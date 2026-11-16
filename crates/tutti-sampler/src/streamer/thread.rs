@@ -11,10 +11,9 @@
 //! The thread body and command handlers live in sibling modules.
 
 use std::sync::Arc;
-use std::thread::JoinHandle;
 use std::time::Duration;
 
-use tutti_rt::{PriorityRequest, request_priority};
+use tutti_rt::{PriorityRequest, StopToken, ThreadHandle};
 use tutti_types::SampleRate;
 
 use super::bell::{Bell, StreamerSender};
@@ -123,22 +122,28 @@ impl Built {
         let cycle = StreamerCycle::new(self.config, self.tx.clone());
         let (queue, backstop) = (self.rx, self.backstop);
 
-        let body = move || {
+        let body = move |_: &StopToken| {
             // The thread owns the queue's one receiver, so however the
             // loop ends (a panic included) its drop tells every sender
             // the streamer is gone instead of letting them queue into
             // nothing; and its table's drop tells every live stream
             // (`Faulted(StreamerGone)`).
-            // Disk streaming should stay ahead of background work, not
-            // compete with the audio threads (Ardour's streamer sets no CPU
-            // priority, LinuxSampler's disk thread runs at nice -10): a
-            // raised, never real-time priority, nice -10 on Linux and
-            // ABOVE_NORMAL on Windows. A refusal is
-            // harmless, so the outcome is only logged.
-            tracing::debug!("streamer: {}", request_priority(PriorityRequest::Raised));
             streamer_loop(&queue, shared, cycle, backstop);
         };
-        let handle = spawn("tutti-streamer", Box::new(body)).map_err(Error::Spawn)?;
+        // Disk streaming should stay ahead of background work, not compete
+        // with the audio threads (Ardour's streamer sets no CPU priority,
+        // LinuxSampler's disk thread runs at nice -10): a raised, never
+        // real-time priority, nice -10 on Linux and ABOVE_NORMAL on Windows. A
+        // refusal is harmless, so the outcome is only logged.
+        let handle = spawn(
+            "tutti-streamer",
+            Some(PriorityRequest::Raised),
+            Box::new(body),
+        )
+        .map_err(Error::Spawn)?;
+        if let Some(outcome) = handle.priority() {
+            tracing::debug!("streamer: {outcome}");
+        }
 
         Ok(Running {
             bell,
@@ -164,7 +169,7 @@ impl Built {
 pub struct Running {
     /// What a stop signals and rings.
     bell: Arc<Bell>,
-    thread_handle: Option<JoinHandle<()>>,
+    thread_handle: Option<ThreadHandle<()>>,
 }
 
 impl std::fmt::Debug for Running {
@@ -187,9 +192,9 @@ impl Running {
     pub(super) fn stop(&mut self) {
         self.bell.shut();
 
-        if let Some(handle) = self.thread_handle.take() {
-            let _ = handle.join();
-        }
+        // The bell is the stop the loop reads; the drop's join waits for the
+        // loop to leave.
+        drop(self.thread_handle.take());
     }
 }
 
