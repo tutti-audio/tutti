@@ -765,7 +765,11 @@ const NO_STD_TARGET: &str = "aarch64-unknown-none";
 
 /// The `#![no_std]` crates, each with the features (besides `std`) built on top of
 /// the bare build. A crate that becomes `no_std` is one line here.
-const NO_STD_CRATES: &[(&str, &[&str])] = &[("tutti-types", &["serde"]), ("tutti-ump", &["serde"])];
+const NO_STD_CRATES: &[(&str, &[&str])] = &[
+    ("tutti-metering", &[]),
+    ("tutti-types", &["serde"]),
+    ("tutti-ump", &["serde"]),
+];
 
 const CHECK_FEATURES: &[&str] = &[
     r#"cargo clippy --locked -p tutti-cpal --features capture --all-targets -- -D warnings"#,
