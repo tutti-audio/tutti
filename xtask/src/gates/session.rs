@@ -18,41 +18,13 @@
 //!    tree.
 
 use super::lex::{blank, line_of};
+use super::use_tree::{is_word, pub_uses, tokens};
 use super::{Cargo, Report, Tree};
 
 const SESSION: &str = "tutti-session";
 const SESSION_SRC: &str = "crates/tutti-session/src";
 fn skipped(dir: &str) -> bool {
     matches!(dir, "target" | ".git")
-}
-
-fn is_word(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || b == b'_'
-}
-
-/// `(::|\w+|[{},*])` tokens of a `use` body.
-fn tokens(body: &str) -> Vec<&str> {
-    let b = body.as_bytes();
-    let mut out = Vec::new();
-    let mut i = 0;
-    while i < b.len() {
-        if b[i] == b':' && b.get(i + 1) == Some(&b':') {
-            out.push(&body[i..i + 2]);
-            i += 2;
-        } else if is_word(b[i]) {
-            let s = i;
-            while i < b.len() && is_word(b[i]) {
-                i += 1;
-            }
-            out.push(&body[s..i]);
-        } else if matches!(b[i], b'{' | b'}' | b',' | b'*') {
-            out.push(&body[i..=i]);
-            i += 1;
-        } else {
-            i += 1;
-        }
-    }
-    out
 }
 
 /// Parse one use tree from `t` at `*k` under `pre`, recording the whole-crate
@@ -111,33 +83,6 @@ fn tree(t: &[&str], k: &mut usize, pre: &[String], hit: &mut Vec<String>) {
         *k += 1;
         return;
     }
-}
-
-/// `pub use` statements of lexed `code`, as `(start, end of the ';')`.
-fn pub_uses(code: &str) -> Vec<(usize, usize)> {
-    let b = code.as_bytes();
-    let mut out = Vec::new();
-    for (at, _) in code.match_indices("pub") {
-        if at > 0 && (is_word(b[at - 1]) || b[at - 1] == b')') {
-            continue;
-        }
-        let rest = &code[at + 3..];
-        let after = rest.trim_start();
-        if after.len() == rest.len() {
-            continue;
-        }
-        let Some(kw) = after.strip_prefix("use") else {
-            continue;
-        };
-        if kw.bytes().next().is_some_and(is_word) {
-            continue;
-        }
-        let body = code.len() - kw.len();
-        if let Some(semi) = code[body..].find(';') {
-            out.push((at, body + semi));
-        }
-    }
-    out
 }
 
 pub(super) fn check(tree_: &dyn Tree, cargo: &dyn Cargo) -> Report {

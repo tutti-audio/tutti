@@ -41,10 +41,13 @@ mod spec_text;
 mod submodule_pins;
 mod test_paths;
 mod toml;
+mod umbrella_api;
+mod use_tree;
 mod value_traits;
 mod vst3_sdk;
 
 pub(crate) use doc_features::doc_runs;
+pub(crate) use umbrella_api::{analyze, reexported_crates};
 
 use std::fs;
 use std::path::{Path, PathBuf};

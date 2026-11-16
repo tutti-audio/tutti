@@ -432,6 +432,21 @@ fn public_api_lists_on_the_docs_nightly_or_diffs_from_a_base() {
     );
 }
 
+/// `umbrella-api` needs the docs nightly, so neither `gates` nor `ci` runs it.
+#[test]
+fn umbrella_api_is_a_local_recipe_outside_gates_and_ci() {
+    assert_eq!(dry("umbrella-api", &[]).len(), 1);
+    assert!(dry("umbrella-api", &[])[0].starts_with("umbrella-api: "));
+    for recipe in ["gates", "ci"] {
+        assert!(
+            !dry(recipe, &[])
+                .iter()
+                .any(|l| l.starts_with("umbrella-api")),
+            "{recipe}"
+        );
+    }
+}
+
 #[test]
 fn public_api_refuses_no_crate_and_a_third_argument() {
     assert_eq!(

@@ -150,6 +150,7 @@ fn execute(step: &Step, ctx: &Ctx) -> Result<(), u8> {
         }
         Step::DocFeatures => doc_features(ctx),
         Step::Package => package(ctx),
+        Step::UmbrellaApi(dir) => umbrella_api(ctx, dir.as_deref()),
         Step::Release(v) => release::run(&ctx.root, v).map_err(|e| {
             eprintln!("xtask: release: {e}");
             1
@@ -250,6 +251,90 @@ fn doc_features(ctx: &Ctx) -> Result<(), u8> {
     }
     eprintln!("FAIL: rustdoc failed for: {}", failed.join(" "));
     Err(1)
+}
+
+/// `umbrella-api [<dir>]`: the unnameable types of what the umbrella exports and
+/// the seeds ranked by how many each pulls in. The texts come from `public-api`
+/// for each crate the umbrella exports from and each crate their signatures name,
+/// or from `<dir>/<package>.txt` when a directory is given.
+fn umbrella_api(ctx: &Ctx, dir: Option<&str>) -> Result<(), u8> {
+    let lib_path = ctx.root.join("crates/tutti/src/lib.rs");
+    let lib = std::fs::read_to_string(&lib_path).map_err(|e| {
+        eprintln!("xtask: cannot read {}: {e}", lib_path.display());
+        1
+    })?;
+    let mut texts: Vec<(String, String)> = Vec::new();
+    let mut want = gates::reexported_crates(&lib);
+    let mut tried: std::collections::BTreeSet<String> = want.iter().cloned().collect();
+    let analysis = loop {
+        for krate in std::mem::take(&mut want) {
+            if texts.iter().any(|(c, _)| *c == krate) {
+                continue;
+            }
+            let package = krate.replace('_', "-");
+            let text = if let Some(dir) = dir {
+                match std::fs::read_to_string(Path::new(dir).join(format!("{package}.txt"))) {
+                    Ok(t) => t,
+                    Err(_) => continue,
+                }
+            } else {
+                let c = Cmd::sh(&format!(
+                    "cargo +{} public-api --package {package} --all-features -s",
+                    recipes::DOCS_NIGHTLY
+                ));
+                println!("+ {}", c.display());
+                let out = command(&c, ctx)
+                    .output()
+                    .map_err(|e| spawn_failed(&c, &e))?;
+                if !out.status.success() {
+                    // A crate with no package of that name (a std path) is not read.
+                    continue;
+                }
+                String::from_utf8_lossy(&out.stdout).into_owned()
+            };
+            texts.push((krate, text));
+        }
+        let refs: Vec<(&str, &str)> = texts
+            .iter()
+            .map(|(c, t)| (c.as_str(), t.as_str()))
+            .collect();
+        let a = gates::analyze(&refs, &lib);
+        let more: Vec<String> = a
+            .wanted
+            .iter()
+            .filter(|c| !texts.iter().any(|(t, _)| t == *c) && !tried.contains(*c))
+            .cloned()
+            .collect();
+        tried.extend(more.iter().cloned());
+        if more.is_empty() {
+            break a;
+        }
+        want = more;
+    };
+    println!(
+        "seeds, by the unexported types each pulls in (and how many of them through an internal type):"
+    );
+    for (n, hidden, seed) in &analysis.seeds {
+        println!("  {n:4}  {hidden:4}  {seed}");
+    }
+    if !analysis.leaks.is_empty() {
+        println!("internal types the exported items name (findings for their owners):");
+        for l in &analysis.leaks {
+            println!("  {l}");
+        }
+    }
+    for m in &analysis.missing {
+        println!("{m}");
+    }
+    println!(
+        "umbrella-api: {} unnameable type(s)",
+        analysis.missing.len()
+    );
+    if analysis.missing.is_empty() {
+        Ok(())
+    } else {
+        Err(1)
+    }
 }
 
 /// `cargo package` over every crate under `crates/`: a directory there holding
