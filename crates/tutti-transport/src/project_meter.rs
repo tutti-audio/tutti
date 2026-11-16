@@ -299,7 +299,7 @@ impl std::fmt::Debug for MeterSlot {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tutti_types::value::Beat;
+    use tutti_types::Beat;
     use tutti_types::{MeterChange, TimeSignature};
 
     fn meter_of(n: u32) -> Arc<MeterMap> {

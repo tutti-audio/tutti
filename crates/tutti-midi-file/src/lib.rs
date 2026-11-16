@@ -1,8 +1,8 @@
 #![doc = include_str!("../README.md")]
 //! MIDI **file** codec for the Tutti audio engine: Standard MIDI File (SMF,
 //! `.mid`) and MIDI 2.0 Clip File (M2-116, `.midi2`) read into one model and
-//! written back from it, losslessly. Re-exported by `tutti` as
-//! `tutti::midi_file` (feature `midi`).
+//! written back from it, losslessly. `tutti::midi` names its
+//! file types (feature `midi`).
 //!
 //! ## The model
 //!

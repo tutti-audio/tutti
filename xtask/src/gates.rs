@@ -42,6 +42,7 @@ mod spec_text;
 mod submodule_pins;
 mod test_paths;
 mod toml;
+mod umbrella;
 // Backs the local `umbrella-api` recipe (it needs the docs nightly): not a gate.
 mod umbrella_api;
 mod use_tree;
@@ -148,6 +149,8 @@ pub(crate) enum Gate {
     Buffers,
     /// A configured thing is built one way, bar the rows of the baseline.
     Building,
+    /// The `tutti` umbrella re-exports no crate whole and offers each item at one path.
+    Umbrella,
     /// Logging is `tracing`: no `log` dependency, and nothing prints outside a `main`.
     Logging,
 }
@@ -177,6 +180,7 @@ impl Gate {
             Gate::Conformance => "gate check-conformance".to_owned(),
             Gate::Buffers => "gate check-buffers".to_owned(),
             Gate::Building => "gate check-building".to_owned(),
+            Gate::Umbrella => "gate check-umbrella".to_owned(),
             Gate::Logging => "gate check-logging".to_owned(),
         }
     }
@@ -206,6 +210,7 @@ impl Gate {
             Gate::DocIdents => doc_idents::check(&tree),
             Gate::PassiveTests => passive_tests::check(&tree),
             Gate::Comments => comments::check(&tree),
+            Gate::Umbrella => umbrella::check(&tree),
             Gate::Buffers => buffers::check(&tree, buffers::MIN_SITES),
             Gate::Building => building::check(&tree, building::ALLOW, building::MIN_SITES),
             Gate::Logging => logging::check(&tree, logging::ALLOW),
