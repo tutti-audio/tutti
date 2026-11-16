@@ -7,20 +7,33 @@
 
 /// Generator numbers, SF2 2.04 section 8.1.2: what a zone's generator list uses.
 pub mod generator {
-
+    /// Generator 8, `initial_filter_fc`.
     pub const INITIAL_FILTER_FC: u16 = 8;
+    /// Generator 9, `initial_filter_q`.
     pub const INITIAL_FILTER_Q: u16 = 9;
+    /// Generator 17, `pan`.
     pub const PAN: u16 = 17;
+    /// Generator 38, `release_vol_env`.
     pub const RELEASE_VOL_ENV: u16 = 38;
+    /// Generator 41, `instrument`.
     pub const INSTRUMENT: u16 = 41;
+    /// Generator 43, `key_range`.
     pub const KEY_RANGE: u16 = 43;
+    /// Generator 44, `vel_range`.
     pub const VEL_RANGE: u16 = 44;
+    /// Generator 46, `key_num`.
     pub const KEY_NUM: u16 = 46;
+    /// Generator 47, `velocity`.
     pub const VELOCITY: u16 = 47;
+    /// Generator 48, `initial_attenuation`.
     pub const INITIAL_ATTENUATION: u16 = 48;
+    /// Generator 51, `coarse_tune`.
     pub const COARSE_TUNE: u16 = 51;
+    /// Generator 53, `sample_id`.
     pub const SAMPLE_ID: u16 = 53;
+    /// Generator 54, `sample_modes`.
     pub const SAMPLE_MODES: u16 = 54;
+    /// Generator 57, `exclusive_class`.
     pub const EXCLUSIVE_CLASS: u16 = 57;
 }
 
@@ -34,17 +47,25 @@ pub fn range(low: u8, high: u8) -> i16 {
 pub type Zone = Vec<(u16, i16)>;
 
 /// An instrument: its zones. Each zone plays the sample, looped.
+#[derive(Debug)]
 pub struct Inst {
+    /// The instrument's name.
     pub name: &'static str,
+    /// The instrument's zones.
     pub zones: Vec<Zone>,
 }
 
 /// A preset: bank, program and zones. Each zone names the instrument (an index
 /// into the instruments) it plays.
+#[derive(Debug)]
 pub struct Preset {
+    /// The preset's name.
     pub name: &'static str,
+    /// The MIDI bank number.
     pub bank: u16,
+    /// The MIDI program number.
     pub program: u16,
+    /// The zones, each with the index of the instrument it plays.
     pub zones: Vec<(Zone, usize)>,
 }
 

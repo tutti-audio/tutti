@@ -6,15 +6,22 @@ use std::fmt::Debug;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 /// What a type's author states: how to build it and which raws it takes.
+#[derive(Debug)]
 pub struct RangeContract<'a, T, R> {
+    /// The checked constructor.
     pub new: fn(R) -> Option<T>,
+    /// The accessor back to the raw.
     pub get: fn(T) -> R,
     /// Present when the type has `of`.
     pub of: Option<fn(R) -> T>,
+    /// Raws the type accepts.
     pub valid: &'a [R],
+    /// Raws the type refuses.
     pub invalid: &'a [R],
 }
 
+/// # Panics
+///
 /// Panics, naming the raw, when the type breaks the contract.
 ///
 /// For each valid raw, `new`, `get`, `TryFrom`, `Into` and `of` agree. For each
@@ -54,6 +61,10 @@ where
 }
 
 /// Panics, naming the raw, when the type's serde form is not its range.
+///
+/// # Panics
+///
+/// Panics, naming the raw, when the type breaks the serde contract.
 ///
 /// For each valid raw, the value serialises as the bare raw and deserialises
 /// back to itself. For each invalid raw, deserialising refuses. NaN and

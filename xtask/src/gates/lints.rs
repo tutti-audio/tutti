@@ -1,23 +1,49 @@
-//! `check-lints`: the workspace's lint table reaches every shipped crate.
+//! `check-lints`: the workspace's lint table reaches every member.
 //!
-//! - **Every `crates/*/Cargo.toml` has `[lints]` with `workspace = true`**, except
-//!   the crates in [`UNLINTED`], each with its reason. A listed crate that takes
-//!   the table after all, or is gone, is a stale entry.
+//! - **Every workspace member's `Cargo.toml` has `[lints]` with `workspace = true`**,
+//!   except the members in [`UNLINTED`], each with its reason. The members come from
+//!   the root manifest's `members`. A listed member that takes the table after all,
+//!   or is not a member, is a stale entry.
 //! - **The root `[workspace.lints.rust]` sets `missing_debug_implementations` to
 //!   `deny`**: a public type without `Debug` fails the build on its own, not
 //!   only under `-D warnings`.
 
-use super::toml::Toml;
+use super::toml::{Toml, strings};
 use super::{Report, Tree};
 
-/// `(crate directory, why it does not take the workspace lints)`.
-pub(super) const UNLINTED: &[(&str, &str)] = &[];
+/// `(member path, why it does not take the workspace lints yet)`. A reason starts
+/// with `temporary:` and names the owner.
+pub(super) const UNLINTED: &[(&str, &str)] = &[
+    (
+        "testing/tutti-clap-test-plugin",
+        "temporary: plugin lane adds [lints] (its task #147)",
+    ),
+    (
+        "testing/tutti-plugin-contract",
+        "temporary: plugin lane adds [lints] (its task #147)",
+    ),
+    (
+        "testing/tutti-shared-plugin",
+        "temporary: plugin lane adds [lints] (its task #147)",
+    ),
+    (
+        "testing/tutti-shared-plugin-vst3-cpp",
+        "temporary: plugin lane adds [lints] (its task #147)",
+    ),
+    (
+        "testing/tutti-vst2-shell-plugin",
+        "temporary: plugin lane adds [lints] (its task #147)",
+    ),
+    (
+        "testing/tutti-vst2-test-plugin",
+        "temporary: plugin lane adds [lints] (its task #147)",
+    ),
+];
 
 const LINT: &str = "missing_debug_implementations";
 
-fn skipped(dir: &str) -> bool {
-    matches!(dir, "target" | ".git")
-}
+/// Fewer members than this means the root manifest was not read.
+const MIN_MEMBERS: usize = 20;
 
 fn takes_workspace_lints(manifest: &Toml) -> bool {
     manifest.value("lints", "workspace") == Some("true")
@@ -25,29 +51,37 @@ fn takes_workspace_lints(manifest: &Toml) -> bool {
 
 pub(super) fn check(tree: &dyn Tree, unlinted: &[(&str, &str)]) -> Report {
     let mut bad: Vec<String> = Vec::new();
-    let files = tree.files("crates", &skipped);
-    let mut crates: Vec<&str> = files
-        .iter()
-        .filter_map(|p| p.strip_prefix("crates/")?.strip_suffix("/Cargo.toml"))
-        .filter(|n| !n.contains('/'))
-        .collect();
-    crates.sort_unstable();
-    if crates.len() < 20 {
+    let root = tree.read("Cargo.toml");
+    let root = root.as_deref().map(Toml::parse);
+    let members: Vec<String> = root
+        .as_ref()
+        .and_then(|r| r.value("workspace", "members"))
+        .map(strings)
+        .unwrap_or_default();
+    if members.len() < MIN_MEMBERS {
         bad.push(format!(
-            "only {} crates found under crates/; the scan is broken",
-            crates.len()
+            "only {} workspace members found in Cargo.toml; the scan is broken",
+            members.len()
         ));
     }
 
-    for name in &crates {
-        let path = format!("crates/{name}/Cargo.toml");
+    for (name, why) in unlinted {
+        if !why.starts_with("temporary:") {
+            bad.push(format!(
+                "UNLINTED {name}: the reason must start with `temporary:` and name the owner"
+            ));
+        }
+    }
+    for dir in &members {
+        let path = format!("{dir}/Cargo.toml");
         let Some(text) = tree.read(&path) else {
+            bad.push(format!("{dir}: a workspace member with no Cargo.toml"));
             continue;
         };
         let takes = takes_workspace_lints(&Toml::parse(&text));
-        match unlinted.iter().find(|(c, _)| c == name) {
+        match unlinted.iter().find(|(c, _)| c == dir) {
             None if !takes => bad.push(format!(
-                "{path}: missing `[lints] workspace = true` (a crate that cannot take it goes in UNLINTED in xtask/src/gates/lints.rs, with its reason)"
+                "{path}: missing `[lints] workspace = true` (a member that cannot take it yet goes in UNLINTED in xtask/src/gates/lints.rs, with a `temporary:` reason naming its owner)"
             )),
             Some((_, why)) if takes => bad.push(format!(
                 "{path}: takes the workspace lints but is listed in UNLINTED ({why}); remove the entry"
@@ -56,17 +90,16 @@ pub(super) fn check(tree: &dyn Tree, unlinted: &[(&str, &str)]) -> Report {
         }
     }
     for (name, _) in unlinted {
-        if !crates.contains(name) {
+        if !members.iter().any(|m| m == name) {
             bad.push(format!(
-                "crates/{name}: listed in UNLINTED but not a crate; was it moved?"
+                "UNLINTED {name}: not a workspace member; was it moved?"
             ));
         }
     }
 
-    match tree.read("Cargo.toml") {
+    match root {
         None => bad.push("Cargo.toml: missing".to_owned()),
         Some(root) => {
-            let root = Toml::parse(&root);
             let level = root
                 .value("workspace.lints.rust", LINT)
                 .map(|v| v.trim().trim_matches('"'));
@@ -82,8 +115,8 @@ pub(super) fn check(tree: &dyn Tree, unlinted: &[(&str, &str)]) -> Report {
     let mut r = Report::default();
     if bad.is_empty() {
         r.say(format!(
-            "check-lints: ok ({} crates, {} unlinted by name)",
-            crates.len(),
+            "check-lints: ok ({} members, {} unlinted by name)",
+            members.len(),
             unlinted.len()
         ));
     } else {
@@ -100,12 +133,19 @@ mod tests {
     use super::super::fake::Mem;
     use super::*;
 
-    const ROOT: &str = "[workspace.lints.rust]\nmissing_docs = \"warn\"\nmissing_debug_implementations = \"deny\"\n";
+    const LINTS: &str = "[workspace.lints.rust]\nmissing_docs = \"warn\"\nmissing_debug_implementations = \"deny\"\n";
+
+    fn root_with(members: usize) -> String {
+        let list: String = (0..members)
+            .map(|i| format!("  \"crates/c{i}\",\n"))
+            .collect();
+        format!("[workspace]\nmembers = [\n{list}]\n\n{LINTS}")
+    }
     const LINTED: &str = "[package]\nname = \"x\"\n\n[lints]\nworkspace = true\n";
 
     fn clean() -> Mem {
         let mut m = Mem::default();
-        m.files.insert("Cargo.toml".to_owned(), ROOT.to_owned());
+        m.files.insert("Cargo.toml".to_owned(), root_with(20));
         for i in 0..20 {
             m.files
                 .insert(format!("crates/c{i}/Cargo.toml"), LINTED.to_owned());
@@ -122,7 +162,7 @@ mod tests {
     fn a_clean_tree_passes() {
         let r = check(&clean(), &[]);
         assert!(r.passed(), "{:?}", r.findings);
-        assert!(r.out[0].starts_with("check-lints: ok (20 crates"));
+        assert!(r.out[0].starts_with("check-lints: ok (20 members"));
     }
 
     #[test]
@@ -147,10 +187,14 @@ mod tests {
         let r = with(
             clean(),
             "Cargo.toml",
-            "[workspace.lints.rust]\nmissing_debug_implementations = \"warn\"\n",
+            &root_with(20).replace("= \"deny\"", "= \"warn\""),
         );
         assert!(r.findings[1].contains("must set missing_debug_implementations"));
-        let r = with(clean(), "Cargo.toml", "[workspace.lints.rust]\n");
+        let r = with(
+            clean(),
+            "Cargo.toml",
+            &root_with(20).replace("missing_debug_implementations = \"deny\"\n", ""),
+        );
         assert!(r.findings[1].contains("found nothing"));
     }
 
@@ -161,22 +205,46 @@ mod tests {
             "crates/c3/Cargo.toml".to_owned(),
             "[package]\nname = \"x\"\n".to_owned(),
         );
-        let r = check(&m, &[("c3", "needs its own table")]);
+        let r = check(&m, &[("crates/c3", "temporary: lane X adds it")]);
         assert!(r.passed(), "{:?}", r.findings);
     }
 
     #[test]
     fn a_stale_unlinted_entry_fails() {
-        let r = check(&clean(), &[("c3", "needs its own table")]);
-        assert!(r.findings[1].contains("listed in UNLINTED (needs its own table); remove"));
-        let r = check(&clean(), &[("gone", "x")]);
-        assert!(r.findings[1].contains("crates/gone: listed in UNLINTED but not a crate"));
+        let r = check(&clean(), &[("crates/c3", "temporary: lane X adds it")]);
+        assert!(r.findings[1].contains("listed in UNLINTED (temporary: lane X adds it); remove"));
+        let r = check(&clean(), &[("crates/gone", "temporary: x")]);
+        assert!(r.findings[1].contains("UNLINTED crates/gone: not a workspace member"));
     }
 
     #[test]
-    fn a_crate_that_is_too_few_fails() {
+    fn too_few_members_fails() {
         let mut m = clean();
-        m.files.retain(|p, _| !p.starts_with("crates/c1"));
+        m.files.insert("Cargo.toml".to_owned(), root_with(3));
         assert!(check(&m, &[]).findings[1].contains("the scan is broken"));
+    }
+
+    #[test]
+    fn a_member_with_workspace_lints_passes_beside_one_without_in_the_list() {
+        let r = check(&clean(), &[]);
+        assert!(r.passed(), "{:?}", r.findings);
+    }
+
+    #[test]
+    fn a_member_without_a_manifest_fails() {
+        let mut m = clean();
+        m.files.remove("crates/c4/Cargo.toml");
+        assert!(
+            check(&m, &[]).findings[1].contains("crates/c4: a workspace member with no Cargo.toml")
+        );
+    }
+
+    #[test]
+    fn an_allow_reason_must_be_temporary() {
+        let mut m = clean();
+        m.files
+            .insert("crates/c3/Cargo.toml".to_owned(), "[package]\n".to_owned());
+        let r = check(&m, &[("crates/c3", "it is fine")]);
+        assert!(r.findings[1].contains("must start with `temporary:`"));
     }
 }

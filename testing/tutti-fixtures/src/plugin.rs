@@ -27,6 +27,7 @@ pub fn detached_work() -> MainWorkHandle {
 /// A thread that runs a [`MainWork`] as the main thread's tick does, until it is
 /// dropped: for a test that calls a plugin handle from its own thread, which is
 /// off the main thread, and needs something to answer the hop.
+#[derive(Debug)]
 pub struct Pump {
     stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,

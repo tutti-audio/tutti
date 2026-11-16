@@ -3,6 +3,8 @@
 use serde::{Serialize, de::DeserializeOwned};
 use std::fmt::Debug;
 
+/// # Panics
+///
 /// Panics when `value` does not serialise to exactly `json`, or when `json`
 /// does not deserialise back to `value`.
 pub fn check_round_trip<T>(value: &T, json: &str)
