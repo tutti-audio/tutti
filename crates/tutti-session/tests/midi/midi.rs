@@ -11,14 +11,15 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use tutti_session::Stamp;
 
 use std::time::{Duration, Instant};
+use tutti_graph::Losses;
 #[cfg(feature = "midi-hardware")]
 use tutti_graph::NodeKey;
-use tutti_graph::{Losses, Refused};
 #[cfg(feature = "midi-hardware")]
 use tutti_midi_device::{EndpointId, PortDirection};
 #[cfg(feature = "midi-hardware")]
 use tutti_midi_runtime::{CHANNELLESS_PORT, MIDI_INPUT_PORTS};
 use tutti_midi_runtime::{LIVE_INLET_CAPACITY, TimedMidiEvent};
+use tutti_rt::PushError;
 #[cfg(feature = "midi-hardware")]
 use tutti_types::SampleRate;
 use tutti_types::{Beat, BeatDuration, Frame};
@@ -336,7 +337,7 @@ fn a_live_inputs_keys_send_in_order_and_are_handed_out_once() {
     }
     assert_eq!(
         keys.note_off(Stamp::NextBlock, MidiChannel::FIRST, NoteNumber::of(60)),
-        Err(Refused::Full)
+        Err(PushError::Full)
     );
 }
 

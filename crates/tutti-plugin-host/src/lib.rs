@@ -42,8 +42,8 @@ pub use listeners::{
 pub use liveness::{Liveness, Verdict};
 pub use meter::PluginMeter;
 pub use node::{
-    InProcClient, Pending, PluginNode, PortLimit, RebindError, Rebinder, Settlement, client_over,
-    load_client, load_client_restoring,
+    InProcClient, Pending, PluginNode, PortLimit, PortSource, RebindError, Rebinder, Settlement,
+    client_over, load_client, load_client_restoring,
 };
 pub use param_delivery::{DeliveryCounters, ParamDelivery, ParamDeliveryStats};
 pub use param_input::take as take_param_input;

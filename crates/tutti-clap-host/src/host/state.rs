@@ -135,68 +135,26 @@ impl NoteState {
     }
 }
 
-/// One routed `clap.log` line: the CLAP severity the plugin passed and the
-/// decoded message.
+/// The `clap.log` lines the host did not emit.
 ///
-/// `severity` stays a bare `clap_log_severity` (`i32`): CLAP leaves room for
-/// severities a host does not recognise, and an enum would have to bucket those
-/// away.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LogRecord {
-    /// The raw `clap_log_severity` the plugin passed, unmapped.
-    pub severity: i32,
-    /// The decoded message text.
-    pub message: String,
-}
-
-/// The last [`LOG_CAPACITY`] lines the plugin logged.
-///
-/// Bounded on purpose: a plugin can log per audio block, so an unbounded buffer
-/// behind a host that never drains is a leak, not a diagnostic. Oldest lines go
-/// first, and `dropped` counts them so a consumer does not read a truncated
-/// history as a complete one.
+/// A line from the audio thread is counted, not emitted: emitting allocates.
 #[derive(Debug)]
 pub struct LogState {
-    pub(crate) records: Mutex<std::collections::VecDeque<LogRecord>>,
     pub(crate) dropped: AtomicU32,
 }
-
-/// How many log lines the host retains before dropping the oldest.
-pub const LOG_CAPACITY: usize = 256;
 
 impl LogState {
     fn new() -> Self {
         Self {
-            records: Mutex::new(std::collections::VecDeque::new()),
             dropped: AtomicU32::new(0),
         }
     }
 
-    /// Counts a line refused because it arrived on the audio thread (see
-    /// `host_log`). Shares the capacity-eviction counter — both are "a line the
-    /// host did not keep", and no caller can act differently on the two.
+    /// Counts a line refused because it arrived on the audio thread.
     ///
     /// Audio-thread safe: one relaxed increment, no lock, no allocation.
     pub(crate) fn note_audio_thread_drop(&self) {
         self.dropped.fetch_add(1, Ordering::Relaxed);
-    }
-
-    /// Records one routed line, evicting the oldest if at capacity.
-    ///
-    /// **Not audio-thread safe:** takes a `Mutex` that `drain_log` holds across
-    /// a copy, so an audio-thread call risks a priority-inversion stall.
-    /// `host_log` diverts those to
-    /// [`note_audio_thread_drop`](Self::note_audio_thread_drop) first.
-    ///
-    /// A poisoned lock is recovered, not propagated — a panic here would take a
-    /// caller down over a diagnostic.
-    pub(crate) fn push(&self, severity: i32, message: String) {
-        let mut records = self.records.lock().unwrap_or_else(|p| p.into_inner());
-        if records.len() == LOG_CAPACITY {
-            records.pop_front();
-            self.dropped.fetch_add(1, Ordering::Relaxed);
-        }
-        records.push_back(LogRecord { severity, message });
     }
 }
 
@@ -368,8 +326,11 @@ pub struct HostState {
     pub params: ParamState,
     /// Note-port change notifications.
     pub notes: NoteState,
-    /// The bounded ring of routed `clap.log` lines.
+    /// The `clap.log` lines refused on the audio thread.
     pub log: LogState,
+    /// The id `clap.log` lines are tagged with. Set once, at load, from the
+    /// descriptor; a line before then carries an empty id.
+    pub plugin_id: OnceLock<String>,
     /// Timers the plugin registered for the host to fire.
     pub timer: TimerState,
     /// Descriptors the plugin registered for the host to watch.
@@ -395,6 +356,7 @@ impl HostState {
             params: ParamState::new(),
             notes: NoteState::new(),
             log: LogState::new(),
+            plugin_id: OnceLock::new(),
             timer: TimerState::new(),
             posix_fds: PosixFdState::new(),
             transport: TransportState::new(),

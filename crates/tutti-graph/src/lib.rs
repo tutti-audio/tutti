@@ -611,8 +611,7 @@ pub use event::{
     SortedEvents, SubBlocks, UmpAt, note_off_room,
 };
 pub use event_inlet::{
-    EventCapacity, EventCapacityError, EventInletNode, EventInletWriter, InletCounts, Refused,
-    Stamp,
+    EventCapacity, EventCapacityError, EventInletNode, EventInletWriter, InletCounts, Stamp,
 };
 pub use event_losses::Losses;
 pub use event_tap::{EventTapReader, EventTapWriter, TapEvent};

@@ -304,7 +304,8 @@ pub use measured::{
     LatencyVerdict, Measured, NotChecked, PROBE_FLOOR, ProbeConfig, StateHash, TailVerdict, Verdict,
 };
 pub use metadata::{
-    BusChannels, Layout, LoadedPlugin, PluginBus, PluginBuses, PluginTail, Processing,
+    BusChannels, Layout, LoadedPlugin, MAX_LAYOUT_BUSES, PluginBus, PluginBuses, PluginTail,
+    Processing,
 };
 pub use midi::{
     MIDI_STACK_CAPACITY, MidiEventVec, RT_MIDI_CAPACITY, RtMidiEvents, WireMidi, group_of_port,

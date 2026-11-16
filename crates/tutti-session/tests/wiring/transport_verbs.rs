@@ -2,7 +2,8 @@
 //! the one timed form, `schedule`.
 
 use tutti_buffers::InterleavedMut;
-use tutti_session::{ScheduleError, Session};
+use tutti_session::Session;
+use tutti_transport::TimedError;
 use tutti_transport::{FadeOut, MotionEvent, Timeline};
 use tutti_types::{At, Beat, Bpm, ChannelLayout, Frame, LoopRange, MaxBlock, SampleRate, Samples};
 
@@ -189,18 +190,12 @@ fn a_play_at_a_beat_on_a_stopped_transport_is_refused() {
 
     assert_eq!(
         s.schedule(Beat(1.0), MotionEvent::Play),
-        Err(ScheduleError::BeatWhileStopped {
-            beat: Beat(1.0),
-            event: MotionEvent::Play
-        })
+        Err(TimedError::BeatWhileStopped(MotionEvent::Play))
     );
     let roll = MotionEvent::play_from(Beat(0.0));
     assert_eq!(
         s.schedule(Beat(2.0), roll),
-        Err(ScheduleError::BeatWhileStopped {
-            beat: Beat(2.0),
-            event: roll
-        })
+        Err(TimedError::BeatWhileStopped(roll))
     );
     assert_eq!(
         s.transport().motion().scheduled_outstanding(),
