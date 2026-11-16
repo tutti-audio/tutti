@@ -1219,6 +1219,9 @@ fn a_chunk_the_server_refuses_is_counted_refused() {
     wait_for("chunk 1's fate", || {
         bridge.chunk_fate(1) == Some(crate::Fate::Refused)
     });
+    // Chunk 4 is answered before block 5, so block 5's collect finds it and
+    // neither of its two looks can count it late.
+    wait_for("chunk 4 published", || bridge.audio_buffer().has_output(4));
     // Block 5 resolves chunk 1.
     block();
 
@@ -1227,10 +1230,10 @@ fn a_chunk_the_server_refuses_is_counted_refused() {
     assert_eq!(counters.skipped(), 0, "the bridge kept up");
     assert_eq!(counters.unanswered(), 0);
     let resolved = counters.late() + counters.refused() + counters.skipped();
-    let missed = counters.missed();
-    assert!(
-        resolved <= missed && missed - resolved <= 1,
-        "{missed} missed, {resolved} resolved: only block 5's own collect is open"
+    assert_eq!(
+        counters.missed(),
+        resolved,
+        "chunks 1 and 2 were missed; block 5's collect finds chunk 4 answered"
     );
 
     bridge_thread.shutdown();
