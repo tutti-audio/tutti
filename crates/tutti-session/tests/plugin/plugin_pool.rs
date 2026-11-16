@@ -15,9 +15,9 @@ use tutti_plugin_db::PluginFormat;
 use tutti_plugin_types::{Normalized, ParamId};
 use tutti_plugin_types::{PluginFailure, TerminationReason};
 use tutti_session::{
-    AddPluginError, CrossfadeRefused, DetachedSession, HandleError, LoadError, Peer, PluginCause,
-    PluginHealth, PoolEvent, PoolState, Presence, RecoveryPolicy, Resource, RetryError, Session,
-    SessionEvent, StateJobError, StateJobFailed,
+    AddPluginError, CrossfadeRefused, DetachedSession, HandleError, JobStatus, LoadError, Peer,
+    PluginCause, PluginHealth, PoolEvent, PoolState, Presence, RecoveryPolicy, Resource,
+    RetryError, Session, SessionEvent, StateJobError, StateJobFailed,
 };
 use tutti_types::{ChannelLayout, MaxBlock, SampleRate, Samples, Tail};
 
@@ -523,9 +523,8 @@ fn a_state_job_saves_what_the_plugin_holds_and_refuses_by_name() {
         .set(set)
         .unwrap();
     let saving = s.save_state(&"a").expect("a node holds the plugin");
-    assert!(!saving.has_landed(), "it lands in an update");
-    settle_until(&mut s, "the save", |_| saving.has_landed());
-    let state = saving.take().expect("landed").expect("a state");
+    assert_ne!(saving.status(), JobStatus::Done, "it lands in an update");
+    let state = saving.wait(&mut s).expect("a state");
 
     s.pool((
         s.plugin_entry("a", &first_id(), &catalog),
@@ -568,12 +567,11 @@ fn a_state_job_of_a_dead_plugin_lands_the_plugins_refusal() {
             held: Duration::from_secs(5),
         });
     let saving = s.save_state(&"a").expect("the node is still there");
-    settle_until(&mut s, "the save", |_| saving.has_landed());
-    let landed = saving.take();
+    let landed = saving.wait(&mut s);
     assert!(
         matches!(
             landed,
-            Some(Err(StateJobFailed::State(StateError::PluginCrashed)))
+            Err(StateJobFailed::State(StateError::PluginCrashed))
         ),
         "the plugin's refusal: {landed:?}"
     );

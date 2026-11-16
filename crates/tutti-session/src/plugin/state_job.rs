@@ -1,6 +1,6 @@
 //! A pooled plugin's state as jobs: [`Session::save_state`] and
-//! [`Session::restore_state`], each answering a [`PoolWait`] that lands in a
-//! later [`update`](Session::update).
+//! [`Session::restore_state`], each answering a [`Job`] that lands in a
+//! later [`update`](Session::update) or is waited for ([`Job::wait`]).
 //!
 //! A save is a round trip to the plugin, so it starts on a worker of the
 //! session's spawner, which asks the plugin's
@@ -18,8 +18,9 @@
 //! in the first `update` on the main thread, for a served plugin as for an
 //! in-process one.
 //!
-//! A wait lands in an `update` of its session: dropping the session ends the
-//! job and its wait never lands. A restore and a save of one plugin asked
+//! A job lands in an `update` of its session: dropping the session ends it and
+//! it never lands. Dropping the [`Job`] cancels it: a restore not yet run does
+//! not run, and a save's bytes are discarded. A restore and a save of one plugin asked
 //! before either landed are unordered; wait for one before asking the other.
 
 use std::fmt;
@@ -30,7 +31,8 @@ use tutti_plugin_types::PluginRefresh;
 
 use super::entry::PluginEntry;
 use super::{Notice, PluginRef, PluginState, queue};
-use crate::{HandleError, JobFailed, PoolKey, PoolWait, Session};
+use crate::job::job_kind;
+use crate::{HandleError, Job, PoolKey, Session, WaitError, WorkerError};
 
 /// Why [`Session::save_state`] or [`Session::restore_state`] started no job.
 #[derive(Clone, Debug, thiserror::Error)]
@@ -48,6 +50,16 @@ pub enum StateJobError<K: fmt::Debug> {
     OtherPlugin(StateError),
 }
 
+job_kind! {
+    /// A plugin's saved state ([`Session::save_state`]).
+    pub SaveState => PluginState, StateJobFailed
+}
+
+job_kind! {
+    /// A state put back into a plugin ([`Session::restore_state`]).
+    pub RestoreState => (), StateJobFailed
+}
+
 /// How a state job ended without its result.
 #[derive(Clone, Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -59,13 +71,16 @@ pub enum StateJobFailed {
     State(#[from] StateError),
     /// The worker did not finish.
     #[error(transparent)]
-    Job(#[from] JobFailed),
+    Worker(#[from] WorkerError),
+    /// The wait could not run ([`Job::wait`]).
+    #[error(transparent)]
+    Wait(#[from] WaitError),
 }
 
 impl<C: crate::Clock> Session<C> {
     /// Saves the state of the plugin in the node over the entry under `key`.
     /// The round trip starts on the session's spawner and the state lands in a
-    /// later [`update`](Self::update). An in-process plugin saves on the main
+    /// later [`update`](Self::update), or [`Job::wait`] returns it. An in-process plugin saves on the main
     /// thread, through the session's main work: keep calling `update` there,
     /// or the save ends as [`StateJobFailed::State`] with
     /// [`StateError::Unavailable`] after the off-main deadline (see the module
@@ -76,26 +91,26 @@ impl<C: crate::Clock> Session<C> {
     ///
     /// [`StateJobError::Entry`] when the key has no loaded plugin entry;
     /// [`StateJobError::NoNode`] when the plugin is in no node.
-    pub fn save_state<K>(
-        &mut self,
-        key: &K,
-    ) -> Result<PoolWait<Result<PluginState, StateJobFailed>>, StateJobError<K>>
+    pub fn save_state<K>(&mut self, key: &K) -> Result<Job<SaveState>, StateJobError<K>>
     where
         K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
     {
         let (handle, plugin, _) = self.state_parts(key)?;
-        let (wait, landing) = PoolWait::new();
-        self.jobs.submit(
-            move || handle.any_thread().save_state(),
-            move |_, done, _| {
-                landing.land(match done {
+        Ok(self.jobs.submit_job(
+            move |cancel| {
+                if cancel.is_cancelled() {
+                    return Err(StateError::Unavailable);
+                }
+                handle.any_thread().save_state()
+            },
+            move |_, done, ticket| {
+                ticket.land(match done {
                     Ok(Ok(bytes)) => Ok(PluginState::new(plugin, bytes)),
                     Ok(Err(refused)) => Err(StateJobFailed::State(refused)),
-                    Err(failed) => Err(StateJobFailed::Job(failed)),
+                    Err(failed) => Err(StateJobFailed::Worker(failed)),
                 });
             },
-        );
-        Ok(wait)
+        ))
     }
 
     /// Restores `state` into the plugin in the node over the entry under
@@ -116,7 +131,7 @@ impl<C: crate::Clock> Session<C> {
         &mut self,
         key: &K,
         state: PluginState,
-    ) -> Result<PoolWait<Result<(), StateJobFailed>>, StateJobError<K>>
+    ) -> Result<Job<RestoreState>, StateJobError<K>>
     where
         K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
     {
@@ -124,15 +139,20 @@ impl<C: crate::Clock> Session<C> {
         state
             .check_for(&plugin)
             .map_err(StateJobError::OtherPlugin)?;
-        let (wait, landing) = PoolWait::new();
+        let (job, ticket) = self.jobs.new_job();
+        ticket.waiting_for_main_thread();
         self.work.defer(move |main| {
+            // A dropped job restores nothing.
+            if ticket.cancelled() {
+                return;
+            }
             let applied = handle.load_state(main, state.bytes());
             if applied.is_ok() {
                 queue(&notices, Notice::Refresh(PluginRefresh::ParamValues));
             }
-            landing.land(applied.map_err(StateJobFailed::State));
+            ticket.land(applied.map_err(StateJobFailed::State));
         });
-        Ok(wait)
+        Ok(job)
     }
 
     /// The handle, the plugin and the notice queue of the node over `key`.

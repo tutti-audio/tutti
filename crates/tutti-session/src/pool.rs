@@ -63,6 +63,7 @@ mod config;
 #[cfg(any(feature = "sampler", feature = "soundfont"))]
 mod data;
 mod entry;
+mod job;
 mod key;
 mod open;
 mod refresh;
@@ -70,7 +71,6 @@ mod report;
 mod run;
 mod stamp;
 mod table;
-mod wait;
 
 pub use config::PoolConfig;
 #[cfg(feature = "sampler")]
@@ -81,17 +81,17 @@ pub(crate) use entry::Staged;
 pub use entry::{
     Declared, IntoPool, Life, Load, LoadError, Parking, PoolEntry, PoolSet, stranded_loads,
 };
+pub use job::{PoolJobError, PoolLoaded, RefreshPool};
 pub use key::PoolKey;
 pub use open::OpenCx;
 pub(crate) use refresh::Checked;
-pub use refresh::RefreshPool;
+pub use refresh::RefreshReport;
 pub use report::{PoolOutcome, PoolReport};
 pub(crate) use stamp::Stamp;
 pub(crate) use table::Pool;
 pub use table::{HandleError, PoolError, PoolEvent, PoolState, RetryError, WhenLoadedError};
 #[cfg(feature = "plugin")]
 pub(crate) use table::{Hold, HoldKind};
-pub use wait::PoolWait;
 
 #[cfg(test)]
 mod tests;
@@ -166,18 +166,18 @@ impl<C: crate::Clock> Session<C> {
     /// The wait for every declared entry's outcome: it lands once no declared
     /// entry is pending, as a [`PoolReport`] of each key's outcome. Entries
     /// that failed are in it, as [`PoolOutcome::Failed`]. An offline session
-    /// calls [`update`](Self::update) until [`PoolWait::has_landed`] before
-    /// it renders. Dropping the [`PoolWait`] ends the wait.
+    /// waits on this job ([`Job::wait`](crate::Job::wait)) before it renders.
+    /// Dropping the [`Job`](crate::Job) ends the wait.
     ///
     /// `K` is the type of the keys the pool was declared with; keys of another
     /// type are not in the report.
-    pub fn pool_loaded<K>(&mut self) -> PoolWait<PoolReport<K>>
+    pub fn pool_loaded<K>(&mut self) -> crate::Job<PoolLoaded<K>>
     where
         K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
     {
-        let (loaded, landing) = PoolWait::new();
-        self.pool.wait_loaded(landing);
-        loaded
+        let (job, ticket) = self.jobs.new_job();
+        self.pool.wait_loaded(ticket);
+        job
     }
 
     /// Runs `then` in an [`update`](Self::update), once, when the declared
@@ -230,17 +230,18 @@ impl<C: crate::Clock> Session<C> {
     /// never does, so a key declared after its file changed shares the loaded
     /// entry until the next refresh, and a plugin binary that changed on disk
     /// or a provided asset is never detected. The result lands in a later
-    /// [`update`](Self::update) as a [`RefreshPool`], or as the job's failure.
-    pub fn refresh_pool(&mut self) -> PoolWait<Result<RefreshPool, crate::JobFailed>> {
-        let (wait, landing) = PoolWait::new();
+    /// [`update`](Self::update) as a [`RefreshReport`], or as the job's failure.
+    pub fn refresh_pool(&mut self) -> crate::Job<RefreshPool> {
         let files = self.pool.stamped_files();
-        self.jobs.submit(
-            move || refresh::check(files),
-            move |session, done, _| {
-                landing.land(done.map(|checked| session.land_pool_refresh(checked)));
+        self.jobs.submit_job(
+            move |_| refresh::check(files),
+            move |session, done, ticket| {
+                ticket.land(
+                    done.map(|checked| session.land_pool_refresh(checked))
+                        .map_err(PoolJobError::from),
+                );
             },
-        );
-        wait
+        )
     }
 
     /// Where the entry under `key` stands, `None` when the pool has none: never

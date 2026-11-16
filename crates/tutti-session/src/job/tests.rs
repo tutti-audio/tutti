@@ -1,0 +1,197 @@
+use std::sync::mpsc::sync_channel;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+use tutti_types::SampleRate;
+
+use super::*;
+use crate::{DetachedSession, Session, SessionBuilder, Task};
+
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+enum EchoError {
+    #[error(transparent)]
+    Worker(#[from] WorkerError),
+    #[error(transparent)]
+    Wait(#[from] WaitError),
+}
+
+job_kind!(Echo => u32, EchoError);
+
+const LONG: Duration = Duration::from_secs(10);
+
+fn session(builder: SessionBuilder) -> DetachedSession {
+    builder.build_detached(SampleRate::SR_48K).unwrap()
+}
+
+/// A session whose tasks wait in the returned list, run by the test.
+fn holding() -> (DetachedSession, Arc<Mutex<Vec<Task>>>) {
+    let held: Arc<Mutex<Vec<Task>>> = Arc::default();
+    let into = Arc::clone(&held);
+    let s = session(Session::builder().spawn_with(move |task| into.lock().unwrap().push(task)));
+    (s, held)
+}
+
+fn run_all(held: &Arc<Mutex<Vec<Task>>>) {
+    let tasks: Vec<Task> = held.lock().unwrap().drain(..).collect();
+    for task in tasks {
+        task.run();
+    }
+}
+
+fn echo(s: &mut DetachedSession, n: u32) -> Job<Echo> {
+    s.jobs.submit_job(
+        move |_| n,
+        |_, done, ticket| ticket.land(done.map_err(EchoError::from)),
+    )
+}
+
+fn landings(events: &[SessionEvent]) -> Vec<JobId> {
+    events
+        .iter()
+        .filter_map(|e| match e {
+            SessionEvent::Landed(landed) => Some(landed.id()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_job_is_pending_then_running_then_done_and_wait_returns_its_result() {
+    let mut s = session(Session::builder());
+    let (started, started_rx) = sync_channel::<()>(0);
+    let (go, go_rx) = sync_channel::<()>(0);
+    let job = s.jobs.submit_job(
+        move |_| {
+            started.send(()).unwrap();
+            go_rx.recv().unwrap();
+            7_u32
+        },
+        |_, done, ticket: Ticket<Echo>| ticket.land(done.map_err(EchoError::from)),
+    );
+    started_rx.recv_timeout(LONG).unwrap();
+    assert_eq!(job.status(), JobStatus::Running);
+    go.send(()).unwrap();
+    assert_eq!(job.wait(&mut s), Ok(7));
+    assert_eq!(job.status(), JobStatus::Done);
+}
+
+#[test]
+fn a_task_nobody_ran_leaves_its_job_pending() {
+    let (mut s, held) = holding();
+    let job = echo(&mut s, 1);
+    assert_eq!(job.status(), JobStatus::Pending);
+    run_all(&held);
+    drop(s);
+}
+
+#[test]
+fn wait_leaves_the_other_landings_for_the_next_update_in_order() {
+    let (mut s, held) = holding();
+    let (first, second, third) = (echo(&mut s, 1), echo(&mut s, 2), echo(&mut s, 3));
+    run_all(&held);
+    assert_eq!(second.wait(&mut s), Ok(2));
+    let rest = s.update();
+    assert_eq!(landings(&rest), [first.id(), third.id()]);
+    assert_eq!(landings(&s.update()), [], "reported once");
+}
+
+#[test]
+fn a_landing_is_taken_once_and_only_by_its_own_job() {
+    let (mut s, held) = holding();
+    let (a, b) = (echo(&mut s, 1), echo(&mut s, 2));
+    run_all(&held);
+    let mut events = s.update();
+    let SessionEvent::Landed(landed) = &mut events[0] else {
+        panic!("the first event is a landing");
+    };
+    assert_eq!(landed.take(&b), None, "another job's landing");
+    assert_eq!(landed.take(&a), Some(Ok(1)));
+    assert_eq!(landed.take(&a), None, "taken");
+}
+
+#[test]
+fn a_dropped_job_lands_nothing() {
+    let (mut s, held) = holding();
+    let job = echo(&mut s, 1);
+    drop(job);
+    run_all(&held);
+    assert_eq!(landings(&s.update()), []);
+}
+
+#[test]
+fn a_worker_that_panicked_lands_panicked_and_wait_returns_it() {
+    let mut s = session(Session::builder());
+    let job = s.jobs.submit_job(
+        |_| -> u32 { panic!("the file was gone") },
+        |_, done, ticket: Ticket<Echo>| ticket.land(done.map_err(EchoError::from)),
+    );
+    assert_eq!(
+        job.wait(&mut s),
+        Err(EchoError::Worker(WorkerError::Panicked {
+            message: "the file was gone".into()
+        }))
+    );
+}
+
+#[test]
+fn wait_ends_when_the_spawner_drops_the_task() {
+    let mut s = session(Session::builder().spawn_with(drop));
+    let job = echo(&mut s, 1);
+    assert_eq!(
+        job.wait(&mut s),
+        Err(EchoError::Worker(WorkerError::Dropped))
+    );
+}
+
+#[test]
+fn wait_ends_when_the_sessions_end_of_the_job_is_gone_unanswered() {
+    let mut s = session(Session::builder());
+    let (job, ticket) = s.jobs.new_job::<Echo>();
+    drop(ticket);
+    assert_eq!(
+        job.wait(&mut s),
+        Err(EchoError::Worker(WorkerError::Dropped))
+    );
+}
+
+#[test]
+fn a_job_waiting_for_the_main_thread_is_not_waited_for_off_it() {
+    // A test thread is not the process's main thread.
+    assert!(tutti_rt::MainThreadMarker::new().is_none());
+    let mut s = session(Session::builder());
+    let (job, ticket) = s.jobs.new_job::<Echo>();
+    ticket.waiting_for_main_thread();
+    assert_eq!(job.status(), JobStatus::WaitingForMainThread);
+    assert_eq!(
+        job.wait(&mut s),
+        Err(EchoError::Wait(WaitError::NeedsMainThread))
+    );
+    // The job is still the caller's: it lands, and a wait then returns it.
+    ticket.land(Ok(5));
+    assert_eq!(job.wait(&mut s), Ok(5));
+}
+
+#[test]
+fn dropping_the_session_returns_within_the_bound_though_a_worker_is_stuck() {
+    let mut s = session(Session::builder());
+    let (started, started_rx) = sync_channel::<()>(0);
+    let (release, release_rx) = sync_channel::<()>(0);
+    let job = s.jobs.submit_job(
+        move |_| {
+            started.send(()).unwrap();
+            let _ = release_rx.recv();
+        },
+        |_, _, ticket: Ticket<Unit>| ticket.land(Ok(())),
+    );
+    started_rx.recv_timeout(LONG).unwrap();
+    let began = Instant::now();
+    drop(s);
+    assert!(
+        began.elapsed() < Duration::from_secs(5),
+        "drop does not wait on it"
+    );
+    drop(job);
+    let _ = release.send(());
+}
+
+job_kind!(Unit => (), EchoError);

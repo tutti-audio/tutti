@@ -17,7 +17,7 @@ use std::path::PathBuf;
 
 use tutti_sampler::{OpenError, Placement, Stream, StreamReader};
 
-use crate::jobs::JobFailed;
+use crate::WorkerError;
 use crate::{Session, SessionEvent};
 
 tutti_types::id! {
@@ -78,7 +78,7 @@ pub enum SamplerError {
     Open(#[from] OpenError),
     /// The open's job did not finish: it panicked, or the spawner dropped it.
     #[error(transparent)]
-    Job(#[from] JobFailed),
+    Job(#[from] WorkerError),
 }
 
 impl<C: crate::Clock> Session<C> {

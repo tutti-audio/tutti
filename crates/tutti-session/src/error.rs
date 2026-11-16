@@ -242,7 +242,7 @@ pub enum MidiError {
     /// A session job did not finish ([`Midi::load_file`](crate::Midi::load_file)):
     /// its work panicked, or the spawner dropped it.
     #[error("MIDI load: {0}")]
-    Job(#[from] crate::JobFailed),
+    Job(#[from] crate::WorkerError),
 
     /// A message was not queued ([`Refused::Full`](tutti_graph::Refused::Full)).
     #[error("MIDI send: {0}")]
