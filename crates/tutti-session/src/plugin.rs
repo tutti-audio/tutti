@@ -654,15 +654,8 @@ impl Outgoing {
             editor_open,
             placement,
         } = self;
-        match placement {
-            Placement::InProcess => Retired::InProcess(InProcessRecord {
-                editor: editor_open.then(|| handle.clone()),
-                _held: Box::new(handle),
-            }),
-            Placement::Served => Retired::Served {
-                editor: editor_open.then_some(handle),
-            },
-        }
+        let editor = editor_open.then(|| handle.clone());
+        Retired::of(placement, editor, handle)
     }
 }
 
@@ -677,6 +670,22 @@ pub(crate) enum Retired {
 }
 
 impl Retired {
+    /// `held` split by `placement`: an in-process owner is kept for the main
+    /// thread, a served one drops here.
+    fn of(
+        placement: Placement,
+        editor: Option<PluginHandle>,
+        held: impl std::any::Any + Send,
+    ) -> Self {
+        match placement {
+            Placement::InProcess => Self::InProcess(InProcessRecord {
+                editor,
+                _held: Box::new(held),
+            }),
+            Placement::Served => Self::Served { editor },
+        }
+    }
+
     /// Parks an in-process record in `yard`; a served one has dropped, and
     /// only its open editor waits there.
     pub(crate) fn settle(self, yard: &mut Graveyard) {
@@ -745,12 +754,13 @@ impl Graveyard {
 
     /// Warns once when the yard has grown past [`WARN_AT`](Self::WARN_AT).
     pub(crate) fn warn_if_piling(&mut self) {
-        if self.retired.len() > Self::WARN_AT && !self.warned {
+        let waiting = self.retired.len() + self.editors.len();
+        if waiting > Self::WARN_AT && !self.warned {
             self.warned = true;
             tracing::warn!(
-                "{} retired plugins are waiting for the main thread: nothing has called \
-                 `Session::main(..).update()` (a host with no main thread never frees them)",
-                self.retired.len()
+                "{waiting} retired plugins and editors are waiting for the main thread: nothing \
+                 has called `Session::main(..).update()` (a host with no main thread never \
+                 frees them)"
             );
         }
     }
@@ -1039,9 +1049,10 @@ impl HostedPlugin {
     /// The outgoing mirror's report callback was on the outgoing handle,
     /// which reports nothing here once it is gone.
     ///
-    /// Returns the outgoing handle, for the graveyard, which closes its editor
-    /// on the main thread if it was open.
-    #[must_use = "the outgoing handle goes to the graveyard"]
+    /// Returns the outgoing handle, to retire through [`Outgoing::retire`]: an
+    /// in-process one waits in the graveyard, and an open editor of either
+    /// kind is closed on the main thread.
+    #[must_use = "the outgoing handle is retired through `Outgoing::retire`"]
     pub(crate) fn replace(
         &mut self,
         handle: PluginHandle,
@@ -1057,7 +1068,7 @@ impl HostedPlugin {
 
     /// [`replace`](Self::replace) for a plugin hosted in process, which has the
     /// node's controls and no plugin controls.
-    #[must_use = "the outgoing handle goes to the graveyard"]
+    #[must_use = "the outgoing handle is retired through `Outgoing::retire`"]
     pub(crate) fn replace_hosted(
         &mut self,
         handle: PluginHandle,
@@ -1078,13 +1089,7 @@ impl HostedPlugin {
         // The node over a pool entry is gone: the entry is no longer held.
         self.pooled = None;
         let editor = self.editor_open.then(|| self.handle.clone());
-        match self.placement {
-            Placement::InProcess => Retired::InProcess(InProcessRecord {
-                editor,
-                _held: Box::new(self),
-            }),
-            Placement::Served => Retired::Served { editor },
-        }
+        Retired::of(self.placement, editor, self)
     }
 
     /// [`replace`](Self::replace)'s handle half: everything but the
