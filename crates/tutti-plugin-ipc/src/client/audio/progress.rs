@@ -70,8 +70,8 @@ const POLL_INTERVAL: Duration = Duration::from_millis(20);
 /// What a [`StallWatch`] makes of the transfer at an instant.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Liveness {
-    /// The transfer moved within its window; ask again by `recheck`.
-    Live { recheck: Instant },
+    /// The transfer moved within its window.
+    Live,
     /// No byte moved for the whole window.
     Stalled,
 }
@@ -109,11 +109,10 @@ impl StallWatch {
             self.seen = bytes;
             self.since = now;
         }
-        let due = self.since + self.window;
-        if now >= due {
+        if now >= self.since + self.window {
             Liveness::Stalled
         } else {
-            Liveness::Live { recheck: due }
+            Liveness::Live
         }
     }
 }
@@ -226,18 +225,8 @@ mod tests {
     fn a_transfer_standing_still_stalls_exactly_at_the_window() {
         let start = Instant::now();
         let mut watch = StallWatch::new(WINDOW, start, 0);
-        assert_eq!(
-            watch.observe(at(start, 1_900), 0),
-            Liveness::Live {
-                recheck: at(start, 2_000)
-            }
-        );
-        assert_eq!(
-            watch.observe(at(start, 1_999), 0),
-            Liveness::Live {
-                recheck: at(start, 2_000)
-            }
-        );
+        assert_eq!(watch.observe(at(start, 1_900), 0), Liveness::Live);
+        assert_eq!(watch.observe(at(start, 1_999), 0), Liveness::Live);
         assert_eq!(watch.observe(at(start, 2_000), 0), Liveness::Stalled);
         assert_eq!(watch.observe(at(start, 2_100), 0), Liveness::Stalled);
     }
@@ -253,18 +242,14 @@ mod tests {
             let now = at(start, step * 1_900);
             assert_eq!(
                 watch.observe(now, step as usize),
-                Liveness::Live {
-                    recheck: now + WINDOW
-                },
+                Liveness::Live,
                 "step {step}"
             );
         }
         let last = at(start, 60 * 1_900);
         assert_eq!(
             watch.observe(last + Duration::from_millis(1_999), 60),
-            Liveness::Live {
-                recheck: last + WINDOW
-            }
+            Liveness::Live
         );
         assert_eq!(watch.observe(last + WINDOW, 60), Liveness::Stalled);
     }

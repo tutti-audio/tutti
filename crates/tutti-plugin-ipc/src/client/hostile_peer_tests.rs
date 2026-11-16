@@ -51,8 +51,8 @@ const NOTICE_TIMEOUT: Duration = Duration::from_secs(10);
 /// out the real margin.
 const REPLY_MARGIN: Duration = Duration::from_millis(200);
 
-/// The shortened deadline the stall tests run with (the slow-transfer test has
-/// its own, wider one).
+/// The shortened deadline the stall tests run with (the chunked-reassembly test
+/// has its own, wider one).
 ///
 /// Two orders of magnitude under production, so a stalled transfer is detected
 /// in a fraction of a second, and comfortably over the 20 ms poll interval so a
