@@ -889,8 +889,8 @@ fn port_change_file() -> std::path::PathBuf {
 }
 
 /// Updates and renders a block at a time until `done` (given the session and the
-/// last frame of the block) holds, failing after 30 s. Whether an update reported
-/// a refused port change.
+/// last frame of the block) holds, failing after 30 s. Returns whether an update
+/// reported a refused port change.
 fn render_until(
     s: &mut Session,
     what: &str,
@@ -951,27 +951,23 @@ fn a_served_plugin_that_grows_its_ports_gets_a_wider_node() {
         s.graph().connect(from, to).unwrap().hard();
     }
     let mut refused = false;
-    let mut until =
-        |s: &mut Session, what: &str, done: &mut dyn FnMut(&Session, [f32; 2]) -> bool| {
-            refused |= render_until(s, what, done);
-        };
-    until(&mut s, "the stereo tags", &mut |_, t| t == [1.0, 2.0]);
+    refused |= render_until(&mut s, "the stereo tags", &mut |_, t| t == [1.0, 2.0]);
     assert_eq!(s.graph_ref().node_outputs(node).unwrap(), 2);
     std::fs::write(port_change_file(), "1").expect("the change is asked");
-    until(&mut s, "the wider node", &mut |s, _| {
+    refused |= render_until(&mut s, "the wider node", &mut |s, _| {
         s.graph_ref().node_outputs(node).is_ok_and(|n| n == 3)
     });
-    until(&mut s, "the tags through the new node", &mut |_, t| {
-        t == [1.0, 2.0]
+    refused |= render_until(&mut s, "the tags through the new node", &mut |s, t| {
+        t == [1.0, 2.0] && s.graph_ref().node_outputs(node).is_ok_and(|n| n == 3)
     });
     // Another change, to two mono buses: every layer (slab, pipeline, node)
     // follows the later layout, so the second output plays the second bus's tag.
     std::fs::write(port_change_file(), "3").expect("the change is asked");
-    until(&mut s, "the narrower node", &mut |s, _| {
+    refused |= render_until(&mut s, "the narrower node", &mut |s, _| {
         s.graph_ref().node_outputs(node).is_ok_and(|n| n == 2)
     });
-    until(&mut s, "the tags of two mono buses", &mut |_, t| {
-        t == [1.0, 1001.0]
+    refused |= render_until(&mut s, "the tags of two mono buses", &mut |s, t| {
+        t == [1.0, 1001.0] && s.graph_ref().node_outputs(node).is_ok_and(|n| n == 2)
     });
     assert!(!refused, "a change the slab can follow is not refused");
     s.close(tutti_fixtures::main_thread());
@@ -1014,8 +1010,8 @@ fn an_inserted_served_plugin_that_grows_its_ports_gets_a_wider_node() {
     refused |= render_until(&mut s, "the wider node", &mut |s, _| {
         s.graph_ref().node_outputs(node).is_ok_and(|n| n == 3)
     });
-    refused |= render_until(&mut s, "the tags through the new node", &mut |_, t| {
-        t == [1.0, 2.0]
+    refused |= render_until(&mut s, "the tags through the new node", &mut |s, t| {
+        t == [1.0, 2.0] && s.graph_ref().node_outputs(node).is_ok_and(|n| n == 3)
     });
     assert!(!refused, "a change the slab can follow is not refused");
     s.close(tutti_fixtures::main_thread());

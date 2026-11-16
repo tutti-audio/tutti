@@ -770,7 +770,7 @@ pub(crate) struct HostedPlugin {
     pub(crate) rebind: Option<RebindState>,
 }
 
-/// What a pooled plugin's record keeps to re-insert its node when the plugin
+/// What a hosted plugin's record keeps to re-insert its node when the plugin
 /// changes its ports: the builder of the new node and the ports the node at the
 /// key declares, built where those ports are known.
 #[derive(Debug)]

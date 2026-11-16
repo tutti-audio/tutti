@@ -1,6 +1,7 @@
-//! A pooled plugin's node re-inserted when the plugin changes its ports.
+//! The node of a hosted plugin that keeps a rebinder (pooled, or inserted or replaced through `Graph`) re-inserted
+//! when the plugin changes its ports.
 //!
-//! `Phase::Plugins` compares the ports a pooled plugin has now with the ones
+//! `Phase::Plugins` compares the ports such a plugin has now with the ones
 //! its node declares. When they differ it asks the plugin's
 //! [`PluginRebinder`](tutti_plugin::catalog::PluginRebinder) to **prepare** a
 //! node over the same plugin, which changes nothing in the plugin, swaps it in
@@ -35,7 +36,7 @@
 //! An in-process plugin changes its ports on the main thread and is ticked
 //! there, so the rebuild runs in an update that runs on it: `plugins_phase` does
 //! not tick an in-process plugin (only `MainSession::update` does, for an open
-//! editor), so this phase does, for the pooled plugins it re-inserts. A served
+//! editor), so this phase does, for each a hosted plugin that keeps a rebinder (pooled, or inserted or replaced through `Graph`). A served
 //! plugin is ticked the same way: it restarts into a new slab, pipeline and
 //! node for its new buses.
 
@@ -65,10 +66,10 @@ pub enum PortsRefusal {
 }
 
 impl<C: Clock> Session<C> {
-    /// Ticks the in-process pooled plugins (their pump is what reads a change
-    /// of ports) and re-inserts the node of each whose ports changed. Called at
-    /// the end of `Phase::Plugins`.
-    pub(crate) fn rebind_pooled_plugins(&mut self, out: &mut Vec<SessionEvent>) {
+    /// Ticks each a hosted plugin that keeps a rebinder (pooled, or inserted or replaced through `Graph`)
+    /// (the tick is what reads a change of ports) and re-inserts the node of
+    /// each whose ports changed. Called at the end of `Phase::Plugins`.
+    pub(crate) fn rebind_plugins(&mut self, out: &mut Vec<SessionEvent>) {
         let main = MainThreadMarker::new();
         let nodes: Vec<NodeKey> = self
             .graph
@@ -94,7 +95,7 @@ impl<C: Clock> Session<C> {
         }
     }
 
-    /// One update of one pooled plugin's rebuild: the record it keeps next.
+    /// One update of the rebuild of one hosted plugin that keeps a rebinder (pooled, or inserted or replaced through `Graph`): the record it keeps next.
     fn rebind_step(
         &mut self,
         node: NodeKey,

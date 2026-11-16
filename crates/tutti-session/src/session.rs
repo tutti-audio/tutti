@@ -1207,7 +1207,7 @@ impl<C: Clock> Session<C> {
                 #[cfg(feature = "plugin")]
                 {
                     self.plugins_phase(cx, out);
-                    self.rebind_pooled_plugins(out);
+                    self.rebind_plugins(out);
                 }
             }
             Phase::RenderMode =>

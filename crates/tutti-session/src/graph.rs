@@ -967,6 +967,7 @@ impl Graph {
     /// swaps any node: crossfading when the running node's shape fits the
     /// bound plugin's, else a plain swap at the same key. Refused, handing
     /// `client` back unbound, while a re-prepare is between its two commits.
+    /// The incoming plugin's rebinder replaces the old one.
     ///
     /// # Errors
     ///
