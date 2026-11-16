@@ -170,6 +170,7 @@ impl Edit {
 /// If `capacity` is zero.
 #[must_use]
 pub fn edits(capacity: usize) -> (EditSink, EditDrain) {
+    assert!(capacity > 0, "an edit ring holds at least one value");
     let (writer, reader) = ring(capacity, Overflow::DropNewest);
     (
         EditSink(writer),
@@ -178,6 +179,11 @@ pub fn edits(capacity: usize) -> (EditSink, EditDrain) {
             undecodable: 0,
         },
     )
+}
+
+/// A ring's loss count as `u32`, saturating.
+fn saturate(lost: u64) -> u32 {
+    u32::try_from(lost).unwrap_or(u32::MAX)
 }
 
 /// The main thread's end of an edit ring.
@@ -189,8 +195,10 @@ impl EditSink {
     ///
     /// # Errors
     ///
-    /// [`PushError::Full`], counted in [`refused`](Self::refused). The caller keeps
+    /// [`PushError::Full`], counted in [`refused`](Self::refused): the caller keeps
     /// the latest value per parameter and retries on its next tick.
+    /// [`PushError::Disconnected`] when the drain is gone; it is not counted in
+    /// `refused`.
     pub fn send(&mut self, edit: Edit) -> Result<(), PushError> {
         self.0
             .push(edit.encode())
@@ -200,7 +208,7 @@ impl EditSink {
     /// Edits refused for want of room, saturating at `u32::MAX`.
     #[must_use]
     pub fn refused(&self) -> u32 {
-        u32::try_from(self.0.lost()).unwrap_or(u32::MAX)
+        saturate(self.0.lost())
     }
 }
 
@@ -342,6 +350,22 @@ mod tests {
 
     /// An edit survives the ring's encoding, in order; a full ring refuses and
     /// counts.
+    /// A ring of no room is refused at construction, and the refused count
+    /// saturates at `u32::MAX` rather than wrapping.
+    #[test]
+    #[should_panic(expected = "an edit ring holds at least one value")]
+    fn an_edit_ring_of_no_room_is_refused() {
+        let _ = edits(0);
+    }
+
+    #[test]
+    fn the_refused_count_saturates_at_u32_max() {
+        assert_eq!(saturate(7), 7);
+        assert_eq!(saturate(u64::from(u32::MAX)), u32::MAX);
+        assert_eq!(saturate(u64::from(u32::MAX) + 1), u32::MAX);
+        assert_eq!(saturate(u64::MAX), u32::MAX);
+    }
+
     #[test]
     fn edits_round_trip_in_order() {
         let (mut sink, mut drain) = edits(2);
