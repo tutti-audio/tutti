@@ -119,8 +119,8 @@ m2-103/8#2 | both |  | required | M2-103 §8 | Resource names are PascalCase wit
 m2-103/8.1#1 | both |  | required | M2-103 §8.1 | Resources are JSON by default under the format rules |  |  |
 m2-103/8.1#2 | both |  | permitted | M2-103 §8.1 | a Resource carries non-JSON data only when its mediaType says so |  |  |
 m2-103/8.3#1 | both |  | recommended | M2-103 §8.3 | standard Resources give a unified approach to common uses |  | other-side | M2-103 §8.3: rule on the MMA/AMEI authors of Resource specifications
-m2-103/8.3#2 | both |  | required | M2-103 §8.3 | standard Resources describe their Properties, intent, rules and relations |  | other-side | M2-103 §6.3: rule on the MMA/AMEI authors of Resource specifications
-m2-103/8.3#3 | both |  | required | M2-103 §8.3 | a Resource spec says which Properties are required and which optional |  | other-side | M2-103 §6.3: rule on the authors of Resource specifications
+m2-103/8.3#2 | both |  | required | M2-103 §8.3 | standard Resources describe their Properties, intent, rules and relations |  | other-side | M2-103 §8.3: rule on the MMA/AMEI authors of Resource specifications
+m2-103/8.3#3 | both |  | required | M2-103 §8.3 | a Resource spec says which Properties are required and which optional |  | other-side | M2-103 §8.3: rule on the authors of Resource specifications
 m2-103/8.3#4 | responder |  | required | M2-103 §8.3 | a required Property, including a required string, is never empty | neg=1 |  |
 m2-103/8.4#1 | responder |  | permitted | M2-103 §8.4 | manufacturers can design devices with custom Resources |  |  |
 m2-103/8.4#2 | responder |  | required | M2-103 §8.4 | a custom Resource follows the Property Exchange style rules |  |  |
