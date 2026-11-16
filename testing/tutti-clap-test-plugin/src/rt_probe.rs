@@ -223,9 +223,8 @@ static AUDIO_THREAD_LOG_LINE: &CStr = c"tutti-probe logging from the audio threa
 /// Emit `count` `clap.log` lines per block, from inside `process`.
 ///
 /// CLAP marks `clap.log` `[thread-safe]`, which includes the audio thread. A
-/// host that records such a line the way it records a main-thread one allocates
-/// a `String`, takes the stderr lock, and takes a `Mutex` its own `drain_log`
-/// holds across a copy — the last a priority inversion.
+/// host that records such a line the way it records a main-thread one decodes it
+/// into a `String` and emits a `tracing` event, both of which allocate.
 ///
 /// # Safety
 /// Safe to call; `extern "C"` only so the test can reach it across `dlopen`.
