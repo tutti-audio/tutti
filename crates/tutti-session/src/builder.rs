@@ -106,8 +106,10 @@ struct Options {
     #[cfg(all(feature = "device", feature = "audio-io"))]
     input_opener: Option<Box<dyn crate::InputOpener>>,
     render_worker_start: Option<crate::RenderWorkerStart>,
+    /// The OS MIDI layer's options when it is on
+    /// ([`midi_hardware`](Self::midi_hardware)); `None` is no OS MIDI layer.
     #[cfg(feature = "midi-hardware")]
-    midi_hardware: bool,
+    midi_hardware: Option<tutti_midi_hardware::MidiHardwareOptions>,
     /// The backend the OS MIDI layer runs over, if not the platform's.
     #[cfg(feature = "midi-hardware")]
     midi_backend: Option<MidiBackend>,
@@ -115,9 +117,6 @@ struct Options {
     mpe_mode: tutti_midi_protocol::MpeMode,
     #[cfg(feature = "midi")]
     midi_ports: tutti_midi_runtime::MidiInputPorts,
-    /// Where the input ports' event times come from.
-    #[cfg(feature = "midi-hardware")]
-    midi_input_timing: tutti_midi_hardware::InputTiming,
     #[cfg(feature = "modulation")]
     unresolved_warning: std::time::Duration,
     #[cfg(feature = "plugin")]
@@ -155,15 +154,13 @@ impl Default for Options {
             input_opener: None,
             render_worker_start: None,
             #[cfg(feature = "midi-hardware")]
-            midi_hardware: false,
+            midi_hardware: None,
             #[cfg(feature = "midi-hardware")]
             midi_backend: None,
             #[cfg(feature = "midi")]
             mpe_mode: tutti_midi_protocol::MpeMode::Disabled,
             #[cfg(feature = "midi")]
             midi_ports: tutti_midi_runtime::MidiInputPorts::FIRST_GROUP,
-            #[cfg(feature = "midi-hardware")]
-            midi_input_timing: tutti_midi_hardware::InputTiming::Arrival,
             #[cfg(feature = "modulation")]
             unresolved_warning: crate::UNRESOLVED_WARNING,
             #[cfg(feature = "plugin")]
@@ -708,11 +705,12 @@ impl<C: Clock> SessionBuilder<C> {
     /// [`Midi::devices`](crate::Midi::devices) and opened by the pool's
     /// [`midi_input`](crate::midi_input) and [`midi_output`](crate::midi_output)
     /// entries, each input feeding the graph through an ingest node and an event
-    /// inlet of its own. Default off.
+    /// inlet of its own, with `options` (MIDI-CI, where input times come from).
+    /// Default off.
     #[cfg(feature = "midi-hardware")]
     #[must_use]
-    pub fn midi_hardware(mut self) -> Self {
-        self.opts.midi_hardware = true;
+    pub fn midi_hardware(mut self, options: tutti_midi_hardware::MidiHardwareOptions) -> Self {
+        self.opts.midi_hardware = Some(options);
         self
     }
 
@@ -725,8 +723,9 @@ impl<C: Clock> SessionBuilder<C> {
     pub fn midi_hardware_over(
         mut self,
         backend: Box<dyn tutti_midi_hardware::MidiEndpoints>,
+        options: tutti_midi_hardware::MidiHardwareOptions,
     ) -> Self {
-        self.opts.midi_hardware = true;
+        self.opts.midi_hardware = Some(options);
         self.opts.midi_backend = Some(MidiBackend(backend));
         self
     }
@@ -752,19 +751,6 @@ impl<C: Clock> SessionBuilder<C> {
     #[must_use]
     pub fn midi_groups(mut self, last: tutti_ump::MidiGroup) -> Self {
         self.opts.midi_ports = tutti_midi_runtime::MidiInputPorts::through(last);
-        self
-    }
-
-    /// Where the event times of the input ports come from:
-    /// [`InputTiming::Arrival`](tutti_midi_hardware::InputTiming::Arrival), the
-    /// OS's arrival stamp (the default), or
-    /// [`JitterReduction`](tutti_midi_hardware::InputTiming::JitterReduction),
-    /// the JR Timestamps of a device that agrees to send them. Every input
-    /// port the pool opens takes it.
-    #[cfg(feature = "midi-hardware")]
-    #[must_use]
-    pub fn midi_input_timing(mut self, timing: tutti_midi_hardware::InputTiming) -> Self {
-        self.opts.midi_input_timing = timing;
         self
     }
 
@@ -837,7 +823,7 @@ impl<C: Clock> SessionBuilder<C> {
         #[cfg(feature = "midi-hardware")]
         let backend = self.opts.midi_backend.take();
         #[cfg(feature = "midi-hardware")]
-        let midi_io = self.opts.midi_hardware.then(|| -> Result<_> {
+        let midi_io = self.opts.midi_hardware.map(|options| -> Result<_> {
             // One event inlet for each input, which its thread pushes into
             // for the frame the engine's block clock puts its arrival on: a
             // block later, so no event is late (the lead).
@@ -847,9 +833,9 @@ impl<C: Clock> SessionBuilder<C> {
             );
             let io = match backend {
                 Some(MidiBackend(backend)) => {
-                    tutti_midi_hardware::MidiSession::open_over(backend, inlets)?
+                    tutti_midi_hardware::MidiSession::open_over(backend, inlets, options)?
                 }
-                None => tutti_midi_hardware::MidiSession::open(inlets)?,
+                None => tutti_midi_hardware::MidiSession::open(inlets, options)?,
             };
             // Subscribed before anything can plug in unseen: `Phase::Poll`
             // is this subscription's only reader.
@@ -958,8 +944,7 @@ impl<C: Clock> SessionBuilder<C> {
             midi_state: crate::midi::MidiState::default().with_mpe(self.opts.mpe_mode),
             #[cfg(feature = "midi-hardware")]
             midi_state: crate::midi::MidiState::with_device_events(parts.device_events)
-                .with_mpe(self.opts.mpe_mode)
-                .with_input_timing(self.opts.midi_input_timing),
+                .with_mpe(self.opts.mpe_mode),
             #[cfg(feature = "modulation")]
             mods: crate::modulation::ModSession::new(self.opts.unresolved_warning),
             #[cfg(feature = "midi-hardware")]
@@ -1050,10 +1035,8 @@ impl<C: Clock> SessionBuilder<C> {
             // how much is built before the refusal.
             Some(declared) => Graph::check_root(declared, Some(&placed))?,
             None => {
-                let width = ChannelLayout::try_from(root).map_err(|_| {
-                    tutti_buffers::FoldError::from(tutti_buffers::BufferError::TooWide {
-                        channels: root,
-                    })
+                let width = ChannelLayout::try_from(root).map_err(|e| {
+                    tutti_buffers::FoldError::from(tutti_buffers::BufferError::from(e))
                 })?;
                 tutti_graph::fold_to_topology(&ChannelTopology::assumed(width), &placed)?;
             }

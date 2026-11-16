@@ -281,9 +281,9 @@ pub enum SessionEvent {
     /// A MIDI event of the session's, by area (design 030, convention 1):
     /// a device came or went, a held input or the output was lost, a
     /// negotiation settled, the device watch ended, or events were dropped.
-    /// See [`MidiEvent`](crate::MidiEvent).
+    /// See [`MidiReport`](crate::MidiReport).
     #[cfg(feature = "midi")]
-    Midi(crate::MidiEvent),
+    Midi(crate::MidiReport),
     /// A stream an [`open_stream`](Session::open_stream) started opened or
     /// failed to. See [`SamplerEvent`](crate::SamplerEvent).
     #[cfg(feature = "sampler")]
@@ -766,7 +766,7 @@ impl<C: Clock> Session<C> {
     /// the error and the root in force stays. A
     /// [`hard`](RootDeclaration::hard) declaration applies at once and drops
     /// the waiting one. An export of the master
-    /// places the file from the declaration (`tutti_export::Setup::with_root`, set by the export's fork).
+    /// places the file from the declaration (`tutti_export::Setup::root`, set by the export's fork).
     ///
     /// The device a declaration must place on is the one the session renders
     /// to (the offline `outputs`, or the open device's, and the new one on a
@@ -1040,7 +1040,7 @@ impl<C: Clock> Session<C> {
                         .map(|action| u64::from(!self.send_clock_action(action)))
                         .sum();
                     if refused > 0 {
-                        out.push(crate::MidiEvent::ClockCommandsRefused(refused).into());
+                        out.push(crate::MidiReport::ClockCommandsRefused(refused).into());
                     }
                 }
                 let lost = self.fault_poll(out);
@@ -1443,7 +1443,7 @@ impl<C: Clock> Session<C> {
     /// Sends what a followed MIDI clock asked of the transport, at the next
     /// block, and says whether the transport took it. A command the transport's
     /// list has no room for is dropped and logged, and the caller counts it
-    /// ([`MidiEvent::ClockCommandsRefused`](crate::MidiEvent::ClockCommandsRefused)):
+    /// ([`MidiReport::ClockCommandsRefused`](crate::MidiReport::ClockCommandsRefused)):
     /// the source says its position again with the next message.
     #[cfg(feature = "midi")]
     fn send_clock_action(&self, action: crate::midi_follow::ClockAction) -> bool {

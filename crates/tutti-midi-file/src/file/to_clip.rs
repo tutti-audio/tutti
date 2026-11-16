@@ -9,9 +9,8 @@
 use core::num::NonZeroU8;
 
 use tutti_ump::{
-    BarAccents, Flex, FlexAddress, FlexTextKind, KeySignature, Letter, Message, Metronome,
-    MidiGroup, SharpsFlats, SysexMessage, TicksPerQuarterNote, TimeSignature, Ump,
-    flex_text_packets,
+    BarAccents, Flex, FlexAddress, FlexTextKind, FlexTimeSignature, KeySignature, Letter, Message,
+    Metronome, MidiGroup, SharpsFlats, SysexMessage, TicksPerQuarterNote, Ump, flex_text_packets,
 };
 
 use unicode_normalization::UnicodeNormalization;
@@ -220,7 +219,7 @@ fn signature(
     clocks_per_click: u8,
 ) -> [FileEvent; 2] {
     [
-        flex(Flex::SetTimeSignature(TimeSignature {
+        flex(Flex::SetTimeSignature(FlexTimeSignature {
             numerator: numerator.get(),
             denominator,
             thirty_seconds,

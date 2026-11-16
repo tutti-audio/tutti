@@ -66,7 +66,7 @@ fn a_job_reads_back_what_it_was_given() {
     assert_eq!(job.output_length(), Samples(1_200));
     assert_eq!(job.total(), Samples(1_264));
     assert_eq!(job.on_event_loss(), EventLossPolicy::Fail);
-    let allowed = job.with_event_loss(EventLossPolicy::Allow);
+    let allowed = job.event_loss(EventLossPolicy::Allow);
     assert_eq!(allowed.on_event_loss(), EventLossPolicy::Allow);
     assert_eq!(allowed.total(), job.total());
 }

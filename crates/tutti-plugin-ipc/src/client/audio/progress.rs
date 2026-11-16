@@ -19,7 +19,7 @@
 //! in both directions: too low and a genuinely wedged plugin is waited on for
 //! minutes, too high and a slow disk-backed plugin is failed for being slow.
 //!
-//! A progress deadline needs neither. "No chunk in [`PROGRESS_TIMEOUT`]" is the
+//! A progress deadline needs neither. "No chunk in [`Timeouts::state_progress`]" is the
 //! question worth asking — *is this transfer still moving?* — and it is the same
 //! question in both directions, at any size, with no bandwidth assumption. A
 //! transfer that advances is allowed to take as long as it takes; one that stops
@@ -33,12 +33,11 @@
 //! [`StateProgress::wait`], which returns only when the reply arrives or when
 //! the counter has stood still for the deadline.
 //!
-//! It carries the **deadline** as well as the counter, so both halves of a
-//! transfer run on one figure. They did not, briefly, and the gap was not
-//! cosmetic: the caller's wait was injectable while the bridge thread's reads
-//! stayed on the constant, so a shortened test deadline exercised a timing
-//! relationship production never has — and the bridge thread's own expiry, the
-//! one that actually fires first, went untested.
+//! It carries the bridge thread's per-chunk **deadline** and the caller's
+//! **patience** (the deadline and a margin) as well as the counter, so both
+//! halves of a transfer run on one configuration, and the caller always outlasts
+//! the bridge thread: the stall report that says how far the transfer got is the
+//! one that arrives.
 //!
 //! # A stall is not a disconnection
 //!
@@ -57,23 +56,7 @@ use super::ask::Ask;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
-use tutti_plugin_types::StateError;
-
-/// How long a state transfer may make no progress before it is declared stalled.
-///
-/// Bounds the gap *between* chunks, never the transfer. A plugin serialising a
-/// large state can legitimately pause between chunks — hitting disk, or
-/// allocating — so this is generous relative to a socket write, and still far
-/// short of a human's patience for a wedged UI.
-///
-/// **The production default, and the only place it is read.** Every wait takes
-/// its deadline from the [`StateProgress`] it is serving, which
-/// [`AudioBridge::new`](super::AudioBridge::new) seeds from here. Reading the
-/// constant at a wait site instead would recreate the two-configuration bug
-/// this shape exists to prevent: a test could shorten one half while the other
-/// stayed on ten seconds, and the untouched half is the one carrying the
-/// behaviour under test.
-pub(super) const PROGRESS_TIMEOUT: Duration = Duration::from_secs(10);
+use tutti_plugin_types::{StateError, Timeouts};
 
 /// How often [`StateProgress::wait`] rechecks the counter.
 ///
@@ -93,21 +76,26 @@ const POLL_INTERVAL: Duration = Duration::from_millis(20);
 #[derive(Clone)]
 pub(super) struct StateProgress {
     bytes: Arc<AtomicUsize>,
-    /// The progress deadline for *this* transfer.
+    /// The bridge thread's per-chunk deadline for *this* transfer
+    /// ([`Timeouts::state_progress`]).
     ///
-    /// Carried on the transfer rather than read from a constant at each wait
-    /// site, so the caller's wait and the bridge thread's per-chunk reads are
-    /// one configuration. They were two, and a test that shortened only the
-    /// caller's half left the bridge thread on the 10 s constant — so the test
-    /// exercised a timing relationship production never has.
+    /// Carried on the transfer rather than read at each wait site, so the
+    /// caller's wait and the bridge thread's per-chunk reads are one
+    /// configuration.
     deadline: Duration,
+    /// How long the caller lets the transfer stand still before it gives up
+    /// ([`Timeouts::state_wait`]): the deadline and a margin, so the bridge
+    /// thread's own stall report (which says how far the transfer got) is
+    /// the one that arrives first.
+    patience: Duration,
 }
 
 impl StateProgress {
-    pub(super) fn new(deadline: Duration) -> Self {
+    pub(super) fn new(timeouts: &Timeouts) -> Self {
         Self {
             bytes: Arc::new(AtomicUsize::new(0)),
-            deadline,
+            deadline: timeouts.state_progress,
+            patience: timeouts.state_wait(),
         }
     }
 
@@ -144,7 +132,7 @@ impl StateProgress {
     /// Wait for `ask`'s reply, giving up only once progress has stalled.
     ///
     /// Returns the transfer's own answer when one arrives. Otherwise the counter
-    /// stood still for [`PROGRESS_TIMEOUT`] and the result is
+    /// stood still for the caller's patience and the result is
     /// [`StateError::Stalled`], carrying how far the transfer got.
     ///
     /// A disconnected channel is the bridge thread having dropped the `Reply`
@@ -155,7 +143,7 @@ impl StateProgress {
         &self,
         ask: Ask<std::result::Result<T, StateError>>,
     ) -> std::result::Result<T, StateError> {
-        let deadline = self.deadline;
+        let patience = self.patience;
         let mut seen = self.bytes();
         let mut idle = Duration::ZERO;
         loop {
@@ -169,7 +157,7 @@ impl StateProgress {
             let now = self.bytes();
             if now == seen {
                 idle += POLL_INTERVAL;
-                if idle >= deadline {
+                if idle >= patience {
                     return Err(self.stalled());
                 }
             } else {

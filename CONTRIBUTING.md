@@ -50,15 +50,28 @@ changed and, for a breaking change, how to migrate.
 
 ### Review
 
-Every pull request is reviewed by someone other than its author before it is queued.
+A pull request is reviewed by someone other than its author before it is queued.
 The reviewer reads the diff, this checklist and the plan it builds, not the author's
-summary of it. A change to `unsafe` code, FFI, `tutti-rt`, the audio thread or a
-breaking public API also gets a second review that reads only soundness and real-time
-safety. A new commit is reviewed again. The review is written in the description's
-"Review" section: who reviewed, the commit they read, each finding marked blocking,
-follow-up or nit, and how it was resolved. Once the review is recorded, CI is green and
-no blocking finding is open, the author may queue the pull request; the maintainer can
-still stop or revert it.
+summary of it. How much review a change gets follows its risk:
+
+- **No review:** a docs-only change, a rename or move the compiler checks, a gate
+  baseline or allow-list edit, or a dependency bump with no code change. CI covers
+  it.
+- **One review:** every other pull request.
+- **A second review** that reads only soundness and real-time safety: a change to
+  `unsafe` code, FFI, `tutti-rt` or another lock-free structure, or the audio
+  thread's no-allocation path.
+
+The reviewer reads what tools do not check: rustfmt, clippy, the gates, rustdoc,
+`cargo xtask deny` and `check-layout` run in CI. A fix for a blocking finding goes
+back to the same reviewer; a fix for a nit or a follow-up is not reviewed again.
+After two rounds, a finding that is not a correctness or soundness defect becomes a
+follow-up. Keep a pull request under about 1,500 changed lines where you can.
+
+The review is written in the description's "Review" section: the tier, who reviewed,
+the commit they read, each finding marked blocking, follow-up or nit, and how it was
+resolved. Once the review is recorded, CI is green and no blocking finding is open,
+the author may queue the pull request; the maintainer can still stop or revert it.
 The reviewer checks:
 
 1. **Correctness.** The change does what it says; each new behaviour has a test that

@@ -45,9 +45,9 @@
 use crate::latency::LatencyGraph;
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
-use tutti_types::{Samples, Tail};
+use tutti_types::{SampleRate, Samples, Seconds, Tail};
 
-/// The upper bound on any single node's reported tail, in frames: 2 880 000.
+/// The upper bound on any single node's reported tail: sixty seconds.
 ///
 /// A finite tail past this is not trusted as a figure: [`graph_tail`] counts
 /// it as [`Tail::Unbounded`], for the reason
@@ -64,8 +64,12 @@ use tutti_types::{Samples, Tail};
 /// somebody meant. Sixty is past every measured unit (no Apple unit exceeds
 /// ~21 s) while still bounding a garbage answer.
 ///
-/// Like its sibling this is a frame count (2 880 000), not a duration: the
-/// topology it bounds carries no rate, so the bound cannot follow one.
+/// Like its sibling this is a duration, so the bound follows the graph's
+/// rate: [`graph_tail`] takes the rate and converts it with
+/// [`Seconds::to_samples_ceil`](tutti_types::Seconds::to_samples_ceil)
+/// (2 880 000 frames at 48 kHz, 5 760 000 at 96 kHz), and
+/// [`Editor::set_tail`](crate::Editor::set_tail) converts it at the editor's
+/// prepared rate. A plugin host converts it at the plugin's own rate.
 ///
 /// Applied per node, so a long chain can legitimately sum past it. That is the
 /// same property the latency bound has: the bound rejects one bad answer, it
@@ -78,7 +82,7 @@ use tutti_types::{Samples, Tail};
 /// [`Editor::set_tail`](crate::Editor::set_tail) refuses one set by hand. It is not a way to declare a longer ring-out: a host that
 /// has one declares `Tail::Unbounded` (the plugin hosts do, for any finite
 /// figure past this), which claims nothing false.
-pub const MAX_NODE_TAIL: Samples = Samples(48_000 * 60);
+pub const MAX_NODE_TAIL: Seconds = Seconds::new(60.0);
 
 /// A [`LatencyGraph`] whose nodes may also keep producing after their input
 /// stops.
@@ -183,7 +187,7 @@ impl GraphTail {
     ///
     /// ```
     /// use tutti_graph::{NodeSpec, OutPort, Source};
-    /// use tutti_types::{ChannelLayout, Samples, Tail};
+    /// use tutti_types::{ChannelLayout, SampleRate, Samples, Tail};
     /// use tutti_graph::{graph_tail, NodeKey, Topology};
     ///
     /// let verb = NodeKey(1);
@@ -195,7 +199,7 @@ impl GraphTail {
     /// );
     /// g.set_outputs([Source::Node(OutPort { node: verb, port: 0 })]);
     ///
-    /// let tail = graph_tail(&g);
+    /// let tail = graph_tail(&g, SampleRate::SR_48K);
     /// assert_eq!(tail.samples(), None); // never decays
     /// let eight_seconds = Samples(8 * 48_000);
     /// assert_eq!(tail.resolve(eight_seconds), eight_seconds);
@@ -216,10 +220,14 @@ impl GraphTail {
 /// affect the render however long it rings, so neither its tail nor its silence
 /// changes the answer.
 ///
+/// `rate` is the graph's sample rate, at which a node's finite figure is
+/// compared with [`MAX_NODE_TAIL`].
+///
 /// Returns [`GraphTail::default`] — no tail, nothing unknown — for a graph whose
 /// nodes all report [`Tail::None`], which is the common case. Allocates; run it
 /// on the control thread.
-pub fn graph_tail<G: TailGraph>(g: &G) -> GraphTail {
+pub fn graph_tail<G: TailGraph>(g: &G, rate: SampleRate) -> GraphTail {
+    let limit = MAX_NODE_TAIL.to_samples_ceil(rate);
     let tails: HashMap<G::Node, Tail> = g.nodes().map(|node| (node, g.tail(node))).collect();
 
     if tails.is_empty() {
@@ -245,7 +253,7 @@ pub fn graph_tail<G: TailGraph>(g: &G) -> GraphTail {
     let unbounded = cycle_rings
         || live.iter().any(|n| match tails.get(n) {
             Some(Tail::Unbounded) => true,
-            Some(Tail::Finite(frames)) => *frames > MAX_NODE_TAIL,
+            Some(Tail::Finite(frames)) => *frames > limit,
             _ => false,
         });
 
@@ -262,7 +270,7 @@ pub fn graph_tail<G: TailGraph>(g: &G) -> GraphTail {
         .map(|(&node, &tail)| {
             let s = tail
                 .samples()
-                .filter(|&s| s <= MAX_NODE_TAIL)
+                .filter(|&s| s <= limit)
                 .unwrap_or(Samples::ZERO);
             (node, s)
         })
@@ -297,7 +305,7 @@ pub fn graph_tail<G: TailGraph>(g: &G) -> GraphTail {
 ///
 /// The ring-out definition is what lets this be a plain add — see [`Tail`].
 /// `Samples`' saturating `Add`, for the reason its latency counterpart uses it:
-/// no node's own figure exceeds `MAX_NODE_TAIL` (one past it counts as
+/// no node's own figure exceeds `MAX_NODE_TAIL` at the graph's rate (one past it counts as
 /// unbounded), so the bound is what makes the sum safe, not the arithmetic.
 fn departure<N: Copy + Eq + Hash>(
     node: N,
@@ -379,6 +387,8 @@ mod tests {
     use super::*;
     use crate::latency::{ChannelFeed, Feed, PortFeed};
 
+    const R: SampleRate = SampleRate::SR_48K;
+
     /// Minimal `TailGraph`: nodes are indices, edges name their source node.
     struct Toy {
         /// Per node: its tail, and the source feeding each input port.
@@ -442,7 +452,7 @@ mod tests {
             ],
             outputs: vec![Some(2)],
         };
-        assert_eq!(graph_tail(&g).samples(), Some(Samples(5000)));
+        assert_eq!(graph_tail(&g, R).samples(), Some(Samples(5000)));
     }
 
     /// Summing two paths leaves the longer one's decay untouched, so a merge
@@ -459,7 +469,7 @@ mod tests {
             ],
             outputs: vec![Some(3)],
         };
-        assert_eq!(graph_tail(&g).samples(), Some(Samples(3000)));
+        assert_eq!(graph_tail(&g, R).samples(), Some(Samples(3000)));
     }
 
     /// A graph cannot decay faster than its slowest part: one unbounded node
@@ -475,7 +485,7 @@ mod tests {
             ],
             outputs: vec![Some(2)],
         };
-        let t = graph_tail(&g);
+        let t = graph_tail(&g, R);
         assert!(t.is_unbounded());
         assert_eq!(t.samples(), None);
     }
@@ -493,7 +503,7 @@ mod tests {
             ],
             outputs: vec![Some(1)],
         };
-        let t = graph_tail(&g);
+        let t = graph_tail(&g, R);
         assert!(!t.is_unbounded(), "an orphan must not make the graph ring");
         assert_eq!(t.samples(), Some(Samples(3000)));
     }
@@ -513,7 +523,7 @@ mod tests {
             ],
             outputs: vec![Some(2)],
         };
-        let t = graph_tail(&g);
+        let t = graph_tail(&g, R);
         assert!(t.is_unbounded());
         assert_eq!(t.samples(), None);
     }
@@ -530,28 +540,49 @@ mod tests {
             ],
             outputs: vec![Some(2)],
         };
-        assert!(!graph_tail(&g).is_unbounded());
+        assert!(!graph_tail(&g, R).is_unbounded());
     }
 
     /// A finite tail past the bound is not trusted as a figure and not cut to
     /// it: it counts as unbounded, so no bounce ends a ring-out at the bound.
-    /// One exactly at the bound is still a figure.
+    /// One exactly at the bound is still a figure. The bound is sixty seconds
+    /// at the graph's rate: 2 880 000 frames at 48 kHz, 5 760 000 at 96 kHz,
+    /// so a figure that is unbounded at 48 kHz is a figure at 96 kHz.
     #[test]
     fn a_tail_past_the_bound_counts_as_unbounded() {
-        let past = Toy {
-            nodes: vec![(Tail::Finite(Samples(MAX_NODE_TAIL.get() + 1)), vec![])],
-            outputs: vec![Some(0)],
-        };
-        let t = graph_tail(&past);
-        assert!(t.is_unbounded());
-        assert_eq!(t.samples(), None);
-        assert_eq!(t.known(), Samples::ZERO);
+        for (rate, bound) in [
+            (SampleRate::SR_48K, 2_880_000),
+            (SampleRate::SR_96K, 5_760_000),
+        ] {
+            assert_eq!(MAX_NODE_TAIL.to_samples_ceil(rate), Samples(bound));
+            let alone = |frames: usize| Toy {
+                nodes: vec![(Tail::Finite(Samples(frames)), vec![])],
+                outputs: vec![Some(0)],
+            };
 
-        let at = Toy {
-            nodes: vec![(Tail::Finite(MAX_NODE_TAIL), vec![])],
+            let t = graph_tail(&alone(bound + 1), rate);
+            assert!(t.is_unbounded(), "{rate:?}");
+            assert_eq!(t.samples(), None);
+            assert_eq!(t.known(), Samples::ZERO);
+
+            let t = graph_tail(&alone(bound), rate);
+            assert!(!t.is_unbounded(), "{rate:?}");
+            assert_eq!(t.samples(), Some(Samples(bound)));
+        }
+    }
+
+    /// The same frame count is a figure at a rate that holds it and unbounded
+    /// at one that does not: 4 000 000 frames is 83 s at 48 kHz and 41.7 s at
+    /// 96 kHz.
+    #[test]
+    fn a_tail_is_judged_in_seconds_at_the_graphs_rate() {
+        let g = Toy {
+            nodes: vec![(Tail::Finite(Samples(4_000_000)), vec![])],
             outputs: vec![Some(0)],
         };
-        assert_eq!(graph_tail(&at).samples(), Some(MAX_NODE_TAIL));
+        assert!(graph_tail(&g, SampleRate::SR_48K).is_unbounded());
+        let t = graph_tail(&g, SampleRate::SR_96K);
+        assert_eq!(t.samples(), Some(Samples(4_000_000)));
     }
 
     /// A node that was never asked has said nothing, which is not the same as
@@ -566,7 +597,7 @@ mod tests {
             ],
             outputs: vec![Some(2)],
         };
-        let t = graph_tail(&g);
+        let t = graph_tail(&g, R);
         assert_eq!(t.unknown_nodes(), 1);
         assert_eq!(t.samples(), None, "an unknown node cannot be read as zero");
         assert_eq!(
@@ -584,7 +615,7 @@ mod tests {
             nodes: vec![(Tail::None, vec![]), (Tail::None, vec![Some(0)])],
             outputs: vec![Some(1)],
         };
-        let t = graph_tail(&g);
+        let t = graph_tail(&g, R);
         assert_eq!(t.samples(), Some(Samples::ZERO));
         assert_eq!(t.unknown_nodes(), 0);
         assert!(!t.is_unbounded());
@@ -606,7 +637,7 @@ mod tests {
             outputs: vec![Some(4)],
         };
         // Leg A: 1000 + 2000 = 3000. Leg B: 2500. The max is 3000.
-        assert_eq!(graph_tail(&g).samples(), Some(Samples(3000)));
+        assert_eq!(graph_tail(&g, R).samples(), Some(Samples(3000)));
     }
 
     /// A graph that never decays is spent at exactly the cap: that is what the
@@ -618,7 +649,7 @@ mod tests {
             outputs: vec![Some(1)],
         };
         let cap = Samples(384_000);
-        assert_eq!(graph_tail(&g).resolve(cap), cap);
+        assert_eq!(graph_tail(&g, R).resolve(cap), cap);
     }
 
     /// A partly-unknown graph resolves to what the nodes that answered reported,
@@ -634,7 +665,7 @@ mod tests {
             nodes: vec![(Tail::Unknown, vec![]), (finite(3000), vec![Some(0)])],
             outputs: vec![Some(1)],
         };
-        let t = graph_tail(&g);
+        let t = graph_tail(&g, R);
         assert_eq!(t.samples(), None, "it cannot be spent without a decision");
         assert_eq!(
             t.resolve(Samples(384_000)),
@@ -651,7 +682,7 @@ mod tests {
             nodes: vec![(Tail::None, vec![]), (finite(100_000), vec![Some(0)])],
             outputs: vec![Some(1)],
         };
-        assert_eq!(graph_tail(&g).resolve(Samples(48_000)), Samples(48_000));
+        assert_eq!(graph_tail(&g, R).resolve(Samples(48_000)), Samples(48_000));
     }
 
     /// A fully-reported graph resolves to its own figure, untouched by a cap it
@@ -662,7 +693,7 @@ mod tests {
             nodes: vec![(Tail::None, vec![]), (finite(3000), vec![Some(0)])],
             outputs: vec![Some(1)],
         };
-        let t = graph_tail(&g);
+        let t = graph_tail(&g, R);
         assert_eq!(t.samples(), Some(Samples(3000)));
         assert_eq!(t.resolve(Samples(384_000)), Samples(3000));
     }
@@ -674,6 +705,6 @@ mod tests {
             nodes: vec![],
             outputs: vec![],
         };
-        assert_eq!(graph_tail(&g).samples(), Some(Samples::ZERO));
+        assert_eq!(graph_tail(&g, R).samples(), Some(Samples::ZERO));
     }
 }

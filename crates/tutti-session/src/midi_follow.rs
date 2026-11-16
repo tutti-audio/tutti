@@ -71,7 +71,7 @@ use tutti_types::{
 };
 use tutti_ump::MidiGroup;
 
-use crate::MidiEvent;
+use crate::MidiReport;
 
 /// How many events the follower's tap holds between two polls. Set Tempo and
 /// Set Time Signature are rare; a source that floods them loses the oldest
@@ -294,7 +294,7 @@ impl Overlay {
                 Followed::Tempo(tempo) => match step_at(&self.tempo, beat, tempo) {
                     Ok(Some(map)) => {
                         self.tempo = Arc::new(map);
-                        out.push(MidiEvent::TempoFollowed { tempo, beat }.into());
+                        out.push(MidiReport::TempoFollowed { tempo, beat }.into());
                     }
                     Ok(None) => {}
                     // The builder refuses only a tempo whose segment duration overflows
@@ -308,7 +308,7 @@ impl Overlay {
                     if let Some(map) = meter_at(&self.meter, at, signature) {
                         self.meter = Arc::new(map);
                         out.push(
-                            MidiEvent::MeterFollowed {
+                            MidiReport::MeterFollowed {
                                 signature,
                                 beat: at,
                             }
@@ -463,8 +463,8 @@ impl ClockFollow {
                 ClockEvent::Play => actions.push(ClockAction::Play),
                 ClockEvent::Stop => actions.push(ClockAction::Stop),
                 ClockEvent::Tempo(tempo) => tempos.push(Followed::Tempo(tempo)),
-                ClockEvent::Locked => out.push(MidiEvent::ClockLocked { kind }.into()),
-                ClockEvent::Unlocked => out.push(MidiEvent::ClockUnlocked { kind }.into()),
+                ClockEvent::Locked => out.push(MidiReport::ClockLocked { kind }.into()),
+                ClockEvent::Unlocked => out.push(MidiReport::ClockUnlocked { kind }.into()),
             }
         }
         if let Some(overlay) = &mut self.overlay {
@@ -537,10 +537,10 @@ impl MachineFollow {
                 MachineControlEvent::Play => actions.push(ClockAction::Play),
                 MachineControlEvent::Stop => actions.push(ClockAction::Stop),
                 MachineControlEvent::Ignored(command) => {
-                    out.push(MidiEvent::MachineControlIgnored(command).into());
+                    out.push(MidiReport::MachineControlIgnored(command).into());
                 }
                 MachineControlEvent::Segmentation(error) => {
-                    out.push(MidiEvent::MachineControlSegmentation(error).into());
+                    out.push(MidiReport::MachineControlSegmentation(error).into());
                 }
                 // An event this session has no counterpart for.
                 _ => {}

@@ -80,12 +80,63 @@ pub struct MidiSession {
     ports: Arc<HardwareMidiInputs>,
     /// The devices present, and the backend that opens them.
     devices: Devices,
-    /// The identity MIDI-CI is enabled with; none while it is off, which is
-    /// the default ([`MidiSession::enable_ci`]).
-    ci_identity: Option<DeviceIdentity>,
+    /// What the session was opened with.
+    options: MidiHardwareOptions,
     /// What the MIDI-CI devices' Property Exchange Responders serve
     /// ([`MidiSession::serve_properties`]); empty by default.
     properties: Arc<Mutex<ResourceStore>>,
+}
+
+/// What an OS MIDI layer is opened with: [`MidiSession::open`]'s second
+/// argument. A session runs with these for its whole life.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[non_exhaustive]
+pub struct MidiHardwareOptions {
+    /// The identity MIDI-CI announces in Discovery; `None` is a session without
+    /// MIDI-CI.
+    pub ci: Option<DeviceIdentity>,
+    /// Where the event times of the input ports come from.
+    pub input_timing: InputTiming,
+}
+
+impl MidiHardwareOptions {
+    /// The options of a session opened with none: no MIDI-CI, inputs timed by
+    /// arrival.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            ci: None,
+            input_timing: InputTiming::Arrival,
+        }
+    }
+
+    /// These options with MIDI-CI announcing `identity` in Discovery.
+    ///
+    /// **MIDI-CI is off unless the app gives an identity**: a Discovery carries a
+    /// System Exclusive manufacturer id, tutti has none, and the one MIDI 1.0
+    /// sets aside for non-commercial use (`7D`) is not for a released product. So
+    /// the app says who it is, with the id it registered. An identity under
+    /// [`ManufacturerId::NON_COMMERCIAL`](tutti_ump::ManufacturerId::NON_COMMERCIAL)
+    /// is for development and research only, never for a released product. A
+    /// device on an input starts at the first [`poll`](MidiSession::poll) after
+    /// the input's negotiation settled and any Identity Request in progress has
+    /// ended.
+    #[must_use]
+    pub const fn ci(mut self, identity: DeviceIdentity) -> Self {
+        self.ci = Some(identity);
+        self
+    }
+
+    /// These options with the event times of the input ports from `timing`:
+    /// [`Arrival`](InputTiming::Arrival), the OS's arrival stamp (the default), or
+    /// [`JitterReduction`](InputTiming::JitterReduction), the JR Timestamps of a
+    /// device that agrees to send them.
+    #[must_use]
+    pub const fn input_timing(mut self, timing: InputTiming) -> Self {
+        self.input_timing = timing;
+        self
+    }
 }
 
 /// One open input, and the UMP Stream negotiation of its device.
@@ -214,8 +265,7 @@ pub enum Polled {
     /// MIDI-CI could not start a device on a Group of the device: the operating
     /// system gave no random bytes for its MUID. It is reported once until the
     /// device starts, and again if the Group leaves the device's Groups and
-    /// returns or MIDI-CI is disabled and enabled again; the Group is tried
-    /// again at every poll while MIDI-CI is enabled.
+    /// returns; the Group is tried again at every poll.
     CiNotStarted(DeviceId, MidiGroup, EntropyError),
 }
 
@@ -224,11 +274,13 @@ impl MidiSession {
     /// by `inlets` (the session builds and owns the [`HardwareMidiInputs`] over
     /// them: [`ports`](Self::ports)).
     ///
+    /// `options` are what the session runs with ([`MidiHardwareOptions`]).
+    ///
     /// # Errors
     ///
     /// As [`Devices::open`].
-    pub fn open(inlets: Arc<InputInlets>) -> Result<Self> {
-        Self::open_over(backend::active(), inlets)
+    pub fn open(inlets: Arc<InputInlets>, options: MidiHardwareOptions) -> Result<Self> {
+        Self::open_over(backend::active(), inlets, options)
     }
 
     /// A session over a supplied backend.
@@ -241,12 +293,16 @@ impl MidiSession {
     /// # Errors
     ///
     /// As [`Devices::open_over`].
-    pub fn open_over(backend: Box<dyn MidiEndpoints>, inlets: Arc<InputInlets>) -> Result<Self> {
+    pub fn open_over(
+        backend: Box<dyn MidiEndpoints>,
+        inlets: Arc<InputInlets>,
+        options: MidiHardwareOptions,
+    ) -> Result<Self> {
         Ok(Self {
             inputs: HashMap::new(),
             ports: Arc::new(HardwareMidiInputs::new(inlets)),
             devices: Devices::open_over(backend)?,
-            ci_identity: None,
+            options,
             properties: Arc::default(),
         })
     }
@@ -297,19 +353,16 @@ impl MidiSession {
     ///
     /// The device's output, if it has one, is opened too, for discovery alone
     /// (the UMP Stream negotiation, or a MIDI 1.0 port's Identity Request, then
-    /// MIDI-CI once enabled, all stepped by [`poll`](Self::poll)): it is not an output a caller holds, which
+    /// MIDI-CI when the session has an identity, all stepped by [`poll`](Self::poll)): it is not an output a caller holds, which
     /// [`connect_output`](Self::connect_output) opens, and it closes with the
     /// input. An output that will not open
     /// leaves the input connected and the device as the OS describes it.
     ///
-    /// `timing` is the source of the input's event times:
+    /// The source of the input's event times is the session's
+    /// [`MidiHardwareOptions::input_timing`]:
     /// [`InputTiming::JitterReduction`] asks the device for JR Timestamps and
     /// places its events by them once it agrees, while [`InputTiming::Arrival`]
-    /// is the OS's arrival stamp. An input already open with another timing
-    /// keeps its port and its queued events: its time source follows at once
-    /// (arrival until the device agrees to JR), and the UMP Stream negotiation
-    /// runs again with the new request, reported by [`poll`](Self::poll) as a
-    /// settle is.
+    /// is the OS's arrival stamp. An input already open is kept as it is.
     ///
     /// # Errors
     ///
@@ -319,21 +372,15 @@ impl MidiSession {
     /// shape a stale id takes after a hot-plug — and [`Error::WrongDirection`]
     /// when it is not an input. Otherwise whatever the backend raises while
     /// opening the port.
-    pub fn connect_input(
-        &mut self,
-        device: impl Into<DeviceQuery>,
-        timing: InputTiming,
-    ) -> Result<Connected> {
+    pub fn connect_input(&mut self, device: impl Into<DeviceQuery>) -> Result<Connected> {
+        let timing = self.options.input_timing;
         let id = device.into().pick(self.inputs())?;
         // An input whose reader died is replaced, not kept: it is silent.
-        if let Some(held) = self.inputs.get_mut(&id)
-            && held.input.is_alive()
+        if self
+            .inputs
+            .get(&id)
+            .is_some_and(|held| held.input.is_alive())
         {
-            if held.timing != timing {
-                held.stream.retime(timing);
-                held.timing = timing;
-                follow_timing(&self.ports, held);
-            }
             return Ok(Connected::AlreadyOpen);
         }
         if let Some(mut held) = self.inputs.remove(&id) {
@@ -483,7 +530,7 @@ impl MidiSession {
     /// rings and sends.
     pub fn poll(&mut self, now: Instant) -> std::vec::IntoIter<Polled> {
         let mut polled = Vec::new();
-        let ci = self.ci_identity;
+        let ci = self.options.ci;
         let ports = &*self.ports;
         for (id, held) in &mut self.inputs {
             let slot = held.input.port();
@@ -545,36 +592,10 @@ impl MidiSession {
         polled.into_iter()
     }
 
-    /// Turns MIDI-CI on, announcing `identity` in Discovery. **It is off until
-    /// this is called**: a Discovery carries a System Exclusive manufacturer
-    /// id, tutti has none, and the one MIDI 1.0 sets aside for non-commercial use
-    /// (`7D`) is not for a released product. So
-    /// the app says who it is, with the id it registered. An identity under
-    /// [`ManufacturerId::NON_COMMERCIAL`](tutti_ump::ManufacturerId::NON_COMMERCIAL)
-    /// is for development and research only, never for a released product.
-    ///
-    /// It reaches every open input (a device on one starts at the next
-    /// [`poll`](Self::poll), after any Identity Request in progress has ended)
-    /// and every input opened later. Calling it again with the identity already
-    /// in use changes nothing; with another, the running devices end as
-    /// [`disable_ci`](Self::disable_ci) ends them (an Invalidate MUID for their
-    /// own MUID, their peers lost) and start again under a new MUID.
-    pub fn enable_ci(&mut self, identity: DeviceIdentity) {
-        self.ci_identity = Some(identity);
-    }
-
-    /// Turns MIDI-CI off: at the next [`poll`](Self::poll) every running device
-    /// sends an Invalidate MUID for its own MUID (M2-101 §5.9 lists a shutdown
-    /// among its reasons: its peers learn at once, not by silence), its peers
-    /// are reported as lost, and the ports copy no more SysEx for it.
-    pub fn disable_ci(&mut self) {
-        self.ci_identity = None;
-    }
-
-    /// The identity MIDI-CI is enabled with, or `None` while it is off.
+    /// What the session was opened with.
     #[must_use]
-    pub fn ci_identity(&self) -> Option<DeviceIdentity> {
-        self.ci_identity
+    pub fn options(&self) -> MidiHardwareOptions {
+        self.options
     }
 
     /// The MIDI-CI peers found on the open input `id`, by Group then MUID:

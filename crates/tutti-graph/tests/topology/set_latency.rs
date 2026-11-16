@@ -15,7 +15,7 @@ use tutti_graph::{
     TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, InPort, OutPort, Source};
-use tutti_types::{ChannelLayout, Latency, Samples};
+use tutti_types::{ChannelLayout, Latency, MaxBlock, SampleRate, Samples};
 
 /// The delay the plugin actually runs.
 const TRUE_LATENCY: usize = 16;
@@ -77,7 +77,11 @@ const DRY: NodeKey = NodeKey(2);
 /// Global input → `PLUGIN` → output 0, and global input → a unity gain
 /// (`DRY`, latency 0) → output 1. The two outputs are aligned by PDC.
 fn graph(plugin: Plugin) -> (Editor, Executor) {
-    let (mut ed, exec) = Editor::new(prepare(64));
+    graph_at(plugin, prepare(64))
+}
+
+fn graph_at(plugin: Plugin, prepared: Prepare) -> (Editor, Executor) {
+    let (mut ed, exec) = Editor::new(prepared);
     ed.spec_mut().topology.inputs = ChannelLayout::MONO;
     ed.insert(PLUGIN, "plugin", Unforkable(plugin));
     ed.insert(
@@ -234,29 +238,41 @@ fn a_latency_change_moves_the_other_paths_compensation() {
 }
 
 /// Refusals: a key with no node, a latency past what PDC compensates, and
-/// between a re-prepare's two commits.
+/// between a re-prepare's two commits. What PDC compensates is ten seconds at
+/// the editor's rate: 480 000 frames at 48 kHz, 960 000 at 96 kHz.
 #[test]
 fn set_latency_refuses_what_it_cannot_honour() {
+    for (rate, frames) in [(SampleRate::SR_48K, 480_000), (SampleRate::SR_96K, 960_000)] {
+        let (mut ed, _exec) =
+            graph_at(Plugin::new(), Prepare::new(rate, MaxBlock::of(Samples(64))));
+        ed.commit().expect("commits");
+        assert_eq!(MAX_NODE_LATENCY.to_samples_ceil(rate), Samples(frames));
+        assert_eq!(
+            ed.set_latency(NodeKey(99), Latency::new(Samples(4))),
+            Err(CommitError::NoSuchNode { node: NodeKey(99) })
+        );
+        // At the limit is fine; one past it is refused, not clamped, and
+        // nothing is written.
+        let limit = Latency::new(Samples(frames));
+        ed.set_latency(PLUGIN, limit).expect("at the limit");
+        let past = Latency::new(Samples(frames + 1));
+        assert_eq!(
+            ed.set_latency(PLUGIN, past),
+            Err(CommitError::LatencyTooLong {
+                node: PLUGIN,
+                latency: past,
+                limit
+            }),
+            "{rate:?}"
+        );
+        assert_eq!(
+            ed.spec().topology.nodes[&PLUGIN].latency,
+            Samples(frames),
+            "{rate:?}"
+        );
+    }
     let (mut ed, _exec) = graph(Plugin::new());
     ed.commit().expect("commits");
-    assert_eq!(
-        ed.set_latency(NodeKey(99), Latency::new(Samples(4))),
-        Err(CommitError::NoSuchNode { node: NodeKey(99) })
-    );
-    // At the limit is fine; one past it is refused, not clamped, and
-    // nothing is written.
-    let limit = Latency::new(MAX_NODE_LATENCY);
-    ed.set_latency(PLUGIN, limit).expect("at the limit");
-    let past = Latency::new(Samples(MAX_NODE_LATENCY.get() + 1));
-    assert_eq!(
-        ed.set_latency(PLUGIN, past),
-        Err(CommitError::LatencyTooLong {
-            node: PLUGIN,
-            latency: past,
-            limit
-        })
-    );
-    assert_eq!(ed.spec().topology.nodes[&PLUGIN].latency, MAX_NODE_LATENCY);
     ed.reprepare(prepare(128)).expect("re-prepares");
     assert_eq!(
         ed.set_latency(PLUGIN, Latency::new(Samples(4))),

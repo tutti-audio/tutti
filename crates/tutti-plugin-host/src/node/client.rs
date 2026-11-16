@@ -112,7 +112,7 @@ pub struct InProcClient<F: Loaded> {
     /// read against. Stored rather than passed in per block so the node's
     /// declared capability and its delivered behaviour read from one value.
     pub(super) features: Features,
-    pub(super) sample_rate: f64,
+    pub(super) sample_rate: SampleRate,
     /// A rate the graph handed this node that the plugin has not been told
     /// about yet, or [`NO_PENDING_RATE`] when there is none.
     ///
@@ -511,7 +511,7 @@ impl<F: Loaded> InProcClient<F> {
         reload: Option<Reload>,
         declared: Declared,
         features: Features,
-        sample_rate: f64,
+        sample_rate: SampleRate,
         pending_sample_rate: Arc<AtomicU64>,
         unlent: Arc<AtomicU64>,
         parameters: impl IntoIterator<Item = ParamId>,
@@ -689,7 +689,7 @@ impl<F: Loaded> InProcClient<F> {
             controls.set_pipeline(self.pipeline);
             controls.restamp(rate);
         }
-        self.sample_rate = rate.get();
+        self.sample_rate = rate;
         self.rate_refused = false;
         self.inner.lock().retuned(rate);
         true
@@ -733,9 +733,8 @@ impl<F: Loaded> InProcClient<F> {
     /// the block's own, from its `Env`.)
     pub(super) fn set_rate(&mut self, sample_rate: tutti_types::SampleRate) {
         let rate = sample_rate;
-        let sample_rate: f64 = rate.get();
-        let changed = sample_rate != self.sample_rate;
-        self.sample_rate = sample_rate;
+        let changed = rate != self.sample_rate;
+        self.sample_rate = rate;
         // Only on a change: a redundant bracket makes a plugin reallocate its
         // buffers.
         if !changed && !self.rate_refused {

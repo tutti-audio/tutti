@@ -9,7 +9,7 @@ use super::ports::{PortInfo, Side, endpoint, endpoint_id, endpoints, locate, slo
 use super::schedule::{Next, Outbox, Schedule};
 use super::sender::{Mailbox, run};
 use crate::Devices;
-use crate::capability::{EndpointInfo, UmpCapability};
+use crate::capability::{OsEndpoint, UmpCapability};
 use crate::devices::ChangeSink;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
 use crate::error::{Error, Result};
@@ -543,10 +543,10 @@ impl MidiEndpoints for Polled {
             Duration::from_millis(5),
         )?))
     }
-    fn inputs(&self) -> Vec<EndpointInfo> {
+    fn inputs(&self) -> Vec<OsEndpoint> {
         Vec::new()
     }
-    fn outputs(&self) -> Vec<EndpointInfo> {
+    fn outputs(&self) -> Vec<OsEndpoint> {
         Vec::new()
     }
     fn open_input(

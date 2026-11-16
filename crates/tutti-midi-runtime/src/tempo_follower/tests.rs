@@ -1,6 +1,6 @@
 use super::*;
 use tutti_fixtures::midi;
-use tutti_ump::{MidiChannel, TimeSignature as Wire};
+use tutti_ump::{FlexTimeSignature as Wire, MidiChannel};
 
 fn tempo_in(group: u8, field: u32) -> Ump {
     Ump::from(Message::Flex(MidiGroup::of(group), Flex::SetTempo(field)))

@@ -25,6 +25,8 @@ serde = ["dep:serde", "tutti-plugin-types/serde"]
 tutti-plugin-types = { version = "0.0.1", path = "../tutti-plugin-types" }
 # `Mint`, which numbers the temp files a save writes beside its target.
 tutti-types = { version = "0.0.1", path = "../tutti-types", default-features = false }
+# `spawn_named`: the scan's worker thread.
+tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 serde = { version = "1", features = ["derive"], optional = true }
 thiserror.workspace = true
 tracing = "0.1"

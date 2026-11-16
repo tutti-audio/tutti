@@ -313,8 +313,8 @@ impl Editor {
     ///
     /// Refused with [`CommitError::NoSuchNode`] for a key with no node,
     /// [`CommitError::LatencyTooLong`] past what PDC compensates
-    /// (`crate::MAX_NODE_LATENCY`; a probed latency is
-    /// clamped there, a figure set by hand is refused), and
+    /// (`crate::MAX_NODE_LATENCY` at the editor's prepared rate; a probed
+    /// latency is clamped there, a figure set by hand is refused), and
     /// [`CommitError::Repreparing`] between a re-prepare's two commits (its
     /// second half re-probes every unit and would overwrite this).
     ///
@@ -329,7 +329,7 @@ impl Editor {
         if self.is_repreparing() {
             return Err(CommitError::Repreparing);
         }
-        let limit = Latency::new(MAX_NODE_LATENCY);
+        let limit = Latency::new(MAX_NODE_LATENCY.to_samples_ceil(self.prepare.sample_rate()));
         if latency > limit {
             return Err(CommitError::LatencyTooLong {
                 node: key,
@@ -386,7 +386,7 @@ impl Editor {
     ///
     /// [`CommitError::NoSuchNode`] for a key with no node,
     /// [`CommitError::TailTooLong`] for a finite tail past
-    /// [`MAX_NODE_TAIL`] (a figure set by
+    /// [`MAX_NODE_TAIL`] at the editor's prepared rate (a figure set by
     /// hand is refused), [`CommitError::Repreparing`] between a re-prepare's
     /// two commits (its second half re-reads every unit's shape and would
     /// overwrite this) or [`CommitError::Poisoned`]; nothing changes.
@@ -396,13 +396,14 @@ impl Editor {
         if self.is_repreparing() {
             return Err(CommitError::Repreparing);
         }
+        let limit = MAX_NODE_TAIL.to_samples_ceil(self.prepare.sample_rate());
         if let Tail::Finite(frames) = tail
-            && frames > MAX_NODE_TAIL
+            && frames > limit
         {
             return Err(CommitError::TailTooLong {
                 node: key,
                 tail: frames,
-                limit: MAX_NODE_TAIL,
+                limit,
             });
         }
         let (Some(node), Some(shape)) = (

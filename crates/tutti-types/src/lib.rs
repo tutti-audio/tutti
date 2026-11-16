@@ -177,7 +177,7 @@ pub use value::{
 
 // Channel layout — how many channels.
 pub use bus::{BusTooWide, BusTopology};
-pub use channels::{ChannelCountOutOfRange, ChannelLayout, MAX_CHANNELS};
+pub use channels::{ChannelLayout, LayoutError, MAX_CHANNELS};
 
 // Channel topology — which speaker each channel feeds. Distinct from the count
 // above, and additive to it: a width-only caller keeps using `ChannelLayout`.

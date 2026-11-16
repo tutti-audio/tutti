@@ -14,7 +14,7 @@ use tutti_graph::{
     Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, InPort, OutPort, Source};
-use tutti_types::{ChannelLayout, Samples, Tail};
+use tutti_types::{ChannelLayout, MaxBlock, SampleRate, Samples, Tail};
 
 const NODE: NodeKey = NodeKey(1);
 const SRC: NodeKey = NodeKey(3);
@@ -49,8 +49,12 @@ impl Node for Ringer {
 }
 
 fn graph(tail: Tail) -> (Editor, Executor, Arc<AtomicUsize>) {
+    graph_at(tail, prepare(BLOCK))
+}
+
+fn graph_at(tail: Tail, prepared: Prepare) -> (Editor, Executor, Arc<AtomicUsize>) {
     let calls = Arc::new(AtomicUsize::new(0));
-    let (mut ed, mut exec) = Editor::new(prepare(BLOCK));
+    let (mut ed, mut exec) = Editor::new(prepared);
     // A source flagged silent from its first block (`Status::Constant`, +0.0),
     // which is what the skip reads.
     ed.insert(
@@ -158,30 +162,44 @@ fn a_shorter_tail_parks_sooner() {
 
 /// **A refusal changes nothing, and nothing is clamped.** An unknown key is
 /// `NoSuchNode`; a finite tail past `MAX_NODE_TAIL` is `TailTooLong` and the
-/// spec keeps the old figure; `Unbounded` and `Unknown` are declarable.
+/// spec keeps the old figure; `Unbounded` and `Unknown` are declarable. The
+/// limit is sixty seconds at the editor's rate: 2 880 000 frames at 48 kHz,
+/// 5 760 000 at 96 kHz.
 #[test]
 fn set_tail_refuses_and_never_clamps() {
-    let (mut ed, _exec, _calls) = graph(Tail::Finite(Samples(BLOCK)));
-    assert!(matches!(
-        ed.set_tail(NodeKey(99), Tail::None),
-        Err(CommitError::NoSuchNode { node }) if node == NodeKey(99)
-    ));
-    let over = Samples(MAX_NODE_TAIL.get() + 1);
-    assert!(matches!(
-        ed.set_tail(NODE, Tail::Finite(over)),
-        Err(CommitError::TailTooLong { node, tail, limit })
-            if node == NODE && tail == over && limit == MAX_NODE_TAIL
-    ));
-    assert_eq!(
-        ed.spec().topology.nodes[&NODE].tail,
-        Tail::Finite(Samples(BLOCK)),
-        "a refusal changes nothing"
-    );
-    ed.set_tail(NODE, Tail::Finite(MAX_NODE_TAIL))
-        .expect("the limit itself fits");
-    for tail in [Tail::Unbounded, Tail::Unknown, Tail::None] {
-        ed.set_tail(NODE, tail).expect("declarable");
-        assert_eq!(ed.spec().topology.nodes[&NODE].tail, tail);
+    for (rate, frames) in [
+        (SampleRate::SR_48K, 2_880_000),
+        (SampleRate::SR_96K, 5_760_000),
+    ] {
+        let (mut ed, _exec, _calls) = graph_at(
+            Tail::Finite(Samples(BLOCK)),
+            Prepare::new(rate, MaxBlock::of(Samples(BLOCK))),
+        );
+        assert_eq!(MAX_NODE_TAIL.to_samples_ceil(rate), Samples(frames));
+        assert!(matches!(
+            ed.set_tail(NodeKey(99), Tail::None),
+            Err(CommitError::NoSuchNode { node }) if node == NodeKey(99)
+        ));
+        let (limit, over) = (Samples(frames), Samples(frames + 1));
+        assert!(
+            matches!(
+                ed.set_tail(NODE, Tail::Finite(over)),
+                Err(CommitError::TailTooLong { node, tail, limit: l })
+                    if node == NODE && tail == over && l == limit
+            ),
+            "{rate:?}"
+        );
+        assert_eq!(
+            ed.spec().topology.nodes[&NODE].tail,
+            Tail::Finite(Samples(BLOCK)),
+            "a refusal changes nothing"
+        );
+        ed.set_tail(NODE, Tail::Finite(limit))
+            .expect("the limit itself fits");
+        for tail in [Tail::Unbounded, Tail::Unknown, Tail::None] {
+            ed.set_tail(NODE, tail).expect("declarable");
+            assert_eq!(ed.spec().topology.nodes[&NODE].tail, tail);
+        }
     }
 }
 

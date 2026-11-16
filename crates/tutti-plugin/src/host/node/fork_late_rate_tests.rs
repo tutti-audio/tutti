@@ -18,6 +18,7 @@ use tutti_types::{ChannelLayout, SampleRate, Samples};
 use crate::handles::PluginClient;
 use tutti_fixtures::machine_lock;
 use tutti_plugin_ipc::BridgeConfig;
+use tutti_plugin_types::Timeouts;
 
 const LOAD_RATE: f64 = 48_000.0;
 const SLOW_RATE: f64 = 96_000.0;
@@ -49,7 +50,17 @@ fn a_late_rate_answer_does_not_silence_an_offline_fork() {
     );
     env.set("TUTTI_CLAP_PROBE_RENDER_MODE", "1");
     let live = PluginClient::new(
-        BridgeConfig::default(),
+        BridgeConfig {
+            // The fork reopens under the live plugin's configuration.
+            timeouts: {
+                let mut t = Timeouts::default();
+                t.rate = RATE_TIMEOUT;
+                t
+            },
+            ..BridgeConfig::at(
+                tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
+            )
+        },
         &tutti_fixtures::detached_work(),
         &crate::catalog::Loadable::uncatalogued(
             crate::catalog::PluginRef::file(tutti_fixtures::clap_probe()).expect("a plugin file"),
@@ -69,7 +80,6 @@ fn a_late_rate_answer_does_not_silence_an_offline_fork() {
         )
         .expect("the probe forks");
     let bridge = fork.bridge();
-    bridge.set_rate_timeout(RATE_TIMEOUT);
     let health = fork.fork_health().expect("a fork has a health probe");
 
     let layout = |n: usize| ChannelLayout::from_count(u16::try_from(n).expect("a few ports"));

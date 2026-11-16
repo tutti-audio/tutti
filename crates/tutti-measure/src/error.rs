@@ -22,14 +22,10 @@ pub enum Error {
     /// A zero hop: frames would never advance.
     #[error("hop size is zero: frames would not advance")]
     ZeroHop,
-    /// A threshold in decibels that is NaN or infinite.
-    #[error("threshold {threshold} is not finite")]
-    InvalidThreshold {
-        /// The offending threshold, in [`Db`].
-        threshold: Db,
-    },
-    /// `min >= max`, or either bound at or below zero. Refused at construction
-    /// because a detector that accepts it reports "unvoiced" forever instead.
+    /// `min >= max`, or either bound at or below zero or not finite. Refused
+    /// when the band is built, or by the call that takes a band the geometry
+    /// cannot hold, because a detector that accepts it reports "unvoiced"
+    /// forever instead.
     #[error("empty frequency range: min {min} is not below max {max}")]
     EmptyFrequencyRange {
         /// The lower bound in [`Hz`]; not below `max`.

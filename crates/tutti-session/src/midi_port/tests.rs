@@ -1,7 +1,7 @@
 use super::*;
 use tutti_buffers::InterleavedMut;
+use tutti_midi_device::{EndpointId, PortDirection};
 use tutti_midi_hardware::test_support::{FakeBackend, persistent_endpoint};
-use tutti_midi_hardware::{EndpointId, PortDirection};
 use tutti_transport::MotionEvent;
 use tutti_types::{ChannelLayout, Frame};
 
@@ -34,7 +34,7 @@ fn the_stamp_stream_is_carried_across_a_closed_output() {
     let (backend, fake) =
         FakeBackend::build_with(vec![], vec![persistent_endpoint(10, "Synth")], usize::MAX);
     let mut s = Session::builder()
-        .midi_hardware_over(backend)
+        .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareOptions::new())
         .build()
         .expect("builds");
     let _ = s.update();

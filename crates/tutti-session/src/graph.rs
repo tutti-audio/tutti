@@ -473,11 +473,15 @@ pub(crate) fn prepare_for(
     }
 }
 
-/// `latency` clamped to what PDC compensates, as the editor clamps a latency
-/// it probes at insert.
+/// `latency` clamped to what PDC compensates at `rate`, as the editor clamps a
+/// latency it probes at insert.
 #[cfg(feature = "plugin")]
-fn clamp_latency(latency: Latency) -> Latency {
-    Latency::new(latency.samples().min(tutti_graph::MAX_NODE_LATENCY))
+fn clamp_latency(latency: Latency, rate: SampleRate) -> Latency {
+    Latency::new(
+        latency
+            .samples()
+            .min(tutti_graph::MAX_NODE_LATENCY.to_samples_ceil(rate)),
+    )
 }
 
 impl Graph {
@@ -3452,10 +3456,8 @@ impl Graph {
             None => {
                 if let Some(placed) = &placed {
                     let outputs = self.outputs();
-                    let width = ChannelLayout::try_from(outputs).map_err(|_| {
-                        tutti_buffers::FoldError::from(tutti_buffers::BufferError::TooWide {
-                            channels: outputs,
-                        })
+                    let width = ChannelLayout::try_from(outputs).map_err(|e| {
+                        tutti_buffers::FoldError::from(tutti_buffers::BufferError::from(e))
                     })?;
                     tutti_graph::fold_to_topology(
                         &tutti_types::ChannelTopology::assumed(width),
@@ -3534,9 +3536,10 @@ impl Graph {
     pub fn latency_plan(&self) -> Compensation {
         // The bus edges as the lanes they commit to; a spec whose bus edges
         // do not lower has none to fold (the commit will say why).
+        let rate = self.editor.prepare().sample_rate();
         match self.editor.lowered() {
-            Ok(lowered) => tutti_graph::latency_plan(&lowered.spec),
-            Err(_) => tutti_graph::latency_plan(self.editor.spec()),
+            Ok(lowered) => tutti_graph::latency_plan(&lowered.spec, rate),
+            Err(_) => tutti_graph::latency_plan(self.editor.spec(), rate),
         }
     }
 
@@ -3573,7 +3576,7 @@ impl Graph {
         // probes at insert: `set_latency` refuses a figure past it, and a
         // refused one would never be retried (the poll only fires again when
         // the plugin's figure moves).
-        let latency = clamp_latency(latency);
+        let latency = clamp_latency(latency, self.editor.prepare().sample_rate());
         if self.node_latency(node) == Ok(latency.samples()) {
             return false;
         }
@@ -3592,7 +3595,7 @@ impl Graph {
     /// A node's tail ceiling moved at runtime (a plugin's tail-changed
     /// callback): hand `tail` (the ceiling its `Shape` declares now) to the
     /// editor (`Editor::set_tail`), a finite figure past what a node may
-    /// declare (`MAX_NODE_TAIL`) becoming `Unbounded`, so
+    /// declare (`MAX_NODE_TAIL` at the editor's rate) becoming `Unbounded`, so
     /// the next commit moves the plan, the export length and the silence skip
     /// to it without touching the running node. The ceiling moves at that
     /// commit, as a latency does.
@@ -3607,7 +3610,8 @@ impl Graph {
         // A finite figure past what a node may declare is `Unbounded`, never
         // clamped (a clamp would declare a ceiling shorter than the plugin
         // rings), and so never refused: nothing retries it.
-        let tail = tutti_plugin_types::Processing::new(tail).ceiling();
+        let rate = self.editor.prepare().sample_rate();
+        let tail = tutti_plugin_types::Processing::new(tail).ceiling(rate);
         if self.node_tail(node) == Ok(tail) {
             return false;
         }
@@ -3880,15 +3884,80 @@ mod tail_tests {
     use tutti_types::Bpm;
 
     fn graph() -> Graph {
+        graph_at(SampleRate::SR_48K)
+    }
+
+    fn graph_at(rate: SampleRate) -> Graph {
         let map = TempoMap::constant(Bpm::of(120.0)).expect("a tempo");
         Graph::new(
             ChannelLayout::STEREO,
             2,
-            SampleRate::SR_48K,
+            rate,
             MaxBlock::of(Samples(64)),
             None,
             tutti_transport::TempoReader::fixed(Arc::new(map)),
         )
+    }
+
+    /// **The tail and latency limits are the graph's rate's**: sixty and ten
+    /// seconds in frames at the graph's rate. A tail at the limit is a figure and
+    /// one past it is `Unbounded`; a tail of 4 000 000 frames (83 s at 48 kHz,
+    /// 41.7 s at 96 kHz) is `Unbounded` at 48 kHz and a figure at 96 kHz. A
+    /// reported latency at the limit is kept and one past it is clamped to it.
+    #[test]
+    fn plugin_refreshes_use_the_graphs_rate() {
+        use tutti_graph::{MAX_NODE_LATENCY, MAX_NODE_TAIL};
+        for rate in [SampleRate::SR_48K, SampleRate::SR_96K] {
+            let tail_limit = MAX_NODE_TAIL.to_samples_ceil(rate);
+            let latency_limit = MAX_NODE_LATENCY.to_samples_ceil(rate);
+            // The two rates' limits, spelled out.
+            let (want_tail, want_latency) = if rate == SampleRate::SR_48K {
+                (Samples(2_880_000), Samples(480_000))
+            } else {
+                (Samples(5_760_000), Samples(960_000))
+            };
+            assert_eq!((tail_limit, latency_limit), (want_tail, want_latency));
+
+            let tail_after = |frames: Samples| {
+                let mut g = graph_at(rate);
+                let (node, _) = g.add(ForkByClone(Const::mono(0.0)));
+                g.commit();
+                assert!(g.refresh_node_tail(node, Tail::Finite(frames)), "{rate:?}");
+                g.node_tail(node).expect("a node")
+            };
+            assert_eq!(tail_after(tail_limit), Tail::Finite(tail_limit), "{rate:?}");
+            assert_eq!(
+                tail_after(Samples(tail_limit.get() + 1)),
+                Tail::Unbounded,
+                "{rate:?}"
+            );
+            let four_million = Samples(4_000_000);
+            let finite_here = four_million <= tail_limit;
+            assert_eq!(finite_here, rate == SampleRate::SR_96K);
+            let want = if finite_here {
+                Tail::Finite(four_million)
+            } else {
+                Tail::Unbounded
+            };
+            assert_eq!(tail_after(four_million), want, "{rate:?}");
+
+            let latency_after = |frames: Samples| {
+                let mut g = graph_at(rate);
+                let (node, _) = g.add(ForkByClone(Const::mono(0.0)));
+                g.commit();
+                assert!(
+                    g.refresh_node_latency(node, Latency::new(frames)),
+                    "{rate:?}"
+                );
+                g.node_latency(node).expect("a node")
+            };
+            assert_eq!(latency_after(latency_limit), latency_limit, "{rate:?}");
+            assert_eq!(
+                latency_after(Samples(latency_limit.get() + 1)),
+                latency_limit,
+                "{rate:?}"
+            );
+        }
     }
 
     /// **A node's tail ceiling follows the figure the host hands the graph,
@@ -3913,7 +3982,8 @@ mod tail_tests {
         );
         assert!(!g.is_edited());
 
-        let past = Tail::Finite(Samples(tutti_graph::MAX_NODE_TAIL.get() + 1));
+        let limit = tutti_graph::MAX_NODE_TAIL.to_samples_ceil(g.editor.prepare().sample_rate());
+        let past = Tail::Finite(Samples(limit.get() + 1));
         assert!(g.refresh_node_tail(node, past));
         assert_eq!(
             g.node_tail(node),

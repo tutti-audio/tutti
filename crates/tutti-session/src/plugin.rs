@@ -2085,13 +2085,11 @@ impl<C: crate::Clock> Session<C> {
                 .controls
                 .as_ref()
                 .map(PluginControls::declared_latency);
-            // Likewise its tail ceiling (the plugin's claim, as the node's shape
-            // declares it): a tail-changed callback re-declares it, and the
-            // next commit moves the plan and the silence skip to it.
-            let declared_tail = hosted
-                .controls
-                .as_ref()
-                .map(|controls| tutti_plugin_types::Processing::new(controls.tail()).ceiling());
+            // Likewise its tail claim (`refresh_node_tail` turns it into the
+            // ceiling the node's shape declares, at the graph's rate): a
+            // tail-changed callback re-declares it, and the next commit moves
+            // the plan and the silence skip to it.
+            let declared_tail = hosted.controls.as_ref().map(PluginControls::tail);
             let healthy = matches!(hosted.status, PluginLiveness::Healthy);
             let due = healthy && Arc::strong_count(&hosted.snapshot_token) == 1 && {
                 let since = *hosted.snapshot_at.get_or_insert(now);
@@ -2553,7 +2551,7 @@ mod tests {
         rig.plugins_at(0);
         assert_eq!(
             rig.session.graph_ref().node_latency(rig.node).unwrap(),
-            tutti_graph::MAX_NODE_LATENCY
+            tutti_graph::MAX_NODE_LATENCY.to_samples_ceil(SampleRate::SR_48K)
         );
     }
 

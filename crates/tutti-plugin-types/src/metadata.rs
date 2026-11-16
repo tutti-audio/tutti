@@ -5,7 +5,7 @@
 //! plugin-load IPC reply, so it is serializable under the `serde` feature.
 
 use tutti_graph::BusRole;
-use tutti_types::Samples;
+use tutti_types::{SampleRate, Samples};
 
 use crate::Measured;
 
@@ -255,13 +255,14 @@ impl Processing {
     /// settings proves nothing about another patch), and a finite claim is
     /// never cut below what the plugin said.
     ///
-    /// **A finite figure past [`MAX_NODE_TAIL`] is `Unbounded`**, never that
-    /// figure clamped: the graph bounds a node's finite tail there (it sizes a
+    /// **A finite figure past [`MAX_NODE_TAIL`] at `rate` is `Unbounded`**, never
+    /// that figure clamped: `rate` is the graph's (the plugin node's prepared
+    /// rate), at which the graph bounds a node's finite tail (it sizes a
     /// bounce's file from it), and a ceiling cut to 60 s would end a two-minute
     /// reverb early and park its node while it still rings. `Unbounded` claims
     /// nothing false: nothing parks on it and an export runs to its own silence
     /// or range rule.
-    pub fn ceiling(&self) -> PluginTail {
+    pub fn ceiling(&self, rate: SampleRate) -> PluginTail {
         let raised = match (self.tail, self.measured.and_then(|m| m.tail)) {
             (PluginTail::Finite(claimed), Some(measured)) if measured > claimed => {
                 PluginTail::Finite(measured)
@@ -269,7 +270,9 @@ impl Processing {
             (tail, _) => tail,
         };
         match raised {
-            PluginTail::Finite(frames) if frames > MAX_NODE_TAIL => PluginTail::Unbounded,
+            PluginTail::Finite(frames) if frames > MAX_NODE_TAIL.to_samples_ceil(rate) => {
+                PluginTail::Unbounded
+            }
             other => other,
         }
     }
@@ -596,7 +599,10 @@ mod tests {
     #[test]
     fn a_longer_measurement_raises_a_finite_claim() {
         let p = Processing::new(PluginTail::Finite(Samples(100))).with_measured(measured(250));
-        assert_eq!(p.ceiling(), PluginTail::Finite(Samples(250)));
+        assert_eq!(
+            p.ceiling(SampleRate::SR_48K),
+            PluginTail::Finite(Samples(250))
+        );
     }
 
     /// **A shorter measurement never lowers the claim**, and an equal one
@@ -606,7 +612,7 @@ mod tests {
         for m in [40, 100] {
             let p = Processing::new(PluginTail::Finite(Samples(100))).with_measured(measured(m));
             assert_eq!(
-                p.ceiling(),
+                p.ceiling(SampleRate::SR_48K),
                 PluginTail::Finite(Samples(100)),
                 "measured {m}"
             );
@@ -620,7 +626,7 @@ mod tests {
     fn a_measurement_does_not_invent_or_bound_a_tail() {
         for claim in [PluginTail::None, PluginTail::Unknown, PluginTail::Unbounded] {
             let p = Processing::new(claim).with_measured(measured(250));
-            assert_eq!(p.ceiling(), claim);
+            assert_eq!(p.ceiling(SampleRate::SR_48K), claim);
         }
     }
 
@@ -634,24 +640,48 @@ mod tests {
             PluginTail::Unbounded,
             PluginTail::Finite(Samples(7)),
         ] {
-            assert_eq!(Processing::new(claim).ceiling(), claim);
+            assert_eq!(Processing::new(claim).ceiling(SampleRate::SR_48K), claim);
             let empty = Processing::new(claim).with_measured(measured_with(None));
-            assert_eq!(empty.ceiling(), claim);
+            assert_eq!(empty.ceiling(SampleRate::SR_48K), claim);
         }
     }
 
     /// **A finite tail past the graph's bound is `Unbounded`, not clamped**: a
     /// clamp would declare a ceiling shorter than the plugin rings; the bound
-    /// itself still fits.
+    /// itself still fits. The bound is sixty seconds at the plugin node's
+    /// rate: 2 880 000 frames at 48 kHz and 5 760 000 at 96 kHz.
     #[test]
     fn a_finite_tail_past_the_graphs_bound_is_unbounded() {
-        let at = PluginTail::Finite(MAX_NODE_TAIL);
-        assert_eq!(Processing::new(at).ceiling(), at);
-        let past = PluginTail::Finite(Samples(MAX_NODE_TAIL.get() + 1));
-        assert_eq!(Processing::new(past).ceiling(), PluginTail::Unbounded);
-        // A measurement that raises a claim past the bound goes the same way.
-        let raised = Processing::new(PluginTail::Finite(Samples(10)))
-            .with_measured(measured(MAX_NODE_TAIL.get() + 1));
-        assert_eq!(raised.ceiling(), PluginTail::Unbounded);
+        for (rate, bound) in [
+            (SampleRate::SR_48K, 2_880_000),
+            (SampleRate::SR_96K, 5_760_000),
+        ] {
+            assert_eq!(MAX_NODE_TAIL.to_samples_ceil(rate), Samples(bound));
+            let at = PluginTail::Finite(Samples(bound));
+            assert_eq!(Processing::new(at).ceiling(rate), at, "{rate:?}");
+            let past = PluginTail::Finite(Samples(bound + 1));
+            assert_eq!(
+                Processing::new(past).ceiling(rate),
+                PluginTail::Unbounded,
+                "{rate:?}"
+            );
+            // A measurement that raises a claim past the bound goes the same way.
+            let raised =
+                Processing::new(PluginTail::Finite(Samples(10))).with_measured(measured(bound + 1));
+            assert_eq!(raised.ceiling(rate), PluginTail::Unbounded, "{rate:?}");
+        }
+    }
+
+    /// The same finite figure is judged at the rate of the graph it sits in:
+    /// 4 000 000 frames is 83 s at 48 kHz, unbounded, and 41.7 s at 96 kHz, a
+    /// figure.
+    #[test]
+    fn a_finite_tail_is_judged_in_seconds_at_the_nodes_rate() {
+        let tail = PluginTail::Finite(Samples(4_000_000));
+        assert_eq!(
+            Processing::new(tail).ceiling(SampleRate::SR_48K),
+            PluginTail::Unbounded
+        );
+        assert_eq!(Processing::new(tail).ceiling(SampleRate::SR_96K), tail);
     }
 }

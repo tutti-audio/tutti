@@ -3,9 +3,10 @@
 use std::fmt;
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
-use crate::{cdylib, main_thread};
+use crate::{cdylib, main_thread, profile_dir};
 use tutti_plugin_types::{Loaded, MainWork, MainWorkHandle, PluginError, Prepare, WindowHandle};
 use tutti_rt::MainThreadMarker;
 
@@ -308,67 +309,65 @@ impl<A: Activation> DerefMut for Active<A> {
 
 /// The shared plugin's library as the module of a `.vst3` bundle,
 /// `<name>.vst3/Contents/<arch>/<module>`, the layout the VST3 host walks.
+///
+/// The bundle is `<profile>/vst3-bundles/<key>/`, keyed by the library's
+/// modified time and length. It is built in a directory of this process's own
+/// and published by renaming that directory to `<key>`, which fails where one
+/// is already there: the first process to publish wins, and no process changes
+/// a bundle once it is visible, so no process loads a path another is making.
+/// The module is a hard link (a copy where linking fails), so a rebuild that
+/// replaces the library leaves a published bundle as it was.
+///
+/// # Panics
+///
+/// If the bundle cannot be made, or the shared plugin has not been built
+/// ([`cdylib`]).
 #[must_use]
 pub fn vst3_module() -> PathBuf {
-    let real = cdylib("tutti_shared_plugin", "tutti-shared-plugin");
-    let dir = real
-        .with_extension("vst3")
-        .join("Contents")
-        .join(tutti_plugin_types::bundle::native_arch_subdirs()[0]);
-    let module = dir.join(real.file_name().expect("file name"));
-    // Every case process stages the same link. Each attempt stages again, and
-    // the panic says what the bundle held.
-    for _ in 0..STAGE_ATTEMPTS {
-        stage_module(&real, &dir, &module);
-        if module.exists() {
-            return module;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
-    panic!(
-        "no module at {} after {STAGE_ATTEMPTS} attempts: the link reads {:?}, \
-         the library {} exists: {}, the bundle directory holds {:?}",
-        module.display(),
-        std::fs::read_link(&module),
-        real.display(),
-        real.exists(),
-        std::fs::read_dir(&dir).map(|d| d.flatten().map(|e| e.file_name()).collect::<Vec<_>>()),
-    );
-}
-
-/// How many times [`vst3_module`] stages the bundle's module before it fails.
-const STAGE_ATTEMPTS: usize = 5;
-
-/// Puts `real` at `module` inside `dir`, unless it is there already. Staged
-/// under a name of this process's own and renamed in, so a process loading it
-/// never sees it half made.
-fn stage_module(real: &std::path::Path, dir: &std::path::Path, module: &std::path::Path) {
-    std::fs::create_dir_all(dir).expect("bundle directory");
-    #[cfg(unix)]
-    if !std::fs::read_link(module).is_ok_and(|to| to == real) {
-        let staging = dir.join(format!(".stage{}", std::process::id()));
-        let _ = std::fs::remove_file(&staging);
-        std::os::unix::fs::symlink(real, &staging).expect("stage the bundle link");
-        let _ = std::fs::rename(&staging, module);
-        let _ = std::fs::remove_file(&staging);
-    }
-    #[cfg(windows)]
-    {
-        // A copy, so a process loading it must never see it half written: stage
-        // beside it and rename, and leave one that is already whole alone (a
-        // loaded DLL cannot be replaced).
-        let whole = |p: &std::path::Path| {
-            std::fs::metadata(p)
-                .and_then(|m| Ok(m.len() == std::fs::metadata(real)?.len()))
-                .unwrap_or(false)
-        };
-        if !whole(module) {
-            let staging = dir.join(format!(".stage{}", std::process::id()));
-            std::fs::copy(real, &staging).expect("stage the bundle copy");
-            let _ = std::fs::rename(&staging, module);
-            let _ = std::fs::remove_file(&staging);
-        }
-    }
+    static MODULE: OnceLock<PathBuf> = OnceLock::new();
+    MODULE
+        .get_or_init(|| {
+            let real = cdylib("tutti_shared_plugin", "tutti-shared-plugin");
+            let meta = std::fs::metadata(&real).expect("the library's metadata");
+            let nanos = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or(0, |d| d.as_nanos());
+            let root = profile_dir().join("vst3-bundles");
+            let name = real.file_name().expect("file name");
+            let inside = Path::new(&format!("{nanos}-{}", meta.len()))
+                .join(Path::new(name).with_extension("vst3"))
+                .join("Contents")
+                .join(tutti_plugin_types::bundle::native_arch_subdirs()[0])
+                .join(name);
+            let published = root.join(&inside);
+            if published.exists() {
+                return published;
+            }
+            let key = inside.components().next().expect("a key").as_os_str();
+            let tmp = root.join(format!(".tmp-{}", std::process::id()));
+            let module = tmp.join(inside.components().skip(1).collect::<PathBuf>());
+            // A directory of an earlier process of this id is not in use.
+            let _ = std::fs::remove_dir_all(&tmp);
+            std::fs::create_dir_all(module.parent().expect("module directory"))
+                .expect("bundle directory");
+            if std::fs::hard_link(&real, &module).is_err() {
+                std::fs::copy(&real, &module).expect("copy the bundle module");
+            }
+            let renamed = std::fs::rename(&tmp, root.join(key));
+            if renamed.is_err() {
+                // Another process published first; its bundle is whole.
+                let _ = std::fs::remove_dir_all(&tmp);
+            }
+            assert!(
+                published.exists(),
+                "no module at {} (publishing the bundle: {renamed:?})",
+                published.display()
+            );
+            published
+        })
+        .clone()
 }
 
 #[cfg(test)]

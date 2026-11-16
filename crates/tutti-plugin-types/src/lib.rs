@@ -224,6 +224,7 @@ mod sample_format;
 mod state_frame;
 mod state_use;
 mod sysex;
+mod timeouts;
 mod track_info;
 mod transport;
 mod transport_request;
@@ -310,6 +311,7 @@ pub use midi::{
     MIDI_STACK_CAPACITY, MidiEventVec, RT_MIDI_CAPACITY, RtMidiEvents, WireMidi, group_of_port,
 };
 pub use midi_intake::MidiIntake;
+pub use timeouts::{Timeouts, ZeroTimeout};
 pub use tutti_graph::BusRole;
 pub use wakeups::{Interest, Ready, Wakeups, Watch};
 // `NoteExpressionVec` is the alias the change list is built from, so a caller
