@@ -16,7 +16,7 @@ pub trait Lerp: Copy + PartialEq + core::fmt::Debug {
 impl Lerp for f32 {
     #[inline]
     fn lerp(&self, to: &f32, k: u32, n: u32) -> f32 {
-        self + (to - self) * (k as f32 / n as f32)
+        crate::lerp(*self, *to, k as f32 / n as f32)
     }
 }
 

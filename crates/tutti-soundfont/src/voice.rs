@@ -2,12 +2,12 @@
 // MeltySynth (Copyright (C) 2021 Nobuaki Tanaka). The MIT notice is
 // LICENSE-RUSTYSYNTH.txt, at the root of this crate.
 
-use std::f32::consts;
-
-use tutti_dsp::{Biquad, DirectForm1, SOLVE_CEILING, SvfControls, SvfModel, SvfType};
+use tutti_dsp::{
+    Biquad, DirectForm1, PanLaw, SOLVE_CEILING, SvfControls, SvfModel, SvfType, pan_gains,
+};
 use tutti_midi_protocol::value_to_unit_f32;
 use tutti_sf2::{SamplePool, Side};
-use tutti_types::{Db, Hz, Q, SampleRate, Semitones};
+use tutti_types::{Db, Hz, Pan, Q, SampleRate, Semitones};
 use tutti_ump::ControlValue;
 use tutti_ump::{MidiChannel, NoteNumber, RegisteredPerNoteController};
 use tutti_voicing::{ChannelState, Glide, NoteControl};
@@ -481,19 +481,12 @@ impl Voice {
             mix_gain *= SoundFontMath::decibels_to_linear(decibels);
         }
 
-        // RP-036's pan, as the percent the angle below is built from.
+        // RP-036's pan, in the percent the zone's pan adds to: the channel's or the
+        // note's, plus the zone's, over the 50 that is hard right.
         let pan = self.note.pan.unwrap_or_else(|| 50_f32 * state.pan().get());
-        let angle = (consts::PI / 200_f32) * (pan + self.instrument_pan + 50_f32);
-        if angle <= 0_f32 {
-            self.current_mix_gain_left = mix_gain;
-            self.current_mix_gain_right = 0_f32;
-        } else if angle >= SoundFontMath::HALF_PI {
-            self.current_mix_gain_left = 0_f32;
-            self.current_mix_gain_right = mix_gain;
-        } else {
-            self.current_mix_gain_left = mix_gain * libm::cosf(angle);
-            self.current_mix_gain_right = mix_gain * libm::sinf(angle);
-        }
+        let (left, right) = pan_gains(Pan((pan + self.instrument_pan) / 50_f32), PanLaw::Rp036);
+        self.current_mix_gain_left = mix_gain * left.get();
+        self.current_mix_gain_right = mix_gain * right.get();
 
         self.current_reverb_send = SoundFontMath::clamp(
             channel_info.reverb_send() + self.instrument_reverb,

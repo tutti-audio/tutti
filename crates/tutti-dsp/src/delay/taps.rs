@@ -3,6 +3,8 @@
 
 use tutti_types::{Db, SampleRate, Seconds};
 
+use crate::level::db_to_ratio_f64;
+
 /// `x` if it is finite, else `default`.
 pub(crate) fn finite_or(x: f32, default: f32) -> f32 {
     if x.is_finite() { x } else { default }
@@ -13,7 +15,7 @@ pub(crate) fn trips(q: f64, floor: Db) -> f64 {
     if q <= 0.0 {
         return 0.0;
     }
-    let target = libm::log(f64::from(floor.to_amplitude().get()));
+    let target = libm::log(db_to_ratio_f64(f64::from(floor.get())));
     (target / libm::log(q)).ceil().max(0.0)
 }
 

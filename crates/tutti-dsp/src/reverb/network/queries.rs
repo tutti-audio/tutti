@@ -2,6 +2,7 @@
 
 use tutti_types::{Amplitude, Db, Hz, SampleRate, SampleSpan, Samples, Seconds};
 
+use crate::level::ratio_to_db_f64;
 use crate::{Ring, System};
 
 use super::gain::decay_seconds;
@@ -138,9 +139,9 @@ impl Fdn {
 
     /// The RT60 of the network's loop in `band`, in seconds: **an estimate**,
     /// exact only for a diagonal `A` (each line is its own loop and the slowest
-    /// governs: the largest `-3 m / (fs log10 g)`) or when every line is set
+    /// governs: the largest `-60 m / (fs dB)`, `dB = 20 log10 g` per trip) or when every line is set
     /// from one RT60. For a mixing `A` it is the length-weighted
-    /// `-3 Σm / (fs Σ log10 g)`, a mean that can undercut the true decay when
+    /// `-60 Σm / (fs Σ dB)`, a mean that can undercut the true decay when
     /// the lines differ: use [`Network::tail`] where a figure
     /// must cover the ring. `m` is the effective length.
     #[must_use]
@@ -149,7 +150,7 @@ impl Fdn {
         let lines = self.lines.iter().map(|l| {
             (
                 l.effective_frames(),
-                libm::log10(f64::from(l.absorption.gain(band).get())),
+                ratio_to_db_f64(f64::from(l.absorption.gain(band).get())),
             )
         });
         let seconds = if self.mixing() {
@@ -167,7 +168,7 @@ impl Fdn {
         Seconds(seconds)
     }
 
-    /// The slowest line's per-frame figures in `band`: `(log10 ρ, log10 σ,
+    /// The slowest line's per-frame figures in `band`: `(20 log10 ρ, 20 log10 σ,
     /// m)` where `ρ = max_i g_i^(1/m_i)` is the slowest amplitude factor per
     /// frame, `σ = max(‖A‖₂, 1)` and `m` the longest line, or `None` when a
     /// line cannot be analysed (a gain that is NaN or negative, a length that is
@@ -175,7 +176,7 @@ impl Fdn {
     /// delay, `D (1 + |g|) / (1 - |g|)`, a conservative reading that is not part
     /// of the proof in [`rt60_bound`](Fdn::rt60_bound).
     pub(super) fn slowest(&self, band: Band) -> Option<(f64, f64, f64)> {
-        let mut log_rho = f64::NEG_INFINITY;
+        let mut db_rho = f64::NEG_INFINITY;
         let mut longest = 0.0f64;
         for l in self.lines.iter() {
             let peak = l.diffuser.map_or(0.0, |d| {
@@ -183,18 +184,18 @@ impl Fdn {
                 d.delay.get() * (1.0 + g) / (1.0 - g)
             });
             let m = l.length.get() + peak;
-            let log_g = libm::log10(f64::from(l.absorption.gain(band).get()));
-            if m.is_nan() || m <= 0.0 || log_g.is_nan() {
+            let db_g = ratio_to_db_f64(f64::from(l.absorption.gain(band).get()));
+            if m.is_nan() || m <= 0.0 || db_g.is_nan() {
                 return None;
             }
-            log_rho = log_rho.max(log_g / m);
+            db_rho = db_rho.max(db_g / m);
             longest = longest.max(m);
         }
-        Some((log_rho, libm::log10(self.norm_bound().max(1.0)), longest))
+        Some((db_rho, ratio_to_db_f64(self.norm_bound().max(1.0)), longest))
     }
 
     /// An RT60 in `band` that never undercuts the true decay: the slowest
-    /// line's, `-3 / (fs log10 (σ ρ))` with `ρ = max_i g_i^(1/m_i)` the slowest
+    /// line's, `-60 / (fs dB(σ ρ))`, `dB = 20 log10`, with `ρ = max_i g_i^(1/m_i)` the slowest
     /// amplitude factor per frame and `σ = max(‖A‖₂, 1)`. Infinite when
     /// `σρ ≥ 1` or a line cannot be analysed. For a diagonal `A` it equals
     /// [`rt60`](Self::rt60).
@@ -226,16 +227,16 @@ impl Fdn {
         if self.lines.is_empty() {
             return Seconds(0.0);
         }
-        let Some((log_rho, log_sigma, _)) = self.slowest(band) else {
+        let Some((db_rho, db_sigma, _)) = self.slowest(band) else {
             return Seconds(f64::INFINITY);
         };
-        let per_frame = log_rho + log_sigma;
+        let per_frame = db_rho + db_sigma;
         Seconds(if per_frame >= 0.0 {
             f64::INFINITY
         } else if per_frame == f64::NEG_INFINITY {
             0.0
         } else {
-            -3.0 / (rate * per_frame)
+            -60.0 / (rate * per_frame)
         })
     }
 
@@ -244,8 +245,8 @@ impl Fdn {
     /// structured matrix), a few frames for a measured-orthogonal one.
     fn lag_extra_frames(&self, band: Band) -> f64 {
         match self.slowest(band) {
-            Some((log_rho, log_sigma, m)) if log_rho + log_sigma < 0.0 => {
-                (m - 1.0).max(0.0) * log_sigma / -(log_rho + log_sigma)
+            Some((db_rho, db_sigma, m)) if db_rho + db_sigma < 0.0 => {
+                (m - 1.0).max(0.0) * db_sigma / -(db_rho + db_sigma)
             }
             _ => 0.0,
         }

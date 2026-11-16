@@ -40,7 +40,7 @@ impl<F: Float + Lanes> Lerp for LadderDesign<F> {
         let t = F::from_f64(f64::from(k)) / F::from_f64(f64::from(n));
         Self {
             coefficients: self.coefficients.lerp(&to.coefficients, t),
-            drive: self.drive + (to.drive - self.drive) * t,
+            drive: crate::lerp(self.drive, to.drive, t),
             ty: to.ty,
         }
     }
