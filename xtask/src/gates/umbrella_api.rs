@@ -959,8 +959,7 @@ pub use tutti_nodes::SvfType;
         let api = "pub struct tutti_graph::Node\n\
                    pub fn tutti_graph::Node::a(&self) -> tutti_graph::Result<()>\n\
                    pub trait tutti_graph::Node: tutti_graph::private::Sealed\n\
-                   pub fn tutti_graph::Node::b(&self, tutti_session::Detached)\n\
-                   pub fn tutti_graph::Node::c(&self, tutti_nodes::SvfSet)\n";
+                   pub fn tutti_graph::Node::b(&self, tutti_session::Detached)\n";
         assert_eq!(missing(api), none());
     }
 

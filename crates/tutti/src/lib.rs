@@ -136,7 +136,7 @@ pub use tutti_session::Error;
 // The graph's vocabulary a session hands out.
 pub use tutti_graph::{
     DECLICK, EventCapacity, EventInletNode, EventInletWriter, EventTapId, EventTapReader, FadeLaw,
-    Level, Losses, MeterReader, NodeMode, Refused, Stamp, TapAlign, TapEvent, TapId, TapReader,
+    Level, Losses, MeterReader, NodeMode, Stamp, TapAlign, TapEvent, TapId, TapReader,
 };
 pub use tutti_metering::{LoadMeter, LoadReading};
 pub use tutti_transport::{FadeOut, LoopRegion, MotionEvent, MotionState, Then, TransportCommand};
@@ -184,8 +184,8 @@ pub use tutti_session::{
 #[cfg(feature = "session")]
 pub use tutti_session::{
     Clock, ConnectError, Edge, EventInPort, EventOutPort, InPort, Job, JobFailed, Key, NoSuchNode,
-    Offline, OfflineSession, OutPort, Playhead, RealTime, Root, ScheduleError, Session,
-    SessionBuilder, SessionEvent, SystemClock, SystemSession, TypedParamRef, Workers,
+    Offline, OfflineSession, OutPort, Playhead, RealTime, Root, Session, SessionBuilder,
+    SessionEvent, SystemClock, SystemSession, TypedParamRef, Workers,
 };
 #[cfg(all(feature = "session", feature = "device"))]
 pub use tutti_session::{Device, DeviceClock, DeviceEvent, LiveSession};
@@ -352,7 +352,7 @@ pub mod session {
         ResourceFact, ResourceId, RootDeclaration, RootReader, RootTopologyStatus, SessionNode,
         Taps, TempoError, Weighted, Wire, root_width,
     };
-    pub use tutti_transport::{AudioTaken, LoopEdit, QueueFull, ScheduleFull};
+    pub use tutti_transport::{AudioTaken, LoopEdit, TimedError};
     // The pool.
     pub use tutti_session::{
         Declared, HandleError, IntoPool, Life, Load, OpenCx, Parking, PoolConfig, PoolEntry,
@@ -390,8 +390,8 @@ pub mod session {
     };
     #[cfg(feature = "io")]
     pub use tutti_session::{
-        DitherSink, DitherSpec, Finite, IDLE_PARK, Live, PumpLoop, PumpPass, Recorder,
-        RecorderError,
+        DitherSink, DitherSpec, FinalizeError, Finite, IDLE_PARK, Live, PumpLoop, PumpPass,
+        Recorder, RecorderError,
     };
     #[cfg(feature = "plugin")]
     pub use tutti_session::{
@@ -605,7 +605,9 @@ pub mod midi {
     };
 
     #[cfg(feature = "midi-hardware")]
-    pub use tutti_midi_device::{DeviceId, DeviceInfo, Learned, Match, SavedDevice};
+    pub use tutti_midi_device::{
+        DeviceId, DeviceInfo, EndpointName, Learned, Match, MidiIdentity, SavedDevice,
+    };
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_hardware::{
         ChannelCount, ChannelProfile, CiChange, CiPeerInfo, DeviceQuery, ListedProfile,

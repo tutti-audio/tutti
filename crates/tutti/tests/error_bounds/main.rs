@@ -41,10 +41,6 @@ fn buffers_errors_are_boxable() {
     err::<SinkFailed>();
 }
 
-fn graph_errors_are_boxable() {
-    err::<tutti::Refused>();
-}
-
 #[cfg(feature = "session")]
 fn session_graph_errors_are_boxable() {
     use tutti::session::{
@@ -57,7 +53,6 @@ fn session_graph_errors_are_boxable() {
     err::<MixError>();
     err::<ModeError>();
     err::<PassError>();
-    err::<tutti::ScheduleError>();
 }
 
 #[cfg(feature = "session")]
