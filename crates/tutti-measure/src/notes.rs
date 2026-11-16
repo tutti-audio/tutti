@@ -66,6 +66,7 @@
 //! These are offline or UI-thread calls: they allocate the pitch track, the
 //! levels and the notes.
 
+use crate::level::SILENCE_FLOOR;
 use tutti_buffers::{Mono, Sample};
 use tutti_dsp::FrameCount;
 use tutti_types::{Amplitude, Cents, Db, Note, SampleRate, Samples, Seconds};
@@ -92,9 +93,6 @@ const MAX_OVERLAP: usize = 64;
 
 /// The most frames in one smoothing span, bounding the median's cost.
 const MAX_SMOOTHING_FRAMES: usize = 1024;
-
-/// Input whose peak is below this is silence, as in tempo estimation.
-const SILENCE_FLOOR: Db = Db(-90.0);
 
 ranged! {
     /// A time setting of a note analysis: within `0..=60` seconds.

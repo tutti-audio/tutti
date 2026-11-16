@@ -134,7 +134,7 @@ impl<'p, P: Processor> Render<'p, P> {
         let mut outs: Vec<&mut [f32]> = self.outs.iter_mut().map(Vec::as_mut_slice).collect();
         let ctx = ProcessContext::new().midi(events);
         let mut io = PluginIo {
-            buffer: AudioBufferMut::F32(AudioBuffer::new(&ins, &mut outs, self.rate.get())),
+            buffer: AudioBufferMut::F32(AudioBuffer::new(&ins, &mut outs, self.rate)),
             ctx: &ctx,
             out: &mut self.out,
         };

@@ -19,16 +19,20 @@
 
 use std::sync::{Arc, Mutex, PoisonError, Weak};
 
-use tutti_graph::{EventTapReader, NodeKey};
+use tutti_graph::{EventTapReader, Losses, NodeKey};
 use tutti_midi_device::{DeviceId, DeviceInfo, Learned, Match, Resolved, SavedDevice};
 use tutti_midi_hardware::{
     CiPeerInfo, DeviceStream, MidiSession, PeerProfiles, ProfileError, ProfileSwitch, ReportAsk,
     ReportError, ReportPeer,
 };
-use tutti_midi_runtime::{DeviceEpochs, JrStream, MidiIngestControls, MidiInputPorts};
+use tutti_midi_runtime::{
+    ClockWriters, DeviceEpochs, JrStream, MidiIngestControls, MidiInputPorts,
+};
+use tutti_rt::{Counter, Gauge};
+use tutti_types::{Resyncs, Seconds};
 use tutti_ump::StreamConfig;
 
-use crate::midi::UmpOut;
+use crate::midi::{LossReaders, LossWriters, UmpOut, loss_cells};
 use crate::pool::{Declared, HandleError, Life, Load, LoadError, PoolEntry};
 use crate::{
     EventInPort, EventOutPort, MidiReport, Peer, PeerError, Presence, Resource, ResourceFact,
@@ -60,18 +64,44 @@ pub enum PortCause {
 /// What an output port is opened with. Part of the entry's identity: declaring
 /// the port again with other options reopens it.
 ///
-/// An output has no option yet: the type is the place the ones the design adds
-/// (Active Sensing) join the identity.
+/// ```
+/// use tutti_session::OutputOptions;
+///
+/// let options = OutputOptions::new().active_sensing(true);
+/// assert_ne!(options, OutputOptions::new());
+/// ```
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
-pub struct OutputOptions {}
+pub struct OutputOptions {
+    /// Whether the port sends Active Sensing: see [`active_sensing`](Self::active_sensing).
+    pub active_sensing: bool,
+}
 
 impl OutputOptions {
     /// The options of an output opened with none.
     #[must_use]
     pub const fn new() -> Self {
-        Self {}
+        Self {
+            active_sensing: false,
+        }
+    }
+
+    /// Whether the port sends Active Sensing (`0xFE`) for its whole life: from
+    /// its own thread, whenever it has been silent for 270 ms
+    /// ([`ACTIVE_SENSING_INTERVAL`](tutti_midi_runtime::ACTIVE_SENSING_INTERVAL)),
+    /// until the port closes. Re-declaring the port's node or a stalled
+    /// [`update`](crate::Session::update) does not stop it, and a receiver that
+    /// has seen one releases its notes when they stop (MIDI 1.0 Detailed
+    /// Specification p. 32).
+    ///
+    /// A port whose device is in the MIDI 2.0 Protocol sends none: MIDI 2.0
+    /// has no Active Sensing. It starts when a negotiation moves the device to
+    /// the MIDI 1.0 Protocol.
+    #[must_use]
+    pub const fn active_sensing(mut self, on: bool) -> Self {
+        self.active_sensing = on;
+        self
     }
 }
 
@@ -92,6 +122,10 @@ pub enum MidiPortError {
     /// Another port of this session holds the device open already.
     #[error("another port of this session holds {0:?} open")]
     InUse(DeviceId),
+    /// The device's previous connection still holds the port's timing cells, so
+    /// the new one would report nothing.
+    #[error("the previous connection of {0:?} still holds the port's timing readings")]
+    ClockHeld(DeviceId),
     /// The OS layer refused to open the device.
     #[error("MIDI hardware: {0}")]
     Hardware(Arc<tutti_midi_hardware::Error>),
@@ -212,6 +246,11 @@ pub(crate) struct InputShared {
     id: ResourceId,
     cell: Mutex<Cell<MidiInputInfo>>,
     requests: Mutex<Vec<InputRequest>>,
+    /// The latest correction the port's clock map made. Made once with the
+    /// entry; a connection writes it and closes it when it ends.
+    timing: Gauge<Seconds>,
+    /// The port's re-anchors, cumulative across connections.
+    resyncs: Counter<Resyncs>,
 }
 
 /// What a handle asked of the device, for the session to send at its next poll.
@@ -230,6 +269,8 @@ impl InputShared {
 pub(crate) struct OutputShared {
     id: ResourceId,
     cell: Mutex<Cell<MidiOutputInfo>>,
+    /// What the port did not send, counted by the session.
+    losses: LossReaders,
 }
 
 impl OutputShared {
@@ -344,10 +385,11 @@ impl PoolEntry for MidiOutputEntry {
 
     fn load(&self) -> Load<OutputLoaded> {
         let saved = self.saved.clone();
+        let options = self.options.clone();
         Load::on_session(move |cx| {
             let id = cx.mint_resource_id();
             cx.midi()
-                .open_output_port(id, saved)
+                .open_output_port(id, saved, options)
                 .map_err(|error| LoadError::Midi(Arc::new(error)))
         })
     }
@@ -399,6 +441,34 @@ impl MidiInput {
     #[must_use]
     pub const fn node(&self) -> NodeKey {
         self.node
+    }
+
+    /// The latest correction the port's clock map made to place the device's
+    /// events on the graph's frames, signed in seconds: positive when a reading
+    /// came late. A steady input reads a small figure, and one whose timing is
+    /// unsteady jumps.
+    ///
+    /// The gauge belongs to the entry, not to a connection: it reads the same
+    /// cell across an unplug and a replug, and reads 0 until a map first makes
+    /// a correction. While the device is away it holds the last correction
+    /// ([`is_closed`](Gauge::is_closed) says so); a replug does not reset it,
+    /// and the new connection's first map writes over it.
+    #[must_use]
+    pub fn timing(&self) -> Gauge<Seconds> {
+        self.shared.timing.clone()
+    }
+
+    /// How many times the port's clock map re-anchored (a reading too far from
+    /// its prediction, or one the map refused and was rebuilt on), so an app can
+    /// show an input whose timing is unsteady. A map that was only rescaled for
+    /// another rate is not one, and neither is the first map of a connection.
+    ///
+    /// Cumulative for the entry: the count carries across an unplug and a
+    /// replug on the same cell. It is meaningful only against a real-time
+    /// clock: an offline session's readings re-anchor often.
+    #[must_use]
+    pub fn resyncs(&self) -> Counter<Resyncs> {
+        self.shared.resyncs.clone()
     }
 
     /// Asks a peer to enable or disable a Profile it lists
@@ -520,6 +590,18 @@ impl MidiOutput {
     pub const fn node(&self) -> NodeKey {
         self.node
     }
+
+    /// What this port did not send, cumulative over its life and across an
+    /// unplug and a replug: [`lost`](Losses::lost) are events its node's tap had
+    /// no room for (1 024 between two updates, the session's MIDI clock
+    /// included), and [`refused`](Losses::refused) those the device would not
+    /// take, that were scheduled more than
+    /// [`MAX_OUTPUT_AHEAD`](tutti_midi_runtime::MAX_OUTPUT_AHEAD) ahead, or that
+    /// had no device to go to.
+    #[must_use]
+    pub fn losses(&self) -> Losses {
+        self.shared.losses.get()
+    }
 }
 
 impl crate::peer::sealed::Sealed for MidiOutput {}
@@ -598,6 +680,12 @@ struct OutputPort {
     node: NodeKey,
     tap: EventTapReader,
     saved: DeviceInfo,
+    /// What the port is opened with: applied to each device output it opens.
+    options: OutputOptions,
+    losses: LossWriters,
+    /// What the open device's output had counted of its own losses when they
+    /// were last folded into `losses`.
+    device_seen: Losses,
     /// The open device's output with its stamp stream; `None` while the device
     /// is away.
     out: Option<UmpOut>,
@@ -769,8 +857,13 @@ impl Ports {
         info: &DeviceInfo,
     ) -> Result<(), MidiPortError> {
         let port = &mut self.inputs[at];
+        // The previous connection's input has dropped with its device being
+        // closed; one that still holds the cells is refused, never connected
+        // without readings.
+        let clock = ClockWriters::reopen(&port.shared.timing, &port.shared.resyncs)
+            .ok_or_else(|| MidiPortError::ClockHeld(info.id.clone()))?;
         match io
-            .connect_input(&info.id)
+            .connect_input_with(&info.id, clock)
             .map_err(|e| MidiPortError::Hardware(Arc::new(e)))?
         {
             tutti_midi_hardware::Connected::Opened(inlet) => {
@@ -909,8 +1002,10 @@ impl Ports {
         for port in &mut self.outputs {
             let held = port.out.as_ref().and_then(UmpOut::device);
             if held.is_some_and(|open| *open.id() == device.id) {
+                port.fold_device_losses();
                 // The stamp stream is kept for the device's return.
                 port.parked = port.out.take().map(UmpOut::into_stream);
+                port.device_seen = Losses::NONE;
                 set_presence(
                     &port.shared.cell,
                     port.shared.id,
@@ -973,7 +1068,7 @@ impl Ports {
             {
                 continue;
             }
-            let presence = match io.connect_output(&arrived.id) {
+            let presence = match open_device_output(io, &arrived.id, &port.options) {
                 Ok(device) => {
                     port.out = Some(match port.parked.take() {
                         Some(stream) => UmpOut::resumed(device, stream),
@@ -1130,6 +1225,20 @@ impl Ports {
 }
 
 impl OutputPort {
+    /// Counts what the device's output refused or lost after taking since the
+    /// last call: a device counts its own, which a send's return does not carry.
+    fn fold_device_losses(&mut self) {
+        let Some(device) = self.out.as_ref().and_then(UmpOut::device) else {
+            return;
+        };
+        let now = device.losses();
+        self.losses
+            .lost(now.lost.saturating_sub(self.device_seen.lost));
+        self.losses
+            .refused(now.refused.saturating_sub(self.device_seen.refused));
+        self.device_seen = now;
+    }
+
     /// Takes in the output's Protocol and JR Timestamps as they are now.
     fn refresh(&self, out: &mut Vec<SessionEvent>) {
         let Some(device) = self.out.as_ref().and_then(UmpOut::device) else {
@@ -1152,6 +1261,23 @@ impl OutputPort {
 }
 
 // --- Opening ---
+
+/// The output of device `id`, with the port's options applied.
+fn open_device_output(
+    io: &MidiSession,
+    id: &DeviceId,
+    options: &OutputOptions,
+) -> Result<tutti_midi_hardware::OpenOutput, MidiPortError> {
+    let mut device = io
+        .connect_output(id)
+        .map_err(|e| MidiPortError::Hardware(Arc::new(e)))?;
+    if options.active_sensing {
+        device
+            .active_sensing()
+            .map_err(|e| MidiPortError::Hardware(Arc::new(e)))?;
+    }
+    Ok(device)
+}
 
 impl crate::Midi<'_> {
     /// Opens the input port of `saved` as `id`: the ingest node joins the graph
@@ -1182,6 +1308,9 @@ impl crate::Midi<'_> {
         let node = key.erase();
         let token = Arc::new(());
         let info = found.clone().unwrap_or_else(|| saved.clone());
+        // The cells start closed: a connection reopens them.
+        let (writers, timing, resyncs) = ClockWriters::new();
+        drop(writers);
         let shared = Arc::new(InputShared {
             id,
             cell: Mutex::new(Cell {
@@ -1189,6 +1318,8 @@ impl crate::Midi<'_> {
                 presence: Presence::Lost(PortCause::Unplugged),
             }),
             requests: Mutex::new(Vec::new()),
+            timing,
+            resyncs,
         });
         self.state.ports.inputs.push(InputPort {
             token: Arc::downgrade(&token),
@@ -1229,6 +1360,7 @@ impl crate::Midi<'_> {
         &mut self,
         id: ResourceId,
         saved: DeviceInfo,
+        options: OutputOptions,
     ) -> Result<OutputLoaded, MidiPortError> {
         let io = self.io.as_deref().ok_or(MidiPortError::NoHardware)?;
         let found = match io.devices().resolve(&saved) {
@@ -1238,10 +1370,7 @@ impl crate::Midi<'_> {
         };
         let found = found.filter(|info| info.direction.is_output());
         let device = match &found {
-            Some(info) => Some(
-                io.connect_output(&info.id)
-                    .map_err(|e| MidiPortError::Hardware(Arc::new(e)))?,
-            ),
+            Some(info) => Some(open_device_output(io, &info.id, &options)?),
             None => None,
         };
         let rate = self.graph.prepared().sample_rate();
@@ -1250,8 +1379,10 @@ impl crate::Midi<'_> {
         let info = found.clone().unwrap_or_else(|| saved.clone());
         let token = Arc::new(());
         let live = device.is_some();
+        let (losses, readers) = loss_cells();
         let shared = Arc::new(OutputShared {
             id,
+            losses: readers,
             cell: Mutex::new(Cell {
                 info: Arc::new(MidiOutputInfo {
                     device: info,
@@ -1274,6 +1405,9 @@ impl crate::Midi<'_> {
             node,
             tap,
             saved,
+            options,
+            losses,
+            device_seen: Losses::NONE,
             out: device.map(|device| UmpOut::of_device(device, rate)),
             parked: None,
         });
@@ -1294,13 +1428,17 @@ impl Ports {
     pub(crate) fn reopen(
         &mut self,
         graph: &mut crate::graph::Graph,
-        drops: &crate::midi::OutDrops,
         timing: Option<&crate::midi::OutputTiming>,
     ) -> bool {
         let mut edited = false;
         for port in &mut self.outputs {
             if port.tap.rate() != graph.prepared().sample_rate() {
-                let _ = crate::midi::drain_events(&mut port.tap, port.out.as_mut(), drops, timing);
+                crate::midi::drain_events(
+                    &mut port.tap,
+                    port.out.as_mut(),
+                    &mut port.losses,
+                    timing,
+                );
                 if let Some(tap) = graph.taps().reopen_event(port.tap.id()) {
                     port.tap = tap;
                     let rate = graph.prepared().sample_rate();
@@ -1316,32 +1454,31 @@ impl Ports {
     }
 
     /// Each output port's tap, read dry and routed to its device.
-    pub(crate) fn drain_outputs(
-        &mut self,
-        drops: &crate::midi::OutDrops,
-        timing: Option<&crate::midi::OutputTiming>,
-    ) {
+    pub(crate) fn drain_outputs(&mut self, timing: Option<&crate::midi::OutputTiming>) {
         for port in &mut self.outputs {
-            let _ = crate::midi::drain_events(&mut port.tap, port.out.as_mut(), drops, timing);
+            crate::midi::drain_events(&mut port.tap, port.out.as_mut(), &mut port.losses, timing);
+            port.fold_device_losses();
         }
     }
 
-    /// Sends `batch` to every output port that has its device open, each event on
-    /// its frame. Whether any did.
+    /// Sends `batch` to every output port, each event on its frame; a port with
+    /// no device counts them refused.
     pub(crate) fn route(
         &mut self,
         batch: &[(tutti_types::Frame, tutti_ump::Ump)],
-        drops: &crate::midi::OutDrops,
         timing: Option<&crate::midi::OutputTiming>,
-    ) -> bool {
-        let mut any = false;
+    ) {
         for port in &mut self.outputs {
-            if let Some(out) = port.out.as_mut() {
-                crate::midi::route_batch(Some(out), drops, timing, batch);
-                any = true;
-            }
+            crate::midi::route_batch(port.out.as_mut(), &mut port.losses, timing, batch);
+            port.fold_device_losses();
         }
-        any
+    }
+
+    /// Counts `n` events as refused by every output port.
+    pub(crate) fn refuse(&mut self, n: u64) {
+        for port in &mut self.outputs {
+            port.losses.refused(n);
+        }
     }
 }
 

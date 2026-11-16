@@ -191,7 +191,8 @@ impl ForkHealth for ForkWatch {
 /// runs: everything a fork needs from the live node, and nothing that keeps
 /// it alive, so a source held by an editor does not outlive the plugin it
 /// forks.
-pub(super) struct ServedFork {
+#[derive(Clone)]
+pub(crate) struct ServedFork {
     /// The live bridge — asked for the state, nothing else. Weak: once every
     /// node and handle on the live instance is gone, a fork answers
     /// [`PluginForkError::LiveGone`] at once instead of queueing a save on a
@@ -212,7 +213,7 @@ pub(super) struct ServedFork {
 }
 
 impl ServedFork {
-    pub(super) fn of(client: &PluginClient<Bound>) -> Self {
+    pub(crate) fn of(client: &PluginClient<Bound>) -> Self {
         Self::reading(client, client.state.tempo.clone())
     }
 

@@ -122,6 +122,13 @@ pub(super) enum Command {
         id: PresetId,
         reply: Reply<bool>,
     },
+    /// Tell the server to open the slab named `shm_name` and render through
+    /// it from its next block: answered `true` once it has.
+    SetupSharedMemory {
+        shm_name: String,
+        layout: crate::protocol::SlabLayout,
+        reply: Reply<bool>,
+    },
     GetCurrentPreset {
         reply: Reply<Option<PresetId>>,
     },

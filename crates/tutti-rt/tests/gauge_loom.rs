@@ -11,7 +11,10 @@
 //!   smaller total;
 //! - **closed is final**: a reader that sees the cell closed reads every value
 //!   the writer wrote (the last gauge value, the whole count);
-//! - **a gauge is never torn**: a read returns the initial value or one store.
+//! - **a gauge is never torn**: a read returns the initial value or one store;
+//! - **a reopened writer starts from the last value** the dropped one wrote;
+//! - **of two concurrent reopens exactly one wins**, and none wins while a
+//!   writer is live.
 
 #![cfg(loom)]
 
@@ -77,5 +80,69 @@ fn a_gauge_reads_one_store_and_closed_is_final() {
         writer.set(Pair([2, 2]));
         drop(writer);
         observer.join().unwrap();
+    });
+}
+
+#[test]
+fn a_reopened_writer_sees_the_last_value_of_the_dropped_one() {
+    loom::model(|| {
+        let (mut writer, total) = counter::<u64>();
+        let reopener = total.clone();
+        let handle = thread::spawn(move || {
+            // Whenever the reopen wins, it follows the drop: the count read is
+            // whole, and adding carries on from it.
+            if let Some(mut next) = reopener.reopen() {
+                assert_eq!(reopener.get(), 3, "a reopened counter read short");
+                next.add(1);
+                assert_eq!(reopener.get(), 4);
+                true
+            } else {
+                false
+            }
+        });
+        writer.add(1);
+        writer.add(2);
+        drop(writer);
+        let won = handle.join().unwrap();
+        if !won {
+            // The reopen ran while the writer was live; it is closed now.
+            assert!(total.reopen().is_some());
+        }
+    });
+}
+
+#[test]
+fn a_reopened_gauge_holds_the_last_value() {
+    loom::model(|| {
+        let (mut writer, level) = gauge(Pair([0, 0]));
+        let reopener = level.clone();
+        let handle = thread::spawn(move || {
+            if let Some(_next) = reopener.reopen() {
+                assert_eq!(reopener.get(), Pair([2, 2]));
+            }
+        });
+        writer.set(Pair([1, 1]));
+        writer.set(Pair([2, 2]));
+        drop(writer);
+        handle.join().unwrap();
+    });
+}
+
+#[test]
+fn of_two_concurrent_reopens_exactly_one_wins() {
+    loom::model(|| {
+        let (writer, total) = counter::<u64>();
+        drop(writer);
+        let other = total.clone();
+        let handle = thread::spawn(move || other.reopen());
+        let mine = total.reopen();
+        // Both writers are held until the count: a dropped one would close the
+        // cell again for the other to win.
+        let theirs = handle.join().unwrap();
+        assert_eq!(
+            u32::from(mine.is_some()) + u32::from(theirs.is_some()),
+            1,
+            "two writers or none"
+        );
     });
 }

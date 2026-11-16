@@ -100,6 +100,8 @@ std only. A rule the compiler already enforces is not a gate.
   the serial render bit for bit.
 - Never make memory safety depend on an exact float result (nodes run inside
   `with_no_denormals`).
+- A node never latches a NaN or an infinity from its input: a block that wrote one is
+  passed on and the recursive state resets after it (`KernelNode` does this for a kernel).
 - A node that changes width declares its buses; the graph never guesses a dry path. A node
   reads a non-main bus through the handle its shape issued.
 - Summing is the graph's: several sources into one port sum. Never add a node to sum.
@@ -215,6 +217,8 @@ std only. A rule the compiler already enforces is not a gate.
 - An error type derives `thiserror::Error` with its text in `#[error(..)]`; a hand
   `impl Error for` is a row of the gate's allow-list with its reason (`cargo xtask
   check-errors`), and a `pub` type named `...Error` implements `Error`.
+- Logging is `tracing`: a library never installs a subscriber, and nothing prints
+  (`println!`/`eprintln!`) outside a `main`; `cargo xtask check-logging` holds it.
 - Naming: an algorithm uses the theory name, a spec keeps its own, a *frame* is one value
   per channel, a *sample* is one value. A user-facing node API keeps the control word.
 - A comment states what the code does and the invariant it holds, in the present tense;

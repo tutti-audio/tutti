@@ -8,7 +8,10 @@
 //!   Payload recycling lives in [`PayloadPool`]; the batcher owns the block
 //!   sequence.
 //! - [`Lifecycle`] — running/crashed flags.
-//! - [`AudioSlab`] — bulk audio transport (created elsewhere; held as Arc).
+//!
+//! The bulk audio transport (the slab) is not the bridge's: the batcher owns the
+//! one it writes and reads, and the bridge only asks the server to open a new one
+//! ([`AudioBridge::setup_shared_memory`]).
 //!
 //! The bridge thread lives in [`BridgeThread`]; its `Drop` shuts it down.
 
@@ -25,9 +28,8 @@ use crate::ServerWatch;
 use crate::protocol::{
     ChordChanges, MidiEventVec, Normalized, NoteExpressionChanges, NoteExpressionIntChanges,
     NoteExpressionTextChanges, ParamId, ParameterChanges, ParameterInfo, Preset, PresetId,
-    ScaleChanges, TransportChanges, TransportInfo,
+    ScaleChanges, SlabLayout, TransportChanges, TransportInfo,
 };
-use crate::transport::shm::AudioSlab;
 use dpi::Size;
 use tutti_plugin_types::{
     BlockStatus, BridgeResult, ContentScale, Delivered, EditorError, PluginFailure, StateError,
@@ -108,7 +110,6 @@ pub(crate) struct AudioBridge {
     payloads: PayloadPool,
     lifecycle: Lifecycle,
     listener: ListenerSlot,
-    audio_buffer: Arc<AudioSlab>,
 }
 
 impl std::fmt::Debug for AudioBridge {
@@ -128,7 +129,6 @@ impl AudioBridge {
     /// The bridge thread cannot be spawned.
     pub fn new(
         socket_path: PathBuf,
-        audio_buffer: Arc<AudioSlab>,
         sample_rate: SampleRate,
         watch: Arc<ServerWatch>,
         timeouts: Timeouts,
@@ -152,7 +152,6 @@ impl AudioBridge {
             payloads,
             lifecycle,
             listener,
-            audio_buffer,
         };
         Ok((bridge, thread))
     }
@@ -316,11 +315,6 @@ impl AudioBridge {
     /// What the bridge thread learned of chunk `seq`, among the last few.
     pub(crate) fn chunk_fate(&self, seq: u64) -> Option<Fate> {
         self.channels.fate(seq)
-    }
-
-    /// The shared-memory slab the blocks travel in.
-    pub fn audio_buffer(&self) -> &Arc<AudioSlab> {
-        &self.audio_buffer
     }
 
     // --- RT fire-and-forget ---
@@ -755,6 +749,25 @@ impl AudioBridge {
         await_reply(ask_resp, self.lifecycle.timeouts().param_wait()).unwrap_or(false)
     }
 
+    /// Has the server open the slab `shm_name` (laid out as `layout`) and
+    /// render through it from its next block. `true` once it has; `false` when
+    /// it refused, did not answer within [`Timeouts::param`](tutti_plugin_types::Timeouts::param) or is gone.
+    /// Control thread; the old slab stays valid until the caller drops it.
+    pub fn setup_shared_memory(&self, shm_name: String, layout: SlabLayout) -> bool {
+        if self.lifecycle.is_crashed() {
+            return false;
+        }
+        let (ask_resp, reply) = ask::<bool>();
+        if !self.channels.push_command(Command::SetupSharedMemory {
+            shm_name,
+            layout,
+            reply,
+        }) {
+            return false;
+        }
+        await_reply(ask_resp, self.lifecycle.timeouts().param_wait()).unwrap_or(false)
+    }
+
     /// Wait until every command queued before this call has reached the
     /// server, been handled, and every event the server sent because of it
     /// (a `LatencyChanged` a render-mode or rate change caused) has reached
@@ -916,21 +929,11 @@ mod tests {
     /// Once the bridge is crashed, the same refusal is `PluginCrashed`.
     #[test]
     fn a_full_queue_is_busy_not_a_crash() {
-        let name = format!("tutti-busy-{}", std::process::id());
-        let layout = crate::protocol::SlabLayout {
-            slots: crate::transport::shm::RING_SLOTS as u32,
-            samples_per_channel: 64,
-            format: crate::protocol::SampleFormat::Float32,
-            inputs: vec![crate::protocol::ChannelLayout::STEREO],
-            outputs: vec![crate::protocol::ChannelLayout::STEREO],
-        };
-        let slab = Arc::clone(AudioSlab::create(name, layout).expect("slab").slab());
         let bridge = AudioBridge {
             channels: Channels::new(SampleRate::SR_48K),
             payloads: PayloadPool::new(),
             lifecycle: Lifecycle::new(Arc::new(ServerWatch::new()), Timeouts::default()),
             listener: Arc::new(Mutex::new(None)),
-            audio_buffer: slab,
         };
         while bridge.channels.push_command(Command::Reset) {}
 

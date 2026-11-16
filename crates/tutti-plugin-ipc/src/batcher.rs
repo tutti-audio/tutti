@@ -66,13 +66,13 @@
 //! else: the `f64` stays inside the node.
 
 use crate::OfflineWait;
-use crate::{FATES, Fate, HarmonyInputs, PluginBridge, SlabWriter};
+use crate::{AudioSlab, FATES, Fate, HarmonyInputs, PluginBridge, SlabAccessError, SlabWriter};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 use tutti_plugin_types::{
-    BlockStatus, BridgeResult, ChunkCounters, MidiEventVec, NoteExpressionChanges,
-    ParameterChanges, SampleFormat, TransportChanges, TransportInfo, WireMidi,
+    BlockStatus, ChunkCounters, MidiEventVec, NoteExpressionChanges, ParameterChanges,
+    SampleFormat, TransportChanges, TransportInfo, WireMidi,
 };
 use tutti_types::Samples;
 
@@ -107,7 +107,7 @@ impl WireStorage {
         seq: u64,
         ch: usize,
         samples: &[f32],
-    ) -> BridgeResult<()> {
+    ) -> Result<(), SlabAccessError> {
         let n = samples.len();
         match self {
             Self::F32 { input, .. } => {
@@ -131,32 +131,32 @@ impl WireStorage {
     /// Only call this for a `seq` the slab has confirmed (see
     /// [`Batcher::collectable`]): the copy count proves nothing about who
     /// wrote the bytes.
-    fn recv(&mut self, bridge: &PluginBridge, seq: u64, ch: usize, out: &mut [f32]) {
+    ///
+    /// `false` when the slab has no such channel (the batcher's widths and the
+    /// slab's disagree): the channel is silence.
+    fn recv(&mut self, slab: &AudioSlab, seq: u64, ch: usize, out: &mut [f32]) -> bool {
         let size = out.len();
-        let n = match self {
+        let (n, held) = match self {
             Self::F32 { output, .. } => {
                 let wire = &mut output[..size];
-                let n = bridge
-                    .audio_buffer()
-                    .read_output_into(seq, ch, wire)
-                    .unwrap_or(0);
+                let read = slab.read_output_into(seq, ch, wire);
+                let n = read.as_ref().map_or(0, |&n| n);
                 out[..n].copy_from_slice(&wire[..n]);
-                n
+                (n, read.is_ok())
             }
             Self::F64 { output, .. } => {
                 let wire = &mut output[..size];
-                let n = bridge
-                    .audio_buffer()
-                    .read_output_into(seq, ch, wire)
-                    .unwrap_or(0);
+                let read = slab.read_output_into(seq, ch, wire);
+                let n = read.as_ref().map_or(0, |&n| n);
                 for (o, &v) in out[..n].iter_mut().zip(&wire[..n]) {
                     // The narrowing is the point: the graph is `f32`.
                     *o = v as f32;
                 }
-                n
+                (n, read.is_ok())
             }
         };
         out[n..].fill(0.0);
+        held
     }
 }
 
@@ -418,7 +418,7 @@ impl Batcher {
             return;
         }
         let deadline = Instant::now() + watch.budget();
-        while !bridge.is_crashed() && !bridge.audio_buffer().has_output(seq) {
+        while !bridge.is_crashed() && !self.slab.has_output(seq) {
             if Instant::now() >= deadline {
                 watch.give_up();
                 // No reply is awaited past the live bound from here on: a
@@ -491,7 +491,7 @@ impl Batcher {
             return None;
         }
         let seq = self.expect_seq?;
-        bridge.audio_buffer().has_output(seq).then_some(seq)
+        self.slab.has_output(seq).then_some(seq)
     }
 
     /// Fill the ring with the output of the chunk in flight: the one submitted
@@ -513,11 +513,7 @@ impl Batcher {
         self.await_output(bridge);
         let chunk = self.chunk;
         match self.collectable(bridge) {
-            Some(seq) => {
-                for (ch, row) in self.ring.iter_mut().enumerate() {
-                    self.wire.recv(bridge, seq, ch, &mut row[..chunk]);
-                }
-            }
+            Some(seq) => self.read_ring(seq),
             None => {
                 // A chunk in flight the server had not answered: a dropout.
                 // Not while the plugin refuses its rate: its silence is
@@ -550,6 +546,18 @@ impl Batcher {
         self.counters.in_flight.store(0, Ordering::Release);
     }
 
+    /// Fill the ring with chunk `seq`'s output from the slab. A channel the slab
+    /// lacks plays as silence and counts as a missed chunk: the batcher and its
+    /// slab disagree.
+    fn read_ring(&mut self, seq: u64) {
+        let chunk = self.chunk;
+        for (ch, row) in self.ring.iter_mut().enumerate() {
+            if !self.wire.recv(self.slab.slab(), seq, ch, &mut row[..chunk]) {
+                self.counters.missed.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
+
     /// Notes `seq`, collected unanswered, to be resolved when the server's
     /// answer is seen: into an empty entry, else over the oldest, which is
     /// counted [`unanswered`](ChunkCounters::unanswered).
@@ -576,7 +584,7 @@ impl Batcher {
             if *seq == 0 {
                 continue;
             }
-            if bridge.audio_buffer().has_output(*seq) {
+            if self.slab.has_output(*seq) {
                 self.counters.late.fetch_add(1, Ordering::Relaxed);
                 *seq = 0;
                 continue;
@@ -622,7 +630,9 @@ impl Batcher {
             }
         }
         if !staged {
-            // The chunk will never be collectable; its output plays as silence.
+            self.counters.missed.fetch_add(1, Ordering::Relaxed);
+            // The chunk will never be collectable (a channel the slab lacks
+            // lands here too, and counts); its output plays as silence.
             // Its parameter changes did not go either: the host keeps them for
             // the next chunk. Its MIDI is lost (`Chunks::unsent`).
             self.expect_seq = None;
@@ -718,8 +728,7 @@ mod tests {
     /// ways: these tests stage nothing, but a batcher cannot exist without the
     /// writer its chunks go through.
     fn slab(samples: usize) -> SlabWriter {
-        static N: tutti_types::Mint = tutti_types::Mint::new();
-        let name = format!("batcher_{}_{}", std::process::id(), N.mint());
+        let name = tutti_fixtures::unique_name("batcher");
         let stereo = tutti_plugin_types::ChannelLayout::STEREO;
         AudioSlab::create(
             name,
@@ -732,6 +741,64 @@ mod tests {
             },
         )
         .unwrap()
+    }
+
+    /// **A chunk's output is read from the slab it is given, and a channel the
+    /// slab lacks answers `false` and plays as silence** instead of indexing
+    /// past it. The slab here is not the bridge's: a batcher reads the one it
+    /// writes.
+    #[test]
+    fn the_output_is_read_from_the_slab_given_and_a_missing_channel_is_refused() {
+        let writer = slab(MAX_CHUNK);
+        let server = AudioSlab::open(writer.name().to_owned(), writer.layout()).unwrap();
+        let mut server = server;
+        server.write(1, 0, &[0.5f32; 8]).unwrap();
+        server.publish(1);
+        let mut wire = WireStorage::new(SampleFormat::Float32, MAX_CHUNK);
+        let mut out = [9.0f32; 8];
+        assert!(wire.recv(writer.slab(), 1, 0, &mut out));
+        assert_eq!(
+            out, [0.5; 8],
+            "the slab's own output, as the server wrote it"
+        );
+        let mut out = [9.0f32; 8];
+        assert!(
+            !wire.recv(writer.slab(), 1, 2, &mut out),
+            "the slab has two channels"
+        );
+        assert_eq!(out, [0.0; 8], "a channel it lacks is silence");
+    }
+
+    /// **A batcher wider than its slab counts a missed chunk for each channel
+    /// the slab lacks, and the others still play.**
+    #[test]
+    fn a_channel_the_slab_lacks_is_counted_as_missed() {
+        let writer = slab(MAX_CHUNK);
+        let mut server = AudioSlab::open(writer.name().to_owned(), writer.layout()).unwrap();
+        for ch in 0..2 {
+            server.write(1, ch, &[0.25f32; 8]).unwrap();
+        }
+        server.publish(1);
+        // Three output rows over a two-channel slab.
+        let mut b = Batcher::new(2, 3, SampleFormat::Float32, MAX_CHUNK, writer);
+        b.chunk = 8;
+        // The refusal is a `Copy` error: nothing is allocated on the audio
+        // thread to report it.
+        assert_no_alloc::assert_no_alloc(|| b.read_ring(1));
+        assert_eq!(b.counters.missed.load(Ordering::Relaxed), 1);
+        assert_eq!(b.ring[0][..8], [0.25; 8], "the channels it has play");
+        assert_eq!(b.ring[2][..8], [0.0; 8], "the one it lacks is silence");
+    }
+
+    /// **A write to a channel the slab lacks is refused without allocating.**
+    #[test]
+    fn a_write_to_a_channel_the_slab_lacks_is_refused_without_allocating() {
+        let mut writer = slab(MAX_CHUNK);
+        let mut wire = WireStorage::new(SampleFormat::Float32, MAX_CHUNK);
+        let samples = [0.5f32; 8];
+        let refused = assert_no_alloc::assert_no_alloc(|| wire.stage(&mut writer, 1, 2, &samples));
+        assert_eq!(refused, Err(SlabAccessError::Channel));
+        assert_eq!(wire.stage(&mut writer, 1, 1, &samples), Ok(()));
     }
 
     /// A fresh batcher has nothing in flight, so its first chunk must be silence

@@ -9,19 +9,30 @@ use tutti_types::SampleRate;
 use super::table::HoldKind;
 use super::{Declared, Life, Load, LoadError, PoolEntry, PoolError, PoolEvent, PoolKey, PoolState};
 use crate::peer::sealed;
-use crate::{HandleError, Job, Peer, PeerError, Presence, Resource, ResourceId, Session};
-use crate::{SessionEvent, jobs::JobFailed};
+use crate::{HandleError, Peer, PeerError, Presence, Resource, ResourceId, Session, Task};
+use crate::{Job, JobKind, SessionEvent, WorkerError};
 
 mod holds;
 mod loads;
 mod refresh;
 
+/// What `events` landed for `job`, taken.
+fn took<J: JobKind>(
+    events: &mut [SessionEvent],
+    job: &Job<J>,
+) -> Option<Result<J::Output, J::Error>> {
+    events.iter_mut().find_map(|event| match event {
+        SessionEvent::Landed(landed) => landed.take(job),
+        _ => None,
+    })
+}
+
 /// The loads a session handed its spawner, held until the test runs them.
 #[derive(Clone, Default)]
-struct Spawned(Arc<Mutex<Vec<Job>>>);
+struct Spawned(Arc<Mutex<Vec<Task>>>);
 
 impl Spawned {
-    fn take(&self) -> Vec<Job> {
+    fn take(&self) -> Vec<Task> {
         std::mem::take(&mut *self.0.lock().unwrap())
     }
 
@@ -111,7 +122,7 @@ impl PoolEntry for Probe {
         Load::on_worker(move || {
             runs.fetch_add(1, Ordering::SeqCst);
             if fail {
-                Err(LoadError::Job(JobFailed::Dropped))
+                Err(LoadError::Job(WorkerError::Dropped))
             } else {
                 Ok(version * 100 + initial)
             }
@@ -321,7 +332,7 @@ fn a_job_that_did_not_finish_fails_the_entry() {
     let landed = events(&mut s);
     assert_eq!(landed.len(), 1);
     assert!(
-        landed[0].1.contains(&JobFailed::Dropped.to_string()),
+        landed[0].1.contains(&WorkerError::Dropped.to_string()),
         "{landed:?}"
     );
 }
@@ -947,7 +958,7 @@ fn a_stale_refusal_of_a_landing_leaves_the_load_in_flight_alone() {
     spawned.run_all();
     let _ = events(&mut s);
     let (landing, _) = s.pool.landing_of::<Probe>(&key).expect("loaded");
-    let refusal = || LoadError::Job(JobFailed::Dropped);
+    let refusal = || LoadError::Job(WorkerError::Dropped);
 
     // A new declaration is in flight: the refusal of the old landing is stale.
     s.pool(entry("a", probe(2, &runs))).unwrap();
@@ -979,6 +990,8 @@ fn a_stale_refusal_of_a_landing_leaves_the_load_in_flight_alone() {
 mod clock_switch {
     use tutti_engine::{ManualStreamDriver, OutputSpec};
     use tutti_types::ChannelLayout;
+
+    use crate::JobStatus;
 
     use super::*;
 
@@ -1368,17 +1381,24 @@ mod clock_switch {
         let runs = runs();
         s.pool(entry("a", probe(1, &runs))).unwrap();
         let wait = s.pool_loaded::<&'static str>();
-        assert!(wait.take().is_none(), "the load is in flight");
+        assert_ne!(wait.status(), JobStatus::Done, "the load is in flight");
         let (driver, spec) = card();
         let mut live = s
             .into_device_on(spec, driver)
             .unwrap_or_else(|e| panic!("switches: {}", e.error()));
         let _ = events(&mut live);
-        assert!(wait.take().is_none(), "the load is still in flight");
+        assert_ne!(
+            wait.status(),
+            JobStatus::Done,
+            "the load is still in flight"
+        );
         for job in spawned.take() {
             job.run();
         }
-        let _ = events(&mut live);
-        assert!(wait.take().is_some(), "the wait landed on the new clock");
+        let mut landed = live.update();
+        assert!(
+            took(&mut landed, &wait).is_some_and(|report| report.is_ok()),
+            "the wait landed on the new clock"
+        );
     }
 }

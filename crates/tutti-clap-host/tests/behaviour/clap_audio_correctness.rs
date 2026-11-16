@@ -222,7 +222,7 @@ fn drive_block(
             inputs: &in_refs,
             outputs: &mut out_refs,
             num_samples: frames,
-            sample_rate: SAMPLE_RATE,
+            sample_rate: tutti_plugin_types::SampleRate::of(SAMPLE_RATE),
         };
         inst.process(&mut buffer, &ClapProcessContext::default())
             .expect("process succeeds");
@@ -490,7 +490,7 @@ fn host_handles_in_place_style_buffers() {
             inputs: &in_refs,
             outputs: &mut out_refs,
             num_samples: FRAMES,
-            sample_rate: SAMPLE_RATE,
+            sample_rate: tutti_plugin_types::SampleRate::of(SAMPLE_RATE),
         };
         inst.process(&mut buffer, &ClapProcessContext::default())
             .expect("process succeeds");
@@ -981,7 +981,7 @@ fn drive_midi_block(inst: &mut Active<f32>, midi: &[UmpAt]) {
         inputs: &in_refs,
         outputs: &mut out_refs,
         num_samples: frames,
-        sample_rate: SAMPLE_RATE,
+        sample_rate: tutti_plugin_types::SampleRate::of(SAMPLE_RATE),
     };
     let ctx = ClapProcessContext {
         midi,

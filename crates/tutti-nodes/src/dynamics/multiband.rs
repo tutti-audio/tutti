@@ -256,7 +256,9 @@ struct Lanes<'a> {
 /// the graph's 32.
 ///
 /// A [`reset`](Node::reset) and a clone (a fork) start from silence, and the next aim lands
-/// whole, as a fresh node's first does.
+/// whole, as a fresh node's first does. A block whose output holds a NaN or an infinity is
+/// passed on as rendered and resets the node after it, its meters back at unity, so nothing
+/// non-finite is latched.
 ///
 /// The gain reduction of each band is a measurement:
 /// [`gain_reduction_db`](Self::gain_reduction_db), or
@@ -568,6 +570,11 @@ impl Node for MultibandCompressorNode {
         let reading = t.bank.take_reading();
         for (band, deepest) in rig.bands.iter().zip(reading.iter()) {
             band.reduction.store(deepest);
+        }
+        // A block that wrote a NaN or an infinity is passed on as rendered, and the bank
+        // starts the next one from silence: nothing non-finite is latched.
+        if output.iter().any(|ch| !ch.iter().all(|s| s.is_finite())) {
+            t.clear(rig);
         }
         Status::Modified
     }

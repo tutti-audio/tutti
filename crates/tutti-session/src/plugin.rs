@@ -150,12 +150,13 @@ pub use entry::{
     AddPluginError, LoadedPlugin, PluginCause, PluginDeclaration, PluginEntry, PluginInfo,
     PluginPorts, PooledPlugin,
 };
-pub use state_job::{StateJobError, StateJobFailed};
+pub use state_job::{RestoreState, SaveState, StateJobError, StateJobFailed};
 
 use crate::plugin_diagnostics::Figures;
 use crate::{
-    Diagnostics, GiveUp, HangDetector, JobFailed, Key, Params, PluginBuses, PortCounts, Recovery,
+    Diagnostics, GiveUp, HangDetector, Key, Params, PluginBuses, PortCounts, Recovery,
     RecoveryAction, RecoveryEvent, RecoveryFailure, ReloadCause, Session, SessionEvent,
+    WorkerError,
 };
 
 /// How often a healthy plugin's state is captured, by default: 8 s (design 015 §4.4).
@@ -518,8 +519,7 @@ pub enum PluginChange {
     /// bypass lasts.
     IoChanged,
     /// The plugin's new ports were not made a node, and the node stays as it
-    /// is: they are wider than a block serves, or outside a served plugin's
-    /// shared-memory slab (laid out at launch), or the graph refused the swap
+    /// is: they are wider than a block serves, or the graph refused the swap
     /// ([`PortsRefusal`]). Reported once for the ports: they count as handled.
     PortsRefused {
         /// Why the ports were refused.
@@ -1918,7 +1918,7 @@ impl<C: crate::Clock> Session<C> {
         &mut self,
         node: NodeKey,
         token: &Arc<()>,
-        failed: JobFailed,
+        failed: WorkerError,
         out: &mut Vec<SessionEvent>,
     ) {
         let now = self.plugins_now;
@@ -1931,7 +1931,7 @@ impl<C: crate::Clock> Session<C> {
             return;
         }
         let cause = match failed {
-            JobFailed::Panicked { message } => RecoveryFailure::ReloadPanicked { message },
+            WorkerError::Panicked { message } => RecoveryFailure::ReloadPanicked { message },
             // `Dropped`, and any end a later version names: no replacement
             // came of the job.
             _ => RecoveryFailure::ReloadDropped,
@@ -2203,7 +2203,7 @@ mod tests {
     //! `tests/plugin/plugin.rs`.
 
     use super::*;
-    use crate::{Job, RecoveryPolicy};
+    use crate::{RecoveryPolicy, Task};
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use tutti_plugin_types::{Normalized, ParamId, ParameterInfo};
 
@@ -2292,13 +2292,13 @@ mod tests {
         dead: Arc<AtomicBool>,
         t0: Instant,
         /// What the session's spawner was handed and nobody has taken.
-        held: Arc<Mutex<Vec<Job>>>,
+        held: Arc<Mutex<Vec<Task>>>,
     }
 
     /// A detached session snapshotting every second, hosting a fake that
     /// answers `state` at a dc node.
     fn rig(state: Option<Vec<u8>>) -> Rig {
-        let held: Arc<Mutex<Vec<Job>>> = Arc::default();
+        let held: Arc<Mutex<Vec<Task>>> = Arc::default();
         let queue = Arc::clone(&held);
         let mut session = Session::builder()
             .snapshot_interval(Duration::from_secs(1))
@@ -2385,7 +2385,7 @@ mod tests {
         }
 
         /// `Phase::Plugins` at `t0 + ms`: the jobs it submitted.
-        fn plugins_at(&mut self, ms: u64) -> Vec<Job> {
+        fn plugins_at(&mut self, ms: u64) -> Vec<Task> {
             let _ = self.events_at(ms);
             std::mem::take(&mut *locked(&self.held))
         }
@@ -2399,7 +2399,7 @@ mod tests {
         }
 
         /// Runs `job` on another thread, and lands its end.
-        fn run_and_land(&mut self, job: Job) -> Vec<SessionEvent> {
+        fn run_and_land(&mut self, job: Task) -> Vec<SessionEvent> {
             std::thread::spawn(move || job.run()).join().unwrap();
             self.land()
         }
@@ -2867,8 +2867,8 @@ mod tests {
     #[test]
     fn a_reload_job_that_ends_without_a_result_is_a_failed_attempt() {
         for failed in [
-            JobFailed::Dropped,
-            JobFailed::Panicked {
+            WorkerError::Dropped,
+            WorkerError::Panicked {
                 message: "boom".into(),
             },
         ] {
@@ -2904,9 +2904,9 @@ mod tests {
                 panic!("the next attempt is scheduled: {out:?}");
             };
             match (&failed, cause) {
-                (JobFailed::Dropped, ReloadCause::Attempt(RecoveryFailure::ReloadDropped)) => {}
+                (WorkerError::Dropped, ReloadCause::Attempt(RecoveryFailure::ReloadDropped)) => {}
                 (
-                    JobFailed::Panicked { message },
+                    WorkerError::Panicked { message },
                     ReloadCause::Attempt(RecoveryFailure::ReloadPanicked { message: got }),
                 ) => assert_eq!(got, message),
                 other => panic!("{other:?}"),

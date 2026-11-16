@@ -155,7 +155,7 @@ impl AuLoaded {
             BusDirection::Output => ("output", self.num_outputs()),
         };
         let layout = tutti_plugin_types::ChannelLayout::try_from(channels)
-            .map_err(|_| AuError::BusTooWide { scope, channels })?;
+            .map_err(|source| AuError::BusTooWide { scope, source })?;
         let placement = self
             .layout_tag(direction, 0)
             .ok()
@@ -593,8 +593,11 @@ impl EditorWindow for AuLoaded {
         _scale: ContentScale,
     ) -> PluginResult<Size> {
         self.close_editor(main);
-        let editor = AuEditor::open(self.unit(), Some(parent), LogicalSize::new(800, 600))
-            .map_err(|e| editor_error("AU open_editor failed", e))?;
+        let editor = AuEditor::open(self.unit(), Some(parent), {
+            let (width, height) = tutti_plugin_types::EditorUnit::DEFAULT_EXTENT;
+            LogicalSize::new(width, height)
+        })
+        .map_err(|e| editor_error("AU open_editor failed", e))?;
         let size = editor.editor_size();
         *self.editor_slot() = Some(editor);
         Ok(size.into())

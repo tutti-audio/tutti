@@ -152,12 +152,8 @@ fn try_send_bridge_msg(
     stream: &interprocess::local_socket::Stream,
     msg: &BridgeMessage,
 ) -> std::io::Result<()> {
-    use std::io::Write;
     let mut stream = stream;
-    let data = postcard::to_allocvec(msg).unwrap();
-    let len = (data.len() as u32).to_be_bytes();
-    stream.write_all(&len)?;
-    stream.write_all(&data)
+    crate::protocol::frame::write_frame(&mut stream, msg).map_err(std::io::Error::other)
 }
 
 /// One stereo bus per direction — the common shape, and the one most easily
@@ -239,7 +235,6 @@ fn bridge_with_server_mode(
 
     let (bridge, bridge_thread) = PluginBridge::new(
         path.clone(),
-        Arc::clone(host_slab.slab()),
         tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
         tutti_plugin_types::PluginFormat::Vst3,
         Some(crate::EditorLoader::new(
@@ -357,6 +352,7 @@ fn a_sidechain_port_reaches_the_plugin() {
     };
     let (bridge, _thread, _server, slab) =
         bridge_with_server(layout, std::time::Duration::ZERO, |out| [2, 0][out]);
+    let host_slab = Arc::clone(slab.slab());
     let mut batcher = Batcher::new(3, CHANNELS, SampleFormat::Float32, BATCH_SIZE, slab);
     let main = vec![1.0f32; BATCH_SIZE];
     let side = vec![5.0f32; BATCH_SIZE];
@@ -371,7 +367,7 @@ fn a_sidechain_port_reaches_the_plugin() {
             &mut out.outs(),
             &mut midi_out,
         );
-        wait_for_reply(&bridge, block + 1, std::time::Duration::from_secs(2));
+        wait_for_reply(&host_slab, block + 1, std::time::Duration::from_secs(2));
     }
     assert_eq!(
         out.at_scalar(0, 0),
@@ -413,6 +409,7 @@ fn drive_blocks_with_gap(blocks: usize, gap: std::time::Duration) -> Vec<Vec<Vec
         layout.input_ring_bytes() > 0 && layout.ring_bytes(layout.output_channels()) > 0,
         "both directions must have their own region"
     );
+    let host_slab = Arc::clone(slab.slab());
     let mut batcher = Batcher::new(CHANNELS, CHANNELS, SampleFormat::Float32, BATCH_SIZE, slab);
 
     let mut midi_out = MidiEventVec::new();
@@ -443,7 +440,7 @@ fn drive_blocks_with_gap(blocks: usize, gap: std::time::Duration) -> Vec<Vec<Vec
         );
 
         if !gap.is_zero() {
-            wait_for_reply(&bridge, block as u64 + 1, gap);
+            wait_for_reply(&host_slab, block as u64 + 1, gap);
         }
     }
 
@@ -473,11 +470,11 @@ fn drive_blocks_with_gap(blocks: usize, gap: std::time::Duration) -> Vec<Vec<Vec
 /// It now panics, naming the budget and the block. That is not a stricter
 /// test — the caller was going to fail either way — it is the same failure with
 /// the right cause on it.
-fn wait_for_reply(bridge: &PluginBridge, seq: u64, budget: std::time::Duration) {
+fn wait_for_reply(slab: &AudioSlab, seq: u64, budget: std::time::Duration) {
     const SLICE: std::time::Duration = std::time::Duration::from_micros(200);
     let deadline = std::time::Instant::now() + budget;
     while std::time::Instant::now() < deadline {
-        if bridge.audio_buffer().has_output(seq) {
+        if slab.has_output(seq) {
             return;
         }
         std::thread::sleep(SLICE);
@@ -671,6 +668,7 @@ fn a_stale_slot_holding_real_audio_still_yields_silence() {
     const DECOY_SEQ: u64 = 1 + RING_SLOTS as u64;
 
     let (bridge, mut bridge_thread, slab) = bridge_with_no_server();
+    let host_slab = Arc::clone(slab.slab());
     let mut batcher = Batcher::new(CHANNELS, CHANNELS, SampleFormat::Float32, BATCH_SIZE, slab);
 
     // The premise, asserted rather than assumed: if the ring depth changes and
@@ -684,8 +682,7 @@ fn a_stale_slot_holding_real_audio_still_yields_silence() {
 
     // The decoy is what a server would have published: written through the
     // server's end of the slab, the output writer `open` hands back.
-    let host = bridge.audio_buffer();
-    let mut server = AudioSlab::open(host.name(), host.layout()).unwrap();
+    let mut server = AudioSlab::open(host_slab.name(), host_slab.layout()).unwrap();
     for ch in 0..CHANNELS {
         server.write(DECOY_SEQ, ch, &[DECOY; BATCH_SIZE]).unwrap();
     }
@@ -734,7 +731,9 @@ fn a_stale_slot_holding_real_audio_still_yields_silence() {
     // The decoy must still be sitting there: if something overwrote it, the
     // silence above proves nothing about the sequence check.
     let mut probe = [0.0f32; BATCH_SIZE];
-    let got = host.read_output_into(DECOY_SEQ, 0, &mut probe).unwrap_or(0);
+    let got = host_slab
+        .read_output_into(DECOY_SEQ, 0, &mut probe)
+        .unwrap_or(0);
     assert!(
         got == BATCH_SIZE && probe.iter().all(|&s| s == DECOY),
         "the decoy was overwritten during the run, so this test no longer \
@@ -951,7 +950,6 @@ fn bridge_with_no_server() -> (Arc<PluginBridge>, BridgeThread, SlabWriter) {
 
     let (bridge, bridge_thread) = PluginBridge::new(
         path,
-        Arc::clone(host_slab.slab()),
         tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
         tutti_plugin_types::PluginFormat::Vst3,
         Some(crate::EditorLoader::new(
@@ -1058,7 +1056,7 @@ fn the_chunk_counters_report_misses_and_answers() {
     let (bridge, mut bridge_thread, _server, slab) =
         bridge_with_server_stall(std::time::Duration::from_millis(50));
     let counters = Arc::new(ChunkCounters::default());
-    let answered_in = Arc::clone(bridge.audio_buffer());
+    let answered_in = Arc::clone(slab.slab());
     counters.attach(move |seq| answered_in.has_output(seq));
     let mut batcher = Batcher::new(CHANNELS, CHANNELS, SampleFormat::Float32, BATCH_SIZE, slab)
         .with_counters(Arc::clone(&counters));
@@ -1112,6 +1110,7 @@ fn a_chunk_published_after_its_miss_is_counted_late() {
     let (bridge, mut bridge_thread, _server, slab) =
         bridge_with_server_stall(std::time::Duration::from_millis(50));
     let counters = Arc::new(ChunkCounters::default());
+    let host_slab = Arc::clone(slab.slab());
     let mut batcher = Batcher::new(CHANNELS, CHANNELS, SampleFormat::Float32, BATCH_SIZE, slab)
         .with_counters(Arc::clone(&counters));
     let input = Planar::new();
@@ -1124,7 +1123,7 @@ fn a_chunk_published_after_its_miss_is_counted_late() {
     assert_eq!(counters.late(), 0, "and had not been published yet");
 
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    while !bridge.audio_buffer().has_output(1) {
+    while !host_slab.has_output(1) {
         assert!(std::time::Instant::now() < deadline, "chunk 1 never came");
         std::thread::sleep(std::time::Duration::from_millis(1));
     }
@@ -1198,6 +1197,7 @@ fn a_chunk_the_server_refuses_is_counted_refused() {
         }),
     );
     let counters = counters_on(&bridge);
+    let host_slab = Arc::clone(slab.slab());
     let mut batcher = Batcher::new(CHANNELS, CHANNELS, SampleFormat::Float32, BATCH_SIZE, slab)
         .with_counters(Arc::clone(&counters));
     let input = Planar::new();
@@ -1213,7 +1213,7 @@ fn a_chunk_the_server_refuses_is_counted_refused() {
     block();
     block();
     release.send(()).unwrap();
-    wait_for("chunk 3 published", || bridge.audio_buffer().has_output(3));
+    wait_for("chunk 3 published", || host_slab.has_output(3));
     // Block 4 sees chunk 2 in the ring; chunk 1's fate is not read yet.
     block();
     wait_for("chunk 1's fate", || {
@@ -1221,7 +1221,7 @@ fn a_chunk_the_server_refuses_is_counted_refused() {
     });
     // Chunk 4 is answered before block 5, so block 5's collect finds it and
     // neither of its two looks can count it late.
-    wait_for("chunk 4 published", || bridge.audio_buffer().has_output(4));
+    wait_for("chunk 4 published", || host_slab.has_output(4));
     // Block 5 resolves chunk 1.
     block();
 
@@ -1418,6 +1418,7 @@ fn a_late_reply_does_not_permanently_crash_the_bridge() {
     // to miss its budget however fast the machine is.
     let (bridge, _bridge_thread, _server, slab) =
         bridge_with_server_stall(std::time::Duration::from_millis(120));
+    let host_slab = Arc::clone(slab.slab());
     let mut batcher = Batcher::new(CHANNELS, CHANNELS, SampleFormat::Float32, BATCH_SIZE, slab);
 
     let mut input = Planar::new();
@@ -1442,12 +1443,12 @@ fn a_late_reply_does_not_permanently_crash_the_bridge() {
     // the host did with the missed deadline — not whether the server ever
     // answered.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    while std::time::Instant::now() < deadline && !bridge.audio_buffer().has_output(1) {
+    while std::time::Instant::now() < deadline && !host_slab.has_output(1) {
         std::thread::sleep(std::time::Duration::from_millis(1));
     }
 
     assert!(
-        bridge.audio_buffer().has_output(1),
+        host_slab.has_output(1),
         "the mock server never published block 1 at all — this test cannot say \
          anything about the timeout until the server has answered"
     );
@@ -1489,6 +1490,7 @@ fn a_timed_out_reply_is_drained_rather_than_paired_with_a_later_block() {
     // One stall, far past `MAX_PROCESS_TIMEOUT`, then full speed.
     let (bridge, _bridge_thread, _server, slab) =
         bridge_with_first_block_stalled(std::time::Duration::from_millis(120));
+    let host_slab = Arc::clone(slab.slab());
     let mut batcher = Batcher::new(CHANNELS, CHANNELS, SampleFormat::Float32, BATCH_SIZE, slab);
 
     let mut input = Planar::new();
@@ -1513,7 +1515,7 @@ fn a_timed_out_reply_is_drained_rather_than_paired_with_a_later_block() {
             &mut midi_out,
         );
         stamps.push(midi_out.iter().map(|e| e.ump.0[0]).collect());
-        wait_for_reply(&bridge, block as u64 + 1, WAIT_BUDGET);
+        wait_for_reply(&host_slab, block as u64 + 1, WAIT_BUDGET);
     }
 
     assert!(
@@ -1637,7 +1639,6 @@ fn stamped_server(stall: std::time::Duration, first_only: bool, rate: SampleRate
 
     let (bridge, bridge_thread) = PluginBridge::new(
         path.clone(),
-        Arc::clone(host_slab.slab()),
         tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
         tutti_plugin_types::PluginFormat::Vst3,
         Some(crate::EditorLoader::new(
@@ -1905,7 +1906,6 @@ fn a_refused_chunk_reports_its_midi_lost() {
         AudioSlab::create(tutti_fixtures::unique_name("test_refused"), stereo_layout()).unwrap();
     let (bridge, _thread) = PluginBridge::new(
         path,
-        Arc::clone(slab.slab()),
         tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
         tutti_plugin_types::PluginFormat::Vst3,
         Some(crate::EditorLoader::new(
@@ -2038,14 +2038,8 @@ fn two_stale_blocks(
     let _ = std::fs::remove_file(&path);
     let name = crate::socket_name(&path).unwrap();
     let listener = ListenerOptions::new().name(name).create_sync().unwrap();
-    let slab = AudioSlab::create(
-        tutti_fixtures::unique_name("test_stale-midi"),
-        stereo_layout(),
-    )
-    .unwrap();
     let (bridge, thread) = PluginBridge::new(
         path.clone(),
-        Arc::clone(slab.slab()),
         tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
         tutti_plugin_types::PluginFormat::Vst3,
         Some(crate::EditorLoader::new(

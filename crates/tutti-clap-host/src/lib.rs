@@ -89,7 +89,7 @@
 //! let inputs: [&[f32]; 2] = [&silence, &silence];
 //! let (mut left, mut right) = (vec![0.0f32; 512], vec![0.0f32; 512]);
 //! let mut outputs: [&mut [f32]; 2] = [&mut left, &mut right];
-//! let mut buffer = AudioBuffer32::new(&inputs, &mut outputs, 48_000.0);
+//! let mut buffer = AudioBuffer32::new(&inputs, &mut outputs, tutti_plugin_types::SampleRate::SR_48K);
 //!
 //! let transport = TransportInfo::default().with_tempo(120.0).with_playing(true);
 //! let midi = [(Offset::ZERO, midi::note_on(MidiChannel::FIRST, 60, 16384))];

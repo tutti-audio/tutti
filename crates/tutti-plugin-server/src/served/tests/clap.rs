@@ -389,7 +389,7 @@ fn a_deactivated_instance_renders_silence_and_tells_the_host() {
         inputs: &input_slices,
         outputs: &mut output_slices,
         num_samples: 64,
-        sample_rate: 44100.0,
+        sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
     };
     let mut out = tutti_plugin_types::ProcessOutput::default();
     instance
@@ -994,7 +994,7 @@ fn process_blocks(instance: &mut ClapInstance, blocks: usize) {
             inputs: &input_slices,
             outputs: &mut output_slices,
             num_samples,
-            sample_rate: 44100.0,
+            sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
         };
         let mut out = tutti_plugin_types::ProcessOutput::default();
         instance
@@ -1071,7 +1071,7 @@ fn test_clap_process_f32_silence() {
         inputs: &input_slices,
         outputs: &mut output_slices,
         num_samples,
-        sample_rate: 44100.0,
+        sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
     };
 
     let ctx = ProcessContext::new();
@@ -1122,7 +1122,7 @@ fn test_clap_process_f32_with_note() {
             inputs: &input_slices,
             outputs: &mut output_slices,
             num_samples,
-            sample_rate: 44100.0,
+            sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
         };
 
         let ctx = ProcessContext::new().midi(&note_on);
@@ -1157,7 +1157,7 @@ fn test_clap_process_f32_with_note() {
             inputs: &input_slices,
             outputs: &mut output_slices,
             num_samples,
-            sample_rate: 44100.0,
+            sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
         };
 
         let mut out = tutti_plugin_types::ProcessOutput::default();
@@ -1244,7 +1244,7 @@ fn test_reference_process_f32_silence() {
         inputs: &input_slices,
         outputs: &mut output_slices,
         num_samples,
-        sample_rate: 44100.0,
+        sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
     };
 
     let ctx = ProcessContext::new();
@@ -1284,7 +1284,7 @@ fn test_reference_process_f32_with_note() {
             inputs: &input_slices,
             outputs: &mut output_slices,
             num_samples,
-            sample_rate: 44100.0,
+            sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
         };
 
         let ctx = if i == 0 {
@@ -1360,7 +1360,7 @@ fn test_clap_lifecycle_processing_starts_on_process() {
         inputs: &input_slices,
         outputs: &mut output_slices,
         num_samples,
-        sample_rate: 44100.0,
+        sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
     };
     let mut out = tutti_plugin_types::ProcessOutput::default();
     instance
@@ -1744,7 +1744,7 @@ fn test_clap_process_with_param_automation() {
         inputs: &input_slices,
         outputs: &mut output_slices,
         num_samples,
-        sample_rate: 44100.0,
+        sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
     };
 
     let ctx = ProcessContext::new().params(&changes);
@@ -1787,7 +1787,7 @@ fn test_clap_process_with_note_expression() {
         inputs: &input_slices,
         outputs: &mut output_slices,
         num_samples,
-        sample_rate: 44100.0,
+        sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
     };
 
     let ctx = ProcessContext::new()
@@ -1824,7 +1824,7 @@ fn test_clap_process_with_transport() {
         inputs: &input_slices,
         outputs: &mut output_slices,
         num_samples,
-        sample_rate: 44100.0,
+        sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
     };
 
     let ctx = ProcessContext::new().transport(&transport);
@@ -2060,7 +2060,7 @@ fn test_clap_sample_rate_change() {
         inputs: &input_slices,
         outputs: &mut output_slices,
         num_samples,
-        sample_rate: 48000.0,
+        sample_rate: tutti_plugin_types::SampleRate::SR_48K,
     };
 
     let ctx = ProcessContext::new();
@@ -2096,7 +2096,7 @@ fn test_clap_sample_rate_cycle_multiple() {
             inputs: &input_slices,
             outputs: &mut output_slices,
             num_samples,
-            sample_rate: rate,
+            sample_rate: tutti_plugin_types::SampleRate::of(rate),
         };
 
         let ctx = ProcessContext::new();

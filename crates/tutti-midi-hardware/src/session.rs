@@ -6,12 +6,15 @@
 //!    [`MidiEndpoints`], so this file has no `#[cfg]` at all.
 //! 2. **It holds no output.** [`connect_output`](MidiSession::connect_output)
 //!    hands the caller the [`OpenOutput`] it opened, which the caller owns and
-//!    queues through with `&mut self`: nothing here sends, so nothing shares an
-//!    output with the session, and an unconnected output is a value the caller
-//!    does not have rather than a sink that silently swallows.
-//! 3. **No background threads.** A native-UMP send is a non-blocking syscall
-//!    and connections are held right here, so nothing needs an output thread.
-//!    (The ALSA *input* pump is the backend's own thread, not this type's.)
+//!    queues through with `&mut self`: nothing here sends, so the session
+//!    shares no output, and an unconnected output is a value the caller does
+//!    not have rather than a sink that silently swallows.
+//! 3. **No background threads of its own.** A native-UMP send is a
+//!    non-blocking syscall and connections are held right here. The threads
+//!    that exist belong to the values handed out: the ALSA *input* pump is the
+//!    backend's, and an [`OpenOutput`] asked to
+//!    [`active_sensing`](OpenOutput::active_sensing) runs one thread that
+//!    shares that output's sink with its owner until it drops.
 //!
 //! # Threading
 //!
@@ -49,7 +52,7 @@ use crate::stream::{DeviceStream, InputTiming, Negotiation};
 use tutti_graph::EventInletNode;
 use tutti_midi_device::{CiDeviceId, ProfileChange, ProfileId};
 use tutti_midi_device::{DeviceId, DeviceInfo, EntropyError, Learned, MidiIdentity, SavedDevice};
-use tutti_midi_runtime::InputInlets;
+use tutti_midi_runtime::{ClockWriters, InputInlets};
 use tutti_ump::{GroupSpan, MidiGroup};
 
 /// The set of open MIDI inputs, and the endpoints available to open.
@@ -372,6 +375,23 @@ impl MidiSession {
     /// when it is not an input. Otherwise whatever the backend raises while
     /// opening the port.
     pub fn connect_input(&mut self, device: impl Into<DeviceQuery>) -> Result<Connected> {
+        self.connect_input_with(device, ClockWriters::new().0)
+    }
+
+    /// [`connect_input`](Self::connect_input), the input's clock map reporting
+    /// its timing to `clock`: the readers stay with whoever made them
+    /// ([`ClockWriters::new`]) and outlive the connection. The writers drop
+    /// with the input, whether it is refused here (already open, or the OS
+    /// failed) or closed later, and their cells close until reopened.
+    ///
+    /// # Errors
+    ///
+    /// As [`connect_input`](Self::connect_input).
+    pub fn connect_input_with(
+        &mut self,
+        device: impl Into<DeviceQuery>,
+        clock: ClockWriters,
+    ) -> Result<Connected> {
         let timing = self.options.input_timing;
         let id = device.into().pick(self.inputs())?;
         // An input whose reader died is replaced, not kept: it is silent.
@@ -387,7 +407,7 @@ impl MidiSession {
         }
 
         // One ring per connection, retired with it.
-        let (input, inlet) = self.devices.open_input(&id, &self.ports)?;
+        let (input, inlet) = self.devices.open_input(&id, &self.ports, clock)?;
         // A UMP Endpoint with an output is asked what it is by the next
         // `poll`. Its output is the negotiation's own, not the session's one
         // destination: asking must not wait for, or disturb, that choice.

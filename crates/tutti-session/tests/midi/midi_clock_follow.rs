@@ -29,9 +29,15 @@ fn system(message: System) -> Ump {
 }
 
 fn rig() -> (Session, FakeCounters) {
+    rig_hearing(G)
+}
+
+/// The rig, its input hearing the Groups from the first through `last`.
+fn rig_hearing(last: MidiGroup) -> (Session, FakeCounters) {
     let (backend, fake) = FakeBackend::build_with(vec![endpoint(KEYS, "Keys")], vec![], usize::MAX);
     let mut s = Session::builder()
         .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareOptions::new())
+        .midi_groups(last)
         .sample_rate(SampleRate::of(RATE))
         .build()
         .expect("builds");
@@ -131,6 +137,42 @@ fn start_plays_from_zero_and_stop_stops() {
     assert!(s.playhead().beat().get() < 0.5, "{:?}", s.playhead().beat());
     send(&fake, system(System::Stop), Instant::now());
     until_rolling(&mut s, false, 50);
+}
+
+/// **The clock followed is the one of the Group chosen.** System Real Time
+/// messages go to any Group (M2-104 section 7.6.1), and a receiver takes its
+/// Timing Clock from the Group it selects, whichever others carry one: with the
+/// second Group followed, a Start on the first Group changes nothing, and a
+/// Start on the second rolls the transport. With nothing followed the transport
+/// answers to its own clock alone (`without_a_follow_a_start_changes_nothing`).
+/// Spec: m2-104/7.6.1#1, m2-104/7.6.1#2
+#[test]
+fn the_clock_of_the_chosen_group_is_followed_and_no_other() {
+    let second = MidiGroup::of(1);
+    let (mut s, fake) = rig_hearing(second);
+    let input = input(&s);
+    s.midi()
+        .follow_clock(FollowClock {
+            input,
+            group: second,
+            kind: ClockKind::BeatClock,
+        })
+        .expect("follows");
+    let _ = s.update();
+    send(&fake, system(System::Start), Instant::now());
+    for _ in 0..40 {
+        pump(&mut s);
+        assert!(
+            !s.playhead().playing(),
+            "the first Group's Start is not ours"
+        );
+    }
+    send(
+        &fake,
+        Message::System(second, System::Start).into(),
+        Instant::now(),
+    );
+    until_rolling(&mut s, true, 50);
 }
 
 /// **Off by default**: without a follow a Start changes nothing.

@@ -495,7 +495,8 @@ impl<T: Vst3Sample> Vst3Processor<T> {
             self.context_requirements
                 .unwrap_or(ProcessContextRequirements::all()),
         );
-        process_context.sampleRate = buffer.sample_rate;
+        // `ProcessContext` is the SDK's C struct: the unit stops at its `f64`.
+        process_context.sampleRate = buffer.sample_rate.get();
 
         // The setup comes from `process_setup()`, the same accessor
         // `apply_process_setup` hands the plugin, so a conformance observer
