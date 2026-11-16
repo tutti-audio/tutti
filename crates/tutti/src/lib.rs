@@ -424,8 +424,8 @@ pub mod session {
     };
     #[cfg(feature = "midi")]
     pub use tutti_session::{
-        FollowClock, FollowMachineControl, MIDI_INPUT_DROP_REPORT, MIDI_OUT_DROP_REPORT, MidiNodes,
-        MidiRouteId, NoSuchMidiRoute, NotInstrument, SendMachineControl, SinkLoaded,
+        FollowClock, FollowMachineControl, MIDI_INPUT_DROP_REPORT, MidiNodes, MidiRouteId,
+        NoSuchMidiRoute, NotInstrument, SendMachineControl, SinkLoaded,
     };
     #[cfg(feature = "soundfont")]
     pub use tutti_session::{GeneralMidi, SoundFontFile, soundfont};
