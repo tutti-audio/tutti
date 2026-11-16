@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tutti_rt::MainThreadMarker;
 
 use crate::pool::open::OpenCx;
-use crate::{JobFailed, PeerError, Presence};
+use crate::{PeerError, Presence, WorkerError};
 
 /// What the session holds of a loaded entry, whatever its kind.
 pub(crate) type Value = Box<dyn Any + Send>;
@@ -435,7 +435,7 @@ pub enum LoadError {
     PluginSwap(Arc<crate::CrossfadeRefused>),
     /// The load's job did not finish: it panicked, or the spawner dropped it.
     #[error(transparent)]
-    Job(#[from] JobFailed),
+    Job(#[from] WorkerError),
 }
 
 /// An erased identity: compared with another of the same kind.

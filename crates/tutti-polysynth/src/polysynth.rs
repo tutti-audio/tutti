@@ -630,7 +630,7 @@ impl PolySynth {
             // throughout it is the identity.
             let (from, to) = (self.master_applied, self.allocator.master_gain());
             let ramp = |from: Amplitude, to: Amplitude, i: usize| {
-                from.get() + (to.get() - from.get()) * ((i + 1) as f32 / n as f32)
+                tutti_dsp::lerp(from.get(), to.get(), (i + 1) as f32 / n as f32)
             };
             for (i, (&l, &r)) in left.iter().zip(right).enumerate() {
                 emit(

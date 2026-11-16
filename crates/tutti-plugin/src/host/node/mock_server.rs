@@ -102,10 +102,8 @@ fn read_frame(stream: &interprocess::local_socket::Stream) -> Option<(Vec<u8>, H
 }
 
 fn send(stream: &interprocess::local_socket::Stream, message: &BridgeMessage) -> bool {
-    use std::io::Write;
     let mut stream = stream;
-    let data = postcard::to_allocvec(message).expect("a reply serializes");
-    stream.write_all(&(data.len() as u32).to_be_bytes()).is_ok() && stream.write_all(&data).is_ok()
+    tutti_plugin_ipc::write_frame(&mut stream, message).is_ok()
 }
 
 /// One connection of the mock server: answers what it is sent. The audio
@@ -170,8 +168,7 @@ pub(super) fn rig(label: &str) -> Rig {
 /// published the block's audio.
 pub(super) fn rig_replying_after(label: &str, reply_delay: Duration) -> Rig {
     use interprocess::local_socket::{ListenerOptions, traits::Listener as _};
-    static COUNTER: tutti_types::Mint = tutti_types::Mint::new();
-    let shm = format!("diff_{label}_{}_{}", std::process::id(), COUNTER.mint());
+    let shm = tutti_fixtures::unique_name(&format!("diff_{label}"));
     let path = unique_socket_path().expect("the OS has a random source");
     let _ = std::fs::remove_file(&path);
     let listener = ListenerOptions::new()
@@ -182,7 +179,6 @@ pub(super) fn rig_replying_after(label: &str, reply_delay: Duration) -> Rig {
     let server_slab = AudioSlab::open(shm, layout()).unwrap();
     let (bridge, thread) = PluginBridge::new(
         path.clone(),
-        Arc::clone(slab.slab()),
         tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
         tutti_plugin_types::PluginFormat::Vst3,
         Some(tutti_plugin_ipc::EditorLoader::new(

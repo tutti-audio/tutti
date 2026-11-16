@@ -154,7 +154,7 @@ fn capture_round_trips_what_the_host_sent() {
         ),
     ];
 
-    let ctx = Vst2ProcessContext::new(SAMPLE_RATE).midi(&midi);
+    let ctx = Vst2ProcessContext::new(tutti_plugin_types::SampleRate::of(SAMPLE_RATE)).midi(&midi);
     instance.process_f32(&in_refs, &mut out_refs, BLOCK, &ctx);
 
     let cap = read_capture(&path);
@@ -215,7 +215,8 @@ fn the_transport_changed_edge_spans_blocks() {
     let playing = TransportInfo::new().with_playing(true);
     let mut changed = Vec::new();
     for transport in [&stopped, &playing, &playing, &stopped] {
-        let ctx = Vst2ProcessContext::new(SAMPLE_RATE).transport(transport);
+        let ctx = Vst2ProcessContext::new(tutti_plugin_types::SampleRate::of(SAMPLE_RATE))
+            .transport(transport);
         instance.process_f32(&in_refs, &mut out_refs, BLOCK, &ctx);
         let cap = read_capture(&path);
         assert!(cap.time_info_present, "the plugin read no transport");
@@ -239,7 +240,7 @@ fn tag_passthrough_oracle_produces_exact_samples() {
     let in_refs: Vec<&[f32]> = inputs.iter().map(|v| v.as_slice()).collect();
     let mut out_refs: Vec<&mut [f32]> = outputs.iter_mut().map(|v| v.as_mut_slice()).collect();
 
-    let ctx = Vst2ProcessContext::new(SAMPLE_RATE);
+    let ctx = Vst2ProcessContext::new(tutti_plugin_types::SampleRate::of(SAMPLE_RATE));
     instance.process_f32(&in_refs, &mut out_refs, BLOCK, &ctx);
 
     // Confirm the render happened before asserting on its output, or a host

@@ -36,7 +36,8 @@
 
 #![cfg(feature = "conformance")]
 
-use std::path::{Path, PathBuf};
+use crate::probe::probe_path;
+
 use std::sync::Mutex;
 use tutti_fixtures::main_thread;
 use tutti_graph::UmpAt;
@@ -143,40 +144,6 @@ fn probe_tag(bus: usize, channel: usize) -> f32 {
     bus as f32 * 1000.0 + channel as f32 + 1.0
 }
 
-/// The in-repo probe bundle, built by `build.rs` from
-/// `tests/support/audio-probe/`. Empty only if the `conformance` feature is off.
-const PROBE_DIR_BUILT: &str = env!("VST3_PROBE_DIR");
-
-/// Locate the probe binary inside a directory holding `audio-probe.vst3`.
-fn probe_in(dir: &str) -> Option<PathBuf> {
-    if dir.is_empty() {
-        return None;
-    }
-    tutti_plugin_types::bundle::any_module_in_bundle(
-        &Path::new(dir).join("audio-probe.vst3"),
-        tutti_plugin_types::bundle::ModuleKind::Vst3,
-    )
-}
-
-/// Path to the reference probe.
-///
-/// **Panics rather than returning `None`.** The probe is built from in-repo
-/// sources by `build.rs` as part of this very `cargo test` invocation, so its
-/// absence is a build failure, not an environmental one. Skipping instead is
-/// what let this suite print `ok. 9 passed` while executing nothing at all: the
-/// bundle was simply named differently than the lookup expected, and nothing
-/// said so.
-fn probe_path() -> PathBuf {
-    if let Some(p) = probe_in(PROBE_DIR_BUILT) {
-        return p;
-    }
-    panic!(
-        "audio-probe not found. build.rs builds it from tests/support/audio-probe \
-         into {PROBE_DIR_BUILT:?} whenever the `conformance` feature is on, so this \
-         means the build did not produce it."
-    );
-}
-
 /// Load and activate the probe.
 ///
 /// Returns `Option` only so call sites keep their existing shape; a load
@@ -255,7 +222,7 @@ fn render(
         inputs: &in_refs,
         outputs: &mut out_refs,
         num_samples: frames,
-        sample_rate: 48_000.0,
+        sample_rate: tutti_plugin_types::SampleRate::SR_48K,
     };
     let events = InputEvents {
         midi,
@@ -419,7 +386,7 @@ fn a_block_past_the_activated_length_is_refused() {
             inputs: &in_refs,
             outputs: &mut out_refs,
             num_samples: frames,
-            sample_rate: 48_000.0,
+            sample_rate: tutti_plugin_types::SampleRate::SR_48K,
         };
         let failed = inst
             .try_process(
@@ -795,7 +762,7 @@ fn f64_path_carries_the_same_audio() {
         inputs: &in_refs,
         outputs: &mut out_refs,
         num_samples: FRAMES,
-        sample_rate: 48_000.0,
+        sample_rate: tutti_plugin_types::SampleRate::SR_48K,
     };
     inst.process(
         &mut buffer,
@@ -1108,7 +1075,7 @@ fn note_expression_reaches_the_plugin_with_its_value() {
         inputs: &in_refs,
         outputs: &mut out_refs,
         num_samples: FRAMES,
-        sample_rate: 48_000.0,
+        sample_rate: tutti_plugin_types::SampleRate::SR_48K,
     };
     let events = InputEvents {
         midi: &midi,
@@ -1193,7 +1160,7 @@ fn a_per_note_pitch_bend_reaches_the_plugin_as_tuning() {
         inputs: &in_refs,
         outputs: &mut out_refs,
         num_samples: FRAMES,
-        sample_rate: 48_000.0,
+        sample_rate: tutti_plugin_types::SampleRate::SR_48K,
     };
     let events = InputEvents {
         midi: &midi,
@@ -1244,7 +1211,7 @@ fn midi_emitted_by_the_plugin_reaches_the_host() {
             inputs: &in_refs,
             outputs: &mut out_refs,
             num_samples: FRAMES,
-            sample_rate: 48_000.0,
+            sample_rate: tutti_plugin_types::SampleRate::SR_48K,
         };
         let out = inst.process(
             &mut buffer,

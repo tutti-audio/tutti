@@ -26,7 +26,7 @@ fn a_block_is_skipped_while_the_plugin_holds_the_input_list() {
         let [l, r] = &mut out;
         let outs: &mut [&mut [f32]] = &mut [&mut l[..], &mut r[..]];
         let ins: &[&[f32]] = &[&input[0][..], &input[1][..]];
-        let mut buffer = AudioBuffer::new(ins, outs, 48_000.0);
+        let mut buffer = AudioBuffer::new(ins, outs, tutti_plugin_types::SampleRate::SR_48K);
         let _ = plugin.process(&mut buffer, &InputEvents::default(), None, &transport);
         out
     };
@@ -74,7 +74,7 @@ fn a_block_is_skipped_while_the_plugin_holds_a_parameter_queue() {
         let [l, r] = &mut out;
         let outs: &mut [&mut [f32]] = &mut [&mut l[..], &mut r[..]];
         let ins: &[&[f32]] = &[&input[0][..], &input[1][..]];
-        let mut buffer = AudioBuffer::new(ins, outs, 48_000.0);
+        let mut buffer = AudioBuffer::new(ins, outs, tutti_plugin_types::SampleRate::SR_48K);
         let _ = plugin.process(
             &mut buffer,
             &InputEvents::default(),
@@ -125,7 +125,7 @@ fn a_refused_set_processing_fails_the_block() {
     let [l, r] = &mut out;
     let outs: &mut [&mut [f32]] = &mut [&mut l[..], &mut r[..]];
     let ins: &[&[f32]] = &[&input[0][..], &input[1][..]];
-    let mut buffer = AudioBuffer::new(ins, outs, 48_000.0);
+    let mut buffer = AudioBuffer::new(ins, outs, tutti_plugin_types::SampleRate::SR_48K);
     let result = plugin.try_process(
         &mut buffer,
         &InputEvents::default(),

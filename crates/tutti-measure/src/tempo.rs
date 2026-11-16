@@ -28,8 +28,9 @@
 //! These are offline or UI-thread calls: each allocates the novelty curve, its
 //! autocorrelation and the tracker's tables.
 
+use crate::level::SILENCE_FLOOR;
 use tutti_buffers::{Mono, Sample};
-use tutti_types::{Bpm, Confidence, Db, SampleRate, Samples, Seconds};
+use tutti_types::{Bpm, Confidence, SampleRate, Samples, Seconds};
 
 use crate::beat;
 use crate::convert::to_f32;
@@ -53,12 +54,6 @@ const MAX_BPM: f64 = 1000.0;
 
 /// The most runner-up tempi kept.
 const MAX_ALTERNATIVES: usize = 16;
-
-/// Input whose peak is below this is treated as silence. The audio entry
-/// points work on the spectral flux of the samples, which is relative, so
-/// without a floor the rounding noise of a near-silent buffer would still read
-/// as a pulse.
-const SILENCE_FLOOR: Db = Db(-90.0);
 
 /// A curve with less relative spread than this is flat: its peak-to-peak range
 /// is within rounding of its own level.
@@ -521,8 +516,8 @@ impl Periodicity {
     /// The prior's weight at `lag`, from 1 at the centre down.
     fn weight(&self, cfg: &TempoConfig, lag: usize) -> f32 {
         let octaves =
-            (self.bpm(lag as f64) / cfg.centre.get()).log2() / f64::from(cfg.spread.get());
-        (-0.5 * octaves * octaves).exp() as f32
+            libm::log2(self.bpm(lag as f64) / cfg.centre.get()) / f64::from(cfg.spread.get());
+        libm::exp(-0.5 * octaves * octaves) as f32
     }
 
     /// The lag refined to a fraction of a frame by a parabola through its

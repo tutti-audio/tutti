@@ -797,7 +797,7 @@ fn hash_cycle(n: f64, seed: u64) -> f32 {
 }
 
 /// Map an integer index to a stable pseudo-random value in `[-1, 1]`
-/// (splitmix64 finalizer).
+/// ([`splitmix64`]).
 ///
 /// Addressable rather than sequential: the value for index `n` is
 /// computable without having produced `n-1`, which is what lets a random
@@ -805,12 +805,22 @@ fn hash_cycle(n: f64, seed: u64) -> f32 {
 /// fork.
 #[inline]
 pub(crate) fn hash_bipolar(n: i64) -> f32 {
-    let mut z = (n as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
-    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-    z ^= z >> 31;
+    let z = splitmix64(n as u64);
     // Top 24 bits → [0, 1) → [-1, 1].
     ((z >> 40) as f32 / (1u32 << 24) as f32) * 2.0 - 1.0
+}
+
+/// The splitmix64 output function (Steele, Lea and Flood 2014; Vigna's
+/// reference) applied to the state `z`: the state advanced by the golden-ratio
+/// increment, then the two multiply-xorshift rounds. A stable,
+/// platform-independent mix whose single step from state `s` is the generator's
+/// output for `s`.
+#[inline]
+pub(crate) fn splitmix64(mut z: u64) -> u64 {
+    z = z.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
 }
 
 impl Waveform {

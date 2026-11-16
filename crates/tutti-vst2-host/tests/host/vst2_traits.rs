@@ -23,7 +23,7 @@ use tutti_vst2_test_plugin::{ProcessCapture, ProcessEntry};
 
 static PROBE_LOCK: Mutex<()> = Mutex::new(());
 
-const SAMPLE_RATE: f64 = 48_000.0;
+const SAMPLE_RATE: SampleRate = SampleRate::SR_48K;
 const BLOCK: usize = 64;
 
 // The opcodes the probe's trace records, as the SDK numbers them.
@@ -32,7 +32,7 @@ const START_PROCESS: i32 = 71;
 const STOP_PROCESS: i32 = 72;
 
 fn prepare() -> Prepare {
-    Prepare::new(SampleRate::of(SAMPLE_RATE), MaxBlock::of(Samples(BLOCK)))
+    Prepare::new(SAMPLE_RATE, MaxBlock::of(Samples(BLOCK)))
 }
 
 /// Holds the probe for one test and puts its switches, capture, trace and

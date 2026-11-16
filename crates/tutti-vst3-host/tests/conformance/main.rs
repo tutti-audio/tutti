@@ -3,6 +3,9 @@
 #[cfg(feature = "conformance")]
 #[path = "../support/conformance.rs"]
 mod conformance_support;
+#[cfg(feature = "conformance")]
+#[path = "../support/probe.rs"]
+mod probe;
 // The one copy of `active`: `conformance_support` already loads it.
 #[cfg(feature = "conformance")]
 use conformance_support::active;

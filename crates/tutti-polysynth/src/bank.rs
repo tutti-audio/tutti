@@ -179,7 +179,7 @@ pub(crate) struct VoiceBank {
     env_config: Adsr,
     shape: EnvShape,
     /// Per-sample one-pole coefficient the output gains glide with.
-    gain_glide: f32,
+    gain_coeff: f32,
     sample_rate: SampleRate,
     /// Sub-voices per voice: lane stride between consecutive voices.
     stride: usize,
@@ -227,7 +227,7 @@ impl std::fmt::Debug for VoiceBank {
             .field("filter", &self.filter)
             .field("env_config", &self.env_config)
             .field("shape", &self.shape)
-            .field("gain_glide", &self.gain_glide)
+            .field("gain_coeff", &self.gain_coeff)
             .field("sample_rate", &self.sample_rate)
             .field("stride", &self.stride)
             .field("voices", &self.voices)
@@ -284,7 +284,7 @@ impl VoiceBank {
             filter,
             env_config: *envelope,
             shape: EnvShape::new(envelope, sample_rate),
-            gain_glide: GAIN_GLIDE.one_pole_coeff(sample_rate),
+            gain_coeff: GAIN_TIME_CONSTANT.one_pole_coeff(sample_rate),
             sample_rate,
             stride: usize::from(stride.get()),
             voices,
@@ -371,7 +371,7 @@ impl VoiceBank {
     pub(crate) fn set_sample_rate(&mut self, sample_rate: SampleRate) {
         self.sample_rate = sample_rate;
         self.shape = EnvShape::new(&self.env_config, sample_rate);
-        self.gain_glide = GAIN_GLIDE.one_pole_coeff(sample_rate);
+        self.gain_coeff = GAIN_TIME_CONSTANT.one_pole_coeff(sample_rate);
         // The SVF's output mix depends on the tap and `Q`, not the rate, so
         // only the per-lane coefficients need recomputing.
         self.cutoff_seen.fill(f32::NAN);
@@ -667,7 +667,7 @@ impl VoiceBank {
 
         let [mut gain_l, mut gain_r] = self.gain[g];
         let [gain_l_target, gain_r_target] = self.gain_target[g];
-        let glide = V::splat(self.gain_glide);
+        let glide = V::splat(self.gain_coeff);
 
         for frame in acc.iter_mut().take(n) {
             inc += inc_step;
@@ -766,10 +766,11 @@ impl VoiceBank {
     }
 }
 
-/// Time constant of the output-gain glide. Half a millisecond settles a
+/// The time constant of the output-gain one-pole smoother (not `tutti_dsp`'s 5 ms
+/// linear `GAIN_GLIDE`): half a millisecond settles a
 /// velocity change to 1% in about 2.3 ms — inaudible as a fade, long enough
 /// that no single sample steps by more than 4% of the change at 48 kHz.
-const GAIN_GLIDE: Seconds = Seconds(0.0005);
+const GAIN_TIME_CONSTANT: Seconds = Seconds(0.0005);
 
 /// The seed the one counter that mixes to zero gets instead.
 const ZERO_SEED: NonZeroU32 = match NonZeroU32::new(0x6D2B_79F5) {

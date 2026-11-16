@@ -48,8 +48,8 @@ tutti-graph = { version = "0.0.1", path = "../tutti-graph" }
 interprocess = { version = "2" }
 
 # Logging
-tracing = "0.1"
-tracing-subscriber = "0.3"
+tracing.workspace = true
+tracing-subscriber.workspace = true
 
 # CLAP plugin hosting (optional)
 tutti-clap-host = { version = "0.0.1", path = "../tutti-clap-host", optional = true }

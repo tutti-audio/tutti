@@ -135,7 +135,11 @@ fn render(processor: &mut ClapProcessor, format: SampleFormat) -> Result<(), Plu
             let inputs = [input.as_slice(), input.as_slice()];
             let mut outputs = [left.as_mut_slice(), right.as_mut_slice()];
             let mut io = PluginIo {
-                buffer: AudioBufferMut::F32(AudioBuffer::new(&inputs, &mut outputs, 48_000.0)),
+                buffer: AudioBufferMut::F32(AudioBuffer::new(
+                    &inputs,
+                    &mut outputs,
+                    tutti_plugin_types::SampleRate::SR_48K,
+                )),
                 ctx: &ctx,
                 out: &mut out,
             };
@@ -148,7 +152,11 @@ fn render(processor: &mut ClapProcessor, format: SampleFormat) -> Result<(), Plu
             let inputs = [input.as_slice(), input.as_slice()];
             let mut outputs = [left.as_mut_slice(), right.as_mut_slice()];
             let mut io = PluginIo {
-                buffer: AudioBufferMut::F64(AudioBuffer::new(&inputs, &mut outputs, 48_000.0)),
+                buffer: AudioBufferMut::F64(AudioBuffer::new(
+                    &inputs,
+                    &mut outputs,
+                    tutti_plugin_types::SampleRate::SR_48K,
+                )),
                 ctx: &ctx,
                 out: &mut out,
             };
@@ -656,7 +664,11 @@ fn an_errored_block_does_not_allocate() {
     let inputs = [input.as_slice(), input.as_slice()];
     let mut outputs = [left.as_mut_slice(), right.as_mut_slice()];
     let mut io = PluginIo {
-        buffer: AudioBufferMut::F32(AudioBuffer::new(&inputs, &mut outputs, 48_000.0)),
+        buffer: AudioBufferMut::F32(AudioBuffer::new(
+            &inputs,
+            &mut outputs,
+            tutti_plugin_types::SampleRate::SR_48K,
+        )),
         ctx: &ctx,
         out: &mut out,
     };

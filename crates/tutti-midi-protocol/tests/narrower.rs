@@ -41,6 +41,7 @@ fn nrpn(address: Address, bank: u8, index: u8, value: u32) -> Message {
 /// **D.2.3: one Registered Controller is four Control Changes**: CC 101 (bank)
 /// and CC 100 (index), then CC 6 and CC 38 carrying the top 14 bits (Figure 97:
 /// CC 6 is bits 31-25, CC 38 bits 24-18).
+/// Spec: m2-104/6.2#4
 #[test]
 fn a_registered_controller_is_four_control_changes() {
     let mut n = Narrower::new();

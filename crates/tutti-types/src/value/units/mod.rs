@@ -83,7 +83,7 @@ pub use measures::{Confidence, Correlation, StereoBalance, Velocity};
 pub use ratios::{
     Cents, CentsSpan, CentsSpanOutOfRange, CompressionRatio, Q, Resonance, Semitones,
 };
-pub use time::{AtomicSampleRate, Hz, SampleRate, SampleRateOutOfRange, Seconds};
+pub use time::{AtomicSampleRate, Hz, ParkedSampleRate, SampleRate, SampleRateOutOfRange, Seconds};
 pub use transport::{
     Beat, BeatDuration, BeatsPerCycle, BeatsPerCycleOutOfRange, Bpm, BpmOutOfRange, PlaybackRate,
     ReadRate, SamplePosition, SrcRatio, StretchFactor,

@@ -43,7 +43,7 @@ use tutti_plugin_types::{
 use tutti_rt::{Overflow, PushError, Returned, RingReader, RingWriter, Rt, ring};
 
 use crate::audio_pipeline::{AudioBlock, AudioPipeline, Clock, ProcessExtras};
-use crate::served::{Render, through};
+use crate::served::Render;
 use crate::transport::Transport;
 
 /// How long the render thread waits for a request before it looks at its
@@ -141,19 +141,11 @@ impl<P: Processor + 'static> Render for End<P> {
         // refused): the block is silence and the plugin is not touched.
         let Some(processor) = self.rt.held() else {
             out.clear();
-            match buffer {
-                AudioBufferMut::F32(mut b) => b.clear_outputs(),
-                AudioBufferMut::F64(mut b) => b.clear_outputs(),
-            }
+            let mut buffer = buffer;
+            buffer.clear_outputs();
             return Ok(());
         };
-        // The closures are not redundant: the variant's constructor is one
-        // function over fixed lifetimes, `through` wants one for any lifetime.
-        #[allow(clippy::redundant_closure)]
-        match buffer {
-            AudioBufferMut::F32(b) => through(processor, b, ctx, out, |b| AudioBufferMut::F32(b)),
-            AudioBufferMut::F64(b) => through(processor, b, ctx, out, |b| AudioBufferMut::F64(b)),
-        }
+        buffer.process(processor, ctx, out)
     }
 }
 
@@ -359,6 +351,14 @@ impl RenderSide {
         while let Some(command) = self.commands.pop() {
             match command {
                 ToRender::Slab(slab) => {
+                    // A slab arrives only between the host's activations: the
+                    // host sets one up in an activation, with no Processor and so
+                    // no block in flight, and sends none until the setup is
+                    // answered (the command is queued before the `Ready` reply). So
+                    // the `reserve` below may allocate and the slab it replaces
+                    // may be dropped here (an unreaped `give_back` unmaps it on
+                    // this thread) without a block waiting on it.
+                    //
                     // The scratch is sized here, between blocks, to the most a
                     // block may carry; `handle_process` refuses any longer.
                     let layout = slab.layout_ref();

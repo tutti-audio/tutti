@@ -121,7 +121,7 @@ fn load() -> Loaded {
     )
     .unwrap_or_else(|e| panic!("in-process load of reference plugin at {path:?}: {e:?}"));
     Loaded {
-        unit: unit.bind(tempo()),
+        unit: unit.bind(tutti_fixtures::tempo()),
         handle,
         path,
     }
@@ -645,11 +645,6 @@ fn the_shape_declares_the_plugins_buses() {
             "VST2 states no placement"
         );
     }
-}
-
-/// The project's tempo map the node under test is bound to.
-fn tempo() -> tutti_transport::TempoReader {
-    tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo")
 }
 
 /// The cases run on the process's main thread (`harness = false`): the node's `prepare`

@@ -139,7 +139,7 @@ impl Loaded for Vst2Loaded {
         main: MainThreadMarker,
         prepare: Prepare,
     ) -> Result<(Vst2Processor, Vst2Controller), Refused<Self>> {
-        let rate = prepare.rate().get();
+        let rate = prepare.rate();
         let block = prepare.max_block().get();
         let Some(audio) = self.audio.take() else {
             return Err(Refused {
@@ -153,7 +153,8 @@ impl Loaded for Vst2Loaded {
         // Before each dispatch, so a plugin asking `audioMasterGetSampleRate` or
         // `GetBlockSize` from inside it reads the figure being set.
         self.host.set_sample_rate(rate);
-        self.instance.set_sample_rate(main, rate as f32);
+        // The `vst` crate takes the rate as a C `float`.
+        self.instance.set_sample_rate(main, rate.get() as f32);
         self.host.set_block_size(block);
         self.instance.set_block_size(main, block as i64);
         self.host.set_offline(prepare.mode().is_offline());

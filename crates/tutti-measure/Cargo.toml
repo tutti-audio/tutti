@@ -24,6 +24,10 @@ tutti-types = { version = "0.0.1", path = "../tutti-types", default-features = f
 # sampler's vocoder.
 tutti-dsp = { version = "0.0.1", path = "../tutti-dsp", default-features = false }
 
+# Pure-Rust transcendentals, so a reading does not depend on the platform's C
+# math library.
+libm = "0.2.15"
+
 # EBU R128 loudness metering (`loudness`). An online meter, which is why the
 # streaming Config/State/step shape fits it without buffering the signal.
 ebur128 = "0.1"

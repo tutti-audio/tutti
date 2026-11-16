@@ -316,3 +316,14 @@ fn one_second_holds_the_rate_rounded_up_and_at_least_one_frame() {
     assert_eq!(SampleRate::of(44_100.5).one_second(), Samples(44_101));
     assert_eq!(SampleRate::of(0.2).one_second(), Samples(1));
 }
+
+#[test]
+fn a_parked_rate_is_taken_once_and_the_latest_wins() {
+    use core::sync::atomic::Ordering::Relaxed;
+    let cell = ParkedSampleRate::new();
+    assert_eq!(cell.take(Relaxed), None, "a new cell is empty");
+    cell.park(SampleRate::SR_44K1, Relaxed);
+    cell.park(SampleRate::SR_48K, Relaxed);
+    assert_eq!(cell.take(Relaxed), Some(SampleRate::SR_48K));
+    assert_eq!(cell.take(Relaxed), None, "a take empties the cell");
+}

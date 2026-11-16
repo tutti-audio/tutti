@@ -41,7 +41,7 @@ pub(crate) fn track(novelty: &[f32], period: f64, tightness: f32) -> Vec<usize> 
     let (lo, hi) = gap_bounds(period, n);
     // `penalty[t - lo]` is the cost of a gap of `t` frames.
     let penalty: Vec<f32> = (lo..=hi)
-        .map(|t| -tightness * (t as f64 / period).ln().powi(2) as f32)
+        .map(|t| -tightness * libm::log(t as f64 / period).powi(2) as f32)
         .collect();
 
     let threshold = START_FRACTION * local.iter().copied().fold(0.0f32, f32::max);
@@ -113,7 +113,7 @@ fn local_score(novelty: &[f32], period: f64) -> Vec<f32> {
     let sigma = (period * SMOOTH_PERIOD_FRACTION).max(f64::MIN_POSITIVE);
     let half = kernel_half(sigma, novelty.len());
     let kernel: Vec<f64> = (-half..=half)
-        .map(|k| (-0.5 * (k as f64 / sigma).powi(2)).exp())
+        .map(|k| libm::exp(-0.5 * (k as f64 / sigma).powi(2)))
         .collect();
     (0..novelty.len() as isize)
         .map(|i| {

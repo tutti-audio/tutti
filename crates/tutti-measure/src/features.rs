@@ -58,11 +58,11 @@ pub fn spectral_flatness(magnitudes: &[f32]) -> f32 {
     let floor = mean * RELATIVE_POWER_FLOOR;
     let mean_log: f64 = magnitudes
         .iter()
-        .map(|&m| power(m).max(floor).ln())
+        .map(|&m| libm::log(power(m).max(floor)))
         .sum::<f64>()
         / magnitudes.len() as f64;
     // Both means in the log domain: exp(mean_log) / mean.
-    ((mean_log - mean.ln()).exp() as f32).clamp(0.0, 1.0)
+    (libm::exp(mean_log - libm::log(mean)) as f32).clamp(0.0, 1.0)
 }
 
 /// The frequency below which `fraction` of the spectrum's energy lies: the

@@ -29,9 +29,11 @@
 //! lock state) implements it. A counter's is a [`Count`].
 //!
 //! **Closed.** When the [`GaugeWriter`] or [`CounterWriter`] drops, the cell
-//! holds its last value and `is_closed` answers `true`: the subject is gone,
+//! holds its last value and `is_closed` answers `true`: no writer is attached,
 //! and the reading stays what it was. A reader that sees the cell closed sees
-//! every value the writer wrote.
+//! every value the writer wrote. [`Gauge::reopen`] and [`Counter::reopen`]
+//! attach a new writer to a closed cell, which starts from that value (a count
+//! goes on from its total), so a closed value is final only until a reopen.
 //!
 //! The model in `tests/gauge_loom.rs` runs this code.
 
@@ -154,6 +156,18 @@ impl Count for tutti_types::Samples {
     }
 }
 
+/// Re-anchors, as a [`Counter`] counts them.
+impl Count for tutti_types::Resyncs {
+    #[inline]
+    fn count(self) -> u64 {
+        self.get()
+    }
+    #[inline]
+    fn from_count(count: u64) -> Self {
+        Self::new(count)
+    }
+}
+
 /// The cell both shapes read: the value's word and the writer's gone flag.
 #[derive(Debug)]
 struct Shared {
@@ -171,10 +185,22 @@ impl Shared {
     }
 
     /// Whether the writer has dropped. Read before the value, so a closed
-    /// cell is read at its final value.
+    /// cell is read at its last value.
     #[inline]
     fn is_closed(&self) -> bool {
         self.closed.load(Ordering::Acquire)
+    }
+
+    /// Takes the writer's place if it has dropped: one exchange from closed to
+    /// open. The `Acquire` side pairs with the dropping writer's `Release`
+    /// store of `closed`, which follows its last value store, so the new
+    /// writer starts from that value; two callers race on one exchange and
+    /// one wins. No store-load pair exists to fence: the exchange is the one
+    /// access to the flag that decides.
+    fn reopen(&self) -> bool {
+        self.closed
+            .compare_exchange(true, false, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
     }
 }
 
@@ -215,11 +241,41 @@ impl<U: Reading> Gauge<U> {
         U::from_bits(self.cell.value.load(Ordering::Acquire))
     }
 
-    /// Whether the writer is gone: the value read is the last it wrote.
+    /// Whether no writer is attached: the value read is the last one written,
+    /// final until a [`reopen`](Self::reopen).
     #[inline]
     #[must_use]
     pub fn is_closed(&self) -> bool {
         self.cell.is_closed()
+    }
+
+    /// A new writer for the cell, once the previous one has dropped; `None`
+    /// while one is live (the cell is not [closed](Self::is_closed)), so there
+    /// is exactly one writer at a time, and of two concurrent calls on a
+    /// closed cell exactly one gets `Some`. The reading holds the last value
+    /// written: it does not reset. Control side, a cheap atomic exchange.
+    ///
+    /// A reader that saw the cell closed has not seen it for good: a reopened
+    /// cell is open again, and closes again when the new writer drops.
+    ///
+    /// ```
+    /// use tutti_rt::gauge;
+    /// use tutti_types::Db;
+    ///
+    /// let (mut writer, level) = gauge(Db(0.0));
+    /// writer.set(Db(-6.0));
+    /// assert!(level.reopen().is_none()); // the writer is live
+    /// drop(writer);
+    /// let mut again = level.reopen().expect("the writer dropped");
+    /// assert_eq!(level.get(), Db(-6.0)); // the last value stays
+    /// again.set(Db(-1.0));
+    /// assert_eq!(level.get(), Db(-1.0));
+    /// ```
+    pub fn reopen(&self) -> Option<GaugeWriter<U>> {
+        self.cell.reopen().then(|| GaugeWriter {
+            cell: Arc::clone(&self.cell),
+            _reading: PhantomData,
+        })
     }
 }
 
@@ -307,11 +363,36 @@ impl<U: Count> Counter<U> {
         U::from_count(self.cell.value.load(Ordering::Acquire))
     }
 
-    /// Whether the writer is gone: the total read is final.
+    /// Whether the writer is gone: the total read is final until a
+    /// [`reopen`](Self::reopen).
     #[inline]
     #[must_use]
     pub fn is_closed(&self) -> bool {
         self.cell.is_closed()
+    }
+
+    /// A new writer for the cell, once the previous one has dropped; `None`
+    /// while one is live, so there is exactly one writer at a time, and of two
+    /// concurrent calls on a closed cell exactly one gets `Some`. The total
+    /// carries on from where the last writer left it: it stays cumulative
+    /// across writers. Control side, a cheap atomic exchange.
+    ///
+    /// ```
+    /// use tutti_rt::counter;
+    ///
+    /// let (mut writer, lost) = counter::<u64>();
+    /// writer.add(2);
+    /// assert!(lost.reopen().is_none()); // the writer is live
+    /// drop(writer);
+    /// let mut again = lost.reopen().expect("the writer dropped");
+    /// again.add(3);
+    /// assert_eq!(lost.get(), 5);
+    /// ```
+    pub fn reopen(&self) -> Option<CounterWriter<U>> {
+        self.cell.reopen().then(|| CounterWriter {
+            cell: Arc::clone(&self.cell),
+            _count: PhantomData,
+        })
     }
 }
 

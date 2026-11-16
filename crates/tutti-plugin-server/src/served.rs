@@ -3,7 +3,7 @@
 //! The host crate of each format is the interpreter of its plugin's lifecycle
 //! (activation, restarts, requests). This is the server's one shell over them:
 //! it loads through [`OutOfProcess::load_served`], activates through
-//! [`Loaded::activate`](tutti_plugin_types::Loaded::activate) into the realtime [`Processor`] and the main-thread
+//! [`Loaded::activate`](tutti_plugin_types::Loaded::activate) into the realtime [`Processor`](tutti_plugin_types::Processor) and the main-thread
 //! [`Controller`](tutti_plugin_types::Controller), and runs both through
 //! [`Lifecycle`], so a format is a type argument and a row of the
 //! `served!` table, not a loader.
@@ -21,13 +21,12 @@ use std::time::{Duration, Instant};
 
 use tutti_plugin_ipc::BridgeMessage;
 use tutti_plugin_types::{
-    AudioBuffer, AudioBufferMut, AutomationMode, Control, Effect, Event, Features, Hand, HostOp,
-    Layout, Lifecycle, Load, LoadStage, LoadedPlugin, MAX_BLOCK_CHANNELS, MainThreadMarker,
-    MainWorkHandle, MaxBlock, Normalized, Notice, OutOfProcess, ParamEdit, ParamId,
-    ParamWriteError, ParameterInfo, PluginDescriptor, PluginError, PluginIo, PluginResult, Prepare,
-    Preset, PresetId, ProcessContext, ProcessOutput, ProcessWake, Processor, RenderMode,
-    RenderModeSupport, Request, Sample, SampleFormat, SampleRate, Samples, Seat, Stage, State,
-    StateUse, TrackInfo,
+    AudioBufferMut, AutomationMode, Control, Effect, Event, Features, Hand, HostOp, Layout,
+    Lifecycle, Load, LoadStage, LoadedPlugin, MainThreadMarker, MainWorkHandle, MaxBlock,
+    Normalized, Notice, OutOfProcess, ParamEdit, ParamId, ParamWriteError, ParameterInfo,
+    PluginDescriptor, PluginError, PluginResult, Prepare, Preset, PresetId, ProcessContext,
+    ProcessOutput, ProcessWake, RenderMode, RenderModeSupport, Request, SampleFormat, SampleRate,
+    Samples, Seat, Stage, State, StateUse, TrackInfo,
 };
 
 mod any;
@@ -695,55 +694,12 @@ impl<F: ServerSide> Render for Served<F> {
         // touched.
         let Some(processor) = self.lifecycle.processor() else {
             out.clear();
-            match buffer {
-                AudioBufferMut::F32(mut b) => b.clear_outputs(),
-                AudioBufferMut::F64(mut b) => b.clear_outputs(),
-            }
+            let mut buffer = buffer;
+            buffer.clear_outputs();
             return Ok(());
         };
-        // The closures are not redundant: the variant's constructor is one
-        // function over fixed lifetimes, `through` wants one for any lifetime.
-        #[allow(clippy::redundant_closure)]
-        match buffer {
-            AudioBufferMut::F32(b) => through(processor, b, ctx, out, |b| AudioBufferMut::F32(b)),
-            AudioBufferMut::F64(b) => through(processor, b, ctx, out, |b| AudioBufferMut::F64(b)),
-        }
+        buffer.process(processor, ctx, out)
     }
-}
-
-/// One block through the Processor: the same channels again in tables whose
-/// borrow is this call's own, because [`PluginIo`] holds one lifetime for
-/// tables and data and a `&mut [&mut _]` is invariant in the data's. An array,
-/// not a `Vec`: this is the audio thread.
-pub(crate) fn through<P: Processor, T: Sample>(
-    processor: &mut P,
-    buffer: AudioBuffer<'_, '_, T>,
-    ctx: &ProcessContext<'_>,
-    out: &mut ProcessOutput,
-    wrap: impl for<'a> FnOnce(AudioBuffer<'a, 'a, T>) -> AudioBufferMut<'a, 'a>,
-) -> PluginResult<()> {
-    let AudioBuffer {
-        inputs,
-        outputs,
-        num_samples,
-        sample_rate,
-    } = buffer;
-    // At most `MAX_BLOCK_CHANNELS`: the caller's table is the slab's width.
-    let width = outputs.len();
-    let mut rest = outputs.iter_mut();
-    let mut table: [&mut [T]; MAX_BLOCK_CHANNELS] =
-        std::array::from_fn(|_| rest.next().map_or(&mut [][..], |o| &mut **o));
-    let mut io = PluginIo {
-        buffer: wrap(AudioBuffer {
-            inputs,
-            outputs: &mut table[..width],
-            num_samples,
-            sample_rate,
-        }),
-        ctx,
-        out,
-    };
-    processor.process(&mut io)
 }
 
 impl<F: ServerSide> ServedPlugin for Served<F> {

@@ -158,3 +158,38 @@ fn a_reader_on_another_thread_sees_a_final_count() {
     drop(writer);
     assert_eq!(reader.join().unwrap(), 1_000);
 }
+
+#[test]
+fn a_cell_reopens_only_once_its_writer_has_dropped() {
+    let (writer, total) = counter::<u64>();
+    assert!(total.reopen().is_none(), "a live writer is the only one");
+    drop(writer);
+    assert!(total.is_closed());
+    let again = total.reopen().expect("the writer dropped");
+    assert!(!total.is_closed());
+    assert!(total.reopen().is_none(), "one writer at a time");
+    drop(again);
+    assert!(total.is_closed());
+    assert!(total.reopen().is_some(), "and again after that one drops");
+}
+
+#[test]
+fn a_counter_stays_cumulative_across_writers() {
+    let (mut first, total) = counter::<Samples>();
+    first.add(Samples(5));
+    drop(first);
+    let mut second = total.reopen().unwrap();
+    second.add(Samples(7));
+    assert_eq!(total.get(), Samples(12));
+}
+
+#[test]
+fn a_gauge_holds_its_last_reading_across_writers() {
+    let (mut first, level) = gauge(Db(0.0));
+    first.set(Db(-9.0));
+    drop(first);
+    let mut second = level.reopen().unwrap();
+    assert_eq!(level.get(), Db(-9.0));
+    second.set(Db(-2.0));
+    assert_eq!(level.get(), Db(-2.0));
+}

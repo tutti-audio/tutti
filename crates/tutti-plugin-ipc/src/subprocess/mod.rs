@@ -4,6 +4,7 @@
 mod launch;
 mod reaped;
 
+pub(crate) use launch::swap_slab;
 pub use launch::{LaunchedServer, launch};
 pub use reaped::Reaped;
 
