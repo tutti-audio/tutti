@@ -676,7 +676,12 @@ trait Rebind: Send {
 /// An in-process format's rebinder, and the variant of [`BoundPlaced`] its
 /// nodes go in.
 #[cfg_attr(
-    not(any(feature = "vst2", feature = "clap", feature = "vst3", feature = "au")),
+    not(any(
+        feature = "vst2",
+        feature = "clap",
+        feature = "vst3",
+        all(feature = "au", target_os = "macos")
+    )),
     expect(
         dead_code,
         reason = "a build with no in-process format has only served plugins"
@@ -766,7 +771,12 @@ impl PluginRebinder {
     }
 
     #[cfg_attr(
-        not(any(feature = "vst2", feature = "clap", feature = "vst3", feature = "au")),
+        not(any(
+            feature = "vst2",
+            feature = "clap",
+            feature = "vst3",
+            all(feature = "au", target_os = "macos")
+        )),
         expect(
             dead_code,
             reason = "a build with no in-process format has only served plugins"
