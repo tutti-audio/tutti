@@ -308,7 +308,7 @@ pub use tutti_midi_file as midi_file;
 /// `MidiChannel`, `MidiGroup`, `NoteNumber`, `NoteVelocity`), a timed event, the keys
 /// that play an instrument or a live input (`MidiKeys`, sent with a `Stamp`) and a take read with (`TapEvent`, `EventTapReader`),
 /// the session's route rule, events and errors (`MidiRouteRule`, `MidiEvent`,
-/// `midi::Error`), and under `midi-hardware` a device (`DeviceId`,
+/// `midi::Error`), a host's own output (`midi_sink`, `MidiSink`), and under `midi-hardware` a device (`DeviceId`,
 /// `DeviceInfo`), the ports the pool opens for them (`midi_input`, `midi_output`,
 /// `MidiInput`, `MidiOutput`) and what an open one said of itself (`Learned`, `SavedDevice`, `Match`), and the Profiles
 /// its MIDI-CI peers support and how to switch one (`PeerProfiles`,
@@ -332,7 +332,8 @@ pub mod midi {
     #[cfg(feature = "session")]
     pub use tutti_session::{
         AddedInstrument, AnyNode, FollowTempo, InstrumentHandle, Midi, MidiEvent, MidiLoad,
-        MidiRouteRule, TakePlacement,
+        MidiRouteRule, MidiSink, MidiSinkEntry, MidiSinkInfo, SinkOptions, Stamping, TakePlacement,
+        midi_sink,
     };
 
     #[cfg(feature = "midi-hardware")]

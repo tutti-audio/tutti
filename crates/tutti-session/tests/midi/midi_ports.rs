@@ -159,7 +159,7 @@ fn a_replug_goes_live_on_the_same_key_and_node() {
     assert_eq!(port.presence(), Presence::Lost(PortCause::Unplugged));
     assert!(matches!(s.pool_state(&"keys"), Some(PoolState::Loaded)));
     assert!(
-        !s.testing_midi_io().unwrap().is_any_input_connected(),
+        fake.connected_inputs().is_empty(),
         "the device's connection is closed"
     );
 
@@ -178,7 +178,7 @@ fn a_replug_goes_live_on_the_same_key_and_node() {
     assert_eq!(again.id(), port.id(), "the same port, not a new one");
     assert_eq!(again.node(), node, "wired to the same ingest node");
     assert!(s.graph_ref().contains(node));
-    assert!(s.testing_midi_io().unwrap().is_any_input_connected());
+    assert!(!fake.connected_inputs().is_empty());
 }
 
 /// **A returning device known only by its name is opened when it is the only
@@ -224,7 +224,7 @@ fn two_returning_devices_of_the_saved_name_leave_the_port_lost() {
     fake.plug(endpoint(2, "Keys"), PortDirection::Input);
     let _ = s.update();
     assert_eq!(port.presence(), Presence::Lost(PortCause::Unplugged));
-    assert!(!s.testing_midi_io().unwrap().is_any_input_connected());
+    assert!(fake.connected_inputs().is_empty());
 }
 
 /// **Another device's arrival does not open a lost port**, and the saved
@@ -243,7 +243,7 @@ fn another_devices_arrival_does_not_restore_a_lost_port() {
     plug(&fake, 2, "Pads", PortDirection::Input);
     let _ = s.update();
     assert_eq!(port.presence(), Presence::Lost(PortCause::Unplugged));
-    assert!(!s.testing_midi_io().unwrap().is_any_input_connected());
+    assert!(fake.connected_inputs().is_empty());
     plug(&fake, 1, "Keys", PortDirection::Input);
     let _ = s.update();
     assert_eq!(port.presence(), Presence::Live);
@@ -268,11 +268,7 @@ fn a_second_port_on_one_device_fails_in_use() {
         "{error:?}"
     );
     assert_eq!(
-        s.testing_midi_io()
-            .unwrap()
-            .ports()
-            .list_input_ports()
-            .len(),
+        fake.connected_inputs().len(),
         1,
         "the failed load left no port"
     );
@@ -334,7 +330,7 @@ fn a_dead_reader_is_reopened_or_reads_reader_failed() {
     fake.kill_input_reader(EndpointId::from_raw(1));
     let _ = s.update();
     assert_eq!(port.presence(), Presence::Live, "reopened at once");
-    assert!(s.testing_midi_io().unwrap().is_any_input_connected());
+    assert!(!fake.connected_inputs().is_empty());
 
     fake.refuse_input_opens(true);
     fake.kill_input_reader(EndpointId::from_raw(1));
@@ -480,7 +476,7 @@ fn a_released_handle_reads_closed_and_the_port_goes() {
         s.midi_input(&"keys"),
         Err(HandleError::NotPooled("keys"))
     ));
-    assert!(!s.testing_midi_io().unwrap().is_any_input_connected());
+    assert!(fake.connected_inputs().is_empty());
     // The node leaves once it has released what its device held: after a block.
     blocks(&s, 2);
     let _ = s.update();

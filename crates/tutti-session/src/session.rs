@@ -62,8 +62,8 @@ pub enum Phase {
     /// lane plays from the update its node does; then the note-envelope
     /// resyncs the apply owes are sent.
     AfterCommit,
-    /// The hardware out (an event tap on the clock)
-    /// drained to the output (feature `midi`; `Midi::set_hardware_out`).
+    /// Every output's event tap drained to its device or sink (feature `midi`:
+    /// the `midi_sink` entries, and with `midi-hardware` the `midi_output` ones).
     MidiOut,
     /// The stream's faults, as [`SessionEvent::Fault`] (a real-time clock),
     /// and the device's own events (feature `device`).
@@ -416,10 +416,8 @@ impl std::fmt::Debug for SessionEvent {
 /// The engine's MIDI, as graph nodes the builder inserts: the clock (Beat Clock
 /// and MTC, off until a host enables it), with its controls. An input port's
 /// ingest node is not here: each `midi_input` entry makes its own
-/// (`MidiInput::node`). The host's hardware out is
-/// not a node: the session reads an event tap on the clock's output
-/// ([`Midi::set_hardware_out`](crate::Midi::set_hardware_out)), and a
-/// `midi_output` port's node is fed by the clock.
+/// (`MidiInput::node`), and each output its own (`MidiSink::node`,
+/// `MidiOutput::node`), fed by the clock.
 #[cfg(feature = "midi")]
 #[derive(Clone, Debug)]
 pub struct MidiNodes {
@@ -543,7 +541,7 @@ pub struct Session<C: Clock = Offline> {
     pub(crate) rolling_sent: std::sync::atomic::AtomicBool,
     #[cfg(feature = "midi")]
     pub(crate) midi: Option<MidiNodes>,
-    /// Clips, live inputs, routes and the hardware out's output.
+    /// Clips, live inputs, routes and the outputs.
     #[cfg(feature = "midi")]
     pub(crate) midi_state: crate::midi::MidiState,
     /// What modulation applied, and the session's own declarations.
@@ -986,8 +984,12 @@ impl<C: Clock> Session<C> {
                 #[cfg(feature = "midi")]
                 {
                     let playhead = self.playhead();
-                    self.midi_state
+                    if self
+                        .midi_state
                         .midi_out_phase(&mut self.graph, &playhead, cx.now, out)
+                    {
+                        self.commit();
+                    }
                 }
             }
             Phase::Plugins => {
@@ -1261,7 +1263,7 @@ impl<C: Clock> Session<C> {
     }
 
     /// The session's MIDI: live inputs, clips, the hardware input's routes
-    /// and the hardware out.
+    /// and the outputs.
     #[cfg(feature = "midi")]
     pub fn midi(&mut self) -> crate::Midi<'_> {
         self.midi_and_ids().0
@@ -1669,16 +1671,5 @@ impl<C: Clock> Session<C> {
     #[cfg(feature = "midi")]
     pub fn midi_nodes(&self) -> Option<&MidiNodes> {
         self.midi.as_ref()
-    }
-
-    /// The raw OS MIDI layer, when the builder opened it
-    /// ([`SessionBuilder::midi_hardware`](crate::SessionBuilder::midi_hardware)):
-    /// for a test that drives the layer under the session (a fake backend's
-    /// hot-plug, a device's ports and negotiation). A host reaches devices
-    /// through the pool's `midi_input` and `midi_output` entries and the
-    /// events of `Session::update`.
-    #[cfg(all(feature = "midi-hardware", feature = "testing"))]
-    pub fn testing_midi_io(&self) -> Option<&tutti_midi_hardware::MidiSession> {
-        self.midi_io.as_ref()
     }
 }

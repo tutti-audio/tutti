@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use tutti_graph::UmpAt;
 use tutti_midi_runtime::{MidiOut, Outgoing, Taken};
-use tutti_session::{Session, UmpOut};
+use tutti_session::{Session, midi_sink};
 use tutti_transport::MotionEvent;
 use tutti_types::{MaxBlock, SampleRate, Samples};
 use tutti_ump::{Message, MidiGroup, System, Ump};
@@ -26,7 +26,7 @@ impl MidiOut for Wire {
     }
 }
 
-/// **A system session sends its MIDI clock to the hardware out with no device.**
+/// **A system session sends its MIDI clock to a sink with no device.**
 /// The clock node is enabled, the transport rolls, and the timer's blocks
 /// carry the 24-PPQN ticks to the output through `Phase::MidiOut`, timed by
 /// terms whose audio output is exactly zero.
@@ -42,10 +42,9 @@ fn the_midi_clock_reaches_the_output_on_the_timers_blocks() {
     let s = &mut system;
     let _ = s.update();
     s.midi_nodes().unwrap().clock_master.set_enabled(true);
-    s.midi().set_hardware_out(Some(UmpOut::new(
-        Box::new(wire.clone()),
-        SampleRate::SR_48K,
-    )));
+    s.pool(midi_sink("out", Arc::new(wire.clone())))
+        .expect("declares");
+    let _ = s.update();
     s.transport()
         .motion()
         .try_send(MotionEvent::Play)
