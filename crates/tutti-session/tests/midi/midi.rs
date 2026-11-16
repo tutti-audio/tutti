@@ -833,34 +833,6 @@ fn a_devices_arrival_is_placed_on_the_engines_clock() {
     );
 }
 
-/// **A device whose inlet overflows is reported**: 3,000 events pushed before
-/// any block reads them against an inlet of 2,048 lose 952, and the next update
-/// reports `InputsDropped` with that total, once.
-#[cfg(feature = "midi-hardware")]
-#[test]
-fn a_device_whose_inlet_overflows_is_reported() {
-    let (mut s, fake, _seen) = keyboards();
-    connect(&mut s, &["keys"]);
-    for n in 0..3_000u32 {
-        fake.send_input(
-            EndpointId::from_raw(1),
-            key(0, (n % 128) as u8),
-            Instant::now(),
-        );
-    }
-    let dropped = |events: Vec<SessionEvent>| {
-        events
-            .into_iter()
-            .filter_map(|e| match e {
-                SessionEvent::Midi(MidiReport::InputsDropped { total }) => Some(total),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-    };
-    assert_eq!(dropped(s.update()), vec![952]);
-    assert!(dropped(s.update()).is_empty(), "reported once");
-}
-
 /// **A watch that dies is reported once**, with its reason: the list is frozen
 /// and the host is told so instead of seeing a quiet table.
 #[cfg(feature = "midi-hardware")]

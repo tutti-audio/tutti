@@ -171,9 +171,49 @@ struct Waiting {
 /// The counts the node and the writer share.
 #[derive(Debug, Default)]
 struct Counts {
-    late: AtomicU64,
-    evicted: AtomicU64,
-    refused: AtomicU64,
+    late: Arc<AtomicU64>,
+    evicted: Arc<AtomicU64>,
+    refused: Arc<AtomicU64>,
+}
+
+/// The evicted, refused and late totals of successive inlets of one owner: each
+/// inlet made over them ([`EventInletNode::pair_with`]) adds to the same three
+/// counts, so an owner that replaces its inlet (a device that is unplugged and
+/// plugged again) reads one cumulative figure. The adds are atomic, so an old
+/// inlet still leaving the graph and its successor may count at once.
+#[derive(Clone, Debug, Default)]
+pub struct InletTotals {
+    late: Arc<AtomicU64>,
+    evicted: Arc<AtomicU64>,
+    refused: Arc<AtomicU64>,
+}
+
+impl InletTotals {
+    /// Totals at zero.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Events dropped from the inlets' waiting lists for room, as
+    /// [`Losses::evicted`].
+    #[must_use]
+    pub fn evicted(&self) -> u64 {
+        self.evicted.load(Ordering::Relaxed)
+    }
+
+    /// Events the inlets' ports refused, as [`Losses::refused`].
+    #[must_use]
+    pub fn refused(&self) -> u64 {
+        self.refused.load(Ordering::Relaxed)
+    }
+
+    /// Events the inlets emitted at offset 0 for being past their frame, as
+    /// [`Losses::late`].
+    #[must_use]
+    pub fn late(&self) -> u64 {
+        self.late.load(Ordering::Relaxed)
+    }
 }
 
 /// A cloneable view of an inlet's counts, for a thread that does not hold the
@@ -413,8 +453,19 @@ impl EventInletNode {
     /// capacity are all `capacity` events. Allocates; control side.
     #[must_use = "the writer is the only way to fill the ring"]
     pub fn pair(capacity: EventCapacity) -> (Self, EventInletWriter) {
+        Self::pair_with(capacity, &InletTotals::new())
+    }
+
+    /// [`pair`](Self::pair), the node counting its evicted and refused events on
+    /// `totals`, which outlive it. Allocates; control side.
+    #[must_use = "the writer is the only way to fill the ring"]
+    pub fn pair_with(capacity: EventCapacity, totals: &InletTotals) -> (Self, EventInletWriter) {
         let (producer, consumer) = ring::<Pushed>(capacity.slots(), Overflow::DropNewest);
-        let counts = Arc::new(Counts::default());
+        let counts = Arc::new(Counts {
+            late: Arc::clone(&totals.late),
+            evicted: Arc::clone(&totals.evicted),
+            refused: Arc::clone(&totals.refused),
+        });
         let clock = SeqWriter::new();
         let writer = EventInletWriter {
             ring: producer,
