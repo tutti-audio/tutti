@@ -30,10 +30,14 @@ fn stereo_sine(rate: f64, freq: f64, secs: f64, amp: f64) -> Vec<f32> {
 }
 
 fn measure(rate: f64, amp: f64) -> tutti_measure::Loudness {
-    let cfg = LoudnessConfig::new(SampleRate::of(rate), Bed::Stereo.topology()).unwrap();
+    let cfg = LoudnessConfig::new(Bed::Stereo.topology());
     let buf = stereo_sine(rate, 1000.0, 3.0, amp);
-    measure_loudness(&cfg, Interleaved::new(&buf, ChannelLayout::STEREO).unwrap())
-        .expect("stereo meters")
+    measure_loudness(
+        &cfg,
+        Interleaved::new(&buf, ChannelLayout::STEREO).unwrap(),
+        SampleRate::of(rate),
+    )
+    .expect("stereo meters")
 }
 
 /// True peak of a sine is its amplitude — a value with a closed form.
@@ -158,11 +162,12 @@ fn a_steady_tone_has_no_loudness_range() {
 /// module clamps to R128's -70 LUFS gate; this pins that it does.
 #[test]
 fn silence_reads_the_gate_not_negative_infinity() {
-    let cfg = LoudnessConfig::new(SampleRate::SR_48K, Bed::Stereo.topology()).unwrap();
+    let cfg = LoudnessConfig::new(Bed::Stereo.topology());
     let silence = vec![0.0f32; 48_000 * 2];
     let l = measure_loudness(
         &cfg,
         Interleaved::new(&silence, ChannelLayout::STEREO).unwrap(),
+        SampleRate::SR_48K,
     )
     .expect("stereo meters");
 

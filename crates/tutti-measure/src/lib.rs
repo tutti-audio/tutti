@@ -19,16 +19,16 @@
 //! - `correlate` — inter-channel phase correlation and stereo image.
 //! - `measure_loudness` — EBU R128 integrated loudness, loudness range and true
 //!   peak.
-//! - `step_windowed_loudness` — momentary (400 ms) and short-term (3 s) loudness and
-//!   true peak of a running stream, after every chunk.
-//! - `step_spectrum` — a streaming spectrum: power in dB per bin, or per
+//! - `WindowedLoudnessConfig::measure` — momentary (400 ms) and short-term (3 s)
+//!   loudness and true peak of a running stream, after every chunk.
+//! - `SpectrumConfig::measure` — a streaming spectrum: power in dB per bin, or per
 //!   third-octave or log band, with smoothing, peak hold and a rolling
 //!   spectrogram.
 //! - `spectral_features` — centroid, flatness and rolloff of every STFT frame.
 //! - `strip_silence` — the sample ranges that hold signal, with a minimum silence
 //!   length and padding.
-//! - `vectorscope_points` (`step_vectorscope` for blocks) — a stereo pair as
-//!   (side, mid) points for a goniometer.
+//! - `vectorscope_points` (`VectorscopeConfig::measure` for blocks) — a stereo pair
+//!   as (side, mid) points for a goniometer.
 //! - `cross_correlate` — FFT cross-correlation of two buffers at every lag.
 //! - `align` — GCC-PHAT delay between two takes: lag, sub-sample offset, confidence.
 //! - `estimate_tempo` / `track_beats` — tempo (BPM, confidence, octave alternatives) by
@@ -37,7 +37,7 @@
 //! - `transcribe` — monophonic audio to notes: a pitch (`Note` plus a cents bend),
 //!   a span in samples and a level, split on onsets and pitch changes;
 //!   `notes_from_track` takes your own pitch track.
-//! - `chroma` / `step_chroma` — harmonic pitch class profile (Gomez 2006) of spectral
+//! - `chroma` / `ChromaConfig::measure` — harmonic pitch class profile (Gomez 2006) of spectral
 //!   peaks, with an estimated tuning in cents; `estimate_key` — Krumhansl-Schmuckler
 //!   key with a confidence and a runner-up; `detect_chords` — major and minor
 //!   triads smoothed by Viterbi, as spans in samples.
@@ -53,27 +53,32 @@
 //!   results on a background thread owns that plumbing itself.
 //! - **No display.** These return numbers, not pixels.
 //!
-//! ## Configs, and carries where they are needed
+//! ## Configs, and meters where audio arrives in chunks
 //!
-//! Every algorithm takes a **config**: a value of chained options, so an invalid
-//! combination is refused with a named error rather than silently producing
-//! nothing.
+//! Every analysis takes a **config**: a value that describes the analysis and
+//! nothing about the audio. It holds thresholds, bands in hertz, durations in
+//! seconds and a [`Framing`] in samples, never a sample rate. The call that
+//! takes the audio binds the rate, derives the geometry and checks what
+//! depends on two settings together (a band against Nyquist, a window against
+//! its hop), answering with a named [`Error`].
 //!
-//! Six of them additionally need a **carry** between frames — onset detection
-//! diffs against the previous spectrum, waveform blocking holds a partial block,
-//! strip silence holds the region it is growing, chroma a running mean, windowed
-//! loudness its meter, and the spectrum its ring of samples and its readings.
-//! Those expose the carry as an explicit value and a `step` function, and their
-//! batch entry points (`detect_onsets`, `summarize`, `strip_silence`) *fold that
-//! same step*, so the two paths cannot drift. Tests pin the equality across chunk
-//! sizes and channel layouts.
+//! Each analysis has the same two terminals:
+//!
+//! - **one-shot**, like scipy: `x(&config, view, rate)` over a whole buffer;
+//! - **streaming**: `config.measure(rate)` makes a meter, `meter.push(view)`
+//!   takes the audio in chunks of any length, and `meter.finish()` reads the
+//!   result.
+//!
+//! The one-shot feeds a meter the whole buffer (`detect_onsets`, `summarize`,
+//! `strip_silence`, `measure_loudness`), so the two paths cannot drift. Tests
+//! pin the equality across chunk sizes and channel layouts. A meter
+//! changes only through `push` and `reset`.
 //!
 //! The rest are stateless: `yin`, `correlate`, `cross_correlate`,
-//! `spectral_features` are pure functions of their input (the vectorscope's
-//! `step_vectorscope` carries only its stride phase between blocks),
-//! and `stft` is batch-only — there is no incremental transform. Meter ballistics
-//! (`step_ballistics`) carries a smoothed reading, but that is a filter over results
-//! rather than a step of the correlation itself.
+//! `spectral_features` are pure functions of their input, and `stft` is
+//! batch-only: there is no incremental transform. Meter ballistics
+//! ([`BallisticsMeter`]) carries a smoothed reading, but that is a filter over
+//! results rather than a step of the correlation itself.
 //!
 //! ## Quick start
 //!
@@ -82,9 +87,9 @@
 //!     correlate, detect_onsets, summarize, yin, DetectionFunction,
 //!     OnsetConfig, PeakConfig, YinConfig,
 //! };
-//! use tutti_dsp::{FftScratch, StftGeometry};
+//! use tutti_dsp::FftScratch;
 //! use tutti_types::{ChannelLayout, SampleRate, Samples};
-//! use tutti_buffers::{Interleaved, StereoPlanes};
+//! use tutti_buffers::{Interleaved, Mono, StereoPlanes};
 //!
 //! let sample_rate = SampleRate::SR_44K1;
 //! let samples: Vec<f32> = vec![0.0; 44100];
@@ -94,21 +99,22 @@
 //! let blocks = summarize(
 //!     &PeakConfig::new(Samples(512), ChannelLayout::STEREO),
 //!     Interleaved::new(&samples, ChannelLayout::STEREO).unwrap(),
-//! );
+//! )?;
 //! let left = blocks.channel(0).expect("stereo has a channel 0");
 //! // A meter wants one number per block; a waveform draws both channels.
 //! let merged = blocks.to_mono();
 //!
-//! // Onsets, via spectral flux.
-//! let geometry = StftGeometry::new(sample_rate, Samples(2048), Samples(512))?;
+//! // Onsets, via spectral flux: the config describes the detection, the call
+//! // takes the audio and its rate.
 //! let onsets = detect_onsets(
-//!     &OnsetConfig::new(geometry, DetectionFunction::SpectralFlux),
-//!     &samples,
+//!     &OnsetConfig::new(DetectionFunction::SpectralFlux),
+//!     Mono::new(&samples),
+//!     sample_rate,
 //!     &mut fft,
 //! )?;
 //!
-//! // Pitch. An inverted range is refused here, not silently unvoiced later.
-//! let pitch = yin(&YinConfig::standard(sample_rate)?, &samples)?;
+//! // Pitch. A band above Nyquist is refused here, not silently unvoiced later.
+//! let pitch = yin(&YinConfig::new(), Mono::new(&samples), sample_rate)?;
 //!
 //! // Stereo correlation. The planes are paired once — a length mismatch is
 //! // refused here rather than silently truncated inside the measurement.
@@ -179,36 +185,35 @@
 //! ## Constraint: a bad setting is unwritable, and a bad combination is refused by the call that takes it
 //!
 //! A config is `Config::new(required..)` and then chained options (`self` in,
-//! a bare name, `Self` out). An option cannot fail: a setting with one range of
-//! its own is a range-checked type (`Harmonics`, `Tightness`, `SpectrumFloor`,
-//! `NoteSpan`, `FiniteLevel`, `PitchHop`, ...) whose `new` refuses a value outside
-//! the range, and a setting that spans two values is one type (`FrequencyBand`,
-//! `PassBand`, `TempoRange`: a low below a high). What depends on the
-//! geometry or the input is checked by the call that takes the config: a band
-//! against Nyquist, a banding against the window, a tempo against the curve's
-//! length. That call answers with a named [`Error`], where a detector that
-//! *accepted* an inverted range would report "unvoiced" forever instead, which
-//! is a silent wrong answer rather than an error. A constructor returns `Error`
-//! only where its arguments are valid together (a geometry for a spectrum, a
-//! topology that has placement for a loudness meter).
+//! a bare name, `Self` out); `new` takes only what has no default. An option
+//! cannot fail: a setting with one range of its own is a range-checked type
+//! (`Harmonics`, `Tightness`, `SpectrumFloor`, `NoteSpan`, `FiniteLevel`,
+//! `PitchHop`, `OnsetThreshold`, ...) whose `new` refuses a value outside the
+//! range, and a setting that spans two values is one type (`FrequencyBand`,
+//! `TempoRange`: a low below a high). What depends on the rate, the framing or
+//! the input is checked by the call that takes the config: a band against
+//! Nyquist, a banding against the window, a tempo against the curve's length.
+//! That call answers with a named [`Error`], where a detector that *accepted*
+//! an inverted range would report "unvoiced" forever instead, which is a
+//! silent wrong answer rather than an error.
 //!
-//! The measurement entry points are correspondingly thin on failure. `correlate` and
-//! `summarize` are infallible — the pairing and layout checks already happened, in
-//! `StereoPlanes::new` and `PeakConfig`. `measure_loudness` returns `Option`,
-//! because too little audio to gate is an absence rather than a fault. Only `yin`
-//! and `detect_onsets` return `Result`, and both do so before touching a sample.
+//! The one-shot entry points are correspondingly thin on failure. `correlate`
+//! is infallible — the pairing check already happened, in
+//! `StereoPlanes::new`. `strip_silence` has nothing to refuse.
+//! `yin`, `detect_onsets`, `summarize` and `measure_loudness` return `Result`,
+//! and refuse before touching a sample.
 //!
 //! `Result`, not `assert!`, throughout: a caller feeding a short buffer gets an
 //! error rather than a panic.
 //!
 //! ## Allocation
 //!
-//! The batch entry points allocate their results, so call them off the audio
-//! thread. The `step_*` functions and `FftScratch` let a caller reuse buffers
-//! across calls. `step_spectrum` allocates nothing once its state is built, and
-//! `step_windowed_loudness` allocates nothing either, but reads three-second windows
-//! on every call, so it belongs on the consumer side of a tap's `TapReader`, not in an
-//! audio callback.
+//! The one-shot entry points allocate their results, so call them off the audio
+//! thread. A meter's `push` and `FftScratch` let a caller reuse buffers across
+//! calls. A `SpectrumMeter` allocates nothing once built, and a
+//! `WindowedMeter` allocates nothing either, but reads three-second windows
+//! on every call, so it belongs on the consumer side of a tap's `TapReader`, not
+//! in an audio callback.
 //!
 //! ## Features
 //!
@@ -221,37 +226,38 @@
 //!
 //! ## Items
 //!
+//! - Framing: a [`Framing`] is a window and a hop in samples, taken by the
+//!   framed configs ([`OnsetConfig`], [`SpectrumConfig`], [`ChromaConfig`],
+//!   [`TempoConfig`], [`ChordConfig`]).
 //! - Transform: [`stft`], [`stft_magnitude`], [`stft_polar`] and
-//!   [`istft_transform`], over a validated [`StftGeometry`](tutti_dsp::StftGeometry) with a
+//!   [`istft_transform`], over a [`StftRequest`] with a
 //!   [`CosineWindow`](tutti_dsp::CosineWindow), producing [`Stft`], [`StftMagnitude`] or [`StftPolar`].
 //! - Pitch: [`yin()`] and [`yin_track`] with a [`YinConfig`], returning
 //!   [`PitchEstimate`] and [`Pitch`]; [`median_filter`] and [`penalize_jumps`]
 //!   clean up a track.
 //! - Onsets: [`detect_onsets`] with an [`OnsetConfig`] and a
-//!   [`DetectionFunction`], or incrementally with [`step_onset`] and
-//!   [`finish_onset`]; [`OnsetState::novelty`] reads the raw detection curve.
+//!   [`DetectionFunction`], or incrementally with an [`OnsetMeter`];
+//!   [`OnsetMeter::novelty`] reads the raw detection curve.
 //! - Waveform blocks: [`summarize`] with a [`PeakConfig`] into [`PeakBlocks`],
-//!   or incrementally with [`step_peaks`] and [`finish_peaks`].
+//!   or incrementally with a [`PeakMeter`].
 //! - Loudness: [`measure_loudness`] with a [`LoudnessConfig`] into
-//!   [`Loudness`], or incrementally with [`step_loudness`] and
-//!   [`finish_loudness`].
-//! - Windowed loudness: [`step_windowed_loudness`] with a [`WindowedLoudnessConfig`] and a
-//!   [`WindowedLoudnessState`] reads momentary (400 ms), short-term (3 s) and true
-//!   peak as a [`WindowedReading`] after every chunk.
-//! - Spectrum: [`step_spectrum`] with a [`SpectrumConfig`] and a
-//!   [`SpectrumState`] streams power in dB per bin or [`Banding`] band, with
-//!   [`Smoothing`], held peaks and a rolling spectrogram.
-//! - Stereo: [`correlate`] into a [`StereoReading`], smoothed for a meter by
-//!   [`step_ballistics`].
+//!   [`Loudness`], or incrementally with a [`LoudnessMeter`]; the true peak
+//!   alone with a [`TruePeakConfig`] ([`measure_true_peak`], [`TruePeakMeter`]).
+//! - Windowed loudness: a [`WindowedMeter`] from a [`WindowedLoudnessConfig`]
+//!   reads momentary (400 ms), short-term (3 s) and true peak as a
+//!   [`WindowedReading`] after every chunk.
+//! - Spectrum: a [`SpectrumMeter`] from a [`SpectrumConfig`] streams power in dB
+//!   per bin or [`Banding`] band, with [`Smoothing`], held peaks and a rolling
+//!   spectrogram.
+//! - Stereo: [`correlate`] into a [`StereoReading`], smoothed for a meter by a
+//!   [`BallisticsMeter`].
 //! - Spectral shape: [`spectral_centroid`], [`spectral_flatness`] and
 //!   [`spectral_rolloff`] over one magnitude spectrum, or [`spectral_features`]
 //!   over every frame of a [`StftMagnitude`], into [`SpectralFeatures`].
 //! - Strip silence: [`strip_silence`] with a [`SilenceConfig`] into
-//!   [`Region`]s, or incrementally with [`step_silence`] and
-//!   [`finish_silence`], which reads the config the scan used.
+//!   [`Region`]s, or incrementally with a [`SilenceMeter`].
 //! - Vectorscope: [`vectorscope_points`] turns a stereo pair into
-//!   [`ScopePoint`]s (side, mid), or block by block with [`step_vectorscope`]
-//!   and a [`VectorscopeState`].
+//!   [`ScopePoint`]s (side, mid), or block by block with a [`VectorscopeMeter`].
 //! - Cross-correlation: [`cross_correlate`] into a [`CrossCorrelation`], read
 //!   at a lag or for its [`CorrelationPeak`].
 //! - Take alignment: [`align()`] with an [`AlignConfig`] finds an [`Alignment`]
@@ -264,8 +270,8 @@
 //!   takes your own pitch track, [`frame_levels`] and onsets;
 //!   [`VelocityRange`] maps a level to a MIDI velocity.
 //! - Harmony: [`chroma()`] with a [`ChromaConfig`] folds spectral peaks into
-//!   twelve pitch classes and estimates the [`Tuning`], or incrementally with
-//!   [`step_chroma`] and a [`ChromaState`]; [`estimate_key`] finds a [`Key`] by
+//!   twelve pitch classes and estimates the [`Tuning`], or incrementally with a
+//!   [`ChromaMeter`]; [`estimate_key`] finds a [`Key`] by
 //!   Krumhansl-Schmuckler over a [`KeyProfile`]; [`detect_chords`] with a
 //!   [`ChordConfig`] smooths triads into [`ChordSpan`]s by Viterbi.
 
@@ -273,8 +279,10 @@ mod align;
 mod beat;
 mod chord;
 mod chroma;
+mod convert;
 mod error;
 mod features;
+mod framing;
 mod key;
 mod loudness;
 mod notes;
@@ -294,55 +302,44 @@ mod vectorscope;
 mod xcorr;
 mod yin;
 
-pub use align::{AlignConfig, Alignment, PassBand, align};
+pub use align::{AlignConfig, Alignment, align};
 pub use chord::{
     ChordConfig, ChordQuality, ChordSpan, SelfTransition, SelfTransitionError, Sharpness,
     SharpnessError, detect_chords,
 };
 pub use chroma::{
-    Chroma, ChromaConfig, ChromaState, FrequencyBand, HarmonicDecay, HarmonicDecayError, Harmonics,
+    Chroma, ChromaConfig, ChromaMeter, FrequencyBand, HarmonicDecay, HarmonicDecayError, Harmonics,
     HarmonicsError, PeakFloor, PeakFloorError, Tuning, TuningOffset, TuningOffsetError, chroma,
-    step_chroma,
 };
 pub use error::{Error, Result};
 pub use features::{
     SpectralFeatures, spectral_centroid, spectral_features, spectral_flatness, spectral_rolloff,
 };
+pub use framing::Framing;
 pub use key::{Key, KeyEstimate, KeyProfile, Mode, estimate_key, estimate_key_from_mean};
 pub use loudness::{
-    Loudness, LoudnessConfig, LoudnessState, TruePeakState, WindowedLoudnessConfig,
-    WindowedLoudnessState, WindowedRate, WindowedRateError, WindowedReading,
-    finish as finish_loudness, finish_true_peak, measure_loudness, step_loudness, step_true_peak,
-    step_windowed_loudness,
+    Loudness, LoudnessConfig, LoudnessMeter, TruePeakConfig, TruePeakMeter, WindowedLoudnessConfig,
+    WindowedMeter, WindowedReading, measure_loudness, measure_true_peak,
 };
-// `finish` is renamed on the way out, matching `finish_peaks` /
-// `finish_loudness` above: three modules each have a `finish`, and the bare name
-// says nothing about which accumulator it drains.
 pub use notes::{
     NoteConfig, NoteEvent, NoteSpan, NoteSpanError, PitchHop, PitchHopError, PitchSplit,
     PitchSplitError, VelocityRange, frame_levels, notes_from_track, transcribe,
 };
 pub use onset::{
-    DetectionFunction, Onset, OnsetConfig, OnsetState, complex_domain_deviation, detect_onsets,
-    finish as finish_onset, high_frequency_content, spectral_energy, spectral_flux, step_onset,
-    suppress_close_onsets,
+    DetectionFunction, Onset, OnsetConfig, OnsetGap, OnsetGapError, OnsetMeter, OnsetSensitivity,
+    OnsetSensitivityError, OnsetThreshold, OnsetThresholdError, complex_domain_deviation,
+    detect_onsets, high_frequency_content, spectral_energy, spectral_flux, suppress_close_onsets,
 };
-pub use peaks::{
-    PeakAccum, PeakBlock, PeakBlocks, PeakConfig, PeakState, finish as finish_peaks, step_peaks,
-    summarize, summarize_block,
-};
+pub use peaks::{PeakBlock, PeakBlocks, PeakConfig, PeakMeter, summarize, summarize_block};
 pub use silence::{
-    FiniteLevel, FiniteLevelError, Region, SilenceConfig, SilenceState, finish as finish_silence,
-    step_silence, strip_silence,
+    FiniteLevel, FiniteLevelError, Region, SilenceConfig, SilenceMeter, strip_silence,
 };
 pub use spectrum::{
     BandCount, BandCountError, Banding, BandsPerOctave, BandsPerOctaveError, PeakDecay,
-    PeakDecayError, Smoothing, SpectrumConfig, SpectrumFloor, SpectrumFloorError, SpectrumState,
-    SpectrumTime, SpectrumTimeError, step_spectrum,
+    PeakDecayError, Smoothing, SpectrumConfig, SpectrumFloor, SpectrumFloorError, SpectrumMeter,
+    SpectrumTime, SpectrumTimeError,
 };
-pub use stereo::{
-    Ballistics, BallisticsState, StereoLevels, StereoReading, correlate, step_ballistics,
-};
+pub use stereo::{Ballistics, BallisticsMeter, StereoLevels, StereoReading, correlate};
 pub use tempo::{
     Alternatives, AlternativesError, BeatGrid, PriorSpread, PriorSpreadError, Tempo,
     TempoCandidate, TempoConfig, TempoRange, Tightness, TightnessError, estimate_tempo,
@@ -352,7 +349,7 @@ pub use transform::{
     HopPolicy, NormalizedMagnitudes, RawMagnitudes, SampleRange, Stft, StftMagnitude, StftPolar,
     StftRequest, istft as istft_transform, stft, stft_magnitude, stft_polar,
 };
-pub use vectorscope::{ScopePoint, VectorscopeState, step_vectorscope, vectorscope_points};
+pub use vectorscope::{ScopePoint, VectorscopeConfig, VectorscopeMeter, vectorscope_points};
 pub use xcorr::{CorrelationPeak, CrossCorrelation, cross_correlate};
 pub use yin::{
     Pitch, PitchEstimate, YinConfig, YinThreshold, YinThresholdError, median_filter,

@@ -18,17 +18,20 @@
 //! - a **phase-inverted** pair folds to a flat line — the clip looks like
 //!   silence and is not.
 //!
-//! [`PeakConfig`] carries a [`ChannelLayout`], [`PeakConfig::chunk_matches`]
-//! rejects a mis-strided chunk, and [`PeakState`] carries a ragged *block*
-//! tail so a caller feeding chunks of any length loses nothing.
+//! [`PeakConfig`] carries a [`ChannelLayout`], [`PeakMeter::push`] refuses a
+//! mis-strided chunk, and the meter carries a ragged *block* tail so a caller
+//! feeding chunks of any length loses nothing.
 //!
 //! A meter or a loudness reading genuinely wants one number per block. Those
 //! call [`PeakBlocks::to_mono`], where the reduction is visible at the call
 //! site — and where its semantics can be stated, because they are *not* the
 //! semantics of folding first.
 
-use tutti_buffers::{Interleaved, PlanesMut, deinterleave};
+use tutti_buffers::{Interleaved, Mono, PlanesMut, Sample, deinterleave};
 use tutti_types::{Amplitude, ChannelLayout, Samples};
+
+use crate::convert::for_blocks;
+use crate::{Error, Result};
 
 /// One block of a waveform summary, for one channel.
 ///
@@ -184,10 +187,14 @@ impl PeakBlocks {
 }
 
 /// How input is blocked.
+///
+/// Blocking is in samples of one channel, so the config holds no sample rate
+/// and [`measure`](Self::measure) takes none.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PeakConfig {
     /// How many [`Samples`] of one channel each block summarizes. Sets the
-    /// horizontal resolution of a waveform display.
+    /// horizontal resolution of a waveform display. A block of zero is refused
+    /// by [`measure`](Self::measure) ([`Error::ZeroBlock`]).
     pub samples_per_block: Samples,
     /// Channel layout of the fed frames. One block series is produced per
     /// channel.
@@ -203,20 +210,30 @@ impl PeakConfig {
         }
     }
 
-    /// Whether `chunk` is the width this config blocks at.
+    /// A meter that blocks chunks of `layout`'s width.
     ///
-    /// The carried half-frame is `layout`-wide, so a chunk of a different width
-    /// spliced onto it realigns at the wrong stride and folds two adjacent
-    /// chunks into one wrong frame. Expressible only because the width travels
-    /// with the buffer — as a bare slice the disagreement cannot be stated.
-    #[inline]
-    pub fn chunk_matches(&self, chunk: Interleaved<'_>) -> bool {
-        chunk.layout() == self.layout
+    /// # Errors
+    ///
+    /// [`Error::ZeroBlock`] for a block of zero samples.
+    pub fn measure(&self) -> Result<PeakMeter> {
+        if self.samples_per_block.is_zero() {
+            return Err(Error::ZeroBlock);
+        }
+        Ok(PeakMeter {
+            cfg: *self,
+            state: PeakState::default(),
+            out: PeakAccum::new(),
+        })
     }
 }
 
 /// Summarizes one block. Stateless.
-pub fn summarize_block(samples: &[f32]) -> PeakBlock {
+pub fn summarize_block<S: Sample>(samples: Mono<'_, S>) -> PeakBlock {
+    block_of(&crate::convert::to_f32(samples.samples()))
+}
+
+/// [`summarize_block`] over `f32` samples.
+fn block_of(samples: &[f32]) -> PeakBlock {
     if samples.is_empty() {
         return PeakBlock::default();
     }
@@ -243,7 +260,7 @@ pub fn summarize_block(samples: &[f32]) -> PeakBlock {
 /// what lets [`step_peaks`] emit blocks channel-major without buffering a whole
 /// chunk's output.
 #[derive(Debug, Clone, Default)]
-pub struct PeakState {
+struct PeakState {
     /// Per channel: samples of an incomplete block. One plane per channel, all
     /// the same length.
     pending: Vec<Vec<f32>>,
@@ -256,15 +273,9 @@ pub struct PeakState {
 }
 
 impl PeakState {
-    /// An empty carry: no pending block, nothing consumed.
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     /// Drops every carry and the consumed count, so the next chunk starts a
     /// fresh stream. Scratch capacity is kept.
-    pub fn reset(&mut self) {
+    fn reset(&mut self) {
         for plane in &mut self.pending {
             plane.clear();
         }
@@ -283,16 +294,13 @@ impl PeakState {
 /// is why the accumulator is a [`PeakBlocks`] and not a bare `Vec`: appending
 /// channel-major to a flat buffer requires knowing where each channel's run
 /// ends, and only the accumulator does.
-pub fn step_peaks(
+fn step_peaks(
     cfg: &PeakConfig,
     state: &mut PeakState,
     chunk: Interleaved<'_>,
     out: &mut PeakAccum,
 ) {
     let block = cfg.samples_per_block.get();
-    if block == 0 || !cfg.chunk_matches(chunk) {
-        return;
-    }
     let channels = cfg.layout.count() as usize;
     out.begin(cfg.layout);
 
@@ -336,13 +344,13 @@ fn cut_blocks(pending: &mut Vec<f32>, block: usize, samples: &[f32], out: &mut V
         if pending.len() < block {
             return;
         }
-        out.push(summarize_block(pending));
+        out.push(block_of(pending));
         pending.clear();
     }
 
     let mut chunks = rest.chunks_exact(block);
     for whole in chunks.by_ref() {
-        out.push(summarize_block(whole));
+        out.push(block_of(whole));
     }
     pending.extend_from_slice(chunks.remainder());
 }
@@ -352,26 +360,25 @@ fn cut_blocks(pending: &mut Vec<f32>, block: usize, samples: &[f32], out: &mut V
 ///
 /// [`summarize`] keeps a short final block, so the streaming path must too or
 /// the two disagree on any input that is not a whole number of blocks.
-pub fn finish(state: &mut PeakState, out: PeakAccum) -> PeakBlocks {
+fn finish(state: &mut PeakState, out: PeakAccum) -> PeakBlocks {
     let mut out = out;
     for (ch, pending) in state.pending.iter_mut().enumerate() {
         if !pending.is_empty() {
-            out.channel_mut(ch).push(summarize_block(pending));
+            out.channel_mut(ch).push(block_of(pending));
             pending.clear();
         }
     }
     out.into_blocks()
 }
 
-/// Where [`step_peaks`] appends, and what [`finish`] turns into a
-/// [`PeakBlocks`].
+/// Where the meter appends, and what it turns into a [`PeakBlocks`].
 ///
 /// A separate type from the finished summary because the two want opposite
 /// layouts: appending wants one growable run per channel, while the result
 /// wants one flat channel-major buffer. Flattening once at the end beats
 /// splicing into the middle of a flat buffer on every chunk.
 #[derive(Debug, Clone)]
-pub struct PeakAccum {
+struct PeakAccum {
     channels: Vec<Vec<PeakBlock>>,
     layout: ChannelLayout,
 }
@@ -388,8 +395,7 @@ impl PeakAccum {
     ///
     /// Until then it is [`ChannelLayout::EMPTY`], matching the zero channel
     /// runs it holds.
-    #[must_use]
-    pub fn new() -> Self {
+    fn new() -> Self {
         Self {
             channels: Vec::new(),
             layout: ChannelLayout::EMPTY,
@@ -427,39 +433,95 @@ impl PeakAccum {
     }
 }
 
-/// Frames [`summarize`] hands [`step_peaks`] per call, rounded down to whole
-/// blocks: small enough that the deinterleave scratch stays in cache, large
-/// enough that the per-call overhead vanishes.
-const SUMMARIZE_CHUNK_FRAMES: usize = 4096;
+/// A running waveform blocking: fed chunks of any length, it appends the whole
+/// blocks each completes, per channel, and carries the ragged tail.
+#[derive(Debug, Clone)]
+pub struct PeakMeter {
+    cfg: PeakConfig,
+    state: PeakState,
+    out: PeakAccum,
+}
+
+impl PeakMeter {
+    /// Blocks a chunk, appending whatever whole blocks it completes.
+    ///
+    /// Chunks need not align to block boundaries; the remainder is carried.
+    /// The summary is **channel-major**: a chunk that completes `n` blocks
+    /// appends `n` blocks for channel 0, then `n` for channel 1, and so on.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::ChunkLayoutMismatch`] when `chunk` is not the config's width:
+    /// the carried half-frame is `layout`-wide, so a chunk of another width
+    /// spliced onto it would realign at the wrong stride.
+    pub fn push<S: Sample>(&mut self, chunk: Interleaved<'_, S>) -> Result<()> {
+        if chunk.layout() != self.cfg.layout {
+            return Err(Error::ChunkLayoutMismatch {
+                chunk: chunk.layout(),
+                config: self.cfg.layout,
+            });
+        }
+        let layout = self.cfg.layout;
+        // At least one step, so an empty chunk still adopts the layout.
+        if chunk.is_empty() {
+            step_peaks(&self.cfg, &mut self.state, empty(layout), &mut self.out);
+            return Ok(());
+        }
+        let Self { cfg, state, out } = self;
+        for_blocks(chunk.samples(), chunk.channels(), |block| {
+            // `for_blocks` cuts whole frames, so the block is always one.
+            if let Ok(whole) = Interleaved::new(block, layout) {
+                step_peaks(cfg, state, whole, out);
+            }
+        });
+        Ok(())
+    }
+
+    /// Drops every carry and everything blocked, so the next chunk starts a
+    /// fresh stream. Scratch capacity is kept.
+    pub fn reset(&mut self) {
+        self.state.reset();
+        self.out = PeakAccum::new();
+    }
+
+    /// Emits the trailing partial block of every channel, if any, and hands
+    /// back the summary.
+    ///
+    /// [`summarize`] keeps a short final block, so the streaming path does too:
+    /// the two agree on any input that is not a whole number of blocks.
+    #[must_use]
+    pub fn finish(mut self) -> PeakBlocks {
+        finish(&mut self.state, self.out)
+    }
+}
+
+fn empty<'a>(layout: ChannelLayout) -> Interleaved<'a> {
+    Interleaved::new(&[], layout).expect("an empty buffer is whole frames")
+}
 
 /// Summarizes a whole buffer, per channel.
 ///
-/// Folds [`step_peaks`] — the same implementation the streaming path uses —
-/// over chunks of whole blocks, so the deinterleave scratch is a few
-/// thousand frames rather than a copy of the whole buffer. Every block is
-/// summarized from the same samples in the same order either way.
-pub fn summarize(cfg: &PeakConfig, buffer: Interleaved<'_>) -> PeakBlocks {
-    let mut out = PeakAccum::new();
-    let mut state = PeakState::new();
-    let block = cfg.samples_per_block.get().max(1);
-    let per_chunk = (SUMMARIZE_CHUNK_FRAMES / block).max(1) * block;
-    let frames = buffer.frames();
-    let mut start = Samples::ZERO;
-    // At least one call, so an empty buffer still adopts the layout.
-    loop {
-        let end = frames.min(start + Samples(per_chunk));
-        step_peaks(cfg, &mut state, buffer.slice(start..end), &mut out);
-        start = end;
-        if start >= frames {
-            break;
-        }
-    }
-    finish(&mut state, out)
+/// Feeds one [`PeakMeter`] the buffer, so every block is summarized from the
+/// same samples in the same order as when streaming.
+///
+/// # Errors
+///
+/// [`Error::ZeroBlock`] for a block of zero samples;
+/// [`Error::ChunkLayoutMismatch`] when `buffer` is not the config's width.
+pub fn summarize<S: Sample>(cfg: &PeakConfig, buffer: Interleaved<'_, S>) -> Result<PeakBlocks> {
+    let mut meter = cfg.measure()?;
+    meter.push(buffer)?;
+    Ok(meter.finish())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `summarize` of a buffer that is valid for its config.
+    fn summarize(cfg: &PeakConfig, buffer: Interleaved<'_>) -> PeakBlocks {
+        super::summarize(cfg, buffer).unwrap()
+    }
 
     fn mono(block: usize) -> PeakConfig {
         PeakConfig::new(Samples(block), ChannelLayout::MONO)
@@ -473,7 +535,7 @@ mod tests {
     /// Stream `samples` in `chunk`-sample pieces. The streaming path, wrapped
     /// so a test states only what it varies.
     fn stream(cfg: &PeakConfig, samples: &[f32], chunk: usize) -> PeakBlocks {
-        let mut state = PeakState::new();
+        let mut state = PeakState::default();
         let mut out = PeakAccum::new();
         for part in samples.chunks(chunk * usize::from(cfg.layout.count())) {
             step_peaks(
@@ -534,9 +596,19 @@ mod tests {
                         streamed, batch,
                         "{layout:?}, block {block}, chunk {chunk} disagrees with batch"
                     );
+                    // A meter fed the same chunks is the same summary.
+                    let mut meter = cfg.measure().unwrap();
+                    for part in samples.chunks(chunk * channels) {
+                        meter.push(Interleaved::new(part, layout).unwrap()).unwrap();
+                    }
+                    assert_eq!(
+                        meter.finish(),
+                        batch,
+                        "{layout:?}, block {block}, chunk {chunk}: meter disagrees"
+                    );
                     // `consumed` is not observable through `stream`, so re-run
                     // the one case that reports it.
-                    let mut state = PeakState::new();
+                    let mut state = PeakState::default();
                     let mut out = PeakAccum::new();
                     for part in samples.chunks(chunk * usize::from(cfg.layout.count())) {
                         step_peaks(
@@ -556,27 +628,24 @@ mod tests {
         }
     }
 
-    /// A chunk whose own width disagrees with the config's is skipped: the
+    /// A chunk whose own width disagrees with the config's is refused: the
     /// pending blocks are `cfg.layout` wide.
     #[test]
-    fn a_chunk_of_the_wrong_width_is_skipped() {
+    fn a_chunk_of_the_wrong_width_is_refused() {
         let cfg = PeakConfig::new(Samples(1), ChannelLayout::STEREO);
-        let mut state = PeakState::new();
-        let mut out = PeakAccum::new();
+        let mut meter = cfg.measure().unwrap();
 
-        step_peaks(
-            &cfg,
-            &mut state,
-            Interleaved::new(&[1.0, 2.0, 3.0, 4.0], ChannelLayout::QUAD).unwrap(),
-            &mut out,
+        assert_eq!(
+            meter.push(Interleaved::new(&[1.0f32, 2.0, 3.0, 4.0], ChannelLayout::QUAD).unwrap()),
+            Err(Error::ChunkLayoutMismatch {
+                chunk: ChannelLayout::QUAD,
+                config: ChannelLayout::STEREO,
+            })
         );
-        let blocks = finish(&mut state, out);
-
         assert!(
-            blocks.is_empty(),
+            meter.finish().is_empty(),
             "a quad chunk must not be blocked as stereo"
         );
-        assert_eq!(state.consumed, Samples(0));
     }
 
     #[test]
@@ -720,7 +789,7 @@ mod tests {
     #[test]
     fn consumed_counts_frames_not_samples() {
         let cfg = PeakConfig::new(Samples(100), ChannelLayout::STEREO);
-        let mut state = PeakState::new();
+        let mut state = PeakState::default();
         let mut out = PeakAccum::new();
 
         let samples: Vec<f32> = (0..400).map(|i| i as f32).collect(); // 200 frames
@@ -743,14 +812,20 @@ mod tests {
             )
             .is_empty()
         );
-        assert!(
-            summarize(
+        // A block of zero samples is named, not silently empty.
+        assert_eq!(
+            super::summarize(
                 &mono(0),
-                Interleaved::new(&[1.0, 2.0], ChannelLayout::MONO).unwrap()
-            )
-            .is_empty()
+                Interleaved::new(&[1.0f32, 2.0], ChannelLayout::MONO).unwrap()
+            ),
+            Err(Error::ZeroBlock)
         );
-        assert_eq!(summarize_block(&[]), PeakBlock::default());
+        assert_eq!(
+            summarize_block(Mono::new(&[] as &[f32])),
+            PeakBlock::default()
+        );
+        let one = summarize_block(Mono::new(&[-0.5f32, 0.25]));
+        assert_eq!((one.min, one.max), (-0.5, 0.25));
 
         // `to_mono` and `channel` on an empty summary answer rather than panic.
         let empty = summarize(
@@ -760,7 +835,7 @@ mod tests {
         assert!(empty.to_mono().is_empty());
         assert!(empty.as_flat().is_empty());
 
-        let mut state = PeakState::new();
+        let mut state = PeakState::default();
         let blocks = finish(&mut state, PeakAccum::new());
         assert!(blocks.is_empty(), "finish on an empty state emits nothing");
     }
@@ -773,7 +848,7 @@ mod tests {
     #[test]
     fn an_empty_summary_has_no_channels() {
         assert_eq!(PeakBlocks::default().layout(), ChannelLayout::EMPTY);
-        let blocks = finish(&mut PeakState::new(), PeakAccum::new());
+        let blocks = finish(&mut PeakState::default(), PeakAccum::new());
         assert_eq!(
             blocks.layout(),
             ChannelLayout::EMPTY,
@@ -821,7 +896,7 @@ mod tests {
     #[test]
     fn reset_returns_to_a_fresh_state() {
         let cfg = mono(100);
-        let mut state = PeakState::new();
+        let mut state = PeakState::default();
         let mut out = PeakAccum::new();
 
         step_peaks(
@@ -856,7 +931,7 @@ mod tests {
     #[test]
     fn reset_clears_every_channel_carry() {
         let cfg = PeakConfig::new(Samples(100), ChannelLayout::STEREO);
-        let mut state = PeakState::new();
+        let mut state = PeakState::default();
         let mut out = PeakAccum::new();
 
         // 50 frames: half a block on both channels, nothing emitted.

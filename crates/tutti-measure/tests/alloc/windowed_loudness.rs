@@ -7,26 +7,22 @@
 
 use tutti_buffers::Interleaved;
 use tutti_fixtures::allocations;
-use tutti_measure::{
-    WindowedLoudnessConfig, WindowedLoudnessState, WindowedRate, step_windowed_loudness,
-};
+use tutti_measure::WindowedLoudnessConfig;
 use tutti_types::{Bed, ChannelLayout, SampleRate};
 
 fn stereo(s: &[f32]) -> Interleaved<'_> {
     Interleaved::new(s, ChannelLayout::STEREO).unwrap()
 }
 
-/// Steps after construction allocate nothing, the first included: block-sized chunks, chunks of
+/// Pushes after construction allocate nothing, the first included: block-sized chunks, chunks of
 /// an odd frame count, an empty chunk, and a reset.
 ///
 /// This is a measurement, not a guarantee of `ebur128`: it holds for the
 /// version in `Cargo.lock`.
 #[test]
 fn a_windowed_loudness_step_does_not_allocate() {
-    let cfg =
-        WindowedLoudnessConfig::new(WindowedRate::of(SampleRate::SR_48K), Bed::Stereo.topology())
-            .unwrap();
-    let mut state = WindowedLoudnessState::new(&cfg).unwrap();
+    let cfg = WindowedLoudnessConfig::new(Bed::Stereo.topology());
+    let mut state = cfg.measure(SampleRate::SR_48K).unwrap();
     let tone: Vec<f32> = (0..48_000 * 2)
         .map(|i| 0.1 * (std::f32::consts::TAU * 997.0 * (i / 2) as f32 / 48_000.0).sin())
         .collect();
@@ -35,33 +31,33 @@ fn a_windowed_loudness_step_does_not_allocate() {
     // every getter reads a full one.
     let first = allocations(|| {
         for _ in 0..4 {
-            step_windowed_loudness(&cfg, &mut state, stereo(&tone)).unwrap();
+            state.push(stereo(&tone)).unwrap();
         }
     });
     assert_eq!(first, 0, "the first steps, which fill the windows");
 
     let aligned = allocations(|| {
         for chunk in tone.chunks(512) {
-            step_windowed_loudness(&cfg, &mut state, stereo(chunk)).unwrap();
+            state.push(stereo(chunk)).unwrap();
         }
     });
     assert_eq!(aligned, 0, "block-sized chunks");
 
     let odd = allocations(|| {
         for chunk in tone.chunks(777 * 2) {
-            step_windowed_loudness(&cfg, &mut state, stereo(chunk)).unwrap();
+            state.push(stereo(chunk)).unwrap();
         }
     });
     assert_eq!(odd, 0, "chunks of 777 frames");
 
     let empty = allocations(|| {
-        step_windowed_loudness(&cfg, &mut state, stereo(&[])).unwrap();
+        state.push(stereo(&[])).unwrap();
     });
     assert_eq!(empty, 0, "an empty chunk");
 
     let reset = allocations(|| {
         state.reset();
-        step_windowed_loudness(&cfg, &mut state, stereo(&tone)).unwrap();
+        state.push(stereo(&tone)).unwrap();
     });
     assert_eq!(reset, 0, "a reset and a step");
 }

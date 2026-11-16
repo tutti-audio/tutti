@@ -13,9 +13,12 @@
 //! across frames, which relies on that property — and
 //! `a_reused_detector_matches_fresh_ones` pins it.
 
+use tutti_buffers::{Mono, Sample};
 use tutti_types::{Cents, Confidence, Hz, Note, SampleRate, Samples};
 
 use crate::chroma::FrequencyBand;
+use crate::convert::to_f32;
+use crate::notes::PitchHop;
 use crate::pitch::PitchDetector;
 use crate::{Error, Result};
 use tutti_dsp::FrameCount;
@@ -28,51 +31,36 @@ ranged! {
     |raw| raw.get() >= 0.01 && raw.get() <= 0.5
 }
 
-/// YIN parameters. Validated once, on construction.
+/// YIN parameters: the band searched and the absolute threshold. Immutable
+/// once built, and in hertz, so it holds no sample rate: [`yin`] and
+/// [`yin_track`] take the buffer's rate and check the band against its
+/// Nyquist.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct YinConfig {
-    sample_rate: SampleRate,
-    min_freq: Hz,
-    max_freq: Hz,
-    pub(crate) threshold: Confidence,
+    band: FrequencyBand,
+    threshold: Confidence,
 }
 
 impl YinConfig {
-    /// Searches `band` at `sample_rate`. The band holds an ordered, finite,
-    /// positive pair, so an inverted range (which would invert the period
-    /// bounds and report "unvoiced" forever) cannot be written.
-    ///
-    /// # Errors
-    ///
-    /// [`Error::AboveNyquist`] when the band's top exceeds half the sample
-    /// rate.
-    pub fn new(sample_rate: impl Into<SampleRate>, band: FrequencyBand) -> Result<Self> {
-        let sample_rate = sample_rate.into();
-        let (min_freq, max_freq) = (band.min(), band.max());
-
-        let nyquist = Hz((sample_rate.get() / 2.0) as f32);
-        if max_freq > nyquist {
-            return Err(Error::AboveNyquist {
-                freq: max_freq,
-                nyquist,
-            });
-        }
-
-        Ok(Self {
-            sample_rate,
-            min_freq,
-            max_freq,
+    /// The standard 50-2000 Hz vocal and instrument band and the paper's
+    /// threshold of 0.1.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            band: FrequencyBand::VOICE,
             threshold: Confidence(0.1),
-        })
+        }
     }
 
-    /// The standard 50–2000 Hz vocal/instrument range.
-    ///
-    /// # Errors
-    ///
-    /// As [`new`](Self::new): [`Error::AboveNyquist`] at a rate below 4 kHz.
-    pub fn standard(sample_rate: impl Into<SampleRate>) -> Result<Self> {
-        Self::new(sample_rate, FrequencyBand::VOICE)
+    /// Searches `band`. The band holds an ordered, finite, positive pair, so an
+    /// inverted range (which would invert the period bounds and report
+    /// "unvoiced" forever) cannot be written. A band whose top exceeds half
+    /// the buffer's sample rate is refused by the call that takes the buffer
+    /// ([`Error::AboveNyquist`]).
+    #[must_use]
+    pub fn band(mut self, band: FrequencyBand) -> Self {
+        self.band = band;
+        self
     }
 
     /// YIN's absolute threshold on the cumulative mean difference. The paper's
@@ -83,28 +71,76 @@ impl YinConfig {
         self
     }
 
+    /// The config at `rate`.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::AboveNyquist`] when the band's top exceeds half `rate`.
+    pub(crate) fn plan(&self, rate: SampleRate) -> Result<YinPlan> {
+        let (min_freq, max_freq) = (self.band.min(), self.band.max());
+        let nyquist = Hz((rate.get() / 2.0) as f32);
+        if max_freq > nyquist {
+            return Err(Error::AboveNyquist {
+                freq: max_freq,
+                nyquist,
+            });
+        }
+        Ok(YinPlan {
+            sample_rate: rate,
+            min_freq,
+            max_freq,
+            threshold: self.threshold,
+        })
+    }
+
+    /// The shortest buffer [`yin`] reads at `rate`; below this it returns
+    /// [`Error::InsufficientInput`] rather than a silent "unvoiced".
+    ///
+    /// # Errors
+    ///
+    /// [`Error::AboveNyquist`] when the band's top exceeds half `rate`.
+    pub fn buffer_size(&self, rate: impl Into<SampleRate>) -> Result<Samples> {
+        Ok(self.plan(rate.into())?.buffer_size())
+    }
+}
+
+impl Default for YinConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// A [`YinConfig`] at one sample rate, its band checked against Nyquist.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct YinPlan {
+    sample_rate: SampleRate,
+    min_freq: Hz,
+    max_freq: Hz,
+    pub(crate) threshold: Confidence,
+}
+
+impl YinPlan {
     /// The rate the analyzed buffer is denominated at.
     #[inline]
     pub(crate) fn sample_rate(&self) -> SampleRate {
         self.sample_rate
     }
 
-    /// Shortest period the range can express — set by the *highest* frequency.
+    /// Shortest period the range can express: set by the *highest* frequency.
     #[inline]
     pub(crate) fn min_period(&self) -> Samples {
         Samples((self.sample_rate.get() / self.max_freq.get() as f64) as usize)
     }
 
-    /// Longest period — set by the *lowest* frequency.
+    /// Longest period: set by the *lowest* frequency.
     #[inline]
     pub(crate) fn max_period(&self) -> Samples {
         Samples((self.sample_rate.get() / self.min_freq.get() as f64) as usize)
     }
 
-    /// Minimum input length. Below this, [`yin`] returns
-    /// [`Error::InsufficientInput`] rather than a silent "unvoiced".
+    /// Minimum input length.
     #[inline]
-    pub fn buffer_size(&self) -> Samples {
+    pub(crate) fn buffer_size(&self) -> Samples {
         Samples(self.max_period().get() * 2)
     }
 
@@ -194,42 +230,56 @@ impl Pitch {
     }
 }
 
-/// Estimates the pitch of one buffer.
+/// Estimates the pitch of one buffer at `rate`.
 ///
 /// Stateless: the same input always yields the same estimate.
 ///
 /// # Errors
-/// Returns [`Error::InsufficientInput`] if `samples` is shorter than
-/// [`YinConfig::buffer_size`] — an explicit refusal rather than a silent
+///
+/// [`Error::AboveNyquist`] when the band's top exceeds half `rate`;
+/// [`Error::InsufficientInput`] if `samples` is shorter than
+/// [`YinConfig::buffer_size`], an explicit refusal rather than a silent
 /// "unvoiced".
-pub fn yin(cfg: &YinConfig, samples: &[f32]) -> Result<PitchEstimate> {
-    let needed = cfg.buffer_size();
-    if samples.len() < needed.get() {
+pub fn yin<S: Sample>(
+    cfg: &YinConfig,
+    samples: Mono<'_, S>,
+    rate: impl Into<SampleRate>,
+) -> Result<PitchEstimate> {
+    let plan = cfg.plan(rate.into())?;
+    let needed = plan.buffer_size();
+    if samples.frames() < needed {
         return Err(Error::InsufficientInput {
             needed,
-            got: Samples(samples.len()),
+            got: samples.frames(),
         });
     }
-    Ok(estimate(&mut cfg.detector(), samples))
+    Ok(estimate(&mut plan.detector(), &to_f32(samples.samples())))
 }
 
-/// Estimates the pitch at `hop` intervals across a buffer.
+/// Estimates the pitch at `hop` intervals across a buffer at `rate`.
 ///
 /// # Errors
 ///
-/// [`Error::ZeroHop`] if `hop` is zero, and [`Error::InsufficientInput`] if
-/// `samples` is shorter than [`YinConfig::buffer_size`].
-pub fn yin_track(
+/// [`Error::AboveNyquist`] when the band's top exceeds half `rate`, and
+/// [`Error::InsufficientInput`] if `samples` is shorter than
+/// [`YinConfig::buffer_size`].
+pub fn yin_track<S: Sample>(
     cfg: &YinConfig,
-    samples: &[f32],
-    hop: impl Into<Samples>,
+    samples: Mono<'_, S>,
+    rate: impl Into<SampleRate>,
+    hop: PitchHop,
 ) -> Result<Vec<PitchEstimate>> {
-    let hop = hop.into();
-    if hop.is_zero() {
-        return Err(Error::ZeroHop);
-    }
+    let plan = cfg.plan(rate.into())?;
+    yin_track_at(&plan, &to_f32(samples.samples()), hop.get())
+}
 
-    let frame = cfg.buffer_size();
+/// [`yin_track`] over a resolved config and `f32` samples.
+pub(crate) fn yin_track_at(
+    plan: &YinPlan,
+    samples: &[f32],
+    hop: Samples,
+) -> Result<Vec<PitchEstimate>> {
+    let frame = plan.buffer_size();
     if samples.len() < frame.get() {
         return Err(Error::InsufficientInput {
             needed: frame,
@@ -239,7 +289,7 @@ pub fn yin_track(
 
     // One detector for the whole track: `detect` carries nothing between
     // calls, so reusing it is both sound and cheaper than replanning per frame.
-    let mut detector = cfg.detector();
+    let mut detector = plan.detector();
     let frames = (samples.len() - frame.get()) / hop.get() + 1;
     Ok((0..frames)
         .map(|i| {
@@ -346,6 +396,24 @@ pub fn penalize_jumps(pitches: &[PitchEstimate], jump_penalty: Confidence) -> Ve
 mod tests {
     use super::*;
 
+    const SR: SampleRate = SampleRate::SR_44K1;
+
+    fn standard() -> YinConfig {
+        YinConfig::new()
+    }
+
+    fn frame(cfg: &YinConfig) -> usize {
+        cfg.buffer_size(SR).unwrap().get()
+    }
+
+    fn pitch_of(cfg: &YinConfig, x: &[f32]) -> Result<PitchEstimate> {
+        yin(cfg, Mono::new(x), SR)
+    }
+
+    fn track_of(cfg: &YinConfig, x: &[f32], hop: usize) -> Result<Vec<PitchEstimate>> {
+        yin_track(cfg, Mono::new(x), SR, PitchHop::of(Samples(hop)))
+    }
+
     fn sine(sample_rate: f64, freq: f32, seconds: f32) -> Vec<f32> {
         let n = (sample_rate as f32 * seconds) as usize;
         tutti_fixtures::signal::sine(
@@ -375,9 +443,10 @@ mod tests {
     #[test]
     fn a_maximum_above_nyquist_is_refused() {
         assert_eq!(
-            YinConfig::new(
+            yin(
+                &YinConfig::new().band(FrequencyBand::new(Hz(50.0), Hz(5000.0)).unwrap()),
+                Mono::new(&[0.0f32; 4096]),
                 SampleRate::SR_8K,
-                FrequencyBand::new(Hz(50.0), Hz(5000.0)).unwrap()
             ),
             Err(Error::AboveNyquist {
                 freq: Hz(5000.0),
@@ -389,13 +458,13 @@ mod tests {
     /// A short buffer is an error, not a silent "unvoiced".
     #[test]
     fn a_short_buffer_reports_why() {
-        let cfg = YinConfig::standard(SampleRate::SR_44K1).unwrap();
+        let cfg = standard();
         let samples = vec![0.0f32; 64];
 
         assert_eq!(
-            yin(&cfg, &samples),
+            pitch_of(&cfg, &samples),
             Err(Error::InsufficientInput {
-                needed: cfg.buffer_size(),
+                needed: cfg.buffer_size(SR).unwrap(),
                 got: Samples(64),
             })
         );
@@ -403,10 +472,10 @@ mod tests {
 
     #[test]
     fn silence_is_unvoiced() {
-        let cfg = YinConfig::standard(SampleRate::SR_44K1).unwrap();
-        let samples = vec![0.0f32; cfg.buffer_size().get() * 2];
+        let cfg = standard();
+        let samples = vec![0.0f32; frame(&cfg) * 2];
 
-        let estimate = yin(&cfg, &samples).unwrap();
+        let estimate = pitch_of(&cfg, &samples).unwrap();
         assert!(!estimate.is_voiced());
         assert_eq!(estimate.frequency(), Hz(0.0));
         assert_eq!(estimate.confidence(), Confidence::NONE);
@@ -416,12 +485,12 @@ mod tests {
     /// A non-finite sample in the window is an unvoiced frame, never a panic.
     #[test]
     fn a_non_finite_sample_is_unvoiced_not_a_panic() {
-        let cfg = YinConfig::standard(SampleRate::SR_44K1).unwrap();
+        let cfg = standard();
         for bad in [f32::NAN, f32::INFINITY] {
             let mut samples = sine(44100.0, 440.0, 1.0);
-            samples.truncate(cfg.buffer_size().get() + 10);
+            samples.truncate(frame(&cfg) + 10);
             samples[3] = bad;
-            let estimate = yin(&cfg, &samples).unwrap();
+            let estimate = pitch_of(&cfg, &samples).unwrap();
             assert!(!estimate.is_voiced(), "{bad} produced a pitch");
         }
     }
@@ -435,8 +504,8 @@ mod tests {
     /// was unpinned.
     #[test]
     fn a_reused_detector_matches_fresh_ones() {
-        let cfg = YinConfig::standard(SampleRate::SR_44K1).unwrap();
-        let frame = cfg.buffer_size().get();
+        let cfg = standard();
+        let frame = frame(&cfg);
 
         // A sweep, so successive frames differ and a leaked carry would show.
         let samples: Vec<f32> = (0..frame * 6)
@@ -447,32 +516,32 @@ mod tests {
             })
             .collect();
 
-        let reused = yin_track(&cfg, &samples, Samples(frame)).unwrap();
+        let reused = track_of(&cfg, &samples, frame).unwrap();
 
         for (i, expected) in reused.iter().enumerate() {
             let start = i * frame;
-            let fresh = yin(&cfg, &samples[start..start + frame]).unwrap();
+            let fresh = pitch_of(&cfg, &samples[start..start + frame]).unwrap();
             assert_eq!(fresh, *expected, "frame {i} differs from a fresh detector");
         }
     }
 
     #[test]
     fn the_same_input_always_gives_the_same_estimate() {
-        let cfg = YinConfig::standard(SampleRate::SR_44K1).unwrap();
+        let cfg = standard();
         let a = sine(44100.0, 440.0, 0.1);
         let b = sine(44100.0, 220.0, 0.1);
 
-        let first = yin(&cfg, &a).unwrap();
-        let _ = yin(&cfg, &b).unwrap();
-        assert_eq!(first, yin(&cfg, &a).unwrap());
+        let first = pitch_of(&cfg, &a).unwrap();
+        let _ = pitch_of(&cfg, &b).unwrap();
+        assert_eq!(first, pitch_of(&cfg, &a).unwrap());
     }
 
     #[test]
     fn a_track_is_voiced_throughout_a_steady_tone() {
-        let cfg = YinConfig::standard(SampleRate::SR_44K1).unwrap();
+        let cfg = standard();
         let samples = sine(44100.0, 440.0, 0.5);
 
-        let track = yin_track(&cfg, &samples, Samples(512)).unwrap();
+        let track = track_of(&cfg, &samples, 512).unwrap();
         assert!(!track.is_empty());
 
         let voiced = track.iter().filter(|p| p.is_voiced()).count();
@@ -481,17 +550,14 @@ mod tests {
             "{voiced} of {} voiced",
             track.len()
         );
-
-        assert_eq!(yin_track(&cfg, &samples, Samples(0)), Err(Error::ZeroHop));
     }
 
     #[test]
     fn periods_derive_from_the_range_and_cannot_contradict_it() {
-        let cfg = YinConfig::new(
-            SampleRate::SR_44K1,
-            FrequencyBand::new(Hz(100.0), Hz(1000.0)).unwrap(),
-        )
-        .unwrap();
+        let cfg = YinConfig::new()
+            .band(FrequencyBand::new(Hz(100.0), Hz(1000.0)).unwrap())
+            .plan(SR)
+            .unwrap();
         assert_eq!(cfg.min_period(), Samples(44)); // 44100 / 1000
         assert_eq!(cfg.max_period(), Samples(441)); // 44100 / 100
         assert_eq!(cfg.buffer_size(), Samples(882));
@@ -539,11 +605,11 @@ mod tests {
     /// Accuracy across the range, not just at A440.
     #[test]
     fn tracks_frequencies_across_the_range() {
-        let cfg = YinConfig::standard(SampleRate::SR_44K1).unwrap();
+        let cfg = standard();
 
         for freq in [100.0f32, 220.0, 440.0, 880.0, 1000.0] {
             let samples = sine(44100.0, freq, 0.1);
-            let estimate = yin(&cfg, &samples).unwrap();
+            let estimate = pitch_of(&cfg, &samples).unwrap();
             let pitch = estimate
                 .pitch()
                 .unwrap_or_else(|| panic!("{freq} Hz unvoiced"));
@@ -561,14 +627,10 @@ mod tests {
     /// soprano C. Both need the range widened past the standard default.
     #[test]
     fn reaches_the_ends_of_a_widened_range() {
-        let cfg = YinConfig::new(
-            SampleRate::SR_44K1,
-            FrequencyBand::new(Hz(40.0), Hz(2000.0)).unwrap(),
-        )
-        .unwrap();
+        let cfg = YinConfig::new().band(FrequencyBand::new(Hz(40.0), Hz(2000.0)).unwrap());
 
         // E2, the guitar's low string.
-        let low = yin(&cfg, &sine(44100.0, 82.41, 0.2)).unwrap();
+        let low = pitch_of(&cfg, &sine(44100.0, 82.41, 0.2)).unwrap();
         let pitch = low.pitch().expect("E2 should be voiced");
         assert!(
             ((pitch.frequency.get() - 82.41) / 82.41).abs() * 100.0 < 3.0,
@@ -578,7 +640,7 @@ mod tests {
         assert_eq!(pitch.note, Note::new(tutti_types::PitchClass::E, 2));
 
         // C6.
-        let high = yin(&cfg, &sine(44100.0, 1046.5, 0.1)).unwrap();
+        let high = pitch_of(&cfg, &sine(44100.0, 1046.5, 0.1)).unwrap();
         let pitch = high.pitch().expect("C6 should be voiced");
         assert!(
             ((pitch.frequency.get() - 1046.5) / 1046.5).abs() * 100.0 < 3.0,

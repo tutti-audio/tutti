@@ -9,7 +9,7 @@
 //! # Time resolution
 //!
 //! Everything works on the novelty curve, one value per hop. The default
-//! [`TempoConfig::geometry`] is a 1024-sample window with a 512-sample hop:
+//! [`TempoConfig::framing`] is a 1024-sample window with a 512-sample hop:
 //! 11.6 ms at 44.1 kHz. Beats sit on the hop grid, shifted by where flux peaks in a frame, so each is
 //! within one hop of the onset it marks. A tempo is a period of whole frames
 //! refined by a parabola, so its error grows with tempo: measured, 0.3 BPM at
@@ -28,9 +28,12 @@
 //! These are offline or UI-thread calls: each allocates the novelty curve, its
 //! autocorrelation and the tracker's tables.
 
+use tutti_buffers::{Mono, Sample};
 use tutti_types::{Bpm, Confidence, Db, SampleRate, Samples, Seconds};
 
 use crate::beat;
+use crate::convert::to_f32;
+use crate::framing::Framing;
 use crate::onset::{DetectionFunction, OnsetConfig, OnsetState, onset_lag, step_onset};
 use crate::xcorr::cross_correlate;
 use crate::{Error, Result};
@@ -128,6 +131,7 @@ pub struct TempoConfig {
     spread: PriorSpread,
     tightness: Tightness,
     alternatives: usize,
+    framing: Framing,
 }
 
 impl Default for TempoConfig {
@@ -141,6 +145,7 @@ impl Default for TempoConfig {
             spread: PriorSpread::of(1.0),
             tightness: Tightness::of(100.0),
             alternatives: 2,
+            framing: Framing::new(Samples(WINDOW), Samples(HOP)),
         }
     }
 }
@@ -152,18 +157,13 @@ impl TempoConfig {
         Self::default()
     }
 
-    /// The window and hop the audio entry points analyse with: 1024 and 512
-    /// samples, 11.6 ms at 44.1 kHz.
-    ///
-    /// # Errors
-    ///
-    /// [`Error::Dsp`] when the geometry is refused.
-    pub fn geometry(sample_rate: impl Into<SampleRate>) -> Result<StftGeometry> {
-        Ok(StftGeometry::new(
-            sample_rate,
-            Samples(WINDOW),
-            Samples(HOP),
-        )?)
+    /// The window and hop the audio entry points analyse with, 1024 and 512
+    /// samples by default (11.6 ms at 44.1 kHz). A zero window or hop is
+    /// refused by the call that takes the audio.
+    #[must_use]
+    pub fn framing(mut self, framing: Framing) -> Self {
+        self.framing = framing;
+        self
     }
 
     /// Search tempi in `range`. The estimate never leaves the range. A range
@@ -263,8 +263,8 @@ impl BeatGrid {
 
 /// Estimates the tempo of `samples`.
 ///
-/// Takes the spectral novelty of `samples` on `geometry` (see
-/// [`TempoConfig::geometry`]) and runs [`estimate_tempo_from_novelty`] on it.
+/// Takes the spectral novelty of `samples` at `rate` on the config's framing
+/// and runs [`estimate_tempo_from_novelty`] on it.
 /// The first frame has no predecessor to differ from, so its novelty is zero.
 ///
 /// # Errors
@@ -274,14 +274,16 @@ impl BeatGrid {
 /// when the input is shorter than one window, or holds fewer than two periods
 /// of the slowest tempo; [`Error::EmptyTempoRange`] when no whole-frame lag
 /// falls in the range at this hop.
-pub fn estimate_tempo(
+pub fn estimate_tempo<S: Sample>(
     cfg: &TempoConfig,
-    geometry: StftGeometry,
-    samples: &[f32],
+    samples: Mono<'_, S>,
+    rate: impl Into<SampleRate>,
     fft: &mut FftScratch,
 ) -> Result<Tempo> {
-    let novelty = novelty(geometry, samples, fft)?;
-    estimate_tempo_from_novelty(cfg, &novelty, geometry.sample_rate(), geometry.hop(), fft)
+    let rate = rate.into();
+    let hop = cfg.framing.hop();
+    let novelty = novelty(cfg, &to_f32(samples.samples()), rate, fft)?.0;
+    estimate_tempo_from_novelty(cfg, &novelty, rate, hop, fft)
 }
 
 /// Estimates the tempo from a novelty curve of one value per `hop` samples.
@@ -297,6 +299,9 @@ pub fn estimate_tempo(
 /// As [`estimate_tempo`] (except that a silence floor applies to samples
 /// only), with [`Error::NonFiniteInput`] for a NaN or infinite
 /// value in `novelty` and [`Error::ZeroHop`] for a zero `hop`.
+///
+/// `novelty` is a curve of readings, not audio, and `hop` is the spacing of
+/// its values in samples.
 pub fn estimate_tempo_from_novelty(
     cfg: &TempoConfig,
     novelty: &[f32],
@@ -318,21 +323,15 @@ pub fn estimate_tempo_from_novelty(
 /// # Errors
 ///
 /// As [`estimate_tempo`].
-pub fn track_beats(
+pub fn track_beats<S: Sample>(
     cfg: &TempoConfig,
-    geometry: StftGeometry,
-    samples: &[f32],
+    samples: Mono<'_, S>,
+    rate: impl Into<SampleRate>,
     fft: &mut FftScratch,
 ) -> Result<BeatGrid> {
-    let novelty = novelty(geometry, samples, fft)?;
-    let mut grid = track_beats_from_novelty(
-        cfg,
-        &novelty,
-        geometry.sample_rate(),
-        geometry.hop(),
-        None,
-        fft,
-    )?;
+    let rate = rate.into();
+    let (novelty, geometry) = novelty(cfg, &to_f32(samples.samples()), rate, fft)?;
+    let mut grid = track_beats_from_novelty(cfg, &novelty, rate, geometry.hop(), None, fft)?;
     let shift = onset_lag(geometry);
     for beat in &mut grid.beats {
         *beat = Samples(beat.get() + shift);
@@ -394,8 +393,18 @@ fn frame_rate(sample_rate: SampleRate, hop: Samples) -> Result<f64> {
     Ok(sample_rate.get() / hop.get() as f64)
 }
 
-/// The detection curve of `samples`, with the first frame zeroed.
-fn novelty(geometry: StftGeometry, samples: &[f32], fft: &mut FftScratch) -> Result<Vec<f32>> {
+/// The detection curve of `samples` at `rate` on the config's framing, with
+/// the first frame zeroed, and the geometry it was taken on.
+fn novelty(
+    cfg: &TempoConfig,
+    samples: &[f32],
+    rate: SampleRate,
+    fft: &mut FftScratch,
+) -> Result<(Vec<f32>, StftGeometry)> {
+    let onset = OnsetConfig::new(DetectionFunction::SpectralFlux)
+        .framing(cfg.framing)
+        .plan(rate)?;
+    let geometry = onset.geometry();
     if samples.iter().any(|s| !s.is_finite()) {
         return Err(Error::NonFiniteInput);
     }
@@ -410,7 +419,6 @@ fn novelty(geometry: StftGeometry, samples: &[f32], fft: &mut FftScratch) -> Res
     if peak < SILENCE_FLOOR.to_amplitude().get() {
         return Err(Error::NoSignal);
     }
-    let onset = OnsetConfig::new(geometry, DetectionFunction::SpectralFlux);
     let mut state = OnsetState::new();
     for frame in geometry.frames_for(Samples(samples.len())).indices() {
         let offset = frame.get() * geometry.hop().get();
@@ -426,7 +434,7 @@ fn novelty(geometry: StftGeometry, samples: &[f32], fft: &mut FftScratch) -> Res
     if let Some(first) = curve.first_mut() {
         *first = 0.0;
     }
-    Ok(curve)
+    Ok((curve, geometry))
 }
 
 /// The normalised autocorrelation of a novelty curve over the searched lags.
@@ -485,7 +493,7 @@ impl Periodicity {
             .iter()
             .map(|&v| (f64::from(v) - mean) as f32)
             .collect();
-        let correlation = cross_correlate(&centred, &centred, fft);
+        let correlation = cross_correlate(Mono::new(&centred), Mono::new(&centred), fft);
         let power = correlation.at(0).unwrap_or(0.0) / n as f32;
         if power <= 0.0 {
             return Err(Error::NoSignal);
@@ -601,7 +609,10 @@ mod tests {
     }
 
     fn geometry() -> StftGeometry {
-        TempoConfig::geometry(SampleRate::of(RATE)).unwrap()
+        TempoConfig::new()
+            .framing
+            .geometry(SampleRate::of(RATE))
+            .unwrap()
     }
 
     /// Positions in samples of the clicks of a train.
@@ -627,7 +638,13 @@ mod tests {
     }
 
     fn tempo_of(x: &[f32]) -> Tempo {
-        estimate_tempo(&TempoConfig::new(), geometry(), x, &mut FftScratch::new()).unwrap()
+        estimate_tempo(
+            &TempoConfig::new(),
+            Mono::new(x),
+            SampleRate::of(RATE),
+            &mut FftScratch::new(),
+        )
+        .unwrap()
     }
 
     const FRAME_RATE: f64 = RATE / 512.0;
@@ -706,8 +723,13 @@ mod tests {
         for bpm in [90.0, 120.0, 128.0, 174.0] {
             let clicks_at = click_samples(bpm, 0.3, 20.0);
             let x = clicks(bpm, 0.3, 20.0);
-            let grid =
-                track_beats(&TempoConfig::new(), geometry(), &x, &mut FftScratch::new()).unwrap();
+            let grid = track_beats(
+                &TempoConfig::new(),
+                Mono::new(&x),
+                SampleRate::of(RATE),
+                &mut FftScratch::new(),
+            )
+            .unwrap();
             let worst = miss(&grid, &clicks_at).into_iter().fold(0.0, f64::max);
             assert!(worst <= hop, "{bpm} BPM: a beat is {worst} samples off");
             assert!(
@@ -733,7 +755,13 @@ mod tests {
     fn the_estimate_stays_inside_the_range() {
         let cfg = TempoConfig::new().range(TempoRange::new(Bpm::of(40.0), Bpm::of(80.0)).unwrap());
         let x = clicks(90.0, 0.3, 24.0);
-        let tempo = estimate_tempo(&cfg, geometry(), &x, &mut FftScratch::new()).unwrap();
+        let tempo = estimate_tempo(
+            &cfg,
+            Mono::new(&x),
+            SampleRate::of(RATE),
+            &mut FftScratch::new(),
+        )
+        .unwrap();
         assert!((tempo.bpm.get() - 45.0).abs() < 1.0, "{}", tempo.bpm);
         for bpm in std::iter::once(tempo.bpm).chain(tempo.alternatives.iter().map(|a| a.bpm)) {
             assert!((40.0..=80.0).contains(&bpm.get()), "{bpm} is outside");
@@ -778,7 +806,13 @@ mod tests {
         let mut fft = FftScratch::new();
         let half = train(0.5);
 
-        let by_default = estimate_tempo(&TempoConfig::new(), geometry(), &half, &mut fft).unwrap();
+        let by_default = estimate_tempo(
+            &TempoConfig::new(),
+            Mono::new(&half),
+            SampleRate::of(RATE),
+            &mut fft,
+        )
+        .unwrap();
         assert!(
             (by_default.bpm.get() - 120.0).abs() < 1.5,
             "{}",
@@ -793,23 +827,36 @@ mod tests {
             by_default.alternatives
         );
 
-        let weak = estimate_tempo(&TempoConfig::new(), geometry(), &train(0.1), &mut fft).unwrap();
+        let weak = estimate_tempo(
+            &TempoConfig::new(),
+            Mono::new(&train(0.1)),
+            SampleRate::of(RATE),
+            &mut fft,
+        )
+        .unwrap();
         assert!((weak.bpm.get() - 60.0).abs() < 1.5, "{}", weak.bpm);
 
         let centred = TempoConfig::new()
             .prior_centre(Bpm::of(60.0))
             .prior_spread(PriorSpread::of(1.0));
-        let low = estimate_tempo(&centred, geometry(), &half, &mut fft).unwrap();
+        let low =
+            estimate_tempo(&centred, Mono::new(&half), SampleRate::of(RATE), &mut fft).unwrap();
         assert!((low.bpm.get() - 60.0).abs() < 1.5, "{}", low.bpm);
 
         let narrow = TempoConfig::new()
             .prior_centre(Bpm::of(120.0))
             .prior_spread(PriorSpread::of(0.1));
-        let high = estimate_tempo(&narrow, geometry(), &train(0.1), &mut fft).unwrap();
+        let high = estimate_tempo(
+            &narrow,
+            Mono::new(&train(0.1)),
+            SampleRate::of(RATE),
+            &mut fft,
+        )
+        .unwrap();
         assert!((high.bpm.get() - 120.0).abs() < 1.5, "{}", high.bpm);
 
         let none = TempoConfig::new().alternatives(Alternatives::of(0));
-        let bare = estimate_tempo(&none, geometry(), &half, &mut fft).unwrap();
+        let bare = estimate_tempo(&none, Mono::new(&half), SampleRate::of(RATE), &mut fft).unwrap();
         assert!(bare.alternatives.is_empty());
     }
 
@@ -824,7 +871,13 @@ mod tests {
         let hop = geometry().hop().get() as f64;
         let run = |tightness: f32| {
             let cfg = TempoConfig::new().tightness(Tightness::new(tightness).unwrap());
-            track_beats(&cfg, geometry(), &x, &mut FftScratch::new()).unwrap()
+            track_beats(
+                &cfg,
+                Mono::new(&x),
+                SampleRate::of(RATE),
+                &mut FftScratch::new(),
+            )
+            .unwrap()
         };
         let tight = miss(&run(100.0), &grid_clicks);
         assert!(tight.iter().all(|&m| m <= hop), "{tight:?}");
@@ -840,11 +893,11 @@ mod tests {
         let mut fft = FftScratch::new();
         for x in [vec![0.0f32; 441_000], vec![0.5f32; 441_000]] {
             assert_eq!(
-                estimate_tempo(&cfg, geometry(), &x, &mut fft),
+                estimate_tempo(&cfg, Mono::new(&x), SampleRate::of(RATE), &mut fft),
                 Err(Error::NoSignal)
             );
             assert_eq!(
-                track_beats(&cfg, geometry(), &x, &mut fft),
+                track_beats(&cfg, Mono::new(&x), SampleRate::of(RATE), &mut fft),
                 Err(Error::NoSignal)
             );
         }
@@ -877,11 +930,11 @@ mod tests {
             let mut x = clicks(120.0, 0.3, 10.0);
             x[20_000] = bad;
             assert_eq!(
-                estimate_tempo(&cfg, geometry(), &x, &mut fft),
+                estimate_tempo(&cfg, Mono::new(&x), SampleRate::of(RATE), &mut fft),
                 Err(Error::NonFiniteInput)
             );
             assert_eq!(
-                track_beats(&cfg, geometry(), &x, &mut fft),
+                track_beats(&cfg, Mono::new(&x), SampleRate::of(RATE), &mut fft),
                 Err(Error::NonFiniteInput)
             );
             let mut curve = vec![0.0f32; 1000];
@@ -926,7 +979,7 @@ mod tests {
         let truth: Vec<f64> = times.iter().map(|&(t, _)| t * RATE).collect();
         let cfg = TempoConfig::new();
         let mut fft = FftScratch::new();
-        let grid = track_beats(&cfg, geometry(), &x, &mut fft).unwrap();
+        let grid = track_beats(&cfg, Mono::new(&x), SampleRate::of(RATE), &mut fft).unwrap();
         let hop = geometry().hop().get() as f64;
         let worst = miss(&grid, &truth).into_iter().fold(0.0, f64::max);
         assert!(worst <= hop, "a beat is {worst} samples off");
@@ -939,14 +992,15 @@ mod tests {
         let x = clicks(128.0, 0.3, 20.0);
         let cfg = TempoConfig::new();
         let mut fft = FftScratch::new();
-        let reference = track_beats(&cfg, geometry(), &x, &mut fft).unwrap();
-        let tempo = estimate_tempo(&cfg, geometry(), &x, &mut fft).unwrap();
+        let reference = track_beats(&cfg, Mono::new(&x), SampleRate::of(RATE), &mut fft).unwrap();
+        let tempo = estimate_tempo(&cfg, Mono::new(&x), SampleRate::of(RATE), &mut fft).unwrap();
         for gain in [0.01f32, 8.0] {
             let y: Vec<f32> = x.iter().map(|s| s * gain).collect();
-            let other = estimate_tempo(&cfg, geometry(), &y, &mut fft).unwrap();
+            let other =
+                estimate_tempo(&cfg, Mono::new(&y), SampleRate::of(RATE), &mut fft).unwrap();
             assert!((other.bpm.get() - tempo.bpm.get()).abs() < 1e-3);
             assert!((other.confidence.get() - tempo.confidence.get()).abs() < 1e-3);
-            let grid = track_beats(&cfg, geometry(), &y, &mut fft).unwrap();
+            let grid = track_beats(&cfg, Mono::new(&y), SampleRate::of(RATE), &mut fft).unwrap();
             assert_eq!(grid.beats, reference.beats, "gain {gain}");
         }
     }
@@ -1042,7 +1096,12 @@ mod tests {
         );
         // Under one window, and under two periods of the slowest tempo.
         assert!(matches!(
-            estimate_tempo(&cfg, geometry(), &[0.0; 100], &mut fft),
+            estimate_tempo(
+                &cfg,
+                Mono::new(&[0.0f32; 100]),
+                SampleRate::of(RATE),
+                &mut fft
+            ),
             Err(Error::InsufficientInput { .. })
         ));
         let mut short = vec![0.0f32; 100];
@@ -1076,12 +1135,12 @@ mod tests {
     /// wide).
     #[test]
     fn a_wide_window_still_places_beats_within_a_hop() {
-        let wide = StftGeometry::new(SampleRate::of(RATE), Samples(4096), Samples(512)).unwrap();
+        let wide = TempoConfig::new().framing(Framing::new(Samples(4096), Samples(512)));
         let clicks_at = click_samples(120.0, 0.3, 20.0);
         let grid = track_beats(
-            &TempoConfig::new(),
-            wide,
-            &clicks(120.0, 0.3, 20.0),
+            &wide,
+            Mono::new(&clicks(120.0, 0.3, 20.0)),
+            SampleRate::of(RATE),
             &mut FftScratch::new(),
         )
         .unwrap();
@@ -1101,14 +1160,30 @@ mod tests {
         let cfg = TempoConfig::new();
         let mut fft = FftScratch::new();
         assert_eq!(
-            estimate_tempo(&cfg, geometry(), &quiet(-100.0), &mut fft),
+            estimate_tempo(
+                &cfg,
+                Mono::new(&quiet(-100.0)),
+                SampleRate::of(RATE),
+                &mut fft
+            ),
             Err(Error::NoSignal)
         );
         assert_eq!(
-            track_beats(&cfg, geometry(), &quiet(-100.0), &mut fft),
+            track_beats(
+                &cfg,
+                Mono::new(&quiet(-100.0)),
+                SampleRate::of(RATE),
+                &mut fft
+            ),
             Err(Error::NoSignal)
         );
-        let tempo = estimate_tempo(&cfg, geometry(), &quiet(-80.0), &mut fft).unwrap();
+        let tempo = estimate_tempo(
+            &cfg,
+            Mono::new(&quiet(-80.0)),
+            SampleRate::of(RATE),
+            &mut fft,
+        )
+        .unwrap();
         assert!((tempo.bpm.get() - 120.0).abs() < 1.5);
     }
 

@@ -15,7 +15,10 @@
 //! panicked, and how a decimated display transform reached it and produced a
 //! comb of islands separated by silence.
 
+use tutti_buffers::{Mono, Sample};
 use tutti_types::{Amplitude, SampleRate, Samples};
+
+use crate::convert::to_f32;
 
 use crate::{Error, Result};
 use tutti_dsp::Complex32;
@@ -209,11 +212,11 @@ impl Stft {
     /// # Errors
     /// Returns [`Error::GridShapeDisagreement`] if `mask` does not
     /// match this transform's `frames x bins` shape.
-    pub fn resynthesize_masked(
+    pub fn resynthesize_masked<S: Sample>(
         &self,
         mask: &Grid<Complex32>,
         fft: &mut FftScratch,
-    ) -> Result<Vec<f32>> {
+    ) -> Result<Vec<S>> {
         if !self.bins.same_shape_as(mask) {
             return Err(Error::GridShapeDisagreement);
         }
@@ -340,8 +343,6 @@ impl SampleRange {
 /// An analysis request: what to analyze, at what resolution.
 #[derive(Debug, Clone, Copy)]
 pub struct StftRequest {
-    /// Rate the buffer is denominated at, used to resolve bin frequencies.
-    pub sample_rate: SampleRate,
     /// Analysis window, in [`Samples`]. Also the FFT size.
     pub window: Samples,
     /// How far to advance between frames — fixed, or decimated to a frame count.
@@ -354,14 +355,10 @@ pub struct StftRequest {
 }
 
 impl StftRequest {
-    /// A request over the whole buffer at a fixed hop.
-    pub fn new(
-        sample_rate: impl Into<SampleRate>,
-        window: impl Into<Samples>,
-        hop: impl Into<Samples>,
-    ) -> Self {
+    /// A request over the whole buffer at a fixed hop. The sample rate is the
+    /// transform call's, which resolves the bin frequencies.
+    pub fn new(window: impl Into<Samples>, hop: impl Into<Samples>) -> Self {
         Self {
-            sample_rate: sample_rate.into(),
             window: window.into(),
             hop: HopPolicy::Fixed(hop.into()),
             range: SampleRange::All,
@@ -406,7 +403,7 @@ impl StftRequest {
         self
     }
 
-    /// The geometry this request resolves to over `len` samples.
+    /// The geometry this request resolves to over `len` samples at `rate`.
     ///
     /// Only ever an overlapping grid — use [`resolve_cola`](Self::resolve_cola)
     /// when the result must invert.
@@ -414,9 +411,9 @@ impl StftRequest {
     /// # Errors
     /// Returns an [`Error`] for a zero window or hop, a hop wider than
     /// the window, or a non-positive sample rate.
-    pub fn resolve(&self, len: Samples) -> Result<StftGeometry> {
+    pub fn resolve(&self, rate: impl Into<SampleRate>, len: Samples) -> Result<StftGeometry> {
         let hop = self.effective_hop(len.get());
-        Ok(StftGeometry::new(self.sample_rate, self.window, hop)?.with_window_fn(self.window_fn))
+        Ok(StftGeometry::new(rate, self.window, hop)?.with_window_fn(self.window_fn))
     }
 
     /// The geometry, additionally required to be invertible.
@@ -426,10 +423,10 @@ impl StftRequest {
     /// [`tutti_dsp::StftError::NotColaCompliant`] (as [`Error::Dsp`]) when the hop does not divide the
     /// window at the overlap this geometry's window shape requires — 4x for
     /// Hann and Hamming, 8x for Blackman.
-    pub fn resolve_cola(&self, len: Samples) -> Result<StftGeometry> {
+    pub fn resolve_cola(&self, rate: impl Into<SampleRate>, len: Samples) -> Result<StftGeometry> {
         let hop = self.effective_hop(len.get());
         Ok(StftGeometry::cola_with(
-            self.sample_rate,
+            rate.into(),
             self.window,
             hop,
             self.window_fn,
@@ -450,7 +447,7 @@ impl StftRequest {
     }
 }
 
-/// Computes the complex STFT.
+/// Computes the complex STFT of `samples` at `rate`.
 ///
 /// The geometry must be COLA-compliant, because this result can be inverted.
 ///
@@ -458,10 +455,16 @@ impl StftRequest {
 ///
 /// As [`StftRequest::resolve_cola`]: an invalid geometry, or one that is not
 /// COLA-compliant.
-pub fn stft(samples: &[f32], request: StftRequest, fft: &mut FftScratch) -> Result<Stft> {
+pub fn stft<S: Sample>(
+    request: StftRequest,
+    samples: Mono<'_, S>,
+    rate: impl Into<SampleRate>,
+    fft: &mut FftScratch,
+) -> Result<Stft> {
+    let samples = to_f32(samples.samples());
     let (start, end) = request.range.resolve(samples.len());
     let slice = &samples[start..end];
-    let geometry = request.resolve_cola(Samples(slice.len()))?;
+    let geometry = request.resolve_cola(rate, Samples(slice.len()))?;
     Ok(compute(slice, geometry, fft))
 }
 
@@ -470,12 +473,13 @@ pub fn stft(samples: &[f32], request: StftRequest, fft: &mut FftScratch) -> Resu
 /// # Errors
 ///
 /// As [`stft`].
-pub fn stft_polar(
-    samples: &[f32],
+pub fn stft_polar<S: Sample>(
     request: StftRequest,
+    samples: Mono<'_, S>,
+    rate: impl Into<SampleRate>,
     fft: &mut FftScratch,
 ) -> Result<StftPolar> {
-    Ok(stft(samples, request, fft)?.to_polar())
+    Ok(stft(request, samples, rate, fft)?.to_polar())
 }
 
 /// Computes a magnitude-only STFT — the display path.
@@ -487,14 +491,16 @@ pub fn stft_polar(
 /// # Errors
 ///
 /// As [`StftRequest::resolve`]: an invalid geometry.
-pub fn stft_magnitude(
-    samples: &[f32],
+pub fn stft_magnitude<S: Sample>(
     request: StftRequest,
+    samples: Mono<'_, S>,
+    rate: impl Into<SampleRate>,
     fft: &mut FftScratch,
 ) -> Result<StftMagnitude> {
+    let samples = to_f32(samples.samples());
     let (start, end) = request.range.resolve(samples.len());
     let slice = &samples[start..end];
-    let geometry = request.resolve(Samples(slice.len()))?;
+    let geometry = request.resolve(rate, Samples(slice.len()))?;
     Ok(compute(slice, geometry, fft).to_magnitude())
 }
 
@@ -502,7 +508,7 @@ pub fn stft_magnitude(
 ///
 /// Weighted overlap-add with per-sample window-sum normalization, which is
 /// exact when the geometry is COLA — and [`Stft`] can only be built on one.
-pub fn istft(transform: &Stft, fft: &mut FftScratch) -> Vec<f32> {
+pub fn istft<S: Sample>(transform: &Stft, fft: &mut FftScratch) -> Vec<S> {
     let geometry = transform.geometry;
     let frames = transform.bins.frames();
     let window_len = geometry.window().get();
@@ -531,7 +537,7 @@ pub fn istft(transform: &Stft, fft: &mut FftScratch) -> Vec<f32> {
             *sample /= sum;
         }
     }
-    out
+    out.iter().map(|s| s.convert_to::<S>()).collect()
 }
 
 /// The shared forward pass. Both entry points differ only in what they accept
@@ -563,6 +569,32 @@ fn compute(samples: &[f32], geometry: StftGeometry, fft: &mut FftScratch) -> Stf
 mod tests {
     use super::*;
 
+    const RATE: SampleRate = SampleRate::SR_44K1;
+
+    fn stft(samples: &[f32], request: StftRequest, fft: &mut FftScratch) -> Result<Stft> {
+        super::stft(request, Mono::new(samples), RATE, fft)
+    }
+
+    fn stft_magnitude(
+        samples: &[f32],
+        request: StftRequest,
+        fft: &mut FftScratch,
+    ) -> Result<StftMagnitude> {
+        super::stft_magnitude(request, Mono::new(samples), RATE, fft)
+    }
+
+    fn stft_polar(
+        samples: &[f32],
+        request: StftRequest,
+        fft: &mut FftScratch,
+    ) -> Result<StftPolar> {
+        super::stft_polar(request, Mono::new(samples), RATE, fft)
+    }
+
+    fn istft(transform: &Stft, fft: &mut FftScratch) -> Vec<f32> {
+        super::istft(transform, fft)
+    }
+
     fn tone(len: usize, freq: f32, sample_rate: f32) -> Vec<f32> {
         tutti_fixtures::signal::sine(
             tutti_types::Hz(freq),
@@ -578,11 +610,7 @@ mod tests {
         let mut fft = FftScratch::new();
         let result = stft(
             &samples,
-            StftRequest::new(
-                SampleRate::SR_44K1,
-                Samples::new(2048usize),
-                Samples::new(512usize),
-            ),
+            StftRequest::new(Samples::new(2048usize), Samples::new(512usize)),
             &mut fft,
         )
         .unwrap();
@@ -611,11 +639,7 @@ mod tests {
         let mut fft = FftScratch::new();
         let transform = stft(
             &samples,
-            StftRequest::new(
-                SampleRate::SR_44K1,
-                Samples::new(2048usize),
-                Samples::new(512usize),
-            ),
+            StftRequest::new(Samples::new(2048usize), Samples::new(512usize)),
             &mut fft,
         )
         .unwrap();
@@ -640,12 +664,8 @@ mod tests {
     fn a_decimated_request_is_refused_by_the_invertible_path() {
         let samples = tone(200_000, 440.0, 44100.0);
         let mut fft = FftScratch::new();
-        let request = StftRequest::new(
-            SampleRate::SR_44K1,
-            Samples::new(2048usize),
-            Samples::new(512usize),
-        )
-        .decimated_to(FrameCount(64), Samples::new(1usize));
+        let request = StftRequest::new(Samples::new(2048usize), Samples::new(512usize))
+            .decimated_to(FrameCount(64), Samples::new(1usize));
 
         // The hop this resolves to is far wider than the window.
         assert!(matches!(
@@ -669,20 +689,16 @@ mod tests {
     #[test]
     fn a_requests_window_shape_reaches_its_geometry() {
         let len = Samples(200_000);
-        let request = StftRequest::new(
-            SampleRate::SR_44K1,
-            Samples::new(2048usize),
-            Samples::new(512usize),
-        )
-        .window_fn(CosineWindow::HAMMING);
+        let request = StftRequest::new(Samples::new(2048usize), Samples::new(512usize))
+            .window_fn(CosineWindow::HAMMING);
 
         assert_eq!(
-            request.resolve(len).expect("valid").window_fn(),
+            request.resolve(RATE, len).expect("valid").window_fn(),
             CosineWindow::HAMMING
         );
         assert_eq!(
             request
-                .resolve_cola(len)
+                .resolve_cola(RATE, len)
                 .expect("Hamming COLAs at 4x")
                 .window_fn(),
             CosineWindow::HAMMING
@@ -698,12 +714,8 @@ mod tests {
     fn a_window_that_needs_more_overlap_is_refused_only_where_it_matters() {
         let samples = tone(200_000, 440.0, 44100.0);
         let mut fft = FftScratch::new();
-        let request = StftRequest::new(
-            SampleRate::SR_44K1,
-            Samples::new(2048usize),
-            Samples::new(512usize),
-        )
-        .window_fn(CosineWindow::BLACKMAN);
+        let request = StftRequest::new(Samples::new(2048usize), Samples::new(512usize))
+            .window_fn(CosineWindow::BLACKMAN);
 
         assert!(matches!(
             stft(&samples, request, &mut fft),
@@ -717,12 +729,8 @@ mod tests {
         assert!(stft_magnitude(&samples, request, &mut fft).is_ok());
 
         // And at the overlap Blackman asks for, it inverts.
-        let deeper = StftRequest::new(
-            SampleRate::SR_44K1,
-            Samples::new(2048usize),
-            Samples::new(256usize),
-        )
-        .window_fn(CosineWindow::BLACKMAN);
+        let deeper = StftRequest::new(Samples::new(2048usize), Samples::new(256usize))
+            .window_fn(CosineWindow::BLACKMAN);
         assert!(stft(&samples, deeper, &mut fft).is_ok());
     }
 
@@ -732,11 +740,7 @@ mod tests {
         let mut fft = FftScratch::new();
         let polar = stft_polar(
             &samples,
-            StftRequest::new(
-                SampleRate::SR_44K1,
-                Samples::new(1024usize),
-                Samples::new(256usize),
-            ),
+            StftRequest::new(Samples::new(1024usize), Samples::new(256usize)),
             &mut fft,
         )
         .unwrap();
@@ -761,22 +765,14 @@ mod tests {
 
         let whole = stft(
             &samples,
-            StftRequest::new(
-                SampleRate::SR_44K1,
-                Samples::new(2048usize),
-                Samples::new(512usize),
-            ),
+            StftRequest::new(Samples::new(2048usize), Samples::new(512usize)),
             &mut fft,
         )
         .unwrap();
         let part = stft(
             &samples,
-            StftRequest::new(
-                SampleRate::SR_44K1,
-                Samples::new(2048usize),
-                Samples::new(512usize),
-            )
-            .over(Samples::new(0usize), Samples::new(8192usize)),
+            StftRequest::new(Samples::new(2048usize), Samples::new(512usize))
+                .over(Samples::new(0usize), Samples::new(8192usize)),
             &mut fft,
         )
         .unwrap();
@@ -785,12 +781,8 @@ mod tests {
         // A span past the end clamps rather than panicking.
         let clamped = stft(
             &samples,
-            StftRequest::new(
-                SampleRate::SR_44K1,
-                Samples::new(2048usize),
-                Samples::new(512usize),
-            )
-            .over(Samples::new(0usize), Samples::new(99_999usize)),
+            StftRequest::new(Samples::new(2048usize), Samples::new(512usize))
+                .over(Samples::new(0usize), Samples::new(99_999usize)),
             &mut fft,
         )
         .unwrap();
@@ -803,18 +795,14 @@ mod tests {
         let mut fft = FftScratch::new();
         let transform = stft(
             &samples,
-            StftRequest::new(
-                SampleRate::SR_44K1,
-                Samples::new(2048usize),
-                Samples::new(512usize),
-            ),
+            StftRequest::new(Samples::new(2048usize), Samples::new(512usize)),
             &mut fft,
         )
         .unwrap();
 
         let wrong = Grid::filled(Complex32::default(), FrameCount(2), tutti_dsp::BinCount(3));
         assert_eq!(
-            transform.resynthesize_masked(&wrong, &mut fft),
+            transform.resynthesize_masked::<f32>(&wrong, &mut fft),
             Err(Error::GridShapeDisagreement)
         );
 
@@ -824,7 +812,7 @@ mod tests {
             transform.bins().frames(),
             transform.bins().bins(),
         );
-        let masked = transform.resynthesize_masked(&neutral, &mut fft).unwrap();
+        let masked: Vec<f32> = transform.resynthesize_masked(&neutral, &mut fft).unwrap();
         let plain = istft(&transform, &mut fft);
         for (a, b) in masked.iter().zip(&plain) {
             assert!((a - b).abs() < 1e-6);
@@ -837,11 +825,7 @@ mod tests {
         let mut fft = FftScratch::new();
         let transform = stft(
             &samples,
-            StftRequest::new(
-                SampleRate::SR_44K1,
-                Samples::new(2048usize),
-                Samples::new(512usize),
-            ),
+            StftRequest::new(Samples::new(2048usize), Samples::new(512usize)),
             &mut fft,
         )
         .unwrap();
@@ -851,7 +835,7 @@ mod tests {
             transform.bins().frames(),
             transform.bins().bins(),
         );
-        let erased = transform.resynthesize_masked(&silence, &mut fft).unwrap();
+        let erased: Vec<f32> = transform.resynthesize_masked(&silence, &mut fft).unwrap();
         for s in erased {
             assert!(s.abs() < 1e-6);
         }
@@ -863,11 +847,7 @@ mod tests {
         let mut fft = FftScratch::new();
         let result = stft(
             &samples,
-            StftRequest::new(
-                SampleRate::SR_44K1,
-                Samples::new(2048usize),
-                Samples::new(512usize),
-            ),
+            StftRequest::new(Samples::new(2048usize), Samples::new(512usize)),
             &mut fft,
         )
         .unwrap();

@@ -6,12 +6,13 @@
 
 use serde::{Deserialize, Serialize};
 use tutti_fixtures::{RangeContract, check_range_contract};
-use tutti_types::{Cents, Confidence, Db, SampleRate, Samples, Seconds};
+use tutti_types::{Amplitude, Cents, Confidence, Db, Samples, Seconds};
 
 use crate::{
     Alternatives, BandCount, BandsPerOctave, FiniteLevel, HarmonicDecay, Harmonics, NoteSpan,
-    PeakDecay, PeakFloor, PitchHop, PitchSplit, PriorSpread, SelfTransition, Sharpness,
-    SpectrumFloor, SpectrumTime, Tightness, TuningOffset, WindowedRate, YinThreshold,
+    OnsetGap, OnsetSensitivity, OnsetThreshold, PeakDecay, PeakFloor, PitchHop, PitchSplit,
+    PriorSpread, SelfTransition, Sharpness, SpectrumFloor, SpectrumTime, Tightness, TuningOffset,
+    YinThreshold,
 };
 
 macro_rules! serde_through_try_from {
@@ -46,7 +47,9 @@ serde_through_try_from! {
     PitchSplit: Cents,
     SelfTransition: f32,
     Sharpness: f32,
-    WindowedRate: SampleRate,
+    OnsetThreshold: Amplitude,
+    OnsetSensitivity: Amplitude,
+    OnsetGap: Seconds,
     FiniteLevel: Db,
     PitchHop: Samples,
     Alternatives: usize,
@@ -63,6 +66,10 @@ fn db(raws: &[f32]) -> Vec<Db> {
 
 fn cents(raws: &[f32]) -> Vec<Cents> {
     raws.iter().map(|&r| Cents(r)).collect()
+}
+
+fn amplitudes(raws: &[f32]) -> Vec<Amplitude> {
+    raws.iter().map(|&r| Amplitude(r)).collect()
 }
 
 fn seconds(raws: &[f64]) -> Vec<Seconds> {
@@ -249,15 +256,39 @@ fn sharpness_keeps_the_range_checked_shape() {
     });
 }
 
-/// 8 kHz..=192 kHz.
+/// Zero or more, finite.
 #[test]
-fn windowed_rate_keeps_the_range_checked_shape() {
+fn onset_threshold_keeps_the_range_checked_shape() {
     check_range_contract(&RangeContract {
-        new: WindowedRate::new,
-        get: WindowedRate::get,
-        of: Some(WindowedRate::of),
-        valid: &[SampleRate::SR_8K, SampleRate::SR_48K, SampleRate::SR_192K],
-        invalid: &[SampleRate::of(7_999.0), SampleRate::of(192_001.0)],
+        new: OnsetThreshold::new,
+        get: OnsetThreshold::get,
+        of: Some(OnsetThreshold::of),
+        valid: &amplitudes(&[0.0, 0.3, 1.0, f32::MAX]),
+        invalid: &amplitudes(&[-0.1, NAN, INF, NEG_INF]),
+    });
+}
+
+/// Above zero, finite.
+#[test]
+fn onset_sensitivity_keeps_the_range_checked_shape() {
+    check_range_contract(&RangeContract {
+        new: OnsetSensitivity::new,
+        get: OnsetSensitivity::get,
+        of: Some(OnsetSensitivity::of),
+        valid: &amplitudes(&[f32::MIN_POSITIVE, 1.0, 3.0, f32::MAX]),
+        invalid: &amplitudes(&[0.0, -1.0, NAN, INF]),
+    });
+}
+
+/// `0..=60` seconds.
+#[test]
+fn onset_gap_keeps_the_range_checked_shape() {
+    check_range_contract(&RangeContract {
+        new: OnsetGap::new,
+        get: OnsetGap::get,
+        of: Some(OnsetGap::of),
+        valid: &seconds(&[0.0, 0.05, 60.0]),
+        invalid: &seconds(&[-0.001, 60.001, f64::NAN, f64::INFINITY]),
     });
 }
 

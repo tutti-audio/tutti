@@ -14,10 +14,7 @@
 
 use tutti_buffers::{Interleaved, InterleavedMut, Planes, interleave};
 use tutti_dsp::DitherShape;
-use tutti_measure::{
-    Loudness, LoudnessConfig, LoudnessState, TruePeakState, finish_loudness, finish_true_peak,
-    step_loudness, step_true_peak,
-};
+use tutti_measure::{Loudness, LoudnessConfig, LoudnessMeter, TruePeakConfig, TruePeakMeter};
 use tutti_types::{Amplitude, ChannelLayout, ChannelTopology, Db, SampleRate, Samples};
 
 use crate::Result;
@@ -375,30 +372,21 @@ impl Reading {
 
 /// A loudness meter over channels with a placement.
 struct PlacedMeter {
-    cfg: LoudnessConfig,
-    state: LoudnessState,
-}
-
-impl PlacedMeter {
-    fn new(cfg: LoudnessConfig) -> std::result::Result<Self, Unmeasured> {
-        Ok(Self {
-            state: LoudnessState::new(&cfg).ok_or(Unmeasured::Format)?,
-            cfg,
-        })
-    }
+    layout: ChannelLayout,
+    meter: LoudnessMeter,
 }
 
 /// A true-peak meter over channels with no placement.
-struct TruePeakMeter {
+struct UnplacedMeter {
     layout: ChannelLayout,
-    state: TruePeakState,
+    meter: TruePeakMeter,
 }
 
 /// What a peak-normalizing output measures with: loudness when its channels
 /// have a placement, the true peak alone when they have none.
 enum PeakMeter {
     Placed(PlacedMeter),
-    TruePeak(TruePeakMeter),
+    TruePeak(UnplacedMeter),
 }
 
 /// The meter of one mode, which fixes what it can read: a `Lufs` meter is
@@ -418,7 +406,7 @@ enum Meter {
 /// A reading taken a chunk at a time, over planes.
 ///
 /// The smallest thing normalize needs to be stoppable: `tutti-measure`'s
-/// `LoudnessState` already accumulates (and is what `measure_loudness` folds),
+/// `LoudnessMeter` already accumulates (and is what `measure_loudness` folds),
 /// so this only adds the planar-to-interleaved copy of one chunk, so that no
 /// whole interleaved copy of the render is made (the one-shot reading made
 /// one), and the chunking the caller checks `Control` between. Chunks end on
@@ -443,15 +431,18 @@ impl Measurer {
         topology: &ChannelTopology,
         normalize: Normalize,
     ) -> std::result::Result<Self, Unmeasured> {
-        let placed = LoudnessConfig::new(rate, topology.clone());
+        let layout = topology.width();
+        let placed = LoudnessConfig::new(topology.clone())
+            .measure(rate)
+            .map(|meter| PlacedMeter { layout, meter });
         let meter = match (normalize, placed) {
-            (Normalize::Lufs { target, ceiling }, Ok(cfg)) => Meter::Lufs {
-                meter: PlacedMeter::new(cfg)?,
+            (Normalize::Lufs { target, ceiling }, Ok(meter)) => Meter::Lufs {
+                meter,
                 target,
                 ceiling,
             },
-            (Normalize::Peak { target }, Ok(cfg)) => Meter::Peak {
-                meter: PeakMeter::Placed(PlacedMeter::new(cfg)?),
+            (Normalize::Peak { target }, Ok(meter)) => Meter::Peak {
+                meter: PeakMeter::Placed(meter),
                 target,
             },
             (
@@ -461,9 +452,11 @@ impl Measurer {
                     | tutti_measure::Error::UnplacedLoudnessChannels { .. },
                 ),
             ) => Meter::Peak {
-                meter: PeakMeter::TruePeak(TruePeakMeter {
-                    layout: topology.width(),
-                    state: TruePeakState::new(rate, topology.width()).ok_or(Unmeasured::Format)?,
+                meter: PeakMeter::TruePeak(UnplacedMeter {
+                    layout,
+                    meter: TruePeakConfig::new(layout)
+                        .measure(rate)
+                        .map_err(|_| Unmeasured::Format)?,
                 }),
                 target,
             },
@@ -474,9 +467,8 @@ impl Measurer {
                     | tutti_measure::Error::UnplacedLoudnessChannels { .. },
                 ),
             ) => return Err(Unmeasured::Placement),
-            // `tutti_measure::Error` is non-exhaustive, so this arm is
-            // required; it is unreachable today: nothing else builds a
-            // config.
+            // The meter cannot be built at this rate or width, and
+            // `tutti_measure::Error` is non-exhaustive.
             (_, Err(_)) => return Err(Unmeasured::Format),
         };
         Ok(Self {
@@ -492,7 +484,7 @@ impl Measurer {
             | Meter::Peak {
                 meter: PeakMeter::Placed(meter),
                 ..
-            } => meter.cfg.topology().width(),
+            } => meter.layout,
             Meter::Peak {
                 meter: PeakMeter::TruePeak(meter),
                 ..
@@ -526,12 +518,22 @@ impl Measurer {
                 meter: PeakMeter::Placed(meter),
                 ..
             } => {
-                step_loudness(&meter.cfg, &mut meter.state, frames);
+                let pushed = meter.meter.push(frames);
+                debug_assert!(
+                    pushed.is_ok(),
+                    "the frames are the meter's width: {pushed:?}"
+                );
             }
             Meter::Peak {
                 meter: PeakMeter::TruePeak(meter),
                 ..
-            } => step_true_peak(&mut meter.state, frames),
+            } => {
+                let pushed = meter.meter.push(frames);
+                debug_assert!(
+                    pushed.is_ok(),
+                    "the frames are the meter's width: {pushed:?}"
+                );
+            }
         }
     }
 
@@ -543,16 +545,14 @@ impl Measurer {
                 target,
                 ceiling,
             } => Reading::Lufs {
-                loudness: finish_loudness(meter.state),
+                loudness: meter.meter.finish(),
                 target,
                 ceiling,
             },
             Meter::Peak { meter, target } => Reading::Peak {
                 measured: match meter {
-                    PeakMeter::Placed(meter) => PeakReading::Placed(finish_loudness(meter.state)),
-                    PeakMeter::TruePeak(meter) => {
-                        PeakReading::TruePeak(finish_true_peak(meter.state))
-                    }
+                    PeakMeter::Placed(meter) => PeakReading::Placed(meter.meter.finish()),
+                    PeakMeter::TruePeak(meter) => PeakReading::TruePeak(meter.meter.finish()),
                 },
                 target,
             },

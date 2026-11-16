@@ -461,11 +461,13 @@ fn a_caller_can_compose_normalization() {
     long.render.duration_seconds = Seconds(2.0);
     let mut out = render_to_buffers(dc(RATE), &long, &FrozenClock).unwrap();
 
-    let cfg = LoudnessConfig::new(out.sample_rate(), Bed::Stereo.topology()).unwrap();
+    let cfg = LoudnessConfig::new(Bed::Stereo.topology());
+    let rate = out.sample_rate();
     let flat = out.interleaved();
     let before = measure_loudness(
         &cfg,
         Interleaved::new(&flat, ChannelLayout::STEREO).unwrap(),
+        rate,
     )
     .unwrap();
     let gain = before.gain_to(Db(-14.0), Db(-1.0));
@@ -474,6 +476,7 @@ fn a_caller_can_compose_normalization() {
     let after = measure_loudness(
         &cfg,
         Interleaved::new(&flat, ChannelLayout::STEREO).unwrap(),
+        rate,
     )
     .unwrap();
 
@@ -743,10 +746,11 @@ fn peak_normalization_lands_on_the_requested_dbtp() {
         .into_samples::<f32>()
         .map(|s| s.unwrap())
         .collect();
-    let meter = LoudnessConfig::new(cfg.render.sample_rate, Bed::Stereo.topology()).unwrap();
+    let meter = LoudnessConfig::new(Bed::Stereo.topology());
     let measured = measure_loudness(
         &meter,
         Interleaved::new(&samples, ChannelLayout::STEREO).unwrap(),
+        cfg.render.sample_rate,
     )
     .unwrap();
 
@@ -782,14 +786,11 @@ fn file_true_peak(path: &std::path::Path) -> f32 {
                 .collect()
         }
     };
-    let meter = LoudnessConfig::new(
-        SampleRate::of(f64::from(spec.sample_rate)),
-        Bed::Stereo.topology(),
-    )
-    .unwrap();
+    let meter = LoudnessConfig::new(Bed::Stereo.topology());
     measure_loudness(
         &meter,
         Interleaved::new(&samples, ChannelLayout::STEREO).unwrap(),
+        SampleRate::of(f64::from(spec.sample_rate)),
     )
     .expect("stereo is measurable")
     .true_peak
@@ -1071,14 +1072,11 @@ fn a_resampled_normalized_export_still_lands_on_its_dbtp_target() {
     assert_eq!(rate, 48_000, "the resample must have reached the file");
     let samples: Vec<f32> = reader.into_samples::<f32>().map(|s| s.unwrap()).collect();
 
-    let meter = LoudnessConfig::new(
-        tutti_types::SampleRate::of(rate as f64),
-        Bed::Stereo.topology(),
-    )
-    .unwrap();
+    let meter = LoudnessConfig::new(Bed::Stereo.topology());
     let measured = measure_loudness(
         &meter,
         Interleaved::new(&samples, ChannelLayout::STEREO).unwrap(),
+        tutti_types::SampleRate::of(rate as f64),
     )
     .expect("stereo at 48k is measurable");
 

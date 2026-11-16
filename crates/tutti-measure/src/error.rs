@@ -22,6 +22,9 @@ pub enum Error {
     /// A zero hop: frames would never advance.
     #[error("hop size is zero: frames would not advance")]
     ZeroHop,
+    /// A waveform block of zero samples.
+    #[error("block size is zero: a block would summarize nothing")]
+    ZeroBlock,
     /// `min >= max`, or either bound at or below zero or not finite. Refused
     /// when the band is built, or by the call that takes a band the geometry
     /// cannot hold, because a detector that accepts it reports "unvoiced"
@@ -116,17 +119,6 @@ pub enum Error {
         /// The most accepted.
         max: FrameCount,
     },
-    /// A frame that is not one window long.
-    #[error("frame of {got} samples is not the window of {window}")]
-    FrameLengthMismatch {
-        /// What the caller supplied, in [`Samples`].
-        got: Samples,
-        /// The window, in [`Samples`].
-        window: Samples,
-    },
-    /// A state built for another config than the one stepped with.
-    #[error("state was built for another config")]
-    StateMismatch,
     /// A grid of chroma that is not twelve columns wide.
     #[error("chroma is {columns} columns wide, not 12")]
     NotTwelveClasses {
@@ -152,14 +144,6 @@ pub enum Error {
     /// peak has a known lag behind its attack.
     #[error("note onsets need spectral flux")]
     OnsetNotSpectralFlux,
-    /// A pitch and an onset analysis at different sample rates.
-    #[error("onset sample rate {onset} differs from yin's {yin}")]
-    SampleRateMismatch {
-        /// The onset geometry's rate.
-        onset: SampleRate,
-        /// YIN's rate.
-        yin: SampleRate,
-    },
     /// A velocity range whose floor is not below its ceiling.
     #[error("velocity floor {floor} is not below ceiling {ceiling}")]
     EmptyVelocityRange {

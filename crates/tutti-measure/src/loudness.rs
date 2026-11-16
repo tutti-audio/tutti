@@ -7,22 +7,23 @@
 //! stream — measure while rendering, apply on a second pass — instead of
 //! holding the whole signal to do both at once.
 //!
-//! `ebur128` is an online meter, so this follows the crate's streaming shape
-//! ([`LoudnessConfig`] + [`LoudnessState`] + [`step_loudness`] + [`finish`]),
-//! with [`measure_loudness`] folding the same path for a whole buffer.
+//! `ebur128` is an online meter, so this follows the crate's streaming shape:
+//! a [`LoudnessConfig`] describes the channels, [`LoudnessConfig::measure`]
+//! binds the rate and makes a [`LoudnessMeter`] that takes the frames in
+//! chunks, and [`measure_loudness`] folds the same meter over a whole buffer.
 //!
 //! # A running meter
 //!
-//! [`step_windowed_loudness`] answers a different question from [`finish`]: not
-//! "how loud was the whole signal" but "how loud is it now", as a
-//! [`WindowedReading`] after every chunk. Momentary loudness is the last 400 ms
-//! and short-term the last 3 s, both K-weighted and ungated (EBU Tech 3341).
-//! The true peak is the largest seen since the meter was built or
-//! [reset](WindowedLoudnessState::reset).
+//! [`WindowedMeter::push`] answers a different question from
+//! [`LoudnessMeter::finish`]: not "how loud was the whole signal" but "how loud
+//! is it now", as a [`WindowedReading`] after every chunk. Momentary loudness
+//! is the last 400 ms and short-term the last 3 s, both K-weighted and ungated
+//! (EBU Tech 3341). The true peak is the largest seen since the meter was built
+//! or [reset](WindowedMeter::reset).
 //!
 //! # Interleaved in, unit-typed out
 //!
-//! `step_loudness` takes an [`Interleaved`] — the shape a render loop already
+//! `push` takes an [`Interleaved`] — the shape a render loop already
 //! has, carrying its own width. Results come back as [`Db`]: LUFS and dBTP
 //! are both decibel readings, and the f32 that `Db` carries is ~3× finer than a
 //! 24-bit LSB at any level these reach, so nothing measurable is lost by not
@@ -45,70 +46,62 @@ use ebur128::{Channel, EbuR128, Mode};
 use tutti_buffers::{Interleaved, Sample};
 use tutti_types::{ChannelLayout, ChannelTopology, Db, Direction, SampleRate};
 
+use crate::convert::{all_finite, for_blocks};
 use crate::{Error, Result};
-use tutti_types::ranged;
 
-/// What the meter is measuring: the rate and channel topology of the frames fed
-/// to [`step_loudness`].
+/// What a loudness meter measures: the channel topology of the frames fed to
+/// it.
 ///
-/// The rate is **not** optional and **not** defaulted. Hardcode it to 48 kHz
-/// and a 44.1 kHz render measures its peaks through a filter built for the
-/// wrong rate and normalizes to a biased target. Carrying the rate in the
-/// config makes that unrepresentable.
+/// The rate is **not** part of the config and **not** defaulted: the call that
+/// takes the frames binds it ([`measure`](Self::measure),
+/// [`measure_loudness`]). Hardcode it to 48 kHz and a 44.1 kHz render measures
+/// its peaks through a filter built for the wrong rate and normalizes to a
+/// biased target.
 ///
 /// The topology says where each channel stands, and with it how much the
-/// channel counts: see the module docs. Building the config refuses a topology
-/// that has no placement to weigh. The LFE adds no loudness, and its peak still
-/// counts in [`Loudness::true_peak`].
+/// channel counts: see the module docs. The call that takes the frames refuses
+/// a topology that has no placement to weigh.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LoudnessConfig {
-    rate: SampleRate,
     topology: ChannelTopology,
-    /// The `ebur128` label of each channel, derived from `topology`.
-    labels: Box<[Channel]>,
 }
 
 impl LoudnessConfig {
-    /// A config for frames at `rate` in `topology`.
-    ///
-    /// # Errors
-    ///
-    /// [`Error::AmbisonicLoudness`] for an ambisonic topology;
-    /// [`Error::UnplacedLoudnessChannels`] for speakers that are not a
-    /// [`Bed`](tutti_types::Bed)'s, whose angles are unknown.
-    pub fn new(rate: impl Into<SampleRate>, topology: ChannelTopology) -> Result<Self> {
-        let labels = channel_labels(&topology)?;
-        Ok(Self {
-            rate: rate.into(),
-            topology,
-            labels,
-        })
-    }
-
-    /// The rate the fed frames are denominated at.
-    #[inline]
+    /// A config for frames in `topology`.
     #[must_use]
-    pub fn rate(&self) -> SampleRate {
-        self.rate
+    pub fn new(topology: ChannelTopology) -> Self {
+        Self { topology }
     }
 
     /// The topology of the fed frames. Fixed at meter construction: a chunk of
-    /// a different width is read as a different signal.
+    /// a different width is refused ([`Error::ChunkLayoutMismatch`]).
     #[inline]
     #[must_use]
     pub fn topology(&self) -> &ChannelTopology {
         &self.topology
     }
 
-    /// Whether `chunk` is the width this config's meter was built for.
+    /// A meter for frames at `rate`.
     ///
-    /// The meter's channel count is fixed at construction, so a chunk of a
-    /// different width is split into the wrong number of frames and read as a
-    /// different signal. Expressible only because the width travels with the
-    /// buffer.
-    #[inline]
-    pub fn chunk_matches(&self, chunk: Interleaved<'_>) -> bool {
-        chunk.layout() == self.topology.width()
+    /// # Errors
+    ///
+    /// [`Error::AmbisonicLoudness`] for an ambisonic topology;
+    /// [`Error::UnplacedLoudnessChannels`] for speakers that are not a
+    /// [`Bed`](tutti_types::Bed)'s, whose angles are unknown;
+    /// [`Error::MeterUnavailable`] when `ebur128` cannot meter the rate.
+    pub fn measure(&self, rate: impl Into<SampleRate>) -> Result<LoudnessMeter> {
+        let labels = channel_labels(&self.topology)?;
+        let layout = self.topology.width();
+        let mut meter = EbuR128::new(
+            u32::from(layout.count()),
+            rate.into().get().round() as u32,
+            Mode::I | Mode::LRA | Mode::TRUE_PEAK,
+        )
+        .map_err(|_| Error::MeterUnavailable)?;
+        meter
+            .set_channel_map(&labels)
+            .map_err(|_| Error::MeterUnavailable)?;
+        Ok(LoudnessMeter { layout, meter })
     }
 }
 
@@ -191,156 +184,192 @@ impl Loudness {
     }
 }
 
-/// The meter's carry between chunks.
+/// A running EBU R128 meter at one rate and topology.
 ///
 /// Wraps `EbuR128`, which accumulates internally.
-pub struct LoudnessState {
+pub struct LoudnessMeter {
+    layout: ChannelLayout,
     meter: EbuR128,
 }
 
 // `EbuR128` is not `Debug`; report what the meter was built for instead.
-impl std::fmt::Debug for LoudnessState {
+impl std::fmt::Debug for LoudnessMeter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LoudnessState").finish_non_exhaustive()
-    }
-}
-
-impl LoudnessState {
-    /// Builds a meter for `cfg`.
-    ///
-    /// Returns `None` when `ebur128` cannot meter the rate, so the failure is
-    /// a value rather than a panic inside a render.
-    #[must_use]
-    pub fn new(cfg: &LoudnessConfig) -> Option<Self> {
-        let mut meter = EbuR128::new(
-            u32::from(cfg.topology.width().count()),
-            cfg.rate.get().round() as u32,
-            Mode::I | Mode::LRA | Mode::TRUE_PEAK,
-        )
-        .ok()?;
-        meter.set_channel_map(&cfg.labels).ok()?;
-        Some(Self { meter })
-    }
-}
-
-/// Feeds one chunk of frames.
-///
-/// The chunk arrives as an [`Interleaved`], so its width travels with it rather
-/// than beside it — as a separate `cfg.layout` and a bare buffer, the two have
-/// to agree and nothing checks that they do. The meter is built from
-/// `cfg.layout`, so a chunk at a different width is metered as the wrong number
-/// of frames — [`chunk_matches`](LoudnessConfig::chunk_matches)
-/// makes that a value the caller can act on. Here a mismatch is simply ignored,
-/// because a metering miss must not fail a render.
-///
-/// An [`Interleaved`] is whole frames, so every chunk keeps each sample on its
-/// own channel. Chunks need not align to any block size.
-pub fn step_loudness(cfg: &LoudnessConfig, state: &mut LoudnessState, chunk: Interleaved<'_>) {
-    if !cfg.chunk_matches(chunk) {
-        return;
-    }
-    // Errors from the meter mean a layout/meter mismatch the guard above
-    // already ruled out; a metering miss must not fail a render.
-    if !chunk.is_empty() {
-        let _ = state.meter.add_frames_f32(chunk.samples());
-    }
-}
-
-/// Reads the meter.
-///
-/// Consumes the state: R128's integrated loudness is a whole-signal answer, and
-/// letting a caller read it mid-stream and keep feeding invites treating a
-/// partial reading as final.
-pub fn finish(state: LoudnessState) -> Loudness {
-    let meter = state.meter;
-    // `-70` LUFS is R128's absolute gate. The meter reports `-inf` (not an
-    // error) when nothing passed it — silence, or simply an input shorter than
-    // the 400 ms gating block, which a short render legitimately is. Clamping to
-    // the gate keeps the reading finite, because an infinite loudness poisons
-    // every gain derived from it into `NaN`.
-    let lufs = meter.loudness_global().unwrap_or(f64::NEG_INFINITY);
-    let lufs = if lufs.is_finite() { lufs } else { -70.0 };
-    let range = meter.loudness_range().unwrap_or(0.0);
-    let range = if range.is_finite() { range } else { 0.0 };
-
-    // True peak is per-channel; the file's peak is the loudest of them.
-    let channels = meter.channels();
-    let peak_linear = (0..channels)
-        .filter_map(|c| meter.true_peak(c).ok())
-        .fold(0.0f64, f64::max);
-
-    Loudness {
-        lufs: Db(lufs as f32),
-        true_peak: true_peak_db(peak_linear),
-        range: Db(range as f32),
-    }
-}
-
-/// A true-peak meter: the largest inter-sample peak over every channel, for
-/// channels with no placement to weigh a loudness by.
-///
-/// Reads nothing but the peak, so it takes no [`ChannelTopology`] and pays for
-/// no integrated or range gating. Shaped as [`LoudnessState`] is: build it,
-/// feed it with [`step_true_peak`], read it with [`finish_true_peak`].
-pub struct TruePeakState {
-    layout: ChannelLayout,
-    meter: EbuR128,
-    /// A chunk widened to the meter's `f64`, reused so a step allocates only
-    /// when a chunk is longer than any before it.
-    scratch: Vec<f64>,
-}
-
-// `EbuR128` is not `Debug`.
-impl std::fmt::Debug for TruePeakState {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TruePeakState")
+        f.debug_struct("LoudnessMeter")
             .field("layout", &self.layout)
             .finish_non_exhaustive()
     }
 }
 
-impl TruePeakState {
-    /// Builds a meter for `layout` at `rate`.
+impl LoudnessMeter {
+    /// Feeds one chunk of frames.
     ///
-    /// Returns `None` when `ebur128` cannot meter the width or the rate.
+    /// The chunk arrives as an [`Interleaved`], so its width travels with it
+    /// rather than beside it. An [`Interleaved`] is whole frames, so every
+    /// chunk keeps each sample on its own channel, and chunks need not align to
+    /// any block size.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::ChunkLayoutMismatch`] when `chunk` is not the topology's width:
+    /// the meter's channel count is fixed, so a chunk of another width would be
+    /// split into the wrong number of frames and read as a different signal.
+    pub fn push<S: Sample>(&mut self, chunk: Interleaved<'_, S>) -> Result<()> {
+        if chunk.layout() != self.layout {
+            return Err(Error::ChunkLayoutMismatch {
+                chunk: chunk.layout(),
+                config: self.layout,
+            });
+        }
+        let channels = chunk.channels();
+        let Self { meter, .. } = self;
+        for_blocks(chunk.samples(), channels, |block| {
+            // The width was checked above, and the block is whole frames, so the
+            // meter takes it; a metering miss must not fail a render.
+            let _ = meter.add_frames_f32(block);
+        });
+        Ok(())
+    }
+
+    /// Reads the meter.
+    ///
+    /// Consumes it: R128's integrated loudness is a whole-signal answer, and
+    /// letting a caller read it mid-stream and keep feeding invites treating a
+    /// partial reading as final.
     #[must_use]
-    pub fn new(rate: impl Into<SampleRate>, layout: ChannelLayout) -> Option<Self> {
+    pub fn finish(self) -> Loudness {
+        let meter = self.meter;
+        // `-70` LUFS is R128's absolute gate. The meter reports `-inf` (not an
+        // error) when nothing passed it — silence, or simply an input shorter than
+        // the 400 ms gating block, which a short render legitimately is. Clamping to
+        // the gate keeps the reading finite, because an infinite loudness poisons
+        // every gain derived from it into `NaN`.
+        let lufs = meter.loudness_global().unwrap_or(f64::NEG_INFINITY);
+        let lufs = if lufs.is_finite() { lufs } else { -70.0 };
+        let range = meter.loudness_range().unwrap_or(0.0);
+        let range = if range.is_finite() { range } else { 0.0 };
+
+        // True peak is per-channel; the file's peak is the loudest of them.
+        let channels = meter.channels();
+        let peak_linear = (0..channels)
+            .filter_map(|c| meter.true_peak(c).ok())
+            .fold(0.0f64, f64::max);
+
+        Loudness {
+            lufs: Db(lufs as f32),
+            true_peak: true_peak_db(peak_linear),
+            range: Db(range as f32),
+        }
+    }
+}
+
+/// What a true-peak meter measures: the width of the frames fed to it.
+///
+/// Reads nothing but the peak, so it takes no [`ChannelTopology`] and pays for
+/// no integrated or range gating, and any channel layout will do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TruePeakConfig {
+    layout: ChannelLayout,
+}
+
+impl TruePeakConfig {
+    /// A config for frames `layout` wide.
+    #[must_use]
+    pub fn new(layout: ChannelLayout) -> Self {
+        Self { layout }
+    }
+
+    /// A meter for frames at `rate`.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::MeterUnavailable`] when `ebur128` cannot meter the width or the
+    /// rate.
+    pub fn measure(&self, rate: impl Into<SampleRate>) -> Result<TruePeakMeter> {
         EbuR128::new(
-            u32::from(layout.count()),
+            u32::from(self.layout.count()),
             rate.into().get().round() as u32,
             Mode::TRUE_PEAK,
         )
-        .ok()
-        .map(|meter| Self {
-            layout,
+        .map_err(|_| Error::MeterUnavailable)
+        .map(|meter| TruePeakMeter {
+            layout: self.layout,
             meter,
             scratch: Vec::new(),
         })
     }
 }
 
-/// Feeds one chunk of frames.
-///
-/// Any sample format is metered at its nominal level (an integer as a fraction
-/// of full scale). A chunk of another width than the state's is ignored, as
-/// [`step_loudness`] ignores it: a metering miss must not fail a render.
-pub fn step_true_peak<S: Sample>(state: &mut TruePeakState, chunk: Interleaved<'_, S>) {
-    if chunk.layout() == state.layout && !chunk.is_empty() {
-        state.scratch.clear();
-        state
-            .scratch
-            .extend(chunk.samples().iter().map(|s| s.to_f64()));
-        let _ = state.meter.add_frames_f64(&state.scratch);
+/// A running true-peak meter: the largest inter-sample peak over every
+/// channel, for channels with no placement to weigh a loudness by.
+pub struct TruePeakMeter {
+    layout: ChannelLayout,
+    meter: EbuR128,
+    /// A chunk widened to the meter's `f64`, reused so a push allocates only
+    /// when a chunk is longer than any before it.
+    scratch: Vec<f64>,
+}
+
+// `EbuR128` is not `Debug`.
+impl std::fmt::Debug for TruePeakMeter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TruePeakMeter")
+            .field("layout", &self.layout)
+            .finish_non_exhaustive()
     }
 }
 
-/// The largest true peak of every channel fed, in dBTP; [`Db::FLOOR`] for
-/// silence. Consumes the state, as [`finish`] does.
-pub fn finish_true_peak(state: TruePeakState) -> Db {
-    let peak = (0..u32::from(state.layout.count()))
-        .filter_map(|c| state.meter.true_peak(c).ok())
-        .fold(0.0f64, f64::max);
-    true_peak_db(peak)
+impl TruePeakMeter {
+    /// Feeds one chunk of frames.
+    ///
+    /// Any sample format is metered at its nominal level (an integer as a
+    /// fraction of full scale).
+    ///
+    /// # Errors
+    ///
+    /// [`Error::ChunkLayoutMismatch`] when `chunk` is not the config's width.
+    pub fn push<S: Sample>(&mut self, chunk: Interleaved<'_, S>) -> Result<()> {
+        if chunk.layout() != self.layout {
+            return Err(Error::ChunkLayoutMismatch {
+                chunk: chunk.layout(),
+                config: self.layout,
+            });
+        }
+        if !chunk.is_empty() {
+            self.scratch.clear();
+            self.scratch
+                .extend(chunk.samples().iter().map(|s| s.to_f64()));
+            let _ = self.meter.add_frames_f64(&self.scratch);
+        }
+        Ok(())
+    }
+
+    /// The largest true peak of every channel fed, in dBTP; [`Db::FLOOR`] for
+    /// silence. Consumes the meter, as [`LoudnessMeter::finish`] does.
+    #[must_use]
+    pub fn finish(self) -> Db {
+        let peak = (0..u32::from(self.layout.count()))
+            .filter_map(|c| self.meter.true_peak(c).ok())
+            .fold(0.0f64, f64::max);
+        true_peak_db(peak)
+    }
+}
+
+/// The true peak of a whole buffer at `rate`, in dBTP: a [`TruePeakMeter`] fed
+/// the buffer, then finished.
+///
+/// # Errors
+///
+/// [`Error::MeterUnavailable`] when `ebur128` cannot meter the width or the
+/// rate; [`Error::ChunkLayoutMismatch`] when `buffer` is not the config's width.
+pub fn measure_true_peak<S: Sample>(
+    cfg: &TruePeakConfig,
+    buffer: Interleaved<'_, S>,
+    rate: impl Into<SampleRate>,
+) -> Result<Db> {
+    let mut meter = cfg.measure(rate)?;
+    meter.push(buffer)?;
+    Ok(meter.finish())
 }
 
 /// An `f64` true-peak amplitude as dBTP, pinning silence at [`Db::FLOOR`].
@@ -362,57 +391,71 @@ fn true_peak_db(peak_linear: f64) -> Db {
     }
 }
 
-// The window a windowed meter keeps is three seconds of every channel, so the
-// rate's upper bound caps its allocation (a topology is at most 16 channels).
-ranged! {
-    /// A rate a windowed meter is built for: within 8 kHz..=192 kHz.
-    WindowedRate(SampleRate), WindowedRateError, "a windowed rate within 8 kHz..=192 kHz",
-    |raw| raw.get() >= 8_000.0 && raw.get() <= 192_000.0
-}
+/// The rates a windowed meter is built for. The window it keeps is three
+/// seconds of every channel, so the upper bound caps its allocation (a topology
+/// is at most 16 channels).
+const WINDOWED_MIN_RATE: SampleRate = SampleRate::of(8_000.0);
+const WINDOWED_MAX_RATE: SampleRate = SampleRate::of(192_000.0);
 
-/// What a [`WindowedLoudnessState`] meters: the rate and layout of the frames fed
-/// to [`step_windowed_loudness`], weighted by placement as [`LoudnessConfig`] is.
+/// What a [`WindowedMeter`] measures: the channel topology of the frames fed to
+/// it, weighted by placement as [`LoudnessConfig`] is.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WindowedLoudnessConfig {
     config: LoudnessConfig,
 }
 
 impl WindowedLoudnessConfig {
-    /// A config for frames at `rate` in `topology`.
-    ///
-    /// # Errors
-    ///
-    /// As [`LoudnessConfig::new`].
-    pub fn new(rate: WindowedRate, topology: ChannelTopology) -> Result<Self> {
-        Ok(Self {
-            config: LoudnessConfig::new(rate.get(), topology)?,
-        })
-    }
-
-    /// The rate the fed frames are denominated at.
-    #[inline]
+    /// A config for frames in `topology`.
     #[must_use]
-    pub fn rate(&self) -> SampleRate {
-        self.config.rate()
+    pub fn new(topology: ChannelTopology) -> Self {
+        Self {
+            config: LoudnessConfig::new(topology),
+        }
     }
 
-    /// The channel topology of the fed frames.
+    /// The topology of the fed frames.
     #[inline]
     #[must_use]
     pub fn topology(&self) -> &ChannelTopology {
         self.config.topology()
     }
 
-    /// The channel count of the fed frames.
-    #[inline]
-    #[must_use]
-    pub fn layout(&self) -> ChannelLayout {
-        self.config.topology().width()
-    }
-
-    /// Frames in `tenths` hundred-millisecond units, as the meter counts them.
-    fn window_frames(&self, tenths: u64) -> u64 {
-        ((self.rate().get().round() as u64 + 5) / 10) * tenths
+    /// A meter for frames at `rate`. Allocates its three-second window here: at
+    /// most 3 s of `f64` samples of every channel, 192 kHz x 16 channels x 3 s x
+    /// 8 bytes, about 74 MB, and far less at ordinary rates and widths.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::SampleRateOutOfRange`] for a rate outside 8 kHz..=192 kHz;
+    /// [`Error::AmbisonicLoudness`] or [`Error::UnplacedLoudnessChannels`] for
+    /// a topology with no placement to weigh; [`Error::MeterUnavailable`] if the
+    /// meter cannot be built.
+    pub fn measure(&self, rate: impl Into<SampleRate>) -> Result<WindowedMeter> {
+        let rate = rate.into();
+        if !(WINDOWED_MIN_RATE..=WINDOWED_MAX_RATE).contains(&rate) {
+            return Err(Error::SampleRateOutOfRange {
+                rate,
+                min: WINDOWED_MIN_RATE,
+                max: WINDOWED_MAX_RATE,
+            });
+        }
+        let labels = channel_labels(self.config.topology())?;
+        let layout = self.config.topology().width();
+        let mut meter = EbuR128::new(
+            u32::from(layout.count()),
+            rate.get().round() as u32,
+            Mode::M | Mode::S | Mode::TRUE_PEAK,
+        )
+        .map_err(|_| Error::MeterUnavailable)?;
+        meter
+            .set_channel_map(&labels)
+            .map_err(|_| Error::MeterUnavailable)?;
+        Ok(WindowedMeter {
+            layout,
+            rate,
+            meter,
+            frames: 0,
+        })
     }
 }
 
@@ -435,58 +478,36 @@ pub struct WindowedReading {
 
 impl WindowedReading {
     /// The lowest loudness a reading reports: a clamp at BS.1770's `-70` LUFS
-    /// absolute gate level, the same one [`finish`] applies.
+    /// absolute gate level, the same one [`LoudnessMeter::finish`] applies.
     ///
     /// Silence, a signal quieter than this and a window that is not yet full
     /// all read it, and only
-    /// [`frames_seen`](WindowedLoudnessState::frames_seen) tells them apart.
+    /// [`frames_seen`](WindowedMeter::frames_seen) tells them apart.
     /// A finite floor keeps every gain derived from a reading finite.
     pub const LOUDNESS_FLOOR: Db = Db(-70.0);
 }
 
-/// The running meter's carry between chunks.
-pub struct WindowedLoudnessState {
-    cfg: WindowedLoudnessConfig,
+/// A running windowed meter at one rate and topology.
+pub struct WindowedMeter {
+    layout: ChannelLayout,
+    rate: SampleRate,
     meter: EbuR128,
     /// Whole frames fed since construction or the last reset.
     frames: u64,
 }
 
 // `EbuR128` is not `Debug`.
-impl std::fmt::Debug for WindowedLoudnessState {
+impl std::fmt::Debug for WindowedMeter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("WindowedLoudnessState")
-            .field("cfg", &self.cfg)
+        f.debug_struct("WindowedMeter")
+            .field("layout", &self.layout)
+            .field("rate", &self.rate)
             .field("frames", &self.frames)
             .finish_non_exhaustive()
     }
 }
 
-impl WindowedLoudnessState {
-    /// Builds a meter for `cfg`. Allocates its three-second window here: at
-    /// most 3 s of `f64` samples of every channel, 192 kHz x 16 channels x 3 s x
-    /// 8 bytes, about 74 MB, and far less at ordinary rates and widths.
-    ///
-    /// # Errors
-    ///
-    /// [`Error::MeterUnavailable`] if the meter cannot be built.
-    pub fn new(cfg: &WindowedLoudnessConfig) -> Result<Self> {
-        let mut meter = EbuR128::new(
-            u32::from(cfg.layout().count()),
-            cfg.rate().get().round() as u32,
-            Mode::M | Mode::S | Mode::TRUE_PEAK,
-        )
-        .map_err(|_| Error::MeterUnavailable)?;
-        meter
-            .set_channel_map(&cfg.config.labels)
-            .map_err(|_| Error::MeterUnavailable)?;
-        Ok(Self {
-            cfg: cfg.clone(),
-            meter,
-            frames: 0,
-        })
-    }
-
+impl WindowedMeter {
     /// Forgets everything fed: the windows read the floor again and the peak
     /// is cleared. Keeps the buffers.
     pub fn reset(&mut self) {
@@ -501,15 +522,71 @@ impl WindowedLoudnessState {
         self.frames
     }
 
-    fn feed(&mut self, samples: &[f32]) -> Result<()> {
-        if samples.is_empty() {
-            return Ok(());
+    /// Frames in `tenths` hundred-millisecond units, as the meter counts them.
+    fn window_frames(&self, tenths: u64) -> u64 {
+        ((self.rate.get().round() as u64 + 5) / 10) * tenths
+    }
+
+    /// Feeds one chunk and reads the meter.
+    ///
+    /// A chunk is whole frames, so the reading does not depend on how the
+    /// stream is cut. A chunk may be empty.
+    ///
+    /// A push allocates nothing once the meter is built (the meter's
+    /// `add_frames_f32` and its momentary, short-term and true-peak getters,
+    /// counted in `tests/alloc/windowed_loudness.rs` for the locked `ebur128`),
+    /// but it is not a realtime-safe call: each reads both windows over their
+    /// whole length, three seconds of every channel for the short-term one, so
+    /// its cost does not shrink with the chunk. Run it on a consumer thread
+    /// that drains a graph tap's `TapReader`, once per display tick, not in an
+    /// audio callback.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::ChunkLayoutMismatch`] when `chunk` is not the topology's width;
+    /// [`Error::NonFiniteInput`] for a NaN or infinite sample;
+    /// [`Error::MeterRejectedFrames`] if the meter refuses the frames. The
+    /// meter is untouched on the first two.
+    pub fn push<S: Sample>(&mut self, chunk: Interleaved<'_, S>) -> Result<WindowedReading> {
+        if chunk.layout() != self.layout {
+            return Err(Error::ChunkLayoutMismatch {
+                chunk: chunk.layout(),
+                config: self.layout,
+            });
         }
-        self.meter
-            .add_frames_f32(samples)
-            .map_err(|_| Error::MeterRejectedFrames)?;
-        self.frames += (samples.len() / usize::from(self.cfg.layout().count())) as u64;
-        Ok(())
+        if !all_finite(chunk.samples()) {
+            return Err(Error::NonFiniteInput);
+        }
+
+        let channels = chunk.channels();
+        let mut rejected = false;
+        for_blocks(chunk.samples(), channels, |block| {
+            if self.meter.add_frames_f32(block).is_err() {
+                rejected = true;
+            } else {
+                self.frames += (block.len() / channels) as u64;
+            }
+        });
+        if rejected {
+            return Err(Error::MeterRejectedFrames);
+        }
+
+        let peak = (0..u32::from(self.layout.count()))
+            .filter_map(|c| self.meter.true_peak(c).ok())
+            .fold(0.0f64, f64::max);
+        Ok(WindowedReading {
+            momentary: windowed_db(
+                self.frames,
+                self.window_frames(4),
+                self.meter.loudness_momentary().ok(),
+            ),
+            short_term: windowed_db(
+                self.frames,
+                self.window_frames(30),
+                self.meter.loudness_shortterm().ok(),
+            ),
+            true_peak: true_peak_db(peak),
+        })
     }
 }
 
@@ -525,71 +602,23 @@ fn windowed_db(frames: u64, needed: u64, lufs: Option<f64>) -> Db {
     }
 }
 
-/// Feeds one chunk and reads the meter.
+/// Measures a whole buffer at `rate`.
 ///
-/// A chunk is whole frames, so the reading does not depend on how the stream
-/// is cut. A chunk may be empty.
-///
-/// A step allocates nothing once the state is built (the meter's `add_frames_f32`
-/// and its momentary, short-term and true-peak getters, counted in
-/// `tests/windowed_loudness_alloc.rs` for the locked `ebur128`), but it is not a realtime-safe call: each
-/// reads both windows over their whole length, three seconds of every channel
-/// for the short-term one, so its cost does not shrink with the chunk. Run it on
-/// a consumer thread that drains a graph tap's `TapReader`, once per display tick, not in
-/// an audio callback.
+/// Feeds one [`LoudnessMeter`] the buffer, so the whole-buffer and streaming
+/// paths can never disagree.
 ///
 /// # Errors
 ///
-/// [`Error::StateMismatch`] when `state` was built for another config;
-/// [`Error::ChunkLayoutMismatch`] when `chunk` is not `cfg`'s layout; [`Error::NonFiniteInput`] for a NaN
-/// or infinite sample. The state is untouched on error.
-pub fn step_windowed_loudness(
-    cfg: &WindowedLoudnessConfig,
-    state: &mut WindowedLoudnessState,
-    chunk: Interleaved<'_>,
-) -> Result<WindowedReading> {
-    if state.cfg != *cfg {
-        return Err(Error::StateMismatch);
-    }
-    if chunk.layout() != cfg.layout() {
-        return Err(Error::ChunkLayoutMismatch {
-            chunk: chunk.layout(),
-            config: cfg.layout(),
-        });
-    }
-    let samples = chunk.samples();
-    if samples.iter().any(|s| !s.is_finite()) {
-        return Err(Error::NonFiniteInput);
-    }
-
-    state.feed(samples)?;
-
-    let peak = (0..u32::from(cfg.layout().count()))
-        .filter_map(|c| state.meter.true_peak(c).ok())
-        .fold(0.0f64, f64::max);
-    Ok(WindowedReading {
-        momentary: windowed_db(
-            state.frames,
-            cfg.window_frames(4),
-            state.meter.loudness_momentary().ok(),
-        ),
-        short_term: windowed_db(
-            state.frames,
-            cfg.window_frames(30),
-            state.meter.loudness_shortterm().ok(),
-        ),
-        true_peak: true_peak_db(peak),
-    })
-}
-
-/// Measures a whole buffer.
-///
-/// Folds [`step_loudness`] — the same implementation the streaming path uses,
-/// so the two can never disagree. `None` when the meter cannot be built.
-pub fn measure_loudness(cfg: &LoudnessConfig, buffer: Interleaved<'_>) -> Option<Loudness> {
-    let mut state = LoudnessState::new(cfg)?;
-    step_loudness(cfg, &mut state, buffer);
-    Some(finish(state))
+/// As [`LoudnessConfig::measure`], and [`Error::ChunkLayoutMismatch`] when
+/// `buffer` is not the topology's width.
+pub fn measure_loudness<S: Sample>(
+    cfg: &LoudnessConfig,
+    buffer: Interleaved<'_, S>,
+    rate: impl Into<SampleRate>,
+) -> Result<Loudness> {
+    let mut meter = cfg.measure(rate)?;
+    meter.push(buffer)?;
+    Ok(meter.finish())
 }
 
 #[cfg(test)]
@@ -599,6 +628,17 @@ mod tests {
     use tutti_types::{
         AmbisonicFormat, AmbisonicOrder, Amplitude, Azimuth, Bed, Elevation, Speaker,
     };
+
+    /// A config with the rate its tests measure at.
+    struct Rated<C>(C, SampleRate);
+
+    /// `measure_loudness` at the rate the config was made for.
+    fn measure_loudness<S: Sample>(
+        c: &Rated<LoudnessConfig>,
+        buffer: Interleaved<'_, S>,
+    ) -> Result<Loudness> {
+        super::measure_loudness(&c.0, buffer, c.1)
+    }
 
     /// The true-peak floor lives at this boundary, not in `Db::from_amplitude`.
     #[test]
@@ -649,8 +689,11 @@ mod tests {
         .collect()
     }
 
-    fn cfg(rate: f64) -> LoudnessConfig {
-        LoudnessConfig::new(SampleRate::of(rate), Bed::Stereo.topology()).unwrap()
+    fn cfg(rate: f64) -> Rated<LoudnessConfig> {
+        Rated(
+            LoudnessConfig::new(Bed::Stereo.topology()),
+            SampleRate::of(rate),
+        )
     }
 
     /// The one-shot form must fold the streaming form exactly — the property
@@ -663,23 +706,16 @@ mod tests {
         let one_shot =
             measure_loudness(&c, Interleaved::new(&buf, ChannelLayout::STEREO).unwrap()).unwrap();
 
-        let mut state = LoudnessState::new(&c).unwrap();
         // 777 frames: not a multiple of any block size the meter uses.
-        for chunk in buf.chunks(777 * 2) {
-            step_loudness(
-                &c,
-                &mut state,
-                Interleaved::new(chunk, ChannelLayout::STEREO).unwrap(),
-            );
+        for frames in [1, 777, 4800, 48_000] {
+            let mut meter = c.0.measure(c.1).unwrap();
+            for chunk in buf.chunks(frames * 2) {
+                meter
+                    .push(Interleaved::new(chunk, ChannelLayout::STEREO).unwrap())
+                    .unwrap();
+            }
+            assert_eq!(meter.finish(), one_shot, "chunks of {frames} frames");
         }
-        let streamed = finish(state);
-
-        assert!(
-            (one_shot.lufs.get() - streamed.lufs.get()).abs() < 0.01,
-            "one-shot {:?} vs streamed {:?}",
-            one_shot.lufs,
-            streamed.lufs
-        );
     }
 
     /// The rate is honoured, not assumed. A meter built for the wrong rate
@@ -753,24 +789,26 @@ mod tests {
         );
     }
 
-    /// A chunk whose own width disagrees with the meter's is skipped, not fed.
+    /// A chunk whose own width disagrees with the meter's is refused, not fed.
     ///
     /// The buffer carries its width, so the disagreement is detectable. Fed
     /// anyway, a quad chunk handed to a stereo meter would be split into twice
     /// as many frames of the wrong signal and silently folded into the
     /// integrated reading.
     #[test]
-    fn a_chunk_of_the_wrong_width_is_not_metered() {
+    fn a_chunk_of_the_wrong_width_is_refused() {
         let c = cfg(48_000.0);
         let buf = sine(48_000.0, 1.0, 1_000.0, 0.5);
 
-        let mut state = LoudnessState::new(&c).unwrap();
-        step_loudness(
-            &c,
-            &mut state,
-            Interleaved::new(&buf, ChannelLayout::QUAD).unwrap(),
+        let mut meter = c.0.measure(c.1).unwrap();
+        assert_eq!(
+            meter.push(Interleaved::new(&buf, ChannelLayout::QUAD).unwrap()),
+            Err(Error::ChunkLayoutMismatch {
+                chunk: ChannelLayout::QUAD,
+                config: ChannelLayout::STEREO,
+            })
         );
-        let m = finish(state);
+        let m = meter.finish();
 
         assert_eq!(
             m.true_peak,
@@ -843,29 +881,25 @@ mod tests {
         Db::from_amplitude(Amplitude::new(a as f32)).get()
     }
 
-    fn windowed_cfg(rate: f64) -> WindowedLoudnessConfig {
-        WindowedLoudnessConfig::new(
-            WindowedRate::new(SampleRate::of(rate)).unwrap(),
-            Bed::Stereo.topology(),
+    fn windowed_cfg(rate: f64) -> Rated<WindowedLoudnessConfig> {
+        Rated(
+            WindowedLoudnessConfig::new(Bed::Stereo.topology()),
+            SampleRate::of(rate),
         )
-        .unwrap()
     }
 
     /// Feeds `buf` in `frames`-frame chunks, returning the reading after each.
     fn windowed_run(
-        cfg: &WindowedLoudnessConfig,
+        cfg: &Rated<WindowedLoudnessConfig>,
         buf: &[f32],
         frames: usize,
     ) -> Vec<WindowedReading> {
-        let mut state = WindowedLoudnessState::new(cfg).unwrap();
+        let mut state = cfg.0.measure(cfg.1).unwrap();
         buf.chunks(frames * 2)
             .map(|chunk| {
-                step_windowed_loudness(
-                    cfg,
-                    &mut state,
-                    Interleaved::new(chunk, ChannelLayout::STEREO).unwrap(),
-                )
-                .unwrap()
+                state
+                    .push(Interleaved::new(chunk, ChannelLayout::STEREO).unwrap())
+                    .unwrap()
             })
             .collect()
     }
@@ -1000,16 +1034,13 @@ mod tests {
         }
         assert_eq!(coarse.last(), fine.last());
 
-        let mut state = WindowedLoudnessState::new(&cfg).unwrap();
+        let mut state = cfg.0.measure(cfg.1).unwrap();
         let mut odd = None;
         for chunk in signal.chunks(777 * 2) {
             odd = Some(
-                step_windowed_loudness(
-                    &cfg,
-                    &mut state,
-                    Interleaved::new(chunk, ChannelLayout::STEREO).unwrap(),
-                )
-                .unwrap(),
+                state
+                    .push(Interleaved::new(chunk, ChannelLayout::STEREO).unwrap())
+                    .unwrap(),
             );
         }
         assert_eq!(odd.as_ref(), fine.last());
@@ -1020,23 +1051,17 @@ mod tests {
     fn reset_reads_like_a_fresh_meter() {
         let cfg = windowed_cfg(48_000.0);
         let tone = windowed_sine(48_000.0, 4.0, |_| 0.1);
-        let mut state = WindowedLoudnessState::new(&cfg).unwrap();
-        step_windowed_loudness(
-            &cfg,
-            &mut state,
-            Interleaved::new(&tone, ChannelLayout::STEREO).unwrap(),
-        )
-        .unwrap();
+        let mut state = cfg.0.measure(cfg.1).unwrap();
+        state
+            .push(Interleaved::new(&tone, ChannelLayout::STEREO).unwrap())
+            .unwrap();
         assert!(state.frames_seen() > 0);
         state.reset();
         assert_eq!(state.frames_seen(), 0);
         let quiet = vec![0.0f32; 48_000 * 2];
-        let r = step_windowed_loudness(
-            &cfg,
-            &mut state,
-            Interleaved::new(&quiet, ChannelLayout::STEREO).unwrap(),
-        )
-        .unwrap();
+        let r = state
+            .push(Interleaved::new(&quiet, ChannelLayout::STEREO).unwrap())
+            .unwrap();
         assert_eq!(r.momentary, WindowedReading::LOUDNESS_FLOOR);
         assert_eq!(r.short_term, WindowedReading::LOUDNESS_FLOOR);
         assert_eq!(r.true_peak, Db::FLOOR);
@@ -1056,13 +1081,10 @@ mod tests {
                     [(left * s) as f32, (right * s) as f32]
                 })
                 .collect();
-            let mut state = WindowedLoudnessState::new(&cfg).unwrap();
-            let r = step_windowed_loudness(
-                &cfg,
-                &mut state,
-                Interleaved::new(&signal, ChannelLayout::STEREO).unwrap(),
-            )
-            .unwrap();
+            let mut state = cfg.0.measure(cfg.1).unwrap();
+            let r = state
+                .push(Interleaved::new(&signal, ChannelLayout::STEREO).unwrap())
+                .unwrap();
             assert!(
                 (r.true_peak.get() - want).abs() < 0.3,
                 "L {left} R {right}: {:?}",
@@ -1075,14 +1097,10 @@ mod tests {
     #[test]
     fn bad_settings_and_input_are_errors() {
         let cfg = windowed_cfg(48_000.0);
-        let mut state = WindowedLoudnessState::new(&cfg).unwrap();
+        let mut state = cfg.0.measure(cfg.1).unwrap();
         let tone = windowed_sine(48_000.0, 0.5, |_| 0.1);
-        let fed = |state: &mut WindowedLoudnessState, buf: &[f32]| {
-            step_windowed_loudness(
-                &cfg,
-                state,
-                Interleaved::new(buf, ChannelLayout::STEREO).unwrap(),
-            )
+        let fed = |state: &mut WindowedMeter, buf: &[f32]| {
+            state.push(Interleaved::new(buf, ChannelLayout::STEREO).unwrap())
         };
         fed(&mut state, &tone).unwrap();
         let frames = state.frames_seen();
@@ -1094,24 +1112,19 @@ mod tests {
             assert_eq!(state.frames_seen(), frames, "a refused chunk feeds nothing");
         }
         assert!(matches!(
-            step_windowed_loudness(
-                &cfg,
-                &mut state,
-                Interleaved::new(&tone, ChannelLayout::QUAD).unwrap()
-            ),
+            state.push(Interleaved::new(&tone, ChannelLayout::QUAD).unwrap()),
             Err(Error::ChunkLayoutMismatch { .. })
         ));
         assert_eq!(state.frames_seen(), frames);
 
-        let other = windowed_cfg(44_100.0);
-        assert!(matches!(
-            step_windowed_loudness(
-                &other,
-                &mut state,
-                Interleaved::new(&tone, ChannelLayout::STEREO).unwrap()
-            ),
-            Err(Error::StateMismatch)
-        ));
+        // A rate outside what a windowed meter is built for is refused where
+        // the rate binds.
+        for rate in [7_999.0, 192_001.0] {
+            assert!(matches!(
+                cfg.0.measure(SampleRate::of(rate)),
+                Err(Error::SampleRateOutOfRange { .. })
+            ));
+        }
     }
 
     // The oracle is BS.1770-5 Table 5: the weight of each speaker of each BS.2051
@@ -1138,7 +1151,7 @@ mod tests {
         for (frame, v) in tone.iter().enumerate() {
             buf[frame * width + index] = *v;
         }
-        let c = LoudnessConfig::new(rate, bed.topology()).unwrap();
+        let c = Rated(LoudnessConfig::new(bed.topology()), rate);
         measure_loudness(&c, Interleaved::new(&buf, bed.width()).unwrap()).unwrap()
     }
 
@@ -1248,7 +1261,7 @@ mod tests {
             Speaker::SideRight,
         ])
         .unwrap();
-        let c = LoudnessConfig::new(SampleRate::SR_48K, reordered).unwrap();
+        let c = Rated(LoudnessConfig::new(reordered), SampleRate::SR_48K);
         let tone = tutti_fixtures::signal::sine(
             tutti_types::Hz(TONE_HZ),
             Amplitude(TONE_AMP),
@@ -1274,28 +1287,34 @@ mod tests {
     }
 
     /// Ambisonic input and speakers that are no known bed are refused with
-    /// their own errors, by both configs.
+    /// their own errors, by both configs, where the rate binds.
     #[test]
     fn a_topology_without_angles_is_refused_by_name() {
+        let rate = SampleRate::SR_48K;
         let ambisonic: ChannelTopology = AmbisonicFormat::ambix(AmbisonicOrder::of(1)).into();
-        assert_eq!(
-            LoudnessConfig::new(SampleRate::SR_48K, ambisonic.clone()),
-            Err(Error::AmbisonicLoudness)
-        );
         let unplaced = ChannelTopology::unassigned(ChannelLayout::from(3u16));
         assert_eq!(
-            LoudnessConfig::new(SampleRate::SR_48K, unplaced.clone()),
-            Err(Error::UnplacedLoudnessChannels {
-                width: ChannelLayout::from(3u16)
-            })
+            LoudnessConfig::new(ambisonic.clone())
+                .measure(rate)
+                .unwrap_err(),
+            Error::AmbisonicLoudness
         );
-        let rate = WindowedRate::of(SampleRate::SR_48K);
         assert_eq!(
-            WindowedLoudnessConfig::new(rate, ambisonic),
-            Err(Error::AmbisonicLoudness)
+            LoudnessConfig::new(unplaced.clone())
+                .measure(rate)
+                .unwrap_err(),
+            Error::UnplacedLoudnessChannels {
+                width: ChannelLayout::from(3u16)
+            }
+        );
+        assert_eq!(
+            WindowedLoudnessConfig::new(ambisonic)
+                .measure(rate)
+                .unwrap_err(),
+            Error::AmbisonicLoudness
         );
         assert!(matches!(
-            WindowedLoudnessConfig::new(rate, unplaced),
+            WindowedLoudnessConfig::new(unplaced).measure(rate),
             Err(Error::UnplacedLoudnessChannels { .. })
         ));
     }
@@ -1305,11 +1324,10 @@ mod tests {
     /// above the same tone on its front left.
     #[test]
     fn the_windowed_meter_weighs_by_placement() {
-        let cfg = WindowedLoudnessConfig::new(
-            WindowedRate::of(SampleRate::SR_48K),
-            Bed::Surround51.topology(),
-        )
-        .unwrap();
+        let cfg = Rated(
+            WindowedLoudnessConfig::new(Bed::Surround51.topology()),
+            SampleRate::SR_48K,
+        );
         let tone = tutti_fixtures::signal::sine(
             tutti_types::Hz(TONE_HZ),
             Amplitude(TONE_AMP),
@@ -1321,15 +1339,12 @@ mod tests {
             for (frame, v) in tone.iter().enumerate() {
                 buf[frame * 6 + channel] = *v;
             }
-            let mut state = WindowedLoudnessState::new(&cfg).unwrap();
-            step_windowed_loudness(
-                &cfg,
-                &mut state,
-                Interleaved::new(&buf, Bed::Surround51.width()).unwrap(),
-            )
-            .unwrap()
-            .momentary
-            .get()
+            let mut state = cfg.0.measure(cfg.1).unwrap();
+            state
+                .push(Interleaved::new(&buf, Bed::Surround51.width()).unwrap())
+                .unwrap()
+                .momentary
+                .get()
         };
         let (front, side, lfe) = (momentary(0), momentary(4), momentary(3));
         assert!((side - front - 10.0 * 1.41f32.log10()).abs() < 0.01);
@@ -1395,32 +1410,52 @@ mod tests {
             .collect();
         let sample_peak = samples.iter().fold(0.0f32, |m, s| m.max(s.abs()));
         assert!((sample_peak - 0.5 / 2f32.sqrt()).abs() < 1e-3);
-        let mut state = TruePeakState::new(rate, ChannelLayout::MONO).unwrap();
-        step_true_peak(
-            &mut state,
-            Interleaved::new(&samples, ChannelLayout::MONO).unwrap(),
-        );
-        let peak = finish_true_peak(state).get();
+        let mut state = TruePeakConfig::new(ChannelLayout::MONO)
+            .measure(rate)
+            .unwrap();
+        state
+            .push(Interleaved::new(&samples, ChannelLayout::MONO).unwrap())
+            .unwrap();
+        let peak = state.finish().get();
         let analytic = 20.0 * 0.5f32.log10();
         // The 4x oversampling filter reads 0.1 dB high at this phase.
         assert!((peak - analytic).abs() < 0.15, "{peak} vs {analytic}");
         assert!(peak > 20.0 * sample_peak.log10() + 2.9, "{peak}");
     }
 
-    /// Silence reads the floor, and a chunk of another width is not metered.
+    /// Silence reads the floor, and a chunk of another width is refused.
     #[test]
-    fn the_true_peak_meter_floors_silence_and_skips_a_wrong_width() {
-        let mut state = TruePeakState::new(SampleRate::SR_48K, ChannelLayout::STEREO).unwrap();
+    fn the_true_peak_meter_floors_silence_and_refuses_a_wrong_width() {
+        let mut state = TruePeakConfig::new(ChannelLayout::STEREO)
+            .measure(SampleRate::SR_48K)
+            .unwrap();
         let loud = vec![0.9f32; 4_800 * 4];
-        step_true_peak(
-            &mut state,
-            Interleaved::new(&loud, ChannelLayout::QUAD).unwrap(),
-        );
-        step_true_peak(
-            &mut state,
-            Interleaved::new(&[0.0; 960], ChannelLayout::STEREO).unwrap(),
-        );
-        assert_eq!(finish_true_peak(state), Db::FLOOR);
+        assert!(matches!(
+            state.push(Interleaved::new(&loud, ChannelLayout::QUAD).unwrap()),
+            Err(Error::ChunkLayoutMismatch { .. })
+        ));
+        state
+            .push(Interleaved::new(&[0.0f32; 960], ChannelLayout::STEREO).unwrap())
+            .unwrap();
+        assert_eq!(state.finish(), Db::FLOOR);
+    }
+
+    /// The one-shot true peak is a meter fed the buffer, at any chunking.
+    #[test]
+    fn the_true_peak_one_shot_equals_a_chunked_meter() {
+        let buf = sine(48_000.0, 0.5, 1_000.0, 0.7);
+        let cfg = TruePeakConfig::new(ChannelLayout::STEREO);
+        let whole = Interleaved::new(&buf, ChannelLayout::STEREO).unwrap();
+        let one_shot = measure_true_peak(&cfg, whole, SampleRate::SR_48K).unwrap();
+        for frames in [1, 777, 4800, 24_000] {
+            let mut meter = cfg.measure(SampleRate::SR_48K).unwrap();
+            for chunk in buf.chunks(frames * 2) {
+                meter
+                    .push(Interleaved::new(chunk, ChannelLayout::STEREO).unwrap())
+                    .unwrap();
+            }
+            assert_eq!(meter.finish(), one_shot, "chunks of {frames} frames");
+        }
     }
 
     /// The same fs/4 figure at 16-bit: the samples are the same sine rounded to
@@ -1435,12 +1470,13 @@ mod tests {
                 x.convert_to::<i16>()
             })
             .collect();
-        let mut state = TruePeakState::new(SampleRate::SR_48K, ChannelLayout::MONO).unwrap();
-        step_true_peak(
-            &mut state,
-            Interleaved::new(&samples, ChannelLayout::MONO).unwrap(),
-        );
-        let peak = finish_true_peak(state).get();
+        let mut state = TruePeakConfig::new(ChannelLayout::MONO)
+            .measure(SampleRate::SR_48K)
+            .unwrap();
+        state
+            .push(Interleaved::new(&samples, ChannelLayout::MONO).unwrap())
+            .unwrap();
+        let peak = state.finish().get();
         assert!((peak - 20.0 * 0.5f32.log10()).abs() < 0.15, "{peak}");
     }
 }

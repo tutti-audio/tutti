@@ -1,6 +1,6 @@
 //! Monophonic audio to notes.
 //!
-//! A YIN pitch track ([`yin_track`]) and the onsets ([`detect_onsets`]) are cut
+//! A YIN pitch track ([`yin_track`](crate::yin_track)) and the onsets ([`detect_onsets`](crate::detect_onsets)) are cut
 //! into notes: each has a [`Note`], a bend in [`Cents`], a span in [`Samples`]
 //! and a peak level. Mapping that to a MIDI event is the caller's: the crate
 //! holds no MIDI types, and [`VelocityRange`] is the one documented way to a
@@ -66,12 +66,14 @@
 //! These are offline or UI-thread calls: they allocate the pitch track, the
 //! levels and the notes.
 
+use tutti_buffers::{Mono, Sample};
 use tutti_dsp::FrameCount;
 use tutti_types::{Amplitude, Cents, Db, Note, SampleRate, Samples, Seconds};
 
-use crate::onset::{DetectionFunction, OnsetConfig, detect_onsets, onset_lag};
+use crate::convert::to_f32;
+use crate::onset::{DetectionFunction, OnsetConfig, OnsetPlan, detect, onset_lag};
 use crate::silence::FiniteLevel;
-use crate::yin::{PitchEstimate, YinConfig, yin_track};
+use crate::yin::{PitchEstimate, YinConfig, YinPlan, yin_track_at};
 use crate::{Error, Result};
 use tutti_dsp::FftScratch;
 use tutti_types::ranged;
@@ -115,60 +117,59 @@ ranged! {
 }
 
 /// What [`transcribe`] and [`notes_from_track`] segment with. Immutable once
-/// built.
+/// built, and free of a sample rate: the call that takes the audio resolves
+/// the seconds to samples, checks the pitch band against Nyquist and the
+/// settings that depend on each other, and answers with a named [`Error`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct NoteConfig {
     yin: YinConfig,
     onset: OnsetConfig,
-    hop: Samples,
-    min_length: Samples,
+    hop: Option<PitchHop>,
+    min_length: NoteSpan,
     pitch_split: PitchSplit,
-    smoothing: Samples,
-    hold: Samples,
+    smoothing: NoteSpan,
+    hold: NoteSpan,
     floor: Db,
 }
 
 impl NoteConfig {
-    /// Segments `yin`'s pitch track and `onset`'s onsets with the defaults: a
-    /// hop of an eighth of the YIN frame, a 60 ms minimum note, a 50 cent
-    /// split, 30 ms of smoothing, 10 ms of hold and a -60 dBFS floor.
-    ///
-    /// # Errors
-    ///
-    /// [`Error::YinFrameTooLong`] when the YIN frame is longer than 262144
-    /// samples (a `min_freq` that low is not a note);
-    /// [`Error::OnsetNotSpectralFlux`] when `onset` is not
-    /// [`DetectionFunction::SpectralFlux`] (the only function whose peak has a
-    /// known lag behind its attack); [`Error::SampleRateMismatch`] when the two
-    /// sample rates differ.
-    pub fn new(yin: YinConfig, onset: OnsetConfig) -> Result<Self> {
-        let frame = yin.buffer_size().get();
-        if frame > MAX_FRAME {
-            return Err(Error::YinFrameTooLong {
-                frame: Samples(frame),
-                max: Samples(MAX_FRAME),
-            });
-        }
-        if onset.function() != DetectionFunction::SpectralFlux {
-            return Err(Error::OnsetNotSpectralFlux);
-        }
-        if onset.geometry().sample_rate() != yin.sample_rate() {
-            return Err(Error::SampleRateMismatch {
-                onset: onset.geometry().sample_rate(),
-                yin: yin.sample_rate(),
-            });
-        }
-        let rate = yin.sample_rate();
-        Ok(Self {
-            yin,
-            onset,
-            hop: Samples((frame / 8).max(1)),
-            min_length: seconds(0.06, rate),
+    /// Segments the pitch track of the standard [`YinConfig`] and the onsets
+    /// of a default spectral-flux [`OnsetConfig`] with the defaults: a hop of
+    /// an eighth of the YIN frame, a 60 ms minimum note, a 50 cent split,
+    /// 30 ms of smoothing, 10 ms of hold and a -60 dBFS floor.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            yin: YinConfig::new(),
+            onset: OnsetConfig::new(DetectionFunction::SpectralFlux),
+            hop: None,
+            min_length: NoteSpan::of(Seconds(0.06)),
             pitch_split: PitchSplit::of(Cents(50.0)),
-            smoothing: seconds(0.03, rate),
-            hold: seconds(0.01, rate),
+            smoothing: NoteSpan::of(Seconds(0.03)),
+            hold: NoteSpan::of(Seconds(0.01)),
             floor: Db(-60.0),
-        })
+        }
+    }
+
+    /// The pitch analysis: its band and threshold.
+    ///
+    /// The call that takes the audio refuses a YIN frame longer than 262144
+    /// samples ([`Error::YinFrameTooLong`]; a lowest frequency that low is not
+    /// a note) and a band above the rate's Nyquist ([`Error::AboveNyquist`]).
+    #[must_use]
+    pub fn pitch(mut self, yin: YinConfig) -> Self {
+        self.yin = yin;
+        self
+    }
+
+    /// The onset analysis that splits notes. The call that takes the audio
+    /// refuses one that is not [`DetectionFunction::SpectralFlux`], the only
+    /// function whose peak has a known lag behind its attack
+    /// ([`Error::OnsetNotSpectralFlux`]).
+    #[must_use]
+    pub fn onsets(mut self, onset: OnsetConfig) -> Self {
+        self.onset = onset;
+        self
     }
 
     /// How far the pitch track advances per frame.
@@ -178,14 +179,14 @@ impl NoteConfig {
     /// it ([`Error::TooManyOverlaps`]).
     #[must_use]
     pub fn hop(mut self, hop: PitchHop) -> Self {
-        self.hop = hop.get();
+        self.hop = Some(hop);
         self
     }
 
     /// Notes shorter than this are dropped. Zero keeps every piece.
     #[must_use]
     pub fn min_length(mut self, length: NoteSpan) -> Self {
-        self.min_length = self.samples(length);
+        self.min_length = length;
         self
     }
 
@@ -202,7 +203,7 @@ impl NoteConfig {
     /// shorter, do not split. At least one frame is used.
     #[must_use]
     pub fn smoothing(mut self, span: NoteSpan) -> Self {
-        self.smoothing = self.samples(span);
+        self.smoothing = span;
         self
     }
 
@@ -210,7 +211,7 @@ impl NoteConfig {
     /// use below the shortest true rest, so a rest is never bridged.
     #[must_use]
     pub fn hold(mut self, hold: NoteSpan) -> Self {
-        self.hold = self.samples(hold);
+        self.hold = hold;
         self
     }
 
@@ -223,6 +224,63 @@ impl NoteConfig {
         self
     }
 
+    /// The config at `rate`.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::AboveNyquist`] for a pitch band above half `rate`;
+    /// [`Error::YinFrameTooLong`] when the YIN frame is longer than 262144
+    /// samples; [`Error::OnsetNotSpectralFlux`] when the onset function is not
+    /// spectral flux; [`Error::Dsp`] for a zero onset window or hop.
+    fn plan(&self, rate: SampleRate) -> Result<NotePlan> {
+        let yin = self.yin.plan(rate)?;
+        let frame = yin.buffer_size().get();
+        if frame > MAX_FRAME {
+            return Err(Error::YinFrameTooLong {
+                frame: Samples(frame),
+                max: Samples(MAX_FRAME),
+            });
+        }
+        if self.onset.function() != DetectionFunction::SpectralFlux {
+            return Err(Error::OnsetNotSpectralFlux);
+        }
+        let onset = self.onset.plan(rate)?;
+        let samples = |span: NoteSpan| span.get().to_samples(rate);
+        Ok(NotePlan {
+            yin,
+            onset,
+            hop: self
+                .hop
+                .map_or(Samples((frame / 8).max(1)), |hop| hop.get()),
+            min_length: samples(self.min_length),
+            pitch_split: self.pitch_split,
+            smoothing: samples(self.smoothing),
+            hold: samples(self.hold),
+            floor: self.floor,
+        })
+    }
+}
+
+impl Default for NoteConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// A [`NoteConfig`] at one sample rate.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct NotePlan {
+    yin: YinPlan,
+    onset: OnsetPlan,
+    hop: Samples,
+    min_length: Samples,
+    pitch_split: PitchSplit,
+    smoothing: Samples,
+    hold: Samples,
+    floor: Db,
+}
+
+impl NotePlan {
     /// The span one pitch frame covers, in [`Samples`]: YIN's buffer size.
     #[inline]
     #[must_use]
@@ -263,11 +321,6 @@ impl NoteConfig {
         hold.min(rest.saturating_sub(1))
     }
 
-    /// `span` in samples at the analysis rate.
-    fn samples(&self, span: NoteSpan) -> Samples {
-        span.get().to_samples(self.yin.sample_rate())
-    }
-
     /// Frames in the smoothing span, at least one.
     fn smoothing_frames(&self) -> usize {
         self.smoothing.get().div_ceil(self.hop.get()).max(1)
@@ -277,10 +330,6 @@ impl NoteConfig {
     fn attack(&self, position: Samples) -> Samples {
         Samples(position.get() + onset_lag(self.onset.geometry()))
     }
-}
-
-fn seconds(s: f64, rate: SampleRate) -> Samples {
-    Seconds(s).to_samples(rate)
 }
 
 /// One note.
@@ -371,8 +420,8 @@ impl VelocityRange {
 
 /// Transcribes the notes of a mono buffer.
 ///
-/// Runs [`yin_track`] at the config's hop, [`frame_levels`] and
-/// [`detect_onsets`], and segments them with [`notes_from_track`]. Onsets are
+/// Runs [`yin_track`](crate::yin_track) at the config's hop, [`frame_levels`] and
+/// [`detect_onsets`](crate::detect_onsets), and segments them with [`notes_from_track`]. Onsets are
 /// placed at `position + 3 * window / 4 - hop / 2` of the onset geometry, where
 /// spectral flux peaks behind an attack.
 ///
@@ -386,11 +435,14 @@ impl VelocityRange {
 /// frames. Noise gives no notes rather than an error, and a buffer shorter
 /// than the onset window (but not than a YIN frame) has no onsets, so only
 /// pitch changes split it.
-pub fn transcribe(
+pub fn transcribe<S: Sample>(
     cfg: &NoteConfig,
-    samples: &[f32],
+    samples: Mono<'_, S>,
+    rate: impl Into<SampleRate>,
     fft: &mut FftScratch,
 ) -> Result<Vec<NoteEvent>> {
+    let cfg = &cfg.plan(rate.into())?;
+    let samples = &to_f32(samples.samples());
     cfg.check_hop()?;
     if samples.iter().any(|s| !s.is_finite()) {
         return Err(Error::NonFiniteInput);
@@ -413,13 +465,13 @@ pub fn transcribe(
         });
     }
 
-    let track = yin_track(&cfg.yin, samples, cfg.hop)?;
-    let levels = frame_levels(cfg, samples)?;
-    let onsets: Vec<Samples> = detect_onsets(&cfg.onset, samples, fft)?
+    let track = yin_track_at(&cfg.yin, samples, cfg.hop)?;
+    let levels = levels_at(cfg, samples)?;
+    let onsets: Vec<Samples> = detect(&cfg.onset, samples, fft)
         .iter()
         .map(|o| cfg.attack(o.position))
         .collect();
-    notes_from_track(cfg, &track, &levels, &onsets)
+    segment(cfg, &track, &levels, &onsets)
 }
 
 /// Whether `len` samples at `frame` and `hop` make more than [`MAX_FRAMES`]
@@ -429,7 +481,7 @@ fn too_many_frames(len: usize, frame: usize, hop: usize) -> bool {
 }
 
 /// The RMS of every pitch frame of `samples`: frame `i` covers
-/// `i * hop .. i * hop + frame`, as [`yin_track`]'s does, so the result lines
+/// `i * hop .. i * hop + frame`, as [`yin_track`](crate::yin_track)'s does, so the result lines
 /// up with a track made at the config's hop. Empty for input shorter than a
 /// frame.
 ///
@@ -437,7 +489,16 @@ fn too_many_frames(len: usize, frame: usize, hop: usize) -> bool {
 ///
 /// [`Error::HopWiderThanWindow`] or [`Error::TooManyOverlaps`] when the hop
 /// does not suit the YIN frame.
-pub fn frame_levels(cfg: &NoteConfig, samples: &[f32]) -> Result<Vec<Amplitude>> {
+pub fn frame_levels<S: Sample>(
+    cfg: &NoteConfig,
+    samples: Mono<'_, S>,
+    rate: impl Into<SampleRate>,
+) -> Result<Vec<Amplitude>> {
+    levels_at(&cfg.plan(rate.into())?, &to_f32(samples.samples()))
+}
+
+/// [`frame_levels`] over a resolved config and `f32` samples.
+fn levels_at(cfg: &NotePlan, samples: &[f32]) -> Result<Vec<Amplitude>> {
     cfg.check_hop()?;
     let frame = cfg.frame().get();
     if samples.len() < frame {
@@ -458,9 +519,9 @@ pub fn frame_levels(cfg: &NoteConfig, samples: &[f32]) -> Result<Vec<Amplitude>>
 
 /// Segments a pitch track into notes.
 ///
-/// `track` is [`yin_track`] at the config's hop and YIN config, `levels` the
+/// `track` is [`yin_track`](crate::yin_track) at the config's hop and YIN config, `levels` the
 /// [`frame_levels`] of the same audio, and `onsets` the sample positions of the
-/// attacks, in any order. For onsets from [`detect_onsets`] add the lag
+/// attacks, in any order. For onsets from [`detect_onsets`](crate::detect_onsets) add the lag
 /// described at [`transcribe`].
 ///
 /// # Errors
@@ -475,6 +536,17 @@ pub fn frame_levels(cfg: &NoteConfig, samples: &[f32]) -> Result<Vec<Amplitude>>
 /// [`Error::NonPositiveFrequency`] for a voiced frequency of zero or below.
 pub fn notes_from_track(
     cfg: &NoteConfig,
+    rate: impl Into<SampleRate>,
+    track: &[PitchEstimate],
+    levels: &[Amplitude],
+    onsets: &[Samples],
+) -> Result<Vec<NoteEvent>> {
+    segment(&cfg.plan(rate.into())?, track, levels, onsets)
+}
+
+/// [`notes_from_track`] over a resolved config.
+fn segment(
+    cfg: &NotePlan,
     track: &[PitchEstimate],
     levels: &[Amplitude],
     onsets: &[Samples],
@@ -523,7 +595,7 @@ pub fn notes_from_track(
 
 /// The samples a voiced frame vouches for, from its start: the integration
 /// window YIN compares, half the buffer.
-fn span_of(cfg: &NoteConfig) -> usize {
+fn span_of(cfg: &NotePlan) -> usize {
     cfg.frame().get() / 2
 }
 
@@ -596,7 +668,7 @@ struct Piece {
 
 /// Cuts a run at its onsets and pitch changes.
 fn split_run(
-    cfg: &NoteConfig,
+    cfg: &NotePlan,
     run: &[usize],
     frames: &[Option<Voiced>],
     onsets: &[(usize, usize)],
@@ -726,7 +798,7 @@ fn median(values: &[f32]) -> f32 {
 
 /// The note of one piece, or `None` when its span is empty.
 fn build_note(
-    cfg: &NoteConfig,
+    cfg: &NotePlan,
     frames: &[Option<Voiced>],
     run: &[usize],
     piece: &Piece,
@@ -772,29 +844,108 @@ fn build_note(
 mod tests {
     use super::*;
     use crate::chroma::FrequencyBand;
+    use crate::framing::Framing;
     use crate::yin::Pitch;
     use rand::{RngExt, SeedableRng, rngs::StdRng};
-    use tutti_dsp::StftGeometry;
     use tutti_types::{Confidence, Hz};
 
     const RATE: f64 = 44100.0;
     const TAU: f64 = std::f64::consts::TAU;
 
+    /// A note config and what it resolves to at its rate: the tests read the
+    /// resolved figures through `Deref` and call the public entry points with
+    /// the config.
+    #[derive(Clone, Copy)]
+    struct Case {
+        cfg: super::NoteConfig,
+        rate: SampleRate,
+        plan: NotePlan,
+    }
+
+    impl Case {
+        fn new(cfg: super::NoteConfig, rate: SampleRate) -> Self {
+            Self {
+                cfg,
+                rate,
+                plan: cfg.plan(rate).unwrap(),
+            }
+        }
+
+        fn with(self, change: impl FnOnce(super::NoteConfig) -> super::NoteConfig) -> Self {
+            Self::new(change(self.cfg), self.rate)
+        }
+
+        fn hop(self, hop: PitchHop) -> Self {
+            self.with(|c| c.hop(hop))
+        }
+
+        fn min_length(self, span: NoteSpan) -> Self {
+            self.with(|c| c.min_length(span))
+        }
+
+        fn pitch_split(self, split: PitchSplit) -> Self {
+            self.with(|c| c.pitch_split(split))
+        }
+
+        fn smoothing(self, span: NoteSpan) -> Self {
+            self.with(|c| c.smoothing(span))
+        }
+
+        fn hold(self, span: NoteSpan) -> Self {
+            self.with(|c| c.hold(span))
+        }
+
+        fn floor(self, floor: FiniteLevel) -> Self {
+            self.with(|c| c.floor(floor))
+        }
+    }
+
+    impl std::ops::Deref for Case {
+        type Target = NotePlan;
+
+        fn deref(&self) -> &NotePlan {
+            &self.plan
+        }
+    }
+
+    type NoteConfig = Case;
+
+    fn transcribe(c: &Case, x: &[f32], fft: &mut FftScratch) -> Result<Vec<NoteEvent>> {
+        super::transcribe(&c.cfg, Mono::new(x), c.rate, fft)
+    }
+
+    fn frame_levels(c: &Case, x: &[f32]) -> Result<Vec<Amplitude>> {
+        super::frame_levels(&c.cfg, Mono::new(x), c.rate)
+    }
+
+    fn notes_from_track(
+        c: &Case,
+        track: &[PitchEstimate],
+        levels: &[Amplitude],
+        onsets: &[Samples],
+    ) -> Result<Vec<NoteEvent>> {
+        super::notes_from_track(&c.cfg, c.rate, track, levels, onsets)
+    }
+
+    fn yin_track(yin: &YinPlan, x: &[f32], hop: Samples) -> Result<Vec<PitchEstimate>> {
+        yin_track_at(yin, x, hop)
+    }
+
     fn config(rate: f64, min_freq: f32, hop_div: usize, onset_window: usize) -> NoteConfig {
-        let yin = YinConfig::new(
-            SampleRate::of(rate),
-            FrequencyBand::new(Hz(min_freq), Hz(1000.0)).unwrap(),
-        )
-        .unwrap();
-        let g = StftGeometry::new(
-            SampleRate::of(rate),
+        let rate = SampleRate::of(rate);
+        let yin = YinConfig::new().band(FrequencyBand::new(Hz(min_freq), Hz(1000.0)).unwrap());
+        let onset = OnsetConfig::new(DetectionFunction::SpectralFlux).framing(Framing::new(
             Samples(onset_window),
             Samples(onset_window / 4),
+        ));
+        let frame = yin.buffer_size(rate).unwrap().get();
+        Case::new(
+            super::NoteConfig::new()
+                .pitch(yin)
+                .onsets(onset)
+                .hop(PitchHop::of(Samples(frame / hop_div))),
+            rate,
         )
-        .unwrap();
-        NoteConfig::new(yin, OnsetConfig::new(g, DetectionFunction::SpectralFlux))
-            .unwrap()
-            .hop(PitchHop::of(Samples(yin.buffer_size().get() / hop_div)))
     }
 
     /// How far a note's start or end may sit from the true attack or release
@@ -1405,25 +1556,29 @@ mod tests {
     /// absurd ones cannot allocate or overflow.
     #[test]
     fn settings_and_inputs_are_validated() {
-        let g = StftGeometry::new(SampleRate::of(RATE), Samples(1024), Samples(256)).unwrap();
-        let flux = OnsetConfig::new(g, DetectionFunction::SpectralFlux);
-        let huge = YinConfig::new(SampleRate::of(RATE), band(0.01, 1000.0)).unwrap();
+        let rate = SampleRate::of(RATE);
+        let flux = OnsetConfig::new(DetectionFunction::SpectralFlux)
+            .framing(Framing::new(Samples(1024), Samples(256)));
+        let notes = |yin: YinConfig, onset: OnsetConfig| {
+            super::NoteConfig::new().pitch(yin).onsets(onset).plan(rate)
+        };
+        let huge = YinConfig::new().band(band(0.01, 1000.0));
         assert!(matches!(
-            NoteConfig::new(huge, flux).unwrap_err(),
+            notes(huge, flux).unwrap_err(),
             Error::YinFrameTooLong { .. }
         ));
-        let yin = YinConfig::new(SampleRate::of(RATE), band(80.0, 1000.0)).unwrap();
-        let energy = OnsetConfig::new(g, DetectionFunction::Energy);
-        assert_eq!(
-            NoteConfig::new(yin, energy).unwrap_err(),
-            Error::OnsetNotSpectralFlux
-        );
-        let other = StftGeometry::new(SampleRate::SR_48K, Samples(1024), Samples(256)).unwrap();
-        let other = OnsetConfig::new(other, DetectionFunction::SpectralFlux);
+        let yin = YinConfig::new().band(band(80.0, 1000.0));
+        let energy = OnsetConfig::new(DetectionFunction::Energy);
+        assert_eq!(notes(yin, energy).unwrap_err(), Error::OnsetNotSpectralFlux);
+        // A pitch band above Nyquist is refused where the rate binds.
+        let high = YinConfig::new().band(band(80.0, 30_000.0));
         assert!(matches!(
-            NoteConfig::new(yin, other).unwrap_err(),
-            Error::SampleRateMismatch { .. }
+            notes(high, flux).unwrap_err(),
+            Error::AboveNyquist { .. }
         ));
+        // A zero onset window is refused too.
+        let zero = flux.framing(Framing::new(Samples(0), Samples(256)));
+        assert!(matches!(notes(yin, zero).unwrap_err(), Error::Dsp(_)));
 
         let c = cfg();
         let frame = c.frame().get();
@@ -1498,9 +1653,14 @@ mod tests {
     /// anything is allocated.
     #[test]
     fn too_many_frames_are_refused() {
-        let yin = YinConfig::new(SampleRate::of(RATE), band(5000.0, 10000.0)).unwrap();
-        let g = StftGeometry::new(SampleRate::of(RATE), Samples(1024), Samples(256)).unwrap();
-        let c = NoteConfig::new(yin, OnsetConfig::new(g, DetectionFunction::SpectralFlux)).unwrap();
+        let yin = YinConfig::new().band(band(5000.0, 10000.0));
+        let c = Case::new(
+            super::NoteConfig::new().pitch(yin).onsets(
+                OnsetConfig::new(DetectionFunction::SpectralFlux)
+                    .framing(Framing::new(Samples(1024), Samples(256))),
+            ),
+            SampleRate::of(RATE),
+        );
         assert!(c.frame().get() < 64, "{:?}", c.frame());
         let c = c.hop(PitchHop::of(Samples(1)));
         let x = vec![0.1f32; MAX_FRAMES + c.frame().get() + 1];
@@ -1579,7 +1739,10 @@ mod tests {
         assert_eq!(c.pitch_split, PitchSplit::of(Cents(50.0)));
         assert_eq!(c.floor, Db(-60.0));
         assert!((secs(c.min_length) - 0.06).abs() < 1e-6);
-        let d = NoteConfig::new(c.yin, c.onset).unwrap();
+        let d = Case::new(
+            super::NoteConfig::new().pitch(YinConfig::new().band(band(80.0, 1000.0))),
+            SampleRate::of(RATE),
+        );
         assert_eq!(d.hop.get(), d.frame().get() / 8);
     }
 }
