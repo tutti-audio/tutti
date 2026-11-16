@@ -39,8 +39,8 @@
 //! ```
 //!
 //! frames, which is a whole number of base frames only when `F` divides it. The first stage's
-//! the first stage's delay is odd, so for `s >= 2` it does not. The last up stage therefore reads its input `q / 2`
-//! frames late, a pure delay of `q = (-T) mod F` frames at the oversampled rate (`q` is even,
+//! delay is odd, so for `s >= 2` it does not. The last up stage therefore reads its input
+//! `q / 2` frames late, a pure delay of `q = (-T) mod F` frames at the oversampled rate (`q` is even,
 //! because `T` and `F` are, so the delay is whole frames of the last stage's input), and
 //!
 //! ```text
@@ -53,8 +53,8 @@
 //! # Gain and precision
 //!
 //! The filters and the oversampled signal run in the `F` of [`Oversampler`]. `f32` resolves
-//! about -144 dB, past the default attenuation. The ripple of a passband the cascade crosses twice is the sum of its stages' ripples, each about
-//! `10^(-attenuation / 20)`.
+//! about -144 dB, past the default attenuation. The ripple of a passband the cascade crosses
+//! twice is the sum of its stages' ripples, each about `10^(-attenuation / 20)`.
 
 use std::sync::Arc;
 
@@ -174,13 +174,16 @@ impl Oversampling {
     pub fn plan(&self, rate: SampleRate) -> Result<OversamplingPlan, FirError> {
         let base = rate.get();
         let stages = self.factor.stages();
+        // A rate that overflows when scaled has a transition that overflows `f32`, which the
+        // design refuses with this error.
+        let overflow = FirError::NonPositiveTransition(Hz(f32::INFINITY));
+        let high = SampleRate::new(base * self.factor.get() as f64).ok_or(overflow)?;
         let passband = f64::from(self.passband.get());
         let mut taps = Vec::with_capacity(stages);
         for j in 0..stages {
             let transition =
                 base * (f64::from(1u32 << j) - passband).min(f64::from(1u32 << j) / 2.0);
-            // An overflowing stage rate has an overflowing transition, which the design refuses.
-            let stage_rate = SampleRate::new(base * f64::from(2u32 << j)).unwrap_or(rate);
+            let stage_rate = SampleRate::new(base * f64::from(2u32 << j)).ok_or(overflow)?;
             let fir = FirDesign::new(FirResponse::HalfBand, Hz(transition as f32))
                 .attenuation(self.attenuation)
                 .design(stage_rate)?;
@@ -205,6 +208,7 @@ impl Oversampling {
         Ok(OversamplingPlan {
             shared: Arc::new(Plan {
                 factor: self.factor,
+                high,
                 taps,
                 lead: pad / 2,
                 latency: Samples((round_trip + pad) / factor),
@@ -216,8 +220,8 @@ impl Oversampling {
 /// One half-band stage's taps.
 #[derive(Clone, Debug)]
 struct StageTaps<F = f64> {
-    /// The taps at even indices: the `2m + 2` that are not the centre's neighbours at even
-    /// offsets. Symmetric.
+    /// The `2m + 2` taps at even indices, from the first to the last tap of the filter. They
+    /// include the centre's two neighbours; the centre itself is at an odd index. Symmetric.
     outer: Box<[F]>,
     /// The centre tap, 1/2.
     centre: F,
@@ -228,6 +232,8 @@ struct StageTaps<F = f64> {
 #[derive(Debug)]
 struct Plan {
     factor: OversamplingFactor,
+    /// The base rate times the factor.
+    high: SampleRate,
     taps: Vec<StageTaps>,
     /// The frames the last up stage reads its input late by.
     lead: usize,
@@ -246,6 +252,12 @@ impl OversamplingPlan {
     #[must_use]
     pub fn factor(&self) -> OversamplingFactor {
         self.shared.factor
+    }
+
+    /// The rate of the oversampled signal: the base rate times the factor.
+    #[must_use]
+    pub fn high_rate(&self) -> SampleRate {
+        self.shared.high
     }
 
     /// The round trip's delay in base-rate frames, up then down, a whole number (see the

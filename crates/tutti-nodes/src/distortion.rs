@@ -86,6 +86,13 @@ impl DistortionNode {
 
     /// Shapes at `factor` times the rate (see "Oversampling" above), up through the half-band
     /// cascade and back, instead of at the rate the node runs at.
+    ///
+    /// Drive changes, from the cell or a lane, reach the shaper about half the latency ahead of
+    /// the audio they were meant for: under 1 ms at 48 kHz for any factor.
+    ///
+    /// At a rate no half-band can be designed for (one where 0.1 times the rate overflows or
+    /// underflows `f32`), the node runs without oversampling and declares no latency: a
+    /// prepare does not fail.
     #[must_use]
     pub fn oversampling(self, factor: OversamplingFactor) -> Self {
         self.map_kernel(|kernel| kernel.factor = Some(factor))
@@ -232,12 +239,14 @@ impl Kernel for DistortionKernel {
 
     /// The input bus and one output bus where it is. The cost is the curve's: `Softsign` and
     /// `HardClip` are arithmetic, `Light`; `Crush` and `SoftCrush` (a rounding call) and
-    /// `Atan` and `Tanh` (a libm call) are `Moderate`.
+    /// `Atan` and `Tanh` (a libm call) are `Moderate`. With oversampling it is `Heavy`: every
+    /// channel runs two half-band cascades and the curve at up to eight times the rate.
     fn shape(&self) -> Shape {
         let output = Bus::banded(self.input, BusRole::Main, 1).expect("one band is a bus");
-        let cost = match self.kind {
-            ShapeKind::Softsign | ShapeKind::HardClip => Cost::Light,
-            _ => Cost::Moderate,
+        let cost = match (self.factor, self.kind) {
+            (Some(_), _) => Cost::Heavy,
+            (None, ShapeKind::Softsign | ShapeKind::HardClip) => Cost::Light,
+            (None, _) => Cost::Moderate,
         };
         Shape::buses(
             Buses::main(self.input),
@@ -251,10 +260,10 @@ impl Kernel for DistortionKernel {
         self.oversampled = self
             .factor
             .and_then(|factor| Oversampled::new(factor, rate, max_block, width));
-        let shaping = self.oversampled.as_ref().map_or(rate, |o| {
-            // A factor of at most 8 times a rate that was finite stays finite.
-            SampleRate::new(rate.get() * o.plan.factor().get() as f64).unwrap_or(rate)
-        });
+        let shaping = self
+            .oversampled
+            .as_ref()
+            .map_or(rate, |o| o.plan.high_rate());
         self.bank = WaveshaperBank::new(self.kind, shaping);
         self.landed = false;
     }
@@ -314,7 +323,6 @@ mod tests {
         RATE, amplitude_at, assert_cell_glides, drive_block, prepared, render_change,
         render_chunked, sine,
     };
-    use tutti_dsp::Oversampling;
     use tutti_graph::contract::{assert_param_fork, drive};
     use tutti_graph::{Node, ParamNode};
     use tutti_types::UnitParam;
@@ -485,7 +493,7 @@ mod tests {
     }
 
     /// The declared cost follows the curve: the two arithmetic-only curves are `Light`, the
-    /// four that call a math routine `Moderate`.
+    /// four that call a math routine `Moderate`; oversampled, every curve is `Heavy`.
     #[test]
     fn the_declared_cost_follows_the_curve() {
         for kind in KINDS {
@@ -498,6 +506,14 @@ mod tests {
                 want,
                 "{kind:?}"
             );
+            for factor in [
+                OversamplingFactor::X2,
+                OversamplingFactor::X4,
+                OversamplingFactor::X8,
+            ] {
+                let n = DistortionNode::new(kind, Drive::new(1.0)).oversampling(factor);
+                assert_eq!(n.shape().cost, Cost::Heavy, "{kind:?} {factor:?}");
+            }
         }
     }
 
@@ -520,10 +536,13 @@ mod tests {
         20.0 * (alias / fundamental).log10()
     }
 
-    /// Oversampling declares the oversampler's round trip as the node's latency (and the
-    /// ring-out after it as its tail), none without it.
+    /// Oversampling declares the oversampler's round trip as the node's latency and the
+    /// ring-out after it as its tail, none without it; and the audio is delayed by exactly that
+    /// latency. A hard clip at drive 1 is the identity below 1, so an impulse of 0.5 comes out
+    /// as the cascade's response: its peak is at the declared latency, and past the latency
+    /// plus the tail the output is exactly zero.
     #[test]
-    fn oversampling_declares_the_round_trip_as_latency() {
+    fn oversampling_delays_the_audio_by_the_declared_latency() {
         let plain = prepared(DistortionNode::new(ShapeKind::Tanh, Drive::new(2.0)));
         assert_eq!(plain.shape().latency.samples(), Samples::ZERO);
         assert_eq!(plain.shape().tail, Tail::None);
@@ -532,27 +551,33 @@ mod tests {
             OversamplingFactor::X4,
             OversamplingFactor::X8,
         ] {
-            let n = prepared(
-                DistortionNode::with_channels(2u16, ShapeKind::Tanh, Drive::new(2.0))
+            let mut n = prepared(
+                DistortionNode::with_channels(1u16, ShapeKind::HardClip, Drive::new(1.0))
                     .oversampling(factor),
             );
-            let latency = Oversampling::new(factor).plan(RATE).unwrap().latency();
-            assert!(latency.get() > 0);
-            assert_eq!(n.shape().latency.samples(), latency, "{factor:?}");
-            assert_eq!(
-                n.shape().tail,
-                Tail::Finite(Samples(latency.get() + 1)),
-                "{factor:?}"
+            let latency = n.shape().latency.samples().get();
+            let Tail::Finite(tail) = n.shape().tail else {
+                panic!("{factor:?}: no finite tail");
+            };
+            assert!(latency > 0, "{factor:?}");
+            let mut x = vec![0.0f32; 1000];
+            x[0] = 0.5;
+            let y = render_chunked(&mut n, &[x], 100).remove(0);
+            let peak = (0..y.len())
+                .max_by(|&a, &b| y[a].abs().total_cmp(&y[b].abs()))
+                .unwrap();
+            assert_eq!(peak, latency, "{factor:?}");
+            assert!(
+                y[latency + tail.get() + 1..].iter().all(|&s| s == 0.0),
+                "{factor:?}: rings past the declared tail"
             );
         }
     }
 
     /// A driven sine aliases: tanh at drive 3 puts the 3rd, 5th and 7th harmonics of 9 kHz at
-    /// 21, 3 and 15 kHz, 12.6 dB under the fundamental. Shaped at twice the rate the folded
-    /// harmonics are under -30 dB, at 4 times under -75 dB, and at 8 times under -110 dB: the
-    /// down-sampler's stopband removes the harmonics past the base Nyquist, and the
-    /// rate holds the curve's further harmonics (which fall as `1/k` to `1/k^2`) from
-    /// folding into the band.
+    /// 21, 3 and 15 kHz. The bounds are regression margins set below the measured levels (dB
+    /// under the fundamental): plain -12.6 (bound above -20), 2x -39.5 (below -30), 4x -83.0
+    /// (below -75) and 8x -128.7 (below -110).
     #[test]
     fn oversampling_removes_the_aliases() {
         let shaped = |factor: Option<OversamplingFactor>| {

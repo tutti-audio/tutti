@@ -1,6 +1,6 @@
 use core::f64::consts::TAU;
 
-use tutti_buffers::{Mono, MonoMut};
+use tutti_buffers::{Float, Mono, MonoMut};
 use tutti_types::{Db, MaxBlock, SampleRate, Samples};
 
 use super::*;
@@ -22,7 +22,9 @@ const SETTLE: usize = 512;
 const TONE_BIN: usize = 1500;
 /// A half-band's ripple and stopband for the default 100 dB: `10^(-100/20)`.
 const DELTA: f64 = 1e-5;
-/// Kaiser's estimate misses its attenuation by a dB or two; the stated margin is 3 dB.
+/// A regression margin: the measured images and aliases sit at least 5 dB under
+/// `-attenuation` (the bounds hold with the margin at -2 dB), and a bound 3 dB short of the
+/// attenuation fails on a real loss of rejection.
 const MARGIN_DB: f64 = 3.0;
 
 fn plan(factor: OversamplingFactor) -> OversamplingPlan {
@@ -245,24 +247,30 @@ fn a_reset_leaves_silence_exact() {
     }
 }
 
-/// An `f64` signal runs through the same filters.
+/// A block in `f32` or `f64` runs through the same filters, delayed by the latency within the
+/// ripple.
 #[test]
-fn a_double_precision_block_round_trips() {
-    let plan = plan(OversamplingFactor::X2);
-    let latency = plan.latency().get();
-    let mut os = plan.state::<f32>(MaxBlock::of(Samples(1024)));
-    let x: Vec<f64> = (0..1024)
-        .map(|n| libm::sin(TAU * 100.0 * n as f64 / WINDOW as f64))
-        .collect();
-    os.upsample(Mono::new(&x));
-    let (high, mut out) = os.high_rate();
-    out.as_mut().copy_from_slice(high.as_ref());
-    let mut y = vec![0.0f64; 1024];
-    os.downsample(MonoMut::new(&mut y));
-    let worst = (4 * latency..1024)
-        .map(|n| (y[n] - x[n - latency]).abs())
-        .fold(0.0, f64::max);
-    assert!(worst < 4.0 * DELTA, "{worst}");
+fn a_block_round_trips_in_either_format() {
+    fn run<F: Float>() {
+        let plan = plan(OversamplingFactor::X2);
+        let latency = plan.latency().get();
+        let mut os = plan.state::<F>(MaxBlock::of(Samples(1024)));
+        let x: Vec<f64> = (0..1024)
+            .map(|n| libm::sin(TAU * 100.0 * n as f64 / WINDOW as f64))
+            .collect();
+        let input: Vec<F> = x.iter().map(|&v| F::from_f64(v)).collect();
+        os.upsample(Mono::new(&input));
+        let (high, mut out) = os.high_rate();
+        out.as_mut().copy_from_slice(high.as_ref());
+        let mut y = vec![F::ZERO; 1024];
+        os.downsample(MonoMut::new(&mut y));
+        let worst = (4 * latency..1024)
+            .map(|n| (y[n].to_f64() - x[n - latency]).abs())
+            .fold(0.0, f64::max);
+        assert!(worst < 4.0 * DELTA, "{worst}");
+    }
+    run::<f32>();
+    run::<f64>();
 }
 
 /// A design the half-band cannot make is the FIR design's refusal.

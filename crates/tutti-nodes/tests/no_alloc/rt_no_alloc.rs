@@ -166,6 +166,15 @@ fn distortion_process_is_allocation_free_fed_and_unfed() {
                 }
             };
             let mut node = Direct::new(node, SampleRate::SR_48K, 64);
+            assert_eq!(
+                tutti_graph::Node::shape(&*node.node)
+                    .latency
+                    .samples()
+                    .get()
+                    > 0,
+                factor.is_some(),
+                "{kind:?} {factor:?}: oversampling must be in force where a factor is set"
+            );
             for (c, x) in node.inputs_mut().iter_mut().enumerate() {
                 for (i, s) in x.iter_mut().enumerate() {
                     *s = 0.9 * (((i + 7 * c) % 13) as f32 / 6.0 - 1.0);
