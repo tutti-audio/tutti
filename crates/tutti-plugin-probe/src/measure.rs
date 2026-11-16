@@ -58,8 +58,8 @@ pub const SETTLE: Seconds = Seconds(1.0);
 
 /// What the stimulus render runs past [`tutti_graph::MAX_NODE_TAIL`]: **the render
 /// budget is `MAX_NODE_TAIL` plus this**, a time converted at the configuration's
-/// rate, so it follows the graph's bound at every rate and the two cannot drift. A plugin still above the floor
-/// when the budget runs out has rung past the bound, so:
+/// rate, so it follows the graph's bound at every rate and the two cannot drift. A
+/// plugin still above the floor when the budget runs out has rung past the bound, so:
 ///
 /// - an **effect** is judged by its lower bound: the last frame above the floor,
 ///   which is beyond `MAX_NODE_TAIL`, so it reads as `TailLonger` (against any

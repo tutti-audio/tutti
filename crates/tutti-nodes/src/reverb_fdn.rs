@@ -165,9 +165,9 @@ impl Kernel for FdnKernel {
     }
 
     /// The bank's ceiling, or [`Tail::Unbounded`] when that is past what a graph takes as a
-    /// finite figure ([`MAX_NODE_TAIL`] at the prepared rate): a longer ring-out is declared unbounded, not as a
-    /// figure the graph would refuse or count as never decaying. The node still narrows it
-    /// each block to what rings.
+    /// finite figure ([`MAX_NODE_TAIL`] at the prepared rate): a longer ring-out is declared
+    /// unbounded, not as a figure the graph would refuse or count as never decaying. The node
+    /// still narrows it each block to what rings.
     fn tail(&self) -> Tail {
         match self.running.as_ref().map(|r| (r.rate, r.bank.tail())) {
             None => Tail::Unknown,

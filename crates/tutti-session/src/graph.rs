@@ -3886,15 +3886,46 @@ mod tail_tests {
     use tutti_types::Bpm;
 
     fn graph() -> Graph {
+        graph_at(SampleRate::SR_48K)
+    }
+
+    fn graph_at(rate: SampleRate) -> Graph {
         let map = TempoMap::constant(Bpm::of(120.0)).expect("a tempo");
         Graph::new(
             ChannelLayout::STEREO,
             2,
-            SampleRate::SR_48K,
+            rate,
             MaxBlock::of(Samples(64)),
             None,
             tutti_transport::TempoReader::fixed(Arc::new(map)),
         )
+    }
+
+    /// **The tail and latency limits are the graph's rate's**: at 96 kHz a tail of
+    /// 4 000 000 frames (41.7 s) is a figure and 5 760 001 is `Unbounded`; at 48 kHz
+    /// the first is already `Unbounded`. A reported latency is clamped to 960 000
+    /// frames (ten seconds) at 96 kHz and to 480 000 at 48 kHz.
+    #[test]
+    fn plugin_refreshes_use_the_graphs_rate() {
+        for (rate, tail_ok, latency) in [
+            (SampleRate::SR_48K, false, 480_000),
+            (SampleRate::SR_96K, true, 960_000),
+        ] {
+            let mut g = graph_at(rate);
+            let (node, _) = g.add(ForkByClone(Const::mono(0.0)));
+            g.commit();
+            let tail = Tail::Finite(Samples(4_000_000));
+            assert!(g.refresh_node_tail(node, tail));
+            let want = if tail_ok { tail } else { Tail::Unbounded };
+            assert_eq!(g.node_tail(node), Ok(want), "{rate:?}");
+            let past = Tail::Finite(Samples(5_760_001));
+            assert!(g.refresh_node_tail(node, past) || !tail_ok);
+            assert_eq!(g.node_tail(node), Ok(Tail::Unbounded), "{rate:?}");
+
+            let over = Latency::new(Samples(960_001));
+            assert!(g.refresh_node_latency(node, over));
+            assert_eq!(g.node_latency(node), Ok(Samples(latency)), "{rate:?}");
+        }
     }
 
     /// **A node's tail ceiling follows the figure the host hands the graph,

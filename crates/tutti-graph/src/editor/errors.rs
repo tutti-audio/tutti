@@ -178,8 +178,8 @@ pub enum CommitError {
         limit: Latency,
     },
     /// A finite tail past what the graph's tail figures bound
-    /// (`crate::MAX_NODE_TAIL` at the editor's rate), refused rather than silently clamped
-    /// ([`Editor::set_tail`](crate::Editor::set_tail)).
+    /// (`crate::MAX_NODE_TAIL` at the editor's rate), refused rather than
+    /// silently clamped ([`Editor::set_tail`](crate::Editor::set_tail)).
     #[error("node {}: tail {} frames; a finite tail is at most {}", .node.0, .tail.get(), .limit.get())]
     TailTooLong {
         /// The node.
