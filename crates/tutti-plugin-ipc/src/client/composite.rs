@@ -12,6 +12,7 @@ use dpi::Size;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Duration;
 use tutti_plugin_types::{
     BridgeResult, Delivered, EditorError, PluginError, PluginFailure, Request, StateError,
 };
@@ -293,6 +294,11 @@ impl PluginBridge {
         self.audio.reserve_param_changes(queues, points);
     }
 
+    /// See `AudioBridge::set_reply_wait`.
+    pub(crate) fn set_reply_wait(&self, wait: Option<Duration>) {
+        self.audio.set_reply_wait(wait);
+    }
+
     /// Block `seq`'s MIDI-out, and any earlier block's still queued. See
     /// [`AudioBridge::take_replies`].
     pub(crate) fn take_replies(
@@ -373,6 +379,12 @@ impl PluginBridge {
         self.audio.audio_buffer()
     }
 
+    /// The bridge thread's count of chunks it skipped as stale. See
+    /// `AudioBridge::skipped_cell`.
+    pub fn skipped_cell(&self) -> Arc<std::sync::atomic::AtomicU64> {
+        self.audio.skipped_cell()
+    }
+
     /// The bridge thread's count of MIDI events it did not send. See
     /// `AudioBridge::dropped_midi_cell`.
     pub fn dropped_midi_cell(&self) -> Arc<std::sync::atomic::AtomicU64> {
@@ -385,7 +397,7 @@ impl PluginBridge {
     }
 
     /// See `AudioBridge::news_settled`.
-    pub fn news_settled(&self, within: std::time::Duration) -> bool {
+    pub fn news_settled(&self, within: Duration) -> bool {
         self.audio.news_settled(within)
     }
 
