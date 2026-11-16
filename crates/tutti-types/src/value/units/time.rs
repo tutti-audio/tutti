@@ -86,7 +86,7 @@ impl Seconds {
     ///
     /// It returns a bare `i64` because tutti has no signed frame unit:
     /// [`Frame`](crate::Frame) is a `u64` position. A
-    /// [`std::time::Duration`] is unsigned, so a caller holding one builds a
+    /// [`core::time::Duration`] is unsigned, so a caller holding one builds a
     /// `Seconds` from it and signs it by direction.
     ///
     /// ```
