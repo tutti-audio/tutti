@@ -157,7 +157,7 @@ where
             origin: reload.origin.clone(),
             work: reload.work.clone(),
             id: client.descriptor.id.clone(),
-            sample_rate: tutti_types::SampleRate::new(client.sample_rate)?,
+            sample_rate: client.sample_rate,
             features: client.features,
             transport: client.transport.clone(),
             delivery: client.params.counters(),

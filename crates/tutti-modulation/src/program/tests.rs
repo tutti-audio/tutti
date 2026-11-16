@@ -771,3 +771,42 @@ fn a_circular_params_value_takes_the_short_arc_and_wraps_its_sum() {
         "a line's sum is not wrapped"
     );
 }
+
+/// A periodic wave reads the `floor`-based fraction of its position as the
+/// phase, so whole cycles before it change nothing: a sine at `n + 0.25` is 1,
+/// a square at `n + 0.1` is 1 and at `n + 0.9` is -1, a sawtooth (`2p - 1`) at
+/// `n + 0.5` is 0.
+#[test]
+fn a_periodic_wave_reads_the_fraction_of_its_position() {
+    for (shape, phase, expected) in [
+        (LfoShape::Sine, 0.25, 1.0f32),
+        (LfoShape::Square, 0.1, 1.0),
+        (LfoShape::Square, 0.9, -1.0),
+        (LfoShape::Sawtooth, 0.5, 0.0),
+    ] {
+        let wave = Waveform::Shape { shape, seed: 0 };
+        for cycle in [0.0, 3.0, 1_000.0] {
+            let got = wave.raw_at(cycle + phase, false);
+            assert!(
+                (got - expected).abs() < 1e-5,
+                "{shape:?} at {}: expected {expected}, got {got}",
+                cycle + phase
+            );
+        }
+    }
+}
+
+/// A negative position reads the end of the cycle: a sawtooth (`2p - 1`) at
+/// `-0.25` and at `-3.25` is the sawtooth at phase 0.75, which is 0.5. A
+/// `fract` wrap would keep the sign and read -1.5.
+#[test]
+fn a_negative_position_reads_the_end_of_the_cycle() {
+    let saw = Waveform::Shape {
+        shape: LfoShape::Sawtooth,
+        seed: 0,
+    };
+    for cycle in [0.0, -3.0] {
+        let got = saw.raw_at(cycle - 0.25, false);
+        assert!((got - 0.5).abs() < 1e-6, "{got} at {}", cycle - 0.25);
+    }
+}

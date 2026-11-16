@@ -222,7 +222,7 @@ impl Rig {
                     rate != env.sample_rate
                         || rolled != piece.transport
                         || (start == Offset::ZERO
-                            && gap >= TransportHistory::CHECKPOINT.get() as u64)
+                            && gap >= TransportHistory::checkpoint(env.sample_rate).get() as u64)
                 }
             };
             if keep {

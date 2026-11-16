@@ -37,9 +37,8 @@
 //!   with no feedback and a finite tail) and `PhaserNode` (a `KernelNode` over `PhaserKernel`, its `Stages`
 //!   and `SweepRange` checked; the rate is floored at 0.01 Hz, a lane's value and a cell's alike), both any width.
 //! - **Distortion** — `DistortionNode` and its `ShapeKind` waveshapers.
-//! - **Modulation sources** — `ModulatorNode<M>` (aliased `LfoNode`), the per-sample
-//!   adapter over a pure `Modulator` (an LFO's is `tutti_modulation::Waveform`, the wave a
-//!   control lane evaluates): an audio generator, whose output feeds a node's
+//! - **Modulation sources** — `LfoNode`, the per-sample LFO over
+//!   `tutti_modulation::Waveform`, the wave a control lane evaluates: an audio generator, whose output feeds a node's
 //!   audio input. Its `LfoClock` is free (a rate in `Hz`, a param) or synced to the
 //!   transport beat (a span fixed at build); its depth and rate are read per frame.
 //! - **Oscillator** — [`OscillatorNode`], a mono source: a sine, or a saw, square or triangle
@@ -63,11 +62,10 @@
 //!   `NoteEnvelopeNode`), and `Modulation`, the reconciler that builds them from
 //!   `tutti_modulation` declarations.
 //! - **Automation / convolution** — the `automation` module's `AutomationLaneNode`
-//!   (a curve as audio) and recording units, and `ConvolverNode` with its IR
-//!   generators (behind a feature).
+//!   (a curve as audio) and recording units, and `ConvolverNode`.
 //!
 //! A `*Node` is the graph-facing node; the inner object some are built from,
-//! `Modulator`, carries no suffix, because it is not a node and
+//! `Waveform`, carries no suffix, because it is not a node and
 //! can be used on its own. The algorithms are `tutti-dsp`'s (`tutti_dsp::DelayLine`,
 //! `tutti_dsp::CrossoverBank`, …); this crate re-exports only the types in a node's
 //! signature: `SvfType`, `LadderType`, `Lanes`, `CrossoverError`,
@@ -201,8 +199,7 @@
 //! - Modulation effects: [`ModDelayNode`] (over `tutti_dsp::ModDelayBank`, its [`Sweep`] and
 //!   [`Stagger`] checked) and [`PhaserNode`] (over `tutti_dsp::PhaserChain`, its [`Stages`] and
 //!   [`SweepRange`] checked); [`DistortionNode`] with [`ShapeKind`].
-//! - Modulation sources: [`LfoNode`] and [`ModulatorNode`], over a
-//!   [`Modulator`] (an LFO's is `tutti-modulation`'s [`Waveform`]).
+//! - Modulation sources: [`LfoNode`], over `tutti-modulation`'s [`Waveform`].
 //! - Signal-driven modulation sources, feeding a
 //!   control lane's event input: [`EnvelopeFollowerNode`] and
 //!   [`NoteEnvelopeNode`].
@@ -249,14 +246,9 @@ mod click;
 pub use click::{ClickNode, ClickSettings, ClickState, MetronomeMode, VolumeOutOfRange};
 
 mod lfo;
-// The `Modulator` trait the modulation node runs, and its impl for
-// `tutti-modulation`'s `Waveform` (the one wave function both tiers evaluate).
-mod modulator;
-// `LfoNode` is `ModulatorNode<Waveform>` — the graph node over a pure
-// `Modulator`. `LfoShape` and `Waveform` are re-exported from `tutti-modulation` through
+// `LfoShape` and `Waveform` are re-exported from `tutti-modulation` through
 // `lfo`, so `use tutti_nodes::LfoShape` works.
-pub use lfo::{LfoClock, LfoNode, LfoShape, ModulatorNode, Waveform};
-pub use modulator::Modulator;
+pub use lfo::{LfoClock, LfoNode, LfoShape, Waveform};
 
 mod oscillator;
 pub use oscillator::OscillatorNode;
@@ -271,7 +263,7 @@ pub use tutti_dsp::{
 };
 
 mod distortion;
-pub use distortion::DistortionNode;
+pub use distortion::{DistortionKernel, DistortionNode};
 // `ShapeKind` is in `DistortionNode::new`'s signature; the curves behind it are
 // `tutti-dsp`'s.
 pub use tutti_dsp::ShapeKind;
@@ -347,10 +339,7 @@ pub use signal::{
 mod reconcile;
 pub use reconcile::{Applied, Feed, ModHost, Modulation, ReconcileError, Target};
 mod convolution;
-pub use convolution::{
-    ConvolverError, ConvolverNode, IrLayout, PortSide, generate_room_ir, generate_room_ir_into,
-    generate_test_ir, generate_test_ir_into,
-};
+pub use convolution::{ConvolverError, ConvolverNode, IrLayout, PortSide};
 
 // Test and stimulus nodes (`Const`, `Osc`, `Through`, `Split`, `Sink`): what a
 // test, example or bench wires a graph out of.

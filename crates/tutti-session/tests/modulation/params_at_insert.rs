@@ -83,7 +83,12 @@ fn add_addresses_a_hosts_param_node() {
 fn add_addresses_an_engine_node() {
     let mut s = session();
     let node = DistortionNode::new(ShapeKind::Tanh, Drive::new(BASE));
-    let cell = node.drive().as_atomic();
+    let tutti_types::ParamCell::F32(cell) = tutti_graph::ParamNode::param_set(&node)
+        .cell(UnitParam::Drive)
+        .expect("a distortion has a drive")
+    else {
+        unreachable!("the drive is an f32 cell")
+    };
     let (key, _) = s.graph().add(node);
     modulate_drive(&mut s, key.erase());
     assert_knob_is(&s, key.erase(), &cell);
