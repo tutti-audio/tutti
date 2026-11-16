@@ -651,16 +651,38 @@ fn a_reactivation_continues_the_chunk_sequence() {
     );
 }
 
-/// Waits for the bridge to have abandoned `count` blocks, panicking with what
-/// it had when `within` runs out.
-fn wait_abandoned(bridge: &PluginBridge, count: u64, within: Duration) {
+/// How many more blocks the bridge must abandon, after a render of
+/// [`CHUNKS_AFTER`] chunks, for it to be off the fork's budget. A bridge held
+/// on the budget (1 s here) abandons at most one per second, so within
+/// [`WITHIN`] it adds two at most; one off it adds nearly all eight, and a
+/// descheduled bridge that skips some (a chunk reached more than `MAX_BEHIND`
+/// behind is skipped, not abandoned) still adds more than this.
+const OFF_THE_BUDGET: u64 = 4;
+const CHUNKS_AFTER: usize = 8;
+const WITHIN: Duration = Duration::from_secs(2);
+
+/// Waits for the bridge to have abandoned [`OFF_THE_BUDGET`] blocks past
+/// `before`, panicking with what it had when [`WITHIN`] runs out.
+fn wait_off_the_budget(bridge: &PluginBridge, before: u64) {
     let start = Instant::now();
-    while bridge.abandoned_replies() < count {
+    while bridge.abandoned_replies() < before + OFF_THE_BUDGET {
         assert!(
-            start.elapsed() < within,
-            "the bridge abandoned {} of {count} blocks in {within:?}: it is still holding a \
-             block for the fork's budget",
-            bridge.abandoned_replies()
+            start.elapsed() < WITHIN,
+            "the bridge abandoned {} blocks in {WITHIN:?} after {CHUNKS_AFTER} chunks, wanted \
+             {OFF_THE_BUDGET}: it is still holding a block for the fork's budget",
+            bridge.abandoned_replies() - before
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+/// Waits for the bridge to have abandoned one block (the first, at the budget).
+fn wait_first_abandoned(bridge: &PluginBridge) {
+    let start = Instant::now();
+    while bridge.abandoned_replies() < 1 {
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "the bridge never abandoned the first block"
         );
         std::thread::sleep(Duration::from_millis(5));
     }
@@ -696,8 +718,10 @@ fn a_silent_server_holds_the_bridge_for_one_budget_not_one_per_chunk() {
         wait.gave_up(),
         "the second render's collect misses its budget"
     );
-    render_chunks(&mut processor, 8);
-    wait_abandoned(&bridge, 9, Duration::from_secs(1));
+    wait_first_abandoned(&bridge);
+    let before = bridge.abandoned_replies();
+    render_chunks(&mut processor, CHUNKS_AFTER);
+    wait_off_the_budget(&bridge, before);
 }
 
 /// **A reactivation after a give-up stays off the budget.** The fork's wait is
@@ -717,11 +741,12 @@ fn a_reactivation_after_a_give_up_does_not_wait_the_budget_again() {
         wait.gave_up(),
         "the second render's collect misses its budget"
     );
-    wait_abandoned(&bridge, 1, Duration::from_secs(3));
+    wait_first_abandoned(&bridge);
     let ipc = Ipc::deactivate(main, processor, controller).expect("the halves rejoin");
     let (mut processor, _controller) = activate(ipc, 32);
-    render_chunks(&mut processor, 8);
-    wait_abandoned(&bridge, 9, Duration::from_secs(1));
+    let before = bridge.abandoned_replies();
+    render_chunks(&mut processor, CHUNKS_AFTER);
+    wait_off_the_budget(&bridge, before);
 }
 
 /// **A reactivation after the server's death stays off the budget.** A death
@@ -738,11 +763,12 @@ fn a_reactivation_after_a_death_does_not_wait_the_budget() {
     render_chunks(&mut processor, 1);
     wait.latch_crash(None);
     assert!(wait.death().is_some(), "the death is latched");
-    wait_abandoned(&bridge, 1, Duration::from_secs(3));
+    wait_first_abandoned(&bridge);
     let ipc = Ipc::deactivate(main, processor, controller).expect("the halves rejoin");
     let (mut processor, _controller) = activate(ipc, 32);
-    render_chunks(&mut processor, 8);
-    wait_abandoned(&bridge, 8, Duration::from_secs(1));
+    let before = bridge.abandoned_replies();
+    render_chunks(&mut processor, CHUNKS_AFTER);
+    wait_off_the_budget(&bridge, before);
 }
 
 /// How many times the mock server was asked for its parameter list.

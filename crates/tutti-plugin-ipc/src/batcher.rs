@@ -66,7 +66,7 @@
 //! else: the `f64` stays inside the node.
 
 use crate::OfflineWait;
-use crate::{HarmonyInputs, PluginBridge, SlabWriter};
+use crate::{HarmonyInputs, PluginBridge, RING_SLOTS, SlabWriter};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
@@ -275,6 +275,11 @@ pub(crate) struct Batcher {
     said: BlockStatus,
     /// What the pipeline reports to its controls.
     counters: Arc<ChunkCounters>,
+    /// Chunks collected unanswered, and not yet seen answered
+    /// ([`Self::watch_late`]); `0` for an empty entry (sequences start at 1).
+    /// At most `RING_SLOTS` matter: a slot reused by a later chunk cannot show
+    /// the older one.
+    unanswered: [u64; RING_SLOTS],
 }
 
 impl std::fmt::Debug for Batcher {
@@ -315,6 +320,7 @@ impl Batcher {
             reply: MidiEventVec::new(),
             said: BlockStatus::Continue,
             counters: Arc::default(),
+            unanswered: [0; RING_SLOTS],
         }
     }
 
@@ -477,6 +483,7 @@ impl Batcher {
     /// audio from arriving.
     pub fn reset(&mut self) {
         self.expect_seq = None;
+        self.unanswered = [0; RING_SLOTS];
         self.counters.in_flight.store(0, Ordering::Release);
         self.pos = 0;
         self.reply.clear();
@@ -515,6 +522,7 @@ impl Batcher {
     fn collect(&mut self, bridge: &PluginBridge, host: &mut impl Chunks) {
         self.reply.clear();
         self.said = BlockStatus::Continue;
+        self.watch_late(bridge);
         self.await_output(bridge);
         let chunk = self.chunk;
         match self.collectable(bridge) {
@@ -527,8 +535,12 @@ impl Batcher {
                 // A chunk in flight the server had not answered: a dropout.
                 // Not while the plugin refuses its rate: its silence is
                 // deliberate, and the status says so.
-                if self.expect_seq.is_some() && !bridge.is_crashed() && !bridge.rate_refused() {
+                if let Some(seq) = self.expect_seq
+                    && !bridge.is_crashed()
+                    && !bridge.rate_refused()
+                {
                     self.counters.missed.fetch_add(1, Ordering::Relaxed);
+                    self.remember_unanswered(seq);
                 }
                 for row in &mut self.ring {
                     row[..chunk].fill(0.0);
@@ -551,6 +563,40 @@ impl Batcher {
         self.counters.in_flight.store(0, Ordering::Release);
     }
 
+    /// Notes `seq`, collected unanswered, to be counted late if the server
+    /// publishes it before its slot is reused: into an empty entry, else over
+    /// the oldest.
+    fn remember_unanswered(&mut self, seq: u64) {
+        let at = self
+            .unanswered
+            .iter()
+            .position(|&s| s == 0)
+            .unwrap_or_else(|| {
+                (0..RING_SLOTS)
+                    .min_by_key(|&i| self.unanswered[i])
+                    .unwrap_or(0)
+            });
+        self.unanswered[at] = seq;
+    }
+
+    /// Counts the chunks collected unanswered that the server has published
+    /// since ([`ChunkCounters::late`]), and forgets those whose slot a later
+    /// chunk may have reused (`RING_SLOTS` chunks submitted on), which can no longer be
+    /// told. A relaxed add and loads of the slab's sequence words: RT-safe.
+    fn watch_late(&mut self, bridge: &PluginBridge) {
+        for seq in &mut self.unanswered {
+            if *seq == 0 {
+                continue;
+            }
+            if bridge.audio_buffer().has_output(*seq) {
+                self.counters.late.fetch_add(1, Ordering::Relaxed);
+                *seq = 0;
+            } else if *seq + (RING_SLOTS as u64) < self.next_seq {
+                *seq = 0;
+            }
+        }
+    }
+
     /// Ship the full FIFO as the next chunk: stage every input port, publish
     /// the input slot **exactly once, after the last channel** (a per-channel
     /// publish would let the server observe the slot as valid while later
@@ -558,6 +604,7 @@ impl Batcher {
     /// half of the previous one sounds almost right — far worse than
     /// silence), and hand the chunk and its payload to the bridge.
     fn submit(&mut self, bridge: &PluginBridge, host: &mut impl Chunks) {
+        self.watch_late(bridge);
         let chunk = self.chunk;
         let seq = self.next_seq;
         let mut staged = true;

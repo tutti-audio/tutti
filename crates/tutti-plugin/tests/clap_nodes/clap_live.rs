@@ -7,15 +7,15 @@
 //! (`Prepare::quantum`), not a fixed 64 frames. With 64, a chunk completed
 //! mid-callback would be collected microseconds after it was submitted, and
 //! read as silence; with the callback as the chunk, the server has a whole
-//! device period to answer. Asserted here: a block after warm-up is silent
-//! only where the machine itself was measured stalled (`Canaries`, and the
-//! pacing sleep's own overshoot), from the stall's start to the pipeline's
-//! refill after its end; every block is either the input delayed by exactly the
-//! declared latency (137 + quantum) or silence, and the graph declares that
-//! latency. On a machine that did not stall, one silent block fails, and a run
-//! whose stalls excuse more than a quarter of its judged blocks is rerun (twice
-//! at most) or reported as too loaded to judge. A stall local to the server
-//! process that no canary sees is an accepted limit: that block fails.
+//! device period to answer. Asserted here: every block is either the input
+//! delayed by exactly the declared latency (137 + quantum) or silence, and the
+//! graph declares that latency. A silent block is a chunk the node collected
+//! unanswered (`PluginControls::missed_chunks`), and it is excused only when the
+//! server then published that chunk before its ring slot was reused
+//! (`late_chunks`): a late answer, which a loaded machine produces. A silent
+//! block whose chunk was never published, or that no collect missed, fails.
+//! A run in which more than a quarter of the judged blocks were late is rerun
+//! (twice at most) or reported as too loaded to judge.
 //!
 //! Needs `cargo build -p tutti-plugin-server` first (see `CLAUDE.md`).
 
@@ -77,10 +77,11 @@ struct Run {
     silent: Vec<usize>,
     /// Of those, neither silent nor the input delayed by `declared`.
     wrong: Vec<usize>,
-    /// The blocks a measured stall explains ([`excused_blocks`]).
-    excused: Vec<usize>,
-    /// How many stalls were measured ([`late`] or later) over the run.
-    stalls: usize,
+    /// The blocks whose collect missed its chunk (`missed_chunks` moved).
+    misses: Vec<usize>,
+    /// The blocks in which a missed chunk was counted late (`late_chunks`
+    /// moved), once per chunk.
+    lates: Vec<usize>,
 }
 
 /// Keeps idle CPUs awake for the length of a paced run (Linux only).
@@ -91,7 +92,7 @@ struct Run {
 /// priority, and the late thread is the host's bridge thread or the server's
 /// about once in 1000 blocks. The plugin gets one period to answer, so such a
 /// wake-up costs the block and its successors up to the next fresh one: the
-/// source of the stalls the [`Canaries`] measure. With spinners on the other
+/// source of the late answers `judge_silence` excuses. With spinners on the other
 /// CPUs at the lowest priority (they yield to any waking thread) the late
 /// wake-ups fell from 8 in 5249 blocks to 1 in 8399. A device's callback is
 /// woken by an interrupt, not from an idle CPU, so this keeps the run closer
@@ -152,98 +153,47 @@ impl Drop for KeepAwake {
 /// Callbacks a [`run_live`] burst makes back to back.
 const BURST: usize = 3;
 
-/// A wake-up this much past its sleep is a machine stalled: a thread woken from
-/// an idle or contended CPU runs late, and the bridge thread and the server
-/// are woken the same way. A block's reply is due one period after its
-/// callback (10 ms at 480 frames, 48 kHz), so only a stall of this order can
-/// cost one: 5 ms, and no more than half a period.
-fn late(period: Duration) -> Duration {
-    Duration::from_millis(5).min(period / 2)
-}
-
-/// Threads sleeping 1 ms in a loop, as the bridge thread and the server sleep,
-/// recording every wake-up [`late`] or later as the interval the thread was
-/// not running. The server's and the bridge's stalls are invisible to the test
-/// thread, so the machine's own scheduling is measured beside the run, from
-/// other threads, and a block is excused only where it shows a stall.
-struct Canaries {
-    stop: Arc<AtomicBool>,
-    threads: Vec<JoinHandle<Vec<(Instant, Instant)>>>,
-}
-
-impl Canaries {
-    fn new(late: Duration) -> Self {
-        let stop = Arc::new(AtomicBool::new(false));
-        let threads = (0..4)
-            .map(|_| {
-                let stop = stop.clone();
-                std::thread::spawn(move || {
-                    let mut stalls = Vec::new();
-                    while !stop.load(Ordering::Relaxed) {
-                        let slept = Instant::now();
-                        std::thread::sleep(Duration::from_millis(1));
-                        let woke = Instant::now();
-                        if woke - slept > Duration::from_millis(1) + late {
-                            stalls.push((slept + Duration::from_millis(1), woke));
-                        }
-                    }
-                    stalls
-                })
-            })
-            .collect();
-        Self { stop, threads }
-    }
-
-    /// Stops the threads; the stalls they saw, as `(start, end)`.
-    fn finish(self) -> Vec<(Instant, Instant)> {
-        self.stop.store(true, Ordering::Relaxed);
-        self.threads
-            .into_iter()
-            .flat_map(|t| t.join().unwrap_or_default())
-            .collect()
-    }
-}
-
-/// The post-warm-up blocks a stall explains. `starts` is when each callback
-/// began (warm-up included, `warm_up` of them first). A stall over `[from, to]`
-/// explains the block before the one it began in (the server's stall began a
-/// little before a canary saw it) through the block it ended in plus the
-/// ring's `RING_SLOTS` while the pipeline refills.
-fn excused_blocks(
-    starts: &[Instant],
-    warm_up: usize,
-    blocks: usize,
-    stalls: &[(Instant, Instant)],
-) -> Vec<usize> {
-    let block_at = |t: Instant| (starts.partition_point(|&s| s <= t) as i64 - 1) - warm_up as i64;
+/// The missed blocks whose chunk the server published after all: a miss at
+/// block `b` is counted late in `b` (the same callback's submit), `b + 1` (the
+/// next collect) or `b + 2`, while the chunk's ring slot still shows it
+/// (`RING_SLOTS` chunks on). Each late count answers one miss, the earliest.
+fn excused(misses: &[usize], lates: &[usize]) -> Vec<usize> {
+    let mut free: Vec<usize> = lates.to_vec();
     let mut excused = Vec::new();
-    for &(from, to) in stalls {
-        let (first, last) = (block_at(from) - 1, block_at(to) + RING_SLOTS as i64);
-        if last < 0 {
-            continue;
+    for &miss in misses {
+        if let Some(at) = free
+            .iter()
+            .position(|&late| (miss..=miss + RING_SLOTS).contains(&late))
+        {
+            free.remove(at);
+            excused.push(miss);
         }
-        let last = last.min(blocks as i64 - 1);
-        excused.extend((first.max(0)..=last).map(|b| b as usize));
     }
-    excused.sort_unstable();
-    excused.dedup();
     excused
 }
 
-/// `Ok` iff every silent block is `excused` by a measured stall, or in
-/// `neutral` (the burst window: its blocks are not judged).
-fn judge_silence(silent: &[usize], excused: &[usize], neutral: Range<usize>) -> Result<(), String> {
-    let unexplained: Vec<usize> = silent
-        .iter()
-        .copied()
-        .filter(|b| !excused.contains(b) && !neutral.contains(b))
-        .collect();
+/// `Ok` iff every silent block from `from` on, outside `neutral` (the burst
+/// window: its blocks are not judged), was a missed chunk the server published
+/// late.
+fn judge_silence(run: &Run, from: usize, neutral: &Range<usize>) -> Result<(), String> {
+    let late = excused(&run.misses, &run.lates);
+    let mut unexplained = Vec::new();
+    for &b in &run.silent {
+        if b < from || neutral.contains(&b) {
+            continue;
+        }
+        if !run.misses.contains(&b) {
+            unexplained.push(format!("{b} (no collect missed: nothing was submitted)"));
+        } else if !late.contains(&b) {
+            unexplained.push(format!("{b} (its chunk was never published)"));
+        }
+    }
     if unexplained.is_empty() {
         Ok(())
     } else {
         Err(format!(
-            "silent blocks {unexplained:?} are outside every measured stall \
-             (silent {silent:?}, explained by a stall {excused:?})"
+            "silent blocks outside a late answer: {unexplained:?} (misses {:?}, late counts at {:?})",
+            run.misses, run.lates
         ))
     }
 }
@@ -261,13 +211,16 @@ fn run_live(rate: f64, quantum: usize, blocks: usize, burst_at: Option<usize>) -
     let (mut ed, exec) = Editor::new(prepare);
     let (src, key) = (NodeKey(1), NodeKey(2));
     ed.insert(src, "ramp", Unforkable(RampSource));
-    let _controls = ed.insert(
-        key,
-        "plugin",
-        probe.client.bind(
-            tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo"),
-        ),
-    );
+    let controls = ed
+        .insert(
+            key,
+            "plugin",
+            probe.client.bind(
+                tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0))
+                    .expect("a tempo"),
+            ),
+        )
+        .controls;
     for port in 0..inputs {
         ed.spec_mut().topology.edges.insert(
             InPort {
@@ -286,22 +239,26 @@ fn run_live(rate: f64, quantum: usize, blocks: usize, burst_at: Option<usize>) -
     let transport = Transport::new(SampleRate::of(rate));
     let engine = Engine::new(&transport, &mut ed, exec).expect("the engine builds");
     let period = Duration::from_secs_f64(quantum as f64 / rate);
-    let late = late(period);
-    let canaries = Canaries::new(late);
     let warm_up = 8 + declared.get().div_ceil(quantum);
     let mut buf = vec![0.0f32; quantum];
     let (mut silent, mut wrong) = (Vec::new(), Vec::new());
-    let mut starts = Vec::with_capacity(warm_up + blocks);
-    let mut stalls = Vec::new();
+    let (mut misses, mut lates) = (Vec::new(), Vec::new());
     let mut next = Instant::now();
     for b in 0..warm_up + blocks {
-        starts.push(Instant::now());
+        let (missed, late) = (controls.missed_chunks(), controls.late_chunks());
         engine.process(&mut InterleavedMut::new(&mut buf, ChannelLayout::MONO).unwrap());
         ed.collect();
         if b >= warm_up {
+            let at = b - warm_up;
             let first = (b * quantum) as u64;
+            if controls.missed_chunks() > missed {
+                misses.push(at);
+            }
+            for _ in late..controls.late_chunks() {
+                lates.push(at);
+            }
             if buf.iter().all(|&s| s == 0.0) {
-                silent.push(b - warm_up);
+                silent.push(at);
             } else if buf
                 .iter()
                 .enumerate()
@@ -322,77 +279,69 @@ fn run_live(rate: f64, quantum: usize, blocks: usize, burst_at: Option<usize>) -
             next = now + period;
         }
         std::thread::sleep(next - now);
-        let woke = Instant::now();
-        if woke - next > late {
-            stalls.push((next, woke));
-        }
     }
     drop(probe.handle);
-    stalls.extend(canaries.finish());
-    let excused = excused_blocks(&starts, warm_up, blocks, &stalls);
     Run {
         declared,
         blocks,
         silent,
         wrong,
-        excused,
-        stalls: stalls.len(),
+        misses,
+        lates,
     }
 }
 
 #[test]
-fn a_silent_block_is_excused_only_inside_a_measured_stall() {
-    assert!(judge_silence(&[], &[], 0..0).is_ok());
-    assert!(judge_silence(&[20, 21, 22], &[19, 20, 21, 22, 23], 0..0).is_ok());
-    let err = judge_silence(&[20, 31], &[19, 20, 21], 0..0).unwrap_err();
-    assert!(err.contains("[31]"), "names the unexplained block: {err}");
-    assert!(
-        judge_silence(&[9], &[], 0..0).is_err(),
-        "on a machine that did not stall, one silent block is a fault"
+fn a_miss_is_late_only_when_a_late_count_follows_within_the_ring() {
+    assert!(excused(&[], &[]).is_empty());
+    assert_eq!(excused(&[10], &[10]), [10], "counted in its own callback");
+    assert_eq!(excused(&[10], &[11]), [10]);
+    assert_eq!(excused(&[10], &[12]), [10], "while its slot still shows it");
+    assert!(excused(&[10], &[13]).is_empty(), "past the ring");
+    assert!(excused(&[10], &[9]).is_empty(), "before the miss");
+    assert!(excused(&[10], &[]).is_empty(), "never published");
+    assert_eq!(
+        excused(&[10, 11], &[12]),
+        [10],
+        "one late count answers one miss, the earliest"
     );
-    assert!(
-        judge_silence(&[61, 62, 63], &[], 60..65).is_ok(),
-        "the neutral window is not judged"
-    );
-    assert!(judge_silence(&[65], &[], 60..65).is_err(), "past it is");
 }
 
 #[test]
-fn a_stall_excuses_its_blocks_and_the_ring_refill_after_it() {
-    let base = Instant::now();
-    let ms = |n: u64| base + Duration::from_millis(n);
-    // 30 callbacks 10 ms apart, 3 of them warm-up.
-    let starts: Vec<Instant> = (0..30).map(|b| ms(b * 10)).collect();
-    // A stall over callbacks 13 (post-warm-up block 10): one block before it
-    // through the block it ends in, plus the ring.
-    let got = excused_blocks(&starts, 3, 27, &[(ms(132), ms(138))]);
-    let want: Vec<usize> = (9..=10 + RING_SLOTS).collect();
-    assert_eq!(got, want);
+fn a_silent_block_is_judged_by_what_the_collect_and_the_server_did() {
+    let run = |silent: &[usize], misses: &[usize], lates: &[usize]| Run {
+        declared: Samples(0),
+        blocks: 200,
+        silent: silent.to_vec(),
+        wrong: Vec::new(),
+        misses: misses.to_vec(),
+        lates: lates.to_vec(),
+    };
+    assert!(judge_silence(&run(&[], &[], &[]), 0, &(0..0)).is_ok());
+    assert!(judge_silence(&run(&[20], &[20], &[21]), 0, &(0..0)).is_ok());
+    let never = judge_silence(&run(&[20], &[20], &[]), 0, &(0..0)).unwrap_err();
+    assert!(never.contains("never published"), "{never}");
+    let none = judge_silence(&run(&[20], &[], &[]), 0, &(0..0)).unwrap_err();
+    assert!(none.contains("nothing was submitted"), "{none}");
     assert!(
-        excused_blocks(&starts, 3, 27, &[(ms(1), ms(8))]).is_empty(),
-        "a stall that ended in warm-up excuses nothing"
+        judge_silence(&run(&[61, 62], &[], &[]), 0, &(60..65)).is_ok(),
+        "the neutral window is not judged"
     );
-    let end = excused_blocks(&starts, 3, 27, &[(ms(285), ms(299))]);
-    assert_eq!(end.last(), Some(&26), "clamped to the run's last block");
-    assert_eq!(
-        excused_blocks(&starts, 3, 27, &[(ms(132), ms(138)), (ms(134), ms(139))]),
-        want,
-        "overlapping stalls count once"
+    assert!(
+        judge_silence(&run(&[3], &[], &[]), 10, &(0..0)).is_ok(),
+        "before `from` is not judged"
     );
 }
-
-/// Runs a run whose stalls may excuse this many judged blocks, at most.
-const MAX_EXCUSED: (usize, usize) = (1, 4);
 
 /// Runs of `run` before a machine is called too loaded to judge.
 const JUDGEABLE_RUNS: usize = 3;
 
-/// The first run of `run` that can be judged: no block wrong, and its stalls
-/// excuse at most a quarter of the blocks judged (`from` on, outside
-/// `neutral`). More than that and a stall explains nearly every block, so the
-/// run asserts almost nothing: it is run again on a fresh server, up to
-/// [`JUDGEABLE_RUNS`] times, and then reported. A run under the cap is
-/// returned whatever its silence is, and a wrong block fails at once.
+/// The first run of `run` that can be judged: no block wrong, no silent block
+/// outside a late answer (either fails at once, in any run, whatever the load),
+/// and no more than a quarter of the blocks judged (`from` on, outside
+/// `neutral`) answered late. More late answers than that and the run asserts
+/// little about the pipeline, so it is run again on a fresh server, up to
+/// [`JUDGEABLE_RUNS`] times, and then reported.
 fn judgeable_run(
     what: &str,
     mut run: impl FnMut() -> Run,
@@ -409,36 +358,31 @@ fn judgeable_run(
             run.declared
         );
         let judged = (from..run.blocks).filter(|b| !neutral.contains(b)).count();
-        let excused = run
-            .excused
+        let late = run
+            .lates
             .iter()
             .filter(|&&b| b >= from && !neutral.contains(&b))
             .count();
         eprintln!(
-            "{what}: run {attempt}: {} of {} judged blocks excused by {} measured stalls, {} silent",
-            excused,
-            judged,
-            run.stalls,
+            "{what}: run {attempt}: {} chunks missed, {late} late, of {judged} judged blocks, \
+             {} silent",
+            run.misses.len(),
             run.silent.len()
         );
-        if excused * MAX_EXCUSED.1 <= judged * MAX_EXCUSED.0 {
+        if let Err(why) = judge_silence(&run, from, &neutral) {
+            panic!("{what}: {why}");
+        }
+        if late * 4 <= judged {
             return run;
         }
-        seen.push(format!("{excused} of {judged}"));
+        seen.push(format!("{late} of {judged}"));
     }
-    panic!("{what}: machine too loaded to judge: blocks excused per run: {seen:?}");
+    panic!("{what}: machine too loaded to judge: late chunks per run: {seen:?}");
 }
 
 fn assert_live(rate: f64, quantum: usize) {
     let what = format!("{quantum}-frame callbacks");
     let run = judgeable_run(&what, || run_live(rate, quantum, 200, None), 0, 0..0);
-    if let Err(why) = judge_silence(&run.silent, &run.excused, 0..0) {
-        panic!(
-            "{what}: {why} of {} blocks, {} stalls measured: the server was not given the \
-             device period to answer",
-            run.blocks, run.stalls
-        );
-    }
     assert_eq!(
         run.declared,
         Samples(PROBE_LATENCY + quantum),
@@ -471,7 +415,7 @@ fn a_device_hears_its_plugin_at_every_callback_size() {
 /// [`BURST`] callbacks plus `RING_SLOTS` more while the pipeline refills.
 /// Asserted: no block is ever neither silent nor the delayed input (a dropped
 /// block must not surface stale or torn data), and outside that window the
-/// stream is as sound as a paced run (silent only inside a measured stall),
+/// stream is as sound as a paced run (a silent block is a late answer),
 /// counted from `SETTLE` blocks after the run's warm-up: a loaded machine can
 /// still be starting the server's pipeline then, which says nothing about the
 /// burst. How many blocks the burst itself drops depends on how fast the server
@@ -494,19 +438,7 @@ fn a_burst_of_callbacks_loses_blocks_but_never_corrupts_them() {
         "a burst of callbacks",
         || run_live(48_000.0, QUANTUM, BLOCKS, Some(BURST_AT)),
         SETTLE,
-        window.clone(),
+        window,
     );
     eprintln!("burst at {BURST_AT}: silent blocks {:?}", run.silent);
-    let silent: Vec<usize> = run
-        .silent
-        .iter()
-        .copied()
-        .filter(|&b| b >= SETTLE)
-        .collect();
-    if let Err(why) = judge_silence(&silent, &run.excused, window.clone()) {
-        panic!(
-            "outside the burst window {window:?} from {SETTLE}: {why}; {} stalls measured",
-            run.stalls
-        );
-    }
 }

@@ -1072,6 +1072,64 @@ fn the_chunk_counters_report_misses_and_answers() {
     bridge_thread.shutdown();
 }
 
+/// **A chunk the server publishes after the node played its silence is counted
+/// late; one it never publishes is only missed.** A server that sleeps 50 ms
+/// per chunk, driven back to back: the second block collects the first chunk
+/// unanswered (a miss). Once the server has published it, the next block
+/// notices, counting it late, before its ring slot is reused.
+#[test]
+fn a_chunk_published_after_its_miss_is_counted_late() {
+    let (bridge, mut bridge_thread, _server, slab) =
+        bridge_with_server_stall(std::time::Duration::from_millis(50));
+    let counters = Arc::new(ChunkCounters::default());
+    let mut batcher = Batcher::new(CHANNELS, CHANNELS, SampleFormat::Float32, BATCH_SIZE, slab)
+        .with_counters(Arc::clone(&counters));
+    let input = Planar::new();
+    let mut output = Planar::new();
+    let mut midi_out = MidiEventVec::new();
+
+    drive_one_block(&mut batcher, &bridge, &input, &mut output, &mut midi_out);
+    drive_one_block(&mut batcher, &bridge, &input, &mut output, &mut midi_out);
+    assert_eq!(counters.missed(), 1, "chunk 1 was collected unanswered");
+    assert_eq!(counters.late(), 0, "and had not been published yet");
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !bridge.audio_buffer().has_output(1) {
+        assert!(std::time::Instant::now() < deadline, "chunk 1 never came");
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    drive_one_block(&mut batcher, &bridge, &input, &mut output, &mut midi_out);
+    assert_eq!(
+        counters.late(),
+        1,
+        "chunk 1, published after its miss, is counted late"
+    );
+    assert!(counters.late() <= counters.missed());
+
+    bridge_thread.shutdown();
+}
+
+/// A chunk the server never publishes is a miss and never late.
+#[test]
+fn a_chunk_never_published_is_missed_and_never_late() {
+    let (bridge, mut bridge_thread, _server, slab) =
+        bridge_with_server_stall(std::time::Duration::from_secs(60));
+    let counters = Arc::new(ChunkCounters::default());
+    let mut batcher = Batcher::new(CHANNELS, CHANNELS, SampleFormat::Float32, BATCH_SIZE, slab)
+        .with_counters(Arc::clone(&counters));
+    let input = Planar::new();
+    let mut output = Planar::new();
+    let mut midi_out = MidiEventVec::new();
+
+    for _ in 0..6 {
+        drive_one_block(&mut batcher, &bridge, &input, &mut output, &mut midi_out);
+    }
+    assert_eq!(counters.missed(), 5, "every chunk but the first collect");
+    assert_eq!(counters.late(), 0, "none of them was ever published");
+
+    bridge_thread.shutdown();
+}
+
 /// Nothing has ever been published, so every block takes the sequence-mismatch
 /// path into `silence_block`.
 #[test]

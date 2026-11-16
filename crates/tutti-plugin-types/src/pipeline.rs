@@ -28,7 +28,7 @@ pub struct BlockCounts {
 }
 
 /// What the pipeline reports to its controls
-/// (`PluginControls::missed_chunks` and `chunk_in_flight_answered`
+/// (`PluginControls::missed_chunks`, `late_chunks` and `chunk_in_flight_answered`
 /// in `tutti-plugin-host`):
 /// written on the audio thread with relaxed atomics, read anywhere.
 ///
@@ -43,6 +43,9 @@ pub struct ChunkCounters {
     /// Chunks the server had not answered when the node collected them
     /// (played as silence), the bridge alive.
     pub missed: AtomicU64,
+    /// Of the chunks counted in [`missed`](Self::missed), those the server
+    /// published after all, before the chunk's ring slot was reused.
+    pub late: AtomicU64,
     /// Whether the chunk of a sequence has been answered, set when the node is
     /// bound (the shared-memory slab's reply flag, which this file does not
     /// name).
@@ -54,6 +57,7 @@ impl std::fmt::Debug for ChunkCounters {
         f.debug_struct("ChunkCounters")
             .field("in_flight", &self.in_flight)
             .field("missed", &self.missed)
+            .field("late", &self.late)
             .finish_non_exhaustive()
     }
 }
@@ -67,6 +71,11 @@ impl ChunkCounters {
     /// See `PluginControls::missed_chunks`.
     pub fn missed(&self) -> u64 {
         self.missed.load(Ordering::Relaxed)
+    }
+
+    /// See `PluginControls::late_chunks`.
+    pub fn late(&self) -> u64 {
+        self.late.load(Ordering::Relaxed)
     }
 
     /// See `PluginControls::chunk_in_flight_answered`.
