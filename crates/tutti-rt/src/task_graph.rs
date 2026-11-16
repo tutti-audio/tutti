@@ -248,11 +248,6 @@ impl TaskGraph {
         self.initial.is_empty()
     }
 
-    /// Tasks with no predecessor: how many participants can start at once.
-    pub fn roots(&self) -> usize {
-        self.roots.len()
-    }
-
     /// Arm the next block: every task pending, the roots ready. `&mut`, so
     /// no participant of the previous block is still inside
     /// [`work`](Self::work). No allocation.
