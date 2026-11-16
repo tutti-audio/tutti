@@ -20,9 +20,48 @@ use tutti_graph::{ForkByClone, IntoNode, Node, ParamNode, ParamSet, Params, Unfo
 /// - its own impl with the default `params` (none), for a node with
 ///   controls of another shape.
 ///
-/// A node whose controls publish to it through an `ArcLend` cell also says
-/// how to free what that cell retired ([`reclaimer`](Self::reclaimer)), so
-/// the session's reclaim phase reaches it whichever host inserted it.
+/// Every impl states what frees what its controls publish
+/// ([`reclaimer`](Self::reclaimer)): [`Reclaims::Cells`] for a node whose
+/// controls publish to it through an `ArcLend` cell (or hold another
+/// control-side free), [`Reclaims::Nothing`] for one that publishes nothing.
+/// There is no default, so an impl that forgets the sweep does not compile and
+/// the session's reclaim phase reaches every node whichever host inserted it.
+///
+/// A node that says nothing about its sweep is refused (E0046):
+///
+/// ```compile_fail,E0046
+/// use tutti_graph::{IntoNode, NodeParts};
+/// use tutti_session::SessionNode;
+///
+/// struct Mine;
+/// impl IntoNode for Mine {
+///     type Controls = ();
+///     fn into_parts(self) -> NodeParts<()> {
+///         unimplemented!()
+///     }
+/// }
+/// impl SessionNode for Mine {}
+/// ```
+///
+/// One that publishes nothing says so by name:
+///
+/// ```
+/// use tutti_graph::{IntoNode, NodeParts};
+/// use tutti_session::{Reclaims, SessionNode};
+///
+/// struct Mine;
+/// impl IntoNode for Mine {
+///     type Controls = ();
+///     fn into_parts(self) -> NodeParts<()> {
+///         unimplemented!()
+///     }
+/// }
+/// impl SessionNode for Mine {
+///     fn reclaimer(_: &()) -> Reclaims {
+///         Reclaims::Nothing
+///     }
+/// }
+/// ```
 pub trait SessionNode: IntoNode + Send + 'static {
     /// The node's params by address, read off its controls once it is in:
     /// what [`Graph::set_param`](crate::Graph::set_param) writes through, and
@@ -36,12 +75,9 @@ pub trait SessionNode: IntoNode + Send + 'static {
     /// What frees the values the node's published cells retired, read off
     /// its controls once it is in. The graph keeps it by node until the node
     /// is removed or replaced, and runs it on every update
-    /// ([`Phase::Reclaim`](crate::Phase::Reclaim)). `None`, the default, for
-    /// a node that publishes nothing.
-    fn reclaimer(controls: &Self::Controls) -> Option<Reclaimer> {
-        let _ = controls;
-        None
-    }
+    /// ([`Phase::Reclaim`](crate::Phase::Reclaim)). Required:
+    /// [`Reclaims::Nothing`] says the node publishes nothing.
+    fn reclaimer(controls: &Self::Controls) -> Reclaims;
 
     /// The node reading the session's tempo map through `tempo` (a reader
     /// the graph hands each node it takes in [`Graph::add`](crate::Graph::add)
@@ -56,6 +92,31 @@ pub trait SessionNode: IntoNode + Send + 'static {
     {
         let _ = tempo;
         self
+    }
+}
+
+/// What frees the values a node's published cells retired: the answer
+/// [`SessionNode::reclaimer`] must give.
+#[derive(Debug)]
+pub enum Reclaims {
+    /// The node's controls publish; this sweeps them.
+    Cells(Reclaimer),
+    /// The node's controls publish nothing that needs a sweep.
+    Nothing,
+}
+
+impl Reclaims {
+    /// The sweep over a clone of `controls` ([`Reclaimer::of`]).
+    pub fn of<R: tutti_rt::Reclaim + Clone + Send + 'static>(controls: &R) -> Self {
+        Self::Cells(Reclaimer::of(controls))
+    }
+
+    /// The sweep, if there is one.
+    pub(crate) fn into_reclaimer(self) -> Option<Reclaimer> {
+        match self {
+            Self::Cells(reclaimer) => Some(reclaimer),
+            Self::Nothing => None,
+        }
     }
 }
 
@@ -96,15 +157,28 @@ macro_rules! param_session_node {
             fn params(controls: &ParamSet) -> Option<ParamSet> {
                 Some(controls.clone())
             }
+
+            // A `ParamSet` publishes through `Param` atomics, no cell.
+            fn reclaimer(_: &ParamSet) -> Reclaims {
+                Reclaims::Nothing
+            }
         }
     )*};
 }
 
 /// A node forkable by a clone taken at insert: no controls, no params.
-impl<N: Node + Clone + Send + 'static> SessionNode for ForkByClone<N> {}
+impl<N: Node + Clone + Send + 'static> SessionNode for ForkByClone<N> {
+    fn reclaimer(_: &()) -> Reclaims {
+        Reclaims::Nothing
+    }
+}
 
 /// A node no fork may take: no controls, no params.
-impl<N: Node + Send + 'static> SessionNode for Unforkable<N> {}
+impl<N: Node + Send + 'static> SessionNode for Unforkable<N> {
+    fn reclaimer(_: &()) -> Reclaims {
+        Reclaims::Nothing
+    }
+}
 
 /// A host's [`ParamNode`], inserted as one: its [`ParamSet`] as its controls
 /// and its params reached by address, forked from the values set. Its typed
@@ -112,6 +186,10 @@ impl<N: Node + Send + 'static> SessionNode for Unforkable<N> {}
 impl<N: ParamNode + Clone + Send + 'static> SessionNode for Params<N> {
     fn params(controls: &ParamSet) -> Option<ParamSet> {
         Some(controls.clone())
+    }
+
+    fn reclaimer(_: &ParamSet) -> Reclaims {
+        Reclaims::Nothing
     }
 }
 
@@ -137,6 +215,10 @@ impl SessionNode for tutti_nodes::MultibandCompressorNode {
     fn params(controls: &tutti_nodes::MultibandControls) -> Option<ParamSet> {
         Some(controls.params().clone())
     }
+
+    fn reclaimer(_: &tutti_nodes::MultibandControls) -> Reclaims {
+        Reclaims::Nothing
+    }
 }
 // The delay, modulation, LFO and oscillator nodes, and the two reverbs (wet only: their
 // blend is the graph's mix), and the convolution reverb (its wet gain, `Volume`).
@@ -153,32 +235,52 @@ param_session_node!(
 
 /// An audio inlet as a graph node: no controls (the writer is the producer's),
 /// no params. Its fork is refused ([`Graph::open_inlet`](crate::Graph::open_inlet)).
-impl SessionNode for tutti_graph::InletNode {}
+impl SessionNode for tutti_graph::InletNode {
+    fn reclaimer(_: &()) -> Reclaims {
+        Reclaims::Nothing
+    }
+}
 
 /// An event inlet as a graph node: no controls (the writer is the producer's),
 /// no params; its fork is silent
 /// ([`Graph::open_event_inlet`](crate::Graph::open_event_inlet)).
-impl SessionNode for tutti_graph::EventInletNode {}
+impl SessionNode for tutti_graph::EventInletNode {
+    fn reclaimer(_: &()) -> Reclaims {
+        Reclaims::Nothing
+    }
+}
 
 /// The metronome as a graph node: its settings are shared through the
 /// transport, no controls and no params.
-impl SessionNode for tutti_nodes::ClickNode {}
+impl SessionNode for tutti_nodes::ClickNode {
+    fn reclaimer(_: &<Self as IntoNode>::Controls) -> Reclaims {
+        Reclaims::Nothing
+    }
+}
 
 /// The MIDI clock as a graph node: its controls are the clock's master side
 /// (read by the session), no params.
 #[cfg(feature = "midi")]
-impl SessionNode for tutti_midi_runtime::ClockNode {}
+impl SessionNode for tutti_midi_runtime::ClockNode {
+    fn reclaimer(_: &<Self as IntoNode>::Controls) -> Reclaims {
+        Reclaims::Nothing
+    }
+}
 
 /// An automation lane as a graph node: no controls, the beat read from its
 /// block's `Env`.
-impl SessionNode for tutti_nodes::automation::AutomationLaneNode {}
+impl SessionNode for tutti_nodes::automation::AutomationLaneNode {
+    fn reclaimer(_: &()) -> Reclaims {
+        Reclaims::Nothing
+    }
+}
 
 /// A MIDI clip as a graph node: its `MidiClipControls`, no params; the
 /// clips it replaced freed by its reclaimer.
 #[cfg(feature = "midi")]
 impl SessionNode for tutti_midi_runtime::MidiClipNode {
-    fn reclaimer(controls: &tutti_midi_runtime::MidiClipControls) -> Option<Reclaimer> {
-        Some(Reclaimer::of(controls))
+    fn reclaimer(controls: &tutti_midi_runtime::MidiClipControls) -> Reclaims {
+        Reclaims::of(controls)
     }
 }
 
@@ -186,8 +288,8 @@ impl SessionNode for tutti_midi_runtime::MidiClipNode {
 /// replaced freed by its reclaimer.
 #[cfg(feature = "midi")]
 impl SessionNode for tutti_midi_runtime::MpeTransformNode {
-    fn reclaimer(controls: &tutti_midi_runtime::MpeTransformControls) -> Option<Reclaimer> {
-        Some(Reclaimer::of(controls))
+    fn reclaimer(controls: &tutti_midi_runtime::MpeTransformControls) -> Reclaims {
+        Reclaims::of(controls)
     }
 }
 
@@ -195,8 +297,8 @@ impl SessionNode for tutti_midi_runtime::MpeTransformNode {
 /// replaced freed by its reclaimer.
 #[cfg(feature = "midi")]
 impl SessionNode for tutti_midi_runtime::HarmonyNode {
-    fn reclaimer(controls: &tutti_midi_runtime::HarmonyControls) -> Option<Reclaimer> {
-        Some(Reclaimer::of(controls))
+    fn reclaimer(controls: &tutti_midi_runtime::HarmonyControls) -> Reclaims {
+        Reclaims::of(controls)
     }
 }
 
@@ -204,14 +306,18 @@ impl SessionNode for tutti_midi_runtime::HarmonyNode {
 /// it replaced freed by its reclaimer.
 #[cfg(feature = "midi")]
 impl SessionNode for tutti_midi_runtime::MidiIngestNode {
-    fn reclaimer(controls: &tutti_midi_runtime::MidiIngestControls) -> Option<Reclaimer> {
-        Some(Reclaimer::of(controls))
+    fn reclaimer(controls: &tutti_midi_runtime::MidiIngestControls) -> Reclaims {
+        Reclaims::of(controls)
     }
 }
 
 /// The SoundFont player as a graph node.
 #[cfg(feature = "soundfont")]
-impl SessionNode for tutti_soundfont::SoundFontUnit {}
+impl SessionNode for tutti_soundfont::SoundFontUnit {
+    fn reclaimer(_: &()) -> Reclaims {
+        Reclaims::Nothing
+    }
+}
 
 // The two panners: bearing and height, and the VBAP spread and width or the
 // HRTF blend, as a `ParamSet`.
@@ -236,16 +342,21 @@ impl SessionNode for tutti_sampler::VoiceNode {
         Some(controls.params().clone())
     }
 
-    fn reclaimer(controls: &tutti_sampler::VoiceNodeHandle) -> Option<Reclaimer> {
-        Some(Reclaimer::of(controls))
+    fn reclaimer(controls: &tutti_sampler::VoiceNodeHandle) -> Reclaims {
+        Reclaims::of(controls)
     }
 }
 
-/// A pool as a graph node; its controls are its `VoicePoolHandle`.
+/// A pool as a graph node; its controls are its `VoicePoolHandle`, whose
+/// retired voices its reclaimer frees.
 #[cfg(feature = "sampler")]
 impl SessionNode for tutti_sampler::VoicePool {
     fn bind_tempo(self, tempo: &tutti_transport::TempoReader) -> Self {
         self.with_tempo(tempo.clone())
+    }
+
+    fn reclaimer(controls: &tutti_sampler::VoicePoolHandle) -> Reclaims {
+        Reclaims::of(controls)
     }
 }
 
@@ -254,6 +365,10 @@ impl SessionNode for tutti_sampler::VoicePool {
 impl SessionNode for tutti_sampler::MemorySource {
     fn bind_tempo(self, tempo: &tutti_transport::TempoReader) -> Self {
         self.with_tempo(tempo.clone())
+    }
+
+    fn reclaimer(_: &ParamSet) -> Reclaims {
+        Reclaims::Nothing
     }
 
     fn params(controls: &ParamSet) -> Option<ParamSet> {
@@ -275,8 +390,8 @@ impl SessionNode for tutti_sampler::Clip {
         Some(controls.params().clone())
     }
 
-    fn reclaimer(controls: &tutti_sampler::VoiceNodeHandle) -> Option<Reclaimer> {
-        Some(Reclaimer::of(controls))
+    fn reclaimer(controls: &tutti_sampler::VoiceNodeHandle) -> Reclaims {
+        Reclaims::of(controls)
     }
 }
 
@@ -287,6 +402,10 @@ impl SessionNode for tutti_sampler::DiskVoice {
     fn bind_tempo(self, tempo: &tutti_transport::TempoReader) -> Self {
         self.with_tempo(tempo.clone())
     }
+
+    fn reclaimer(_: &tutti_sampler::DiskVoiceControls) -> Reclaims {
+        Reclaims::Nothing
+    }
 }
 
 #[cfg(test)]
@@ -296,11 +415,11 @@ mod tests {
     /// Whether `N`'s impl hands the graph a reclaimer once `node` is split.
     fn keeps_one<N: SessionNode>(node: N) -> bool {
         let (_, controls) = node.into_node();
-        N::reclaimer(&controls).is_some()
+        N::reclaimer(&controls).into_reclaimer().is_some()
     }
 
     /// **Every engine node whose controls publish to it keeps a
-    /// reclaimer**: the clip, the harmony track, the live input and the
+    /// reclaimer**: the clip, the harmony track, the live input, the pool and the
     /// voice. What each one frees is pinned with a held loan in its own
     /// crate; the graph's sweep of them in `tests/wiring/graph.rs`.
     #[test]
@@ -322,6 +441,7 @@ mod tests {
                 tutti_sampler::VoiceWindow::from(tutti_types::Beat(0.0)),
             )
             .expect("a placeable wave");
+            assert!(keeps_one(tutti_sampler::VoicePool::new()));
             assert!(keeps_one(tutti_sampler::VoiceNode::new(
                 tutti_sampler::Voice {
                     source: tutti_sampler::VoiceSource::Memory(source),

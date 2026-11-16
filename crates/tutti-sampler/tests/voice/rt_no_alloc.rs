@@ -967,6 +967,48 @@ fn collect_retired_frees_the_removed_slots_on_the_control_thread() {
     assert_eq!(handle.collect_retired(), 0, "and only once");
 }
 
+/// **A pool's owner sweeps its retired slots through `Reclaim`**: the session's
+/// reclaim phase frees what the callback parked, so the retire ring never
+/// fills and sends a free back into the callback.
+#[test]
+fn reclaim_frees_the_removed_slots_a_callback_parked() {
+    let wave = surround_wave(2.0, 48_000.0);
+    let (reader, handle) = VoicePool::with_channels(6u16)
+        .expect("a width the sampler reads")
+        .with_handle();
+    let mut reader = Rig::new(reader, 64);
+    let sampler = MemorySource::with_config(
+        wave,
+        MemorySourceConfig {
+            placement: Some(VoiceWindow {
+                start: Beat::new(0.0),
+                duration: None,
+            }),
+            channels: ChannelLayout::from(6u16),
+            ..Default::default()
+        },
+    )
+    .expect("a placeable wave");
+    handle
+        .add(SlotId(1), sampler, Playback::default())
+        .expect("room in the queue");
+    reader.block();
+    handle.remove(SlotId(1)).expect("room in the queue");
+    reader.block();
+    assert_eq!(reader.node().voice_count(), 0, "the remove drained");
+
+    assert_eq!(
+        tutti_rt::Reclaim::reclaim(&handle),
+        0,
+        "nothing stays pinned"
+    );
+    assert_eq!(
+        handle.collect_retired(),
+        0,
+        "the sweep already freed the parked slot"
+    );
+}
+
 /// An `AddVoice` past the pool's 64 slots neither grows the slot vector
 /// nor frees the voice in the callback.
 ///

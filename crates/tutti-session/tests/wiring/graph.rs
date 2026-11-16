@@ -907,8 +907,8 @@ impl IntoNode for Published {
 }
 
 impl SessionNode for Published {
-    fn reclaimer(controls: &PublishedControls) -> Option<tutti_session::Reclaimer> {
-        Some(tutti_session::Reclaimer::of(controls))
+    fn reclaimer(controls: &PublishedControls) -> tutti_session::Reclaims {
+        tutti_session::Reclaims::of(controls)
     }
 }
 

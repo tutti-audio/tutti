@@ -861,7 +861,7 @@ impl Graph {
     fn address<N: SessionNode>(&mut self, node: NodeKey, controls: &N::Controls) {
         if let Some(entry) = self.nodes.get_mut(&node) {
             entry.params = N::params(controls);
-            entry.reclaimer = N::reclaimer(controls);
+            entry.reclaimer = N::reclaimer(controls).into_reclaimer();
         }
     }
 

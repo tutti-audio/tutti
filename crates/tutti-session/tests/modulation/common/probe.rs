@@ -136,6 +136,10 @@ impl SessionNode for ProbeUnit {
     fn params(controls: &ParamSet) -> Option<ParamSet> {
         Some(controls.clone())
     }
+
+    fn reclaimer(_: &ParamSet) -> tutti_session::Reclaims {
+        tutti_session::Reclaims::Nothing
+    }
 }
 
 /// `level` on executor frames `[from, to)`, else 0, on both channels.
