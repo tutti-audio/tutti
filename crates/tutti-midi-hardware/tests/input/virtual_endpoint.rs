@@ -145,7 +145,6 @@ fn jr_messages_a_client_sends_are_not_heard_by_an_arrival_port() {
         peer.send_to_subscribers(port, ump.words()).expect("sends");
     }
     assert_eq!(listener.hear(1, PATIENCE), [note]);
-    assert_eq!(ports.losses().dropped(), 0);
 }
 
 /// A block of Groups 4 to 5, named, bidirectional, a receiver's hint.

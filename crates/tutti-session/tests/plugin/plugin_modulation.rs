@@ -19,8 +19,8 @@ use std::time::{Duration, Instant};
 use support::{clap_probe, plugin_server};
 use tutti_graph::NodeKey;
 use tutti_modulation::Lfo;
+use tutti_plugin::PluginClient;
 use tutti_plugin::catalog::{Loadable, PluginRef};
-use tutti_plugin::handles::PluginClient;
 use tutti_plugin_types::{Normalized, ParamId};
 use tutti_session::{
     Crossfade, DetachedSession, EventInPort, EventOutPort, PHASES, ParamRef, PhaseCx, RouteSpec,
@@ -317,6 +317,224 @@ fn a_crossfaded_plugin_keeps_its_lane_and_a_removed_one_drops_it() {
     assert!(
         !s.graph_ref().contains(lane),
         "the lane leaves with its plugin"
+    );
+}
+
+/// Sets the probe's gain to `value` through the session's params.
+fn set_gain(s: &DetachedSession, node: impl Into<NodeKey> + Copy, value: f64) {
+    s.plugin_view(node)
+        .unwrap()
+        .params()
+        .get(ParamId::new(GAIN))
+        .unwrap()
+        .set(Normalized::of(value))
+        .unwrap();
+}
+
+/// How far a plugin's value may be from the one a lane plays: the plugin
+/// takes it as a float over the wire.
+const TOLERANCE: f64 = 1e-3;
+
+/// Whether `v` is within [`TOLERANCE`] of `want`.
+fn near(v: Option<Normalized>, want: f64) -> bool {
+    v.is_some_and(|v| (v.get() - want).abs() < TOLERANCE)
+}
+
+/// **A set under a lane writes the lane's knob.** The gain's lane is a macro
+/// of -0.25 over the knob, which starts at the plugin's 60/72. A set of 0.5
+/// is the lane's knob at once, the read-back is that knob (the control, not
+/// the played value), and the plugin hears the knob plus the route (0.25).
+#[test]
+fn a_set_under_a_lane_writes_the_knob() {
+    let mut s = detached();
+    let mut drive = Drive::new();
+    let node = add_probe(&mut s);
+    drive.update(&mut s);
+    wait_for_values(&mut drive, &mut s, node);
+    let gain = node.param(ParamId::new(GAIN));
+    {
+        let mut m = s.mods_mut();
+        m.range_raw(gain, 0.0, 1.0).unwrap();
+        let source = m.macro_(1.0);
+        m.route(RouteSpec::new(source, gain, Depth::of(-0.25)))
+            .unwrap();
+    }
+    lane_of(&mut drive, &mut s, gain);
+    // The lane drives the plugin before the set.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !near(gain_value(&s, node), 60.0 / 72.0 - 0.25) {
+        assert!(
+            Instant::now() < deadline,
+            "the lane never reached the plugin"
+        );
+        drive.frame(&mut s);
+    }
+
+    set_gain(&s, node, 0.5);
+    let knob = s.mod_state().lane(gain.key()).and_then(|(_, l)| l.knob());
+    assert_eq!(knob, Some(0.5), "the knob is the set value, with no update");
+    let read = s
+        .plugin_view(node)
+        .unwrap()
+        .params()
+        .get(ParamId::new(GAIN))
+        .unwrap()
+        .normalized();
+    assert_eq!(read, Normalized::of(0.5), "the read-back is the knob");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !near(gain_value(&s, node), 0.25) {
+        assert!(
+            Instant::now() < deadline,
+            "the plugin hears {:?}, not the knob plus the route",
+            gain_value(&s, node)
+        );
+        drive.frame(&mut s);
+    }
+}
+
+/// **A set in the update that added the lane writes its knob.** The lane
+/// exists as the update ends, so a set made then is the base: the plugin
+/// hears it plus the route, not the raw value.
+#[test]
+fn a_set_right_after_the_lane_is_added_writes_the_knob() {
+    let mut s = detached();
+    let mut drive = Drive::new();
+    let node = add_probe(&mut s);
+    drive.update(&mut s);
+    wait_for_values(&mut drive, &mut s, node);
+    let gain = node.param(ParamId::new(GAIN));
+    {
+        let mut m = s.mods_mut();
+        m.range_raw(gain, 0.0, 1.0).unwrap();
+        let source = m.macro_(1.0);
+        m.route(RouteSpec::new(source, gain, Depth::of(-0.25)))
+            .unwrap();
+    }
+    lane_of(&mut drive, &mut s, gain);
+
+    set_gain(&s, node, 0.5);
+    let knob = s.mod_state().lane(gain.key()).and_then(|(_, l)| l.knob());
+    assert_eq!(knob, Some(0.5), "the knob is the set value");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !near(gain_value(&s, node), 0.25) {
+        assert!(
+            Instant::now() < deadline,
+            "the plugin hears {:?}, not the knob plus the route",
+            gain_value(&s, node)
+        );
+        drive.frame(&mut s);
+    }
+}
+
+/// **Once its lane is gone a parameter takes a set as the plugin's own.** The
+/// lane's knob is not written, and the plugin takes the value raw.
+#[test]
+fn a_set_after_the_lane_is_removed_goes_to_the_plugin() {
+    let mut s = detached();
+    let mut drive = Drive::new();
+    let node = add_probe(&mut s);
+    drive.update(&mut s);
+    wait_for_values(&mut drive, &mut s, node);
+    let gain = node.param(ParamId::new(GAIN));
+    let route = {
+        let mut m = s.mods_mut();
+        m.range_raw(gain, 0.0, 1.0).unwrap();
+        let source = m.macro_(1.0);
+        m.route(RouteSpec::new(source, gain, Depth::of(-0.25)))
+            .unwrap()
+    };
+    lane_of(&mut drive, &mut s, gain);
+    drive.update(&mut s);
+    {
+        let mut m = s.mods_mut();
+        m.remove_route(route).unwrap();
+        m.clear_range(gain);
+    }
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while s.mod_state().lane(gain.key()).is_some() {
+        assert!(Instant::now() < deadline, "the lane never left");
+        drive.update(&mut s);
+    }
+
+    // The update that dropped the lane also dropped the parameter's knob.
+    set_gain(&s, node, 0.5);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !near(gain_value(&s, node), 0.5) {
+        assert!(
+            Instant::now() < deadline,
+            "the plugin hears {:?}, not the raw set",
+            gain_value(&s, node)
+        );
+        drive.frame(&mut s);
+    }
+}
+
+/// **A read of the plugin does not put the played value in the mirror.** The
+/// gain is set to 0.5 under a lane that plays 0.25 (a macro of -0.25 over the
+/// knob). A preset load makes the session read the plugin's values again; the
+/// read finds the played 0.25, and the parameter still reads the knob.
+#[test]
+fn a_read_landing_under_a_lane_keeps_the_knob_in_the_mirror() {
+    // The plugin's file is probed before its variables are set; the reference
+    // plugin answers `clap.preset-load` only when asked.
+    crate::pooled::prime(&PluginRef::file(clap_probe()).expect("a plugin file"));
+    set_env("TUTTI_CLAP_PROBE_PRESET_LOAD", "1");
+    let mut s = detached();
+    let mut drive = Drive::new();
+    let node = add_probe(&mut s);
+    drive.update(&mut s);
+    wait_for_values(&mut drive, &mut s, node);
+    let gain = node.param(ParamId::new(GAIN));
+    {
+        let mut m = s.mods_mut();
+        m.range_raw(gain, 0.0, 1.0).unwrap();
+        let source = m.macro_(1.0);
+        m.route(RouteSpec::new(source, gain, Depth::of(-0.25)))
+            .unwrap();
+    }
+    lane_of(&mut drive, &mut s, gain);
+    set_gain(&s, node, 0.5);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !near(gain_value(&s, node), 0.25) {
+        assert!(Instant::now() < deadline, "the lane never played the knob");
+        drive.frame(&mut s);
+    }
+
+    // The preset sets only the first parameter (Cutoff), so the read it
+    // causes has landed once the mirror's Cutoff moved.
+    let cutoff = |s: &DetachedSession| {
+        let plugin = s.plugin_view(node).unwrap();
+        let params = plugin.params();
+        let first = params.iter().next().expect("a parameter").id();
+        params.get(first).unwrap().normalized()
+    };
+    let before = cutoff(&s);
+    s.main(tutti_fixtures::main_thread())
+        .plugin(node)
+        .unwrap()
+        .presets()
+        .unwrap()
+        .load_file("/nowhere/bright.tutti-preset")
+        .expect("the plugin takes the preset");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while cutoff(&s) == before {
+        assert!(Instant::now() < deadline, "the read never landed");
+        drive.update(&mut s);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    // The knob reported as the read landed is applied by the next update.
+    drive.update(&mut s);
+
+    let read = s
+        .plugin_view(node)
+        .unwrap()
+        .params()
+        .get(ParamId::new(GAIN))
+        .unwrap()
+        .normalized();
+    assert!(
+        near(Some(read), 0.5),
+        "the mirror holds {read:?}, not the knob 0.5"
     );
 }
 

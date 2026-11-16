@@ -20,10 +20,9 @@ use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
 
-use tutti_graph::Losses;
 use tutti_midi_device::{ClockHeard, JrReceiver};
-use tutti_midi_runtime::{DeviceInput, InletCounts, InputId};
-use tutti_rt::{Overflow, RingReader, RingWriter, ring};
+use tutti_midi_runtime::{DeviceInput, InputId};
+use tutti_rt::{Overflow, PushError, RingReader, RingWriter, ring};
 use tutti_ump::{Message, Ump, Utility};
 
 use crate::InputTiming;
@@ -219,40 +218,48 @@ impl InputProducerHandle {
     /// `timestamp`. Otherwise the JR messages are ignored and every event is
     /// placed at `timestamp`.
     ///
-    /// Returns what became of it: [`Pushed::Sent`] into the graph's inlet,
-    /// [`Pushed::Diverted`] (not music, or the port is paused, so nothing was
-    /// lost for want of room), or [`Pushed::Full`] when the device's inlet is
-    /// full: the event is then dropped, not queued, and counted
-    /// ([`HardwareMidiInputs::losses`](super::HardwareMidiInputs::losses)).
-    /// An **inactive** port ([`set_port_active`](super::HardwareMidiInputs::set_port_active))
+    /// Returns what became of it: [`Delivered::Sent`] into the graph's inlet, or
+    /// [`Delivered::Diverted`] (not music, or the port is paused, so nothing was
+    /// lost for want of room). An **inactive** port
+    /// ([`set_port_active`](super::HardwareMidiInputs::set_port_active))
     /// discards the event and is `Diverted`. Lock-free and allocation-free, so
     /// it is safe to call from a driver callback.
+    ///
+    /// # Errors
+    ///
+    /// [`PushError::Disconnected`] once the inlet's node is gone (the port was
+    /// removed): nothing is counted. [`PushError::Full`] when the device's inlet is full: the event is
+    /// dropped, not queued, and counted in the input's own `lost` cell
+    /// ([`InputReaders::lost`](tutti_midi_runtime::InputReaders::lost)). A caller
+    /// counts or logs it.
     #[inline]
-    pub fn push(&mut self, event: impl Into<Ump>, timestamp: Instant) -> Pushed {
+    pub fn push(
+        &mut self,
+        event: impl Into<Ump>,
+        timestamp: Instant,
+    ) -> Result<Delivered, PushError> {
         let event = event.into();
         if !self.active.load(Ordering::Acquire) {
-            return Pushed::Diverted;
+            return Ok(Delivered::Diverted);
         }
         if event.is_stream() {
             // A message the ring has no room for is counted by the ring.
             let _ = self.stream.push(event);
-            return Pushed::Diverted;
+            return Ok(Delivered::Diverted);
         }
         self.jr.follow(self.timing.get());
         if event.is_jr() {
             if let Ok(Message::Utility(utility)) = event.decode() {
                 self.jr.take(utility, timestamp);
             }
-            return Pushed::Diverted;
+            return Ok(Delivered::Diverted);
         }
         if event.message_type() == SYSEX7 && self.hear_sysex.load(Ordering::Relaxed) {
             let _ = self.stream.push(event);
         }
-        if self.input.push(event, self.jr.place(timestamp)) {
-            Pushed::Sent
-        } else {
-            Pushed::Full
-        }
+        self.input
+            .push(event, self.jr.place(timestamp))
+            .map(|()| Delivered::Sent)
     }
 
     /// The identity of the port this handle feeds: the key to pass to
@@ -264,18 +271,16 @@ impl InputProducerHandle {
     }
 }
 
-/// What [`InputProducerHandle::push`] did with an event.
+/// What [`InputProducerHandle::push`] did with an event that was not lost:
+/// the `Ok` of its `Result`, whose `Err` ([`PushError::Full`]) is a lost event
+/// a caller counts or logs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-#[must_use = "`Full` is a lost event: a caller counts or logs it"]
-pub enum Pushed {
+pub enum Delivered {
     /// The event went into the device's inlet, for the graph.
     Sent,
     /// The event was kept out of the graph on purpose (a UMP Stream message,
     /// a JR message, or any event of a paused port): nothing was lost.
     Diverted,
-    /// The device's inlet had no room: the event is dropped, and counted as
-    /// lost.
-    Full,
 }
 
 /// The UMP Stream messages of one port, drained as they are read
@@ -306,7 +311,6 @@ impl Iterator for StreamDrain {
 pub(crate) struct HardwareMidiInput {
     name: String,
     active: Arc<AtomicBool>,
-    counts: InletCounts,
     /// The reading end of the stream ring; control side, one reader at a time.
     stream: Mutex<RingReader<Ump>>,
     hear_sysex: Arc<AtomicBool>,
@@ -326,7 +330,6 @@ impl HardwareMidiInput {
             Self {
                 name: name.into(),
                 active: Arc::clone(&active),
-                counts: input.counts(),
                 stream: Mutex::new(stream_out),
                 hear_sysex: Arc::clone(&hear_sysex),
                 timing: Arc::clone(&timing),
@@ -341,11 +344,6 @@ impl HardwareMidiInput {
                 jr: JrInput::new(jr_counts),
             },
         )
-    }
-
-    /// What the inlet has lost.
-    pub(crate) fn losses(&self) -> Losses {
-        self.counts.losses()
     }
 
     /// How many Stream messages the ring had no room for.

@@ -54,7 +54,7 @@ fn read(handle: &PluginHandle, i: usize) -> Option<f32> {
 }
 
 /// A rolling graph with the plugin fed by `lanes`.
-fn rig(client: tutti_plugin::handles::PluginClient, lanes: Vec<ControlLaneNode>) -> Rig {
+fn rig(client: tutti_plugin::PluginClient, lanes: Vec<ControlLaneNode>) -> Rig {
     let prepare = Prepare::new(SampleRate::of(SAMPLE_RATE), MaxBlock::of(Samples(BLOCK)));
     let mut rig = Rig::prepared_with(
         client.bind(

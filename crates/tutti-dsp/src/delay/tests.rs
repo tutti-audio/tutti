@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn test_delay_line_basic() {
-    let mut dl = DelayLine::new(10);
+    let mut dl = DelayLine::new(Samples(10));
     dl.push_sample(1.0);
     dl.push_sample(0.0);
     dl.push_sample(0.0);
@@ -18,7 +18,7 @@ fn test_delay_line_basic() {
 fn an_integer_read_delays_by_exactly_that_many_frames() {
     const MAX: usize = 6;
     for at in 0..3 * (MAX + 1) {
-        let mut dl = DelayLine::new(MAX);
+        let mut dl = DelayLine::new(Samples(MAX));
         for frame in 0..at + MAX + 2 {
             dl.push_sample(if frame == at { 1.0 } else { 0.0 });
             for d in 0..=MAX {
@@ -32,7 +32,7 @@ fn an_integer_read_delays_by_exactly_that_many_frames() {
 
 #[test]
 fn test_delay_line_linear_interpolation() {
-    let mut dl = DelayLine::new(10);
+    let mut dl = DelayLine::new(Samples(10));
     dl.push_sample(0.0);
     dl.push_sample(1.0);
     dl.push_sample(0.0);
@@ -43,7 +43,7 @@ fn test_delay_line_linear_interpolation() {
 
 #[test]
 fn test_delay_line_cubic_interpolation() {
-    let mut dl = DelayLine::new(10);
+    let mut dl = DelayLine::new(Samples(10));
     for i in 0..5 {
         dl.push_sample(i as f32);
     }
@@ -57,7 +57,7 @@ fn test_delay_line_cubic_interpolation() {
 
 #[test]
 fn test_delay_line_reset() {
-    let mut dl = DelayLine::new(10);
+    let mut dl = DelayLine::new(Samples(10));
     dl.push_sample(1.0);
     dl.push_sample(1.0);
     dl.reset();
@@ -71,7 +71,7 @@ fn test_delay_line_reset() {
 #[test]
 fn a_whole_read_returns_each_sample_len_pushes_later() {
     const LEN: usize = 4;
-    let mut line = DelayLine::new(LEN);
+    let mut line = DelayLine::new(Samples(LEN));
     for round in 0..2 {
         for k in 0..5 * LEN {
             line.push_sample((k + 1) as f32);
@@ -87,7 +87,7 @@ fn a_whole_read_returns_each_sample_len_pushes_later() {
 #[test]
 fn the_two_readers_agree_on_a_whole_delay() {
     const MAX: usize = 7;
-    let mut line = DelayLine::new(MAX);
+    let mut line = DelayLine::new(Samples(MAX));
     for k in 0..3 * MAX {
         line.push_sample(((k * 37) % 11) as f32 - 5.0);
         for d in 0..=MAX {

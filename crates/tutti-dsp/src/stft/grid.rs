@@ -41,20 +41,6 @@ macro_rules! grid_newtype {
             }
         }
 
-        impl From<usize> for $name {
-            #[inline]
-            fn from(v: usize) -> Self {
-                Self(v)
-            }
-        }
-
-        impl From<$name> for usize {
-            #[inline]
-            fn from(v: $name) -> usize {
-                v.0
-            }
-        }
-
         impl core::fmt::Display for $name {
             #[inline]
             fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {

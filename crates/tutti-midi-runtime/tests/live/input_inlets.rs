@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use tutti_fixtures::midi;
 use tutti_fixtures::{BlockClock, EventRig};
 use tutti_graph::NodeKey;
-use tutti_midi_runtime::{ClockWriters, DeviceInput, InputInlets};
+use tutti_midi_runtime::{DeviceInput, InputInlets, InputWriters};
 use tutti_rt::{Counter, Gauge};
 use tutti_types::{Frame, Resyncs, SampleRate, Seconds};
 use tutti_ump::{MidiChannel, Ump};
@@ -76,7 +76,7 @@ fn an_arrival_sounds_on_the_frame_the_clock_puts_it_on_plus_the_lead() {
         inlets.set_clock(Some(clock.reader()));
         clock.write(t0, Frame::new(1000), SampleRate::of(RATE));
         for (n, d) in [(60u8, 100u64), (61, 250), (62, 700)] {
-            assert!(rig.input.push(note(n), after(t0, d)));
+            assert!(rig.input.push(note(n), after(t0, d)).is_ok());
         }
         rig.run(6);
         let frames: Vec<u64> = rig.take().iter().map(|e| e.0).collect();
@@ -99,9 +99,9 @@ fn a_later_reading_places_later_arrivals() {
     let mut clock = BlockClock::new();
     inlets.set_clock(Some(clock.reader()));
     clock.write(t0, Frame::new(1000), SampleRate::of(RATE));
-    assert!(rig.input.push(note(60), after(t0, 100)));
+    assert!(rig.input.push(note(60), after(t0, 100)).is_ok());
     clock.write(after(t0, 480), Frame::new(1480), SampleRate::of(RATE));
-    assert!(rig.input.push(note(61), after(t0, 580)));
+    assert!(rig.input.push(note(61), after(t0, 580)).is_ok());
     rig.run(6);
     let frames: Vec<u64> = rig.take().iter().map(|e| e.0).collect();
     assert_eq!(frames, vec![1100, 1580]);
@@ -113,7 +113,7 @@ fn a_later_reading_places_later_arrivals() {
 fn before_a_reading_an_event_is_for_the_next_block() {
     let inlets = inlets(Duration::from_millis(5));
     let mut rig = Rig::new(&inlets);
-    assert!(rig.input.push(note(60), Instant::now()));
+    assert!(rig.input.push(note(60), Instant::now()).is_ok());
     rig.run(2);
     assert_eq!(rig.take(), vec![(0, note(60))]);
 }
@@ -130,7 +130,7 @@ fn an_arrival_before_frame_zero_is_for_the_next_block() {
     clock.write(t0, Frame::new(100), SampleRate::of(RATE));
     // 5,000 frames before the reading: frame -4,900.
     let early = t0 - Duration::from_secs_f64(5000.0 / RATE);
-    assert!(rig.input.push(note(60), early));
+    assert!(rig.input.push(note(60), early).is_ok());
     rig.run(2);
     assert_eq!(rig.take(), vec![(0, note(60))]);
 }
@@ -147,14 +147,14 @@ fn a_restarted_clock_places_arrivals_from_the_new_anchor() {
     let mut first = BlockClock::new();
     inlets.set_clock(Some(first.reader()));
     first.write(t0, Frame::new(1000), SampleRate::of(RATE));
-    assert!(rig.input.push(note(60), after(t0, 480)));
+    assert!(rig.input.push(note(60), after(t0, 480)).is_ok());
 
     // The engine restarts a second later; its frames begin at 0 again.
     let t1 = t0 + Duration::from_secs(1);
     let mut second = BlockClock::new();
     inlets.set_clock(Some(second.reader()));
     second.write(t1, Frame::new(100), SampleRate::of(RATE));
-    assert!(rig.input.push(note(61), after(t1, 480)));
+    assert!(rig.input.push(note(61), after(t1, 480)).is_ok());
     rig.run(6);
     let frames: Vec<u64> = rig.take().iter().map(|e| e.0).collect();
     assert_eq!(frames, vec![580, 1480]);
@@ -172,7 +172,11 @@ fn a_reading_at_another_rate_is_rescaled_by_the_inlet() {
     let mut clock = BlockClock::new();
     inlets.set_clock(Some(clock.reader()));
     clock.write(t0, Frame::new(2000), SampleRate::SR_96K);
-    assert!(rig.input.push(note(60), t0 + Duration::from_millis(10)));
+    assert!(
+        rig.input
+            .push(note(60), t0 + Duration::from_millis(10))
+            .is_ok()
+    );
     rig.run(6);
     // 2,000 frames at 96 kHz is 1,000 at 48 kHz; 10 ms is 480 more.
     assert_eq!(rig.take(), vec![(1480, note(60))]);
@@ -204,8 +208,8 @@ fn two_inputs_share_the_clock_and_keep_their_own_events() {
     let mut clock = BlockClock::new();
     inlets.set_clock(Some(clock.reader()));
     clock.write(t0, Frame::new(1000), SampleRate::of(RATE));
-    assert!(a.input.push(note(60), after(t0, 100)));
-    assert!(b.input.push(note(61), after(t0, 300)));
+    assert!(a.input.push(note(60), after(t0, 100)).is_ok());
+    assert!(b.input.push(note(61), after(t0, 300)).is_ok());
     a.run(6);
     b.run(6);
     assert_eq!(a.take(), vec![(1100, note(60))]);
@@ -220,10 +224,49 @@ fn a_full_inlet_refuses_and_counts() {
     let (mut device, _node) = inlets.open();
     let counts = device.counts();
     let pushed: Vec<bool> = (0..4)
-        .map(|i| device.push(note(60 + i), Instant::now()))
+        .map(|i| device.push(note(60 + i), Instant::now()).is_ok())
         .collect();
     assert_eq!(pushed, vec![true, true, false, false]);
     assert_eq!(counts.losses().lost, 2);
+}
+
+/// **An input's lost count is its own cell and carries across a reopened
+/// input**: a push the ring refuses raises it, the count survives the device
+/// dropping, and the next connection on the same cell keeps adding.
+#[test]
+fn the_lost_count_carries_across_a_reopened_input() {
+    let inlets = InputInlets::new(tutti_graph::EventCapacity::of(2), Duration::ZERO);
+    let (writers, readers) = InputWriters::new();
+    let (mut device, _node) = inlets.open_with(writers.split().0);
+    assert_eq!(readers.lost.get(), 0);
+    for i in 0..4 {
+        let _ = device.push(note(60 + i), Instant::now());
+    }
+    assert_eq!(readers.lost.get(), 2, "the two pushes the ring refused");
+    drop(device);
+    assert_eq!(readers.lost.get(), 2, "the count outlives the input");
+    let again = InputWriters::reopen(&readers).expect("the input dropped");
+    let (mut device, _node) = inlets.open_with(again.split().0);
+    for i in 0..4 {
+        let _ = device.push(note(60 + i), Instant::now());
+    }
+    assert_eq!(readers.lost.get(), 4, "the reopened input keeps counting");
+}
+
+/// **A push into an inlet whose node is gone is not a loss**: it is refused as
+/// `Disconnected` and the input's `lost` cell stays at zero, where a full ring
+/// raises it.
+#[test]
+fn a_push_after_the_node_is_gone_is_disconnected_and_not_lost() {
+    let inlets = inlets(Duration::ZERO);
+    let (writers, readers) = InputWriters::new();
+    let (mut device, node) = inlets.open_with(writers.split().0);
+    drop(node);
+    assert_eq!(
+        device.push(note(60), Instant::now()),
+        Err(tutti_rt::PushError::Disconnected)
+    );
+    assert_eq!(readers.lost.get(), 0);
 }
 
 /// A device whose clock the test writes, built on the reading "frame 1000 at
@@ -239,8 +282,9 @@ struct Timed {
 impl Timed {
     fn new() -> Self {
         let inlets = inlets(Duration::ZERO);
-        let (writers, timing, resyncs) = ClockWriters::new();
-        let (device, _node) = inlets.open_with(writers);
+        let (writers, readers) = InputWriters::new();
+        let (timing, resyncs) = (readers.timing, readers.resyncs);
+        let (device, _node) = inlets.open_with(writers.split().0);
         let clock = BlockClock::new();
         inlets.set_clock(Some(clock.reader()));
         let mut timed = Self {
@@ -370,8 +414,9 @@ fn a_rate_change_counts_a_resync_only_when_its_reading_is_far_off() {
 #[test]
 fn the_cells_carry_across_a_reopened_input() {
     let inlets = inlets(Duration::ZERO);
-    let (writers, timing, resyncs) = ClockWriters::new();
-    let (mut device, _node) = inlets.open_with(writers);
+    let (writers, readers) = InputWriters::new();
+    let (timing, resyncs) = (readers.timing.clone(), readers.resyncs.clone());
+    let (mut device, _node) = inlets.open_with(writers.split().0);
     let mut clock = BlockClock::new();
     inlets.set_clock(Some(clock.reader()));
     let t0 = Instant::now() + Duration::from_secs(3600);
@@ -385,16 +430,16 @@ fn the_cells_carry_across_a_reopened_input() {
     let _ = device.push(note(60), t0);
     assert_eq!(resyncs.get(), Resyncs::new(1));
     assert!(
-        ClockWriters::reopen(&timing, &resyncs).is_none(),
+        InputWriters::reopen(&readers).is_none(),
         "the input holds them"
     );
     drop(device);
     assert!(timing.is_closed() && resyncs.is_closed());
     let held = timing.get();
-    let again = ClockWriters::reopen(&timing, &resyncs).expect("the input dropped");
+    let again = InputWriters::reopen(&readers).expect("the input dropped");
     assert!(!timing.is_closed() && !resyncs.is_closed());
     assert_eq!(timing.get(), held);
-    let (mut device, _node) = inlets.open_with(again);
+    let (mut device, _node) = inlets.open_with(again.split().0);
     // The new map's first reading is not a resync; a far one after it is the second.
     let t1 = t0 + Duration::from_secs(10);
     clock.write(t1, Frame::new(5000), SampleRate::of(RATE));

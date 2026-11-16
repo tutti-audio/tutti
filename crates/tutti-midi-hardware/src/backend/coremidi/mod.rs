@@ -358,7 +358,7 @@ impl MidiEndpoints for CoreMidiEndpoints {
                         // One CoreMIDI packet is a packed word stream of several
                         // concatenated UMP messages.
                         for event in split_stream(packet.data()) {
-                            if producer.push(event, arrived) == crate::Pushed::Full {
+                            if producer.push(event, arrived) == Err(tutti_rt::PushError::Full) {
                                 tracing::debug!("MIDI input ring full, dropping event");
                             }
                         }

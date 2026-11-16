@@ -72,8 +72,8 @@
 //!   per parameter, landed in a later [`Session::update`]. Until then the
 //!   mirror is not ready, and a lane on the plugin waits for it.
 //! - **Snapshots.** A healthy plugin's state is captured every
-//!   [`SNAPSHOT_INTERVAL`] of `now` (`SessionBuilder::snapshot_interval`),
-//!   as a job on the same spawner (a blocking round trip), landed in a later
+//!   `snapshot_interval` (8 s by default, set on the `SessionBuilder`) of
+//!   `now`, as a job on the same spawner (a blocking round trip), landed in a later
 //!   update. One is in flight per plugin at most: the landing holds the
 //!   plugin's snapshot token until it lands, whether the job ran, panicked or
 //!   was dropped.
@@ -159,10 +159,10 @@ use crate::{
     WorkerError,
 };
 
-/// How often a healthy plugin's state is captured, by default: 8 s (design 015 §4.4).
+/// How often a healthy plugin's state is captured, by default: 8 s.
 /// [`SessionBuilder::snapshot_interval`](crate::SessionBuilder::snapshot_interval)
 /// sets another.
-pub const SNAPSHOT_INTERVAL: Duration = Duration::from_secs(8);
+pub(crate) const SNAPSHOT_INTERVAL: Duration = Duration::from_secs(8);
 
 /// A plugin load: what the pool's plugin entry runs, and what a recovery reload
 /// runs again. [`run`](Self::run) blocks (a `plugin-server` launch, half a
@@ -751,6 +751,9 @@ pub(crate) struct HostedPlugin {
     /// it still declare the parameter. Ended when the record retires or the
     /// plugin is replaced.
     pub(crate) gate: Gate,
+    /// The lane knobs of the parameters a modulation lane drives: where a set
+    /// of one goes.
+    pub(crate) driven: crate::plugin_params::Driven,
     /// The read that fills the mirror (a crossfade rebuilt it, the load's read
     /// was not answered, or the plugin announced a rescan), until
     /// `Phase::Plugins` hands it to the host as a job.
@@ -880,7 +883,7 @@ struct Reload {
 }
 
 struct Ready {
-    client: Box<tutti_plugin::handles::PluginClient>,
+    client: Box<tutti_plugin::PluginClient>,
     restore: StateRestore,
     mirror: Option<Mirror>,
 }
@@ -935,6 +938,7 @@ impl HostedPlugin {
             hearing,
             mirror,
             gate: Gate::default(),
+            driven: crate::plugin_params::Driven::default(),
             param_read: Some(read),
             mirror_token: Arc::new(()),
             silenced: false,
@@ -1467,6 +1471,7 @@ impl<C: crate::Clock> Session<C> {
         match values {
             Ok(values) => {
                 hosted.mirror.land(values);
+                hosted.driven.report_knobs(&hosted.mirror);
                 hosted.gate.declare(&hosted.mirror);
                 true
             }
@@ -2117,11 +2122,11 @@ impl<C: crate::Clock> Session<C> {
                     },
                 );
             }
-            let state = &self.mods.state;
+            // A value the plugin reported or the host set goes into the knob
+            // of the lane driving that parameter, if one does.
+            let driven = &hosted.driven;
             hosted.mirror.drain_edits(|id, value| {
-                if let Some(target) = state.plugin_target(node, id.get()) {
-                    state.set_knob(target, value.get() as f32);
-                }
+                driven.write(id, value);
             });
 
             if let Some(tail) = declared_tail {

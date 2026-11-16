@@ -49,7 +49,7 @@
 //! over its return queue, and a job on the session's spawner reports over a
 //! channel that [`Phase::Collect`] drains. A call on the [`Graph`] only stages
 //! an edit, in the graph value the control thread holds
-//! ([`Graph::topology`], [`Graph::is_edited`]); nothing reaches the audio
+//! ([`Graph::is_edited`] says whether one waits); nothing reaches the audio
 //! thread until an update's commit sends it.
 //!
 //! Like `tutti-graph`, every module is private: everything is
@@ -126,9 +126,9 @@ mod watch;
 
 #[cfg(feature = "export")]
 pub use bounce::{
-    AnyStem, BOUNCE_STALL_WARNING, Bounce, BounceConfigError, BounceError, BounceHandle, BounceJob,
-    BounceLatency, BounceRendered, BounceTail, Bounced, BufferMaster, BufferStem, ExportClock,
-    FileMaster, FileStem, Master, NoMaster, PrepareEdit, PreparedGraph, Range, Stem, StemGain,
+    AnyStem, Bounce, BounceConfigError, BounceError, BounceHandle, BounceJob, BounceLatency,
+    BounceRendered, BounceTail, Bounced, BufferMaster, BufferStem, ExportClock, FileMaster,
+    FileStem, Master, NoMaster, PrepareEdit, PreparedGraph, Range, Stem, StemGain,
 };
 pub use builder::{BlockConfig, SessionBuilder, Workers, root_width};
 #[cfg(feature = "device")]
@@ -152,7 +152,6 @@ pub use error::{MidiError, RouteDeclarer};
 #[cfg(feature = "soundfont")]
 pub use general_midi::GeneralMidi;
 pub use graph::ModKeys;
-pub use graph::RenderWorkerStart;
 #[cfg(feature = "testing")]
 pub use graph::{AudioSide, Testing};
 pub use graph::{
@@ -174,8 +173,7 @@ pub use key::{
 pub use main_session::{EditorView, MainPlugin, MainSession, Opened};
 #[cfg(feature = "midi")]
 pub use midi::{
-    MIDI_INPUT_DROP_REPORT, Midi, MidiLoad, MidiRouteId, MidiRouteRule, NoSuchMidiRoute, Stamping,
-    TakePlacement,
+    Midi, MidiLoad, MidiRouteId, MidiRouteRule, NoSuchMidiRoute, Stamping, TakePlacement,
 };
 #[cfg(feature = "midi")]
 pub use midi_follow::{FollowClock, FollowMachineControl, FollowTempo, SendMachineControl};
@@ -191,18 +189,16 @@ pub use midi_sink::{MidiSink, MidiSinkEntry, MidiSinkInfo, SinkLoaded, SinkOptio
 pub use modulation::{
     AutomationTake, MixRef, ModRefusal, ModRouteId, ModSourceId, ModState, ModTarget, Mods,
     ModsView, NoAutomation, NoSuchModRoute, NoSuchModSource, ParamRef, Problem, Ranged, RouteError,
-    RouteInfo, RouteMut, RouteSpec, SourceInfo, SourceName, TargetName, UNRESOLVED_WARNING,
-    declare_targets,
+    RouteInfo, RouteMut, RouteSpec, SourceInfo, SourceName, TargetName, declare_targets,
 };
-pub use node::{Reclaimer, SessionNode};
+pub use node::{Reclaimer, Reclaims, SessionNode};
 pub use params::{ParamError, RangeError, TypedParamRef};
 pub use peer::{Peer, PeerError, Presence, Resource, ResourceFact, ResourceId};
 #[cfg(feature = "plugin")]
 pub use plugin::{
     AddPluginError, LoadedPlugin, Plugin, PluginCause, PluginChange, PluginDeclaration,
     PluginEntry, PluginEvent, PluginHealth, PluginInfo, PluginNode, PluginPorts, PooledPlugin,
-    PortsRefusal, RestoreState, SNAPSHOT_INTERVAL, SaveState, StateJobError, StateJobFailed,
-    StateRestore, StateView,
+    PortsRefusal, RestoreState, SaveState, StateJobError, StateJobFailed, StateRestore, StateView,
 };
 pub(crate) use pool::Pool;
 #[cfg(all(feature = "sampler", codec))]
@@ -270,4 +266,4 @@ pub use tutti_graph::{
 #[cfg(feature = "midi")]
 pub use tutti_ump::{MidiChannel, MidiGroup};
 #[cfg(feature = "device")]
-pub use watch::{Backoff, DevicePolicy, DeviceWatch, Follow, FollowEvent, LISTING_WARNING};
+pub use watch::{Backoff, DevicePolicy, DeviceWatch, Follow, FollowEvent};
