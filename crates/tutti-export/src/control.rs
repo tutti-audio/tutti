@@ -198,7 +198,7 @@ impl Weights {
     pub(crate) fn of<'a>(targets: impl IntoIterator<Item = &'a crate::Target>) -> Self {
         let normalizes = targets
             .into_iter()
-            .any(|t| matches!(t, crate::Target::File(f) if f.normalize().is_some()));
+            .any(|t| matches!(t, crate::Target::File(f) if f.normalize_setting().is_some()));
         if normalizes {
             Self::Normalized
         } else {

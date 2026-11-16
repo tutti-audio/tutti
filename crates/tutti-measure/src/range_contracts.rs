@@ -9,9 +9,9 @@ use tutti_fixtures::{RangeContract, check_range_contract};
 use tutti_types::{Cents, Db, SampleRate, Seconds};
 
 use crate::{
-    BandCount, BandsPerOctave, HarmonicDecay, Harmonics, NoteSpan, PeakDecay, PeakFloor,
-    PitchSplit, PriorSpread, SelfTransition, Sharpness, SpectrumFloor, SpectrumTime, Tightness,
-    TuningOffset, WindowedRate,
+    BandCount, BandsPerOctave, GateLevel, HarmonicDecay, Harmonics, NoteSpan, Overlap, PeakDecay,
+    PeakFloor, PitchSplit, PriorSpread, SelfTransition, Sharpness, SpectrumFloor, SpectrumTime,
+    Tightness, TuningOffset, WindowedRate,
 };
 
 macro_rules! serde_through_try_from {
@@ -47,6 +47,8 @@ serde_through_try_from! {
     SelfTransition: f32,
     Sharpness: f32,
     WindowedRate: SampleRate,
+    GateLevel: Db,
+    Overlap: usize,
 }
 
 const NAN: f32 = f32::NAN;
@@ -254,5 +256,29 @@ fn windowed_rate_keeps_the_range_checked_shape() {
         of: Some(WindowedRate::of),
         valid: &[SampleRate::SR_8K, SampleRate::SR_48K, SampleRate::SR_192K],
         invalid: &[SampleRate::of(7_999.0), SampleRate::of(192_001.0)],
+    });
+}
+
+/// Finite decibels.
+#[test]
+fn gate_level_keeps_the_range_checked_shape() {
+    check_range_contract(&RangeContract {
+        new: GateLevel::new,
+        get: GateLevel::get,
+        of: Some(GateLevel::of),
+        valid: &db(&[-300.0, -60.0, 0.0, 12.0, f32::MAX, f32::MIN]),
+        invalid: &db(&[NAN, INF, NEG_INF]),
+    });
+}
+
+/// `1..=64` pitch frames over one YIN frame.
+#[test]
+fn overlap_keeps_the_range_checked_shape() {
+    check_range_contract(&RangeContract {
+        new: Overlap::new,
+        get: Overlap::get,
+        of: Some(Overlap::of),
+        valid: &[1, 8, 64],
+        invalid: &[0, 65, usize::MAX],
     });
 }

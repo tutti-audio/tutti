@@ -14,7 +14,7 @@ use tutti_dsp::DitherSpec;
 /// quantizes nothing, so the noise would only be encoded as signal. Both are
 /// a format with no integer width.
 pub(crate) fn dither_spec(target: &FileTarget) -> Option<DitherSpec> {
-    let shape = target.dither()?;
+    let shape = target.dither_setting()?;
     let depth = target.format().int_depth()?;
     Some(DitherSpec {
         shape,

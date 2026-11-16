@@ -105,7 +105,7 @@ impl SilenceConfig {
     /// Audio kept before the first loud sample of a region and after its last,
     /// so an attack or a tail is not clipped.
     #[must_use]
-    pub fn with_padding(mut self, pre: impl Into<Seconds>, post: impl Into<Seconds>) -> Self {
+    pub fn padding(mut self, pre: impl Into<Seconds>, post: impl Into<Seconds>) -> Self {
         self.pre_pad = pre.into().to_samples(self.sample_rate);
         self.post_pad = post.into().to_samples(self.sample_rate);
         self
@@ -279,7 +279,7 @@ mod tests {
         x[5..10].fill(1.0);
         x[500..510].fill(1.0);
         x[990..995].fill(1.0);
-        let c = cfg(Db(-20.0), 10.0).with_padding(Seconds(0.02), Seconds(0.03));
+        let c = cfg(Db(-20.0), 10.0).padding(Seconds(0.02), Seconds(0.03));
         // 5..10 -> 0..40; 500..510 -> 480..540; 990..995 -> 970..1000.
         assert_eq!(
             strip_silence(&c, &x),
@@ -317,7 +317,7 @@ mod tests {
         x[200..260].fill(-0.9);
         x[400..401].fill(0.9);
         x[690..].fill(0.9);
-        let c = cfg(Db(-30.0), 40.0).with_padding(Seconds(0.005), Seconds(0.01));
+        let c = cfg(Db(-30.0), 40.0).padding(Seconds(0.005), Seconds(0.01));
         let batch = strip_silence(&c, &x);
         assert_eq!(batch.len(), 4);
         for chunk in [1usize, 7, 64, 199, 700] {
@@ -344,7 +344,7 @@ mod tests {
     #[test]
     fn finish_reads_the_scanned_config_and_an_unstepped_state_is_empty() {
         assert!(finish(&SilenceState::new()).is_empty());
-        let c = cfg(Db(-20.0), 10.0).with_padding(Seconds(0.004), Seconds(0.006));
+        let c = cfg(Db(-20.0), 10.0).padding(Seconds(0.004), Seconds(0.006));
         let mut state = SilenceState::new();
         let mut x = vec![0.0f32; 100];
         x[50..60].fill(1.0);

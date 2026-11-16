@@ -2,7 +2,7 @@
 //!
 //! Normalization needs the whole signal measured before a gain can be chosen,
 //! which is two passes, so an output that asks for it
-//! ([`FileTarget::with_normalize`](crate::FileTarget::with_normalize)) is not
+//! ([`FileTarget::normalize`](crate::FileTarget::normalize)) is not
 //! streamed to its encoder while the graph renders: [`render`](crate::render())
 //! keeps what the graph rendered for it (`spill`: memory up to a budget, then a
 //! temporary file beside the target), measures it with a [`Measurer`] at the
@@ -272,7 +272,7 @@ fn headroom_ceiling(target: &FileTarget) -> Option<Db> {
     let depth = target.format().int_depth()?;
     // One LSB in the `[-1, 1]` float domain, as the dither scales it.
     let lsb = depth.lsb().get();
-    let dither_peak = match target.dither() {
+    let dither_peak = match target.dither_setting() {
         None => 0.0,
         Some(DitherShape::Rectangular) => 0.5,
         Some(DitherShape::Triangular) => 1.0,

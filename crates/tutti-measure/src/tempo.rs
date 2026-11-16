@@ -43,7 +43,7 @@ const WINDOW: usize = 1024;
 /// The default hop, in samples.
 const HOP: usize = 512;
 
-/// The slowest and fastest tempo [`TempoConfig::with_range`] accepts. Outside
+/// The slowest and fastest tempo [`TempoRange`] accepts. Outside
 /// them a period is not a musical beat, and the lag it maps to is absurd.
 const MIN_BPM: f64 = 1.0;
 const MAX_BPM: f64 = 1000.0;
@@ -75,6 +75,56 @@ ranged! {
     /// deviation, which no unit type covers.
     Tightness(f32), TightnessError, "a tightness of zero or more",
     |raw| raw >= 0.0 && raw <= f32::MAX
+}
+
+/// The tempi searched: `min` below `max`, each within `1..=1000` BPM.
+///
+/// `TryFrom` over `min..=max` names the reason a range is refused;
+/// [`new`](Self::new) is the same check as an `Option`. Whether a whole-frame
+/// lag falls in the range at the hop in use, and whether the curve is long
+/// enough for it, is checked when the tempo is estimated.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TempoRange {
+    min: Bpm,
+    max: Bpm,
+}
+
+impl TempoRange {
+    /// The range `min..=max`, or `None` where [`TryFrom`] would refuse it.
+    #[must_use]
+    pub fn new(min: Bpm, max: Bpm) -> Option<Self> {
+        Self::try_from(min..=max).ok()
+    }
+
+    /// The slowest tempo searched.
+    #[inline]
+    #[must_use]
+    pub fn min(&self) -> Bpm {
+        self.min
+    }
+
+    /// The fastest tempo searched.
+    #[inline]
+    #[must_use]
+    pub fn max(&self) -> Bpm {
+        self.max
+    }
+}
+
+impl TryFrom<core::ops::RangeInclusive<Bpm>> for TempoRange {
+    type Error = Error;
+
+    /// # Errors
+    ///
+    /// [`Error::EmptyTempoRange`] unless `1 <= min < max <= 1000`.
+    fn try_from(range: core::ops::RangeInclusive<Bpm>) -> Result<Self> {
+        let (min, max) = range.into_inner();
+        let ok = |b: Bpm| (MIN_BPM..=MAX_BPM).contains(&b.get());
+        if !(ok(min) && ok(max) && min < max) {
+            return Err(Error::EmptyTempoRange { min, max });
+        }
+        Ok(Self { min, max })
+    }
 }
 
 /// What [`estimate_tempo`] and [`track_beats`] search and prefer.
@@ -124,28 +174,20 @@ impl TempoConfig {
         )?)
     }
 
-    /// Search tempi from `min` to `max` inclusive. The estimate never leaves
-    /// the range. A range that holds no whole-frame lag at the hop in use, or
-    /// needs more curve than the input has, is refused when the tempo is
-    /// estimated.
-    ///
-    /// # Errors
-    ///
-    /// [`Error::EmptyTempoRange`] unless `1 <= min < max <= 1000`.
-    pub fn with_range(mut self, min: Bpm, max: Bpm) -> Result<Self> {
-        let ok = |b: Bpm| (MIN_BPM..=MAX_BPM).contains(&b.get());
-        if !(ok(min) && ok(max) && min < max) {
-            return Err(Error::EmptyTempoRange { min, max });
-        }
-        self.min = min;
-        self.max = max;
-        Ok(self)
+    /// Search tempi in `range`. The estimate never leaves the range. A range
+    /// that holds no whole-frame lag at the hop in use, or needs more curve
+    /// than the input has, is refused when the tempo is estimated.
+    #[must_use]
+    pub fn range(mut self, range: TempoRange) -> Self {
+        self.min = range.min;
+        self.max = range.max;
+        self
     }
 
     /// Prefer tempi near `centre`, falling to `exp(-1/2)` of the weight one
     /// `spread` away, in octaves (a factor of two in tempo per octave).
     #[must_use]
-    pub fn with_prior(mut self, centre: Bpm, spread: PriorSpread) -> Self {
+    pub fn prior(mut self, centre: Bpm, spread: PriorSpread) -> Self {
         self.centre = centre;
         self.spread = spread;
         self
@@ -156,7 +198,7 @@ impl TempoConfig {
     /// standard deviation. Zero ignores the period and picks the strongest
     /// onsets; large values give an evenly spaced grid.
     #[must_use]
-    pub fn with_tightness(mut self, tightness: Tightness) -> Self {
+    pub fn tightness(mut self, tightness: Tightness) -> Self {
         self.tightness = tightness;
         self
     }
@@ -164,7 +206,7 @@ impl TempoConfig {
     /// How many runner-up tempi [`Tempo::alternatives`] holds, at most; capped
     /// at 16.
     #[must_use]
-    pub fn with_alternatives(mut self, count: usize) -> Self {
+    pub fn alternatives(mut self, count: usize) -> Self {
         self.alternatives = count.min(MAX_ALTERNATIVES);
         self
     }
@@ -172,7 +214,7 @@ impl TempoConfig {
     /// The slowest and fastest tempo searched.
     #[inline]
     #[must_use]
-    pub fn range(&self) -> (Bpm, Bpm) {
+    pub fn range_setting(&self) -> (Bpm, Bpm) {
         (self.min, self.max)
     }
 }
@@ -699,9 +741,7 @@ mod tests {
     /// inside the range.
     #[test]
     fn the_estimate_stays_inside_the_range() {
-        let cfg = TempoConfig::new()
-            .with_range(Bpm::of(40.0), Bpm::of(80.0))
-            .unwrap();
+        let cfg = TempoConfig::new().range(TempoRange::new(Bpm::of(40.0), Bpm::of(80.0)).unwrap());
         let x = clicks(90.0, 0.3, 24.0);
         let tempo = estimate_tempo(&cfg, geometry(), &x, &mut FftScratch::new()).unwrap();
         assert!((tempo.bpm.get() - 45.0).abs() < 1.0, "{}", tempo.bpm);
@@ -721,9 +761,7 @@ mod tests {
             curve[at as usize] = 1.0;
             at += 24.8;
         }
-        let cfg = TempoConfig::new()
-            .with_range(Bpm::of(60.0), Bpm::of(120.0))
-            .unwrap();
+        let cfg = TempoConfig::new().range(TempoRange::new(Bpm::of(60.0), Bpm::of(120.0)).unwrap());
         let tempo = estimate_tempo_from_novelty(
             &cfg,
             &curve,
@@ -768,15 +806,15 @@ mod tests {
         let weak = estimate_tempo(&TempoConfig::new(), geometry(), &train(0.1), &mut fft).unwrap();
         assert!((weak.bpm.get() - 60.0).abs() < 1.5, "{}", weak.bpm);
 
-        let centred = TempoConfig::new().with_prior(Bpm::of(60.0), PriorSpread::of(1.0));
+        let centred = TempoConfig::new().prior(Bpm::of(60.0), PriorSpread::of(1.0));
         let low = estimate_tempo(&centred, geometry(), &half, &mut fft).unwrap();
         assert!((low.bpm.get() - 60.0).abs() < 1.5, "{}", low.bpm);
 
-        let narrow = TempoConfig::new().with_prior(Bpm::of(120.0), PriorSpread::of(0.1));
+        let narrow = TempoConfig::new().prior(Bpm::of(120.0), PriorSpread::of(0.1));
         let high = estimate_tempo(&narrow, geometry(), &train(0.1), &mut fft).unwrap();
         assert!((high.bpm.get() - 120.0).abs() < 1.5, "{}", high.bpm);
 
-        let none = TempoConfig::new().with_alternatives(0);
+        let none = TempoConfig::new().alternatives(0);
         let bare = estimate_tempo(&none, geometry(), &half, &mut fft).unwrap();
         assert!(bare.alternatives.is_empty());
     }
@@ -791,7 +829,7 @@ mod tests {
         let grid_clicks = click_samples(120.0, 0.3, 20.0);
         let hop = geometry().hop().get() as f64;
         let run = |tightness: f32| {
-            let cfg = TempoConfig::new().with_tightness(Tightness::new(tightness).unwrap());
+            let cfg = TempoConfig::new().tightness(Tightness::new(tightness).unwrap());
             track_beats(&cfg, geometry(), &x, &mut FftScratch::new()).unwrap()
         };
         let tight = miss(&run(100.0), &grid_clicks);
@@ -993,7 +1031,7 @@ mod tests {
         let mut fft = FftScratch::new();
         for (min, max) in [(100.0, 100.0), (120.0, 90.0)] {
             assert!(matches!(
-                cfg.with_range(Bpm::of(min), Bpm::of(max)),
+                TempoRange::try_from(Bpm::of(min)..=Bpm::of(max)),
                 Err(Error::EmptyTempoRange { .. })
             ));
         }
@@ -1020,7 +1058,7 @@ mod tests {
             Err(Error::InsufficientInput { .. })
         ));
         // At a hop this wide no whole-frame lag falls in 100 to 101 BPM.
-        let narrow = cfg.with_range(Bpm::of(100.0), Bpm::of(101.0)).unwrap();
+        let narrow = cfg.range(TempoRange::new(Bpm::of(100.0), Bpm::of(101.0)).unwrap());
         let mut long = vec![0.0f32; 4000];
         long[3] = 1.0;
         assert!(matches!(
@@ -1134,14 +1172,14 @@ mod tests {
         for (min, max) in [(1e-300, 90.0), (0.5, 90.0), (60.0, 1e9), (60.0, 1001.0)] {
             assert!(
                 matches!(
-                    cfg.with_range(Bpm::of(min), Bpm::of(max)),
+                    TempoRange::try_from(Bpm::of(min)..=Bpm::of(max)),
                     Err(Error::EmptyTempoRange { .. })
                 ),
                 "{min}..{max}"
             );
         }
         // The slowest range allowed needs 2 * (5168 + 2) frames of curve.
-        let slow = cfg.with_range(Bpm::of(1.0), Bpm::of(200.0)).unwrap();
+        let slow = cfg.range(TempoRange::new(Bpm::of(1.0), Bpm::of(200.0)).unwrap());
         let curve: Vec<f32> = (0..2000).map(|i| (i % 43) as f32).collect();
         assert!(matches!(
             estimate_tempo_from_novelty(
@@ -1158,7 +1196,7 @@ mod tests {
     /// The alternatives are capped.
     #[test]
     fn the_alternative_count_is_capped() {
-        let cfg = TempoConfig::new().with_alternatives(usize::MAX);
+        let cfg = TempoConfig::new().alternatives(usize::MAX);
         assert_eq!(cfg.alternatives, MAX_ALTERNATIVES);
     }
 }

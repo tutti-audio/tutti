@@ -18,7 +18,7 @@
 //!
 //! The 25 states are then smoothed by a Viterbi search in the manner of Mauch
 //! (2010): an emission of `sharpness * score` per frame, a probability
-//! [`with_self_transition`](ChordConfig::with_self_transition) of staying in a state and
+//! [`self_transition`](ChordConfig::self_transition) of staying in a state and
 //! the rest shared evenly among the other 24. A short flicker costs two
 //! switches and a short chord pays for them, so the prior sets how many frames
 //! a chord must last, which depends on the hop.
@@ -159,14 +159,14 @@ impl ChordConfig {
 
     /// The probability of staying in a state from one frame to the next.
     #[must_use]
-    pub fn with_self_transition(mut self, probability: SelfTransition) -> Self {
+    pub fn self_transition(mut self, probability: SelfTransition) -> Self {
         self.self_transition = probability;
         self
     }
 
     /// How strongly a frame's similarity weighs against the transition prior.
     #[must_use]
-    pub fn with_sharpness(mut self, sharpness: Sharpness) -> Self {
+    pub fn sharpness(mut self, sharpness: Sharpness) -> Self {
         self.sharpness = sharpness;
         self
     }
@@ -514,7 +514,7 @@ mod tests {
         (second[0], second[4], second[7]) = (1.0, 0.4, 0.4);
         let sim = similarities(&second)[0];
         assert!(sim > 0.85 && sim < 0.939, "{sim}");
-        let config = cfg().with_self_transition(SelfTransition::of(0.02));
+        let config = cfg().self_transition(SelfTransition::of(0.02));
         let path = viterbi(&grid(&[triad(0, false), second]), &config);
         assert_eq!(path, [0, NO_CHORD as u8]);
     }
@@ -540,8 +540,8 @@ mod tests {
             // The F frame's margin over C is two thirds of the sharpness.
             let sharpness = ((cost + offset) * 1.5) as f32;
             let config = cfg()
-                .with_self_transition(SelfTransition::new(p).unwrap())
-                .with_sharpness(Sharpness::new(sharpness).unwrap());
+                .self_transition(SelfTransition::new(p).unwrap())
+                .sharpness(Sharpness::new(sharpness).unwrap());
             let spans = detect_chords(&grid, &config).unwrap();
             assert_eq!(spans.len(), if kept { 3 } else { 1 }, "offset {offset}");
         }
@@ -556,7 +556,7 @@ mod tests {
         let flicker = [c, c, c, c, f, c, c, c, c];
         let smoothed = run(&flicker, &cfg());
         assert_eq!(roots(&smoothed), [(PitchClass::C, ChordQuality::Major)]);
-        let raw = cfg().with_self_transition(SelfTransition::of(1.0 / 25.0));
+        let raw = cfg().self_transition(SelfTransition::of(1.0 / 25.0));
         let per_frame = run(&flicker, &raw);
         assert_eq!(
             roots(&per_frame),
@@ -577,7 +577,7 @@ mod tests {
     fn viterbi_is_the_best_path() {
         let mut rng = StdRng::seed_from_u64(11);
         for p in [0.9f32, 0.5, 0.02] {
-            let config = cfg().with_self_transition(SelfTransition::new(p).unwrap());
+            let config = cfg().self_transition(SelfTransition::new(p).unwrap());
             for _ in 0..3 {
                 let rows: Vec<[f32; CLASSES]> = (0..4)
                     .map(|_| core::array::from_fn(|_| rng.random_range(0.0..1.0)))

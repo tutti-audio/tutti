@@ -120,14 +120,14 @@ impl OnsetConfig {
 
     /// Multiplier on the adaptive threshold. Higher rejects more.
     #[must_use]
-    pub fn with_threshold(mut self, threshold: impl Into<Amplitude>) -> Self {
+    pub fn threshold(mut self, threshold: impl Into<Amplitude>) -> Self {
         self.threshold = threshold.into();
         self
     }
 
     /// Gain applied to the detection function before thresholding.
     #[must_use]
-    pub fn with_sensitivity(mut self, sensitivity: impl Into<Amplitude>) -> Self {
+    pub fn sensitivity(mut self, sensitivity: impl Into<Amplitude>) -> Self {
         self.sensitivity = sensitivity.into();
         self
     }
@@ -138,7 +138,7 @@ impl OnsetConfig {
     /// milliseconds on one setter and seconds on another of the same type is
     /// how a gap ends up a thousand times off.
     #[must_use]
-    pub fn with_min_gap(mut self, gap: impl Into<Seconds>) -> Self {
+    pub fn min_gap(mut self, gap: impl Into<Seconds>) -> Self {
         let gap: Seconds = gap.into();
         self.min_gap = gap.to_samples(self.geometry.sample_rate());
         self
@@ -450,7 +450,7 @@ mod tests {
         let samples = signal(0.5, &[0.2]);
         let run = |gain: f32| {
             let cfg = OnsetConfig::new(geometry(), DetectionFunction::Energy)
-                .with_sensitivity(Amplitude(gain));
+                .sensitivity(Amplitude(gain));
             let mut state = OnsetState::new();
             let window = cfg.geometry().window().get();
             let mut fft = FftScratch::new();
@@ -504,8 +504,8 @@ mod tests {
     #[test]
     fn batch_and_streaming_agree() {
         let cfg = OnsetConfig::new(geometry(), DetectionFunction::SpectralFlux)
-            .with_threshold(Amplitude(0.2))
-            .with_sensitivity(Amplitude(2.0));
+            .threshold(Amplitude(0.2))
+            .sensitivity(Amplitude(2.0));
         let samples = signal(1.0, &[0.1, 0.3, 0.5, 0.7]);
         let mut fft = FftScratch::new();
 
@@ -685,8 +685,8 @@ mod tests {
             DetectionFunction::ComplexDomain,
         ] {
             let cfg = OnsetConfig::new(geometry(), function)
-                .with_threshold(Amplitude(0.2))
-                .with_sensitivity(Amplitude(2.0));
+                .threshold(Amplitude(0.2))
+                .sensitivity(Amplitude(2.0));
             let onsets = detect_onsets(&cfg, &samples, &mut fft).unwrap();
 
             assert_eq!(onsets.len(), truth.len(), "{function:?}: wrong count");
@@ -710,8 +710,8 @@ mod tests {
     #[test]
     fn energy_misses_short_decaying_spikes() {
         let cfg = OnsetConfig::new(geometry(), DetectionFunction::Energy)
-            .with_threshold(Amplitude(0.2))
-            .with_sensitivity(Amplitude(2.0));
+            .threshold(Amplitude(0.2))
+            .sensitivity(Amplitude(2.0));
         let samples = signal(1.0, &[0.1, 0.3, 0.5, 0.7]);
         let mut fft = FftScratch::new();
 
@@ -720,24 +720,24 @@ mod tests {
 
     #[test]
     fn the_gap_is_expressed_in_seconds() {
-        let cfg = OnsetConfig::new(geometry(), DetectionFunction::SpectralFlux)
-            .with_min_gap(Seconds(0.05));
+        let cfg =
+            OnsetConfig::new(geometry(), DetectionFunction::SpectralFlux).min_gap(Seconds(0.05));
         assert_eq!(cfg.min_gap, Samples(2205));
 
-        let wide = cfg.with_min_gap(Seconds(0.5));
+        let wide = cfg.min_gap(Seconds(0.5));
         assert_eq!(wide.min_gap, Samples(22050));
     }
 
     #[test]
     fn a_wide_gap_suppresses_close_onsets() {
         let cfg = OnsetConfig::new(geometry(), DetectionFunction::SpectralFlux)
-            .with_threshold(Amplitude(0.2))
-            .with_sensitivity(Amplitude(2.0));
+            .threshold(Amplitude(0.2))
+            .sensitivity(Amplitude(2.0));
         let samples = signal(1.0, &[0.1, 0.3, 0.5, 0.7]);
         let mut fft = FftScratch::new();
 
         let baseline = detect_onsets(&cfg, &samples, &mut fft).unwrap().len();
-        let widened = detect_onsets(&cfg.with_min_gap(Seconds(0.5)), &samples, &mut fft).unwrap();
+        let widened = detect_onsets(&cfg.min_gap(Seconds(0.5)), &samples, &mut fft).unwrap();
 
         assert!(widened.len() < baseline);
     }

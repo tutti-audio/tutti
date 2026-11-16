@@ -6,7 +6,7 @@
 use tutti_dsp::{FftScratch, FrameCount, StftGeometry};
 use tutti_fixtures::allocations;
 use tutti_measure::{
-    Banding, BandsPerOctave, PeakDecay, Smoothing, SpectrumConfig, SpectrumState, SpectrumTime,
+    Banding, BandsPerOctave, FrequencyBand, PeakDecay, Smoothing, SpectrumConfig, SpectrumTime,
     step_spectrum,
 };
 use tutti_types::{Db, Hz, SampleRate, Samples, Seconds};
@@ -19,17 +19,13 @@ fn a_spectrum_step_does_not_allocate() {
     let geometry = StftGeometry::new(SampleRate::SR_48K, Samples(1024), Samples(256)).unwrap();
     let plain = SpectrumConfig::new(geometry).unwrap();
     let banded = plain
-        .with_banding(Banding::Octave {
+        .banding(Banding::Octave {
             per_octave: BandsPerOctave::of(3),
-            min: Hz(400.0),
-            max: Hz(20_000.0),
+            band: FrequencyBand::new(Hz(400.0), Hz(20_000.0)).unwrap(),
         })
-        .unwrap()
-        .with_smoothing(Smoothing::Average(SpectrumTime::of(Seconds(0.2))))
-        .with_peak_hold(SpectrumTime::of(Seconds(0.5)), PeakDecay::of(Db(20.0)))
-        .unwrap()
-        .with_spectrogram(FrameCount(7))
-        .unwrap();
+        .smoothing(Smoothing::Average(SpectrumTime::of(Seconds(0.2))))
+        .peak_hold(SpectrumTime::of(Seconds(0.5)), PeakDecay::of(Db(20.0)))
+        .spectrogram(FrameCount(7));
     let signal: Vec<f32> = (0..48_000)
         .map(|i| 0.4 * (std::f32::consts::TAU * 1234.5 * i as f32 / 48_000.0).sin())
         .collect();
@@ -37,7 +33,7 @@ fn a_spectrum_step_does_not_allocate() {
     for cfg in [plain, banded] {
         let mut fft = FftScratch::new();
         let mut state = None;
-        let built = allocations(|| state = Some(SpectrumState::new(&cfg, &mut fft)));
+        let built = allocations(|| state = Some(cfg.state(&mut fft).unwrap()));
         assert!(built > 0, "construction builds the buffers");
         let mut state = state.unwrap();
 

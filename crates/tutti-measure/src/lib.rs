@@ -55,8 +55,9 @@
 //!
 //! ## Configs, and carries where they are needed
 //!
-//! Every algorithm takes a **config**: immutable, validated once, so an invalid
-//! combination fails at construction rather than silently producing nothing.
+//! Every algorithm takes a **config**: a value of chained options, so an invalid
+//! combination is refused with a named error rather than silently producing
+//! nothing.
 //!
 //! Six of them additionally need a **carry** between frames — onset detection
 //! diffs against the previous spectrum, waveform blocking holds a partial block,
@@ -175,20 +176,21 @@
 //! let reading = correlate(planes);
 //! ```
 //!
-//! ## Constraint: an invalid combination is refused at construction, never mid-measurement
+//! ## Constraint: a bad setting is unwritable, and a bad combination is refused by the call that takes it
 //!
-//! The config constructors are where `tutti_measure::Error` comes from — a hop that exceeds or does
-//! not COLA-divide its window, an inverted or above-Nyquist frequency range, a
-//! non-positive sample rate. Refusing there is the point: a detector that *accepted*
-//! an inverted range would report "unvoiced" forever instead, which is a silent
-//! wrong answer rather than an error.
-//!
-//! A setting with one range of its own is a range-checked type (`Harmonics`,
-//! `Tightness`, `SpectrumFloor`, `NoteSpan`, ...): its `new` refuses a value
-//! outside the range, so a config holds none, and its `with_*` setter cannot
-//! fail. The constructors that still return `Error` refuse only what spans
-//! fields or the input: a hop against its window, a band against Nyquist, a
-//! tempo against the curve's length.
+//! A config is `Config::new(required..)` and then chained options (`self` in,
+//! a bare name, `Self` out). An option cannot fail: a setting with one range of
+//! its own is a range-checked type (`Harmonics`, `Tightness`, `SpectrumFloor`,
+//! `NoteSpan`, `GateLevel`, `Overlap`, ...) whose `new` refuses a value outside
+//! the range, and a setting that spans two values is one type (`FrequencyBand`,
+//! `PassBand`, `TempoRange`: a low below a high). What depends on the
+//! geometry or the input is checked by the call that takes the config: a band
+//! against Nyquist, a banding against the window, a tempo against the curve's
+//! length. That call answers with a named [`Error`], where a detector that
+//! *accepted* an inverted range would report "unvoiced" forever instead, which
+//! is a silent wrong answer rather than an error. A constructor returns `Error`
+//! only where its arguments are valid together (a geometry for a spectrum, a
+//! topology that has placement for a loudness meter).
 //!
 //! The measurement entry points are correspondingly thin on failure. `correlate` and
 //! `summarize` are infallible — the pairing and layout checks already happened, in
@@ -292,13 +294,13 @@ mod vectorscope;
 mod xcorr;
 mod yin;
 
-pub use align::{AlignConfig, Alignment, align};
+pub use align::{AlignConfig, Alignment, PassBand, align};
 pub use chord::{
     ChordConfig, ChordQuality, ChordSpan, SelfTransition, SelfTransitionError, Sharpness,
     SharpnessError, detect_chords,
 };
 pub use chroma::{
-    Chroma, ChromaConfig, ChromaState, HarmonicDecay, HarmonicDecayError, Harmonics,
+    Chroma, ChromaConfig, ChromaState, FrequencyBand, HarmonicDecay, HarmonicDecayError, Harmonics,
     HarmonicsError, PeakFloor, PeakFloorError, Tuning, TuningOffset, TuningOffsetError, chroma,
     step_chroma,
 };
@@ -317,8 +319,9 @@ pub use loudness::{
 // `finish_loudness` above: three modules each have a `finish`, and the bare name
 // says nothing about which accumulator it drains.
 pub use notes::{
-    NoteConfig, NoteEvent, NoteSpan, NoteSpanError, PitchSplit, PitchSplitError, VelocityRange,
-    frame_levels, notes_from_track, transcribe,
+    GateLevel, GateLevelError, NoteConfig, NoteEvent, NoteSpan, NoteSpanError, Overlap,
+    OverlapError, PitchSplit, PitchSplitError, VelocityRange, frame_levels, notes_from_track,
+    transcribe,
 };
 pub use onset::{
     DetectionFunction, Onset, OnsetConfig, OnsetState, complex_domain_deviation, detect_onsets,
@@ -341,8 +344,8 @@ pub use stereo::{
     Ballistics, BallisticsState, StereoLevels, StereoReading, correlate, step_ballistics,
 };
 pub use tempo::{
-    BeatGrid, PriorSpread, PriorSpreadError, Tempo, TempoCandidate, TempoConfig, Tightness,
-    TightnessError, estimate_tempo, estimate_tempo_from_novelty, track_beats,
+    BeatGrid, PriorSpread, PriorSpreadError, Tempo, TempoCandidate, TempoConfig, TempoRange,
+    Tightness, TightnessError, estimate_tempo, estimate_tempo_from_novelty, track_beats,
     track_beats_from_novelty,
 };
 pub use transform::{

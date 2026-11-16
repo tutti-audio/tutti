@@ -137,14 +137,14 @@ impl FileTarget {
     /// topology, and without one it has the engine's order for the width
     /// ([`Written::placement`] reports which).
     #[must_use]
-    pub fn with_topology(mut self, topology: ChannelTopology) -> Self {
+    pub fn topology(mut self, topology: ChannelTopology) -> Self {
         self.width = Width::Placed(topology);
         self
     }
 
     /// Writes at another rate than the render's.
     #[must_use]
-    pub fn with_resample(mut self, resample: Option<Resample>) -> Self {
+    pub fn resample(mut self, resample: Option<Resample>) -> Self {
         self.resample = resample;
         self
     }
@@ -152,7 +152,7 @@ impl FileTarget {
     /// The noise added when an integer width is quantized; `None` adds none.
     /// A format with no integer width (`Pcm::Float32`, Ogg Vorbis) ignores it.
     #[must_use]
-    pub fn with_dither(mut self, dither: Option<DitherShape>) -> Self {
+    pub fn dither(mut self, dither: Option<DitherShape>) -> Self {
         self.dither = dither;
         self
     }
@@ -161,14 +161,14 @@ impl FileTarget {
     ///
     /// [`Normalize::Lufs`] weights loudness by where each channel's speaker
     /// stands, so it needs a placement: the topology stated by
-    /// [`with_topology`](Self::with_topology), or, for a file that states none,
+    /// [`topology`](Self::topology), or, for a file that states none,
     /// [`ChannelTopology::assumed`] for its width, which
     /// [`Written::placement`] reports as `Assumed`. A width with no assumed
     /// placement (3, 5, 7 or 9 channels, say) is refused when the render
     /// starts ([`TargetError::UnplacedLoudness`]), before any frame is
     /// rendered.
     #[must_use]
-    pub fn with_normalize(mut self, normalize: Option<NormalizeSpec>) -> Self {
+    pub fn normalize(mut self, normalize: Option<NormalizeSpec>) -> Self {
         self.normalize = normalize;
         self
     }
@@ -191,7 +191,7 @@ impl FileTarget {
         self.width.layout()
     }
 
-    /// Whether the file's speakers are stated ([`with_topology`](Self::with_topology))
+    /// Whether the file's speakers are stated ([`topology`](Self::topology))
     /// or assumed from its width ([`ChannelTopology::assumed`]).
     #[must_use]
     pub fn placement(&self) -> tutti_types::Placement {
@@ -213,25 +213,25 @@ impl FileTarget {
 
     /// The speakers the file's channels feed, if stated.
     #[must_use]
-    pub fn topology(&self) -> Option<&ChannelTopology> {
+    pub fn topology_setting(&self) -> Option<&ChannelTopology> {
         self.width.topology()
     }
 
     /// The rate conversion on the way out, if any.
     #[must_use]
-    pub fn resample(&self) -> Option<Resample> {
+    pub fn resample_setting(&self) -> Option<Resample> {
         self.resample
     }
 
     /// The dither, if any.
     #[must_use]
-    pub fn dither(&self) -> Option<DitherShape> {
+    pub fn dither_setting(&self) -> Option<DitherShape> {
         self.dither
     }
 
     /// The normalize, if any.
     #[must_use]
-    pub fn normalize(&self) -> Option<NormalizeSpec> {
+    pub fn normalize_setting(&self) -> Option<NormalizeSpec> {
         self.normalize
     }
 }
@@ -256,7 +256,7 @@ impl BufferTarget {
     /// Which speakers the planes are, for the fold onto them. It replaces the
     /// width [`new`](Self::new) was given: there is one plane per speaker.
     #[must_use]
-    pub fn with_topology(mut self, topology: ChannelTopology) -> Self {
+    pub fn topology(mut self, topology: ChannelTopology) -> Self {
         self.width = Width::Placed(topology);
         self
     }
@@ -269,7 +269,7 @@ impl BufferTarget {
 
     /// The speakers the planes are, if stated.
     #[must_use]
-    pub fn topology(&self) -> Option<&ChannelTopology> {
+    pub fn topology_setting(&self) -> Option<&ChannelTopology> {
         self.width.topology()
     }
 }
@@ -483,11 +483,11 @@ pub enum TargetError {
     /// is weighted by each speaker's placement, and a file with no stated
     /// topology is taken to be [`ChannelTopology::assumed`] for its width, which
     /// has a placement at 1, 2, 4, 6, 8 and 12 channels only. State a topology
-    /// ([`FileTarget::with_topology`]) that is a known bed, or normalize by
+    /// ([`FileTarget::topology`]) that is a known bed, or normalize by
     /// [`Normalize::Peak`].
     #[error(
         "a Lufs output of {channels:?} has no speaker placement to weigh loudness by: \
-         state a known topology with `with_topology`, or normalize by peak"
+         state a known topology with `topology`, or normalize by peak"
     )]
     UnplacedLoudness {
         /// The output's width.

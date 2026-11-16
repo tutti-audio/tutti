@@ -2,7 +2,7 @@
 //!
 //! The harmonic pitch class profile of Gomez (2006). Each frame of a
 //! [`StftGeometry`] is windowed and transformed, the local maxima of the
-//! magnitude spectrum between [`with_band`](ChromaConfig::with_band) are located to a fraction of a bin by
+//! magnitude spectrum between [`band`](ChromaConfig::band) are located to a fraction of a bin by
 //! parabolic interpolation of the log magnitude, and each peak's energy (its
 //! squared amplitude) is added to the pitch class of its frequency and of its
 //! subharmonics `f/2 .. f/n`, each weighted by [`harmonic_decay`] to the power
@@ -17,7 +17,7 @@
 //! in-band partial is under -90 dBFS holds no pitch and reads all zero,
 //! never NaN; the floor is absolute because a relative one would call the
 //! rounding noise of a silent buffer a signal. Within a frame, a peak under
-//! [`with_peak_floor`](ChromaConfig::with_peak_floor) of the frame's strongest is
+//! [`peak_floor`](ChromaConfig::peak_floor) of the frame's strongest is
 //! ignored, which keeps window sidelobes out of the profile.
 //!
 //! # Tuning
@@ -46,7 +46,7 @@
 //! the peaks seen so far, so early frames fold with a rougher tuning than
 //! [`chroma`]'s whole-buffer one; with a fixed tuning the two agree to the bit.
 //!
-//! [`harmonic_decay`]: ChromaConfig::with_harmonic_decay
+//! [`harmonic_decay`]: ChromaConfig::harmonic_decay
 
 use tutti_types::{Cents, Db, Hz, Note, Samples, Semitones};
 
@@ -113,6 +113,55 @@ impl TuningOffset {
     pub const NONE: TuningOffset = TuningOffset(Cents(0.0));
 }
 
+/// The frequencies a peak may sit between: `min` below `max`, both finite and
+/// above zero. Whether the band suits a sample rate and a window (under
+/// Nyquist, three bins wide) is checked by [`chroma`] and [`step_chroma`], which
+/// know the geometry. `TryFrom` over `min..=max` names the reason a band is
+/// refused; [`new`](Self::new) is the same check as an `Option`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FrequencyBand {
+    min: Hz,
+    max: Hz,
+}
+
+impl FrequencyBand {
+    /// The band `min..=max`, or `None` where [`TryFrom`] would refuse it.
+    #[must_use]
+    pub fn new(min: impl Into<Hz>, max: impl Into<Hz>) -> Option<Self> {
+        Self::try_from(min.into()..=max.into()).ok()
+    }
+
+    /// The lower edge.
+    #[inline]
+    #[must_use]
+    pub fn min(&self) -> Hz {
+        self.min
+    }
+
+    /// The upper edge.
+    #[inline]
+    #[must_use]
+    pub fn max(&self) -> Hz {
+        self.max
+    }
+}
+
+impl TryFrom<core::ops::RangeInclusive<Hz>> for FrequencyBand {
+    type Error = Error;
+
+    /// # Errors
+    ///
+    /// [`Error::EmptyFrequencyRange`] when a bound is not finite and positive,
+    /// or `min` is not below `max`.
+    fn try_from(range: core::ops::RangeInclusive<Hz>) -> Result<Self> {
+        let (min, max) = range.into_inner();
+        if !(min.get().is_finite() && max.get().is_finite() && min.get() > 0.0 && min < max) {
+            return Err(Error::EmptyFrequencyRange { min, max });
+        }
+        Ok(Self { min, max })
+    }
+}
+
 /// How the tuning a frame is folded with is found.
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
@@ -172,47 +221,45 @@ impl ChromaConfig {
             peak_floor: PeakFloor::of(Db(-40.0)),
             tuning: Tuning::Estimate,
         };
-        config.band()?;
+        config.band_bins()?;
         Ok(config)
     }
 
-    /// Folds only peaks from `min_freq` to `max_freq`.
+    /// Folds only peaks inside `band`.
     ///
-    /// # Errors
-    ///
-    /// [`Error::EmptyFrequencyRange`] when a bound is not finite and positive,
-    /// `min_freq` is not below `max_freq`, or fewer than three bins fall in it;
-    /// [`Error::AboveNyquist`] when `max_freq` exceeds half the sample rate.
-    pub fn with_band(mut self, min_freq: impl Into<Hz>, max_freq: impl Into<Hz>) -> Result<Self> {
-        (self.min_freq, self.max_freq) = (min_freq.into(), max_freq.into());
-        self.band()?;
-        Ok(self)
+    /// [`chroma`] and [`step_chroma`] refuse a band that exceeds half the
+    /// sample rate ([`Error::AboveNyquist`]) or holds fewer than three bins
+    /// ([`Error::EmptyFrequencyRange`]).
+    #[must_use]
+    pub fn band(mut self, band: FrequencyBand) -> Self {
+        (self.min_freq, self.max_freq) = (band.min, band.max);
+        self
     }
 
     /// How many partials a peak may be, itself included.
     #[must_use]
-    pub fn with_harmonics(mut self, harmonics: Harmonics) -> Self {
+    pub fn harmonics(mut self, harmonics: Harmonics) -> Self {
         self.harmonics = harmonics;
         self
     }
 
     /// The weight of a subharmonic, per order past the first.
     #[must_use]
-    pub fn with_harmonic_decay(mut self, decay: HarmonicDecay) -> Self {
+    pub fn harmonic_decay(mut self, decay: HarmonicDecay) -> Self {
         self.harmonic_decay = decay;
         self
     }
 
     /// Peaks this far under the frame's strongest are ignored.
     #[must_use]
-    pub fn with_peak_floor(mut self, floor: PeakFloor) -> Self {
+    pub fn peak_floor(mut self, floor: PeakFloor) -> Self {
         self.peak_floor = floor;
         self
     }
 
     /// Folds with a fixed or an estimated tuning.
     #[must_use]
-    pub fn with_tuning(mut self, tuning: Tuning) -> Self {
+    pub fn tuning(mut self, tuning: Tuning) -> Self {
         self.tuning = tuning;
         self
     }
@@ -227,13 +274,13 @@ impl ChromaConfig {
     /// How the tuning is found.
     #[inline]
     #[must_use]
-    pub fn tuning(&self) -> Tuning {
+    pub fn tuning_setting(&self) -> Tuning {
         self.tuning
     }
 
     /// The bins a peak may sit on, `lo..=hi`, each with both neighbours inside
     /// the half spectrum; an error unless the band is valid and holds three.
-    fn band(&self) -> Result<(usize, usize)> {
+    fn band_bins(&self) -> Result<(usize, usize)> {
         let (min, max) = (self.min_freq, self.max_freq);
         let empty = Error::EmptyFrequencyRange { min, max };
         if !(min.get().is_finite() && max.get().is_finite() && min.get() > 0.0 && min < max) {
@@ -261,8 +308,8 @@ impl ChromaConfig {
     /// Calls `visit(frequency, energy)` for each peak of `magnitudes` that
     /// counts, and returns false, calling nothing, for a frame with no pitch.
     fn peaks(&self, magnitudes: &[f32], mut visit: impl FnMut(f64, f32)) -> bool {
-        // The band was validated on construction and on every `with_band`.
-        let Ok((lo, hi)) = self.band() else {
+        // The terminals check the band before any frame is folded.
+        let Ok((lo, hi)) = self.band_bins() else {
             return false;
         };
         let top = magnitudes[lo..=hi].iter().copied().fold(0.0f32, f32::max);
@@ -496,6 +543,8 @@ impl ChromaState {
 ///
 /// # Errors
 ///
+/// [`Error::EmptyFrequencyRange`] or [`Error::AboveNyquist`] when the band does
+/// not suit the geometry (see [`ChromaConfig::band`]);
 /// [`Error::FrameLengthMismatch`] when `samples` is not one window long;
 /// [`Error::NonFiniteInput`] when it holds a NaN or infinity.
 pub fn step_chroma(
@@ -506,6 +555,7 @@ pub fn step_chroma(
 ) -> Result<[f32; CLASSES]> {
     // Checked before the state adopts the config, so a bad frame leaves the
     // carry as it was.
+    cfg.band_bins()?;
     if samples.len() != cfg.geometry.window().get() {
         return Err(Error::FrameLengthMismatch {
             got: Samples(samples.len()),
@@ -553,10 +603,13 @@ pub fn step_chroma(
 ///
 /// # Errors
 ///
+/// [`Error::EmptyFrequencyRange`] or [`Error::AboveNyquist`] when the band does
+/// not suit the geometry (see [`ChromaConfig::band`]);
 /// [`Error::NonFiniteInput`] for a NaN or infinite sample;
 /// [`Error::InsufficientInput`] for less than one window;
 /// [`Error::TooManyFrames`] for more than 524288 frames.
 pub fn chroma(samples: &[f32], cfg: &ChromaConfig, fft: &mut FftScratch) -> Result<Chroma> {
+    cfg.band_bins()?;
     if samples.iter().any(|s| !s.is_finite()) {
         return Err(Error::NonFiniteInput);
     }
@@ -716,7 +769,7 @@ mod tests {
     /// (a third of it) reads `0.09 / 1.3`.
     #[test]
     fn the_harmonic_decay_weighs_the_subharmonic_votes() {
-        let cfg = cfg().with_harmonic_decay(HarmonicDecay::of(0.3));
+        let cfg = cfg().harmonic_decay(HarmonicDecay::of(0.3));
         let c = run(&sine(392.0, 8192, 0.5), &cfg).mean();
         assert!((c[7] - 1.0).abs() < 1e-6);
         assert!((c[0] - 0.09 / 1.3).abs() < 0.01, "{c:?}");
@@ -732,10 +785,10 @@ mod tests {
             .zip(sine(330.0, 8192, 0.5 * 10f64.powf(-50.0 / 20.0)))
             .map(|(a, b)| a + b)
             .collect();
-        let only = cfg().with_harmonics(Harmonics::of(1));
-        let ignored = run(&x, &only.with_peak_floor(PeakFloor::of(Db(-40.0)))).mean();
+        let only = cfg().harmonics(Harmonics::of(1));
+        let ignored = run(&x, &only.peak_floor(PeakFloor::of(Db(-40.0)))).mean();
         assert_eq!(ignored[4], 0.0);
-        let heard = run(&x, &only.with_peak_floor(PeakFloor::of(Db(-80.0)))).mean();
+        let heard = run(&x, &only.peak_floor(PeakFloor::of(Db(-80.0)))).mean();
         assert!(heard[4] > 0.0, "{heard:?}");
     }
 
@@ -744,9 +797,9 @@ mod tests {
     #[test]
     fn the_band_selects_the_peaks_that_fold() {
         let x = sine(440.0, 8192, 0.5);
-        let inside = cfg().with_band(Hz(300.0), Hz(600.0)).unwrap();
+        let inside = cfg().band(FrequencyBand::new(Hz(300.0), Hz(600.0)).unwrap());
         assert_eq!(run(&x, &inside).mean()[9], 1.0);
-        let above = cfg().with_band(Hz(600.0), Hz(2000.0)).unwrap();
+        let above = cfg().band(FrequencyBand::new(Hz(600.0), Hz(2000.0)).unwrap());
         assert!(run(&x, &above).grid().as_slice().iter().all(|&v| v == 0.0));
     }
 
@@ -771,7 +824,7 @@ mod tests {
     fn a_fixed_tuning_moves_the_fold() {
         let x = sine(440.0 * (30.0f64 / 1200.0).exp2(), 8192, 0.5);
         let at = |cents: f32| {
-            let cfg = cfg().with_tuning(Tuning::Fixed(TuningOffset::new(Cents(cents)).unwrap()));
+            let cfg = cfg().tuning(Tuning::Fixed(TuningOffset::new(Cents(cents)).unwrap()));
             let c = run(&x, &cfg);
             assert_eq!(c.tuning(), Cents(cents));
             c.mean()
@@ -790,7 +843,7 @@ mod tests {
             .map(|(a, b)| a + b)
             .collect();
         let batch = run(&x, &cfg());
-        let fixed = cfg().with_tuning(Tuning::Fixed(TuningOffset::new(batch.tuning()).unwrap()));
+        let fixed = cfg().tuning(Tuning::Fixed(TuningOffset::new(batch.tuning()).unwrap()));
         let (mut state, mut fft) = (ChromaState::new(), FftScratch::new());
         for (i, row) in batch.grid().rows().enumerate() {
             let at = i * 1024;
@@ -819,7 +872,7 @@ mod tests {
         let (mut state, mut fft) = (ChromaState::new(), FftScratch::new());
         let x = sine(440.0, 4096, 0.5);
         step_chroma(&cfg(), &mut state, &x, &mut fft).unwrap();
-        let other = cfg().with_harmonics(Harmonics::of(1));
+        let other = cfg().harmonics(Harmonics::of(1));
         step_chroma(&other, &mut state, &sine(330.0, 4096, 0.5), &mut fft).unwrap();
         let mean = state.mean();
         assert_eq!((mean[4], mean[9]), (1.0, 0.0), "{mean:?}");
@@ -833,7 +886,7 @@ mod tests {
         let x = sine(440.0 * (25.0f64 / 1200.0).exp2(), 4096, 0.5);
         step_chroma(&cfg(), &mut state, &x, &mut fft).unwrap();
         let (mean, tuning) = (state.mean(), state.tuning());
-        let other = cfg().with_harmonics(Harmonics::of(1));
+        let other = cfg().harmonics(Harmonics::of(1));
         let mut nan = x.clone();
         nan[7] = f32::NAN;
         assert!(step_chroma(&other, &mut state, &nan, &mut fft).is_err());
@@ -862,19 +915,38 @@ mod tests {
             Err(Error::TooManyOverlaps { .. })
         ));
         assert!(ChromaConfig::new(geometry(4096, 64)).is_ok());
-        let empty = |r: Result<ChromaConfig>| matches!(r, Err(Error::EmptyFrequencyRange { .. }));
         for (lo, hi) in [
             (500.0, 100.0),
             (0.0, 1000.0),
             (f32::NAN, 1000.0),
             (100.0, f32::NAN),
             (100.0, f32::INFINITY),
-            (100.0, 110.0),
         ] {
-            assert!(empty(cfg().with_band(Hz(lo), Hz(hi))), "{lo} {hi}");
+            assert!(
+                matches!(
+                    FrequencyBand::try_from(Hz(lo)..=Hz(hi)),
+                    Err(Error::EmptyFrequencyRange { .. })
+                ),
+                "{lo} {hi}"
+            );
         }
+        // The geometry decides what the terminals accept: a band of under
+        // three bins, or one above Nyquist.
+        let x = sine(440.0, 8192, 0.5);
+        let mut fft = FftScratch::new();
+        let narrow = cfg().band(FrequencyBand::new(Hz(100.0), Hz(110.0)).unwrap());
         assert!(matches!(
-            cfg().with_band(Hz(100.0), Hz(12_000.0)),
+            chroma(&x, &narrow, &mut fft),
+            Err(Error::EmptyFrequencyRange { .. })
+        ));
+        let wide = cfg().band(FrequencyBand::new(Hz(100.0), Hz(12_000.0)).unwrap());
+        assert!(matches!(
+            chroma(&x, &wide, &mut fft),
+            Err(Error::AboveNyquist { .. })
+        ));
+        let mut state = ChromaState::new();
+        assert!(matches!(
+            step_chroma(&wide, &mut state, &x[..4096], &mut fft),
             Err(Error::AboveNyquist { .. })
         ));
         // A low rate clamps the default band to Nyquist instead of failing.

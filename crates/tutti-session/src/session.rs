@@ -740,7 +740,7 @@ impl<C: Clock> Session<C> {
     /// cuts at one block instead. A commit that lands while the fade runs ends
     /// it at that block, as a hard edit ends a unit's crossfade; the new root
     /// is heard alone from there. An export of the master
-    /// places the file from the declaration (`tutti_export::Setup::with_root`, set by the export's fork).
+    /// places the file from the declaration (`tutti_export::Setup::root`, set by the export's fork).
     ///
     /// The device a declaration must place on is the one the session renders
     /// to (the offline `outputs`, or the open device's, and the new one on a

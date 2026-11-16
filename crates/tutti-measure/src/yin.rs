@@ -84,7 +84,7 @@ impl YinConfig {
     /// YIN's absolute threshold on the cumulative mean difference. The paper's
     /// default is 0.1; lower finds fewer pitches and fewer errors.
     #[must_use]
-    pub fn with_threshold(mut self, threshold: impl Into<Confidence>) -> Self {
+    pub fn threshold(mut self, threshold: impl Into<Confidence>) -> Self {
         self.threshold = Confidence::new_clamped(threshold.into().get().clamp(0.01, 0.5));
         self
     }
@@ -98,7 +98,7 @@ impl YinConfig {
     /// The YIN aperiodicity cutoff as a [`Confidence`], `0.01..=0.5`. A
     /// reading's threshold, not a blend.
     #[inline]
-    pub fn threshold(&self) -> Confidence {
+    pub fn threshold_setting(&self) -> Confidence {
         self.threshold
     }
 
