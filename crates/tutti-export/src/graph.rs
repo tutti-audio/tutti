@@ -49,7 +49,7 @@ impl Setup {
     /// not the live engine's: a job finds a pool busy with another caller's
     /// and runs on its caller alone.
     #[must_use]
-    pub fn with_pool(mut self, pool: Option<Arc<dyn Pool>>) -> Self {
+    pub fn pool(mut self, pool: Option<Arc<dyn Pool>>) -> Self {
         self.pool = pool;
         self
     }
@@ -64,7 +64,7 @@ impl Setup {
     /// ([`ConfigError::Placement`]). Give it for a fork of a live graph that
     /// declared its root, so the file is placed as the device was.
     #[must_use]
-    pub fn with_root(mut self, root: Option<ChannelTopology>) -> Self {
+    pub fn root(mut self, root: Option<ChannelTopology>) -> Self {
         self.root = root;
         self
     }
@@ -149,7 +149,7 @@ pub struct RenderGraph {
     /// only thing that runs it.
     executor: Executor,
     /// What the graph's output channels are, when the live graph declared it
-    /// ([`Setup::with_root`]); `None` is the engine's order for the width.
+    /// ([`Setup::root`]); `None` is the engine's order for the width.
     root: Option<ChannelTopology>,
     /// The executor's `(dropped, recovered)` event counts where the last
     /// render ended, or where the pair was wrapped: the next render counts its
@@ -203,7 +203,7 @@ impl RenderGraph {
         self.settled = counts;
     }
 
-    /// The declared output topology ([`Setup::with_root`]).
+    /// The declared output topology ([`Setup::root`]).
     pub(crate) fn root_topology(&self) -> Option<&ChannelTopology> {
         self.root.as_ref()
     }

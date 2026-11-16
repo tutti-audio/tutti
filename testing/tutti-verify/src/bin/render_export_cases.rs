@@ -130,9 +130,9 @@ impl Case {
         normalize: Option<Normalize>,
     ) -> FileTarget {
         FileTarget::new(path, self.format, self.channels)
-            .with_resample(self.resample)
-            .with_dither(self.dither)
-            .with_normalize(normalize.map(NormalizeSpec::own))
+            .resample(self.resample)
+            .dither(self.dither)
+            .normalize(normalize.map(NormalizeSpec::own))
     }
 }
 

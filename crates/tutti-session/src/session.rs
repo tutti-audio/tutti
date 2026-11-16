@@ -766,7 +766,7 @@ impl<C: Clock> Session<C> {
     /// the error and the root in force stays. A
     /// [`hard`](RootDeclaration::hard) declaration applies at once and drops
     /// the waiting one. An export of the master
-    /// places the file from the declaration (`tutti_export::Setup::with_root`, set by the export's fork).
+    /// places the file from the declaration (`tutti_export::Setup::root`, set by the export's fork).
     ///
     /// The device a declaration must place on is the one the session renders
     /// to (the offline `outputs`, or the open device's, and the new one on a
