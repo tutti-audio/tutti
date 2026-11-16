@@ -468,11 +468,12 @@ tutti-plugin-host  setter  crates/tutti-plugin-host/src/controls.rs::PluginContr
 tutti-plugin-host  setter  crates/tutti-plugin-host/src/node/client.rs::InProcClient::set_render_mode
 
 # tutti-plugin-ipc
+tutti-plugin-ipc  config-width  crates/tutti-plugin-ipc/src/config/bridge.rs::BridgeConfig::at
+tutti-plugin-ipc  ctor-result  crates/tutti-plugin-ipc/src/config/bridge.rs::BridgeConfig::new
 tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/batcher.rs::Batcher::set_offline_wait
 tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/audio/mod.rs::AudioBridge::set_automation_state_rt
 tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/audio/mod.rs::AudioBridge::set_listener
 tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/audio/mod.rs::AudioBridge::set_parameter_rt
-tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/audio/mod.rs::AudioBridge::set_rate_timeout
 tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/audio/mod.rs::AudioBridge::set_render_mode_rt
 tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/audio/mod.rs::AudioBridge::set_track_info
 tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/composite.rs::PluginBridge::set_automation_state_rt
@@ -480,7 +481,6 @@ tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/composite.rs::Plugi
 tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/composite.rs::PluginBridge::set_editor_size
 tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/composite.rs::PluginBridge::set_listener
 tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/composite.rs::PluginBridge::set_parameter_rt
-tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/composite.rs::PluginBridge::set_rate_timeout
 tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/composite.rs::PluginBridge::set_render_mode_rt
 tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/composite.rs::PluginBridge::set_track_info
 

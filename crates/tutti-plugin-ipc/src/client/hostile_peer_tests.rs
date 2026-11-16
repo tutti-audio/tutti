@@ -752,7 +752,7 @@ fn a_crash_before_any_listener_is_still_reported_by_the_query() {
 /// Once crashed, further calls must fail fast rather than block.
 ///
 /// A host that keeps waiting the full timeout on every subsequent request turns
-/// one dead plugin into a UI that hangs for `PARAM_TIMEOUT` per interaction. The
+/// one dead plugin into a UI that hangs for `Timeouts::param` per interaction. The
 /// crash flag exists to short-circuit that, so it has to actually be consulted.
 #[test]
 fn calls_after_a_crash_fail_fast_instead_of_waiting_out_the_timeout() {
@@ -765,7 +765,7 @@ fn calls_after_a_crash_fail_fast_instead_of_waiting_out_the_timeout() {
         "the bridge never noticed the server was gone"
     );
 
-    // Subsequent calls must return promptly. `PARAM_TIMEOUT` is 5 s, so
+    // Subsequent calls must return promptly. `Timeouts::param` is 5 s, so
     // anything near that means the short-circuit is missing.
     let start = Instant::now();
     for _ in 0..5 {
@@ -853,7 +853,7 @@ fn an_absurd_length_prefix_does_not_hang_or_exhaust_memory() {
          read (after {elapsed:?})"
     );
     // The rejection is a length comparison, so it must not cost a socket
-    // timeout. `PARAM_TIMEOUT` is 5 s; anything near it means the host read the
+    // timeout. `Timeouts::param` is 5 s; anything near it means the host read the
     // prefix, allocated, and then sat waiting for a body — the pre-bound
     // behaviour this test's second paragraph describes.
     assert!(
@@ -925,7 +925,7 @@ fn the_frame_cap_is_the_boundary_it_claims_to_be() {
 /// one-byte-per-200 ms.
 ///
 /// What makes it worse than a slow request is *who* is stuck. The caller has
-/// its own `PARAM_TIMEOUT` and returns `None` on schedule, so the symptom is
+/// its own `Timeouts::param` and returns `None` on schedule, so the symptom is
 /// invisible from the audio thread — but the bridge thread never returns from
 /// `handle`, so `pump` never runs `crash()`, `is_crashed()` stays false, and
 /// every later request is queued behind a thread that is never coming back.
@@ -1220,7 +1220,7 @@ fn a_late_rate_answer_does_not_override_a_later_one() {
 }
 
 /// **Dropping the bridge ends a wait for a rate change that never answers.**
-/// The bridge thread waits up to `RATE_TIMEOUT` (10 s) for the reply, and the
+/// The bridge thread waits up to `Timeouts::rate` (10 s) for the reply, and the
 /// drop joins it: the wait must notice the shutdown, not run out.
 #[test]
 fn dropping_the_bridge_ends_a_hung_rate_change() {
@@ -1251,11 +1251,11 @@ fn dropping_the_bridge_ends_a_hung_rate_change() {
 /// ceiling from `u32::MAX` to 64 MiB, and both are unbounded in practice.
 ///
 /// The assertion is on the **crash flag**, not on the caller's return: the
-/// caller has its own `PARAM_TIMEOUT` and answers `None` on schedule whether or
+/// caller has its own `Timeouts::param` and answers `None` on schedule whether or
 /// not the bridge thread is wedged, so only `is_crashed` distinguishes "the
 /// read gave up" from "the read is still running and the caller left".
 ///
-/// The gap is far shorter than `PARAM_TIMEOUT`, so a per-syscall bound would
+/// The gap is far shorter than `Timeouts::param`, so a per-syscall bound would
 /// never fire and this test would fail on `wait_for_crash` — which is exactly
 /// how it fails when the deadline is removed.
 #[test]
@@ -1769,12 +1769,12 @@ fn a_chatty_plugin_does_not_extend_the_budget() {
 }
 
 /// **A live peer caught part-way through a frame at the budget is not declared
-/// unable to frame.** The read finishes *that* frame within `DRAIN_FINISH`
-/// and stops. Extending the whole read by `DRAIN_FINISH` instead let the next
+/// unable to frame.** The read finishes *that* frame within `Timeouts::drain`
+/// and stops. Extending the whole read by `Timeouts::drain` instead let the next
 /// frame start before the extended deadline and be caught part-way in turn,
 /// and the bridge crashed on a peer whose every frame completes in 400 ms.
 ///
-/// The peer's split is 200 ms against `DRAIN_FINISH`'s 500: a frame caught
+/// The peer's split is 200 ms against `Timeouts::drain`'s 500: a frame caught
 /// part-way finishes with 300 ms to spare, which a loaded runner's late wakeups
 /// do not use up. A 400 ms split left 100 ms and failed on a loaded macOS
 /// runner.

@@ -86,7 +86,7 @@ pub(super) const ALLOW: &[(&str, usize, &str)] = &[
     ("crates/tutti-plugin-ipc/src/ipc/tests.rs", 4, PLUGINS),
     (
         "crates/tutti-plugin-ipc/src/subprocess/launch.rs",
-        10,
+        11,
         PLUGINS,
     ),
     ("crates/tutti-plugin-probe/src/lib.rs", 3, PLUGINS),

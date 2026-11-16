@@ -50,7 +50,7 @@ const MAX_PROCESS_TIMEOUT: Duration = Duration::from_millis(50);
 /// once it has gone quiet: news the server sent is already in the socket.
 const DRAIN_UNSOLICITED: Duration = Duration::from_millis(1);
 
-/// The slice [`Timeouts::rate`] is waited in, between checks that the bridge is
+/// The slice [`Timeouts::rate`](tutti_plugin_types::Timeouts::rate) is waited in, between checks that the bridge is
 /// still running.
 const RATE_SLICE: Duration = Duration::from_millis(100);
 
@@ -126,7 +126,7 @@ fn is_stale(seq: u64, newest: u64) -> bool {
 /// stream, so it lives and dies with the stream.
 pub(super) struct Owed {
     /// How long a reply that has already started arriving gets to finish when
-    /// its request's own budget runs out ([`Timeouts::drain`]).
+    /// its request's own budget runs out ([`Timeouts::drain`](tutti_plugin_types::Timeouts::drain)).
     ///
     /// Larger than any request's budget, and the split is the point: the
     /// decision to *wait* for a reply is the request's, and is short for a
@@ -325,7 +325,7 @@ pub(super) enum Late {
 /// A timeout on a frame boundary is not an error: the stream is synchronised
 /// and the session healthy, so the caller answers its own caller and the
 /// bridge goes on. A budget that expires **part-way through a frame** gets
-/// [`Timeouts::drain`] to complete *that frame*, and the read ends there (with
+/// [`Timeouts::drain`](tutti_plugin_types::Timeouts::drain) to complete *that frame*, and the read ends there (with
 /// the frame, when it is the answer): extending the whole read instead let a
 /// chatty peer start a new frame at the extended deadline, and a live peer was
 /// declared unable to frame. A frame still unfinished after `Timeouts::drain` is
@@ -866,7 +866,7 @@ pub(super) fn handle(
     Ok(())
 }
 
-/// A query's reply, within [`Timeouts::param`]: `None` when it does not come
+/// A query's reply, within [`Timeouts::param`](tutti_plugin_types::Timeouts::param): `None` when it does not come
 /// in time, which the query answers as "cannot be asked" (and the reply is
 /// owed). A timeout here was a `?` that crashed a healthy bridge.
 fn ask(

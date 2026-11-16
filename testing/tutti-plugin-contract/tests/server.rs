@@ -125,7 +125,7 @@ fn served<F: Format>(
     // SAFETY: set before any thread of this test reads it.
     unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server()) };
     let Launched { ipc, .. } = Ipc::launch(
-        IpcConfig::default(),
+        IpcConfig::new().expect("the OS has a random source"),
         path,
         F::FORMAT,
         Load::new(),
