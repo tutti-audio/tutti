@@ -95,7 +95,8 @@
 //!
 //! # Un-bypass
 //!
-//! A bypassed unit is not called, so its state is stale. The toggle that
+//! A bypassed unit is not processed (only its [`Node::poll_parked`](crate::Node::poll_parked) runs, once
+//! per block), so its state is stale. The toggle that
 //! leaves Bypassed calls [`Node::reset`](crate::Node::reset) before the first
 //! call, keeps the aligned input audible for `L` frames (the node's output is
 //! its warm-up, discarded), and then fades from the input to the output.

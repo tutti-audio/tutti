@@ -119,6 +119,9 @@ fn park<A: AudioSlots, F: SlotFlags + ?Sized, E: EventSlots + ?Sized>(
     // A parked node is not called, so a wake raised meanwhile is consumed
     // here, as its discarded events are.
     u.node.take_wake();
+    // The node's pending handoffs are answered (a plugin's recalled
+    // Processor); it renders nothing and writes no port.
+    u.node.poll_parked();
     // Its params go on stepping, as a skipped node's do: their ramps and
     // declick follow the timeline while it is out.
     if rec.params.len != 0 || u.params.busy() {

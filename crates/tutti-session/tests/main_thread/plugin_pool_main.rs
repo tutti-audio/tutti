@@ -756,9 +756,7 @@ fn a_plugin_that_grows_wider_than_a_block_is_refused_by_name() {
 }
 
 /// **A node muted before its plugin changes ports is still muted after:** the
-/// swap keeps the mode of the key. (A bypassed node is not run, so it never
-/// hands its Processor back and its plugin's restart waits for the bypass to
-/// end; a muted node keeps running.)
+/// swap keeps the mode of the key.
 fn a_muted_node_stays_muted_through_a_port_change() {
     use tutti_session::NodeMode;
     let mut r = rebound(0);
@@ -771,6 +769,63 @@ fn a_muted_node_stays_muted_through_a_port_change() {
         s.graph_ref().node_outputs(node).is_ok_and(|n| n == 3)
     });
     assert_eq!(r.s.graph_ref().mode(node), Ok(NodeMode::Muted));
+    r.s.close(tutti_fixtures::main_thread());
+}
+
+/// **A bypassed node's plugin changes its ports and the node is re-inserted
+/// while the bypass lasts:** the plugin's request is read on the control side,
+/// not by a block the parked node never runs. The wider node is at the key
+/// within a bounded number of updates, still bypassed.
+fn a_bypassed_plugin_node_is_re_inserted_for_its_port_change() {
+    use tutti_session::NodeMode;
+    let mut r = rebound(0);
+    let node = r.node;
+    r.until("a block", |s| s.graph_ref().node_outputs(node).is_ok());
+    r.s.graph()
+        .set_mode(node, NodeMode::Bypassed)
+        .expect("a node can be bypassed");
+    // Parked: its fade is done.
+    for _ in 0..8 {
+        let _ = r.channel(0);
+    }
+    r.change_ports(1);
+    let mut updates = 0;
+    let mut wider = false;
+    while updates < 4000 && !wider {
+        let _ = r.s.update();
+        let _ = r.channel(0);
+        wider = r.s.graph_ref().node_outputs(node).is_ok_and(|n| n == 3);
+        updates += 1;
+        thread::sleep(Duration::from_millis(2));
+    }
+    assert!(
+        wider,
+        "the bypassed node kept its old ports for {updates} updates"
+    );
+    assert_eq!(r.s.graph_ref().mode(node), Ok(NodeMode::Bypassed));
+    r.s.close(tutti_fixtures::main_thread());
+}
+
+/// **A parked node answers the commit's relend:** after a bypassed node's
+/// plugin changes its ports, the Processor is lent to the node that replaced
+/// it (the rebuild stops settling) while the bypass lasts.
+fn a_bypassed_plugin_node_answers_the_relend_of_its_commit() {
+    use tutti_session::NodeMode;
+    let mut r = rebound(0);
+    let node = r.node;
+    r.until("a block", |s| s.graph_ref().node_outputs(node).is_ok());
+    r.s.graph()
+        .set_mode(node, NodeMode::Bypassed)
+        .expect("a node can be bypassed");
+    for _ in 0..8 {
+        let _ = r.channel(0);
+    }
+    r.change_ports(1);
+    let _ = r.until("the Processor to reach the new node", |s| {
+        s.graph_ref().node_outputs(node).is_ok_and(|n| n == 3)
+            && s.graph_ref().testing().rebuild_settling(node) == Some(false)
+    });
+    assert_eq!(r.s.graph_ref().mode(node), Ok(NodeMode::Bypassed));
     r.s.close(tutti_fixtures::main_thread());
 }
 
@@ -886,6 +941,8 @@ a_plugin_that_widens_its_ports_is_re_inserted_wider,
 a_plugin_that_narrows_its_ports_reports_the_wiring_it_lost,
 a_plugin_that_grows_wider_than_a_block_is_refused_by_name,
 a_muted_node_stays_muted_through_a_port_change,
+a_bypassed_plugin_node_is_re_inserted_for_its_port_change,
+a_bypassed_plugin_node_answers_the_relend_of_its_commit,
 a_port_change_during_a_sample_rate_change_ends_with_the_new_ports,
 a_node_removed_while_its_rebuild_settles_leaves_nothing_behind,
 ];
