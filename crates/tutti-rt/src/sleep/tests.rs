@@ -10,6 +10,11 @@ fn a_sleep_never_returns_before_its_deadline() {
         sleep_until_ns(deadline);
         assert!(monotonic_ns() >= deadline, "woke {ahead_us} us ahead early");
     }
+    // A negative deadline is past on any clock reading.
+    for deadline in [i64::MIN, -1] {
+        sleep_until_ns(deadline);
+        assert!(monotonic_ns() >= deadline);
+    }
 }
 
 /// The time left is the distance to the deadline, and nothing once the

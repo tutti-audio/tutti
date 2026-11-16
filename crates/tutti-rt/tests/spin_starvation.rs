@@ -38,8 +38,9 @@
 //!
 //! A run whose caller found the task already finished (its wait under
 //! 1 ms: the helper ran its whole task before the caller woke from its block
-//! on the helper's signal, which an equal-priority FIFO helper can do) did not exercise the wait. It
-//! is reported as such, and the assertion needs at least one run that did.
+//! on the helper's signal, which an equal-priority FIFO helper can do) did
+//! not exercise the wait. It is reported as such, and the assertion needs at
+//! least one run that did.
 //!
 //! In a real deployment the helper is not pinned, and the kernel's RT
 //! push/pull migrates a runnable FIFO helper to a core running anything of

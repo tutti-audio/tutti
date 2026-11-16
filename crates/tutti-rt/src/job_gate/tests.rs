@@ -108,7 +108,9 @@ fn a_panicking_job_closes_the_gate() {
 /// **`run` returns only after a helper inside the job has left it.** The
 /// helper stays in the job until the caller has closed the gate, which the
 /// close does before it waits, then records that it left. Every wait is
-/// bounded, so a failure is an assertion rather than a hang.
+/// bounded, so a failure is an assertion rather than a hang. A close that did
+/// not wait for the helper is caught with high probability, not
+/// deterministically.
 #[test]
 fn run_waits_for_a_helper_still_inside() {
     use std::time::{Duration, Instant};

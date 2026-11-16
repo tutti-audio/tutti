@@ -36,7 +36,9 @@ impl Drop for Watched {
 
 /// Dropping the writer stops its thread before `drop` returns, so the sink (a
 /// file, in a staged encoder) is closed by then. The drop starts once the
-/// thread has begun writing, so the thread is working through its queue.
+/// thread has begun writing, so the thread is working through its queue. A
+/// drop that did not join is caught with high probability, not
+/// deterministically.
 #[test]
 fn a_dropped_writer_has_stopped_its_thread() {
     let dropped = Arc::new(AtomicBool::new(false));
