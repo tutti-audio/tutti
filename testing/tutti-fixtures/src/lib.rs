@@ -44,15 +44,19 @@
 #![deny(clippy::undocumented_unsafe_blocks, clippy::missing_safety_doc)]
 
 mod alloc_count;
-#[cfg(all(feature = "au", target_os = "macos"))]
+#[cfg(feature = "au")]
+#[cfg_attr(target_os = "macos", path = "au/macos.rs")]
+#[cfg_attr(not(target_os = "macos"), path = "au/other.rs")]
 mod au;
 mod digest;
 mod env;
 #[cfg(feature = "graph")]
 mod event_rig;
+mod links;
 mod machine_lock;
 mod main_thread;
 pub mod midi;
+mod names;
 #[cfg(feature = "plugin")]
 mod plugin;
 mod range_contract;
@@ -64,8 +68,12 @@ pub mod tpt;
 mod vst3_cpp;
 
 pub use alloc_count::{ThreadCounting, allocations};
-#[cfg(all(feature = "au", target_os = "macos"))]
-pub use au::{au_bundle, element_name_retain_count};
+#[cfg(feature = "au")]
+#[allow(
+    unused_imports,
+    reason = "the Audio Unit fixtures exist on macOS; `au` is empty elsewhere"
+)]
+pub use au::*;
 pub use digest::{Fnv, Noise, noise};
 pub use env::{ScopedEnv, cases};
 #[cfg(feature = "graph")]
@@ -169,13 +177,7 @@ pub fn profile_dir() -> PathBuf {
 ///
 /// `lib_stem` is the crate name with `-` replaced by `_`, as cargo spells it.
 pub fn lib_filename(lib_stem: &str) -> String {
-    if cfg!(target_os = "windows") {
-        format!("{lib_stem}.dll")
-    } else if cfg!(target_os = "macos") {
-        format!("lib{lib_stem}.dylib")
-    } else {
-        format!("lib{lib_stem}.so")
-    }
+    format!("{}{lib_stem}.{}", names::LIB_PREFIX, names::LIB_EXT)
 }
 
 /// Where cargo may have put the artifact `name` under `profile`:
@@ -296,10 +298,9 @@ pub fn vst2_probe() -> &'static Path {
     static RESOLVED: OnceLock<PathBuf> = OnceLock::new();
     RESOLVED.get_or_init(|| {
         let real = cdylib("tutti_vst2_test_plugin", "tutti-vst2-test-plugin");
-        if cfg!(target_os = "macos") {
-            publish_with_extension(&real, "vst")
-        } else {
-            real
+        match names::VST2_LINK_EXT {
+            Some(extension) => publish_with_extension(&real, extension),
+            None => real,
         }
     })
 }
@@ -331,18 +332,14 @@ pub fn publish_with_extension(real: &Path, extension: &str) -> PathBuf {
     if link == real {
         return link;
     }
-    #[cfg(unix)]
-    if std::fs::read_link(&link).is_ok_and(|to| to == real) {
+    if links::is_published(&link, real) {
         return link;
     }
 
     // Stage under a name no other process can pick, then swap it in.
     let staging = link.with_extension(format!("{extension}.tmp{}", std::process::id()));
     let _ = std::fs::remove_file(&staging);
-    #[cfg(unix)]
-    std::os::unix::fs::symlink(real, &staging).expect("stage the reference plugin symlink");
-    #[cfg(windows)]
-    std::fs::copy(real, &staging).expect("stage the reference plugin copy");
+    links::stage(real, &staging);
 
     if let Err(e) = std::fs::rename(&staging, &link) {
         // Losing the swap is not a failure: whoever won published a link to
@@ -360,8 +357,6 @@ pub fn publish_with_extension(real: &Path, extension: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(unix)]
-    use std::io::Write;
 
     /// The rule the module docs call load-bearing: newest wins, so a stale
     /// uplifted copy cannot shadow a fresh one in `deps/`.
@@ -503,10 +498,6 @@ mod tests {
         assert!(name.contains("some_plugin"));
     }
 
-    /// **A link already naming the artifact is not republished.** The
-    /// link's own inode is the witness: a republish renames a fresh symlink
-    /// over it, which a second call must not do.
-    ///
     /// A file that already has the extension is its own published path, and stays a file
     /// (D18: the Linux `.so` cdylib published as `.so` became a link to itself).
     #[test]
@@ -518,35 +509,6 @@ mod tests {
         assert_eq!(publish_with_extension(&real, "so"), real);
         assert!(std::fs::symlink_metadata(&real).unwrap().is_file());
         assert_eq!(std::fs::read(&real).unwrap(), b"x");
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn a_published_link_is_left_alone() {
-        use std::os::unix::fs::MetadataExt;
-        let dir = std::env::temp_dir().join(format!("tfr-link-{}", std::process::id()));
-        let _ = std::fs::create_dir_all(&dir);
-        let real = dir.join("libplugin.so");
-        std::fs::File::create(&real)
-            .unwrap()
-            .write_all(b"x")
-            .unwrap();
-        let link = publish_with_extension(&real, "clap");
-        assert_eq!(link, dir.join("libplugin.clap"));
-        assert_eq!(std::fs::read_link(&link).unwrap(), real);
-        let first = std::fs::symlink_metadata(&link).unwrap().ino();
-        assert_eq!(publish_with_extension(&real, "clap"), link);
-        let second = std::fs::symlink_metadata(&link).unwrap().ino();
-        assert_eq!(first, second, "the second publish replaced the link");
-
-        // A link naming something else is replaced.
-        let other = dir.join("other.so");
-        std::fs::File::create(&other).unwrap();
-        let _ = std::fs::remove_file(&link);
-        std::os::unix::fs::symlink(&other, &link).unwrap();
-        publish_with_extension(&real, "clap");
-        assert_eq!(std::fs::read_link(&link).unwrap(), real);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -2,17 +2,16 @@
 
 use std::path::{Path, PathBuf};
 
+#[cfg_attr(windows, path = "vst3_cpp/ext_windows.rs")]
+#[cfg_attr(target_os = "macos", path = "vst3_cpp/ext_macos.rs")]
+#[cfg_attr(not(any(windows, target_os = "macos")), path = "vst3_cpp/ext_other.rs")]
+mod ext;
+
 /// The C++ plugin's module, in the bundle its crate's `build.rs` links.
 #[must_use]
 pub fn vst3_cpp_module() -> PathBuf {
     // The extension its `build.rs` gives the module.
-    let ext = if cfg!(windows) {
-        "vst3"
-    } else if cfg!(target_os = "macos") {
-        "dylib"
-    } else {
-        "so"
-    };
+    let ext = ext::MODULE_EXT;
     let module = vst3_cpp_bundle()
         .join("Contents")
         .join(tutti_plugin_types::bundle::native_arch_subdirs()[0])

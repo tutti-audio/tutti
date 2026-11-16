@@ -137,6 +137,7 @@ mod tests {
     use super::*;
     use crate::{StftRequest, stft_magnitude};
     use rand::{RngExt, SeedableRng, rngs::StdRng};
+    use tutti_buffers::Mono;
     use tutti_dsp::FftScratch;
     use tutti_types::SampleRate;
     use tutti_types::Samples;
@@ -145,8 +146,14 @@ mod tests {
     const WINDOW: usize = 2048;
 
     fn magnitudes_of(samples: &[f32]) -> StftMagnitude {
-        let request = StftRequest::new(SampleRate::of(RATE), Samples(WINDOW), Samples(WINDOW / 2));
-        stft_magnitude(samples, request, &mut FftScratch::new()).unwrap()
+        let request = StftRequest::new(Samples(WINDOW), Samples(WINDOW / 2));
+        stft_magnitude(
+            request,
+            Mono::new(samples),
+            SampleRate::of(RATE),
+            &mut FftScratch::new(),
+        )
+        .unwrap()
     }
 
     fn bin_width() -> Hz {

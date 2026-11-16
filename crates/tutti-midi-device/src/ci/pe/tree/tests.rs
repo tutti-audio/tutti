@@ -27,6 +27,7 @@ fn property_data_may_have_whitespace_between_tokens() {
 // §6.1.1: a character beyond 7-bit ASCII is written as the `\u` escapes of its
 // UTF-16, and Beats followed by the eighth note is `Beats` and the escape of
 // U+266A.
+/// Spec: m2-103/6.1.1#2
 #[test]
 fn a_non_ascii_character_is_written_as_utf16_escapes() {
     let escape = |hex: &str| format!("\\u{hex}");
@@ -48,6 +49,7 @@ fn a_byte_past_7f_is_not_json_of_property_exchange() {
 }
 
 // §6.1.1: the forward slash may be escaped or not.
+/// Spec: m2-103/6.1.1#1
 #[test]
 fn a_forward_slash_may_be_escaped() {
     assert_eq!(parse(r#""a\/b""#).unwrap(), parse(r#""a/b""#).unwrap());

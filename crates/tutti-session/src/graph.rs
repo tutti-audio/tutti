@@ -553,7 +553,7 @@ impl Graph {
         feature = "midi",
         feature = "plugin",
         feature = "sampler",
-        all(feature = "device", feature = "audio-io")
+        feature = "device"
     ))]
     pub(crate) fn prepared(&self) -> Prepare {
         *self.editor.prepare()

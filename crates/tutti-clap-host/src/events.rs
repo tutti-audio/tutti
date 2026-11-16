@@ -3932,6 +3932,7 @@ mod tests {
     /// A note's 16-bit velocity reaches a MIDI-dialect port as its top 7 bits
     /// (M2-115 section 3.4: the downscale is a right shift by 9). 0xE665 is
     /// 115.2 in those units, which is 115; a rounding conversion gives 114.
+    /// Spec: m2-115/2.2#2
     #[test]
     fn midi_dialect_velocity_is_the_m2_115_shift() {
         let ch = MidiChannel::of(0);
@@ -3996,6 +3997,7 @@ mod tests {
     /// ends a Registered Parameter run arrives in a block after the select and
     /// the MSB (M2-104 Appendix D.3.3), and the run is one controller (pitch
     /// bend sensitivity of 12 semitones, zero-extended, M2-115 section 4.1).
+    /// Spec: m2-115/4.1#1
     #[test]
     fn a_parameter_run_assembles_across_blocks() {
         let cc = |controller, value| ClapEvent::midi(0, 0, [0xB0, controller, value]);

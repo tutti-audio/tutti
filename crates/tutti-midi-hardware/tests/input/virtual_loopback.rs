@@ -109,6 +109,7 @@ fn what_a_session_output_sends_reaches_a_virtual_destination_in_order() {
 /// it) and the graph's ingest node widens it as it does a MIDI 1.0 device's:
 /// the 16-bit velocity `0x8100` is the 7-bit `0x40` on the wire and `0x8000`
 /// after widening (M2-115).
+/// Spec: m2-115/2.3#1
 #[test]
 fn a_midi1_destination_delivers_what_the_ingest_node_widens() {
     let spec = spec("midi1").with_protocol(VirtualProtocol::Midi1);

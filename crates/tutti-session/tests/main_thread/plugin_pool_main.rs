@@ -756,9 +756,7 @@ fn a_plugin_that_grows_wider_than_a_block_is_refused_by_name() {
 }
 
 /// **A node muted before its plugin changes ports is still muted after:** the
-/// swap keeps the mode of the key. (A bypassed node is not run, so it never
-/// hands its Processor back and its plugin's restart waits for the bypass to
-/// end; a muted node keeps running.)
+/// swap keeps the mode of the key.
 fn a_muted_node_stays_muted_through_a_port_change() {
     use tutti_session::NodeMode;
     let mut r = rebound(0);
@@ -771,6 +769,30 @@ fn a_muted_node_stays_muted_through_a_port_change() {
         s.graph_ref().node_outputs(node).is_ok_and(|n| n == 3)
     });
     assert_eq!(r.s.graph_ref().mode(node), Ok(NodeMode::Muted));
+    r.s.close(tutti_fixtures::main_thread());
+}
+
+/// **A bypassed node's plugin changes its ports while the bypass lasts:** the
+/// parked node answers the restart's recall and the commit's relend, so the
+/// wider node is at the key, still bypassed, and holds the Processor (the
+/// rebuild stops settling).
+fn a_bypassed_plugin_node_is_re_inserted_and_takes_its_processor() {
+    use tutti_session::NodeMode;
+    let mut r = rebound(0);
+    let node = r.node;
+    r.until("a block", |s| s.graph_ref().node_outputs(node).is_ok());
+    r.s.graph()
+        .set_mode(node, NodeMode::Bypassed)
+        .expect("a node can be bypassed");
+    for _ in 0..8 {
+        let _ = r.channel(0);
+    }
+    r.change_ports(1);
+    r.until("the Processor to reach the new node", |s| {
+        s.graph_ref().node_outputs(node).is_ok_and(|n| n == 3)
+            && s.graph_ref().testing().rebuild_settling(node) == Some(false)
+    });
+    assert_eq!(r.s.graph_ref().mode(node), Ok(NodeMode::Bypassed));
     r.s.close(tutti_fixtures::main_thread());
 }
 
@@ -886,6 +908,7 @@ a_plugin_that_widens_its_ports_is_re_inserted_wider,
 a_plugin_that_narrows_its_ports_reports_the_wiring_it_lost,
 a_plugin_that_grows_wider_than_a_block_is_refused_by_name,
 a_muted_node_stays_muted_through_a_port_change,
+a_bypassed_plugin_node_is_re_inserted_and_takes_its_processor,
 a_port_change_during_a_sample_rate_change_ends_with_the_new_ports,
 a_node_removed_while_its_rebuild_settles_leaves_nothing_behind,
 ];

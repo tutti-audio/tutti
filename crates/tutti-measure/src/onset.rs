@@ -6,18 +6,44 @@
 //! individually, named for themselves, because choosing between them is a real
 //! choice with real trade-offs.
 //!
-//! The carry is explicit. Spectral flux and complex-domain deviation both need
-//! the previous frame; hidden in `&mut self`, that would let a detector diff
-//! frame 0 of one call against the last frame of the *previous* one. Here you
-//! cannot forget to reset something you have to pass in.
+//! An [`OnsetConfig`] describes the detection: the function, the framing in
+//! samples, a threshold, a sensitivity and a minimum gap in seconds. The rate
+//! binds where the audio does: [`detect_onsets`] takes a buffer and its rate,
+//! and [`OnsetConfig::measure`] makes an [`OnsetMeter`] that takes the buffer
+//! in chunks of any length and cuts its own frames. Spectral flux and
+//! complex-domain deviation both need the previous frame, which a meter
+//! carries, so a run cannot diff its first frame against another run's last.
 
+use tutti_buffers::{Mono, Sample};
 use tutti_types::{Amplitude, SampleRate, Samples, Seconds};
 
 use crate::Result;
+use crate::convert::{for_blocks, to_f32};
+use crate::framing::{FrameCutter, Framing};
 use tutti_dsp::Complex32;
 use tutti_dsp::FftScratch;
-use tutti_dsp::FrameIndex;
 use tutti_dsp::StftGeometry;
+use tutti_types::ranged;
+
+ranged! {
+    /// The multiplier on the adaptive threshold: finite and not negative.
+    /// Higher rejects more.
+    OnsetThreshold(Amplitude), OnsetThresholdError, "an onset threshold of zero or more",
+    |raw| raw.get() >= 0.0 && raw.get() <= f32::MAX
+}
+
+ranged! {
+    /// The gain applied to the detection function before thresholding: finite
+    /// and above zero, since a gain of zero detects nothing.
+    OnsetSensitivity(Amplitude), OnsetSensitivityError, "an onset sensitivity above zero",
+    |raw| raw.get() > 0.0 && raw.get() <= f32::MAX
+}
+
+ranged! {
+    /// The shortest spacing between accepted onsets: within `0..=60` seconds.
+    OnsetGap(Seconds), OnsetGapError, "an onset gap within 0..=60 s",
+    |raw| raw.get() >= 0.0 && raw.get() <= 60.0
+}
 
 /// How novelty is measured frame to frame.
 ///
@@ -71,7 +97,11 @@ pub fn high_frequency_content(current: &[Complex32]) -> f32 {
 /// Not an RMS: the sum is not divided by the frame's length, so the value
 /// grows with the window (by `sqrt(len)` for a steady signal). Onset
 /// detection compares frames of one length, where the scale cancels.
-pub fn spectral_energy(frame: &[f32]) -> f32 {
+pub fn spectral_energy<S: Sample>(frame: Mono<'_, S>) -> f32 {
+    energy(&to_f32(frame.samples()))
+}
+
+fn energy(frame: &[f32]) -> f32 {
     frame.iter().map(|s| s * s).sum::<f32>().sqrt()
 }
 
@@ -93,9 +123,100 @@ pub fn complex_domain_deviation(previous: &[f32], current: &[Complex32]) -> f32 
         .sqrt()
 }
 
-/// Onset detection parameters. Immutable once built.
+/// Onset detection parameters. Immutable once built, and free of a sample
+/// rate: [`detect_onsets`] and [`OnsetConfig::measure`] take it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct OnsetConfig {
+    function: DetectionFunction,
+    framing: Framing,
+    threshold: OnsetThreshold,
+    sensitivity: OnsetSensitivity,
+    min_gap: OnsetGap,
+}
+
+impl OnsetConfig {
+    /// Detects with `function` over frames of 2048 samples every 512, with a
+    /// 0.3 threshold multiplier, unity sensitivity and a 50 ms minimum gap.
+    #[must_use]
+    pub fn new(function: DetectionFunction) -> Self {
+        Self {
+            function,
+            framing: Framing::new(Samples(2048), Samples(512)),
+            threshold: OnsetThreshold::of(Amplitude(0.3)),
+            sensitivity: OnsetSensitivity::of(Amplitude::UNITY),
+            min_gap: OnsetGap::of(Seconds(0.05)),
+        }
+    }
+
+    /// The window and hop frames are taken at. A zero window or hop is refused
+    /// by the call that takes the audio.
+    #[must_use]
+    pub fn framing(mut self, framing: Framing) -> Self {
+        self.framing = framing;
+        self
+    }
+
+    /// Multiplier on the adaptive threshold. Higher rejects more.
+    #[must_use]
+    pub fn threshold(mut self, threshold: OnsetThreshold) -> Self {
+        self.threshold = threshold;
+        self
+    }
+
+    /// Gain applied to the detection function before thresholding.
+    #[must_use]
+    pub fn sensitivity(mut self, sensitivity: OnsetSensitivity) -> Self {
+        self.sensitivity = sensitivity;
+        self
+    }
+
+    /// Minimum spacing between accepted onsets.
+    ///
+    /// Takes seconds, like every other time-valued setting in the engine:
+    /// milliseconds on one setter and seconds on another of the same type is
+    /// how a gap ends up a thousand times off.
+    #[must_use]
+    pub fn min_gap(mut self, gap: OnsetGap) -> Self {
+        self.min_gap = gap;
+        self
+    }
+
+    /// Which detection function measures novelty between frames.
+    #[inline]
+    pub(crate) fn function(&self) -> DetectionFunction {
+        self.function
+    }
+
+    /// The config at `rate`.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::ZeroWindow`](crate::Error::ZeroWindow) or
+    /// [`Error::ZeroHop`](crate::Error::ZeroHop) for a zero window or hop.
+    pub(crate) fn plan(&self, rate: SampleRate) -> Result<OnsetPlan> {
+        Ok(OnsetPlan {
+            geometry: self.framing.geometry(rate)?,
+            function: self.function,
+            threshold: self.threshold.get(),
+            sensitivity: self.sensitivity.get(),
+            min_gap: self.min_gap.get().to_samples(rate),
+        })
+    }
+
+    /// A meter that detects onsets in audio at `rate`, chunk by chunk.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::ZeroWindow`](crate::Error::ZeroWindow) or
+    /// [`Error::ZeroHop`](crate::Error::ZeroHop) for a zero window or hop.
+    pub fn measure(&self, rate: impl Into<SampleRate>) -> Result<OnsetMeter> {
+        Ok(OnsetMeter::new(self.plan(rate.into())?))
+    }
+}
+
+/// An [`OnsetConfig`] at one sample rate.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct OnsetPlan {
     geometry: StftGeometry,
     function: DetectionFunction,
     threshold: Amplitude,
@@ -103,57 +224,11 @@ pub struct OnsetConfig {
     min_gap: Samples,
 }
 
-impl OnsetConfig {
-    /// Defaults: a 0.3 threshold multiplier, unity sensitivity, and a 50 ms
-    /// minimum gap.
-    #[must_use]
-    pub fn new(geometry: StftGeometry, function: DetectionFunction) -> Self {
-        let min_gap = Seconds(0.05).to_samples(geometry.sample_rate());
-        Self {
-            geometry,
-            function,
-            threshold: Amplitude(0.3),
-            sensitivity: Amplitude::UNITY,
-            min_gap,
-        }
-    }
-
-    /// Multiplier on the adaptive threshold. Higher rejects more.
-    #[must_use]
-    pub fn threshold(mut self, threshold: impl Into<Amplitude>) -> Self {
-        self.threshold = threshold.into();
-        self
-    }
-
-    /// Gain applied to the detection function before thresholding.
-    #[must_use]
-    pub fn sensitivity(mut self, sensitivity: impl Into<Amplitude>) -> Self {
-        self.sensitivity = sensitivity.into();
-        self
-    }
-
-    /// Minimum spacing between accepted onsets.
-    ///
-    /// Takes [`Seconds`], like every other time-valued setter in the engine —
-    /// milliseconds on one setter and seconds on another of the same type is
-    /// how a gap ends up a thousand times off.
-    #[must_use]
-    pub fn min_gap(mut self, gap: impl Into<Seconds>) -> Self {
-        let gap: Seconds = gap.into();
-        self.min_gap = gap.to_samples(self.geometry.sample_rate());
-        self
-    }
-
+impl OnsetPlan {
     /// The window, hop and sample rate onsets are detected on.
     #[inline]
     pub(crate) fn geometry(&self) -> StftGeometry {
         self.geometry
-    }
-
-    /// Which detection function measures novelty between frames.
-    #[inline]
-    pub(crate) fn function(&self) -> DetectionFunction {
-        self.function
     }
 }
 
@@ -194,178 +269,160 @@ pub(crate) fn onset_lag(geometry: StftGeometry) -> usize {
     (geometry.window().get() * 3 / 4).saturating_sub(geometry.hop().get() / 2)
 }
 
-/// What the detector carries between frames.
+/// A running onset detection at one rate: fed chunks of the buffer in order,
+/// of any length, it cuts the frames at the hop and reads the onsets at
+/// [`finish`](Self::finish).
 ///
-/// Explicit, so a batch run cannot inherit a streaming run's history — the
-/// previous frame's magnitudes are a value the caller holds, not state hidden
-/// behind `&mut self`.
-#[derive(Debug, Clone, Default)]
-pub struct OnsetState {
-    /// The config this carry belongs to.
-    ///
-    /// A carry is only meaningful for the config that produced it, and
-    /// `OnsetConfig` is `Copy` and passed per call — so nothing stops a caller
-    /// varying it mid-run. Recording it here lets [`step_onset`] reset instead
-    /// of measuring novelty against a reference from a different detection
-    /// function or a different time grid.
-    config: Option<OnsetConfig>,
+/// Spectral flux and complex-domain deviation both need the previous frame,
+/// which the meter carries, so a run cannot diff its first frame against
+/// another run's last.
+///
+/// Not for the audio thread: it keeps one novelty value per frame, so it grows
+/// with the audio and allocates.
+pub struct OnsetMeter {
+    plan: OnsetPlan,
+    cutter: FrameCutter,
+    fft: FftScratch,
+    /// The analysis window of the plan's geometry.
+    window: Vec<f32>,
+    /// The previous frame's magnitudes.
     previous: Vec<f32>,
     /// The current frame's bins, reused across frames.
-    ///
-    /// Lives here rather than in [`FftScratch`] because `FftScratch::forward`
-    /// takes its output slice from the caller — the buffer is this state's to
-    /// own, and it sits beside `previous` because the two are resized by the
-    /// same bin count on the same line.
     spectrum: Vec<Complex32>,
-    /// The analysis window of `config`'s geometry, built when the config is
-    /// adopted.
-    window: Vec<f32>,
     /// Novelty per frame, in analysis order. Thresholding is global, so peaks
     /// can only be picked once the run is complete.
     novelty: Vec<(Samples, f32)>,
 }
 
-impl OnsetState {
-    /// An empty carry: no previous frame, no accumulated novelty.
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
+impl core::fmt::Debug for OnsetMeter {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("OnsetMeter")
+            .field("plan", &self.plan)
+            .field("frames", &self.novelty.len())
+            .finish_non_exhaustive()
+    }
+}
+
+impl OnsetMeter {
+    fn new(plan: OnsetPlan) -> Self {
+        let bins = plan.geometry.bins_per_frame().get();
+        Self {
+            cutter: FrameCutter::new(Framing::new(plan.geometry.window(), plan.geometry.hop())),
+            fft: FftScratch::new(),
+            window: plan.geometry.window_coefficients(),
+            previous: vec![0.0; bins],
+            spectrum: vec![Complex32::default(); bins],
+            novelty: Vec::new(),
+            plan,
+        }
     }
 
-    /// Forgets everything. Equivalent to starting with a fresh state.
-    pub fn reset(&mut self) {
-        self.config = None;
-        self.previous.clear();
-        self.spectrum.clear();
-        self.window.clear();
-        self.novelty.clear();
+    /// Feeds the next chunk of the buffer, in order.
+    pub fn push<S: Sample>(&mut self, chunk: Mono<'_, S>) {
+        for_blocks(chunk.samples(), 1, |block| self.feed(block));
     }
 
-    /// The detection curve so far: one `(position, novelty)` pair per pushed
-    /// frame, in analysis order.
+    /// Takes converted samples and steps each frame they complete.
+    fn feed(&mut self, block: &[f32]) {
+        let Self {
+            plan,
+            cutter,
+            fft,
+            window,
+            previous,
+            spectrum,
+            novelty,
+        } = self;
+        cutter.feed(block, |index, samples| {
+            // Every spectral branch stores its magnitudes, including the ones
+            // that do not read them. Skipping the store leaves `previous`
+            // stale or zeroed, so the first frame after a switch measured
+            // novelty against the wrong reference, which then dominates the
+            // adaptive threshold for the whole run.
+            let value = match plan.function {
+                DetectionFunction::Energy => energy(samples),
+                DetectionFunction::SpectralFlux => {
+                    fft.forward(samples, window, spectrum);
+                    let v = spectral_flux(previous, spectrum);
+                    store_magnitudes(previous, spectrum);
+                    v
+                }
+                DetectionFunction::HighFrequencyContent => {
+                    fft.forward(samples, window, spectrum);
+                    let v = high_frequency_content(spectrum) * 0.01;
+                    store_magnitudes(previous, spectrum);
+                    v
+                }
+                DetectionFunction::ComplexDomain => {
+                    fft.forward(samples, window, spectrum);
+                    let v = complex_domain_deviation(previous, spectrum);
+                    store_magnitudes(previous, spectrum);
+                    v
+                }
+            };
+            let position = Samples(index * plan.geometry.hop().get());
+            novelty.push((position, value * plan.sensitivity.get()));
+        });
+    }
+
+    /// The detection curve so far: one `(position, novelty)` pair per frame
+    /// analysed, in analysis order.
     ///
-    /// The raw values [`finish`] thresholds, after the config's sensitivity
-    /// and before any peak picking, so a tempo or beat tracker can read the
-    /// curve itself. The scale depends on the [`DetectionFunction`] and is
-    /// only comparable within one run. Empty after [`reset`](Self::reset).
+    /// The raw values [`finish`](Self::finish) thresholds, after the config's
+    /// sensitivity and before any peak picking. The scale depends on the
+    /// [`DetectionFunction`] and is only comparable within one run.
     #[inline]
+    #[must_use]
     pub fn novelty(&self) -> &[(Samples, f32)] {
         &self.novelty
     }
+
+    /// Forgets everything fed. Equivalent to a fresh meter at the same rate.
+    pub fn reset(&mut self) {
+        self.cutter.reset();
+        self.previous.fill(0.0);
+        self.novelty.clear();
+    }
+
+    /// The onsets of the audio fed: peaks of the novelty above its adaptive
+    /// threshold, closer than the minimum gap resolved to the stronger.
+    #[must_use]
+    pub fn finish(self) -> Vec<Onset> {
+        let mut onsets = pick_peaks(&self.plan, &self.novelty);
+        suppress_close_onsets(&mut onsets, self.plan.min_gap);
+        onsets
+    }
 }
 
-/// Feeds one frame and accumulates its novelty.
+/// Detects onsets across a whole buffer at `rate`.
 ///
-/// Returns nothing per frame: the threshold is adaptive over the whole run, so
-/// no single frame can be judged in isolation. Call [`finish`] to pick peaks.
-pub fn step_onset(
-    cfg: &OnsetConfig,
-    state: &mut OnsetState,
-    frame: FrameIndex,
-    samples: &[f32],
-    fft: &mut FftScratch,
-) {
-    // The carry is only meaningful for the config that produced it. Comparing
-    // the whole config — not just the bin count — is what makes this correct:
-    // two geometries can share a window (and so a bin count) while differing
-    // in hop, which puts the carried frame on a different time grid.
-    if state.config != Some(*cfg) {
-        state.reset();
-        state.config = Some(*cfg);
-        // The window is the geometry's, so it is built once per config
-        // rather than once per frame.
-        state.window = cfg.geometry.window_coefficients();
-    }
-
-    let bins = cfg.geometry.bins_per_frame().get();
-    if state.previous.len() != bins {
-        state.previous = vec![0.0; bins];
-    }
-    // Resized, not rebuilt: `forward` overwrites every bin it is handed, so the
-    // contents carry nothing between frames — only the allocation does.
-    if state.spectrum.len() != bins {
-        state.spectrum.resize(bins, Complex32::default());
-    }
-
-    let position = Samples(frame.get() * cfg.geometry.hop().get());
-
-    // Every spectral branch stores its magnitudes, including the ones that do
-    // not read them. Skipping the store leaves `previous` stale or zeroed, so
-    // the first frame after a switch measured novelty against the wrong
-    // reference — overstating flux by ~12x and complex-domain deviation by
-    // ~15,000x in measurement, which then dominates the adaptive threshold and
-    // the strength normalization for the *whole* run.
-    let OnsetState {
-        previous,
-        spectrum,
-        window,
-        ..
-    } = state;
-    let value = match cfg.function {
-        DetectionFunction::Energy => spectral_energy(samples),
-        DetectionFunction::SpectralFlux => {
-            fft.forward(samples, window, spectrum);
-            let v = spectral_flux(previous, spectrum);
-            store_magnitudes(previous, spectrum);
-            v
-        }
-        DetectionFunction::HighFrequencyContent => {
-            fft.forward(samples, window, spectrum);
-            let v = high_frequency_content(spectrum) * 0.01;
-            store_magnitudes(previous, spectrum);
-            v
-        }
-        DetectionFunction::ComplexDomain => {
-            fft.forward(samples, window, spectrum);
-            let v = complex_domain_deviation(previous, spectrum);
-            store_magnitudes(previous, spectrum);
-            v
-        }
-    };
-
-    state
-        .novelty
-        .push((position, value * cfg.sensitivity.get()));
-}
-
-/// Picks peaks from the accumulated novelty and applies gap suppression.
-pub fn finish(cfg: &OnsetConfig, state: &OnsetState) -> Vec<Onset> {
-    let mut onsets = pick_peaks(cfg, &state.novelty);
-    suppress_close_onsets(&mut onsets, cfg.min_gap);
-    onsets
-}
-
-/// Detects onsets across a whole buffer.
-///
-/// Folds [`step_onset`] — the same implementation the streaming path uses, so
-/// the two cannot drift.
+/// Feeds one [`OnsetMeter`] the buffer, so the two cannot drift. `fft` is the
+/// caller's scratch, lent to the meter for the call so its plans are reused. A
+/// buffer shorter than one window yields no onsets.
 ///
 /// # Errors
 ///
-/// Never; the `Result` keeps the signature of the other whole-buffer
-/// analyses. A buffer shorter than one window yields no onsets.
-pub fn detect_onsets(
+/// [`Error::ZeroWindow`](crate::Error::ZeroWindow) or
+/// [`Error::ZeroHop`](crate::Error::ZeroHop) for a zero window or hop.
+pub fn detect_onsets<S: Sample>(
     cfg: &OnsetConfig,
-    samples: &[f32],
+    samples: Mono<'_, S>,
+    rate: impl Into<SampleRate>,
     fft: &mut FftScratch,
 ) -> Result<Vec<Onset>> {
-    let window = cfg.geometry.window().get();
-    if samples.len() < window {
-        return Ok(Vec::new());
-    }
+    let plan = cfg.plan(rate.into())?;
+    Ok(run(plan, &to_f32(samples.samples()), fft).finish())
+}
 
-    let mut state = OnsetState::new();
-    for frame in cfg.geometry.frames_for(Samples(samples.len())).indices() {
-        let offset = frame.get() * cfg.geometry.hop().get();
-        step_onset(
-            cfg,
-            &mut state,
-            frame,
-            &samples[offset..offset + window],
-            fft,
-        );
-    }
-    Ok(finish(cfg, &state))
+/// A meter for `plan` fed `samples`, with the caller's scratch lent to it: the
+/// whole-buffer run of the crate's own callers (tempo, notes), which hold a
+/// resolved plan and `f32` samples.
+pub(crate) fn run(plan: OnsetPlan, samples: &[f32], fft: &mut FftScratch) -> OnsetMeter {
+    let mut meter = OnsetMeter::new(plan);
+    core::mem::swap(&mut meter.fft, fft);
+    meter.feed(samples);
+    core::mem::swap(&mut meter.fft, fft);
+    meter
 }
 
 /// Drops onsets closer together than `min_gap`, keeping the stronger of a pair.
@@ -399,7 +456,7 @@ pub fn suppress_close_onsets(onsets: &mut Vec<Onset>, min_gap: Samples) {
 /// Strict local maxima above an adaptive `mean + k·σ` threshold.
 ///
 /// Endpoints are never reported: a maximum needs both neighbours.
-fn pick_peaks(cfg: &OnsetConfig, novelty: &[(Samples, f32)]) -> Vec<Onset> {
+fn pick_peaks(cfg: &OnsetPlan, novelty: &[(Samples, f32)]) -> Vec<Onset> {
     if novelty.len() < 3 {
         return Vec::new();
     }
@@ -443,28 +500,46 @@ mod tests {
 
     const SAMPLE_RATE: f64 = 44100.0;
 
+    fn rate() -> SampleRate {
+        SampleRate::of(SAMPLE_RATE)
+    }
+
+    fn plan(cfg: OnsetConfig) -> OnsetPlan {
+        cfg.plan(rate()).unwrap()
+    }
+
+    fn flux() -> OnsetConfig {
+        OnsetConfig::new(DetectionFunction::SpectralFlux)
+    }
+
+    fn detect_at(cfg: &OnsetConfig, samples: &[f32], fft: &mut FftScratch) -> Vec<Onset> {
+        detect_onsets(cfg, Mono::new(samples), rate(), fft).unwrap()
+    }
+
+    fn amplitude(a: f32) -> OnsetThreshold {
+        OnsetThreshold::of(Amplitude(a))
+    }
+
+    fn gain(a: f32) -> OnsetSensitivity {
+        OnsetSensitivity::of(Amplitude(a))
+    }
+
+    fn gap(seconds: f64) -> OnsetGap {
+        OnsetGap::of(Seconds(seconds))
+    }
+
     /// The curve has one entry per frame, at the frame's start sample, scaled by
     /// the config's sensitivity, and a click raises the frame that holds it.
     #[test]
     fn the_novelty_curve_is_readable_per_frame_and_scaled_by_sensitivity() {
         let samples = signal(0.5, &[0.2]);
-        let run = |gain: f32| {
-            let cfg = OnsetConfig::new(geometry(), DetectionFunction::Energy)
-                .sensitivity(Amplitude(gain));
-            let mut state = OnsetState::new();
-            let window = cfg.geometry().window().get();
-            let mut fft = FftScratch::new();
-            for frame in cfg.geometry().frames_for(Samples(samples.len())).indices() {
-                let offset = frame.get() * cfg.geometry().hop().get();
-                step_onset(
-                    &cfg,
-                    &mut state,
-                    frame,
-                    &samples[offset..offset + window],
-                    &mut fft,
-                );
-            }
-            state
+        let run = |factor: f32| {
+            let mut meter = OnsetConfig::new(DetectionFunction::Energy)
+                .sensitivity(gain(factor))
+                .measure(rate())
+                .unwrap();
+            meter.push(Mono::new(&samples));
+            meter
         };
         let (one, three) = (run(1.0), run(3.0));
         for (i, &(position, _)) in one.novelty().iter().enumerate() {
@@ -483,10 +558,6 @@ mod tests {
         assert!(cleared.novelty().is_empty());
     }
 
-    fn geometry() -> StftGeometry {
-        StftGeometry::new(SampleRate::of(SAMPLE_RATE), Samples(2048), Samples(512)).unwrap()
-    }
-
     fn signal(seconds: f64, onsets: &[f64]) -> Vec<f32> {
         let n = (SAMPLE_RATE * seconds) as usize;
         let mut samples = vec![0.0f32; n];
@@ -499,178 +570,98 @@ mod tests {
         samples
     }
 
-    /// The property the explicit carry buys: batch and streaming agree by
-    /// construction, because they run the same step function.
+    /// The property the explicit carry buys: a meter fed chunks of any size
+    /// and the one-shot agree bit for bit, because they run the same step.
     #[test]
-    fn batch_and_streaming_agree() {
-        let cfg = OnsetConfig::new(geometry(), DetectionFunction::SpectralFlux)
-            .threshold(Amplitude(0.2))
-            .sensitivity(Amplitude(2.0));
+    fn a_meter_fed_in_chunks_equals_the_one_shot() {
+        let cfg = flux().threshold(amplitude(0.2)).sensitivity(gain(2.0));
         let samples = signal(1.0, &[0.1, 0.3, 0.5, 0.7]);
         let mut fft = FftScratch::new();
 
-        let batch = detect_onsets(&cfg, &samples, &mut fft).unwrap();
+        let batch = detect_at(&cfg, &samples, &mut fft);
+        assert_eq!(batch.len(), 4);
 
-        let mut state = OnsetState::new();
-        let window = cfg.geometry().window().get();
-        for frame in cfg.geometry().frames_for(Samples(samples.len())).indices() {
-            let offset = frame.get() * cfg.geometry().hop().get();
-            step_onset(
-                &cfg,
-                &mut state,
-                frame,
-                &samples[offset..offset + window],
-                &mut fft,
-            );
+        for chunk in [1usize, 7, 511, 2048, 3001, samples.len()] {
+            let mut meter = cfg.measure(rate()).unwrap();
+            for part in samples.chunks(chunk) {
+                meter.push(Mono::new(part));
+            }
+            let curve = meter.novelty().to_vec();
+            assert_eq!(meter.finish(), batch, "chunk {chunk}");
+
+            let reference = cfg.measure(rate()).unwrap();
+            let mut whole = reference;
+            whole.push(Mono::new(&samples));
+            assert_eq!(curve, whole.novelty(), "chunk {chunk}");
         }
-        let streamed = finish(&cfg, &state);
-
-        assert_eq!(batch, streamed);
     }
 
-    /// A reused state must be reset; a fresh one needs nothing. Both paths are
-    /// visible at the call site rather than hidden in a method.
+    /// Every sample format reads at its nominal level: a 16-bit copy of the
+    /// signal gives the novelty of the `f32` signal to within quantisation.
     #[test]
-    fn a_reset_state_matches_a_fresh_one() {
-        let cfg = OnsetConfig::new(geometry(), DetectionFunction::SpectralFlux);
+    fn an_integer_buffer_is_read_at_its_nominal_level() {
+        let cfg = flux();
+        let samples = signal(0.5, &[0.1, 0.3]);
+        let ints: Vec<i16> = samples
+            .iter()
+            .map(|&s| (s * f32::from(i16::MAX)) as i16)
+            .collect();
+        let mut float = cfg.measure(rate()).unwrap();
+        float.push(Mono::new(&samples));
+        let mut int = cfg.measure(rate()).unwrap();
+        int.push(Mono::new(&ints));
+        assert_eq!(float.novelty().len(), int.novelty().len());
+        for (a, b) in float.novelty().iter().zip(int.novelty()) {
+            assert!((a.1 - b.1).abs() <= 1e-2 * a.1.max(1.0), "{a:?} {b:?}");
+        }
+    }
+
+    /// A reused meter must be reset; a fresh one needs nothing.
+    #[test]
+    fn a_reset_meter_matches_a_fresh_one() {
         let a = signal(0.5, &[0.1, 0.3]);
         let b = signal(0.5, &[0.2]);
-        let mut fft = FftScratch::new();
 
-        let mut reused = OnsetState::new();
-        run(&cfg, &mut reused, &a, &mut fft);
+        let mut reused = flux().measure(rate()).unwrap();
+        reused.push(Mono::new(&a));
         reused.reset();
-        run(&cfg, &mut reused, &b, &mut fft);
+        reused.push(Mono::new(&b));
 
-        let mut fresh = OnsetState::new();
-        run(&cfg, &mut fresh, &b, &mut fft);
+        let mut fresh = flux().measure(rate()).unwrap();
+        fresh.push(Mono::new(&b));
 
-        assert_eq!(finish(&cfg, &reused), finish(&cfg, &fresh));
+        assert_eq!(reused.finish(), fresh.finish());
     }
 
     /// The per-frame spectrum buffer is allocated once, not per frame.
     ///
-    /// `detect_onsets` folds `step_onset` over every frame of the buffer, so a
-    /// fresh `vec![Complex32; bins]` there cost one allocation per frame — tens
-    /// of thousands for a few minutes of audio.
+    /// A fresh `vec![Complex32; bins]` per frame cost one allocation per
+    /// frame, tens of thousands for a few minutes of audio.
     ///
-    /// Asserted by **writing a sentinel into the buffer and seeing it survive**
-    /// the resize check on the next frame. Two weaker observables do not
-    /// work: `capacity()` is identical either way (a fresh
-    /// `vec![_; bins]` allocates exactly `bins`), and this crate deliberately
-    /// carries no `assert_no_alloc` dev-dependency — see its Cargo.toml, which
-    /// records that everything here is cold-path batch analysis that
-    /// legitimately allocates its output. A buffer that is *replaced* loses the
-    /// sentinel; one that is refilled in place keeps the allocation and only
-    /// has its bins overwritten by `forward`.
+    /// Asserted by **reserving past the buffer and seeing the reserve
+    /// survive**: `capacity()` is identical for a refilled buffer and a fresh
+    /// `vec![_; bins]`, but a buffer that is *replaced* loses the spare
+    /// capacity and one refilled in place keeps it.
     #[test]
     fn the_spectrum_buffer_is_reused_across_frames() {
-        let cfg = OnsetConfig::new(geometry(), DetectionFunction::SpectralFlux);
-        let mut fft = FftScratch::new();
-        let mut state = OnsetState::new();
+        let mut meter = flux().measure(rate()).unwrap();
         let samples = signal(1.0, &[0.1, 0.3, 0.5, 0.7]);
+        let bins = meter.spectrum.len();
+        assert!(bins > 0);
 
-        // First frame sizes the buffer.
-        let window = cfg.geometry().window().get();
-        step_onset(
-            &cfg,
-            &mut state,
-            FrameIndex(0),
-            &samples[..window],
-            &mut fft,
-        );
-        let bins = state.spectrum.len();
-        assert!(bins > 0, "the first frame must have sized the buffer");
-
-        // Reserve well past what a frame needs. `resize` back down to `bins`
-        // keeps the larger allocation; `vec![_; bins]` requests a fresh one
-        // sized exactly `bins`, so the spare capacity is what separates them.
-        state.spectrum.reserve_exact(bins * 4);
-        let reserved = state.spectrum.capacity();
+        meter.spectrum.reserve_exact(bins * 4);
+        let reserved = meter.spectrum.capacity();
         assert!(reserved > bins, "the reserve must actually over-allocate");
 
-        run(&cfg, &mut state, &samples, &mut fft);
+        meter.push(Mono::new(&samples));
 
-        assert!(state.novelty().len() > 8, "the run must cover many frames");
+        assert!(meter.novelty().len() > 8, "the run must cover many frames");
+        assert_eq!(meter.spectrum.len(), bins, "one frame of bins");
         assert_eq!(
-            state.spectrum.len(),
-            bins,
-            "the buffer is exactly one frame of bins"
-        );
-        assert_eq!(
-            state.spectrum.capacity(),
+            meter.spectrum.capacity(),
             reserved,
-            "every frame must refill the same allocation — a rebuilt \
-             `vec![_; bins]` would drop this spare capacity"
+            "every frame must refill the same allocation"
         );
-    }
-
-    fn run(cfg: &OnsetConfig, state: &mut OnsetState, samples: &[f32], fft: &mut FftScratch) {
-        let window = cfg.geometry().window().get();
-        for frame in cfg.geometry().frames_for(Samples(samples.len())).indices() {
-            let offset = frame.get() * cfg.geometry().hop().get();
-            step_onset(cfg, state, frame, &samples[offset..offset + window], fft);
-        }
-    }
-
-    /// Changing the config mid-run invalidates the carry.
-    ///
-    /// `OnsetConfig` is `Copy` and passed per call, so a caller can vary it
-    /// between frames. Unhandled, the first frame after a switch would diff
-    /// against a reference from the previous function — measured at ~12x
-    /// overstatement for flux and ~15,000x for complex-domain — which would
-    /// then dominate the adaptive threshold and strength normalization for
-    /// the whole run.
-    #[test]
-    fn switching_config_mid_run_resets_the_carry() {
-        let samples = signal(0.5, &[0.1, 0.25]);
-        let mut fft = FftScratch::new();
-
-        let hfc = OnsetConfig::new(geometry(), DetectionFunction::HighFrequencyContent);
-        let flux = OnsetConfig::new(geometry(), DetectionFunction::SpectralFlux);
-
-        // Run HFC frames, then switch to flux on the same state.
-        let mut switched = OnsetState::new();
-        run(&hfc, &mut switched, &samples, &mut fft);
-        run(&flux, &mut switched, &samples, &mut fft);
-
-        // A state that only ever saw flux.
-        let mut clean = OnsetState::new();
-        run(&flux, &mut clean, &samples, &mut fft);
-
-        assert_eq!(
-            finish(&flux, &switched),
-            finish(&flux, &clean),
-            "a config switch must discard the previous function's carry"
-        );
-    }
-
-    /// Same window, different hop: the bin count is identical, so a
-    /// bins-only guard would not notice the time grid changed.
-    #[test]
-    fn a_hop_change_alone_resets_the_carry() {
-        let samples = signal(0.5, &[0.1, 0.25]);
-        let mut fft = FftScratch::new();
-
-        let coarse = OnsetConfig::new(
-            StftGeometry::new(SampleRate::of(SAMPLE_RATE), Samples(2048), Samples(1024)).unwrap(),
-            DetectionFunction::SpectralFlux,
-        );
-        let fine = OnsetConfig::new(geometry(), DetectionFunction::SpectralFlux);
-        assert_eq!(
-            coarse.geometry().bins_per_frame(),
-            fine.geometry().bins_per_frame(),
-            "the two geometries must share a bin count for this test to bite"
-        );
-
-        let mut switched = OnsetState::new();
-        run(&coarse, &mut switched, &samples, &mut fft);
-        run(&fine, &mut switched, &samples, &mut fft);
-
-        let mut clean = OnsetState::new();
-        run(&fine, &mut clean, &samples, &mut fft);
-
-        assert_eq!(finish(&fine, &switched), finish(&fine, &clean));
     }
 
     #[test]
@@ -684,17 +675,17 @@ mod tests {
             DetectionFunction::HighFrequencyContent,
             DetectionFunction::ComplexDomain,
         ] {
-            let cfg = OnsetConfig::new(geometry(), function)
-                .threshold(Amplitude(0.2))
-                .sensitivity(Amplitude(2.0));
-            let onsets = detect_onsets(&cfg, &samples, &mut fft).unwrap();
+            let cfg = OnsetConfig::new(function)
+                .threshold(amplitude(0.2))
+                .sensitivity(gain(2.0));
+            let onsets = detect_at(&cfg, &samples, &mut fft);
 
             assert_eq!(onsets.len(), truth.len(), "{function:?}: wrong count");
 
             // Reported early by up to one window — a frame is attributed to
             // its start offset, so the error grows with how deep into the
             // frame the spike falls.
-            let tolerance = cfg.geometry().window().get() as f64 / SAMPLE_RATE;
+            let tolerance = plan(cfg).geometry().window().get() as f64 / SAMPLE_RATE;
             for (found, &expected) in onsets.iter().zip(&truth) {
                 let t = found.time(SampleRate::of(SAMPLE_RATE)).get();
                 assert!(
@@ -709,35 +700,47 @@ mod tests {
     /// weakness stays a known property rather than becoming a silent change.
     #[test]
     fn energy_misses_short_decaying_spikes() {
-        let cfg = OnsetConfig::new(geometry(), DetectionFunction::Energy)
-            .threshold(Amplitude(0.2))
-            .sensitivity(Amplitude(2.0));
+        let cfg = OnsetConfig::new(DetectionFunction::Energy)
+            .threshold(amplitude(0.2))
+            .sensitivity(gain(2.0));
         let samples = signal(1.0, &[0.1, 0.3, 0.5, 0.7]);
         let mut fft = FftScratch::new();
 
-        assert!(detect_onsets(&cfg, &samples, &mut fft).unwrap().is_empty());
+        assert!(detect_at(&cfg, &samples, &mut fft).is_empty());
+    }
+
+    /// The defaults a config documents: a 0.3 threshold multiplier, unity
+    /// sensitivity, a 50 ms gap, and frames of 2048 samples every 512.
+    #[test]
+    fn the_defaults_are_the_documented_ones() {
+        let p = plan(flux());
+        assert_eq!(p.threshold, Amplitude(0.3));
+        assert_eq!(p.sensitivity, Amplitude::UNITY);
+        assert_eq!(p.min_gap, Samples(2205));
+        assert_eq!(p.geometry().window(), Samples(2048));
+        assert_eq!(p.geometry().hop(), Samples(512));
     }
 
     #[test]
     fn the_gap_is_expressed_in_seconds() {
-        let cfg =
-            OnsetConfig::new(geometry(), DetectionFunction::SpectralFlux).min_gap(Seconds(0.05));
-        assert_eq!(cfg.min_gap, Samples(2205));
-
-        let wide = cfg.min_gap(Seconds(0.5));
-        assert_eq!(wide.min_gap, Samples(22050));
+        let cfg = flux().min_gap(gap(0.05));
+        assert_eq!(plan(cfg).min_gap, Samples(2205));
+        assert_eq!(plan(cfg.min_gap(gap(0.5))).min_gap, Samples(22050));
+        // The same seconds are twice the samples at twice the rate.
+        assert_eq!(
+            cfg.plan(SampleRate::of(88200.0)).unwrap().min_gap,
+            Samples(4410)
+        );
     }
 
     #[test]
     fn a_wide_gap_suppresses_close_onsets() {
-        let cfg = OnsetConfig::new(geometry(), DetectionFunction::SpectralFlux)
-            .threshold(Amplitude(0.2))
-            .sensitivity(Amplitude(2.0));
+        let cfg = flux().threshold(amplitude(0.2)).sensitivity(gain(2.0));
         let samples = signal(1.0, &[0.1, 0.3, 0.5, 0.7]);
         let mut fft = FftScratch::new();
 
-        let baseline = detect_onsets(&cfg, &samples, &mut fft).unwrap().len();
-        let widened = detect_onsets(&cfg.min_gap(Seconds(0.5)), &samples, &mut fft).unwrap();
+        let baseline = detect_at(&cfg, &samples, &mut fft).len();
+        let widened = detect_at(&cfg.min_gap(gap(0.5)), &samples, &mut fft);
 
         assert!(widened.len() < baseline);
     }
@@ -779,26 +782,6 @@ mod tests {
         assert_eq!(kept, [0, 1200]);
     }
 
-    /// The analysis window is the config's: a state that switches to a
-    /// geometry with another window function analyses with the new one.
-    #[test]
-    fn a_config_switch_rebuilds_the_window() {
-        let hann = OnsetConfig::new(geometry(), DetectionFunction::SpectralFlux);
-        let blackman = OnsetConfig::new(
-            geometry().with_window_fn(tutti_dsp::CosineWindow::BLACKMAN),
-            DetectionFunction::SpectralFlux,
-        );
-        let samples = signal(0.1, &[0.01]);
-        let frame = &samples[..geometry().window().get()];
-        let mut fft = FftScratch::new();
-        let mut state = OnsetState::new();
-        step_onset(&hann, &mut state, FrameIndex(0), frame, &mut fft);
-        assert_eq!(state.window, hann.geometry().window_coefficients());
-        step_onset(&blackman, &mut state, FrameIndex(1), frame, &mut fft);
-        assert_eq!(state.window, blackman.geometry().window_coefficients());
-        assert_ne!(state.window, hann.geometry().window_coefficients());
-    }
-
     /// Unsorted input must not underflow.
     ///
     /// `pick_peaks` emits ascending positions, but the function is public and
@@ -824,7 +807,6 @@ mod tests {
 
     #[test]
     fn detection_functions_respond_to_what_they_are_for() {
-        let quiet = vec![Complex32::new(0.1, 0.0); 16];
         let loud = vec![Complex32::new(1.0, 0.0); 16];
         let previous = vec![0.1f32; 16];
 
@@ -843,18 +825,42 @@ mod tests {
         high[15] = Complex32::new(1.0, 0.0);
         assert!(high_frequency_content(&high) > high_frequency_content(&low));
 
-        assert!(spectral_energy(&[1.0, 1.0, 1.0, 1.0]) > spectral_energy(&[0.1; 4]));
-        let _ = quiet;
+        assert!(
+            spectral_energy(Mono::new(&[1.0f32; 4])) > spectral_energy(Mono::new(&[0.1f32; 4]))
+        );
     }
 
     #[test]
     fn input_shorter_than_a_window_yields_nothing() {
-        let cfg = OnsetConfig::new(geometry(), DetectionFunction::SpectralFlux);
         let mut fft = FftScratch::new();
-        assert!(
-            detect_onsets(&cfg, &[0.0; 100], &mut fft)
-                .unwrap()
-                .is_empty()
-        );
+        assert!(detect_at(&flux(), &[0.0; 100], &mut fft).is_empty());
+        let mut meter = flux().measure(rate()).unwrap();
+        meter.push(Mono::new(&[0.0f32; 100]));
+        assert!(meter.novelty().is_empty());
+        assert!(meter.finish().is_empty());
+    }
+
+    /// A zero window or hop is refused by the call that takes the rate.
+    #[test]
+    fn a_zero_framing_is_refused_where_the_rate_binds() {
+        for framing in [
+            Framing::new(Samples(0), Samples(512)),
+            Framing::new(Samples(2048), Samples(0)),
+        ] {
+            let cfg = flux().framing(framing);
+            assert!(matches!(
+                cfg.measure(rate()),
+                Err(crate::Error::ZeroWindow | crate::Error::ZeroHop)
+            ));
+            assert!(matches!(
+                detect_onsets(
+                    &cfg,
+                    Mono::new(&[0.0f32; 4096]),
+                    rate(),
+                    &mut FftScratch::new()
+                ),
+                Err(crate::Error::ZeroWindow | crate::Error::ZeroHop)
+            ));
+        }
     }
 }

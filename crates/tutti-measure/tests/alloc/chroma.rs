@@ -1,52 +1,43 @@
-//! A chroma step allocates nothing once its state holds the buffers.
+//! A chroma push allocates nothing once its meter is made.
 //!
 //! The crate carries no `assert_no_alloc` dev-dependency (see its Cargo.toml),
 //! so this binary counts allocations with its own global allocator. It counts
 //! per thread, so the harness's other threads do not show up in a count.
 
-use tutti_dsp::{FftScratch, StftGeometry};
+use tutti_buffers::Mono;
 use tutti_fixtures::allocations;
-use tutti_measure::{ChromaConfig, ChromaState, Tuning, TuningOffset, step_chroma};
-use tutti_types::{Cents, SampleRate, Samples};
+use tutti_measure::{ChromaConfig, Framing};
+use tutti_types::{SampleRate, Samples};
 
-/// After one step has built the buffers and planned the FFT, further steps, a
-/// `reset` and a step, and a step under a config that differs only in tuning
-/// allocate nothing. A different geometry rebuilds the buffers, which does.
+/// Construction builds the buffers and plans the FFT, so every push, the first
+/// included, and a `reset` allocate nothing.
 #[test]
-fn steps_after_the_first_do_not_allocate() {
-    let geometry = StftGeometry::new(SampleRate::SR_22K05, Samples(2048), Samples(512)).unwrap();
-    let cfg = ChromaConfig::new(geometry).unwrap();
-    let fixed = cfg.tuning(Tuning::Fixed(TuningOffset::of(Cents(10.0))));
+fn no_push_allocates() {
+    let cfg = ChromaConfig::new().framing(Framing::new(Samples(2048), Samples(512)));
     let frame: Vec<f32> = (0..2048)
         .map(|i| (std::f32::consts::TAU * 440.0 * i as f32 / 22_050.0).sin() * 0.5)
         .collect();
-    let (mut state, mut fft) = (ChromaState::new(), FftScratch::new());
+    let rate = SampleRate::SR_22K05;
+    let mut meter = None;
+    let built = allocations(|| meter = Some(cfg.measure(rate).unwrap()));
+    assert!(built > 0, "construction builds the buffers");
+    let mut meter = meter.unwrap();
 
+    // Construction planned the transform, so even the first push allocates
+    // nothing.
     let first = allocations(|| {
-        step_chroma(&cfg, &mut state, &frame, &mut fft).unwrap();
+        meter.push(Mono::new(&frame)).unwrap();
     });
-    assert!(first > 0, "the first step builds the buffers");
+    assert_eq!(first, 0, "the first push");
 
     let again = allocations(|| {
-        step_chroma(&cfg, &mut state, &frame, &mut fft).unwrap();
+        meter.push(Mono::new(&frame)).unwrap();
     });
-    assert_eq!(again, 0, "a second step");
+    assert_eq!(again, 0, "a second push");
 
     let reset = allocations(|| {
-        state.reset();
-        step_chroma(&cfg, &mut state, &frame, &mut fft).unwrap();
+        meter.reset();
+        meter.push(Mono::new(&frame)).unwrap();
     });
-    assert_eq!(reset, 0, "reset and a step");
-
-    let retuned = allocations(|| {
-        step_chroma(&fixed, &mut state, &frame, &mut fft).unwrap();
-    });
-    assert_eq!(retuned, 0, "a tuning-only switch and a step");
-
-    let wider = StftGeometry::new(SampleRate::SR_22K05, Samples(4096), Samples(512)).unwrap();
-    let wide = ChromaConfig::new(wider).unwrap();
-    let rebuilt = allocations(|| {
-        step_chroma(&wide, &mut state, &vec![0.0; 4096], &mut fft).unwrap();
-    });
-    assert!(rebuilt > 0, "a new geometry rebuilds");
+    assert_eq!(reset, 0, "reset and a push");
 }
