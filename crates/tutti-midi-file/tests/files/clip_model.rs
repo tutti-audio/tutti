@@ -267,6 +267,38 @@ fn a_dctpq_is_1_to_65535_and_zero_is_refused() {
     }
 }
 
+/// M2-104 section 7.2.3.1: an application may use a wall clock time base, a
+/// Set Tempo of 60 beats per minute and a DCTPQ equal to the ticks a second.
+/// With 1000 ticks per quarter note at 60 bpm a tick is a millisecond, so a note
+/// at tick 2500 sounds at 2.5 seconds.
+/// Spec: m2-104/7.2.3.1#2
+#[test]
+fn a_wall_clock_clip_has_a_millisecond_tick() {
+    let parts = [
+        dcs(0),
+        dctpq(1000),
+        dcs(0),
+        start(),
+        dcs(0),
+        set_tempo(60.0),
+        dcs(2500),
+        on(60, 0x8000),
+        dcs(500),
+        off(60),
+        dcs(0),
+        end(),
+    ];
+    let file = MidiFile::from_bytes(&clip(&parts)).unwrap();
+    let events = &file.tracks()[0].events;
+    let note = events
+        .iter()
+        .find(|(_, e)| matches!(e, FileEvent::Message(Message::Midi2(..))))
+        .unwrap();
+    assert_eq!(note.0, Tick(2500));
+    let seconds = file.seconds_at(file.beat_at(note.0)).get();
+    assert!((seconds - 2.5).abs() < 1e-9, "{seconds}");
+}
+
 /// Spec: m2-116/7#3, m2-116/7.1#1
 #[test]
 fn a_clip_without_start_of_clip_is_refused() {
@@ -527,7 +559,7 @@ fn a_message_before_the_dctpq_is_refused() {
 /// Section 6: the header may hold other messages that configure a receiver,
 /// each behind its own DCS. They are in the model, in order with their delta
 /// times, are not events of the sequence, and write back.
-/// Spec: m2-116/6#7, m2-116/6.1#1, m2-116/6.3#1
+/// Spec: m2-116/6#7, m2-116/6.1#1, m2-116/6.3#1, m2-116/2#1
 #[test]
 fn a_header_with_program_change_cc_and_sysex_round_trips() {
     let control = Ump::from(Message::Midi2(

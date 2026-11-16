@@ -12,7 +12,7 @@ const NOTE: [u32; 2] = [0x4093_3C00, 0x8000_0000];
 /// A System Timing Clock (type 1, 1 word).
 const CLOCK: u32 = 0x10F8_0000;
 
-/// Spec: m2-104/2.1#2
+/// Spec: m2-104/2.1#2, m2-104/2.1.1#1
 #[test]
 fn mixed_lengths_are_walked_by_type() {
     let words = [JR, NOTE[0], NOTE[1], CLOCK];

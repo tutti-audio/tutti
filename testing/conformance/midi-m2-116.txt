@@ -21,13 +21,13 @@
 #   m2-116/hdr/<n>                the nth byte of the file header: facts
 #                                 byte (1-based) and value
 # side: writer, reader or both (todo marks a row not yet read).
-m2-116/1.2#1 | both |  | permitted | M2-116 §1.2 | background: SMF type 2 lets each track have its own tempo; no Clip File behaviour |  | other-side | M2-116 §1.2: background on SMF type 2, no Clip File behaviour
-m2-116/1.4.1#1 | both |  | permitted | M2-116 §1.4.1 | glossary: a Profile can list mandatory and optional messages, definition only |  | other-side | M2-116 §1.4.1: glossary entry, no implementation requirement
-m2-116/1.4.1#2 | both |  | permitted | M2-116 §1.4.1 | glossary: Property Exchange reads another device's property data, definition only |  | other-side | M2-116 §1.4.1: glossary entry, no implementation requirement
-m2-116/1.4.1#3 | both |  | recommended | M2-116 §1.4.1 | glossary: tempo is clocks per time unit, definition only |  | other-side | M2-116 §1.4.1: glossary entry, no implementation requirement
-m2-116/1.4.1#4 | both |  | permitted | M2-116 §1.4.1 | glossary: a Transaction can have several replies, definition only |  | other-side | M2-116 §1.4.1: glossary entry, no implementation requirement
-m2-116/1.4.1#5 | both |  | permitted | M2-116 §1.4.1 | glossary: a Transaction can be a longer multi-step exchange, definition only |  | other-side | M2-116 §1.4.1: glossary entry, no implementation requirement
-m2-116/2#1 | both |  | permitted | M2-116 §2 | comparison with SMF type 0: the configuration header can set up a receiver before the sequence plays |  | other-side | M2-116 §2: comparison with SMF type 0, background
+m2-116/1.2#1 | both |  | permitted | M2-116 §1.2 | background: SMF type 2 lets each track have its own tempo; no Clip File behaviour |  | other-side | M2-116 §1.2: subject is SMF Type 2 files, another format ("each track may have its own tempo")
+m2-116/1.4.1#1 | both |  | permitted | M2-116 §1.4.1 | glossary: a Profile can list mandatory and optional messages, definition only |  | other-side | M2-116 §1.4.1: subject is a Profile, "An MA/AMEI specification" ("A Profile may have a defined minimum set")
+m2-116/1.4.1#2 | both |  | permitted | M2-116 §1.4.1 | glossary: Property Exchange reads another device's property data, definition only |  |  |
+m2-116/1.4.1#3 | both |  | recommended | M2-116 §1.4.1 | glossary: tempo is clocks per time unit, definition only |  | other-side | M2-116 §1.4.1: subject is a passage of music ("The rate at which a passage of music is or should be played")
+m2-116/1.4.1#4 | both |  | permitted | M2-116 §1.4.1 | glossary: a Transaction can have several replies, definition only |  |  |
+m2-116/1.4.1#5 | both |  | permitted | M2-116 §1.4.1 | glossary: a Transaction can be a longer multi-step exchange, definition only |  |  |
+m2-116/2#1 | both |  | permitted | M2-116 §2 | comparison with SMF type 0: the configuration header can set up a receiver before the sequence plays |  |  |
 m2-116/3.2.1#1 | both |  | required | M2-116 §3.2.1 | the file holds one DCTPQ, the first message after the file header and any Set Profile On messages |  |  |
 m2-116/3.2.1#2 | both |  | required | M2-116 §3.2.1 | the DCTPQ has a Delta Clockstamp before it that counts zero ticks |  |  |
 m2-116/3.2.2#1 | both |  | required | M2-116 §3.2.2 | a message other than a Delta Clockstamp is timed by the nearest Delta Clockstamp before it |  |  |
@@ -64,7 +64,7 @@ m2-116/6.1.2#5 | writer |  | recommended | M2-116 §6.1.2 | Set Time Signature m
 m2-116/6.2#1 | both |  | permitted | M2-116 §6.2 | some sequence data can be aimed at a device that supports a given MIDI-CI Profile |  |  |
 m2-116/6.2#2 | both |  | permitted | M2-116 §6.2 | Profile configuration can set a receiver up to respond well to the sequence data |  |  |
 m2-116/6.2#3 | writer |  | recommended | M2-116 §6.2 | data meant for a Profile gets a Set Profile On with that Profile ID at the start of the header |  |  |
-m2-116/6.2#4 | writer |  | recommended | M2-116 §6.2 | note: Profiles can be complex, so authors should take care; advice only |  | other-side | M2-116 §6.2: note advising sequence authors, no behaviour
+m2-116/6.2#4 | writer |  | recommended | M2-116 §6.2 | note: Profiles can be complex, so authors should take care; advice only |  | other-side | M2-116 §6.2: subject is the authors of sequence data, people ("Authors of sequence data should be aware")
 m2-116/6.2.1.1#1 | reader |  | recommended | M2-116 §6.2.1.1 | a sequencer reads the Set Profile On from the header and runs the MIDI-CI discovery, inquiry and Set Profile On transactions to configure the receiver |  |  |
 m2-116/6.2.1.1#2 | reader |  | recommended | M2-116 §6.2.1.1 | the sequencer does that on load, before it sends the rest of the header and the sequence |  |  |
 m2-116/6.3#1 | both |  | permitted | M2-116 §6.3 | the header can hold other UMP messages that prepare the receiver, such as bank and program, volume, pan, Profile messages and SysEx |  |  |

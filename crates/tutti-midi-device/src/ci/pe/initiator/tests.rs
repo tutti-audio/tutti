@@ -339,6 +339,7 @@ fn a_get_is_one_header_only_chunk() {
 // M2-103 §9, §6.2: the reply is reassembled whatever its chunks, its Property
 // Data decoded by the encoding the reply names, and the status, header and body
 // delivered together.
+/// Spec: m2-104/1.6.1#3, m2-104/1.6.1#5, m2-116/1.4.1#2, m2-116/1.4.1#4
 #[test]
 fn a_get_reply_of_many_chunks_is_decoded_by_its_mutual_encoding() {
     let (mut i, now) = ready(2);
@@ -458,7 +459,7 @@ fn a_notify_status_is_not_a_reply_status() {
 
 // M2-103 §15, §15.2: under Flow Control each chunk of the reply is acknowledged
 // with ACK 0x11 naming the chunk (Table 94), and the last too for a Get.
-/// Spec: m2-103/15.2#1
+/// Spec: m2-103/15.2#1, m2-104/1.6.1#6, m2-116/1.4.1#5
 #[test]
 fn a_get_under_flow_control_acknowledges_every_chunk_including_the_last() {
     let (mut i, now) = ready(2);

@@ -206,7 +206,7 @@ fn a_discovery_of_another_version_is_answered() {
 // Figure 14, §7.1.3: word 1 holds the manufacturer's three bytes, word 2 the
 // family and model, word 3 the revision. §7.1.4: a 30 byte name is a Start (14),
 // a Continue (14) and an End (2 then zeros). §7.1.5: "SN-0001" is Complete.
-/// Spec: m2-104/7.1.4#2, m2-104/7.1.5#7
+/// Spec: m2-104/7.1.4#2, m2-104/7.1.5#7, m2-104/7.1.3#2
 #[test]
 fn identity_name_and_instance_id_words() {
     let out = ask(&mut device(), discovery(ALL));
