@@ -23,6 +23,11 @@ pub enum BridgeError {
     #[error("Bridge configuration refused: {0}")]
     Timeouts(#[from] crate::ZeroTimeout),
 
+    /// The thread that watches the subprocess's end could not start, so the
+    /// subprocess is not run.
+    #[error("the plugin-server's exit cannot be watched: {0}")]
+    ExitUnwatched(#[source] std::io::Error),
+
     /// The host could not reach the subprocess over its control socket.
     #[error("Bridge connection failed: {0}")]
     ConnectionFailed(String),

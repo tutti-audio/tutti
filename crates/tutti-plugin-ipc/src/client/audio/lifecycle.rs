@@ -129,6 +129,9 @@ impl Lifecycle {
 
     pub(super) fn request_shutdown(&self) {
         self.running.store(false, Ordering::Release);
+        // Store-load pair with the load in `crash`: ordered before the kill that
+        // the guard makes next.
+        std::sync::atomic::fence(Ordering::SeqCst);
     }
 }
 

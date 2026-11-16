@@ -117,7 +117,9 @@ impl Drop for ProcessGuard {
     fn drop(&mut self) {
         // The bridge is asked to stop before the kill, so the EOF the kill
         // causes is read after the request and declares nothing; the exit
-        // thread is stopped for the same reason.
+        // thread is stopped for the same reason. (The request ends in a SeqCst
+        // fence and `crash` loads the flag after another, so a failure read
+        // after the kill cannot miss the stop: a store-load pair, fenced.)
         if let Some(bridge) = &self._bridge_thread {
             bridge.request_stop();
         }
@@ -246,7 +248,9 @@ mod tests {
 
         // Nothing reads a socket here, so only the process's end can set the
         // watch; a bound under every deadline the host waits on.
-        dead_within(guard.watch(), Duration::from_secs(5)).expect("the kill was never declared");
+        let took = dead_within(guard.watch(), Duration::from_secs(5))
+            .expect("the kill was never declared");
+        assert!(took < Duration::from_secs(2), "declared after {took:?}");
         match guard.watch().cause() {
             Some(PluginFailure::ServerExited { status }) => {
                 assert_eq!(status.signal(), Some(9), "SIGKILL: {status:?}");

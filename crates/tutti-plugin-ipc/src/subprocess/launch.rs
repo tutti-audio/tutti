@@ -143,11 +143,7 @@ pub(super) fn launch_with_state(
     config.timeouts.validate()?;
     let server =
         ProcessGuard::launched(Reaped::new(spawn_process(locator, config)?), config.clone())
-            .map_err(|e| {
-                BridgeError::ConnectionFailed(format!(
-                    "the plugin-server's exit cannot be watched: {e}"
-                ))
-            })?;
+            .map_err(BridgeError::ExitUnwatched)?;
 
     // The guard is borrowed, not moved: the connect retry asks its watch so a
     // server that died on startup is reported at once, and the teardown below
@@ -1207,6 +1203,9 @@ mod tests {
     /// thread is attached, so the stream's EOF is not a signal here): the watch
     /// does not wait on a timeout, and nothing would end this wait but the
     /// process's end.
+    ///
+    /// No bridge is attached, so by construction only the process's end can set
+    /// the watch; the 5 s bound is a ceiling for a loaded machine, not a pace.
     ///
     /// Needs `cargo build -p tutti-plugin-server` first.
     #[test]

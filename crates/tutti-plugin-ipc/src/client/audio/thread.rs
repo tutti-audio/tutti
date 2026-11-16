@@ -326,6 +326,9 @@ fn pump(
 /// requested before the kill, so every failure the kill causes is read after
 /// the request.
 fn crash(lifecycle: &Lifecycle, listener: &ListenerSlot, cause: PluginFailure) {
+    // Pairs with the fence in `Lifecycle::request_shutdown`: the failure was
+    // read after the kill, the kill after that fence, so the load sees the stop.
+    std::sync::atomic::fence(std::sync::atomic::Ordering::SeqCst);
     if !lifecycle.is_running() {
         return;
     }

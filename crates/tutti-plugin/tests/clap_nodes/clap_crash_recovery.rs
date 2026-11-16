@@ -269,6 +269,11 @@ fn a_plugin_that_aborts_mid_render_leaves_the_host_alive_and_silent() {
         status.cause()
     );
 
+    // A process's end names how it ended: an abort is not a success.
+    if let Some(PluginFailure::ServerExited { status }) = status.cause() {
+        assert!(!status.success(), "{status:?}");
+    }
+
     // --- After the crash: silence. Not garbage, not the last good block.
     //
     // Silence specifically, and asserted on every sample: a host that left its

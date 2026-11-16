@@ -65,11 +65,15 @@ impl Imp {
         // SAFETY: no change is submitted, so no event refers to a descriptor;
         // the event list is a live buffer of one slot.
         let ready = unsafe { kevent_timespec(queue, &[], &mut taken[..], Some(&timeout)) };
-        // A failure to ask is "may have ended": the owner's `try_wait` decides.
-        let ended = ready.map_or(true, |(events, _)| !events.is_empty());
-        if ended {
-            self.seen.store(true, Ordering::Release);
+        match ready {
+            Ok((events, _)) if events.is_empty() => false,
+            Ok(_) => {
+                self.seen.store(true, Ordering::Release);
+                true
+            }
+            // A failure to ask (a signal, say) is "may have ended": the owner's
+            // `try_wait` decides, and the next wait asks again.
+            Err(_) => true,
         }
-        ended
     }
 }

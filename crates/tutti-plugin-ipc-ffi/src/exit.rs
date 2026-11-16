@@ -19,6 +19,7 @@ mod platform;
 mod platform;
 
 use std::process::Child;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 /// The slice a platform with no wake sleeps between asks.
@@ -34,6 +35,11 @@ const NAP: Duration = Duration::from_millis(10);
 #[derive(Debug)]
 pub struct ExitWait {
     inner: platform::Imp,
+    /// Until the first [`wait`](Self::wait) has answered. A child may have
+    /// ended before the OS was asked to watch it (a kqueue registration on a
+    /// zombie succeeds and never fires), so the first wait says "may have
+    /// ended" without asking, and the owner's `try_wait` reads the status.
+    unasked: AtomicBool,
 }
 
 impl ExitWait {
@@ -43,6 +49,7 @@ impl ExitWait {
     pub fn of(child: &Child) -> Self {
         Self {
             inner: platform::Imp::of(child),
+            unasked: AtomicBool::new(true),
         }
     }
 
@@ -52,24 +59,62 @@ impl ExitWait {
     /// runs.
     #[must_use]
     pub fn wait(&self, timeout: Duration) -> bool {
+        if self.unasked.swap(false, Ordering::AcqRel) {
+            return true;
+        }
         self.inner.wait(timeout)
     }
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::process::Command;
     use std::time::Instant;
 
+    /// A command that ends at once, on every platform.
+    fn quick() -> Command {
+        if cfg!(windows) {
+            let mut command = Command::new("cmd");
+            command.args(["/C", "exit"]);
+            command
+        } else {
+            Command::new("true")
+        }
+    }
+
+    /// **A child that ended before it was watched is still learned of**: the
+    /// wait is made after the exit, so an OS wake for it may never come, and the
+    /// owner reads the status within a bound all the same.
+    #[test]
+    fn a_child_that_ended_before_the_wait_was_made_is_learned_of() {
+        let mut child = quick().spawn().expect("the command spawns");
+        std::thread::sleep(Duration::from_millis(100));
+        let wait = ExitWait::of(&child);
+        let started = Instant::now();
+        loop {
+            if wait.wait(Duration::from_millis(100))
+                && let Some(status) = child.try_wait().expect("the status reads")
+            {
+                assert!(status.success(), "{status:?}");
+                break;
+            }
+            assert!(
+                started.elapsed() < Duration::from_secs(5),
+                "the end of the child was never learned of"
+            );
+        }
+    }
+
     /// **A running child is waited out in full, and its end wakes the wait
-    /// long before the timeout.** On a platform with no wake the wait only
-    /// sleeps, so the test names the platforms that have one.
+    /// before the timeout** (the first wait only says "may have ended", so it is
+    /// spent before the one measured).
     #[cfg(target_os = "linux")]
     #[test]
     fn the_end_of_a_child_wakes_the_wait() {
         let mut child = Command::new("sleep").arg("30").spawn().expect("sleep");
         let wait = ExitWait::of(&child);
+        assert!(wait.wait(Duration::ZERO), "the first wait asks nothing");
         let start = Instant::now();
         assert!(!wait.wait(Duration::from_millis(50)), "a running child");
         assert!(start.elapsed() >= Duration::from_millis(50));
