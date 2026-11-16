@@ -651,6 +651,79 @@ fn a_reactivation_continues_the_chunk_sequence() {
     );
 }
 
+/// Waits for the bridge to have abandoned `count` blocks, panicking with what
+/// it had when `within` runs out.
+fn wait_abandoned(bridge: &PluginBridge, count: u64, within: Duration) {
+    let start = Instant::now();
+    while bridge.abandoned_replies() < count {
+        assert!(
+            start.elapsed() < within,
+            "the bridge abandoned {} of {count} blocks in {within:?}: it is still holding a \
+             block for the fork's budget",
+            bridge.abandoned_replies()
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+/// Renders `chunks` more chunks of silence through an offline fork's
+/// processor, a bridge-thread turn apart: a chunk the bridge reaches more than
+/// `MAX_BEHIND` behind the newest is skipped, not abandoned, and the count
+/// below is of abandoned ones.
+fn render_chunks(processor: &mut IpcProcessor, chunks: usize) {
+    for _ in 0..chunks {
+        render_silence(processor, 32);
+        std::thread::sleep(Duration::from_millis(15));
+    }
+}
+
+/// **A server that never replies costs an offline fork one budget, however
+/// many chunks the render still submits.** The bridge thread waits the fork's
+/// budget (here 1 s) for a reply while the fork waits on it; once the fork
+/// gives up it waits no more, and the bridge returns to the few block periods
+/// a live block is given. The server here publishes and replies to nothing:
+/// the first chunk is abandoned at the budget, and the eight after it within
+/// milliseconds each (at the budget each they would take eight seconds).
+#[test]
+fn a_silent_server_holds_the_bridge_for_one_budget_not_one_per_chunk() {
+    let _machine = machine_lock();
+    let (mut ipc, _server) = mock();
+    let bridge = Arc::clone(ipc.bridge());
+    let wait = ipc.watch(true);
+    let (mut processor, _controller) = activate(ipc, 32);
+    render_chunks(&mut processor, 2);
+    assert!(
+        wait.gave_up(),
+        "the second render's collect misses its budget"
+    );
+    render_chunks(&mut processor, 8);
+    wait_abandoned(&bridge, 9, Duration::from_secs(1));
+}
+
+/// **A reactivation after a give-up stays off the budget.** The fork's wait is
+/// latched across `deactivate` and `activate`: the new activation collects at
+/// once, and the bridge thread must not hold one budget per chunk for a
+/// server that already did not answer.
+#[test]
+fn a_reactivation_after_a_give_up_does_not_wait_the_budget_again() {
+    let _machine = machine_lock();
+    let main = main_thread();
+    let (mut ipc, _server) = mock();
+    let bridge = Arc::clone(ipc.bridge());
+    let wait = ipc.watch(true);
+    let (mut processor, controller) = activate(ipc, 32);
+    render_chunks(&mut processor, 2);
+    assert!(
+        wait.gave_up(),
+        "the second render's collect misses its budget"
+    );
+    wait_abandoned(&bridge, 1, Duration::from_secs(3));
+    let ipc = Ipc::deactivate(main, processor, controller).expect("the halves rejoin");
+    let (mut processor, _controller) = activate(ipc, 32);
+    render_chunks(&mut processor, 8);
+    wait_abandoned(&bridge, 9, Duration::from_secs(1));
+}
+
 /// How many times the mock server was asked for its parameter list.
 fn list_asks(server: &Mock) -> usize {
     server

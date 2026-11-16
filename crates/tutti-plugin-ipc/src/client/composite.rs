@@ -11,6 +11,7 @@ use dpi::Size;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Duration;
 use tutti_plugin_types::{
     BridgeResult, Delivered, EditorError, PluginError, PluginFailure, Request, StateError,
 };
@@ -267,7 +268,7 @@ impl PluginBridge {
         format: PluginFormat,
         load_editor: Option<EditorLoader>,
         sample_rate: SampleRate,
-        state_progress_timeout: std::time::Duration,
+        state_progress_timeout: Duration,
     ) -> BridgeResult<(Arc<Self>, BridgeThread)> {
         let (mut audio, bridge_thread) = AudioBridge::new(socket_path, audio_buffer, sample_rate)?;
         audio.set_state_progress_timeout(state_progress_timeout);
@@ -319,7 +320,7 @@ impl PluginBridge {
     }
 
     /// See `AudioBridge::set_reply_wait`.
-    pub(crate) fn set_reply_wait(&self, wait: Option<std::time::Duration>) {
+    pub(crate) fn set_reply_wait(&self, wait: Option<Duration>) {
         self.audio.set_reply_wait(wait);
     }
 
@@ -415,7 +416,7 @@ impl PluginBridge {
     }
 
     /// See `AudioBridge::news_settled`.
-    pub fn news_settled(&self, within: std::time::Duration) -> bool {
+    pub fn news_settled(&self, within: Duration) -> bool {
         self.audio.news_settled(within)
     }
 
@@ -469,7 +470,7 @@ impl PluginBridge {
 
     /// See `AudioBridge::set_rate_timeout`.
     #[cfg(any(test, feature = "testing"))]
-    pub fn set_rate_timeout(&self, timeout: std::time::Duration) {
+    pub fn set_rate_timeout(&self, timeout: Duration) {
         self.audio.set_rate_timeout(timeout);
     }
 

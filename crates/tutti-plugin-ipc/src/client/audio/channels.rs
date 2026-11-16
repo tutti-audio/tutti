@@ -14,6 +14,7 @@ use super::messages::{AudioResponse, Command};
 use crossbeam::queue::ArrayQueue;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 use tutti_rt::Doorbell;
 use tutti_types::{AtomicSampleRate, SampleRate};
 
@@ -45,10 +46,10 @@ pub(super) struct Channels {
     /// starves the command queue.
     sample_rate: Arc<AtomicSampleRate>,
     /// How long the bridge thread waits for a block's reply, in nanoseconds,
-    /// when it is not the live bound ([`process_timeout`](super::dispatch)):
-    /// `0` while the bridge serves a device. An offline render has no
-    /// deadline, so a reply the server is slow to send is the server's, not
-    /// an abandoned block's.
+    /// when it is not the live bound (the block period's few multiples, from
+    /// the dispatcher): `0` is the live bound, so a set wait is never stored as
+    /// `0`. An offline render has no deadline, so a reply the server is slow
+    /// to send is the server's, not an abandoned block's.
     reply_wait_ns: Arc<AtomicU64>,
     /// How many owed replies the drain has taken back off the socket, ever.
     ///
@@ -125,14 +126,17 @@ impl Channels {
 
     /// The bridge thread's wait for a block's reply, when it is not the live
     /// one.
-    pub(super) fn reply_wait(&self) -> Option<std::time::Duration> {
+    pub(super) fn reply_wait(&self) -> Option<Duration> {
         match self.reply_wait_ns.load(Ordering::Relaxed) {
             0 => None,
-            ns => Some(std::time::Duration::from_nanos(ns)),
+            ns => Some(Duration::from_nanos(ns)),
         }
     }
 
-    pub(super) fn set_reply_wait(&self, wait: Option<std::time::Duration>) {
+    /// Sets the wait, `None` for the live bound. `None` is stored as the `0`
+    /// sentinel, and a wait is raised to 1 ns so a zero wait is not read back
+    /// as the live bound; one past `u64::MAX` ns saturates.
+    pub(super) fn set_reply_wait(&self, wait: Option<Duration>) {
         let ns = wait.map_or(0, |w| {
             u64::try_from(w.as_nanos()).unwrap_or(u64::MAX).max(1)
         });
@@ -183,7 +187,7 @@ impl Channels {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .as_ref()
-            .is_some_and(|watch| watch.wait_readable(std::time::Duration::ZERO))
+            .is_some_and(|watch| watch.wait_readable(Duration::ZERO))
     }
 
     /// The bridge thread has read the control connection dry. Cleared *after*
@@ -374,7 +378,7 @@ mod tests {
         (t, rx)
     }
 
-    const PATIENCE: std::time::Duration = std::time::Duration::from_secs(20);
+    const PATIENCE: Duration = Duration::from_secs(20);
 
     /// **A push wakes a parked bridge, and the audio thread's half
     /// allocates nothing.** The ring runs inside `assert_no_alloc` with the
