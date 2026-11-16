@@ -266,9 +266,9 @@ pub mod tempo {
 /// a program that builds one directly depends on `tutti-graph`.
 pub mod graph {
     pub use tutti_graph::{
-        BusRole, Buses, Cost, Cx, Env, ForkByClone, HasParam, HasParams, InBus, Inputs, IntoNode,
-        Io, Node, OutBus, Outputs, ParamFork, ParamNode, ParamSet, ParamSetBuilder, ParamUnit,
-        Prepare, Scalar, Shape, Status, Unforkable, declare_params, param_parts,
+        Bus, BusRole, Buses, Cost, Cx, Env, ForkByClone, HasParam, HasParams, InBus, Inputs,
+        IntoNode, Io, Node, OutBus, Outputs, ParamFork, ParamNode, ParamSet, ParamSetBuilder,
+        ParamUnit, Params, Prepare, Scalar, Shape, Status, Unforkable, declare_params, param_parts,
     };
 }
 

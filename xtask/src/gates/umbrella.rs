@@ -30,6 +30,14 @@ pub(super) const ALLOW: &[(&str, &str)] = &[
         "the sound device's id (`tutti_cpal`) at the root and the MIDI device's (`tutti_midi_device`) in `midi`: two types, one name",
     ),
     (
+        "Bus",
+        "the bus handle a node's shape issues (`graph::Bus`) and the session's bus key (`session::Bus`): two types, one name",
+    ),
+    (
+        "Params",
+        "the wrapper a node with params is inserted as (`graph::Params`) and a plugin's parameter view at the root: two types, one name",
+    ),
+    (
         "Error",
         "the session's one error at the root and `midi::Error`, the MIDI error it nests (`tutti_session::MidiError`)",
     ),
