@@ -42,6 +42,11 @@
 //! - `range-macro`: a `macro_rules!` outside `tutti-types` whose body holds a
 //!   `fn new` of one parameter returning `Option<..>`, the `new(raw) -> Option`
 //!   signature of a range-checked type.
+//! - `option-arg`: a receiver by value, a built type of `Self` or the owner (no wrapper:
+//!   an option returns `Self`), and a parameter after the receiver whose type is an
+//!   `Option<..>` (any path to it) or an `impl Into<Option<..>>`: "none" is said by not
+//!   calling the option. A terminal `build(self)` whose built type is not its owner is
+//!   not one.
 //!
 //! **Blind spots.** The scan is lexical: it does not see an item a macro writes (the
 //! `with-prefix` of a macro-made method), an owner reached through a type alias, a
@@ -78,9 +83,10 @@ pub(super) enum Rule {
     ConfigWidth,
     CtorResult,
     RangeMacro,
+    OptionArg,
 }
 
-const RULES: [(Rule, &str); 7] = [
+const RULES: [(Rule, &str); 8] = [
     (Rule::WithPrefix, "with-prefix"),
     (Rule::ChainResult, "chain-result"),
     (Rule::Setter, "setter"),
@@ -88,6 +94,7 @@ const RULES: [(Rule, &str); 7] = [
     (Rule::ConfigWidth, "config-width"),
     (Rule::CtorResult, "ctor-result"),
     (Rule::RangeMacro, "range-macro"),
+    (Rule::OptionArg, "option-arg"),
 ];
 
 impl Rule {
@@ -601,6 +608,23 @@ fn is_width(param: &str, bounds: &str) -> bool {
     false
 }
 
+/// Whether a parameter `pat: ty` is an `Option<..>` (any path to it) or an
+/// `impl Into<Option<..>>`.
+fn takes_option(param: &str) -> bool {
+    let p = squash(strip_attrs(param));
+    let Some((_, ty)) = p.split_once(':') else {
+        return false;
+    };
+    let ty = ty.trim();
+    if let Some(t) = ty.strip_prefix("impl ") {
+        return t
+            .trim()
+            .strip_prefix("Into<")
+            .is_some_and(|r| bare(r) == "Option");
+    }
+    bare(ty) == "Option" && ty.contains('<')
+}
+
 fn macro_bodies(code: &str) -> Vec<(usize, usize, String)> {
     let mut out = Vec::new();
     let mut from = 0;
@@ -765,6 +789,9 @@ pub(super) fn scan(path: &str, src: &str) -> Vec<Site> {
                 }
                 if ty == Some(Wrap::Result) {
                     hit(Rule::ChainResult);
+                }
+                if ty == Some(Wrap::Plain) && params.iter().skip(1).any(|p| takes_option(p)) {
+                    hit(Rule::OptionArg);
                 }
             }
             Recv::Ref => {
@@ -986,6 +1013,40 @@ mod tests {
         let ok = "pub struct B; impl B { pub fn build(self) -> Result<Product, E> { todo!() }\n\
                   pub fn depth(self, d: u8) -> Self { self } }";
         assert!(rules(ok).is_empty());
+    }
+
+    #[test]
+    fn a_chained_option_taking_an_option_is_a_violation_and_other_shapes_are_not() {
+        for bad in [
+            "impl T { pub fn pool(mut self, p: Option<Arc<P>>) -> Self { self } }",
+            "impl T { pub fn pool(self, p: std::option::Option<u8>) -> T { self } }",
+            "impl T { pub fn pool(self, p: core::option::Option<u8>) -> Self { self } }",
+            "impl T { pub fn pool(self, p: impl Into<Option<u8>>) -> Self { self } }",
+        ] {
+            assert_eq!(rules(bad), one("pool", "option-arg"), "{bad}");
+        }
+        for ok in [
+            "impl T { pub fn pool(&self, p: Option<u8>) -> Self { todo!() } }",
+            "impl T { pub fn pool(self, p: Option<u8>) -> Option<Self> { Some(self) } }",
+            "impl T { pub fn build(self, p: Option<u8>) -> Product { todo!() } }",
+            "pub fn pool(p: Option<u8>) -> Self { todo!() }",
+            "impl T { pub(crate) fn pool(self, p: Option<u8>) -> Self { self } }",
+            "impl T { pub fn pool(self, p: Vec<Option<u8>>) -> Self { self } }",
+            "impl T { pub fn pool(self, p: u8) -> Self { self } }",
+        ] {
+            assert_eq!(rules(ok), vec![], "{ok}");
+        }
+    }
+
+    #[test]
+    fn an_option_arg_row_with_no_violation_is_stale_and_fails() {
+        let list = "a  option-arg  crates/a/src/lib.rs::T::pool\n";
+        let r = run(
+            list,
+            "impl T { pub fn pool(self, p: u8) -> Self { self } }",
+            &[],
+        );
+        assert!(!r.passed());
     }
 
     #[test]
