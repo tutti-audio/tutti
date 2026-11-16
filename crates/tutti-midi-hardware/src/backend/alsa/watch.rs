@@ -33,9 +33,11 @@
 //! a change is the rename and costs no start read; a port exit or a start is the
 //! new occupant. The classification cannot tell a change read for an earlier
 //! rename from the rename of the listed identity, so a replug that follows a
-//! rename read in the same look can be reported twice, never missed. An enumeration cut short is not a look; the
-//! watch asks to be woken again until one is whole, so a removal it has read
-//! does not wait for an unrelated announcement.
+//! rename read in the same look can be reported twice, never missed.
+//!
+//! An enumeration cut short is not a look; the watch asks to be woken again
+//! until one is whole, so a removal it has read does not wait for an unrelated
+//! announcement.
 //!
 //! Enumeration runs on the watch's own client. A client opened to enumerate would
 //! announce its own start, port and exit to this very port, and the watch would
