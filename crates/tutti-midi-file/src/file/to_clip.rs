@@ -9,13 +9,18 @@
 use core::num::NonZeroU8;
 
 use tutti_ump::{
-    BarAccents, Flex, FlexAddress, FlexTextKind, FlexTimeSignature, KeySignature, Letter, Message,
-    Metronome, MidiGroup, SharpsFlats, SysexMessage, TicksPerQuarterNote, Ump, flex_text_packets,
+    BarAccents, Flex, FlexAddress, FlexTimeSignature, KeySignature, Letter, Message, Metronome,
+    MidiGroup, PlainTextKind, SharpsFlats, SysexMessage, Text, TextError, TicksPerQuarterNote, Ump,
+    flex_text_packets,
 };
 
 use unicode_normalization::UnicodeNormalization;
 
 use crate::{FileEvent, Meta, MidiFile, Result, SmfFormat, TextKind, Tick, Track};
+
+use lyrics::Lyrics;
+
+mod lyrics;
 
 /// Why a file cannot be a clip.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
@@ -59,6 +64,11 @@ pub enum DropReason {
     TextNotUtf8,
     /// A text with a NUL, which Flex Data text uses as its padding.
     TextHasNul,
+    /// A text past the 384 bytes of a Flex Data message.
+    TextTooLong,
+    /// A lyric with nothing but breaks and hyphens: it has no syllable, and
+    /// no syllable before it for the break to end (see [`MidiFile::to_clip`]).
+    LyricWithoutSyllable,
     /// A Key Signature past 7 sharps or flats, which the Flex message does
     /// not hold.
     KeySignatureOutOfRange,
@@ -263,23 +273,31 @@ fn key_signature(sharps: i8, minor: bool) -> Option<KeySignature> {
     })
 }
 
-/// A text as its Flex packets, or why it has none.
+/// The text of an SMF text event as message text, or why it has none.
 ///
 /// Message text is NFC-normalized UTF-8 with no Byte Order Mark (M2-104
 /// section 1.8): a leading BOM goes and the rest is
 /// composed to NFC, which changes how the text is spelled, never what it says.
-fn text(kind: FlexTextKind, bytes: &[u8]) -> std::result::Result<Vec<FileEvent>, DropReason> {
+fn message_text(bytes: &[u8]) -> std::result::Result<String, DropReason> {
     if bytes.is_empty() {
         return Err(DropReason::EmptyText);
     }
     let text = std::str::from_utf8(bytes).map_err(|_| DropReason::TextNotUtf8)?;
-    let text: String = text
+    Ok(text
         .strip_prefix('\u{FEFF}')
         .unwrap_or(text)
         .nfc()
-        .collect();
-    let packets = flex_text_packets(MidiGroup::FIRST, FlexAddress::Group, kind, &text)
-        .ok_or(DropReason::TextHasNul)?;
+        .collect())
+}
+
+/// A text as its Flex packets, or why it has none.
+fn text(kind: PlainTextKind, bytes: &[u8]) -> std::result::Result<Vec<FileEvent>, DropReason> {
+    let text = Text::try_from(&*message_text(bytes)?).map_err(|e| match e {
+        TextError::Nul => DropReason::TextHasNul,
+        TextError::TooLong => DropReason::TextTooLong,
+        other => unreachable!("{other:?} is of a list entry, not of a text"),
+    })?;
+    let packets = flex_text_packets(MidiGroup::FIRST, FlexAddress::Group, kind, &text);
     Ok(packets.map(event).collect())
 }
 
@@ -342,19 +360,16 @@ fn convert(
                     // otherwise the track's. The sequence is the
                     // Composition (Song) Name of Appendix B.
                     TextKind::TrackName if track == 0 && format != SmfFormat::Sequential => {
-                        FlexTextKind::CompositionName
+                        PlainTextKind::CompositionName
                     }
                     TextKind::TrackName => return Err(DropReason::TrackName),
-                    TextKind::Copyright => FlexTextKind::Copyright,
-                    TextKind::Lyric => FlexTextKind::Lyrics,
+                    TextKind::Copyright => PlainTextKind::Copyright,
                     // Any text is what the Unknown Metadata Text message is
                     // for (M2-104 Table 16, bank 1 status 0).
-                    TextKind::Text => FlexTextKind::UnknownMetadata,
-                    TextKind::InstrumentName
-                    | TextKind::Marker
-                    | TextKind::CuePoint
-                    | TextKind::ProgramName
-                    | TextKind::DeviceName => return Err(DropReason::NoSuccessor),
+                    TextKind::Text => PlainTextKind::UnknownMetadata,
+                    // The rest have no successor. A lyric is read with the
+                    // lyrics around it (see `Source`), so it is not here.
+                    _ => return Err(DropReason::NoSuccessor),
                 };
                 other(text(kind, bytes)?)
             }
@@ -365,6 +380,13 @@ fn convert(
             }),
         },
     }
+}
+
+/// What an event of the SMF converts from: the event, or for a lyric the
+/// clip events read with the lyrics around it.
+enum Source {
+    Event,
+    Lyric(std::result::Result<Vec<FileEvent>, DropReason>),
 }
 
 impl MidiFile {
@@ -382,7 +404,7 @@ impl MidiFile {
     /// | Time Signature `FF 58` | Flex Set Time Signature (numerator, denominator power, 32nds per quarter) then Flex Set Metronome (clocks per click; the bar undivided, its one accent part the numerator; no subdivisions) |
     /// | Key Signature `FF 59` | Flex Set Key Signature: the sharps or flats, and the tonic's letter from the circle of fifths (a minor key's from the major key 3 sharps up) |
     /// | Copyright `FF 02` | Flex Copyright Notice |
-    /// | Lyric `FF 05` | Flex Lyrics |
+    /// | Lyric `FF 05` | Flex Lyrics, a syllable a message, karaoke marks as section 7.5.10 has them (below) |
     /// | Track Name `FF 03` of format 0, or the first track of format 1 | Flex Composition Name (SMF 1.0 section 3.3: it names the sequence) |
     /// | Text `FF 01` | Flex Unknown Metadata Text |
     /// | `F0` System Exclusive, complete and 7-bit | SysEx7 packets |
@@ -390,6 +412,23 @@ impl MidiFile {
     /// | End of Track | End of Clip, at the longest track's end |
     ///
     /// Texts are split over Flex packets by [`tutti_ump::flex_text_packets`].
+    ///
+    /// A lyric's text is read as karaoke text and written as Lyric Data
+    /// (M2-104 section 7.5.10: a syllable a message, and a space, a carriage
+    /// return or a carriage return and line feed at the end of the text for
+    /// the end of a word, line or paragraph): a `/` at the start of an event
+    /// is a line break and a `\` a paragraph break, a space at either end of
+    /// the text a word break, and each ends the syllable before it; hyphens
+    /// at the end of a syllable are dropped (a genuine one there is lost), as
+    /// the syllable that follows it with no word end before it continues the
+    /// word already (section 7.5.10: hyphens are for hyphenated words); an
+    /// event of several words is one
+    /// message each, all at its tick. A lyric of only breaks ends the syllable
+    /// before it and is not listed in [`Converted::dropped`]; one of only
+    /// hyphens is, as [`DropReason::LyricWithoutSyllable`]. These karaoke
+    /// conventions are those of the SMF Lyric Meta Event (RP-026), which the
+    /// MIDI specifications this crate is held to do not contain.
+    ///
     /// Nothing else is converted: [`DropReason`] lists what has no successor.
     ///
     /// Format 1's tracks merge into the clip's one sequence by tick, ties in
@@ -537,20 +576,43 @@ impl MidiFile {
                 placed.push((Tick(0), Rank::Signature, ev));
             }
         }
+        let mut lyrics = Lyrics::default();
+        for (index, landing) in landings.iter().enumerate() {
+            if let FileEvent::Meta(Meta::Text {
+                kind: TextKind::Lyric,
+                bytes,
+            }) = landing.event
+            {
+                match message_text(bytes) {
+                    Ok(text) => lyrics.push(index, &text),
+                    Err(reason) => lyrics.refuse(index, reason),
+                }
+            }
+        }
+        let mut sources: Vec<Source> = landings.iter().map(|_| Source::Event).collect();
+        for (index, events) in lyrics.into_events() {
+            sources[index] = Source::Lyric(events);
+        }
         let mut dropped = Vec::new();
         let mut moved = Vec::new();
-        for Landing {
-            track,
-            from,
-            to,
-            event,
-            superseded,
-        } in landings
+        for (
+            Landing {
+                track,
+                from,
+                to,
+                event,
+                superseded,
+            },
+            source,
+        ) in landings.into_iter().zip(sources)
         {
             let converted = if superseded {
                 Err(DropReason::Superseded)
             } else {
-                convert(track, format, event)
+                match source {
+                    Source::Event => convert(track, format, event),
+                    Source::Lyric(events) => events.map(|events| (Rank::Other, events)),
+                }
             };
             match converted {
                 Ok((rank, events)) => {

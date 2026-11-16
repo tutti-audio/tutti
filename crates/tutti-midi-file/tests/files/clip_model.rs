@@ -983,8 +983,30 @@ fn the_constructor_holds_the_header_duration_to_the_header() {
 }
 
 fn text_packets(kind: tutti_ump::FlexTextKind, text: &str) -> Vec<(Tick, FileEvent)> {
-    tutti_ump::flex_text_packets(MidiGroup::FIRST, tutti_ump::FlexAddress::Group, kind, text)
-        .unwrap()
+    use tutti_ump::{
+        FlexAddress, FlexTextKind, LyricKind, PlainTextKind, Syllable, SyllableBody, SyllableEnd,
+        Text, flex_lyric_packets, flex_text_packets,
+    };
+    let (group, address) = (MidiGroup::FIRST, FlexAddress::Group);
+    let lyric = |kind| {
+        let syllable = Syllable {
+            body: SyllableBody::try_from(text).unwrap(),
+            end: SyllableEnd::None,
+        };
+        flex_lyric_packets(group, address, kind, &syllable).collect::<Vec<_>>()
+    };
+    let plain = |kind| {
+        let text = Text::try_from(text).unwrap();
+        flex_text_packets(group, address, kind, &text).collect::<Vec<_>>()
+    };
+    let umps = match kind {
+        FlexTextKind::Lyrics => lyric(LyricKind::Lyrics),
+        FlexTextKind::Ruby => lyric(LyricKind::Ruby),
+        FlexTextKind::Composer => plain(PlainTextKind::Composer),
+        FlexTextKind::Arranger => plain(PlainTextKind::Arranger),
+        other => panic!("{other:?}"),
+    };
+    umps.into_iter()
         .map(|ump| (Tick(10), packet(ump.decode().unwrap())))
         .collect()
 }

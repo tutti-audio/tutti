@@ -1070,3 +1070,159 @@ fn a_replacing_signature_counts_its_bars_from_the_one_before_the_replaced() {
     let moves: Vec<_> = done.moved.iter().map(|m| (m.from.0, m.to.0)).collect();
     assert_eq!(moves, [(250, 288)]);
 }
+
+/// The Lyric Data texts of a clip, one string a message: M2-104 section
+/// 7.5.10 puts a syllable in one message, so the short ones here are one
+/// Complete packet each.
+fn lyrics_of(file: &MidiFile) -> Vec<(u64, String)> {
+    events_of(file)
+        .iter()
+        .filter_map(|(tick, e)| match e {
+            FileEvent::Message(Message::Flex(
+                _,
+                Flex::Text {
+                    kind: FlexTextKind::Lyrics,
+                    bytes,
+                    ..
+                },
+            )) => {
+                let end = bytes.iter().position(|b| *b == 0).unwrap_or(bytes.len());
+                Some((tick.0, String::from_utf8(bytes[..end].to_vec()).unwrap()))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn lyrics_of_smf(lyrics: &[&str]) -> Vec<(u64, String)> {
+    let events = lyrics
+        .iter()
+        .zip(0u64..)
+        .map(|(l, i)| (i * 10, text(TextKind::Lyric, l)))
+        .collect();
+    lyrics_of(&format0(events).to_clip().unwrap().clip)
+}
+
+fn lyric_texts(lyrics: &[&str]) -> Vec<String> {
+    lyrics_of_smf(lyrics).into_iter().map(|l| l.1).collect()
+}
+
+/// M2-104 section 7.5.10: a hyphen is only for a hyphenated word, and a
+/// syllable with no space, CR or LF at its end is followed by the rest of its
+/// word, so the karaoke hyphen that says the same is not carried. A hyphen
+/// inside a word stays.
+#[test]
+fn a_karaoke_hyphen_ends_no_syllable_in_the_clip() {
+    assert_eq!(lyric_texts(&["Hel-", "lo "]), ["Hel", "lo "]);
+    assert_eq!(lyric_texts(&["sixty-four "]), ["sixty-four "]);
+    assert_eq!(lyric_texts(&["Hel- "]), ["Hel "]);
+    // Every trailing hyphen is the mark, so a genuine hyphen there is lost.
+    assert_eq!(lyric_texts(&["Hel--", "lo"]), ["Hel", "lo"]);
+    assert_eq!(lyric_texts(&["a-- "]), ["a "]);
+    assert_eq!(lyric_texts(&["sixty-", "four"]), ["sixty", "four"]);
+}
+
+/// A lyric of only hyphens has no syllable and is reported, never dropped
+/// silently; a text past the 384 bytes of a message and one with a NUL are
+/// reported for what they are.
+#[test]
+fn a_lyric_that_cannot_be_a_message_is_reported() {
+    let smf = format0(vec![
+        (0, text(TextKind::Lyric, "-")),
+        (1, text(TextKind::Lyric, "--")),
+        (2, text(TextKind::Lyric, &"x".repeat(383))),
+        (3, text(TextKind::Lyric, "a\0b")),
+        (4, text(TextKind::Copyright, &"x".repeat(385))),
+    ]);
+    let reasons: Vec<DropReason> = smf
+        .to_clip()
+        .unwrap()
+        .dropped
+        .iter()
+        .map(|d| d.reason)
+        .collect();
+    assert_eq!(
+        reasons,
+        [
+            DropReason::LyricWithoutSyllable,
+            DropReason::LyricWithoutSyllable,
+            DropReason::TextTooLong,
+            DropReason::TextHasNul,
+            DropReason::TextTooLong,
+        ]
+    );
+}
+
+/// M2-104 section 7.5.10: a space at the end of the text ends a word, a CR
+/// a line, a CR LF a paragraph. In SMF karaoke the break is at the start of
+/// the next event (`/` a line, `\` a paragraph, a space a word); the clip
+/// puts it on the syllable it ends.
+#[test]
+fn karaoke_breaks_end_the_syllable_before_them() {
+    assert_eq!(
+        lyric_texts(&["Hel", "lo", "/world", "\\Next", " word"]),
+        ["Hel", "lo\r", "world\r\n", "Next ", "word"]
+    );
+    // A break event of its own, and a space at the start of a syllable.
+    assert_eq!(
+        lyric_texts(&["Hel", "lo", "/", "Go"]),
+        ["Hel", "lo\r", "Go"]
+    );
+    assert_eq!(lyric_texts(&["Hel", " lo"]), ["Hel ", "lo"]);
+}
+
+/// M2-104 section 7.5.10: a message is one syllable, so an event of several
+/// words is a message each at its tick, the last keeping its own end.
+#[test]
+fn a_lyric_of_several_words_is_a_message_each_at_its_tick() {
+    assert_eq!(
+        lyrics_of_smf(&["one two three\r\n"]),
+        [
+            (0, "one ".to_owned()),
+            (0, "two ".to_owned()),
+            (0, "three\r\n".to_owned())
+        ]
+    );
+}
+
+/// A lyric with nothing to say that has nothing before it to end is reported.
+#[test]
+fn a_lyric_of_only_a_break_with_no_syllable_before_is_reported() {
+    let smf = format0(vec![
+        (0, text(TextKind::Lyric, "/")),
+        (5, text(TextKind::Lyric, "-")),
+    ]);
+    let converted = smf.to_clip().unwrap();
+    let reasons: Vec<DropReason> = converted.dropped.iter().map(|d| d.reason).collect();
+    assert_eq!(
+        reasons,
+        [
+            DropReason::LyricWithoutSyllable,
+            DropReason::LyricWithoutSyllable
+        ]
+    );
+}
+
+/// M2-104 section 7.5.10: a syllable is placed at the time its sung note
+/// begins. An SMF lyric is at that time, so the clip's Lyric Data message is
+/// at the tick of its source event, however many messages the event becomes.
+/// Spec: m2-104/7.5.10#2
+#[test]
+fn a_lyric_keeps_the_tick_of_its_event() {
+    let smf = format0(vec![
+        (7, text(TextKind::Lyric, "Hel-")),
+        (130, text(TextKind::Lyric, "lo ")),
+        (480, text(TextKind::Lyric, "big wide")),
+        (481, text(TextKind::Lyric, "/world")),
+    ]);
+    assert_eq!(
+        lyrics_of(&smf.to_clip().unwrap().clip),
+        [
+            (7, "Hel".to_owned()),
+            (130, "lo ".to_owned()),
+            (480, "big ".to_owned()),
+            (480, "wide\r".to_owned()),
+            (481, "world".to_owned()),
+        ]
+    );
+}

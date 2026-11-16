@@ -5,7 +5,7 @@
 
 use tutti_ump::{
     Flex, FlexAddress, FlexTextAssembler, FlexTextKind, FlexTextStep, Form, Message, MidiGroup,
-    System, Ump, Utility, flex_text_packets,
+    PlainTextKind, System, Text, Ump, Utility, flex_text_packets,
 };
 
 const G0: MidiGroup = MidiGroup::of(0);
@@ -51,7 +51,8 @@ fn a_written_text_reads_back_whole() {
     for len in 0..70 {
         // 'é' is two bytes: odd offsets put a character across a packet edge.
         let original: String = std::iter::repeat_n("é", len).collect::<String>() + "x";
-        let packets = flex_text_packets(G0, FlexAddress::Group, LYRICS, &original).unwrap();
+        let text = Text::try_from(&*original).unwrap();
+        let packets = flex_text_packets(G0, FlexAddress::Group, PlainTextKind::Copyright, &text);
         assert_eq!(feed(&mut a, packets), [original], "{len}");
     }
     assert_eq!((a.dropped(), a.invalid()), (0, 0));
@@ -259,7 +260,8 @@ fn groups_assemble_apart_up_to_the_lanes() {
 fn a_text_over_capacity_is_dropped_whole() {
     let mut a = FlexTextAssembler::new(vec![0; 24], 24, 1);
     let long = "x".repeat(25);
-    let packets = flex_text_packets(G0, FlexAddress::Group, LYRICS, &long).unwrap();
+    let text = Text::try_from(&*long).unwrap();
+    let packets = flex_text_packets(G0, FlexAddress::Group, PlainTextKind::Copyright, &text);
     let mut got = vec![];
     for u in packets {
         if let FlexTextStep::Done(t) = a.push(u) {
@@ -269,7 +271,8 @@ fn a_text_over_capacity_is_dropped_whole() {
     assert!(got.is_empty());
     assert_eq!(a.dropped(), 1);
     let exact = "y".repeat(24);
-    let packets = flex_text_packets(G0, FlexAddress::Group, LYRICS, &exact).unwrap();
+    let text = Text::try_from(&*exact).unwrap();
+    let packets = flex_text_packets(G0, FlexAddress::Group, PlainTextKind::Copyright, &text);
     let mut got = vec![];
     for u in packets {
         if let FlexTextStep::Done(t) = a.push(u) {
