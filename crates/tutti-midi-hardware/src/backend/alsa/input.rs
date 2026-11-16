@@ -303,15 +303,21 @@ struct Arrivals {
     latest: Option<Instant>,
 }
 
+/// Whether the held `pairing` must be read again at `now` for an event stamped
+/// `stamped`: there is none, the event came after it, or it is older than
+/// [`PAIRING_AGE`].
+fn pairing_is_stale(pairing: Option<(Paired, Instant)>, stamped: Duration, now: Instant) -> bool {
+    pairing.is_none_or(|(paired, read)| {
+        stamped > paired.clock() || now.saturating_duration_since(read) > PAIRING_AGE
+    })
+}
+
 impl Arrivals {
     /// The OS instant an event stamped `stamped` on the queue arrived at. Reads
     /// a fresh pairing when the held one is older than the event (the event
     /// came after it) or than [`PAIRING_AGE`]; one syscall, not one per event.
     fn at(&mut self, seq: &Client, stamped: Duration) -> Instant {
-        let stale = self
-            .pairing
-            .is_none_or(|(paired, read)| stamped > paired.clock() || read.elapsed() > PAIRING_AGE);
-        if stale {
+        if pairing_is_stale(self.pairing, stamped, Instant::now()) {
             self.pairing = Paired::read(|| self.clock.now(seq))
                 .ok()
                 .map(|paired| (paired, Instant::now()));

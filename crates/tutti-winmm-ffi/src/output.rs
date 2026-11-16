@@ -7,6 +7,7 @@ use windows_sys::Win32::Media::Audio::{
     midiOutOpen, midiOutPrepareHeader, midiOutReset, midiOutShortMsg, midiOutUnprepareHeader,
 };
 
+use crate::deadline::Deadline;
 use crate::error::{Error, check};
 
 /// How long a SysEx send may take beyond what its bytes take on a MIDI 1.0
@@ -96,7 +97,7 @@ impl MidiOut {
         // `MIDIERR_STILLPLAYING`, so the call that releases it is also the
         // wait for it.
         let bound = Duration::from_millis(message.len() as u64 / 3 + 1) + SLACK;
-        let started = Instant::now();
+        let give_up = Deadline::after(Instant::now(), bound);
         let released = loop {
             // SAFETY: `header` is the header prepared above (or one whose
             // preparation failed, which unprepare accepts).
@@ -104,7 +105,7 @@ impl MidiOut {
             if code != MIDIERR_STILLPLAYING {
                 break code;
             }
-            if started.elapsed() >= bound {
+            if give_up.passed(Instant::now()) {
                 // The driver may still read the header and the bytes: they
                 // are never freed.
                 return Err(Error::NotReturned {

@@ -38,6 +38,7 @@ use windows_sys::Win32::Media::{
     MM_MIM_CLOSE, MM_MIM_DATA, MM_MIM_LONGDATA, MM_MIM_LONGERROR, MMSYSERR_INVALHANDLE,
 };
 
+use crate::deadline::Deadline;
 use crate::error::{Error, check};
 use crate::sleeper::Sleeper;
 
@@ -285,8 +286,8 @@ impl MidiIn {
             let _ = worker.join();
         }
         // Callbacks that found the input before it was removed finish.
-        let started = Instant::now();
-        while self.shared.in_flight.load(Ordering::Acquire) > 0 && started.elapsed() < LEAVE_BOUND {
+        let leave = Deadline::after(Instant::now(), LEAVE_BOUND);
+        while self.shared.in_flight.load(Ordering::Acquire) > 0 && !leave.passed(Instant::now()) {
             std::thread::yield_now();
         }
         if self.shared.in_flight.load(Ordering::Acquire) > 0 {
