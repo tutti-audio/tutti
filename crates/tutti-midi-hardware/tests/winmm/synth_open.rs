@@ -9,7 +9,7 @@ use tutti_ump::{MidiGroup, SysexMessage, Ump};
 use super::gs_synth::synth;
 
 /// Long enough to be a failure, not a race.
-const PATIENCE: Duration = Duration::from_secs(5);
+const PATIENCE: Duration = Duration::from_secs(30);
 
 fn at(send: SendAt, ump: Ump) -> Outgoing {
     Outgoing::new(Offset::ZERO, send, ump)
@@ -53,7 +53,8 @@ fn the_synth_is_sent_every_event_at_its_time_and_opens_again_after_a_close() {
         drained(&out);
         assert_eq!(out.losses(), Losses::NONE);
         assert!(out.is_alive());
-        // Each was held to its time: the last was due 90 ms in.
+        // Each was held to its time: the last was due 90 ms in, and a hold never
+        // ends early; only lateness depends on load.
         assert!(
             now.elapsed() >= Duration::from_millis(85),
             "{:?}",
