@@ -512,10 +512,9 @@ pub enum PluginChange {
     /// The re-inserted plugin renders silence from the swap until its
     /// Processor reaches the new node: the old node returns it at its next block
     /// and the next update's pump lends it on. A node that is
-    /// [`Bypassed`](crate::NodeMode::Bypassed) is not run, so it hands nothing
-    /// back: a plugin's port change (and any restart) waits there until the
-    /// bypass ends. A plugin with a bypass of its own keeps running, and is not
-    /// held up.
+    /// [`Bypassed`](crate::NodeMode::Bypassed) is not processed, but it still
+    /// answers the recall once per block, so the change completes while the
+    /// bypass lasts.
     IoChanged,
     /// The plugin's new ports were not made a node, and the node stays as it
     /// is: they are wider than a block serves, or outside a served plugin's
