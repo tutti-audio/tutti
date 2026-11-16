@@ -8,7 +8,7 @@
 //! through [`ProfilesChange`](crate::ProfilesChange) and
 //! [`ProcessChange`](crate::ProcessChange).
 
-use tutti_midi_device::{Nak, Outcome, ProfileId, Request};
+use tutti_midi_device::{Nak, Outcome, Request};
 
 /// How a request to a peer ended.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -22,18 +22,20 @@ pub enum Answer {
         /// How it ended.
         outcome: Outcome,
     },
-    /// A switch of `profile` was not sent: the peer was lost between the
-    /// request and the poll that would have sent it.
+    /// A switch was not sent: the peer was lost between the request and the
+    /// poll that would have sent it.
     SwitchLost {
-        /// The Profile.
-        profile: ProfileId,
+        /// What was asked.
+        request: Request,
     },
     /// A MIDI Message Report ended.
     Report(ReportEnd),
     /// A report was not sent: the peer was lost between the request and the
-    /// poll that would have sent it, or has since said it does not support
-    /// MIDI Message Report.
+    /// poll that would have sent it.
     ReportLost,
+    /// A report was not sent: the peer has since said it does not support MIDI
+    /// Message Report.
+    ReportUnsupported,
 }
 
 /// How a MIDI Message Report ended.

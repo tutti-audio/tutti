@@ -275,10 +275,10 @@ pub use devices::{
 pub use endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
 pub use error::{Error, NotFound, Result};
 pub use port::{HardwareMidiInputs, InputProducerHandle, PortInfo, Pushed, StreamDrain};
-pub use process::{ProcessChange, ReportAsk, ReportError, ReportPeer};
+pub use process::{ProcessChange, ReportAsk, ReportError, Reporter};
 pub use profiles::{
-    ChannelCount, ChannelProfile, ListedProfile, NotAChannelCount, PeerProfiles, ProfileError,
-    ProfileSwitch, ProfilesChange, Whole, WholeProfile,
+    ChannelCount, ChannelSwitcher, NotAChannelCount, PeerProfiles, ProfileError, ProfileSwitch,
+    ProfilesChange, Switcher, Whole, WholeSwitcher,
 };
 pub use properties::{PropertyAsk, PropertyCall, PropertyChange, PropertyError, PropertyPeer};
 pub use session::{Connected, DeviceQuery, MidiHardwareOptions, MidiSession, Polled, Presented};

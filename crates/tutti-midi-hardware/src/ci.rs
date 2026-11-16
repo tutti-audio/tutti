@@ -75,26 +75,30 @@
 //! Profiles the peer answers with and the reports it sends after
 //! ([`MidiSession::profiles`](crate::MidiSession::profiles)), and is stepped by
 //! the same poll and its time as the device is. It sends on the same output.
+//!
 //! An app's request to enable or disable a Profile
-//! ([`MidiSession::set_profile`](crate::MidiSession::set_profile)) is queued
-//! and started by the next poll, which has the time its wait counts from; its
-//! end is an [`Answer::Switch`]. When
-//! the peer is lost (an Invalidate MUID, a collision, a changed MUID of the
-//! device or its Group ending) its Initiator and Profiles go
-//! and [`ProfilesChange::Dropped`] says so; closing the input reports nothing, as
-//! for peers.
+//! ([`MidiSession::set_profile`](crate::MidiSession::set_profile)) is queued and
+//! started by the next poll, which has the time its wait counts from. Its end is
+//! an [`Answer::Switch`]. When the peer is lost (an Invalidate MUID, a collision,
+//! a changed MUID of the device or its Group ending) its Initiator and Profiles
+//! go, [`ProfilesChange::Dropped`] says so, and a switch still waiting ends with
+//! an [`Answer::SwitchLost`] if it was not yet sent. Closing the input reports
+//! nothing, as for peers.
 //!
 //! # Process Inquiry
 //!
 //! A peer whose Discovery Reply declares Process Inquiry
-//! ([`CiCategories::PROCESS_INQUIRY`]) gets a [`ProcessInitiator`], made when it is
-//! found: it sends an Inquiry: Process Inquiry Capabilities to the Function Block,
-//! and a peer whose reply says it supports MIDI Message Report is listed
-//! ([`MidiSession::report_peers`](crate::MidiSession::report_peers)). An app's request
-//! for a report ([`MidiSession::report`](crate::MidiSession::report)) is queued and
-//! started by the next poll. The messages of a report are not CI: they are the peer's
+//! ([`CiCategories::PROCESS_INQUIRY`]) gets a [`ProcessInitiator`], made when it
+//! is found: it sends an Inquiry: Process Inquiry Capabilities to the Function
+//! Block, and a peer whose reply says it supports MIDI Message Report is listed
+//! ([`MidiSession::report_peers`](crate::MidiSession::report_peers)).
+//!
+//! An app's request for a report
+//! ([`MidiSession::report`](crate::MidiSession::report)) is queued and started
+//! by the next poll. The messages of a report are not CI: they are the peer's
 //! MIDI, and reach the graph with the rest of the input, before the
-//! [`ReportEnd::Ended`] the session reports. A lost peer's Initiator goes with it ([`ProcessChange::Dropped`]).
+//! [`ReportEnd::Ended`] that is the report's [`Answer`]. A lost peer's Initiator
+//! goes with it ([`ProcessChange::Dropped`]).
 //!
 //! # Property Exchange
 //!
@@ -166,7 +170,7 @@ use tutti_ump::{DeviceIdentity, MidiGroup, SysexAssembler, SysexStep, Ump};
 
 use crate::answer::{Answer, ReportEnd};
 use crate::devices::OpenOutput;
-use crate::process::{self, ProcessChange, ReportAsk, ReportError, ReportPeer};
+use crate::process::{self, ProcessChange, ReportAsk, ReportError, Reporter};
 use crate::profiles::{
     PeerProfiles, ProfileError, ProfileSwitch, ProfilesChange, Snapshot, Switch,
 };
@@ -624,7 +628,7 @@ impl Ci {
                             .features()
                             .is_some_and(|f| f.contains(ProcessFeatures::MIDI_MESSAGE_REPORT))
                     })
-                    .map(|(&muid, _)| ReportPeer {
+                    .map(|(&muid, _)| Reporter {
                         device: self.device.clone(),
                         group: member.group,
                         muid,
@@ -931,7 +935,7 @@ impl Running {
                         muid: switch.muid,
                     },
                     Answer::SwitchLost {
-                        profile: switch.profile,
+                        request: switch.request(),
                     },
                 ));
                 continue;
@@ -1144,12 +1148,13 @@ impl Member {
         };
         match initiator.report(ask.request, now) {
             Ok(actions) => self.carry_out_process(ask.peer.muid, actions, sends, changes),
-            // A report already waiting is answered once, for the request in
-            // flight, so this one has no answer of its own.
+            // The session sends a report only once the one in flight has
+            // ended; a second here has no answer of its own.
             Err(ProcessError::AlreadyAsking) => {}
-            Err(_) => changes
+            Err(ProcessError::NotSupported) => changes
                 .answers
-                .push((self.peer_id(ask.peer.muid), Answer::ReportLost)),
+                .push((self.peer_id(ask.peer.muid), Answer::ReportUnsupported)),
+            Err(_) => {}
         }
     }
 
@@ -1239,7 +1244,7 @@ impl Member {
             changes.answers.push((
                 self.peer_id(switch.muid),
                 Answer::SwitchLost {
-                    profile: switch.profile,
+                    request: switch.request(),
                 },
             ));
             return;
@@ -1250,8 +1255,9 @@ impl Member {
         };
         match started {
             Ok(actions) => self.carry_out(switch.muid, actions, sends, changes),
-            // The switch in flight is answered once, for every request that
-            // named it, so this one has no answer of its own.
+            // The session sends a switch of a Profile at an address only once
+            // the one in flight has ended; a second here has no answer of its
+            // own.
             Err(RequestError::AlreadyAsking) => {}
         }
     }
@@ -1724,10 +1730,18 @@ mod tests {
             );
             assert_eq!(
                 changes.answers,
-                [(id, Answer::SwitchLost { profile })],
+                [(
+                    id,
+                    Answer::SwitchLost {
+                        request: tutti_midi_device::Request::SetOff {
+                            address: CiDeviceId::Group,
+                            profile
+                        }
+                    }
+                )],
                 "{group:?}"
             );
-            let peer = ReportPeer {
+            let peer = Reporter {
                 device: device.clone(),
                 group,
                 muid,

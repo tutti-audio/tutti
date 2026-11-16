@@ -1,5 +1,5 @@
 //! The Process Inquiry of a MIDI-CI peer, as the session drives it: the peers
-//! that can be asked for a MIDI Message Report ([`ReportPeer`]), the request
+//! that can be asked for a MIDI Message Report ([`Reporter`]), the request
 //! ([`ReportAsk`]) and what the peer's Process Inquiry did ([`ProcessChange`]).
 //!
 //! The session is the Initiator (M2-101 §9): it asks every peer that declared
@@ -22,13 +22,13 @@ use tutti_ump::MidiGroup;
 /// A peer that declared Process Inquiry and answered that it supports MIDI
 /// Message Report: the handle a [`ReportAsk`] is made from.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ReportPeer {
+pub struct Reporter {
     pub(crate) device: DeviceId,
     pub(crate) group: MidiGroup,
     pub(crate) muid: Muid,
 }
 
-impl ReportPeer {
+impl Reporter {
     /// The input device the peer was found on.
     #[must_use]
     pub const fn device(&self) -> &DeviceId {
@@ -59,11 +59,11 @@ impl ReportPeer {
 }
 
 /// A request for a MIDI Message Report from one peer. Made only from a
-/// [`ReportPeer`], and it names the input device that handle was read from, so it
+/// [`Reporter`], and it names the input device that handle was read from, so it
 /// cannot be sent to another.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReportAsk {
-    pub(crate) peer: ReportPeer,
+    pub(crate) peer: Reporter,
     pub(crate) request: ReportRequest,
 }
 
@@ -92,7 +92,7 @@ impl ReportAsk {
     /// MIDI Message Report.
     pub fn check<'a>(
         &self,
-        peers: impl IntoIterator<Item = &'a ReportPeer>,
+        peers: impl IntoIterator<Item = &'a Reporter>,
     ) -> Result<(), ReportError> {
         if peers.into_iter().any(|peer| *peer == self.peer) {
             Ok(())
@@ -103,7 +103,7 @@ impl ReportAsk {
 }
 
 /// The peers of one input that can be asked for a report.
-pub(crate) type Snapshot = Arc<[ReportPeer]>;
+pub(crate) type Snapshot = Arc<[Reporter]>;
 
 /// A change in the Process Inquiry of one peer, once each from
 /// [`MidiSession::poll`](crate::MidiSession::poll); the [`PeerId`](crate::PeerId)

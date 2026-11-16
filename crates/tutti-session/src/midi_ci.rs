@@ -21,8 +21,8 @@ use tutti_midi_device::{
     CiDeviceId, Nak, Outcome, ProfileId, ProfileState, ReportRequest, Request,
 };
 use tutti_midi_hardware::{
-    Answer, ChannelCount, ChannelProfile as ListedChannel, PeerId, PeerProfiles, ReportEnd,
-    ReportPeer as ListedReporter, WholeProfile as ListedWhole,
+    Answer, ChannelCount, ChannelSwitcher as ListedChannel, MidiSession, PeerId, PeerProfiles,
+    ProfileSwitch, ReportAsk, ReportEnd, Reporter as ListedReporter, WholeSwitcher as ListedWhole,
 };
 use tutti_ump::MidiChannel;
 
@@ -43,9 +43,8 @@ job_kind!(
     pub RequestReport => (), PeerError<Nak>
 );
 
-/// What a handle needs of its port to make a request: the port's record, weakly
-/// (the record holds the handles its info lists), and the queue its jobs land
-/// in.
+/// How a handle reaches its port: the port's record, held weakly because the
+/// record holds the info that lists the handles, and the queue the jobs land in.
 #[derive(Clone)]
 pub(crate) struct PortLink {
     shared: Weak<InputShared>,
@@ -57,8 +56,10 @@ impl PortLink {
         Self { shared, landed }
     }
 
-    /// A job for `make`'s request, queued for the next poll, or already ended
-    /// when the port cannot take it.
+    /// A job for `request`, queued for the next poll, or already ended when
+    /// the port cannot take it: the check and the queueing are one step under
+    /// the port's lock, so a request either reaches the queue the session drains
+    /// or ends at once.
     fn submit<J, R>(
         &self,
         request: R,
@@ -71,10 +72,7 @@ impl PortLink {
         let (job, ticket) = Ticket::new(&self.landed);
         match self.shared.upgrade() {
             None => ticket.land(Err(PeerError::Disconnected)),
-            Some(shared) => match shared.admit(|info| lists(info, &request)) {
-                Ok(()) => shared.enqueue(make(request, ticket)),
-                Err(error) => ticket.land(Err(error)),
-            },
+            Some(shared) => shared.push(request, ticket, lists, make),
         }
         job
     }
@@ -86,9 +84,10 @@ impl std::fmt::Debug for PortLink {
     }
 }
 
-/// One found peer's Profiles ([`MidiInputInfo::profiles`](crate::MidiInputInfo::profiles)):
-/// the Profiles it lists as handles to
-/// switch them from.
+/// One found peer's Profiles
+/// ([`MidiInputInfo::profiles`](crate::MidiInputInfo::profiles)): the Profiles it
+/// lists, as handles to switch them from ([`listed`](Self::listed)), and the
+/// peer's table ([`profiles`](Self::profiles)).
 #[derive(Clone, Debug)]
 pub struct ProfilePeer {
     link: PortLink,
@@ -110,18 +109,16 @@ impl ProfilePeer {
     /// Every Profile the peer lists, as handles to switch them from.
     pub fn listed(&self) -> impl Iterator<Item = ListedProfile> + '_ {
         self.peer.listed().map(|listed| match listed {
-            tutti_midi_hardware::ListedProfile::Channel(inner) => {
+            tutti_midi_hardware::Switcher::Channel(inner) => {
                 ListedProfile::Channel(ChannelProfile {
                     link: self.link.clone(),
                     inner,
                 })
             }
-            tutti_midi_hardware::ListedProfile::Whole(inner) => {
-                ListedProfile::Whole(WholeProfile {
-                    link: self.link.clone(),
-                    inner,
-                })
-            }
+            tutti_midi_hardware::Switcher::Whole(inner) => ListedProfile::Whole(WholeProfile {
+                link: self.link.clone(),
+                inner,
+            }),
         })
     }
 }
@@ -192,11 +189,19 @@ pub struct ChannelProfile {
 impl ChannelProfile {
     /// Asks the peer to enable the Profile on this Channel, as the Manager of
     /// `channels` Channels in all.
+    ///
+    /// The count is not checked against [`ListedProfile::channels`]: that is the
+    /// count of the peer's last Report, not a limit the peer declared, and the
+    /// limit of a Profile Details reply is never inquired. A peer that cannot
+    /// comply answers with its Disabled Report, which lands as
+    /// [`ProfileState::Disabled`].
     pub fn enable(&self, channels: ChannelCount) -> Job<SwitchProfile> {
         self.switch(self.inner.enable(channels))
     }
 
-    /// Asks the peer to disable the Profile on this Channel.
+    /// Asks the peer to disable the Profile on this Channel. A Profile the peer
+    /// lists as disabled is asked all the same: the spec does not make it
+    /// meaningless, and the peer answers with its Disabled Report.
     pub fn disable(&self) -> Job<SwitchProfile> {
         self.switch(self.inner.disable())
     }
@@ -293,93 +298,192 @@ impl Eq for ReportPeer {}
 
 // --- The requests in flight ---
 
-/// The requests a port has sent and the peer has not answered.
+/// A request sent to a peer, or waiting to be, with the jobs that wait for its
+/// answer. Identical requests share one slot and so one answer.
+struct Slot<R, J: crate::JobKind> {
+    peer: PeerId,
+    request: R,
+    sent: bool,
+    tickets: Vec<Ticket<J>>,
+}
+
+/// The requests a port has made of its peers and they have not answered.
+///
+/// A peer answers one switch of a Profile at an address, and one report, at a
+/// time, so a request that differs from the one in flight for the same target
+/// waits behind it and is sent when that one ends. An identical request joins the
+/// one in flight, or the one waiting, and lands with its answer.
 #[derive(Default)]
 pub(crate) struct Pending {
-    switches: Vec<(PeerId, Request, Ticket<SwitchProfile>)>,
-    reports: Vec<(PeerId, Ticket<RequestReport>)>,
+    switches: Vec<Slot<ProfileSwitch, SwitchProfile>>,
+    reports: Vec<Slot<ReportAsk, RequestReport>>,
 }
 
 impl Pending {
-    pub(crate) fn switch(&mut self, peer: PeerId, request: Request, ticket: Ticket<SwitchProfile>) {
-        self.switches.push((peer, request, ticket));
+    /// Takes in a switch the app asked for: sent now when nothing else is out
+    /// for its Profile at its address.
+    pub(crate) fn switch(
+        &mut self,
+        io: &mut MidiSession,
+        switch: ProfileSwitch,
+        ticket: Ticket<SwitchProfile>,
+    ) {
+        if let Some(slot) = self.switches.iter_mut().find(|s| s.request == switch) {
+            slot.tickets.push(ticket);
+            return;
+        }
+        self.switches.push(Slot {
+            peer: switch.peer(),
+            request: switch,
+            sent: false,
+            tickets: vec![ticket],
+        });
+        self.send(io);
     }
 
-    pub(crate) fn report(&mut self, peer: PeerId, ticket: Ticket<RequestReport>) {
-        self.reports.push((peer, ticket));
+    /// Takes in a report the app asked for: sent now when none is out for its
+    /// peer.
+    pub(crate) fn report(
+        &mut self,
+        io: &mut MidiSession,
+        ask: ReportAsk,
+        ticket: Ticket<RequestReport>,
+    ) {
+        if let Some(slot) = self.reports.iter_mut().find(|s| s.request == ask) {
+            slot.tickets.push(ticket);
+            return;
+        }
+        self.reports.push(Slot {
+            peer: ask.peer(),
+            request: ask,
+            sent: false,
+            tickets: vec![ticket],
+        });
+        self.send(io);
     }
 
-    /// Lands `answer` on the requests of `peer` it ends.
-    pub(crate) fn answer(&mut self, peer: PeerId, answer: &Answer) {
+    /// Sends each request that waits for nothing, and ends one the device
+    /// cannot take.
+    pub(crate) fn send(&mut self, io: &mut MidiSession) {
+        let mut at = 0;
+        while at < self.switches.len() {
+            let busy = {
+                let slot = &self.switches[at];
+                let key = (slot.peer, switch_at(&slot.request.request()));
+                self.switches[..at]
+                    .iter()
+                    .any(|s| (s.peer, switch_at(&s.request.request())) == key)
+            };
+            if busy || self.switches[at].sent {
+                at += 1;
+            } else if io.set_profile(self.switches[at].request.clone()).is_ok() {
+                self.switches[at].sent = true;
+                at += 1;
+            } else {
+                end_slot(self.switches.remove(at), || Err(PeerError::Disconnected));
+            }
+        }
+        let mut at = 0;
+        while at < self.reports.len() {
+            let peer = self.reports[at].peer;
+            let busy = self.reports[..at].iter().any(|s| s.peer == peer);
+            if busy || self.reports[at].sent {
+                at += 1;
+            } else if io.report(self.reports[at].request.clone()).is_ok() {
+                self.reports[at].sent = true;
+                at += 1;
+            } else {
+                end_slot(self.reports.remove(at), || Err(PeerError::Disconnected));
+            }
+        }
+    }
+
+    /// Lands `answer` on the request of `peer` it ends, and sends what waited
+    /// behind it.
+    pub(crate) fn answer(&mut self, io: &mut MidiSession, peer: PeerId, answer: &Answer) {
         match answer {
             Answer::Switch { request, outcome } => {
-                let at = switch_at(request);
-                let ended = take(&mut self.switches, |(p, r, _)| {
-                    *p == peer && switch_at(r) == at
-                });
-                for (_, _, ticket) in ended {
-                    ticket.complete(|| switched(outcome));
-                }
+                self.end_switch(peer, request, &switched(outcome));
             }
-            Answer::SwitchLost { profile } => {
-                let ended = take(&mut self.switches, |(p, r, _)| {
-                    *p == peer && switch_at(r).is_some_and(|(_, id)| id == *profile)
-                });
-                for (_, _, ticket) in ended {
-                    ticket.complete(|| Err(PeerError::Disconnected));
-                }
+            Answer::SwitchLost { request } => {
+                self.end_switch(peer, request, &Err(PeerError::Disconnected));
             }
-            Answer::Report(end) => {
-                for (_, ticket) in take(&mut self.reports, |(p, _)| *p == peer) {
-                    ticket.complete(|| reported(end));
-                }
-            }
-            Answer::ReportLost => {
-                for (_, ticket) in take(&mut self.reports, |(p, _)| *p == peer) {
-                    ticket.complete(|| Err(PeerError::Disconnected));
-                }
-            }
+            Answer::Report(end) => self.end_report(peer, &reported(end)),
+            Answer::ReportLost => self.end_report(peer, &Err(PeerError::Disconnected)),
+            Answer::ReportUnsupported => self.end_report(peer, &Err(PeerError::Unsupported)),
             // A kind of answer this session does not know ends nothing.
             _ => {}
+        }
+        self.send(io);
+    }
+
+    fn end_switch(
+        &mut self,
+        peer: PeerId,
+        request: &Request,
+        result: &Result<ProfileState, PeerError<Nak>>,
+    ) {
+        let key = (peer, switch_at(request));
+        let at = self
+            .switches
+            .iter()
+            .position(|s| s.sent && (s.peer, switch_at(&s.request.request())) == key);
+        if let Some(at) = at {
+            end_slot(self.switches.remove(at), || result.clone());
+        }
+    }
+
+    fn end_report(&mut self, peer: PeerId, result: &Result<(), PeerError<Nak>>) {
+        if let Some(at) = self.reports.iter().position(|s| s.sent && s.peer == peer) {
+            end_slot(self.reports.remove(at), || result.clone());
         }
     }
 
     /// The peer's Profiles went with it: its switches end.
     pub(crate) fn lose_switches(&mut self, peer: PeerId) {
-        for (_, _, ticket) in take(&mut self.switches, |(p, ..)| *p == peer) {
-            ticket.complete(|| Err(PeerError::Disconnected));
+        let (gone, kept) = std::mem::take(&mut self.switches)
+            .into_iter()
+            .partition(|s| s.peer == peer);
+        self.switches = kept;
+        for slot in gone {
+            end_slot(slot, || Err(PeerError::Disconnected));
         }
     }
 
     /// The peer's Process Inquiry went with it: its reports end.
     pub(crate) fn lose_reports(&mut self, peer: PeerId) {
-        for (_, ticket) in take(&mut self.reports, |(p, _)| *p == peer) {
-            ticket.complete(|| Err(PeerError::Disconnected));
+        let (gone, kept) = std::mem::take(&mut self.reports)
+            .into_iter()
+            .partition(|s| s.peer == peer);
+        self.reports = kept;
+        for slot in gone {
+            end_slot(slot, || Err(PeerError::Disconnected));
         }
     }
 
     /// Every request ends as `why`.
     pub(crate) fn end(&mut self, why: &PeerError<Nak>) {
-        for (_, _, ticket) in self.switches.drain(..) {
-            ticket.complete(|| Err(why.clone()));
+        for slot in self.switches.drain(..) {
+            end_slot(slot, || Err(why.clone()));
         }
-        for (_, ticket) in self.reports.drain(..) {
-            ticket.complete(|| Err(why.clone()));
+        for slot in self.reports.drain(..) {
+            end_slot(slot, || Err(why.clone()));
         }
     }
 }
 
-/// Removes the items `ended` holds of `items`, in order.
-fn take<T>(items: &mut Vec<T>, ended: impl Fn(&T) -> bool) -> Vec<T> {
-    let (gone, kept) = std::mem::take(items)
-        .into_iter()
-        .partition(|item| ended(item));
-    *items = kept;
-    gone
+/// Lands what `result` makes on every job of `slot`.
+fn end_slot<R, J: crate::JobKind>(
+    slot: Slot<R, J>,
+    result: impl Fn() -> Result<J::Output, J::Error>,
+) {
+    for ticket in slot.tickets {
+        ticket.land(result());
+    }
 }
 
 /// Where and which Profile a request switches: a Set On and a Set Off of one
-/// Profile at one address wait in the same slot.
+/// Profile at one address wait for the same slot.
 fn switch_at(request: &Request) -> Option<(CiDeviceId, ProfileId)> {
     match request {
         Request::SetOn { address, profile } | Request::SetOff { address, profile } => {

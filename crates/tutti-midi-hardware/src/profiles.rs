@@ -1,6 +1,6 @@
 //! The Profiles of a MIDI-CI peer, as the session holds and drives them: what
 //! the peer supports ([`PeerProfiles`]), the handles an app asks to switch one
-//! from ([`ListedProfile`]), the request itself ([`ProfileSwitch`]) and what
+//! from ([`Switcher`]), the request itself ([`ProfileSwitch`]) and what
 //! happened to its table ([`ProfilesChange`]).
 //!
 //! The session is the Initiator (M2-101 §7): it asks every peer that declared
@@ -13,8 +13,8 @@
 //!
 //! What the spec's request fields allow is in the handle's type. The Number
 //! Channels Requested of a Set Profile On (M2-101 §7.8) is a count of Channels
-//! only where the Profile is on one Channel: a [`ChannelProfile`] takes a
-//! [`ChannelCount`], and a [`WholeProfile`] (on the Group or Function Block)
+//! only where the Profile is on one Channel: a [`ChannelSwitcher`] takes a
+//! [`ChannelCount`], and a [`WholeSwitcher`] (on the Group or Function Block)
 //! has no count to get wrong, since there the field is the width of what is
 //! addressed. A count of 0 on a Channel is unwritable. The limit a peer
 //! declares in a Profile Details reply (M2-102 §2.5.1) is not known to this
@@ -57,12 +57,12 @@ struct Listed {
 
 /// A Profile the peer lists on one Channel.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ChannelProfile {
+pub struct ChannelSwitcher {
     listed: Listed,
     channel: MidiChannel,
 }
 
-/// Where a [`WholeProfile`] is: the whole Group or the whole Function Block.
+/// Where a [`WholeSwitcher`] is: the whole Group or the whole Function Block.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Whole {
     /// The Group, not channelized (`0x7E`).
@@ -73,7 +73,7 @@ pub enum Whole {
 
 /// A Profile the peer lists on the whole Group or Function Block.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct WholeProfile {
+pub struct WholeSwitcher {
     listed: Listed,
     whole: Whole,
 }
@@ -81,11 +81,11 @@ pub struct WholeProfile {
 /// A Profile a peer lists, at the address it lists it: the handle a
 /// [`ProfileSwitch`] is made from.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ListedProfile {
+pub enum Switcher {
     /// On one Channel: enabling it says how many Channels it is to use.
-    Channel(ChannelProfile),
+    Channel(ChannelSwitcher),
     /// On the Group or Function Block: enabling it has no count.
-    Whole(WholeProfile),
+    Whole(WholeSwitcher),
 }
 
 /// What a switch does.
@@ -98,7 +98,7 @@ pub(crate) enum Switch {
 /// A request that a peer enable or disable one Profile it lists
 /// ([`MidiSession::set_profile`](crate::MidiSession::set_profile)), whose end
 /// is an [`Answer::Switch`](crate::Answer::Switch). Made only
-/// from a [`ListedProfile`], and it names the input device that handle was read
+/// from a [`Switcher`], and it names the input device that handle was read
 /// from, so it cannot be sent to another.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProfileSwitch {
@@ -188,7 +188,7 @@ impl Listed {
     }
 }
 
-impl ChannelProfile {
+impl ChannelSwitcher {
     /// Asks the peer to enable the Profile on this Channel, as the Manager of
     /// `channels` Channels in all.
     #[must_use]
@@ -231,7 +231,7 @@ impl ChannelProfile {
     }
 }
 
-impl WholeProfile {
+impl WholeSwitcher {
     /// Asks the peer to enable the Profile on the whole Group or Function Block.
     #[must_use]
     pub fn enable(&self) -> ProfileSwitch {
@@ -276,7 +276,7 @@ impl WholeProfile {
     }
 }
 
-impl ListedProfile {
+impl Switcher {
     /// The Profile.
     #[must_use]
     pub const fn profile(&self) -> ProfileId {
@@ -417,7 +417,7 @@ impl PeerProfiles {
     }
 
     /// Every Profile the peer lists, as handles to switch them from.
-    pub fn listed(&self) -> impl Iterator<Item = ListedProfile> + '_ {
+    pub fn listed(&self) -> impl Iterator<Item = Switcher> + '_ {
         self.table.addresses().flat_map(move |address| {
             self.table.profiles(address).map(move |(profile, entry)| {
                 let listed = Listed {
@@ -429,13 +429,13 @@ impl PeerProfiles {
                 };
                 match address {
                     CiDeviceId::Channel(channel) => {
-                        ListedProfile::Channel(ChannelProfile { listed, channel })
+                        Switcher::Channel(ChannelSwitcher { listed, channel })
                     }
-                    CiDeviceId::Group => ListedProfile::Whole(WholeProfile {
+                    CiDeviceId::Group => Switcher::Whole(WholeSwitcher {
                         listed,
                         whole: Whole::Group,
                     }),
-                    CiDeviceId::FunctionBlock => ListedProfile::Whole(WholeProfile {
+                    CiDeviceId::FunctionBlock => Switcher::Whole(WholeSwitcher {
                         listed,
                         whole: Whole::FunctionBlock,
                     }),

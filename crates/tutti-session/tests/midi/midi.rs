@@ -1453,6 +1453,18 @@ pub(crate) enum Reply {
     Silent,
 }
 
+/// What the session asked a fake MIDI-CI peer, in the order it arrived.
+#[cfg(feature = "midi-hardware")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Asked {
+    /// A Set Profile On, with the Number of Channels.
+    On(tutti_midi_device::ProfileChannels),
+    /// A Set Profile Off.
+    Off,
+    /// An Inquiry: MIDI Message Report, with the scope asked.
+    Report(tutti_midi_device::ReportScope),
+}
+
 /// A MIDI-CI peer that lists the MPE Profile (M2-120 section 3.2) disabled on
 /// Channel 1, enables it when asked with the Number of Channels (appendix A.3
 /// and A.4) and disables it when asked, and sends a MIDI Message Report of one
@@ -1465,6 +1477,8 @@ pub(crate) struct MpePeer {
     pub(crate) muid: tutti_midi_device::Muid,
     pub(crate) switch: Reply,
     pub(crate) report: Reply,
+    /// What the session asked of it so far.
+    pub(crate) asked: Vec<Asked>,
 }
 
 #[cfg(feature = "midi-hardware")]
@@ -1498,6 +1512,7 @@ impl MpePeer {
             muid: tutti_midi_device::Muid::of(0x0012_3456),
             switch: Reply::Answer,
             report: Reply::Answer,
+            asked: Vec::new(),
         }
     }
 
@@ -1528,7 +1543,18 @@ impl MpePeer {
             let SysexStep::Complete(done) = self.assembler.push(ump) else {
                 continue;
             };
-            match CiMessage::decode(self.assembler.message(done).payload()) {
+            let decoded = CiMessage::decode(self.assembler.message(done).payload());
+            match &decoded {
+                Decoded::Message(CiMessage::SetProfileOn { channels, .. }) => {
+                    self.asked.push(Asked::On(*channels));
+                }
+                Decoded::Message(CiMessage::SetProfileOff { .. }) => self.asked.push(Asked::Off),
+                Decoded::Message(CiMessage::MessageReportInquiry { scope, .. }) => {
+                    self.asked.push(Asked::Report(*scope));
+                }
+                _ => {}
+            }
+            match decoded {
                 Decoded::Message(CiMessage::Discovery { header, .. }) => {
                     let data = DiscoveryData::new(
                         DeviceIdentity {

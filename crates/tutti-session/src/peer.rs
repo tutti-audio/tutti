@@ -177,6 +177,9 @@ pub enum PeerError<E> {
     /// The peer did not answer in time.
     #[error("the peer did not answer in time")]
     TimedOut,
+    /// The peer said it does not support the request.
+    #[error("the peer does not support the request")]
+    Unsupported,
     /// The peer's pool entry was released, or swapped to another identity,
     /// before the request landed: this handle reads
     /// [`Presence::Closed`].

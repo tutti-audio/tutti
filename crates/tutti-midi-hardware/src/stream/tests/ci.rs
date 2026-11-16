@@ -918,7 +918,7 @@ fn a_ci_peers_product_instance_id_fills_what_the_device_left() {
 
 // --- Profile Configuration (M2-101 section 7, M2-102 section 2) -----------
 
-use crate::{ChannelCount, ListedProfile, ProfileError, ProfilesChange, Whole};
+use crate::{ChannelCount, ProfileError, ProfilesChange, Switcher, Whole};
 use tutti_midi_device::{
     Outcome, PEER_REPLY_TIMEOUT, ProfileChange, ProfileChannels, ProfileId, ProfileLists,
     ProfileState, Request, StandardProfile,
@@ -1090,9 +1090,9 @@ fn the_replies_to_profile_inquiry_become_the_peers_profiles_once_the_final_one_a
     assert_eq!((held.group(), held.muid()), (GROUP_0, peer()));
     let listed: Vec<_> = held.listed().collect();
     let [
-        ListedProfile::Channel(one),
-        ListedProfile::Channel(two),
-        ListedProfile::Whole(three),
+        Switcher::Channel(one),
+        Switcher::Channel(two),
+        Switcher::Whole(three),
     ] = listed.as_slice()
     else {
         panic!("two on Channel 1 and one on the Group: {listed:?}");
@@ -1122,7 +1122,7 @@ fn a_set_profile_on_names_the_channel_and_its_enabled_report_updates_the_table()
     let (mut wire, ours) = peer_declaring(CiCategories::PROFILE_CONFIGURATION);
     known_profiles(&mut wire, ours, vec![], vec![profile(2)], vec![]);
     let listed: Vec<_> = wire.session.profiles(&wire.id)[0].listed().collect();
-    let [ListedProfile::Channel(c)] = listed.as_slice() else {
+    let [Switcher::Channel(c)] = listed.as_slice() else {
         panic!("one Channel Profile: {listed:?}");
     };
     let _ = received(&wire);
@@ -1355,7 +1355,7 @@ fn a_set_profile_on_a_group_asks_for_no_channels_and_off_is_resolved_by_the_disa
     let (mut wire, ours) = peer_declaring(CiCategories::PROFILE_CONFIGURATION);
     known_profiles(&mut wire, ours, vec![], vec![], vec![profile(3)]);
     let listed: Vec<_> = wire.session.profiles(&wire.id)[0].listed().collect();
-    let [ListedProfile::Whole(whole)] = listed.as_slice() else {
+    let [Switcher::Whole(whole)] = listed.as_slice() else {
         panic!("one Group Profile: {listed:?}");
     };
     let _ = received(&wire);
@@ -1481,7 +1481,7 @@ fn added_and_removed_reports_change_the_list_and_a_stale_handle_is_refused() {
         ),
         "{changes:?}"
     );
-    let ListedProfile::Channel(old) = &stale[0] else {
+    let Switcher::Channel(old) = &stale[0] else {
         panic!("a Channel Profile");
     };
     assert_eq!(
@@ -1500,7 +1500,7 @@ fn an_invalidate_muid_drops_the_peers_profiles_and_refuses_its_handles() {
     let (mut wire, ours) = peer_declaring(CiCategories::PROFILE_CONFIGURATION);
     known_profiles(&mut wire, ours, vec![], vec![profile(2)], vec![]);
     let listed: Vec<_> = wire.session.profiles(&wire.id)[0].listed().collect();
-    let ListedProfile::Channel(c) = &listed[0] else {
+    let Switcher::Channel(c) = &listed[0] else {
         panic!("a Channel Profile");
     };
     wire.session
@@ -1539,7 +1539,7 @@ fn a_set_profile_nothing_answers_times_out_after_the_profile_timeout() {
     let (mut wire, ours) = peer_declaring(CiCategories::PROFILE_CONFIGURATION);
     known_profiles(&mut wire, ours, vec![], vec![profile(2)], vec![]);
     let listed: Vec<_> = wire.session.profiles(&wire.id)[0].listed().collect();
-    let ListedProfile::Channel(c) = &listed[0] else {
+    let Switcher::Channel(c) = &listed[0] else {
         panic!("a Channel Profile");
     };
     wire.session
@@ -1594,7 +1594,7 @@ fn a_request_while_one_for_that_profile_waits_is_not_sent() {
     let (mut wire, ours) = peer_declaring(CiCategories::PROFILE_CONFIGURATION);
     known_profiles(&mut wire, ours, vec![], vec![profile(2)], vec![]);
     let listed: Vec<_> = wire.session.profiles(&wire.id)[0].listed().collect();
-    let ListedProfile::Channel(c) = &listed[0] else {
+    let Switcher::Channel(c) = &listed[0] else {
         panic!("a Channel Profile");
     };
     let _ = received(&wire);
@@ -1605,7 +1605,13 @@ fn a_request_while_one_for_that_profile_waits_is_not_sent() {
     }
     let changes = polled(&mut wire, 110);
     assert!(changes.is_empty(), "{changes:?}");
-    assert_eq!(payloads(&received(&wire)).len(), 1);
+    let sent = payloads(&received(&wire));
+    let [(_, payload)] = sent.as_slice() else {
+        panic!("one Set Profile On: {sent:?}");
+    };
+    assert_eq!(payload[..4], [0x7E, 0x00, 0x0D, 0x22]);
+    assert_eq!(payload[13..18], profile(2).to_bytes());
+    assert_eq!(payload[18..], [1, 0], "one Channel, as the first asked");
 }
 
 /// A count of Channels is at least 1 and fits 14 bits (M2-101 section 7.8).
@@ -1880,7 +1886,12 @@ fn a_report_while_one_waits_is_not_sent() {
     }
     let changes = polled(&mut wire, 110);
     assert!(changes.is_empty(), "{changes:?}");
-    assert_eq!(payloads(&received(&wire)).len(), 1);
+    let sent = payloads(&received(&wire));
+    let [(_, payload)] = sent.as_slice() else {
+        panic!("one Inquiry: {sent:?}");
+    };
+    assert_eq!(payload[..4], [0x7E, 0x7F, 0x0D, 0x42]);
+    assert_eq!(payload[13..], [0x01, 0b10, 0x00, 0b10, 0b1]);
 }
 
 /// A lost peer's handle is refused, and the peer's Initiator is reported dropped.

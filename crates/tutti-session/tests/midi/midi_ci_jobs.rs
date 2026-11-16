@@ -7,7 +7,8 @@ use std::time::{Duration, Instant};
 
 use tutti_midi_device::{
     ChannelControllers, CiHeader, CiMessage, DataControl, EndpointId, Nak, NoteData,
-    PEER_REPLY_TIMEOUT, PortDirection, ProfileState, ReportRequest, ReportScope, SystemMessages,
+    PEER_REPLY_TIMEOUT, PortDirection, ProfileChannels, ProfileState, ReportRequest, ReportScope,
+    SystemMessages,
 };
 use tutti_midi_hardware::ChannelCount;
 use tutti_midi_hardware::test_support::FakeCounters;
@@ -19,7 +20,7 @@ use tutti_session::{
 use tutti_ump::{DeviceIdentity, ManufacturerId, Message, MidiGroup, U7, Voice2};
 
 use crate::common::{Seen, blocks, play, tap};
-use crate::midi::{MpePeer, Reply, connect, hot_plug_session_ci, plug, update_at};
+use crate::midi::{Asked, MpePeer, Reply, connect, hot_plug_session_ci, plug, update_at};
 
 /// A session over a fake OS with one MIDI-CI peer on the input `"wire"`, whose
 /// Profiles and Process Inquiry are known, and the session's clock.
@@ -308,4 +309,174 @@ fn a_report_whose_peer_leaves_before_its_end_is_disconnected() {
     }
     wire.run(5);
     assert_eq!(wire.result(&job), Some(Err(PeerError::Disconnected)));
+}
+
+/// A report with another scope than `everything`.
+fn notes_only() -> ReportRequest {
+    ReportRequest::new(
+        DataControl::Full,
+        ReportScope::FunctionBlock {
+            system: SystemMessages::empty(),
+            controllers: ChannelControllers::empty(),
+            notes: NoteData::NOTES,
+        },
+    )
+}
+
+fn scope(request: ReportRequest) -> ReportScope {
+    request.scope
+}
+
+/// A request identical to the one in flight is not sent again: both jobs land
+/// with its answer.
+#[test]
+fn an_identical_repeated_switch_shares_the_answer_and_is_sent_once() {
+    let mut wire = Wire::new(Reply::Answer, Reply::Answer);
+    let first = wire.profile().enable(four());
+    let second = wire.profile().enable(four());
+    wire.run(30);
+    assert_eq!(wire.peer.asked, [Asked::On(ProfileChannels::of(4))]);
+    assert_eq!(wire.result(&first), Some(Ok(ProfileState::Enabled)));
+    assert_eq!(wire.result(&second), Some(Ok(ProfileState::Enabled)));
+}
+
+/// A disable asked while an enable is out waits behind it: the peer is asked
+/// Set On and then Set Off, in that order, and each job lands the state of its
+/// own answer.
+#[test]
+fn a_disable_behind_an_enable_is_sent_after_it_and_lands_its_own_state() {
+    let mut wire = Wire::new(Reply::Answer, Reply::Answer);
+    let enable = wire.profile().enable(four());
+    let disable = wire.profile().disable();
+    wire.run(40);
+    assert_eq!(
+        wire.peer.asked,
+        [Asked::On(ProfileChannels::of(4)), Asked::Off]
+    );
+    assert_eq!(wire.result(&enable), Some(Ok(ProfileState::Enabled)));
+    assert_eq!(wire.result(&disable), Some(Ok(ProfileState::Disabled)));
+    assert_eq!(wire.state(), ProfileState::Disabled);
+}
+
+/// An enable with another Channel count is a different request: it waits behind
+/// the first and is sent with its own count.
+#[test]
+fn an_enable_with_another_count_waits_behind_and_is_sent_with_its_own() {
+    let mut wire = Wire::new(Reply::Answer, Reply::Answer);
+    let two = wire.profile().enable(ChannelCount::new(2).unwrap());
+    let three = wire.profile().enable(ChannelCount::new(3).unwrap());
+    wire.run(40);
+    assert_eq!(
+        wire.peer.asked,
+        [
+            Asked::On(ProfileChannels::of(2)),
+            Asked::On(ProfileChannels::of(3))
+        ]
+    );
+    assert_eq!(wire.result(&two), Some(Ok(ProfileState::Enabled)));
+    assert_eq!(wire.result(&three), Some(Ok(ProfileState::Enabled)));
+}
+
+/// An identical report request shares the report in flight.
+#[test]
+fn an_identical_repeated_report_shares_the_answer_and_is_sent_once() {
+    let mut wire = Wire::new(Reply::Answer, Reply::Answer);
+    let first = wire.reporter().request(everything());
+    let second = wire.reporter().request(everything());
+    wire.run(30);
+    assert_eq!(wire.peer.asked, [Asked::Report(scope(everything()))]);
+    assert_eq!(wire.result(&first), Some(Ok(())));
+    assert_eq!(wire.result(&second), Some(Ok(())));
+}
+
+/// A report that asks for something else waits behind the one in flight, and is
+/// sent when it has ended.
+#[test]
+fn a_report_of_another_kind_waits_behind_the_one_in_flight() {
+    let mut wire = Wire::new(Reply::Answer, Reply::Answer);
+    let first = wire.reporter().request(everything());
+    let second = wire.reporter().request(notes_only());
+    wire.run(40);
+    assert_eq!(
+        wire.peer.asked,
+        [
+            Asked::Report(scope(everything())),
+            Asked::Report(scope(notes_only()))
+        ]
+    );
+    assert_eq!(wire.result(&first), Some(Ok(())));
+    assert_eq!(wire.result(&second), Some(Ok(())));
+}
+
+/// A request pending when the entry is released ends as `Released`, and one made
+/// after it ends at the call.
+#[test]
+fn a_request_pending_when_the_port_is_released_ends_released() {
+    let mut wire = Wire::new(Reply::Silent, Reply::Answer);
+    let profile = wire.profile();
+    let pending = profile.enable(four());
+    wire.run(5);
+    wire.s
+        .pool(Vec::<
+            tutti_session::Declared<&str, tutti_session::MidiInputEntry>,
+        >::new())
+        .expect("declares nothing");
+    wire.run(3);
+    assert_eq!(wire.result(&pending), Some(Err(PeerError::Released)));
+    let late = profile.enable(four());
+    assert_eq!(late.status(), JobStatus::Done, "ended at the call");
+    wire.run(1);
+    assert_eq!(wire.result(&late), Some(Err(PeerError::Released)));
+}
+
+/// A request pending when the device goes ends as `Disconnected`, and the port
+/// takes requests again once the device returns and its peer is found.
+#[test]
+fn a_request_pending_across_a_replug_ends_and_the_returned_port_takes_new_ones() {
+    let mut wire = Wire::new(Reply::Silent, Reply::Answer);
+    let pending = wire.profile().enable(four());
+    wire.run(5);
+    let raw = EndpointId::from_raw(MpePeer::RAW);
+    wire.fake.unplug(raw);
+    wire.run(3);
+    assert_eq!(wire.result(&pending), Some(Err(PeerError::Disconnected)));
+    plug(&wire.fake, MpePeer::RAW, "Wire", PortDirection::Duplex);
+    wire.peer.switch = Reply::Answer;
+    wire.run(80);
+    let again = wire.profile().enable(four());
+    wire.run(30);
+    assert_eq!(wire.result(&again), Some(Ok(ProfileState::Enabled)));
+}
+
+/// A session that ends with a request pending ends the job, and a handle that
+/// outlives the session ends what it asks at the call: neither is left waiting.
+#[test]
+fn a_session_dropped_with_a_request_pending_ends_the_job() {
+    let mut wire = Wire::new(Reply::Silent, Reply::Answer);
+    let profile = wire.profile();
+    let pending = profile.enable(four());
+    wire.run(5);
+    let queued = profile.disable();
+    drop(wire);
+    assert_eq!(pending.status(), JobStatus::Done);
+    assert_eq!(queued.status(), JobStatus::Done);
+    assert_eq!(profile.enable(four()).status(), JobStatus::Done);
+}
+
+/// A job lands in the update after the one whose poll read the answer, not in
+/// that one.
+#[test]
+fn a_job_lands_in_the_update_after_the_poll_that_read_the_answer() {
+    let mut wire = Wire::new(Reply::Answer, Reply::Answer);
+    let job = wire.profile().enable(four());
+    for _ in 0..30 {
+        wire.step(1);
+        if job.status() == JobStatus::Done {
+            break;
+        }
+    }
+    assert_eq!(job.status(), JobStatus::Done, "the poll read the answer");
+    assert_eq!(wire.result(&job), None, "not yet in an event");
+    wire.step(1);
+    assert_eq!(wire.result(&job), Some(Ok(ProfileState::Enabled)));
 }

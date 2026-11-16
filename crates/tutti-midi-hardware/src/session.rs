@@ -43,7 +43,7 @@ use crate::ci::{CiChange, CiPeerInfo, Heard, PeerId};
 use crate::devices::{Devices, OpenInput, OpenOutput};
 use crate::endpoints::MidiEndpoints;
 use crate::error::{Error, Result};
-use crate::process::{ProcessChange, ReportAsk, ReportError, ReportPeer};
+use crate::process::{ProcessChange, ReportAsk, ReportError, Reporter};
 use crate::profiles::{PeerProfiles, ProfileError, ProfileSwitch, ProfilesChange};
 use crate::properties::{PropertyAsk, PropertyChange, PropertyError, PropertyPeer};
 use crate::stream::{DeviceStream, InputTiming, Negotiation};
@@ -779,7 +779,7 @@ impl MidiSession {
     /// [`ci_peers`](Self::ci_peers): read again after a
     /// [`Polled::Process`] that says `Capabilities`.
     #[must_use]
-    pub fn report_peers(&self, id: &DeviceId) -> Arc<[ReportPeer]> {
+    pub fn report_peers(&self, id: &DeviceId) -> Arc<[Reporter]> {
         self.inputs
             .get(id)
             .map_or_else(Arc::default, |held| held.stream.report_peers())
