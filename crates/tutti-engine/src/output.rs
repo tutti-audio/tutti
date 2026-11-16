@@ -30,6 +30,20 @@
 //! editor refuses a commit whose root was never published
 //! ([`CommitError::RootNotPublished`](tutti_graph::CommitError::RootNotPublished)).
 //!
+//! # A routing change
+//!
+//! A change of the routing ([`OutputControl::set_routing`]) or of what a
+//! device is ([`OutputControl::state_device`]) replaces folds in place, and the
+//! table it replaced stays published beside the new one while the audio thread
+//! crossfades from it: the same rendered channels folded the old way and the
+//! new way, mixed by [`FadeLaw::EqualAmplitude`](tutti_graph::FadeLaw::EqualAmplitude)
+//! over the declick length. The audio thread counts the frames since it first
+//! lent a table of the new generation, reports the fade's end in an atomic, and
+//! [`OutputControl::reclaim`] drops the replaced table through the cell; the
+//! audio thread never holds or frees it. A change that lands while a root
+//! crossfade runs, or while the last routing fade has not ended, cuts: it holds
+//! no third table.
+//!
 //! # What the device is
 //!
 //! A device states its channel count and nothing else (a backend has no channel
@@ -129,6 +143,12 @@ pub(crate) struct OutputFolds {
     roots: Vec<RootFolds>,
     /// Where the mix lands: composed into every root's folds.
     routing: Routing,
+    /// Counts the changes that replace folds in place (a routing, a device's
+    /// statement); a change of it starts a crossfade on the audio thread.
+    generation: u64,
+    /// The table the last such change replaced, while the audio thread
+    /// crossfades from it; `None` is a cut. It holds no `previous` of its own.
+    previous: Option<Arc<OutputFolds>>,
 }
 
 impl OutputFolds {
@@ -143,6 +163,8 @@ impl OutputFolds {
                 by_device: Vec::new(),
             }],
             routing: Routing::default(),
+            generation: 0,
+            previous: None,
         };
         for device in 1..=widest {
             let device = ChannelLayout::try_from(device)
@@ -194,6 +216,28 @@ impl OutputFolds {
             root.by_device[slot] = Some(root.column(&device, &self.routing));
         }
         self.devices[slot] = Some(device);
+    }
+
+    /// Starts a routing generation: the table as it stands becomes
+    /// [`previous`](Self::previous) for the audio thread to fade from, unless
+    /// `in_flight` (the fade of the last generation has not ended), which cuts.
+    /// Call before the edit.
+    fn begin_fade(&mut self, in_flight: bool) {
+        self.previous = None;
+        let replaced = (!in_flight).then(|| Arc::new(self.clone()));
+        self.generation += 1;
+        self.previous = replaced;
+    }
+
+    /// The count of in-place fold changes: the audio thread fades when it
+    /// differs from the one it last rendered.
+    pub(crate) fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    /// The table the last in-place change replaced, while it is crossfaded from.
+    pub(crate) fn previous(&self) -> Option<&Arc<OutputFolds>> {
+        self.previous.as_ref()
     }
 
     /// Rebuilds every root's folds into every device held, from `routing`.
@@ -257,6 +301,9 @@ pub struct OutputControl {
     /// The root of the plan the last block rendered, written by the audio
     /// thread: the older roots' folds are done with.
     installed: Arc<AtomicU64>,
+    /// The newest routing generation whose crossfade the audio thread has
+    /// finished or cut: its `previous` table is no longer read.
+    routing_ended: Arc<AtomicU64>,
 }
 
 impl OutputControl {
@@ -266,7 +313,17 @@ impl OutputControl {
             stage: Arc::new(ArcLend::new(StageTargets::UNITY)),
             writer: Arc::default(),
             installed: Arc::default(),
+            routing_ended: Arc::default(),
         }
+    }
+
+    pub(crate) fn routing_ended(&self) -> &Arc<AtomicU64> {
+        &self.routing_ended
+    }
+
+    /// Whether the audio thread may still be fading from `folds.previous`.
+    fn fade_in_flight(&self, folds: &OutputFolds) -> bool {
+        folds.previous.is_some() && self.routing_ended.load(Ordering::Acquire) < folds.generation
     }
 
     pub(crate) fn cell(&self) -> &Arc<ArcLend<OutputFolds>> {
@@ -350,6 +407,10 @@ impl OutputControl {
         self.update(|folds| {
             if folds.devices.get(slot).and_then(Option::as_ref) == Some(&entry) {
                 return Ok(false);
+            }
+            if folds.has_device(slot + 1) {
+                let in_flight = self.fade_in_flight(folds);
+                folds.begin_fade(in_flight);
             }
             folds.set_device(entry, slot);
             Ok(true)
@@ -468,9 +529,16 @@ impl OutputControl {
 
     /// Sets where the mix lands: the format the root is heard in and the map
     /// to the device, composed into every root's folds into every device held
-    /// (one fold per pair, so the callback still applies one). Live: the next
-    /// segment folds by the new routing, with no restart. A root a routing
-    /// cannot place on a device has no fold into it ([`has_fold`](Self::has_fold)).
+    /// (one fold per pair, so the callback still applies one). Live: from the
+    /// next segment the callback crossfades the same rendered channels from the
+    /// old routing's folds to the new ones over the declick length
+    /// ([`declick_frames`](tutti_graph::declick_frames)), with no restart.
+    ///
+    /// The change cuts instead, folding by the new routing at once, when a
+    /// root change is crossfading, when the last routing change (or device
+    /// statement) is still fading, when the old routing has no fold for the
+    /// root, or when no block has rendered yet. A root a routing cannot place on
+    /// a device has no fold into it ([`has_fold`](Self::has_fold)).
     ///
     /// Control side: it allocates and publishes. A callback mid-block keeps the
     /// folds it lent.
@@ -479,6 +547,8 @@ impl OutputControl {
             if folds.routing == routing {
                 return Ok::<_, std::convert::Infallible>(false);
             }
+            let in_flight = self.fade_in_flight(folds);
+            folds.begin_fade(in_flight);
             folds.set_routing(routing);
             Ok(true)
         });
@@ -520,6 +590,19 @@ impl OutputControl {
                 let before = folds.roots.len();
                 folds.roots.retain(|r| r.id.get() >= installed);
                 Ok::<_, std::convert::Infallible>(folds.roots.len() != before)
+            });
+        }
+        // A crossfade the audio thread has finished: its `previous` goes
+        // with the table that held it, freed here once no block lends it.
+        let ended = self.routing_ended.load(Ordering::Acquire);
+        let current = self.cell.current();
+        let finished = current.previous.is_some() && ended >= current.generation;
+        drop(current);
+        if finished {
+            let _ = self.update(|folds| {
+                let finished = folds.previous.is_some() && ended >= folds.generation;
+                folds.previous = None;
+                Ok::<_, std::convert::Infallible>(finished)
             });
         }
         self.cell.reclaim() + self.stage.reclaim()
