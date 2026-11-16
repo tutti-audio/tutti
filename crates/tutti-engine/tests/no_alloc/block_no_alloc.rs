@@ -206,8 +206,7 @@ fn a_metered_and_tapped_callback_is_allocation_free() {
 
 /// A delayed render (the timer's per-block call, with the zero latency it
 /// reports) and the render-thread fault records must not allocate or free, even
-/// over a fault whose message is an owned string: an overrun leaves a latching
-/// or owned message in place, and a panic replaces it without dropping it.
+/// over a fault whose message is an owned string.
 #[test]
 fn a_delayed_render_and_the_render_thread_fault_records_are_allocation_free() {
     let (_transport, state) = rolling_state();

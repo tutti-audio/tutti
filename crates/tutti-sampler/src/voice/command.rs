@@ -1129,6 +1129,17 @@ impl tutti_rt::Reclaim for VoiceNodeHandle {
     }
 }
 
+/// Frees the slots the pool's audio side retired
+/// ([`collect_retired`](VoicePoolHandle::collect_retired)), so the pool's
+/// owner's tick keeps the retire ring from filling; control thread only. Nothing a
+/// reader pins is left over: it returns 0.
+impl tutti_rt::Reclaim for VoicePoolHandle {
+    fn reclaim(&self) -> usize {
+        self.collect_retired();
+        0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
