@@ -359,6 +359,14 @@ impl RenderSide {
         while let Some(command) = self.commands.pop() {
             match command {
                 ToRender::Slab(slab) => {
+                    // A slab arrives only between the host's activations: the
+                    // host sets one up in an activation, with no Processor and so
+                    // no block in flight, and sends none until the setup is
+                    // answered (the command is queued before the `Ready` reply). So
+                    // the `reserve` below may allocate and the slab it replaces
+                    // may be dropped here (an unreaped `give_back` unmaps it on
+                    // this thread) without a block waiting on it.
+                    //
                     // The scratch is sized here, between blocks, to the most a
                     // block may carry; `handle_process` refuses any longer.
                     let layout = slab.layout_ref();

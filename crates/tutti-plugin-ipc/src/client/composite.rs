@@ -7,7 +7,6 @@ use crate::protocol::{
     MidiEventVec, Normalized, NoteExpressionChanges, ParamId, ParameterChanges, ParameterInfo,
     Preset, PresetId, TransportChanges, TransportInfo,
 };
-use crate::transport::shm::AudioSlab;
 use dpi::Size;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -218,8 +217,7 @@ impl GuiMirror {
 
 impl PluginBridge {
     /// Build the full bridge — spawns the audio bridge thread that connects
-    /// to the plugin-server at `socket_path`, wires it to `audio_buffer` for
-    /// block-oriented audio transfer, and leaves the GUI instance to be
+    /// to the plugin-server at `socket_path` and leaves the GUI instance to be
     /// lazily loaded on first `open_editor`.
     ///
     /// Returns an `Arc<Self>` (for cheap cloning into the audio graph) and
@@ -235,7 +233,6 @@ impl PluginBridge {
     /// The bridge thread cannot be spawned, or `timeouts` has a zero deadline.
     pub fn new(
         socket_path: PathBuf,
-        audio_buffer: Arc<AudioSlab>,
         origin: Origin,
         format: PluginFormat,
         load_editor: Option<EditorLoader>,
@@ -244,8 +241,7 @@ impl PluginBridge {
         timeouts: Timeouts,
     ) -> BridgeResult<(Arc<Self>, BridgeThread)> {
         timeouts.validate()?;
-        let (audio, bridge_thread) =
-            AudioBridge::new(socket_path, audio_buffer, sample_rate, watch, timeouts)?;
+        let (audio, bridge_thread) = AudioBridge::new(socket_path, sample_rate, watch, timeouts)?;
         let bridge = Arc::new(Self {
             remote: Mutex::new(RemoteEditor::new(audio.clone())),
             audio,
@@ -375,11 +371,6 @@ impl PluginBridge {
         layout: crate::protocol::SlabLayout,
     ) -> bool {
         self.audio.setup_shared_memory(shm_name, layout)
-    }
-
-    /// See `AudioBridge::audio_buffer`.
-    pub fn audio_buffer(&self) -> &Arc<AudioSlab> {
-        self.audio.audio_buffer()
     }
 
     /// The bridge thread's count of MIDI events it did not send. See

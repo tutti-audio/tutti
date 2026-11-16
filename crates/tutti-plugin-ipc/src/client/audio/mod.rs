@@ -27,7 +27,6 @@ use crate::protocol::{
     NoteExpressionTextChanges, ParamId, ParameterChanges, ParameterInfo, Preset, PresetId,
     ScaleChanges, SlabLayout, TransportChanges, TransportInfo,
 };
-use crate::transport::shm::AudioSlab;
 use dpi::Size;
 use tutti_plugin_types::{
     BlockStatus, BridgeResult, ContentScale, Delivered, EditorError, PluginFailure, StateError,
@@ -107,7 +106,6 @@ pub(crate) struct AudioBridge {
     payloads: PayloadPool,
     lifecycle: Lifecycle,
     listener: ListenerSlot,
-    audio_buffer: Arc<AudioSlab>,
 }
 
 impl std::fmt::Debug for AudioBridge {
@@ -127,7 +125,6 @@ impl AudioBridge {
     /// The bridge thread cannot be spawned.
     pub fn new(
         socket_path: PathBuf,
-        audio_buffer: Arc<AudioSlab>,
         sample_rate: SampleRate,
         watch: Arc<ServerWatch>,
         timeouts: Timeouts,
@@ -151,7 +148,6 @@ impl AudioBridge {
             payloads,
             lifecycle,
             listener,
-            audio_buffer,
         };
         Ok((bridge, thread))
     }
@@ -304,11 +300,6 @@ impl AudioBridge {
     /// the plugin node's controls read it beside the node's own.
     pub(crate) fn dropped_midi_cell(&self) -> Arc<std::sync::atomic::AtomicU64> {
         self.channels.dropped_midi_cell()
-    }
-
-    /// The shared-memory slab the blocks travel in.
-    pub fn audio_buffer(&self) -> &Arc<AudioSlab> {
-        &self.audio_buffer
     }
 
     // --- RT fire-and-forget ---
@@ -915,21 +906,11 @@ mod tests {
     /// Once the bridge is crashed, the same refusal is `PluginCrashed`.
     #[test]
     fn a_full_queue_is_busy_not_a_crash() {
-        let name = format!("tutti-busy-{}", std::process::id());
-        let layout = crate::protocol::SlabLayout {
-            slots: crate::transport::shm::RING_SLOTS as u32,
-            samples_per_channel: 64,
-            format: crate::protocol::SampleFormat::Float32,
-            inputs: vec![crate::protocol::ChannelLayout::STEREO],
-            outputs: vec![crate::protocol::ChannelLayout::STEREO],
-        };
-        let slab = Arc::clone(AudioSlab::create(name, layout).expect("slab").slab());
         let bridge = AudioBridge {
             channels: Channels::new(SampleRate::SR_48K),
             payloads: PayloadPool::new(),
             lifecycle: Lifecycle::new(Arc::new(ServerWatch::new()), Timeouts::default()),
             listener: Arc::new(Mutex::new(None)),
-            audio_buffer: slab,
         };
         while bridge.channels.push_command(Command::Reset) {}
 

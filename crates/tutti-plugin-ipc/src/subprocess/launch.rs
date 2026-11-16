@@ -441,8 +441,11 @@ fn setup_shm(
 }
 
 /// The slab a running server renders through when the plugin's buses are
-/// `loaded`'s: `None` when `held` is already laid out for them, else a new one
-/// the server has opened and will render through from its next block.
+/// `loaded`'s: `None` when `held` is already laid out for them (and the server
+/// is known to render through it, `unsure` false), else a new one the server has
+/// opened and will render through from its next block. After a failed setup the
+/// server may be on a slab the host never got the answer for, so `unsure` asks
+/// for a new one whatever `held` is.
 ///
 /// Control thread, bounded by the bridge's query deadline. The server swaps at
 /// a block head and hands the slab it leaves back off its render thread; the
@@ -460,9 +463,10 @@ pub(crate) fn swap_slab(
     format: SampleFormat,
     ceiling: usize,
     held: &SlabLayout,
+    unsure: bool,
 ) -> BridgeResult<Option<SlabWriter>> {
     let layout = slab_layout_for(loaded, format, ceiling);
-    if layout == *held {
+    if layout == *held && !unsure {
         return Ok(None);
     }
     let shm_name = next_shm_name()?;

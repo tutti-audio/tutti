@@ -438,6 +438,10 @@ pub struct Ipc {
     /// The sequence the slab's next chunk carries: the slab outlives each
     /// activation's batcher, so the sequence does too.
     next_seq: u64,
+    /// A slab setup failed, so the server may render through a slab the host
+    /// does not hold: the next activation sets one up even for the layout the
+    /// host holds.
+    slab_unsure: bool,
 }
 
 impl std::fmt::Debug for Ipc {
@@ -520,6 +524,7 @@ impl Ipc {
             link: Arc::new(link),
             slab,
             next_seq: 1,
+            slab_unsure: false,
         }
     }
 
@@ -557,7 +562,6 @@ impl Ipc {
         let mut guard = server.server;
         let (bridge, thread) = PluginBridge::new(
             config.socket_path.clone(),
-            Arc::clone(server.slab.slab()),
             tutti_plugin_types::Origin::new(path.clone(), load.clone()),
             format,
             load_editor.clone(),
@@ -706,6 +710,7 @@ impl Ipc {
     pub fn controller(&self) -> IpcController {
         IpcController {
             link: Arc::clone(&self.link),
+            activated: None,
         }
     }
 
@@ -722,6 +727,11 @@ impl Ipc {
 #[derive(Clone)]
 pub struct IpcController {
     pub(crate) link: Arc<Link>,
+    /// The buses the activation this controller belongs to was laid out for:
+    /// what its [`wiring`](tutti_plugin_types::Control::wiring) answers, whatever the plugin has announced
+    /// since. `None` for a view that belongs to no activation, which answers
+    /// the buses announced last.
+    activated: Option<Arc<LoadedPlugin>>,
 }
 
 impl std::fmt::Debug for IpcController {
@@ -732,10 +742,28 @@ impl std::fmt::Debug for IpcController {
     }
 }
 
+impl Ipc {
+    /// What `Control::wiring` answers: the buses announced last.
+    pub(crate) fn wiring_now(&self) -> LoadedPlugin {
+        self.link.current()
+    }
+}
+
 impl IpcController {
+    /// What `Control::wiring` answers: the buses of the activation this
+    /// controller belongs to, or the ones announced last for a view of none.
+    pub(crate) fn wiring_now(&self) -> LoadedPlugin {
+        self.activated
+            .as_deref()
+            .cloned()
+            .unwrap_or_else(|| self.link.current())
+    }
+
     /// The buses the plugin has now: those it last announced
-    /// (`PluginIoChanged`), else those it reported at load. The slab is laid
-    /// out for the ones at load ([`Ipc::loaded`]).
+    /// (`PluginIoChanged`), else those it reported at load: the trigger for a
+    /// restart, not the buses of an activation. The slab, the pipeline and the
+    /// node's ports are laid out from the one reading an activation takes
+    /// (`Control::wiring` of its controller).
     #[must_use]
     pub fn layout(&self) -> tutti_plugin_types::Layout {
         let loaded = self.link.current();
@@ -790,6 +818,7 @@ impl Ipc {
             link,
             slab,
             next_seq,
+            slab_unsure,
         } = self;
         // The one reading of the buses this activation lays out: the slab, the
         // pipeline's widths and (through `Control::wiring` at the same restart)
@@ -801,6 +830,7 @@ impl Ipc {
             link.format,
             link.ceiling,
             slab.layout_ref(),
+            slab_unsure,
         ) {
             Ok(None) => slab,
             Ok(Some(new)) => {
@@ -819,6 +849,9 @@ impl Ipc {
                         link,
                         slab,
                         next_seq,
+                        // The server may have taken the slab before the
+                        // answer was lost.
+                        slab_unsure: true,
                     }),
                     reason: PluginError::Other(why.to_string()),
                 });
@@ -829,9 +862,10 @@ impl Ipc {
             let _ = link.bridge.set_sample_rate_rt(rate);
             link.set_rate(rate);
         }
+        // The widths are the slab's own, which is the snapshot's: one source.
         let mut batcher = Batcher::new(
-            snapshot.total_inputs(),
-            snapshot.total_outputs(),
+            slab.layout_ref().input_channels(),
+            slab.layout_ref().output_channels(),
             link.format,
             link.ceiling,
             slab,
@@ -848,7 +882,13 @@ impl Ipc {
         }
         link.reserve(batcher.chunk());
         let processor = IpcProcessor::new(Arc::clone(&link), batcher);
-        Ok((processor, IpcController { link }))
+        Ok((
+            processor,
+            IpcController {
+                link,
+                activated: Some(Arc::new(snapshot)),
+            },
+        ))
     }
 }
 
@@ -894,6 +934,7 @@ impl Loaded for Ipc {
             link: controller.link,
             slab,
             next_seq,
+            slab_unsure: false,
         })
     }
 }

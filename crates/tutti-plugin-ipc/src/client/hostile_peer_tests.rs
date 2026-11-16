@@ -27,7 +27,7 @@ use crate::protocol::{
     BridgeMessage, ChannelLayout, HostMessage, Normalized, PROTOCOL_VERSION, ParamId, SampleFormat,
     SlabLayout,
 };
-use crate::transport::shm::{AudioSlab, RING_SLOTS};
+use crate::transport::shm::RING_SLOTS;
 use crate::unique_socket_path;
 use std::io::{Read, Write};
 use std::sync::Arc;
@@ -378,15 +378,8 @@ impl MockServer {
             .create_sync()
             .expect("listen");
 
-        // The peer writes no audio here: only the shared, read-only slab is kept.
-        let slab = Arc::clone(
-            AudioSlab::create(unique_shm_name(label), stereo_layout())
-                .expect("create slab")
-                .slab(),
-        );
         let (bridge, thread) = PluginBridge::new(
             path.clone(),
-            slab,
             tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
             tutti_plugin_types::PluginFormat::Vst3,
             Some(crate::EditorLoader::new(
@@ -827,7 +820,7 @@ fn a_slab_setup_is_answered_refused_or_given_up_on_within_the_deadline() {
         "no answer is a refusal"
     );
     assert!(
-        started.elapsed() < Duration::from_secs(10),
+        started.elapsed() < Duration::from_secs(2),
         "bounded by the deadline, not by the server"
     );
 

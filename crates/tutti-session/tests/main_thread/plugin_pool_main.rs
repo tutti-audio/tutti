@@ -932,18 +932,11 @@ fn a_served_plugin_that_grows_its_ports_gets_a_wider_node() {
         s.graph().connect(from, to).unwrap().hard();
     }
     let mut refused = false;
-    let mut tags = [0.0f32; 2];
     let mut until =
         |s: &mut Session, what: &str, done: &mut dyn FnMut(&Session, [f32; 2]) -> bool| {
             let deadline = Instant::now() + Duration::from_secs(30);
             loop {
-                let ev = s.update();
-                for e in &ev {
-                    if let SessionEvent::Plugin(_) = e {
-                        eprintln!("DBG {e:?}");
-                    }
-                }
-                refused |= ev.iter().any(|event| {
+                refused |= s.update().iter().any(|event| {
                     matches!(
                         event,
                         SessionEvent::Plugin(PluginEvent {
@@ -960,8 +953,7 @@ fn a_served_plugin_that_grows_its_ports_gets_a_wider_node() {
                     )
                     .unwrap(),
                 );
-                tags = [out[out.len() - 2], out[out.len() - 1]];
-                if done(s, tags) {
+                if done(s, [out[out.len() - 2], out[out.len() - 1]]) {
                     return;
                 }
                 assert!(Instant::now() < deadline, "{what} never happened");
@@ -987,7 +979,6 @@ fn a_served_plugin_that_grows_its_ports_gets_a_wider_node() {
         t == [1.0, 1001.0]
     });
     assert!(!refused, "a change the slab can follow is not refused");
-    let _ = tags;
     s.close(tutti_fixtures::main_thread());
 }
 

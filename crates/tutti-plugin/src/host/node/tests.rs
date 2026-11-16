@@ -149,10 +149,8 @@ fn handle_with_mock_server(
         },
     )
     .unwrap();
-    let buffer = Arc::clone(slab.slab());
     let (bridge, bridge_thread) = PluginBridge::new(
         path.clone(),
-        buffer,
         tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
         tutti_plugin_types::PluginFormat::Vst3,
         Some(tutti_plugin_ipc::EditorLoader::new(
@@ -242,10 +240,8 @@ fn handle_with_multi_reply_server(
         },
     )
     .unwrap();
-    let buffer = Arc::clone(slab.slab());
     let (bridge, bridge_thread) = PluginBridge::new(
         path.clone(),
-        buffer,
         tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
         tutti_plugin_types::PluginFormat::Vst3,
         Some(tutti_plugin_ipc::EditorLoader::new(

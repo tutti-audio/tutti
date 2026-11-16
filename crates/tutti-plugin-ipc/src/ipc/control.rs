@@ -187,7 +187,7 @@ macro_rules! served_control {
             }
 
             fn wiring(&self, _main: MainThreadMarker) -> LoadedPlugin {
-                self.link.current()
+                self.wiring_now()
             }
 
             fn parameters(&self, _main: MainThreadMarker) -> Vec<ParameterInfo> {

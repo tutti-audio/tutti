@@ -38,6 +38,9 @@ struct Mock {
     stream: Arc<interprocess::local_socket::Stream>,
     /// Whether the server refuses the slabs it is asked to open.
     refuse_slabs: Arc<std::sync::atomic::AtomicBool>,
+    /// Buses the plugin announces while the server is asked to open a slab,
+    /// before it answers: a change that lands inside an activation.
+    announce_during_setup: Arc<Mutex<Option<tutti_plugin_types::Layout>>>,
     _bridge: crate::BridgeThread,
 }
 
@@ -132,7 +135,6 @@ fn mock_with(
     let slab = AudioSlab::create(shm, layout).unwrap();
     let (bridge, thread) = PluginBridge::new(
         path.clone(),
-        Arc::clone(slab.slab()),
         origin,
         format,
         load_editor,
@@ -197,6 +199,8 @@ fn mock_with(
     let answers = Arc::clone(&parameters);
     let refuse_slabs = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let refusing = Arc::clone(&refuse_slabs);
+    let announce_during_setup: Arc<Mutex<Option<tutti_plugin_types::Layout>>> = Arc::default();
+    let announcing = Arc::clone(&announce_during_setup);
     std::thread::spawn(move || {
         loop {
             let mut len = [0u8; 4];
@@ -233,16 +237,26 @@ fn mock_with(
                         },
                     },
                 ),
-                HostMessage::SetupSharedMemory { .. } => reply(
-                    &served,
-                    &if refusing.load(std::sync::atomic::Ordering::Acquire) {
-                        BridgeMessage::Error {
-                            message: "the slab does not open".into(),
-                        }
-                    } else {
-                        BridgeMessage::SharedMemoryReady
-                    },
-                ),
+                HostMessage::SetupSharedMemory { .. } => {
+                    if let Some(layout) = announcing.lock().unwrap().take() {
+                        reply(
+                            &served,
+                            &BridgeMessage::PluginIoChanged {
+                                layout: Some(layout),
+                            },
+                        );
+                    }
+                    reply(
+                        &served,
+                        &if refusing.load(std::sync::atomic::Ordering::Acquire) {
+                            BridgeMessage::Error {
+                                message: "the slab does not open".into(),
+                            }
+                        } else {
+                            BridgeMessage::SharedMemoryReady
+                        },
+                    )
+                }
                 HostMessage::SetEditorSize { size } => {
                     reply(&served, &BridgeMessage::EditorSized { result: Ok(*size) })
                 }
@@ -285,6 +299,7 @@ fn mock_with(
             parameters,
             stream,
             refuse_slabs,
+            announce_during_setup,
             _bridge: thread,
         },
     )
@@ -433,6 +448,7 @@ fn the_buses_a_plugin_announces_are_the_buses_the_host_sees() {
         sink.lock().unwrap().push(format!("{event:?}"));
     })));
     let main = main_thread();
+    let view = ipc.controller();
     let (_processor, controller) = activate(ipc, 32);
     let at_load = controller.layout();
     assert_eq!(at_load.input_widths(), vec![ChannelLayout::STEREO]);
@@ -460,9 +476,17 @@ fn the_buses_a_plugin_announces_are_the_buses_the_host_sees() {
         let _ = controller.parameters(main);
     }
     assert_eq!(controller.layout(), announced);
-    let wiring = controller.wiring(main);
-    assert_eq!(wiring.inputs, announced.inputs, "the controller's wiring");
+    let wiring = view.wiring(main);
+    assert_eq!(
+        wiring.inputs, announced.inputs,
+        "a view's wiring follows it"
+    );
     assert_eq!(wiring.outputs, announced.outputs);
+    assert_eq!(
+        controller.wiring(main).inputs,
+        at_load.inputs,
+        "the activation's wiring is the buses it was laid out for"
+    );
 }
 
 /// A mock plugin that announced a wider input and has been deactivated, with
@@ -542,6 +566,73 @@ fn an_activation_over_new_buses_has_a_slab_laid_out_for_them() {
         1,
         "the same buses reuse the slab"
     );
+}
+
+/// **A change of buses that lands inside an activation is the next restart's:
+/// the activation's slab and wiring agree on the buses it read, and the restart
+/// after it lays out the later ones.** The plugin announces a third bus while the
+/// server is asked to open the slab for the second layout: the controller's
+/// wiring is still the second layout (never the later one over the earlier
+/// slab), the buses it has announced are the third, and the next activation
+/// sets up a slab for the third and wires it. (The batcher's widths are the
+/// slab's own, so they agree wherever the slab does.)
+#[test]
+fn a_change_inside_an_activation_waits_for_the_next_restart() {
+    let _machine = machine_lock();
+    let (ipc, server) = mock();
+    let (ipc, second) = announced_and_deactivated(ipc, &server);
+    let third = tutti_plugin_types::Layout {
+        inputs: vec![
+            PluginBus::main(ChannelLayout::STEREO),
+            PluginBus::new(ChannelLayout::MONO, tutti_plugin_types::BusRole::Aux),
+            PluginBus::new(ChannelLayout::MONO, tutti_plugin_types::BusRole::Aux),
+        ],
+        outputs: second.outputs.clone(),
+    };
+    *server.announce_during_setup.lock().unwrap() = Some(third.clone());
+    let (processor, mut controller) = activate(ipc, 32);
+    // The later layout is heard (a command's reply reads it), after the
+    // activation read the second.
+    let start = Instant::now();
+    while controller.layout() != third {
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "the later buses are heard"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+        let _ = controller.parameters(main_thread());
+    }
+    assert_eq!(
+        controller.wiring(main_thread()).inputs,
+        second.inputs,
+        "the wiring is the activation's buses, not the later ones"
+    );
+    let setups = slab_setups(&server);
+    assert_eq!(setups.len(), 1);
+    assert_eq!(
+        setups[0].inputs,
+        second.input_widths(),
+        "the slab is the second layout"
+    );
+    let mut asked = Vec::new();
+    controller.take_requests(main_thread(), &mut asked);
+    assert!(
+        asked.contains(&Request::IoChanged),
+        "the announcement asks for a restart: {asked:?}"
+    );
+
+    // The restart the announcement asks for lays out the third.
+    let ipc = Ipc::deactivate(main_thread(), processor, controller).expect("rejoin");
+    assert_eq!(*ipc.slab.layout_ref(), setups[0]);
+    let (_p, controller) = activate(ipc, 32);
+    let setups = slab_setups(&server);
+    assert_eq!(setups.len(), 2);
+    assert_eq!(
+        setups[1].inputs,
+        third.input_widths(),
+        "the slab follows the later layout"
+    );
+    assert_eq!(controller.wiring(main_thread()).inputs, third.inputs);
 }
 
 /// **A server that refuses the new slab leaves the plugin as it was, and the next
