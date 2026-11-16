@@ -2,7 +2,7 @@
 //! unchecked.
 
 use tutti_codec::Wave;
-use tutti_types::ChannelLayout;
+use tutti_types::{ChannelLayout, LayoutError};
 use tutti_types::{SampleRate, Samples};
 
 /// Rendered audio held in memory, one `Vec` per channel.
@@ -72,11 +72,8 @@ pub enum RenderedError {
         found: Samples,
     },
     /// More planes than a [`ChannelLayout`] holds.
-    #[error("rendered audio has {planes} channels, and a layout holds at most 65535")]
-    TooWide {
-        /// The number of planes given.
-        planes: usize,
-    },
+    #[error(transparent)]
+    Layout(#[from] LayoutError),
 }
 
 impl std::fmt::Debug for Rendered {
@@ -97,7 +94,7 @@ impl Rendered {
     /// # Errors
     ///
     /// [`RenderedError::NoPlanes`] for no planes,
-    /// [`RenderedError::TooWide`] for more planes than a layout holds,
+    /// [`RenderedError::Layout`] for more planes than a layout holds,
     /// [`RenderedError::UnequalPlanes`] for planes of different lengths.
     pub fn new(
         planes: Vec<Vec<f32>>,
@@ -107,11 +104,7 @@ impl Rendered {
         let Some(first) = planes.first() else {
             return Err(RenderedError::NoPlanes);
         };
-        if u16::try_from(planes.len()).is_err() {
-            return Err(RenderedError::TooWide {
-                planes: planes.len(),
-            });
-        }
+        ChannelLayout::try_from(planes.len())?;
         if let Some((plane, other)) = planes
             .iter()
             .enumerate()

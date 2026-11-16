@@ -2543,6 +2543,7 @@ dependencies = [
  "tutti-buffers",
  "tutti-codec",
  "tutti-fixtures",
+ "tutti-rt",
  "tutti-types",
  "vorbis_rs",
 ]
