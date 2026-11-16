@@ -36,13 +36,13 @@ pub enum ExtremeValues {
 }
 
 impl ExtremeValues {
-    /// `voice` at MIDI 1.0 resolution as [`narrow`] gives it, with the extremes
+    /// `voice` at MIDI 1.0 resolution as [`narrow()`] gives it, with the extremes
     /// of this mode applied to its value.
     ///
     /// # Errors
     ///
     /// [`NoMidi1Form`] for a message with no single MIDI 1.0 message, as for
-    /// [`narrow`].
+    /// [`narrow()`].
     pub fn narrow(self, voice: Voice2) -> Result<Voice1, NoMidi1Form> {
         let narrowed = narrow(voice)?;
         if self == Self::Scaled {
