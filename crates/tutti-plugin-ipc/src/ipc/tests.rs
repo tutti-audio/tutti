@@ -666,6 +666,55 @@ fn a_refused_slab_leaves_the_old_one_and_the_next_activation_retries() {
     assert_eq!(slab_setups(&server).len(), 2, "asked again, and taken");
 }
 
+/// **A refused or lost setup makes the next one happen even for the slab the
+/// host holds.** The plugin goes to a second layout, the server takes that slab
+/// but the host never hears (here: it refuses), and the plugin goes back to the
+/// layout the host holds: the server may be on the orphan slab, so the host sets
+/// the held layout up again instead of trusting its own slab.
+#[test]
+fn a_failed_setup_is_followed_by_one_even_for_the_layout_held() {
+    let _machine = machine_lock();
+    let (ipc, server) = mock();
+    let (ipc, _second) = announced_and_deactivated(ipc, &server);
+    let held = ipc.slab.layout_ref().clone();
+    server
+        .refuse_slabs
+        .store(true, std::sync::atomic::Ordering::Release);
+    let Err(refused) = ipc.activate(main_thread(), prepare(32)) else {
+        panic!("the server refused the slab");
+    };
+    let ipc = refused.plugin.expect("the plugin comes back");
+    // The plugin is back at the buses of the slab the host holds.
+    let original = tutti_plugin_types::Layout {
+        inputs: vec![PluginBus::main(ChannelLayout::STEREO)],
+        outputs: vec![PluginBus::main(ChannelLayout::STEREO)],
+    };
+    let view = ipc.controller();
+    server.say(&BridgeMessage::PluginIoChanged {
+        layout: Some(original.clone()),
+    });
+    let start = Instant::now();
+    while view.layout() != original {
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "the host hears it"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+        let _ = view.parameters(main_thread());
+    }
+    server
+        .refuse_slabs
+        .store(false, std::sync::atomic::Ordering::Release);
+    let (_p, _c) = activate(ipc, 32);
+    let setups = slab_setups(&server);
+    assert_eq!(
+        setups.len(),
+        2,
+        "a setup, though the layout is the held one"
+    );
+    assert_eq!(setups[1], held);
+}
+
 /// **A served plugin with no origin cannot be reopened, and says so**, through
 /// both the token-free reopen and the trait's.
 #[test]
