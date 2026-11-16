@@ -18,7 +18,8 @@
 //! (integer periods instead of interpolated ones; the global minimum instead of
 //! the first local one below threshold) before being committed.
 
-use tutti_measure::{FrequencyBand, YinConfig, yin, yin_track};
+use tutti_buffers::Mono;
+use tutti_measure::{FrequencyBand, PitchEstimate, PitchHop, Result, YinConfig};
 use tutti_types::{Hz, SampleRate, Samples};
 
 const SR: f64 = 48_000.0;
@@ -45,9 +46,24 @@ fn sine(freq: f64, secs: f64, amp: f64) -> Vec<f32> {
     tone(freq, &[1.0], secs, amp)
 }
 
+/// `yin` at this file's rate.
+fn yin(cfg: &YinConfig, samples: &[f32]) -> Result<PitchEstimate> {
+    tutti_measure::yin(cfg, Mono::new(samples), SampleRate::of(SR))
+}
+
+/// `yin_track` at this file's rate, one estimate every `hop` samples.
+fn yin_track(cfg: &YinConfig, samples: &[f32], hop: Samples) -> Result<Vec<PitchEstimate>> {
+    tutti_measure::yin_track(
+        cfg,
+        Mono::new(samples),
+        SampleRate::of(SR),
+        PitchHop::new(hop).expect("a hop of at least one sample"),
+    )
+}
+
 /// Detected frequency, or `None` if unvoiced.
 fn detect(samples: &[f32]) -> Option<f32> {
-    let cfg = YinConfig::standard(SampleRate::of(SR)).expect("standard range");
+    let cfg = YinConfig::new();
     yin(&cfg, samples)
         .expect("buffer long enough")
         .pitch()
@@ -158,7 +174,7 @@ fn noise_is_not_confidently_pitched() {
         })
         .collect();
 
-    let cfg = YinConfig::standard(SampleRate::of(SR)).unwrap();
+    let cfg = YinConfig::new();
     let est = yin(&cfg, &samples).expect("long enough");
     assert!(
         !est.is_voiced(),
@@ -177,8 +193,8 @@ fn noise_is_not_confidently_pitched() {
 /// falls inside a percentage tolerance.
 #[test]
 fn a_rising_sweep_reads_as_rising() {
-    let cfg = YinConfig::standard(SampleRate::of(SR)).unwrap();
-    let frame = cfg.buffer_size().get();
+    let cfg = YinConfig::new();
+    let frame = cfg.buffer_size(SampleRate::of(SR)).unwrap().get();
     let n = frame * 8;
 
     // Phase is the integral of frequency. Writing `sin(TAU*f*t)` with a moving
@@ -235,7 +251,7 @@ fn the_note_name_agrees_with_the_frequency() {
         (440.0, "A4"),
         (880.0, "A5"),
     ] {
-        let cfg = YinConfig::standard(SampleRate::of(SR)).unwrap();
+        let cfg = YinConfig::new();
         let est = yin(&cfg, &sine(f, 0.5, 0.5)).expect("long enough");
         let p = est.pitch().unwrap_or_else(|| panic!("{f} Hz unvoiced"));
 
@@ -268,11 +284,7 @@ fn a_tone_below_the_configured_range_is_not_reported_as_in_range() {
     // Search 400-2000 Hz, present a 100 Hz tone. The correct answers are
     // "unvoiced" or a harmonic inside the band — never 100 Hz, which the
     // configuration excludes.
-    let cfg = YinConfig::new(
-        SampleRate::of(SR),
-        FrequencyBand::new(Hz(400.0), Hz(2000.0)).unwrap(),
-    )
-    .expect("valid range");
+    let cfg = YinConfig::new().band(FrequencyBand::new(Hz(400.0), Hz(2000.0)).unwrap());
     let est = yin(&cfg, &sine(100.0, 0.5, 0.5)).expect("long enough");
 
     if let Some(p) = est.pitch() {

@@ -19,8 +19,9 @@ use tutti_graph::{
     Edge, Editor, Env, EventCapacity, EventEdge, EventIn, EventInletNode, EventInletWriter,
     EventKind, EventOut, EventTapId, EventTapReader, Executor, ForkCause, ForkMode, ForkSource,
     ForkTarget, Forked, InPort, IntoNode, Losses, Node, NodeKey, NodeParts, OutPort, PlayClock,
-    Prepare, Refused, Source, Stamp, TapAlign, TapEvent, TransportChanges, TransportPosition,
+    Prepare, Source, Stamp, TapAlign, TapEvent, TransportChanges, TransportPosition,
 };
+use tutti_rt::PushError;
 use tutti_types::MaxBlock;
 use tutti_types::{Frame, Moment, SampleRate, Samples};
 use tutti_ump::{CCNumber, MidiChannel, U7, Ump};
@@ -214,7 +215,7 @@ fn a_push_to_a_dropped_node_is_disconnected_and_uncounted() {
     drop(d);
     assert_eq!(
         tx.push(Stamp::NextBlock, note(1)),
-        Err(Refused::Disconnected)
+        Err(PushError::Disconnected)
     );
     assert_eq!(tx.counts().losses().lost, 0);
 }
@@ -229,7 +230,7 @@ fn a_full_ring_refuses_and_counts_lost() {
         tx.push(Stamp::NextBlock, note(k)).unwrap();
     }
     for _ in 0..4 {
-        assert_eq!(tx.push(Stamp::NextBlock, note(99)), Err(Refused::Full));
+        assert_eq!(tx.push(Stamp::NextBlock, note(99)), Err(PushError::Full));
     }
     assert_eq!(tx.counts().losses().lost, 4);
     d.block();

@@ -145,8 +145,7 @@ pub use edge::EdgeGainError;
 #[cfg(feature = "plugin")]
 pub use error::HostPluginError;
 pub use error::{
-    ConnectError, Error, HeardTapError, InletError, NoSuchNode, RemoveError, Result, ScheduleError,
-    TempoError,
+    ConnectError, Error, HeardTapError, InletError, NoSuchNode, RemoveError, Result, TempoError,
 };
 #[cfg(feature = "midi")]
 pub use error::{MidiError, RouteDeclarer};
@@ -230,7 +229,9 @@ pub use plugin_params::{Param, ParamGesture, Params, PluginParamError, TypedPara
 pub use plugin_presets::{PresetEntry, PresetKind, Presets};
 pub use policy::{OutputPolicy, OutputPolicyError, OutputPolicyHandle, Policy};
 #[cfg(feature = "record")]
-pub use recorder::{Finite, IDLE_PARK, Live, PumpLoop, PumpPass, Recorder, RecorderError};
+pub use recorder::{
+    FinalizeError, Finite, IDLE_PARK, Live, PumpLoop, PumpPass, Recorder, RecorderError,
+};
 #[cfg(feature = "plugin")]
 pub use recovery::{
     GiveUp, PortCounts, Recovery, RecoveryAction, RecoveryEvent, RecoveryFailure, RecoveryPolicy,

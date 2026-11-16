@@ -364,9 +364,9 @@ impl Portamento {
 #[inline]
 fn glide_at(curve: Law, from: Hz, to: Hz, progress: f32) -> Hz {
     let t = curve.eval(progress);
-    let log_from = from.get().ln();
-    let log_to = to.get().ln();
-    Hz((log_from + (log_to - log_from) * t).exp())
+    // Equal steps in pitch: `from` moved `t` of the way along its interval to `to`.
+    let interval = Semitones::from_pitch_ratio(to.get() / from.get());
+    Hz(from.get() * (interval * t).to_pitch_ratio())
 }
 
 #[cfg(test)]

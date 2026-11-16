@@ -491,8 +491,8 @@ impl Voice {
             self.current_mix_gain_left = 0_f32;
             self.current_mix_gain_right = mix_gain;
         } else {
-            self.current_mix_gain_left = mix_gain * angle.cos();
-            self.current_mix_gain_right = mix_gain * angle.sin();
+            self.current_mix_gain_left = mix_gain * libm::cosf(angle);
+            self.current_mix_gain_right = mix_gain * libm::sinf(angle);
         }
 
         self.current_reverb_send = SoundFontMath::clamp(

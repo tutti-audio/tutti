@@ -155,6 +155,10 @@ impl ClapLoaded {
         );
 
         let host_state = Arc::new(HostState::new(main));
+        // The id is set before `instantiate`: `init` may already log.
+        let _ = host_state
+            .plugin_id
+            .set(bundle.descriptors()[index].id.clone());
         let host = ClapHost::new(host_state.clone()).into_inner();
         let plugin = bundle
             .instantiate(index, host, host_state.roles.clone(), work)

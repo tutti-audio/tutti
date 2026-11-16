@@ -101,9 +101,9 @@ impl ShapeKind {
     fn curve(self, hardness: f32, x: f32) -> f32 {
         use core::f32::consts::PI;
         match self {
-            Self::Tanh => (x * hardness).tanh(),
+            Self::Tanh => libm::tanhf(x * hardness),
             // Rescaled to saturate at ±1 while keeping unit slope at the origin.
-            Self::Atan => (x * (hardness * PI * 0.5)).atan() * (2.0 / PI),
+            Self::Atan => libm::atanf(x * (hardness * PI * 0.5)) * (2.0 / PI),
             Self::Softsign => {
                 let y = x * hardness;
                 y / (1.0 + y.abs())

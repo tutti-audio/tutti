@@ -43,6 +43,7 @@
 
 use pitch_detection::detector::PitchDetector;
 use pitch_detection::detector::yin::YINDetector;
+use tutti_buffers::Mono;
 use tutti_measure::{PitchEstimate, YinConfig, yin};
 use tutti_types::SampleRate;
 
@@ -66,8 +67,8 @@ fn saw(f0: f64, n: usize) -> Vec<f32> {
 
 /// tutti's reading, in Hz. `None` when it reports unvoiced.
 fn tutti_hz(x: &[f32]) -> Option<f64> {
-    let cfg = YinConfig::standard(SampleRate::of(SR)).expect("config");
-    match yin(&cfg, x).expect("enough input") {
+    let cfg = YinConfig::new();
+    match yin(&cfg, Mono::new(x), SampleRate::of(SR)).expect("enough input") {
         PitchEstimate::Voiced(p) => Some(p.frequency.get() as f64),
         PitchEstimate::Unvoiced => None,
     }
@@ -94,7 +95,7 @@ fn cents(a: f64, b: f64) -> f64 {
 /// The two implementations must agree on the fundamental.
 #[test]
 fn tutti_yin_agrees_with_an_independent_yin() {
-    // Mid-range fundamentals, well inside `YinConfig::standard`'s 50..2000 Hz
+    // Mid-range fundamentals, well inside `YinConfig::new`'s 50..2000 Hz
     // and comfortably resolved at a 4096-sample window.
     let cases = [110.0f64, 220.0, 440.0, 587.33];
 

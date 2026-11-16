@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use tutti_midi_protocol::{Universal, UniversalReader, narrow_value};
 use tutti_sf2::SoundFont;
-use tutti_types::{SampleRate, Semitones};
+use tutti_types::{SampleRate, Seconds, Semitones};
 use tutti_ump::{Address, CCNumber, Message, MidiChannel, MidiGroup, U7, Ump, Voice2};
 use tutti_voicing::{MasterGain, Rules, Voicing};
 
@@ -584,7 +584,7 @@ impl Player {
     /// 10.5), so it is at most 8000 timecents, 101.6 s. `None` if a release
     /// cannot be bounded (it is not finite). The effects after the unit are the
     /// graph's: each node declares its own tail.
-    pub(crate) fn ring_out(&self) -> Option<f64> {
+    pub(crate) fn ring_out(&self) -> Option<Seconds> {
         let mut longest = 0_f64;
         for preset in self.font.presets() {
             for preset_zone in preset.regions() {
@@ -595,7 +595,7 @@ impl Player {
                 }
             }
         }
-        longest.is_finite().then_some(longest)
+        longest.is_finite().then_some(Seconds(longest))
     }
 }
 

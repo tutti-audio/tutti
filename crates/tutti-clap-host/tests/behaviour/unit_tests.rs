@@ -1594,3 +1594,40 @@ fn test_param_mod_event_ffi() {
         _ => panic!("Expected ParamMod"),
     }
 }
+
+/// Each CLAP severity is emitted at its level on target `tutti::plugin`, tagged
+/// with the plugin's id; one CLAP does not name is a warning that carries the
+/// raw value.
+#[test]
+fn each_log_severity_maps_to_its_tracing_level() {
+    use tracing::Level;
+    use tutti_clap_ffi::{HostCallbacks, LogSeverity};
+
+    let state = HostState::new(main_thread());
+    state.plugin_id.set("org.example.synth".to_owned()).unwrap();
+    let severities = [
+        (LogSeverity::Debug, Level::DEBUG, None),
+        (LogSeverity::Info, Level::INFO, None),
+        (LogSeverity::Warning, Level::WARN, None),
+        (LogSeverity::Error, Level::ERROR, None),
+        (LogSeverity::Fatal, Level::ERROR, None),
+        (LogSeverity::HostMisbehaving, Level::ERROR, None),
+        (LogSeverity::PluginMisbehaving, Level::ERROR, None),
+        (LogSeverity::Unknown(99), Level::WARN, Some(99)),
+    ];
+    let got = support::logs::plugin_events(|| {
+        for (severity, _, _) in severities {
+            state.log(severity, "line");
+        }
+    });
+    let want: Vec<_> = severities
+        .iter()
+        .map(|(_, level, raw)| (*level, *raw))
+        .collect();
+    let got_pairs: Vec<_> = got.iter().map(|e| (e.level, e.severity)).collect();
+    assert_eq!(got_pairs, want);
+    assert!(
+        got.iter()
+            .all(|e| e.plugin.as_deref() == Some("org.example.synth") && e.message == "line")
+    );
+}

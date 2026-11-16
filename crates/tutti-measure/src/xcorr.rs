@@ -7,8 +7,10 @@
 //! the direct sum. A caller that wants a weighted variant (phase transform)
 //! reshapes the cross-spectrum through [`cross_correlate_shaped`].
 
+use tutti_buffers::{Mono, Sample};
 use tutti_types::Samples;
 
+use crate::convert::to_f32;
 use tutti_dsp::Complex32;
 use tutti_dsp::FftScratch;
 
@@ -94,8 +96,12 @@ impl CrossCorrelation {
 ///
 /// See [`CrossCorrelation`] for the lag convention. Allocates the padded
 /// buffers and the result; an offline call.
-pub fn cross_correlate(a: &[f32], b: &[f32], fft: &mut FftScratch) -> CrossCorrelation {
-    cross_correlate_shaped(a, b, fft, |_| {})
+pub fn cross_correlate<S: Sample>(
+    a: Mono<'_, S>,
+    b: Mono<'_, S>,
+    fft: &mut FftScratch,
+) -> CrossCorrelation {
+    cross_correlate_shaped(&to_f32(a.samples()), &to_f32(b.samples()), fft, |_| {})
 }
 
 /// [`cross_correlate`] with the cross-spectrum `A * conj(B)` handed to `shape`
@@ -150,6 +156,30 @@ pub(crate) fn cross_correlate_shaped(
 mod tests {
     use super::*;
     use rand::{RngExt, SeedableRng, rngs::StdRng};
+
+    fn cross_correlate(a: &[f32], b: &[f32], fft: &mut FftScratch) -> CrossCorrelation {
+        super::cross_correlate(Mono::new(a), Mono::new(b), fft)
+    }
+
+    /// Any sample format correlates at its nominal level: an `i16` copy of a
+    /// buffer peaks at the same lag as the `f32` original.
+    #[test]
+    fn an_integer_buffer_correlates_at_its_nominal_level() {
+        let base = noise(300, 21);
+        let mut late = vec![0.0f32; 40];
+        late.extend_from_slice(&base);
+        let ints = |x: &[f32]| -> Vec<i16> {
+            x.iter()
+                .map(|&v| (v * f32::from(i16::MAX)) as i16)
+                .collect()
+        };
+        let r = super::cross_correlate(
+            Mono::new(&ints(&late)),
+            Mono::new(&ints(&base)),
+            &mut FftScratch::new(),
+        );
+        assert_eq!(r.peak().unwrap().lag, 40);
+    }
 
     fn noise(len: usize, seed: u64) -> Vec<f32> {
         let mut rng = StdRng::seed_from_u64(seed);

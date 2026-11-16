@@ -10,7 +10,8 @@
 
 use std::ops::{Deref, DerefMut};
 
-use tutti_graph::{EventCapacity, EventInletWriter, Losses, Refused, Stamp};
+use tutti_graph::{EventCapacity, EventInletWriter, Losses, Stamp};
+use tutti_rt::PushError;
 use tutti_ump::{Address, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, Voice2};
 
 /// The ring a live input's inlet is opened with, in events (it is also the
@@ -88,7 +89,7 @@ impl MidiKeys {
         channel: MidiChannel,
         note: NoteNumber,
         velocity: NoteVelocity,
-    ) -> Result<(), Refused> {
+    ) -> Result<(), PushError> {
         self.voice(at, channel, Voice2::note_on(note, velocity))
     }
 
@@ -103,7 +104,7 @@ impl MidiKeys {
         at: impl Into<Stamp>,
         channel: MidiChannel,
         note: NoteNumber,
-    ) -> Result<(), Refused> {
+    ) -> Result<(), PushError> {
         self.voice(at, channel, Voice2::note_off(note, NoteVelocity::MIN))
     }
 
@@ -112,7 +113,7 @@ impl MidiKeys {
         at: impl Into<Stamp>,
         channel: MidiChannel,
         voice: Voice2,
-    ) -> Result<(), Refused> {
+    ) -> Result<(), PushError> {
         let address = Address {
             group: self.group,
             channel,

@@ -112,7 +112,6 @@ fn mock_with(
 ) -> (Ipc, Mock) {
     use interprocess::local_socket::{ListenerOptions, traits::Listener as _};
     use std::io::{Read, Write};
-    static COUNTER: tutti_types::Mint = tutti_types::Mint::new();
     let layout = SlabLayout {
         samples_per_channel: CEILING,
         format: SampleFormat::Float32,
@@ -120,7 +119,7 @@ fn mock_with(
         inputs: vec![ChannelLayout::STEREO],
         outputs: vec![ChannelLayout::STEREO],
     };
-    let shm = format!("ipc_{}_{}", std::process::id(), COUNTER.mint());
+    let shm = tutti_fixtures::unique_name("ipc");
     let path = unique_socket_path().expect("the OS has a random source");
     let _ = std::fs::remove_file(&path);
     let listener = ListenerOptions::new()
@@ -402,6 +401,54 @@ fn the_controller_reports_what_the_plugin_re_reports() {
     }));
 }
 
+/// **The buses a plugin announces are the ones the host sees, and not before.**
+/// The plugin has a stereo bus in and out at load; it announces a stereo main bus
+/// and a mono aux bus on the way in. The controller's layout, and the `wiring`
+/// its `Control` answers, follow the announcement; the slab's layout (what
+/// [`Ipc::loaded`] says, what the pipeline was built for) stays the one at load. A
+/// `PluginIoChanged` with no layout changes nothing.
+#[test]
+fn the_buses_a_plugin_announces_are_the_buses_the_host_sees() {
+    let _machine = machine_lock();
+    let (ipc, server) = mock();
+    let heard = Arc::new(Mutex::new(Vec::new()));
+    let sink = Arc::clone(&heard);
+    ipc.forward_events(Some(Arc::new(move |event| {
+        sink.lock().unwrap().push(format!("{event:?}"));
+    })));
+    let main = main_thread();
+    let (_processor, controller) = activate(ipc, 32);
+    let at_load = controller.layout();
+    assert_eq!(at_load.input_widths(), vec![ChannelLayout::STEREO]);
+
+    server.say(&BridgeMessage::PluginIoChanged { layout: None });
+    let announced = tutti_plugin_types::Layout {
+        inputs: vec![
+            PluginBus::main(ChannelLayout::STEREO),
+            PluginBus::new(ChannelLayout::MONO, tutti_plugin_types::BusRole::Aux),
+        ],
+        outputs: at_load.outputs.clone(),
+    };
+    server.say(&BridgeMessage::PluginIoChanged {
+        layout: Some(announced.clone()),
+    });
+    // An idle bridge reads nothing: the next command's reply reads it.
+    assert_eq!(controller.parameters(main).len(), 1);
+    let start = Instant::now();
+    while !heard.lock().unwrap().iter().any(|e| e.contains("IoLayout")) {
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "the host hears it"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+        let _ = controller.parameters(main);
+    }
+    assert_eq!(controller.layout(), announced);
+    let wiring = controller.wiring(main);
+    assert_eq!(wiring.inputs, announced.inputs, "the controller's wiring");
+    assert_eq!(wiring.outputs, announced.outputs);
+}
+
 /// **A served plugin with no origin cannot be reopened, and says so**, through
 /// both the token-free reopen and the trait's.
 #[test]
@@ -653,6 +700,104 @@ fn a_reactivation_continues_the_chunk_sequence() {
         new.iter().all(|n| old.iter().all(|o| n > o)),
         "old {old:?}, new {new:?}"
     );
+}
+
+/// How many more blocks the bridge must abandon, after a render of
+/// [`CHUNKS_AFTER`] chunks, for it to be off the fork's budget. A bridge held
+/// on the budget (1 s here) abandons at most one per second, so within
+/// [`WITHIN`] it adds two at most; one off it adds nearly all eight, and a
+/// descheduled bridge that skips some (a chunk reached more than `MAX_BEHIND`
+/// behind is skipped, not abandoned) still adds more than this.
+const OFF_THE_BUDGET: u64 = 4;
+const CHUNKS_AFTER: usize = 8;
+const WITHIN: Duration = Duration::from_secs(2);
+
+/// Waits for the bridge to have abandoned [`OFF_THE_BUDGET`] blocks past
+/// `before`, panicking with what it had when [`WITHIN`] runs out.
+fn wait_off_the_budget(bridge: &PluginBridge, before: u64) {
+    let start = Instant::now();
+    while bridge.abandoned_replies() < before + OFF_THE_BUDGET {
+        assert!(
+            start.elapsed() < WITHIN,
+            "the bridge abandoned {} blocks in {WITHIN:?} after {CHUNKS_AFTER} chunks, wanted \
+             {OFF_THE_BUDGET}: it is still holding a block for the fork's budget",
+            bridge.abandoned_replies() - before
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+/// Waits for the bridge to have abandoned one block (the first, at the budget).
+fn wait_first_abandoned(bridge: &PluginBridge) {
+    let start = Instant::now();
+    while bridge.abandoned_replies() < 1 {
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "the bridge never abandoned the first block"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+/// Renders `chunks` more chunks of silence through an offline fork's
+/// processor, a bridge-thread turn apart: a chunk the bridge reaches more than
+/// `MAX_BEHIND` behind the newest is skipped, not abandoned, and the count
+/// below is of abandoned ones.
+fn render_chunks(processor: &mut IpcProcessor, chunks: usize) {
+    for _ in 0..chunks {
+        render_silence(processor, 32);
+        std::thread::sleep(Duration::from_millis(15));
+    }
+}
+
+/// **A server that never replies costs an offline fork one budget, however
+/// many chunks the render still submits.** The bridge thread waits the fork's
+/// budget (here 1 s) for a reply while the fork waits on it; once the fork
+/// gives up it waits no more, and the bridge returns to the few block periods
+/// a live block is given. The server here publishes and replies to nothing:
+/// the first chunk is abandoned at the budget, and the eight after it within
+/// milliseconds each (at the budget each they would take eight seconds).
+#[test]
+fn a_silent_server_holds_the_bridge_for_one_budget_not_one_per_chunk() {
+    let _machine = machine_lock();
+    let (mut ipc, _server) = mock();
+    let bridge = Arc::clone(ipc.bridge());
+    let wait = ipc.watch(true);
+    let (mut processor, _controller) = activate(ipc, 32);
+    render_chunks(&mut processor, 2);
+    assert!(
+        wait.gave_up(),
+        "the second render's collect misses its budget"
+    );
+    wait_first_abandoned(&bridge);
+    let before = bridge.abandoned_replies();
+    render_chunks(&mut processor, CHUNKS_AFTER);
+    wait_off_the_budget(&bridge, before);
+}
+
+/// **A reactivation after a give-up stays off the budget.** The fork's wait is
+/// latched across `deactivate` and `activate`: the new activation collects at
+/// once, and the bridge thread must not hold one budget per chunk for a
+/// server that already did not answer.
+#[test]
+fn a_reactivation_after_a_give_up_does_not_wait_the_budget_again() {
+    let _machine = machine_lock();
+    let main = main_thread();
+    let (mut ipc, _server) = mock();
+    let bridge = Arc::clone(ipc.bridge());
+    let wait = ipc.watch(true);
+    let (mut processor, controller) = activate(ipc, 32);
+    render_chunks(&mut processor, 2);
+    assert!(
+        wait.gave_up(),
+        "the second render's collect misses its budget"
+    );
+    wait_first_abandoned(&bridge);
+    let ipc = Ipc::deactivate(main, processor, controller).expect("the halves rejoin");
+    let (mut processor, _controller) = activate(ipc, 32);
+    let before = bridge.abandoned_replies();
+    render_chunks(&mut processor, CHUNKS_AFTER);
+    wait_off_the_budget(&bridge, before);
 }
 
 /// How many times the mock server was asked for its parameter list.

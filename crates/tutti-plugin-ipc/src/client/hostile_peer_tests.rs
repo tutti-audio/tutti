@@ -104,16 +104,6 @@ fn wait_until(mut cond: impl FnMut() -> bool) -> bool {
     false
 }
 
-fn unique_shm_name(label: &str) -> String {
-    static COUNTER: tutti_types::Mint = tutti_types::Mint::new();
-    format!(
-        "hostile_{}_{}_{}",
-        label,
-        std::process::id(),
-        COUNTER.mint()
-    )
-}
-
 fn stereo_layout() -> SlabLayout {
     SlabLayout {
         slots: RING_SLOTS as u32,
@@ -380,9 +370,12 @@ impl MockServer {
 
         // The peer writes no audio here: only the shared, read-only slab is kept.
         let slab = Arc::clone(
-            AudioSlab::create(unique_shm_name(label), stereo_layout())
-                .expect("create slab")
-                .slab(),
+            AudioSlab::create(
+                tutti_fixtures::unique_name(&format!("hostile_{label}")),
+                stereo_layout(),
+            )
+            .expect("create slab")
+            .slab(),
         );
         let (bridge, thread) = PluginBridge::new(
             path.clone(),
@@ -723,6 +716,60 @@ fn an_unprompted_event_reaches_the_listener_while_no_command_waits() {
         "the server's unprompted latency change was not heard within {NOTICE_TIMEOUT:?}"
     );
     assert_eq!(*heard.lock(), [77]);
+}
+
+/// **A layout no plugin has is dropped on receipt; the next real one is kept.**
+/// The peer announces a hundred thousand zero-width buses, which every width
+/// check passes, then a stereo plugin's. The host hears the second layout only,
+/// once, and both resyncs.
+#[test]
+fn a_layout_with_absurdly_many_buses_is_dropped_on_receipt() {
+    use crate::client::audio::BridgeEvent;
+    use parking_lot::Mutex as PlMutex;
+    use tutti_plugin_types::{Layout, PluginBus};
+
+    let silly = Layout {
+        inputs: (0..100_000)
+            .map(|_| PluginBus::main(ChannelLayout::from_count(0)))
+            .collect(),
+        outputs: Vec::new(),
+    };
+    let real = Layout {
+        inputs: vec![PluginBus::main(ChannelLayout::STEREO)],
+        outputs: vec![PluginBus::main(ChannelLayout::STEREO)],
+    };
+    let sent = real.clone();
+    let mock = MockServer::start("silly-layout", move |msg| match msg {
+        HostMessage::SetRenderMode { .. } => Action::ReplyMany(vec![
+            BridgeMessage::PluginIoChanged {
+                layout: Some(silly.clone()),
+            },
+            BridgeMessage::PluginIoChanged {
+                layout: Some(sent.clone()),
+            },
+        ]),
+        _ => Action::Silent,
+    });
+    let layouts: Arc<PlMutex<Vec<Layout>>> = Arc::new(PlMutex::new(Vec::new()));
+    let resyncs = Arc::new(AtomicU64::new(0));
+    let (sink, count) = (Arc::clone(&layouts), Arc::clone(&resyncs));
+    mock.bridge.set_listener(Some(Arc::new(move |ev| match ev {
+        BridgeEvent::IoLayout(layout) => sink.lock().push(layout),
+        BridgeEvent::Resync(_) => {
+            count.fetch_add(1, Ordering::Relaxed);
+        }
+        _ => {}
+    })));
+    assert!(
+        mock.bridge
+            .set_render_mode_rt(crate::protocol::RenderMode::Realtime)
+    );
+    assert!(
+        wait_until(|| !layouts.lock().is_empty()),
+        "the real layout was not heard within {NOTICE_TIMEOUT:?}"
+    );
+    assert_eq!(*layouts.lock(), [real], "only the plausible layout is kept");
+    assert!(resyncs.load(Ordering::Relaxed) >= 1, "the resync is heard");
 }
 
 /// A crash that happens **before** any listener exists is still reported.

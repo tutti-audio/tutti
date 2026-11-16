@@ -861,6 +861,71 @@ fn a_live_routing_and_ramping_output_gains_are_allocation_free() {
     }
 }
 
+/// A routing change crossfades over the declick length (240 frames at 48 kHz, nearly four 64-frame blocks),
+/// without allocating on the audio thread: the blocks through the fade (a
+/// second change landing in mid-fade, which cuts) and after it are guarded,
+/// each `set_routing` and `reclaim` (which free the replaced table) runs on
+/// the control side between guarded calls, and the settled figure is checked.
+#[test]
+fn a_routing_crossfade_is_allocation_free() {
+    use tutti_engine::{OutputMap, Routing};
+    use tutti_graph::{Editor, NodeKey, OutPort, Prepare, Source, Unforkable};
+
+    let transport = Transport::new(SampleRate::of(48_000.0));
+    let (mut ed, exec) = Editor::new(Prepare::new(
+        SampleRate::of(48_000.0),
+        tutti_types::MaxBlock::of(tutti_types::Samples(512)),
+    ));
+    ed.insert(NodeKey(1), "wide", Unforkable(TwelveWide));
+    ed.spec_mut().topology.set_outputs((0..12).map(|port| {
+        Source::Node(OutPort {
+            node: NodeKey(1),
+            port,
+        })
+    }));
+    ed.commit().expect("commits");
+    let engine = Engine::new(&transport, &mut ed, exec).expect("twelve is within the cap");
+    let twelve = ChannelLayout::from(12u16);
+    engine.support_output(twelve).expect("a width");
+    let control = engine.output_control();
+    let mut out = vec![0.0f32; 64 * 12];
+    let mut block = |engine: &Engine| {
+        assert_no_alloc::assert_no_alloc(|| {
+            engine.process(&mut InterleavedMut::new(&mut out, twelve).unwrap());
+        });
+    };
+    let to = |outputs: [usize; 12]| Routing {
+        map: OutputMap::channels(outputs).unwrap(),
+        ..Routing::default()
+    };
+    // The first block adopts the plan and the routing in force.
+    engine.process(&mut InterleavedMut::new(&mut vec![0.0f32; 64 * 12], twelve).unwrap());
+
+    // Reversed: a full fade, over blocks that straddle its length.
+    control.set_routing(to([11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0]));
+    for _ in 0..6 {
+        block(&engine);
+        let _ = engine.reclaim();
+    }
+    // A second change two blocks in, and a third one block after it.
+    control.set_routing(to([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]));
+    block(&engine);
+    block(&engine);
+    control.set_routing(to([1, 0, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10]));
+    block(&engine);
+    for _ in 0..6 {
+        block(&engine);
+        let _ = engine.reclaim();
+    }
+    // Settled: heard channel `c` is output `c ^ 1`, at `(c + 1) / 16`.
+    let v = |c: usize| (c + 1) as f32 / 16.0;
+    for frame in out.as_chunks::<12>().0 {
+        for (c, &s) in frame.iter().enumerate() {
+            assert_eq!(s, v(c ^ 1), "output {c}");
+        }
+    }
+}
+
 /// Silence that reports 16 frames of latency, so the graph delays every other
 /// output of a root it is in by 16 with a ring.
 struct Latent;

@@ -28,6 +28,7 @@ fn the_formula_is_40_log10_of_the_fraction_of_full_scale() {
     }
 }
 
+/// Spec: m2-125/5.2#1, m2-125/6.1.8#1
 #[test]
 fn a_send_level_is_linear_in_amplitude_and_100_percent_at_full_scale() {
     // M2-125 §5.2: linear with respect to amplitude, 100% at 0xFFFFFFFF.

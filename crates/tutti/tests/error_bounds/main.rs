@@ -46,8 +46,7 @@ fn rt_transport_and_engine_errors_are_boxable() {
     err::<tutti::rt::Contended>();
     err::<tutti::rt::RequestBitOutOfRange>();
     err::<tutti::transport::AudioTaken>();
-    err::<tutti::transport::QueueFull>();
-    err::<tutti::transport::ScheduleFull>();
+    err::<tutti::transport::TimedError<tutti::transport::TransportCommand>>();
     err::<tutti::engine::GraphEngineError>();
 }
 
@@ -55,7 +54,7 @@ fn graph_errors_are_boxable() {
     use tutti::graph::{
         BusError, CloseError, CommitError, CompileError, EventCapacityError, EventOrderError,
         ForkError, ForkFault, MissingSource, MixError, ModeError, ParamPortsError, PassError,
-        Refused, ScheduleError, TransportChangeRejected, VerifyError,
+        ScheduleError, TransportChangeRejected, VerifyError,
     };
     err::<BusError>();
     err::<CloseError>();
@@ -70,7 +69,6 @@ fn graph_errors_are_boxable() {
     err::<ModeError>();
     err::<ParamPortsError>();
     err::<PassError>();
-    err::<Refused>();
     err::<ScheduleError>();
     err::<TransportChangeRejected>();
     err::<VerifyError>();

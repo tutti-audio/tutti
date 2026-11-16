@@ -540,6 +540,7 @@ fn a_reserved_subclass_is_refused_with_its_classification() {
 }
 
 /// M2-123 5.2.9, 5.1.
+/// Spec: m2-123/5.1#5, m2-123/5.2.9#1
 #[test]
 fn an_attribute_that_is_not_an_articulation_is_refused() {
     for kind in [0x18, 0x19] {

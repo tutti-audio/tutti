@@ -7,11 +7,17 @@
 //! (`Prepare::quantum`), not a fixed 64 frames. With 64, a chunk completed
 //! mid-callback would be collected microseconds after it was submitted, and
 //! read as silence; with the callback as the chunk, the server has a whole
-//! device period to answer. Asserted here: the blocks after warm-up are
-//! silent in at most one run, no longer than a scheduler stall plus the
-//! pipeline's refill (`max_stall_blocks`), every block is either the input delayed
-//! by exactly the declared latency (137 + quantum) or silence, and the graph
-//! declares that latency.
+//! device period to answer. Asserted here: every block is either the input
+//! delayed by exactly the declared latency (137 + quantum) or silence, and the
+//! graph declares that latency. A silent block is a chunk the node collected
+//! unanswered (`PluginControls::missed_chunks`), and it is excused only when the
+//! server then published that chunk before its ring slot was reused
+//! (`late_chunks`), a late answer a loaded machine produces, or when the bridge
+//! skipped it as more than a chunk behind (`skipped_chunks`). A silent block
+//! whose chunk was neither, or that no collect missed, fails: a server that
+//! drops a chunk it finds overwritten is not counted, and fails the same way.
+//! A run in which more than a quarter of the judged blocks were late is rerun
+//! (twice at most) or reported as too loaded to judge.
 //!
 //! Needs `cargo build -p tutti-plugin-server` first (see `CLAUDE.md`).
 
@@ -73,6 +79,14 @@ struct Run {
     silent: Vec<usize>,
     /// Of those, neither silent nor the input delayed by `declared`.
     wrong: Vec<usize>,
+    /// The blocks whose collect missed its chunk (`missed_chunks` moved).
+    misses: Vec<usize>,
+    /// The blocks in which a missed chunk was counted late (`late_chunks`
+    /// moved), once per chunk.
+    lates: Vec<usize>,
+    /// The blocks in which the bridge skipped a chunk as stale
+    /// (`skipped_chunks` moved), once per chunk.
+    skips: Vec<usize>,
 }
 
 /// Keeps idle CPUs awake for the length of a paced run (Linux only).
@@ -83,7 +97,7 @@ struct Run {
 /// priority, and the late thread is the host's bridge thread or the server's
 /// about once in 1000 blocks. The plugin gets one period to answer, so such a
 /// wake-up costs the block and its successors up to the next fresh one: the
-/// source of the stalls `judge_stall` tolerates. With spinners on the other
+/// source of the late answers `judge_silence` excuses. With spinners on the other
 /// CPUs at the lowest priority (they yield to any waking thread) the late
 /// wake-ups fell from 8 in 5249 blocks to 1 in 8399. A device's callback is
 /// woken by an interrupt, not from an idle CPU, so this keeps the run closer
@@ -144,6 +158,63 @@ impl Drop for KeepAwake {
 /// Callbacks a [`run_live`] burst makes back to back.
 const BURST: usize = 3;
 
+/// How many blocks after a miss a skip may be counted: the bridge thread is
+/// the one that skips, and it can be a stall behind the audio thread.
+const SKIP_WINDOW: usize = RING_SLOTS + 2;
+
+/// The missed blocks whose chunk the plugin side accounts for: published
+/// after all, or skipped by the bridge. A miss at block `b` is counted late in
+/// `b` (the same callback's submit), `b + 1` (the next collect) or `b + 2`,
+/// while the chunk's ring slot still shows it (`RING_SLOTS` chunks on); a
+/// skip is counted within [`SKIP_WINDOW`] blocks of it. Each count answers
+/// one miss, the earliest.
+fn excused(misses: &[usize], lates: &[usize], skips: &[usize]) -> Vec<usize> {
+    let (mut lates, mut skips) = (lates.to_vec(), skips.to_vec());
+    let mut excused = Vec::new();
+    for &miss in misses {
+        let take = |events: &mut Vec<usize>, window: usize| {
+            events
+                .iter()
+                .position(|&e| (miss..=miss + window).contains(&e))
+                .map(|at| events.remove(at))
+                .is_some()
+        };
+        if take(&mut lates, RING_SLOTS) || take(&mut skips, SKIP_WINDOW) {
+            excused.push(miss);
+        }
+    }
+    excused
+}
+
+/// `Ok` iff every silent block from `from` on, outside `neutral` (the burst
+/// window: its blocks are not judged), was a missed chunk the server published
+/// late.
+fn judge_silence(run: &Run, from: usize, neutral: &Range<usize>) -> Result<(), String> {
+    let late = excused(&run.misses, &run.lates, &run.skips);
+    let mut unexplained = Vec::new();
+    for &b in &run.silent {
+        if b < from || neutral.contains(&b) {
+            continue;
+        }
+        if !run.misses.contains(&b) {
+            unexplained.push(format!("{b} (no collect missed: nothing was submitted)"));
+        } else if !late.contains(&b) {
+            unexplained.push(format!(
+                "{b} (its chunk was never published, nor counted skipped)"
+            ));
+        }
+    }
+    if unexplained.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "silent blocks outside a late answer or a skip: {unexplained:?} \
+             (misses {:?}, late counts at {:?}, skips at {:?})",
+            run.misses, run.lates, run.skips
+        ))
+    }
+}
+
 /// Render `blocks` callbacks of `quantum` frames at `rate`, paced to real
 /// time, through an engine whose graph is the ramp into the probe. With
 /// `burst_at`, the callbacks from that block (counted after warm-up) on run
@@ -157,13 +228,16 @@ fn run_live(rate: f64, quantum: usize, blocks: usize, burst_at: Option<usize>) -
     let (mut ed, exec) = Editor::new(prepare);
     let (src, key) = (NodeKey(1), NodeKey(2));
     ed.insert(src, "ramp", Unforkable(RampSource));
-    let _controls = ed.insert(
-        key,
-        "plugin",
-        probe.client.bind(
-            tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo"),
-        ),
-    );
+    let controls = ed
+        .insert(
+            key,
+            "plugin",
+            probe.client.bind(
+                tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0))
+                    .expect("a tempo"),
+            ),
+        )
+        .controls;
     for port in 0..inputs {
         ed.spec_mut().topology.edges.insert(
             InPort {
@@ -185,14 +259,32 @@ fn run_live(rate: f64, quantum: usize, blocks: usize, burst_at: Option<usize>) -
     let warm_up = 8 + declared.get().div_ceil(quantum);
     let mut buf = vec![0.0f32; quantum];
     let (mut silent, mut wrong) = (Vec::new(), Vec::new());
+    let (mut misses, mut lates, mut skips) = (Vec::new(), Vec::new(), Vec::new());
+    let mut skipped = 0;
     let mut next = Instant::now();
     for b in 0..warm_up + blocks {
+        // The bridge thread counts a skip when it gets to the chunk, between
+        // callbacks: what it counted since the last callback began is the
+        // last block's.
+        let now_skipped = controls.skipped_chunks();
+        if b > warm_up {
+            skips.extend((skipped..now_skipped).map(|_| b - 1 - warm_up));
+        }
+        skipped = now_skipped;
+        let (missed, late) = (controls.missed_chunks(), controls.late_chunks());
         engine.process(&mut InterleavedMut::new(&mut buf, ChannelLayout::MONO).unwrap());
         ed.collect();
         if b >= warm_up {
+            let at = b - warm_up;
             let first = (b * quantum) as u64;
+            if controls.missed_chunks() > missed {
+                misses.push(at);
+            }
+            for _ in late..controls.late_chunks() {
+                lates.push(at);
+            }
             if buf.iter().all(|&s| s == 0.0) {
-                silent.push(b - warm_up);
+                silent.push(at);
             } else if buf
                 .iter()
                 .enumerate()
@@ -214,138 +306,138 @@ fn run_live(rate: f64, quantum: usize, blocks: usize, burst_at: Option<usize>) -
         }
         std::thread::sleep(next - now);
     }
+    // A skip of the last chunks may still be on its way.
+    std::thread::sleep(period * 3);
+    skips.extend((skipped..controls.skipped_chunks()).map(|_| blocks - 1));
     drop(probe.handle);
     Run {
         declared,
         blocks,
         silent,
         wrong,
-    }
-}
-
-/// Longest scheduler stall a paced run tolerates, once. Empirical: the
-/// wake-up delays measured on the 4-vCPU VM were 10 to 28 ms (max 28 ms), and
-/// 36 ms leaves headroom over that for the test thread and the server each
-/// being late. Not derived from a scheduler's constants, which differ by
-/// kernel and CPU count.
-const STALL: Duration = Duration::from_millis(36);
-
-/// Silent blocks one stall of [`STALL`] may cost at `period`: the blocks the
-/// stall spans, plus `RING_SLOTS` while the pipeline refills.
-fn max_stall_blocks(period: Duration) -> usize {
-    STALL.as_nanos().div_ceil(period.as_nanos()) as usize + RING_SLOTS
-}
-
-/// `Ok` iff the sorted block indices `silent` form at most one contiguous run
-/// and it is no longer than `max_run`. A second run, or a longer one, is a
-/// fault in the pipeline and not a stall.
-///
-/// `neutral` is a range whose blocks are not judged (the burst window): they
-/// count as silent when runs are formed, so a stall straddling its edge is one
-/// run, and not towards a run's length.
-fn judge_stall(silent: &[usize], max_run: usize, neutral: Range<usize>) -> Result<(), String> {
-    let mut all: Vec<usize> = silent.iter().copied().chain(neutral.clone()).collect();
-    all.sort_unstable();
-    all.dedup();
-    let mut runs: Vec<Vec<usize>> = Vec::new();
-    for &b in &all {
-        match runs.last_mut() {
-            Some(run) if run.last().is_some_and(|&l| l + 1 == b) => run.push(b),
-            _ => runs.push(vec![b]),
-        }
-    }
-    for run in &mut runs {
-        run.retain(|b| !neutral.contains(b));
-    }
-    runs.retain(|r| !r.is_empty());
-    if runs.len() > 1 {
-        return Err(format!("{} separate silent runs: {silent:?}", runs.len()));
-    }
-    match runs.first() {
-        Some(r) if r.len() > max_run => Err(format!(
-            "one silent run of {} blocks (> {max_run}): {r:?}",
-            r.len()
-        )),
-        _ => Ok(()),
+        misses,
+        lates,
+        skips,
     }
 }
 
 #[test]
-fn tolerates_one_bounded_stall() {
-    assert!(judge_stall(&[], 4, 0..0).is_ok());
-    assert!(judge_stall(&[22, 23, 24], 4, 0..0).is_ok());
-    assert!(
-        judge_stall(&[9, 10, 11, 12], 4, 0..0).is_ok(),
-        "at the bound"
-    );
-    assert!(
-        judge_stall(&[9, 10, 11, 12, 13], 4, 0..0).is_err(),
-        "bound + 1"
-    );
-    assert!(
-        judge_stall(&[22, 23, 24, 87, 88], 4, 0..0).is_err(),
-        "two stalls"
-    );
-    assert!(
-        judge_stall(&[5, 7], 4, 0..0).is_err(),
-        "a gap of one block separates"
-    );
-}
-
-#[test]
-fn a_stall_straddling_the_neutral_window_is_one_run() {
-    let window = 60..65;
-    assert!(judge_stall(&[58, 59, 65, 66], 4, window.clone()).is_ok());
-    assert!(judge_stall(&[59, 65], 4, window.clone()).is_ok());
-    assert!(judge_stall(&[], 4, window.clone()).is_ok(), "empty window");
-    assert!(
-        judge_stall(&[56, 57, 58, 59, 65], 4, window.clone()).is_err(),
-        "five blocks outside the window exceed the bound"
-    );
-    assert!(
-        judge_stall(&[10, 11, 58, 59], 4, window.clone()).is_err(),
-        "a stall away from the window is a second run"
-    );
-    assert!(
-        judge_stall(&[57], 4, window).is_ok(),
-        "one stall near the window"
-    );
-}
-
-#[test]
-fn a_stall_bound_follows_the_block_period() {
-    // 36 ms over 10 ms blocks is 4 blocks, over 21.33 ms blocks 2.
-    assert_eq!(max_stall_blocks(Duration::from_millis(10)), 4 + RING_SLOTS);
+fn a_miss_is_accounted_for_only_by_a_late_count_or_a_skip_in_its_window() {
+    assert!(excused(&[], &[], &[]).is_empty());
     assert_eq!(
-        max_stall_blocks(Duration::from_secs_f64(1024.0 / 48_000.0)),
-        2 + RING_SLOTS
+        excused(&[10], &[10], &[]),
+        [10],
+        "counted in its own callback"
     );
+    assert_eq!(excused(&[10], &[11], &[]), [10]);
+    assert_eq!(
+        excused(&[10], &[12], &[]),
+        [10],
+        "while its slot still shows it"
+    );
+    assert!(excused(&[10], &[13], &[]).is_empty(), "past the ring");
+    assert!(excused(&[10], &[9], &[]).is_empty(), "before the miss");
+    assert!(excused(&[10], &[], &[]).is_empty(), "never published");
+    assert_eq!(
+        excused(&[10, 11], &[12], &[]),
+        [10],
+        "one late count answers one miss, the earliest"
+    );
+    assert_eq!(excused(&[10], &[], &[13]), [10], "a skip, a stall behind");
+    assert!(
+        excused(&[10], &[], &[15]).is_empty(),
+        "a skip past its window"
+    );
+    assert_eq!(
+        excused(&[10, 11], &[], &[11]),
+        [10],
+        "one skip answers one miss"
+    );
+}
+
+#[test]
+fn a_silent_block_is_judged_by_what_the_collect_and_the_server_did() {
+    let run = |silent: &[usize], misses: &[usize], lates: &[usize], skips: &[usize]| Run {
+        declared: Samples(0),
+        blocks: 200,
+        silent: silent.to_vec(),
+        wrong: Vec::new(),
+        misses: misses.to_vec(),
+        lates: lates.to_vec(),
+        skips: skips.to_vec(),
+    };
+    assert!(judge_silence(&run(&[], &[], &[], &[]), 0, &(0..0)).is_ok());
+    assert!(judge_silence(&run(&[20], &[20], &[21], &[]), 0, &(0..0)).is_ok());
+    assert!(
+        judge_silence(&run(&[20], &[20], &[], &[22]), 0, &(0..0)).is_ok(),
+        "a chunk the bridge skipped"
+    );
+    let never = judge_silence(&run(&[20], &[20], &[], &[]), 0, &(0..0)).unwrap_err();
+    assert!(never.contains("never published"), "{never}");
+    let none = judge_silence(&run(&[20], &[], &[], &[]), 0, &(0..0)).unwrap_err();
+    assert!(none.contains("nothing was submitted"), "{none}");
+    assert!(
+        judge_silence(&run(&[61, 62], &[], &[], &[]), 0, &(60..65)).is_ok(),
+        "the neutral window is not judged"
+    );
+    assert!(
+        judge_silence(&run(&[3], &[], &[], &[]), 10, &(0..0)).is_ok(),
+        "before `from` is not judged"
+    );
+}
+
+/// Runs of `run` before a machine is called too loaded to judge.
+const JUDGEABLE_RUNS: usize = 3;
+
+/// The first run of `run` that can be judged: no block wrong, no silent block
+/// outside a late answer or a skip (either fails at once, in any run, whatever
+/// the load), and no more than a quarter of the blocks judged (`from` on,
+/// outside `neutral`) answered late or skipped. More than that and the run asserts
+/// little about the pipeline, so it is run again on a fresh server, up to
+/// [`JUDGEABLE_RUNS`] times, and then reported.
+fn judgeable_run(
+    what: &str,
+    mut run: impl FnMut() -> Run,
+    from: usize,
+    neutral: Range<usize>,
+) -> Run {
+    let mut seen = Vec::new();
+    for attempt in 1..=JUDGEABLE_RUNS {
+        let run = run();
+        assert!(
+            run.wrong.is_empty(),
+            "{what}: blocks {:?} are neither silent nor the input delayed by {:?}",
+            run.wrong,
+            run.declared
+        );
+        let judged = (from..run.blocks).filter(|b| !neutral.contains(b)).count();
+        let late = run
+            .lates
+            .iter()
+            .chain(&run.skips)
+            .filter(|&&b| b >= from && !neutral.contains(&b))
+            .count();
+        eprintln!(
+            "{what}: run {attempt}: {} chunks missed, {late} late or skipped ({} skipped), of \
+             {judged} judged blocks, {} silent",
+            run.misses.len(),
+            run.skips.len(),
+            run.silent.len()
+        );
+        if let Err(why) = judge_silence(&run, from, &neutral) {
+            panic!("{what}: {why}");
+        }
+        if late * 4 <= judged {
+            return run;
+        }
+        seen.push(format!("{late} of {judged}"));
+    }
+    panic!("{what}: machine too loaded to judge: late or skipped chunks per run: {seen:?}");
 }
 
 fn assert_live(rate: f64, quantum: usize) {
-    let run = run_live(rate, quantum, 200, None);
-    eprintln!(
-        "{quantum}-frame callbacks: declared {:?}, {} of {} blocks silent, {} wrong",
-        run.declared,
-        run.silent.len(),
-        run.blocks,
-        run.wrong.len()
-    );
-    let period = Duration::from_secs_f64(quantum as f64 / rate);
-    if let Err(why) = judge_stall(&run.silent, max_stall_blocks(period), 0..0) {
-        panic!(
-            "{quantum}-frame callbacks: {why} of {} blocks: more than one \
-             scheduler stall, or the server was not given the device period to answer",
-            run.blocks
-        );
-    }
-    assert!(
-        run.wrong.is_empty(),
-        "{quantum}-frame callbacks: blocks {:?} are neither silent nor the input \
-         delayed by {:?}",
-        run.wrong,
-        run.declared
-    );
+    let what = format!("{quantum}-frame callbacks");
+    let run = judgeable_run(&what, || run_live(rate, quantum, 200, None), 0, 0..0);
     assert_eq!(
         run.declared,
         Samples(PROBE_LATENCY + quantum),
@@ -378,10 +470,10 @@ fn a_device_hears_its_plugin_at_every_callback_size() {
 /// [`BURST`] callbacks plus `RING_SLOTS` more while the pipeline refills.
 /// Asserted: no block is ever neither silent nor the delayed input (a dropped
 /// block must not surface stale or torn data), and outside that window the
-/// stream is as sound as a paced run (at most one bounded stall), counted from
-/// `SETTLE` blocks after the run's warm-up: a loaded machine can still be
-/// starting the server's pipeline then, which says nothing about the burst.
-/// How many blocks the burst itself drops depends on how fast the server
+/// stream is as sound as a paced run (a silent block is a late answer),
+/// counted from `SETTLE` blocks after the run's warm-up: a loaded machine can
+/// still be starting the server's pipeline then, which says nothing about the
+/// burst. How many blocks the burst itself drops depends on how fast the server
 /// answers, so that number is not asserted.
 ///
 /// The mechanism of the drop is pinned by `dispatch`'s unit tests; this pins the
@@ -396,25 +488,12 @@ fn a_burst_of_callbacks_loses_blocks_but_never_corrupts_them() {
     let _lock = machine_lock();
     let _env = ProbeEnv::new().render_mode(render::LATENCY);
 
-    let run = run_live(48_000.0, QUANTUM, BLOCKS, Some(BURST_AT));
-
-    assert!(
-        run.wrong.is_empty(),
-        "blocks {:?} are neither silent nor the input delayed by {:?}: a block \
-         the ring dropped surfaced as data",
-        run.wrong,
-        run.declared
+    let window = BURST_AT..BURST_AT + BURST + RING_SLOTS;
+    let run = judgeable_run(
+        "a burst of callbacks",
+        || run_live(48_000.0, QUANTUM, BLOCKS, Some(BURST_AT)),
+        SETTLE,
+        window,
     );
     eprintln!("burst at {BURST_AT}: silent blocks {:?}", run.silent);
-    let window = BURST_AT..BURST_AT + BURST + RING_SLOTS;
-    let silent: Vec<usize> = run
-        .silent
-        .iter()
-        .copied()
-        .filter(|&b| b >= SETTLE)
-        .collect();
-    let period = Duration::from_secs_f64(QUANTUM as f64 / 48_000.0);
-    if let Err(why) = judge_stall(&silent, max_stall_blocks(period), window.clone()) {
-        panic!("outside the burst window {window:?} from {SETTLE}: {why}");
-    }
 }

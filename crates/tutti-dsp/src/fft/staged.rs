@@ -58,7 +58,7 @@ impl Split {
                 (0..l)
                     .map(|k| {
                         let angle = -2.0 * PI / (2 * l) as f64 * k as f64;
-                        let w = Complex32::new(angle.cos() as f32, angle.sin() as f32);
+                        let w = Complex32::new(libm::cos(angle) as f32, libm::sin(angle) as f32);
                         match direction {
                             FftDirection::Forward => w,
                             FftDirection::Inverse => w.conj(),
