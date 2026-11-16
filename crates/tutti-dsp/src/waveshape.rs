@@ -2,10 +2,9 @@
 //! `HardClip`, `Crush` and `SoftCrush`, each one line of arithmetic, and the
 //! [`WaveshaperBank`] that runs one over a block.
 //!
-//! A bank's drive is a [`Glide`] over [`GAIN_GLIDE`], or a lane read per frame
-//! where a port drives it; a frame whose lane value is not finite reads the
-//! drive in force, the glide's value at that frame. Frame `i` reads the glide at step `taken + 1 + i`, then the
-//! block's steps are taken.
+//! A bank's drive is a [`Glide`] over [`GAIN_GLIDE`], or a lane read per frame where a port drives
+//! it; a frame whose lane value is not finite reads the drive in force, the glide's value at that
+//! frame. Frame `i` reads the glide at step `taken + 1 + i`, then the block's steps are taken.
 
 use tutti_buffers::{Float, Mono, Planes, PlanesMut, Sample};
 use tutti_types::{Drive, SampleRate};
@@ -206,9 +205,9 @@ impl WaveshaperBank {
     /// Runs `input` into `output`, each channel through the curve at the drive.
     ///
     /// `lane` is the drive per frame where a port drives it: a frame past its end, or one
-    /// that is not finite, reads the drive in force: the glide's value at that frame. Channel `c` of `input` feeds channel `c`
-    /// of `output`; a channel past the narrower of the two views is not touched, and the
-    /// frames rendered are the fewer of the two views'. No allocation.
+    /// that is not finite, reads the drive in force: the glide's value at that frame. Channel `c`
+    /// of `input` feeds channel `c` of `output`; a channel past the narrower of the two views is
+    /// not touched, and the frames rendered are the fewer of the two views'. No allocation.
     pub fn process<S: Float>(
         &mut self,
         lane: Option<Mono<'_, S>>,

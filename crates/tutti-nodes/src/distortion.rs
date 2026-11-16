@@ -22,11 +22,11 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// `set_param` (`UnitParam::Drive`); a value that is not finite reads as the last one that
 /// was.
 ///
-/// **It is read per frame** when the graph drives it: a lane on its port is the bank's own,
-/// and a frame of it that is not finite reads the drive in force: the cell's, gliding to its value. A cell that moves is sampled
-/// at the stream grid (16 frames from the last reset, [`Kernel::GRID`]) and glides over
-/// [`GAIN_GLIDE`](tutti_dsp::GAIN_GLIDE), 5 ms, so a write is no step at a block's edge and
-/// renders the same whatever the blocks.
+/// **It is read per frame** when the graph drives it: a lane on its port is the bank's own, and a
+/// frame of it that is not finite reads the drive in force: the cell's, gliding to its value. A
+/// cell that moves is sampled at the stream grid (16 frames from the last reset, [`Kernel::GRID`])
+/// and glides over [`GAIN_GLIDE`](tutti_dsp::GAIN_GLIDE), 5 ms, so a write is no step at a block's
+/// edge and renders the same whatever the blocks.
 ///
 /// The node declares no tail once prepared (the shape of a kernel node is unknown until it has
 /// a rate): the curves are memoryless, so a silent input is a silent output.
