@@ -22,6 +22,7 @@ use tutti_nodes::{
     LimiterNode, MaxDelay, ModDelayNode, PhaserControls, PhaserNode, ShapeKind, Stages,
     SvfControls, SvfFilterNode, SvfType,
 };
+use tutti_nodes::{DcBlockerConfig, DcBlockerNode};
 use tutti_types::{
     Amplitude, BusTopology, ChannelLayout, CompressionRatio, Db, Depth, Drive, Feedback, Hz, Q,
     Resonance, Seconds, UnitParam,
@@ -167,6 +168,17 @@ fn distortion() {
     })
     .control("drive", |d| {
         assert!(d.param_set().set(UnitParam::Drive, 8.0))
+    })
+    .check();
+}
+
+#[test]
+fn dc_blocker() {
+    IsolateRow::new("DcBlockerNode (stereo)", || {
+        DcBlockerNode::from(DcBlockerConfig::new(ChannelLayout::STEREO))
+    })
+    .control("corner", |d| {
+        assert!(d.param_set().set(UnitParam::Cutoff, 80.0))
     })
     .check();
 }

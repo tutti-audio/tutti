@@ -30,6 +30,8 @@
 //!   `GAIN_GLIDE`).
 //! - **Convolution** — `Convolver`, a uniform or non-uniform partitioned FFT
 //!   convolution over an IR's shared, read-only `IrSpectra`.
+//! - **DC blocker** (`dc_block.rs`): [`DcBlocker`], a first-order high-pass with its pole from
+//!   [`dc_pole`], reached along a line over [`COEFF_INTERVAL`] frames.
 //! - **Delay** — `DelayLine`, a fractional-read ring with an `InterpolationMode`;
 //!   `DelayBank`, the feedback delay over buffers views (a `DelayLayout` of a checked
 //!   `MaxDelay`, `Routing` and `ChannelTimes`; its time and feedback `Glide`s and per-frame
@@ -149,6 +151,7 @@
 
 mod control;
 mod convolver;
+mod dc_block;
 mod delay;
 mod dither;
 mod dynamics;
@@ -176,6 +179,7 @@ mod xorshift;
 
 pub use control::{COEFF_INTERVAL, LANES};
 pub use convolver::{Convolver, IrSpectra, MatrixConvolver, MatrixConvolverError};
+pub use dc_block::{DC_CORNER, DcBlocker, DcBlockerControls, MIN_DC_CORNER, dc_pole};
 pub use delay::{
     ChannelTimes, ChannelTimesError, DELAY_SLEW, DelayBank, DelayControls, DelayGlides, DelayLanes,
     DelayLayout, DelayLine, InterpolationMode, MAX_DELAY_CHANNELS, MaxDelay, MaxDelayError,
