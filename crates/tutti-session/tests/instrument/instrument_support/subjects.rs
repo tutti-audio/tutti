@@ -7,7 +7,7 @@ use tutti_sf2::SoundFont;
 use tutti_soundfont::{Settings, SoundFontUnit};
 use tutti_types::{Adsr, Amplitude, Seconds};
 
-use super::cases::{Gap, Subject};
+use super::cases::{Chunks, Gap, Subject};
 use super::rig::{RATE, Rig, offline_session};
 
 /// `PolySynth`: a saw, a 1 ms attack and a 50 ms release.
@@ -156,6 +156,19 @@ impl Subject for Plugin {
         Some(tutti_shared_plugin::transcript::Transcript::parse(
             &tutti_shared_plugin::transcript::find_blob(&state),
         ))
+    }
+
+    fn chunks(rig: &Rig) -> Chunks {
+        let d = rig
+            .session
+            .plugin_view(rig.node)
+            .expect("the plugin is hosted")
+            .diagnostics();
+        Chunks {
+            missed: d.missed_chunks(),
+            late: d.late_chunks(),
+            skipped: d.skipped_chunks(),
+        }
     }
 
     fn rig() -> Rig {

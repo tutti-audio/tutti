@@ -1519,8 +1519,13 @@ impl<C: Clock> Session<C> {
         if count == self.faults_seen {
             return false;
         }
+        // A take that lags (a record mid-write) retries on the next poll; an
+        // empty one (a counted fault whose text was lost) is seen.
+        let Ok(taken) = faults.take_last() else {
+            return false;
+        };
         self.faults_seen = count;
-        let Some(fault) = faults.take_last() else {
+        let Some(fault) = taken else {
             return false;
         };
         let lost = fault.kind == tutti_engine::StreamFaultKind::Disconnected;

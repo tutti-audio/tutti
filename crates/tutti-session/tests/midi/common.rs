@@ -44,7 +44,11 @@ impl IntoNode for Tap {
     }
 }
 
-impl SessionNode for Tap {}
+impl SessionNode for Tap {
+    fn reclaimer(_: &()) -> tutti_session::Reclaims {
+        tutti_session::Reclaims::Nothing
+    }
+}
 
 /// An offline session at 48 kHz, stereo: the builder's MIDI nodes in.
 pub fn offline() -> Session {

@@ -907,8 +907,8 @@ impl IntoNode for Published {
 }
 
 impl SessionNode for Published {
-    fn reclaimer(controls: &PublishedControls) -> Option<tutti_session::Reclaimer> {
-        Some(tutti_session::Reclaimer::of(controls))
+    fn reclaimer(controls: &PublishedControls) -> tutti_session::Reclaims {
+        tutti_session::Reclaims::of(controls)
     }
 }
 
@@ -999,6 +999,65 @@ fn the_update_sweeps_each_nodes_reclaimer_while_it_is_in_the_graph() {
     replace_under_a_held_borrow(&third);
     let _ = s.update();
     assert_eq!(third.cell.retired_len(), 1, "a removed node is not swept");
+}
+
+/// A pool's voice added and then removed, rendered through, so the pool's
+/// audio side parks the removed slot in its retire ring.
+#[cfg(feature = "sampler")]
+fn park_a_retired_slot(s: &mut DetachedSession, handle: &tutti_sampler::VoicePoolHandle) {
+    use tutti_sampler::{MemorySource, Playback, SlotId, VoiceWindow};
+    let source = MemorySource::placed(
+        Arc::new(tutti_codec::Wave::new(1, SampleRate::SR_48K)),
+        VoiceWindow::from(tutti_types::Beat(0.0)),
+    )
+    .expect("a placeable wave");
+    handle
+        .add(SlotId(1), source, Playback::default())
+        .expect("queued");
+    let mut out = [0.0f32];
+    s.render_frame(&mut out);
+    handle.remove(SlotId(1)).expect("queued");
+    s.render_frame(&mut out);
+}
+
+/// **The update frees the slots a pool the graph holds retired**: `Graph::add`
+/// of a `VoicePool` keeps `VoicePoolHandle`'s reclaimer, and
+/// `Phase::Reclaim` (the update) drains the pool's retire ring on the control
+/// side. A pool inserted without one (`Unforkable`) keeps its parked slot, so
+/// the sweep, not the render, is what freed the first.
+#[cfg(feature = "sampler")]
+#[test]
+fn the_update_frees_the_slots_a_graph_pool_retired() {
+    let mut s = detached(1);
+    let (pool, handle) = s.graph().add(tutti_sampler::VoicePool::new());
+    let (bare, bare_handle) = tutti_sampler::VoicePool::new().with_handle();
+    let (bare, ()) = s.graph().add(tutti_graph::Unforkable(bare));
+    s.graph()
+        .set_sources_hard(
+            Root::output(0),
+            [OutPort::new(pool, 0), OutPort::new(bare, 0)],
+        )
+        .unwrap();
+    let _ = s.update();
+    park_a_retired_slot(&mut s, &handle);
+    park_a_retired_slot(&mut s, &bare_handle);
+
+    let _ = s.update();
+    assert_eq!(
+        tutti_rt::Reclaim::reclaim(&handle),
+        0,
+        "nothing left for a second sweep"
+    );
+    assert_eq!(
+        handle.collect_retired(),
+        0,
+        "the update freed the graph pool's retired slot"
+    );
+    assert_eq!(
+        bare_handle.collect_retired(),
+        1,
+        "a pool with no reclaimer keeps its parked slot"
+    );
 }
 
 /// The widest global input a layout holds builds: the count is a
