@@ -62,7 +62,7 @@ use tutti_types::ranged;
 use crate::chroma::{CLASSES, Chroma};
 use crate::framing::Framing;
 use crate::{Error, Result};
-use tutti_dsp::{FrameCount, Grid};
+use tutti_dsp::{FrameCount, FrameIndex, Grid};
 
 /// The states: 12 major roots, 12 minor roots, and "no chord".
 const STATES: usize = 2 * CLASSES + 1;
@@ -251,7 +251,7 @@ fn viterbi(chroma: &Grid<f32>, cfg: &ChordConfig) -> Vec<u8> {
     let emit =
         |frame: &[f32]| similarities(frame).map(|s| s as Score * Score::from(cfg.sharpness.get()));
 
-    let mut score = emit(chroma.row(0.into()));
+    let mut score = emit(chroma.row(FrameIndex::new(0)));
     let mut back = vec![0u8; frames * STATES];
     for t in 1..frames {
         // The two best states, so a state can take the best of the others.
@@ -263,7 +263,7 @@ fn viterbi(chroma: &Grid<f32>, cfg: &ChordConfig) -> Vec<u8> {
                 second = s;
             }
         }
-        let emission = emit(chroma.row(t.into()));
+        let emission = emit(chroma.row(FrameIndex::new(t)));
         let mut next = [0.0 as Score; STATES];
         for s in 0..STATES {
             let other = if s == top { second } else { top };

@@ -34,6 +34,10 @@ use std::sync::Arc;
 /// rustfft's semver: a rustfft bump that changes num-complex changes this type.
 pub use rustfft::num_complex::Complex32;
 
+/// num-complex 0.4's `Complex<f64>`, re-exported from rustfft beside
+/// [`Complex32`]: the type the control-side frequency responses are computed in.
+pub use rustfft::num_complex::Complex64;
+
 /// The pass twiddles of an even `size`: `size / 4` rounded up, minus the DC
 /// term. Forward carries `w^k / 2`, inverse the conjugate of `w^k`, with
 /// `w = exp(-2 pi i / size)`.
