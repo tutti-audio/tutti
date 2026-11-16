@@ -226,10 +226,19 @@ jobs:
       - run: cargo clippy --locked -p tutti-plugin-server --no-default-features --features au --lib -- -D warnings
       # Rustdoc over what only macOS compiles, in the merge queue, so a broken link fails before it reaches main;
       # `rustdoc` documents the rest of the workspace on Linux.
-      - run: cargo doc --locked --no-deps -p tutti-au-ffi -p tutti-au-host -p tutti-coremidi-ffi -p tutti-midi-hardware
+      # `tutti-vst3-ffi` needs the VST3 SDK, which this job does not check out, so its macOS view code is the one
+      # piece left out.
+      - run: >-
+          cargo doc --locked --no-deps -p tutti-au-ffi -p tutti-au-host -p tutti-coremidi-ffi -p tutti-midi-hardware
+          -p tutti-plugin-types -p tutti-plugin-ipc-ffi -p tutti-clap-ffi -p tutti-rt
         env:
           RUSTDOCFLAGS: -D warnings --document-private-items
       - run: cargo doc --locked --no-deps -p tutti-plugin --features au --lib
+        env:
+          RUSTDOCFLAGS: -D warnings --document-private-items
+      - run: >-
+          cargo doc --locked --no-deps -p tutti-plugin-server -p tutti-plugin-probe --no-default-features
+          --features tutti-plugin-server/clap,tutti-plugin-server/au,tutti-plugin-probe/clap,tutti-plugin-probe/au --lib
         env:
           RUSTDOCFLAGS: -D warnings --document-private-items
 
