@@ -155,10 +155,10 @@ impl crate::MidiEndpoints for Capture {
         *self.0.lock().unwrap() = Some(sink);
         Ok(Box::new(crate::endpoints::NoWatch))
     }
-    fn inputs(&self) -> Vec<crate::EndpointInfo> {
+    fn inputs(&self) -> Vec<crate::OsEndpoint> {
         Vec::new()
     }
-    fn outputs(&self) -> Vec<crate::EndpointInfo> {
+    fn outputs(&self) -> Vec<crate::OsEndpoint> {
         Vec::new()
     }
     fn open_input(

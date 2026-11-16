@@ -128,11 +128,11 @@ pub use manufacturer::{ManufacturerId, NotManufacturerId};
 pub use message::{
     Accidental, Address, Alteration, AlterationKind, Attribute, Bank, BarAccents, BlockFilter,
     BlockSelect, ChordBass, ChordName, ChordPitch, Data128, DeviceIdentity, Direction,
-    DiscoveryFilter, EndpointInfo, Flex, FlexAddress, FlexTextKind, Form, FunctionBlockInfo,
-    FunctionBlocks, KeySignature, Letter, Message, Metronome, Midi1Port, MixedDataHeader,
-    PerNoteManagement, Protocol, RegisteredPerNoteController, Stream, StreamConfig, Sysex7Packet,
-    Sysex8Packet, SysexStatus, System, TimeSignature, UiHint, UmpVersion, Unknown, Utility, Voice1,
-    Voice2,
+    DiscoveryFilter, EndpointInfoNotification, Flex, FlexAddress, FlexTextKind, FlexTimeSignature,
+    Form, FunctionBlockInfo, FunctionBlocks, KeySignature, Letter, Message, Metronome, Midi1Port,
+    MixedDataHeader, PerNoteManagement, Protocol, RegisteredPerNoteController, Stream,
+    StreamConfig, Sysex7Packet, Sysex8Packet, SysexStatus, System, UiHint, UmpVersion, Unknown,
+    Utility, Voice1, Voice2,
 };
 pub use messages::{Join, Span, Spans, spans, spans_joined};
 pub use midi_channel::MidiChannel;

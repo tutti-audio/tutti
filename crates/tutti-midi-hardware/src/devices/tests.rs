@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use super::*;
 use crate::HardwareMidiInputs;
-use crate::capability::EndpointInfo;
+use crate::capability::OsEndpoint;
 use crate::devices::reporter::{Reporter, os_devices};
 use crate::test_support::{FakeBackend, FakeCounters, endpoint};
 use tutti_midi_device::Identity;
@@ -236,10 +236,10 @@ impl MidiEndpoints for Refuses {
         sink.seed(os_devices(&self.inputs(), &[]))?;
         Ok(Box::new(crate::endpoints::NoWatch))
     }
-    fn inputs(&self) -> Vec<EndpointInfo> {
+    fn inputs(&self) -> Vec<OsEndpoint> {
         vec![endpoint(1, "Keys")]
     }
-    fn outputs(&self) -> Vec<EndpointInfo> {
+    fn outputs(&self) -> Vec<OsEndpoint> {
         Vec::new()
     }
     fn open_input(
@@ -621,10 +621,10 @@ impl MidiEndpoints for Tagging {
         sink.seed(os_devices(&[], &self.outputs()))?;
         Ok(Box::new(crate::endpoints::NoWatch))
     }
-    fn inputs(&self) -> Vec<EndpointInfo> {
+    fn inputs(&self) -> Vec<OsEndpoint> {
         Vec::new()
     }
-    fn outputs(&self) -> Vec<EndpointInfo> {
+    fn outputs(&self) -> Vec<OsEndpoint> {
         vec![endpoint(1, "Synth")]
     }
     fn open_input(

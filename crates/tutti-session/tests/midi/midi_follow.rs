@@ -7,9 +7,9 @@ use crate::common::{blocks, play, tap};
 use std::sync::Arc;
 use std::time::Instant;
 
-use tutti_midi_hardware::EndpointId;
+use tutti_midi_device::EndpointId;
 use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint};
-use tutti_session::{FollowTempo, MidiError, MidiEvent, Session, SessionEvent, TempoError};
+use tutti_session::{FollowTempo, MidiError, MidiReport, Session, SessionEvent, TempoError};
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_types::{Beat, Bpm, MeterChange, MeterMap, SampleRate, TimeSignature};
 use tutti_ump::{Flex, Message, MidiGroup, Ump};
@@ -22,7 +22,8 @@ const KEYS: u64 = 1;
 /// wired.
 fn rig_with(groups: Option<MidiGroup>) -> (Session, FakeCounters) {
     let (backend, fake) = FakeBackend::build_with(vec![endpoint(KEYS, "Keys")], vec![], usize::MAX);
-    let mut builder = Session::builder().midi_hardware_over(backend);
+    let mut builder = Session::builder()
+        .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareOptions::new());
     if let Some(last) = groups {
         builder = builder.midi_groups(last);
     }
@@ -69,7 +70,7 @@ fn flex_tempo(group: MidiGroup, bpm: f64) -> Ump {
 fn flex_meter(group: MidiGroup, numerator: u8, denominator: u8) -> Ump {
     Ump::from(Message::Flex(
         group,
-        Flex::SetTimeSignature(tutti_ump::TimeSignature {
+        Flex::SetTimeSignature(tutti_ump::FlexTimeSignature {
             numerator,
             denominator,
             thirty_seconds: 8,
@@ -84,7 +85,7 @@ fn send(fake: &FakeCounters, ump: Ump) {
 /// What the update that found a change saw: the playhead of the last block and
 /// the tempo map then in force.
 struct Found {
-    events: Vec<MidiEvent>,
+    events: Vec<MidiReport>,
     playhead: tutti_engine::Playhead,
     before: Arc<TempoMap>,
 }
@@ -97,7 +98,7 @@ fn until_followed(s: &mut Session) -> Found {
         blocks(s, 1);
         let playhead = s.playhead();
         let before = s.transport().settings().tempo_map();
-        let events: Vec<MidiEvent> = s
+        let events: Vec<MidiReport> = s
             .update()
             .into_iter()
             .filter_map(|e| match e {
@@ -108,7 +109,7 @@ fn until_followed(s: &mut Session) -> Found {
         if events.iter().any(|e| {
             matches!(
                 e,
-                MidiEvent::TempoFollowed { .. } | MidiEvent::MeterFollowed { .. }
+                MidiReport::TempoFollowed { .. } | MidiReport::MeterFollowed { .. }
             )
         }) {
             return Found {
@@ -121,11 +122,11 @@ fn until_followed(s: &mut Session) -> Found {
     panic!("no follow event in {LIMIT} updates");
 }
 
-fn followed_tempo(events: &[MidiEvent]) -> (Bpm, Beat) {
+fn followed_tempo(events: &[MidiReport]) -> (Bpm, Beat) {
     events
         .iter()
         .find_map(|e| match e {
-            MidiEvent::TempoFollowed { tempo, beat } => Some((*tempo, *beat)),
+            MidiReport::TempoFollowed { tempo, beat } => Some((*tempo, *beat)),
             _ => None,
         })
         .expect("a TempoFollowed")
@@ -200,7 +201,7 @@ fn a_set_tempo_is_a_step_at_the_next_block_start_and_unfollowing_restores() {
     assert!(
         events
             .iter()
-            .any(|e| matches!(e, SessionEvent::Midi(MidiEvent::TempoUnfollowed))),
+            .any(|e| matches!(e, SessionEvent::Midi(MidiReport::TempoUnfollowed))),
         "the update reports it"
     );
     let restored = s.transport().settings().tempo_map();
@@ -226,7 +227,7 @@ fn without_a_follow_a_flex_tempo_changes_nothing() {
         assert!(
             !events
                 .iter()
-                .any(|e| matches!(e, SessionEvent::Midi(MidiEvent::TempoFollowed { .. }))),
+                .any(|e| matches!(e, SessionEvent::Midi(MidiReport::TempoFollowed { .. }))),
             "{events:?}"
         );
     }
@@ -312,7 +313,7 @@ fn a_set_time_signature_lands_on_the_next_bar_line() {
         .events
         .iter()
         .find_map(|e| match e {
-            MidiEvent::MeterFollowed { signature, beat } => Some((*signature, *beat)),
+            MidiReport::MeterFollowed { signature, beat } => Some((*signature, *beat)),
             _ => None,
         })
         .expect("a MeterFollowed");
@@ -354,7 +355,7 @@ fn the_meter_is_followed_only_when_asked() {
         !found
             .events
             .iter()
-            .any(|e| matches!(e, MidiEvent::MeterFollowed { .. }))
+            .any(|e| matches!(e, MidiReport::MeterFollowed { .. }))
     );
     assert_eq!(*meter.current(), MeterMap::default());
 }
@@ -378,7 +379,7 @@ fn another_group_is_ignored_and_a_second_follow_replaces_the_first() {
         found
             .events
             .iter()
-            .filter(|e| matches!(e, MidiEvent::TempoFollowed { .. }))
+            .filter(|e| matches!(e, MidiReport::TempoFollowed { .. }))
             .count(),
         1,
         "Group 0's tempo is not followed"
@@ -420,7 +421,7 @@ fn a_repeated_tempo_adds_no_point() {
         assert!(
             !events
                 .iter()
-                .any(|e| matches!(e, SessionEvent::Midi(MidiEvent::TempoFollowed { .. }))),
+                .any(|e| matches!(e, SessionEvent::Midi(MidiReport::TempoFollowed { .. }))),
             "{events:?}"
         );
     }

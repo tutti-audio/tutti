@@ -13,7 +13,7 @@
 use tutti::types::MaxBlock;
 use tutti::{
     At, BarNumber, Beat, Bpm, Cents, ChannelLayout, Db, Engine, Frame, Hz, InterleavedMut, Meter,
-    MeterMap, MotionEvent, SampleRate, Samples, Seconds, TempoMap, Transport, TransportCommand,
+    MeterMap, MotionEvent, SampleRate, Samples, Seconds, Transport, TransportCommand,
 };
 
 /// Everything below is reached through `tutti::` and nothing else. If the
@@ -123,12 +123,11 @@ fn a_timed_transport_program_needs_only_the_root() {
 }
 
 /// A tempo map is built from `tutti::tempo` alone and published to the
-/// transport's settings (what `Session::set_tempo_map` forwards to), with
-/// `TempoMap` itself at the root: 120 BPM, then a time ramp to 180 over four
+/// transport's settings (what `Session::set_tempo_map` forwards to): 120 BPM, then a time ramp to 180 over four
 /// beats, lasts 1.6 s, so beat 4 is frame 76 800 at 48 kHz.
 #[test]
 fn a_tempo_map_is_built_and_published_through_the_facade() {
-    let map: TempoMap = tutti::tempo::TempoMap::builder(Bpm::of(120.0))
+    let map = tutti::tempo::TempoMap::builder(Bpm::of(120.0))
         .ramp_time_to(Beat(4.0), Bpm::of(180.0))
         .build()
         .expect("a map");

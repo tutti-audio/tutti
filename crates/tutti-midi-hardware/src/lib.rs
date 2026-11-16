@@ -16,10 +16,10 @@
 //! [`Devices`] lists the MIDI devices and keeps the list current while it lives:
 //! `open()` starts a watch, which stops when the last `Devices` and [`DeviceEvents`]
 //! over it are dropped. `subscribe()` gives a [`DeviceEvents`] of its own, so one
-//! reader never takes another's events. Each device has a [`DeviceId`], and
+//! reader never takes another's events. Each device has a [`DeviceId`](tutti_midi_device::DeviceId), and
 //! `open_input(&id, &ports)` returns an [`OpenInput`] that closes the connection
 //! and retires its ring when dropped.
-//! `resolve(&saved)` restores a remembered [`DeviceInfo`] (see `tutti-midi-device`'s
+//! `resolve(&saved)` restores a remembered [`DeviceInfo`](tutti_midi_device::DeviceInfo) (see `tutti-midi-device`'s
 //! `serde` feature): `Exact` is safe to bind, `SameName` is a lone device that
 //! matches only by name (ALSA), `Ambiguous` lists candidates. An id names a device within a run:
 //! its identity is what the OS lets survive a restart, and the ordinal after it only
@@ -28,7 +28,8 @@
 //!
 //! ```rust,no_run
 //! use std::time::Duration;
-//! use tutti_midi_hardware::{DeviceEvent, Devices};
+//! use tutti_midi_device::DeviceEvent;
+//! use tutti_midi_hardware::Devices;
 //!
 //! let devices = Devices::open()?;
 //! let events = devices.subscribe();
@@ -47,7 +48,7 @@
 //! ```
 //!
 //! - **Linux:** a thread subscribes to the sequencer's `System:Announce` port, so a
-//!   device that vanishes is noticed when the kernel says so. A [`DeviceId`] is the
+//!   device that vanishes is noticed when the kernel says so. A [`DeviceId`](tutti_midi_device::DeviceId) is the
 //!   client and port name plus an ordinal for identical devices; the client number
 //!   is a handle to the current connection and not part of it. A client number the
 //!   kernel hands to a new device straight after an old one exits is a new device,
@@ -56,17 +57,17 @@
 //!   held on it; `Changed` is for backends whose identity survives a rename.
 //! - **macOS:** one process-wide CoreMIDI client runs its run loop on one thread
 //!   for setup notifications, and each [`Devices`] registers with it. A
-//!   [`DeviceId`] is the endpoint's `MIDIUniqueID`. Untested by the author.
+//!   [`DeviceId`](tutti_midi_device::DeviceId) is the endpoint's `MIDIUniqueID`. Untested by the author.
 //! - If the watch ends on its own, [`DeviceEvents::recv_timeout`] says why, once the events the watch reported are taken, and the list
 //!   stays as it was.
 //! - **Windows:** Windows Multimedia has no notification, so the watch lists the
 //!   ports once a second and reports the difference; a device shows within about
-//!   that long. A [`DeviceId`] is the device interface path the driver reports,
+//!   that long. A [`DeviceId`](tutti_midi_device::DeviceId) is the device interface path the driver reports,
 //!   or the product name and ids when it reports none, with the direction.
 //! - **Linux without alsa-lib 1.2.10:** the list is empty and stays so, as
 //!   enumeration is; opening reports [`Error::Unsupported`].
 //!
-//! A [`DeviceId`] built on the UMP Product Instance Id is in the types, but no
+//! A [`DeviceId`](tutti_midi_device::DeviceId) built on the UMP Product Instance Id is in the types, but no
 //! backend reads one yet: alsa-lib exposes none, and CoreMIDI's unique id stands in.
 //!
 //! ## Virtual endpoints
@@ -87,18 +88,19 @@
 //!
 //! [`MidiSession`] is the whole OS edge. Inbound events never pass *through* it:
 //! each opened input is a port of the session's [`HardwareMidiInputs`]
-//! (`session.ports()`), an inlet made by the [`InputInlets`] the session was
+//! (`session.ports()`), an inlet made by the [`InputInlets`](tutti_midi_runtime::InputInlets) the session was
 //! opened over, and the device's own thread stamps each arrival with the frame
 //! the engine's block clock puts it on and pushes it into that device's event
 //! inlet. The graph reads the inlets on their frames (the node
 //! `connect_input` returns is the inlet's graph side, to be wired to a
-//! [`MidiIngestNode`]), so the audio thread converts no time. The session only
+//! [`MidiIngestNode`](tutti_midi_runtime::MidiIngestNode)), so the audio thread converts no time. The session only
 //! owns the connection. Disconnecting drops the connection's
 //! [`InputProducerHandle`] and retires its port.
 //!
 //! ```rust,no_run
 //! use std::sync::Arc;
-//! use tutti_midi_hardware::{InputInlets, InputTiming, MidiSession};
+//! use tutti_midi_runtime::InputInlets;
+//! use tutti_midi_hardware::{MidiHardwareOptions, MidiSession};
 //! use tutti_graph::Offset;
 //! use tutti_fixtures::midi;
 //! use tutti_ump::{MidiChannel, NoteVelocity};
@@ -106,7 +108,7 @@
 //! // The inlets inbound events land in (1024 events each, placed 10 ms after
 //! // they arrive), then a session over this platform's backend.
 //! let inlets = InputInlets::new(tutti_graph::EventCapacity::of(1024), std::time::Duration::from_millis(10));
-//! let mut session = MidiSession::open(Arc::clone(&inlets))?;
+//! let mut session = MidiSession::open(Arc::clone(&inlets), MidiHardwareOptions::new())?;
 //!
 //! // The devices present now; capability (protocol, function blocks) is read from
 //! // the OS.
@@ -117,7 +119,7 @@
 //! // Connect by id when the choice matters (see "Matching by name" below).
 //! if let Some(first) = session.inputs().first() {
 //!     // The inlet node of a newly opened input is the graph's to add and wire.
-//!     let _inlet = session.connect_input(&first.id, InputTiming::Arrival)?;
+//!     let _inlet = session.connect_input(&first.id)?;
 //! }
 //! // Or by name: one `DeviceQuery` form for connect and disconnect.
 //! session.disconnect_input("keystep");
@@ -139,11 +141,11 @@
 //!   `&DeviceId` or a `&str`); `connect_output` returns the [`OpenOutput`], which
 //!   the caller owns and sends through.
 //! - [`HardwareMidiInputs`]: the open input ports, each named by its
-//!   [`InputId`] and the [`InputProducerHandle`] its driver thread pushes through,
+//!   [`InputId`](tutti_midi_runtime::InputId) and the [`InputProducerHandle`] its driver thread pushes through,
 //!   whose `push` answers [`Pushed`].
-//! - [`DeviceInfo`], [`DeviceId`], [`DeviceEvent`]: what the list holds and reports;
+//! - [`DeviceInfo`](tutti_midi_device::DeviceInfo), [`DeviceId`](tutti_midi_device::DeviceId), [`DeviceEvent`](tutti_midi_device::DeviceEvent): what the list holds and reports;
 //!   they live in `tutti-midi-device`, with the pure `DeviceTable` behind them.
-//! - [`EndpointInfo`], [`EndpointId`], [`UmpCapability`]: what a backend enumerates.
+//! - [`OsEndpoint`], [`EndpointId`](tutti_midi_device::EndpointId), [`UmpCapability`]: what a backend enumerates.
 //! - [`DeviceStream`], [`Basis`]: what a device's UMP Stream conversation settled
 //!   (`MidiSession::poll` steps it, `MidiSession::stream` reads it).
 //! - [`MidiEndpoints`]: the backend trait; [`MidiSession::open`] picks this
@@ -156,7 +158,7 @@
 //! substring, first hit wins**, in id order. So `"iac"` matches `"IAC Driver
 //! Bus 1"`, and a name matching two devices takes the one with the lowest id; for
 //! a disconnect the match is over the open inputs, and the lowest id among them is
-//! the one closed. Connect by [`DeviceId`] when the choice matters, and
+//! the one closed. Connect by [`DeviceId`](tutti_midi_device::DeviceId) when the choice matters, and
 //! [`MidiSession::disconnect_all_inputs`] closes every one. A name that matches
 //! nothing is [`Error::NoDeviceNamed`], listing the names it searched.
 //!
@@ -181,6 +183,8 @@
 //!
 //! ## Features
 //!
+//! - `serde`: `Serialize` and `Deserialize` for [`MidiHardwareOptions`] and
+//!   [`InputTiming`], so an app stores the options it opens with. Off by default.
 //! - `testing`: exports `test_support::FakeBackend`, a device list with no OS
 //!   behind it, for [`MidiSession::open_over`] in headless tests; its `plug` and
 //!   `unplug` drive hot-plug. Off by default.
@@ -193,9 +197,10 @@
 //!
 //! ## Where it sits
 //!
-//! Builds on `tutti-ump` (the wire vocabulary and its decoded `Message`) and `tutti-midi-runtime`
-//! (the graph's MIDI nodes), and re-exports the parts of both a
-//! hardware consumer needs. It does **not** include the file codecs: SMF and the
+//! Builds on `tutti-ump` (the wire vocabulary and its decoded `Message`),
+//! `tutti-midi-device` (devices, endpoints and their identity) and
+//! `tutti-midi-runtime` (the graph's MIDI nodes); their items are named from
+//! those crates. It does **not** include the file codecs: SMF and the
 //! path-level Clip File codec are in `tutti-midi-file`, so a consumer that only
 //! reads `.mid` files does not link CoreMIDI or ALSA. Re-exported by `tutti`.
 //!
@@ -259,7 +264,7 @@ mod wire;
 #[cfg(any(test, feature = "testing"))]
 pub mod test_support;
 
-pub use capability::{EndpointInfo, UmpCapability};
+pub use capability::{OsEndpoint, UmpCapability};
 pub use ci::{CiChange, CiPeerInfo, PeerId};
 pub use devices::{
     ChangeSink, DeviceEvents, Devices, OpenInput, OpenOutput, Pending, RecvTimeoutError, SeedError,
@@ -274,23 +279,9 @@ pub use profiles::{
     ProfileSwitch, ProfilesChange, Whole, WholeProfile,
 };
 pub use properties::{PropertyAsk, PropertyCall, PropertyChange, PropertyError, PropertyPeer};
-pub use session::{Connected, DeviceQuery, MidiSession, Polled};
+pub use session::{Connected, DeviceQuery, MidiHardwareOptions, MidiSession, Polled};
 pub use stream::{Basis, DeviceStream, InputTiming};
-pub use tutti_midi_device::{
-    BindPolicy, Capabilities, DeviceEvent, DeviceId, DeviceInfo, Endpoint, EndpointId,
-    FunctionBlock, Identity, Learned, Match, OsChange, OsDevice, PortDirection, Resolved,
-    SavedDevice, Supports,
-};
 pub use virtual_endpoint::{VirtualDestination, VirtualProtocol, VirtualSource, VirtualSpec};
-
-// --- Runtime delivery (the graph's MIDI border) ---
-//
-// The nodes a port feeds (`MidiIngestNode`, over the inlet each port is made with) and
-// clip playback live in `tutti-midi-runtime`; surfaced here because delivery
-// is what a port feeds, so a hardware consumer needs both. That is the test a
-// file codec fails: a `.mid` reader needs no port, and no port needs it.
-
-pub use tutti_midi_runtime::{InputId, InputInlets, MidiIngestNode, MidiOut, TimedMidiEvent};
 
 // --- Standard MIDI File codec: NOT here ---
 //

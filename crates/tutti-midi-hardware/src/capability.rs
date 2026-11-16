@@ -1,6 +1,6 @@
 //! What a MIDI endpoint is and what it can carry.
 //!
-//! [`EndpointInfo`] is what enumeration returns: a name, an opaque
+//! [`OsEndpoint`] is what enumeration returns: a name, an opaque
 //! [`EndpointId`] to open it by, and a [`UmpCapability`] describing what the OS
 //! says it can do.
 //!
@@ -135,7 +135,7 @@ fn usable(protocol: Protocol) -> Protocol {
 
 /// One endpoint as enumeration found it.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct EndpointInfo {
+pub struct OsEndpoint {
     /// Opaque handle to open it by.
     pub id: EndpointId,
     /// What the OS knows it by, for a [`DeviceId`](tutti_midi_device::DeviceId).

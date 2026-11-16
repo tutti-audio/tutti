@@ -44,6 +44,7 @@ tutti-midi-protocol = { version = "0.0.1", path = "../tutti-midi-protocol", opti
 tutti-midi-runtime = { version = "0.0.1", path = "../tutti-midi-runtime", default-features = false, optional = true }
 tutti-midi-file = { version = "0.0.1", path = "../tutti-midi-file", optional = true }
 tutti-midi-hardware = { version = "0.0.1", path = "../tutti-midi-hardware", optional = true }
+tutti-midi-device = { version = "0.0.1", path = "../tutti-midi-device", optional = true }
 tutti-plugin = { version = "0.0.1", path = "../tutti-plugin", optional = true }
 tutti-plugin-host = { version = "0.0.1", path = "../tutti-plugin-host", optional = true }
 # The API layer: a graph, its engine and its device behind one
@@ -133,7 +134,7 @@ midi = [
     "dep:tutti-midi-runtime",
     "tutti-session?/midi",
 ]
-midi-hardware = ["midi", "dep:tutti-midi-hardware", "tutti-session?/midi-hardware"]
+midi-hardware = ["midi", "dep:tutti-midi-hardware", "dep:tutti-midi-device", "tutti-session?/midi-hardware"]
 
 # --- subsystems -------------------------------------------------------------
 #

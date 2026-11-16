@@ -38,7 +38,7 @@ pub(super) mod virtual_endpoint;
 mod watch;
 
 use crate::InputProducerHandle;
-use crate::capability::EndpointInfo;
+use crate::capability::OsEndpoint;
 use crate::devices::ChangeSink;
 use crate::devices::reporter::os_devices;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
@@ -76,7 +76,7 @@ impl AlsaEndpoints {
     /// An unopenable sequencer means no endpoints, not a panic — the same shape
     /// CoreMIDI's failed-client path takes. Callers see an empty list and the
     /// reason lands in `debug!`.
-    fn list(&self, direction: Direction) -> Vec<EndpointInfo> {
+    fn list(&self, direction: Direction) -> Vec<OsEndpoint> {
         let mut held = self
             .enumerator
             .lock()
@@ -104,11 +104,11 @@ impl MidiEndpoints for AlsaEndpoints {
         watch::start(sink, devices)
     }
 
-    fn inputs(&self) -> Vec<EndpointInfo> {
+    fn inputs(&self) -> Vec<OsEndpoint> {
         self.list(Direction::Input)
     }
 
-    fn outputs(&self) -> Vec<EndpointInfo> {
+    fn outputs(&self) -> Vec<OsEndpoint> {
         self.list(Direction::Output)
     }
 

@@ -8,13 +8,13 @@ use core::num::NonZeroU8;
 use tutti_ump::{
     Accidental, Address, Alteration, AlterationKind, Attribute, Bank, BarAccents, BlockFilter,
     BlockSelect, CCNumber, ChordBass, ChordName, ChordPitch, ChordType, Data128, DeltaTicks,
-    DeviceIdentity, Direction, DiscoveryFilter, EndpointInfo, FirstGroup, Flex, FlexAddress,
-    FlexTextKind, Form, FunctionBlockId, FunctionBlockInfo, GroupSpan, KeySignature, Letter,
-    MdsChunk, MdsChunkSize, MdsChunks, MdsIdentity, Message, Metronome, Midi1Port, MidiChannel,
-    MidiGroup, MixedDataHeader, NoteNumber, NoteVelocity, PerNoteManagement, Protocol,
-    RegisteredPerNoteController, SharpsFlats, Stream, StreamConfig, Sysex7Packet, Sysex8Packet,
-    SysexStatus, System, TimeSignature, U4, U7, U14, UiHint, Ump, UmpVersion, Utility, Voice1,
-    Voice2,
+    DeviceIdentity, Direction, DiscoveryFilter, EndpointInfoNotification, FirstGroup, Flex,
+    FlexAddress, FlexTextKind, FlexTimeSignature, Form, FunctionBlockId, FunctionBlockInfo,
+    GroupSpan, KeySignature, Letter, MdsChunk, MdsChunkSize, MdsChunks, MdsIdentity, Message,
+    Metronome, Midi1Port, MidiChannel, MidiGroup, MixedDataHeader, NoteNumber, NoteVelocity,
+    PerNoteManagement, Protocol, RegisteredPerNoteController, SharpsFlats, Stream, StreamConfig,
+    Sysex7Packet, Sysex8Packet, SysexStatus, System, U4, U7, U14, UiHint, Ump, UmpVersion, Utility,
+    Voice1, Voice2,
 };
 use tutti_ump::{BendValue, ControlValue, FunctionBlockCount, TicksPerQuarterNote};
 use tutti_ump::{ManufacturerId, Unknown};
@@ -496,7 +496,7 @@ fn flex_setup() {
     // clocks.
     pin(
         [0xD610_0001, 0x0302_0800, 0, 0],
-        f(Flex::SetTimeSignature(TimeSignature {
+        f(Flex::SetTimeSignature(FlexTimeSignature {
             numerator: 3,
             denominator: 2,
             thirty_seconds: 8,
@@ -713,7 +713,7 @@ fn stream_endpoint_info() {
     // bit 1, TXJR bit 0. Static, 3 blocks, M2, M1, rx, tx.
     pin(
         [0xF001_0101, 0x8300_0303, 0, 0],
-        Message::Stream(Stream::EndpointInfo(EndpointInfo {
+        Message::Stream(Stream::EndpointInfo(EndpointInfoNotification {
             version: UmpVersion { major: 1, minor: 1 },
             static_function_blocks: true,
             function_blocks: FunctionBlockCount::of(3).into(),
@@ -726,7 +726,7 @@ fn stream_endpoint_info() {
     // M2 only, no JR: bit 9 alone.
     pin(
         [0xF001_0101, 0x2000_0200, 0, 0],
-        Message::Stream(Stream::EndpointInfo(EndpointInfo {
+        Message::Stream(Stream::EndpointInfo(EndpointInfoNotification {
             version: UmpVersion { major: 1, minor: 1 },
             static_function_blocks: false,
             function_blocks: FunctionBlockCount::of(32).into(),
