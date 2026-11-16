@@ -443,7 +443,7 @@ fn all_ctrl_list_reads_table_6() {
 
 // M2-117 §2.1.1.2: a `valueSelect` control sends the values of a CtrlMapList, so
 // `ctrlMapId` shall be set.
-/// Spec: m2-117/2.1.1#21
+/// Spec: m2-117/2.1.1.2#2
 #[test]
 fn value_select_needs_a_map() {
     let entry = |extra: &str| {
@@ -465,7 +465,7 @@ fn value_select_needs_a_map() {
 }
 
 // M2-117 §2.1.1.3: `minMax` and `stepCount` shall not be on the same entry.
-/// Spec: m2-117/2.1.1#11, m2-117/2.1.1#26
+/// Spec: m2-117/2.1.1#11, m2-117/2.1.1.3#2
 #[test]
 fn step_count_and_min_max_exclude_each_other() {
     let entry = |extra: &str| {
@@ -566,6 +566,25 @@ fn a_controller_is_listed_twice_only_for_transmit_and_recognize() {
     let twice = r#"[{"title":"A","ctrlType":"cc","channel":1,"ctrlIndex":[2]},
         {"title":"B","ctrlType":"cc","channel":1,"ctrlIndex":[2]}]"#;
     assert!(decode(&PeResource::AllCtrlList, twice).is_err());
+    // Two entries that both describe what is sent, or both what is recognized.
+    let entry = |extra: &str| {
+        format!(r#"{{"title":"T","ctrlType":"cc","channel":1,"ctrlIndex":[2],{extra}}}"#)
+    };
+    for (a, b) in [
+        (r#""transmit":"none""#, r#""transmit":"none""#),
+        (r#""recognize":"none""#, r#""recognize":"none""#),
+    ] {
+        let both = format!("[{},{}]", entry(a), entry(b));
+        assert!(decode(&PeResource::AllCtrlList, &both).is_err(), "{both}");
+    }
+    // A third entry of the pair's controller is a repeat.
+    let third = format!(
+        r#"[{},{},{}]"#,
+        entry(r#""transmit":"none""#),
+        entry(r#""recognize":"none""#),
+        entry(r#""transmit":"none""#)
+    );
+    assert!(decode(&PeResource::AllCtrlList, &third).is_err(), "{third}");
     // The same controller on another Channel is another entry.
     let other = twice.replace(
         r#""title":"B","ctrlType":"cc","channel":1"#,

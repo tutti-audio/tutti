@@ -435,7 +435,7 @@ fn parse_heading(line: &str, dotted_top: bool) -> Option<Label> {
         || !title
             .chars()
             .next()
-            .is_some_and(|c| c.is_ascii_alphanumeric())
+            .is_some_and(|c| c.is_ascii_alphanumeric() || c == '"')
     {
         return None;
     }
@@ -537,6 +537,21 @@ impl Outline {
     }
 }
 
+/// A line that starts with a number and a closing dot (`3. Continue`).
+fn dotted_item(t: &str) -> bool {
+    let digits = t.bytes().take_while(u8::is_ascii_digit).count();
+    digits > 0 && t[digits..].starts_with(". ")
+}
+
+/// Whether the nearest text line before or after `lines[at]` is a dotted item
+/// too: a run of them is a list, and a dotted heading stands alone.
+fn next_to_dotted_item(lines: &[String], at: usize) -> bool {
+    let text = |l: &&String| !l.trim().is_empty();
+    let before = lines[..at].iter().rev().find(text);
+    let after = lines[at + 1..].iter().find(text);
+    before.is_some_and(|l| dotted_item(l.trim())) || after.is_some_and(|l| dotted_item(l.trim()))
+}
+
 fn caption(t: &str) -> Option<(bool, u32)> {
     let (is_table, rest) = match (t.strip_prefix("Table "), t.strip_prefix("Figure ")) {
         (Some(r), _) => (true, r),
@@ -563,7 +578,7 @@ fn classify(lines: &[String], doc: &Doc) -> Result<Vec<Line>, String> {
     };
     let mut out = Vec::new();
     let mut started = false;
-    for l in lines {
+    for (at, l) in lines.iter().enumerate() {
         let t = l.trim();
         if t.is_empty() {
             if started {
@@ -571,7 +586,9 @@ fn classify(lines: &[String], doc: &Doc) -> Result<Vec<Line>, String> {
             }
             continue;
         }
-        if let Some(label) = parse_heading(l, doc.dotted_top) {
+        if let Some(label) = parse_heading(l, doc.dotted_top)
+            .filter(|_| !(dotted_item(t) && next_to_dotted_item(lines, at)))
+        {
             let first = !started && label == (false, vec![1]);
             if first || (started && outline.accept(&label)) {
                 if first {
@@ -992,6 +1009,41 @@ mod tests {
         );
         // Without the flag no heading `1` exists.
         assert!(classify(&clean(&text), &M2_104).is_err());
+    }
+
+    #[test]
+    fn a_dotted_heading_after_a_numbered_list_is_not_among_its_items() {
+        let text = doc(&[
+            TOC,
+            "1. Alpha\nA frob shall spin.\n\n2. Beta\nA bar shall follow:\n   1. One\n   2. Two\n   3. Three\nA baz may idle.\n\n3. Gamma\nA qux should hum.\n",
+            "",
+            "",
+        ]);
+        let dotted = Doc {
+            dotted_top: true,
+            ..M2_104
+        };
+        let items = keyword_items(&classify(&clean(&text), &dotted).unwrap(), &dotted);
+        assert_eq!(
+            ids(&items),
+            [
+                ("m2-104/1#1", "required"),
+                ("m2-104/2#1", "required"),
+                ("m2-104/2#2", "permitted"),
+                ("m2-104/3#1", "recommended"),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_heading_title_may_open_with_a_quote() {
+        let items = sentences_of(
+            "1 Alpha\nA frob shall spin.\n\n1.1 \"Beta\" Integration\nA bar may ring.\n",
+        );
+        assert_eq!(
+            ids(&items),
+            [("m2-104/1#1", "required"), ("m2-104/1.1#1", "permitted")]
+        );
     }
 
     #[test]
