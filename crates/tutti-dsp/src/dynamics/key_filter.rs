@@ -102,7 +102,11 @@ impl KeyStage {
     }
 
     /// The key's level at each frame of `frames`, into `out` (as long as `frames`, at most
-    /// [`CHUNK`]): the loudest channel of the filtered key. No allocation.
+    /// [`CHUNK`]): the loudest channel of the filtered key. Key channels past the stage's
+    /// width are not heard. A frame where the filter's output is not finite reads the
+    /// unfiltered key's level there (a NaN as quiet, an infinity as the largest finite level),
+    /// and the filter's state resets after the chunk, so a non-finite key is heard for at most
+    /// one chunk. No allocation.
     pub(super) fn levels<S: Float>(
         &mut self,
         key: &Planes<'_, S>,
@@ -115,15 +119,28 @@ impl KeyStage {
         let mut scratch = [[S::ZERO; CHUNK]; MAX_CHANNELS];
         let mut views: [&mut [S]; MAX_CHANNELS] = scratch.each_mut().map(|p| &mut p[..n]);
         let width = heard.channels().min(MAX_CHANNELS);
+        // Every plane is `n` frames long and `width` is within `MAX_CHANNELS`.
         let Ok(mut filtered) = PlanesMut::new(&mut views[..width]) else {
+            debug_assert!(false, "the scratch planes are one length");
             return;
         };
         self.bank
             .process(&mut self.coefficients, heard, filtered.reborrow());
-        for plane in filtered.iter() {
-            for (m, &x) in out.iter_mut().zip(plane.samples()) {
-                *m = m.max(level(x.convert_to::<f32>()));
+        let mut non_finite = false;
+        for (plane, raw) in filtered.iter().zip(heard.iter()) {
+            for ((m, &y), &x) in out.iter_mut().zip(plane.samples()).zip(raw.samples()) {
+                let y = y.convert_to::<f32>();
+                let l = if y.is_finite() {
+                    level(y)
+                } else {
+                    non_finite = true;
+                    level(x.convert_to::<f32>())
+                };
+                *m = m.max(l);
             }
+        }
+        if non_finite {
+            self.bank.reset();
         }
     }
 }

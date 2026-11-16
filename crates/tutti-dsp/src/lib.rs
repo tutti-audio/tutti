@@ -100,8 +100,8 @@
 //!   ([`BrickwallBank`], its ceiling a per-frame lane); the compressor ([`CompressorBank`],
 //!   keyed, its threshold a lane, its makeup a [`Glide`] over [`GAIN_GLIDE`]) and the noise
 //!   gate ([`GateBank`], its range gliding likewise). Both read a [`KeySource`]: a side-chain
-//!   bus or the signal itself, through a [`KeyFilter`] if the bank is built with one. The multiband compressor ([`MultibandBank`]) is a crossover tree
-//!   per channel and a [`CompressorBank`] per band, each band's makeup, bypass and solo
+//!   bus or the signal itself, through a [`KeyFilter`] if the bank is built with one. The
+//!   multiband compressor ([`MultibandBank`]) is a crossover tree per channel and a [`CompressorBank`] per band, each band's makeup, bypass and solo
 //!   gliding over [`GAIN_GLIDE`].
 //! - **Reverb** (`reverb/`): the model, a [`Network`] of [`Stage`]s with
 //!   analytic queries ([`Network::rt60`], [`tail`](System::tail),

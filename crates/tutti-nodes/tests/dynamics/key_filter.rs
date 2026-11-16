@@ -170,6 +170,31 @@ fn a_band_passed_key_reduces_by_the_curve_at_its_filtered_level() {
     );
 }
 
+/// A NaN or an infinite key sample does not latch the filter: once the key is finite again,
+/// the reduction is back on the curve at the filtered level, a tone under the cutoff
+/// attenuated by it.
+#[test]
+fn a_non_finite_key_sample_does_not_latch_the_key_filter() {
+    let (f, fc, q, a) = (250.0, 1_000.0, BUTTERWORTH, 0.5);
+    let want = curve_db(
+        amplitude_db(a) + response_db(KeyFilter::HighPass, f, fc, q),
+        THRESHOLD,
+        RATIO,
+    );
+    for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+        let mut node = prepared(compressor(KeyFilter::HighPass, fc, q), SR, 1_024);
+        let mut key = tone(f, a, 24_000);
+        key[6_000] = bad;
+        let out = run(&mut node, &key);
+        let got = deepest_reduction_db(&out);
+        let tolerance = sampled_peak_tolerance_db(f);
+        assert!(
+            (got - want).abs() < tolerance,
+            "after a {bad} key sample: {got} dB, curve says {want} dB (within {tolerance} dB)"
+        );
+    }
+}
+
 /// Setting the cutoff through the node's `ParamSet` moves the filter: the reduction at 1 kHz
 /// falls from the curve at the unfiltered level to the curve at the level a 4 kHz high-pass
 /// leaves.
@@ -190,6 +215,8 @@ fn the_cutoff_param_moves_the_key_filter() {
             RATIO,
         );
         let got = deepest_reduction_db(&out);
+        // A 1 kHz tone's sampled peak is within `sampled_peak_tolerance_db(1 kHz)`, 0.022 dB,
+        // of its crest; 0.05 dB holds that with room for the glide's last step.
         assert!(
             (got - want).abs() < 0.05,
             "cutoff {cutoff}: {got} dB, curve says {want} dB"
@@ -216,6 +243,8 @@ fn the_q_param_moves_the_key_filter() {
             RATIO,
         );
         let got = deepest_reduction_db(&out);
+        // A 1 kHz tone's sampled peak is within `sampled_peak_tolerance_db(1 kHz)`, 0.022 dB,
+        // of its crest; 0.05 dB holds that with room for the glide's last step.
         assert!(
             (got - want).abs() < 0.05,
             "q {q}: {got} dB, curve says {want} dB"

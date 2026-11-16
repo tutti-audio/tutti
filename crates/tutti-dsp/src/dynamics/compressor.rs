@@ -226,7 +226,8 @@ impl CompressorBank {
 
     /// This bank with the detector hearing its key through `filter`, over `width` key
     /// channels at the cutoff and Q [`aim`](Self::aim) gives it. [`KeyFilter::Off`] is no
-    /// filter. Allocates: build it on the control side.
+    /// filter; key channels past `width` are not heard. Allocates: build it on the control
+    /// side.
     #[must_use]
     pub fn key_filter(mut self, filter: KeyFilter, width: ChannelLayout) -> Self {
         self.key = filter
