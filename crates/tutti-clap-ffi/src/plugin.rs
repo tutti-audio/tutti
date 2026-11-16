@@ -99,7 +99,7 @@ use clap_sys::plugin::clap_plugin;
 use crate::host::Host;
 use crate::library::{Bundle, LoadError, Stage};
 use crate::roles::ThreadRoles;
-use tutti_plugin_types::{ContentScale, MainThreadMarker, MainWorkHandle};
+use tutti_plugin_types::{ContentScale, MainThreadMarker, MainWorkHandle, read_c_chars};
 
 macro_rules! extensions {
     ($($(#[$m:meta])* $field:ident: $ty:ty = [$($id:expr),+];)*) => {
@@ -1201,7 +1201,7 @@ fn value_to_text(
     // SAFETY: the plugin's own `value_to_text` with the instance and a
     // writable buffer of the capacity it is told.
     let ok = unsafe { f(plugin, id, value, buf.as_mut_ptr(), buf.len() as u32) };
-    ok.then(|| crate::chars_to_string(&buf))
+    ok.then(|| read_c_chars(&buf))
 }
 
 /// `params.text_to_value` through `params`; `None` for text with an interior
@@ -1278,7 +1278,7 @@ impl AudioPortInfo {
         };
         Self {
             id: info.id,
-            name: crate::chars_to_string(&info.name),
+            name: read_c_chars(&info.name),
             flags: crate::AudioPortFlags::from_bits_retain(info.flags),
             channel_count: info.channel_count,
             port_type,

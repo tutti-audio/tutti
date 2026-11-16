@@ -14,6 +14,7 @@ mod latency_removal;
 mod loop_region;
 mod output_policy;
 mod root_crossfade;
+mod root_defer;
 mod root_reopen;
 mod root_topology;
 mod scene_render;

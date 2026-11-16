@@ -18,6 +18,7 @@ mod meter;
 mod no_denormals;
 mod parallel;
 mod pool_spawn_refusal;
+mod root_fade;
 mod rt_no_alloc;
 mod tap;
 mod tap_audio_in;
