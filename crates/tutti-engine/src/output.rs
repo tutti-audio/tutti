@@ -367,6 +367,12 @@ impl OutputControl {
     /// device of that many channels. `None` takes the statement back, and the
     /// device is the engine's order for its width again.
     ///
+    /// Replacing a device already held crossfades like
+    /// [`set_routing`](Self::set_routing): the audio thread mixes from the old
+    /// folds to the new over the declick length, and the same cuts apply (a
+    /// root fade, a fade still running, no old fold; see the module's "A
+    /// routing change").
+    ///
     /// A device of `topology`'s width must have been built for first
     /// ([`support`](Self::support)) or is added here.
     ///

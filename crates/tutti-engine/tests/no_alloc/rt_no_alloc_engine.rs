@@ -861,7 +861,7 @@ fn a_live_routing_and_ramping_output_gains_are_allocation_free() {
     }
 }
 
-/// A routing change crossfades over the declick length, four 64-frame blocks,
+/// A routing change crossfades over the declick length (240 frames at 48 kHz, nearly four 64-frame blocks),
 /// without allocating on the audio thread: the blocks through the fade (a
 /// second change landing in mid-fade, which cuts) and after it are guarded,
 /// each `set_routing` and `reclaim` (which free the replaced table) runs on
