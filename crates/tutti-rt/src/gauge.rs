@@ -29,9 +29,11 @@
 //! lock state) implements it. A counter's is a [`Count`].
 //!
 //! **Closed.** When the [`GaugeWriter`] or [`CounterWriter`] drops, the cell
-//! holds its last value and `is_closed` answers `true`: the subject is gone,
+//! holds its last value and `is_closed` answers `true`: no writer is attached,
 //! and the reading stays what it was. A reader that sees the cell closed sees
-//! every value the writer wrote.
+//! every value the writer wrote. [`Gauge::reopen`] and [`Counter::reopen`]
+//! attach a new writer to a closed cell, which starts from that value (a count
+//! goes on from its total), so a closed value is final only until a reopen.
 //!
 //! The model in `tests/gauge_loom.rs` runs this code.
 
@@ -183,7 +185,7 @@ impl Shared {
     }
 
     /// Whether the writer has dropped. Read before the value, so a closed
-    /// cell is read at its final value.
+    /// cell is read at its last value.
     #[inline]
     fn is_closed(&self) -> bool {
         self.closed.load(Ordering::Acquire)
@@ -239,7 +241,8 @@ impl<U: Reading> Gauge<U> {
         U::from_bits(self.cell.value.load(Ordering::Acquire))
     }
 
-    /// Whether the writer is gone: the value read is the last it wrote.
+    /// Whether no writer is attached: the value read is the last one written,
+    /// final until a [`reopen`](Self::reopen).
     #[inline]
     #[must_use]
     pub fn is_closed(&self) -> bool {
