@@ -34,7 +34,7 @@
 use std::any::Any;
 use std::fmt;
 use std::marker::PhantomData;
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -81,12 +81,17 @@ pub(crate) use job_kind;
 pub struct Job<J: JobKind> {
     id: JobId,
     cell: Arc<Cell>,
+    queue: LandedQueue,
     _kind: PhantomData<fn() -> J>,
 }
 
-/// One job's identity, unique within its session.
+/// One job's identity, unique in the process: a [`Landed`] is keyed by it, and
+/// its result is type-erased, so two sessions never share an id.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct JobId(u64);
+
+/// The next [`JobId`]'s number, process-wide.
+static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
 /// Where a [`Job`] stands. A reading, not a promise: it moves on while the
 /// caller looks.
@@ -113,6 +118,10 @@ pub enum WaitError {
     /// `wait`, or [`update`](Session::update), there.
     #[error("the job waits for the main thread and the caller is not on it")]
     NeedsMainThread,
+    /// The job's result already landed and was taken: by the app from its
+    /// [`SessionEvent::Landed`], or by an earlier `wait`.
+    #[error("the job's result was already taken")]
+    AlreadyLanded,
 }
 
 /// Why a job's worker ended without a result.
@@ -157,7 +166,7 @@ impl Cancel {
 
     /// The job was dropped: its result will not be read.
     #[cfg_attr(
-        not(feature = "plugin"),
+        not(any(test, feature = "plugin")),
         expect(dead_code, reason = "the plugin state jobs (feature `plugin`) read it")
     )]
     pub(crate) fn is_cancelled(&self) -> bool {
@@ -198,10 +207,12 @@ impl<J: JobKind> Job<J> {
     /// is [`WaitingForMainThread`](JobStatus::WaitingForMainThread), it
     /// answers [`WaitError::NeedsMainThread`] and the job runs on.
     ///
-    /// The result is taken: a later [`Landed::take`] of the job answers `None`.
-    /// A worker that panicked lands as [`WorkerError::Panicked`], so a wait
-    /// never hangs on it, nor on a job the spawner dropped or whose session
-    /// side ended unanswered ([`WorkerError::Dropped`]).
+    /// The result is taken: a later [`Landed::take`] of the job answers `None`,
+    /// and a second `wait`, or one after the app took the job's
+    /// [`SessionEvent::Landed`], answers [`WaitError::AlreadyLanded`]. A worker
+    /// that panicked lands as [`WorkerError::Panicked`], so a wait never hangs
+    /// on it, nor on a job the spawner dropped or whose session side ended
+    /// unanswered ([`WorkerError::Dropped`]).
     ///
     /// # Errors
     ///
@@ -230,7 +241,11 @@ impl<J: JobKind> Job<J> {
             }
             session.jobs.hold(events);
             if ended {
-                return Err(WorkerError::Dropped.into());
+                return Err(if self.status() == JobStatus::Done {
+                    WaitError::AlreadyLanded.into()
+                } else {
+                    WorkerError::Dropped.into()
+                });
             }
             session.jobs.block(WAIT_SLICE);
         }
@@ -243,6 +258,9 @@ const WAIT_SLICE: Duration = Duration::from_millis(1);
 impl<J: JobKind> Drop for Job<J> {
     fn drop(&mut self) {
         self.cell.cancelled.store(true, Ordering::Release);
+        // A landing queued before the drop is discarded with it; one after it
+        // sees `cancelled` under the same lock (`Ticket::land`).
+        lock(&self.queue).retain(|landed| landed.id != self.id);
     }
 }
 
@@ -255,7 +273,9 @@ impl<J: JobKind> fmt::Debug for Job<J> {
     }
 }
 
-/// The result of a job, as [`SessionEvent::Landed`] reports it, once.
+/// The result of a job, as [`SessionEvent::Landed`] reports it, once. The
+/// result is type-erased and keyed by [`JobId`]: only [`take`](Self::take) with
+/// the job it belongs to returns it.
 pub struct Landed {
     id: JobId,
     result: Option<Box<dyn Any + Send>>,
@@ -274,8 +294,12 @@ impl Landed {
         if self.id != job.id {
             return None;
         }
-        let result = self.result.take()?;
-        result
+        // Checked before it moves out, so a mismatch never destroys the result.
+        if !self.result.as_ref()?.is::<Result<J::Output, J::Error>>() {
+            return None;
+        }
+        self.result
+            .take()?
             .downcast::<Result<J::Output, J::Error>>()
             .ok()
             .map(|result| *result)
@@ -304,8 +328,8 @@ pub(crate) struct Ticket<J: JobKind> {
 }
 
 impl<J: JobKind> Ticket<J> {
-    pub(crate) fn new(id: u64, queue: &LandedQueue) -> (Job<J>, Self) {
-        let id = JobId(id);
+    pub(crate) fn new(queue: &LandedQueue) -> (Job<J>, Self) {
+        let id = JobId(NEXT_ID.fetch_add(1, Ordering::Relaxed));
         let cell = Arc::new(Cell {
             status: AtomicU8::new(PENDING),
             cancelled: AtomicBool::new(false),
@@ -315,6 +339,7 @@ impl<J: JobKind> Ticket<J> {
             Job {
                 id,
                 cell: Arc::clone(&cell),
+                queue: Arc::clone(queue),
                 _kind: PhantomData,
             },
             Self {
@@ -346,21 +371,45 @@ impl<J: JobKind> Ticket<J> {
         self.cell.status.store(WAITING, Ordering::Release);
     }
 
+    /// Marks the job as waiting for the main thread (`true`) or running
+    /// (`false`), while it is not done.
+    pub(crate) fn set_main_wait(&self, waiting: bool) {
+        self.cell
+            .status
+            .store(if waiting { WAITING } else { RUNNING }, Ordering::Release);
+    }
+
+    /// Runs `effect` and lands its result, unless the job was dropped first:
+    /// then `effect` does not run. A drop after the check lets `effect` finish
+    /// (it is atomic with respect to the drop) and its result is discarded.
+    pub(crate) fn complete(self, effect: impl FnOnce() -> Result<J::Output, J::Error>) {
+        if !self.cancelled() {
+            let result = effect();
+            self.land(result);
+        }
+    }
+
     /// Queues the result to land in the next update, unless the job was
     /// dropped.
     pub(crate) fn land(self, result: Result<J::Output, J::Error>) {
+        let mut queue = lock(&self.queue);
+        // Under the lock the drop's purge takes: a landing is queued before
+        // the purge (and purged) or sees the drop here.
         if self.cancelled() {
             return;
         }
         self.cell.status.store(DONE, Ordering::Release);
-        self.queue
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .push(Landed {
-                id: self.id,
-                result: Some(Box::new(result)),
-            });
+        queue.push(Landed {
+            id: self.id,
+            result: Some(Box::new(result)),
+        });
     }
+}
+
+fn lock(queue: &LandedQueue) -> std::sync::MutexGuard<'_, Vec<Landed>> {
+    queue
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 impl<J: JobKind> Drop for Ticket<J> {

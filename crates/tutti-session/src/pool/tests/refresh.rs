@@ -103,6 +103,20 @@ fn a_refresh_loads_again_the_entry_whose_file_changed_and_keeps_the_old_value_un
 }
 
 #[test]
+fn a_dropped_refresh_job_starts_no_reload() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut s, spawned, path, reads) = loaded(dir.path(), b"one");
+    std::fs::write(&path, b"longer").unwrap();
+    let job = s.refresh_pool();
+    drop(job);
+    spawned.run_all();
+    let _ = s.update();
+    assert!(spawned.take().is_empty(), "no reload started");
+    assert_eq!(state(&s, "a").as_deref(), Some("loaded"));
+    assert_eq!(reads.load(Ordering::SeqCst), 1);
+}
+
+#[test]
 fn the_pool_diff_never_reads_the_file_so_a_declared_key_shares_the_stale_entry_until_a_refresh() {
     let dir = tempfile::tempdir().unwrap();
     let (mut s, spawned, path, reads) = loaded(dir.path(), b"one");

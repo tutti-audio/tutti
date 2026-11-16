@@ -646,6 +646,22 @@ fn pool_loaded_lands_in_the_update_that_settles_the_last_entry_and_a_dropped_one
 }
 
 #[test]
+fn pool_loaded_waits_for_the_main_thread_while_an_entry_is_in_a_main_stage() {
+    let (s, spawned) = session();
+    let mut s = with_main_thread(s);
+    let log = Log::default();
+    s.pool(declare(&stub("a", How::Main, &log))).unwrap();
+    let job = s.pool_loaded::<&'static str>();
+    spawned.run_all();
+    // This thread is not the process's main thread: the wait would never end.
+    assert!(matches!(
+        job.wait(&mut s),
+        Err(crate::PoolJobError::Wait(crate::WaitError::NeedsMainThread))
+    ));
+    assert_eq!(job.status(), JobStatus::WaitingForMainThread);
+}
+
+#[test]
 fn an_empty_pool_reports_at_once() {
     let (mut s, _) = session();
     let loaded = s.pool_loaded::<&'static str>();

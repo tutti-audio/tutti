@@ -121,6 +121,11 @@ impl<C: crate::Clock> Session<C> {
     /// asking the other. The wait never lands once the session is dropped, or
     /// when no update runs on the main thread.
     ///
+    /// **Dropping the [`Job`] cancels the restore** if the main thread has not
+    /// started it, so a fire-and-forget call must keep the job until it
+    /// lands. A drop after the main thread began the restore does not undo it:
+    /// the restore applies whole and its result is discarded.
+    ///
     /// # Errors
     ///
     /// [`StateJobError::Entry`] when the key has no loaded plugin entry;
@@ -143,14 +148,13 @@ impl<C: crate::Clock> Session<C> {
         ticket.waiting_for_main_thread();
         self.work.defer(move |main| {
             // A dropped job restores nothing.
-            if ticket.cancelled() {
-                return;
-            }
-            let applied = handle.load_state(main, state.bytes());
-            if applied.is_ok() {
-                queue(&notices, Notice::Refresh(PluginRefresh::ParamValues));
-            }
-            ticket.land(applied.map_err(StateJobFailed::State));
+            ticket.complete(|| {
+                let applied = handle.load_state(main, state.bytes());
+                if applied.is_ok() {
+                    queue(&notices, Notice::Refresh(PluginRefresh::ParamValues));
+                }
+                applied.map_err(StateJobFailed::State)
+            });
         });
         Ok(job)
     }

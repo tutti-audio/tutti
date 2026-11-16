@@ -56,7 +56,7 @@ fn landings(events: &[SessionEvent]) -> Vec<JobId> {
 }
 
 #[test]
-fn a_job_is_pending_then_running_then_done_and_wait_returns_its_result() {
+fn a_running_job_reports_running_and_wait_returns_its_result() {
     let mut s = session(Session::builder());
     let (started, started_rx) = sync_channel::<()>(0);
     let (go, go_rx) = sync_channel::<()>(0);
@@ -76,12 +76,13 @@ fn a_job_is_pending_then_running_then_done_and_wait_returns_its_result() {
 }
 
 #[test]
-fn a_task_nobody_ran_leaves_its_job_pending() {
+fn a_job_is_pending_until_its_task_runs_and_done_once_it_ended() {
     let (mut s, held) = holding();
     let job = echo(&mut s, 1);
     assert_eq!(job.status(), JobStatus::Pending);
     run_all(&held);
-    drop(s);
+    let _ = s.update();
+    assert_eq!(job.status(), JobStatus::Done);
 }
 
 #[test]
@@ -195,3 +196,101 @@ fn dropping_the_session_returns_within_the_bound_though_a_worker_is_stuck() {
 }
 
 job_kind!(Unit => (), EchoError);
+
+#[test]
+fn a_job_waited_for_while_another_lands_still_returns_the_other_later() {
+    let (mut s, held) = holding();
+    let (a, b) = (echo(&mut s, 1), echo(&mut s, 2));
+    run_all(&held);
+    assert_eq!(a.wait(&mut s), Ok(1));
+    assert_eq!(b.wait(&mut s), Ok(2), "b's landing was held for it");
+}
+
+#[test]
+fn a_wait_after_the_result_was_taken_answers_already_landed() {
+    let (mut s, held) = holding();
+    let (a, b) = (echo(&mut s, 1), echo(&mut s, 2));
+    run_all(&held);
+    assert_eq!(a.wait(&mut s), Ok(1));
+    assert_eq!(
+        a.wait(&mut s),
+        Err(EchoError::Wait(WaitError::AlreadyLanded))
+    );
+    // The app took b's landing from the event itself.
+    let mut events = s.update();
+    let SessionEvent::Landed(landed) = &mut events[0] else {
+        panic!("b's landing");
+    };
+    assert_eq!(landed.take(&b), Some(Ok(2)));
+    assert_eq!(
+        b.wait(&mut s),
+        Err(EchoError::Wait(WaitError::AlreadyLanded))
+    );
+}
+
+#[test]
+fn ids_are_unique_across_sessions() {
+    let (mut first, _held_a) = holding();
+    let (mut second, _held_b) = holding();
+    assert_ne!(echo(&mut first, 1).id(), echo(&mut second, 1).id());
+}
+
+#[test]
+fn a_job_dropped_before_its_stage_runs_never_runs_it_and_lands_nothing() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let mut s = session(Session::builder());
+    let ran = Arc::new(AtomicBool::new(false));
+    let stage = |ticket: Ticket<Echo>, ran: Arc<AtomicBool>| -> Box<dyn FnOnce()> {
+        Box::new(move || {
+            ticket.complete(|| {
+                ran.store(true, Ordering::SeqCst);
+                Ok(1)
+            });
+        })
+    };
+    // Dropped before the stage starts: the effect never runs.
+    let (job, ticket) = s.jobs.new_job::<Echo>();
+    let deferred = stage(ticket, Arc::clone(&ran));
+    drop(job);
+    deferred();
+    assert!(!ran.load(Ordering::SeqCst), "the effect did not run");
+    assert_eq!(landings(&s.update()), []);
+    // Kept: it runs and lands.
+    let (job, ticket) = s.jobs.new_job::<Echo>();
+    stage(ticket, Arc::clone(&ran))();
+    assert_eq!(job.wait(&mut s), Ok(1));
+    assert!(ran.load(Ordering::SeqCst));
+}
+
+#[test]
+fn a_job_dropped_after_its_landing_was_queued_takes_the_landing_with_it() {
+    let mut s = session(Session::builder());
+    let (job, ticket) = s.jobs.new_job::<Echo>();
+    ticket.land(Ok(2));
+    drop(job);
+    assert_eq!(landings(&s.update()), [], "no orphan landing");
+}
+
+#[test]
+fn a_save_job_dropped_before_its_worker_starts_does_the_round_trip_never() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let (mut s, held) = holding();
+    let saved = Arc::new(AtomicBool::new(false));
+    let effect = Arc::clone(&saved);
+    // The shape of `save_state`: the worker skips the round trip for a
+    // cancelled job.
+    let job: Job<Echo> = s.jobs.submit_job(
+        move |cancel| {
+            if cancel.is_cancelled() {
+                return None;
+            }
+            effect.store(true, Ordering::SeqCst);
+            Some(1_u32)
+        },
+        |_, done, ticket| ticket.land(done.map_err(EchoError::from).map(|n| n.unwrap_or(0))),
+    );
+    drop(job);
+    run_all(&held);
+    assert!(!saved.load(Ordering::SeqCst), "nothing was saved");
+    assert_eq!(landings(&s.update()), []);
+}

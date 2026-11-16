@@ -395,7 +395,7 @@ impl Jobs {
 
     /// A job with no worker: its ticket lands when the session has the answer.
     pub(crate) fn new_job<J: JobKind>(&self) -> (Job<J>, Ticket<J>) {
-        Ticket::new(self.next.mint().get(), &self.landed)
+        Ticket::new(&self.landed)
     }
 
     /// Runs `work` on the spawner as a typed job. `land` runs in a later

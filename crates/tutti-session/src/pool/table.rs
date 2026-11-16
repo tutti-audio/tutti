@@ -213,6 +213,9 @@ struct Slot {
     life: Life,
     loaded: Option<Value>,
     state: PoolState,
+    /// The pending load stands at its main-thread stage (read while
+    /// [`pending`](Self::pending)).
+    at_main: bool,
     /// The outcome that landed while the entry was held: reported when the
     /// pool declares the entry again.
     unreported: Option<PoolEvent>,
@@ -256,9 +259,15 @@ impl Slot {
         )
     }
 
+    /// A load of this entry waits for the main thread.
+    const fn waits_on_main(&self) -> bool {
+        self.at_main && self.pending()
+    }
+
     /// The state while a load that stands at `stage` is pending: the old
     /// value, if there is one, stays the entry's.
     fn awaiting(&mut self, stage: Stage) {
+        self.at_main = matches!(stage, Stage::Main);
         self.state = if self.loaded.is_some() {
             PoolState::Reloading
         } else {
@@ -539,6 +548,7 @@ impl<C: Clock> Pool<C> {
                     life: Life::new(),
                     loaded: None,
                     state: PoolState::Loading,
+                    at_main: false,
                     unreported: None,
                     generation: 0,
                     reload,
@@ -1042,10 +1052,15 @@ impl<C: Clock> Pool<C> {
     pub(crate) fn wait_loaded<K: Clone + Send + 'static>(&mut self, ticket: Ticket<PoolLoaded<K>>) {
         let mut ticket = Some(ticket);
         let mut waiter = move |slots: &Slots| {
-            if ticket.as_ref().is_none_or(Ticket::cancelled) {
+            let Some(ticket_ref) = ticket.as_ref().filter(|t| !t.cancelled()) else {
                 return true;
-            }
+            };
             let Some(report) = Self::report::<K>(slots) else {
+                ticket_ref.set_main_wait(
+                    slots
+                        .values()
+                        .any(|slot| slot.declared && slot.waits_on_main()),
+                );
                 return false;
             };
             if let Some(ticket) = ticket.take() {
@@ -1152,6 +1167,7 @@ impl<C: Clock> Pool<C> {
         for key in &refreshed.reloaded {
             if let Some(slot) = self.slots.get_mut(key) {
                 slot.state = PoolState::Reloading;
+                slot.at_main = false;
             }
         }
         let starts = refreshed

@@ -231,15 +231,15 @@ impl<C: crate::Clock> Session<C> {
     /// entry until the next refresh, and a plugin binary that changed on disk
     /// or a provided asset is never detected. The result lands in a later
     /// [`update`](Self::update) as a [`RefreshReport`], or as the job's failure.
+    /// Dropping the job cancels the reloads the check would start.
     pub fn refresh_pool(&mut self) -> crate::Job<RefreshPool> {
         let files = self.pool.stamped_files();
         self.jobs.submit_job(
             move |_| refresh::check(files),
-            move |session, done, ticket| {
-                ticket.land(
-                    done.map(|checked| session.land_pool_refresh(checked))
-                        .map_err(PoolJobError::from),
-                );
+            move |session, done, ticket| match done {
+                // A dropped job reloads nothing.
+                Ok(checked) => ticket.complete(|| Ok(session.land_pool_refresh(checked))),
+                Err(failed) => ticket.land(Err(failed.into())),
             },
         )
     }

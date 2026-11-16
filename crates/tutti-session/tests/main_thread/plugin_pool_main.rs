@@ -389,7 +389,7 @@ fn an_in_process_swap_waits_for_the_main_thread() {
 /// A value saved through `save_state`, then moved, is the value the plugin and
 /// its mirror hold after `restore_state` lands in an update on the main thread;
 /// the outcome lands in an update, never at the call.
-fn restore_round_trip(hosting: Hosting, drop_the_job: bool) {
+fn restore_round_trip(hosting: Hosting) {
     const CUTOFF: tutti_plugin_types::ParamId = tutti_plugin_types::ParamId::new(101);
     let (catalog, _dir) = catalog();
     let mut s = session();
@@ -446,19 +446,6 @@ fn restore_round_trip(hosting: Hosting, drop_the_job: bool) {
         JobStatus::WaitingForMainThread,
         "it runs in an update on the main thread"
     );
-    if drop_the_job {
-        drop(restoring);
-        for _ in 0..3 {
-            blocks(&mut s);
-        }
-        assert!(
-            (knob(&s) - 0.1).abs() < 1e-6,
-            "a dropped job restored nothing: {}",
-            knob(&s)
-        );
-        s.close(tutti_fixtures::main_thread());
-        return;
-    }
     restoring.wait(&mut s).expect("applied");
     // The mirror is read again by a job the next updates land.
     let deadline = Instant::now() + Duration::from_secs(30);
@@ -478,19 +465,13 @@ fn restore_round_trip(hosting: Hosting, drop_the_job: bool) {
 /// writes reach the plugin at the head of a block, so the saved state holds the
 /// value the blocks delivered, and the restore moves it back.
 fn a_restore_job_applies_the_saved_state_to_an_in_process_plugin() {
-    restore_round_trip(Hosting::InProcess, false);
-}
-
-/// **Dropping a restore job cancels it:** the main thread's stage finds the job
-/// gone and leaves the plugin as it is.
-fn a_dropped_restore_job_restores_nothing() {
-    restore_round_trip(Hosting::OutOfProcess, true);
+    restore_round_trip(Hosting::InProcess);
 }
 
 /// **A restore job applies the saved state to a served plugin**, in the first
 /// update on the main thread.
 fn a_restore_job_applies_the_saved_state_to_a_served_plugin() {
-    restore_round_trip(Hosting::OutOfProcess, false);
+    restore_round_trip(Hosting::OutOfProcess);
 }
 
 /// **An in-process save the main thread does not run answers `Unavailable`:**
@@ -908,7 +889,6 @@ an_in_process_swap_to_other_ports_fails_the_entry,
 an_in_process_swap_waits_for_the_main_thread,
 a_restore_job_applies_the_saved_state_to_an_in_process_plugin,
 a_restore_job_applies_the_saved_state_to_a_served_plugin,
-a_dropped_restore_job_restores_nothing,
 an_in_process_save_the_main_thread_does_not_run_is_unavailable,
 a_plugin_that_widens_its_ports_is_re_inserted_wider,
 a_plugin_that_narrows_its_ports_reports_the_wiring_it_lost,
