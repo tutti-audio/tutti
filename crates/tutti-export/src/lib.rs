@@ -211,7 +211,7 @@ mod planar;
 mod spill;
 
 mod graph;
-pub use graph::{GRAPH_MAX_BLOCK, RenderGraph, Setup};
+pub use graph::{GRAPH_MAX_BLOCK, RenderGraph, RtLogSink, Setup};
 
 pub(crate) mod encode;
 pub(crate) mod process;

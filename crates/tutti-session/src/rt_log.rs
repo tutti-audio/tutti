@@ -17,8 +17,7 @@ use std::fmt::Write as _;
 
 use tracing::Level;
 use tracing::level_filters::LevelFilter;
-use tutti_engine::RtLogReaders;
-use tutti_graph::{LogFilter, NodeKey, RtLevel, RtRecord, RtTarget, RtValue};
+use tutti_graph::{LogFilter, NodeKey, RtLevel, RtLogReaders, RtRecord, RtTarget, RtValue};
 
 /// The most verbose level a `tracing` subscriber would emit on `$target`.
 macro_rules! most_verbose {
@@ -112,11 +111,54 @@ pub(crate) fn drain<'a>(readers: &RtLogReaders, kind_of: impl Fn(NodeKey) -> Opt
     let lost = readers.drain(current_filter(), |record| {
         emit(record, kind_of(record.source()));
     });
+    warn_lost(lost);
+}
+
+/// One warning naming `lost` records, if there were any.
+fn warn_lost(lost: u64) {
     if lost > 0 {
         tracing::warn!(
             target: "tutti::rt",
             lost,
             "the audio thread's log lost records (a full ring, or more than four in one node call)"
         );
+    }
+}
+
+/// An export's sink: the same events a live drain emits, for the nodes the
+/// live graph named when the fork was gathered.
+#[cfg(feature = "export")]
+#[derive(Debug)]
+pub(crate) struct Emit {
+    kinds: std::collections::BTreeMap<NodeKey, String>,
+}
+
+#[cfg(feature = "export")]
+impl Emit {
+    /// The kinds of the nodes `live` holds.
+    pub(crate) fn of(live: &tutti_graph::Editor) -> Self {
+        let kinds = live
+            .spec()
+            .topology
+            .nodes
+            .iter()
+            .map(|(&key, spec)| (key, spec.kind.clone()))
+            .collect();
+        Self { kinds }
+    }
+}
+
+#[cfg(feature = "export")]
+impl tutti_export::RtLogSink for Emit {
+    fn filter(&self) -> LogFilter {
+        current_filter()
+    }
+
+    fn record(&self, record: &RtRecord) {
+        emit(record, self.kinds.get(&record.source()).map(String::as_str));
+    }
+
+    fn lost(&self, count: u64) {
+        warn_lost(count);
     }
 }

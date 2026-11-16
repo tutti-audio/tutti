@@ -15,7 +15,7 @@
 
 use std::sync::Arc;
 
-use tutti_export::{Error, RenderGraph, Setup};
+use tutti_export::{Error, RenderGraph, RtLogSink, Setup};
 use tutti_graph::{
     CommitError, Editor, Executor, ForkError, ForkMode, ForkRemains, ForkTarget, PendingFork, Pool,
 };
@@ -39,6 +39,9 @@ pub(crate) struct PendingExport {
     /// The live root's declared topology, for an export of the master: the
     /// file is placed from it, as the device is.
     root: Option<ChannelTopology>,
+    /// Where the fork's audio-thread log goes, named as the live graph names
+    /// its nodes.
+    rt_log: Arc<dyn RtLogSink>,
 }
 
 impl PendingExport {
@@ -64,7 +67,13 @@ impl PendingExport {
         let fork = live
             .fork_gather(target, ForkMode::Offline, RenderGraph::prepare(rate))
             .map_err(fork_error)?;
-        Ok(Self { fork, pool, root })
+        let rt_log = Arc::new(crate::rt_log::Emit::of(live));
+        Ok(Self {
+            fork,
+            pool,
+            root,
+            rt_log,
+        })
     }
 
     /// Build the fork (on a worker: a hosted plugin's `plugin-server` launch
@@ -81,7 +90,10 @@ impl PendingExport {
         Ok(ForkedPair {
             editor,
             executor,
-            setup: Setup::new().pool(self.pool).root(self.root),
+            setup: Setup::new()
+                .pool(self.pool)
+                .root(self.root)
+                .rt_log(Some(self.rt_log)),
         })
     }
 }

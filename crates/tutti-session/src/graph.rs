@@ -359,7 +359,7 @@ pub struct Graph {
     output: Option<Placed>,
     /// What the nodes logged on the audio thread, once an engine renders the
     /// graph: drained by the session's reclaim sweep ([`Graph::drain_rt_log`]).
-    rt_log: Option<tutti_engine::RtLogReaders>,
+    rt_log: Option<tutti_graph::RtLogReaders>,
     /// The last widening [`widen_outputs`](Self::widen_outputs) refused.
     widen_refusal: Option<tutti_graph::RootError>,
     /// Why the declaration that waited for a root crossfade, or a hard one

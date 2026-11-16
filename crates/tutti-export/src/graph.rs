@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tutti_types::SampleRate;
 
 use tutti_graph::GraphTail;
-use tutti_graph::{Editor, Executor, Pool, Prepare, RenderMode};
+use tutti_graph::{Editor, Executor, LogFilter, Pool, Prepare, RenderMode, RtLogReaders, RtRecord};
 use tutti_types::{ChannelTopology, MaxBlock, Samples};
 
 use crate::{ConfigError, Result};
@@ -33,6 +33,28 @@ pub const GRAPH_MAX_BLOCK: MaxBlock = MaxBlock::of(Samples(1024));
 pub struct Setup {
     pool: Option<Arc<dyn Pool>>,
     root: Option<ChannelTopology>,
+    rt_log: Option<Arc<dyn RtLogSink>>,
+}
+
+/// Receives the records a render's nodes log on its audio thread, on the
+/// thread that renders.
+///
+/// The render drains the executor's log rings between blocks and hands each
+/// record, in frame order, to [`record`](Self::record). A sink is what lets
+/// the export stay free of any logging crate: the host's turns a record into
+/// whatever its subscriber takes ([`Setup::rt_log`]).
+pub trait RtLogSink: Send + Sync + std::fmt::Debug {
+    /// The most verbose level per target this sink takes, read when the
+    /// render starts and after each block; a record above it is never
+    /// written.
+    fn filter(&self) -> LogFilter;
+
+    /// A record a node logged, from the block just rendered.
+    fn record(&self, record: &RtRecord);
+
+    /// `count` records were lost since the last report: a full ring, or more
+    /// than four in one node call.
+    fn lost(&self, count: u64);
 }
 
 impl Setup {
@@ -66,6 +88,15 @@ impl Setup {
     #[must_use]
     pub fn root(mut self, root: Option<ChannelTopology>) -> Self {
         self.root = root;
+        self
+    }
+
+    /// Hands what the graph's nodes log on the audio thread to `sink`, drained
+    /// between blocks on the render's thread. With `None` (the default) the
+    /// render's log gate stays off and nothing is written.
+    #[must_use]
+    pub fn rt_log(mut self, sink: Option<Arc<dyn RtLogSink>>) -> Self {
+        self.rt_log = sink;
         self
     }
 }
@@ -156,6 +187,9 @@ pub struct RenderGraph {
     /// losses from here, so a drop between the two (installing a commit) is
     /// the next render's, and a drop in an earlier render is not.
     settled: (u64, u64),
+    /// The executor's log rings and where their records go, when the setup
+    /// named a sink.
+    rt_log: Option<(RtLogReaders, Arc<dyn RtLogSink>)>,
 }
 
 impl RenderGraph {
@@ -185,11 +219,16 @@ impl RenderGraph {
             executor.dropped_event_count(),
             executor.recovered_event_count(),
         );
+        // After the pool: the readers are those of the executor's final sizing.
+        let rt_log = setup
+            .rt_log
+            .map(|sink| (RtLogReaders::new(&mut executor), sink));
         Ok(Self {
             editor,
             executor,
             root: setup.root,
             settled,
+            rt_log,
         })
     }
 
@@ -201,6 +240,11 @@ impl RenderGraph {
     /// The executor's counts at the end of a render: the next one starts here.
     pub(crate) fn settle(&mut self, counts: (u64, u64)) {
         self.settled = counts;
+    }
+
+    /// The log readers and their sink ([`Setup::rt_log`]).
+    pub(crate) fn rt_log(&self) -> Option<(RtLogReaders, Arc<dyn RtLogSink>)> {
+        self.rt_log.clone()
     }
 
     /// The declared output topology ([`Setup::root`]).

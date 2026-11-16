@@ -131,7 +131,6 @@ mod manual;
 mod output;
 mod restart;
 mod routing;
-mod rt_log;
 mod stage;
 mod stream;
 mod timer;
@@ -150,6 +149,5 @@ pub use restart::{Stopped, StreamHost};
 pub use routing::{
     OutputLevelError, OutputLevels, OutputMap, OutputMapError, OutputStrip, Routing, RoutingError,
 };
-pub use rt_log::RtLogReaders;
 pub use stream::{OutputSpec, OutputStream, RunningStream, StartError, StreamDriver};
 pub use timer::{DEFAULT_BLOCK, TimerDriver, TimerError, TimerRunning};

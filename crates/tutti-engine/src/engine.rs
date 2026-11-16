@@ -206,7 +206,7 @@ pub struct Engine {
     /// [`support_output`](Self::support_output).
     output: OutputControl,
     /// The readers of what the graph's nodes logged on the audio thread.
-    rt_log: crate::RtLogReaders,
+    rt_log: tutti_graph::RtLogReaders,
     /// The audio thread's reader of `output`, lent once per call.
     folds: AudioThreadCell<Reader<OutputFolds>>,
     /// The gain each device output is ramped to, published beside the folds.
@@ -498,7 +498,7 @@ impl Engine {
         // Seeded from the executor; no test here can cover it, since the
         // executor is always fresh at `Engine::new`.
         let dropped_seen = executor.dropped_event_count();
-        let rt_log = crate::RtLogReaders::new(&mut executor);
+        let rt_log = tutti_graph::RtLogReaders::new(&mut executor);
         let (recorder, meter) = LoadMeter::pair();
         let (heard_taps, hearing) = crate::hearing::link();
         let clock = BlockClock::new();
@@ -589,9 +589,9 @@ impl Engine {
 
     /// The readers of the records the graph's nodes logged on the audio
     /// thread, to keep when this engine moves to the audio thread:
-    /// [`drain`](crate::RtLogReaders::drain) on any tick the control side
+    /// [`drain`](tutti_graph::RtLogReaders::drain) on any tick the control side
     /// already has.
-    pub fn rt_log(&self) -> crate::RtLogReaders {
+    pub fn rt_log(&self) -> tutti_graph::RtLogReaders {
         self.rt_log.clone()
     }
 
