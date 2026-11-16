@@ -339,36 +339,16 @@ pub fn vst3_module() -> PathBuf {
 /// How many times [`vst3_module`] stages the bundle's module before it fails.
 const STAGE_ATTEMPTS: usize = 5;
 
+#[cfg_attr(unix, path = "plugin/stage_unix.rs")]
+#[cfg_attr(windows, path = "plugin/stage_windows.rs")]
+mod stage;
+
 /// Puts `real` at `module` inside `dir`, unless it is there already. Staged
 /// under a name of this process's own and renamed in, so a process loading it
 /// never sees it half made.
 fn stage_module(real: &std::path::Path, dir: &std::path::Path, module: &std::path::Path) {
     std::fs::create_dir_all(dir).expect("bundle directory");
-    #[cfg(unix)]
-    if !std::fs::read_link(module).is_ok_and(|to| to == real) {
-        let staging = dir.join(format!(".stage{}", std::process::id()));
-        let _ = std::fs::remove_file(&staging);
-        std::os::unix::fs::symlink(real, &staging).expect("stage the bundle link");
-        let _ = std::fs::rename(&staging, module);
-        let _ = std::fs::remove_file(&staging);
-    }
-    #[cfg(windows)]
-    {
-        // A copy, so a process loading it must never see it half written: stage
-        // beside it and rename, and leave one that is already whole alone (a
-        // loaded DLL cannot be replaced).
-        let whole = |p: &std::path::Path| {
-            std::fs::metadata(p)
-                .and_then(|m| Ok(m.len() == std::fs::metadata(real)?.len()))
-                .unwrap_or(false)
-        };
-        if !whole(module) {
-            let staging = dir.join(format!(".stage{}", std::process::id()));
-            std::fs::copy(real, &staging).expect("stage the bundle copy");
-            let _ = std::fs::rename(&staging, module);
-            let _ = std::fs::remove_file(&staging);
-        }
-    }
+    stage::module(real, dir, module);
 }
 
 #[cfg(test)]
