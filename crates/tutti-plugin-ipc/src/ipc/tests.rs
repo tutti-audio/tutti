@@ -949,14 +949,17 @@ fn a_reactivation_continues_the_chunk_sequence() {
 }
 
 /// How many more blocks the bridge must abandon, after a render of
-/// [`CHUNKS_AFTER`] chunks, for the renders to have gone through. The rule that
-/// a wait that gave up holds the bridge no budget any more is
+/// [`CHUNKS_AFTER`] chunks, for it to be off the fork's budget. The rule that a
+/// wait that gave up holds the bridge no budget any more is
 /// `OfflineWait::reply_wait`, tested over its states in `offline_wait`; these
-/// tests carry it through the activation and the render, and assert that the
-/// chunks after the give-up are all collected under [`POLL_GUARD`], never how
-/// soon.
-const OFF_THE_BUDGET: u64 = 4;
-const CHUNKS_AFTER: usize = 8;
+/// tests carry it through the render and the reactivation. A bridge held one
+/// budget (1 s) per chunk abandons [`OFF_THE_BUDGET`] blocks in more than
+/// [`POLL_GUARD`], so the hang guard fails it; one off the budget abandons them
+/// in a bridge-thread turn each. The margin of [`CHUNKS_AFTER`] over
+/// [`OFF_THE_BUDGET`] absorbs the chunks a descheduled bridge skips (one reached
+/// more than `MAX_BEHIND` behind is skipped, not abandoned).
+const OFF_THE_BUDGET: u64 = 64;
+const CHUNKS_AFTER: usize = 90;
 
 /// Waits for the bridge to have abandoned [`OFF_THE_BUDGET`] blocks past
 /// `before`, panicking with what it had when [`POLL_GUARD`] runs out.
@@ -965,8 +968,9 @@ fn wait_off_the_budget(bridge: &PluginBridge, before: u64) {
     while bridge.abandoned_replies() < before + OFF_THE_BUDGET {
         assert!(
             start.elapsed() < POLL_GUARD,
-            "the bridge abandoned {} blocks after {CHUNKS_AFTER} chunks, wanted \
-             {OFF_THE_BUDGET}",
+            "the bridge abandoned {} blocks in {POLL_GUARD:?} after {CHUNKS_AFTER} \
+             chunks, wanted {OFF_THE_BUDGET}: it is holding a block for the \
+             fork's budget",
             bridge.abandoned_replies() - before
         );
         std::thread::sleep(Duration::from_millis(5));
@@ -1136,18 +1140,32 @@ fn a_resync_with_a_changed_list_flips_the_answer() {
 /// bridge held inside its listener (so the plugin's change of list is on the
 /// connection and the news is pending), a write to the parameter that became
 /// read-only waits, and once the bridge is released it is refused `ReadOnly`
-/// rather than accepted from the old list.
+/// rather than accepted from the old list, and puts nothing on the wire.
+///
+/// The limit: the release follows the write's start, not its arrival in the
+/// settle wait. A release that lands before the write reads the list lets the
+/// news settle first, and a write that did not wait would then pass too; the
+/// test fails such a design only when the write reads the list first.
 #[test]
 fn a_write_waits_for_the_news_the_bridge_has_not_delivered() {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::mpsc;
     use tutti_plugin_types::{Normalized, ParamWriteError};
     let _machine = machine_lock();
+    let sets = |got: &[HostMessage]| {
+        got.iter()
+            .filter(|m| matches!(m, HostMessage::SetParameter { .. }))
+            .count()
+    };
     let (mut ipc, server) = mock();
     *server.parameters.lock().unwrap() = vec![param(3, false)];
     let main = main_thread();
     let half = Normalized::of(0.5);
     assert_eq!(ipc.set_parameter(main, ParamId::new(3), half), Ok(()));
+    assert!(
+        server.wait_for(|got| sets(got) == 1),
+        "the first write reaches the server"
+    );
 
     // The first event the listener sees holds the bridge thread until released.
     let (held_tx, held_rx) = mpsc::channel::<()>();
@@ -1190,6 +1208,14 @@ fn a_write_waits_for_the_news_the_bridge_has_not_delivered() {
             Err(ParamWriteError::ReadOnly(ParamId::new(3)))
         );
     });
+    // The control stream is ordered: once a round trip has come back, a write
+    // the refused one had put on it would be on the record.
+    let _ = ipc.parameters(main);
+    assert_eq!(
+        sets(&server.received.lock().unwrap()),
+        1,
+        "the refused write reached the server"
+    );
 }
 
 /// **A value resync does not forget the list**: every dropped parameter event

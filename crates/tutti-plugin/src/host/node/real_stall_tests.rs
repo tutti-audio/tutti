@@ -1,6 +1,6 @@
 //! The block budget, against a **real plugin that really stops**.
 //!
-//! [`a_timed_out_reply_is_drained_rather_than_paired_with_a_later_block`] proves
+//! `a_timed_out_reply_is_drained_rather_than_paired_with_a_later_block` proves
 //! this with a mock server, and it stays: it is deterministic, needs no
 //! subprocess, and can construct timings a real plugin cannot be talked
 //! into. What it cannot do is prove the mock resembles the thing it stands in

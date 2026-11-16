@@ -487,10 +487,8 @@ fn wait_for_reply(slab: &AudioSlab, seq: u64, budget: std::time::Duration) {
 /// How long [`wait_for_reply`] will wait for a block's reply before declaring
 /// the harness stuck.
 ///
-/// Was a fixed inter-block sleep chosen to exceed a 64-sample block's ~1.33 ms
-/// at 48 kHz. It is now a *timeout* rather than a duration that is always
-/// spent: the common case returns as soon as the server publishes, in
-/// microseconds.
+/// It is a *timeout* rather than a duration that is always spent: the common
+/// case returns as soon as the server publishes, in microseconds.
 ///
 /// Generous on purpose, and it costs nothing to be. Since the wait is on a
 /// condition, this bound is only reached when the reply never comes at all — a
@@ -501,10 +499,7 @@ fn wait_for_reply(slab: &AudioSlab, seq: u64, budget: std::time::Duration) {
 /// generous enough converts a slow machine into a false failure. A minute is
 /// far beyond any real scheduling delay for a mock server that does two memcpys,
 /// and still bounded enough that a genuinely wedged run fails rather than hangs
-/// a CI job.
-///
-/// It was 500 ms, and a 500 ms budget silently expiring is exactly what
-/// produced the "block N was silent" reports this file's history records.
+/// a CI job. It guards a hang and asserts completion, never speed.
 const WAIT_BUDGET: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// Classify what a block's output actually is, so a failure names the defect
@@ -972,7 +967,7 @@ fn counters_on(bridge: &PluginBridge) -> Arc<ChunkCounters> {
     counters
 }
 
-/// Waits until `done`, failing after ten seconds.
+/// Waits until `done`, failing after [`WAIT_BUDGET`].
 fn wait_for(what: &str, mut done: impl FnMut() -> bool) {
     let deadline = std::time::Instant::now() + WAIT_BUDGET;
     while !done() {

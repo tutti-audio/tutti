@@ -316,10 +316,9 @@ impl MockServer {
     /// As [`start`](Self::start), with an explicit state-transfer progress
     /// deadline.
     ///
-    /// Every test here uses a shortened one. The deadline these tests are about
-    /// is 10 s in production, and a test that proved the stall path by waiting
-    /// it out would cost 10 s of wall clock to assert one comparison — which is
-    /// exactly the kind of slow test that gets deleted rather than fixed.
+    /// The stall tests pass a shortened one: production's is 10 s, and a test
+    /// that proved the stall path by waiting it out would spend all of it. The
+    /// chunked-reassembly test passes a window far past anything it spends.
     fn start_with_state_progress_timeout(
         label: &str,
         state_progress: Duration,

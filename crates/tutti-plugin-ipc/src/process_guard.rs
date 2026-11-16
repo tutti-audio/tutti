@@ -185,6 +185,9 @@ mod tests {
     use std::process::Command;
     use std::time::Instant;
 
+    /// A hang guard for the wait on the watch: far past anything the OS takes.
+    const HANG_GUARD: Duration = Duration::from_secs(60);
+
     fn guard_over(mut command: Command) -> ProcessGuard {
         let child = command.spawn().expect("the child spawns");
         ProcessGuard::launched(
@@ -214,7 +217,7 @@ mod tests {
     fn a_process_that_exits_sets_the_watch_with_its_status() {
         let guard = guard_over(Command::new("true"));
         assert!(
-            dead_within(guard.watch(), Duration::from_secs(60)),
+            dead_within(guard.watch(), HANG_GUARD),
             "the exit was never declared"
         );
         match guard.watch().cause() {
@@ -249,7 +252,7 @@ mod tests {
         // Nothing reads a socket here, so only the process's end can set the
         // watch; a bound under every deadline the host waits on.
         assert!(
-            dead_within(guard.watch(), Duration::from_secs(60)),
+            dead_within(guard.watch(), HANG_GUARD),
             "the kill was never declared"
         );
         match guard.watch().cause() {

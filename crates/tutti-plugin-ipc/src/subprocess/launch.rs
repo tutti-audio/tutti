@@ -703,10 +703,10 @@ mod tests {
     }
 
     /// **A restore that never returns is the state's to answer for**: past its
-    /// window the launch fails as `StateRestoreError`. The window is tiny and
-    /// the plugin sleeps far past it, so the stall is real in every run; that
-    /// the window is `Timeouts::state_restore` once restoring is
-    /// `a_restore_is_waited_on_for_its_own_window`.
+    /// window the launch fails as `StateRestoreError`. The window is 200 ms and
+    /// the plugin sleeps far past it, so the restore outlasts its window in
+    /// every run. `a_restore_is_waited_on_for_its_own_window` pins that the
+    /// window is `Timeouts::state_restore` once the server says it is restoring.
     #[test]
     #[cfg(unix)]
     fn a_restore_that_outlasts_its_window_is_blamed_on_the_state() {
