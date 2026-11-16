@@ -18,7 +18,7 @@ use tutti_graph::{
     Edge, Feed, FeedbackFrom, InPort, InputDelay, Node, NodeKey, NodeSpec, OutPort, OutputDelay,
     Reference, Source, Topology, TransportPosition, delays, graph_tail, latency_plan,
 };
-use tutti_types::{ChannelLayout, Samples, Tail};
+use tutti_types::{ChannelLayout, SampleRate, Samples, Tail};
 
 const BLOCK: usize = 64;
 
@@ -72,7 +72,7 @@ fn sources() -> Topology {
 }
 
 fn sorted_inputs(t: &Topology) -> Vec<InputDelay<NodeKey>> {
-    let mut v = delays(t).inputs().to_vec();
+    let mut v = delays(t, SampleRate::SR_48K).inputs().to_vec();
     v.sort();
     v
 }
@@ -104,7 +104,7 @@ fn each_source_of_a_fan_in_port_is_delayed_to_the_arrival() {
     t.connect(at(SINK, 1), direct(MID));
     t.set_outputs([Source::Node(out(SINK, 0))]);
 
-    let d = delays(&t);
+    let d = delays(&t, SampleRate::SR_48K);
     assert_eq!(d.arrival(SINK), Samples(300), "the latest of all sources");
     assert_eq!(d.departure(SINK), Samples(300), "a sum has no latency");
     assert_eq!(
@@ -115,7 +115,7 @@ fn each_source_of_a_fan_in_port_is_delayed_to_the_arrival() {
             input(SINK, 1, Feed::Node(MID), Samples(200)),
         ]
     );
-    assert_eq!(latency_plan(&t).total(), Samples(300));
+    assert_eq!(latency_plan(&t, SampleRate::SR_48K).total(), Samples(300));
 }
 
 /// A global input in a fan-in is aligned like any other source: it arrives at
@@ -159,7 +159,7 @@ fn a_feedback_addend_is_not_aligned_and_does_not_delay() {
         at(SINK, 0),
         Edge::Feedback(FeedbackFrom::new(out(SLOW, 0), Samples(BLOCK))),
     );
-    let d = delays(&t);
+    let d = delays(&t, SampleRate::SR_48K);
     assert_eq!(d.arrival(SINK), Samples(100));
     assert!(d.inputs().is_empty());
 }
@@ -175,7 +175,7 @@ fn each_source_of_a_fan_in_output_is_delayed_to_the_output_time() {
     t.set_outputs([Source::Node(out(SLOW, 0)), Source::Node(out(MID, 0))]);
     t.outputs[0].push(Source::Node(out(DRY, 0)));
 
-    let d = delays(&t);
+    let d = delays(&t, SampleRate::SR_48K);
     assert_eq!(
         d.outputs(),
         &[
@@ -200,12 +200,18 @@ fn the_tail_of_a_sum_is_the_longest_of_its_sources() {
     t.connect(at(SINK, 0), direct(key(1)));
     t.connect(at(SINK, 0), direct(key(2)));
     t.set_outputs([Source::Node(out(SINK, 0))]);
-    assert_eq!(graph_tail(&t).samples(), Some(Samples(3100)));
+    assert_eq!(
+        graph_tail(&t, SampleRate::SR_48K).samples(),
+        Some(Samples(3100))
+    );
 
     // The same two into one output channel.
     t.set_outputs([Source::Node(out(key(1), 0))]);
     t.outputs[0].push(Source::Node(out(key(2), 0)));
-    assert_eq!(graph_tail(&t).samples(), Some(Samples(3000)));
+    assert_eq!(
+        graph_tail(&t, SampleRate::SR_48K).samples(),
+        Some(Samples(3000))
+    );
 }
 
 // ---- the reference interpreter -------------------------------------------

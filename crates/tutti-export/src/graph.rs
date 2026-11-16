@@ -259,8 +259,8 @@ impl RenderGraph {
 
     /// The tail the graph reports — how long it keeps ringing after its input
     /// stops — with its caveats: the fold over the graph's topology
-    /// (`tutti_graph::graph_tail`), whose per-node tails the editor probed
-    /// from each prepared unit.
+    /// (`tutti_graph::graph_tail`, at the graph's prepared rate), whose per-node
+    /// tails the editor probed from each prepared unit.
     ///
     /// For a caller that wants a [`Job`](crate::Job)'s tail to be whatever the graph says: a reverb, a convolver, a hosted plugin
     /// that declared a decay. It returns the figure and its caveats
@@ -290,6 +290,9 @@ impl RenderGraph {
     /// # let _ = job;
     /// ```
     pub fn reported_tail(&self) -> GraphTail {
-        tutti_graph::graph_tail(&self.editor.spec().topology)
+        tutti_graph::graph_tail(
+            &self.editor.spec().topology,
+            self.editor.prepare().sample_rate(),
+        )
     }
 }

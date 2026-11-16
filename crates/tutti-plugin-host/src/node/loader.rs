@@ -104,7 +104,7 @@ where
         pending_sample_rate,
         descriptor,
         loaded,
-    } = wire(main, inner, rt, origin, sample_rate.get(), 0).map_err(|(stage, reason)| {
+    } = wire(main, inner, rt, origin, sample_rate, 0).map_err(|(stage, reason)| {
         BridgeError::LoadFailed {
             path: path.to_path_buf(),
             stage,
@@ -157,7 +157,7 @@ fn wire<H>(
     mut inner: Instance<H>,
     rt: tutti_rt::Rt<H::Processor>,
     origin: Option<Reload>,
-    sample_rate: f64,
+    sample_rate: tutti_types::SampleRate,
     spares: usize,
 ) -> Result<Wired<H>, (LoadStage, String)>
 where
@@ -271,7 +271,7 @@ where
         None,
         declared,
         wiring.features,
-        prepare.rate().get(),
+        prepare.rate(),
         Arc::new(AtomicU64::new(super::client::NO_PENDING_RATE)),
         Arc::new(AtomicU64::new(0)),
         parameters,
