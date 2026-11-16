@@ -31,11 +31,10 @@ serde = ["dep:serde"]
 # `contract` harness).
 testing = ["tutti-graph/contract"]
 
-
 [dependencies]
 # The file edge: `Wave` (the resident buffer a voice plays), and with a
-# `tutti-codec` decode feature the decoder the streamer loads and streams through (`Wave::read`,
-# `Wave::read_metadata`, `FileIn`).
+# `tutti-codec` decode feature the decoder the streamer loads and streams
+# through (`Wave::read`, `Wave::read_metadata`, `FileIn`).
 tutti-codec = { version = "0.0.1", path = "../tutti-codec" }
 
 # The graph: every node here is a `tutti_graph::Node`, reads
