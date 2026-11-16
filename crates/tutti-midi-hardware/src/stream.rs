@@ -88,6 +88,7 @@ use tutti_ump::{
     Stream, StreamConfig, SysexAssembler, SysexStep, Ump,
 };
 
+use crate::answer::Answer;
 use crate::capability::UmpCapability;
 use crate::ci::{
     Ci, CiChange, CiChanges, CiPeerInfo, Heard, PeerId, groups_after_settle, groups_of_a_midi1_port,
@@ -351,6 +352,8 @@ pub(crate) struct Stepped {
     pub(crate) process: Vec<(PeerId, ProcessChange)>,
     /// The Property Exchange of the peers that changed.
     pub(crate) properties: Vec<(PeerId, PropertyChange)>,
+    /// How the requests asked of peers ended.
+    pub(crate) answers: Vec<(PeerId, Answer)>,
     /// The Groups whose MIDI-CI device could not start, with why.
     pub(crate) unstarted: Vec<(MidiGroup, EntropyError)>,
 }
@@ -606,6 +609,7 @@ impl Negotiation {
             profiles: changes.profiles,
             process: changes.process,
             properties: changes.properties,
+            answers: changes.answers,
             unstarted: changes.unstarted,
         }
     }

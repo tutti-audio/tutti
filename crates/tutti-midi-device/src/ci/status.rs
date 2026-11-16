@@ -34,6 +34,16 @@ macro_rules! status_message {
             pub message: MessageText,
         }
 
+        impl ::std::fmt::Display for $name {
+            fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+                write!(
+                    f,
+                    concat!(stringify!($name), " with status {:#04x}"),
+                    self.status_code.get()
+                )
+            }
+        }
+
         impl $name {
             /// A message for the original sub-ID#2 `sub_id2` with a status
             /// code, no status data, no details and no text.

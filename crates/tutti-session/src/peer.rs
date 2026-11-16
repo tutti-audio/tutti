@@ -19,6 +19,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use thiserror::Error;
 
+use crate::{WaitError, WorkerError};
+
 /// A resource's identity in one session: unique among every token the session
 /// has handed out, and never reused.
 ///
@@ -153,7 +155,9 @@ pub enum ResourceFact {
 
 /// Why a request to a [`Peer`] failed. `E` is the request's own refusal.
 ///
-/// A request on a peer that is `Lost` fails at the call, not here.
+/// A request that returns a [`Job`](crate::Job) and is made of a peer that is
+/// `Lost` fails at the call: the job is already ended with
+/// [`Disconnected`](Self::Disconnected), and lands in the next update.
 ///
 /// # Examples
 ///
@@ -181,6 +185,13 @@ pub enum PeerError<E> {
     /// The peer answered, and the answer is not success.
     #[error("the peer refused the request: {0}")]
     Refused(E),
+    /// The job's work ended without an answer (the session ended it, or it
+    /// panicked).
+    #[error(transparent)]
+    Worker(#[from] WorkerError),
+    /// [`Job::wait`](crate::Job::wait) could not wait for the answer.
+    #[error(transparent)]
+    Wait(#[from] WaitError),
 }
 
 #[cfg(test)]

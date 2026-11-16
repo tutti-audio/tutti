@@ -3,7 +3,7 @@
 //! device says is the input's producer.
 
 use super::*;
-use crate::{CiChange, PeerId, Polled};
+use crate::{Answer, CiChange, PeerId, Polled, ReportEnd};
 use tutti_midi_device::{
     CI_VERSION, CiCategories, CiDeviceId, CiHeader, CiMessage, Decoded, Destination, DiscoveryData,
     INQUIRY_TIMEOUT, MaxSysexSize, Muid,
@@ -985,6 +985,20 @@ fn known_profiles(
     );
 }
 
+/// How the requests ended, in order, each naming the peer.
+fn request_answers(polled: &[Polled]) -> Vec<&Answer> {
+    polled
+        .iter()
+        .filter_map(|p| match p {
+            Polled::Answer(_, who, answer) => {
+                assert_eq!(*who, peer_id(), "every answer names the peer");
+                Some(answer)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
 fn profile_events(polled: &[Polled]) -> Vec<&ProfilesChange> {
     polled
         .iter()
@@ -1146,23 +1160,24 @@ fn a_set_profile_on_names_the_channel_and_its_enabled_report_updates_the_table()
     let changes = polled(&mut wire, 130);
     assert_eq!(
         profile_events(&changes),
-        [
-            &ProfilesChange::Changed {
+        [&ProfilesChange::Changed {
+            address: channel(0),
+            profile: profile(2),
+            change: ProfileChange::Enabled,
+        },]
+    );
+    assert_eq!(
+        request_answers(&changes),
+        [&Answer::Switch {
+            request: Request::SetOn {
                 address: channel(0),
-                profile: profile(2),
-                change: ProfileChange::Enabled,
+                profile: profile(2)
             },
-            &ProfilesChange::Resolved {
-                request: Request::SetOn {
-                    address: channel(0),
-                    profile: profile(2)
-                },
-                outcome: Outcome::Reported {
-                    state: ProfileState::Enabled,
-                    channels: ProfileChannels::of(3),
-                },
-            }
-        ]
+            outcome: Outcome::Reported {
+                state: ProfileState::Enabled,
+                channels: ProfileChannels::of(3),
+            },
+        }]
     );
     let peers = wire.session.profiles(&wire.id);
     let entry = peers[0].table().get(channel(0), profile(2)).unwrap();
@@ -1393,15 +1408,14 @@ fn a_set_profile_on_a_group_asks_for_no_channels_and_off_is_resolved_by_the_disa
     );
     let changes = polled(&mut wire, 160);
     assert!(
-        profile_events(&changes).iter().any(|c| matches!(
-            c,
-            ProfilesChange::Resolved {
+        request_answers(&changes).iter().any(|a| matches!(
+            a,
+            Answer::Switch {
                 request: Request::SetOff { .. },
                 outcome: Outcome::Reported {
                     state: ProfileState::Disabled,
                     ..
                 },
-                ..
             }
         )),
         "{changes:?}"
@@ -1535,12 +1549,12 @@ fn a_set_profile_nothing_answers_times_out_after_the_profile_timeout() {
     let _ = polled(&mut wire, sent_at);
     let wait = PEER_REPLY_TIMEOUT.as_millis() as u64;
     let early = polled(&mut wire, sent_at + wait - 1);
-    assert!(profile_events(&early).is_empty(), "{early:?}");
+    assert!(request_answers(&early).is_empty(), "{early:?}");
     let ended = polled(&mut wire, sent_at + wait);
     assert!(
         matches!(
-            profile_events(&ended).as_slice(),
-            [ProfilesChange::Resolved {
+            request_answers(&ended).as_slice(),
+            [Answer::Switch {
                 outcome: Outcome::TimedOut,
                 ..
             }]
@@ -1574,7 +1588,7 @@ fn an_inquiry_without_a_final_reply_times_out_keeping_what_was_heard() {
 }
 
 /// A second request for a Profile at an address whose first is still waiting is
-/// not sent: it is reported as not sent, and only one Set Profile On went out.
+/// not sent: it has no answer of its own, and only one Set Profile On went out.
 #[test]
 fn a_request_while_one_for_that_profile_waits_is_not_sent() {
     let (mut wire, ours) = peer_declaring(CiCategories::PROFILE_CONFIGURATION);
@@ -1590,13 +1604,7 @@ fn a_request_while_one_for_that_profile_waits_is_not_sent() {
             .unwrap();
     }
     let changes = polled(&mut wire, 110);
-    assert!(
-        matches!(
-            profile_events(&changes).as_slice(),
-            [ProfilesChange::NotSent { profile: p, .. }] if *p == profile(2)
-        ),
-        "{changes:?}"
-    );
+    assert!(changes.is_empty(), "{changes:?}");
     assert_eq!(payloads(&received(&wire)).len(), 1);
 }
 
@@ -1615,8 +1623,8 @@ fn a_channel_count_is_at_least_one_and_fits_fourteen_bits() {
 
 use crate::{ProcessChange, ReportError};
 use tutti_midi_device::{
-    ChannelControllers, DataControl, Nak, NoteData, ProcessError, ProcessFeatures, ReportRequest,
-    ReportScope, SUB_ID2_MESSAGE_REPORT_INQUIRY, SystemMessages,
+    ChannelControllers, DataControl, Nak, NoteData, ProcessFeatures, ReportRequest, ReportScope,
+    SUB_ID2_MESSAGE_REPORT_INQUIRY, SystemMessages,
 };
 
 fn process_events(polled: &[Polled]) -> Vec<&ProcessChange> {
@@ -1776,10 +1784,7 @@ fn a_report_asks_with_table_43_and_ends_with_the_peers_end() {
         120,
     );
     let began = polled(&mut wire, 130);
-    assert_eq!(
-        process_events(&began),
-        [&ProcessChange::ReportBegan(declared)]
-    );
+    assert!(began.is_empty(), "the Reply is not an answer: {began:?}");
     say(
         &wire,
         GROUP_0,
@@ -1793,7 +1798,7 @@ fn a_report_asks_with_table_43_and_ends_with_the_peers_end() {
         140,
     );
     let ended = polled(&mut wire, 150);
-    assert_eq!(process_events(&ended), [&ProcessChange::ReportEnded]);
+    assert_eq!(request_answers(&ended), [&Answer::Report(ReportEnd::Ended)]);
     // The transaction is over: another may be asked for.
     wire.session
         .report(handle.ask(function_block_request()))
@@ -1832,7 +1837,10 @@ fn a_nak_of_a_report_ends_it_and_is_reported() {
         120,
     );
     let ended = polled(&mut wire, 130);
-    assert_eq!(process_events(&ended), [&ProcessChange::ReportRefused(nak)]);
+    assert_eq!(
+        request_answers(&ended),
+        [&Answer::Report(ReportEnd::Refused(nak))]
+    );
 }
 
 /// A report whose Reply never comes ends once the process timeout has passed
@@ -1849,13 +1857,16 @@ fn a_report_nothing_answers_times_out_after_the_process_timeout() {
     let _ = polled(&mut wire, sent_at);
     let wait = PEER_REPLY_TIMEOUT.as_millis() as u64;
     let early = polled(&mut wire, sent_at + wait - 1);
-    assert!(process_events(&early).is_empty(), "{early:?}");
+    assert!(request_answers(&early).is_empty(), "{early:?}");
     let ended = polled(&mut wire, sent_at + wait);
-    assert_eq!(process_events(&ended), [&ProcessChange::ReportTimedOut]);
+    assert_eq!(
+        request_answers(&ended),
+        [&Answer::Report(ReportEnd::TimedOut)]
+    );
 }
 
-/// A second request while one waits is not sent: it is reported, and only one
-/// Inquiry went out.
+/// A second request while one waits is not sent: it has no answer of its own,
+/// and only one Inquiry went out.
 #[test]
 fn a_report_while_one_waits_is_not_sent() {
     let (mut wire, ours) = peer_declaring(CiCategories::PROCESS_INQUIRY);
@@ -1868,10 +1879,7 @@ fn a_report_while_one_waits_is_not_sent() {
             .unwrap();
     }
     let changes = polled(&mut wire, 110);
-    assert_eq!(
-        process_events(&changes),
-        [&ProcessChange::NotSent(ProcessError::AlreadyAsking)]
-    );
+    assert!(changes.is_empty(), "{changes:?}");
     assert_eq!(payloads(&received(&wire)).len(), 1);
 }
 

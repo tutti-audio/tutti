@@ -77,7 +77,8 @@
 //! the same poll and its time as the device is. It sends on the same output.
 //! An app's request to enable or disable a Profile
 //! ([`MidiSession::set_profile`](crate::MidiSession::set_profile)) is queued
-//! and started by the next poll, which has the time its wait counts from. When
+//! and started by the next poll, which has the time its wait counts from; its
+//! end is an [`Answer::Switch`]. When
 //! the peer is lost (an Invalidate MUID, a collision, a changed MUID of the
 //! device or its Group ending) its Initiator and Profiles go
 //! and [`ProfilesChange::Dropped`] says so; closing the input reports nothing, as
@@ -92,9 +93,8 @@
 //! ([`MidiSession::report_peers`](crate::MidiSession::report_peers)). An app's request
 //! for a report ([`MidiSession::report`](crate::MidiSession::report)) is queued and
 //! started by the next poll. The messages of a report are not CI: they are the peer's
-//! MIDI, and reach the graph with the rest of the input, between the
-//! [`ProcessChange::ReportBegan`] and the [`ProcessChange::ReportEnded`] the
-//! session reports. A lost peer's Initiator goes with it ([`ProcessChange::Dropped`]).
+//! MIDI, and reach the graph with the rest of the input, before the
+//! [`ReportEnd::Ended`] the session reports. A lost peer's Initiator goes with it ([`ProcessChange::Dropped`]).
 //!
 //! # Property Exchange
 //!
@@ -158,11 +158,13 @@ use std::time::Instant;
 use tutti_graph::{Losses, Offset};
 use tutti_midi_device::{
     CiAction, CiCategories, CiDevice, CiHeader, CiMessage, CiPeer, Decoded, DeviceId, EntropyError,
-    EntropyWords, MaxSysexSize, Muid, ProcessAction, ProcessFeatures, ProcessInitiator,
-    ProfileAction, ProfileInitiator, ResourceInitiator, ResourceResponder, ResourceStore,
+    EntropyWords, MaxSysexSize, Muid, ProcessAction, ProcessError, ProcessFeatures,
+    ProcessInitiator, ProfileAction, ProfileInitiator, RequestError, ResourceInitiator,
+    ResourceResponder, ResourceStore,
 };
 use tutti_ump::{DeviceIdentity, MidiGroup, SysexAssembler, SysexStep, Ump};
 
+use crate::answer::{Answer, ReportEnd};
 use crate::devices::OpenOutput;
 use crate::process::{self, ProcessChange, ReportAsk, ReportError, ReportPeer};
 use crate::profiles::{
@@ -198,6 +200,8 @@ pub(crate) struct CiChanges {
     pub(crate) process: Vec<(PeerId, ProcessChange)>,
     /// Peers' Property Exchange.
     pub(crate) properties: Vec<(PeerId, PropertyChange)>,
+    /// How the requests asked of peers ended.
+    pub(crate) answers: Vec<(PeerId, Answer)>,
     /// The Groups whose device could not start, with why.
     pub(crate) unstarted: Vec<(MidiGroup, EntropyError)>,
     /// The CI messages the output refused in this step.
@@ -537,7 +541,7 @@ impl Ci {
     /// Asks that the peer of `switch` be sent it at the next poll, after
     /// checking the peer still lists the Profile at that address.
     pub(crate) fn set_profile(&mut self, switch: ProfileSwitch) -> Result<(), ProfileError> {
-        switch.check(&self.profiles)?;
+        switch.check(self.profiles.iter())?;
         self.queue.push(switch);
         Ok(())
     }
@@ -550,7 +554,7 @@ impl Ci {
     /// Asks that the peer of `ask` be sent its request at the next poll, after
     /// checking it is still one that supports MIDI Message Report.
     pub(crate) fn report(&mut self, ask: ReportAsk) -> Result<(), ReportError> {
-        ask.check(&self.reporters)?;
+        ask.check(self.reporters.iter())?;
         self.reports.push(ask);
         Ok(())
     }
@@ -921,12 +925,12 @@ impl Running {
         let mut sends = Vec::new();
         for switch in queue.drain(..) {
             let Some(member) = self.members.iter_mut().find(|m| m.group == switch.group) else {
-                changes.profiles.push((
+                changes.answers.push((
                     PeerId {
                         group: switch.group,
                         muid: switch.muid,
                     },
-                    ProfilesChange::PeerGone {
+                    Answer::SwitchLost {
                         profile: switch.profile,
                     },
                 ));
@@ -951,12 +955,12 @@ impl Running {
         let mut sends = Vec::new();
         for ask in asks.drain(..) {
             let Some(member) = self.members.iter_mut().find(|m| m.group == ask.peer.group) else {
-                changes.process.push((
+                changes.answers.push((
                     PeerId {
                         group: ask.peer.group,
                         muid: ask.peer.muid,
                     },
-                    ProcessChange::PeerGone,
+                    Answer::ReportLost,
                 ));
                 continue;
             };
@@ -1134,15 +1138,18 @@ impl Member {
     ) {
         let Some(initiator) = self.process.get_mut(&ask.peer.muid) else {
             changes
-                .process
-                .push((self.peer_id(ask.peer.muid), ProcessChange::PeerGone));
+                .answers
+                .push((self.peer_id(ask.peer.muid), Answer::ReportLost));
             return;
         };
         match initiator.report(ask.request, now) {
             Ok(actions) => self.carry_out_process(ask.peer.muid, actions, sends, changes),
-            Err(error) => changes
-                .process
-                .push((self.peer_id(ask.peer.muid), ProcessChange::NotSent(error))),
+            // A report already waiting is answered once, for the request in
+            // flight, so this one has no answer of its own.
+            Err(ProcessError::AlreadyAsking) => {}
+            Err(_) => changes
+                .answers
+                .push((self.peer_id(ask.peer.muid), Answer::ReportLost)),
         }
     }
 
@@ -1164,10 +1171,22 @@ impl Member {
                 ProcessAction::Capabilities(features) => ProcessChange::Capabilities(features),
                 ProcessAction::CapabilitiesTimedOut => ProcessChange::CapabilitiesTimedOut,
                 ProcessAction::CapabilitiesRefused(_) => ProcessChange::CapabilitiesRefused,
-                ProcessAction::ReportBegan { declared } => ProcessChange::ReportBegan(declared),
-                ProcessAction::ReportEnded => ProcessChange::ReportEnded,
-                ProcessAction::ReportRefused(nak) => ProcessChange::ReportRefused(nak),
-                ProcessAction::ReportTimedOut => ProcessChange::ReportTimedOut,
+                ProcessAction::ReportEnded => {
+                    changes.answers.push((id, Answer::Report(ReportEnd::Ended)));
+                    continue;
+                }
+                ProcessAction::ReportRefused(nak) => {
+                    changes
+                        .answers
+                        .push((id, Answer::Report(ReportEnd::Refused(nak))));
+                    continue;
+                }
+                ProcessAction::ReportTimedOut => {
+                    changes
+                        .answers
+                        .push((id, Answer::Report(ReportEnd::TimedOut)));
+                    continue;
+                }
                 _ => continue,
             };
             changes.process.push((id, change));
@@ -1217,9 +1236,9 @@ impl Member {
         changes: &mut CiChanges,
     ) {
         let Some(initiator) = self.initiators.get_mut(&switch.muid) else {
-            changes.profiles.push((
+            changes.answers.push((
                 self.peer_id(switch.muid),
-                ProfilesChange::PeerGone {
+                Answer::SwitchLost {
                     profile: switch.profile,
                 },
             ));
@@ -1231,13 +1250,9 @@ impl Member {
         };
         match started {
             Ok(actions) => self.carry_out(switch.muid, actions, sends, changes),
-            Err(error) => changes.profiles.push((
-                self.peer_id(switch.muid),
-                ProfilesChange::NotSent {
-                    profile: switch.profile,
-                    error,
-                },
-            )),
+            // The switch in flight is answered once, for every request that
+            // named it, so this one has no answer of its own.
+            Err(RequestError::AlreadyAsking) => {}
         }
     }
 
@@ -1269,7 +1284,10 @@ impl Member {
                     change,
                 },
                 ProfileAction::Resolved { request, outcome } => {
-                    ProfilesChange::Resolved { request, outcome }
+                    changes
+                        .answers
+                        .push((id, Answer::Switch { request, outcome }));
+                    continue;
                 }
                 ProfileAction::SpecificData {
                     address,
@@ -1705,8 +1723,8 @@ mod tests {
                 &mut changes,
             );
             assert_eq!(
-                changes.profiles,
-                [(id, ProfilesChange::PeerGone { profile })],
+                changes.answers,
+                [(id, Answer::SwitchLost { profile })],
                 "{group:?}"
             );
             let peer = ReportPeer {
@@ -1728,8 +1746,8 @@ mod tests {
                 &mut changes,
             );
             assert_eq!(
-                changes.process,
-                [(id, ProcessChange::PeerGone)],
+                changes.answers[1..],
+                [(id, Answer::ReportLost)],
                 "{group:?}"
             );
             let call = PropertyCall::Get(ResourceGet::new(

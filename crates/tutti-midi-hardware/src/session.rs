@@ -37,6 +37,7 @@ use tutti_graph::Losses;
 use tutti_midi_device::ResourceStore;
 
 use crate::HardwareMidiInputs;
+use crate::answer::Answer;
 use crate::backend;
 use crate::ci::{CiChange, CiPeerInfo, Heard, PeerId};
 use crate::devices::{Devices, OpenInput, OpenOutput};
@@ -250,12 +251,15 @@ pub enum Polled {
     /// A MIDI-CI peer of the device (named by its [`PeerId`]) was found, changed
     /// or lost.
     Ci(DeviceId, PeerId, CiChange),
-    /// A MIDI-CI peer's Profiles became known or changed, a switch ended, or
-    /// the peer's Profiles were dropped.
+    /// A MIDI-CI peer's Profiles became known or changed, or the peer's
+    /// Profiles were dropped.
     Profile(DeviceId, PeerId, ProfilesChange),
-    /// A MIDI-CI peer answered Process Inquiry, a MIDI Message Report began or
-    /// ended, or the peer's Process Inquiry was dropped.
+    /// A MIDI-CI peer answered Process Inquiry, or the peer's Process Inquiry
+    /// was dropped.
     Process(DeviceId, PeerId, ProcessChange),
+    /// A request made of a MIDI-CI peer ended: the peer's Report or NAK, the
+    /// wait running out, or the peer lost first.
+    Answer(DeviceId, PeerId, Answer),
     /// A MIDI-CI peer answered Property Exchange, a call ended, the peer
     /// changed what the device serves, or the peer's Property Exchange was
     /// dropped.
@@ -595,6 +599,12 @@ impl MidiSession {
             );
             polled.extend(
                 stepped
+                    .answers
+                    .into_iter()
+                    .map(|(peer, answer)| Polled::Answer(id.clone(), peer, answer)),
+            );
+            polled.extend(
+                stepped
                     .properties
                     .into_iter()
                     .map(|(peer, change)| Polled::Property(id.clone(), peer, change)),
@@ -742,8 +752,8 @@ impl MidiSession {
 
     /// Asks a peer to enable or disable a Profile it lists, on the input the
     /// [`ProfileSwitch`] was made from, as the Initiator (M2-101 §§7.8, 7.9): the request is sent at the
-    /// next [`poll`](Self::poll), and its end is a [`ProfilesChange::Resolved`]
-    /// (the peer's Enabled or Disabled Report, its NAK, or [`PEER_REPLY_TIMEOUT`]
+    /// next [`poll`](Self::poll), and its end is an [`Answer::Switch`] (the
+    /// peer's Enabled or Disabled Report, its NAK, or [`PEER_REPLY_TIMEOUT`]
     /// with no answer). Make the [`ProfileSwitch`] from a handle in
     /// [`profiles`](Self::profiles).
     ///
@@ -776,11 +786,9 @@ impl MidiSession {
     }
 
     /// Asks a peer for a MIDI Message Report, as the Initiator (M2-101 §9.5): the
-    /// request is sent at the next [`poll`](Self::poll), and the peer's Reply and
-    /// End are a [`ProcessChange::ReportBegan`] and a
-    /// [`ProcessChange::ReportEnded`] (or its NAK, or the wait running out, which
-    /// are [`ProcessChange::ReportRefused`] and [`ProcessChange::ReportTimedOut`]). The
-    /// MIDI messages of the report arrive on the input between them, as MIDI.
+    /// request is sent at the next [`poll`](Self::poll), and its end is an
+    /// [`Answer::Report`]: the peer's End, its NAK, or the wait running out. The
+    /// MIDI messages of the report arrive on the input before it, as MIDI.
     /// Make the [`ReportAsk`] from a handle in [`report_peers`](Self::report_peers).
     ///
     /// # Errors

@@ -13,6 +13,9 @@ mod held_keys;
 // Clips, live inputs, routes and the outputs (`Session::midi`).
 #[cfg(feature = "midi")]
 mod midi;
+// A request to a MIDI-CI peer is a typed job: a Profile switch, a Message Report.
+#[cfg(feature = "midi-hardware")]
+mod midi_ci_jobs;
 // MIDI ports as pool entries: absent, replugged, ambiguous, released, per-port ingest.
 #[cfg(feature = "midi-hardware")]
 mod midi_ports;

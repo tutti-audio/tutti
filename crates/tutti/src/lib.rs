@@ -307,7 +307,7 @@ pub use tutti_midi_file as midi_file;
 /// `DeviceInfo`), the ports the pool opens for them (`midi_input`, `midi_output`,
 /// `MidiInput`, `MidiOutput`) and what an open one said of itself (`Learned`, `SavedDevice`, `Match`), and the Profiles
 /// its MIDI-CI peers support and how to switch one (`PeerProfiles`,
-/// `ListedProfile`, `ProfileSwitch`, `ProfilesChange`). The
+/// `ListedProfile`, `SwitchProfile`, `ProfilesChange`). The
 /// lower layers (`Translator`, `Narrower`, `ClockMap`) are
 /// by path through [`midi_protocol`] and [`midi_runtime`]; the
 /// MIDI-CI codec is `tutti-midi-device`'s. Feature `midi`.
@@ -341,14 +341,14 @@ pub mod midi {
     };
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_hardware::{
-        ChannelCount, ChannelProfile, CiChange, CiPeerInfo, DeviceQuery, ListedProfile,
-        MidiHardwareOptions, PeerId, PeerProfiles, ProfileError, ProfileSwitch, ProfilesChange,
-        Whole, WholeProfile,
+        ChannelCount, CiChange, CiPeerInfo, DeviceQuery, MidiHardwareOptions, PeerId, PeerProfiles,
+        ProfilesChange, Whole,
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
     pub use tutti_session::{
-        MidiInput, MidiInputInfo, MidiOutput, MidiOutputInfo, MidiPortError, OutputOptions,
-        PortCause, midi_input, midi_output,
+        ChannelProfile, ListedProfile, MidiInput, MidiInputInfo, MidiOutput, MidiOutputInfo,
+        MidiPortError, OutputOptions, PortCause, ProfilePeer, ReportPeer, RequestReport,
+        SwitchProfile, WholeProfile, midi_input, midi_output,
     };
 }
 

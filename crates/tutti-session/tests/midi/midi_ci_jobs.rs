@@ -1,0 +1,311 @@
+//! A request to a MIDI-CI peer is a typed job (M2-101 sections 7 and 9): a
+//! Profile switch and a MIDI Message Report, each driven over the fake OS by a
+//! peer that answers, refuses or stays silent, with the session's clock set by
+//! the test.
+
+use std::time::{Duration, Instant};
+
+use tutti_midi_device::{
+    ChannelControllers, CiHeader, CiMessage, DataControl, EndpointId, Nak, NoteData,
+    PEER_REPLY_TIMEOUT, PortDirection, ProfileState, ReportRequest, ReportScope, SystemMessages,
+};
+use tutti_midi_hardware::ChannelCount;
+use tutti_midi_hardware::test_support::FakeCounters;
+use tutti_session::Peer as _;
+use tutti_session::{
+    ChannelProfile, Job, JobKind, JobStatus, Landed, ListedProfile, MidiInput, MidiRouteRule,
+    PeerError, ReportPeer, Session, SessionEvent,
+};
+use tutti_ump::{DeviceIdentity, ManufacturerId, Message, MidiGroup, U7, Voice2};
+
+use crate::common::{Seen, blocks, play, tap};
+use crate::midi::{MpePeer, Reply, connect, hot_plug_session_ci, plug, update_at};
+
+/// A session over a fake OS with one MIDI-CI peer on the input `"wire"`, whose
+/// Profiles and Process Inquiry are known, and the session's clock.
+struct Wire {
+    s: Session,
+    fake: FakeCounters,
+    port: MidiInput,
+    peer: MpePeer,
+    seen: Seen,
+    start: Instant,
+    ms: u64,
+    landed: Vec<Landed>,
+}
+
+impl Wire {
+    fn new(switch: Reply, report: Reply) -> Self {
+        let (mut s, fake) = hot_plug_session_ci(DeviceIdentity {
+            manufacturer: ManufacturerId::NON_COMMERCIAL,
+            family: [U7::of(1); 2],
+            model: [U7::of(2); 2],
+            revision: [U7::of(3); 4],
+        });
+        let (synth, seen) = tap(&mut s);
+        s.midi()
+            .route(MidiRouteRule::any_channel().to(synth))
+            .expect("routes");
+        plug(&fake, MpePeer::RAW, "Wire", PortDirection::Duplex);
+        let _ = s.update();
+        connect(&mut s, &["wire"]);
+        let port = s.midi_input(&"wire").expect("loaded");
+        play(&s);
+        let mut peer = MpePeer::new();
+        peer.switch = switch;
+        peer.report = report;
+        let mut wire = Self {
+            s,
+            fake,
+            port,
+            peer,
+            seen,
+            start: Instant::now(),
+            ms: 0,
+            landed: Vec::new(),
+        };
+        wire.run(60);
+        wire
+    }
+
+    /// Runs the session and the peer for `ms` milliseconds, one at a time.
+    fn run(&mut self, ms: u64) {
+        for _ in 0..ms {
+            self.step(1);
+        }
+    }
+
+    /// One update `by` milliseconds on, and what the peer then answers.
+    fn step(&mut self, by: u64) {
+        self.ms += by;
+        let now = self.start + Duration::from_millis(self.ms);
+        for event in update_at(&mut self.s, now) {
+            if let SessionEvent::Landed(landed) = event {
+                self.landed.push(landed);
+            }
+        }
+        self.peer.answer(&self.fake, now);
+        blocks(&self.s, 1);
+    }
+
+    /// What `job` landed with, once.
+    fn result<J: JobKind>(&mut self, job: &Job<J>) -> Option<Result<J::Output, J::Error>> {
+        self.landed.iter_mut().find_map(|landed| landed.take(job))
+    }
+
+    /// The Profile the peer lists on Channel 1, as the port's info reads now.
+    fn profile(&self) -> ChannelProfile {
+        let info = self.port.info();
+        let [peer] = info.profiles() else {
+            panic!("one peer lists Profiles: {:?}", info.profiles());
+        };
+        match peer.listed().next() {
+            Some(ListedProfile::Channel(profile)) => profile,
+            other => panic!("one Profile on a Channel: {other:?}"),
+        }
+    }
+
+    fn reporter(&self) -> ReportPeer {
+        let info = self.port.info();
+        let [peer] = info.report_peers() else {
+            panic!("one peer can report: {:?}", info.report_peers());
+        };
+        peer.clone()
+    }
+
+    fn state(&self) -> ProfileState {
+        let info = self.port.info();
+        info.profiles()[0].listed().next().expect("listed").state()
+    }
+}
+
+fn four() -> ChannelCount {
+    ChannelCount::new(4).expect("a count")
+}
+
+fn everything() -> ReportRequest {
+    ReportRequest::new(
+        DataControl::Full,
+        ReportScope::FunctionBlock {
+            system: SystemMessages::empty(),
+            controllers: ChannelControllers::CONTROL_CHANGE,
+            notes: NoteData::NOTES,
+        },
+    )
+}
+
+/// The peer's Enabled Report lands the switch with the state it reports, and
+/// the port's list holds it.
+#[test]
+fn a_switch_the_peer_enables_lands_enabled() {
+    let mut wire = Wire::new(Reply::Answer, Reply::Answer);
+    assert_eq!(wire.state(), ProfileState::Disabled);
+    let job = wire.profile().enable(four());
+    wire.run(30);
+    assert_eq!(wire.result(&job), Some(Ok(ProfileState::Enabled)));
+    assert_eq!(wire.state(), ProfileState::Enabled);
+}
+
+/// The peer's Disabled Report lands the switch with the state it reports.
+#[test]
+fn a_switch_the_peer_disables_lands_disabled() {
+    let mut wire = Wire::new(Reply::Answer, Reply::Answer);
+    let enable = wire.profile().enable(four());
+    wire.run(30);
+    assert_eq!(wire.result(&enable), Some(Ok(ProfileState::Enabled)));
+    let job = wire.profile().disable();
+    wire.run(30);
+    assert_eq!(wire.result(&job), Some(Ok(ProfileState::Disabled)));
+    assert_eq!(wire.state(), ProfileState::Disabled);
+}
+
+/// A NAK of the switch is `Refused`, with the peer's NAK, and leaves the
+/// Profile as it was.
+#[test]
+fn a_switch_the_peer_naks_is_refused_with_its_nak() {
+    let mut wire = Wire::new(Reply::Refuse, Reply::Answer);
+    let job = wire.profile().enable(four());
+    wire.run(30);
+    let Some(Err(PeerError::Refused(nak))) = wire.result(&job) else {
+        panic!("a refusal: {:?}", wire.landed);
+    };
+    assert_eq!(nak.status_code, Nak::STATUS_PROFILE_NOT_SUPPORTED);
+    assert_eq!(wire.state(), ProfileState::Disabled);
+}
+
+/// A switch no one answers lands `TimedOut` once the peer reply timeout has
+/// passed since it was sent, and not before.
+#[test]
+fn a_switch_nothing_answers_times_out_after_the_peer_reply_timeout() {
+    let mut wire = Wire::new(Reply::Silent, Reply::Answer);
+    let job = wire.profile().enable(four());
+    wire.run(5);
+    let wait = PEER_REPLY_TIMEOUT.as_millis() as u64;
+    wire.step(wait - 20);
+    assert_eq!(wire.result(&job), None, "still waiting");
+    wire.step(20);
+    wire.run(1);
+    assert_eq!(wire.result(&job), Some(Err(PeerError::TimedOut)));
+}
+
+/// A peer that leaves before it answers ends the switch as `Disconnected`.
+#[test]
+fn a_switch_whose_peer_leaves_before_it_answers_is_disconnected() {
+    let mut wire = Wire::new(Reply::Silent, Reply::Answer);
+    let job = wire.profile().enable(four());
+    wire.run(5);
+    let muid = wire.peer.muid;
+    for ump in (CiMessage::InvalidateMuid {
+        header: CiHeader::new(muid),
+        target: muid,
+    })
+    .packets(MidiGroup::FIRST)
+    {
+        let now = wire.start + Duration::from_millis(wire.ms);
+        assert!(
+            wire.fake
+                .send_input(EndpointId::from_raw(MpePeer::RAW), ump, now)
+        );
+    }
+    wire.run(5);
+    assert_eq!(wire.result(&job), Some(Err(PeerError::Disconnected)));
+}
+
+/// A request of a port that is lost fails at the call: the job is ended before
+/// any update, and lands `Disconnected` in the next one.
+#[test]
+fn a_request_on_a_lost_port_fails_at_the_call() {
+    let mut wire = Wire::new(Reply::Answer, Reply::Answer);
+    let profile = wire.profile();
+    let reporter = wire.reporter();
+    wire.fake.unplug(EndpointId::from_raw(MpePeer::RAW));
+    wire.run(2);
+    let switch = profile.enable(four());
+    let report = reporter.request(everything());
+    assert_eq!(switch.status(), JobStatus::Done);
+    assert_eq!(report.status(), JobStatus::Done);
+    wire.run(1);
+    assert_eq!(wire.result(&switch), Some(Err(PeerError::Disconnected)));
+    assert_eq!(wire.result(&report), Some(Err(PeerError::Disconnected)));
+}
+
+/// A job that is dropped lands nothing, and the peer's answer still moves the
+/// Profile.
+#[test]
+fn a_dropped_switch_lands_nothing_and_the_peers_answer_still_applies() {
+    let mut wire = Wire::new(Reply::Answer, Reply::Answer);
+    drop(wire.profile().enable(four()));
+    wire.run(30);
+    assert!(wire.landed.is_empty(), "{:?}", wire.landed);
+    assert_eq!(wire.state(), ProfileState::Enabled);
+}
+
+/// A report lands at the peer's End, and the messages it carried reached the
+/// graph as the input's MIDI.
+#[test]
+fn a_report_lands_at_the_peers_end_and_its_messages_reach_the_graph() {
+    let mut wire = Wire::new(Reply::Answer, Reply::Answer);
+    let job = wire.reporter().request(everything());
+    wire.run(30);
+    assert_eq!(wire.result(&job), Some(Ok(())));
+    let reported = wire
+        .seen
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(_, event)| {
+            matches!(
+                event.decode(),
+                Ok(Message::Midi2(_, Voice2::NoteOn { note, .. }))
+                    if note.get() == MpePeer::REPORTED_NOTE
+            )
+        })
+        .count();
+    assert_eq!(reported, 1, "the report's one Note On reached the graph");
+}
+
+/// A NAK of the report is `Refused`, with the peer's NAK.
+#[test]
+fn a_report_the_peer_naks_is_refused_with_its_nak() {
+    let mut wire = Wire::new(Reply::Answer, Reply::Refuse);
+    let job = wire.reporter().request(everything());
+    wire.run(30);
+    let Some(Err(PeerError::Refused(nak))) = wire.result(&job) else {
+        panic!("a refusal: {:?}", wire.landed);
+    };
+    assert_eq!(nak.status_code, Nak::STATUS_TERMINATE);
+}
+
+/// A report no one answers lands `TimedOut` after the peer reply timeout.
+#[test]
+fn a_report_nothing_answers_times_out_after_the_peer_reply_timeout() {
+    let mut wire = Wire::new(Reply::Answer, Reply::Silent);
+    let job = wire.reporter().request(everything());
+    wire.run(5);
+    wire.step(PEER_REPLY_TIMEOUT.as_millis() as u64);
+    wire.run(1);
+    assert_eq!(wire.result(&job), Some(Err(PeerError::TimedOut)));
+}
+
+/// A peer that leaves while its report is out ends the job as `Disconnected`.
+#[test]
+fn a_report_whose_peer_leaves_before_its_end_is_disconnected() {
+    let mut wire = Wire::new(Reply::Answer, Reply::Silent);
+    let job = wire.reporter().request(everything());
+    wire.run(5);
+    let muid = wire.peer.muid;
+    for ump in (CiMessage::InvalidateMuid {
+        header: CiHeader::new(muid),
+        target: muid,
+    })
+    .packets(MidiGroup::FIRST)
+    {
+        let now = wire.start + Duration::from_millis(wire.ms);
+        assert!(
+            wire.fake
+                .send_input(EndpointId::from_raw(MpePeer::RAW), ump, now)
+        );
+    }
+    wire.run(5);
+    assert_eq!(wire.result(&job), Some(Err(PeerError::Disconnected)));
+}

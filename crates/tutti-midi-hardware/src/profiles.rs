@@ -1,7 +1,7 @@
 //! The Profiles of a MIDI-CI peer, as the session holds and drives them: what
 //! the peer supports ([`PeerProfiles`]), the handles an app asks to switch one
 //! from ([`ListedProfile`]), the request itself ([`ProfileSwitch`]) and what
-//! happened ([`ProfilesChange`]).
+//! happened to its table ([`ProfilesChange`]).
 //!
 //! The session is the Initiator (M2-101 §7): it asks every peer that declared
 //! Profile Configuration for its Profiles when it is found, and keeps the answer
@@ -24,8 +24,8 @@
 use std::sync::Arc;
 
 use tutti_midi_device::{
-    CiDeviceId, DeviceId, Muid, Outcome, ProfileChange, ProfileChannels, ProfileEntry, ProfileId,
-    ProfileState, ProfileTable, ProfileTarget, Request, RequestError, SpecificData,
+    CiDeviceId, DeviceId, Muid, ProfileChange, ProfileChannels, ProfileEntry, ProfileId,
+    ProfileState, ProfileTable, ProfileTarget, Request, SpecificData,
 };
 use tutti_midi_protocol::{ChannelResponse, MpeZones, PitchBendSensitivity};
 use tutti_ump::{MidiChannel, MidiGroup, MpeChannels, MpeOverlap, MpeZoneSet, MpeZoneSpan};
@@ -96,7 +96,8 @@ pub(crate) enum Switch {
 }
 
 /// A request that a peer enable or disable one Profile it lists
-/// ([`MidiSession::set_profile`](crate::MidiSession::set_profile)). Made only
+/// ([`MidiSession::set_profile`](crate::MidiSession::set_profile)), whose end
+/// is an [`Answer::Switch`](crate::Answer::Switch). Made only
 /// from a [`ListedProfile`], and it names the input device that handle was read
 /// from, so it cannot be sent to another.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -124,6 +125,21 @@ impl ProfileSwitch {
         }
     }
 
+    /// What the peer is asked: the Profile and the address, on or off.
+    #[must_use]
+    pub const fn request(&self) -> Request {
+        match self.switch {
+            Switch::On(target) => Request::SetOn {
+                address: target.address(),
+                profile: self.profile,
+            },
+            Switch::Off(address) => Request::SetOff {
+                address,
+                profile: self.profile,
+            },
+        }
+    }
+
     /// Whether `peers`, the Profiles an input's peers list now, still hold the
     /// peer and the Profile at the address the switch names.
     ///
@@ -131,9 +147,12 @@ impl ProfileSwitch {
     ///
     /// [`ProfileError::NoSuchPeer`] when no peer of `peers` is the switch's,
     /// [`ProfileError::NotListed`] when it no longer lists the Profile there.
-    pub fn check(&self, peers: &[PeerProfiles]) -> Result<(), ProfileError> {
+    pub fn check<'a>(
+        &self,
+        peers: impl IntoIterator<Item = &'a PeerProfiles>,
+    ) -> Result<(), ProfileError> {
         let peer = peers
-            .iter()
+            .into_iter()
             .find(|p| p.group() == self.group && p.muid() == self.muid)
             .ok_or(ProfileError::NoSuchPeer)?;
         let address = match self.switch {
@@ -191,6 +210,25 @@ impl ChannelProfile {
     pub const fn channel(&self) -> MidiChannel {
         self.channel
     }
+
+    /// The Profile.
+    #[must_use]
+    pub const fn profile(&self) -> ProfileId {
+        self.listed.profile
+    }
+
+    /// Whether the peer had it enabled when this was read.
+    #[must_use]
+    pub const fn state(&self) -> ProfileState {
+        self.listed.entry.state()
+    }
+
+    /// The Channel count of the peer's last Enabled or Disabled Report of it, if
+    /// a Version 2 peer sent one.
+    #[must_use]
+    pub const fn channels(&self) -> Option<ProfileChannels> {
+        self.listed.entry.channels()
+    }
 }
 
 impl WholeProfile {
@@ -217,33 +255,54 @@ impl WholeProfile {
     pub const fn whole(&self) -> Whole {
         self.whole
     }
-}
-
-impl ListedProfile {
-    const fn listed(&self) -> &Listed {
-        match self {
-            Self::Channel(p) => &p.listed,
-            Self::Whole(p) => &p.listed,
-        }
-    }
 
     /// The Profile.
     #[must_use]
     pub const fn profile(&self) -> ProfileId {
-        self.listed().profile
+        self.listed.profile
     }
 
     /// Whether the peer had it enabled when this was read.
     #[must_use]
     pub const fn state(&self) -> ProfileState {
-        self.listed().entry.state()
+        self.listed.entry.state()
     }
 
     /// The Channel count of the peer's last Enabled or Disabled Report of it, if
     /// a Version 2 peer sent one.
     #[must_use]
     pub const fn channels(&self) -> Option<ProfileChannels> {
-        self.listed().entry.channels()
+        self.listed.entry.channels()
+    }
+}
+
+impl ListedProfile {
+    /// The Profile.
+    #[must_use]
+    pub const fn profile(&self) -> ProfileId {
+        match self {
+            Self::Channel(p) => p.profile(),
+            Self::Whole(p) => p.profile(),
+        }
+    }
+
+    /// Whether the peer had it enabled when this was read.
+    #[must_use]
+    pub const fn state(&self) -> ProfileState {
+        match self {
+            Self::Channel(p) => p.state(),
+            Self::Whole(p) => p.state(),
+        }
+    }
+
+    /// The Channel count of the peer's last Enabled or Disabled Report of it, if
+    /// a Version 2 peer sent one.
+    #[must_use]
+    pub const fn channels(&self) -> Option<ProfileChannels> {
+        match self {
+            Self::Channel(p) => p.channels(),
+            Self::Whole(p) => p.channels(),
+        }
     }
 
     /// Asks the peer to disable the Profile at its address.
@@ -412,32 +471,6 @@ pub enum ProfilesChange {
     /// The peer NAKed the Profile Inquiry: it has no Profile Configuration to
     /// ask about.
     InquiryRefused,
-    /// A [`ProfileSwitch`] ended: the peer reported the Profile's state, NAKed
-    /// it, or did not answer in time.
-    Resolved {
-        /// What was asked.
-        request: Request,
-        /// How it ended.
-        outcome: Outcome,
-    },
-    /// A [`ProfileSwitch`] a call accepted was not queued: the peer or the
-    /// Profile went between the call and the next poll. A call that is refused
-    /// at once (`ProfileSwitch::check`) never gets here.
-    NotQueued(ProfileError),
-    /// A [`ProfileSwitch`] was not sent: one for that Profile at that address
-    /// was already waiting.
-    NotSent {
-        /// The Profile.
-        profile: ProfileId,
-        /// Why.
-        error: RequestError,
-    },
-    /// A [`ProfileSwitch`] was not sent: the peer was lost between the request
-    /// and the poll that would have sent it.
-    PeerGone {
-        /// The Profile.
-        profile: ProfileId,
-    },
     /// The peer sent Profile Specific Data (M2-101 §7.12): a Profile's own
     /// message, which [`mpe_channel_response`](ProfilesChange::mpe_channel_response)
     /// reads for the MPE Profile.

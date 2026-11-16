@@ -32,8 +32,8 @@ pub enum MidiReport {
         /// Its listing now; `info.id` is the device.
         info: tutti_midi_device::DeviceInfo,
     },
-    /// A MIDI-CI peer's Profiles became known or changed, a request to switch one
-    /// ended, or the peer's Profiles were dropped with it (M2-101 section 7): the
+    /// A MIDI-CI peer's Profiles became known or changed, or the peer's Profiles
+    /// were dropped with it (M2-101 section 7): the
     /// session is the Initiator with every peer that declares Profile
     /// Configuration, and reports each change once, from `Phase::Poll`. The
     /// Profiles now are the input's
@@ -49,13 +49,11 @@ pub enum MidiReport {
         /// What happened.
         change: tutti_midi_hardware::ProfilesChange,
     },
-    /// A MIDI-CI peer answered Process Inquiry, a MIDI Message Report it was asked
-    /// for began, ended, was refused or timed out, or the peer's Process Inquiry was
+    /// A MIDI-CI peer answered Process Inquiry, or the peer's Process Inquiry was
     /// dropped with it (M2-101 section 9): the session is the Initiator with every
     /// peer that declares Process Inquiry, and reports each change once, from
-    /// `Phase::Poll`. The messages of a report are not events of this kind: they
-    /// reach the graph as the input's MIDI, between the began and the ended. The
-    /// peers that can be asked are the input's
+    /// `Phase::Poll`. The peers that can be asked for a MIDI Message Report are the
+    /// input's
     /// [`MidiInputInfo::report_peers`](crate::MidiInputInfo::report_peers).
     #[cfg(feature = "midi-hardware")]
     CiProcess {

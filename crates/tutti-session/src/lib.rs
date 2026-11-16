@@ -86,6 +86,8 @@ mod key;
 mod main_session;
 #[cfg(feature = "midi")]
 mod midi;
+#[cfg(feature = "midi-hardware")]
+mod midi_ci;
 #[cfg(feature = "midi")]
 mod midi_follow;
 #[cfg(feature = "midi-hardware")]
@@ -178,6 +180,11 @@ pub use main_session::{EditorView, MainPlugin, MainSession, Opened};
 pub use midi::{
     MIDI_INPUT_DROP_REPORT, MIDI_OUT_DROP_REPORT, Midi, MidiLoad, MidiRouteId, MidiRouteRule,
     NoSuchMidiRoute, Stamping, TakePlacement,
+};
+#[cfg(feature = "midi-hardware")]
+pub use midi_ci::{
+    ChannelProfile, ListedProfile, ProfilePeer, ReportPeer, RequestReport, SwitchProfile,
+    WholeProfile,
 };
 #[cfg(feature = "midi")]
 pub use midi_follow::{FollowClock, FollowMachineControl, FollowTempo, SendMachineControl};

@@ -219,6 +219,7 @@
 
 // No `///` on these: a doc comment on a `pub mod` shadows the module's own
 // `//!` and re-resolves its intra-doc links in this scope.
+mod answer;
 mod backend;
 // Compiled everywhere so its tests run on every platform; only the native
 // backends (ALSA, CoreMIDI) convert an OS block, so it is dead where the stub
@@ -264,6 +265,7 @@ mod wire;
 #[cfg(any(test, feature = "testing"))]
 pub mod test_support;
 
+pub use answer::{Answer, ReportEnd};
 pub use capability::{OsEndpoint, UmpCapability};
 pub use ci::{CiChange, CiPeerInfo, PeerId};
 pub use devices::{
