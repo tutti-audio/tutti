@@ -487,7 +487,7 @@ mod halves {
                     inputs: &inputs,
                     outputs: &mut outputs,
                     num_samples: 64,
-                    sample_rate: tutti_plugin_types::SampleRate::SR_44K1, // `AudioBuffer`'s own raw field
+                    sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
                 }),
                 ctx: &ctx,
                 out: &mut out,

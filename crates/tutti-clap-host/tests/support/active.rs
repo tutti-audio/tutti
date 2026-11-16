@@ -14,33 +14,23 @@ use tutti_clap_host::{
 };
 use tutti_fixtures::{Activation, Whole};
 use tutti_plugin_types::{
-    AudioBufferMut, MainThreadMarker, MaxBlock, PluginError, Prepare, Sample, SampleFormat,
-    SampleRate, Samples,
+    MainThreadMarker, MaxBlock, PluginError, Prepare, Sample, SampleFormat, SampleRate, Samples,
 };
 
 /// A sample width a suite names with a type (`Active<f32>`, `AudioBuffer32`):
 /// test-side sugar for the processor's runtime `SampleFormat`. The host has no
-/// sample type parameter; this only picks the format value and wraps a typed
-/// buffer for the one `process`.
+/// sample type parameter; this only picks the format value.
 pub trait Width: Sample {
     /// The format an activation at this width negotiates.
     const FORMAT: SampleFormat;
-    /// The buffer as the processor takes it.
-    fn wrap<'t, 'd: 't>(buffer: AudioBuffer<'t, 'd, Self>) -> AudioBufferMut<'t, 'd>;
 }
 
 impl Width for f32 {
     const FORMAT: SampleFormat = SampleFormat::Float32;
-    fn wrap<'t, 'd: 't>(buffer: AudioBuffer<'t, 'd, f32>) -> AudioBufferMut<'t, 'd> {
-        AudioBufferMut::F32(buffer)
-    }
 }
 
 impl Width for f64 {
     const FORMAT: SampleFormat = SampleFormat::Float64;
-    fn wrap<'t, 'd: 't>(buffer: AudioBuffer<'t, 'd, f64>) -> AudioBufferMut<'t, 'd> {
-        AudioBufferMut::F64(buffer)
-    }
 }
 
 /// CLAP's activation at the width `T`.
@@ -153,7 +143,7 @@ impl<T: Width> ActiveExt<T> for Active<T> {
         buffer: &mut AudioBuffer<T>,
         ctx: &ClapProcessContext<'_>,
     ) -> tutti_clap_host::Result<ProcessOutputRef<'_>> {
-        let mut wrapped = T::wrap(AudioBuffer {
+        let mut wrapped = T::tagged(AudioBuffer {
             inputs: buffer.inputs,
             outputs: &mut *buffer.outputs,
             num_samples: buffer.num_samples,

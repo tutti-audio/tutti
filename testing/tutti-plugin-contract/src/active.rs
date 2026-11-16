@@ -3,8 +3,8 @@
 
 use tutti_fixtures::Whole;
 use tutti_plugin_types::{
-    AudioBuffer, AudioBufferMut, Loaded, MaxBlock, PluginIo, Prepare, ProcessContext,
-    ProcessOutput, Processor, Sample, SampleFormat, SampleRate, Samples,
+    AudioBuffer, Loaded, MaxBlock, PluginIo, Prepare, ProcessContext, ProcessOutput, Processor,
+    Sample, SampleFormat, SampleRate, Samples,
 };
 
 /// The default rate.
@@ -23,22 +23,11 @@ pub fn prepare(rate: f64, block: usize, format: SampleFormat) -> Prepare {
 }
 
 /// A sample width a case can render at.
-pub trait Width: Sample + Into<f64> + From<f32> {
-    /// The width's buffer variant.
-    fn wrap<'t, 'd: 't>(buffer: AudioBuffer<'t, 'd, Self>) -> AudioBufferMut<'t, 'd>;
-}
+pub trait Width: Sample + Into<f64> + From<f32> {}
 
-impl Width for f32 {
-    fn wrap<'t, 'd: 't>(buffer: AudioBuffer<'t, 'd, Self>) -> AudioBufferMut<'t, 'd> {
-        AudioBufferMut::F32(buffer)
-    }
-}
+impl Width for f32 {}
 
-impl Width for f64 {
-    fn wrap<'t, 'd: 't>(buffer: AudioBuffer<'t, 'd, Self>) -> AudioBufferMut<'t, 'd> {
-        AudioBufferMut::F64(buffer)
-    }
-}
+impl Width for f64 {}
 
 /// One activation, both halves held together.
 pub type Active<L> = tutti_fixtures::Active<Whole<L>>;
@@ -79,7 +68,7 @@ impl<L: Loaded> Render for Active<L> {
         let mut refs: Vec<&mut [S]> = outs.iter_mut().map(Vec::as_mut_slice).collect();
         let mut out = ProcessOutput::default();
         let mut io = PluginIo {
-            buffer: S::wrap(AudioBuffer::new(&ins, &mut refs, self.prepare().rate())),
+            buffer: S::tagged(AudioBuffer::new(&ins, &mut refs, self.prepare().rate())),
             ctx,
             out: &mut out,
         };
