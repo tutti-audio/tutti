@@ -86,13 +86,13 @@ mod main_session;
 #[cfg(feature = "midi")]
 mod midi;
 #[cfg(feature = "midi")]
-mod midi_event;
-#[cfg(feature = "midi")]
 mod midi_follow;
 #[cfg(feature = "midi-hardware")]
 mod midi_hardware;
 #[cfg(feature = "midi-hardware")]
 mod midi_port;
+#[cfg(feature = "midi")]
+mod midi_report;
 #[cfg(feature = "midi")]
 mod midi_sink;
 #[cfg(feature = "modulation")]
@@ -177,14 +177,14 @@ pub use midi::{
     NoSuchMidiRoute, Stamping, TakePlacement,
 };
 #[cfg(feature = "midi")]
-pub use midi_event::MidiEvent;
-#[cfg(feature = "midi")]
 pub use midi_follow::{FollowClock, FollowMachineControl, FollowTempo, SendMachineControl};
 #[cfg(feature = "midi-hardware")]
 pub use midi_port::{
     InputLoaded, MidiInput, MidiInputEntry, MidiInputInfo, MidiOutput, MidiOutputEntry,
     MidiOutputInfo, MidiPortError, OutputLoaded, OutputOptions, PortCause, midi_input, midi_output,
 };
+#[cfg(feature = "midi")]
+pub use midi_report::MidiReport;
 #[cfg(feature = "midi")]
 pub use midi_sink::{MidiSink, MidiSinkEntry, MidiSinkInfo, SinkLoaded, SinkOptions, midi_sink};
 #[cfg(feature = "modulation")]

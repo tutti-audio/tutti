@@ -227,16 +227,22 @@ fn a_saved_alsa_device_resolves_by_name_only() {
     let saved = info(until(&devices, added(&name)));
     assert_eq!(
         devices.resolve(&saved),
-        crate::Resolved::SameName(saved.clone())
+        tutti_midi_device::Resolved::SameName(saved.clone())
     );
 
     drop(first);
     until(&devices, removed(saved.id.clone()));
-    assert_eq!(devices.resolve(&saved), crate::Resolved::Missing);
+    assert_eq!(
+        devices.resolve(&saved),
+        tutti_midi_device::Resolved::Missing
+    );
 
     let _second = plug(&name);
     let again = info(until(&devices, added(&name)));
-    assert_eq!(devices.resolve(&saved), crate::Resolved::SameName(again));
+    assert_eq!(
+        devices.resolve(&saved),
+        tutti_midi_device::Resolved::SameName(again)
+    );
 }
 
 /// A port is listed once it has capabilities, in both directions it has: a
@@ -485,10 +491,10 @@ impl crate::MidiEndpoints for Panicky {
             Some(Vec::new())
         })
     }
-    fn inputs(&self) -> Vec<crate::EndpointInfo> {
+    fn inputs(&self) -> Vec<crate::OsEndpoint> {
         Vec::new()
     }
-    fn outputs(&self) -> Vec<crate::EndpointInfo> {
+    fn outputs(&self) -> Vec<crate::OsEndpoint> {
         Vec::new()
     }
     fn open_input(
@@ -1270,7 +1276,7 @@ fn a_device_on_the_sequencer_is_negotiated_through_the_pump_and_the_output() {
     let stop = std::sync::Arc::new(AtomicBool::new(false));
     let inlets =
         tutti_midi_runtime::InputInlets::new(tutti_graph::EventCapacity::of(64), Duration::ZERO);
-    let mut session = crate::MidiSession::open(inlets).unwrap();
+    let mut session = crate::MidiSession::open(inlets, None).unwrap();
     let want = format!("{name}: port");
     let deadline = Instant::now() + PATIENCE;
     let id = loop {

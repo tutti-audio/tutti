@@ -80,8 +80,8 @@ pub struct MidiSession {
     ports: Arc<HardwareMidiInputs>,
     /// The devices present, and the backend that opens them.
     devices: Devices,
-    /// The identity MIDI-CI is enabled with; none while it is off, which is
-    /// the default ([`MidiSession::enable_ci`]).
+    /// The identity MIDI-CI runs with, given at [`open`](MidiSession::open); none
+    /// when the session has no MIDI-CI, or after [`disable_ci`](MidiSession::disable_ci).
     ci_identity: Option<DeviceIdentity>,
     /// What the MIDI-CI devices' Property Exchange Responders serve
     /// ([`MidiSession::serve_properties`]); empty by default.
@@ -224,11 +224,22 @@ impl MidiSession {
     /// by `inlets` (the session builds and owns the [`HardwareMidiInputs`] over
     /// them: [`ports`](Self::ports)).
     ///
+    /// `ci` is the identity MIDI-CI announces in Discovery, or `None` for a
+    /// session without MIDI-CI. **MIDI-CI is off unless the app gives one**: a
+    /// Discovery carries a System Exclusive manufacturer id, tutti has none, and
+    /// the one MIDI 1.0 sets aside for non-commercial use (`7D`) is not for a
+    /// released product. So the app says who it is, with the id it registered. An
+    /// identity under
+    /// [`ManufacturerId::NON_COMMERCIAL`](tutti_ump::ManufacturerId::NON_COMMERCIAL)
+    /// is for development and research only, never for a released product. A
+    /// device on an input starts at the first [`poll`](Self::poll) after its
+    /// negotiation settled and any Identity Request in progress has ended.
+    ///
     /// # Errors
     ///
     /// As [`Devices::open`].
-    pub fn open(inlets: Arc<InputInlets>) -> Result<Self> {
-        Self::open_over(backend::active(), inlets)
+    pub fn open(inlets: Arc<InputInlets>, ci: Option<DeviceIdentity>) -> Result<Self> {
+        Self::open_over(backend::active(), inlets, ci)
     }
 
     /// A session over a supplied backend.
@@ -241,12 +252,16 @@ impl MidiSession {
     /// # Errors
     ///
     /// As [`Devices::open_over`].
-    pub fn open_over(backend: Box<dyn MidiEndpoints>, inlets: Arc<InputInlets>) -> Result<Self> {
+    pub fn open_over(
+        backend: Box<dyn MidiEndpoints>,
+        inlets: Arc<InputInlets>,
+        ci: Option<DeviceIdentity>,
+    ) -> Result<Self> {
         Ok(Self {
             inputs: HashMap::new(),
             ports: Arc::new(HardwareMidiInputs::new(inlets)),
             devices: Devices::open_over(backend)?,
-            ci_identity: None,
+            ci_identity: ci,
             properties: Arc::default(),
         })
     }
@@ -545,24 +560,6 @@ impl MidiSession {
         polled.into_iter()
     }
 
-    /// Turns MIDI-CI on, announcing `identity` in Discovery. **It is off until
-    /// this is called**: a Discovery carries a System Exclusive manufacturer
-    /// id, tutti has none, and the one MIDI 1.0 sets aside for non-commercial use
-    /// (`7D`) is not for a released product. So
-    /// the app says who it is, with the id it registered. An identity under
-    /// [`ManufacturerId::NON_COMMERCIAL`](tutti_ump::ManufacturerId::NON_COMMERCIAL)
-    /// is for development and research only, never for a released product.
-    ///
-    /// It reaches every open input (a device on one starts at the next
-    /// [`poll`](Self::poll), after any Identity Request in progress has ended)
-    /// and every input opened later. Calling it again with the identity already
-    /// in use changes nothing; with another, the running devices end as
-    /// [`disable_ci`](Self::disable_ci) ends them (an Invalidate MUID for their
-    /// own MUID, their peers lost) and start again under a new MUID.
-    pub fn enable_ci(&mut self, identity: DeviceIdentity) {
-        self.ci_identity = Some(identity);
-    }
-
     /// Turns MIDI-CI off: at the next [`poll`](Self::poll) every running device
     /// sends an Invalidate MUID for its own MUID (M2-101 §5.9 lists a shutdown
     /// among its reasons: its peers learn at once, not by silence), its peers
@@ -571,7 +568,7 @@ impl MidiSession {
         self.ci_identity = None;
     }
 
-    /// The identity MIDI-CI is enabled with, or `None` while it is off.
+    /// The identity MIDI-CI runs with, or `None` while it is off.
     #[must_use]
     pub fn ci_identity(&self) -> Option<DeviceIdentity> {
         self.ci_identity

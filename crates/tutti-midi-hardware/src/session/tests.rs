@@ -1,6 +1,6 @@
 use super::*;
 use crate::InputProducerHandle;
-use crate::capability::EndpointInfo;
+use crate::capability::OsEndpoint;
 use crate::devices::ChangeSink;
 use crate::devices::reporter::os_devices;
 use crate::endpoints::{DeviceOut, InputConnection, NoWatch, Watch};
@@ -28,7 +28,7 @@ fn session() -> (MidiSession, Arc<AtomicUsize>, Arc<AtomicUsize>) {
     let (backend, counters) = FakeBackend::build();
     let inlets = inlets();
     (
-        MidiSession::open_over(backend, inlets).unwrap(),
+        MidiSession::open_over(backend, inlets, None).unwrap(),
         counters.sent,
         counters.opens,
     )
@@ -93,7 +93,7 @@ fn by_name_matching_is_case_insensitive_substring() {
 #[test]
 fn connecting_an_absent_device_is_an_error_not_a_silent_noop() {
     let (backend, counters) = FakeBackend::build();
-    let mut s = MidiSession::open_over(backend, inlets()).unwrap();
+    let mut s = MidiSession::open_over(backend, inlets(), None).unwrap();
     // A name that matches nothing says what it searched, so a typo shows what
     // was there.
     let Err(Error::NoDeviceNamed { name, searched }) =
@@ -189,7 +189,7 @@ fn an_output_reaches_its_device() {
 fn a_send_time_reaches_the_sink_with_its_packet() {
     use tutti_midi_runtime::{Outgoing, SendAt};
     let (backend, counters) = FakeBackend::build_accepting(usize::MAX);
-    let s = MidiSession::open_over(backend, inlets()).unwrap();
+    let s = MidiSession::open_over(backend, inlets(), None).unwrap();
     let mut output = s.connect_output("synth a").unwrap();
     let raw = EndpointId::from_raw(10);
     let t = std::time::Instant::now() + std::time::Duration::from_secs(1);
@@ -218,7 +218,7 @@ fn a_send_time_reaches_the_sink_with_its_packet() {
 fn a_refusing_output_reports_zero_accepted() {
     let (backend, counters) = FakeBackend::build_accepting(0);
     let sent = counters.sent;
-    let s = MidiSession::open_over(backend, inlets()).unwrap();
+    let s = MidiSession::open_over(backend, inlets(), None).unwrap();
     let mut output = s.connect_output("synth a").unwrap();
 
     assert_eq!(
@@ -237,7 +237,7 @@ fn a_refusing_output_reports_zero_accepted() {
 #[test]
 fn a_partial_accept_reports_what_landed() {
     let (backend, _counters) = FakeBackend::build_accepting(1);
-    let s = MidiSession::open_over(backend, inlets()).unwrap();
+    let s = MidiSession::open_over(backend, inlets(), None).unwrap();
     let mut output = s.connect_output("synth a").unwrap();
 
     assert_eq!(output.queue(&[note(), note(), note()]).packets(), 1);
@@ -264,7 +264,7 @@ fn sysex() -> [UmpAt; 3] {
 #[test]
 fn a_message_the_device_cannot_take_whole_is_refused_whole_and_counted() {
     let (backend, counters) = FakeBackend::build_accepting(2);
-    let s = MidiSession::open_over(backend, inlets()).unwrap();
+    let s = MidiSession::open_over(backend, inlets(), None).unwrap();
     let mut output = s.connect_output("synth a").unwrap();
     let raw = EndpointId::from_raw(10);
     let [start, middle, end] = sysex();
@@ -287,7 +287,7 @@ fn a_message_the_device_cannot_take_whole_is_refused_whole_and_counted() {
 #[test]
 fn each_connected_output_is_its_own_value_on_its_own_device() {
     let (backend, counters) = FakeBackend::build_accepting(usize::MAX);
-    let s = MidiSession::open_over(backend, inlets()).unwrap();
+    let s = MidiSession::open_over(backend, inlets(), None).unwrap();
     let id = |name: &str| s.outputs().into_iter().find(|d| d.name == name).unwrap().id;
     let mut synth = s.connect_output(&id("Synth A")).unwrap();
     let mut iac = s.connect_output(&id("IAC Bus 1")).unwrap();
@@ -364,10 +364,10 @@ impl MidiEndpoints for LoggingBackend {
         sink.seed(os_devices(&self.inputs(), &[]))?;
         Ok(Box::new(NoWatch))
     }
-    fn inputs(&self) -> Vec<EndpointInfo> {
+    fn inputs(&self) -> Vec<OsEndpoint> {
         vec![crate::test_support::endpoint(1, "Logged")]
     }
-    fn outputs(&self) -> Vec<EndpointInfo> {
+    fn outputs(&self) -> Vec<OsEndpoint> {
         Vec::new()
     }
     fn open_input(
@@ -396,7 +396,7 @@ fn logging_session(refuse: bool) -> (MidiSession, Arc<Mutex<Vec<&'static str>>>)
     };
     let inlets = inlets();
     (
-        MidiSession::open_over(Box::new(backend), inlets).unwrap(),
+        MidiSession::open_over(Box::new(backend), inlets, None).unwrap(),
         log,
     )
 }
@@ -448,6 +448,6 @@ fn a_session_is_send() {
         tutti_graph::EventCapacity::of(8),
         std::time::Duration::ZERO,
     );
-    let session = MidiSession::open_over(backend, inlets).unwrap();
+    let session = MidiSession::open_over(backend, inlets, None).unwrap();
     assert!(is_send(&session));
 }

@@ -9,11 +9,11 @@
 use crate::common::blocks;
 use std::time::{Duration, Instant};
 
-use tutti_midi_hardware::EndpointId;
+use tutti_midi_device::EndpointId;
 use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint};
 use tutti_midi_runtime::{ClockKind, MidiClockDecoder};
 use tutti_session::{
-    FollowClock, FollowTempo, MidiError, MidiEvent, Session, SessionEvent, TempoError,
+    FollowClock, FollowTempo, MidiError, MidiReport, Session, SessionEvent, TempoError,
 };
 use tutti_transport::MotionEvent;
 use tutti_types::{At, Bpm, SampleRate};
@@ -65,7 +65,7 @@ fn send(fake: &FakeCounters, ump: Ump, at: Instant) {
 }
 
 /// Renders one block and runs one update; the MIDI events it reported.
-fn pump(s: &mut Session) -> Vec<MidiEvent> {
+fn pump(s: &mut Session) -> Vec<MidiReport> {
     blocks(s, 1);
     s.update()
         .into_iter()
@@ -77,7 +77,7 @@ fn pump(s: &mut Session) -> Vec<MidiEvent> {
 }
 
 /// Pumps until `done` holds of what an update reported, at most `limit` times.
-fn until(s: &mut Session, limit: usize, done: impl Fn(&[MidiEvent]) -> bool) -> Vec<MidiEvent> {
+fn until(s: &mut Session, limit: usize, done: impl Fn(&[MidiReport]) -> bool) -> Vec<MidiReport> {
     let mut all = Vec::new();
     for _ in 0..limit {
         all.extend(pump(s));
@@ -179,20 +179,21 @@ fn a_steady_clock_locks_and_sets_the_tempo_and_a_dropout_unlocks() {
     }
     send_ticks(&fake, Instant::now(), period, 60);
     let events = until(&mut s, 400, |e| {
-        e.iter().any(|e| matches!(e, MidiEvent::ClockLocked { .. }))
+        e.iter()
+            .any(|e| matches!(e, MidiReport::ClockLocked { .. }))
             && e.iter()
-                .any(|e| matches!(e, MidiEvent::TempoFollowed { .. }))
+                .any(|e| matches!(e, MidiReport::TempoFollowed { .. }))
     });
     assert!(events.iter().any(|e| matches!(
         e,
-        MidiEvent::ClockLocked {
+        MidiReport::ClockLocked {
             kind: ClockKind::BeatClock
         }
     )));
     let tempo = events
         .iter()
         .find_map(|e| match e {
-            MidiEvent::TempoFollowed { tempo, .. } => Some(*tempo),
+            MidiReport::TempoFollowed { tempo, .. } => Some(*tempo),
             _ => None,
         })
         .unwrap();
@@ -209,7 +210,7 @@ fn a_steady_clock_locks_and_sets_the_tempo_and_a_dropout_unlocks() {
     assert!(
         events.iter().any(|e| matches!(
             e,
-            MidiEvent::ClockUnlocked {
+            MidiReport::ClockUnlocked {
                 kind: ClockKind::BeatClock
             }
         )),
@@ -255,11 +256,12 @@ fn mtc_quarter_frames_lock_and_play_from_their_position() {
         );
     }
     let events = until(&mut s, 400, |e| {
-        e.iter().any(|e| matches!(e, MidiEvent::ClockLocked { .. }))
+        e.iter()
+            .any(|e| matches!(e, MidiReport::ClockLocked { .. }))
     });
     assert!(events.iter().any(|e| matches!(
         e,
-        MidiEvent::ClockLocked {
+        MidiReport::ClockLocked {
             kind: ClockKind::Mtc
         }
     )));
@@ -307,7 +309,7 @@ fn a_beat_clock_follower_owns_the_tempo_and_mtc_does_not() {
     assert!(
         events
             .iter()
-            .any(|e| matches!(e, SessionEvent::Midi(MidiEvent::ClockUnfollowed)))
+            .any(|e| matches!(e, SessionEvent::Midi(MidiReport::ClockUnfollowed)))
     );
     assert!(s.set_tempo(Bpm::of(100.0)).is_ok());
 }
@@ -327,7 +329,7 @@ fn a_clock_command_the_transport_refuses_is_counted() {
         // The list is full again before the update that places what the tap held.
         while s.schedule(At::NextBlock, MotionEvent::stop()).is_ok() {}
         for event in s.update() {
-            if let SessionEvent::Midi(MidiEvent::ClockCommandsRefused(n)) = event {
+            if let SessionEvent::Midi(MidiReport::ClockCommandsRefused(n)) = event {
                 refused += n;
             }
         }

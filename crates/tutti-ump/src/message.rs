@@ -968,7 +968,7 @@ pub enum Flex {
     /// Set Tempo: units of 10 ns per quarter note.
     SetTempo(u32),
     /// Set Time Signature.
-    SetTimeSignature(TimeSignature),
+    SetTimeSignature(FlexTimeSignature),
     /// Set Metronome.
     SetMetronome(Metronome),
     /// Set Key Signature.
@@ -990,7 +990,7 @@ pub enum Flex {
 
 /// Set Time Signature fields (§7.5.4).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct TimeSignature {
+pub struct FlexTimeSignature {
     /// The numerator field.
     pub numerator: u8,
     /// The denominator as a negative power of 2; `0` is non-standard.
@@ -1309,7 +1309,7 @@ pub struct DiscoveryFilter {
 
 /// An Endpoint Info Notification (§7.1.2).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct EndpointInfo {
+pub struct EndpointInfoNotification {
     /// The UMP version.
     pub version: UmpVersion,
     /// The Function Blocks never change.
@@ -1461,7 +1461,7 @@ pub enum Stream {
         filter: DiscoveryFilter,
     },
     /// Endpoint Info Notification.
-    EndpointInfo(EndpointInfo),
+    EndpointInfo(EndpointInfoNotification),
     /// Device Identity Notification.
     DeviceIdentity(DeviceIdentity),
     /// Endpoint Name Notification: 14 UTF-8 bytes, zero-padded.

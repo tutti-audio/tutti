@@ -28,7 +28,8 @@
 //!
 //! ```rust,no_run
 //! use std::time::Duration;
-//! use tutti_midi_hardware::{DeviceEvent, Devices};
+//! use tutti_midi_device::DeviceEvent;
+//! use tutti_midi_hardware::Devices;
 //!
 //! let devices = Devices::open()?;
 //! let events = devices.subscribe();
@@ -98,7 +99,8 @@
 //!
 //! ```rust,no_run
 //! use std::sync::Arc;
-//! use tutti_midi_hardware::{InputInlets, InputTiming, MidiSession};
+//! use tutti_midi_runtime::InputInlets;
+//! use tutti_midi_hardware::{InputTiming, MidiSession};
 //! use tutti_graph::Offset;
 //! use tutti_fixtures::midi;
 //! use tutti_ump::{MidiChannel, NoteVelocity};
@@ -106,7 +108,7 @@
 //! // The inlets inbound events land in (1024 events each, placed 10 ms after
 //! // they arrive), then a session over this platform's backend.
 //! let inlets = InputInlets::new(tutti_graph::EventCapacity::of(1024), std::time::Duration::from_millis(10));
-//! let mut session = MidiSession::open(Arc::clone(&inlets))?;
+//! let mut session = MidiSession::open(Arc::clone(&inlets), None)?;
 //!
 //! // The devices present now; capability (protocol, function blocks) is read from
 //! // the OS.
@@ -143,7 +145,7 @@
 //!   whose `push` answers [`Pushed`].
 //! - [`DeviceInfo`], [`DeviceId`], [`DeviceEvent`]: what the list holds and reports;
 //!   they live in `tutti-midi-device`, with the pure `DeviceTable` behind them.
-//! - [`EndpointInfo`], [`EndpointId`], [`UmpCapability`]: what a backend enumerates.
+//! - [`OsEndpoint`], [`EndpointId`], [`UmpCapability`]: what a backend enumerates.
 //! - [`DeviceStream`], [`Basis`]: what a device's UMP Stream conversation settled
 //!   (`MidiSession::poll` steps it, `MidiSession::stream` reads it).
 //! - [`MidiEndpoints`]: the backend trait; [`MidiSession::open`] picks this
@@ -259,7 +261,7 @@ mod wire;
 #[cfg(any(test, feature = "testing"))]
 pub mod test_support;
 
-pub use capability::{EndpointInfo, UmpCapability};
+pub use capability::{OsEndpoint, UmpCapability};
 pub use ci::{CiChange, CiPeerInfo, PeerId};
 pub use devices::{
     ChangeSink, DeviceEvents, Devices, OpenInput, OpenOutput, Pending, RecvTimeoutError, SeedError,
@@ -276,21 +278,7 @@ pub use profiles::{
 pub use properties::{PropertyAsk, PropertyCall, PropertyChange, PropertyError, PropertyPeer};
 pub use session::{Connected, DeviceQuery, MidiSession, Polled};
 pub use stream::{Basis, DeviceStream, InputTiming};
-pub use tutti_midi_device::{
-    BindPolicy, Capabilities, DeviceEvent, DeviceId, DeviceInfo, Endpoint, EndpointId,
-    FunctionBlock, Identity, Learned, Match, OsChange, OsDevice, PortDirection, Resolved,
-    SavedDevice, Supports,
-};
 pub use virtual_endpoint::{VirtualDestination, VirtualProtocol, VirtualSource, VirtualSpec};
-
-// --- Runtime delivery (the graph's MIDI border) ---
-//
-// The nodes a port feeds (`MidiIngestNode`, over the inlet each port is made with) and
-// clip playback live in `tutti-midi-runtime`; surfaced here because delivery
-// is what a port feeds, so a hardware consumer needs both. That is the test a
-// file codec fails: a `.mid` reader needs no port, and no port needs it.
-
-pub use tutti_midi_runtime::{InputId, InputInlets, MidiIngestNode, MidiOut, TimedMidiEvent};
 
 // --- Standard MIDI File codec: NOT here ---
 //

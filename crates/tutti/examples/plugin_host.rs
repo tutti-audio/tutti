@@ -28,12 +28,12 @@
 
 use std::path::PathBuf;
 
+use tutti::midi::{MidiChannel, TimedMidiEvent};
 use tutti::plugin::catalog::{CatalogConfig, PluginDb, PluginId, ScanPoll};
 use tutti::ump::{Address, Message, NoteNumber, U7, Ump, Voice1};
 use tutti::{
-    Beat, Bounce, Catalog, Format, MaxBlock, MidiChannel, Normalized, ParamId, Pcm, PluginEvent,
-    PluginRef, PoolEvent, PresetError, PresetKind, Range, Root, SampleRate, Samples, Session,
-    SessionEvent, TimedMidiEvent,
+    Beat, Bounce, Catalog, Format, MaxBlock, Normalized, ParamId, Pcm, PluginEvent, PluginRef,
+    PoolEvent, PresetError, PresetKind, Range, Root, SampleRate, Samples, Session, SessionEvent,
 };
 
 const RATE: SampleRate = SampleRate::SR_48K;

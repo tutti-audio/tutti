@@ -14,18 +14,20 @@
 //! CI runs it as a test (`test = true`).
 //!
 //! **Not covered here:** MIDI Time Code out, and the MIDI-CI session
-//! ([`Midi::enable_ci`](tutti::Midi::enable_ci) and the peers a
+//! ([`SessionBuilder::midi_ci`](tutti::SessionBuilder::midi_ci) and the peers a
 //! [`MidiInput`](tutti::midi::MidiInput) lists), which needs a peer device.
 
-use tutti::midi::{self, MidiRouteRule, TakePlacement};
+use tutti::midi::{
+    self, AddedInstrument, Message, MidiChannel, MidiFile, MidiGroup, MidiRouteRule, NoteNumber,
+    NoteVelocity, TakePlacement, Tick, Track,
+};
 use tutti::midi_file::{FileEvent, SmfDivision, SmfFormat};
 use tutti::midi_protocol::{MpeMode, MpeZoneConfig, MpeZones, PitchBendSensitivity};
 use tutti::polysynth::{PolySynth, SynthConfig};
 use tutti::ump::{TicksPerQuarterNote, U7};
 use tutti::{
-    AddedInstrument, Beat, ChannelLayout, Error, EventCapacity, Frame, InterleavedMut, MaxBlock,
-    Message, MidiChannel, MidiFile, MidiGroup, NoteNumber, NoteVelocity, SampleRate, Samples,
-    Session, SessionEvent, Stamp, Tick, Track,
+    Beat, ChannelLayout, Error, EventCapacity, Frame, InterleavedMut, MaxBlock, SampleRate,
+    Samples, Session, SessionEvent, Stamp,
 };
 use tutti_ump::Voice1;
 

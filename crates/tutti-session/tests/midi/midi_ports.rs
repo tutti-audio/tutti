@@ -8,8 +8,8 @@ use std::time::Instant;
 use crate::common::{MF, Seen, blocks, note, play, tap};
 use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
+use tutti_midi_device::{DeviceInfo, EndpointId, PortDirection};
 use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint, persistent_endpoint};
-use tutti_midi_hardware::{DeviceInfo, EndpointId, PortDirection};
 use tutti_midi_runtime::MidiClipNode;
 use tutti_session::{
     Declared, EventInPort, HandleError, LoadError, MidiInputEntry, MidiPortError, MidiRouteRule,
@@ -688,7 +688,8 @@ fn another_devices_removal_leaves_a_port_open() {
 /// handle then reads the stream.
 #[test]
 fn a_ports_info_follows_what_the_device_says() {
-    use tutti_midi_hardware::{Basis, Capabilities, Endpoint, Supports};
+    use tutti_midi_device::{Capabilities, Endpoint, Supports};
+    use tutti_midi_hardware::Basis;
     use tutti_ump::Protocol;
 
     let (mut s, fake) = session();

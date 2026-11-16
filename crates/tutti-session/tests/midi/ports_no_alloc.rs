@@ -10,7 +10,7 @@ use crate::common::{MF, play};
 use tutti_buffers::InterleavedMut;
 use tutti_fixtures::midi;
 use tutti_graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
-use tutti_midi_hardware::EndpointId;
+use tutti_midi_device::EndpointId;
 use tutti_midi_hardware::test_support::{FakeBackend, persistent_endpoint};
 use tutti_session::{MidiRouteRule, Session, midi_input, midi_output};
 use tutti_types::ChannelLayout;

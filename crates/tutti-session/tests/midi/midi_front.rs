@@ -408,8 +408,8 @@ fn a_route_rule_keyed_by_the_apps_id_round_trips_and_refuses_a_bad_channel() {
 #[cfg(feature = "midi-hardware")]
 mod hardware {
     use super::*;
+    use tutti_midi_device::{EndpointId, Identity, PortDirection};
     use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint};
-    use tutti_midi_hardware::{EndpointId, Identity, PortDirection};
     use tutti_session::{
         LoadError, MidiPortError, Peer, PoolState, PortCause, Presence, midi_input, midi_output,
     };
@@ -425,7 +425,7 @@ mod hardware {
     }
 
     /// A device the OS names by a unit, so its saved identity is exact.
-    fn unit(raw: u64, name: &str, unit: &str) -> tutti_midi_hardware::EndpointInfo {
+    fn unit(raw: u64, name: &str, unit: &str) -> tutti_midi_hardware::OsEndpoint {
         let mut e = endpoint(raw, name);
         e.identity = Identity::Product(unit.into());
         e
@@ -475,13 +475,7 @@ mod hardware {
     fn a_session_with_no_os_layer_refuses_by_name() {
         let mut bare = offline();
         assert!(bare.midi().devices().is_empty());
-        let identity = tutti_ump::DeviceIdentity {
-            manufacturer: tutti_ump::ManufacturerId::NON_COMMERCIAL,
-            family: [tutti_ump::U7::of(1); 2],
-            model: [tutti_ump::U7::of(2); 2],
-            revision: [tutti_ump::U7::of(3); 4],
-        };
-        let refused = bare.midi().enable_ci(identity).unwrap_err();
+        let refused = bare.midi().disable_ci().unwrap_err();
         assert!(matches!(
             refused,
             MidiError::Port(tutti_session::MidiPortError::NoHardware)
@@ -554,7 +548,7 @@ mod hardware {
     /// confirms as `Unknown` (never as the same unit).
     #[test]
     fn a_device_that_has_said_nothing_is_unknown() {
-        use tutti_midi_hardware::{Learned, Match};
+        use tutti_midi_device::{Learned, Match};
         let (mut s, fake) = session();
         fake.plug(endpoint(3, "Keys"), PortDirection::Input);
         let _ = s.update();

@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use tutti_fixtures::{BlockClock, EventRig};
 use tutti_graph::{EventEdge, EventIn, EventInletNode, EventOut, NodeKey};
-use tutti_midi_hardware::{InputInlets, MidiIngestNode};
+use tutti_midi_runtime::{InputInlets, MidiIngestNode};
 use tutti_types::{Frame, SampleRate};
 use tutti_ump::Ump;
 

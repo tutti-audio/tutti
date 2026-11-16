@@ -115,6 +115,10 @@ struct Options {
     mpe_mode: tutti_midi_protocol::MpeMode,
     #[cfg(feature = "midi")]
     midi_ports: tutti_midi_runtime::MidiInputPorts,
+    /// The identity MIDI-CI runs with; none, no MIDI-CI
+    /// ([`midi_ci`](Self::midi_ci)).
+    #[cfg(feature = "midi-hardware")]
+    midi_ci: Option<tutti_ump::DeviceIdentity>,
     /// Where the input ports' event times come from.
     #[cfg(feature = "midi-hardware")]
     midi_input_timing: tutti_midi_hardware::InputTiming,
@@ -162,6 +166,8 @@ impl Default for Options {
             mpe_mode: tutti_midi_protocol::MpeMode::Disabled,
             #[cfg(feature = "midi")]
             midi_ports: tutti_midi_runtime::MidiInputPorts::FIRST_GROUP,
+            #[cfg(feature = "midi-hardware")]
+            midi_ci: None,
             #[cfg(feature = "midi-hardware")]
             midi_input_timing: tutti_midi_hardware::InputTiming::Arrival,
             #[cfg(feature = "modulation")]
@@ -755,6 +761,24 @@ impl<C: Clock> SessionBuilder<C> {
         self
     }
 
+    /// Runs MIDI-CI over the OS MIDI layer ([`midi_hardware`](Self::midi_hardware)),
+    /// announcing `identity` in Discovery. **Without this call the session has no
+    /// MIDI-CI**: a Discovery carries a System Exclusive manufacturer id, tutti
+    /// has none, and MIDI 1.0's `7D` is "not to be used on any product released
+    /// to the public", so the app gives the id it registered (an identity under
+    /// `ManufacturerId::NON_COMMERCIAL` is for development and research only).
+    /// Every input the pool opens runs it, starting a device at the first
+    /// update after the input's negotiation settled and any Identity Request in
+    /// progress has ended. Found peers are
+    /// [`MidiInputInfo::peers`](crate::MidiInputInfo::peers). It has no effect
+    /// on a session with no OS MIDI layer.
+    #[cfg(feature = "midi-hardware")]
+    #[must_use]
+    pub fn midi_ci(mut self, identity: tutti_ump::DeviceIdentity) -> Self {
+        self.opts.midi_ci = Some(identity);
+        self
+    }
+
     /// Where the event times of the input ports come from:
     /// [`InputTiming::Arrival`](tutti_midi_hardware::InputTiming::Arrival), the
     /// OS's arrival stamp (the default), or
@@ -845,11 +869,12 @@ impl<C: Clock> SessionBuilder<C> {
                 crate::midi::MIDI_INPUT_INLET_CAPACITY,
                 crate::midi::input_lead(quantum.unwrap_or(max_block).samples(), rate),
             );
+            let ci = self.opts.midi_ci;
             let io = match backend {
                 Some(MidiBackend(backend)) => {
-                    tutti_midi_hardware::MidiSession::open_over(backend, inlets)?
+                    tutti_midi_hardware::MidiSession::open_over(backend, inlets, ci)?
                 }
-                None => tutti_midi_hardware::MidiSession::open(inlets)?,
+                None => tutti_midi_hardware::MidiSession::open(inlets, ci)?,
             };
             // Subscribed before anything can plug in unseen: `Phase::Poll`
             // is this subscription's only reader.

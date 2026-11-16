@@ -35,11 +35,11 @@ mod support;
 use std::path::{Path, PathBuf};
 
 use tutti::export::Written;
+use tutti::midi::{MidiChannel, MidiFile, NoteNumber, Tick, Track};
 use tutti::session::Master;
 use tutti::{
-    Beat, Bounce, Bpm, Format, MaxBlock, MidiChannel, MidiFile, NodeKey, NoteNumber, Pcm,
-    PluginRef, PluginState, PoolEvent, Range, Root, SampleRate, Samples, Session, SessionEvent,
-    Tick, Track,
+    Beat, Bounce, Bpm, Format, MaxBlock, NodeKey, Pcm, PluginRef, PluginState, PoolEvent, Range,
+    Root, SampleRate, Samples, Session, SessionEvent,
 };
 
 const RATE: SampleRate = SampleRate::SR_48K;

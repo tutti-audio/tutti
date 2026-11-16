@@ -114,7 +114,7 @@
 //! | `tutti::midi_runtime` | `tutti-midi-runtime` | MIDI graph nodes, Beat Clock and MTC sync, JR timestamps, MPE ingest | `midi` |
 //! | `tutti::midi_file` | `tutti-midi-file` | Standard MIDI File and MIDI 2.0 Clip File codecs | `midi` |
 //! | `tutti::midi_hardware` | `tutti-midi-hardware` | OS MIDI I/O: endpoints, send and receive | `midi-hardware` |
-//! | `tutti::midi` | `tutti-session` and the MIDI crates | the common MIDI path's names in one place: `MidiFile`, `Track`, `Message`, `Ump`, `Stamp`, `TapEvent`, `MidiRouteRule`, `MidiEvent`, `midi::Error` | `midi` |
+//! | `tutti::midi` | `tutti-session` and the MIDI crates | the common MIDI path's names in one place: `MidiFile`, `Track`, `Message`, `Ump`, `MidiRouteRule`, `MidiReport`, `midi::Error` | `midi` |
 //! | `tutti::plugin` | `tutti-plugin` | VST2, VST3, CLAP and AU plugins as graph nodes | `plugin` + a format |
 //!
 //! Each module is the whole crate, so its own docs are the reference for it.
@@ -306,8 +306,8 @@ pub use tutti_midi_file as midi_file;
 /// The names of the common MIDI path in one place:
 /// a file (`MidiFile`, `Track`, `Tick`), a message (`Message`, `Ump`,
 /// `MidiChannel`, `MidiGroup`, `NoteNumber`, `NoteVelocity`), a timed event, the keys
-/// that play an instrument or a live input (`MidiKeys`, sent with a `Stamp`) and a take read with (`TapEvent`, `EventTapReader`),
-/// the session's route rule, events and errors (`MidiRouteRule`, `MidiEvent`,
+/// that play an instrument or a live input (`MidiKeys`),
+/// the session's route rule, events and errors (`MidiRouteRule`, `MidiReport`,
 /// `midi::Error`), a host's own output (`midi_sink`, `MidiSink`), and under `midi-hardware` a device (`DeviceId`,
 /// `DeviceInfo`), the ports the pool opens for them (`midi_input`, `midi_output`,
 /// `MidiInput`, `MidiOutput`) and what an open one said of itself (`Learned`, `SavedDevice`, `Match`), and the Profiles
@@ -318,10 +318,11 @@ pub use tutti_midi_file as midi_file;
 /// MIDI-CI codec is `tutti-midi-device`'s. Feature `midi`.
 #[cfg(feature = "midi")]
 pub mod midi {
-    pub use tutti_graph::{EventCapacity, EventTapReader, Refused, Stamp, TapEvent};
     pub use tutti_midi_file::{FileEvent, Meta, MidiFile, SmfFormat, Tick, Track};
     pub use tutti_midi_runtime::{MidiKeys, TimedMidiEvent};
-    pub use tutti_ump::{Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, U7, U14, Ump};
+    pub use tutti_ump::{
+        CCNumber, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, U7, U14, Ump,
+    };
 
     /// The session's one MIDI error (`tutti_session::MidiError`): each cause
     /// (hardware, file, send, route) is its source.
@@ -331,16 +332,17 @@ pub mod midi {
     pub use tutti_session::RouteDeclarer;
     #[cfg(feature = "session")]
     pub use tutti_session::{
-        AddedInstrument, AnyNode, FollowTempo, InstrumentHandle, Midi, MidiEvent, MidiLoad,
+        AddedInstrument, AnyNode, FollowTempo, InstrumentHandle, Midi, MidiLoad, MidiReport,
         MidiRouteRule, MidiSink, MidiSinkEntry, MidiSinkInfo, SinkOptions, Stamping, TakePlacement,
         midi_sink,
     };
 
     #[cfg(feature = "midi-hardware")]
+    pub use tutti_midi_device::{DeviceId, DeviceInfo, Learned, Match, SavedDevice};
+    #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_hardware::{
-        ChannelCount, ChannelProfile, CiChange, CiPeerInfo, DeviceId, DeviceInfo, DeviceQuery,
-        Learned, ListedProfile, Match, PeerId, PeerProfiles, ProfileError, ProfileSwitch,
-        ProfilesChange, SavedDevice, Whole, WholeProfile,
+        ChannelCount, ChannelProfile, CiChange, CiPeerInfo, DeviceQuery, ListedProfile, PeerId,
+        PeerProfiles, ProfileError, ProfileSwitch, ProfilesChange, Whole, WholeProfile,
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
     pub use tutti_session::{
@@ -396,7 +398,6 @@ pub use tutti_graph::{
 pub use tutti_metering::{LoadMeter, LoadReading};
 pub use tutti_nodes::{ClickState, MetronomeMode};
 pub use tutti_rt::{ArcLend, Loan, Reader};
-pub use tutti_tempo::TempoMap;
 pub use tutti_transport::{
     FadeOut, LoopEdit, LoopRegion, MotionEvent, MotionState, OfflineTimeline,
     OfflineTimelineConfig, Then, Timeline, Transport, TransportCommand,
@@ -413,7 +414,6 @@ pub use tutti_types::{
     SamplePosition, SampleRate, Samples, Seconds, Semitones, Speaker, Tail, TimeSignature,
     UnitAddr, UnitParam, Velocity,
 };
-pub use tutti_ump::{CCNumber, MidiChannel, MidiGroup};
 
 // The device handle and a device's identity.
 #[cfg(feature = "device")]
@@ -439,10 +439,6 @@ pub use tutti_nodes::{
 // The session, its wiring and its requests.
 #[cfg(feature = "session")]
 pub use tutti_graph::NodeKey;
-#[cfg(feature = "midi")]
-pub use tutti_midi_file::{MidiFile, Tick, Track};
-#[cfg(feature = "midi")]
-pub use tutti_midi_runtime::TimedMidiEvent;
 #[cfg(feature = "modulation")]
 pub use tutti_modulation::{Follower, Lfo};
 #[cfg(feature = "plugin")]
@@ -456,8 +452,6 @@ pub use tutti_session::{
     PluginHealth, PluginInfo, PluginNode, PluginParamError, PoolEvent, PoolState, PooledPlugin,
     PortCounts, PresetEntry, PresetKind, Presets, RecoveryFailure, ReloadCause, TypedParam,
 };
-#[cfg(all(feature = "session", feature = "midi"))]
-pub use tutti_session::{AddedInstrument, MidiEvent, MidiRouteRule};
 #[cfg(all(feature = "session", feature = "export"))]
 pub use tutti_session::{
     Bounce, BounceError, BounceLatency, BounceTail, Bounced, Range, Stem, StemGain,
@@ -481,5 +475,3 @@ pub use tutti_session::{
 pub use tutti_session::{ParamRef, RouteSpec};
 #[cfg(all(feature = "session", feature = "sampler"))]
 pub use tutti_session::{SamplerEvent, SamplerLoad};
-#[cfg(feature = "midi")]
-pub use tutti_ump::{Message, NoteNumber, NoteVelocity, Ump};

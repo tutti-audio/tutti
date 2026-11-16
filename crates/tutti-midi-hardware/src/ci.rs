@@ -8,21 +8,21 @@
 //!
 //! # Opt-in
 //!
-//! **It is off until the app gives an identity**
-//! ([`MidiSession::enable_ci`](crate::MidiSession::enable_ci)). A Discovery
+//! **It is off unless the app gives an identity**
+//! ([`MidiSession::open`](crate::MidiSession::open)). A Discovery
 //! announces a System Exclusive manufacturer id, and tutti has none of its own:
 //! M1 reserves `7D` for non-commercial use, never for a released product, and
 //! tutti is a library that apps ship. So no
 //! device is started, and the port copies no SysEx for MIDI-CI, until the app
-//! says who it is, with the id it registered. Enabling reaches the inputs
-//! already open (they start at the next poll, after any Identity Request in
-//! progress has ended) and later ones; disabling ends every running device,
+//! says who it is, with the id it registered. It reaches every input (a device
+//! starts at the first poll after the input's negotiation settled and any
+//! Identity Request in progress has ended); disabling ends every running device,
 //! sending each an Invalidate MUID (M2-101 §5.9 lists a shutdown among its
 //! reasons) and reporting its peers as lost.
 //!
 //! # When it ends
 //!
-//! Besides a disable or another identity, a device ends when its Group is no
+//! Besides a disable, a device ends when its Group is no
 //! longer called for: a settled Endpoint whose Function Block changes (the
 //! Connection keeps hearing them unless the Endpoint declared them static)
 //! is read again, and the Groups recomputed. A Group that stays keeps its
@@ -128,7 +128,7 @@
 //!
 //! # What it declares
 //!
-//! - **Identity**: the app's, as given to `enable_ci`.
+//! - **Identity**: the app's, as given to [`MidiSession::open`](crate::MidiSession::open).
 //! - **Categories**: Profile Configuration, Process Inquiry and Property Exchange. The
 //!   devices initiate all three and answer Property Exchange from their store.
 //!   They answer a Profile Inquiry with no Profiles (M2-101 §7.13 allows a device
@@ -451,7 +451,7 @@ impl Ci {
     }
 
     /// One step at `now`, with the identity the app enabled MIDI-CI with, if it
-    /// did: ends the devices that run under another identity (or none), starts
+    /// did: ends the devices that run when it is none, starts
     /// them if they are to run and do not, else hands the running ones what the
     /// port heard and the time. What they send goes out on `out`. Returns the
     /// peers' changes.
@@ -1346,7 +1346,7 @@ mod tests {
             tutti_graph::EventCapacity::of(64),
             Duration::ZERO,
         );
-        let session = MidiSession::open_over(backend, inlets).unwrap();
+        let session = MidiSession::open_over(backend, inlets, None).unwrap();
         counters.plug(endpoint(7, "Wire"), PortDirection::Duplex);
         let id = session.outputs().first().expect("the device").id.clone();
         (session.connect_output(&id).unwrap(), counters)
@@ -1672,7 +1672,7 @@ mod tests {
             tutti_graph::EventCapacity::of(64),
             Duration::ZERO,
         );
-        let session = MidiSession::open_over(backend, inlets).unwrap();
+        let session = MidiSession::open_over(backend, inlets, None).unwrap();
         counters.plug(endpoint(7, "Wire"), PortDirection::Duplex);
         session.outputs().first().expect("the device").id.clone()
     }

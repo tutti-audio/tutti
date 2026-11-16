@@ -1,7 +1,7 @@
 use super::*;
 use tutti_buffers::InterleavedMut;
+use tutti_midi_device::{EndpointId, PortDirection};
 use tutti_midi_hardware::test_support::{FakeBackend, persistent_endpoint};
-use tutti_midi_hardware::{EndpointId, PortDirection};
 use tutti_transport::MotionEvent;
 use tutti_types::{ChannelLayout, Frame};
 

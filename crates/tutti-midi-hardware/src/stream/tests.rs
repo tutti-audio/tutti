@@ -50,10 +50,20 @@ fn streams(polled: impl IntoIterator<Item = Polled>) -> Vec<(DeviceId, DeviceStr
 }
 
 fn session_over(os: UmpCapability, direction: PortDirection, device: Endpoint) -> Wire {
+    session_over_ci(os, direction, device, None)
+}
+
+/// As [`session_over`], with MIDI-CI under `ci` from the start.
+fn session_over_ci(
+    os: UmpCapability,
+    direction: PortDirection,
+    device: Endpoint,
+    ci: Option<tutti_ump::DeviceIdentity>,
+) -> Wire {
     let (backend, counters) = FakeBackend::build_with(vec![], vec![], usize::MAX);
     let inlets =
         tutti_midi_runtime::InputInlets::new(tutti_graph::EventCapacity::of(64), Duration::ZERO);
-    let session = MidiSession::open_over(backend, inlets).unwrap();
+    let session = MidiSession::open_over(backend, inlets, ci).unwrap();
     let mut info = endpoint(7, "Wire");
     info.capability = os;
     counters.plug(info, direction);
@@ -346,13 +356,19 @@ fn a_midi1_port_is_not_sent_stream_messages_and_is_described_at_once() {
 
 /// A MIDI 1.0 duplex device, connected, and what the session sent at `ms`.
 fn midi1_wire() -> Wire {
-    let mut wire = session_over(
+    midi1_wire_ci(None)
+}
+
+/// As [`midi1_wire`], with MIDI-CI under `ci` from the start.
+fn midi1_wire_ci(ci: Option<tutti_ump::DeviceIdentity>) -> Wire {
+    let mut wire = session_over_ci(
         UmpCapability::midi1(),
         PortDirection::Duplex,
         Endpoint::new(Supports::of(Capabilities {
             midi1: true,
             ..Capabilities::default()
         })),
+        ci,
     );
     if let crate::Connected::Opened(inlet) = wire
         .session

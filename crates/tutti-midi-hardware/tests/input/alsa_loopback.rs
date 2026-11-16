@@ -18,7 +18,9 @@ use super::listener::Listener;
 
 use tutti_fixtures::midi::{note_off, note_on};
 use tutti_graph::{EventCapacity, Offset};
-use tutti_midi_hardware::{DeviceInfo, InputInlets, MidiSession, OpenOutput};
+use tutti_midi_device::DeviceInfo;
+use tutti_midi_hardware::{MidiSession, OpenOutput};
+use tutti_midi_runtime::InputInlets;
 use tutti_ump::{KeyEvent, MidiChannel, Ump};
 
 /// Whether `ev` starts a note, in either protocol.
@@ -44,7 +46,7 @@ fn open() -> Loopback {
     // 256 events, each placed 20 ms after it arrived.
     let inlets = InputInlets::new(EventCapacity::of(256), Duration::from_millis(20));
     let mut graph = Listener::over(&inlets);
-    let mut io = MidiSession::open(Arc::clone(&inlets)).expect("open MIDI");
+    let mut io = MidiSession::open(Arc::clone(&inlets), None).expect("open MIDI");
     let inputs = io.inputs();
     let outputs = io.outputs();
     let (Some(inp), Some(out)) = (pick(&inputs), pick(&outputs)) else {

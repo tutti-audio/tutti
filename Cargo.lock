@@ -2389,6 +2389,7 @@ dependencies = [
  "tutti-graph",
  "tutti-measure",
  "tutti-metering",
+ "tutti-midi-device",
  "tutti-midi-file",
  "tutti-midi-hardware",
  "tutti-midi-protocol",
