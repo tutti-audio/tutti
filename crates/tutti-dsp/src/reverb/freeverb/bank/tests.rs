@@ -97,7 +97,6 @@ fn a_comb_is_the_feedback_comb_of_its_definition() {
         comb.process(&x, 1.0, &mut y);
         let want = comb_response(len, l, g, d);
         for (n, (&got, &w)) in y.iter().zip(&want).enumerate() {
-            // Under 1e-6 the comb flushes to zero: a bound far under the figures asserted.
             assert!(
                 (f64::from(got) - w).abs() < 1e-5,
                 "L {l}, g {g}, d {d}, frame {n}: {got} vs {w}"
@@ -458,11 +457,11 @@ fn views_of_any_format_and_width_are_the_f32_render() {
     assert_eq!(left, want.0);
 }
 
-/// The all-pass and the comb flush what is under 1e-6 to zero, so a tail that has fallen
-/// below it is exactly silent, and a hostile input (a huge value) stays finite at the
-/// extreme room.
+/// A tail that has run twice its declared length is under -100 dB of the impulse (the
+/// declared tail is the fall to -60 dB, and the decay is exponential), and a hostile input
+/// (a huge value) stays finite at the extreme room.
 #[test]
-fn the_tail_falls_to_exact_silence_and_a_huge_input_stays_finite() {
+fn the_tail_falls_far_below_its_floor_and_a_huge_input_stays_finite() {
     let c = controls(1.0, 0.0);
     let (mut bank, mut glides) = settled(RATE, &c);
     let Tail::Finite(tail) = bank.tail_of(&c) else {
@@ -473,7 +472,7 @@ fn the_tail_falls_to_exact_silence_and_a_huge_input_stays_finite() {
         l[tail.get() * 2..]
             .iter()
             .chain(&r[tail.get() * 2..])
-            .all(|&s| s == 0.0)
+            .all(|&s| s.abs() < 1e-5)
     );
     let (mut bank, mut glides) = settled(RATE, &c);
     let loud = vec![1e30f32; 4_000];
@@ -502,4 +501,42 @@ fn an_absurd_rate_neither_hangs_nor_allocates_without_bound() {
     let bank = FreeverbBank::new(SampleRate::of(1.0e9));
     let longest = bank.combs.iter().flatten().map(|c| c.buffer.len()).max();
     assert_eq!(longest, Some(1 << 16));
+}
+
+/// The Schroeder integral of the render of the General MIDI room at damping 0 falls at the
+/// loop decay of its combs: the sum of eight parallel exponentials, each with the RT60
+/// `-3 L / (rate log10 g)` of its own length `L`, so the render's RT60 (the -20 to -50 dB
+/// fall, doubled) lies between that of the shortest comb (1116 frames) and that of the
+/// longest of the right channel (1640 + 23), and nothing flushed it short: the curve runs
+/// to -90 dB and below.
+#[test]
+fn the_render_schroeder_rt60_lies_between_the_shortest_and_longest_comb_t60() {
+    let c = controls(0.5, 0.0);
+    let g = f64::from(c.feedback().get());
+    let comb_t60 = |l: f64| -3.0 * l / (RATE.get() * libm::log10(g));
+    let (mut bank, mut glides) = settled(RATE, &c);
+    let frames = (4.0 * comb_t60(1663.0) * RATE.get()) as usize;
+    let (l, r) = run(&mut bank, &mut glides, &impulse(frames), 512);
+    let mut energy = vec![0.0f64; frames];
+    let mut total = 0.0;
+    for i in (0..frames).rev() {
+        total += f64::from(l[i]).powi(2) + f64::from(r[i]).powi(2);
+        energy[i] = total;
+    }
+    let db: Vec<f64> = energy
+        .iter()
+        .map(|e| 10.0 * libm::log10(e / energy[0]))
+        .collect();
+    let at = |level: f64| {
+        db.iter()
+            .position(|&x| x <= level)
+            .expect("the curve falls")
+    };
+    let rt60 = 2.0 * (at(-50.0) - at(-20.0)) as f64 / RATE.get();
+    let (shortest, longest) = (comb_t60(1116.0), comb_t60(1663.0));
+    assert!(
+        rt60 > 0.95 * shortest && rt60 < 1.05 * longest,
+        "{rt60} s outside {shortest}..{longest} s"
+    );
+    assert!(at(-90.0) > at(-50.0), "the decay runs on below -90 dB");
 }

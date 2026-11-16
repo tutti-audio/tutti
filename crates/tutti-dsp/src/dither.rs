@@ -57,7 +57,7 @@ impl DitherNoise {
 
     #[inline]
     fn rectangular(&mut self) -> f32 {
-        Xorshift32::to_unit(self.rng.next_u32()) - 0.5
+        0.5 * Xorshift32::to_bipolar(self.rng.next_u32())
     }
 
     #[inline]

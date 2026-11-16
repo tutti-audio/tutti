@@ -2,7 +2,7 @@
 // MeltySynth (Copyright (C) 2021 Nobuaki Tanaka). The MIT notice is
 // LICENSE-RUSTYSYNTH.txt, at the root of this crate.
 
-use tutti_ump::ControlValue;
+use tutti_midi_protocol::widen_value;
 use tutti_ump::{Bank, CCNumber, U7, U14, Voice2};
 
 /// The amount of the default modulators CC 91 to reverb send and CC 93 to
@@ -114,7 +114,7 @@ impl Channel {
         let fresh = Self::new(self.is_percussion_channel);
         let cc = |controller: CCNumber, value: u8| Voice2::ControlChange {
             controller,
-            value: ControlValue::new(u32::from(value) << 25),
+            value: widen_value(U7::masked(value)),
         };
         // What the receiver holds as Bank Select once the messages so far
         // are read: nothing, then the bank's MSB if a Program Change goes.
@@ -185,5 +185,31 @@ impl Channel {
     /// section 8.4.9, as [`reverb_send`](Self::reverb_send).
     pub(crate) fn chorus_send(&self) -> f32 {
         SEND_AMOUNT * (f32::from(self.chorus_send) / 128_f32)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tutti_ump::ControlValue;
+
+    /// A chased effect send is the 7-bit value widened Min-Center-Max (M2-115
+    /// section 3): 0 stays 0, the centre 64 is exactly `0x8000_0000` and 127
+    /// is full scale, `0xFFFF_FFFF`, and a value below the centre shifts (1 is `1 << 25`);
+    /// a plain shift would put 127 at
+    /// `0xFE00_0000`.
+    #[test]
+    fn a_chased_send_is_widened_to_the_corners_of_32_bits() {
+        for (send, want) in [(64, 0x8000_0000_u32), (127, 0xFFFF_FFFF), (1, 1 << 25)] {
+            let mut channel = Channel::new(false);
+            channel.set_reverb_send(send);
+            let mut seen = Vec::new();
+            channel.chase(&mut |m| seen.push(m));
+            let Some(Voice2::ControlChange { controller, value }) = seen.pop() else {
+                panic!("a send is chased as a control change");
+            };
+            assert_eq!(controller, CCNumber::REVERB_SEND);
+            assert_eq!(value, ControlValue::new(want), "send {send}");
+        }
     }
 }

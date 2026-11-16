@@ -23,6 +23,7 @@ use crate::tuning::A4_FREQ;
 use crate::unison::MAX_UNISON_VOICES;
 use crate::{FilterModConfig, FilterType, SynthConfig};
 use crate::{MpeVoiceState, UnisonEngine, UnisonVoiceParams, UnisonVoices};
+use tutti_dsp::{PanLaw, pan_gains};
 use tutti_types::{
     Amplitude, Depth, Hz, Pan, Phase, PhaseIncrement, Resonance, SampleRate, Seconds, Semitones,
 };
@@ -114,18 +115,14 @@ fn two_octave_factor(x: f32) -> f32 {
 }
 
 /// The channel's pan (CC 10) as a pair of gains on a voice's own: RP-036's
-/// `cos` and `sin` of `Pi/2` along the pan, scaled by `sqrt(2)` so that the
+/// pan law scaled by `sqrt(2)` ([`PanLaw::Rp036UnityCentre`]) so that the
 /// centre leaves the voice's own placement alone (its constant-power pan law
 /// puts `sqrt(0.5)` in each channel at its centre, which a mono voice at the
 /// channel's centre keeps: RP-036's `cos (Pi/4)`). A mono voice panned by the
 /// channel alone thus has RP-036's gains exactly; a unison stack, whose
 /// sub-voices spread about the centre, is balanced by it.
-fn channel_pan(channel: &ChannelState) -> (f32, f32) {
-    // `sqrt(2) cos(Pi/4 + d)` is `cos d - sin d` and `sqrt(2) sin(Pi/4 + d)` is
-    // `cos d + sin d`, with `d` the angle off the centre: written so, the centre
-    // is 1 exactly, where `SQRT_2 * FRAC_PI_4.cos()` is one ulp short in `f32`.
-    let (sin, cos) = (std::f32::consts::FRAC_PI_4 * channel.pan().get()).sin_cos();
-    (cos - sin, cos + sin)
+fn channel_pan(channel: &ChannelState) -> (Amplitude, Amplitude) {
+    pan_gains(channel.pan(), PanLaw::Rp036UnityCentre)
 }
 
 impl SynthVoice {
@@ -420,11 +417,12 @@ impl SynthVoice {
             bank.set_pitch(lane, Hz(freq * ratio));
             // Constant-power pan law, then the unison voice's own gain and the
             // voice's. Evaluated per control step, not per sample.
-            let (pan, g) = (pan.get(), amplitude.get() * gain);
+            let (left, right) = pan_gains(pan, PanLaw::SquareRoot);
+            let g = amplitude.get() * gain;
             bank.set_gains(
                 lane,
-                Amplitude(((1.0 - pan) * 0.5).sqrt() * g * pan_left),
-                Amplitude(((1.0 + pan) * 0.5).sqrt() * g * pan_right),
+                Amplitude(left.get() * g * pan_left.get()),
+                Amplitude(right.get() * g * pan_right.get()),
             );
             if self.snap_tone {
                 bank.snap_tone(lane);

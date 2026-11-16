@@ -810,3 +810,35 @@ fn a_negative_position_reads_the_end_of_the_cycle() {
         assert!((got - 0.5).abs() < 1e-6, "{got} at {}", cycle - 0.25);
     }
 }
+
+/// `splitmix64` is the published generator (Vigna): from state `s` the output
+/// is the finalizer of `s + 0x9E3779B97F4A7C15`. The first outputs from state 0
+/// are 0xE220A8397B1DCDAF, 0x6E789E6AA1B965F4 and 0x06C45D188009454F, and the
+/// generator's own state steps by the increment.
+#[test]
+fn splitmix64_reproduces_the_reference_generator() {
+    let gamma = 0x9E37_79B9_7F4A_7C15_u64;
+    let reference = |state: u64| {
+        let mut z = state.wrapping_add(gamma);
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    };
+    // The generator's n-th output reads the state advanced n - 1 steps; the one mix takes
+    // the state before the increment.
+    for n in 0..100_u64 {
+        let state = n.wrapping_mul(gamma);
+        assert_eq!(splitmix64(state), reference(state));
+    }
+    assert_eq!(splitmix64(0), 0xE220_A839_7B1D_CDAF);
+    assert_eq!(splitmix64(gamma), 0x6E78_9E6A_A1B9_65F4);
+    assert_eq!(splitmix64(2u64.wrapping_mul(gamma)), 0x06C4_5D18_8009_454F);
+}
+
+/// The random LFO's value for cycle 0 is not a constant -1: the mix of index 0
+/// is not 0.
+#[test]
+fn the_hash_of_cycle_zero_is_inside_the_range_and_not_the_floor() {
+    let h = hash_bipolar(0);
+    assert!(h > -1.0 && h < 1.0, "{h}");
+}

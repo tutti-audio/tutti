@@ -40,3 +40,31 @@ fn to_unit_maps_the_word_range_onto_zero_to_one() {
     let third = Xorshift32::to_unit(u32::MAX / 3);
     assert!((f64::from(third) - 1.0 / 3.0).abs() < 1e-7, "{third}");
 }
+
+/// The generator's words are Marsaglia's recurrence (`x ^= x << 13; x ^= x >> 17;
+/// x ^= x << 5`) applied to the previous word, written out here, from a stated
+/// seed over a thousand steps.
+#[test]
+fn a_thousand_words_follow_the_published_recurrence() {
+    let mut g = seed(0xDEAD_BEEF);
+    let mut x = 0xDEAD_BEEF_u32;
+    for i in 0..1000 {
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        assert_eq!(g.next_u32(), x, "word {i}");
+    }
+}
+
+/// `to_bipolar` is `2 u - 1` of `to_unit`: the end words are -1 and 1, and the
+/// middle word `2^31` is `2^32 / (2^32 - 1) - 1`, a hair above zero (2.3e-10, which
+/// `f32` rounds to 0).
+#[test]
+fn to_bipolar_maps_the_word_range_onto_minus_one_to_one() {
+    assert_eq!(Xorshift32::to_bipolar(0), -1.0);
+    assert_eq!(Xorshift32::to_bipolar(u32::MAX), 1.0);
+    let mid = Xorshift32::to_bipolar(1 << 31);
+    assert!(f64::from(mid).abs() < 1e-7, "{mid}");
+    let quarter = Xorshift32::to_bipolar(u32::MAX / 4);
+    assert!((f64::from(quarter) + 0.5).abs() < 1e-7, "{quarter}");
+}

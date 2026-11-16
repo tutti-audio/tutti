@@ -8,6 +8,8 @@
 
 use tutti_types::{Amplitude, SampleRate, SampleSpan, Seconds};
 
+use crate::level::{db_to_ratio_f64, ratio_to_db_f64};
+
 /// The loop gain that makes a loop of `delay` frames decay by 60 dB in `rt60`:
 /// `g = 10^(-3 d / (RT60 fs))`.
 ///
@@ -28,11 +30,11 @@ pub fn loop_gain(delay: SampleSpan, rt60: Seconds, rate: SampleRate) -> Amplitud
     if trips == SampleSpan::ZERO {
         return Amplitude::SILENT;
     }
-    Amplitude(libm::exp10(-3.0 * delay.get() / trips.get()) as f32)
+    Amplitude(db_to_ratio_f64(-60.0 * delay.get() / trips.get()) as f32)
 }
 
 /// The inverse of [`loop_gain`]: the RT60 of a loop of `delay` frames at
-/// gain `gain`, `-3 d / (fs log10 g)`.
+/// gain `gain`, `-60 d / (fs · 20 log10 g)`.
 ///
 /// A gain of 0 decays at once (zero seconds); a gain of 1 or more, and a gain
 /// that is NaN or negative (not a loop gain), never settle: infinity.
@@ -40,20 +42,20 @@ pub fn loop_gain(delay: SampleSpan, rt60: Seconds, rate: SampleRate) -> Amplitud
 pub fn rt60_from_gain(gain: Amplitude, delay: SampleSpan, rate: SampleRate) -> Seconds {
     Seconds(decay_seconds(
         delay.get(),
-        libm::log10(f64::from(gain.get())),
+        ratio_to_db_f64(f64::from(gain.get())),
         rate.get(),
     ))
 }
 
-/// RT60 in seconds of a loop set (`delay_sum` frames in all, `log10_gain_sum`
-/// the sum of the loop gains' base-10 logs): `-3 Σm / (fs Σ log10 g)`.
-pub(crate) fn decay_seconds(delay_sum: f64, log10_gain_sum: f64, rate: f64) -> f64 {
-    if log10_gain_sum.is_nan() || log10_gain_sum >= 0.0 {
+/// RT60 in seconds of a loop set (`delay_sum` frames in all, `db_sum` the sum of
+/// the loop gains' decibels per trip): `-60 Σm / (fs Σ dB)`.
+pub(crate) fn decay_seconds(delay_sum: f64, db_sum: f64, rate: f64) -> f64 {
+    if db_sum.is_nan() || db_sum >= 0.0 {
         f64::INFINITY
-    } else if log10_gain_sum == f64::NEG_INFINITY {
+    } else if db_sum == f64::NEG_INFINITY {
         0.0
     } else {
-        -3.0 * delay_sum / (rate * log10_gain_sum)
+        -60.0 * delay_sum / (rate * db_sum)
     }
 }
 
