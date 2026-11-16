@@ -108,7 +108,7 @@
 //! | `tutti::soundfont` | `tutti-soundfont` | SoundFont (.sf2) playback node | `soundfont` |
 //! | `tutti::dsp` | `tutti-dsp` | real FFT, windows, filters, dynamics, convolution, delay, reverb | `dsp` |
 //! | `tutti::measure` | `tutti-measure` | waveform, onsets, pitch, loudness, correlation, spectra, STFT | `dsp` |
-//! | `tutti::modulation` | `tutti-modulation` | modulation sources, routes and the compiler to per-param control programs | `modulation` |
+//! | `tutti::modulation` | `tutti-modulation` | modulation sources, routes and the compiler to per-param control programs | always |
 //! | `tutti::midi_protocol` | `tutti-midi-protocol` | MIDI 1.0 to 2.0 translation, MPE zones | `midi` |
 //! | `tutti::midi_runtime` | `tutti-midi-runtime` | MIDI graph nodes, Beat Clock and MTC sync, JR timestamps, MPE ingest | `midi` |
 //! | `tutti::midi_file` | `tutti-midi-file` | Standard MIDI File and MIDI 2.0 Clip File codecs | `midi` |
@@ -126,8 +126,8 @@
 //! - `device` — `tutti::device`, the sound card. Off by default so an offline
 //!   render, a CI job or a server builds without ALSA or CoreAudio headers.
 //! - `jack` — JACK output through `tutti-cpal` (links libjack; implies `device`).
-//! - `decode-wav`, `decode-flac`, `decode-mp3`, `decode-ogg` — audio file decoders (each implies `codec`, and
-//!   enables the same decoder in the sampler when `sampler` is on).
+//! - `decode-wav`, `decode-flac`, `decode-mp3`, `decode-ogg` — audio file decoders (each implies `codec` and
+//!   turns on the same decoder in `tutti-codec`; a sampler decodes through it).
 //! - `encode-wav`, `encode-flac`, `encode-aiff`, `encode-vorbis` — the encoders `tutti::codec` writes
 //!   (each implies `codec`; none implies `export`, and `encode-vorbis` is the one path to a C library).
 //! - `codec` — `tutti::codec`. Implied by every decode and encode feature.
@@ -137,8 +137,8 @@
 //! - `export` — `tutti::export` (implies `encode-wav`).
 //! - `midi` — `tutti::midi`, `tutti::midi_protocol`, `tutti::midi_runtime`, `tutti::midi_file`. `crates/tutti/examples/midi_all.rs` uses every piece together, offline.
 //! - `midi-hardware` — `tutti::midi_hardware` (implies `midi`).
-//! - `synth`, `soundfont`, `sampler`, `dsp`, `modulation` — the
-//!   matching module (`dsp` gives both `tutti::dsp` and `tutti::measure`). `soundfont` implies `midi`; `sampler` implies `decode-wav`.
+//! - `synth`, `soundfont`, `sampler`, `dsp` — the
+//!   matching module (`dsp` gives both `tutti::dsp` and `tutti::measure`). `synth` and `soundfont` imply `midi`; `sampler` implies no decoder.
 //! - `plugin` — `tutti::plugin` (implies `midi`), with one or more formats:
 //!   `vst2`, `vst3`, `clap`, `au`. Each format links its SDK, which is why none
 //!   is in `full`. The out-of-process plugin server is a separate binary,
@@ -275,9 +275,7 @@ pub use tutti_dsp as dsp;
 pub use tutti_measure as measure;
 
 /// Modulation (`tutti-modulation`): sources, routes and the compiler that turns
-/// them into one control program per param. Feature
-/// `modulation`.
-#[cfg(feature = "modulation")]
+/// them into one control program per param.
 pub use tutti_modulation as modulation;
 
 // --- midi -------------------------------------------------------------------
@@ -440,7 +438,6 @@ pub use tutti_nodes::{
 // The session, its wiring and its requests.
 #[cfg(feature = "session")]
 pub use tutti_graph::NodeKey;
-#[cfg(feature = "modulation")]
 pub use tutti_modulation::{Follower, Lfo};
 #[cfg(feature = "plugin")]
 pub use tutti_plugin::catalog::{Catalog, Hosting, PluginRef, PluginState};
@@ -472,7 +469,7 @@ pub use tutti_session::{
 pub use tutti_session::{
     Input, InputConfig, Punch, Recorded, Take, TakeError, TakeEvent, TakeTarget, Trim,
 };
-#[cfg(all(feature = "session", feature = "modulation"))]
+#[cfg(feature = "session")]
 pub use tutti_session::{ParamRef, RouteSpec};
 #[cfg(all(feature = "session", feature = "sampler"))]
 pub use tutti_session::{SamplerEvent, SamplerLoad};

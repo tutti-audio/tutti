@@ -3,7 +3,7 @@
 //! beats bounced to a WAV file (the reverb's tail rings on past the eighth).
 //!
 //! ```text
-//! cargo run -p tutti --features "export,sampler,dsp,modulation" --example song_bounce -- <outdir>
+//! cargo run -p tutti --features "export,sampler,dsp,decode-wav" --example song_bounce -- <outdir>
 //! ```
 //!
 //! `tutti`'s root carries the session, the units, the sampler's `Clip`, the

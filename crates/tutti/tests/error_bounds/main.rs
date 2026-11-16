@@ -85,13 +85,12 @@ fn device_errors_are_boxable() {
     err::<tutti::session::RestartError>();
 }
 
-#[cfg(feature = "modulation")]
 fn modulation_errors_are_boxable() {
     err::<tutti::modulation::CompileError>();
     err::<tutti::modulation::ProgramError>();
 }
 
-#[cfg(all(feature = "session", feature = "modulation"))]
+#[cfg(feature = "session")]
 fn session_modulation_errors_are_boxable() {
     err::<tutti::session::ModRefusal>();
     err::<tutti::session::Problem>();
