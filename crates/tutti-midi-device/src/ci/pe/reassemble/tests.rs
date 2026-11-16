@@ -83,6 +83,7 @@ fn refused(step: Result<PeStep, PeRefused>) -> PeRefused {
 
 // M2-101 §8.3: the chunks of a message, in order, are one message with the header
 // of the first and the data of all.
+/// Spec: m2-101/8.3#4
 #[test]
 fn the_chunks_of_a_message_reassemble_in_order() {
     let now = Instant::now();
@@ -108,6 +109,7 @@ fn the_chunks_of_a_message_reassemble_in_order() {
 }
 
 // M2-101 §8.3.2: a message with no Property Data is one chunk, 1 of 1.
+/// Spec: m2-101/8.3.2#1, m2-101/8.3.2#2
 #[test]
 fn a_header_only_message_is_complete_at_once() {
     let mut r = reassembler();
@@ -118,6 +120,7 @@ fn a_header_only_message_is_complete_at_once() {
 
 // M2-101 §8.3, Table 29, "Unknown Number": the count is 0 until the final chunk
 // declares it equal to its own number.
+/// Spec: m2-101/8.3#7, m2-101/8.3#9
 #[test]
 fn an_unknown_count_ends_at_the_chunk_that_names_it() {
     let now = Instant::now();
@@ -136,6 +139,7 @@ fn an_unknown_count_ends_at_the_chunk_that_names_it() {
 
 // M2-101 §8.3, Table 29, "Unexpected End Before Chunk 6, Property Data Remains
 // Good": a message that declared 6 ends at chunk 3 by naming 3.
+/// Spec: m2-101/8.3#11
 #[test]
 fn a_known_count_may_end_early_by_naming_a_smaller_one() {
     let now = Instant::now();
@@ -148,6 +152,7 @@ fn a_known_count_may_end_early_by_naming_a_smaller_one() {
 
 // M2-101 §8.3, Table 29, "Property Data is Bad": a final chunk numbered 0, for a
 // declared count and for an unknown one, abandons the message and its data.
+/// Spec: m2-101/8.3#12
 #[test]
 fn a_final_chunk_numbered_zero_abandons_the_message() {
     for total in [6, 0] {
@@ -173,6 +178,7 @@ fn an_abandoning_chunk_with_no_message_is_refused() {
 // M2-101 §8.3: the count of Number of This Chunk starts from 1, so a message
 // begins at its first chunk; a later one with no message before it is out of
 // sequence (NAK 0x21).
+/// Spec: m2-101/8.3#5
 #[test]
 fn a_later_chunk_with_no_first_is_out_of_sequence() {
     let mut r = reassembler();
@@ -183,6 +189,7 @@ fn a_later_chunk_with_no_first_is_out_of_sequence() {
 
 // M2-101 §8.3: the chunks are numbered in sequence; a skipped number ends the
 // message, which cannot be recovered (Table 16, NAK 0x21).
+/// Spec: m2-101/8.3#4
 #[test]
 fn a_skipped_chunk_ends_the_message() {
     let now = Instant::now();
@@ -266,6 +273,7 @@ fn a_first_chunk_for_an_id_in_use_is_refused() {
 }
 
 // M2-103 §5.3: Request IDs may be reused after a Transaction is complete.
+/// Spec: m2-103/3.3#9
 #[test]
 fn an_id_is_free_again_when_its_message_is_complete() {
     let now = Instant::now();
@@ -277,6 +285,7 @@ fn an_id_is_free_again_when_its_message_is_complete() {
 
 // M2-103 §5.3: an ID is unique only to the pair of MUIDs, so the same ID from two
 // peers is two messages; M2-101 §8.4: and an inquiry and a reply of one ID are two.
+/// Spec: m2-103/3.3#10, m2-101/8.4#5
 #[test]
 fn an_id_is_unique_to_a_peer_and_a_direction() {
     let now = Instant::now();
@@ -338,6 +347,7 @@ fn a_count_that_disagrees_ends_the_message() {
 
 // M2-103 §12.2: the time between consecutive chunks is under 3 seconds, so the
 // message times out at 3 seconds and not a nanosecond before, and the NAK is 0x42.
+/// Spec: m2-103/10#5
 #[test]
 fn a_message_times_out_after_three_seconds_from_its_last_chunk() {
     let t0 = Instant::now();

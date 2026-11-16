@@ -138,6 +138,7 @@ fn a_reply_scope_within_a_request_keeps_only_what_was_asked() {
     );
 }
 
+/// Spec: m2-101/9.2#1
 #[test]
 fn the_capabilities_inquiry_is_table_40_on_the_function_block() {
     let message = CiMessage::ProcessCapabilitiesInquiry {
@@ -285,6 +286,7 @@ fn a_message_report_inquiry_that_table_43_forbids_is_malformed() {
     assert_eq!(scope.controllers(), ChannelControllers::all());
 }
 
+/// Spec: m2-101/9.6#5
 #[test]
 fn the_message_report_reply_is_table_45_on_the_inquirys_device_id() {
     let scope = ReportScope::Group {
@@ -322,6 +324,7 @@ fn the_end_of_message_report_is_table_46_with_no_body() {
     }
 }
 
+/// Spec: m2-101/3.3.3#3
 #[test]
 fn a_process_inquiry_message_to_the_broadcast_muid_is_not_read() {
     for sub in 0x40..=0x44 {

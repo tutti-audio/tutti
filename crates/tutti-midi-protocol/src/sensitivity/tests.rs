@@ -65,7 +65,7 @@ fn serde_carries_the_bare_bits() {
 /// **RPN #00/00's data is whole semitones then cents** (M2-104 section 7.4.7.1,
 /// M2-115 section 4.1): 2 semitones 50 cents is 2.5 semitones, not the 2.39 the
 /// same word is as a binary fraction (50 / 128).
-/// Spec: m2-104/7.4.7.1#1
+/// Spec: m2-104/7.4.7.1#1, m2-115/4.1#1
 #[test]
 fn channel_data_is_semitones_and_cents() {
     let data = RegisteredData::new(U7::of(2), U7::of(50));

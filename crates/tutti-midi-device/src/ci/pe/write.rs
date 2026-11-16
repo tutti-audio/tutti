@@ -138,6 +138,7 @@ mod tests {
     // M2-103 §6.1.1: a string value is JSON (ECMA-404), so a quote, a backslash
     // and a control character are escaped, where Message Text (M2-101 §5.10.4)
     // sends a quote and a line feed as they are.
+    /// Spec: m2-103/4.1.1#2
     #[test]
     fn a_property_string_escapes_what_json_requires() {
         assert_eq!(written("a\"b\\c\nd\te"), r#""a\"b\\c\nd\te""#);
@@ -146,6 +147,7 @@ mod tests {
 
     // M2-103 §6.1.1: a character that is not 7-bit ASCII is its UTF-16 units,
     // each a `\u` escape.
+    /// Spec: m2-103/4.1.1#2
     #[test]
     fn a_property_string_escapes_non_ascii_as_utf16_units() {
         assert_eq!(written("Beats\u{266a}"), "\"Beats\\u266a\"");

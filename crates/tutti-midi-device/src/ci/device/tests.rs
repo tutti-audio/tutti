@@ -72,6 +72,7 @@ fn invalidate(from: u32, target: u32) -> Decoded {
     })
 }
 
+/// Spec: m2-101/4.1#1, m2-101/5.5#1, m2-101/5.5.4#3
 #[test]
 fn a_new_device_sends_a_discovery_from_its_muid_to_everyone_on_output_path_0() {
     // §4.1, §5.5, §5.5.4.
@@ -92,6 +93,7 @@ fn a_new_device_sends_a_discovery_from_its_muid_to_everyone_on_output_path_0() {
     assert_eq!(device.deadline(), Some(now + DISCOVERY_WINDOW));
 }
 
+/// Spec: m2-101/5.5.5#1
 #[test]
 fn the_discovery_window_is_three_seconds_and_closes_once() {
     // §5.5.5: at least 3 seconds.
@@ -128,6 +130,7 @@ fn a_reply_to_another_muid_is_not_ours() {
     assert_eq!(device.peers().count(), 0);
 }
 
+/// Spec: m2-101/5.9.2#1
 #[test]
 fn two_replies_with_one_muid_in_a_round_are_a_collision_invalidated_and_dropped() {
     // §5.9.2.
@@ -146,6 +149,7 @@ fn two_replies_with_one_muid_in_a_round_are_a_collision_invalidated_and_dropped(
     assert!(device.peer(Muid::of(PEER)).is_none());
 }
 
+/// Spec: m2-101/4.1#2, m2-101/5.6#1, m2-101/5.6.1#1
 #[test]
 fn a_discovery_is_answered_to_its_sender_echoing_the_output_path_with_no_function_block() {
     // §4.1, §5.6, §5.6.1, §5.6.2.
@@ -162,6 +166,7 @@ fn a_discovery_is_answered_to_its_sender_echoing_the_output_path_with_no_functio
     assert_eq!(device.muid(), Muid::of(OURS));
 }
 
+/// Spec: m2-101/5.9.1#1, m2-101/5.9.1#4, m2-101/5.9.1#5
 #[test]
 fn a_discovery_with_our_muid_is_answered_by_option_b() {
     // §5.9.1 Option B: Invalidate the duplicate, change our MUID, discover again.
@@ -198,6 +203,7 @@ fn a_discovery_with_our_muid_is_answered_by_option_b() {
 
 /// A Reply from our MUID to our MUID answers our Discovery from a device that
 /// drew our MUID (§5.9.1): this device never answers itself.
+/// Spec: m2-101/5.9.1#5
 #[test]
 fn a_reply_from_our_muid_to_us_is_a_collision_on_us() {
     let (mut device, _, now) = device([OURS]);
@@ -207,6 +213,7 @@ fn a_reply_from_our_muid_to_us_is_a_collision_on_us() {
     assert_eq!(device.peers().count(), 0);
 }
 
+/// Spec: m2-101/5.9#1, m2-101/5.9#2, m2-101/5.9#4
 #[test]
 fn an_invalidate_of_our_muid_ends_everything_changes_it_and_discovers_again_without_replying() {
     // §5.9: terminate transactions, new MUID, no reply, new Discovery.
@@ -225,6 +232,7 @@ fn an_invalidate_of_our_muid_ends_everything_changes_it_and_discovers_again_with
     assert_eq!(device.peers().count(), 0);
 }
 
+/// Spec: m2-101/5.9#3
 #[test]
 fn an_invalidate_of_a_peer_discards_it_and_sends_nothing() {
     let (mut device, _, now) = device([OURS]);
@@ -322,6 +330,7 @@ fn an_ack_or_a_nak_is_never_nakked() {
     assert!(device.on_message(&unread, now).is_empty());
 }
 
+/// Spec: m2-101/5.7#1
 #[test]
 fn a_peer_with_a_function_block_is_asked_once_for_its_product_instance_id() {
     // §5.7: Inquiry: Endpoint, status 0x00, to a Function Block.
@@ -435,6 +444,7 @@ fn an_endpoint_inquiry_to_us_is_nakked_for_we_have_no_id_to_give() {
     assert!(device.on_message(&inquiry(OTHER), now).is_empty());
 }
 
+/// Spec: m2-101/3.3.2#3
 #[test]
 fn a_new_muid_is_never_the_old_one_a_peer_or_reserved() {
     // Draws: ours, then the same again, a reserved one, the broadcast value, the
@@ -497,6 +507,7 @@ fn on(
     Decoded::Message(message(header, Muid::of(to)))
 }
 
+/// Spec: m2-101/7.3#1, m2-101/7.13#3, m2-102/2.4#9, m2-102/2.4#10, m2-102/2.4#13
 #[test]
 fn a_profile_inquiry_to_us_is_answered_on_its_address_with_both_lists_empty() {
     // §7.13: a device with no Profiles replies with 0 enabled and 0 disabled; M2-102
@@ -537,6 +548,7 @@ fn a_profile_inquiry_for_another_muid_is_not_answered() {
     assert!(device.on_message(&inquiry, now).is_empty());
 }
 
+/// Spec: m2-102/2.4#24, m2-102/2.6#6, m2-102/2.7#7
 #[test]
 fn a_set_on_set_off_or_details_inquiry_to_us_is_nakked_0x04_with_the_profile_id() {
     // M2-101 §5.11.3 (details are the Profile Id), M2-102 §2.4, §2.6, §2.7.
@@ -666,6 +678,7 @@ fn report_inquiry(scope: ReportScope, to: u32) -> Decoded {
     })
 }
 
+/// Spec: m2-101/9.3#1
 #[test]
 fn a_device_declaring_process_inquiry_reports_midi_message_report_supported() {
     // §9.3, Table 42: D0, MIDI Message Report, which the empty report below is.
@@ -690,6 +703,7 @@ fn a_device_declaring_process_inquiry_reports_midi_message_report_supported() {
     assert_eq!(*features, ProcessFeatures::MIDI_MESSAGE_REPORT);
 }
 
+/// Spec: m2-101/9.6#1, m2-101/9.6#5, m2-101/9.8#1
 #[test]
 fn a_report_of_the_function_block_or_group_is_an_empty_reply_and_the_end_on_that_address() {
     // §9.6: a bit is 0 for a kind the Responder cannot provide, and the Device ID is
@@ -719,6 +733,7 @@ fn a_report_of_the_function_block_or_group_is_an_empty_reply_and_the_end_on_that
     }
 }
 
+/// Spec: m2-101/9.5#6
 #[test]
 fn a_report_of_a_channel_is_nakked_0x03_as_no_channel_is_in_use() {
     // §9.5: a NAK when the Channel is not in use.

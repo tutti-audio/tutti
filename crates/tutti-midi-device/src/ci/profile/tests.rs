@@ -218,6 +218,7 @@ fn set_off_is_table_25_with_two_reserved_bytes_that_are_ignored() {
     assert_eq!(decoded(&want), message);
 }
 
+/// Spec: m2-101/7.10#5, m2-101/7.11#5
 #[test]
 fn enabled_and_disabled_reports_are_tables_26_and_27_to_the_broadcast_muid() {
     for (sub, enabled) in [(0x24u8, true), (0x25, false)] {
@@ -262,6 +263,7 @@ fn a_version_1_report_has_no_channel_count_and_reads_as_zero() {
     assert_eq!(channels, ProfileChannels::BY_ADDRESS);
 }
 
+/// Spec: m2-101/7.4#2, m2-101/7.5#2, m2-102/2.4#15, m2-102/2.4#18
 #[test]
 fn added_and_removed_reports_are_tables_20_and_21_to_the_broadcast_muid() {
     let added = CiMessage::ProfileAdded {

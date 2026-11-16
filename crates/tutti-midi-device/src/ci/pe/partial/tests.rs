@@ -20,6 +20,7 @@ fn program() -> PeJson {
 }
 
 // §10.2 Tables 33 and 34: `{"/lfoSpeed":10}` changes the one property.
+/// Spec: m2-103/8#6
 #[test]
 fn a_partial_set_changes_the_property_a_pointer_names() {
     let update = PartialUpdate::from_json(&json(r#"{"/lfoSpeed":10}"#)).unwrap();
@@ -33,6 +34,7 @@ fn a_partial_set_changes_the_property_a_pointer_names() {
 
 // §10.2 Tables 35 to 38: two changes to elements of arrays, and the Property Data
 // after them.
+/// Spec: m2-103/8.2#1
 #[test]
 fn a_partial_set_changes_elements_of_arrays() {
     let update = PartialUpdate::from_json(&json(
@@ -49,6 +51,7 @@ fn a_partial_set_changes_elements_of_arrays() {
 
 // §10: the value of a change is a string, a number or a boolean, never an object
 // or an array.
+/// Spec: m2-103/8#7, m2-103/8#8
 #[test]
 fn a_change_to_an_object_or_an_array_is_not_a_partial_set() {
     for bad in [
@@ -69,6 +72,7 @@ fn a_change_to_an_object_or_an_array_is_not_a_partial_set() {
 
 // §10: each key is a JSON Pointer (RFC 6901 §3, §5): empty, or `/`-led tokens in
 // which `~` begins `~0` or `~1`.
+/// Spec: m2-103/8#6
 #[test]
 fn a_pointer_follows_rfc_6901() {
     assert!(JsonPointer::new("").is_some());
@@ -149,6 +153,7 @@ fn a_pointer_has_one_value_in_a_change() {
 }
 
 // §10.2 Table 35: the Property Data of a Partial Set is the object of pointers.
+/// Spec: m2-103/8#6
 #[test]
 fn a_change_is_written_as_an_object_of_pointers() {
     let update = PartialUpdate::new()

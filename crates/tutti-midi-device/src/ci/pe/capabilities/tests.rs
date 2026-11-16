@@ -187,6 +187,7 @@ fn each_chunked_message_is_sent_under_its_sub_id2() {
 
 // A sub-ID#2 no message uses (0x3E) is not read; the PE messages go to one device
 // (§8), so one sent to everyone is the wrong destination.
+/// Spec: m2-101/3.3.3#3
 #[test]
 fn an_unused_sub_id2_is_unsupported_and_a_broadcast_pe_message_is_misaddressed() {
     let mut bytes = pe(
@@ -229,6 +230,7 @@ fn the_request_count_is_a_range_checked_value() {
 // M2-101 Table 39: Notify has the fields of a chunk (Request ID, Header Data
 // with its length, the two chunk counts, Property Data with its length) under
 // sub-ID#2 0x3F, and goes to one device.
+/// Spec: m2-101/3.3.3#3
 #[test]
 fn notify_lays_out_table_39_and_goes_to_one_device() {
     let chunk = PeChunk::notify(PeRequestId::of(5), PeStatus::Terminate);

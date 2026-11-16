@@ -54,6 +54,7 @@ fn an_empty_and_a_sixteen_byte_id_round_trip() {
     }
 }
 
+/// Spec: m2-101/5.8.3.1#5
 #[test]
 fn an_id_over_sixteen_bytes_is_not_a_ci_id_and_is_refused_on_the_wire() {
     // §5.8.3.1: at most 16 bytes, where M2-104 allows 42.
@@ -73,6 +74,7 @@ fn an_id_over_sixteen_bytes_is_not_a_ci_id_and_is_refused_on_the_wire() {
     );
 }
 
+/// Spec: m2-101/5.8.3.1#4
 #[test]
 fn a_reply_whose_data_is_not_printable_ascii_or_runs_short_is_unread() {
     for tail in [
@@ -109,6 +111,7 @@ fn a_reserved_status_is_unread_in_both_messages_and_nakked_generic() {
     }
 }
 
+/// Spec: m2-101/3.3.3#3
 #[test]
 fn an_endpoint_message_to_the_broadcast_muid_is_refused() {
     // §3.3.3: neither is defined with the Broadcast MUID.

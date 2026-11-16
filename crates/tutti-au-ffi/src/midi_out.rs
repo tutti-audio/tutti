@@ -1165,6 +1165,7 @@ mod tests {
     /// bend sensitivity of 12 semitones, zero-extended, M2-115 section 4.1).
     /// A decoder that widened each message alone would send three Control
     /// Changes and then a fourth.
+    /// Spec: m2-115/4.1#1
     #[test]
     fn a_parameter_run_assembles_across_lists() {
         let mut decoder = Decoder::new(MidiGroup::FIRST);

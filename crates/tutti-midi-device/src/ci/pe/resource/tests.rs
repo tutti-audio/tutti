@@ -132,6 +132,7 @@ fn device_info_ids_are_7_bit_arrays_of_the_right_length() {
 
 // M2-103 §6.1.4: a property named `x-` is the manufacturer's, kept inside an AMEI
 // Resource; an unknown property that is not one is a later version's.
+/// Spec: m2-103/4.1.4#2
 #[test]
 fn a_manufacturer_property_is_kept_and_written_back() {
     let text = r#"{"manufacturerId":[125,0,0],"manufacturer":"Educational Use","familyId":[0,0],
@@ -155,6 +156,7 @@ fn a_manufacturer_property_is_kept_and_written_back() {
 }
 
 // An extension is the manufacturer's when its name starts `x-` (M2-103 §6.1.4).
+/// Spec: m2-103/4.1.4#2
 #[test]
 fn only_a_vendor_name_is_an_extension() {
     let mut extensions = PeExtensions::default();
@@ -637,6 +639,7 @@ fn a_resource_without_a_type_is_opaque_json() {
 
 // M2-103 §8.4: a manufacturer Resource is named `X-` and 1 to 33 alphanumerics;
 // §8.6: a List Resource's name ends `List`.
+/// Spec: m2-103/6.4#3, m2-103/6#2, m2-103/6.6#1
 #[test]
 fn resource_names_follow_8_4_and_8_6() {
     assert!(CustomResource::new("X-Anything").is_some());
@@ -719,6 +722,7 @@ fn a_default_entry_is_minimal() {
 
 // M2-103 §14.3: canGet, canSet, requireResId, canPaginate and schema keep their
 // defaults on a Resource an AMEI/MMA specification defines.
+/// Spec: m2-103/12.3#3
 #[test]
 fn a_standard_resource_keeps_its_defaults() {
     let entry = |resource: PeResource| ResourceEntry::new(resource).unwrap();
@@ -756,6 +760,7 @@ fn a_standard_resource_keeps_its_defaults() {
 }
 
 // M2-103 §14: ResourceList has no entry for itself, and each Resource has one entry.
+/// Spec: m2-103/7.1#3, m2-103/12#4
 #[test]
 fn resource_list_does_not_list_itself_or_repeat() {
     assert_eq!(
@@ -798,6 +803,7 @@ fn only_a_list_resource_paginates_and_has_columns() {
 
 // M2-103 §14.4, Table 86: a manufacturer JSON Resource gives a schema with at least
 // a title.
+/// Spec: m2-103/12.4#1, m2-103/12.4#2
 #[test]
 fn a_custom_entry_needs_a_schema_with_a_title() {
     let wifi = custom("X-WIFIOn");
@@ -852,6 +858,7 @@ fn columns_name_a_property_or_a_link() {
 
 // M2-103 §8.5, §14.2: an entry that needs a `resId`, and a Resource that does not
 // have entries, as targets of an inquiry.
+/// Spec: m2-103/6.5#4
 #[test]
 fn a_target_has_a_res_id_when_the_resource_has_entries() {
     assert!(matches!(
@@ -870,6 +877,7 @@ fn a_target_has_a_res_id_when_the_resource_has_entries() {
 }
 
 // M2-103 §8.6.2: only a List Resource takes `offset` and `limit`.
+/// Spec: m2-103/6.6.2#2
 #[test]
 fn only_a_list_resource_is_asked_for_a_page() {
     let page = PePage {
@@ -962,6 +970,7 @@ fn a_get_is_checked_against_its_entry() {
 
 // M2-103 §10: a Full Set needs `canSet` of `full` or `partial`, and a Partial Set
 // needs `partial`.
+/// Spec: m2-103/8#3, m2-103/8#9
 #[test]
 fn a_set_is_checked_against_its_entry() {
     let target = ResourceTarget::new(PeResource::LocalOn).unwrap();

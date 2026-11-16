@@ -208,6 +208,7 @@ fn received(sent_chunks: Vec<(PeMessageKind, PeChunk)>) -> PeReceived {
 
 // M2-103 §3.2 step 2, M2-101 §8.5: Property Exchange Capabilities is asked
 // before anything else, and Table 30 is its message.
+/// Spec: m2-101/8.5#1
 #[test]
 fn the_capabilities_inquiry_is_the_first_message_and_nothing_is_asked_before_the_reply() {
     let now = Instant::now();
@@ -298,6 +299,7 @@ fn the_capabilities_inquiry_times_out_at_three_seconds_and_a_nak_refuses_it() {
 
 // M2-101 Table 33 and M2-103 §15.2 Table 95: a Get is one chunk of Header Data and
 // no Property Data, numbered 1 of 1 (M2-101 §8.3.2), to the Function Block.
+/// Spec: m2-101/8.3.2#1, m2-101/8.3.2#2, m2-101/8.7#1
 #[test]
 fn a_get_is_one_header_only_chunk() {
     let (mut i, now) = ready(2);
@@ -680,6 +682,7 @@ fn set(flow: PeFlowControl) -> PeSet {
 // M2-103 §10, M2-101 §8.3: a Set encodes its Property Data, splits it so that each
 // chunk fits the peer's receivable size, carries the header in chunk 1 only, and
 // sends every chunk at once when no Flow Control was asked.
+/// Spec: m2-101/8.9#1
 #[test]
 fn a_set_sends_every_chunk_at_once_without_flow_control() {
     let (mut i, now) = ready(1);
@@ -718,6 +721,7 @@ fn a_set_sends_every_chunk_at_once_without_flow_control() {
 }
 
 // M2-103 §10.2: a Partial Set says so in its header.
+/// Spec: m2-103/8#4, m2-103/8#5
 #[test]
 fn a_partial_set_says_so() {
     let (mut i, now) = ready(1);
@@ -900,6 +904,7 @@ fn a_timeout_wait_holds_a_chunk_that_waits_for_its_ack() {
 
 // M2-103 §5.3: a Request ID is 0 to 127, no more requests are made at once than the
 // peer's count, and an ID is free when its transaction is complete.
+/// Spec: m2-101/8.4#4, m2-103/3.3#4, m2-103/3.3#8, m2-103/3.3#9
 #[test]
 fn requests_use_distinct_ids_up_to_the_peers_count_and_ids_come_free() {
     let (mut i, now) = ready(2);
@@ -925,6 +930,7 @@ fn requests_use_distinct_ids_up_to_the_peers_count_and_ids_come_free() {
 // §5.3: the reply that answers a request ends it for that ID only; a timeout frees
 // the ID too ("Requests that don't receive a response will time out and the Request ID
 // can be reused").
+/// Spec: m2-103/3.3#9
 #[test]
 fn a_timeout_frees_the_id_of_a_full_pool() {
     let (mut i, now) = ready(2);
@@ -940,6 +946,7 @@ fn a_timeout_frees_the_id_of_a_full_pool() {
 // a time; a peer takes at most 127 at once (M2-101 §8.5), so at the largest count
 // the pool gives 127 distinct IDs and refuses the next, and a freed slot goes to
 // the ID not yet given before the one just released.
+/// Spec: m2-101/8.4#4
 #[test]
 fn the_pool_gives_distinct_ids_up_to_the_largest_count_and_refuses_the_next() {
     let most = SimultaneousRequests::of(SimultaneousRequests::MAX);
@@ -958,6 +965,7 @@ fn the_pool_gives_distinct_ids_up_to_the_largest_count_and_refuses_the_next() {
 
 // M2-103 §5.3: an Initiator "shall not use more than the reported number": the
 // limit binds before the IDs run out, and an ID is not reused at once.
+/// Spec: m2-103/3.3#4
 #[test]
 fn the_pool_stops_at_the_peers_count_and_reuses_an_id_after_the_others() {
     let mut ids = RequestIds::default();
@@ -1089,6 +1097,7 @@ fn reply_status(actions: &[PeAction]) -> (PeRequestId, PeReply) {
 // M2-103 §11.1: Start is the header of a Get with the command `start` first; the
 // Responder assigns the Subscription Id in its reply, and the Initiator keeps a
 // table of it to the Resource.
+/// Spec: m2-103/9#4, m2-103/9.1#5
 #[test]
 fn start_subscription_is_a_get_shaped_header_and_the_reply_names_the_id() {
     let (mut i, now) = ready(2);
@@ -1146,6 +1155,7 @@ fn a_start_that_gives_no_id_or_fails_holds_no_subscription() {
 // M2-103 §11.1, §11.2: the Responder's `full` and `partial` updates carry Property
 // Data in the encoding they name; each is answered with a Reply to Subscription of
 // the same Request ID and status 200, and handed out against its Resource.
+/// Spec: m2-101/8.12#1, m2-103/9#10, m2-103/9.2#1
 #[test]
 fn a_full_and_a_partial_update_are_answered_and_handed_out() {
     let (mut i, now) = ready(2);
@@ -1277,6 +1287,7 @@ fn the_responder_ends_a_subscription() {
 
 // §11.5, §11.1: the Initiator ends it with `end` and `endedBy` `initiator`, which
 // leaves the table at once, and the reply is the end of the transaction.
+/// Spec: m2-103/9.5#1
 #[test]
 fn the_initiator_ends_a_subscription() {
     let (mut i, now) = ready(2);
@@ -1329,6 +1340,7 @@ fn messages_from_another_device_or_to_another_are_not_this_peers() {
 
 // M2-101 §8.2: the Device ID of every Property Exchange message is the Function
 // Block, and a message is sent from our MUID to the peer's.
+/// Spec: m2-101/8.2#1
 #[test]
 fn every_message_is_addressed_to_the_function_block_from_us_to_the_peer() {
     let (mut i, now) = ready(2);
@@ -1350,6 +1362,7 @@ fn notify(request: PeRequestId, status: PeStatus) -> Decoded {
 
 // M2-103 §12.1.3: a receiver terminates the request a Notify with status 144
 // names, whatever the transaction, and no NAK answers it.
+/// Spec: m2-103/10#3
 #[test]
 fn a_notify_terminate_ends_a_get_and_a_set_by_request_id() {
     let (mut i, now) = ready(2);
@@ -1462,6 +1475,7 @@ fn a_notify_that_is_not_for_a_request_in_flight_changes_nothing() {
 // M2-103 §12.1.3: all inquiries of the Request ID cease, so a Subscription message
 // the peer was sending in chunks is dropped by a Notify Terminate and its later
 // chunks start nothing.
+/// Spec: m2-103/10#3
 #[test]
 fn a_notify_terminate_drops_a_subscription_message_the_peer_was_sending() {
     let (mut i, now) = ready(2);

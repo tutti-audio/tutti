@@ -62,6 +62,7 @@ fn known(features: ProcessFeatures) -> (ProcessInitiator, Instant) {
     (initiator, now)
 }
 
+/// Spec: m2-101/9.2#1
 #[test]
 fn it_starts_with_a_capabilities_inquiry_to_the_peer_on_the_function_block() {
     // §9.2: the Destination is the Function Block, never a Channel.
@@ -177,6 +178,7 @@ fn a_report_is_one_inquiry_a_reply_and_an_end_on_the_inquirys_device_id() {
     }
 }
 
+/// Spec: m2-101/9.6#4
 #[test]
 fn a_reply_declares_only_the_kinds_that_were_asked() {
     // §9.6: a Responder sets no bit that was not requested.
@@ -224,6 +226,7 @@ fn an_end_before_the_reply_does_not_end_the_report() {
     assert!(initiator.is_reporting());
 }
 
+/// Spec: m2-101/9.8.1#2
 #[test]
 fn a_nak_ends_the_report_without_an_end() {
     // §9.8.1.
