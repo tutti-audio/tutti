@@ -7,7 +7,8 @@ use tutti_graph::UmpAt;
 pub use tutti_plugin_types::{Samples, WireMidi};
 
 pub use tutti_plugin_types::{
-    ChannelLayout, ParameterInfo, PluginTail, TimeSignature, TransportInfo, WindowHandle,
+    ChannelLayout, ParameterInfo, PluginTail, PluginVersion, TimeSignature, TransportInfo,
+    WindowHandle,
 };
 
 /// What the plugin declared at load time; see [`Vst2Loaded::metadata`](crate::Vst2Loaded::metadata).
@@ -33,10 +34,9 @@ pub struct PluginInfo {
     pub name: String,
     /// Vendor string from `effGetVendorString`; empty if the plugin declines.
     pub vendor: String,
-    /// Version as the plugin reports it, rendered as a string. VST2 carries a
-    /// bare `i32` with no encoding agreed across vendors, so this is for display
-    /// rather than for comparison.
-    pub version: String,
+    /// `AEffect::version`, a bare `i32` the spec gives no encoding, kept as the integer
+    /// ([`PluginVersion::Integer`]) rather than decoded into parts.
+    pub version: PluginVersion,
     /// The plugin's declared VST2 category, carried verbatim. Callers classify
     /// it themselves rather than relying on the derived `receives_midi` flag.
     pub category: Vst2Category,

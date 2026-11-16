@@ -114,7 +114,9 @@ const ONLY: &[(&str, &[&str])] = &[
     ("tutti-rt", &["tutti-types"]),
     ("tutti-midi-network", &["tutti-ump", "tutti-midi-device"]),
     ("tutti-metering", &["tutti-types"]),
-    ("tutti-codec", &["tutti-types", "tutti-buffers"]),
+    // The encoders' worker threads (`spawn_named`), behind the `encode-flac` and
+    // `encode-vorbis` features.
+    ("tutti-codec", &["tutti-types", "tutti-buffers", "tutti-rt"]),
     ("tutti-tempo", &["tutti-types"]),
     (
         "tutti-voicing",

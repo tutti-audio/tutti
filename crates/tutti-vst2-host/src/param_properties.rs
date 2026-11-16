@@ -44,7 +44,9 @@
 
 use vst::api;
 
-use tutti_plugin_types::{LinearRange, MainThreadMarker, Normalized, ParamId, ParamMapping};
+use tutti_plugin_types::{
+    LinearRange, MainThreadMarker, Normalized, ParamId, ParamMapping, read_c_str,
+};
 
 use crate::loaded::Vst2Loaded;
 
@@ -276,18 +278,6 @@ pub struct MidiKeyName {
     pub name: String,
 }
 
-/// Decodes a fixed-size, NUL-padded C string field the plugin wrote.
-///
-/// Stops at the first NUL and lossily decodes the rest. Both halves matter:
-/// VST2 pads with NULs and plugins are not required to terminate a field that
-/// exactly fills it, and the bytes are plugin-authored so they are not
-/// guaranteed UTF-8. A `from_utf8` that errored would drop an otherwise good
-/// name over one stray byte in a vendor's copyright sign.
-fn decode_label(bytes: &[u8]) -> String {
-    let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
-    String::from_utf8_lossy(&bytes[..end]).into_owned()
-}
-
 /// Decodes a bank-select byte pair, mapping VST2's `255` sentinel to absence.
 ///
 /// Either byte reading 255 discards the pair: a half-specified bank select is
@@ -328,8 +318,8 @@ impl ParameterProperties {
 
         Self {
             index,
-            label: decode_label(&raw.label),
-            short_label: decode_label(&raw.short_label),
+            label: read_c_str(&raw.label),
+            short_label: read_c_str(&raw.short_label),
             flags,
             // Each payload is read only under its own gate. The plugin is not
             // required to zero the fields it does not describe.
@@ -374,7 +364,7 @@ impl ParameterProperties {
             // A negative count is malformed; clamp to zero rather than
             // wrapping into a huge one.
             parameter_count: u16::try_from(raw.num_parameters_in_category).unwrap_or(0),
-            label: decode_label(&raw.category_label),
+            label: read_c_str(&raw.category_label),
         })
     }
 }
@@ -385,7 +375,7 @@ impl MidiProgram {
     fn decode(index: i32, raw: &api::MidiProgramName) -> Self {
         Self {
             index,
-            name: decode_label(&raw.name),
+            name: read_c_str(&raw.name),
             midi_program: raw.midi_program,
             bank: decode_bank(raw.midi_bank_msb, raw.midi_bank_lsb),
             parent_category: decode_parent_category(raw.parent_category_index),
@@ -399,7 +389,7 @@ impl MidiProgramCategory {
     fn decode(index: i32, raw: &api::MidiProgramCategory) -> Self {
         Self {
             index,
-            name: decode_label(&raw.name),
+            name: read_c_str(&raw.name),
             parent_category: decode_parent_category(raw.parent_category_index),
         }
     }
@@ -410,7 +400,7 @@ impl MidiKeyName {
         Self {
             program_index,
             key_number,
-            name: decode_label(&raw.keyname),
+            name: read_c_str(&raw.keyname),
         }
     }
 }

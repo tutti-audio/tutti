@@ -17,9 +17,9 @@ use serde::{Deserialize, Serialize, Serializer};
 use std::path::{Path, PathBuf};
 
 /// The version of the record layout [`PluginDb`] serializes and deserializes.
-/// 3: a file's row lists every plugin it holds; 2: a bus's speakers name a
-/// channel with no speaker `Unassigned`.
-pub const DB_VERSION: u64 = 3;
+/// 4: a plugin's version is a `PluginVersion`, not a string; 3: a file's row lists every
+/// plugin it holds; 2: a bus's speakers name a channel with no speaker `Unassigned`.
+pub const DB_VERSION: u64 = 4;
 
 /// Why a record is not a database this version can read.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

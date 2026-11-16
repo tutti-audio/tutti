@@ -1,4 +1,4 @@
-//! MIDI through the session: clips, routes, held keys, the hardware out and the SoundFont unit.
+//! MIDI through the session: clips, routes, held keys, the outputs and the SoundFont unit.
 
 /// Inert outside `assert_no_alloc`, so every test here may also gate a closure on
 /// allocating nothing.
@@ -10,7 +10,7 @@ static A: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
 mod common;
 #[cfg(feature = "midi")]
 mod held_keys;
-// Clips, live inputs, routes and the hardware out (`Session::midi`).
+// Clips, live inputs, routes and the outputs (`Session::midi`).
 #[cfg(feature = "midi")]
 mod midi;
 // MIDI ports as pool entries: absent, replugged, ambiguous, released, per-port ingest.
@@ -29,7 +29,7 @@ mod midi_soundfont;
 // The General MIDI setup of a SoundFont unit (`Session::add_general_midi`).
 #[cfg(feature = "soundfont")]
 mod general_midi;
-// The hardware out as an event tap on the clock.
+// A sink as an output node read through an event tap.
 #[cfg(feature = "midi")]
 mod midi_out_tap;
 // The session's MIDI front: hardware through the view, the session's MPE mode,
@@ -51,7 +51,7 @@ mod midi_clock_follow;
 // The session follows MIDI Machine Control from the input and sends it from the transport.
 #[cfg(feature = "midi-hardware")]
 mod midi_machine_control;
-// The hardware out on the system clock: no device, the timer's blocks.
+// A sink on the system clock: no device, the timer's blocks.
 #[cfg(feature = "midi")]
 mod system_clock;
 // A session's input and output ports render a block without allocating.

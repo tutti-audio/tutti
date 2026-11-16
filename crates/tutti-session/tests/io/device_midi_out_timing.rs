@@ -1,4 +1,4 @@
-//! The hardware out is sent at the time each event's frame is heard, not when
+//! A sink is sent at the time each event's frame is heard, not when
 //! the host happens to drain it: a session on `ManualStreamDriver`s, whose
 //! callbacks report the audio output's latency as they are told to.
 //!
@@ -10,11 +10,13 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use tutti_engine::{ManualStream, ManualStreamDriver, OutputSpec};
+use tutti_midi_runtime::{MidiClipNode, TimedMidiEvent};
 use tutti_midi_runtime::{MidiOut, Outgoing, OutputLatency, OutputOffset, SendAt, Taken};
-use tutti_session::{LiveSession, Session, UmpOut};
+use tutti_session::{EventInPort, LiveSession, Session, midi_sink};
 use tutti_transport::MotionEvent;
-use tutti_types::{ChannelLayout, SampleRate, Seconds};
+use tutti_types::{Beat, ChannelLayout, SampleRate, Seconds};
 use tutti_ump::{Message, MidiGroup, System, Ump};
+use tutti_ump::{MidiChannel, NoteNumber, NoteVelocity, Voice2};
 
 const RATE: f64 = 48_000.0;
 const BLOCK: usize = 512;
@@ -65,10 +67,9 @@ fn rig(wire: &Wire) -> (LiveSession, ManualStream) {
         .build_device_on(spec(), driver)
         .expect("builds with no device");
     let _ = s.update();
-    s.midi().set_hardware_out(Some(UmpOut::new(
-        Box::new(wire.clone()),
-        SampleRate::of(RATE),
-    )));
+    s.pool(midi_sink("out", Arc::new(wire.clone())))
+        .expect("declares");
+    let _ = s.update();
     s.midi_nodes().unwrap().clock_master.set_enabled(true);
     s.transport()
         .motion()
@@ -198,5 +199,69 @@ fn an_unreported_audio_latency_is_left_out_and_reported() {
             .iter()
             .any(|at| *at >= last_block + Duration::from_millis(40)),
         "the reported 40 ms is in the send time"
+    );
+}
+
+/// **A clip's notes reach a sink at the instants their frames are heard.** A
+/// note from beat 1 for one beat at 120 BPM and 48 kHz is a note-on at frame
+/// 24 000 and a note-off at 48 000, so the two leave exactly 0.5 s apart in
+/// `SendAt::At`, and the note-on leaves at the time its frame is heard: the
+/// last block's instant plus the 1.5 s the stream reports, less the 26 688
+/// frames (0.556 s) between the note and that block's start, less the sink's
+/// own 5 ms latency.
+#[test]
+fn a_clips_notes_are_sent_when_their_frames_are_heard() {
+    let wire = Wire::default();
+    let (mut s, stream) = rig(&wire);
+    s.midi_nodes().unwrap().clock_master.set_enabled(false);
+    s.midi().set_output_latency(
+        OutputLatency::new(
+            Duration::from_millis(5),
+            OutputOffset::new(Seconds(0.0)).unwrap(),
+        )
+        .unwrap(),
+    );
+    let note = |on: bool, at: Beat| {
+        let voice = if on {
+            Voice2::note_on(NoteNumber::of(60), NoteVelocity::new(0xC800))
+        } else {
+            Voice2::note_off(NoteNumber::of(60), NoteVelocity::MIN)
+        };
+        TimedMidiEvent::new(at, Message::midi2(MidiChannel::FIRST, voice)).unwrap()
+    };
+    let (clip, _) = s.graph().add(MidiClipNode::new([
+        note(true, Beat(1.0)),
+        note(false, Beat(2.0)),
+    ]));
+    let sink = s.midi_sink(&"out").expect("loaded");
+    s.graph()
+        .set_sources(EventInPort::new(sink.node(), 0), [clip.events_out()])
+        .expect("the sink's node takes events");
+    let _ = s.update();
+    let latency = Duration::from_millis(1500);
+    let last_block = render(&stream, 100, Some(latency));
+    let _ = s.update();
+    let sends: Vec<(bool, Instant)> = wire
+        .take()
+        .iter()
+        .filter_map(|e| match (e.ump.key_event(), e.send) {
+            (Some(tutti_ump::KeyEvent::On(_)), SendAt::At(at)) => Some((true, at)),
+            (Some(tutti_ump::KeyEvent::Off(_)), SendAt::At(at)) => Some((false, at)),
+            _ => None,
+        })
+        .collect();
+    let [(true, on), (false, off)] = sends[..] else {
+        panic!("a note-on then a note-off, scheduled: {sends:?}")
+    };
+    let gap = off.duration_since(on).as_secs_f64();
+    assert!((gap - 0.5).abs() < 1e-6, "{gap}");
+    // The last block began at frame 99 * 512 = 50 688.
+    let heard = last_block + latency
+        - Duration::from_secs_f64(f64::from(50_688 - 24_000) / RATE)
+        - Duration::from_millis(5);
+    assert!(
+        on >= heard && on <= heard + Duration::from_millis(16),
+        "the note-on is {:?} after the instant its frame is heard",
+        on.checked_duration_since(heard)
     );
 }

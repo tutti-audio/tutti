@@ -62,8 +62,8 @@ pub enum Phase {
     /// lane plays from the update its node does; then the note-envelope
     /// resyncs the apply owes are sent.
     AfterCommit,
-    /// The hardware out (an event tap on the clock)
-    /// drained to the output (feature `midi`; `Midi::set_hardware_out`).
+    /// Every output's event tap drained to its device or sink (feature `midi`:
+    /// the `midi_sink` entries, and with `midi-hardware` the `midi_output` ones).
     MidiOut,
     /// The stream's faults, as [`SessionEvent::Fault`] (a real-time clock),
     /// and the device's own events (feature `device`).
@@ -416,10 +416,8 @@ impl std::fmt::Debug for SessionEvent {
 /// The engine's MIDI, as graph nodes the builder inserts: the clock (Beat Clock
 /// and MTC, off until a host enables it), with its controls. An input port's
 /// ingest node is not here: each `midi_input` entry makes its own
-/// (`MidiInput::node`). The host's hardware out is
-/// not a node: the session reads an event tap on the clock's output
-/// ([`Midi::set_hardware_out`](crate::Midi::set_hardware_out)), and a
-/// `midi_output` port's node is fed by the clock.
+/// (`MidiInput::node`), and each output its own (`MidiSink::node`,
+/// `MidiOutput::node`), fed by the clock.
 #[cfg(feature = "midi")]
 #[derive(Clone, Debug)]
 pub struct MidiNodes {
@@ -435,9 +433,17 @@ pub struct MidiNodes {
 /// Whether the root is as it was asked to be
 /// ([`Session::root_topology_status`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum RootTopologyStatus {
     /// In force: the root is what was declared (or nothing was).
     Applied,
+    /// Declared and waiting for a running root crossfade to end: the root in
+    /// force is the previous declaration, and
+    /// [`requested_root_topology`](Session::requested_root_topology) is the
+    /// waiting one. It applies in the first update after the fade has ended
+    /// (which needs blocks rendered), or is `Refused` if it cannot be placed
+    /// then.
+    Pending,
     /// Not in force, and why. The previous state stands.
     Refused(tutti_graph::RootError),
 }
@@ -535,7 +541,7 @@ pub struct Session<C: Clock = Offline> {
     pub(crate) rolling_sent: std::sync::atomic::AtomicBool,
     #[cfg(feature = "midi")]
     pub(crate) midi: Option<MidiNodes>,
-    /// Clips, live inputs, routes and the hardware out's output.
+    /// Clips, live inputs, routes and the outputs.
     #[cfg(feature = "midi")]
     pub(crate) midi_state: crate::midi::MidiState,
     /// What modulation applied, and the session's own declarations.
@@ -737,9 +743,29 @@ impl<C: Clock> Session<C> {
     /// fade out and the new root's fade in over the declick length (5 ms),
     /// both rendering the same nodes, so a change of layout never steps the
     /// sound. [`.hard()`](RootDeclaration::hard) on the returned declaration
-    /// cuts at one block instead. A commit that lands while the fade runs ends
-    /// it at that block, as a hard edit ends a unit's crossfade; the new root
-    /// is heard alone from there. An export of the master
+    /// cuts at one block instead.
+    ///
+    /// A declaration made while a root crossfade runs, and not
+    /// [`hard`](RootDeclaration::hard), waits: it is checked at the call (the
+    /// errors below are named here), and held until the running fade ends. The
+    /// newest such declaration wins. The first [`update`](Self::update) after
+    /// the fade has ended applies it, and the root's width and readers
+    /// ([`RootReaderReopened`](crate::SessionEvent::RootReaderReopened)) change in
+    /// that update with the audio; until then the root in force, its taps and
+    /// [`root_topology`](Self::root_topology) are the running fade's, and
+    /// [`requested_root_topology`](Self::requested_root_topology) is the
+    /// waiting one ([`Pending`](RootTopologyStatus::Pending)). It is heard up
+    /// to one fade length (5 ms) late, and the fade only ends as blocks render:
+    /// with none rendering (a stopped stream, an offline session nobody
+    /// pulls) it waits. It stays with the graph through a device restart or a
+    /// clock switch, and is checked against the device it finds when it is
+    /// applied. A declaration refused at its call drops nothing: the waiting
+    /// one still applies. If the
+    /// device no longer places it when it is applied,
+    /// [`root_topology_status`](Self::root_topology_status) is `Refused` with
+    /// the error and the root in force stays. A
+    /// [`hard`](RootDeclaration::hard) declaration applies at once and drops
+    /// the waiting one. An export of the master
     /// places the file from the declaration (`tutti_export::Setup::root`, set by the export's fork).
     ///
     /// The device a declaration must place on is the one the session renders
@@ -757,6 +783,7 @@ impl<C: Clock> Session<C> {
         &mut self,
         root: Option<ChannelTopology>,
     ) -> crate::Result<RootDeclaration<'_>> {
+        self.sync_root_refusal();
         // The same request again, in force, is nothing to do.
         if !(root == self.root_request && self.root_refusal.is_none()) {
             self.root_request = root.clone();
@@ -773,6 +800,14 @@ impl<C: Clock> Session<C> {
         })
     }
 
+    /// Takes the refusal of a declaration that waited and could not be
+    /// applied into `root_refusal`, where a device restart re-attempts it.
+    pub(crate) fn sync_root_refusal(&mut self) {
+        if let Some(e) = self.graph.take_apply_refusal() {
+            self.root_refusal = Some(e);
+        }
+    }
+
     /// The topology last asked for with
     /// [`declare_root_topology`](Self::declare_root_topology) (or
     /// [`SessionBuilder::root_topology`](crate::SessionBuilder::root_topology)),
@@ -783,7 +818,7 @@ impl<C: Clock> Session<C> {
     }
 
     /// Whether the root is as it was asked to be. A refusal is a value here,
-    /// never only a log line.
+    /// never only a log line. The first that holds is reported, in this order:
     ///
     /// - [`RootTopologyStatus::Refused`] with the declaration's own
     ///   [`FoldError`](tutti_buffers::FoldError) when the last request could not
@@ -792,6 +827,9 @@ impl<C: Clock> Session<C> {
     ///   **device restart re-attempts the request**: it is
     ///   [`Applied`](RootTopologyStatus::Applied) as soon as the new device
     ///   places it.
+    /// - The same when a declaration that waited for a root crossfade
+    ///   ([`declare_root_topology`](Self::declare_root_topology)) could not be
+    ///   placed once the fade ended; a later widening does not replace it.
     /// - Otherwise `Refused` with [`Graph::widen_outputs`]'s last refusal: a
     ///   widening the declared root could not take
     ///   ([`RootError::Width`](tutti_graph::RootError::Width)), or
@@ -799,10 +837,19 @@ impl<C: Clock> Session<C> {
     ///   ([`FoldError::Unplaced`](tutti_buffers::FoldError::Unplaced), as a
     ///   [`RootError::Fold`](tutti_graph::RootError::Fold)); that
     ///   is what a host's `MasterSources` longer than the root comes to.
-    /// - Otherwise `Applied`.
+    /// - Otherwise [`Pending`](RootTopologyStatus::Pending) while a declaration
+    ///   waits for a root crossfade, and `Applied`.
+    ///
+    /// "The previous declaration" includes one that is waiting: a declaration
+    /// refused at its call drops nothing, so a waiting one still applies.
     pub fn root_topology_status(&self) -> RootTopologyStatus {
-        match self.root_refusal.or(self.graph.widen_refusal()) {
+        match self
+            .root_refusal
+            .or(self.graph.apply_refusal())
+            .or(self.graph.widen_refusal())
+        {
             Some(e) => RootTopologyStatus::Refused(e),
+            None if self.graph.root_pending() => RootTopologyStatus::Pending,
             None => RootTopologyStatus::Applied,
         }
     }
@@ -879,6 +926,7 @@ impl<C: Clock> Session<C> {
                 }
                 let repreparing = self.graph.is_repreparing();
                 self.graph.collect();
+                self.sync_root_refusal();
                 // Closes a plugin that was dropped off its own thread (a pool thread at an
                 // export's end, say): it handed the close to this session's collector, which
                 // runs on the process's main thread (`MainThreadMarker::new` is `Some` only there).
@@ -936,8 +984,12 @@ impl<C: Clock> Session<C> {
                 #[cfg(feature = "midi")]
                 {
                     let playhead = self.playhead();
-                    self.midi_state
+                    if self
+                        .midi_state
                         .midi_out_phase(&mut self.graph, &playhead, cx.now, out)
+                    {
+                        self.commit();
+                    }
                 }
             }
             Phase::Plugins => {
@@ -1211,7 +1263,7 @@ impl<C: Clock> Session<C> {
     }
 
     /// The session's MIDI: live inputs, clips, the hardware input's routes
-    /// and the hardware out.
+    /// and the outputs.
     #[cfg(feature = "midi")]
     pub fn midi(&mut self) -> crate::Midi<'_> {
         self.midi_and_ids().0
@@ -1619,16 +1671,5 @@ impl<C: Clock> Session<C> {
     #[cfg(feature = "midi")]
     pub fn midi_nodes(&self) -> Option<&MidiNodes> {
         self.midi.as_ref()
-    }
-
-    /// The raw OS MIDI layer, when the builder opened it
-    /// ([`SessionBuilder::midi_hardware`](crate::SessionBuilder::midi_hardware)):
-    /// for a test that drives the layer under the session (a fake backend's
-    /// hot-plug, a device's ports and negotiation). A host reaches devices
-    /// through the pool's `midi_input` and `midi_output` entries and the
-    /// events of `Session::update`.
-    #[cfg(all(feature = "midi-hardware", feature = "testing"))]
-    pub fn testing_midi_io(&self) -> Option<&tutti_midi_hardware::MidiSession> {
-        self.midi_io.as_ref()
     }
 }

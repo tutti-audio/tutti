@@ -886,6 +886,8 @@ impl RootDeclaration<'_> {
     /// it. The default is a crossfade over [`DECLICK`](tutti_graph::DECLICK)
     /// (5 ms), so a change of layout never steps the sound; `hard` is for a
     /// test, an analysis graph or a root changed before anything is listening.
+    /// A declaration that waits for a running crossfade applies at once, and
+    /// the cut is its.
     pub fn hard(self) -> Self {
         self.graph.harden_root();
         self

@@ -30,11 +30,11 @@
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::thread::JoinHandle;
 use std::time::Duration;
 
 use thiserror::Error;
 use tutti_buffers::{FiniteSource, InterleavedMut, Pull, Sample, Sink, SinkFailed, Source};
+use tutti_rt::{StopToken, ThreadHandle, spawn_named};
 use tutti_types::{ChannelLayout, Samples};
 
 /// How long a [`Recorder`] parks when a [`Starved`](Pull::Starved) source
@@ -183,8 +183,8 @@ pub enum PumpPass {
 ///
 /// Owns both endpoints and a scratch buffer. [`pump_once`](Self::pump_once)
 /// moves at most the capacity it was built with and allocates nothing. Step it
-/// by hand to count frames exactly, or hand it to a [`Recorder`] to run on a
-/// thread.
+/// by hand to count frames exactly; a [`Recorder`] builds one and runs it on a
+/// thread of its own.
 ///
 /// The channel width is not a type parameter: the endpoints carry it as a
 /// runtime [`ChannelLayout`].
@@ -458,11 +458,11 @@ where
 #[derive(Debug)]
 #[must_use = "a recorder stops and finalizes when dropped; keep it for as long as the take runs"]
 pub struct Recorder<K = Live> {
-    /// Cleared by [`request_stop`](Self::request_stop) to break the pump loop.
-    running: Arc<AtomicBool>,
+    /// Raised by [`request_stop`](Self::request_stop) to break the pump loop.
+    stop: StopToken,
     /// The running pump. Taking it makes the shutdown once-only: whichever of
     /// `finish`, `wait`, `finish_in_place` and `drop` runs first leaves `None`.
-    handle: Option<JoinHandle<std::io::Result<()>>>,
+    handle: Option<ThreadHandle<std::io::Result<()>>>,
     /// Raised by the pump on its first failed pass; see [`failed`](Self::failed).
     failed: Arc<AtomicBool>,
     /// Frames the source discarded; see [`lost`](Self::lost).
@@ -516,17 +516,7 @@ impl Recorder<Live> {
         I: Source + Send + 'static,
         O: Sink<Sample = I::Sample> + Send + 'static,
     {
-        Ok(Self::run(PumpLoop::new(src, sink, capacity)?, park))
-    }
-
-    /// Runs an already built loop on a thread of its own, parking `park` on a
-    /// starved pass.
-    pub fn run<I, O>(pump_loop: PumpLoop<I, O>, park: Duration) -> Self
-    where
-        I: Source + Send + 'static,
-        O: Sink<Sample = I::Sample> + Send + 'static,
-    {
-        Self::spawn(pump_loop, park)
+        Self::spawn(PumpLoop::new(src, sink, capacity)?, park)
     }
 }
 
@@ -560,7 +550,7 @@ impl Recorder<Finite> {
         I: FiniteSource + Send + 'static,
         O: Sink<Sample = I::Sample> + Send + 'static,
     {
-        Ok(Self::spawn(PumpLoop::new(src, sink, capacity)?, IDLE_PARK))
+        Self::spawn(PumpLoop::new(src, sink, capacity)?, IDLE_PARK)
     }
 
     /// Waits for the take to reach its own end, then finalizes.
@@ -578,27 +568,28 @@ impl Recorder<Finite> {
     /// As [`finish`](Self::finish).
     #[must_use = "the result says whether the take finalized"]
     pub fn wait(mut self) -> Result<(), RecorderError> {
-        // Not `finish_in_place`: that clears the stop flag and truncates the take.
+        // Not `finish_in_place`: that requests the stop and truncates the take.
         self.join_pump().unwrap_or(Ok(()))
     }
 }
 
 impl<K> Recorder<K> {
-    fn spawn<I, O>(mut pump_loop: PumpLoop<I, O>, park: Duration) -> Self
+    fn spawn<I, O>(mut pump_loop: PumpLoop<I, O>, park: Duration) -> Result<Self, RecorderError>
     where
         I: Source + Send + 'static,
         O: Sink<Sample = I::Sample> + Send + 'static,
     {
-        let running = Arc::new(AtomicBool::new(true));
         let failed = Arc::clone(&pump_loop.failed);
         let lost = Arc::clone(&pump_loop.lost);
-        let flag = Arc::clone(&running);
-        let handle = std::thread::spawn(move || {
-            while flag.load(Ordering::Acquire) {
+        let handle = spawn_named("tutti-recorder", None, move |token| {
+            while !token.is_stopped() {
                 match pump_loop.pump_once() {
                     PumpPass::Wrote(_) => {}
-                    // Live source: the producer has not caught up.
-                    PumpPass::Starved => std::thread::sleep(park),
+                    // Live source: the producer has not caught up. The wait
+                    // ends early on a stop, and the loop's check reads it.
+                    PumpPass::Starved => {
+                        let _ = token.wait(park);
+                    }
                     // Finite source: there is no more to read. Broken source
                     // or sink: nothing more will come.
                     PumpPass::Ended | PumpPass::Failed => break,
@@ -607,14 +598,14 @@ impl<K> Recorder<K> {
             // Finalize exactly once, here, where the loop is owned. The result
             // rides the joined thread back to `finish`.
             pump_loop.finalize()
-        });
-        Self {
-            running,
+        })?;
+        Ok(Self {
+            stop: handle.token(),
             handle: Some(handle),
             failed,
             lost,
             kind: PhantomData,
-        }
+        })
     }
 
     /// Stops the pump, waits for its thread, and finalizes the sink.
@@ -643,7 +634,7 @@ impl<K> Recorder<K> {
     /// [`finish_in_place`](Self::finish_in_place) collects the result without
     /// blocking.
     pub fn request_stop(&self) {
-        self.running.store(false, Ordering::Release);
+        self.stop.stop();
     }
 
     /// Whether the pump is still meant to run: `false` once a stop was
@@ -654,7 +645,7 @@ impl<K> Recorder<K> {
     /// [`is_finished`](Self::is_finished) for that.
     #[must_use]
     pub fn is_running(&self) -> bool {
-        self.running.load(Ordering::Acquire)
+        !self.stop.is_stopped()
     }
 
     /// Whether the take failed: the source broke ([`Pull::Failed`], for a
@@ -691,7 +682,7 @@ impl<K> Recorder<K> {
     /// there is no pump left to report on.
     #[must_use]
     pub fn is_finished(&self) -> bool {
-        self.handle.as_ref().is_some_and(JoinHandle::is_finished)
+        self.handle.as_ref().is_some_and(ThreadHandle::is_finished)
     }
 
     /// Stops the pump, joins it and returns the sink's finalize result,
@@ -705,7 +696,7 @@ impl<K> Recorder<K> {
     /// [`PumpLoop::finalize`]). Blocks for at most one pass (or one park);
     /// after [`is_finished`](Self::is_finished) it does not block at all.
     ///
-    /// Clearing the stop flag is the half that matters for a **live** source:
+    /// Requesting the stop is the half that matters for a **live** source:
     /// the loop exits on its own only for a finite one; a starving source
     /// parks and re-polls forever, so nothing else ever reaches the finalize
     /// below it.
@@ -715,15 +706,21 @@ impl<K> Recorder<K> {
         self.join_pump()
     }
 
-    /// Joins the pump and surfaces its finalize result, leaving `running`
-    /// alone. The half [`finish_in_place`](Self::finish_in_place) and
+    /// Joins the pump and surfaces its finalize result; it requests no stop
+    /// itself. The half [`finish_in_place`](Self::finish_in_place) and
     /// [`wait`](Self::wait) share, and the whole difference between them is
-    /// the flag clear before this call.
+    /// the stop requested before this call. A pump that panicked comes back as
+    /// an `io::Error` reading "recording thread panicked: {message}".
     fn join_pump(&mut self) -> Option<Result<(), RecorderError>> {
         self.handle.take().map(|handle| {
             handle
                 .join()
-                .unwrap_or_else(|_| Err(std::io::Error::other("recording thread panicked")))
+                .unwrap_or_else(|panicked| {
+                    Err(std::io::Error::other(format!(
+                        "recording thread panicked: {}",
+                        panicked.message
+                    )))
+                })
                 .map_err(RecorderError::from_take)
         })
     }

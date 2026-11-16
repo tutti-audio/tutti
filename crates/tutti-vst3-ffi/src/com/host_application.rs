@@ -12,7 +12,7 @@
 
 use crate::guard::Out;
 use std::ffi::c_void;
-use tutti_plugin_types::ffi_guard;
+use tutti_plugin_types::{ffi_guard, write_utf16_str};
 
 use vst3::Steinberg::{
     IPlugFrame_iid, TUID,
@@ -63,17 +63,15 @@ impl Class for HostApplication {
 }
 
 impl HostApplication {
-    /// A host application that names itself `name` (cut to 127 UTF-16 units)
-    /// and, on Linux, answers `IRunLoop` with `run_loop`.
+    /// A host application that names itself `name` (cut to 127 UTF-16 units, never inside a
+    /// surrogate pair) and, on Linux, answers `IRunLoop` with `run_loop`.
     pub(crate) fn new(
         name: &str,
         #[cfg(target_os = "linux")] run_loop: Arc<RunLoop>,
         #[cfg(target_os = "linux")] owner: Option<super::run_loop::Owner>,
     ) -> ComWrapper<Self> {
         let mut name_utf16 = [0u16; 128];
-        for (i, c) in name.encode_utf16().take(127).enumerate() {
-            name_utf16[i] = c;
-        }
+        write_utf16_str(&mut name_utf16, name);
         ComWrapper::new(Self {
             name: name_utf16,
             #[cfg(target_os = "linux")]
@@ -381,5 +379,24 @@ mod tests {
         let len = name.iter().position(|&c| c == 0).unwrap();
         assert_eq!(len, 127, "127 characters should survive, the rest cut");
         assert!(name[..len].iter().all(|&c| c == u16::from(b'A')));
+    }
+
+    /// A host name whose 127th and 128th UTF-16 units would be one surrogate pair is cut
+    /// before the pair: the plugin never reads a lone high surrogate at the end.
+    /// Spec: vst3.IHostApplication.getName
+    #[test]
+    fn a_host_name_is_not_cut_inside_a_surrogate_pair() {
+        let host = HostApplication::new_for_test(&format!("{}\u{1F3B5}", "A".repeat(126)));
+        let ptr = host.to_com_ptr::<IHostApplication>().unwrap();
+
+        let mut name: String128 = [0; 128];
+        // SAFETY: the test calls a COM method on a live object it owns, with arguments valid
+        // for the call.
+        unsafe {
+            assert_eq!(ptr.getName(&mut name), kResultOk);
+        }
+
+        assert_eq!(name[126], 0, "the pair needs two units and only one fits");
+        assert!(name[..126].iter().all(|&c| c == u16::from(b'A')));
     }
 }

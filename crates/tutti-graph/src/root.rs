@@ -55,9 +55,14 @@ impl std::fmt::Display for RootId {
 /// them, the old root's channels: the same nodes, wired as the previous root
 /// wired them. The host folds each bank with its own root's fold and sums them
 /// under the [`fade`](Self::fade)'s gains, the old root's as the outgoing side,
-/// for the first [`Fade::duration`](crate::Fade::duration) frames the plan renders.
+/// for the first [`Fade::duration`](crate::Fade::duration) frames rendered
+/// since the commit that declared the new root
+/// ([`Executor::root_fade`](crate::Executor::root_fade) counts them). A later
+/// plan that leaves the root alone carries the same bank, and the count goes on
+/// through it.
 ///
-/// The old root's channels align to the previous plan's total latency: when the
+/// The old root's channels align to the total latency of the plan the root
+/// change was made from, through every plan that continues the fade: when the
 /// old and new totals differ, a source present in both roots is heard at two
 /// delays during the fade and shifts once at its end.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

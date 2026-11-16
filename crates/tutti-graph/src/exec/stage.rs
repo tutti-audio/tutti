@@ -480,25 +480,7 @@ impl Stager {
                     .collect()
             })
             .unwrap_or_default();
-        // The longest old ring that aligns each source to an output, whichever
-        // channel it fed (the lowest key among equals): what a source on a new
-        // channel starts from, with none of its history zero-filled.
-        let old_delays_list = cx.old.map(|p| p.delays.as_slice()).unwrap_or_default();
-        let mut old_by_source: BTreeMap<crate::Source, usize> = BTreeMap::new();
-        for (i, d) in old_delays_list.iter().enumerate() {
-            if let DelayKey::Output { from, .. } = d.key {
-                let better = |j: &usize| {
-                    let best = &old_delays_list[*j];
-                    (d.len, std::cmp::Reverse(d.key)) > (best.len, std::cmp::Reverse(best.key))
-                };
-                match old_by_source.get(&from) {
-                    Some(j) if !better(j) => {}
-                    _ => {
-                        old_by_source.insert(from, i);
-                    }
-                }
-            }
-        }
+        let old_by_source = ring_by_source(cx.old.map(|p| p.delays.as_slice()).unwrap_or_default());
         let mut caps = BTreeMap::new();
         let mut owing = BTreeSet::new();
         let mut rings = Vec::with_capacity(plan.delays.len());
@@ -1154,6 +1136,27 @@ pub(super) fn sort_by_offset(events: &mut [Event]) {
     }
 }
 
+/// The longest ring that aligns each source to an output, whichever channel it
+/// fed, as an index into `delays`; of equal lengths, the lowest key. The choice
+/// is a function of the set of rings, not of their order in the plan: what a
+/// source on a new channel starts from, with none of its history zero-filled.
+fn ring_by_source(delays: &[crate::DelaySpec]) -> BTreeMap<crate::Source, usize> {
+    let mut by_source: BTreeMap<crate::Source, usize> = BTreeMap::new();
+    for (i, d) in delays.iter().enumerate() {
+        let DelayKey::Output { from, .. } = d.key else {
+            continue;
+        };
+        let better = |j: &usize| {
+            let best = &delays[*j];
+            (d.len, std::cmp::Reverse(d.key)) > (best.len, std::cmp::Reverse(best.key))
+        };
+        if by_source.get(&from).is_none_or(better) {
+            by_source.insert(from, i);
+        }
+    }
+    by_source
+}
+
 /// The old ring an output channel's ring of this plan starts from when no old
 /// ring has its own key: the old root's channel `c` for the bank's channel
 /// `base + c`, and, in a root change, for a root channel of a source the old
@@ -1176,5 +1179,74 @@ fn copy_origin(
         // Only in a root change: any other recompile keeps a ring by its key.
         Some(_) if !old.contains_key(key) => by_source.get(&from).copied(),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{DelaySpec, NodeKey, OutPort, Source};
+    use tutti_types::Samples;
+
+    fn ring(channel: u16, from: Source, len: usize) -> DelaySpec {
+        DelaySpec {
+            key: DelayKey::Output { channel, from },
+            len: Samples(len),
+        }
+    }
+
+    fn source(node: u64) -> Source {
+        Source::Node(OutPort {
+            node: NodeKey(node),
+            port: 0,
+        })
+    }
+
+    /// The longest ring of a source is the one a new channel copies, and of
+    /// equal lengths the lowest key, whatever order the plan lists them in:
+    /// two renders of one commit never copy different rings.
+    #[test]
+    fn the_longest_ring_of_a_source_wins_and_the_lowest_key_breaks_a_tie() {
+        let s = source(1);
+        let delays = [
+            ring(3, s, 20),
+            ring(2, s, 30),
+            ring(1, s, 30),
+            ring(0, s, 10),
+            ring(0, source(2), 5),
+        ];
+        let by = ring_by_source(&delays);
+        assert_eq!(
+            by[&s], 2,
+            "channel 1: of the two 30-frame rings, the lower key"
+        );
+        assert_eq!(by[&source(2)], 4, "a source of its own has its own ring");
+        let mut order: Vec<usize> = (0..delays.len()).collect();
+        for _ in 0..delays.len() {
+            order.rotate_left(1);
+            let shuffled: Vec<DelaySpec> = order.iter().map(|&i| delays[i]).collect();
+            let by = ring_by_source(&shuffled);
+            assert_eq!(
+                shuffled[by[&s]].key, delays[2].key,
+                "the same ring in any listing order"
+            );
+        }
+    }
+
+    /// A ring that is not an output's is no source's origin.
+    #[test]
+    fn only_output_rings_are_origins() {
+        let at = crate::InPort {
+            node: NodeKey(9),
+            port: 0,
+        };
+        let delays = [DelaySpec {
+            key: DelayKey::Audio {
+                at,
+                from: source(1),
+            },
+            len: Samples(40),
+        }];
+        assert!(ring_by_source(&delays).is_empty());
     }
 }

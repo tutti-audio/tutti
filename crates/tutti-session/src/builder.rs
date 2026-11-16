@@ -246,9 +246,6 @@ struct Parts {
     compensation: Arc<PrerollTable>,
     #[cfg(feature = "midi")]
     midi: Option<crate::MidiNodes>,
-    /// The reader of the tap the hardware out drains.
-    #[cfg(feature = "midi")]
-    midi_tap: Option<tutti_graph::EventTapReader>,
     #[cfg(feature = "midi-hardware")]
     midi_io: Option<tutti_midi_hardware::MidiSession>,
     #[cfg(feature = "midi-hardware")]
@@ -405,8 +402,6 @@ impl SessionBuilder<Offline> {
                 compensation: Arc::default(),
                 #[cfg(feature = "midi")]
                 midi: None,
-                #[cfg(feature = "midi")]
-                midi_tap: None,
                 #[cfg(feature = "midi-hardware")]
                 midi_io: None,
                 #[cfg(feature = "midi-hardware")]
@@ -464,7 +459,7 @@ impl SessionBuilder<SystemClock> {
         let mut session = self.session(parts, crate::clock::SystemEngine { stream }, true)?;
         session.load = load;
         session.heard = Some((heard, layout));
-        // The hardware out is timed by the session's one clock reader and the
+        // The outputs are timed by the session's one clock reader and the
         // stream's latency, which the timer reports as zero.
         #[cfg(feature = "midi")]
         session
@@ -554,7 +549,7 @@ impl SessionBuilder<crate::DeviceClock> {
         session.load = engine.take_load_meter();
         session.heard = Some((engine.heard_taps(), spec.channels));
         let clock = engine.block_clock();
-        // The hardware out is timed by the session's one clock reader and the
+        // The outputs are timed by the session's one clock reader and the
         // stream's latency, read on every drain.
         #[cfg(feature = "midi")]
         session
@@ -884,35 +879,20 @@ impl<C: Clock> SessionBuilder<C> {
         let (click, _settings) = graph.add(ClickNode::new(&transport, Arc::clone(&click_settings)));
 
         // The engine's MIDI as graph nodes: the clock (off until a host enables
-        // it), and the event tap on the clock that is the host's hardware out.
-        // An input port's ingest node is made when its pool entry loads.
+        // it). An input port's ingest node and an output's node are made when
+        // their pool entries load, and the clock feeds each output.
         #[cfg(feature = "midi")]
         let midi = {
             let (clock, clock_master) = graph.add(tutti_midi_runtime::ClockNode::new(
                 tutti_ump::MidiGroup::FIRST,
                 rate,
             ));
-            // The hardware out: a tap on the clock's event output, aligned to
-            // the outputs' time so MIDI leaves with the audio.
-            let tap = graph
-                .taps()
-                .open_event(
-                    clock.events_out(),
-                    tutti_graph::TapAlign::ToOutput,
-                    crate::midi::MIDI_OUT_TAP_CAPACITY,
-                )
-                .expect("the clock node is in the graph with its event output");
-            (
-                Some(crate::MidiNodes {
-                    input_ports: self.opts.midi_ports,
-                    clock: clock.erase(),
-                    clock_master,
-                }),
-                Some(tap),
-            )
+            Some(crate::MidiNodes {
+                input_ports: self.opts.midi_ports,
+                clock: clock.erase(),
+                clock_master,
+            })
         };
-        #[cfg(feature = "midi")]
-        let (midi, midi_tap) = midi;
 
         Ok(Parts {
             graph,
@@ -922,8 +902,6 @@ impl<C: Clock> SessionBuilder<C> {
             compensation: Arc::default(),
             #[cfg(feature = "midi")]
             midi,
-            #[cfg(feature = "midi")]
-            midi_tap,
             #[cfg(feature = "midi-hardware")]
             midi_io,
             #[cfg(feature = "midi-hardware")]
@@ -977,15 +955,11 @@ impl<C: Clock> SessionBuilder<C> {
             #[cfg(feature = "midi")]
             midi: parts.midi,
             #[cfg(all(feature = "midi", not(feature = "midi-hardware")))]
-            midi_state: crate::midi::MidiState::with_hardware_tap(parts.midi_tap)
-                .with_mpe(self.opts.mpe_mode),
+            midi_state: crate::midi::MidiState::default().with_mpe(self.opts.mpe_mode),
             #[cfg(feature = "midi-hardware")]
-            midi_state: crate::midi::MidiState::with_device_events(
-                parts.device_events,
-                parts.midi_tap,
-            )
-            .with_mpe(self.opts.mpe_mode)
-            .with_input_timing(self.opts.midi_input_timing),
+            midi_state: crate::midi::MidiState::with_device_events(parts.device_events)
+                .with_mpe(self.opts.mpe_mode)
+                .with_input_timing(self.opts.midi_input_timing),
             #[cfg(feature = "modulation")]
             mods: crate::modulation::ModSession::new(self.opts.unresolved_warning),
             #[cfg(feature = "midi-hardware")]
@@ -1076,10 +1050,8 @@ impl<C: Clock> SessionBuilder<C> {
             // how much is built before the refusal.
             Some(declared) => Graph::check_root(declared, Some(&placed))?,
             None => {
-                let width = ChannelLayout::try_from(root).map_err(|_| {
-                    tutti_buffers::FoldError::from(tutti_buffers::BufferError::TooWide {
-                        channels: root,
-                    })
+                let width = ChannelLayout::try_from(root).map_err(|e| {
+                    tutti_buffers::FoldError::from(tutti_buffers::BufferError::from(e))
                 })?;
                 tutti_graph::fold_to_topology(&ChannelTopology::assumed(width), &placed)?;
             }

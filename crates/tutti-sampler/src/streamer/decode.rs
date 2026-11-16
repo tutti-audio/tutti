@@ -10,9 +10,9 @@
 //! [`Decoded`](super::command::StreamerCommand::Decoded), so the streamer
 //! wakes for it as it wakes for any command.
 //!
-//! The thread is not joined: it ends after the job it is on when the lane is
-//! dropped (the job queue disconnects), or when the streamer's queue is gone
-//! (its send fails).
+//! The thread is detached, not joined: it ends after the job it is on when the
+//! lane is dropped (the job queue disconnects), or when the streamer's queue is
+//! gone (its send fails).
 
 // With no codec feature there is no decode to run: the lane is never asked for
 // a job, and `load_wave` reads only the cache. A feature-matrix artifact, so
@@ -30,10 +30,10 @@ use std::io;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::thread::{self, JoinHandle};
 
 use crossbeam_channel::Sender;
 use tutti_codec::Wave;
+use tutti_rt::{PriorityRequest, StopToken, ThreadHandle, spawn_named};
 
 use super::StreamerSender;
 use super::cache::LruCache;
@@ -43,11 +43,19 @@ use super::metrics::{Metrics, ReadMeter};
 use crate::OpenError;
 
 /// How a thread is started: the seam a test replaces to see a spawn fail.
-pub(super) type Spawner = fn(&str, Box<dyn FnOnce() + Send>) -> io::Result<JoinHandle<()>>;
+pub(super) type Spawner = fn(
+    &str,
+    Option<PriorityRequest>,
+    Box<dyn FnOnce(&StopToken) + Send>,
+) -> io::Result<ThreadHandle<()>>;
 
 /// The OS's thread: what ships.
-fn os_spawn(name: &str, body: Box<dyn FnOnce() + Send>) -> io::Result<JoinHandle<()>> {
-    thread::Builder::new().name(name.into()).spawn(body)
+fn os_spawn(
+    name: &str,
+    priority: Option<PriorityRequest>,
+    body: Box<dyn FnOnce(&StopToken) + Send>,
+) -> io::Result<ThreadHandle<()>> {
+    spawn_named(name, priority, body)
 }
 
 /// A hook a test runs where the streamer reads a file: the stream and the
@@ -149,7 +157,7 @@ impl DecodeLane {
         let (cache, metrics) = (Arc::clone(&shared.cache), Arc::clone(&shared.metrics));
         #[cfg(test)]
         let decode_hook = shared.seams.decode_hook.clone();
-        let body = move || {
+        let body = move |_: &StopToken| {
             let mut meter = ReadMeter::new();
             for Job { id, path } in queue {
                 // A panic in the decoder is this file's failure, not the
@@ -182,8 +190,9 @@ impl DecodeLane {
                 }
             }
         };
-        (shared.seams.spawn)("tutti-decode", Box::new(body))
-            .map_err(|error| OpenError::Io(error.kind()))?;
+        (shared.seams.spawn)("tutti-decode", None, Box::new(body))
+            .map_err(|error| OpenError::Io(error.kind()))?
+            .detach();
         Ok(jobs)
     }
 }

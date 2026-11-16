@@ -553,12 +553,10 @@ tutti-session  setter  crates/tutti-session/src/graph.rs::Graph::set_sample_rate
 tutti-session  setter  crates/tutti-session/src/graph.rs::Graph::set_sources
 tutti-session  setter  crates/tutti-session/src/graph.rs::Graph::set_sources_hard
 tutti-session  setter  crates/tutti-session/src/instrument.rs::InstrumentHandle::set_gain
-tutti-session  setter  crates/tutti-session/src/midi.rs::Midi::set_hardware_out
 tutti-session  setter  crates/tutti-session/src/midi.rs::Midi::set_mpe
 tutti-session  setter  crates/tutti-session/src/midi.rs::Midi::set_output_latency
 tutti-session  setter  crates/tutti-session/src/midi.rs::Midi::set_route_fallback
 tutti-session  setter  crates/tutti-session/src/midi.rs::Midi::set_routes
-tutti-session  setter  crates/tutti-session/src/midi.rs::UmpOut::set_stamping
 tutti-session  setter  crates/tutti-session/src/midi_port.rs::MidiInput::set_profile
 tutti-session  setter  crates/tutti-session/src/modulation.rs::Mods::set_source
 tutti-session  setter  crates/tutti-session/src/modulation.rs::RouteMut::set_curve
