@@ -48,6 +48,8 @@ tutti-midi-protocol = { version = "0.0.1", path = "../tutti-midi-protocol", opti
 tutti-midi-runtime = { version = "0.0.1", path = "../tutti-midi-runtime", default-features = false, optional = true }
 tutti-midi-file = { version = "0.0.1", path = "../tutti-midi-file", optional = true }
 tutti-midi-hardware = { version = "0.0.1", path = "../tutti-midi-hardware", optional = true }
+# The device vocabulary (`DeviceId`, `DeviceInfo`, ...) the OS MIDI layer reports in.
+tutti-midi-device = { version = "0.0.1", path = "../tutti-midi-device", optional = true }
 tutti-sampler = { version = "0.0.1", path = "../tutti-sampler", default-features = false, optional = true }
 tutti-soundfont = { version = "0.0.1", path = "../tutti-soundfont", optional = true }
 # The font a `soundfont` pool entry opens (`tutti-soundfont` does not re-export it).
@@ -84,7 +86,7 @@ midi = [
     "dep:tutti-midi-runtime",
     "dep:tutti-midi-file",
 ]
-midi-hardware = ["midi", "dep:tutti-midi-hardware"]
+midi-hardware = ["midi", "dep:tutti-midi-hardware", "dep:tutti-midi-device"]
 # `serde` for `MidiRouteRule<T>` (keyed by the app's own stable id, not a
 # `NodeKey`): its Group and channel are `tutti-ump`'s, with its `serde`.
 serde = ["midi", "dep:serde", "tutti-ump/serde"]
@@ -117,9 +119,6 @@ tutti-session = { path = ".", features = ["testing"] }
 # The `FakeBackend` the hot-plug tests drive (`plug`, `unplug`). Dev-only:
 # `midi-hardware` must not link a fake backend.
 tutti-midi-hardware = { path = "../tutti-midi-hardware", features = ["testing"] }
-# The MIDI-CI messages a fake device answers the session's Discovery with
-# (`tests/midi/midi.rs`).
-tutti-midi-device = { path = "../tutti-midi-device" }
 # Stimulus nodes (`Const`, `Osc`, `Through`) for the tests and doctests.
 tutti-nodes = { path = "../tutti-nodes", default-features = false, features = ["testing"] }
 # The in-memory tone a sampler voice test plays (`Wave`).

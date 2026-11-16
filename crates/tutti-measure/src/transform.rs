@@ -349,7 +349,7 @@ pub struct StftRequest {
     /// Which span of the buffer to transform.
     pub range: SampleRange,
     /// The window *shape*. [`CosineWindow::HANN`] unless
-    /// [`with_window`](Self::with_window) says otherwise.
+    /// [`window_fn`](Self::window_fn) says otherwise.
     pub window_fn: CosineWindow,
 }
 
@@ -380,7 +380,7 @@ impl StftRequest {
     /// overlap where Hann needs 4x, so a grid that inverted before may not
     /// after. That refusal is the point.
     #[must_use]
-    pub fn with_window(mut self, window_fn: CosineWindow) -> Self {
+    pub fn window_fn(mut self, window_fn: CosineWindow) -> Self {
         self.window_fn = window_fn;
         self
     }
@@ -664,7 +664,7 @@ mod tests {
     }
 
     /// **The request's window shape reaches the resolved geometry**, on both
-    /// paths — otherwise `with_window` would be accepted, stored, and ignored,
+    /// paths — otherwise `window_fn` would be accepted, stored, and ignored,
     /// which is the shape of failure that leaves an analysis quietly on Hann.
     #[test]
     fn a_requests_window_shape_reaches_its_geometry() {
@@ -674,7 +674,7 @@ mod tests {
             Samples::new(2048usize),
             Samples::new(512usize),
         )
-        .with_window(CosineWindow::HAMMING);
+        .window_fn(CosineWindow::HAMMING);
 
         assert_eq!(
             request.resolve(len).expect("valid").window_fn(),
@@ -703,7 +703,7 @@ mod tests {
             Samples::new(2048usize),
             Samples::new(512usize),
         )
-        .with_window(CosineWindow::BLACKMAN);
+        .window_fn(CosineWindow::BLACKMAN);
 
         assert!(matches!(
             stft(&samples, request, &mut fft),
@@ -722,7 +722,7 @@ mod tests {
             Samples::new(2048usize),
             Samples::new(256usize),
         )
-        .with_window(CosineWindow::BLACKMAN);
+        .window_fn(CosineWindow::BLACKMAN);
         assert!(stft(&samples, deeper, &mut fft).is_ok());
     }
 

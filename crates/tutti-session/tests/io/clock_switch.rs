@@ -744,7 +744,7 @@ fn the_old_driver_renders_its_last_block_before_the_new_one_its_first() {
 /// port's ingest node stays the graph's, and the device stays connected.
 #[cfg(feature = "midi-hardware")]
 mod midi_ports {
-    use tutti_midi_hardware::EndpointId;
+    use tutti_midi_device::EndpointId;
     use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint};
     use tutti_session::PoolState;
     use tutti_ump::{Message, MidiGroup, System, Ump};
@@ -755,7 +755,7 @@ mod midi_ports {
         let (backend, fake) =
             FakeBackend::build_with(vec![endpoint(1, "Keys")], vec![], usize::MAX);
         let mut s = system_builder()
-            .midi_hardware_over(backend)
+            .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareOptions::new())
             .build()
             .expect("builds");
         let _ = s.update();

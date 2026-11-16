@@ -10,7 +10,7 @@ use crate::common::{MF, play};
 use tutti_buffers::InterleavedMut;
 use tutti_fixtures::midi;
 use tutti_graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
-use tutti_midi_hardware::EndpointId;
+use tutti_midi_device::EndpointId;
 use tutti_midi_hardware::test_support::{FakeBackend, persistent_endpoint};
 use tutti_session::{MidiRouteRule, Session, midi_input, midi_output};
 use tutti_types::ChannelLayout;
@@ -41,7 +41,7 @@ fn an_input_and_an_output_port_render_without_allocating() {
         usize::MAX,
     );
     let mut s = Session::builder()
-        .midi_hardware_over(backend)
+        .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareOptions::new())
         .build()
         .expect("builds");
     let _ = s.update();

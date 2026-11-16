@@ -467,7 +467,7 @@ fn in_blocks_declaring(t0: Instant, n: u8, is_static: bool) -> Connection {
     };
     let (mut c, _) = Connection::with_wanted(wanted, t0);
     c.on_message(
-        stream(Stream::EndpointInfo(tutti_ump::EndpointInfo {
+        stream(Stream::EndpointInfo(tutti_ump::EndpointInfoNotification {
             version: UMP_VERSION,
             static_function_blocks: is_static,
             function_blocks: FunctionBlockCount::new(n).unwrap().into(),

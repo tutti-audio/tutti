@@ -446,7 +446,7 @@ fn program_change() -> Ump {
 fn time_signature() -> Ump {
     Message::Flex(
         MidiGroup::FIRST,
-        Flex::SetTimeSignature(tutti_ump::TimeSignature {
+        Flex::SetTimeSignature(tutti_ump::FlexTimeSignature {
             numerator: 3,
             denominator: 2,
             thirty_seconds: 8,

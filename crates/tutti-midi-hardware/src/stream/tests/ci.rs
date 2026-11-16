@@ -82,13 +82,13 @@ fn endpoint_of(blocks: &[FunctionBlock]) -> Endpoint {
 /// A negotiated UMP Endpoint with `blocks`, and the poll after the settle,
 /// which starts MIDI-CI.
 fn endpoint_wire(blocks: &[FunctionBlock]) -> Wire {
-    let mut wire = session_over(
+    let mut wire = session_over_ci(
         UmpCapability::midi2(),
         PortDirection::Duplex,
         endpoint_of(blocks),
+        Some(identity()),
     );
-    wire.session.enable_ci(identity());
-    wire.open(InputTiming::Arrival);
+    wire.open();
     // One Function Block Discovery per declared block takes a few ticks.
     let settled = (0..32).any(|ms| !wire.tick(ms).1.is_empty());
     assert!(settled, "the negotiation settled");
@@ -103,8 +103,7 @@ fn endpoint_wire(blocks: &[FunctionBlock]) -> Wire {
 /// A MIDI 1.0 port whose Identity Request was answered and whose MIDI-CI has
 /// started, with the MUID it drew; what was sent so far is read off.
 fn midi1_running() -> (Wire, Muid) {
-    let mut wire = midi1_wire();
-    wire.session.enable_ci(identity());
+    let mut wire = midi1_wire_ci(Some(identity()));
     let _ = polled(&mut wire, 0);
     reply_at(&wire, identity_reply(0), 10);
     let _ = polled(&mut wire, 20);
@@ -189,16 +188,16 @@ fn an_endpoint_with_no_blocks_or_no_answer_gets_discovery_on_group_0() {
     );
 
     // Never answered: the Stream Discoveries are sent and dropped.
-    let mut wire = session_over(
+    let mut wire = session_over_ci(
         UmpCapability::midi2(),
         PortDirection::Duplex,
         Endpoint::new(Supports::of(Capabilities {
             midi1: true,
             ..Capabilities::default()
         })),
+        Some(identity()),
     );
-    wire.session.enable_ci(identity());
-    wire.open(InputTiming::Arrival);
+    wire.open();
     let step = STEP_TIMEOUT.as_millis() as u64;
     for ms in [0, step, 2 * step, 3 * step + 1, 3 * step + 2] {
         let _ = polled(&mut wire, ms);
@@ -239,8 +238,7 @@ fn messages_are_routed_by_group() {
 fn a_midi1_port_is_sent_discovery_only_after_the_identity_inquiry_ended() {
     let ms = INQUIRY_TIMEOUT.as_millis() as u64;
     for answered in [true, false] {
-        let mut wire = midi1_wire();
-        wire.session.enable_ci(identity());
+        let mut wire = midi1_wire_ci(Some(identity()));
         let mut order = String::new();
         for step in 0..8 {
             if answered && step == 1 {
@@ -382,8 +380,7 @@ fn a_sysex_that_is_not_midi_ci_is_ignored() {
 #[test]
 fn nothing_midi_ci_reaches_the_sessions_output_and_the_graph_still_hears_sysex() {
     use crate::testing::Rig;
-    let mut wire = midi1_wire();
-    wire.session.enable_ci(identity());
+    let mut wire = midi1_wire_ci(Some(identity()));
     let other = EndpointId::from_raw(8);
     wire.counters.plug(
         crate::test_support::endpoint(8, "Other"),
@@ -483,8 +480,7 @@ fn a_reply_to_discovery_is_addressed_to_one_device() {
 #[test]
 fn after_giving_up_the_sysex_copy_stays_on_for_midi_ci_and_no_request_is_sent() {
     use tutti_midi_device::INQUIRY_ATTEMPTS;
-    let mut wire = midi1_wire();
-    wire.session.enable_ci(identity());
+    let mut wire = midi1_wire_ci(Some(identity()));
     let ms = INQUIRY_TIMEOUT.as_millis() as u64;
     // The request, its one retry, then the poll that gives up, then the one
     // that starts MIDI-CI.
@@ -518,7 +514,7 @@ fn midi_ci_is_off_by_default() {
         PortDirection::Duplex,
         endpoint_of(&[ci_block(0, 2, 2)]),
     );
-    wire.open(InputTiming::Arrival);
+    wire.open();
     let settled = (0..32).any(|ms| !wire.tick(ms).1.is_empty());
     assert!(settled);
     for ms in [100, 5_000, 20_000] {
@@ -528,7 +524,7 @@ fn midi_ci_is_off_by_default() {
         received(&wire).is_empty(),
         "a block that declares MIDI-CI, unasked"
     );
-    assert_eq!(wire.session.ci_identity(), None);
+    assert_eq!(wire.session.options().ci, None);
 
     use tutti_midi_device::{INQUIRY_ATTEMPTS, INQUIRY_TIMEOUT};
     let mut wire = midi1_wire();
@@ -553,113 +549,6 @@ fn midi_ci_is_off_by_default() {
         0,
         "the copy is off"
     );
-}
-
-/// Enabling reaches an input already open and says exactly the app's identity;
-/// disabling sends each device's Invalidate MUID for its own MUID (§5.9),
-/// reports its peers lost, stops the copy and answers nothing after.
-#[test]
-fn disabling_ends_midi_ci_with_an_invalidate_muid_and_the_loss_of_its_peers() {
-    let (mut wire, ours) = midi1_running();
-    assert_eq!(wire.session.ci_identity(), Some(identity()));
-    say(
-        &wire,
-        GROUP_0,
-        &CiMessage::DiscoveryReply {
-            header: CiHeader::new(peer()),
-            to: ours,
-            data: peer_data(),
-        },
-        40,
-    );
-    let _ = polled(&mut wire, 50);
-    assert_eq!(wire.session.ci_peers(&wire.id).len(), 1);
-
-    wire.session.disable_ci();
-    let ended = polled(&mut wire, 60);
-    assert!(
-        matches!(
-            ended.as_slice(),
-            [Polled::Ci(_, who, CiChange::Lost)] if *who == peer_id()
-        ),
-        "{ended:?}"
-    );
-    let sent = ci_sent(&wire);
-    let [(group, CiMessage::InvalidateMuid { header, target })] = sent.as_slice() else {
-        panic!("one Invalidate MUID, got {sent:?}");
-    };
-    assert_eq!((*group, header.source, *target), (GROUP_0, ours, ours));
-    assert!(wire.session.ci_peers(&wire.id).is_empty());
-
-    // Nothing more: a Discovery is not answered and the copy is off.
-    let slot = wire.session.ports().list_input_ports()[0].id;
-    let _ = wire.session.ports().drain_stream(slot).count();
-    say(
-        &wire,
-        GROUP_0,
-        &CiMessage::Discovery {
-            header: CiHeader::new(peer()),
-            data: peer_data(),
-        },
-        70,
-    );
-    assert_eq!(wire.session.ports().drain_stream(slot).count(), 0);
-    let _ = polled(&mut wire, 80);
-    assert!(received(&wire).is_empty());
-}
-
-/// `enable_ci` again: with the identity already in use it changes nothing; with
-/// another, the running devices end as on a disable (an Invalidate MUID for
-/// their own MUID, M2-101 §5.9, and their peers lost) and start again under a
-/// new MUID, whose Discovery carries the new identity.
-#[test]
-fn enabling_again_with_another_identity_restarts_midi_ci_under_a_new_muid() {
-    let (mut wire, ours) = midi1_running();
-    say(
-        &wire,
-        GROUP_0,
-        &CiMessage::DiscoveryReply {
-            header: CiHeader::new(peer()),
-            to: ours,
-            data: peer_data(),
-        },
-        40,
-    );
-    let _ = polled(&mut wire, 50);
-    assert_eq!(wire.session.ci_peers(&wire.id).len(), 1);
-
-    wire.session.enable_ci(identity());
-    assert!(
-        polled(&mut wire, 60).is_empty(),
-        "the same identity changes nothing"
-    );
-    assert!(ci_sent(&wire).is_empty());
-    assert_eq!(wire.session.ci_peers(&wire.id).len(), 1);
-
-    let mut other = identity();
-    other.family = [U7::of(9), U7::of(9)];
-    wire.session.enable_ci(other);
-    let mut changes = polled(&mut wire, 70);
-    changes.extend(polled(&mut wire, 80));
-    assert!(
-        changes.iter().any(|c| matches!(
-            c,
-            Polled::Ci(_, who, CiChange::Lost) if *who == peer_id()
-        )),
-        "{changes:?}"
-    );
-    let sent = ci_sent(&wire);
-    let [
-        (_, CiMessage::InvalidateMuid { header, target }),
-        (_, CiMessage::Discovery { header: dh, data }),
-    ] = sent.as_slice()
-    else {
-        panic!("an Invalidate MUID then a Discovery, got {sent:?}");
-    };
-    assert_eq!((header.source, *target), (ours, ours));
-    assert_ne!(dh.source, ours, "a new MUID");
-    assert_eq!(data.identity, other);
-    assert!(wire.session.ci_peers(&wire.id).is_empty());
 }
 
 /// The peers read are a snapshot: a list held across a change keeps what it
@@ -1618,21 +1507,6 @@ fn an_invalidate_muid_drops_the_peers_profiles_and_refuses_its_handles() {
     );
 }
 
-/// Disabling MIDI-CI ends every device and its peers; the peers' Profiles are
-/// dropped and reported with them.
-#[test]
-fn disabling_midi_ci_drops_the_profiles() {
-    let (mut wire, ours) = peer_declaring(CiCategories::PROFILE_CONFIGURATION);
-    known_profiles(&mut wire, ours, vec![], vec![profile(2)], vec![]);
-    wire.session.disable_ci();
-    let changes = polled(&mut wire, 110);
-    assert!(
-        profile_events(&changes).contains(&&ProfilesChange::Dropped),
-        "{changes:?}"
-    );
-    assert!(wire.session.profiles(&wire.id).is_empty());
-}
-
 /// M2-102 gives an Initiator no time limit; tutti's is [`PEER_REPLY_TIMEOUT`]. A
 /// Set Profile On the peer never answers ends, and is reported, once that long
 /// has passed since it was sent and not before; the table is left as it was.
@@ -2014,20 +1888,6 @@ fn a_lost_peer_drops_its_process_inquiry_and_refuses_its_handles() {
         wire.session.report(handle.ask(function_block_request())),
         Err(ReportError::NoSuchPeer)
     );
-}
-
-/// Disabling MIDI-CI drops the peers' Process Inquiry.
-#[test]
-fn disabling_midi_ci_drops_process_inquiry() {
-    let (mut wire, ours) = peer_declaring(CiCategories::PROCESS_INQUIRY);
-    answer_capabilities(&mut wire, ours, ProcessFeatures::MIDI_MESSAGE_REPORT);
-    wire.session.disable_ci();
-    let changes = polled(&mut wire, 110);
-    assert!(
-        process_events(&changes).contains(&&ProcessChange::Dropped),
-        "{changes:?}"
-    );
-    assert!(wire.session.report_peers(&wire.id).is_empty());
 }
 
 /// M2-101 section 9.3 and 9.6: the session declares Process Inquiry, and answers a

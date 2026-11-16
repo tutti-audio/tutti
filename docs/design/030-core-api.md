@@ -523,7 +523,7 @@ order, one PR per step, each deleting what it replaces. It supersedes tasks
      in its type (`Stem<N, FileStem>` has `.gain(StemGain)`, `Stem<N, BufferStem>` has none; a
      `compile_fail` doctest), so `NormalizeBuffers` and `Bounce::normalize_stems` are gone.
      `FileTarget` and `BufferTarget` hold one width, a count or a topology
-     (`with_topology(topology)` replaces the count), so the render-start refusal of a topology
+     (`topology(topology)` replaces the count), so the render-start refusal of a topology
      of another width is deleted.
    - E2: `Produced::file` and `buffers` borrow (`Option<&Written>`, `Option<&Rendered>`),
      `into_file` and `into_buffers` own; `Outcome::finished` borrows and `into_finished`
