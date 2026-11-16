@@ -315,7 +315,7 @@ impl Drop for Plugin {
         // SAFETY: taken once, here, and `self.parts` is not used again.
         let parts = unsafe { ManuallyDrop::take(&mut self.parts) };
         if parts.home.here().is_none() {
-            log::warn!(
+            tracing::warn!(
                 "a VST3 plugin was dropped off the main thread; its teardown is handed to the \
                  main thread"
             );

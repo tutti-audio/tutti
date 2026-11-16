@@ -77,12 +77,14 @@
 
 extern crate libc;
 extern crate libloading;
-extern crate num_enum;
 extern crate num_traits;
 #[macro_use]
-extern crate log;
+extern crate tracing;
 #[macro_use]
 extern crate bitflags;
+
+#[macro_use]
+mod primitive_enum;
 
 pub mod api;
 pub mod buffer;
@@ -95,8 +97,25 @@ pub mod midi;
 pub mod plugin;
 pub mod scratch;
 
+pub use primitive_enum::UnknownPrimitive;
+
 // Test-only global allocator for the RT-safety test of the render refusal; it aborts on
 // any allocation inside an `assert_no_alloc` scope.
 #[cfg(test)]
 #[global_allocator]
 static RT_NO_ALLOC_HARNESS: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
+
+#[cfg(test)]
+mod primitive_enum_tests {
+    /// Every opcode and code enum decodes each of its own values and refuses the
+    /// value past its largest.
+    #[test]
+    fn every_enum_round_trips_and_refuses_one_past_the_end() {
+        crate::api::ProcessLevel::assert_round_trips();
+        crate::api::AutomationState::assert_round_trips();
+        crate::plugin::Category::assert_round_trips();
+        crate::plugin::OpCode::assert_round_trips();
+        crate::host::OpCode::assert_round_trips();
+        crate::editor::Key::assert_round_trips();
+    }
+}

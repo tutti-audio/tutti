@@ -23,6 +23,7 @@ testing = []
 # The editor's sizes, which name their unit (`dpi::Size`).
 dpi.workspace = true
 thiserror.workspace = true
+tracing = "0.1"
 clap-sys = "0.5"
 libloading.workspace = true
 bitflags = "2"
@@ -34,7 +35,6 @@ tutti-graph = { version = "0.0.1", path = "../tutti-graph" }
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 # `Beat` and `BeatDuration`: what a `transport-control` request carries.
 tutti-types = { version = "0.0.1", path = "../tutti-types" }
-log = "0.4"
 
 [dev-dependencies]
 # The reference plugin the wrapper tests load; Cargo builds its cdylib in the

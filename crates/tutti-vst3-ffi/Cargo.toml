@@ -24,6 +24,7 @@ conformance = []
 dpi.workspace = true
 libloading.workspace = true
 thiserror.workspace = true
+tracing = "0.1"
 parking_lot = "0.13"
 crossbeam-queue = "0.3"
 arrayvec = "0.7"
@@ -34,7 +35,6 @@ tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 vst3 = "0.3"
 # The warning of a plugin dropped off the main thread.
-log = "0.4"
 # `IRunLoop` (Linux): the look at the descriptors a plugin registered.
 tutti-plugin-ipc-ffi = { version = "0.0.1", path = "../tutti-plugin-ipc-ffi" }
 
