@@ -259,10 +259,13 @@ fn a_plugin_that_aborts_mid_render_leaves_the_host_alive_and_silent() {
          wait."
     );
     assert!(
-        matches!(status.cause(), Some(PluginFailure::StreamClosed)),
-        "a plugin that aborts closes its stream, and the latched cause says so \
-         (got {:?}); without one a host can report that something died but \
-         never what",
+        matches!(
+            status.cause(),
+            Some(PluginFailure::StreamClosed | PluginFailure::ServerExited { .. })
+        ),
+        "a plugin that aborts ends its process and closes its stream, and the \
+         latched cause is whichever the host saw first (got {:?}); without one a \
+         host can report that something died but never what",
         status.cause()
     );
 
