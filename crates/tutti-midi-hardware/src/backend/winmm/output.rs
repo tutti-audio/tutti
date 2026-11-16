@@ -1,8 +1,6 @@
 //! Sending MIDI 1.0 to a winmm output, each event at its time.
 
-use std::sync::mpsc;
-use std::sync::{Arc, Mutex, PoisonError};
-use std::thread::JoinHandle;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use super::super::legacy_port::bytes::{ByteOut, Wire};
@@ -11,6 +9,7 @@ use crate::endpoints::DeviceOut;
 use crate::error::{Error, Result};
 use tutti_graph::Losses;
 use tutti_midi_runtime::{MidiOut, Outgoing, SendAt, Taken};
+use tutti_rt::{ThreadHandle, spawn_named};
 use tutti_ump::Ump;
 use tutti_winmm_ffi::{MidiOut as Port, Sleeper};
 
@@ -34,9 +33,7 @@ struct Shared {
 /// events not yet due are dropped.
 pub struct WinMmOutput {
     shared: Arc<Shared>,
-    /// Disconnects when the thread ends, however it ends.
-    ended: Mutex<mpsc::Receiver<()>>,
-    thread: Option<JoinHandle<()>>,
+    thread: Option<ThreadHandle<()>>,
 }
 
 impl MidiOut for WinMmOutput {
@@ -89,18 +86,16 @@ impl Drop for WinMmOutput {
             tracing::warn!("winmm MIDI output wake: {e}");
         }
         if let Some(thread) = self.thread.take() {
-            match self
-                .ended
-                .get_mut()
-                .unwrap_or_else(PoisonError::into_inner)
-                .recv_timeout(JOIN_BOUND)
-            {
-                Err(mpsc::RecvTimeoutError::Timeout) => tracing::warn!(
-                    "winmm MIDI output did not stop within {JOIN_BOUND:?}; left running"
-                ),
-                // Disconnected: the thread has ended (or is ending).
-                _ => {
-                    let _ = thread.join();
+            match thread.stop_within(JOIN_BOUND) {
+                Ok(Ok(())) => {}
+                // A panic in the sender is caught by its loop, which kills the
+                // mailbox; one that escapes is reported here.
+                Ok(Err(panicked)) => tracing::error!("winmm MIDI output: {panicked}"),
+                Err(stuck) => {
+                    tracing::warn!(
+                        "winmm MIDI output did not stop within {JOIN_BOUND:?}; left running"
+                    );
+                    stuck.detach();
                 }
             }
         }
@@ -136,21 +131,15 @@ pub(super) fn open(index: u32) -> Result<WinMmOutput> {
         mailbox: Mailbox::new(),
         sleeper: Sleeper::new()?,
     });
-    let (ending, ended) = mpsc::channel();
-    let thread = std::thread::Builder::new()
-        .name("tutti-midi-out".to_string())
-        .spawn({
-            let shared = Arc::clone(&shared);
-            move || {
-                // Dropped when the thread returns or unwinds.
-                let _ending: mpsc::Sender<()> = ending;
-                thread(port, &shared);
-            }
-        })
-        .map_err(|e| Error::device_from("spawn MIDI output thread", e))?;
+    let thread = spawn_named("tutti-midi-out", None, {
+        let shared = Arc::clone(&shared);
+        move |_| {
+            thread(port, &shared);
+        }
+    })
+    .map_err(|e| Error::device_from("spawn MIDI output thread", e))?;
     Ok(WinMmOutput {
         shared,
-        ended: Mutex::new(ended),
         thread: Some(thread),
     })
 }

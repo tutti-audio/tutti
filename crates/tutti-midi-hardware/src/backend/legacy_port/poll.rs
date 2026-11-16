@@ -1,8 +1,5 @@
 //! A device watch for an OS that has no notification: list again on a timer.
 
-use std::sync::mpsc::{self, RecvTimeoutError, Sender};
-use std::sync::{Mutex, PoisonError};
-use std::thread::JoinHandle;
 use std::time::Duration;
 
 use crate::devices::ChangeSink;
@@ -10,6 +7,7 @@ use crate::devices::reporter::Reporter;
 use crate::endpoints::Watch;
 use crate::error::{Error, Result};
 use tutti_midi_device::OsDevice;
+use tutti_rt::{ThreadHandle, spawn_named};
 
 /// How often the list is read again: a device plugged in shows within this.
 pub(in crate::backend) const INTERVAL: Duration = Duration::from_secs(1);
@@ -18,10 +16,7 @@ pub(in crate::backend) const INTERVAL: Duration = Duration::from_secs(1);
 /// (a thread that does not within [`JOIN_BOUND`] is left running and logged),
 /// so no report reaches the sink afterwards.
 pub(in crate::backend) struct PollWatch {
-    stop: Option<Sender<()>>,
-    /// Disconnects when the thread ends, however it ends.
-    ended: Mutex<mpsc::Receiver<()>>,
-    thread: Option<JoinHandle<()>>,
+    thread: Option<ThreadHandle<()>>,
 }
 
 /// How long dropping a watch waits for its thread before it lets the thread
@@ -33,22 +28,15 @@ impl Watch for PollWatch {}
 
 impl Drop for PollWatch {
     fn drop(&mut self) {
-        // Closing the channel wakes the thread out of its wait.
-        drop(self.stop.take());
         if let Some(thread) = self.thread.take() {
-            match self
-                .ended
-                .get_mut()
-                .unwrap_or_else(PoisonError::into_inner)
-                .recv_timeout(JOIN_BOUND)
-            {
-                Err(RecvTimeoutError::Timeout) => {
+            match thread.stop_within(JOIN_BOUND) {
+                Ok(Ok(())) => {}
+                // A panic in a look is caught and reported to the sink; one
+                // that escapes the catch is reported here.
+                Ok(Err(panicked)) => tracing::error!("MIDI device watch: {panicked}"),
+                Err(stuck) => {
                     tracing::warn!("MIDI device watch did not stop within {JOIN_BOUND:?}");
-                }
-                // Disconnected: the thread has ended (or is ending), so the
-                // join is brief.
-                _ => {
-                    let _ = thread.join();
+                    stuck.detach();
                 }
             }
         }
@@ -73,28 +61,19 @@ pub(in crate::backend) fn start(
     reporter
         .seed(snapshot())
         .map_err(|e| Error::device_from("seed the MIDI device list", e))?;
-    let (stop, stopped) = mpsc::channel::<()>();
-    let (ending, ended) = mpsc::channel::<()>();
-    let thread = std::thread::Builder::new()
-        .name("tutti-devwatch".to_string())
-        .spawn(move || {
-            // Dropped when the thread returns or unwinds.
-            let _ending = ending;
-            // `Disconnected` is the drop's stop; nothing is ever sent.
-            while let Err(RecvTimeoutError::Timeout) = stopped.recv_timeout(interval) {
-                let look = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    reporter.report(snapshot(), |_| false);
-                }));
-                if look.is_err() {
-                    failures.fail(crate::WatchFailure::Panicked);
-                    return;
-                }
+    let thread = spawn_named("tutti-devwatch", None, move |stop| {
+        while !stop.wait(interval) {
+            let look = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                reporter.report(snapshot(), |_| false);
+            }));
+            if look.is_err() {
+                failures.fail(crate::WatchFailure::Panicked);
+                return;
             }
-        })
-        .map_err(|e| Error::device_from("spawn the MIDI device watch", e))?;
+        }
+    })
+    .map_err(|e| Error::device_from("spawn the MIDI device watch", e))?;
     Ok(PollWatch {
-        stop: Some(stop),
-        ended: Mutex::new(ended),
         thread: Some(thread),
     })
 }
