@@ -20,6 +20,8 @@ use tutti_midi_device::{
     Resolved,
 };
 use tutti_midi_runtime::{InputId, Outgoing, Taken};
+use tutti_rt::{Counter, Gauge};
+use tutti_types::{Resyncs, Seconds};
 use tutti_ump::StreamConfig;
 
 use crate::HardwareMidiInputs;
@@ -565,6 +567,15 @@ impl OpenInput {
     #[must_use]
     pub fn is_alive(&self) -> bool {
         self.connection.as_ref().is_some_and(|c| c.is_alive())
+    }
+
+    /// The readers of this input's clock map: its latest correction and its
+    /// re-anchors ([`DeviceInput::timing`](tutti_midi_runtime::DeviceInput::timing),
+    /// [`DeviceInput::resyncs`](tutti_midi_runtime::DeviceInput::resyncs)). They
+    /// belong to this connection: a reconnect makes new ones.
+    #[must_use]
+    pub fn clock_readings(&self) -> Option<(Gauge<Seconds>, Counter<Resyncs>)> {
+        self.ports.clock_readings(self.port)
     }
 
     /// The port its events land in, for the list's `set_port_active`.

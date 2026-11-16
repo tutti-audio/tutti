@@ -154,6 +154,18 @@ impl Count for tutti_types::Samples {
     }
 }
 
+/// Re-anchors, as a [`Counter`] counts them.
+impl Count for tutti_types::Resyncs {
+    #[inline]
+    fn count(self) -> u64 {
+        self.get()
+    }
+    #[inline]
+    fn from_count(count: u64) -> Self {
+        Self::new(count)
+    }
+}
+
 /// The cell both shapes read: the value's word and the writer's gone flag.
 #[derive(Debug)]
 struct Shared {

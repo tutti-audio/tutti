@@ -12,6 +12,8 @@
 //! - [`timeline`] — [`TimelineSegment`], the one frame↔beat conversion, and
 //!   [`first_frame_at_or_after`], the one rule for the frame a beat lands on.
 //! - [`play`] — [`PlayReading`], the graph's play clock at one frame.
+//! - [`resyncs`] — [`Resyncs`], a count of clock-map re-anchors: a count unit
+//!   of its own beside `Samples`.
 //! - [`samples`] — [`Samples`], an integer frame count. An unassigned quantity,
 //!   deliberately *not* a `Unit` (it is compared and added, not interpolated
 //!   or automated).
@@ -31,6 +33,7 @@ pub mod latency;
 pub mod max_block;
 pub mod param;
 pub mod play;
+pub mod resyncs;
 pub mod samples;
 pub mod tail;
 pub mod timeline;
@@ -44,6 +47,7 @@ pub use max_block::{InvalidMaxBlock, MaxBlock};
 pub use note::{NotOnMidiScale, Note, NoteNumberOutOfRange, PitchClass};
 pub use param::{Param, Param64, ParamCell, ParamRaw};
 pub use play::PlayReading;
+pub use resyncs::Resyncs;
 pub use samples::Samples;
 pub use tail::Tail;
 pub use timeline::{

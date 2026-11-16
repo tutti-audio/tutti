@@ -25,8 +25,17 @@
 //! (`late` in [`InletCounts::losses`]), only when the
 //! thread's push comes more than the lead after its arrival.
 //!
-//! # One inlet per input
+//! # Timing
 //!
+//! Each [`DeviceInput`] reads how steady its map is: [`timing`](DeviceInput::timing)
+//! is the latest correction the map made (signed, positive when a reading came
+//! late), and [`resyncs`](DeviceInput::resyncs) counts its re-anchors: a reading
+//! past [`RESYNC`](crate::RESYNC), or a rebuild after the map rejected one. The
+//! first map built is not a resync. The device's thread writes both with
+//! atomic stores, so reading them blocks nothing.
+//!
+//! # One inlet per input
+//!//!
 //! [`open`](InputInlets::open) makes one inlet for one input: the [`DeviceInput`]
 //! its thread pushes through, and the [`EventInletNode`] the graph's owner adds
 //! to the graph and wires to the input's ingest node. Nothing is shared between
@@ -38,8 +47,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use tutti_graph::{EventCapacity, EventInletNode, EventInletWriter, InletCounts, Stamp};
-use tutti_rt::{ArcLend, Reader};
-use tutti_types::Moment;
+use tutti_rt::{ArcLend, Counter, CounterWriter, Gauge, GaugeWriter, Reader, counter, gauge};
+use tutti_types::{Moment, Resyncs, Seconds};
 use tutti_ump::Ump;
 
 use crate::clock_map::{ClockMap, ClockReading, Observed};
@@ -133,6 +142,8 @@ impl InputInlets {
     pub fn open(&self) -> (DeviceInput, EventInletNode) {
         let id = self.last.fetch_add(1, Ordering::Relaxed) + 1;
         let (node, writer) = EventInletNode::pair(self.capacity);
+        let (timing, timing_reader) = gauge(Seconds::new(0.0));
+        let (resyncs, resyncs_reader) = counter();
         let input = DeviceInput {
             id: InputId(NonZeroU64::new(id).unwrap_or(NonZeroU64::MAX)),
             counts: writer.counts(),
@@ -141,6 +152,10 @@ impl InputInlets {
             lead: Arc::clone(&self.lead),
             seen: None,
             map: None,
+            timing,
+            timing_reader,
+            resyncs,
+            resyncs_reader,
         };
         (input, node)
     }
@@ -163,6 +178,13 @@ pub struct DeviceInput {
     /// The latest reading the map was fed.
     seen: Option<(Instant, Moment)>,
     map: Option<ClockMap>,
+    /// The latest correction the map made; the reader end is
+    /// [`timing`](Self::timing).
+    timing: GaugeWriter<Seconds>,
+    timing_reader: Gauge<Seconds>,
+    /// The map's re-anchors; the reader end is [`resyncs`](Self::resyncs).
+    resyncs: CounterWriter<Resyncs>,
+    resyncs_reader: Counter<Resyncs>,
 }
 
 impl std::fmt::Debug for DeviceInput {
@@ -187,6 +209,23 @@ impl DeviceInput {
     #[must_use]
     pub fn counts(&self) -> InletCounts {
         self.counts.clone()
+    }
+
+    /// The latest correction the input's clock map made, signed: positive when
+    /// a reading came late, zero before the first. A steady input reads a
+    /// small figure; one that jumps is unsteady. Readable from any thread.
+    #[must_use]
+    pub fn timing(&self) -> Gauge<Seconds> {
+        self.timing_reader.clone()
+    }
+
+    /// How many times the input's clock map re-anchored: on a reading too far
+    /// from its prediction ([`RESYNC`](crate::RESYNC)), or built again after it
+    /// rejected one. The first map built is not counted. Readable from any
+    /// thread.
+    #[must_use]
+    pub fn resyncs(&self) -> Counter<Resyncs> {
+        self.resyncs_reader.clone()
     }
 
     /// Pushes `ump`, which the OS delivered at `arrival`, for the frame the
@@ -222,20 +261,28 @@ impl DeviceInput {
 
     /// Feeds the map a reading: it follows the engine's clock, or is built
     /// again where the clock was restarted (a reading the map rejects, a
-    /// frame that went back) or at another rate.
+    /// frame that went back) or at another rate. The correction the map made
+    /// is the timing reading; a re-anchor on a far reading, or a rebuild after
+    /// a rejection, is a resync. The first map is neither.
     fn follow(&mut self, (os, at): (Instant, Moment)) {
         let reading = ClockReading::new(os, at.frame());
-        let rebuild = match self.map.as_mut() {
-            None => true,
-            Some(map) => {
-                if map.rate() != at.rate() {
-                    map.set_rate(at.rate());
-                }
-                map.observe(reading) == Observed::Rejected
-            }
-        };
-        if rebuild {
+        let Some(map) = self.map.as_mut() else {
             self.map = Some(ClockMap::new(at.rate(), reading));
+            return;
+        };
+        if map.rate() != at.rate() {
+            map.set_rate(at.rate());
+        }
+        match map.observe(reading) {
+            Observed::Followed { correction } => self.timing.set(correction),
+            Observed::Resynced { correction } => {
+                self.timing.set(correction);
+                self.resyncs.add(Resyncs::new(1));
+            }
+            Observed::Rejected => {
+                self.map = Some(ClockMap::new(at.rate(), reading));
+                self.resyncs.add(Resyncs::new(1));
+            }
         }
     }
 }

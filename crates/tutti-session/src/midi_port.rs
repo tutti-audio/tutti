@@ -26,6 +26,8 @@ use tutti_midi_hardware::{
     ReportError, ReportPeer,
 };
 use tutti_midi_runtime::{DeviceEpochs, JrStream, MidiIngestControls, MidiInputPorts};
+use tutti_rt::{Counter, Gauge, counter, gauge};
+use tutti_types::{Resyncs, Seconds};
 use tutti_ump::StreamConfig;
 
 use crate::midi::UmpOut;
@@ -212,6 +214,26 @@ pub(crate) struct InputShared {
     id: ResourceId,
     cell: Mutex<Cell<MidiInputInfo>>,
     requests: Mutex<Vec<InputRequest>>,
+    /// The clock readings of the open connection: replaced at each connect.
+    /// Before the first connect, and while none has been made, they read the
+    /// zero of a closed cell.
+    clock: Mutex<ClockReadings>,
+}
+
+/// The readers of one connection's clock map.
+#[derive(Clone)]
+struct ClockReadings {
+    timing: Gauge<Seconds>,
+    resyncs: Counter<Resyncs>,
+}
+
+impl ClockReadings {
+    /// Readings that read zero and never change: a port not yet connected.
+    fn idle() -> Self {
+        let (_writer, timing) = gauge(Seconds::new(0.0));
+        let (_writer, resyncs) = counter();
+        Self { timing, resyncs }
+    }
 }
 
 /// What a handle asked of the device, for the session to send at its next poll.
@@ -221,6 +243,13 @@ enum InputRequest {
 }
 
 impl InputShared {
+    fn clock(&self) -> ClockReadings {
+        self.clock
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
     fn read<R>(&self, read: impl FnOnce(&Cell<MidiInputInfo>) -> R) -> R {
         read(&self.cell.lock().unwrap_or_else(PoisonError::into_inner))
     }
@@ -399,6 +428,27 @@ impl MidiInput {
     #[must_use]
     pub const fn node(&self) -> NodeKey {
         self.node
+    }
+
+    /// The latest correction the port's clock map made to place the device's
+    /// events on the graph's frames, signed in seconds: positive when a reading
+    /// came late, zero before the first. A steady input reads a small figure,
+    /// and one whose timing is unsteady jumps. It is the open connection's:
+    /// after an unplug and a replug, read it again from the handle for the new
+    /// connection's; while the port was never connected it reads zero.
+    #[must_use]
+    pub fn timing(&self) -> Gauge<Seconds> {
+        self.shared.clock().timing
+    }
+
+    /// How many times the port's clock map re-anchored (a reading too far from
+    /// its prediction, or one it refused and was rebuilt on), so an app can show
+    /// an input whose timing is unsteady. The first map built is not counted.
+    /// It is the open connection's, counting from zero at each connect: read it
+    /// again from the handle after a replug.
+    #[must_use]
+    pub fn resyncs(&self) -> Counter<Resyncs> {
+        self.shared.clock().resyncs
     }
 
     /// Asks a peer to enable or disable a Profile it lists
@@ -779,6 +829,14 @@ impl Ports {
                 let _ =
                     graph.set_sources(EventInPort::new(port.node, 0), [EventOutPort::new(key, 0)]);
                 port.inlet = Some(key);
+                if let Some((timing, resyncs)) = io.clock_readings(&info.id) {
+                    *port
+                        .shared
+                        .clock
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner) =
+                        ClockReadings { timing, resyncs };
+                }
                 port.epochs.arrive();
                 port.open = Some(info.id.clone());
                 Ok(())
@@ -1189,6 +1247,7 @@ impl crate::Midi<'_> {
                 presence: Presence::Lost(PortCause::Unplugged),
             }),
             requests: Mutex::new(Vec::new()),
+            clock: Mutex::new(ClockReadings::idle()),
         });
         self.state.ports.inputs.push(InputPort {
             token: Arc::downgrade(&token),

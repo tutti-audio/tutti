@@ -50,6 +50,8 @@ use tutti_graph::EventInletNode;
 use tutti_midi_device::{CiDeviceId, ProfileChange, ProfileId};
 use tutti_midi_device::{DeviceId, DeviceInfo, EntropyError, Learned, SavedDevice};
 use tutti_midi_runtime::InputInlets;
+use tutti_rt::{Counter, Gauge};
+use tutti_types::{Resyncs, Seconds};
 use tutti_ump::{DeviceIdentity, MidiGroup};
 
 /// The set of open MIDI inputs, and the endpoints available to open.
@@ -609,6 +611,15 @@ impl MidiSession {
         self.inputs
             .get(id)
             .map_or_else(Arc::default, |held| held.stream.ci_peers())
+    }
+
+    /// The readers of the clock map of the open input `id`: its latest
+    /// correction (signed, positive when a reading came late) and how many
+    /// times it re-anchored. `None` when the input is not open. They belong to
+    /// the connection: closing it and opening again makes new ones.
+    #[must_use]
+    pub fn clock_readings(&self, id: &DeviceId) -> Option<(Gauge<Seconds>, Counter<Resyncs>)> {
+        self.inputs.get(id)?.input.clock_readings()
     }
 
     /// The MIDI-CI messages the output of the open input `id` has refused, as
