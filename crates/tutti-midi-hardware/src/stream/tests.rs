@@ -13,8 +13,8 @@ use std::time::Duration;
 use tutti_fixtures::midi;
 use tutti_graph::UmpAt;
 use tutti_midi_device::{
-    BlockName, Capabilities, DeviceId, EndpointId, FunctionBlock, MAX_ATTEMPTS, PortDirection,
-    STEP_TIMEOUT, Supports,
+    BlockName, Capabilities, DeviceId, EndpointId, EndpointName, FunctionBlock, MAX_ATTEMPTS,
+    PortDirection, STEP_TIMEOUT, Supports,
 };
 use tutti_ump::ControlValue;
 use tutti_ump::MidiChannel;
@@ -75,14 +75,21 @@ fn session_over_ci(
     device: Endpoint,
     ci: Option<tutti_ump::DeviceIdentity>,
 ) -> Wire {
-    session_over_with(
-        os,
-        direction,
-        device,
-        ci.map_or(crate::MidiHardwareOptions::new(), |identity| {
-            crate::MidiHardwareOptions::new().ci(identity)
-        }),
-    )
+    let mut wire = session_over(os, direction, device);
+    wire.session.present(ci.map(presented));
+    wire
+}
+
+/// The session presenting `device` over one Group, named "Session".
+fn presented(device: tutti_ump::DeviceIdentity) -> crate::Presented {
+    crate::Presented {
+        identity: crate::MidiIdentity {
+            device,
+            name: EndpointName::new("Session").unwrap(),
+            instance: None,
+        },
+        groups: GroupSpan::of(1),
+    }
 }
 
 /// A wire over a session opened with `options`.
@@ -996,6 +1003,7 @@ fn an_output_connected_after_the_settle_starts_in_the_settled_protocol() {
 }
 
 mod ci;
+mod endpoint;
 mod jr;
 
 /// A device's SysEx identity is not its OS listing, which `learned` leaves out.

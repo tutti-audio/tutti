@@ -144,6 +144,13 @@ impl MidiInputPorts {
         }
     }
 
+    /// The Groups the node hears, from the first.
+    #[must_use]
+    pub fn groups(self) -> tutti_ump::GroupSpan {
+        // `groups` is 1 to 16, which `GroupSpan` holds.
+        tutti_ump::GroupSpan::new(self.groups).unwrap_or(tutti_ump::GroupSpan::of(1))
+    }
+
     /// How many event outputs the node has.
     #[must_use]
     pub const fn count(self) -> usize {

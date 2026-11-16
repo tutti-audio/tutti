@@ -9,7 +9,7 @@
 //! # Opt-in
 //!
 //! **It is off unless the app gives an identity**
-//! ([`MidiSession::open`](crate::MidiSession::open)). A Discovery
+//! ([`MidiSession::present`](crate::MidiSession::present)). A Discovery
 //! announces a System Exclusive manufacturer id, and tutti has none of its own:
 //! M1 reserves `7D` for non-commercial use, never for a released product, and
 //! tutti is a library that apps ship. So no
@@ -465,6 +465,17 @@ impl Ci {
             if let Some(running) = &mut self.running {
                 running.serve(&self.store);
             }
+        }
+        // Who the session is changed, or it presents no one: the devices that
+        // ran under the old identity end (Invalidate MUID, peers lost) and the
+        // new identity, if any, starts them again below.
+        if self
+            .running
+            .as_ref()
+            .is_some_and(|running| Some(running.identity) != identity)
+            && let Some(running) = self.running.take()
+        {
+            running.stop(out, &mut changes);
         }
         match (&mut self.running, identity) {
             (Some(running), _) => {

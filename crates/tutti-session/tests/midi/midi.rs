@@ -655,17 +655,23 @@ fn hot_plug_session() -> (Session, tutti_midi_hardware::test_support::FakeCounte
 fn hot_plug_session_ci(
     identity: tutti_ump::DeviceIdentity,
 ) -> (Session, tutti_midi_hardware::test_support::FakeCounters) {
-    let (backend, fake) =
-        tutti_midi_hardware::test_support::FakeBackend::build_with(vec![], vec![], usize::MAX);
-    let s = Session::builder()
-        .midi_hardware_over(
-            backend,
-            tutti_midi_hardware::MidiHardwareOptions::new().ci(identity),
-        )
-        .sample_rate(SampleRate::of(RATE))
-        .build()
-        .expect("builds");
+    let (mut s, fake) = hot_plug_session();
+    present(&mut s, identity);
     (s, fake)
+}
+
+/// The policy that presents `identity` on every MIDI device, named "Session".
+#[cfg(feature = "midi-hardware")]
+fn present(s: &mut Session, identity: tutti_ump::DeviceIdentity) {
+    s.policy::<tutti_session::MidiPolicy>()
+        .set(tutti_session::MidiPolicy {
+            identity: Some(tutti_midi_hardware::MidiIdentity {
+                device: identity,
+                name: tutti_midi_device::EndpointName::new("Session").unwrap(),
+                instance: None,
+            }),
+        })
+        .expect("the session has an OS MIDI layer");
 }
 
 /// The device events of an update, as `(kind, device name)`.
@@ -1598,21 +1604,12 @@ fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {
     use tutti_midi_protocol::{MpeZoneConfig, MpeZones, PitchBendSensitivity};
     use tutti_ump::{CCNumber, Message, Voice2};
 
-    let (backend, fake) =
-        tutti_midi_hardware::test_support::FakeBackend::build_with(vec![], vec![], usize::MAX);
-    let mut s = Session::builder()
-        .midi_hardware_over(
-            backend,
-            tutti_midi_hardware::MidiHardwareOptions::new().ci(tutti_ump::DeviceIdentity {
-                manufacturer: tutti_ump::ManufacturerId::NON_COMMERCIAL,
-                family: [tutti_ump::U7::of(1); 2],
-                model: [tutti_ump::U7::of(2); 2],
-                revision: [tutti_ump::U7::of(3); 4],
-            }),
-        )
-        .sample_rate(SampleRate::of(RATE))
-        .build()
-        .expect("builds");
+    let (mut s, fake) = hot_plug_session_ci(tutti_ump::DeviceIdentity {
+        manufacturer: tutti_ump::ManufacturerId::NON_COMMERCIAL,
+        family: [tutti_ump::U7::of(1); 2],
+        model: [tutti_ump::U7::of(2); 2],
+        revision: [tutti_ump::U7::of(3); 4],
+    });
     let (synth, seen) = tap(&mut s);
     s.midi()
         .route(MidiRouteRule::any_channel().to(synth))

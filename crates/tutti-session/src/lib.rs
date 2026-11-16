@@ -222,6 +222,8 @@ pub use pool::{SoundFontFile, soundfont};
 use hang::HangDetector;
 #[cfg(feature = "plugin")]
 pub use hang::HangPolicy;
+#[cfg(feature = "midi-hardware")]
+pub use midi_hardware::{MidiPolicy, MidiPolicyError, MidiPolicyHandle};
 #[cfg(feature = "plugin")]
 pub use plugin_diagnostics::{Diagnostics, PluginBuses};
 #[cfg(feature = "plugin")]

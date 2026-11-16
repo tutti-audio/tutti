@@ -334,12 +334,14 @@ pub mod midi {
     };
 
     #[cfg(feature = "midi-hardware")]
-    pub use tutti_midi_device::{DeviceId, DeviceInfo, Learned, Match, SavedDevice};
+    pub use tutti_midi_device::{
+        DeviceId, DeviceInfo, EndpointName, Learned, Match, ProductInstanceId, SavedDevice,
+    };
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_hardware::{
         ChannelCount, ChannelProfile, CiChange, CiPeerInfo, DeviceQuery, ListedProfile,
-        MidiHardwareOptions, PeerId, PeerProfiles, ProfileError, ProfileSwitch, ProfilesChange,
-        Whole, WholeProfile,
+        MidiHardwareOptions, MidiIdentity, PeerId, PeerProfiles, ProfileError, ProfileSwitch,
+        ProfilesChange, Whole, WholeProfile,
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
     pub use tutti_session::{

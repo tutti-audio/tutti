@@ -3,8 +3,9 @@
 //! An [`Endpoint`] is a value: the UMP version, the protocols and Jitter
 //! Reduction (JR) timestamps it supports and has active, who it is, and its
 //! Function Blocks. [`Endpoint::reply`] is the answering side as one pure step
-//! over a received message, with no allocation. The asking side is
-//! [`Connection`](crate::Connection).
+//! over a received message, with no allocation: a session that presents an
+//! identity answers a peer's Stream messages with the [`local`](Endpoint::local)
+//! Endpoint it describes. The asking side is [`Connection`](crate::Connection).
 
 use tutti_ump::{
     BlockFilter, BlockSelect, DeviceIdentity, Direction as BlockDirection, DiscoveryFilter,
