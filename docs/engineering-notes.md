@@ -141,7 +141,7 @@ fields, function signatures, `Param<U>`, and return types alike.
 The roster: `Hz` · `Seconds` · `Db` · `Amplitude` · `Mix` · `Feedback` · `Depth` ·
 `Drive` · `Spread` · `StereoWidth` · `Bpm` · `Beat` / `BeatDuration` ·
 `Semitones` / `Cents` · `Azimuth` / `Elevation` / `ArcDegrees` · `Phase` /
-`PhaseIncrement` / `Radians` · `SamplePosition` / `Samples` · `SrcRatio` /
+`PhaseIncrement` / `Radians` · `SamplePosition` / `Samples` / `Resyncs` · `SrcRatio` /
 `PlaybackRate` / `StretchFactor` · `CompressionRatio` / `Q` / `Resonance` ·
 `Confidence` / `Correlation` / `Pan` · `SampleRate`.
 

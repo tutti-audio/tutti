@@ -25,7 +25,11 @@ use tutti_midi_hardware::{
     CiPeerInfo, DeviceStream, MidiSession, PeerProfiles, ProfileError, ProfileSwitch, ReportAsk,
     ReportError, ReportPeer,
 };
-use tutti_midi_runtime::{DeviceEpochs, JrStream, MidiIngestControls, MidiInputPorts};
+use tutti_midi_runtime::{
+    ClockWriters, DeviceEpochs, JrStream, MidiIngestControls, MidiInputPorts,
+};
+use tutti_rt::{Counter, Gauge};
+use tutti_types::{Resyncs, Seconds};
 use tutti_ump::StreamConfig;
 
 use crate::midi::UmpOut;
@@ -92,6 +96,10 @@ pub enum MidiPortError {
     /// Another port of this session holds the device open already.
     #[error("another port of this session holds {0:?} open")]
     InUse(DeviceId),
+    /// The device's previous connection still holds the port's timing cells, so
+    /// the new one would report nothing.
+    #[error("the previous connection of {0:?} still holds the port's timing readings")]
+    ClockHeld(DeviceId),
     /// The OS layer refused to open the device.
     #[error("MIDI hardware: {0}")]
     Hardware(Arc<tutti_midi_hardware::Error>),
@@ -212,6 +220,11 @@ pub(crate) struct InputShared {
     id: ResourceId,
     cell: Mutex<Cell<MidiInputInfo>>,
     requests: Mutex<Vec<InputRequest>>,
+    /// The latest correction the port's clock map made. Made once with the
+    /// entry; a connection writes it and closes it when it ends.
+    timing: Gauge<Seconds>,
+    /// The port's re-anchors, cumulative across connections.
+    resyncs: Counter<Resyncs>,
 }
 
 /// What a handle asked of the device, for the session to send at its next poll.
@@ -399,6 +412,34 @@ impl MidiInput {
     #[must_use]
     pub const fn node(&self) -> NodeKey {
         self.node
+    }
+
+    /// The latest correction the port's clock map made to place the device's
+    /// events on the graph's frames, signed in seconds: positive when a reading
+    /// came late. A steady input reads a small figure, and one whose timing is
+    /// unsteady jumps.
+    ///
+    /// The gauge belongs to the entry, not to a connection: it reads the same
+    /// cell across an unplug and a replug, and reads 0 until a map first makes
+    /// a correction. While the device is away it holds the last correction
+    /// ([`is_closed`](Gauge::is_closed) says so); a replug does not reset it,
+    /// and the new connection's first map writes over it.
+    #[must_use]
+    pub fn timing(&self) -> Gauge<Seconds> {
+        self.shared.timing.clone()
+    }
+
+    /// How many times the port's clock map re-anchored (a reading too far from
+    /// its prediction, or one the map refused and was rebuilt on), so an app can
+    /// show an input whose timing is unsteady. A map that was only rescaled for
+    /// another rate is not one, and neither is the first map of a connection.
+    ///
+    /// Cumulative for the entry: the count carries across an unplug and a
+    /// replug on the same cell. It is meaningful only against a real-time
+    /// clock: an offline session's readings re-anchor often.
+    #[must_use]
+    pub fn resyncs(&self) -> Counter<Resyncs> {
+        self.shared.resyncs.clone()
     }
 
     /// Asks a peer to enable or disable a Profile it lists
@@ -769,8 +810,13 @@ impl Ports {
         info: &DeviceInfo,
     ) -> Result<(), MidiPortError> {
         let port = &mut self.inputs[at];
+        // The previous connection's input has dropped with its device being
+        // closed; one that still holds the cells is refused, never connected
+        // without readings.
+        let clock = ClockWriters::reopen(&port.shared.timing, &port.shared.resyncs)
+            .ok_or_else(|| MidiPortError::ClockHeld(info.id.clone()))?;
         match io
-            .connect_input(&info.id)
+            .connect_input_with(&info.id, clock)
             .map_err(|e| MidiPortError::Hardware(Arc::new(e)))?
         {
             tutti_midi_hardware::Connected::Opened(inlet) => {
@@ -1182,6 +1228,9 @@ impl crate::Midi<'_> {
         let node = key.erase();
         let token = Arc::new(());
         let info = found.clone().unwrap_or_else(|| saved.clone());
+        // The cells start closed: a connection reopens them.
+        let (writers, timing, resyncs) = ClockWriters::new();
+        drop(writers);
         let shared = Arc::new(InputShared {
             id,
             cell: Mutex::new(Cell {
@@ -1189,6 +1238,8 @@ impl crate::Midi<'_> {
                 presence: Presence::Lost(PortCause::Unplugged),
             }),
             requests: Mutex::new(Vec::new()),
+            timing,
+            resyncs,
         });
         self.state.ports.inputs.push(InputPort {
             token: Arc::downgrade(&token),

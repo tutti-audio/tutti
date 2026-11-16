@@ -10,8 +10,9 @@ use std::time::{Duration, Instant};
 use tutti_fixtures::midi;
 use tutti_fixtures::{BlockClock, EventRig};
 use tutti_graph::NodeKey;
-use tutti_midi_runtime::{DeviceInput, InputInlets};
-use tutti_types::{Frame, SampleRate};
+use tutti_midi_runtime::{ClockWriters, DeviceInput, InputInlets};
+use tutti_rt::{Counter, Gauge};
+use tutti_types::{Frame, Resyncs, SampleRate, Seconds};
 use tutti_ump::{MidiChannel, Ump};
 
 const RATE: f64 = 48_000.0;
@@ -223,4 +224,187 @@ fn a_full_inlet_refuses_and_counts() {
         .collect();
     assert_eq!(pushed, vec![true, true, false, false]);
     assert_eq!(counts.losses().lost, 2);
+}
+
+/// A device whose clock the test writes, built on the reading "frame 1000 at
+/// `t0`": the first map.
+struct Timed {
+    device: DeviceInput,
+    timing: Gauge<Seconds>,
+    resyncs: Counter<Resyncs>,
+    clock: BlockClock,
+    t0: Instant,
+}
+
+impl Timed {
+    fn new() -> Self {
+        let inlets = inlets(Duration::ZERO);
+        let (writers, timing, resyncs) = ClockWriters::new();
+        let (device, _node) = inlets.open_with(writers);
+        let clock = BlockClock::new();
+        inlets.set_clock(Some(clock.reader()));
+        let mut timed = Self {
+            device,
+            timing,
+            resyncs,
+            clock,
+            t0: Instant::now() + Duration::from_secs(3600),
+        };
+        timed.read(Duration::ZERO, 1000);
+        timed
+    }
+
+    /// The engine reads frame `frame` at `t0 + after`; a push makes the
+    /// device's thread see it.
+    fn read(&mut self, after: Duration, frame: u64) {
+        let at = self.t0 + after;
+        self.clock
+            .write(at, Frame::new(frame), SampleRate::of(RATE));
+        // Whether the event is placed is not under test here.
+        let _ = self.device.push(note(60), at);
+    }
+
+    /// The reading `frame` makes on a map anchored at frame 1000 (`t0`):
+    /// where the nominal rate puts it, `late` seconds off (negative: early).
+    fn read_off(&mut self, frame: u64, late: f64) {
+        let nominal = (frame - 1000) as f64 / RATE;
+        self.read(Duration::from_secs_f64(nominal + late), frame);
+    }
+
+    fn correction(&self) -> f64 {
+        self.timing.get().get()
+    }
+}
+
+/// **The first map is not a resync, and nothing has been corrected**: after the
+/// first reading the counter reads 0 and the gauge 0 s.
+#[test]
+fn the_first_map_built_counts_no_resync_and_reads_no_correction() {
+    let timed = Timed::new();
+    assert_eq!(timed.resyncs.get(), Resyncs::ZERO);
+    assert_eq!(timed.timing.get(), Seconds::new(0.0));
+}
+
+/// **A late follow counts nothing and the gauge reads its step**: a reading
+/// 8 ms late moves the map by an eighth of it, +1 ms.
+#[test]
+fn a_late_follow_counts_no_resync_and_the_gauge_reads_a_positive_eighth() {
+    let mut timed = Timed::new();
+    timed.read_off(1480, 0.008);
+    assert_eq!(timed.resyncs.get(), Resyncs::ZERO);
+    assert!((timed.correction() - 0.001).abs() < 1e-9);
+}
+
+/// **An early follow reads the step with the opposite sign**: -1 ms.
+#[test]
+fn an_early_follow_counts_no_resync_and_the_gauge_reads_a_negative_eighth() {
+    let mut timed = Timed::new();
+    timed.read_off(1480, -0.008);
+    assert_eq!(timed.resyncs.get(), Resyncs::ZERO);
+    assert!((timed.correction() + 0.001).abs() < 1e-9);
+}
+
+/// **A reading past `RESYNC` counts one resync, and the gauge reads the whole
+/// error, signed**: 50 ms off is a restart or a suspend, not jitter.
+#[test]
+fn a_reading_far_off_counts_one_resync_and_the_gauge_reads_the_whole_error() {
+    for late in [0.05, -0.05] {
+        let mut timed = Timed::new();
+        timed.read_off(49_000, late);
+        assert_eq!(timed.resyncs.get(), Resyncs::new(1), "{late}");
+        assert!((timed.correction() - late).abs() < 1e-9, "{late}");
+    }
+}
+
+/// **Each re-anchor counts**: two far readings in a row are two resyncs.
+#[test]
+fn every_far_reading_counts_its_own_resync() {
+    let mut timed = Timed::new();
+    timed.read(Duration::from_millis(100), 1480);
+    timed.read(Duration::from_millis(300), 1960);
+    assert_eq!(timed.resyncs.get(), Resyncs::new(2));
+}
+
+/// **A map rebuilt after a rejected reading counts one resync**: an engine that
+/// restarts begins its frames again, the map refuses the reading, and the
+/// rebuild is a re-anchor. The gauge keeps the last correction: a rejection
+/// made none.
+#[test]
+fn a_map_rebuilt_after_a_rejected_reading_counts_one_resync() {
+    let mut timed = Timed::new();
+    timed.read_off(1480, 0.008);
+    // The frame goes back to 100, a second on.
+    timed.read(Duration::from_secs(1), 100);
+    assert_eq!(timed.resyncs.get(), Resyncs::new(1));
+    assert!((timed.correction() - 0.001).abs() < 1e-9);
+}
+
+/// **A rate change is not a rebuild**: the map is rescaled to the same instant,
+/// so a reading consistent with the new rate is followed, and counts no resync;
+/// one far off after it is a resync as at any rate.
+#[test]
+fn a_rate_change_counts_a_resync_only_when_its_reading_is_far_off() {
+    let mut timed = Timed::new();
+    // Frame 1000 at 48 kHz is frame 2000 at 96 kHz; 10 ms later is 960 frames on.
+    timed.clock.write(
+        timed.t0 + Duration::from_millis(10),
+        Frame::new(2960),
+        SampleRate::SR_96K,
+    );
+    let _ = timed.device.push(note(60), timed.t0);
+    assert_eq!(timed.resyncs.get(), Resyncs::ZERO);
+    assert!(timed.correction().abs() < 1e-6);
+    // 1 s on at 96 kHz, 100 ms late.
+    timed.clock.write(
+        timed.t0 + Duration::from_millis(1110),
+        Frame::new(2960 + 96_000),
+        SampleRate::SR_96K,
+    );
+    let _ = timed.device.push(note(61), timed.t0);
+    assert_eq!(timed.resyncs.get(), Resyncs::new(1));
+}
+
+/// **The readers outlive a connection**: the count is cumulative across a
+/// device that drops and an input reopened on the same cells, and the gauge
+/// holds its last reading until the new map writes one.
+#[test]
+fn the_cells_carry_across_a_reopened_input() {
+    let inlets = inlets(Duration::ZERO);
+    let (writers, timing, resyncs) = ClockWriters::new();
+    let (mut device, _node) = inlets.open_with(writers);
+    let mut clock = BlockClock::new();
+    inlets.set_clock(Some(clock.reader()));
+    let t0 = Instant::now() + Duration::from_secs(3600);
+    clock.write(t0, Frame::new(1000), SampleRate::of(RATE));
+    let _ = device.push(note(60), t0);
+    clock.write(
+        t0 + Duration::from_millis(1050),
+        Frame::new(1000 + 48_000),
+        SampleRate::of(RATE),
+    );
+    let _ = device.push(note(60), t0);
+    assert_eq!(resyncs.get(), Resyncs::new(1));
+    assert!(
+        ClockWriters::reopen(&timing, &resyncs).is_none(),
+        "the input holds them"
+    );
+    drop(device);
+    assert!(timing.is_closed() && resyncs.is_closed());
+    let held = timing.get();
+    let again = ClockWriters::reopen(&timing, &resyncs).expect("the input dropped");
+    assert!(!timing.is_closed() && !resyncs.is_closed());
+    assert_eq!(timing.get(), held);
+    let (mut device, _node) = inlets.open_with(again);
+    // The new map's first reading is not a resync; a far one after it is the second.
+    let t1 = t0 + Duration::from_secs(10);
+    clock.write(t1, Frame::new(5000), SampleRate::of(RATE));
+    let _ = device.push(note(60), t1);
+    assert_eq!(resyncs.get(), Resyncs::new(1));
+    clock.write(
+        t1 + Duration::from_millis(1100),
+        Frame::new(5000 + 48_000),
+        SampleRate::of(RATE),
+    );
+    let _ = device.push(note(60), t1);
+    assert_eq!(resyncs.get(), Resyncs::new(2));
 }

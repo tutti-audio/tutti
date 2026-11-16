@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tutti_plugin::catalog::{Hosting, PluginRef};
 use tutti_plugin_types::BridgeError;
-use tutti_session::{Job, LoadError, PoolEvent, Session, SessionEvent};
+use tutti_session::{LoadError, PoolEvent, Session, SessionEvent, Task};
 use tutti_types::{MaxBlock, Samples};
 
 fn session() -> Session {
@@ -71,8 +71,8 @@ fn outcome(s: &mut Session, main: tutti_plugin_types::MainThreadMarker) -> PoolE
 }
 
 /// A session whose spawner holds the jobs it is handed, and the jobs.
-fn holding() -> (Session, Arc<Mutex<Vec<Job>>>) {
-    let held: Arc<Mutex<Vec<Job>>> = Arc::default();
+fn holding() -> (Session, Arc<Mutex<Vec<Task>>>) {
+    let held: Arc<Mutex<Vec<Task>>> = Arc::default();
     let spawned = Arc::clone(&held);
     let s = Session::builder()
         .max_block(MaxBlock::of(Samples(512)))
@@ -82,8 +82,8 @@ fn holding() -> (Session, Arc<Mutex<Vec<Job>>>) {
     (s, held)
 }
 
-fn run_held(held: &Arc<Mutex<Vec<Job>>>) {
-    let jobs: Vec<Job> = held.lock().unwrap().drain(..).collect();
+fn run_held(held: &Arc<Mutex<Vec<Task>>>) {
+    let jobs: Vec<Task> = held.lock().unwrap().drain(..).collect();
     for job in jobs {
         job.run();
     }

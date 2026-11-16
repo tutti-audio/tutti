@@ -185,9 +185,9 @@ pub use tutti_session::{
 };
 #[cfg(feature = "session")]
 pub use tutti_session::{
-    Clock, ConnectError, Edge, EventInPort, EventOutPort, InPort, Job, JobFailed, Key, NoSuchNode,
-    Offline, OfflineSession, OutPort, Playhead, RealTime, Root, Session, SessionBuilder,
-    SessionEvent, SystemClock, SystemSession, TypedParamRef, Workers,
+    Clock, ConnectError, Edge, EventInPort, EventOutPort, InPort, Job, JobId, JobKind, JobStatus,
+    Key, Landed, NoSuchNode, Offline, OfflineSession, OutPort, Playhead, RealTime, Root, Session,
+    SessionBuilder, SessionEvent, SystemClock, SystemSession, TypedParamRef, WaitError, Workers,
 };
 #[cfg(all(feature = "session", feature = "device"))]
 pub use tutti_session::{Device, DeviceClock, DeviceEvent, LiveSession};
@@ -283,7 +283,7 @@ pub mod types {
         UnitAddr, UnitParam, UnitParamOutOfRange, Velocity, beats_per_sample,
         first_frame_at_or_after, frames_per_beat, snap_to_whole_frame,
     };
-    pub use tutti_types::{Mint, Phase, Placement};
+    pub use tutti_types::{Mint, Phase, Placement, Resyncs};
 }
 
 /// The project's tempo (`tutti-tempo`): `TempoMap`, the points and builder it is
@@ -369,8 +369,8 @@ pub mod session {
     pub use tutti_session::Load as PoolLoad;
     pub use tutti_session::{
         Declared, HandleError, IntoPool, Life, LoadError, OpenCx, Parking, PoolConfig, PoolEntry,
-        PoolError, PoolEvent, PoolKey, PoolOutcome, PoolReport, PoolSet, PoolState, PoolWait,
-        RefreshPool, RetryError, WhenLoadedError, stranded_loads,
+        PoolError, PoolEvent, PoolKey, PoolOutcome, PoolReport, PoolSet, PoolState, RefreshPool,
+        RetryError, WhenLoadedError, stranded_loads,
     };
 
     #[cfg(any(feature = "io", feature = "export"))]

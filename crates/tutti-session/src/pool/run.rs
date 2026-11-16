@@ -10,11 +10,11 @@ use crate::pool::entry::{Defer, LoadError, Step, Value};
 use crate::pool::open::OpenCx;
 use crate::pool::stamp::Stamp;
 use crate::pool::table::{Opening, Start, Worker};
-use crate::{JobFailed, Session};
+use crate::{Session, WorkerError};
 
 /// A panic in a stage the session runs itself, as a load's failure.
 fn panicked(payload: &(dyn std::any::Any + Send)) -> LoadError {
-    LoadError::Job(JobFailed::Panicked {
+    LoadError::Job(WorkerError::Panicked {
         message: panic_message(payload),
     })
 }
