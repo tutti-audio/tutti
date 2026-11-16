@@ -1935,7 +1935,6 @@ impl Graph {
     /// # Errors
     ///
     /// The apply's refusal: the graph keeps what the last apply built.
-    #[cfg(feature = "modulation")]
     pub(crate) fn modulate(
         &mut self,
         m: &mut tutti_nodes::Modulation,
@@ -1958,7 +1957,6 @@ impl Graph {
 
     /// Schedules the note-envelope resyncs `m` owes, after the commit that
     /// sent their nodes (`Modulation::send_resyncs`).
-    #[cfg(feature = "modulation")]
     pub(crate) fn send_mod_resyncs(&mut self, m: &mut tutti_nodes::Modulation) {
         // A resync refused for now stays owed (the next update retries); one
         // refused for good is counted (`Modulation::resyncs_dropped`).
@@ -2865,7 +2863,7 @@ impl Graph {
     /// node that is [`Bypassed`](NodeMode::Bypassed) or
     /// [`Muted`](NodeMode::Muted) ignores the mix: the mode wins.
     ///
-    /// A modulation route onto the mix (`Mods::route` (feature `modulation`)
+    /// A modulation route onto the mix (`Mods::route`
     /// with a `MixRef`) has this as its base: `set_mix` is the one writer of
     /// the mix, routed or not.
     ///
@@ -2888,7 +2886,7 @@ impl Graph {
     ///
     /// Once the graph has committed the node this reads its live cell, which is
     /// also the knob of a modulation route onto the node's mix (`Mods::route`
-    /// (feature `modulation`) with a `MixRef`): the base the route modulates
+    /// with a `MixRef`): the base the route modulates
     /// around, and what the mix returns to when the route goes. It is the base,
     /// not the lane's value.
     ///
@@ -3778,7 +3776,6 @@ fn render(
 /// and a source by `SourceKey(u64)`; the `u64` is the host's own minting (an
 /// entity's bits, say), and this is how the session's
 /// [`Modulation`](crate::Phase::Modulation) phase reads it ([`ModInput`](crate::ModInput)).
-#[cfg(feature = "modulation")]
 pub trait ModKeys {
     /// The node a target's key names.
     fn node(&self, target: u64) -> Option<NodeKey>;
@@ -3798,7 +3795,6 @@ pub trait ModKeys {
 /// `Param` cell, a plugin target feeds the node's event input 0 and starts at
 /// the plugin's mirrored value (the session's record of it,
 /// `Plugin::param_values`).
-#[cfg(feature = "modulation")]
 struct ModHostOver<'a> {
     nodes: &'a BTreeMap<NodeKey, Entry>,
     #[cfg(feature = "plugin")]
@@ -3810,10 +3806,8 @@ struct ModHostOver<'a> {
 }
 
 /// A plugin parameter's modulation target, by its node and parameter id.
-#[cfg(feature = "modulation")]
 pub(crate) type PluginTargets = BTreeMap<(NodeKey, u32), tutti_modulation::TargetKey>;
 
-#[cfg(feature = "modulation")]
 impl tutti_nodes::ModHost for ModHostOver<'_> {
     fn target(&self, target: tutti_modulation::TargetKey) -> Option<tutti_nodes::Target> {
         let tutti_modulation::TargetKey::Param {

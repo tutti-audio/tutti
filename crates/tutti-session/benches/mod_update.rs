@@ -15,7 +15,7 @@
 //!
 //! A percentile harness, not criterion: the figure is a mean and a p99 per
 //! update, printed. Run it with
-//! `cargo bench -p tutti-session --features modulation --bench mod_update`.
+//! `cargo bench -p tutti-session --bench mod_update`.
 
 use std::time::{Duration, Instant};
 use tutti_types::MaxBlock;

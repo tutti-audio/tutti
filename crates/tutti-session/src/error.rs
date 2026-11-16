@@ -456,7 +456,6 @@ pub enum Error {
 
     /// A modulation declaration refused when it was made: wraps
     /// [`RouteError`](crate::RouteError).
-    #[cfg(feature = "modulation")]
     #[error(transparent)]
     Modulation(#[from] crate::RouteError),
 

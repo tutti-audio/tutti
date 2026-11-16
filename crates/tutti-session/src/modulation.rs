@@ -1,4 +1,4 @@
-//! Modulation in the session (feature `modulation`; design 015 §4.4, §4.6):
+//! Modulation in the session (design 015 §4.4, §4.6):
 //! the reconcile loop of doc 014 §8.2, run by [`Phase::Modulation`] and
 //! [`Phase::AfterCommit`](crate::Phase::AfterCommit), over either the
 //! session's own declarations ([`Session::mods_mut`](crate::Session::mods_mut)) or a

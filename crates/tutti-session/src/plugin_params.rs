@@ -304,9 +304,8 @@ impl<'a> Param<'a> {
     }
 
     /// The reference that targets this parameter in a modulation route
-    /// (feature `modulation`): the one a native node's param method gives, so a
+    ///: the one a native node's param method gives, so a
     /// route targets a plugin's parameter and a native one through one type.
-    #[cfg(feature = "modulation")]
     #[must_use]
     pub fn target(&self) -> crate::ParamRef {
         crate::Key::<crate::PluginNode>::new(self.params.node).param(self.id())

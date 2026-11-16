@@ -31,15 +31,10 @@ serde = ["dep:serde"]
 # `contract` harness).
 testing = ["tutti-graph/contract"]
 
-# Audio format support - cascade to tutti-codec, which owns the decoder.
-decode-wav = ["tutti-codec/decode-wav"]
-decode-flac = ["tutti-codec/decode-flac"]
-decode-mp3 = ["tutti-codec/decode-mp3"]
-decode-ogg = ["tutti-codec/decode-ogg"]
 
 [dependencies]
-# The file edge: `Wave` (the resident buffer a voice plays), and with a decode
-# feature the decoder the streamer loads and streams through (`Wave::read`,
+# The file edge: `Wave` (the resident buffer a voice plays), and with a
+# `tutti-codec` decode feature the decoder the streamer loads and streams through (`Wave::read`,
 # `Wave::read_metadata`, `FileIn`).
 tutti-codec = { version = "0.0.1", path = "../tutti-codec" }
 
@@ -86,7 +81,9 @@ criterion.workspace = true
 # A dev-dependency on self is how a feature reaches `tests/` unconditionally:
 # `required-features` on the test target would skip `tier_parity` when the
 # feature is off, and a plain `cargo nextest run` would report green without it.
-tutti-sampler = { path = ".", features = ["testing", "decode-wav", "decode-flac", "decode-mp3", "serde"] }
+tutti-sampler = { path = ".", features = ["testing", "serde"] }
+# The decoders the tests open files with.
+tutti-codec = { path = "../tutti-codec", features = ["decode-wav", "decode-flac", "decode-mp3"] }
 # Stimulus nodes (`tutti_nodes::testing`).
 tutti-nodes = { path = "../tutti-nodes", default-features = false, features = ["testing"] }
 # `contract` for the node harnesses (`drive_input`, `Direct`, `BlockRig`).

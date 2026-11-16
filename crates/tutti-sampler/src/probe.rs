@@ -160,7 +160,6 @@ fn streamable(path: &Path, meta: &tutti_codec::WaveMetadata) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(feature = "decode-wav")]
     use std::io::Write;
 
     /// A minimal real PCM wav, `frames` frames of stereo silence, written
@@ -174,7 +173,6 @@ mod tests {
     ///
     /// Gated to match its two callers, which are both `#[cfg(feature = "decode-wav")]`
     /// — a build with a different codec on has no use for a hand-rolled WAV.
-    #[cfg(feature = "decode-wav")]
     fn write_wav(dir: &tempfile::TempDir, name: &str, frames: usize) -> std::path::PathBuf {
         let path = dir.path().join(name);
         let mut f = std::fs::File::create(&path).expect("create");
@@ -196,7 +194,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "decode-wav")]
     fn a_wav_reports_its_header_without_decoding() {
         let dir = tempfile::tempdir().expect("temp dir");
         let path = write_wav(&dir, "probe_ok.wav", 4800);
@@ -220,7 +217,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "decode-wav")]
     fn frames_or_zero_does_not_hide_an_unknown_length() {
         // The convenience and the policy field disagree on purpose: one is for
         // display, the other for decisions.
@@ -238,7 +234,6 @@ mod tests {
     /// An unstreamable file is not an error — it is a legitimate verdict that
     /// removes the caller's tier *choice* rather than its ability to play.
     #[test]
-    #[cfg(feature = "decode-wav")]
     fn a_zero_length_file_still_probes() {
         let dir = tempfile::tempdir().expect("temp dir");
         let path = write_wav(&dir, "probe_empty.wav", 0);

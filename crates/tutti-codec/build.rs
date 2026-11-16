@@ -16,5 +16,7 @@ fn main() {
     }
     if any(&["DECODE_WAV", "DECODE_FLAC", "DECODE_MP3", "DECODE_OGG"]) {
         println!("cargo::rustc-cfg=decode");
+        // Read by `tutti-sampler`'s build script as `DEP_TUTTI_CODEC_DECODE`.
+        println!("cargo::metadata=decode=1");
     }
 }
