@@ -57,24 +57,29 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 /// `*` is every type of the crate.
 const INTERNAL: &[(&str, &str, &str)] = &[
     (
-        "tutti_engine",
-        "HeardTapError",
-        "the payload of session's HeardTapError::Tap, matched through its variants; it shares the name",
+        "tutti_transport",
+        "Transport",
+        "the transport's surface is 6 types; owner: core-engine, lane core-leaks",
+    ),
+    (
+        "tutti_graph",
+        "Editor",
+        "the editor's surface is 55 types; owner: core-engine, lane core-leaks",
     ),
     (
         "tutti_engine",
         "StreamDriver",
-        "a custom device backend's driver; owner: core-engine, lane core-leaks",
+        "the driver's surface is 13 types; owner: core-engine, lane core-leaks",
     ),
     (
-        "tutti_transport",
-        "Transport",
-        "the engine's transport; owner: core-engine, lane core-leaks",
+        "tutti_plugin_host",
+        "PluginHandle",
+        "the handle's surface is 26 types; owner: core-engine, lane core-leaks",
     ),
     (
-        "tutti_transport",
-        "OfflineTransport",
-        "the export render's transport; owner: core-engine, lane core-leaks",
+        "tutti_engine",
+        "HeardTapError",
+        "the payload of session's HeardTapError::Tap, matched through its variants; it shares the name",
     ),
     (
         "tutti_transport",
@@ -88,53 +93,8 @@ const INTERNAL: &[(&str, &str, &str)] = &[
     ),
     (
         "tutti_graph",
-        "Editor",
-        "the editor the session wraps; owner: core-engine, lane core-leaks",
-    ),
-    (
-        "tutti_graph",
         "Topology",
         "the compiler's view of a graph; owner: core-engine, lane core-leaks",
-    ),
-    (
-        "tutti_graph",
-        "GraphInvalid",
-        "the compiler's refusal of a graph; owner: core-engine, lane core-leaks",
-    ),
-    (
-        "tutti_graph",
-        "CompileError",
-        "the compiler's error; owner: core-engine, lane core-leaks",
-    ),
-    (
-        "tutti_graph",
-        "VerifyError",
-        "the compiler's error; owner: core-engine, lane core-leaks",
-    ),
-    (
-        "tutti_graph",
-        "InletNode",
-        "the node behind an inlet; owner: core-engine, lane core-leaks",
-    ),
-    (
-        "tutti_graph",
-        "InletRing",
-        "the ring behind an inlet; owner: core-engine, lane core-leaks",
-    ),
-    (
-        "tutti_graph",
-        "ParamMod",
-        "a compiler record; owner: core-engine, lane core-leaks",
-    ),
-    (
-        "tutti_graph",
-        "ParamRange",
-        "a compiler record; owner: core-engine, lane core-leaks",
-    ),
-    (
-        "tutti_graph",
-        "TapWriter",
-        "the audio side of a tap; owner: core-engine, lane core-leaks",
     ),
     (
         "tutti_graph",
@@ -145,11 +105,6 @@ const INTERNAL: &[(&str, &str, &str)] = &[
         "tutti_graph",
         "EventEdge",
         "the compiler's edge; the session's `EventEdge` is another; owner: core-engine, lane core-leaks",
-    ),
-    (
-        "tutti_graph",
-        "Edge",
-        "the compiler's edge; the session's `Edge` is another; owner: core-engine, lane core-leaks",
     ),
     (
         "tutti_graph",
@@ -167,19 +122,9 @@ const INTERNAL: &[(&str, &str, &str)] = &[
         "a graph edge's source; the buffers' `Source` is another; owner: core-engine, lane core-leaks",
     ),
     (
-        "tutti_graph",
-        "Sink",
-        "a graph edge's sink; the buffers' `Sink` is another; owner: core-engine, lane core-leaks",
-    ),
-    (
         "tutti_plugin",
         "PluginClient",
-        "the host's client of a served plugin; owner: core-engine, lane core-leaks",
-    ),
-    (
-        "tutti_plugin_host",
-        "PluginHandle",
-        "the host's control handle; owner: core-engine, lane core-leaks",
+        "owner: plugin lane, needs a root pub use",
     ),
     (
         "tutti_midi_protocol",
@@ -208,21 +153,6 @@ const INTERNAL: &[(&str, &str, &str)] = &[
         "the compiler's declarations",
     ),
     ("tutti_modulation", "Source", "the compiler's signal source"),
-    (
-        "tutti_cpal",
-        "Error",
-        "the backend's error; the session's `Error` wraps it; owner: core-engine, lane core-leaks",
-    ),
-    (
-        "tutti_midi_file",
-        "Error",
-        "the file codec's error; `midi::Error` nests it; owner: core-engine, lane core-leaks",
-    ),
-    (
-        "tutti_midi_hardware",
-        "Error",
-        "the hardware error; `midi::Error` nests it; owner: core-engine, lane core-leaks",
-    ),
     ("tutti_alsa_ffi", "*", "not a dependency of the umbrella"),
     ("tutti_measure", "*", "not a dependency of the umbrella"),
 ];

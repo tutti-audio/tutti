@@ -136,9 +136,11 @@ pub use tutti_session::Error;
 // The graph's vocabulary a session hands out.
 pub use tutti_graph::{
     DECLICK, EventCapacity, EventInletNode, EventInletWriter, EventTapId, EventTapReader, FadeLaw,
-    Level, Losses, MeterReader, NodeMode, Stamp, TapAlign, TapEvent, TapId, TapReader,
+    InletNode, InletRing, Level, Losses, MeterReader, NodeMode, Stamp, TapAlign, TapEvent, TapId,
+    TapReader, TapWriter,
 };
 pub use tutti_metering::{LoadMeter, LoadReading};
+pub use tutti_rt::PushError;
 pub use tutti_transport::{FadeOut, LoopRegion, MotionEvent, MotionState, Then, TransportCommand};
 
 // Units, channels, buffers and the musical meter.
@@ -268,7 +270,7 @@ pub mod types {
     pub use tutti_curve::{Curvature, CurvatureError, Exponent, ExponentError, Law, Piece};
     pub use tutti_rt::{
         Count, Counter, CounterWriter, Drained, Gauge, GaugeWriter, LevelSpan, Panicked, PosFrame,
-        PushError, Reading, Reclaim,
+        Reading, Reclaim,
     };
     pub use tutti_types::{
         Adsr, AmbisonicFormat, AmbisonicNormalization, AmbisonicOrder, AmbisonicOrderOutOfRange,
@@ -310,14 +312,17 @@ pub mod graph {
         ParamUnit, Params, Prepare, Scalar, Shape, Status, Unforkable, declare_params, param_parts,
     };
     pub use tutti_graph::{
-        BusIn, BusOut, Channel, Chase, ConstantMask, Continuity, Due, Event, EventKind,
-        EventOrderError, EventRejected, EventWriter, ForkBuild, ForkCause, ForkFaultKind,
-        ForkHealth, ForkMode, ForkSource, Forked, Harmony, HarmonyKind, InPlaceMask,
-        LoopRange as TransportLoop, NodeParts, Offset, ParamInput, ParamPorts, ParamPortsError,
-        ParamRamp, ParamRangeReader, ParamSegment, Pass as DryPath, PlayClock, RenderMode,
-        Resolution, SilenceMask, SortedEvents, SubBlocks, TransportChange, TransportChangeRejected,
-        TransportChanges, TransportHistory, TransportPosition, UmpAt, Wake,
+        BusIn, BusOut, Channel, Chase, CompileError, ConstantMask, Continuity, CycleEdge, Due,
+        Edge as GraphEdge, Event, EventKind, EventOrderError, EventRejected, EventWriter,
+        ForkBuild, ForkCause, ForkFaultKind, ForkHealth, ForkMode, ForkSource, Forked,
+        GraphInvalid, Harmony, HarmonyKind, InPlaceMask, LoopRange as TransportLoop, NodeParts,
+        Offset, ParamInput, ParamMod, ParamPorts, ParamPortsError, ParamRamp, ParamRange,
+        ParamRangeReader, ParamSegment, Pass as DryPath, PlayClock, RenderMode, Resolution,
+        SilenceMask, Sink as GraphSink, SortedEvents, SubBlocks, TransportChange,
+        TransportChangeRejected, TransportChanges, TransportHistory, TransportPosition, UmpAt,
+        VerifyError, Wake,
     };
+    pub use tutti_graph::{EdgeGain, FeedbackFrom, Invalid, NodeMix, RangeView};
 }
 
 /// The session's host plumbing (`tutti-session`): what a host that runs the
@@ -325,6 +330,8 @@ pub mod graph {
 /// that calls `Session::update`. The application's own names are at the root.
 #[cfg(feature = "session")]
 pub mod session {
+    #[cfg(feature = "device")]
+    pub use tutti_cpal::Error as DeviceError;
     #[cfg(all(feature = "device", feature = "audio-io"))]
     pub use tutti_cpal::MicConfig;
     #[cfg(feature = "device")]
@@ -363,11 +370,11 @@ pub mod session {
         HeardTapError, Inlet, InletError, LIVE_MAX_BLOCK, MainBus, MainSink, Meters, NotReopened,
         Outlet, OutputPlacement, OutputPolicy, OutputPolicyError, OutputPolicyHandle, PHASES,
         ParamError, Peer, PeerError, Phase as UpdatePhase, PhaseCx, Policy, Presence, RangeError,
-        Reclaimer, RemoveError, RenderWorkerStart, Reopened, ReplaceRefused, Resource,
-        ResourceFact, ResourceId, RootDeclaration, RootReader, RootTopologyStatus, SessionNode,
-        Taps, TempoError, Weighted, Wire, root_width,
+        Reclaimer, RemoveError, Reopened, ReplaceRefused, Resource, ResourceFact, ResourceId,
+        RootDeclaration, RootReader, RootTopologyStatus, SessionNode, Taps, TempoError, Weighted,
+        Wire, root_width,
     };
-    pub use tutti_transport::{AudioTaken, LoopEdit, TimedError};
+    pub use tutti_transport::{AudioTaken, LoopEdit, OfflineTransport, TimedError, Timeline};
     // The pool.
     pub use tutti_session::Load as PoolLoad;
     pub use tutti_session::{
@@ -381,9 +388,9 @@ pub mod session {
     pub use tutti_session::DitherShape;
     #[cfg(feature = "export")]
     pub use tutti_session::{
-        AnyStem, BOUNCE_STALL_WARNING, BounceConfigError, BounceHandle, BounceJob, BounceRendered,
-        BufferMaster, BufferStem, EventLossPolicy, ExportClock, FileMaster, FileStem, Master,
-        NoMaster, Normalize, Outcome, PrepareEdit, PreparedGraph, Produced, Progress, Resample,
+        AnyStem, BounceConfigError, BounceHandle, BounceJob, BounceRendered, BufferMaster,
+        BufferStem, EventLossPolicy, ExportClock, FileMaster, FileStem, Master, NoMaster,
+        Normalize, Outcome, PrepareEdit, PreparedGraph, Produced, Progress, Resample,
         Stage as BounceStage,
     };
     #[cfg(all(feature = "device", feature = "audio-io"))]
@@ -397,13 +404,12 @@ pub mod session {
     pub use tutti_session::{
         AutomationTake, MixRef, ModInput, ModKeys, ModRefusal, ModRouteId, ModSourceId, ModState,
         ModTarget, Mods, ModsView, NoAutomation, NoSuchModRoute, NoSuchModSource, Problem, Ranged,
-        RouteError, RouteInfo, RouteMut, SourceInfo, SourceName, TargetName, UNRESOLVED_WARNING,
-        declare_targets,
+        RouteError, RouteInfo, RouteMut, SourceInfo, SourceName, TargetName, declare_targets,
     };
     #[cfg(feature = "device")]
     pub use tutti_session::{
         Backoff, DeviceLatency, DevicePolicy, DeviceRestart, DeviceRestarted, DeviceWatch, Follow,
-        FollowEvent, LISTING_WARNING, RestartError, RestartOutcome,
+        FollowEvent, RestartError, RestartOutcome,
     };
     #[cfg(feature = "io")]
     pub use tutti_session::{
@@ -415,7 +421,7 @@ pub mod session {
         EditorView, GiveUp, HangPolicy, HostPluginError, LoadedPlugin, MainPlugin, MainSession,
         ParamGesture, PluginCause, PluginEntry as PoolPluginEntry, PluginPorts, PortsRefusal,
         Recovery, RecoveryAction, RecoveryEvent, RecoveryFailure, RecoveryPolicy, ReloadCause,
-        SNAPSHOT_INTERVAL, StateJobError, StateJobFailed, StateRestore, StateView,
+        StateJobError, StateJobFailed, StateRestore, StateView,
     };
     #[cfg(feature = "midi")]
     pub use tutti_session::{
@@ -564,6 +570,8 @@ pub mod plugin {
 #[cfg(feature = "midi")]
 pub mod midi {
     #[cfg(feature = "midi-hardware")]
+    pub use tutti_midi_device::EndpointId;
+    #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_device::{
         ChannelControllers, ChannelsDetail, CiCategories, CiDeviceId, CiPeer, DataControl,
         DetailsData, DiscoveryData, Identity, InquiryTarget, ManufacturerProfile, MaxSysexSize,
@@ -573,16 +581,27 @@ pub mod midi {
         ProfileId, ProfileState, ProfileTable, ReportRequest, ReportScope, Request, RequestError,
         SpecificData, StandardProfile, SystemMessages, WinMmDevice,
     };
+    pub use tutti_midi_file::Error as FileError;
+    pub use tutti_midi_file::{
+        ClipFileError, ConfigError as FileConfigError, Refusal, SmfParseError, ToClipError,
+        Truncated,
+    };
     pub use tutti_midi_file::{
         Converted, DropReason, Dropped, MidiFileKind, Moved, NoCommonTimeline, OutOfOrder,
         PairedNote, SmfDivision, SmfDivisionOutOfRange, TextKind, WriteOptions,
     };
     pub use tutti_midi_file::{FileEvent, Meta, MidiFile, SmfFormat, Tick, Track};
     #[cfg(feature = "midi-hardware")]
+    pub use tutti_midi_hardware::Error as HardwareError;
+    #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_hardware::{
         InputTiming, NotAChannelCount, ProcessChange, ReportAsk, ReportError, ReportPeer,
         WatchFailure,
     };
+    #[cfg(feature = "midi-hardware")]
+    pub use tutti_midi_hardware::{NotFound, SeedError};
+    #[cfg(feature = "midi-hardware")]
+    pub use tutti_midi_protocol::NoMidi1Form;
     pub use tutti_midi_protocol::{
         ChannelResponse, KeyTable, MmcSegmentError, MpeMode, MpeSpec, MpeZone, MpeZoneConfig,
         MpeZones, MtcRate, NotFrequencyData, NotSysexDeviceId, PitchBendSensitivity, Recipient,

@@ -216,7 +216,7 @@ pub enum PassEnd {
 /// A playhead kept as a frame count on a [`TimelineSegment`], with its beat
 /// derived in closed form.
 ///
-/// See the [module docs](self) for why the frame, not the beat, is counted.
+/// See the module docs for why the frame, not the beat, is counted.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FrameClock {
     /// The segment the beat is derived from, on this clock's frame count.
