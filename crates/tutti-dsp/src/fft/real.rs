@@ -34,7 +34,7 @@ use std::sync::Arc;
 /// rustfft's semver: a rustfft bump that changes num-complex changes this type.
 pub use rustfft::num_complex::Complex32;
 
-/// num-complex 0.4's `Complex<f64>`, re-exported from rustfft beside
+/// num-complex 0.4's complex number over `f64`, re-exported from rustfft beside
 /// [`Complex32`]: the type the control-side frequency responses are computed in.
 pub use rustfft::num_complex::Complex64;
 
