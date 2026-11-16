@@ -203,6 +203,7 @@ fn the_published_endpoint_record_carries_the_protocol_and_the_blocks() {
 /// MIDI 1.0 channel voice message (type 2) a client sends it reaches the graph's
 /// ingest node as it does from a MIDI 1.0 device, which widens it: velocity
 /// `0x40` is `0x8000` (M2-115).
+/// Spec: m2-115/2.3#1
 #[test]
 fn a_midi1_destination_reports_midi1_and_its_messages_arrive_widened() {
     let spec = spec("midi1").with_protocol(VirtualProtocol::Midi1);
@@ -228,6 +229,7 @@ fn a_midi1_destination_reports_midi1_and_its_messages_arrive_widened() {
 /// A MIDI 2.0 note sent into a MIDI 1.0 source reaches a subscriber as the
 /// MIDI 1.0 note (type 2): the 16-bit velocity `0x8100` is the 7-bit `0x40`
 /// (M2-115).
+/// Spec: m2-115/2.3#1
 #[test]
 fn a_midi2_note_sent_into_a_midi1_source_arrives_as_a_midi1_note() {
     let spec = spec("narrow").with_protocol(VirtualProtocol::Midi1);
@@ -337,6 +339,7 @@ fn a_registered_controller_reaches_a_midi1_subscriber_as_the_rpn_sequence() {
 
 /// A MIDI 1.0 note sent into a MIDI 2.0 source reaches a subscriber widened:
 /// velocity `0x40` is `0x8000` (M2-115).
+/// Spec: m2-115/2.3#1
 #[test]
 fn a_midi1_note_sent_into_a_midi2_source_arrives_widened() {
     let spec = spec("widen");

@@ -121,13 +121,19 @@ pub fn with_no_denormals<R>(f: impl FnOnce() -> R) -> R {
     f()
 }
 
+#[cfg_attr(target_arch = "x86_64", path = "denormals/x86_64.rs")]
+#[cfg_attr(target_arch = "aarch64", path = "denormals/aarch64.rs")]
+#[cfg_attr(
+    not(any(target_arch = "x86_64", target_arch = "aarch64")),
+    path = "denormals/other.rs"
+)]
+mod arch;
+
 /// The FPU mode saved by [`Restore::set`], written back on drop. Private, so
 /// `f` cannot reach it to forget or reorder it.
 struct Restore {
-    #[cfg(target_arch = "x86_64")]
-    prev_mxcsr: u32,
-    #[cfg(target_arch = "aarch64")]
-    prev_fpcr: u64,
+    /// The register the architecture's module saved on entry.
+    saved: arch::Saved,
     /// `!Send` and `!Sync`: the saved register belongs to the thread that
     /// built it, and dropping it on another would write it there.
     _thread: PhantomData<*const ()>,
@@ -137,48 +143,9 @@ impl Restore {
     /// Sets flush-to-zero and captures the previous FPU mode for the drop.
     #[inline]
     fn set() -> Self {
-        #[cfg(target_arch = "x86_64")]
-        {
-            // SAFETY: `stmxcsr`/`ldmxcsr` read and write only this thread's
-            // MXCSR register through a pointer to a live local `u32` (4 bytes,
-            // as `stmxcsr` stores and `ldmxcsr` loads); SSE is part of the
-            // x86_64 baseline, and `nostack` holds because neither touches the
-            // stack. Setting FTZ|DAZ changes no memory, only how denormals
-            // round in float code (see `# Soundness` on the caller: no memory
-            // safety depends on an exact float result).
-            unsafe {
-                let mut prev: u32 = 0;
-                core::arch::asm!("stmxcsr [{}]", in(reg) &mut prev, options(nostack));
-                let new = prev | 0x8040; // FTZ | DAZ
-                core::arch::asm!("ldmxcsr [{}]", in(reg) &new, options(nostack));
-                Self {
-                    prev_mxcsr: prev,
-                    _thread: PhantomData,
-                }
-            }
-        }
-        #[cfg(target_arch = "aarch64")]
-        {
-            // SAFETY: `mrs`/`msr` on FPCR read and write only this thread's
-            // floating-point control register and touch no memory; FPCR is
-            // available at EL0 on aarch64. Setting FZ changes only how
-            // denormals are handled in float code, and no memory safety
-            // depends on an exact float result (see `# Soundness` above).
-            unsafe {
-                let prev: u64;
-                core::arch::asm!("mrs {}, fpcr", out(reg) prev);
-                core::arch::asm!("msr fpcr, {}", in(reg) prev | (1 << 24)); // FZ
-                Self {
-                    prev_fpcr: prev,
-                    _thread: PhantomData,
-                }
-            }
-        }
-        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-        {
-            Self {
-                _thread: PhantomData,
-            }
+        Self {
+            saved: arch::set(),
+            _thread: PhantomData,
         }
     }
 }
@@ -186,20 +153,8 @@ impl Restore {
 impl Drop for Restore {
     #[inline]
     fn drop(&mut self) {
-        #[cfg(target_arch = "x86_64")]
-        // SAFETY: restores the MXCSR value `set` read from this same thread
-        // (`Restore` is `!Send`, so drop runs on it) through a pointer to the
-        // live `u32` field; the value came from `stmxcsr`, so it has no
-        // reserved bit set that `ldmxcsr` would fault on.
-        unsafe {
-            core::arch::asm!("ldmxcsr [{}]", in(reg) &self.prev_mxcsr, options(nostack));
-        }
-        #[cfg(target_arch = "aarch64")]
-        // SAFETY: writes back the FPCR value `set` read from this same thread
-        // (`Restore` is `!Send`, so drop runs on it); no memory is touched.
-        unsafe {
-            core::arch::asm!("msr fpcr, {}", in(reg) self.prev_fpcr);
-        }
+        // `Restore` is `!Send`, so this runs on the thread `set` read from.
+        arch::restore(&self.saved);
     }
 }
 

@@ -3,6 +3,9 @@
 // The device-free device tests (`ManualStreamDriver`): `device` is a feature,
 // so this suite runs under it (CI's dark-features job names it; a workspace run
 // no longer turns it on).
+// A session changes clock between the system clock and a sound card.
+#[cfg(feature = "device")]
+mod clock_switch;
 #[cfg(feature = "device")]
 mod device;
 #[cfg(all(feature = "device", feature = "audio-io"))]

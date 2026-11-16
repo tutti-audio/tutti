@@ -126,6 +126,13 @@ where
         this.segments.prepare(this.params.room());
     }
 
+    /// A parked node (bypassed) answers its Processor's handoff: a recall the
+    /// control side raised (a restart, a commit's relend, a rate change) is
+    /// returned, and a Processor on offer is taken. Wait-free; renders nothing.
+    fn poll_parked(&mut self) {
+        let _ = self.client.rt.poll(Processor::stop);
+    }
+
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
         let Self {
             client: this,

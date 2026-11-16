@@ -10,7 +10,9 @@
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
-use tutti_dsp::{FftScratch, StftGeometry};
+use tutti_buffers::Mono;
+use tutti_dsp::FftScratch;
+use tutti_measure::PitchHop;
 use tutti_measure::{
     DetectionFunction, OnsetConfig, StftRequest, YinConfig, detect_onsets, istft_transform, stft,
 };
@@ -44,23 +46,25 @@ fn benches(c: &mut Criterion) {
 
     g.bench_function("stft_istft_2048_hop512", |b| {
         let mut fft = FftScratch::new();
-        let req = StftRequest::new(SR, Samples(2048), Samples(512));
+        let req = StftRequest::new(Samples(2048), Samples(512));
         b.iter(|| {
-            let s = stft(black_box(&x), req, &mut fft).unwrap();
-            black_box(istft_transform(&s, &mut fft))
+            let s = stft(req, Mono::new(black_box(&x)), SR, &mut fft).unwrap();
+            black_box(istft_transform::<f32>(&s, &mut fft))
         });
     });
 
     g.bench_function("onsets_flux_2048_hop512", |b| {
         let mut fft = FftScratch::new();
-        let geometry = StftGeometry::new(SR, Samples(2048), Samples(512)).unwrap();
-        let cfg = OnsetConfig::new(geometry, DetectionFunction::SpectralFlux);
-        b.iter(|| black_box(detect_onsets(&cfg, black_box(&x), &mut fft).unwrap()));
+        let cfg = OnsetConfig::new(DetectionFunction::SpectralFlux);
+        b.iter(|| black_box(detect_onsets(&cfg, Mono::new(black_box(&x)), SR, &mut fft).unwrap()));
     });
 
     g.bench_function("yin_track_hop512", |b| {
-        let cfg = YinConfig::standard(SR).unwrap();
-        b.iter(|| black_box(tutti_measure::yin_track(&cfg, black_box(&x), Samples(512)).unwrap()));
+        let cfg = YinConfig::new();
+        let hop = PitchHop::of(Samples(512));
+        b.iter(|| {
+            black_box(tutti_measure::yin_track(&cfg, Mono::new(black_box(&x)), SR, hop).unwrap())
+        });
     });
 
     g.finish();

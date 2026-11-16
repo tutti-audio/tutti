@@ -77,13 +77,16 @@ pub use config::PoolConfig;
 pub use data::{AudioEntry, AudioFile, StreamInfo, Tier, audio_file};
 #[cfg(feature = "soundfont")]
 pub use data::{SoundFontFile, soundfont};
+pub(crate) use entry::Staged;
 pub use entry::{
     Declared, IntoPool, Life, Load, LoadError, Parking, PoolEntry, PoolSet, stranded_loads,
 };
 pub use key::PoolKey;
 pub use open::OpenCx;
+pub(crate) use refresh::Checked;
 pub use refresh::RefreshPool;
 pub use report::{PoolOutcome, PoolReport};
+pub(crate) use stamp::Stamp;
 pub(crate) use table::Pool;
 pub use table::{HandleError, PoolError, PoolEvent, PoolState, RetryError, WhenLoadedError};
 #[cfg(feature = "plugin")]
@@ -234,11 +237,7 @@ impl<C: crate::Clock> Session<C> {
         self.jobs.submit(
             move || refresh::check(files),
             move |session, done, _| {
-                landing.land(done.map(|checked| {
-                    let (starts, refreshed) = session.pool.reload_changed(checked);
-                    session.pool_start(starts);
-                    refreshed
-                }));
+                landing.land(done.map(|checked| session.land_pool_refresh(checked)));
             },
         );
         wait

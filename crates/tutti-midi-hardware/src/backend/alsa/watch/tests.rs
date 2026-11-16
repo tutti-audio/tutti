@@ -645,3 +645,168 @@ fn a_new_occupant_listed_by_a_look_that_did_not_quiet_has_its_start_still_to_com
     world.wake(heard(&REPLUG), |_| {});
     assert_eq!(world.shape(), pair("Two", "Two"));
 }
+
+/// A rename read in a look that did not quiet is a change of the occupant whose
+/// start was read: the old client exits and an identical one takes the number,
+/// and the new start is a new occupant, reported removed and added, whether the
+/// rename's change is read in the same wake as the replug or before it.
+#[test]
+fn a_rename_listed_by_a_look_that_did_not_quiet_does_not_hide_a_replug() {
+    for changes_first in [false, true] {
+        let mut world = World::with("One", &[]);
+        world.model.storm.set(true);
+        world.wake(heard(&[]), |m| {
+            *m.present.borrow_mut() = World::device("Renamed")
+        });
+        world.model.storm.set(false);
+        assert_eq!(world.shape(), pair("One", "Renamed"));
+        if changes_first {
+            world.wake(heard(&[Event::ClientChange(5)]), |_| {});
+            world.wake(heard(&REPLUG), |_| {});
+        } else {
+            let mut announced = vec![Event::ClientChange(5)];
+            announced.extend(REPLUG);
+            world.wake(heard(&announced), |_| {});
+        }
+        assert_eq!(world.shape(), pair("Renamed", "Renamed"));
+    }
+}
+
+/// Wakes `world` as a non-quiet look that lists client 5 as `name` and reads
+/// `first`, then reads `rest`; returns after the quiet wake.
+fn non_quiet_rename(world: &mut World, name: &str, first: &[Event], rest: &[Event]) {
+    world.model.storm.set(true);
+    world.wake(heard(first), |m| {
+        *m.present.borrow_mut() = World::device(name)
+    });
+    world.model.storm.set(false);
+    world.wake(heard(rest), |_| {});
+}
+
+/// The rename's change read in the same wake as the look that lists it is
+/// already the verdict: the next start is a replug.
+#[test]
+fn a_change_read_with_the_look_that_lists_the_rename_is_a_rename() {
+    let mut world = World::with("One", &[]);
+    non_quiet_rename(&mut world, "Renamed", &[Event::ClientChange(5)], &REPLUG);
+    assert_eq!(
+        world.shape(),
+        twice(pair("One", "Renamed"), pair("Renamed", "Renamed"))
+    );
+}
+
+/// A port's change is the rename of that port's device.
+#[test]
+fn a_port_change_is_a_rename() {
+    let mut world = World::with("One", &[]);
+    non_quiet_rename(&mut world, "Renamed", &[Event::PortChange(5, 0)], &REPLUG);
+    assert_eq!(
+        world.shape(),
+        twice(pair("One", "Renamed"), pair("Renamed", "Renamed"))
+    );
+}
+
+/// A new occupant listed by a look that did not quiet: the exit of the old
+/// owner's port tells it, so a change read after it (the new owner's, or the old
+/// one's late) is no rename, and the start that follows is the occupant's own.
+#[test]
+fn a_port_exit_read_for_an_undecided_handle_is_a_new_occupant() {
+    let mut world = World::with("One", &[]);
+    world.model.storm.set(true);
+    world.wake(heard(&[]), |m| {
+        *m.present.borrow_mut() = World::device("Two")
+    });
+    world.wake(
+        heard(&[Event::PortExit(5, 0), Event::ClientChange(5)]),
+        |_| {},
+    );
+    world.model.storm.set(false);
+    world.wake(heard(&START), |_| {});
+    assert_eq!(world.shape(), pair("One", "Two"));
+    world.wake(heard(&REPLUG), |_| {});
+    assert_eq!(world.shape(), pair("Two", "Two"));
+}
+
+/// A quiet look says the start of every listed client was read: a handle left
+/// undecided by an earlier look is decided, and a replug is reported.
+#[test]
+fn a_quiet_look_decides_an_undecided_handle() {
+    let mut world = World::with("One", &[]);
+    world.model.storm.set(true);
+    world.wake(heard(&[]), |m| {
+        *m.present.borrow_mut() = World::device("Renamed")
+    });
+    world.model.storm.set(false);
+    world.wake(heard(&[]), |_| {});
+    world.wake(heard(&REPLUG), |_| {});
+    assert_eq!(
+        world.shape(),
+        twice(pair("One", "Renamed"), pair("Renamed", "Renamed"))
+    );
+}
+
+/// A change read for an earlier rename cannot be told from the rename of the
+/// identity the look lists: a rename and a replug to "Three" that happen before
+/// the look, with only the first change read, is taken for a rename, and the
+/// start read next is reported again. The error is a second pair, never a miss.
+#[test]
+fn a_replug_listed_after_a_read_change_is_reported_again_by_its_start() {
+    let mut world = World::with("One", &[]);
+    non_quiet_rename(&mut world, "Three", &[Event::ClientChange(5)], &REPLUG);
+    assert_eq!(
+        world.shape(),
+        twice(pair("One", "Three"), pair("Three", "Three"))
+    );
+}
+
+/// A port's change read in a wake after the look that lists the rename decides
+/// it, as a client's does.
+#[test]
+fn a_port_change_read_after_the_look_decides_the_rename() {
+    let mut world = World::with("One", &[]);
+    world.model.storm.set(true);
+    world.wake(heard(&[]), |m| {
+        *m.present.borrow_mut() = World::device("Renamed")
+    });
+    world.wake(heard(&[Event::PortChange(5, 0)]), |_| {});
+    world.model.storm.set(false);
+    world.wake(heard(&REPLUG), |_| {});
+    assert_eq!(
+        world.shape(),
+        twice(pair("One", "Renamed"), pair("Renamed", "Renamed"))
+    );
+}
+
+/// The exit of the old owner's port read before a change in the wake that lists
+/// the new occupant tells a replacement, not a rename: the start read next is
+/// the occupant's own.
+#[test]
+fn a_port_exit_read_before_a_change_with_the_look_is_a_replacement() {
+    let mut world = World::with("One", &[]);
+    non_quiet_rename(
+        &mut world,
+        "Two",
+        &[Event::PortExit(5, 0), Event::ClientChange(5)],
+        &START,
+    );
+    assert_eq!(world.shape(), pair("One", "Two"));
+}
+
+/// A replacement a look lists after a rename, whose port exit was read, is not
+/// made a rename by a change read after it.
+#[test]
+fn a_replacement_listed_after_a_rename_is_not_taken_for_one() {
+    let mut world = World::with("One", &[]);
+    non_quiet_rename(&mut world, "Renamed", &[], &[]);
+    world.model.storm.set(true);
+    world.wake(heard(&[Event::PortExit(5, 0)]), |m| {
+        *m.present.borrow_mut() = World::device("Two")
+    });
+    world.wake(heard(&[Event::ClientChange(5)]), |_| {});
+    world.model.storm.set(false);
+    world.wake(heard(&START), |_| {});
+    assert_eq!(
+        world.shape(),
+        twice(pair("One", "Renamed"), pair("Renamed", "Two"))
+    );
+}
