@@ -78,29 +78,28 @@ use tutti_plugin_types::{
 
 use crate::plugin::{Gate, HostedPlugin, Notices, queue};
 
-/// The lane knobs of a plugin's driven parameters, by id: where a set of one
-/// goes. The session fills it in `Phase::Plugins` from the lanes the last
-/// apply resolved, so a parameter without a lane (or whose lane was removed)
+/// The lane knobs of a plugin's driven parameters: where a set of one goes,
+/// whether the host made it or the plugin reported it. The modulation apply
+/// replaces it (`Graph::refresh_driven`) after every lane it built or dropped,
+/// so within one update a parameter without a lane, or whose lane was removed,
 /// is absent and a set of it goes to the plugin.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Driven {
     #[cfg(feature = "modulation")]
-    knobs: std::sync::Arc<
-        std::sync::Mutex<std::collections::BTreeMap<u32, tutti_nodes::automation::LaneControls>>,
-    >,
+    knobs: std::sync::Arc<std::sync::Mutex<Knobs>>,
 }
+
+/// The lanes with a knob, by the parameter they drive.
+#[cfg(feature = "modulation")]
+pub(crate) type Knobs = std::collections::BTreeMap<ParamId, tutti_nodes::automation::LaneControls>;
 
 impl Driven {
     /// Writes `value` into parameter `id`'s lane knob. `false` when no lane
     /// with a knob drives it.
     #[cfg(feature = "modulation")]
     pub(crate) fn write(&self, id: ParamId, value: Normalized) -> bool {
-        let knobs = self
-            .knobs
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        knobs
-            .get(&id.get())
+        self.lock()
+            .get(&id)
             .is_some_and(|lane| lane.set_knob(value.get() as f32))
     }
 
@@ -111,16 +110,34 @@ impl Driven {
         false
     }
 
-    /// Replaces the driven parameters with `knobs`.
+    /// Replaces the driven parameters with `knobs`; nothing is touched while
+    /// there were none and there are none.
     #[cfg(feature = "modulation")]
-    pub(crate) fn replace(
-        &self,
-        knobs: std::collections::BTreeMap<u32, tutti_nodes::automation::LaneControls>,
-    ) {
-        *self
-            .knobs
+    pub(crate) fn replace(&self, knobs: Knobs) {
+        let mut held = self.lock();
+        if held.is_empty() && knobs.is_empty() {
+            return;
+        }
+        *held = knobs;
+    }
+
+    /// Reports each driven parameter's knob into `mirror`: a read of the
+    /// plugin lands the value it plays (the knob plus the lane's routes), and
+    /// the mirror holds the knob.
+    #[cfg(feature = "modulation")]
+    pub(crate) fn report_knobs(&self, mirror: &tutti_plugin_host::PluginParamValues) {
+        for (&id, lane) in self.lock().iter() {
+            if let Some(knob) = lane.knob() {
+                mirror.report(id, Normalized::clamped(f64::from(knob)));
+            }
+        }
+    }
+
+    #[cfg(feature = "modulation")]
+    fn lock(&self) -> std::sync::MutexGuard<'_, Knobs> {
+        self.knobs
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = knobs;
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 }
 
@@ -346,7 +363,11 @@ impl<'a> Param<'a> {
     /// what was read. From the session's mirror, so it asks the plugin nothing.
     ///
     /// A parameter a modulation lane drives reads its base, the lane's knob;
-    /// the value the plugin plays is that plus the lane's routes.
+    /// the value the plugin plays is that plus the lane's routes. The mirror
+    /// is written with the knob: by a set of the parameter, and again when a
+    /// read of the plugin lands (which finds the played value). Nothing reports
+    /// the played value into it: a plugin's report of a value the host just
+    /// gave it is not an edit (`PluginParamValues`).
     #[must_use]
     pub fn normalized(&self) -> Normalized {
         self.params.hosted.mirror.value_at(self.position)

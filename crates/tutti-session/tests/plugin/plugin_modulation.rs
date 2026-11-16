@@ -331,8 +331,13 @@ fn set_gain(s: &DetachedSession, node: impl Into<NodeKey> + Copy, value: f64) {
         .unwrap();
 }
 
+/// How far a plugin's value may be from the one a lane plays: the plugin
+/// takes it as a float over the wire.
+const TOLERANCE: f64 = 1e-3;
+
+/// Whether `v` is within [`TOLERANCE`] of `want`.
 fn near(v: Option<Normalized>, want: f64) -> bool {
-    v.is_some_and(|v| (v.get() - want).abs() < 1e-3)
+    v.is_some_and(|v| (v.get() - want).abs() < TOLERANCE)
 }
 
 /// **A set under a lane writes the lane's knob.** The gain's lane is a macro
@@ -356,7 +361,6 @@ fn a_set_under_a_lane_writes_the_knob() {
     }
     lane_of(&mut drive, &mut s, gain);
     // The lane drives the plugin before the set.
-    drive.update(&mut s);
     let deadline = Instant::now() + Duration::from_secs(10);
     while !near(gain_value(&s, node), 60.0 / 72.0 - 0.25) {
         assert!(
@@ -377,6 +381,40 @@ fn a_set_under_a_lane_writes_the_knob() {
         .unwrap()
         .normalized();
     assert_eq!(read, Normalized::of(0.5), "the read-back is the knob");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !near(gain_value(&s, node), 0.25) {
+        assert!(
+            Instant::now() < deadline,
+            "the plugin hears {:?}, not the knob plus the route",
+            gain_value(&s, node)
+        );
+        drive.frame(&mut s);
+    }
+}
+
+/// **A set in the update that added the lane writes its knob.** The lane
+/// exists as the update ends, so a set made then is the base: the plugin
+/// hears it plus the route, not the raw value.
+#[test]
+fn a_set_right_after_the_lane_is_added_writes_the_knob() {
+    let mut s = detached();
+    let mut drive = Drive::new();
+    let node = add_probe(&mut s);
+    drive.update(&mut s);
+    wait_for_values(&mut drive, &mut s, node);
+    let gain = node.param(ParamId::new(GAIN));
+    {
+        let mut m = s.mods_mut();
+        m.range_raw(gain, 0.0, 1.0).unwrap();
+        let source = m.macro_(1.0);
+        m.route(RouteSpec::new(source, gain, Depth::of(-0.25)))
+            .unwrap();
+    }
+    lane_of(&mut drive, &mut s, gain);
+
+    set_gain(&s, node, 0.5);
+    let knob = s.mod_state().lane(gain.key()).and_then(|(_, l)| l.knob());
+    assert_eq!(knob, Some(0.5), "the knob is the set value");
     let deadline = Instant::now() + Duration::from_secs(10);
     while !near(gain_value(&s, node), 0.25) {
         assert!(
@@ -417,8 +455,8 @@ fn a_set_after_the_lane_is_removed_goes_to_the_plugin() {
         assert!(Instant::now() < deadline, "the lane never left");
         drive.update(&mut s);
     }
-    drive.update(&mut s);
 
+    // The update that dropped the lane also dropped the parameter's knob.
     set_gain(&s, node, 0.5);
     let deadline = Instant::now() + Duration::from_secs(10);
     while !near(gain_value(&s, node), 0.5) {

@@ -1949,6 +1949,15 @@ impl Graph {
         Ok((applied, host.plugin_targets.into_inner()))
     }
 
+    /// Points each hosted plugin's driven parameters at the lanes `state` holds:
+    /// where a set of a driven parameter goes.
+    #[cfg(all(feature = "modulation", feature = "plugin"))]
+    pub(crate) fn refresh_driven(&self, state: &crate::modulation::ModState) {
+        for (&node, hosted) in &self.plugins {
+            hosted.driven.replace(state.plugin_lanes(node));
+        }
+    }
+
     /// Schedules the note-envelope resyncs `m` owes, after the commit that
     /// sent their nodes (`Modulation::send_resyncs`).
     #[cfg(feature = "modulation")]

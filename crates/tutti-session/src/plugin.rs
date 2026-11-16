@@ -1473,6 +1473,8 @@ impl<C: crate::Clock> Session<C> {
         match values {
             Ok(values) => {
                 hosted.mirror.land(values);
+                #[cfg(feature = "modulation")]
+                hosted.driven.report_knobs(&hosted.mirror);
                 hosted.gate.declare(&hosted.mirror);
                 true
             }
@@ -2123,18 +2125,11 @@ impl<C: crate::Clock> Session<C> {
                     },
                 );
             }
-            #[cfg(feature = "modulation")]
-            let state = &self.mods.state;
-            // The lanes now driving this plugin's parameters, before the edits
-            // below land: a set between updates writes the knob of the lane
-            // the last update found.
-            #[cfg(feature = "modulation")]
-            hosted.driven.replace(state.plugin_lanes(node));
-            hosted.mirror.drain_edits(|_id, _value| {
-                #[cfg(feature = "modulation")]
-                if let Some(target) = state.plugin_target(node, _id.get()) {
-                    state.set_knob(target, _value.get() as f32);
-                }
+            // A value the plugin reported or the host set goes into the knob
+            // of the lane driving that parameter, if one does.
+            let driven = &hosted.driven;
+            hosted.mirror.drain_edits(|id, value| {
+                driven.write(id, value);
             });
 
             if let Some(tail) = declared_tail {
