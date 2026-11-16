@@ -94,7 +94,11 @@ impl Rig {
         let ctx = ProcessContext::new();
         let mut out = ProcessOutput::default();
         let mut io = PluginIo {
-            buffer: AudioBufferMut::F32(AudioBuffer::new(&inputs, &mut outputs, rate)),
+            buffer: AudioBufferMut::F32(AudioBuffer::new(
+                &inputs,
+                &mut outputs,
+                SampleRate::of(rate),
+            )),
             ctx: &ctx,
             out: &mut out,
         };
@@ -457,7 +461,11 @@ fn the_processor_renders_without_allocating() {
     let processor = rig.lifecycle.processor().expect("held");
     let mut outputs = [left.as_mut_slice(), right.as_mut_slice()];
     let mut io = PluginIo {
-        buffer: AudioBufferMut::F32(AudioBuffer::new(&inputs, &mut outputs, 48_000.0)),
+        buffer: AudioBufferMut::F32(AudioBuffer::new(
+            &inputs,
+            &mut outputs,
+            tutti_plugin_types::SampleRate::SR_48K,
+        )),
         ctx: &ctx,
         out: &mut out,
     };

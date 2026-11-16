@@ -59,6 +59,7 @@ use tutti_plugin_types::{
     AutomationMode, MainThreadMarker, Request, RescanScope, WireMidi, sysex_packets,
 };
 use tutti_rt::RequestWord;
+use tutti_types::{AtomicSampleRate, SampleRate};
 use tutti_ump::MidiGroup;
 use vst::api::{AutomationState, ProcessLevel, Supported};
 use vst::host::Host;
@@ -159,7 +160,7 @@ pub(crate) struct HostState {
     /// The rate the plugin was last told (`effSetSampleRate`), as `f64` bits.
     /// Answers `audioMasterGetSampleRate`, and is written before the opcode is
     /// dispatched for the same reason as [`block_size`](Self::block_size).
-    sample_rate_bits: AtomicU64,
+    sample_rate: AtomicSampleRate,
     /// Whether the host is rendering offline, answered back through
     /// `audioMasterGetCurrentProcessLevel`.
     ///
@@ -216,7 +217,7 @@ impl HostState {
         midi_out_tx: Arc<ArrayQueue<WireMidi>>,
         time_info: TransportReader,
         block_size: usize,
-        default_sample_rate: f64,
+        default_sample_rate: SampleRate,
         current_id: i32,
     ) -> Self {
         Self {
@@ -226,7 +227,7 @@ impl HostState {
             dropped_midi_out: AtomicU64::new(0),
             time_info,
             block_size: AtomicU64::new(block_size as u64),
-            sample_rate_bits: AtomicU64::new(default_sample_rate.to_bits()),
+            sample_rate: AtomicSampleRate::new(default_sample_rate),
             offline: std::sync::atomic::AtomicBool::new(false),
             process_thread: AtomicUsize::new(0),
             automation: AtomicU8::new(0),
@@ -252,9 +253,8 @@ impl HostState {
 
     /// Records the rate the plugin is about to be told, for
     /// `audioMasterGetSampleRate`.
-    pub(crate) fn set_sample_rate(&self, rate: f64) {
-        self.sample_rate_bits
-            .store(rate.to_bits(), Ordering::Release);
+    pub(crate) fn set_sample_rate(&self, rate: SampleRate) {
+        self.sample_rate.store(rate, Ordering::Release);
     }
 
     /// The requests the plugin raised, for the main thread to take.
@@ -486,7 +486,8 @@ impl Host for HostState {
     /// the new rate for the main thread). A plugin asking from inside
     /// `effSetSampleRate` must read the figure being set.
     fn get_sample_rate(&self) -> f32 {
-        f64::from_bits(self.sample_rate_bits.load(Ordering::Acquire)) as f32
+        // `audioMasterGetSampleRate` answers a C `float`.
+        self.sample_rate.load(Ordering::Acquire).get() as f32
     }
 
     /// The level of the thread asking (`audioMasterGetCurrentProcessLevel`): from inside the
@@ -628,7 +629,7 @@ mod tests {
 
     use vst::host::Host;
 
-    fn make_host(time_info: TransportReader, default_sample_rate: f64) -> HostState {
+    fn make_host(time_info: TransportReader, default_sample_rate: SampleRate) -> HostState {
         HostState::new(
             tutti_fixtures::main_thread(),
             Arc::new(ArrayQueue::new(PARAM_QUEUE_CAPACITY)),
@@ -648,7 +649,7 @@ mod tests {
     #[test]
     fn get_sample_rate_is_the_rate_the_plugin_was_told() {
         let mut time_info = TransportWriter::new();
-        let host = make_host(time_info.reader(), 44_100.0);
+        let host = make_host(time_info.reader(), SampleRate::SR_44K1);
         assert_eq!(host.get_sample_rate(), 44_100.0, "the load-time rate");
 
         // A block's snapshot at another rate does not move the answer.
@@ -658,7 +659,7 @@ mod tests {
         });
         assert_eq!(host.get_sample_rate(), 44_100.0);
 
-        host.set_sample_rate(88_200.0);
+        host.set_sample_rate(SampleRate::SR_88K2);
         assert_eq!(host.get_sample_rate(), 88_200.0);
     }
 
@@ -666,7 +667,7 @@ mod tests {
     /// Spec: vst2.audioMaster.GetBlockSize
     #[test]
     fn get_block_size_follows_the_announced_block() {
-        let host = make_host(TransportWriter::new().reader(), 48_000.0);
+        let host = make_host(TransportWriter::new().reader(), SampleRate::SR_48K);
         assert_eq!(host.get_block_size(), 512);
         host.set_block_size(8192);
         assert_eq!(host.get_block_size(), 8192);
@@ -677,7 +678,7 @@ mod tests {
     /// Spec: vst2.audioMaster.IOChanged
     #[test]
     fn io_changed_is_handled_and_raises_its_requests_once() {
-        let host = make_host(TransportWriter::new().reader(), 48_000.0);
+        let host = make_host(TransportWriter::new().reader(), SampleRate::SR_48K);
         assert_eq!(
             tutti_plugin_types::taken(host.requests()).count(),
             0,
@@ -708,7 +709,7 @@ mod tests {
     /// Spec: vst2.audioMaster.UpdateDisplay
     #[test]
     fn update_display_asks_for_a_reread_of_names_and_values() {
-        let host = make_host(TransportWriter::new().reader(), 48_000.0);
+        let host = make_host(TransportWriter::new().reader(), SampleRate::SR_48K);
         assert_eq!(
             tutti_plugin_types::taken(host.requests()).count(),
             0,
@@ -736,7 +737,7 @@ mod tests {
     /// Spec: vst2.audioMaster.SizeWindow
     #[test]
     fn size_window_keeps_the_latest_request_for_the_main_thread() {
-        let host = make_host(TransportWriter::new().reader(), 48_000.0);
+        let host = make_host(TransportWriter::new().reader(), SampleRate::SR_48K);
         assert_eq!(host.take_size_request(), None, "nothing asked yet");
         assert!(host.size_window(640, 480));
         assert!(host.size_window(800, 600));
@@ -756,7 +757,7 @@ mod tests {
     /// `audioMasterCanDo` claims what tutti does and declines what it does not.
     #[test]
     fn can_do_claims_what_the_host_supports() {
-        let host = make_host(TransportWriter::new().reader(), 48_000.0);
+        let host = make_host(TransportWriter::new().reader(), SampleRate::SR_48K);
         for yes in [
             "sendVstEvents",
             "sendVstMidiEvent",
@@ -788,7 +789,7 @@ mod tests {
     /// Spec: vst2.audioMaster.CurrentId
     #[test]
     fn current_id_is_the_chosen_sub_plugin_and_zero_when_none() {
-        let none = make_host(TransportWriter::new().reader(), 48_000.0);
+        let none = make_host(TransportWriter::new().reader(), SampleRate::SR_48K);
         assert_eq!(none.get_plugin_id(), 0);
         let chosen = HostState::new(
             tutti_fixtures::main_thread(),
@@ -796,7 +797,7 @@ mod tests {
             Arc::new(ArrayQueue::new(MIDI_OUT_QUEUE_CAPACITY)),
             TransportWriter::new().reader(),
             512,
-            48_000.0,
+            SampleRate::SR_48K,
             0x5348_414C,
         );
         assert_eq!(chosen.get_plugin_id(), 0x5348_414C);
@@ -808,7 +809,7 @@ mod tests {
     /// Spec: vst2.audioMaster.GetCurrentProcessLevel, vst2.level.kVstProcessLevelOffline, vst2.level.kVstProcessLevelRealtime
     #[test]
     fn process_level_inside_process_follows_the_render_mode() {
-        let host = make_host(TransportWriter::new().reader(), 48_000.0);
+        let host = make_host(TransportWriter::new().reader(), SampleRate::SR_48K);
 
         host.set_offline(true);
         {
@@ -825,7 +826,10 @@ mod tests {
     /// `User`, another thread is `Unknown`, and the process scope ending ends `Realtime`.
     #[test]
     fn process_level_outside_process_is_user_on_main_and_unknown_elsewhere() {
-        let host = Arc::new(make_host(TransportWriter::new().reader(), 48_000.0));
+        let host = Arc::new(make_host(
+            TransportWriter::new().reader(),
+            SampleRate::SR_48K,
+        ));
         let _main = tutti_fixtures::main_thread();
 
         assert_eq!(host.get_process_level(), ProcessLevel::User);
@@ -855,7 +859,10 @@ mod tests {
     /// mode, and after the scope it is `Unknown`.
     #[test]
     fn process_level_on_a_process_thread_that_is_not_main() {
-        let host = Arc::new(make_host(TransportWriter::new().reader(), 48_000.0));
+        let host = Arc::new(make_host(
+            TransportWriter::new().reader(),
+            SampleRate::SR_48K,
+        ));
         let _main = tutti_fixtures::main_thread();
         host.set_offline(true);
         let answers = {
@@ -878,7 +885,7 @@ mod tests {
     /// Spec: vst2.audioMaster.GetAutomationState, vst2.automation.kVstAutomationOff, vst2.automation.kVstAutomationRead, vst2.automation.kVstAutomationWrite, vst2.automation.kVstAutomationReadWrite
     #[test]
     fn automation_state_answers_each_mode_with_its_header_value() {
-        let host = make_host(TransportWriter::new().reader(), 48_000.0);
+        let host = make_host(TransportWriter::new().reader(), SampleRate::SR_48K);
         assert_eq!(host.get_automation_state() as i32, 1, "off before any set");
         for (mode, value) in [
             (AutomationMode::Reading, 2),
@@ -900,7 +907,7 @@ mod tests {
     /// refusal must be distinguishable from a plugin that never automated.
     #[test]
     fn a_full_param_queue_drops_and_counts() {
-        let host = make_host(TransportWriter::new().reader(), 48_000.0);
+        let host = make_host(TransportWriter::new().reader(), SampleRate::SR_48K);
 
         // Nothing dropped before anything overflows — without this the
         // assertion below would also pass on a counter stuck at "always
@@ -935,7 +942,7 @@ mod tests {
     /// must not share a tally.
     #[test]
     fn midi_out_drops_are_counted_apart_from_param_drops() {
-        let host = make_host(TransportWriter::new().reader(), 48_000.0);
+        let host = make_host(TransportWriter::new().reader(), SampleRate::SR_48K);
         let ev = a_note_on();
 
         for _ in 0..MIDI_OUT_QUEUE_CAPACITY {
@@ -1000,7 +1007,7 @@ mod tests {
     #[test]
     fn a_sysex_from_the_plugin_reaches_the_host_whole() {
         for len in [1usize, 6, 7, 40, 200] {
-            let host = make_host(TransportWriter::new().reader(), 48_000.0);
+            let host = make_host(TransportWriter::new().reader(), SampleRate::SR_48K);
             let body: Vec<u8> = (0..len).map(|i| (i % 0x7F) as u8).collect();
             let message: Vec<u8> = tutti_ump::frame(&body).collect();
             // The plugin's own buffer, alive for the callback only.
@@ -1025,7 +1032,7 @@ mod tests {
     /// not read past its declared end.
     #[test]
     fn an_event_shorter_than_its_struct_is_ignored() {
-        let host = make_host(TransportWriter::new().reader(), 48_000.0);
+        let host = make_host(TransportWriter::new().reader(), SampleRate::SR_48K);
         let mut payload = vec![0xF0u8, 1, 2, 0xF7];
         let mut sysex = sysex_event(0, &mut payload);
         sysex.byte_size = 8;
@@ -1055,7 +1062,7 @@ mod tests {
     /// the enum (reading one is undefined behaviour, which no test can show).
     #[test]
     fn a_malformed_event_list_is_ignored() {
-        let host = make_host(TransportWriter::new().reader(), 48_000.0);
+        let host = make_host(TransportWriter::new().reader(), SampleRate::SR_48K);
 
         let negative = vst::api::Events {
             num_events: -1,
@@ -1115,7 +1122,7 @@ mod tests {
     /// never left as a `START` without its `END`.
     #[test]
     fn a_sysex_past_the_queue_is_dropped_whole_and_counted() {
-        let host = make_host(TransportWriter::new().reader(), 48_000.0);
+        let host = make_host(TransportWriter::new().reader(), SampleRate::SR_48K);
         let mut payload = vec![1u8; MIDI_OUT_QUEUE_CAPACITY * 6 + 1];
         let mut event = sysex_event(0, &mut payload);
         deliver(&host, &mut event);
@@ -1128,7 +1135,7 @@ mod tests {
     /// until the queue refuses one, then it is drained again.
     #[test]
     fn the_sysex_path_is_allocation_free() {
-        let host = make_host(TransportWriter::new().reader(), 48_000.0);
+        let host = make_host(TransportWriter::new().reader(), SampleRate::SR_48K);
         let mut payload: Vec<u8> = (0..200).map(|i| (i % 0x7F) as u8).collect();
         let mut event = sysex_event(3, &mut payload);
         // 200 payload bytes, six to a packet (M2-104 section 7.7): 34 packets.
@@ -1158,7 +1165,7 @@ mod tests {
     /// message beside them does, and nothing allocates.
     #[test]
     fn a_stray_status_from_a_plugin_allocates_nothing() {
-        let host = make_host(TransportWriter::new().reader(), 48_000.0);
+        let host = make_host(TransportWriter::new().reader(), SampleRate::SR_48K);
         let note = a_note_on();
         let mut api_ev = crate::midi::from_midi(&note).expect("note-on has a MIDI-1 form");
         let good = api_ev.midi_data;
@@ -1209,7 +1216,7 @@ mod tests {
     /// observes something.
     #[test]
     fn both_audio_thread_callbacks_are_allocation_free() {
-        let host = make_host(TransportWriter::new().reader(), 48_000.0);
+        let host = make_host(TransportWriter::new().reader(), SampleRate::SR_48K);
         let ev = a_note_on();
         let mut api_ev = crate::midi::from_midi(&ev).expect("note-on has a MIDI-1 form");
         let events = vst::api::Events {

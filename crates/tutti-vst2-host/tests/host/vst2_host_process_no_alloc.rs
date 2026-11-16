@@ -152,7 +152,8 @@ fn drive_silent(inst: &mut Active, iters: usize, transport: &TransportInfo) {
     let mut in_r = [0.0f32; BLOCK];
     let mut out_l = [0.0f32; BLOCK];
     let mut out_r = [0.0f32; BLOCK];
-    let ctx = Vst2ProcessContext::new(SAMPLE_RATE).transport(transport);
+    let ctx = Vst2ProcessContext::new(tutti_plugin_types::SampleRate::of(SAMPLE_RATE))
+        .transport(transport);
     for _ in 0..iters {
         let ins: &[&[f32]] = &[&in_l[..], &in_r[..]];
         let outs: &mut [&mut [f32]] = &mut [&mut out_l[..], &mut out_r[..]];
@@ -204,7 +205,8 @@ fn drive_silent_f64(inst: &mut Active, iters: usize, transport: &TransportInfo) 
     let mut in_r = [0.0f64; BLOCK];
     let mut out_l = [0.0f64; BLOCK];
     let mut out_r = [0.0f64; BLOCK];
-    let ctx = Vst2ProcessContext::new(SAMPLE_RATE).transport(transport);
+    let ctx = Vst2ProcessContext::new(tutti_plugin_types::SampleRate::of(SAMPLE_RATE))
+        .transport(transport);
     for _ in 0..iters {
         let ins: &[&[f64]] = &[&in_l[..], &in_r[..]];
         let outs: &mut [&mut [f64]] = &mut [&mut out_l[..], &mut out_r[..]];
@@ -272,7 +274,7 @@ fn process_f32_with_midi_does_not_allocate() {
             (Offset::ZERO, midi::note_on(MidiChannel::FIRST, 60, 0x4000)),
             (Offset::ZERO, midi::note_off(MidiChannel::FIRST, 60, 0)),
         ];
-        let ctx = Vst2ProcessContext::new(SAMPLE_RATE)
+        let ctx = Vst2ProcessContext::new(tutti_plugin_types::SampleRate::of(SAMPLE_RATE))
             .midi(&warm)
             .transport(&transport);
         let _ = inst.process_f32(ins, outs, BLOCK, &ctx);
@@ -291,7 +293,7 @@ fn process_f32_with_midi_does_not_allocate() {
             };
             let ins: &[&[f32]] = &[];
             let outs: &mut [&mut [f32]] = &mut [&mut out_l[..], &mut out_r[..]];
-            let ctx = Vst2ProcessContext::new(SAMPLE_RATE)
+            let ctx = Vst2ProcessContext::new(tutti_plugin_types::SampleRate::of(SAMPLE_RATE))
                 .midi(events)
                 .transport(&transport);
             let _ = inst.process_f32(ins, outs, BLOCK, &ctx);

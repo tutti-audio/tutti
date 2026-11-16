@@ -240,7 +240,7 @@ fn live_realtime_prefetch_toggle_is_spec_clean() {
             inputs: &in_refs,
             outputs: &mut out_refs,
             num_samples: 512,
-            sample_rate: 48_000.0,
+            sample_rate: tutti_plugin_types::SampleRate::SR_48K,
         };
         inst.process(&mut buffer, &InputEvents::default(), None, &transport);
 
@@ -353,7 +353,7 @@ fn plugin_observes_the_offline_mode_we_requested() {
             inputs: &in_refs,
             outputs: &mut out_refs,
             num_samples: 512,
-            sample_rate: 48_000.0,
+            sample_rate: tutti_plugin_types::SampleRate::SR_48K,
         };
         let out = inst.process(&mut buffer, &InputEvents::default(), None, &transport);
         if let Some(queue) = out

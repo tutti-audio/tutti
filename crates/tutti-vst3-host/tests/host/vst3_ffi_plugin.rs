@@ -5,7 +5,7 @@
 //! These live here, not in the FFI crate, because the probe is built by this
 //! crate's build script and the FFI crate cannot depend on this one.
 
-use std::path::PathBuf;
+use crate::probe::probe_path;
 use std::sync::Arc;
 use tutti_fixtures::main_thread;
 
@@ -15,17 +15,7 @@ use tutti_vst3_ffi::{
 };
 use vst3::Steinberg::Vst::ProcessSetup;
 
-const PROBE_DIR_BUILT: &str = env!("VST3_PROBE_DIR");
 const BLOCK: usize = 64;
-
-fn probe_path() -> PathBuf {
-    let bundle = std::path::Path::new(PROBE_DIR_BUILT).join("audio-probe.vst3");
-    tutti_plugin_types::bundle::any_module_in_bundle(
-        &bundle,
-        tutti_plugin_types::bundle::ModuleKind::Vst3,
-    )
-    .unwrap_or(bundle)
-}
 
 fn setup() -> ProcessSetup {
     ProcessSetup {

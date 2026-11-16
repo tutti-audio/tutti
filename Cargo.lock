@@ -2668,6 +2668,7 @@ dependencies = [
  "tutti-rt",
  "tutti-shared-plugin",
  "tutti-shared-plugin-vst3-cpp",
+ "tutti-transport",
  "tutti-types",
  "tutti-ump",
 ]
@@ -3382,6 +3383,7 @@ dependencies = [
  "tutti-graph",
  "tutti-plugin-types",
  "tutti-rt",
+ "tutti-types",
  "tutti-ump",
  "tutti-vst2-ffi",
  "tutti-vst2-test-plugin",

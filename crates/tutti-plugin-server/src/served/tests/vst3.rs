@@ -98,7 +98,7 @@ fn activations_seen_by_the_plugin(instance: &mut Vst3Instance) -> u32 {
         inputs: &input_slices,
         outputs: &mut output_slices,
         num_samples: frames,
-        sample_rate: 48_000.0,
+        sample_rate: tutti_plugin_types::SampleRate::SR_48K,
     };
     let ctx = ProcessContext::new();
     let mut out = ProcessOutput::default();
@@ -111,7 +111,7 @@ fn activations_seen_by_the_plugin(instance: &mut Vst3Instance) -> u32 {
         inputs: &input_slices,
         outputs: &mut output_slices,
         num_samples: frames,
-        sample_rate: 48_000.0,
+        sample_rate: tutti_plugin_types::SampleRate::SR_48K,
     };
     instance
         .render(AudioBufferMut::F32(buffer), &ctx, &mut out)
@@ -685,7 +685,7 @@ fn test_vst3_process_f32_silence() {
         inputs: &input_slices,
         outputs: &mut output_slices,
         num_samples,
-        sample_rate: 44100.0,
+        sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
     };
 
     let ctx = tutti_plugin_types::ProcessContext::new();
@@ -722,7 +722,7 @@ fn test_vst3_process_f32_with_note() {
             inputs: &input_slices,
             outputs: &mut output_slices,
             num_samples,
-            sample_rate: 44100.0,
+            sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
         };
 
         let ctx = tutti_plugin_types::ProcessContext::new().midi(&note_on);
@@ -752,7 +752,7 @@ fn test_vst3_process_f32_with_note() {
             inputs: &input_slices,
             outputs: &mut output_slices,
             num_samples,
-            sample_rate: 44100.0,
+            sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
         };
 
         let mut out = tutti_plugin_types::ProcessOutput::default();
@@ -870,7 +870,7 @@ fn test_voxengo_span_process_f64() {
         inputs: &input_slices,
         outputs: &mut output_slices,
         num_samples,
-        sample_rate: 44100.0,
+        sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
     };
 
     let ctx = tutti_plugin_types::ProcessContext::new();
@@ -929,7 +929,7 @@ fn test_voxengo_boogex_process_f64() {
         inputs: &input_slices,
         outputs: &mut output_slices,
         num_samples,
-        sample_rate: 44100.0,
+        sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
     };
 
     let ctx = tutti_plugin_types::ProcessContext::new();
