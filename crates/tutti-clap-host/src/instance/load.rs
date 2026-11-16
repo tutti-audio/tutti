@@ -10,7 +10,7 @@ use crate::types::PluginInfo;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tutti_clap_ffi::{AudioPortInfo, Bundle, DescriptorInfo, LoadError, PortKind, Stage};
-use tutti_plugin_types::{BusChannels, ChannelLayout, EditorPresence};
+use tutti_plugin_types::{BusChannels, ChannelLayout, EditorPresence, PluginVersion};
 use tutti_plugin_types::{Load, MainThreadMarker, MainWorkHandle, Origin};
 use tutti_types::LayoutError;
 
@@ -69,7 +69,7 @@ fn load_failed(bundle_path: &Path, error: LoadError) -> ClapError {
 fn info_of(d: &DescriptorInfo) -> PluginInfo {
     PluginInfo::new(d.id.clone(), d.name.clone())
         .vendor(d.vendor.clone())
-        .version(d.version.clone())
+        .version(PluginVersion::text(d.version.clone()))
         .url(d.url.clone())
         .description(d.description.clone())
         .features(d.features.clone())

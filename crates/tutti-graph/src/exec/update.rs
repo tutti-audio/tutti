@@ -86,7 +86,7 @@ impl Executor {
                 // Frames at the old rate name nothing at the new one.
                 self.clock.history.clear();
                 let ratio = new / old;
-                self.clock.frame = crate::command::rescale(self.clock.frame, ratio);
+                self.clock.frame = self.clock.frame.scaled(ratio);
                 self.clock.play.rescale(ratio);
                 self.inbox.commands.rescale(ratio, c.seq);
             }
@@ -350,12 +350,21 @@ impl Executor {
             std::mem::swap(&mut self.parked, &mut c.parked);
         }
         c.staged = Some(st);
-        // A root crossfade starts with the plan that carries it; a plan that
-        // carries none (a later commit) ends one running.
-        self.root_fade = plan.root_bank().map(|_| RootFadeRun {
-            seq: c.seq,
-            done: 0,
-        });
+        // A root crossfade starts with the plan that carries it, and a plan
+        // that carries none ends one running. A plan that carries the old root
+        // the running plan carries, under the same new root, continues the
+        // crossfade from the frames it has rendered.
+        let continues = |old: &Plan, bank: crate::RootBank| {
+            old.root_id() == plan.root_id() && old.root_bank().is_some_and(|b| b.old == bank.old)
+        };
+        self.root_fade = match (plan.root_bank(), old_plan.as_deref(), self.root_fade) {
+            (Some(bank), Some(old), Some(run)) if continues(old, bank) => Some(run),
+            (Some(_), ..) => Some(RootFadeRun {
+                seq: c.seq,
+                done: 0,
+            }),
+            (None, ..) => None,
+        };
         self.plan = Some(plan);
         c.plan = old_plan;
     }

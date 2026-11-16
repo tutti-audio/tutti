@@ -1149,11 +1149,11 @@ impl<C: Clock> Pool<C> {
             feature = "sampler",
             feature = "soundfont",
             feature = "plugin",
-            feature = "midi-hardware"
+            feature = "midi"
         )),
         expect(
             dead_code,
-            reason = "the readers of the kinds (features `sampler`, `soundfont`, `plugin`, `midi-hardware`) are its callers"
+            reason = "the readers of the kinds (features `sampler`, `soundfont`, `plugin`, `midi`) are its callers"
         )
     )]
     pub(crate) fn handle<K, E>(&self, key: &K) -> Result<E::Handle, HandleError<K>>

@@ -16,6 +16,7 @@ use crate::spec::GraphSpec;
 pub(super) type Resumed = (Plan, Delta, BTreeMap<NodeKey, Box<dyn Node>>, BusLanes);
 
 /// The spec and shapes a commit compiled the running plan from.
+#[derive(Clone)]
 pub(super) struct Committed {
     pub(super) spec: GraphSpec,
     pub(super) shapes: Shapes,

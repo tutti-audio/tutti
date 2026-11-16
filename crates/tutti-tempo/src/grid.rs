@@ -1,4 +1,4 @@
-use tutti_types::{Beat, Bpm, Frame, SampleRate};
+use tutti_types::{Beat, Bpm, Frame, SampleRate, TimelineSegment};
 
 /// The length in frames of a [`Cell`]: how often a ramp's tempo is re-seated.
 ///
@@ -91,7 +91,6 @@ impl Cell {
     /// `start..=end`; outside it the line continues.
     #[must_use]
     pub fn beat_at(&self, frame: Frame, rate: SampleRate) -> Beat {
-        let n = frame.get() as f64 - self.start.get() as f64;
-        Beat(self.beat.get() + n * self.tempo.get() / (60.0 * rate.get()))
+        TimelineSegment::new(self.start, self.beat, self.tempo, rate).beat_at(frame)
     }
 }

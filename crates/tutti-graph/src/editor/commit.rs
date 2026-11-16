@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tutti_curve::declick_frames;
 
 use super::lifecycle::Resume;
-use super::{BusLanes, CommitError, Editor, SentBank, starting};
+use super::{BusLanes, CommitError, Editor, Fading, SentBank, starting};
 use crate::compile::{CompileError, Shapes, compile};
 use crate::exec::Commit;
 use crate::exec::{Opened, StageIn};
@@ -182,7 +182,7 @@ impl Editor {
             }
             return Ok(());
         }
-        let (valid, weights) = self.lower_with_bank()?;
+        let (valid, weights, fading) = self.lower_with_bank()?;
         let (mut plan, mut delta) = compile(
             &valid,
             &self.shapes,
@@ -237,6 +237,7 @@ impl Editor {
             .collect();
         self.placements.clear_fades_and_cuts();
         self.send(plan, delta, units, &weights, None);
+        self.fading = fading;
         self.sync_ranges();
         self.life
             .set_committed(self.spec.clone(), self.shapes.clone());
@@ -248,7 +249,28 @@ impl Editor {
     /// for the `fade`'s length, and the host folds each with its own root's
     /// fold and mixes them by the fade's gains ([`RootBank`]).
     /// `None` (the default) cuts at the commit's block, as does a zero
-    /// duration. Read when a commit is compiled.
+    /// duration. Read when a commit that changes the root is compiled.
+    ///
+    /// A crossfade is one fade of one law and length, counted from the block
+    /// that applies the commit that began it:
+    ///
+    /// - A commit that leaves the root's generation alone continues it: the
+    ///   frames already rendered stay counted, and the old root's channels
+    ///   keep the wiring they had when the fade began, less the sources
+    ///   removed since.
+    /// - A commit that declares the root again ends it at that block and
+    ///   begins another, of the fade set now, from the root that was fading
+    ///   in (at full level) to the newest: the root that was fading out is
+    ///   dropped, as a plan holds two roots at most. That is two steps of
+    ///   `1 - g`, `g` the dropped root's gain at the block: a caller that
+    ///   wants no step declares the new root after [`settle_fades`](Self::settle_fades)
+    ///   reports the running fade over (the session does).
+    /// - A commit that changes the root's width without declaring it again
+    ///   ends the crossfade running as a cut: the old root's channels cannot
+    ///   stand beside a root of another width.
+    ///
+    /// While a crossfade runs the editor holds a clone of the committed spec
+    /// and shapes, the old root's wiring, until it ends.
     pub fn set_root_fade(&mut self, fade: Option<Fade>) {
         self.root_fade = fade.filter(|f| !f.is_cut());
     }
@@ -263,14 +285,24 @@ impl Editor {
     /// fade is set, with the previous root's output channels after the new
     /// root's: the old root's wiring as it was committed, over the nodes that
     /// are still here. Its lanes are static at the weights they had.
-    fn lower_with_bank(&self) -> Result<(ValidGraph, BusLanes), CommitError> {
-        let (Some(fade), Some(was)) = (
-            self.root_fade,
-            self.life
-                .committed()
-                .filter(|c| c.spec.root_id != self.spec.root_id),
-        ) else {
-            return Self::lower_and_validate(&self.spec, &self.shapes);
+    fn lower_with_bank(&self) -> Result<(ValidGraph, BusLanes, Option<Fading>), CommitError> {
+        let plain = || {
+            Self::lower_and_validate(&self.spec, &self.shapes)
+                .map(|(valid, lanes)| (valid, lanes, None))
+        };
+        let committed = self.life.committed();
+        // The crossfade running, when this commit leaves its root alone and
+        // its channels stand.
+        let continuing = self.fading.as_ref().filter(|f| {
+            f.root == self.spec.root_id
+                && committed.is_some_and(|c| c.spec.root_id == self.spec.root_id)
+                && !self.bank.is_some_and(|b| b.ended)
+                && f.bank.base == self.spec.topology.outputs.len()
+        });
+        let (fade, was, published) = match (continuing, self.root_fade, committed) {
+            (Some(f), _, _) => (f.bank.fade, &f.was, true),
+            (None, Some(fade), Some(c)) if c.spec.root_id != self.spec.root_id => (fade, c, false),
+            _ => return plain(),
         };
         let lower = |spec: &GraphSpec, shapes: &Shapes| {
             spec.lowered(shapes)
@@ -280,13 +312,14 @@ impl Editor {
         let before = lower(&was.spec, &was.shapes)?;
         let base = now.spec.topology.outputs.len();
         let old_width = before.spec.topology.outputs.len();
-        let published = self
-            .root_gate
-            .as_ref()
-            .is_none_or(|gate| gate.published(was.spec.root_id, old_width));
+        let published = published
+            || self
+                .root_gate
+                .as_ref()
+                .is_none_or(|gate| gate.published(was.spec.root_id, old_width));
         if base == 0 || old_width == 0 || !published {
             let valid = now.spec.validate().map_err(CommitError::Invalid)?;
-            return Ok((valid, now.weights()));
+            return Ok((valid, now.weights(), None));
         }
         let alive = |source: Source| match source {
             Source::Node(p) => self
@@ -331,16 +364,20 @@ impl Editor {
                 .retain(|id, _| !matches!(id.sink, Sink::Output(c) if usize::from(c) >= base));
         }
         let valid = now.spec.validate().map_err(CommitError::Invalid)?;
-        let valid = if kept {
-            valid.with_root_bank(RootBank {
-                old: was.spec.root_id,
-                base,
-                fade,
-            })
-        } else {
-            valid
+        if !kept {
+            return Ok((valid, now.weights(), None));
+        }
+        let bank = RootBank {
+            old: was.spec.root_id,
+            base,
+            fade,
         };
-        Ok((valid, now.weights()))
+        let fading = Fading {
+            was: was.clone(),
+            root: self.spec.root_id,
+            bank,
+        };
+        Ok((valid.with_root_bank(bank), now.weights(), Some(fading)))
     }
 
     /// Sends a plan compiled elsewhere — against [`base`](Self::base) — with
@@ -375,6 +412,7 @@ impl Editor {
         // caller that lowers it must have).
         let weights = self.lowered().map(|l| l.weights()).unwrap_or_default();
         self.send(plan, delta, units, &weights, None);
+        self.fading = None;
         Ok(())
     }
 
@@ -391,10 +429,23 @@ impl Editor {
     ) {
         self.touch();
         let fades = starting(&delta);
-        self.bank = plan.root_bank().map(|_| SentBank {
-            seq: self.link.next_seq(),
-            ended: false,
+        // A plan that carries the crossfade the last one carried continues
+        // it: the executor keeps its progress, and it ends under the seq that
+        // began it.
+        self.bank = plan.root_bank().map(|bank| {
+            let (old, root) = (bank.old, plan.root_id());
+            self.bank
+                .filter(|b| !b.ended && b.old == old && b.root == root)
+                .unwrap_or(SentBank {
+                    seq: self.link.next_seq(),
+                    old,
+                    root,
+                    ended: false,
+                })
         });
+        if self.bank.is_none() {
+            self.fading = None;
+        }
         let plan = Arc::new(plan);
         let committed = self.life.committed().map(|c| &c.spec);
         let spec = &self.spec;

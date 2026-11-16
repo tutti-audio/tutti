@@ -13,7 +13,7 @@
 //!
 //! - **A map point inside a playing stretch**, at the frame where the beat
 //!   crosses it: the first frame at or after the point's time, by the engine's
-//!   one placement rule ([`first_frame_at_or_after`]), measured from the
+//!   one placement rule ([`TempoView::frames_between`]), measured from the
 //!   stretch's own start (so a seek or a wrap before it is already in the
 //!   stretch's start).
 //! - **A loop wrap**, the same way, at the loop's end.
@@ -49,7 +49,7 @@
 
 use tutti_graph::{Cx, MAX_TRANSPORT_CHANGES, Offset};
 use tutti_tempo::TempoView;
-use tutti_types::{Beat, Samples, Seconds, first_frame_at_or_after};
+use tutti_types::{Beat, Samples, Seconds};
 
 use crate::transport_source::{ProjectTime, Snapshot, SteadyTime, slope, transport_info};
 use tutti_plugin_types::{TransportChange, TransportChanges, TransportInfo};
@@ -132,16 +132,14 @@ impl Stretch {
     /// the playing beat reaches first (the wrap, on a tie). `None` when it is
     /// stopped or has none ahead.
     fn predict(&self, view: &mut TempoView<'_>) -> Option<(usize, Kind)> {
-        let rate = view.rate().get();
         if !self.playing || !self.beat.get().is_finite() {
             return None;
         }
-        let t0 = view.seconds_at(self.beat).get();
+        let start = self.beat;
         let frames_to = |beat: Beat, view: &mut TempoView<'_>| {
-            let ahead = (view.seconds_at(beat).get() - t0) * rate;
             // A change is on a frame after the stretch's own: one that rounds
             // onto the start was taken into it ([`Snapshot::settle`]).
-            usize::try_from(first_frame_at_or_after(ahead).max(1)).ok()
+            usize::try_from(view.frames_between(start, beat).max(1)).ok()
         };
         let points = view.map().points();
         let past = self.beat.get().max(self.told.get());

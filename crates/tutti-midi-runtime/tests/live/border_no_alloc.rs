@@ -10,7 +10,7 @@ use tutti_graph::{
 use tutti_graph::{ForkByClone, NodeKey, Stamp};
 use tutti_midi_runtime::{
     ClockNode, DeviceEpochs, HarmonyNode, LIVE_INLET_CAPACITY, MidiClipNode, MidiIngestNode,
-    MidiKeys, MidiMailbox, MidiOutNode, MpeTransformNode, TimedHarmony, TimedMidiEvent,
+    MidiKeys, MidiOutNode, MpeTransformNode, TimedHarmony, TimedMidiEvent,
 };
 use tutti_types::MaxBlock;
 use tutti_types::{Beat, Bpm, Frame, FrameClock, Moment, SampleRate, Samples};
@@ -84,7 +84,6 @@ fn the_border_nodes_process_without_allocating() {
     exec.process(512, &t, &[], &mut []);
     let _ = out.poll_into(&mut drain);
 
-    let (tx, rx) = MidiMailbox::pair();
     assert_no_alloc::assert_no_alloc(|| {
         for b in 1..200u32 {
             busy(&mut dev, u64::from(b));
@@ -102,10 +101,7 @@ fn the_border_nodes_process_without_allocating() {
                 &[],
                 &mut [],
             );
-            let n = out.poll_into(&mut drain);
-            // Both halves of a mailbox, too.
-            let _ = tx.queue_stamped(&drain[..n.min(4)]);
-            let _ = rx.poll_into(&mut drain);
+            let _ = out.poll_into(&mut drain);
         }
     });
     assert_eq!(out.dropped(), 0);

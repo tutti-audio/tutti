@@ -110,7 +110,9 @@ pub(crate) mod wire;
 /// - **Version 41** adds to a plugin's wiring whether it has a bypass of its own
 ///   and the controller table it declares, to a parameter its role (now a
 ///   `ControlRole`) and its overview mark.
-pub const PROTOCOL_VERSION: u32 = 41;
+/// - **Version 42** writes a descriptor's `version` as a `PluginVersion` (absent, text,
+///   integer or dotted) where it was a string.
+pub const PROTOCOL_VERSION: u32 = 42;
 
 /// Largest control-socket frame body either end will allocate for, in bytes.
 ///

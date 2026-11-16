@@ -7,6 +7,7 @@
 //! opaque [`AuComponentRef`] handle too.
 
 pub use crate::platform::discovery::*;
+use tutti_plugin_types::PluginVersion;
 
 /// High-level classification of an Audio Unit.
 ///
@@ -79,9 +80,9 @@ pub struct AuComponentInfo {
     pub sub_type: u32,
     /// High-level type classification.
     pub component_type: AuType,
-    /// `"major.minor.dot"` from `AudioComponentGetVersion`, or empty if the
-    /// component refused the call.
-    pub version: String,
+    /// `AudioComponentGetVersion` decoded as `0xMMMMmmdd`, or
+    /// [`PluginVersion::Absent`] if the component refused the call.
+    pub version: PluginVersion,
     /// Raw `componentFlags` from the component's description.
     ///
     /// Carried rather than dropped because one bit decides whether the
