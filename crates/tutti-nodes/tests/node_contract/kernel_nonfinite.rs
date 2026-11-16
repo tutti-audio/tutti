@@ -22,7 +22,9 @@ const BLOCK: usize = 64;
 const POISONED: u64 = 4;
 const BLOCKS: u64 = 160;
 
-/// Every kernel node, built fresh.
+/// Every kernel node, built fresh. The filters, the lines, the modulation and the reverbs
+/// latch a non-finite sample without the node's reset; the distortion and the dynamics
+/// recover from one on their own, and their rows hold that.
 fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
     vec![
         (

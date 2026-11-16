@@ -257,7 +257,8 @@ struct Lanes<'a> {
 ///
 /// A [`reset`](Node::reset) and a clone (a fork) start from silence, and the next aim lands
 /// whole, as a fresh node's first does. A block whose output holds a NaN or an infinity is
-/// passed on as rendered and resets the node after it, so nothing non-finite is latched.
+/// passed on as rendered and resets the node after it, its meters back at unity, so nothing
+/// non-finite is latched.
 ///
 /// The gain reduction of each band is a measurement:
 /// [`gain_reduction_db`](Self::gain_reduction_db), or

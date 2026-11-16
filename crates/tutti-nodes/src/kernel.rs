@@ -152,8 +152,8 @@ pub trait Kernel: Clone + Send + 'static {
 ///
 /// A kernel never latches a NaN or an infinity. A block whose output holds one is passed on
 /// as rendered, and the kernel is reset after it, so the next block starts from silence: one
-/// non-finite input sample is heard in at most one block. A kernel fed non-finite input renders
-/// what it renders from it, block by block.
+/// non-finite input sample is heard in at most one block. A kernel fed non-finite input for
+/// longer renders each block from it sample for sample, and resets after each.
 ///
 /// # In a graph
 ///
