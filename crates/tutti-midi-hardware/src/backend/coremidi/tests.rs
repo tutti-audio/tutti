@@ -51,7 +51,7 @@ fn an_unknown_id_does_not_open() {
 fn capability_is_read_from_the_endpoint_not_assumed() {
     // A MIDI-1.0-protocol virtual source: the safe wrapper's plain
     // `virtual_source` is MIDI 1.0 by construction.
-    let client = match Client::new("tutti-cap-test") {
+    let client = match tutti_coremidi_ffi::create_client(|| Client::new("tutti-cap-test")) {
         Ok(c) => c,
         // No CoreMIDI here (sandbox/headless) — nothing to test against.
         Err(_) => return,

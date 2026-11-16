@@ -5,6 +5,7 @@
 //! fresh server is up about five seconds later. `ClientRetry` decides when to
 //! try again; [`create_client`] is the loop that reads the clock and sleeps.
 
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 /// The `OSStatus` `MIDIClientCreate` returns while the MIDI server is exiting.
@@ -39,15 +40,32 @@ pub(crate) enum Retry {
 pub(crate) struct ClientRetry {
     deadline: Instant,
     wait: Duration,
+    windowed: bool,
 }
 
 impl ClientRetry {
     /// A rule for a creation whose first attempt starts at `start`.
-    pub(crate) fn new(start: Instant) -> Self {
+    ///
+    /// `gave_up` is the instant an earlier creation's window ended in failure.
+    /// Within [`RETRY_BOUND`] of it the server is still known to be gone, so this
+    /// creation makes its one attempt and does not retry; after that it gets a
+    /// full window again.
+    pub(crate) fn new(start: Instant, gave_up: Option<Instant>) -> Self {
+        let suppressed = gave_up.is_some_and(|at| start < at + RETRY_BOUND);
         Self {
-            deadline: start + RETRY_BOUND,
+            deadline: if suppressed {
+                start
+            } else {
+                start + RETRY_BOUND
+            },
             wait: FIRST_WAIT,
+            windowed: !suppressed,
         }
+    }
+
+    /// Whether this creation had a retry window (it was not suppressed).
+    pub(crate) fn windowed(&self) -> bool {
+        self.windowed
     }
 
     /// The decision for an attempt that failed with `status` at `now`.
@@ -67,13 +85,17 @@ impl ClientRetry {
 /// Runs `create` until it succeeds, fails with a status other than
 /// `SERVER_GONE`, or `RETRY_BOUND` passes; returns the last status then.
 ///
-/// Every client creation in the process goes through here.
+/// Every client creation in the process goes through here. A window that ends
+/// in failure is remembered process-wide: creations within `RETRY_BOUND` after
+/// it make one attempt each, so a persistent failure costs one wait per window.
 ///
 /// # Errors
 ///
 /// The status of the last attempt.
 pub fn create_client<T>(mut create: impl FnMut() -> Result<T, i32>) -> Result<T, i32> {
-    let mut rule = ClientRetry::new(Instant::now());
+    static GAVE_UP: Mutex<Option<Instant>> = Mutex::new(None);
+    let gave_up = *GAVE_UP.lock().unwrap_or_else(|p| p.into_inner());
+    let mut rule = ClientRetry::new(Instant::now(), gave_up);
     loop {
         let status = match create() {
             Ok(client) => return Ok(client),
@@ -81,7 +103,12 @@ pub fn create_client<T>(mut create: impl FnMut() -> Result<T, i32>) -> Result<T,
         };
         match rule.after(status, Instant::now()) {
             Retry::At(at) => std::thread::sleep(at.saturating_duration_since(Instant::now())),
-            Retry::GiveUp => return Err(status),
+            Retry::GiveUp => {
+                if status == SERVER_GONE && rule.windowed() {
+                    *GAVE_UP.lock().unwrap_or_else(|p| p.into_inner()) = Some(Instant::now());
+                }
+                return Err(status);
+            }
         }
     }
 }
@@ -97,7 +124,7 @@ mod tests {
     #[test]
     fn retries_a_gone_server_with_doubling_waits_capped_at_one_second() {
         let start = Instant::now();
-        let mut rule = ClientRetry::new(start);
+        let mut rule = ClientRetry::new(start, None);
         let mut now = start;
         let mut waits = Vec::new();
         for _ in 0..6 {
@@ -116,7 +143,7 @@ mod tests {
     #[test]
     fn gives_up_at_the_bound_and_clips_the_last_wait_to_it() {
         let start = Instant::now();
-        let mut rule = ClientRetry::new(start);
+        let mut rule = ClientRetry::new(start, None);
         let near = start + RETRY_BOUND - ms(50);
         assert_eq!(
             rule.after(SERVER_GONE, near),
@@ -132,7 +159,7 @@ mod tests {
     #[test]
     fn covers_a_five_second_server_restart() {
         let start = Instant::now();
-        let mut rule = ClientRetry::new(start);
+        let mut rule = ClientRetry::new(start, None);
         let mut now = start;
         while now < start + Duration::from_secs(5) {
             let Retry::At(at) = rule.after(SERVER_GONE, now) else {
@@ -146,7 +173,7 @@ mod tests {
     fn never_retries_another_status() {
         let start = Instant::now();
         for status in [-1, 0, -10839, -10833, -303, -305, i32::MIN, i32::MAX] {
-            let mut rule = ClientRetry::new(start);
+            let mut rule = ClientRetry::new(start, None);
             assert_eq!(rule.after(status, start), Retry::GiveUp, "status {status}");
         }
     }
@@ -160,5 +187,38 @@ mod tests {
         });
         assert_eq!(result, Err(-10839));
         assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn a_creation_within_the_bound_of_a_failed_window_makes_one_attempt() {
+        let start = Instant::now();
+        let gave_up = start;
+        for later in [ms(0), ms(5_000), RETRY_BOUND - ms(1)] {
+            let mut rule = ClientRetry::new(start + later, Some(gave_up));
+            assert!(!rule.windowed());
+            assert_eq!(rule.after(SERVER_GONE, start + later), Retry::GiveUp);
+        }
+    }
+
+    #[test]
+    fn a_creation_after_the_bound_of_a_failed_window_gets_a_full_window() {
+        let start = Instant::now();
+        let mut rule = ClientRetry::new(start + RETRY_BOUND, Some(start));
+        assert!(rule.windowed());
+        assert_eq!(
+            rule.after(SERVER_GONE, start + RETRY_BOUND),
+            Retry::At(start + RETRY_BOUND + ms(100))
+        );
+    }
+
+    #[test]
+    fn create_client_retries_a_gone_server_until_it_answers() {
+        let mut calls = 0;
+        let result = create_client(|| {
+            calls += 1;
+            if calls == 1 { Err(SERVER_GONE) } else { Ok(7) }
+        });
+        assert_eq!(result, Ok(7));
+        assert_eq!(calls, 2);
     }
 }
