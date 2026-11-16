@@ -113,8 +113,11 @@
 // below a struct), which leaves the type undocumented in rustdoc while it looks
 // documented in the source. Nothing else catches that.
 #![forbid(unsafe_code)]
+#![cfg_attr(not(test), no_std)]
 #![deny(missing_docs)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
+
+extern crate alloc;
 
 // `value` is declared first and `#[macro_use]`d so `unit!`, the macro that
 // defines every quantity, is in scope for the modules below — `macro_rules!`
@@ -129,6 +132,7 @@ pub mod value;
 
 // `ranged!` is `#[macro_export]`ed: it is the one way any crate writes a
 // range-checked type, used as `tutti_types::ranged!`.
+mod maths;
 mod ranged;
 
 // `id!` is `#[macro_export]`ed for the same reason: the one way any crate

@@ -126,7 +126,7 @@ impl Frame {
     #[inline]
     #[must_use]
     pub fn nearest(position: f64) -> Frame {
-        Frame::new(position.round() as u64)
+        Frame::new(libm::round(position) as u64)
     }
 
     /// The frame at the same wall-clock time at rate `to`, this one being a

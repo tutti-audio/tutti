@@ -312,7 +312,7 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
     (
         "check-no-std",
         "",
-        "build each no_std crate for a bare-metal target (needs `rustup target add thumbv7em-none-eabihf`)",
+        "build each no_std crate for a bare-metal target (needs `rustup target add aarch64-unknown-none`)",
     ),
     (
         "verify-audio",
@@ -761,11 +761,11 @@ impl Planner<'_> {
 }
 
 /// A target with no `std`: a crate that builds for it uses only `core` and `alloc`.
-const NO_STD_TARGET: &str = "thumbv7em-none-eabihf";
+const NO_STD_TARGET: &str = "aarch64-unknown-none";
 
 /// The `#![no_std]` crates, each with the features (besides `std`) built on top of
 /// the bare build. A crate that becomes `no_std` is one line here.
-const NO_STD_CRATES: &[(&str, &[&str])] = &[("tutti-ump", &["serde"])];
+const NO_STD_CRATES: &[(&str, &[&str])] = &[("tutti-types", &["serde"]), ("tutti-ump", &["serde"])];
 
 const CHECK_FEATURES: &[&str] = &[
     r#"cargo clippy --locked -p tutti-cpal --features capture --all-targets -- -D warnings"#,

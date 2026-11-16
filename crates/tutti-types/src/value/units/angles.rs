@@ -45,7 +45,7 @@ impl Azimuth {
     #[inline]
     #[must_use]
     pub fn wrap(self) -> Azimuth {
-        let r = (self.0 + 180.0).rem_euclid(360.0);
+        let r = crate::maths::rem_euclid_f32(self.0 + 180.0, 360.0);
         Azimuth((if r >= 360.0 { 360.0_f32.next_down() } else { r }) - 180.0)
     }
 
@@ -229,7 +229,7 @@ impl Phase {
         } else if (1.0..2.0).contains(&v) {
             Phase(v - 1.0)
         } else {
-            let r = v.rem_euclid(1.0);
+            let r = crate::maths::rem_euclid_f32(v, 1.0);
             Phase(if r >= 1.0 { 1.0_f32.next_down() } else { r })
         }
     }
@@ -384,11 +384,11 @@ impl Radians {
         // in this chain, and the vocoder's per-bin wraps wait on it. Every
         // `f32` input gives the same bits as dividing (swept).
         let s = if x.abs() < 16_777_216.0 {
-            x - TAU * ((x + PI) * (1.0 / TAU)).floor()
+            x - TAU * libm::floor((x + PI) * (1.0 / TAU))
         } else {
             // `fmod` is exact, so a huge `x` costs one libm call and no
             // accumulated rounding beyond `TAU`'s own.
-            let r = x.rem_euclid(TAU);
+            let r = crate::maths::rem_euclid_f64(x, TAU);
             if r >= PI { r - TAU } else { r }
         };
         // The true `pi` is a hair under the `f32` one, so a value just below
