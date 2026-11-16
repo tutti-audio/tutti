@@ -35,8 +35,8 @@
 //!
 //! Anything that renders, decodes, or opens a device. It is the **root leaf** —
 //! Engine-free, depending on no workspace crate (its outside
-//! dependencies are `atomic_float` and `libm`, plus `serde`
-//! behind its feature) and `#![forbid(unsafe_code)]`. The lock-free and `unsafe`
+//! dependencies are `atomic_float`, `libm` and `thiserror`, plus `serde`
+//! behind its feature), `no_std` with `alloc`, and `#![forbid(unsafe_code)]`. The lock-free and `unsafe`
 //! runtime primitives, the graph runtime, the engine, the device and the file
 //! codecs are other crates'. The exception is `Mint`, a bare atomic counter:
 //! it has no protocol to model, like `Param` and `AtomicSampleRate`, so it
