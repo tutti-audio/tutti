@@ -78,6 +78,7 @@ fn each_setting_matches_its_row_of_table_6() {
     );
 }
 
+/// Spec: m2-121/5.1.2#5
 #[test]
 fn a_value_falls_in_the_range_whose_ends_it_borders() {
     // Both ends of every range of Table 6, and each discrete value, read back.

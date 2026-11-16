@@ -22,6 +22,7 @@ fn the_single_channel_profile_id_is_7e_20_02_01_01() {
     );
 }
 
+/// Spec: m2-118/3.3#1
 #[test]
 fn the_function_block_profile_is_addressed_to_7f() {
     // M2-118 §3.3: Device ID 0x7F in every Profile Configuration message.

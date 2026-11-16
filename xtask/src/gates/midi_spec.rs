@@ -1196,7 +1196,7 @@ mod tests {
     fn an_appendix_heading_may_end_its_letter_in_a_dot() {
         let text = doc(&[
             TOC,
-            "1 Alpha\nA frob shall spin.\nAppendix A. It is so.\n\nAppendix A : Table\nA bar may ring.\n3. Item\nA baz should hum.\n",
+            "1 Alpha\nA frob shall spin.\nAppendix A. It is so.\n\nAppendix A. Table\nA bar may ring.\n3. Item\nA baz should hum.\n",
             "",
             "",
         ]);
@@ -1208,6 +1208,21 @@ mod tests {
                 ("m2-104/a#1", "permitted"),
                 ("m2-104/a#2", "recommended")
             ]
+        );
+    }
+
+    #[test]
+    fn an_appendix_heading_may_put_a_space_before_its_colon() {
+        let text = doc(&[
+            TOC,
+            "1 Alpha\nA frob shall spin.\n\nAppendix A : Table\nA bar may ring.\n",
+            "",
+            "",
+        ]);
+        let items = keyword_items(&classify(&clean(&text), &M2_104).unwrap(), &M2_104);
+        assert_eq!(
+            ids(&items),
+            [("m2-104/1#1", "required"), ("m2-104/a#1", "permitted")]
         );
     }
 
