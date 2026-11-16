@@ -428,10 +428,10 @@ pub mod session {
     };
     #[cfg(feature = "plugin")]
     pub use tutti_session::{
-        EditorView, GiveUp, HangPolicy, HostPluginError, LoadedPlugin, MainPlugin, MainSession,
-        ParamGesture, PluginCause, PluginEntry as PoolPluginEntry, PluginPorts, PortsRefusal,
-        Recovery, RecoveryAction, RecoveryEvent, RecoveryFailure, RecoveryPolicy, ReloadCause,
-        StateJobError, StateJobFailed, StateRestore, StateView,
+        EditorView, GiveUp, HangPolicy, LoadedPlugin, MainPlugin, MainSession, ParamGesture,
+        PluginCause, PluginEntry as PoolPluginEntry, PluginPorts, PortsRefusal, Recovery,
+        RecoveryAction, RecoveryEvent, RecoveryFailure, RecoveryPolicy, ReloadCause, StateJobError,
+        StateJobFailed, StateRestore, StateView,
     };
     #[cfg(feature = "midi")]
     pub use tutti_session::{

@@ -802,7 +802,7 @@ impl<C: Clock> SessionBuilder<C> {
     /// path ([`Session::add_pooled_plugin`](crate::Session::add_pooled_plugin)). It does not
     /// cover an in-process VST2 plugin (its crash takes the process, and a
     /// hang in it is not observed), nor one a host inserted itself with
-    /// `Graph::insert_plugin` or `Graph::host_plugin` (the session does not
+    /// `Graph::insert_plugin` (the session does not
     /// know its path): those are removed or left as before.
     #[cfg(feature = "plugin")]
     #[must_use]

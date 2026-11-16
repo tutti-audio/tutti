@@ -918,50 +918,6 @@ impl Graph {
         (Key::new(node), rebinder)
     }
 
-    /// Hosts a plugin the host inserted itself (an in-process plugin, a
-    /// wrapper around one): `handle` gets the session's health watch,
-    /// snapshots and render mode at `node`, as
-    /// [`Session::add_pooled_plugin`](crate::Session::add_pooled_plugin)'s do. Its latency
-    /// is whatever its node's shape declared at insert. Returns the node's
-    /// key as a plugin's, [`Key<PluginNode>`](crate::PluginNode).
-    ///
-    /// `plugin` is which plugin it is, which the handle does not know (the
-    /// file it came from): the one the host opened, and the ref its states
-    /// are saved under ([`Plugin::state`](crate::Plugin::state)).
-    ///
-    /// A host that binds a plugin itself (`PluginClient::bind`) gives it a
-    /// reader of the session's tempo map, `session.transport().settings
-    /// .tempo_reader()`, so the plugin is told the project's tempo; this
-    /// method binds nothing.
-    ///
-    /// # Errors
-    ///
-    /// [`HostPluginError::NoSuchNode`](crate::HostPluginError::NoSuchNode) when
-    /// `node` is not in the graph;
-    /// [`HostPluginError::AlreadyHosted`](crate::HostPluginError::AlreadyHosted)
-    /// when it already hosts a plugin (an in-process plugin's record is freed on
-    /// the main thread, through the graveyard, never replaced where it stands). Nothing
-    /// is hosted on an error.
-    #[cfg(feature = "plugin")]
-    pub fn host_plugin(
-        &mut self,
-        node: impl Into<NodeKey>,
-        handle: tutti_plugin_host::PluginHandle,
-        plugin: tutti_plugin::catalog::PluginRef,
-    ) -> Result<Key<crate::PluginNode>, crate::HostPluginError> {
-        let node = node.into();
-        if !self.nodes.contains_key(&node) {
-            return Err(crate::NoSuchNode::new(node).into());
-        }
-        if self.plugins.contains_key(&node) {
-            return Err(crate::HostPluginError::AlreadyHosted(node));
-        }
-        self.plugins
-            .insert(node, crate::plugin::HostedPlugin::new(handle, plugin));
-        self.write_own_bypass(node);
-        Ok(Key::new(node))
-    }
-
     /// Swap the plugin at `node` for `client`, as [`replace`](Self::replace)
     /// swaps any node: crossfading when the running node's shape fits the
     /// bound plugin's, else a plain swap at the same key. Refused, handing
