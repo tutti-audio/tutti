@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, ThreadId};
 
 use tutti_plugin_types::MainWork;
-use tutti_session::{Declared, DetachedSession, Job, Life, Load, PoolEntry, RetryError, Session};
+use tutti_session::{Declared, DetachedSession, Life, Load, PoolEntry, RetryError, Session, Task};
 use tutti_types::SampleRate;
 
 /// What the worker hands the main stage: it says where it is dropped.
@@ -59,7 +59,7 @@ fn session_with_output() -> (
     Arc<Mutex<Option<ThreadId>>>,
     Arc<AtomicBool>,
 ) {
-    let held: Arc<Mutex<Vec<Job>>> = Arc::default();
+    let held: Arc<Mutex<Vec<Task>>> = Arc::default();
     let spawned = Arc::clone(&held);
     let mut session = Session::builder()
         .spawn_with(move |job| spawned.lock().unwrap().push(job))
@@ -123,7 +123,7 @@ impl PoolEntry for Dual {
         let made = move || {
             if fail.load(Ordering::SeqCst) {
                 Err(tutti_session::LoadError::Job(
-                    tutti_session::JobFailed::Dropped,
+                    tutti_session::WorkerError::Dropped,
                 ))
             } else {
                 Ok(Arc::new(1))
@@ -142,8 +142,8 @@ impl PoolEntry for Dual {
     }
 }
 
-fn held_session() -> (DetachedSession, Arc<Mutex<Vec<Job>>>) {
-    let held: Arc<Mutex<Vec<Job>>> = Arc::default();
+fn held_session() -> (DetachedSession, Arc<Mutex<Vec<Task>>>) {
+    let held: Arc<Mutex<Vec<Task>>> = Arc::default();
     let spawned = Arc::clone(&held);
     let session = Session::builder()
         .spawn_with(move |job| spawned.lock().unwrap().push(job))
@@ -152,8 +152,8 @@ fn held_session() -> (DetachedSession, Arc<Mutex<Vec<Job>>>) {
     (session, held)
 }
 
-fn run_held(held: &Arc<Mutex<Vec<Job>>>) -> usize {
-    let jobs: Vec<Job> = held.lock().unwrap().drain(..).collect();
+fn run_held(held: &Arc<Mutex<Vec<Task>>>) -> usize {
+    let jobs: Vec<Task> = held.lock().unwrap().drain(..).collect();
     let count = jobs.len();
     for job in jobs {
         job.run();

@@ -460,9 +460,9 @@ pub use tutti_session::{
 #[cfg(feature = "session")]
 pub use tutti_session::{
     Clock, ConnectError, Edge, EventInPort, EventOutPort, EventTapPort, HeardOpen, HeardTapError,
-    InPort, Job, JobFailed, Key, NoSuchNode, Offline, OfflineSession, OutPort, Phase, Playhead,
-    RealTime, Root, Session, SessionBuilder, SessionEvent, SystemClock, SystemSession,
-    TypedParamRef, Workers,
+    InPort, Job, JobId, JobKind, JobStatus, Key, Landed, NoSuchNode, Offline, OfflineSession,
+    OutPort, Phase, Playhead, RealTime, Root, Session, SessionBuilder, SessionEvent, SystemClock,
+    SystemSession, Task, TypedParamRef, WaitError, WorkerError, Workers,
 };
 #[cfg(all(feature = "session", feature = "device"))]
 pub use tutti_session::{
