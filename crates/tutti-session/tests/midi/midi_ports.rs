@@ -25,7 +25,7 @@ const RATE: f64 = 48_000.0;
 fn session() -> (Session, FakeCounters) {
     let (backend, fake) = FakeBackend::build_with(vec![], vec![], usize::MAX);
     let s = Session::builder()
-        .midi_hardware_over(backend)
+        .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareOptions::new())
         .sample_rate(SampleRate::of(RATE))
         .build()
         .expect("builds");

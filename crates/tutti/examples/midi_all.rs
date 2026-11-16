@@ -14,22 +14,21 @@
 //! CI runs it as a test (`test = true`).
 //!
 //! **Not covered here:** MIDI Time Code out, and the MIDI-CI session
-//! ([`SessionBuilder::midi_ci`](tutti::SessionBuilder::midi_ci) and the peers a
+//! ([`MidiHardwareOptions::ci`](tutti::midi::MidiHardwareOptions::ci) and the peers a
 //! [`MidiInput`](tutti::midi::MidiInput) lists), which needs a peer device.
 
 use tutti::midi::{
-    self, AddedInstrument, Message, MidiChannel, MidiFile, MidiGroup, MidiRouteRule, NoteNumber,
-    NoteVelocity, TakePlacement, Tick, Track,
+    self, AddedInstrument, Message, MidiChannel, MidiFile, MidiGroup, MidiHardwareOptions,
+    MidiRouteRule, NoteNumber, NoteVelocity, TakePlacement, Tick, TicksPerQuarterNote, Track, U7,
+    Voice1,
 };
 use tutti::midi_file::{FileEvent, SmfDivision, SmfFormat};
 use tutti::midi_protocol::{MpeMode, MpeZoneConfig, MpeZones, PitchBendSensitivity};
 use tutti::polysynth::{PolySynth, SynthConfig};
-use tutti::ump::{TicksPerQuarterNote, U7};
 use tutti::{
     Beat, ChannelLayout, Error, EventCapacity, Frame, InterleavedMut, MaxBlock, SampleRate,
     Samples, Session, SessionEvent, Stamp,
 };
-use tutti_ump::Voice1;
 
 const RATE: SampleRate = SampleRate::SR_48K;
 const BLOCK: usize = 512;
@@ -56,7 +55,7 @@ fn session() -> Result<Session, Error> {
     let build = |hardware: bool| {
         let builder = Session::builder().midi_groups(MidiGroup::of(1));
         let builder = if hardware {
-            builder.midi_hardware()
+            builder.midi_hardware(MidiHardwareOptions::new())
         } else {
             builder
         };

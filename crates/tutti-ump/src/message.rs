@@ -988,7 +988,7 @@ pub enum Flex {
     },
 }
 
-/// Set Time Signature fields (§7.5.4).
+/// Flex Data Set Time Signature fields (§7.5.4).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FlexTimeSignature {
     /// The numerator field.

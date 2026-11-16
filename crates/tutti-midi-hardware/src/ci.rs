@@ -16,13 +16,11 @@
 //! device is started, and the port copies no SysEx for MIDI-CI, until the app
 //! says who it is, with the id it registered. It reaches every input (a device
 //! starts at the first poll after the input's negotiation settled and any
-//! Identity Request in progress has ended); disabling ends every running device,
-//! sending each an Invalidate MUID (M2-101 §5.9 lists a shutdown among its
-//! reasons) and reporting its peers as lost.
+//! Identity Request in progress has ended).
 //!
 //! # When it ends
 //!
-//! Besides a disable, a device ends when its Group is no
+//! A device ends when its Group is no
 //! longer called for: a settled Endpoint whose Function Block changes (the
 //! Connection keeps hearing them unless the Endpoint declared them static)
 //! is read again, and the Groups recomputed. A Group that stays keeps its
@@ -78,7 +76,7 @@
 //! ([`MidiSession::set_profile`](crate::MidiSession::set_profile)) is queued
 //! and started by the next poll, which has the time its wait counts from. When
 //! the peer is lost (an Invalidate MUID, a collision, a changed MUID of the
-//! device, MIDI-CI disabled or its Group ending) its Initiator and Profiles go
+//! device or its Group ending) its Initiator and Profiles go
 //! and [`ProfilesChange::Dropped`] says so; closing the input reports nothing, as
 //! for peers.
 //!
@@ -145,9 +143,8 @@
 //!   numbers. A Group whose stream cannot be seeded starts no device; the
 //!   failure is reported once until it starts
 //!   ([`Polled::CiNotStarted`](crate::Polled::CiNotStarted); a Group that
-//!   leaves the Groups and returns, or MIDI-CI is disabled and enabled again, is
-//!   reported again) and
-//!   the Group is tried again at every poll while MIDI-CI is enabled.
+//!   leaves the Groups and returns is reported again) and
+//!   the Group is tried again at every poll.
 //!
 //! Time is an argument: nothing here reads a clock.
 
@@ -304,7 +301,7 @@ pub enum CiChange {
     /// what it holds now.
     Updated(CiPeer),
     /// The peer is gone: it was invalidated, collided, went with the device's
-    /// own MUID (which a collision changes), or MIDI-CI was disabled.
+    /// own MUID (which a collision changes).
     Lost,
 }
 
@@ -360,8 +357,7 @@ struct Running {
     store: Arc<Mutex<ResourceStore>>,
     /// The Groups whose device could not start and was reported: reported once
     /// until it starts, tried again at every poll. A Group that leaves the
-    /// Groups and returns, or MIDI-CI is disabled and enabled again, is reported
-    /// again.
+    /// Groups and returns is reported again.
     unstarted: Vec<MidiGroup>,
 }
 
@@ -450,10 +446,9 @@ impl Ci {
         enabled && (!self.groups.is_empty() || self.running.is_some())
     }
 
-    /// One step at `now`, with the identity the app enabled MIDI-CI with, if it
-    /// did: ends the devices that run when it is none, starts
-    /// them if they are to run and do not, else hands the running ones what the
-    /// port heard and the time. What they send goes out on `out`. Returns the
+    /// One step at `now`, with the identity the session runs MIDI-CI with, if it
+    /// does: starts the devices if they are to run and do not, else hands the
+    /// running ones what the port heard and the time. What they send goes out on `out`. Returns the
     /// peers' changes.
     pub(crate) fn poll(
         &mut self,
@@ -464,14 +459,6 @@ impl Ci {
         out: &mut OpenOutput,
     ) -> CiChanges {
         let mut changes = CiChanges::default();
-        if self
-            .running
-            .as_ref()
-            .is_some_and(|running| enabled != Some(running.identity))
-            && let Some(running) = self.running.take()
-        {
-            running.stop(out, &mut changes);
-        }
         if !Arc::ptr_eq(&self.store, store) {
             self.store = Arc::clone(store);
             if let Some(running) = &mut self.running {
@@ -1346,7 +1333,8 @@ mod tests {
             tutti_graph::EventCapacity::of(64),
             Duration::ZERO,
         );
-        let session = MidiSession::open_over(backend, inlets, None).unwrap();
+        let session =
+            MidiSession::open_over(backend, inlets, crate::MidiHardwareOptions::new()).unwrap();
         counters.plug(endpoint(7, "Wire"), PortDirection::Duplex);
         let id = session.outputs().first().expect("the device").id.clone();
         (session.connect_output(&id).unwrap(), counters)
@@ -1672,7 +1660,8 @@ mod tests {
             tutti_graph::EventCapacity::of(64),
             Duration::ZERO,
         );
-        let session = MidiSession::open_over(backend, inlets, None).unwrap();
+        let session =
+            MidiSession::open_over(backend, inlets, crate::MidiHardwareOptions::new()).unwrap();
         counters.plug(endpoint(7, "Wire"), PortDirection::Duplex);
         session.outputs().first().expect("the device").id.clone()
     }

@@ -158,8 +158,8 @@ fn play_to_file(
 /// Two bars: a note on each beat, 120 BPM for the first four beats and 60
 /// for the last four, as a file with a tempo map.
 fn phrase(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    use tutti::midi::{TicksPerQuarterNote, U7};
     use tutti::midi_file::{Meta, SmfDivision, SmfFormat};
-    use tutti::ump::{TicksPerQuarterNote, U7};
     const TPQ: u16 = 480;
     const DIVISION: TicksPerQuarterNote = TicksPerQuarterNote::of(TPQ);
     const SMF_DIVISION: SmfDivision = SmfDivision::of(TPQ);

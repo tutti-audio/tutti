@@ -100,7 +100,7 @@
 //! ```rust,no_run
 //! use std::sync::Arc;
 //! use tutti_midi_runtime::InputInlets;
-//! use tutti_midi_hardware::{InputTiming, MidiSession};
+//! use tutti_midi_hardware::{InputTiming, MidiHardwareOptions, MidiSession};
 //! use tutti_graph::Offset;
 //! use tutti_fixtures::midi;
 //! use tutti_ump::{MidiChannel, NoteVelocity};
@@ -108,7 +108,7 @@
 //! // The inlets inbound events land in (1024 events each, placed 10 ms after
 //! // they arrive), then a session over this platform's backend.
 //! let inlets = InputInlets::new(tutti_graph::EventCapacity::of(1024), std::time::Duration::from_millis(10));
-//! let mut session = MidiSession::open(Arc::clone(&inlets), None)?;
+//! let mut session = MidiSession::open(Arc::clone(&inlets), MidiHardwareOptions::new())?;
 //!
 //! // The devices present now; capability (protocol, function blocks) is read from
 //! // the OS.
@@ -276,7 +276,7 @@ pub use profiles::{
     ProfileSwitch, ProfilesChange, Whole, WholeProfile,
 };
 pub use properties::{PropertyAsk, PropertyCall, PropertyChange, PropertyError, PropertyPeer};
-pub use session::{Connected, DeviceQuery, MidiSession, Polled};
+pub use session::{Connected, DeviceQuery, MidiHardwareOptions, MidiSession, Polled};
 pub use stream::{Basis, DeviceStream, InputTiming};
 pub use virtual_endpoint::{VirtualDestination, VirtualProtocol, VirtualSource, VirtualSpec};
 

@@ -63,7 +63,14 @@ fn session_over_ci(
     let (backend, counters) = FakeBackend::build_with(vec![], vec![], usize::MAX);
     let inlets =
         tutti_midi_runtime::InputInlets::new(tutti_graph::EventCapacity::of(64), Duration::ZERO);
-    let session = MidiSession::open_over(backend, inlets, ci).unwrap();
+    let session = MidiSession::open_over(
+        backend,
+        inlets,
+        ci.map_or(crate::MidiHardwareOptions::new(), |identity| {
+            crate::MidiHardwareOptions::new().ci(identity)
+        }),
+    )
+    .unwrap();
     let mut info = endpoint(7, "Wire");
     info.capability = os;
     counters.plug(info, direction);

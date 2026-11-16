@@ -643,7 +643,7 @@ fn hot_plug_session() -> (Session, tutti_midi_hardware::test_support::FakeCounte
     let (backend, fake) =
         tutti_midi_hardware::test_support::FakeBackend::build_with(vec![], vec![], usize::MAX);
     let s = Session::builder()
-        .midi_hardware_over(backend)
+        .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareOptions::new())
         .sample_rate(SampleRate::of(RATE))
         .build()
         .expect("builds");
@@ -658,8 +658,10 @@ fn hot_plug_session_ci(
     let (backend, fake) =
         tutti_midi_hardware::test_support::FakeBackend::build_with(vec![], vec![], usize::MAX);
     let s = Session::builder()
-        .midi_hardware_over(backend)
-        .midi_ci(identity)
+        .midi_hardware_over(
+            backend,
+            tutti_midi_hardware::MidiHardwareOptions::new().ci(identity),
+        )
         .sample_rate(SampleRate::of(RATE))
         .build()
         .expect("builds");
@@ -732,7 +734,7 @@ fn keyboards() -> (
         usize::MAX,
     );
     let mut s = Session::builder()
-        .midi_hardware_over(backend)
+        .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareOptions::new())
         .sample_rate(SampleRate::of(RATE))
         .build()
         .expect("builds");
@@ -1599,13 +1601,15 @@ fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {
     let (backend, fake) =
         tutti_midi_hardware::test_support::FakeBackend::build_with(vec![], vec![], usize::MAX);
     let mut s = Session::builder()
-        .midi_hardware_over(backend)
-        .midi_ci(tutti_ump::DeviceIdentity {
-            manufacturer: tutti_ump::ManufacturerId::NON_COMMERCIAL,
-            family: [tutti_ump::U7::of(1); 2],
-            model: [tutti_ump::U7::of(2); 2],
-            revision: [tutti_ump::U7::of(3); 4],
-        })
+        .midi_hardware_over(
+            backend,
+            tutti_midi_hardware::MidiHardwareOptions::new().ci(tutti_ump::DeviceIdentity {
+                manufacturer: tutti_ump::ManufacturerId::NON_COMMERCIAL,
+                family: [tutti_ump::U7::of(1); 2],
+                model: [tutti_ump::U7::of(2); 2],
+                revision: [tutti_ump::U7::of(3); 4],
+            }),
+        )
         .sample_rate(SampleRate::of(RATE))
         .build()
         .expect("builds");

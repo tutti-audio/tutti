@@ -417,7 +417,7 @@ mod hardware {
     fn session() -> (Session, FakeCounters) {
         let (backend, fake) = FakeBackend::build_with(vec![], vec![], usize::MAX);
         let s = Session::builder()
-            .midi_hardware_over(backend)
+            .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareOptions::new())
             .sample_rate(SampleRate::SR_48K)
             .build()
             .expect("builds");
@@ -469,19 +469,12 @@ mod hardware {
         assert_eq!(out.presence(), Presence::Closed);
     }
 
-    /// **A session with no OS layer lists nothing and refuses by name**: the
-    /// MIDI-CI call fails with its own error, and an entry fails to load.
+    /// **A session with no OS layer lists nothing**; an entry naming a device
+    /// fails to load by name (`midi_ports`).
     #[test]
-    fn a_session_with_no_os_layer_refuses_by_name() {
+    fn a_session_with_no_os_layer_lists_nothing() {
         let mut bare = offline();
         assert!(bare.midi().devices().is_empty());
-        let refused = bare.midi().disable_ci().unwrap_err();
-        assert!(matches!(
-            refused,
-            MidiError::Port(tutti_session::MidiPortError::NoHardware)
-        ));
-        let session_error: tutti_session::Error = refused.into();
-        assert!(matches!(session_error, tutti_session::Error::Midi(_)));
     }
 
     /// **A saved device is bound at load when it is the one, and fails with its

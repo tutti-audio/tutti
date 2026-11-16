@@ -109,7 +109,6 @@
 //! | `tutti::dsp` | `tutti-dsp` | real FFT, windows, filters, dynamics, convolution, delay, reverb | `dsp` |
 //! | `tutti::measure` | `tutti-measure` | waveform, onsets, pitch, loudness, correlation, spectra, STFT | `dsp` |
 //! | `tutti::modulation` | `tutti-modulation` | modulation sources, routes and the compiler to per-param control programs | `modulation` |
-//! | `tutti::ump` | `tutti-ump` | the Universal MIDI Packet and its decoded `Message`, `Midi1Parser` for MIDI 1.0 bytes | `midi` |
 //! | `tutti::midi_protocol` | `tutti-midi-protocol` | MIDI 1.0 to 2.0 translation, MPE zones | `midi` |
 //! | `tutti::midi_runtime` | `tutti-midi-runtime` | MIDI graph nodes, Beat Clock and MTC sync, JR timestamps, MPE ingest | `midi` |
 //! | `tutti::midi_file` | `tutti-midi-file` | Standard MIDI File and MIDI 2.0 Clip File codecs | `midi` |
@@ -136,7 +135,7 @@
 //! - `audio-io` — mic capture and recording (implies `io`; the capture stream
 //!   itself needs `device`).
 //! - `export` — `tutti::export` (implies `encode-wav`).
-//! - `midi` — `tutti::midi`, `tutti::ump`, `tutti::midi_protocol`, `tutti::midi_runtime`, `tutti::midi_file`. `crates/tutti/examples/midi_all.rs` uses every piece together, offline.
+//! - `midi` — `tutti::midi`, `tutti::midi_protocol`, `tutti::midi_runtime`, `tutti::midi_file`. `crates/tutti/examples/midi_all.rs` uses every piece together, offline.
 //! - `midi-hardware` — `tutti::midi_hardware` (implies `midi`).
 //! - `synth`, `soundfont`, `sampler`, `dsp`, `modulation` — the
 //!   matching module (`dsp` gives both `tutti::dsp` and `tutti::measure`). `soundfont` implies `midi`; `sampler` implies `decode-wav`.
@@ -282,11 +281,6 @@ pub use tutti_modulation as modulation;
 
 // --- midi -------------------------------------------------------------------
 
-/// The Universal MIDI Packet and its decoded messages (`tutti-ump`): `Ump`,
-/// `Message`, `Ump::decode`, `Midi1Parser`. Feature `midi`.
-#[cfg(feature = "midi")]
-pub use tutti_ump as ump;
-
 /// MIDI 1.0 to MIDI 2.0 translation and the MPE zone types
 /// (`tutti-midi-protocol`). Feature `midi`.
 #[cfg(feature = "midi")]
@@ -305,7 +299,7 @@ pub use tutti_midi_file as midi_file;
 
 /// The names of the common MIDI path in one place:
 /// a file (`MidiFile`, `Track`, `Tick`), a message (`Message`, `Ump`,
-/// `MidiChannel`, `MidiGroup`, `NoteNumber`, `NoteVelocity`), a timed event, the keys
+/// `MidiChannel`, `MidiGroup`, `NoteNumber`, `NoteVelocity`, `Voice1`, `SysexAssembler`, `Midi1Parser`), a timed event, the keys
 /// that play an instrument or a live input (`MidiKeys`),
 /// the session's route rule, events and errors (`MidiRouteRule`, `MidiReport`,
 /// `midi::Error`), a host's own output (`midi_sink`, `MidiSink`), and under `midi-hardware` a device (`DeviceId`,
@@ -313,15 +307,17 @@ pub use tutti_midi_file as midi_file;
 /// `MidiInput`, `MidiOutput`) and what an open one said of itself (`Learned`, `SavedDevice`, `Match`), and the Profiles
 /// its MIDI-CI peers support and how to switch one (`PeerProfiles`,
 /// `ListedProfile`, `ProfileSwitch`, `ProfilesChange`). The
-/// lower layers (`Translator`, `Narrower`, `SysexAssembler`, `ClockMap`) are
-/// by path through [`ump`], [`midi_protocol`] and [`midi_runtime`]; the
+/// lower layers (`Translator`, `Narrower`, `ClockMap`) are
+/// by path through [`midi_protocol`] and [`midi_runtime`]; the
 /// MIDI-CI codec is `tutti-midi-device`'s. Feature `midi`.
 #[cfg(feature = "midi")]
 pub mod midi {
     pub use tutti_midi_file::{FileEvent, Meta, MidiFile, SmfFormat, Tick, Track};
     pub use tutti_midi_runtime::{MidiKeys, TimedMidiEvent};
     pub use tutti_ump::{
-        CCNumber, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, U7, U14, Ump,
+        Address, CCNumber, DeviceIdentity, ManufacturerId, Message, Midi1Parser, MidiChannel,
+        MidiGroup, NoteNumber, NoteVelocity, Protocol, StreamConfig, SysexAssembler,
+        TicksPerQuarterNote, U7, U14, Ump, Voice1,
     };
 
     /// The session's one MIDI error (`tutti_session::MidiError`): each cause
@@ -341,8 +337,9 @@ pub mod midi {
     pub use tutti_midi_device::{DeviceId, DeviceInfo, Learned, Match, SavedDevice};
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_hardware::{
-        ChannelCount, ChannelProfile, CiChange, CiPeerInfo, DeviceQuery, ListedProfile, PeerId,
-        PeerProfiles, ProfileError, ProfileSwitch, ProfilesChange, Whole, WholeProfile,
+        ChannelCount, ChannelProfile, CiChange, CiPeerInfo, DeviceQuery, ListedProfile,
+        MidiHardwareOptions, PeerId, PeerProfiles, ProfileError, ProfileSwitch, ProfilesChange,
+        Whole, WholeProfile,
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
     pub use tutti_session::{

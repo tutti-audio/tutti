@@ -524,7 +524,7 @@ fn midi_ci_is_off_by_default() {
         received(&wire).is_empty(),
         "a block that declares MIDI-CI, unasked"
     );
-    assert_eq!(wire.session.ci_identity(), None);
+    assert_eq!(wire.session.options().ci, None);
 
     use tutti_midi_device::{INQUIRY_ATTEMPTS, INQUIRY_TIMEOUT};
     let mut wire = midi1_wire();
@@ -549,58 +549,6 @@ fn midi_ci_is_off_by_default() {
         0,
         "the copy is off"
     );
-}
-
-/// Disabling sends each device's Invalidate MUID for its own MUID (§5.9),
-/// reports its peers lost, stops the copy and answers nothing after.
-#[test]
-fn disabling_ends_midi_ci_with_an_invalidate_muid_and_the_loss_of_its_peers() {
-    let (mut wire, ours) = midi1_running();
-    assert_eq!(wire.session.ci_identity(), Some(identity()));
-    say(
-        &wire,
-        GROUP_0,
-        &CiMessage::DiscoveryReply {
-            header: CiHeader::new(peer()),
-            to: ours,
-            data: peer_data(),
-        },
-        40,
-    );
-    let _ = polled(&mut wire, 50);
-    assert_eq!(wire.session.ci_peers(&wire.id).len(), 1);
-
-    wire.session.disable_ci();
-    let ended = polled(&mut wire, 60);
-    assert!(
-        matches!(
-            ended.as_slice(),
-            [Polled::Ci(_, who, CiChange::Lost)] if *who == peer_id()
-        ),
-        "{ended:?}"
-    );
-    let sent = ci_sent(&wire);
-    let [(group, CiMessage::InvalidateMuid { header, target })] = sent.as_slice() else {
-        panic!("one Invalidate MUID, got {sent:?}");
-    };
-    assert_eq!((*group, header.source, *target), (GROUP_0, ours, ours));
-    assert!(wire.session.ci_peers(&wire.id).is_empty());
-
-    // Nothing more: a Discovery is not answered and the copy is off.
-    let slot = wire.session.ports().list_input_ports()[0].id;
-    let _ = wire.session.ports().drain_stream(slot).count();
-    say(
-        &wire,
-        GROUP_0,
-        &CiMessage::Discovery {
-            header: CiHeader::new(peer()),
-            data: peer_data(),
-        },
-        70,
-    );
-    assert_eq!(wire.session.ports().drain_stream(slot).count(), 0);
-    let _ = polled(&mut wire, 80);
-    assert!(received(&wire).is_empty());
 }
 
 /// The peers read are a snapshot: a list held across a change keeps what it
@@ -1559,18 +1507,14 @@ fn an_invalidate_muid_drops_the_peers_profiles_and_refuses_its_handles() {
     );
 }
 
-/// Disabling MIDI-CI ends every device and its peers; the peers' Profiles are
-/// dropped and reported with them.
+/// Closing the input ends its devices and their peers; the peers' Profiles go
+/// with them.
 #[test]
-fn disabling_midi_ci_drops_the_profiles() {
+fn closing_the_input_drops_the_profiles() {
     let (mut wire, ours) = peer_declaring(CiCategories::PROFILE_CONFIGURATION);
     known_profiles(&mut wire, ours, vec![], vec![profile(2)], vec![]);
-    wire.session.disable_ci();
-    let changes = polled(&mut wire, 110);
-    assert!(
-        profile_events(&changes).contains(&&ProfilesChange::Dropped),
-        "{changes:?}"
-    );
+    assert!(!wire.session.profiles(&wire.id).is_empty());
+    assert!(wire.session.disconnect_input(&wire.id.clone()));
     assert!(wire.session.profiles(&wire.id).is_empty());
 }
 
@@ -1957,17 +1901,13 @@ fn a_lost_peer_drops_its_process_inquiry_and_refuses_its_handles() {
     );
 }
 
-/// Disabling MIDI-CI drops the peers' Process Inquiry.
+/// Closing the input drops the peers' Process Inquiry.
 #[test]
-fn disabling_midi_ci_drops_process_inquiry() {
+fn closing_the_input_drops_process_inquiry() {
     let (mut wire, ours) = peer_declaring(CiCategories::PROCESS_INQUIRY);
     answer_capabilities(&mut wire, ours, ProcessFeatures::MIDI_MESSAGE_REPORT);
-    wire.session.disable_ci();
-    let changes = polled(&mut wire, 110);
-    assert!(
-        process_events(&changes).contains(&&ProcessChange::Dropped),
-        "{changes:?}"
-    );
+    assert!(!wire.session.report_peers(&wire.id).is_empty());
+    assert!(wire.session.disconnect_input(&wire.id.clone()));
     assert!(wire.session.report_peers(&wire.id).is_empty());
 }
 

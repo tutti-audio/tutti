@@ -82,7 +82,7 @@ pub enum MidiPortError {
     /// The session has no OS MIDI layer
     /// ([`SessionBuilder::midi_hardware`](crate::SessionBuilder::midi_hardware)
     /// was not asked for).
-    #[error("the session has no OS MIDI layer; build it with `midi_hardware()`")]
+    #[error("the session has no OS MIDI layer; build it with `midi_hardware(options)`")]
     NoHardware,
     /// Several present devices could be the saved one, or its ordinal cannot be
     /// trusted across a restart: these are the candidates, ordered by id, for
