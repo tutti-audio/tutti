@@ -45,7 +45,7 @@ fn the_opened_name_tells_a_supplied_driver_from_an_unnamed_device() {
     let mut driver = driver_over(engine);
     let (manual, _stream) = ManualStreamDriver::new();
     driver
-        .restart_on(manual_spec(), manual, |_, _| Ok::<(), crate::Error>(()))
+        .switch(manual_spec(), manual, |_, _| Ok::<(), crate::Error>(()))
         .unwrap();
     assert_eq!(driver.opened_name().unwrap(), None);
 }
@@ -60,7 +60,7 @@ fn a_failed_restart_keeps_the_opened_name() {
     let mut driver = driver_over(engine);
     let (manual, _stream) = ManualStreamDriver::new();
     driver
-        .restart_on(manual_spec(), manual, |_, _| {
+        .switch(manual_spec(), manual, |_, _| {
             Err(crate::Error::InvalidConfig("refused".into()))
         })
         .expect_err("the hook refuses");

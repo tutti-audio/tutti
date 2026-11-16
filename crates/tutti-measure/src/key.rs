@@ -115,7 +115,7 @@ pub fn estimate_key(chroma: &Grid<f32>, profile: KeyProfile) -> Result<KeyEstima
 }
 
 /// The key of one chroma vector, such as a mean read from a
-/// [`ChromaState`](crate::ChromaState).
+/// [`ChromaMeter`](crate::ChromaMeter).
 ///
 /// # Errors
 ///

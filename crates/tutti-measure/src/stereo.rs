@@ -5,11 +5,11 @@
 //! inverted and cancelling.
 //!
 //! Split into a pure kernel ([`correlate`]) and an explicit smoother
-//! ([`step_ballistics`]). Folding the two together invites a `width` stored
+//! ([`BallisticsMeter`]). Folding the two together invites a `width` stored
 //! beside the correlation it is defined from and smoothed independently of it,
 //! so the smoothed pair contradicts the invariant the kernel guarantees.
 
-use tutti_buffers::StereoPlanes;
+use tutti_buffers::{Sample, StereoPlanes};
 use tutti_types::{Amplitude, Correlation, Db, Seconds, StereoBalance, StereoWidth};
 
 /// Mid/side and per-channel levels.
@@ -101,7 +101,7 @@ impl StereoReading {
 /// below divides by a single frame count. Reconciling the pair here with
 /// `left.len().min(right.len())` silently measures the shorter of two
 /// mismatched blocks; the pairing cannot be formed at all unless they agree.
-pub fn correlate(planes: StereoPlanes<'_>) -> StereoReading {
+pub fn correlate<S: Sample>(planes: StereoPlanes<'_, S>) -> StereoReading {
     let n = planes.frames().get();
     if n == 0 {
         return StereoReading::default();
@@ -114,7 +114,7 @@ pub fn correlate(planes: StereoPlanes<'_>) -> StereoReading {
     let (mut sum_mid, mut sum_side) = (0.0f64, 0.0f64);
 
     for i in 0..n {
-        let (l, r) = (left[i] as f64, right[i] as f64);
+        let (l, r) = (left[i].to_f64(), right[i].to_f64());
         sum_ll += l * l;
         sum_rr += r * r;
         sum_lr += l * r;
@@ -167,11 +167,8 @@ impl Ballistics {
     /// engine. As two adjacent bare `f32` milliseconds, transposing them
     /// compiles and makes the meter sluggish to peaks and instant to release —
     /// under-reporting exactly the problems it exists to show.
-    pub fn new(attack: impl Into<Seconds>, release: impl Into<Seconds>) -> Self {
-        Self {
-            attack: attack.into(),
-            release: release.into(),
-        }
+    pub fn new(attack: Seconds, release: Seconds) -> Self {
+        Self { attack, release }
     }
 
     /// 10 ms attack, 100 ms release — standard meter ballistics.
@@ -185,7 +182,7 @@ impl Ballistics {
     /// Public because ballistics are not stereo-specific: a level meter smooths
     /// the peak and RMS of `tutti_graph::Level`
     /// with the same attack and release (the meter holds the peak since the
-    /// last read; the decay is the reader's). [`step_ballistics`] stays the
+    /// last read; the decay is the reader's). [`BallisticsMeter::push`] stays the
     /// convenience for the stereo case.
     ///
     /// The one-pole coefficient of the attack or release over a step of
@@ -211,80 +208,86 @@ impl Ballistics {
     }
 }
 
-/// The smoothed reading carried between blocks.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct BallisticsState {
+/// A running smoother of stereo readings: the smoothed reading carried between
+/// blocks, moved by [`push`](Self::push) with the config's attack and release.
+#[derive(Debug, Clone, Copy)]
+pub struct BallisticsMeter {
+    cfg: Ballistics,
     current: StereoReading,
 }
 
-impl BallisticsState {
-    /// A state seeded with a default (silent, uncorrelated) reading.
+impl Ballistics {
+    /// A smoother seeded with a default (silent, uncorrelated) reading.
     #[must_use]
-    pub fn new() -> Self {
-        Self::default()
+    pub fn measure(&self) -> BallisticsMeter {
+        BallisticsMeter {
+            cfg: *self,
+            current: StereoReading::default(),
+        }
     }
+}
 
+impl BallisticsMeter {
     /// The latest smoothed reading.
     #[inline]
+    #[must_use]
     pub fn current(&self) -> StereoReading {
         self.current
     }
 
-    /// Discards the smoothed reading, so the next step starts from silence
+    /// Discards the smoothed reading, so the next push starts from silence
     /// rather than decaying from the previous signal.
     pub fn reset(&mut self) {
         self.current = StereoReading::default();
     }
-}
 
-/// Smooths an instantaneous reading and returns the result.
-///
-/// Returns the *smoothed* value, which is the useful one — returning the
-/// instantaneous reading instead and hiding the smoothed one behind a separate
-/// `current()` call makes the obvious use of the return value the wrong one.
-///
-/// Only `correlation` and the levels are smoothed; width is derived from the
-/// smoothed correlation afterwards, so the two cannot disagree.
-pub fn step_ballistics(
-    cfg: &Ballistics,
-    state: &mut BallisticsState,
-    instant: StereoReading,
-    dt: Seconds,
-) -> StereoReading {
-    let smooth = |old: f32, new: f32| cfg.step(old, new, dt);
+    /// Smooths an instantaneous reading, `dt` after the last, and returns the
+    /// result.
+    ///
+    /// Returns the *smoothed* value, which is the useful one: returning the
+    /// instantaneous reading instead and hiding the smoothed one behind a
+    /// separate `current()` call makes the obvious use of the return value the
+    /// wrong one.
+    ///
+    /// Only `correlation` and the levels are smoothed; width is derived from the
+    /// smoothed correlation afterwards, so the two cannot disagree.
+    pub fn push(&mut self, instant: StereoReading, dt: Seconds) -> StereoReading {
+        let cfg = &self.cfg;
+        let smooth = |old: f32, new: f32| cfg.step(old, new, dt);
 
-    let correlation = Correlation::new_clamped(smooth(
-        state.current.correlation.get(),
-        instant.correlation.get(),
-    ));
-    let balance =
-        StereoBalance::new_clamped(smooth(state.current.balance.get(), instant.balance.get()));
+        let correlation = Correlation::new_clamped(smooth(
+            self.current.correlation.get(),
+            instant.correlation.get(),
+        ));
+        let balance =
+            StereoBalance::new_clamped(smooth(self.current.balance.get(), instant.balance.get()));
 
-    let levels = StereoLevels {
-        mid: Amplitude(smooth(
-            state.current.levels.mid.get(),
-            instant.levels.mid.get(),
-        )),
-        side: Amplitude(smooth(
-            state.current.levels.side.get(),
-            instant.levels.side.get(),
-        )),
-        left: Amplitude(smooth(
-            state.current.levels.left.get(),
-            instant.levels.left.get(),
-        )),
-        right: Amplitude(smooth(
-            state.current.levels.right.get(),
-            instant.levels.right.get(),
-        )),
-    };
+        let levels = StereoLevels {
+            mid: Amplitude(smooth(
+                self.current.levels.mid.get(),
+                instant.levels.mid.get(),
+            )),
+            side: Amplitude(smooth(
+                self.current.levels.side.get(),
+                instant.levels.side.get(),
+            )),
+            left: Amplitude(smooth(
+                self.current.levels.left.get(),
+                instant.levels.left.get(),
+            )),
+            right: Amplitude(smooth(
+                self.current.levels.right.get(),
+                instant.levels.right.get(),
+            )),
+        };
 
-    state.current = StereoReading {
-        correlation,
-        balance,
-        levels,
-    };
-    state.current
+        self.current = StereoReading {
+            correlation,
+            balance,
+            levels,
+        };
+        self.current
+    }
 }
 
 #[cfg(test)]
@@ -354,39 +357,27 @@ mod tests {
     /// drift from the correlation it is defined from — even after smoothing.
     #[test]
     fn width_cannot_contradict_correlation_even_when_smoothed() {
-        let cfg = Ballistics::standard();
-        let mut state = BallisticsState::new();
+        let mut state = Ballistics::standard().measure();
         let mono = tone(512, 1.0);
         let inverted: Vec<f32> = mono.iter().map(|s| -s).collect();
 
         // Flip from correlated to anti-correlated: the case that desynced the
         // old stored pair.
-        let smoothed = step_ballistics(
-            &cfg,
-            &mut state,
-            correlate(pair(&mono, &mono)),
-            Seconds(0.01),
-        );
+        let smoothed = state.push(correlate(pair(&mono, &mono)), Seconds(0.01));
         assert_eq!(smoothed.width(), smoothed.correlation.to_stereo_width());
 
-        let smoothed = step_ballistics(
-            &cfg,
-            &mut state,
-            correlate(pair(&mono, &inverted)),
-            Seconds(0.01),
-        );
+        let smoothed = state.push(correlate(pair(&mono, &inverted)), Seconds(0.01));
         assert_eq!(smoothed.width(), smoothed.correlation.to_stereo_width());
     }
 
     /// The smoothed value is what comes back, not the instantaneous one.
     #[test]
     fn the_return_value_is_the_smoothed_reading() {
-        let cfg = Ballistics::new(Seconds(1.0), Seconds(1.0));
-        let mut state = BallisticsState::new();
+        let mut state = Ballistics::new(Seconds(1.0), Seconds(1.0)).measure();
         let mono = tone(512, 1.0);
 
         let instant = correlate(pair(&mono, &mono));
-        let smoothed = step_ballistics(&cfg, &mut state, instant, Seconds(0.001));
+        let smoothed = state.push(instant, Seconds(0.001));
 
         assert_eq!(smoothed, state.current());
         assert!(
@@ -401,14 +392,12 @@ mod tests {
         let mono = tone(512, 1.0);
         let inverted: Vec<f32> = mono.iter().map(|s| -s).collect();
 
-        let mut fast = BallisticsState::new();
-        let mut slow = BallisticsState::new();
-        let fast_cfg = Ballistics::new(Seconds(0.001), Seconds(0.001));
-        let slow_cfg = Ballistics::new(Seconds(1.0), Seconds(1.0));
+        let mut fast = Ballistics::new(Seconds(0.001), Seconds(0.001)).measure();
+        let mut slow = Ballistics::new(Seconds(1.0), Seconds(1.0)).measure();
 
         let target = correlate(pair(&mono, &mono));
-        let fast_out = step_ballistics(&fast_cfg, &mut fast, target, Seconds(0.01));
-        let slow_out = step_ballistics(&slow_cfg, &mut slow, target, Seconds(0.01));
+        let fast_out = fast.push(target, Seconds(0.01));
+        let slow_out = slow.push(target, Seconds(0.01));
 
         assert!(
             fast_out.correlation > slow_out.correlation,
@@ -417,11 +406,10 @@ mod tests {
 
         // And the release path differs from the attack path.
         let falling = correlate(pair(&mono, &inverted));
-        let asymmetric = Ballistics::new(Seconds(0.001), Seconds(1.0));
-        let mut state = BallisticsState::new();
-        step_ballistics(&asymmetric, &mut state, target, Seconds(0.01));
+        let mut state = Ballistics::new(Seconds(0.001), Seconds(1.0)).measure();
+        state.push(target, Seconds(0.01));
         let before = state.current().correlation;
-        step_ballistics(&asymmetric, &mut state, falling, Seconds(0.01));
+        state.push(falling, Seconds(0.01));
         let after = state.current().correlation;
         assert!(
             (before.get() - after.get()).abs() < 0.05,
