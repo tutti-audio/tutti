@@ -98,6 +98,20 @@ impl StreamHost {
         self.graph_rate
     }
 
+    /// Says the graph is prepared as `prepared` says: the stream's rate and
+    /// callback size ([`quantum`](tutti_graph::Prepare::quantum)) and
+    /// [`graph_rate`](Self::graph_rate) take it. For a caller whose restart
+    /// hook failed part way and left the graph where it is, so that what the
+    /// host reports is what the graph is prepared at. It takes the graph's own
+    /// values whole, so it cannot be told anything else.
+    pub fn settle(&mut self, prepared: &tutti_graph::Prepare) {
+        self.graph_rate = prepared.sample_rate();
+        let mut spec = self.stream.spec().clone();
+        spec.sample_rate = prepared.sample_rate();
+        spec.quantum = prepared.quantum();
+        self.stream.set_spec(spec);
+    }
+
     /// The stream this host runs, for reads: [`spec`](OutputStream::spec),
     /// [`is_running`](OutputStream::is_running), [`faults`](OutputStream::faults),
     /// [`latency`](OutputStream::latency).

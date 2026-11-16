@@ -6,15 +6,18 @@
 //! kept inside the region. Each region is then widened by the padding and
 //! regions that touch after widening are joined.
 //!
-//! Shaped like onset detection: [`step_silence`] folds chunks into a
-//! [`SilenceState`] and [`finish`] reads the regions, and
-//! [`strip_silence`] is that fold over one buffer, so batch and streaming
-//! cannot drift.
+//! A [`SilenceConfig`] describes the scan in decibels and seconds. The rate
+//! binds where the audio does: [`strip_silence`] takes a buffer and its rate,
+//! and [`SilenceConfig::measure`] makes a [`SilenceMeter`] that takes the
+//! buffer in chunks. `strip_silence` feeds one meter the whole buffer, so batch
+//! and streaming cannot drift.
 
 use core::ops::Range;
 
+use tutti_buffers::{Mono, Sample};
 use tutti_types::{Db, SampleRate, Samples, Seconds};
 
+use crate::convert::for_blocks;
 use tutti_types::ranged;
 
 ranged! {
@@ -27,7 +30,7 @@ ranged! {
 
 /// A half-open span of samples, `start..end`.
 ///
-/// Built only by [`finish`], so `start <= end` always holds.
+/// Built only by [`SilenceMeter::finish`], so `start <= end` always holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Region {
     start: Samples,
@@ -67,16 +70,15 @@ impl Region {
     }
 }
 
-/// Strip-silence parameters. Immutable once built.
+/// What a strip-silence scan reads: a threshold, the shortest silence that
+/// cuts and the padding kept around a region. Immutable once built, and in
+/// seconds, so it holds no sample rate.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SilenceConfig {
-    sample_rate: SampleRate,
     threshold: Db,
-    /// `threshold` as a linear magnitude, resolved once.
-    floor: f32,
-    min_silence: Samples,
-    pre_pad: Samples,
-    post_pad: Samples,
+    min_silence: Seconds,
+    pre_pad: Seconds,
+    post_pad: Seconds,
 }
 
 impl SilenceConfig {
@@ -86,47 +88,59 @@ impl SilenceConfig {
     /// A `min_silence` under one sample cuts at every sample below the
     /// threshold.
     #[must_use]
-    pub fn new(
-        sample_rate: impl Into<SampleRate>,
-        threshold: FiniteLevel,
-        min_silence: impl Into<Seconds>,
-    ) -> Self {
-        let rate = sample_rate.into();
-        let threshold = threshold.get();
+    pub fn new(threshold: FiniteLevel, min_silence: Seconds) -> Self {
         Self {
-            sample_rate: rate,
-            threshold,
-            floor: threshold.to_amplitude().get(),
-            min_silence: min_silence.into().to_samples(rate).max(Samples(1)),
-            pre_pad: Samples::ZERO,
-            post_pad: Samples::ZERO,
+            threshold: threshold.get(),
+            min_silence,
+            pre_pad: Seconds(0.0),
+            post_pad: Seconds(0.0),
         }
     }
 
     /// Audio kept before the first loud sample of a region, so an attack is not
     /// clipped.
     #[must_use]
-    pub fn pre_padding(mut self, pre: impl Into<Seconds>) -> Self {
-        self.pre_pad = pre.into().to_samples(self.sample_rate);
+    pub fn pre_padding(mut self, pre: Seconds) -> Self {
+        self.pre_pad = pre;
         self
     }
 
     /// Audio kept after the last loud sample of a region, so a tail is not
     /// clipped.
     #[must_use]
-    pub fn post_padding(mut self, post: impl Into<Seconds>) -> Self {
-        self.post_pad = post.into().to_samples(self.sample_rate);
+    pub fn post_padding(mut self, post: Seconds) -> Self {
+        self.post_pad = post;
         self
+    }
+
+    /// A meter that scans audio at `rate`, chunk by chunk.
+    #[must_use]
+    pub fn measure(&self, rate: impl Into<SampleRate>) -> SilenceMeter {
+        let rate = rate.into();
+        SilenceMeter {
+            floor: self.threshold.to_amplitude().get(),
+            min_silence: self.min_silence.to_samples(rate).max(Samples(1)).get(),
+            pre_pad: self.pre_pad.to_samples(rate).get(),
+            post_pad: self.post_pad.to_samples(rate).get(),
+            seen: 0,
+            open: None,
+            closed: Vec::new(),
+        }
     }
 }
 
-/// What the scan carries between chunks.
+/// A running strip-silence scan at one rate: fed chunks of the buffer in
+/// order, it reads the regions at [`finish`](Self::finish).
 ///
-/// Valid for one config; a different one starts over, as in
-/// [`OnsetState`](crate::OnsetState).
-#[derive(Debug, Clone, Default)]
-pub struct SilenceState {
-    config: Option<SilenceConfig>,
+/// Not for the audio thread: it keeps one entry per region found, so it grows
+/// with the audio and allocates. Feed it from the offline or UI side.
+#[derive(Debug, Clone)]
+pub struct SilenceMeter {
+    /// The threshold as a linear magnitude.
+    floor: f32,
+    min_silence: usize,
+    pre_pad: usize,
+    post_pad: usize,
     /// Samples consumed so far.
     seen: usize,
     /// The region being grown: first and last loud sample.
@@ -135,78 +149,70 @@ pub struct SilenceState {
     closed: Vec<(usize, usize)>,
 }
 
-impl SilenceState {
-    /// An empty carry, before the first sample.
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
+impl SilenceMeter {
+    /// Feeds the next chunk of the buffer, in order.
+    pub fn push<S: Sample>(&mut self, chunk: Mono<'_, S>) {
+        for_blocks(chunk.samples(), 1, |block| self.scan(block));
     }
 
-    /// Forgets everything. Equivalent to a fresh state.
-    pub fn reset(&mut self) {
-        *self = Self::default();
-    }
-}
-
-/// Feeds the next chunk of the buffer, in order.
-///
-/// Not for the audio thread: the state keeps one entry per region found, so it
-/// grows with the audio and allocates. Feed it from the offline or UI side.
-pub fn step_silence(cfg: &SilenceConfig, state: &mut SilenceState, samples: &[f32]) {
-    if state.config != Some(*cfg) {
-        state.reset();
-        state.config = Some(*cfg);
-    }
-    for (offset, &sample) in samples.iter().enumerate() {
-        // Below the floor, or NaN, is silence.
-        if sample.abs() < cfg.floor || sample.is_nan() {
-            continue;
-        }
-        let at = state.seen + offset;
-        state.open = match state.open {
-            None => Some((at, at)),
-            // The gap is `at - last - 1` samples: split once it reaches the minimum.
-            Some((first, last)) if at - last > cfg.min_silence.get() => {
-                state.closed.push((first, last + 1));
-                Some((at, at))
+    fn scan(&mut self, samples: &[f32]) {
+        for (offset, &sample) in samples.iter().enumerate() {
+            // Below the floor, or NaN, is silence.
+            if sample.abs() < self.floor || sample.is_nan() {
+                continue;
             }
-            Some((first, _)) => Some((first, at)),
-        };
-    }
-    state.seen += samples.len();
-}
-
-/// The regions of the audio fed so far, padded, clamped to the buffer and
-/// joined where they touch. Ascending and disjoint.
-///
-/// Uses the config the state was stepped with, so the padding cannot disagree
-/// with the scan. A state that has not been stepped has no regions.
-pub fn finish(state: &SilenceState) -> Vec<Region> {
-    let Some(cfg) = state.config else {
-        return Vec::new();
-    };
-    let open = state.open.map(|(first, last)| (first, last + 1));
-    let mut regions: Vec<Region> = Vec::new();
-    for &(first, end) in state.closed.iter().chain(open.iter()) {
-        let start = Samples(first.saturating_sub(cfg.pre_pad.get()));
-        let end = Samples(end.saturating_add(cfg.post_pad.get()).min(state.seen));
-        match regions.last_mut() {
-            Some(prev) if start <= prev.end => prev.end = prev.end.max(end),
-            _ => regions.push(Region { start, end }),
+            let at = self.seen + offset;
+            self.open = match self.open {
+                None => Some((at, at)),
+                // The gap is `at - last - 1` samples: split once it reaches the minimum.
+                Some((first, last)) if at - last > self.min_silence => {
+                    self.closed.push((first, last + 1));
+                    Some((at, at))
+                }
+                Some((first, _)) => Some((first, at)),
+            };
         }
+        self.seen += samples.len();
     }
-    regions
+
+    /// Forgets everything fed. Equivalent to a fresh meter at the same rate.
+    pub fn reset(&mut self) {
+        self.seen = 0;
+        self.open = None;
+        self.closed.clear();
+    }
+
+    /// The regions of the audio fed, padded, clamped to the buffer and joined
+    /// where they touch. Ascending and disjoint.
+    #[must_use]
+    pub fn finish(self) -> Vec<Region> {
+        let open = self.open.map(|(first, last)| (first, last + 1));
+        let mut regions: Vec<Region> = Vec::new();
+        for &(first, end) in self.closed.iter().chain(open.iter()) {
+            let start = Samples(first.saturating_sub(self.pre_pad));
+            let end = Samples(end.saturating_add(self.post_pad).min(self.seen));
+            match regions.last_mut() {
+                Some(prev) if start <= prev.end => prev.end = prev.end.max(end),
+                _ => regions.push(Region { start, end }),
+            }
+        }
+        regions
+    }
 }
 
-/// The signal regions of a whole buffer: [`step_silence`] over it, then
-/// [`finish`].
+/// The signal regions of a whole buffer at `rate`: a [`SilenceMeter`] fed the
+/// buffer, then finished.
 ///
 /// Mono. Fold a multichannel buffer first (`Fold::fold`), or take the
 /// union of per-channel results.
-pub fn strip_silence(cfg: &SilenceConfig, samples: &[f32]) -> Vec<Region> {
-    let mut state = SilenceState::new();
-    step_silence(cfg, &mut state, samples);
-    finish(&state)
+pub fn strip_silence<S: Sample>(
+    cfg: &SilenceConfig,
+    samples: Mono<'_, S>,
+    rate: impl Into<SampleRate>,
+) -> Vec<Region> {
+    let mut meter = cfg.measure(rate);
+    meter.push(samples);
+    meter.finish()
 }
 
 #[cfg(test)]
@@ -217,10 +223,13 @@ mod tests {
 
     fn cfg(threshold: Db, min_silence_ms: f32) -> SilenceConfig {
         SilenceConfig::new(
-            SampleRate::of(RATE),
             FiniteLevel::new(threshold).unwrap(),
             Seconds::from_f32(min_silence_ms / 1000.0),
         )
+    }
+
+    fn strip(c: &SilenceConfig, x: &[f32]) -> Vec<Region> {
+        strip_silence(c, Mono::new(x), SampleRate::of(RATE))
     }
 
     fn r(start: usize, end: usize) -> Region {
@@ -237,7 +246,7 @@ mod tests {
         let mut x = vec![0.0f32; 550];
         x[..100].fill(0.5);
         x[400..500].fill(0.5);
-        let regions = strip_silence(&cfg(Db(-20.0), 50.0), &x);
+        let regions = strip(&cfg(Db(-20.0), 50.0), &x);
         assert_eq!(regions, vec![r(0, 100), r(400, 500)]);
         assert_eq!(regions[0].len(), Samples(100));
         assert_eq!(&x[regions[1].range()], &[0.5f32; 100][..]);
@@ -253,8 +262,8 @@ mod tests {
             x
         };
         let c = cfg(Db(-20.0), 50.0);
-        assert_eq!(strip_silence(&c, &build(49)), vec![r(0, 249)]);
-        assert_eq!(strip_silence(&c, &build(50)), vec![r(0, 100), r(150, 250)]);
+        assert_eq!(strip(&c, &build(49)), vec![r(0, 249)]);
+        assert_eq!(strip(&c, &build(50)), vec![r(0, 100), r(150, 250)]);
     }
 
     /// A sample exactly at the threshold is loud; the next float below is not.
@@ -266,10 +275,10 @@ mod tests {
         let mut x = vec![0.0f32; 100];
         x[10] = floor;
         x[60] = below;
-        assert_eq!(strip_silence(&c, &x), vec![r(10, 11)]);
+        assert_eq!(strip(&c, &x), vec![r(10, 11)]);
         // Sign does not matter.
         x[10] = -floor;
-        assert_eq!(strip_silence(&c, &x), vec![r(10, 11)]);
+        assert_eq!(strip(&c, &x), vec![r(10, 11)]);
     }
 
     /// Padding widens each side, clamps at the buffer and joins regions that
@@ -284,10 +293,7 @@ mod tests {
             .pre_padding(Seconds(0.02))
             .post_padding(Seconds(0.03));
         // 5..10 -> 0..40; 500..510 -> 480..540; 990..995 -> 970..1000.
-        assert_eq!(
-            strip_silence(&c, &x),
-            vec![r(0, 40), r(480, 540), r(970, 1000)]
-        );
+        assert_eq!(strip(&c, &x), vec![r(0, 40), r(480, 540), r(970, 1000)]);
 
         // Bursts 100..110 and then `gap` later: the first pads to 80..140, the
         // second starts at `90 + gap`. They meet exactly at gap 50 and join;
@@ -296,7 +302,7 @@ mod tests {
             let mut x = vec![0.0f32; 400];
             x[100..110].fill(1.0);
             x[110 + gap..120 + gap].fill(1.0);
-            strip_silence(&c, &x)
+            strip(&c, &x)
         };
         assert_eq!(pair(50), vec![r(80, 200)]);
         assert_eq!(pair(51), vec![r(80, 140), r(141, 201)]);
@@ -306,15 +312,16 @@ mod tests {
     #[test]
     fn nothing_loud_gives_no_regions() {
         let c = cfg(Db(-20.0), 10.0);
-        assert!(strip_silence(&c, &[0.0; 64]).is_empty());
-        assert!(strip_silence(&c, &[]).is_empty());
-        assert!(strip_silence(&c, &[f32::NAN; 8]).is_empty());
+        assert!(strip(&c, &[0.0; 64]).is_empty());
+        assert!(strip(&c, &[]).is_empty());
+        assert!(strip(&c, &[f32::NAN; 8]).is_empty());
     }
 
-    /// Feeding in chunks of any size gives the batch result, including a chunk
-    /// edge inside a gap and inside a region, and a region open at the end.
+    /// A meter fed chunks of any size gives the one-shot result bit for bit,
+    /// including a chunk edge inside a gap and inside a region, and a region
+    /// open at the end.
     #[test]
-    fn chunked_feeding_matches_the_batch() {
+    fn a_meter_fed_in_chunks_equals_the_one_shot() {
         let mut x = vec![0.0f32; 700];
         x[3..40].fill(0.9);
         x[200..260].fill(-0.9);
@@ -323,41 +330,55 @@ mod tests {
         let c = cfg(Db(-30.0), 40.0)
             .pre_padding(Seconds(0.005))
             .post_padding(Seconds(0.01));
-        let batch = strip_silence(&c, &x);
+        let batch = strip(&c, &x);
         assert_eq!(batch.len(), 4);
         for chunk in [1usize, 7, 64, 199, 700] {
-            let mut state = SilenceState::new();
+            let mut meter = c.measure(SampleRate::of(RATE));
             for part in x.chunks(chunk) {
-                step_silence(&c, &mut state, part);
+                meter.push(Mono::new(part));
             }
-            assert_eq!(finish(&state), batch, "chunk {chunk}");
+            assert_eq!(meter.finish(), batch, "chunk {chunk}");
         }
     }
 
-    /// A different config restarts the carry.
+    /// Any sample format scans at its nominal level: 16-bit audio at half
+    /// scale is as loud as an `f32` half.
     #[test]
-    fn a_changed_config_restarts_the_scan() {
-        let mut state = SilenceState::new();
-        step_silence(&cfg(Db(-20.0), 10.0), &mut state, &[0.5; 100]);
-        let other = cfg(Db(-10.0), 10.0);
-        step_silence(&other, &mut state, &[0.5; 10]);
-        assert_eq!(finish(&state), vec![r(0, 10)]);
+    fn an_integer_buffer_scans_at_its_nominal_level() {
+        let mut x = vec![0i16; 300];
+        x[100..200].fill(i16::MAX / 2);
+        let regions = strip_silence(&cfg(Db(-20.0), 10.0), Mono::new(&x), SampleRate::of(RATE));
+        assert_eq!(regions, vec![r(100, 200)]);
     }
 
-    /// A state that was never stepped has no regions, and the padding comes
-    /// from the config the scan used: `finish` takes nothing else.
+    /// A reset meter reads like a fresh one, and a meter that was never fed
+    /// has no regions; padding comes from the config the meter was made from.
     #[test]
-    fn finish_reads_the_scanned_config_and_an_unstepped_state_is_empty() {
-        assert!(finish(&SilenceState::new()).is_empty());
+    fn a_reset_meter_is_a_fresh_one() {
         let c = cfg(Db(-20.0), 10.0)
             .pre_padding(Seconds(0.004))
             .post_padding(Seconds(0.006));
-        let mut state = SilenceState::new();
+        assert!(c.measure(SampleRate::of(RATE)).finish().is_empty());
+        let mut meter = c.measure(SampleRate::of(RATE));
         let mut x = vec![0.0f32; 100];
         x[50..60].fill(1.0);
-        step_silence(&c, &mut state, &x);
-        assert_eq!(finish(&state), vec![r(46, 66)]);
-        state.reset();
-        assert!(finish(&state).is_empty());
+        meter.push(Mono::new(&x));
+        meter.reset();
+        assert!(meter.clone().finish().is_empty());
+        meter.push(Mono::new(&x));
+        assert_eq!(meter.finish(), vec![r(46, 66)]);
+    }
+
+    /// The padding and the minimum silence resolve against the rate the
+    /// meter is made at: the same config at twice the rate keeps twice the
+    /// samples.
+    #[test]
+    fn durations_resolve_at_the_measuring_rate() {
+        let c = cfg(Db(-20.0), 10.0).pre_padding(Seconds(0.004));
+        let mut x = vec![0.0f32; 400];
+        x[100..110].fill(1.0);
+        let at = |rate: f64| strip_silence(&c, Mono::new(&x), SampleRate::of(rate));
+        assert_eq!(at(1000.0), vec![r(96, 110)]);
+        assert_eq!(at(2000.0), vec![r(92, 110)]);
     }
 }

@@ -1,13 +1,14 @@
-//! A spectrum step allocates nothing once its state is built.
+//! A spectrum push allocates nothing once its meter is built.
 //!
 //! Counted with this binary's own global allocator, as in `chroma_alloc.rs`. It
 //! counts per thread, so the harness's other threads do not show up.
 
-use tutti_dsp::{FftScratch, FrameCount, StftGeometry};
+use tutti_buffers::Mono;
+use tutti_dsp::FrameCount;
 use tutti_fixtures::allocations;
 use tutti_measure::{
-    Banding, BandsPerOctave, FrequencyBand, PeakDecay, Smoothing, SpectrumConfig, SpectrumTime,
-    step_spectrum,
+    Banding, BandsPerOctave, Framing, FrequencyBand, PeakDecay, Smoothing, SpectrumConfig,
+    SpectrumTime,
 };
 use tutti_types::{Db, Hz, SampleRate, Samples, Seconds};
 
@@ -16,8 +17,7 @@ use tutti_types::{Db, Hz, SampleRate, Samples, Seconds};
 /// for bins and for bands, with smoothing, peaks and a wrapping spectrogram.
 #[test]
 fn a_spectrum_step_does_not_allocate() {
-    let geometry = StftGeometry::new(SampleRate::SR_48K, Samples(1024), Samples(256)).unwrap();
-    let plain = SpectrumConfig::new(geometry).unwrap();
+    let plain = SpectrumConfig::new().framing(Framing::new(Samples(1024), Samples(256)));
     let banded = plain
         .banding(Banding::Octave {
             per_octave: BandsPerOctave::of(3),
@@ -32,16 +32,15 @@ fn a_spectrum_step_does_not_allocate() {
         .collect();
 
     for cfg in [plain, banded] {
-        let mut fft = FftScratch::new();
         let mut state = None;
-        let built = allocations(|| state = Some(cfg.state(&mut fft).unwrap()));
+        let built = allocations(|| state = Some(cfg.measure(SampleRate::SR_48K).unwrap()));
         assert!(built > 0, "construction builds the buffers");
         let mut state = state.unwrap();
 
         let steps = allocations(|| {
             for size in [1, 100, 256, 777, 4096] {
                 for block in signal.chunks(size) {
-                    step_spectrum(&cfg, &mut state, block, &mut fft).unwrap();
+                    state.push(Mono::new(block)).unwrap();
                 }
             }
         });
@@ -50,7 +49,7 @@ fn a_spectrum_step_does_not_allocate() {
         let after_reset = allocations(|| {
             state.reset();
             for block in signal.chunks(500) {
-                step_spectrum(&cfg, &mut state, block, &mut fft).unwrap();
+                state.push(Mono::new(block)).unwrap();
             }
             let _ = (state.levels(), state.peaks(), state.spectrogram().count());
         });

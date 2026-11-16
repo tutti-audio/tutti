@@ -62,6 +62,9 @@ use crate::{
 #[derive(Debug)]
 pub struct DeviceHandle {
     device: Option<Device>,
+    /// The platform host the device was opened on, which a switch to the
+    /// system clock hands on.
+    pub(crate) audio_host: tutti_cpal::AudioHost,
     /// The device watch, and what restarts reported since the last poll.
     pub(crate) watch: Option<DeviceWatch>,
     pub(crate) events: Vec<SessionEvent>,
@@ -70,9 +73,10 @@ pub struct DeviceHandle {
 impl DeviceHandle {
     /// A handle whose device is yet to be started: the builder's, until the
     /// stream is up.
-    pub(crate) fn vacant() -> Self {
+    pub(crate) fn vacant(audio_host: tutti_cpal::AudioHost) -> Self {
         Self {
             device: None,
+            audio_host,
             watch: None,
             events: Vec::new(),
         }
@@ -95,8 +99,14 @@ impl DeviceHandle {
             .expect("the device is in its slot except while a restart runs")
     }
 
+    /// The device, taken out of the handle: a switch to the system clock
+    /// moves its host.
+    pub(crate) fn into_device(mut self) -> Device {
+        self.take()
+    }
+
     /// Takes the device out for a restart; [`fill`](Self::fill) puts it back.
-    fn take(&mut self) -> Device {
+    pub(crate) fn take(&mut self) -> Device {
         self.device
             .take()
             .expect("the device is in its slot except while a restart runs")
@@ -259,7 +269,7 @@ impl Session<DeviceClock> {
     /// Runs `f` with the device out of its slot and the session beside it: the
     /// restart's hook moves the whole session while the device's driver runs.
     /// The device goes back before `f`'s panic, if it has one, unwinds on.
-    fn with_device<R>(&mut self, f: impl FnOnce(&mut Self, &mut Device) -> R) -> R {
+    pub(crate) fn with_device<R>(&mut self, f: impl FnOnce(&mut Self, &mut Device) -> R) -> R {
         let mut device = self.running.take();
         let outcome =
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(self, &mut device)));
@@ -290,7 +300,7 @@ impl Session<DeviceClock> {
         let outcome = self.check_restart(max_block).and_then(|()| {
             let previous = self.device().graph_rate();
             self.with_device(|session, device| {
-                device.driver.restart_on(spec, driver, |spec, stopped| {
+                device.driver.switch(spec, driver, |spec, stopped| {
                     session.rerate(spec, stopped, max_block, topology)
                 })
             })
@@ -421,10 +431,10 @@ impl Session<DeviceClock> {
 /// }
 /// ```
 pub struct Device {
-    driver: TuttiDriver,
+    pub(crate) driver: TuttiDriver,
     /// What the host last chose to run on (the build's, then a restart's):
     /// what the device policy follows.
-    chosen: DeviceSelector,
+    pub(crate) chosen: DeviceSelector,
     /// The capture delay the session's inputs report, read by
     /// [`latency`](Self::latency).
     input_latency: Arc<StreamLatency>,
@@ -776,6 +786,14 @@ pub enum DeviceEvent {
         /// Why not.
         error: Error,
     },
+    /// A capture the session held ended because the session left the sound
+    /// card's clock ([`Session::into_system_clock`]): the input's node stays in
+    /// the graph, silent. One event for each input.
+    #[cfg(feature = "audio-io")]
+    InputClosed {
+        /// The input.
+        input: crate::Input,
+    },
     /// The listing started with [`Session::list_outputs`] answered: the
     /// host's output devices, in enumeration order. Reported once.
     OutputsListed(Vec<DeviceId>),
@@ -843,34 +861,27 @@ impl<C: Clock> Session<C> {
     }
 
     /// The checks that must pass before the stream stops.
-    fn check_restart(&self, max_block: Option<MaxBlock>) -> Result<()> {
+    pub(crate) fn check_restart(&self, max_block: Option<MaxBlock>) -> Result<()> {
         self.graph.check_reprepare(max_block)?;
         Ok(())
     }
 
-    /// The hook: move everything the session owns to `spec`, with no
-    /// callback running.
-    fn rerate(
-        &mut self,
-        spec: &OutputSpec,
-        stopped: &Stopped<'_>,
-        max_block: Option<MaxBlock>,
-        topology: Option<ChannelTopology>,
+    /// Whether the root in force can be placed on a device of `channels`, as
+    /// `topology` states them or as the engine's order for the width: what a
+    /// restart or a clock switch refuses before anything moves.
+    pub(crate) fn check_device(
+        &self,
+        channels: ChannelLayout,
+        topology: Option<&ChannelTopology>,
     ) -> Result<()> {
-        let rate = spec.sample_rate;
-        // The root in force has to be placeable on the new device, as the
-        // request states it or as the engine's order for its width: refused
-        // before the graph moves, the stream still stopped, like any refusal
-        // here. The root a wider device will widen an undeclared one to is
-        // the root in force.
         let placed = topology
-            .clone()
-            .unwrap_or_else(|| ChannelTopology::assumed(spec.channels));
-        if placed.width() != spec.channels {
+            .cloned()
+            .unwrap_or_else(|| ChannelTopology::assumed(channels));
+        if placed.width() != channels {
             return Err(tutti_buffers::FoldError::from(
                 tutti_buffers::BufferError::WidthMismatch {
                     src: placed.width(),
-                    dst: spec.channels,
+                    dst: channels,
                 },
             )
             .into());
@@ -883,7 +894,7 @@ impl<C: Clock> Session<C> {
             let width = if mapped {
                 self.graph.outputs()
             } else {
-                crate::root_width(ChannelLayout::clamped(self.graph.outputs()), spec.channels)
+                crate::root_width(ChannelLayout::clamped(self.graph.outputs()), channels)
             };
             ChannelTopology::assumed(ChannelLayout::clamped(width))
         });
@@ -897,15 +908,34 @@ impl<C: Clock> Session<C> {
                 tutti_engine::RoutingError::Fold(source) => Error::Unplaceable {
                     root: self.graph.root_id(),
                     width: root.width(),
-                    device: spec.channels,
+                    device: channels,
                     source,
                 },
                 map => Error::MapUnplaceable {
                     map: self.output_policy.map.clone(),
-                    device: spec.channels,
+                    device: channels,
                     source: map,
                 },
             })?;
+        Ok(())
+    }
+
+    /// The hook: move everything the session owns to `spec`, with no
+    /// callback running.
+    pub(crate) fn rerate(
+        &mut self,
+        spec: &OutputSpec,
+        stopped: &Stopped<'_>,
+        max_block: Option<MaxBlock>,
+        topology: Option<ChannelTopology>,
+    ) -> Result<()> {
+        let rate = spec.sample_rate;
+        // The root in force has to be placeable on the new device, as the
+        // request states it or as the engine's order for its width: refused
+        // before the graph moves, the stream still stopped, like any refusal
+        // here. The root a wider device will widen an undeclared one to is
+        // the root in force.
+        self.check_device(spec.channels, topology.as_ref())?;
         // The new device's callback size too: a hosted plugin's pipeline
         // follows it, and its declared latency with it.
         self.graph.reprepare(rate, max_block, spec.quantum)?;
@@ -949,6 +979,7 @@ impl<C: Clock> Session<C> {
         // edit flag set, and the next update retries.
         // A declared root keeps the width it declared: the device is no floor
         // under it.
+        let mapped = self.output_policy.map.targets().is_some();
         let width = crate::root_width(ChannelLayout::clamped(self.graph.outputs()), spec.channels);
         if self.graph.root_topology().is_none() && !mapped && width > self.graph.outputs() {
             // Undeclared, so it cannot be refused.
