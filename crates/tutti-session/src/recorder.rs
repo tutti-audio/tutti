@@ -183,8 +183,8 @@ pub enum PumpPass {
 ///
 /// Owns both endpoints and a scratch buffer. [`pump_once`](Self::pump_once)
 /// moves at most the capacity it was built with and allocates nothing. Step it
-/// by hand to count frames exactly, or hand it to a [`Recorder`] to run on a
-/// thread.
+/// by hand to count frames exactly; a [`Recorder`] builds one and runs it on a
+/// thread of its own.
 ///
 /// The channel width is not a type parameter: the endpoints carry it as a
 /// runtime [`ChannelLayout`].
