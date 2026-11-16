@@ -339,7 +339,7 @@ fn a_get_is_one_header_only_chunk() {
 // M2-103 §9, §6.2: the reply is reassembled whatever its chunks, its Property
 // Data decoded by the encoding the reply names, and the status, header and body
 // delivered together.
-/// Spec: m2-104/1.6.1#3, m2-104/1.6.1#5, m2-116/1.4.1#2, m2-116/1.4.1#4
+/// Spec: m2-104/1.6.1#3, m2-116/1.4.1#2
 #[test]
 fn a_get_reply_of_many_chunks_is_decoded_by_its_mutual_encoding() {
     let (mut i, now) = ready(2);

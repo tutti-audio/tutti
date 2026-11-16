@@ -64,7 +64,9 @@ fn note_constructors_are_the_no_attribute_messages() {
 /// M2-104 section 7.4.14, Table 8: the one attribute a sender writes for data
 /// that fits no defined Attribute Type, or of a type it does not know, is type
 /// 0x01 (Manufacturer Specific): byte 4 of the first word is 0x01 and the low
-/// half of the second word is the data, whatever the 16 bits are.
+/// half of the second word is the data, whatever the 16 bits are. No other
+/// free-form type is writable: `ReservedAttribute` has no public constructor
+/// (a `compile_fail` doctest in `reserved.rs`).
 /// Spec: m2-104/7.4.14#4, m2-104/7.4.14#5
 #[test]
 fn attribute_data_that_fits_no_defined_type_is_type_one() {

@@ -245,7 +245,6 @@ fn copyright_and_lyrics_are_flex_text_over_several_packets() {
 /// Delta Clockstamp of the value of the one before Start of Clip. A clip with no
 /// configuration header has a stamp of 0 before Start of Clip, and the Set
 /// Tempo after it has a stamp of 0.
-/// Spec: m2-116/7.1.1#2
 #[test]
 fn the_first_set_tempo_has_the_delta_clockstamp_of_start_of_clip() {
     let smf = format0(vec![

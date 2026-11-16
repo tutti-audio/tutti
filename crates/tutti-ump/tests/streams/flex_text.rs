@@ -132,7 +132,7 @@ fn a_message_has_at_most_32_packets() {
 /// framing is the one every message of type 0xD uses: each text kind of both
 /// status banks, at either address, is a Start, a Continue and an End, and its
 /// packets say the kind and the address they were written with.
-/// Spec: m2-104/7.5#1, m2-104/7.5.1#1
+/// Spec: m2-104/7.5#1
 #[test]
 fn every_text_kind_is_framed_alike_at_a_channel_or_the_group() {
     const KINDS: [FlexTextKind; 18] = [
