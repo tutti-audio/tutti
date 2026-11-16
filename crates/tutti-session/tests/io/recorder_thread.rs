@@ -312,9 +312,8 @@ fn a_starving_source_is_ended_only_by_stop() {
 
 /// **A panic on the pump thread becomes an error, not a lost take.**
 ///
-/// the join maps the pump's panic to
-/// `io::Error::other("recording thread panicked: {message}")`. Nothing exercised that arm,
-/// so a panicking source would have surfaced as… whatever `unwrap` does.
+/// The join maps the pump's panic to
+/// `io::Error::other("recording thread panicked: {message}")`.
 ///
 /// Safe to run only because this repo uses nextest, which gives every test its
 /// own process: the panic is caught by the join here, but a pump that used
@@ -336,9 +335,8 @@ fn a_panicking_source_surfaces_as_a_recording_thread_panic() {
     )
     .expect("stereo source into a stereo sink");
 
-    // Sequence on the panic having happened, not on a duration: `stop()`
-    // called first would clear the flag and the thread would exit cleanly
-    // without ever polling, which is the race the first draft of this test hit.
+    // Sequence on the panic having happened, not on a duration: a stop
+    // requested first lets the thread exit cleanly without ever polling.
     wait_until("the source to be polled and panic", || {
         polled.load(Ordering::Acquire) >= 1
     });
@@ -349,7 +347,7 @@ fn a_panicking_source_surfaces_as_a_recording_thread_panic() {
 
     assert!(
         err.to_string().contains("recording thread panicked"),
-        "expected the join-poison message, got: {err}"
+        "expected the recording-thread panic, got: {err}"
     );
     assert!(
         polled.load(Ordering::Acquire) >= 1,

@@ -154,7 +154,7 @@ impl<T> ThreadHandle<T> {
     pub fn join(mut self) -> Result<T, Panicked> {
         let lost = |name: &str| Panicked {
             name: name.to_owned(),
-            message: "(not a string)".to_owned(),
+            message: "(panicked outside the catch)".to_owned(),
         };
         match self.join.take() {
             // The body's panic is caught on the thread, so a join error is a

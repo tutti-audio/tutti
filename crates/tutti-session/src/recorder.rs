@@ -720,8 +720,8 @@ impl<K> Recorder<K> {
         self.join_pump()
     }
 
-    /// Joins the pump and surfaces its finalize result, leaving the stop
-    /// token alone. The half [`finish_in_place`](Self::finish_in_place) and
+    /// Joins the pump and surfaces its finalize result; it requests no stop
+    /// itself. The half [`finish_in_place`](Self::finish_in_place) and
     /// [`wait`](Self::wait) share, and the whole difference between them is
     /// the stop requested before this call. A pump that panicked comes back as
     /// an `io::Error` reading "recording thread panicked: {message}".
