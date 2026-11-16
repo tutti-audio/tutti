@@ -22,6 +22,22 @@ fn a_silent_output_is_sent_active_sensing_within_300_ms() {
     );
 }
 
+/// p.32: a transmitter sends at least every 300 ms: the interval is within it,
+/// so the next send is due within 300 ms of the last byte.
+#[test]
+fn the_next_send_is_due_within_300_ms_of_the_last_byte() {
+    let t0 = Instant::now();
+    let mut sender = ActiveSensingSender::new(MidiGroup::FIRST, t0);
+    let last_byte = t0 + Duration::from_millis(40);
+    sender.sent(last_byte);
+    assert!(sender.deadline() <= last_byte + Duration::from_millis(300));
+    assert!(
+        sender
+            .poll(last_byte + Duration::from_millis(300))
+            .is_some()
+    );
+}
+
 /// p.32: Active Sensing is sent when nothing else is, so any other message
 /// moves the next one an interval past it.
 #[test]

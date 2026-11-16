@@ -178,8 +178,10 @@ pub trait DeviceOut: MidiOut {
     }
 
     /// The batches from now on are in `protocol`. Called when the output opens
-    /// and whenever the device's configuration changes, never during a
-    /// [`queue`](MidiOut::queue). The default is for a transport that does not
+    /// and whenever the device's configuration changes. It may run while
+    /// another thread is in [`queue`](MidiOut::queue) (the Active Sensing thread
+    /// queues beside the control thread), so an implementation keeps the
+    /// protocol in an atomic. The default is for a transport that does not
     /// tag.
     fn follow(&self, _protocol: Protocol) {}
 }

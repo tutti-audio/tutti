@@ -15,7 +15,6 @@
 //! [`Phase::MidiOut`]: crate::Phase::MidiOut
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tutti_graph::UmpAt;
 
@@ -493,44 +492,51 @@ impl UmpOut {
     }
 }
 
-/// How many outbound events went nowhere, and whether that has been said
-/// aloud: the total behind [`MidiReport::OutputDropped`] and
-/// [`Midi::out_drops`], over every output.
-#[derive(Debug, Default)]
-pub(crate) struct OutDrops {
-    dropped: AtomicU64,
-    warned: AtomicBool,
+/// The writing half of an output's cumulative losses: held by the session beside
+/// the output, written on the session's thread.
+pub(crate) struct LossWriters {
+    lost: tutti_rt::CounterWriter<u64>,
+    refused: tutti_rt::CounterWriter<u64>,
 }
 
-impl OutDrops {
-    /// Events discarded for want of an open output, refused by an output
-    /// node's tap for want of room, refused as scheduled more than
-    /// [`MAX_OUTPUT_AHEAD`](tutti_midi_runtime::MAX_OUTPUT_AHEAD) ahead or by
-    /// the sink, or a Machine Control look that was never sent (a time no time
-    /// code names, or a payload that does not pack as SysEx7).
-    pub(crate) fn count(&self) -> u64 {
-        self.dropped.load(Ordering::Relaxed)
+/// The reading half of an output's losses, shared with its handle.
+#[derive(Clone, Debug)]
+pub(crate) struct LossReaders {
+    lost: tutti_rt::Counter<u64>,
+    refused: tutti_rt::Counter<u64>,
+}
+
+/// A fresh pair of loss cells, at zero.
+pub(crate) fn loss_cells() -> (LossWriters, LossReaders) {
+    let (lost_writer, lost) = tutti_rt::counter();
+    let (refused_writer, refused) = tutti_rt::counter();
+    (
+        LossWriters {
+            lost: lost_writer,
+            refused: refused_writer,
+        },
+        LossReaders { lost, refused },
+    )
+}
+
+impl LossWriters {
+    /// Counts `n` events its node's tap had no room for.
+    pub(crate) fn lost(&mut self, n: u64) {
+        self.lost.add(n);
     }
 
-    /// Record `n` events that were refused with an output to blame: a count,
-    /// with no warning of its own.
-    pub(crate) fn record_refused(&self, n: u64) {
-        self.dropped.fetch_add(n, Ordering::Relaxed);
+    /// Counts `n` events that did not go: refused by the output, scheduled too
+    /// far ahead, or with no output to send to.
+    pub(crate) fn refused(&mut self, n: u64) {
+        self.refused.add(n);
     }
+}
 
-    /// Record `n` events dropped for want of an open output, warning the first
-    /// time only.
-    fn record(&self, n: usize) {
-        if n == 0 {
-            return;
-        }
-        let total = self.dropped.fetch_add(n as u64, Ordering::Relaxed) + n as u64;
-        if !self.warned.swap(true, Ordering::Relaxed) {
-            tracing::warn!(
-                "MIDI out has events but no output is open; {total} dropped so far. \
-                 Declare a `midi_output` or `midi_sink` entry and connect its node."
-            );
-        }
+impl LossReaders {
+    /// The losses so far: events the tap lost, events that did not go.
+    pub(crate) fn get(&self) -> tutti_graph::Losses {
+        tutti_graph::Losses::lost(self.lost.get())
+            + tutti_graph::Losses::refused(self.refused.get())
     }
 }
 
@@ -538,10 +544,10 @@ impl OutDrops {
 /// drain to the callback it is given, and they are then sent together
 /// ([`UmpOut::send_frames`]), so the spacing of the whole drain, not of a
 /// chunk of it, is what the stamps and the send times keep. With no output the
-/// events are counted as dropped. Returns how many events did not go.
+/// events are counted as refused in `losses`. Returns how many events did not go.
 fn route_drain(
     out: Option<&mut UmpOut>,
-    drops: &OutDrops,
+    losses: &mut LossWriters,
     timing: Option<&OutputTiming>,
     fill: impl FnOnce(&mut dyn FnMut(Frame, Ump)),
 ) -> u64 {
@@ -552,14 +558,14 @@ fn route_drain(
             fill(&mut |frame, ump| batch.push((frame, ump)));
             let refused = out.send_frames(&batch, timing) as u64;
             out.drained = batch;
-            drops.record_refused(refused);
+            losses.refused(refused);
             refused
         }
         None => {
             let mut n = 0;
             fill(&mut |_, _| n += 1);
-            drops.record(n);
-            n as u64
+            losses.refused(n);
+            n
         }
     }
 }
@@ -569,21 +575,16 @@ fn route_drain(
 /// not back up), counted first. Returns how many events did not go.
 pub(crate) fn route_batch(
     out: Option<&mut UmpOut>,
-    drops: &OutDrops,
+    losses: &mut LossWriters,
     timing: Option<&OutputTiming>,
     events: &[(Frame, Ump)],
 ) -> u64 {
-    match out {
-        Some(out) => {
-            let refused = out.send_frames(events, timing) as u64;
-            drops.record_refused(refused);
-            refused
-        }
-        None => {
-            drops.record(events.len());
-            events.len() as u64
-        }
-    }
+    let refused = match out {
+        Some(out) => out.send_frames(events, timing) as u64,
+        None => events.len() as u64,
+    };
+    losses.refused(refused);
+    refused
 }
 
 /// What [`Midi::unroute`] found missing: the rule `id` named.
@@ -762,7 +763,6 @@ pub(crate) struct MidiState {
     pub(crate) ports: crate::midi_port::Ports,
     /// The session's one MPE mode ([`Midi::set_mpe`]).
     mpe: MpeMode,
-    drops: OutDrops,
     /// The tempo the session follows, if it does ([`Midi::follow_tempo`]).
     follow: Option<Follow>,
     /// The MIDI clock the session follows, if it does ([`Midi::follow_clock`]).
@@ -783,9 +783,6 @@ pub(crate) struct MidiState {
     output_clock: Option<OutputClockSource>,
     /// The outputs' own latency and offset ([`Midi::set_output_latency`]).
     output_latency: OutputLatency,
-    /// The drop count the last `MidiOut` phase reported, and when.
-    drops_seen: u64,
-    reported_at: Option<Instant>,
     /// The hardware input's drop total the last `Poll` phase reported, and
     /// when.
     #[cfg(feature = "midi-hardware")]
@@ -810,17 +807,9 @@ impl std::fmt::Debug for MidiState {
             .field("minted", &self.minted)
             .field("routed", &self.routed)
             .field("host_routes", &self.host_routes)
-            .field("drops", &self.drops)
-            .field("drops_seen", &self.drops_seen)
-            .field("reported_at", &self.reported_at)
             .finish_non_exhaustive()
     }
 }
-
-/// How often a rising drop count is reported at most
-/// ([`MidiReport::OutputDropped`]):
-/// a Machine Control look with no output open drops on every update.
-pub const MIDI_OUT_DROP_REPORT: Duration = Duration::from_secs(1);
 
 /// How often a rising count of events the hardware inputs' inlets dropped is
 /// reported at most
@@ -1073,28 +1062,30 @@ impl MidiState {
         ) {
             Ok(Some(message)) => message,
             Ok(None) => return,
-            // A refused look sends nothing and is counted as a lost event.
+            // A refused look sends nothing and is counted refused on every output.
             Err(_) => {
-                self.drops.record_refused(1);
+                self.refuse_to_outputs(1);
                 return;
             }
         };
         let frame = playhead.frame();
         let Ok(packets) = tutti_ump::Sysex7Packets::from_payload(*group, &message) else {
-            self.drops.record_refused(1);
+            self.refuse_to_outputs(1);
             return;
         };
         let batch: Vec<(Frame, Ump)> = packets.map(|ump| (frame, ump)).collect();
         let timing = self.output_timing();
-        // Every open output is sent it; with none open it is counted dropped.
+        // Every output is sent it, and counts what does not go.
         #[cfg(feature = "midi-hardware")]
-        let devices = self.ports.route(&batch, &self.drops, timing.as_ref());
-        #[cfg(not(feature = "midi-hardware"))]
-        let devices = false;
-        let sinks = self.sinks.route(&batch, &self.drops, timing.as_ref());
-        if !devices && !sinks {
-            route_batch(None, &self.drops, timing.as_ref(), &batch);
-        }
+        self.ports.route(&batch, timing.as_ref());
+        self.sinks.route(&batch, timing.as_ref());
+    }
+
+    /// Counts `n` events a look could not become as refused by every output.
+    fn refuse_to_outputs(&mut self, n: u64) {
+        #[cfg(feature = "midi-hardware")]
+        self.ports.refuse(n);
+        self.sinks.refuse(n);
     }
 
     /// The outputs' taps are on one scale of frames, the rate they were opened
@@ -1104,61 +1095,48 @@ impl MidiState {
     /// commit compiles the new taps.
     pub(crate) fn follow_rate(&mut self, graph: &mut Graph) -> bool {
         let timing = self.output_timing();
-        let sinks = self.sinks.reopen(graph, &self.drops, timing.as_ref());
+        let sinks = self.sinks.reopen(graph, timing.as_ref());
         #[cfg(feature = "midi-hardware")]
-        let ports = self.ports.reopen(graph, &self.drops, timing.as_ref());
+        let ports = self.ports.reopen(graph, timing.as_ref());
         #[cfg(not(feature = "midi-hardware"))]
         let ports = false;
         sinks || ports
     }
 
-    /// `Phase::MidiOut`: drains every output's tap to its device or sink, and
-    /// reports the drops when their count rose, at most once per
-    /// [`MIDI_OUT_DROP_REPORT`] of `now`. Whether the graph was edited.
+    /// `Phase::MidiOut`: drains every output's tap to its device or sink.
+    /// Whether the graph was edited.
     pub(crate) fn midi_out_phase(
         &mut self,
         graph: &mut Graph,
         playhead: &tutti_engine::Playhead,
-        now: Instant,
-        out: &mut Vec<crate::SessionEvent>,
     ) -> bool {
         // A graph re-rated outside the device hook (`Graph::set_sample_rate`)
         // is followed here, before this update's events are read.
         let mut edited = self.follow_rate(graph);
         let timing = self.output_timing();
-        edited |= self.sinks.drain(graph, &self.drops, timing.as_ref());
+        edited |= self.sinks.drain(graph, timing.as_ref());
         #[cfg(feature = "midi-hardware")]
-        self.ports.drain_outputs(&self.drops, timing.as_ref());
+        self.ports.drain_outputs(timing.as_ref());
         self.send_machine_control(playhead);
-        let count = self.drops.count();
-        let due = self
-            .reported_at
-            .is_none_or(|at| now.saturating_duration_since(at) >= MIDI_OUT_DROP_REPORT);
-        if count != self.drops_seen && due {
-            self.drops_seen = count;
-            self.reported_at = Some(now);
-            out.push(MidiReport::OutputDropped { total: count }.into());
-        }
         edited
     }
 }
 
 /// Reads `tap` dry and routes what it held to `out` (with none, the events are
-/// counted as dropped), each event on its frame. Returns what was lost: the
-/// events the tap refused for want of room ([`EventTapReader::take_lost`]) as
-/// `lost`, and those that did not go as `refused`; both are counted in `drops`
-/// too.
+/// counted as refused), each event on its frame. The events the tap had no room
+/// for ([`EventTapReader::take_lost`]) are counted lost, and those that did not
+/// go refused, in `losses`.
 pub(crate) fn drain_events(
     tap: &mut EventTapReader,
     out: Option<&mut UmpOut>,
-    drops: &OutDrops,
+    losses: &mut LossWriters,
     timing: Option<&OutputTiming>,
-) -> tutti_graph::Losses {
+) {
     let mut events = [TapEvent {
         frame: Frame::ZERO,
         ump: Ump([0; 4]),
     }; DRAIN_CHUNK];
-    let refused = route_drain(out, drops, timing, |push| {
+    route_drain(out, losses, timing, |push| {
         loop {
             let n = tap.pop_into(&mut events);
             for e in &events[..n] {
@@ -1169,9 +1147,7 @@ pub(crate) fn drain_events(
             }
         }
     });
-    let lost = tap.take_lost();
-    drops.record_refused(lost);
-    tutti_graph::Losses::lost(lost) + tutti_graph::Losses::refused(refused)
+    losses.lost(tap.take_lost());
 }
 
 /// Wires `inputs`' ports as `rules` route them (`tutti_midi_runtime::compile_routes`)
@@ -2156,14 +2132,6 @@ impl Midi<'_> {
         (node, tap)
     }
 
-    /// Events dropped over every output: for want of an open output, refused
-    /// by an output node's tap for want of room (1 024 events between two
-    /// updates), refused by a sink or as scheduled too far ahead, counted. A
-    /// `midi_sink`'s own share is [`MidiSink::losses`](crate::MidiSink::losses).
-    pub fn out_drops(&self) -> u64 {
-        self.state.drops.count()
-    }
-
     /// Sets the outputs' own latency and offset: what a MIDI device
     /// takes to sound an event (it is sent that much earlier) and a trim on top
     /// (positive sends later), added to the terms every event is timed by
@@ -2204,7 +2172,7 @@ impl Midi<'_> {
 mod tests {
     use super::*;
     use std::sync::Arc;
-    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use tutti_fixtures::midi;
     use tutti_types::SampleRate;
 
@@ -2299,19 +2267,26 @@ mod tests {
     /// silently.
     #[test]
     fn routing_with_no_output_counts_the_drops() {
-        let drops = OutDrops::default();
-        let refused = route_batch(None, &drops, None, &[at(0), at(1), at(2)]);
-        assert_eq!((refused, drops.count()), (3, 3));
+        let (mut writers, readers) = loss_cells();
+        let refused = route_batch(None, &mut writers, None, &[at(0), at(1), at(2)]);
+        assert_eq!(
+            (refused, readers.get()),
+            (3, tutti_graph::Losses::refused(3))
+        );
     }
 
     /// And a router *with* an output does not count drops.
     #[test]
     fn routing_to_an_open_output_drops_nothing() {
         let (mut out, count) = out_with_counter(Stamping::Off);
-        let drops = OutDrops::default();
-        route_batch(Some(&mut out), &drops, None, &[at(0), at(1)]);
+        let (mut writers, readers) = loss_cells();
+        route_batch(Some(&mut out), &mut writers, None, &[at(0), at(1)]);
         assert_eq!(count.load(Ordering::SeqCst), 2, "both reached the sink");
-        assert_eq!(drops.count(), 0, "nothing was dropped");
+        assert_eq!(
+            readers.get(),
+            tutti_graph::Losses::NONE,
+            "nothing was dropped"
+        );
     }
 
     /// An event on a frame of the graph's clock.
@@ -2337,10 +2312,10 @@ mod tests {
     fn a_batch_of_frames_is_a_block_from_its_first_frame() {
         let log = Arc::new(std::sync::Mutex::new(Vec::new()));
         let mut out = UmpOut::new(Arc::new(Recording(log.clone())), SampleRate::SR_48K);
-        let drops = OutDrops::default();
+        let (mut losses, _) = loss_cells();
         route_batch(
             Some(&mut out),
-            &drops,
+            &mut losses,
             None,
             &[at(1_250), at(1_000), at(1_999)],
         );
@@ -2356,7 +2331,7 @@ mod tests {
         let before = out.origin();
         route_batch(
             Some(&mut out),
-            &drops,
+            &mut losses,
             None,
             &[at(1_250), at(1_000), at(1_999)],
         );
@@ -2503,16 +2478,19 @@ mod tests {
     fn an_event_beyond_the_cap_is_refused_and_counted() {
         let t0 = Instant::now() + Duration::from_secs(60);
         let (mut out, log) = timed_out();
-        let drops = OutDrops::default();
+        let (mut writers, readers) = loss_cells();
         let timing = timing_at(t0, OutputTerms::default());
         let beyond = 48_000 * 3;
         let refused = route_batch(
             Some(&mut out),
-            &drops,
+            &mut writers,
             Some(&timing),
             &[at(1_000), at(beyond)],
         );
-        assert_eq!((refused, drops.count()), (1, 1));
+        assert_eq!(
+            (refused, readers.get()),
+            (1, tutti_graph::Losses::refused(1))
+        );
         assert_eq!(log.lock().unwrap().len(), 1, "only the one within the cap");
     }
 
