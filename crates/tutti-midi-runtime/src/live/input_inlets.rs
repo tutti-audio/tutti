@@ -25,17 +25,17 @@
 //! (`late` in [`InletCounts::losses`]), only when the
 //! thread's push comes more than the lead after its arrival.
 //!
-//! # Timing
+//! # Timing and losses
 //!
-//! Each [`DeviceInput`] reports how steady its map is through the
-//! [`ClockWriters`] it is opened with ([`open_with`](InputInlets::open_with)):
-//! a gauge of the latest correction the map made (signed, positive when a
-//! reading came late) and a counter of its re-anchors, a [`Resyncs`] each. The
-//! readers are made once, by [`ClockWriters::new`], and outlive any one
-//! connection: [`ClockWriters::reopen`] hands the writers to the next
-//! connection once the last has dropped, so the counter is cumulative across
-//! connections and the gauge holds its last reading until the next map writes
-//! one. The device's thread writes with atomic stores, so reading them blocks
+//! Each [`DeviceInput`] reports through the [`InputWriters`] it is opened with
+//! ([`open_with`](InputInlets::open_with)): a gauge of the latest correction its
+//! map made (signed, positive when a reading came late), a counter of its
+//! re-anchors, a [`Resyncs`] each, and a counter of the pushes its inlet had no
+//! room for. The readers ([`InputReaders`]) are made once, by
+//! [`InputWriters::new`], and outlive any one connection:
+//! [`InputWriters::reopen`] hands the writers to the next connection once the
+//! last has dropped, so the counters are cumulative across connections and the
+//! gauge holds its last reading until the next map writes one. The device's thread writes with atomic stores, so reading them blocks
 //! nothing.
 //!
 //! # One inlet per input
@@ -144,13 +144,13 @@ impl InputInlets {
     /// and the [`DeviceInput`] (dropped).
     #[must_use = "the node is the inlet's graph side: until it is added, what the device sends goes nowhere"]
     pub fn open(&self) -> (DeviceInput, EventInletNode) {
-        self.open_with(ClockWriters::new().0)
+        self.open_with(InputWriters::new().0)
     }
 
     /// [`open`](Self::open) with the input's timing written to `clock`: the
-    /// readers of its cells stay with whoever made them ([`ClockWriters::new`]).
+    /// readers of its cells stay with whoever made them ([`InputWriters::new`]).
     #[must_use = "the node is the inlet's graph side: until it is added, what the device sends goes nowhere"]
-    pub fn open_with(&self, clock: ClockWriters) -> (DeviceInput, EventInletNode) {
+    pub fn open_with(&self, clock: InputWriters) -> (DeviceInput, EventInletNode) {
         let id = self.last.fetch_add(1, Ordering::Relaxed) + 1;
         let (node, writer) = EventInletNode::pair(self.capacity);
         let input = DeviceInput {
@@ -163,6 +163,7 @@ impl InputInlets {
             map: None,
             timing: clock.timing,
             resyncs: clock.resyncs,
+            lost: clock.lost,
         };
         (input, node)
     }
@@ -172,35 +173,66 @@ fn nanos(d: Duration) -> u64 {
     u64::try_from(d.as_nanos()).unwrap_or(u64::MAX)
 }
 
-/// The writing ends of an input's timing cells: the latest correction its clock
-/// map made and the count of its re-anchors. One set writes at a time; the
-/// device's end ([`DeviceInput`]) owns it for a connection, and dropping the
-/// input closes the cells until [`reopen`](Self::reopen) hands the writers on.
+/// The writing ends of an input's cells: the latest correction its clock map
+/// made, the count of its re-anchors and the count of events its inlet had no
+/// room for. One set writes at a time; the device's end ([`DeviceInput`]) owns
+/// it for a connection, and dropping the input closes the cells until
+/// [`reopen`](Self::reopen) hands the writers on.
 #[derive(Debug)]
-#[must_use = "the writers are how an input reports its timing"]
-pub struct ClockWriters {
+#[must_use = "the writers are how an input reports its timing and its losses"]
+pub struct InputWriters {
     timing: GaugeWriter<Seconds>,
     resyncs: CounterWriter<Resyncs>,
+    lost: CounterWriter<u64>,
 }
 
-impl ClockWriters {
+/// The reading ends of an input's cells ([`InputWriters`]): made once with the
+/// writers, kept by whoever outlives the connections.
+#[derive(Clone, Debug)]
+pub struct InputReaders {
+    /// The latest correction the clock map made, in seconds.
+    pub timing: Gauge<Seconds>,
+    /// The clock map's re-anchors.
+    pub resyncs: Counter<Resyncs>,
+    /// The events the inlet had no room for.
+    pub lost: Counter<u64>,
+}
+
+impl InputWriters {
     /// New cells and their writers, with their readers: a gauge reading 0 s
-    /// and a counter at zero. Allocates: control side.
-    pub fn new() -> (Self, Gauge<Seconds>, Counter<Resyncs>) {
+    /// and counters at zero. Allocates: control side.
+    pub fn new() -> (Self, InputReaders) {
         let (timing, gauge) = gauge(Seconds::new(0.0));
-        let (resyncs, counter) = counter();
-        (Self { timing, resyncs }, gauge, counter)
+        let (resyncs, counter_resyncs) = counter();
+        let (lost, counter_lost) = counter();
+        (
+            Self {
+                timing,
+                resyncs,
+                lost,
+            },
+            InputReaders {
+                timing: gauge,
+                resyncs: counter_resyncs,
+                lost: counter_lost,
+            },
+        )
     }
 
     /// The writers of cells whose last writers have dropped; `None` while a
-    /// connection still holds them. The count carries on from where it was and
-    /// the gauge holds its last reading (it is not reset: it reads the latest
-    /// correction made, until the next map makes one). Control side.
-    pub fn reopen(timing: &Gauge<Seconds>, resyncs: &Counter<Resyncs>) -> Option<Self> {
-        // If only the first reopens, its writer drops here and closes it again.
-        let timing = timing.reopen()?;
-        let resyncs = resyncs.reopen()?;
-        Some(Self { timing, resyncs })
+    /// connection still holds them. The counts carry on from where they were
+    /// and the gauge holds its last reading (it is not reset: it reads the
+    /// latest correction made, until the next map makes one). Control side.
+    pub fn reopen(readers: &InputReaders) -> Option<Self> {
+        // If only some reopen, their writers drop here and close them again.
+        let timing = readers.timing.reopen()?;
+        let resyncs = readers.resyncs.reopen()?;
+        let lost = readers.lost.reopen()?;
+        Some(Self {
+            timing,
+            resyncs,
+            lost,
+        })
     }
 }
 
@@ -221,6 +253,8 @@ pub struct DeviceInput {
     timing: GaugeWriter<Seconds>,
     /// The map's re-anchors.
     resyncs: CounterWriter<Resyncs>,
+    /// The pushes the ring refused.
+    lost: CounterWriter<u64>,
 }
 
 impl std::fmt::Debug for DeviceInput {
@@ -251,7 +285,8 @@ impl DeviceInput {
     /// block clock puts that time on, plus the lead; or for the next block
     /// while no reading exists (no engine yet, or `arrival` before frame 0).
     /// `false` when the ring was full: the event is dropped and counted in
-    /// [`Losses::lost`](tutti_graph::Losses::lost). Lock-free and allocation-free, so safe to
+    /// [`Losses::lost`](tutti_graph::Losses::lost) and in the input's own `lost`
+    /// cell ([`InputReaders::lost`]). Lock-free and allocation-free, so safe to
     /// call from a driver callback.
     #[inline]
     pub fn push(&mut self, ump: impl Into<Ump>, arrival: Instant) -> bool {
@@ -260,7 +295,11 @@ impl DeviceInput {
             Some(at) => self.writer.push(at, ump),
             None => self.writer.push(Stamp::NextBlock, ump),
         };
-        sent.is_ok()
+        let sent = sent.is_ok();
+        if !sent {
+            self.lost.add(1);
+        }
+        sent
     }
 
     /// The moment `arrival` plus the lead is, by the latest block reading.

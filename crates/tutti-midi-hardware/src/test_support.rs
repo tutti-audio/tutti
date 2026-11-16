@@ -19,19 +19,20 @@
 //! fake device list, and shipping one in a release build invites it into
 //! production wiring by accident.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread::JoinHandle;
 
+use crate::InputProducerHandle;
 use crate::capability::{OsEndpoint, UmpCapability};
 use crate::devices::ChangeSink;
 use crate::devices::reporter::os_devices;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
 use crate::error::{Error, Result};
-use crate::{InputProducerHandle, Pushed};
 use tutti_midi_device::{EndpointId, Identity, OsChange, PortDirection};
 use tutti_midi_runtime::{MidiOut, Taken};
+use tutti_rt::PushError;
 
 /// A backend with a fixed device list and no OS behind it.
 ///
@@ -54,6 +55,8 @@ pub struct FakeBackend {
     log: SentLog,
     /// How many events per batch the sink it hands out will accept.
     accepts: usize,
+    /// Whether the sinks it handed out refuse everything for now.
+    refusing: Arc<AtomicBool>,
 }
 
 /// The producer handle of each input connection that is open, by device.
@@ -136,9 +139,17 @@ pub struct FakeCounters {
     devices: Arc<Mutex<FakeDevices>>,
     producers: Producers,
     log: SentLog,
+    refusing: Arc<AtomicBool>,
 }
 
 impl FakeCounters {
+    /// Makes every sink the fake handed out refuse everything (or take what its
+    /// `accepts` allows again): a device whose output filled up after it was
+    /// opened.
+    pub fn refuse_sends(&self, refuse: bool) {
+        self.refusing.store(refuse, Ordering::SeqCst);
+    }
+
     /// Takes the packets sent to the output of device `id` since the last call,
     /// oldest first: what the fake device received on the wire.
     pub fn take_sent(&self, id: EndpointId) -> Vec<tutti_ump::Ump> {
@@ -181,8 +192,8 @@ impl FakeCounters {
     /// The fake device `id` sends `ump`, which the OS delivered at `arrival`:
     /// pushed through the producer of its open input connection, as a driver's
     /// thread would. `false` when no connection to `id` is open, or the
-    /// port's inlet is full ([`Pushed::Full`]); an event kept out of the graph
-    /// on purpose ([`Pushed::Diverted`]) was taken.
+    /// port's inlet is full ([`PushError::Full`]); an event kept out of the graph
+    /// on purpose ([`Delivered::Diverted`](crate::Delivered)) was taken.
     pub fn send_input(
         &self,
         id: EndpointId,
@@ -196,7 +207,7 @@ impl FakeCounters {
         producers
             .iter_mut()
             .find(|(device, _)| *device == id)
-            .is_some_and(|(_, producer)| producer.push(ump, arrival) != Pushed::Full)
+            .is_some_and(|(_, producer)| producer.push(ump, arrival) != Err(PushError::Full))
     }
 
     /// Input ports opened so far.
@@ -337,6 +348,7 @@ impl Drop for FakeConn {
 struct FakeSink {
     sent: Arc<AtomicUsize>,
     accepts: usize,
+    refusing: Arc<AtomicBool>,
     id: EndpointId,
     log: SentLog,
 }
@@ -346,7 +358,12 @@ impl DeviceOut for FakeSink {}
 impl MidiOut for FakeSink {
     fn queue_timed(&self, events: &[tutti_midi_runtime::Outgoing]) -> Taken {
         self.sent.fetch_add(events.len(), Ordering::SeqCst);
-        let taken = Taken::within(events, self.accepts);
+        let accepts = if self.refusing.load(Ordering::SeqCst) {
+            0
+        } else {
+            self.accepts
+        };
+        let taken = Taken::within(events, accepts);
         self.log
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -424,7 +441,9 @@ impl FakeBackend {
     ) -> (Box<dyn MidiEndpoints>, FakeCounters) {
         let producers = Producers::default();
         let log = SentLog::default();
+        let refusing = Arc::new(AtomicBool::new(false));
         let counters = FakeCounters {
+            refusing: Arc::clone(&refusing),
             producers: Arc::clone(&producers),
             log: Arc::clone(&log),
             sent: Arc::new(AtomicUsize::new(0)),
@@ -444,6 +463,7 @@ impl FakeBackend {
             producers,
             log,
             accepts,
+            refusing,
         };
         (Box::new(backend), counters)
     }
@@ -538,6 +558,7 @@ impl MidiEndpoints for FakeBackend {
         Ok(Box::new(FakeSink {
             sent: Arc::clone(&self.sent),
             accepts: self.accepts,
+            refusing: Arc::clone(&self.refusing),
             id,
             log: Arc::clone(&self.log),
         }))

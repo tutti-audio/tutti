@@ -19,7 +19,7 @@ use tutti_midi_device::{
     DeviceEvent, DeviceId, DeviceInfo, DeviceTable, EndpointId, OsChange, OsDevice, PortDirection,
     Resolved,
 };
-use tutti_midi_runtime::{ClockWriters, InputId, Outgoing, Taken};
+use tutti_midi_runtime::{InputId, InputWriters, Outgoing, Taken};
 use tutti_ump::StreamConfig;
 
 use crate::HardwareMidiInputs;
@@ -343,7 +343,7 @@ impl Devices {
         &self,
         id: &DeviceId,
         ports: &Arc<HardwareMidiInputs>,
-        clock: ClockWriters,
+        clock: InputWriters,
     ) -> Result<(OpenInput, EventInletNode)> {
         let (info, handle) = self.present(id, PortDirection::is_input)?;
         let (producer, inlet) = ports.open_input_port_with(info.name.as_str(), clock);

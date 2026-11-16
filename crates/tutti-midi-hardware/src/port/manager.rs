@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use tutti_graph::{EventInletNode, Losses};
-use tutti_midi_runtime::{ClockWriters, InputId, InputInlets};
+use tutti_midi_runtime::{InputId, InputInlets, InputWriters};
 
 use super::async_port::{HardwareMidiInput, InputProducerHandle, StreamDrain};
 use crate::InputTiming;
@@ -140,16 +140,16 @@ impl HardwareMidiInputs {
         &self,
         name: impl Into<String>,
     ) -> (InputProducerHandle, EventInletNode) {
-        self.open_input_port_with(name, ClockWriters::new().0)
+        self.open_input_port_with(name, InputWriters::new().0)
     }
 
     /// [`open_input_port`](Self::open_input_port), the port's clock map
-    /// reporting its timing to `clock` (see [`ClockWriters`]).
+    /// reporting its timing to `clock` (see [`InputWriters`]).
     #[must_use = "the handle is the port's only producer, and the node its graph side: dropping either leaves the port fed by nothing"]
     pub fn open_input_port_with(
         &self,
         name: impl Into<String>,
-        clock: ClockWriters,
+        clock: InputWriters,
     ) -> (InputProducerHandle, EventInletNode) {
         let name = name.into();
         let mut ports = self.ports();

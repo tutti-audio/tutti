@@ -66,17 +66,6 @@ pub enum MidiReport {
         /// What happened.
         change: tutti_midi_hardware::ProcessChange,
     },
-    /// The hardware devices' event inlets dropped events because they were
-    /// full: the total over every input so far, reported when it rises, at
-    /// most once per [`MIDI_INPUT_DROP_REPORT`](crate::MIDI_INPUT_DROP_REPORT)
-    /// of [`PhaseCx::now`](crate::PhaseCx::now). An inlet's ring is emptied
-    /// each block; it fills when blocks stop coming (a stalled callback) or
-    /// the device sends faster than they empty it.
-    #[cfg(feature = "midi-hardware")]
-    InputsDropped {
-        /// Events dropped so far, over every input.
-        total: u64,
-    },
     /// A [`Midi::load_file`](crate::Midi::load_file) ended: the file, or why
     /// not.
     FileLoaded {

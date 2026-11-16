@@ -1,5 +1,5 @@
 use super::*;
-use crate::Pushed;
+use crate::Delivered;
 use crate::testing::{RATE, Rig, ports};
 use std::time::{Duration, Instant};
 
@@ -91,8 +91,8 @@ fn a_ports_events_reach_the_graph_on_their_frames_and_inputs() {
     rig.attach(inlet);
     let (mut b, inlet) = manager.open_input_port("B");
     rig.attach(inlet);
-    assert_eq!(a.push(note(60), rig.time_of(130)), Pushed::Sent);
-    assert_eq!(b.push(note(64), rig.time_of(200)), Pushed::Sent);
+    assert_eq!(a.push(note(60), rig.time_of(130)), Ok(Delivered::Sent));
+    assert_eq!(b.push(note(64), rig.time_of(200)), Ok(Delivered::Sent));
     rig.run(4);
     assert_eq!(rig.take(), vec![(0, 130, note(60)), (1, 200, note(64))]);
 }
@@ -108,7 +108,7 @@ fn arrivals_keep_their_spacing_and_the_lead_is_added_to_each() {
     let (mut port, inlet) = manager.open_input_port("A");
     rig.attach(inlet);
     for (n, frame) in [(60u8, 130u64), (61, 200), (62, 333)] {
-        assert_eq!(port.push(note(n), rig.time_of(frame)), Pushed::Sent);
+        assert_eq!(port.push(note(n), rig.time_of(frame)), Ok(Delivered::Sent));
     }
     rig.run(8);
     let frames: Vec<u64> = rig.take().iter().map(|e| e.1).collect();
@@ -124,7 +124,7 @@ fn an_arrival_past_its_block_is_emitted_late_and_counted() {
     let (mut port, inlet) = manager.open_input_port("A");
     rig.attach(inlet);
     rig.run(3); // with the block `rig` ran, frames 0..256 have been rendered
-    assert_eq!(port.push(note(60), rig.time_of(10)), Pushed::Sent);
+    assert_eq!(port.push(note(60), rig.time_of(10)), Ok(Delivered::Sent));
     rig.run(1);
     assert_eq!(
         rig.take(),
@@ -152,11 +152,11 @@ fn an_inactive_port_discards_its_events() {
     manager.set_port_active(id, false);
     assert_eq!(
         port.push(note(60), rig.time_of(100)),
-        Pushed::Diverted,
+        Ok(Delivered::Diverted),
         "discarded, not lost"
     );
     manager.set_port_active(id, true);
-    assert_eq!(port.push(note(61), rig.time_of(120)), Pushed::Sent);
+    assert_eq!(port.push(note(61), rig.time_of(120)), Ok(Delivered::Sent));
     rig.run(4);
     assert_eq!(rig.take(), vec![(0, 120, note(61))]);
     assert_eq!(manager.losses().dropped(), 0);
@@ -282,7 +282,9 @@ fn a_full_inlet_counts_what_it_drops() {
     rig.attach(inlet);
     let id = handle.port();
     let taken = (0..10)
-        .filter(|_| handle.push(Ump::from(Message::Utility(Utility::Noop)), now()) == Pushed::Sent)
+        .filter(|_| {
+            handle.push(Ump::from(Message::Utility(Utility::Noop)), now()) == Ok(Delivered::Sent)
+        })
         .count();
     assert_eq!(taken, 4);
     assert_eq!(manager.port_info(id).map(|p| p.losses.lost), Some(6));
@@ -315,7 +317,7 @@ fn the_stream_drain_takes_a_message_per_step() {
     };
     let (a, b, c) = (stream(0), stream(1), stream(2));
     for ump in [a, b, c] {
-        assert_eq!(port.push(ump, now()), Pushed::Diverted);
+        assert_eq!(port.push(ump, now()), Ok(Delivered::Diverted));
     }
     let mut drain = manager.drain_stream(slot);
     assert_eq!(drain.next(), Some(a));

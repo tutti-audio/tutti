@@ -8,16 +8,17 @@ use std::time::{Duration, Instant};
 
 use super::enumerate::unpack_id;
 use super::poll::ErrorRun;
+use crate::InputProducerHandle;
 use crate::endpoints::InputConnection;
 use crate::error::Result;
 use crate::guard::Guard;
 use crate::stamp::Paired;
-use crate::{InputProducerHandle, Pushed};
 use tutti_alsa_ffi::{
     Blocking, CAP_WRITE, Client, Poller, QueueClock, Read, TYPE_APPLICATION, TYPE_MIDI_GENERIC,
     UmpVersion, Wait,
 };
 use tutti_midi_device::EndpointId;
+use tutti_rt::PushError;
 use tutti_rt::{ThreadHandle, spawn_named};
 use tutti_ump::split_stream;
 
@@ -283,7 +284,7 @@ fn pump(
         // swallowing three words of zeros.
         let decoded = split_stream(&words).next();
         if let Some(event) = decoded
-            && producer.push(event, now) == Pushed::Full
+            && producer.push(event, now) == Err(PushError::Full)
         {
             tracing::debug!("MIDI input ring full, dropping event");
         }

@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use tutti_fixtures::midi;
 use tutti_fixtures::{BlockClock, EventRig};
 use tutti_graph::NodeKey;
-use tutti_midi_runtime::{ClockWriters, DeviceInput, InputInlets};
+use tutti_midi_runtime::{DeviceInput, InputInlets, InputWriters};
 use tutti_rt::{Counter, Gauge};
 use tutti_types::{Frame, Resyncs, SampleRate, Seconds};
 use tutti_ump::{MidiChannel, Ump};
@@ -226,6 +226,29 @@ fn a_full_inlet_refuses_and_counts() {
     assert_eq!(counts.losses().lost, 2);
 }
 
+/// **An input's lost count is its own cell and carries across a reopened
+/// input**: a push the ring refuses raises it, the count survives the device
+/// dropping, and the next connection on the same cell keeps adding.
+#[test]
+fn the_lost_count_carries_across_a_reopened_input() {
+    let inlets = InputInlets::new(tutti_graph::EventCapacity::of(2), Duration::ZERO);
+    let (writers, readers) = InputWriters::new();
+    let (mut device, _node) = inlets.open_with(writers);
+    assert_eq!(readers.lost.get(), 0);
+    for i in 0..4 {
+        let _ = device.push(note(60 + i), Instant::now());
+    }
+    assert_eq!(readers.lost.get(), 2, "the two pushes the ring refused");
+    drop(device);
+    assert_eq!(readers.lost.get(), 2, "the count outlives the input");
+    let again = InputWriters::reopen(&readers).expect("the input dropped");
+    let (mut device, _node) = inlets.open_with(again);
+    for i in 0..4 {
+        let _ = device.push(note(60 + i), Instant::now());
+    }
+    assert_eq!(readers.lost.get(), 4, "the reopened input keeps counting");
+}
+
 /// A device whose clock the test writes, built on the reading "frame 1000 at
 /// `t0`": the first map.
 struct Timed {
@@ -239,7 +262,8 @@ struct Timed {
 impl Timed {
     fn new() -> Self {
         let inlets = inlets(Duration::ZERO);
-        let (writers, timing, resyncs) = ClockWriters::new();
+        let (writers, readers) = InputWriters::new();
+        let (timing, resyncs) = (readers.timing, readers.resyncs);
         let (device, _node) = inlets.open_with(writers);
         let clock = BlockClock::new();
         inlets.set_clock(Some(clock.reader()));
@@ -370,7 +394,8 @@ fn a_rate_change_counts_a_resync_only_when_its_reading_is_far_off() {
 #[test]
 fn the_cells_carry_across_a_reopened_input() {
     let inlets = inlets(Duration::ZERO);
-    let (writers, timing, resyncs) = ClockWriters::new();
+    let (writers, readers) = InputWriters::new();
+    let (timing, resyncs) = (readers.timing.clone(), readers.resyncs.clone());
     let (mut device, _node) = inlets.open_with(writers);
     let mut clock = BlockClock::new();
     inlets.set_clock(Some(clock.reader()));
@@ -385,13 +410,13 @@ fn the_cells_carry_across_a_reopened_input() {
     let _ = device.push(note(60), t0);
     assert_eq!(resyncs.get(), Resyncs::new(1));
     assert!(
-        ClockWriters::reopen(&timing, &resyncs).is_none(),
+        InputWriters::reopen(&readers).is_none(),
         "the input holds them"
     );
     drop(device);
     assert!(timing.is_closed() && resyncs.is_closed());
     let held = timing.get();
-    let again = ClockWriters::reopen(&timing, &resyncs).expect("the input dropped");
+    let again = InputWriters::reopen(&readers).expect("the input dropped");
     assert!(!timing.is_closed() && !resyncs.is_closed());
     assert_eq!(timing.get(), held);
     let (mut device, _node) = inlets.open_with(again);

@@ -30,7 +30,7 @@ fn reclaim_frees_a_request_a_block_held_across_the_next() {
     let mut node = MidiIngestNode::new();
     let controls = MidiIngestControls {
         request: Arc::clone(node.mpe_request.cell()),
-        dropped: Arc::clone(&node.dropped),
+        dropped: node.dropped_reader.clone(),
     };
     {
         // A block in progress across the request.
