@@ -133,7 +133,8 @@ impl OfflineTimeline {
     ///
     /// A render that must see the map's tempo changes drives it through
     /// [`RenderClock::render_graph`](super::RenderClock::render_graph), which
-    /// knows the block it hands the graph. A map of one point is the constant tempo, bit for bit.
+    /// knows the block it hands the graph. A map of one point is the constant
+    /// tempo, bit for bit.
     #[must_use]
     pub fn new(config: &OfflineTimelineConfig) -> Self {
         let map = &config.tempo_map;
