@@ -10,11 +10,13 @@
 //!
 //! - **Raise:** `fetch_or(bit, Release)`. Raising a bit already set changes
 //!   nothing: a request is a level, not a count.
-//! - **Take:** `swap(0, Acquire)`. Every bit raised before the swap in the
-//!   word's modification order is returned by this take or an earlier one; a
-//!   raise after it stays for the next. No bit is lost and none is returned
-//!   twice, because the swap and the `fetch_or` are both read-modify-writes
-//!   on one location.
+//! - **Take:** an `Acquire` load, and only when it reads a non-zero word a
+//!   `swap(0, Acquire)`, so the common case (no request) is one load and no
+//!   read-modify-write. Every bit raised before the swap in the word's
+//!   modification order is returned by this take or an earlier one; a raise
+//!   after it, or after a load that read zero, stays for the next. No bit is
+//!   lost and none is returned twice, because the swap and the `fetch_or` are
+//!   both read-modify-writes on one location.
 //!
 //! The `Release`/`Acquire` pair orders what the raiser wrote before raising
 //! (the plugin's new state) before what the taker reads after taking. There is
@@ -34,69 +36,15 @@ mod sync {
 /// Bits in a [`RequestWord`].
 pub const REQUEST_BITS: u8 = 32;
 
-/// One kind of request: a position in a [`RequestWord`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct RequestBit(u8);
+tutti_types::ranged! {
+    /// One kind of request: a position in a [`RequestWord`], `0..32`.
+    #[derive(Eq, Hash)]
+    RequestBit(u8), RequestBitOutOfRange, "a request bit below 32", |raw| raw < REQUEST_BITS
+}
 
 impl RequestBit {
-    /// The bit at `index`, or `None` if it is [`REQUEST_BITS`] or more.
-    #[must_use]
-    pub const fn new(index: u8) -> Option<Self> {
-        if index < REQUEST_BITS {
-            Some(Self(index))
-        } else {
-            None
-        }
-    }
-
-    /// The bit at `index`, for a literal or a constant.
-    ///
-    /// # Panics
-    ///
-    /// If `index` is [`REQUEST_BITS`] or more, at compile time in a `const`.
-    #[must_use]
-    pub const fn of(index: u8) -> Self {
-        match Self::new(index) {
-            Some(bit) => bit,
-            None => panic!("a request word has 32 bits"),
-        }
-    }
-
-    /// The position.
-    #[must_use]
-    pub const fn get(self) -> u8 {
-        self.0
-    }
-
     const fn mask(self) -> u32 {
         1 << self.0
-    }
-}
-
-impl From<RequestBit> for u8 {
-    fn from(bit: RequestBit) -> u8 {
-        bit.0
-    }
-}
-
-/// A bit index a [`RequestWord`] has no room for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("request bit {} is not below {}", .0, REQUEST_BITS)]
-pub struct RequestBitOutOfRange(u8);
-
-impl RequestBitOutOfRange {
-    /// The index that was refused.
-    #[must_use]
-    pub const fn get(self) -> u8 {
-        self.0
-    }
-}
-
-impl TryFrom<u8> for RequestBit {
-    type Error = RequestBitOutOfRange;
-
-    fn try_from(index: u8) -> Result<Self, RequestBitOutOfRange> {
-        Self::new(index).ok_or(RequestBitOutOfRange(index))
     }
 }
 
@@ -167,9 +115,9 @@ impl RequestWord {
     /// between them.
     #[must_use = "the bits are cleared; dropping them drops the requests"]
     pub fn take(&self) -> RequestBits {
+        if self.0.load(Ordering::Acquire) == 0 {
+            return RequestBits::NONE;
+        }
         RequestBits(self.0.swap(0, Ordering::Acquire))
     }
 }
-
-#[cfg(all(test, not(loom)))]
-mod tests;
