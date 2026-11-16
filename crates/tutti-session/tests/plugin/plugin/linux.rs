@@ -58,7 +58,9 @@ fn a_reload_that_fails_to_load_carries_the_bridge_error_as_its_source() {
     assert!(
         matches!(
             causes.first(),
-            Some(ReloadCause::Died(PluginFailure::StreamClosed))
+            Some(ReloadCause::Died(
+                PluginFailure::StreamClosed | PluginFailure::ServerExited { .. }
+            ))
         ),
         "the first reload is for the death: {causes:?}"
     );

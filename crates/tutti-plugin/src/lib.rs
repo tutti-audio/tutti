@@ -365,13 +365,13 @@ pub use error::{
 mod format;
 mod host;
 
-pub use tutti_plugin_ipc::BridgeConfig;
+pub use tutti_plugin_ipc::{BridgeConfig, unique_socket_path};
 
 // The main-thread token the editor, state and polling entries take; a host
 // makes it once, on its UI thread, with `MainThreadMarker::new`. `MainWork` is the
 // collector a host runs on that thread, and `MainWorkHandle` what a plugin it loads
 // defers its close through.
-pub use tutti_plugin_types::{MainThreadMarker, MainWork, MainWorkHandle};
+pub use tutti_plugin_types::{MainThreadMarker, MainWork, MainWorkHandle, Timeouts};
 // `PluginClient::set_automation_state` takes this, so callers must be able to
 // name it without depending on tutti-plugin-types directly.
 pub use tutti_plugin_types::AutomationMode;

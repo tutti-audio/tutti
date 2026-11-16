@@ -237,6 +237,21 @@ pub fn parent_process_id() -> Option<u32> {
     found
 }
 
+/// Ends this process at once with `code`, without running a plugin library's
+/// detach or any other thread's cleanup (`TerminateProcess` on the current
+/// process), for a server whose host is gone: a plain `exit` would run every
+/// loaded library's detach routine while other threads are killed mid-call.
+/// Aborts if the OS refuses.
+#[cfg(windows)]
+pub fn terminate_process(code: u32) -> ! {
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, TerminateProcess};
+
+    // SAFETY: both calls take only scalars; `GetCurrentProcess` returns a
+    // pseudo-handle that names this process and needs no close.
+    unsafe { TerminateProcess(GetCurrentProcess(), code) };
+    std::process::abort()
+}
+
 /// Bytes the named pipe can hand over right now, without blocking or
 /// consuming them (`PeekNamedPipe` as a pure size query).
 ///
