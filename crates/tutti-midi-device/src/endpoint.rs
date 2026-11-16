@@ -774,7 +774,7 @@ impl Endpoint {
     fn send_info(&self, out: &mut impl Extend<Ump>) {
         send(
             out,
-            Stream::EndpointInfo(tutti_ump::EndpointInfo {
+            Stream::EndpointInfo(tutti_ump::EndpointInfoNotification {
                 version: self.version,
                 static_function_blocks: self.static_function_blocks,
                 function_blocks: self.declared_blocks.into(),
@@ -959,7 +959,7 @@ impl Endpoint {
     /// nothing is folded): the numbers are 0 to 31, so there is no Endpoint
     /// with more.
     #[must_use]
-    pub(crate) fn apply_info(&mut self, info: &tutti_ump::EndpointInfo) -> bool {
+    pub(crate) fn apply_info(&mut self, info: &tutti_ump::EndpointInfoNotification) -> bool {
         let Some(declared) = info.function_blocks.count() else {
             return false;
         };

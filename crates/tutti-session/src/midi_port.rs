@@ -20,10 +20,10 @@
 use std::sync::{Arc, Mutex, PoisonError, Weak};
 
 use tutti_graph::{EventTapReader, NodeKey};
+use tutti_midi_device::{DeviceId, DeviceInfo, Learned, Match, Resolved, SavedDevice};
 use tutti_midi_hardware::{
-    CiPeerInfo, DeviceId, DeviceInfo, DeviceStream, InputTiming, Learned, Match, MidiSession,
-    PeerProfiles, ProfileError, ProfileSwitch, ReportAsk, ReportError, ReportPeer, Resolved,
-    SavedDevice,
+    CiPeerInfo, DeviceStream, MidiSession, PeerProfiles, ProfileError, ProfileSwitch, ReportAsk,
+    ReportError, ReportPeer,
 };
 use tutti_midi_runtime::{DeviceEpochs, JrStream, MidiIngestControls, MidiInputPorts};
 use tutti_ump::StreamConfig;
@@ -31,7 +31,7 @@ use tutti_ump::StreamConfig;
 use crate::midi::UmpOut;
 use crate::pool::{Declared, HandleError, Life, Load, LoadError, PoolEntry};
 use crate::{
-    EventInPort, EventOutPort, MidiEvent, Peer, PeerError, Presence, Resource, ResourceFact,
+    EventInPort, EventOutPort, MidiReport, Peer, PeerError, Presence, Resource, ResourceFact,
     ResourceId, Session, SessionEvent,
 };
 
@@ -82,7 +82,7 @@ pub enum MidiPortError {
     /// The session has no OS MIDI layer
     /// ([`SessionBuilder::midi_hardware`](crate::SessionBuilder::midi_hardware)
     /// was not asked for).
-    #[error("the session has no OS MIDI layer; build it with `midi_hardware()`")]
+    #[error("the session has no OS MIDI layer; build it with `midi_hardware(options)`")]
     NoHardware,
     /// Several present devices could be the saved one, or its ordinal cannot be
     /// trusted across a restart: these are the candidates, ordered by id, for
@@ -403,7 +403,7 @@ impl MidiInput {
 
     /// Asks a peer to enable or disable a Profile it lists
     /// ([`MidiInputInfo::profiles`]): the request goes out at the next update,
-    /// and its end is a [`MidiEvent::CiProfiles`].
+    /// and its end is a [`MidiReport::CiProfiles`].
     ///
     /// # Errors
     ///
@@ -428,7 +428,7 @@ impl MidiInput {
 
     /// Asks a peer for a MIDI Message Report ([`MidiInputInfo::report_peers`]):
     /// the request goes out at the next update, and its end is a
-    /// [`MidiEvent::CiProcess`].
+    /// [`MidiReport::CiProcess`].
     ///
     /// # Errors
     ///
@@ -613,22 +613,11 @@ struct Retiring {
 }
 
 /// The ports of the session, and what they are opened with.
+#[derive(Default)]
 pub(crate) struct Ports {
-    timing: InputTiming,
     inputs: Vec<InputPort>,
     outputs: Vec<OutputPort>,
     retiring: Vec<Retiring>,
-}
-
-impl Default for Ports {
-    fn default() -> Self {
-        Self {
-            timing: InputTiming::Arrival,
-            inputs: Vec::new(),
-            outputs: Vec::new(),
-            retiring: Vec::new(),
-        }
-    }
 }
 
 impl std::fmt::Debug for Ports {
@@ -718,11 +707,6 @@ impl InputPort {
 }
 
 impl Ports {
-    /// The input ports are opened with `timing` from now on.
-    pub(crate) fn set_timing(&mut self, timing: InputTiming) {
-        self.timing = timing;
-    }
-
     /// Every input port ingests classic MPE in `mode` from the next block.
     pub(crate) fn set_mpe_mode(&self, mode: tutti_midi_protocol::MpeMode) {
         for port in &self.inputs {
@@ -784,10 +768,9 @@ impl Ports {
         graph: &mut crate::graph::Graph,
         info: &DeviceInfo,
     ) -> Result<(), MidiPortError> {
-        let timing = self.timing;
         let port = &mut self.inputs[at];
         match io
-            .connect_input(&info.id, timing)
+            .connect_input(&info.id)
             .map_err(|e| MidiPortError::Hardware(Arc::new(e)))?
         {
             tutti_midi_hardware::Connected::Opened(inlet) => {
@@ -834,19 +817,19 @@ impl Ports {
         io: &mut MidiSession,
         graph: &mut crate::graph::Graph,
         rate: tutti_types::SampleRate,
-        events: Vec<tutti_midi_hardware::DeviceEvent>,
+        events: Vec<tutti_midi_device::DeviceEvent>,
         now: std::time::Instant,
         out: &mut Vec<SessionEvent>,
     ) -> Edits {
         let mut edits = Edits::default();
         edits |= self.retire(io, graph);
         for event in events {
-            out.push(MidiEvent::of_device(event.clone()).into());
+            out.push(MidiReport::of_device(event.clone()).into());
             match event {
-                tutti_midi_hardware::DeviceEvent::Removed(device) => {
+                tutti_midi_device::DeviceEvent::Removed(device) => {
                     edits |= self.lose(io, graph, &device, out);
                 }
-                tutti_midi_hardware::DeviceEvent::Added(device) => {
+                tutti_midi_device::DeviceEvent::Added(device) => {
                     edits |= self.restore(io, graph, rate, &device, out);
                 }
                 _ => {}
@@ -1024,7 +1007,7 @@ impl Ports {
                         let (device, peer) = (switch.device().clone(), switch.peer());
                         if let Err(error) = io.set_profile(switch) {
                             out.push(
-                                MidiEvent::CiProfiles {
+                                MidiReport::CiProfiles {
                                     device,
                                     peer,
                                     change: tutti_midi_hardware::ProfilesChange::NotQueued(error),
@@ -1037,7 +1020,7 @@ impl Ports {
                         let (device, peer) = (ask.device().clone(), ask.peer());
                         if let Err(error) = io.report(ask) {
                             out.push(
-                                MidiEvent::CiProcess {
+                                MidiReport::CiProcess {
                                     device,
                                     peer,
                                     change: tutti_midi_hardware::ProcessChange::NotQueued(error),
@@ -1079,7 +1062,7 @@ impl Ports {
                         profile_devices.push(device.clone());
                     }
                     out.push(
-                        MidiEvent::CiProfiles {
+                        MidiReport::CiProfiles {
                             device: device.clone(),
                             peer: *peer,
                             change: change.clone(),
@@ -1090,7 +1073,7 @@ impl Ports {
                 }
                 tutti_midi_hardware::Polled::Process(device, peer, change) => {
                     out.push(
-                        MidiEvent::CiProcess {
+                        MidiReport::CiProcess {
                             device: device.clone(),
                             peer: *peer,
                             change: change.clone(),

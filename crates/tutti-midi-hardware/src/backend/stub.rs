@@ -18,7 +18,7 @@
 //! needs logic, that is a signal to reconsider rather than to grow it.**
 
 use crate::InputProducerHandle;
-use crate::capability::EndpointInfo;
+use crate::capability::OsEndpoint;
 use crate::devices::ChangeSink;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, NoWatch, Watch};
 use crate::error::{Error, Result};
@@ -45,11 +45,11 @@ impl MidiEndpoints for StubEndpoints {
         Ok(Box::new(NoWatch))
     }
 
-    fn inputs(&self) -> Vec<EndpointInfo> {
+    fn inputs(&self) -> Vec<OsEndpoint> {
         Vec::new()
     }
 
-    fn outputs(&self) -> Vec<EndpointInfo> {
+    fn outputs(&self) -> Vec<OsEndpoint> {
         Vec::new()
     }
 

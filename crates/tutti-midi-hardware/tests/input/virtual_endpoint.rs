@@ -18,9 +18,9 @@ use tutti_fixtures::midi::{
 use tutti_graph::EventCapacity;
 use tutti_midi_device::{BlockName, EndpointName, FunctionBlock};
 use tutti_midi_hardware::{
-    HardwareMidiInputs, InputInlets, VirtualDestination, VirtualProtocol, VirtualSource,
-    VirtualSpec,
+    HardwareMidiInputs, VirtualDestination, VirtualProtocol, VirtualSource, VirtualSpec,
 };
+use tutti_midi_runtime::InputInlets;
 use tutti_ump::{
     Bank, CCNumber, Direction, FirstGroup, FunctionBlockId, GroupSpan, Message, MidiChannel, Rpn,
     U7, UiHint, Ump, Utility, Voice1,

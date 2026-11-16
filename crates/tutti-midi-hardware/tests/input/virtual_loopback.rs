@@ -11,8 +11,10 @@ use tutti_fixtures::midi::note_on;
 use tutti_graph::{EventCapacity, Offset};
 use tutti_midi_device::{DeviceInfo, EndpointName};
 use tutti_midi_hardware::{
-    InputInlets, MidiSession, VirtualDestination, VirtualProtocol, VirtualSource, VirtualSpec,
+    MidiHardwareOptions, MidiSession, VirtualDestination, VirtualProtocol, VirtualSource,
+    VirtualSpec,
 };
+use tutti_midi_runtime::InputInlets;
 use tutti_ump::{MidiChannel, Ump};
 
 const PATIENCE: Duration = Duration::from_secs(10);
@@ -26,7 +28,10 @@ fn spec(tag: &str) -> VirtualSpec {
 fn session() -> (MidiSession, Listener) {
     let inlets = InputInlets::new(EventCapacity::of(64), Duration::ZERO);
     let listener = Listener::over(&inlets);
-    (MidiSession::open(inlets).expect("a session"), listener)
+    (
+        MidiSession::open(inlets, MidiHardwareOptions::new()).expect("a session"),
+        listener,
+    )
 }
 
 /// The device `spec` published, once the session lists it.
@@ -62,9 +67,8 @@ fn what_a_virtual_source_sends_reaches_a_session_input_in_order() {
     let source = VirtualSource::open(&spec).expect("a virtual source");
     let (mut io, mut graph) = session();
     let device = listed(|| io.inputs(), &spec);
-    let tutti_midi_hardware::Connected::Opened(inlet) = io
-        .connect_input(&device.id, tutti_midi_hardware::InputTiming::Arrival)
-        .expect("connects")
+    let tutti_midi_hardware::Connected::Opened(inlet) =
+        io.connect_input(&device.id).expect("connects")
     else {
         panic!("a new input opens");
     };
@@ -110,7 +114,7 @@ fn a_midi1_destination_delivers_what_the_ingest_node_widens() {
     let spec = spec("midi1").with_protocol(VirtualProtocol::Midi1);
     let inlets = InputInlets::new(EventCapacity::of(64), Duration::ZERO);
     let mut graph = Listener::over_ingest(&inlets);
-    let io = MidiSession::open(inlets).expect("a session");
+    let io = MidiSession::open(inlets, MidiHardwareOptions::new()).expect("a session");
     let (producer, inlet) = Arc::clone(io.ports()).open_input_port("virtual");
     graph.attach(inlet);
     let _destination = VirtualDestination::open(&spec, producer).expect("a virtual destination");

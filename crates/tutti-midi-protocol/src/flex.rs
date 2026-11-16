@@ -5,7 +5,7 @@
 //! reading of them.
 
 use tutti_types::{BeatsPerBar, Bpm, NoteValue};
-use tutti_ump::TimeSignature as FlexTimeSignature;
+use tutti_ump::FlexTimeSignature;
 
 /// 10-nanosecond units in one minute: 60 s is 6e9 of them, so a tempo of
 /// `bpm` is `6e9 / bpm` units per quarter note.
@@ -64,7 +64,7 @@ pub fn flex_tempo_field(bpm: Bpm) -> u32 {
 /// ```
 /// use tutti_midi_protocol::flex_time_signature;
 /// use tutti_types::TimeSignature;
-/// use tutti_ump::TimeSignature as Wire;
+/// use tutti_ump::FlexTimeSignature as Wire;
 ///
 /// let seven_eight = Wire { numerator: 7, denominator: 3, thirty_seconds: 8 };
 /// assert_eq!(flex_time_signature(seven_eight), Some(TimeSignature::of(7, 8)));

@@ -43,7 +43,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use crate::InputProducerHandle;
 use crate::backend::by_message::{Refused, by_message};
 use crate::block::RawBlock;
-use crate::capability::{EndpointInfo, UmpCapability};
+use crate::capability::{OsEndpoint, UmpCapability};
 use crate::devices::ChangeSink;
 use crate::devices::reporter::os_devices;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
@@ -278,13 +278,13 @@ impl CoreMidiEndpoints {
 }
 
 /// The sources now, as endpoints.
-fn list_inputs() -> Vec<EndpointInfo> {
+fn list_inputs() -> Vec<OsEndpoint> {
     let umps = ump_endpoints().unwrap_or_default();
     (0..Sources::count())
         .filter_map(Source::from_index)
         .enumerate()
         .filter_map(|(index, source)| {
-            Some(EndpointInfo {
+            Some(OsEndpoint {
                 id: endpoint_id(&source)?,
                 identity: Identity::CoreMidi(unique_id(&source)?),
                 name: endpoint_name(&source, index),
@@ -294,13 +294,13 @@ fn list_inputs() -> Vec<EndpointInfo> {
         .collect()
 }
 
-fn list_outputs() -> Vec<EndpointInfo> {
+fn list_outputs() -> Vec<OsEndpoint> {
     let umps = ump_endpoints().unwrap_or_default();
     (0..Destinations::count())
         .filter_map(coremidi::Destination::from_index)
         .enumerate()
         .filter_map(|(index, dest)| {
-            Some(EndpointInfo {
+            Some(OsEndpoint {
                 id: endpoint_id(&dest)?,
                 identity: Identity::CoreMidi(unique_id(&dest)?),
                 name: endpoint_name(&dest, index),
@@ -315,11 +315,11 @@ impl MidiEndpoints for CoreMidiEndpoints {
         watch::start(sink, Self::devices)
     }
 
-    fn inputs(&self) -> Vec<EndpointInfo> {
+    fn inputs(&self) -> Vec<OsEndpoint> {
         list_inputs()
     }
 
-    fn outputs(&self) -> Vec<EndpointInfo> {
+    fn outputs(&self) -> Vec<OsEndpoint> {
         list_outputs()
     }
 
