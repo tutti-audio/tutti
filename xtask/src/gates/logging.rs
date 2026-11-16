@@ -58,6 +58,10 @@ pub(super) const ALLOW: &[(&str, &str)] = &[
         "temporary: the CLAP plugin-log callback prints; the plugin lane converts it to `tracing`, and the row leaves with its PR",
     ),
     (
+        "crates/tutti-au-ffi/src/editor/mod.rs",
+        "temporary: the leaked-editor notice prints; the plugin lane converts it to `tracing` (#1073), and the row leaves with its PR",
+    ),
+    (
         "testing/tutti-fixtures/src/main_thread.rs",
         "permanent: the `harness = false` test runner prints each test's name and result as a test harness does",
     ),
