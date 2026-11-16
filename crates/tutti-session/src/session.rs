@@ -46,7 +46,7 @@ pub enum Phase {
     /// while an export is in flight, Realtime otherwise, each plugin told on
     /// a change or when it was never told.
     RenderMode,
-    /// Modulation's apply (feature `modulation`): the declarations (the
+    /// Modulation's apply: the declarations (the
     /// host's, `PhaseCx::mods`, or the session's own, `Session::mods_mut`)
     /// onto the graph, staging what is new for the commit. A refusal is
     /// `SessionEvent::Modulation`.
@@ -56,7 +56,7 @@ pub enum Phase {
     /// the last one, and the compensation of the plan it sent (or of a re-prepare's resumed plan)
     /// published.
     Commit,
-    /// Modulation's re-apply and resyncs (feature `modulation`): while a
+    /// Modulation's re-apply and resyncs: while a
     /// target is unresolved (its node was new before the commit), the
     /// declarations apply again and what that built is committed, so the
     /// lane plays from the update its node does; then the note-envelope
@@ -104,24 +104,16 @@ pub struct PhaseCx<'a> {
     /// `None`: the session's own ([`Session::mods_mut`]). Read by the
     /// [`Modulation`](Phase::Modulation) and
     /// [`AfterCommit`](Phase::AfterCommit) phases.
-    #[cfg(feature = "modulation")]
     pub mods: Option<ModInput<'a>>,
-    _borrow: std::marker::PhantomData<&'a ()>,
 }
 
 impl PhaseCx<'_> {
     /// A context at `now`, with the session's own declarations.
     pub fn at(now: Instant) -> Self {
-        Self {
-            now,
-            #[cfg(feature = "modulation")]
-            mods: None,
-            _borrow: std::marker::PhantomData,
-        }
+        Self { now, mods: None }
     }
 }
 
-#[cfg(feature = "modulation")]
 impl<'a> PhaseCx<'a> {
     /// The same context with the host's declarations.
     #[must_use]
@@ -133,7 +125,6 @@ impl<'a> PhaseCx<'a> {
 
 /// A host's modulation declarations, borrowed for one phase, and how its
 /// keys resolve to nodes.
-#[cfg(feature = "modulation")]
 #[derive(Clone, Copy)]
 pub struct ModInput<'a> {
     /// The declarations, as `tutti_modulation` takes them.
@@ -142,7 +133,6 @@ pub struct ModInput<'a> {
     pub keys: &'a dyn crate::ModKeys,
 }
 
-#[cfg(feature = "modulation")]
 impl std::fmt::Debug for ModInput<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ModInput").finish_non_exhaustive()
@@ -196,7 +186,7 @@ pub enum SessionEvent {
     /// is not part of an [`Edge`](crate::Edge)). A modulation route onto a
     /// dropped edge, or a param or edge-gain lane the node's lost event
     /// outputs drove, is not listed: the route stays declared and reads
-    /// unresolved (`Problem::Unresolved`, feature `modulation`) until its target
+    /// unresolved (`Problem::Unresolved`) until its target
     /// is wired again.
     Unwired {
         /// The node whose re-insert dropped the wiring.
@@ -290,7 +280,6 @@ pub enum SessionEvent {
     /// warning time ([`SessionBuilder::unresolved_warning`](crate::SessionBuilder::unresolved_warning),
     /// 4 s by default) of [`PhaseCx::now`], likely a key no node is ever bound to,
     /// once per stretch it stays unresolved.
-    #[cfg(feature = "modulation")]
     Modulation(crate::Problem),
     /// A MIDI event of the session's, by area (design 030, convention 1):
     /// a device came or went, a held input or the output was lost, a
@@ -389,7 +378,6 @@ impl std::fmt::Debug for SessionEvent {
             Self::Device(event) => f.debug_tuple("Device").field(event).finish(),
             #[cfg(all(feature = "device", feature = "audio-io"))]
             Self::Take(event) => f.debug_tuple("Take").field(event).finish(),
-            #[cfg(feature = "modulation")]
             Self::Modulation(problem) => f.debug_tuple("Modulation").field(problem).finish(),
             #[cfg(feature = "midi")]
             Self::Midi(event) => f.debug_tuple("Midi").field(event).finish(),
@@ -570,7 +558,6 @@ pub struct Session<C: Clock = Offline> {
     #[cfg(feature = "midi")]
     pub(crate) midi_state: crate::midi::MidiState,
     /// What modulation applied, and the session's own declarations.
-    #[cfg(feature = "modulation")]
     pub(crate) mods: crate::modulation::ModSession,
     #[cfg(feature = "midi-hardware")]
     pub(crate) midi_io: Option<tutti_midi_hardware::MidiSession>,
@@ -790,7 +777,6 @@ impl<C: Clock> Session<C> {
             midi,
             #[cfg(feature = "midi")]
             midi_state,
-            #[cfg(feature = "modulation")]
             mods,
             #[cfg(feature = "midi-hardware")]
             midi_io,
@@ -856,7 +842,6 @@ impl<C: Clock> Session<C> {
                 midi,
                 #[cfg(feature = "midi")]
                 midi_state,
-                #[cfg(feature = "modulation")]
                 mods,
                 #[cfg(feature = "midi-hardware")]
                 midi_io,
@@ -1105,8 +1090,6 @@ impl<C: Clock> Session<C> {
     /// Runs one phase, pushing what it found onto `out`. A host running the
     /// phases itself runs them in [`PHASES`] order, once each per update.
     pub fn run_phase(&mut self, phase: Phase, cx: PhaseCx<'_>, out: &mut Vec<SessionEvent>) {
-        #[cfg(not(feature = "modulation"))]
-        let _ = cx;
         match phase {
             Phase::Collect => {
                 // First, so what a job landed is in the graph this update commits.
@@ -1177,14 +1160,10 @@ impl<C: Clock> Session<C> {
                 }
                 self.resumed = false;
             }
-            Phase::Modulation =>
-            {
-                #[cfg(feature = "modulation")]
-                self.mods
-                    .modulation_phase(&mut self.graph, cx.mods, cx.now, out)
-            }
+            Phase::Modulation => self
+                .mods
+                .modulation_phase(&mut self.graph, cx.mods, cx.now, out),
             Phase::AfterCommit => {
-                #[cfg(feature = "modulation")]
                 {
                     // The re-apply's commit, as the update's own: published
                     // on `Sent`.
@@ -1338,7 +1317,6 @@ impl<C: Clock> Session<C> {
         pinned += self.transport.settings().reclaim_tempo();
         // The engine's output folds are swept by the graph (`Graph::reclaim`),
         // offline or on a device, through the `OutputControl` it kept.
-        #[cfg(feature = "modulation")]
         {
             pinned += self.mods.state.reclaim();
         }
@@ -1428,7 +1406,6 @@ impl<C: Clock> Session<C> {
 
     /// What the session holds of `node`, which left the graph, goes.
     fn forget_node(&mut self, node: NodeKey) {
-        #[cfg(feature = "modulation")]
         self.mods.own.forget_node(node);
         #[cfg(feature = "midi")]
         if let Some(pair) = self.midi_state.forget_node(node) {
@@ -1438,12 +1415,6 @@ impl<C: Clock> Session<C> {
         }
         #[cfg(all(feature = "device", feature = "audio-io"))]
         self.inputs.forget(node);
-        #[cfg(not(any(
-            feature = "modulation",
-            feature = "midi",
-            all(feature = "device", feature = "audio-io")
-        )))]
-        let _ = node;
     }
 
     /// The session's own modulation declarations, read: its routes and
@@ -1451,7 +1422,6 @@ impl<C: Clock> Session<C> {
     /// [`routes_to`](crate::ModsView::routes_to),
     /// [`sources`](crate::ModsView::sources)). Reading marks nothing
     /// edited; [`mods_mut`](Self::mods_mut) edits.
-    #[cfg(feature = "modulation")]
     #[must_use]
     pub fn mods(&self) -> crate::ModsView<'_> {
         crate::Mods::view_of(&self.mods.own)
@@ -1461,7 +1431,6 @@ impl<C: Clock> Session<C> {
     /// §4.3, §5.1): the next update applies them. A session has one
     /// declarer: while these hold anything, a host's
     /// [`ModInput`] is refused.
-    #[cfg(feature = "modulation")]
     pub fn mods_mut(&mut self) -> crate::Mods<'_> {
         // Whatever the handle edits is built into the next apply's
         // declarations.
@@ -1473,7 +1442,6 @@ impl<C: Clock> Session<C> {
 
     /// The modulation as applied: the lanes, what is unresolved, the
     /// refusal held.
-    #[cfg(feature = "modulation")]
     pub fn mod_state(&self) -> &crate::ModState {
         &self.mods.state
     }

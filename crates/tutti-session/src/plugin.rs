@@ -1177,7 +1177,6 @@ impl HostedPlugin {
 
     /// Parameter `id`'s value, as a modulation lane's knob starts at it:
     /// `None` while not read, `Some(None)` for one it does not list.
-    #[cfg(any(test, feature = "modulation"))]
     pub(crate) fn param_value(&self, id: u32) -> Option<Option<f32>> {
         self.mirror
             .get(tutti_plugin_types::ParamId::new(id))
@@ -1222,15 +1221,14 @@ impl HostedPlugin {
 /// [`Key::erase`] names none; the view of the plugin is [`Plugin`].
 /// It is the session's name for a hosted plugin's node; the node itself is
 /// `tutti_plugin_host::PluginNode`, below the session.
-/// With `modulation`, `key.param(id)` is a plugin parameter's
+/// `key.param(id)` is a plugin parameter's
 /// `ParamRef` (see `Key::param`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PluginNode {}
 
-#[cfg(feature = "modulation")]
 impl Key<PluginNode> {
     /// Parameter `id` of the plugin, as the reference a modulation route or an
-    /// automation lane targets (feature `modulation`): the same one
+    /// automation lane targets: the same one
     /// [`Param::target`](crate::Param::target) gives and a native node's param
     /// method does, so a route names a plugin's parameter and a native one
     /// through one type.
@@ -1564,7 +1562,6 @@ impl<C: crate::Clock> Session<C> {
         match values {
             Ok(values) => {
                 hosted.mirror.land(values);
-                #[cfg(feature = "modulation")]
                 hosted.driven.report_knobs(&hosted.mirror);
                 hosted.gate.declare(&hosted.mirror);
                 true

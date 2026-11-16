@@ -186,7 +186,7 @@ mod tests {
             "pub use tutti_modulation;\n",
             "pub use tutti_modulation::*;\n",
             "pub use tutti_engine::prelude::*;\n",
-            "#[cfg(feature = \"modulation\")] pub use tutti_modulation as modulation;\n",
+            "#[cfg(feature = \"midi\")] pub use tutti_modulation as modulation;\n",
             "pub use tutti_modulation::{self as modulation};\n",
             "pub use tutti_modulation::{a::{B}, self};\n",
             "pub use {tutti_modulation as m};\n",

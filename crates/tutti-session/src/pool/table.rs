@@ -1221,14 +1221,14 @@ impl<C: Clock> Pool<C> {
     #[cfg_attr(
         not(any(
             test,
-            feature = "sampler",
+            all(feature = "sampler", codec),
             feature = "soundfont",
             feature = "plugin",
             feature = "midi"
         )),
         expect(
             dead_code,
-            reason = "the readers of the kinds (features `sampler`, `soundfont`, `plugin`, `midi`) are its callers"
+            reason = "the readers of the kinds (features `sampler` with a decoder, `soundfont`, `plugin`, `midi`) are its callers"
         )
     )]
     pub(crate) fn handle<K, E>(&self, key: &K) -> Result<E::Handle, HandleError<K>>
