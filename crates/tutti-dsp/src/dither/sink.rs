@@ -53,12 +53,13 @@ pub struct DitherSpec {
 /// struct Count(usize);
 /// impl Sink for Count {
 ///     type Sample = f32;
+///     type Error = std::convert::Infallible;
 ///     fn layout(&self) -> ChannelLayout { ChannelLayout::MONO }
 ///     fn write(&mut self, frames: Interleaved<'_, f32>) -> Result<(), SinkFailed> {
 ///         self.0 += frames.samples().len();
 ///         Ok(())
 ///     }
-///     fn finalize(self) -> std::io::Result<()> { Ok(()) }
+///     fn finalize(self) -> Result<(), Self::Error> { Ok(()) }
 /// }
 ///
 /// let lsb = Amplitude(1.0 / 32768.0); // 16 bit
@@ -109,6 +110,7 @@ impl<S: Sink<Sample = f32>> DitherSink<S> {
 
 impl<S: Sink<Sample = f32>> Sink for DitherSink<S> {
     type Sample = f32;
+    type Error = S::Error;
 
     fn layout(&self) -> ChannelLayout {
         self.inner.layout()
@@ -137,7 +139,7 @@ impl<S: Sink<Sample = f32>> Sink for DitherSink<S> {
         Ok(())
     }
 
-    fn finalize(self) -> std::io::Result<()> {
+    fn finalize(self) -> Result<(), Self::Error> {
         self.inner.finalize()
     }
 }
