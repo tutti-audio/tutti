@@ -338,7 +338,7 @@ impl super::RenderClock for OfflineTimeline {
     /// ([`Env::transport_at`](tutti_graph::Env::transport_at), and
     /// [`Env::for_each_beat`](tutti_graph::Env::for_each_beat) frame by
     /// frame)), and a tempo change of the map is cut by
-    /// [`render_graph`](Self::render_graph), which takes the block's changes
+    /// [`render_graph`](super::RenderClock::render_graph), which takes the block's changes
     /// from the map.
     fn graph_block(
         &self,
