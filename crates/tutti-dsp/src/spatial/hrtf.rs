@@ -31,10 +31,12 @@ use std::sync::Arc;
 use tutti_buffers::{Fold, MonoMut, Planes};
 use tutti_types::{ChannelLayout, ChannelTopology, Direction, Mix, Radians, SampleRate};
 
+mod hull;
 mod sphere;
 
 use crate::Complex32;
-use sphere::{HrirSphere, HrtfSet, Weights};
+pub use sphere::{HrirMeasurement, HrirSphere};
+use sphere::{HrtfSet, Weights};
 
 /// Frames per convolution step, and the crossfade length of a direction
 /// change.
@@ -76,6 +78,13 @@ pub enum HrtfBinauralError {
     /// or an index count that is not a whole number of triangles.
     #[error("bad HRIR sphere header: {0}")]
     Header(&'static str),
+    /// The rate a sphere is built at is not a whole number of hertz, which
+    /// the byte format cannot store.
+    #[error("HRIR sphere rate {} Hz is not a whole number of hertz", .rate.get())]
+    FractionalRate {
+        /// The rate given.
+        rate: SampleRate,
+    },
     /// The sphere's sample rate is outside [`MIN_SPHERE_RATE`] to
     /// [`MAX_SPHERE_RATE`] Hz. Resampling scales the response length by the
     /// ratio of the rates, so the bound keeps a file from asking for a
@@ -116,6 +125,28 @@ pub enum HrtfBinauralError {
         /// The vertex's index.
         vertex: usize,
     },
+    /// The responses of a measurement are not as long as the first's.
+    #[error("measurement {vertex} has a response of {found} frames, but the first has {expected}")]
+    ResponseLength {
+        /// The measurement's index.
+        vertex: usize,
+        /// The first measurement's length, in frames.
+        expected: usize,
+        /// The length found, in frames.
+        found: usize,
+    },
+    /// Two measurements are in one direction.
+    #[error("measurements {first} and {second} are in the same direction")]
+    Duplicate {
+        /// The earlier measurement's index.
+        first: usize,
+        /// The later one's.
+        second: usize,
+    },
+    /// There are fewer than four directions, or they all lie in one plane
+    /// through the listener: no triangles enclose the listener.
+    #[error("the directions are fewer than four or coplanar, so they do not enclose the listener")]
+    NotEnclosing,
     /// No face is a usable triangle: there are none, or each one's plane
     /// passes through the origin, so no direction can be blended.
     #[error("the HRIR sphere has no usable face")]
@@ -209,7 +240,7 @@ impl HrtfBinaural {
         sample_rate: SampleRate,
         aim: Direction,
     ) -> Result<Self, HrtfBinauralError> {
-        let sphere = Arc::new(HrirSphere::parse(hrir_bytes)?);
+        let sphere = Arc::new(HrirSphere::from_bytes(hrir_bytes)?);
         let set = Arc::new(HrtfSet::build(&sphere, rate_key(sample_rate), HRTF_STEP));
         Ok(Self::over(sphere, set, aim))
     }
