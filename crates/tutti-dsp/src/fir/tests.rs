@@ -370,3 +370,24 @@ fn a_filter_beyond_the_maximum_length_is_refused() {
         "{err:?}"
     );
 }
+
+/// An attenuation past what f64 taps resolve (300 dB) is refused by name; 300 dB itself
+/// designs.
+#[test]
+fn an_attenuation_past_the_maximum_is_refused() {
+    let lp = |a| {
+        FirDesign::new(
+            FirResponse::LowPass {
+                cutoff: Hz(4_000.0),
+            },
+            Hz(8_000.0),
+        )
+        .attenuation(Db(a))
+        .design(SampleRate::SR_48K)
+    };
+    assert!(matches!(
+        lp(10_000.0),
+        Err(FirError::AttenuationTooHigh { .. })
+    ));
+    assert!(lp(300.0).is_ok());
+}

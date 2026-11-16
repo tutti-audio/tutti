@@ -192,7 +192,7 @@ pub use filter::{
     LadderDesign, LadderModel, LadderType, Lanes, MAX_SPLITS, SOLVE_CEILING, SvfBank,
     SvfCoefficients, SvfCoeffs, SvfControls, SvfModel, SvfType, fit_to_rate, ladder_step, svf_step,
 };
-pub use fir::{Fir, FirDesign, FirError, FirResponse, kaiser_beta};
+pub use fir::{Fir, FirDesign, FirError, FirResponse, MAX_ATTENUATION, kaiser_beta};
 pub use glide::{Glide, Lerp, Steps};
 pub use interp::{cubic_hermite, lerp};
 pub use model::{Lti, MaxDecay, MaxDecayError, Ring, System, TAIL_FLOOR};

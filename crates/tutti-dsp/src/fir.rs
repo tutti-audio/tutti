@@ -5,9 +5,9 @@
 //! rate, checks the settings against it and returns the taps as a [`Fir`].
 //! Everything here runs on the control side.
 //!
-//! The length and the window shape come from Kaiser's formulas (Oppenheim &
-//! Schafer, *Discrete-Time Signal Processing*, 3rd ed., eqs. 7.62 and 7.63;
-//! scipy's `kaiserord` and `firwin`): for a stopband attenuation `A` dB and a
+//! The length and the window shape come from Kaiser's formulas (Kaiser 1974,
+//! as scipy's `kaiserord` and `firwin` use them; Oppenheim & Schafer,
+//! *Discrete-Time Signal Processing*, 3rd ed., eq. 7.62 for `β`): for a stopband attenuation `A` dB and a
 //! transition `Δω` rad/sample, `β = kaiser_beta(A)` and
 //! `N = (A − 7.95) / (2.285 · Δω) + 1`, rounded up to an odd length so the
 //! filter is type I (symmetric, a whole-sample delay of `(N − 1) / 2`).
@@ -54,6 +54,11 @@ pub enum FirResponse {
     HalfBand,
 }
 
+/// The most stopband attenuation a design takes: `f64` taps resolve about
+/// 313 dB below the passband (their epsilon), so a deeper stopband is not
+/// representable.
+pub const MAX_ATTENUATION: Db = Db(300.0);
+
 /// A windowed-sinc FIR filter, described without a sample rate.
 ///
 /// Built as `FirDesign::new(response, transition)` and the option
@@ -83,8 +88,10 @@ impl FirDesign {
         }
     }
 
-    /// The stopband attenuation, in positive dB: the stopband sits at or
-    /// below `-attenuation` and the passband ripple is `10^(-attenuation/20)`.
+    /// The stopband attenuation, in positive dB: the stopband sits at about
+    /// `-attenuation` and the passband ripple is about `10^(-attenuation/20)`.
+    /// Kaiser's formulas are estimates, so a design can miss either by a dB or
+    /// two, most with a wide transition.
     #[must_use]
     pub fn attenuation(mut self, attenuation: Db) -> Self {
         self.attenuation = attenuation;
@@ -103,6 +110,8 @@ impl FirDesign {
     ///   not a positive, finite number.
     /// - [`FirError::TransitionTooWide`] when a transition band does not fit
     ///   between its edge and 0, Nyquist or the neighbouring edge's band.
+    /// - [`FirError::AttenuationTooHigh`] past [`MAX_ATTENUATION`], which `f64`
+    ///   taps cannot resolve.
     /// - [`FirError::TooLong`] when the filter would exceed `2^20` taps.
     pub fn design(&self, rate: SampleRate) -> Result<Fir, FirError> {
         let nyquist = rate.get() / 2.0;
@@ -113,6 +122,12 @@ impl FirDesign {
         }
         if !(attenuation.is_finite() && attenuation > 0.0) {
             return Err(FirError::NonPositiveAttenuation(self.attenuation));
+        }
+        if attenuation > f64::from(MAX_ATTENUATION.get()) {
+            return Err(FirError::AttenuationTooHigh {
+                attenuation: self.attenuation,
+                max: MAX_ATTENUATION,
+            });
         }
 
         let inside = |f: Hz| {
@@ -319,6 +334,16 @@ pub enum FirError {
     /// A stopband attenuation that is not positive and finite.
     #[error("stopband attenuation {0:?} is not positive")]
     NonPositiveAttenuation(Db),
+    /// A stopband attenuation past [`MAX_ATTENUATION`]: `f64` taps resolve
+    /// about 313 dB below the passband, and past it the window's Bessel term
+    /// overflows.
+    #[error("stopband attenuation {attenuation:?} is past the {max:?} f64 taps resolve")]
+    AttenuationTooHigh {
+        /// The attenuation asked for.
+        attenuation: Db,
+        /// The most a design takes.
+        max: Db,
+    },
     /// A transition band that does not fit between its edge and 0, Nyquist or
     /// the next edge.
     #[error("transition {transition:?} does not fit; the widest here is {widest:?}")]
@@ -355,7 +380,7 @@ pub fn kaiser_beta(attenuation: Db) -> f64 {
 }
 
 /// Kaiser's estimate of the filter length for `attenuation` dB and a
-/// transition of `delta_omega` rad/sample (O&S eq. 7.63):
+/// transition of `delta_omega` rad/sample (Kaiser 1974):
 /// `(A − 7.95) / (2.285 Δω) + 1`, rounded up.
 fn kaiser_order(attenuation: f64, delta_omega: f64) -> usize {
     let n = (attenuation - 7.95) / (2.285 * delta_omega) + 1.0;
