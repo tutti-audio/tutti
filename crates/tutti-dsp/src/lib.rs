@@ -108,6 +108,9 @@
 //!   [`FreeverbBank`] (its comb feedback and damping [`Glide`]s in [`FreeverbGlides`]) and the
 //!   feedback delay network over buffers views ([`FdnBank`] over an [`FdnLayout`], its
 //!   parameters [`Glide`]s in [`FdnGlides`]). [`loop_gain`] and [`rt60_from_gain`] are the RT60 formula both ways.
+//! - **FIR design** (`fir.rs`): [`FirDesign`] describes a Kaiser windowed-sinc filter (a
+//!   [`FirResponse`], a transition and an attenuation) and designs it at a rate into a
+//!   [`Fir`], failing with a [`FirError`]; [`kaiser_beta`] is the window's parameter.
 //! - **Convolution**: [`Convolver`] over a shared [`IrSpectra`].
 //! - **Delay and modulation** (`delay.rs`, `modulation/`): [`DelayLine`] with an
 //!   [`InterpolationMode`]; the feedback delay ([`DelayBank`] over a [`DelayLayout`]: a
@@ -147,6 +150,7 @@ mod dither;
 mod dynamics;
 mod fft;
 mod filter;
+mod fir;
 mod glide;
 mod interp;
 mod level;
@@ -188,6 +192,7 @@ pub use filter::{
     LadderDesign, LadderModel, LadderType, Lanes, MAX_SPLITS, SOLVE_CEILING, SvfBank,
     SvfCoefficients, SvfCoeffs, SvfControls, SvfModel, SvfType, fit_to_rate, ladder_step, svf_step,
 };
+pub use fir::{Fir, FirDesign, FirError, FirResponse, kaiser_beta};
 pub use glide::{Glide, Lerp, Steps};
 pub use interp::{cubic_hermite, lerp};
 pub use model::{Lti, MaxDecay, MaxDecayError, Ring, System, TAIL_FLOOR};
