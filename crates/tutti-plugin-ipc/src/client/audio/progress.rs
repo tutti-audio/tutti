@@ -55,7 +55,7 @@
 use super::ask::Ask;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tutti_plugin_types::{StateError, Timeouts};
 
 /// How often [`StateProgress::wait`] rechecks the counter.
@@ -66,6 +66,57 @@ use tutti_plugin_types::{StateError, Timeouts};
 /// transfer is not detected appreciably late, long enough that the poll costs
 /// nothing next to a transfer measured in seconds.
 const POLL_INTERVAL: Duration = Duration::from_millis(20);
+
+/// What a [`StallWatch`] makes of the transfer at an instant.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Liveness {
+    /// The transfer moved within its window; ask again by `recheck`.
+    Live { recheck: Instant },
+    /// No byte moved for the whole window.
+    Stalled,
+}
+
+/// The progress deadline as a pure rule: a transfer is alive while its byte
+/// count advances and stalled once it stands still for `window`.
+///
+/// It reads no clock. The waiting caller passes the instant it sampled, so the
+/// rule is a function of the instants it is given and a test drives it with
+/// constructed ones.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct StallWatch {
+    window: Duration,
+    seen: usize,
+    since: Instant,
+}
+
+impl StallWatch {
+    /// A watch that starts at `now` with `bytes` already moved.
+    pub(super) fn new(window: Duration, now: Instant, bytes: usize) -> Self {
+        Self {
+            window,
+            seen: bytes,
+            since: now,
+        }
+    }
+
+    /// The verdict at `now` given the transfer's byte count.
+    ///
+    /// A count other than the last one seen is progress and restarts the
+    /// window at `now`; the same count is stalled once `now` is `window` past
+    /// the last progress, and live until then.
+    pub(super) fn observe(&mut self, now: Instant, bytes: usize) -> Liveness {
+        if bytes != self.seen {
+            self.seen = bytes;
+            self.since = now;
+        }
+        let due = self.since + self.window;
+        if now >= due {
+            Liveness::Stalled
+        } else {
+            Liveness::Live { recheck: due }
+        }
+    }
+}
 
 /// Shared byte counter for one in-flight state transfer.
 ///
@@ -143,9 +194,7 @@ impl StateProgress {
         &self,
         ask: Ask<std::result::Result<T, StateError>>,
     ) -> std::result::Result<T, StateError> {
-        let patience = self.patience;
-        let mut seen = self.bytes();
-        let mut idle = Duration::ZERO;
+        let mut watch = StallWatch::new(self.patience, Instant::now(), self.bytes());
         loop {
             match ask.recv_timeout_borrowed(POLL_INTERVAL) {
                 Ok(value) => return value,
@@ -154,23 +203,78 @@ impl StateProgress {
                 }
                 Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
             }
-            let now = self.bytes();
-            if now == seen {
-                idle += POLL_INTERVAL;
-                if idle >= patience {
-                    return Err(self.stalled());
-                }
-            } else {
-                // Progress: the transfer is alive, so the idle clock restarts.
-                //
-                // Both halves are load-bearing *together*, which is not obvious:
-                // `idle` accumulates only inside the no-progress branch, so
-                // either the guarded accumulate or this reset alone keeps the
-                // deadline honest, and deleting just one leaves the behaviour
-                // correct.
-                seen = now;
-                idle = Duration::ZERO;
+            if watch.observe(Instant::now(), self.bytes()) == Liveness::Stalled {
+                return Err(self.stalled());
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const WINDOW: Duration = Duration::from_secs(2);
+
+    fn at(start: Instant, ms: u64) -> Instant {
+        start + Duration::from_millis(ms)
+    }
+
+    /// A transfer that has not moved is live until the window has passed and
+    /// stalled from the window's last instant on.
+    #[test]
+    fn a_transfer_standing_still_stalls_exactly_at_the_window() {
+        let start = Instant::now();
+        let mut watch = StallWatch::new(WINDOW, start, 0);
+        assert_eq!(
+            watch.observe(at(start, 1_900), 0),
+            Liveness::Live {
+                recheck: at(start, 2_000)
+            }
+        );
+        assert_eq!(
+            watch.observe(at(start, 1_999), 0),
+            Liveness::Live {
+                recheck: at(start, 2_000)
+            }
+        );
+        assert_eq!(watch.observe(at(start, 2_000), 0), Liveness::Stalled);
+        assert_eq!(watch.observe(at(start, 2_100), 0), Liveness::Stalled);
+    }
+
+    /// Progress restarts the window at the instant it is seen, so a transfer
+    /// that advances every 1.9 s lives however long it runs, and one that stops
+    /// is stalled one window after its last byte and not one after the start.
+    #[test]
+    fn progress_restarts_the_window_so_a_steady_transfer_outlives_it() {
+        let start = Instant::now();
+        let mut watch = StallWatch::new(WINDOW, start, 0);
+        for step in 1..=60u64 {
+            let now = at(start, step * 1_900);
+            assert_eq!(
+                watch.observe(now, step as usize),
+                Liveness::Live {
+                    recheck: now + WINDOW
+                },
+                "step {step}"
+            );
+        }
+        let last = at(start, 60 * 1_900);
+        assert_eq!(
+            watch.observe(last + Duration::from_millis(1_999), 60),
+            Liveness::Live {
+                recheck: last + WINDOW
+            }
+        );
+        assert_eq!(watch.observe(last + WINDOW, 60), Liveness::Stalled);
+    }
+
+    /// A watch started with bytes already moved counts them as the baseline:
+    /// they are not progress.
+    #[test]
+    fn bytes_moved_before_the_watch_started_are_not_progress() {
+        let start = Instant::now();
+        let mut watch = StallWatch::new(WINDOW, start, 64);
+        assert_eq!(watch.observe(at(start, 2_000), 64), Liveness::Stalled);
     }
 }
