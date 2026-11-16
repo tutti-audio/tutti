@@ -19,10 +19,12 @@
 //!   land after the switch.
 //! - **Runs asked with [`Session::when_loaded`] cannot:** a run takes the
 //!   session of the clock it was asked of. The runs whose entry has loaded run
-//!   before the switch begins, with the session as it was; a switch with a run
-//!   waiting for an entry that has not loaded is refused
-//!   ([`Error::RunsPending`]), before anything stops, and goes through once the
-//!   run has fired.
+//!   before the switch begins, with the session as it is (a run may ask more
+//!   runs, which run too, until none is due); a switch with a run waiting for
+//!   an entry that has not loaded is refused ([`Error::RunsPending`]), before
+//!   anything stops, and goes through once the run has fired. What a run did
+//!   to the session (the graph, the card) is what the switch then checks. A run
+//!   that panics unwinds out of the switch and drops the session.
 //! - **Captures end** when the session leaves the sound card: each input the
 //!   session held closes and is reported as
 //!   [`DeviceEvent::InputClosed`](crate::DeviceEvent) (feature `audio-io`).
@@ -33,9 +35,13 @@
 //!   that cannot run, a run waiting), and a device that will not open fails
 //!   before anything stops. A failure after the stop (the new stream will not
 //!   open, the re-prepare refuses) is undone by starting the old clock again at
-//!   its old rate and block. Only when that fails too, a graph the re-prepare
-//!   poisoned, is the session returned **stopped**, and the error then is
-//!   [`Error::SwitchNotUndone`], which names both failures.
+//!   its old rate and block. Only when that fails too (a graph the re-prepare
+//!   poisoned; on a card, a device that is gone) is the session returned
+//!   **stopped**, and the error then is [`Error::SwitchNotUndone`], which names
+//!   both failures. The host then reports what the graph is prepared at, and
+//!   the session is restarted on a card (`Session::restart`) or switched
+//!   again (`Session::into_device` on the system clock) once what broke is
+//!   fixed.
 
 use tutti_cpal::{AudioEngine, DeviceHost, DeviceSelector, TuttiDriver};
 use tutti_engine::{OutputSpec, StreamDriver, TimerDriver};
@@ -127,23 +133,35 @@ fn bind_inputs(
 }
 
 impl<C: crate::Clock> Session<C> {
-    /// What a switch makes before anything stops, so a refusal leaves the
-    /// session as it was:
+    /// The first of what a switch makes before anything stops:
     ///
-    /// - the root and the output map in force have to be placeable on the new
-    ///   channels, and the graph has to be able to re-prepare;
-    /// - the runs asked with `when_loaded` whose entry has loaded run now, with
-    ///   the session as it is (they are the app's closures, and the clock they
-    ///   were asked of is the one the session is still on);
-    /// - no run may be left waiting for an entry that has not loaded
-    ///   ([`Error::RunsPending`]): it cannot follow the session to the next clock.
-    fn check_switch(&mut self, channels: ChannelLayout) -> Result<()> {
-        self.check_device(channels, None)?;
-        self.check_restart(None)?;
+    /// 1. refuse while a run waits for an entry that has not loaded
+    ///    ([`Error::RunsPending`]): it cannot follow the session to the next
+    ///    clock;
+    /// 2. run the runs asked with `when_loaded` whose entry has loaded, with
+    ///    the session as it is (they are the app's closures, and the clock they
+    ///    were asked of is the one the session is still on), until none is due:
+    ///    a run may ask another;
+    /// 3. refuse again: a run may have asked one for an entry that has not
+    ///    loaded.
+    ///
+    /// The switch reads the session after this, so what a run did to it (the
+    /// graph, the card) is what the checks and the switch see.
+    fn settle_runs(&mut self) -> Result<()> {
         self.refuse_waiting_runs()?;
-        self.pool_run_loaded();
-        // A run may have asked another.
+        while self.pool.has_due_run() {
+            self.pool_run_loaded();
+        }
         self.refuse_waiting_runs()
+    }
+
+    /// The second: what a switch refuses before anything stops, so a refusal
+    /// leaves the session as it was. The root and the output map in force have
+    /// to be placeable on the new channels, and the graph has to be able to
+    /// re-prepare.
+    fn check_switch(&self, channels: ChannelLayout) -> Result<()> {
+        self.check_device(channels, None)?;
+        self.check_restart(None)
     }
 
     fn refuse_waiting_runs(&self) -> Result<()> {
@@ -240,7 +258,10 @@ impl Session<SystemClock> {
         )
             -> std::result::Result<TuttiDriver, Box<(tutti_engine::StreamHost, Error)>>,
     ) -> std::result::Result<LiveSession, ClockError<Self>> {
-        if let Err(e) = self.check_switch(channels) {
+        if let Err(e) = self
+            .settle_runs()
+            .and_then(|()| self.check_switch(channels))
+        {
             return Err(ClockError::new(self, e));
         }
         let previous = self.graph.prepared().sample_rate();
@@ -273,7 +294,7 @@ impl Session<SystemClock> {
             |spec, stopped| self.rerate(spec, stopped, None, None),
         );
         if restored.is_err() {
-            host.settle(self.graph.prepared().sample_rate());
+            host.settle(&self.graph.prepared());
         }
         self.faults_seen = host.stream().faults().count();
         self.running.host = Some(host);
@@ -375,6 +396,11 @@ impl Session<DeviceClock> {
     where
         D: StreamDriver<Error = tutti_engine::TimerError>,
     {
+        // The runs first: they may have changed the graph or restarted the
+        // card, and the switch is of the session as they left it.
+        if let Err(e) = self.settle_runs() {
+            return Err(ClockError::new(self, e));
+        }
         let rate = self.device().graph_rate();
         let old = self.device().spec().clone();
         let mut spec = old.clone().with_quantum(self.graph.prepared().max_block());
@@ -395,8 +421,8 @@ impl Session<DeviceClock> {
             // The card again.
             let undone = self.with_device(|session, device| undo(session, device, old));
             if undone.is_err() {
-                let graph_rate = self.graph.prepared().sample_rate();
-                self.device_mut().driver.settle(graph_rate);
+                let prepared = self.graph.prepared();
+                self.device_mut().driver.settle(&prepared);
             }
             self.faults_seen = self.device().faults().count();
             self.carried_events.append(&mut events);
@@ -423,5 +449,142 @@ impl Session<DeviceClock> {
         note_rate_change(&mut events, rate, now);
         system.carried_events.append(&mut events);
         Ok(system)
+    }
+}
+
+#[cfg(all(test, feature = "testing"))]
+mod tests {
+    use tutti_engine::{ManualStreamDriver, OutputBlock, RunningStream, StreamFaults, TimerError};
+    use tutti_types::{MaxBlock, Samples};
+
+    use super::*;
+
+    /// The handle of a stream that never opens.
+    struct Never;
+
+    impl RunningStream for Never {
+        fn stop(self: Box<Self>) {}
+    }
+
+    /// A card whose stream will not open.
+    struct UnopenableCard;
+
+    impl StreamDriver for UnopenableCard {
+        type Running = Never;
+        type Error = tutti_cpal::Error;
+
+        fn open(
+            self,
+            _: &OutputSpec,
+            _: OutputBlock,
+            _: std::sync::Arc<StreamFaults>,
+        ) -> std::result::Result<Never, Self::Error> {
+            Err(tutti_cpal::Error::InvalidDevice("no card".into()))
+        }
+    }
+
+    /// A timer the OS refuses.
+    struct UnstartableTimer;
+
+    impl StreamDriver for UnstartableTimer {
+        type Running = Never;
+        type Error = TimerError;
+
+        fn open(
+            self,
+            _: &OutputSpec,
+            _: OutputBlock,
+            _: std::sync::Arc<StreamFaults>,
+        ) -> std::result::Result<Never, Self::Error> {
+            Err(TimerError::Thread(std::io::Error::other("no thread")))
+        }
+    }
+
+    /// A node that cannot run above 90 kHz: its `prepare` panics there, which is
+    /// how a re-prepare poisons an editor.
+    struct Grenade;
+
+    impl tutti_graph::Node for Grenade {
+        fn shape(&self) -> tutti_graph::Shape {
+            tutti_graph::Shape::source_unassigned(ChannelLayout::MONO)
+        }
+
+        fn prepare(&mut self, prepare: &tutti_graph::Prepare) {
+            assert!(prepare.sample_rate().get() < 90_000.0, "no such rate");
+        }
+
+        fn process(
+            &mut self,
+            _: &tutti_graph::Cx<'_>,
+            mut io: tutti_graph::Io<'_>,
+        ) -> tutti_graph::Status {
+            io.output(0).fill(0.0);
+            tutti_graph::Status::Modified
+        }
+
+        fn reset(&mut self) {}
+    }
+
+    fn spec(rate: SampleRate, quantum: usize) -> OutputSpec {
+        OutputSpec::new(
+            rate,
+            ChannelLayout::STEREO,
+            tutti_buffers::SampleFormat::F32,
+        )
+        .with_quantum(MaxBlock::of(Samples(quantum)))
+    }
+
+    /// **A card that cannot be started again after a timer that would not
+    /// start leaves the session stopped, its stream reporting what the graph is
+    /// prepared at**: the error names both failures, and the stream's rate and
+    /// callback size are the prepared graph's.
+    #[test]
+    fn a_double_failure_on_the_card_leaves_it_stopped_agreeing_with_the_graph() {
+        let (driver, _stream) = ManualStreamDriver::new();
+        let live = Session::builder()
+            .device(Default::default())
+            .build_device_on(spec(SampleRate::SR_48K, 256), driver)
+            .expect("builds with no device");
+        let err = live
+            .into_system_clock_on(UnstartableTimer, UnopenableCard)
+            .expect_err("neither starts");
+        assert!(
+            matches!(err.error().error(), Error::SwitchNotUndone { .. }),
+            "{}",
+            err.error()
+        );
+        let live = err.into_session();
+        assert!(!live.device().is_running(), "stopped");
+        let prepared = live.graph.prepared();
+        assert_eq!(live.device().spec().sample_rate, prepared.sample_rate());
+        assert_eq!(live.device().spec().quantum, prepared.quantum());
+        assert_eq!(live.device().graph_rate(), prepared.sample_rate());
+    }
+
+    /// **A poisoned graph on the timer leaves it stopped, its stream reporting
+    /// what the graph is prepared at**: the rate and the block.
+    #[test]
+    fn a_poisoned_graph_on_the_timer_leaves_it_stopped_agreeing_with_the_graph() {
+        let mut s = Session::builder()
+            .sample_rate(SampleRate::SR_48K)
+            .max_block(MaxBlock::of(Samples(480)))
+            .system_clock()
+            .build()
+            .expect("builds");
+        s.graph().add(tutti_graph::Unforkable(Grenade));
+        let _ = s.update();
+        let (driver, _stream) = ManualStreamDriver::new();
+        let err = s
+            .into_device_on(spec(SampleRate::of(96_000.0), 256), driver)
+            .expect_err("the graph is poisoned by the re-prepare");
+        assert!(
+            matches!(err.error().error(), Error::SwitchNotUndone { .. }),
+            "{}",
+            err.error()
+        );
+        let s = err.into_session();
+        let prepared = s.graph.prepared();
+        assert_eq!(s.stream_spec().sample_rate, prepared.sample_rate());
+        assert_eq!(s.stream_spec().quantum, prepared.quantum());
     }
 }

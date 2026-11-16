@@ -423,6 +423,16 @@ impl<C: Clock> Pool<C> {
         }
     }
 
+    /// Whether a run is due: its entry is declared and loaded.
+    #[cfg(feature = "device")]
+    pub(crate) fn has_due_run(&self) -> bool {
+        self.when_loaded.iter().any(|run| {
+            self.slots
+                .get(&run.key)
+                .is_some_and(|slot| slot.declared && matches!(slot.state, PoolState::Loaded))
+        })
+    }
+
     /// The entries the runs not yet run wait for, in the order asked: a run
     /// whose entry is loading, failed or held. (One whose entry is loaded runs
     /// at the next update; one whose entry was released is dropped there.)

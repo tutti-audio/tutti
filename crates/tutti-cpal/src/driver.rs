@@ -149,7 +149,11 @@ impl TuttiDriver {
 
     /// Switches the stream to a driver of the caller's choosing at the caller's
     /// `spec`, running `rerate` between the stop and the start, resolving no
-    /// device: a restart whose driver is given, not found.
+    /// device: a restart whose driver is given, not found. **The driver is now
+    /// the device**: the driver's errors are the device layer's
+    /// ([`Error`](crate::Error)), and the device is recorded as supplied (it
+    /// names none). [`move_to`](Self::move_to) is the move to a driver that is
+    /// not the device's.
     ///
     /// The device-free counterpart of `restart_with`, as
     /// [`start_with`](Self::start_with) is of `restart`: over a
@@ -206,7 +210,9 @@ impl TuttiDriver {
     }
 
     /// Moves the stream, still this driver's, to `driver` at `spec`: a driver
-    /// that is not the device's (a timer). `rerate` runs between the stop and
+    /// that is not the device's (a timer), whose errors are its own and whose
+    /// move leaves the device on record, so a restart can open it again
+    /// ([`switch`](Self::switch) makes the driver the device). `rerate` runs between the stop and
     /// the start, as in [`restart_with`](Self::restart_with); a failure leaves
     /// the stream stopped at its old spec. [`into_host`](Self::into_host) hands
     /// the stream on once the device is no longer wanted.
@@ -223,8 +229,8 @@ impl TuttiDriver {
     }
 
     /// [`StreamHost::settle`] on this driver's stream.
-    pub fn settle(&mut self, rate: tutti_types::SampleRate) {
-        self.host.settle(rate);
+    pub fn settle(&mut self, prepared: &tutti_graph::Prepare) {
+        self.host.settle(prepared);
     }
 
     /// The stream host, taken out of the driver: the device is no longer this
