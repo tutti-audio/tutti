@@ -44,7 +44,8 @@
 //!   signature of a range-checked type.
 //! - `option-arg`: a receiver by value, a built type of `Self` or the owner (no wrapper:
 //!   an option returns `Self`), and a parameter after the receiver whose type is an
-//!   `Option<..>` (any path to it) or an `impl Into<Option<..>>`: "none" is said by not
+//!   `Option<..>` (any path to it), an `impl Into<Option<..>>` or a generic bounded
+//!   `Into<Option<..>>`: "none" is said by not
 //!   calling the option. A terminal `build(self)` whose built type is not its owner is
 //!   not one.
 //!
@@ -608,9 +609,10 @@ fn is_width(param: &str, bounds: &str) -> bool {
     false
 }
 
-/// Whether a parameter `pat: ty` is an `Option<..>` (any path to it) or an
-/// `impl Into<Option<..>>`.
-fn takes_option(param: &str) -> bool {
+/// Whether a parameter `pat: ty` is an `Option<..>` (any path to it), an
+/// `impl Into<Option<..>>`, or a generic bounded `Into<Option<..>>` in `bounds`
+/// (the generics and the `where` clause).
+fn takes_option(param: &str, bounds: &str) -> bool {
     let p = squash(strip_attrs(param));
     let Some((_, ty)) = p.split_once(':') else {
         return false;
@@ -622,7 +624,11 @@ fn takes_option(param: &str) -> bool {
             .strip_prefix("Into<")
             .is_some_and(|r| bare(r) == "Option");
     }
-    bare(ty) == "Option" && ty.contains('<')
+    if bare(ty) == "Option" && ty.contains('<') {
+        return true;
+    }
+    let b = squash(bounds);
+    b.contains(&format!("{ty}:Into<Option<")) || b.contains(&format!("{ty}: Into<Option<"))
 }
 
 fn macro_bodies(code: &str) -> Vec<(usize, usize, String)> {
@@ -790,7 +796,9 @@ pub(super) fn scan(path: &str, src: &str) -> Vec<Site> {
                 if ty == Some(Wrap::Result) {
                     hit(Rule::ChainResult);
                 }
-                if ty == Some(Wrap::Plain) && params.iter().skip(1).any(|p| takes_option(p)) {
+                if ty == Some(Wrap::Plain)
+                    && params.iter().skip(1).any(|p| takes_option(p, &bounds))
+                {
                     hit(Rule::OptionArg);
                 }
             }
@@ -1022,6 +1030,10 @@ mod tests {
             "impl T { pub fn pool(self, p: std::option::Option<u8>) -> T { self } }",
             "impl T { pub fn pool(self, p: core::option::Option<u8>) -> Self { self } }",
             "impl T { pub fn pool(self, p: impl Into<Option<u8>>) -> Self { self } }",
+            "impl T { pub fn pool(self, p: ::core::option::Option<u8>) -> Self { self } }",
+            "impl T { pub fn pool(self, mut p: Option<u8>) -> Self { self } }",
+            "impl T { pub fn pool<O: Into<Option<u8>>>(self, p: O) -> Self { self } }",
+            "impl T { pub fn pool<O>(self, p: O) -> Self where O: Into<Option<u8>> { self } }",
         ] {
             assert_eq!(rules(bad), one("pool", "option-arg"), "{bad}");
         }
@@ -1033,6 +1045,8 @@ mod tests {
             "impl T { pub(crate) fn pool(self, p: Option<u8>) -> Self { self } }",
             "impl T { pub fn pool(self, p: Vec<Option<u8>>) -> Self { self } }",
             "impl T { pub fn pool(self, p: u8) -> Self { self } }",
+            "impl T { pub fn pool(self, p: &Option<u8>) -> Self { self } }",
+            "impl T { pub fn pool<O: Into<u8>>(self, p: O) -> Self { self } }",
         ] {
             assert_eq!(rules(ok), vec![], "{ok}");
         }
