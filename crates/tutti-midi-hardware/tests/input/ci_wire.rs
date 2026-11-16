@@ -17,7 +17,8 @@ use tutti_midi_device::{
 };
 use tutti_ump::ManufacturerId;
 use tutti_ump::{
-    DeviceIdentity, Message, Midi1Parser, MidiGroup, SysexAssembler, SysexStep, U7, Ump, frame,
+    DeviceIdentity, Message, Midi1Parser, MidiGroup, SoftwareRevision, SysexAssembler, SysexStep,
+    U7, Ump, frame,
 };
 
 #[test]
@@ -33,7 +34,7 @@ fn midi1_wire_sysex_promotes_to_a_typed_ci_message() {
                 manufacturer: ManufacturerId::of(0xA109),
                 family: [0x42, 0x00].map(U7::of),
                 model: [0x07, 0x00].map(U7::of),
-                revision: [1, 2, 3, 4].map(U7::of),
+                revision: SoftwareRevision::from([1, 2, 3, 4].map(U7::of)),
             },
             categories: CiCategories::PROFILE_CONFIGURATION,
             max_sysex_size: MaxSysexSize::of(512),

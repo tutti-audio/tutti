@@ -178,3 +178,17 @@ fn the_text_types_convert_display_and_parse() {
     assert_eq!(text.as_ref() as &str, "done");
     assert!("a\0".parse::<EndpointName>().is_err());
 }
+
+// §7.1.5: the Id is ASCII 32-126 and at most 42 bytes; the 128 random bits are
+// 32 lowercase hex digits, leading zeros kept.
+#[test]
+fn a_random_product_instance_id_is_32_lowercase_hex_digits() {
+    let id = |bytes| ProductInstanceId::from_random(bytes);
+    assert_eq!(id([0; 16]).as_str(), "0".repeat(32));
+    assert_eq!(id([0xAB; 16]).as_str(), "ab".repeat(16));
+    let mixed = [
+        0x00, 0x01, 0x0F, 0x10, 0x7E, 0x7F, 0x80, 0xFF, 0xDE, 0xAD, 0xBE, 0xEF, 0x09, 0xA0, 0x00,
+        0x5C,
+    ];
+    assert_eq!(id(mixed).as_str(), "00010f107e7f80ffdeadbeef09a0005c");
+}
