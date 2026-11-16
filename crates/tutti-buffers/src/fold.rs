@@ -25,7 +25,7 @@ pub enum FoldEnd {
 #[non_exhaustive]
 pub enum FoldError {
     /// A width is zero channels ([`BufferError::ZeroWidth`]) or does not fit a
-    /// channel layout ([`BufferError::Layout`]).
+    /// channel layout ([`BufferError::Layout`], carrying a [`LayoutError`](tutti_types::LayoutError)).
     #[error(transparent)]
     Buffer(#[from] BufferError),
     /// Source channel `channel` (speaker `speaker`) has no place in the

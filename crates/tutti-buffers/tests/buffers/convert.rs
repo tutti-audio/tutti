@@ -322,9 +322,9 @@ fn interleave_inverts_deinterleave_at_every_width() {
 }
 
 /// More planes than a layout holds are refused with the layout's own error,
-/// the refused count intact and reachable through `source()`.
+/// carrying the refused count.
 #[test]
-fn planes_past_a_layout_keep_the_layout_error_as_the_cause() {
+fn planes_past_a_layout_carry_the_layout_error_and_the_refused_count() {
     use std::error::Error;
     let planes = vec![Vec::<f32>::new(); usize::from(u16::MAX) + 1];
     let refused = Planes::from_vecs(&planes).unwrap_err();
