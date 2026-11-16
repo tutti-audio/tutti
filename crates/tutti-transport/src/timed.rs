@@ -18,7 +18,7 @@
 //! backlog of waiting commands): the ring's push cannot fail, and neither
 //! can the audio thread's move into its pending list, which is allocated
 //! at the sum up front. With every credit held, `schedule` refuses the
-//! command and hands it back ([`ScheduleFull`]). That is the back-pressure:
+//! command and hands it back ([`TimedError::Full`]). That is the back-pressure:
 //! nothing is dropped on either side. A beat-timed command holds its credit
 //! while it waits for its beat, which is why
 //! [`cancel_scheduled`](super::MotionFsm::cancel_scheduled) exists.
@@ -77,16 +77,47 @@ impl From<MotionEvent> for TransportCommand {
     }
 }
 
-/// [`SCHEDULE_CAPACITY`] commands were in flight, so this one was not sent.
-/// Handed back so a caller can retry it once the engine has applied some.
-#[derive(Debug, Clone, Copy, PartialEq, thiserror::Error)]
-#[error("transport command queue full; {command:?} at {at:?} not sent")]
-pub struct ScheduleFull {
-    /// When it was meant to happen.
-    pub at: At,
-    /// The command.
-    pub command: TransportCommand,
+/// Why a timed command was refused instead of queued for the timeline. Each
+/// variant hands the command `E` back, so a caller can retry or reroute it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum TimedError<E: std::fmt::Debug> {
+    /// [`SCHEDULE_CAPACITY`] commands were in flight (or
+    /// [`IMMEDIATE_RESERVE`] more, for one due at the next block), so the
+    /// command was not sent, whatever time it was for. Retry it once the
+    /// engine has applied some.
+    #[error("transport command queue full; {0:?} not sent")]
+    Full(E),
+    /// A command that starts the transport rolling was timed at a beat while
+    /// the transport is stopped. A beat has a frame only once the transport
+    /// rolls, so the command would wait for a playback that only it can
+    /// start, and never fire. Start the transport first, or time it at a
+    /// frame or the next block. The session's verbs check this before
+    /// sending; [`MotionFsm`](super::MotionFsm)'s own sends never return it.
+    #[error("{0:?} cannot fire: a stopped transport never reaches a beat")]
+    BeatWhileStopped(E),
 }
+
+impl<E: std::fmt::Debug> TimedError<E> {
+    /// The command that was not sent.
+    pub fn into_inner(self) -> E {
+        match self {
+            Self::Full(command) | Self::BeatWhileStopped(command) => command,
+        }
+    }
+
+    /// The same refusal, with the command converted by `f`.
+    pub fn map<F: std::fmt::Debug>(self, f: impl FnOnce(E) -> F) -> TimedError<F> {
+        match self {
+            Self::Full(command) => TimedError::Full(f(command)),
+            Self::BeatWhileStopped(command) => TimedError::BeatWhileStopped(f(command)),
+        }
+    }
+}
+
+/// Every credit was held.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct NoCredit;
 
 /// One command in flight.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -167,8 +198,8 @@ impl Schedule {
         }
     }
 
-    /// Send, or hand the command back when every credit is held.
-    pub(crate) fn send(&self, at: At, command: TransportCommand) -> Result<(), ScheduleFull> {
+    /// Send, or refuse when every credit is held; the caller still owns the command.
+    pub(crate) fn send(&self, at: At, command: TransportCommand) -> Result<(), NoCredit> {
         let mut held = self.credit.load(Ordering::Acquire);
         loop {
             let limit = match at {
@@ -176,7 +207,7 @@ impl Schedule {
                 _ => SCHEDULE_CAPACITY,
             };
             if held >= limit {
-                return Err(ScheduleFull { at, command });
+                return Err(NoCredit);
             }
             match self.credit.compare_exchange_weak(
                 held,
@@ -363,7 +394,7 @@ mod tests {
             s.send(At::Frame(Frame::new(i as u64)), play).expect("room");
         }
         let at = At::Frame(Frame::new(99));
-        assert_eq!(s.send(at, play), Err(ScheduleFull { at, command: play }));
+        assert_eq!(s.send(at, play), Err(NoCredit));
         let mut audio = ScheduleAudio::new(s.clone());
         audio.gather();
         assert_eq!(audio.pending().len(), SCHEDULE_CAPACITY);
@@ -386,13 +417,7 @@ mod tests {
         for _ in 0..IMMEDIATE_RESERVE {
             s.send(At::NextBlock, play).expect("reserve");
         }
-        assert_eq!(
-            s.send(At::NextBlock, play),
-            Err(ScheduleFull {
-                at: At::NextBlock,
-                command: play
-            })
-        );
+        assert_eq!(s.send(At::NextBlock, play), Err(NoCredit));
         assert_eq!(s.outstanding(), SCHEDULE_CAPACITY + IMMEDIATE_RESERVE);
     }
 

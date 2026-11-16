@@ -145,8 +145,7 @@ pub use edge::EdgeGainError;
 #[cfg(feature = "plugin")]
 pub use error::HostPluginError;
 pub use error::{
-    ConnectError, Error, HeardTapError, InletError, NoSuchNode, RemoveError, Result, ScheduleError,
-    TempoError,
+    ConnectError, Error, HeardTapError, InletError, NoSuchNode, RemoveError, Result, TempoError,
 };
 #[cfg(feature = "midi")]
 pub use error::{MidiError, RouteDeclarer};
