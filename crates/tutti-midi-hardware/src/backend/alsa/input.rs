@@ -2,8 +2,8 @@
 
 use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
 use super::enumerate::unpack_id;
@@ -63,8 +63,6 @@ pub struct AlsaInput {
     stop: Option<UnixStream>,
     /// Set by the pump when it ends on an error, never on a stop.
     died: Arc<AtomicBool>,
-    /// Disconnects when the pump ends, however it ends: the drop's bounded wait.
-    ended: mpsc::Receiver<()>,
     thread: Option<ThreadHandle<()>>,
 }
 
@@ -82,16 +80,17 @@ impl Drop for AlsaInput {
             // outlive this would leave the port subscribed to a device the
             // caller believes it disconnected. But not for ever: a pump stuck in
             // alsa-lib is detached, and says so.
-            match self.ended.recv_timeout(JOIN_BOUND) {
-                Err(mpsc::RecvTimeoutError::Timeout) => {
+            match thread.stop_within(JOIN_BOUND) {
+                Ok(Ok(())) => {}
+                // The pump's guard catches its own panics and marks the input
+                // dead; one that escapes the guard is reported here.
+                Ok(Err(panicked)) => tracing::error!("ALSA MIDI pump: {panicked}"),
+                Err(stuck) => {
                     tracing::warn!(
                         "ALSA MIDI pump did not stop within {JOIN_BOUND:?}; left running, still subscribed"
                     );
-                    thread.detach();
+                    stuck.detach();
                 }
-                // Disconnected: the pump has ended (or is ending), so the
-                // handle's join is brief.
-                _ => drop(thread),
             }
         }
     }
@@ -174,10 +173,7 @@ pub(super) fn start(
     let polls = Poller::new(&seq, stop_rx.as_raw_fd())?;
     let died = Arc::new(AtomicBool::new(false));
     let flag = Arc::clone(&died);
-    let (ending, ended) = mpsc::channel();
     let thread = spawn_named("tutti-midi-in", None, move |_| {
-        // Dropped when the pump returns or unwinds, which disconnects `ended`.
-        let _ending: mpsc::Sender<()> = ending;
         // A panic in the pump ends it with the input held, so it is caught
         // and marks the input dead, as an error does.
         Guard::new(Arc::clone(&flag)).run(|| pump(seq, polls, clock, stop_rx, flag, producer));
@@ -187,7 +183,6 @@ pub(super) fn start(
     Ok(AlsaInput {
         stop: Some(stop_tx),
         died,
-        ended,
         thread: Some(thread),
     })
 }

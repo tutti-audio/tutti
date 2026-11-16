@@ -474,9 +474,16 @@ impl Watch for AlsaWatch {}
 
 impl Drop for AlsaWatch {
     fn drop(&mut self) {
-        // Closing the pair wakes `poll`; the handle's drop then stops and joins.
+        // Closing the pair wakes `poll`; the join then waits for the thread.
         drop(self.stop.take());
-        drop(self.thread.take());
+        if let Some(thread) = self.thread.take() {
+            thread.token().stop();
+            // The thread reports its own panics to the sink; one that escapes
+            // that (inside `fail`) is reported here.
+            if let Err(panicked) = thread.join() {
+                tracing::error!("ALSA device watch: {panicked}");
+            }
+        }
     }
 }
 
