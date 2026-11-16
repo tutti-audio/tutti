@@ -25,7 +25,10 @@
 //!   into and one reader takes whole since its last take (a level meter's lane).
 //! - [`gauge()`] / [`counter()`] — a reading a node writes and any thread reads:
 //!   a level that moves both ways ([`Gauge`]) or a count that only grows
-//!   ([`Counter`], the loss count of a [`ring()`]), each one word.
+//!   ([`Counter`], one or several tallies, such as a [`ring()`]'s loss count),
+//!   one load per word.
+//! - [`tally()`] — a count with many writers ([`Tally`], [`TallyWriter`]):
+//!   `Clone` writers that `fetch_add`, for owners whose writers overlap.
 //!
 //! **Queues and signals**
 //!
@@ -180,7 +183,10 @@ pub use dirty_set::{DirtyIndex, DirtySet, Taken};
 pub use doorbell::Doorbell;
 pub use drain_clock::{DrainBeat, DrainMark, DrainWatch, drain_clock};
 pub use fault_latch::{Drained, FaultLatch};
-pub use gauge::{Count, Counter, CounterWriter, Gauge, GaugeWriter, Reading, counter, gauge};
+pub use gauge::{
+    Count, Counter, CounterWriter, Gauge, GaugeWriter, Reading, Tally, TallyWriter, Words, counter,
+    gauge, tally,
+};
 pub use handoff::{Hand, Rt, handoff};
 pub use job_gate::JobGate;
 pub use level_cell::{LevelReader, LevelSpan, LevelWriter, level_cell};

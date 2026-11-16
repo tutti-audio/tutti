@@ -9,10 +9,15 @@
 //!
 //! - A [`Gauge<U>`] is a latest value. [`GaugeWriter::set`] replaces it,
 //!   [`Gauge::get`] reads it; any number of `Clone`s read the same cell.
-//! - A [`Counter<U>`] is a cumulative count. [`CounterWriter::add`] adds to it
-//!   and saturates; [`Counter::get`] never returns less than an earlier `get`.
+//! - A [`Counter<U>`] is a cumulative count of one or several tallies
+//!   ([`Count`]). [`CounterWriter::add`] adds to each and saturates it;
+//!   no tally of [`Counter::get`] is less than in an earlier `get`.
 //!
-//! Nothing resets on read, and a reader never blocks: one load of one word.
+//! A [`Tally<U>`] is a count with many writers ([`tally()`]): `Clone` writers
+//! that `fetch_add`, wrapping rather than saturating, with no closed flag.
+//!
+//! Nothing resets on read, and a reader never blocks: one load per word (one
+//! word for a gauge).
 //! The writer is not `Clone` and writes through `&mut self`, so the cell has
 //! one writer at a time by type (a shared reference cannot write, and two
 //! threads cannot race a read-modify-write). Writing is audio-thread safe: no
@@ -38,6 +43,9 @@
 //! The model in `tests/gauge_loom.rs` runs this code.
 
 use std::marker::PhantomData;
+
+mod tally;
+pub use tally::{Tally, TallyWriter, tally};
 
 use sync::{Arc, AtomicBool, AtomicU64, Ordering};
 use tutti_types::Unit;
@@ -120,50 +128,145 @@ where
     }
 }
 
-/// A quantity a [`Counter`] counts: a whole number of something.
+/// A [`Count`]'s tallies: `[u64; N]` with `N >= 1`, and nothing else. Sealed,
+/// so a count's width is fixed by its type and the counter's cells always
+/// match it.
 ///
-/// `count` and `from_count` are inverse: `U::from_count(u.count()) == u`. The
-/// owner of a measurement implements it for the type that names what is
-/// counted (a count of events, of frames), so a `Counter<U>` reads back a `U`
-/// and not a bare number.
-pub trait Count: Copy + Send + 'static {
-    /// The number of whole units.
-    fn count(self) -> u64;
-    /// `count` units.
-    fn from_count(count: u64) -> Self;
+/// A count of no tallies is refused when its counter is built, at compile
+/// time.
+///
+/// ```compile_fail,E0080
+/// use tutti_rt::{Count, counter};
+///
+/// #[derive(Clone, Copy)]
+/// struct ZeroCount;
+///
+/// impl Count for ZeroCount {
+///     type Words = [u64; 0];
+///     fn to_words(self) -> [u64; 0] {
+///         []
+///     }
+///     fn from_words(_: [u64; 0]) -> Self {
+///         ZeroCount
+///     }
+/// }
+///
+/// let _ = counter::<ZeroCount>();
+/// ```
+///
+/// A tally refuses it the same way.
+///
+/// ```compile_fail,E0080
+/// use tutti_rt::{Count, tally};
+///
+/// #[derive(Clone, Copy)]
+/// struct ZeroCount;
+///
+/// impl Count for ZeroCount {
+///     type Words = [u64; 0];
+///     fn to_words(self) -> [u64; 0] {
+///         []
+///     }
+///     fn from_words(_: [u64; 0]) -> Self {
+///         ZeroCount
+///     }
+/// }
+///
+/// let _ = tally::<ZeroCount>();
+/// ```
+pub trait Words: words::Sealed + Copy {
+    /// The number of tallies: `N`, a compile error when `N` is 0.
+    const LEN: usize;
+    /// All tallies zero.
+    fn zeroed() -> Self;
+    /// The tallies as a slice of `LEN` words.
+    fn as_slice(&self) -> &[u64];
+    /// The tallies as a mutable slice of `LEN` words.
+    fn as_mut_slice(&mut self) -> &mut [u64];
 }
 
-impl Count for u64 {
+mod words {
+    pub trait Sealed {}
+    impl<const N: usize> Sealed for [u64; N] {}
+}
+
+impl<const N: usize> Words for [u64; N] {
+    const LEN: usize = {
+        assert!(N >= 1, "a count has at least one tally");
+        N
+    };
     #[inline]
-    fn count(self) -> u64 {
+    fn zeroed() -> Self {
+        [0; N]
+    }
+    #[inline]
+    fn as_slice(&self) -> &[u64] {
         self
     }
     #[inline]
-    fn from_count(count: u64) -> Self {
+    fn as_mut_slice(&mut self) -> &mut [u64] {
+        self
+    }
+}
+
+/// A quantity a [`Counter`] counts: one or several whole-number tallies.
+///
+/// A value is a fixed array of words, one per tally ([`Words`](Self::Words),
+/// `[u64; N]`). The counter keeps one atomic per word and adds word by word,
+/// each saturating at `u64::MAX` on its own, so a carry never crosses from
+/// one tally to the next. `from_words(u.to_words()) == u`.
+///
+/// The tallies are independent: each only grows, but a reader that races the
+/// writer may read word 0 at one instant and word 1 at a later one (see
+/// [`Counter::get`]). A quantity whose words must agree at an instant is not
+/// a `Count`.
+///
+/// The owner of a measurement implements it for the type that names what is
+/// counted (a count of events, of frames), so a `Counter<U>` reads back a `U`
+/// and not a bare number.
+pub trait Count: Copy + Send + 'static {
+    /// The tallies: `[u64; N]`, one word per tally.
+    type Words: Words;
+    /// The value as its tallies.
+    fn to_words(self) -> Self::Words;
+    /// The value whose tallies `to_words` returned.
+    fn from_words(words: Self::Words) -> Self;
+}
+
+impl Count for u64 {
+    type Words = [u64; 1];
+    #[inline]
+    fn to_words(self) -> [u64; 1] {
+        [self]
+    }
+    #[inline]
+    fn from_words([count]: [u64; 1]) -> Self {
         count
     }
 }
 
 /// Frames, as a [`Counter`] counts them.
 impl Count for tutti_types::Samples {
+    type Words = [u64; 1];
     #[inline]
-    fn count(self) -> u64 {
-        self.0 as u64
+    fn to_words(self) -> [u64; 1] {
+        [self.0 as u64]
     }
     #[inline]
-    fn from_count(count: u64) -> Self {
+    fn from_words([count]: [u64; 1]) -> Self {
         Self(usize::try_from(count).unwrap_or(usize::MAX))
     }
 }
 
 /// Re-anchors, as a [`Counter`] counts them.
 impl Count for tutti_types::Resyncs {
+    type Words = [u64; 1];
     #[inline]
-    fn count(self) -> u64 {
-        self.get()
+    fn to_words(self) -> [u64; 1] {
+        [self.get()]
     }
     #[inline]
-    fn from_count(count: u64) -> Self {
+    fn from_words([count]: [u64; 1]) -> Self {
         Self::new(count)
     }
 }
@@ -171,17 +274,31 @@ impl Count for tutti_types::Resyncs {
 /// The cell both shapes read: the value's word and the writer's gone flag.
 #[derive(Debug)]
 struct Shared {
+    /// Word 0 of the value: a gauge's whole value, a counter's first tally.
     value: AtomicU64,
+    /// A counter's tallies after the first; empty for a gauge and a one-word
+    /// count. Allocated once, with the cell.
+    rest: Box<[AtomicU64]>,
     /// Raised (`Release`) by the writer's drop, after its last store.
     closed: AtomicBool,
 }
 
 impl Shared {
-    fn new(initial: u64) -> Arc<Self> {
+    fn new(initial: u64, extra_words: usize) -> Arc<Self> {
         Arc::new(Self {
             value: AtomicU64::new(initial),
+            rest: (0..extra_words).map(|_| AtomicU64::new(0)).collect(),
             closed: AtomicBool::new(false),
         })
+    }
+
+    /// Word `i` of the value: `value` for 0, then `rest`.
+    #[inline]
+    fn word(&self, i: usize) -> &AtomicU64 {
+        match i.checked_sub(1) {
+            None => &self.value,
+            Some(j) => &self.rest[j],
+        }
     }
 
     /// Whether the writer has dropped. Read before the value, so a closed
@@ -304,7 +421,7 @@ impl<U: Reading> Drop for GaugeWriter<U> {
 /// A gauge holding `initial`, and its writer. Allocates: control side.
 #[must_use = "the writer is the only way to set the reading"]
 pub fn gauge<U: Reading>(initial: U) -> (GaugeWriter<U>, Gauge<U>) {
-    let cell = Shared::new(initial.to_bits());
+    let cell = Shared::new(initial.to_bits(), 0);
     (
         GaugeWriter {
             cell: Arc::clone(&cell),
@@ -356,15 +473,29 @@ impl<U: Count> Clone for Counter<U> {
 }
 
 impl<U: Count> Counter<U> {
-    /// The total counted so far. Never less than an earlier `get`. Wait-free.
+    /// The total counted so far. No tally is ever less than in an earlier
+    /// `get`. Wait-free: one load per word.
+    ///
+    /// Each word is read on its own, in order, so a read that races the
+    /// writer may pair word 0 from before an `add` with a later word from
+    /// after it. Every word is a real total of its own tally; none is torn.
+    /// `get` does not load the `closed` flag: a reader that wants the final
+    /// total reads [`is_closed`](Self::is_closed) first, and once that is
+    /// `true` the `get` that follows reads every tally whole (the writer's
+    /// last store precedes its `Release` store of `closed`).
     #[inline]
     #[must_use]
     pub fn get(&self) -> U {
-        U::from_count(self.cell.value.load(Ordering::Acquire))
+        let mut words = U::Words::zeroed();
+        for (i, word) in words.as_mut_slice().iter_mut().enumerate() {
+            *word = self.cell.word(i).load(Ordering::Acquire);
+        }
+        U::from_words(words)
     }
 
     /// Whether the writer is gone: the total read is final until a
-    /// [`reopen`](Self::reopen).
+    /// [`reopen`](Self::reopen). A `get` after this answers `true` reads
+    /// every tally the writer wrote; a `get` before it may read mid-run.
     #[inline]
     #[must_use]
     pub fn is_closed(&self) -> bool {
@@ -404,17 +535,20 @@ pub struct CounterWriter<U: Count> {
 }
 
 impl<U: Count> CounterWriter<U> {
-    /// Adds `by` to the total, saturating at `u64::MAX`. Wait-free; allocates
-    /// nothing. Takes `&mut self`, so the read-then-store of the word has no
-    /// second writer to race and no add is lost.
+    /// Adds `by` to the total, each tally saturating at `u64::MAX` on its own.
+    /// Wait-free; allocates nothing. Takes `&mut self`, so the read-then-store
+    /// of a word has no second writer to race and no add is lost.
     #[inline]
     pub fn add(&mut self, by: U) {
-        let total = self
-            .cell
-            .value
-            .load(Ordering::Relaxed)
-            .saturating_add(by.count());
-        self.cell.value.store(total, Ordering::Release);
+        let by = by.to_words();
+        for (i, add) in by.as_slice().iter().enumerate() {
+            let word = self.cell.word(i);
+            let total = word.load(Ordering::Relaxed).saturating_add(*add);
+            // Relaxed: this word's coherence order keeps each tally monotonic
+            // for a reader, and the `Release` store of `closed` in the drop
+            // publishes every word to a reader that saw it closed.
+            word.store(total, Ordering::Relaxed);
+        }
     }
 }
 
@@ -427,7 +561,7 @@ impl<U: Count> Drop for CounterWriter<U> {
 /// A counter at zero, and its writer. Allocates: control side.
 #[must_use = "the writer is the only way to count"]
 pub fn counter<U: Count>() -> (CounterWriter<U>, Counter<U>) {
-    let cell = Shared::new(0);
+    let cell = Shared::new(0, <U::Words as Words>::LEN - 1);
     (
         CounterWriter {
             cell: Arc::clone(&cell),

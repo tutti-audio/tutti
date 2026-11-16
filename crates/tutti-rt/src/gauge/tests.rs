@@ -1,17 +1,35 @@
 use tutti_types::{Db, SamplePosition, Samples};
 
-use super::{Count, Counter, CounterWriter, Gauge, GaugeWriter, Reading, counter, gauge};
+use super::{Count, Counter, CounterWriter, Gauge, GaugeWriter, Reading, counter, gauge, tally};
 
 /// A count of dropped events, as an owner would name one.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Dropped(u64);
 
 impl Count for Dropped {
-    fn count(self) -> u64 {
-        self.0
+    type Words = [u64; 1];
+    fn to_words(self) -> [u64; 1] {
+        [self.0]
     }
-    fn from_count(count: u64) -> Self {
+    fn from_words([count]: [u64; 1]) -> Self {
         Self(count)
+    }
+}
+
+/// An owner's two-tally count.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Two {
+    lost: u64,
+    late: u64,
+}
+
+impl Count for Two {
+    type Words = [u64; 2];
+    fn to_words(self) -> [u64; 2] {
+        [self.lost, self.late]
+    }
+    fn from_words([lost, late]: [u64; 2]) -> Self {
+        Self { lost, late }
     }
 }
 
@@ -192,4 +210,135 @@ fn a_gauge_holds_its_last_reading_across_writers() {
     assert_eq!(level.get(), Db(-9.0));
     second.set(Db(-2.0));
     assert_eq!(level.get(), Db(-2.0));
+}
+
+#[test]
+fn a_two_tally_counter_adds_each_tally_on_its_own() {
+    let (mut writer, total) = counter::<Two>();
+    writer.add(Two { lost: 1, late: 10 });
+    writer.add(Two { lost: 2, late: 0 });
+    assert_eq!(total.get(), Two { lost: 3, late: 10 });
+}
+
+#[test]
+fn a_tally_saturates_without_carrying_into_the_next() {
+    let (mut writer, total) = counter::<Two>();
+    writer.add(Two {
+        lost: u64::MAX - 1,
+        late: 4,
+    });
+    writer.add(Two { lost: 5, late: 1 });
+    assert_eq!(
+        total.get(),
+        Two {
+            lost: u64::MAX,
+            late: 5
+        },
+        "the full tally stops at the top and the other goes on"
+    );
+}
+
+#[test]
+fn a_two_tally_counter_stays_cumulative_across_writers() {
+    let (mut first, total) = counter::<Two>();
+    first.add(Two { lost: 2, late: 3 });
+    drop(first);
+    assert!(total.is_closed());
+    let mut second = total.reopen().unwrap();
+    second.add(Two { lost: 1, late: 1 });
+    assert_eq!(total.get(), Two { lost: 3, late: 4 });
+}
+
+#[test]
+fn a_reader_of_a_two_tally_counter_never_sees_a_tally_go_back() {
+    let (mut writer, total) = counter::<Two>();
+    let reader = std::thread::spawn(move || {
+        let mut last = Two { lost: 0, late: 0 };
+        while !total.is_closed() {
+            let now = total.get();
+            assert!(now.lost >= last.lost && now.late >= last.late);
+            last = now;
+        }
+        total.get()
+    });
+    for _ in 0..10_000 {
+        writer.add(Two { lost: 1, late: 2 });
+    }
+    drop(writer);
+    assert_eq!(
+        reader.join().unwrap(),
+        Two {
+            lost: 10_000,
+            late: 20_000
+        }
+    );
+}
+
+#[test]
+fn two_tally_writers_add_to_one_exact_total() {
+    let total = tally::<u64>();
+    let handles: Vec<_> = (0..2)
+        .map(|_| {
+            let mut writer = total.writer();
+            std::thread::spawn(move || {
+                for _ in 0..50_000 {
+                    writer.add(1);
+                }
+            })
+        })
+        .collect();
+    for h in handles {
+        h.join().unwrap();
+    }
+    assert_eq!(total.get(), 100_000, "an add was lost to the other writer");
+}
+
+#[test]
+fn a_tally_adds_each_tally_of_a_two_tally_count() {
+    let total = tally::<Two>();
+    let mut a = total.writer();
+    let mut b = a.clone();
+    a.add(Two { lost: 1, late: 10 });
+    b.add(Two { lost: 2, late: 0 });
+    assert_eq!(total.clone().get(), Two { lost: 3, late: 10 });
+}
+
+#[test]
+fn a_tally_reader_never_sees_a_tally_go_back() {
+    let total = tally::<Two>();
+    let mut writers = [total.writer(), total.writer()];
+    let reader = std::thread::spawn({
+        let total = total.clone();
+        move || {
+            let mut last = Two { lost: 0, late: 0 };
+            for _ in 0..10_000 {
+                let now = total.get();
+                assert!(now.lost >= last.lost && now.late >= last.late);
+                last = now;
+            }
+        }
+    });
+    for _ in 0..10_000 {
+        for w in &mut writers {
+            w.add(Two { lost: 1, late: 2 });
+        }
+    }
+    reader.join().unwrap();
+    assert_eq!(
+        total.get(),
+        Two {
+            lost: 20_000,
+            late: 40_000
+        }
+    );
+}
+
+#[test]
+fn a_tally_outlives_every_writer_and_mints_more() {
+    let total = tally::<u64>();
+    let mut first = total.writer();
+    first.add(2);
+    drop(first);
+    total.writer().add(3);
+    assert_eq!(total.get(), 5);
 }
