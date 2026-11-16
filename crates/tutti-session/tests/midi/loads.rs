@@ -1,5 +1,5 @@
 //! A MIDI file load is a job: `Midi::load_file` returns a `MidiLoad` at once
-//! and the result lands as `MidiEvent::FileLoaded` carrying that id, in
+//! and the result lands as `MidiReport::FileLoaded` carrying that id, in
 //! `update()`. A SoundFont is a pool entry, loaded the pool's way.
 
 use std::path::Path;
@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use tutti_midi_file::{MidiFile, SmfDivision, SmfFormat, Tick, Track};
 use tutti_session::{
-    DetachedSession, JobFailed, MidiError, MidiEvent, MidiLoad, Session, SessionEvent,
+    DetachedSession, JobFailed, MidiError, MidiLoad, MidiReport, Session, SessionEvent,
 };
 use tutti_types::SampleRate;
 use tutti_ump::{MidiChannel, NoteNumber, U7};
@@ -38,7 +38,7 @@ fn write_file(dir: &Path, name: &str, key: u8) -> (std::path::PathBuf, MidiFile)
 fn land<T>(
     s: &mut DetachedSession,
     want: usize,
-    mut pick: impl FnMut(MidiEvent) -> Option<T>,
+    mut pick: impl FnMut(MidiReport) -> Option<T>,
 ) -> Vec<T> {
     let deadline = Instant::now() + Duration::from_secs(10);
     let mut got = Vec::new();
@@ -56,9 +56,9 @@ fn land<T>(
     got
 }
 
-fn files(event: MidiEvent) -> Option<(MidiLoad, Result<MidiFile, MidiError>)> {
+fn files(event: MidiReport) -> Option<(MidiLoad, Result<MidiFile, MidiError>)> {
     match event {
-        MidiEvent::FileLoaded { load, file } => Some((load, file)),
+        MidiReport::FileLoaded { load, file } => Some((load, file)),
         _ => None,
     }
 }

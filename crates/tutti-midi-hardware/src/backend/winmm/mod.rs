@@ -35,7 +35,7 @@ mod input;
 mod output;
 
 use crate::InputProducerHandle;
-use crate::capability::EndpointInfo;
+use crate::capability::OsEndpoint;
 use crate::devices::ChangeSink;
 use crate::devices::reporter::os_devices;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
@@ -98,7 +98,7 @@ fn ports(side: Side) -> impl Iterator<Item = (u32, PortInfo)> {
 }
 
 /// The endpoints of `side` now.
-fn list(side: Side) -> Vec<EndpointInfo> {
+fn list(side: Side) -> Vec<OsEndpoint> {
     endpoints(side, ports(side).map(|(_, info)| info))
 }
 
@@ -123,11 +123,11 @@ impl MidiEndpoints for WinMmEndpoints {
         Ok(Box::new(poll::start(sink, devices, poll::INTERVAL)?))
     }
 
-    fn inputs(&self) -> Vec<EndpointInfo> {
+    fn inputs(&self) -> Vec<OsEndpoint> {
         list(Side::Input)
     }
 
-    fn outputs(&self) -> Vec<EndpointInfo> {
+    fn outputs(&self) -> Vec<OsEndpoint> {
         list(Side::Output)
     }
 

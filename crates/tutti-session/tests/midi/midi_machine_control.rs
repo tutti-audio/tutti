@@ -10,12 +10,12 @@ use crate::common::blocks;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use tutti_midi_hardware::EndpointId;
+use tutti_midi_device::EndpointId;
 use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint};
 use tutti_midi_protocol::{MtcRate, Recipient, SysexDeviceId};
 use tutti_midi_runtime::{ClockKind, MidiOut};
 use tutti_session::{
-    FollowClock, FollowMachineControl, MidiError, MidiEvent, SendMachineControl, Session,
+    FollowClock, FollowMachineControl, MidiError, MidiReport, SendMachineControl, Session,
     SessionEvent, TempoError, midi_sink,
 };
 use tutti_transport::FadeOut;
@@ -30,7 +30,7 @@ const OURS: SysexDeviceId = SysexDeviceId::of(5);
 fn rig() -> (Session, FakeCounters) {
     let (backend, fake) = FakeBackend::build_with(vec![endpoint(KEYS, "Keys")], vec![], usize::MAX);
     let mut s = Session::builder()
-        .midi_hardware_over(backend)
+        .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareOptions::new())
         .sample_rate(SampleRate::of(RATE))
         .build()
         .expect("builds");
@@ -68,7 +68,7 @@ fn command(fake: &FakeCounters, device: u8, commands: &[u8]) {
     }
 }
 
-fn pump(s: &mut Session) -> Vec<MidiEvent> {
+fn pump(s: &mut Session) -> Vec<MidiReport> {
     blocks(s, 1);
     s.update()
         .into_iter()
@@ -236,7 +236,7 @@ fn a_command_the_transport_cannot_do_is_reported() {
     assert!(
         seen.iter().any(|e| matches!(
             e,
-            MidiEvent::MachineControlIgnored(tutti_midi_protocol::MmcCommand::RecordStrobe)
+            MidiReport::MachineControlIgnored(tutti_midi_protocol::MmcCommand::RecordStrobe)
         )),
         "{seen:?}"
     );
@@ -262,7 +262,7 @@ fn segmented_commands_act_whole_and_a_stray_segment_is_reported() {
     assert!(
         seen.iter().any(|e| matches!(
             e,
-            MidiEvent::MachineControlSegmentation(SegmentFault::String(
+            MidiReport::MachineControlSegmentation(SegmentFault::String(
                 tutti_midi_protocol::MmcSegmentError::MissingFirst
             ))
         )),
@@ -323,7 +323,7 @@ fn unfollowing_is_reported_and_refused_when_not_following() {
     assert!(
         events
             .iter()
-            .any(|e| matches!(e, MidiEvent::MachineControlUnfollowed)),
+            .any(|e| matches!(e, MidiReport::MachineControlUnfollowed)),
         "{events:?}"
     );
 }

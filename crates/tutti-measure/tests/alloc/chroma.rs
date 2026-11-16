@@ -16,7 +16,7 @@ use tutti_types::{Cents, SampleRate, Samples};
 fn steps_after_the_first_do_not_allocate() {
     let geometry = StftGeometry::new(SampleRate::SR_22K05, Samples(2048), Samples(512)).unwrap();
     let cfg = ChromaConfig::new(geometry).unwrap();
-    let fixed = cfg.with_tuning(Tuning::Fixed(TuningOffset::of(Cents(10.0))));
+    let fixed = cfg.tuning(Tuning::Fixed(TuningOffset::of(Cents(10.0))));
     let frame: Vec<f32> = (0..2048)
         .map(|i| (std::f32::consts::TAU * 440.0 * i as f32 / 22_050.0).sin() * 0.5)
         .collect();

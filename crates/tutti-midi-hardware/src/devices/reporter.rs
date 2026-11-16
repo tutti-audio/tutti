@@ -84,11 +84,11 @@ impl Reporter {
 /// The devices of an enumeration, one per handle: an endpoint listed both ways
 /// is [`Duplex`](PortDirection::Duplex).
 pub(crate) fn os_devices(
-    inputs: &[crate::capability::EndpointInfo],
-    outputs: &[crate::capability::EndpointInfo],
+    inputs: &[crate::capability::OsEndpoint],
+    outputs: &[crate::capability::OsEndpoint],
 ) -> Vec<OsDevice> {
     let mut devices: BTreeMap<EndpointId, OsDevice> = BTreeMap::new();
-    let as_device = |e: &crate::capability::EndpointInfo, direction| OsDevice {
+    let as_device = |e: &crate::capability::OsEndpoint, direction| OsDevice {
         handle: e.id,
         identity: e.identity.clone(),
         name: e.name.clone(),

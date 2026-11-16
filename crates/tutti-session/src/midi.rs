@@ -38,7 +38,7 @@ use crate::midi_follow::{
     CLOCK_TAP_CAPACITY, ClockAction, ClockFollow, FOLLOW_TAP_CAPACITY, Follow, FollowCx,
     MACHINE_TAP_CAPACITY, MachineFollow,
 };
-use crate::{EventOutPort, Key, MidiError, MidiEvent, MidiNodes};
+use crate::{EventOutPort, Key, MidiError, MidiNodes, MidiReport};
 use crate::{FollowClock, FollowMachineControl, FollowTempo, SendMachineControl};
 
 /// What a [`Midi`] call returns: the area's one error.
@@ -61,7 +61,7 @@ const DRAIN_CHUNK: usize = 256;
 /// that for 1.3 s, where an event waits for its frame only the lead (one block,
 /// [`input_lead`]) and a ring is emptied every block, so a full ring means a
 /// stalled graph, which the inlet reports as lost
-/// (`MidiEvent::InputsDropped`) and does not block on. A device faster than a
+/// (`MidiReport::InputsDropped`) and does not block on. A device faster than a
 /// DIN cable (USB) fills it sooner, at its own rate, for the same stall.
 #[cfg(feature = "midi-hardware")]
 pub(crate) const MIDI_INPUT_INLET_CAPACITY: tutti_graph::EventCapacity =
@@ -494,7 +494,7 @@ impl UmpOut {
 }
 
 /// How many outbound events went nowhere, and whether that has been said
-/// aloud: the total behind [`MidiEvent::OutputDropped`] and
+/// aloud: the total behind [`MidiReport::OutputDropped`] and
 /// [`Midi::out_drops`], over every output.
 #[derive(Debug, Default)]
 pub(crate) struct OutDrops {
@@ -776,7 +776,7 @@ pub(crate) struct MidiState {
     machine_out: Option<(MidiGroup, tutti_midi_runtime::MachineControlSender)>,
     /// Events [`Midi::unfollow_tempo`] and [`Midi::unfollow_clock`] queued for the next `Poll` phase, which
     /// reports them.
-    follow_events: Vec<MidiEvent>,
+    follow_events: Vec<MidiReport>,
     /// What the engine gives the outputs' timing: its block clock and the
     /// audio output's latency. `None` offline, where every event
     /// is sent at once.
@@ -818,13 +818,13 @@ impl std::fmt::Debug for MidiState {
 }
 
 /// How often a rising drop count is reported at most
-/// ([`MidiEvent::OutputDropped`]):
+/// ([`MidiReport::OutputDropped`]):
 /// a Machine Control look with no output open drops on every update.
 pub const MIDI_OUT_DROP_REPORT: Duration = Duration::from_secs(1);
 
 /// How often a rising count of events the hardware inputs' inlets dropped is
 /// reported at most
-/// (`MidiEvent::InputsDropped`, feature `midi-hardware`):
+/// (`MidiReport::InputsDropped`, feature `midi-hardware`):
 /// a stalled audio callback with a busy controller drops on every update.
 pub const MIDI_INPUT_DROP_REPORT: Duration = Duration::from_secs(1);
 
@@ -838,13 +838,6 @@ impl MidiState {
             device_events,
             ..Self::default()
         }
-    }
-
-    /// The state with the timing the input ports are opened with.
-    #[cfg(feature = "midi-hardware")]
-    pub(crate) fn with_input_timing(mut self, timing: tutti_midi_hardware::InputTiming) -> Self {
-        self.ports.set_timing(timing);
-        self
     }
 
     /// The outputs are timed by `clock` from now on (a session with an
@@ -884,7 +877,7 @@ impl MidiState {
     }
 
     /// `Phase::Poll`, for the ports: retires those whose entry ended, takes in
-    /// the devices that came and went (each a [`MidiEvent`], and a port that
+    /// the devices that came and went (each a [`MidiReport`], and a port that
     /// held one reads it as its [`Presence`](crate::Presence)), sends what the
     /// handles asked of the MIDI-CI peers, steps the UMP Stream negotiations and
     /// the MIDI-CI of the open inputs, and reports the events the inputs' inlets
@@ -919,7 +912,7 @@ impl MidiState {
                 .and_then(tutti_midi_hardware::DeviceEvents::failure)
         {
             self.watch_failure_reported = true;
-            out.push(MidiEvent::WatchFailed(why).into());
+            out.push(MidiReport::WatchFailed(why).into());
         }
         let total = io.ports().losses().dropped();
         let due = self
@@ -928,7 +921,7 @@ impl MidiState {
         if total != self.input_drops_seen && due {
             self.input_drops_seen = total;
             self.input_reported_at = Some(now);
-            out.push(MidiEvent::InputsDropped { total }.into());
+            out.push(MidiReport::InputsDropped { total }.into());
         }
         edits.graph || edits.routes
     }
@@ -1144,7 +1137,7 @@ impl MidiState {
         if count != self.drops_seen && due {
             self.drops_seen = count;
             self.reported_at = Some(now);
-            out.push(MidiEvent::OutputDropped { total: count }.into());
+            out.push(MidiReport::OutputDropped { total: count }.into());
         }
         edited
     }
@@ -1232,7 +1225,7 @@ fn compile_feeds<'r, T: Copy + Ord + 'r>(
 tutti_types::id! {
     /// A file load a [`Midi`] started, named so the event that lands it can be
     /// matched to the call: [`Midi::load_file`] returns one, and
-    /// [`MidiEvent::FileLoaded`] carries it. The session mints it; it names
+    /// [`MidiReport::FileLoaded`] carries it. The session mints it; it names
     /// nothing else.
     pub struct MidiLoad;
 }
@@ -1277,7 +1270,7 @@ impl Midi<'_> {
     }
 
     /// Reads the MIDI file at `path` on the session's spawner. Returns at
-    /// once; the result lands as [`MidiEvent::FileLoaded`] with the returned
+    /// once; the result lands as [`MidiReport::FileLoaded`] with the returned
     /// id in a later [`Session::update`](crate::Session::update), on the
     /// thread that calls `update()`. A file that cannot be read lands as
     /// [`MidiError::File`], a job that did not finish as [`MidiError::Job`].
@@ -1290,13 +1283,13 @@ impl Midi<'_> {
                 let read = tutti_midi_file::MidiFile::read(path);
                 Box::new(move |events: &mut Vec<crate::SessionEvent>| {
                     let file = read.map_err(MidiError::from);
-                    events.push(MidiEvent::FileLoaded { load, file }.into());
+                    events.push(MidiReport::FileLoaded { load, file }.into());
                 })
             }),
             Box::new(move |failed| {
                 Box::new(move |events: &mut Vec<crate::SessionEvent>| {
                     let file = Err(failed.into());
-                    events.push(MidiEvent::FileLoaded { load, file }.into());
+                    events.push(MidiReport::FileLoaded { load, file }.into());
                 })
             }),
         );
@@ -1483,7 +1476,7 @@ impl Midi<'_> {
     /// file's one timeline
     /// ([`MidiFile::timeline`](tutti_midi_file::MidiFile::timeline)), with
     /// its looping and bounce behaviour. A file arrives from
-    /// [`load_file`](Self::load_file) as [`MidiEvent::FileLoaded`].
+    /// [`load_file`](Self::load_file) as [`MidiReport::FileLoaded`].
     ///
     /// # Errors
     ///
@@ -1781,7 +1774,7 @@ impl Midi<'_> {
     /// mode: its input follows the Profile's zones and rules, in the Groups it
     /// enabled them on, until it disables the Profile or goes. The session
     /// does that from the peer's Profile reports
-    /// (`MidiEvent::CiProfiles`).
+    /// (`MidiReport::CiProfiles`).
     pub fn set_mpe(&mut self, mode: MpeMode) {
         self.state.mpe = mode;
         #[cfg(feature = "midi-hardware")]
@@ -1879,7 +1872,7 @@ impl Midi<'_> {
     /// (M2-104 §7.5.3, §7.5.4): the session reads them from an event tap on
     /// that Group's channelless port in each
     /// [`Poll`](crate::Phase::Poll) phase and publishes them to the transport,
-    /// reported as [`MidiEvent::TempoFollowed`] and [`MidiEvent::MeterFollowed`].
+    /// reported as [`MidiReport::TempoFollowed`] and [`MidiReport::MeterFollowed`].
     /// **Off by default**: until this is called, a Flex tempo changes nothing.
     ///
     /// The source is Flex Set Tempo on one Group; MIDI Beat Clock and MIDI Time
@@ -1936,7 +1929,7 @@ impl Midi<'_> {
     /// project's tempo map and meter again, for the ones the follower changed.
     /// The transport takes them at the next block at its current beat, so the
     /// playhead does not jump, and the tempo from there on is the project's.
-    /// Reported as [`MidiEvent::TempoUnfollowed`] by the next update.
+    /// Reported as [`MidiReport::TempoUnfollowed`] by the next update.
     ///
     /// # Errors
     ///
@@ -1950,7 +1943,7 @@ impl Midi<'_> {
         if let Some(meter) = meter {
             self.meter.set_meter(meter);
         }
-        self.state.follow_events.push(MidiEvent::TempoUnfollowed);
+        self.state.follow_events.push(MidiReport::TempoUnfollowed);
         Ok(())
     }
 
@@ -1965,7 +1958,7 @@ impl Midi<'_> {
     /// **[`ClockKind::BeatClock`](tutti_midi_runtime::ClockKind::BeatClock)**:
     /// the tempo fit from the Timing Clocks' spacing is published into the
     /// tempo map as [`follow_tempo`](Self::follow_tempo)'s is (and reported as
-    /// [`MidiEvent::TempoFollowed`]), Start plays from beat 0, Continue plays
+    /// [`MidiReport::TempoFollowed`]), Start plays from beat 0, Continue plays
     /// from where the source counted to, Stop stops, and a Song Position
     /// Pointer locates to its sixteenth notes (M1 pp.27 to 31).
     ///
@@ -1974,8 +1967,8 @@ impl Midi<'_> {
     /// the tempo map in force. The transport plays once the follower locks,
     /// locates when the source jumps, and a Full Message locates.
     ///
-    /// **Lock** is reported as [`MidiEvent::ClockLocked`] and
-    /// [`MidiEvent::ClockUnlocked`]; the rules and constants are those of
+    /// **Lock** is reported as [`MidiReport::ClockLocked`] and
+    /// [`MidiReport::ClockUnlocked`]; the rules and constants are those of
     /// `tutti_midi_runtime::ClockFollower`. A source silent for its dropout
     /// unlocks and stops the transport it was rolling.
     ///
@@ -2020,7 +2013,7 @@ impl Midi<'_> {
     /// Stops following ([`follow_clock`](Self::follow_clock)): the transport
     /// keeps the motion it had, and the project's tempo map and meter are
     /// published again for the ones a Beat Clock follower changed. Reported as
-    /// [`MidiEvent::ClockUnfollowed`] by the next update.
+    /// [`MidiReport::ClockUnfollowed`] by the next update.
     ///
     /// # Errors
     ///
@@ -2032,7 +2025,7 @@ impl Midi<'_> {
             .take()
             .ok_or(MidiError::NotFollowingClock)?;
         self.restore_maps(clock.restore());
-        self.state.follow_events.push(MidiEvent::ClockUnfollowed);
+        self.state.follow_events.push(MidiReport::ClockUnfollowed);
         Ok(())
     }
 
@@ -2067,9 +2060,9 @@ impl Midi<'_> {
     /// it). A LOCATE and a play in one message locate and then play. Every
     /// command is placed at the next block (`At::NextBlock`). A command the
     /// transport has no counterpart for is reported as
-    /// [`MidiEvent::MachineControlIgnored`]; no response is sent. COMMAND SEGMENT
+    /// [`MidiReport::MachineControlIgnored`]; no response is sent. COMMAND SEGMENT
     /// strings are reassembled first, and a segment that does not belong is
-    /// [`MidiEvent::MachineControlSegmentation`].
+    /// [`MidiReport::MachineControlSegmentation`].
     ///
     /// **One at a time**: following again replaces the first, forgetting the
     /// groups it was assigned to.
@@ -2090,7 +2083,7 @@ impl Midi<'_> {
 
     /// Stops following Machine Control ([`follow_machine_control`](Self::follow_machine_control)):
     /// the transport keeps the motion it had. Reported as
-    /// [`MidiEvent::MachineControlUnfollowed`] by the next update.
+    /// [`MidiReport::MachineControlUnfollowed`] by the next update.
     ///
     /// # Errors
     ///
@@ -2102,7 +2095,7 @@ impl Midi<'_> {
             .ok_or(MidiError::NotFollowingMachineControl)?;
         self.state
             .follow_events
-            .push(MidiEvent::MachineControlUnfollowed);
+            .push(MidiReport::MachineControlUnfollowed);
         Ok(())
     }
 

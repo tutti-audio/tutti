@@ -183,7 +183,7 @@ fn check_outputs(outputs: &[Output]) -> Result<()> {
             }));
         }
         let Some(file) = file else { continue };
-        if let Some(normalize) = file.normalize()
+        if let Some(normalize) = file.normalize
             && normalize.gain() == GainSource::Own
             && matches!(normalize.mode(), Normalize::Lufs { .. })
         {
@@ -199,13 +199,13 @@ fn check_outputs(outputs: &[Output]) -> Result<()> {
                 }));
             }
         }
-        if let Some(normalize) = file.normalize()
+        if let Some(normalize) = file.normalize
             && let GainSource::FromOutput(j) = normalize.gain()
         {
             let measures = outputs.get(j).is_some_and(|other| {
                 j != i
                     && matches!(other.target(), Target::File(f)
-                        if f.normalize().is_some_and(|n| n.gain() == GainSource::Own))
+                        if f.normalize.is_some_and(|n| n.gain() == GainSource::Own))
             });
             if !measures {
                 return Err(target_error(TargetError::GainSource { index: j }));
@@ -236,8 +236,8 @@ fn open_lanes(
     for (i, output) in outputs.into_iter().enumerate() {
         let (feed, target) = output.into_parts();
         let (layout, topology) = match &target {
-            Target::File(f) => (f.channels(), f.topology()),
-            Target::Buffers(b) => (b.channels(), b.topology()),
+            Target::File(f) => (f.channels(), f.width.topology()),
+            Target::Buffers(b) => (b.channels(), b.width.topology()),
         };
         let placement = if topology.is_some() {
             tutti_types::Placement::Stated
@@ -266,7 +266,7 @@ fn open_lanes(
             Target::File(file) => {
                 let chain = Box::new(open_file(&file, plan, job.rate())?);
                 let path = file.path().to_path_buf();
-                match file.normalize() {
+                match file.normalize {
                     None => (Sink::Stream { chain }, Some(path)),
                     Some(spec) => (
                         Sink::Spill {
@@ -430,7 +430,7 @@ fn finish(
                 unreachable!("listed as waiting");
             };
             chain.set_gain(chosen[i].expect("chosen above").gain);
-            let block = if waiting.target.resample().is_some() {
+            let block = if waiting.target.resample.is_some() {
                 chunk_frames(rate).get()
             } else {
                 REPLAY_BLOCK

@@ -23,10 +23,10 @@ use crate::field::{
 use crate::message::{
     Accidental, Address, Alteration, AlterationKind, Attribute, Bank, BarAccents, BlockFilter,
     BlockSelect, ChordBass, ChordName, ChordPitch, Data128, DeviceIdentity, Direction,
-    DiscoveryFilter, EndpointInfo, Flex, FlexAddress, FlexTextKind, Form, FunctionBlockInfo,
-    FunctionBlocks, KeySignature, Letter, Message, Metronome, Midi1Port, MixedDataHeader,
-    PerNoteManagement, Protocol, Stream, StreamConfig, Sysex7Packet, Sysex8Packet, SysexStatus,
-    System, TimeSignature, UiHint, UmpVersion, Unknown, Utility, Voice1, Voice2,
+    DiscoveryFilter, EndpointInfoNotification, Flex, FlexAddress, FlexTextKind, FlexTimeSignature,
+    Form, FunctionBlockInfo, FunctionBlocks, KeySignature, Letter, Message, Metronome, Midi1Port,
+    MixedDataHeader, PerNoteManagement, Protocol, Stream, StreamConfig, Sysex7Packet, Sysex8Packet,
+    SysexStatus, System, UiHint, UmpVersion, Unknown, Utility, Voice1, Voice2,
 };
 use crate::{
     ArticulationAttribute, BendValue, CCNumber, ControlValue, Field, ManufacturerId, MdsChunk,
@@ -446,7 +446,7 @@ fn flex(w: [u32; 4]) -> Option<Flex> {
     match (bank, status) {
         (0x00, 0x00) if complete && address == FlexAddress::Group => Some(Flex::SetTempo(w[1])),
         (0x00, 0x01) if complete && address == FlexAddress::Group => {
-            Some(Flex::SetTimeSignature(TimeSignature {
+            Some(Flex::SetTimeSignature(FlexTimeSignature {
                 numerator: byte(w[1], 3),
                 denominator: byte(w[1], 2),
                 thirty_seconds: byte(w[1], 1),
@@ -546,7 +546,7 @@ fn stream(w: [u32; 4]) -> Option<Stream> {
                 stream_configuration: flag(w[1], 4),
             },
         }),
-        0x01 if complete => Some(Stream::EndpointInfo(EndpointInfo {
+        0x01 if complete => Some(Stream::EndpointInfo(EndpointInfoNotification {
             version,
             static_function_blocks: flag(w[1], 31),
             function_blocks: match FunctionBlockCount::new(byte(w[1], 3) & 0x7f) {

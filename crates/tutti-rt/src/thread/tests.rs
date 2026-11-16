@@ -147,3 +147,63 @@ fn join_returns_the_value_and_does_not_stop() {
     assert_eq!(handle.join().unwrap(), (7, false), "the body ran unstopped");
     assert!(!token.is_stopped(), "join does not request the stop");
 }
+
+/// A body that returns on its stop ends within the bound and its value comes back.
+#[test]
+fn stop_within_returns_the_value_of_a_body_that_heeds_the_stop() {
+    let handle = spawn_named("heeds", None, |stop| {
+        while !stop.wait(Duration::from_secs(60)) {}
+        7
+    })
+    .expect("spawn");
+    assert_eq!(
+        handle.stop_within(Duration::from_secs(30)).ok(),
+        Some(Ok(7))
+    );
+}
+
+/// A body still blocked at the bound comes back as its handle, stopped and still joinable.
+#[test]
+fn stop_within_hands_back_a_body_that_has_not_ended() {
+    let (release, released) = mpsc::channel::<()>();
+    let handle = spawn_named("stuck", None, move |_| {
+        let _ = released.recv();
+        9
+    })
+    .expect("spawn");
+    let asked = Instant::now();
+    let handle = handle
+        .stop_within(Duration::from_millis(20))
+        .expect_err("the body ignores the stop and is still blocked");
+    assert!(
+        asked.elapsed() >= Duration::from_millis(20),
+        "the bound is waited out"
+    );
+    assert!(handle.token().is_stopped(), "the stop stays requested");
+    release.send(()).expect("the body is waiting");
+    assert_eq!(
+        handle.join(),
+        Ok(9),
+        "the handed-back handle still owns the thread"
+    );
+}
+
+/// A body that panics on its stop comes back as `Panicked`, not as a timeout.
+#[test]
+fn stop_within_returns_a_panic_as_panicked() {
+    let handle = spawn_named("panics", None, |stop| {
+        while !stop.wait(Duration::from_secs(60)) {}
+        panic!("on stop");
+    })
+    .expect("spawn");
+    let outcome: Result<(), Panicked> = handle
+        .stop_within(Duration::from_secs(30))
+        .expect("the body ended");
+    assert_eq!(
+        outcome,
+        Err(Panicked {
+            name: "panics".to_owned(),
+            message: "on stop".to_owned()
+        })
+    );
+}
