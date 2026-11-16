@@ -559,7 +559,7 @@ pub trait Plugin: Send {
     ///     }
     ///
     ///     fn init(&mut self) {
-    ///         info!("loaded with host vst version: {}", self.host.vst_version());
+    ///         tracing::info!("loaded with host vst version: {}", self.host.vst_version());
     ///     }
     ///
     ///     // ...

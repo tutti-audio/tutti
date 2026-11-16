@@ -34,7 +34,6 @@ tutti-types = { version = "0.0.1", path = "../tutti-types" }
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 vst3 = "0.3"
-# The warning of a plugin dropped off the main thread.
 # `IRunLoop` (Linux): the look at the descriptors a plugin registered.
 tutti-plugin-ipc-ffi = { version = "0.0.1", path = "../tutti-plugin-ipc-ffi" }
 

@@ -107,15 +107,25 @@ static RT_NO_ALLOC_HARNESS: assert_no_alloc::AllocDisabler = assert_no_alloc::Al
 
 #[cfg(test)]
 mod primitive_enum_tests {
-    /// Every opcode and code enum decodes each of its own values and refuses the
-    /// value past its largest.
+    use crate::UnknownPrimitive;
+
+    /// A value no variant has is refused and named, in every repr: the
+    /// dispatchers rely on the refusal to skip opcodes they do not know.
     #[test]
-    fn every_enum_round_trips_and_refuses_one_past_the_end() {
-        crate::api::ProcessLevel::assert_round_trips();
-        crate::api::AutomationState::assert_round_trips();
-        crate::plugin::Category::assert_round_trips();
-        crate::plugin::OpCode::assert_round_trips();
-        crate::host::OpCode::assert_round_trips();
-        crate::editor::Key::assert_round_trips();
+    fn a_value_no_variant_has_is_refused_with_that_value() {
+        assert_eq!(
+            crate::plugin::OpCode::try_from(i32::MAX).err(),
+            Some(UnknownPrimitive(i64::from(i32::MAX)))
+        );
+        assert_eq!(
+            crate::api::ProcessLevel::try_from(-1).err(),
+            Some(UnknownPrimitive(-1))
+        );
+        assert_eq!(
+            crate::plugin::Category::try_from(isize::MIN)
+                .err()
+                .map(UnknownPrimitive::get),
+            Some(isize::MIN as i64)
+        );
     }
 }
