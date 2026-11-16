@@ -432,19 +432,45 @@ fn public_api_lists_on_the_docs_nightly_or_diffs_from_a_base() {
     );
 }
 
-/// `umbrella-api` needs the docs nightly, so neither `gates` nor `ci` runs it.
+/// `umbrella-api` needs the docs nightly, so neither `gates` nor `ci` plans it.
 #[test]
 fn umbrella_api_is_a_local_recipe_outside_gates_and_ci() {
-    assert_eq!(dry("umbrella-api", &[]).len(), 1);
-    assert!(dry("umbrella-api", &[])[0].starts_with("umbrella-api: "));
+    let umbrella = |recipe: &str| {
+        plan(recipe, &[], &ctx())
+            .unwrap()
+            .iter()
+            .any(|s| matches!(s, Step::UmbrellaApi(_)))
+    };
+    assert!(umbrella("umbrella-api"));
     for recipe in ["gates", "ci"] {
-        assert!(
-            !dry(recipe, &[])
-                .iter()
-                .any(|l| l.starts_with("umbrella-api")),
-            "{recipe}"
-        );
+        assert!(!umbrella(recipe), "{recipe}");
     }
+}
+
+#[test]
+fn umbrella_api_takes_one_optional_directory() {
+    let step = |args: &[&str]| {
+        let args: Vec<String> = args.iter().map(|s| (*s).to_owned()).collect();
+        plan("umbrella-api", &args, &ctx())
+    };
+    assert!(matches!(&step(&[]).unwrap()[..], [Step::UmbrellaApi(None)]));
+    assert!(matches!(&step(&["texts"]).unwrap()[..], [Step::UmbrellaApi(Some(d))] if d == "texts"));
+    assert_eq!(
+        step(&["a", "b"]).unwrap_err(),
+        "`umbrella-api` takes at most 1 argument(s), got 2"
+    );
+}
+
+#[test]
+fn the_public_api_command_is_one_for_both_recipes() {
+    assert_eq!(
+        public_api_cmd("tutti-rt"),
+        "cargo +nightly-2026-10-14 public-api --package tutti-rt --all-features -s"
+    );
+    assert_eq!(
+        dry("public-api", &["tutti-rt"]),
+        [public_api_cmd("tutti-rt")]
+    );
 }
 
 #[test]

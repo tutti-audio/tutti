@@ -402,7 +402,14 @@ const TARGET: &str = "x86_64-pc-windows-msvc";
 
 /// The dated nightly CI pins for the docs.rs build; `public-api` reads rustdoc
 /// JSON from the same one.
-pub(crate) const DOCS_NIGHTLY: &str = "nightly-2026-10-14";
+const DOCS_NIGHTLY: &str = "nightly-2026-10-14";
+
+/// The command that lists `package`'s public API with all its features on, for
+/// the `public-api` and `umbrella-api` recipes.
+pub(crate) fn public_api_cmd(package: &str) -> String {
+    // `-s` omits blanket impls only: a lost auto-trait impl is a break.
+    format!("cargo +{DOCS_NIGHTLY} public-api --package {package} --all-features -s")
+}
 
 impl Planner<'_> {
     fn run(&mut self, c: Cmd) {
@@ -686,10 +693,7 @@ impl Planner<'_> {
                             .to_owned(),
                     );
                 }
-                // `-s` omits blanket impls only: a lost auto-trait impl is a break.
-                let list = format!(
-                    "cargo +{DOCS_NIGHTLY} public-api --package {krate} --all-features -s"
-                );
+                let list = public_api_cmd(&krate);
                 if base.is_empty() {
                     self.lines(&[list]);
                 } else {

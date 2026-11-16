@@ -5,6 +5,9 @@
 //! path it comes from and its own name), the name it exports (the alias when there
 //! is an `as`) and whether it re-exports a crate or module whole. `pub(crate) use`
 //! is not a re-export.
+//!
+//! One walker serves every reader: `check-session` reads the whole-crate leaves of
+//! each statement ([`statements`]) and `umbrella-api` the exported items ([`uses`]).
 
 use super::lex::blank;
 
@@ -13,7 +16,7 @@ pub(super) fn is_word(b: u8) -> bool {
 }
 
 /// `(::|\w+|[{},*])` tokens of a `use` body.
-pub(super) fn tokens(body: &str) -> Vec<&str> {
+fn tokens(body: &str) -> Vec<&str> {
     let b = body.as_bytes();
     let mut out = Vec::new();
     let mut i = 0;
@@ -38,7 +41,7 @@ pub(super) fn tokens(body: &str) -> Vec<&str> {
 }
 
 /// `pub use` statements of lexed `code`, as `(start, end of the ';')`.
-pub(super) fn pub_uses(code: &str) -> Vec<(usize, usize)> {
+fn pub_uses(code: &str) -> Vec<(usize, usize)> {
     let b = code.as_bytes();
     let mut out = Vec::new();
     for (at, _) in code.match_indices("pub") {
@@ -74,6 +77,9 @@ pub(super) struct Leaf {
     pub(super) source: String,
     /// The leaf is a glob, a bare crate or `self`: a crate or module whole.
     pub(super) whole: bool,
+    /// The leaf is `self` of a group (`m::{self}`): `source` is then the group's
+    /// own name and `path` what precedes it.
+    pub(super) is_self: bool,
 }
 
 impl Leaf {
@@ -132,22 +138,45 @@ fn leaves(t: &[&str], k: &mut usize, pre: &[String], out: &mut Vec<Leaf>) {
                 || (path.is_empty() && source.starts_with("tutti_")),
             path,
             source,
+            is_self: self_leaf,
         });
         return;
     }
 }
 
+/// A `pub use` statement of lexed code: where it sits and its leaves.
+pub(super) struct Statement {
+    /// Offset of the `pub`.
+    pub(super) at: usize,
+    /// Offset of the closing `;`.
+    pub(super) semi: usize,
+    pub(super) leaves: Vec<Leaf>,
+}
+
+/// The `pub use` statements of `code`, which [`blank`] has lexed.
+pub(super) fn statements(code: &str) -> Vec<Statement> {
+    pub_uses(code)
+        .into_iter()
+        .map(|(at, semi)| {
+            let body = code[at + 3..semi].trim_start();
+            let t = tokens(&body["use".len()..]);
+            let mut leaves_ = Vec::new();
+            leaves(&t, &mut 0, &[], &mut leaves_);
+            Statement {
+                at,
+                semi,
+                leaves: leaves_,
+            }
+        })
+        .collect()
+}
+
 /// The `pub use` leaves of the source `src`.
 pub(super) fn uses(src: &str) -> Vec<Leaf> {
-    let code = blank(src);
-    let mut out = Vec::new();
-    for (at, semi) in pub_uses(&code) {
-        let body = code[at + 3..semi].trim_start();
-        let t = tokens(&body["use".len()..]);
-        let mut k = 0;
-        leaves(&t, &mut k, &[], &mut out);
-    }
-    out
+    statements(&blank(src))
+        .into_iter()
+        .flat_map(|s| s.leaves)
+        .collect()
 }
 
 #[cfg(test)]
@@ -202,6 +231,15 @@ mod tests {
             assert!(items(src).iter().all(|i| i.3), "{src}");
         }
         assert!(!items("pub use tutti_x::m;")[0].3);
+    }
+
+    #[test]
+    fn a_statement_knows_where_it_sits() {
+        let code = blank("// c\npub use tutti_x::{A, B};\n");
+        let s = statements(&code);
+        assert_eq!(s.len(), 1);
+        assert_eq!(&code[s[0].at..=s[0].semi], "pub use tutti_x::{A, B};");
+        assert_eq!(s[0].leaves.len(), 2);
     }
 
     #[test]
