@@ -70,7 +70,7 @@ use tutti_dsp::FrameCount;
 use tutti_types::{Amplitude, Cents, Db, Note, SampleRate, Samples, Seconds};
 
 use crate::onset::{DetectionFunction, OnsetConfig, detect_onsets, onset_lag};
-use crate::silence::GateLevel;
+use crate::silence::FiniteLevel;
 use crate::yin::{PitchEstimate, YinConfig, yin_track};
 use crate::{Error, Result};
 use tutti_dsp::FftScratch;
@@ -218,7 +218,7 @@ impl NoteConfig {
     /// note quieter than it is lost; scale the input rather than lower it
     /// below the noise.
     #[must_use]
-    pub fn floor(mut self, floor: GateLevel) -> Self {
+    pub fn floor(mut self, floor: FiniteLevel) -> Self {
         self.floor = floor.get();
         self
     }
@@ -335,13 +335,13 @@ impl Default for VelocityRange {
     }
 }
 
-impl TryFrom<core::ops::RangeInclusive<GateLevel>> for VelocityRange {
+impl TryFrom<core::ops::RangeInclusive<FiniteLevel>> for VelocityRange {
     type Error = Error;
 
     /// # Errors
     ///
     /// [`Error::EmptyVelocityRange`] unless `floor < ceiling`.
-    fn try_from(range: core::ops::RangeInclusive<GateLevel>) -> Result<Self> {
+    fn try_from(range: core::ops::RangeInclusive<FiniteLevel>) -> Result<Self> {
         let (floor, ceiling) = (range.start().get(), range.end().get());
         if floor >= ceiling {
             return Err(Error::EmptyVelocityRange { floor, ceiling });
@@ -354,7 +354,7 @@ impl VelocityRange {
     /// Levels from `floor` to `ceiling`, or `None` unless `floor < ceiling`.
     /// `TryFrom` over `floor..=ceiling` is the same check with the reason.
     #[must_use]
-    pub fn new(floor: GateLevel, ceiling: GateLevel) -> Option<Self> {
+    pub fn new(floor: FiniteLevel, ceiling: FiniteLevel) -> Option<Self> {
         Self::try_from(floor..=ceiling).ok()
     }
 
@@ -1226,7 +1226,7 @@ mod tests {
     /// reads NaN as the quietest.
     #[test]
     fn the_velocity_map_is_linear_and_clamped() {
-        let r = VelocityRange::new(GateLevel::of(Db(-60.0)), GateLevel::of(Db(-20.0))).unwrap();
+        let r = VelocityRange::new(FiniteLevel::of(Db(-60.0)), FiniteLevel::of(Db(-20.0))).unwrap();
         assert_eq!(r.midi(Db(-60.0)), 1);
         assert_eq!(r.midi(Db(-20.0)), 127);
         assert_eq!(r.midi(Db(-40.0)), 64);
@@ -1234,7 +1234,7 @@ mod tests {
         assert_eq!(r.midi(Db(0.0)), 127);
         assert_eq!(r.midi(Db(f32::NEG_INFINITY)), 1);
         assert_eq!(r.midi(Db(f32::NAN)), 1);
-        let level = |v: f32| GateLevel::of(Db(v));
+        let level = |v: f32| FiniteLevel::of(Db(v));
         assert!(VelocityRange::new(level(-20.0), level(-20.0)).is_none());
         assert_eq!(
             VelocityRange::try_from(level(-20.0)..=level(-30.0)),
@@ -1243,9 +1243,9 @@ mod tests {
                 ceiling: Db(-30.0)
             })
         );
-        // A NaN or infinite bound is not a `GateLevel`.
-        assert!(GateLevel::new(Db(f32::NAN)).is_none());
-        assert!(GateLevel::new(Db(f32::INFINITY)).is_none());
+        // A NaN or infinite bound is not a `FiniteLevel`.
+        assert!(FiniteLevel::new(Db(f32::NAN)).is_none());
+        assert!(FiniteLevel::new(Db(f32::INFINITY)).is_none());
     }
 
     /// Scaling the input by a power of two (exact in floating point) changes
@@ -1280,7 +1280,7 @@ mod tests {
         // -60 dBFS RMS is an amplitude of 0.00141; this is under it.
         let quiet: Vec<f32> = base.iter().map(|s| s * 0.001).collect();
         assert_eq!(run(&c, &quiet), Vec::new());
-        let lowered = c.floor(GateLevel::of(Db(-80.0)));
+        let lowered = c.floor(FiniteLevel::of(Db(-80.0)));
         assert_eq!(run(&lowered, &quiet).len(), 2);
     }
 

@@ -18,10 +18,10 @@ use tutti_types::{Db, SampleRate, Samples, Seconds};
 use tutti_types::ranged;
 
 ranged! {
-    /// A level that is a finite number of decibels, under which audio is
-    /// silence: a NaN would make a config unequal to itself, and an infinity is
-    /// no level.
-    GateLevel(Db), GateLevelError, "a finite level",
+    /// A level in dBFS that is a finite number of decibels: a silence gate's
+    /// threshold, a note floor, or an end of a velocity range. A NaN would make a
+    /// config unequal to itself, and an infinity is no level.
+    FiniteLevel(Db), FiniteLevelError, "a finite level",
     |raw| raw.get().is_finite()
 }
 
@@ -88,7 +88,7 @@ impl SilenceConfig {
     #[must_use]
     pub fn new(
         sample_rate: impl Into<SampleRate>,
-        threshold: GateLevel,
+        threshold: FiniteLevel,
         min_silence: impl Into<Seconds>,
     ) -> Self {
         let rate = sample_rate.into();
@@ -218,7 +218,7 @@ mod tests {
     fn cfg(threshold: Db, min_silence_ms: f32) -> SilenceConfig {
         SilenceConfig::new(
             SampleRate::of(RATE),
-            GateLevel::new(threshold).unwrap(),
+            FiniteLevel::new(threshold).unwrap(),
             Seconds::from_f32(min_silence_ms / 1000.0),
         )
     }

@@ -181,7 +181,7 @@
 //! A config is `Config::new(required..)` and then chained options (`self` in,
 //! a bare name, `Self` out). An option cannot fail: a setting with one range of
 //! its own is a range-checked type (`Harmonics`, `Tightness`, `SpectrumFloor`,
-//! `NoteSpan`, `GateLevel`, `PitchHop`, ...) whose `new` refuses a value outside
+//! `NoteSpan`, `FiniteLevel`, `PitchHop`, ...) whose `new` refuses a value outside
 //! the range, and a setting that spans two values is one type (`FrequencyBand`,
 //! `PassBand`, `TempoRange`: a low below a high). What depends on the
 //! geometry or the input is checked by the call that takes the config: a band
@@ -332,7 +332,7 @@ pub use peaks::{
     summarize, summarize_block,
 };
 pub use silence::{
-    GateLevel, GateLevelError, Region, SilenceConfig, SilenceState, finish as finish_silence,
+    FiniteLevel, FiniteLevelError, Region, SilenceConfig, SilenceState, finish as finish_silence,
     step_silence, strip_silence,
 };
 pub use spectrum::{

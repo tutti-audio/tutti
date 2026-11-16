@@ -9,7 +9,7 @@ use tutti_fixtures::{RangeContract, check_range_contract};
 use tutti_types::{Cents, Confidence, Db, SampleRate, Samples, Seconds};
 
 use crate::{
-    Alternatives, BandCount, BandsPerOctave, GateLevel, HarmonicDecay, Harmonics, NoteSpan,
+    Alternatives, BandCount, BandsPerOctave, FiniteLevel, HarmonicDecay, Harmonics, NoteSpan,
     PeakDecay, PeakFloor, PitchHop, PitchSplit, PriorSpread, SelfTransition, Sharpness,
     SpectrumFloor, SpectrumTime, Tightness, TuningOffset, WindowedRate, YinThreshold,
 };
@@ -47,7 +47,7 @@ serde_through_try_from! {
     SelfTransition: f32,
     Sharpness: f32,
     WindowedRate: SampleRate,
-    GateLevel: Db,
+    FiniteLevel: Db,
     PitchHop: Samples,
     Alternatives: usize,
     YinThreshold: Confidence,
@@ -265,9 +265,9 @@ fn windowed_rate_keeps_the_range_checked_shape() {
 #[test]
 fn gate_level_keeps_the_range_checked_shape() {
     check_range_contract(&RangeContract {
-        new: GateLevel::new,
-        get: GateLevel::get,
-        of: Some(GateLevel::of),
+        new: FiniteLevel::new,
+        get: FiniteLevel::get,
+        of: Some(FiniteLevel::of),
         valid: &db(&[-300.0, -60.0, 0.0, 12.0, f32::MAX, f32::MIN]),
         invalid: &db(&[NAN, INF, NEG_INF]),
     });
