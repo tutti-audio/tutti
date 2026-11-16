@@ -38,22 +38,6 @@ const MACROS: &[&str] = &["println", "eprintln", "print", "eprint", "dbg"];
 /// `temporary:`.
 pub(super) const ALLOW: &[(&str, &str)] = &[
     (
-        "crates/tutti-clap-ffi/Cargo.toml",
-        "temporary: the plugin lane moves tutti-clap-ffi from `log` to `tracing`; the row leaves with its PR",
-    ),
-    (
-        "crates/tutti-vst2-ffi/Cargo.toml",
-        "temporary: the plugin lane moves tutti-vst2-ffi from `log` to `tracing`; the row leaves with its PR",
-    ),
-    (
-        "crates/tutti-vst3-ffi/Cargo.toml",
-        "temporary: the plugin lane moves tutti-vst3-ffi from `log` to `tracing`; the row leaves with its PR",
-    ),
-    (
-        "testing/tutti-vst2-author/Cargo.toml",
-        "temporary: the plugin lane moves tutti-vst2-author from `log` to `tracing`; the row leaves with its PR",
-    ),
-    (
         "crates/tutti-clap-host/src/host/callbacks.rs",
         "temporary: the CLAP plugin-log callback prints; the plugin lane converts it to `tracing`, and the row leaves with its PR",
     ),
