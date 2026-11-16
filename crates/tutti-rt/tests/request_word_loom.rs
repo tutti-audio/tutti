@@ -14,7 +14,8 @@
 //! - **each bit taken once**: no bit appears in two takes, because a raise
 //!   happens once and a take clears;
 //! - **raise orders what came before it**: a taker that sees a bit also sees
-//!   the datum its raiser wrote before raising.
+//!   the datum its raiser wrote before raising;
+//! - **an unraised word is never taken** (the second test).
 
 #![cfg(loom)]
 
@@ -67,5 +68,18 @@ fn raises_from_two_threads_are_all_taken_once() {
             }
         }
         assert_eq!(seen, [1, 1], "a bit lost, or taken twice");
+    });
+}
+
+/// A word nobody raised is never taken as non-empty, whatever the other
+/// thread's takes do.
+#[test]
+fn an_unraised_word_is_never_taken() {
+    loom::model(|| {
+        let word = Arc::new(RequestWord::new());
+        let other = word.clone();
+        let t = thread::spawn(move || assert!(other.take().is_empty()));
+        assert!(word.take().is_empty());
+        t.join().unwrap();
     });
 }

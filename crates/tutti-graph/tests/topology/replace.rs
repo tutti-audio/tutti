@@ -143,7 +143,10 @@ struct DropProbe {
 
 impl Drop for DropProbe {
     fn drop(&mut self) {
-        let on_audio = RtScope::is_inside();
+        // `check_outside` panics only under `debug_assertions`, so a drop on the audio thread is
+        // recorded in debug builds alone; a release run still pins the drop's place and time.
+        let on_audio = cfg!(debug_assertions)
+            && std::panic::catch_unwind(|| RtScope::check_outside("a node")).is_err();
         self.dropped
             .store(if on_audio { 2 } else { 1 }, Ordering::SeqCst);
     }

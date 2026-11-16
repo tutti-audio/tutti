@@ -89,7 +89,7 @@ jobs:
       - run: cargo xtask check-paths tutti_curve envelope law
       - run: cargo xtask check-paths tutti_buffers convert error i24 interleaved mono planes sample
       - run: cargo xtask check-paths tutti_voicing controller holds phase voicing
-      - run: cargo xtask check-paths tutti_rt cell denormals doorbell drain_clock edits job_gate level_cell packed_atomic pos_ring request_word scope seq_cell spin split task_graph vec
+      - run: cargo xtask check-paths tutti_rt cell denormals doorbell drain_clock job_gate level_cell packed_atomic pos_ring request_word scope seq_cell spin split task_graph vec
       # Compares the SDK version the prose states against the commits the superproject records; a bumped submodule
       # otherwise shows as an unexplained C++ error in `audio-probe`.
       - run: cargo xtask check-submodule-pins
@@ -543,7 +543,7 @@ jobs:
   miri:
     name: miri (tutti-rt)
     needs: changes
-    # `tutti-rt` depends on no other workspace crate, so the `loom` filter covers what miri reads.
+    # `tutti-rt` names `tutti-types` only for `ranged!`, so the `loom` filter covers what miri reads of it.
     if: needs.changes.outputs.loom == 'true' && needs.changes.outputs.full == 'true'
     runs-on: ubuntu-24.04
     # About 10 minutes on main; a hang fails here, not at GitHub's cap. Slow pure-arithmetic tests shrink under `cfg!(miri)`.
@@ -726,11 +726,9 @@ jobs:
       - run: cargo test --locked -p tutti-rt --release --test task_graph_loom
       - run: cargo test --locked -p tutti-rt --release --test request_word_loom
       - run: cargo test --locked -p tutti-rt --release --test dirty_set_loom
-      - run: cargo test --locked -p tutti-rt --release --test edit_ring_loom
       - run: cargo test --locked -p tutti-rt --release --test level_cell_loom
       - run: cargo test --locked -p tutti-rt --release --test drain_clock_loom -- --nocapture
       - run: cargo test --locked -p tutti-rt --release --test fault_latch_loom -- --nocapture
-      - run: cargo test --locked -p tutti-rt --release --test wake_flag_loom
       # `Gauge` and `Counter` (a counter never goes back, a closed cell is read
       # at its final value, a gauge is never torn), against the shipped code.
       - run: cargo test --locked -p tutti-rt --release --test gauge_loom

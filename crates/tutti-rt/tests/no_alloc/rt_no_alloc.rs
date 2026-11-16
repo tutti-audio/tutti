@@ -55,15 +55,15 @@ fn audio_thread_cell_borrows_neither_allocate_nor_free() {
     assert_eq!(*cell.borrow(), (0..10_000u64).sum::<u64>());
 }
 
-/// `RequestWord::raise` and `take`, and an `edit_ring` push and pop (full and
+/// `RequestWord::raise` and `take`, and a `ring` push and pop (full and
 /// empty answers included), neither allocate nor free: the whole of what a
 /// host callback and the block-head drain do.
 #[test]
-fn request_word_and_edit_ring_are_allocation_free() {
-    use tutti_rt::{RequestBit, RequestWord, edit_ring};
+fn request_word_and_ring_are_allocation_free() {
+    use tutti_rt::{Overflow, RequestBit, RequestWord, ring};
 
     let word = RequestWord::new();
-    let (mut writer, mut reader) = edit_ring::<[u32; 3]>(4);
+    let (mut writer, mut reader) = ring::<[u32; 3]>(4, Overflow::DropNewest);
     assert_no_alloc::assert_no_alloc(|| {
         for round in 0..1_000u32 {
             word.raise(RequestBit::of((round % 32) as u8));
@@ -78,7 +78,7 @@ fn request_word_and_edit_ring_are_allocation_free() {
             assert!(reader.pop().is_none());
         }
     });
-    assert!(writer.refused() > 0);
+    assert!(writer.lost() > 0);
 }
 
 /// A reader's whole block on a `PosRing`: `claim`, the window, `holds`,
@@ -302,7 +302,7 @@ fn job_gate_run_and_help_are_allocation_free() {
     });
 }
 
-/// `RtScope::enter`, `is_inside`, `check_outside` and the guard's drop
+/// `RtScope::enter`, `check_outside` and the guard's drop
 /// neither allocate nor free.
 #[test]
 fn rt_scope_is_allocation_free() {
@@ -312,9 +312,7 @@ fn rt_scope_is_allocation_free() {
         for _ in 0..1_000 {
             RtScope::check_outside("a value");
             let guard = RtScope::enter();
-            assert!(RtScope::is_inside());
             drop(guard);
-            assert!(!RtScope::is_inside());
         }
     });
 }
