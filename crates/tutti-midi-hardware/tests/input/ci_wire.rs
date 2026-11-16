@@ -34,7 +34,7 @@ fn midi1_wire_sysex_promotes_to_a_typed_ci_message() {
                 manufacturer: ManufacturerId::of(0xA109),
                 family: [0x42, 0x00].map(U7::of),
                 model: [0x07, 0x00].map(U7::of),
-                revision: SoftwareRevision::from_bytes([1, 2, 3, 4].map(U7::of)),
+                revision: SoftwareRevision::from([1, 2, 3, 4].map(U7::of)),
             },
             categories: CiCategories::PROFILE_CONFIGURATION,
             max_sysex_size: MaxSysexSize::of(512),

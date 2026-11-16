@@ -777,7 +777,7 @@ fn stream_identity_and_names() {
             manufacturer: ManufacturerId::of(0xA06B),
             family: [U7::of(1), U7::of(2)],
             model: [U7::of(3), U7::of(4)],
-            revision: SoftwareRevision::from_bytes(b([5, 6, 7, 8])),
+            revision: SoftwareRevision::from(b([5, 6, 7, 8])),
         })),
     );
     // Endpoint Name: two bytes in word 1 (15-8, 7-0), then twelve.

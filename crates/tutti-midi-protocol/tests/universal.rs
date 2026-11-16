@@ -51,7 +51,7 @@ fn an_identity_reply_has_a_one_or_three_byte_manufacturer() {
             manufacturer: ManufacturerId::of(0x41),
             family: u7s([1, 2]),
             model: u7s([3, 4]),
-            revision: SoftwareRevision::from_bytes(u7s([5, 6, 7, 8])),
+            revision: SoftwareRevision::from(u7s([5, 6, 7, 8])),
         })
     );
     let three = heard(&[

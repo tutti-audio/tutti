@@ -223,12 +223,12 @@ impl ProductInstanceId {
     /// feature) and declares the stored one next time, making one only when
     /// there is none stored.
     #[must_use]
+    #[allow(
+        clippy::missing_panics_doc,
+        reason = "32 lowercase hex digits are printable ASCII and within 42 bytes"
+    )]
     pub fn from_random(random: [u8; 16]) -> Self {
-        Self::hex(u128::from_be_bytes(random))
-    }
-
-    fn hex(bits: u128) -> Self {
-        Self::new(&format!("{bits:032x}"))
+        Self::new(&format!("{:032x}", u128::from_be_bytes(random)))
             .expect("32 hex digits are printable ASCII and at most 42 bytes")
     }
 

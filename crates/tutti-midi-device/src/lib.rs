@@ -82,7 +82,6 @@ mod inquiry;
 mod jr;
 mod learned;
 mod name;
-mod sysex8;
 mod table;
 
 pub use ci::{
@@ -157,5 +156,4 @@ pub use inquiry::{INQUIRY_ATTEMPTS, INQUIRY_TIMEOUT, IdentityInquiry, InquiryAct
 pub use jr::{ClockHeard, JrLock, JrReceiver, JrTime, TICK_HZ, Unmapped};
 pub use learned::{Learned, Match, SavedDevice};
 pub use name::{BlockName, EndpointName, Name, NameError, ProductInstanceId};
-pub use sysex8::{Sysex8Refused, Sysex8Slot, Sysex8Streams, Sysex8Support};
 pub use table::{BindPolicy, DeviceEvent, DeviceTable, OsChange, OsDevice, Resolved};

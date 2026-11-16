@@ -120,7 +120,7 @@ fn identity(input: &mut &[u8]) -> Res<DeviceIdentity> {
         manufacturer: manufacturer,
         family: (u7, u7).map(|(a, b)| [a, b]),
         model: (u7, u7).map(|(a, b)| [a, b]),
-        revision: (u7, u7, u7, u7).map(|(a, b, c, d)| SoftwareRevision::from_bytes([a, b, c, d])),
+        revision: (u7, u7, u7, u7).map(|(a, b, c, d)| SoftwareRevision::from([a, b, c, d])),
     })
     .parse_next(input)
 }

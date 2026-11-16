@@ -1349,8 +1349,8 @@ pub struct DeviceIdentity {
 /// the version of software or firmware but may also be the version of
 /// hardware". The format is the Device's own; a product's version is
 /// `major.minor.patch` in the first three bytes and a build number in the
-/// fourth (`str::parse` reads one from the text `CARGO_PKG_VERSION`
-/// holds).
+/// fourth (`str::parse` reads one from an app's version text, such as
+/// `CARGO_PKG_VERSION`).
 ///
 /// ```
 /// use tutti_ump::SoftwareRevision;
@@ -1365,8 +1365,10 @@ pub struct DeviceIdentity {
 pub struct SoftwareRevision([U7; 4]);
 
 impl From<[U7; 4]> for SoftwareRevision {
+    /// The four bytes as the wire carries them: a revision a peer declares in
+    /// its own format.
     fn from(bytes: [U7; 4]) -> Self {
-        Self::from_bytes(bytes)
+        Self(bytes)
     }
 }
 
@@ -1376,25 +1378,12 @@ impl From<SoftwareRevision> for [U7; 4] {
     }
 }
 
-/// Why [`SoftwareRevision::parse`] refuses a text.
+/// Why a text is not a [`SoftwareRevision`] (its `FromStr`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
 #[error("not a software revision: `major.minor[.patch[.build]]`, each part 0 to 127")]
 pub struct NotASoftwareRevision;
 
 impl SoftwareRevision {
-    /// The revision `major.minor.patch` with build number `build`.
-    #[must_use]
-    pub const fn new(major: U7, minor: U7, patch: U7, build: U7) -> Self {
-        Self([major, minor, patch, build])
-    }
-
-    /// The four bytes as the wire carries them, a revision a peer declares in
-    /// its own format.
-    #[must_use]
-    pub const fn from_bytes(bytes: [U7; 4]) -> Self {
-        Self(bytes)
-    }
-
     /// The four bytes.
     #[must_use]
     pub const fn get(self) -> [U7; 4] {
@@ -1405,7 +1394,8 @@ impl SoftwareRevision {
 impl FromStr for SoftwareRevision {
     type Err = NotASoftwareRevision;
 
-    /// A product's version text: `major.minor`, `.patch` and `.build` after it
+    /// The app-facing entry: an app's own version text
+    /// (`env!("CARGO_PKG_VERSION")`) becomes its revision. `major.minor`, `.patch` and `.build` after it
     /// if present (a part left out is 0), each 0 to 127. A pre-release or build
     /// suffix (`-` or `+` and what follows) is not part of the revision.
     fn from_str(version: &str) -> Result<Self, NotASoftwareRevision> {

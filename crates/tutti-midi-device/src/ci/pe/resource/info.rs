@@ -84,7 +84,7 @@ impl PeDeviceInfo {
                 manufacturer,
                 family,
                 model,
-                revision: SoftwareRevision::from_bytes(revision),
+                revision: SoftwareRevision::from(revision),
             },
             manufacturer: manufacturer_name,
             family: family_name,

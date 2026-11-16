@@ -39,13 +39,13 @@ fn device() -> DeviceIdentity {
             .unwrap(),
         family: [U7::of(0), U7::of(0)],
         model: [U7::of(48), U7::of(0)],
-        revision: SoftwareRevision::from_bytes([U7::of(0), U7::of(0), U7::of(1), U7::of(0)]),
+        revision: SoftwareRevision::from([U7::of(0), U7::of(0), U7::of(1), U7::of(0)]),
     }
 }
 
 fn other_version() -> DeviceIdentity {
     DeviceIdentity {
-        revision: SoftwareRevision::from_bytes([U7::of(0), U7::of(0), U7::of(2), U7::of(0)]),
+        revision: SoftwareRevision::from([U7::of(0), U7::of(0), U7::of(2), U7::of(0)]),
         ..device()
     }
 }

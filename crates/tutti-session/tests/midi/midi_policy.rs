@@ -33,7 +33,7 @@ fn device(model: u8) -> DeviceIdentity {
         manufacturer: ManufacturerId::NON_COMMERCIAL,
         family: [U7::of(1); 2],
         model: [U7::of(model); 2],
-        revision: tutti_ump::SoftwareRevision::from_bytes([U7::of(3); 4]),
+        revision: tutti_ump::SoftwareRevision::from([U7::of(3); 4]),
     }
 }
 
@@ -230,10 +230,13 @@ fn a_peers_endpoint_discovery_is_answered_only_once_the_policy_names_an_identity
         Stream::EndpointInfo(info),
         Stream::DeviceIdentity(who),
         Stream::EndpointName(_, name),
+        Stream::ProductInstanceId(..),
+        Stream::ProductInstanceId(..),
+        Stream::ProductInstanceId(..),
         Stream::StreamConfigurationNotification(config),
     ] = sent.as_slice()
     else {
-        panic!("Info, Identity, Name, Configuration: {sent:?}");
+        panic!("Info, Identity, Name, Product Instance Id, Configuration: {sent:?}");
     };
     assert_eq!(
         config.protocol,

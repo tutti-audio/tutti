@@ -8,7 +8,7 @@ use crate::{CiChange, Polled, ProfilesChange};
 use tutti_midi_device::CiCategories;
 use tutti_midi_device::MidiIdentity;
 use tutti_midi_device::{CiMessage, ProductInstanceId};
-use tutti_ump::{BlockFilter, BlockSelect, DiscoveryFilter, UmpVersion};
+use tutti_ump::{BlockFilter, BlockSelect, DiscoveryFilter, Form, UmpVersion};
 
 const ASKING: UmpVersion = UmpVersion { major: 1, minor: 1 };
 
@@ -98,10 +98,15 @@ fn a_peers_endpoint_discovery_is_answered_with_the_presented_endpoint() {
         Stream::EndpointInfo(info),
         Stream::DeviceIdentity(who),
         Stream::EndpointName(_, name),
+        Stream::ProductInstanceId(..),
+        Stream::ProductInstanceId(..),
+        Stream::ProductInstanceId(..),
         Stream::StreamConfigurationNotification(config),
     ] = sent.as_slice()
     else {
-        panic!("Info, Identity, Name and Configuration, in that order: {sent:?}");
+        panic!(
+            "Info, Identity, Name, Product Instance Id and Configuration, in that order: {sent:?}"
+        );
     };
     assert_eq!(info.version, ASKING);
     assert!(info.static_function_blocks);
@@ -140,6 +145,83 @@ fn the_product_instance_id_is_answered_when_the_identity_has_one() {
         panic!("only the Product Instance Id: {sent:?}");
     };
     assert_eq!(&text[..7], b"SN-0042");
+}
+
+fn ask_instance_id() -> Stream {
+    Stream::EndpointDiscovery {
+        version: ASKING,
+        filter: DiscoveryFilter {
+            endpoint_info: false,
+            device_identity: false,
+            endpoint_name: false,
+            product_instance_id: true,
+            stream_configuration: false,
+        },
+    }
+}
+
+/// M2-104 §7.1.5: an identity with no Product Instance Id is declared with one
+/// the session made, and a rebuild of the Endpoint (a change of Groups) answers
+/// the same one, so the Id re-identifies the device; the session says what it
+/// is, so an app can keep it.
+/// Spec: m2-104/7.1.5#1, m2-104/7.1.5#2
+#[test]
+fn a_generated_product_instance_id_is_the_same_through_every_rebuild() {
+    let mut wire = presenting(Some(presented(identity())));
+    let id_packets = |sent: Vec<Stream>| -> Vec<Stream> {
+        sent.into_iter()
+            .filter(|s| matches!(s, Stream::ProductInstanceId(..)))
+            .collect()
+    };
+    let first = id_packets(answered(&mut wire, ask_instance_id(), 100));
+    assert_eq!(first.len(), 3, "32 bytes: a Start, a Continue and an End");
+    wire.session.present(Some(presented_over(2)));
+    let second = id_packets(answered(&mut wire, ask_instance_id(), 200));
+    wire.session.present(Some(presented_over(3)));
+    let third = id_packets(answered(&mut wire, ask_instance_id(), 300));
+    // Each rebuild announces the Endpoint again and then answers: the same Id
+    // twice, and the same as before.
+    for after in [second, third] {
+        assert!(!after.is_empty() && after.len() % 3 == 0);
+        assert!(
+            after.chunks(3).all(|id| id == first.as_slice()),
+            "{after:?}"
+        );
+    }
+    let kept = wire.session.instance_id().expect("the session made one");
+    let mut text = Vec::new();
+    for packet in &first {
+        let Stream::ProductInstanceId(_, bytes) = packet else {
+            panic!("{packet:?}");
+        };
+        text.extend_from_slice(bytes);
+    }
+    assert!(text.starts_with(kept.as_str().as_bytes()));
+}
+
+/// An Id the identity carries is declared as it is, and the session makes none.
+#[test]
+fn a_given_product_instance_id_is_kept_through_a_rebuild() {
+    let mut who = presented(identity());
+    who.identity.instance = Some(ProductInstanceId::new("SN-0042").unwrap());
+    let mut wire = presenting(Some(who));
+    wire.session.present(Some(crate::Presented {
+        groups: GroupSpan::new(2).unwrap(),
+        ..who
+    }));
+    let sent = answered(&mut wire, ask_instance_id(), 100);
+    let ids: Vec<_> = sent
+        .iter()
+        .filter(|s| matches!(s, Stream::ProductInstanceId(..)))
+        .collect();
+    assert!(!ids.is_empty());
+    for id in ids {
+        let Stream::ProductInstanceId(form, text) = id else {
+            unreachable!()
+        };
+        assert_eq!((*form, &text[..7]), (Form::Complete, &b"SN-0042"[..]));
+    }
+    assert_eq!(wire.session.instance_id(), None);
 }
 
 /// M2-104 §7.1.8: a Function Block Discovery for block 0 is answered with its

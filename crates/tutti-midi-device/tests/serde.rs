@@ -128,7 +128,7 @@ mod learned {
                 manufacturer: ManufacturerId::of(0x0042),
                 family: [1, 0].map(U7::of),
                 model: [7, 0].map(U7::of),
-                revision: SoftwareRevision::from_bytes([1, 2, 3, 4].map(U7::of)),
+                revision: SoftwareRevision::from([1, 2, 3, 4].map(U7::of)),
             })
             .with_instance_id(ProductInstanceId::new("SN-1").unwrap())
     }
@@ -201,7 +201,7 @@ mod saved_state {
             manufacturer: ManufacturerId::of(0x0042),
             family: [1, 0].map(U7::of),
             model: [7, 0].map(U7::of),
-            revision: SoftwareRevision::from_bytes([1, 2, 3, 4].map(U7::of)),
+            revision: SoftwareRevision::from([1, 2, 3, 4].map(U7::of)),
         }
     }
 

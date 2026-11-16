@@ -7,7 +7,7 @@ fn identity(model: u8) -> DeviceIdentity {
         manufacturer: ManufacturerId::of(0x0042),
         family: [1, 0].map(U7::of),
         model: [model, 0].map(U7::of),
-        revision: SoftwareRevision::from_bytes([1, 2, 3, 4].map(U7::of)),
+        revision: SoftwareRevision::from([1, 2, 3, 4].map(U7::of)),
     }
 }
 

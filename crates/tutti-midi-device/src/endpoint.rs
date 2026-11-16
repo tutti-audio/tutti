@@ -12,7 +12,6 @@ use tutti_ump::{
     Midi1Port, Protocol, Stream, StreamConfig, UiHint, Ump, UmpVersion, text_packets,
 };
 
-use crate::entropy::{EntropyError, random_bytes};
 use crate::name::{BlockName, EndpointName, ProductInstanceId};
 
 /// How many Function Blocks an Endpoint holds (M2-104 §7.1.7: numbers `0..=31`).
@@ -618,22 +617,6 @@ impl Endpoint {
     pub const fn with_instance_id(mut self, id: ProductInstanceId) -> Self {
         self.instance_id = Some(id);
         self
-    }
-
-    /// The Product Instance Id it declares (§7.1.5: Devices should declare
-    /// one): the one it has, else a new
-    /// [`ProductInstanceId::from_random`] one, which it keeps and answers
-    /// Endpoint Discovery with from then on.
-    ///
-    /// # Errors
-    ///
-    /// [`EntropyError`] when it has none and the operating system has no
-    /// random bytes to give.
-    pub fn ensure_instance_id(&mut self) -> Result<&ProductInstanceId, EntropyError> {
-        match &mut self.instance_id {
-            Some(id) => Ok(id),
-            none => Ok(none.insert(ProductInstanceId::from_random(random_bytes()?))),
-        }
     }
 
     /// The Endpoint declaring whether its Function Blocks never change

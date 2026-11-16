@@ -567,12 +567,7 @@ fn stream(w: [u32; 4]) -> Option<Stream> {
             ])?,
             family: [u7(w[2], 3), u7(w[2], 2)],
             model: [u7(w[2], 1), u7(w[2], 0)],
-            revision: SoftwareRevision::from_bytes([
-                u7(w[3], 3),
-                u7(w[3], 2),
-                u7(w[3], 1),
-                u7(w[3], 0),
-            ]),
+            revision: SoftwareRevision::from([u7(w[3], 3), u7(w[3], 2), u7(w[3], 1), u7(w[3], 0)]),
         })),
         0x03 => Some(Stream::EndpointName(form(w0, 26), text14(w))),
         0x04 => Some(Stream::ProductInstanceId(form(w0, 26), text14(w))),
