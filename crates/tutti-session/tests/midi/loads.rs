@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use tutti_midi_file::{MidiFile, SmfDivision, SmfFormat, Tick, Track};
 use tutti_session::{
-    DetachedSession, JobFailed, MidiError, MidiLoad, MidiReport, Session, SessionEvent,
+    DetachedSession, MidiError, MidiLoad, MidiReport, Session, SessionEvent, WorkerError,
 };
 use tutti_types::SampleRate;
 use tutti_ump::{MidiChannel, NoteNumber, U7};
@@ -114,7 +114,7 @@ fn a_dropped_job_lands_as_a_job_error() {
     let (load, file) = land(&mut s, 1, files).pop().unwrap();
     assert_eq!(load, id);
     assert!(
-        matches!(file, Err(MidiError::Job(JobFailed::Dropped))),
+        matches!(file, Err(MidiError::Job(WorkerError::Dropped))),
         "{file:?}"
     );
 }

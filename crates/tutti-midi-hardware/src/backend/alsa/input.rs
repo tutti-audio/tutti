@@ -248,7 +248,7 @@ fn pump(
                     Ok(Wait::Ready) => continue,
                     Ok(Wait::Stopped) => return,
                     Ok(Wait::Broken) => return die("the sequencer descriptor failed"),
-                    Ok(Wait::Timeout) => unreachable!("wait(None) has no timeout"),
+                    Ok(Wait::TimedOut) => unreachable!("wait(None) has no timeout"),
                     Err(e) => return die(&e.to_string()),
                 }
             }

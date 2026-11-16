@@ -259,6 +259,7 @@ fn with_real_time(rng: &mut Rng, stream: Vec<Tagged>) -> Vec<Tagged> {
 /// (inside a message's data and inside a SysEx) read back as exactly the
 /// messages that made them, in order. A SysEx of 6 bytes or fewer is one
 /// `Complete`; longer, a `Start`, `Continue`s of six and an `End`.
+/// Spec: m2-104/3.2#1
 #[test]
 fn generated_streams_read_back_to_their_messages() {
     let mut rng = Rng(0x2545_F491_4F6C_DD1D);

@@ -36,7 +36,8 @@
 //! there, so the rebuild runs in an update that runs on it: `plugins_phase` does
 //! not tick an in-process plugin (only `MainSession::update` does, for an open
 //! editor), so this phase does, for the pooled plugins it re-inserts. A served
-//! plugin's ports are fixed by its slab: a change of buses is refused.
+//! plugin is ticked the same way: it restarts into a new slab, pipeline and
+//! node for its new buses.
 
 use thiserror::Error;
 use tutti_plugin_host::{RebindError, Settlement};
@@ -51,8 +52,7 @@ use tutti_graph::NodeKey;
 #[non_exhaustive]
 pub enum PortsRefusal {
     /// The plugin's ports cannot be a node: too wide for a block
-    /// ([`TooWide`](RebindError::TooWide)), or outside a served plugin's slab
-    /// ([`OutsideSlab`](RebindError::OutsideSlab)). The plugin is untouched.
+    /// ([`TooWide`](RebindError::TooWide)). The plugin is untouched.
     /// (A plugin that is not running or restarting is asked again at the next
     /// update, not refused.)
     #[error(transparent)]
@@ -81,7 +81,7 @@ impl<C: Clock> Session<C> {
             let Some(hosted) = self.graph.plugins.get_mut(&node) else {
                 continue;
             };
-            if let (Some(main), None) = (main, hosted.handle.server_pid()) {
+            if let Some(main) = main {
                 hosted.handle.editor_idle(main);
             }
             let Some(state) = hosted.rebind.take() else {
@@ -114,6 +114,9 @@ impl<C: Clock> Session<C> {
             },
             RebindState::Idle { rebinder, laid_out } => (rebinder.clone(), laid_out.clone()),
         };
+        if let Some(main) = main {
+            rebinder.tick(main);
+        }
         let Some(now) = rebinder.layout() else {
             return state.with(laid_out, false);
         };
@@ -121,21 +124,23 @@ impl<C: Clock> Session<C> {
             return state.with(laid_out, false);
         }
         match rebinder.prepare() {
-            // A served plugin whose buses still fit its slab: its node stays.
-            Ok(None) => state.with(now, false),
-            Ok(Some(rebuilt)) => {
+            Ok(rebuilt) => {
                 // The swap commits on the main thread; an update that is not on
                 // it asks again, the unplaced node dropped.
                 let Some(main) = main else {
                     return state.with(laid_out, false);
                 };
                 let (bound, controls, commit) = rebuilt.into_parts();
-                controls.set_meter(self.click_settings.project_meter());
+                if let Some(controls) = &controls {
+                    controls.set_meter(self.click_settings.project_meter());
+                }
                 match self.graph.replace_rebound(node, bound) {
                     Ok(()) => {
                         // The plugin is touched only now the node is in place.
                         commit.commit(main);
-                        if let Some(hosted) = self.graph.plugins.get_mut(&node) {
+                        if let (Some(hosted), Some(controls)) =
+                            (self.graph.plugins.get_mut(&node), controls)
+                        {
                             hosted.node = Some(controls);
                         }
                         state.with(now, true)

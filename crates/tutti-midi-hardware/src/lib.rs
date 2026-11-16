@@ -243,6 +243,7 @@ mod port;
 mod process;
 mod profiles;
 mod properties;
+mod sensing;
 mod session;
 // Only the backends with a clock of their own to read convert its timestamp.
 #[cfg_attr(
