@@ -751,9 +751,8 @@ impl MidiSession {
     }
 
     /// Asks a peer for a Property Exchange call, as the Initiator (M2-103): the
-    /// request is made at the next [`poll`](Self::poll), a
-    /// [`PropertyChange::Started`] names its call and the
-    /// [`PropertyChange::Event`]s that follow end it. Make the [`PropertyAsk`]
+    /// request is made at the next [`poll`](Self::poll), and an [`Answer::Got`] or
+    /// [`Answer::Set`] ends it. Make the [`PropertyAsk`]
     /// from a handle in [`property_peers`](Self::property_peers).
     ///
     /// # Errors

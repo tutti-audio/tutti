@@ -16,28 +16,45 @@
 //! ([`PropertyChange::Served`]). The app does not publish updates through the
 //! session.
 //!
-//! A request started by a poll is [`PropertyChange::Started`] with the
-//! [`CallId`] its [`ResourceEvent`]s name, in the order the requests were made.
+//! A call's end is an [`Answer`](crate::Answer) ([`Answer::Got`](crate::Answer::Got),
+//! [`Answer::Set`](crate::Answer::Set)); a call the Initiator refuses or a peer lost
+//! before it starts is [`Answer::PropertyNotSent`](crate::Answer::PropertyNotSent) or
+//! [`Answer::PropertyLost`](crate::Answer::PropertyLost).
 
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
 use tutti_midi_device::{
-    CallError, CallId, DeviceId, Muid, ResourceEvent, ResourceGet, ResourceSet, ResponderEvent,
-    SubscribeId,
+    DeviceId, Muid, PeResource, PeResourceList, ResourceEvent, ResourceGet, ResourceSet,
+    ResponderEvent, SubscribeId,
 };
 use tutti_ump::MidiGroup;
 
 /// A peer that declared Property Exchange and answered its Capabilities Inquiry:
 /// the handle a [`PropertyAsk`] is made from.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PropertyPeer {
     pub(crate) device: DeviceId,
     pub(crate) group: MidiGroup,
     pub(crate) muid: Muid,
+    pub(crate) resources: Arc<PeResourceList>,
 }
 
 impl PropertyPeer {
+    /// The Resources the peer's ResourceList names, with how each is read, set
+    /// and subscribed to; empty until the list has come.
+    #[must_use]
+    pub fn resources(&self) -> &PeResourceList {
+        &self.resources
+    }
+
+    /// Whether `other` is the same peer of the same input: the ResourceList each
+    /// was read with does not matter.
+    #[must_use]
+    pub fn is(&self, other: &Self) -> bool {
+        self.device == other.device && self.group == other.group && self.muid == other.muid
+    }
+
     /// The input device the peer was found on.
     #[must_use]
     pub const fn device(&self) -> &DeviceId {
@@ -91,6 +108,21 @@ pub enum PropertyCall {
     Unsubscribe(SubscribeId),
 }
 
+impl PropertyCall {
+    /// The Resource the call is of, `None` for the end of a Subscription, which
+    /// names the Subscription.
+    #[must_use]
+    pub fn resource(&self) -> Option<&PeResource> {
+        match self {
+            Self::Get(get) | Self::Subscribe(get) | Self::GetList { get, .. } => {
+                Some(get.target().resource())
+            }
+            Self::Set(set) => Some(set.target().resource()),
+            Self::Unsubscribe(_) => None,
+        }
+    }
+}
+
 /// A request to one peer's Property Exchange. Made only from a [`PropertyPeer`],
 /// and it names the input device that handle was read from, so it cannot be sent
 /// to another.
@@ -98,6 +130,37 @@ pub enum PropertyCall {
 pub struct PropertyAsk {
     pub(crate) peer: PropertyPeer,
     pub(crate) call: PropertyCall,
+}
+
+impl PropertyAsk {
+    /// The peer asked.
+    #[must_use]
+    pub const fn peer(&self) -> &PropertyPeer {
+        &self.peer
+    }
+
+    /// What is asked of it.
+    #[must_use]
+    pub const fn call(&self) -> &PropertyCall {
+        &self.call
+    }
+
+    /// Checks the peer is one of `peers`, the input's peers that answered their
+    /// Capabilities.
+    ///
+    /// # Errors
+    ///
+    /// [`PropertyError::NoSuchPeer`] when it is not.
+    pub fn check<'a>(
+        &self,
+        peers: impl IntoIterator<Item = &'a PropertyPeer>,
+    ) -> Result<(), PropertyError> {
+        if peers.into_iter().any(|peer| peer.is(&self.peer)) {
+            Ok(())
+        } else {
+            Err(PropertyError::NoSuchPeer)
+        }
+    }
 }
 
 /// The peers of one input that can be asked.
@@ -111,23 +174,9 @@ pub(crate) type Snapshot = Arc<[PropertyPeer]>;
 pub enum PropertyChange {
     /// The Initiator reports: the peer's Capabilities arrived (and with them the
     /// peer is in [`MidiSession::property_peers`](crate::MidiSession::property_peers)),
-    /// its ResourceList, or the end of a call.
+    /// its ResourceList, or what a Subscription holds. A call's end is an
+    /// [`Answer`](crate::Answer), not an event.
     Event(Box<ResourceEvent>),
-    /// A [`PropertyAsk`] was started, and its events name this call.
-    Started(CallId),
-    /// A [`PropertyAsk`] was not started.
-    NotSent {
-        /// What was asked.
-        call: Box<PropertyCall>,
-        /// Why not.
-        error: CallError,
-    },
-    /// A [`PropertyAsk`] was not started: the peer was lost between the request
-    /// and the poll that would have started it.
-    PeerGone {
-        /// What was asked.
-        call: Box<PropertyCall>,
-    },
     /// The peer did something to what this device serves: a Set changed the
     /// store, or a Subscription began or ended.
     Served(ResponderEvent),
