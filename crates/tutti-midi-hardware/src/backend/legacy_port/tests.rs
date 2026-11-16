@@ -581,7 +581,9 @@ fn the_poll_seeds_then_reports_a_device_that_appears_and_one_that_goes() {
     };
     assert_eq!(removed.name, "A");
 
-    // Once the last holder drops, the thread has ended: no look follows.
+    // Once the last holder drops, the thread has ended (the drop joins it): no
+    // look follows. The window gives a surviving thread, looking every 5 ms,
+    // the chance to show; a longer one only makes the check stricter.
     drop(events);
     drop(devices);
     let looks = LOOKS.load(Ordering::SeqCst);

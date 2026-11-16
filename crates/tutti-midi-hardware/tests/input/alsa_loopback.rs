@@ -59,10 +59,14 @@ fn open() -> Loopback {
         panic!("a new input opens");
     };
     graph.attach(inlet);
-    let sink = io.connect_output(&out.id).expect("connect output");
-    std::thread::sleep(Duration::from_millis(200));
-    // Whatever was buffered before the test.
-    graph.listen(Duration::from_millis(50));
+    let mut sink = io.connect_output(&out.id).expect("connect output");
+    // Whatever was buffered before the test is drained with the probes.
+    graph.ready(
+        || {
+            let _ = sink.queue(&[(Offset::ZERO, note_on(MidiChannel::of(1), 59, 0x8100))]);
+        },
+        Duration::from_secs(30),
+    );
     Loopback {
         sink,
         graph,
