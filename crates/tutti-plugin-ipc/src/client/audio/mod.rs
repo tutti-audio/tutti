@@ -400,6 +400,14 @@ impl AudioBridge {
         !self.lifecycle.is_crashed() && self.channels.push_command(Command::SetRenderMode { mode })
     }
 
+    /// Makes the bridge thread wait `wait` for each block's reply, in place of
+    /// the few block periods a device's block is given, or the live bound again
+    /// with `None`. An offline render has no deadline: a reply that comes after
+    /// the live bound carries the block's MIDI-out all the same.
+    pub(crate) fn set_reply_wait(&self, wait: Option<Duration>) {
+        self.channels.set_reply_wait(wait);
+    }
+
     /// Queues a reset of the plugin's processing state. Realtime-safe; `false`
     /// when it was not queued.
     pub(crate) fn reset_rt(&self) -> bool {

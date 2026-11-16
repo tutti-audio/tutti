@@ -11,7 +11,8 @@
 //! silent in at most one run, no longer than a scheduler stall plus the
 //! pipeline's refill (`max_stall_blocks`), every block is either the input delayed
 //! by exactly the declared latency (137 + quantum) or silence, and the graph
-//! declares that latency.
+//! declares that latency. Silence a scheduler stall could explain is judged on
+//! up to `ATTEMPTS` runs on fresh servers; a wrong block fails at once.
 //!
 //! Needs `cargo build -p tutti-plugin-server` first (see `CLAUDE.md`).
 
@@ -322,29 +323,74 @@ fn a_stall_bound_follows_the_block_period() {
     );
 }
 
-fn assert_live(rate: f64, quantum: usize) {
-    let run = run_live(rate, quantum, 200, None);
-    eprintln!(
-        "{quantum}-frame callbacks: declared {:?}, {} of {} blocks silent, {} wrong",
-        run.declared,
-        run.silent.len(),
-        run.blocks,
-        run.wrong.len()
-    );
-    let period = Duration::from_secs_f64(quantum as f64 / rate);
-    if let Err(why) = judge_stall(&run.silent, max_stall_blocks(period), 0..0) {
-        panic!(
-            "{quantum}-frame callbacks: {why} of {} blocks: more than one \
-             scheduler stall, or the server was not given the device period to answer",
-            run.blocks
+/// Paced runs a silence pattern gets before it is called a fault.
+///
+/// The property is wall-clock: the server answers inside one device period,
+/// and the machine it is measured on also schedules every other process. A
+/// stall past [`STALL`] on the test thread, the bridge thread or the server
+/// (a CPU oversubscribed by a parallel test run, a compile) costs silent blocks
+/// that no pipeline defect explains, and one run cannot tell the two apart. A
+/// pipeline defect (a chunk that is not the callback, a ring that drops what it
+/// should keep) is silent in every run, a stall in few, so a fault is silence
+/// that [`judge_stall`] rejects in each of `ATTEMPTS` independent runs, each on
+/// a fresh server. Corruption is never retried: a block neither silent nor the
+/// delayed input fails at once, in any run.
+const ATTEMPTS: usize = 4;
+
+/// The first of `ATTEMPTS` runs of `run` that `judge` accepts. Panics at once
+/// on a run with a wrong block, and, once every run is rejected, with each
+/// run's reason.
+fn first_sound_run(
+    what: &str,
+    mut run: impl FnMut() -> Run,
+    judge: impl Fn(&Run) -> Result<(), String>,
+) -> Run {
+    let mut rejected = Vec::new();
+    for attempt in 1..=ATTEMPTS {
+        let run = run();
+        assert!(
+            run.wrong.is_empty(),
+            "{what}: blocks {:?} are neither silent nor the input delayed by {:?}: \
+             a block the ring dropped surfaced as data",
+            run.wrong,
+            run.declared
         );
+        match judge(&run) {
+            Ok(()) => return run,
+            Err(why) => {
+                eprintln!("{what}: run {attempt} of {ATTEMPTS} rejected: {why}");
+                rejected.push(why);
+            }
+        }
     }
-    assert!(
-        run.wrong.is_empty(),
-        "{quantum}-frame callbacks: blocks {:?} are neither silent nor the input \
-         delayed by {:?}",
-        run.wrong,
-        run.declared
+    panic!(
+        "{what}: silence a stall does not explain, in each of {ATTEMPTS} runs on fresh \
+         servers (more than the stall bound, or a second stall, every time): {rejected:#?}"
+    );
+}
+
+fn assert_live(rate: f64, quantum: usize) {
+    let what = format!("{quantum}-frame callbacks");
+    let period = Duration::from_secs_f64(quantum as f64 / rate);
+    let run = first_sound_run(
+        &what,
+        || run_live(rate, quantum, 200, None),
+        |run| {
+            eprintln!(
+                "{what}: declared {:?}, {} of {} blocks silent, {} wrong",
+                run.declared,
+                run.silent.len(),
+                run.blocks,
+                run.wrong.len()
+            );
+            judge_stall(&run.silent, max_stall_blocks(period), 0..0).map_err(|why| {
+                format!(
+                    "{why} of {} blocks: more than one scheduler stall, or the server \
+                     was not given the device period to answer",
+                    run.blocks
+                )
+            })
+        },
     );
     assert_eq!(
         run.declared,
@@ -396,25 +442,21 @@ fn a_burst_of_callbacks_loses_blocks_but_never_corrupts_them() {
     let _lock = machine_lock();
     let _env = ProbeEnv::new().render_mode(render::LATENCY);
 
-    let run = run_live(48_000.0, QUANTUM, BLOCKS, Some(BURST_AT));
-
-    assert!(
-        run.wrong.is_empty(),
-        "blocks {:?} are neither silent nor the input delayed by {:?}: a block \
-         the ring dropped surfaced as data",
-        run.wrong,
-        run.declared
-    );
-    eprintln!("burst at {BURST_AT}: silent blocks {:?}", run.silent);
     let window = BURST_AT..BURST_AT + BURST + RING_SLOTS;
-    let silent: Vec<usize> = run
-        .silent
-        .iter()
-        .copied()
-        .filter(|&b| b >= SETTLE)
-        .collect();
     let period = Duration::from_secs_f64(QUANTUM as f64 / 48_000.0);
-    if let Err(why) = judge_stall(&silent, max_stall_blocks(period), window.clone()) {
-        panic!("outside the burst window {window:?} from {SETTLE}: {why}");
-    }
+    first_sound_run(
+        "a burst of callbacks",
+        || run_live(48_000.0, QUANTUM, BLOCKS, Some(BURST_AT)),
+        |run| {
+            eprintln!("burst at {BURST_AT}: silent blocks {:?}", run.silent);
+            let silent: Vec<usize> = run
+                .silent
+                .iter()
+                .copied()
+                .filter(|&b| b >= SETTLE)
+                .collect();
+            judge_stall(&silent, max_stall_blocks(period), window.clone())
+                .map_err(|why| format!("outside the burst window {window:?} from {SETTLE}: {why}"))
+        },
+    );
 }

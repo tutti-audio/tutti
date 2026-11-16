@@ -44,6 +44,12 @@ pub(super) struct Channels {
     /// a constant sit orders of magnitude off the real block period, which
     /// starves the command queue.
     sample_rate: Arc<AtomicSampleRate>,
+    /// How long the bridge thread waits for a block's reply, in nanoseconds,
+    /// when it is not the live bound ([`process_timeout`](super::dispatch)):
+    /// `0` while the bridge serves a device. An offline render has no
+    /// deadline, so a reply the server is slow to send is the server's, not
+    /// an abandoned block's.
+    reply_wait_ns: Arc<AtomicU64>,
     /// How many owed replies the drain has taken back off the socket, ever.
     ///
     /// Pure instrumentation, and the only externally visible evidence that the
@@ -96,6 +102,7 @@ impl Channels {
             newest_seq: Arc::new(AtomicU64::new(0)),
             bell: Arc::new(Doorbell::new()),
             sample_rate: Arc::new(AtomicSampleRate::new(sample_rate)),
+            reply_wait_ns: Arc::new(AtomicU64::new(0)),
             settled: Arc::new(AtomicU64::new(0)),
             abandoned: Arc::new(AtomicU64::new(0)),
             replies: Arc::new(AtomicU64::new(0)),
@@ -114,6 +121,22 @@ impl Channels {
 
     pub(super) fn set_sample_rate(&self, rate: SampleRate) {
         self.sample_rate.store(rate, Ordering::Relaxed);
+    }
+
+    /// The bridge thread's wait for a block's reply, when it is not the live
+    /// one.
+    pub(super) fn reply_wait(&self) -> Option<std::time::Duration> {
+        match self.reply_wait_ns.load(Ordering::Relaxed) {
+            0 => None,
+            ns => Some(std::time::Duration::from_nanos(ns)),
+        }
+    }
+
+    pub(super) fn set_reply_wait(&self, wait: Option<std::time::Duration>) {
+        let ns = wait.map_or(0, |w| {
+            u64::try_from(w.as_nanos()).unwrap_or(u64::MAX).max(1)
+        });
+        self.reply_wait_ns.store(ns, Ordering::Relaxed);
     }
 
     /// Park the bridge thread until a command is queued or `stop` says to

@@ -750,7 +750,10 @@ impl Ipc {
             offline: true,
         }) = link.watch()
         {
+            link.bridge.set_reply_wait(Some(wait.budget()));
             batcher.set_offline_wait(wait);
+        } else {
+            link.bridge.set_reply_wait(None);
         }
         link.reserve(batcher.chunk());
         let processor = IpcProcessor::new(Arc::clone(&link), batcher);

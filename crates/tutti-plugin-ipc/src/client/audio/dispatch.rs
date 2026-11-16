@@ -464,7 +464,9 @@ pub(super) fn handle(
 
             payloads.recycle(payload);
 
-            let timeout = process_timeout(num_samples, channels.sample_rate());
+            let timeout = channels
+                .reply_wait()
+                .unwrap_or_else(|| process_timeout(num_samples, channels.sample_rate()));
             let sent = ipc::send(audio_stream, &msg);
             // The parameter-change buffer goes back to the audio thread's free
             // list once its contents are on the wire (sent or not: a failed

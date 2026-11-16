@@ -383,7 +383,8 @@ impl Batcher {
     ///
     /// **The first miss is the last wait.** A chunk still missing at the
     /// budget is collected as silence, as the live path would, and the wait
-    /// latches `gave_up`: from then on every chunk is collected at once
+    /// latches `gave_up` and the bridge thread's wait for a reply returns to
+    /// the live bound: from then on every chunk is collected at once
     /// (silence, unless the server catches up), so a hung server costs one
     /// budget per render, not one per chunk — an hour-long export through a
     /// wedged plugin would otherwise take days to report its failure. The
@@ -425,6 +426,10 @@ impl Batcher {
             }
             if now >= deadline {
                 watch.give_up();
+                // No reply is awaited past the live bound from here on: a
+                // hung server must not hold the bridge thread one budget per
+                // chunk the render still submits.
+                bridge.set_reply_wait(None);
                 tracing::warn!(
                     seq,
                     budget = ?watch.budget(),

@@ -20,7 +20,7 @@ use tutti_ump::MidiChannel;
 
 use super::mock_server::{
     BEATS_PER_FRAME_120, CHUNK, PARAMS, Record, SR, STEP_BEAT, STEP_FRAME, at, beat_at, new_node,
-    rig, tempo,
+    rig, rig_replying_after, tempo,
 };
 use tutti_midi_protocol::widen_velocity;
 use tutti_ump::{Message, NoteNumber, U7, Voice2};
@@ -115,6 +115,40 @@ fn a_click_comes_out_one_declared_latency_later() {
     for (i, s) in heard.iter().enumerate() {
         let want = if i == click { 2.0 } else { 0.0 };
         assert_eq!(*s, want, "frame {i}");
+    }
+}
+
+/// **An offline render's MIDI-out is the plugin's, whenever the server's reply
+/// comes.** The mock server publishes a chunk's audio and sends its reply a
+/// quarter of a second later (a scheduler that has not run it: far past the
+/// few block periods a live block waits). A note at frame 10 of the first
+/// chunk is echoed at frame 10 of the second, as it is with a prompt server.
+#[test]
+fn a_late_reply_still_carries_its_midi_out_offline() {
+    let _machine = machine_lock();
+    let (mut unit, _record, _threads) = new_node(
+        rig_replying_after("late", std::time::Duration::from_millis(250)),
+        tempo(STEP_BEAT),
+    );
+    let mut heard = Vec::new();
+    for (block, frame) in [(0usize, 0u64), (1, 128), (2, 256)] {
+        let events: Vec<Event> = if block == 0 {
+            vec![note_on(at(10, CHUNK))]
+        } else {
+            Vec::new()
+        };
+        unit.events(0, &events);
+        unit.block_in(&block_env(frame, CHUNK));
+        heard.push(
+            unit.events_out(0)
+                .iter()
+                .map(|e| e.offset.index())
+                .collect::<Vec<_>>(),
+        );
+    }
+    let want: [&[usize]; 3] = [&[], &[10], &[]];
+    for (block, (heard, want)) in heard.iter().zip(want).enumerate() {
+        assert_eq!(heard, want, "block {block}: the plugin's MIDI-out");
     }
 }
 

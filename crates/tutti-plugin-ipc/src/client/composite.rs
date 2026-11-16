@@ -318,6 +318,11 @@ impl PluginBridge {
         self.audio.reserve_param_changes(queues, points);
     }
 
+    /// See `AudioBridge::set_reply_wait`.
+    pub(crate) fn set_reply_wait(&self, wait: Option<std::time::Duration>) {
+        self.audio.set_reply_wait(wait);
+    }
+
     /// Block `seq`'s MIDI-out, and any earlier block's still queued. See
     /// [`AudioBridge::take_replies`].
     pub(crate) fn take_replies(
