@@ -112,9 +112,9 @@ pub struct PeakBlocks {
 #[cfg(feature = "serde")]
 #[derive(serde::Deserialize)]
 struct StoredPeakBlocks {
-    blocks: Vec<PeakBlock>,
-    layout: ChannelLayout,
-    per_channel: usize,
+    pub blocks: Vec<PeakBlock>,
+    pub layout: ChannelLayout,
+    pub per_channel: usize,
 }
 
 #[cfg(feature = "serde")]
