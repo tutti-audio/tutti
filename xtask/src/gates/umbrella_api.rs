@@ -87,6 +87,11 @@ const INTERNAL: &[(&str, &str, &str)] = &[
         "the export render's clock; `ExportClock` wraps it",
     ),
     (
+        "tutti_graph",
+        "Executor",
+        "the graph's executor; an app renders through `Session` or `Bounce`",
+    ),
+    (
         "tutti_transport",
         "OfflineClock",
         "the export render's clock; `ExportClock` wraps it",
