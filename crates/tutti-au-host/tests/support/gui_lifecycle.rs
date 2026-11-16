@@ -461,7 +461,7 @@ gui_test! {
 /// is still usable (a new editor opens on it) afterwards.
 fn dropping_off_the_main_thread_leaks_and_counts_the_view() {
     let _g = lock();
-    let (unit, _, _) = WITH_COCOA_VIEW[0];
+    let (unit, _, _) = &WITH_COCOA_VIEW[0];
     let au = ready(unit);
     // SAFETY: `au` is live and initialized, and this runs on the main thread.
     let editor = unsafe { open_headless(&au) }
