@@ -516,21 +516,7 @@ impl Recorder<Live> {
         I: Source + Send + 'static,
         O: Sink<Sample = I::Sample> + Send + 'static,
     {
-        Self::run(PumpLoop::new(src, sink, capacity)?, park)
-    }
-
-    /// Runs an already built loop on a thread of its own, parking `park` on a
-    /// starved pass.
-    ///
-    /// # Errors
-    ///
-    /// [`RecorderError::Io`] when the OS refuses the thread.
-    pub fn run<I, O>(pump_loop: PumpLoop<I, O>, park: Duration) -> Result<Self, RecorderError>
-    where
-        I: Source + Send + 'static,
-        O: Sink<Sample = I::Sample> + Send + 'static,
-    {
-        Self::spawn(pump_loop, park)
+        Self::spawn(PumpLoop::new(src, sink, capacity)?, park)
     }
 }
 
