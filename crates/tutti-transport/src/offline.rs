@@ -334,13 +334,12 @@ impl super::RenderClock for OfflineTimeline {
     /// This timeline at its current playhead: rolling (an offline render always
     /// is), at its tempo, looping over its region, and counted from its
     /// segment's origin, so a node walking its `Env` continues this timeline's
-    /// arithmetic. There are never changes here: a loop wrap inside the block
-    /// is not a change (the graph derives it from the snapshot, as it does live
-    /// ([`Env::transport_at`](tutti_graph::Env::transport_at), and
-    /// [`Env::for_each_beat`](tutti_graph::Env::for_each_beat) frame by
-    /// frame)), and a tempo change of the map is cut by
-    /// [`render_graph`](super::RenderClock::render_graph), which takes the block's changes
-    /// from the map.
+    /// arithmetic. There are never changes here. A loop wrap inside the block
+    /// is not a change: the graph derives it from the snapshot, as it does
+    /// live, through [`Env::transport_at`](tutti_graph::Env::transport_at) and
+    /// [`Env::for_each_beat`](tutti_graph::Env::for_each_beat). A tempo change
+    /// of the map is cut by [`render_graph`](super::RenderClock::render_graph),
+    /// which takes the block's changes from the map.
     fn graph_block(
         &self,
     ) -> (
