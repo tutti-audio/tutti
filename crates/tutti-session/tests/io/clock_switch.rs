@@ -221,6 +221,8 @@ fn a_graph_that_no_longer_compiles_fails_the_switch_and_the_timer_runs_again() {
     );
     assert!(!stream.is_open(), "the card never started");
     let mut s = err.into_session();
+    assert_eq!(s.stream_spec().sample_rate, SampleRate::SR_48K);
+    assert_eq!(s.stream_spec().quantum, Some(MaxBlock::of(Samples(BLOCK))));
     wait_past(&mut s, before);
 }
 
@@ -265,12 +267,17 @@ fn a_poisoned_graph_comes_back_stopped() {
         .into_device_on(stereo(SampleRate::of(96_000.0)), driver)
         .expect_err("the graph is poisoned by the re-prepare");
     assert!(
-        matches!(err.error().error(), Error::Reprepare(_) | Error::Output(_)),
-        "{}",
+        matches!(err.error().error(), Error::SwitchNotUndone { .. }),
+        "the double failure is named: {}",
         err.error()
     );
     assert!(!stream.is_open(), "the card never started");
     let s = err.into_session();
+    assert_eq!(
+        s.stream_spec().sample_rate,
+        s.transport().sample_rate(),
+        "the host says what the graph is prepared at"
+    );
     let stopped_at = frame(&s);
     std::thread::sleep(Duration::from_millis(100));
     assert_eq!(frame(&s), stopped_at, "the timer is stopped");
@@ -475,6 +482,18 @@ fn a_card_that_fails_to_open_after_the_stop_returns_the_session_running_on_the_t
         SampleRate::SR_48K,
         "the old rate again"
     );
+    let stream = s.stream_spec();
+    assert_eq!(
+        stream.sample_rate,
+        SampleRate::SR_48K,
+        "the old stream spec"
+    );
+    assert_eq!(stream.channels, ChannelLayout::STEREO);
+    assert_eq!(
+        stream.quantum,
+        Some(MaxBlock::of(Samples(BLOCK))),
+        "the old block"
+    );
     wait_past(&mut s, before);
 }
 
@@ -488,6 +507,7 @@ fn a_timer_that_fails_to_start_returns_the_session_running_on_the_card() {
         .device(Default::default())
         .build_device_on(stereo(SampleRate::SR_48K), driver)
         .expect("builds with no device");
+    let before = live.device().spec().clone();
     let (back, again) = ManualStreamDriver::new();
     let err = live
         .into_system_clock_on(UnstartableTimer, back)
@@ -500,7 +520,11 @@ fn a_timer_that_fails_to_start_returns_the_session_running_on_the_card() {
     let mut live = err.into_session();
     assert!(live.device().is_running(), "the card runs again");
     assert_eq!(live.device().graph_rate(), SampleRate::SR_48K);
-    assert_eq!(live.device().spec().sample_rate, SampleRate::SR_48K);
+    assert_eq!(
+        *live.device().spec(),
+        before,
+        "the spec it had, block included"
+    );
     assert!(
         again.render_block(64).is_some(),
         "the card renders blocks again"
@@ -559,9 +583,13 @@ fn a_restart_report_no_update_read_is_reported_after_the_switch() {
 
 // --- Two drivers never run the graph at once ---
 
-/// Records which thread renders each block, then silence.
+/// Records which thread renders each block, then silence, and panics if two
+/// blocks are in `process` at once.
 #[derive(Clone)]
-struct Renderer(std::sync::Arc<std::sync::Mutex<Vec<std::thread::ThreadId>>>);
+struct Renderer {
+    log: std::sync::Arc<std::sync::Mutex<Vec<std::thread::ThreadId>>>,
+    inside: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
 
 impl tutti_graph::Node for Renderer {
     fn shape(&self) -> tutti_graph::Shape {
@@ -575,11 +603,17 @@ impl tutti_graph::Node for Renderer {
         _: &tutti_graph::Cx<'_>,
         mut io: tutti_graph::Io<'_>,
     ) -> tutti_graph::Status {
-        self.0
+        assert!(
+            !self.inside.swap(true, std::sync::atomic::Ordering::SeqCst),
+            "two threads in process at once"
+        );
+        self.log
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .push(std::thread::current().id());
         io.output(0).fill(0.0);
+        self.inside
+            .store(false, std::sync::atomic::Ordering::SeqCst);
         tutti_graph::Status::Modified
     }
 
@@ -665,7 +699,10 @@ fn the_old_driver_renders_its_last_block_before_the_new_one_its_first() {
     let log = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     // The timer, then a card on a thread of its own.
     let mut s = system();
-    let (node, _) = s.graph().add(ForkByClone(Renderer(log.clone())));
+    let (node, _) = s.graph().add(ForkByClone(Renderer {
+        log: log.clone(),
+        inside: Default::default(),
+    }));
     s.graph()
         .set_sources_hard(Root::output(0), [OutPort::new(node, 0)])
         .unwrap();
@@ -683,6 +720,7 @@ fn the_old_driver_renders_its_last_block_before_the_new_one_its_first() {
     });
     let (changes, back) = hand_overs(&log.lock().unwrap());
     assert_eq!((changes, back), (1, false), "timer, then card");
+    assert_eq!(live.faults().count(), 0, "no block overlapped another");
 
     // The card, then the timer.
     let mut system = live
@@ -694,6 +732,7 @@ fn the_old_driver_renders_its_last_block_before_the_new_one_its_first() {
         log.lock().unwrap().len() > at + 3
     });
     let (changes, back) = hand_overs(&log.lock().unwrap());
+    assert_eq!(system.faults().count(), 0, "nor on the way back");
     assert_eq!(
         (changes, back),
         (2, false),

@@ -144,7 +144,6 @@ fn events<C: crate::Clock>(session: &mut Session<C>) -> Vec<(&'static str, Strin
                     PoolEvent::Reloaded => "reloaded".to_owned(),
                     PoolEvent::Failed(error) => format!("failed: {error}"),
                     PoolEvent::Released => "released".to_owned(),
-                    PoolEvent::RunDropped => "run dropped".to_owned(),
                 },
             )),
             _ => None,
@@ -1048,65 +1047,129 @@ mod clock_switch {
         assert!(events(&mut live).is_empty(), "and no more");
     }
 
-    /// **A run asked with `when_loaded` is run or reported dropped by a clock
-    /// switch, never silently lost**: a run is typed to the clock it was asked
-    /// of, so the one whose entry has loaded runs before the session converts,
-    /// and the one whose entry has not is reported once as
-    /// `PoolEvent::RunDropped` and does not run, though its entry's load, in
-    /// flight, carries over and lands. (The run's closure takes the session of
-    /// the clock it was asked of; no closure can be handed another clock's.)
+    fn live_session() -> (crate::LiveSession, Spawned, tutti_engine::ManualStream) {
+        let spawned = Spawned::default();
+        let held = spawned.clone();
+        let (driver, stream) = ManualStreamDriver::new();
+        let spec = OutputSpec::new(
+            SampleRate::SR_48K,
+            ChannelLayout::STEREO,
+            tutti_buffers::SampleFormat::F32,
+        );
+        let session = Session::builder()
+            .spawn_with(move |job| held.0.lock().unwrap().push(job))
+            .device(Default::default())
+            .build_device_on(spec, driver)
+            .unwrap();
+        (session, spawned, stream)
+    }
+
+    /// **A run whose entry has loaded runs before the switch begins, with the
+    /// session as it is**: a run that reads the stream's faults or updates the
+    /// session (what a run may do) finds the clock's stream in its place, in
+    /// both directions, and the switch goes through.
     #[test]
-    fn a_run_for_a_loaded_entry_runs_and_one_for_a_pending_entry_is_reported_dropped() {
+    fn a_run_for_a_loaded_entry_runs_before_the_switch_with_the_session_intact() {
+        let ran = Arc::new(AtomicUsize::new(0));
+
         let (mut s, spawned) = system_session();
         let runs = runs();
-        s.pool((
-            entry("loaded", probe(1, &runs)),
-            entry("pending", probe(1, &runs)),
-        ))
-        .unwrap();
-        let mut jobs = spawned.take();
-        let held_back: Vec<_> = jobs.split_off(1);
-        for job in jobs {
-            job.run();
-        }
+        s.pool(entry("a", probe(1, &runs))).unwrap();
+        spawned.run_all();
         let _ = events(&mut s);
-        let ran_loaded = Arc::new(AtomicUsize::new(0));
-        let ran_pending = Arc::new(AtomicUsize::new(0));
-        let seen = Arc::clone(&ran_loaded);
-        s.when_loaded(&"loaded", move |_| {
+        let seen = Arc::clone(&ran);
+        s.when_loaded(&"a", move |s| {
+            let _ = s.faults();
+            let _ = s.update();
             seen.fetch_add(1, Ordering::SeqCst);
         })
         .unwrap();
-        let seen = Arc::clone(&ran_pending);
+        let (driver, spec) = card();
+        let _live = s
+            .into_device_on(spec, driver)
+            .unwrap_or_else(|e| panic!("switches: {}", e.error()));
+        assert_eq!(ran.load(Ordering::SeqCst), 1, "ran on the timer's session");
+
+        let (mut live, spawned, _stream) = live_session();
+        let runs = self::runs();
+        live.pool(entry("b", probe(1, &runs))).unwrap();
+        spawned.run_all();
+        let _ = events(&mut live);
+        let seen = Arc::clone(&ran);
+        live.when_loaded(&"b", move |s| {
+            let _ = s.faults();
+            let _ = s.update();
+            let _ = s.device();
+            seen.fetch_add(1, Ordering::SeqCst);
+        })
+        .unwrap();
+        let _system = live
+            .into_system_clock()
+            .unwrap_or_else(|e| panic!("switches: {}", e.error()));
+        assert_eq!(ran.load(Ordering::SeqCst), 2, "ran on the card's session");
+    }
+
+    /// **A switch is refused, before anything stops, while a run waits for an
+    /// entry that has not loaded**: the error names the keys, the session is
+    /// back on its old clock with its closure intact, and the run fires once
+    /// the entry loads. In both directions.
+    #[test]
+    fn a_switch_is_refused_while_a_run_waits_for_an_entry_that_has_not_loaded() {
+        let ran = Arc::new(AtomicUsize::new(0));
+
+        let (mut s, spawned) = system_session();
+        let runs = runs();
+        s.pool(entry("pending", probe(1, &runs))).unwrap();
+        let seen = Arc::clone(&ran);
         s.when_loaded(&"pending", move |_| {
             seen.fetch_add(1, Ordering::SeqCst);
         })
         .unwrap();
         let (driver, spec) = card();
-        let mut live = s
+        let err = s
             .into_device_on(spec, driver)
-            .unwrap_or_else(|e| panic!("switches: {}", e.error()));
-        assert_eq!(ran_loaded.load(Ordering::SeqCst), 1, "ran on the old clock");
-        let after = events(&mut live);
-        let dropped: Vec<_> = after
-            .iter()
-            .filter(|(_, what)| what == "run dropped")
-            .collect();
-        assert_eq!(
-            dropped,
-            [&("pending", "run dropped".to_owned())],
-            "{after:?}"
+            .expect_err("a run waits for the entry");
+        assert!(
+            matches!(
+                err.error().error(),
+                crate::Error::RunsPending { keys } if keys.len() == 1
+            ),
+            "{}",
+            err.error()
         );
-        assert_eq!(ran_pending.load(Ordering::SeqCst), 0, "never ran");
-        for job in held_back {
-            job.run();
-        }
-        assert_eq!(
-            events(&mut live),
-            [("pending", "loaded".to_owned())],
-            "the load itself carried over and lands"
+        let mut s = err.into_session();
+        assert_eq!(s.stream_spec().sample_rate, SampleRate::SR_48K);
+        spawned.run_all();
+        let _ = events(&mut s);
+        let _ = s.update();
+        assert_eq!(ran.load(Ordering::SeqCst), 1, "the run fires when it loads");
+        let (driver, spec) = card();
+        s.into_device_on(spec, driver)
+            .unwrap_or_else(|e| panic!("then it goes through: {}", e.error()));
+
+        let (mut live, spawned, stream) = live_session();
+        let runs = self::runs();
+        live.pool(entry("pending", probe(1, &runs))).unwrap();
+        let seen = Arc::clone(&ran);
+        live.when_loaded(&"pending", move |_| {
+            seen.fetch_add(1, Ordering::SeqCst);
+        })
+        .unwrap();
+        let err = live
+            .into_system_clock()
+            .expect_err("a run waits for the entry");
+        assert!(
+            matches!(err.error().error(), crate::Error::RunsPending { .. }),
+            "{}",
+            err.error()
         );
-        assert_eq!(ran_pending.load(Ordering::SeqCst), 0, "the run did not");
+        let mut live = err.into_session();
+        assert!(live.device().is_running(), "still on the card");
+        assert!(stream.render_block(64).is_some(), "and rendering");
+        spawned.run_all();
+        let _ = events(&mut live);
+        let _ = live.update();
+        assert_eq!(ran.load(Ordering::SeqCst), 2, "the run fires when it loads");
     }
 
     /// **A wait for the pool to load carries over a clock switch**: the load

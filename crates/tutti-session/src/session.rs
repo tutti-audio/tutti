@@ -619,6 +619,13 @@ impl Session<Offline> {
 }
 
 impl<C: RealTime> Session<C> {
+    /// The configuration of the stream that renders the session's blocks: its
+    /// rate, width and block (the callback size, or the timer's block).
+    #[must_use]
+    pub fn stream_spec(&self) -> &tutti_engine::OutputSpec {
+        crate::clock::sealed::Streaming::output_stream(&self.running).spec()
+    }
+
     /// The stream's fault record: one entry each time the clock's stream
     /// failed, a device unplugged, a callback that panicked, a timer that fell
     /// more than four blocks behind and began its schedule again. The same
@@ -661,23 +668,16 @@ impl Session<crate::Detached> {
 }
 
 impl<C: Clock> Session<C> {
-    #[cfg(feature = "device")]
     /// The same session on the clock `running` belongs to: every field moves,
     /// the clock's own state is swapped, and the old one is handed back.
     ///
     /// Jobs in flight carry over: a job's lander is typed to nothing of the
     /// clock, and lands on the converted session. The runs waiting for an
-    /// entry to load (`when_loaded`) are typed to the clock they were asked of:
-    /// those whose entry has loaded run first, the rest are reported
-    /// [`PoolEvent::RunDropped`](crate::PoolEvent::RunDropped).
-    pub(crate) fn with_clock<K: Clock>(
-        mut self,
-        running: K::Running,
-        out: &mut Vec<SessionEvent>,
-    ) -> (Session<K>, C::Running) {
-        // The runs whose entry has loaded run here, on the clock they were
-        // asked of; the rest cannot follow the session to the next.
-        self.pool_run_loaded();
+    /// entry to load (`when_loaded`) are typed to the clock they were asked of
+    /// and do not: the caller has run or refused them first, so this runs no
+    /// closure of the app's.
+    #[cfg(feature = "device")]
+    pub(crate) fn with_clock<K: Clock>(self, running: K::Running) -> (Session<K>, C::Running) {
         let Session {
             #[cfg(feature = "plugin")]
             _early_work,
@@ -740,11 +740,7 @@ impl<C: Clock> Session<C> {
             main_work,
             carried_events,
         } = self;
-        let (pool, dropped) = pool.rebind();
-        out.extend(dropped.into_iter().map(|key| SessionEvent::Pool {
-            key,
-            event: crate::PoolEvent::RunDropped,
-        }));
+        let pool = pool.rebind();
         (
             Session {
                 #[cfg(feature = "plugin")]

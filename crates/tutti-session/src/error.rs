@@ -436,6 +436,29 @@ pub enum Error {
         source: tutti_engine::RoutingError,
     },
 
+    /// A clock switch was refused before anything stopped: runs asked with
+    /// [`Session::when_loaded`](crate::Session::when_loaded) wait for these
+    /// entries, which have not loaded. A run takes the session of the clock it
+    /// was asked of and cannot follow the session to another, so the switch
+    /// waits until they have run. Nothing moved.
+    #[error("a clock switch waits for runs pending on entries not loaded: {keys:?}")]
+    RunsPending {
+        /// The entries the runs wait for, in the order asked.
+        keys: Vec<crate::PoolKey>,
+    },
+
+    /// A clock switch failed after the old stream stopped, and starting the old
+    /// clock again failed too: the session is **stopped**, on the clock it was
+    /// on. Restart it ([`Session::restart`](crate::Session::restart) on a card)
+    /// once what broke is fixed.
+    #[error("the clock switch failed ({switch}), and so did starting the old clock again ({undo})")]
+    SwitchNotUndone {
+        /// Why the switch failed.
+        switch: Box<Error>,
+        /// Why the old clock could not be started again.
+        undo: Box<Error>,
+    },
+
     /// An inlet refused its producer's ring ([`Graph::add_inlet`](crate::Graph::add_inlet)).
     #[error(transparent)]
     Inlet(#[from] InletError),

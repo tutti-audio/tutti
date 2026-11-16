@@ -189,13 +189,47 @@ impl TuttiDriver {
     /// the host back** and its stream stopped at its old spec: nothing plays,
     /// and the driver the host ran is to be started again by the caller.
     pub fn start_resolved<E: From<crate::Error>>(
-        mut host: StreamHost,
+        host: StreamHost,
         engine: AudioEngine,
         resolved: crate::Resolved,
         rerate: impl FnOnce(&OutputSpec, &Stopped<'_>) -> core::result::Result<(), E>,
     ) -> core::result::Result<Self, (StreamHost, E)> {
         let (spec, driver, opened) = resolved.into_parts();
         let AudioEngine { target, .. } = engine;
+        Self::take_over(host, spec, driver, rerate, target, opened)
+    }
+
+    /// [`start_resolved`](Self::start_resolved) with a driver of the caller's
+    /// choosing at the caller's `spec`: no device is opened, as
+    /// [`switch`](Self::switch) opens none. Behind `testing`.
+    ///
+    /// # Errors
+    /// As [`start_resolved`](Self::start_resolved).
+    #[cfg(feature = "testing")]
+    pub fn start_on<D: StreamDriver, E: From<crate::Error>>(
+        host: StreamHost,
+        spec: OutputSpec,
+        driver: D,
+        rerate: impl FnOnce(&OutputSpec, &Stopped<'_>) -> core::result::Result<(), E>,
+    ) -> core::result::Result<Self, (StreamHost, E)>
+    where
+        D::Error: Into<crate::Error>,
+    {
+        Self::take_over(host, spec, driver, rerate, None, Opened::Supplied)
+    }
+
+    /// The one start both of the above make: `driver` takes the host's stream.
+    fn take_over<D: StreamDriver, E: From<crate::Error>>(
+        mut host: StreamHost,
+        spec: OutputSpec,
+        driver: D,
+        rerate: impl FnOnce(&OutputSpec, &Stopped<'_>) -> core::result::Result<(), E>,
+        target: Option<(DeviceHost, DeviceSelector)>,
+        opened: Opened,
+    ) -> core::result::Result<Self, (StreamHost, E)>
+    where
+        D::Error: Into<crate::Error>,
+    {
         match host.restart_with(
             || Ok((spec, driver)),
             |spec, stopped| rerate(spec, stopped).map_err(Restart::Hook),
@@ -209,39 +243,26 @@ impl TuttiDriver {
         }
     }
 
-    /// [`start_resolved`](Self::start_resolved) with a driver of the caller's
-    /// choosing at the caller's `spec`: no device is opened, as
-    /// [`switch`](Self::switch) opens none. Behind `testing`.
+    /// Moves the stream, still this driver's, to `driver` at `spec`: a driver
+    /// that is not the device's (a timer). `rerate` runs between the stop and
+    /// the start, as in [`restart_with`](Self::restart_with); a failure leaves
+    /// the stream stopped at its old spec. [`into_host`](Self::into_host) hands
+    /// the stream on once the device is no longer wanted.
     ///
     /// # Errors
-    /// As [`start_resolved`](Self::start_resolved).
-    #[cfg(feature = "testing")]
-    pub fn start_on<D: StreamDriver, E: From<crate::Error>>(
-        mut host: StreamHost,
+    /// The hook's error, or what the driver's `open` reports, as `E`.
+    pub fn move_to<D: StreamDriver, E: From<StartError<D::Error>>>(
+        &mut self,
         spec: OutputSpec,
         driver: D,
         rerate: impl FnOnce(&OutputSpec, &Stopped<'_>) -> core::result::Result<(), E>,
-    ) -> core::result::Result<Self, (StreamHost, E)>
-    where
-        D::Error: Into<crate::Error>,
-    {
-        match host.restart_with(
-            || Ok((spec, driver)),
-            |spec, stopped| rerate(spec, stopped).map_err(Restart::Hook),
-        ) {
-            Ok(()) => Ok(Self {
-                host,
-                target: None,
-                opened: Opened::Supplied,
-            }),
-            Err(e) => Err((host, e.into_user())),
-        }
+    ) -> core::result::Result<(), E> {
+        self.host.restart_with(|| Ok((spec, driver)), rerate)
     }
 
-    /// The host that runs this driver's stream, to move it to another driver
-    /// ([`StreamHost::restart_with`]).
-    pub fn host_mut(&mut self) -> &mut StreamHost {
-        &mut self.host
+    /// [`StreamHost::settle`] on this driver's stream.
+    pub fn settle(&mut self, rate: tutti_types::SampleRate) {
+        self.host.settle(rate);
     }
 
     /// The stream host, taken out of the driver: the device is no longer this

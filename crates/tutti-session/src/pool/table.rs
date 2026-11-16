@@ -78,11 +78,6 @@ pub enum PoolEvent {
     /// The entry was released: undeclared, with no hold left. Its handles
     /// read [`Presence::Closed`](crate::Presence::Closed).
     Released,
-    /// A run asked with [`Session::when_loaded`](crate::Session::when_loaded)
-    /// for this entry was dropped, not run: the session changed clock before
-    /// the entry loaded, and a run is typed to the clock it was asked of.
-    /// Asked again on the session it now is, it runs once the entry has loaded.
-    RunDropped,
 }
 
 /// Why [`Session::pool`](crate::Session::pool) refused a set. It refuses the
@@ -398,34 +393,50 @@ impl<C: Clock> Pool<C> {
     }
 
     /// The same pool for a session on clock `K`: every entry, load in flight,
-    /// stage and wait carries over, and the runs waiting for an entry to load
-    /// ([`when_loaded`](Self::when_loaded)) do not: each is typed to the
-    /// session it was asked of. Their keys are returned, in the order asked,
-    /// for the caller to report; no run is dropped unreported.
+    /// stage and wait carries over. The runs waiting for an entry to load
+    /// ([`when_loaded`](Self::when_loaded)) are typed to the session they were
+    /// asked of and do not: the caller has run or refused them first
+    /// ([`waiting_runs`](Self::waiting_runs)).
     #[cfg(feature = "device")]
-    pub(crate) fn rebind<K: Clock>(self) -> (Pool<K>, Vec<PoolKey>) {
-        let dropped = self.when_loaded.iter().map(|run| run.key.clone()).collect();
-        (
-            Pool {
-                config: self.config,
-                slots: self.slots,
-                last_generation: self.last_generation,
-                flights: self.flights,
-                queue: self.queue,
-                running: self.running,
-                openings: self.openings,
-                main: self.main,
-                main_seen: self.main_seen,
-                queued: self.queued,
-                released: self.released,
-                ranks: self.ranks,
-                last_rank: self.last_rank,
-                waiters: self.waiters,
-                when_loaded: Vec::new(),
-                last_when: self.last_when,
-            },
-            dropped,
-        )
+    pub(crate) fn rebind<K: Clock>(self) -> Pool<K> {
+        debug_assert!(
+            self.when_loaded.is_empty(),
+            "no run waits when the session changes clock"
+        );
+        Pool {
+            config: self.config,
+            slots: self.slots,
+            last_generation: self.last_generation,
+            flights: self.flights,
+            queue: self.queue,
+            running: self.running,
+            openings: self.openings,
+            main: self.main,
+            main_seen: self.main_seen,
+            queued: self.queued,
+            released: self.released,
+            ranks: self.ranks,
+            last_rank: self.last_rank,
+            waiters: self.waiters,
+            when_loaded: Vec::new(),
+            last_when: self.last_when,
+        }
+    }
+
+    /// The entries the runs not yet run wait for, in the order asked: a run
+    /// whose entry is loading, failed or held. (One whose entry is loaded runs
+    /// at the next update; one whose entry was released is dropped there.)
+    #[cfg(feature = "device")]
+    pub(crate) fn waiting_runs(&self) -> Vec<PoolKey> {
+        self.when_loaded
+            .iter()
+            .filter(|run| {
+                self.slots
+                    .get(&run.key)
+                    .is_some_and(|slot| !(slot.declared && matches!(slot.state, PoolState::Loaded)))
+            })
+            .map(|run| run.key.clone())
+            .collect()
     }
 
     /// Whether a stage on the main thread will be run: the caller is on the main
