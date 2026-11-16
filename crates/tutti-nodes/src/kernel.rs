@@ -267,7 +267,7 @@ impl<K: Kernel> KernelNode<K> {
             .filter_map(|c| io.input(c)[..size].iter().rposition(|&s| s != 0.0))
             .max();
         let owed = clock.advance(current, Heard { size, last_input });
-        io.report_tail(owed.tail);
+        io.report_tail(owed.tail(t.rate));
         owed.live
     }
 

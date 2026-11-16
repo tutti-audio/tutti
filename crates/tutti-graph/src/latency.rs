@@ -71,7 +71,7 @@
 //! g.connect(InPort { node: mixer, port: 1 }, out(b));
 //! g.set_outputs([Source::Node(OutPort { node: mixer, port: 0 })]);
 //!
-//! let d = delays(&g);
+//! let d = delays(&g, SampleRate::SR_48K);
 //! // The mixer's port 1 waits 512 frames for the limiter on port 0.
 //! let wait = InputDelay { node: mixer, port: 1, feed: Feed::Node(b), by: Samples(512) };
 //! assert_eq!(d.inputs(), &[wait]);
@@ -82,17 +82,21 @@
 
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
-use tutti_types::Samples;
+use tutti_types::{SampleRate, Samples, Seconds};
 
-/// The upper bound on any single node's reported latency, in frames: 480 000.
+/// The upper bound on any single node's reported latency: ten seconds.
 ///
-/// A frame count, not a duration: [`delays`] and the editor's limits run on a
-/// topology that carries no rate, so the bound cannot follow one.
+/// A duration, so the bound follows the graph's rate: [`delays`] and
+/// [`plan`] take the rate and convert it with
+/// [`Seconds::to_samples_ceil`](tutti_types::Seconds::to_samples_ceil)
+/// (480 000 frames at 48 kHz, 960 000 at 96 kHz), and
+/// [`Editor::set_latency`](crate::Editor::set_latency) converts it at the
+/// editor's prepared rate.
 ///
 /// Reported latencies are clamped to this rather than trusted. A plugin that
 /// returns garbage would otherwise size a multi-gigabyte compensation ring.
 /// Clamping keeps a third-party bug from taking down the host.
-pub const MAX_NODE_LATENCY: Samples = Samples(48_000 * 10);
+pub const MAX_NODE_LATENCY: Seconds = Seconds::new(10.0);
 
 /// What feeds one input port, as far as latency is concerned.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -300,7 +304,7 @@ impl<N: Copy + Eq + Hash> Delays<N> {
     }
 
     /// Returns when `node`'s output is ready: its [`arrival`](Self::arrival)
-    /// plus its own latency (clamped to [`MAX_NODE_LATENCY`]).
+    /// plus its own latency (clamped to [`MAX_NODE_LATENCY`] at the rate the solve ran at).
     pub fn departure(&self, node: N) -> Samples {
         departure(node, &self.arrival, &self.latency)
     }
@@ -334,22 +338,25 @@ impl<N> Delays<N> {
 /// Computes the compensation `g` needs.
 ///
 /// Use this to report a graph's latency; [`delays`] also says where the
-/// delays go. Returns an empty result when no node reports latency — the
-/// common case. Allocates; run it on the control thread.
-pub fn plan<G: LatencyGraph>(g: &G) -> Compensation {
-    delays(g).compensation
+/// delays go. `rate` is the graph's sample rate, at which each node's latency
+/// is clamped to [`MAX_NODE_LATENCY`]. Returns an empty result when no node
+/// reports latency — the common case. Allocates; run it on the control thread.
+pub fn plan<G: LatencyGraph>(g: &G, rate: SampleRate) -> Compensation {
+    delays(g, rate).compensation
 }
 
 /// Computes the delays that align `g`, and the compensation they leave: the
 /// compiler's solve (see the module docs), as a value.
 ///
-/// Each node's reported latency is clamped to [`MAX_NODE_LATENCY`]. A cycle
-/// does not fail the walk: its nodes are compensated approximately.
-/// Allocates; run it on the control thread.
-pub fn delays<G: LatencyGraph>(g: &G) -> Delays<G::Node> {
+/// Each node's reported latency is clamped to [`MAX_NODE_LATENCY`] converted
+/// at `rate`, the graph's sample rate. A cycle does not fail the walk: its
+/// nodes are compensated approximately. Allocates; run it on the control
+/// thread.
+pub fn delays<G: LatencyGraph>(g: &G, rate: SampleRate) -> Delays<G::Node> {
+    let limit = MAX_NODE_LATENCY.to_samples_ceil(rate);
     let latency: HashMap<G::Node, Samples> = g
         .nodes()
-        .map(|node| (node, g.latency(node).min(MAX_NODE_LATENCY)))
+        .map(|node| (node, g.latency(node).min(limit)))
         .collect();
 
     if latency.is_empty() || latency.values().all(|l| l.is_zero()) {
@@ -514,6 +521,8 @@ fn topological_order<G: LatencyGraph>(g: &G, latency: &HashMap<G::Node, Samples>
 mod tests {
     use super::*;
 
+    const R: SampleRate = SampleRate::SR_48K;
+
     /// Minimal `LatencyGraph`: nodes are indices, edges name their source.
     struct Toy {
         /// Per node: its latency, and what feeds each input port.
@@ -613,14 +622,14 @@ mod tests {
     #[test]
     fn empty_graph_plans_nothing() {
         let g = Toy::new(vec![], vec![]);
-        assert_eq!(plan(&g), Compensation::default());
+        assert_eq!(plan(&g, R), Compensation::default());
     }
 
     #[test]
     fn zero_latency_graph_plans_nothing() {
         // src -> pass -> out, nobody reports latency.
         let g = Toy::new(vec![(0, vec![]), (0, vec![Some(0)])], vec![Some(1)]);
-        assert_eq!(plan(&g), Compensation::default());
+        assert_eq!(plan(&g, R), Compensation::default());
     }
 
     /// `plan` is `delays`' compensation, and both are functions of the graph
@@ -639,19 +648,19 @@ mod tests {
             vec![Some(3)],
         );
 
-        let reported = plan(&g);
+        let reported = plan(&g, R);
         assert_eq!(reported.total(), Samples(512));
-        let d = delays(&g);
+        let d = delays(&g, R);
         assert_eq!(d.compensation(), &reported);
         assert!(!d.inputs().is_empty());
-        assert_eq!(delays(&g), d, "a second pass answers the same");
+        assert_eq!(delays(&g, R), d, "a second pass answers the same");
     }
 
     #[test]
     fn single_chain_needs_no_delay() {
         // One path has nothing to align against, however slow it is.
         let g = Toy::new(vec![(0, vec![]), (512, vec![Some(0)])], vec![Some(1)]);
-        let d = delays(&g);
+        let d = delays(&g, R);
 
         assert!(d.inputs().is_empty());
         assert!(d.outputs().is_empty());
@@ -673,7 +682,7 @@ mod tests {
             ],
             vec![Some(3)],
         );
-        let d = delays(&g);
+        let d = delays(&g, R);
 
         assert_eq!(d.inputs(), &[input(3, 1, Feed::Node(1), Samples(512))]);
         assert_eq!(d.compensation().total(), Samples(512));
@@ -695,7 +704,7 @@ mod tests {
         );
 
         assert_eq!(
-            delays(&g).inputs(),
+            delays(&g, R).inputs(),
             &[input(3, 1, Feed::Node(2), Samples(512))]
         );
     }
@@ -707,7 +716,7 @@ mod tests {
             vec![(0, vec![]), (0, vec![]), (512, vec![Some(0)])],
             vec![Some(2), Some(1)],
         );
-        let d = delays(&g);
+        let d = delays(&g, R);
         let c = d.compensation();
 
         assert_eq!(d.outputs(), &[output(1, Feed::Node(1), Samples(512))]);
@@ -723,7 +732,7 @@ mod tests {
             vec![(0, vec![]), (0, vec![]), (512, vec![Some(0)])],
             vec![Some(2), Some(1)],
         );
-        assert_eq!(plan(&g).for_channel(99), Samples(0));
+        assert_eq!(plan(&g, R).for_channel(99), Samples(0));
     }
 
     #[test]
@@ -740,7 +749,7 @@ mod tests {
             ],
             vec![Some(4)],
         );
-        let d = delays(&g);
+        let d = delays(&g, R);
 
         assert_eq!(d.inputs(), &[input(4, 1, Feed::Node(3), Samples(150))]);
         assert_eq!(d.compensation().total(), Samples(150));
@@ -762,7 +771,7 @@ mod tests {
         );
 
         assert_eq!(
-            sorted_inputs(&delays(&g)),
+            sorted_inputs(&delays(&g, R)),
             vec![
                 input(3, 1, Feed::Node(1), Samples(200)),
                 input(3, 2, Feed::Node(2), Samples(300))
@@ -774,7 +783,7 @@ mod tests {
     fn unconnected_ports_contribute_no_latency() {
         //   0(512) ─▶ 1 port 0;  port 1 unconnected -> no delay for it
         let g = Toy::new(vec![(512, vec![]), (0, vec![Some(0), None])], vec![Some(1)]);
-        let d = delays(&g);
+        let d = delays(&g, R);
 
         assert!(d.inputs().is_empty());
         assert_eq!(d.compensation().total(), Samples(512));
@@ -790,12 +799,12 @@ mod tests {
             vec![Some(1)],
         );
         assert_eq!(
-            delays(&g).inputs(),
+            delays(&g, R).inputs(),
             &[input(1, 1, Feed::Outside, Samples(48))]
         );
         // Alone, a global input has nothing to align against.
         let alone = Toy::with_feeds(vec![(48, vec![Feed::Outside])], vec![Some(0)]);
-        assert!(delays(&alone).inputs().is_empty());
+        assert!(delays(&alone, R).inputs().is_empty());
     }
 
     /// A node's arrival counts its other (event, param) sources: a dry audio
@@ -809,18 +818,32 @@ mod tests {
             vec![Some(2)],
         );
         g.others[2] = vec![0];
-        let d = delays(&g);
+        let d = delays(&g, R);
         assert_eq!(d.inputs(), &[input(2, 0, Feed::Node(1), Samples(64))]);
         assert_eq!(d.compensation().total(), Samples(64));
     }
 
+    /// The bound is ten seconds at the graph's rate: 480 000 frames at
+    /// 48 kHz, 960 000 at 96 kHz. A latency at the bound is kept, one past it
+    /// is clamped to it, and the same frame count is kept at the rate that
+    /// holds it.
     #[test]
-    fn reported_latency_is_clamped() {
-        let g = Toy::new(
-            vec![(0, vec![]), (usize::MAX, vec![Some(0)])],
-            vec![Some(1)],
+    fn reported_latency_is_clamped_to_ten_seconds_at_the_rate() {
+        let one = |frames: usize| Toy::new(vec![(frames, vec![])], vec![Some(0)]);
+        for (rate, bound) in [(SampleRate::SR_48K, 480_000), (SampleRate::SR_96K, 960_000)] {
+            assert_eq!(MAX_NODE_LATENCY.to_samples_ceil(rate), Samples(bound));
+            assert_eq!(plan(&one(bound), rate).total(), Samples(bound), "{rate:?}");
+            assert_eq!(
+                plan(&one(bound + 1), rate).total(),
+                Samples(bound),
+                "{rate:?}: one past is clamped"
+            );
+        }
+        assert_eq!(
+            plan(&one(960_000), SampleRate::SR_48K).total(),
+            Samples(480_000)
         );
-        assert_eq!(plan(&g).total(), MAX_NODE_LATENCY);
+        assert_eq!(plan(&one(usize::MAX), R).total(), Samples(480_000));
     }
 
     #[test]
@@ -831,6 +854,6 @@ mod tests {
             vec![(100, vec![Some(1)]), (0, vec![Some(0)])],
             vec![Some(1)],
         );
-        assert!(!plan(&g).is_empty());
+        assert!(!plan(&g, R).is_empty());
     }
 }

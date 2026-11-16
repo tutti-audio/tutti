@@ -63,6 +63,9 @@ where
     /// its latency, so the tail excludes latency as [`Shape::tail`] asks.
     fn shape(&self) -> Shape {
         let this = &self.client;
+        // Set only from a `SampleRate` (`set_rate`, the loader's), so it is one.
+        let rate = tutti_types::SampleRate::new(this.sample_rate)
+            .expect("the client's rate is a SampleRate");
         let midi_out = u16::from(this.features.contains(Features::MIDI_OUT));
         // The plugin's figures as the control side last re-read them
         // (`poll_changes` keeps them current; nothing is dispatched to the
@@ -84,7 +87,7 @@ where
             .with_latency(latency)
             // The ceiling: the plugin's claim, raised by what a probe measured
             // (empty until a probe ran with `--measure`), never lowered.
-            .with_tail(Processing::new(tail).ceiling())
+            .with_tail(Processing::new(tail).ceiling(rate))
     }
 
     /// The rate (parked for the plugin, dispatched from the main thread; a

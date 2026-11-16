@@ -2,7 +2,6 @@
 //! past, so a node behind a latent path reads the transport its input audio
 //! was rendered at ([`Cx::transport_at`](crate::Cx::transport_at)).
 
-use crate::MAX_NODE_LATENCY;
 use tutti_types::{Frame, Latency, SampleRate, Samples};
 
 use crate::node::{Env, MAX_TRANSPORT_CHANGES, TransportPosition};
@@ -47,9 +46,6 @@ const CHECKPOINT: usize = 8_192;
 // One block's pieces (its start and every change) and the one covering the
 // frame before it always fit.
 const _: () = assert!(JUMPS > MAX_TRANSPORT_CHANGES + 1);
-// Continuous playback is exact back to `(JUMPS - 1) * CHECKPOINT` frames:
-// at least four maxed-out nodes in series.
-const _: () = assert!((JUMPS - 1) * CHECKPOINT >= 4 * MAX_NODE_LATENCY.get());
 
 /// The transport's jumps over the graph's recent past: what a node behind a
 /// latent path reads its transport from ([`Env::transport_before`],
@@ -120,9 +116,10 @@ const _: () = assert!((JUMPS - 1) * CHECKPOINT >= 4 * MAX_NODE_LATENCY.get());
 ///   inside a node's arrival, the oldest are dropped. Continuous playback
 ///   spends one checkpoint per `CHECKPOINT` frames, so with no jump at all
 ///   it is exact back to `(JUMPS - 1) * CHECKPOINT` = **2 088 960 frames**
-///   (43.5 s at 48 kHz), and clamps past that. An arrival is a sum of node
-///   latencies, each clamped to `MAX_NODE_LATENCY` (480 000), so that is
-///   four maxed-out nodes in series and some; a fifth goes past it. Jumps
+///   (43.5 s at 48 kHz, 21.8 s at 96 kHz), and clamps past that. An arrival
+///   is a sum of node latencies, each clamped to `MAX_NODE_LATENCY` (ten
+///   seconds), so at 48 kHz that is four maxed-out nodes in series and
+///   some; a fifth goes past it, and at 96 kHz the third does. Jumps
 ///   inside the arrival spend pieces too: a 10-second lookahead at 48 kHz
 ///   holds 59 checkpoints and leaves room for some 196 jumps (a burst of
 ///   seeks, or a host reporting a hand-built transport or a new tempo, a
@@ -668,7 +665,7 @@ mod tests {
     /// The bound for continuous playback, exactly: blocks of `CHECKPOINT`
     /// frames make every block start a checkpoint, so the newest 256 pieces
     /// reach back `(JUMPS - 1) * CHECKPOINT` = 2 088 960 frames from the
-    /// last block's start (at least four `MAX_NODE_LATENCY`s). That frame
+    /// last block's start (four `MAX_NODE_LATENCY`s at 48 kHz). That frame
     /// reads its block; the one before it reads the clamp (the oldest piece,
     /// unmoved).
     #[test]
@@ -676,7 +673,12 @@ mod tests {
         let block = TransportHistory::CHECKPOINT.get();
         let bound = (JUMPS as u64 - 1) * block as u64;
         assert_eq!(bound, 2_088_960);
-        assert!(bound >= 4 * MAX_NODE_LATENCY.get() as u64);
+        assert!(
+            bound
+                >= 4 * crate::MAX_NODE_LATENCY
+                    .to_samples_ceil(SampleRate::SR_48K)
+                    .get() as u64
+        );
         let mut p = Played::default();
         let mut next = counted(0.0, None);
         for b in 0..300u64 {

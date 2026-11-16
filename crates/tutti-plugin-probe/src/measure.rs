@@ -19,7 +19,7 @@
 //!    note-on at frame 0 and a note-off [`NOTE_LENGTH`] later.
 //! 4. **Render until it settles**: until the output has stayed below the floor
 //!    for [`SETTLE`] after its last frame above it (and after the note-off), or
-//!    the render budget ([`BUDGET_MARGIN`] past `MAX_NODE_TAIL`) is spent.
+//!    the render budget ([`BUDGET_MARGIN`] past `MAX_NODE_TAIL`, in time) is spent.
 //!
 //! The figures: the first frame above the floor is the latency (an onset, so a
 //! disagreement with the report is recorded and never corrected); the last is
@@ -57,8 +57,8 @@ pub const SILENCE: Seconds = Seconds(1.0);
 pub const SETTLE: Seconds = Seconds(1.0);
 
 /// What the stimulus render runs past [`tutti_graph::MAX_NODE_TAIL`]: **the render
-/// budget is `MAX_NODE_TAIL` plus this**, in frames, so it follows the graph's
-/// bound at every rate and the two cannot drift. A plugin still above the floor
+/// budget is `MAX_NODE_TAIL` plus this**, a time converted at the configuration's
+/// rate, so it follows the graph's bound at every rate and the two cannot drift. A plugin still above the floor
 /// when the budget runs out has rung past the bound, so:
 ///
 /// - an **effect** is judged by its lower bound: the last frame above the floor,
@@ -229,7 +229,7 @@ pub fn measure_at<P: Processor>(
 
     // 3 and 4. The stimulus, rendered until it settles.
     let judge_tail = matches!(subject.tail, PluginTail::None | PluginTail::Finite(_));
-    let (settle, budget) = (frames(SETTLE), MAX_NODE_TAIL.get() + frames(BUDGET_MARGIN));
+    let (settle, budget) = (frames(SETTLE), frames(MAX_NODE_TAIL + BUDGET_MARGIN));
     let note_off = subject.instrument.then(|| frames(NOTE_LENGTH));
     let mut onset = None;
     let mut last = None;

@@ -658,7 +658,7 @@ pub fn compile(
     // One solve: `crate::delays` over the checked graph. The
     // compiler places its delays itself (event and param edges included) from
     // the solve's arrivals.
-    let solved = crate::delays(graph);
+    let solved = crate::delays(graph, prepare.sample_rate());
     let arrival: Vec<Latency> = keys
         .iter()
         .map(|&k| Latency::new(solved.arrival(k)))

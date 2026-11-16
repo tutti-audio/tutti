@@ -473,11 +473,15 @@ pub(crate) fn prepare_for(
     }
 }
 
-/// `latency` clamped to what PDC compensates, as the editor clamps a latency
-/// it probes at insert.
+/// `latency` clamped to what PDC compensates at `rate`, as the editor clamps a
+/// latency it probes at insert.
 #[cfg(feature = "plugin")]
-fn clamp_latency(latency: Latency) -> Latency {
-    Latency::new(latency.samples().min(tutti_graph::MAX_NODE_LATENCY))
+fn clamp_latency(latency: Latency, rate: SampleRate) -> Latency {
+    Latency::new(
+        latency
+            .samples()
+            .min(tutti_graph::MAX_NODE_LATENCY.to_samples_ceil(rate)),
+    )
 }
 
 impl Graph {
@@ -3534,9 +3538,10 @@ impl Graph {
     pub fn latency_plan(&self) -> Compensation {
         // The bus edges as the lanes they commit to; a spec whose bus edges
         // do not lower has none to fold (the commit will say why).
+        let rate = self.editor.prepare().sample_rate();
         match self.editor.lowered() {
-            Ok(lowered) => tutti_graph::latency_plan(&lowered.spec),
-            Err(_) => tutti_graph::latency_plan(self.editor.spec()),
+            Ok(lowered) => tutti_graph::latency_plan(&lowered.spec, rate),
+            Err(_) => tutti_graph::latency_plan(self.editor.spec(), rate),
         }
     }
 
@@ -3573,7 +3578,7 @@ impl Graph {
         // probes at insert: `set_latency` refuses a figure past it, and a
         // refused one would never be retried (the poll only fires again when
         // the plugin's figure moves).
-        let latency = clamp_latency(latency);
+        let latency = clamp_latency(latency, self.editor.prepare().sample_rate());
         if self.node_latency(node) == Ok(latency.samples()) {
             return false;
         }
@@ -3592,7 +3597,7 @@ impl Graph {
     /// A node's tail ceiling moved at runtime (a plugin's tail-changed
     /// callback): hand `tail` (the ceiling its `Shape` declares now) to the
     /// editor (`Editor::set_tail`), a finite figure past what a node may
-    /// declare (`MAX_NODE_TAIL`) becoming `Unbounded`, so
+    /// declare (`MAX_NODE_TAIL` at the editor's rate) becoming `Unbounded`, so
     /// the next commit moves the plan, the export length and the silence skip
     /// to it without touching the running node. The ceiling moves at that
     /// commit, as a latency does.
@@ -3607,7 +3612,8 @@ impl Graph {
         // A finite figure past what a node may declare is `Unbounded`, never
         // clamped (a clamp would declare a ceiling shorter than the plugin
         // rings), and so never refused: nothing retries it.
-        let tail = tutti_plugin_types::Processing::new(tail).ceiling();
+        let rate = self.editor.prepare().sample_rate();
+        let tail = tutti_plugin_types::Processing::new(tail).ceiling(rate);
         if self.node_tail(node) == Ok(tail) {
             return false;
         }
@@ -3913,7 +3919,8 @@ mod tail_tests {
         );
         assert!(!g.is_edited());
 
-        let past = Tail::Finite(Samples(tutti_graph::MAX_NODE_TAIL.get() + 1));
+        let limit = tutti_graph::MAX_NODE_TAIL.to_samples_ceil(g.editor.prepare().sample_rate());
+        let past = Tail::Finite(Samples(limit.get() + 1));
         assert!(g.refresh_node_tail(node, past));
         assert_eq!(
             g.node_tail(node),

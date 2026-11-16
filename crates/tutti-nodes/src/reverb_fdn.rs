@@ -82,6 +82,8 @@ control_set! {
 /// A [`FdnBank`] and its glides, once the rate is known.
 #[derive(Clone, Debug)]
 struct Running {
+    /// The rate the bank was sized at: what a tail bound is converted at.
+    rate: SampleRate,
     bank: FdnBank,
     glides: FdnGlides,
 }
@@ -131,7 +133,7 @@ impl Kernel for FdnKernel {
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
         let bank = FdnBank::new(&self.layout, rate);
         let glides = bank.glides();
-        self.running = Some(Running { bank, glides });
+        self.running = Some(Running { rate, bank, glides });
         self.landed = false;
     }
 
@@ -163,14 +165,16 @@ impl Kernel for FdnKernel {
     }
 
     /// The bank's ceiling, or [`Tail::Unbounded`] when that is past what a graph takes as a
-    /// finite figure ([`MAX_NODE_TAIL`]): a longer ring-out is declared unbounded, not as a
+    /// finite figure ([`MAX_NODE_TAIL`] at the prepared rate): a longer ring-out is declared unbounded, not as a
     /// figure the graph would refuse or count as never decaying. The node still narrows it
     /// each block to what rings.
     fn tail(&self) -> Tail {
-        match self.running.as_ref().map(|r| r.bank.tail()) {
+        match self.running.as_ref().map(|r| (r.rate, r.bank.tail())) {
             None => Tail::Unknown,
-            Some(Tail::Finite(n)) if n > MAX_NODE_TAIL => Tail::Unbounded,
-            Some(tail) => tail,
+            Some((rate, Tail::Finite(n))) if n > MAX_NODE_TAIL.to_samples_ceil(rate) => {
+                Tail::Unbounded
+            }
+            Some((_, tail)) => tail,
         }
     }
 

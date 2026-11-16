@@ -166,7 +166,7 @@ pub enum CommitError {
         node: NodeKey,
     },
     /// A latency past what PDC compensates
-    /// (`crate::MAX_NODE_LATENCY`), refused rather than
+    /// (`crate::MAX_NODE_LATENCY` at the editor's rate), refused rather than
     /// silently clamped ([`Editor::set_latency`](crate::Editor::set_latency)).
     #[error("node {}: latency {} frames; PDC compensates at most {}", .node.0, .latency.samples().get(), .limit.samples().get())]
     LatencyTooLong {
@@ -178,7 +178,7 @@ pub enum CommitError {
         limit: Latency,
     },
     /// A finite tail past what the graph's tail figures bound
-    /// (`crate::MAX_NODE_TAIL`), refused rather than silently clamped
+    /// (`crate::MAX_NODE_TAIL` at the editor's rate), refused rather than silently clamped
     /// ([`Editor::set_tail`](crate::Editor::set_tail)).
     #[error("node {}: tail {} frames; a finite tail is at most {}", .node.0, .tail.get(), .limit.get())]
     TailTooLong {

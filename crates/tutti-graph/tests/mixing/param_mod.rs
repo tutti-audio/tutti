@@ -1027,7 +1027,7 @@ fn a_param_source_counts_toward_arrival_in_both_solves() {
     let plan = ed.base().expect("a plan");
     assert_eq!(plan.total_latency(), Latency::new(Samples(37)));
     assert_eq!(
-        tutti_graph::latency_plan(ed.spec()).total(),
+        tutti_graph::latency_plan(ed.spec(), RATE).total(),
         Samples(37),
         "the spec's own fold agrees"
     );
