@@ -493,7 +493,16 @@ impl<F: ServerSide> Served<F> {
             Notice::ParamTitlesChanged => {
                 self.events.push(BridgeMessage::PluginParamTitlesChanged);
             }
-            Notice::Reloaded => self.events.push(BridgeMessage::PluginReloaded),
+            Notice::Reloaded => {
+                // A reload may change the buses: the host is told them first,
+                // so its picture is current when it re-reads everything.
+                self.refresh_wiring(main);
+                let io = self.io_changed();
+                if matches!(io, BridgeMessage::PluginIoChanged { layout: Some(_) }) {
+                    self.events.push(io);
+                }
+                self.events.push(BridgeMessage::PluginReloaded);
+            }
             Notice::Transport(request) => {
                 self.events
                     .push(BridgeMessage::TransportRequested { request });
@@ -545,7 +554,9 @@ impl<F: ServerSide> Served<F> {
         BridgeMessage::PluginIoChanged { layout }
     }
 
-    /// Reads the plugin's wiring again into what the host is given.
+    /// Reads the plugin's wiring again into what the host is given. A plugin
+    /// with no control (lost) keeps the wiring it last had, so the host is
+    /// told no new buses for it.
     fn refresh_wiring(&mut self, main: MainThreadMarker) {
         if let Some(control) = self.lifecycle.control() {
             self.descriptor = control.info().clone();

@@ -154,7 +154,21 @@ pub struct Layout {
     pub outputs: PluginBuses,
 }
 
+/// The most buses a [`Layout`] holds in a direction and still be believed: a
+/// plugin has a handful, and a layout read off a wire is held to it.
+pub const MAX_LAYOUT_BUSES: usize = 32;
+
 impl Layout {
+    /// Whether this is a layout a plugin can have: at most
+    /// [`MAX_LAYOUT_BUSES`] buses in a direction and a width a block serves.
+    /// What a layout that came off a wire passes before it is kept.
+    #[must_use]
+    pub fn is_plausible(&self) -> bool {
+        self.inputs.len() <= MAX_LAYOUT_BUSES
+            && self.outputs.len() <= MAX_LAYOUT_BUSES
+            && self.check_width().is_ok()
+    }
+
     /// Whether every direction is within the width a block serves.
     ///
     /// # Errors

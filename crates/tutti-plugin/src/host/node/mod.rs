@@ -107,7 +107,7 @@ use std::sync::atomic::Ordering;
 use tutti_graph::{IntoNode, Node, NodeParts, Shape};
 use tutti_plugin_host::{
     InProcClient, InvalidateSink, ParameterChangeSink, PluginControls, PluginHandle, PluginNode,
-    PortLimit, Rebinder, RefreshSink, TransportSink, client_over,
+    PortLimit, PortSource, Rebinder, RefreshSink, TransportSink, client_over,
 };
 use tutti_plugin_ipc::{
     BridgeConfig, BridgeEvent, Ipc, IpcController, IpcOrigin, Launched, PluginBridge,
@@ -535,13 +535,13 @@ impl PluginClient<Bound> {
     #[must_use]
     pub fn rebinder(&self) -> Rebinder<Ipc> {
         let served = self.served.clone();
-        self.state.node.rebinder(
-            Some(PortLimit {
+        self.state.node.rebinder(PortSource::Served {
+            limit: PortLimit {
                 inputs: self.loaded.input_widths(),
                 outputs: self.loaded.output_widths(),
-            }),
-            Some(Arc::new(move || served.layout())),
-        )
+            },
+            live: Arc::new(move || served.layout()),
+        })
     }
 }
 

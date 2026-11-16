@@ -112,7 +112,7 @@ pub(crate) mod wire;
 ///   `ControlRole`) and its overview mark.
 /// - **Version 42** writes a descriptor's `version` as a `PluginVersion` (absent, text,
 ///   integer or dotted) where it was a string.
-/// - **Version 43** gave `PluginIoChanged` the buses the plugin has now, when they
+/// - **Version 43** gives `PluginIoChanged` the buses the plugin has now, when they
 ///   differ from the ones the host was last told: the host's picture of a
 ///   served plugin's ports followed none of its changes.
 pub const PROTOCOL_VERSION: u32 = 43;
@@ -242,33 +242,22 @@ mod tests {
 
     use tutti_fixtures::midi;
 
-    /// **A `PluginIoChanged` carries the buses the plugin announced over the
-    /// wire**, and none when it announced none.
+    /// **A `PluginIoChanged` with no layout is its variant tag and one `None`
+    /// byte, and one with a layout ends in what follows that `Some`.** The
+    /// encoding is the wire's: a reordered variant or a changed option is a
+    /// protocol change, and this fails until the version moves.
     #[test]
-    fn a_plugin_io_changed_carries_its_layout_over_the_wire() {
-        let layout = tutti_plugin_types::Layout {
-            inputs: vec![tutti_plugin_types::PluginBus::main(
-                tutti_types::ChannelLayout::STEREO,
-            )],
-            outputs: vec![
-                tutti_plugin_types::PluginBus::main(tutti_types::ChannelLayout::STEREO),
-                tutti_plugin_types::PluginBus::new(
-                    tutti_types::ChannelLayout::MONO,
-                    tutti_plugin_types::BusRole::Aux,
-                ),
-            ],
-        };
-        for sent in [Some(layout), None] {
-            let bytes = postcard::to_allocvec(&BridgeMessage::PluginIoChanged {
-                layout: sent.clone(),
-            })
+    fn a_plugin_io_changed_without_a_layout_is_two_bytes() {
+        let none = postcard::to_allocvec(&BridgeMessage::PluginIoChanged { layout: None })
             .expect("serialize");
-            let back: BridgeMessage = postcard::from_bytes(&bytes).expect("deserialize");
-            assert!(
-                matches!(&back, BridgeMessage::PluginIoChanged { layout } if *layout == sent),
-                "{back:?}"
-            );
-        }
+        assert_eq!(none.len(), 2, "{none:?}");
+        assert_eq!(none[1], 0, "no layout is a zero option byte");
+        let some = postcard::to_allocvec(&BridgeMessage::PluginIoChanged {
+            layout: Some(tutti_plugin_types::Layout::default()),
+        })
+        .expect("serialize");
+        assert_eq!(some[..2], [none[0], 1], "the same variant, then `Some`");
+        assert_eq!(some[2..], [0, 0], "and two empty bus lists");
     }
 
     /// Every preset frame survives the wire in both directions.

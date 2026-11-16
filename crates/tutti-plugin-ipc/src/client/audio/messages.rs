@@ -330,7 +330,8 @@ pub(super) struct Unsolicited {
     /// Transport requests, oldest first. Every one counts, so none is merged:
     /// past [`UNSOLICITED_TRANSPORT`] the oldest is dropped.
     transport: std::collections::VecDeque<tutti_plugin_types::TransportRequest>,
-    /// Parameter events dropped since the last [`take_dropped`](Self::take_dropped).
+    /// Events dropped (a parameter edit past the queue, a layout no plugin
+    /// has) since the last [`take_dropped`](Self::take_dropped).
     dropped: u64,
 }
 
@@ -435,9 +436,15 @@ impl Unsolicited {
     }
 
     /// The buses a `PluginIoChanged` carried; a later one replaces an earlier
-    /// one not yet drained.
+    /// one not yet drained. A layout no plugin has
+    /// ([`is_plausible`](tutti_plugin_types::Layout::is_plausible)) is dropped
+    /// and counted with the dropped events.
     pub(super) fn io_layout(&mut self, layout: tutti_plugin_types::Layout) {
-        self.io_layout = Some(layout);
+        if layout.is_plausible() {
+            self.io_layout = Some(layout);
+        } else {
+            self.dropped += 1;
+        }
     }
 
     /// A resync request; a second of the same kind adds nothing.
@@ -548,6 +555,37 @@ mod tests {
         );
         inbox.resync(ResyncKind::Io);
         assert_eq!(labels(&mut inbox), ["Io"]);
+    }
+
+    /// **A layout no plugin has is dropped and counted, and does not replace
+    /// the one held.**
+    #[test]
+    fn an_implausible_layout_is_dropped_and_counted() {
+        use tutti_plugin_types::{Layout, MAX_LAYOUT_BUSES, PluginBus};
+        let stereo = || PluginBus::main(tutti_types::ChannelLayout::STEREO);
+        let good = Layout {
+            inputs: vec![stereo()],
+            outputs: vec![stereo()],
+        };
+        let mut inbox = Unsolicited::new();
+        inbox.io_layout(good.clone());
+        inbox.io_layout(Layout {
+            inputs: vec![
+                PluginBus::main(tutti_types::ChannelLayout::from_count(0));
+                MAX_LAYOUT_BUSES + 1
+            ],
+            outputs: Vec::new(),
+        });
+        inbox.io_layout(Layout {
+            inputs: vec![stereo(); 9],
+            outputs: Vec::new(),
+        });
+        assert_eq!(inbox.take_dropped(), 2);
+        let heard: Vec<BridgeEvent> = inbox.drain().collect();
+        assert!(
+            matches!(heard.as_slice(), [BridgeEvent::IoLayout(l)] if *l == good),
+            "{heard:?}"
+        );
     }
 
     /// **A request to be processed again is heard once, after everything the
