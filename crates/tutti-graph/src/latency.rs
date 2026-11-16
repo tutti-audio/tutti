@@ -54,7 +54,7 @@
 //! ```
 //! use tutti_graph::{Edge, Feed, InPort, InputDelay, NodeSpec, OutPort, Source};
 //! use tutti_graph::delays;
-//! use tutti_types::{ChannelLayout, Samples};
+//! use tutti_types::{ChannelLayout, SampleRate, Samples};
 //! use tutti_graph::{NodeKey, Topology};
 //!
 //! let (a, limiter, b, mixer) = (NodeKey(1), NodeKey(2), NodeKey(3), NodeKey(4));
