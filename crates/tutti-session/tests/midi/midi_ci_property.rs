@@ -927,3 +927,128 @@ fn a_subscribe_to_a_resource_the_entry_forbids_is_not_sent() {
     );
     assert!(wire.peer.asked.is_empty());
 }
+
+/// A peer that leaves MIDI-CI takes its Subscriptions with it: the lease reads
+/// `EndedByPeer`, noticed with its own id, and the peer is no longer listed.
+#[test]
+fn a_peer_that_leaves_ends_its_leases_as_ended_by_the_peer() {
+    let mut wire = Wire::new(subscribable());
+    let lease = wire.subscribed(&PeResource::LocalOn);
+    let muid = wire.peer.muid;
+    for ump in (CiMessage::InvalidateMuid {
+        header: CiHeader::new(muid),
+        target: muid,
+    })
+    .packets(MidiGroup::FIRST)
+    {
+        let now = wire.now();
+        assert!(wire.fake.send_input(EndpointId::from_raw(RAW), ump, now));
+    }
+    wire.run(10);
+    assert_eq!(
+        lease.presence(),
+        Presence::Lost(SubscriptionCause::EndedByPeer)
+    );
+    assert!(wire.changed.contains(&(lease.id(), ResourceFact::Presence)));
+    assert!(wire.port.info().resource_peers().is_empty());
+}
+
+/// A lease whose port was unplugged stays lost across the device's return, with its
+/// one notice, and the returned port takes a new Subscription.
+#[test]
+fn a_lease_lost_with_its_port_stays_lost_across_a_replug() {
+    let mut wire = Wire::new(subscribable());
+    let lease = wire.subscribed(&PeResource::LocalOn);
+    wire.fake.unplug(EndpointId::from_raw(RAW));
+    wire.run(3);
+    assert_eq!(
+        lease.presence(),
+        Presence::Lost(SubscriptionCause::PortLost)
+    );
+    plug(&wire.fake, RAW, "Wire", PortDirection::Duplex);
+    wire.run(200);
+    assert_eq!(
+        lease.presence(),
+        Presence::Lost(SubscriptionCause::PortLost)
+    );
+    let notices = wire
+        .changed
+        .iter()
+        .filter(|c| **c == (lease.id(), ResourceFact::Presence))
+        .count();
+    assert_eq!(notices, 1);
+    let again = wire.subscribed(&PeResource::LocalOn);
+    assert_eq!(again.presence(), Presence::Live);
+}
+
+/// A Get after a `notify` that the peer never answers leaves the data held out of
+/// date, so the record drops it rather than read it as current.
+#[test]
+fn a_sync_that_fails_clears_the_data_the_record_holds() {
+    let mut wire = Wire::new(subscribable());
+    let _lease = wire.subscribed(&PeResource::DeviceInfo);
+    assert!(wire.held(&PeResource::DeviceInfo).is_some());
+    wire.peer.reply = Reply::Silent;
+    let long = "x".repeat(600);
+    let now = wire.now();
+    let actions = wire
+        .peer
+        .responder
+        .publish(
+            &Wire::target(PeResource::DeviceInfo),
+            device_info(&long),
+            now,
+        )
+        .expect("publishes");
+    wire.peer.send(&wire.fake, actions, now);
+    wire.run(20);
+    assert!(
+        wire.held(&PeResource::DeviceInfo).is_some(),
+        "the old data is held while the Get is out"
+    );
+    wire.step(PE_TIMEOUT.as_millis() as u64 + 100);
+    wire.run(5);
+    assert_eq!(wire.held(&PeResource::DeviceInfo), None);
+}
+
+/// The end of a Subscription is a request like another: past the peer's count it
+/// waits for room and then goes out.
+#[test]
+fn an_unsubscribe_past_the_peers_simultaneous_requests_waits_and_goes_out() {
+    let mut wire = Wire::taking(subscribable(), 1);
+    let lease = wire.subscribed(&PeResource::LocalOn);
+    wire.peer.reply = Reply::Silent;
+    let get = wire.listed(&PeResource::DeviceInfo).fetch();
+    wire.run(10);
+    drop(lease);
+    wire.run(10);
+    assert_ne!(wire.peer.asked.last(), Some(&Asked::Unsubscribe));
+    wire.peer.reply = Reply::Serve;
+    wire.step(PE_TIMEOUT.as_millis() as u64 + 100);
+    wire.run(60);
+    assert_eq!(wire.result(&get), Some(Err(PeerError::TimedOut)));
+    assert_eq!(wire.peer.asked.last(), Some(&Asked::Unsubscribe));
+    assert_eq!(wire.peer.responder.subscriptions().count(), 0);
+}
+
+/// A lease that outlives its released port drops without sending and without
+/// hanging.
+#[test]
+fn a_lease_dropped_after_its_port_was_released_sends_nothing() {
+    let mut wire = Wire::new(subscribable());
+    let lease = wire.subscribed(&PeResource::LocalOn);
+    wire.s
+        .pool(Vec::<
+            tutti_session::Declared<&str, tutti_session::MidiInputEntry>,
+        >::new())
+        .expect("declares nothing");
+    wire.run(5);
+    assert_eq!(
+        lease.presence(),
+        Presence::Lost(SubscriptionCause::PortLost)
+    );
+    let asked = wire.peer.asked.len();
+    drop(lease);
+    wire.run(5);
+    assert_eq!(wire.peer.asked.len(), asked);
+}

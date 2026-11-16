@@ -45,6 +45,17 @@ pub(super) fn responder(own: Muid, store: Arc<Mutex<ResourceStore>>) -> Resource
     ResourceResponder::sharing(own, RESPONDER, store)
 }
 
+/// Which side of a device a Property Exchange message is for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Route {
+    /// The Responder and every Initiator: each keeps or ignores it.
+    Both,
+    /// The Initiators alone.
+    Initiators,
+    /// The Responder alone.
+    Responder,
+}
+
 impl Member {
     /// Whether `muid` declared Property Exchange in its Discovery Reply.
     fn declares_property_exchange(&self, muid: Muid) -> bool {
@@ -98,6 +109,7 @@ impl Member {
     /// goes.
     pub(super) fn forget_property(&mut self, muid: Muid, changes: &mut CiChanges) {
         self.server.forget(muid);
+        self.updates.retain(|(from, _)| *from != muid);
         if self.properties.remove(&muid).is_some() {
             changes
                 .properties
@@ -145,35 +157,40 @@ impl Member {
         {
             sends.push((self.group, nak));
         }
-        if !self.is_update(decoded) {
+        let route = self.route_of(decoded);
+        if route != Route::Initiators {
             let served = self.server.on_message(decoded, now);
             self.carry_out_served(served, sends, changes);
         }
-        let heard: Vec<_> = self
-            .properties
-            .iter_mut()
-            .map(|(&muid, initiator)| (muid, initiator.on_message(decoded, now)))
-            .collect();
+        let heard: Vec<_> = if route == Route::Responder {
+            Vec::new()
+        } else {
+            self.properties
+                .iter_mut()
+                .map(|(&muid, initiator)| (muid, initiator.on_message(decoded, now)))
+                .collect()
+        };
         for (muid, actions) in heard {
             self.carry_out_property(muid, actions, sends, changes);
         }
     }
 
-    /// Whether `decoded` is a message of a Subscription the Initiator of its peer
-    /// holds: an update, which only a Responder sends (M2-103 §11.1), or the end
-    /// of a Subscription the Initiator holds. It is the Initiator's alone: the
-    /// Responder serves what peers ask of the store, and would refuse it.
-    fn is_update(&mut self, decoded: &Decoded) -> bool {
+    /// Who a message is for. A Subscription inquiry is the Initiator's when it is
+    /// an update, which only a Responder sends (M2-103 §11.1), or the end of a
+    /// Subscription the Initiator of its peer holds, and every chunk of such a
+    /// message follows its first; any other is the Responder's, which serves what
+    /// peers ask of the store. Each side would refuse what is the other's.
+    fn route_of(&mut self, decoded: &Decoded) -> Route {
         let Decoded::Message(CiMessage::PropertyExchange {
             header,
             message: PeCiMessage::Chunk { kind, chunk },
             ..
         }) = decoded
         else {
-            return false;
+            return Route::Both;
         };
         if *kind != PeMessageKind::SUBSCRIPTION_INQUIRY {
-            return false;
+            return Route::Both;
         }
         let source = header.source;
         let key = (source, chunk.request_id());
@@ -197,7 +214,11 @@ impl Member {
         if owned && !last {
             self.updates.push(key);
         }
-        owned
+        if owned {
+            Route::Initiators
+        } else {
+            Route::Responder
+        }
     }
 
     /// Ends every wait of the Responder and the Initiators that has run out.

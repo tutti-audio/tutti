@@ -2399,6 +2399,179 @@ fn a_subscription_starts_and_ends_through_the_session() {
     assert_eq!(far.resp.subscriptions().count(), 0);
 }
 
+/// The statuses of the Subscription replies the session sent.
+fn subscription_replies(wire: &Wire) -> Vec<tutti_midi_device::PeStatus> {
+    use tutti_midi_device::{PeHeader, PeMessageKind};
+    ci_sent(wire)
+        .into_iter()
+        .filter_map(|(_, message)| match message {
+            CiMessage::PropertyExchange {
+                message: PeCiMessage::Chunk { kind, chunk },
+                ..
+            } if kind == PeMessageKind::SUBSCRIPTION_REPLY => {
+                match PeHeader::parse(chunk.header()) {
+                    Ok(PeHeader::Reply(reply)) => Some(reply.status),
+                    _ => None,
+                }
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// A Subscription inquiry of the peer: a header and its data, in `total` chunks
+/// of which this is the `at`th.
+fn subscription_chunk(
+    ours: Muid,
+    request: u8,
+    total: u16,
+    at: u16,
+    header: &str,
+    data: &str,
+) -> CiMessage {
+    use tutti_midi_device::{
+        ChunkNo, ChunkPosition, ChunkTotal, PeChunk, PeMessageKind, PeRequestId,
+    };
+    CiMessage::PropertyExchange {
+        header: CiHeader::new(peer()),
+        to: ours,
+        message: PeCiMessage::Chunk {
+            kind: PeMessageKind::SUBSCRIPTION_INQUIRY,
+            chunk: PeChunk::new(
+                PeRequestId::of(request),
+                ChunkTotal::Known(ChunkNo::of(total)),
+                ChunkPosition::Number(ChunkNo::of(at)),
+                header.as_bytes().to_vec(),
+                data.as_bytes().to_vec(),
+            )
+            .expect("a chunk"),
+        },
+    }
+}
+
+/// A subscribed far end whose Subscription the session's Initiator holds.
+fn held_subscription() -> (Wire, Muid, Far, tutti_midi_device::SubscribeId) {
+    let (mut wire, ours, mut far) = ready_property_peer(subscribable());
+    let get = ResourceGet::new(ResourceTarget::new(PeResource::LocalOn).unwrap());
+    let all = ask_and_pump(&mut wire, &mut far, PropertyCall::Subscribe(get), 300);
+    let id = property_answers(&all)
+        .into_iter()
+        .find_map(|a| match a {
+            Answer::Subscribed { subscribe_id, .. } => Some(subscribe_id.clone()),
+            _ => None,
+        })
+        .expect("a Subscription started");
+    (wire, ours, far, id)
+}
+
+/// M2-103 section 11.1: an update of a Subscription the session holds is answered
+/// once, by its Initiator, with 200; the Responder, which would refuse it as
+/// something only a Responder sends, hears nothing of it.
+#[test]
+fn an_update_of_a_held_subscription_is_answered_once_with_200_and_not_by_the_responder() {
+    let (mut wire, _, mut far, _) = held_subscription();
+    let _ = ci_sent(&wire);
+    let now = wire.at(600);
+    let target = ResourceTarget::new(PeResource::LocalOn).unwrap();
+    let actions = far
+        .resp
+        .publish(&target, PeData::LocalOn(PeLocalOn(false)), now)
+        .expect("publishes");
+    for action in actions {
+        if let tutti_midi_device::ResponderAction::Send(message) = action {
+            say(&wire, GROUP_0, &message, 600);
+        }
+    }
+    let _ = polled(&mut wire, 610);
+    assert_eq!(
+        subscription_replies(&wire),
+        [tutti_midi_device::PeStatus::Ok]
+    );
+}
+
+/// An update in several chunks is the Initiator's from its first chunk to its last:
+/// the session answers it once, with 200, and the Responder says nothing for any
+/// chunk.
+#[test]
+fn a_chunked_update_is_answered_once_by_the_initiator_and_not_by_the_responder() {
+    let (mut wire, ours, _far, id) = held_subscription();
+    let _ = ci_sent(&wire);
+    let header = format!(r#"{{"command":"full","subscribeId":"{}"}}"#, id.as_str());
+    say(
+        &wire,
+        GROUP_0,
+        &subscription_chunk(ours, 9, 2, 1, &header, "tr"),
+        600,
+    );
+    let _ = polled(&mut wire, 610);
+    assert!(
+        subscription_replies(&wire).is_empty(),
+        "nothing answers the first of two chunks"
+    );
+    say(
+        &wire,
+        GROUP_0,
+        &subscription_chunk(ours, 9, 2, 2, "", "ue"),
+        620,
+    );
+    let _ = polled(&mut wire, 630);
+    assert_eq!(
+        subscription_replies(&wire),
+        [tutti_midi_device::PeStatus::Ok]
+    );
+}
+
+/// M2-103 section 11.3: the End of a Subscription the session holds, sent by the
+/// peer, reaches the Initiator, which reports it and answers 200; the Responder
+/// does not answer it as the end of a Subscription it never had.
+#[test]
+fn the_peers_end_of_a_held_subscription_reaches_the_initiator() {
+    let (mut wire, _, mut far, id) = held_subscription();
+    let _ = ci_sent(&wire);
+    let now = wire.at(600);
+    for action in far.resp.end_subscription(&id, now) {
+        if let tutti_midi_device::ResponderAction::Send(message) = action {
+            say(&wire, GROUP_0, &message, 600);
+        }
+    }
+    let all = polled(&mut wire, 610);
+    let ended = property_events(&all).into_iter().any(|c| {
+        matches!(c, PropertyChange::Event(e)
+            if matches!(**e, ResourceEvent::SubscriptionEnded { .. }))
+    });
+    assert!(ended, "the Initiator reported the end");
+    assert_eq!(
+        subscription_replies(&wire),
+        [tutti_midi_device::PeStatus::Ok]
+    );
+}
+
+/// The End of a Subscription the session does not hold is the Responder's: it
+/// answers it 404, as it does the end of a Subscription it never started.
+#[test]
+fn the_end_of_an_unheld_subscription_reaches_the_responder_and_is_answered_404() {
+    let (mut wire, ours, _far, _) = held_subscription();
+    let _ = ci_sent(&wire);
+    say(
+        &wire,
+        GROUP_0,
+        &subscription_chunk(
+            ours,
+            11,
+            1,
+            1,
+            r#"{"command":"end","subscribeId":"unheld"}"#,
+            "",
+        ),
+        600,
+    );
+    let _ = polled(&mut wire, 610);
+    assert_eq!(
+        subscription_replies(&wire),
+        [tutti_midi_device::PeStatus::NotFound]
+    );
+}
+
 /// A call the peer's ResourceList does not allow is refused when it is started,
 /// with the reason, and nothing is sent.
 #[test]

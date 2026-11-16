@@ -9,12 +9,16 @@ use std::sync::Arc;
 
 use tutti_midi_device::{
     DeviceId, Muid, PeData, PeJson, PeResource, PeResourceList, ResourceGet, ResourceTarget,
+    SubscribeId,
 };
 use tutti_midi_hardware::test_support::property_peer;
 use tutti_midi_hardware::{PeerId, PropertyCall};
 use tutti_ump::MidiGroup;
 
-use super::{Ended, GetProperty, PeFailure, PeerError, Pending, PropertySlot, Slot};
+use super::{
+    Ended, GetProperty, PeFailure, PeerError, Pending, PortLink, PropertySlot, Slot, Subscribe,
+    Subscription,
+};
 use crate::job::{LandedQueue, Ticket};
 use crate::peer::ResourceIds;
 
@@ -172,10 +176,40 @@ fn a_pending_that_ends_as_disconnected_lands_its_property_calls_disconnected() {
             tickets: vec![ticket],
         }));
     }
-    pending.end(Ended::Disconnected, &mut Vec::new());
+    pending.end(Ended::Disconnected);
     let mut landed: Vec<_> = queue.lock().unwrap().drain(..).collect();
     for job in &jobs {
         let result = landed.iter_mut().find_map(|l| l.take(job));
         assert_eq!(result, Some(Err(PeerError::Disconnected)));
     }
+}
+
+/// A lease that is still live when its job is dropped ends its Subscription as it
+/// drops, which lands a job on the same queue: the drop of the job discards it with
+/// the queue's lock released. A lock held across the discard hangs this test.
+#[test]
+fn dropping_a_job_whose_landed_lease_is_live_does_not_deadlock() {
+    let queue: LandedQueue = Arc::default();
+    let link = PortLink::new(std::sync::Weak::new(), Arc::clone(&queue));
+    let peer = property_peer(
+        device_id(),
+        MidiGroup::FIRST,
+        Muid::of(0x0012_3456),
+        PeResourceList::new(),
+    );
+    let ask = peer.ask(PropertyCall::Subscribe(ResourceGet::new(
+        ResourceTarget::new(PeResource::LocalOn).unwrap(),
+    )));
+    let (job, ticket) = Ticket::<Subscribe>::new(&queue);
+    let (lease, _held) = Subscription::new(
+        ResourceIds::new().mint(),
+        link,
+        &ask,
+        PeResource::LocalOn,
+        SubscribeId::new("s1").expect("an id"),
+    );
+    ticket.land(Ok(lease));
+    assert_eq!(queue.lock().unwrap().len(), 1, "the lease is in the queue");
+    drop(job);
+    assert!(queue.lock().unwrap().is_empty());
 }

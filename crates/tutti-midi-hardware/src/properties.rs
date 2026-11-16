@@ -17,8 +17,9 @@
 //! session.
 //!
 //! A call's end is an [`Answer`](crate::Answer) ([`Answer::Got`](crate::Answer::Got),
-//! [`Answer::Set`](crate::Answer::Set), [`Answer::Subscribed`](crate::Answer::Subscribed)); a call the Initiator refuses or a peer lost
-//! before it starts is [`Answer::PropertyNotSent`](crate::Answer::PropertyNotSent) or
+//! [`Answer::Set`](crate::Answer::Set),
+//! [`Answer::Subscribed`](crate::Answer::Subscribed)); a call the Initiator refuses
+//! or a peer lost before it starts is [`Answer::PropertyNotSent`](crate::Answer::PropertyNotSent) or
 //! [`Answer::PropertyLost`](crate::Answer::PropertyLost).
 
 use std::num::NonZeroU32;

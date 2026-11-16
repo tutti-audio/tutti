@@ -531,11 +531,13 @@ pub(crate) fn listed_peer(info: &crate::MidiInputInfo, ask: &PropertyAsk) -> boo
 /// entry as it was listed.
 fn listing(entry: &ResourceEntry) -> impl FnOnce(&crate::MidiInputInfo, &PropertyAsk) -> bool + '_ {
     move |info, ask| {
-        info.resource_peers()
-            .iter()
-            .map(ResourcePeer::peer)
-            .find(|peer| peer.group() == ask.peer().group() && peer.muid() == ask.peer().muid())
-            .is_some_and(|peer| peer.resources().entry(entry.resource()) == Some(entry))
+        listed_peer(info, ask)
+            && info
+                .resource_peers()
+                .iter()
+                .map(ResourcePeer::peer)
+                .find(|peer| peer.group() == ask.peer().group() && peer.muid() == ask.peer().muid())
+                .is_some_and(|peer| peer.resources().entry(entry.resource()) == Some(entry))
     }
 }
 
@@ -1002,6 +1004,9 @@ impl Pending {
         resource: &PeResource,
         subscribe_id: &tutti_midi_device::SubscribeId,
     ) {
+        // The slot is gone only when the peer's calls ended (it was lost, or its
+        // port closed), and a Subscription lives in the peer's Initiator, which
+        // goes with it: there is no Subscription left to end.
         let Some(at) = self.sent_call(peer, |s| {
             matches!(s, PropertySlot::Subscribe(_)) && s.ask().call().resource() == Some(resource)
         }) else {
@@ -1026,12 +1031,7 @@ impl Pending {
     }
 
     /// What a Subscription's peer sent, or the Initiator found, of its data.
-    pub(crate) fn event(
-        &mut self,
-        peer: PeerId,
-        event: &tutti_midi_device::ResourceEvent,
-        out: &mut Vec<SessionEvent>,
-    ) {
+    pub(crate) fn event(&mut self, peer: PeerId, event: &tutti_midi_device::ResourceEvent) {
         use tutti_midi_device::ResourceEvent;
         match event {
             ResourceEvent::Updated {
@@ -1042,7 +1042,7 @@ impl Pending {
                 self.subs.update(peer, subscribe_id, None);
             }
             ResourceEvent::SubscriptionEnded { subscribe_id, .. } => {
-                self.subs.ended_by_peer(peer, subscribe_id, out);
+                self.subs.ended_by_peer(peer, subscribe_id);
             }
             _ => {}
         }
@@ -1053,6 +1053,11 @@ impl Pending {
     pub(crate) fn take_changed(&mut self) -> bool {
         self.subs.prune();
         self.subs.take_dirty()
+    }
+
+    /// The notices of the leases that ended since the last call.
+    pub(crate) fn take_notices(&mut self) -> Vec<SessionEvent> {
+        self.subs.take_notices()
     }
 
     /// What `peer`'s Subscriptions hold of its Resources.
@@ -1089,9 +1094,8 @@ impl Pending {
     }
 
     /// The peer's Property Exchange went with it: its calls end.
-    pub(crate) fn lose_properties(&mut self, peer: PeerId, out: &mut Vec<SessionEvent>) {
-        self.subs
-            .lose(Some(peer), SubscriptionCause::EndedByPeer, out);
+    pub(crate) fn lose_properties(&mut self, peer: PeerId) {
+        self.subs.lose(Some(peer), SubscriptionCause::EndedByPeer);
         let (gone, kept) = std::mem::take(&mut self.properties)
             .into_iter()
             .partition(|s| s.peer() == peer);
@@ -1102,8 +1106,8 @@ impl Pending {
     }
 
     /// Every request ends as `why`.
-    pub(crate) fn end(&mut self, why: Ended, out: &mut Vec<SessionEvent>) {
-        self.subs.lose(None, SubscriptionCause::PortLost, out);
+    pub(crate) fn end(&mut self, why: Ended) {
+        self.subs.lose(None, SubscriptionCause::PortLost);
         for slot in self.switches.drain(..) {
             end_slot(slot, || Err(why.error()));
         }

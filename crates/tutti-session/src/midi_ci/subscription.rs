@@ -171,6 +171,8 @@ struct Held {
 #[derive(Default)]
 pub(crate) struct Subscriptions {
     held: Vec<Held>,
+    /// The notices of leases that ended, for the session to report.
+    notices: Vec<SessionEvent>,
     /// Whether the record changed since it was last read for the port's info.
     dirty: bool,
 }
@@ -220,24 +222,14 @@ impl Subscriptions {
     }
 
     /// The Subscription `id` was ended by the peer: its lease reads it, once.
-    pub(crate) fn ended_by_peer(
-        &mut self,
-        peer: PeerId,
-        id: &SubscribeId,
-        out: &mut Vec<SessionEvent>,
-    ) {
+    pub(crate) fn ended_by_peer(&mut self, peer: PeerId, id: &SubscribeId) {
         if let Some(lease) = self.remove(peer, id) {
-            lose(&lease, SubscriptionCause::EndedByPeer, out);
+            lose(&lease, SubscriptionCause::EndedByPeer, &mut self.notices);
         }
     }
 
     /// Every Subscription of `peer` (all when `None`) ends as `cause`.
-    pub(crate) fn lose(
-        &mut self,
-        peer: Option<PeerId>,
-        cause: SubscriptionCause,
-        out: &mut Vec<SessionEvent>,
-    ) {
+    pub(crate) fn lose(&mut self, peer: Option<PeerId>, cause: SubscriptionCause) {
         let (gone, kept) = std::mem::take(&mut self.held)
             .into_iter()
             .partition(|h| peer.is_none_or(|p| h.peer == p));
@@ -245,9 +237,14 @@ impl Subscriptions {
         self.dirty |= !gone.is_empty();
         for held in gone {
             if let Some(lease) = held.lease.upgrade() {
-                lose(&lease, cause, out);
+                lose(&lease, cause, &mut self.notices);
             }
         }
+    }
+
+    /// The notices of the leases that ended since the last call.
+    pub(crate) fn take_notices(&mut self) -> Vec<SessionEvent> {
+        std::mem::take(&mut self.notices)
     }
 
     /// Forgets what the dropped leases held.
@@ -284,6 +281,11 @@ fn lose(lease: &Lease, cause: SubscriptionCause, out: &mut Vec<SessionEvent>) {
 impl ResourcePeer {
     /// The Property Data of `resource` as a live [`Subscription`] keeps it, or
     /// `None` while none holds it (before its first Get, after it ended).
+    ///
+    /// After a `notify`, or an update that does not decode, the session Gets the
+    /// Resource, and this reads the data held before until that Get lands or
+    /// times out (an `Updated` replaces it, a failed Get clears it): the window is
+    /// bounded by the Get's timeout.
     #[must_use]
     pub fn property(&self, resource: &super::ListedResource) -> Option<&PeData> {
         self.held

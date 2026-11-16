@@ -363,7 +363,12 @@ impl InputShared {
             Gate::Open => None,
         };
         match refused {
-            Some(why) => ticket.land(Err(why.error())),
+            Some(why) => {
+                // The job lands, and takes the landed queue's lock, with the
+                // inbox's lock released.
+                drop(inbox);
+                ticket.land(Err(why.error()));
+            }
             None => inbox.queue.push(make(request, ticket)),
         }
     }
@@ -809,6 +814,8 @@ pub(crate) struct Ports {
     inputs: Vec<InputPort>,
     outputs: Vec<OutputPort>,
     retiring: Vec<Retiring>,
+    /// The notices of leases whose port went, for the next step to report.
+    notices: Vec<SessionEvent>,
 }
 
 impl std::fmt::Debug for Ports {
@@ -893,8 +900,7 @@ impl Drop for InputPort {
     /// The session ended: the requests its handles queued or waited on end, and
     /// a handle that outlives it ends what it asks at the call.
     fn drop(&mut self) {
-        // The session is gone: nothing reads the leases' notices.
-        self.end_requests(Gate::Away, Ended::Disconnected, &mut Vec::new());
+        self.end_requests(Gate::Away, Ended::Disconnected);
     }
 }
 
@@ -902,9 +908,9 @@ impl InputPort {
     /// Every request of the port, queued or sent, ends as `why`, and the port
     /// takes none until its device is open again: for good with
     /// [`Gate::Released`].
-    fn end_requests(&mut self, gate: Gate, why: Ended, out: &mut Vec<SessionEvent>) {
+    fn end_requests(&mut self, gate: Gate, why: Ended) {
         self.shared.shut(gate, why);
-        self.pending.end(why, out);
+        self.pending.end(why);
     }
 
     /// Whether the entry that made this port still holds it.
@@ -1035,7 +1041,6 @@ impl Ports {
         at: usize,
         io: &mut MidiSession,
         graph: &mut crate::graph::Graph,
-        out: &mut Vec<SessionEvent>,
     ) {
         let port = &mut self.inputs[at];
         if let Some(id) = port.open.take() {
@@ -1048,7 +1053,7 @@ impl Ports {
         port.epochs.depart();
         port.controls.clear_mpe_profiles();
         // The device's peers went with its connection.
-        port.end_requests(Gate::Away, Ended::Disconnected, out);
+        port.end_requests(Gate::Away, Ended::Disconnected);
     }
 
     /// The step of the update's `Phase::Poll` for the ports: retires those whose
@@ -1064,7 +1069,7 @@ impl Ports {
         out: &mut Vec<SessionEvent>,
     ) -> Edits {
         let mut edits = Edits::default();
-        edits |= self.retire(io, graph, out);
+        edits |= self.retire(io, graph);
         for event in events {
             out.push(MidiReport::of_device(event.clone()).into());
             match event {
@@ -1084,12 +1089,7 @@ impl Ports {
 
     /// Ends the ports whose entry was released or swapped, and takes out the
     /// ingest nodes that have released what their devices held.
-    fn retire(
-        &mut self,
-        io: &mut MidiSession,
-        graph: &mut crate::graph::Graph,
-        out: &mut Vec<SessionEvent>,
-    ) -> Edits {
+    fn retire(&mut self, io: &mut MidiSession, graph: &mut crate::graph::Graph) -> Edits {
         let mut edits = Edits::default();
         let mut at = 0;
         while at < self.inputs.len() {
@@ -1097,9 +1097,10 @@ impl Ports {
                 at += 1;
                 continue;
             }
-            self.inputs[at].end_requests(Gate::Released, Ended::Released, out);
-            self.disconnect_input(at, io, graph, out);
-            let port = self.inputs.remove(at);
+            self.inputs[at].end_requests(Gate::Released, Ended::Released);
+            self.disconnect_input(at, io, graph);
+            let mut port = self.inputs.remove(at);
+            self.notices.extend(port.pending.take_notices());
             self.retiring.push(Retiring {
                 node: port.node,
                 epochs: port.epochs.clone(),
@@ -1144,7 +1145,7 @@ impl Ports {
             if self.inputs[at].open.as_ref() != Some(&device.id) {
                 continue;
             }
-            self.disconnect_input(at, io, graph, out);
+            self.disconnect_input(at, io, graph);
             let shared = &self.inputs[at].shared;
             set_presence(
                 &shared.cell,
@@ -1292,6 +1293,7 @@ impl Ports {
         out: &mut Vec<SessionEvent>,
     ) -> Edits {
         let mut edits = Edits::default();
+        out.append(&mut self.notices);
         let mut touched: Vec<DeviceId> = Vec::new();
         let mut profile_devices: Vec<DeviceId> = Vec::new();
         for polled in io.poll(now) {
@@ -1348,12 +1350,12 @@ impl Ports {
                     if matches!(change, tutti_midi_hardware::PropertyChange::Dropped)
                         && let Some(port) = self.port_of(device)
                     {
-                        port.pending.lose_properties(*peer, out);
+                        port.pending.lose_properties(*peer);
                     }
                     if let tutti_midi_hardware::PropertyChange::Event(event) = change
                         && let Some(port) = self.port_of(device)
                     {
-                        port.pending.event(*peer, event, out);
+                        port.pending.event(*peer, event);
                     }
                     // An event of the peer (its ResourceList, whose Get held one of
                     // its requests) may have made room for a call that waits.
@@ -1375,6 +1377,7 @@ impl Ports {
         for port in &mut self.inputs {
             // A Subscription's data that changed, or whose lease dropped, is a
             // change of the info too.
+            out.extend(port.pending.take_notices());
             let held = port.pending.take_changed();
             if port
                 .open
@@ -1399,7 +1402,7 @@ impl Ports {
             let Some(device) = io.devices().list().into_iter().find(|d| d.id == id) else {
                 continue;
             };
-            self.disconnect_input(at, io, graph, out);
+            self.disconnect_input(at, io, graph);
             let result = self.connect_input(at, io, graph, &device);
             let shared = &self.inputs[at].shared;
             if result.is_err() {
