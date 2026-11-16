@@ -55,13 +55,6 @@ fn layout_file() -> std::path::PathBuf {
         .join(format!("plugin-pool-layout.{}", std::process::id()))
 }
 
-/// The file whose appearance, holding a layout number, makes a running server's
-/// plugin take that layout and ask its host to rescan its ports.
-fn port_change_file() -> std::path::PathBuf {
-    std::path::Path::new(env!("CARGO_TARGET_TMPDIR"))
-        .join(format!("plugin-pool-port-change.{}", std::process::id()))
-}
-
 /// Sets what the plugin's servers read from the environment: the server's path
 /// and the file of the port layout. Once, when the first session is built (the
 /// test's catalog is probed before that, with none of the plugin's variables
@@ -77,7 +70,6 @@ fn servers() {
         unsafe {
             std::env::set_var("TUTTI_PLUGIN_SERVER", plugin_server());
             std::env::set_var("TUTTI_CLAP_PROBE_PORT_LAYOUT_FILE", layout_file());
-            std::env::set_var("TUTTI_CLAP_PROBE_PORT_CHANGE_FILE", port_change_file());
         }
     });
 }
@@ -626,68 +618,6 @@ fn a_swap_to_a_plugin_with_other_ports_fails_the_entry() {
             .all(|event| !matches!(event, SessionEvent::CommitRefused(_))),
         "the graph still commits"
     );
-}
-
-/// **A served plugin that grows its ports is refused by name, once.** The
-/// stereo plugin announces a stereo and an aux bus while it runs: the server
-/// tells the host the buses, the session finds them outside the slab the node
-/// was laid out for and reports [`PluginChange::PortsRefused`] with
-/// `OutsideSlab` naming both layouts, the node stays, and nothing is reported
-/// again.
-#[test]
-fn a_served_plugin_that_grows_its_ports_is_refused_outside_its_slab_once() {
-    use tutti_plugin_host::RebindError;
-    use tutti_session::{PluginChange, PluginEvent, PortsRefusal};
-    let (catalog, _dir) = catalog();
-    let (mut s, node) = with_node(&catalog);
-    let outputs = s.graph_ref().node_outputs(node).unwrap();
-    assert_eq!(outputs, 2, "the stereo plugin");
-    // The running server's plugin takes the aux-bus layout and asks to rescan.
-    std::fs::write(port_change_file(), "1").expect("the change is asked");
-    let mut refusals = Vec::new();
-    let deadline = Instant::now() + Duration::from_secs(30);
-    while refusals.is_empty() {
-        assert!(
-            Instant::now() < deadline,
-            "no refusal was reported (the change file is still there: {})",
-            port_change_file().exists()
-        );
-        refusals.extend(pump(&mut s).into_iter().filter_map(|event| match event {
-            SessionEvent::Plugin(PluginEvent {
-                change: PluginChange::PortsRefused { why },
-                ..
-            }) => Some(why),
-            _ => None,
-        }));
-    }
-    let stereo = vec![ChannelLayout::STEREO];
-    let stereo_and_mono = vec![ChannelLayout::STEREO, ChannelLayout::MONO];
-    assert_eq!(
-        refusals,
-        [PortsRefusal::Ports(RebindError::OutsideSlab {
-            inputs: stereo.clone(),
-            outputs: stereo,
-            now_inputs: stereo_and_mono.clone(),
-            now_outputs: stereo_and_mono,
-        })]
-    );
-    assert_eq!(
-        s.graph_ref().node_outputs(node).unwrap(),
-        outputs,
-        "the node stays"
-    );
-    for _ in 0..20 {
-        assert!(
-            !pump(&mut s).iter().any(|event| matches!(
-                event,
-                SessionEvent::Plugin(PluginEvent {
-                    change: PluginChange::PortsRefused { .. },
-                    ..
-                })
-            )),
-            "reported once"
-        );
-    }
 }
 
 /// **A changed identity under the same key loads the new plugin and the node

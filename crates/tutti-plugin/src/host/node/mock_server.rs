@@ -179,7 +179,6 @@ pub(super) fn rig_replying_after(label: &str, reply_delay: Duration) -> Rig {
     let server_slab = AudioSlab::open(shm, layout()).unwrap();
     let (bridge, thread) = PluginBridge::new(
         path.clone(),
-        Arc::clone(slab.slab()),
         tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
         tutti_plugin_types::PluginFormat::Vst3,
         Some(tutti_plugin_ipc::EditorLoader::new(
