@@ -169,7 +169,7 @@ impl Drop for AuEditor {
         // the wrong thread.
         match MainThreadMarker::new() {
             Some(main) => self.close(main),
-            None if !self.view.is_null() => self.leak_view(),
+            None if !self.view.is_null() => {}
             None => {}
         }
     }
