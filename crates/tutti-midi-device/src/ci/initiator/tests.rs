@@ -65,6 +65,7 @@ fn state(i: &ProfileInitiator, address: CiDeviceId, p: ProfileId) -> Option<Prof
     i.table().get(address, p).map(ProfileEntry::state)
 }
 
+/// Spec: m2-101/7.2#1
 #[test]
 fn it_starts_with_a_profile_inquiry_to_the_function_block_from_us_to_the_peer() {
     // M2-102 §2.4: an Inquiry to 0x7F asks for every Profile.
@@ -232,6 +233,7 @@ fn a_nak_of_the_inquiry_ends_it() {
     assert!(!i.is_known());
 }
 
+/// Spec: m2-102/2.4#5, m2-102/2.4#6, m2-102/2.4#7, m2-102/2.4#8
 #[test]
 fn the_reports_update_the_table_and_say_what_changed() {
     let (mut i, _, _) = start();
@@ -351,6 +353,7 @@ fn a_version_1_peers_report_has_no_channel_count() {
     );
 }
 
+/// Spec: m2-101/7.8#1
 #[test]
 fn set_on_a_channel_sends_the_request_with_its_channel_count() {
     let (mut i, _, now) = start();
@@ -377,6 +380,7 @@ fn set_on_a_channel_sends_the_request_with_its_channel_count() {
     assert_eq!(*channels, ProfileChannels::of(7));
 }
 
+/// Spec: m2-101/7.8#1
 #[test]
 fn set_on_a_group_or_function_block_asks_for_zero_channels() {
     // §7.8: a Group or Function Block address sets Number Channels Requested to 0x0000.

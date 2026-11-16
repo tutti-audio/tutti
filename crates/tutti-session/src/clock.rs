@@ -141,7 +141,20 @@ pub struct DetachedGraph;
 /// the callback on. Dropping the session stops the thread.
 #[derive(Debug)]
 pub struct SystemEngine {
-    pub(crate) stream: OutputStream,
+    /// The stream's host. Out of its slot only while a clock switch runs, which
+    /// puts it back before the switch returns.
+    pub(crate) host: Option<tutti_engine::StreamHost>,
+    /// The platform host a switch to the sound card opens the device on.
+    #[cfg(feature = "device")]
+    pub(crate) audio_host: tutti_cpal::AudioHost,
+}
+
+impl SystemEngine {
+    pub(crate) fn host(&self) -> &tutti_engine::StreamHost {
+        self.host
+            .as_ref()
+            .expect("the stream host is in its slot except while a clock switch runs")
+    }
 }
 
 impl Clock for Offline {
@@ -160,13 +173,13 @@ impl RealTime for SystemClock {}
 
 impl sealed::Running for SystemEngine {
     fn stream(&self) -> Option<&OutputStream> {
-        Some(&self.stream)
+        Some(self.host().stream())
     }
 }
 
 impl sealed::Streaming for SystemEngine {
     fn output_stream(&self) -> &OutputStream {
-        &self.stream
+        self.host().stream()
     }
 }
 

@@ -117,6 +117,8 @@ mod recovery;
 #[cfg(feature = "sampler")]
 mod sampler;
 mod session;
+#[cfg(feature = "device")]
+mod switch;
 #[cfg(all(feature = "device", feature = "audio-io"))]
 mod take;
 #[cfg(feature = "device")]
@@ -243,6 +245,8 @@ pub use session::MidiNodes;
 #[cfg(feature = "modulation")]
 pub use session::ModInput;
 pub use session::{PHASES, Phase, PhaseCx, RootTopologyStatus, Session, SessionEvent};
+#[cfg(feature = "device")]
+pub use switch::ClockError;
 #[cfg(all(feature = "device", feature = "audio-io"))]
 pub use take::{
     Armed, InFlight, Placement, Punch, PunchError, Recorded, Rolling, Start, Take, TakeEnd,

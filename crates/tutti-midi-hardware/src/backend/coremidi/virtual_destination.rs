@@ -65,7 +65,7 @@ impl UmpVirtualDestination {
     /// # Errors
     ///
     /// [`Error::VirtualBlocksUnsupported`] when `spec` declares blocks, and
-    /// [`Error::Os`](crate::Error::Os) if CoreMIDI refuses the client or the endpoint.
+    /// [`Error::Os`] if CoreMIDI refuses the client or the endpoint.
     pub(crate) fn open(
         spec: &VirtualSpec,
         mut producer: crate::InputProducerHandle,
@@ -91,7 +91,7 @@ impl UmpVirtualDestination {
     ///
     /// # Errors
     ///
-    /// [`Error::Os`](crate::Error::Os) if CoreMIDI refuses either the client or the
+    /// [`Error::Os`] if CoreMIDI refuses either the client or the
     /// destination endpoint.
     #[cfg(test)]
     pub(crate) fn new<F>(name: &str, protocol: VirtualProtocol, mut on_event: F) -> Result<Self>
@@ -101,7 +101,8 @@ impl UmpVirtualDestination {
         Self::stamped(name, protocol, move |event, _arrived| on_event(event))
     }
 
-    /// As [`new`](Self::new), also giving each message the `Instant` its packet
+    /// Creates a virtual destination named `name` carrying `protocol`, invoking
+    /// `on_event` for every UMP message received with the `Instant` its packet
     /// reached CoreMIDI (the packet's host time).
     fn stamped<F>(name: &str, protocol: VirtualProtocol, mut on_event: F) -> Result<Self>
     where

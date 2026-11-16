@@ -17,6 +17,7 @@ mod inlet_retire;
 mod meter;
 mod no_denormals;
 mod parallel;
+mod parked_poll;
 mod pool_spawn_refusal;
 mod root_fade;
 mod rt_no_alloc;

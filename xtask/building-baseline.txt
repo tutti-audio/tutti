@@ -153,16 +153,6 @@ tutti-graph  ctor-result  crates/tutti-graph/src/event.rs::SortedEvents::sort
 tutti-graph  ctor-result  crates/tutti-graph/src/param.rs::ParamPorts::try_new
 tutti-graph  ctor-result  crates/tutti-graph/src/param.rs::ParamPorts::try_of
 
-# tutti-measure
-tutti-measure  ctor-result  crates/tutti-measure/src/chroma.rs::ChromaConfig::new
-tutti-measure  ctor-result  crates/tutti-measure/src/loudness.rs::LoudnessConfig::new
-tutti-measure  ctor-result  crates/tutti-measure/src/loudness.rs::WindowedLoudnessConfig::new
-tutti-measure  ctor-result  crates/tutti-measure/src/loudness.rs::WindowedLoudnessState::new
-tutti-measure  ctor-result  crates/tutti-measure/src/notes.rs::NoteConfig::new
-tutti-measure  ctor-result  crates/tutti-measure/src/spectrum.rs::SpectrumConfig::new
-tutti-measure  ctor-result  crates/tutti-measure/src/yin.rs::YinConfig::new
-tutti-measure  ctor-result  crates/tutti-measure/src/yin.rs::YinConfig::standard
-
 # tutti-midi-device
 tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_can_get
 tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_can_paginate

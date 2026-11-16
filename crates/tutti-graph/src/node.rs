@@ -1428,6 +1428,21 @@ pub trait Node: Send + 'static {
     /// Returns the node to the state of a freshly prepared one.
     fn reset(&mut self);
 
+    /// Answers the handoffs a **parked** node has pending, once per block the
+    /// executor parks it ([`NodeMode::Bypassed`](crate::NodeMode::Bypassed) with
+    /// its fade done): [`process`](Self::process) is not called then, so a
+    /// node that holds something the control side recalls (a plugin's
+    /// Processor) would otherwise never hand it back.
+    ///
+    /// The contract is narrow: answer pending handoffs only. It runs at the node's place in the
+    /// schedule, on the thread that would have run `process`, so the parallel
+    /// executor sees what the serial one does. It is never called for a node
+    /// that is not parked, nor for one the executor skips as idle (that one is
+    /// woken through its [`Wake`] and processed). Audio thread: must not allocate, lock or block.
+    ///
+    /// The default does nothing.
+    fn poll_parked(&mut self) {}
+
     /// Writes the state a successor must start from, as events for its first
     /// event input, when a replace swaps this node out (a crossfade, a plain
     /// replace, an insert at an existing key): an instrument's programs,

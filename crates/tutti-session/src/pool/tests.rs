@@ -132,7 +132,7 @@ fn entry(key: &'static str, probe: Probe) -> Declared<&'static str, Probe> {
 }
 
 /// The pool events of one update, as `(key, what)`.
-fn events(session: &mut crate::DetachedSession) -> Vec<(&'static str, String)> {
+fn events<C: crate::Clock>(session: &mut Session<C>) -> Vec<(&'static str, String)> {
     session
         .update()
         .into_iter()
@@ -151,7 +151,7 @@ fn events(session: &mut crate::DetachedSession) -> Vec<(&'static str, String)> {
         .collect()
 }
 
-fn state(session: &crate::DetachedSession, key: &'static str) -> Option<String> {
+fn state<C: crate::Clock>(session: &Session<C>, key: &'static str) -> Option<String> {
     session.pool_state(&key).map(|state| match state {
         PoolState::Loading => "loading".to_owned(),
         PoolState::Loaded => "loaded".to_owned(),
@@ -163,8 +163,8 @@ fn state(session: &crate::DetachedSession, key: &'static str) -> Option<String> 
     })
 }
 
-fn handle(
-    session: &crate::DetachedSession,
+fn handle<C: crate::Clock>(
+    session: &Session<C>,
     key: &'static str,
 ) -> Result<ProbeHandle, HandleError<&'static str>> {
     session.pool.handle::<_, Probe>(&key)
@@ -971,4 +971,414 @@ fn a_stale_refusal_of_a_landing_leaves_the_load_in_flight_alone() {
     s.retry(&"a").unwrap();
     spawned.run_all();
     assert_eq!(events(&mut s), [("a", "loaded".to_owned())]);
+}
+
+/// A clock switch, with loads of the session's own in flight (the pool's loads
+/// run as jobs on the session's spawner).
+#[cfg(feature = "device")]
+mod clock_switch {
+    use tutti_engine::{ManualStreamDriver, OutputSpec};
+    use tutti_types::ChannelLayout;
+
+    use super::*;
+
+    fn system_session() -> (crate::SystemSession, Spawned) {
+        let spawned = Spawned::default();
+        let held = spawned.clone();
+        let session = Session::builder()
+            .spawn_with(move |job| held.0.lock().unwrap().push(job))
+            .system_clock()
+            .build()
+            .unwrap();
+        (session, spawned)
+    }
+
+    fn card() -> (ManualStreamDriver, OutputSpec) {
+        let (driver, _stream) = ManualStreamDriver::new();
+        let spec = OutputSpec::new(
+            SampleRate::SR_48K,
+            ChannelLayout::STEREO,
+            tutti_buffers::SampleFormat::F32,
+        );
+        (driver, spec)
+    }
+
+    /// **A loaded entry survives a clock switch, and each load in flight lands
+    /// after it**: a job's lander is typed to nothing of the clock, so the
+    /// loads that had not landed when the session converted land on the new
+    /// session, once each, while the entry that had loaded is as it was.
+    #[test]
+    fn a_loaded_entry_survives_a_clock_switch_and_loads_in_flight_land_after_it() {
+        let (mut s, spawned) = system_session();
+        let runs = runs();
+        s.pool((
+            entry("loaded", probe(1, &runs)),
+            entry("late", probe(1, &runs)),
+            entry("later", probe(1, &runs)),
+        ))
+        .unwrap();
+        let mut jobs = spawned.take();
+        assert_eq!(jobs.len(), 3);
+        let held_back: Vec<_> = jobs.drain(1..).collect();
+        for job in jobs {
+            job.run();
+        }
+        assert_eq!(events(&mut s), [("loaded", "loaded".to_owned())]);
+        let (driver, spec) = card();
+        let mut live = s
+            .into_device_on(spec, driver)
+            .unwrap_or_else(|e| panic!("switches: {}", e.error()));
+        assert!(events(&mut live).is_empty(), "nothing lands at the switch");
+        assert_eq!(state(&live, "late").as_deref(), Some("loading"));
+        for job in held_back {
+            job.run();
+        }
+        assert_eq!(
+            events(&mut live),
+            [
+                ("late", "loaded".to_owned()),
+                ("later", "loaded".to_owned())
+            ],
+            "each lands once, on the converted session"
+        );
+        assert_eq!(state(&live, "loaded").as_deref(), Some("loaded"));
+        assert_eq!(*handle(&live, "late").unwrap().info(), 100);
+        assert_eq!(*handle(&live, "loaded").unwrap().info(), 100, "intact");
+        assert!(events(&mut live).is_empty(), "and no more");
+    }
+
+    fn live_session() -> (crate::LiveSession, Spawned, tutti_engine::ManualStream) {
+        let spawned = Spawned::default();
+        let held = spawned.clone();
+        let (driver, stream) = ManualStreamDriver::new();
+        let spec = OutputSpec::new(
+            SampleRate::SR_48K,
+            ChannelLayout::STEREO,
+            tutti_buffers::SampleFormat::F32,
+        );
+        let session = Session::builder()
+            .spawn_with(move |job| held.0.lock().unwrap().push(job))
+            .device(Default::default())
+            .build_device_on(spec, driver)
+            .unwrap();
+        (session, spawned, stream)
+    }
+
+    /// **A run whose entry has loaded runs before the switch begins, with the
+    /// session as it is**: a run that reads the stream's faults or updates the
+    /// session (what a run may do) finds the clock's stream in its place, in
+    /// both directions, and the switch goes through.
+    #[test]
+    fn a_run_for_a_loaded_entry_runs_before_the_switch_with_the_session_intact() {
+        let ran = Arc::new(AtomicUsize::new(0));
+
+        let (mut s, spawned) = system_session();
+        let runs = runs();
+        s.pool(entry("a", probe(1, &runs))).unwrap();
+        spawned.run_all();
+        let _ = events(&mut s);
+        let seen = Arc::clone(&ran);
+        s.when_loaded(&"a", move |s| {
+            let _ = s.faults();
+            let _ = s.update();
+            seen.fetch_add(1, Ordering::SeqCst);
+        })
+        .unwrap();
+        let (driver, spec) = card();
+        let _live = s
+            .into_device_on(spec, driver)
+            .unwrap_or_else(|e| panic!("switches: {}", e.error()));
+        assert_eq!(ran.load(Ordering::SeqCst), 1, "ran on the timer's session");
+
+        let (mut live, spawned, _stream) = live_session();
+        let runs = self::runs();
+        live.pool(entry("b", probe(1, &runs))).unwrap();
+        spawned.run_all();
+        let _ = events(&mut live);
+        let seen = Arc::clone(&ran);
+        live.when_loaded(&"b", move |s| {
+            let _ = s.faults();
+            let _ = s.update();
+            let _ = s.device();
+            seen.fetch_add(1, Ordering::SeqCst);
+        })
+        .unwrap();
+        let _system = live
+            .into_system_clock()
+            .unwrap_or_else(|e| panic!("switches: {}", e.error()));
+        assert_eq!(ran.load(Ordering::SeqCst), 2, "ran on the card's session");
+    }
+
+    /// **A switch is refused, before anything stops, while a run waits for an
+    /// entry that has not loaded**: the error names the keys, the session is
+    /// back on its old clock with its closure intact, and the run fires once
+    /// the entry loads. In both directions.
+    #[test]
+    fn a_switch_is_refused_while_a_run_waits_for_an_entry_that_has_not_loaded() {
+        let ran = Arc::new(AtomicUsize::new(0));
+
+        let (mut s, spawned) = system_session();
+        let runs = runs();
+        s.pool(entry("pending", probe(1, &runs))).unwrap();
+        let seen = Arc::clone(&ran);
+        s.when_loaded(&"pending", move |_| {
+            seen.fetch_add(1, Ordering::SeqCst);
+        })
+        .unwrap();
+        let (driver, spec) = card();
+        let err = s
+            .into_device_on(spec, driver)
+            .expect_err("a run waits for the entry");
+        assert!(
+            matches!(
+                err.error().error(),
+                crate::Error::RunsPending { keys } if keys.len() == 1
+            ),
+            "{}",
+            err.error()
+        );
+        let mut s = err.into_session();
+        assert_eq!(s.stream_spec().sample_rate, SampleRate::SR_48K);
+        spawned.run_all();
+        let _ = events(&mut s);
+        let _ = s.update();
+        assert_eq!(ran.load(Ordering::SeqCst), 1, "the run fires when it loads");
+        let (driver, spec) = card();
+        let _live = s
+            .into_device_on(spec, driver)
+            .unwrap_or_else(|e| panic!("then it goes through: {}", e.error()));
+
+        let (mut live, spawned, stream) = live_session();
+        let runs = self::runs();
+        live.pool(entry("pending", probe(1, &runs))).unwrap();
+        let seen = Arc::clone(&ran);
+        live.when_loaded(&"pending", move |_| {
+            seen.fetch_add(1, Ordering::SeqCst);
+        })
+        .unwrap();
+        let err = live
+            .into_system_clock()
+            .expect_err("a run waits for the entry");
+        assert!(
+            matches!(err.error().error(), crate::Error::RunsPending { .. }),
+            "{}",
+            err.error()
+        );
+        let mut live = err.into_session();
+        assert!(live.device().is_running(), "still on the card");
+        assert!(stream.render_block(64).is_some(), "and rendering");
+        spawned.run_all();
+        let _ = events(&mut live);
+        let _ = live.update();
+        assert_eq!(ran.load(Ordering::SeqCst), 2, "the run fires when it loads");
+    }
+
+    /// **A run asked from inside a due run runs before the switch too**: the
+    /// due runs run until none is due, so one asked for a loaded entry is not
+    /// left to the session's next clock, and one asked for an entry that has
+    /// not loaded refuses the switch. In both directions.
+    #[test]
+    fn a_run_asked_by_a_run_runs_before_the_switch_and_one_for_a_pending_entry_refuses_it() {
+        let ran = Arc::new(AtomicUsize::new(0));
+
+        // The timer: R1 on a loaded entry asks R2 on the same entry.
+        let (mut s, spawned) = system_session();
+        let runs = runs();
+        s.pool((entry("a", probe(1, &runs)), entry("b", probe(1, &runs))))
+            .unwrap();
+        let mut jobs = spawned.take();
+        let held = jobs.split_off(1);
+        for job in jobs {
+            job.run();
+        }
+        let _ = events(&mut s);
+        let (first, second) = (Arc::clone(&ran), Arc::clone(&ran));
+        s.when_loaded(&"a", move |s| {
+            first.fetch_add(1, Ordering::SeqCst);
+            s.when_loaded(&"a", move |_| {
+                second.fetch_add(10, Ordering::SeqCst);
+            })
+            .unwrap();
+        })
+        .unwrap();
+        let (driver, spec) = card();
+        let live = s
+            .into_device_on(spec, driver)
+            .unwrap_or_else(|e| panic!("switches: {}", e.error()));
+        assert_eq!(ran.load(Ordering::SeqCst), 11, "both ran, on the timer");
+        drop((live, held));
+
+        // R1 on a loaded entry asks R2 on an entry that has not loaded.
+        let (mut s, spawned) = system_session();
+        let runs = self::runs();
+        s.pool((entry("a", probe(1, &runs)), entry("b", probe(1, &runs))))
+            .unwrap();
+        let mut jobs = spawned.take();
+        let held = jobs.split_off(1);
+        for job in jobs {
+            job.run();
+        }
+        let _ = events(&mut s);
+        let asked = Arc::clone(&ran);
+        s.when_loaded(&"a", move |s| {
+            let late = Arc::clone(&asked);
+            s.when_loaded(&"b", move |_| {
+                late.fetch_add(100, Ordering::SeqCst);
+            })
+            .unwrap();
+        })
+        .unwrap();
+        let (driver, spec) = card();
+        let err = s
+            .into_device_on(spec, driver)
+            .expect_err("a run for an entry that has not loaded was asked");
+        assert!(
+            matches!(err.error().error(), crate::Error::RunsPending { keys } if keys.len() == 1),
+            "{}",
+            err.error()
+        );
+        let mut s = err.into_session();
+        for job in held {
+            job.run();
+        }
+        let _ = events(&mut s);
+        let _ = s.update();
+        assert_eq!(ran.load(Ordering::SeqCst), 111, "the asked run fires later");
+
+        // The card: the same two.
+        let (mut live, spawned, _stream) = live_session();
+        let runs = self::runs();
+        live.pool((entry("a", probe(1, &runs)), entry("b", probe(1, &runs))))
+            .unwrap();
+        let mut jobs = spawned.take();
+        let held = jobs.split_off(1);
+        for job in jobs {
+            job.run();
+        }
+        let _ = events(&mut live);
+        let (first, second) = (Arc::clone(&ran), Arc::clone(&ran));
+        live.when_loaded(&"a", move |s| {
+            first.fetch_add(1000, Ordering::SeqCst);
+            s.when_loaded(&"a", move |_| {
+                second.fetch_add(10_000, Ordering::SeqCst);
+            })
+            .unwrap();
+        })
+        .unwrap();
+        let asked = Arc::clone(&ran);
+        live.when_loaded(&"a", move |s| {
+            let late = Arc::clone(&asked);
+            s.when_loaded(&"b", move |_| {
+                late.fetch_add(100_000, Ordering::SeqCst);
+            })
+            .unwrap();
+        })
+        .unwrap();
+        let err = live
+            .into_system_clock()
+            .expect_err("a run for an entry that has not loaded was asked");
+        assert!(
+            matches!(err.error().error(), crate::Error::RunsPending { .. }),
+            "{}",
+            err.error()
+        );
+        assert_eq!(
+            ran.load(Ordering::SeqCst),
+            11_111,
+            "the one asked of a loaded entry ran before the refusal"
+        );
+        drop((err, held));
+    }
+
+    /// **A switch is of the session as the due runs left it**: a run that
+    /// sets an output map the next card cannot place makes the switch refuse it,
+    /// and a run that restarts the card at another rate makes the switch to the
+    /// timer carry that rate.
+    #[test]
+    fn a_switch_honours_what_a_due_run_did_to_the_session() {
+        let spawned = Spawned::default();
+        let held = spawned.clone();
+        let mut s = Session::builder()
+            .spawn_with(move |job| held.0.lock().unwrap().push(job))
+            .outputs(ChannelLayout::from(6u16))
+            .system_clock()
+            .build()
+            .unwrap();
+        let runs = runs();
+        s.pool(entry("a", probe(1, &runs))).unwrap();
+        spawned.run_all();
+        let _ = events(&mut s);
+        s.when_loaded(&"a", |s| {
+            s.policy::<crate::OutputPolicy>()
+                .set(crate::OutputPolicy {
+                    monitor: Some(tutti_types::Bed::Stereo.topology()),
+                    map: tutti_engine::OutputMap::channels([4, 5]).unwrap(),
+                    ..crate::OutputPolicy::default()
+                })
+                .unwrap();
+        })
+        .unwrap();
+        let (driver, spec) = card();
+        let err = s
+            .into_device_on(spec, driver)
+            .expect_err("the run set a map the card has no outputs for");
+        assert!(
+            matches!(err.error().error(), crate::Error::MapUnplaceable { .. }),
+            "{}",
+            err.error()
+        );
+        let _ = err.into_session();
+
+        let (mut live, spawned, _stream) = live_session();
+        let runs = self::runs();
+        live.pool(entry("a", probe(1, &runs))).unwrap();
+        spawned.run_all();
+        let _ = events(&mut live);
+        live.when_loaded(&"a", |s| {
+            let (driver, _new) = ManualStreamDriver::new();
+            s.restart_on(
+                OutputSpec::new(
+                    SampleRate::SR_44K1,
+                    ChannelLayout::STEREO,
+                    tutti_buffers::SampleFormat::F32,
+                ),
+                driver,
+                None,
+                None,
+            )
+            .unwrap();
+        })
+        .unwrap();
+        let system = live
+            .into_system_clock()
+            .unwrap_or_else(|e| panic!("switches: {}", e.error()));
+        assert_eq!(
+            system.stream_spec().sample_rate,
+            SampleRate::SR_44K1,
+            "the timer runs at the rate the run restarted the card to"
+        );
+    }
+
+    /// **A wait for the pool to load carries over a clock switch**: the load
+    /// in flight carries over too, and the wait taken before the switch lands
+    /// its report on the new clock once the load does.
+    #[test]
+    fn a_pool_wait_carries_over_a_clock_switch() {
+        let (mut s, spawned) = system_session();
+        let runs = runs();
+        s.pool(entry("a", probe(1, &runs))).unwrap();
+        let wait = s.pool_loaded::<&'static str>();
+        assert!(wait.take().is_none(), "the load is in flight");
+        let (driver, spec) = card();
+        let mut live = s
+            .into_device_on(spec, driver)
+            .unwrap_or_else(|e| panic!("switches: {}", e.error()));
+        let _ = events(&mut live);
+        assert!(wait.take().is_none(), "the load is still in flight");
+        for job in spawned.take() {
+            job.run();
+        }
+        let _ = events(&mut live);
+        assert!(wait.take().is_some(), "the wait landed on the new clock");
+    }
 }

@@ -36,6 +36,35 @@ pub struct AudioEngine {
     pub(crate) opened: Opened,
 }
 
+/// A device found and its config read, not yet opened as a stream
+/// ([`AudioEngine::resolve_device`]): what
+/// [`AudioEngine::start_resolved`] starts.
+pub struct Resolved {
+    spec: OutputSpec,
+    pub(crate) driver: CpalDriver,
+    pub(crate) opened: Opened,
+}
+
+impl Resolved {
+    /// The config the stream will run at.
+    #[must_use]
+    pub fn spec(&self) -> &OutputSpec {
+        &self.spec
+    }
+
+    pub(crate) fn into_parts(self) -> (OutputSpec, CpalDriver, Opened) {
+        (self.spec, self.driver, self.opened)
+    }
+}
+
+impl std::fmt::Debug for Resolved {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Resolved")
+            .field("spec", &self.spec)
+            .finish_non_exhaustive()
+    }
+}
+
 /// The device a stream runs on, as the engine learned it when it opened.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Opened {
@@ -176,6 +205,22 @@ impl AudioEngine {
         Self::resolve_target(self.target.as_ref())
     }
 
+    /// Resolves the selected device and reads its config, without opening a
+    /// stream: the device is found and its config known, so a host that moves
+    /// a running graph onto it can refuse what the device cannot take (a root
+    /// it cannot place) while the old stream still plays.
+    ///
+    /// # Errors
+    /// As [`start`](Self::start) up to the stream's opening.
+    pub fn resolve_device(&self) -> Result<Resolved> {
+        let (driver, spec, opened) = self.resolve()?;
+        Ok(Resolved {
+            spec,
+            driver,
+            opened,
+        })
+    }
+
     /// [`resolve`](Self::resolve) for a bare `target`, which a restart reads
     /// while the stream is borrowed elsewhere.
     pub(crate) fn resolve_target(
@@ -198,6 +243,48 @@ impl AudioEngine {
         // previous stream ran on.
         let opened = Opened::of(&device);
         Ok((CpalDriver::new(device, format)?, spec, opened))
+    }
+
+    /// Starts `resolved` (this engine's device, found by
+    /// [`resolve_device`](Self::resolve_device)) on `host`, a host whose stream
+    /// another driver ran (a timer): the device takes over the stream, `rerate`
+    /// runs between the stop and the start as in
+    /// [`TuttiDriver::restart_with`](crate::TuttiDriver::restart_with), and the
+    /// host's stream, fault record and latency cell are the same ones.
+    ///
+    /// # Errors
+    /// The hook's error, or what the driver's `open` reports, as `E`, **with
+    /// the host back** and its stream stopped at its old spec: nothing plays,
+    /// and the driver the host ran is to be started again by the caller.
+    pub fn start_resolved<E: From<Error>>(
+        self,
+        host: tutti_engine::StreamHost,
+        resolved: Resolved,
+        rerate: impl FnOnce(&OutputSpec, &tutti_engine::Stopped<'_>) -> core::result::Result<(), E>,
+    ) -> core::result::Result<crate::TuttiDriver, (tutti_engine::StreamHost, E)> {
+        let (spec, driver, opened) = resolved.into_parts();
+        crate::TuttiDriver::take_over(host, spec, driver, rerate, self.target, opened)
+    }
+
+    /// [`start_resolved`](Self::start_resolved) with a driver of the caller's
+    /// choosing at this engine's spec ([`from_spec`](Self::from_spec)): no
+    /// device is opened, as [`TuttiDriver::switch`](crate::TuttiDriver::switch)
+    /// opens none. Behind `testing`.
+    ///
+    /// # Errors
+    /// As [`start_resolved`](Self::start_resolved).
+    #[cfg(feature = "testing")]
+    pub fn start_on<D: StreamDriver, E: From<Error>>(
+        self,
+        host: tutti_engine::StreamHost,
+        driver: D,
+        rerate: impl FnOnce(&OutputSpec, &tutti_engine::Stopped<'_>) -> core::result::Result<(), E>,
+    ) -> core::result::Result<crate::TuttiDriver, (tutti_engine::StreamHost, E)>
+    where
+        D::Error: Into<Error>,
+    {
+        let spec = self.spec().clone();
+        crate::TuttiDriver::take_over(host, spec, driver, rerate, self.target, self.opened)
     }
 
     /// Starts a stream at the current [`spec`](Self::spec) through `driver`.
