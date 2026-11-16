@@ -1199,7 +1199,7 @@ mod tests {
         };
         let clock = Clock {
             sample_rate: SampleRate::SR_48K,
-            format: format,
+            format,
         };
 
         // Warm up: first call allocates the scratch buffers.
