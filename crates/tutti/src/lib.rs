@@ -390,7 +390,7 @@ pub use tutti_plugin_host as plugin_host;
 pub use tutti_engine::Engine;
 pub use tutti_graph::{
     DECLICK, EventCapacity, EventInletNode, EventInletWriter, EventTapId, EventTapReader, FadeLaw,
-    Level, Losses, MeterReader, NodeMode, Refused, Stamp, TapAlign, TapEvent, TapId, TapReader,
+    Level, Losses, MeterReader, NodeMode, Stamp, TapAlign, TapEvent, TapId, TapReader,
 };
 pub use tutti_metering::{LoadMeter, LoadReading};
 pub use tutti_nodes::{ClickState, MetronomeMode};
@@ -457,8 +457,8 @@ pub use tutti_session::{
 pub use tutti_session::{
     Clock, ConnectError, Edge, EventInPort, EventOutPort, EventTapPort, HeardOpen, HeardTapError,
     InPort, Job, JobFailed, Key, NoSuchNode, Offline, OfflineSession, OutPort, Phase, Playhead,
-    RealTime, Root, ScheduleError, Session, SessionBuilder, SessionEvent, SystemClock,
-    SystemSession, TypedParamRef, Workers,
+    RealTime, Root, Session, SessionBuilder, SessionEvent, SystemClock, SystemSession,
+    TypedParamRef, Workers,
 };
 #[cfg(all(feature = "session", feature = "device"))]
 pub use tutti_session::{

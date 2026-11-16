@@ -30,7 +30,7 @@ use super::fsm::{DeclickOutcome, TransitionResult, TransportFsm};
 use super::loop_region::{LoopOwner, LoopReader, LoopRegion};
 use super::settings::TransportSettings;
 use super::state::SeekSlot;
-use super::timed::{Schedule, ScheduleFull, TransportCommand};
+use super::timed::{Schedule, TimedError, TransportCommand};
 use std::sync::atomic::AtomicU8;
 use tutti_types::At;
 use tutti_types::Beat;
@@ -149,19 +149,6 @@ impl MotionEvent {
             then: Then::Stop,
         }
     }
-}
-
-/// The command queue was full, so `event` never reached the state machine.
-///
-/// Distinct from the FSM *rejecting* a transition (`Play` while already
-/// rolling is a legitimate no-op): this means the event was not sent, which
-/// is a bug — the queue holds [`SCHEDULE_CAPACITY`](super::SCHEDULE_CAPACITY)
-/// user-driven commands in flight.
-#[derive(Debug, Clone, Copy, PartialEq, thiserror::Error)]
-#[error("transport command queue full; {event:?} not sent")]
-pub struct QueueFull {
-    /// The event that was refused, handed back so a caller can retry it.
-    pub event: MotionEvent,
 }
 
 /// The control handle of the transport's motion machine: send and schedule
@@ -300,13 +287,13 @@ impl MotionFsm {
     ///
     /// With no engine running over the transport, commands stay in flight,
     /// up to [`SCHEDULE_CAPACITY`](super::SCHEDULE_CAPACITY) (64), and past
-    /// that this returns [`ScheduleFull`].
+    /// that this returns [`TimedError::Full`].
     /// Loop edits share those credits and are not coalesced: send a dragged
     /// brace's edit on release ([`LoopEdit`](super::LoopEdit)).
     ///
     /// # Errors
     ///
-    /// Returns [`ScheduleFull`] when
+    /// Returns [`TimedError::Full`] when
     /// [`SCHEDULE_CAPACITY`](super::SCHEDULE_CAPACITY) commands are in flight:
     /// nothing was sent, and the command is handed back inside it.
     ///
@@ -321,14 +308,16 @@ impl MotionFsm {
     /// transport.motion().schedule(At::Frame(Frame::new(48_000)), MotionEvent::Play)?;
     /// transport.motion().schedule(At::Beat(Beat(16.0)), MotionEvent::stop())?;
     /// assert_eq!(transport.motion().scheduled_outstanding(), 2);
-    /// # Ok::<_, tutti_transport::ScheduleFull>(())
+    /// # Ok::<_, tutti_transport::TimedError<MotionEvent>>(())
     /// ```
-    pub fn schedule(
+    pub fn schedule<C: Into<TransportCommand> + Copy + std::fmt::Debug>(
         &self,
         at: At,
-        command: impl Into<TransportCommand>,
-    ) -> Result<(), ScheduleFull> {
-        self.timed.send(at, command.into())
+        command: C,
+    ) -> Result<(), TimedError<C>> {
+        self.timed
+            .send(at, command.into())
+            .map_err(|_| TimedError::Full(command))
     }
 
     /// Takes back every command waiting for a frame or a beat that has not
@@ -374,31 +363,29 @@ impl MotionFsm {
     /// commands waiting for their time count) it may still use the
     /// [`IMMEDIATE_RESERVE`](super::IMMEDIATE_RESERVE) credits only
     /// `At::NextBlock` commands take, so a backlog of waiting commands cannot
-    /// refuse a stop; past those too this returns [`QueueFull`].
+    /// refuse a stop; past those too this returns [`TimedError::Full`].
     ///
     /// RT-safe: lock-free, no allocation.
     ///
     /// # Errors
     ///
-    /// Returns [`QueueFull`] when the command queue is full. The event was
+    /// Returns [`TimedError::Full`] when the command queue is full. The event was
     /// not queued, and is handed back inside the error so it can be retried.
-    pub fn try_send(&self, event: MotionEvent) -> Result<(), QueueFull> {
-        self.timed
-            .send(At::NextBlock, event.into())
-            .map_err(|_| QueueFull { event })
+    pub fn try_send(&self, event: MotionEvent) -> Result<(), TimedError<MotionEvent>> {
+        self.schedule(At::NextBlock, event)
     }
 
     /// Requests several transitions, in order.
     ///
     /// # Errors
     ///
-    /// Returns [`QueueFull`] for the first event the full queue refused, and
+    /// Returns [`TimedError::Full`] for the first event the full queue refused, and
     /// sends none after it. Events queued before that point still stand, so
     /// the transport may be left partway through the batch.
     pub fn try_send_all(
         &self,
         events: impl IntoIterator<Item = MotionEvent>,
-    ) -> Result<(), QueueFull> {
+    ) -> Result<(), TimedError<MotionEvent>> {
         events.into_iter().try_for_each(|e| self.try_send(e))
     }
 
@@ -716,9 +703,7 @@ mod tests {
         }
         assert_eq!(
             m.try_send(MotionEvent::Play),
-            Err(QueueFull {
-                event: MotionEvent::Play
-            }),
+            Err(TimedError::Full(MotionEvent::Play)),
             "a full queue must report the drop, and hand the event back"
         );
     }
@@ -764,9 +749,7 @@ mod tests {
             .expect("the last reserve credit takes the stop");
         assert_eq!(
             m.try_send(MotionEvent::Play),
-            Err(QueueFull {
-                event: MotionEvent::Play
-            })
+            Err(TimedError::Full(MotionEvent::Play))
         );
         a.drain();
         assert!(
