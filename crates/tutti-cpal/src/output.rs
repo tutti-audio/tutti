@@ -38,7 +38,7 @@ pub struct AudioEngine {
 
 /// A device found and its config read, not yet opened as a stream
 /// ([`AudioEngine::resolve_device`]): what
-/// [`TuttiDriver::start_resolved`](crate::TuttiDriver::start_resolved) starts.
+/// [`AudioEngine::start_resolved`] starts.
 pub struct Resolved {
     spec: OutputSpec,
     pub(crate) driver: CpalDriver,
