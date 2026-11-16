@@ -12,11 +12,7 @@
 //! rather than the default configuration.
 //!
 //! This says nothing about the `ArcLend` deallocation property, which is a
-//! race no allocation-sampling test can pin. Likewise the `clap.log` mutex: its
-//! allocations are gated below, but a priority inversion is invisible here and
-//! is handled by construction — the host refuses to reach the lock from the
-//! audio thread, which the same test pins from the other side by asserting the
-//! lines were counted as dropped.
+//! race no allocation-sampling test can pin.
 
 use std::path::Path;
 use std::sync::Mutex;
@@ -1094,14 +1090,11 @@ fn start_processing_failure_is_allocation_free() {
 }
 
 /// A plugin logging through `clap.log` from inside `process` must not make the
-/// host allocate, lock stderr, or take the log mutex.
+/// host allocate.
 ///
 /// CLAP marks `clap.log` `[thread-safe]`, which includes the audio thread.
-/// Treating such a line like a main-thread one would mean `into_owned()`,
-/// `eprintln!`, and `LogState::push` taking a `Mutex` that `drain_log` holds
-/// across a `.collect()`. The first two are allocations; the third is a
-/// priority inversion this gate cannot see, caught instead by the host refusing
-/// to reach the lock from this thread.
+/// Treating such a line like a main-thread one would mean decoding the message
+/// into a `String` and emitting a `tracing` event, both allocations.
 ///
 /// `log_lines_dropped` is asserted to move, so a host that silently discarded
 /// audio-thread logs would fail here rather than pass.

@@ -146,6 +146,7 @@ mod role_wire {
 /// Two layouts are equal when every bus agrees, which is how a re-read after a
 /// restart decides the host must be told.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Layout {
     /// The input buses.
     pub inputs: PluginBuses,
@@ -153,7 +154,24 @@ pub struct Layout {
     pub outputs: PluginBuses,
 }
 
+/// The most buses a [`Layout`] holds in a direction and still be believed: a
+/// plugin has a handful, and a layout read off a wire is held to it.
+pub const MAX_LAYOUT_BUSES: usize = 32;
+
 impl Layout {
+    /// Whether this is a layout a plugin can have: at most
+    /// [`MAX_LAYOUT_BUSES`] buses in a direction and a width a block serves.
+    /// What a layout that came off a wire passes before it is kept: an
+    /// implausible `PluginIoChanged` layout is dropped and counted with the
+    /// dropped events, and the host keeps the layout it held, so no
+    /// `PortsRefused` follows.
+    #[must_use]
+    pub fn is_plausible(&self) -> bool {
+        self.inputs.len() <= MAX_LAYOUT_BUSES
+            && self.outputs.len() <= MAX_LAYOUT_BUSES
+            && self.check_width().is_ok()
+    }
+
     /// Whether every direction is within the width a block serves.
     ///
     /// # Errors
@@ -174,6 +192,18 @@ impl Layout {
     #[must_use]
     pub fn total_outputs(&self) -> usize {
         width(&self.outputs)
+    }
+
+    /// The input buses' widths, in order.
+    #[must_use]
+    pub fn input_widths(&self) -> BusChannels {
+        widths(&self.inputs)
+    }
+
+    /// The output buses' widths, in order.
+    #[must_use]
+    pub fn output_widths(&self) -> BusChannels {
+        widths(&self.outputs)
     }
 }
 

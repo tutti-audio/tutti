@@ -234,7 +234,8 @@ pub use tutti_codec as codec;
 #[cfg(feature = "io")]
 pub mod io {
     pub use tutti_session::{
-        DitherShape, DitherSink, DitherSpec, IDLE_PARK, PumpLoop, PumpPass, Recorder, RecorderError,
+        DitherShape, DitherSink, DitherSpec, FinalizeError, IDLE_PARK, PumpLoop, PumpPass,
+        Recorder, RecorderError,
     };
 }
 
