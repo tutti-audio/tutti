@@ -34,7 +34,7 @@ tutti-plugin-ipc-ffi = { version = "0.0.1", path = "../tutti-plugin-ipc-ffi" }
 arrayvec = "0.7"
 parking_lot = "0.13"
 thiserror.workspace = true
-tracing = "0.1"
+tracing.workspace = true
 
 [dev-dependencies]
 tutti-midi-protocol = { path = "../tutti-midi-protocol" }

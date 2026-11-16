@@ -48,6 +48,9 @@ pub(crate) enum Step {
     /// The release edits (`release.rs`): the workspace version, the path
     /// dependency pins and the changelog section.
     Release(Version),
+    /// `umbrella-api`: `public-api` text of each crate the umbrella exports from,
+    /// read for a signature type the umbrella does not name (`gates/umbrella_api.rs`).
+    UmbrellaApi(Option<String>),
     /// `cargo package --no-verify` over every crate under `crates/`, listed
     /// when the step runs.
     Package,
@@ -75,6 +78,7 @@ impl Step {
                 "cargo deny --version || fail (cargo install cargo-deny --version 0.20.2 --locked)"
                     .to_owned()
             }
+            Step::UmbrellaApi(dir) => format!("umbrella-api: cargo public-api --package <crate> --all-features -s for each crate crates/tutti/src/lib.rs exports from and each crate their signatures name{}, then the types those signatures name that the umbrella does not, and the seeds ranked by how many each pulls in", dir.as_ref().map_or(String::new(), |d| format!(" (the texts of {d}/<package>.txt instead)"))),
             Step::Package => {
                 "cargo package --locked --no-verify -p <each crate under crates/>".to_owned()
             }
@@ -247,6 +251,11 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
         "a configured thing is built by the one shape, bar the rows of xtask/building-baseline.txt and the gate's allow-list",
     ),
     (
+        "check-logging",
+        "",
+        "no `log` dependency, and no print macro outside a main, a test or an example",
+    ),
+    (
         "check-conformance",
         "",
         "spec inventories are well formed, test tags name rows, the CLAP inventory matches clap-sys and the VST3 one the SDK",
@@ -328,6 +337,11 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
          dirty tree and restores the checkout)",
     ),
     (
+        "umbrella-api",
+        "[<dir>]",
+        "the types in the signatures of what tutti exports that tutti does not name (needs cargo-public-api; not in gates or ci)",
+    ),
+    (
         "book",
         "[OUT]",
         "build the book with mdbook into book/build, or into OUT (relative to book/)",
@@ -394,6 +408,13 @@ const TARGET: &str = "x86_64-pc-windows-msvc";
 /// The dated nightly CI pins for the docs.rs build; `public-api` reads rustdoc
 /// JSON from the same one.
 const DOCS_NIGHTLY: &str = "nightly-2026-10-14";
+
+/// The command that lists `package`'s public API with all its features on, for
+/// the `public-api` and `umbrella-api` recipes.
+pub(crate) fn public_api_cmd(package: &str) -> String {
+    // `-s` omits blanket impls only: a lost auto-trait impl is a break.
+    format!("cargo +{DOCS_NIGHTLY} public-api --package {package} --all-features -s")
+}
 
 impl Planner<'_> {
     fn run(&mut self, c: Cmd) {
@@ -470,6 +491,7 @@ impl Planner<'_> {
                 | "conformance"
                 | "coverage"
                 | "public-api"
+                | "umbrella-api"
         );
         if !takes_args && !args.is_empty() {
             return Err(format!(
@@ -569,6 +591,7 @@ impl Planner<'_> {
             "check-platform-seam" => self.out.push(Step::Gate(Gate::PlatformSeam)),
             "check-buffers" => self.out.push(Step::Gate(Gate::Buffers)),
             "check-building" => self.out.push(Step::Gate(Gate::Building)),
+            "check-logging" => self.out.push(Step::Gate(Gate::Logging)),
             "check-conformance" => self.out.push(Step::Gate(Gate::Conformance)),
             "conformance" => {
                 let o = options(name, args, &["--results", "--out"])?;
@@ -664,6 +687,10 @@ impl Planner<'_> {
                 self.out.push(Step::Release(v));
             }
             "package" => self.out.push(Step::Package),
+            "umbrella-api" => {
+                let [dir] = Self::params(name, args, [""])?;
+                self.out.push(Step::UmbrellaApi((!dir.is_empty()).then_some(dir)));
+            }
             "public-api" => {
                 let [krate, base] = Self::params(name, args, ["", ""])?;
                 if krate.is_empty() {
@@ -672,10 +699,7 @@ impl Planner<'_> {
                             .to_owned(),
                     );
                 }
-                // `-s` omits blanket impls only: a lost auto-trait impl is a break.
-                let list = format!(
-                    "cargo +{DOCS_NIGHTLY} public-api --package {krate} --all-features -s"
-                );
+                let list = public_api_cmd(&krate);
                 if base.is_empty() {
                     self.lines(&[list]);
                 } else {
@@ -695,7 +719,7 @@ impl Planner<'_> {
                     "check-value-traits", "check-submodule-pins", "check-doc-refs",
                     "check-pointers", "check-comments", "check-platform-seam", "check-doc-idents",
                     "check-passive-tests", "check-alloc-binaries", "check-buffers",
-                    "check-building",
+                    "check-building", "check-logging",
                 ] {
                     self.dep(d)?;
                 }

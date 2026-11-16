@@ -46,7 +46,7 @@ parking_lot = "0.13"
 interprocess = { version = "2" }
 
 thiserror = "2"
-tracing = "0.1"
+tracing.workspace = true
 
 [dev-dependencies]
 tutti-midi-protocol = { path = "../tutti-midi-protocol" }

@@ -5,6 +5,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
+use tutti_types::ParkedSampleRate;
 
 use parking_lot::Mutex;
 
@@ -142,7 +143,7 @@ struct Wired<H: Loaded> {
     inner: Arc<Mutex<Instance<H>>>,
     /// Where the audio side parks a rate for the main thread's pump; drained
     /// by the handle's backend.
-    pending_sample_rate: Arc<AtomicU64>,
+    pending_sample_rate: Arc<ParkedSampleRate>,
     descriptor: PluginDescriptor,
     /// The wiring as the plugin reports it, with the presets it can list.
     loaded: LoadedPlugin,
@@ -201,7 +202,7 @@ where
     // `on_invalidate`), happen only while the editor pump runs. The session
     // does not tick an in-process plugin's handle; a host that wants them
     // without an editor calls `PluginHandle::editor_idle` on its own tick.
-    let pending_sample_rate = Arc::new(AtomicU64::new(super::client::NO_PENDING_RATE));
+    let pending_sample_rate = Arc::new(ParkedSampleRate::new());
     // `loaded.features`, not a local copy, so the node gates its per-block
     // transport send on the exact value the handle reports. One value, read
     // twice, cannot drift into a declared-but-undelivered capability.
@@ -272,7 +273,7 @@ where
         declared,
         wiring.features,
         prepare.rate(),
-        Arc::new(AtomicU64::new(super::client::NO_PENDING_RATE)),
+        Arc::new(ParkedSampleRate::new()),
         Arc::new(AtomicU64::new(0)),
         parameters,
         spares,

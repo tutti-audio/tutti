@@ -4,6 +4,8 @@
 
 #[path = "../support/active.rs"]
 mod active;
+#[path = "../support/probe.rs"]
+mod probe;
 
 // `assert_no_alloc` does nothing outside an `assert_no_alloc` closure, so the
 // other tests here are unaffected.

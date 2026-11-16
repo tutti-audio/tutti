@@ -6,7 +6,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use tutti_plugin_types::{
     AudioBufferMut, Edit, EditDrain, EditSink, Normalized, NoteExpressionChanges, ParamId,
-    PluginError, PluginIo, PluginResult, Processor, SampleFormat, TransportInfo as SharedTransport,
+    PluginError, PluginIo, PluginResult, Processor, SampleFormat, SampleRate,
+    TransportInfo as SharedTransport,
 };
 use tutti_rt::Reader;
 
@@ -213,7 +214,7 @@ impl ClapProcessor {
         &mut self,
         buffer: &mut AudioBufferMut<'_, '_>,
         ctx: &tutti_plugin_types::ProcessContext<'_>,
-        sample_rate: f64,
+        sample_rate: SampleRate,
         out: &mut tutti_plugin_types::ProcessOutput,
     ) -> PluginResult<()> {
         self.scratch.in_note_expressions.clear();
@@ -329,14 +330,8 @@ fn convert_note_expressions(
     }
 }
 
-/// CLAP's transport for the block. A non-finite or non-positive rate falls back
-/// to 44.1 kHz for the seconds position.
-fn convert_transport(transport: &SharedTransport, sample_rate: f64) -> TransportInfo {
-    let sr = if sample_rate.is_finite() && sample_rate > 0.0 {
-        sample_rate
-    } else {
-        44100.0
-    };
+/// CLAP's transport for the block.
+fn convert_transport(transport: &SharedTransport, sample_rate: SampleRate) -> TransportInfo {
     // CLAP's `song_pos_seconds`. Prefer the wire's own seconds field (the
     // plugin node's project time, `transport_source::ProjectTime`); fall back
     // to the project-time sample position for a producer that reports only
@@ -344,7 +339,7 @@ fn convert_transport(transport: &SharedTransport, sample_rate: f64) -> Transport
     let seconds = if transport.position.seconds.get() != 0.0 {
         transport.position.seconds
     } else {
-        tutti_types::Seconds(transport.position.samples.unwrap_or(0) as f64 / sr)
+        tutti_types::Seconds(transport.position.samples.unwrap_or(0) as f64 / sample_rate.get())
     };
     TransportInfo::default()
         .with_playing(transport.state.playing)
@@ -421,7 +416,7 @@ mod tests {
             .with_playing(true)
             .with_tempo(133.0)
             .with_tempo_inc(0.002);
-        let got = convert_transport(&wire, 48_000.0);
+        let got = convert_transport(&wire, SampleRate::SR_48K);
         assert_eq!(got.timing.tempo, 133.0);
         assert_eq!(got.timing.tempo_inc, 0.002);
     }

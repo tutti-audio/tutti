@@ -59,8 +59,8 @@ pub use units::{
     Amplitude, ArcDegrees, AtomicSampleRate, Azimuth, Balance, Beat, BeatDuration, BeatsPerCycle,
     BeatsPerCycleOutOfRange, Bpm, BpmOutOfRange, Cents, CentsSpan, CentsSpanOutOfRange,
     CompressionRatio, Confidence, Correlation, Db, Depth, DepthOutOfRange, Direction, Drive,
-    Elevation, Feedback, Gain, Hz, Mix, Pan, Phase, PhaseIncrement, PlaybackRate, Q, Radians,
-    ReadRate, Resonance, SamplePosition, SampleRate, SampleRateOutOfRange, SampleSpan,
+    Elevation, Feedback, Gain, Hz, Mix, Pan, ParkedSampleRate, Phase, PhaseIncrement, PlaybackRate,
+    Q, Radians, ReadRate, Resonance, SamplePosition, SampleRate, SampleRateOutOfRange, SampleSpan,
     SampleSpanOutOfRange, Seconds, Semitones, Spread, SrcRatio, StereoBalance, StereoWidth,
     StretchFactor, Unit, Velocity,
 };

@@ -777,8 +777,7 @@ impl AuLoaded {
     /// long as the callback should stay installed** — dropping it withdraws the
     /// callback from the AU before freeing the state the AU points at, which is
     /// the ordering that keeps the AU from dereferencing freed memory on its
-    /// render thread. [`AuMidiOutput::remove`] does the same and surfaces the AU's
-    /// status.
+    /// render thread.
     ///
     /// `sink` is called **on the render thread** and must not allocate, lock or
     /// block; it receives a borrowed slice precisely so it cannot park one. The

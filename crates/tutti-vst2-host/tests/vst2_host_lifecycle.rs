@@ -710,7 +710,8 @@ fn render_f32(
     let mut outs = vec![vec![0.0f32; frames]; channels];
     let in_refs: Vec<&[f32]> = ins.iter().map(Vec::as_slice).collect();
     let mut out_refs: Vec<&mut [f32]> = outs.iter_mut().map(Vec::as_mut_slice).collect();
-    let mut ctx = Vst2ProcessContext::new(SAMPLE_RATE).midi(midi);
+    let mut ctx =
+        Vst2ProcessContext::new(tutti_plugin_types::SampleRate::of(SAMPLE_RATE)).midi(midi);
     if let Some(t) = transport {
         ctx = ctx.transport(t);
     }

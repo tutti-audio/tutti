@@ -38,8 +38,8 @@ use super::client::{InProcClient, Inputs, PluginNode, Rendered, render_with};
 use crate::{Call, NodeControls, Snapshot, param_input, transport_info};
 use tutti_plugin_types::{BlockStatus, ProcessOutput, Processing};
 use tutti_plugin_types::{
-    ChordChanges, ChordValue, ExpressiveContext, Features, InProcess, Loaded, MAX_BLOCK_CHANNELS,
-    Processor, ScaleChanges, ScaleValue, TransportInfo, WireMidi,
+    ChannelTable, ChordChanges, ChordValue, ExpressiveContext, Features, InProcess, Loaded,
+    Processor, ScaleChanges, ScaleValue, TransportInfo, WireMidi, silence,
 };
 
 /// A side's handles: one per bus and one for the ports past them.
@@ -286,11 +286,11 @@ where
                 }
 
                 let piece_midi = this.midi.len();
-                let ins: ArrayVec<&[f32], MAX_BLOCK_CHANNELS> = channels_in(&inputs, &ins_by_bus)
+                let ins: ChannelTable<&[f32]> = channels_in(&inputs, &ins_by_bus)
                     .take(n_in)
                     .map(|ch| &ch[at..at + n])
                     .collect();
-                let mut outs: ArrayVec<&mut [f32], MAX_BLOCK_CHANNELS> = outputs
+                let mut outs: ChannelTable<&mut [f32]> = outputs
                     .buses(&outs_by_bus)
                     .flat_map(BusOut::into_channels)
                     .take(n_out)
@@ -310,12 +310,10 @@ where
                     &ins,
                     &mut outs,
                     n,
-                    this.sample_rate.get(),
+                    this.sample_rate,
                 );
                 if rendered != Rendered::Ran {
-                    for out in &mut outs {
-                        out.fill(0.0);
-                    }
+                    silence(&mut outs, n);
                 }
                 slept &= rendered == Rendered::Ran && asleep(&this.out, &outs);
                 if rendered == Rendered::Ran {
@@ -425,11 +423,11 @@ where
         let block_midi = this.midi.len();
         let rendered = {
             let (inputs, mut outputs) = io.split();
-            let ins: ArrayVec<&[f32], MAX_BLOCK_CHANNELS> = channels_in(&inputs, &ins_by_bus)
+            let ins: ChannelTable<&[f32]> = channels_in(&inputs, &ins_by_bus)
                 .take(n_in)
                 .map(|ch| &ch[..size])
                 .collect();
-            let mut outs: ArrayVec<&mut [f32], MAX_BLOCK_CHANNELS> = outputs
+            let mut outs: ChannelTable<&mut [f32]> = outputs
                 .buses(&outs_by_bus)
                 .flat_map(BusOut::into_channels)
                 .take(n_out)
@@ -449,12 +447,10 @@ where
                 &ins,
                 &mut outs,
                 size,
-                this.sample_rate.get(),
+                this.sample_rate,
             );
             if rendered != Rendered::Ran {
-                for out in &mut outs {
-                    out.fill(0.0);
-                }
+                silence(&mut outs, size);
             }
             // Read with the buffers still lent: a sleep claims silent output.
             let slept = rendered == Rendered::Ran && asleep(&this.out, &outs);
@@ -693,11 +689,6 @@ mod owed_tests {
         )
     }
 
-    /// A reader of a constant 120 BPM map, for nodes these tests drive.
-    fn tempo() -> tutti_transport::TempoReader {
-        tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo")
-    }
-
     const BLOCK: usize = 64;
 
     fn read(handle: &PluginHandle, i: i32) -> Option<f32> {
@@ -719,7 +710,7 @@ mod owed_tests {
         let (client, _handle) = load_client(main, tutti_fixtures::vst2_probe(), SampleRate::SR_48K)
             .unwrap_or_else(|e| panic!("in-process load of the probe: {e:?}"));
         let fork = client
-            .bind(tempo())
+            .bind(tutti_fixtures::tempo())
             .fork_instance(main, tutti_graph::ForkMode::Live)
             .expect("the fork loads on the main thread");
         let (fork, refused) = std::thread::spawn(move || {
@@ -779,7 +770,11 @@ mod owed_tests {
         let inner = std::sync::Arc::clone(&client.inner);
         let unlent = std::sync::Arc::clone(&client.unlent);
         let controls = client.controls();
-        let mut unit = Direct::new(client.bind(tempo()), SampleRate::SR_48K, BLOCK);
+        let mut unit = Direct::new(
+            client.bind(tutti_fixtures::tempo()),
+            SampleRate::SR_48K,
+            BLOCK,
+        );
         assert_eq!(read(&handle, 1), Some(1.0 / 16.0), "the probe's default");
         // The realtime end takes the Processor it was lent.
         unit.block();
@@ -850,7 +845,11 @@ mod owed_tests {
         });
         let inner = std::sync::Arc::clone(&client.inner);
         let controls = client.controls();
-        let mut unit = Direct::new(client.bind(tempo()), SampleRate::SR_48K, BLOCK);
+        let mut unit = Direct::new(
+            client.bind(tutti_fixtures::tempo()),
+            SampleRate::SR_48K,
+            BLOCK,
+        );
         let (cut, next) = dumps();
 
         unit.events(0, &cut[..3]);
@@ -892,7 +891,11 @@ mod owed_tests {
             )
         });
         let controls = client.controls();
-        let mut unit = Direct::new(client.bind(tempo()), SampleRate::SR_48K, BLOCK);
+        let mut unit = Direct::new(
+            client.bind(tutti_fixtures::tempo()),
+            SampleRate::SR_48K,
+            BLOCK,
+        );
         let (cut, next) = dumps();
 
         unit.events(0, &cut[..3]);

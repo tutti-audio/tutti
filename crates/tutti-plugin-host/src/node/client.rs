@@ -12,7 +12,7 @@
 //! silence too, counted by [`InProcClient::failed_blocks`].
 //!
 //! A block is one [`Processor::process`]: the graph's channel slices as an
-//! [`AudioBufferMut`], the block's MIDI, parameter chunk and transport as a
+//! [`AudioBufferMut`](tutti_plugin_types::AudioBufferMut), the block's MIDI, parameter chunk and transport as a
 //! [`ProcessContext`], and a [`ProcessOutput`] the client owns and clears each
 //! block. A block is allocation-free in steady state (verified by the
 //! `assert_no_alloc` test in `tests/`).
@@ -21,8 +21,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tutti_graph::UmpAt;
 use tutti_plugin_types::{
-    AudioBuffer, AudioBufferMut, Loaded, MainThreadMarker, MainWorkHandle, Origin,
-    PluginDescriptor, PluginIo, PluginTail, ProcessContext, ProcessOutput, Processor, sanitize,
+    Loaded, MainThreadMarker, MainWorkHandle, Origin, PluginDescriptor, PluginTail, ProcessContext,
+    ProcessOutput, Processor, process_block, sanitize,
 };
 use tutti_rt::Rt;
 
@@ -32,16 +32,16 @@ use tutti_graph::{Bus, Buses, Cx, Offset, Shape};
 use tutti_plugin_types::{Layout, LoadedPlugin, PluginBus};
 use tutti_tempo::TempoView;
 use tutti_transport::TempoReader;
-use tutti_types::{BusTopology, ChannelLayout, SampleRate, Samples};
+use tutti_types::{BusTopology, ChannelLayout, ParkedSampleRate, SampleRate, Samples};
 
 use super::instance::Instance;
 use crate::{BlockTransport, TransportSource, TransportWalk};
 use crate::{ParamDelivery, PluginControls, PluginMeter, SegmentPoints};
 use tutti_plugin_types::MidiIntake;
 use tutti_plugin_types::{
-    ChordChanges, ExpressiveContext, Features, MAX_BLOCK_CHANNELS, MIDI_STACK_CAPACITY,
-    MidiEventVec, ParamId, ParameterChanges, PluginTooWide, ScaleChanges, TransportChange,
-    TransportChanges, TransportInfo,
+    ChordChanges, ExpressiveContext, Features, MIDI_STACK_CAPACITY, MidiEventVec, ParamId,
+    ParameterChanges, PluginTooWide, ScaleChanges, TransportChange, TransportChanges,
+    TransportInfo,
 };
 
 /// A plugin running inside the host process, as a graph node, whatever its
@@ -114,7 +114,7 @@ pub struct InProcClient<F: Loaded> {
     pub(super) features: Features,
     pub(super) sample_rate: SampleRate,
     /// A rate the graph handed this node that the plugin has not been told
-    /// about yet, or [`NO_PENDING_RATE`] when there is none.
+    /// about yet; empty when there is none.
     ///
     /// Telling a plugin its rate is a deactivation and an activation, which
     /// needs the main thread. A `prepare` on it runs the change itself; one off
@@ -123,7 +123,7 @@ pub struct InProcClient<F: Loaded> {
     /// the out-of-process client gets from its command queue.
     ///
     /// Shared with the control backend, which drains it.
-    pub(super) pending_sample_rate: Arc<AtomicU64>,
+    pub(super) pending_sample_rate: Arc<ParkedSampleRate>,
     /// Blocks rendered silent because the realtime end held no Processor.
     /// Shared with the loader's handle side.
     pub(super) unlent: Arc<AtomicU64>,
@@ -451,22 +451,14 @@ impl<F: Loaded> std::ops::DerefMut for PluginNode<F> {
     }
 }
 
-/// [`InProcClient::pending_sample_rate`] sentinel: nothing is waiting.
-///
-/// A rate is stored as `f64::to_bits`, so the sentinel must be a bit pattern no
-/// rate produces. Zero is not one — `0.0f64.to_bits() == 0`, and a parked `0.0`
-/// would then read as "nothing waiting". `u64::MAX` is a NaN payload, and a
-/// rate that round-trips to NaN is not a rate.
-pub(super) const NO_PENDING_RATE: u64 = u64::MAX;
-
 /// Park `rate` for the main thread to dispatch. Audio-thread safe: one
 /// `Relaxed` store, no lock and no allocation.
 ///
 /// Last write wins. A rate superseded before anyone drained it never reached
 /// the plugin, so dropping it loses nothing — the plugin only needs to hear the
 /// rate it is about to run at.
-pub(super) fn queue_sample_rate(cell: &AtomicU64, rate: SampleRate) {
-    cell.store(rate.get().to_bits(), Ordering::Relaxed);
+pub(super) fn queue_sample_rate(cell: &ParkedSampleRate, rate: SampleRate) {
+    cell.park(rate, Ordering::Relaxed);
 }
 
 /// Dispatch a parked rate, if any, and report whether one reached the plugin.
@@ -478,13 +470,10 @@ pub(super) fn queue_sample_rate(cell: &AtomicU64, rate: SampleRate) {
 /// thread has handed it back.
 pub(super) fn drain_sample_rate<F: Loaded>(
     main: MainThreadMarker,
-    cell: &AtomicU64,
+    cell: &ParkedSampleRate,
     inner: &Mutex<Instance<F>>,
 ) -> bool {
-    // The sentinel is a NaN, which is no rate: a cell with nothing waiting
-    // reads as `None`, and the only other thing it holds is a queued rate.
-    let bits = cell.swap(NO_PENDING_RATE, Ordering::Relaxed);
-    let Some(rate) = SampleRate::new(f64::from_bits(bits)) else {
+    let Some(rate) = cell.take(Ordering::Relaxed) else {
         return false;
     };
     // A refusal is kept in the instance and reported by the control side's next
@@ -512,7 +501,7 @@ impl<F: Loaded> InProcClient<F> {
         declared: Declared,
         features: Features,
         sample_rate: SampleRate,
-        pending_sample_rate: Arc<AtomicU64>,
+        pending_sample_rate: Arc<ParkedSampleRate>,
         unlent: Arc<AtomicU64>,
         parameters: impl IntoIterator<Item = ParamId>,
         spares: usize,
@@ -842,7 +831,7 @@ pub(super) fn render_with<P: Processor>(
     inputs: &[&[f32]],
     outputs: &mut [&mut [f32]],
     size: usize,
-    sample_rate: f64,
+    sample_rate: SampleRate,
 ) -> Rendered {
     let (unlent, failed) = counters;
     // Taken whether or not the plugin runs: a block with no Processor drops
@@ -868,32 +857,11 @@ pub(super) fn render_with<P: Processor>(
     if let Some(expressive) = with.expressive {
         ctx = ctx.expressive(expressive);
     }
-    // `PluginIo` borrows the tables and the data for one lifetime, and a
-    // `&mut [&mut _]` is invariant in the data's: the same slices again, in a
-    // table whose borrow is this call's own. An array, not an `ArrayVec`: a
-    // type with a `Drop` would need its data to outlive the borrow of the
-    // table.
-    // At most `MAX_BLOCK_CHANNELS`: the node is never built over a wider
-    // plugin (`Declared::of`), and the callers' tables are that wide.
-    let width = outputs.len();
-    let mut rest = outputs.iter_mut();
-    let mut table: [&mut [f32]; MAX_BLOCK_CHANNELS] =
-        std::array::from_fn(|_| rest.next().map_or(&mut [][..], |o| &mut **o));
-    let mut io = PluginIo {
-        buffer: AudioBufferMut::F32(AudioBuffer {
-            inputs,
-            outputs: &mut table[..width],
-            num_samples: size,
-            sample_rate,
-        }),
-        ctx: &ctx,
-        out,
-    };
-    let processed = processor.process(&mut io);
+    let processed = process_block(processor, inputs, outputs, size, sample_rate, &ctx, out);
     match processed {
         Ok(()) => {
             // A plugin's NaN or infinity would poison every node downstream of it.
-            for channel in outputs.iter_mut().take(width) {
+            for channel in outputs.iter_mut() {
                 sanitize(channel);
             }
             Rendered::Ran
@@ -1155,7 +1123,7 @@ mod transport_tests {
 #[cfg(test)]
 mod render_tests {
     use super::*;
-    use tutti_plugin_types::{PluginError, PluginResult, WireMidi};
+    use tutti_plugin_types::{PluginError, PluginIo, PluginResult, WireMidi};
     use tutti_ump::Ump;
 
     /// A Processor that fails every block it is told to, and emits one MIDI
@@ -1209,7 +1177,7 @@ mod render_tests {
             &[],
             &mut [&mut channel[..]],
             8,
-            48_000.0,
+            SampleRate::SR_48K,
         )
     }
 
@@ -1273,6 +1241,7 @@ mod render_tests {
 mod sanitize_tests {
     use super::*;
     use tutti_plugin_types::PluginResult;
+    use tutti_plugin_types::{AudioBufferMut, PluginIo};
 
     /// Writes NaN, +inf and -inf among finite samples to its first output channel.
     struct Poisoned;
@@ -1316,7 +1285,7 @@ mod sanitize_tests {
             &[],
             &mut [&mut channel[..]],
             4,
-            48_000.0,
+            SampleRate::SR_48K,
         );
         assert_eq!(rendered, Rendered::Ran);
         assert_eq!(channel, [0.5, 0.0, 0.0, 0.0]);
@@ -1327,6 +1296,7 @@ mod sanitize_tests {
 mod declared_buses {
     use super::*;
     use tutti_graph::BusRole;
+    use tutti_plugin_types::MAX_BLOCK_CHANNELS;
     use tutti_plugin_types::{ChannelTopology, Speaker};
 
     fn width(n: u16) -> ChannelLayout {
