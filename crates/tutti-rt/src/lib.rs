@@ -33,7 +33,7 @@
 //! - **`request_priority`** — asks the OS to raise the calling thread's priority and returns
 //!   what it granted (never real time on Linux), or the refusal.
 //! - **`spawn_named`** — starts a named, optionally prioritised control-side thread whose body
-//!   gets a `StopToken`; its `ThreadHandle` stops and joins on drop and reports a panic once.
+//!   gets a `StopToken`; its `ThreadHandle` stops and joins on drop (or within a bound, `stop_within`) and reports a panic once.
 //! - **`sleep_until_ns`** — blocks a thread until an absolute `monotonic_ns` deadline, the
 //!   sleep of a thread that paces itself against deadlines.
 //! - **`ArcLend`/`Loan`/`Reader`** — the publish cell, re-exported from `arc-lend`:

@@ -18,7 +18,7 @@ use tutti_ump::{MidiGroup, Ump};
 
 use tutti_midi_runtime::MidiClipNode;
 use tutti_session::{
-    Declared, EventInPort, EventOutPort, MidiEvent, MidiSinkEntry, Peer, Presence, Resource,
+    Declared, EventInPort, EventOutPort, MidiReport, MidiSinkEntry, Peer, Presence, Resource,
     Session, SessionEvent, SinkOptions, Stamping, midi_sink,
 };
 use tutti_types::{Beat, BeatDuration};
@@ -171,7 +171,7 @@ fn a_full_tap_counts_what_it_drops() {
     assert!(
         events
             .iter()
-            .any(|e| matches!(e, SessionEvent::Midi(MidiEvent::OutputDropped { total }) if *total == dropped)),
+            .any(|e| matches!(e, SessionEvent::Midi(MidiReport::OutputDropped { total }) if *total == dropped)),
         "and reported: {events:?}"
     );
 }

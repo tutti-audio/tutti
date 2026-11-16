@@ -16,8 +16,8 @@ use tutti_midi_file::{
 };
 use tutti_types::{Beat, Seconds};
 use tutti_ump::{
-    BarAccents, Flex, FlexAddress, FlexTextKind, Form, KeySignature, Letter, Message, Metronome,
-    MidiGroup, SharpsFlats, SysexStatus, TimeSignature,
+    BarAccents, Flex, FlexAddress, FlexTextKind, FlexTimeSignature, Form, KeySignature, Letter,
+    Message, Metronome, MidiGroup, SharpsFlats, SysexStatus,
 };
 
 const TPQ: u16 = 480;
@@ -47,7 +47,7 @@ const DEFAULT_TEMPO: u32 = 50_000_000;
 
 fn signature_events(n: u8, d: u8, bb: u8, cc: u8) -> [FileEvent; 2] {
     [
-        flex(Flex::SetTimeSignature(TimeSignature {
+        flex(Flex::SetTimeSignature(FlexTimeSignature {
             numerator: n,
             denominator: d,
             thirty_seconds: bb,

@@ -19,7 +19,7 @@ use core::num::NonZeroU8;
 use tutti_ump::FunctionBlockCount;
 use tutti_ump::{
     Accidental, Alteration, AlterationKind, BarAccents, ChordBass, ChordName, ChordPitch,
-    ChordType, Direction, DiscoveryFilter, EndpointInfo, FirstGroup, Flex, FlexAddress,
+    ChordType, Direction, DiscoveryFilter, EndpointInfoNotification, FirstGroup, Flex, FlexAddress,
     FlexTextKind, Form, FunctionBlockId, FunctionBlockInfo, GroupSpan, Letter, Message, Metronome,
     Midi1Port, MidiGroup, Protocol, Stream, StreamConfig, U4, UiHint, Ump, UmpVersion,
 };
@@ -250,7 +250,7 @@ fn the_version_is_major_then_minor() {
     );
     pin(
         [0xF001_0102, 0, 0, 0],
-        Message::Stream(Stream::EndpointInfo(EndpointInfo {
+        Message::Stream(Stream::EndpointInfo(EndpointInfoNotification {
             version,
             static_function_blocks: false,
             function_blocks: FunctionBlockCount::of(0).into(),
@@ -266,7 +266,7 @@ fn the_version_is_major_then_minor() {
 // TXJR bit 0. Each alone, so that no two flags can trade places unseen.
 #[test]
 fn endpoint_info_flags_each_alone() {
-    let none = EndpointInfo {
+    let none = EndpointInfoNotification {
         version: UmpVersion { major: 1, minor: 1 },
         static_function_blocks: false,
         function_blocks: FunctionBlockCount::of(0).into(),
@@ -275,7 +275,7 @@ fn endpoint_info_flags_each_alone() {
         rx_jr: false,
         tx_jr: false,
     };
-    let case = |word: u32, info: EndpointInfo| {
+    let case = |word: u32, info: EndpointInfoNotification| {
         pin(
             [0xF001_0101, word, 0, 0],
             Message::Stream(Stream::EndpointInfo(info)),
@@ -283,42 +283,42 @@ fn endpoint_info_flags_each_alone() {
     };
     case(
         0x8000_0000,
-        EndpointInfo {
+        EndpointInfoNotification {
             static_function_blocks: true,
             ..none
         },
     );
     case(
         0x0500_0000,
-        EndpointInfo {
+        EndpointInfoNotification {
             function_blocks: FunctionBlockCount::of(5).into(),
             ..none
         },
     );
     case(
         0x0000_0200,
-        EndpointInfo {
+        EndpointInfoNotification {
             midi2: true,
             ..none
         },
     );
     case(
         0x0000_0100,
-        EndpointInfo {
+        EndpointInfoNotification {
             midi1: true,
             ..none
         },
     );
     case(
         0x0000_0002,
-        EndpointInfo {
+        EndpointInfoNotification {
             rx_jr: true,
             ..none
         },
     );
     case(
         0x0000_0001,
-        EndpointInfo {
+        EndpointInfoNotification {
             tx_jr: true,
             ..none
         },

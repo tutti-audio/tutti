@@ -9,7 +9,7 @@
 //! [`ConvolverNode`](crate::ConvolverNode).
 
 use tutti_graph::MAX_NODE_TAIL;
-use tutti_types::{Samples, Tail};
+use tutti_types::{SampleRate, Samples, Tail};
 
 /// A tail of this many frames never ends.
 pub(crate) const UNBOUNDED: u64 = u64::MAX;
@@ -23,11 +23,12 @@ pub(crate) fn tail_frames(tail: Tail) -> u64 {
     }
 }
 
-/// A tail from whole frames: unbounded for [`UNBOUNDED`] and for a figure past
-/// [`MAX_NODE_TAIL`], which the graph refuses as a finite tail and counts as never decaying
-/// where it is not refused. Nothing the clock reports past the bound is finite.
-pub(crate) fn frames_tail(frames: u64) -> Tail {
-    if frames == UNBOUNDED || frames > MAX_NODE_TAIL.get() as u64 {
+/// A tail from whole frames at `rate`: unbounded for [`UNBOUNDED`] and for a figure past
+/// [`MAX_NODE_TAIL`] at that rate, which the graph refuses as a finite tail and counts as
+/// never decaying where it is not refused. Nothing the clock reports past the bound is
+/// finite.
+pub(crate) fn frames_tail(frames: u64, rate: SampleRate) -> Tail {
+    if frames == UNBOUNDED || frames > MAX_NODE_TAIL.to_samples_ceil(rate).get() as u64 {
         Tail::Unbounded
     } else {
         Tail::Finite(Samples(usize::try_from(frames).unwrap_or(usize::MAX)))
@@ -46,11 +47,18 @@ pub(crate) struct Heard {
 /// What the clock answers for a block.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Owed {
-    /// The ring-out to report, held at the longer figure until a shorter one has been heard
-    /// out.
-    pub tail: Tail,
+    /// The ring-out owed in frames ([`UNBOUNDED`] for ever), held at the longer figure until
+    /// a shorter one has been heard out.
+    pub ring: u64,
     /// How many frames of the block may still sound.
     pub live: usize,
+}
+
+impl Owed {
+    /// The ring-out to report at `rate`: see [`frames_tail`].
+    pub(crate) fn tail(self, rate: SampleRate) -> Tail {
+        frames_tail(self.ring, rate)
+    }
 }
 
 /// The ring-out a node owes, in frames.
@@ -146,7 +154,7 @@ impl TailClock {
             }
         };
         Owed {
-            tail: frames_tail(self.ring),
+            ring: self.ring,
             live: live.min(size as u64) as usize,
         }
     }
@@ -155,6 +163,8 @@ impl TailClock {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const R: SampleRate = SampleRate::SR_48K;
 
     fn silent(size: usize) -> Heard {
         Heard {
@@ -184,7 +194,7 @@ mod tests {
         let mut c = TailClock::new(1_000, 0);
         let owed = c.advance(0, silent(64));
         assert_eq!(owed.live, 0);
-        assert_eq!(owed.tail, Tail::Finite(Samples(0)));
+        assert_eq!(owed.tail(R), Tail::Finite(Samples(0)));
     }
 
     /// An impulse on a block's frame 0 with a tail of 100 and a latency of 10 sounds for the
@@ -200,7 +210,7 @@ mod tests {
                 last_input: Some(0),
             },
         );
-        assert_eq!(first.tail, Tail::Finite(Samples(100)));
+        assert_eq!(first.tail(R), Tail::Finite(Samples(100)));
         assert_eq!(first.live, 64);
         let second = c.advance(100, silent(64));
         assert_eq!(second.live, 111 - 64);
@@ -239,9 +249,9 @@ mod tests {
                 last_input: Some(63),
             },
         );
-        assert_eq!(first.tail, Tail::Finite(Samples(150)), "the ceiling");
+        assert_eq!(first.tail(R), Tail::Finite(Samples(150)), "the ceiling");
         let second = c.advance(20, silent(64));
-        assert_eq!(second.tail, Tail::Finite(Samples(150)), "held");
+        assert_eq!(second.tail(R), Tail::Finite(Samples(150)), "held");
         assert_eq!(second.live, 64);
         assert_eq!(c.advance(20, silent(64)).live, 64);
         assert_eq!(c.advance(20, silent(64)).live, 150 - 128);
@@ -253,35 +263,59 @@ mod tests {
     fn a_thaw_rings_out_from_the_block_it_is_seen_in() {
         let mut c = TailClock::new(UNBOUNDED, 0);
         let held = c.advance(UNBOUNDED, silent(64));
-        assert_eq!(held.tail, Tail::Unbounded);
+        assert_eq!(held.tail(R), Tail::Unbounded);
         assert_eq!(held.live, 64);
         let thaw = c.advance(100, silent(64));
-        assert_eq!(thaw.tail, Tail::Finite(Samples(100)));
+        assert_eq!(thaw.tail(R), Tail::Finite(Samples(100)));
         assert_eq!(thaw.live, 64);
         assert_eq!(c.advance(100, silent(64)).live, 100 - 64);
         assert_eq!(c.advance(100, silent(64)).live, 0);
     }
 
     /// A ring-out past what a graph takes as finite is reported unbounded, whatever the
-    /// ceiling: the bound itself is still finite, one frame past it is not, and the node's
-    /// own count (what is live) goes on in frames.
+    /// ceiling: the bound (sixty seconds at the node's rate) is still finite, one frame past
+    /// it is not, and the node's own count (what is live) goes on in frames. At 96 kHz the
+    /// bound is twice the frames it is at 48 kHz.
     #[test]
     fn nothing_past_the_graphs_bound_is_reported_finite() {
-        let bound = MAX_NODE_TAIL.get() as u64;
-        let mut c = TailClock::new(UNBOUNDED, 0);
-        let at = c.advance(
-            bound,
-            Heard {
-                size: 64,
-                last_input: Some(0),
-            },
+        for (rate, bound) in [
+            (SampleRate::SR_48K, 2_880_000u64),
+            (SampleRate::SR_96K, 5_760_000),
+        ] {
+            let mut c = TailClock::new(UNBOUNDED, 0);
+            let at = c.advance(
+                bound,
+                Heard {
+                    size: 64,
+                    last_input: Some(0),
+                },
+            );
+            assert_eq!(
+                at.tail(rate),
+                Tail::Finite(Samples(bound as usize)),
+                "{rate:?}"
+            );
+            let past = c.advance(bound + 1, silent(64));
+            assert_eq!(past.tail(rate), Tail::Unbounded, "{rate:?}");
+            assert_eq!(past.live, 64, "it still rings, frame by frame");
+            assert_eq!(frames_tail(bound + 1, rate), Tail::Unbounded);
+            assert_eq!(
+                frames_tail(bound, rate),
+                Tail::Finite(Samples(bound as usize))
+            );
+        }
+        // The same count is a figure at the rate that holds it.
+        let frames = 4_000_000;
+        assert_eq!(
+            frames_tail(frames, SampleRate::SR_48K),
+            Tail::Unbounded,
+            "83 s"
         );
-        assert_eq!(at.tail, Tail::Finite(MAX_NODE_TAIL));
-        let past = c.advance(bound + 1, silent(64));
-        assert_eq!(past.tail, Tail::Unbounded);
-        assert_eq!(past.live, 64, "it still rings, frame by frame");
-        assert_eq!(frames_tail(bound + 1), Tail::Unbounded);
-        assert_eq!(frames_tail(bound), Tail::Finite(MAX_NODE_TAIL));
+        assert_eq!(
+            frames_tail(frames, SampleRate::SR_96K),
+            Tail::Finite(Samples(frames as usize)),
+            "41.7 s"
+        );
     }
 
     /// `clear` forgets what was owed and heard.

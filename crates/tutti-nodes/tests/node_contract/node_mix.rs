@@ -160,9 +160,10 @@ fn check_io<N: IntoNode>(
 #[test]
 fn the_convolver_is_blended_by_the_graph() {
     use tutti_buffers::Mono;
-    use tutti_nodes::{ConvolverNode, generate_room_ir};
-    let ir = generate_room_ir(0.5, Seconds(0.05), RATE);
-    let ir2 = generate_room_ir(0.8, Seconds(0.08), RATE);
+    use tutti_fixtures::signal::room_ir;
+    use tutti_nodes::ConvolverNode;
+    let ir = room_ir(0.5, Seconds(0.05), RATE);
+    let ir2 = room_ir(0.8, Seconds(0.08), RATE);
     check(
         "convolver (dual mono, 64-frame block)",
         &|| ConvolverNode::per_channel(&[&ir, &ir2], 64).unwrap(),
