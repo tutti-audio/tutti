@@ -34,7 +34,7 @@ use tutti_types::{Bpm, Confidence, Db, SampleRate, Samples, Seconds};
 use crate::beat;
 use crate::convert::to_f32;
 use crate::framing::Framing;
-use crate::onset::{DetectionFunction, OnsetConfig, OnsetState, onset_lag, step_onset};
+use crate::onset::{DetectionFunction, OnsetConfig, onset_lag, run};
 use crate::xcorr::cross_correlate;
 use crate::{Error, Result};
 use tutti_dsp::FftScratch;
@@ -419,18 +419,11 @@ fn novelty(
     if peak < SILENCE_FLOOR.to_amplitude().get() {
         return Err(Error::NoSignal);
     }
-    let mut state = OnsetState::new();
-    for frame in geometry.frames_for(Samples(samples.len())).indices() {
-        let offset = frame.get() * geometry.hop().get();
-        step_onset(
-            &onset,
-            &mut state,
-            frame,
-            &samples[offset..offset + window],
-            fft,
-        );
-    }
-    let mut curve: Vec<f32> = state.novelty().iter().map(|&(_, v)| v).collect();
+    let mut curve: Vec<f32> = run(onset, samples, fft)
+        .novelty()
+        .iter()
+        .map(|&(_, v)| v)
+        .collect();
     if let Some(first) = curve.first_mut() {
         *first = 0.0;
     }

@@ -141,6 +141,10 @@ const fn ty(
 }
 
 const NOT_A_NODE: &str = "an analysis or transport config: it holds no width to choose";
+const MEASURES: &str = "a measurement config describes the analysis; the audio's width travels \
+    with the view it is applied to (`Mono`, `Interleaved`, `StereoPlanes`), so there is no width to choose";
+const TOPOLOGY: &str = "a loudness config holds the channel topology the weights are read from, \
+    which is the analysis's channel model, not a width choice; the call checks the view's width against it";
 const TEST_SUPPORT: &str =
     "test support behind the `testing` or `contract` feature, not an app's type";
 
@@ -382,29 +386,35 @@ pub(super) const ALLOW: &[Allow] = &[
         "reading the platform window handle: the failure is the OS's, not a value's",
     ),
     ty("crates/tutti-au-host/", "StreamConfig", WIDTH, NOT_A_NODE),
-    ty("crates/tutti-measure/", "AlignConfig", WIDTH, NOT_A_NODE),
-    ty("crates/tutti-measure/", "ChordConfig", WIDTH, NOT_A_NODE),
-    ty("crates/tutti-measure/", "ChromaConfig", WIDTH, NOT_A_NODE),
-    ty("crates/tutti-measure/", "LoudnessConfig", WIDTH, NOT_A_NODE),
-    ty("crates/tutti-measure/", "NoteConfig", WIDTH, NOT_A_NODE),
-    ty("crates/tutti-measure/", "OnsetConfig", WIDTH, NOT_A_NODE),
-    ty("crates/tutti-measure/", "PeakConfig", WIDTH, NOT_A_NODE),
-    ty("crates/tutti-measure/", "SilenceConfig", WIDTH, NOT_A_NODE),
-    ty("crates/tutti-measure/", "SpectrumConfig", WIDTH, NOT_A_NODE),
-    ty("crates/tutti-measure/", "TempoConfig", WIDTH, NOT_A_NODE),
+    ty("crates/tutti-measure/", "AlignConfig", WIDTH, MEASURES),
+    ty("crates/tutti-measure/", "ChordConfig", WIDTH, MEASURES),
+    ty("crates/tutti-measure/", "ChromaConfig", WIDTH, MEASURES),
+    ty("crates/tutti-measure/", "LoudnessConfig", WIDTH, TOPOLOGY),
+    ty("crates/tutti-measure/", "NoteConfig", WIDTH, MEASURES),
+    ty("crates/tutti-measure/", "OnsetConfig", WIDTH, MEASURES),
+    ty("crates/tutti-measure/", "PeakConfig", WIDTH, MEASURES),
+    ty("crates/tutti-measure/", "SilenceConfig", WIDTH, MEASURES),
+    ty("crates/tutti-measure/", "SpectrumConfig", WIDTH, MEASURES),
+    ty("crates/tutti-measure/", "TempoConfig", WIDTH, MEASURES),
     ty(
         "crates/tutti-measure/",
         "VectorscopeConfig",
         WIDTH,
-        NOT_A_NODE,
+        MEASURES,
     ),
     ty(
         "crates/tutti-measure/",
         "WindowedLoudnessConfig",
         WIDTH,
-        NOT_A_NODE,
+        TOPOLOGY,
     ),
-    ty("crates/tutti-measure/", "YinConfig", WIDTH, NOT_A_NODE),
+    ty(
+        "crates/tutti-measure/",
+        "TruePeakMeter::new",
+        CTOR,
+        "ebur128 refuses a rate or width it cannot meter: the refusal is the library's, not a value's",
+    ),
+    ty("crates/tutti-measure/", "YinConfig", WIDTH, MEASURES),
     ty(
         "crates/tutti-midi-network/",
         "HostConfig",

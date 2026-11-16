@@ -11,14 +11,19 @@ use tutti_types::{Bpm, ChannelLayout, Db, Hz, SampleRate, Samples};
 ///
 /// An analyser's own validation raises its own variant. [`Dsp`](Self::Dsp)
 /// carries what the shared STFT infrastructure refused (a window and hop that
-/// do not fit, a grid whose shape disagrees with its data), so `?` on
-/// building a `StftGeometry` or a `Grid` keeps working.
+/// do not divide, a grid whose shape disagrees with its data), so `?` on
+/// building a `StftGeometry` or a `Grid` keeps working. A zero window or hop is
+/// [`ZeroWindow`](Self::ZeroWindow) or [`ZeroHop`](Self::ZeroHop) wherever it
+/// is found.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
     /// The shared STFT infrastructure refused a geometry or a grid.
     #[error(transparent)]
-    Dsp(#[from] tutti_dsp::StftError),
+    Dsp(tutti_dsp::StftError),
+    /// A zero window: a frame would hold nothing.
+    #[error("analysis window is zero-length")]
+    ZeroWindow,
     /// A zero hop: frames would never advance.
     #[error("hop size is zero: frames would not advance")]
     ZeroHop,
@@ -26,9 +31,9 @@ pub enum Error {
     #[error("block size is zero: a block would summarize nothing")]
     ZeroBlock,
     /// `min >= max`, or either bound at or below zero or not finite. Refused
-    /// when the band is built, or by the call that takes a band the geometry
-    /// cannot hold, because a detector that accepts it reports "unvoiced"
-    /// forever instead.
+    /// when the band is built (`FrequencyBand::new`), or by the call that takes
+    /// a band the framing cannot hold (fewer than three bins, no whole band),
+    /// because a detector that accepts it reports "unvoiced" forever instead.
     #[error("empty frequency range: min {min} is not below max {max}")]
     EmptyFrequencyRange {
         /// The lower bound in [`Hz`]; not below `max`.
@@ -250,6 +255,16 @@ pub enum Error {
         /// What the caller supplied, in [`Samples`].
         got: Samples,
     },
+}
+
+impl From<tutti_dsp::StftError> for Error {
+    fn from(error: tutti_dsp::StftError) -> Self {
+        match error {
+            tutti_dsp::StftError::ZeroWindow => Self::ZeroWindow,
+            tutti_dsp::StftError::ZeroHop => Self::ZeroHop,
+            other => Self::Dsp(other),
+        }
+    }
 }
 
 /// Result of an analysis call, defaulting the error to [`Error`].

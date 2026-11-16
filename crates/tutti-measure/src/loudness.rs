@@ -50,7 +50,9 @@ use crate::convert::{all_finite, for_blocks};
 use crate::{Error, Result};
 
 /// What a loudness meter measures: the channel topology of the frames fed to
-/// it.
+/// it. Unlike a width, a topology is part of the analysis: it is the channel
+/// model each speaker's weight is read from. [`measure_loudness`] checks the
+/// buffer's width against it ([`Error::ChunkLayoutMismatch`]).
 ///
 /// The rate is **not** part of the config and **not** defaulted: the call that
 /// takes the frames binds it ([`measure`](Self::measure),
@@ -186,7 +188,9 @@ impl Loudness {
 
 /// A running EBU R128 meter at one rate and topology.
 ///
-/// Wraps `EbuR128`, which accumulates internally.
+/// Wraps `EbuR128`, which accumulates internally. Not for the audio thread: the
+/// meter keeps the gating blocks of the whole run, so it grows with the audio
+/// and allocates.
 pub struct LoudnessMeter {
     layout: ChannelLayout,
     meter: EbuR128,
@@ -231,6 +235,11 @@ impl LoudnessMeter {
         Ok(())
     }
 
+    /// Forgets everything fed: the readings start over.
+    pub fn reset(&mut self) {
+        self.meter.reset();
+    }
+
     /// Reads the meter.
     ///
     /// Consumes it: R128's integrated loudness is a whole-signal answer, and
@@ -263,45 +272,16 @@ impl LoudnessMeter {
     }
 }
 
-/// What a true-peak meter measures: the width of the frames fed to it.
-///
-/// Reads nothing but the peak, so it takes no [`ChannelTopology`] and pays for
-/// no integrated or range gating, and any channel layout will do.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TruePeakConfig {
-    layout: ChannelLayout,
-}
-
-impl TruePeakConfig {
-    /// A config for frames `layout` wide.
-    #[must_use]
-    pub fn new(layout: ChannelLayout) -> Self {
-        Self { layout }
-    }
-
-    /// A meter for frames at `rate`.
-    ///
-    /// # Errors
-    ///
-    /// [`Error::MeterUnavailable`] when `ebur128` cannot meter the width or the
-    /// rate.
-    pub fn measure(&self, rate: impl Into<SampleRate>) -> Result<TruePeakMeter> {
-        EbuR128::new(
-            u32::from(self.layout.count()),
-            rate.into().get().round() as u32,
-            Mode::TRUE_PEAK,
-        )
-        .map_err(|_| Error::MeterUnavailable)
-        .map(|meter| TruePeakMeter {
-            layout: self.layout,
-            meter,
-            scratch: Vec::new(),
-        })
-    }
-}
-
 /// A running true-peak meter: the largest inter-sample peak over every
 /// channel, for channels with no placement to weigh a loudness by.
+///
+/// It reads nothing but the peak, so it takes no [`ChannelTopology`], pays for
+/// no integrated or range gating, and any channel layout will do: the width is
+/// the audio's, so there is no config to describe, and the meter is made from
+/// the rate and the width it measures.
+///
+/// Not for the audio thread: a push widens the chunk into a scratch that grows
+/// to the longest chunk fed, and the meter's own buffers allocate.
 pub struct TruePeakMeter {
     layout: ChannelLayout,
     meter: EbuR128,
@@ -320,6 +300,26 @@ impl std::fmt::Debug for TruePeakMeter {
 }
 
 impl TruePeakMeter {
+    /// A meter for frames `layout` wide at `rate`.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::MeterUnavailable`] when `ebur128` cannot meter the width or the
+    /// rate.
+    pub fn new(rate: impl Into<SampleRate>, layout: ChannelLayout) -> Result<Self> {
+        EbuR128::new(
+            u32::from(layout.count()),
+            rate.into().get().round() as u32,
+            Mode::TRUE_PEAK,
+        )
+        .map_err(|_| Error::MeterUnavailable)
+        .map(|meter| Self {
+            layout,
+            meter,
+            scratch: Vec::new(),
+        })
+    }
+
     /// Feeds one chunk of frames.
     ///
     /// Any sample format is metered at its nominal level (an integer as a
@@ -327,7 +327,7 @@ impl TruePeakMeter {
     ///
     /// # Errors
     ///
-    /// [`Error::ChunkLayoutMismatch`] when `chunk` is not the config's width.
+    /// [`Error::ChunkLayoutMismatch`] when `chunk` is not the meter's width.
     pub fn push<S: Sample>(&mut self, chunk: Interleaved<'_, S>) -> Result<()> {
         if chunk.layout() != self.layout {
             return Err(Error::ChunkLayoutMismatch {
@@ -344,6 +344,11 @@ impl TruePeakMeter {
         Ok(())
     }
 
+    /// Forgets everything fed: the peak reads the floor again.
+    pub fn reset(&mut self) {
+        self.meter.reset();
+    }
+
     /// The largest true peak of every channel fed, in dBTP; [`Db::FLOOR`] for
     /// silence. Consumes the meter, as [`LoudnessMeter::finish`] does.
     #[must_use]
@@ -356,18 +361,17 @@ impl TruePeakMeter {
 }
 
 /// The true peak of a whole buffer at `rate`, in dBTP: a [`TruePeakMeter`] fed
-/// the buffer, then finished.
+/// the buffer, then finished. The width is the buffer's.
 ///
 /// # Errors
 ///
 /// [`Error::MeterUnavailable`] when `ebur128` cannot meter the width or the
-/// rate; [`Error::ChunkLayoutMismatch`] when `buffer` is not the config's width.
+/// rate.
 pub fn measure_true_peak<S: Sample>(
-    cfg: &TruePeakConfig,
     buffer: Interleaved<'_, S>,
     rate: impl Into<SampleRate>,
 ) -> Result<Db> {
-    let mut meter = cfg.measure(rate)?;
+    let mut meter = TruePeakMeter::new(rate, buffer.layout())?;
     meter.push(buffer)?;
     Ok(meter.finish())
 }
@@ -488,6 +492,9 @@ impl WindowedReading {
 }
 
 /// A running windowed meter at one rate and topology.
+///
+/// There is no `finish`: the result is the [`WindowedReading`] each push
+/// returns. Not for the audio thread (see [`push`](Self::push)).
 pub struct WindowedMeter {
     layout: ChannelLayout,
     rate: SampleRate,
@@ -1410,9 +1417,7 @@ mod tests {
             .collect();
         let sample_peak = samples.iter().fold(0.0f32, |m, s| m.max(s.abs()));
         assert!((sample_peak - 0.5 / 2f32.sqrt()).abs() < 1e-3);
-        let mut state = TruePeakConfig::new(ChannelLayout::MONO)
-            .measure(rate)
-            .unwrap();
+        let mut state = TruePeakMeter::new(rate, ChannelLayout::MONO).unwrap();
         state
             .push(Interleaved::new(&samples, ChannelLayout::MONO).unwrap())
             .unwrap();
@@ -1426,9 +1431,7 @@ mod tests {
     /// Silence reads the floor, and a chunk of another width is refused.
     #[test]
     fn the_true_peak_meter_floors_silence_and_refuses_a_wrong_width() {
-        let mut state = TruePeakConfig::new(ChannelLayout::STEREO)
-            .measure(SampleRate::SR_48K)
-            .unwrap();
+        let mut state = TruePeakMeter::new(SampleRate::SR_48K, ChannelLayout::STEREO).unwrap();
         let loud = vec![0.9f32; 4_800 * 4];
         assert!(matches!(
             state.push(Interleaved::new(&loud, ChannelLayout::QUAD).unwrap()),
@@ -1444,11 +1447,10 @@ mod tests {
     #[test]
     fn the_true_peak_one_shot_equals_a_chunked_meter() {
         let buf = sine(48_000.0, 0.5, 1_000.0, 0.7);
-        let cfg = TruePeakConfig::new(ChannelLayout::STEREO);
         let whole = Interleaved::new(&buf, ChannelLayout::STEREO).unwrap();
-        let one_shot = measure_true_peak(&cfg, whole, SampleRate::SR_48K).unwrap();
+        let one_shot = measure_true_peak(whole, SampleRate::SR_48K).unwrap();
         for frames in [1, 777, 4800, 24_000] {
-            let mut meter = cfg.measure(SampleRate::SR_48K).unwrap();
+            let mut meter = TruePeakMeter::new(SampleRate::SR_48K, ChannelLayout::STEREO).unwrap();
             for chunk in buf.chunks(frames * 2) {
                 meter
                     .push(Interleaved::new(chunk, ChannelLayout::STEREO).unwrap())
@@ -1470,9 +1472,7 @@ mod tests {
                 x.convert_to::<i16>()
             })
             .collect();
-        let mut state = TruePeakConfig::new(ChannelLayout::MONO)
-            .measure(SampleRate::SR_48K)
-            .unwrap();
+        let mut state = TruePeakMeter::new(SampleRate::SR_48K, ChannelLayout::MONO).unwrap();
         state
             .push(Interleaved::new(&samples, ChannelLayout::MONO).unwrap())
             .unwrap();

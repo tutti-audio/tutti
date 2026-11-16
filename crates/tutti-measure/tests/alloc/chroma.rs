@@ -1,4 +1,4 @@
-//! A chroma step allocates nothing once its state holds the buffers.
+//! A chroma push allocates nothing once its meter is made.
 //!
 //! The crate carries no `assert_no_alloc` dev-dependency (see its Cargo.toml),
 //! so this binary counts allocations with its own global allocator. It counts
@@ -6,16 +6,14 @@
 
 use tutti_buffers::Mono;
 use tutti_fixtures::allocations;
-use tutti_measure::{ChromaConfig, Framing, Tuning, TuningOffset};
-use tutti_types::{Cents, SampleRate, Samples};
+use tutti_measure::{ChromaConfig, Framing};
+use tutti_types::{SampleRate, Samples};
 
-/// After one push has built the buffers and planned the FFT, further pushes
-/// and a `reset` allocate nothing, and the pushed frame count is the same as a
-/// fresh meter's.
+/// Construction builds the buffers and plans the FFT, so every push, the first
+/// included, and a `reset` allocate nothing.
 #[test]
-fn pushes_after_the_first_do_not_allocate() {
+fn no_push_allocates() {
     let cfg = ChromaConfig::new().framing(Framing::new(Samples(2048), Samples(512)));
-    let fixed = cfg.tuning(Tuning::Fixed(TuningOffset::of(Cents(10.0))));
     let frame: Vec<f32> = (0..2048)
         .map(|i| (std::f32::consts::TAU * 440.0 * i as f32 / 22_050.0).sin() * 0.5)
         .collect();
@@ -25,11 +23,12 @@ fn pushes_after_the_first_do_not_allocate() {
     assert!(built > 0, "construction builds the buffers");
     let mut meter = meter.unwrap();
 
-    // The first push sizes the sample buffer and plans the transform.
+    // Construction planned the transform, so even the first push allocates
+    // nothing.
     let first = allocations(|| {
         meter.push(Mono::new(&frame)).unwrap();
     });
-    assert!(first > 0, "the first push builds the buffers");
+    assert_eq!(first, 0, "the first push");
 
     let again = allocations(|| {
         meter.push(Mono::new(&frame)).unwrap();
@@ -41,11 +40,4 @@ fn pushes_after_the_first_do_not_allocate() {
         meter.push(Mono::new(&frame)).unwrap();
     });
     assert_eq!(reset, 0, "reset and a push");
-
-    // A meter of another tuning is its own meter: it builds its own buffers.
-    let mut other = fixed.measure(rate).unwrap();
-    let rebuilt = allocations(|| {
-        other.push(Mono::new(&frame)).unwrap();
-    });
-    assert!(rebuilt > 0, "a new meter builds its own");
 }

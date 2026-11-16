@@ -53,7 +53,7 @@ use tutti_buffers::{Mono, Sample};
 use tutti_types::{Cents, Db, Hz, Note, SampleRate, Samples, Semitones};
 
 use crate::convert::{all_finite, for_blocks, to_f32};
-use crate::framing::Framing;
+use crate::framing::{FrameCutter, Framing, check_nyquist};
 use crate::{Error, Result};
 use tutti_dsp::Complex32;
 use tutti_dsp::FftScratch;
@@ -275,7 +275,8 @@ impl ChromaConfig {
     ///
     /// # Errors
     ///
-    /// [`Error::Dsp`] for a zero window or hop; [`Error::WindowOutOfRange`]
+    /// [`Error::ZeroWindow`] or [`Error::ZeroHop`] for a zero window or hop;
+    /// [`Error::WindowOutOfRange`]
     /// for a window under 64 or over 262144 samples;
     /// [`Error::TooManyOverlaps`] for a hop under a sixty-fourth of the window;
     /// [`Error::EmptyFrequencyRange`] when the band holds fewer than three bins;
@@ -343,10 +344,7 @@ impl ChromaPlan {
         if !(min.get().is_finite() && max.get().is_finite() && min.get() > 0.0 && min < max) {
             return Err(empty);
         }
-        let nyquist = Hz(self.geometry.sample_rate().get() as f32 / 2.0);
-        if max > nyquist {
-            return Err(Error::AboveNyquist { freq: max, nyquist });
-        }
+        check_nyquist(max, self.geometry.sample_rate())?;
         let width = self.bin_width();
         let lo = ((f64::from(min.get()) / width).ceil() as usize).max(1);
         let hi = ((f64::from(max.get()) / width).floor() as usize)
@@ -480,6 +478,16 @@ pub struct Chroma {
 }
 
 impl Chroma {
+    /// A chroma of `grid` taken at `framing`, with `tuning`.
+    #[cfg(test)]
+    pub(crate) fn new(grid: Grid<f32>, tuning: Cents, framing: Framing) -> Self {
+        Self {
+            grid,
+            tuning,
+            framing,
+        }
+    }
+
     /// One row per frame, one column per pitch class from C, each `0..=1`.
     #[inline]
     #[must_use]
@@ -528,7 +536,7 @@ fn mean_of(sum: &[f64; CLASSES], frames: usize) -> [f32; CLASSES] {
 /// What a run of frames carries: a running mean and the tuning sums, and the
 /// buffers a frame is transformed in.
 #[derive(Debug, Clone)]
-struct ChromaState {
+struct ChromaFold {
     plan: ChromaPlan,
     window: Vec<f32>,
     spectrum: Vec<Complex32>,
@@ -538,7 +546,7 @@ struct ChromaState {
     sums: TuningSums,
 }
 
-impl ChromaState {
+impl ChromaFold {
     /// A state with every buffer built for `plan`.
     fn new(plan: ChromaPlan) -> Self {
         let window = plan.geometry.window().get();
@@ -619,32 +627,34 @@ impl ChromaState {
 /// length, it cuts the frames at the hop, folds each into a running mean and
 /// reports the mean and the tuning so far.
 ///
-/// With [`Tuning::Estimate`] the tuning is the estimate from the peaks seen so
-/// far; with a fixed tuning the frames equal [`chroma`]'s bit for bit.
+/// There is no `finish`: the reading, [`mean`](Self::mean) and
+/// [`tuning`](Self::tuning), is available after any push. With
+/// [`Tuning::Estimate`] the tuning is the estimate from the peaks seen so far;
+/// with a fixed tuning the frames equal [`chroma`]'s bit for bit.
+///
+/// A push allocates nothing once the meter is made (the transform is planned
+/// there), and its cost is a transform per frame: fit for a consumer thread
+/// that drains a tap, not for an audio callback.
 #[derive(Debug)]
 pub struct ChromaMeter {
-    state: ChromaState,
+    fold: ChromaFold,
+    cutter: FrameCutter,
     fft: FftScratch,
-    /// The samples from absolute index `base` that no frame has finished with.
-    buffer: Vec<f32>,
-    base: usize,
-    /// The first sample of the next frame.
-    next_start: usize,
-    latest: Option<[f32; CLASSES]>,
 }
 
 impl ChromaMeter {
     fn new(plan: ChromaPlan) -> Self {
-        let (window, hop) = (plan.geometry.window().get(), plan.geometry.hop().get());
+        let mut fft = FftScratch::new();
+        let fold = ChromaFold::new(plan);
+        // Plans the transform and sizes its scratch, so a push allocates
+        // nothing.
+        let window = plan.geometry.window().get();
+        let mut spectrum = vec![Complex32::default(); window / 2 + 1];
+        fft.forward(&vec![0.0; window], &fold.window, &mut spectrum);
         Self {
-            state: ChromaState::new(plan),
-            fft: FftScratch::new(),
-            // A window and the longest block `push` converts at once: a push
-            // allocates nothing after this.
-            buffer: Vec::with_capacity(window + crate::convert::BLOCK + hop),
-            base: 0,
-            next_start: 0,
-            latest: None,
+            cutter: FrameCutter::new(Framing::new(plan.geometry.window(), plan.geometry.hop())),
+            fold,
+            fft,
         }
     }
 
@@ -660,78 +670,50 @@ impl ChromaMeter {
             return Err(Error::NonFiniteInput);
         }
         let mut folded = 0;
-        for_blocks(chunk.samples(), 1, |block| folded += self.feed(block));
+        for_blocks(chunk.samples(), 1, |block| {
+            self.feed(block, |_| folded += 1);
+        });
         Ok(folded)
     }
 
-    /// Takes converted samples and folds each frame they complete.
-    fn feed(&mut self, block: &[f32]) -> usize {
-        self.buffer.extend_from_slice(block);
-        let (window, hop) = (
-            self.state.plan.geometry.window().get(),
-            self.state.plan.geometry.hop().get(),
-        );
-        let mut folded = 0;
-        while self.next_start + window <= self.base + self.buffer.len() {
-            let at = self.next_start - self.base;
-            self.latest = Some(
-                self.state
-                    .fold_frame(&self.buffer[at..at + window], &mut self.fft),
-            );
-            folded += 1;
-            self.next_start += hop;
-        }
-        let done = (self.next_start - self.base).min(self.buffer.len());
-        self.buffer.drain(..done);
-        self.base += done;
-        folded
+    /// Takes converted, finite samples and folds each frame they complete,
+    /// calling `each` with the frame's chroma.
+    fn feed(&mut self, block: &[f32], mut each: impl FnMut(&[f32; CLASSES])) {
+        let Self { fold, cutter, fft } = self;
+        cutter.feed(block, |_, samples| each(&fold.fold_frame(samples, fft)));
     }
 
     /// The mean of the frames folded so far, per class; all zero before the
     /// first.
     #[must_use]
     pub fn mean(&self) -> [f32; CLASSES] {
-        self.state.mean()
-    }
-
-    /// The chroma of the last frame folded, `0..=1` per class; `None` before
-    /// the first.
-    #[must_use]
-    pub fn latest(&self) -> Option<[f32; CLASSES]> {
-        self.latest
+        self.fold.mean()
     }
 
     /// The tuning in use: the config's fixed value, or the estimate from the
     /// peaks seen so far (0 before any).
     #[must_use]
     pub fn tuning(&self) -> Cents {
-        self.state.tuning()
-    }
-
-    /// How many frames have been folded.
-    #[must_use]
-    pub fn frames(&self) -> usize {
-        self.state.frames
+        self.fold.tuning()
     }
 
     /// Forgets the carried frames and tuning, keeping the buffers: the next
     /// push allocates nothing. Reads like a fresh meter.
     pub fn reset(&mut self) {
-        self.state.reset();
-        self.buffer.clear();
-        self.base = 0;
-        self.next_start = 0;
-        self.latest = None;
+        self.fold.reset();
+        self.cutter.reset();
     }
 }
 
 /// The chromagram of a whole buffer at `rate`.
 ///
-/// With [`Tuning::Estimate`] the buffer is transformed twice, once to find the
-/// tuning of all its peaks and once to fold with it; the second pass is a
-/// [`ChromaMeter`] with that tuning fixed, so streaming a buffer at a fixed
-/// tuning gives these frames bit for bit. Frame `i` covers samples
-/// `i * hop .. i * hop + window`.
+/// With a fixed tuning this feeds one [`ChromaMeter`] the buffer, so streaming
+/// it gives these frames bit for bit. With [`Tuning::Estimate`] it is the one
+/// exception to "the one-shot is a meter fed the buffer": the buffer is
+/// transformed twice, once to find the tuning of all its peaks and once, in a
+/// meter with that tuning fixed, to fold with it, so a streaming estimate (which
+/// can only use the peaks seen so far) differs from it in its early frames.
+/// Frame `i` covers samples `i * hop .. i * hop + window`.
 ///
 /// # Errors
 ///
@@ -775,7 +757,7 @@ pub fn chroma<S: Sample>(
     let tuning = match plan.tuning {
         Tuning::Fixed(offset) => offset,
         Tuning::Estimate => {
-            let mut state = ChromaState::new(plan);
+            let mut state = ChromaFold::new(plan);
             for i in 0..frames.get() {
                 state.transform(frame_at(i), fft);
                 let sums = &mut state.sums;
@@ -789,11 +771,11 @@ pub fn chroma<S: Sample>(
         tuning: Tuning::Fixed(tuning),
         ..plan
     };
-    let mut state = ChromaState::new(fixed);
+    let mut meter = ChromaMeter::new(fixed);
+    core::mem::swap(&mut meter.fft, fft);
     let mut data = Vec::with_capacity(frames.get() * CLASSES);
-    for i in 0..frames.get() {
-        data.extend_from_slice(&state.fold_frame(frame_at(i), fft));
-    }
+    meter.feed(&samples, |frame| data.extend_from_slice(frame));
+    core::mem::swap(&mut meter.fft, fft);
     Ok(Chroma {
         grid: Grid::new(data, frames, BinCount(CLASSES))?,
         tuning: tuning.get(),
@@ -992,7 +974,6 @@ mod tests {
         let fixed = cfg().tuning(Tuning::Fixed(TuningOffset::new(batch.tuning()).unwrap()));
         // At the batch's tuning, the one-shot is the meter's reference.
         assert_eq!(run(&x, &fixed).grid(), batch.grid());
-        let last: Vec<f32> = batch.grid().rows().last().unwrap().to_vec();
         for chunk in [1usize, 777, 4096, 5000, x.len()] {
             let mut meter = fixed.measure(RATE).unwrap();
             let mut folded = 0;
@@ -1000,8 +981,6 @@ mod tests {
                 folded += meter.push(Mono::new(part)).unwrap();
             }
             assert_eq!(folded, batch.grid().frames().get(), "chunk {chunk}");
-            assert_eq!(meter.frames(), folded, "chunk {chunk}");
-            assert_eq!(meter.latest().unwrap().as_slice(), last, "chunk {chunk}");
             assert_eq!(meter.mean(), batch.mean(), "chunk {chunk}");
             assert_eq!(meter.tuning(), batch.tuning(), "chunk {chunk}");
         }
@@ -1009,8 +988,31 @@ mod tests {
         meter.push(Mono::new(&x)).unwrap();
         meter.reset();
         assert_eq!(meter.mean(), [0.0; CLASSES]);
-        assert_eq!(meter.latest(), None);
-        assert_eq!(meter.frames(), 0);
+        assert_eq!(meter.tuning(), batch.tuning());
+    }
+
+    /// Under an estimated tuning a meter's reading depends on what it has
+    /// seen, never on how the stream was cut: chunks of 1, an odd count and the
+    /// whole buffer give the same mean and tuning bit for bit.
+    #[test]
+    fn an_estimating_meter_does_not_depend_on_the_chunking() {
+        let x: Vec<f32> = sine(440.0 * (25.0f64 / 1200.0).exp2(), 12_000, 0.5)
+            .iter()
+            .zip(sine(660.0, 12_000, 0.3))
+            .map(|(a, b)| a + b)
+            .collect();
+        let read = |chunk: usize| {
+            let mut meter = cfg().measure(RATE).unwrap();
+            for part in x.chunks(chunk) {
+                meter.push(Mono::new(part)).unwrap();
+            }
+            (meter.mean(), meter.tuning())
+        };
+        let whole = read(x.len());
+        assert!(whole.1.get() != 0.0, "the estimate read the peaks");
+        for chunk in [1usize, 777] {
+            assert_eq!(read(chunk), whole, "chunk {chunk}");
+        }
     }
 
     /// With an estimated tuning the meter reads the peaks seen so far.
@@ -1030,14 +1032,11 @@ mod tests {
         let x = sine(440.0 * (25.0f64 / 1200.0).exp2(), 4096, 0.5);
         let mut meter = cfg().measure(RATE).unwrap();
         meter.push(Mono::new(&x)).unwrap();
-        let (mean, tuning, frames) = (meter.mean(), meter.tuning(), meter.frames());
+        let (mean, tuning) = (meter.mean(), meter.tuning());
         let mut nan = x.clone();
         nan[7] = f32::NAN;
         assert_eq!(meter.push(Mono::new(&nan)), Err(Error::NonFiniteInput));
-        assert_eq!(
-            (meter.mean(), meter.tuning(), meter.frames()),
-            (mean, tuning, frames)
-        );
+        assert_eq!((meter.mean(), meter.tuning()), (mean, tuning));
 
         meter.reset();
         assert_eq!(meter.mean(), [0.0; CLASSES]);
@@ -1056,8 +1055,11 @@ mod tests {
         ));
         assert!(matches!(at(4096, 32), Err(Error::TooManyOverlaps { .. })));
         assert!(at(4096, 64).is_ok());
-        assert!(matches!(at(0, 8), Err(Error::Dsp(_))));
-        assert!(matches!(at(4096, 0), Err(Error::Dsp(_))));
+        assert!(matches!(at(0, 8), Err(Error::ZeroWindow | Error::ZeroHop)));
+        assert!(matches!(
+            at(4096, 0),
+            Err(Error::ZeroWindow | Error::ZeroHop)
+        ));
         for (lo, hi) in [
             (500.0, 100.0),
             (0.0, 1000.0),

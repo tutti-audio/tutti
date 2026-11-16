@@ -65,7 +65,7 @@ use tutti_types::{Db, Hz, SampleRate, Samples, Seconds};
 
 use crate::chroma::FrequencyBand;
 use crate::convert::{all_finite, for_blocks};
-use crate::framing::Framing;
+use crate::framing::{Framing, check_nyquist};
 use crate::stereo::Ballistics;
 use crate::{Error, Result};
 use tutti_dsp::Complex32;
@@ -292,7 +292,7 @@ impl SpectrumConfig {
     ///
     /// # Errors
     ///
-    /// [`Error::Dsp`] for a zero window or hop;
+    /// [`Error::ZeroWindow`] or [`Error::ZeroHop`] for a zero window or hop;
     /// [`Error::WindowOutOfRange`] for a window under 64 or over 65536
     /// samples; [`Error::HopWiderThanWindow`] for a hop wider than the window;
     /// [`Error::TooManyOverlaps`] for a hop giving more than 64 frames per
@@ -305,10 +305,7 @@ impl SpectrumConfig {
     /// exceed 4194304 cells; [`Error::PeakHoldTooLong`] when the peak hold is
     /// more than 4294967295 frames at the hop and rate in use.
     pub fn measure(&self, rate: impl Into<SampleRate>) -> Result<SpectrumMeter> {
-        let plan = self.plan(rate.into())?;
-        let mut fft = FftScratch::new();
-        let state = SpectrumState::build(&plan, &mut fft)?;
-        Ok(SpectrumMeter { state, fft })
+        SpectrumMeter::build(&self.plan(rate.into())?)
     }
 
     fn plan(&self, rate: SampleRate) -> Result<SpectrumPlan> {
@@ -437,10 +434,7 @@ impl SpectrumPlan {
             Banding::Log { count, band } => (band.min(), band.max(), count.get(), None),
         };
         let empty = Error::EmptyFrequencyRange { min, max };
-        let nyquist = Hz((self.geometry.sample_rate().get() / 2.0) as f32);
-        if max > nyquist {
-            return Err(Error::AboveNyquist { freq: max, nyquist });
-        }
+        check_nyquist(max, self.geometry.sample_rate())?;
         let (lo, hi) = (f64::from(min.get()), f64::from(max.get()));
         let edges: Vec<f64> = match per_octave {
             Some(n) => {
@@ -497,10 +491,19 @@ impl SpectrumPlan {
 
 /// What a spectrum carries between blocks, and the readings.
 ///
-/// Built for one plan.
-#[derive(Debug, Clone)]
-struct SpectrumState {
+/// A running spectrum at one rate: fed blocks of any length, it analyses a
+/// frame whenever a hop of new samples has arrived, and holds the readings.
+///
+/// There is no `finish`: the result is the readings ([`levels`](Self::levels),
+/// [`peaks`](Self::peaks), [`spectrogram`](Self::spectrogram)), which are
+/// available after any push.
+///
+/// Pushing allocates nothing once the meter is built, but each frame is a
+/// transform and every output is smoothed, so it belongs on the consumer side of
+/// a tap, not in an audio callback.
+pub struct SpectrumMeter {
     cfg: SpectrumPlan,
+    fft: FftScratch,
     window: Vec<f32>,
     /// The first bin of each band and one past the last; empty for bins.
     band_bins: Vec<usize>,
@@ -527,9 +530,19 @@ struct SpectrumState {
     filled: usize,
 }
 
-impl SpectrumState {
-    /// The state of a plan whose layout holds.
-    fn build(cfg: &SpectrumPlan, fft: &mut FftScratch) -> Result<Self> {
+impl core::fmt::Debug for SpectrumMeter {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("SpectrumMeter")
+            .field("cfg", &self.cfg)
+            .field("frames", &self.frames)
+            .finish_non_exhaustive()
+    }
+}
+
+impl SpectrumMeter {
+    /// The meter of a plan whose layout holds.
+    fn build(cfg: &SpectrumPlan) -> Result<Self> {
+        let mut fft = FftScratch::new();
         let edges = cfg.layout()?;
         let outputs = edges.as_ref().map_or(cfg.bins(), |e| e.len() - 1);
         let band_bins = edges.unwrap_or_default();
@@ -549,6 +562,7 @@ impl SpectrumState {
         fft.forward(&vec![0.0; size], &vec![0.0; size], &mut spectrum);
         let mut state = Self {
             cfg: *cfg,
+            fft,
             window: cfg.geometry.window_coefficients(),
             band_bins,
             frequencies,
@@ -628,13 +642,14 @@ impl SpectrumState {
     }
 
     /// Analyses the ring as the frame that just became due.
-    fn analyse(&mut self, fft: &mut FftScratch) {
+    fn analyse(&mut self) {
         let cfg = self.cfg;
         // The ring's oldest sample is at `write`.
         let (newer, older) = self.ring.split_at(self.write);
         self.frame[..older.len()].copy_from_slice(older);
         self.frame[older.len()..].copy_from_slice(newer);
-        fft.forward(&self.frame, &self.window, &mut self.spectrum);
+        self.fft
+            .forward(&self.frame, &self.window, &mut self.spectrum);
 
         // `4 |X|^2 / (g N)^2`: a sine of amplitude `a` on a bin reads `a^2`. DC,
         // and Nyquist of an even window, have no image: `|X|^2 / (g N)^2`.
@@ -727,48 +742,6 @@ fn to_db(power: f32, floor: Db) -> Db {
     }
 }
 
-impl SpectrumState {
-    /// Feeds converted samples and analyses each frame that completes in them.
-    fn step(&mut self, block: &[f32], fft: &mut FftScratch) -> bool {
-        let size = self.ring.len();
-        let mut rest = block;
-        let mut ready = false;
-        while !rest.is_empty() {
-            // Up to the next due frame, and not past the end of the ring.
-            let until_due = (self.next_due - self.fed).min(usize::MAX as u64) as usize;
-            let take = rest.len().min(until_due).min(size - self.write);
-            self.ring[self.write..self.write + take].copy_from_slice(&rest[..take]);
-            self.write = (self.write + take) % size;
-            self.fed += take as u64;
-            rest = &rest[take..];
-            if self.fed == self.next_due {
-                self.analyse(fft);
-                self.next_due += self.cfg.geometry.hop().get() as u64;
-                ready = true;
-            }
-        }
-        ready
-    }
-}
-
-/// A running spectrum at one rate: fed blocks of any length, it analyses a
-/// frame whenever a hop of new samples has arrived, and holds the readings.
-///
-/// Pushing allocates nothing once the meter is built.
-pub struct SpectrumMeter {
-    state: SpectrumState,
-    fft: FftScratch,
-}
-
-impl core::fmt::Debug for SpectrumMeter {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("SpectrumMeter")
-            .field("cfg", &self.state.cfg)
-            .field("frames", &self.state.frames)
-            .finish_non_exhaustive()
-    }
-}
-
 impl SpectrumMeter {
     /// Feeds a block and analyses each frame that completes in it, in order.
     /// Returns whether at least one did; the readings are those of the last.
@@ -786,46 +759,32 @@ impl SpectrumMeter {
             return Err(Error::NonFiniteInput);
         }
         let mut ready = false;
-        let Self { state, fft } = self;
         for_blocks(block.samples(), 1, |converted| {
-            ready |= state.step(converted, fft);
+            ready |= self.step(converted);
         });
         Ok(ready)
     }
 
-    /// Forgets everything fed, keeping the buffers: the readings are the
-    /// floor and the next frame is ready after a whole window.
-    pub fn reset(&mut self) {
-        self.state.reset();
-    }
-
-    /// The level of each output as of the last frame, the floor before one.
-    #[inline]
-    #[must_use]
-    pub fn levels(&self) -> &[Db] {
-        self.state.levels()
-    }
-
-    /// The held peak of each output: never under its level.
-    #[inline]
-    #[must_use]
-    pub fn peaks(&self) -> &[Db] {
-        self.state.peaks()
-    }
-
-    /// The frequency of each output: a bin's, or the geometric centre of a
-    /// band's edges.
-    #[inline]
-    #[must_use]
-    pub fn frequencies(&self) -> &[Hz] {
-        self.state.frequencies()
-    }
-
-    /// The kept columns of levels, oldest first, each as long as
-    /// [`levels`](Self::levels). Empty without a spectrogram, and shorter than
-    /// the configured columns until that many frames have been analysed.
-    pub fn spectrogram(&self) -> impl ExactSizeIterator<Item = &[Db]> + '_ {
-        self.state.spectrogram()
+    /// Feeds converted samples and analyses each frame that completes in them.
+    fn step(&mut self, block: &[f32]) -> bool {
+        let size = self.ring.len();
+        let mut rest = block;
+        let mut ready = false;
+        while !rest.is_empty() {
+            // Up to the next due frame, and not past the end of the ring.
+            let until_due = (self.next_due - self.fed).min(usize::MAX as u64) as usize;
+            let take = rest.len().min(until_due).min(size - self.write);
+            self.ring[self.write..self.write + take].copy_from_slice(&rest[..take]);
+            self.write = (self.write + take) % size;
+            self.fed += take as u64;
+            rest = &rest[take..];
+            if self.fed == self.next_due {
+                self.analyse();
+                self.next_due += self.cfg.geometry.hop().get() as u64;
+                ready = true;
+            }
+        }
+        ready
     }
 }
 

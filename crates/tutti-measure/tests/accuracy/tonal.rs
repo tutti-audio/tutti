@@ -66,11 +66,6 @@ fn chroma(x: &[f32], cfg: &ChromaConfig, fft: &mut FftScratch) -> Result<Chroma>
     tutti_measure::chroma(cfg, Mono::new(x), SampleRate::of(SR), fft)
 }
 
-/// The chord smoothing for the frames `c` was taken at.
-fn chords_for(c: &Chroma) -> ChordConfig {
-    ChordConfig::new().framing(c.framing())
-}
-
 fn mean_chroma(x: &[f32], cfg: &ChromaConfig) -> [f32; 12] {
     chroma(x, cfg, &mut FftScratch::new()).unwrap().mean()
 }
@@ -134,7 +129,7 @@ fn a_triad_of_sines_is_the_chord_c_major() {
     chord_tones(&mut x, 0, 2.0, 0, false, 1);
     let cfg = config();
     let c = chroma(&x, &cfg, &mut FftScratch::new()).unwrap();
-    let spans = detect_chords(c.grid(), &chords_for(&c)).unwrap();
+    let spans = detect_chords(&c, &ChordConfig::new()).unwrap();
     assert_eq!(spans.len(), 1);
     assert_eq!(
         (spans[0].root, spans[0].quality),
@@ -164,7 +159,7 @@ fn everything_rotates_by_the_transposition() {
         ];
         want.sort_unstable();
         assert_eq!(top(&c.mean(), 3), want, "k {k}");
-        let spans = detect_chords(c.grid(), &chords_for(&c)).unwrap();
+        let spans = detect_chords(&c, &ChordConfig::new()).unwrap();
         assert_eq!(spans.len(), 1, "k {k}");
         assert_eq!(
             (spans[0].root.semitones_above_c(), spans[0].quality),
@@ -277,7 +272,7 @@ fn a_progression_has_its_boundaries_where_the_chords_change() {
         let g = geometry(window, hop);
         let chroma_cfg = config().framing(Framing::new(Samples(window), Samples(hop)));
         let c = chroma(&x, &chroma_cfg, &mut fft).unwrap();
-        let spans = detect_chords(c.grid(), &chords_for(&c)).unwrap();
+        let spans = detect_chords(&c, &ChordConfig::new()).unwrap();
         let got: Vec<_> = spans.iter().map(|s| (s.root, s.quality)).collect();
         let want: Vec<_> = progression
             .iter()
@@ -316,8 +311,8 @@ fn silence_noise_and_bad_input() {
         estimate_key(silent.grid(), KeyProfile::Temperley).unwrap_err(),
         Error::NoTonalContent
     );
-    let chords = chords_for(&silent);
-    assert!(detect_chords(silent.grid(), &chords).unwrap().is_empty());
+    let chords = ChordConfig::new();
+    assert!(detect_chords(&silent, &chords).unwrap().is_empty());
 
     let mut rng = StdRng::seed_from_u64(3);
     let noise: Vec<f32> = (0..SR as usize * 4)
@@ -325,7 +320,7 @@ fn silence_noise_and_bad_input() {
         .collect();
     let noisy = chroma(&noise, &cfg, &mut fft).unwrap();
     assert!(noisy.grid().as_slice().iter().all(|v| v.is_finite()));
-    assert!(detect_chords(noisy.grid(), &chords).unwrap().is_empty());
+    assert!(detect_chords(&noisy, &chords).unwrap().is_empty());
     let sure = |x: &[f32]| {
         let c = chroma(x, &cfg, &mut FftScratch::new()).unwrap();
         estimate_key(c.grid(), KeyProfile::Krumhansl)

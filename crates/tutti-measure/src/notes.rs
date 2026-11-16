@@ -1,8 +1,8 @@
 //! Monophonic audio to notes.
 //!
-//! A YIN pitch track ([`yin_track`](crate::yin_track)) and the onsets ([`detect_onsets`](crate::detect_onsets)) are cut
-//! into notes: each has a [`Note`], a bend in [`Cents`], a span in [`Samples`]
-//! and a peak level. Mapping that to a MIDI event is the caller's: the crate
+//! A YIN pitch track ([`yin_track`](crate::yin_track)) and the onsets
+//! ([`detect_onsets`](crate::detect_onsets)) are cut into notes: each has a
+//! [`Note`], a bend in [`Cents`], a span in [`Samples`] and a peak level. Mapping that to a MIDI event is the caller's: the crate
 //! holds no MIDI types, and [`VelocityRange`] is the one documented way to a
 //! 1..=127 velocity.
 //!
@@ -71,7 +71,7 @@ use tutti_dsp::FrameCount;
 use tutti_types::{Amplitude, Cents, Db, Note, SampleRate, Samples, Seconds};
 
 use crate::convert::to_f32;
-use crate::onset::{DetectionFunction, OnsetConfig, OnsetPlan, detect, onset_lag};
+use crate::onset::{DetectionFunction, OnsetConfig, OnsetPlan, onset_lag, run};
 use crate::silence::FiniteLevel;
 use crate::yin::{PitchEstimate, YinConfig, YinPlan, yin_track_at};
 use crate::{Error, Result};
@@ -231,7 +231,7 @@ impl NoteConfig {
     /// [`Error::AboveNyquist`] for a pitch band above half `rate`;
     /// [`Error::YinFrameTooLong`] when the YIN frame is longer than 262144
     /// samples; [`Error::OnsetNotSpectralFlux`] when the onset function is not
-    /// spectral flux; [`Error::Dsp`] for a zero onset window or hop.
+    /// spectral flux; [`Error::ZeroWindow`] or [`Error::ZeroHop`] for a zero onset window or hop.
     fn plan(&self, rate: SampleRate) -> Result<NotePlan> {
         let yin = self.yin.plan(rate)?;
         let frame = yin.buffer_size().get();
@@ -467,7 +467,8 @@ pub fn transcribe<S: Sample>(
 
     let track = yin_track_at(&cfg.yin, samples, cfg.hop)?;
     let levels = levels_at(cfg, samples)?;
-    let onsets: Vec<Samples> = detect(&cfg.onset, samples, fft)
+    let onsets: Vec<Samples> = run(cfg.onset, samples, fft)
+        .finish()
         .iter()
         .map(|o| cfg.attack(o.position))
         .collect();
@@ -1578,7 +1579,7 @@ mod tests {
         ));
         // A zero onset window is refused too.
         let zero = flux.framing(Framing::new(Samples(0), Samples(256)));
-        assert!(matches!(notes(yin, zero).unwrap_err(), Error::Dsp(_)));
+        assert!(matches!(notes(yin, zero).unwrap_err(), Error::ZeroWindow));
 
         let c = cfg();
         let frame = c.frame().get();

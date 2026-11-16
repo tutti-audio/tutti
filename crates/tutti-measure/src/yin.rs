@@ -18,6 +18,7 @@ use tutti_types::{Cents, Confidence, Hz, Note, SampleRate, Samples};
 
 use crate::chroma::FrequencyBand;
 use crate::convert::to_f32;
+use crate::framing::check_nyquist;
 use crate::notes::PitchHop;
 use crate::pitch::PitchDetector;
 use crate::{Error, Result};
@@ -78,13 +79,7 @@ impl YinConfig {
     /// [`Error::AboveNyquist`] when the band's top exceeds half `rate`.
     pub(crate) fn plan(&self, rate: SampleRate) -> Result<YinPlan> {
         let (min_freq, max_freq) = (self.band.min(), self.band.max());
-        let nyquist = Hz((rate.get() / 2.0) as f32);
-        if max_freq > nyquist {
-            return Err(Error::AboveNyquist {
-                freq: max_freq,
-                nyquist,
-            });
-        }
+        check_nyquist(max_freq, rate)?;
         Ok(YinPlan {
             sample_rate: rate,
             min_freq,

@@ -382,24 +382,19 @@ impl StftRequest {
         self
     }
 
-    /// Decimates to roughly `frames` frames — a display transform.
+    /// How the hop is chosen: a fixed one, or one widened to a target frame
+    /// count (a display transform).
     #[must_use]
-    pub fn decimated_to(mut self, frames: FrameCount, min_hop: impl Into<Samples>) -> Self {
-        self.hop = HopPolicy::TargetFrames {
-            frames,
-            min_hop: min_hop.into(),
-        };
+    pub fn hop(mut self, hop: HopPolicy) -> Self {
+        self.hop = hop;
         self
     }
 
-    /// Restricts the request to the half-open span `[start, end)`, clamped to
-    /// the buffer at resolve time.
+    /// Restricts the request to a span of the buffer; a [`SampleRange::Span`]
+    /// is clamped to the buffer at resolve time.
     #[must_use]
-    pub fn over(mut self, start: impl Into<Samples>, end: impl Into<Samples>) -> Self {
-        self.range = SampleRange::Span {
-            start: start.into(),
-            end: end.into(),
-        };
+    pub fn range(mut self, range: SampleRange) -> Self {
+        self.range = range;
         self
     }
 
@@ -664,8 +659,12 @@ mod tests {
     fn a_decimated_request_is_refused_by_the_invertible_path() {
         let samples = tone(200_000, 440.0, 44100.0);
         let mut fft = FftScratch::new();
-        let request = StftRequest::new(Samples::new(2048usize), Samples::new(512usize))
-            .decimated_to(FrameCount(64), Samples::new(1usize));
+        let request = StftRequest::new(Samples::new(2048usize), Samples::new(512usize)).hop(
+            HopPolicy::TargetFrames {
+                frames: FrameCount(64),
+                min_hop: Samples::new(1usize),
+            },
+        );
 
         // The hop this resolves to is far wider than the window.
         assert!(matches!(
@@ -771,8 +770,12 @@ mod tests {
         .unwrap();
         let part = stft(
             &samples,
-            StftRequest::new(Samples::new(2048usize), Samples::new(512usize))
-                .over(Samples::new(0usize), Samples::new(8192usize)),
+            StftRequest::new(Samples::new(2048usize), Samples::new(512usize)).range(
+                SampleRange::Span {
+                    start: Samples::new(0usize),
+                    end: Samples::new(8192usize),
+                },
+            ),
             &mut fft,
         )
         .unwrap();
@@ -781,8 +784,12 @@ mod tests {
         // A span past the end clamps rather than panicking.
         let clamped = stft(
             &samples,
-            StftRequest::new(Samples::new(2048usize), Samples::new(512usize))
-                .over(Samples::new(0usize), Samples::new(99_999usize)),
+            StftRequest::new(Samples::new(2048usize), Samples::new(512usize)).range(
+                SampleRange::Span {
+                    start: Samples::new(0usize),
+                    end: Samples::new(99_999usize),
+                },
+            ),
             &mut fft,
         )
         .unwrap();

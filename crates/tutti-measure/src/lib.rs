@@ -15,7 +15,7 @@
 //!   Folding to one series is `PeakBlocks::to_mono`, a caller's choice rather than
 //!   this crate's default.
 //! - `detect_onsets` — onset detection over four selectable detection functions.
-//! - `yin` — monophonic pitch estimation (de Cheveigné & Kawahara, 2002).
+//! - `yin` — monophonic pitch estimation (de Cheveigné and Kawahara, 2002).
 //! - `correlate` — inter-channel phase correlation and stereo image.
 //! - `measure_loudness` — EBU R128 integrated loudness, loudness range and true
 //!   peak.
@@ -37,10 +37,11 @@
 //! - `transcribe` — monophonic audio to notes: a pitch (`Note` plus a cents bend),
 //!   a span in samples and a level, split on onsets and pitch changes;
 //!   `notes_from_track` takes your own pitch track.
-//! - `chroma` / `ChromaConfig::measure` — harmonic pitch class profile (Gomez 2006) of spectral
-//!   peaks, with an estimated tuning in cents; `estimate_key` — Krumhansl-Schmuckler
-//!   key with a confidence and a runner-up; `detect_chords` — major and minor
-//!   triads smoothed by Viterbi, as spans in samples.
+//! - `chroma` / `ChromaConfig::measure` — harmonic pitch class profile (Gomez
+//!   2006) of spectral peaks, with an estimated tuning in cents; `estimate_key`
+//!   — Krumhansl-Schmuckler key with a confidence and a runner-up;
+//!   `detect_chords` — major and minor triads smoothed by Viterbi, as spans in
+//!   samples.
 //! - `stft` / `istft_transform` — the short-time Fourier transform, in three result
 //!   types so invertibility is a compile-time question.
 //!
@@ -57,28 +58,48 @@
 //!
 //! Every analysis takes a **config**: a value that describes the analysis and
 //! nothing about the audio. It holds thresholds, bands in hertz, durations in
-//! seconds and a [`Framing`] in samples, never a sample rate. The call that
-//! takes the audio binds the rate, derives the geometry and checks what
-//! depends on two settings together (a band against Nyquist, a window against
-//! its hop), answering with a named [`Error`].
+//! seconds and a [`Framing`] in samples, never a sample rate or a channel width
+//! the audio carries. The call that takes the audio binds the rate, derives the
+//! geometry and checks what depends on two settings together (a band against
+//! Nyquist, a window against its hop), answering with a named [`Error`].
 //!
 //! Each analysis has the same two terminals:
 //!
 //! - **one-shot**, like scipy: `x(&config, view, rate)` over a whole buffer;
 //! - **streaming**: `config.measure(rate)` makes a meter, `meter.push(view)`
-//!   takes the audio in chunks of any length, and `meter.finish()` reads the
-//!   result.
+//!   takes the audio in chunks of any length, `meter.reset()` starts over, and
+//!   `meter.finish()` reads the result where the result is of the whole run.
 //!
-//! The one-shot feeds a meter the whole buffer (`detect_onsets`, `summarize`,
-//! `strip_silence`, `measure_loudness`), so the two paths cannot drift. Tests
-//! pin the equality across chunk sizes and channel layouts. A meter
-//! changes only through `push` and `reset`.
+//! The one-shot feeds a meter the whole buffer, so the two cannot drift, with
+//! one stated exception: `chroma` under `Tuning::Estimate` finds the tuning in a
+//! first pass over the whole buffer, which a streaming meter cannot do. A meter
+//! changes only through `push` and `reset`. `push` returns a `Result` exactly
+//! where the chunk can be refused (a NaN, a width that is not the meter's).
 //!
-//! The rest are stateless: `yin`, `correlate`, `cross_correlate`,
-//! `spectral_features` are pure functions of their input, and `stft` is
-//! batch-only: there is no incremental transform. Meter ballistics
-//! ([`BallisticsMeter`]) carries a smoothed reading, but that is a filter over
-//! results rather than a step of the correlation itself.
+//! | Analysis | Config | One-shot | Meter | `push` / result | Audio thread |
+//! |---|---|---|---|---|---|
+//! | silence | [`SilenceConfig`] | [`strip_silence`] | [`SilenceMeter`] | `()` / `finish` regions | no: grows per region |
+//! | onsets | [`OnsetConfig`] | [`detect_onsets`] | [`OnsetMeter`] | `()` / `finish` onsets, `novelty` | no: grows per frame |
+//! | spectrum | [`SpectrumConfig`] | none | [`SpectrumMeter`] | `Result<bool>` / readings, no `finish` | no: a transform per frame, but no allocation |
+//! | chroma | [`ChromaConfig`] | [`chroma()`] | [`ChromaMeter`] | `Result<usize>` / `mean`, `tuning`, no `finish` | no: a transform per frame, no allocation |
+//! | loudness | [`LoudnessConfig`] | [`measure_loudness`] | [`LoudnessMeter`] | `Result<()>` / `finish` [`Loudness`] | no: grows with the run |
+//! | windowed loudness | [`WindowedLoudnessConfig`] | none | [`WindowedMeter`] | `Result<WindowedReading>` / the reading, no `finish` | no: reads 3 s per push, no allocation |
+//! | true peak | none: the audio's width is the meter's | [`measure_true_peak`] | [`TruePeakMeter`] | `Result<()>` / `finish` dBTP | no: grows to the longest chunk |
+//! | waveform blocks | [`PeakConfig`] | [`summarize`] | [`PeakMeter`] | `Result<()>` / `finish` blocks | no: grows per block |
+//! | vectorscope | [`VectorscopeConfig`] | [`vectorscope_points`] | [`VectorscopeMeter`] | `()` into the caller's `Vec` / no `finish` | no: grows the caller's `Vec` |
+//! | meter ballistics | [`Ballistics`] | none | [`BallisticsMeter`] | the smoothed reading / `current`, no `finish` | yes: no allocation, a few flops |
+//!
+//! A meter has no `finish` where its result is a reading that exists after
+//! every push (spectrum, chroma, windowed loudness, ballistics) or is the
+//! caller's own buffer (vectorscope). A config has no width where the width is
+//! the audio's, which travels with the view (`Mono`, `Interleaved`,
+//! `StereoPlanes`); [`LoudnessConfig`] and [`WindowedLoudnessConfig`] hold a
+//! topology because the weight of each speaker is part of the analysis, and
+//! check the view's width against it ([`Error::ChunkLayoutMismatch`]).
+//!
+//! The rest are stateless: `yin`, `correlate`, `cross_correlate`, `align`,
+//! `estimate_tempo`, `transcribe` and `spectral_features` are pure functions of
+//! their input, and `stft` is batch-only: there is no incremental transform.
 //!
 //! ## Quick start
 //!
@@ -97,7 +118,7 @@
 //!
 //! // Waveform blocks for display — one series per channel.
 //! let blocks = summarize(
-//!     &PeakConfig::new(Samples(512), ChannelLayout::STEREO),
+//!     &PeakConfig::new(Samples(512)),
 //!     Interleaved::new(&samples, ChannelLayout::STEREO).unwrap(),
 //! )?;
 //! let left = blocks.channel(0).expect("stereo has a channel 0");
@@ -231,7 +252,8 @@
 //!   [`TempoConfig`], [`ChordConfig`]).
 //! - Transform: [`stft`], [`stft_magnitude`], [`stft_polar`] and
 //!   [`istft_transform`], over a [`StftRequest`] with a
-//!   [`CosineWindow`](tutti_dsp::CosineWindow), producing [`Stft`], [`StftMagnitude`] or [`StftPolar`].
+//!   [`CosineWindow`](tutti_dsp::CosineWindow), producing [`Stft`],
+//!   [`StftMagnitude`] or [`StftPolar`].
 //! - Pitch: [`yin()`] and [`yin_track`] with a [`YinConfig`], returning
 //!   [`PitchEstimate`] and [`Pitch`]; [`median_filter`] and [`penalize_jumps`]
 //!   clean up a track.
@@ -242,7 +264,7 @@
 //!   or incrementally with a [`PeakMeter`].
 //! - Loudness: [`measure_loudness`] with a [`LoudnessConfig`] into
 //!   [`Loudness`], or incrementally with a [`LoudnessMeter`]; the true peak
-//!   alone with a [`TruePeakConfig`] ([`measure_true_peak`], [`TruePeakMeter`]).
+//!   alone with [`measure_true_peak`] or a [`TruePeakMeter`].
 //! - Windowed loudness: a [`WindowedMeter`] from a [`WindowedLoudnessConfig`]
 //!   reads momentary (400 ms), short-term (3 s) and true peak as a
 //!   [`WindowedReading`] after every chunk.
@@ -318,8 +340,8 @@ pub use features::{
 pub use framing::Framing;
 pub use key::{Key, KeyEstimate, KeyProfile, Mode, estimate_key, estimate_key_from_mean};
 pub use loudness::{
-    Loudness, LoudnessConfig, LoudnessMeter, TruePeakConfig, TruePeakMeter, WindowedLoudnessConfig,
-    WindowedMeter, WindowedReading, measure_loudness, measure_true_peak,
+    Loudness, LoudnessConfig, LoudnessMeter, TruePeakMeter, WindowedLoudnessConfig, WindowedMeter,
+    WindowedReading, measure_loudness, measure_true_peak,
 };
 pub use notes::{
     NoteConfig, NoteEvent, NoteSpan, NoteSpanError, PitchHop, PitchHopError, PitchSplit,

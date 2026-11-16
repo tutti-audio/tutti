@@ -95,7 +95,7 @@ fn cents(a: f64, b: f64) -> f64 {
 /// The two implementations must agree on the fundamental.
 #[test]
 fn tutti_yin_agrees_with_an_independent_yin() {
-    // Mid-range fundamentals, well inside `YinConfig::standard`'s 50..2000 Hz
+    // Mid-range fundamentals, well inside `YinConfig::new`'s 50..2000 Hz
     // and comfortably resolved at a 4096-sample window.
     let cases = [110.0f64, 220.0, 440.0, 587.33];
 

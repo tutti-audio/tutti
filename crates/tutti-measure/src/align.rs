@@ -14,10 +14,11 @@
 //! correlation on every call, through [`cross_correlate_shaped`].
 
 use tutti_buffers::{Mono, Sample};
-use tutti_types::{Confidence, Hz, SampleRate, Samples, Seconds};
+use tutti_types::{Confidence, SampleRate, Samples, Seconds};
 
 use crate::chroma::FrequencyBand;
 use crate::convert::to_f32;
+use crate::framing::check_nyquist;
 use crate::xcorr::{CrossCorrelation, cross_correlate_shaped};
 use crate::{Error, Result};
 use tutti_dsp::Complex32;
@@ -56,8 +57,11 @@ impl AlignConfig {
 
     /// Weight only bins inside `band`, leaving the rest out of the
     /// correlation: a band where both takes carry the same source, away from
-    /// rumble or hiss that does not. [`align`] refuses a band whose top exceeds
-    /// half the sample rate ([`Error::AboveNyquist`]).
+    /// rumble or hiss that does not. A band's low edge is above 0 (a
+    /// [`FrequencyBand`] holds no zero), so a low-pass-only band is written with
+    /// a small low edge, which drops the DC bin from the PHAT weighting.
+    /// [`align`] refuses a band whose top exceeds half the sample rate
+    /// ([`Error::AboveNyquist`]).
     #[must_use]
     pub fn band(mut self, band: FrequencyBand) -> Self {
         self.band = Some(band);
@@ -132,13 +136,7 @@ pub fn align<S: Sample>(
 ) -> Result<Alignment> {
     let rate = rate.into();
     if let Some(band) = config.band {
-        let nyquist = Hz((rate.get() / 2.0) as f32);
-        if band.max() > nyquist {
-            return Err(Error::AboveNyquist {
-                freq: band.max(),
-                nyquist,
-            });
-        }
+        check_nyquist(band.max(), rate)?;
     }
     let (reference, take) = (to_f32(reference.samples()), to_f32(take.samples()));
     let (reference, take) = (&reference[..], &take[..]);
@@ -284,6 +282,7 @@ mod tests {
     use super::*;
     use crate::cross_correlate;
     use rand::{RngExt, SeedableRng, rngs::StdRng};
+    use tutti_types::Hz;
 
     fn noise(len: usize, seed: u64) -> Vec<f32> {
         let mut rng = StdRng::seed_from_u64(seed);

@@ -62,6 +62,8 @@ impl VectorscopeConfig {
 
 /// A running vectorscope: where the stride stands between blocks.
 ///
+/// There is no `finish`: the points go into the caller's `Vec` on every push.
+///
 /// Carries how many frames to skip before the next point, so a stream fed in
 /// blocks keeps one stride phase instead of restarting it per block.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
