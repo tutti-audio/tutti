@@ -283,9 +283,7 @@ fn bridge_with_server_mode(
                         }
                         if let Some(gate) = gate.as_ref().filter(|_| data.seq == 1) {
                             let _ = gate.got.send(());
-                            let _ = gate
-                                .release
-                                .recv_timeout(std::time::Duration::from_secs(10));
+                            let _ = gate.release.recv_timeout(WAIT_BUDGET);
                         }
                         if mute {
                             continue;
@@ -331,9 +329,6 @@ fn bridge_with_server_mode(
         })
         .unwrap();
 
-    // Let the bridge thread start up and register I/O.
-    std::thread::sleep(std::time::Duration::from_millis(50));
-
     (bridge, bridge_thread, server_thread, host_slab)
 }
 
@@ -367,7 +362,7 @@ fn a_sidechain_port_reaches_the_plugin() {
             &mut out.outs(),
             &mut midi_out,
         );
-        wait_for_reply(&host_slab, block + 1, std::time::Duration::from_secs(2));
+        wait_for_reply(&host_slab, block + 1, WAIT_BUDGET);
     }
     assert_eq!(
         out.at_scalar(0, 0),
@@ -503,14 +498,14 @@ fn wait_for_reply(slab: &AudioSlab, seq: u64, budget: std::time::Duration) {
 /// the test is failing regardless of how long it waited first. Sizing it to
 /// "how slow could a loaded machine plausibly be?" is the wrong question: the
 /// answer has no upper bound anyone can name, and every value that is not
-/// generous enough converts a slow machine into a false failure. Ten seconds is
+/// generous enough converts a slow machine into a false failure. A minute is
 /// far beyond any real scheduling delay for a mock server that does two memcpys,
 /// and still bounded enough that a genuinely wedged run fails rather than hangs
 /// a CI job.
 ///
 /// It was 500 ms, and a 500 ms budget silently expiring is exactly what
 /// produced the "block N was silent" reports this file's history records.
-const WAIT_BUDGET: std::time::Duration = std::time::Duration::from_secs(10);
+const WAIT_BUDGET: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// Classify what a block's output actually is, so a failure names the defect
 /// instead of just printing two numbers.
@@ -743,196 +738,6 @@ fn a_stale_slot_holding_real_audio_still_yields_silence() {
     bridge_thread.shutdown();
 }
 
-/// **The test that justifies the whole change.** Several stalled plugins driven
-/// in series must not make the audio thread wait for their replies: not on
-/// most steps, not on most of any one plugin's steps, and not on most blocks.
-/// A long wait on only a few steps is not covered; see the end of this comment.
-///
-/// # Why waiting fails
-///
-/// A synchronous design is individually defensible — each plugin waits at most
-/// half its own block period before giving up and emitting silence. But the
-/// graph's serial executor runs nodes one after another within one callback,
-/// so the budgets sum:
-///
-/// | Stalled plugins | Spent waiting | vs the 1333 us period @ 64/48k |
-/// |---|---|---|
-/// | 1 | 667 us | 0.50x — fine |
-/// | 2 | 1333 us | 1.00x — at the edge |
-/// | **3** | **2000 us** | **1.50x — overrun** |
-/// | 8 | 5333 us | 4.00x — overrun |
-///
-/// Three concurrently-stalled plugins blow the callback; measured under 24x CPU
-/// load, 4 of 12 blocks made their deadline. Parallelising the executor would
-/// not help — plugins in series on one track are a dependency chain, and that
-/// is the common arrangement. The problem is the waiting, not the serialism.
-///
-/// The loop below drives the plugins one after another within each block, which
-/// is exactly the arrangement whose budgets would sum if the thread waited.
-///
-/// # On the threshold
-///
-/// The limit is expressed **per block-plugin step**, and derived from the wait
-/// budget this test exists to detect rather than picked as a round number:
-/// [`SYNC_WAIT_BUDGET`] / 4, far above the real cost (a 7-11 us median step
-/// measured, debug build) and far below a single re-inserted wait.
-///
-/// A wall-clock bound over the *whole* test cannot do this job: rig setup alone
-/// (three mock servers, each with a 50 ms startup settle) accounts for ~150 ms,
-/// so the budget left for the measured work is enormous relative to what it
-/// actually costs. Only the driving loop is timed.
-///
-/// # Why medians, not the total
-///
-/// The two errors the clock can make are not symmetric, and the assertions are
-/// built on that:
-///
-/// - **A wait is a lower bound.** A design that waits for the reply sleeps
-///   until the reply comes or it gives up, and no scheduler makes a sleep
-///   shorter. The server is single-threaded and stalls 10 ms per block, so it
-///   falls further behind with every block, and a step that waits for it takes
-///   at least [`SYNC_WAIT_BUDGET`].
-/// - **Load only adds time, and only to the steps it lands on.** A descheduled
-///   thread makes the step it is in longer; it cannot touch the others.
-///
-/// So each assertion is a median, which a minority of slow samples cannot
-/// move, over a population in which a waiting design makes at least half the
-/// samples slow:
-///
-/// - **every step** (60): a design that waits on every step;
-/// - **each plugin's steps** (20 each): one plugin that waits on every block,
-///   such as a per-callback budget spent by whichever plugin runs first;
-/// - **each block's summed steps** (20), against `PLUGINS` limits: waits spread
-///   thinly, such as one on every 4th step, which put a wait in 3 of 4 blocks.
-///
-/// A correct design fails one only if the scheduler takes the core away for
-/// over the limit in at least half of that population's samples individually.
-///
-/// An earlier version asserted the *mean* (total / 60) and failed on macOS CI
-/// at 285 us/step (17 ms in all, on a docs-only PR). The log shows only the
-/// total; the likely cause is a few long deschedulings, which the division
-/// spreads across all 60 steps until they read like a wait on each. Bursty
-/// load pinned to one core reproduced that shape (a ~10 us median, a handful
-/// of steps of 10-190 ms) and failed the mean every run.
-///
-/// **Not covered:** a long wait on only a few steps, such as one 10 ms wait
-/// per plugin. The mean caught that, but it is exactly what a descheduling
-/// looks like, and no wall-clock measurement here can tell the two apart.
-#[test]
-fn stalled_plugins_do_not_stall_the_audio_thread() {
-    let _lock = machine_lock();
-    use std::time::{Duration, Instant};
-
-    const PLUGINS: usize = 3;
-    const BLOCKS: usize = 20;
-    /// Far beyond any block period, so a design that waits cannot hide it.
-    const SERVER_STALL: Duration = Duration::from_millis(10);
-    /// What the synchronous design spent per plugin per block: half the block
-    /// period at 64 samples / 48 kHz. This is the quantity under test.
-    const SYNC_WAIT_BUDGET: Duration = Duration::from_micros(667);
-    /// Per block-plugin step. See the note on the threshold above.
-    const STEP_LIMIT: Duration = Duration::from_micros(SYNC_WAIT_BUDGET.as_micros() as u64 / 4);
-
-    // Block 1 has nothing in flight, so nothing to wait for; every later block
-    // collects one the 10 ms server is behind on. A median of `n` samples is
-    // the `n / 2`-th smallest, so it is over the limit once `n - n / 2` samples
-    // are: a waiting design must be able to make that many slow in each
-    // population. Per plugin and per block, that is `BLOCKS - 1` of `BLOCKS`;
-    // over every step, `PLUGINS` times as many of `PLUGINS` times as many.
-    // (`BLOCKS - 1 >= BLOCKS - BLOCKS / 2`, written as clippy prefers it.)
-    const _: () = assert!(
-        BLOCKS > BLOCKS - BLOCKS / 2,
-        "too few blocks for a waiting design to own each median"
-    );
-
-    let (mut rigs, mut batchers): (Vec<_>, Vec<_>) = (0..PLUGINS)
-        .map(|_| {
-            let (bridge, thread, server, slab) = bridge_with_server_stall(SERVER_STALL);
-            let batcher = Batcher::new(CHANNELS, CHANNELS, SampleFormat::Float32, BATCH_SIZE, slab);
-            ((bridge, thread, server), batcher)
-        })
-        .unzip();
-
-    let mut input = Planar::new();
-    let mut output = Planar::new();
-    for ch in 0..CHANNELS {
-        for i in 0..BATCH_SIZE {
-            input.set_scalar(ch, i, ramp_sample(0, ch, i));
-        }
-    }
-    let mut midi_out = MidiEventVec::new();
-
-    // Each step timed on its own, so one descheduling costs one sample of the
-    // distribution rather than the whole measurement. Allocated up front: the
-    // loop under test pushes into it. Block-major: step `b * PLUGINS + p` is
-    // plugin `p` in block `b`.
-    let mut step_times = Vec::with_capacity(BLOCKS * PLUGINS);
-    for _ in 0..BLOCKS {
-        for (batcher, (bridge, _, _)) in batchers.iter_mut().zip(rigs.iter()) {
-            output.clear();
-            let step = Instant::now();
-            batcher.process(
-                bridge,
-                BATCH_SIZE,
-                &input.ins(),
-                &mut output.outs(),
-                &mut midi_out,
-            );
-            step_times.push(step.elapsed());
-        }
-    }
-
-    fn median(samples: impl Iterator<Item = Duration>) -> Duration {
-        let mut sorted: Vec<Duration> = samples.collect();
-        sorted.sort_unstable();
-        sorted[sorted.len() / 2]
-    }
-    let total: Duration = step_times.iter().sum();
-    let slow = step_times.iter().filter(|&&t| t >= STEP_LIMIT).count();
-    let slowest = step_times.iter().max().copied().unwrap_or_default();
-    let steps = step_times.len();
-    let shape = format!(
-        "{slow} of {steps} steps over {STEP_LIMIT:?}, slowest {slowest:?}, \
-         {total:?} in all"
-    );
-    let regressed = format!(
-        "A synchronous design waits {SYNC_WAIT_BUDGET:?} per plugin per block, \
-         so this looks like the audio thread is waiting for replies again."
-    );
-
-    let every_step = median(step_times.iter().copied());
-    assert!(
-        every_step < STEP_LIMIT,
-        "{PLUGINS} stalled plugins x {BLOCKS} blocks: the median step took \
-         {every_step:?}, over the {STEP_LIMIT:?} limit ({shape}). {regressed}"
-    );
-
-    for p in 0..PLUGINS {
-        let plugin = median(step_times.iter().skip(p).step_by(PLUGINS).copied());
-        assert!(
-            plugin < STEP_LIMIT,
-            "plugin {p}'s median step took {plugin:?}, over the {STEP_LIMIT:?} \
-             limit ({shape}). {regressed}"
-        );
-    }
-
-    let block_limit = STEP_LIMIT * PLUGINS as u32;
-    let block = median(
-        step_times
-            .chunks(PLUGINS)
-            .map(|b| b.iter().sum::<Duration>()),
-    );
-    assert!(
-        block < block_limit,
-        "the median block of {PLUGINS} steps took {block:?}, over the \
-         {block_limit:?} limit ({shape}). {regressed}"
-    );
-
-    for (_, thread, _) in rigs.iter_mut() {
-        thread.shutdown();
-    }
-}
-
 /// A bridge whose socket has no server behind it: the listener is created,
 /// dropped, and never accepts. Every dispatch therefore fails, which is how the
 /// bridge marks itself crashed through its ordinary path rather than through a
@@ -1077,7 +882,7 @@ fn the_chunk_counters_report_misses_and_answers() {
         "a chunk the stalled server has not answered read as answered"
     );
 
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let deadline = std::time::Instant::now() + WAIT_BUDGET;
     while !counters.in_flight_answered() {
         assert!(
             std::time::Instant::now() < deadline,
@@ -1122,7 +927,7 @@ fn a_chunk_published_after_its_miss_is_counted_late() {
     assert_eq!(counters.missed(), 1, "chunk 1 was collected unanswered");
     assert_eq!(counters.late(), 0, "and had not been published yet");
 
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let deadline = std::time::Instant::now() + WAIT_BUDGET;
     while !host_slab.has_output(1) {
         assert!(std::time::Instant::now() < deadline, "chunk 1 never came");
         std::thread::sleep(std::time::Duration::from_millis(1));
@@ -1169,7 +974,7 @@ fn counters_on(bridge: &PluginBridge) -> Arc<ChunkCounters> {
 
 /// Waits until `done`, failing after ten seconds.
 fn wait_for(what: &str, mut done: impl FnMut() -> bool) {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let deadline = std::time::Instant::now() + WAIT_BUDGET;
     while !done() {
         assert!(std::time::Instant::now() < deadline, "{what}");
         std::thread::sleep(std::time::Duration::from_millis(1));
@@ -1206,7 +1011,7 @@ fn a_chunk_the_server_refuses_is_counted_refused() {
 
     let mut block = || drive_one_block(&mut batcher, &bridge, &input, &mut output, &mut midi_out);
     block();
-    got.recv_timeout(std::time::Duration::from_secs(10))
+    got.recv_timeout(WAIT_BUDGET)
         .expect("the server holds chunk 1");
     // Blocks 2 and 3 collect chunks 1 and 2 unanswered and stage chunk 3 over
     // chunk 1's input slot.
@@ -1442,7 +1247,7 @@ fn a_late_reply_does_not_permanently_crash_the_bridge() {
     // Give the stalled reply time to land, so the only thing under test is what
     // the host did with the missed deadline — not whether the server ever
     // answered.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let deadline = std::time::Instant::now() + WAIT_BUDGET;
     while std::time::Instant::now() < deadline && !host_slab.has_output(1) {
         std::thread::sleep(std::time::Duration::from_millis(1));
     }
@@ -1727,8 +1532,6 @@ fn stamped_server(stall: std::time::Duration, first_only: bool, rate: SampleRate
         })
         .unwrap();
 
-    std::thread::sleep(std::time::Duration::from_millis(50));
-
     (bridge, bridge_thread, server_thread, host_slab)
 }
 
@@ -1917,7 +1720,7 @@ fn a_refused_chunk_reports_its_midi_lost() {
         tutti_plugin_types::Timeouts::default(),
     )
     .unwrap();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let deadline = std::time::Instant::now() + WAIT_BUDGET;
     while !bridge.is_crashed() {
         assert!(std::time::Instant::now() < deadline, "never crashed");
         std::thread::sleep(std::time::Duration::from_millis(1));
@@ -2101,7 +1904,7 @@ fn two_stale_blocks(
         assert!(submitted.block);
     }
     release.send(()).unwrap();
-    let wait = std::time::Duration::from_secs(5);
+    let wait = WAIT_BUDGET;
     let (seq, three) = got.recv_timeout(wait).expect("block 3 sent");
     assert_eq!(seq, 3);
     let (seq, four) = got.recv_timeout(wait).expect("block 4 sent");

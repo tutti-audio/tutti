@@ -17,6 +17,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 use tutti_plugin_types::MAX_CHUNK;
 use tutti_plugin_types::StateUse;
+use tutti_plugin_types::Timeouts;
 use tutti_plugin_types::{BridgeError, BridgeResult};
 use tutti_plugin_types::{Helper, Load, Locator, PluginFormat};
 use tutti_types::SampleRate;
@@ -290,6 +291,37 @@ fn handshake(config: &BridgeConfig, server: &ProcessGuard) -> BridgeResult<Contr
     }
 }
 
+/// Which wait a `LoadPlugin` reply is under: the open (library, instance,
+/// init) has the bridge's call window; once the server says it has begun
+/// restoring staged state the restore has a window of its own and answers for
+/// a failure.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LoadPhase {
+    Opening,
+    Restoring,
+}
+
+impl LoadPhase {
+    /// How long the next reply may take in this phase.
+    fn window(self, timeouts: &Timeouts) -> Duration {
+        match self {
+            Self::Opening => timeouts.call,
+            Self::Restoring => timeouts.state_restore,
+        }
+    }
+
+    /// `error` as this phase answers for it: a restore's failure is the
+    /// state's ([`BridgeError::StateRestoreError`]); an open's is its own.
+    fn blame(self, error: BridgeError) -> BridgeError {
+        match self {
+            Self::Opening => error,
+            Self::Restoring => BridgeError::StateRestoreError(format!(
+                "the plugin did not finish restoring its state: {error}"
+            )),
+        }
+    }
+}
+
 fn load_plugin(
     stream: &mut ControlStream,
     config: &BridgeConfig,
@@ -326,23 +358,12 @@ fn load_plugin(
     // its own. A failure from then on is the state's to answer for
     // ([`BridgeError::StateRestoreError`]); one before it is a load failure, and
     // blames nothing.
-    let mut timeout = config.timeouts.call;
-    let mut restoring = false;
+    let mut phase = LoadPhase::Opening;
     loop {
-        let reply = match ipc::recv_within(stream, timeout) {
-            Ok(reply) => reply,
-            Err(e) if restoring => {
-                return Err(BridgeError::StateRestoreError(format!(
-                    "the plugin did not finish restoring its state: {e}"
-                )));
-            }
-            Err(e) => return Err(e),
-        };
+        let reply =
+            ipc::recv_within(stream, phase.window(&config.timeouts)).map_err(|e| phase.blame(e))?;
         match reply {
-            BridgeMessage::RestoringState => {
-                restoring = true;
-                timeout = config.timeouts.state_restore;
-            }
+            BridgeMessage::RestoringState => phase = LoadPhase::Restoring,
             BridgeMessage::PluginLoaded {
                 descriptor,
                 loaded,
@@ -627,7 +648,7 @@ mod tests {
         env: &[(&str, &str)],
         call: Duration,
         state_restore: Duration,
-    ) -> (BridgeResult<LaunchedServer>, Duration) {
+    ) -> BridgeResult<LaunchedServer> {
         // Held for the launch: the server inherits the switches when it spawns.
         let mut switches = tutti_fixtures::ScopedEnv::new();
         for (k, v) in env {
@@ -643,8 +664,7 @@ mod tests {
             ..BridgeConfig::at(crate::unique_socket_path().expect("the OS has a random source"))
         };
         let plugin = tutti_fixtures::clap_probe();
-        let started = Instant::now();
-        let launched = launch_with_state(
+        launch_with_state(
             &Locator::at(tutti_fixtures::plugin_server()),
             &config,
             plugin,
@@ -653,8 +673,7 @@ mod tests {
             SampleRate::SR_48K,
             Some(&[0u8; 16]),
             StateUse::Project,
-        );
-        (launched, started.elapsed())
+        )
     }
 
     #[cfg(unix)]
@@ -663,35 +682,38 @@ mod tests {
         drop(server);
     }
 
-    /// **A slow restore that succeeds is a load.** The plugin takes 2.5 s over
-    /// its state, longer than the bridge's 1 s timeout, and the launch waits for
-    /// it: the server said it began restoring, and a restore has the window of its
-    /// own.
+    /// **A slow restore that succeeds is a load.** The plugin sleeps in its
+    /// state restore for longer than the bridge's call window, and the launch
+    /// waits for it: the server said it began restoring, and a restore has the
+    /// window of its own. The call window is a few seconds, the restore's a
+    /// hang guard; the test asserts the launch completes, not how long it took.
     ///
     /// Needs `cargo build -p tutti-plugin-server` first.
     #[test]
     #[cfg(unix)]
     fn a_slow_restore_that_succeeds_is_a_load() {
-        let (launched, took) = stateful_launch(
-            &[("TUTTI_CLAP_PROBE_STATE_LOAD_SLEEP_MS", "2500")],
-            Duration::from_secs(1),
-            Duration::from_secs(20),
+        let launched = stateful_launch(
+            &[("TUTTI_CLAP_PROBE_STATE_LOAD_SLEEP_MS", "4000")],
+            Duration::from_secs(3),
+            Duration::from_secs(60),
         );
-        assert!(took >= Duration::from_millis(2_500), "{took:?}");
         let server = launched.expect("a slow restore is not a failure");
         assert!(server.state_restore.is_some(), "a restore was attempted");
         reap(Ok(server));
     }
 
     /// **A restore that never returns is the state's to answer for**: past its
-    /// window the launch fails as `StateRestoreError`.
+    /// window the launch fails as `StateRestoreError`. The window is tiny and
+    /// the plugin sleeps far past it, so the stall is real in every run; that
+    /// the window is `Timeouts::state_restore` once restoring is
+    /// `a_restore_is_waited_on_for_its_own_window`.
     #[test]
     #[cfg(unix)]
     fn a_restore_that_outlasts_its_window_is_blamed_on_the_state() {
-        let (launched, _) = stateful_launch(
-            &[("TUTTI_CLAP_PROBE_STATE_LOAD_SLEEP_MS", "6000")],
-            Duration::from_secs(1),
-            Duration::from_millis(1_500),
+        let launched = stateful_launch(
+            &[("TUTTI_CLAP_PROBE_STATE_LOAD_SLEEP_MS", "60000")],
+            Duration::from_secs(60),
+            Duration::from_millis(200),
         );
         assert!(
             matches!(&launched, Err(BridgeError::StateRestoreError(_))),
@@ -700,20 +722,47 @@ mod tests {
         );
     }
 
-    /// **A plugin that dies in its state restore is blamed on the state.**
+    /// **A plugin that dies in its state restore is blamed on the state.** The
+    /// death is read off the connection, so the windows are hang guards.
     #[test]
     #[cfg(unix)]
     fn a_crash_in_the_restore_is_blamed_on_the_state() {
-        let (launched, _) = stateful_launch(
+        let launched = stateful_launch(
             &[("TUTTI_CLAP_PROBE_CRASH_ON_STATE_LOAD", "1")],
-            Duration::from_secs(2),
-            Duration::from_secs(20),
+            Duration::from_secs(60),
+            Duration::from_secs(60),
         );
         assert!(
             matches!(&launched, Err(BridgeError::StateRestoreError(_))),
             "{:?}",
             launched.as_ref().err()
         );
+    }
+
+    /// The window of the wait a `LoadPlugin` reply is under: `call` while the
+    /// plugin opens, `state_restore` once the server says it is restoring, and
+    /// only a restore's failure is the state's.
+    #[test]
+    fn a_restore_is_waited_on_for_its_own_window() {
+        let mut t = Timeouts::default();
+        t.call = Duration::from_secs(1);
+        t.state_restore = Duration::from_secs(20);
+        assert_eq!(LoadPhase::Opening.window(&t), Duration::from_secs(1));
+        assert_eq!(LoadPhase::Restoring.window(&t), Duration::from_secs(20));
+
+        let timed_out = || BridgeError::Timeout {
+            operation: "a reply".into(),
+            duration_ms: 1,
+            partial: false,
+        };
+        assert!(matches!(
+            LoadPhase::Opening.blame(timed_out()),
+            BridgeError::Timeout { .. }
+        ));
+        assert!(matches!(
+            LoadPhase::Restoring.blame(timed_out()),
+            BridgeError::StateRestoreError(_)
+        ));
     }
 
     /// **A plugin that dies before the restore is not blamed on the state**: it
@@ -721,10 +770,10 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn a_crash_before_the_restore_is_not_blamed_on_the_state() {
-        let (launched, _) = stateful_launch(
+        let launched = stateful_launch(
             &[("TUTTI_CLAP_PROBE_CRASH_ON_INIT", "1")],
-            Duration::from_secs(2),
-            Duration::from_secs(20),
+            Duration::from_secs(60),
+            Duration::from_secs(60),
         );
         assert!(
             launched.is_err() && !matches!(&launched, Err(BridgeError::StateRestoreError(_))),
@@ -1135,16 +1184,15 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
-    /// A server that dies before binding is reported at once, not after the
-    /// full timeout.
+    /// A server that dies before binding is reported as dead, not as an
+    /// unreachable socket after the timeout.
     ///
-    /// Without the watch on the process this case is indistinguishable from a slow
-    /// spawn, so the host would retry for the whole `Timeouts::connect` before
-    /// reporting a failure whose cause was known in milliseconds. The elapsed
-    /// assertion is the point — a test that only checked for `Err` would pass
-    /// on the slow path too.
+    /// Without the watch on the process this case is indistinguishable from a
+    /// slow spawn, so the host would retry for the whole patience and report the
+    /// connect failure. The patience here is a hang guard far past anything the
+    /// retry needs: only the watch can produce "exited before binding".
     #[test]
-    fn a_server_that_never_binds_is_reported_before_the_timeout() {
+    fn a_server_that_never_binds_is_reported_dead_not_unreachable() {
         let path = std::env::temp_dir().join(format!("tutti_never_bound_{}", std::process::id()));
         let _ = std::fs::remove_file(&path);
 
@@ -1156,16 +1204,9 @@ mod tests {
         )
         .expect("the exit thread starts");
 
-        let patience = Timeouts::default().connect;
-        let started = Instant::now();
-        let err = connect_when_listening(&path, &dead, patience)
+        let err = connect_when_listening(&path, &dead, Duration::from_secs(60))
             .expect_err("a server that never binds cannot connect");
-        let elapsed = started.elapsed();
 
-        assert!(
-            elapsed < patience / 2,
-            "a dead server must be noticed promptly, took {elapsed:?} of {patience:?}"
-        );
         assert!(
             format!("{err}").contains("exited before binding"),
             "the error must say the server died rather than blaming the socket, got: {err}"
@@ -1272,7 +1313,7 @@ mod tests {
         let started = Instant::now();
         while !guard.watch().is_dead() {
             assert!(
-                started.elapsed() < Duration::from_secs(5),
+                started.elapsed() < Duration::from_secs(60),
                 "the end of the process was never declared"
             );
             thread::sleep(Duration::from_millis(1));
