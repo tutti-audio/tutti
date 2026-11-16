@@ -340,7 +340,9 @@ fn a_clock_switch_re_declares_a_plugins_latency_and_keeps_its_handle() {
         .build()
         .expect("builds");
     let client = PluginClient::new(
-        tutti_plugin::BridgeConfig::default(),
+        tutti_plugin::BridgeConfig::at(
+            tutti_plugin::unique_socket_path().expect("the OS has a random source"),
+        ),
         &tutti_fixtures::detached_work(),
         &Loadable::uncatalogued(PluginRef::file(clap_probe()).expect("a plugin file")),
         RATE,
