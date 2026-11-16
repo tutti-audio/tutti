@@ -5,8 +5,10 @@
 //! literals are blanked) is read for each `pub use .. ;` as a use tree:
 //!
 //! 1. **No whole-crate re-export**: `pub use tutti_x;`, `pub use tutti_x as y;`,
-//!    `pub use ::tutti_x ..`, `pub use tutti_x::{self}` and a glob anywhere under
-//!    a `tutti_` path are findings. Each item is listed by name.
+//!    `pub use ::tutti_x ..`, `pub use tutti_x::{self}` and any glob (`::*`, under
+//!    a `tutti_` path or a local one) are findings. Each item is listed by name.
+//!    A module re-exported by its name (`pub use tutti_x::module;`) is not
+//!    told apart from a function lexically and is not seen.
 //! 2. **One path per item**: the exported name (the alias when there is an
 //!    `as`) of every `pub use` leaf is collected per module path (the crate
 //!    root, then each inline `pub mod` and each file module). A name that is
@@ -14,7 +16,9 @@
 //!
 //! A name may sit at two paths when [`ALLOW`] holds a row for it with the reason;
 //! a row for a name that is no longer duplicated is a finding. Each finding names
-//! the file and line.
+//! the file and line. The rule reads names, so one item exported under two
+//! names is not seen, and a `cfg` pair offering one name from two sources needs
+//! a row.
 
 use super::lex::{blank, find_word_from, line_of, matching};
 use super::session::{is_word, pub_uses, tokens};
@@ -52,7 +56,7 @@ fn skipped(dir: &str) -> bool {
 struct Leaf {
     /// The name the leaf exports; `*` for a glob.
     name: String,
-    /// The leaf re-exports a `tutti_` crate or one of its modules whole.
+    /// The leaf re-exports a `tutti_` crate whole, or is a glob.
     whole: bool,
 }
 
@@ -80,7 +84,7 @@ fn leaves(t: &[&str], k: &mut usize, pre: &[String], out: &mut Vec<Leaf>) {
             *k += 1;
             out.push(Leaf {
                 name: "*".to_owned(),
-                whole: from_tutti(&path),
+                whole: true,
             });
             return;
         }
@@ -204,7 +208,7 @@ pub(super) fn check(tree: &dyn Tree, allow: &[(&str, &str)]) -> Report {
             for leaf in found {
                 if leaf.whole {
                     bad.push(format!(
-                        "{place}: re-exports a crate whole (`{}`); list each item by name",
+                        "{place}: re-exports a crate or module whole (`{}`); list each item by name",
                         leaf.name
                     ));
                 } else if leaf.name != "*" && leaf.name != "_" {
@@ -291,6 +295,8 @@ pub mod types {
             ("pub use ::tutti_engine as engine;", "engine", 2),
             ("pub use tutti_engine::*;", "*", 2),
             ("pub use tutti_graph::editor::*;", "*", 2),
+            ("pub use self::inner::*;", "*", 2),
+            ("pub use super::*;", "*", 2),
             ("pub use tutti_graph::{self};", "tutti_graph", 2),
             ("pub use tutti_graph::{self as g};", "g", 2),
             ("pub use {tutti_engine as e, tutti_types::Hz};", "e", 2),

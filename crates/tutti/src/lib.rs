@@ -214,13 +214,12 @@ pub mod nodes {
         FdnLayout, FdnNode, FreeverbControls, FreeverbNode, GateControls, GateNode,
         HrtfBinauralNode, InterpolationMode, IrLayout, KeySource, LadderControls, LadderFilterNode,
         LadderType, LfoClock, LfoNode, LfoShape, LimiterControls, LimiterNode, Lookahead, MaxDecay,
-        MaxDelay, MaxDelayError, MetronomeMode, ModDelayControls, ModDelayNode, ModulatorNode,
+        MaxDelay, MaxDelayError, MetronomeMode, ModDelayControls, ModDelayNode,
         MultibandCompressorNode, MultibandControls, NoteEnvelopeNode, OscillatorNode,
         PhaserControls, PhaserNode, PortSide, Routing, RoutingError, SOURCE_EVENT_CAPACITY,
         ShapeKind, SourceNode, SourcePorts, Stages, StagesError, Stagger, StaggerError,
         SvfControls, SvfFilterNode, SvfType, Sweep, SweepError, SweepRange, SweepRangeError,
-        VbapError, VbapPannerNode, VolumeOutOfRange, Waveform, generate_room_ir,
-        generate_room_ir_into, generate_test_ir, generate_test_ir_into,
+        VbapError, VbapPannerNode, VolumeOutOfRange, Waveform,
     };
 }
 
