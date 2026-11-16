@@ -32,7 +32,6 @@
 #![warn(unsafe_op_in_unsafe_fn)]
 
 mod caps;
-mod deadline;
 mod error;
 mod input;
 mod output;

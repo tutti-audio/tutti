@@ -242,8 +242,12 @@ fn pump(
                 PUMP_WAKES.fetch_add(1, Ordering::SeqCst);
                 #[cfg(test)]
                 if let Ok(Wait::Ready) = waited {
+                    // Held for the stall, or until a test clears it.
                     let ms = PUMP_STALL_MS.load(Ordering::SeqCst);
-                    std::thread::sleep(Duration::from_millis(ms));
+                    let end = Instant::now() + Duration::from_millis(ms);
+                    while Instant::now() < end && PUMP_STALL_MS.load(Ordering::SeqCst) != 0 {
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
                 }
                 match waited {
                     Ok(Wait::Ready) => continue,

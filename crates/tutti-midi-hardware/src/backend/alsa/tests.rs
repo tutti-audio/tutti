@@ -777,10 +777,10 @@ fn an_idle_pump_does_not_wake() {
     let pumped = Pumped::open(Duration::ZERO);
     std::thread::sleep(Duration::from_millis(50));
     let before = super::input::PUMP_WAKES.load(std::sync::atomic::Ordering::SeqCst);
-    std::thread::sleep(Duration::from_millis(300));
+    std::thread::sleep(Duration::from_secs(2));
     let woke = super::input::PUMP_WAKES.load(std::sync::atomic::Ordering::SeqCst) - before;
     // Another client's traffic does not reach this port, so nothing should wake it.
-    assert!(woke <= 3, "{woke} wakes in 300 ms idle");
+    assert!(woke <= 3, "{woke} wakes in 2 s idle");
     drop(pumped);
 }
 
@@ -838,21 +838,23 @@ fn an_input_whose_pump_fails_reads_as_gone() {
 /// The time an event is given is when it arrived, not when the pump read it.
 /// The pump is held 400 ms after its wake (`PUMP_STALL_MS`), so three notes sent
 /// 50 and 100 ms apart are all in the queue when it reads; their spacing as the
-/// graph hears them (the frames they sound on) is at least the sender's gap
-/// less the sequencer clock's resolution (a sleep lasts at least its gap), and a
-/// read-time stamp would put all three within microseconds. The inlets' lead (one second) is longer
-/// than the stall, so no event is late and its frame is its arrival's.
+/// graph hears them (the frames they sound on) is the spacing of the instants
+/// the sender sent them at, within the sequencer clock's resolution and the
+/// scheduler's (both are measured, so load stretches both), and a read-time
+/// stamp would put all three within microseconds. The inlets' lead (one second)
+/// is longer than the stall, so no event is late and its frame is its
+/// arrival's.
 #[test]
 fn events_keep_the_spacing_they_arrived_with_when_the_pump_is_late() {
     let rate = crate::testing::RATE;
     super::input::PUMP_STALL_MS.store(400, std::sync::atomic::Ordering::SeqCst);
     let mut pumped = Pumped::open(Duration::from_secs(1));
 
-    let gaps = [50, 100];
-    pumped.send();
-    for gap in gaps {
+    let mut sent = Vec::new();
+    for gap in [0, 50, 100] {
         std::thread::sleep(Duration::from_millis(gap));
         pumped.send();
+        sent.push(Instant::now());
     }
 
     // Each event's frame, as the graph plays it: the graph runs on the wall
@@ -867,12 +869,12 @@ fn events_keep_the_spacing_they_arrived_with_when_the_pump_is_late() {
     }
     super::input::PUMP_STALL_MS.store(0, std::sync::atomic::Ordering::SeqCst);
 
-    for (i, gap) in gaps.into_iter().enumerate() {
-        let sent = gap as f64 / 1000.0 - 0.020;
-        let spacing = (heard[i + 1] - heard[i]) as f64 / rate;
+    for i in 1..3 {
+        let spacing = (heard[i] - heard[i - 1]) as f64 / rate;
+        let sent = (sent[i] - sent[i - 1]).as_secs_f64();
         assert!(
-            spacing >= sent,
-            "gap {i}: sent at least {sent:.4} s apart, heard {spacing:.4} s apart"
+            (spacing - sent).abs() < 0.025,
+            "gap {i}: sent {sent:.4} s apart, heard {spacing:.4} s apart"
         );
     }
 }
@@ -896,6 +898,7 @@ fn dropping_an_input_does_not_wait_on_a_stuck_pump() {
     let start = Instant::now();
     drop(connection);
     let took = start.elapsed();
+    // Releases the stalled pump, which would otherwise sleep out its 30 s.
     super::input::PUMP_STALL_MS.store(0, std::sync::atomic::Ordering::SeqCst);
     assert!(
         took >= Duration::from_millis(900),
@@ -936,7 +939,7 @@ fn next_note(device: &Virtual, patience: Duration) -> Option<(u32, Instant)> {
 }
 
 /// **The sequencer holds a scheduled event until its time.** Against the real
-/// kernel: an event sent `At` 100 ms ahead, then one sent `Now`, reach the
+/// kernel: an event sent `At` 2 s ahead, then one sent `Now`, reach the
 /// subscriber in the other order, and the scheduled one is not there before the
 /// `Instant` the send asked for (less the pairing's few ms of slack). Only
 /// lateness depends on load; an early delivery or a held event that is not
@@ -948,7 +951,7 @@ fn a_scheduled_event_arrives_at_its_time_and_now_at_once() {
     let output = super::output::connect(id).expect("the output to open");
     let slack = Duration::from_millis(10);
 
-    let asked = Instant::now() + Duration::from_millis(100);
+    let asked = Instant::now() + Duration::from_secs(2);
     send(&output, 0x2090_3C64, tutti_midi_runtime::SendAt::At(asked));
     send(&output, 0x2090_3D64, tutti_midi_runtime::SendAt::Now);
     let (first, _) = next_note(&target, PATIENCE).expect("the event sent now");

@@ -131,7 +131,7 @@ fn the_os_blocks_are_within_the_spec() {
 /// **A packet sent `At` a future instant is held by CoreMIDI until then, and
 /// one sent `Now` goes at once**: the send time the plan gives becomes the
 /// packet's host-time stamp, which CoreMIDI schedules. A virtual UMP
-/// destination records when each packet arrives; the note sent 150 ms ahead
+/// destination records when each packet arrives; the note sent 2 s ahead
 /// arrives after the one sent now, though it was queued first, and not before
 /// its instant. Only lateness depends on load.
 #[test]
@@ -158,7 +158,7 @@ fn a_scheduled_packet_is_held_until_its_time_and_now_goes_at_once() {
     out.follow(Protocol::Midi2);
 
     let note = |n| midi::note_on(MidiChannel::FIRST, n, 0xFFFF);
-    let due = Instant::now() + Duration::from_millis(150);
+    let due = Instant::now() + Duration::from_secs(2);
     let sent = out.queue_timed(&[
         Outgoing::new(tutti_graph::Offset::ZERO, SendAt::At(due), note(60)),
         Outgoing::new(tutti_graph::Offset::ZERO, SendAt::Now, note(61)),

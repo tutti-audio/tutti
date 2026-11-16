@@ -73,7 +73,9 @@ fn what_a_virtual_source_sends_reaches_a_session_input_in_order() {
         panic!("a new input opens");
     };
     graph.attach(inlet);
-    graph.ready(|| source.send(notes()[0]).expect("sends"), PATIENCE);
+    // A probe on a key no test asserts on, so a late one is never a test note.
+    let probe = note_on(MidiChannel::of(1), 59, 0x8000);
+    graph.ready(|| source.send(probe).expect("sends"), PATIENCE);
 
     let sent = notes();
     for ump in &sent {
@@ -95,7 +97,7 @@ fn what_a_session_output_sends_reaches_a_virtual_destination_in_order() {
     let mut out = io.connect_output(&device.id).expect("connects");
     graph.ready(
         || {
-            let _ = out.queue(&[(Offset::ZERO, notes()[0])]);
+            let _ = out.queue(&[(Offset::ZERO, note_on(MidiChannel::of(1), 59, 0x8000))]);
         },
         PATIENCE,
     );
