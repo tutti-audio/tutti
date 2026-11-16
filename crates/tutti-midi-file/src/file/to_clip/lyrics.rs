@@ -84,8 +84,7 @@ impl Lyrics {
                 let mut events = Vec::new();
                 for Piece { body, end } in syllables {
                     let body = SyllableBody::try_from(&*body).map_err(|e| match e {
-                        SyllableError::Nul => DropReason::TextHasNul,
-                        SyllableError::TooLong => DropReason::TextTooLong,
+                        SyllableError::Text(e) => DropReason::Text(e),
                         // The split leaves no separator in a body.
                         other => unreachable!("{other:?} in a syllable the split made"),
                     })?;

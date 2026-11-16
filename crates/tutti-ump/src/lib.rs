@@ -123,8 +123,8 @@ pub use field::{
 };
 pub use flex_text::{FlexText, FlexTextAssembler, FlexTextStep};
 pub use flex_write::{
-    Entry, FLEX_TEXT_MAX_LEN, FlexTextPackets, Iso8601Date, Iso8601DateError, LyricKind,
-    LyricPackets, MelismaEndPackets, PlainTextKind, Syllable, SyllableBody, SyllableEnd,
+    Entry, EntryError, FLEX_TEXT_MAX_LEN, FlexTextPackets, Iso8601Date, Iso8601DateError,
+    LyricKind, LyricPackets, MelismaEndPackets, PlainTextKind, Syllable, SyllableBody, SyllableEnd,
     SyllableError, Text, TextError, WordEnd, flex_clip_name_packets, flex_lyric_packets,
     flex_melisma_end_packets, flex_project_name_packets, flex_recording_date_packets,
     flex_text_packets,

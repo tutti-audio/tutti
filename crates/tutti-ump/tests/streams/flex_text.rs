@@ -3,10 +3,10 @@
 //! entry point holds a message to.
 
 use tutti_ump::{
-    Entry, FLEX_TEXT_MAX_LEN, Flex, FlexAddress, FlexTextAssembler, FlexTextKind, FlexTextStep,
-    Form, Iso8601Date, LyricKind, Message, MidiChannel, MidiGroup, PlainTextKind, Syllable,
-    SyllableBody, SyllableEnd, Text, TextError, Ump, flex_clip_name_packets, flex_lyric_packets,
-    flex_project_name_packets, flex_recording_date_packets, flex_text_packets,
+    Entry, EntryError, FLEX_TEXT_MAX_LEN, Flex, FlexAddress, FlexTextAssembler, FlexTextKind,
+    FlexTextStep, Form, Iso8601Date, LyricKind, Message, MidiChannel, MidiGroup, PlainTextKind,
+    Syllable, SyllableBody, SyllableEnd, Text, TextError, Ump, flex_clip_name_packets,
+    flex_lyric_packets, flex_project_name_packets, flex_recording_date_packets, flex_text_packets,
 };
 
 fn text(s: &str) -> Text {
@@ -249,10 +249,10 @@ fn several_entities_in_one_text_are_separated_by_commas() {
     assert_eq!(list(&[]).unwrap().as_str(), "");
     assert_eq!(
         Entry::try_from("Lennon, John").err(),
-        Some(TextError::CommaInEntry)
+        Some(EntryError::Comma)
     );
     // An empty entry would leave two separators in a row.
-    assert_eq!(Entry::try_from("").err(), Some(TextError::EmptyEntry));
+    assert_eq!(Entry::try_from("").err(), Some(EntryError::Empty));
     // A list past the longest text is refused.
     let long = "x".repeat(200);
     assert_eq!(list(&[&long, &long]).err(), Some(TextError::TooLong));

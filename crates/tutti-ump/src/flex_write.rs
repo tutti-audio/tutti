@@ -32,13 +32,21 @@ pub enum TextError {
     /// The text is longer than [`FLEX_TEXT_MAX_LEN`] bytes.
     #[error("a Flex text is at most {FLEX_TEXT_MAX_LEN} bytes")]
     TooLong,
-    /// An [`Entry`] holds a comma, which separates the entries of a list.
+}
+
+/// Why an [`Entry`] cannot be made.
+#[derive(Error, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum EntryError {
+    /// The entry holds a comma, which separates the entries of a list.
     #[error("an entry of a list holds no comma")]
-    CommaInEntry,
-    /// An [`Entry`] is empty: in a list it would leave two separators in a
-    /// row.
+    Comma,
+    /// The entry is empty: in a list it would leave two separators in a row.
     #[error("an entry of a list is not empty")]
-    EmptyEntry,
+    Empty,
+    /// The entry is not a [`Text`].
+    #[error(transparent)]
+    Text(#[from] TextError),
 }
 
 /// A text a Flex Data message carries: UTF-8 with no NUL and at most
@@ -152,22 +160,22 @@ impl Text {
 pub struct Entry(Text);
 
 impl TryFrom<&str> for Entry {
-    type Error = TextError;
+    type Error = EntryError;
 
     /// The entry `entry`.
     ///
     /// # Errors
     ///
-    /// [`TextError::EmptyEntry`] for an empty entry and
-    /// [`TextError::CommaInEntry`] for a comma; otherwise as for [`Text`].
-    fn try_from(entry: &str) -> Result<Self, TextError> {
+    /// [`EntryError::Empty`] for an empty entry and [`EntryError::Comma`]
+    /// for a comma; otherwise [`EntryError::Text`], as for [`Text`].
+    fn try_from(entry: &str) -> Result<Self, EntryError> {
         if entry.is_empty() {
-            return Err(TextError::EmptyEntry);
+            return Err(EntryError::Empty);
         }
         if entry.contains(',') {
-            return Err(TextError::CommaInEntry);
+            return Err(EntryError::Comma);
         }
-        Text::try_from(entry).map(Self)
+        Ok(Text::try_from(entry).map(Self)?)
     }
 }
 
@@ -302,12 +310,10 @@ pub enum SyllableError {
     /// is one syllable, and these end a word, a line or a paragraph.
     #[error("a syllable holds no space, carriage return or line feed")]
     Separator,
-    /// A NUL byte, which is the padding.
-    #[error("a syllable holds no NUL byte")]
-    Nul,
-    /// A syllable that with its end is past [`FLEX_TEXT_MAX_LEN`] bytes.
-    #[error("a syllable is at most {} bytes", FLEX_TEXT_MAX_LEN - 2)]
-    TooLong,
+    /// The syllable is not a [`Text`], or is too long to keep room for the
+    /// longest end, a carriage return and a line feed.
+    #[error(transparent)]
+    Text(#[from] TextError),
 }
 
 /// The text of one syllable of a Lyric Data or Ruby Data message: no space,
@@ -323,18 +329,17 @@ impl TryFrom<&str> for SyllableBody {
     ///
     /// # Errors
     ///
-    /// [`SyllableError::Separator`], [`SyllableError::Nul`] or
-    /// [`SyllableError::TooLong`].
+    /// [`SyllableError::Separator`] for a space, carriage return or line
+    /// feed; otherwise [`SyllableError::Text`], for a NUL or a body past
+    /// [`FLEX_TEXT_MAX_LEN`] bytes less the two of the longest end.
     fn try_from(body: &str) -> Result<Self, SyllableError> {
         if body.contains([' ', '\r', '\n']) {
             return Err(SyllableError::Separator);
         }
         if body.len() > FLEX_TEXT_MAX_LEN - 2 {
-            return Err(SyllableError::TooLong);
+            return Err(TextError::TooLong.into());
         }
-        Text::try_from(body)
-            .map(Self)
-            .map_err(|_| SyllableError::Nul)
+        Ok(Text::try_from(body).map(Self)?)
     }
 }
 

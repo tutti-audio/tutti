@@ -6,7 +6,7 @@
 
 use tutti_ump::{
     Flex, FlexAddress, FlexTextAssembler, FlexTextKind, FlexTextStep, Form, LyricKind, Message,
-    MidiGroup, Syllable, SyllableBody, SyllableEnd, SyllableError, Ump, WordEnd,
+    MidiGroup, Syllable, SyllableBody, SyllableEnd, SyllableError, TextError, Ump, WordEnd,
     flex_lyric_packets, flex_melisma_end_packets,
 };
 
@@ -209,11 +209,11 @@ fn a_message_holds_one_syllable() {
     }
     assert_eq!(
         SyllableBody::try_from("a\0").err(),
-        Some(SyllableError::Nul)
+        Some(SyllableError::Text(TextError::Nul))
     );
     assert_eq!(
         SyllableBody::try_from(&*"x".repeat(383)).err(),
-        Some(SyllableError::TooLong)
+        Some(SyllableError::Text(TextError::TooLong))
     );
     // The longest syllable with the longest end still fits 32 packets.
     let longest = Syllable {

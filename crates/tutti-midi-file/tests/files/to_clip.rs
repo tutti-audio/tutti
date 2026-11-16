@@ -17,7 +17,8 @@ use tutti_midi_file::{
 use tutti_types::{Beat, Seconds};
 use tutti_ump::{
     BarAccents, Flex, FlexAddress, FlexTextKind, FlexTimeSignature, Form, KeySignature, Letter,
-    Message, Metronome, MidiGroup, SharpsFlats, Stream, SysexStatus, Utility, split_stream,
+    Message, Metronome, MidiGroup, SharpsFlats, Stream, SysexStatus, TextError, Utility,
+    split_stream,
 };
 
 const TPQ: u16 = 480;
@@ -654,7 +655,10 @@ fn text_that_flex_cannot_carry_is_reported() {
     ]);
     let converted = smf.to_clip().unwrap();
     let reasons: Vec<_> = converted.dropped.iter().map(|d| d.reason).collect();
-    assert_eq!(reasons, [DropReason::TextNotUtf8, DropReason::TextHasNul]);
+    assert_eq!(
+        reasons,
+        [DropReason::TextNotUtf8, DropReason::Text(TextError::Nul)]
+    );
     assert_eq!(
         flex_texts(&converted.clip),
         [(
@@ -1146,9 +1150,9 @@ fn a_lyric_that_cannot_be_a_message_is_reported() {
         [
             DropReason::LyricWithoutSyllable,
             DropReason::LyricWithoutSyllable,
-            DropReason::TextTooLong,
-            DropReason::TextHasNul,
-            DropReason::TextTooLong,
+            DropReason::Text(TextError::TooLong),
+            DropReason::Text(TextError::Nul),
+            DropReason::Text(TextError::TooLong),
         ]
     );
 }
