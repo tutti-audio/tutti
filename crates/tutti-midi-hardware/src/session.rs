@@ -49,9 +49,7 @@ use crate::stream::{DeviceStream, InputTiming, Negotiation};
 use tutti_graph::EventInletNode;
 use tutti_midi_device::{CiDeviceId, ProfileChange, ProfileId};
 use tutti_midi_device::{DeviceId, DeviceInfo, EntropyError, Learned, SavedDevice};
-use tutti_midi_runtime::InputInlets;
-use tutti_rt::{Counter, Gauge};
-use tutti_types::{Resyncs, Seconds};
+use tutti_midi_runtime::{ClockWriters, InputInlets};
 use tutti_ump::{DeviceIdentity, MidiGroup};
 
 /// The set of open MIDI inputs, and the endpoints available to open.
@@ -375,6 +373,23 @@ impl MidiSession {
     /// when it is not an input. Otherwise whatever the backend raises while
     /// opening the port.
     pub fn connect_input(&mut self, device: impl Into<DeviceQuery>) -> Result<Connected> {
+        self.connect_input_with(device, ClockWriters::new().0)
+    }
+
+    /// [`connect_input`](Self::connect_input), the input's clock map reporting
+    /// its timing to `clock`: the readers stay with whoever made them
+    /// ([`ClockWriters::new`]) and outlive the connection. The writers drop
+    /// with the input, whether it is refused here (already open, or the OS
+    /// failed) or closed later, and their cells close until reopened.
+    ///
+    /// # Errors
+    ///
+    /// As [`connect_input`](Self::connect_input).
+    pub fn connect_input_with(
+        &mut self,
+        device: impl Into<DeviceQuery>,
+        clock: ClockWriters,
+    ) -> Result<Connected> {
         let timing = self.options.input_timing;
         let id = device.into().pick(self.inputs())?;
         // An input whose reader died is replaced, not kept: it is silent.
@@ -390,7 +405,7 @@ impl MidiSession {
         }
 
         // One ring per connection, retired with it.
-        let (input, inlet) = self.devices.open_input(&id, &self.ports)?;
+        let (input, inlet) = self.devices.open_input(&id, &self.ports, clock)?;
         // A UMP Endpoint with an output is asked what it is by the next
         // `poll`. Its output is the negotiation's own, not the session's one
         // destination: asking must not wait for, or disturb, that choice.
@@ -611,15 +626,6 @@ impl MidiSession {
         self.inputs
             .get(id)
             .map_or_else(Arc::default, |held| held.stream.ci_peers())
-    }
-
-    /// The readers of the clock map of the open input `id`: its latest
-    /// correction (signed, positive when a reading came late) and how many
-    /// times it re-anchored. `None` when the input is not open. They belong to
-    /// the connection: closing it and opening again makes new ones.
-    #[must_use]
-    pub fn clock_readings(&self, id: &DeviceId) -> Option<(Gauge<Seconds>, Counter<Resyncs>)> {
-        self.inputs.get(id)?.input.clock_readings()
     }
 
     /// The MIDI-CI messages the output of the open input `id` has refused, as

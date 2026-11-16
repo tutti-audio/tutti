@@ -11,9 +11,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use tutti_graph::{EventInletNode, Losses};
-use tutti_midi_runtime::{InputId, InputInlets};
-use tutti_rt::{Counter, Gauge};
-use tutti_types::{Resyncs, Seconds};
+use tutti_midi_runtime::{ClockWriters, InputId, InputInlets};
 
 use super::async_port::{HardwareMidiInput, InputProducerHandle, StreamDrain};
 use crate::InputTiming;
@@ -142,9 +140,20 @@ impl HardwareMidiInputs {
         &self,
         name: impl Into<String>,
     ) -> (InputProducerHandle, EventInletNode) {
+        self.open_input_port_with(name, ClockWriters::new().0)
+    }
+
+    /// [`open_input_port`](Self::open_input_port), the port's clock map
+    /// reporting its timing to `clock` (see [`ClockWriters`]).
+    #[must_use = "the handle is the port's only producer, and the node its graph side: dropping either leaves the port fed by nothing"]
+    pub fn open_input_port_with(
+        &self,
+        name: impl Into<String>,
+        clock: ClockWriters,
+    ) -> (InputProducerHandle, EventInletNode) {
         let name = name.into();
         let mut ports = self.ports();
-        let (input, node) = self.inlets.open();
+        let (input, node) = self.inlets.open_with(clock);
         let id = input.id();
         let (port, handle) = HardwareMidiInput::new(name, input);
         ports.live.insert(id, Arc::new(port));
@@ -178,15 +187,6 @@ impl HardwareMidiInputs {
     /// The live port `id` names, if any: a stale id names none.
     fn port(&self, id: InputId) -> Option<Arc<HardwareMidiInput>> {
         self.ports().live.get(&id).cloned()
-    }
-
-    /// The readers of the clock map of the port `id` names: its latest
-    /// correction (signed, positive when a reading came late) and how many
-    /// times it re-anchored. `None` for a stale id. Readable from any thread;
-    /// they read what the port's last value was once it is retired.
-    #[must_use]
-    pub fn clock_readings(&self, id: InputId) -> Option<(Gauge<Seconds>, Counter<Resyncs>)> {
-        self.port(id).map(|port| port.clock_readings())
     }
 
     /// A snapshot of one port, or `None` when `id` names no live port.

@@ -23,8 +23,7 @@ use std::time::Instant;
 use tutti_graph::Losses;
 use tutti_midi_device::{ClockHeard, JrReceiver};
 use tutti_midi_runtime::{DeviceInput, InletCounts, InputId};
-use tutti_rt::{Counter, Gauge, Overflow, RingReader, RingWriter, ring};
-use tutti_types::{Resyncs, Seconds};
+use tutti_rt::{Overflow, RingReader, RingWriter, ring};
 use tutti_ump::{Message, Ump, Utility};
 
 use crate::InputTiming;
@@ -308,8 +307,6 @@ pub(crate) struct HardwareMidiInput {
     name: String,
     active: Arc<AtomicBool>,
     counts: InletCounts,
-    correction: Gauge<Seconds>,
-    resyncs: Counter<Resyncs>,
     /// The reading end of the stream ring; control side, one reader at a time.
     stream: Mutex<RingReader<Ump>>,
     hear_sysex: Arc<AtomicBool>,
@@ -330,8 +327,6 @@ impl HardwareMidiInput {
                 name: name.into(),
                 active: Arc::clone(&active),
                 counts: input.counts(),
-                correction: input.timing(),
-                resyncs: input.resyncs(),
                 stream: Mutex::new(stream_out),
                 hear_sysex: Arc::clone(&hear_sysex),
                 timing: Arc::clone(&timing),
@@ -346,12 +341,6 @@ impl HardwareMidiInput {
                 jr: JrInput::new(jr_counts),
             },
         )
-    }
-
-    /// The readers of the input's clock map: its latest correction and its
-    /// re-anchors ([`DeviceInput::timing`], [`DeviceInput::resyncs`]).
-    pub(crate) fn clock_readings(&self) -> (Gauge<Seconds>, Counter<Resyncs>) {
-        (self.correction.clone(), self.resyncs.clone())
     }
 
     /// What the inlet has lost.
