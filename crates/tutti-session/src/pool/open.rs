@@ -44,10 +44,10 @@ impl<'a> OpenCx<'a> {
     /// The id of a new resource: no other token of this session has it. The
     /// peer a stage opens takes its id here.
     #[cfg_attr(
-        not(feature = "midi-hardware"),
+        not(feature = "midi"),
         expect(
             dead_code,
-            reason = "the pool's MIDI ports (feature `midi-hardware`) mint their ids here"
+            reason = "the pool's MIDI sinks and ports (feature `midi`) mint their ids here"
         )
     )]
     pub(crate) fn mint_resource_id(&mut self) -> crate::ResourceId {
@@ -60,7 +60,7 @@ impl<'a> OpenCx<'a> {
         self.rate
     }
 
-    /// The session's MIDI: its devices, inputs and the hardware out.
+    /// The session's MIDI: its devices, inputs and outputs.
     #[cfg(feature = "midi")]
     pub fn midi(&mut self) -> crate::Midi<'_> {
         self.midi.reborrow()

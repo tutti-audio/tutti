@@ -27,9 +27,6 @@
 //!   it writes to its port; [`MidiClipNode`] uses it.
 //! - [`MidiKeys`]: the key helpers (`note_on`, `note_off`) over `tutti-graph`'s
 //!   event inlet, which is how a control thread sends MIDI into the graph.
-//! - [`MidiMailbox`] / [`MidiSender`] / [`MidiReceiver`]: the lock-free ring MIDI
-//!   a host's own outbound MIDI crosses to the session's drain on (it goes when
-//!   the host's outbound path is its own).
 //! - [`ClockMaster`], [`JrClock`] and [`JrStamper`]: engine-produced MIDI *out*
 //!   (Beat Clock, MTC, JR timestamps).
 //! - [`MidiClockDecoder`] and [`MtcDecoder`]: the inbound half of
@@ -120,26 +117,6 @@
 //! let mut keys = MidiKeys::new(writer, MidiGroup::FIRST);
 //! keys.note_on(Stamp::NextBlock, MidiChannel::FIRST, NoteNumber::of(60), NoteVelocity::new(0xC800))
 //!     .unwrap();
-//! ```
-//!
-//! Out of the graph, a mailbox is a lock-free ring a control thread drains:
-//!
-//! ```rust
-//! use tutti_graph::Offset;
-//! use tutti_midi_runtime::MidiMailbox;
-//! use tutti_ump::{KeyEvent, MidiChannel, NoteNumber, NoteVelocity, Ump, Voice2, Address, Message};
-//!
-//! let (tx, rx) = MidiMailbox::pair();
-//! let on = Ump::from(Message::Midi2(
-//!     Address::first(MidiChannel::FIRST),
-//!     Voice2::note_on(NoteNumber::of(60), NoteVelocity::new(0xC800)),
-//! ));
-//! assert_eq!(tx.queue(&[(Offset::ZERO, on)]).packets(), 1);
-//!
-//! let mut block = [(0, Ump([0; 4])); 8];
-//! assert_eq!(rx.poll_into(&mut block), 1);
-//! let Some(KeyEvent::On(key)) = block[0].1.key_event() else { panic!("a note-on") };
-//! assert_eq!(key.note(), NoteNumber::of(60));
 //! ```
 //!
 //! ## Events are not lost silently
@@ -241,9 +218,8 @@ pub use held::HeldState;
 pub use ledger::{NoteLedger, Sending};
 pub use live::{
     ACTIVE_SENSING_JUDGE, ActiveSensing, ArrivalClock, CHANNELLESS_PORT, DeviceEpochs, DeviceInput,
-    InputId, InputInlets, LIVE_INLET_CAPACITY, MAILBOX_CAPACITY, MIDI_INPUT_DENSITY,
-    MIDI_INPUT_EVENT_CAPACITY, MIDI_INPUT_PORTS, MidiIngestControls, MidiIngestNode,
-    MidiInputPorts, MidiKeys, MidiMailbox, MidiReceiver, MidiSender, MpeIngest,
+    InputId, InputInlets, LIVE_INLET_CAPACITY, MIDI_INPUT_DENSITY, MIDI_INPUT_EVENT_CAPACITY,
+    MIDI_INPUT_PORTS, MidiIngestControls, MidiIngestNode, MidiInputPorts, MidiKeys, MpeIngest,
     MpeTransformControls, MpeTransformNode, RouteRule, compile_routes,
 };
 pub use mpe_features::{MpeFeaturesError, ask_mpe_features, mpe_features};
