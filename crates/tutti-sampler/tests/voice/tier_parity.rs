@@ -47,6 +47,7 @@
 
 use std::path::Path;
 use std::sync::Arc;
+use tutti_fixtures::signal::rms_f64;
 
 use tutti_codec::Wave;
 use tutti_graph::{Node, contract};
@@ -411,8 +412,8 @@ fn the_disk_and_memory_tiers_render_the_same_material() {
                 .map(|&(l, r)| if ch == 0 { l } else { r })
                 .collect()
         };
-        let m = rms(&pick(&mem_out));
-        let k = rms(&pick(&disk_out));
+        let m = rms_f64(&pick(&mem_out));
+        let k = rms_f64(&pick(&disk_out));
         let db = 20.0 * (k / m).log10();
         assert!(
             db.abs() < 1.0,
@@ -795,10 +796,6 @@ fn the_tiers_agree_under_varispeed() {
              {mem_hz:.1} Hz — the tiers apply varispeed differently"
         );
     }
-}
-
-fn rms(x: &[f32]) -> f64 {
-    (x.iter().map(|&s| (s as f64).powi(2)).sum::<f64>() / x.len() as f64).sqrt()
 }
 
 /// Dominant frequency by DFT peak with parabolic interpolation.
