@@ -348,16 +348,14 @@ mod tests {
         assert_eq!(taken(&word).count(), 0);
     }
 
-    /// An edit survives the ring's encoding, in order; a full ring refuses and
-    /// counts.
-    /// A ring of no room is refused at construction, and the refused count
-    /// saturates at `u32::MAX` rather than wrapping.
+    /// A ring of no room is refused at construction.
     #[test]
     #[should_panic(expected = "an edit ring holds at least one value")]
     fn an_edit_ring_of_no_room_is_refused() {
         let _ = edits(0);
     }
 
+    /// The refused count saturates at `u32::MAX` rather than wrapping.
     #[test]
     fn the_refused_count_saturates_at_u32_max() {
         assert_eq!(saturate(7), 7);
@@ -366,6 +364,8 @@ mod tests {
         assert_eq!(saturate(u64::MAX), u32::MAX);
     }
 
+    /// An edit survives the ring's encoding, in order; a full ring refuses and
+    /// counts.
     #[test]
     fn edits_round_trip_in_order() {
         let (mut sink, mut drain) = edits(2);
