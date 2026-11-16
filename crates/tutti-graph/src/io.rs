@@ -365,7 +365,7 @@ impl<'a> Io<'a> {
     /// one node call is one record whose `repeats` counts the rest; a fifth
     /// distinct record in one node call is counted lost. The executor fills
     /// in the node and the frame, and the session emits the record as a
-    /// `tracing` event on `tutti::rt`.
+    /// `tracing` event on its audio-thread target.
     ///
     /// ```text
     /// io.log(RtLevel::Warn, "non-finite sample", offset, &[("channel", c.into())]);
@@ -382,7 +382,7 @@ impl<'a> Io<'a> {
     }
 
     /// As [`log`](Self::log), for a hosted plugin's record: the session
-    /// emits it on `tutti::plugin`, which a subscriber filters on its own.
+    /// emits it on its plugin target, which a subscriber filters on its own.
     #[inline]
     pub fn log_plugin(
         &self,
