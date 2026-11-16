@@ -1,5 +1,5 @@
 //! The slab's backing file on unix: a file under shared memory, removed by its
-//! creator with `unlink`, which leaves a peer's mapping intact.
+//! creator when its mapping ends.
 
 use super::Open;
 use crate::SlabError;
@@ -7,16 +7,25 @@ use std::fs::{File, OpenOptions};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
 
-/// What stays open beside the mapping: nothing, since `unlink` ends the name
-/// whatever is mapped.
+/// What ends the name: the creator's carries the path and unlinks it on drop,
+/// which leaves a peer's mapping intact; an opener's carries nothing.
 #[derive(Debug)]
-pub(super) struct Backing;
+pub(super) struct Backing(Option<PathBuf>);
 
 impl Backing {
-    /// Releases `file`: the mapping does not need the descriptor.
-    pub(super) fn keep(file: File) -> Self {
+    /// Takes the end of the name from `file`'s creator; an opener's file is only
+    /// released, since the mapping does not need the descriptor.
+    pub(super) fn keep(file: File, name: &str, mode: Open) -> Self {
         drop(file);
-        Self
+        Self(matches!(mode, Open::Create).then(|| path(name)))
+    }
+}
+
+impl Drop for Backing {
+    fn drop(&mut self) {
+        if let Some(path) = &self.0 {
+            let _ = std::fs::remove_file(path);
+        }
     }
 }
 

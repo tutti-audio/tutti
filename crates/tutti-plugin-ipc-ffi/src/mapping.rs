@@ -11,7 +11,7 @@
 //! A mapping exists only together with its one [`MappingWriter`] (not `Clone`,
 //! `write` takes `&mut self`), so within this process every store into the data
 //! region is ordered by the borrow checker. That, and the file being made here
-//! (exclusively, at 0600) and never resized, is what lets every call in this
+//! (exclusively, at 0600 on unix and in the temp directory's ACL on Windows) and never resized, is what lets every call in this
 //! module be safe.
 //!
 //! The backing file's platform is one module, chosen once above: where it lives,
@@ -103,12 +103,13 @@ impl MappingWriter {
     /// Creates the slab named `name`, `size` bytes long, maps it and stamps its
     /// header, before any peer can know the name.
     ///
-    /// The file is created exclusively, at 0600: a name that already exists (a
+    /// The file is created exclusively, at 0600 on unix (the temp directory's
+    /// ACL on Windows): a name that already exists (a
     /// symlink included) is an error, never a file to truncate, since another
-    /// process could hold that file mapped, or have planted it. The creator
-    /// removes it with [`remove`]; on Windows the file also ends with the last
-    /// mapping of it, whichever process holds that, because the creator opens it
-    /// delete-on-close and keeps that handle for as long as its mapping lives.
+    /// process could hold that file mapped, or have planted it. The file ends
+    /// with the creator's mapping: on unix the creator's drop unlinks it, and on
+    /// Windows it is opened delete-on-close and the creator keeps that handle,
+    /// so it is deleted when the last handle and view of it close.
     ///
     /// # Errors
     ///
@@ -120,7 +121,11 @@ impl MappingWriter {
     /// If `size` is smaller than [`SLAB_HEADER_BYTES`]: the caller sizes the
     /// slab from a layout that always includes the header.
     pub fn create(name: &str, size: usize) -> Result<Self, SlabError> {
-        let writer = Self::map(platform::open_file(name, size, Open::Create)?)?;
+        let writer = Self::map(
+            platform::open_file(name, size, Open::Create)?,
+            name,
+            Open::Create,
+        )?;
         // Stamp before anyone can open it: the peer is told the slab's name only
         // after this returns, and `initialize` releases the magic last so an
         // opener that sees the magic sees a fully written header.
@@ -157,15 +162,15 @@ impl MappingWriter {
                 expected: size,
             });
         }
-        let writer = Self::map(file)?;
+        let writer = Self::map(file, name, Open::Existing)?;
         writer.mapping.header().validate()?;
         Ok(writer)
     }
 
-    fn map(file: File) -> Result<Self, SlabError> {
+    fn map(file: File, name: &str, mode: Open) -> Result<Self, SlabError> {
         // SAFETY: `memmap2`'s contract is that the file is not truncated or
         // resized by anyone while mapped. `open_file` is the only code that makes
-        // or opens a slab file: it creates one exclusively at 0600 and sizes it
+        // or opens a slab file: it creates one exclusively (0600 on unix) and sizes it
         // before this map, and opens the peer's without `truncate` and never
         // sizes it. A process with write access to the file could still shrink
         // it; that is a fault of a trusted peer, as is scribbling on it (the
@@ -173,7 +178,10 @@ impl MappingWriter {
         let map = unsafe { MmapMut::map_mut(&file) }
             .map_err(|e| SlabError::File(format!("failed to map shared memory: {e}")))?;
         Ok(Self {
-            mapping: Arc::new(SharedMapping::new(map, platform::Backing::keep(file))),
+            mapping: Arc::new(SharedMapping::new(
+                map,
+                platform::Backing::keep(file, name, mode),
+            )),
         })
     }
 
@@ -302,16 +310,6 @@ impl SharedMapping {
     }
 }
 
-/// Removes the backing file of the slab named `name`, as its creator does when
-/// it is done with it. A peer that still has it mapped keeps its mapping.
-///
-/// On Windows a file with a mapped view cannot be removed here; the creator's
-/// open handle (see [`MappingWriter::create`]) removes it when the last mapping
-/// of it closes.
-pub fn remove(name: &str) {
-    let _ = std::fs::remove_file(platform::path(name));
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -329,7 +327,6 @@ mod tests {
     fn a_copy_into_the_header_panics() {
         let n = name("hdr");
         let mut w = MappingWriter::create(&n, SLAB_HEADER_BYTES + 64).unwrap();
-        remove(&n);
         w.write(0, &[0u8; 8]);
     }
 
@@ -341,7 +338,6 @@ mod tests {
         let n = name("magic");
         let _w = MappingWriter::create(&n, SLAB_HEADER_BYTES + 64).unwrap();
         let bytes = std::fs::read(platform::path(&n)).unwrap();
-        remove(&n);
         assert_eq!(
             u64::from_le_bytes(bytes[..8].try_into().unwrap()),
             SLAB_MAGIC
@@ -361,7 +357,6 @@ mod tests {
         peer.mapping().read(SLAB_HEADER_BYTES, &mut back);
         assert_eq!(back, [7u8; 16]);
         let err = MappingWriter::open(&n, size + 1).expect_err("a short slab");
-        remove(&n);
         assert!(matches!(err, SlabError::Short { .. }), "got {err}");
     }
 
@@ -378,8 +373,7 @@ mod tests {
         std::os::unix::fs::symlink(platform::path(&real), platform::path(&link)).unwrap();
         let opened = MappingWriter::open(&link, size);
         let created = MappingWriter::create(&link, size);
-        remove(&link);
-        remove(&real);
+        let _ = std::fs::remove_file(platform::path(&link));
         assert!(opened.is_err(), "open followed a link");
         assert!(created.is_err(), "create followed a link");
     }
@@ -392,31 +386,44 @@ mod tests {
         let n = name("foreign");
         std::fs::write(platform::path(&n), vec![0xABu8; size]).unwrap();
         let err = MappingWriter::open(&n, size).expect_err("a foreign file must not open");
-        remove(&n);
+        std::fs::remove_file(platform::path(&n)).unwrap();
         assert!(
             err.to_string().contains("not a tutti audio slab"),
             "expected a magic failure, got: {err}"
         );
     }
 
-    /// No file and no openable mapping outlives the last of a slab's mappings:
-    /// the creator's `remove` (what dropping the owning slab runs) and the drop
-    /// of both ends leave nothing at the name. On Windows `remove` cannot delete
-    /// a file that is mapped, so this holds only if the file ends with its last
-    /// mapping.
+    /// No openable slab outlives the last of its mappings: after the owner and
+    /// its peer drop, the name opens no more (unlinked on unix, deleted or
+    /// delete-pending on Windows). CI runs this on unix only.
     #[test]
     fn nothing_outlives_the_last_mapping() {
         let size = SLAB_HEADER_BYTES + 64;
         let n = name("gone");
         let owner = MappingWriter::create(&n, size).unwrap();
         let peer = MappingWriter::open(&n, size).unwrap();
-        remove(&n);
         drop(owner);
         drop(peer);
         assert!(
-            !platform::path(&n).exists(),
-            "the file outlived its mappings"
+            MappingWriter::open(&n, size).is_err(),
+            "the slab opens after its mappings are gone"
         );
+    }
+
+    /// The owner dropping first leaves the peer's mapping working, and the
+    /// peer's drop is what ends the slab. CI runs this on unix only.
+    #[test]
+    fn the_peer_outlives_the_owner_and_ends_the_slab() {
+        let size = SLAB_HEADER_BYTES + 16;
+        let n = name("peer_last");
+        let owner = MappingWriter::create(&n, size).unwrap();
+        let mut peer = MappingWriter::open(&n, size).unwrap();
+        drop(owner);
+        peer.write(SLAB_HEADER_BYTES, &[9u8; 16]);
+        let mut back = [0u8; 16];
+        peer.mapping().read(SLAB_HEADER_BYTES, &mut back);
+        assert_eq!(back, [9u8; 16]);
+        drop(peer);
         assert!(
             MappingWriter::open(&n, size).is_err(),
             "the slab opens after its mappings are gone"

@@ -5,7 +5,9 @@
 //! map it when its creator is done. So the creator opens it with
 //! `FILE_FLAG_DELETE_ON_CLOSE` and keeps that handle for as long as its mapping
 //! lives; the file is deleted when the last handle and the last view of it close,
-//! in either process, including after a crash. The peer opens it by name with the
+//! in either process, including after a crash (observed NTFS behaviour, not a
+//! documented guarantee). The file sits in the temp directory, so its access is
+//! that directory's ACL. The peer opens it by name with the
 //! default share mode (read, write and delete), which the creator's open admits,
 //! and does not ask for deletion.
 
@@ -15,17 +17,21 @@ use std::fs::{File, OpenOptions};
 use std::os::windows::fs::OpenOptionsExt;
 use std::path::PathBuf;
 use windows_sys::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE};
-use windows_sys::Win32::Storage::FileSystem::{DELETE, FILE_FLAG_DELETE_ON_CLOSE};
+use windows_sys::Win32::Storage::FileSystem::{
+    DELETE, FILE_FLAG_DELETE_ON_CLOSE, FILE_FLAG_OPEN_REPARSE_POINT,
+};
 
 /// The open file handle kept for as long as the mapping lives: the creator's
 /// carries the delete-on-close, and the name stays openable while it is held.
 #[derive(Debug)]
-pub(super) struct Backing(#[allow(dead_code, reason = "held for its drop")] File);
+pub(super) struct Backing {
+    _file: File,
+}
 
 impl Backing {
-    /// Keeps `file` open.
-    pub(super) fn keep(file: File) -> Self {
-        Self(file)
+    /// Keeps `file` open; closing it, with the last view, ends the file.
+    pub(super) fn keep(file: File, _name: &str, _mode: Open) -> Self {
+        Self { _file: file }
     }
 }
 
@@ -42,7 +48,11 @@ pub(super) fn open_file(name: &str, size: usize, mode: Open) -> Result<File, Sla
                 .custom_flags(FILE_FLAG_DELETE_ON_CLOSE);
         }
         Open::Existing => {
-            opts.read(true).write(true);
+            // The reparse point itself is opened, never its target, as
+            // `O_NOFOLLOW` does on unix.
+            opts.read(true)
+                .write(true)
+                .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
         }
     }
     let file = opts
