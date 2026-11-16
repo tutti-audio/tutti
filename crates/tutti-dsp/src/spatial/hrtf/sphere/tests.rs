@@ -315,3 +315,25 @@ fn a_rate_that_is_not_a_whole_number_of_hertz_is_refused() {
     ));
     assert!(HrirSphere::new(SampleRate::of(44_100.0), &measurements).is_ok());
 }
+
+/// A direction the hull of the others encloses (here a point at half radius, as rounding can
+/// leave one just inside) is refused by its index, and the octahedron alone passes.
+#[test]
+fn a_direction_the_hull_drops_is_refused_by_index() {
+    let mut points = vec![
+        [1.0, 0.0, 0.0],
+        [-1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, -1.0, 0.0],
+        [0.0, 0.0, 1.0],
+        [0.0, 0.0, -1.0],
+    ];
+    let faces = convex_hull(&points).expect("an octahedron");
+    assert!(every_vertex_on(&faces, points.len()).is_ok());
+    points.insert(2, [0.5, 0.0, 0.0]);
+    let faces = convex_hull(&points).expect("an octahedron");
+    assert!(matches!(
+        every_vertex_on(&faces, points.len()),
+        Err(HrtfBinauralError::Inside { vertex: 2 })
+    ));
+}

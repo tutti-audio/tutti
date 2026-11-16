@@ -127,3 +127,22 @@ fn points_without_volume_have_no_hull() {
     let line: Vec<Vec3> = (0..5).map(|i| [f64::from(i), 0.0, 0.0]).collect();
     assert!(convex_hull(&line).is_none(), "collinear points");
 }
+
+/// A measurement grid as SOFA sets lay them out: rings of 72 directions every 10 degrees
+/// of elevation from -40 to 80, aligned in azimuth so each four neighbours are cocircular,
+/// and the pole. Exact cocircular quads must still triangulate closed, with every
+/// direction a vertex.
+#[test]
+fn a_ring_grid_with_cocircular_quads_is_a_closed_convex_triangulation() {
+    let mut points: Vec<Vec3> = Vec::new();
+    for ring in -4..=8 {
+        let el = f64::from(ring * 10).to_radians();
+        for k in 0..72 {
+            let az = f64::from(k * 5).to_radians();
+            points.push([el.cos() * az.cos(), el.cos() * az.sin(), el.sin()]);
+        }
+    }
+    points.push([0.0, 0.0, 1.0]);
+    let faces = convex_hull(&points).expect("the grid has volume");
+    assert_convex_triangulation(&points, &faces);
+}

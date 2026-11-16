@@ -120,6 +120,10 @@ impl HrirSphere {
     /// hertz as the byte format stores it. Every
     /// response has the same length, which becomes the sphere's.
     ///
+    /// A set that leaves part of the sphere unmeasured (one hemisphere, say)
+    /// has no face there that a ray from the listener crosses: a direction
+    /// there takes its nearest measured direction's responses.
+    ///
     /// # Errors
     ///
     /// An [`HrtfBinauralError`]: [`FractionalRate`](HrtfBinauralError::FractionalRate)
@@ -129,12 +133,14 @@ impl HrirSphere {
     /// for responses of unequal length,
     /// [`Duplicate`](HrtfBinauralError::Duplicate) for two measurements in
     /// one direction, [`NotEnclosing`](HrtfBinauralError::NotEnclosing) for
-    /// fewer than four directions or directions in one plane, and
+    /// fewer than four directions or directions in one plane,
+    /// [`Inside`](HrtfBinauralError::Inside) for a direction the hull of the
+    /// others encloses, and
     /// [`Vertex`](HrtfBinauralError::Vertex) for a non-finite direction or
     /// a response sample out of range.
-    pub fn new(
+    pub fn new<S: Sample>(
         rate: SampleRate,
-        measurements: &[HrirMeasurement<'_>],
+        measurements: &[HrirMeasurement<'_, S>],
     ) -> Result<Self, HrtfBinauralError> {
         // The format stores a `u32`; a rate past it is refused by `check_shape`'s range.
         let hz = rate.get();
@@ -181,6 +187,7 @@ impl HrirSphere {
             }
         }
         let faces = convex_hull(&wide).ok_or(HrtfBinauralError::NotEnclosing)?;
+        every_vertex_on(&faces, positions.len())?;
         let sphere = Self {
             rate,
             len,
@@ -311,6 +318,19 @@ impl HrirSphere {
             return Err(HrtfBinauralError::NoFace);
         }
         Ok(())
+    }
+}
+
+/// Each of the `vertices` is a corner of some face: the hull dropped none of them as
+/// lying inside the others.
+fn every_vertex_on(faces: &[[u32; 3]], vertices: usize) -> Result<(), HrtfBinauralError> {
+    let mut on_hull = vec![false; vertices];
+    for &v in faces.iter().flatten() {
+        on_hull[v as usize] = true;
+    }
+    match on_hull.iter().position(|&on| !on) {
+        Some(vertex) => Err(HrtfBinauralError::Inside { vertex }),
+        None => Ok(()),
     }
 }
 

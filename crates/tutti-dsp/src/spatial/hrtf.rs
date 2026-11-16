@@ -147,6 +147,14 @@ pub enum HrtfBinauralError {
     /// through the listener: no triangles enclose the listener.
     #[error("the directions are fewer than four or coplanar, so they do not enclose the listener")]
     NotEnclosing,
+    /// A direction lies inside the hull of the others (closer to the
+    /// listener than the triangle it would sit on, after rounding), so no
+    /// face blends its responses.
+    #[error("measurement {vertex}'s direction lies inside the hull of the others")]
+    Inside {
+        /// The measurement's index.
+        vertex: usize,
+    },
     /// No face is a usable triangle: there are none, or each one's plane
     /// passes through the origin, so no direction can be blended.
     #[error("the HRIR sphere has no usable face")]
