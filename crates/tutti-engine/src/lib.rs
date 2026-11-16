@@ -138,7 +138,8 @@ pub use block_clock::{BlockClockReader, BlockReading, Playhead};
 pub use callback::{AudioCallbackState, MAX_FRAMES, OutputBlock, process_audio};
 pub use engine::{DEFAULT_BLOCK_CAPACITY, Engine, GraphEngineError};
 pub use faults::{
-    BackendErrorKind, RT_TEXT_BYTES, STALL_GRACE, StreamFault, StreamFaultKind, StreamFaults,
+    BackendErrorKind, Lagging, RT_TEXT_BYTES, STALL_GRACE, StreamFault, StreamFaultKind,
+    StreamFaults,
 };
 pub use hearing::{HeardOpen, HeardTapError, HeardTaps};
 pub use latency::StreamLatency;
