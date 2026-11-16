@@ -68,6 +68,10 @@ impl ClientRetry {
 /// `SERVER_GONE`, or `RETRY_BOUND` passes; returns the last status then.
 ///
 /// Every client creation in the process goes through here.
+///
+/// # Errors
+///
+/// The status of the last attempt.
 pub fn create_client<T>(mut create: impl FnMut() -> Result<T, i32>) -> Result<T, i32> {
     let mut rule = ClientRetry::new(Instant::now());
     loop {
