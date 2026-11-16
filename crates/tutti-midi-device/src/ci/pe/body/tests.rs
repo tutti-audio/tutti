@@ -35,6 +35,7 @@ fn ascii_is_the_body_unchanged_and_seven_bit() {
 }
 
 // Table 12: Mcoded7 carries 8-bit data in 7-bit bytes.
+/// Spec: m2-103/6.1.7#1
 #[test]
 fn mcoded7_round_trips_every_byte_value() {
     let data: Vec<u8> = (0..=255).collect();
@@ -47,6 +48,7 @@ fn mcoded7_round_trips_every_byte_value() {
 }
 
 // Table 12: zlib+Mcoded7 is zlib compression, then Mcoded7.
+/// Spec: m2-103/6.2.2#1
 #[test]
 fn zlib_mcoded7_round_trips() {
     for len in [0, 1, 7, 100, 5000] {

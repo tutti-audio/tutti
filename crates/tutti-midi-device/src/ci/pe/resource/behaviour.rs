@@ -411,6 +411,7 @@ fn long_channel_link() -> Link {
 
 // M2-103 §15.2: under Flow Control the Responder sends a chunk, waits for the ACK that
 // asks for the next, and the last chunk needs its ACK too.
+/// Spec: m2-103/15.2#1
 #[test]
 fn a_flow_controlled_reply_goes_a_chunk_for_each_ack() {
     let mut link = long_channel_link();
@@ -452,6 +453,7 @@ fn started_stream() -> (Link, PeChunk) {
 
 // M2-103 §15.4: a NAK that asks for the last chunk again gets it again, to three times;
 // a fourth ends the transaction (§15.5).
+/// Spec: m2-103/15.4#1
 #[test]
 fn a_resend_nak_gets_the_last_chunk_again() {
     let (mut link, first) = started_stream();
@@ -484,6 +486,7 @@ fn a_resend_nak_gets_the_last_chunk_again() {
 
 // M2-103 §15.5: a chunk with no ACK in 3 seconds is sent again; after three repeats the
 // Responder fails with a Terminate NAK.
+/// Spec: m2-103/15.5#2, m2-103/15.5#3
 #[test]
 fn a_chunk_with_no_ack_is_sent_again_three_times_and_then_terminated() {
     let (mut link, first) = started_stream();
@@ -561,6 +564,7 @@ fn a_set_under_flow_control_is_acked_a_chunk_at_a_time() {
 
 // M2-103 §15.3, Table 15: a Set that does not use Flow Control on a Resource with
 // `fcOnSet` is 407, and one that does on a Resource without it is 406.
+/// Spec: m2-103/15.3#2, m2-103/15.3#3
 #[test]
 fn a_set_answers_407_without_flow_control_and_406_with_it_unasked() {
     let mut raw = Raw::new();
@@ -589,6 +593,7 @@ fn a_set_answers_407_without_flow_control_and_406_with_it_unasked() {
 
 // M2-103 §12.2.1: a Responder that cannot answer in time sends an ACK that asks the
 // Initiator to wait, and answers when it can.
+/// Spec: m2-103/12.2.1#1
 #[test]
 fn a_busy_resource_is_answered_with_a_timeout_wait_and_then_the_reply() {
     let mut link = Link::new(store(), 256);
@@ -848,6 +853,7 @@ fn a_simple_action_link_reads_table_69() {
 }
 
 // M2-103 §13.1.1 Table 70: the button Sets the Resource of the Link with the `propData`.
+/// Spec: m2-103/13.1.1#2
 #[test]
 fn a_simple_action_is_a_set_of_its_prop_data() {
     let link = PeLink {
@@ -916,6 +922,7 @@ fn a_selector_action_link_reads_table_73() {
 
 // M2-103 §13.1.2 Table 76: the chosen entry's `selectedProperty` is the Property
 // Data of a Set of the action Resource.
+/// Spec: m2-103/13.1.2#8
 #[test]
 fn a_selection_is_a_set_of_the_selected_property() {
     let data = PeData::decode(&PeResource::ChannelList, &json(selector_channels())).unwrap();

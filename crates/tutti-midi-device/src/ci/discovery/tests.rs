@@ -78,6 +78,7 @@ fn discovery_and_reply_have_the_version_2_trailers() {
 // version with the fields of that version: a 1.1 body ends after the Receivable
 // Maximum SysEx Message Size (16 bytes), and the fields it lacks are absent, not
 // path 0 and not block 0.
+/// Spec: m2-101/5.3#6, m2-101/5.4#7
 #[test]
 fn a_version_1_body_has_no_output_path_and_no_function_block() {
     let d = sample_discovery();
@@ -110,6 +111,7 @@ fn a_body_with_no_output_path_encodes_as_version_1() {
 
 // The Reply of a device that sends Message Format Version 1 is a whole message
 // that decodes, and the path 0 the Version 2 field names is not what it holds.
+/// Spec: m2-101/5.3#6, m2-101/5.4#7
 #[test]
 fn a_version_1_discovery_reply_message_is_read() {
     let d = sample_discovery();
@@ -209,6 +211,7 @@ fn the_category_bits_are_table_7s_and_a_peers_deprecated_d1_is_dropped() {
 }
 
 // §5.5.3: the Receivable Maximum SysEx Message Size is 128 or greater.
+/// Spec: m2-101/5.5.3#1
 #[test]
 fn a_receivable_size_under_128_is_malformed() {
     let mut body = Vec::new();
@@ -231,6 +234,7 @@ fn a_receivable_size_under_128_is_malformed() {
 
 // §5.6.2: the Function Block is the number of the Function Block, 0 to 31, or
 // 0x7F for none; the numbers between are not a Function Block.
+/// Spec: m2-101/5.6.2#1
 #[test]
 fn the_function_block_of_a_reply_is_0_to_31_or_none() {
     let mut body = Vec::new();

@@ -2,7 +2,7 @@
 //! spec's `pdftotext -layout` text. The text is never committed; the extraction is a pure function from
 //! that text to [`Item`]s, so a test feeds it small in-memory texts.
 //!
-//! Each document has its own prefix (`m2-104`, `m2-116`), its own table of
+//! Each document has its own prefix (`m2-101` to `m2-116`), its own table of
 //! rows beyond the keyword sentences ([`Tables`]) and its own heading quirks
 //! ([`Doc`]). Three kinds of item:
 //!
@@ -17,7 +17,9 @@
 //!   strongest. A word in quotation marks names the word and is not a use of
 //!   it, and neither is the first cell of a table row (the table that
 //!   defines the words). Notes and examples are not set apart: the spec says
-//!   the words are used solely for conformance.
+//!   the words are used solely for conformance. M2-101, M2-102, M2-103 and
+//!   M2-115 carry the same Table 2 (and a Table 3 of words that are not conformance
+//!   words: must, will, can, might).
 //! - `m2-104/mt/<mt>`: one per Message Type of the allocation table
 //!   ([`Tables::Messages`]), facts `mt` and `bytes`, the UMP size.
 //! - `m2-104/msg/<mt>/<status>`: one per defined message of the message
@@ -72,6 +74,8 @@ pub(super) enum Tables {
     },
     /// The table that spells the file header, one byte per column.
     FileHeader { table: u32 },
+    /// Keyword sentences only.
+    None,
 }
 
 /// One spec document the extractor reads.
@@ -97,7 +101,64 @@ pub(super) struct Doc {
 }
 
 /// The documents, one inventory file each.
-pub(super) const DOCS: &[Doc] = &[M2_104, M2_116];
+pub(super) const DOCS: &[Doc] = &[M2_101, M2_102, M2_103, M2_104, M2_115, M2_116];
+
+/// The header note of a document with its own Table 2 and no tables of rows.
+const SAME_TABLES: &str = "\
+# This document has its own conformance-word table (its Table 2), the same three
+# rows as M2-104's, and no negated forms either. Its Table 3 lists must,
+# will, can and might as words that are never conformance statements: a
+# sentence with only those has no row. Sentence rows only: no table of the
+# document has a row per item.
+";
+
+pub(super) const M2_101: Doc = Doc {
+    prefix: "m2-101",
+    label: "M2-101",
+    title: "MIDI Capability Inquiry (M2-101 v1.2.1)",
+    file: "midi-m2-101.txt",
+    source: "M2-101-UM",
+    sides: "initiator, responder or both",
+    note: SAME_TABLES,
+    implicit_levels: false,
+    tables: Tables::None,
+};
+
+pub(super) const M2_102: Doc = Doc {
+    prefix: "m2-102",
+    label: "M2-102",
+    title: "Common Rules for MIDI-CI Profiles (M2-102 v1.1)",
+    file: "midi-m2-102.txt",
+    source: "M2-102-U",
+    sides: "initiator, responder or both",
+    note: SAME_TABLES,
+    implicit_levels: false,
+    tables: Tables::None,
+};
+
+pub(super) const M2_103: Doc = Doc {
+    prefix: "m2-103",
+    label: "M2-103",
+    title: "Common Rules for MIDI-CI Property Exchange (M2-103 v1.2)",
+    file: "midi-m2-103.txt",
+    source: "M2-103-UM",
+    sides: "initiator, responder or both",
+    note: SAME_TABLES,
+    implicit_levels: false,
+    tables: Tables::None,
+};
+
+pub(super) const M2_115: Doc = Doc {
+    prefix: "m2-115",
+    label: "M2-115",
+    title: "MIDI 2.0 Bit Scaling and Resolution (M2-115 v1.0.1)",
+    file: "midi-m2-115.txt",
+    source: "M2-115-U",
+    sides: "sender, receiver or both",
+    note: SAME_TABLES,
+    implicit_levels: false,
+    tables: Tables::None,
+};
 
 pub(super) const M2_104: Doc = Doc {
     prefix: "m2-104",
@@ -740,6 +801,7 @@ pub(super) fn extract(doc: &Doc, text: &str) -> Result<Vec<Item>, String> {
     out.extend(match doc.tables {
         Tables::Messages { mt_table, messages } => message_items(&lines, doc, mt_table, messages)?,
         Tables::FileHeader { table } => header_items(&lines, doc, table)?,
+        Tables::None => Vec::new(),
     });
     let mut seen = BTreeSet::new();
     for it in &out {
@@ -886,6 +948,29 @@ mod tests {
         let plain = keyword_items(&lines, &M2_104);
         assert!(plain.iter().all(|i| !i.id.contains("1.1.1.1")));
         assert_eq!(plain[1].id, "m2-104/1.2#1");
+    }
+
+    #[test]
+    fn a_document_with_no_tables_gives_keyword_rows_alone() {
+        for d in [&M2_101, &M2_102, &M2_103, &M2_115] {
+            let body = "1 Alpha\nA frob shall spin.\n";
+            let items = extract(d, &doc(&[TOC, body, "", ""])).unwrap();
+            assert_eq!(items.len(), 1);
+            assert!(items[0].id.starts_with(d.prefix));
+            assert_eq!(items[0].section, format!("{} \u{a7}1", d.label));
+        }
+    }
+
+    #[test]
+    fn each_document_has_its_own_prefix_and_file() {
+        let prefixes: BTreeSet<_> = DOCS.iter().map(|d| d.prefix).collect();
+        let files: BTreeSet<_> = DOCS.iter().map(|d| d.file).collect();
+        assert_eq!(prefixes.len(), DOCS.len());
+        assert_eq!(files.len(), DOCS.len());
+        assert!(
+            DOCS.iter()
+                .all(|d| d.file == format!("midi-{}.txt", d.prefix))
+        );
     }
 
     #[test]
