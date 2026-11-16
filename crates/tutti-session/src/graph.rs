@@ -228,7 +228,7 @@ where
 }
 
 #[cfg(feature = "plugin")]
-struct PluginSwap(Box<tutti_plugin::handles::PluginClient>);
+struct PluginSwap(Box<tutti_plugin::PluginClient>);
 
 #[cfg(feature = "plugin")]
 impl ErasedSwap for PluginSwap {
@@ -881,7 +881,7 @@ impl Graph {
     #[cfg(feature = "plugin")]
     pub fn insert_plugin(
         &mut self,
-        client: Box<tutti_plugin::handles::PluginClient>,
+        client: Box<tutti_plugin::PluginClient>,
     ) -> Key<crate::PluginNode> {
         self.insert_plugin_with_rebinder(client).0
     }
@@ -891,7 +891,7 @@ impl Graph {
     #[cfg(feature = "plugin")]
     pub(crate) fn insert_plugin_with_rebinder(
         &mut self,
-        client: Box<tutti_plugin::handles::PluginClient>,
+        client: Box<tutti_plugin::PluginClient>,
     ) -> (
         Key<crate::PluginNode>,
         tutti_plugin::catalog::PluginRebinder,
@@ -975,10 +975,10 @@ impl Graph {
     pub fn replace_plugin(
         &mut self,
         node: impl Into<NodeKey>,
-        client: Box<tutti_plugin::handles::PluginClient>,
+        client: Box<tutti_plugin::PluginClient>,
         fade: Seconds,
         law: FadeLaw,
-    ) -> Result<(), ReplaceRefused<Box<tutti_plugin::handles::PluginClient>>> {
+    ) -> Result<(), ReplaceRefused<Box<tutti_plugin::PluginClient>>> {
         self.replace_plugin_with_rebinder(node, client, fade, law)
             .map(|_| ())
     }
@@ -993,12 +993,12 @@ impl Graph {
     pub(crate) fn replace_plugin_with_rebinder(
         &mut self,
         node: impl Into<NodeKey>,
-        client: Box<tutti_plugin::handles::PluginClient>,
+        client: Box<tutti_plugin::PluginClient>,
         fade: Seconds,
         law: FadeLaw,
     ) -> Result<
         tutti_plugin::catalog::PluginRebinder,
-        ReplaceRefused<Box<tutti_plugin::handles::PluginClient>>,
+        ReplaceRefused<Box<tutti_plugin::PluginClient>>,
     > {
         let node = node.into();
         // Asked here, before binding: `replace` hands back what it refuses,
@@ -1453,7 +1453,7 @@ impl Graph {
     pub fn crossfade_plugin(
         &mut self,
         node: impl Into<NodeKey>,
-        client: Box<tutti_plugin::handles::PluginClient>,
+        client: Box<tutti_plugin::PluginClient>,
         fade: Seconds,
         law: FadeLaw,
     ) -> Result<Crossfade<()>, CrossfadeRefused> {

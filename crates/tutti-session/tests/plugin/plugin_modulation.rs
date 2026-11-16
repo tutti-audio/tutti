@@ -19,8 +19,8 @@ use std::time::{Duration, Instant};
 use support::{clap_probe, plugin_server};
 use tutti_graph::NodeKey;
 use tutti_modulation::Lfo;
+use tutti_plugin::PluginClient;
 use tutti_plugin::catalog::{Loadable, PluginRef};
-use tutti_plugin::handles::PluginClient;
 use tutti_plugin_types::{Normalized, ParamId};
 use tutti_session::{
     Crossfade, DetachedSession, EventInPort, EventOutPort, PHASES, ParamRef, PhaseCx, RouteSpec,

@@ -880,7 +880,7 @@ struct Reload {
 }
 
 struct Ready {
-    client: Box<tutti_plugin::handles::PluginClient>,
+    client: Box<tutti_plugin::PluginClient>,
     restore: StateRestore,
     mirror: Option<Mirror>,
 }
