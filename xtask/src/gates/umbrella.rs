@@ -1,212 +1,35 @@
 //! `check-umbrella`: the `tutti` umbrella re-exports no crate whole and offers
 //! every item at one path.
 //!
-//! The umbrella's source (`crates/tutti/src`, every file lexed so comments and
-//! literals are blanked) is read for each `pub use .. ;` as a use tree:
+//! The umbrella's source (`crates/tutti/src`) is read for each `pub use .. ;` as a
+//! use tree ([`super::use_tree`]):
 //!
-//! 1. **No whole-crate re-export**: `pub use tutti_x;`, `pub use tutti_x as y;`,
-//!    `pub use ::tutti_x ..`, `pub use tutti_x::{self}` and any glob (`::*`, under
-//!    a `tutti_` path or a local one) are findings. Each item is listed by name.
-//!    A module re-exported by its name (`pub use tutti_x::module;`) is not
-//!    told apart from a function lexically and is not seen.
-//! 2. **One path per item**: the exported name (the alias when there is an
-//!    `as`) of every `pub use` leaf is collected per module path (the crate
-//!    root, then each inline `pub mod` and each file module). A name that is
-//!    exported twice, in one module or in two, is a finding.
+//! 1. **No whole re-export**: `pub use tutti_x;`, `pub use tutti_x as y;`,
+//!    `pub use ::tutti_x ..`, `pub use tutti_x::{self}` and any glob are findings.
+//!    Each item is listed by name.
+//! 2. **One item, one path**: an item (its source path, `tutti_x::module::Item`) is
+//!    exported once, under one name: `pub use tutti_x::A` and `pub use tutti_x::A
+//!    as B`, or `tutti_x::A` in two modules, are findings, and so is a module
+//!    exported by name (`pub use tutti_x::module`) together with one of its items.
+//!    Two different items that share a name in different modules are fine: a
+//!    module is a namespace, and the compiler refuses a name twice in one.
 //!
-//! A name may sit at two paths when [`ALLOW`] holds a row for it with the reason;
-//! a row for a name that is no longer duplicated is a finding. Each finding names
-//! the file and line. The rule reads names, so one item exported under two
-//! names is not seen, and a `cfg` pair offering one name from two sources needs
-//! a row.
+//! Each finding names the file and line. The rule reads source paths, so one item
+//! reached through two crates (a type `tutti_nodes` re-exports from `tutti_dsp`,
+//! exported from both) is not seen.
 //!
 //! Its companion `cargo xtask umbrella-api` ([`super::umbrella_api`]) reads the
 //! other way: every type in the signature of an exported item is itself exported.
 
-use super::lex::{blank, find_word_from, line_of, matching};
-use super::session::{is_word, pub_uses, tokens};
-use super::{Report, Tree};
+use super::Report;
+use super::Tree;
+use super::use_tree::uses;
 use std::collections::BTreeMap;
 
 const SRC: &str = "crates/tutti/src";
 
-/// Names exported at two paths on purpose: each is two distinct types that share a
-/// name and both must be reachable; the reason says which, as `crate` in `module`.
-pub(super) const ALLOW: &[(&str, &str)] = &[
-    ("Bank", "`sf2` in `soundfont`, `ump` in `midi`"),
-    ("Bus", "`graph` in `graph`, `session` in `session`"),
-    ("Channel", "`graph` in `graph`, `session` in `session`"),
-    (
-        "Clock",
-        "`session` in the root, `modulation` in `modulation`",
-    ),
-    ("DeviceId", "`cpal` in the root, `midi_device` in `midi`"),
-    (
-        "Direction",
-        "`types` in `types`, `cpal` in `session`, `sampler` in `sampler`, `ump` in `midi`",
-    ),
-    (
-        "Error",
-        "`session` in the root, `export` in `session`, `codec` in `codec`, `sampler` in `sampler`, `sf2` in `soundfont`, `session` in `midi`",
-    ),
-    ("Event", "`graph` in `graph`, `session` in `session`"),
-    ("Instrument", "`graph` in `session`, `sf2` in `soundfont`"),
-    ("Key", "`session` in the root, `ump` in `midi`"),
-    ("KeyEvent", "`plugin_types` in `plugin`, `ump` in `midi`"),
-    ("Load", "`session` in `session`, `plugin_types` in `plugin`"),
-    ("LoopRange", "`types` in `types`, `graph` in `graph`"),
-    ("Outcome", "`session` in `session`, `midi_device` in `midi`"),
-    ("OutputMap", "`dsp` in `nodes`, `engine` in `session`"),
-    ("Param", "`types` in `types`, `session` in `session`"),
-    (
-        "ParamUnit",
-        "`graph` in `graph`, `plugin_types` in `plugin`",
-    ),
-    ("Params", "`session` in the root, `graph` in `graph`"),
-    ("Pass", "`types` in `types`, `graph` in `graph`"),
-    ("Phase", "`types` in `types`, `session` in `session`"),
-    (
-        "Placement",
-        "`types` in `types`, `session` in `session`, `sampler` in `sampler`",
-    ),
-    (
-        "PluginEntry",
-        "`session` in `session`, `plugin_db` in `plugin`",
-    ),
-    ("Preset", "`sf2` in `soundfont`, `plugin` in `plugin`"),
-    ("Recorder", "`nodes` in `nodes`, `session` in `session`"),
-    ("Routing", "`nodes` in `nodes`, `engine` in `session`"),
-    ("RoutingError", "`nodes` in `nodes`, `engine` in `session`"),
-    ("Sample", "`buffers` in `types`, `codec` in `codec`"),
-    (
-        "SampleFormat",
-        "`buffers` in `types`, `plugin_types` in `plugin`",
-    ),
-    ("Stream", "`sampler` in `sampler`, `ump` in `midi`"),
-    (
-        "StreamFault",
-        "`engine` in `session`, `sampler` in `sampler`",
-    ),
-    ("Taps", "`dsp` in `nodes`, `session` in `session`"),
-    ("TempoError", "`tempo` in `tempo`, `session` in `session`"),
-];
-
 fn skipped(dir: &str) -> bool {
     matches!(dir, "target" | ".git")
-}
-
-/// One leaf of a `pub use` tree.
-#[derive(Debug, PartialEq, Eq)]
-pub(super) struct Leaf {
-    /// The name the leaf exports; `*` for a glob.
-    pub(super) name: String,
-    /// The item's own name, before an `as`.
-    pub(super) source: String,
-    /// The first segment of the path the item comes from; empty for a bare name.
-    pub(super) krate: String,
-    /// The leaf re-exports a `tutti_` crate whole, or is a glob.
-    pub(super) whole: bool,
-}
-
-/// The leaves of the use tree in `t` at `*k` under the prefix `pre`.
-pub(super) fn leaves(t: &[&str], k: &mut usize, pre: &[String], out: &mut Vec<Leaf>) {
-    let mut path = pre.to_vec();
-    if t.get(*k) == Some(&"::") {
-        *k += 1;
-    }
-    let from_tutti = |path: &[String]| path.first().is_some_and(|p| p.starts_with("tutti_"));
-    while *k < t.len() {
-        let tok = t[*k];
-        if tok == "{" {
-            *k += 1;
-            while *k < t.len() && t[*k] != "}" {
-                leaves(t, k, &path, out);
-                if t.get(*k) == Some(&",") {
-                    *k += 1;
-                }
-            }
-            *k += 1;
-            return;
-        }
-        if tok == "*" {
-            *k += 1;
-            out.push(Leaf {
-                name: "*".to_owned(),
-                source: "*".to_owned(),
-                krate: path.first().cloned().unwrap_or_default(),
-                whole: true,
-            });
-            return;
-        }
-        if tok.bytes().all(is_word) {
-            *k += 1;
-            if t.get(*k) == Some(&"::") {
-                path.push(tok.to_owned());
-                *k += 1;
-                continue;
-            }
-            let alias = if t.get(*k) == Some(&"as") {
-                *k += 2;
-                t.get(*k - 1).copied()
-            } else {
-                None
-            };
-            let self_leaf = tok == "self";
-            let name = match (alias, self_leaf) {
-                (Some(a), _) => a,
-                (None, true) => path.last().map_or(tok, String::as_str),
-                (None, false) => tok,
-            };
-            let whole = if self_leaf {
-                from_tutti(&path)
-            } else {
-                path.is_empty() && tok.starts_with("tutti_")
-            };
-            let source = if self_leaf {
-                path.last().map_or(tok, String::as_str)
-            } else {
-                tok
-            };
-            out.push(Leaf {
-                name: name.to_owned(),
-                source: source.to_owned(),
-                krate: path.first().cloned().unwrap_or_default(),
-                whole,
-            });
-            return;
-        }
-        *k += 1;
-        return;
-    }
-}
-
-/// The inline `mod NAME { .. }` blocks of lexed `code`, as `(name, open, close)`.
-fn inline_mods(code: &str) -> Vec<(String, usize, usize)> {
-    let b = code.as_bytes();
-    let mut out = Vec::new();
-    let mut from = 0;
-    while let Some(at) = find_word_from(code, "mod", from) {
-        from = at + 3;
-        let mut i = from;
-        while i < b.len() && b[i].is_ascii_whitespace() {
-            i += 1;
-        }
-        let s = i;
-        while i < b.len() && is_word(b[i]) {
-            i += 1;
-        }
-        let name = &code[s..i];
-        while i < b.len() && b[i].is_ascii_whitespace() {
-            i += 1;
-        }
-        if !name.is_empty()
-            && b.get(i) == Some(&b'{')
-            && let Some(close) = matching(code, i, b'{', b'}')
-        {
-            out.push((name.to_owned(), i, close));
-        }
-    }
-    out
 }
 
 /// The module path of a file under the umbrella's `src`, as segments.
@@ -223,7 +46,14 @@ fn file_module(path: &str) -> Vec<String> {
     segs
 }
 
-pub(super) fn check(tree: &dyn Tree, allow: &[(&str, &str)]) -> Report {
+/// Where one export stands: its module, the name it takes and `file:line`.
+struct At {
+    module: String,
+    name: String,
+    place: String,
+}
+
+pub(super) fn check(tree: &dyn Tree) -> Report {
     let mut r = Report::default();
     let files: Vec<String> = tree
         .files(SRC, &skipped)
@@ -237,68 +67,65 @@ pub(super) fn check(tree: &dyn Tree, allow: &[(&str, &str)]) -> Report {
     }
 
     let mut bad: Vec<String> = Vec::new();
-    // Exported name -> every `(module path, file:line)` that exports it.
-    let mut seen: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
-    let mut exports = 0;
+    // Item path -> every export of it.
+    let mut seen: BTreeMap<String, Vec<At>> = BTreeMap::new();
     for path in &files {
         let src = tree.read(path).unwrap_or_default();
-        let code = blank(&src);
-        let mods = inline_mods(&code);
-        for (at, semi) in pub_uses(&code) {
-            let body = code[at + 3..semi].trim_start();
-            let body = &body["use".len()..];
-            let t = tokens(body);
-            let (mut k, mut found) = (0, Vec::new());
-            leaves(&t, &mut k, &[], &mut found);
-            let place = format!("{path}:{}", line_of(&code, at));
+        for u in uses(&src) {
+            let place = format!("{path}:{}", u.line);
+            if u.leaf.whole {
+                bad.push(format!(
+                    "{place}: re-exports a crate or module whole (`{}`); list each item by name",
+                    u.leaf.name
+                ));
+                continue;
+            }
+            if u.leaf.name == "_" {
+                continue;
+            }
             let mut module = file_module(path);
-            module.extend(
-                mods.iter()
-                    .filter(|(_, open, close)| *open < at && at < *close)
-                    .map(|(n, ..)| n.clone()),
-            );
+            module.extend(u.module);
             let module = if module.is_empty() {
                 "the root".to_owned()
             } else {
                 module.join("::")
             };
-            for leaf in found {
-                if leaf.whole {
-                    bad.push(format!(
-                        "{place}: re-exports a crate or module whole (`{}`); list each item by name",
-                        leaf.name
-                    ));
-                } else if leaf.name != "*" && leaf.name != "_" {
-                    exports += 1;
-                    seen.entry(leaf.name)
-                        .or_default()
-                        .push((module.clone(), place.clone()));
-                }
-            }
+            seen.entry(u.leaf.item()).or_default().push(At {
+                module,
+                name: u.leaf.name,
+                place,
+            });
         }
     }
-    for (name, why) in allow {
-        if seen.get(*name).is_none_or(|at| at.len() < 2) {
+    for (item, at) in &seen {
+        if at.len() > 1 {
+            let paths: Vec<String> = at
+                .iter()
+                .map(|a| format!("`{}` in {} ({})", a.name, a.module, a.place))
+                .collect();
             bad.push(format!(
-                "ALLOW row `{name}` ({why}) names a name that is not exported twice; delete the row"
-            ));
-        }
-    }
-    for (name, at) in &seen {
-        if at.len() > 1 && !allow.iter().any(|(n, _)| n == name) {
-            let paths: Vec<String> = at.iter().map(|(m, p)| format!("{m} ({p})")).collect();
-            bad.push(format!(
-                "{}: `{name}` is exported {} times: {}; one path per item",
-                at[1].1,
+                "{}: `{item}` is exported {} times: {}; one path per item",
+                at[1].place,
                 at.len(),
                 paths.join(", ")
+            ));
+        }
+        // An item under a module that is exported by name is exported twice.
+        for (under, inner) in seen.range(format!("{item}::")..) {
+            if !under.starts_with(&format!("{item}::")) {
+                break;
+            }
+            bad.push(format!(
+                "{}: `{under}` is also under `{item}`, which {} exports whole by name; one path per item",
+                inner[0].place, at[0].place
             ));
         }
     }
 
     if bad.is_empty() {
         r.say(format!(
-            "check-umbrella: ok (tutti re-exports no crate whole and {exports} items sit at one path each; {} files)",
+            "check-umbrella: ok (tutti re-exports no crate whole and {} items sit at one path each; {} files)",
+            seen.len(),
             files.len()
         ));
     } else {
@@ -318,7 +145,7 @@ mod tests {
     const LIB: &str = "crates/tutti/src/lib.rs";
 
     fn lib(src: &str) -> Report {
-        check(&Mem::with(&[(LIB, src)]), &[])
+        check(&Mem::with(&[(LIB, src)]))
     }
 
     const CURATED: &str = "\
@@ -352,8 +179,7 @@ pub mod types {
             ("pub use ::tutti_engine as engine;", "engine", 2),
             ("pub use tutti_engine::*;", "*", 2),
             ("pub use tutti_graph::editor::*;", "*", 2),
-            ("pub use self::inner::*;", "*", 2),
-            ("pub use super::*;", "*", 2),
+            ("pub use local::*;", "*", 2),
             ("pub use tutti_graph::{self};", "tutti_graph", 2),
             ("pub use tutti_graph::{self as g};", "g", 2),
             ("pub use {tutti_engine as e, tutti_types::Hz};", "e", 2),
@@ -378,44 +204,42 @@ pub mod types {
     }
 
     #[test]
-    fn a_name_at_the_root_and_in_a_module_is_reported() {
-        let r = lib("pub use tutti_a::{Hz, Db};\npub mod types {\n    pub use tutti_b::Hz;\n}\n");
+    fn the_same_item_at_two_paths_is_reported_with_both() {
+        let r = lib("pub use tutti_a::{Hz, Db};\npub mod types {\n    pub use tutti_a::Hz;\n}\n");
         assert_eq!(r.findings.len(), 2, "{:?}", r.findings);
-        assert!(r.findings[1].contains("crates/tutti/src/lib.rs:3: `Hz` is exported 2 times"));
-        assert!(r.findings[1].contains("the root (crates/tutti/src/lib.rs:1)"));
-        assert!(r.findings[1].contains("types (crates/tutti/src/lib.rs:3)"));
+        assert!(
+            r.findings[1].contains("crates/tutti/src/lib.rs:3: `tutti_a::Hz` is exported 2 times")
+        );
+        assert!(r.findings[1].contains("`Hz` in the root (crates/tutti/src/lib.rs:1)"));
+        assert!(r.findings[1].contains("`Hz` in types (crates/tutti/src/lib.rs:3)"));
     }
 
     #[test]
-    fn a_name_in_two_modules_and_twice_in_one_are_reported() {
+    fn the_same_item_under_an_alias_is_reported() {
+        let r = lib("pub use tutti_a::Error;\npub mod m { pub use tutti_a::Error as AError; }\n");
+        assert_eq!(r.findings.len(), 2, "{:?}", r.findings);
+        assert!(r.findings[1].contains("`tutti_a::Error` is exported 2 times"));
+        assert!(r.findings[1].contains("`AError` in m"));
+        let twice = lib("pub use tutti_a::{Hz, Hz as H};\n");
+        assert!(twice.findings[1].contains("`tutti_a::Hz` is exported 2 times"));
+    }
+
+    #[test]
+    fn two_items_sharing_a_name_in_different_modules_pass() {
         let r = lib(
-            "pub mod a { pub use x::Hz; }\npub mod b { pub use y::Hz; }\n\
-             pub mod c { pub use x::{Db, Db}; }\n",
+            "pub use tutti_session::Key;\npub mod midi { pub use tutti_ump::Key; }\n\
+             pub mod graph { pub use tutti_graph::Key; }\n",
         );
-        assert_eq!(r.findings.len(), 3, "{:?}", r.findings);
-        assert!(r.findings[1].contains("`Db` is exported 2 times"));
-        assert!(r.findings[2].contains("`Hz` is exported 2 times"));
+        assert!(r.passed(), "{:?}", r.findings);
     }
 
     #[test]
-    fn an_alias_is_the_exported_name() {
-        let ok = lib("pub use a::Error as AError;\npub mod m { pub use b::Error; }\n");
-        assert!(ok.passed(), "{:?}", ok.findings);
-        let bad = lib("pub use a::Error;\npub mod m { pub use b::Thing as Error; }\n");
-        assert!(!bad.passed());
-        assert!(bad.findings[1].contains("`Error` is exported 2 times"));
-    }
-
-    #[test]
-    fn a_file_module_is_its_own_path() {
-        let mut m = Mem::with(&[(LIB, "pub use a::Hz;\n")]);
-        m.files.insert(
-            "crates/tutti/src/types.rs".into(),
-            "pub use b::Hz;\n".into(),
-        );
-        let r = check(&m, &[]);
-        assert!(r.findings[1].contains("types.rs:1: `Hz`"));
-        assert!(r.findings[1].contains("the root (crates/tutti/src/lib.rs:1), types"));
+    fn a_module_exported_by_name_and_one_of_its_items_are_reported() {
+        let r = lib("pub use tutti_a::m;\npub mod x {\n    pub use tutti_a::m::Item;\n}\n");
+        assert_eq!(r.findings.len(), 2, "{:?}", r.findings);
+        assert!(r.findings[1].contains("lib.rs:3: `tutti_a::m::Item` is also under `tutti_a::m`"));
+        // A sibling that only shares the prefix text is not under it.
+        assert!(lib("pub use tutti_a::m;\npub use tutti_a::mx::Item;\n").passed());
     }
 
     #[test]
@@ -428,30 +252,22 @@ pub mod types {
     }
 
     #[test]
-    fn an_allowed_name_may_sit_at_two_paths_and_a_stale_row_fails() {
-        let src = "pub use a::Id;\npub mod m { pub use b::Id; }\n";
-        let m = Mem::with(&[(LIB, src)]);
-        let r = check(&m, &[("Id", "two types")]);
-        assert!(r.passed(), "{:?}", r.findings);
-        let r = check(&m, &[("Id", "two types"), ("Gone", "no longer duplicated")]);
-        assert_eq!(r.findings.len(), 2, "{:?}", r.findings);
-        assert!(r.findings[1].contains("ALLOW row `Gone`"));
-        // The row covers its name only.
-        let m = Mem::with(&[(
-            LIB,
-            "pub use a::Id;\npub mod m { pub use b::Id; pub use b::Other; }\npub use c::Other;\n",
-        )]);
-        let r = check(&m, &[("Id", "two types")]);
-        assert!(
-            r.findings[1].contains("`Other` is exported 2 times"),
-            "{:?}",
-            r.findings
+    fn a_file_module_is_its_own_path_but_its_item_is_the_same_item() {
+        let mut m = Mem::with(&[(LIB, "pub use a::Hz;\n")]);
+        m.files.insert(
+            "crates/tutti/src/types.rs".into(),
+            "pub use a::Hz;\npub use b::Hz as Other;\n".into(),
         );
+        let r = check(&m);
+        assert_eq!(r.findings.len(), 2, "{:?}", r.findings);
+        assert!(r.findings[1].contains("types.rs:1: `a::Hz` is exported 2 times"));
+        assert!(r.findings[1].contains("in the root"));
+        assert!(r.findings[1].contains("in types"));
     }
 
     #[test]
     fn a_missing_source_directory_fails() {
-        let r = check(&Mem::default(), &[]);
+        let r = check(&Mem::default());
         assert_eq!(r.findings[0], "check-umbrella: FAIL");
         assert!(r.findings[1].contains("holds no .rs file"));
     }

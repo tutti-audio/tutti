@@ -701,7 +701,7 @@ comments and docs, and treat it as a bug when you find it:
   device into the recorder and the offline path.)
   `crates/tutti/tests/no_logic.rs` enforces this by reading `lib.rs`, and
   `cargo xtask check-umbrella` reads it too: no `pub use` re-exports a
-  crate whole, and no name is exported at two paths.
+  crate whole, and no item is exported at two paths.
 
   `bevy-tutti` does **not** depend on `tutti`, deliberately: it would keep
   its direct edges anyway for their `bevy` features, ending with two edges to

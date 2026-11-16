@@ -43,6 +43,7 @@ mod test_paths;
 mod toml;
 mod umbrella;
 mod umbrella_api;
+mod use_tree;
 mod value_traits;
 mod vst3_sdk;
 
@@ -204,7 +205,7 @@ impl Gate {
             Gate::DocIdents => doc_idents::check(&tree),
             Gate::PassiveTests => passive_tests::check(&tree),
             Gate::Comments => comments::check(&tree),
-            Gate::Umbrella => umbrella::check(&tree, umbrella::ALLOW),
+            Gate::Umbrella => umbrella::check(&tree),
             Gate::Buffers => buffers::check(&tree, buffers::MIN_SITES),
             Gate::Building => building::check(&tree, building::ALLOW, building::MIN_SITES),
             Gate::AllocBinaries => alloc_binaries::check(&tree, alloc_binaries::ALLOWED),

@@ -1,7 +1,7 @@
 //! `umbrella-api`: every type in the public signature of an item the umbrella
 //! exports is nameable through the umbrella.
 //!
-//! The companion of `check-umbrella`, which holds that each name sits at one
+//! The companion of `check-umbrella`, which holds that each item sits at one
 //! path; this reads the other way, that no type a caller needs is missing. It is
 //! a recipe and not a gate: it needs the docs nightly and `cargo-public-api`.
 //!
@@ -12,7 +12,7 @@
 //! names, and the types those name in turn; each is *covered* when `lib.rs`
 //! exports:
 //!
-//! - the type from its crate (`pub use` of a list covers each name in it, not its
+//! - the type from its crate (a `pub use` list covers each name in it, not its
 //!   alias; a crate's `Error` is not covered by another crate's);
 //! - a module of its crate by name, which covers everything under it;
 //! - the type from a crate that only re-exports it (the text of that crate holds
@@ -21,30 +21,29 @@
 //!
 //! The result lists the types no export covers, each with the items that name it,
 //! and ranks every exported item (a *seed*) by how many uncovered types its
-//! signature pulls in, transitively. A leaky seed is dropped from `lib.rs`; one the umbrella
-//! needs stays, and the internal types it names are rows of [`INTERNAL`].
+//! signature pulls in, transitively. A leaky seed is dropped from `lib.rs`; one
+//! the umbrella needs stays, and the internal types it names are rows of
+//! [`INTERNAL`].
 //!
 //! Not asked for: a private `Sealed` trait, which is unnameable on purpose; a
-//! crate's `Result` alias, which expands to std's `Result` and an error type
-//! the umbrella exports; the rows of [`TESTING`], items a crate keeps behind its
+//! crate's `Result` alias, which expands to std's `Result` and an error type the
+//! umbrella exports; the rows of [`TESTING`], items a crate keeps behind its
 //! `testing` feature, which the all-features text still shows; and the rows of
 //! [`OWNER_PRIVATE`], `pub` items in a private module of their crate, which no
 //! path reaches.
 
-use super::lex::blank;
-use super::session::{is_word, pub_uses, tokens};
-use super::umbrella::{Leaf, leaves};
+use super::use_tree::{is_word, uses};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-/// `(crate, type, why)` rows: types the umbrella does not name because they are
-/// internals of their crate (the engine, the executor, the compiler). An exported
-/// item whose signature names one is a finding for the item's owner, listed in
-/// [`Analysis::leaks`] and not asked for. A type of `*` is every type of the crate.
+/// `(crate, type, why)` rows: internals of their crate (the engine, the executor,
+/// the compiler) that the umbrella does not name. An exported item whose signature
+/// names one is a finding for its owner, listed in [`Analysis::leaks`]. A type of
+/// `*` is every type of the crate.
 const INTERNAL: &[(&str, &str, &str)] = &[
     (
         "tutti_engine",
         "StreamDriver",
-        "the engine's stream driver, which a custom device backend implements",
+        "a custom device backend's driver",
     ),
     ("tutti_transport", "Transport", "the engine's transport"),
     (
@@ -62,11 +61,7 @@ const INTERNAL: &[(&str, &str, &str)] = &[
         "OfflineClock",
         "the export render's clock",
     ),
-    (
-        "tutti_graph",
-        "Editor",
-        "the graph editor the session wraps",
-    ),
+    ("tutti_graph", "Editor", "the editor the session wraps"),
     ("tutti_graph", "Topology", "the compiler's view of a graph"),
     (
         "tutti_graph",
@@ -77,61 +72,49 @@ const INTERNAL: &[(&str, &str, &str)] = &[
     ("tutti_graph", "VerifyError", "the compiler's error"),
     ("tutti_graph", "InletNode", "the node behind an inlet"),
     ("tutti_graph", "InletRing", "the ring behind an inlet"),
-    (
-        "tutti_graph",
-        "ParamMod",
-        "the compiler's parameter modulation record",
-    ),
-    (
-        "tutti_graph",
-        "ParamRange",
-        "the compiler's parameter range record",
-    ),
+    ("tutti_graph", "ParamMod", "a compiler record"),
+    ("tutti_graph", "ParamRange", "a compiler record"),
     ("tutti_graph", "TapWriter", "the audio side of a tap"),
-    (
-        "tutti_graph",
-        "Compensation",
-        "the compiler's latency compensation record",
-    ),
+    ("tutti_graph", "Compensation", "a compiler record"),
     (
         "tutti_graph",
         "EventEdge",
-        "the compiler's event edge, which `EventEdge` of the session shadows",
+        "the compiler's edge; the session's `EventEdge` is another",
     ),
     (
         "tutti_graph",
         "Edge",
-        "the compiler's edge, which `Edge` of the session shadows",
+        "the compiler's edge; the session's `Edge` is another",
     ),
     (
         "tutti_graph",
         "InPort",
-        "the compiler's port, which `InPort` of the session shadows",
+        "the compiler's port; the session's `InPort` is another",
     ),
     (
         "tutti_graph",
         "OutPort",
-        "the compiler's port, which `OutPort` of the session shadows",
+        "the compiler's port; the session's `OutPort` is another",
     ),
     (
         "tutti_graph",
         "Source",
-        "a graph edge's source, which the buffers' `Source` shadows",
+        "a graph edge's source; the buffers' `Source` is another",
     ),
     (
         "tutti_graph",
         "Sink",
-        "a graph edge's sink, which the buffers' `Sink` shadows",
+        "a graph edge's sink; the buffers' `Sink` is another",
     ),
     (
         "tutti_plugin",
         "PluginClient",
-        "the plugin host's client of a served plugin",
+        "the host's client of a served plugin",
     ),
     (
         "tutti_plugin_host",
         "PluginHandle",
-        "the plugin host's control handle",
+        "the host's control handle",
     ),
     (
         "tutti_midi_protocol",
@@ -141,7 +124,7 @@ const INTERNAL: &[(&str, &str, &str)] = &[
     (
         "tutti_midi_hardware",
         "MidiEndpoints",
-        "the OS MIDI endpoint set, about 52 types",
+        "the OS endpoint set, about 52 types",
     ),
     (
         "tutti_midi_hardware",
@@ -157,35 +140,30 @@ const INTERNAL: &[(&str, &str, &str)] = &[
     (
         "tutti_modulation",
         "Declarations",
-        "the modulation compiler's declarations",
+        "the compiler's declarations",
     ),
-    (
-        "tutti_modulation",
-        "Source",
-        "the modulation compiler's signal source",
-    ),
+    ("tutti_modulation", "Source", "the compiler's signal source"),
     (
         "tutti_cpal",
         "Error",
-        "the device backend's error, which the session's `Error` wraps",
+        "the backend's error; the session's `Error` wraps it",
     ),
     (
         "tutti_midi_file",
         "Error",
-        "the file codec's error, which `midi::Error` nests",
+        "the file codec's error; `midi::Error` nests it",
     ),
     (
         "tutti_midi_hardware",
         "Error",
-        "the hardware layer's error, which `midi::Error` nests",
+        "the hardware error; `midi::Error` nests it",
     ),
     ("tutti_alsa_ffi", "*", "not a dependency of the umbrella"),
     ("tutti_measure", "*", "not a dependency of the umbrella"),
 ];
 
-/// `(crate, type)` rows that share a name with a type another crate defines and
-/// the umbrella re-exports from a crate that only re-exports it: they are not the
-/// exported type.
+/// `(crate, type)` rows that share a name with a type another crate defines and the
+/// umbrella re-exports from a crate that only re-exports it: not the exported type.
 const DISTINCT: &[(&str, &str)] = &[
     ("tutti_graph", "Playhead"),
     ("tutti_graph", "Lookahead"),
@@ -225,32 +203,25 @@ const OWNER_PRIVATE: &[(&str, &str)] = &[
     ("tutti_nodes", "SvfSet"),
 ];
 
-/// The `pub use` leaves of `lib` that name an item of a `tutti_` crate.
-fn exports(lib: &str) -> Vec<Leaf> {
-    let code = blank(lib);
-    let mut out = Vec::new();
-    for (at, semi) in pub_uses(&code) {
-        let body = code[at + 3..semi].trim_start();
-        let t = tokens(&body["use".len()..]);
-        let (mut k, mut found) = (0, Vec::new());
-        leaves(&t, &mut k, &[], &mut found);
-        out.extend(
-            found
-                .into_iter()
-                .filter(|l| !l.whole && l.krate.starts_with("tutti_")),
-        );
-    }
-    out
+/// What `lib.rs` exports, as `(crate, item)`: the items, and the modules by name
+/// (a lowercase name).
+fn exports(lib: &str) -> Vec<(String, String)> {
+    uses(lib)
+        .into_iter()
+        .map(|u| u.leaf)
+        .filter(|l| !l.whole && l.krate().starts_with("tutti_"))
+        .map(|l| (l.krate().to_owned(), l.source))
+        .collect()
 }
 
 /// The `tutti_` crates the umbrella exports from, sorted.
 pub(crate) fn reexported_crates(lib: &str) -> Vec<String> {
-    let set: BTreeSet<String> = exports(lib).into_iter().map(|l| l.krate).collect();
+    let set: BTreeSet<String> = exports(lib).into_iter().map(|(c, _)| c).collect();
     set.into_iter().collect()
 }
 
 /// A type a signature names: its crate, the modules on the path and its name.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct Ty {
     krate: String,
     mods: Vec<String>,
@@ -263,39 +234,47 @@ impl Ty {
     }
 }
 
-/// The type the crate path at `at` names (crate, modules, item), and the offset after it.
+/// The type the `tutti_` path at `at` names (crate, modules, item), and the offset
+/// after it.
 fn type_at(s: &str, at: usize) -> Option<(Ty, usize)> {
     let b = s.as_bytes();
     let word = |from: usize| from + b[from..].iter().take_while(|&&c| is_word(c)).count();
-    let end = word(at);
-    let krate = s[at..end].to_owned();
+    let mut i = word(at);
+    let krate = s[at..i].to_owned();
     let mut mods = Vec::new();
-    let mut i = end;
     loop {
         if !s[i..].starts_with("::") {
             return None;
         }
-        i += 2;
-        let e = word(i);
-        if e == i {
+        let e = word(i + 2);
+        if e == i + 2 {
             return None;
         }
-        if b[i].is_ascii_uppercase() {
-            let name = s[i..e].to_owned();
-            return Some((Ty { krate, mods, name }, e));
+        let seg = s[i + 2..e].to_owned();
+        if seg.starts_with(|c: char| c.is_ascii_uppercase()) {
+            return Some((
+                Ty {
+                    krate,
+                    mods,
+                    name: seg,
+                },
+                e,
+            ));
         }
-        mods.push(s[i..e].to_owned());
+        mods.push(seg);
         i = e;
     }
 }
 
-/// Every `tutti_` type path in `s`.
-fn types_in(s: &str) -> Vec<Ty> {
+/// Every `tutti_` path in `s`: its crate, and the type it names if it names one.
+fn paths(s: &str) -> impl Iterator<Item = (String, Option<Ty>)> + '_ {
     let b = s.as_bytes();
     s.match_indices("tutti_")
         .filter(|(i, _)| *i == 0 || !is_word(b[i - 1]))
-        .filter_map(|(i, _)| type_at(s, i).map(|(t, _)| t))
-        .collect()
+        .map(|(i, _)| {
+            let end = i + b[i..].iter().take_while(|&&c| is_word(c)).count();
+            (s[i..end].to_owned(), type_at(s, i).map(|(t, _)| t))
+        })
 }
 
 /// What follows `pub ` on a line of the text, after any attributes
@@ -308,84 +287,48 @@ fn public(line: &str) -> Option<&str> {
     rest.strip_prefix("pub ")
 }
 
-/// The `tutti_` crates whose paths `text` names.
-fn crates_named(text: &str) -> BTreeSet<String> {
-    let b = text.as_bytes();
-    text.match_indices("tutti_")
-        .filter(|(i, _)| *i == 0 || !is_word(b[i - 1]))
-        .filter_map(|(i, _)| {
-            let end = i + b[i..].iter().take_while(|&&c| is_word(c)).count();
-            text[end..]
-                .starts_with("::")
-                .then(|| text[i..end].to_owned())
-        })
-        .collect()
-}
-
 /// What the umbrella exports, as the coverage rules read it.
 struct Covers {
-    /// `(crate, item)` of `pub use tutti_x::Item`.
-    items: BTreeSet<(String, String)>,
-    /// `(crate, module)` of `pub use tutti_x::module`.
-    modules: BTreeSet<(String, String)>,
-    /// Names exported from a crate that only re-exports them, with the crates
-    /// that crate's text names (the one it re-exports from is among them).
+    /// `(crate, item)` and `(crate, module)` of each `pub use`.
+    exported: BTreeSet<(String, String)>,
+    /// Names exported from a crate that only re-exports them, with the crates that
+    /// crate's text names (the one it re-exports from is among them).
     foreign: BTreeMap<String, BTreeSet<String>>,
 }
 
 impl Covers {
     fn new(lib: &str, texts: &[(&str, &str)]) -> Covers {
-        // `(crate, name)` of the definitions each crate's text holds.
-        let mut defined = BTreeSet::new();
-        for (krate, text) in texts {
-            for line in text.lines() {
-                let Some(rest) = public(line) else {
-                    continue;
-                };
-                let Some(rest) = ["struct ", "enum ", "trait ", "union ", "type ", "macro "]
+        // `(crate, name)` of the definitions the texts hold.
+        let defined: BTreeSet<(String, String)> = texts
+            .iter()
+            .flat_map(|(_, text)| text.lines())
+            .filter_map(public)
+            .filter_map(|rest| {
+                let rest = ["struct ", "enum ", "trait ", "union ", "type ", "macro "]
                     .iter()
-                    .find_map(|k| rest.strip_prefix(k))
-                else {
-                    continue;
-                };
-                if let Some((t, end)) = type_at(rest, 0)
-                    && !rest[end..].starts_with("::")
-                {
-                    defined.insert((t.krate.clone(), t.name.clone()));
-                    let _ = krate;
-                }
+                    .find_map(|k| rest.strip_prefix(k))?;
+                let (t, end) = type_at(rest, 0)?;
+                (!rest[end..].starts_with("::")).then(|| t.id())
+            })
+            .collect();
+        let mut foreign: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        let exported: BTreeSet<_> = exports(lib).into_iter().collect();
+        for (krate, name) in &exported {
+            let text = texts.iter().find(|(c, _)| c == krate).map(|(_, t)| *t);
+            if let Some(text) = text
+                && !defined.contains(&(krate.clone(), name.clone()))
+            {
+                foreign
+                    .entry(name.clone())
+                    .or_default()
+                    .extend(paths(text).map(|(c, _)| c));
             }
         }
-        let loaded: BTreeSet<&str> = texts.iter().map(|(c, _)| *c).collect();
-        let mut c = Covers {
-            items: BTreeSet::new(),
-            modules: BTreeSet::new(),
-            foreign: BTreeMap::new(),
-        };
-        for l in exports(lib) {
-            if l.source.starts_with(|ch: char| ch.is_ascii_lowercase()) {
-                c.modules.insert((l.krate, l.source));
-            } else {
-                if loaded.contains(l.krate.as_str())
-                    && !defined.contains(&(l.krate.clone(), l.source.clone()))
-                {
-                    let text = texts
-                        .iter()
-                        .find(|(k, _)| *k == l.krate)
-                        .map_or("", |(_, t)| *t);
-                    c.foreign
-                        .entry(l.source.clone())
-                        .or_default()
-                        .extend(crates_named(text));
-                }
-                c.items.insert((l.krate, l.source));
-            }
-        }
-        c
+        Covers { exported, foreign }
     }
 
     fn covers(&self, t: &Ty) -> bool {
-        self.items.contains(&t.id())
+        self.exported.contains(&t.id())
             || self
                 .foreign
                 .get(&t.name)
@@ -393,7 +336,7 @@ impl Covers {
                 && !DISTINCT.contains(&(t.krate.as_str(), t.name.as_str()))
             || t.mods
                 .iter()
-                .any(|m| self.modules.contains(&(t.krate.clone(), m.clone())))
+                .any(|m| self.exported.contains(&(t.krate.clone(), m.clone())))
     }
 }
 
@@ -411,49 +354,87 @@ pub(crate) struct Analysis {
     pub(crate) wanted: Vec<String>,
 }
 
+type Edges = BTreeMap<(String, String), (Ty, Vec<Ty>)>;
+
 /// The signature types of every item in `texts`, by the item's `(crate, name)`.
-fn edges(texts: &[(&str, &str)]) -> BTreeMap<(String, String), (Ty, Vec<Ty>)> {
-    let mut out: BTreeMap<(String, String), (Ty, Vec<Ty>)> = BTreeMap::new();
-    for (_, text) in texts {
-        for line in text.lines() {
-            let Some(rest) = public(line) else {
-                continue;
-            };
-            // The words before the path (`fn`, `struct`, `const`, ..).
-            let Some(at) = rest.find("tutti_") else {
-                continue;
-            };
-            if !rest[..at].split(' ').all(|w| w.bytes().all(is_word)) {
-                continue;
-            }
-            let Some((subject, end)) = type_at(rest, at) else {
-                continue;
-            };
-            out.entry(subject.id())
-                .or_insert_with(|| (subject, Vec::new()))
-                .1
-                .extend(types_in(&rest[end..]));
+fn edges(texts: &[(&str, &str)]) -> Edges {
+    let mut out = Edges::new();
+    for line in texts.iter().flat_map(|(_, t)| t.lines()).filter_map(public) {
+        // The words before the path (`fn`, `struct`, `const`, ..).
+        let Some(at) = line.find("tutti_") else {
+            continue;
+        };
+        if !line[..at].split(' ').all(|w| w.bytes().all(is_word)) {
+            continue;
         }
+        let Some((subject, end)) = type_at(line, at) else {
+            continue;
+        };
+        let refs = paths(&line[end..]).filter_map(|(_, t)| t);
+        out.entry(subject.id())
+            .or_insert_with(|| (subject, Vec::new()))
+            .1
+            .extend(refs);
     }
     out
 }
 
-/// The uncovered types `refs` name, transitively, internal ones included.
+fn skip(t: &Ty) -> bool {
+    let id = (t.krate.as_str(), t.name.as_str());
+    EXCLUDED.contains(&id.1) || TESTING.contains(&id) || OWNER_PRIVATE.contains(&id)
+}
+
+fn internal_id(krate: &str, name: &str) -> bool {
+    INTERNAL
+        .iter()
+        .any(|(c, n, _)| *c == krate && (*n == "*" || *n == name))
+}
+
+fn internal(t: &Ty) -> bool {
+    internal_id(&t.krate, &t.name)
+}
+
+/// Each uncovered type `refs` name, transitively, with the type that named it (one
+/// pair for every naming, so a type shows all its users). Internal types are
+/// returned and followed only when `through`.
 fn reach(
-    edges: &BTreeMap<(String, String), (Ty, Vec<Ty>)>,
+    edges: &Edges,
     covers: &Covers,
-    skip: &dyn Fn(&Ty) -> bool,
+    me: &str,
     refs: &[Ty],
-) -> BTreeSet<(String, String)> {
-    let mut seen = BTreeSet::new();
-    let mut queue: VecDeque<&Ty> = refs.iter().collect();
-    while let Some(t) = queue.pop_front() {
-        if covers.covers(t) || skip(t) || !seen.insert(t.id()) {
+    through: bool,
+) -> Vec<(Ty, String)> {
+    let mut followed = BTreeSet::new();
+    let mut out = Vec::new();
+    let mut queue: VecDeque<(Ty, String)> =
+        refs.iter().map(|t| (t.clone(), me.to_owned())).collect();
+    while let Some((t, user)) = queue.pop_front() {
+        if covers.covers(&t) || skip(&t) {
             continue;
         }
-        queue.extend(edges.get(&t.id()).map(|e| &e.1).into_iter().flatten());
+        if followed.insert(t.id()) && (through || !internal(&t)) {
+            let here = format!("{}::{}", t.krate, t.name);
+            for next in edges.get(&t.id()).map(|e| &e.1).into_iter().flatten() {
+                queue.push_back((next.clone(), here.clone()));
+            }
+        }
+        out.push((t, user));
     }
-    seen
+    out
+}
+
+fn distinct(walk: &[(Ty, String)]) -> BTreeSet<(String, String)> {
+    walk.iter().map(|(t, _)| t.id()).collect()
+}
+
+fn list(m: BTreeMap<(String, String), BTreeSet<String>>) -> Vec<String> {
+    m.into_iter()
+        .map(|((c, ty), users)| {
+            let more = if users.len() > 4 { " ..." } else { "" };
+            let users: Vec<String> = users.into_iter().take(4).collect();
+            format!("{c}::{ty} <- {}{more}", users.join(", "))
+        })
+        .collect()
 }
 
 /// The types the exported items of `texts` name that the umbrella does not export,
@@ -462,70 +443,42 @@ pub(crate) fn analyze(texts: &[(&str, &str)], lib: &str) -> Analysis {
     let covers = Covers::new(lib, texts);
     let edges = edges(texts);
     let loaded: BTreeSet<&str> = texts.iter().map(|(c, _)| *c).collect();
-    let internal = |t: &Ty| {
-        INTERNAL
-            .iter()
-            .any(|(c, n, _)| *c == t.krate && (*n == "*" || *n == t.name))
-    };
-    let skip = |t: &Ty| {
-        EXCLUDED.contains(&t.name.as_str())
-            || TESTING.contains(&(t.krate.as_str(), t.name.as_str()))
-            || OWNER_PRIVATE.contains(&(t.krate.as_str(), t.name.as_str()))
-    };
-    let mut seeds = Vec::new();
-    let mut missing: BTreeMap<(String, String), BTreeSet<String>> = BTreeMap::new();
-    let mut leaks: BTreeMap<(String, String), BTreeSet<String>> = BTreeMap::new();
-    let mut wanted = BTreeSet::new();
+    let mut a = Analysis::default();
+    let (mut missing, mut leaks) = (BTreeMap::new(), BTreeMap::new());
     for ((krate, item), (subject, refs)) in &edges {
         if !covers.covers(subject) {
             continue;
         }
         let me = format!("{krate}::{item}");
-        let mut seen: BTreeSet<(String, String)> = BTreeSet::new();
-        let mut queue: VecDeque<(Ty, String)> =
-            refs.iter().map(|t| (t.clone(), me.clone())).collect();
-        while let Some((t, user)) = queue.pop_front() {
-            if !loaded.contains(t.krate.as_str()) {
-                wanted.insert(t.krate.clone());
-            }
-            if covers.covers(&t) || skip(&t) {
-                continue;
-            }
-            if internal(&t) {
-                leaks.entry(t.id()).or_default().insert(user);
-                continue;
-            }
-            missing.entry(t.id()).or_default().insert(user);
-            if !seen.insert(t.id()) {
-                continue;
-            }
-            let here = format!("{}::{}", t.krate, t.name);
-            for next in edges.get(&t.id()).map(|e| &e.1).into_iter().flatten() {
-                queue.push_back((next.clone(), here.clone()));
-            }
+        a.wanted.extend(
+            refs.iter()
+                .filter(|t| !loaded.contains(t.krate.as_str()))
+                .map(|t| t.krate.clone()),
+        );
+        let near = reach(&edges, &covers, &me, refs, false);
+        for (t, user) in &near {
+            let into = if internal(t) {
+                &mut leaks
+            } else {
+                &mut missing
+            };
+            into.entry(t.id())
+                .or_insert_with(BTreeSet::new)
+                .insert(user.clone());
         }
-        // The same walk through the internal types, to size what they hide.
-        let all = reach(&edges, &covers, &skip, refs);
-        if !all.is_empty() {
-            seeds.push((all.len(), all.len() - seen.len(), me));
+        let all = distinct(&reach(&edges, &covers, &me, refs, true)).len();
+        if all > 0 {
+            let seen = distinct(&near);
+            let shown = seen.len() - seen.iter().filter(|(c, n)| internal_id(c, n)).count();
+            a.seeds.push((all, all - shown, me));
         }
     }
-    seeds.sort_by(|a, b| b.0.cmp(&a.0).then(a.2.cmp(&b.2)));
-    let list = |m: BTreeMap<(String, String), BTreeSet<String>>| -> Vec<String> {
-        m.into_iter()
-            .map(|((c, ty), users)| {
-                let more = if users.len() > 4 { " ..." } else { "" };
-                let users: Vec<String> = users.into_iter().take(4).collect();
-                format!("{c}::{ty} <- {}{more}", users.join(", "))
-            })
-            .collect()
-    };
-    Analysis {
-        missing: list(missing),
-        leaks: list(leaks),
-        seeds,
-        wanted: wanted.into_iter().collect(),
-    }
+    a.seeds.sort_by(|x, y| y.0.cmp(&x.0).then(x.2.cmp(&y.2)));
+    a.missing = list(missing);
+    a.leaks = list(leaks);
+    a.wanted.sort();
+    a.wanted.dedup();
+    a
 }
 
 #[cfg(test)]
@@ -566,6 +519,13 @@ pub use tutti_nodes::SvfType;
         let api = "#[non_exhaustive] pub enum tutti_graph::Node\n\
                    #[non_exhaustive] pub fn tutti_graph::Node::cx(&self) -> tutti_graph::Cx\n";
         assert_eq!(missing(api), ["tutti_graph::Cx <- tutti_graph::Node"]);
+    }
+
+    #[test]
+    fn a_path_cut_short_names_no_type() {
+        let api = "pub struct tutti_graph::Node\npub fn tutti_graph::Node::a(tutti_graph::\n\
+                   pub fn tutti_graph::Node::b(tutti_graph";
+        assert_eq!(missing(api), Vec::<String>::new());
     }
 
     #[test]

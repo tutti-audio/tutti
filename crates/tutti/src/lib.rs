@@ -77,7 +77,7 @@
 //! | `tutti::plugin` | hosting settings, the main-thread proof and the plugin catalog | `plugin` + a format |
 //!
 //! `cargo xtask check-umbrella` holds the rule: no crate is re-exported whole,
-//! and no name is exported twice.
+//! and no item is exported twice.
 //! Every type in the signature of an exported item is nameable here, bar the
 //! internals of the engine, the graph compiler and the plugin host that a few
 //! items still name; `cargo xtask umbrella-api` lists them for their owners.
