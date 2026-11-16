@@ -535,13 +535,13 @@ impl PluginClient<Bound> {
     #[must_use]
     pub fn rebinder(&self) -> Rebinder<Ipc> {
         let served = self.served.clone();
-        self.state
-            .node
-            .rebinder(Some(PortLimit {
+        self.state.node.rebinder(
+            Some(PortLimit {
                 inputs: self.loaded.input_widths(),
                 outputs: self.loaded.output_widths(),
-            }))
-            .with_live_layout(move || served.layout())
+            }),
+            Some(Arc::new(move || served.layout())),
+        )
     }
 }
 

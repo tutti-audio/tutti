@@ -77,6 +77,10 @@ pub struct PortLimit {
     pub outputs: Vec<tutti_types::ChannelLayout>,
 }
 
+/// Where a rebinder reads the ports the plugin has now when its lifecycle does
+/// not follow them: the plugin's own report.
+pub type LiveLayout = Arc<dyn Fn() -> tutti_plugin_types::Layout + Send + Sync>;
+
 /// Builds the node that replaces a plugin node whose plugin changed its ports.
 ///
 /// Made from the node it replaces ([`InProcClient::rebinder`]) and kept on the
@@ -102,7 +106,7 @@ pub struct Rebinder<F: Loaded> {
     limit: Option<PortLimit>,
     /// Where the ports are read from when the plugin's lifecycle does not
     /// follow them (a served plugin's): the plugin's own report.
-    live: Option<Arc<dyn Fn() -> tutti_plugin_types::Layout + Send + Sync>>,
+    live: Option<LiveLayout>,
 }
 
 impl<F: Loaded> Clone for Rebinder<F> {
@@ -204,20 +208,8 @@ where
         ))
     }
 
-    /// This rebinder, reading the ports the plugin has now from `live` instead
-    /// of from its lifecycle: for a plugin whose lifecycle does not follow its
-    /// ports, as a served plugin's does not.
-    #[must_use]
-    pub fn with_live_layout(
-        mut self,
-        live: impl Fn() -> tutti_plugin_types::Layout + Send + Sync + 'static,
-    ) -> Self {
-        self.live = Some(Arc::new(live));
-        self
-    }
-
     /// The ports the plugin has now: its own report where this rebinder reads
-    /// one ([`with_live_layout`](Self::with_live_layout)), else as its lifecycle
+    /// one (the `live` of [`InProcClient::rebinder`]), else as its lifecycle
     /// last read them. What a node [`prepare`](Self::prepare) built now would
     /// declare. `None` for a lost plugin or before a layout was read.
     #[must_use]
@@ -328,8 +320,8 @@ impl<F: Loaded> PluginNode<F> {
     /// The [`Rebinder`] for this node, binding its successors to the tempo
     /// reader the node was bound to. See [`InProcClient::rebinder`].
     #[must_use]
-    pub fn rebinder(&self, limit: Option<PortLimit>) -> Rebinder<F> {
-        self.client.rebinder(self.tempo.clone(), limit)
+    pub fn rebinder(&self, limit: Option<PortLimit>, live: Option<LiveLayout>) -> Rebinder<F> {
+        self.client.rebinder(self.tempo.clone(), limit, live)
     }
 }
 
@@ -337,9 +329,15 @@ impl<F: Loaded> InProcClient<F> {
     /// The [`Rebinder`] for this node, over the same plugin, binding its
     /// successors to `tempo`. `limit` is the ports a rebuilt node may have:
     /// `None` for a plugin whose node has no fixed pipeline, `Some` for a
-    /// served one.
+    /// served one. `live` reads the plugin's own report of its ports, for a
+    /// plugin whose lifecycle does not follow them.
     #[must_use]
-    pub fn rebinder(&self, tempo: TempoReader, limit: Option<PortLimit>) -> Rebinder<F> {
+    pub fn rebinder(
+        &self,
+        tempo: TempoReader,
+        limit: Option<PortLimit>,
+        live: Option<LiveLayout>,
+    ) -> Rebinder<F> {
         Rebinder {
             inner: Arc::clone(&self.inner),
             descriptor: self.descriptor.clone(),
@@ -355,7 +353,7 @@ impl<F: Loaded> InProcClient<F> {
             own_bypass: self.declared.ports.own_bypass,
             tempo,
             limit,
-            live: None,
+            live,
         }
     }
 }
@@ -433,7 +431,7 @@ mod tests {
             None,
         )
         .expect("the fake is narrow");
-        let rebinder = client.rebinder(tempo(), limit);
+        let rebinder = client.rebinder(tempo(), limit, None);
         let inner = Arc::clone(&client.inner);
         let node = contract::prepared(client.bind(tempo()), SR, BLOCK);
         (fake, rebinder, node, inner)

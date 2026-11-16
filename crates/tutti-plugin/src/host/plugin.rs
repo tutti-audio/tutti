@@ -533,26 +533,34 @@ impl Plugin {
             }
             #[cfg(feature = "vst2")]
             Placed::Vst2(c) => {
-                let rebinder =
-                    PluginRebinder::in_process(c.rebinder(tempo.clone(), None), BoundPlaced::Vst2);
+                let rebinder = PluginRebinder::in_process(
+                    c.rebinder(tempo.clone(), None, None),
+                    BoundPlaced::Vst2,
+                );
                 (BoundPlaced::Vst2(Box::new(c.bind(tempo))), rebinder)
             }
             #[cfg(feature = "clap")]
             Placed::Clap(c) => {
-                let rebinder =
-                    PluginRebinder::in_process(c.rebinder(tempo.clone(), None), BoundPlaced::Clap);
+                let rebinder = PluginRebinder::in_process(
+                    c.rebinder(tempo.clone(), None, None),
+                    BoundPlaced::Clap,
+                );
                 (BoundPlaced::Clap(Box::new(c.bind(tempo))), rebinder)
             }
             #[cfg(feature = "vst3")]
             Placed::Vst3(c) => {
-                let rebinder =
-                    PluginRebinder::in_process(c.rebinder(tempo.clone(), None), BoundPlaced::Vst3);
+                let rebinder = PluginRebinder::in_process(
+                    c.rebinder(tempo.clone(), None, None),
+                    BoundPlaced::Vst3,
+                );
                 (BoundPlaced::Vst3(Box::new(c.bind(tempo))), rebinder)
             }
             #[cfg(all(feature = "au", target_os = "macos"))]
             Placed::Au(c) => {
-                let rebinder =
-                    PluginRebinder::in_process(c.rebinder(tempo.clone(), None), BoundPlaced::Au);
+                let rebinder = PluginRebinder::in_process(
+                    c.rebinder(tempo.clone(), None, None),
+                    BoundPlaced::Au,
+                );
                 (BoundPlaced::Au(Box::new(c.bind(tempo))), rebinder)
             }
         };
