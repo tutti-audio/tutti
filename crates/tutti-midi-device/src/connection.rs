@@ -26,7 +26,7 @@ use std::time::{Duration, Instant};
 
 use bitflags::bitflags;
 use tutti_ump::{
-    BlockFilter, BlockSelect, DiscoveryFilter, Message, Protocol, Stream, StreamConfig,
+    BlockFilter, BlockSelect, DiscoveryFilter, Field, Message, Protocol, Stream, StreamConfig,
     StreamTextAssembler, Ump,
 };
 
@@ -286,7 +286,7 @@ impl Connection {
     }
 
     fn start_blocks(&mut self, now: Instant) -> Action {
-        if self.endpoint.declared_blocks == 0 {
+        if self.endpoint.declared_blocks.get() == 0 {
             return self.settle(Ending::Negotiated);
         }
         self.step = Step::Blocks {
@@ -312,7 +312,11 @@ impl Connection {
                     self.endpoint.insert_block(block);
                 }
             }
-            Stream::FunctionBlockName { block, form, bytes } => {
+            Stream::FunctionBlockName {
+                block: Field::Value(block),
+                form,
+                bytes,
+            } => {
                 // One name is open at a time: another block's Start drops it.
                 if let Some(text) = self.block_name.feed(block.get(), form, &bytes)
                     && let (Some(name_text), Some(slot)) = (
@@ -329,10 +333,10 @@ impl Connection {
             }
             _ => {}
         }
-        let every = if self.endpoint.declared_blocks >= 32 {
+        let every = if self.endpoint.declared_blocks.get() >= 32 {
             u32::MAX
         } else {
-            (1u32 << self.endpoint.declared_blocks) - 1
+            (1u32 << self.endpoint.declared_blocks.get()) - 1
         };
         if info & every == every && infos.is_none() {
             infos = Some(now);
@@ -372,7 +376,11 @@ impl Connection {
                 self.endpoint.insert_block(block);
                 Action::Changed
             }
-            Stream::FunctionBlockName { block, form, bytes } => {
+            Stream::FunctionBlockName {
+                block: Field::Value(block),
+                form,
+                bytes,
+            } => {
                 let Some(text) = self.block_name.feed(block.get(), form, &bytes) else {
                     return Action::Wait;
                 };

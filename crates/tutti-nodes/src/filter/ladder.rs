@@ -225,6 +225,7 @@ mod tests {
     use super::*;
     use crate::filter::test_utils::{generate_sine, process_mono, rms};
     use crate::test_support::{RATE_44K, prepared_at, tick, tick_fed};
+    use tutti_dsp::Complex64;
     use tutti_graph::contract::assert_param_fork;
     use tutti_graph::{Node, ParamNode};
     use tutti_types::Tail;
@@ -605,42 +606,91 @@ mod tests {
 
     // ── Per-block reads ──────────────────────────────────────────────────────
 
-    /// Unprepared: `render_change` prepares each copy at 48 kHz.
-    fn ladder_48k() -> LadderFilterNode<f64> {
-        LadderFilterNode::<f64>::with_channels(
-            ChannelLayout::STEREO,
-            LadderType::LP24,
-            Hz::new(500.0),
-            Resonance::new(0.4),
-        )
-    }
-
     /// A cutoff written between blocks glides on the stream clock: the render is the
     /// same at every block length, under way one 64-frame block in, and arrived
     /// [`GAIN_GLIDE`](tutti_dsp::GAIN_GLIDE) (240 frames at 48 kHz) after the block it
     /// was first seen in.
     #[test]
     fn a_cutoff_written_between_blocks_glides_on_the_stream() {
-        use crate::test_support::{assert_cell_glides, noise, render_change};
-        let x = noise(5, 64 + 512);
-        let change = |n: &LadderFilterNode<f64>| {
-            assert!(n.param_set().set(UnitParam::Cutoff, 7_000.0));
+        const FS: f64 = 48_000.0;
+        const HZ: f64 = 1_500.0;
+        const RES: f64 = 0.4;
+        let make = || {
+            LadderFilterNode::<f64>::with_channels(
+                ChannelLayout::STEREO,
+                LadderType::LP24,
+                Hz::new(1_000.0),
+                Resonance::new(RES as f32),
+            )
         };
-        let (before, after) = ([&x[..64], &x[..64]], [&x[64..], &x[64..]]);
-        let node = assert_cell_glides(ladder_48k, change, &before, &after, "ladder cutoff");
-        assert_eq!(node.applied().map(|c| c.freq), Some(Hz(7_000.0)), "arrived");
-        let one = [&x[64..128], &x[64..128]];
-        let (mid, _) = render_change(ladder_48k, change, &before, &one, 64);
-        let f = mid.applied().unwrap().freq.get();
-        assert!(500.0 < f && f < 7_000.0, "under way after 64 frames: {f}");
+        let change = |n: &LadderFilterNode<f64>| {
+            assert!(n.param_set().set(UnitParam::Cutoff, 1_400.0));
+        };
+        // 1e-3 keeps the saturator linear (`tanh x = x - x^3/3`: 3e-7 of the signal).
+        let (low, blocks) = block_levels(make, change, HZ, 1e-3);
+
+        // The spec: `1 / ((1 + s/wc)^4 + k)`, `k = 4 res`, under the bilinear map prewarped
+        // at the cutoff, the same figure the bank's held-response test pins.
+        let gain = |g: f64| {
+            let one = Complex64::new(1.0, 0.0);
+            let zi = Complex64::from_polar(1.0, -2.0 * core::f64::consts::PI * HZ / FS);
+            let s = (one - zi) / (one + zi) / g;
+            let p = one + s;
+            1.0 / (p * p * p * p + 4.0 * RES).norm()
+        };
+        let g_of = |fc: f64| libm::tan(core::f64::consts::PI * fc / FS);
+        // The cell glides 1000 to 1400 Hz over 240 frames from the write at stream frame 256
+        // (the grid point at its first block): step `k = frame - 255` at a grid point's
+        // frame. A design is taken at each grid point (every 16 frames) and the
+        // coefficients glide to it over the 16 frames after: frame `t` is `(t - p + 1) / 16`
+        // of the way from the design at the grid point `p` before it to the one at `p`.
+        let cell = |p: i64| {
+            let k = (p - 255).clamp(0, 240) as f64;
+            1_000.0 + 400.0 * k / 240.0
+        };
+        let expect = |block: usize| {
+            let mut sum = 0.0;
+            for i in 0..64 {
+                let t = 256 + 64 * block as i64 + i;
+                let p = t - t % 16;
+                let w = (t - p + 1) as f64 / 16.0;
+                let g = g_of(cell(p - 16)) * (1.0 - w) + g_of(cell(p)) * w;
+                sum += gain(g).powi(2);
+            }
+            1e-3 * core::f64::consts::FRAC_1_SQRT_2 * (sum / 64.0).sqrt()
+        };
+        // The tone is steady-state at each block's design, so the glide's lag in the stages
+        // costs a few percent; a cutoff that never moved or jumped is off by tens.
+        let near = |got: f32, want: f64, what: &str| {
+            assert!(
+                (f64::from(got) - want).abs() < 0.10 * want,
+                "{what}: {got} against {want}"
+            );
+        };
+        near(
+            low,
+            1e-3 * core::f64::consts::FRAC_1_SQRT_2 * gain(g_of(1_000.0)),
+            "before",
+        );
+        for (j, &level) in blocks.iter().enumerate() {
+            near(level, expect(j), &format!("block {j} after the write"));
+        }
+        // A cutoff that jumped would put block 0 at the landed gain, three times the
+        // held one; the glide's first block is well under it.
+        let landed = 1e-3 * core::f64::consts::FRAC_1_SQRT_2 * gain(g_of(1_400.0));
+        assert!(
+            f64::from(blocks[0]) < 0.8 * landed,
+            "block 0 is not yet landed"
+        );
     }
 
     /// Drive multiplies straight into the saturator, so a step would click: a drive
-    /// written between blocks glides on the stream clock like a cutoff, and arrives.
+    /// written between blocks glides on the stream clock like a cutoff, and arrives. The
+    /// level of a high-pass tone below the saturator's knee rises on every block of the glide
+    /// (a drive that jumped would start at its landed level, and one that never moved would
+    /// not rise), starts well under it, and settles on it.
     #[test]
     fn a_drive_written_between_blocks_glides_on_the_stream() {
-        use crate::test_support::{assert_cell_glides, noise, render_change};
-        let x = noise(6, 64 + 512);
         // A high-pass tap, so the saturator's input reaches the output unfiltered.
         let make = || {
             LadderFilterNode::<f64>::with_channels(
@@ -653,13 +703,44 @@ mod tests {
         let change = |n: &LadderFilterNode<f64>| {
             assert!(n.param_set().set(UnitParam::Drive, 9.0));
         };
-        let (before, after) = ([&x[..64], &x[..64]], [&x[64..], &x[64..]]);
-        let node = assert_cell_glides(make, change, &before, &after, "ladder drive");
-        assert_eq!(node.applied().map(|c| c.drive), Some(Drive(9.0)), "arrived");
-        let one = [&x[64..128], &x[64..128]];
-        let (mid, _) = render_change(make, change, &before, &one, 64);
-        let d = mid.applied().unwrap().drive.get();
-        assert!(1.0 < d && d < 9.0, "under way after 64 frames: {d}");
+        let (low, blocks) = block_levels(make, change, 6_000.0, 0.1);
+        let landed = blocks[7];
+        assert!(landed > 4.0 * low, "the drive arrived: {low} to {landed}");
+        assert!(
+            blocks[0] > low && blocks[0] < 0.5 * landed,
+            "block 0 is under way: {low} < {} < {landed}",
+            blocks[0]
+        );
+        // Four 64-frame blocks of a 240-frame glide: each one louder than the last, then
+        // landed (the glide is done by block 4).
+        assert!(blocks[..5].windows(2).all(|w| w[1] > w[0]), "{blocks:?}");
+        assert!(
+            blocks[5..]
+                .iter()
+                .all(|&l| (l - landed).abs() < 0.01 * landed)
+        );
+    }
+
+    /// A stereo node over a tone of `hz` (whole periods in 64 frames) at `amplitude`:
+    /// the RMS of the last 64 frames of 256 before a write (`low`), and of each 64-frame
+    /// block of the 512 frames after it. The render is also the same at every block length.
+    fn block_levels(
+        make: impl Fn() -> LadderFilterNode<f64>,
+        change: impl Fn(&LadderFilterNode<f64>),
+        hz: f64,
+        amplitude: f32,
+    ) -> (f32, Vec<f32>) {
+        use crate::test_support::{assert_cell_glides, drive_block, prepared, render_change, sine};
+        let x: Vec<f32> = sine(hz, 48_000.0, 256 + 512)
+            .into_iter()
+            .map(|s| amplitude * s)
+            .collect();
+        let (before, after) = ([&x[..256], &x[..256]], [&x[256..], &x[256..]]);
+        assert_cell_glides(&make, &change, &before, &after, "ladder");
+        let mut start = prepared(make());
+        let low = rms(&drive_block(&mut start, &before)[0][192..]);
+        let (_, out) = render_change(&make, &change, &before, &after, 64);
+        (low, out[0].chunks(64).map(rms).collect())
     }
 
     /// Six channels share one coefficient solve and keep six independent

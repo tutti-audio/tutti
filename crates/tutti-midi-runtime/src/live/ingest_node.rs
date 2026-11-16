@@ -239,7 +239,7 @@ const PORTS_PER_GROUP: usize = MIDI_INPUT_PORTS;
 ///
 /// let (mut editor, _exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
 /// // The inlet is not wired yet.
-/// let controls = editor.insert(NodeKey(1), "midi in", MidiIngestNode::new());
+/// let controls = editor.insert(NodeKey(1), "midi in", MidiIngestNode::new()).controls;
 /// controls.set_mpe_mode(tutti_midi_protocol::MpeMode::Disabled);
 /// ```
 pub struct MidiIngestNode {
@@ -667,6 +667,9 @@ impl Node for MidiIngestNode {
                     _ => {}
                 }
                 device.held.observe(raw);
+                // The translator ignores a MIDI 2.0 Control Change of CC 0, 6,
+                // 32, 38 and 98 to 101, as a MIDI 2.0 receiver does (M2-104
+                // section 7.4.6): `None` here is that rule, not a lost event.
                 if let Some(ev) = device.translator.translate(raw) {
                     let mpe = &mut device.mpe;
                     staging.whole(ev.is_note_off(), |send| mpe.translate(&(at, ev), send));

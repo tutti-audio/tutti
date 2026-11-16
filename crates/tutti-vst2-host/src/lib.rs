@@ -122,7 +122,7 @@
 //!
 //! // A normalized `0..=1` value, written to the parameter at position 0.
 //! let first = plugin.parameters(main)[0].id();
-//! plugin.set_parameter(main, first, Normalized::of(0.5));
+//! plugin.set_parameter(main, first, Normalized::of(0.5)).expect("the first parameter is declared");
 //! # Ok(()) }
 //! ```
 //!

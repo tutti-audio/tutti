@@ -759,7 +759,7 @@ fn lanes_200(
     for k in 0..200 {
         let lane = lane_for(k, ed.param_range_cell(at(k)).expect("committed"));
         let key = NodeKey(2000 + k as u64);
-        controls.push(ed.insert(key, "lane", lane));
+        controls.push(ed.insert(key, "lane", lane).controls);
         ed.spec_mut()
             .connect_param(at(k), EventOut { node: key, port: 0 });
     }
@@ -1329,11 +1329,13 @@ fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
         Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(128))));
     let (saw, filter) = (NodeKey(1 << 48), NodeKey((1 << 48) + 1));
     ed.insert(saw, "saw", ForkByClone(Osc::saw(Hz(110.0))));
-    let params = ed.insert(
-        filter,
-        "svf",
-        SvfFilterNode::<f64>::new(SvfType::LowPass, Hz(1_000.0), Q(0.7)),
-    );
+    let params = ed
+        .insert(
+            filter,
+            "svf",
+            SvfFilterNode::<f64>::new(SvfType::LowPass, Hz(1_000.0), Q(0.7)),
+        )
+        .controls;
     let topology = &mut ed.spec_mut().topology;
     topology.edges.insert(
         InPort {

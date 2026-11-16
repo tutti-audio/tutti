@@ -70,7 +70,7 @@ impl BusRef {
 
     /// The topology of one band of this bus in `buses`, and its first port:
     /// `None` when the bus or the band is not there.
-    fn resolve(self, buses: &crate::Buses) -> Option<(BusTopology, usize)> {
+    pub(crate) fn resolve(self, buses: &crate::Buses) -> Option<(BusTopology, usize)> {
         let index = usize::from(self.bus);
         let bus = buses.get(index)?;
         let band = usize::from(self.band);

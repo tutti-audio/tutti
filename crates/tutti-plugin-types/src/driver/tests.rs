@@ -339,10 +339,12 @@ fn a_failed_rebuild_is_refused_and_the_next_activation_rebuilds_first() {
 fn a_parameter_set_reaches_the_processor_at_the_next_block() {
     let mut rig = Rig::new();
     let (a, b) = (ParamId::new(3), ParamId::new(9));
+    rig.plugin.declare(&[(a, false), (b, false)]);
     rig.lifecycle
         .control()
         .unwrap()
-        .set_parameter(main(), a, Normalized::of(0.5));
+        .set_parameter(main(), a, Normalized::of(0.5))
+        .expect("a declared, writable parameter");
     assert_eq!(rig.plugin.calls(), [Call::SetParameter(a)]);
     rig.plugin.clear_calls();
 
@@ -359,11 +361,13 @@ fn a_parameter_set_reaches_the_processor_at_the_next_block() {
     rig.lifecycle
         .control()
         .expect("the plugin is there")
-        .set_parameter(main(), a, Normalized::of(0.25));
+        .set_parameter(main(), a, Normalized::of(0.25))
+        .expect("a declared, writable parameter");
     rig.lifecycle
         .control()
         .expect("the plugin is there")
-        .set_parameter(main(), b, Normalized::of(0.75));
+        .set_parameter(main(), b, Normalized::of(0.75))
+        .expect("a declared, writable parameter");
     rig.render(64).unwrap();
     rig.render(64).unwrap();
     assert_eq!(
@@ -583,19 +587,23 @@ fn a_refused_edit_is_retried_on_the_next_tick() {
     rig.plugin.edit_capacity(1);
     rig.op(HostOp::Activate(prepare(48_000.0)));
     let (a, b) = (ParamId::new(1), ParamId::new(2));
+    rig.plugin.declare(&[(a, false), (b, false)]);
     rig.lifecycle
         .control()
         .expect("the plugin is there")
-        .set_parameter(main(), a, Normalized::of(0.1));
+        .set_parameter(main(), a, Normalized::of(0.1))
+        .expect("a declared, writable parameter");
     // The ring holds one: these are refused, `b` twice.
     rig.lifecycle
         .control()
         .expect("the plugin is there")
-        .set_parameter(main(), b, Normalized::of(0.2));
+        .set_parameter(main(), b, Normalized::of(0.2))
+        .expect("a declared, writable parameter");
     rig.lifecycle
         .control()
         .expect("the plugin is there")
-        .set_parameter(main(), b, Normalized::of(0.9));
+        .set_parameter(main(), b, Normalized::of(0.9))
+        .expect("a declared, writable parameter");
     rig.plugin.clear_calls();
     rig.render(64).unwrap();
     assert_eq!(
@@ -677,6 +685,13 @@ fn a_panic_in_a_transition_is_not_told_twice() {
     assert!(!notices.iter().any(|n| matches!(n, Notice::Lost { .. })));
 }
 
+/// A new realtime end, named as the Processor's way.
+fn install(rig: &mut Rig) -> tutti_rt::Rt<<FakeLoaded as Loaded>::Processor> {
+    let (successor, rt) = Successor::new();
+    rig.hand.install(successor);
+    rt
+}
+
 /// The realtime end's poll between blocks, with `stop` as its last step.
 fn poll(rt: &mut tutti_rt::Rt<<FakeLoaded as Loaded>::Processor>) -> bool {
     rt.poll(Processor::stop).is_some()
@@ -740,6 +755,117 @@ fn a_refused_lend_is_offered_again_on_a_tick() {
     rig.tick();
     assert!(rig.lifecycle.processor().is_none(), "offered again");
     assert!(poll(&mut rt));
+}
+
+/// **An `install` moves the Processor to the new realtime end at the restart
+/// that follows, and leaves the old end empty.** The old end stops and returns
+/// it at its poll, the tick restarts the plugin, and the new Processor is lent
+/// to the end `install` named: the old end holds none, so dropping it frees
+/// nothing.
+#[test]
+fn an_install_lends_the_restarted_processor_to_the_new_end() {
+    let (mut rig, mut old) = Rig::threaded();
+    rig.op(HostOp::Activate(prepare(48_000.0)));
+    assert!(poll(&mut old), "the old end holds the Processor");
+
+    let mut new = install(&mut rig);
+    assert!(rig.hand.pending());
+    rig.op(HostOp::Reconfigure(prepare(44_100.0)));
+    assert!(rig.state.is_parked(), "waits for the old end to return it");
+    assert!(rig.hand.pending(), "the Processor has not moved yet");
+    assert!(!poll(&mut new), "nothing is lent to the new end yet");
+
+    assert!(!poll(&mut old), "the old end hands it back");
+    assert_eq!(rig.plugin.calls().last(), Some(&Call::Stop));
+    rig.tick();
+    assert!(!rig.hand.pending(), "lent through the new end");
+    assert!(old.held().is_none(), "the old end holds none");
+    assert!(!poll(&mut old), "and is lent none");
+    assert!(poll(&mut new), "the restarted Processor is in the new end");
+    assert_eq!(activations(&rig.plugin.calls()), 2);
+}
+
+/// **A second `install` before the Processor moves replaces the first:** the
+/// end the first call returned is never lent to, and the Processor goes to the
+/// second.
+#[test]
+fn a_second_install_replaces_the_first() {
+    let (mut rig, mut old) = Rig::threaded();
+    rig.op(HostOp::Activate(prepare(48_000.0)));
+    assert!(poll(&mut old));
+    let mut first = install(&mut rig);
+    let mut second = install(&mut rig);
+    rig.op(HostOp::Reconfigure(prepare(44_100.0)));
+    assert!(!poll(&mut old));
+    rig.tick();
+    rig.tick();
+    assert!(!poll(&mut first), "the replaced end is never lent to");
+    assert!(first.held().is_none());
+    assert!(poll(&mut second), "the Processor went to the last end");
+}
+
+/// **A Processor held on the main thread moves at the next lend:** a local
+/// hand, whose Processor stays in the seat, becomes a threaded one when
+/// `install` is called, and the next tick lends to the end it returned.
+#[test]
+fn an_install_of_a_held_processor_lends_to_the_new_end_on_the_next_tick() {
+    let mut rig = Rig::new();
+    rig.op(HostOp::Activate(prepare(48_000.0)));
+    assert!(rig.lifecycle.processor().is_some(), "held: a local hand");
+    let mut new = install(&mut rig);
+    rig.tick();
+    assert!(!rig.hand.pending());
+    assert!(rig.lifecycle.processor().is_none(), "lent");
+    assert!(poll(&mut new));
+}
+
+/// **A relend moves the Processor with no deactivation and no activation:**
+/// the plugin keeps running, the old end returns the Processor at its poll and
+/// the same Processor is lent to the new end.
+#[test]
+fn a_relend_moves_the_processor_without_restarting_the_plugin() {
+    let (mut rig, mut old) = Rig::threaded();
+    rig.op(HostOp::Activate(prepare(48_000.0)));
+    assert!(poll(&mut old));
+    let mut new = install(&mut rig);
+    rig.op(HostOp::Relend);
+    assert!(rig.state.is_parked(), "waits for the old end to return it");
+    assert!(!poll(&mut old), "the old end hands it back");
+    rig.tick();
+    assert!(!rig.hand.pending());
+    assert!(poll(&mut new), "lent to the new end");
+    assert!(old.held().is_none());
+    let calls = rig.plugin.calls();
+    assert_eq!(activations(&calls), 1, "no second activation");
+    assert!(!calls.contains(&Call::Deactivate), "no deactivation");
+}
+
+/// **A relend of a plugin that is not active does nothing:** nothing is
+/// recalled, parked or lent, and the successor stays pending.
+#[test]
+fn a_relend_of_a_plugin_that_is_not_active_does_nothing() {
+    let mut rig = Rig::new();
+    let _new = install(&mut rig);
+    rig.op(HostOp::Relend);
+    assert!(!rig.state.is_parked());
+    assert!(rig.plugin.calls().is_empty());
+    assert!(rig.hand.pending(), "the successor stays pending");
+}
+
+/// **A relend raised while an activation is in flight does not displace
+/// it:** the activation lends at its end, to the successor.
+#[test]
+fn a_relend_during_an_activation_is_left_to_the_activation() {
+    let (mut rig, mut old) = Rig::threaded();
+    rig.op(HostOp::Activate(prepare(48_000.0)));
+    assert!(poll(&mut old));
+    let mut new = install(&mut rig);
+    rig.op(HostOp::Reconfigure(prepare(44_100.0)));
+    rig.op(HostOp::Relend);
+    assert!(!poll(&mut old));
+    rig.tick();
+    assert!(poll(&mut new), "the reconfigure's lend went to the new end");
+    assert_eq!(activations(&rig.plugin.calls()), 2);
 }
 
 /// **The fake's explicit answers for the editor, render-mode, request and

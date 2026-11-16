@@ -433,7 +433,7 @@ fn insert_returns_typed_controls() {
             width: 1,
         })),
     );
-    let gain = ed.insert(FX, "gain", GainBuilder);
+    let gain = ed.insert(FX, "gain", GainBuilder).controls;
     wire(&mut ed, FX, SRC);
     ed.spec_mut()
         .topology

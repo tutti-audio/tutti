@@ -27,13 +27,13 @@
 //!   gate read a typed `KeySource`, the limiter reports its lookahead as latency), and
 //!   `MultibandCompressorNode` (2 to 4 bands, a linked
 //!   compressor per band of a Linkwitz-Riley crossover, a hand-written node over
-//!   `Realized<MultibandRecurrence>`). Every setting is an indexed param: a
+//!   `tutti_dsp::MultibandBank`). Every setting is an indexed param: a
 //!   threshold, knee, ratio, attack, release and make-up (`GainDb`) per band, a
 //!   `Cutoff` per crossover (27 ports at 4 bands), and a `Bypass` and `Solo`
 //!   toggle per band (`>= 0.5` is on, as every toggle; cells without a port). The
 //!   per-band gain reduction meters are readings on `MultibandControls`.
 //! - **Modulation effects** — `ModDelayNode` (chorus and flanger are
-//!   its two `Sweep` presets, over `tutti_dsp::ModDelayFamily`; the General MIDI chorus a third,
+//!   its two `Sweep` presets, a `KernelNode` over `ModDelayKernel`; the General MIDI chorus a third,
 //!   with no feedback and a finite tail) and `PhaserNode` (a `KernelNode` over `PhaserKernel`, its `Stages`
 //!   and `SweepRange` checked; the rate is floored at 0.01 Hz, a lane's value and a cell's alike), both any width.
 //! - **Distortion** — `DistortionNode` and its `ShapeKind` waveshapers.
@@ -154,7 +154,7 @@
 //! ## Features
 //!
 //! `default = []`. The FFT convolution reverb is not a feature: `ConvolverNode` at any width, with
-//! `IrChannelConfig`, over `tutti_dsp::Convolver`, whose FFT is
+//! `IrLayout`, over `tutti_dsp::Convolver` and `MatrixConvolver`, whose FFT is
 //! `tutti_dsp::RealFft` (scalar, so the output is CPU-independent). An IR's
 //! spectra are stored once (`tutti_dsp::IrSpectra`, behind an `Arc`) and shared
 //! by every channel and every fork of the graph.
@@ -170,14 +170,14 @@
 //! Every time constant here is derived from a sample rate: delay taps and ring
 //! lengths from [`Seconds`], filter coefficients from a cutoff in [`Hz`]
 //! against Nyquist, envelope attack and release coefficients, LFO phase
-//! increments. A node built over a family ([`FamilyNode`]: the filters, delays, dynamics,
+//! increments. A node built over a kernel ([`KernelNode`]: the filters, delays, dynamics,
 //! modulation effects and reverbs) has no rate until `prepare` gives it one: it builds its
-//! realization, its models and every figure derived from the rate there, so an unprepared
+//! bank and every figure derived from the rate there, so an unprepared
 //! node holds none. Before `prepare` it declares no latency and an unknown tail, which the
 //! graph reads again after it, and renders silence. A setting that names a frequency is
 //! checked for what a rate does not change (finite, above 0, in order), and a frequency
-//! past the prepared rate's Nyquist is held under it, not refused. The nodes outside the
-//! families ([`LfoNode`], [`ConvolverNode`]) take their rate from `prepare` too. To drive a node
+//! past the prepared rate's Nyquist is held under it, not refused. The nodes that are not
+//! kernels ([`LfoNode`], [`ConvolverNode`]) take their rate from `prepare` too. To drive a node
 //! outside a graph, prepare it first (`tutti_graph::Solo`, or
 //! `tutti_graph::contract::prepared` in tests).
 //!
@@ -198,7 +198,7 @@
 //!   [`BrickwallLimiterNode`], and [`MultibandCompressorNode`] (2 to 4
 //!   bands over a Linkwitz-Riley crossover, every setting an indexed param: see
 //!   [`BAND_PARAMS`]) with its [`MultibandControls`].
-//! - Modulation effects: [`ModDelayNode`] (over `tutti_dsp::ModDelayFamily`, its [`Sweep`] and
+//! - Modulation effects: [`ModDelayNode`] (over `tutti_dsp::ModDelayBank`, its [`Sweep`] and
 //!   [`Stagger`] checked) and [`PhaserNode`] (over `tutti_dsp::PhaserChain`, its [`Stages`] and
 //!   [`SweepRange`] checked); [`DistortionNode`] with [`ShapeKind`].
 //! - Modulation sources: [`LfoNode`] and [`ModulatorNode`], over a
@@ -305,32 +305,33 @@ pub use strip::BusStripNode;
 // The one node over an effect's algorithm and state: the driver and the trait an
 // algorithm implements to run in it.
 mod kernel;
-pub use kernel::{ControlLanes, Kernel, KernelNode};
+pub use kernel::{ControlLanes, Kernel, KernelNode, MAX_LANES};
 
-// The reverb: any `tutti_dsp::Family` as a node, and the Freeverb send (mono in,
-// stereo wet out) the SoundFont player's General MIDI setup uses.
-mod reverb;
 pub use params::{At, Control, ControlRead, ControlSet, ControlValid, Params};
-pub use reverb::{FamilyNode, FreeverbNode, NodeFamily, Rings, TailCeiling, TailCeilingError};
+
+// Freeverb as a `KernelNode`, and the send (mono in, stereo wet out) the SoundFont
+// player's General MIDI setup uses.
+mod reverb_freeverb;
+pub use reverb_freeverb::{FreeverbKernel, FreeverbNode};
 
 // The feedback delay network as a `KernelNode`.
 mod reverb_fdn;
 pub use reverb_fdn::{FdnKernel, FdnNode};
 
-// The families and controls that sit in a node's signature.
-pub use tutti_dsp::{FdnControls, FdnLayout, FreeverbControls, FreeverbFamily};
+// The banks' controls that sit in a node's signature.
+pub use tutti_dsp::{FdnControls, FdnLayout, FreeverbControls, MaxDecay};
 
 // The spatial panners: VBAP speaker panning and binaural HRTF rendering.
 mod spatial;
 pub use spatial::{HrtfBinauralNode, VbapError, VbapPannerNode};
 
 mod modulation;
-pub use modulation::{ModDelayNode, PhaserKernel, PhaserNode};
+pub use modulation::{ModDelayKernel, ModDelayNode, PhaserKernel, PhaserNode};
 // The sweep, its stagger and the controls are in `ModDelayNode::new`'s and `PhaserNode::new`'s
 // signatures.
 pub use tutti_dsp::{
-    ModDelayControls, ModDelayFamily, PhaserControls, Stages, StagesError, Stagger, StaggerError,
-    Sweep, SweepError, SweepRange, SweepRangeError,
+    ModDelayControls, PhaserControls, Stages, StagesError, Stagger, StaggerError, Sweep,
+    SweepError, SweepRange, SweepRangeError,
 };
 
 // The control sources' node (`SourceNode<S: ControlSource>`) and the
@@ -347,7 +348,7 @@ mod reconcile;
 pub use reconcile::{Applied, Feed, ModHost, Modulation, ReconcileError, Target};
 mod convolution;
 pub use convolution::{
-    ConvolverError, ConvolverNode, IrChannelConfig, generate_room_ir, generate_room_ir_into,
+    ConvolverError, ConvolverNode, IrLayout, PortSide, generate_room_ir, generate_room_ir_into,
     generate_test_ir, generate_test_ir_into,
 };
 

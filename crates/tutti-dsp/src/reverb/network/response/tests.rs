@@ -1,17 +1,26 @@
-use tutti_types::{Amplitude, Db, Seconds, StereoWidth};
+use tutti_types::{Amplitude, Db, Gain, SampleSpan, Seconds, StereoWidth};
 
 use super::*;
 use crate::reverb::network::{Gains, Inline, LineModulation, OutputMap, Tap, Taps};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
+/// `v` as signed gains.
+fn gain_vec(v: &[f32]) -> Vec<Gain> {
+    v.iter().map(|&x| Gain::new(x)).collect()
+}
+
 fn gains(v: &[f32]) -> Gains {
-    Gains::from_slice(v).unwrap()
+    Gains::from_slice(&gain_vec(v)).unwrap()
+}
+
+fn dense(v: &[f32]) -> Matrix {
+    Matrix::Dense(Inline::from_slice(&gain_vec(v)).unwrap())
 }
 
 fn line(length: f32, absorption: Absorption) -> Line {
     Line {
-        length,
+        length: SampleSpan::of(f64::from(length)),
         modulation: LineModulation::NONE,
         absorption,
         diffuser: None,
@@ -62,8 +71,8 @@ fn close(a: Complex64, b: Complex64) -> bool {
 fn the_two_all_pass_forms_have_their_documented_gains() {
     let ap = |form| {
         let a = AllPass {
-            delay: 8.0,
-            gain: 0.5,
+            delay: SampleSpan::of(8.0),
+            gain: Gain::new(0.5),
             modulation: LineModulation::NONE,
             form,
         };
@@ -98,8 +107,8 @@ fn an_all_pass_has_the_l1_norm_of_its_impulse_response() {
         (AllPassForm::Freeverb, -0.5, 3.0),
     ] {
         let a = AllPass {
-            delay: 4.0,
-            gain: g,
+            delay: SampleSpan::of(4.0),
+            gain: Gain::new(g),
             modulation: LineModulation::NONE,
             form,
         };
@@ -177,12 +186,7 @@ fn a_hadamard_is_the_sylvester_matrix() {
         [1.0, -1.0, -1.0, 1.0],
     ];
     let flat: Vec<f32> = h.iter().flatten().map(|x| x / 2.0).collect();
-    let dense = network(vec![Stage::Fdn(fdn(
-        &lines,
-        Matrix::Dense(Inline::from_slice(&flat).unwrap()),
-        &b,
-        &c,
-    ))]);
+    let dense = network(vec![Stage::Fdn(fdn(&lines, dense(&flat), &b, &c))]);
     for w in [0.0, 0.2, 1.1, 3.0] {
         assert!(close(at(&hadamard, w), at(&dense, w)), "w {w}");
     }
@@ -209,7 +213,7 @@ fn the_rank_one_solve_equals_elimination() {
     let v: Vec<f32> = v.iter().map(|x| (f64::from(*x) / norm) as f32).collect();
     let dense_of = |entry: &dyn Fn(usize, usize) -> f64| {
         let all: Vec<f32> = (0..n * n).map(|k| entry(k / n, k % n) as f32).collect();
-        Matrix::Dense(Inline::from_slice(&all).unwrap())
+        dense(&all)
     };
     let id = |i: usize, j: usize| f64::from(u8::from(i == j));
     let householder = dense_of(&|i, j| id(i, j) - 2.0 / n as f64);
@@ -244,7 +248,7 @@ fn elimination_is_cramers_rule_on_two_lines() {
     let flat: Vec<f32> = a.iter().flatten().copied().collect();
     let n = network(vec![Stage::Fdn(fdn(
         &lines,
-        Matrix::Dense(Inline::from_slice(&flat).unwrap()),
+        dense(&flat),
         &[1.0, 0.0],
         &[0.0, 1.0],
     ))]);
@@ -314,8 +318,8 @@ fn the_spectral_radius_is_the_slowest_decay_per_frame() {
     let mut channels = Inline::new();
     channels
         .push(AllPass {
-            delay: 100.0,
-            gain: 0.5,
+            delay: SampleSpan::of(100.0),
+            gain: Gain::new(0.5),
             ..AllPass::default()
         })
         .unwrap();
@@ -324,8 +328,8 @@ fn the_spectral_radius_is_the_slowest_decay_per_frame() {
 
     let taps = Taps {
         taps: Inline::from_slice(&[Tap {
-            delay: 10.0,
-            gain: 0.5,
+            delay: SampleSpan::of(10.0),
+            gain: Gain::new(0.5),
             channel: 0,
         }])
         .unwrap(),
@@ -424,13 +428,13 @@ fn taps_width_and_wet_follow_the_kernels_fold() {
     let taps = Taps {
         taps: Inline::from_slice(&[
             Tap {
-                delay: 3.0,
-                gain: 0.5,
+                delay: SampleSpan::of(3.0),
+                gain: Gain::new(0.5),
                 channel: 0,
             },
             Tap {
-                delay: 5.0,
-                gain: -0.25,
+                delay: SampleSpan::of(5.0),
+                gain: Gain::new(-0.25),
                 channel: 1,
             },
         ])
@@ -466,8 +470,8 @@ fn taps_width_and_wet_follow_the_kernels_fold() {
 fn the_pre_delay_is_a_delay() {
     let mut n = network(vec![Stage::Taps(Taps {
         taps: Inline::from_slice(&[Tap {
-            delay: 0.0,
-            gain: 1.0,
+            delay: SampleSpan::of(0.0),
+            gain: Gain::new(1.0),
             channel: 0,
         }])
         .unwrap(),

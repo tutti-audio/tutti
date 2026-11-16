@@ -12,14 +12,15 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use dpi::{LogicalSize, Size};
-use tutti_au_ffi::AuEditor;
+use tutti_au_ffi::{AuEditor, Scope};
 use tutti_plugin_types::features::probed;
 use tutti_plugin_types::{
-    AuComponentType, AutomationMode, ContentScale, Control, EditorCapabilities, EditorError,
-    EditorPresence, EditorWindow, Features, LoadedPlugin, MainThreadMarker, Normalized, ParamEdit,
-    ParamFlags, ParamId, ParamMapping, ParamRange, ParamSteps, ParameterInfo, PluginBus,
-    PluginBuses, PluginClass, PluginDescriptor, PluginError, PluginResult, PluginTail, Preset,
-    PresetId, RenderModeSupport, Request, RescanScope, StateUse, WindowHandle, Wraps, taken,
+    AuComponentType, AutomationMode, BypassWrite, ContentScale, Control, EditorCapabilities,
+    EditorError, EditorPresence, EditorWindow, Features, LoadedPlugin, MainThreadMarker,
+    Normalized, OwnBypass, ParamEdit, ParamFlags, ParamId, ParamMapping, ParamRange, ParamSteps,
+    ParamWriteError, ParameterInfo, PluginBus, PluginBuses, PluginClass, PluginDescriptor,
+    PluginError, PluginResult, PluginTail, PluginVersion, Preset, PresetId, RenderModeSupport,
+    Request, RescanScope, StateUse, WindowHandle, Wraps, taken,
 };
 use tutti_types::Samples;
 
@@ -81,7 +82,11 @@ pub(crate) fn describe(handle: &AuHandle) -> PluginDescriptor {
             info.manufacturer.clone(),
             info.version.clone(),
         ),
-        None => (String::from("au.unknown"), String::new(), String::new()),
+        None => (
+            String::from("au.unknown"),
+            String::new(),
+            PluginVersion::Absent,
+        ),
     };
     PluginDescriptor {
         id,
@@ -93,6 +98,17 @@ pub(crate) fn describe(handle: &AuHandle) -> PluginDescriptor {
         },
         editor: EditorPresence::measured(AuEditor::has_editor(handle.unit())),
         measured: None,
+    }
+}
+
+/// `READ_ONLY` for a parameter the host cannot write: one that is not
+/// `kAudioUnitParameterFlag_IsWritable`, or that is `kAudioUnitParameterFlag_MeterReadOnly`
+/// (a meter the unit writes and the host only reads).
+fn read_only_flags(writable: bool, meter_read_only: bool) -> ParamFlags {
+    if writable && !meter_read_only {
+        ParamFlags::empty()
+    } else {
+        ParamFlags::READ_ONLY
     }
 }
 
@@ -214,11 +230,10 @@ impl AuLoaded {
         }
     }
 
-    fn denormalize(&self, id: ParamId, value: Normalized) -> f32 {
-        match self.ranges.bounds(id.get()) {
-            Some(bounds) => bounds.plain(value) as f32,
-            None => value.get() as f32,
-        }
+    /// `value` in the declared plain units; `None` for a parameter off the
+    /// table, which has no range to denormalize against.
+    fn denormalize(&self, id: ParamId, value: Normalized) -> Option<f32> {
+        Some(self.ranges.bounds(id.get())?.plain(value) as f32)
     }
 
     /// Reads the declared ranges again, after the unit said its parameter list
@@ -287,6 +302,15 @@ impl Control for AuLoaded {
             tail: self.tail_figure(),
             features: self.features(),
             probed: probed::AU,
+            // A unit without `kAudioUnitProperty_BypassEffect` (every
+            // instrument) refuses the read.
+            own_bypass: self.is_bypassed().is_ok().then_some(OwnBypass::Property),
+            // A unit that does not implement the mapping family (most effects)
+            // refuses the read and declares none.
+            assignments: self
+                .parameter_midi_mappings()
+                .map(|table| crate::midi_map::declared(&table))
+                .unwrap_or_default(),
         }
     }
 
@@ -304,6 +328,18 @@ impl Control for AuLoaded {
                 .entry(clump)
                 .or_insert_with(|| parameters::clump_name(unit, clump).unwrap_or_default());
         }
+
+        // `ParametersForOverview` is the unit's own shortlist; a unit that does
+        // not implement it marks none.
+        let overview: Vec<u32> = self
+            .parameters_for_overview()
+            .map(|list| {
+                list.into_iter()
+                    .filter(|o| o.scope == Scope::GLOBAL.raw())
+                    .map(|o| o.id)
+                    .collect()
+            })
+            .unwrap_or_default();
 
         params
             .into_iter()
@@ -329,11 +365,7 @@ impl Control for AuLoaded {
                     .and_then(|c| clump_names.get(&c))
                     .cloned()
                     .unwrap_or_default();
-                let flags = if p.writable {
-                    ParamFlags::empty()
-                } else {
-                    ParamFlags::READ_ONLY
-                };
+                let flags = read_only_flags(p.writable, p.meter_read_only);
                 // `AudioUnitParameterID` is AU's opaque plugin-chosen handle.
                 ParameterInfo::new(p.id.into(), p.name)
                     .with_unit(p.unit.to_string())
@@ -348,9 +380,23 @@ impl Control for AuLoaded {
                     // The unit code is a closed enumeration, so it types the
                     // parameter exactly.
                     .with_measures(crate::unit_measures(p.unit_code))
-                    .with_role(crate::unit_role(p.unit_code))
+                    .with_overview(overview.contains(&p.id))
             })
             .collect()
+    }
+
+    /// What `kAudioUnitProperty_BypassEffect` holds now.
+    fn bypassed(&self, _main: MainThreadMarker) -> Option<bool> {
+        self.is_bypassed().ok()
+    }
+
+    /// Writes `kAudioUnitProperty_BypassEffect`: an AU's bypass is a unit
+    /// property, never a parameter. A unit that refuses the write loses it.
+    fn set_bypassed(&mut self, _main: MainThreadMarker, bypassed: bool) -> BypassWrite {
+        match self.set_bypass(bypassed) {
+            Ok(()) => BypassWrite::Sent,
+            Err(_) => BypassWrite::Lost,
+        }
     }
 
     /// Plain, in the AU's own units: `ParamBounds`'s [`ParamMapping`] over the
@@ -386,9 +432,28 @@ impl Control for AuLoaded {
     /// active unit takes it directly rather than through a queue to the
     /// Processor). Normalized in, denormalized against the same table the
     /// automation path uses, so the two cannot disagree about a range.
-    fn set_parameter(&mut self, _main: MainThreadMarker, id: ParamId, value: Normalized) {
-        let plain = self.denormalize(id, value);
-        let _ = parameters::set(self.unit(), id.get(), plain);
+    fn set_parameter(
+        &mut self,
+        main: MainThreadMarker,
+        id: ParamId,
+        value: Normalized,
+    ) -> Result<(), ParamWriteError> {
+        self.parameter_writable(main, id)?;
+        // Declared, so the table has its range.
+        if let Some(plain) = self.denormalize(id, value) {
+            let _ = parameters::set(self.unit(), id.get(), plain);
+        }
+        Ok(())
+    }
+
+    /// From the range table, which holds every declared parameter and the ids
+    /// the AU declared read-only.
+    fn parameter_writable(
+        &self,
+        _main: MainThreadMarker,
+        id: ParamId,
+    ) -> Result<(), ParamWriteError> {
+        ParamWriteError::check(id, self.ranges.access(id.get()))
     }
 
     /// The AU's own display string. `AudioUnitParameterStringFromValue` takes
@@ -404,7 +469,7 @@ impl Control for AuLoaded {
         id: ParamId,
         value: Normalized,
     ) -> Option<String> {
-        parameters::string_from_value(self.unit(), id.get(), self.denormalize(id, value))
+        parameters::string_from_value(self.unit(), id.get(), self.denormalize(id, value)?)
     }
 
     /// The inverse, re-normalized so the result can be handed straight to
@@ -613,5 +678,21 @@ mod tests {
             None,
             "a CLAP preset path must not yield an AU selector"
         );
+    }
+}
+
+#[cfg(test)]
+mod flag_tests {
+    use super::*;
+
+    /// A writable parameter is not read-only; one that is not writable is; a meter is,
+    /// whatever its writable bit says.
+    /// Spec: au.param.flag.MeterReadOnly
+    #[test]
+    fn a_meter_parameter_is_read_only_even_when_it_is_writable() {
+        assert_eq!(read_only_flags(true, false), ParamFlags::empty());
+        assert_eq!(read_only_flags(false, false), ParamFlags::READ_ONLY);
+        assert_eq!(read_only_flags(true, true), ParamFlags::READ_ONLY);
+        assert_eq!(read_only_flags(false, true), ParamFlags::READ_ONLY);
     }
 }

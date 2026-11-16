@@ -1,11 +1,6 @@
-use rand::rngs::StdRng;
-use rand::{RngExt, SeedableRng};
-use tutti_types::{Db, Seconds};
+use tutti_types::{Feedback, Mix};
 
 use super::*;
-use crate::contract::{FamilyCase, Figure, Hook, LtiCase, ReverbCase};
-use crate::reverb::network::Band;
-use crate::{Lti as _, System as _};
 
 fn controls(room: f32, damp: f32) -> FreeverbControls {
     FreeverbControls {
@@ -14,319 +9,53 @@ fn controls(room: f32, damp: f32) -> FreeverbControls {
     }
 }
 
-impl FamilyCase for FreeverbFamily {
-    fn capacity(&self, rate: SampleRate) -> NetworkCapacity {
-        self.reach(&self.reach_at(rate))
-    }
-
-    fn reachable(&self) -> Vec<FreeverbControls> {
-        let steps = [0.0, 0.25, 0.5, 0.75, 1.0];
-        let mut all: Vec<_> = steps
-            .iter()
-            .flat_map(|&r| steps.iter().map(move |&d| controls(r, d)))
-            .collect();
-        let mut rng = StdRng::seed_from_u64(22);
-        all.extend(
-            (0..200).map(|_| controls(rng.random_range(0.0..=1.0), rng.random_range(0.0..=1.0))),
-        );
-        all
-    }
-
-    fn hostile(&self) -> Vec<FreeverbControls> {
-        let nasty = [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -3.0, 7.0];
-        nasty
-            .iter()
-            .flat_map(|&v| [controls(v, 0.5), controls(0.5, v), controls(v, v)])
-            .collect()
-    }
-
-    fn musical_delay(&self, n: &Network) -> usize {
-        n.min_delay() as usize
-    }
-
-    /// Freeverb has no size, diffusion, pre-delay, freeze, width or wet
-    /// control, so those hooks are empty, and its network never sets a
-    /// pre-delay, a width or a wet gain.
-    fn vacant(&self) -> &'static [(Hook, &'static str)] {
-        &[
-            (Hook::SizePairs, "Freeverb has no size control"),
-            (Hook::DiffusionPairs, "Freeverb has no diffusion control"),
-            (Hook::PreDelayPairs, "Freeverb has no pre-delay"),
-            (Hook::FreezePairs, "Freeverb cannot freeze"),
-            (Hook::WidthPairs, "Freeverb has no width control"),
-            (Hook::WetPairs, "Freeverb has no wet gain"),
-        ]
-    }
-}
-
-impl ReverbCase for FreeverbFamily {
-    /// 15%. The measured figure is the energy slope 40 to 65 dB down, where
-    /// a bank of combs of 1116 to 1640 frames (a 1.47 ratio in rate) has
-    /// not yet settled on the slowest: it lands 5 to 11% under the network's
-    /// `rt60`, which is the slowest comb's; the bank's own spread needs more
-    /// than the default 10%.
-    fn tolerance(&self) -> f32 {
-        0.15
-    }
-
-    /// The RT60 of the slowest comb (1617 + 23 = 1640 frames at 44.1 kHz,
-    /// scaled to the rate) at the gain Freeverb gives a band: the loop
-    /// gain `room * 0.28 + 0.7` times the one-pole `(1 - d) / (1 - d z^-1)`
-    /// (`d = damp * 0.4`) at DC, a quarter of the rate and Nyquist.
-    fn requested_rt60(
-        &self,
-        c: &FreeverbControls,
-        rate: SampleRate,
-        band: Band,
-    ) -> Option<Seconds> {
-        let longest = (rate.get() / 44_100.0 * 1640.0).round();
-        let loop_gain = f64::from(c.room.get() * 0.28 + 0.7);
-        let d = f64::from(c.damp.get() * 0.4);
-        let pole = match band {
-            Band::Low => 1.0,
-            Band::Mid => (1.0 - d) / libm::sqrt(1.0 + d * d),
-            Band::High => (1.0 - d) / (1.0 + d),
-        };
-        let g = loop_gain * pole;
-        Some(Seconds(
-            (-3.0 * longest / (rate.get() * libm::log10(g))) as f32 as f64,
-        ))
-    }
-
-    fn decay_pairs(&self) -> Vec<(FreeverbControls, FreeverbControls)> {
-        vec![
-            (controls(0.2, 0.5), controls(0.5, 0.5)),
-            (controls(0.5, 0.5), controls(1.0, 0.5)),
-            (controls(0.0, 0.0), controls(1.0, 1.0)),
-        ]
-    }
-    // Freeverb has no size, diffusion, pre-delay or freeze control, so the
-    // size, diffusion and pre-delay pairs are empty and `frozen` is false:
-    // those directions of the cases are vacuous for it (`vacant` says so).
-    // The freeze case still asserts that no control reaches a lossless loop.
-}
-
-impl LtiCase for FreeverbFamily {
-    /// `|H_L(0)| = 0.015 sum_left 1 / (1 - g_loop)`: at DC each comb is
-    /// `0.015 z^-D / (1 - g_loop z^-D)` with the one-pole at its DC gain (the
-    /// loop gain `g_loop = room * 0.28 + 0.7`), the eight left combs add, and
-    /// the four all-passes have unit gain at DC for a feedback of 0.5. The right
-    /// channel is the same sum over its eight combs.
-    fn figures(&self) -> Vec<Figure<FreeverbControls>> {
-        let rate = SampleRate::SR_48K;
-        [(0.5, 0.5), (0.0, 0.5), (1.0, 0.2), (0.9, 1.0)]
-            .into_iter()
-            .flat_map(|(room, damp)| {
-                let loop_gain = f64::from(room * 0.28 + 0.7);
-                let dc = 8.0 * f64::from(Freeverb::FIXED_GAIN) / (1.0 - loop_gain);
-                (0..2).map(move |output| Figure {
-                    controls: controls(room, damp),
-                    rate,
-                    output,
-                    freq: tutti_types::Hz(0.0),
-                    gain: dc,
-                    tolerance: 1e-4,
-                })
-            })
-            .collect()
-    }
-
-    fn fill(&self, rate: SampleRate, trips: f32) -> usize {
-        (trips * self.capacity(rate).line) as usize
-    }
-}
-
-crate::family_contract!(FreeverbFamily, Grows, Lti, reverb);
-
-/// At the General MIDI controls the network carries `Freeverb`'s own
-/// constants to the bit: the comb loop gain, the damping, the all-pass
-/// feedback and the input gain.
+/// The scalings are Jezar's: the comb loop gain is `room * 0.28 + 0.7` and the damping
+/// `damp * 0.4`, so the General MIDI room (0.5, 0.5) is a loop gain of 0.84 and a damping of
+/// 0.2, and the ends of the range are 0.7 to 0.98 and 0 to 0.4.
 #[test]
-fn the_general_midi_controls_give_todays_coefficients_to_the_bit() {
-    let n = FreeverbFamily.member(&FreeverbControls::GENERAL_MIDI, SampleRate::SR_44K1);
-    let Stage::Fdn(fdn) = &n.stages[0] else {
-        panic!("the first stage is the combs")
-    };
-    for line in fdn.lines.iter() {
-        let Absorption::OnePole { gain, damp } = line.absorption else {
-            panic!()
-        };
-        assert_eq!(gain.get().to_bits(), Freeverb::ROOM_FEEDBACK.to_bits());
-        assert_eq!(damp.to_bits(), Freeverb::DAMPING.to_bits());
-    }
-    assert!(
-        fdn.input
-            .iter()
-            .all(|&g| g.to_bits() == Freeverb::FIXED_GAIN.to_bits())
-    );
-    for stage in &n.stages[1..] {
-        let Stage::AllPass(a) = stage else {
-            panic!("then the all-passes")
-        };
-        assert!(
-            a.iter()
-                .all(|a| a.gain.to_bits() == Freeverb::ALLPASS_FEEDBACK.to_bits())
-        );
-        // Freeverb's own all-pass, not the lattice (see `AllPassForm`).
-        assert!(a.iter().all(|a| a.form == AllPassForm::Freeverb));
-    }
-    // The literal figures too, so the constants themselves are pinned: the
-    // loop gain 0.84, the damping 0.2, the all-pass feedback 0.5, the input 0.015.
-    assert_eq!(Freeverb::ROOM_FEEDBACK, 0.84);
-    assert_eq!(Freeverb::DAMPING, 0.2);
-    assert_eq!(Freeverb::ALLPASS_FEEDBACK, 0.5);
-    assert_eq!(Freeverb::FIXED_GAIN, 0.015);
+fn the_scalings_are_freeverbs() {
+    let gm = FreeverbControls::GENERAL_MIDI;
+    assert_eq!(gm, FreeverbControls::default());
+    assert!((gm.feedback().get() - 0.84).abs() < 1e-6);
+    assert!((gm.damping() - 0.2).abs() < 1e-6);
+    assert!((controls(0.0, 0.0).feedback().get() - 0.7).abs() < 1e-6);
+    assert!((controls(1.0, 1.0).feedback().get() - 0.98).abs() < 1e-6);
+    assert_eq!(controls(0.0, 0.0).damping(), 0.0);
+    assert!((controls(1.0, 1.0).damping() - 0.4).abs() < 1e-6);
 }
 
-/// The network's lines are those of a `Freeverb` built at the same rate,
-/// and its coefficients are the ones in the combs, at several rates (the
-/// rate is rounded to whole hertz as `Freeverb::new` does).
-#[test]
-fn the_network_has_the_lines_of_a_freeverb_built_at_the_rate() {
-    for hz in [
-        22_050.0, 44_100.0, 44_100.4, 48_000.0, 88_200.0, 96_000.0, 192_000.0,
-    ] {
-        let rate = SampleRate::of(hz);
-        let reverb = Freeverb::new(rate);
-        let figures = reverb.figures();
-        let n = FreeverbFamily.member(&FreeverbControls::GENERAL_MIDI, rate);
-        assert_eq!(n.rate, SampleRate::of(hz.round()));
-        let Stage::Fdn(fdn) = &n.stages[0] else {
-            panic!()
-        };
-        let lengths: Vec<usize> = fdn.lines.iter().map(|l| l.length as usize).collect();
-        let want: Vec<usize> = figures
-            .combs_left
-            .iter()
-            .chain(&figures.combs_right)
-            .copied()
-            .collect();
-        assert_eq!(lengths, want, "{hz} Hz");
-        assert_eq!(fdn.matrix, Matrix::Diagonal);
-        for (stage, (l, r)) in n.stages[1..].iter().zip(
-            figures
-                .all_passes_left
-                .iter()
-                .zip(&figures.all_passes_right),
-        ) {
-            let Stage::AllPass(a) = stage else { panic!() };
-            assert_eq!(
-                (a[0].delay as usize, a[1].delay as usize),
-                (*l, *r),
-                "{hz} Hz"
-            );
-        }
-        let (feedback, damp1, damp2) = figures.comb;
-        let Absorption::OnePole { gain, damp } = fdn.lines[0].absorption else {
-            panic!()
-        };
-        assert_eq!((gain.get(), damp), (feedback, damp1));
-        assert_eq!(damp2, 1.0 - damp);
-        assert_eq!(a_gain(&n), figures.all_pass_feedback);
-    }
-}
-
-fn a_gain(n: &Network) -> f32 {
-    let Stage::AllPass(a) = &n.stages[1] else {
-        panic!()
-    };
-    a[0].gain
-}
-
-/// The stereo spread: the right combs and all-passes are 23 frames longer
-/// at 44.1 kHz, and the rows of `C` send the first eight lines to the left
-/// and the next eight to the right. The tunings are Freeverb's (1116, 1188,
-/// 1277, 1356, 1422, 1491, 1557, 1617 and 556, 441, 341, 225), so the total
-/// delay is their sum, a figure fixed by the definition.
-#[test]
-fn the_tunings_and_the_stereo_spread_are_freeverbs() {
-    let n = FreeverbFamily.member(&FreeverbControls::GENERAL_MIDI, SampleRate::SR_44K1);
-    let Stage::Fdn(fdn) = &n.stages[0] else {
-        panic!()
-    };
-    let left = [
-        1116.0f32, 1188.0, 1277.0, 1356.0, 1422.0, 1491.0, 1557.0, 1617.0,
-    ];
-    for (i, base) in left.iter().enumerate() {
-        assert_eq!(fdn.lines[i].length, *base);
-        assert_eq!(fdn.lines[8 + i].length, base + 23.0);
-    }
-    assert_eq!(fdn.output.rows.len(), 2);
-    for (i, (l, r)) in fdn.output.rows[0]
-        .iter()
-        .zip(fdn.output.rows[1].iter())
-        .enumerate()
-    {
-        assert_eq!((*l, *r), if i < 8 { (1.0, 0.0) } else { (0.0, 1.0) });
-    }
-    let aps = [556.0f32, 441.0, 341.0, 225.0];
-    for (stage, base) in n.stages[1..].iter().zip(aps) {
-        let Stage::AllPass(a) = stage else { panic!() };
-        assert_eq!((a[0].delay, a[1].delay), (base, base + 23.0));
-    }
-    // 16 combs and 8 all-passes: 2 * (sum of the tunings) + 8 * 23 + 4 * 23.
-    let total: f32 = 2.0 * (left.iter().sum::<f32>() + aps.iter().sum::<f32>()) + 12.0 * 23.0;
-    assert_eq!(n.modal_density().to_f32(), total / 44_100.0);
-}
-
-/// The analytic figures of the GM reverb, from the definition: the slowest
-/// comb is 1640 frames at a loop gain of 0.84, so its low-band RT60 is
-/// `-3 * 1640 / (44100 * log10 0.84)` = 1.5 s; the one-pole at 0.2 leaves
-/// the Nyquist band `0.84 * 0.8 / 1.2` = 0.56 of it per trip. The tail to
-/// -60 dB is the longest line, the all-passes' trains and that RT60.
-#[test]
-fn the_general_midi_network_decays_as_the_definition_says() {
-    let n = FreeverbFamily.member(&FreeverbControls::GENERAL_MIDI, SampleRate::SR_44K1);
-    let low = -3.0 * 1640.0 / (44_100.0 * libm::log10(0.84));
-    assert!(
-        (n.rt60(Band::Low).get() - low).abs() < 1e-5,
-        "{:?}",
-        n.rt60(Band::Low)
-    );
-    let high = -3.0 * 1640.0 / (44_100.0 * libm::log10(0.84 * 0.8 / 1.2));
-    assert!((n.rt60(Band::High).get() - high).abs() < 1e-5);
-    assert!(n.rt60(Band::High).get() < n.rt60(Band::Mid).get());
-    assert!(n.rt60(Band::Mid).get() < n.rt60(Band::Low).get());
-    assert!(n.is_stable() && !n.is_lossless());
-    assert_eq!(n.latency(), tutti_types::Samples::ZERO);
-    let Ring::Finite(tail) = n.tail(Db(-60.0)) else {
-        panic!("finite")
-    };
-    assert!(tail.to_f32() > low as f32, "{tail:?} covers the decay");
-}
-
-use crate::Ring;
-
-/// The bounds of Freeverb are the design at room 1, whatever the reach's
-/// decay: it has no decay control to cap.
-#[test]
-fn the_bounds_are_the_largest_design() {
-    let reach = Reach::at(SampleRate::SR_48K);
-    let b = FreeverbFamily.reach(&reach);
-    let room_one = FreeverbFamily.member(&controls(1.0, 0.0), SampleRate::SR_48K);
-    assert_eq!(b, NetworkCapacity::need(&room_one, reach.floor()));
-    assert_eq!((b.lines, b.stages, b.outputs), (16, 5, 2));
-    let short = Reach::new(
-        SampleRate::SR_48K,
-        MaxDecay::new(Seconds(0.5)).unwrap(),
-        Db(-60.0),
-    )
-    .unwrap();
-    assert_eq!(FreeverbFamily.reach(&short), b);
-}
-
-/// A non-finite control takes the General MIDI value and a control out of
-/// range is clamped, so the design is total.
+/// A control outside `0..1` is clamped and one that is not finite is the General MIDI
+/// value, so every control gives a loop under the stable bound.
 #[test]
 fn a_hostile_control_is_made_safe() {
-    let rate = SampleRate::SR_44K1;
-    let gm = FreeverbFamily.member(&FreeverbControls::GENERAL_MIDI, rate);
+    let gm = FreeverbControls::GENERAL_MIDI;
+    assert_eq!(controls(f32::NAN, f32::INFINITY).feedback(), gm.feedback());
+    assert_eq!(controls(f32::NAN, f32::NAN).damping(), gm.damping());
     assert_eq!(
-        FreeverbFamily.member(&controls(f32::NAN, f32::INFINITY), rate),
-        gm
+        controls(9.0, -2.0).feedback(),
+        controls(1.0, 0.0).feedback()
     );
+    assert_eq!(controls(9.0, -2.0).damping(), 0.0);
     assert_eq!(
-        FreeverbFamily.member(&controls(9.0, -2.0), rate),
-        FreeverbFamily.member(&controls(1.0, 0.0), rate)
+        controls(f32::INFINITY, 0.0).feedback(),
+        gm.feedback(),
+        "not a number: General MIDI"
     );
+    for room in [
+        -1e30f32,
+        -1.0,
+        0.0,
+        0.3,
+        1.0,
+        5.0,
+        1e30,
+        f32::NAN,
+        f32::INFINITY,
+    ] {
+        let g = controls(room, 0.5).feedback();
+        assert!(
+            g >= Feedback(0.7) && g <= Feedback(0.98),
+            "room {room}: {g:?}"
+        );
+    }
 }

@@ -251,7 +251,7 @@ fn the_radius_is_the_slowest_root_of_the_denominator() {
     }
 }
 
-/// Non-finite controls take the family's default and a huge `Q` is held at
+/// Non-finite controls take the design's default and a huge `Q` is held at
 /// `MAX_Q`, so every model is one that can be run: finite coefficients, a
 /// radius under 1.
 #[test]

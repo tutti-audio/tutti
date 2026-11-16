@@ -174,18 +174,16 @@ impl Session {
 
     /// Tells the render thread what its blocks read, if that changed since it
     /// was last told: the rate and format, the length the plugin was activated
-    /// for, whether it refused the rate and what it consumes.
+    /// for, whether it refused the rate, what it consumes and its channel counts.
     fn publish(&mut self) {
+        let loaded = self.plugin.as_ref().map(|p| p.plugin().loaded());
         let config = RenderConfig {
             clock: self.clock,
             max_block: self.max_block,
             rate_refused: self.rate_refused.is_some(),
-            features: self
-                .plugin
-                .as_ref()
-                .map_or_else(tutti_plugin_types::Features::empty, |p| {
-                    p.plugin().loaded().features
-                }),
+            features: loaded.map_or_else(tutti_plugin_types::Features::empty, |l| l.features),
+            inputs: loaded.map_or(0, |l| l.total_inputs()),
+            outputs: loaded.map_or(0, |l| l.total_outputs()),
         };
         if config != self.published {
             self.published = config;
@@ -281,7 +279,10 @@ impl Session {
                     // The wire's decode refuses an out-of-range or NaN value
                     // (`Normalized::new`), so one from the peer fails the frame
                     // and never reaches a live plugin.
-                    plugin.plugin_mut().set_parameter(main, param_id, value);
+                    // A write the plugin refuses (undeclared, read-only) is
+                    // refused here and not written; the wire has no reply to
+                    // carry the error.
+                    let _ = plugin.plugin_mut().set_parameter(main, param_id, value);
                 }
                 Ok(Reaction::None)
             }
@@ -1499,13 +1500,13 @@ mod tests {
         let buffer_name = format!("tutti_vst_buffer_{}_{}", name, std::process::id());
         // The negotiated format, not the requested one, as the host's
         // `setup_shm` sizes the slab.
-        let layout = tutti_plugin_ipc::SlabLayout {
-            samples_per_channel: 8192,
-            format: s.clock.format,
-            slots: tutti_plugin_ipc::RING_SLOTS as u32,
-            inputs: vec![tutti_plugin_types::ChannelLayout::STEREO],
-            outputs: vec![tutti_plugin_types::ChannelLayout::STEREO],
-        };
+        let loaded = s.plugin.as_ref().unwrap().plugin().loaded();
+        let layout = tutti_plugin_ipc::SlabLayout::new(
+            8192,
+            s.clock.format,
+            loaded.input_widths(),
+            loaded.output_widths(),
+        );
         let shm_guard = AudioSlab::create(buffer_name.clone(), layout.clone()).unwrap();
         s.attach(AudioSlab::open(buffer_name, layout).unwrap());
         (s, shm_guard)
@@ -1713,7 +1714,7 @@ mod tests {
             tutti_clap_test_plugin::RenderMode::TagPassthrough as u32,
         );
         let (mut s, mut shm) = load_clap(name, format);
-        for ch in 0..2 {
+        for ch in 0..shm.layout_ref().input_channels() {
             shm.write::<T>(SEQ, ch, &[input; F64_FRAMES]).unwrap();
         }
         shm.publish(SEQ);
@@ -1875,6 +1876,73 @@ mod tests {
         assert!(block(&mut s, 4, 512), "a block within bounds renders");
         assert_eq!(visits(Site::Process), processes_at_load + 1);
         assert_eq!(s.side().refused_blocks(), 3);
+    }
+
+    /// **A block never renders into a slab laid out unlike the plugin's ports.**
+    /// A plugin that restarts itself with other ports leaves the slab of the
+    /// old ones attached until the host sets up another: a block then reads
+    /// back as silence, is counted, and never reaches the plugin; the matching
+    /// slab renders again.
+    #[test]
+    #[cfg(feature = "clap")]
+    fn a_slab_laid_out_unlike_the_plugins_ports_is_refused() {
+        use tutti_clap_test_plugin::Site;
+        use tutti_plugin_types::ChannelLayout;
+
+        let _lock = crate::test_utils::plugin_load_lock();
+        let (mut s, matching) = load_clap("layout_gate", SampleFormat::Float32);
+        let visits = |site: Site| clap_probe_sites().sites[site as usize].visits;
+        let processes_at_load = visits(Site::Process);
+        let layout = tutti_plugin_ipc::SlabLayout {
+            samples_per_channel: 512,
+            format: s.clock.format,
+            slots: tutti_plugin_ipc::RING_SLOTS as u32,
+            inputs: vec![ChannelLayout::STEREO],
+            outputs: vec![ChannelLayout::MONO],
+        };
+        let name = format!("tutti_layout_gate_mono_{}", std::process::id());
+        let mut host = AudioSlab::create(name.clone(), layout.clone()).unwrap();
+        s.attach(AudioSlab::open(name, layout).unwrap());
+
+        let block = |s: &mut Rig, host: &mut SlabWriter, seq: u64, channels: usize| {
+            for ch in 0..channels {
+                host.write::<f32>(seq, ch, &[0.5; 512]).unwrap();
+            }
+            host.publish(seq);
+            let reply = s
+                .handle(
+                    main_thread(),
+                    HostMessage::ProcessAudio(tutti_plugin_ipc::ProcessAudioData {
+                        seq,
+                        num_samples: 256,
+                        ..Default::default()
+                    }),
+                )
+                .unwrap()
+                .into_reply();
+            assert!(matches!(reply, BridgeMessage::AudioProcessed { .. }));
+            host.has_output(seq)
+        };
+
+        assert!(
+            !block(&mut s, &mut host, 1, 2),
+            "published into a mono slab"
+        );
+        assert_eq!(s.side().refused_blocks(), 1, "the refusal is counted");
+        assert_eq!(
+            visits(Site::Process),
+            processes_at_load,
+            "the block never reached the plugin"
+        );
+
+        let mut matching = matching;
+        let name = format!("tutti_vst_buffer_layout_gate_{}", std::process::id());
+        s.attach(AudioSlab::open(name, matching.layout()).unwrap());
+        assert!(
+            block(&mut s, &mut matching, 2, 2),
+            "the matching slab renders"
+        );
+        assert_eq!(s.side().refused_blocks(), 1);
     }
 
     /// What [`clap_round_trip`] observed.
@@ -2554,11 +2622,12 @@ mod tests {
     /// loads it, with a slab sized to what the plugin declared.
     #[cfg(feature = "vst3")]
     fn load_vst3_probe(name: &str) -> (Rig, SlabWriter) {
-        let bundle = std::path::Path::new(crate::test_utils::vst3_probe_path())
-            .ancestors()
-            .find(|p| p.extension().is_some_and(|e| e == "vst3"))
-            .expect("the probe module is inside its bundle")
-            .to_path_buf();
+        let bundle = tutti_plugin_types::bundle::bundle_dir_of(
+            std::path::Path::new(crate::test_utils::vst3_probe_path()),
+            tutti_plugin_types::bundle::ModuleKind::Vst3,
+        )
+        .expect("the probe module is inside its bundle")
+        .to_path_buf();
         let mut s = Rig::new();
         s.handle(
             main_thread(),
@@ -2721,11 +2790,12 @@ mod tests {
         let _lock = crate::test_utils::plugin_load_lock();
         // The load names the `.vst3` bundle, not the module inside it that
         // `vst3_probe_path` names.
-        let bundle = std::path::Path::new(crate::test_utils::vst3_probe_path())
-            .ancestors()
-            .find(|p| p.extension().is_some_and(|e| e == "vst3"))
-            .expect("the probe module is inside its bundle")
-            .to_path_buf();
+        let bundle = tutti_plugin_types::bundle::bundle_dir_of(
+            std::path::Path::new(crate::test_utils::vst3_probe_path()),
+            tutti_plugin_types::bundle::ModuleKind::Vst3,
+        )
+        .expect("the probe module is inside its bundle")
+        .to_path_buf();
         let mut s = Rig::new();
         s.handle(
             main_thread(),

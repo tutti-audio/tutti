@@ -145,6 +145,73 @@ impl Speaker {
             _ => None,
         }
     }
+
+    /// Returns whether this speaker is on the listener's left: one of the seven
+    /// left speakers a [`mirror`](Self::mirror) pairs with a right one.
+    #[must_use]
+    pub const fn is_left(self) -> bool {
+        matches!(
+            self,
+            Self::FrontLeft
+                | Self::BackLeft
+                | Self::FrontLeftOfCenter
+                | Self::SideLeft
+                | Self::TopFrontLeft
+                | Self::TopBackLeft
+                | Self::TopSideLeft
+        )
+    }
+
+    /// Returns whether this speaker is on the listener's right: the
+    /// [`mirror`](Self::mirror) of a left one.
+    #[must_use]
+    pub const fn is_right(self) -> bool {
+        matches!(
+            self,
+            Self::FrontRight
+                | Self::BackRight
+                | Self::FrontRightOfCenter
+                | Self::SideRight
+                | Self::TopFrontRight
+                | Self::TopBackRight
+                | Self::TopSideRight
+        )
+    }
+
+    /// Returns the speaker at the mirror image of this one across the
+    /// listener's median plane: its left/right partner at the same depth and
+    /// height (`FrontLeft` for `FrontRight`, `TopSideRight` for `TopSideLeft`).
+    ///
+    /// `None` for a speaker on the median plane (the centres and
+    /// [`TopCenter`](Self::TopCenter)), for the LFE, which is not placed, and
+    /// for [`Unknown`](Self::Unknown) and [`Unassigned`](Self::Unassigned).
+    #[must_use]
+    pub const fn mirror(self) -> Option<Self> {
+        match self {
+            Self::FrontLeft => Some(Self::FrontRight),
+            Self::FrontRight => Some(Self::FrontLeft),
+            Self::BackLeft => Some(Self::BackRight),
+            Self::BackRight => Some(Self::BackLeft),
+            Self::FrontLeftOfCenter => Some(Self::FrontRightOfCenter),
+            Self::FrontRightOfCenter => Some(Self::FrontLeftOfCenter),
+            Self::SideLeft => Some(Self::SideRight),
+            Self::SideRight => Some(Self::SideLeft),
+            Self::TopFrontLeft => Some(Self::TopFrontRight),
+            Self::TopFrontRight => Some(Self::TopFrontLeft),
+            Self::TopBackLeft => Some(Self::TopBackRight),
+            Self::TopBackRight => Some(Self::TopBackLeft),
+            Self::TopSideLeft => Some(Self::TopSideRight),
+            Self::TopSideRight => Some(Self::TopSideLeft),
+            Self::FrontCenter
+            | Self::LowFrequency
+            | Self::BackCenter
+            | Self::TopCenter
+            | Self::TopFrontCenter
+            | Self::TopBackCenter
+            | Self::Unknown(_)
+            | Self::Unassigned => None,
+        }
+    }
 }
 
 /// A speaker list that names a speaker twice.
@@ -490,7 +557,132 @@ pub enum Placement {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AmbisonicNormalization, AmbisonicOrder, AmbisonicOrdering};
+    use crate::{AmbisonicNormalization, AmbisonicOrder, AmbisonicOrdering, Bed};
+
+    /// Every named speaker except `Unknown`, which carries a payload.
+    const NAMED: [Speaker; 21] = [
+        Speaker::FrontLeft,
+        Speaker::FrontRight,
+        Speaker::FrontCenter,
+        Speaker::LowFrequency,
+        Speaker::BackLeft,
+        Speaker::BackRight,
+        Speaker::FrontLeftOfCenter,
+        Speaker::FrontRightOfCenter,
+        Speaker::BackCenter,
+        Speaker::SideLeft,
+        Speaker::SideRight,
+        Speaker::TopCenter,
+        Speaker::TopFrontLeft,
+        Speaker::TopFrontCenter,
+        Speaker::TopFrontRight,
+        Speaker::TopBackLeft,
+        Speaker::TopBackCenter,
+        Speaker::TopBackRight,
+        Speaker::TopSideLeft,
+        Speaker::TopSideRight,
+        Speaker::Unassigned,
+    ];
+
+    /// The mirror is an involution with no fixed point, and pairs a left with
+    /// a right: each paired speaker's name says one side and its partner's the
+    /// other, so a pair never crosses depth or height.
+    #[test]
+    fn the_mirror_pairs_each_left_with_its_right_and_back() {
+        let mut paired = 0;
+        for s in NAMED {
+            let Some(m) = s.mirror() else { continue };
+            paired += 1;
+            assert_ne!(m, s, "{s:?} is its own mirror");
+            assert_eq!(m.mirror(), Some(s), "{s:?} -> {m:?} does not return");
+            let (name, partner) = (format!("{s:?}"), format!("{m:?}"));
+            let swapped = if name.contains("Left") {
+                name.replace("Left", "Right")
+            } else {
+                name.replace("Right", "Left")
+            };
+            assert_eq!(swapped, partner, "{s:?} mirrors to {m:?}");
+        }
+        assert_eq!(paired, 14, "seven left/right pairs");
+        assert_eq!(Speaker::Unknown(7).mirror(), None);
+    }
+
+    /// A speaker has a mirror exactly when it is on one side, and its mirror is
+    /// on the other: the side predicates and the mirror describe one table.
+    #[test]
+    fn a_speaker_with_a_mirror_is_on_one_side_and_its_mirror_on_the_other() {
+        let mut lefts = 0;
+        for s in NAMED {
+            assert!(!(s.is_left() && s.is_right()), "{s:?} on both sides");
+            assert_eq!(
+                s.mirror().is_some(),
+                s.is_left() || s.is_right(),
+                "{s:?}: a mirror iff a side"
+            );
+            if let Some(m) = s.mirror() {
+                assert_eq!(s.is_left(), m.is_right(), "{s:?} / {m:?}");
+            }
+            lefts += usize::from(s.is_left());
+        }
+        assert_eq!(lefts, 7, "seven left speakers");
+        assert!(!Speaker::Unknown(3).is_left() && !Speaker::Unknown(3).is_right());
+    }
+
+    /// Wherever a bed places a left speaker, its azimuth is positive (tutti's
+    /// convention: 90 is left), and a right one's negative.
+    #[test]
+    fn a_bed_places_sided_speakers_at_the_azimuth_sign_of_their_side() {
+        let mut checked = 0;
+        for bed in Bed::ALL {
+            for s in NAMED {
+                let Some(d) = bed.direction(s) else { continue };
+                if s.is_left() {
+                    assert!(d.azimuth.0 > 0.0, "{bed:?}: {s:?} at {:?}", d.azimuth);
+                    checked += 1;
+                } else if s.is_right() {
+                    assert!(d.azimuth.0 < 0.0, "{bed:?}: {s:?} at {:?}", d.azimuth);
+                    checked += 1;
+                }
+            }
+        }
+        assert!(checked >= 20, "only {checked} placed sided speakers");
+    }
+
+    /// On the median plane or unplaced, a speaker has no mirror.
+    #[test]
+    fn centres_the_lfe_and_unplaced_channels_have_no_mirror() {
+        for s in [
+            Speaker::FrontCenter,
+            Speaker::LowFrequency,
+            Speaker::BackCenter,
+            Speaker::TopCenter,
+            Speaker::TopFrontCenter,
+            Speaker::TopBackCenter,
+            Speaker::Unassigned,
+        ] {
+            assert_eq!(s.mirror(), None, "{s:?}");
+        }
+    }
+
+    /// Wherever a bed places both a speaker and its mirror, they sit at
+    /// opposite azimuths and the same elevation: the mirror is the reflection
+    /// the bed table draws.
+    #[test]
+    fn a_bed_places_a_speaker_and_its_mirror_at_opposite_azimuths() {
+        let mut checked = 0;
+        for bed in Bed::ALL {
+            for s in NAMED {
+                let (Some(m), Some(d)) = (s.mirror(), bed.direction(s)) else {
+                    continue;
+                };
+                let Some(dm) = bed.direction(m) else { continue };
+                assert_eq!(dm.azimuth.0, -d.azimuth.0, "{bed:?}: {s:?} / {m:?}");
+                assert_eq!(dm.elevation.0, d.elevation.0, "{bed:?}: {s:?} / {m:?}");
+                checked += 1;
+            }
+        }
+        assert!(checked >= 20, "only {checked} placed pairs");
+    }
 
     fn topology(list: &[Speaker]) -> ChannelTopology {
         ChannelTopology::new(list.iter().copied()).unwrap()

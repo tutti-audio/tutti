@@ -100,10 +100,7 @@ pub use conformance::{Observer, clear_observer, set_observer};
 pub use error::Vst3Error;
 pub use module::{ClassInfo, CreateError, FactoryFlags, FactoryInfo, LoadError, Module};
 pub use plugin::{BusDirection, MediaType, MidiLearn, Plugin};
-pub use sdk::{
-    SdkEnum, Zeroable, c_str_to_string, cid_to_string, guid_as_tuid, sdk_enum_i32, sdk_enum_u32,
-    utf16_to_string, zeroed,
-};
+pub use sdk::{SdkEnum, Zeroable, cid_to_string, guid_as_tuid, sdk_enum_i32, sdk_enum_u32, zeroed};
 pub use types::*;
 pub use view::{
     EditorError, detach_view, platform_type_refused, rect_size, send_key_down, send_key_up,

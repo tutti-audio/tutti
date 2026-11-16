@@ -148,7 +148,7 @@
 //!
 //! // The write takes the id and a normalized `0..=1` value.
 //! if let Some(&id) = plugin.parameter_ids(main).first() {
-//!     plugin.set_parameter(main, id, Normalized::of(0.75));
+//!     plugin.set_parameter(main, id, Normalized::of(0.75))?;
 //! }
 //!
 //! // State save/restore is legal before any buffer exists — a project load

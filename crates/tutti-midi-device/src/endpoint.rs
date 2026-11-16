@@ -8,8 +8,8 @@
 
 use tutti_ump::{
     BlockFilter, BlockSelect, DeviceIdentity, Direction as BlockDirection, DiscoveryFilter,
-    FirstGroup, FunctionBlockId, FunctionBlockInfo, GroupSpan, Message, Midi1Port, Protocol,
-    Stream, StreamConfig, U7, UiHint, Ump, UmpVersion, text_packets,
+    FirstGroup, FunctionBlockCount, FunctionBlockId, FunctionBlockInfo, GroupSpan, Message,
+    Midi1Port, Protocol, Stream, StreamConfig, UiHint, Ump, UmpVersion, text_packets,
 };
 
 use crate::name::{BlockName, EndpointName, ProductInstanceId};
@@ -21,7 +21,7 @@ pub const MAX_FUNCTION_BLOCKS: usize = 32;
 pub const UMP_VERSION: UmpVersion = UmpVersion { major: 1, minor: 1 };
 
 /// What an Endpoint supports (M2-104 §7.1.2).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Capabilities {
     /// Sends and receives the MIDI 1.0 Protocol (`M1`).
     pub midi1: bool,
@@ -31,6 +31,65 @@ pub struct Capabilities {
     pub rx_jr: bool,
     /// Sends JR Timestamps (`TXJR`).
     pub tx_jr: bool,
+}
+
+/// What an Endpoint that answers supports: [`Capabilities`] with at least one
+/// Protocol (M2-104 §7.1.2: the Protocol it is in is one it supports, so an
+/// Endpoint with neither has none to be in). A peer's report is a
+/// [`Capabilities`] and may say neither; this is what an Endpoint declares of
+/// itself.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Supports(Capabilities);
+
+/// Why [`Supports::new`] refuses: neither Protocol is supported.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("an Endpoint supports at least one of MIDI 1.0 and MIDI 2.0")]
+pub struct NoProtocol;
+
+impl Supports {
+    /// `capabilities` as what an Endpoint supports, `None` with neither
+    /// Protocol.
+    #[must_use]
+    pub const fn new(capabilities: Capabilities) -> Option<Self> {
+        if capabilities.midi1 || capabilities.midi2 {
+            Some(Self(capabilities))
+        } else {
+            None
+        }
+    }
+
+    /// As [`new`](Self::new), for a literal.
+    ///
+    /// # Panics
+    ///
+    /// With neither Protocol.
+    #[must_use]
+    pub const fn of(capabilities: Capabilities) -> Self {
+        match Self::new(capabilities) {
+            Some(supports) => supports,
+            None => panic!("an Endpoint supports at least one Protocol"),
+        }
+    }
+
+    /// The capabilities.
+    #[must_use]
+    pub const fn get(self) -> Capabilities {
+        self.0
+    }
+}
+
+impl From<Supports> for Capabilities {
+    fn from(supports: Supports) -> Self {
+        supports.0
+    }
+}
+
+impl TryFrom<Capabilities> for Supports {
+    type Error = NoProtocol;
+
+    fn try_from(capabilities: Capabilities) -> Result<Self, NoProtocol> {
+        Self::new(capabilities).ok_or(NoProtocol)
+    }
 }
 
 /// One Function Block (M2-104 §7.1.8): a set of Groups that act as one
@@ -272,12 +331,12 @@ impl FunctionBlock {
     fn info(&self) -> FunctionBlockInfo {
         FunctionBlockInfo {
             active: self.active,
-            id: self.id,
+            id: self.id.into(),
             direction: self.direction,
             ui_hint: self.ui_hint,
             midi1: self.midi1,
-            first_group: self.first_group,
-            groups_spanned: self.groups,
+            first_group: self.first_group.into(),
+            groups_spanned: self.groups.into(),
             midi_ci_version: self.midi_ci_version,
             max_sysex8_streams: self.max_sysex8_streams,
         }
@@ -287,9 +346,9 @@ impl FunctionBlock {
     /// field the wire kept is out of range: a number above 31, a Group span
     /// off the end, or a reserved direction.
     pub(crate) fn from_info(info: &FunctionBlockInfo) -> Option<Self> {
-        let id = FunctionBlockId::new(info.id.get())?;
-        let first_group = FirstGroup::new(info.first_group.get())?;
-        let groups = GroupSpan::new(info.groups_spanned.get())?;
+        let id = info.id.value()?;
+        let first_group = info.first_group.value()?;
+        let groups = info.groups_spanned.value()?;
         // A peer's reserved MIDI 1.0 value, or a port over several Groups, is
         // kept as not a port: the block is still usable as MIDI 2.0.
         let midi1 = match info.midi1 {
@@ -331,6 +390,41 @@ pub enum Reply {
     Configured(Configuration),
 }
 
+/// A change to what an [`Endpoint`] declares, applied by
+/// [`Endpoint::change`], which sends the notification the spec asks for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum EndpointChange {
+    /// The protocols and JR Timestamps it supports: an Endpoint Info
+    /// Notification (§7.1.2).
+    Capabilities(Supports),
+    /// A new Device Identity: a Device Identity Notification (§7.1.3).
+    Identity(DeviceIdentity),
+    /// A new name: an Endpoint Name Notification (§7.1.4).
+    Name(EndpointName),
+    /// A new Product Instance Id: a Product Instance Id Notification
+    /// (§7.1.5).
+    InstanceId(ProductInstanceId),
+    /// A Function Block added, or replaced by the one of that number: an
+    /// Endpoint Info Notification when the declared count grows (§7.1.2), a
+    /// Function Block Info Notification when its properties change (§7.1.8,
+    /// §6.1.2) and a Function Block Name Notification when its name does
+    /// (§7.1.9).
+    Block(FunctionBlock),
+}
+
+/// Why [`Endpoint::change`] refused a change.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
+#[non_exhaustive]
+pub enum ChangeError {
+    /// The Endpoint declared its Function Blocks static, so a block that is
+    /// not the one held is refused: §7.1.2 fixes the set of blocks, and every
+    /// property and name of each, after discovery. That includes a block
+    /// with a number the Endpoint does not have yet.
+    #[error("the Endpoint declared its Function Blocks static")]
+    StaticBlocks,
+}
+
 /// How an Endpoint took a Stream Configuration Request (M2-104 §7.1.6.1 step
 /// 3): the Protocol and JR Timestamps in use afterwards, and whether that is
 /// what was asked.
@@ -370,7 +464,7 @@ pub struct Endpoint {
     pub(crate) instance_id: Option<ProductInstanceId>,
     pub(crate) static_function_blocks: bool,
     /// The count Endpoint Info declares: `0..=32`.
-    pub(crate) declared_blocks: u8,
+    pub(crate) declared_blocks: FunctionBlockCount,
     pub(crate) blocks: [Option<FunctionBlock>; MAX_FUNCTION_BLOCKS],
 }
 
@@ -389,7 +483,13 @@ impl Endpoint {
     /// ours, and [`Endpoint::reply`] changes it on a Stream Configuration
     /// Request.
     #[must_use]
-    pub const fn new(capabilities: Capabilities) -> Self {
+    pub const fn new(supports: Supports) -> Self {
+        Self::declaring(supports.0)
+    }
+
+    /// An Endpoint declaring `capabilities`, which may be none that work: a
+    /// discoverer's blank Endpoint, before the peer has said.
+    const fn declaring(capabilities: Capabilities) -> Self {
         let protocol = if capabilities.midi2 && !capabilities.midi1 {
             Protocol::Midi2
         } else {
@@ -407,7 +507,7 @@ impl Endpoint {
             name: None,
             instance_id: None,
             static_function_blocks: false,
-            declared_blocks: 0,
+            declared_blocks: FunctionBlockCount::of(0),
             blocks: [None; MAX_FUNCTION_BLOCKS],
         }
     }
@@ -419,10 +519,10 @@ impl Endpoint {
     /// static.
     #[must_use]
     pub fn midi1_device(name: Option<EndpointName>) -> Self {
-        let mut endpoint = Self::new(Capabilities {
+        let mut endpoint = Self::new(Supports::of(Capabilities {
             midi1: true,
             ..Capabilities::default()
-        })
+        }))
         .with_static_function_blocks(true);
         endpoint.name = name;
         endpoint.insert_inferred_block();
@@ -454,11 +554,11 @@ impl Endpoint {
     /// [`with_name`](Self::with_name)).
     #[must_use]
     pub fn local(groups: GroupSpan) -> Self {
-        let mut endpoint = Self::new(Capabilities {
+        let mut endpoint = Self::new(Supports::of(Capabilities {
             midi1: true,
             midi2: true,
             ..Capabilities::default()
-        })
+        }))
         .with_static_function_blocks(true);
         if let (Some(id), Some(first)) = (FunctionBlockId::new(0), FirstGroup::new(0))
             && let Ok(block) =
@@ -471,7 +571,7 @@ impl Endpoint {
 
     /// An Endpoint with nothing known, for a discoverer to fill.
     pub(crate) const fn blank() -> Self {
-        let mut endpoint = Self::new(Capabilities {
+        let mut endpoint = Self::declaring(Capabilities {
             midi1: false,
             midi2: false,
             rx_jr: false,
@@ -530,8 +630,10 @@ impl Endpoint {
     pub(crate) fn insert_block(&mut self, block: FunctionBlock) {
         let i = usize::from(block.id.get());
         self.blocks[i] = Some(block);
-        let count = u8::try_from(i + 1).unwrap_or(u8::MAX);
-        self.declared_blocks = self.declared_blocks.max(count);
+        // A block's number is at most 31, so its count is at most 32.
+        if let Some(count) = u8::try_from(i + 1).ok().and_then(FunctionBlockCount::new) {
+            self.declared_blocks = self.declared_blocks.max(count);
+        }
     }
 
     /// The UMP version it declares.
@@ -579,7 +681,7 @@ impl Endpoint {
     /// The number of Function Blocks it declares (§7.1.2), `0..=32`.
     #[must_use]
     pub const fn declared_function_blocks(&self) -> u8 {
-        self.declared_blocks
+        self.declared_blocks.get()
     }
 
     /// Function Block `id`, when it is known.
@@ -653,35 +755,145 @@ impl Endpoint {
 
     fn answer_discovery(&self, filter: DiscoveryFilter, out: &mut impl Extend<Ump>) {
         if filter.endpoint_info {
-            send(
-                out,
-                Stream::EndpointInfo(tutti_ump::EndpointInfo {
-                    version: self.version,
-                    static_function_blocks: self.static_function_blocks,
-                    function_blocks: U7::masked(self.declared_blocks),
-                    midi2: self.capabilities.midi2,
-                    midi1: self.capabilities.midi1,
-                    rx_jr: self.capabilities.rx_jr,
-                    tx_jr: self.capabilities.tx_jr,
-                }),
-            );
+            self.send_info(out);
         }
         if let (true, Some(identity)) = (filter.device_identity, self.identity) {
             send(out, Stream::DeviceIdentity(identity));
         }
         if let (true, Some(name)) = (filter.endpoint_name, &self.name) {
-            for (form, b) in text_packets::<14>(name.as_bytes()) {
-                send(out, Stream::EndpointName(form, b));
-            }
+            send_name(out, name);
         }
         if let (true, Some(id)) = (filter.product_instance_id, &self.instance_id) {
-            for (form, b) in text_packets::<14>(id.as_str().as_bytes()) {
-                send(out, Stream::ProductInstanceId(form, b));
-            }
+            send_instance_id(out, id);
         }
         if filter.stream_configuration {
             send(out, Stream::StreamConfigurationNotification(self.active));
         }
+    }
+
+    fn send_info(&self, out: &mut impl Extend<Ump>) {
+        send(
+            out,
+            Stream::EndpointInfo(tutti_ump::EndpointInfo {
+                version: self.version,
+                static_function_blocks: self.static_function_blocks,
+                function_blocks: self.declared_blocks.into(),
+                midi2: self.capabilities.midi2,
+                midi1: self.capabilities.midi1,
+                rx_jr: self.capabilities.rx_jr,
+                tx_jr: self.capabilities.tx_jr,
+            }),
+        );
+    }
+
+    /// Applies `change` and sends into `out` the notifications it calls for,
+    /// in the order Endpoint Info, then the part that changed. A change that
+    /// leaves the Endpoint as it was sends nothing.
+    ///
+    /// A [`EndpointChange::Capabilities`] that drops what is active (a
+    /// Protocol, RXJR or TXJR) also changes the active configuration to what
+    /// is left and sends its Stream Configuration Notification (§7.1.6.3).
+    ///
+    /// The spec has no message that removes a block name. A block replaced by
+    /// one with no name sends one Complete Function Block Name of zeros, the
+    /// way this crate sends an empty name (§7.1.1 does for an Endpoint's), so
+    /// a peer that reads it as empty drops the old one; that is this crate's
+    /// choice.
+    ///
+    /// # Errors
+    ///
+    /// [`ChangeError::StaticBlocks`] for a [`EndpointChange::Block`] that
+    /// differs from the block held, when the Endpoint declared its blocks
+    /// static (§7.1.2): nothing is changed or sent.
+    pub fn change(
+        &mut self,
+        change: EndpointChange,
+        out: &mut impl Extend<Ump>,
+    ) -> Result<(), ChangeError> {
+        match change {
+            EndpointChange::Capabilities(supports) => {
+                let capabilities = supports.get();
+                if capabilities != self.capabilities {
+                    self.capabilities = capabilities;
+                    self.send_info(out);
+                    // What it no longer supports does not stay active: the
+                    // Protocol falls to the one left (the choice `new` makes
+                    // for an Endpoint of those capabilities) and JR Timestamps
+                    // go off. Its Stream Configuration Notification follows
+                    // when that changed the active configuration (§7.1.6.3:
+                    // sent when any property in it changes).
+                    let was = self.active;
+                    let supported = match self.active.protocol {
+                        Protocol::Midi1 => capabilities.midi1,
+                        Protocol::Midi2 => capabilities.midi2,
+                        _ => false,
+                    };
+                    if !supported {
+                        // One Protocol is supported: `Supports` has at least one.
+                        self.active.protocol = if capabilities.midi2 && !capabilities.midi1 {
+                            Protocol::Midi2
+                        } else {
+                            Protocol::Midi1
+                        };
+                    }
+                    self.active.rx_jr &= capabilities.rx_jr;
+                    self.active.tx_jr &= capabilities.tx_jr;
+                    if self.active != was {
+                        send(out, Stream::StreamConfigurationNotification(self.active));
+                    }
+                }
+            }
+            EndpointChange::Identity(identity) => {
+                if self.identity != Some(identity) {
+                    self.identity = Some(identity);
+                    send(out, Stream::DeviceIdentity(identity));
+                }
+            }
+            EndpointChange::Name(name) => {
+                if self.name.as_ref() != Some(&name) {
+                    send_name(out, &name);
+                    self.name = Some(name);
+                }
+            }
+            EndpointChange::InstanceId(id) => {
+                if self.instance_id.as_ref() != Some(&id) {
+                    send_instance_id(out, &id);
+                    self.instance_id = Some(id);
+                }
+            }
+            EndpointChange::Block(block) => {
+                let old = self.blocks[usize::from(block.id.get())];
+                if old == Some(block) {
+                    return Ok(());
+                }
+                if self.static_function_blocks {
+                    return Err(ChangeError::StaticBlocks);
+                }
+                let declared = self.declared_blocks;
+                self.insert_block(block);
+                if self.declared_blocks != declared {
+                    self.send_info(out);
+                }
+                if old.map(|b| b.info()) != Some(block.info()) {
+                    send(out, Stream::FunctionBlockInfo(block.info()));
+                }
+                let old_name = old.and_then(|b| b.name);
+                if old_name != block.name && (block.name.is_some() || old_name.is_some()) {
+                    let bytes = block.name.as_ref().map_or(&[][..], BlockName::as_bytes);
+                    for (form, bytes) in text_packets::<13>(bytes) {
+                        send(
+                            out,
+                            Stream::FunctionBlockName {
+                                block: block.id.into(),
+                                form,
+                                bytes,
+                            },
+                        );
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     fn answer_block_discovery(
@@ -700,6 +912,8 @@ impl Endpoint {
                 }
                 None => return,
             },
+            // A number no Endpoint has.
+            BlockSelect::Reserved(_) => return,
         };
         if filter.info {
             for block in asked.iter().flatten() {
@@ -713,7 +927,7 @@ impl Endpoint {
                         send(
                             out,
                             Stream::FunctionBlockName {
-                                block: block.id,
+                                block: block.id.into(),
                                 form,
                                 bytes,
                             },
@@ -746,12 +960,12 @@ impl Endpoint {
     /// with more.
     #[must_use]
     pub(crate) fn apply_info(&mut self, info: &tutti_ump::EndpointInfo) -> bool {
-        if usize::from(info.function_blocks.get()) > MAX_FUNCTION_BLOCKS {
+        let Some(declared) = info.function_blocks.count() else {
             return false;
-        }
+        };
         self.version = info.version;
         self.static_function_blocks = info.static_function_blocks;
-        self.declared_blocks = info.function_blocks.get();
+        self.declared_blocks = declared;
         self.capabilities = Capabilities {
             midi1: info.midi1,
             midi2: info.midi2,
@@ -770,7 +984,7 @@ impl Endpoint {
     /// block (`from_info`: §7.1.8 requires it to span one Group).
     pub(crate) fn read_block(&self, info: &FunctionBlockInfo) -> Option<FunctionBlock> {
         let mut block = FunctionBlock::from_info(info)?;
-        if block.id.get() >= self.declared_blocks {
+        if block.id.get() >= self.declared_blocks.get() {
             return None;
         }
         if self.static_function_blocks {
@@ -786,9 +1000,21 @@ impl Endpoint {
         self.active = MIDI1_NO_JR;
         self.capabilities.midi1 = true;
         if self.function_blocks().next().is_none() {
-            self.declared_blocks = 0;
+            self.declared_blocks = FunctionBlockCount::of(0);
             self.insert_inferred_block();
         }
+    }
+}
+
+fn send_name(out: &mut impl Extend<Ump>, name: &EndpointName) {
+    for (form, b) in text_packets::<14>(name.as_bytes()) {
+        send(out, Stream::EndpointName(form, b));
+    }
+}
+
+fn send_instance_id(out: &mut impl Extend<Ump>, id: &ProductInstanceId) {
+    for (form, b) in text_packets::<14>(id.as_str().as_bytes()) {
+        send(out, Stream::ProductInstanceId(form, b));
     }
 }
 

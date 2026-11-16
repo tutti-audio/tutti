@@ -948,6 +948,7 @@ impl<C: Clock> Session<C> {
         // sends the resumed plan, and the executor adopts it.
         stopped.apply_pending();
         self.graph.collect();
+        self.sync_root_refusal();
         // A unit that panicked in `prepare`, or shapes that no longer
         // compile, poison the editor here: refuse, the stream still stopped.
         self.graph.check_reprepare(None)?;
@@ -955,7 +956,7 @@ impl<C: Clock> Session<C> {
         // is placed only now, so a refused restart moves nothing, and a
         // restart onto the old device places it again.
         self.graph.place_device(spec.channels, topology)?;
-        // The hardware out's tap reads frames of one rate: reopened at the
+        // The outputs' taps read frames of one rate: reopened at the
         // new one, committed with the rest below.
         #[cfg(feature = "midi")]
         if self.midi_state.follow_rate(&mut self.graph) {
@@ -964,7 +965,7 @@ impl<C: Clock> Session<C> {
         // A declaration a device refused is asked again of this one: if it
         // places, it is in force, committed and settled below with the rest.
         if self.root_refusal.is_some() {
-            match self.graph.declare_root(self.root_request.clone()) {
+            match self.graph.declare_root(self.root_request.clone(), true) {
                 Ok(()) => {
                     self.root_refusal = None;
                     self.commit();

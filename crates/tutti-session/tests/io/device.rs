@@ -929,6 +929,83 @@ fn a_refused_declaration_is_retried_on_a_restart() {
     assert_eq!(session.graph_ref().outputs(), 4);
 }
 
+/// A declaration that waited for a root crossfade and is refused when it
+/// applies, because the device it finds no longer places it, is a `Refused`
+/// status that a later widening does not erase, and a restart asks again.
+#[test]
+fn a_waiting_declaration_the_device_no_longer_places_is_refused_and_retried_on_a_restart() {
+    use tutti_session::RootTopologyStatus;
+    let wide = OutputSpec::new(
+        SampleRate::SR_48K,
+        ChannelLayout::from(6u16),
+        tutti_buffers::SampleFormat::F32,
+    );
+    let buses = tutti_types::ChannelTopology::unassigned(ChannelLayout::QUAD);
+    let stereo = tutti_types::ChannelTopology::assumed(ChannelLayout::STEREO);
+    let (driver, stream) = ManualStreamDriver::new();
+    let mut session = Session::builder()
+        .device(Default::default())
+        .build_device_on(wide.clone(), driver)
+        .unwrap();
+    // Something is heard, so the old root has outputs to fade; the root in
+    // force fits both devices, and the change to it starts a fade.
+    let (dc, _) = session
+        .graph()
+        .add(ForkByClone(tutti_nodes::testing::Const::mono(0.5)));
+    session
+        .graph()
+        .set_sources_hard(Root::output(0), [OutPort::new(dc, 0)])
+        .unwrap();
+    let _ = session.update();
+    session.declare_root_topology(Some(stereo.clone())).unwrap();
+    let _ = session.update();
+    stream.render_block(64).expect("open");
+    // Four buses place on six channels, so the declaration is taken, and waits.
+    session.declare_root_topology(Some(buses.clone())).unwrap();
+    assert_eq!(session.root_topology_status(), RootTopologyStatus::Pending);
+    assert_eq!(session.requested_root_topology(), Some(&buses));
+
+    // The device changes under it to one that cannot place four buses.
+    let (driver, narrow) = ManualStreamDriver::new();
+    session
+        .restart_on(spec_at(48_000.0), driver, None, None)
+        .expect("the root in force places on stereo");
+    for _ in 0..5 {
+        narrow.render_block(64).expect("open");
+        let _ = session.update();
+    }
+    assert!(
+        matches!(
+            session.root_topology_status(),
+            RootTopologyStatus::Refused(tutti_graph::RootError::Fold(_))
+        ),
+        "{:?}",
+        session.root_topology_status()
+    );
+    assert_eq!(
+        session.root_topology(),
+        Some(&stereo),
+        "the root in force stays"
+    );
+    let refusal = session.root_topology_status();
+    let _ = session.graph().widen_outputs(8);
+    assert_eq!(
+        session.root_topology_status(),
+        refusal,
+        "a widening does not replace the declaration's refusal"
+    );
+
+    let (driver, _wide) = ManualStreamDriver::new();
+    session.restart_on(wide, driver, None, None).unwrap();
+    assert_eq!(session.root_topology_status(), RootTopologyStatus::Applied);
+    assert_eq!(
+        session.root_topology(),
+        Some(&buses),
+        "the restart asked again"
+    );
+    assert_eq!(session.graph_ref().outputs(), 4);
+}
+
 /// A source whose render always panics.
 #[derive(Clone)]
 struct AlwaysPanics;

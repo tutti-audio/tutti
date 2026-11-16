@@ -13,7 +13,8 @@
 
 namespace shared {
 
-constexpr uint32_t kLevel = 0, kAux = 1, kMode = 2, kTone = 3, kParams = 4, kModes = 5;
+constexpr uint32_t kLevel = 0, kAux = 1, kMode = 2, kTone = 3, kMeter = 4, kBypass = 5, kParams = 5, kListed = 6, kModes = 5;
+// kBypass is core.rs's BYPASS: listed by the VST3 shells after the meter, flagged as the bypass parameter.
 // `tone`'s plain domain (core.rs, "Spec"): a decreasing exponential, 20000 * 1000^(-n).
 constexpr double kTonePlainMax = 20000.0, kTonePlainMin = 20.0;
 inline double tonePlain (double n)
@@ -53,7 +54,7 @@ struct Ev { int kind; uint32_t offset; uint32_t id; double value; };
 
 struct Core
 {
-	std::atomic<double> level {0.5}, aux {0.25}, tone {0.5};
+	std::atomic<double> level {0.5}, aux {0.25}, tone {0.5}, bypass {0.0};
 	std::atomic<uint32_t> mode {0}, notice {0}, tailSel {0}, ringsSel {0}, faultSel {0};
 	uint32_t tailSamples () const
 	{
@@ -78,17 +79,17 @@ struct Core
 	std::vector<std::vector<double>> delay;
 	std::vector<Ev> events;
 
-	static bool known (uint32_t id) { return id < kParams; }
 	bool param (uint32_t id, double& v) const
 	{
-		if (id == kLevel) v = level; else if (id == kAux) v = aux; else if (id == kTone) v = tone;
-		else if (id == kMode) v = double (mode) / double (kModes - 1); else return false;
+		if (id == kLevel) v = level; else if (id == kAux) v = aux; else if (id == kTone) v = tone; else if (id == kBypass) v = bypass;
+		else if (id == kMode) v = double (mode) / double (kModes - 1);
+		else if (id == kMeter) v = 0.0; else return false;
 		return true;
 	}
 	void setParam (uint32_t id, double v)
 	{
 		v = std::min (1.0, std::max (0.0, v));
-		if (id == kLevel) level = v; else if (id == kAux) aux = v; else if (id == kTone) tone = v;
+		if (id == kLevel) level = v; else if (id == kAux) aux = v; else if (id == kTone) tone = v; else if (id == kBypass) bypass = v;
 		else if (id == kMode) mode = std::min<uint32_t> (kModes - 1, uint32_t (std::lround (v * (kModes - 1))));
 	}
 	uint32_t latency () const { return mode == 1 ? kLatency : 0; }

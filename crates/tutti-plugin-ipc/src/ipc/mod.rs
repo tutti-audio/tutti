@@ -51,9 +51,10 @@ use std::time::Duration;
 
 use tutti_plugin_types::{
     BridgeError, BridgeResult, ChunkCounters, Controller, Load, LoadStage, Loaded, LoadedPlugin,
-    MainThreadMarker, ParameterChanges, ParameterQueue, PluginDescriptor, PluginError,
-    PluginFormat, PluginResult, PluginTail, Prepare, ProcessWake, Refused, Reopen, Request,
-    RestartRules, SampleFormat, SampleRate, Samples, StateUse, Stuck,
+    MainThreadMarker, ParamAccess, ParamId, ParamWriteError, ParameterChanges, ParameterQueue,
+    PluginDescriptor, PluginError, PluginFormat, PluginResult, PluginTail, Prepare, ProcessWake,
+    Refused, Reopen, Request, RestartRules, ResyncKind, SampleFormat, SampleRate, Samples,
+    StateUse, Stuck,
 };
 use tutti_types::AtomicSampleRate;
 
@@ -163,6 +164,54 @@ struct Events {
     /// What the plugin's request to be processed again raises, from the
     /// bridge's thread ([`Control::bind_wake`](tutti_plugin_types::Control::bind_wake)).
     wake: OnceLock<ProcessWake>,
+    /// The parameters the plugin declares: see [`DeclaredCache`].
+    declared: DeclaredCache,
+}
+
+/// The parameters the plugin declares and whether each is read-only, sorted by
+/// id: asked of the server once, then kept, and forgotten when the plugin says
+/// its declarations may have changed (a `Resync` of its parameter titles, a
+/// reload or its buses) or dies. The write policy reads it, so a write does not
+/// cost a round trip.
+///
+/// `generation` counts the times it was forgotten, changed under the same lock
+/// as the list: a refill that began before a forgetting does not store its
+/// (older) answer. A change the plugin makes before its notice reaches the
+/// client is not seen until the notice arrives; that window is inherent to
+/// asking once.
+#[derive(Default)]
+struct DeclaredCache {
+    state: Mutex<DeclaredState>,
+}
+
+#[derive(Default)]
+struct DeclaredState {
+    list: Option<Arc<[(ParamId, ParamAccess)]>>,
+    generation: u64,
+}
+
+impl DeclaredCache {
+    /// The kept list, or the generation a refill must pass to [`store`](Self::store).
+    fn get(&self) -> Result<Arc<[(ParamId, ParamAccess)]>, u64> {
+        let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        state.list.clone().ok_or(state.generation)
+    }
+
+    /// Keeps `list`, read when the generation was `started`, unless a forgetting
+    /// has made it older than the plugin's word.
+    fn store(&self, started: u64, list: &Arc<[(ParamId, ParamAccess)]>) {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        if state.generation == started {
+            state.list = Some(Arc::clone(list));
+        }
+    }
+
+    /// Forgets the list, and makes a refill that is under way not store.
+    fn forget(&self) {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        state.list = None;
+        state.generation += 1;
+    }
 }
 
 impl Events {
@@ -181,6 +230,15 @@ impl Events {
                     wake.raise();
                 }
             }
+            // What can change the declarations: the parameter list itself, a
+            // rebuilt instance, a bus change (a plugin's parameters may follow
+            // its buses), and death (a dead plugin has none). Not `ParamValues`,
+            // which every dropped parameter event raises and which says nothing
+            // of the list: a forget on it would make the next write a round trip.
+            BridgeEvent::Resync(
+                ResyncKind::ParamTitles | ResyncKind::Reloaded | ResyncKind::Io,
+            )
+            | BridgeEvent::Crashed { .. } => self.declared.forget(),
             // A transport request reaches the application through the
             // listener, in order. Nothing is queued for `take_requests`, which
             // a served plugin's host does not drain: a request kept here would
@@ -229,6 +287,60 @@ impl Link {
     /// The latency the plugin reports now.
     pub(crate) fn latency(&self) -> Samples {
         Samples(self.events.latency.load(Ordering::Acquire))
+    }
+
+    /// The plugin's declared parameters, sorted by id, from the cache the server's
+    /// last answer filled; asks the server only when there is none (the first
+    /// write, or the first after a resync). News the plugin sent that the bridge
+    /// has not yet processed is settled first, so a resync the bridge is about to
+    /// deliver is not missed ([`PluginBridge::news_settled`]; news not yet read off the
+    /// connection is the one window left, as for any asked-once list). Checked in
+    /// this order: a crashed plugin is [`Lost`](ParamWriteError::Lost) (and its
+    /// cache is forgotten); one that does not settle or answer in time is
+    /// [`Unanswered`](ParamWriteError::Unanswered).
+    ///
+    /// **It waits**: the settle sleep-polls for as long as the bridge has news
+    /// pending, up to the link's timeout, and a bridge wedged inside its listener
+    /// makes the write fail `Unanswered` after that. Control thread only; the
+    /// realtime path reads no cache.
+    ///
+    /// # Errors
+    ///
+    /// As above, naming `id`, the parameter the caller was writing.
+    pub(crate) fn declared(
+        &self,
+        id: ParamId,
+    ) -> Result<Arc<[(ParamId, ParamAccess)]>, ParamWriteError> {
+        if self.bridge.is_crashed() {
+            self.events.declared.forget();
+            return Err(ParamWriteError::Lost(id));
+        }
+        if !self.bridge.news_settled(self.timeout) {
+            return Err(if self.bridge.is_crashed() {
+                ParamWriteError::Lost(id)
+            } else {
+                ParamWriteError::Unanswered(id)
+            });
+        }
+        let started = match self.events.declared.get() {
+            Ok(kept) => return Ok(kept),
+            Err(generation) => generation,
+        };
+        let Some(infos) = self.bridge.parameters() else {
+            return Err(if self.bridge.is_crashed() {
+                ParamWriteError::Lost(id)
+            } else {
+                ParamWriteError::Unanswered(id)
+            });
+        };
+        let mut sorted: Vec<(ParamId, ParamAccess)> = infos
+            .iter()
+            .map(|info| (info.id(), ParamAccess::of(info)))
+            .collect();
+        sorted.sort_unstable_by_key(|&(id, _)| id);
+        let list: Arc<[(ParamId, ParamAccess)]> = sorted.into();
+        self.events.declared.store(started, &list);
+        Ok(list)
     }
 
     pub(crate) fn tail(&self) -> PluginTail {
@@ -287,6 +399,9 @@ pub(crate) struct Watch {
 pub struct Ipc {
     pub(crate) link: Arc<Link>,
     slab: SlabWriter,
+    /// The sequence the slab's next chunk carries: the slab outlives each
+    /// activation's batcher, so the sequence does too.
+    next_seq: u64,
 }
 
 impl std::fmt::Debug for Ipc {
@@ -336,6 +451,7 @@ impl Ipc {
             requests: Mutex::new(Vec::new()),
             forward: Mutex::new(None),
             wake: OnceLock::new(),
+            declared: DeclaredCache::default(),
         });
         let listening = Arc::clone(&events);
         bridge.set_listener(Some(Arc::new(move |event| listening.on(event))));
@@ -357,6 +473,7 @@ impl Ipc {
         Self {
             link: Arc::new(link),
             slab,
+            next_seq: 1,
         }
     }
 
@@ -608,7 +725,11 @@ impl Ipc {
         self,
         prepare: Prepare,
     ) -> Result<(IpcProcessor, IpcController), Refused<Self>> {
-        let Self { link, slab } = self;
+        let Self {
+            link,
+            slab,
+            next_seq,
+        } = self;
         let rate = prepare.rate();
         if rate != link.rate() {
             let _ = link.bridge.set_sample_rate_rt(rate);
@@ -621,6 +742,7 @@ impl Ipc {
             link.ceiling,
             slab,
         )
+        .starting_at(next_seq)
         .with_counters(Arc::clone(&link.counters));
         batcher.prepare(Samples(prepare.max_block().get()), None);
         if let Some(Watch {
@@ -669,10 +791,11 @@ impl Loaded for Ipc {
                 ),
             });
         }
-        let slab = processor.into_slab();
+        let (slab, next_seq) = processor.into_parts();
         Ok(Self {
             link: controller.link,
             slab,
+            next_seq,
         })
     }
 }

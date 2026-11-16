@@ -57,21 +57,13 @@ use tutti_types::{MAX_CHANNELS, SampleRate, Seconds, Tail};
 
 use super::design::{CROSSOVER, FdnControls, FdnLayout};
 use crate::reverb::network::{Absorption, Band, Matrix, Network, Stage};
+use crate::reverb::{CHUNK, ramp};
 use crate::{Glide, Ring, Steps, System, TAIL_FLOOR};
 
-/// The frames between glide steps: [`FdnBank::CHUNK`].
-pub(crate) const CHUNK: usize = 32;
-/// The longest ramp of a gain, in seconds.
-const RAMP: f64 = 0.020;
 /// How far a line's length moves in a chunk, in frames.
 const LENGTH_STEP: f32 = 0.5;
 /// How far the pre-delay moves in a chunk, in frames.
 const PRE_STEP: f32 = 2.0;
-
-/// A 20 ms ramp at `rate`, in whole chunks (at least one).
-pub(crate) fn ramp(rate: f64) -> Steps {
-    Steps::Fixed(((RAMP * rate / CHUNK as f64).ceil() as u32).max(1))
-}
 
 /// The coefficient point a design asks for, as [`FdnBank::aim`] writes it: the values
 /// [`FdnGlides`] glide to, before any rate is applied. Sized for the most lines the bank was
@@ -311,7 +303,7 @@ impl FdnBank {
     pub fn new(layout: &FdnLayout, rate: SampleRate) -> Self {
         let bounds = layout.capacity(rate);
         let max_lines = bounds.lines;
-        let cap = bounds.line.ceil() as usize + 4;
+        let cap = bounds.line.to_samples_ceil().get() + 4;
         let pre_cap = bounds.pre_delay.get() + 4;
         let mut target = Target::new(max_lines);
         set_poles(&mut target, CROSSOVER.map(|f| f.get()), rate.get());
@@ -445,11 +437,8 @@ impl FdnBank {
         let flat = 1.0 / (n as f32).sqrt();
         for j in 0..n {
             let line = &f.lines[j];
-            t.len[j] = if line.length.is_finite() {
-                line.length.clamp(1.0, max_len)
-            } else {
-                1.0
-            };
+            // The kernel's coefficient point is `f32`: a span narrows once, here.
+            t.len[j] = (line.length.get() as f32).clamp(1.0, max_len);
             t.gain[j] = absorption_gains(line.absorption, t.pole);
             // A diagonal network is `m = 0`; its `v` is a unit vector (line 0)
             // like the rest, so a ramp to a mixing matrix moves between unit
@@ -457,11 +446,11 @@ impl FdnBank {
             let v = match &f.matrix {
                 Matrix::Diagonal => f32::from(u8::from(j == 0)),
                 Matrix::Householder => flat,
-                Matrix::Reflection(v) if v.len() == n => v[j],
+                Matrix::Reflection(v) if v.len() == n => v[j].get(),
                 _ => 0.0,
             };
             t.v[j] = if v.is_finite() { v } else { 0.0 };
-            let input = f.input.get(j).copied().unwrap_or(0.0);
+            let input = f.input.get(j).map_or(0.0, |g| g.get());
             t.input[j] = if input.is_finite() { input } else { 0.0 };
             let row = |r: usize| {
                 let x = f
@@ -470,8 +459,7 @@ impl FdnBank {
                     .get(r)
                     .or_else(|| f.output.rows.first())
                     .and_then(|row| row.get(j))
-                    .copied()
-                    .unwrap_or(0.0);
+                    .map_or(0.0, |g| g.get());
                 if x.is_finite() { x } else { 0.0 }
             };
             t.out[j] = [row(0), row(1)];
@@ -483,11 +471,7 @@ impl FdnBank {
             t.out[j] = [0.0; 2];
         }
         let m = f.lines[0].modulation;
-        t.depth = if m.depth.is_finite() {
-            m.depth.abs().min((self.cap as f32) * 0.25)
-        } else {
-            0.0
-        };
+        t.depth = (m.depth.get() as f32).min((self.cap as f32) * 0.25);
         let hz = m.rate.get();
         t.rate_hz = if hz.is_finite() {
             hz.clamp(0.0, 20.0)

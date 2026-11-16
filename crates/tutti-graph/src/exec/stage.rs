@@ -59,6 +59,11 @@ pub(super) enum RingFrom {
     /// The old ring at this index is copied into the one built for the new
     /// length, and goes back in the commit.
     Move { from: u32 },
+    /// The old ring at this index is copied into the one built for it and
+    /// stays where it is, for the ring that takes it over: an old root's
+    /// channel, kept sounding while the new root's channel of the same source
+    /// goes on with the same history.
+    Copy { from: u32 },
 }
 
 /// An old event edge whose source's held keys are closed at its sink.
@@ -475,6 +480,7 @@ impl Stager {
                     .collect()
             })
             .unwrap_or_default();
+        let old_by_source = ring_by_source(cx.old.map(|p| p.delays.as_slice()).unwrap_or_default());
         let mut caps = BTreeMap::new();
         let mut owing = BTreeSet::new();
         let mut rings = Vec::with_capacity(plan.delays.len());
@@ -508,6 +514,18 @@ impl Stager {
                     caps.insert(d.key, cap);
                 }
                 None => match carried {
+                    // An old root's channel in a root crossfade's bank starts
+                    // with the history the root's own channel had.
+                    None if copy_origin(plan, &d.key, &old_delays, &old_by_source)
+                        .filter(|_| cx.carry)
+                        .is_some() =>
+                    {
+                        let j = copy_origin(plan, &d.key, &old_delays, &old_by_source);
+                        rings.push(Some(Ring::Audio(AudioRing::new(d.len))));
+                        from.push(RingFrom::Copy {
+                            from: j.map_or(0, |j| j as u32),
+                        });
+                    }
                     Some(j) if cx.old.is_some_and(|p| p.delays[j].len == d.len) => {
                         rings.push(None);
                         from.push(RingFrom::Keep {
@@ -1115,5 +1133,120 @@ pub(super) fn sort_by_offset(events: &mut [Event]) {
         let key = events[i].offset;
         let at = events[..i].partition_point(|e| e.offset <= key);
         events[at..=i].rotate_right(1);
+    }
+}
+
+/// The longest ring that aligns each source to an output, whichever channel it
+/// fed, as an index into `delays`; of equal lengths, the lowest key. The choice
+/// is a function of the set of rings, not of their order in the plan: what a
+/// source on a new channel starts from, with none of its history zero-filled.
+fn ring_by_source(delays: &[crate::DelaySpec]) -> BTreeMap<crate::Source, usize> {
+    let mut by_source: BTreeMap<crate::Source, usize> = BTreeMap::new();
+    for (i, d) in delays.iter().enumerate() {
+        let DelayKey::Output { from, .. } = d.key else {
+            continue;
+        };
+        let better = |j: &usize| {
+            let best = &delays[*j];
+            (d.len, std::cmp::Reverse(d.key)) > (best.len, std::cmp::Reverse(best.key))
+        };
+        if by_source.get(&from).is_none_or(better) {
+            by_source.insert(from, i);
+        }
+    }
+    by_source
+}
+
+/// The old ring an output channel's ring of this plan starts from when no old
+/// ring has its own key: the old root's channel `c` for the bank's channel
+/// `base + c`, and, in a root change, for a root channel of a source the old
+/// plan aligned on another channel, that channel's ring (a source's delayed
+/// signal does not depend on the channel it feeds).
+fn copy_origin(
+    plan: &Plan,
+    key: &DelayKey,
+    old: &BTreeMap<DelayKey, usize>,
+    by_source: &BTreeMap<crate::Source, usize>,
+) -> Option<usize> {
+    let DelayKey::Output { channel, from } = *key else {
+        return None;
+    };
+    match plan.root_bank() {
+        Some(bank) if usize::from(channel) >= bank.base => {
+            let was = channel - u16::try_from(bank.base).ok()?;
+            old.get(&DelayKey::Output { channel: was, from }).copied()
+        }
+        // Only in a root change: any other recompile keeps a ring by its key.
+        Some(_) if !old.contains_key(key) => by_source.get(&from).copied(),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{DelaySpec, NodeKey, OutPort, Source};
+    use tutti_types::Samples;
+
+    fn ring(channel: u16, from: Source, len: usize) -> DelaySpec {
+        DelaySpec {
+            key: DelayKey::Output { channel, from },
+            len: Samples(len),
+        }
+    }
+
+    fn source(node: u64) -> Source {
+        Source::Node(OutPort {
+            node: NodeKey(node),
+            port: 0,
+        })
+    }
+
+    /// The longest ring of a source is the one a new channel copies, and of
+    /// equal lengths the lowest key, whatever order the plan lists them in:
+    /// two renders of one commit never copy different rings.
+    #[test]
+    fn the_longest_ring_of_a_source_wins_and_the_lowest_key_breaks_a_tie() {
+        let s = source(1);
+        let delays = [
+            ring(3, s, 20),
+            ring(2, s, 30),
+            ring(1, s, 30),
+            ring(0, s, 10),
+            ring(0, source(2), 5),
+        ];
+        let by = ring_by_source(&delays);
+        assert_eq!(
+            by[&s], 2,
+            "channel 1: of the two 30-frame rings, the lower key"
+        );
+        assert_eq!(by[&source(2)], 4, "a source of its own has its own ring");
+        let mut order: Vec<usize> = (0..delays.len()).collect();
+        for _ in 0..delays.len() {
+            order.rotate_left(1);
+            let shuffled: Vec<DelaySpec> = order.iter().map(|&i| delays[i]).collect();
+            let by = ring_by_source(&shuffled);
+            assert_eq!(
+                shuffled[by[&s]].key, delays[2].key,
+                "the same ring in any listing order"
+            );
+        }
+    }
+
+    /// A ring that is not an output's is no source's origin.
+    #[test]
+    fn only_output_rings_are_origins() {
+        let at = crate::InPort {
+            node: NodeKey(9),
+            port: 0,
+        };
+        let delays = [DelaySpec {
+            key: DelayKey::Audio {
+                at,
+                from: source(1),
+            },
+            len: Samples(40),
+        }];
+        assert!(ring_by_source(&delays).is_empty());
     }
 }

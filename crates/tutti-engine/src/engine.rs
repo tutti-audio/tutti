@@ -70,6 +70,23 @@
 //! machine's own fade ramp is not used; the engine settles it the moment the
 //! command lands.
 //!
+//! # A root change
+//!
+//! A commit that changes the root's generation can carry the old root's
+//! outputs beside the new root's ([`Plan::root_bank`](tutti_graph::Plan::root_bank),
+//! [`Editor::set_root_fade`]). Over the fade's length the engine folds each root
+//! with its own fold, `(RootId, device)`, and mixes them by the fade law's
+//! gains: the old root's channels fade out as the new root's fade in, frame by
+//! frame, and past the fade the new root is heard alone. The old root's
+//! channels align to the previous plan's total latency, so when the two totals
+//! differ a source present in both roots is heard at two delays during the
+//! fade and shifts once at its end. A commit with no fade
+//! cuts at its block. A commit that installs while the fade runs and leaves
+//! the root's generation alone continues it from the frames already mixed. One
+//! that declares the root again ends it at its block and begins another from
+//! the root that was fading in: the root that was fading out is dropped, a
+//! step the session avoids by declaring only after the running fade ends.
+//!
 //! # Limits
 //!
 //! [`Engine::new`] bounds the graph's editor ([`Editor::set_limits`]) to
@@ -206,7 +223,7 @@ struct GraphRender {
     /// drives the clock itself; every node reads what it publishes from its
     /// block's `Env`.
     transport: TransportAudio,
-    /// `MAX_CHANNELS` planar channels of `stride` frames each.
+    /// `SCRATCH_CHUNKS` planar channels of `stride` frames each.
     scratch: Vec<f32>,
     stride: usize,
     playhead: Playhead,
@@ -230,6 +247,88 @@ struct GraphRender {
 struct Lent<'a> {
     folds: &'a OutputFolds,
     stage: &'a StageTargets,
+}
+
+/// The root banks a plan renders at most: the root's channels and, while a
+/// root change crossfades, the old root's.
+const ROOT_BANKS: usize = 2;
+
+/// Planar chunks of the fold scratch: the rendered channels of both banks and
+/// the root crossfade's four.
+const SCRATCH_CHUNKS: usize = ROOT_BANKS * MAX_CHANNELS + 4;
+
+/// The scratch a root crossfade folds through: the block's worth of each.
+struct Mixing<'a> {
+    /// One device channel of the new root's fold.
+    fold: &'a mut [f32],
+    /// The same channel of the old root's.
+    old: &'a mut [f32],
+    /// The gain of the old root at each frame of the block, and the new
+    /// root's.
+    gain_old: &'a mut [f32],
+    gain_new: &'a mut [f32],
+}
+
+/// The two roots a block folds into the device, and how far their fade has
+/// got.
+struct Crossfaded<'a, 'p> {
+    /// The new root's fold into the device, and its channels.
+    new: (&'a tutti_buffers::Fold, &'p [&'p [f32]]),
+    /// The old root's: `None` when its fold is not published, which fades
+    /// the new root in from silence.
+    old: Option<(&'a tutti_buffers::Fold, &'p [&'p [f32]])>,
+    fade: tutti_graph::RootFade,
+}
+
+impl Mixing<'_> {
+    /// Folds the two roots into `device` and sums them under the fade's
+    /// gains: frame `k` of the fade is `old * g_old + new * g_new` with
+    /// `(g_old, g_new)` the fade law's gains at `k`, and from the fade's last
+    /// frame on the new root is the whole mix. Every sample of `device` is
+    /// written. Allocation-free.
+    fn crossfade(
+        &mut self,
+        roots: Crossfaded<'_, '_>,
+        mut device: InterleavedMut<'_>,
+    ) -> Result<(), tutti_buffers::BufferError> {
+        let Crossfaded { new, old, fade } = roots;
+        let frames = device.frames().get();
+        let channels = device.channels();
+        let (length, first) = (fade.fade.duration.get(), fade.done.get());
+        for (i, (go, gn)) in self.gain_old[..frames]
+            .iter_mut()
+            .zip(&mut self.gain_new[..frames])
+            .enumerate()
+        {
+            (*go, *gn) = if first + i < length {
+                fade.fade.law.gains(first + i, length)
+            } else {
+                (0.0, 1.0)
+            };
+        }
+        let new_planes = Planes::new(new.1)?;
+        let old_planes = old.map(|(_, planes)| Planes::new(planes)).transpose()?;
+        let block = device.samples_mut();
+        for channel in 0..channels {
+            new.0.fold_planar_channel(
+                new_planes,
+                channel,
+                tutti_buffers::MonoMut::new(&mut self.fold[..frames]),
+            )?;
+            match (old, old_planes) {
+                (Some((fold, _)), Some(planes)) => fold.fold_planar_channel(
+                    planes,
+                    channel,
+                    tutti_buffers::MonoMut::new(&mut self.old[..frames]),
+                )?,
+                _ => self.old[..frames].fill(0.0),
+            }
+            for (i, sample) in block[channel..].iter_mut().step_by(channels).enumerate() {
+                *sample = self.old[i] * self.gain_old[i] + self.fold[i] * self.gain_new[i];
+            }
+        }
+        Ok(())
+    }
 }
 
 impl GraphRender {
@@ -370,7 +469,7 @@ impl Engine {
             graph: AudioThreadCell::new(GraphRender {
                 exec: executor,
                 transport: audio,
-                scratch: vec![0.0; MAX_CHANNELS * stride],
+                scratch: vec![0.0; SCRATCH_CHUNKS * stride],
                 stride,
                 playhead: Playhead::new(),
                 dropped_seen,
@@ -1273,21 +1372,41 @@ impl GraphRender {
         // block, so the width, the block bound and the rate read here are the
         // ones the block renders with. The editor's limits refuse a graph
         // wider than the scratch.
-        let (root, width) = self
-            .exec
-            .plan()
-            .map_or((RootId::GENESIS, 0), |p| (p.root_id(), p.global_outputs()));
+        let (root, width, rendered) = self.exec.plan().map_or((RootId::GENESIS, 0, 0), |p| {
+            (p.root_id(), p.global_outputs(), p.rendered_outputs())
+        });
+        // While a root change crossfades, the old root's folds are still in
+        // use: the control side retires none past the oldest root rendered.
+        let fade = self.exec.root_fade();
+        let held = fade.map_or(root, |f| f.old);
         // A relaxed store: the control side only needs it to catch up.
-        self.installed.store(root.get(), Ordering::Relaxed);
+        self.installed.store(held.get(), Ordering::Relaxed);
         debug_assert!(width <= MAX_CHANNELS, "the editor's limits refuse this");
         let width = width.min(MAX_CHANNELS);
         let block = &mut output[at * out_ch..(at + len) * out_ch];
         let stride = self.stride;
         let mut chunks = self.scratch.chunks_mut(stride);
-        let mut outs: [&mut [f32]; MAX_CHANNELS] =
-            std::array::from_fn(|_| chunks.next().expect("MAX_CHANNELS chunks"));
-        self.exec
-            .render_applied(len, transport, changes, &[], &mut outs[..width]);
+        let mut outs: [&mut [f32]; ROOT_BANKS * MAX_CHANNELS] =
+            std::array::from_fn(|_| chunks.next().expect("a chunk per rendered channel"));
+        let mut mixing = Mixing {
+            fold: chunks.next().expect("a chunk to fold the new root into"),
+            old: chunks.next().expect("a chunk to fold the old root into"),
+            gain_old: chunks.next().expect("a chunk for the old root's gains"),
+            gain_new: chunks.next().expect("a chunk for the new root's gains"),
+        };
+        self.exec.render_applied(
+            len,
+            transport,
+            changes,
+            &[],
+            &mut outs[..rendered.min(ROOT_BANKS * MAX_CHANNELS)],
+        );
+        // The block that ends the fade is the old root's last: from here the
+        // new root is the oldest in use.
+        self.installed.store(
+            self.exec.root_fade().map_or(root, |f| f.old).get(),
+            Ordering::Relaxed,
+        );
         // Published after the block, not by the walk before it: through the
         // block the live playhead still reads its first frame (the last
         // block's end), and it only moves forward.
@@ -1311,8 +1430,30 @@ impl GraphRender {
                 for (slot, out) in table.iter_mut().zip(&outs).take(width) {
                     *slot = &out[..len];
                 }
-                let folded = Planes::new(&table[..width])
-                    .and_then(|planes| fold.fold_planar_to_interleaved(planes, device.reborrow()));
+                let folded = match fade {
+                    None => Planes::new(&table[..width]).and_then(|planes| {
+                        fold.fold_planar_to_interleaved(planes, device.reborrow())
+                    }),
+                    Some(fade) => {
+                        // The old root's channels follow the new root's.
+                        let old = fade.width.min(MAX_CHANNELS);
+                        let mut old_table: [&[f32]; MAX_CHANNELS] = [&[]; MAX_CHANNELS];
+                        for (slot, out) in old_table.iter_mut().zip(&outs[width..]).take(old) {
+                            *slot = &out[..len];
+                        }
+                        mixing.crossfade(
+                            Crossfaded {
+                                new: (fold, &table[..width]),
+                                old: lent
+                                    .folds
+                                    .get(fade.old, out_ch, old)
+                                    .map(|fold| (fold, &old_table[..old])),
+                                fade,
+                            },
+                            device.reborrow(),
+                        )
+                    }
+                };
                 debug_assert!(
                     folded.is_ok(),
                     "the root's channels are a block long and the fold is for its width: {folded:?}"
@@ -1344,6 +1485,7 @@ mod tests {
     use tutti_graph::Prepare;
     use tutti_transport::Timeline;
     use tutti_transport::{MotionEvent, Transport};
+    use tutti_types::Bed;
     use tutti_types::Bpm;
     use tutti_types::ChannelTopology;
     use tutti_types::MaxBlock;
@@ -2467,6 +2609,397 @@ mod tests {
         assert!(!control.has_fold(old, 2, stereo), "the old root is gone");
         assert!(control.has_fold(new, 2, stereo));
         assert_eq!(control.reclaim(), 0, "nothing is left pinned");
+    }
+
+    /// One channel of constant 1.0.
+    struct Dc;
+
+    impl tutti_graph::Node for Dc {
+        fn shape(&self) -> tutti_graph::Shape {
+            tutti_graph::Shape::source_unassigned(ChannelLayout::MONO)
+                .with_tail(tutti_types::Tail::Unbounded)
+        }
+        fn prepare(&mut self, _: &Prepare) {}
+        fn process(
+            &mut self,
+            _: &tutti_graph::Cx<'_>,
+            mut io: tutti_graph::Io<'_>,
+        ) -> tutti_graph::Status {
+            io.output(0).fill(1.0);
+            tutti_graph::Status::Modified
+        }
+        fn reset(&mut self) {}
+    }
+
+    /// Feeds the constant at key 1 to channel `channel` of a `width`-wide
+    /// root, the others silent, in the editor's spec.
+    fn feed(ed: &mut Editor, width: usize, channel: usize) {
+        use tutti_graph::{NodeKey, OutPort, Source};
+        let dc = Source::Node(OutPort {
+            node: NodeKey(1),
+            port: 0,
+        });
+        ed.spec_mut()
+            .topology
+            .set_outputs((0..width).map(|c| if c == channel { dc } else { Source::Zero }));
+    }
+
+    /// The smootherstep `s(x) = x³ (6x² − 15x + 10)` the equal-amplitude
+    /// gains are built on: `(1 − s, s)` at `x = (k + 1) / (n + 1)`.
+    fn equal_amplitude(k: usize, n: usize) -> (f32, f32) {
+        let x = (k + 1) as f64 / (n + 1) as f64;
+        let s = x * x * x * (6.0 * x * x - 15.0 * x + 10.0);
+        ((1.0 - s) as f32, s as f32)
+    }
+
+    /// An engine of the constant at key 1 into the left of a stereo root, the
+    /// root fade set to `fade` frames of equal amplitude, and the plan
+    /// rendered once.
+    fn crossfading_engine(fade: usize) -> (Engine, Editor) {
+        let (mut ed, exec) =
+            Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(8))));
+        ed.insert(tutti_graph::NodeKey(1), "dc", tutti_graph::Unforkable(Dc));
+        feed(&mut ed, 2, 0);
+        ed.commit().expect("commits");
+        let engine =
+            Engine::new(&Transport::new(SampleRate::SR_48K), &mut ed, exec).expect("within limits");
+        ed.set_root_fade(Some(tutti_graph::Fade::new(
+            Samples(fade),
+            tutti_graph::FadeLaw::EqualAmplitude,
+        )));
+        assert_eq!(block_with(&engine, 2, || {}), [1.0, 0.0].repeat(8));
+        (engine, ed)
+    }
+
+    /// Declares a root of `width` channels (`None` the engine's order) with
+    /// the constant on its channel `channel`, and commits.
+    fn move_root(
+        ed: &mut Editor,
+        control: &OutputControl,
+        root: Option<ChannelTopology>,
+        width: usize,
+        channel: usize,
+    ) {
+        let id = ed.spec().root_id.next();
+        control
+            .publish_root(id, root, ChannelLayout::STEREO)
+            .expect("places");
+        ed.spec_mut().root_id = id;
+        feed(ed, width, channel);
+        ed.commit().expect("commits");
+    }
+
+    /// A root change crossfades: the old root's lanes ramp out by the
+    /// equal-amplitude gains while the new root's ramp in, frame by frame
+    /// over four 8-frame blocks, each root folded by its own fold. The old
+    /// root is the constant on the left, the new the same constant on the
+    /// right, so each frame of the left is the outgoing gain and of the right
+    /// the incoming one; past the fade's 20 frames the right is the whole mix.
+    #[test]
+    fn a_root_change_crossfades_the_old_root_out_and_the_new_in() {
+        let (engine, mut ed) = crossfading_engine(20);
+        let control = engine.output_control();
+        move_root(&mut ed, &control, None, 2, 1);
+        let heard: Vec<f32> = (0..4).flat_map(|_| block_with(&engine, 2, || {})).collect();
+        for (k, frame) in heard.as_chunks::<2>().0.iter().enumerate() {
+            let (out, new) = if k < 20 {
+                equal_amplitude(k, 20)
+            } else {
+                (0.0, 1.0)
+            };
+            assert!(
+                (frame[0] - out).abs() < 1e-6 && (frame[1] - new).abs() < 1e-6,
+                "frame {k}: {frame:?} against ({out}, {new})"
+            );
+        }
+    }
+
+    /// The two roots are folded each by its own fold: a stereo root fading
+    /// out to a 5.1 root whose constant is on the centre, into a stereo
+    /// device. The centre folds to both sides at -3 dB (BS.775), so the left
+    /// is `out + new / sqrt(2)` and the right `new / sqrt(2)`.
+    #[test]
+    fn each_root_is_folded_by_its_own_fold_through_the_crossfade() {
+        let (engine, mut ed) = crossfading_engine(20);
+        let control = engine.output_control();
+        move_root(&mut ed, &control, Some(Bed::Surround51.topology()), 6, 2);
+        let heard: Vec<f32> = (0..3).flat_map(|_| block_with(&engine, 2, || {})).collect();
+        let centre = std::f32::consts::FRAC_1_SQRT_2;
+        for (k, frame) in heard.as_chunks::<2>().0.iter().enumerate().take(24) {
+            let (out, new) = if k < 20 {
+                equal_amplitude(k, 20)
+            } else {
+                (0.0, 1.0)
+            };
+            let (left, right) = (out + new * centre, new * centre);
+            assert!(
+                (frame[0] - left).abs() < 1e-6 && (frame[1] - right).abs() < 1e-6,
+                "frame {k}: {frame:?} against ({left}, {right})"
+            );
+        }
+    }
+
+    /// A root change with no root fade is a cut: the first frame of the block
+    /// the commit lands on is the new root alone.
+    #[test]
+    fn a_root_change_without_a_fade_cuts_at_the_block() {
+        let (engine, mut ed) = crossfading_engine(20);
+        ed.set_root_fade(None);
+        let control = engine.output_control();
+        move_root(&mut ed, &control, None, 2, 1);
+        assert_eq!(block_with(&engine, 2, || {}), [0.0, 1.0].repeat(8));
+        assert!(
+            ed.base().is_some_and(|p| p.root_bank().is_none()),
+            "the plan carries no old root"
+        );
+    }
+
+    /// The old root's folds stay published while the fade runs and go at the
+    /// first reclaim after the block that ends it, not after the commit's
+    /// first block; the plan is then compiled again without the old channels.
+    #[test]
+    fn the_old_roots_folds_go_at_the_first_reclaim_after_the_crossfade_ends() {
+        let (engine, mut ed) = crossfading_engine(20);
+        let control = engine.output_control();
+        let stereo = ChannelLayout::STEREO;
+        let old = ed.spec().root_id;
+        move_root(&mut ed, &control, None, 2, 1);
+        let new = ed.spec().root_id;
+        // Frames 0..8, 8..16 and 16..24: the third ends the 20-frame fade.
+        for block in 0..2 {
+            let _ = block_with(&engine, 2, || {});
+            let _ = control.reclaim();
+            assert!(
+                control.has_fold(old, 2, stereo),
+                "the old root is folded until the fade ends (block {block})"
+            );
+        }
+        let _ = block_with(&engine, 2, || {});
+        let _ = control.reclaim();
+        assert!(!control.has_fold(old, 2, stereo), "the old root is gone");
+        assert!(control.has_fold(new, 2, stereo));
+        assert_eq!(control.reclaim(), 0, "nothing is left pinned");
+        // The editor learns the fade is over and compiles the old channels away.
+        let _ = ed.collect();
+        assert!(ed.settle_fades(), "the fade's end is reported once");
+        assert!(ed.base().is_some_and(|p| p.root_bank().is_some()));
+        ed.commit().expect("commits");
+        assert!(ed.base().is_some_and(|p| p.root_bank().is_none()));
+        assert_eq!(block_with(&engine, 2, || {}), [0.0, 1.0].repeat(8));
+        assert!(!ed.settle_fades(), "and once only");
+    }
+
+    /// A commit that lands while the fade runs, and leaves the root alone,
+    /// continues it: the rewire to both channels brings the right in by the
+    /// fade's gains from frame 8 on, not at once, while the left stays the sum
+    /// of the old root going out and the new coming in, which is one.
+    #[test]
+    fn a_commit_that_lands_mid_fade_continues_it() {
+        let (engine, mut ed) = crossfading_engine(20);
+        let control = engine.output_control();
+        move_root(&mut ed, &control, None, 2, 1);
+        let mut heard: Vec<f32> = block_with(&engine, 2, || {});
+        let dc = tutti_graph::Source::Node(tutti_graph::OutPort {
+            node: tutti_graph::NodeKey(1),
+            port: 0,
+        });
+        ed.spec_mut().topology.set_outputs([dc, dc]);
+        ed.commit().expect("commits");
+        heard.extend((0..3).flat_map(|_| block_with(&engine, 2, || {})));
+        for (k, frame) in heard.as_chunks::<2>().0.iter().enumerate() {
+            let (out, new) = if k < 20 {
+                equal_amplitude(k, 20)
+            } else {
+                (0.0, 1.0)
+            };
+            // The old root is the constant on the left; the new root, from
+            // frame 8, the constant on both sides.
+            let (left, right) = if k < 8 { (out, new) } else { (out + new, new) };
+            assert!(
+                (frame[0] - left).abs() < 1e-6 && (frame[1] - right).abs() < 1e-6,
+                "frame {k}: {frame:?} against ({left}, {right})"
+            );
+        }
+    }
+
+    /// Counts 1, 2, 3 ... one per frame, on one channel.
+    struct Count(f32);
+
+    impl tutti_graph::Node for Count {
+        fn shape(&self) -> tutti_graph::Shape {
+            tutti_graph::Shape::source_unassigned(ChannelLayout::MONO)
+                .with_tail(tutti_types::Tail::Unbounded)
+        }
+        fn prepare(&mut self, _: &Prepare) {}
+        fn process(
+            &mut self,
+            _: &tutti_graph::Cx<'_>,
+            mut io: tutti_graph::Io<'_>,
+        ) -> tutti_graph::Status {
+            for x in io.output(0) {
+                self.0 += 1.0;
+                *x = self.0;
+            }
+            tutti_graph::Status::Modified
+        }
+        fn reset(&mut self) {}
+    }
+
+    /// Silence that reports 16 frames of latency, so the graph delays every
+    /// other output by 16.
+    struct Late;
+
+    impl tutti_graph::Node for Late {
+        fn shape(&self) -> tutti_graph::Shape {
+            tutti_graph::Shape::source_unassigned(ChannelLayout::MONO)
+                .with_latency(tutti_types::Latency::new(Samples(16)))
+                .with_tail(tutti_types::Tail::Unbounded)
+        }
+        fn prepare(&mut self, _: &Prepare) {}
+        fn process(
+            &mut self,
+            _: &tutti_graph::Cx<'_>,
+            mut io: tutti_graph::Io<'_>,
+        ) -> tutti_graph::Status {
+            io.output(0).fill(0.0);
+            tutti_graph::Status::Modified
+        }
+        fn reset(&mut self) {}
+    }
+
+    /// A compensated old root fades out with no gap: the counter on the left
+    /// is delayed by 16 frames to the output time, and its history crosses
+    /// into the old root's channel of the bank, so frame `t` of the fade is
+    /// the counter's value 16 frames before, times the outgoing gain, with no
+    /// dip to silence. The new root, which has the same source on its right,
+    /// starts from the same history, so it has no gap either.
+    #[test]
+    fn a_compensated_old_root_crossfades_out_with_its_history() {
+        use tutti_graph::{NodeKey, OutPort, Source};
+        let (mut ed, exec) =
+            Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(8))));
+        ed.insert(NodeKey(1), "count", tutti_graph::Unforkable(Count(0.0)));
+        ed.insert(NodeKey(2), "late", tutti_graph::Unforkable(Late));
+        let count = Source::Node(OutPort {
+            node: NodeKey(1),
+            port: 0,
+        });
+        let late = Source::Node(OutPort {
+            node: NodeKey(2),
+            port: 0,
+        });
+        ed.spec_mut().topology.set_outputs([count, late]);
+        ed.commit().expect("commits");
+        let engine =
+            Engine::new(&Transport::new(SampleRate::SR_48K), &mut ed, exec).expect("within limits");
+        ed.set_root_fade(Some(tutti_graph::Fade::new(
+            Samples(20),
+            tutti_graph::FadeLaw::EqualAmplitude,
+        )));
+        let control = engine.output_control();
+        // 16 frames of the old root, whose left is the counter 16 behind.
+        for _ in 0..2 {
+            let _ = block_with(&engine, 2, || {});
+        }
+        let id = ed.spec().root_id.next();
+        control
+            .publish_root(id, None, ChannelLayout::STEREO)
+            .unwrap();
+        ed.spec_mut().root_id = id;
+        ed.spec_mut().topology.set_outputs([late, count]);
+        ed.commit().expect("commits");
+        let heard: Vec<f32> = (0..3).flat_map(|_| block_with(&engine, 2, || {})).collect();
+        // The counter's value at absolute frame `t` is `t + 1`; delayed by 16
+        // it is `t - 15` from frame 16 on.
+        let delayed = |t: usize| (t as f32 - 15.0).max(0.0);
+        for (k, frame) in heard.as_chunks::<2>().0.iter().enumerate().take(24) {
+            let t = 16 + k;
+            let (out, new) = if k < 20 {
+                equal_amplitude(k, 20)
+            } else {
+                (0.0, 1.0)
+            };
+            let left = out * delayed(t);
+            // The counter's history crosses to the right too: the source's
+            // delayed signal does not depend on the channel it feeds.
+            let right = new * delayed(t);
+            assert!(
+                (frame[0] - left).abs() < 1e-3 && (frame[1] - right).abs() < 1e-3,
+                "frame {k}: {frame:?} against ({left}, {right})"
+            );
+        }
+    }
+
+    /// An old root's latent source the new root lacks does not move the new
+    /// root: the old root has the counter and a 16-frame latent source, the
+    /// new root the counter alone on the left. The new root's counter is
+    /// undelayed from its first frame, through the fade and after the commit
+    /// that compiles the old channels away, and the plan's reported latency is
+    /// the new root's (none), not the old root's 16.
+    #[test]
+    fn a_latent_source_the_new_root_lacks_does_not_move_the_new_root() {
+        use tutti_graph::{NodeKey, OutPort, Source};
+        let (mut ed, exec) =
+            Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(8))));
+        ed.insert(NodeKey(1), "count", tutti_graph::Unforkable(Count(0.0)));
+        ed.insert(NodeKey(2), "late", tutti_graph::Unforkable(Late));
+        let count = Source::Node(OutPort {
+            node: NodeKey(1),
+            port: 0,
+        });
+        let late = Source::Node(OutPort {
+            node: NodeKey(2),
+            port: 0,
+        });
+        ed.spec_mut().topology.set_outputs([count, late]);
+        ed.commit().expect("commits");
+        let engine =
+            Engine::new(&Transport::new(SampleRate::SR_48K), &mut ed, exec).expect("within limits");
+        ed.set_root_fade(Some(tutti_graph::Fade::new(
+            Samples(20),
+            tutti_graph::FadeLaw::EqualAmplitude,
+        )));
+        let control = engine.output_control();
+        for _ in 0..2 {
+            let _ = block_with(&engine, 2, || {});
+        }
+        assert_eq!(
+            ed.base().map(|p| p.total_latency().samples()),
+            Some(Samples(16))
+        );
+        let id = ed.spec().root_id.next();
+        control
+            .publish_root(id, None, ChannelLayout::STEREO)
+            .unwrap();
+        ed.spec_mut().root_id = id;
+        ed.spec_mut().topology.set_outputs([count, Source::Zero]);
+        ed.commit().expect("commits");
+        assert_eq!(
+            ed.base().map(|p| p.total_latency().samples()),
+            Some(Samples(0)),
+            "the reported latency is the new root's"
+        );
+        let mut heard: Vec<f32> = (0..3).flat_map(|_| block_with(&engine, 2, || {})).collect();
+        // The fade is over: compile the old channels away and keep rendering.
+        let _ = ed.collect();
+        assert!(ed.settle_fades());
+        ed.commit().expect("commits");
+        heard.extend((0..2).flat_map(|_| block_with(&engine, 2, || {})));
+        // The counter at absolute frame `t` is `t + 1`; the old root's copy is
+        // 16 behind from frame 16 on.
+        for (k, frame) in heard.as_chunks::<2>().0.iter().enumerate() {
+            let t = 16 + k;
+            let (out, new) = if k < 20 {
+                equal_amplitude(k, 20)
+            } else {
+                (0.0, 1.0)
+            };
+            let left = out * (t as f32 - 15.0) + new * (t as f32 + 1.0);
+            assert!(
+                (frame[0] - left).abs() < 1e-3 && frame[1].abs() < 1e-6,
+                "frame {k}: {frame:?} against ({left}, 0)"
+            );
+        }
     }
 
     /// A fold set a block holds when it is replaced stays pinned until the

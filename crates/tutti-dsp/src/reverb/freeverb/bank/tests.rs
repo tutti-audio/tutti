@@ -1,0 +1,505 @@
+use tutti_buffers::{Planes, PlanesMut};
+use tutti_types::{Db, Mix, Samples};
+
+use super::*;
+use crate::TAIL_FLOOR;
+
+const RATE: SampleRate = SampleRate::SR_44K1;
+
+fn controls(room: f32, damp: f32) -> FreeverbControls {
+    FreeverbControls {
+        room: Mix(room),
+        damp: Mix(damp),
+    }
+}
+
+fn impulse(len: usize) -> Vec<f32> {
+    let mut x = vec![0.0f32; len];
+    x[0] = 1.0;
+    x
+}
+
+/// `x` through `bank` in blocks of `block`, `glides` carried across them: `(left, right)`.
+fn run(
+    bank: &mut FreeverbBank,
+    glides: &mut FreeverbGlides,
+    x: &[f32],
+    block: usize,
+) -> (Vec<f32>, Vec<f32>) {
+    let mut out = (vec![0.0f32; x.len()], vec![0.0f32; x.len()]);
+    let mut at = 0;
+    while at < x.len() {
+        let end = (at + block).min(x.len());
+        let a = [&x[at..end]];
+        let (l, r) = (&mut out.0[at..end], &mut out.1[at..end]);
+        let mut outs: [&mut [f32]; 2] = [l, r];
+        bank.process(
+            glides,
+            Planes::new(&a).unwrap(),
+            PlanesMut::new(&mut outs).unwrap(),
+        );
+        at = end;
+    }
+    out
+}
+
+/// A bank at `rate` with `c` aimed and landed.
+fn settled(rate: SampleRate, c: &FreeverbControls) -> (FreeverbBank, FreeverbGlides) {
+    let bank = FreeverbBank::new(rate);
+    let mut glides = bank.glides();
+    bank.aim(&mut glides, c);
+    glides.settle();
+    (bank, glides)
+}
+
+/// A comb's impulse response from its definition: the loop `v[n] = x[n] + g s[n]` with `s` the
+/// one-pole `s[n] = (1 - d) y[n] + d s[n - 1]` of the output `y[n] = v[n - L]`. The first
+/// echo is the impulse at `L`; echo `k >= 2` is at `kL` through `k - 1` passes of the
+/// one-pole, each scaled by `g`: `g^(k-1) (1 - d)^(k-1) C(m + k - 2, m) d^m` at `kL + m`, the
+/// `k - 1` fold convolution of the one-pole's `(1 - d) d^m` (a negative binomial). The echoes
+/// overlap once `m` reaches `L`, and add.
+fn comb_response(len: usize, l: usize, g: f64, d: f64) -> Vec<f64> {
+    let mut h = vec![0.0; len];
+    for k in 1..=len / l {
+        for m in 0..len.saturating_sub(k * l) {
+            let at = k * l + m;
+            h[at] += if k == 1 {
+                if m == 0 { 1.0 } else { 0.0 }
+            } else {
+                let choose = (0..m).fold(1.0f64, |c, i| {
+                    c * (k as f64 - 2.0 + (i + 1) as f64) / (i + 1) as f64
+                });
+                (g * (1.0 - d)).powi(k as i32 - 1) * choose * d.powi(m as i32)
+            };
+        }
+    }
+    h
+}
+
+/// Each comb is the feedback comb of its definition: taps at multiples of its length with the
+/// damping low-pass applied in the loop. At damping 0 that is `g^(k-1)` at `kL` and nothing
+/// between; at 0.2 and 0.4 it is the negative-binomial echoes of [`comb_response`].
+#[test]
+fn a_comb_is_the_feedback_comb_of_its_definition() {
+    for (l, g, d) in [
+        (100usize, 0.84f64, 0.0f64),
+        (97, 0.9, 0.2),
+        (64, 0.7, 0.4),
+        (200, 0.98, 0.1),
+    ] {
+        let mut comb = CombFilter::new(l);
+        comb.feedback = g as f32;
+        comb.damp1 = d as f32;
+        comb.damp2 = 1.0 - d as f32;
+        let len = 6 * l + 3;
+        let x = impulse(len);
+        let mut y = vec![0.0f32; len];
+        comb.process(&x, 1.0, &mut y);
+        let want = comb_response(len, l, g, d);
+        for (n, (&got, &w)) in y.iter().zip(&want).enumerate() {
+            // Under 1e-6 the comb flushes to zero: a bound far under the figures asserted.
+            assert!(
+                (f64::from(got) - w).abs() < 1e-5,
+                "L {l}, g {g}, d {d}, frame {n}: {got} vs {w}"
+            );
+        }
+        if d == 0.0 {
+            let loud = |n: usize| n.is_multiple_of(l) && n >= l;
+            assert!((0..len).filter(|&n| !loud(n)).all(|n| y[n] == 0.0), "L {l}");
+        }
+    }
+}
+
+/// An all-pass is Freeverb's, `H(z) = ((1 + g) z^-D - 1) / (1 - g z^-D)`, not the
+/// unit-magnitude lattice. Its impulse response, from the transfer function, is -1 at frame 0
+/// and `g^(k-1)` at frame `k D` for `k >= 1`, and zero elsewhere; its gain is 1 at DC for
+/// `g = 0.5` and `(2 + g) / (1 + g)` where `D w = pi`.
+#[test]
+fn an_all_pass_is_freeverbs_form() {
+    let (d, g) = (8usize, 0.5f32);
+    let mut ap = AllPassFilter::new(d);
+    ap.feedback = g;
+    let mut h = impulse(18 * d + 1);
+    ap.process(&mut h);
+    assert!((h[0] + 1.0).abs() < 1e-6, "h[0] = {}", h[0]);
+    for k in 1..=17usize {
+        assert!(
+            (h[k * d] - g.powi(k as i32 - 1)).abs() < 1e-5,
+            "h[{}] = {}",
+            k * d,
+            h[k * d]
+        );
+    }
+    assert!((0..h.len()).filter(|n| n % d != 0).all(|n| h[n] == 0.0));
+    let gain_at = |omega: f64| {
+        let (re, im) = h
+            .iter()
+            .enumerate()
+            .fold((0.0f64, 0.0f64), |(re, im), (n, &x)| {
+                let a = omega * n as f64;
+                (
+                    re + f64::from(x) * libm::cos(a),
+                    im - f64::from(x) * libm::sin(a),
+                )
+            });
+        re.hypot(im)
+    };
+    assert!((gain_at(0.0) - 1.0).abs() < 1e-3, "DC {}", gain_at(0.0));
+    let peak = gain_at(std::f64::consts::PI / d as f64);
+    assert!(
+        (peak - (2.0 + 0.5) / (1.0 + 0.5)).abs() < 1e-3,
+        "peak {peak}"
+    );
+}
+
+/// The tunings and the stereo spread are Freeverb's (combs 1116, 1188, 1277, 1356, 1422,
+/// 1491, 1557, 1617 and all-passes 556, 441, 341, 225 at 44.1 kHz), the right channel's
+/// lines 23 frames longer, and at another rate each is `round(rate / 44100 * tuning)` of
+/// the rate rounded to whole hertz.
+#[test]
+fn the_tunings_and_the_stereo_spread_are_freeverbs() {
+    let bank = FreeverbBank::new(RATE);
+    let lens = |side: usize| -> (Vec<usize>, Vec<usize>) {
+        (
+            bank.combs[side].iter().map(|c| c.buffer.len()).collect(),
+            bank.all_passes[side]
+                .iter()
+                .map(|a| a.buffer.len())
+                .collect(),
+        )
+    };
+    let left = [1116usize, 1188, 1277, 1356, 1422, 1491, 1557, 1617];
+    let aps = [556usize, 441, 341, 225];
+    assert_eq!(lens(0), (left.to_vec(), aps.to_vec()));
+    assert_eq!(
+        lens(1),
+        (
+            left.iter().map(|l| l + 23).collect(),
+            aps.iter().map(|l| l + 23).collect()
+        )
+    );
+    for hz in [22_050.0f64, 44_100.4, 48_000.0, 96_000.0, 192_000.0] {
+        let bank = FreeverbBank::new(SampleRate::of(hz));
+        let whole = hz.round();
+        let scale = |t: usize| (whole / 44_100.0 * t as f64).round() as usize;
+        for (side, spread) in [(0, 0), (1, 23)] {
+            assert_eq!(
+                bank.combs[side]
+                    .iter()
+                    .map(|c| c.buffer.len())
+                    .collect::<Vec<_>>(),
+                left.iter().map(|&l| scale(l + spread)).collect::<Vec<_>>(),
+                "{hz} Hz, side {side}"
+            );
+            assert_eq!(
+                bank.all_passes[side]
+                    .iter()
+                    .map(|a| a.buffer.len())
+                    .collect::<Vec<_>>(),
+                aps.iter().map(|&l| scale(l + spread)).collect::<Vec<_>>(),
+                "{hz} Hz, side {side}"
+            );
+        }
+    }
+}
+
+/// The spread is heard: an impulse comes out of the left at the shortest comb, 1116 frames at
+/// 44.1 kHz, and out of the right 23 frames later, and nothing before.
+#[test]
+fn the_right_channel_sounds_23_frames_after_the_left() {
+    let (mut bank, mut glides) = settled(RATE, &FreeverbControls::GENERAL_MIDI);
+    let (l, r) = run(&mut bank, &mut glides, &impulse(1_300), 64);
+    assert!(l[..1116].iter().all(|&s| s == 0.0));
+    assert!(l[1116].abs() > 0.01);
+    assert!(r[..1139].iter().all(|&s| s == 0.0));
+    assert!(r[1139].abs() > 0.01);
+}
+
+/// The wet signal is the input through the 8 combs summed and the four all-passes; with the
+/// input scaled by 0.015 the first echo at the shortest comb is `0.015` through the
+/// all-passes' direct paths, `(-1)^4`.
+#[test]
+fn the_input_is_scaled_by_the_fixed_gain() {
+    let (mut bank, mut glides) = settled(RATE, &FreeverbControls::GENERAL_MIDI);
+    let (l, _) = run(&mut bank, &mut glides, &impulse(1_200), 64);
+    assert!((l[1116] - 0.015).abs() < 1e-6, "{}", l[1116]);
+    assert_eq!(FreeverbBank::FIXED_GAIN, Gain::new(0.015));
+}
+
+/// The decay is Schroeder's: a comb of `L` frames at loop gain `g` falls by 60 dB after
+/// `RT60 = -3 L / (rate log10 g)` seconds, `L ln(1e-3) / ln g` frames. The comb's own
+/// response at damping 0 crosses 1e-3 of its first echo at that trip, read off its echoes,
+/// at several room sizes (the longest comb, 1640 frames at the right).
+#[test]
+fn a_comb_falls_sixty_decibels_in_the_schroeder_rt60() {
+    let l = 1_640usize;
+    for room in [0.0f32, 0.5, 0.9, 1.0] {
+        let g = f64::from(controls(room, 0.0).feedback().get());
+        let mut comb = CombFilter::new(l);
+        comb.feedback = g as f32;
+        comb.damp1 = 0.0;
+        comb.damp2 = 1.0;
+        let trips = (-3.0 / g.log10()).ceil() as usize + 2;
+        let len = (trips + 1) * l;
+        let x = impulse(len);
+        let mut y = vec![0.0f32; len];
+        comb.process(&x, 1.0, &mut y);
+        let first_below = (1..)
+            .find(|&k| y[k * l].abs() < 1e-3)
+            .expect("the comb decays");
+        // The first echo is the impulse itself: `first_below - 1` trips of the loop gain.
+        let rt60 = (first_below - 1) as f64 * l as f64 / RATE.get();
+        let formula = -3.0 * l as f64 / (RATE.get() * g.log10());
+        assert!(
+            (rt60 - formula).abs() <= l as f64 / RATE.get(),
+            "room {room}: measured {rt60} s, Schroeder {formula} s"
+        );
+    }
+    // The General MIDI room: 1640 frames at 0.84 is 1.473 s.
+    let gm = -3.0 * 1640.0 / (44_100.0 * libm::log10(0.84));
+    assert!((gm - 1.4734).abs() < 1e-3, "{gm}");
+}
+
+/// The tail covers the ring-out and is not absurdly long: the declared tail of the General
+/// MIDI room is past the Schroeder RT60 of its longest comb and the all-pass chain's
+/// echoes, and the render has fallen 60 dB under its peak by then and not long before.
+#[test]
+fn the_tail_is_the_rt60_of_the_longest_comb_plus_the_chain() {
+    let gm = FreeverbControls::GENERAL_MIDI;
+    let (mut bank, mut glides) = settled(RATE, &gm);
+    let Tail::Finite(tail) = bank.tail_of(&gm) else {
+        panic!("a finite tail")
+    };
+    let g = f64::from(gm.feedback().get());
+    let trips = (f64::from(TAIL_FLOOR.get()) / 20.0 * std::f64::consts::LN_10 / g.ln()).ceil();
+    let comb = (1.0 + trips) * (1640.0 + 2.0);
+    let chain: f64 = [579.0f64, 464.0, 364.0, 248.0]
+        .iter()
+        .map(|d| {
+            (1.0 + (-60.0f64 / 20.0 * std::f64::consts::LN_10 / 0.5f64.ln()).ceil()) * (d + 2.0)
+        })
+        .sum();
+    // The figure is seconds at the rate, ceiled to frames: the sum of whole frames, to the
+    // frame the division rounds to.
+    let want = (comb + chain).ceil() as usize;
+    assert!(
+        tail.get().abs_diff(want) <= 1,
+        "{} against {want}",
+        tail.get()
+    );
+    assert!(tail.get() as f64 > 1.5 * RATE.get(), "past one RT60");
+    let len = tail.get() + 20_000;
+    let (l, r) = run(&mut bank, &mut glides, &impulse(len), 512);
+    let peak = l.iter().chain(&r).fold(0.0f32, |m, s| m.max(s.abs()));
+    let last = |from: usize| {
+        l[from..]
+            .iter()
+            .chain(&r[from..])
+            .fold(0.0f32, |m, s| m.max(s.abs()))
+    };
+    assert!(last(tail.get()) < 1e-3 * peak, "under -60 dB past the tail");
+    assert!(last(tail.get() / 4) > 1e-3 * peak, "not absurdly loose");
+    // A bigger room rings longer, a smaller one shorter; the damping does not change it.
+    let at = |room: f32, damp: f32| match bank.tail_of(&controls(room, damp)) {
+        Tail::Finite(n) => n.get(),
+        other => panic!("{other:?}"),
+    };
+    assert!(at(0.9, 0.5) > at(0.5, 0.5) && at(0.5, 0.5) > at(0.1, 0.5));
+    assert_eq!(at(0.5, 0.0), at(0.5, 1.0));
+    assert_eq!(
+        bank.tail(),
+        Tail::Finite(Samples(at(1.0, 0.0))),
+        "the ceiling is the room at its largest"
+    );
+    assert_eq!(TAIL_FLOOR, Db(-60.0));
+}
+
+/// A room size and a damping that move mid-stream move the combs' feedback and damping over
+/// the 20 ms glide, a chunk at a time, and land on the new figures exactly: each chunk's
+/// change is the distance over the steps (20 ms at 48 kHz in chunks of 32 frames is 30), the
+/// first is far from the target, and the figure is the target at the last step and not
+/// before.
+#[test]
+fn a_moving_room_glides_its_combs_a_chunk_at_a_time() {
+    let rate = SampleRate::SR_48K;
+    let (from_c, to_c) = (controls(0.2, 0.1), controls(0.9, 0.9));
+    let (mut bank, mut glides) = settled(rate, &from_c);
+    let x = vec![0.25f32; FreeverbBank::CHUNK];
+    let chunk = |bank: &mut FreeverbBank, glides: &mut FreeverbGlides| {
+        run(bank, glides, &x, FreeverbBank::CHUNK);
+        let c = &bank.combs[0][0];
+        (c.feedback, c.damp1)
+    };
+    let (from, from_damp) = chunk(&mut bank, &mut glides);
+    assert_eq!(from, from_c.feedback().get());
+    bank.aim(&mut glides, &to_c);
+    let (to, to_damp) = (to_c.feedback().get(), to_c.damping());
+    let steps = 30;
+    let mut last = from;
+    for k in 1..=steps {
+        let (f, dmp) = chunk(&mut bank, &mut glides);
+        assert!(
+            ((f - last) - (to - from) / steps as f32).abs() < 1e-5,
+            "step {k}: {last} -> {f}"
+        );
+        if k == 1 {
+            assert!(
+                (to - f).abs() > 0.9 * (to - from).abs(),
+                "the first chunk is far from the target: {f} of {from} -> {to}"
+            );
+        }
+        if k < steps {
+            assert!(f != to && dmp != to_damp, "landed early at {k}");
+        }
+        last = f;
+    }
+    assert_eq!(chunk(&mut bank, &mut glides), (to, to_damp));
+    assert!(from != to && from_damp != to_damp);
+}
+
+/// The chunks are counted from the last reset, not from a call's edge: any split of the
+/// stream gives the bits of one call, with the room moving through it.
+#[test]
+fn any_block_size_gives_the_same_bits() {
+    let x: Vec<f32> = (0..3_000)
+        .map(|n| ((n * 13 + 5) % 100) as f32 / 50.0 - 1.0)
+        .collect();
+    let render = |block: usize| {
+        let (mut bank, mut glides) = settled(RATE, &controls(0.2, 0.1));
+        bank.aim(&mut glides, &controls(0.9, 0.7));
+        run(&mut bank, &mut glides, &x, block)
+    };
+    let whole = render(x.len());
+    assert!(whole.0.iter().any(|&s| s != 0.0));
+    for block in [1, 7, 31, 32, 33, 64, 100, 255] {
+        assert_eq!(render(block), whole, "blocks of {block}");
+    }
+}
+
+/// A reset empties the lines and restarts the chunks: the response to an impulse is a fresh
+/// bank's, bit for bit, though the reset came off a chunk's edge; and a clone continues
+/// identically and shares no line.
+#[test]
+fn a_reset_bank_is_a_fresh_one_and_a_clone_shares_nothing() {
+    let c = controls(0.7, 0.3);
+    let (mut used, mut glides) = settled(RATE, &c);
+    run(&mut used, &mut glides, &vec![1.0; 5_017], 100);
+    used.reset();
+    let (mut fresh, mut fresh_glides) = settled(RATE, &c);
+    let mut glides = used.glides();
+    used.aim(&mut glides, &c);
+    glides.settle();
+    assert_eq!(
+        run(&mut used, &mut glides, &impulse(4_000), 64),
+        run(&mut fresh, &mut fresh_glides, &impulse(4_000), 64)
+    );
+    let mut copy = used.clone();
+    let mut copy_glides = glides;
+    let more = run(&mut used, &mut glides, &impulse(2_000), 64);
+    assert_eq!(run(&mut copy, &mut copy_glides, &impulse(2_000), 64), more);
+    copy.reset();
+    assert!(
+        run(&mut used, &mut glides, &vec![0.0; 100], 64)
+            .0
+            .iter()
+            .any(|&s| s != 0.0),
+        "the original still rings"
+    );
+}
+
+/// A view of `f64` is the `f32` render converted, to the last bit, with the room moving;
+/// an input of two channels is their average; a view of one output plane has the left only.
+#[test]
+fn views_of_any_format_and_width_are_the_f32_render() {
+    let x: Vec<f32> = (0..2_000)
+        .map(|n| ((n * 7) % 19) as f32 / 9.0 - 1.0)
+        .collect();
+    let setup = || {
+        let (bank, mut glides) = settled(RATE, &controls(0.3, 0.2));
+        bank.aim(&mut glides, &controls(0.8, 0.5));
+        (bank, glides)
+    };
+    let (mut bank, mut glides) = setup();
+    let want = run(&mut bank, &mut glides, &x, 128);
+    let (mut bank, mut glides) = setup();
+    let wide: Vec<f64> = x.iter().map(|&s| f64::from(s)).collect();
+    let (mut l, mut r) = (vec![0.0f64; x.len()], vec![0.0f64; x.len()]);
+    let ins = [wide.as_slice()];
+    let mut outs: [&mut [f64]; 2] = [&mut l, &mut r];
+    bank.process(
+        &mut glides,
+        Planes::new(&ins).unwrap(),
+        PlanesMut::new(&mut outs).unwrap(),
+    );
+    for (g, w) in l.iter().zip(&want.0).chain(r.iter().zip(&want.1)) {
+        assert_eq!(*g, f64::from(*w));
+    }
+    // Two channels are averaged: the same signal twice is itself.
+    let (mut bank, mut glides) = setup();
+    let twice = [x.as_slice(), x.as_slice()];
+    let (mut l2, mut r2) = (vec![0.0f32; x.len()], vec![0.0f32; x.len()]);
+    let mut outs: [&mut [f32]; 2] = [&mut l2, &mut r2];
+    bank.process(
+        &mut glides,
+        Planes::new(&twice).unwrap(),
+        PlanesMut::new(&mut outs).unwrap(),
+    );
+    assert_eq!((l2, r2), want);
+    // One output plane is the left.
+    let (mut bank, mut glides) = setup();
+    let one_in = [x.as_slice()];
+    let mut left = vec![0.0f32; x.len()];
+    let mut outs: [&mut [f32]; 1] = [&mut left];
+    bank.process(
+        &mut glides,
+        Planes::new(&one_in).unwrap(),
+        PlanesMut::new(&mut outs).unwrap(),
+    );
+    assert_eq!(left, want.0);
+}
+
+/// The all-pass and the comb flush what is under 1e-6 to zero, so a tail that has fallen
+/// below it is exactly silent, and a hostile input (a huge value) stays finite at the
+/// extreme room.
+#[test]
+fn the_tail_falls_to_exact_silence_and_a_huge_input_stays_finite() {
+    let c = controls(1.0, 0.0);
+    let (mut bank, mut glides) = settled(RATE, &c);
+    let Tail::Finite(tail) = bank.tail_of(&c) else {
+        panic!("finite")
+    };
+    let (l, r) = run(&mut bank, &mut glides, &impulse(tail.get() * 3), 512);
+    assert!(
+        l[tail.get() * 2..]
+            .iter()
+            .chain(&r[tail.get() * 2..])
+            .all(|&s| s == 0.0)
+    );
+    let (mut bank, mut glides) = settled(RATE, &c);
+    let loud = vec![1e30f32; 4_000];
+    let (l, r) = run(&mut bank, &mut glides, &loud, 64);
+    assert!(l.iter().chain(&r).all(|s| s.is_finite()));
+}
+
+/// A rate so low a tuning rounds to no frames (the shortest all-pass, 225, is under half a frame
+/// below 98 Hz) still has a line of one frame, so a render returns and is finite; and a rate no
+/// device has saturates the line instead of allocating tens of millions of frames.
+#[test]
+fn an_absurd_rate_neither_hangs_nor_allocates_without_bound() {
+    for hz in [1.0f64, 50.0, 97.0] {
+        let (mut bank, mut glides) = settled(SampleRate::of(hz), &FreeverbControls::GENERAL_MIDI);
+        assert!(bank.combs.iter().flatten().all(|c| !c.buffer.is_empty()));
+        assert!(
+            bank.all_passes
+                .iter()
+                .flatten()
+                .all(|a| !a.buffer.is_empty())
+        );
+        let (l, r) = run(&mut bank, &mut glides, &impulse(2_000), 64);
+        assert!(l.iter().chain(&r).all(|s| s.is_finite()), "{hz} Hz");
+        assert!(l.iter().chain(&r).any(|&s| s != 0.0), "{hz} Hz sounds");
+    }
+    let bank = FreeverbBank::new(SampleRate::of(1.0e9));
+    let longest = bank.combs.iter().flatten().map(|c| c.buffer.len()).max();
+    assert_eq!(longest, Some(1 << 16));
+}

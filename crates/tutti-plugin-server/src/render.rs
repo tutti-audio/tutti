@@ -74,6 +74,12 @@ pub(crate) struct RenderConfig {
     pub rate_refused: bool,
     /// What the plugin consumes, as it reports now.
     pub features: Features,
+    /// The channels the plugin takes now, over all its buses, 0 with none
+    /// loaded. A block renders only into a slab laid out the same.
+    pub inputs: usize,
+    /// The channels the plugin gives now, over all its buses, 0 with none
+    /// loaded. A block renders only into a slab laid out the same.
+    pub outputs: usize,
 }
 
 impl RenderConfig {
@@ -84,6 +90,8 @@ impl RenderConfig {
             max_block: 0,
             rate_refused: false,
             features: Features::empty(),
+            inputs: 0,
+            outputs: 0,
         }
     }
 }
@@ -306,7 +314,8 @@ pub(crate) struct RenderSide {
     /// The barrier the next block that reaches the plugin acknowledges.
     barrier: Option<u64>,
     /// Blocks refused for their length (empty, or past the activated length or
-    /// the slab's room), since the session began.
+    /// the slab's room) or for a slab laid out unlike the plugin's ports, since
+    /// the session began.
     refused_blocks: u64,
 }
 
@@ -493,18 +502,24 @@ impl RenderSide {
     }
 
     /// Whether a block of `frames` may reach the plugin: not empty, within the
-    /// length it was activated for, and within the slab's per-channel room
-    /// (the scratch's size). The length is the peer's to choose, so it is
-    /// checked here, once, for every format: unchecked, a long one sized the
-    /// scratch to it on the audio thread, and the formats disagreed past the
-    /// activated length (CLAP refused it, VST2 split it, VST3 passed it to the
-    /// plugin). A refused block is counted and reads back as silence.
+    /// length it was activated for, within the slab's per-channel room (the
+    /// scratch's size), and into a slab laid out as the plugin's ports are now.
+    /// The length is the peer's to choose, so it is checked here, once, for
+    /// every format: unchecked, a long one sized the scratch to it on the audio
+    /// thread, and the formats disagreed past the activated length (CLAP
+    /// refused it, VST2 split it, VST3 passed it to the plugin). A plugin that changed its ports before the host set up a slab
+    /// for them is read and written as the other layout otherwise. A refused
+    /// block is counted and reads back as silence.
     fn block_fits(&mut self, frames: usize) -> bool {
-        let room = self
-            .slab
-            .as_ref()
-            .map_or(0, |slab| slab.layout_ref().samples_per_channel);
-        let fits = frames > 0 && frames <= self.config.max_block && frames <= room;
+        let (room, matches) = self.slab.as_ref().map_or((0, false), |slab| {
+            let layout = slab.layout_ref();
+            (
+                layout.samples_per_channel,
+                layout.input_channels() == self.config.inputs
+                    && layout.output_channels() == self.config.outputs,
+            )
+        });
+        let fits = matches && frames > 0 && frames <= self.config.max_block && frames <= room;
         if !fits {
             self.refused_blocks += 1;
         }

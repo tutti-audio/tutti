@@ -1,9 +1,11 @@
+use tutti_types::{Gain, SampleSpan};
+
 use super::*;
 use crate::reverb::network::{Band, Fdn, Matrix, Network, Stage};
 use crate::{Lti as _, System as _};
 
 fn freezable() -> FdnLayout {
-    FdnLayout::new(8, MaxDecay::DEFAULT.get(), true).unwrap()
+    FdnLayout::new(8, MaxDecay::DEFAULT, true).unwrap()
 }
 
 fn base() -> FdnControls {
@@ -79,13 +81,13 @@ fn diffusion_is_the_reflection_vector() {
             panic!("a reflection at {diffusion}")
         };
         assert_eq!(v.len(), 8);
-        let unit: f64 = v.iter().map(|&x| f64::from(x).powi(2)).sum();
+        let unit: f64 = v.iter().map(|&x| f64::from(x.get()).powi(2)).sum();
         assert!((unit - 1.0).abs() < 1e-6, "{diffusion}: |v|^2 = {unit}");
         assert!(
-            v[0] < last_axis,
+            v[0].get() < last_axis,
             "the first line's share falls as the mix grows"
         );
-        last_axis = v[0];
+        last_axis = v[0].get();
     }
 }
 
@@ -99,8 +101,15 @@ fn a_freeze_is_lossless_and_takes_no_input() {
     let f = fdn_of(&n);
     assert!(n.is_lossless() && n.is_stable());
     assert_eq!(n.tail(Db(-60.0)), Ring::Unbounded);
-    assert!(f.input.iter().all(|&g| g == 0.0), "the input is shut");
-    assert!(f.lines.iter().all(|l| l.modulation.depth == 0.0));
+    assert!(
+        f.input.iter().all(|&g| g == Gain::SILENT),
+        "the input is shut"
+    );
+    assert!(
+        f.lines
+            .iter()
+            .all(|l| l.modulation.depth == SampleSpan::ZERO)
+    );
     for l in f.lines.iter() {
         for band in Band::ALL {
             assert_eq!(l.absorption.gain(band).get().to_bits(), 1.0f32.to_bits());
@@ -115,10 +124,10 @@ fn a_freeze_is_lossless_and_takes_no_input() {
 #[test]
 fn lengths_are_whole_frames_that_grow_with_size_and_rate() {
     let d = FdnLayout::default();
-    let mut last = vec![0.0f32; 8];
+    let mut last = vec![0.0f64; 8];
     for size in [0.0, 0.3, 0.6, 1.0] {
         let n = design_of(&d, &with(|c| c.size = Mix(size)));
-        let lengths: Vec<f32> = fdn_of(&n).lines.iter().map(|l| l.length).collect();
+        let lengths: Vec<f64> = fdn_of(&n).lines.iter().map(|l| l.length.get()).collect();
         assert!(lengths.iter().all(|l| l.fract() == 0.0), "{lengths:?}");
         assert!(lengths.iter().zip(&last).all(|(a, b)| a > b));
         last = lengths;
@@ -126,7 +135,7 @@ fn lengths_are_whole_frames_that_grow_with_size_and_rate() {
     let at = |hz| design_at(&d, &base(), SampleRate::of(hz));
     let (a, b) = (at(44_100.0), at(88_200.0));
     for (x, y) in fdn_of(&a).lines.iter().zip(fdn_of(&b).lines.iter()) {
-        assert!((y.length - 2.0 * x.length).abs() <= 1.0);
+        assert!((y.length.get() - 2.0 * x.length.get()).abs() <= 1.0);
     }
 }
 
@@ -136,13 +145,16 @@ fn lengths_are_whole_frames_that_grow_with_size_and_rate() {
 #[test]
 fn the_input_feeds_every_line_and_the_ears_take_alternate_lines() {
     for n in [2usize, 8, 16] {
-        let d = FdnLayout::new(n, Seconds(2.0), false).unwrap();
+        let d = FdnLayout::new(n, MaxDecay::of(Seconds(2.0)), false).unwrap();
         let net = design_of(&d, &base());
         let f = fdn_of(&net);
         let input = 1.0 / (n as f32).sqrt();
         let ear = (2.0 / n as f32).sqrt();
         assert_eq!(f.lines.len(), n);
-        assert!(f.input.iter().all(|&g| (g - input).abs() < 1e-6), "{n}");
+        assert!(
+            f.input.iter().all(|&g| (g.get() - input).abs() < 1e-6),
+            "{n}"
+        );
         for j in 0..n {
             let (left, right) = (f.output.rows[0][j], f.output.rows[1][j]);
             let (hot, cold) = if j % 2 == 0 {
@@ -150,25 +162,22 @@ fn the_input_feeds_every_line_and_the_ears_take_alternate_lines() {
             } else {
                 (right, left)
             };
-            assert!((hot - ear).abs() < 1e-6 && cold == 0.0, "line {j} of {n}");
+            assert!(
+                (hot.get() - ear).abs() < 1e-6 && cold == Gain::SILENT,
+                "line {j} of {n}"
+            );
         }
     }
 }
 
-/// The configuration refuses what the network cannot hold.
+/// The configuration refuses a line count the network cannot hold: it is 2 to 16 and even.
 #[test]
-fn a_configuration_refuses_what_it_cannot_hold() {
-    let ok = Seconds(8.0);
+fn a_configuration_refuses_a_line_count_it_cannot_hold() {
+    let ok = MaxDecay::DEFAULT;
     assert!(FdnLayout::new(8, ok, false).is_some());
     assert!(FdnLayout::new(16, ok, true).is_some());
     for lines in [0, 1, 7, 17, 18] {
         assert!(FdnLayout::new(lines, ok, false).is_none(), "{lines}");
-    }
-    for bad in [0.0, 0.01, 60.001, f32::NAN, f32::INFINITY] {
-        assert!(
-            FdnLayout::new(8, Seconds::from_f32(bad), false).is_none(),
-            "{bad}"
-        );
     }
 }
 
@@ -190,10 +199,11 @@ fn the_capacity_dominates_where_rounding_matters() {
             ..FdnControls::DEFAULT
         };
         let tail = design_at(&d, &c, rate).tail(TAIL_FLOOR);
-        assert!(
-            bound.tail.covers(tail),
-            "diffusion {k}%: {tail:?} over {:?}",
-            bound.tail
-        );
+        let covered = match (bound.tail, tail) {
+            (Ring::Unbounded, _) => true,
+            (Ring::Finite(_), Ring::Unbounded) => false,
+            (Ring::Finite(a), Ring::Finite(b)) => a.get() >= b.get(),
+        };
+        assert!(covered, "diffusion {k}%: {tail:?} over {:?}", bound.tail);
     }
 }

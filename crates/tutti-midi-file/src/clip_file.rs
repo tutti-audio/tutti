@@ -37,7 +37,10 @@
 use std::vec::Vec;
 
 use crate::Truncated;
-use tutti_ump::{DeltaTicks, Flex, FlexTextKind, Form, Message, Stream, SysexStatus, Ump, Utility};
+use tutti_ump::{
+    DeltaTicks, Flex, FlexTextKind, Form, Message, Stream, SysexStatus, TicksPerQuarterNote, Ump,
+    Utility,
+};
 
 mod read;
 
@@ -51,7 +54,7 @@ pub(crate) const CLIP_FILE_MAGIC: [u8; 8] = *b"SMF2CLIP";
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ParsedClip {
     /// Ticks per quarter note (the DCTPQ), never zero.
-    pub(crate) ticks_per_quarter: u16,
+    pub(crate) ticks_per_quarter: TicksPerQuarterNote,
     /// The header's messages after the file header, as `(tick, packet)`: the
     /// leading Set Profile On packets at 0, then each message behind its DCS,
     /// ticks counted from the DCTPQ (the header's own clock, which runs
@@ -201,7 +204,7 @@ pub(crate) fn property_exchange(message: &Message) -> bool {
 ///
 /// [`MidiFile`]: crate::MidiFile
 pub(crate) fn write(
-    ticks_per_quarter: u16,
+    ticks_per_quarter: TicksPerQuarterNote,
     header: &[(u64, Ump)],
     header_end: u64,
     events: &[(u64, Ump)],
@@ -323,7 +326,7 @@ fn push_delta(out: &mut Vec<u8>, mut ticks: u64) {
     push_words(out, delta_clockstamp(ticks).words());
 }
 
-fn dctpq(ticks_per_quarter: u16) -> Ump {
+fn dctpq(ticks_per_quarter: TicksPerQuarterNote) -> Ump {
     Ump::from(Message::Utility(Utility::TicksPerQuarterNote(
         ticks_per_quarter,
     )))

@@ -10,9 +10,9 @@ use crate::types::PluginInfo;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tutti_clap_ffi::{AudioPortInfo, Bundle, DescriptorInfo, LoadError, PortKind, Stage};
-use tutti_plugin_types::{BusChannels, ChannelLayout, EditorPresence};
+use tutti_plugin_types::{BusChannels, ChannelLayout, EditorPresence, PluginVersion};
 use tutti_plugin_types::{Load, MainThreadMarker, MainWorkHandle, Origin};
-use tutti_types::ChannelCountOutOfRange;
+use tutti_types::LayoutError;
 
 /// A placeholder rate for the plugin until its first activation, whose
 /// `Prepare` carries the real one.
@@ -69,7 +69,7 @@ fn load_failed(bundle_path: &Path, error: LoadError) -> ClapError {
 fn info_of(d: &DescriptorInfo) -> PluginInfo {
     PluginInfo::new(d.id.clone(), d.name.clone())
         .vendor(d.vendor.clone())
-        .version(d.version.clone())
+        .version(PluginVersion::text(d.version.clone()))
         .url(d.url.clone())
         .description(d.description.clone())
         .features(d.features.clone())
@@ -221,7 +221,7 @@ impl AudioPortSource for tutti_clap_ffi::Plugin {
 /// reporting 65 538 channels must not become a stereo bus.
 pub(super) fn layout_of_port(
     port: &AudioPortInfo,
-) -> std::result::Result<ChannelLayout, ChannelCountOutOfRange> {
+) -> std::result::Result<ChannelLayout, LayoutError> {
     match port.port_type {
         PortKind::Mono => Ok(ChannelLayout::MONO),
         PortKind::Stereo => Ok(ChannelLayout::STEREO),
@@ -546,7 +546,7 @@ mod enumeration_hole_tests {
         for wide in [65_536, 65_537, 65_538, u32::MAX] {
             assert_eq!(
                 layout_of_port(&unspecified_port(wide)),
-                Err(ChannelCountOutOfRange(u64::from(wide)))
+                Err(LayoutError::TooWide(u64::from(wide)))
             );
         }
         // The type tag names the width, so the count is not consulted.

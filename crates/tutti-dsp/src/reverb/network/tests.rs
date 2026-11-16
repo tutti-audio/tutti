@@ -18,12 +18,12 @@ fn the_pre_delay_is_rounded_to_whole_frames() {
 }
 
 /// A `Network` is a plain value built on the control side: the whole value
-/// stays under 64 KiB (it is about 55 KB: `MAX_STAGES` of the largest stage).
+/// stays under 80 KiB (it is about 67 KB: `MAX_STAGES` of the largest stage).
 #[test]
-fn a_network_stays_under_64_kib() {
+fn a_network_stays_under_80_kib() {
     let bytes = std::mem::size_of::<Network>();
     println!("size_of::<Network>() = {bytes}");
-    assert!(bytes < 64 * 1024, "{bytes}");
+    assert!(bytes < 80 * 1024, "{bytes}");
 }
 
 /// An empty network recirculates nothing: no decay, no tail, stable.
@@ -41,8 +41,8 @@ fn an_empty_network_is_silent_and_stable() {
 #[test]
 fn the_forms_differ_in_their_direct_term_and_group_delay() {
     let ap = |form, gain| AllPass {
-        delay: 100.0,
-        gain,
+        delay: SampleSpan::of(100.0),
+        gain: Gain::new(gain),
         modulation: LineModulation::NONE,
         form,
     };
@@ -51,11 +51,11 @@ fn the_forms_differ_in_their_direct_term_and_group_delay() {
     assert!(!ap(AllPassForm::Lattice, 0.0).has_direct_term());
     assert!(ap(AllPassForm::Freeverb, 0.0).has_direct_term());
     assert!(ap(AllPassForm::Freeverb, 0.5).has_direct_term());
-    assert_eq!(ap(AllPassForm::Lattice, 0.5).low_frequency_delay(), 300.0);
     assert_eq!(
-        ap(AllPassForm::Freeverb, 0.5).low_frequency_delay(),
-        f32::INFINITY
+        ap(AllPassForm::Lattice, 0.5).low_frequency_delay(),
+        Some(SampleSpan::of(300.0))
     );
+    assert_eq!(ap(AllPassForm::Freeverb, 0.5).low_frequency_delay(), None);
 }
 
 /// The lattice form is unit magnitude at every frequency, from its

@@ -1,9 +1,5 @@
-//! Control-rate helpers: the solve interval and stream cadence, and the
+//! Control-rate helpers: the solve interval and the
 //! channel grouping the filters' held path runs in.
-
-use core::num::NonZeroU32;
-
-use crate::Cadence;
 
 /// Samples between coefficient solves on a parameter that moves inside a block.
 ///
@@ -15,15 +11,10 @@ use crate::Cadence;
 /// sweep moves at, so the interpolation error is a small fraction of the change
 /// between two solves. Measured against the per-sample solve: 3e-5 worst on a
 /// 200 Hz → 8 kHz cutoff sweep in 85 ms (4.6e-4 at 64 samples; exactly 0 at
-/// 1), 3.5e-6 on a 2 Hz phaser. (Every family solves on the stream's grid, not
+/// 1), 3.5e-6 on a 2 Hz phaser. (Every bank solves on the stream's grid, not
 /// from a block's start: a control is in the render up to 16 frames
 /// after it was sampled, wherever the blocks fall.)
 pub const COEFF_INTERVAL: usize = 16;
-
-/// [`COEFF_INTERVAL`] as a stream-anchored [`Cadence`]: the grid the
-/// SVF, the ladder and the crossover are solved on, counted from the last reset.
-pub(crate) const COEFF_STREAM: Cadence =
-    Cadence::stream(NonZeroU32::new(COEFF_INTERVAL as u32).expect("the interval is positive"));
 
 /// Channels a recursive node renders together, sample-inner.
 ///

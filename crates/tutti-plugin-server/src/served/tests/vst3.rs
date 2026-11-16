@@ -82,11 +82,13 @@ const ACTIVATION_COUNT_BASE: f32 = 9000.0;
 /// is rendered, so the answer is what the plugin saw, not what the host
 /// believes.
 fn activations_seen_by_the_plugin(instance: &mut Vst3Instance) -> u32 {
-    instance.set_parameter(
-        main_thread(),
-        tutti_plugin_types::ParamId::new(PARAM_MODE),
-        Normalized::clamped(MODE_ACTIVATION_COUNT),
-    );
+    instance
+        .set_parameter(
+            main_thread(),
+            tutti_plugin_types::ParamId::new(PARAM_MODE),
+            Normalized::clamped(MODE_ACTIVATION_COUNT),
+        )
+        .expect("a declared, writable parameter");
     let frames = 128;
     let input = vec![vec![0.0f32; frames]; 3];
     let mut output = vec![vec![0.0f32; frames]; 3];

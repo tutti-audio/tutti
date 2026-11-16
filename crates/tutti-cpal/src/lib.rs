@@ -138,4 +138,4 @@ pub use roster::{DeviceChange, DeviceId, DeviceRoster, Direction, Snapshot, Snap
 pub use cpal;
 
 #[cfg(feature = "capture")]
-pub use mic::{MONITOR_RING_FRAMES, MicConfig, MicIn};
+pub use mic::{MONITOR_RING, MicConfig, MicIn};

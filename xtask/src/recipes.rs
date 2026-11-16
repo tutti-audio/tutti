@@ -242,6 +242,11 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
         "a public item names audio with a fixed sample format only as a row of xtask/buffers-fixed.txt",
     ),
     (
+        "check-building",
+        "",
+        "a configured thing is built by the one shape, bar the rows of xtask/building-baseline.txt and the gate's allow-list",
+    ),
+    (
         "check-conformance",
         "",
         "spec inventories are well formed, test tags name rows, the CLAP inventory matches clap-sys and the VST3 one the SDK",
@@ -316,6 +321,13 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
     ),
     ("deny", "", "RustSec advisories (needs cargo-deny)"),
     (
+        "public-api",
+        "<crate> [<base>]",
+        "a crate's public API with all its features on the docs nightly, or its diff from <base> \
+         to HEAD (needs cargo-public-api; the diff checks each commit out in place, refuses a \
+         dirty tree and restores the checkout)",
+    ),
+    (
         "book",
         "[OUT]",
         "build the book with mdbook into book/build, or into OUT (relative to book/)",
@@ -378,6 +390,10 @@ struct Planner<'a> {
 }
 
 const TARGET: &str = "x86_64-pc-windows-msvc";
+
+/// The dated nightly CI pins for the docs.rs build; `public-api` reads rustdoc
+/// JSON from the same one.
+const DOCS_NIGHTLY: &str = "nightly-2026-10-14";
 
 impl Planner<'_> {
     fn run(&mut self, c: Cmd) {
@@ -453,6 +469,7 @@ impl Planner<'_> {
                 | "conformance-inventory"
                 | "conformance"
                 | "coverage"
+                | "public-api"
         );
         if !takes_args && !args.is_empty() {
             return Err(format!(
@@ -551,6 +568,7 @@ impl Planner<'_> {
             "check-comments" => self.out.push(Step::Gate(Gate::Comments)),
             "check-platform-seam" => self.out.push(Step::Gate(Gate::PlatformSeam)),
             "check-buffers" => self.out.push(Step::Gate(Gate::Buffers)),
+            "check-building" => self.out.push(Step::Gate(Gate::Building)),
             "check-conformance" => self.out.push(Step::Gate(Gate::Conformance)),
             "conformance" => {
                 let o = options(name, args, &["--results", "--out"])?;
@@ -603,13 +621,12 @@ impl Planner<'_> {
                     r#"RUSTDOCFLAGS="-D warnings --document-private-items" cargo doc --locked --workspace --no-deps"#,
                     r#"RUSTDOCFLAGS="-D warnings --document-private-items" cargo doc --locked -p tutti-session -p tutti --no-deps --all-features"#,
                     r#"RUSTDOCFLAGS="-D warnings" cargo doc --locked -p tutti-graph --no-deps --features contract"#,
-                    r#"RUSTDOCFLAGS="-D warnings" cargo doc --locked -p tutti-dsp --no-deps --features contract"#,
                     r#"RUSTDOCFLAGS="-D warnings" cargo doc --locked -p tutti-plugin-types --no-deps --features contract"#,
                 ]);
                 self.out.push(Step::DocFeatures);
-                self.lines(&[
-                    r#"RUSTDOCFLAGS="-D warnings --cfg docsrs" cargo +nightly-2026-10-14 doc --locked --workspace --no-deps"#,
-                ]);
+                self.lines(&[format!(
+                    r#"RUSTDOCFLAGS="-D warnings --cfg docsrs" cargo +{DOCS_NIGHTLY} doc --locked --workspace --no-deps"#
+                )]);
             }
             "check-no-std" => self.check_no_std(),
             "check-loom" => self.lines(&[
@@ -647,6 +664,24 @@ impl Planner<'_> {
                 self.out.push(Step::Release(v));
             }
             "package" => self.out.push(Step::Package),
+            "public-api" => {
+                let [krate, base] = Self::params(name, args, ["", ""])?;
+                if krate.is_empty() {
+                    return Err(
+                        "`public-api` takes a crate: `cargo xtask public-api <crate> [<base>]`"
+                            .to_owned(),
+                    );
+                }
+                // `-s` omits blanket impls only: a lost auto-trait impl is a break.
+                let list = format!(
+                    "cargo +{DOCS_NIGHTLY} public-api --package {krate} --all-features -s"
+                );
+                if base.is_empty() {
+                    self.lines(&[list]);
+                } else {
+                    self.lines(&[format!("{list} diff {base}..HEAD")]);
+                }
+            }
             "deny" => {
                 self.out.push(Step::RequireCargoDeny);
                 self.lines(&["cargo deny --locked check advisories"]);
@@ -660,6 +695,7 @@ impl Planner<'_> {
                     "check-value-traits", "check-submodule-pins", "check-doc-refs",
                     "check-pointers", "check-comments", "check-platform-seam", "check-doc-idents",
                     "check-passive-tests", "check-alloc-binaries", "check-buffers",
+                    "check-building",
                 ] {
                     self.dep(d)?;
                 }
@@ -761,7 +797,6 @@ const CHECK_FEATURES: &[&str] = &[
     r#"cargo clippy --locked -p tutti-midi-device --features serde --all-targets -- -D warnings"#,
     r#"cargo clippy --locked -p tutti-tempo --features serde --all-targets -- -D warnings"#,
     r#"cargo clippy --locked -p tutti-dsp --lib -- -D warnings"#,
-    r#"cargo clippy --locked -p tutti-dsp --lib --features contract -- -D warnings"#,
     r#"cargo clippy --locked -p tutti-plugin-types --lib --features contract -- -D warnings"#,
     r#"cargo clippy --locked -p tutti-midi-hardware --features sequencer-tests --all-targets -- -D warnings"#,
     r#"cargo clippy --locked -p tutti-clap-ffi --lib -- -D warnings"#,

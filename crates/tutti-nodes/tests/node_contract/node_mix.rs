@@ -15,15 +15,15 @@
 //! Each render is preceded by one block of silence, the block the mix's ramp from
 //! the unit's `WET` start lands on, and only the frames after it are compared.
 
-use tutti_dsp::{FdnControls, FdnLayout, FreeverbControls, FreeverbFamily};
+use tutti_dsp::{FdnControls, FdnLayout, FreeverbControls};
 use tutti_fixtures::noise;
 use tutti_fixtures::signal::bits;
 use tutti_graph::contract::drive;
 use tutti_graph::{IntoNode, Prepare, Solo};
 use tutti_nodes::{
     ChannelTimes, CompressorControls, CompressorNode, CrossoverNode, DelayControls, DelayLayout,
-    DelayNode, FamilyNode, FdnNode, GateControls, GateNode, InterpolationMode, KeySource, MaxDelay,
-    ModDelayNode, PhaserControls, PhaserNode, Stages,
+    DelayNode, FdnNode, FreeverbNode, GateControls, GateNode, InterpolationMode, KeySource,
+    MaxDelay, ModDelayNode, PhaserControls, PhaserNode, Stages,
 };
 use tutti_types::MaxBlock;
 use tutti_types::{
@@ -159,12 +159,27 @@ fn check_io<N: IntoNode>(
 }
 #[test]
 fn the_convolver_is_blended_by_the_graph() {
+    use tutti_buffers::Mono;
     use tutti_nodes::{ConvolverNode, generate_room_ir};
     let ir = generate_room_ir(0.5, Seconds(0.05), RATE);
     let ir2 = generate_room_ir(0.8, Seconds(0.08), RATE);
     check(
-        "convolver (stereo, 64-frame block)",
-        &|| ConvolverNode::stereo(&ir, &ir2, 64),
+        "convolver (dual mono, 64-frame block)",
+        &|| ConvolverNode::per_channel(&[&ir, &ir2], 64).unwrap(),
+        2,
+        64,
+    );
+    check(
+        "convolver (true stereo, 64-frame block)",
+        &|| {
+            ConvolverNode::true_stereo(
+                Mono::new(&ir),
+                Mono::new(&ir2),
+                Mono::new(&ir2),
+                Mono::new(&ir),
+                64,
+            )
+        },
         2,
         64,
     );
@@ -254,14 +269,14 @@ fn the_chorus_flanger_and_phaser_are_blended_by_the_graph() {
 fn the_reverbs_are_blended_by_the_graph() {
     check_io(
         "freeverb (General MIDI room)",
-        &|| FamilyNode::fixed(FreeverbFamily, FreeverbControls::GENERAL_MIDI),
+        &FreeverbNode::general_midi,
         1,
         2,
         0,
     );
     check_io(
         "freeverb (live)",
-        &|| FamilyNode::live(FreeverbFamily, FreeverbControls::GENERAL_MIDI),
+        &|| FreeverbNode::live(FreeverbControls::GENERAL_MIDI),
         1,
         2,
         0,

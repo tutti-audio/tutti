@@ -68,11 +68,11 @@ fn ci_block(id: u8, first_group: u8, version: u8) -> FunctionBlock {
 }
 
 fn endpoint_of(blocks: &[FunctionBlock]) -> Endpoint {
-    let device = Endpoint::new(Capabilities {
+    let device = Endpoint::new(Supports::of(Capabilities {
         midi1: true,
         midi2: true,
         ..Capabilities::default()
-    });
+    }));
     blocks
         .iter()
         .cloned()
@@ -192,7 +192,10 @@ fn an_endpoint_with_no_blocks_or_no_answer_gets_discovery_on_group_0() {
     let mut wire = session_over(
         UmpCapability::midi2(),
         PortDirection::Duplex,
-        Endpoint::new(Capabilities::default()),
+        Endpoint::new(Supports::of(Capabilities {
+            midi1: true,
+            ..Capabilities::default()
+        })),
     );
     wire.session.enable_ci(identity());
     wire.open(InputTiming::Arrival);
@@ -764,12 +767,12 @@ fn block_info(wire: &Wire, id: u8, first_group: u8, version: u8, ms: u64) {
         wire,
         Stream::FunctionBlockInfo(tutti_ump::FunctionBlockInfo {
             active: true,
-            id: FunctionBlockId::new(id).unwrap(),
+            id: FunctionBlockId::new(id).unwrap().into(),
             direction: BlockDirection::Bidirectional,
             ui_hint: tutti_ump::UiHint::Both,
             midi1: tutti_ump::Midi1Port::No,
-            first_group: FirstGroup::new(first_group).unwrap(),
-            groups_spanned: GroupSpan::new(1).unwrap(),
+            first_group: FirstGroup::new(first_group).unwrap().into(),
+            groups_spanned: GroupSpan::new(1).unwrap().into(),
             midi_ci_version: version,
             max_sysex8_streams: 0,
         }),

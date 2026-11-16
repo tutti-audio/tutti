@@ -141,8 +141,8 @@ where
             return Status::Silent;
         }
         let ports = this.declared.ports;
-        let n_in = (ports.audio_in().count() as usize).min(MAX_BLOCK_CHANNELS);
-        let n_out = (ports.audio_out().count() as usize).min(MAX_BLOCK_CHANNELS);
+        let n_in = ports.audio_in().count() as usize;
+        let n_out = ports.audio_out().count() as usize;
         // The plugin's channels are a list in its bus order: the graph's
         // buffers are reached a bus at a time, in that order.
         let (ins_by_bus, outs_by_bus): (Handles<InBus>, Handles<OutBus>) = (
@@ -187,13 +187,6 @@ where
             this.out_events.clear();
             let mut block = this.transport.lend(features);
             let (inputs, mut outputs) = io.split();
-            for out in outputs
-                .buses(&outs_by_bus)
-                .flat_map(BusOut::into_channels)
-                .skip(n_out)
-            {
-                out[..size].fill(0.0);
-            }
             // Whether every piece of the block was asleep (`asleep`): one that
             // was not, or did not run, keeps the node called.
             let mut slept = true;
@@ -424,16 +417,6 @@ where
         let block_midi = this.midi.len();
         let rendered = {
             let (inputs, mut outputs) = io.split();
-            // A plugin wider than the tables is handed their first
-            // `MAX_BLOCK_CHANNELS` channels; the graph's outputs past them would
-            // keep whatever their buffers last held, so they are silenced.
-            for out in outputs
-                .buses(&outs_by_bus)
-                .flat_map(BusOut::into_channels)
-                .skip(n_out)
-            {
-                out[..size].fill(0.0);
-            }
             let ins: ArrayVec<&[f32], MAX_BLOCK_CHANNELS> = channels_in(&inputs, &ins_by_bus)
                 .take(n_in)
                 .map(|ch| &ch[..size])

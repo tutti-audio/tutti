@@ -55,8 +55,6 @@ tutti-vst3-ffi = { version = "0.0.1", path = "../tutti-vst3-ffi" }
 cc = "1"
 
 [dev-dependencies]
-# `service_now`: the in-process pass over the run loop's descriptors and timers.
-tutti-plugin-host = { path = "../tutti-plugin-host" }
 # This crate, on itself, purely to turn `conformance` on for its own tests.
 # That feature is what makes `build.rs` compile `audio-probe`, the reference
 # plugin the suites here load — the VST3 counterpart to `tutti-clap-host`'s
@@ -72,7 +70,6 @@ assert_no_alloc = { version = "1", default-features = false }
 # they read a per-note bend at the same range. Acyclic: it does not depend on
 # this crate.
 tutti-clap-host = { path = "../tutti-clap-host" }
-tempfile = "3"
 # The shared test plugin (its cdylib is built by the same `cargo test`) and the
 # helper that finds it: `tests/conformance/vst3_run_loop.rs` drives its editor modes.
 # `mapping_contract!`: the laws `ControllerMapping` is held to, through the shared

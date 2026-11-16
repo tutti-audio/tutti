@@ -9,8 +9,8 @@ use crate::common;
 use proptest::prelude::*;
 use tutti_ump::ControlValue;
 use tutti_ump::{
-    Address, Key, KeyEvent, Message, MidiChannel, MidiGroup, NoteNumber, Protocol, Ump, Voice1,
-    Voice2,
+    Address, Key, KeyEvent, Message, MidiChannel, MidiGroup, NoteNumber, Protocol, Stream, Ump,
+    Voice1, Voice2,
 };
 
 const SUSTAIN: u8 = 64;
@@ -132,8 +132,15 @@ fn a_key_carries_its_fields() {
 #[test]
 fn a_reserved_protocol_has_no_key_and_no_pedal() {
     let a = Address::first(MidiChannel::FIRST);
-    assert_eq!(Key::new(Protocol::Reserved(3), a, NoteNumber::of(1)), None);
-    assert_eq!(Ump::sustain_up(Protocol::Reserved(3), a), None);
+    let Ok(Message::Stream(Stream::StreamConfigurationRequest(config))) =
+        Ump([0xF005_0300, 0, 0, 0]).decode()
+    else {
+        panic!("a Stream Configuration Request")
+    };
+    let reserved = config.protocol;
+    assert!(matches!(reserved, Protocol::Reserved(_)));
+    assert_eq!(Key::new(reserved, a, NoteNumber::of(1)), None);
+    assert_eq!(Ump::sustain_up(reserved, a), None);
 }
 
 /// A table index is group * 16 + channel, and `from_index` inverts it for

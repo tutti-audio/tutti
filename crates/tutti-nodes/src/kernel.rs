@@ -1,4 +1,4 @@
-//! [`Kernel`]: what a family of effects tells the one node that runs it, and
+//! [`Kernel`]: what an effect tells the one node that runs it, and
 //! [`KernelNode`], that node.
 //!
 //! A kernel is the effect's algorithm with its state: it designs itself from its plain
@@ -10,7 +10,6 @@
 use core::ops::Range;
 
 use tutti_buffers::{Float, Mono, Planes, PlanesMut};
-use tutti_dsp::MAX_LANES;
 use tutti_graph::{
     BusRole, Cx, HasParam, HasParams, InBus, IntoNode, Io, MAX_PORTS, Node, NodeParts, OutBus,
     ParamNode, ParamSet, Prepare, Shape, Status,
@@ -19,6 +18,11 @@ use tutti_types::{Latency, MaxBlock, SampleRate, Samples, Tail};
 
 use crate::params::{At, ControlSet, HasControl, HasControls, Params};
 use crate::tail_clock::{Heard, TailClock, tail_frames};
+
+/// The most per-frame control lanes a [`ControlLanes`] carries.
+///
+/// Four serve every effect that reads lanes (a limiter's threshold and ceiling are two).
+pub const MAX_LANES: usize = 4;
 
 /// The per-frame lanes of a block's [`ControlRead::Fast`](crate::ControlRead::Fast)
 /// controls, in the order of their rows: the frames a port carries, in the port's own unit
@@ -220,12 +224,6 @@ impl<K: Kernel> KernelNode<K> {
         }
     }
 
-    /// The controls the kernel was last designed from, for a node's own tests.
-    #[cfg(test)]
-    pub(crate) fn applied(&self) -> Option<<K::Set as ControlSet>::Controls> {
-        self.tuned.as_ref().and_then(|t| t.applied)
-    }
-
     /// Back to silence: the grid counted from here, no ring-out owed, no input heard.
     fn clear(&mut self) {
         self.kernel.reset();
@@ -283,24 +281,12 @@ impl<K: Kernel> KernelNode<K> {
         }
         let driven = self.params.lanes(io);
         let (ins, mut outs) = io.split();
-        let mut input: [&[f32]; MAX_PORTS] = [&[]; MAX_PORTS];
-        for (c, slot) in input.iter_mut().enumerate().take(self.inputs) {
-            *slot = &ins.get(c)[frames.clone()];
-        }
-        let mut key: [&[f32]; MAX_PORTS] = [&[]; MAX_PORTS];
-        let mut keys = 0;
-        if let Some(bus) = self.key {
-            for (slot, ch) in key.iter_mut().zip(ins.bus(bus).channels()) {
-                *slot = &ch[frames.clone()];
-                keys += 1;
-            }
-        }
-        let mut output: [&mut [f32]; MAX_PORTS] = core::array::from_fn(|_| Default::default());
-        let mut width = 0;
-        for (slot, ch) in output.iter_mut().zip(outs.bus(self.out).into_channels()) {
-            *slot = &mut ch[frames.clone()];
-            width += 1;
-        }
+        let (input, _) = slice_in((0..self.inputs).map(|c| ins.get(c)), &frames);
+        let (key, keys) = match self.key {
+            Some(bus) => slice_in(ins.bus(bus).channels(), &frames),
+            None => ([&[][..]; MAX_PORTS], 0),
+        };
+        let (mut output, width) = slice_out(outs.bus(self.out).into_channels(), &frames);
         // Both views are whole planes of `frames.len()` frames, at most `MAX_PORTS` wide
         // (the most ports a shape declares, so a crossover's bands are all written). A bus
         // can be declared with no channels (an empty `BusTopology`): an output with none has
@@ -337,43 +323,30 @@ impl<K: Kernel> KernelNode<K> {
     /// together, in one call.
     fn render_steps(&mut self, io: &mut Io<'_>, position: u64, rate: SampleRate) {
         let size = io.frames();
-        let period = K::GRID as u64;
-        let first = ((period - position % period) % period) as usize;
-        let mut grid = (first..size).step_by(K::GRID).peekable();
-        let mut held = 0;
-        let mut from = 0;
-        loop {
-            let corner = self.params.corner_from(io, from);
-            let (cut, at_grid) = match (grid.peek().copied(), corner) {
-                (Some(g), Some(c)) if g <= c => {
-                    grid.next();
-                    (g, true)
-                }
-                (_, Some(c)) => (c, false),
-                (Some(g), None) => {
-                    grid.next();
-                    (g, true)
-                }
-                (None, None) => break,
-            };
-            from = cut + 1;
-            let target = self.params.read(
-                io,
-                At {
-                    position,
-                    frame: cut,
-                    rate,
-                },
-            );
-            let applied = self.tuned.as_ref().and_then(|t| t.applied);
-            if (K::CUT_ALWAYS && at_grid) || applied.is_none_or(|a| self.params.moved(&a, &target))
-            {
-                self.render(io, held..cut);
-                self.apply(target);
-                held = cut;
-            }
-        }
-        self.render(io, held..size);
+        walk_grid(
+            &mut (self, io),
+            Grid {
+                position,
+                size,
+                period: K::GRID,
+            },
+            |(node, io), from| node.params.corner_from(io, from),
+            |(node, io), frame, at_grid| {
+                let target = node.params.read(
+                    io,
+                    At {
+                        position,
+                        frame,
+                        rate,
+                    },
+                );
+                let applied = node.tuned.as_ref().and_then(|t| t.applied);
+                let moved = applied.is_none_or(|a| node.params.moved(&a, &target));
+                ((K::CUT_ALWAYS && at_grid) || moved).then_some(target)
+            },
+            |(node, _), target| node.apply(target),
+            |(node, io), frames| node.render(io, frames),
+        );
     }
 
     /// Parks: the kernel silent and the grid counted from here, as a fresh node, unless
@@ -393,6 +366,93 @@ impl<K: Kernel> KernelNode<K> {
             t.applied = Some(controls);
         }
     }
+}
+
+/// The first [`MAX_PORTS`] of `channels`, each cut to `frames`, and how many there are.
+pub(crate) fn slice_in<'a>(
+    channels: impl Iterator<Item = &'a [f32]>,
+    frames: &Range<usize>,
+) -> ([&'a [f32]; MAX_PORTS], usize) {
+    let mut planes: [&[f32]; MAX_PORTS] = [&[]; MAX_PORTS];
+    let mut n = 0;
+    for (slot, ch) in planes.iter_mut().zip(channels) {
+        *slot = &ch[frames.clone()];
+        n += 1;
+    }
+    (planes, n)
+}
+
+/// [`slice_in`] for channels written to.
+pub(crate) fn slice_out<'a>(
+    channels: impl Iterator<Item = &'a mut [f32]>,
+    frames: &Range<usize>,
+) -> ([&'a mut [f32]; MAX_PORTS], usize) {
+    let mut planes: [&mut [f32]; MAX_PORTS] = core::array::from_fn(|_| Default::default());
+    let mut n = 0;
+    for (slot, ch) in planes.iter_mut().zip(channels) {
+        *slot = &mut ch[frames.clone()];
+        n += 1;
+    }
+    (planes, n)
+}
+
+/// Where a block falls on the stream's grid: it has `size` frames, begins at stream frame
+/// `position` (frames since the last reset), and the grid has a point every `period` frames
+/// from frame 0.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Grid {
+    pub(crate) position: u64,
+    pub(crate) size: usize,
+    pub(crate) period: usize,
+}
+
+/// Walks a block over the grid and the corners of the controls: the one cut loop of a node
+/// whose design moves on the stream clock.
+///
+/// At each cut (a grid point, or an earlier corner), `moved` reads the controls at that
+/// frame and returns the design to take if they moved; the frames held so far are
+/// `render`ed first, then `apply` takes the design and the held span restarts at the cut.
+/// The frames after the last cut are `render`ed. `corner_from(state, from)` is the first
+/// corner at or after frame `from`, if any.
+pub(crate) fn walk_grid<S, T>(
+    state: &mut S,
+    grid: Grid,
+    corner_from: impl Fn(&mut S, usize) -> Option<usize>,
+    mut moved: impl FnMut(&mut S, usize, bool) -> Option<T>,
+    mut apply: impl FnMut(&mut S, T),
+    mut render: impl FnMut(&mut S, Range<usize>),
+) {
+    let Grid {
+        position,
+        size,
+        period,
+    } = grid;
+    let first = ((period as u64 - position % period as u64) % period as u64) as usize;
+    let mut grid = (first..size).step_by(period).peekable();
+    let mut held = 0;
+    let mut from = 0;
+    loop {
+        let corner = corner_from(state, from);
+        let (cut, at_grid) = match (grid.peek().copied(), corner) {
+            (Some(g), Some(c)) if g <= c => {
+                grid.next();
+                (g, true)
+            }
+            (_, Some(c)) => (c, false),
+            (Some(g), None) => {
+                grid.next();
+                (g, true)
+            }
+            (None, None) => break,
+        };
+        from = cut + 1;
+        if let Some(target) = moved(state, cut, at_grid) {
+            render(state, held..cut);
+            apply(state, target);
+            held = cut;
+        }
+    }
+    render(state, held..size);
 }
 
 impl<K: Kernel> Node for KernelNode<K> {

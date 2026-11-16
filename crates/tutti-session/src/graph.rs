@@ -57,7 +57,7 @@ use tutti_graph::{
 };
 use tutti_graph::{
     EventCapacity, EventInletNode, EventInletWriter, EventTapId, MeterId, MeterSpec, MissingSource,
-    TapAlign, Topology,
+    TapAlign, TapId, Topology,
 };
 #[cfg(feature = "plugin")]
 use tutti_types::Latency;
@@ -70,7 +70,7 @@ mod observe;
 #[cfg(feature = "testing")]
 mod testing;
 
-pub use observe::{Meters, Taps};
+pub use observe::{Meters, NotReopened, Reopened, RootReader, Taps};
 #[cfg(feature = "testing")]
 pub use testing::{AudioSide, Testing};
 
@@ -330,8 +330,20 @@ pub struct Graph {
     event_taps: BTreeMap<EventTapId, (tutti_graph::EventTapSource, TapAlign, EventCapacity)>,
     /// The master meter's reader until a host takes it.
     master_meter: Option<MeterReader>,
+    /// The master meter's id: the one meter that reads the root.
+    master_meter_id: MeterId,
+    /// Each open tap on the root ([`Taps::open_output`]) with its capacity and
+    /// the width its reader has, so a root of another width opens it again.
+    output_taps: BTreeMap<TapId, (Samples, usize)>,
+    /// The readers the root's width opened again, each held under its id until
+    /// claimed ([`Graph::take_reopened`]).
+    reopened: BTreeMap<RootReader, observe::Held>,
     /// Crossfades refused `Busy`, in request order.
     parked: VecDeque<Parked>,
+    /// The wiring each re-insert dropped, by node, until the commit that
+    /// carries the re-insert is sent and the session reports it
+    /// ([`SessionEvent::Unwired`](crate::SessionEvent::Unwired)).
+    unwired: Vec<Unwiring>,
     /// The nodes [`remove`](Self::remove) took out since the session last
     /// forgot what it declared on them ([`Graph::take_removed`]).
     removed: Vec<NodeKey>,
@@ -347,6 +359,15 @@ pub struct Graph {
     output: Option<Placed>,
     /// The last widening [`widen_outputs`](Self::widen_outputs) refused.
     widen_refusal: Option<tutti_graph::RootError>,
+    /// Why the declaration that waited for a root crossfade, or a hard one
+    /// made through [`harden_root`](Self::harden_root), could not be applied;
+    /// the session takes it as its declaration refusal
+    /// ([`take_apply_refusal`](Self::take_apply_refusal)). A slot of its own,
+    /// so a widening neither hides nor erases it.
+    apply_refusal: Option<tutti_graph::RootError>,
+    /// A root declared while a root crossfade ran, applied when it ends:
+    /// the newest declaration (`Some(None)` takes the declaration back).
+    pending_root: Option<Option<tutti_types::ChannelTopology>>,
     /// The hosted plugins' records, by node (`plugin.rs`): kept here so a
     /// crossfade to another plugin and a removal update them where they
     /// happen.
@@ -363,6 +384,15 @@ pub struct Graph {
     /// publisher is the session's `TransportSettings`, whose `Reclaim` sweep
     /// already covers the cell.
     pub(crate) tempo: tutti_transport::TempoReader,
+}
+
+/// The wiring a re-insert at one key dropped, in the session's port types.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Unwiring {
+    pub(crate) node: NodeKey,
+    pub(crate) edges: Vec<Edge>,
+    pub(crate) event_edges: Vec<crate::EventEdge>,
+    pub(crate) bus_edges: Vec<(BusSource, BusSink)>,
 }
 
 /// A hook each live render helper runs once on its own thread, with its
@@ -470,8 +500,9 @@ impl Graph {
         // without asking for it.
         // `Outputs` names no source, so the open cannot be refused.
         let ids = Mint::new();
+        let master_meter_id = MeterId::mint(&ids);
         let master_meter = editor
-            .open_meter(MeterId::mint(&ids), MeterSpec::Outputs)
+            .open_meter(master_meter_id, MeterSpec::Outputs)
             .expect("a master meter names no source");
         master_meter.enable();
         Self {
@@ -492,11 +523,17 @@ impl Graph {
             ids,
             event_taps: BTreeMap::new(),
             master_meter: Some(master_meter),
+            master_meter_id,
+            output_taps: BTreeMap::new(),
+            reopened: BTreeMap::new(),
             parked: VecDeque::new(),
+            unwired: Vec::new(),
             removed: Vec::new(),
             root: None,
             output: None,
             widen_refusal: None,
+            apply_refusal: None,
+            pending_root: None,
             #[cfg(feature = "plugin")]
             plugins: BTreeMap::new(),
             #[cfg(feature = "plugin")]
@@ -703,7 +740,8 @@ impl Graph {
     /// are not a [`SessionNode`] (a bound plugin).
     pub(crate) fn place<N: IntoNode>(&mut self, node: N) -> (Key<N>, N::Controls) {
         let id = NodeKey::fresh();
-        let controls = self.editor.insert(id, N::kind(), node);
+        // A fresh key has no wiring recorded, so nothing is unwired.
+        let controls = self.editor.insert(id, N::kind(), node).controls;
         self.nodes.insert(
             id,
             Entry {
@@ -834,11 +872,27 @@ impl Graph {
         &mut self,
         client: Box<tutti_plugin::handles::PluginClient>,
     ) -> Key<crate::PluginNode> {
+        self.insert_plugin_with_rebinder(client).0
+    }
+
+    /// [`insert_plugin`](Self::insert_plugin), and the builder of the node
+    /// that replaces this one when the plugin changes its audio ports.
+    #[cfg(feature = "plugin")]
+    pub(crate) fn insert_plugin_with_rebinder(
+        &mut self,
+        client: Box<tutti_plugin::handles::PluginClient>,
+    ) -> (
+        Key<crate::PluginNode>,
+        tutti_plugin::catalog::PluginRebinder,
+    ) {
         let node = NodeKey::fresh();
         let hosted = crate::plugin::HostedPlugin::new(client.handle(), client.plugin().clone())
             .with_controls(client.controls());
         let tempo = self.tempo.clone();
-        let _controls = self.editor.insert(node, PLUGIN_KIND, client.bind(tempo));
+        let bound = client.bind(tempo);
+        let rebinder = tutti_plugin::catalog::PluginRebinder::served(bound.rebinder());
+        // A fresh key has no wiring recorded, so nothing is unwired.
+        let _controls = self.editor.insert(node, PLUGIN_KIND, bound).controls;
         self.nodes.insert(
             node,
             Entry {
@@ -847,8 +901,9 @@ impl Graph {
             },
         );
         self.plugins.insert(node, hosted);
+        self.write_own_bypass(node);
         self.edited = true;
-        Key::new(node)
+        (Key::new(node), rebinder)
     }
 
     /// Hosts a plugin the host inserted itself (an in-process plugin, a
@@ -891,6 +946,7 @@ impl Graph {
         }
         self.plugins
             .insert(node, crate::plugin::HostedPlugin::new(handle, plugin));
+        self.write_own_bypass(node);
         Ok(Key::new(node))
     }
 
@@ -912,6 +968,27 @@ impl Graph {
         fade: Seconds,
         law: FadeLaw,
     ) -> Result<(), ReplaceRefused<Box<tutti_plugin::handles::PluginClient>>> {
+        self.replace_plugin_with_rebinder(node, client, fade, law)
+            .map(|_| ())
+    }
+
+    /// [`replace_plugin`](Self::replace_plugin), and the builder of the node
+    /// that replaces the incoming one when the plugin changes its audio ports.
+    ///
+    /// # Errors
+    ///
+    /// As [`replace_plugin`](Self::replace_plugin).
+    #[cfg(feature = "plugin")]
+    pub(crate) fn replace_plugin_with_rebinder(
+        &mut self,
+        node: impl Into<NodeKey>,
+        client: Box<tutti_plugin::handles::PluginClient>,
+        fade: Seconds,
+        law: FadeLaw,
+    ) -> Result<
+        tutti_plugin::catalog::PluginRebinder,
+        ReplaceRefused<Box<tutti_plugin::handles::PluginClient>>,
+    > {
         let node = node.into();
         // Asked here, before binding: `replace` hands back what it refuses,
         // and a bound plugin cannot be unbound.
@@ -930,7 +1007,9 @@ impl Graph {
         let controls = client.controls();
         let plugin = client.plugin().clone();
         let tempo = self.tempo.clone();
-        match self.swap_unit(node, client.bind(tempo), fade, law) {
+        let bound = client.bind(tempo);
+        let rebinder = tutti_plugin::catalog::PluginRebinder::served(bound.rebinder());
+        match self.swap_unit(node, bound, fade, law) {
             Ok(_controls) => {
                 // The record is carried over to the incoming plugin (unlike
                 // `replace`, which takes it out): its handle is what the
@@ -950,7 +1029,8 @@ impl Graph {
                         );
                     }
                 }
-                Ok(())
+                self.write_own_bypass(node);
+                Ok(rebinder)
             }
             Err(ReplaceRefused::Failed(refused)) => Err(ReplaceRefused::Failed(refused)),
             Err(ReplaceRefused::Busy(_)) => unreachable!("checked above"),
@@ -971,7 +1051,10 @@ impl Graph {
         plugin: Box<tutti_plugin::catalog::Plugin>,
         fade: Seconds,
         law: FadeLaw,
-    ) -> Result<(), ReplaceRefused<Box<tutti_plugin::catalog::Plugin>>> {
+    ) -> Result<
+        tutti_plugin::catalog::PluginRebinder,
+        ReplaceRefused<Box<tutti_plugin::catalog::Plugin>>,
+    > {
         if let Some(cause) = self.editor.poison_cause() {
             return Err(ReplaceRefused::Failed(CrossfadeRefused::Poisoned(
                 cause.to_owned(),
@@ -986,7 +1069,7 @@ impl Graph {
         let handle = plugin.handle().clone();
         let controls = plugin.node_controls();
         let plugin_ref = plugin.plugin().clone();
-        let bound = (*plugin).bind(self.tempo.clone());
+        let (bound, rebinder) = (*plugin).bind_with_rebinder(self.tempo.clone());
         match self.swap_unit(node, bound, fade, law) {
             Ok(_) => {
                 match self.plugins.get_mut(&node) {
@@ -1000,11 +1083,34 @@ impl Graph {
                         self.plugins.insert(node, hosted);
                     }
                 }
-                Ok(())
+                Ok(rebinder)
             }
             Err(ReplaceRefused::Failed(refused)) => Err(ReplaceRefused::Failed(refused)),
             Err(ReplaceRefused::Busy(_)) => unreachable!("checked above"),
         }
+    }
+
+    /// Swaps the node of the plugin at `node` for `bound`, the node
+    /// [`PluginRebinder::prepare`](tutti_plugin::catalog::PluginRebinder::prepare)
+    /// built over the same plugin with the ports it has now: the key, and the
+    /// wiring to the ports the new node keeps, stay, and the wiring to the ports
+    /// it lacks is dropped and reported
+    /// ([`SessionEvent::Unwired`](crate::SessionEvent::Unwired)). The plugin's
+    /// record stays.
+    ///
+    /// # Errors
+    ///
+    /// [`ReplaceRefused::Busy`] while the graph re-prepares, handing `bound`
+    /// back unplaced; [`ReplaceRefused::Failed`] on a poisoned graph, a `node`
+    /// not in it, or an editor that refuses the swap.
+    #[cfg(feature = "plugin")]
+    pub(crate) fn replace_rebound(
+        &mut self,
+        node: NodeKey,
+        bound: tutti_plugin::catalog::BoundPlugin,
+    ) -> Result<(), ReplaceRefused<tutti_plugin::catalog::BoundPlugin>> {
+        self.swap_unit(node, bound, tutti_graph::DECLICK, FadeLaw::default())
+            .map(|_| ())
     }
 
     /// Puts the silent stand-in of a plugin that is gone at `node`
@@ -1185,16 +1291,97 @@ impl Graph {
             return Err(ReplaceRefused::Busy(incoming));
         }
         let rate = self.editor.prepare().sample_rate();
-        let controls = self
+        let placed = self
             .editor
             .replace_or_swap(node, incoming, Fade::seconds(fade, rate, law))
             .map_err(|e| ReplaceRefused::Failed(CrossfadeRefused::Editor(e)))?;
+        let controls = placed.controls;
+        self.note_unwired(node, &placed.unwired);
         if let Some(entry) = self.nodes.get_mut(&node) {
             entry.params = None;
             entry.reclaimer = None;
         }
         self.edited = true;
         Ok(controls)
+    }
+
+    /// Records what a re-insert at `node` unwired, in the session's port
+    /// types, for the update that commits it to report. A dropped edge no
+    /// feed put there stops being one a feed owns.
+    fn note_unwired(&mut self, node: NodeKey, unwired: &tutti_graph::Unwired) {
+        if unwired.is_empty() {
+            return;
+        }
+        let mut edges: Vec<Edge> = Vec::new();
+        for id in &unwired.edges {
+            // A feedback edge is reported as the pair of ports it joins.
+            let source = match id.from {
+                RawEdge::Direct(source) => source,
+                RawEdge::Feedback(f) => Source::Node(f.from),
+            };
+            // Explicit silence is no wire an app made: nothing to report.
+            let Some(from) = OutPort::of_source(source) else {
+                continue;
+            };
+            let edge = Edge::new(from, InPort::of_sink(id.sink));
+            if !edges.contains(&edge) {
+                edges.push(edge);
+            }
+        }
+        let mut event_edges: Vec<crate::EventEdge> = Vec::new();
+        for (at, edge) in &unwired.event_edges {
+            let (from, to) = (EventOutPort::of_raw(edge.from()), EventInPort::of_raw(*at));
+            if at.port == 0
+                && let Some(fed) = self.fed_edges.get_mut(&at.node)
+            {
+                fed.retain(|s| *s != from);
+            }
+            let edge = crate::EventEdge::new(from, to);
+            if !event_edges.contains(&edge) {
+                event_edges.push(edge);
+            }
+        }
+        let mut bus_edges: Vec<(BusSource, BusSink)> = Vec::new();
+        let named = unwired
+            .bus_edges
+            .iter()
+            .map(|(to, feed)| (feed.source, BusSink::Node(*to)))
+            .chain(
+                unwired
+                    .root_buses
+                    .iter()
+                    .map(|feed| (feed.source, BusSink::Root)),
+            );
+        for wire in named {
+            if !bus_edges.contains(&wire) {
+                bus_edges.push(wire);
+            }
+        }
+        if edges.is_empty() && event_edges.is_empty() && bus_edges.is_empty() {
+            return;
+        }
+        match self.unwired.iter_mut().find(|u| u.node == node) {
+            Some(held) => {
+                held.edges.extend(edges);
+                held.event_edges.extend(event_edges);
+                held.bus_edges.extend(bus_edges);
+            }
+            None => self.unwired.push(Unwiring {
+                node,
+                edges,
+                event_edges,
+                bus_edges,
+            }),
+        }
+    }
+
+    /// What the re-inserts since the last call unwired, once the commit that
+    /// carries them is sent: nothing while an edit still waits.
+    pub(crate) fn take_unwired(&mut self) -> Vec<Unwiring> {
+        if self.edited {
+            return Vec::new();
+        }
+        std::mem::take(&mut self.unwired)
     }
 
     /// Swaps the node behind `node` for `incoming` under `fade` along
@@ -1633,11 +1820,13 @@ impl Graph {
         self.write_event_sources(sink, 0, &all);
     }
 
-    /// Every source any feeder feeds `sink` that is in the graph.
+    /// Every source any feeder feeds `sink` that is an event output the graph
+    /// has: a source re-inserted without that port is not fed until it has it
+    /// again.
     fn fed_in_graph(&self, sink: NodeKey) -> Vec<EventOutPort> {
         self.fed(sink)
             .into_iter()
-            .filter(|s| self.contains(s.node()))
+            .filter(|s| self.check_event_out(*s).is_ok())
             .collect()
     }
 
@@ -2560,6 +2749,12 @@ impl Graph {
     /// A control, not an edit: the graph is not recompiled, the mode lands at
     /// the next block, and the graph is not marked edited.
     ///
+    /// A hosted plugin with a bypass of its own is not bypassed by the
+    /// executor: the host writes the plugin's bypass in this call
+    /// (`PluginHandle::set_bypassed`) and compares it on every control tick.
+    /// Off the main thread an in-process plugin's write is lost, and it is kept
+    /// only by a tick on the main thread.
+    ///
     /// # Errors
     ///
     /// [`ModeError::NoSuchNode`] when `node` is not in the graph;
@@ -2571,7 +2766,67 @@ impl Graph {
         if self.editor.is_leaving(node) {
             return Err(ModeError::NoSuchNode { node });
         }
-        self.editor.set_mode(node, mode)
+        self.editor.set_mode(node, mode)?;
+        // A plugin with a bypass of its own keeps running in `Bypassed` (its
+        // node declares it), so its bypass is written here, once per change.
+        // `set_bypassed` leaves a plugin without one alone.
+        #[cfg(feature = "plugin")]
+        self.write_own_bypass(node);
+        Ok(())
+    }
+
+    /// Writes the bypass of the plugin hosted at `node`, if any, to what the
+    /// node's mode says: on every change of mode, and when a plugin enters the
+    /// node (an insert, a host, a replacement or a reload). A plugin without a
+    /// bypass of its own is left alone. The write is not assumed applied:
+    /// [`reconcile_own_bypass`](Self::reconcile_own_bypass) compares on every
+    /// tick, and a write that never reached the plugin is written again there.
+    #[cfg(feature = "plugin")]
+    pub(crate) fn write_own_bypass(&mut self, node: NodeKey) {
+        let Ok(mode) = self.mode(node) else { return };
+        if let Some(hosted) = self.plugins.get_mut(&node) {
+            hosted
+                .bypass
+                .assert_mode(&hosted.handle, &hosted.mirror, mode);
+        }
+    }
+
+    /// Makes every healthy hosted plugin's own bypass the node's mode, on the
+    /// control tick and with no round trip (`BypassSync::reconcile`): an
+    /// in-process plugin's bypass is read, without waiting for its instance, and
+    /// a served plugin's is compared with its mirrored parameter values. A
+    /// plugin that differs, or whose write never reached it, is written again,
+    /// each episode counted once
+    /// ([`Plugin::bypass_writes_unapplied`](crate::Plugin::bypass_writes_unapplied)).
+    /// A plugin that refused the mode is not written again until the node's mode
+    /// changes: the refusal is latched, and counted as an episode only when the
+    /// plugin held another bypass.
+    ///
+    /// Until a plugin is back in the node's mode the executor does not bypass its
+    /// node, so it plays processed audio under `Bypassed` for that long: a tick
+    /// or two for an in-process plugin; for a served one until the plugin
+    /// reports its change, or a dropped write is retried (the wait doubles up to
+    /// 32 ticks). A served plugin that refuses a delivered write is not seen. An
+    /// in-process plugin's bypass is kept only on a session ticked on the main
+    /// thread (its write and read are the main thread's); an in-process plugin on
+    /// another thread's tick is not refused, and its node stays unbypassed under
+    /// `Bypassed`.
+    #[cfg(feature = "plugin")]
+    pub(crate) fn reconcile_own_bypass(&mut self) {
+        let wants: Vec<(NodeKey, NodeMode)> = self
+            .plugins
+            .keys()
+            .filter_map(|&node| Some((node, self.mode(node).ok()?)))
+            .collect();
+        for (node, want) in wants {
+            if let Some(hosted) = self.plugins.get_mut(&node)
+                && hosted.is_healthy()
+            {
+                hosted
+                    .bypass
+                    .reconcile(&hosted.handle, &hosted.mirror, want);
+            }
+        }
     }
 
     /// `node`'s mode, [`NodeMode::Active`] for a node never given one.
@@ -2786,6 +3041,16 @@ impl Graph {
     pub(crate) fn reap_taps(&mut self) -> usize {
         let reaped = self.editor.reap_taps();
         if reaped > 0 {
+            let open = &self.editor.spec().topology.taps;
+            self.output_taps.retain(|id, _| open.contains_key(id));
+            // A held reader keeps its tap alive, and a claimed one has left the map.
+            debug_assert!(
+                self.reopened.keys().all(|id| match id {
+                    RootReader::Tap(tap) => open.contains_key(tap),
+                    RootReader::Meter(_) => true,
+                }),
+                "no held reader names a reaped tap"
+            );
             self.edited = true;
         }
         reaped
@@ -2808,6 +3073,15 @@ impl Graph {
     pub(crate) fn reap_meters(&mut self) -> usize {
         let reaped = self.editor.reap_meters();
         if reaped > 0 {
+            let open = &self.editor.spec().topology.meters;
+            // A held reader keeps its meter alive, and a claimed one has left the map.
+            debug_assert!(
+                self.reopened.keys().all(|id| match id {
+                    RootReader::Meter(meter) => open.contains_key(meter),
+                    RootReader::Tap(_) => true,
+                }),
+                "no held reader names a reaped meter"
+            );
             self.edited = true;
         }
         reaped
@@ -3086,12 +3360,91 @@ impl Graph {
         Ok(())
     }
 
+    /// Makes the root declaration last made a cut: the commit that carries
+    /// it renders no old root. A declaration that waits for a running
+    /// crossfade is applied now instead, and is the cut.
+    pub(crate) fn harden_root(&mut self) {
+        match self.pending_root.take() {
+            Some(root) => self.apply_declared(root, true),
+            None => self.editor.set_root_fade(None),
+        }
+    }
+
+    /// Whether a root declaration waits for the running crossfade to end.
+    pub(crate) fn root_pending(&self) -> bool {
+        self.pending_root.is_some()
+    }
+
+    /// The refusal of a declaration when it was applied, taken: the session
+    /// holds it as its own. See [`apply_refusal`](Self).
+    pub(crate) fn take_apply_refusal(&mut self) -> Option<tutti_graph::RootError> {
+        self.apply_refusal.take()
+    }
+
+    /// The refusal of a declaration when it was applied, not yet taken.
+    pub(crate) fn apply_refusal(&self) -> Option<tutti_graph::RootError> {
+        self.apply_refusal
+    }
+
+    /// Applies the declaration that waited, once the crossfade it waited for
+    /// is over: the spec, the readers and the announcement change together.
+    /// A refusal now (the device no longer places it, the roots in flight are
+    /// at their limit) is [`take_apply_refusal`](Self::take_apply_refusal)'s.
+    fn apply_pending_root(&mut self) {
+        if self.editor.root_fade_running() {
+            return;
+        }
+        if let Some(root) = self.pending_root.take() {
+            self.apply_declared(root, false);
+        }
+    }
+
+    fn apply_declared(&mut self, root: Option<tutti_types::ChannelTopology>, hard: bool) {
+        let applied = self
+            .check_declaration(&root)
+            .and_then(|width| self.apply_root(root, hard, width));
+        if let Err(e) = applied {
+            self.apply_refusal = Some(e);
+        }
+    }
+
+    /// Declares the root's topology. A declaration that changes it is the next
+    /// root, and the commit that carries it crossfades the old root's outputs
+    /// into the new root's over the declick length (`Editor::set_root_fade`),
+    /// unless `hard`: the new root takes over at the commit's block.
+    ///
+    /// While a root crossfade runs, a declaration that is not `hard` is held
+    /// (checked now, applied by [`collect`](Self::collect) once the fade is
+    /// over, the newest replacing an older one): the spec, the readers and the
+    /// root in force do not change until then. A declaration refused at the
+    /// call drops nothing: the one waiting still applies. The fade is over
+    /// when the executor has rendered it, so a held declaration also waits
+    /// while no blocks render, and travels with the graph through a restart,
+    /// to be checked against the device it finds when it is applied.
     pub(crate) fn declare_root(
         &mut self,
         root: Option<tutti_types::ChannelTopology>,
+        hard: bool,
     ) -> Result<(), tutti_graph::RootError> {
+        let width = self.check_declaration(&root)?;
+        if !hard && self.editor.root_fade_running() {
+            self.pending_root = Some(root);
+            self.apply_refusal = None;
+            return Ok(());
+        }
+        self.pending_root = None;
+        self.apply_refusal = None;
+        self.apply_root(root, hard, width)
+    }
+
+    /// The width of the root `root` declares, if it can be placed on the
+    /// device: [`declare_root`](Self::declare_root)'s checks.
+    fn check_declaration(
+        &self,
+        root: &Option<tutti_types::ChannelTopology>,
+    ) -> Result<usize, tutti_graph::RootError> {
         let placed = self.placed_topology();
-        let width = match &root {
+        Ok(match root {
             Some(root) => {
                 Self::check_root(root, placed.as_ref())?;
                 usize::from(root.width().count())
@@ -3099,10 +3452,8 @@ impl Graph {
             None => {
                 if let Some(placed) = &placed {
                     let outputs = self.outputs();
-                    let width = ChannelLayout::try_from(outputs).map_err(|_| {
-                        tutti_buffers::FoldError::from(tutti_buffers::BufferError::TooWide {
-                            channels: outputs,
-                        })
+                    let width = ChannelLayout::try_from(outputs).map_err(|e| {
+                        tutti_buffers::FoldError::from(tutti_buffers::BufferError::from(e))
                     })?;
                     tutti_graph::fold_to_topology(
                         &tutti_types::ChannelTopology::assumed(width),
@@ -3111,7 +3462,15 @@ impl Graph {
                 }
                 self.outputs()
             }
-        };
+        })
+    }
+
+    fn apply_root(
+        &mut self,
+        root: Option<tutti_types::ChannelTopology>,
+        hard: bool,
+        width: usize,
+    ) -> Result<(), tutti_graph::RootError> {
         // A changed declaration is the next root: its folds are published
         // first, so the commit that carries its id finds them. The engine
         // checks the device again, and a refusal there leaves the graph as it
@@ -3132,6 +3491,14 @@ impl Graph {
         let bus = root
             .as_ref()
             .map(|r| tutti_types::BusTopology::try_from(r).expect("a checked root fits a bus"));
+        // Both roots render the same nodes, in phase.
+        self.editor.set_root_fade((!hard).then(|| {
+            tutti_graph::Fade::seconds(
+                tutti_graph::DECLICK,
+                self.editor.prepare().sample_rate(),
+                tutti_graph::FadeLaw::EqualAmplitude,
+            )
+        }));
         let spec = self.editor.spec_mut();
         if spec.root != bus {
             spec.root = bus;
@@ -3145,12 +3512,15 @@ impl Graph {
         }
         self.root = root;
         self.widen_refusal = None;
+        let mut resized = false;
         let outputs = &mut self.editor.spec_mut().topology.outputs;
         if outputs.len() != width {
             outputs.resize(width, Vec::new());
             self.drop_stale_gains();
             self.edited = true;
+            resized = true;
         }
+        self.reopen_root_readers(resized);
         Ok(())
     }
 
@@ -3264,6 +3634,7 @@ impl Graph {
         if self.editor.settle_fades() {
             self.edited = true;
         }
+        self.apply_pending_root();
     }
 
     /// The output ports that lost events since the last call
@@ -3356,15 +3727,35 @@ fn render(
         output.fill(0.0);
         return;
     };
-    let (ins, outs) = (plan.global_inputs() as usize, plan.global_outputs());
+    let (ins, outs, root) = (
+        plan.global_inputs() as usize,
+        plan.rendered_outputs(),
+        plan.global_outputs(),
+    );
     scratch.resize_with(outs, || vec![0.0]);
     let inputs: Vec<&[f32]> = (0..ins)
         .map(|c| input.get(c).map_or(&[0.0f32][..], std::slice::from_ref))
         .collect();
+    let fade = exec.root_fade();
     let mut outputs: Vec<&mut [f32]> = scratch.iter_mut().map(|c| &mut c[..1]).collect();
     exec.process(1, transport, &inputs, &mut outputs);
+    // With no device there is no fold: the root's channels are the output's
+    // by index, and a root change crossfades channel by channel, the old
+    // root's channels after the new root's.
+    let gains = fade.map(|f| f.fade.law.gains(f.done.get(), f.fade.duration.get()));
     for (c, o) in output.iter_mut().enumerate() {
-        *o = scratch.get(c).map_or(0.0, |s| s[0]);
+        let new = scratch.get(c).filter(|_| c < root).map_or(0.0, |s| s[0]);
+        *o = match (fade, gains) {
+            (Some(f), Some((go, gn))) => {
+                let old = if c < f.width {
+                    scratch[root + c][0]
+                } else {
+                    0.0
+                };
+                old * go + new * gn
+            }
+            _ => new,
+        };
     }
 }
 
@@ -3543,5 +3934,69 @@ mod tail_tests {
             !g.refresh_node_tail(NodeKey(9_999), Tail::None),
             "no such node"
         );
+    }
+}
+
+#[cfg(test)]
+mod root_fade_tests {
+    use super::*;
+    use std::sync::Arc;
+    use tutti_graph::{FadeLaw, ForkByClone, OutPort, RootId, Source};
+    use tutti_nodes::testing::Const;
+    use tutti_tempo::TempoMap;
+    use tutti_types::{Bed, Bpm};
+
+    fn graph() -> (Graph, NodeKey) {
+        let map = TempoMap::constant(Bpm::of(120.0)).expect("a tempo");
+        let mut g = Graph::new(
+            ChannelLayout::STEREO,
+            2,
+            SampleRate::SR_48K,
+            MaxBlock::of(Samples(64)),
+            None,
+            tutti_transport::TempoReader::fixed(Arc::new(map)),
+        );
+        let (node, _) = g.add(ForkByClone(Const::mono(1.0)));
+        let node = NodeKey::from(node);
+        g.editor
+            .spec_mut()
+            .topology
+            .set_outputs([Source::Node(OutPort { node, port: 0 }), Source::Zero]);
+        g.commit();
+        (g, node)
+    }
+
+    /// **A root declaration crossfades by the declick unless it is hard**: the
+    /// plan of the commit that carries the next root also renders the old
+    /// root's outputs, the old root's id and the root's width naming where
+    /// they begin, over the declick length (5 ms, 240 frames at 48 kHz) along
+    /// the equal-amplitude law; a hard declaration carries none.
+    #[test]
+    fn a_root_declaration_crossfades_for_the_declick_unless_hard() {
+        let (mut g, _) = graph();
+        g.declare_root(Some(Bed::Surround51.topology()), false)
+            .expect("declares");
+        assert!(matches!(g.commit(), Committed::Sent));
+        let plan = g.editor.base().expect("a plan");
+        let bank = plan.root_bank().expect("the old root is carried");
+        assert_eq!(bank.old, RootId::GENESIS);
+        assert_eq!(bank.base, 6, "the new root's width");
+        assert_eq!(
+            plan.rendered_outputs(),
+            6 + 2,
+            "and the old root's after it"
+        );
+        assert_eq!(plan.global_outputs(), 6);
+        assert_eq!(
+            (bank.fade.duration, bank.fade.law),
+            (Samples(240), FadeLaw::EqualAmplitude)
+        );
+
+        g.declare_root(Some(Bed::Stereo.topology()), true)
+            .expect("declares");
+        assert!(matches!(g.commit(), Committed::Sent));
+        let plan = g.editor.base().expect("a plan");
+        assert_eq!(plan.root_bank(), None, "a hard declaration cuts");
+        assert_eq!(plan.rendered_outputs(), 2);
     }
 }

@@ -213,6 +213,15 @@ impl Editor {
                 .is_none_or(|c| c.spec.bus_fade(from, to).is_some())
     }
 
+    /// Whether the plan sent last carries an old root whose crossfade the
+    /// executor has not yet been reported through ([`settle_fades`](Self::settle_fades)
+    /// reports it): a declaration of the root made now would end that fade at
+    /// its block.
+    #[must_use]
+    pub fn root_fade_running(&self) -> bool {
+        self.bank.is_some_and(|b| !b.ended)
+    }
+
     /// Finishes, in the spec, every declick fade the executor has reported
     /// ended since the last call: an edge that faded `Out` is removed (with
     /// its entry, and a bus edge with its lanes), an edge or bus edge that
@@ -240,6 +249,13 @@ impl Editor {
                 self.remove(key);
                 changed = true;
             }
+        }
+        // A root change's crossfade the executor has rendered through: the
+        // commit that follows compiles the old root's channels away.
+        let ended = self.link.root_fade_ended();
+        if let Some(bank) = self.bank.as_mut().filter(|b| !b.ended && b.seq <= ended) {
+            bank.ended = true;
+            changed = true;
         }
         if changed {
             self.touch();

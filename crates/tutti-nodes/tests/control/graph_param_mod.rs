@@ -38,7 +38,7 @@ use tutti_nodes::{
 };
 use tutti_types::{
     Amplitude, AtomicF32, BeatsPerCycle, BusTopology, ChannelLayout, CompressionRatio, Db, Depth,
-    Drive, Feedback, Hz, Mix, PhaseIncrement, Q, Resonance, SampleRate, Samples, Seconds,
+    Drive, Feedback, Hz, Mix, PhaseIncrement, Q, Resonance, SampleRate, Samples, Seconds, UnitAddr,
     UnitParam,
 };
 
@@ -509,8 +509,8 @@ fn cases() -> Vec<Case> {
             input: noise,
         },
         Case {
-            name: "strip pan",
-            param: UnitParam::Pan,
+            name: "strip balance",
+            param: UnitParam::Balance,
             make: |w, v| {
                 let n = BusStripNode::new(
                     ChannelLayout::try_from(w)
@@ -519,7 +519,7 @@ fn cases() -> Vec<Case> {
                         .expect("a test width fits a bus"),
                 );
                 if let Some(v) = v {
-                    assert!(n.param_set().set(UnitParam::Pan, v));
+                    assert!(n.param_set().set(UnitParam::Balance, v));
                 }
                 parts_of(n)
             },
@@ -841,6 +841,17 @@ fn settled(out: &[Vec<f32>]) -> impl Iterator<Item = (usize, usize, f32)> + '_ {
 fn each_fed_param_is_the_one_the_dsp_reads() {
     for w in [1usize, 2, 6] {
         for case in cases() {
+            // A node declares a param only where it can act (a mono strip has no
+            // balance), and the graph refuses a feed to one it does not declare.
+            if !(case.make)(w, None)
+                .node
+                .shape()
+                .params
+                .as_slice()
+                .contains(&UnitAddr::first(case.param))
+            {
+                continue;
+            }
             let at = |v: f32| {
                 (
                     render((case.make)(w, None), Some((case.param, v)), case.input),
@@ -1072,7 +1083,7 @@ fn an_unmodulated_param_adds_nothing_to_the_plan() {
         Some(Arc::new(AtomicF32::new(5.0)).into()),
         None,
     );
-    let controls = r.editor_mut().insert(LANE, "lane", lane);
+    let controls = r.editor_mut().insert(LANE, "lane", lane).controls;
     r.editor_mut().commit().expect("commits");
     // A steady tone, so a jump in drive is a jump in level.
     let tone = vec![0.25f32; 600];

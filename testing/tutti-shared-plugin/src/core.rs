@@ -33,6 +33,30 @@
 //! 61 s (`TAIL_PAST_CAP`). That is what the plugin **reports**. A parameter event
 //! moves `level` or `aux` at its sample offset.
 //!
+//! # Control metadata
+//!
+//! What the plugin says of its parameters, in each format that has the concept:
+//!
+//! - **Group.** `aux` is in the group `Filter`: VST3's unit `Filter`, the
+//!   innermost of `Voices` > `Oscillator` > `Filter` (the units are declared and
+//!   hold nothing else), CLAP's module `Voices/Oscillator/Filter`, AU's clump 3
+//!   named `Filter`. The others have none; VST2 declares none.
+//! - **Roles** (VST3's `IParameterFunctionName`, asked per unit): the dry/wet mix
+//!   is `level` and the low-latency switch is `mode`, the Z pan position is `tone`,
+//!   all in the root unit, and the X pan position is `aux` in the `Filter` unit
+//!   (`FUNCTION_NAMES`). No other format declares one.
+//! - **Overview** (AU's `ParametersForOverview`): `level` and `tone`.
+//! - **Shape.** `mode` is a five-position selector: VST3 `stepCount` 4, CLAP
+//!   stepped over `0..=4`, AU indexed over `0..=4`, VST2 says nothing. The
+//!   others are continuous.
+//! - **Bypass.** `bypass` ([`BYPASS`]) is the plugin's own bypass: a listed
+//!   parameter flagged as the bypass in VST3 and CLAP, `kAudioUnitProperty_BypassEffect`
+//!   in AU and `effSetBypass` in VST2 (neither a parameter). A write reaches the transcript as
+//!   `bypass`'s point, `1` bypassed. The plugin renders the same either way.
+//! - **Controller table.** VST3's `IMidiMapping` and AU's
+//!   mapping table each declare one mapping: Control Change 74 on
+//!   channel 0 drives `level`.
+//!
 //! # Faults
 //!
 //! The high nibble of the mode word's low byte (`mode | fault << 4`) makes
@@ -192,10 +216,39 @@ pub const AUX: u32 = 1;
 pub const MODE: u32 = 2;
 /// The parameter with a plain domain: a decreasing exponential (see the spec).
 pub const TONE: u32 = 3;
-/// Number of parameters.
-pub const PARAMS: u32 = 4;
+/// The read-only parameter: a meter the host never writes, always 0. Every
+/// format declares it read-only where the format has the flag (VST2 has none).
+pub const METER: u32 = 4;
+/// The bypass parameter: `0` processing, `1` bypassed. Only CLAP and VST3 list
+/// it, flagged as the format's bypass; an AU's bypass is its
+/// `kAudioUnitProperty_BypassEffect` property and VST2's `effSetBypass`, and a
+/// write to either reaches the plugin as this parameter's point.
+pub const BYPASS: u32 = 5;
+/// The module CLAP puts `aux` in: the path of the `Filter` unit VST3 puts it in
+/// (`Voices` > `Oscillator` > `Filter`).
+pub const AUX_MODULE: &str = "Voices/Oscillator/Filter";
+/// The unit tree VST3 declares, `(id, parent, name)`, the root being unit `0`:
+/// `Voices` > `Oscillator` > `Filter`. Only `aux` is in a unit, [`AUX_UNIT`].
+pub const UNITS: [(i32, i32, &str); 3] = [(1, 0, "Voices"), (2, 1, "Oscillator"), (3, 2, "Filter")];
+/// The unit `aux` is in.
+pub const AUX_UNIT: i32 = 3;
+/// The parameters VST3's `IParameterFunctionName` answers, `(unit, function
+/// name, parameter)`: the function names that are controls, each in the unit
+/// its parameter is in.
+pub const FUNCTION_NAMES: [(i32, &str, u32); 4] = [
+    (0, "DryWetMix", LEVEL),
+    (AUX_UNIT, "PanPosCenterX", AUX),
+    (0, "LowLatencyMode", MODE),
+    (0, "PanPosCenterZ", TONE),
+];
+/// Number of parameters VST2 and AU list: the four above and the meter.
+pub const PARAMS: u32 = 5;
+/// The ids CLAP and VST3 list, in list order: the five above and [`BYPASS`].
+pub const LISTED_IDS: [u32; 6] = [LEVEL, AUX, MODE, TONE, METER, BYPASS];
+/// Number of parameters CLAP and VST3 list.
+pub const LISTED: u32 = LISTED_IDS.len() as u32;
 /// Parameter names, by id.
-pub const NAMES: [&str; PARAMS as usize] = ["level", "aux", "mode", "tone"];
+pub const NAMES: [&str; 6] = ["level", "aux", "mode", "tone", "meter", "bypass"];
 /// The plain value of `TONE` at its normalized minimum, its largest.
 pub const TONE_PLAIN_MAX: f64 = 20_000.0;
 /// The plain value of `TONE` at its normalized maximum, its smallest.
@@ -334,6 +387,8 @@ pub fn default_of(id: u32) -> Option<f64> {
         AUX => Some(0.25),
         MODE => Some(0.0),
         TONE => Some(0.5),
+        METER => Some(0.0),
+        BYPASS => Some(0.0),
         _ => None,
     }
 }
@@ -461,6 +516,7 @@ pub struct Core {
     level: AtomicU64,
     aux: AtomicU64,
     tone: AtomicU64,
+    bypass: AtomicU64,
     mode: AtomicU32,
     fault: AtomicU32,
     editor: AtomicU32,
@@ -544,6 +600,7 @@ impl Core {
             level: AtomicU64::new(0.5f64.to_bits()),
             aux: AtomicU64::new(0.25f64.to_bits()),
             tone: AtomicU64::new(0.5f64.to_bits()),
+            bypass: AtomicU64::new(0),
             mode: z(),
             fault: z(),
             editor: z(),
@@ -605,7 +662,9 @@ impl Core {
             LEVEL => Some(f64::from_bits(self.level.load(Relaxed))),
             AUX => Some(f64::from_bits(self.aux.load(Relaxed))),
             TONE => Some(f64::from_bits(self.tone.load(Relaxed))),
+            BYPASS => Some(f64::from_bits(self.bypass.load(Relaxed))),
             MODE => Some(f64::from(self.mode.load(Relaxed)) / f64::from(MODES - 1)),
+            METER => Some(0.0),
             _ => None,
         }
     }
@@ -617,6 +676,7 @@ impl Core {
             LEVEL => self.level.store(v.to_bits(), Relaxed),
             AUX => self.aux.store(v.to_bits(), Relaxed),
             TONE => self.tone.store(v.to_bits(), Relaxed),
+            BYPASS => self.bypass.store(v.to_bits(), Relaxed),
             MODE => self.mode.store(mode_of(v), Relaxed),
             _ => {}
         }

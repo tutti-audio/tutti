@@ -1,8 +1,6 @@
 //! The fractional-read delay ring and its interpolation: a delay whose time is
 //! modulated must interpolate between taps or it steps audibly.
 
-use tutti_types::{SampleRate, Seconds};
-
 mod bank;
 mod layout;
 mod max_delay;
@@ -14,7 +12,7 @@ pub use bank::{DelayBank, DelayGlides, DelayLanes};
 pub use layout::{DELAY_SLEW, DelayControls, DelayLayout, MAX_DELAY_CHANNELS};
 pub use max_delay::{MaxDelay, MaxDelayError};
 pub use routing::{Routing, RoutingError};
-pub(crate) use taps::{finite_or, read_taps, ring_seconds, trips};
+pub(crate) use taps::{finite_or, ring_seconds, trips};
 pub use times::{ChannelTimes, ChannelTimesError};
 
 /// How a fractional delay position is turned into a sample.
@@ -99,19 +97,19 @@ impl DelayLine {
     /// Reads the line `delay_samples` frames back from the newest write,
     /// interpolating per `mode`.
     ///
-    /// `delay_samples` is a **fractional frame count**, not [`Seconds`] — the
-    /// caller converts, because keeping the fraction is the whole point of an
-    /// interpolated read. `0.0` is the sample just pushed. Where the unit types
-    /// stop: `Samples` is an integer count and cannot carry the fraction, and
-    /// `SamplePosition` is an absolute f64 offset into a wave, where this is a
-    /// per-sample f32 span back from the write head.
+    /// `delay_samples` is a **fractional frame count**, not seconds: the caller
+    /// converts ([`SampleSpan::from_seconds`](tutti_types::SampleSpan::from_seconds)),
+    /// because keeping the fraction is the whole point of an interpolated read.
+    /// `0.0` is the sample just pushed. It is a bare `f32` because this is the
+    /// per-sample kernel read: a caller lowers its span to the raw once per block
+    /// (or once per frame for a driven delay) and reads at it.
     ///
     /// The delay is clamped to `0.0..=max_delay_samples`, so an over-long
     /// request shortens silently rather than panicking. Does not allocate.
     #[inline]
     pub fn read_sample(&self, delay_samples: f32, mode: InterpolationMode) -> f32 {
-        // Defensive only: a family's `reach_covers_need` proves no member's read leaves the
-        // line, so this clamp is reached by a caller outside the model alone.
+        // Defensive only: a caller holds its delay inside the line, so this clamp is
+        // reached by a caller that does not.
         let delay = delay_samples.clamp(0.0, self.max_delay_samples as f32);
         match mode {
             InterpolationMode::None => {
@@ -160,23 +158,14 @@ impl DelayLine {
     }
 }
 
-/// A delay position in samples, keeping the fraction.
-///
-/// Deliberately **not** `Seconds::to_samples`: that returns `Samples`, an
-/// integer frame count, and the whole point of an interpolated read is the
-/// fractional part — rounding here would quantise every delay to a frame
-/// boundary and step audibly under modulation.
-///
-/// The multiply stays in `f64` and narrows once at the end. Narrowing the
-/// *rate* first (`secs * sample_rate as f32`) computes the whole position at
-/// `f32` precision, which is coarser than the fractional read can resolve.
-#[inline]
-pub fn fractional_samples(secs: Seconds, sample_rate: SampleRate) -> f32 {
-    (secs.get() * sample_rate.get()) as f32
-}
-
 /// One sample of one uncoupled channel: read the feedback tap, write the line,
 /// read the output tap (the wet sample).
+///
+/// The delay `d` and the feedback `fb` are the raw `f32` of a
+/// [`SampleSpan`](tutti_types::SampleSpan) of frames and a
+/// [`Feedback`](tutti_types::Feedback): this is the per-frame read, called once per sample
+/// per channel, and its caller lowers its span to the position once per frame after the
+/// clamp that makes it a span (a delay glide's value is already an `f32` of frames).
 #[inline(always)]
 pub fn delay_step(line: &mut DelayLine, x: f32, d: f32, fb: f32, interp: InterpolationMode) -> f32 {
     let tap = line.read_sample((d.max(1.0) - 1.0).max(0.0), interp);

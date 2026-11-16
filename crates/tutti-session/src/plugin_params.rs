@@ -312,12 +312,19 @@ impl<'a> Param<'a> {
         crate::Key::<crate::PluginNode>::new(self.params.node).param(self.id())
     }
 
+    /// The write policy every format answers
+    /// ([`ParamWriteError`](tutti_plugin_types::ParamWriteError)), on what the
+    /// mirror holds of this parameter's declaration.
     fn writable(&self) -> Result<(), PluginParamError> {
-        if self.info().flag(tutti_plugin_types::ParamFlags::READ_ONLY) == Some(true) {
-            Err(PluginParamError::ReadOnly(self.id()))
-        } else {
-            Ok(())
-        }
+        use tutti_plugin_types::{ParamAccess, ParamWriteError};
+        // The mirror holds a declaration, so the policy can only refuse as
+        // read-only; any other refusal is reported as an unknown parameter.
+        ParamWriteError::check(self.id(), Some(ParamAccess::of(self.info()))).map_err(|refused| {
+            match refused {
+                ParamWriteError::ReadOnly(id) => PluginParamError::ReadOnly(id),
+                other => PluginParamError::Unknown(other.id()),
+            }
+        })
     }
 
     /// Sends `value` to the plugin and reads it back at once.

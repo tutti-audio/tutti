@@ -51,7 +51,7 @@ use crate::schedule::CLIP_EVENT_DENSITY;
 /// use tutti_midi_runtime::MpeTransformNode;
 ///
 /// let (mut editor, _exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
-/// let controls = editor.insert(NodeKey(1), "mpe", MpeTransformNode::new(MpeMode::Disabled));
+/// let controls = editor.insert(NodeKey(1), "mpe", MpeTransformNode::new(MpeMode::Disabled)).controls;
 /// controls.set_mode(MpeMode::Disabled);
 /// assert_eq!(controls.mode(), MpeMode::Disabled);
 /// ```
@@ -206,6 +206,9 @@ impl Node for MpeTransformNode {
                     tell(&self.mpe, &mut self.told, group, event.offset, &mut staging);
                 }
             }
+            // `None` is an absorbed select, or a MIDI 2.0 Control Change of
+            // CC 0, 6, 32, 38 or 98 to 101, which a MIDI 2.0 receiver ignores
+            // (M2-104 section 7.4.6).
             if let Some(ev) = self.translator.translate(raw) {
                 let mpe = &mut self.mpe;
                 staging.whole(ev.is_note_off(), |send| {

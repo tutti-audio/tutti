@@ -5,9 +5,9 @@ use tutti_plugin_types::MainThreadMarker;
 use tutti_plugin_types::features::probed;
 use tutti_plugin_types::{
     AutomationMode, ContentScale, Control, EditorPresence, EditorWindow, Features, KeyEvent,
-    KeyUse, LoadedPlugin, ModifierConvention, Normalized, ParamEdit, ParamId, ParameterInfo,
-    PluginBus, PluginClass, PluginDescriptor, PluginError, PluginResult, Preset, PresetId,
-    RenderMode, RenderModeSupport, Request, StateUse, WindowHandle,
+    KeyUse, LoadedPlugin, ModifierConvention, Normalized, ParamAccess, ParamEdit, ParamId,
+    ParamWriteError, ParameterInfo, PluginBus, PluginClass, PluginDescriptor, PluginError,
+    PluginResult, Preset, PresetId, RenderMode, RenderModeSupport, Request, StateUse, WindowHandle,
 };
 
 use crate::error::Vst2Error;
@@ -22,6 +22,7 @@ pub(crate) fn plugin_error(error: Vst2Error) -> PluginError {
     match error {
         Vst2Error::LoadFailed { stage, reason, .. } => PluginError::Load { stage, reason },
         Vst2Error::StateError(reason) => PluginError::State(reason),
+        Vst2Error::StateFrame(frame) => PluginError::State(frame.to_string()),
         Vst2Error::EditorError(reason) => {
             PluginError::Editor(tutti_plugin_types::EditorError::PluginError(reason))
         }
@@ -93,6 +94,10 @@ impl Control for Vst2Loaded {
             tail: self.tail(main),
             features: self.features(),
             probed: probed::VST2,
+            // VST2 has no opcode that reads the bypass back, so the host cannot
+            // confirm a write of `effSetBypass`: the executor's bypass serves it.
+            own_bypass: None,
+            assignments: Vec::new(),
         }
     }
 
@@ -109,10 +114,26 @@ impl Control for Vst2Loaded {
     }
 
     /// Applied now, with `setParameter`, which the SDK allows from either thread.
-    /// A write to a parameter the plugin does not have, or one it exposes no
-    /// `setParameter` for, is discarded.
-    fn set_parameter(&mut self, _main: MainThreadMarker, id: ParamId, value: Normalized) {
+    /// A write to a plugin that exposes no `setParameter` is discarded.
+    fn set_parameter(
+        &mut self,
+        main: MainThreadMarker,
+        id: ParamId,
+        value: Normalized,
+    ) -> Result<(), ParamWriteError> {
+        self.parameter_writable(main, id)?;
         let _ = self.write_parameter(id, value);
+        Ok(())
+    }
+
+    /// Declared when `id` addresses a parameter. VST2 has no opcode for a
+    /// read-only one, so a declared parameter is writable.
+    fn parameter_writable(
+        &self,
+        _main: MainThreadMarker,
+        id: ParamId,
+    ) -> Result<(), ParamWriteError> {
+        ParamWriteError::check(id, self.param_index(id).map(|_| ParamAccess::Unreported))
     }
 
     fn parameter_plain(

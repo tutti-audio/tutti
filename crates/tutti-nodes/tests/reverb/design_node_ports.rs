@@ -1,12 +1,12 @@
-//! `FamilyNode<D>`'s ports are its design's cells and nothing else: no port for a mix, because
+//! A node's ports are its design's cells and nothing else: no port for a mix, because
 //! a node is the wet signal alone and its blend with the input is the graph's (`node_mix.rs`).
 //! The state-variable filter and a live Freeverb start their ports at the first cell; the fixed
 //! General MIDI send has none.
 
-use tutti_dsp::{FreeverbControls, FreeverbFamily, SvfType};
+use tutti_dsp::{FreeverbControls, SvfType};
 use tutti_graph::contract::prepared;
 use tutti_graph::{Node, ParamNode};
-use tutti_nodes::{FamilyNode, FreeverbNode, SvfFilterNode};
+use tutti_nodes::{FreeverbNode, SvfFilterNode};
 use tutti_types::{Hz, Q, SampleRate, UnitAddr, UnitParam};
 
 const SR: SampleRate = SampleRate::SR_48K;
@@ -33,7 +33,7 @@ fn a_design_nodes_ports_start_at_its_first_cell() {
     assert!(filter.param_set().get(UnitParam::Wet).is_none());
 
     let live = prepared(
-        FamilyNode::live(FreeverbFamily, FreeverbControls::GENERAL_MIDI),
+        FreeverbNode::live(FreeverbControls::GENERAL_MIDI),
         SR,
         BLOCK,
     );

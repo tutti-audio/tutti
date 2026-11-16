@@ -284,7 +284,11 @@ fn class_of(timed: &TimedMidiEvent) -> Class {
 /// the translator absorbs (an RPN select, Data Entry, Bank Select) is gone; a
 /// select or Data Entry that ends a run is replaced by the run's controller,
 /// and a run the clip ends on (a CC 6 with no CC 38 after it) is sent right
-/// after its CC 6's place, on its beat.
+/// after its CC 6's place, on its beat. A MIDI 2.0 Control Change of CC 0, 6,
+/// 32, 38 or 98 to 101 is dropped, as the Protocol has Program Change,
+/// Registered Controller and Assignable Controller for what they carry and a
+/// receiver ignores them (M2-104 section 7.4.6): a native MIDI 2.0 clip holding
+/// one plays without it, which is the spec's rule and no data loss.
 /// Control thread.
 fn translated(events: impl IntoIterator<Item = TimedMidiEvent>) -> Vec<TimedMidiEvent> {
     let events: Vec<TimedMidiEvent> = events.into_iter().collect();
@@ -465,7 +469,7 @@ impl MidiClipControls {
 /// let (mut editor, _exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
 /// let on = midi::note_on(MidiChannel::FIRST, 60, 0xFFFF);
 /// let clip = MidiClipNode::new([TimedMidiEvent::new(Beat(1.0), on).unwrap()]);
-/// let controls = editor.insert(NodeKey(1), "clip", clip);
+/// let controls = editor.insert(NodeKey(1), "clip", clip).controls;
 /// assert_eq!(controls.len(), 1);
 /// ```
 pub struct MidiClipNode {

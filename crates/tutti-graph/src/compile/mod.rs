@@ -1,8 +1,8 @@
 //! The compiler: `compile(&ValidGraph, &Shapes, &Prepare, prev) -> (Plan, Delta)`.
 //!
 //! Pure: no I/O, no audio, no units — only the value, the shapes
-//! the units declared, and the previous plan (for placements and nothing
-//! else). The passes, in order:
+//! the units declared, and the previous plan (for placements, and for the
+//! output time an old root's channels were heard at). The passes, in order:
 //!
 //! 1. **Check** every node's shape against its spec — widths, latency and
 //!    tail must all agree — and every event edge's ports against the shapes.
@@ -430,10 +430,13 @@ impl Emitted {
 /// allocates. [`Editor::commit`](crate::Editor::commit) calls it for you; call
 /// it directly to inspect a plan or to drive [`Editor::package`](crate::Editor::package).
 ///
-/// `prev` is the plan currently running, if any. It is read for exactly one
-/// thing — which store index each surviving key already occupies — so that the
-/// [`Delta`] moves only what changed. Delay-ring and feedback state carry over
-/// by *key* at the runtime and need nothing from `prev`.
+/// `prev` is the plan currently running, if any. It is read for two things:
+/// which store index each surviving key already occupies, so that the
+/// [`Delta`] moves only what changed, and, when the graph carries an old
+/// root's channels ([`ValidGraph::root_bank`]), its total latency, the output
+/// time those channels align to. With no `prev`, that time is the new root's
+/// own total. Delay-ring and feedback state carry over by *key* at the
+/// runtime and need nothing else from `prev`.
 ///
 /// # Errors
 ///
@@ -666,7 +669,24 @@ pub fn compile(
         .collect();
     let departure = |n: usize| departures[n];
     let total = Latency::new(solved.compensation().total());
-    let compensation: Vec<Samples> = (0..topology.outputs.len())
+    // The root's channels: a root change's old channels, after them, are
+    // aligned like any output and report nothing outward.
+    let rendered_outputs = topology.outputs.len();
+    // An old root's channels are aligned to the output time they were heard
+    // at: the previous plan's total, or, for a plan that continues the
+    // previous plan's crossfade, the alignment that plan kept. The new root's
+    // alignment does not move for the length of the fade and back after it.
+    let bank_total = match (graph.root_bank(), prev) {
+        (Some(bank), Some(p)) if p.root_bank.is_some_and(|b| b.old == bank.old) => p.bank_total,
+        (_, Some(p)) => p.total_latency,
+        (_, None) => total,
+    };
+    let output_time = |channel: u16| match graph.root_bank() {
+        Some(bank) if usize::from(channel) >= bank.base => bank_total,
+        _ => total,
+    };
+    let root_width = graph.root_bank().map_or(rendered_outputs, |b| b.base);
+    let compensation: Vec<Samples> = (0..root_width)
         .map(|ch| solved.compensation().for_channel(ch))
         .collect();
 
@@ -1002,7 +1022,7 @@ pub fn compile(
                     let r = align_audio(
                         &mut em,
                         v,
-                        dep.gap_to(total),
+                        dep.gap_to(output_time(channel)),
                         DelayKey::Output {
                             channel,
                             from: source,
@@ -1017,7 +1037,7 @@ pub fn compile(
                             value: align_event(
                                 &mut em,
                                 event_out_val[&from],
-                                departure(dense[&from.node]).gap_to(total),
+                                departure(dense[&from.node]).gap_to(output_time(channel)),
                                 DelayKey::EdgeGain { id, from },
                             ),
                         });
@@ -1040,7 +1060,14 @@ pub fn compile(
             Source::Global(ch) => ARef::Val(global_val[&ch]),
             Source::Zero => ARef::Zero,
         };
-        let d = compensation[channel as usize];
+        let d = match (graph.root_bank(), source) {
+            (Some(bank), _) if usize::from(channel) >= bank.base => match source {
+                Source::Node(p) => departure(dense[&p.node]).gap_to(bank_total),
+                Source::Global(_) => Latency::ZERO.gap_to(bank_total),
+                Source::Zero => Samples::ZERO,
+            },
+            _ => solved.compensation().for_channel(usize::from(channel)),
+        };
         // Delaying silence is silence: a zero channel reports its
         // compensation (as `latency::plan` does) but gets no ring.
         let mut delay = (!d.is_zero() && src != ARef::Zero).then(|| {
@@ -1091,7 +1118,13 @@ pub fn compile(
                 // What each output channel carries, post-sum and aligned
                 // (above); a lane past the output count is silence.
                 let srcs: Vec<ARef> = (0..*width)
-                    .map(|c| output_refs.get(c).copied().unwrap_or(ARef::Zero))
+                    .map(|c| {
+                        output_refs
+                            .get(c)
+                            .filter(|_| c < root_width)
+                            .copied()
+                            .unwrap_or(ARef::Zero)
+                    })
                     .collect();
                 let op = em.push(Pre::Tap {
                     tap: tap_ids.len() as u32,
@@ -1231,7 +1264,7 @@ pub fn compile(
     let mut meter_ids: Vec<(crate::MeterId, usize)> = Vec::new();
     for (&meter, spec) in &topology.meters {
         let srcs: Vec<ARef> = match spec {
-            crate::MeterSpec::Outputs => output_refs.clone(),
+            crate::MeterSpec::Outputs => output_refs[..root_width].to_vec(),
             crate::MeterSpec::Ports { sources, align } => {
                 let mut srcs = Vec::with_capacity(sources.len());
                 for (lane, source) in sources.iter().enumerate() {
@@ -1732,7 +1765,10 @@ pub fn compile(
         global_inputs: topology.inputs.count(),
         compensation,
         root_id: crate::RootId::GENESIS,
+        root_bank: graph.root_bank(),
+        rendered_outputs,
         total_latency: total,
+        bank_total,
         audio_values,
         event_values,
         value_readers,

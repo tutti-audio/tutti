@@ -2,6 +2,7 @@ use tutti_buffers::{Planes, PlanesMut};
 use tutti_types::{Db, Depth, Hz, Mix, SampleRate, Seconds, StereoWidth, Tail};
 
 use super::*;
+use crate::MaxDecay;
 use crate::reverb::network::{Fdn, Network, Stage};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -21,7 +22,7 @@ fn still(f: impl FnOnce(&mut FdnControls)) -> FdnControls {
 }
 
 fn layout(lines: usize, freezable: bool) -> FdnLayout {
-    FdnLayout::new(lines, Seconds(8.0), freezable).unwrap()
+    FdnLayout::new(lines, MaxDecay::DEFAULT, freezable).unwrap()
 }
 
 /// A bank of `layout` at `rate`, landed on `c`.
@@ -196,13 +197,13 @@ fn each_band_decays_at_its_designed_rt60() {
         c.width = StereoWidth(1.0);
         c.wet = Db(0.0);
     });
-    let length = fdn_of(&design(&l, RATE, &c)).lines[0].length;
+    let length = fdn_of(&design(&l, RATE, &c)).lines[0].length.get();
     assert_eq!(length.fract(), 0.0, "a whole number of frames");
     let trip = length as usize;
     let (mut bank, mut glides) = landed(&l, RATE, &c);
     let [left, _] = run(&mut bank, &mut glides, &impulse(8 * trip), 64);
 
-    let g = [3.0, 1.5, 0.6].map(|t| trip_gain(f64::from(length), t, RATE));
+    let g = [3.0, 1.5, 0.6].map(|t| trip_gain(length, t, RATE));
     // The crossovers (300 Hz and 4 kHz) are the design's, restated here: the test's own copy
     // of the figures the absorption's response is written in.
     let mid_hz = libm::sqrt(300.0 * 4_000.0);
@@ -226,7 +227,7 @@ fn each_band_decays_at_its_designed_rt60() {
         }
         // The decay the impulse response shows, from its own echoes.
         let mean = ratios.iter().sum::<f64>() / ratios.len() as f64;
-        measured.push(rt60_of_trip_gain(mean, f64::from(length), RATE));
+        measured.push(rt60_of_trip_gain(mean, length, RATE));
     }
     // At DC the absorption is the low band's gain, so the decay is the designed 3 s.
     assert!((measured[0] - 3.0).abs() < 0.005 * 3.0, "{measured:?}");
@@ -311,8 +312,8 @@ fn a_diagonal_network_is_the_identity_a_comb_a_line_with_a_positive_sign() {
     let f = fdn_of(&net);
     let expected: f64 = (0..f.lines.len())
         .map(|j| {
-            let b = f64::from(f.input[j]);
-            let c = f64::from(f.output.rows[0][j]);
+            let b = f64::from(f.input[j].get());
+            let c = f64::from(f.output.rows[0][j].get());
             let g = f64::from(f.lines[j].absorption.gain(Band::Low).get());
             b * c / (1.0 - g)
         })
@@ -345,7 +346,7 @@ fn the_first_echo_follows_the_pre_delay_the_wet_gain_and_the_width() {
         let first = fdn_of(&net)
             .lines
             .iter()
-            .map(|line| line.length as usize)
+            .map(|line| line.length.get() as usize)
             .min()
             .unwrap();
         let at = 4_800 + first;
@@ -623,8 +624,8 @@ fn a_length_moves_half_a_frame_a_chunk_and_lands_exactly() {
     let (a, b) = (still(|c| c.size = Mix(0.2)), still(|c| c.size = Mix(0.3)));
     let (mut bank, mut glides) = landed(&l, RATE, &a);
     let (from, to) = (
-        fdn_of(&design(&l, RATE, &a)).lines[3].length,
-        fdn_of(&design(&l, RATE, &b)).lines[3].length,
+        fdn_of(&design(&l, RATE, &a)).lines[3].length.get() as f32,
+        fdn_of(&design(&l, RATE, &b)).lines[3].length.get() as f32,
     );
     let steps = ((to - from) / 0.5).ceil() as usize;
     assert!(steps > 100, "a long way: {steps} chunks");

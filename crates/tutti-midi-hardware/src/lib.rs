@@ -188,13 +188,13 @@
 //!   sequencer, with user-space clients as the devices. Linux only; needs the
 //!   `snd-seq` module and a readable `/dev/snd/seq`. Off by default.
 //! - `synth-tests`: the suites that open Windows' GS Wavetable Synth through
-//!   the winmm backend. Windows only; needs an audio endpoint, which a hosted
-//!   CI runner lacks. Off by default.
+//!   the winmm backend. Windows only; needs an audio endpoint, which a machine
+//!   with no sound hardware gets from a virtual audio driver. Off by default.
 //!
 //! ## Where it sits
 //!
 //! Builds on `tutti-ump` (the wire vocabulary and its decoded `Message`) and `tutti-midi-runtime`
-//! (the graph's MIDI nodes and mailbox), and re-exports the parts of both a
+//! (the graph's MIDI nodes), and re-exports the parts of both a
 //! hardware consumer needs. It does **not** include the file codecs: SMF and the
 //! path-level Clip File codec are in `tutti-midi-file`, so a consumer that only
 //! reads `.mid` files does not link CoreMIDI or ALSA. Re-exported by `tutti`.
@@ -279,22 +279,18 @@ pub use stream::{Basis, DeviceStream, InputTiming};
 pub use tutti_midi_device::{
     BindPolicy, Capabilities, DeviceEvent, DeviceId, DeviceInfo, Endpoint, EndpointId,
     FunctionBlock, Identity, Learned, Match, OsChange, OsDevice, PortDirection, Resolved,
-    SavedDevice,
+    SavedDevice, Supports,
 };
 pub use virtual_endpoint::{VirtualDestination, VirtualProtocol, VirtualSource, VirtualSpec};
 
 // --- Runtime delivery (the graph's MIDI border) ---
 //
-// The nodes a port feeds (`MidiIngestNode`, over the inlet each port is made with), the
-// ring MIDI crosses threads on (`MidiMailbox`/`MidiSender`/`MidiReceiver`) and
+// The nodes a port feeds (`MidiIngestNode`, over the inlet each port is made with) and
 // clip playback live in `tutti-midi-runtime`; surfaced here because delivery
 // is what a port feeds, so a hardware consumer needs both. That is the test a
 // file codec fails: a `.mid` reader needs no port, and no port needs it.
 
-pub use tutti_midi_runtime::{
-    InputId, InputInlets, MidiIngestNode, MidiMailbox, MidiOut, MidiReceiver, MidiSender,
-    TimedMidiEvent,
-};
+pub use tutti_midi_runtime::{InputId, InputInlets, MidiIngestNode, MidiOut, TimedMidiEvent};
 
 // --- Standard MIDI File codec: NOT here ---
 //

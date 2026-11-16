@@ -534,7 +534,6 @@ unsafe extern "C" fn plugin_process(
     }
 
     *CAPTURE.lock().unwrap_or_else(|p| p.into_inner()) = cap;
-    unsafe { params_state::apply_extra_param_events(p.in_events) };
     unsafe { record_sysex_input(p) };
 
     // AUDIO-CORRECTNESS: write the closed-form output the routing oracle
@@ -593,6 +592,10 @@ unsafe extern "C" fn plugin_process(
 
     // HOST EXTENSIONS: a command a test latched for the audio thread's block.
     unsafe { host_ext::on_process(host) };
+
+    // The values the block's events leave the parameters at, after the block's
+    // own per-sample reads: `state.save` and `params.get_value` answer them.
+    unsafe { params_state::apply_param_events(p.in_events) };
 
     // RT-HAZARD: the status is the last thing decided, so the block counter the
     // alternating modes read advances exactly once per block regardless of
@@ -1108,6 +1111,9 @@ pub enum PortLayoutMode {
     /// Two mono buses on both sides (`in = [1, 1]`, `out = [1, 1]`): the
     /// stereo layout's channel totals with another split of buses.
     TwoMono = 3,
+    /// One bus of more channels than a block serves, on both sides (`in = [17]`,
+    /// `out = [17]`): a plugin the host must refuse a node for.
+    TooWide = 4,
 }
 
 /// Process-global selected layout. `AtomicU32` rather than a `Mutex` because
@@ -1121,6 +1127,7 @@ impl PortLayoutMode {
             1 => Self::AsymmetricAux,
             2 => Self::Instrument,
             3 => Self::TwoMono,
+            4 => Self::TooWide,
             _ => Self::SymmetricStereo,
         }
     }
@@ -1128,7 +1135,7 @@ impl PortLayoutMode {
     /// Number of ports on the given side.
     fn port_count(self, is_input: bool) -> u32 {
         match self {
-            Self::SymmetricStereo => 1,
+            Self::SymmetricStereo | Self::TooWide => 1,
             Self::AsymmetricAux | Self::TwoMono => 2,
             Self::Instrument => u32::from(!is_input),
         }
@@ -1141,6 +1148,7 @@ impl PortLayoutMode {
             Self::SymmetricStereo => &[2],
             Self::AsymmetricAux => &[2, 1],
             Self::TwoMono => &[1, 1],
+            Self::TooWide => &[17],
             Self::Instrument if is_input => &[],
             Self::Instrument => &[2],
         };

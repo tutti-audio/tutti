@@ -7,9 +7,7 @@
 use std::sync::Arc;
 use tutti_types::MaxBlock;
 
-use tutti_dsp::{
-    FdnControls, FdnLayout, FreeverbControls, FreeverbFamily, MaxDecay, Network, System,
-};
+use tutti_dsp::{FdnControls, FdnLayout, FreeverbControls, MaxDecay, Network, System};
 use tutti_graph::contract::{
     Driven, assert_honest_tail, assert_param_fork, drive, drive_input, prepared,
 };
@@ -19,7 +17,7 @@ use tutti_graph::{
 };
 use tutti_modulation::ControlProgram;
 use tutti_nodes::automation::ControlLaneNode;
-use tutti_nodes::{FamilyNode, FdnNode};
+use tutti_nodes::{FdnNode, FreeverbNode};
 use tutti_types::{
     AtomicF32, ChannelLayout, Db, Depth, Frame, Latency, Mix, SampleRate, Samples, Seconds, Tail,
     UnitAddr, UnitParam,
@@ -33,7 +31,7 @@ fn plain() -> FdnLayout {
 }
 
 fn freezable() -> FdnLayout {
-    FdnLayout::new(8, Seconds(8.0), true).unwrap()
+    FdnLayout::new(8, MaxDecay::DEFAULT, true).unwrap()
 }
 
 fn live(layout: FdnLayout, c: FdnControls) -> FdnNode {
@@ -345,7 +343,7 @@ fn a_non_finite_write_is_ignored() {
 /// controls, and the FDN is stereo out.
 #[test]
 fn a_live_node_has_its_layouts_params() {
-    let f = FamilyNode::live(FreeverbFamily, FreeverbControls::GENERAL_MIDI);
+    let f = FreeverbNode::live(FreeverbControls::GENERAL_MIDI);
     assert_eq!(f.param_set().params().count(), 2, "the room, the damping");
     let n = live(freezable(), FdnControls::DEFAULT);
     assert_eq!(n.param_set().params().count(), 11);
@@ -613,7 +611,7 @@ fn the_declared_tail_is_within_the_graphs_bound_or_unbounded() {
         default.get() < 2_000_000,
         "nothing stretches the ceiling: {default:?}"
     );
-    let nineteen = FdnLayout::new(8, Seconds(19.0), false).unwrap();
+    let nineteen = FdnLayout::new(8, MaxDecay::of(Seconds(19.0)), false).unwrap();
     let Tail::Finite(long) = at(nineteen, SampleRate::SR_48K) else {
         panic!("a finite ceiling")
     };
@@ -621,6 +619,6 @@ fn the_declared_tail_is_within_the_graphs_bound_or_unbounded() {
         long <= MAX_NODE_TAIL && long.get() as f64 > 19.0 * 48_000.0,
         "{long:?}"
     );
-    let cap = FdnLayout::new(16, MaxDecay::CAP, false).unwrap();
+    let cap = FdnLayout::new(16, MaxDecay::new(MaxDecay::CAP).unwrap(), false).unwrap();
     assert_eq!(at(cap, SampleRate::SR_192K), Tail::Unbounded);
 }

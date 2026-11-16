@@ -54,9 +54,9 @@ pub use protocol::{
     BridgeMessage, HostMessage, MAX_FRAME_BYTES, MAX_STATE_BYTES, PROTOCOL_VERSION,
     ProcessAudioData, STATE_CHUNK_BYTES, SlabLayout, StagedState,
 };
-pub use subprocess::{LaunchedServer, Reaped, launch, resolve_bundle};
+pub use subprocess::{LaunchedServer, Reaped, launch};
 pub use transport::control::socket_name;
-pub use transport::shm::{AudioSlab, RING_SLOTS, SlabWriter};
+pub use transport::shm::{AudioSlab, RING_SLOTS, SlabLayoutError, SlabWriter};
 // Splitting and reassembling plugin state across frames: both ends must chunk
 // identically, so the server uses this one.
 pub use transport::state_chunk;

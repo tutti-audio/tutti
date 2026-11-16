@@ -20,7 +20,9 @@ use tutti_graph::{
 };
 use tutti_plugin_host::{PluginNode, client_over};
 use tutti_plugin_types::fake::{Call, FakeLoaded, FakePlugin};
-use tutti_plugin_types::{Control, Loaded, Prepare};
+use tutti_plugin_types::{
+    ChannelLayout, Control, Loaded, MAX_BLOCK_CHANNELS, PluginBus, PluginTooWide, Prepare,
+};
 use tutti_tempo::TempoMap;
 use tutti_transport::TempoReader;
 use tutti_types::{Bpm, Frame, MaxBlock, SampleRate, Samples, Tail};
@@ -50,7 +52,8 @@ fn node(ring: usize, tail: usize) -> (PluginNode<FakeLoaded>, FakePlugin) {
         [],
         0,
         None,
-    );
+    )
+    .expect("the fake is within a block's width");
     let map = TempoMap::constant(Bpm::of(120.0)).expect("a tempo");
     (client.bind(TempoReader::fixed(Arc::new(map))), fake)
 }
@@ -221,4 +224,40 @@ fn a_sleep_parks_before_the_ceiling_has_elapsed() {
     // Called for the first block(s) only: asleep from the start, so parked
     // long before the 128-frame ceiling's two blocks could matter.
     assert!(processed(&fake) <= 2, "{} calls", processed(&fake));
+}
+
+/// **A plugin wider than a block serves gets no node.** Its wiring, as the
+/// plugin reports it, has one channel more than `MAX_BLOCK_CHANNELS` in a
+/// direction: `client_over` refuses it by name instead of handing the plugin
+/// the first channels only.
+#[test]
+fn a_plugin_wider_than_a_block_is_refused_by_name() {
+    let (_fake, loaded) = FakePlugin::new();
+    let main = main_thread();
+    let mut wiring = loaded.wiring(main);
+    let descriptor = loaded.info().clone();
+    let prepare = Prepare::new(SR, MaxBlock::new(Samples(BLOCK)).expect("a block"));
+    let Ok((processor, controller)) = loaded.activate(main, prepare) else {
+        panic!("the fake activates");
+    };
+    wiring.outputs = vec![PluginBus::main(ChannelLayout::clamped(
+        MAX_BLOCK_CHANNELS + 1,
+    ))];
+    let refused = client_over::<FakeLoaded>(
+        processor,
+        controller,
+        prepare,
+        descriptor,
+        &wiring,
+        [],
+        0,
+        None,
+    );
+    assert_eq!(
+        refused.err(),
+        Some(PluginTooWide {
+            direction: "output",
+            channels: MAX_BLOCK_CHANNELS + 1
+        })
+    );
 }

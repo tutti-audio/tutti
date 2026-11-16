@@ -1,7 +1,8 @@
 //! Loading, initialization and the plugin's requests and notifications.
 
 use super::*;
-use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
+use crate::host::midi_mapping::{MidiCcMapping, declared_assignments, scan};
+use tutti_plugin_types::{MainThreadMarker, MainWorkHandle, PluginVersion};
 
 impl Vst3Loaded {
     /// Reads a plugin's metadata without initializing it.
@@ -140,6 +141,7 @@ impl Vst3Loaded {
         // Whether there is an editor is asked of the plugin here, on the main
         // thread; `Control::info` has no token and reads the answer.
         let _ = loaded.descriptor.set(loaded.measured_descriptor(main));
+        loaded.rebuild_midi_cc_mapping(main);
         Ok(loaded)
     }
 
@@ -162,7 +164,9 @@ impl Vst3Loaded {
             descriptor: OnceLock::new(),
             active: Activation::default(),
             carried: Vec::new(),
+            declared: None,
             midi_cc: Arc::new(ArcLend::new(MidiCcCell(MidiCcMapping::empty()))),
+            assignments: Vec::new(),
             stashed: Vec::new(),
         }
     }
@@ -402,13 +406,16 @@ impl Vst3Loaded {
     }
 
     /// Re-queries the `IMidiMapping` CC to parameter table from the controller
-    /// and publishes it, so the Processor routes against it from its next
+    /// and publishes it, and keeps the assignments it declares for
+    /// [`wiring`](tutti_plugin_types::Control::wiring), so the Processor routes against it from its next
     /// block. Call it when the plugin raised
     /// [`Request::MidiCcAssignmentChanged`](tutti_plugin_types::Request::MidiCcAssignmentChanged). Allocates.
     pub(crate) fn rebuild_midi_cc_mapping(&mut self, main: MainThreadMarker) {
+        let slots = scan(main, &self.plugin);
         self.midi_cc
-            .publish(MidiCcCell(MidiCcMapping::query(main, &self.plugin)));
+            .publish(MidiCcCell(MidiCcMapping::from_slots(&slots)));
         self.midi_cc.reclaim();
+        self.assignments = declared_assignments(&slots);
     }
 }
 
@@ -471,9 +478,9 @@ pub(super) fn build_plugin_info_raw(library: &Library, class: &AudioClass) -> Pl
             .unwrap_or_default()
     });
     // The real version string lives on the class (e.g. "1.0.0.512",
-    // Major.Minor.Subversion.Build). A plugin that declares none falls back to
-    // the "1.0.0" placeholder rather than showing an empty version field.
-    let version = class.version.clone().unwrap_or_else(|| "1.0.0".to_string());
+    // Major.Minor.Subversion.Build), and is kept as the plugin wrote it. A class that
+    // declares none is `Absent`.
+    let version = PluginVersion::text(class.version.clone().unwrap_or_default());
 
     PluginInfo::new(id_of(&class.cid), class.name.clone())
         .vendor(vendor)

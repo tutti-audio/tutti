@@ -164,8 +164,7 @@ impl Plugin {
     /// for a blacklisted plugin,
     /// [`BridgeError::ServerNotFound`](tutti_plugin_types::BridgeError::ServerNotFound)
     /// when the `plugin-server` binary cannot be located,
-    /// [`BridgeError::LoadFailed`](tutti_plugin_types::BridgeError::LoadFailed) or
-    /// [`BridgeError::BundleResolutionFailed`](tutti_plugin_types::BridgeError::BundleResolutionFailed)
+    /// [`BridgeError::LoadFailed`](tutti_plugin_types::BridgeError::LoadFailed)
     /// when the plugin does not load, [`BridgeError::NotOutOfProcess`] for a
     /// VST2 plugin whose load asks for [`Hosting::OutOfProcess`],
     /// [`BridgeError::NotInProcess`] for a format this build has no in-process
@@ -514,18 +513,50 @@ impl Plugin {
     /// [`TempoReader::fixed`](tutti_transport::TempoReader::fixed) one.
     #[must_use]
     pub fn bind(self, tempo: tutti_transport::TempoReader) -> BoundPlugin {
-        let bound = match self.placed {
-            Placed::Served(c) => BoundPlaced::Served(Box::new(c.bind(tempo))),
+        self.bind_with_rebinder(tempo).0
+    }
+
+    /// [`bind`](Self::bind), and the builder of the node that replaces this one
+    /// when the plugin changes its audio ports, over the same plugin, binding
+    /// its successors to `tempo` too. A served plugin's is limited to the ports
+    /// it was launched with.
+    #[must_use]
+    pub fn bind_with_rebinder(
+        self,
+        tempo: tutti_transport::TempoReader,
+    ) -> (BoundPlugin, PluginRebinder) {
+        let (bound, rebinder) = match self.placed {
+            Placed::Served(c) => {
+                let bound = c.bind(tempo);
+                let rebinder = PluginRebinder::served(bound.rebinder());
+                (BoundPlaced::Served(Box::new(bound)), rebinder)
+            }
             #[cfg(feature = "vst2")]
-            Placed::Vst2(c) => BoundPlaced::Vst2(Box::new(c.bind(tempo))),
+            Placed::Vst2(c) => {
+                let rebinder =
+                    PluginRebinder::in_process(c.rebinder(tempo.clone(), None), BoundPlaced::Vst2);
+                (BoundPlaced::Vst2(Box::new(c.bind(tempo))), rebinder)
+            }
             #[cfg(feature = "clap")]
-            Placed::Clap(c) => BoundPlaced::Clap(Box::new(c.bind(tempo))),
+            Placed::Clap(c) => {
+                let rebinder =
+                    PluginRebinder::in_process(c.rebinder(tempo.clone(), None), BoundPlaced::Clap);
+                (BoundPlaced::Clap(Box::new(c.bind(tempo))), rebinder)
+            }
             #[cfg(feature = "vst3")]
-            Placed::Vst3(c) => BoundPlaced::Vst3(Box::new(c.bind(tempo))),
+            Placed::Vst3(c) => {
+                let rebinder =
+                    PluginRebinder::in_process(c.rebinder(tempo.clone(), None), BoundPlaced::Vst3);
+                (BoundPlaced::Vst3(Box::new(c.bind(tempo))), rebinder)
+            }
             #[cfg(all(feature = "au", target_os = "macos"))]
-            Placed::Au(c) => BoundPlaced::Au(Box::new(c.bind(tempo))),
+            Placed::Au(c) => {
+                let rebinder =
+                    PluginRebinder::in_process(c.rebinder(tempo.clone(), None), BoundPlaced::Au);
+                (BoundPlaced::Au(Box::new(c.bind(tempo))), rebinder)
+            }
         };
-        BoundPlugin { bound }
+        (BoundPlugin { bound }, rebinder)
     }
 
     /// Returns the node as the concrete out-of-process [`PluginClient`],
@@ -576,6 +607,198 @@ impl Plugin {
 /// [`PluginControls`]: tutti_plugin_host::PluginControls
 pub struct BoundPlugin {
     bound: BoundPlaced,
+}
+
+/// Builds the node that replaces a plugin's node when the plugin changes its
+/// audio ports ([`Plugin::bind_with_rebinder`]): an in-process plugin's successor
+/// is over the same instance, and the Processor moves to it with no
+/// restart. A served plugin's launch fixed its shared-memory slab, so ports
+/// of other widths are refused by name and nothing is built.
+///
+/// `Clone`: every clone drives the same plugin.
+#[derive(Clone)]
+pub struct PluginRebinder {
+    inner: std::sync::Arc<std::sync::Mutex<dyn Rebind>>,
+}
+
+/// A node [`PluginRebinder::prepare`] built over the plugin's new ports, and
+/// the commit that moves the plugin's Processor to it.
+///
+/// Put the node in the graph ([`into_parts`](Self::into_parts)), and commit
+/// only if that succeeded: dropping the commit changes nothing in the plugin.
+#[derive(Debug)]
+#[must_use = "a node renders nothing until its move is committed"]
+pub struct Rebuilt {
+    bound: BoundPlugin,
+    controls: tutti_plugin_host::NodeControls,
+    commit: Commit,
+}
+
+impl Rebuilt {
+    /// The node, to swap in for the one it replaces; its controls (its meter
+    /// cell and its parameter delivery's counters); and the commit.
+    pub fn into_parts(self) -> (BoundPlugin, tutti_plugin_host::NodeControls, Commit) {
+        (self.bound, self.controls, self.commit)
+    }
+}
+
+/// The move of a plugin's Processor to a node [`PluginRebinder::prepare`]
+/// built: see [`Pending::commit`](tutti_plugin_host::Pending::commit). Dropping
+/// it changes nothing.
+#[must_use = "a node renders nothing until its move is committed"]
+pub struct Commit(Box<dyn FnOnce(MainThreadMarker) + Send>);
+
+impl Commit {
+    /// Names the node the Processor's way and recalls the Processor from the
+    /// node it replaces; see [`Pending::commit`](tutti_plugin_host::Pending::commit).
+    /// Call it once the node is in the graph: it does not fail.
+    pub fn commit(self, main: MainThreadMarker) {
+        (self.0)(main);
+    }
+}
+
+impl std::fmt::Debug for Commit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Commit").finish_non_exhaustive()
+    }
+}
+
+/// One hosting's rebinder, behind the format.
+trait Rebind: Send {
+    fn layout(&self) -> Option<tutti_plugin_types::Layout>;
+    fn settled(&self) -> tutti_plugin_host::Settlement;
+    fn prepare(&self) -> std::result::Result<Option<Rebuilt>, tutti_plugin_host::RebindError>;
+}
+
+/// An in-process format's rebinder, and the variant of [`BoundPlaced`] its
+/// nodes go in.
+#[cfg_attr(
+    not(any(feature = "vst2", feature = "clap", feature = "vst3", feature = "au")),
+    expect(
+        dead_code,
+        reason = "a build with no in-process format has only served plugins"
+    )
+)]
+struct InProcessRebind<F: tutti_plugin_types::InProcess> {
+    rebinder: tutti_plugin_host::Rebinder<F>,
+    wrap: fn(Box<tutti_plugin_host::PluginNode<F>>) -> BoundPlaced,
+}
+
+impl<F> Rebind for InProcessRebind<F>
+where
+    F: tutti_plugin_types::InProcess + 'static,
+    F::Processor: 'static,
+{
+    fn layout(&self) -> Option<tutti_plugin_types::Layout> {
+        self.rebinder.layout()
+    }
+
+    fn settled(&self) -> tutti_plugin_host::Settlement {
+        self.rebinder.settled()
+    }
+
+    fn prepare(&self) -> std::result::Result<Option<Rebuilt>, tutti_plugin_host::RebindError> {
+        let (node, pending) = self.rebinder.prepare()?;
+        let controls = node.controls();
+        Ok(Some(Rebuilt {
+            bound: BoundPlugin {
+                bound: (self.wrap)(Box::new(node)),
+            },
+            controls,
+            commit: Commit(Box::new(move |main| pending.commit(main))),
+        }))
+    }
+}
+
+/// A served plugin's rebinder: it builds no node, for its slab is laid out at
+/// launch.
+struct ServedRebind(tutti_plugin_host::Rebinder<tutti_plugin_ipc::Ipc>);
+
+impl Rebind for ServedRebind {
+    fn layout(&self) -> Option<tutti_plugin_types::Layout> {
+        self.0.layout()
+    }
+
+    fn settled(&self) -> tutti_plugin_host::Settlement {
+        self.0.settled()
+    }
+
+    fn prepare(&self) -> std::result::Result<Option<Rebuilt>, tutti_plugin_host::RebindError> {
+        self.0.check_ports().map(|()| None)
+    }
+}
+
+impl std::fmt::Debug for PluginRebinder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PluginRebinder").finish_non_exhaustive()
+    }
+}
+
+impl PluginRebinder {
+    /// The rebinder of a served plugin's bound client
+    /// ([`PluginClient::rebinder`](crate::handles::PluginClient::rebinder)).
+    #[must_use]
+    pub fn served(rebinder: tutti_plugin_host::Rebinder<tutti_plugin_ipc::Ipc>) -> Self {
+        Self {
+            inner: std::sync::Arc::new(std::sync::Mutex::new(ServedRebind(rebinder))),
+        }
+    }
+
+    #[cfg_attr(
+        not(any(feature = "vst2", feature = "clap", feature = "vst3", feature = "au")),
+        expect(
+            dead_code,
+            reason = "a build with no in-process format has only served plugins"
+        )
+    )]
+    fn in_process<F>(
+        rebinder: tutti_plugin_host::Rebinder<F>,
+        wrap: fn(Box<tutti_plugin_host::PluginNode<F>>) -> BoundPlaced,
+    ) -> Self
+    where
+        F: tutti_plugin_types::InProcess + 'static,
+        F::Processor: 'static,
+    {
+        Self {
+            inner: std::sync::Arc::new(std::sync::Mutex::new(InProcessRebind { rebinder, wrap })),
+        }
+    }
+
+    /// The rebinder, whatever a panic left in its lock: it holds no state of
+    /// its own.
+    fn lock(&self) -> std::sync::MutexGuard<'_, dyn Rebind + 'static> {
+        self.inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// The ports the plugin has now, as its lifecycle last read them. `None`
+    /// for a lost plugin.
+    #[must_use]
+    pub fn layout(&self) -> Option<tutti_plugin_types::Layout> {
+        self.lock().layout()
+    }
+
+    /// Where the Processor's way is after the last commit.
+    #[must_use]
+    pub fn settled(&self) -> tutti_plugin_host::Settlement {
+        self.lock().settled()
+    }
+
+    /// A node over the plugin's ports as they are now: see
+    /// [`Rebinder::prepare`](tutti_plugin_host::Rebinder::prepare). Nothing is
+    /// changed in the plugin until the [`Rebuilt`]'s commit, after the node is
+    /// in the graph. `Ok(None)` for a served plugin whose ports still fit its
+    /// slab: its node stays.
+    ///
+    /// # Errors
+    ///
+    /// The refusals of [`Rebinder::prepare`](tutti_plugin_host::Rebinder::prepare);
+    /// for a served plugin, [`OutsideSlab`](tutti_plugin_host::RebindError::OutsideSlab)
+    /// when its buses changed width.
+    pub fn prepare(&self) -> std::result::Result<Option<Rebuilt>, tutti_plugin_host::RebindError> {
+        self.lock().prepare()
+    }
 }
 
 enum BoundPlaced {

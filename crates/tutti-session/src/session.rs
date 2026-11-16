@@ -13,6 +13,7 @@ use tutti_tempo::TempoMap;
 use tutti_transport::{FadeOut, LoopEdit, MotionEvent, QueueFull, ScheduleFull, Then, Transport};
 use tutti_types::{At, Beat, Bpm, ChannelLayout, ChannelTopology, LoopRange, Samples};
 
+use crate::RootDeclaration;
 use crate::graph::{Committed, CrossfadeId, Graph, Retried};
 use crate::{Clock, Offline, RealTime};
 use crate::{HeardOpen, HeardTapError, Playhead, RemoveError, ScheduleError, TempoError};
@@ -61,8 +62,8 @@ pub enum Phase {
     /// lane plays from the update its node does; then the note-envelope
     /// resyncs the apply owes are sent.
     AfterCommit,
-    /// The hardware out (an event tap on the clock)
-    /// drained to the output (feature `midi`; `Midi::set_hardware_out`).
+    /// Every output's event tap drained to its device or sink (feature `midi`:
+    /// the `midi_sink` entries, and with `midi-hardware` the `midi_output` ones).
     MidiOut,
     /// The stream's faults, as [`SessionEvent::Fault`] (a real-time clock),
     /// and the device's own events (feature `device`).
@@ -178,6 +179,34 @@ pub enum SessionEvent {
         /// Why.
         refused: crate::CrossfadeRefused,
     },
+    /// A node re-inserted with a narrower shape (a plugin whose ports changed,
+    /// a node re-declared at a new width) lost wiring to the ports it no
+    /// longer has. Reported once, by the update that commits the re-insert,
+    /// per node: the audio edges, the event edges and the bus edges (root feeds
+    /// included) that were dropped, by the ports the app named them with.
+    /// Edges to the ports the node still has are kept, gains included. A
+    /// refused commit reports nothing: the record waits for the update whose
+    /// commit lands.
+    ///
+    /// A feedback edge is listed as the pair of ports it joined (its delay
+    /// is not part of an [`Edge`](crate::Edge)). A modulation route onto a
+    /// dropped edge, or a param or edge-gain lane the node's lost event
+    /// outputs drove, is not listed: the route stays declared and reads
+    /// unresolved (`Problem::Unresolved`, feature `modulation`) until its target
+    /// is wired again.
+    Unwired {
+        /// The node whose re-insert dropped the wiring.
+        node: NodeKey,
+        /// The audio edges dropped, into or out of the node (a feedback edge
+        /// as the pair of ports it joined).
+        edges: Vec<crate::Edge>,
+        /// The event edges dropped, into or out of the node.
+        event_edges: Vec<crate::EventEdge>,
+        /// The bus edges dropped, into or out of the node, as the app wired
+        /// them: the source bus and the sink, a node's input bus or the
+        /// root.
+        bus_edges: Vec<(tutti_graph::BusSource, crate::BusSink)>,
+    },
     /// A node's event output port lost events since the last update: they
     /// were past its capacity (a note-off only past the room set aside for
     /// note-offs), a PDC or feedback delay it feeds was full, or the node
@@ -283,6 +312,30 @@ pub enum SessionEvent {
         /// Which of its readings changed.
         fact: crate::ResourceFact,
     },
+    /// A reader of the root was opened again, because the root's width is no
+    /// longer the one the reader has: a tap from
+    /// [`Taps::open_output`](crate::Taps::open_output), or the master meter
+    /// once a host took it ([`Session::take_master_meter`]). `id` names the new
+    /// reader, which the session holds until
+    /// [`Session::take_reopened`] claims it (an event left unread loses
+    /// nothing); `topology` is the root's now. The old reader reads closed, so
+    /// no reader takes twelve channels for two: a tap's reads what its rings
+    /// held when the commit that changed the root was applied and then ends
+    /// ([`Pull::Ended`](tutti_buffers::Pull::Ended)), a meter's reads
+    /// [`is_closed`](tutti_graph::MeterReader::is_closed). A second reopen
+    /// before the claim replaces the held reader, and the earlier one ends.
+    ///
+    /// The new tap is fed from the first block of the plan that carries the
+    /// change, and what the old one holds ends on the block before it: a root
+    /// crossfade fades the engine's output, never what a tap reads, so the
+    /// tap switches to the new root at the commit and never reads the old
+    /// root's channels. The event comes in the update that sends the commit.
+    RootReaderReopened {
+        /// The reader to claim.
+        id: crate::RootReader,
+        /// The root's topology the reader was opened for.
+        topology: ChannelTopology,
+    },
     /// A pool entry's change: its load landed or failed, a reload landed, or it
     /// was released. See [`PoolEvent`](crate::PoolEvent); `key` is the key the
     /// app declared it under ([`PoolKey::get`](crate::PoolKey::get)).
@@ -313,6 +366,18 @@ impl std::fmt::Debug for SessionEvent {
                 .debug_struct("RateChanged")
                 .field("from", from)
                 .field("to", to)
+                .finish(),
+            Self::Unwired {
+                node,
+                edges,
+                event_edges,
+                bus_edges,
+            } => f
+                .debug_struct("Unwired")
+                .field("node", node)
+                .field("edges", edges)
+                .field("event_edges", event_edges)
+                .field("bus_edges", bus_edges)
                 .finish(),
             Self::Fault(fault) => f.debug_tuple("Fault").field(fault).finish(),
             #[cfg(feature = "device")]
@@ -349,6 +414,11 @@ impl std::fmt::Debug for SessionEvent {
                 .field("id", id)
                 .field("fact", fact)
                 .finish(),
+            Self::RootReaderReopened { id, topology } => f
+                .debug_struct("RootReaderReopened")
+                .field("id", id)
+                .field("topology", topology)
+                .finish(),
             Self::Pool { key, event } => f
                 .debug_struct("Pool")
                 .field("key", key)
@@ -361,10 +431,8 @@ impl std::fmt::Debug for SessionEvent {
 /// The engine's MIDI, as graph nodes the builder inserts: the clock (Beat Clock
 /// and MTC, off until a host enables it), with its controls. An input port's
 /// ingest node is not here: each `midi_input` entry makes its own
-/// (`MidiInput::node`). The host's hardware out is
-/// not a node: the session reads an event tap on the clock's output
-/// ([`Midi::set_hardware_out`](crate::Midi::set_hardware_out)), and a
-/// `midi_output` port's node is fed by the clock.
+/// (`MidiInput::node`), and each output its own (`MidiSink::node`,
+/// `MidiOutput::node`), fed by the clock.
 #[cfg(feature = "midi")]
 #[derive(Clone, Debug)]
 pub struct MidiNodes {
@@ -380,9 +448,17 @@ pub struct MidiNodes {
 /// Whether the root is as it was asked to be
 /// ([`Session::root_topology_status`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum RootTopologyStatus {
     /// In force: the root is what was declared (or nothing was).
     Applied,
+    /// Declared and waiting for a running root crossfade to end: the root in
+    /// force is the previous declaration, and
+    /// [`requested_root_topology`](Session::requested_root_topology) is the
+    /// waiting one. It applies in the first update after the fade has ended
+    /// (which needs blocks rendered), or is `Refused` if it cannot be placed
+    /// then.
+    Pending,
     /// Not in force, and why. The previous state stands.
     Refused(tutti_graph::RootError),
 }
@@ -485,7 +561,7 @@ pub struct Session<C: Clock = Offline> {
     pub(crate) rolling_sent: std::sync::atomic::AtomicBool,
     #[cfg(feature = "midi")]
     pub(crate) midi: Option<MidiNodes>,
-    /// Clips, live inputs, routes and the hardware out's output.
+    /// Clips, live inputs, routes and the outputs.
     #[cfg(feature = "midi")]
     pub(crate) midi_state: crate::midi::MidiState,
     /// What modulation applied, and the session's own declarations.
@@ -860,7 +936,35 @@ impl<C: Clock> Session<C> {
     /// narrowed (channels past it are dropped), with no floor of the device's
     /// ([`root_width`](crate::root_width)). Afterwards the width and the
     /// declaration cannot disagree: [`Graph::widen_outputs`] refuses to widen a
-    /// declared root. Declare again to change both. An export of the master
+    /// declared root. Declare again to change both.
+    ///
+    /// A declaration that changes the root crossfades: the old root's outputs
+    /// fade out and the new root's fade in over the declick length (5 ms),
+    /// both rendering the same nodes, so a change of layout never steps the
+    /// sound. [`.hard()`](RootDeclaration::hard) on the returned declaration
+    /// cuts at one block instead.
+    ///
+    /// A declaration made while a root crossfade runs, and not
+    /// [`hard`](RootDeclaration::hard), waits: it is checked at the call (the
+    /// errors below are named here), and held until the running fade ends. The
+    /// newest such declaration wins. The first [`update`](Self::update) after
+    /// the fade has ended applies it, and the root's width and readers
+    /// ([`RootReaderReopened`](crate::SessionEvent::RootReaderReopened)) change in
+    /// that update with the audio; until then the root in force, its taps and
+    /// [`root_topology`](Self::root_topology) are the running fade's, and
+    /// [`requested_root_topology`](Self::requested_root_topology) is the
+    /// waiting one ([`Pending`](RootTopologyStatus::Pending)). It is heard up
+    /// to one fade length (5 ms) late, and the fade only ends as blocks render:
+    /// with none rendering (a stopped stream, an offline session nobody
+    /// pulls) it waits. It stays with the graph through a device restart or a
+    /// clock switch, and is checked against the device it finds when it is
+    /// applied. A declaration refused at its call drops nothing: the waiting
+    /// one still applies. If the
+    /// device no longer places it when it is applied,
+    /// [`root_topology_status`](Self::root_topology_status) is `Refused` with
+    /// the error and the root in force stays. A
+    /// [`hard`](RootDeclaration::hard) declaration applies at once and drops
+    /// the waiting one. An export of the master
     /// places the file from the declaration (`tutti_export::Setup::with_root`, set by the export's fork).
     ///
     /// The device a declaration must place on is the one the session renders
@@ -874,21 +978,32 @@ impl<C: Clock> Session<C> {
     /// renders ([`MAX_CHANNELS`](tutti_types::MAX_CHANNELS)), or the
     /// device cannot place it (an unassigned root wider than the device, a channel
     /// no speaker names). Nothing is changed.
-    pub fn declare_root_topology(&mut self, root: Option<ChannelTopology>) -> crate::Result<()> {
+    pub fn declare_root_topology(
+        &mut self,
+        root: Option<ChannelTopology>,
+    ) -> crate::Result<RootDeclaration<'_>> {
+        self.sync_root_refusal();
         // The same request again, in force, is nothing to do.
-        if root == self.root_request && self.root_refusal.is_none() {
-            return Ok(());
+        if !(root == self.root_request && self.root_refusal.is_none()) {
+            self.root_request = root.clone();
+            match self.graph.declare_root(root, false) {
+                Ok(()) => self.root_refusal = None,
+                Err(e) => {
+                    self.root_refusal = Some(e);
+                    return Err(e.into());
+                }
+            }
         }
-        self.root_request = root.clone();
-        match self.graph.declare_root(root) {
-            Ok(()) => {
-                self.root_refusal = None;
-                Ok(())
-            }
-            Err(e) => {
-                self.root_refusal = Some(e);
-                Err(e.into())
-            }
+        Ok(RootDeclaration {
+            graph: &mut self.graph,
+        })
+    }
+
+    /// Takes the refusal of a declaration that waited and could not be
+    /// applied into `root_refusal`, where a device restart re-attempts it.
+    pub(crate) fn sync_root_refusal(&mut self) {
+        if let Some(e) = self.graph.take_apply_refusal() {
+            self.root_refusal = Some(e);
         }
     }
 
@@ -902,7 +1017,7 @@ impl<C: Clock> Session<C> {
     }
 
     /// Whether the root is as it was asked to be. A refusal is a value here,
-    /// never only a log line.
+    /// never only a log line. The first that holds is reported, in this order:
     ///
     /// - [`RootTopologyStatus::Refused`] with the declaration's own
     ///   [`FoldError`](tutti_buffers::FoldError) when the last request could not
@@ -911,6 +1026,9 @@ impl<C: Clock> Session<C> {
     ///   **device restart re-attempts the request**: it is
     ///   [`Applied`](RootTopologyStatus::Applied) as soon as the new device
     ///   places it.
+    /// - The same when a declaration that waited for a root crossfade
+    ///   ([`declare_root_topology`](Self::declare_root_topology)) could not be
+    ///   placed once the fade ended; a later widening does not replace it.
     /// - Otherwise `Refused` with [`Graph::widen_outputs`]'s last refusal: a
     ///   widening the declared root could not take
     ///   ([`RootError::Width`](tutti_graph::RootError::Width)), or
@@ -918,10 +1036,19 @@ impl<C: Clock> Session<C> {
     ///   ([`FoldError::Unplaced`](tutti_buffers::FoldError::Unplaced), as a
     ///   [`RootError::Fold`](tutti_graph::RootError::Fold)); that
     ///   is what a host's `MasterSources` longer than the root comes to.
-    /// - Otherwise `Applied`.
+    /// - Otherwise [`Pending`](RootTopologyStatus::Pending) while a declaration
+    ///   waits for a root crossfade, and `Applied`.
+    ///
+    /// "The previous declaration" includes one that is waiting: a declaration
+    /// refused at its call drops nothing, so a waiting one still applies.
     pub fn root_topology_status(&self) -> RootTopologyStatus {
-        match self.root_refusal.or(self.graph.widen_refusal()) {
+        match self
+            .root_refusal
+            .or(self.graph.apply_refusal())
+            .or(self.graph.widen_refusal())
+        {
             Some(e) => RootTopologyStatus::Refused(e),
+            None if self.graph.root_pending() => RootTopologyStatus::Pending,
             None => RootTopologyStatus::Applied,
         }
     }
@@ -998,6 +1125,7 @@ impl<C: Clock> Session<C> {
                 }
                 let repreparing = self.graph.is_repreparing();
                 self.graph.collect();
+                self.sync_root_refusal();
                 // Closes a plugin that was dropped off its own thread (a pool thread at an
                 // export's end, say): it handed the close to this session's collector, which
                 // runs on the process's main thread (`MainThreadMarker::new` is `Some` only there).
@@ -1015,6 +1143,20 @@ impl<C: Clock> Session<C> {
             Phase::Commit => {
                 self.apply_output_policy();
                 let sent = self.graph.is_edited() && self.commit_reporting(out);
+                out.extend(
+                    self.graph
+                        .announce_reopened()
+                        .into_iter()
+                        .map(|(id, topology)| SessionEvent::RootReaderReopened { id, topology }),
+                );
+                for u in self.graph.take_unwired() {
+                    out.push(SessionEvent::Unwired {
+                        node: u.node,
+                        edges: u.edges,
+                        event_edges: u.event_edges,
+                        bus_edges: u.bus_edges,
+                    });
+                }
                 if !sent && self.resumed {
                     self.publish_sent();
                 }
@@ -1041,14 +1183,20 @@ impl<C: Clock> Session<C> {
                 #[cfg(feature = "midi")]
                 {
                     let playhead = self.playhead();
-                    self.midi_state
+                    if self
+                        .midi_state
                         .midi_out_phase(&mut self.graph, &playhead, cx.now, out)
+                    {
+                        self.commit();
+                    }
                 }
             }
-            Phase::Plugins =>
-            {
+            Phase::Plugins => {
                 #[cfg(feature = "plugin")]
-                self.plugins_phase(cx, out)
+                {
+                    self.plugins_phase(cx, out);
+                    self.rebind_pooled_plugins(out);
+                }
             }
             Phase::RenderMode =>
             {
@@ -1315,7 +1463,7 @@ impl<C: Clock> Session<C> {
     }
 
     /// The session's MIDI: live inputs, clips, the hardware input's routes
-    /// and the hardware out.
+    /// and the outputs.
     #[cfg(feature = "midi")]
     pub fn midi(&mut self) -> crate::Midi<'_> {
         self.midi_and_ids().0
@@ -1682,6 +1830,19 @@ impl<C: Clock> Session<C> {
         self.graph.meters().master()
     }
 
+    /// Claims the reader reopened under `id`
+    /// ([`SessionEvent::RootReaderReopened`]): held until then.
+    ///
+    /// # Errors
+    ///
+    /// [`NotReopened`](crate::NotReopened) when none is held under `id`.
+    pub fn take_reopened(
+        &mut self,
+        id: crate::RootReader,
+    ) -> Result<crate::Reopened, crate::NotReopened> {
+        self.graph.take_reopened(id)
+    }
+
     /// Hands the master meter's reader to its one consumer; see
     /// [`master_meter`](Self::master_meter) and
     /// [`Meters::take_master`](crate::Meters::take_master).
@@ -1710,16 +1871,5 @@ impl<C: Clock> Session<C> {
     #[cfg(feature = "midi")]
     pub fn midi_nodes(&self) -> Option<&MidiNodes> {
         self.midi.as_ref()
-    }
-
-    /// The raw OS MIDI layer, when the builder opened it
-    /// ([`SessionBuilder::midi_hardware`](crate::SessionBuilder::midi_hardware)):
-    /// for a test that drives the layer under the session (a fake backend's
-    /// hot-plug, a device's ports and negotiation). A host reaches devices
-    /// through the pool's `midi_input` and `midi_output` entries and the
-    /// events of `Session::update`.
-    #[cfg(all(feature = "midi-hardware", feature = "testing"))]
-    pub fn testing_midi_io(&self) -> Option<&tutti_midi_hardware::MidiSession> {
-        self.midi_io.as_ref()
     }
 }

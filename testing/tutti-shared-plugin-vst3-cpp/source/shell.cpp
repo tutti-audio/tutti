@@ -180,6 +180,9 @@ constexpr const char* kXml =
     "</representation></vstXML>";
 }
 
+// The unit `aux` is in (core.rs, AUX_UNIT): the innermost of Voices > Oscillator > Filter.
+constexpr UnitID kAuxUnit = 3;
+
 class SharedController : public EditControllerEx1,
                          public IMidiMapping,
                          public INoteExpressionController,
@@ -270,14 +273,23 @@ public:
 		return stream->write (const_cast<char*> (spec::kXml), len, &n) == kResultOk && n == len ? kResultOk : kResultFalse;
 	}
 
-	// IParameterFunctionName: the dry/wet mix is `level`, the randomize target is `tone`.
+	// IParameterFunctionName (core.rs, FUNCTION_NAMES): the dry/wet mix is `level`, the low-latency
+	// switch is `mode`, the X pan position is `aux` (in the Filter unit) and the Z pan position is
+	// `tone`; the randomize target is `tone`, which is no control.
 	tresult PLUGIN_API getParameterIDFromFunctionName (UnitID unit, FIDString name, ParamID& id) SMTG_OVERRIDE
 	{
-		if (unit != kRootUnitId || !name) return kResultFalse;
-		if (std::strcmp (name, FunctionNameType::kDryWetMix) == 0) id = shared::kLevel;
-		else if (std::strcmp (name, FunctionNameType::kRandomize) == 0) id = shared::kTone;
-		else return kResultFalse;
-		return kResultTrue;
+		if (!name) return kResultFalse;
+		struct Row { UnitID unit; FIDString name; ParamID id; };
+		static const Row rows[] = {
+			{kRootUnitId, FunctionNameType::kDryWetMix, shared::kLevel},
+			{kAuxUnit, FunctionNameType::kPanPosCenterX, shared::kAux},
+			{kRootUnitId, FunctionNameType::kLowLatencyMode, shared::kMode},
+			{kRootUnitId, FunctionNameType::kPanPosCenterZ, shared::kTone},
+			{kRootUnitId, FunctionNameType::kRandomize, shared::kTone},
+		};
+		for (const Row& r : rows)
+			if (r.unit == unit && std::strcmp (r.name, name) == 0) { id = r.id; return kResultTrue; }
+		return kResultFalse;
 	}
 
 	// IMidiLearn: a live controller moves `aux` to controller / 127. The call is a main-thread call
@@ -295,14 +307,18 @@ public:
 		tresult r = EditControllerEx1::initialize (ctx);
 		if (r != kResultOk) return r;
 		mainThread = std::this_thread::get_id ();
-		// A unit tree three levels deep under the implicit root; the parameters stay in the root.
+		// A unit tree three levels deep under the implicit root; `aux` is in the innermost unit, the
+		// others in the root.
 		addUnit (new Unit (STR16 ("Voices"), 1, kRootUnitId));
 		addUnit (new Unit (STR16 ("Oscillator"), 2, 1));
 		addUnit (new Unit (STR16 ("Filter"), 3, 2));
 		parameters.addParameter (STR16 ("level"), nullptr, 0, 0.5, ParameterInfo::kCanAutomate, shared::kLevel);
-		parameters.addParameter (STR16 ("aux"), nullptr, 0, 0.25, ParameterInfo::kCanAutomate, shared::kAux);
+		parameters.addParameter (STR16 ("aux"), nullptr, 0, 0.25, ParameterInfo::kCanAutomate, shared::kAux, kAuxUnit);
 		parameters.addParameter (STR16 ("mode"), nullptr, shared::kModes - 1, 0.0, ParameterInfo::kCanAutomate, shared::kMode);
 		parameters.addParameter (STR16 ("tone"), nullptr, 0, 0.5, ParameterInfo::kCanAutomate, shared::kTone);
+		parameters.addParameter (STR16 ("meter"), nullptr, 0, 0.0, ParameterInfo::kIsReadOnly, shared::kMeter);
+		// The bypass switch (core.rs, BYPASS): two positions, flagged as the plugin's own bypass.
+		parameters.addParameter (STR16 ("bypass"), nullptr, 1, 0.0, ParameterInfo::kCanAutomate | ParameterInfo::kIsBypass, shared::kBypass);
 		return kResultOk;
 	}
 	// `tone` is the one parameter with a plain domain of its own (core.rs, "Spec").

@@ -54,9 +54,7 @@ use tutti_codec::{FileOut, Format, Spec};
 use tutti_engine::StreamLatency;
 use tutti_graph::{MissingSource, NodeKey, TapAlign, TapReader};
 use tutti_tempo::TempoMap;
-use tutti_types::{
-    At, Beat, ChannelLayout, Frame, SampleRate, Samples, Seconds, first_frame_at_or_after,
-};
+use tutti_types::{At, Beat, ChannelLayout, Frame, SampleRate, Samples, Seconds};
 
 use crate::jobs::{JobFailed, Landed, Landings};
 use crate::recorder::IDLE_PARK;
@@ -408,9 +406,11 @@ impl Anchor {
         if beat.get().partial_cmp(&self.beat.get()) != Some(std::cmp::Ordering::Greater) {
             return None;
         }
-        let ahead = (self.map.seconds_at(beat).get() - self.map.seconds_at(self.beat).get())
-            * self.rate.get();
-        let frames = first_frame_at_or_after(ahead).max(0) as u64;
+        let frames = self
+            .map
+            .view(self.rate)
+            .frames_between(self.beat, beat)
+            .max(0) as u64;
         Some(self.frame + Samples(usize::try_from(frames).unwrap_or(usize::MAX)))
     }
 }
@@ -795,7 +795,7 @@ impl<C: crate::Clock> Session<C> {
 
         let ports: Vec<_> = (0..width).map(|channel| node.out(channel)).collect();
         // A second of frames: the pump parks `IDLE_PARK` at a time.
-        let capacity = Samples(rate.get().ceil() as usize);
+        let capacity = rate.one_second();
         let reader = self.graph.taps().open(&ports, TapAlign::Raw, capacity)?;
 
         let id = TakeId::mint(self.inputs.takes());

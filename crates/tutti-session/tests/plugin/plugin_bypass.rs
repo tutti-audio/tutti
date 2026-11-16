@@ -1,12 +1,11 @@
-//! A hosted plugin's bypass is the graph's (doc 013, "Bypass and mute are
-//! graph state", M2's host half): `Graph::set_mode` on a plugin node, over
-//! the reference CLAP plugin in a real `plugin-server`.
+//! A hosted plugin's mode is the graph's: `Graph::set_mode` on a plugin node,
+//! over the reference CLAP plugin in a real `plugin-server`.
 //!
-//! The plugin's own bypass parameter is not used (doc 013, "Plugins"): the
-//! graph's aligned-input path is delayed by the node's **declared** latency,
-//! which for a served plugin is the plugin's own latency plus the pipeline's
-//! chunk. So a bypassed plugin node passes a click exactly that many frames
-//! late, and its server is not called while it is parked.
+//! A plugin that lists no bypass of its own is bypassed by the graph: its
+//! aligned-input path is delayed by the node's **declared** latency, which for
+//! a served plugin is the plugin's own latency plus the pipeline's chunk. So a
+//! bypassed plugin node passes a click exactly that many frames late, its
+//! server is not called while it is parked, and the host writes it nothing.
 //!
 //! Every figure is analytic: a single `1.0` at frame [`FIRE`], so the bypassed
 //! output is `1.0` at `FIRE + L` and `+0.0` at every other frame. The plugin
@@ -157,6 +156,31 @@ fn a_bypassed_plugin_passes_a_click_its_declared_latency_late() {
             FIRE + latency
         );
     }
+}
+
+/// **A plugin without a bypass of its own is bypassed by the executor, and the
+/// host writes nothing to it.** The reference plugin lists no bypass: it claims
+/// none, the session ticks over it (each `update` reconciles the plugins it
+/// hosts) and its click still comes out late, as the executor's bypass delays
+/// it, and no write is counted.
+#[test]
+fn a_plugin_without_its_own_bypass_is_left_to_the_executor() {
+    let mut r = rig(NodeMode::Bypassed);
+    let latency = r.s.graph_ref().node_latency(r.plugin).unwrap().0;
+    let mut out = Vec::new();
+    for _ in 0..(FIRE + latency) / BLOCK + 2 {
+        out.extend(r.render(1));
+        let _ = r.s.update();
+    }
+    assert_eq!(
+        out[FIRE + latency].to_bits(),
+        1.0f32.to_bits(),
+        "the click is the executor's bypass line, ticks and all"
+    );
+    let plugin = r.s.plugin_view(r.plugin).expect("hosted");
+    assert_eq!(plugin.handle().loaded().own_bypass, None);
+    assert_eq!(plugin.bypass_writes_unapplied(), 0);
+    assert_eq!(plugin.handle().bypassed(), None, "nothing to read back");
 }
 
 /// **A bypassed plugin is parked: its server is not called.** Bypassed from

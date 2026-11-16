@@ -1,12 +1,12 @@
 //! `From<Message> for Ump`: a message to its canonical words, reserved bits
 //! zero. The mirror of `decode.rs`.
 
-use crate::field::U7;
+use crate::field::{ChordType, FirstGroup, FunctionBlockId, GroupSpan, U7};
 use crate::message::{
     Accidental, Address, Alteration, AlterationKind, Attribute, BlockSelect, ChordName, ChordPitch,
-    Data128, Direction, Flex, FlexAddress, FlexTextKind, Form, KeySignature, Letter, Message,
-    Midi1Port, Protocol, Stream, StreamConfig, Sysex7Packet, SysexStatus, System, UiHint, Utility,
-    Voice1, Voice2,
+    Data128, Direction, Flex, FlexAddress, FlexTextKind, Form, FunctionBlocks, KeySignature,
+    Letter, Message, Midi1Port, Protocol, Stream, StreamConfig, Sysex7Packet, SysexStatus, System,
+    UiHint, Utility, Voice1, Voice2,
 };
 use crate::{MidiGroup, Ump};
 
@@ -59,7 +59,8 @@ fn utility(u: Utility) -> u32 {
         Utility::Noop => 0,
         Utility::JrClock(t) => (0x1 << 20) | u32::from(t),
         Utility::JrTimestamp(t) => (0x2 << 20) | u32::from(t),
-        Utility::TicksPerQuarterNote(n) => (0x3 << 20) | u32::from(n),
+        Utility::TicksPerQuarterNote(n) => (0x3 << 20) | u32::from(n.get()),
+        Utility::ReservedTicksPerQuarterNote(r) => (0x3 << 20) | u32::from(r.get()),
         Utility::DeltaClockstamp(t) => (0x4 << 20) | t.get(),
     }
 }
@@ -180,7 +181,8 @@ fn attribute(a: Attribute) -> (u32, u32) {
         Attribute::Manufacturer(d) => (0x01, u32::from(d)),
         Attribute::Profile(d) => (0x02, u32::from(d)),
         Attribute::Pitch(d) => (0x03, u32::from(d)),
-        Attribute::Reserved { kind, data } => (u32::from(kind), u32::from(data)),
+        Attribute::Articulation(a) => (u32::from(a.kind()), u32::from(a.data())),
+        Attribute::Reserved(r) => (u32::from(r.kind()), u32::from(r.data())),
     }
 }
 
@@ -271,7 +273,7 @@ fn flex_head(g: MidiGroup, f: Form, address: FlexAddress, bank: u32, status: u32
     let (addr, channel) = match address {
         FlexAddress::Channel(c) => (0, u32::from(c.get())),
         FlexAddress::Group => (1, 0),
-        FlexAddress::Reserved(a) => (u32::from(a) & 0x3, 0),
+        FlexAddress::Reserved(r) => (u32::from(r.get()) & 0x3, 0),
     };
     head(0xD, g) | (form(f) << 22) | (addr << 20) | (channel << 16) | (bank << 8) | status
 }
@@ -286,7 +288,7 @@ fn letter(l: Option<Letter>) -> u32 {
         Some(Letter::E) => 5,
         Some(Letter::F) => 6,
         Some(Letter::G) => 7,
-        Some(Letter::Reserved(n)) => u32::from(n) & 0xf,
+        Some(Letter::Reserved(r)) => u32::from(r.get()) & 0xf,
     }
 }
 
@@ -297,7 +299,7 @@ fn accidental(a: Accidental) -> u32 {
         Accidental::DoubleSharp => 0x2,
         Accidental::Flat => 0xF,
         Accidental::DoubleFlat => 0xE,
-        Accidental::Reserved(n) => u32::from(n) & 0xf,
+        Accidental::Reserved(r) => u32::from(r.get()) & 0xf,
     }
 }
 
@@ -308,7 +310,7 @@ fn alteration(a: Alteration) -> u32 {
         AlterationKind::Subtract => 2,
         AlterationKind::Raise => 3,
         AlterationKind::Lower => 4,
-        AlterationKind::Reserved(n) => u32::from(n) & 0xf,
+        AlterationKind::Reserved(r) => u32::from(r.get()) & 0xf,
     };
     (kind << 4) | u32::from(a.degree.get())
 }
@@ -330,13 +332,13 @@ fn chord_name(c: ChordName) -> [u32; 4] {
         0,
         (accidental(c.tonic_accidental) << 28)
             | (letter(c.tonic) << 24)
-            | (u32::from(c.chord_type.get()) << 16)
+            | (u32::from(c.chord_type.raw(ChordType::get)) << 16)
             | (alteration(c.alterations[0]) << 8)
             | alteration(c.alterations[1]),
         (alteration(c.alterations[2]) << 24) | (alteration(c.alterations[3]) << 16),
         (bass_acc << 28)
             | (bass_note << 24)
-            | (u32::from(c.bass.chord_type.get()) << 16)
+            | (u32::from(c.bass.chord_type.raw(ChordType::get)) << 16)
             | (alteration(c.bass.alterations[0]) << 8)
             | alteration(c.bass.alterations[1]),
     ]
@@ -376,12 +378,15 @@ fn flex(g: MidiGroup, f: Flex) -> [u32; 4] {
             0,
             0,
         ],
-        Flex::SetMetronome(m) => [
-            complete(FlexAddress::Group, 0, 0x02),
-            word([m.clocks_per_click, m.accent_1, m.accent_2, m.accent_3]),
-            word([m.subdivision_1, m.subdivision_2, 0, 0]),
-            0,
-        ],
+        Flex::SetMetronome(m) => {
+            let [a, b, c] = m.accents.parts();
+            [
+                complete(FlexAddress::Group, 0, 0x02),
+                word([m.clocks_per_click, a, b, c]),
+                word([m.subdivision_1, m.subdivision_2, 0, 0]),
+                0,
+            ]
+        }
         Flex::SetKeySignature(a, k) => [complete(a, 0, 0x05), key_signature(k), 0, 0],
         Flex::SetChordName(a, c) => {
             let mut w = chord_name(c);
@@ -415,7 +420,7 @@ fn stream_config(c: StreamConfig) -> u32 {
     let protocol = match c.protocol {
         Protocol::Midi1 => 0x01,
         Protocol::Midi2 => 0x02,
-        Protocol::Reserved(n) => u32::from(n),
+        Protocol::Reserved(r) => u32::from(r.get()),
     };
     (protocol << 8) | (u32::from(c.rx_jr) << 1) | u32::from(c.tx_jr)
 }
@@ -447,7 +452,10 @@ fn stream(s: Stream) -> [u32; 4] {
                 | (u32::from(e.version.major) << 8)
                 | u32::from(e.version.minor),
             (u32::from(e.static_function_blocks) << 31)
-                | (u32::from(e.function_blocks.get()) << 24)
+                | (u32::from(match e.function_blocks {
+                    FunctionBlocks::Count(count) => count.get(),
+                    FunctionBlocks::Reserved(r) => r.get(),
+                }) << 24)
                 | (u32::from(e.midi2) << 9)
                 | (u32::from(e.midi1) << 8)
                 | (u32::from(e.rx_jr) << 1)
@@ -482,6 +490,7 @@ fn stream(s: Stream) -> [u32; 4] {
             let block = match block {
                 BlockSelect::One(id) => u32::from(id.get()),
                 BlockSelect::All => 0xFF,
+                BlockSelect::Reserved(r) => u32::from(r.get()),
             };
             [
                 stream_head(done, 0x10)
@@ -498,7 +507,7 @@ fn stream(s: Stream) -> [u32; 4] {
                 Direction::Input => 0b01,
                 Direction::Output => 0b10,
                 Direction::Bidirectional => 0b11,
-                Direction::Reserved(n) => u32::from(n) & 0x3,
+                Direction::Reserved(r) => u32::from(r.get()) & 0x3,
             };
             let ui_hint = match i.ui_hint {
                 UiHint::Unknown => 0,
@@ -510,17 +519,17 @@ fn stream(s: Stream) -> [u32; 4] {
                 Midi1Port::No => 0,
                 Midi1Port::Unrestricted => 1,
                 Midi1Port::Restricted => 2,
-                Midi1Port::Reserved(n) => u32::from(n) & 0x3,
+                Midi1Port::Reserved(r) => u32::from(r.get()) & 0x3,
             };
             [
                 stream_head(done, 0x11)
                     | (u32::from(i.active) << 15)
-                    | (u32::from(i.id.get()) << 8)
+                    | (u32::from(i.id.raw(FunctionBlockId::get)) << 8)
                     | (ui_hint << 4)
                     | (midi1 << 2)
                     | direction,
-                (u32::from(i.first_group.get()) << 24)
-                    | (u32::from(i.groups_spanned.get()) << 16)
+                (u32::from(i.first_group.raw(FirstGroup::get)) << 24)
+                    | (u32::from(i.groups_spanned.raw(GroupSpan::get)) << 16)
                     | (u32::from(i.midi_ci_version) << 8)
                     | u32::from(i.max_sysex8_streams),
                 0,
@@ -532,7 +541,9 @@ fn stream(s: Stream) -> [u32; 4] {
             form,
             bytes: b,
         } => [
-            stream_head(form, 0x12) | (u32::from(block.get()) << 8) | u32::from(b[0]),
+            stream_head(form, 0x12)
+                | (u32::from(block.raw(FunctionBlockId::get)) << 8)
+                | u32::from(b[0]),
             word([b[1], b[2], b[3], b[4]]),
             word([b[5], b[6], b[7], b[8]]),
             word([b[9], b[10], b[11], b[12]]),

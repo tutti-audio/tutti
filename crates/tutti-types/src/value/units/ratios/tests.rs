@@ -113,3 +113,17 @@ fn cents_span_saturates_only_by_name_and_through_a_cell() {
 fn cents_span_converts_to_semitones() {
     assert_eq!(CentsSpan::of(100.0).to_semitones(), Semitones(1.0));
 }
+
+#[test]
+fn twelve_semitones_and_twelve_hundred_cents_are_exactly_an_octave() {
+    assert_eq!(Semitones(12.0).to_pitch_ratio(), 2.0);
+    assert_eq!(Cents(1200.0).to_pitch_ratio(), 2.0);
+    assert_eq!(Semitones(-12.0).to_pitch_ratio(), 0.5);
+}
+
+#[test]
+fn a_semitone_is_the_twelfth_root_of_two() {
+    let want = 1.059_463_1_f32;
+    assert!((Semitones(1.0).to_pitch_ratio() - want).abs() < 1e-6);
+    assert!((Cents(100.0).to_pitch_ratio() - want).abs() < 1e-6);
+}

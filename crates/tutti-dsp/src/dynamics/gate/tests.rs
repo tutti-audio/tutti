@@ -4,7 +4,7 @@ use tutti_buffers::{Mono, Planes, PlanesMut};
 use tutti_types::{Db, SampleRate, Seconds};
 
 use super::*;
-use crate::contract::noise;
+use crate::testing::noise;
 
 const RATE: SampleRate = SampleRate::SR_48K;
 /// The rates the static and time-constant tests run at.

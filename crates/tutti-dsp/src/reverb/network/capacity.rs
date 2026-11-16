@@ -1,17 +1,15 @@
-//! [`NetworkCapacity`]: the reverb's worst-case sizes, what [`Grows::reach`](crate::Grows::reach)
-//! gives for [`FreeverbFamily`](crate::FreeverbFamily) and what a [`FdnLayout`](crate::FdnLayout)
-//! sizes its bank from.
+//! [`NetworkCapacity`]: the reverb's worst-case sizes, what a
+//! [`FdnLayout`](crate::FdnLayout) sizes its bank from.
 
-use tutti_types::{Db, Samples};
+use tutti_types::{Db, SampleSpan, Samples};
 
 use super::{Network, Stage};
-use crate::{Capacity, Ring, System};
+use crate::{Ring, System};
 
-/// The size of a [`Network`], or the worst case over a family's controls: every
+/// The size of a [`Network`], or the worst case over a layout's controls: every
 /// figure a runner allocates from.
 ///
-/// [`Capacity::need`] measures one network; [`Capacity::dominates`] says one capacity holds
-/// another.
+/// [`need`](Self::need) measures one network.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct NetworkCapacity {
     /// Delay lines in all.
@@ -24,29 +22,29 @@ pub struct NetworkCapacity {
     pub outputs: usize,
     /// The longest single line, in frames, with its nested all-pass and its
     /// modulation excursion.
-    pub line: f32,
+    pub line: SampleSpan,
     /// The total delay of every line, all-pass and tap, in frames, with the
     /// modulation excursions.
-    pub delay: f32,
+    pub delay: SampleSpan,
     /// The longest FIR.
     pub ir: Samples,
     /// The longest pre-delay.
     pub pre_delay: Samples,
-    /// The longest [`tail`](System::tail) at the reach's floor.
+    /// The longest [`tail`](System::tail) at the floor it was measured to.
     pub tail: Ring,
 }
 
-impl Capacity for NetworkCapacity {
-    type Source = Network;
-
-    fn need(network: &Network, floor: Db) -> Self {
+impl NetworkCapacity {
+    /// The sizes `network` needs, its tail measured to `floor`.
+    #[must_use]
+    pub fn need(network: &Network, floor: Db) -> Self {
         let mut b = NetworkCapacity {
             lines: 0,
             stages: network.stages.len(),
             taps: 0,
             outputs: 0,
-            line: 0.0,
-            delay: 0.0,
+            line: SampleSpan::ZERO,
+            delay: SampleSpan::ZERO,
             ir: Samples::ZERO,
             pre_delay: network.pre_delay,
             tail: network.tail(floor),
@@ -55,19 +53,26 @@ impl Capacity for NetworkCapacity {
             match stage {
                 Stage::Taps(t) => {
                     b.taps += t.taps.len();
-                    b.delay += t.taps.iter().map(|t| t.delay).fold(0.0, f32::max);
+                    b.delay += t
+                        .taps
+                        .iter()
+                        .map(|t| t.delay)
+                        .fold(SampleSpan::ZERO, SampleSpan::max);
                 }
                 Stage::AllPass(a) => {
-                    b.delay += a
+                    b.delay = a
                         .iter()
-                        .map(|a| a.delay + a.modulation.depth.abs())
-                        .sum::<f32>();
+                        .fold(b.delay, |sum, a| sum + a.delay + a.modulation.depth);
                 }
                 Stage::Fdn(f) => {
                     b.lines += f.lines.len();
                     b.outputs = b.outputs.max(f.output.rows.len());
                     for l in f.lines.iter() {
-                        let len = l.effective_length() + l.modulation.depth.abs();
+                        // An unbounded nested all-pass saturates.
+                        let len = l
+                            .effective_length()
+                            .unwrap_or(SampleSpan::clamped(f64::MAX))
+                            + l.modulation.depth;
                         b.line = b.line.max(len);
                         b.delay += len;
                     }
@@ -76,21 +81,5 @@ impl Capacity for NetworkCapacity {
             }
         }
         b
-    }
-
-    fn tail(&self) -> Ring {
-        self.tail
-    }
-
-    fn dominates(&self, other: &NetworkCapacity) -> bool {
-        self.lines >= other.lines
-            && self.stages >= other.stages
-            && self.taps >= other.taps
-            && self.outputs >= other.outputs
-            && self.line >= other.line
-            && self.delay >= other.delay
-            && self.ir >= other.ir
-            && self.pre_delay >= other.pre_delay
-            && self.tail.covers(other.tail)
     }
 }

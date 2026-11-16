@@ -168,16 +168,20 @@
 // One `unsafe` item: `WindowHandle::from_u64`, the constructor whose caller
 // vouches for a window's bare platform number.
 #![deny(unsafe_code)]
+#![deny(clippy::undocumented_unsafe_blocks, clippy::missing_safety_doc)]
 
 mod any_thread;
 mod automation;
 mod automation_mode;
 mod bridge_error;
 pub mod bundle;
+mod bypass;
+mod c_string;
 mod channels;
 mod classification;
 #[cfg(feature = "contract")]
 pub mod contract;
+mod control_role;
 mod descriptor;
 mod driver;
 mod editor;
@@ -217,11 +221,13 @@ mod process_wake;
 mod render_mode;
 mod requests;
 mod sample_format;
+mod state_frame;
 mod state_use;
 mod sysex;
 mod track_info;
 mod transport;
 mod transport_request;
+mod version;
 mod wakeups;
 
 // Test-only global allocator for the no-alloc gates: panics on any heap
@@ -248,18 +254,23 @@ pub use any_thread::{AnyThread, Health};
 pub use automation::{ParameterChanges, ParameterPoint, ParameterQueue};
 pub use automation_mode::{AutomationMode, AutomationModeError};
 pub use bridge_error::{BridgeError, BridgeResult, PluginForkError};
+pub use c_string::{
+    c_str_prefix, read_c_chars, read_c_str, read_utf16_str, write_c_chars, write_c_str,
+    write_utf16_str, write_utf16_units,
+};
 pub use channels::{
-    AudioBuffer, AudioBuffer32, AudioBuffer64, AudioBufferMut, MAX_BLOCK_CHANNELS, Sample, sanitize,
+    AudioBuffer, AudioBuffer32, AudioBuffer64, AudioBufferMut, MAX_BLOCK_CHANNELS, PluginTooWide,
+    Sample, sanitize,
 };
 pub use classification::{ClapFeature, PluginRole, Vst2Category, Vst3PlugType, Vst3SubCategories};
 pub use descriptor::{AuComponentType, EditorPresence, PluginClass, PluginDescriptor};
-pub use driver::{Hand, Lifecycle, Seat};
+pub use driver::{Hand, Lifecycle, Seat, Successor};
 pub use editor::{
     AspectRatio, ContentScale, EditorCapabilities, EditorError, EditorUnit, InvalidContentScale,
     KeyEvent, KeyUse, ModifierConvention, ResizeHints, WindowHandle,
 };
 pub use failure::{PluginFailure, TerminationReason};
-pub use format::{PluginFormat, PluginId};
+pub use format::{PluginFormat, PluginId, UnknownExtension};
 pub use guard::{contained_panics, ffi_guard};
 pub use host::{Control, Controller, Loaded, PluginIo, Processor, Refused, Stuck, Wraps};
 pub use hosting::{Editor, EditorWindow, InProcess, Load, Origin, OutOfProcess, Reopen};
@@ -268,9 +279,11 @@ pub use order::{StableOrder, insertion_sort_by_key};
 pub use points::{PointBuf, PointPool};
 pub use process_wake::ProcessWake;
 pub use requests::{Edit, EditDrain, EditQueue, EditSink, edits, taken};
+pub use state_frame::{BareFrame, FrameReader, Opened, StateFrame, StateFrameError};
 pub use state_use::StateUse;
 pub use track_info::{TrackInfo, TrackKind};
 pub use transport_request::TransportRequest;
+pub use version::{EmptyVersionText, PluginVersion, VersionText};
 // Exported as `PluginResult` only: the bare name `Result` shadows std's under a
 // glob import.
 pub use error::{Delivered, PluginError, PresetError, Result as PluginResult, StateError};
@@ -300,6 +313,8 @@ pub use tutti_graph::BusRole;
 pub use wakeups::{Interest, Ready, Wakeups, Watch};
 // `NoteExpressionVec` is the alias the change list is built from, so a caller
 // assembling one has to name it.
+pub use bypass::{BypassWrite, OwnBypass, bypass_parameter, bypass_value, is_bypassed};
+pub use control_role::{Axis, ControlRole, MidiAssignment, MidiSource};
 pub use locate::{Helper, Locator};
 pub use note_expression::{
     NoteExpressionChanges, NoteExpressionType, NoteExpressionValue,
@@ -307,10 +322,11 @@ pub use note_expression::{
 };
 pub use note_id::{note_id_to_channel_note, plugin_note_id};
 pub use param_edit::ParamEdit;
-pub use param_mapping::ParamMapping;
+pub use param_mapping::{LinearRange, ParamMapping};
 pub use param_unit::{ParamUnit, PlainUnit};
 pub use parameters::{
-    InvalidNormalized, Normalized, ParamFlags, ParamId, ParamRange, ParamSteps, ParameterInfo,
+    InvalidNormalized, Normalized, ParamAccess, ParamFlags, ParamId, ParamRange, ParamSteps,
+    ParamWriteError, ParameterInfo,
 };
 pub use pipeline::{BlockCounts, ChunkCounters, MAX_CHUNK};
 pub use presets::{Preset, PresetId, PresetSupport};

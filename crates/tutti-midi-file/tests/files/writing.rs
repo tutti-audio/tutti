@@ -3,12 +3,17 @@
 
 use std::path::Path;
 
-use tutti_midi_file::{Error, MidiFile, SmfFormat};
+use tutti_midi_file::{Error, MidiFile, SmfDivision, SmfFormat};
 
 use crate::common::track;
 
 fn file(tpq: u16) -> MidiFile {
-    MidiFile::smf(SmfFormat::SingleTrack, tpq, vec![track(vec![])]).unwrap()
+    MidiFile::smf(
+        SmfFormat::SingleTrack,
+        SmfDivision::of(tpq),
+        vec![track(vec![])],
+    )
+    .unwrap()
 }
 
 fn entries(dir: &Path) -> Vec<String> {

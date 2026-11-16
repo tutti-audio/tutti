@@ -12,10 +12,10 @@
 //! of band gains that would exceed 1 anywhere to peak at 0.9999; the model does not,
 //! and [`Absorption::peak`] is what shows a design never asks for it.
 
-use tutti_types::{Hz, SampleRate};
+use tutti_types::{Amplitude, Gain, Hz, SampleRate};
 
 use super::{
-    Absorption, AllPass, AllPassForm, Band, Fdn, Line, MAX_CHANNELS, Matrix, Network, Stage,
+    Absorption, AllPass, AllPassForm, Band, Fdn, Line, MAX_CHANNELS, Matrix, Network, Stage, energy,
 };
 use crate::{Complex64, Lti};
 
@@ -188,7 +188,7 @@ impl AllPass {
     /// `H(e^jw)`: the lattice `(z^-D - g) / (1 - g z^-D)` or Freeverb's
     /// `((1 + g) z^-D - 1) / (1 - g z^-D)`.
     fn response(&self, w: f64) -> Complex64 {
-        let (g, zd) = (f64::from(self.gain), delay(w, f64::from(self.delay)));
+        let (g, zd) = (f64::from(self.gain.get()), delay(w, self.delay.get()));
         let den = ONE - zd * g;
         match self.form {
             AllPassForm::Lattice => (zd - g) / den,
@@ -201,9 +201,9 @@ impl AllPass {
     /// Freeverb's has `-1` at 0 and `(1 + g) g^(k-1) - g^k = g^(k-1)` at `kD`.
     /// `1 + 2|g|` and `1 + 1/(1 - |g|)` at `r = 1`. Infinity when `|g| r^-D >= 1`.
     fn majorant(&self, r: f64) -> f64 {
-        let g = f64::from(self.gain).abs();
-        let d = f64::from(self.delay);
-        if !(g.is_finite() && d.is_finite() && d >= 0.0 && g < 1.0) {
+        let g = f64::from(self.gain.magnitude().get());
+        let d = self.delay.get();
+        if !(g.is_finite() && g < 1.0) {
             return f64::INFINITY;
         }
         let back = libm::pow(r, -d);
@@ -220,8 +220,8 @@ impl AllPass {
     /// The largest `|H(e^jw)|`: 1 for the lattice, and for Freeverb's the larger
     /// of its two extremes (`z^-D = 1` and `-1`; `|H|` is monotone in `cos(wD)`).
     fn peak(&self) -> f64 {
-        let g = f64::from(self.gain);
-        if !(g.is_finite() && self.delay.is_finite() && self.delay >= 0.0 && g.abs() < 1.0) {
+        let g = f64::from(self.gain.get());
+        if !(g.is_finite() && g.abs() < 1.0) {
             return f64::INFINITY;
         }
         match self.form {
@@ -232,9 +232,9 @@ impl AllPass {
 
     /// The pole radius `|g|^(1/D)`: an all-pass of no delay is memoryless.
     fn radius(&self) -> f64 {
-        let g = f64::from(self.gain).abs();
-        let d = f64::from(self.delay);
-        if !(g.is_finite() && d.is_finite() && d >= 0.0 && g < 1.0) {
+        let g = f64::from(self.gain.magnitude().get());
+        let d = self.delay.get();
+        if !(g.is_finite() && g < 1.0) {
             return f64::INFINITY;
         }
         if g == 0.0 {
@@ -248,7 +248,7 @@ impl AllPass {
 impl Line {
     /// One trip's response `G(e^jw) AP(e^jw) z^-m`: the diagonal of the loop `T`.
     fn trip(&self, w: f64, rate: f64) -> Complex64 {
-        let mut t = self.absorption.response(w, rate) * delay(w, f64::from(self.length));
+        let mut t = self.absorption.response(w, rate) * delay(w, self.length.get());
         if let Some(d) = self.diffuser {
             t *= d.response(w);
         }
@@ -267,7 +267,7 @@ impl Matrix {
                 if v.len() != n {
                     return None;
                 }
-                f64::from(u8::from(i == j)) - 2.0 * f64::from(v[i]) * f64::from(v[j])
+                f64::from(u8::from(i == j)) - 2.0 * f64::from(v[i].get()) * f64::from(v[j].get())
             }
             Matrix::Hadamard => {
                 if !n.is_power_of_two() {
@@ -284,13 +284,13 @@ impl Matrix {
                 if c.len() != n {
                     return None;
                 }
-                f64::from(c[(j + n - i) % n])
+                f64::from(c[(j + n - i) % n].get())
             }
             Matrix::Dense(a) => {
                 if a.len() != n * n {
                     return None;
                 }
-                f64::from(a[i * n + j])
+                f64::from(a[i * n + j].get())
             }
         })
     }
@@ -343,7 +343,7 @@ impl Fdn {
             return None;
         }
         for (si, b) in s.iter_mut().zip(self.input.iter()) {
-            *si = Complex64::new(f64::from(*b), 0.0);
+            *si = Complex64::new(f64::from(b.get()), 0.0);
         }
         // `A = I - 2 u u^T` for a unit `u` (a rank one change of the identity):
         // `I - A T = (I - T) + 2 u (T u)^T`, solved by Sherman and Morrison in O(n).
@@ -372,7 +372,7 @@ impl Fdn {
                 let u = 1.0 / libm::sqrt(n as f64);
                 rank_one(&|_| u, s);
             }
-            Matrix::Reflection(v) => rank_one(&|i| f64::from(v[i]), s),
+            Matrix::Reflection(v) => rank_one(&|i| f64::from(v[i].get()), s),
             other => {
                 let mut m = vec![ZERO; n * n];
                 for i in 0..n {
@@ -432,7 +432,7 @@ impl Network {
                     let mut next = 1;
                     for tap in t.taps.iter() {
                         let c = usize::from(tap.channel).min(MAX_CHANNELS - 1);
-                        out[c] += x * f64::from(tap.gain) * delay(w, f64::from(tap.delay));
+                        out[c] += x * f64::from(tap.gain.get()) * delay(w, tap.delay.get());
                         next = next.max(c + 1);
                     }
                     width = next;
@@ -467,13 +467,13 @@ impl Network {
                             .lines
                             .iter()
                             .zip(&s)
-                            .map(|(l, s)| *s * delay(w, f64::from(l.length)))
+                            .map(|(l, s)| *s * delay(w, l.length.get()))
                             .collect();
                         for (r, row) in f.output.rows.iter().enumerate() {
                             out[r] = x * row
                                 .iter()
                                 .zip(&d)
-                                .map(|(c, d)| *d * f64::from(*c))
+                                .map(|(c, d)| *d * f64::from(c.get()))
                                 .sum::<Complex64>();
                         }
                     }
@@ -509,11 +509,11 @@ impl Network {
                 Stage::Taps(t) => {
                     let mut per = [0.0f64; MAX_CHANNELS];
                     for tap in t.taps.iter() {
-                        let (g, d) = (f64::from(tap.gain), f64::from(tap.delay));
+                        let (g, d) = (f64::from(tap.gain.magnitude().get()), tap.delay.get());
                         if !(g.is_finite() && d.is_finite() && d >= 0.0) {
                             return f64::INFINITY;
                         }
-                        per[usize::from(tap.channel).min(MAX_CHANNELS - 1)] += g.abs();
+                        per[usize::from(tap.channel).min(MAX_CHANNELS - 1)] += g;
                     }
                     per.iter().copied().fold(0.0, f64::max)
                 }
@@ -552,8 +552,7 @@ enum Norm {
 impl Fdn {
     /// The Euclidean norm of the largest output row, and of the input gains.
     fn row_norms(&self) -> (f64, f64) {
-        let two =
-            |g: &[f32]| libm::sqrt(g.iter().map(|&x| f64::from(x) * f64::from(x)).sum::<f64>());
+        let two = |g: &[Gain]| libm::sqrt(energy(g));
         let c = self.output.rows.iter().map(|r| two(r)).fold(0.0, f64::max);
         (c, two(&self.input))
     }
@@ -572,7 +571,7 @@ impl Fdn {
             // majorant of its impulse response bounds it.
             g *= if r == 1.0 { d.peak() } else { d.majorant(r) };
         }
-        g * libm::pow(r, -f64::from(line.length + line.modulation.depth.abs()))
+        g * libm::pow(r, -(line.length + line.modulation.depth).get())
     }
 
     /// `||C|| r^-m ||B|| / (1 - q)` with `q = ||A|| max_i |G_i| r^-m_i`: a bound on
@@ -600,7 +599,7 @@ impl Fdn {
         let longest = self
             .lines
             .iter()
-            .map(|l| f64::from(l.length + l.modulation.depth.abs()))
+            .map(|l| (l.length + l.modulation.depth).get())
             .fold(0.0, f64::max);
         let (c, b) = self.row_norms();
         c * libm::pow(r, -longest) * b / (1.0 - q)
@@ -657,7 +656,7 @@ impl Fdn {
                         .zip(self.input.iter())
                         .zip(&a)
                         .map(|((c, b), a)| {
-                            let w = f64::from(*c).abs() * f64::from(*b).abs();
+                            let w = f64::from(c.magnitude().get()) * f64::from(b.magnitude().get());
                             if w == 0.0 { 0.0 } else { w / (1.0 - a) }
                         })
                         .map(|x| if x < 0.0 { f64::INFINITY } else { x })
@@ -737,10 +736,7 @@ impl Lti for Network {
                 Stage::Fdn(f) => f.radius(),
                 Stage::AllPass(a) => a.iter().map(AllPass::radius).fold(0.0, f64::max),
                 Stage::Taps(t) => {
-                    if t.taps
-                        .iter()
-                        .all(|t| t.gain.is_finite() && t.delay.is_finite())
-                    {
+                    if t.taps.iter().all(|t| t.gain.get().is_finite()) {
                         0.0
                     } else {
                         f64::INFINITY
@@ -784,13 +780,8 @@ impl Lti for Network {
     fn is_stable(&self) -> bool {
         self.stages.iter().all(|s| match s {
             Stage::Fdn(f) => f.is_stable(),
-            Stage::AllPass(a) => a
-                .iter()
-                .all(|a| a.gain.abs() < 1.0 && a.delay.is_finite() && a.delay >= 0.0),
-            Stage::Taps(t) => t
-                .taps
-                .iter()
-                .all(|t| t.gain.is_finite() && t.delay.is_finite() && t.delay >= 0.0),
+            Stage::AllPass(a) => a.iter().all(|a| a.gain.magnitude() < Amplitude::UNITY),
+            Stage::Taps(t) => t.taps.iter().all(|t| t.gain.get().is_finite()),
             Stage::Fir(s) => s.rt60.iter().all(|r| !r.get().is_nan()),
         })
     }

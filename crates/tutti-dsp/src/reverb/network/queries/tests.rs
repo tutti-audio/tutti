@@ -1,17 +1,23 @@
-use tutti_types::{Amplitude, SampleRate};
+use tutti_types::{Amplitude, Gain, SampleRate, SampleSpan};
 
 use super::super::{
     Absorption, AllPass, AllPassForm, Band, Fdn, FirSummary, Gains, Inline, Line, LineModulation,
     Matrix, Network, NetworkCapacity, OutputMap, Stage, Tap, Taps, loop_gain,
 };
 use super::*;
-use crate::{Capacity as _, Lti as _};
+use crate::Lti as _;
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
-fn line(length: f32, absorption: Absorption) -> Line {
+/// `v` as a row of signed gains.
+fn gain_row<const N: usize>(v: &[f32]) -> Inline<Gain, N> {
+    let gains: Vec<Gain> = v.iter().map(|&x| Gain::new(x)).collect();
+    Inline::from_slice(&gains).unwrap()
+}
+
+fn line(length: f64, absorption: Absorption) -> Line {
     Line {
-        length,
+        length: SampleSpan::of(length),
         modulation: LineModulation::NONE,
         absorption,
         diffuser: None,
@@ -22,7 +28,7 @@ fn fdn(lines: &[Line], matrix: Matrix) -> Fdn {
     Fdn {
         lines: Inline::from_slice(lines).unwrap(),
         matrix,
-        input: Gains::filled(1.0, lines.len()).unwrap(),
+        input: Gains::filled(Gain::UNITY, lines.len()).unwrap(),
         output: OutputMap::default(),
     }
 }
@@ -40,13 +46,16 @@ fn network(stages: &[Stage]) -> Network {
 /// `0.1 + 1 + 1` = 2.1 s, and to -90 dB 4.1 s.
 #[test]
 fn the_tail_is_pre_delay_transit_and_the_decay_to_the_floor() {
-    let g = loop_gain(48_000.0, Seconds(2.0), RATE);
+    let g = loop_gain(SampleSpan::of(48_000.0), Seconds(2.0), RATE);
     let mut n = network(&[Stage::Fdn(fdn(
         &[line(48_000.0, Absorption::Gain(g))],
         Matrix::Diagonal,
     ))]);
     n.pre_delay = Samples(4_800);
-    let seconds = |floor| n.tail(Db(floor)).seconds().unwrap().get();
+    let seconds = |floor| match n.tail(Db(floor)) {
+        Ring::Finite(s) => s.get(),
+        Ring::Unbounded => panic!("a damped line rings out"),
+    };
     assert!((seconds(-60.0) - 3.1).abs() < 1e-5, "{}", seconds(-60.0));
     assert!((seconds(-30.0) - 2.1).abs() < 1e-5);
     assert!((seconds(-90.0) - 4.1).abs() < 1e-5);
@@ -59,13 +68,16 @@ fn the_tail_is_pre_delay_transit_and_the_decay_to_the_floor() {
 #[test]
 fn a_series_all_pass_rings_for_its_geometric_train() {
     let ap = AllPass {
-        delay: 100.0,
-        gain: 0.5,
+        delay: SampleSpan::of(100.0),
+        gain: Gain::new(0.5),
         modulation: LineModulation::NONE,
         form: AllPassForm::Lattice,
     };
     let n = network(&[Stage::AllPass(Inline::from_slice(&[ap, ap]).unwrap())]);
-    let t = n.tail(Db(-60.0)).seconds().unwrap().get();
+    let Ring::Finite(t) = n.tail(Db(-60.0)) else {
+        panic!("an all-pass chain rings out")
+    };
+    let t = t.get();
     assert!((t - 1100.0 / 48_000.0).abs() < 1e-7, "{t}");
     assert_eq!(n.rt60(Band::Low).get(), 0.0);
     assert!(n.is_stable() && !n.is_lossless());
@@ -79,11 +91,11 @@ fn a_series_all_pass_rings_for_its_geometric_train() {
 fn rt60_is_the_slowest_line_for_a_diagonal_and_the_length_weighted_loop_for_a_mixing() {
     let slow = line(
         40_000.0,
-        Absorption::Gain(loop_gain(40_000.0, Seconds(3.0), RATE)),
+        Absorption::Gain(loop_gain(SampleSpan::of(40_000.0), Seconds(3.0), RATE)),
     );
     let fast = line(
         20_000.0,
-        Absorption::Gain(loop_gain(20_000.0, Seconds(1.0), RATE)),
+        Absorption::Gain(loop_gain(SampleSpan::of(20_000.0), Seconds(1.0), RATE)),
     );
     let diagonal = network(&[Stage::Fdn(fdn(&[slow, fast], Matrix::Diagonal))]);
     assert!((diagonal.rt60(Band::High).get() - 3.0).abs() < 1e-4);
@@ -96,8 +108,12 @@ fn rt60_is_the_slowest_line_for_a_diagonal_and_the_length_weighted_loop_for_a_mi
         "{:?}",
         mixed.rt60(Band::High)
     );
-    let equal =
-        [20_000.0, 30_000.0].map(|m| line(m, Absorption::Gain(loop_gain(m, Seconds(2.0), RATE))));
+    let equal = [20_000.0, 30_000.0].map(|m| {
+        line(
+            m,
+            Absorption::Gain(loop_gain(SampleSpan::of(m), Seconds(2.0), RATE)),
+        )
+    });
     let same = network(&[Stage::Fdn(fdn(&equal, Matrix::Householder))]);
     assert!((same.rt60(Band::Low).get() - 2.0).abs() < 1e-4);
 }
@@ -124,10 +140,10 @@ fn a_one_pole_has_its_gain_at_dc_a_quarter_rate_and_nyquist() {
     let from = Absorption::from_rt60(
         [Seconds(2.0), Seconds(1.0), Seconds(0.5)],
         [tutti_types::Hz(200.0), tutti_types::Hz(2000.0)],
-        4800.0,
+        SampleSpan::of(4800.0),
         RATE,
     );
-    let want = [2.0, 1.0, 0.5].map(|t| loop_gain(4800.0, Seconds(t), RATE));
+    let want = [2.0, 1.0, 0.5].map(|t| loop_gain(SampleSpan::of(4800.0), Seconds(t), RATE));
     assert_eq!(Band::ALL.map(|x| from.gain(x)), want);
 }
 
@@ -137,15 +153,19 @@ fn a_one_pole_has_its_gain_at_dc_a_quarter_rate_and_nyquist() {
 #[test]
 fn a_nested_all_pass_lengthens_the_loop_by_its_low_frequency_delay() {
     let ap = AllPass {
-        delay: 100.0,
-        gain: 0.5,
+        delay: SampleSpan::of(100.0),
+        gain: Gain::new(0.5),
         modulation: LineModulation::NONE,
         form: AllPassForm::Lattice,
     };
-    assert_eq!(ap.low_frequency_delay(), 300.0);
+    assert_eq!(ap.low_frequency_delay(), Some(SampleSpan::of(300.0)));
     assert_eq!(
-        AllPass { gain: 1.0, ..ap }.low_frequency_delay(),
-        f32::INFINITY
+        AllPass {
+            gain: Gain::UNITY,
+            ..ap
+        }
+        .low_frequency_delay(),
+        None
     );
     let g = 0.9;
     let plain = line(1000.0, Absorption::Gain(Amplitude(g)));
@@ -153,7 +173,7 @@ fn a_nested_all_pass_lengthens_the_loop_by_its_low_frequency_delay() {
         diffuser: Some(ap),
         ..plain
     };
-    assert_eq!(nested.effective_length(), 1300.0);
+    assert_eq!(nested.effective_length(), Some(SampleSpan::of(1300.0)));
     let r = |l| {
         network(&[Stage::Fdn(fdn(&[l], Matrix::Diagonal))])
             .rt60(Band::Mid)
@@ -197,18 +217,18 @@ fn stability_follows_the_gains_and_the_matrix() {
     assert!(stable(&three, Matrix::Householder));
     assert!(!stable(
         &two(0.5),
-        Matrix::Dense(Inline::from_slice(&[1.0, 0.0, 0.0]).unwrap())
+        Matrix::Dense(gain_row(&[1.0, 0.0, 0.0]))
     ));
     // A shift is an orthogonal circulant; [1, 1] is not, and is stable only
     // when g times its Frobenius norm 2 is below 1.
-    let shift = Matrix::Circulant(Inline::from_slice(&[0.0, 1.0]).unwrap());
+    let shift = Matrix::Circulant(gain_row(&[0.0, 1.0]));
     assert!(stable(&two(0.99), shift));
-    let ones = Matrix::Circulant(Inline::from_slice(&[1.0, 1.0]).unwrap());
+    let ones = Matrix::Circulant(gain_row(&[1.0, 1.0]));
     assert!(!stable(&two(0.6), ones.clone()));
     assert!(stable(&two(0.4), ones));
-    let dense_orthogonal = Matrix::Dense(Inline::from_slice(&[0.0, 1.0, -1.0, 0.0]).unwrap());
+    let dense_orthogonal = Matrix::Dense(gain_row(&[0.0, 1.0, -1.0, 0.0]));
     assert!(stable(&two(0.99), dense_orthogonal));
-    let dense_big = Matrix::Dense(Inline::from_slice(&[0.0, 2.0, 2.0, 0.0]).unwrap());
+    let dense_big = Matrix::Dense(gain_row(&[0.0, 2.0, 2.0, 0.0]));
     assert!(!stable(&two(0.6), dense_big));
     assert!(!stable(
         &[line(100.0, Absorption::Gain(Amplitude(-0.5)))],
@@ -218,10 +238,11 @@ fn stability_follows_the_gains_and_the_matrix() {
         &[line(100.0, Absorption::Gain(Amplitude(f32::NAN)))],
         Matrix::Diagonal
     ));
-    let ap = |gain| {
+    let ap = |gain: f32| {
+        let gain = Gain::new(gain);
         network(&[Stage::AllPass(
             Inline::from_slice(&[AllPass {
-                delay: 10.0,
+                delay: SampleSpan::of(10.0),
                 gain,
                 modulation: LineModulation::NONE,
                 form: AllPassForm::Lattice,
@@ -331,7 +352,7 @@ fn a_fir_reports_its_summary() {
     assert_eq!(Band::ALL.map(|b| n.rt60(b).get()), [2.0, 1.5, 1.0]);
     assert_eq!(n.latency(), Samples(256));
     assert_eq!(n.tail(Db(-60.0)), Ring::Finite(Seconds(0.5)));
-    assert_eq!(n.min_delay(), 100.0);
+    assert_eq!(n.min_delay(), Some(SampleSpan::of(100.0)));
     assert_eq!(network(&[]).latency(), Samples::ZERO);
 }
 
@@ -341,8 +362,8 @@ fn a_fir_reports_its_summary() {
 fn the_shortest_path_decides_the_direct_path() {
     let ap = Stage::AllPass(
         Inline::from_slice(&[AllPass {
-            delay: 100.0,
-            gain: 0.5,
+            delay: SampleSpan::of(100.0),
+            gain: Gain::new(0.5),
             modulation: LineModulation::NONE,
             form: AllPassForm::Lattice,
         }])
@@ -354,31 +375,34 @@ fn the_shortest_path_decides_the_direct_path() {
         Matrix::Diagonal,
     ));
     let mut n = network(&[comb.clone(), ap]);
-    assert_eq!(n.min_delay(), 100.0);
+    assert_eq!(n.min_delay(), Some(SampleSpan::of(100.0)));
     assert!(!n.has_direct_path());
     n.pre_delay = Samples(20);
-    assert_eq!(n.min_delay(), 120.0);
+    assert_eq!(n.min_delay(), Some(SampleSpan::of(120.0)));
     // A lattice at g = 0 is a plain delay, no direct path; Freeverb's form
     // keeps its -1 at g = 0 and is direct.
     let plain = |form| {
         Stage::AllPass(
             Inline::from_slice(&[AllPass {
-                delay: 100.0,
-                gain: 0.0,
+                delay: SampleSpan::of(100.0),
+                gain: Gain::new(0.0),
                 modulation: LineModulation::NONE,
                 form,
             }])
             .unwrap(),
         )
     };
-    assert_eq!(network(&[plain(AllPassForm::Lattice)]).min_delay(), 100.0);
+    assert_eq!(
+        network(&[plain(AllPassForm::Lattice)]).min_delay(),
+        Some(SampleSpan::of(100.0))
+    );
     assert!(!network(&[plain(AllPassForm::Lattice)]).has_direct_path());
     assert!(network(&[plain(AllPassForm::Freeverb)]).has_direct_path());
-    let tap = |d| {
+    let tap = |d: f64| {
         Stage::Taps(Taps {
             taps: Inline::from_slice(&[Tap {
-                delay: d,
-                gain: 1.0,
+                delay: SampleSpan::of(d),
+                gain: Gain::UNITY,
                 channel: 0,
             }])
             .unwrap(),
@@ -386,24 +410,27 @@ fn the_shortest_path_decides_the_direct_path() {
     };
     assert!(network(&[tap(0.5)]).has_direct_path());
     assert!(!network(&[tap(1.0)]).has_direct_path());
-    assert_eq!(network(&[tap(7.0), comb]).min_delay(), 107.0);
+    assert_eq!(
+        network(&[tap(7.0), comb]).min_delay(),
+        Some(SampleSpan::of(107.0))
+    );
     assert_eq!(
         network(&[]).min_delay(),
-        0.0,
+        Some(SampleSpan::ZERO),
         "no stages: nothing is added to the pre-delay"
     );
 }
 
-/// `NetworkCapacity::dominates` needs every figure, and `of` measures them.
+/// `NetworkCapacity::need` measures every figure of a network.
 #[test]
-fn a_bound_dominates_only_when_every_figure_does() {
+fn a_capacity_measures_every_figure_of_its_network() {
     let g = Absorption::Gain(Amplitude(0.5));
     let mut f = fdn(
         &[
             line(100.0, g),
             Line {
                 modulation: LineModulation {
-                    depth: 2.0,
+                    depth: SampleSpan::of(2.0),
                     rate: tutti_types::Hz(1.0),
                 },
                 ..line(200.0, g)
@@ -411,38 +438,18 @@ fn a_bound_dominates_only_when_every_figure_does() {
         ],
         Matrix::Hadamard,
     );
-    f.output.rows.push(Gains::filled(1.0, 2).unwrap()).unwrap();
+    f.output
+        .rows
+        .push(Gains::filled(Gain::UNITY, 2).unwrap())
+        .unwrap();
     let mut n = network(&[Stage::Fdn(f)]);
     n.pre_delay = Samples(10);
     let b = NetworkCapacity::need(&n, Db(-60.0));
     assert_eq!((b.lines, b.stages, b.taps, b.outputs), (2, 1, 0, 1));
-    assert_eq!((b.line, b.delay, b.pre_delay), (202.0, 302.0, Samples(10)));
-    assert!(b.dominates(&b));
-    let smaller: [fn(&mut NetworkCapacity); 8] = [
-        |b| b.lines -= 1,
-        |b| b.stages -= 1,
-        |b| b.outputs -= 1,
-        |b| b.line -= 1.0,
-        |b| b.delay -= 1.0,
-        |b| b.pre_delay = Samples(b.pre_delay.get() - 1),
-        |b| b.tail = Ring::Finite(Seconds(0.0)),
-        |b| b.ir = Samples::ZERO,
-    ];
-    let mut with_taps_and_ir = b;
-    with_taps_and_ir.taps = 1;
-    with_taps_and_ir.ir = Samples(5);
-    for (i, shrink) in smaller.iter().enumerate() {
-        let mut s = if i == 7 { with_taps_and_ir } else { b };
-        shrink(&mut s);
-        let (big, small) = if i == 7 {
-            (&with_taps_and_ir, &s)
-        } else {
-            (&b, &s)
-        };
-        assert!(big.dominates(small), "row {i} the other way round");
-        assert!(!small.dominates(big), "row {i}");
-    }
-    assert!(!b.dominates(&with_taps_and_ir), "taps");
+    assert_eq!(
+        (b.line, b.delay, b.pre_delay),
+        (SampleSpan::of(202.0), SampleSpan::of(302.0), Samples(10))
+    );
 }
 
 fn one_pole(gain: f32, damp: f32) -> Absorption {
@@ -480,7 +487,7 @@ fn a_one_pole_outside_the_unit_circle_is_not_stable() {
         }
         assert!(!stable(a), "damp {damp}");
         let f = fdn(&[line(100.0, a)], Matrix::Diagonal);
-        assert_eq!(f.rt60_bound(Band::Mid, RATE.get()).to_f32(), f32::INFINITY);
+        assert_eq!(f.rt60_bound(Band::Mid, RATE).to_f32(), f32::INFINITY);
         let n = network(&[Stage::Fdn(f)]);
         assert_eq!(n.tail(Db(-60.0)), Ring::Unbounded);
     }
@@ -492,18 +499,12 @@ fn a_one_pole_outside_the_unit_circle_is_not_stable() {
     assert!(!stable(one_pole(0.9, -0.5)));
 }
 
-/// A line must have a finite, positive length: a delay-free loop (length 0),
-/// a negative or non-finite one, or a non-finite modulation depth is not
-/// stable and not lossless, even at a gain of 1 under an orthogonal matrix.
+/// A line must have a positive length: a delay-free loop (length 0) is not
+/// stable and not lossless, even at a gain of 1 under an orthogonal matrix. A
+/// negative, NaN or infinite length, or modulation depth, is not a `SampleSpan`.
 #[test]
-fn a_line_without_a_finite_positive_length_is_not_stable() {
-    let mut modulated = line(100.0, Absorption::Gain(Amplitude(0.5)));
-    modulated.modulation.depth = f32::NAN;
-    let mut lines = vec![modulated];
-    for length in [0.0, -5.0, f32::NAN, f32::INFINITY] {
-        lines.push(line(length, Absorption::Gain(Amplitude(0.5))));
-    }
-    for l in lines {
+fn a_delay_free_line_is_not_stable() {
+    for l in [line(0.0, Absorption::Gain(Amplitude(0.5)))] {
         for gain in [0.5, 1.0] {
             let l = Line {
                 absorption: Absorption::Gain(Amplitude(gain)),
@@ -534,10 +535,10 @@ fn a_line_without_a_finite_positive_length_is_not_stable() {
 #[test]
 fn the_orthogonality_tolerance_cannot_let_a_growing_loop_through() {
     let scaled = |c0: f32, n: usize| {
-        let mut row = Gains::filled(0.0, n).unwrap();
-        row.as_mut_slice()[0] = c0;
+        let mut row = Gains::filled(Gain::SILENT, n).unwrap();
+        row.as_mut_slice()[0] = Gain::new(c0);
         let lines: Vec<Line> = (0..n)
-            .map(|i| line(100.0 + i as f32, Absorption::Gain(Amplitude(1.0 - 2e-6))))
+            .map(|i| line(100.0 + i as f64, Absorption::Gain(Amplitude(1.0 - 2e-6))))
             .collect();
         fdn(&lines, Matrix::Circulant(row))
     };
@@ -557,12 +558,12 @@ fn the_orthogonality_tolerance_cannot_let_a_growing_loop_through() {
             line(100.0, Absorption::Gain(Amplitude(0.5))),
             line(130.0, Absorption::Gain(Amplitude(0.5))),
         ],
-        Matrix::Circulant(Inline::from_slice(&[1.0 + eta / 2.0, eta / 2.0]).unwrap()),
+        Matrix::Circulant(gain_row(&[1.0 + eta / 2.0, eta / 2.0])),
     );
     let Matrix::Circulant(c) = &near.matrix else {
         unreachable!()
     };
-    let truth = f64::from(c[0]) + f64::from(c[1]);
+    let truth = f64::from(c[0].get()) + f64::from(c[1].get());
     assert!(near.orthogonal());
     assert!(
         near.norm_bound() >= truth,
@@ -582,10 +583,10 @@ fn the_orthogonality_tolerance_cannot_let_a_growing_loop_through() {
 #[test]
 fn the_tail_covers_a_mixing_network_whose_lines_decay_differently() {
     let rate = SampleRate::of(1_000.0);
-    let lines = [(40.0f32, 3.0f32), (70.0, 1.0)].map(|(m, t)| {
+    let lines = [(40.0f64, 3.0f32), (70.0, 1.0)].map(|(m, t)| {
         line(
             m,
-            Absorption::Gain(loop_gain(m, Seconds::from_f32(t), rate)),
+            Absorption::Gain(loop_gain(SampleSpan::of(m), Seconds::from_f32(t), rate)),
         )
     });
     let mut mixed = Network::new(rate);
@@ -595,7 +596,7 @@ fn the_tail_covers_a_mixing_network_whose_lines_decay_differently() {
         .unwrap();
     let estimate = mixed.rt60(Band::Mid).to_f32();
     assert!((estimate - 1.32).abs() < 1e-3, "{estimate}");
-    let bound = fdn(&lines, Matrix::Hadamard).rt60_bound(Band::Mid, rate.get());
+    let bound = fdn(&lines, Matrix::Hadamard).rt60_bound(Band::Mid, rate);
     assert!((bound.get() - 3.0).abs() < 1e-3);
     let Ring::Finite(tail) = mixed.tail(Db(-60.0)) else {
         panic!("finite")
@@ -638,7 +639,7 @@ fn the_tail_covers_a_mixing_network_whose_lines_decay_differently() {
         .push(Stage::Fdn(fdn(&lines, Matrix::Diagonal)))
         .unwrap();
     let exact = diagonal.rt60(Band::Mid).get();
-    let bound = fdn(&lines, Matrix::Diagonal).rt60_bound(Band::Mid, rate.get());
+    let bound = fdn(&lines, Matrix::Diagonal).rt60_bound(Band::Mid, rate);
     assert!((bound.get() - exact).abs() < 1e-4);
 }
 
@@ -651,12 +652,12 @@ fn a_nearly_orthogonal_matrix_adds_a_lag_a_structured_one_does_not() {
     let lines = [line(100.0, g), line(130.0, g)];
     let structured = fdn(&lines, Matrix::Householder);
     assert_eq!(structured.lag_extra_frames(Band::Mid), 0.0);
-    let c = Matrix::Circulant(Inline::from_slice(&[1.000_000_2, 0.0]).unwrap());
+    let c = Matrix::Circulant(gain_row(&[1.000_000_2, 0.0]));
     let near = fdn(&lines, c);
     assert!(near.orthogonal() && near.lag_extra_frames(Band::Mid) > 0.0);
     assert!(
-        near.rt60_bound(Band::Mid, 48_000.0).get()
-            > structured.rt60_bound(Band::Mid, 48_000.0).get()
+        near.rt60_bound(Band::Mid, SampleRate::SR_48K).get()
+            > structured.rt60_bound(Band::Mid, SampleRate::SR_48K).get()
     );
 }
 
@@ -666,10 +667,10 @@ fn a_nearly_orthogonal_matrix_adds_a_lag_a_structured_one_does_not() {
 /// loss.
 #[test]
 fn only_a_lattice_diffuser_is_inside_the_analysis() {
-    let nested = |form, gain| Line {
+    let nested = |form, gain: f32| Line {
         diffuser: Some(AllPass {
-            delay: 20.0,
-            gain,
+            delay: SampleSpan::of(20.0),
+            gain: Gain::new(gain),
             modulation: LineModulation::NONE,
             form,
         }),
@@ -699,12 +700,7 @@ fn only_a_lattice_diffuser_is_inside_the_analysis() {
 #[test]
 fn a_reflection_is_orthogonal_when_its_vector_is_a_unit() {
     let lines = [100.0, 130.0, 170.0, 190.0].map(|m| line(m, Absorption::Gain(Amplitude(1.0))));
-    let reflect = |v: &[f32]| {
-        network(&[Stage::Fdn(fdn(
-            &lines,
-            Matrix::Reflection(Inline::from_slice(v).unwrap()),
-        ))])
-    };
+    let reflect = |v: &[f32]| network(&[Stage::Fdn(fdn(&lines, Matrix::Reflection(gain_row(v))))]);
     let unit = reflect(&[0.5, 0.5, 0.5, 0.5]);
     assert!(unit.is_lossless() && unit.is_stable());
     // A unit vector off the flat one is just as orthogonal.
@@ -740,7 +736,7 @@ fn a_reflection_is_orthogonal_when_its_vector_is_a_unit() {
     let lossy = [100.0, 130.0, 170.0, 190.0].map(|m| line(m, Absorption::Gain(Amplitude(0.9))));
     let wrong = network(&[Stage::Fdn(fdn(
         &lossy,
-        Matrix::Reflection(Inline::from_slice(&[0.5, 0.5, 0.5]).unwrap()),
+        Matrix::Reflection(gain_row(&[0.5, 0.5, 0.5])),
     ))]);
     assert!(!wrong.is_stable());
 }

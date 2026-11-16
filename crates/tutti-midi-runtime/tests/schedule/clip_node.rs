@@ -31,7 +31,7 @@ fn rig(clip: MidiClipNode, max: usize) -> (Editor, Executor, MidiClipControls, S
 
 fn rig_with<N: IntoNode>(clip: N, max: usize) -> (Editor, Executor, N::Controls, Seen) {
     let mut rig = EventRig::events_only(RATE, max, 1);
-    let controls = rig.editor.insert(NodeKey(1), "clip", clip);
+    let controls = rig.editor.insert(NodeKey(1), "clip", clip).controls;
     rig.feed(NodeKey(1), 0, 0);
     rig.commit();
     (rig.editor, rig.exec, controls, rig.seen)
@@ -930,7 +930,7 @@ fn a_render_that_starts_mid_clip_starts_from_the_timelines_state() {
                 Address::new(g, c0),
                 Voice2::RegisteredPerNote {
                     note: NoteNumber::of(60),
-                    controller: RegisteredPerNoteController::from(3),
+                    controller: RegisteredPerNoteController::Pitch,
                     value: ControlValue::new(0x4000_0000),
                 },
             )),

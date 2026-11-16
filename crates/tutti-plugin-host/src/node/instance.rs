@@ -11,13 +11,18 @@
 //! back at the audio thread's next poll.
 
 use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
 
 use tutti_plugin_types::{
-    Event, Hand, HostOp, InProcess, Lifecycle, Load, Loaded, MaxBlock, Notice, Origin, PluginError,
-    Prepare, Processor, RenderMode, RenderModeSupport, SampleRate, Samples, State, standing,
+    Event, Hand, HostOp, InProcess, Layout, Lifecycle, Load, Loaded, MaxBlock, Notice, Origin,
+    PluginError, Prepare, Processor, RenderMode, RenderModeSupport, SampleRate, Samples, State,
+    Successor, standing,
 };
 use tutti_rt::Rt;
+
+use super::rebind::{RebindError, Settlement};
 
 use tutti_plugin_types::LoadStage;
 use tutti_plugin_types::ParamEdit;
@@ -60,6 +65,13 @@ pub(super) struct Instance<F: Loaded> {
     rate_report: Option<Option<(SampleRate, String)>>,
     /// The last rate change was refused (the report above says so once).
     rate_refused: bool,
+    /// A successor was committed ([`commit`](Self::commit)).
+    committed: bool,
+    /// Whether the plugin is lost, readable with no lock: a node dropped while
+    /// the control side holds the instance reads it. A latch: it is set once,
+    /// nothing is published through it, and a reader that misses it only
+    /// hands a Processor back that nothing then collects, so no fence is needed.
+    lost: Arc<AtomicBool>,
 }
 
 impl<F: InProcess> Instance<F> {
@@ -128,6 +140,8 @@ impl<F: Loaded> Instance<F> {
             changes: Changes::default(),
             rate_report: None,
             rate_refused: false,
+            committed: false,
+            lost: Arc::new(AtomicBool::new(false)),
         };
         let refused = this.drive(main, Event::Op(HostOp::Activate(prepare)));
         if let Some(reason) = refused {
@@ -162,6 +176,8 @@ impl<F: Loaded> Instance<F> {
             changes: Changes::default(),
             rate_report: None,
             rate_refused: false,
+            committed: false,
+            lost: Arc::new(AtomicBool::new(false)),
         };
         (this, rt)
     }
@@ -187,6 +203,9 @@ impl<F: Loaded> Instance<F> {
                     | Notice::ParamTitlesChanged
                     | Notice::Reloaded => {}
                 });
+        if self.lifecycle.is_poisoned() {
+            self.lost.store(true, Ordering::Release);
+        }
         refused
     }
 
@@ -196,14 +215,6 @@ impl<F: Loaded> Instance<F> {
         self.lifecycle.control()
     }
 
-    /// Whether the plugin is gone (a call into it panicked): it renders
-    /// silence and the pump skips it.
-    #[cfg(test)]
-    #[must_use]
-    pub(super) fn is_lost(&self) -> bool {
-        self.lifecycle.is_poisoned()
-    }
-
     /// The latency and tail as the control side last read them. Dispatches
     /// nothing, so the graph compile may call it.
     pub(super) fn figures(&self) -> (Samples, PluginTail) {
@@ -211,6 +222,86 @@ impl<F: Loaded> Instance<F> {
             self.state.latency().unwrap_or_default(),
             self.state.tail().unwrap_or_default(),
         )
+    }
+
+    /// The ports the plugin last reported, with its latency and tail: what a
+    /// node rebuilt over it declares. `None` before the lifecycle has read a
+    /// layout, and once the plugin is lost.
+    pub(super) fn reading(&self) -> Option<(&Layout, Samples, PluginTail)> {
+        if self.lifecycle.is_poisoned() {
+            return None;
+        }
+        let (latency, tail) = self.figures();
+        Some((self.state.layout()?, latency, tail))
+    }
+
+    /// Whether the plugin can take a successor realtime end now.
+    ///
+    /// # Errors
+    ///
+    /// [`RebindError::NotRunning`] for a plugin that is not active (loaded,
+    /// refused or lost): there is no Processor to move.
+    /// [`RebindError::Restarting`] while the plugin's own restart or a request
+    /// still to be read is under way: the layout the lifecycle holds is not the
+    /// one the plugin will run with, so the caller pumps and tries again.
+    pub(super) fn ready_to_rehand(&self) -> Result<(), RebindError> {
+        if !self.state.renders() {
+            return Err(RebindError::NotRunning);
+        }
+        if !self.state.is_quiet() || self.state.is_parked() {
+            return Err(RebindError::Restarting);
+        }
+        Ok(())
+    }
+
+    /// Names `successor` as the Processor's way and brings the Processor back to
+    /// be lent to it: a [`HostOp::Relend`], so the plugin keeps running and is
+    /// neither deactivated nor activated ([`Hand::install`]). Main thread.
+    ///
+    /// It does not fail: the node it serves is in the graph already and the
+    /// node it replaces is on its way out, so whatever the plugin's state is
+    /// now, the successor is where its Processor goes next.
+    ///
+    /// - An active plugin with nothing under way plans a recall (the op), which
+    ///   raises the recall on the end that holds the Processor; that node hands
+    ///   it back at its next poll or when it is dropped, and the pump's tick
+    ///   lends it to the successor.
+    /// - A plugin with a restart under way (its own, or a rate change's) has a
+    ///   recall up or its Processor held; the plan ends in a lend, which goes to
+    ///   the successor.
+    /// - A plugin that is not active has no Processor lent; its next activation
+    ///   lends to the successor.
+    ///
+    /// Until the Processor arrives the successor's end is empty and a node over it
+    /// renders silence; [`settlement`](Self::settlement) says when the way is
+    /// the successor's. A plugin that refuses the restart renders nothing until
+    /// one it takes: the refusal is kept for the control side, as a rate's is
+    /// ([`take_rate_report`](Self::take_rate_report)).
+    pub(super) fn commit(&mut self, main: MainThreadMarker, successor: Successor<F::Processor>) {
+        self.hand.install(successor);
+        if let Some(why) = self.drive(main, Event::Op(HostOp::Relend)) {
+            self.note_refusal(why);
+        }
+        self.committed = true;
+    }
+
+    /// Where the Processor's way is, after a [`commit`](Self::commit).
+    pub(super) fn settlement(&self) -> Settlement {
+        if self.lifecycle.is_poisoned() {
+            Settlement::Lost
+        } else if self.hand.pending() {
+            Settlement::Pending
+        } else if self.committed {
+            Settlement::Moved
+        } else {
+            Settlement::Idle
+        }
+    }
+
+    /// The flag [`lost_flag`](Self::lost_flag) shares: set when the lifecycle poisons, shared with the nodes over this
+    /// instance.
+    pub(super) fn lost_flag(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.lost)
     }
 
     /// The render mode the plugin runs in, or was last told.
@@ -466,7 +557,7 @@ mod tests {
         assert_eq!(instance.prepare.rate(), SampleRate::SR_96K);
         assert_eq!(instance.take_rate_report(), None, "a plain change");
         assert!(instance.renders());
-        assert!(!instance.is_lost());
+        assert!(!instance.lost_flag().load(Ordering::Acquire));
     }
 
     /// **A rate change made off the realtime thread completes at the pump,

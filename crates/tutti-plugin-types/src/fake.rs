@@ -22,9 +22,9 @@ use tutti_rt::RequestWord;
 use crate::{
     AudioBufferMut, ChannelLayout, ContentScale, Control, Controller, EditDrain, EditSink,
     EditorError, EditorWindow, FdId, Layout, Loaded, LoadedPlugin, MainThreadMarker, Normalized,
-    ParamEdit, ParamId, ParameterInfo, PluginBus, PluginDescriptor, PluginError, PluginIo,
-    PluginResult, PluginTail, Prepare, Processor, Refused, RenderMode, RenderModeSupport, Request,
-    RescanScope, RestartRules, SampleRate, Samples, Stuck, TimerId, WindowHandle, edits,
+    ParamEdit, ParamFlags, ParamId, ParameterInfo, PluginBus, PluginDescriptor, PluginError,
+    PluginIo, PluginResult, PluginTail, Prepare, Processor, Refused, RenderMode, RenderModeSupport,
+    Request, RescanScope, RestartRules, SampleRate, Samples, Stuck, TimerId, WindowHandle, edits,
 };
 
 /// One call the fake received.
@@ -238,9 +238,21 @@ struct Shared {
     /// The mode the fake was last told live: `0` none, `1` realtime, `2`
     /// offline.
     told_mode: AtomicU8,
+    /// The parameters the fake declares and whether each is read-only. None
+    /// until [`FakePlugin::declare`]: the fake refuses a write to an id it does
+    /// not declare, as every format does.
+    declared: Mutex<Vec<(ParamId, bool)>>,
 }
 
 impl Shared {
+    /// The declared parameters, if the fake declares any.
+    fn declared(&self) -> Vec<(ParamId, bool)> {
+        self.declared
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
     fn wiring(&self) -> LoadedPlugin {
         self.log.push(Call::Wiring);
         let outputs = ChannelLayout::try_from(self.outputs.load(Ordering::Relaxed))
@@ -303,6 +315,7 @@ impl FakePlugin {
             resize_request: AtomicU64::new(0),
             render_mode_support: AtomicU8::new(0),
             told_mode: AtomicU8::new(0),
+            declared: Mutex::new(Vec::new()),
         });
         (
             Self(shared.clone()),
@@ -428,6 +441,19 @@ impl FakePlugin {
         self.0.outputs.store(u32::from(channels), Ordering::Relaxed);
     }
 
+    /// Declares the fake's parameters: each `(id, read_only)`. The fake follows
+    /// the write policy of every format: a write to an id it does not declare is
+    /// [`Undeclared`](crate::ParamWriteError::Undeclared), and one to a read-only
+    /// parameter is [`ReadOnly`](crate::ParamWriteError::ReadOnly). It declares
+    /// nothing until this is called.
+    pub fn declare(&self, parameters: &[(ParamId, bool)]) {
+        *self
+            .0
+            .declared
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = parameters.to_vec();
+    }
+
     /// Gives the fake an editor: `open_editor` answers 640 by 480 and the
     /// window calls are logged. The default is none.
     pub fn with_editor(&self, has: bool) {
@@ -512,9 +538,17 @@ macro_rules! fake_control {
             }
 
             fn parameters(&self, _main: MainThreadMarker) -> Vec<ParameterInfo> {
-                self.values
-                    .iter()
-                    .map(|&(id, _)| ParameterInfo::new(id, "p"))
+                self.shared
+                    .declared()
+                    .into_iter()
+                    .map(|(id, read_only)| {
+                        let flags = if read_only {
+                            ParamFlags::READ_ONLY
+                        } else {
+                            ParamFlags::empty()
+                        };
+                        ParameterInfo::new(id, "p").with_flags(ParamFlags::READ_ONLY, flags)
+                    })
                     .collect()
             }
 
@@ -540,11 +574,20 @@ macro_rules! fake_control {
                 Normalized::new(plain)
             }
 
-            fn set_parameter(&mut self, _main: MainThreadMarker, id: ParamId, value: Normalized) {
+            /// Follows the write policy: only a parameter the fake declares
+            /// ([`FakePlugin::declare`]) is written.
+            fn set_parameter(
+                &mut self,
+                main: MainThreadMarker,
+                id: ParamId,
+                value: Normalized,
+            ) -> Result<(), $crate::ParamWriteError> {
+                self.parameter_writable(main, id)?;
                 self.shared.log.push(Call::SetParameter(id));
                 set_value(&mut self.values, id, value);
                 let set: fn(&mut Self, ParamId, Normalized) = $set;
                 set(self, id, value);
+                Ok(())
             }
 
             fn save_state(
@@ -592,8 +635,10 @@ macro_rules! fake_control {
                 self.shared.log.push(Call::ServiceFd(id));
             }
 
-            /// The fake never asks for anything.
-            fn take_requests(&mut self, _main: MainThreadMarker, _out: &mut Vec<Request>) {}
+            /// What a test raised on [`FakePlugin::request_word`], taken once.
+            fn take_requests(&mut self, _main: MainThreadMarker, out: &mut Vec<Request>) {
+                out.extend(crate::taken(&self.shared.requests));
+            }
 
             /// As [`FakePlugin::take_render_mode`] set it; at activation by
             /// default, as VST3 takes it.
@@ -911,5 +956,33 @@ impl Processor for FakeProcessor {
 impl From<&FakeLoaded> for Layout {
     fn from(fake: &FakeLoaded) -> Self {
         Layout::from(&fake.shared.wiring())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A fake that declares parameters follows the write policy of every
+    /// format: an undeclared id and a read-only parameter are refused at the
+    /// call and write nothing; a declared one is written.
+    #[test]
+    fn a_fake_that_declares_parameters_follows_the_write_policy() {
+        let (plugin, mut loaded) = FakePlugin::new();
+        let (open, meter, gone) = (ParamId::new(1), ParamId::new(2), ParamId::new(3));
+        plugin.declare(&[(open, false), (meter, true)]);
+        let main = tutti_fixtures::main_thread();
+        let half = Normalized::of(0.5);
+        assert_eq!(loaded.set_parameter(main, open, half), Ok(()));
+        assert_eq!(
+            loaded.set_parameter(main, meter, half),
+            Err(crate::ParamWriteError::ReadOnly(meter))
+        );
+        assert_eq!(
+            loaded.set_parameter(main, gone, half),
+            Err(crate::ParamWriteError::Undeclared(gone))
+        );
+        assert_eq!(loaded.parameter(main, meter), None);
+        assert_eq!(loaded.parameter(main, open), Some(half));
     }
 }

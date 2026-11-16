@@ -9,7 +9,7 @@ use tutti_types::Samples;
 
 use crate::Measured;
 
-use crate::{ChannelLayout, ChannelTopology, FeatureReport, Features};
+use crate::{ChannelLayout, ChannelTopology, FeatureReport, Features, MidiAssignment, OwnBypass};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -97,6 +97,20 @@ fn width(buses: &[PluginBus]) -> usize {
     buses.iter().map(|b| b.channels.count() as usize).sum()
 }
 
+/// The first direction of a plugin with `inputs` and `outputs` channels that is
+/// past what a block serves.
+fn check_widths(inputs: usize, outputs: usize) -> Result<(), crate::PluginTooWide> {
+    for (direction, channels) in [("input", inputs), ("output", outputs)] {
+        if channels > crate::MAX_BLOCK_CHANNELS {
+            return Err(crate::PluginTooWide {
+                direction,
+                channels,
+            });
+        }
+    }
+    Ok(())
+}
+
 /// The widths of `buses`, in order.
 fn widths(buses: &[PluginBus]) -> BusChannels {
     buses.iter().map(|b| b.channels).collect()
@@ -137,6 +151,30 @@ pub struct Layout {
     pub inputs: PluginBuses,
     /// The output buses.
     pub outputs: PluginBuses,
+}
+
+impl Layout {
+    /// Whether every direction is within the width a block serves.
+    ///
+    /// # Errors
+    ///
+    /// [`PluginTooWide`](crate::PluginTooWide) for the first direction past
+    /// [`MAX_BLOCK_CHANNELS`](crate::MAX_BLOCK_CHANNELS).
+    pub fn check_width(&self) -> Result<(), crate::PluginTooWide> {
+        check_widths(self.total_inputs(), self.total_outputs())
+    }
+
+    /// The total input channel width across all buses.
+    #[must_use]
+    pub fn total_inputs(&self) -> usize {
+        width(&self.inputs)
+    }
+
+    /// The total output channel width across all buses.
+    #[must_use]
+    pub fn total_outputs(&self) -> usize {
+        width(&self.outputs)
+    }
 }
 
 use tutti_graph::MAX_NODE_TAIL;
@@ -257,9 +295,34 @@ pub struct LoadedPlugin {
     // postcard payload is `PROTOCOL_VERSION`'s job, not serde's.
     #[cfg_attr(feature = "serde", serde(default))]
     pub probed: Features,
+    /// The plugin's bypass of its own, where it keeps it: VST3's `kIsBypass`
+    /// parameter, CLAP's `CLAP_PARAM_IS_BYPASS` parameter, AU's
+    /// `kAudioUnitProperty_BypassEffect`, VST2's `effSetBypass` (only where the
+    /// plugin accepts it). `None` for a plugin without one, or one that refuses.
+    /// A node over it declares
+    /// [`Shape::with_own_bypass`](tutti_graph::Shape::with_own_bypass) and the
+    /// host writes the plugin's bypass when the node's mode changes
+    /// ([`Control::set_bypassed`](crate::Control::set_bypassed)).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub own_bypass: Option<OwnBypass>,
+    /// The controller table the plugin declares (VST3 `IMidiMapping`, AU
+    /// `kAudioUnitProperty_AllParameterMIDIMappings`): empty for a format or a
+    /// plugin with none. The plugin's suggestion; nothing applies it.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub assignments: Vec<MidiAssignment>,
 }
 
 impl LoadedPlugin {
+    /// Whether every direction is within the width a block serves.
+    ///
+    /// # Errors
+    ///
+    /// [`PluginTooWide`](crate::PluginTooWide) for the first direction past
+    /// [`MAX_BLOCK_CHANNELS`](crate::MAX_BLOCK_CHANNELS).
+    pub fn check_width(&self) -> Result<(), crate::PluginTooWide> {
+        check_widths(self.total_inputs(), self.total_outputs())
+    }
+
     /// Returns the total input channel width across all buses.
     pub fn total_inputs(&self) -> usize {
         width(&self.inputs)
@@ -351,6 +414,12 @@ mod tests {
             tail: PluginTail::Finite(Samples(48_000)),
             features: Features::F64_AUDIO | Features::MIDI_IN,
             probed: Features::F64_AUDIO | Features::MIDI_IN | Features::EDITOR,
+            own_bypass: Some(OwnBypass::Parameter(crate::ParamId::new(4))),
+            assignments: vec![MidiAssignment {
+                channel: tutti_ump::MidiChannel::new(3),
+                source: crate::MidiSource::PitchBend,
+                param: crate::ParamId::new(9),
+            }],
         };
         let bytes = postcard::to_allocvec(&loaded).unwrap();
         let back: LoadedPlugin = postcard::from_bytes(&bytes).unwrap();

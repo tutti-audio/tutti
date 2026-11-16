@@ -103,8 +103,10 @@ impl Vst3Editor {
 
 impl Editor for Vst3Editor {
     fn set_parameter(&mut self, main: MainThreadMarker, id: ParamId, value: Normalized) {
-        // VST3's `setParamNormalized` takes the host domain unchanged.
-        Control::set_parameter(&mut self.inner, main, id, value);
+        // VST3's `setParamNormalized` takes the host domain unchanged. The
+        // mirror follows the host's write policy: a write the plugin refuses
+        // (undeclared or read-only) is not mirrored either.
+        let _ = Control::set_parameter(&mut self.inner, main, id, value);
     }
 
     fn set_automation_state(&mut self, main: MainThreadMarker, mode: AutomationMode) {

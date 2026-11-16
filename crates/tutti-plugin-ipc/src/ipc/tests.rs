@@ -8,13 +8,15 @@ use std::time::{Duration, Instant};
 
 use tutti_fixtures::{machine_lock, main_thread};
 use tutti_plugin_types::{
-    ChannelLayout, Control, Controller, Loaded, LoadedPlugin, MaxBlock, ParamId, ParameterInfo,
-    PluginBus, PluginDescriptor, Prepare, Processor, Reopen, Request, SampleFormat, SampleRate,
-    Samples,
+    ChannelLayout, Control, Controller, Loaded, LoadedPlugin, MaxBlock, ParamAccess, ParamId,
+    ParameterInfo, PluginBus, PluginDescriptor, Prepare, Processor, Reopen, Request, SampleFormat,
+    SampleRate, Samples,
 };
 
+use super::DeclaredCache;
+
 use crate::{
-    AudioSlab, BridgeConfig, BridgeMessage, HostMessage, Ipc, IpcController, IpcParts,
+    AudioSlab, BridgeConfig, BridgeEvent, BridgeMessage, HostMessage, Ipc, IpcController, IpcParts,
     IpcProcessor, PROTOCOL_VERSION, PluginBridge, ProcessGuard, RING_SLOTS, SlabLayout,
     unique_socket_path,
 };
@@ -31,6 +33,8 @@ type Received = Arc<Mutex<Vec<HostMessage>>>;
 /// the asks the tests make, and sends what a test injects.
 struct Mock {
     received: Received,
+    /// The parameters the server declares when asked (`GetParameterList`).
+    parameters: Arc<Mutex<Vec<ParameterInfo>>>,
     stream: Arc<interprocess::local_socket::Stream>,
     _bridge: crate::BridgeThread,
 }
@@ -160,6 +164,11 @@ fn mock_with(
         },
     );
     let received: Received = Arc::default();
+    let parameters: Arc<Mutex<Vec<ParameterInfo>>> =
+        Arc::new(Mutex::new(vec![ParameterInfo::new(
+            ParamId::new(3),
+            "gain",
+        )]));
     std::thread::spawn({
         let (log, audio) = (Arc::clone(&received), Arc::clone(&audio));
         move || {
@@ -181,6 +190,7 @@ fn mock_with(
         }
     });
     let (log, served) = (Arc::clone(&received), Arc::clone(&stream));
+    let answers = Arc::clone(&parameters);
     std::thread::spawn(move || {
         loop {
             let mut len = [0u8; 4];
@@ -195,6 +205,8 @@ fn mock_with(
             let Ok(message) = postcard::from_bytes::<HostMessage>(&bytes) else {
                 break;
             };
+            // Recorded before it is answered: a count read after the reply sees it.
+            log.lock().unwrap().push(message.clone());
             match &message {
                 HostMessage::SetSampleRate { rate } => reply(
                     &served,
@@ -221,12 +233,11 @@ fn mock_with(
                 HostMessage::GetParameterList => reply(
                     &served,
                     &BridgeMessage::ParameterList {
-                        parameters: vec![ParameterInfo::new(ParamId::new(3), "gain")],
+                        parameters: answers.lock().unwrap().clone(),
                     },
                 ),
                 _ => {}
             }
-            log.lock().unwrap().push(message);
         }
         let _ = std::fs::remove_file(&path);
     });
@@ -253,6 +264,7 @@ fn mock_with(
         ipc,
         Mock {
             received,
+            parameters,
             stream,
             _bridge: thread,
         },
@@ -571,4 +583,299 @@ fn a_client_with_a_loader_sends_no_editor_message() {
             .any(|m| matches!(m, HostMessage::OpenEditor { .. })),
         "the editor is the host's"
     );
+}
+
+/// Renders one block of `frames` silent frames through `processor`.
+fn render_silence(processor: &mut IpcProcessor, frames: usize) {
+    use tutti_plugin_types::{
+        AudioBuffer, AudioBufferMut, PluginIo, ProcessContext, ProcessOutput,
+    };
+    let input = vec![vec![0.0f32; frames]; 2];
+    let mut output = vec![vec![0.0f32; frames]; 2];
+    let inputs: Vec<&[f32]> = input.iter().map(Vec::as_slice).collect();
+    let mut outputs: Vec<&mut [f32]> = output.iter_mut().map(Vec::as_mut_slice).collect();
+    let ctx = ProcessContext::new();
+    let mut out = ProcessOutput::default();
+    let mut io = PluginIo {
+        buffer: AudioBufferMut::F32(AudioBuffer {
+            inputs: &inputs,
+            outputs: &mut outputs,
+            num_samples: frames,
+            sample_rate: RATE.get(),
+        }),
+        ctx: &ctx,
+        out: &mut out,
+    };
+    processor.process(&mut io).expect("the block renders");
+}
+
+/// The sequences of the `ProcessAudio` messages the mock was sent, in order.
+fn process_seqs(server: &Mock, count: usize) -> Vec<u64> {
+    let seqs = |log: &[HostMessage]| {
+        log.iter()
+            .filter_map(|m| match m {
+                HostMessage::ProcessAudio(data) => Some(data.seq),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    assert!(
+        server.wait_for(|log| seqs(log).len() >= count),
+        "{count} chunks reach the server"
+    );
+    seqs(&server.received.lock().unwrap())
+}
+
+/// **A reactivation never reuses a chunk sequence.** The slab outlives an
+/// activation, and a `ProcessAudio` of the old one can still be in the audio
+/// socket when the server publishes: a new activation that restarted its
+/// sequence would match that publish as its own chunk and play old audio as
+/// new. The sequence of the second activation is past every one of the first.
+#[test]
+fn a_reactivation_continues_the_chunk_sequence() {
+    let _machine = machine_lock();
+    let main = main_thread();
+    let (ipc, server) = mock();
+    let (mut processor, controller) = activate(ipc, 32);
+    render_silence(&mut processor, 32);
+    render_silence(&mut processor, 32);
+    let first = process_seqs(&server, 2);
+    let ipc = Ipc::deactivate(main, processor, controller).expect("the halves rejoin");
+    let (mut processor, _controller) = activate(ipc, 32);
+    render_silence(&mut processor, 32);
+    let all = process_seqs(&server, 3);
+    let (old, new) = all.split_at(first.len());
+    assert!(
+        new.iter().all(|n| old.iter().all(|o| n > o)),
+        "old {old:?}, new {new:?}"
+    );
+}
+
+/// How many times the mock server was asked for its parameter list.
+fn list_asks(server: &Mock) -> usize {
+    server
+        .received
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|m| matches!(m, HostMessage::GetParameterList))
+        .count()
+}
+
+fn param(id: u32, read_only: bool) -> ParameterInfo {
+    let flags = if read_only {
+        tutti_plugin_types::ParamFlags::READ_ONLY
+    } else {
+        tutti_plugin_types::ParamFlags::empty()
+    };
+    ParameterInfo::new(ParamId::new(id), "p")
+        .with_flags(tutti_plugin_types::ParamFlags::READ_ONLY, flags)
+}
+
+/// **A served write is checked against the declared parameters, and the server
+/// is asked once**: a read-only parameter is refused (`ReadOnly`), an undeclared
+/// id too, a declared one is written, and the three writes cost one
+/// `GetParameterList` between them.
+#[test]
+fn a_served_write_is_checked_against_one_ask() {
+    use tutti_plugin_types::{Normalized, ParamWriteError};
+    let _machine = machine_lock();
+    let (mut ipc, server) = mock();
+    *server.parameters.lock().unwrap() = vec![param(3, false), param(4, true)];
+    let main = main_thread();
+    let half = Normalized::of(0.5);
+    let id = ParamId::new;
+    assert_eq!(
+        ipc.set_parameter(main, id(4), half),
+        Err(ParamWriteError::ReadOnly(id(4)))
+    );
+    assert_eq!(
+        ipc.set_parameter(main, id(9), half),
+        Err(ParamWriteError::Undeclared(id(9)))
+    );
+    assert_eq!(ipc.set_parameter(main, id(3), half), Ok(()));
+    assert_eq!(
+        list_asks(&server),
+        1,
+        "the second and third writes asked nothing"
+    );
+}
+
+/// **A resync that changes the list flips the answer, with no command to
+/// carry it**: the plugin says its parameters changed on an idle bridge, the
+/// bridge reads it off the connection, and the first write after the event
+/// reached the listener asks again and sees the parameter that became
+/// read-only.
+#[test]
+fn a_resync_with_a_changed_list_flips_the_answer() {
+    use tutti_plugin_types::{Normalized, ParamWriteError, ResyncKind};
+    let _machine = machine_lock();
+    let (mut ipc, server) = mock();
+    *server.parameters.lock().unwrap() = vec![param(3, false)];
+    let main = main_thread();
+    let half = Normalized::of(0.5);
+    assert_eq!(ipc.set_parameter(main, ParamId::new(3), half), Ok(()));
+    let arrived = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let heard = Arc::clone(&arrived);
+    ipc.forward_events(Some(Arc::new(move |event| {
+        if matches!(event, BridgeEvent::Resync(ResyncKind::ParamTitles)) {
+            heard.store(true, std::sync::atomic::Ordering::Release);
+        }
+    })));
+    *server.parameters.lock().unwrap() = vec![param(3, true)];
+    server.say(&BridgeMessage::PluginParamTitlesChanged);
+    let start = Instant::now();
+    while !arrived.load(std::sync::atomic::Ordering::Acquire) {
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "the event never arrived"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    // The cache is forgotten before the event is forwarded: no read of the
+    // bridge stands between the event and this write.
+    assert_eq!(
+        ipc.set_parameter(main, ParamId::new(3), half),
+        Err(ParamWriteError::ReadOnly(ParamId::new(3)))
+    );
+    assert!(list_asks(&server) >= 2, "the list was asked again");
+}
+
+/// **A write settles the news the bridge has not delivered yet**: with the
+/// bridge held inside its listener (so the plugin's change of list is on the
+/// connection and the news is pending), a write to the parameter that became
+/// read-only waits, and once the bridge is released it is refused `ReadOnly`
+/// rather than accepted from the old list.
+#[test]
+fn a_write_waits_for_the_news_the_bridge_has_not_delivered() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::mpsc;
+    use tutti_plugin_types::{Normalized, ParamWriteError};
+    let _machine = machine_lock();
+    let (mut ipc, server) = mock();
+    *server.parameters.lock().unwrap() = vec![param(3, false)];
+    let main = main_thread();
+    let half = Normalized::of(0.5);
+    assert_eq!(ipc.set_parameter(main, ParamId::new(3), half), Ok(()));
+
+    // The first event the listener sees holds the bridge thread until released.
+    let (held_tx, held_rx) = mpsc::channel::<()>();
+    let (release_tx, release_rx) = mpsc::channel::<()>();
+    let release_rx = Mutex::new(release_rx);
+    let first = AtomicBool::new(true);
+    let held_tx = Mutex::new(held_tx);
+    ipc.forward_events(Some(Arc::new(move |event| {
+        if matches!(event, BridgeEvent::LatencyChanged { .. })
+            && first.swap(false, Ordering::SeqCst)
+        {
+            held_tx.lock().unwrap().send(()).unwrap();
+            let _ = release_rx.lock().unwrap().recv();
+        }
+    })));
+    server.say(&BridgeMessage::LatencyChanged {
+        samples: tutti_plugin_types::Samples(64),
+    });
+    held_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("the bridge reached its listener");
+
+    // The list changes and the plugin says so, behind the held bridge.
+    *server.parameters.lock().unwrap() = vec![param(3, true)];
+    server.say(&BridgeMessage::PluginParamTitlesChanged);
+
+    let done = AtomicBool::new(false);
+    std::thread::scope(|scope| {
+        let write = scope.spawn(|| {
+            let answer = ipc.set_parameter(main_thread(), ParamId::new(3), half);
+            done.store(true, Ordering::SeqCst);
+            answer
+        });
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(
+            !done.load(Ordering::SeqCst),
+            "the write was answered from the old list while news was pending"
+        );
+        release_tx.send(()).unwrap();
+        assert_eq!(
+            write.join().unwrap(),
+            Err(ParamWriteError::ReadOnly(ParamId::new(3)))
+        );
+    });
+}
+
+/// **A value resync does not forget the list**: every dropped parameter event
+/// raises `ParamValues`, which says nothing of the declarations, so the next
+/// write is still answered from the cache.
+#[test]
+fn a_values_resync_keeps_the_declared_list() {
+    use tutti_plugin_types::{Normalized, ResyncKind};
+    let _machine = machine_lock();
+    let (mut ipc, server) = mock();
+    *server.parameters.lock().unwrap() = vec![param(3, false)];
+    let main = main_thread();
+    let half = Normalized::of(0.5);
+    assert_eq!(ipc.set_parameter(main, ParamId::new(3), half), Ok(()));
+    let arrived = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let heard = Arc::clone(&arrived);
+    ipc.forward_events(Some(Arc::new(move |event| {
+        if matches!(event, BridgeEvent::Resync(ResyncKind::ParamValues)) {
+            heard.store(true, std::sync::atomic::Ordering::Release);
+        }
+    })));
+    server.say(&BridgeMessage::PluginParamValuesChanged);
+    let start = Instant::now();
+    while !arrived.load(std::sync::atomic::Ordering::Acquire) {
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "the event never arrived"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(ipc.set_parameter(main, ParamId::new(3), half), Ok(()));
+    assert_eq!(list_asks(&server), 1, "the write asked nothing");
+}
+
+/// **A lost plugin is refused with `Lost`**, from the first check: a write that
+/// cannot be checked is never `Ok`, and the cache is forgotten.
+#[test]
+fn a_lost_plugin_refuses_the_write() {
+    use tutti_plugin_types::{Normalized, ParamWriteError, PluginFailure};
+    let _machine = machine_lock();
+    let (mut ipc, _server) = mock();
+    let main = main_thread();
+    let half = Normalized::of(0.5);
+    assert_eq!(ipc.set_parameter(main, ParamId::new(3), half), Ok(()));
+    ipc.link.bridge.mark_crashed(PluginFailure::StreamClosed);
+    assert_eq!(
+        ipc.set_parameter(main, ParamId::new(3), half),
+        Err(ParamWriteError::Lost(ParamId::new(3)))
+    );
+    assert_eq!(
+        ipc.parameter_writable(main, ParamId::new(3)),
+        Err(ParamWriteError::Lost(ParamId::new(3)))
+    );
+}
+
+/// **A refill that began before a forgetting does not store its older answer**
+/// (the generation moved): the write that asked is answered from what it read,
+/// and the next one asks again.
+#[test]
+fn a_refill_older_than_a_forgetting_is_not_kept() {
+    let cache = DeclaredCache::default();
+    let list = |read_only| -> Arc<[(ParamId, ParamAccess)]> {
+        vec![(ParamId::new(3), ParamAccess::reported(read_only))].into()
+    };
+    let Err(started) = cache.get() else {
+        panic!("a new cache is empty");
+    };
+    // The plugin resyncs while the read is in flight.
+    cache.forget();
+    cache.store(started, &list(false));
+    assert!(cache.get().is_err(), "the older answer was not kept");
+    // A refill that began after it is kept.
+    let Err(started) = cache.get() else {
+        unreachable!()
+    };
+    cache.store(started, &list(true));
+    assert_eq!(cache.get().unwrap()[0].1, ParamAccess::ReadOnly);
 }

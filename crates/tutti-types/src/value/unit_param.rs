@@ -77,12 +77,12 @@ pub enum UnitParam {
     Detune = 18,
     /// Unison stereo spread (0..1).
     StereoSpread = 19,
-    /// Stereo balance, `-1..1` (left to right). The mixer-strip control.
+    /// A panner's left/right position (`Pan`, `-1..1`): where a source is
+    /// placed by a pan law. A strip's balance of a pair it already has is
+    /// [`Balance`](Self::Balance).
     ///
     /// Distinct from [`StereoSpread`](Self::StereoSpread), which widens a source
-    /// about its centre; this moves the centre. It is addressed through a
-    /// node's `ParamSet` like every other `UnitParam`, so a generic param
-    /// reconciler reaches it too.
+    /// about its centre; this moves the centre.
     Pan = 20,
     // 21 was `Mute`, deleted with the strip's mute (doc 013, "Bypass and mute
     // are graph state"): a node-wide mute is `NodeMode::Muted`. The id is
@@ -149,6 +149,10 @@ pub enum UnitParam {
     /// An audio oscillator's frequency (Hz): the pitch it sounds. An LFO's
     /// speed is [`Rate`](Self::Rate).
     Frequency = 35,
+    /// A strip's stereo balance (`Balance`, `-1..1`): attenuates the side it
+    /// moves away from on a signal that is already a left/right pair. Not
+    /// [`Pan`](Self::Pan), which places a source by a pan law.
+    Balance = 36,
 }
 
 /// The error converting a `u16` that is not a known [`UnitParam`]
@@ -203,6 +207,7 @@ impl TryFrom<u16> for UnitParam {
             33 => Range,
             34 => CrossFeedback,
             35 => Frequency,
+            36 => Balance,
             other => return Err(UnitParamOutOfRange(other)),
         })
     }
@@ -451,10 +456,10 @@ impl From<UnitAddr> for ParamAddr {
 /// `ParamKey::<Db>::THRESHOLD`. There is deliberately **no key** yet for
 /// `DelayTime` ("beats or seconds — unit-defined"), `RoomSize` and `Damping`
 /// (bare `0..1` with no unit type of their own), `StereoSpread` (a synth's
-/// unison spread, which no unit type claims), `Pan` (the `Pan` type
-/// is a *measurement*, and a pan control needs its own), and `Bypass` (a switch,
-/// not a scalar). Each needs its unit decided first; until then they stay
-/// reachable through [`UnitParam`] and cannot be ramped by key.
+/// unison spread, which no unit type claims), `Pan` (no node holds a `Param<Pan>`
+/// yet), and `Bypass` (a switch, not a
+/// scalar). Each needs its unit decided first; until then they stay reachable
+/// through [`UnitParam`] and cannot be ramped by key.
 ///
 /// ```compile_fail
 /// use tutti_types::{Db, ParamKey};
@@ -531,8 +536,8 @@ impl<U> From<ParamKey<U>> for UnitAddr {
 }
 
 use super::units::{
-    Amplitude, Azimuth, CentsSpan, CompressionRatio, Db, Depth, Drive, Elevation, Feedback, Hz,
-    Mix, Q, Seconds, Spread, StereoWidth,
+    Amplitude, Azimuth, Balance, CentsSpan, CompressionRatio, Db, Depth, Drive, Elevation,
+    Feedback, Hz, Mix, Q, Seconds, Spread, StereoWidth,
 };
 
 /// Defines the typed keys, and — from the same lines — the registry
@@ -625,6 +630,10 @@ param_keys! {
         /// Mid/side stereo width.
         WIDTH = StereoWidth;
     }
+    Balance {
+        /// A strip's stereo balance.
+        BALANCE = Balance;
+    }
 }
 
 impl ParamKey<()> {
@@ -672,6 +681,10 @@ mod tests {
             ParamKey::<Seconds>::RELEASE.addr(),
             UnitAddr::from(UnitParam::Release)
         );
+        assert_eq!(
+            ParamKey::<Balance>::BALANCE.addr(),
+            UnitAddr::from(UnitParam::Balance)
+        );
         assert_ne!(ParamKey::<Hz>::CUTOFF, ParamKey::<Hz>::RATE);
     }
 
@@ -692,7 +705,7 @@ mod tests {
     /// Only the bearing is circular; the height and the other widths are a line.
     #[test]
     fn only_azimuth_is_circular() {
-        for id in (0..=35u16).filter(|&id| id != 21) {
+        for id in (0..=36u16).filter(|&id| id != 21) {
             let p = UnitParam::try_from(id).expect("known id");
             assert_eq!(p.is_circular(), p == UnitParam::Azimuth, "{p:?}");
         }
@@ -718,7 +731,7 @@ mod tests {
     #[test]
     fn u16_round_trips() {
         // 21 is retired (it was `Mute`), the one gap.
-        for id in (0..=34u16).filter(|&id| id != 21) {
+        for id in (0..=36u16).filter(|&id| id != 21) {
             let p = UnitParam::try_from(id).expect("known id");
             assert_eq!(u16::from(p), id);
         }
@@ -752,7 +765,7 @@ mod tests {
         assert_eq!(UnitParam::try_from(26), Ok(UnitParam::Diffusion));
         assert_eq!(UnitParam::try_from(27), Ok(UnitParam::Freeze));
         assert_eq!(UnitParam::try_from(28), Ok(UnitParam::Azimuth));
-        assert_eq!(UnitParam::try_from(36), Err(UnitParamOutOfRange(36)));
+        assert_eq!(UnitParam::try_from(37), Err(UnitParamOutOfRange(37)));
         // Decay's three bands are indices of one kind.
         for (index, packed) in [(0u8, 0x0019u16), (1, 0x0119), (2, 0x0219)] {
             assert_eq!(UnitAddr::new(UnitParam::Decay, index).to_u16(), packed);
@@ -763,7 +776,7 @@ mod tests {
     /// (and is `AudioParam`'s `P`), so this table is the compatibility
     /// record: a renumbered or re-ordered variant fails here by name, which
     /// `u16_round_trips` (any id maps to *some* variant) cannot say.
-    const PINNED: [(UnitParam, u16); 35] = [
+    const PINNED: [(UnitParam, u16); 36] = [
         (UnitParam::Cutoff, 0),
         (UnitParam::Q, 1),
         (UnitParam::GainDb, 2),
@@ -799,6 +812,7 @@ mod tests {
         (UnitParam::Range, 33),
         (UnitParam::CrossFeedback, 34),
         (UnitParam::Frequency, 35),
+        (UnitParam::Balance, 36),
     ];
 
     /// **Index 0 is the plain id**, for every param: the packed form of
@@ -834,7 +848,7 @@ mod tests {
     /// stays the strict, index-free decode.
     #[test]
     fn unknown_kinds_and_indexed_ids_are_refused_by_the_right_decoder() {
-        assert_eq!(UnitAddr::try_from(0x0124), Err(UnitParamOutOfRange(0x0124)));
+        assert_eq!(UnitAddr::try_from(0x0140), Err(UnitParamOutOfRange(0x0140)));
         assert_eq!(UnitAddr::try_from(0x00FF), Err(UnitParamOutOfRange(0x00FF)));
         // 9_999 is 0x270F: kind 15 at index 39, which is a known kind.
         assert_eq!(
@@ -851,8 +865,8 @@ mod tests {
     /// decode looks at).
     #[test]
     fn the_out_of_range_error_names_the_low_byte() {
-        let e = UnitAddr::try_from(0x0124).unwrap_err();
-        assert_eq!(e.to_string(), "unknown UnitParam id: 292 (low byte 36)");
+        let e = UnitAddr::try_from(0x0140).unwrap_err();
+        assert_eq!(e.to_string(), "unknown UnitParam id: 320 (low byte 64)");
     }
 
     /// An address is equal to a bare param only at index 0, in both

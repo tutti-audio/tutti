@@ -1027,7 +1027,16 @@ pub struct Plan {
     pub(crate) compensation: Vec<Samples>,
     /// The root generation the spec carried when this plan was committed.
     pub(crate) root_id: crate::RootId,
+    /// The old root's outputs this plan renders after its own channels,
+    /// while a root change crossfades.
+    pub(crate) root_bank: Option<crate::RootBank>,
+    /// Output channels the plan renders: the root's, then the bank's.
+    pub(crate) rendered_outputs: usize,
     pub(crate) total_latency: Latency,
+    /// The output time the bank's channels align to (read only when the plan
+    /// has a bank): the total of the plan the root change was made from, kept
+    /// by a plan that continues the same crossfade.
+    pub(crate) bank_total: Latency,
     pub(crate) audio_values: Vec<Value>,
     pub(crate) event_values: Vec<Value>,
     pub(crate) value_readers: Vec<u32>,
@@ -1266,9 +1275,23 @@ impl Plan {
         self.root_id
     }
 
-    /// Global output width.
+    /// Global output width: the root's channels.
     pub fn global_outputs(&self) -> usize {
         self.compensation.len()
+    }
+
+    /// The output channels the plan renders: [`global_outputs`](Self::global_outputs)
+    /// and, during a root change's crossfade, the old root's channels after
+    /// them ([`root_bank`](Self::root_bank)). The slices a render is handed.
+    pub fn rendered_outputs(&self) -> usize {
+        self.rendered_outputs
+    }
+
+    /// The old root this plan renders beside its own while the root change
+    /// that made it crossfades: its channels are
+    /// `global_outputs()..rendered_outputs()`.
+    pub fn root_bank(&self) -> Option<crate::RootBank> {
+        self.root_bank
     }
 
     /// Per output channel, how far a source *outside* the graph must pre-roll

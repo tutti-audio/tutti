@@ -23,7 +23,7 @@ use tutti_plugin_ipc::BridgeMessage;
 use tutti_plugin_types::{
     AudioBuffer, AudioBufferMut, AutomationMode, Control, Effect, Event, Features, Hand, HostOp,
     Lifecycle, Load, LoadStage, LoadedPlugin, MAX_BLOCK_CHANNELS, MainThreadMarker, MainWorkHandle,
-    MaxBlock, Normalized, Notice, OutOfProcess, ParamEdit, ParamId, ParameterInfo,
+    MaxBlock, Normalized, Notice, OutOfProcess, ParamEdit, ParamId, ParamWriteError, ParameterInfo,
     PluginDescriptor, PluginError, PluginIo, PluginResult, Prepare, Preset, PresetId,
     ProcessContext, ProcessOutput, ProcessWake, Processor, RenderMode, RenderModeSupport, Request,
     Sample, SampleFormat, SampleRate, Samples, Seat, Stage, State, StateUse, TrackInfo,
@@ -112,8 +112,17 @@ pub(crate) trait ServedPlugin: Render {
     fn parameters(&self, main: MainThreadMarker) -> Vec<ParameterInfo>;
     /// A parameter's value, normalized.
     fn parameter(&self, main: MainThreadMarker, id: ParamId) -> Option<Normalized>;
-    /// Sets a parameter.
-    fn set_parameter(&mut self, main: MainThreadMarker, id: ParamId, value: Normalized);
+    /// Sets a parameter, or says why the plugin refuses it.
+    ///
+    /// # Errors
+    ///
+    /// As [`Control::set_parameter`].
+    fn set_parameter(
+        &mut self,
+        main: MainThreadMarker,
+        id: ParamId,
+        value: Normalized,
+    ) -> Result<(), ParamWriteError>;
     /// The host's automation mode.
     fn set_automation_state(&mut self, main: MainThreadMarker, mode: AutomationMode);
     /// What the host says of the plugin's track.
@@ -522,6 +531,12 @@ impl<F: ServerSide> Served<F> {
         if let Some(control) = self.lifecycle.control() {
             self.descriptor = control.info().clone();
             self.wiring = control.wiring(main);
+            // A bypass that is a property cannot be read back across the wire
+            // (a read is a round trip), so a served plugin does not claim it: the
+            // executor's bypass serves the node.
+            if self.wiring.own_bypass == Some(tutti_plugin_types::OwnBypass::Property) {
+                self.wiring.own_bypass = None;
+            }
         }
     }
 
@@ -683,7 +698,8 @@ pub(crate) fn through<P: Processor, T: Sample>(
         num_samples,
         sample_rate,
     } = buffer;
-    let width = outputs.len().min(MAX_BLOCK_CHANNELS);
+    // At most `MAX_BLOCK_CHANNELS`: the caller's table is the slab's width.
+    let width = outputs.len();
     let mut rest = outputs.iter_mut();
     let mut table: [&mut [T]; MAX_BLOCK_CHANNELS] =
         std::array::from_fn(|_| rest.next().map_or(&mut [][..], |o| &mut **o));
@@ -821,9 +837,17 @@ impl<F: ServerSide> ServedPlugin for Served<F> {
 
     /// Normalized `0..=1`. On an active plugin the write is queued to the
     /// Processor and reaches the plugin at the head of the next block.
-    fn set_parameter(&mut self, main: MainThreadMarker, id: ParamId, value: Normalized) {
-        if let Some(control) = self.lifecycle.control() {
-            control.set_parameter(main, id, value);
+    fn set_parameter(
+        &mut self,
+        main: MainThreadMarker,
+        id: ParamId,
+        value: Normalized,
+    ) -> Result<(), ParamWriteError> {
+        match self.lifecycle.control() {
+            Some(control) => control.set_parameter(main, id, value),
+            // A lost plugin has nothing to write to: the write is refused, as
+            // a client's is.
+            None => Err(ParamWriteError::Lost(id)),
         }
     }
 

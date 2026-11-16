@@ -61,6 +61,8 @@
 #[cfg(feature = "export")]
 mod bounce;
 mod builder;
+#[cfg(feature = "plugin")]
+mod bypass;
 mod clock;
 #[cfg(feature = "device")]
 mod device;
@@ -91,6 +93,8 @@ mod midi_follow;
 mod midi_hardware;
 #[cfg(feature = "midi-hardware")]
 mod midi_port;
+#[cfg(feature = "midi")]
+mod midi_sink;
 #[cfg(feature = "modulation")]
 mod modulation;
 mod node;
@@ -155,7 +159,7 @@ pub use graph::RenderWorkerStart;
 pub use graph::{AudioSide, Testing};
 pub use graph::{
     Committed, Crossfade, CrossfadeId, CrossfadeRefused, Feeder, Graph, LIVE_MAX_BLOCK, Meters,
-    ReplaceRefused, Taps,
+    NotReopened, Reopened, ReplaceRefused, RootReader, Taps,
 };
 #[cfg(all(feature = "device", feature = "audio-io"))]
 pub use input::{Input, InputConfig, InputOpener, OpenedInput, Trim};
@@ -163,16 +167,16 @@ pub use input::{Input, InputConfig, InputOpener, OpenedInput, Trim};
 pub use instrument::{AddedInstrument, AnyNode, InstrumentHandle, NotInstrument};
 pub use jobs::{Job, JobFailed};
 pub use key::{
-    Bus, BusSink, Channel, Connection, Edge, Event, EventInPort, EventOutPort, EventTapPort, Fanin,
-    InPort, Inlet, Key, MainBus, MainSink, OutPort, Outlet, Root, Weighted, Wire,
+    Bus, BusSink, Channel, Connection, Edge, Event, EventEdge, EventInPort, EventOutPort,
+    EventTapPort, Fanin, InPort, Inlet, Key, MainBus, MainSink, OutPort, Outlet, Root,
+    RootDeclaration, Weighted, Wire,
 };
 #[cfg(feature = "plugin")]
 pub use main_session::{EditorView, MainPlugin, MainSession, Opened};
 #[cfg(feature = "midi")]
 pub use midi::{
-    MIDI_INPUT_DROP_REPORT, MIDI_OUT_DROP_REPORT, Midi, MidiLoad, MidiOutDrops, MidiOutRouter,
-    MidiRouteId, MidiRouteRule, NoSuchMidiRoute, OutputTiming, TakePlacement, UmpOut,
-    drain_receiver_through,
+    MIDI_INPUT_DROP_REPORT, MIDI_OUT_DROP_REPORT, Midi, MidiLoad, MidiRouteId, MidiRouteRule,
+    NoSuchMidiRoute, Stamping, TakePlacement,
 };
 #[cfg(feature = "midi")]
 pub use midi_event::MidiEvent;
@@ -183,6 +187,8 @@ pub use midi_port::{
     InputLoaded, MidiInput, MidiInputEntry, MidiInputInfo, MidiOutput, MidiOutputEntry,
     MidiOutputInfo, MidiPortError, OutputLoaded, OutputOptions, PortCause, midi_input, midi_output,
 };
+#[cfg(feature = "midi")]
+pub use midi_sink::{MidiSink, MidiSinkEntry, MidiSinkInfo, SinkLoaded, SinkOptions, midi_sink};
 #[cfg(feature = "modulation")]
 pub use modulation::{
     AutomationTake, MixRef, ModRefusal, ModRouteId, ModSourceId, ModState, ModTarget, Mods,
@@ -197,7 +203,7 @@ pub use peer::{Peer, PeerError, Presence, Resource, ResourceFact, ResourceId};
 pub use plugin::{
     AddPluginError, LoadedPlugin, Plugin, PluginCause, PluginChange, PluginDeclaration,
     PluginEntry, PluginEvent, PluginHealth, PluginInfo, PluginNode, PluginPorts, PooledPlugin,
-    SNAPSHOT_INTERVAL, StateRestore, StateView,
+    PortsRefusal, SNAPSHOT_INTERVAL, StateJobError, StateJobFailed, StateRestore, StateView,
 };
 pub(crate) use pool::Pool;
 #[cfg(feature = "sampler")]

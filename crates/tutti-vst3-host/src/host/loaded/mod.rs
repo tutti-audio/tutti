@@ -15,8 +15,8 @@ use std::path::Path;
 use std::sync::{Arc, OnceLock};
 
 use tutti_plugin_types::{
-    Normalized, ParamFlags, ParamId, ParamRange, ParamSteps, ParameterInfo, PluginDescriptor,
-    SampleFormat,
+    Normalized, ParamAccess, ParamFlags, ParamId, ParamRange, ParamSteps, ParameterInfo,
+    PluginDescriptor, SampleFormat,
 };
 use tutti_rt::ArcLend;
 use tutti_types::ChannelTopology;
@@ -34,7 +34,7 @@ use crate::types::{
 use super::instance::usable_topology;
 use super::library::Library;
 use super::midi_learn::MidiLearnConsumer;
-use super::midi_mapping::{MidiCcCell, MidiCcMapping};
+use super::midi_mapping::MidiCcCell;
 
 mod buses;
 mod editor;
@@ -74,9 +74,19 @@ pub struct Vst3Loaded {
     /// Writes a rejoin took from the halves that no block had delivered, for
     /// the next activation's first block.
     pub(super) carried: Vec<(ParamId, Normalized)>,
+    /// What the plugin declared when it was activated, and what each parameter
+    /// declares of its writability, sorted by id: the table the Processor drops
+    /// writes against. `None` while inactive. A write is answered from it while
+    /// active, so `Ok` means the Processor will apply it; the plugin's live
+    /// parameter info may have moved since (a `kParamTitlesChanged` restart), and
+    /// the table is read again at the next activation.
+    pub(super) declared: Option<Arc<[(ParamId, ParamAccess)]>>,
     /// The `IMidiMapping` table the Processor routes against: published by
     /// whichever half rebuilds it, lent to the Processor once per block.
     pub(super) midi_cc: Arc<ArcLend<MidiCcCell>>,
+    /// What the `IMidiMapping` table declares, read when the table is rebuilt
+    /// (at load, at every activation and when the plugin says it changed).
+    pub(super) assignments: Vec<tutti_plugin_types::MidiAssignment>,
     /// Notifications [`Control::take_reported_edits`](tutti_plugin_types::Control::take_reported_edits)
     /// popped that are not edits, for the next
     /// [`poll_plugin_notifications`](Self::poll_plugin_notifications) to hand

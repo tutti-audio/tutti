@@ -213,7 +213,7 @@ impl Normalize {
             Measurer::new(rendered.sample_rate(), topology, *self).map_err(unmeasurable)?;
         let planes = rendered.planes();
         let frames = rendered.frames().get();
-        let chunk = chunk_frames(rendered.sample_rate());
+        let chunk = chunk_frames(rendered.sample_rate()).get();
         let mut at = 0;
         while at < frames {
             if control.is_cancelled() {
@@ -283,9 +283,10 @@ fn headroom_ceiling(target: &FileTarget) -> Option<Db> {
 }
 
 /// The most frames a measurement takes at once: one second of audio at `rate`,
-/// and at least one. A cancel waits for at most one chunk, and the chunk is the unit the conversion before it is cut in too.
-pub(crate) fn chunk_frames(rate: SampleRate) -> usize {
-    (rate.get().round() as usize).max(1)
+/// rounded up, and at least one. A cancel waits for at most one chunk, and the
+/// chunk is the unit the conversion before it is cut in too.
+pub(crate) fn chunk_frames(rate: SampleRate) -> Samples {
+    rate.one_second()
 }
 
 /// What a peak-normalizing [`Measurer`] read: a placement-weighted loudness,

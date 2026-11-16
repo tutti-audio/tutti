@@ -21,8 +21,11 @@
 //! engine's order for the plan's width
 //! ([`ChannelTopology::assumed`](tutti_types::ChannelTopology::assumed)), at
 //! every width. A root's folds stay published until a plan of a later root has
-//! rendered a block ([`OutputControl::reclaim`]): the root change is a cut at
-//! the commit, so that block is where the older root's last plan ended. At most
+//! rendered a block ([`OutputControl::reclaim`]). A root change that cuts ends
+//! the older root at the commit's block. One that crossfades
+//! ([`Editor::set_root_fade`](tutti_graph::Editor::set_root_fade)) keeps the
+//! older root's folds until the block that ends the fade, since that block
+//! still folds the old root's outputs. At most
 //! [`MAX_PENDING_ROOTS`] are published ahead of the plan in force, and the
 //! editor refuses a commit whose root was never published
 //! ([`CommitError::RootNotPublished`](tutti_graph::CommitError::RootNotPublished)).

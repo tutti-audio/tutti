@@ -27,10 +27,12 @@ impl Db {
     #[inline]
     #[must_use]
     pub fn to_amplitude(self) -> Amplitude {
-        Amplitude(10.0_f32.powf(self.0 / 20.0))
+        Amplitude(libm::powf(10.0, self.0 / 20.0))
     }
 
-    /// Amplitude as decibels. **Silence is `-inf`, not [`FLOOR`](Self::FLOOR).**
+    /// Amplitude as decibels (`20·log10`). **Silence is `-inf`, not
+    /// [`FLOOR`](Self::FLOOR)**, the constant a consumer clamps to at its own
+    /// boundary. A negative amplitude is NaN.
     ///
     /// No floor is applied. Silence has no logarithm, and what to substitute
     /// for it belongs to the consumer, not to the conversion: a meter wants one
@@ -45,7 +47,20 @@ impl Db {
     #[inline]
     #[must_use]
     pub fn from_amplitude(amp: Amplitude) -> Db {
-        Db(20.0 * amp.0.log10())
+        Db(20.0 * libm::log10f(amp.0))
+    }
+
+    /// A power ratio as decibels (`10·log10`). `power` is a dimensionless
+    /// ratio of powers, the square of an amplitude ratio, so `0.5` is
+    /// about -3.01 dB.
+    ///
+    /// Follows the rule of [`from_amplitude`](Self::from_amplitude): zero power
+    /// is `-inf`, not [`FLOOR`](Self::FLOOR), the constant a consumer clamps to
+    /// at its own boundary, and a negative power is NaN.
+    #[inline]
+    #[must_use]
+    pub fn from_power(power: f32) -> Db {
+        Db(10.0 * libm::log10f(power))
     }
 }
 
@@ -135,6 +150,15 @@ impl Gain {
         } else {
             None
         }
+    }
+
+    /// How loud this gain is, without its sign: `|g|` as an [`Amplitude`].
+    /// Total, unlike [`to_amplitude`](Self::to_amplitude), which refuses a
+    /// negative gain; a NaN gain has a NaN magnitude.
+    #[inline]
+    #[must_use]
+    pub fn magnitude(self) -> Amplitude {
+        Amplitude(self.0.abs())
     }
 
     /// This gain applied to a sample.

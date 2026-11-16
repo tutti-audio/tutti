@@ -18,14 +18,17 @@ use super::routing::{MAX_WIDTH, Routing, RoutingError};
 use super::times::{ChannelTimes, ChannelTimesError};
 use crate::InterpolationMode;
 
-/// The fastest a delay time glides: 1/8 of a frame of delay per frame.
+/// The farthest a delay time moves in one frame: 1/8 of a frame of delay per frame.
 ///
 /// A moving delay is a pitch shift: a delay that grows by `s` frames per frame lowers
 /// the pitch by the factor `1 / (1 + s)`, so the glide's speed bounds the bend, and a
 /// time that jumps is a pitch bend as long as the jump is far. At 1/8 the bend is at
 /// most 12.5%, about 2 semitones (`12 log2(1.125) = 2.04`), however far the time moves:
-/// a jump of 0.5 s at 48 kHz glides for 192,000 frames (4 s). (`Steps::Rate` takes an
-/// `f32`: where the unit types stop.)
+/// a jump of 0.5 s at 48 kHz glides for 192,000 frames (4 s).
+///
+/// A plain number, frames of delay per frame, so no unit: a span of frames (`SampleSpan`) is
+/// not a rate, and none of the units covers a dimensionless slope. It is the `Rate` of a
+/// [`Steps::Rate`](crate::Steps::Rate), the glide's own `f32`.
 pub const DELAY_SLEW: f32 = 0.125;
 
 /// The most channels a delay has: a bus's.

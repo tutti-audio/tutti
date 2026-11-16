@@ -24,6 +24,7 @@ fn least_args(name: &str) -> &'static [&'static str] {
     match name {
         "release" => &["0.1.0"],
         "conformance" => &["--results", "r"],
+        "public-api" => &["tutti-rt"],
         _ => &[],
     }
 }
@@ -258,7 +259,7 @@ fn deny_probes_cargo_deny_first() {
 #[test]
 fn doc_sets_rustdocflags_and_the_dated_nightly() {
     let s = dry("doc", &[]);
-    assert_eq!(s.len(), 7);
+    assert_eq!(s.len(), 6);
     assert!(s[0].starts_with("RUSTDOCFLAGS='-D warnings --document-private-items' cargo doc"));
     assert!(
         s[1].starts_with("RUSTDOCFLAGS='-D warnings --document-private-items' cargo doc")
@@ -268,17 +269,12 @@ fn doc_sets_rustdocflags_and_the_dated_nightly() {
         s[1]
     );
     assert!(
-        s[3].contains("-p tutti-dsp") && s[3].contains("--features contract"),
+        s[3].contains("-p tutti-plugin-types") && s[3].contains("--features contract"),
         "{}",
         s[3]
     );
-    assert!(
-        s[4].contains("-p tutti-plugin-types") && s[4].contains("--features contract"),
-        "{}",
-        s[4]
-    );
-    assert!(s[5].starts_with("doc-features: cargo doc"), "{}", s[5]);
-    assert!(s[6].contains("cargo +nightly-2026-10-14 doc"));
+    assert!(s[4].starts_with("doc-features: cargo doc"), "{}", s[4]);
+    assert!(s[5].contains("cargo +nightly-2026-10-14 doc"));
 }
 
 #[test]
@@ -419,5 +415,32 @@ fn check_no_std_builds_each_listed_crate_for_the_bare_metal_target() {
             "cargo build --locked -p tutti-ump --no-default-features --target thumbv7em-none-eabihf",
             "cargo build --locked -p tutti-ump --no-default-features --target thumbv7em-none-eabihf --features serde",
         ]
+    );
+}
+
+#[test]
+fn public_api_lists_on_the_docs_nightly_or_diffs_from_a_base() {
+    assert_eq!(
+        dry("public-api", &["tutti-rt"]),
+        ["cargo +nightly-2026-10-14 public-api --package tutti-rt --all-features -s"]
+    );
+    assert_eq!(
+        dry("public-api", &["tutti-rt", "origin/main"]),
+        [
+            "cargo +nightly-2026-10-14 public-api --package tutti-rt --all-features -s diff origin/main..HEAD"
+        ]
+    );
+}
+
+#[test]
+fn public_api_refuses_no_crate_and_a_third_argument() {
+    assert_eq!(
+        plan("public-api", &[], &ctx()).unwrap_err(),
+        "`public-api` takes a crate: `cargo xtask public-api <crate> [<base>]`"
+    );
+    let three: Vec<String> = ["a", "b", "c"].iter().map(|s| (*s).to_owned()).collect();
+    assert_eq!(
+        plan("public-api", &three, &ctx()).unwrap_err(),
+        "`public-api` takes at most 2 argument(s), got 3"
     );
 }

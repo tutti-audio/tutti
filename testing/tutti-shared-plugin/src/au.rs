@@ -70,6 +70,42 @@ pub const AU_VERSION: u32 = 0x0001_0000;
 /// The descriptor id a `Load` names it by: `au.<type>.<subtype>.<manufacturer>`.
 pub const AU_ID: &str = "au.aumf.Tshp.Tutt";
 
+/// The parameters of `ParametersForOverview`: the unit's headline controls.
+const OVERVIEW: [u32; 2] = [core::LEVEL, core::TONE];
+
+/// The controller the unit's mapping table maps to `level`, Control Change on
+/// channel 0 (core, "VST3 controllers and flushes", as the VST3 shells map it).
+const MAPPED_CONTROLLER: u8 = 74;
+
+/// `kAudioUnitProperty_AllParameterMIDIMappings`, which `coreaudio-sys` does not
+/// export.
+const PROPERTY_ALL_PARAMETER_MIDI_MAPPINGS: u32 = 41;
+
+/// Apple's `AUParameterMIDIMapping`: 32 bytes, align 4.
+#[repr(C)]
+struct MidiMapping {
+    scope: u32,
+    element: u32,
+    parameter_id: u32,
+    flags: u32,
+    sub_range_min: f32,
+    sub_range_max: f32,
+    status: u8,
+    data1: u8,
+    /// `reserved1`, `reserved2` and `reserved3`, which must be zero.
+    reserved: [u8; 6],
+}
+const _: () = assert!(std::mem::size_of::<MidiMapping>() == 32);
+
+/// `AudioUnitParameterNameInfo` as `ParameterClumpName` reads it: the clump's
+/// id in, its name out (`{ UInt32; CFStringRef }`, 16 bytes).
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct ClumpNameInfo {
+    id: u32,
+    name: sys::CFStringRef,
+}
+
 /// Channels the unit's one bus has a side.
 const CHANNELS: usize = 2;
 const _: () = assert!(CHANNELS <= MAX_CHANNELS);
@@ -271,19 +307,20 @@ fn guard(f: impl FnOnce() -> sys::OSStatus) -> sys::OSStatus {
 
 /// The plain (declared) value of parameter `id` for the core's value.
 fn to_plain(id: u32, normalized: f64) -> f32 {
-    if id == core::TONE {
-        core::tone_plain(normalized) as f32
-    } else {
-        normalized as f32
+    match id {
+        core::TONE => core::tone_plain(normalized) as f32,
+        // `mode` is an indexed parameter: its plain value is the position.
+        core::MODE => (normalized * f64::from(core::MODES - 1)) as f32,
+        _ => normalized as f32,
     }
 }
 
 /// The core's value of parameter `id` for a plain one.
 fn to_normalized(id: u32, plain: f32) -> f64 {
-    if id == core::TONE {
-        core::tone_normalized(f64::from(plain))
-    } else {
-        f64::from(plain)
+    match id {
+        core::TONE => core::tone_normalized(f64::from(plain)),
+        core::MODE => f64::from(plain) / f64::from(core::MODES - 1),
+        _ => f64::from(plain),
     }
 }
 
@@ -295,8 +332,11 @@ fn parameter_info(id: u32) -> sys::AudioUnitParameterInfo {
     for (dst, &src) in info.name.iter_mut().zip(name.as_bytes()) {
         *dst = src as std::os::raw::c_char;
     }
-    info.flags = sys::kAudioUnitParameterFlag_IsReadable | sys::kAudioUnitParameterFlag_IsWritable;
-    if id != core::TONE {
+    info.flags = sys::kAudioUnitParameterFlag_IsReadable;
+    if id != core::METER {
+        info.flags |= sys::kAudioUnitParameterFlag_IsWritable;
+    }
+    if id != core::TONE && id != core::METER {
         // `level` and `aux` take a ramp; `tone`'s value is not linear in its
         // plain units, so it takes none.
         info.flags |= sys::kAudioUnitParameterFlag_CanRamp;
@@ -306,10 +346,20 @@ fn parameter_info(id: u32) -> sys::AudioUnitParameterInfo {
         info.unit = sys::kAudioUnitParameterUnit_Hertz;
         info.minValue = core::TONE_PLAIN_MIN as f32;
         info.maxValue = core::TONE_PLAIN_MAX as f32;
+    } else if id == core::MODE {
+        // The five positions, indexed: `0..=4`.
+        info.unit = sys::kAudioUnitParameterUnit_Indexed;
+        info.minValue = 0.0;
+        info.maxValue = (core::MODES - 1) as f32;
     } else {
         info.unit = sys::kAudioUnitParameterUnit_Generic;
         info.minValue = 0.0;
         info.maxValue = 1.0;
+    }
+    if id == core::AUX {
+        // `aux` is in the clump `Filter` (`ParameterClumpName`).
+        info.flags |= sys::kAudioUnitParameterFlag_HasClump;
+        info.clumpID = core::AUX_UNIT as u32;
     }
     info.defaultValue = to_plain(id, default);
     info
@@ -426,6 +476,16 @@ fn property_shape(
                 std::mem::size_of::<sys::AudioUnitParameterInfo>() as u32,
                 false,
             )
+        }
+        x if x == sys::kAudioUnitProperty_ParameterClumpName && global => {
+            (std::mem::size_of::<ClumpNameInfo>() as u32, false)
+        }
+        x if x == sys::kAudioUnitProperty_ParametersForOverview && global => (
+            (OVERVIEW.len() * std::mem::size_of::<sys::AudioUnitParameter>()) as u32,
+            false,
+        ),
+        x if x == PROPERTY_ALL_PARAMETER_MIDI_MAPPINGS && global => {
+            (std::mem::size_of::<MidiMapping>() as u32, false)
         }
         x if x == sys::kAudioUnitProperty_ClassInfo && global => {
             (std::mem::size_of::<sys::CFPropertyListRef>() as u32, true)
@@ -593,9 +653,60 @@ unsafe extern "C" fn get_property(
                 x if x == sys::kAudioUnitProperty_TailTime => {
                     write_property(data, io_size, tail_seconds(i.core.tail_samples(), rate))
                 }
-                x if x == sys::kAudioUnitProperty_BypassEffect => {
-                    write_property(data, io_size, 0u32)
+                // What the host last wrote: `1` bypassed.
+                x if x == sys::kAudioUnitProperty_BypassEffect => write_property(
+                    data,
+                    io_size,
+                    u32::from(i.core.param(core::BYPASS).unwrap_or(0.0) >= 0.5),
+                ),
+                x if x == sys::kAudioUnitProperty_ParameterClumpName => {
+                    if io_size.is_null() {
+                        return ERR_PARAM;
+                    }
+                    let Some(request) = read_property::<ClumpNameInfo>(data, *io_size) else {
+                        return ERR_INVALID_PROPERTY_VALUE;
+                    };
+                    let (unit, _, name) = core::UNITS[core::UNITS.len() - 1];
+                    if request.id != unit as u32 {
+                        return ERR_INVALID_PARAMETER;
+                    }
+                    // Copy rule: the caller owns the reference it is given.
+                    let name = CFString::new(name);
+                    write_property(
+                        data,
+                        io_size,
+                        ClumpNameInfo {
+                            id: request.id,
+                            name: CFRetain(name.as_CFTypeRef()) as sys::CFStringRef,
+                        },
+                    )
                 }
+                x if x == sys::kAudioUnitProperty_ParametersForOverview => {
+                    // An all-zero `AudioUnitParameter` is valid (no unit, global scope);
+                    // the enclosing `unsafe` block covers the `zeroed` call.
+                    let mut list: [sys::AudioUnitParameter; OVERVIEW.len()] = std::mem::zeroed();
+                    for (slot, id) in list.iter_mut().zip(OVERVIEW) {
+                        slot.mParameterID = id;
+                        slot.mScope = sys::kAudioUnitScope_Global;
+                    }
+                    write_property(data, io_size, list)
+                }
+                x if x == PROPERTY_ALL_PARAMETER_MIDI_MAPPINGS => write_property(
+                    data,
+                    io_size,
+                    MidiMapping {
+                        scope: sys::kAudioUnitScope_Global,
+                        element: 0,
+                        parameter_id: core::LEVEL,
+                        flags: 0,
+                        sub_range_min: 0.0,
+                        sub_range_max: 0.0,
+                        // Control Change on channel 0.
+                        status: 0xB0,
+                        data1: MAPPED_CONTROLLER,
+                        reserved: [0; 6],
+                    },
+                ),
                 x if x == sys::kAudioUnitProperty_SupportedNumChannels => write_property(
                     data,
                     io_size,
@@ -725,8 +836,20 @@ unsafe extern "C" fn set_property(
                     ctl.offline = u32::from(offline != 0);
                     0
                 }
-                // Accepted and not kept: bypass, and the presentation latency
-                // the host reports.
+                // The host's write of the bypass is the plugin's parameter
+                // `core::BYPASS`: recorded at offset 0 like any write outside
+                // the block's event list, then applied.
+                x if x == sys::kAudioUnitProperty_BypassEffect => {
+                    let Some(bypass) = read_property::<u32>(data, size) else {
+                        return ERR_INVALID_PROPERTY_VALUE;
+                    };
+                    let value = if bypass != 0 { 1.0 } else { 0.0 };
+                    i.core.log_set_param(core::BYPASS, value);
+                    i.core.set_param(core::BYPASS, value);
+                    0
+                }
+                // Accepted and not kept: the presentation latency the host
+                // reports.
                 _ => 0,
             }
         }

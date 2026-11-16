@@ -2,14 +2,15 @@ use std::time::{Duration, Instant};
 
 use tutti_ump::ManufacturerId;
 use tutti_ump::{
-    DeviceIdentity, Direction as BlockDirection, FirstGroup, Form, FunctionBlockId,
-    FunctionBlockInfo, GroupSpan, Message, Midi1Port, Protocol, Stream, StreamConfig, U7, UiHint,
-    Ump,
+    DeviceIdentity, Direction as BlockDirection, FirstGroup, Form, FunctionBlockCount,
+    FunctionBlockId, FunctionBlockInfo, GroupSpan, Message, Midi1Port, Protocol, Stream,
+    StreamConfig, U7, UiHint, Ump,
 };
 
 use super::*;
-use crate::endpoint::{Capabilities, Endpoint, FunctionBlock, FunctionBlockBuilder};
+use crate::endpoint::{Capabilities, Endpoint, FunctionBlock, FunctionBlockBuilder, Supports};
 use crate::name::{BlockName, EndpointName, ProductInstanceId};
+use tutti_fixtures::midi;
 
 fn at(base: Instant, ms: u64) -> Instant {
     base + Duration::from_millis(ms)
@@ -55,7 +56,7 @@ fn block(n: u8, first: u8, span: u8, name: &str) -> FunctionBlockBuilder {
 /// A MIDI 2.0 device with every optional part and two blocks.
 fn device() -> Endpoint {
     let u = |n| U7::new(n).unwrap();
-    Endpoint::new(FULL)
+    Endpoint::new(Supports::of(FULL))
         .with_identity(DeviceIdentity {
             manufacturer: ManufacturerId::of(0xA109),
             family: [u(1), u(2)],
@@ -197,24 +198,24 @@ fn the_request_asks_only_for_what_the_peer_supports() {
     let t0 = Instant::now();
     let (mut c, first) = Connection::new(t0);
     let first = discovery_of(first);
-    let mut peer = Endpoint::new(Capabilities {
+    let mut peer = Endpoint::new(Supports::of(Capabilities {
         midi1: true,
         midi2: true,
         rx_jr: true,
         tx_jr: false,
-    });
+    }));
     let (_, sent) = run(&mut c, &mut peer, first, t0);
     assert_eq!(sent[1].0, [0xF005_0202, 0, 0, 0]);
     assert_eq!(c.endpoint().active(), peer.active());
     // And the other direction.
     let (mut c, first) = Connection::new(t0);
     let first = discovery_of(first);
-    let mut peer = Endpoint::new(Capabilities {
+    let mut peer = Endpoint::new(Supports::of(Capabilities {
         midi1: true,
         midi2: true,
         rx_jr: false,
         tx_jr: true,
-    });
+    }));
     let (_, sent) = run(&mut c, &mut peer, first, t0);
     assert_eq!(sent[1].0, [0xF005_0201, 0, 0, 0]);
     assert_eq!(c.endpoint().active(), peer.active());
@@ -286,7 +287,7 @@ fn notification(protocol: Protocol, rx_jr: bool, tx_jr: bool) -> Message {
 /// replies by hand, so it has sent its Stream Configuration Request.
 fn requested(t0: Instant) -> Connection {
     let (mut c, _) = Connection::new(t0);
-    let mut peer = Endpoint::new(FULL);
+    let mut peer = Endpoint::new(Supports::of(FULL));
     let mut replies: Vec<Ump> = Vec::new();
     let _ = peer.reply(
         stream(Stream::EndpointDiscovery {
@@ -331,7 +332,7 @@ fn a_notification_of_another_protocol_is_reported_as_it_is() {
 fn a_reserved_protocol_in_a_notification_is_midi1() {
     let t0 = Instant::now();
     let mut c = requested(t0);
-    c.on_message(notification(Protocol::Reserved(9), true, true), t0);
+    c.on_message(notification(midi::reserved_protocol(9), true, true), t0);
     assert_eq!(c.endpoint().active().protocol, Protocol::Midi1);
 }
 
@@ -469,7 +470,7 @@ fn in_blocks_declaring(t0: Instant, n: u8, is_static: bool) -> Connection {
         stream(Stream::EndpointInfo(tutti_ump::EndpointInfo {
             version: UMP_VERSION,
             static_function_blocks: is_static,
-            function_blocks: U7::new(n).unwrap(),
+            function_blocks: FunctionBlockCount::new(n).unwrap().into(),
             midi2: true,
             midi1: true,
             rx_jr: false,
@@ -485,12 +486,12 @@ fn in_blocks_declaring(t0: Instant, n: u8, is_static: bool) -> Connection {
 fn info_of(n: u8) -> Message {
     stream(Stream::FunctionBlockInfo(FunctionBlockInfo {
         active: true,
-        id: id(n),
+        id: id(n).into(),
         direction: BlockDirection::Input,
         ui_hint: UiHint::Receiver,
         midi1: Midi1Port::No,
-        first_group: FirstGroup::new(n).unwrap(),
-        groups_spanned: GroupSpan::new(1).unwrap(),
+        first_group: FirstGroup::new(n).unwrap().into(),
+        groups_spanned: GroupSpan::new(1).unwrap().into(),
         midi_ci_version: 0,
         max_sysex8_streams: 0,
     }))
@@ -500,7 +501,7 @@ fn block_name_packet(n: u8, form: Form, text: &[u8]) -> Message {
     let mut bytes = [0u8; 13];
     bytes[..text.len()].copy_from_slice(text);
     stream(Stream::FunctionBlockName {
-        block: id(n),
+        block: id(n).into(),
         form,
         bytes,
     })
@@ -630,7 +631,7 @@ fn info_moved(n: u8, first_group: u8) -> Message {
     let Message::Stream(Stream::FunctionBlockInfo(mut info)) = info_of(n) else {
         unreachable!()
     };
-    info.first_group = FirstGroup::new(first_group).unwrap();
+    info.first_group = FirstGroup::new(first_group).unwrap().into();
     stream(Stream::FunctionBlockInfo(info))
 }
 
@@ -714,16 +715,12 @@ fn a_block_outside_the_declared_count_is_not_read() {
 fn a_declared_count_above_32_is_refused() {
     let t0 = Instant::now();
     let (mut c, _) = Connection::new(t0);
+    // A count of 33 or more is reserved, so no sender builds one: it is read
+    // from the packet, as a peer's is.
     let info = |count: u8| {
-        stream(Stream::EndpointInfo(tutti_ump::EndpointInfo {
-            version: UMP_VERSION,
-            static_function_blocks: false,
-            function_blocks: U7::new(count).unwrap(),
-            midi2: true,
-            midi1: true,
-            rx_jr: false,
-            tx_jr: false,
-        }))
+        Ump([0xF001_0101, u32::from(count) << 24 | 0x300, 0, 0])
+            .decode()
+            .unwrap()
     };
     assert_eq!(c.on_message(info(33), t0), Action::Wait);
     assert_eq!(
@@ -803,7 +800,7 @@ fn a_midi1_port_over_several_groups_is_read_as_a_plain_block() {
             unreachable!()
         };
         info.midi1 = Midi1Port::Unrestricted;
-        info.groups_spanned = GroupSpan::new(span).unwrap();
+        info.groups_spanned = GroupSpan::new(span).unwrap().into();
         stream(Stream::FunctionBlockInfo(info))
     };
     let mut c = in_blocks(t0, 1);

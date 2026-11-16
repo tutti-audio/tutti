@@ -15,7 +15,7 @@ mod device_listing;
 // A restart onto another rate, width or block, and the MIDI clock's re-rate.
 #[cfg(all(feature = "device", feature = "midi"))]
 mod device_midi_clock;
-// The hardware out is sent at the time of each event's frame.
+// A sink is sent at the time of each event's frame.
 #[cfg(all(feature = "device", feature = "midi"))]
 mod device_midi_out_timing;
 #[cfg(feature = "device")]

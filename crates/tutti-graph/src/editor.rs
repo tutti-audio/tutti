@@ -56,6 +56,7 @@ use std::sync::Arc;
 use tutti_types::At;
 
 use crate::EdgeId;
+use crate::Fade;
 use crate::bus_edge::{BusError, BusFold, BusRef, BusSource, Lowering};
 use crate::command::{CommandId, ScheduleError, command_channel};
 use crate::compile::{CompileError, Shapes};
@@ -83,6 +84,7 @@ mod nodes;
 mod outlets;
 mod placements;
 mod taps;
+mod unwired;
 use cells::LiveCells;
 pub use errors::{CloseError, CommitError, MissingSource};
 use lifecycle::Lifecycle;
@@ -90,6 +92,7 @@ use link::Link;
 use outlets::Outlets;
 use placements::Placements;
 use tutti_types::{Amplitude, MAX_CHANNELS};
+pub use unwired::{Placed, Unwired};
 
 /// The host's side of a root generation: whether it has published the folds
 /// for `root` at `outputs` channels ([`Editor::set_root_gate`]).
@@ -254,6 +257,42 @@ pub struct Editor {
     /// What the executor will hold once the commits sent are applied: the
     /// bounds each commit's state is built from.
     stager: Stager,
+    /// How a commit that changes the root's generation trades the old root
+    /// for the new ([`set_root_fade`](Self::set_root_fade)); `None` cuts.
+    root_fade: Option<Fade>,
+    /// The commit sent last that carries an old root's channels, until a
+    /// commit without them follows.
+    bank: Option<SentBank>,
+    /// The old root a crossfading plan renders, kept for the commits that
+    /// continue the crossfade.
+    fading: Option<Fading>,
+}
+
+/// The old root of a crossfade in progress, as the commit that began it
+/// found it: what each commit while the crossfade runs compiles the bank from.
+/// It holds a clone of the committed spec and shapes until the crossfade ends.
+#[derive(Clone)]
+struct Fading {
+    /// The old root's spec and shapes.
+    was: lifecycle::Committed,
+    /// The root generation that fades in.
+    root: crate::RootId,
+    /// The bank the plans carry.
+    bank: crate::RootBank,
+}
+
+/// A commit sent with an old root's channels beside the root's own.
+#[derive(Clone, Copy, Debug)]
+struct SentBank {
+    /// Its `seq`, or that of the commit that began the crossfade it
+    /// continues.
+    seq: u64,
+    /// The root that fades out.
+    old: crate::RootId,
+    /// The root that fades in.
+    root: crate::RootId,
+    /// Whether the executor has rendered its crossfade through.
+    ended: bool,
 }
 
 impl std::fmt::Debug for Editor {
@@ -328,6 +367,9 @@ impl Editor {
             cells: LiveCells::new(),
             revision: 0,
             stager,
+            root_fade: None,
+            bank: None,
+            fading: None,
         };
         (editor, Executor::new(prepare, cap, ends, command_rx))
     }

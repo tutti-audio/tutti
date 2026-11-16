@@ -23,7 +23,7 @@
 //! use tutti_graph::NodeKey;
 //! use tutti_transport::TempoReader;
 //! fn insert(client: PluginClient, tempo: TempoReader, editor: &mut Editor) -> PluginControls {
-//!     editor.insert(NodeKey(1), "plugin", client.bind(tempo))
+//!     editor.insert(NodeKey(1), "plugin", client.bind(tempo)).controls
 //! }
 //! ```
 //!
@@ -107,7 +107,7 @@ use std::sync::atomic::Ordering;
 use tutti_graph::{IntoNode, Node, NodeParts, Shape};
 use tutti_plugin_host::{
     InProcClient, InvalidateSink, ParameterChangeSink, PluginControls, PluginHandle, PluginNode,
-    RefreshSink, TransportSink, client_over,
+    PortLimit, Rebinder, RefreshSink, TransportSink, client_over,
 };
 use tutti_plugin_ipc::{
     BridgeConfig, BridgeEvent, Ipc, IpcController, IpcOrigin, Launched, PluginBridge,
@@ -183,7 +183,7 @@ impl std::fmt::Debug for Bound {
 /// use tutti_graph::NodeKey;
 /// use tutti_transport::TempoReader;
 /// fn insert(client: PluginClient, tempo: TempoReader, editor: &mut Editor) -> PluginControls {
-///     editor.insert(NodeKey(1), "plugin", client.bind(tempo))
+///     editor.insert(NodeKey(1), "plugin", client.bind(tempo)).controls
 /// }
 /// ```
 pub struct PluginClient<S = Unbound> {
@@ -432,10 +432,11 @@ impl PluginClient<Unbound> {
             prepare,
             descriptor.clone(),
             &loaded,
-            params,
+            params.iter().copied(),
             ParameterChanges::SPARE_QUEUES,
             Some(controls.clone()),
-        );
+        )
+        .map_err(|e| failed(e.to_string()))?;
         Ok(Self {
             bridge,
             descriptor,
@@ -493,6 +494,7 @@ impl PluginClient<Unbound> {
             fork_watch,
             state: Unbound { client },
         } = self;
+
         PluginClient {
             bridge,
             descriptor,
@@ -514,6 +516,26 @@ impl PluginClient<Unbound> {
                 tempo,
             },
         }
+    }
+}
+
+impl PluginClient<Bound> {
+    /// The builder of the node that replaces this one when the plugin changes
+    /// its audio ports ([`Rebinder::prepare`]). Made on the call from what the
+    /// bound node holds, so take it before the client goes into a graph
+    /// (`into_parts` consumes the client) and keep it beside the node's
+    /// controls. It is limited to the ports the plugin had when it was
+    /// launched: the shared-memory slab is laid out once, and a rebuilt node
+    /// over other ports is refused with
+    /// [`RebindError::OutsideSlab`](tutti_plugin_host::RebindError::OutsideSlab).
+    ///
+    /// The rebinder keeps the plugin instance alive until it is dropped.
+    #[must_use]
+    pub fn rebinder(&self) -> Rebinder<Ipc> {
+        self.state.node.rebinder(Some(PortLimit {
+            inputs: self.inputs,
+            outputs: self.outputs,
+        }))
     }
 }
 
@@ -676,7 +698,11 @@ impl<S> PluginClient<S> {
         self.bridge.dropped_parameter_events()
     }
 
-    /// Queues a parameter change for the plugin. RT-safe, fire-and-forget.
+    /// Queues a parameter change for the plugin. RT-safe, fire-and-forget: it
+    /// never waits on a round trip, so it does not check the write against the
+    /// plugin's declared parameters. The server's own `Control::set_parameter`
+    /// refuses a write to a parameter the plugin does not declare or declares
+    /// read-only, and writes nothing; the wire has no reply to say so.
     ///
     /// Main-thread parameter reads and writes are on
     /// [`PluginHandle`]; this lets a

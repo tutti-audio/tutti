@@ -50,7 +50,7 @@
 //! Clock or JR Timestamp a device sends anyway; with
 //! [`JitterReduction`](InputTiming::JitterReduction) TXJR is asked for, and a
 //! device that settles on it has its events placed by its JR Timestamps. JR on
-//! the output side is the session's `UmpOut` stamping, which follows the
+//! the output side is the session's output stamping, which follows the
 //! configuration the negotiation settled (`rx_jr`), so a device that is not
 //! asked is not sent it, and one that turns it on itself is.
 //!
@@ -73,8 +73,10 @@ use tutti_midi_device::{
     Action, Connection, Ending, Endpoint, EntropyError, IdentityInquiry, InquiryAction, Learned,
 };
 use tutti_midi_protocol::{Addressed, Read, Universal, read};
+use tutti_midi_runtime::Outgoing;
 use tutti_ump::{
-    DeviceIdentity, MidiGroup, Protocol, StreamConfig, SysexAssembler, SysexStep, Ump,
+    DeviceIdentity, Message, MidiGroup, Protocol, Stream, StreamConfig, SysexAssembler, SysexStep,
+    Ump,
 };
 
 use crate::capability::UmpCapability;
@@ -232,6 +234,39 @@ pub(crate) struct Negotiation {
     inquire: Inquire,
     ci: Ci,
     timing: InputTiming,
+    /// Where the request to stop JR Timestamps the input did not ask for is.
+    stop: StopJr,
+}
+
+/// The request that stops JR Timestamps a device sends the input did not ask
+/// for (M2-104 §7.2.2.3): one per episode, an episode being the time the
+/// device's TXJR stays on against an input that wants it off.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StopJr {
+    /// TXJR is off, or wanted: nothing to ask.
+    Settled,
+    /// TXJR is on and unwanted, and the request is not out yet: the output
+    /// refused it, and the next poll tries again.
+    Unsent,
+    /// The request is out. A device that kept TXJR on is not asked again
+    /// until the episode ends.
+    Asked,
+}
+
+impl StopJr {
+    /// The state after a poll, where `unwanted` says the device's TXJR is on
+    /// against the input, and `send` queues the request: whether the output
+    /// took it. A request is made once per episode and retried each poll
+    /// until it goes out. `send` is told whether this is a retry, which is
+    /// to be quiet: a refusal is counted and logged once per episode.
+    fn next(self, unwanted: bool, send: impl FnOnce(bool) -> bool) -> Self {
+        match (unwanted, self) {
+            (false, _) => Self::Settled,
+            (true, Self::Asked) => Self::Asked,
+            (true, state) if send(state == Self::Unsent) => Self::Asked,
+            (true, _) => Self::Unsent,
+        }
+    }
 }
 
 /// What one [`Negotiation::poll`] did.
@@ -348,6 +383,7 @@ impl Negotiation {
             inquire,
             ci: Ci::new(device),
             timing,
+            stop: StopJr::Settled,
         }
     }
 
@@ -356,6 +392,7 @@ impl Negotiation {
     /// it answers. A device that is not asked has nothing to renegotiate.
     pub(crate) fn retime(&mut self, timing: InputTiming) {
         self.timing = timing;
+        self.stop = StopJr::Settled;
         if self.os.is_ump_endpoint() && self.out.is_some() {
             self.run = Run::Idle;
         }
@@ -513,9 +550,10 @@ impl Negotiation {
             return self.poll_inquiry(now, heard);
         }
         let mut actions = Vec::new();
+        let wanted = self.timing.wanted();
         match &mut self.run {
             Run::Idle => {
-                let (connection, first) = Connection::with_wanted(self.timing.wanted(), now);
+                let (connection, first) = Connection::with_wanted(wanted, now);
                 actions.push(first);
                 self.run = Run::Asking(Box::new(connection));
             }
@@ -537,14 +575,24 @@ impl Negotiation {
                         changed |= connection.on_message(message, now) == Action::Changed;
                     }
                 }
-                if !changed {
-                    return None;
+                let mut reported = None;
+                if changed {
+                    stream.endpoint = *connection.endpoint();
+                    // MIDI-CI follows: its Groups are the blocks' now, taken
+                    // up by the next poll (`Ci::poll`).
+                    self.ci.decide(groups_after_settle(stream));
+                    reported = Some(**stream);
                 }
-                stream.endpoint = *connection.endpoint();
-                // MIDI-CI follows: its Groups are the blocks' now, taken up
-                // by the next poll (`Ci::poll`).
-                self.ci.decide(groups_after_settle(stream));
-                return Some(**stream);
+                // A device that sends JR Timestamps the input did not ask for
+                // is asked once to stop (M2-104 §7.2.2.3), and again only
+                // after its TXJR has gone off and come back on.
+                let unwanted = stream.endpoint.active().tx_jr && !wanted.tx_jr;
+                let out = &mut self.out;
+                self.stop = self.stop.next(unwanted, |retry| {
+                    let request = Stream::StreamConfigurationRequest(wanted);
+                    queue(out, Ump::from(Message::Stream(request)), retry)
+                });
+                return reported;
             }
         }
         for action in actions {
@@ -557,13 +605,10 @@ impl Negotiation {
         None
     }
 
+    /// Sends a negotiation step. One the output refused is counted by the
+    /// output ([`OpenOutput::losses`]) and sent again when the step times out.
     fn send(&mut self, ump: Ump) {
-        if let Some(out) = &mut self.out
-            && out.queue(&[(Offset::ZERO, ump)]).is_none()
-        {
-            // The step is sent again when it times out.
-            tracing::debug!("a UMP Stream message was refused by {}", out.name());
-        }
+        queue(&mut self.out, ump, false);
     }
 
     fn settle(&mut self, ending: Ending) -> Option<DeviceStream> {
@@ -593,6 +638,20 @@ impl Negotiation {
         };
         Some(stream)
     }
+}
+
+/// Queues `ump` to the device: whether the output took it. A refusal is
+/// counted by the output and logged, unless `retry` says it is a repeat of an
+/// offer that was refused already.
+fn queue(out: &mut Option<OpenOutput>, ump: Ump, retry: bool) -> bool {
+    let Some(out) = out else { return false };
+    let events = Outgoing::now_batch(&[(Offset::ZERO, ump)]);
+    let (taken, refused) = out.offer(&events);
+    if refused > 0 && !retry {
+        out.count_refused(refused);
+        tracing::debug!("a UMP Stream message was refused by {}", out.name());
+    }
+    !taken.is_none()
 }
 
 #[cfg(test)]

@@ -6,22 +6,29 @@
 //! ways, in `f64` and through `libm` so a design does not depend on the
 //! platform's C math library.
 
-use tutti_types::{Amplitude, SampleRate, Seconds};
+use tutti_types::{Amplitude, SampleRate, SampleSpan, Seconds};
 
 /// The loop gain that makes a loop of `delay` frames decay by 60 dB in `rt60`:
 /// `g = 10^(-3 d / (RT60 fs))`.
 ///
-/// `delay` is fractional frames (a bare `f32`: `Samples` is whole frames). The
-/// gain is an `Amplitude`: a loop gain is non-negative. A
+/// The gain is an `Amplitude`: a loop gain is non-negative. A
 /// zero, negative or NaN `rt60` has no memory and gives gain 0; an infinite
-/// one never decays and gives 1.
+/// one, or one so long its frame count overflows, never decays and gives 1.
 #[must_use]
-pub fn loop_gain(delay: f32, rt60: Seconds, rate: SampleRate) -> Amplitude {
-    let trips = rt60.get() * rate.get();
-    if trips.is_nan() || trips <= 0.0 {
+pub fn loop_gain(delay: SampleSpan, rt60: Seconds, rate: SampleRate) -> Amplitude {
+    let Some(trips) = SampleSpan::from_seconds(rt60, rate) else {
+        // Not a span: a positive RT60 whose frames overflow (infinity included)
+        // never decays, anything else (negative, NaN) has no memory.
+        return if rt60.get() > 0.0 {
+            Amplitude::UNITY
+        } else {
+            Amplitude::SILENT
+        };
+    };
+    if trips == SampleSpan::ZERO {
         return Amplitude::SILENT;
     }
-    Amplitude(libm::exp10(-3.0 * f64::from(delay) / trips) as f32)
+    Amplitude(libm::exp10(-3.0 * delay.get() / trips.get()) as f32)
 }
 
 /// The inverse of [`loop_gain`]: the RT60 of a loop of `delay` frames at
@@ -30,9 +37,9 @@ pub fn loop_gain(delay: f32, rt60: Seconds, rate: SampleRate) -> Amplitude {
 /// A gain of 0 decays at once (zero seconds); a gain of 1 or more, and a gain
 /// that is NaN or negative (not a loop gain), never settle: infinity.
 #[must_use]
-pub fn rt60_from_gain(gain: Amplitude, delay: f32, rate: SampleRate) -> Seconds {
+pub fn rt60_from_gain(gain: Amplitude, delay: SampleSpan, rate: SampleRate) -> Seconds {
     Seconds(decay_seconds(
-        f64::from(delay),
+        delay.get(),
         libm::log10(f64::from(gain.get())),
         rate.get(),
     ))

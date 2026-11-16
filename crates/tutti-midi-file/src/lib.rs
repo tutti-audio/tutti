@@ -38,7 +38,9 @@
 //!
 //! - **To a Clip File.** [`MidiFile::to_clip`] converts a format 0 or 1 SMF: its meta
 //!   events become the Flex Data messages of M2-116 Appendix B, and what has no UMP
-//!   form comes back in [`Converted::dropped`], never lost silently.
+//!   form comes back in [`Converted::dropped`], never lost silently. A Set Tempo or Time
+//!   Signature off the grid a Clip File requires moves to the nearest position and is
+//!   listed in [`Converted::moved`].
 //!
 //! [`MidiFileKind::detect`] tells the two containers apart by magic, not by
 //! extension. Nothing here touches an OS MIDI API; ports are in
@@ -49,16 +51,16 @@
 //! Build a file, write it, read it back; the tempo map answers in seconds:
 //!
 //! ```rust
-//! use tutti_midi_file::{Meta, MidiFile, SmfFormat, Tick, Track};
+//! use tutti_midi_file::{Meta, MidiFile, SmfDivision, SmfFormat, Tick, Track};
 //! use tutti_types::{Beat, Bpm, Seconds};
-//! use tutti_ump::{MidiChannel, NoteNumber, U7};
+//! use tutti_ump::{MidiChannel, NoteNumber, TicksPerQuarterNote, U7};
 //!
 //! // 120 BPM, then 60 from beat 4, at 480 ticks per quarter.
 //! let track = Track::new()
 //!     .meta(Tick(0), Meta::tempo(Bpm::of(120.0)))
 //!     .note(Tick(0), 1_440, MidiChannel::FIRST, NoteNumber::of(60), U7::of(100))
-//!     .meta(Tick::quarters(4, 480), Meta::tempo(Bpm::of(60.0)));
-//! let file = MidiFile::smf(SmfFormat::SingleTrack, 480, vec![track])?;
+//!     .meta(Tick::quarters(4, TicksPerQuarterNote::of(480)), Meta::tempo(Bpm::of(60.0)));
+//! let file = MidiFile::smf(SmfFormat::SingleTrack, SmfDivision::of(480), vec![track])?;
 //!
 //! let read = MidiFile::from_bytes(&file.to_bytes()?)?;
 //! assert_eq!(read, file);
@@ -110,10 +112,11 @@ pub use clip_file::ClipFileError;
 pub use config::{ConfigError, OutOfOrder, Refusal};
 pub use fault::{SmfParseError, Truncated};
 pub use file::{
-    Converted, DropReason, Dropped, FileEvent, Meta, MidiFile, NoCommonTimeline, PairedNote,
+    Converted, DropReason, Dropped, FileEvent, Meta, MidiFile, Moved, NoCommonTimeline, PairedNote,
     SmfFormat, TextKind, Tick, ToClipError, Track,
 };
 pub use kind::MidiFileKind;
+pub use smf::{SmfDivision, SmfDivisionOutOfRange};
 pub use write::WriteOptions;
 
 use thiserror::Error;

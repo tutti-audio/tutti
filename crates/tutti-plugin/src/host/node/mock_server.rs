@@ -213,7 +213,7 @@ pub(super) fn rig(label: &str) -> Rig {
             id: "test.plugin".into(),
             name: "Test Plugin".into(),
             vendor: String::new(),
-            version: String::new(),
+            version: tutti_plugin_types::PluginVersion::Absent,
             class: PluginClass::Unknown,
             editor: EditorPresence::Absent,
             measured: None,
@@ -308,7 +308,8 @@ pub(super) fn new_node(
         PARAMS.iter().map(|&id| ParamId::new(id)),
         ParameterChanges::SPARE_QUEUES,
         None,
-    );
+    )
+    .expect("the wiring is within a block's width");
     client.go_offline();
     (Direct::new(client.bind(tempo), SR, CHUNK), record, threads)
 }

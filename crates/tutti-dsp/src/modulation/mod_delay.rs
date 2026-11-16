@@ -1,54 +1,47 @@
-//! [`ModDelayFamily`]: the chorus and the flanger as a [`Family`].
+//! The chorus and the flanger: a swept delay of any width, [`ModDelayBank`], and what it is
+//! built to ([`ModDelayLayout`]) and told ([`ModDelayControls`]).
 //!
-//! A swept delay of any width: one [`DelayLine`] per channel, each read at a delay an LFO
-//! moves around a base, with feedback. The output is the delayed signal alone, the **wet**
-//! signal: the blend with the dry input is the graph's mix. A [`Sweep`] says what it is
-//! built to (a chorus sits at a long base delay, a flanger at a short one), a [`Stagger`]
-//! how the channels' sweeps are offset, and the controls are three: the LFO's rate, the
-//! sweep's depth and the feedback ([`ModDelayControls`]).
+//! One [`DelayLine`] per channel, each read at a delay an LFO moves around a base, with
+//! feedback. The output is the delayed signal alone, the **wet** signal: the blend with the
+//! dry input is the graph's mix. A [`Sweep`] says what it is built to (a chorus sits at a
+//! long base delay, a flanger at a short one), a [`Stagger`] how the channels' sweeps are
+//! offset, and the controls are three: the LFO's rate, the sweep's depth and the feedback.
 //!
-//! **The LFO is state on the stream's clock.** Its phase is a field of the recurrence's
-//! state, an `f32` [`Phase`] walked by the rate's increment, counted from the last `clear`
-//! (and so from every `prepare`: a re-prepare restarts the sweep). It is not anchored to
-//! the transport. Its sine is solved only at **control points** every
-//! [`COEFF_INTERVAL`] frames of the stream and joined by chords, so a
-//! block's cut does not move it: the chord of a sine over a step of `h` radians misses it
-//! by at most `h^2 / 8`, which at 5 Hz and 48 kHz is 1.4e-5 of the depth (0.03 samples
-//! against the deepest chorus, 40 ms), and it kinks the delay's slope at each point, a small
-//! ripple on the pitch modulation. A rate that moves lands whole at its grid point and the
-//! phase is continuous across it, so a rate change is click free by itself.
+//! The bank is the kernel: it runs a block through delays that are [`Glide`]s, one per
+//! channel, and a feedback glide. **The LFO is the caller's**, on the stream's clock: it
+//! solves the corners of a segment (each channel's delay at the segment's start and at its
+//! end, [`COEFF_INTERVAL`](crate::COEFF_INTERVAL) frames on, [`swept`](ModDelayBank::swept))
+//! and aims each channel's glide across it, so the cut of the blocks does not move the
+//! render. The chord of a sine over a step of `h` radians misses it by at most `h^2 / 8`,
+//! which at 5 Hz and 48 kHz is 1.4e-5 of the depth (0.03 samples against the deepest chorus,
+//! 40 ms), and it kinks the delay's slope at each corner, a small ripple on the pitch
+//! modulation.
 //!
-//! **A moving depth is a pitch bend**, so its speed is bounded, not its duration: a depth
-//! that moves glides at most [`DELAY_SLEW`] frames of delay per frame. The feedback glides
-//! over [`GAIN_GLIDE`].
+//! **A moving depth is a pitch bend**, so its speed is bounded, not its duration: the caller
+//! glides a depth at most [`DELAY_SLEW`](crate::DELAY_SLEW) frames of delay per frame
+//! ([`design`](ModDelayBank::design) gives the depth as a span of frames).
 //!
-//! The delay has **no latency**: the sweep is the effect, not processing delay, and PDC
-//! must not delay the rest of the mix to line up with it.
+//! The delay has **no latency**: the sweep is the effect, not processing delay, and PDC must
+//! not delay the rest of the mix to line up with it.
 //!
-//! One frame of a channel is [`delay_step`], the delay family's loop: the
-//! feedback tap is read one frame nearer than the delay **before** the push and the output at
-//! the delay **after** it, so the loop's period is exactly the delay
-//! ([`ModDelayMember::loop_frames`]) and the first echo is at the delay too: a comb
+//! One frame of a channel is [`delay_step`], the delay's loop: the feedback tap is read one
+//! frame nearer than the delay **before** the push and the output at the delay **after** it,
+//! so the loop's period is exactly the delay and the first echo is at the delay too: a comb
 //! `1 / (1 - g z^-d)`.
 //!
-//! The memory is the sweep's own [`Domain`](crate::Domain), its [`MaxDelay`]: a line holds
-//! that long, and `base + depth_max` fits in it by [`Sweep::new`] ([`Grows`]).
+//! The memory is the sweep's own [`MaxDelay`]: a line holds that long, and `base +
+//! depth_max` fits in it by [`Sweep::new`]. The state is `f32`; a view of another [`Float`]
+//! is converted at the edges.
 
-use core::ops::{Range, RangeInclusive};
-
+use tutti_buffers::{Float, Planes, PlanesMut, Sample};
 use tutti_types::{
-    BusTopology, Db, Feedback, Hz, MAX_CHANNELS, Phase, PhaseIncrement, SampleRate, Samples,
-    Seconds,
+    BusTopology, Feedback, Gain, Hz, MAX_CHANNELS, PhaseIncrement, SamplePosition, SampleRate,
+    SampleSpan, Samples, Seconds,
 };
 
 use super::sweep::{Stagger, StaggerError, Sweep};
-use crate::control::COEFF_STREAM;
-use crate::delay::{delay_step, finite_or, read_taps, ring_seconds, trips};
-use crate::{
-    Approach, COEFF_INTERVAL, Cadence, Capacity, Channels, Complex64, DELAY_SLEW, DelayLine,
-    Effort, Family, GAIN_GLIDE, Glide, Grows, Inputs, InterpolationMode, Lti, MaxDelay, Reach,
-    Recurrence, Ring, Setup, Start, Steps, System,
-};
+use crate::delay::finite_or;
+use crate::{DelayLine, Glide, InterpolationMode, MaxDelay, delay_step};
 
 /// The LFO's slowest rate: 0.01 Hz, a lane's value and a cell's alike. A rate below it
 /// (or negative) reads as it.
@@ -61,7 +54,7 @@ pub const MAX_MOD_DELAY_CHANNELS: usize = MAX_CHANNELS;
 /// the highs (the sweep's interpolation is not a control).
 const READ: InterpolationMode = InterpolationMode::Linear;
 
-/// The controls of a [`ModDelayFamily`].
+/// The controls of a swept delay.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ModDelayControls {
     /// The LFO's rate: how fast the delay sweeps. Chorus and flanger rates are slow,
@@ -70,7 +63,7 @@ pub struct ModDelayControls {
     pub rate: Hz,
     /// How far the delay moves either side of the base, in seconds of delay (not a
     /// fraction: it is added to the base delay, unlike the phaser's unitless depth).
-    /// Clamped into the sweep's `depth_min..=depth_max`. Not finite reads as the default's.
+    /// Clamped into the sweep's range. Not finite reads as the default's.
     pub depth: Seconds,
     /// How much of the delayed signal recirculates; on a flanger the most characterful
     /// control, since more sharpens the comb notches into a resonant sweep. Clamped into
@@ -115,266 +108,33 @@ impl Default for ModDelayControls {
     }
 }
 
-/// A swept delay at one set of controls and one rate: the delay it is swept around, how
-/// far, the feedback and the LFO's step.
-///
-/// The description the recurrence is held to. It is **linear and time invariant at a held
-/// delay**, so [`Lti`] describes the member frozen at the sweep's **centre** (the base
-/// delay): with a depth of zero that is the render, and with a depth it is the figure the
-/// sweep moves around. [`at`](Self::at) freezes it at any position of the sweep. The
-/// frozen member is the comb `O / (1 - g T)` with `O` and `T` the line's own interpolated
-/// taps (so exact at every delay, the edges included): for a whole delay of `d >= 1` frames,
-/// `z^-d / (1 - g z^-d)`.
+/// What [`ModDelayBank::design`] makes of the controls at a rate: the values the sweep runs
+/// at.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ModDelayMember {
-    rate: SampleRate,
-    width: usize,
-    /// The sample rate narrowed once to `f32`: the delay positions feed an interpolated
-    /// read, so they keep their fraction rather than going through `Seconds::to_samples`.
-    sr: f32,
-    /// The centre delay in frames (fractional), before the floor of one frame.
-    base_frames: f32,
-    /// The line's capacity in frames: no delay is past it.
-    cap: usize,
-    /// The sweep's depth in seconds, clamped into the sweep's range.
-    depth: f32,
-    /// The feedback, clamped into `0..=feedback_max`.
-    feedback: f32,
+pub struct SweepDesign {
     /// The LFO's step per frame, in cycles.
-    inc: PhaseIncrement,
+    pub inc: PhaseIncrement,
+    /// How far the delay moves either side of the base, in frames, inside the sweep's
+    /// range.
+    pub depth: SampleSpan,
+    /// The feedback, inside `0..=`[`feedback_max`](Sweep::feedback_max).
+    pub feedback: Feedback,
 }
 
-impl ModDelayMember {
-    fn of(family: &ModDelayFamily, c: &ModDelayControls, rate: SampleRate) -> Self {
-        let d = ModDelayControls::DEFAULT;
-        let sweep = &family.sweep;
-        let sr = rate.get() as f32;
-        let cap = sweep.max_delay().frames(rate);
-        let hz = if c.rate.get().is_finite() {
-            c.rate.get()
-        } else {
-            d.rate.get()
-        };
-        let depth = if c.depth.get().is_finite() {
-            c.depth
-        } else {
-            d.depth
-        };
-        // `max` then `min` rather than `clamp`: the same value for a well formed sweep.
-        let depth = depth
-            .to_f32()
-            .max(sweep.depth_min().to_f32())
-            .min(sweep.depth_max().to_f32());
-        let feedback = finite_or(c.feedback.get(), d.feedback.get())
-            .max(0.0)
-            .min(sweep.feedback_max().get());
-        Self {
-            rate,
-            width: family.width(),
-            sr,
-            base_frames: (sweep.base().to_f32() * sr).min(cap as f32),
-            cap,
-            depth,
-            feedback,
-            inc: PhaseIncrement::per_sample(Hz(hz.max(MIN_RATE.get())), rate),
-        }
-    }
-
-    /// The channels.
-    #[must_use]
-    pub fn width(&self) -> usize {
-        self.width
-    }
-
-    /// The delay at the sweep's centre, in frames (fractional): the base, floored at one
-    /// frame (a delay is at least a frame: the feedback tap is read one before it).
-    #[must_use]
-    fn centre_frames(&self) -> f32 {
-        self.base_frames.max(1.0)
-    }
-
-    /// How far the sweep reaches either side of the centre, in frames: the depth, clamped
-    /// into the sweep's range, in delay.
-    #[must_use]
-    fn depth_frames(&self) -> f32 {
-        self.depth * self.sr
-    }
-
-    /// The feedback, clamped into the sweep's range.
-    #[must_use]
-    pub fn feedback(&self) -> Feedback {
-        Feedback(self.feedback)
-    }
-
-    /// The delays the sweep reaches, in frames: from the shortest, `base - depth` floored
-    /// at one frame (a `depth` past the base flat-bottoms the sweep), to the longest,
-    /// `base + depth`, which is inside the line.
-    #[must_use]
-    fn delay_range(&self) -> RangeInclusive<f32> {
-        let reach = self.depth_frames();
-        let longest = (self.base_frames + reach).max(1.0).min(self.cap as f32);
-        let shortest = (self.base_frames - reach).max(1.0).min(longest);
-        shortest..=longest
-    }
-
-    /// The same sweep frozen at LFO position `lfo` (in `-1..=1`): a member with no depth
-    /// whose centre is the delay there, `base + lfo * depth` floored at one frame. The
-    /// position the contract's frozen probes are at is `at(0.0)`.
-    #[must_use]
-    pub fn at(&self, lfo: f32) -> Self {
-        let delay = (self.base_frames + lfo * self.depth * self.sr)
-            .max(1.0)
-            .min(self.cap as f32);
-        Self {
-            base_frames: delay,
-            depth: 0.0,
-            ..*self
-        }
-    }
-
-    /// The feedback taps of the loop: the line read one frame nearer than the delay, before
-    /// the push (`k` frames back is `z^-(k + 1)`), as [`delay_step`] reads
-    /// it.
-    fn feedback_taps(&self) -> ([(usize, f32); 4], usize) {
-        read_taps(
-            (self.centre_frames().max(1.0) - 1.0).max(0.0),
-            self.cap,
-            READ,
-        )
-    }
-
-    /// The frames the loop reaches back: the farthest feedback tap with a weight, plus the
-    /// frame it is read behind the push. For a whole delay of `d` frames that is `d`, the
-    /// loop's period; a fractional one reaches a frame farther.
-    #[must_use]
-    pub fn loop_frames(&self) -> usize {
-        let (taps, n) = self.feedback_taps();
-        // A tap with no weight (the neighbour of a whole delay) reaches nothing.
-        let reach = taps[..n].iter().filter(|t| t.1 != 0.0).map(|t| t.0).max();
-        reach.unwrap_or(0) + 1
-    }
-}
-
-impl System for ModDelayMember {
-    /// Zero, whatever the sweep: the modulated delay is the effect's sound, not
-    /// processing latency.
-    fn latency(&self) -> Samples {
-        Samples::ZERO
-    }
-
-    /// The echoes still to come, to `floor` under the first: the loop's period (the
-    /// longest delay) a trip, and as many trips as it takes the feedback to fall to it.
-    fn tail(&self, floor: Db) -> Ring {
-        let longest = *self.delay_range().end();
-        Ring::Finite(ring_seconds(
-            longest.ceil() as usize,
-            trips(f64::from(self.feedback), floor),
-            self.rate,
-        ))
-    }
-}
-
-impl Lti for ModDelayMember {
-    fn inputs(&self) -> usize {
-        self.width
-    }
-
-    fn outputs(&self) -> usize {
-        self.width
-    }
-
-    /// The response of `output` to its own input: `O / (1 - g T)` at the centre delay,
-    /// the same on every channel (the channels differ only by the phase their sweeps
-    /// start at, which a frozen member has none of).
-    fn frequency_response(&self, output: usize, freqs: &[Hz], gain: &mut [Complex64]) {
-        if output >= self.width {
-            gain.fill(Complex64::new(f64::NAN, f64::NAN));
-            return;
-        }
-        let (taps, n) = read_taps(self.centre_frames(), self.cap, READ);
-        let (ftaps, ftn) = self.feedback_taps();
-        let g = f64::from(self.feedback);
-        for (out, f) in gain.iter_mut().zip(freqs) {
-            let w = std::f64::consts::TAU * f64::from(f.get()) / self.rate.get();
-            // `z^-k` for a tap `k` frames back.
-            let z = |k: usize| Complex64::from_polar(1.0, -w * k as f64);
-            // The output is read after the push (`k` frames back is `z^-k`), the feedback
-            // tap one frame nearer, before it (`z^-(k+1)`): the same delay.
-            let o: Complex64 = taps[..n].iter().map(|&(k, a)| z(k) * f64::from(a)).sum();
-            let t: Complex64 = ftaps[..ftn]
-                .iter()
-                .map(|&(k, a)| z(k + 1) * f64::from(a))
-                .sum();
-            *out = o / (Complex64::new(1.0, 0.0) - t * g);
-        }
-    }
-
-    /// `g^(1/K)`: every pole is inside it. A pole `z` has `1 = |g T(z)|`, and
-    /// `|T(z)| <= |z|^-K` for `|z| < 1` (the linear read's taps are a convex blend), with `K`
-    /// the most frames back the loop reaches ([`loop_frames`](Self::loop_frames)).
-    fn spectral_radius(&self) -> f64 {
-        let g = f64::from(self.feedback);
-        if g <= 0.0 {
-            return 0.0;
-        }
-        g.powf(1.0 / self.loop_frames() as f64)
-    }
-
-    /// `1 / (1 - g)`: `|v| <= 1 / (1 - g)` for `|x| <= 1` (the loop's geometric series),
-    /// and the output is a convex blend of `v`.
-    fn l1_norm(&self) -> f64 {
-        let g = f64::from(self.feedback);
-        if g < 1.0 {
-            1.0 / (1.0 - g)
-        } else {
-            f64::INFINITY
-        }
-    }
-}
-
-/// The sizes a swept delay allocates: the longest delay a line holds, and how long the
-/// echoes of the longest sweep ring ([`Capacity`]).
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ModDelayCapacity {
-    /// The longest delay a line holds, in frames. A line is one frame longer, so a read at
-    /// exactly this still has a neighbour to blend toward.
-    pub frames: usize,
-    tail: Ring,
-}
-
-impl Capacity for ModDelayCapacity {
-    type Source = ModDelayMember;
-
-    fn need(member: &ModDelayMember, floor: Db) -> Self {
-        Self {
-            frames: member.delay_range().end().ceil() as usize,
-            tail: member.tail(floor),
-        }
-    }
-
-    fn tail(&self) -> Ring {
-        self.tail
-    }
-
-    fn dominates(&self, other: &Self) -> bool {
-        self.frames >= other.frames && self.tail.covers(other.tail)
-    }
-}
-
-/// The [`Family`] of the chorus and the flanger: `input` wide, each channel a line swept by
-/// an LFO, its [`Sweep`] and [`Stagger`] construction constants.
+/// What a swept delay is built to: its bus, the [`Sweep`] and the [`Stagger`] of its
+/// channels.
 ///
-/// A chorus is [`ModDelayFamily::chorus`] and a flanger [`flanger`](Self::flanger): the
-/// same family at different numbers. [`general_midi_chorus`](Self::general_midi_chorus) is
-/// the chorus send of a General MIDI synthesizer, with no feedback.
+/// A chorus is [`ModDelayLayout::chorus`] and a flanger [`flanger`](Self::flanger): the same
+/// layout at different numbers. [`general_midi_chorus`](Self::general_midi_chorus) is the
+/// chorus send of a General MIDI synthesizer, with no feedback.
 #[derive(Clone, Copy, Debug)]
-pub struct ModDelayFamily {
+pub struct ModDelayLayout {
     input: BusTopology,
     sweep: Sweep,
     stagger: Stagger,
 }
 
-impl ModDelayFamily {
+impl ModDelayLayout {
     /// A swept delay on the bus `input`, built to `sweep`, its channels' sweeps offset by
     /// `stagger`.
     ///
@@ -422,6 +182,12 @@ impl ModDelayFamily {
         }
     }
 
+    /// The bus it runs on.
+    #[must_use]
+    pub const fn input(&self) -> BusTopology {
+        self.input
+    }
+
     /// The channels.
     #[must_use]
     pub fn width(&self) -> usize {
@@ -434,304 +200,166 @@ impl ModDelayFamily {
         &self.sweep
     }
 
-    /// The longest delay a line holds: the [`Domain`](crate::Domain) of the sweep.
+    /// The longest delay a line holds.
     #[must_use]
     pub const fn max_delay(&self) -> MaxDelay {
         self.sweep.max_delay()
     }
-}
 
-impl Family for ModDelayFamily {
-    type Controls = ModDelayControls;
-    type Member = ModDelayMember;
-    type Recurrence = ModDelayRecurrence;
-
-    /// Solved on the stream's grid of 16 frames, like the filters: a cell that moves
-    /// inside a block reaches the render within 16 frames, wherever the blocks fall, and
-    /// the LFO's control points are on the same grid.
-    const CADENCE: Cadence = COEFF_STREAM;
-
-    fn channels(&self) -> Channels {
-        Channels::same(self.input)
-    }
-
-    fn blank(&self, rate: SampleRate) -> ModDelayMember {
-        ModDelayMember::of(self, &ModDelayControls::DEFAULT, rate)
-    }
-
-    /// The controls, made runnable: a rate below 0.01 Hz is 0.01 Hz, a depth out of range
-    /// is clamped into the sweep's, a feedback into `0..=feedback_max`; a control that is
-    /// not finite is the default's.
-    fn member_into(&self, c: &ModDelayControls, rate: SampleRate, out: &mut ModDelayMember) {
-        *out = ModDelayMember::of(self, c, rate);
-    }
-
-    fn recurrence(&self, _: SampleRate) -> ModDelayRecurrence {
+    /// Each channel's LFO phase offset (channel 0's is zero), wrapped, for the first
+    /// [`width`](Self::width) channels and zero after.
+    #[must_use]
+    pub fn offsets(&self) -> [PhaseIncrement; MAX_MOD_DELAY_CHANNELS] {
         let mut offsets = [PhaseIncrement(0.0); MAX_MOD_DELAY_CHANNELS];
         for (c, o) in offsets.iter_mut().enumerate().take(self.width()) {
             *o = self.stagger.offset(c);
         }
-        ModDelayRecurrence {
-            width: self.width(),
-            offsets,
-        }
+        offsets
     }
 }
 
-impl Grows for ModDelayFamily {
-    type Domain = MaxDelay;
-
-    /// A line of the longest delay, and the echoes of it at the sweep's most feedback.
-    fn reach(&self, reach: &Reach<MaxDelay>) -> ModDelayCapacity {
-        let frames = reach.domain().frames(reach.rate());
-        ModDelayCapacity {
-            frames,
-            tail: Ring::Finite(ring_seconds(
-                frames,
-                trips(f64::from(self.sweep.feedback_max().get()), reach.floor()),
-                reach.rate(),
-            )),
-        }
-    }
-}
-
-/// The coefficient point of a swept delay: the centre delay in frames, the depth in
-/// seconds, the feedback and the LFO's step.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ModDelayTarget {
-    base: f32,
-    sr: f32,
-    depth: f32,
-    feedback: f32,
-    inc: PhaseIncrement,
-}
-
-/// The coefficients in flight: the depth gliding at [`DELAY_SLEW`] (a pitch bend's speed),
-/// the feedback over [`GAIN_GLIDE`], and the centre delay, the rate and the LFO's step
-/// landed whole (a rate change is phase continuous by itself).
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ModDelayCoeffs {
-    base: f32,
-    sr: f32,
-    depth: Glide<f32>,
-    feedback: Glide<f32>,
-    inc: PhaseIncrement,
-    /// The steps a feedback glide takes: [`GAIN_GLIDE`] at the prepared rate.
-    steps: u32,
-}
-
-impl Approach for ModDelayCoeffs {
-    type Target = ModDelayTarget;
-
-    fn aim(&mut self, target: &ModDelayTarget) {
-        self.base = target.base;
-        self.sr = target.sr;
-        self.inc = target.inc;
-        // The depth is in seconds and the slew in frames of delay per frame: a depth that
-        // moves `s` seconds moves the delay `s * sr` frames.
-        self.depth
-            .aim_by(target.depth, Steps::Rate(DELAY_SLEW / target.sr));
-        self.feedback
-            .aim_by(target.feedback, Steps::Fixed(self.steps));
-    }
-
-    #[inline]
-    fn step(&mut self) -> bool {
-        // Each moves, so no short circuit.
-        let (d, f) = (self.depth.step(), self.feedback.step());
-        d | f
-    }
-
-    fn settle(&mut self) {
-        self.depth.settle();
-        self.feedback.settle();
-    }
-}
-
-/// What a block changes: a line for each channel, and the LFO.
+/// A swept delay of any width: a [`DelayLine`] per channel, and the loop that recirculates
+/// each.
+///
+/// Built on the control side for one rate, where it allocates the lines; a clone keeps their
+/// size, and [`reset`](Self::reset) zeroes them without allocating.
 #[derive(Clone, Debug)]
-pub struct ModDelayState {
-    lines: Vec<DelayLine>,
-    /// Per channel, the LFO's sine at the two control points around the current position:
-    /// `[the segment's start, its end]`.
-    points: Vec<[f32; 2]>,
-    /// The LFO's phase at the segment's **end**, where `points` last solved (before the
-    /// first segment, its start, which is where the LFO begins).
-    phase: Phase,
-    /// Frames since the last control point, in `0..COEFF_INTERVAL`: counted from the last
-    /// `clear`, so where the points fall does not depend on how the stream is cut.
-    pos: usize,
-    /// Whether `points` hold the current segment's sines: false until the first segment
-    /// after a `clear`.
-    primed: bool,
+pub struct ModDelayBank {
+    lines: Box<[DelayLine]>,
+    sweep: Sweep,
+    rate: SampleRate,
+    /// The line's capacity in frames: no delay is past it.
+    cap: SampleSpan,
+    /// The centre delay, inside the line.
+    base: SampleSpan,
 }
 
-/// The [`Recurrence`] of a [`ModDelayFamily`].
-///
-/// K, per frame, is the swept loop of the module docs, a channel at a time (the lines are
-/// independent): [`delay_step`] at the delay, which reads the feedback
-/// tap, adds it scaled by the feedback to the input, pushes, and reads the output. The delay is
-/// `base + lfo * depth`, floored at one frame, with `lfo` the chord between the sine's two
-/// control points.
-///
-/// A `prepare` empties the lines (the rate is new, and the delays in frames were the old
-/// one's) **and restarts the sweep**: the LFO's phase is zero again, like after `clear`.
-#[derive(Clone, Copy, Debug)]
-pub struct ModDelayRecurrence {
-    width: usize,
-    /// Each channel's LFO phase offset (channel 0's is zero), wrapped.
-    offsets: [PhaseIncrement; MAX_MOD_DELAY_CHANNELS],
-}
-
-impl ModDelayRecurrence {
-    /// Channel `c`'s sine at the LFO phase `p`.
-    #[inline]
-    fn sine(&self, c: usize, p: Phase) -> f32 {
-        // Channel 0's offset is zero; `offset_by(0)` returns the phase unchanged.
-        p.offset_by(self.offsets[c]).to_radians().get().sin()
-    }
-
-    /// Steps the control points on: the segment that ended is the one that begins, and
-    /// the new one ends [`COEFF_INTERVAL`] frames on at the LFO's step `inc`.
-    fn solve(&self, state: &mut ModDelayState, inc: PhaseIncrement) {
-        let start = state.phase;
-        let mut end = start;
-        for _ in 0..COEFF_INTERVAL {
-            end = end.advance(inc);
-        }
-        for c in 0..self.width {
-            let first = if state.primed {
-                state.points[c][1]
-            } else {
-                self.sine(c, start)
-            };
-            state.points[c] = [first, self.sine(c, end)];
-        }
-        state.phase = end;
-        state.primed = true;
-    }
-}
-
-impl Recurrence for ModDelayRecurrence {
-    type Member = ModDelayMember;
-    type Capacity = ModDelayCapacity;
-    type Target = ModDelayTarget;
-    type Coeffs = ModDelayCoeffs;
-    type State = ModDelayState;
-
-    const STEP: usize = 1;
-
-    fn start(&self, member: &ModDelayMember) -> Start<Self> {
-        let mut target = ModDelayTarget {
-            base: 0.0,
-            sr: 1.0,
-            depth: 0.0,
-            feedback: 0.0,
-            inc: PhaseIncrement(0.0),
-        };
-        self.coefficients_into(member, &mut target);
-        Start {
-            coeffs: ModDelayCoeffs {
-                base: target.base,
-                sr: target.sr,
-                depth: Glide::landed(target.depth),
-                feedback: Glide::landed(target.feedback),
-                inc: target.inc,
-                steps: 0,
-            },
-            state: ModDelayState {
-                lines: (0..self.width).map(|_| DelayLine::new(0)).collect(),
-                points: vec![[0.0; 2]; self.width],
-                phase: Phase::START,
-                pos: 0,
-                primed: false,
-            },
-            target,
+impl ModDelayBank {
+    /// A silent swept delay of `layout` at `rate`: a line per channel of
+    /// `ceil(max_delay * rate)` frames. Allocates: build it on the control side.
+    #[must_use]
+    pub fn new(layout: &ModDelayLayout, rate: SampleRate) -> Self {
+        let cap = layout.max_delay().frames(rate);
+        let cap_span = SampleSpan::from_samples(Samples::new(cap));
+        let base = SampleSpan::from_seconds(layout.sweep.base(), rate)
+            .unwrap_or(SampleSpan::ZERO)
+            .min(cap_span);
+        Self {
+            lines: (0..layout.width()).map(|_| DelayLine::new(cap)).collect(),
+            sweep: layout.sweep,
+            rate,
+            cap: cap_span,
+            base,
         }
     }
 
-    /// Sizes a line per channel from the capacity, and the feedback glide from
-    /// [`GAIN_GLIDE`] at the rate. The conversion saturates: a prepare must not panic. The
-    /// sweep restarts.
-    fn prepare(
-        &mut self,
-        capacity: &ModDelayCapacity,
-        setup: &Setup,
-        coeffs: &mut ModDelayCoeffs,
-        state: &mut ModDelayState,
-        _: &mut ModDelayTarget,
-    ) {
-        coeffs.steps =
-            u32::try_from(GAIN_GLIDE.to_samples_ceil(setup.rate).get()).unwrap_or(u32::MAX);
-        state.lines = (0..self.width)
-            .map(|_| DelayLine::new(capacity.frames))
-            .collect();
-        self.clear(state);
+    /// The channels.
+    #[must_use]
+    pub fn width(&self) -> usize {
+        self.lines.len()
     }
 
-    fn coefficients_into(&self, m: &ModDelayMember, target: &mut ModDelayTarget) -> bool {
-        *target = ModDelayTarget {
-            base: m.base_frames,
-            sr: m.sr,
-            depth: m.depth,
-            feedback: m.feedback,
-            inc: m.inc,
-        };
-        true
+    /// The line's longest delay at the prepared rate.
+    #[must_use]
+    pub fn max_delay(&self) -> Samples {
+        self.cap.to_samples_floor()
     }
 
-    fn clear(&self, state: &mut ModDelayState) {
-        for line in &mut state.lines {
+    /// Back to silence. No allocation.
+    pub fn reset(&mut self) {
+        for line in &mut self.lines {
             line.reset();
         }
-        state.points.fill([0.0; 2]);
-        state.phase = Phase::START;
-        state.pos = 0;
-        state.primed = false;
     }
 
-    fn run(
-        &self,
-        coeffs: &ModDelayCoeffs,
-        state: &mut ModDelayState,
-        feed: &Inputs<'_>,
-        output: &mut [&mut [f32]],
-        frames: Range<usize>,
-        _: usize,
-    ) {
-        const STEP: f32 = 1.0 / COEFF_INTERVAL as f32;
-        let (base, sr) = (coeffs.base, coeffs.sr);
-        let (depth, feedback) = (coeffs.depth.now(), coeffs.feedback.now());
-        let mut i = frames.start;
-        while i < frames.end {
-            if state.pos == 0 {
-                self.solve(state, coeffs.inc);
-            }
-            let end = i + (COEFF_INTERVAL - state.pos).min(frames.end - i);
-            let channels = state
-                .points
-                .iter()
-                .zip(state.lines.iter_mut())
-                .zip(feed.audio)
-                .zip(output.iter_mut());
-            for (((&[prev, next], line), input), out) in channels.take(self.width) {
-                let slope = (next - prev) * STEP;
-                for (pos, k) in (state.pos..).zip(i..end) {
-                    let lfo = prev + slope * pos as f32;
-                    let delay = (base + lfo * depth * sr).max(1.0);
-                    out[k] = delay_step(line, input[k], delay, feedback, READ);
-                }
-            }
-            state.pos += end - i;
-            if state.pos == COEFF_INTERVAL {
-                state.pos = 0;
-            }
-            i = end;
+    /// The controls as the sweep runs them: a rate below 0.01 Hz is 0.01 Hz, a depth outside
+    /// the sweep's range is clamped into it and a feedback into `0..=feedback_max`; a control
+    /// that is not finite is the default's.
+    #[must_use]
+    pub fn design(&self, controls: &ModDelayControls) -> SweepDesign {
+        let d = ModDelayControls::DEFAULT;
+        let hz = finite_or(controls.rate.get(), d.rate.get()).max(MIN_RATE.get());
+        let depth = if controls.depth.get().is_finite() {
+            controls.depth
+        } else {
+            d.depth
+        };
+        let depth = depth
+            .get()
+            .clamp(self.sweep.depth_min().get(), self.sweep.depth_max().get());
+        let depth = SampleSpan::from_seconds(Seconds(depth), self.rate)
+            .unwrap_or(SampleSpan::ZERO)
+            .min(self.cap);
+        let feedback = finite_or(controls.feedback.get(), d.feedback.get())
+            .max(0.0)
+            .min(self.sweep.feedback_max().get());
+        SweepDesign {
+            inc: PhaseIncrement::per_sample(Hz(hz), self.rate),
+            depth,
+            feedback: Feedback(feedback),
         }
     }
 
-    fn effort(&self) -> Effort {
-        Effort::Moderate
+    /// Where the read lands with the LFO at `lfo` (in `-1..=1`) and the sweep `depth` frames
+    /// deep: the centre `base + lfo * depth` frames behind the newest write, held inside the
+    /// line. A position, not a delay: it can fall behind the write (a depth past the base),
+    /// and [`process`](Self::process) floors the delay a frame reads at one frame (the
+    /// feedback tap is read one before it), so a sweep that bottoms out flat-bottoms there
+    /// whatever the chord between corners does.
+    #[must_use]
+    pub fn swept(&self, lfo: Gain, depth: SampleSpan) -> SamplePosition {
+        let at = self.base.get() + f64::from(lfo.get()) * depth.get();
+        SamplePosition(at.min(self.cap.get()))
+    }
+
+    /// Runs `input` into `output`, frame `i` at `delays[c].at(taken + 1 + i)` for channel `c`
+    /// and `feedback.at(taken + 1 + i)`, then takes the block's steps from the glides. Each
+    /// delay is in frames, floored at one frame where it is read.
+    ///
+    /// Each channel is [`delay_step`] at its delay: the line's own tap scaled by the feedback
+    /// added to the input. Channel `c` of `input` feeds channel `c` of `output`; a channel
+    /// past the bank's width, or past the narrower of the two views, is not touched. The
+    /// feedback glide's values must stay below 1 ([`Feedback::MAX_STABLE`] is the bound
+    /// [`design`](Self::design) holds them to). No allocation.
+    pub fn process<S: Float>(
+        &mut self,
+        delays: &mut [Glide<f32>],
+        feedback: &mut Glide<f32>,
+        input: Planes<'_, S>,
+        mut output: PlanesMut<'_, '_, S>,
+    ) {
+        let frames = input.frames().get().min(output.frames().get());
+        let run = self
+            .lines
+            .len()
+            .min(input.channels())
+            .min(output.channels())
+            .min(delays.len());
+        let fb_first = feedback.taken().saturating_add(1);
+        for (c, ((line, delay), out)) in self
+            .lines
+            .iter_mut()
+            .zip(delays.iter())
+            .zip(output.iter_mut())
+            .enumerate()
+            .take(run)
+        {
+            let first = delay.taken().saturating_add(1);
+            let xs = &input.plane(c).samples()[..frames];
+            let ys = &mut out.into_samples_mut()[..frames];
+            for (i, (y, x)) in ys.iter_mut().zip(xs).enumerate() {
+                let step = u32::try_from(i).unwrap_or(u32::MAX);
+                let d = delay.at(first.saturating_add(step)).max(1.0);
+                let g = feedback.at(fb_first.saturating_add(step));
+                let wet = delay_step(line, x.convert_to::<f32>(), d, g, READ);
+                *y = wet.convert_to::<S>();
+            }
+        }
+        let taken = u32::try_from(frames).unwrap_or(u32::MAX);
+        for glide in delays.iter_mut().take(run) {
+            glide.advance(taken);
+        }
+        feedback.advance(taken);
     }
 }
 
