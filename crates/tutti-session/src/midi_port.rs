@@ -70,7 +70,8 @@ pub enum PortCause {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
 pub struct OutputOptions {
-    active_sensing: bool,
+    /// Whether the port sends Active Sensing: see [`active_sensing`](Self::active_sensing).
+    pub active_sensing: bool,
 }
 
 impl OutputOptions {
@@ -97,12 +98,6 @@ impl OutputOptions {
     pub const fn active_sensing(mut self, on: bool) -> Self {
         self.active_sensing = on;
         self
-    }
-
-    /// Whether the port sends Active Sensing.
-    #[must_use]
-    pub const fn sends_active_sensing(&self) -> bool {
-        self.active_sensing
     }
 }
 
@@ -1230,7 +1225,7 @@ fn open_device_output(
     let mut device = io
         .connect_output(id)
         .map_err(|e| MidiPortError::Hardware(Arc::new(e)))?;
-    if options.sends_active_sensing() {
+    if options.active_sensing {
         device
             .active_sensing()
             .map_err(|e| MidiPortError::Hardware(Arc::new(e)))?;
