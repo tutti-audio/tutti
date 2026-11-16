@@ -3813,8 +3813,8 @@ struct ModHostOver<'a> {
     #[cfg(feature = "plugin")]
     plugins: &'a BTreeMap<NodeKey, crate::plugin::HostedPlugin>,
     keys: &'a dyn ModKeys,
-    /// Each plugin target the apply resolved, by node and parameter: where
-    /// `Phase::Plugins` writes a GUI edit (`ModState::plugin_target`).
+    /// Each plugin target the apply resolved, by node and parameter: which
+    /// plugin parameters a lane drives (`ModState::plugin_lanes`).
     plugin_targets: std::cell::RefCell<PluginTargets>,
 }
 
