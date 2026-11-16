@@ -890,7 +890,7 @@ impl Graph {
         tutti_plugin::catalog::PluginRebinder,
     ) {
         let node = NodeKey::fresh();
-        let hosted = crate::plugin::HostedPlugin::new(client.handle(), client.plugin().clone())
+        let hosted = crate::plugin::HostedPlugin::served(client.handle(), client.plugin().clone())
             .with_controls(client.controls());
         let tempo = self.tempo.clone();
         let bound = client.bind(tempo);
@@ -931,8 +931,8 @@ impl Graph {
     /// [`HostPluginError::NoSuchNode`](crate::HostPluginError::NoSuchNode) when
     /// `node` is not in the graph;
     /// [`HostPluginError::AlreadyHosted`](crate::HostPluginError::AlreadyHosted)
-    /// when it already hosts a plugin (a plugin's record is freed on the main
-    /// thread, through the graveyard, never replaced where it stands). Nothing
+    /// when it already hosts a plugin (an in-process plugin's record is freed on
+    /// the main thread, through the graveyard, never replaced where it stands). Nothing
     /// is hosted on an error.
     #[cfg(feature = "plugin")]
     pub fn host_plugin(
@@ -1023,12 +1023,12 @@ impl Graph {
                 match self.plugins.get_mut(&node) {
                     Some(hosted) => {
                         let outgoing = hosted.replace(handle, controls, plugin);
-                        self.graveyard.bury_handle(outgoing);
+                        outgoing.retire().settle(&mut self.graveyard);
                     }
                     None => {
                         self.plugins.insert(
                             node,
-                            crate::plugin::HostedPlugin::new(handle, plugin)
+                            crate::plugin::HostedPlugin::served(handle, plugin)
                                 .with_controls(controls),
                         );
                     }
@@ -1079,7 +1079,7 @@ impl Graph {
                 match self.plugins.get_mut(&node) {
                     Some(hosted) => {
                         let outgoing = hosted.replace_hosted(handle, controls, plugin_ref);
-                        self.graveyard.bury_handle(outgoing);
+                        outgoing.retire().settle(&mut self.graveyard);
                     }
                     None => {
                         let mut hosted = crate::plugin::HostedPlugin::new(handle, plugin_ref);
@@ -1268,7 +1268,7 @@ impl Graph {
         let controls = self.swap_unit(node, incoming, fade, law)?;
         #[cfg(feature = "plugin")]
         if let Some(record) = self.plugins.remove(&node) {
-            self.graveyard.bury(record);
+            record.retire().settle(&mut self.graveyard);
         }
         Ok(controls)
     }
@@ -1865,7 +1865,7 @@ impl Graph {
         }
         #[cfg(feature = "plugin")]
         if let Some(record) = self.plugins.remove(&node) {
-            self.graveyard.bury(record);
+            record.retire().settle(&mut self.graveyard);
         }
         // A crossfade waiting on it would only fail at its retry, dropping
         // the incoming node then: drop it here, on the control thread.

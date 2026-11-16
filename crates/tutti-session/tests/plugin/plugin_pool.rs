@@ -1143,4 +1143,31 @@ mod process {
             Err(AddPluginError::Installed("fx"))
         ));
     }
+
+    /// **A served plugin's record is not parked:** removing the node drops it
+    /// at once, with nothing in the graveyard, and the server ends under
+    /// `Session::update` alone, which has no main thread to empty a yard.
+    #[test]
+    fn a_removed_served_plugin_is_dropped_with_no_graveyard_entry() {
+        let (catalog, _dir) = catalog();
+        let mut s = session(true);
+        s.pool(s.plugin_entry("fx", &first_id(), &catalog)).unwrap();
+        loaded(&mut s, "fx");
+        let node = s.add_pooled_plugin(&"fx").unwrap();
+        let pid = s
+            .plugin_view(node)
+            .unwrap()
+            .diagnostics()
+            .server_pid()
+            .expect("a served plugin has its server");
+        let alive = || std::path::Path::new(&format!("/proc/{pid}")).exists();
+        assert!(alive());
+
+        s.remove(node).unwrap();
+        assert_eq!(s.retired_plugins(), 0, "nothing is parked");
+        pump_until(&mut s, "the server's end", |s| {
+            let _ = s.update();
+            !alive()
+        });
+    }
 }
