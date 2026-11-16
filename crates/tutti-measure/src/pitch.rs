@@ -46,7 +46,7 @@ use tutti_types::{Confidence, Hz};
 
 use tutti_dsp::RealFft;
 
-use crate::yin::YinConfig;
+use crate::yin::YinPlan;
 use tutti_dsp::Complex32;
 
 /// YIN pitch detector (de Cheveigné & Kawahara, 2002).
@@ -56,7 +56,7 @@ use tutti_dsp::Complex32;
 /// allocates nothing and a track reuses one detector for every frame.
 pub(crate) struct PitchDetector {
     /// The validated range, rate and threshold this detector runs at.
-    cfg: YinConfig,
+    cfg: YinPlan,
     difference: Vec<f32>,
     cumulative_mean: Vec<f32>,
     fft: RealFft,
@@ -75,7 +75,7 @@ pub(crate) struct PitchDetector {
 }
 
 impl PitchDetector {
-    pub fn new(cfg: YinConfig) -> Self {
+    pub fn new(cfg: YinPlan) -> Self {
         let max_period = cfg.max_period().get();
         let fft_size = (max_period * 2).next_power_of_two();
         let fft = RealFft::new(fft_size);
@@ -98,7 +98,7 @@ impl PitchDetector {
     }
 
     /// Needs at least `buffer_size()` samples.
-    pub fn detect(&mut self, samples: &[f32]) -> PitchResult {
+    pub(crate) fn detect(&mut self, samples: &[f32]) -> PitchResult {
         let (min_period, max_period) = self.periods(samples.len());
 
         if samples.len() < max_period * 2 || max_period <= min_period {
@@ -287,6 +287,7 @@ impl PitchDetector {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::yin::YinConfig;
     use tutti_types::SampleRate;
 
     const SR: SampleRate = SampleRate::SR_48K;
@@ -324,7 +325,7 @@ mod tests {
     }
 
     fn detector() -> PitchDetector {
-        PitchDetector::new(YinConfig::standard(SR).unwrap())
+        PitchDetector::new(YinConfig::new().plan(SR).unwrap())
     }
 
     fn period_samples(freq: Hz) -> f64 {

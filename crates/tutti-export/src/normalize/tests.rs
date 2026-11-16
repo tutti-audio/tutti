@@ -218,8 +218,9 @@ mod measurer {
         );
 
         let one_shot = measure_loudness(
-            &LoudnessConfig::new(RATE, Bed::Stereo.topology()).unwrap(),
+            &LoudnessConfig::new(Bed::Stereo.topology()),
             Interleaved::new(&rendered.interleaved(), rendered.layout()).unwrap(),
+            RATE,
         )
         .expect("meterable");
         assert!(

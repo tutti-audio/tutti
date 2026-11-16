@@ -202,11 +202,12 @@ fn main() -> tutti_export::Result<()> {
     .into_finished()
     .and_then(Produced::into_buffers)
     .expect("nothing cancels a control with no token");
-    let cfg = LoudnessConfig::new(audio.sample_rate(), Bed::Stereo.topology()).unwrap();
+    let cfg = LoudnessConfig::new(Bed::Stereo.topology());
     let flat = audio.interleaved();
     let before = measure_loudness(
         &cfg,
         Interleaved::new(&flat, ChannelLayout::STEREO).unwrap(),
+        audio.sample_rate(),
     )
     .expect("stereo is meterable");
     println!("by hand: {:.2} LUFS", before.lufs.get());

@@ -103,10 +103,11 @@ fn a_loudness_normalized_export_reports_the_gain_to_its_target() {
         .into_samples::<f32>()
         .map(Result::unwrap)
         .collect();
-    let meter = LoudnessConfig::new(RATE, Bed::Stereo.topology()).unwrap();
+    let meter = LoudnessConfig::new(Bed::Stereo.topology());
     let written_loudness = measure_loudness(
         &meter,
         Interleaved::new(&samples, ChannelLayout::STEREO).unwrap(),
+        RATE,
     )
     .unwrap();
     assert!(
