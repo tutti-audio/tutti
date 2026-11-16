@@ -88,6 +88,8 @@ control_set! {
 /// A [`FreeverbBank`] and its glides, once the rate is known.
 #[derive(Clone, Debug)]
 struct Running {
+    /// The rate the bank was sized at: what a tail bound is converted at.
+    rate: SampleRate,
     bank: FreeverbBank,
     glides: FreeverbGlides,
 }
@@ -138,7 +140,7 @@ impl Kernel for FreeverbKernel {
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
         let bank = FreeverbBank::new(rate);
         let glides = bank.glides();
-        self.running = Some(Running { bank, glides });
+        self.running = Some(Running { rate, bank, glides });
         self.landed = false;
     }
 
@@ -175,7 +177,7 @@ impl Kernel for FreeverbKernel {
 
     /// The bank's ceiling (the room at its largest), or the room's own for a send, or
     /// [`Tail::Unbounded`] when that is past what a graph takes as a finite figure
-    /// ([`MAX_NODE_TAIL`]).
+    /// ([`MAX_NODE_TAIL`] at the prepared rate).
     fn tail(&self) -> Tail {
         let Some(r) = &self.running else {
             return Tail::Unknown;
@@ -185,7 +187,7 @@ impl Kernel for FreeverbKernel {
             .as_ref()
             .map_or_else(|| r.bank.tail(), |c| r.bank.tail_of(c));
         match tail {
-            Tail::Finite(n) if n > MAX_NODE_TAIL => Tail::Unbounded,
+            Tail::Finite(n) if n > MAX_NODE_TAIL.to_samples_ceil(r.rate) => Tail::Unbounded,
             tail => tail,
         }
     }

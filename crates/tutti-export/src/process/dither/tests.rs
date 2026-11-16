@@ -4,7 +4,7 @@ use tutti_dsp::DitherShape;
 use tutti_types::ChannelLayout;
 
 fn config(dither: Option<DitherShape>, format: Format) -> FileTarget {
-    FileTarget::new("unused.wav", format, ChannelLayout::STEREO).with_dither(dither)
+    FileTarget::new("unused.wav", format, ChannelLayout::STEREO).dither(dither)
 }
 
 fn wav(pcm: Pcm) -> Format {

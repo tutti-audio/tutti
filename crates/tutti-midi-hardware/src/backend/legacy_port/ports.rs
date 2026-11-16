@@ -1,6 +1,6 @@
 //! What names a byte port: its identity, and the id it is opened by.
 
-use crate::capability::{EndpointInfo, UmpCapability};
+use crate::capability::{OsEndpoint, UmpCapability};
 use std::collections::BTreeMap;
 
 use tutti_midi_device::{EndpointId, Identity, WinMmDevice};
@@ -101,12 +101,12 @@ pub(in crate::backend) fn locate(
 
 /// The endpoint of the `occurrence`th port that `info` describes on `side`: a
 /// MIDI 1.0 port with no Function Blocks, named as the driver names it.
-pub(in crate::backend) fn endpoint(side: Side, occurrence: u32, info: PortInfo) -> EndpointInfo {
+pub(in crate::backend) fn endpoint(side: Side, occurrence: u32, info: PortInfo) -> OsEndpoint {
     let identity = match side {
         Side::Input => Identity::winmm_input(info.device.clone()),
         Side::Output => Identity::winmm_output(info.device.clone()),
     };
-    EndpointInfo {
+    OsEndpoint {
         id: endpoint_id(side, occurrence, &info),
         identity,
         name: info.name,
@@ -119,7 +119,7 @@ pub(in crate::backend) fn endpoint(side: Side, occurrence: u32, info: PortInfo) 
 pub(in crate::backend) fn endpoints(
     side: Side,
     ports: impl IntoIterator<Item = PortInfo>,
-) -> Vec<EndpointInfo> {
+) -> Vec<OsEndpoint> {
     let mut seen: BTreeMap<u32, u32> = BTreeMap::new();
     ports
         .into_iter()

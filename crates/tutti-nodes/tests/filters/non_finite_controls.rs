@@ -314,8 +314,9 @@ fn svf_ladder_delay_moddelay_phaser_compressor_gate_hold_off_non_finite_controls
 /// recursive state, but the block's end starts the next block's ramp.
 #[test]
 fn the_convolver_holds_off_non_finite_controls() {
-    use tutti_nodes::{ConvolverNode, generate_test_ir};
-    let ir = generate_test_ir(128, Seconds::new(0.1), SampleRate::SR_48K);
+    use tutti_fixtures::signal::decay_ir;
+    use tutti_nodes::ConvolverNode;
+    let ir = decay_ir(128, Seconds::new(0.1), SampleRate::SR_48K);
     survives_node(
         "convolver",
         || ConvolverNode::shared_ir(ChannelLayout::STEREO, &ir, 64).unwrap(),
@@ -339,7 +340,7 @@ fn the_distortion_holds_off_non_finite_controls() {
         survives_node(
             "distortion",
             || DistortionNode::new(kind, Drive::new(2.0)),
-            |n| vec![("drive", n.drive().cell(), 5.0)],
+            |n| vec![("drive", n.param_set().cell(UnitParam::Drive).unwrap(), 5.0)],
         );
     }
 }

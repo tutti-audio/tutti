@@ -1,7 +1,7 @@
 //! What the session's MIDI reports from [`Session::update`](crate::Session::update):
-//! [`MidiEvent`], nested under [`SessionEvent::Midi`](crate::SessionEvent::Midi).
+//! [`MidiReport`], nested under [`SessionEvent::Midi`](crate::SessionEvent::Midi).
 
-/// A MIDI event of the session, one per thing that happened.
+/// One thing that happened in the session's MIDI, reported once.
 ///
 /// A variant about one device carries its `DeviceId`
 /// as a field; a count over every input or the output has no device, and is its
@@ -11,26 +11,26 @@
 /// `Phase::MidiOut`.
 #[derive(Debug)]
 #[non_exhaustive]
-pub enum MidiEvent {
+pub enum MidiReport {
     /// A MIDI device was added to the list, in the order the OS reported.
     /// The session reads the devices in `Phase::Poll`; the
     /// list at any time is [`Midi::devices`](crate::Midi::devices).
     #[cfg(feature = "midi-hardware")]
     Added {
         /// What is listed of it; `info.id` is the device.
-        info: tutti_midi_hardware::DeviceInfo,
+        info: tutti_midi_device::DeviceInfo,
     },
     /// A MIDI device left the list; `info` is its last.
     #[cfg(feature = "midi-hardware")]
     Removed {
         /// Its last listing; `info.id` is the device.
-        info: tutti_midi_hardware::DeviceInfo,
+        info: tutti_midi_device::DeviceInfo,
     },
     /// A listed device's name or direction changed; its id did not.
     #[cfg(feature = "midi-hardware")]
     Changed {
         /// Its listing now; `info.id` is the device.
-        info: tutti_midi_hardware::DeviceInfo,
+        info: tutti_midi_device::DeviceInfo,
     },
     /// A MIDI-CI peer's Profiles became known or changed, a request to switch one
     /// ended, or the peer's Profiles were dropped with it (M2-101 section 7): the
@@ -43,7 +43,7 @@ pub enum MidiEvent {
     #[cfg(feature = "midi-hardware")]
     CiProfiles {
         /// The device.
-        device: tutti_midi_hardware::DeviceId,
+        device: tutti_midi_device::DeviceId,
         /// The peer.
         peer: tutti_midi_hardware::PeerId,
         /// What happened.
@@ -60,7 +60,7 @@ pub enum MidiEvent {
     #[cfg(feature = "midi-hardware")]
     CiProcess {
         /// The device.
-        device: tutti_midi_hardware::DeviceId,
+        device: tutti_midi_device::DeviceId,
         /// The peer.
         peer: tutti_midi_hardware::PeerId,
         /// What happened.
@@ -166,10 +166,10 @@ pub enum MidiEvent {
 }
 
 #[cfg(feature = "midi-hardware")]
-impl MidiEvent {
+impl MidiReport {
     /// The event a change of the device list is.
-    pub(crate) fn of_device(event: tutti_midi_hardware::DeviceEvent) -> Self {
-        use tutti_midi_hardware::DeviceEvent;
+    pub(crate) fn of_device(event: tutti_midi_device::DeviceEvent) -> Self {
+        use tutti_midi_device::DeviceEvent;
         match event {
             DeviceEvent::Added(info) => Self::Added { info },
             DeviceEvent::Removed(info) => Self::Removed { info },
@@ -178,8 +178,8 @@ impl MidiEvent {
     }
 }
 
-impl From<MidiEvent> for crate::SessionEvent {
-    fn from(event: MidiEvent) -> Self {
+impl From<MidiReport> for crate::SessionEvent {
+    fn from(event: MidiReport) -> Self {
         Self::Midi(event)
     }
 }

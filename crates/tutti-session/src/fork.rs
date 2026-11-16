@@ -81,7 +81,7 @@ impl PendingExport {
         Ok(ForkedPair {
             editor,
             executor,
-            setup: Setup::new().with_pool(self.pool).with_root(self.root),
+            setup: Setup::new().pool(self.pool).root(self.root),
         })
     }
 }

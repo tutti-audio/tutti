@@ -20,11 +20,13 @@ fn jr(utility: Utility) -> Ump {
 
 /// A connected, settled wire and a graph reading its inlets.
 fn settled(timing: InputTiming, device: Endpoint) -> (Wire, Rig, DeviceStream) {
-    let mut wire = session_over(UmpCapability::midi2(), PortDirection::Duplex, device);
-    let crate::Connected::Opened(inlet) = wire
-        .session
-        .connect_input(&wire.id.clone(), timing)
-        .unwrap()
+    let mut wire = session_over_timing(
+        UmpCapability::midi2(),
+        PortDirection::Duplex,
+        device,
+        timing,
+    );
+    let crate::Connected::Opened(inlet) = wire.session.connect_input(&wire.id.clone()).unwrap()
     else {
         panic!("the wire's input was not open");
     };
@@ -84,15 +86,13 @@ fn txjr_is_asked_for_only_by_an_input_opened_for_jr() {
         (InputTiming::JitterReduction, true),
         (InputTiming::Arrival, false),
     ] {
-        let mut wire = session_over(
+        let mut wire = session_over_timing(
             UmpCapability::midi2(),
             PortDirection::Duplex,
             offering_both(),
+            timing,
         );
-        let _ = wire
-            .session
-            .connect_input(&wire.id.clone(), timing)
-            .unwrap();
+        let _ = wire.session.connect_input(&wire.id.clone()).unwrap();
         let mut asked = Vec::new();
         let mut settled = None;
         for ms in 0..8 {
@@ -172,15 +172,13 @@ fn an_arrival_input_keeps_the_arrival_stamp_though_the_device_sends_jr() {
 /// Spec: m2-104/7.1.6.2#5
 #[test]
 fn no_jr_is_expected_before_the_notification() {
-    let mut wire = session_over(
+    let mut wire = session_over_timing(
         UmpCapability::midi2(),
         PortDirection::Duplex,
         offering_both(),
+        InputTiming::JitterReduction,
     );
-    let crate::Connected::Opened(inlet) = wire
-        .session
-        .connect_input(&wire.id.clone(), InputTiming::JitterReduction)
-        .unwrap()
+    let crate::Connected::Opened(inlet) = wire.session.connect_input(&wire.id.clone()).unwrap()
     else {
         panic!("the wire's input was not open");
     };
@@ -261,10 +259,7 @@ fn a_reconnected_input_asks_again_to_stop_jr() {
     send_ump(&wire, on, 20);
     wire.poll(30);
     assert!(wire.session.disconnect_input(&wire.id.clone()));
-    let _ = wire
-        .session
-        .connect_input(&wire.id.clone(), InputTiming::Arrival)
-        .unwrap();
+    let _ = wire.session.connect_input(&wire.id.clone()).unwrap();
     wire.counters.take_sent(wire.raw);
     // A new device state answers the new negotiation, and turns TXJR on again.
     let settled = settle(&mut wire);
@@ -347,41 +342,6 @@ fn events_are_placed_in_the_order_they_arrive() {
     let at = |ump| heard.iter().find(|h| h.2 == ump).expect("heard").1;
     assert_eq!(heard.len(), 2);
     assert!(at(first) <= at(second));
-}
-
-/// Changing an open input's timing keeps its port: the events queued before the
-/// change are all heard, the device is asked again with the new request, and
-/// events after the settle are placed by the new source.
-#[test]
-fn changing_an_open_inputs_timing_keeps_its_queued_events() {
-    let (mut wire, mut rig, first) = settled(InputTiming::Arrival, offering_both());
-    assert!(!first.config().tx_jr);
-    let notes: Vec<Ump> = (0..3)
-        .map(|n| midi::note_on(MidiChannel::FIRST, 70 + n, 0xFFFF))
-        .collect();
-    for (n, note) in notes.iter().enumerate() {
-        assert!(
-            wire.counters
-                .send_input(wire.raw, *note, wire.at(1_000 + 10 * n as u64))
-        );
-    }
-    let id = wire.id.clone();
-    let _ = wire
-        .session
-        .connect_input(&id, InputTiming::JitterReduction)
-        .unwrap();
-    assert_eq!(wire.counters.opens(), 1, "the port is not reopened");
-    let mut settled = None;
-    for ms in 10..20 {
-        settled = settled.or(wire.tick(ms).1.pop());
-    }
-    assert!(settled.expect("asked again, and settled").1.config().tx_jr);
-    let (frame, heard) = note_delayed_by_10ms(&wire, &mut rig);
-    assert_near(frame, frame_at(1_000 + 312 + LATENCY));
-    for note in &notes {
-        assert!(heard.contains(note), "{note:?} was lost by the change");
-    }
-    assert_eq!(heard.len(), 4);
 }
 
 /// A JR Clock repeated is counted late once, and one that jumps restarts the

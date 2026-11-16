@@ -13,7 +13,7 @@ use tutti_graph::{
     Edge, Feed, FeedbackFrom, InPort, Invalid, LatencyGraph, NodeKey, NodeSpec, OutPort, PortFeed,
     Sink, Source, TapAlign, TapId, TapSpec, Topology, graph_tail, latency_plan,
 };
-use tutti_types::{ChannelLayout, Samples, Tail};
+use tutti_types::{ChannelLayout, SampleRate, Samples, Tail};
 
 const A: NodeKey = NodeKey(1);
 const B: NodeKey = NodeKey(2);
@@ -87,13 +87,13 @@ fn latency_and_tail_are_folds_over_the_value() {
     let t = unequal_latency_diamond();
     t.validate().expect("well formed");
 
-    let comp = latency_plan(&t);
+    let comp = latency_plan(&t, SampleRate::SR_48K);
     assert_eq!(comp.total(), Samples(512), "graph latency is the slow path");
     // The un-delayed branch is the one that needs pre-roll; the compensation is
     // reported per output channel, and there is one.
     assert_eq!(comp.channels(), [Samples(0)]);
 
-    let tail = graph_tail(&t);
+    let tail = graph_tail(&t, SampleRate::SR_48K);
     assert_eq!(tail.samples(), Some(Samples(64)));
     assert_eq!(tail.unknown_nodes(), 0);
 
@@ -122,7 +122,7 @@ fn an_undeclared_tail_is_counted_as_unknown() {
     let mut t = chain();
     t.nodes.get_mut(&B).unwrap().tail = Tail::Unknown;
 
-    let tail = graph_tail(&t);
+    let tail = graph_tail(&t, SampleRate::SR_48K);
     assert_eq!(tail.unknown_nodes(), 1);
     assert_eq!(tail.samples(), None, "an unknown node has no finite answer");
 }
@@ -382,7 +382,10 @@ fn a_cycle_is_rejected_unless_feedback_breaks_it() {
     let mut lat = broken.clone();
     lat.nodes.get_mut(&A).unwrap().latency = Samples(128);
     let lat = lat.validate().expect("still acyclic");
-    assert_eq!(latency_plan(lat.get()).total(), Samples(128));
+    assert_eq!(
+        latency_plan(lat.get(), SampleRate::SR_48K).total(),
+        Samples(128)
+    );
 }
 
 /// An unconnected declared port is reported and does **not** block validity: a
@@ -437,8 +440,8 @@ fn insertion_order_does_not_change_the_value() {
     assert_eq!(hash_of(&forward), hash_of(&backward));
     assert_eq!(forward.topo_order(), backward.topo_order());
     assert_eq!(
-        latency_plan(&forward).total(),
-        latency_plan(&backward).total()
+        latency_plan(&forward, SampleRate::SR_48K).total(),
+        latency_plan(&backward, SampleRate::SR_48K).total()
     );
 }
 

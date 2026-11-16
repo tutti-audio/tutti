@@ -158,7 +158,7 @@
 //! ## Normalization is part of an output, not of the render
 //!
 //! Choosing a gain means measuring the whole signal first, which is two passes. So
-//! an output that asks for it (`FileTarget::with_normalize`) does not stream: its
+//! an output that asks for it (`FileTarget::normalize`) does not stream: its
 //! audio waits in a spill while the graph renders, is measured at the file's rate
 //! (`Normalize::Peak` or `Normalize::Lufs`, which an integer format's headroom
 //! lowers) and is written with the gain, which `Written::gain` reports beside the
@@ -250,7 +250,7 @@ pub struct Written {
     /// below full scale for an integer format, so this stays `0` unless the
     /// programme itself was past full scale.
     pub clipped_samples: u64,
-    /// The gain a normalizing output applied ([`FileTarget::with_normalize`]);
+    /// The gain a normalizing output applied ([`FileTarget::normalize`]);
     /// `None` for the others, so `None` means the file is as rendered. Chosen
     /// against the target or ceiling after an integer format's headroom was
     /// taken off it, so for [`Normalize::Peak`] it is
@@ -272,7 +272,7 @@ pub struct Written {
     /// [`gain`](Self::gain) is still its peak normalization.
     pub measured: Option<Loudness>,
     /// Whether the file's channels were placed by the output
-    /// ([`FileTarget::with_topology`]: [`Stated`](tutti_types::Placement::Stated))
+    /// ([`FileTarget::topology`]: [`Stated`](tutti_types::Placement::Stated))
     /// or taken to be the engine's order for the width
     /// ([`ChannelTopology::assumed`](tutti_types::ChannelTopology::assumed):
     /// [`Assumed`](tutti_types::Placement::Assumed)). A `Lufs` normalize
@@ -429,7 +429,7 @@ pub fn write_buffers(
     on_event_loss: EventLossPolicy,
 ) -> Result<Written> {
     frame_width(target.channels())?;
-    if target.normalize().is_some() {
+    if target.normalize.is_some() {
         return Err(Error::Target {
             output: 0,
             why: TargetError::NormalizeOfPlanes,

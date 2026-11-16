@@ -1,431 +1,183 @@
-//! Waveshaping distortion node over six memoryless curves ([`ShapeKind`]).
-//!
-//! Each curve ([`ShapeKind::apply`]) is one line of arithmetic: `Tanh`,
-//! `Atan`, `Softsign`, `Clip`, `Crush` and `SoftCrush`.
-//!
-//! The node owns an atomic `drive` (a [`Param`]) and rebuilds the cheap,
-//! stateless shaper only when drive actually moves, so `UnitParam::Drive` is
-//! written through the node's [`ParamSet`] live, with no node rebuild and no
-//! zipper noise.
-//!
-//! The waveshape *kind* (Tanh / Atan / … ) is fixed at construction: switching
-//! kind is a different effect kind, which a host handles as remove + add (a
-//! respawn), exactly like switching filter type.
-//!
-//! 2 inputs / 2 outputs by default ([`DistortionNode::with_channels`] for
-//! any width). The shaper is memoryless, so the two channels are
-//! fully independent and stereo is just the same curve applied per channel.
-//!
-//! # Modulated drive
-//!
-//! Drive is modulatable by the graph: when the graph
-//! feeds the node's param port ([`Io::param`](tutti_graph::Io::param)) a
-//! per-frame drive, it **overrides** the `drive` atomic per sample (rebuilding the stateless
-//! shaper when it moves). Unfed, the node reads its atomic once per block —
-//! bit-identical output to a node nothing can modulate, at the cost of one
-//! branch.
+//! The waveshaper [`DistortionNode`]: six memoryless curves ([`ShapeKind`]) at a drive.
 
-use crate::ramp::LastGood;
-use tutti_dsp::{ShapeKind, Shaper};
-use tutti_graph::{Cx, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status};
-use tutti_types::UnitParam;
-use tutti_types::{ChannelLayout, Drive, Param, Tail};
+use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_dsp::{COEFF_INTERVAL, ShapeKind, WaveshaperBank, WaveshaperControls};
+use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
+use tutti_types::{BusTopology, ChannelLayout, Drive, MaxBlock, SampleRate, Tail};
 
-/// Stereo waveshaping distortion. 2 inputs, 2 outputs.
+use crate::kernel::{ControlLanes, Kernel, KernelNode};
+
+/// Waveshaping distortion of any width: `N` audio inputs and `N` outputs, every channel
+/// shaped alone by the same curve at the same drive.
 ///
-/// `drive` is live-modulatable via the [`Param`] atomic (UI handle) and, in a
-/// graph, the [`ParamSet`] it is inserted with (`UnitParam::Drive`); the
-/// waveshape `kind` is set at construction.
-#[derive(Debug)]
-pub struct DistortionNode {
-    kind: ShapeKind,
-    drive: Param<Drive>,
-    shaper: Shaper,
-    last_drive: f32,
-    /// The last finite drive read from the cell or the port: an infinite one
-    /// would build an infinitely hard shaper (a NaN is already inert).
-    good: LastGood,
-    /// Audio channel width (as many inputs as outputs). The shaper is
-    /// stateless and channel-shared, so widening is purely the port count.
-    layout: ChannelLayout,
-}
-
-// The params a [`DistortionNode`] lets the graph modulate, in port order.
-tutti_graph::declare_params!([] DistortionNode, n {
-    Drive => Drive = &n.drive,
-});
+/// A [`KernelNode`] over [`DistortionKernel`], the curves and the drive's glide being
+/// [`WaveshaperBank`]'s; this file holds the cell and how the graph reaches it. The curve
+/// ([`ShapeKind`]) is fixed at construction: a node with another one is another node.
+///
+/// # Drive
+///
+/// The drive is input gain into the curve, floored at 0 ([`ShapeKind::apply`] says what the
+/// two staircases make of it). It is a live [`Params`](crate::Params) cell shared across
+/// clones, set through the node's [`ParamSet`](tutti_graph::ParamSet) or the graph's
+/// `set_param` (`UnitParam::Drive`); a value that is not finite reads as the last one that
+/// was.
+///
+/// **It is read per frame** when the graph drives it: a lane on its port is the bank's own, and a
+/// frame of it that is not finite reads the drive in force: the cell's, gliding to its value. A
+/// cell that moves is sampled at the stream grid (16 frames from the last reset, [`Kernel::GRID`])
+/// and glides over [`GAIN_GLIDE`](tutti_dsp::GAIN_GLIDE), 5 ms, so a write is no step at a block's
+/// edge and renders the same whatever the blocks.
+///
+/// The node declares no tail once prepared (the shape of a kernel node is unknown until it has
+/// a rate): the curves are memoryless, so a silent input is a silent output.
+///
+/// # In a graph
+///
+/// A graph node ([`IntoNode`](tutti_graph::IntoNode)): inserted, a fork of it starts from the
+/// value last set through its [`ParamSet`](tutti_graph::ParamSet). The graph prepares it at
+/// the device rate before its first block.
+pub type DistortionNode = KernelNode<DistortionKernel>;
 
 impl DistortionNode {
-    /// Builds a stereo waveshaper of `kind` at `drive`.
+    /// A stereo waveshaper of `kind` at `drive`.
     ///
     /// [`Drive`] is input gain into the shaping curve, floored at 0: higher
-    /// pushes further into the nonlinearity and distorts harder. The curve
-    /// itself is stateless, so drive is the only thing that changes its
-    /// character.
+    /// pushes further into the nonlinearity and distorts harder.
     pub fn new(kind: ShapeKind, drive: impl Into<Drive>) -> Self {
         Self::with_channels(ChannelLayout::STEREO, kind, drive)
     }
 
-    /// An `n`-channel waveshaper. The shaper carries no per-channel state, so
-    /// every channel is shaped by the same (linked) drive/kind.
-    /// `with_channels(ChannelLayout::STEREO, …)` is bit-identical to
-    /// [`Self::new`]. An empty layout is taken as mono, as the other nodes do.
+    /// An `n`-channel waveshaper: every channel is shaped by the same (linked) drive and
+    /// kind. An empty layout is taken as mono, as the other nodes do.
+    ///
+    /// # Panics
+    ///
+    /// Past 16 channels: a waveshaper is one bus.
     pub fn with_channels(
         channels: impl Into<ChannelLayout>,
         kind: ShapeKind,
         drive: impl Into<Drive>,
     ) -> Self {
-        let drive = drive.into();
-        let d = drive.get().max(0.0);
+        let width = ChannelLayout::from_count(channels.into().count().max(1));
+        let input =
+            BusTopology::unassigned(width).expect("a waveshaper is at most 16 channels wide");
+        Self::with_kernel(
+            DistortionKernel::new(kind, input),
+            DistortionSet,
+            WaveshaperControls {
+                drive: drive.into(),
+            },
+        )
+    }
+}
+
+/// The waveshaper's control: the drive.
+#[derive(Clone, Copy, Debug)]
+pub struct DistortionSet;
+
+control_set! {
+    DistortionSet(_s): WaveshaperControls = WaveshaperControls::DEFAULT;
+    live: (all);
+    Drive => Drive = drive { fast };
+
+    fn defaults(&self) -> WaveshaperControls {
+        WaveshaperControls::DEFAULT
+    }
+}
+
+impl DistortionSet {
+    /// The lane of the drive: the one [`fast`](crate::ControlRead::Fast) row.
+    const DRIVE_LANE: usize = 0;
+}
+
+/// The waveshaper as a [`Kernel`]: a [`WaveshaperBank`] of one curve, at the prepared rate.
+#[derive(Clone, Debug)]
+pub struct DistortionKernel {
+    kind: ShapeKind,
+    input: BusTopology,
+    bank: WaveshaperBank,
+    /// Whether the first retarget after `prepare` has landed.
+    landed: bool,
+}
+
+impl DistortionKernel {
+    /// A waveshaper of `kind` on the bus `input`. Its rate until `prepare` is a placeholder:
+    /// an unprepared node renders nothing.
+    fn new(kind: ShapeKind, input: BusTopology) -> Self {
         Self {
             kind,
-            drive: Param::new(drive),
-            shaper: Shaper::build(kind, d),
-            last_drive: d,
-            // An infinite initial drive reads as 0 here, so the first block rebuilds.
-            good: LastGood::new(d, 0.0),
-            layout: ChannelLayout::from_count(channels.into().count().max(1)),
-        }
-    }
-
-    /// A handle on the shared [`Drive`] cell, for the UI / automation.
-    #[must_use]
-    pub fn drive(&self) -> Param<Drive> {
-        self.drive.handle()
-    }
-
-    /// Rebuild the (stateless) shaper if drive has moved meaningfully. Cheap:
-    /// the shapers carry no z-state, so reconstruction is just a field swap.
-    #[inline]
-    fn maybe_update(&mut self) {
-        let d = self.good.read(self.drive.load().get());
-        if (d - self.last_drive).abs() > 1e-6 {
-            self.shaper = Shaper::build(self.kind, d);
-            self.last_drive = d;
-        }
-    }
-
-    /// Rebuild the shaper from a per-sample effective drive (audio-rate
-    /// modulation path). Same change guard as [`Self::maybe_update`] so a held
-    /// modulation value doesn't rebuild every sample needlessly.
-    #[inline]
-    fn maybe_update_modulated(&mut self, drive: f32) {
-        if (drive - self.last_drive).abs() > 1e-6 {
-            self.shaper = Shaper::build(self.kind, drive);
-            self.last_drive = drive;
+            input,
+            bank: WaveshaperBank::new(kind, SampleRate::SR_48K),
+            landed: false,
         }
     }
 }
 
-/// Shares the drive cell (the template [`tutti_graph::param_parts`] forks
-/// from).
-impl Clone for DistortionNode {
-    fn clone(&self) -> Self {
-        Self {
-            kind: self.kind,
-            drive: self.drive.handle(),
-            shaper: self.shaper,
-            last_drive: self.last_drive,
-            good: self.good,
-            layout: self.layout,
-        }
-    }
-}
+impl Kernel for DistortionKernel {
+    type Set = DistortionSet;
 
-impl Node for DistortionNode {
-    /// `channels` in and out, drive modulatable .
-    /// The shapers carry no z-state, so the output stops with the input.
-    ///
-    /// The cost is the curve's:
-    /// `Softsign` and `HardClip` are arithmetic, `Light`; `Crush` and
-    /// `SoftCrush` (a rounding call) and `Atan` and `Tanh` (a libm call)
-    /// are `Moderate`.
+    /// A cell that moves reaches the render within 16 frames, wherever the blocks fall.
+    const GRID: usize = COEFF_INTERVAL;
+
+    /// The input bus and one output bus where it is. The cost is the curve's: `Softsign` and
+    /// `HardClip` are arithmetic, `Light`; `Crush` and `SoftCrush` (a rounding call) and
+    /// `Atan` and `Tanh` (a libm call) are `Moderate`.
     fn shape(&self) -> Shape {
-        let width = self.layout;
+        let output = Bus::banded(self.input, BusRole::Main, 1).expect("one band is a bus");
         let cost = match self.kind {
-            ShapeKind::Softsign | ShapeKind::HardClip => tutti_graph::Cost::Light,
-            _ => tutti_graph::Cost::Moderate,
+            ShapeKind::Softsign | ShapeKind::HardClip => Cost::Light,
+            _ => Cost::Moderate,
         };
-        Shape::through_unassigned(width)
-            .with_cost(cost)
-            .with_tail(Tail::None)
-            .with_param_addrs(self.declared_ports().as_slice())
+        Shape::buses(
+            Buses::main(self.input),
+            Buses::NONE.with(output).expect("one bus"),
+        )
+        .with_cost(cost)
     }
 
-    /// Nothing is rate-dependent: the curves are memoryless.
-    fn prepare(&mut self, _: &Prepare) {}
+    fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
+        self.bank = WaveshaperBank::new(self.kind, rate);
+        self.landed = false;
+    }
 
-    fn process(&mut self, _cx: &Cx<'_>, mut io: Io<'_>) -> Status {
-        let size = io.frames();
-        let drive = self
-            .declared_param::<{ UnitParam::Drive as u16 }>(&io)
-            .frames();
-        let (inputs, mut outputs) = io.split();
-        // Both paths are channel-major, each loop compiled for its curve
-        // (`ShapeKind::shape_block` and friends). The curve is memoryless, so a sample's value depends
-        // only on its input and its frame's hardness, not on the loop order.
-        match drive {
-            // Fast path: drive not modulated — block-rate shaper update,
-            // bit-identical to a node nothing modulates.
-            None => {
-                self.maybe_update();
-                let h = self.shaper.hardness();
-                for (c, out) in outputs.iter_mut().enumerate() {
-                    self.kind
-                        .shape_block(h, &inputs.get(c)[..size], &mut out[..size]);
-                }
-            }
-            // Modulated path: the per-frame drive rebuilds the shaper when it
-            // moves (a sequential guard, so it runs once, in frame order),
-            // and each frame's hardness lands in channel 0's output, which
-            // is then the hardness every channel reads. Channel 0 is shaped
-            // last, over its own hardness.
-            Some(drive) => {
-                let mut outs = outputs.iter_mut();
-                let Some(first) = outs.next() else {
-                    return Status::Modified;
-                };
-                let first = &mut first[..size];
-                for (h, &d) in first.iter_mut().zip(drive) {
-                    let d = self.good.read(d);
-                    self.maybe_update_modulated(d.max(0.0));
-                    *h = self.shaper.hardness();
-                }
-                for (c, out) in outs.enumerate() {
-                    self.kind.shape_block_per_frame(
-                        &*first,
-                        &inputs.get(c + 1)[..size],
-                        &mut out[..size],
-                    );
-                }
-                self.kind
-                    .shape_block_in_place(&inputs.get(0)[..size], first);
-            }
+    /// Silence, and the next design lands at once, as a fresh node's first does.
+    fn reset(&mut self) {
+        self.bank.settle();
+        self.landed = false;
+    }
+
+    fn retarget(&mut self, controls: &WaveshaperControls) {
+        self.bank.aim(controls);
+        if !self.landed {
+            self.bank.settle();
+            self.landed = true;
         }
-        Status::Modified
     }
 
-    fn reset(&mut self) {}
-
-    fn param_base(&self, k: usize) -> Option<f32> {
-        self.declared_base(k)
+    fn render<S: Float>(
+        &mut self,
+        input: Planes<'_, S>,
+        lanes: ControlLanes<'_, S>,
+        output: PlanesMut<'_, '_, S>,
+    ) {
+        self.bank
+            .process(lanes.get(DistortionSet::DRIVE_LANE), input, output);
+        // A design after a render is a move, which glides.
+        self.landed = true;
     }
-}
 
-impl ParamNode for DistortionNode {
-    /// The drive.
-    fn param_set(&self) -> ParamSet {
-        self.declared_set()
-    }
-
-    /// A clone with its drive cell detached.
-    fn fork_fresh(&self) -> Self {
-        let mut fork = self.clone();
-        fork.drive.detach();
-        fork
-    }
-}
-
-/// Inserted with its [`ParamSet`] as its controls and a fork from the value
-/// last set through it ([`tutti_graph::param_parts`]).
-impl IntoNode for DistortionNode {
-    type Controls = ParamSet;
-
-    fn into_parts(self) -> NodeParts<ParamSet> {
-        tutti_graph::param_parts(self)
+    fn tail(&self) -> Tail {
+        Tail::None
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{RATE, tick};
+    use crate::test_support::{RATE, assert_cell_glides, drive_block, prepared, render_change};
     use tutti_graph::contract::{assert_param_fork, drive};
+    use tutti_graph::{Node, ParamNode};
     use tutti_types::UnitParam;
-
-    fn process_mono_through(node: &mut DistortionNode, input: &[f32]) -> Vec<f32> {
-        let mut out = vec![0.0f32; input.len()];
-        for (i, &x) in input.iter().enumerate() {
-            let mut o = [0.0f32; 2];
-            tick(node, &[x, x], &mut o);
-            out[i] = o[0];
-        }
-        out
-    }
-
-    /// A fork starts from the drive last set through the node's `ParamSet`
-    /// and shares no cell with it.
-    #[test]
-    fn a_fork_shares_no_cell() {
-        assert_param_fork(DistortionNode::new(ShapeKind::Tanh, Drive::new(2.0)));
-    }
-
-    #[test]
-    fn distortion_is_two_in_two_out() {
-        let n = DistortionNode::new(ShapeKind::Tanh, Drive::new(1.0));
-        assert_eq!(n.shape().audio_in().count(), 2);
-        assert_eq!(n.shape().audio_out().count(), 2);
-    }
-
-    #[test]
-    fn with_channels_reports_arity_and_shapes_every_channel() {
-        let mut n = DistortionNode::with_channels(6u16, ShapeKind::HardClip, Drive::new(1.0));
-        assert_eq!(n.shape().audio_in().count(), 6);
-        assert_eq!(n.shape().audio_out().count(), 6);
-
-        // Each channel gets the same (linked) shaper — hardclip clamps all 6.
-        let mut out = [0.0f32; 6];
-        tick(&mut n, &[4.0, -4.0, 2.0, -2.0, 0.5, -0.5], &mut out);
-        for (c, &y) in out.iter().enumerate() {
-            assert!(
-                (-1.0 - 1e-6..=1.0 + 1e-6).contains(&y),
-                "ch{c} not hardclipped: {y}"
-            );
-        }
-        // The two saturating channels actually hit the rails (not silent).
-        assert!((out[0] - 1.0).abs() < 1e-6);
-        assert!((out[1] + 1.0).abs() < 1e-6);
-    }
-
-    #[test]
-    fn hardclip_clamps_to_unity() {
-        let mut n = DistortionNode::new(ShapeKind::HardClip, Drive::new(1.0));
-        let input = vec![-4.0, -1.0, 0.0, 1.0, 4.0];
-        let out = process_mono_through(&mut n, &input);
-        for y in out {
-            assert!(
-                (-1.0 - 1e-6..=1.0 + 1e-6).contains(&y),
-                "hardclip exceeded ±1: {y}"
-            );
-        }
-    }
-
-    #[test]
-    fn tanh_is_monotonic_and_bounded() {
-        let mut n = DistortionNode::new(ShapeKind::Tanh, Drive::new(2.0));
-        let input: Vec<f32> = (0..200).map(|i| (i as f32 / 100.0) - 1.0).collect();
-        let out = process_mono_through(&mut n, &input);
-        // tanh saturates within (-1, 1) and is strictly increasing for increasing input.
-        for w in out.windows(2) {
-            assert!(
-                w[1] >= w[0] - 1e-6,
-                "tanh not monotonic: {} -> {}",
-                w[0],
-                w[1]
-            );
-        }
-        for &y in &out {
-            assert!(y.abs() <= 1.0, "tanh out of bounds: {y}");
-        }
-    }
-
-    #[test]
-    fn higher_drive_saturates_more() {
-        // Same input, more drive → the saturating curve pushes mid-level signal
-        // closer to the rails, so RMS rises.
-        let signal: Vec<f32> = (0..512).map(|i| 0.3 * (i as f32 * 0.05).sin()).collect();
-        let rms = |v: &[f32]| (v.iter().map(|x| x * x).sum::<f32>() / v.len() as f32).sqrt();
-
-        let mut low = DistortionNode::new(ShapeKind::Tanh, Drive::new(1.0));
-        let mut high = DistortionNode::new(ShapeKind::Tanh, Drive::new(8.0));
-        let out_low = process_mono_through(&mut low, &signal);
-        let out_high = process_mono_through(&mut high, &signal);
-        assert!(
-            rms(&out_high) > rms(&out_low),
-            "more drive should raise RMS: low={}, high={}",
-            rms(&out_low),
-            rms(&out_high)
-        );
-    }
-
-    /// Drive is reachable by address through the node's `ParamSet`, and an
-    /// address it does not own is refused.
-    #[test]
-    fn drive_settable_via_unit_param() {
-        let n = DistortionNode::new(ShapeKind::Tanh, Drive::new(1.0));
-        let set = n.param_set();
-        assert!(set.set(UnitParam::Drive, 5.0));
-        assert!((n.drive().load().get() - 5.0).abs() < 1e-3);
-        // A param this unit doesn't own is refused.
-        assert!(!set.set(UnitParam::Cutoff, 1000.0));
-    }
-
-    #[test]
-    fn channels_are_independent() {
-        let mut n = DistortionNode::new(ShapeKind::HardClip, Drive::new(1.0));
-        let mut o = [0.0f32; 2];
-        tick(&mut n, &[4.0, 0.5], &mut o);
-        assert!(
-            (o[0] - 1.0).abs() < 1e-6,
-            "L should clip to 1.0, got {}",
-            o[0]
-        );
-        assert!((o[1] - 0.5).abs() < 1e-6, "R should pass 0.5, got {}", o[1]);
-    }
-
-    // ── Modulated drive (the graph's param feed) ────────────────────────────
-
-    /// The shape declares drive, and never changes the arity.
-    #[test]
-    fn distortion_declares_its_drive_param() {
-        let d = DistortionNode::new(ShapeKind::Tanh, Drive::new(1.0));
-        assert_eq!(d.shape().params.as_slice(), &[UnitParam::Drive][..]);
-        assert_eq!(
-            (d.shape().audio_in().count(), d.shape().audio_out().count()),
-            (2, 2)
-        );
-        assert_eq!(d.param_base(0), Some(1.0), "the base is the drive control");
-    }
-
-    #[test]
-    fn distortion_unmodulated_matches_held_constant() {
-        // A node whose fed drive is held at the same value as a plain node's
-        // atomic must produce bit-identical output — the modulated path is a
-        // faithful superset. Tanh at drive 5.0 saturates hard enough that any
-        // divergence would show.
-        let signal: Vec<f32> = (0..512).map(|i| 0.6 * (i as f32 * 0.05).sin()).collect();
-
-        let mut plain = DistortionNode::new(ShapeKind::Tanh, Drive::new(5.0));
-        let plain_out = process_mono_through(&mut plain, &signal);
-
-        let mut modn = DistortionNode::new(ShapeKind::Tanh, Drive::new(5.0));
-        let held = vec![5.0f32; signal.len()];
-        let mod_out = drive(&mut modn, RATE, &[&signal, &signal], &[Some(&held)]);
-        for i in 0..signal.len() {
-            assert!(
-                (plain_out[i] - mod_out[0][i]).abs() < 1e-6,
-                "modulated-held output diverges from plain at sample {i}: {} vs {}",
-                plain_out[i],
-                mod_out[0][i]
-            );
-        }
-    }
-
-    /// A fed drive shapes every channel of a wide node, per frame: with the
-    /// drive fed a step, each of six channels saturates harder from the
-    /// step's frame on, and a block whose param reads its base reads the
-    /// control again.
-    #[test]
-    fn a_fed_drive_shapes_every_channel_of_a_wide_node() {
-        let mut n = DistortionNode::with_channels(6u16, ShapeKind::HardClip, Drive::new(1.0));
-        assert_eq!(
-            (n.shape().audio_in().count(), n.shape().audio_out().count()),
-            (6, 6)
-        );
-        let x = vec![0.25f32; 64];
-        let ins: Vec<&[f32]> = (0..6).map(|_| &x[..]).collect();
-        let drive_step: Vec<f32> = (0..64).map(|i| if i < 32 { 1.0 } else { 3.0 }).collect();
-        let out = drive(&mut n, RATE, &ins, &[Some(&drive_step)]);
-        for (c, o) in out.iter().enumerate() {
-            assert_eq!(o[31], 0.25, "channel {c} before the step");
-            assert_eq!(o[32], 0.75, "channel {c} on the step's frame");
-        }
-        let out = drive(&mut n, RATE, &ins, &[None]);
-        assert!(
-            out.iter().all(|o| o.iter().all(|&y| y == 0.25)),
-            "the control again"
-        );
-    }
 
     const KINDS: [ShapeKind; 6] = [
         ShapeKind::Tanh,
@@ -436,53 +188,166 @@ mod tests {
         ShapeKind::SoftCrush,
     ];
 
-    /// Every output sample of a block is the node's curve applied to that
-    /// channel's own input at the node's drive: the per-kind loops pick the
-    /// curve they name and read their own channel at their own frame.
+    fn hard_clip(channels: u16, drive: f32) -> DistortionNode {
+        prepared(DistortionNode::with_channels(
+            channels,
+            ShapeKind::HardClip,
+            Drive::new(drive),
+        ))
+    }
+
+    /// A fork starts from the drive last set through the node's `ParamSet` and shares no
+    /// cell with it.
     #[test]
-    fn a_block_is_the_curve_of_each_sample() {
-        use crate::test_support::noise;
-        for kind in KINDS {
-            let mut n = DistortionNode::with_channels(3u16, kind, Drive::new(2.5));
-            let ins: Vec<Vec<f32>> = (0..3).map(|c| noise(c + 7, 64)).collect();
-            let refs: Vec<&[f32]> = ins.iter().map(|c| &c[..]).collect();
-            let out = drive(&mut n, RATE, &refs, &[None]);
-            for (c, (o, x)) in out.iter().zip(&ins).enumerate() {
-                for (i, (&y, &x)) in o.iter().zip(x).enumerate() {
-                    let want = kind.apply(x, Drive(2.5));
-                    assert_eq!(y.to_bits(), want.to_bits(), "{kind:?} ch{c} frame {i}");
-                }
-            }
+    fn a_fork_shares_no_cell() {
+        assert_param_fork(DistortionNode::new(ShapeKind::Tanh, Drive::new(2.0)));
+    }
+
+    /// The node is stereo unless told otherwise, and the shape declares the drive.
+    #[test]
+    fn the_shape_is_stereo_and_declares_its_drive_param() {
+        let n = DistortionNode::new(ShapeKind::Tanh, Drive::new(1.5));
+        let shape = n.shape();
+        assert_eq!(
+            (shape.audio_in().count(), shape.audio_out().count()),
+            (2, 2)
+        );
+        assert_eq!(shape.params.as_slice(), &[UnitParam::Drive][..]);
+        assert_eq!(n.param_base(0), Some(1.5), "the base is the drive control");
+    }
+
+    /// An `n`-channel node reports `n` in and out, and shapes each channel at the same
+    /// drive: a hard clip at drive 1 is the clamp to ±1 of each channel alone.
+    #[test]
+    fn a_wide_node_shapes_every_channel_alone() {
+        let mut n = hard_clip(6, 1.0);
+        assert_eq!(
+            (n.shape().audio_in().count(), n.shape().audio_out().count()),
+            (6, 6)
+        );
+        let x = [4.0f32, -4.0, 2.0, -2.0, 0.5, -0.5];
+        let ins: Vec<&[f32]> = x.iter().map(std::slice::from_ref).collect();
+        let out = drive_block(&mut n, &ins);
+        let want = [1.0f32, -1.0, 1.0, -1.0, 0.5, -0.5];
+        for (c, (y, w)) in out.iter().zip(want).enumerate() {
+            assert_eq!(y[0], w, "channel {c}");
         }
     }
 
-    /// With a drive fed that moves every frame, every channel's sample is
-    /// the curve at that frame's drive, channel 0 included (whose output
-    /// holds the hardness until it is shaped last).
+    /// An empty layout is taken as mono.
     #[test]
-    fn a_fed_drive_is_read_per_frame_on_every_channel() {
-        use crate::test_support::noise;
-        let fed: Vec<f32> = (0..64).map(|i| 1.0 + 0.125 * i as f32).collect();
-        for kind in KINDS {
-            let mut n = DistortionNode::with_channels(3u16, kind, Drive::new(1.0));
-            let ins: Vec<Vec<f32>> = (0..3).map(|c| noise(c + 11, 64)).collect();
-            let refs: Vec<&[f32]> = ins.iter().map(|c| &c[..]).collect();
-            let out = drive(&mut n, RATE, &refs, &[Some(&fed)]);
-            for (c, (o, x)) in out.iter().zip(&ins).enumerate() {
-                for (i, (&y, &x)) in o.iter().zip(x).enumerate() {
-                    let want = kind.apply(x, Drive(fed[i]));
-                    assert_eq!(y.to_bits(), want.to_bits(), "{kind:?} ch{c} frame {i}");
-                }
-            }
-        }
+    fn an_empty_layout_is_mono() {
+        let n = DistortionNode::with_channels(0u16, ShapeKind::Tanh, Drive::new(1.0));
+        assert_eq!(n.shape().audio_in().count(), 1);
     }
 
-    /// The two arithmetic-only curves declare themselves `Light`, the four
-    /// that call a math routine (`tanh`, `atan`, `round`, `floor`)
-    /// `Moderate`.
+    /// Drive is reachable by address through the node's `ParamSet`, and an address it does
+    /// not own is refused.
+    #[test]
+    fn drive_is_settable_by_unit_param() {
+        let n = DistortionNode::new(ShapeKind::Tanh, Drive::new(1.0));
+        let set = n.param_set();
+        assert!(set.set(UnitParam::Drive, 5.0));
+        assert_eq!(set.get(UnitParam::Drive), Some(5.0));
+        assert!(!set.set(UnitParam::Cutoff, 1000.0));
+    }
+
+    /// A drive fed a step shapes every channel of a wide node from the step's own frame:
+    /// each of six channels clips `0.25` at `1` before and `3` from frame 32, and a block
+    /// whose port is not fed reads the cell again.
+    #[test]
+    fn a_fed_drive_shapes_every_channel_of_a_wide_node() {
+        let mut n = hard_clip(6, 1.0);
+        let x = vec![0.25f32; 64];
+        let ins: Vec<&[f32]> = (0..6).map(|_| &x[..]).collect();
+        let step: Vec<f32> = (0..64).map(|i| if i < 32 { 1.0 } else { 3.0 }).collect();
+        let out = drive(&mut n, RATE, &ins, &[Some(&step)]);
+        for (c, o) in out.iter().enumerate() {
+            assert_eq!(o[31], 0.25, "channel {c} before the step");
+            assert_eq!(o[32], 0.75, "channel {c} on the step's frame");
+        }
+        let out = drive(&mut n, RATE, &ins, &[None]);
+        assert!(
+            out.iter().all(|o| o.iter().all(|&y| y == 0.25)),
+            "the cell again"
+        );
+    }
+
+    /// A cell written between blocks glides on the stream clock, whatever the blocks, and the
+    /// glide is the line from the old drive to the new over `GAIN_GLIDE`: frame `i` of a hard
+    /// clip of `0.2` is `0.2 (1 + 2 (i + 1) / n)`, and the frames after it are `0.6`.
+    #[test]
+    fn a_drive_written_between_blocks_glides_over_the_glide() {
+        let make = || DistortionNode::with_channels(1u16, ShapeKind::HardClip, Drive::new(1.0));
+        let change = |n: &DistortionNode| {
+            assert!(n.param_set().set(UnitParam::Drive, 3.0));
+        };
+        let before = vec![0.2f32; 64];
+        let after = vec![0.2f32; 600];
+        assert_cell_glides(make, change, &[&before], &[&after], "drive");
+        let (_, out) = render_change(make, change, &[&before], &[&after], 64);
+        let n = tutti_dsp::GAIN_GLIDE.to_samples_ceil(RATE).get();
+        for (i, &y) in out[0].iter().enumerate().take(n) {
+            let want = 0.2 * (1.0 + 2.0 * (i + 1) as f64 / n as f64);
+            assert!((f64::from(y) - want).abs() < 1e-6, "frame {i}: {y}");
+        }
+        assert!(out[0][n..].iter().all(|&y| y == 0.2 * 3.0));
+    }
+
+    /// A drive that is not finite is refused, written or fed: the render stays at the last
+    /// drive that was (a hard clip of `0.25` at 2 is `0.5`), and a built-in non-finite drive
+    /// reads as unity.
+    #[test]
+    fn a_non_finite_drive_is_refused() {
+        let mut n = hard_clip(1, 2.0);
+        let x = vec![0.25f32; 64];
+        for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            assert!(n.param_set().set(UnitParam::Drive, bad));
+            let out = drive_block(&mut n, &[&x]);
+            assert!(out[0].iter().all(|&y| y == 0.5), "written {bad}");
+            let fed = vec![bad; 64];
+            let out = drive(&mut n, RATE, &[&x], &[Some(&fed)]);
+            assert!(out[0].iter().all(|&y| y == 0.5), "fed {bad}");
+        }
+        let mut built = hard_clip(1, f32::NAN);
+        let out = drive_block(&mut built, &[&x]);
+        assert!(out[0].iter().all(|&y| y == 0.25), "built with NaN");
+    }
+
+    /// A cell written after a reset lands on the first frame, as a fresh node's first design
+    /// does: a hard clip of `0.2` reads `0.6` at drive 3 from frame 0, though the drive was
+    /// 1 before.
+    #[test]
+    fn a_cell_written_after_a_reset_lands_whole() {
+        let mut n = hard_clip(1, 1.0);
+        let x = vec![0.2f32; 64];
+        drive_block(&mut n, &[&x]);
+        Node::reset(&mut n);
+        assert!(n.param_set().set(UnitParam::Drive, 3.0));
+        let out = drive_block(&mut n, &[&x]);
+        assert_eq!(out[0][0], 0.2 * 3.0);
+        assert!(out[0].iter().all(|&y| y == 0.2 * 3.0));
+    }
+
+    /// A reset lands a drive in flight on its target: the render after it is the held curve
+    /// from its first frame.
+    #[test]
+    fn a_reset_lands_the_drive() {
+        let mut n = hard_clip(1, 1.0);
+        let x = vec![0.2f32; 64];
+        drive_block(&mut n, &[&x]);
+        assert!(n.param_set().set(UnitParam::Drive, 3.0));
+        let mid = drive_block(&mut n, &[&x[..10]]);
+        assert!(mid[0][9] < 0.2 * 3.0, "still gliding");
+        Node::reset(&mut n);
+        let out = drive_block(&mut n, &[&x]);
+        assert!(out[0].iter().all(|&y| y == 0.2 * 3.0));
+    }
+
+    /// The declared cost follows the curve: the two arithmetic-only curves are `Light`, the
+    /// four that call a math routine `Moderate`.
     #[test]
     fn the_declared_cost_follows_the_curve() {
-        use tutti_graph::Cost;
         for kind in KINDS {
             let want = match kind {
                 ShapeKind::Softsign | ShapeKind::HardClip => Cost::Light,

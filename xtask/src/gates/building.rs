@@ -386,6 +386,7 @@ pub(super) const ALLOW: &[Allow] = &[
     ty("crates/tutti-measure/", "ChordConfig", WIDTH, NOT_A_NODE),
     ty("crates/tutti-measure/", "OnsetConfig", WIDTH, NOT_A_NODE),
     ty("crates/tutti-measure/", "PeakConfig", WIDTH, NOT_A_NODE),
+    ty("crates/tutti-measure/", "SilenceConfig", WIDTH, NOT_A_NODE),
     ty("crates/tutti-measure/", "TempoConfig", WIDTH, NOT_A_NODE),
     ty(
         "crates/tutti-midi-network/",

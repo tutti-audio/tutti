@@ -38,7 +38,7 @@
 //! [`HardwareMidiInputs`]: crate::HardwareMidiInputs
 
 use crate::InputProducerHandle;
-use crate::capability::EndpointInfo;
+use crate::capability::OsEndpoint;
 use crate::devices::ChangeSink;
 use crate::error::Result;
 use tutti_graph::Losses;
@@ -100,11 +100,11 @@ pub trait MidiEndpoints: Send + Sync {
     ///
     /// A fresh snapshot per call — device lists go stale on hot-plug, and a
     /// cached one is a second owner of state the OS already holds.
-    fn inputs(&self) -> Vec<EndpointInfo>;
+    fn inputs(&self) -> Vec<OsEndpoint>;
 
     /// Endpoints this engine can send MIDI to. A fresh snapshot per call, as
     /// [`inputs`](Self::inputs) is.
-    fn outputs(&self) -> Vec<EndpointInfo>;
+    fn outputs(&self) -> Vec<OsEndpoint>;
 
     /// Open `id` for input, delivering events into `producer`.
     ///

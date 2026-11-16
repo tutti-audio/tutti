@@ -3,7 +3,7 @@
 use std::os::raw::c_int;
 
 use crate::block::RawBlock;
-use crate::capability::{EndpointInfo, UmpCapability};
+use crate::capability::{OsEndpoint, UmpCapability};
 use tutti_alsa_ffi::{
     BLOCK_IS_LOWSPEED, BLOCK_IS_MIDI1, CAP_READ, CAP_SUBS_READ, CAP_SUBS_WRITE, CAP_WRITE, Client,
     PROTO_MIDI2, PortEntry, UmpBlock, UmpEndpoint,
@@ -68,7 +68,7 @@ mod tests;
 ///
 /// Names are `"Client: Port"`, matching how `aconnect -l` presents them, unless
 /// the port name already starts with the client's.
-pub(super) fn endpoints(seq: &Client, direction: Direction) -> Vec<EndpointInfo> {
+pub(super) fn endpoints(seq: &Client, direction: Direction) -> Vec<OsEndpoint> {
     walk(seq, [direction]).lists.into_iter().flatten().collect()
 }
 
@@ -78,7 +78,7 @@ pub(super) fn endpoints(seq: &Client, direction: Direction) -> Vec<EndpointInfo>
 ///
 /// `None` when the walk stopped on a query error, so the lists may be short:
 /// a short list reported as a look would remove devices that are still there.
-pub(super) fn both(seq: &Client) -> Option<(Vec<EndpointInfo>, Vec<EndpointInfo>)> {
+pub(super) fn both(seq: &Client) -> Option<(Vec<OsEndpoint>, Vec<OsEndpoint>)> {
     let Walk {
         lists: [inputs, outputs],
         complete,
@@ -89,14 +89,14 @@ pub(super) fn both(seq: &Client) -> Option<(Vec<EndpointInfo>, Vec<EndpointInfo>
 /// What a walk found.
 struct Walk<const N: usize> {
     /// One list per direction asked for, in order.
-    lists: [Vec<EndpointInfo>; N],
+    lists: [Vec<OsEndpoint>; N],
     /// Whether every query ended with `-ENOENT`, the end of the list.
     complete: bool,
 }
 
 /// One list per entry of `directions`, in order.
 fn walk<const N: usize>(seq: &Client, directions: [Direction; N]) -> Walk<N> {
-    let mut out: [Vec<EndpointInfo>; N] = std::array::from_fn(|_| Vec::new());
+    let mut out: [Vec<OsEndpoint>; N] = std::array::from_fn(|_| Vec::new());
     // `-ENOENT` is the last client or port. A client that exits mid-walk answers
     // `-ENXIO` (`snd_seq_ioctl_query_next_port`): not the end of its ports, so
     // the walk is short and is taken again.
@@ -121,7 +121,7 @@ fn walk<const N: usize>(seq: &Client, directions: [Direction; N]) -> Walk<N> {
 }
 
 /// The endpoint a listed port is.
-fn endpoint_of(port: PortEntry) -> EndpointInfo {
+fn endpoint_of(port: PortEntry) -> OsEndpoint {
     let PortEntry {
         client,
         client_name,
@@ -130,7 +130,7 @@ fn endpoint_of(port: PortEntry) -> EndpointInfo {
         ump,
         ..
     } = port;
-    EndpointInfo {
+    OsEndpoint {
         id: pack_id(client, number),
         identity: Identity::alsa(client_name.as_str(), port_name.as_str()),
         // "Client: Port" is how `aconnect -l` presents them, and a

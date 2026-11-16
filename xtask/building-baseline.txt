@@ -113,14 +113,6 @@ tutti-engine  ctor-result  crates/tutti-engine/src/engine.rs::Engine::with_capac
 tutti-engine  ctor-result  crates/tutti-engine/src/routing.rs::OutputMap::channels
 
 # tutti-export
-tutti-export  with-prefix  crates/tutti-export/src/graph.rs::Setup::with_pool
-tutti-export  with-prefix  crates/tutti-export/src/graph.rs::Setup::with_root
-tutti-export  with-prefix  crates/tutti-export/src/job.rs::Job::with_event_loss
-tutti-export  with-prefix  crates/tutti-export/src/output.rs::BufferTarget::with_topology
-tutti-export  with-prefix  crates/tutti-export/src/output.rs::FileTarget::with_dither
-tutti-export  with-prefix  crates/tutti-export/src/output.rs::FileTarget::with_normalize
-tutti-export  with-prefix  crates/tutti-export/src/output.rs::FileTarget::with_resample
-tutti-export  with-prefix  crates/tutti-export/src/output.rs::FileTarget::with_topology
 tutti-export  ctor-result  crates/tutti-export/src/graph.rs::RenderGraph::assemble
 tutti-export  ctor-result  crates/tutti-export/src/job.rs::Job::new
 tutti-export  ctor-result  crates/tutti-export/src/rendered.rs::Rendered::new
@@ -162,50 +154,11 @@ tutti-graph  ctor-result  crates/tutti-graph/src/param.rs::ParamPorts::try_new
 tutti-graph  ctor-result  crates/tutti-graph/src/param.rs::ParamPorts::try_of
 
 # tutti-measure
-tutti-measure  with-prefix  crates/tutti-measure/src/align.rs::AlignConfig::with_band
-tutti-measure  with-prefix  crates/tutti-measure/src/chord.rs::ChordConfig::with_self_transition
-tutti-measure  with-prefix  crates/tutti-measure/src/chord.rs::ChordConfig::with_sharpness
-tutti-measure  with-prefix  crates/tutti-measure/src/chroma.rs::ChromaConfig::with_band
-tutti-measure  with-prefix  crates/tutti-measure/src/chroma.rs::ChromaConfig::with_harmonic_decay
-tutti-measure  with-prefix  crates/tutti-measure/src/chroma.rs::ChromaConfig::with_harmonics
-tutti-measure  with-prefix  crates/tutti-measure/src/chroma.rs::ChromaConfig::with_peak_floor
-tutti-measure  with-prefix  crates/tutti-measure/src/chroma.rs::ChromaConfig::with_tuning
-tutti-measure  with-prefix  crates/tutti-measure/src/notes.rs::NoteConfig::with_floor
-tutti-measure  with-prefix  crates/tutti-measure/src/notes.rs::NoteConfig::with_hold
-tutti-measure  with-prefix  crates/tutti-measure/src/notes.rs::NoteConfig::with_hop
-tutti-measure  with-prefix  crates/tutti-measure/src/notes.rs::NoteConfig::with_min_length
-tutti-measure  with-prefix  crates/tutti-measure/src/notes.rs::NoteConfig::with_pitch_split
-tutti-measure  with-prefix  crates/tutti-measure/src/notes.rs::NoteConfig::with_smoothing
-tutti-measure  with-prefix  crates/tutti-measure/src/onset.rs::OnsetConfig::with_min_gap
-tutti-measure  with-prefix  crates/tutti-measure/src/onset.rs::OnsetConfig::with_sensitivity
-tutti-measure  with-prefix  crates/tutti-measure/src/onset.rs::OnsetConfig::with_threshold
-tutti-measure  with-prefix  crates/tutti-measure/src/silence.rs::SilenceConfig::with_padding
-tutti-measure  with-prefix  crates/tutti-measure/src/spectrum.rs::SpectrumConfig::with_banding
-tutti-measure  with-prefix  crates/tutti-measure/src/spectrum.rs::SpectrumConfig::with_floor
-tutti-measure  with-prefix  crates/tutti-measure/src/spectrum.rs::SpectrumConfig::with_peak_hold
-tutti-measure  with-prefix  crates/tutti-measure/src/spectrum.rs::SpectrumConfig::with_smoothing
-tutti-measure  with-prefix  crates/tutti-measure/src/spectrum.rs::SpectrumConfig::with_spectrogram
-tutti-measure  with-prefix  crates/tutti-measure/src/tempo.rs::TempoConfig::with_alternatives
-tutti-measure  with-prefix  crates/tutti-measure/src/tempo.rs::TempoConfig::with_prior
-tutti-measure  with-prefix  crates/tutti-measure/src/tempo.rs::TempoConfig::with_range
-tutti-measure  with-prefix  crates/tutti-measure/src/tempo.rs::TempoConfig::with_tightness
-tutti-measure  with-prefix  crates/tutti-measure/src/transform.rs::StftRequest::with_window
-tutti-measure  with-prefix  crates/tutti-measure/src/yin.rs::YinConfig::with_threshold
-tutti-measure  chain-result  crates/tutti-measure/src/align.rs::AlignConfig::with_band
-tutti-measure  chain-result  crates/tutti-measure/src/chroma.rs::ChromaConfig::with_band
-tutti-measure  chain-result  crates/tutti-measure/src/notes.rs::NoteConfig::with_floor
-tutti-measure  chain-result  crates/tutti-measure/src/notes.rs::NoteConfig::with_hop
-tutti-measure  chain-result  crates/tutti-measure/src/spectrum.rs::SpectrumConfig::with_banding
-tutti-measure  chain-result  crates/tutti-measure/src/spectrum.rs::SpectrumConfig::with_peak_hold
-tutti-measure  chain-result  crates/tutti-measure/src/spectrum.rs::SpectrumConfig::with_spectrogram
-tutti-measure  chain-result  crates/tutti-measure/src/tempo.rs::TempoConfig::with_range
 tutti-measure  ctor-result  crates/tutti-measure/src/chroma.rs::ChromaConfig::new
 tutti-measure  ctor-result  crates/tutti-measure/src/loudness.rs::LoudnessConfig::new
 tutti-measure  ctor-result  crates/tutti-measure/src/loudness.rs::WindowedLoudnessConfig::new
 tutti-measure  ctor-result  crates/tutti-measure/src/loudness.rs::WindowedLoudnessState::new
 tutti-measure  ctor-result  crates/tutti-measure/src/notes.rs::NoteConfig::new
-tutti-measure  ctor-result  crates/tutti-measure/src/notes.rs::VelocityRange::new
-tutti-measure  ctor-result  crates/tutti-measure/src/silence.rs::SilenceConfig::new
 tutti-measure  ctor-result  crates/tutti-measure/src/spectrum.rs::SpectrumConfig::new
 tutti-measure  ctor-result  crates/tutti-measure/src/yin.rs::YinConfig::new
 tutti-measure  ctor-result  crates/tutti-measure/src/yin.rs::YinConfig::standard
@@ -344,11 +297,11 @@ tutti-midi-runtime  node-ctor  crates/tutti-midi-runtime/src/schedule/harmony_no
 tutti-modulation  ctor-result  crates/tutti-modulation/src/program.rs::ControlProgram::new
 
 # tutti-nodes
-tutti-nodes  with-prefix  crates/tutti-nodes/src/lfo.rs::ModulatorNode::with_beat_sync
-tutti-nodes  with-prefix  crates/tutti-nodes/src/lfo.rs::ModulatorNode::with_depth
-tutti-nodes  with-prefix  crates/tutti-nodes/src/lfo.rs::ModulatorNode::with_phase_offset
-tutti-nodes  with-prefix  crates/tutti-nodes/src/lfo.rs::ModulatorNode::with_rate
-tutti-nodes  with-prefix  crates/tutti-nodes/src/lfo.rs::ModulatorNode::with_seed
+tutti-nodes  with-prefix  crates/tutti-nodes/src/lfo.rs::LfoNode::with_beat_sync
+tutti-nodes  with-prefix  crates/tutti-nodes/src/lfo.rs::LfoNode::with_depth
+tutti-nodes  with-prefix  crates/tutti-nodes/src/lfo.rs::LfoNode::with_phase_offset
+tutti-nodes  with-prefix  crates/tutti-nodes/src/lfo.rs::LfoNode::with_rate
+tutti-nodes  with-prefix  crates/tutti-nodes/src/lfo.rs::LfoNode::with_seed
 tutti-nodes  with-prefix  crates/tutti-nodes/src/oscillator.rs::OscillatorNode::with_level
 tutti-nodes  setter  crates/tutti-nodes/src/automation/control_lane.rs::LaneControls::set_knob
 tutti-nodes  setter  crates/tutti-nodes/src/automation/recording.rs::Recorder::set_config
@@ -398,8 +351,7 @@ tutti-nodes  node-ctor  crates/tutti-nodes/src/filter/svf.rs::SvfFilterNode::new
 tutti-nodes  node-ctor  crates/tutti-nodes/src/filter/svf.rs::SvfFilterNode::with_channels
 tutti-nodes  node-ctor  crates/tutti-nodes/src/filter/svf.rs::SvfFilterNode::with_controls
 tutti-nodes  node-ctor  crates/tutti-nodes/src/kernel.rs::KernelNode::with_kernel
-tutti-nodes  node-ctor  crates/tutti-nodes/src/lfo.rs::ModulatorNode::new
-tutti-nodes  node-ctor  crates/tutti-nodes/src/lfo.rs::ModulatorNode::with_modulator
+tutti-nodes  node-ctor  crates/tutti-nodes/src/lfo.rs::LfoNode::new
 tutti-nodes  node-ctor  crates/tutti-nodes/src/modulation/mod_delay.rs::ModDelayNode::chorus
 tutti-nodes  node-ctor  crates/tutti-nodes/src/modulation/mod_delay.rs::ModDelayNode::flanger
 tutti-nodes  node-ctor  crates/tutti-nodes/src/modulation/mod_delay.rs::ModDelayNode::general_midi_chorus

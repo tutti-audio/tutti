@@ -24,7 +24,7 @@ use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread::JoinHandle;
 
-use crate::capability::{EndpointInfo, UmpCapability};
+use crate::capability::{OsEndpoint, UmpCapability};
 use crate::devices::ChangeSink;
 use crate::devices::reporter::os_devices;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
@@ -65,8 +65,8 @@ type SentLog = Arc<Mutex<Vec<(EndpointId, tutti_ump::Ump, tutti_midi_runtime::Se
 /// The fake OS's device lists, and the channel into each running watch.
 #[derive(Debug, Default)]
 struct FakeDevices {
-    inputs: Vec<EndpointInfo>,
-    outputs: Vec<EndpointInfo>,
+    inputs: Vec<OsEndpoint>,
+    outputs: Vec<OsEndpoint>,
     /// Whether opening an output fails, as one held by another app does.
     refuse_outputs: bool,
     /// Whether opening an input fails.
@@ -219,7 +219,7 @@ impl FakeCounters {
     /// watch. A device already plugged in under that id is replaced, which a
     /// watch sees as a change. The watch thread delivers it, and this returns
     /// once it has: the event is waiting in every subscriber's queue.
-    pub fn plug(&self, endpoint: EndpointInfo, direction: PortDirection) {
+    pub fn plug(&self, endpoint: OsEndpoint, direction: PortDirection) {
         let mut devices = self.devices();
         let id = endpoint.id;
         devices.inputs.retain(|e| e.id != id);
@@ -360,10 +360,10 @@ impl MidiOut for FakeSink {
     }
 }
 
-/// An [`EndpointInfo`] with a raw id and a name, MIDI 2.0 capable.
+/// An [`OsEndpoint`] with a raw id and a name, MIDI 2.0 capable.
 #[must_use]
-pub fn endpoint(raw: u64, name: &str) -> EndpointInfo {
-    EndpointInfo {
+pub fn endpoint(raw: u64, name: &str) -> OsEndpoint {
+    OsEndpoint {
         id: EndpointId::from_raw(raw),
         identity: Identity::alsa(name, "port"),
         name: name.to_string(),
@@ -374,8 +374,8 @@ pub fn endpoint(raw: u64, name: &str) -> EndpointInfo {
 /// Like [`endpoint`], but known by a CoreMIDI unique id (the raw id), the way
 /// a device is told for certain across a replug.
 #[must_use]
-pub fn persistent_endpoint(raw: u32, name: &str) -> EndpointInfo {
-    EndpointInfo {
+pub fn persistent_endpoint(raw: u32, name: &str) -> OsEndpoint {
+    OsEndpoint {
         identity: Identity::CoreMidi(raw.cast_signed()),
         ..endpoint(u64::from(raw), name)
     }
@@ -418,8 +418,8 @@ impl FakeBackend {
     /// or a list whose ids a test wants to control.
     #[must_use]
     pub fn build_with(
-        inputs: Vec<EndpointInfo>,
-        outputs: Vec<EndpointInfo>,
+        inputs: Vec<OsEndpoint>,
+        outputs: Vec<OsEndpoint>,
         accepts: usize,
     ) -> (Box<dyn MidiEndpoints>, FakeCounters) {
         let producers = Producers::default();
@@ -490,11 +490,11 @@ impl MidiEndpoints for FakeBackend {
         }))
     }
 
-    fn inputs(&self) -> Vec<EndpointInfo> {
+    fn inputs(&self) -> Vec<OsEndpoint> {
         self.devices().inputs.clone()
     }
 
-    fn outputs(&self) -> Vec<EndpointInfo> {
+    fn outputs(&self) -> Vec<OsEndpoint> {
         self.devices().outputs.clone()
     }
 
