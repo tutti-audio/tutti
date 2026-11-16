@@ -3,7 +3,8 @@
 //! with zeros).
 
 use tutti_ump::{
-    FLEX_TEXT_MAX_LEN, Flex, FlexAddress, FlexTextKind, Form, Message, MidiGroup, flex_text_packets,
+    FLEX_TEXT_MAX_LEN, Flex, FlexAddress, FlexTextKind, Form, Message, MidiChannel, MidiGroup,
+    flex_text_packets,
 };
 
 fn packets(text: &str) -> Vec<(Form, [u8; 12])> {
@@ -124,4 +125,60 @@ fn a_message_has_at_most_32_packets() {
         )
         .is_none()
     );
+}
+
+/// Section 7.5 and 7.5.1: a Flex Data message spans several packets and is
+/// addressed to a Channel or to the Group, and the Start, Continue and End
+/// framing is the one every message of type 0xD uses: each text kind of both
+/// status banks, at either address, is a Start, a Continue and an End, and its
+/// packets say the kind and the address they were written with.
+/// Spec: m2-104/7.5#1, m2-104/7.5.1#1
+#[test]
+fn every_text_kind_is_framed_alike_at_a_channel_or_the_group() {
+    const KINDS: [FlexTextKind; 18] = [
+        FlexTextKind::UnknownMetadata,
+        FlexTextKind::ProjectName,
+        FlexTextKind::CompositionName,
+        FlexTextKind::ClipName,
+        FlexTextKind::Copyright,
+        FlexTextKind::Composer,
+        FlexTextKind::Lyricist,
+        FlexTextKind::Arranger,
+        FlexTextKind::Publisher,
+        FlexTextKind::PrimaryPerformer,
+        FlexTextKind::AccompanyingPerformer,
+        FlexTextKind::RecordingLocation,
+        FlexTextKind::UnknownPerformance,
+        FlexTextKind::Lyrics,
+        FlexTextKind::LyricsLanguage,
+        FlexTextKind::Ruby,
+        FlexTextKind::RubyLanguage,
+        FlexTextKind::RecordingDate,
+    ];
+    // 25 bytes: twelve, twelve and one.
+    let text = "0123456789ab0123456789abX";
+    for kind in KINDS {
+        for address in [FlexAddress::Group, FlexAddress::Channel(MidiChannel::of(9))] {
+            let packets = flex_text_packets(MidiGroup::of(5), address, kind, text).unwrap();
+            let seen: Vec<_> = packets
+                .map(|ump| match ump.decode() {
+                    Ok(Message::Flex(
+                        group,
+                        Flex::Text {
+                            address,
+                            kind,
+                            form,
+                            ..
+                        },
+                    )) => (group, address, kind, form),
+                    other => panic!("not Flex text: {other:?}"),
+                })
+                .collect();
+            let want: Vec<_> = [Form::Start, Form::Continue, Form::End]
+                .into_iter()
+                .map(|form| (MidiGroup::of(5), address, kind, form))
+                .collect();
+            assert_eq!(seen, want, "{kind:?} at {address:?}");
+        }
+    }
 }

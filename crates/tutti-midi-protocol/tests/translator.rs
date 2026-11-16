@@ -465,7 +465,7 @@ fn bank_select_rides_on_the_next_program_change_only() {
     );
 }
 
-/// Spec: m2-104/d.3.1#1, m2-104/d.3.1#2, m2-115/3.1#1
+/// Spec: m2-104/d.3.1#1, m2-104/d.3.1#2, m2-115/3.1#1, m2-104/6.2#4
 #[test]
 fn stateless_messages_are_widened() {
     let mut t = Translator::new();

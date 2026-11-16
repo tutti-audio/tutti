@@ -61,6 +61,40 @@ fn note_constructors_are_the_no_attribute_messages() {
     ));
 }
 
+/// M2-104 section 7.4.14, Table 8: the one attribute a sender writes for data
+/// that fits no defined Attribute Type, or of a type it does not know, is type
+/// 0x01 (Manufacturer Specific): byte 4 of the first word is 0x01 and the low
+/// half of the second word is the data, whatever the 16 bits are.
+/// Spec: m2-104/7.4.14#4, m2-104/7.4.14#5
+#[test]
+fn attribute_data_that_fits_no_defined_type_is_type_one() {
+    let address = Address::first(MidiChannel::of(3));
+    let note = NoteNumber::of(60);
+    let velocity = NoteVelocity::new(0x8000);
+    for data in [0x0000u16, 0x0001, 0x1234, 0x8000, 0xFFFF] {
+        let attribute = Attribute::Manufacturer(data);
+        let on = Ump::from(Message::Midi2(
+            address,
+            Voice2::NoteOn {
+                note,
+                velocity,
+                attribute,
+            },
+        ));
+        let off = Ump::from(Message::Midi2(
+            address,
+            Voice2::NoteOff {
+                note,
+                velocity,
+                attribute,
+            },
+        ));
+        let low = 0x8000_0000 | u32::from(data);
+        assert_eq!(on, Ump([0x4093_3C01, low, 0, 0]), "{data:#06x}");
+        assert_eq!(off, Ump([0x4083_3C01, low, 0, 0]), "{data:#06x}");
+    }
+}
+
 /// MIDI 1.0 Detailed Specification: 24 Timing Clocks per quarter note.
 #[test]
 fn a_quarter_note_is_24_timing_clocks() {

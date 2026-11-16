@@ -48,7 +48,7 @@ fn read(kind: FlexTextKind, text: &str) -> String {
 
 /// A syllable is one Complete packet, or a Start, Continue* and End: the last
 /// packet of every text is a Complete or an End, never a Start or Continue.
-/// Spec: m2-104/7.5.10#3, m2-104/7.5.12#3
+/// Spec: m2-104/7.5.10#3, m2-104/7.5.12#3, m2-104/7.5.2#1, m2-104/7.5.10#4, m2-104/7.5.12#4
 #[test]
 fn a_syllable_is_a_complete_packet_or_a_run_ending_in_end() {
     for kind in KINDS {

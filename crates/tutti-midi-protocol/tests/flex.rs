@@ -85,3 +85,20 @@ fn a_tempo_writes_its_ten_ns_units_per_quarter() {
         assert!((back - bpm.get()).abs() < 1e-6, "{bpm:?} -> {back}");
     }
 }
+
+/// **The whole 32-bit field is the resolution.** Section 7.5.3 leaves a
+/// sequencer to choose how many bits of the tempo field it supports; this one
+/// supports all of them: the field is read as `6e9 / field` beats per minute at
+/// each of the 32-bit field's steps, so two fields one 10 ns unit apart are two
+/// tempos, and no field from 1 to `u32::MAX` is refused.
+/// Spec: m2-104/7.5.3#7, m2-116/7.1.1#5
+#[test]
+fn every_unit_of_the_tempo_field_is_a_tempo() {
+    for field in [1u32, 2, 1_000, 50_000_000, 99_999_999, u32::MAX - 1] {
+        let slower = flex_tempo(field + 1).unwrap().get();
+        let this = flex_tempo(field).unwrap().get();
+        assert_eq!(this, 6.0e9 / f64::from(field), "{field}");
+        assert!(slower < this, "{field}");
+    }
+    assert!(flex_tempo(u32::MAX).is_some());
+}

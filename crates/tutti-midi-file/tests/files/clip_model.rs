@@ -130,6 +130,7 @@ fn the_clip_length_is_the_delta_before_end_of_clip() {
 /// The lossless round trip: every packet, the Flex messages, a packet no
 /// definition covers, and a gap past the 20-bit DCS field (restarted by NOOPs,
 /// M2-116 section 3.2.2) all come back.
+/// Spec: m2-116/3.3#1
 #[test]
 fn a_gap_past_the_dcs_field_round_trips() {
     let gap: u32 = 3 * 0x000F_FFFF + 17; // three restarts and a remainder
@@ -475,7 +476,7 @@ fn with_header(header: &[Ump]) -> Vec<Ump> {
 
 /// Section 6: Set Profile On messages come first, carry no DCS, and the DCTPQ
 /// follows them. Kept in the header, written back before the DCTPQ.
-/// Spec: m2-116/hdr/1, m2-116/hdr/2, m2-116/hdr/3, m2-116/hdr/4, m2-116/hdr/5, m2-116/hdr/6, m2-116/hdr/7, m2-116/hdr/8, m2-116/5#2, m2-116/5#3, m2-116/6#1, m2-116/6#3, m2-116/6#4, m2-116/6#5, m2-116/6#6, m2-116/3.2.1#1, m2-116/3.2.1#2
+/// Spec: m2-116/hdr/1, m2-116/hdr/2, m2-116/hdr/3, m2-116/hdr/4, m2-116/hdr/5, m2-116/hdr/6, m2-116/hdr/7, m2-116/hdr/8, m2-116/5#2, m2-116/5#3, m2-116/6#1, m2-116/6#3, m2-116/6#4, m2-116/6#5, m2-116/6#6, m2-116/3.2.1#1, m2-116/3.2.1#2, m2-116/6.2#1, m2-116/6.2#2, m2-116/6.2#3
 #[test]
 fn set_profile_on_before_the_dctpq_is_accepted() {
     let two_packets = [
@@ -962,7 +963,7 @@ fn text_packets(kind: tutti_ump::FlexTextKind, text: &str) -> Vec<(Tick, FileEve
 /// M2-116 section 3.2.2: a Delta Clockstamp sets the time of the messages that
 /// follow it until the next one. The parts of a Lyric or Ruby message are written behind one DCS;
 /// the parts of any other message, and separate messages, keep their own.
-/// Spec: m2-116/3.2.2#1
+/// Spec: m2-116/3.2.2#1, m2-104/7.5.10#5, m2-104/7.5.12#5
 #[test]
 fn the_parts_of_a_lyric_or_ruby_message_share_one_delta_clockstamp() {
     use tutti_ump::FlexTextKind::{Composer, Lyrics, Ruby};
