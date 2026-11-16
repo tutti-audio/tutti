@@ -548,15 +548,25 @@ fn asking_for_capabilities_does_not_wake_the_watch() {
 /// a device that comes and goes: the exit the kernel announces for the old
 /// owner arrives after the look that already shows the new one, and the new
 /// device must be added once and never removed while it lives. One `Devices`,
-/// `A` dropped and `B` plugged at once, `B` held for 150 ms.
+/// `A` dropped and `B` plugged at once, for 40 cycles.
 ///
-/// The old owner's `CLIENT_EXIT` is posted after the number is free, so it can
-/// arrive after the look that shows `B`; only a start says a number has a new
-/// occupant, so that exit is nothing. The test holds three
-/// clients for six seconds. The sequencer has 64 dynamic client slots, so
-/// `.config/nextest.toml` runs the tests of this file at most four at a time
-/// (test group `sequencer`): parallel copies of the suite ran out of slots
-/// (`snd_seq_open` ENOMEM) with this test beside them.
+/// The old owner's `CLIENT_EXIT` is posted after the number is free, so the
+/// watch can read it after a look that already lists `B`; only a start says a
+/// number has a new occupant, so that exit is nothing. It is posted while `A`
+/// closes, before `B` opens, so once `B` is added a sentinel plugged after it
+/// is the barrier: the watch reads announcements in the order they were posted,
+/// and the sentinel's add comes after that exit has been read. Every event for
+/// `B` up to it is judged.
+///
+/// On a real kernel the exit is most often read before `B` is listed, so this
+/// test seldom meets the late order; `watch::tests::late_exits_and_changes_of_an_old_owner_are_nothing`
+/// holds the rule that a late exit is nothing. This test holds the whole watch
+/// to it on the sequencer: no removal and no second add of a live device.
+///
+/// The sequencer has 64 dynamic client slots, so `.config/nextest.toml` runs the
+/// tests of this file at most four at a time (test group `sequencer`): parallel
+/// copies of the suite ran out of slots (`snd_seq_open` ENOMEM) with this test
+/// beside them.
 #[test]
 fn a_device_that_takes_a_departed_clients_number_is_added_once() {
     let devices = Watched::open();
@@ -565,17 +575,20 @@ fn a_device_that_takes_a_departed_clients_number_is_added_once() {
         let name = unique(&format!("flap-b-{cycle}"));
         drop(a);
         let b = plug(&name);
-        let end = Instant::now() + Duration::from_millis(150);
         let mut seen = Vec::new();
-        while let Some(left) = end.checked_duration_since(Instant::now()) {
-            seen.extend(devices.wait(left));
-        }
-        let of_b: Vec<_> = seen
+        until_in(&devices, &mut seen, added(&name));
+        let sentinel_name = unique(&format!("flap-s-{cycle}"));
+        let sentinel = plug(&sentinel_name);
+        until_in(&devices, &mut seen, added(&sentinel_name));
+        drop(sentinel);
+        let more_of_b: Vec<_> = seen
             .iter()
             .filter(|e| e.info().name.starts_with(&format!("{name}:")))
-            .map(|e| matches!(e, DeviceEvent::Added(_)))
             .collect();
-        assert_eq!(of_b, [true], "cycle {cycle}: events for the live device");
+        assert!(
+            more_of_b.is_empty(),
+            "cycle {cycle}: the live device, once added, saw {more_of_b:?}"
+        );
         assert!(
             devices
                 .list()
