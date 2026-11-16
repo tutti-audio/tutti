@@ -526,7 +526,9 @@ pub(crate) struct Pending {
     reports: Vec<Slot<ReportAsk, RequestReport>>,
     properties: Vec<PropertySlot>,
     /// The peers whose last call found them out of requests to take: their
-    /// unsent calls wait for an answer or an event of the peer to make room.
+    /// unsent calls wait for an answer or an event of the peer to make room. A
+    /// request id is released only as its call ends, which is an answer or an
+    /// event, so a parked call is never left without one to wake it.
     full: Vec<PeerId>,
 }
 
