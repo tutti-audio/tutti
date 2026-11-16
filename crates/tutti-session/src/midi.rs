@@ -179,9 +179,9 @@ pub(crate) struct OutputTiming {
 
 /// An output node's tap, in events: the ring its output is copied into between
 /// two updates (a note-off is kept up to
-/// [`note_off_room`](tutti_graph::note_off_room) of it). What a
-/// [`MidiSink`](crate::MidiSink)'s node holds before the tap refuses.
-pub const MIDI_OUT_TAP_CAPACITY: tutti_graph::EventCapacity = tutti_graph::EventCapacity::of(1024);
+/// [`note_off_room`](tutti_graph::note_off_room) of it).
+pub(crate) const MIDI_OUT_TAP_CAPACITY: tutti_graph::EventCapacity =
+    tutti_graph::EventCapacity::of(1024);
 
 /// Whether a host's own sink ([`midi_sink`](crate::midi_sink())) is sent JR
 /// Timestamps (M2-104-UM §7.2.2.2). It gates timestamps, not delivery: with it
@@ -2169,7 +2169,7 @@ impl Midi<'_> {
     }
 
     /// Events dropped over every output: for want of an open output, refused
-    /// by an output node's tap for want of room ([`MIDI_OUT_TAP_CAPACITY`] events between two
+    /// by an output node's tap for want of room (1 024 events between two
     /// updates), refused by a sink or as scheduled too far ahead, counted. A
     /// `midi_sink`'s own share is [`MidiSink::losses`](crate::MidiSink::losses).
     pub fn out_drops(&self) -> u64 {

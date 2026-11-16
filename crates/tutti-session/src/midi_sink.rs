@@ -26,8 +26,8 @@ use crate::{Peer, Presence, Resource, ResourceId, Session};
 /// What a sink is sent with. Part of the entry's identity: declaring the sink
 /// again with other options reopens it.
 ///
-/// As `OutputOptions` is for a device's port, for the
-/// options a host's sink has and a device's does not: whether it is JR-stamped.
+/// Like `OutputOptions` for a device's port, these are
+/// the options only a host's sink has: whether it is JR-stamped.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
@@ -185,7 +185,7 @@ impl MidiSink {
     }
 
     /// What this sink did not get, cumulative: [`lost`](Losses::lost) are events
-    /// its node's tap had no room for ([`MIDI_OUT_TAP_CAPACITY`](crate::MIDI_OUT_TAP_CAPACITY) between two updates), and
+    /// its node's tap had no room for (1 024 between two updates), and
     /// [`refused`](Losses::refused) those the sink refused or that were
     /// scheduled more than [`MAX_OUTPUT_AHEAD`](tutti_midi_runtime::MAX_OUTPUT_AHEAD)
     /// ahead. A JR Timestamp the sink refuses is not counted: the event it

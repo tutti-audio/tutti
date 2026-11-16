@@ -287,3 +287,22 @@ fn a_re_rated_stream_continues_its_jr_time_at_the_new_rate() {
         .collect();
     assert_eq!(stamps, [31_250, 31_250 + 15_625]);
 }
+
+// At 48 kHz with the 100 ms default, two 4 800-frame spans clock at frames 0
+// and 4 800. Re-rated to 44.1 kHz the last clock is at 4 410, the origin at
+// 8 820 and the interval 4 410 frames, so the next clock is owed at 8 820
+// exactly, one interval on, and reads 0.2 s: 6 250 ticks.
+#[test]
+fn a_re_rated_clock_keeps_its_cadence_at_the_new_rate() {
+    let mut stream = JrStream::new(SampleRate::SR_48K).with_clock(SampleRate::SR_48K);
+    let mut out = Vec::new();
+    stream.stamp_span(&[], Samples(4_800), &mut out);
+    stream.stamp_span(&[], Samples(4_800), &mut out);
+    let stream = stream.at_rate(SampleRate::SR_44K1);
+    assert_eq!(stream.origin(), Frame::new(8_820));
+    let mut clock = stream.emitter.expect("the stream clocks");
+    assert_eq!(clock.interval(), Samples(4_410), "100 ms at 44.1 kHz");
+    assert!(clock.due(Frame::new(8_819)).is_none(), "one frame short");
+    let due = clock.due(Frame::new(8_820)).expect("one interval on");
+    assert_eq!(jr_clock_value(&due), Some(6_250));
+}

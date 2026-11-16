@@ -144,6 +144,9 @@ pub const JR_CLOCK_INTERVAL: Duration = Duration::from_millis(100);
 pub struct JrClockEmitter {
     clock: JrClock,
     sample_rate: SampleRate,
+    /// The configured period, which [`interval`](Self::interval) counts in
+    /// frames at the current rate.
+    period: Duration,
     interval: Samples,
     /// Absolute frame of the last emitted clock. `None` until the
     /// first, which is due immediately — a receiver needs a reference before it
@@ -173,6 +176,7 @@ impl JrClockEmitter {
         Self {
             clock: JrClock::new(sample_rate),
             sample_rate,
+            period: interval,
             interval: Seconds::new(interval.as_secs_f64()).to_samples(sample_rate),
             last_emit: None,
         }
@@ -289,9 +293,10 @@ impl JrStream {
     }
 
     /// This stream at another sample rate: the stamper and the clock count
-    /// ticks at `sample_rate`, and the origin and the last clock's frame are
-    /// converted to its frames, so JR time carries on from where it stood and
-    /// does not jump when the graph is re-rated.
+    /// ticks at `sample_rate`, the origin and the last clock's frame are
+    /// converted to its frames (rounded to the nearest frame), and the clock's
+    /// interval is its period counted again at `sample_rate`. JR time carries on
+    /// from where it stood, within half a frame, when the graph is re-rated.
     #[must_use]
     pub fn at_rate(self, sample_rate: impl Into<SampleRate>) -> Self {
         let sample_rate = sample_rate.into();
@@ -305,9 +310,8 @@ impl JrStream {
             emitter: self.emitter.map(|emitter| JrClockEmitter {
                 clock: JrClock::new(sample_rate),
                 sample_rate,
-                interval: Samples(
-                    (emitter.interval.0 as f64 * sample_rate.get() / old.get()).round() as usize,
-                ),
+                period: emitter.period,
+                interval: Seconds::new(emitter.period.as_secs_f64()).to_samples(sample_rate),
                 last_emit: emitter.last_emit.map(convert),
             }),
         }
