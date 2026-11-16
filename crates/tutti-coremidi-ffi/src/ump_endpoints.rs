@@ -9,8 +9,12 @@
 //!
 //! The classes do not exist before macOS 15. [`ump_endpoints`] asks the
 //! Objective-C runtime for the manager class first and returns `None` where it
-//! is absent, so a caller on an older system behaves as it did before.
+//! is absent, so a caller on an older system behaves as it did before. Every
+//! message send goes through [`catch`], so an Objective-C exception (the MIDI
+//! server being unreachable raises one) comes back as an [`ObjcException`]
+//! instead of unwinding into Rust, which aborts the process.
 
+use crate::objc_exception::{ObjcException, catch};
 use coremidi_sys::{MIDIObjectGetIntegerProperty, kMIDIPropertyUniqueID};
 use objc2::rc::autoreleasepool;
 use objc2::runtime::AnyClass;
@@ -62,19 +66,27 @@ pub struct UmpEndpointInfo {
 
 /// Every UMP Endpoint now, or `None` where the OS has no
 /// `MIDIUMPEndpointManager` (before macOS 15).
-#[must_use]
-pub fn ump_endpoints() -> Option<Vec<UmpEndpointInfo>> {
+///
+/// # Errors
+///
+/// [`ObjcException`] when CoreMIDI raises one (for instance in a process with no
+/// reachable MIDI server).
+pub fn ump_endpoints() -> Result<Option<Vec<UmpEndpointInfo>>, ObjcException> {
     // `ClassType::class` panics on a missing class; the lookup by name is the
     // availability check.
-    AnyClass::get(c"MIDIUMPEndpointManager")?;
-    Some(autoreleasepool(|_| {
-        // SAFETY: the class exists (checked above), `sharedInstance` and
-        // `UMPEndpoints` take no arguments and are safe to call from any thread
-        // (Apple documents the manager as a shared singleton), and the arrays
-        // they return are retained for the length of the pool.
-        let endpoints = unsafe { MIDIUMPEndpointManager::sharedInstance().UMPEndpoints() };
-        endpoints.iter().map(|e| endpoint_info(&e)).collect()
-    }))
+    if AnyClass::get(c"MIDIUMPEndpointManager").is_none() {
+        return Ok(None);
+    }
+    autoreleasepool(|_| {
+        catch(|| {
+            // SAFETY: the class exists (checked above), `sharedInstance` and
+            // `UMPEndpoints` take no arguments and are safe to call from any thread
+            // (Apple documents the manager as a shared singleton), and the arrays
+            // they return are retained for the length of the pool.
+            let endpoints = unsafe { MIDIUMPEndpointManager::sharedInstance().UMPEndpoints() };
+            Some(endpoints.iter().map(|e| endpoint_info(&e)).collect())
+        })
+    })
 }
 
 fn endpoint_info(endpoint: &MIDIUMPEndpoint) -> UmpEndpointInfo {
