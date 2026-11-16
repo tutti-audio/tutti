@@ -17,6 +17,7 @@ use crate::loss::Dropped;
 use crate::node::{ConstantMask, Cx, Env, InPlaceMask, MAX_PORTS, Node, SilenceMask, Status};
 use crate::param::ParamInput;
 use crate::plan::{Direct, Form, NodeRec, Plan};
+use crate::rtlog::{LogSink, LogSlots};
 use crate::slots::{AudioSlots, EventSlots, SlotFlags};
 
 /// [`Op::Node`](crate::Op::Node): run `u` for `h.rec`: the plain op for a unit whose mode asks
@@ -322,6 +323,10 @@ pub(crate) struct OpState<'s, A: ?Sized, F: ?Sized, E: ?Sized> {
     pub(crate) overlay: &'s mut Vec<Event>,
     pub(crate) due: Deliveries<'s>,
     pub(crate) dropped: &'s mut Dropped,
+    /// The slots a node's [`Io::log`](crate::Io::log) fills, and where they
+    /// are flushed after its call: this participant's own.
+    pub(crate) log: &'s LogSlots,
+    pub(crate) sink: &'s mut LogSink,
 }
 
 /// Run one node op: the silence skip, flushed-event injection, the call
@@ -523,8 +528,10 @@ pub(super) fn node_op_with<A: AudioSlots, F: SlotFlags + ?Sized, E: EventSlots +
         &[]
     };
     let reported = Cell::new(None);
+    let log = st.log;
     let call = Call {
         reported: &reported,
+        log,
         env: h.env,
         history: h.history,
         max: h.max,
@@ -538,6 +545,7 @@ pub(super) fn node_op_with<A: AudioSlots, F: SlotFlags + ?Sized, E: EventSlots +
         params,
     };
     let status = call_node(&call, &mut *u.node, st);
+    log.flush(h.plan.units[unit as usize].key, h.env.frame, &mut *st.sink);
     // This call's report, or the ceiling when it made none.
     u.reported = reported
         .get()
@@ -640,6 +648,8 @@ pub(super) struct Call<'p, 'e> {
     params: &'p [ParamInput<'p>],
     /// Where the node's [`Io::report_tail`] lands.
     reported: &'p Cell<Option<Tail>>,
+    /// Where the node's [`Io::log`] lands.
+    log: &'p LogSlots,
 }
 
 impl<'p> Call<'p, '_> {
@@ -667,7 +677,8 @@ impl<'p> Call<'p, '_> {
         )
         .with_main(self.rec.main)
         .with_params(self.params)
-        .with_tail(self.reported);
+        .with_tail(self.reported)
+        .with_log(self.log);
         node.process(&self.cx(), io)
     }
 
@@ -771,7 +782,8 @@ impl<'p> Call<'p, '_> {
         .with_main(rec.main)
         .with_params(self.params)
         .with_lost(&unplaced)
-        .with_tail(self.reported);
+        .with_tail(self.reported)
+        .with_log(self.log);
         let status = node.process(&self.cx(), io);
         if unplaced.get() != 0 {
             dropped.at_node(rec.unit, unplaced.get());

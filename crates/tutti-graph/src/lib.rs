@@ -587,6 +587,7 @@ mod preroll;
 mod reference;
 mod render_mode;
 mod root;
+mod rtlog;
 mod slots;
 mod spec;
 mod tail;
@@ -662,6 +663,10 @@ pub use preroll::PrerollTable;
 pub use render_mode::RenderMode;
 pub use root::{
     RootBank, RootError, RootId, fold_to_topology, fold_to_topology_with, fold_to_width,
+};
+pub use rtlog::{
+    LogFilter, LogGate, MAX_FIELDS, RtLevel, RtLogReader, RtLogReaders, RtRecord, RtTarget,
+    RtValue, TEXT_CAPACITY,
 };
 pub use tail::{GraphTail, MAX_NODE_TAIL, TailGraph, graph_tail};
 pub use wake::Wake;
