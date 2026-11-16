@@ -289,14 +289,8 @@ impl Tracker {
         );
         self.port_pending =
             Self::port_pending_after(fold.port_pending, &self.last, &handles, &events);
-        self.undecided = Self::undecided_after(
-            fold.undecided,
-            &self.last,
-            &changed,
-            &handles,
-            &events,
-            quiet,
-        );
+        self.undecided =
+            Self::undecided_after(fold.undecided, &self.last, &changed, &handles, &events);
         self.last = handles;
         self.reporter
             .report(present, |id| fold.replaced.contains(&id));
@@ -356,20 +350,16 @@ impl Tracker {
         })
     }
 
-    /// The handles in [`Tracker::undecided`] after a look: none after a quiet
-    /// one; otherwise those that were and still are, and the reported handles it
-    /// lists under another identity whose `events` do not tell yet.
+    /// The handles in [`Tracker::undecided`] after a look: those that were and
+    /// still are, and the reported handles it lists under another identity whose
+    /// `events` do not tell yet.
     fn undecided_after(
         kept: BTreeSet<EndpointId>,
         last: &BTreeSet<EndpointId>,
         changed: &BTreeSet<EndpointId>,
         handles: &BTreeSet<EndpointId>,
         events: &[Event],
-        quiet: bool,
     ) -> BTreeSet<EndpointId> {
-        if quiet {
-            return BTreeSet::new();
-        }
         let listed = handles
             .iter()
             .filter(|&&h| {
@@ -439,7 +429,6 @@ impl Tracker {
                     let handle = pack_id(n, p);
                     if self.last.contains(&handle) {
                         fold.unconfirmed.remove(&handle);
-                        fold.undecided.remove(&handle);
                         if !fold.port_pending.remove(&handle) {
                             fold.replaced.insert(handle);
                         }
