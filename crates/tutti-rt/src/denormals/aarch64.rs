@@ -10,7 +10,7 @@ pub(super) fn set() -> Saved {
     // floating-point control register and touch no memory; FPCR is
     // available at EL0 on aarch64. Setting FZ changes only how
     // denormals are handled in float code, and no memory safety
-    // depends on an exact float result (see `# Soundness` above).
+    // depends on an exact float result (see `# Soundness` on `with_no_denormals`).
     unsafe {
         let prev: u64;
         core::arch::asm!("mrs {}, fpcr", out(reg) prev);

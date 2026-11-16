@@ -4,22 +4,18 @@
 use std::hint::spin_loop;
 use std::time::Duration;
 
-/// A wait that only spins; the budget does not apply.
-pub(crate) struct SpinThenYield {
-    /// The counter's value at the last wait.
-    seen: u32,
-}
+/// A wait that only spins; neither the counter nor the budget applies.
+pub(crate) struct SpinThenYield;
 
 impl SpinThenYield {
-    /// A wait on a counter now at `seen`; `budget` is ignored, as the caller
-    /// never yields here.
-    pub(crate) fn new(seen: u32, _budget: Duration) -> Self {
-        Self { seen }
+    /// A wait on a counter now at `_seen`; `_budget` is ignored, as the
+    /// caller never yields here.
+    pub(crate) fn new(_seen: u32, _budget: Duration) -> Self {
+        Self
     }
 
-    /// One step of the wait, given the counter's current value `now`.
-    pub(crate) fn wait(&mut self, now: u32) {
-        self.seen = now;
+    /// One step of the wait; the counter's value `_now` is not consulted.
+    pub(crate) fn wait(&mut self, _now: u32) {
         spin_loop();
     }
 }

@@ -104,7 +104,7 @@ impl fmt::Display for PriorityOutcome {
 fn wanted(request: PriorityRequest) -> thread_priority::ThreadPriority {
     match request {
         PriorityRequest::Highest => thread_priority::ThreadPriority::Max,
-        PriorityRequest::Raised => raised_by::raised(),
+        PriorityRequest::Raised => raised::raised(),
     }
 }
 
@@ -116,11 +116,11 @@ fn wanted(request: PriorityRequest) -> thread_priority::ThreadPriority {
     not(any(target_os = "macos", target_os = "ios")),
     path = "priority/cross.rs"
 )]
-mod raised_by;
+mod raised;
 
 #[cfg_attr(unix, path = "priority/unix.rs")]
 #[cfg_attr(not(unix), path = "priority/other.rs")]
-mod class;
+mod scheduling_class;
 
 /// Ask the OS to raise the **calling thread**'s priority, and report what it
 /// did. A refusal changes nothing and is harmless to the caller.
@@ -138,7 +138,7 @@ pub fn request_priority(request: PriorityRequest) -> PriorityOutcome {
     match set_current_thread_priority(wanted(request)) {
         Ok(()) => PriorityOutcome::Granted {
             requested: request,
-            scheduling: class::scheduling(),
+            scheduling: scheduling_class::scheduling(),
         },
         Err(e) => PriorityOutcome::Refused {
             requested: request,
