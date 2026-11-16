@@ -112,7 +112,7 @@ impl RequestWord {
     /// Returns every bit raised since the last take, and clears them.
     ///
     /// The one consuming thread's call: two takers would split the bits
-    /// between them.
+    /// between them. The swap needs no `Release`: a take publishes nothing.
     #[must_use = "the bits are cleared; dropping them drops the requests"]
     pub fn take(&self) -> RequestBits {
         if self.0.load(Ordering::Acquire) == 0 {

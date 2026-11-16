@@ -5,8 +5,9 @@
 //! The structures the engine's audio callback touches, allocation-free on the
 //! audio path (`tests/no_alloc/rt_no_alloc.rs` gates it), and the home of the
 //! engine's lock-free and `unsafe` runtime structures. It names one tutti
-//! crate, `tutti-types` (the units a [`Gauge`] reads, and [`RequestBit`]'s range); its other dependencies are
-//! `arc-lend`, `arrayvec` and `bytemuck` (and `loom` under `--cfg loom`).
+//! crate, `tutti-types` (the units a [`Gauge`] reads, and [`RequestBit`]'s range);
+//! its other dependencies are `arc-lend`, `arrayvec` and `bytemuck` (and `loom`
+//! under `--cfg loom`).
 //!
 //! **Cells and collections**
 //!
@@ -35,7 +36,7 @@
 //! - [`PosRing`] — frames a writer thread places ahead of the audio thread,
 //!   indexed by position (a disk stream's ring).
 //! - [`RequestWord`] — up to 32 kinds of request ([`RequestBit`]) raised from
-//!   any thread with one `fetch_or` and taken whole by a control thread.
+//!   any thread with one `fetch_or` and taken whole by any one thread.
 //! - [`DirtySet`] — a sized set of dirty flags, an atomic bit per index, with
 //!   no capacity to overflow.
 //! - [`FaultLatch`] — a flag a producer raises when it stops for good, read

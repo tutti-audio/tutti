@@ -1,6 +1,8 @@
 //! `RequestBit`'s range: every index below 32 is a bit and every other is
 //! refused at every door.
 
+#![cfg(not(loom))]
+
 use tutti_fixtures::{RangeContract, check_range_contract};
 use tutti_rt::{RequestBit, RequestBitOutOfRange, RequestBits, RequestWord};
 
