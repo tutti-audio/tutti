@@ -820,7 +820,7 @@ impl<C: Clock> Session<C> {
     }
 
     /// Whether the root is as it was asked to be. A refusal is a value here,
-    /// never only a log line.
+    /// never only a log line. The first that holds is reported, in this order:
     ///
     /// - [`RootTopologyStatus::Refused`] with the declaration's own
     ///   [`FoldError`](tutti_buffers::FoldError) when the last request could not
