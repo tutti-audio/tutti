@@ -66,7 +66,7 @@
 //! else: the `f64` stays inside the node.
 
 use crate::OfflineWait;
-use crate::{HarmonyInputs, PluginBridge, SlabWriter};
+use crate::{AudioSlab, HarmonyInputs, PluginBridge, SlabWriter};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
@@ -131,32 +131,32 @@ impl WireStorage {
     /// Only call this for a `seq` the slab has confirmed (see
     /// [`Batcher::collectable`]): the copy count proves nothing about who
     /// wrote the bytes.
-    fn recv(&mut self, bridge: &PluginBridge, seq: u64, ch: usize, out: &mut [f32]) {
+    ///
+    /// `false` when the slab has no such channel (the batcher's widths and the
+    /// slab's disagree): the channel is silence.
+    fn recv(&mut self, slab: &AudioSlab, seq: u64, ch: usize, out: &mut [f32]) -> bool {
         let size = out.len();
-        let n = match self {
+        let (n, held) = match self {
             Self::F32 { output, .. } => {
                 let wire = &mut output[..size];
-                let n = bridge
-                    .audio_buffer()
-                    .read_output_into(seq, ch, wire)
-                    .unwrap_or(0);
+                let read = slab.read_output_into(seq, ch, wire);
+                let n = read.as_ref().map_or(0, |&n| n);
                 out[..n].copy_from_slice(&wire[..n]);
-                n
+                (n, read.is_ok())
             }
             Self::F64 { output, .. } => {
                 let wire = &mut output[..size];
-                let n = bridge
-                    .audio_buffer()
-                    .read_output_into(seq, ch, wire)
-                    .unwrap_or(0);
+                let read = slab.read_output_into(seq, ch, wire);
+                let n = read.as_ref().map_or(0, |&n| n);
                 for (o, &v) in out[..n].iter_mut().zip(&wire[..n]) {
                     // The narrowing is the point: the graph is `f32`.
                     *o = v as f32;
                 }
-                n
+                (n, read.is_ok())
             }
         };
         out[n..].fill(0.0);
+        held
     }
 }
 
@@ -412,7 +412,7 @@ impl Batcher {
             return;
         }
         let deadline = Instant::now() + watch.budget();
-        while !bridge.is_crashed() && !bridge.audio_buffer().has_output(seq) {
+        while !bridge.is_crashed() && !self.slab.has_output(seq) {
             if Instant::now() >= deadline {
                 watch.give_up();
                 tracing::warn!(
@@ -480,7 +480,7 @@ impl Batcher {
             return None;
         }
         let seq = self.expect_seq?;
-        bridge.audio_buffer().has_output(seq).then_some(seq)
+        self.slab.has_output(seq).then_some(seq)
     }
 
     /// Fill the ring with the output of the chunk in flight: the one submitted
@@ -503,7 +503,11 @@ impl Batcher {
         match self.collectable(bridge) {
             Some(seq) => {
                 for (ch, row) in self.ring.iter_mut().enumerate() {
-                    self.wire.recv(bridge, seq, ch, &mut row[..chunk]);
+                    // A channel the slab lacks plays as silence and counts as
+                    // a missed chunk: the batcher and its slab disagree.
+                    if !self.wire.recv(self.slab.slab(), seq, ch, &mut row[..chunk]) {
+                        self.counters.missed.fetch_add(1, Ordering::Relaxed);
+                    }
                 }
             }
             None => {
@@ -555,7 +559,9 @@ impl Batcher {
             }
         }
         if !staged {
-            // The chunk will never be collectable; its output plays as silence.
+            self.counters.missed.fetch_add(1, Ordering::Relaxed);
+            // The chunk will never be collectable (a channel the slab lacks
+            // lands here too, and counts); its output plays as silence.
             // Its parameter changes did not go either: the host keeps them for
             // the next chunk. Its MIDI is lost (`Chunks::unsent`).
             self.expect_seq = None;
@@ -665,6 +671,32 @@ mod tests {
             },
         )
         .unwrap()
+    }
+
+    /// **A chunk's output is read from the slab it is given, and a channel the
+    /// slab lacks answers `false` and plays as silence** instead of indexing
+    /// past it. The slab here is not the bridge's: a batcher reads the one it
+    /// writes.
+    #[test]
+    fn the_output_is_read_from_the_slab_given_and_a_missing_channel_is_refused() {
+        let writer = slab(MAX_CHUNK);
+        let server = AudioSlab::open(writer.name().to_owned(), writer.layout()).unwrap();
+        let mut server = server;
+        server.write(1, 0, &[0.5f32; 8]).unwrap();
+        server.publish(1);
+        let mut wire = WireStorage::new(SampleFormat::Float32, MAX_CHUNK);
+        let mut out = [9.0f32; 8];
+        assert!(wire.recv(writer.slab(), 1, 0, &mut out));
+        assert_eq!(
+            out, [0.5; 8],
+            "the slab's own output, as the server wrote it"
+        );
+        let mut out = [9.0f32; 8];
+        assert!(
+            !wire.recv(writer.slab(), 1, 2, &mut out),
+            "the slab has two channels"
+        );
+        assert_eq!(out, [0.0; 8], "a channel it lacks is silence");
     }
 
     /// A fresh batcher has nothing in flight, so its first chunk must be silence

@@ -894,7 +894,7 @@ impl Graph {
             .with_controls(client.controls());
         let tempo = self.tempo.clone();
         let bound = client.bind(tempo);
-        let rebinder = tutti_plugin::catalog::PluginRebinder::served(bound.rebinder());
+        let rebinder = tutti_plugin::catalog::PluginRebinder::served(&bound);
         // A fresh key has no wiring recorded, so nothing is unwired.
         let _controls = self.editor.insert(node, PLUGIN_KIND, bound).controls;
         self.nodes.insert(
@@ -1012,7 +1012,7 @@ impl Graph {
         let plugin = client.plugin().clone();
         let tempo = self.tempo.clone();
         let bound = client.bind(tempo);
-        let rebinder = tutti_plugin::catalog::PluginRebinder::served(bound.rebinder());
+        let rebinder = tutti_plugin::catalog::PluginRebinder::served(&bound);
         match self.swap_unit(node, bound, fade, law) {
             Ok(_controls) => {
                 // The record is carried over to the incoming plugin (unlike

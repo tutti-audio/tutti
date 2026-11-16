@@ -36,6 +36,8 @@ struct Mock {
     /// The parameters the server declares when asked (`GetParameterList`).
     parameters: Arc<Mutex<Vec<ParameterInfo>>>,
     stream: Arc<interprocess::local_socket::Stream>,
+    /// Whether the server refuses the slabs it is asked to open.
+    refuse_slabs: Arc<std::sync::atomic::AtomicBool>,
     _bridge: crate::BridgeThread,
 }
 
@@ -193,6 +195,8 @@ fn mock_with(
     });
     let (log, served) = (Arc::clone(&received), Arc::clone(&stream));
     let answers = Arc::clone(&parameters);
+    let refuse_slabs = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let refusing = Arc::clone(&refuse_slabs);
     std::thread::spawn(move || {
         loop {
             let mut len = [0u8; 4];
@@ -227,6 +231,16 @@ fn mock_with(
                             Some(_) => Ok(Some(MOCK_EDITOR)),
                             None => Ok(None),
                         },
+                    },
+                ),
+                HostMessage::SetupSharedMemory { .. } => reply(
+                    &served,
+                    &if refusing.load(std::sync::atomic::Ordering::Acquire) {
+                        BridgeMessage::Error {
+                            message: "the slab does not open".into(),
+                        }
+                    } else {
+                        BridgeMessage::SharedMemoryReady
                     },
                 ),
                 HostMessage::SetEditorSize { size } => {
@@ -270,6 +284,7 @@ fn mock_with(
             received,
             parameters,
             stream,
+            refuse_slabs,
             _bridge: thread,
         },
     )
@@ -405,9 +420,9 @@ fn the_controller_reports_what_the_plugin_re_reports() {
 /// **The buses a plugin announces are the ones the host sees, and not before.**
 /// The plugin has a stereo bus in and out at load; it announces a stereo main bus
 /// and a mono aux bus on the way in. The controller's layout, and the `wiring`
-/// its `Control` answers, follow the announcement; the slab's layout (what
-/// [`Ipc::loaded`] says, what the pipeline was built for) stays the one at load. A
-/// `PluginIoChanged` with no layout changes nothing.
+/// its `Control` answers, follow the announcement; the slab and the pipeline
+/// follow it at the next activation (the test below). A `PluginIoChanged` with
+/// no layout changes nothing.
 #[test]
 fn the_buses_a_plugin_announces_are_the_buses_the_host_sees() {
     let _machine = machine_lock();
@@ -448,6 +463,116 @@ fn the_buses_a_plugin_announces_are_the_buses_the_host_sees() {
     let wiring = controller.wiring(main);
     assert_eq!(wiring.inputs, announced.inputs, "the controller's wiring");
     assert_eq!(wiring.outputs, announced.outputs);
+}
+
+/// A mock plugin that announced a wider input and has been deactivated, with
+/// the slab it was activated over: the next activation sees new buses.
+fn announced_and_deactivated(ipc: Ipc, server: &Mock) -> (Ipc, tutti_plugin_types::Layout) {
+    let main = main_thread();
+    let heard = Arc::new(Mutex::new(Vec::new()));
+    let sink = Arc::clone(&heard);
+    ipc.forward_events(Some(Arc::new(move |event| {
+        sink.lock().unwrap().push(format!("{event:?}"));
+    })));
+    let (processor, controller) = activate(ipc, 32);
+    let announced = tutti_plugin_types::Layout {
+        inputs: vec![
+            PluginBus::main(ChannelLayout::STEREO),
+            PluginBus::new(ChannelLayout::MONO, tutti_plugin_types::BusRole::Aux),
+        ],
+        outputs: controller.layout().outputs,
+    };
+    server.say(&BridgeMessage::PluginIoChanged {
+        layout: Some(announced.clone()),
+    });
+    let start = Instant::now();
+    while !heard.lock().unwrap().iter().any(|e| e.contains("IoLayout")) {
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "the host hears it"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+        let _ = controller.parameters(main);
+    }
+    let ipc = Ipc::deactivate(main, processor, controller).expect("the halves rejoin");
+    (ipc, announced)
+}
+
+/// The `SetupSharedMemory` messages the mock server has received.
+fn slab_setups(server: &Mock) -> Vec<SlabLayout> {
+    server
+        .received
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|m| match m {
+            HostMessage::SetupSharedMemory { layout, .. } => Some(layout.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// **An activation over other buses lays out a new slab for them and tells the
+/// server; one over the same buses reuses the slab and tells it nothing.** The
+/// slab, the pipeline and the controller's wiring come from one reading of the
+/// buses.
+#[test]
+fn an_activation_over_new_buses_has_a_slab_laid_out_for_them() {
+    let _machine = machine_lock();
+    let (ipc, server) = mock();
+    let (ipc, announced) = announced_and_deactivated(ipc, &server);
+    assert!(slab_setups(&server).is_empty(), "nothing is set up before");
+    let held = ipc.slab.layout_ref().clone();
+    let (processor, controller) = activate(ipc, 32);
+    let setups = slab_setups(&server);
+    assert_eq!(setups.len(), 1, "one new slab");
+    assert_eq!(
+        setups[0].inputs,
+        announced.input_widths(),
+        "laid out for the buses announced"
+    );
+    assert_ne!(setups[0], held);
+    assert_eq!(controller.wiring(main_thread()).inputs, announced.inputs);
+
+    let ipc = Ipc::deactivate(main_thread(), processor, controller).expect("rejoin");
+    assert_eq!(*ipc.slab.layout_ref(), setups[0], "the new slab is kept");
+    let (_p, _c) = activate(ipc, 32);
+    assert_eq!(
+        slab_setups(&server).len(),
+        1,
+        "the same buses reuse the slab"
+    );
+}
+
+/// **A server that refuses the new slab leaves the plugin as it was, and the next
+/// activation asks again.** The refusal hands back the `Ipc` with the slab it
+/// held; nothing waits out a deadline for the error.
+#[test]
+fn a_refused_slab_leaves_the_old_one_and_the_next_activation_retries() {
+    let _machine = machine_lock();
+    let (ipc, server) = mock();
+    let (ipc, announced) = announced_and_deactivated(ipc, &server);
+    let held = ipc.slab.layout_ref().clone();
+    server
+        .refuse_slabs
+        .store(true, std::sync::atomic::Ordering::Release);
+    let started = Instant::now();
+    let Err(refused) = ipc.activate(main_thread(), prepare(32)) else {
+        panic!("the server refused the slab");
+    };
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "the error ends the wait"
+    );
+    let ipc = refused.plugin.expect("the plugin comes back");
+    assert_eq!(*ipc.slab.layout_ref(), held, "the old slab is kept");
+
+    server
+        .refuse_slabs
+        .store(false, std::sync::atomic::Ordering::Release);
+    let (_p, controller) = activate(ipc, 32);
+    assert_eq!(controller.wiring(main_thread()).inputs, announced.inputs);
+    assert_eq!(slab_setups(&server).len(), 2, "asked again, and taken");
 }
 
 /// **A served plugin with no origin cannot be reopened, and says so**, through

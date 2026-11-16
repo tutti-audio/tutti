@@ -25,7 +25,7 @@ use crate::ServerWatch;
 use crate::protocol::{
     ChordChanges, MidiEventVec, Normalized, NoteExpressionChanges, NoteExpressionIntChanges,
     NoteExpressionTextChanges, ParamId, ParameterChanges, ParameterInfo, Preset, PresetId,
-    ScaleChanges, TransportChanges, TransportInfo,
+    ScaleChanges, SlabLayout, TransportChanges, TransportInfo,
 };
 use crate::transport::shm::AudioSlab;
 use dpi::Size;
@@ -730,6 +730,25 @@ impl AudioBridge {
             .channels
             .push_command(Command::LoadPreset { id, reply })
         {
+            return false;
+        }
+        await_reply(ask_resp, self.lifecycle.timeouts().param_wait()).unwrap_or(false)
+    }
+
+    /// Has the server open the slab `shm_name` (laid out as `layout`) and
+    /// render through it from its next block. `true` once it has; `false` when
+    /// it refused, did not answer within [`Timeouts::param`](tutti_plugin_types::Timeouts::param) or is gone.
+    /// Control thread; the old slab stays valid until the caller drops it.
+    pub fn setup_shared_memory(&self, shm_name: String, layout: SlabLayout) -> bool {
+        if self.lifecycle.is_crashed() {
+            return false;
+        }
+        let (ask_resp, reply) = ask::<bool>();
+        if !self.channels.push_command(Command::SetupSharedMemory {
+            shm_name,
+            layout,
+            reply,
+        }) {
             return false;
         }
         await_reply(ask_resp, self.lifecycle.timeouts().param_wait()).unwrap_or(false)

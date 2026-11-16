@@ -440,6 +440,42 @@ fn setup_shm(
     }
 }
 
+/// The slab a running server renders through when the plugin's buses are
+/// `loaded`'s: `None` when `held` is already laid out for them, else a new one
+/// the server has opened and will render through from its next block.
+///
+/// Control thread, bounded by the bridge's query deadline. The server swaps at
+/// a block head and hands the slab it leaves back off its render thread; the
+/// caller drops the slab it held once this returns, which unmaps the host's own
+/// view and cannot touch the server's.
+///
+/// # Errors
+///
+/// The slab cannot be created, or the server refused it, did not answer in
+/// time or is gone. The server may have opened the slab before the answer was
+/// lost; `held` stays valid and the next activation asks again.
+pub(crate) fn swap_slab(
+    bridge: &crate::PluginBridge,
+    loaded: &LoadedPlugin,
+    format: SampleFormat,
+    ceiling: usize,
+    held: &SlabLayout,
+) -> BridgeResult<Option<SlabWriter>> {
+    let layout = slab_layout_for(loaded, format, ceiling);
+    if layout == *held {
+        return Ok(None);
+    }
+    let shm_name = next_shm_name()?;
+    let slab = AudioSlab::create(shm_name.clone(), layout.clone())?;
+    if bridge.setup_shared_memory(shm_name, layout) {
+        Ok(Some(slab))
+    } else {
+        Err(BridgeError::ConnectionFailed(
+            "the plugin-server did not take the new audio slab".into(),
+        ))
+    }
+}
+
 fn next_shm_name() -> BridgeResult<String> {
     // Unguessable for the same reason as the socket (`unique_socket_path`):
     // `/dev/shm` is shared, and `AudioSlab::create` refuses a name that

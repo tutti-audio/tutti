@@ -779,6 +779,76 @@ fn a_layout_with_absurdly_many_buses_is_dropped_on_receipt() {
     assert!(resyncs.load(Ordering::Relaxed) >= 1, "the resync is heard");
 }
 
+/// **A slab the server opens is taken; one it never answers, or dies over, fails
+/// within the deadline and leaves the caller its old slab.** The bridge only
+/// reports whether the server has the slab; what the caller keeps is its own.
+#[test]
+fn a_slab_setup_is_answered_refused_or_given_up_on_within_the_deadline() {
+    let layout = stereo_layout();
+    let ready = MockServer::start("slab-ready", |msg| match msg {
+        HostMessage::SetupSharedMemory { .. } => {
+            Action::Reply(Box::new(BridgeMessage::SharedMemoryReady))
+        }
+        _ => Action::Silent,
+    });
+    assert!(
+        ready
+            .bridge
+            .setup_shared_memory(unique_shm_name("slab-new"), layout.clone()),
+        "the server's ready is the answer"
+    );
+
+    let refusing = MockServer::start("slab-refused", |msg| match msg {
+        HostMessage::SetupSharedMemory { .. } => Action::Reply(Box::new(BridgeMessage::Error {
+            message: "the slab does not open".into(),
+        })),
+        _ => Action::Silent,
+    });
+    let started = Instant::now();
+    assert!(
+        !refusing
+            .bridge
+            .setup_shared_memory(unique_shm_name("slab-refused"), layout.clone()),
+        "the server's error is a refusal"
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "answered at once, not at the deadline"
+    );
+
+    let mut quick = Timeouts::default();
+    quick.param = Duration::from_millis(300);
+    let silent = MockServer::start_with_timeouts("slab-silent", quick, |_| Action::Silent);
+    let started = Instant::now();
+    assert!(
+        !silent
+            .bridge
+            .setup_shared_memory(unique_shm_name("slab-silent"), layout.clone()),
+        "no answer is a refusal"
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(10),
+        "bounded by the deadline, not by the server"
+    );
+
+    let dying = MockServer::start("slab-dies", |msg| match msg {
+        HostMessage::SetupSharedMemory { .. } => Action::Die,
+        _ => Action::Silent,
+    });
+    let started = Instant::now();
+    assert!(
+        !dying
+            .bridge
+            .setup_shared_memory(unique_shm_name("slab-dies"), layout),
+        "a server that dies mid-swap is a refusal"
+    );
+    assert!(started.elapsed() < Duration::from_secs(10));
+    assert!(
+        dying.wait_for_crash(),
+        "and the bridge says the server is gone"
+    );
+}
+
 /// A crash that happens **before** any listener exists is still reported.
 ///
 /// This is the case a callback-only design loses. `PluginBridge::new` spawns

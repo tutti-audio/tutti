@@ -58,9 +58,10 @@ use tutti_plugin_types::{
 };
 use tutti_types::AtomicSampleRate;
 
+use crate::subprocess::swap_slab;
 use crate::{
-    Batcher, BridgeConfig, BridgeEvent, BridgeListener, EditorLoader, OfflineWait, PluginBridge,
-    ProcessGuard, SlabWriter, launch, unique_socket_path,
+    AudioSlab, Batcher, BridgeConfig, BridgeEvent, BridgeListener, EditorLoader, OfflineWait,
+    PluginBridge, ProcessGuard, SlabWriter, launch, unique_socket_path,
 };
 
 /// Where a served plugin came from: what [`Ipc::reopen_restoring`] launches
@@ -231,6 +232,15 @@ impl Events {
             BridgeEvent::IoLayout(layout) => {
                 *self.layout.lock().unwrap_or_else(PoisonError::into_inner) = Some(layout.clone());
             }
+            // The restart the core plans for it ([`RESTARTS`](Loaded::RESTARTS))
+            // lays out the slab, the pipeline and the node for the buses the
+            // layout above names; the pump that takes the request reports it.
+            // A bus change also changes what the plugin declares (its
+            // parameters may follow its buses).
+            BridgeEvent::Resync(ResyncKind::Io) => {
+                self.declared.forget();
+                self.ask(Request::IoChanged);
+            }
             BridgeEvent::ProcessRequested => {
                 if let Some(wake) = self.wake.get() {
                     wake.raise();
@@ -241,14 +251,10 @@ impl Events {
             // its buses), and death (a dead plugin has none). Not `ParamValues`,
             // which every dropped parameter event raises and which says nothing
             // of the list: a forget on it would make the next write a round trip.
-            BridgeEvent::Resync(
-                ResyncKind::ParamTitles | ResyncKind::Reloaded | ResyncKind::Io,
-            )
+            BridgeEvent::Resync(ResyncKind::ParamTitles | ResyncKind::Reloaded)
             | BridgeEvent::Crashed { .. } => self.declared.forget(),
             // A transport request reaches the application through the
-            // listener, in order. Nothing is queued for `take_requests`, which
-            // a served plugin's host does not drain: a request kept here would
-            // only pile up.
+            // listener, in order; nothing is queued for it here.
             _ => {}
         }
         let forward = self
@@ -281,6 +287,9 @@ pub(crate) struct Link {
     pub(crate) timeout: Duration,
     pub(crate) origin: Option<IpcOrigin>,
     pub(crate) counters: Arc<ChunkCounters>,
+    /// The slab `counters` asks whether a chunk was answered: the one the
+    /// current activation renders through.
+    answering: Arc<Mutex<Arc<AudioSlab>>>,
     events: Arc<Events>,
     /// The rate the server runs at.
     rate: AtomicSampleRate,
@@ -291,8 +300,8 @@ pub(crate) struct Link {
 
 impl Link {
     /// The plugin as the host knows it now: what it reported at load, with the
-    /// buses it announced since. The slab and the pipeline are laid out for
-    /// [`loaded`](Self::loaded), the buses at load.
+    /// buses it announced since. An activation reads it once and lays out the
+    /// slab, the pipeline and the node's ports from that one value.
     pub(crate) fn current(&self) -> LoadedPlugin {
         let mut loaded = self.loaded.clone();
         if let Some(layout) = self.layout() {
@@ -468,9 +477,17 @@ impl Ipc {
             origin,
         } = parts;
         let counters = Arc::new(ChunkCounters::default());
+        // The slab the pipeline reads, which an activation may replace: read
+        // by the control side's diagnostics only, never by the audio thread.
+        let answering = Arc::new(Mutex::new(Arc::clone(slab.slab())));
         {
-            let slab = Arc::clone(bridge.audio_buffer());
-            counters.attach(move |seq| slab.has_output(seq));
+            let answering = Arc::clone(&answering);
+            counters.attach(move |seq| {
+                answering
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .has_output(seq)
+            });
         }
         let events = Arc::new(Events {
             latency: AtomicUsize::new(loaded.latency_samples.get()),
@@ -494,6 +511,7 @@ impl Ipc {
             timeout,
             origin,
             counters,
+            answering,
             events,
             rate: AtomicSampleRate::new(rate),
             wait: Mutex::new(None),
@@ -773,14 +791,47 @@ impl Ipc {
             slab,
             next_seq,
         } = self;
+        // The one reading of the buses this activation lays out: the slab, the
+        // pipeline's widths and (through `Control::wiring` at the same restart)
+        // the node's ports follow it. A change after it is the next restart's.
+        let snapshot = link.current();
+        let slab = match swap_slab(
+            &link.bridge,
+            &snapshot,
+            link.format,
+            link.ceiling,
+            slab.layout_ref(),
+        ) {
+            Ok(None) => slab,
+            Ok(Some(new)) => {
+                *link
+                    .answering
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner) = Arc::clone(new.slab());
+                // The slab the server renders through now; the old one goes
+                // with the writer, after the server's ack.
+                drop(slab);
+                new
+            }
+            Err(why) => {
+                return Err(Refused {
+                    plugin: Some(Self {
+                        link,
+                        slab,
+                        next_seq,
+                    }),
+                    reason: PluginError::Other(why.to_string()),
+                });
+            }
+        };
         let rate = prepare.rate();
         if rate != link.rate() {
             let _ = link.bridge.set_sample_rate_rt(rate);
             link.set_rate(rate);
         }
         let mut batcher = Batcher::new(
-            link.loaded.total_inputs(),
-            link.loaded.total_outputs(),
+            snapshot.total_inputs(),
+            snapshot.total_outputs(),
             link.format,
             link.ceiling,
             slab,
@@ -805,9 +856,13 @@ impl Loaded for Ipc {
     type Processor = IpcProcessor;
     type Controller = IpcController;
 
-    /// Nothing restarts a served plugin: a rate, a block and a latency change
-    /// are re-read or taken live, as the served path does today.
-    const RESTARTS: RestartRules = RestartRules::NONE;
+    /// A change of the plugin's buses restarts it: the activation lays out a
+    /// slab, a pipeline and a node for the new ones. A rate, a block and a
+    /// latency change are re-read or taken live.
+    const RESTARTS: RestartRules = RestartRules {
+        io: true,
+        latency: false,
+    };
 
     /// Builds the pipeline for `prepare`'s block and the Processor over it.
     /// The server is told no rate here: it was launched at one, and a node

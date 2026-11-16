@@ -368,6 +368,15 @@ impl PluginBridge {
         self.audio.reset_rt()
     }
 
+    /// See `AudioBridge::setup_shared_memory`.
+    pub fn setup_shared_memory(
+        &self,
+        shm_name: String,
+        layout: crate::protocol::SlabLayout,
+    ) -> bool {
+        self.audio.setup_shared_memory(shm_name, layout)
+    }
+
     /// See `AudioBridge::audio_buffer`.
     pub fn audio_buffer(&self) -> &Arc<AudioSlab> {
         self.audio.audio_buffer()
