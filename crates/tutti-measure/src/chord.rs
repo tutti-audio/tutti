@@ -246,8 +246,8 @@ fn similarities(frame: &[f32]) -> [f64; STATES] {
 /// The best state per frame under the emission and transition model.
 fn viterbi(chroma: &Grid<f32>, cfg: &ChordConfig) -> Vec<u8> {
     let frames = chroma.frames().get();
-    let stay = Score::from(cfg.self_transition.get()).ln();
-    let switch = ((1.0 - Score::from(cfg.self_transition.get())) / (STATES - 1) as Score).ln();
+    let stay = libm::log(Score::from(cfg.self_transition.get()));
+    let switch = libm::log((1.0 - Score::from(cfg.self_transition.get())) / (STATES - 1) as Score);
     let emit =
         |frame: &[f32]| similarities(frame).map(|s| s as Score * Score::from(cfg.sharpness.get()));
 

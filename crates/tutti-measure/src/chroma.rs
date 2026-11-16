@@ -49,6 +49,7 @@
 //!
 //! [`harmonic_decay`]: ChromaConfig::harmonic_decay
 
+use crate::level::SILENCE_FLOOR;
 use tutti_buffers::{Mono, Sample};
 use tutti_types::{Cents, Db, Hz, Note, SampleRate, Samples, Semitones};
 
@@ -75,10 +76,6 @@ pub(crate) const MAX_FRAMES: usize = 1 << 19;
 /// The most hops in one window. Each frame is a whole transform, so this
 /// bounds the cost of a tiny hop.
 const MAX_OVERLAP: usize = 64;
-
-/// A frame whose strongest in-band partial is below this holds no pitch, as in
-/// note transcription.
-const SILENCE_FLOOR: Db = Db(-90.0);
 
 /// Smallest positive magnitude, standing in for an empty neighbour bin before
 /// its logarithm is taken.
@@ -396,8 +393,8 @@ impl ChromaPlan {
         let off = off_grid(frequency);
         let turn = f64::from(off) * std::f64::consts::TAU;
         let w = f64::from(energy);
-        sums.cos += w * turn.cos();
-        sums.sin += w * turn.sin();
+        sums.cos += w * libm::cos(turn);
+        sums.sin += w * libm::sin(turn);
     }
 
     /// Folds a peak into the twelve classes at `tuning` semitones sharp.
@@ -438,14 +435,14 @@ fn class_of(frequency: f64, tuning: Semitones) -> usize {
 /// middle one is the peak: its offset from the middle bin, within
 /// `-0.5..=0.5`, and the magnitude there.
 fn interpolate(below: f32, mid: f32, above: f32) -> (f64, f32) {
-    let ln = |m: f32| f64::from(m).max(TINY).ln();
+    let ln = |m: f32| libm::log(f64::from(m).max(TINY));
     let (a, b, c) = (ln(below), ln(mid), ln(above));
     let curvature = a - 2.0 * b + c;
     if curvature.is_nan() || curvature >= 0.0 {
         return (0.0, mid);
     }
     let offset = (0.5 * (a - c) / curvature).clamp(-0.5, 0.5);
-    (offset, (b - 0.25 * (a - c) * offset).exp() as f32)
+    (offset, libm::exp(b - 0.25 * (a - c) * offset) as f32)
 }
 
 /// The energy-weighted circular mean of the peaks' off-grid distances, kept as
@@ -460,7 +457,7 @@ impl TuningSums {
     /// The mean distance, within `-50..=50` cents; 0 with no peak. `atan2` is
     /// within a half turn, so the offset is within a half semitone.
     fn offset(self) -> TuningOffset {
-        let turns = self.sin.atan2(self.cos) / std::f64::consts::TAU;
+        let turns = libm::atan2(self.sin, self.cos) / std::f64::consts::TAU;
         TuningOffset::new(Semitones(turns as f32).to_cents()).unwrap_or(TuningOffset::NONE)
     }
 

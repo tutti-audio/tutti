@@ -28,10 +28,11 @@ use std::time::Instant;
 use dpi::Size;
 
 use crate::{
-    AudioBufferMut, AutomationMode, BypassWrite, ContentScale, EditorCapabilities, EditorWindow,
-    KeyEvent, KeyUse, LoadedPlugin, Normalized, ParamId, ParamWriteError, ParameterInfo,
-    PluginDescriptor, PluginError, PluginResult, PluginTail, Preset, PresetId, ProcessContext,
-    ProcessOutput, ProcessWake, SampleRate, Samples, WindowHandle,
+    AudioBuffer, AudioBufferMut, AutomationMode, BypassWrite, ChannelTable, ContentScale,
+    EditorCapabilities, EditorWindow, KeyEvent, KeyUse, LoadedPlugin, Normalized, ParamId,
+    ParamWriteError, ParameterInfo, PluginDescriptor, PluginError, PluginResult, PluginTail,
+    Preset, PresetId, ProcessContext, ProcessOutput, ProcessWake, Sample, SampleRate, Samples,
+    WindowHandle,
 };
 use crate::{Delivered, ParamEdit, bypass_parameter, bypass_value, is_bypassed};
 use crate::{
@@ -853,6 +854,78 @@ pub struct Stuck<P, C> {
     pub controller: C,
     /// Why.
     pub reason: PluginError,
+}
+
+/// Runs one block of `inputs` and `outputs` through `processor`. The outputs are
+/// borrowed again into a table of this call's own, because [`PluginIo`] holds
+/// one lifetime for tables and data and a `&mut [&mut _]` is invariant in the
+/// data's. The tables are stack arrays ([`ChannelTable`]), so this is callable
+/// on the audio thread.
+///
+/// # Errors
+///
+/// [`PluginError::Process`] when the plugin failed the block.
+#[allow(clippy::too_many_arguments)]
+pub fn process_block<P: Processor, T: Sample>(
+    processor: &mut P,
+    inputs: &[&[T]],
+    outputs: &mut [&mut [T]],
+    num_samples: usize,
+    sample_rate: SampleRate,
+    ctx: &ProcessContext<'_>,
+    out: &mut ProcessOutput,
+) -> PluginResult<()>
+where
+    for<'a> AudioBufferMut<'a, 'a>: From<AudioBuffer<'a, 'a, T>>,
+{
+    let mut table: ChannelTable<&mut [T]> = outputs.iter_mut().map(|o| &mut **o).collect();
+    let mut io = PluginIo {
+        buffer: AudioBufferMut::from(AudioBuffer {
+            inputs,
+            outputs: &mut table,
+            num_samples,
+            sample_rate,
+        }),
+        ctx,
+        out,
+    };
+    processor.process(&mut io)
+}
+
+impl AudioBufferMut<'_, '_> {
+    /// This block through `processor`, whichever width it carries
+    /// ([`process_block`]).
+    ///
+    /// # Errors
+    ///
+    /// [`PluginError::Process`] when the plugin failed the block.
+    pub fn process<P: Processor>(
+        self,
+        processor: &mut P,
+        ctx: &ProcessContext<'_>,
+        out: &mut ProcessOutput,
+    ) -> PluginResult<()> {
+        match self {
+            Self::F32(b) => process_block(
+                processor,
+                b.inputs,
+                b.outputs,
+                b.num_samples,
+                b.sample_rate,
+                ctx,
+                out,
+            ),
+            Self::F64(b) => process_block(
+                processor,
+                b.inputs,
+                b.outputs,
+                b.num_samples,
+                b.sample_rate,
+                ctx,
+                out,
+            ),
+        }
+    }
 }
 
 /// One block's buffers, inputs and outputs.

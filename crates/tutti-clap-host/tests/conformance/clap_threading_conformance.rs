@@ -530,7 +530,7 @@ fn a_sample_rate_change_deactivates_and_reactivates_the_plugin() {
     let mut inst = probe.activate();
     drive_block(&mut inst, 64, &ClapProcessContext::default());
 
-    let before = inst.loaded().sample_rate();
+    let before = inst.loaded().sample_rate().get();
     let target = if before == 48_000.0 {
         44_100.0
     } else {
@@ -545,7 +545,7 @@ fn a_sample_rate_change_deactivates_and_reactivates_the_plugin() {
         .expect("the reference plugin must accept an ordinary DAW sample rate");
 
     assert_eq!(
-        inst.loaded().sample_rate(),
+        inst.loaded().sample_rate().get(),
         target,
         "the host must report the rate it activated at; a stale reading here \
          means `process` would size its scratch from one rate while the plugin \

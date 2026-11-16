@@ -263,12 +263,12 @@ pub(crate) fn bus_count(unit: &Unit, direction: BusDirection) -> u32 {
 /// returns -10877 from AudioToolbox — the error is the AU's, not invented here.
 pub(crate) fn bus_layout(unit: &Unit, direction: BusDirection, bus: u32) -> Result<ChannelLayout> {
     let asbd = unit.get::<StreamFormat>(direction.scope(), Element(bus))?;
-    ChannelLayout::try_from(asbd.mChannelsPerFrame).map_err(|_| AuError::BusTooWide {
+    ChannelLayout::try_from(asbd.mChannelsPerFrame).map_err(|source| AuError::BusTooWide {
         scope: match direction {
             BusDirection::Input => "input",
             BusDirection::Output => "output",
         },
-        channels: asbd.mChannelsPerFrame,
+        source,
     })
 }
 

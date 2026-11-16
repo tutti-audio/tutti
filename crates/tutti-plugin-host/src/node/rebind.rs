@@ -26,7 +26,7 @@ use tutti_plugin_types::{
     Features, Loaded, MainThreadMarker, ParamId, PluginDescriptor, Successor,
 };
 use tutti_transport::TempoReader;
-use tutti_types::Samples;
+use tutti_types::{ParkedSampleRate, Samples};
 
 use super::client::{Declared, InProcClient, PluginNode, Reload};
 use super::instance::Instance;
@@ -61,7 +61,7 @@ pub struct Rebinder<F: Loaded> {
     reload: Option<Reload>,
     features: Features,
     sample_rate: tutti_types::SampleRate,
-    pending_sample_rate: Arc<AtomicU64>,
+    pending_sample_rate: Arc<ParkedSampleRate>,
     unlent: Arc<AtomicU64>,
     parameters: Vec<ParamId>,
     spares: usize,
