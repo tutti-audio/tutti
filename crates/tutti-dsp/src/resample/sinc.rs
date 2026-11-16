@@ -65,7 +65,7 @@ impl WindowedSinc {
             return 0.0;
         }
         let x = std::f64::consts::PI * self.cutoff * t;
-        let sinc = if x == 0.0 { 1.0 } else { x.sin() / x };
+        let sinc = if x == 0.0 { 1.0 } else { libm::sin(x) / x };
         self.cutoff * sinc * self.window.centred(t / (2.0 * self.half))
     }
 }

@@ -102,7 +102,7 @@ impl SvfCoeffs {
         let sample_rate = sample_rate.into();
         // `tan` diverges at Nyquist itself, so the cutoff stops just short of it.
         let fc = (freq as f64).clamp(1.0, f64::from(sample_rate.nyquist_scaled(0.998).get()));
-        let g0 = (core::f64::consts::PI * fc / sample_rate.get()).tan();
+        let g0 = libm::tan(core::f64::consts::PI * fc / sample_rate.get());
         let q = (q as f64).max(0.01);
         // A gain past `MAX_GAIN_DB` either way is that gain: `10^(dB / 40)`
         // underflows to 0 far out (`k = 1 / (Q * A)` is then infinite and the
@@ -113,7 +113,9 @@ impl SvfCoeffs {
         } else {
             gain_db.clamp(-Self::MAX_GAIN_DB, Self::MAX_GAIN_DB)
         };
-        let a = 10.0_f64.powf(gain_db as f64 / 40.0);
+        // `Db` is `f32` and the design is `f64` to 1e-9 (the closed-form tests), so the
+        // half-gain amplitude `10^(dB / 40)` is `libm`'s in `f64`.
+        let a = libm::pow(10.0, f64::from(gain_db) / 40.0);
 
         // RBJ cookbook shapes: a bell's damping is `1/(Q*A)`, and a shelf's
         // midpoint (half the dB gain) sits at `fc`, so its prototype is tuned

@@ -3235,6 +3235,7 @@ name = "tutti-soundfont"
 version = "0.0.1"
 dependencies = [
  "assert_no_alloc",
+ "libm",
  "serde",
  "thiserror 2.0.21",
  "tutti-dsp",

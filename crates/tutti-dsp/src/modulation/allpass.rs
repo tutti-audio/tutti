@@ -39,7 +39,8 @@ const SWEEP_FLOOR_HZ: f32 = 1.0;
 pub fn allpass_coeff(sweep_hz: f32, sr: f32) -> f32 {
     let sweep_hz = sweep_hz.max(SWEEP_FLOOR_HZ).min(0.49 * sr);
     let w = core::f32::consts::PI * sweep_hz / sr;
-    (w.tan() - 1.0) / (w.tan() + 1.0)
+    let t = libm::tanf(w);
+    (t - 1.0) / (t + 1.0)
 }
 
 #[cfg(test)]

@@ -77,39 +77,45 @@ pub enum RecorderError {
     #[error("the recording source failed; the take holds only what it delivered before")]
     SourceFailed,
 
-    /// File I/O failed: writing frames, or closing the sink in
-    /// [`finalize`](Sink::finalize).
+    /// The sink failed: a write, or closing it in
+    /// [`finalize`](Sink::finalize) (for a WAV, the header was then left
+    /// unpatched and the file is unreadable).
+    ///
+    /// A [`Recorder`] is not generic over its sink, so the sink's
+    /// [`Error`](Sink::Error) arrives boxed; it is reachable through
+    /// [`source`](std::error::Error::source) and `downcast_ref`.
+    #[error("the recording sink failed")]
+    Sink(#[source] Box<dyn std::error::Error + Send + Sync>),
+
+    /// The recording thread could not be spawned.
+    #[error("the recording thread could not be spawned")]
+    Spawn(#[source] std::io::Error),
+
+    /// The recording thread panicked.
     #[error(transparent)]
-    Io(#[from] std::io::Error),
+    Panicked(#[from] tutti_rt::Panicked),
 }
 
-/// [`RecorderError`] as the `io::Error` a sink's
-/// [`finalize`](Sink::finalize) speaks, for a host that reports every way
-/// a take can end through one channel.
-///
-/// [`Io`](RecorderError::Io) unwraps to the error it carries. The others
-/// become an `io::Error` with this error as its source, so the layouts stay
-/// reachable through `get_ref`/`downcast`.
-impl From<RecorderError> for std::io::Error {
-    fn from(error: RecorderError) -> Self {
+/// Why [`PumpLoop::finalize`] did not end cleanly.
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum FinalizeError<E: std::error::Error + 'static> {
+    /// The source broke mid-take ([`Pull::Failed`]) after the sink closed
+    /// cleanly: the file is valid and holds the frames delivered before the
+    /// failure.
+    #[error("the recording source failed; the take holds only what it delivered before")]
+    SourceFailed,
+
+    /// The sink's [`finalize`](Sink::finalize) failed.
+    #[error("the recording sink failed to close")]
+    Sink(#[source] E),
+}
+
+impl<E: std::error::Error + Send + Sync + 'static> From<FinalizeError<E>> for RecorderError {
+    fn from(error: FinalizeError<E>) -> Self {
         match error {
-            RecorderError::Io(io) => io,
-            RecorderError::SourceFailed => std::io::Error::other(RecorderError::SourceFailed),
-            mismatch @ RecorderError::ChannelWidthMismatch { .. } => {
-                std::io::Error::new(std::io::ErrorKind::InvalidInput, mismatch)
-            }
-        }
-    }
-}
-
-impl RecorderError {
-    /// The error a take's `io::Error` result stands for:
-    /// [`SourceFailed`](Self::SourceFailed) if that is what it carries,
-    /// [`Io`](Self::Io) otherwise.
-    fn from_take(error: std::io::Error) -> Self {
-        match error.get_ref().and_then(|e| e.downcast_ref::<Self>()) {
-            Some(Self::SourceFailed) => Self::SourceFailed,
-            _ => Self::Io(error),
+            FinalizeError::SourceFailed => Self::SourceFailed,
+            FinalizeError::Sink(e) => Self::Sink(Box::new(e)),
         }
     }
 }
@@ -381,15 +387,15 @@ where
     ///
     /// # Errors
     ///
-    /// The sink's [`finalize`](Sink::finalize) error; for a WAV, the file
-    /// is then unreadable. If the sink closed cleanly but the source had
-    /// failed, [`RecorderError::SourceFailed`] as an `io::Error`: the file is
-    /// valid and holds the frames delivered before the failure.
-    pub fn finalize(self) -> std::io::Result<()> {
+    /// [`FinalizeError::Sink`] with the sink's [`finalize`](Sink::finalize)
+    /// error; for a WAV, the file is then unreadable. If the sink closed
+    /// cleanly but the source had failed, [`FinalizeError::SourceFailed`]: the
+    /// file is valid and holds the frames delivered before the failure.
+    pub fn finalize(self) -> Result<(), FinalizeError<O::Error>> {
         let source_failed = self.source_failed;
-        self.sink.finalize()?;
+        self.sink.finalize().map_err(FinalizeError::Sink)?;
         if source_failed {
-            return Err(RecorderError::SourceFailed.into());
+            return Err(FinalizeError::SourceFailed);
         }
         Ok(())
     }
@@ -462,7 +468,7 @@ pub struct Recorder<K = Live> {
     stop: StopToken,
     /// The running pump. Taking it makes the shutdown once-only: whichever of
     /// `finish`, `wait`, `finish_in_place` and `drop` runs first leaves `None`.
-    handle: Option<ThreadHandle<std::io::Result<()>>>,
+    handle: Option<ThreadHandle<Result<(), RecorderError>>>,
     /// Raised by the pump on its first failed pass; see [`failed`](Self::failed).
     failed: Arc<AtomicBool>,
     /// Frames the source discarded; see [`lost`](Self::lost).
@@ -494,6 +500,7 @@ impl Recorder<Live> {
     where
         I: Source + Send + 'static,
         O: Sink<Sample = I::Sample> + Send + 'static,
+        O::Error: Send + Sync + 'static,
     {
         Self::start_with_capacity(src, sink, SCRATCH_FRAMES, IDLE_PARK)
     }
@@ -515,6 +522,7 @@ impl Recorder<Live> {
     where
         I: Source + Send + 'static,
         O: Sink<Sample = I::Sample> + Send + 'static,
+        O::Error: Send + Sync + 'static,
     {
         Self::spawn(PumpLoop::new(src, sink, capacity)?, park)
     }
@@ -531,6 +539,7 @@ impl Recorder<Finite> {
     where
         I: FiniteSource + Send + 'static,
         O: Sink<Sample = I::Sample> + Send + 'static,
+        O::Error: Send + Sync + 'static,
     {
         Self::start_finite_with_capacity(src, sink, SCRATCH_FRAMES)
     }
@@ -549,6 +558,7 @@ impl Recorder<Finite> {
     where
         I: FiniteSource + Send + 'static,
         O: Sink<Sample = I::Sample> + Send + 'static,
+        O::Error: Send + Sync + 'static,
     {
         Self::spawn(PumpLoop::new(src, sink, capacity)?, IDLE_PARK)
     }
@@ -578,6 +588,7 @@ impl<K> Recorder<K> {
     where
         I: Source + Send + 'static,
         O: Sink<Sample = I::Sample> + Send + 'static,
+        O::Error: Send + Sync + 'static,
     {
         let failed = Arc::clone(&pump_loop.failed);
         let lost = Arc::clone(&pump_loop.lost);
@@ -597,8 +608,9 @@ impl<K> Recorder<K> {
             }
             // Finalize exactly once, here, where the loop is owned. The result
             // rides the joined thread back to `finish`.
-            pump_loop.finalize()
-        })?;
+            pump_loop.finalize().map_err(RecorderError::from)
+        })
+        .map_err(RecorderError::Spawn)?;
         Ok(Self {
             stop: handle.token(),
             handle: Some(handle),
@@ -620,8 +632,9 @@ impl<K> Recorder<K> {
     ///
     /// [`RecorderError::SourceFailed`] if the source broke mid-take; the sink
     /// was finalized, so the file is valid and holds what was delivered.
-    /// [`RecorderError::Io`] if finalizing failed (for a WAV, the header was
-    /// left unpatched and the file is unreadable) or the pump thread panicked.
+    /// [`RecorderError::Sink`] if finalizing failed (for a WAV, the header was
+    /// left unpatched and the file is unreadable).
+    /// [`RecorderError::Panicked`] if the pump thread panicked.
     #[must_use = "the result says whether the take finalized"]
     pub fn finish(mut self) -> Result<(), RecorderError> {
         self.finish_in_place().unwrap_or(Ok(()))
@@ -692,9 +705,9 @@ impl<K> Recorder<K> {
     /// be moved out (a component, a field). `None` once the result was already
     /// collected, which is what makes a second finalize unrepresentable rather
     /// than a panic. A failed source comes back as
-    /// [`RecorderError::SourceFailed`] inside the `io::Error` (see
-    /// [`PumpLoop::finalize`]). Blocks for at most one pass (or one park);
-    /// after [`is_finished`](Self::is_finished) it does not block at all.
+    /// [`RecorderError::SourceFailed`]. Blocks for at most one pass (or one
+    /// park); after [`is_finished`](Self::is_finished) it does not block at
+    /// all.
     ///
     /// Requesting the stop is the half that matters for a **live** source:
     /// the loop exits on its own only for a finite one; a starving source
@@ -710,18 +723,12 @@ impl<K> Recorder<K> {
     /// itself. The half [`finish_in_place`](Self::finish_in_place) and
     /// [`wait`](Self::wait) share, and the whole difference between them is
     /// the stop requested before this call. A pump that panicked comes back as
-    /// an `io::Error` reading "recording thread panicked: {message}".
+    /// [`RecorderError::Panicked`].
     fn join_pump(&mut self) -> Option<Result<(), RecorderError>> {
         self.handle.take().map(|handle| {
             handle
                 .join()
-                .unwrap_or_else(|panicked| {
-                    Err(std::io::Error::other(format!(
-                        "recording thread panicked: {}",
-                        panicked.message
-                    )))
-                })
-                .map_err(RecorderError::from_take)
+                .unwrap_or_else(|panicked| Err(RecorderError::Panicked(panicked)))
         })
     }
 }

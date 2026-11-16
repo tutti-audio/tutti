@@ -1,8 +1,8 @@
 //! The audio path's block pipeline: the chunk ceiling both ends of the process
 //! edge size to, and what the path counts of the blocks and chunks it sent.
 
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, OnceLock};
 
 /// The largest chunk that crosses the process edge: the largest device
 /// callback a live plugin keeps in step with, and so the ceiling on the
@@ -28,7 +28,7 @@ pub struct BlockCounts {
 }
 
 /// What the pipeline reports to its controls
-/// (`PluginControls::missed_chunks` and `chunk_in_flight_answered`
+/// (`PluginControls::missed_chunks`, `late_chunks`, `skipped_chunks` and `chunk_in_flight_answered`
 /// in `tutti-plugin-host`):
 /// written on the audio thread with relaxed atomics, read anywhere.
 ///
@@ -43,6 +43,12 @@ pub struct ChunkCounters {
     /// Chunks the server had not answered when the node collected them
     /// (played as silence), the bridge alive.
     pub missed: AtomicU64,
+    /// Of the chunks counted in [`missed`](Self::missed), those the server
+    /// published after all, before the chunk's ring slot was reused.
+    pub late: AtomicU64,
+    /// Chunks the bridge dropped because the plugin fell more than one chunk
+    /// behind, counted by the bridge thread (set by [`attach_skipped`](Self::attach_skipped)).
+    skipped: OnceLock<Arc<AtomicU64>>,
     /// Whether the chunk of a sequence has been answered, set when the node is
     /// bound (the shared-memory slab's reply flag, which this file does not
     /// name).
@@ -54,6 +60,8 @@ impl std::fmt::Debug for ChunkCounters {
         f.debug_struct("ChunkCounters")
             .field("in_flight", &self.in_flight)
             .field("missed", &self.missed)
+            .field("late", &self.late)
+            .field("skipped", &self.skipped())
             .finish_non_exhaustive()
     }
 }
@@ -67,6 +75,23 @@ impl ChunkCounters {
     /// See `PluginControls::missed_chunks`.
     pub fn missed(&self) -> u64 {
         self.missed.load(Ordering::Relaxed)
+    }
+
+    /// Reads the bridge thread's count of skipped chunks (the node's bind).
+    pub fn attach_skipped(&self, skipped: Arc<AtomicU64>) {
+        let _ = self.skipped.set(skipped);
+    }
+
+    /// See `PluginControls::skipped_chunks`.
+    pub fn skipped(&self) -> u64 {
+        self.skipped
+            .get()
+            .map_or(0, |skipped| skipped.load(Ordering::Relaxed))
+    }
+
+    /// See `PluginControls::late_chunks`.
+    pub fn late(&self) -> u64 {
+        self.late.load(Ordering::Relaxed)
     }
 
     /// See `PluginControls::chunk_in_flight_answered`.

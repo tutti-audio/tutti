@@ -152,7 +152,7 @@ fn the_reverbs_tail_covers_its_ring_out() {
         panic!("a finite tail, not {:?}", node.shape().tail)
     };
     let out = impulse_response(FreeverbNode::general_midi(), tail.get() + 20_000);
-    let peak = out.iter().flatten().fold(0.0f32, |m, s| m.max(s.abs()));
+    let peak = tutti_fixtures::signal::peak_planes(&out);
     let rang = out
         .iter()
         .filter_map(|c| c.iter().rposition(|s| s.abs() >= 1e-3 * peak))

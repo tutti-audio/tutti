@@ -10,6 +10,7 @@ struct Discard(ChannelLayout);
 
 impl Sink for Discard {
     type Sample = f32;
+    type Error = core::convert::Infallible;
 
     fn layout(&self) -> ChannelLayout {
         self.0
@@ -17,7 +18,7 @@ impl Sink for Discard {
     fn write(&mut self, _: Interleaved<'_>) -> Result<(), SinkFailed> {
         Ok(())
     }
-    fn finalize(self) -> std::io::Result<()> {
+    fn finalize(self) -> Result<(), Self::Error> {
         Ok(())
     }
 }

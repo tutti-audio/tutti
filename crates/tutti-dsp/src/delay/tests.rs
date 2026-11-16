@@ -103,3 +103,15 @@ fn the_two_readers_agree_on_a_whole_delay() {
         assert_eq!(line.read_whole(MAX + 5), line.read_whole(MAX));
     }
 }
+
+/// The trips an echo makes before it is `floor` under the first: `ceil(ln(10^(floor/20)) / ln q)`.
+/// At `q = 1/2` each trip is 6.0206 dB down, so -60 dB takes 9.97 trips (10), -90 dB 14.95 (15)
+/// and -120 dB 19.93 (20); a loop gain of 0 never echoes.
+#[test]
+fn trips_count_the_echoes_to_the_floor_in_decibels() {
+    use tutti_types::Db;
+    assert_eq!(taps::trips(0.5, Db(-60.0)), 10.0);
+    assert_eq!(taps::trips(0.5, Db(-90.0)), 15.0);
+    assert_eq!(taps::trips(0.5, Db(-120.0)), 20.0);
+    assert_eq!(taps::trips(0.0, Db(-60.0)), 0.0);
+}
