@@ -344,11 +344,11 @@ tutti-midi-runtime  node-ctor  crates/tutti-midi-runtime/src/schedule/harmony_no
 tutti-modulation  ctor-result  crates/tutti-modulation/src/program.rs::ControlProgram::new
 
 # tutti-nodes
-tutti-nodes  with-prefix  crates/tutti-nodes/src/lfo.rs::ModulatorNode::with_beat_sync
-tutti-nodes  with-prefix  crates/tutti-nodes/src/lfo.rs::ModulatorNode::with_depth
-tutti-nodes  with-prefix  crates/tutti-nodes/src/lfo.rs::ModulatorNode::with_phase_offset
-tutti-nodes  with-prefix  crates/tutti-nodes/src/lfo.rs::ModulatorNode::with_rate
-tutti-nodes  with-prefix  crates/tutti-nodes/src/lfo.rs::ModulatorNode::with_seed
+tutti-nodes  with-prefix  crates/tutti-nodes/src/lfo.rs::LfoNode::with_beat_sync
+tutti-nodes  with-prefix  crates/tutti-nodes/src/lfo.rs::LfoNode::with_depth
+tutti-nodes  with-prefix  crates/tutti-nodes/src/lfo.rs::LfoNode::with_phase_offset
+tutti-nodes  with-prefix  crates/tutti-nodes/src/lfo.rs::LfoNode::with_rate
+tutti-nodes  with-prefix  crates/tutti-nodes/src/lfo.rs::LfoNode::with_seed
 tutti-nodes  with-prefix  crates/tutti-nodes/src/oscillator.rs::OscillatorNode::with_level
 tutti-nodes  setter  crates/tutti-nodes/src/automation/control_lane.rs::LaneControls::set_knob
 tutti-nodes  setter  crates/tutti-nodes/src/automation/recording.rs::Recorder::set_config
@@ -398,8 +398,7 @@ tutti-nodes  node-ctor  crates/tutti-nodes/src/filter/svf.rs::SvfFilterNode::new
 tutti-nodes  node-ctor  crates/tutti-nodes/src/filter/svf.rs::SvfFilterNode::with_channels
 tutti-nodes  node-ctor  crates/tutti-nodes/src/filter/svf.rs::SvfFilterNode::with_controls
 tutti-nodes  node-ctor  crates/tutti-nodes/src/kernel.rs::KernelNode::with_kernel
-tutti-nodes  node-ctor  crates/tutti-nodes/src/lfo.rs::ModulatorNode::new
-tutti-nodes  node-ctor  crates/tutti-nodes/src/lfo.rs::ModulatorNode::with_modulator
+tutti-nodes  node-ctor  crates/tutti-nodes/src/lfo.rs::LfoNode::new
 tutti-nodes  node-ctor  crates/tutti-nodes/src/modulation/mod_delay.rs::ModDelayNode::chorus
 tutti-nodes  node-ctor  crates/tutti-nodes/src/modulation/mod_delay.rs::ModDelayNode::flanger
 tutti-nodes  node-ctor  crates/tutti-nodes/src/modulation/mod_delay.rs::ModDelayNode::general_midi_chorus

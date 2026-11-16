@@ -1,16 +1,14 @@
-//! The audio-rate modulation adapter.
+//! The audio-rate LFO node.
 //!
-//! [`ModulatorNode<M>`] is the graph adapter over a pure [`Modulator`]: it
-//! owns everything *audio* — the `tutti_graph::Node` impl, the clock
-//! position, the sample rate, the beat read from each block's `Env` — and
-//! calls the modulator only for the one pure step `cycles -> value`. The
-//! modulator itself knows nothing of transport or audio.
-//!
-//! [`LfoNode`] is `ModulatorNode<Waveform>` — the concrete, monomorphized LFO node
-//! the graph builds, over the same [`Waveform`] a control lane evaluates, so a
-//! beat-synced node and lane produce one sequence (a random wave included).
-//! A free-running node runs from its insert and does not restart at play.
-//! Because `M` is a concrete type param (not `Box<dyn>`), `value()` inlines.
+//! [`LfoNode`] owns everything *audio*: the `tutti_graph::Node` impl, the clock
+//! position, the sample rate, the beat read from each block's `Env`. It calls
+//! [`Waveform::raw_at`] for the one pure step `cycles -> value`, the same
+//! function a control lane evaluates, so a beat-synced node and lane produce
+//! one sequence (a random wave included). The wave is a pure function of its
+//! position in unwrapped cycles: the cycle index addresses a stepped shape's
+//! step, the fraction is the phase, and a negative position reads the end of
+//! the cycle. A free-running node runs from its insert and does not restart at
+//! play.
 //!
 //! `LfoShape` and `Waveform` are re-exported so `use tutti_nodes::LfoShape`
 //! resolves here.
@@ -23,7 +21,6 @@ use tutti_types::{Latency, Tail};
 
 // The waveform vocabulary is tutti-modulation's floor, re-exported so `use
 // tutti_nodes::LfoShape` resolves.
-pub use crate::modulator::Modulator;
 pub use tutti_modulation::{LfoShape, Waveform};
 
 /// What an LFO's phase follows: its own frame count, or the transport beat.
@@ -56,14 +53,19 @@ impl core::fmt::Display for LfoClock {
     }
 }
 
-/// The audio-rate modulation node: a graph node (`tutti_graph::Node`,
-/// no inputs, one output) that computes a clock position in unwrapped cycles
-/// — free-running, or from the transport beat of its block's `Env` — and
-/// drives a pure [`Modulator`] `M`.
+/// The audio-rate LFO: a graph node (`tutti_graph::Node`, no inputs, one
+/// output) that computes a clock position in unwrapped cycles — free-running,
+/// or from the transport beat of its block's `Env` — and reads its [`Waveform`]
+/// there.
 ///
-/// Owns everything audio; `M` owns the pure `cycles -> value`. The depth is
-/// held here and only here (a live atomic the UI can write), multiplied onto
-/// the modulator's output.
+/// **The per-sample tier.** Reach for this when a control-rate value is too
+/// coarse (audio-rate modulation): an audio generator whose output feeds a
+/// node's own audio input. Beat-synced it reads the beat of every frame from
+/// its block's `Env`, so it is sample-accurate and renders identically offline.
+/// The control-rate alternative is a `tutti_modulation::Source::Lfo` route,
+/// which a control lane evaluates into the param's port.
+///
+/// The depth is a live atomic the UI can write, multiplied onto the wave.
 ///
 /// **Addressable.** The value at a position is a pure function of it, so a
 /// random wave steps on the cycle index ([`Waveform::raw_at`]): beat-synced, it
@@ -86,14 +88,14 @@ impl core::fmt::Display for LfoClock {
 /// latent path is aligned by the compiler, which delays this node's edge into
 /// it like any other source's.
 #[derive(Debug)]
-pub struct ModulatorNode<M: Modulator> {
-    modulator: M,
+pub struct LfoNode {
+    wave: Waveform,
     clock: LfoClock,
     /// The free-running rate: read only by [`LfoClock::Free`], and declared as
     /// a param only then.
     rate: Param<Hz>,
     depth: Param<Depth>,
-    /// Added to the clock position before the modulator reads it.
+    /// Added to the clock position before the wave reads it.
     phase_offset: PhaseIncrement,
     /// Free-running clock position, in unwrapped cycles (`f64`, so the cycle
     /// index a random wave steps on stays exact for as long as a session
@@ -104,21 +106,7 @@ pub struct ModulatorNode<M: Modulator> {
     sample_rate: Option<SampleRate>,
 }
 
-/// The concrete LFO node the graph builds — a [`ModulatorNode`] driving a
-/// [`Waveform`], the one a control lane evaluates. Monomorphized, so `value()`
-/// inlines.
-///
-/// **The per-sample tier.** Reach for this when a control-rate value is too
-/// coarse (audio-rate modulation): an audio generator whose output feeds a
-/// node's own audio input. Beat-synced it reads the
-/// beat of every frame from its block's `Env`, so it is sample-accurate and
-/// renders identically offline.
-///
-/// The control-rate alternative is a `tutti_modulation::Source::Lfo` route, which a
-/// control lane evaluates into the param's port.
-pub type LfoNode = ModulatorNode<Waveform>;
-
-impl ModulatorNode<Waveform> {
+impl LfoNode {
     /// Creates a free-running LFO of `shape` (seed 0) at a rate of
     /// 1.0 Hz.
     ///
@@ -127,7 +115,15 @@ impl ModulatorNode<Waveform> {
     /// it.
     #[must_use]
     pub fn new(shape: LfoShape) -> Self {
-        Self::with_modulator(Waveform::Shape { shape, seed: 0 })
+        Self {
+            wave: Waveform::Shape { shape, seed: 0 },
+            clock: LfoClock::Free,
+            rate: Param::new(Hz(1.0)),
+            depth: Param::new(Depth::FULL),
+            phase_offset: PhaseIncrement(0.0),
+            position: 0.0,
+            sample_rate: None,
+        }
     }
 
     /// The random shapes' seed: seed 0 is the plain sequence, the one a
@@ -135,7 +131,7 @@ impl ModulatorNode<Waveform> {
     /// Ignored by a wave that is not a shape.
     #[must_use]
     pub fn with_seed(mut self, seed: u64) -> Self {
-        if let Waveform::Shape { seed: s, .. } = &mut self.modulator {
+        if let Waveform::Shape { seed: s, .. } = &mut self.wave {
             *s = seed;
         }
         self
@@ -159,24 +155,7 @@ impl From<tutti_modulation::Lfo> for LfoNode {
     }
 }
 
-impl<M: Modulator> ModulatorNode<M> {
-    /// Builds a modulation node over an arbitrary pure modulator, free-running
-    /// at 1 Hz. The generic entry point behind [`LfoNode::new`].
-    ///
-    /// It takes no sample rate: the graph hands it the device rate in
-    /// [`Node::prepare`] before its first block.
-    pub fn with_modulator(modulator: M) -> Self {
-        Self {
-            modulator,
-            clock: LfoClock::Free,
-            rate: Param::new(Hz(1.0)),
-            depth: Param::new(Depth::FULL),
-            phase_offset: PhaseIncrement(0.0),
-            position: 0.0,
-            sample_rate: None,
-        }
-    }
-
+impl LfoNode {
     /// Runs free at `rate` cycles a second ([`LfoClock::Free`]).
     #[must_use]
     pub fn with_rate(mut self, rate: impl Into<Hz>) -> Self {
@@ -195,7 +174,7 @@ impl<M: Modulator> ModulatorNode<M> {
 
     /// Sets the modulation [`Depth`].
     ///
-    /// Bipolar: a negative depth inverts the modulator, so `-1.0` is the same
+    /// Bipolar: a negative depth inverts the wave, so `-1.0` is the same
     /// shape phase-flipped and `0.0` is flat.
     #[must_use]
     pub fn with_depth(self, depth: impl Into<Depth>) -> Self {
@@ -222,24 +201,23 @@ impl<M: Modulator> ModulatorNode<M> {
         self.clock
     }
 
-    /// The one call into the pure modulator, at `cycles` plus the phase
-    /// offset, with the depth applied.
+    /// The wave at `cycles` plus the phase offset, with the depth applied.
     #[inline]
     fn evaluate(&self, cycles: f64, offset: PhaseIncrement, depth: f32) -> f32 {
-        self.modulator.value(cycles + f64::from(offset.get())) * depth
+        self.wave.raw_at(cycles + f64::from(offset.get()), false) * depth
     }
 }
 
-// The params a [`ModulatorNode`] lets the graph modulate, in port order: its
+// The params an [`LfoNode`] lets the graph modulate, in port order: its
 // depth and, free-running, its rate (a beat-synced node's span is its clock).
 // Both are read per frame. The clock is fixed once the node is live (`with_*`
 // only), so its shape never changes.
-tutti_graph::declare_params!([M: Modulator + Send + 'static] ModulatorNode<M>, n {
+tutti_graph::declare_params!([] LfoNode, n {
     Depth => Depth = &n.depth,
     Rate => Hz = matches!(n.clock, LfoClock::Free).then_some(&n.rate),
 });
 
-impl<M: Modulator + Send + 'static> Node for ModulatorNode<M> {
+impl Node for LfoNode {
     fn shape(&self) -> Shape {
         Shape::source_unassigned(ChannelLayout::MONO)
             .with_cost(tutti_graph::Cost::Moderate)
@@ -317,7 +295,7 @@ impl<M: Modulator + Send + 'static> Node for ModulatorNode<M> {
     }
 }
 
-impl<M: Modulator + Clone + Send + 'static> ParamNode for ModulatorNode<M> {
+impl ParamNode for LfoNode {
     /// The depth, and the rate while free-running (a beat-synced node's span is
     /// its clock).
     fn param_set(&self) -> ParamSet {
@@ -338,7 +316,7 @@ impl<M: Modulator + Clone + Send + 'static> ParamNode for ModulatorNode<M> {
 
 /// Inserted with its [`ParamSet`] as its controls and a fork that starts
 /// from the values last set through it ([`tutti_graph::param_parts`]).
-impl<M: Modulator + Clone + Send + 'static> IntoNode for ModulatorNode<M> {
+impl IntoNode for LfoNode {
     type Controls = ParamSet;
 
     fn into_parts(self) -> NodeParts<ParamSet> {
@@ -346,10 +324,10 @@ impl<M: Modulator + Clone + Send + 'static> IntoNode for ModulatorNode<M> {
     }
 }
 
-impl<M: Modulator + Clone> Clone for ModulatorNode<M> {
+impl Clone for LfoNode {
     fn clone(&self) -> Self {
         Self {
-            modulator: self.modulator.clone(),
+            wave: self.wave.clone(),
             clock: self.clock,
             rate: self.rate.handle(),
             depth: self.depth.handle(),
@@ -535,7 +513,7 @@ mod tests {
         assert!((out[0] - 0.5).abs() < 0.01);
     }
 
-    /// Negative depth inverts the modulator rather than silencing it.
+    /// Negative depth inverts the wave rather than silencing it.
     ///
     /// `Depth` is bipolar: `with_depth(-1.0)` stores `-1.0` and phase-flips the
     /// shape. Clamping to `0.0..=1.0` instead would store `0.0` and take the
@@ -569,6 +547,46 @@ mod tests {
             d.output(0)[0].abs() < 0.1,
             "After reset, LFO should start near zero"
         );
+    }
+
+    /// The wave reads the position's fraction as its phase, in any cycle.
+    ///
+    /// The waveform maths itself is `tutti-modulation`'s (`LfoShape::evaluate_periodic`,
+    /// asserted there over every shape).
+    #[test]
+    fn deterministic_shapes_read_the_positions_phase() {
+        for (shape, phase, expected) in [
+            (LfoShape::Sine, 0.25, 1.0),
+            (LfoShape::Square, 0.1, 1.0),
+            (LfoShape::Square, 0.9, -1.0),
+            (LfoShape::Sawtooth, 0.5, 0.0),
+        ] {
+            let wave = Waveform::Shape { shape, seed: 0 };
+            for cycle in [0.0, 3.0, 1_000.0] {
+                let got = wave.raw_at(cycle + phase, false);
+                assert!(
+                    (got - expected).abs() < 0.01,
+                    "{shape:?} at {}: expected {expected}, got {got}",
+                    cycle + phase
+                );
+            }
+        }
+    }
+
+    /// A negative position reads the end of the cycle: a sawtooth at `-0.25`
+    /// is the sawtooth at phase `0.75` (a `fract` wrap would keep the sign and
+    /// read off the front).
+    #[test]
+    fn a_negative_position_reads_the_end_of_the_cycle() {
+        let saw = Waveform::Shape {
+            shape: LfoShape::Sawtooth,
+            seed: 0,
+        };
+        for cycle in [0.0, -3.0] {
+            let want = LfoShape::Sawtooth.evaluate_periodic(tutti_types::Phase(0.75));
+            let got = saw.raw_at(cycle - 0.25, false);
+            assert!((got - want).abs() < 1e-5, "{got} vs {want}");
+        }
     }
 
     fn random(seed: u64) -> Waveform {
