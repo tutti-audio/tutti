@@ -1227,16 +1227,15 @@ fn open_device_output(
     id: &DeviceId,
     options: &OutputOptions,
 ) -> Result<tutti_midi_hardware::OpenOutput, MidiPortError> {
-    let device = io
+    let mut device = io
         .connect_output(id)
         .map_err(|e| MidiPortError::Hardware(Arc::new(e)))?;
     if options.sends_active_sensing() {
         device
-            .with_active_sensing()
-            .map_err(|e| MidiPortError::Hardware(Arc::new(e)))
-    } else {
-        Ok(device)
+            .active_sensing()
+            .map_err(|e| MidiPortError::Hardware(Arc::new(e)))?;
     }
+    Ok(device)
 }
 
 impl crate::Midi<'_> {

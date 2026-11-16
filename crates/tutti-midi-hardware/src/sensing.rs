@@ -10,24 +10,25 @@
 //! Active Sensing.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, RecvTimeoutError, Sender};
-use std::sync::{Arc, Mutex, PoisonError};
-use std::thread::JoinHandle;
-use std::time::Instant;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::{Duration, Instant};
 
 use tutti_graph::Offset;
 use tutti_midi_runtime::ActiveSensingSender;
+use tutti_rt::{StopToken, ThreadHandle, spawn_named};
 use tutti_ump::{MidiGroup, Protocol};
 
 use crate::endpoints::DeviceOut;
+
+/// How long dropping a heartbeat waits for its thread: the thread sleeps on
+/// its stop token, so it ends at once unless the sink is stuck in a send.
+const STOP_BOUND: Duration = Duration::from_secs(1);
 
 /// The running heartbeat. Dropping it stops the thread and waits for it.
 pub(crate) struct Heartbeat {
     schedule: Arc<Mutex<ActiveSensingSender>>,
     midi1: Arc<AtomicBool>,
-    /// Dropped to end the thread: its `recv_timeout` then disconnects.
-    stop: Option<Sender<()>>,
-    thread: Option<JoinHandle<()>>,
+    thread: Option<ThreadHandle<()>>,
 }
 
 impl Heartbeat {
@@ -42,18 +43,14 @@ impl Heartbeat {
             Instant::now(),
         )));
         let midi1 = Arc::new(AtomicBool::new(protocol == Protocol::Midi1));
-        let (stop, ended) = mpsc::channel::<()>();
-        let thread = std::thread::Builder::new()
-            .name("tutti-active-sensing".into())
-            .spawn({
-                let schedule = Arc::clone(&schedule);
-                let midi1 = Arc::clone(&midi1);
-                move || beat(&sink, &schedule, &midi1, &ended)
-            })?;
+        let thread = spawn_named("tutti-midi-sense", None, {
+            let schedule = Arc::clone(&schedule);
+            let midi1 = Arc::clone(&midi1);
+            move |stop| beat(&sink, &schedule, &midi1, stop)
+        })?;
         Ok(Self {
             schedule,
             midi1,
-            stop: Some(stop),
             thread: Some(thread),
         })
     }
@@ -72,40 +69,45 @@ impl Heartbeat {
 
 impl Drop for Heartbeat {
     fn drop(&mut self) {
-        drop(self.stop.take());
         if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
+            match thread.stop_within(STOP_BOUND) {
+                Ok(Ok(())) => {}
+                Ok(Err(panicked)) => tracing::error!("Active Sensing thread: {panicked}"),
+                Err(stuck) => {
+                    tracing::warn!(
+                        "Active Sensing thread did not stop within {STOP_BOUND:?}; left running"
+                    );
+                    stuck.detach();
+                }
+            }
         }
     }
 }
 
-fn lock(schedule: &Mutex<ActiveSensingSender>) -> std::sync::MutexGuard<'_, ActiveSensingSender> {
+fn lock(schedule: &Mutex<ActiveSensingSender>) -> MutexGuard<'_, ActiveSensingSender> {
     schedule.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// Sleeps to the schedule's deadline, sends what is due, and repeats until
-/// `ended` disconnects.
+/// `stop` is requested.
 fn beat(
     sink: &Arc<dyn DeviceOut>,
     schedule: &Mutex<ActiveSensingSender>,
     midi1: &AtomicBool,
-    ended: &mpsc::Receiver<()>,
+    stop: &StopToken,
 ) {
     loop {
         let wait = lock(schedule)
             .deadline()
             .saturating_duration_since(Instant::now());
-        match ended.recv_timeout(wait) {
-            Err(RecvTimeoutError::Disconnected) => return,
-            Ok(()) => {}
-            Err(RecvTimeoutError::Timeout) => {
-                let due = lock(schedule).poll(Instant::now());
-                if let Some(ump) = due
-                    && midi1.load(Ordering::Relaxed)
-                {
-                    let _ = sink.queue(&[(Offset::ZERO, ump)]);
-                }
-            }
+        if stop.wait(wait) {
+            return;
+        }
+        let due = lock(schedule).poll(Instant::now());
+        if let Some(ump) = due
+            && midi1.load(Ordering::Relaxed)
+        {
+            let _ = sink.queue(&[(Offset::ZERO, ump)]);
         }
     }
 }

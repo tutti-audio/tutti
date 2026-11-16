@@ -590,7 +590,7 @@ impl OpenInput {
 /// ([`follow`](Self::follow) takes it from a
 /// [`MidiSession::poll`](crate::MidiSession::poll) report). UMP Stream messages pass in every form.
 pub struct OpenOutput {
-    /// The Active Sensing thread, once [`with_active_sensing`](Self::with_active_sensing)
+    /// The Active Sensing thread, once [`active_sensing`](Self::active_sensing)
     /// started it. Declared first: it drops, and its thread ends holding the
     /// sink, before the sink does, so the connection closes on the dropping thread.
     heartbeat: Option<Heartbeat>,
@@ -610,7 +610,7 @@ impl core::fmt::Debug for OpenOutput {
 }
 
 impl OpenOutput {
-    /// This output, sending Active Sensing (`0xFE`) from a thread of its own
+    /// Starts this output sending Active Sensing (`0xFE`) from a thread of its own
     /// whenever it has been silent for
     /// [`ACTIVE_SENSING_INTERVAL`](tutti_midi_runtime::ACTIVE_SENSING_INTERVAL),
     /// until it is dropped: a transmitter that starts goes on (MIDI 1.0
@@ -622,14 +622,14 @@ impl OpenOutput {
     /// # Errors
     ///
     /// [`Error::Io`] when the thread cannot start.
-    pub fn with_active_sensing(mut self) -> Result<Self> {
+    pub fn active_sensing(&mut self) -> Result<()> {
         if self.heartbeat.is_none() {
             self.heartbeat = Some(Heartbeat::start(
                 Arc::clone(&self.sink),
                 self.wire.config().protocol,
             )?);
         }
-        Ok(self)
+        Ok(())
     }
 
     /// Whether the output can still send; see
