@@ -9,9 +9,10 @@ use std::time::Instant;
 
 use tutti_midi_device::Muid;
 use tutti_midi_device::{
-    BodyLimit, BufferLimit, CiCategories, CiMessage, Decoded, PeCapabilities, PeReassemblyLimits,
-    PeSettings, ResourceAction, ResourceEvent, ResourceInitiator, ResourceResponder, ResourceStore,
-    ResponderAction, ResponderSettings, SimultaneousRequests, StreamLimit,
+    BodyLimit, BufferLimit, ChunkPosition, ChunkTotal, CiCategories, CiMessage, Decoded,
+    PeCapabilities, PeCiMessage, PeHeader, PeMessageKind, PeReassemblyLimits, PeSettings,
+    PeSubscription, ResourceAction, ResourceEvent, ResourceInitiator, ResourceResponder,
+    ResourceStore, ResponderAction, ResponderSettings, SimultaneousRequests, StreamLimit,
 };
 use tutti_ump::MidiGroup;
 
@@ -144,8 +145,10 @@ impl Member {
         {
             sends.push((self.group, nak));
         }
-        let served = self.server.on_message(decoded, now);
-        self.carry_out_served(served, sends, changes);
+        if !self.is_update(decoded) {
+            let served = self.server.on_message(decoded, now);
+            self.carry_out_served(served, sends, changes);
+        }
         let heard: Vec<_> = self
             .properties
             .iter_mut()
@@ -154,6 +157,47 @@ impl Member {
         for (muid, actions) in heard {
             self.carry_out_property(muid, actions, sends, changes);
         }
+    }
+
+    /// Whether `decoded` is a message of a Subscription the Initiator of its peer
+    /// holds: an update, which only a Responder sends (M2-103 §11.1), or the end
+    /// of a Subscription the Initiator holds. It is the Initiator's alone: the
+    /// Responder serves what peers ask of the store, and would refuse it.
+    fn is_update(&mut self, decoded: &Decoded) -> bool {
+        let Decoded::Message(CiMessage::PropertyExchange {
+            header,
+            message: PeCiMessage::Chunk { kind, chunk },
+            ..
+        }) = decoded
+        else {
+            return false;
+        };
+        if *kind != PeMessageKind::SUBSCRIPTION_INQUIRY {
+            return false;
+        }
+        let source = header.source;
+        let key = (source, chunk.request_id());
+        let owned = if chunk.header().is_empty() {
+            self.updates.contains(&key)
+        } else {
+            match PeHeader::parse(chunk.header()) {
+                Ok(PeHeader::Subscription(PeSubscription::Update { .. })) => true,
+                Ok(PeHeader::Subscription(PeSubscription::End { subscribe_id, .. })) => self
+                    .properties
+                    .get(&source)
+                    .is_some_and(|i| i.subscriptions().any(|(id, ..)| *id == subscribe_id)),
+                _ => false,
+            }
+        };
+        let last = matches!(
+            (chunk.position(), chunk.total()),
+            (ChunkPosition::Number(n), ChunkTotal::Known(total)) if n == total
+        ) || chunk.position() == ChunkPosition::Abandoned;
+        self.updates.retain(|k| *k != key);
+        if owned && !last {
+            self.updates.push(key);
+        }
+        owned
     }
 
     /// Ends every wait of the Responder and the Initiators that has run out.
@@ -235,6 +279,33 @@ impl Member {
                     ResourceEvent::Set {
                         resource, result, ..
                     } => changes.answers.push((id, Answer::Set { resource, result })),
+                    ResourceEvent::Subscribed {
+                        subscribe_id,
+                        target,
+                        ..
+                    } => changes.answers.push((
+                        id,
+                        Answer::Subscribed {
+                            target,
+                            subscribe_id,
+                        },
+                    )),
+                    ResourceEvent::SubscribeFailed {
+                        target, failure, ..
+                    } => changes
+                        .answers
+                        .push((id, Answer::SubscribeFailed { target, failure })),
+                    ResourceEvent::Unsubscribed {
+                        subscribe_id,
+                        result,
+                        ..
+                    } => changes.answers.push((
+                        id,
+                        Answer::Unsubscribed {
+                            subscribe_id,
+                            result,
+                        },
+                    )),
                     other => changes
                         .properties
                         .push((id, PropertyChange::Event(Box::new(other)))),

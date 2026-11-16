@@ -2371,16 +2371,6 @@ fn ask_and_pump(wire: &mut Wire, far: &mut Far, call: PropertyCall, ms: u64) -> 
     all
 }
 
-fn resource_events(all: &[Polled]) -> Vec<ResourceEvent> {
-    property_events(all)
-        .into_iter()
-        .filter_map(|c| match c {
-            PropertyChange::Event(e) => Some((**e).clone()),
-            _ => None,
-        })
-        .collect()
-}
-
 /// M2-103 section 11: a Subscription the peer allows starts with its Reply and ends
 /// with the Initiator's End.
 /// Spec: m2-103/11#4, m2-103/11.5#1
@@ -2389,22 +2379,22 @@ fn a_subscription_starts_and_ends_through_the_session() {
     let (mut wire, _, mut far) = ready_property_peer(subscribable());
     let get = ResourceGet::new(ResourceTarget::new(PeResource::LocalOn).unwrap());
     let all = ask_and_pump(&mut wire, &mut far, PropertyCall::Subscribe(get), 300);
-    let events = resource_events(&all);
-    let Some(id) = events.iter().find_map(|e| match e {
-        ResourceEvent::Subscribed { subscribe_id, .. } => Some(subscribe_id.clone()),
+    let answers = property_answers(&all);
+    let Some(id) = answers.iter().find_map(|a| match a {
+        Answer::Subscribed { subscribe_id, .. } => Some(subscribe_id.clone()),
         _ => None,
     }) else {
-        panic!("a Subscription started: {events:?}");
+        panic!("a Subscription started: {answers:?}");
     };
     assert_eq!(far.resp.subscriptions().count(), 1);
 
     let all = ask_and_pump(&mut wire, &mut far, PropertyCall::Unsubscribe(id), 600);
-    let events = resource_events(&all);
+    let answers = property_answers(&all);
     assert!(
-        events
+        answers
             .iter()
-            .any(|e| matches!(e, ResourceEvent::Unsubscribed { result: Ok(_), .. })),
-        "{events:?}"
+            .any(|a| matches!(a, Answer::Unsubscribed { result: Ok(_), .. })),
+        "{answers:?}"
     );
     assert_eq!(far.resp.subscriptions().count(), 0);
 }

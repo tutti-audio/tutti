@@ -15,7 +15,11 @@
 //! ([`MidiInputInfo::resource_peers`](crate::MidiInputInfo::resource_peers)) are
 //! handles the same way: [`ListedResource::fetch`] returns a [`Job<GetProperty>`](Job)
 //! landing the Property Data, [`ListedResource::write`] a [`Job<SetProperty>`](Job)
-//! landing the status of the reply.
+//! landing the status of the reply, [`ListedResource::subscribe`] a
+//! [`Job<Subscribe>`](Job) landing a [`Subscription`] lease. While the lease is live
+//! the session keeps the Resource's Property Data current
+//! ([`ResourcePeer::property`]); dropping the lease ends the Subscription with the
+//! peer.
 //!
 //! Each fails with [`PeerError`]: [`PeerError::Disconnected`] when the peer
 //! leaves before the job lands, [`PeerError::TimedOut`] when it does not answer
@@ -39,8 +43,10 @@ use tutti_midi_hardware::{
 };
 use tutti_ump::MidiChannel;
 
+use crate::SessionEvent;
 use crate::job::{LandedQueue, Ticket, job_kind};
 use crate::midi_port::{Ended, InputRequest, InputShared};
+use crate::peer::ResourceIds;
 use crate::{Job, PeerError};
 
 job_kind!(
@@ -55,6 +61,11 @@ job_kind!(
     /// Report, and its messages reached the graph as the input's MIDI before it.
     pub RequestReport => (), PeerError<Nak>
 );
+
+mod subscription;
+
+pub(crate) use subscription::{EndSubscription, Subscriptions};
+pub use subscription::{Subscribe, Subscription, SubscriptionCause};
 
 job_kind!(
     /// A Get of a peer's Resource: the Property Data the peer sent.
@@ -390,6 +401,8 @@ impl Eq for ReportPeer {}
 pub struct ResourcePeer {
     link: PortLink,
     peer: PropertyPeer,
+    /// What the live Subscriptions hold of its Resources.
+    held: subscription::Bodies,
 }
 
 impl ResourcePeer {
@@ -399,8 +412,8 @@ impl ResourcePeer {
         &self.peer
     }
 
-    pub(crate) fn new(link: PortLink, peer: PropertyPeer) -> Self {
-        Self { link, peer }
+    pub(crate) fn new(link: PortLink, peer: PropertyPeer, held: subscription::Bodies) -> Self {
+        Self { link, peer, held }
     }
 
     /// Every Resource the peer's ResourceList names, as handles to make a call
@@ -420,7 +433,7 @@ impl ResourcePeer {
 
 impl PartialEq for ResourcePeer {
     fn eq(&self, other: &Self) -> bool {
-        self.peer == other.peer
+        self.peer == other.peer && self.held == other.held
     }
 }
 
@@ -463,6 +476,22 @@ impl ListedResource {
         }
     }
 
+    /// Asks the peer to send the Resource's updates (M2-103 §11): the job lands a
+    /// [`Subscription`] once the peer accepts. A Resource the entry does not let be
+    /// subscribed to ends the job as [`PeFailure::NotSent`]. Two calls make two
+    /// Subscriptions: none is shared.
+    pub fn subscribe(&self) -> Job<Subscribe> {
+        match ResourceTarget::new(self.resource().clone()) {
+            Ok(target) => self.link.submit(
+                self.peer
+                    .ask(PropertyCall::Subscribe(ResourceGet::new(target))),
+                listing(&self.entry),
+                InputRequest::Subscribe,
+            ),
+            Err(refused) => self.not_sent(refused),
+        }
+    }
+
     /// Sends the peer `data` as the Resource's whole Property Data. `data` that is
     /// another Resource's ends the job as [`PeFailure::NotSent`], as the
     /// ResourceList's refusal of a Set does.
@@ -488,6 +517,14 @@ impl ListedResource {
                 refused,
             ))))
     }
+}
+
+/// Whether the port's info still lists the peer of `ask`.
+pub(crate) fn listed_peer(info: &crate::MidiInputInfo, ask: &PropertyAsk) -> bool {
+    info.resource_peers()
+        .iter()
+        .map(ResourcePeer::peer)
+        .any(|peer| peer.group() == ask.peer().group() && peer.muid() == ask.peer().muid())
 }
 
 /// Whether the port's info still lists the peer of `ask` with the Resource's
@@ -520,7 +557,6 @@ struct Slot<R, J: crate::JobKind> {
 /// waits behind it and is sent when that one ends. An identical request joins the
 /// last request for its target, in flight or waiting, and lands with its answer;
 /// one that follows a different request queues its own.
-#[derive(Default)]
 pub(crate) struct Pending {
     switches: Vec<Slot<ProfileSwitch, SwitchProfile>>,
     reports: Vec<Slot<ReportAsk, RequestReport>>,
@@ -530,6 +566,9 @@ pub(crate) struct Pending {
     /// request id is released only as its call ends, which is an answer or an
     /// event, so a parked call is never left without one to wake it.
     full: Vec<PeerId>,
+    /// What the live Subscriptions hold.
+    subs: Subscriptions,
+    ids: ResourceIds,
 }
 
 /// A Property Exchange call sent to a peer, or waiting to be, in the order the
@@ -537,6 +576,8 @@ pub(crate) struct Pending {
 enum PropertySlot {
     Get(Slot<PropertyAsk, GetProperty>),
     Set(Slot<PropertyAsk, SetProperty>),
+    Subscribe(Slot<PropertyAsk, Subscribe>),
+    Unsubscribe(Slot<PropertyAsk, EndSubscription>),
 }
 
 impl PropertySlot {
@@ -544,6 +585,8 @@ impl PropertySlot {
         match self {
             Self::Get(s) => s.peer,
             Self::Set(s) => s.peer,
+            Self::Subscribe(s) => s.peer,
+            Self::Unsubscribe(s) => s.peer,
         }
     }
 
@@ -551,6 +594,8 @@ impl PropertySlot {
         match self {
             Self::Get(s) => &s.request,
             Self::Set(s) => &s.request,
+            Self::Subscribe(s) => &s.request,
+            Self::Unsubscribe(s) => &s.request,
         }
     }
 
@@ -558,6 +603,8 @@ impl PropertySlot {
         match self {
             Self::Get(s) => s.sent,
             Self::Set(s) => s.sent,
+            Self::Subscribe(s) => s.sent,
+            Self::Unsubscribe(s) => s.sent,
         }
     }
 
@@ -565,6 +612,8 @@ impl PropertySlot {
         match self {
             Self::Get(s) => s.sent = sent,
             Self::Set(s) => s.sent = sent,
+            Self::Subscribe(s) => s.sent = sent,
+            Self::Unsubscribe(s) => s.sent = sent,
         }
     }
 
@@ -578,6 +627,8 @@ impl PropertySlot {
         match self {
             Self::Get(slot) => end_slot(slot, || Err(error.clone())),
             Self::Set(slot) => end_slot(slot, || Err(error.clone())),
+            Self::Subscribe(slot) => end_slot(slot, || Err(error.clone())),
+            Self::Unsubscribe(slot) => end_slot(slot, || Err(error.clone())),
         }
     }
 }
@@ -596,6 +647,17 @@ fn peer_of(ask: &PropertyAsk) -> PeerId {
 }
 
 impl Pending {
+    pub(crate) fn new(ids: ResourceIds) -> Self {
+        Self {
+            switches: Vec::new(),
+            reports: Vec::new(),
+            properties: Vec::new(),
+            full: Vec::new(),
+            subs: Subscriptions::default(),
+            ids,
+        }
+    }
+
     /// Takes in a switch the app asked for: sent now when nothing else is out
     /// for its Profile at its address.
     pub(crate) fn switch(
@@ -687,6 +749,39 @@ impl Pending {
         self.send(io);
     }
 
+    /// Takes in a Subscription the app asked for. It is never joined: each lease
+    /// is its own.
+    pub(crate) fn subscribe(
+        &mut self,
+        io: &mut MidiSession,
+        ask: PropertyAsk,
+        ticket: Ticket<Subscribe>,
+    ) {
+        self.properties.push(PropertySlot::Subscribe(Slot {
+            peer: peer_of(&ask),
+            request: ask,
+            sent: false,
+            tickets: vec![ticket],
+        }));
+        self.send(io);
+    }
+
+    /// Takes in the end of a Subscription, asked when its lease dropped.
+    pub(crate) fn unsubscribe(
+        &mut self,
+        io: &mut MidiSession,
+        ask: PropertyAsk,
+        ticket: Ticket<EndSubscription>,
+    ) {
+        self.properties.push(PropertySlot::Unsubscribe(Slot {
+            peer: peer_of(&ask),
+            request: ask,
+            sent: false,
+            tickets: vec![ticket],
+        }));
+        self.send(io);
+    }
+
     /// The last call for `ask`'s Resource of its peer, in flight or waiting: an
     /// identical call joins it, and one that follows a different call queues its
     /// own, since it reads what that one leaves.
@@ -763,7 +858,13 @@ impl Pending {
 
     /// Lands `answer` on the request of `peer` it ends, and sends what waited
     /// behind it.
-    pub(crate) fn answer(&mut self, io: &mut MidiSession, peer: PeerId, answer: &Answer) {
+    pub(crate) fn answer(
+        &mut self,
+        io: &mut MidiSession,
+        link: &PortLink,
+        peer: PeerId,
+        answer: &Answer,
+    ) {
         match answer {
             Answer::Switch { request, outcome } => {
                 self.end_switch(peer, request, &switched(outcome));
@@ -799,6 +900,37 @@ impl Pending {
                 }) && let PropertySlot::Set(slot) = self.properties.remove(at)
                 {
                     end_slot(slot, || result.clone());
+                }
+            }
+            Answer::Subscribed {
+                target,
+                subscribe_id,
+            } => {
+                self.make_room(peer);
+                self.subscribed(link, peer, target.resource(), subscribe_id);
+            }
+            Answer::SubscribeFailed { target, failure } => {
+                self.make_room(peer);
+                if let Some(at) = self.sent_call(peer, |s| {
+                    matches!(s, PropertySlot::Subscribe(_))
+                        && s.ask().call().resource() == Some(target.resource())
+                }) {
+                    self.properties.remove(at).fail(&PeFailure::of(failure));
+                }
+            }
+            Answer::Unsubscribed {
+                subscribe_id,
+                result,
+            } => {
+                self.make_room(peer);
+                let call = PropertyCall::Unsubscribe(subscribe_id.clone());
+                if let Some(at) = self.sent_call(peer, |s| s.ask().call() == &call) {
+                    let error = result.as_ref().err().map(PeFailure::of);
+                    match (self.properties.remove(at), error) {
+                        (PropertySlot::Unsubscribe(slot), None) => end_slot(slot, || Ok(())),
+                        (slot, Some(error)) => slot.fail(&error),
+                        (slot, None) => slot.fail(&PeerError::Disconnected),
+                    }
                 }
             }
             Answer::PropertyNotSent { call, error } => self.not_sent(peer, call, error),
@@ -859,6 +991,75 @@ impl Pending {
         }
     }
 
+    /// The peer accepted the Subscription to `resource` that is out for it: its
+    /// job lands the lease, and the record starts holding its Property Data. A
+    /// job dropped since lands nowhere, and the lease it carries ends the
+    /// Subscription as it drops.
+    fn subscribed(
+        &mut self,
+        link: &PortLink,
+        peer: PeerId,
+        resource: &PeResource,
+        subscribe_id: &tutti_midi_device::SubscribeId,
+    ) {
+        let Some(at) = self.sent_call(peer, |s| {
+            matches!(s, PropertySlot::Subscribe(_)) && s.ask().call().resource() == Some(resource)
+        }) else {
+            return;
+        };
+        let PropertySlot::Subscribe(slot) = self.properties.remove(at) else {
+            return;
+        };
+        let (lease, weak) = Subscription::new(
+            self.ids.mint(),
+            link.clone(),
+            &slot.request,
+            resource.clone(),
+            subscribe_id.clone(),
+        );
+        self.subs
+            .started(peer, weak, resource.clone(), subscribe_id.clone());
+        // One job asked for it: a Subscription is never joined.
+        if let Some(ticket) = slot.tickets.into_iter().next() {
+            ticket.land(Ok(lease));
+        }
+    }
+
+    /// What a Subscription's peer sent, or the Initiator found, of its data.
+    pub(crate) fn event(
+        &mut self,
+        peer: PeerId,
+        event: &tutti_midi_device::ResourceEvent,
+        out: &mut Vec<SessionEvent>,
+    ) {
+        use tutti_midi_device::ResourceEvent;
+        match event {
+            ResourceEvent::Updated {
+                subscribe_id, data, ..
+            } => self.subs.update(peer, subscribe_id, Some(data.clone())),
+            // What is held is out of date, and nothing says by how much.
+            ResourceEvent::SyncFailed { subscribe_id, .. } => {
+                self.subs.update(peer, subscribe_id, None);
+            }
+            ResourceEvent::SubscriptionEnded { subscribe_id, .. } => {
+                self.subs.ended_by_peer(peer, subscribe_id, out);
+            }
+            _ => {}
+        }
+    }
+
+    /// Forgets the Subscriptions whose leases dropped, and reads whether the
+    /// Property Data held changed since the last call.
+    pub(crate) fn take_changed(&mut self) -> bool {
+        self.subs.prune();
+        self.subs.take_dirty()
+    }
+
+    /// What `peer`'s Subscriptions hold of its Resources.
+    pub(crate) fn bodies(&self, peer: PeerId) -> subscription::Bodies {
+        self.subs.bodies(peer)
+    }
+
     fn end_report(&mut self, peer: PeerId, result: &Result<(), PeerError<Nak>>) {
         if let Some(at) = self.reports.iter().position(|s| s.sent && s.peer == peer) {
             end_slot(self.reports.remove(at), || result.clone());
@@ -888,7 +1089,9 @@ impl Pending {
     }
 
     /// The peer's Property Exchange went with it: its calls end.
-    pub(crate) fn lose_properties(&mut self, peer: PeerId) {
+    pub(crate) fn lose_properties(&mut self, peer: PeerId, out: &mut Vec<SessionEvent>) {
+        self.subs
+            .lose(Some(peer), SubscriptionCause::EndedByPeer, out);
         let (gone, kept) = std::mem::take(&mut self.properties)
             .into_iter()
             .partition(|s| s.peer() == peer);
@@ -899,7 +1102,8 @@ impl Pending {
     }
 
     /// Every request ends as `why`.
-    pub(crate) fn end(&mut self, why: Ended) {
+    pub(crate) fn end(&mut self, why: Ended, out: &mut Vec<SessionEvent>) {
+        self.subs.lose(None, SubscriptionCause::PortLost, out);
         for slot in self.switches.drain(..) {
             end_slot(slot, || Err(why.error()));
         }

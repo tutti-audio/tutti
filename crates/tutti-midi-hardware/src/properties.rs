@@ -17,7 +17,7 @@
 //! session.
 //!
 //! A call's end is an [`Answer`](crate::Answer) ([`Answer::Got`](crate::Answer::Got),
-//! [`Answer::Set`](crate::Answer::Set)); a call the Initiator refuses or a peer lost
+//! [`Answer::Set`](crate::Answer::Set), [`Answer::Subscribed`](crate::Answer::Subscribed)); a call the Initiator refuses or a peer lost
 //! before it starts is [`Answer::PropertyNotSent`](crate::Answer::PropertyNotSent) or
 //! [`Answer::PropertyLost`](crate::Answer::PropertyLost).
 
@@ -173,7 +173,8 @@ pub(crate) type Snapshot = Arc<[PropertyPeer]>;
 pub enum PropertyChange {
     /// The Initiator reports: the peer's Capabilities arrived (and with them the
     /// peer is in [`MidiSession::property_peers`](crate::MidiSession::property_peers)),
-    /// its ResourceList, or what a Subscription holds. A call's end is an
+    /// its ResourceList, or what a Subscription holds (an update, the end the peer
+    /// made of it). A call's end is an
     /// [`Answer`](crate::Answer), not an event.
     Event(Box<ResourceEvent>),
     /// The peer did something to what this device serves: a Set changed the

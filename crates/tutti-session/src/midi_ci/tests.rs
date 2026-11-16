@@ -14,8 +14,9 @@ use tutti_midi_hardware::test_support::property_peer;
 use tutti_midi_hardware::{PeerId, PropertyCall};
 use tutti_ump::MidiGroup;
 
-use super::{Ended, GetProperty, PeFailure, PeerError, Pending, PropertyAsk, PropertySlot, Slot};
+use super::{Ended, GetProperty, PeFailure, PeerError, Pending, PropertySlot, Slot};
 use crate::job::{LandedQueue, Ticket};
+use crate::peer::ResourceIds;
 
 fn failed(status: PeStatus) -> ResourceFailure {
     ResourceFailure::Peer(Box::new(PeOutcome::Failed(PeResponse {
@@ -159,7 +160,7 @@ fn a_pending_that_ends_as_disconnected_lands_its_property_calls_disconnected() {
         group: MidiGroup::FIRST,
         muid: Muid::of(0x0012_3456),
     };
-    let mut pending = Pending::default();
+    let mut pending = Pending::new(ResourceIds::new());
     let mut jobs = Vec::new();
     for sent in [true, false] {
         let (job, ticket) = Ticket::<GetProperty>::new(&queue);
@@ -171,7 +172,7 @@ fn a_pending_that_ends_as_disconnected_lands_its_property_calls_disconnected() {
             tickets: vec![ticket],
         }));
     }
-    pending.end(Ended::Disconnected);
+    pending.end(Ended::Disconnected, &mut Vec::new());
     let mut landed: Vec<_> = queue.lock().unwrap().drain(..).collect();
     for job in &jobs {
         let result = landed.iter_mut().find_map(|l| l.take(job));

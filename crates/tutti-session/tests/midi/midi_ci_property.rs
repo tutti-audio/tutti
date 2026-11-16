@@ -7,17 +7,18 @@ use std::time::{Duration, Instant};
 
 use tutti_midi_device::{BodyLimit, BufferLimit, PeCiMessage, PeMessageKind};
 use tutti_midi_device::{
-    CallError, CiCategories, CiHeader, CiMessage, Decoded, DiscoveryData, EndpointId, MaxSysexSize,
-    PE_TIMEOUT, PeCapabilities, PeData, PeExternalSync, PeHeader, PeLocalOn, PeReassemblyLimits,
-    PeResource, PeStatus, PortDirection, RequestRefused, ResourceEntry, ResourceResponder,
-    ResourceStore, ResourceTarget, ResponderAction, ResponderSettings, SimultaneousRequests,
-    StreamLimit,
+    CallError, CiCategories, CiHeader, CiMessage, Decoded, DiscoveryData, EndpointId, JsonPointer,
+    MaxSysexSize, PE_TIMEOUT, PartialUpdate, PeCapabilities, PeData, PeExternalSync, PeHeader,
+    PeJson, PeLocalOn, PeReassemblyLimits, PeResource, PeStatus, PeSubscription, PortDirection,
+    RequestRefused, ResourceEntry, ResourceResponder, ResourceStore, ResourceTarget,
+    ResponderAction, ResponderSettings, SimultaneousRequests, StreamLimit,
 };
 use tutti_midi_hardware::test_support::FakeCounters;
 use tutti_session::Peer as _;
 use tutti_session::{
-    Job, JobKind, JobStatus, Landed, ListedResource, MidiInput, PeFailure, PeerError, Session,
-    SessionEvent,
+    Job, JobKind, JobStatus, Landed, ListedResource, MidiInput, PeFailure, PeerError, Presence,
+    Resource as _, ResourceFact, ResourceId, Session, SessionEvent, Subscription,
+    SubscriptionCause,
 };
 use tutti_ump::{DeviceIdentity, ManufacturerId, MidiGroup, U7, Ump};
 
@@ -31,6 +32,8 @@ const RAW: u64 = 9;
 enum Asked {
     Get(String),
     Set(String),
+    Subscribe(String),
+    Unsubscribe,
 }
 
 /// How the fake peer answers a Get or a Set.
@@ -96,6 +99,17 @@ impl PePeer {
     }
 
     /// What the session sent the peer, answered as the peer would.
+    /// Sends what the Responder made of an update the test asked for.
+    fn send(&self, fake: &FakeCounters, actions: Vec<ResponderAction>, now: Instant) {
+        for action in actions {
+            if let ResponderAction::Send(message) = action {
+                for ump in message.packets(MidiGroup::FIRST) {
+                    assert!(fake.send_input(EndpointId::from_raw(RAW), ump, now));
+                }
+            }
+        }
+    }
+
     fn answer(&mut self, fake: &FakeCounters, now: Instant) {
         use tutti_ump::SysexStep;
         let mut answers: Vec<Ump> = Vec::new();
@@ -130,6 +144,23 @@ impl PePeer {
                     .packets(MidiGroup::FIRST),
                 );
                 continue;
+            }
+            if let Decoded::Message(CiMessage::PropertyExchange {
+                message: PeCiMessage::Chunk { kind, chunk },
+                ..
+            }) = &decoded
+                && *kind == PeMessageKind::SUBSCRIPTION_INQUIRY
+                && !chunk.header().is_empty()
+                && let Ok(PeHeader::Subscription(subscription)) = PeHeader::parse(chunk.header())
+            {
+                match subscription {
+                    PeSubscription::Start(request) => {
+                        self.asked
+                            .push(Asked::Subscribe(request.resource.as_str().to_owned()));
+                    }
+                    PeSubscription::End { .. } => self.asked.push(Asked::Unsubscribe),
+                    _ => {}
+                }
             }
             if let Decoded::Message(CiMessage::PropertyExchange {
                 message: PeCiMessage::Chunk { kind, chunk },
@@ -183,6 +214,8 @@ struct Wire {
     start: Instant,
     ms: u64,
     landed: Vec<Landed>,
+    /// What the updates noticed of resources, in order.
+    changed: Vec<(ResourceId, ResourceFact)>,
 }
 
 impl Wire {
@@ -211,6 +244,7 @@ impl Wire {
             start: Instant::now(),
             ms: 0,
             landed: Vec::new(),
+            changed: Vec::new(),
         };
         wire.run(120);
         wire
@@ -226,8 +260,10 @@ impl Wire {
         self.ms += by;
         let now = self.start + Duration::from_millis(self.ms);
         for event in update_at(&mut self.s, now) {
-            if let SessionEvent::Landed(landed) = event {
-                self.landed.push(landed);
+            match event {
+                SessionEvent::Landed(landed) => self.landed.push(landed),
+                SessionEvent::ResourceChanged { id, fact } => self.changed.push((id, fact)),
+                _ => {}
             }
         }
         self.peer.answer(&self.fake, now);
@@ -600,4 +636,294 @@ fn a_call_pending_across_a_replug_ends_and_the_returned_port_takes_new_ones() {
     let again = wire.listed(&PeResource::LocalOn).fetch();
     wire.run(60);
     assert_eq!(wire.result(&again), Some(Ok(on(false))));
+}
+
+// --- Subscriptions (M2-103 section 11) ---
+
+fn device_info(model: &str) -> PeData {
+    let json = format!(
+        r#"{{"version":"1.0","manufacturerId":[125,0,0],"manufacturer":"Educational Use",
+        "familyId":[0,0],"family":"Test Range","modelId":[48,0],"model":"{model}",
+        "versionId":[0,0,1,0]}}"#
+    );
+    let json = PeJson::parse(json.as_bytes()).expect("json");
+    PeData::decode(&PeResource::DeviceInfo, &json).expect("DeviceInfo")
+}
+
+/// A store whose LocalOn (on) and DeviceInfo ("Workbench") can be subscribed to.
+fn subscribable() -> ResourceStore {
+    let mut store = ResourceStore::new();
+    store.declare(
+        ResourceEntry::new(PeResource::LocalOn)
+            .unwrap()
+            .with_can_subscribe(true),
+    );
+    store.declare(
+        ResourceEntry::new(PeResource::DeviceInfo)
+            .unwrap()
+            .with_can_subscribe(true),
+    );
+    store.put(None, on(true)).expect("declared");
+    store.put(None, device_info("Workbench")).expect("declared");
+    store
+}
+
+impl Wire {
+    fn now(&self) -> Instant {
+        self.start + Duration::from_millis(self.ms)
+    }
+
+    /// What the live Subscriptions hold of `resource`, as the port's info reads now.
+    fn held(&self, resource: &PeResource) -> Option<PeData> {
+        let info = self.port.info();
+        let listed = self.listed(resource);
+        info.resource_peers()[0].property(&listed).cloned()
+    }
+
+    /// Subscribes to `resource` and runs until the lease and its first Property
+    /// Data have come.
+    fn subscribed(&mut self, resource: &PeResource) -> Subscription {
+        let job = self.listed(resource).subscribe();
+        self.run(80);
+        match self.result(&job) {
+            Some(Ok(lease)) => lease,
+            other => panic!("a lease: {other:?}"),
+        }
+    }
+
+    fn target(resource: PeResource) -> ResourceTarget {
+        ResourceTarget::new(resource).expect("a Resource with no entries")
+    }
+
+    /// How many times the peer was told of a change of the info of the port.
+    fn info_notices(&self) -> usize {
+        let id = self.port.id();
+        self.changed
+            .iter()
+            .filter(|c| **c == (id, ResourceFact::Info))
+            .count()
+    }
+}
+
+/// M2-103 section 11: a Subscription lands a live lease once the peer accepts, the
+/// peer is asked to start it and then to send the Resource, and the peer's record
+/// holds the Property Data the Get returned.
+#[test]
+fn a_subscription_lands_live_and_the_record_holds_the_resources_data() {
+    let mut wire = Wire::new(subscribable());
+    assert_eq!(wire.held(&PeResource::LocalOn), None);
+    let lease = wire.subscribed(&PeResource::LocalOn);
+    assert_eq!(lease.presence(), Presence::Live);
+    assert_eq!(*lease.resource(), PeResource::LocalOn);
+    assert_eq!(
+        wire.peer.asked,
+        [
+            Asked::Subscribe("LocalOn".to_owned()),
+            Asked::Get("LocalOn".to_owned())
+        ]
+    );
+    assert_eq!(wire.held(&PeResource::LocalOn), Some(on(true)));
+    assert!(
+        wire.info_notices() >= 1,
+        "the record changed: {:?}",
+        wire.changed
+    );
+}
+
+/// M2-103 section 11.1: a `full` update replaces the data the record holds, and the
+/// change is noticed as a change of the info.
+#[test]
+fn a_full_update_replaces_the_data_the_record_holds() {
+    let mut wire = Wire::new(subscribable());
+    let _lease = wire.subscribed(&PeResource::LocalOn);
+    let before = wire.info_notices();
+    let now = wire.now();
+    let actions = wire
+        .peer
+        .responder
+        .publish(&Wire::target(PeResource::LocalOn), on(false), now)
+        .expect("publishes");
+    wire.peer.send(&wire.fake, actions, now);
+    wire.run(40);
+    assert_eq!(wire.held(&PeResource::LocalOn), Some(on(false)));
+    assert_eq!(wire.info_notices(), before + 1);
+}
+
+/// M2-103 section 11.1: a `partial` update is merged into the data held, and what it
+/// does not name is kept.
+#[test]
+fn a_partial_update_is_merged_into_the_data_the_record_holds() {
+    let mut wire = Wire::new(subscribable());
+    let _lease = wire.subscribed(&PeResource::DeviceInfo);
+    let now = wire.now();
+    let update = PartialUpdate::new()
+        .with(
+            JsonPointer::new("/model").expect("a pointer"),
+            PeJson::from("Renamed"),
+        )
+        .expect("an update");
+    let actions = wire
+        .peer
+        .responder
+        .change(&Wire::target(PeResource::DeviceInfo), update, now)
+        .expect("changes");
+    wire.peer.send(&wire.fake, actions, now);
+    wire.run(40);
+    let Some(PeData::DeviceInfo(info)) = wire.held(&PeResource::DeviceInfo) else {
+        panic!("DeviceInfo is held");
+    };
+    assert_eq!(info.model.as_str(), "Renamed");
+    assert_eq!(info.family.as_str(), "Test Range");
+}
+
+/// M2-103 section 11.1.1: an update too large for one chunk is a `notify`, and the
+/// session Gets the Resource: the record holds what the Get returned.
+#[test]
+fn a_notify_makes_the_session_get_the_resource_and_the_record_holds_the_result() {
+    let mut wire = Wire::new(subscribable());
+    let _lease = wire.subscribed(&PeResource::DeviceInfo);
+    let long = "x".repeat(600);
+    let now = wire.now();
+    let actions = wire
+        .peer
+        .responder
+        .publish(
+            &Wire::target(PeResource::DeviceInfo),
+            device_info(&long),
+            now,
+        )
+        .expect("publishes");
+    wire.peer.send(&wire.fake, actions, now);
+    let gets = |wire: &Wire| {
+        wire.peer
+            .asked
+            .iter()
+            .filter(|a| **a == Asked::Get("DeviceInfo".to_owned()))
+            .count()
+    };
+    let before = gets(&wire);
+    wire.run(80);
+    assert_eq!(gets(&wire), before + 1, "the session Got after the notify");
+    let Some(PeData::DeviceInfo(info)) = wire.held(&PeResource::DeviceInfo) else {
+        panic!("DeviceInfo is held");
+    };
+    assert_eq!(info.model.as_str(), long);
+}
+
+/// Dropping the lease ends the Subscription with the peer, through the port's queue,
+/// and the record forgets the data.
+#[test]
+fn dropping_the_lease_ends_the_subscription_with_the_peer() {
+    let mut wire = Wire::new(subscribable());
+    let lease = wire.subscribed(&PeResource::LocalOn);
+    assert_eq!(wire.peer.responder.subscriptions().count(), 1);
+    drop(lease);
+    wire.run(60);
+    assert_eq!(wire.peer.asked.last(), Some(&Asked::Unsubscribe));
+    assert_eq!(wire.peer.responder.subscriptions().count(), 0);
+    assert_eq!(wire.held(&PeResource::LocalOn), None);
+}
+
+/// A job dropped before the peer accepts lands nowhere, and the Subscription it
+/// started ends as the lease it would have carried drops.
+#[test]
+fn a_dropped_subscribe_job_does_not_leave_a_subscription_with_the_peer() {
+    let mut wire = Wire::new(subscribable());
+    drop(wire.listed(&PeResource::LocalOn).subscribe());
+    wire.run(120);
+    assert_eq!(
+        wire.peer.asked.first(),
+        Some(&Asked::Subscribe("LocalOn".to_owned()))
+    );
+    assert_eq!(wire.peer.asked.last(), Some(&Asked::Unsubscribe));
+    assert_eq!(wire.peer.responder.subscriptions().count(), 0);
+}
+
+/// M2-103 section 11.3: the peer ending the Subscription is the lease's presence,
+/// noticed with the lease's own id, and the record forgets the data.
+#[test]
+fn the_peer_ending_the_subscription_is_the_leases_presence() {
+    let mut wire = Wire::new(subscribable());
+    let lease = wire.subscribed(&PeResource::LocalOn);
+    let id = wire
+        .peer
+        .responder
+        .subscriptions()
+        .next()
+        .expect("held")
+        .0
+        .clone();
+    let now = wire.now();
+    let actions = wire.peer.responder.end_subscription(&id, now);
+    wire.peer.send(&wire.fake, actions, now);
+    wire.run(40);
+    assert_eq!(
+        lease.presence(),
+        Presence::Lost(SubscriptionCause::EndedByPeer)
+    );
+    assert!(wire.changed.contains(&(lease.id(), ResourceFact::Presence)));
+    assert_eq!(wire.held(&PeResource::LocalOn), None);
+}
+
+/// A port that closes under a Subscription ends it: the lease reads `PortLost`,
+/// noticed with its own id, and dropping it afterward sends nothing.
+#[test]
+fn a_subscription_whose_port_is_lost_reads_port_lost() {
+    let mut wire = Wire::new(subscribable());
+    let lease = wire.subscribed(&PeResource::LocalOn);
+    wire.fake.unplug(EndpointId::from_raw(RAW));
+    wire.run(3);
+    assert_eq!(
+        lease.presence(),
+        Presence::Lost(SubscriptionCause::PortLost)
+    );
+    assert!(wire.changed.contains(&(lease.id(), ResourceFact::Presence)));
+    let asked = wire.peer.asked.len();
+    drop(lease);
+    wire.run(3);
+    assert_eq!(wire.peer.asked.len(), asked);
+}
+
+/// A Subscription counts against the peer's simultaneous requests like a Get: with
+/// a peer that takes one, a Get and two Subscriptions all land, in the order asked.
+#[test]
+fn subscriptions_past_the_peers_simultaneous_requests_wait_for_room() {
+    let mut wire = Wire::taking(subscribable(), 1);
+    let get = wire.listed(&PeResource::DeviceInfo).fetch();
+    let first = wire.listed(&PeResource::LocalOn).subscribe();
+    let second = wire.listed(&PeResource::DeviceInfo).subscribe();
+    wire.run(300);
+    assert_eq!(wire.result(&get), Some(Ok(device_info("Workbench"))));
+    assert!(matches!(wire.result(&first), Some(Ok(_))));
+    assert!(matches!(wire.result(&second), Some(Ok(_))));
+    let at = |wanted: Asked| {
+        wire.peer
+            .asked
+            .iter()
+            .position(|a| *a == wanted)
+            .unwrap_or_else(|| panic!("{wanted:?} was asked: {:?}", wire.peer.asked))
+    };
+    assert_eq!(at(Asked::Get("DeviceInfo".to_owned())), 0);
+    assert!(
+        at(Asked::Subscribe("LocalOn".to_owned())) < at(Asked::Subscribe("DeviceInfo".to_owned()))
+    );
+}
+
+/// M2-103 section 14.2: a Resource whose entry does not allow a Subscription is not
+/// asked: the job lands as not sent, and the peer hears nothing.
+#[test]
+fn a_subscribe_to_a_resource_the_entry_forbids_is_not_sent() {
+    let mut wire = Wire::new(store());
+    let job = wire.listed(&PeResource::LocalOn).subscribe();
+    wire.run(30);
+    let Some(Err(PeerError::Refused(PeFailure::NotSent(CallError::Refused(refused))))) =
+        wire.result(&job)
+    else {
+        panic!("not sent: {:?}", wire.landed);
+    };
+    assert!(
+        matches!(refused, RequestRefused::CannotSubscribe(_)),
+        "{refused:?}"
+    );
+    assert!(wire.peer.asked.is_empty());
 }

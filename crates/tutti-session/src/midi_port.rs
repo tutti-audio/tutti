@@ -34,8 +34,8 @@ use tutti_ump::StreamConfig;
 use crate::job::Ticket;
 use crate::midi::{LossReaders, LossWriters, UmpOut, loss_cells};
 use crate::midi_ci::{
-    GetProperty, Pending, PortLink, ProfilePeer, ReportPeer, RequestReport, ResourcePeer,
-    SetProperty, SwitchProfile,
+    EndSubscription, GetProperty, Pending, PortLink, ProfilePeer, ReportPeer, RequestReport,
+    ResourcePeer, SetProperty, Subscribe, SwitchProfile,
 };
 use crate::pool::{Declared, HandleError, Life, Load, LoadError, PoolEntry};
 use crate::{
@@ -279,6 +279,8 @@ pub(crate) enum InputRequest {
     Report(ReportAsk, Ticket<RequestReport>),
     Get(PropertyAsk, Ticket<GetProperty>),
     Set(PropertyAsk, Ticket<SetProperty>),
+    Subscribe(PropertyAsk, Ticket<Subscribe>),
+    Unsubscribe(PropertyAsk, Ticket<EndSubscription>),
 }
 
 impl InputRequest {
@@ -289,6 +291,8 @@ impl InputRequest {
             Self::Report(_, ticket) => ticket.land(Err(why.error())),
             Self::Get(_, ticket) => ticket.land(Err(why.error())),
             Self::Set(_, ticket) => ticket.land(Err(why.error())),
+            Self::Subscribe(_, ticket) => ticket.land(Err(why.error())),
+            Self::Unsubscribe(_, ticket) => ticket.land(Err(why.error())),
         }
     }
 }
@@ -470,8 +474,9 @@ impl PoolEntry for MidiInputEntry {
         let saved = self.saved.clone();
         Load::on_session(move |cx| {
             let id = cx.mint_resource_id();
+            let ids = cx.resource_ids();
             cx.midi()
-                .open_input_port(id, saved)
+                .open_input_port(id, ids, saved)
                 .map_err(|error| LoadError::Midi(Arc::new(error)))
         })
     }
@@ -849,7 +854,12 @@ fn set_presence<I>(
 }
 
 /// The snapshot of the open input `device`, as the OS layer reads it now.
-fn input_info(io: &MidiSession, device: &DeviceInfo, link: &PortLink) -> MidiInputInfo {
+fn input_info(
+    io: &MidiSession,
+    device: &DeviceInfo,
+    link: &PortLink,
+    pending: &Pending,
+) -> MidiInputInfo {
     MidiInputInfo {
         device: device.clone(),
         stream: io.stream(&device.id),
@@ -868,7 +878,13 @@ fn input_info(io: &MidiSession, device: &DeviceInfo, link: &PortLink) -> MidiInp
         resource_peers: io
             .property_peers(&device.id)
             .iter()
-            .map(|peer| ResourcePeer::new(link.clone(), peer.clone()))
+            .map(|peer| {
+                let id = tutti_midi_hardware::PeerId {
+                    group: peer.group(),
+                    muid: peer.muid(),
+                };
+                ResourcePeer::new(link.clone(), peer.clone(), pending.bodies(id))
+            })
             .collect(),
     }
 }
@@ -877,7 +893,8 @@ impl Drop for InputPort {
     /// The session ended: the requests its handles queued or waited on end, and
     /// a handle that outlives it ends what it asks at the call.
     fn drop(&mut self) {
-        self.end_requests(Gate::Away, Ended::Disconnected);
+        // The session is gone: nothing reads the leases' notices.
+        self.end_requests(Gate::Away, Ended::Disconnected, &mut Vec::new());
     }
 }
 
@@ -885,9 +902,9 @@ impl InputPort {
     /// Every request of the port, queued or sent, ends as `why`, and the port
     /// takes none until its device is open again: for good with
     /// [`Gate::Released`].
-    fn end_requests(&mut self, gate: Gate, why: Ended) {
+    fn end_requests(&mut self, gate: Gate, why: Ended, out: &mut Vec<SessionEvent>) {
         self.shared.shut(gate, why);
-        self.pending.end(why);
+        self.pending.end(why, out);
     }
 
     /// Whether the entry that made this port still holds it.
@@ -902,7 +919,7 @@ impl InputPort {
         let Some(device) = io.devices().list().into_iter().find(|d| d.id == *id) else {
             return;
         };
-        let info = input_info(io, &device, &self.shared.link);
+        let info = input_info(io, &device, &self.shared.link, &self.pending);
         let mut cell = self
             .shared
             .cell
@@ -1018,6 +1035,7 @@ impl Ports {
         at: usize,
         io: &mut MidiSession,
         graph: &mut crate::graph::Graph,
+        out: &mut Vec<SessionEvent>,
     ) {
         let port = &mut self.inputs[at];
         if let Some(id) = port.open.take() {
@@ -1030,7 +1048,7 @@ impl Ports {
         port.epochs.depart();
         port.controls.clear_mpe_profiles();
         // The device's peers went with its connection.
-        port.end_requests(Gate::Away, Ended::Disconnected);
+        port.end_requests(Gate::Away, Ended::Disconnected, out);
     }
 
     /// The step of the update's `Phase::Poll` for the ports: retires those whose
@@ -1046,7 +1064,7 @@ impl Ports {
         out: &mut Vec<SessionEvent>,
     ) -> Edits {
         let mut edits = Edits::default();
-        edits |= self.retire(io, graph);
+        edits |= self.retire(io, graph, out);
         for event in events {
             out.push(MidiReport::of_device(event.clone()).into());
             match event {
@@ -1066,7 +1084,12 @@ impl Ports {
 
     /// Ends the ports whose entry was released or swapped, and takes out the
     /// ingest nodes that have released what their devices held.
-    fn retire(&mut self, io: &mut MidiSession, graph: &mut crate::graph::Graph) -> Edits {
+    fn retire(
+        &mut self,
+        io: &mut MidiSession,
+        graph: &mut crate::graph::Graph,
+        out: &mut Vec<SessionEvent>,
+    ) -> Edits {
         let mut edits = Edits::default();
         let mut at = 0;
         while at < self.inputs.len() {
@@ -1074,8 +1097,8 @@ impl Ports {
                 at += 1;
                 continue;
             }
-            self.inputs[at].end_requests(Gate::Released, Ended::Released);
-            self.disconnect_input(at, io, graph);
+            self.inputs[at].end_requests(Gate::Released, Ended::Released, out);
+            self.disconnect_input(at, io, graph, out);
             let port = self.inputs.remove(at);
             self.retiring.push(Retiring {
                 node: port.node,
@@ -1121,7 +1144,7 @@ impl Ports {
             if self.inputs[at].open.as_ref() != Some(&device.id) {
                 continue;
             }
-            self.disconnect_input(at, io, graph);
+            self.disconnect_input(at, io, graph, out);
             let shared = &self.inputs[at].shared;
             set_presence(
                 &shared.cell,
@@ -1181,7 +1204,7 @@ impl Ports {
             let shared = &self.inputs[at].shared;
             let presence = match result {
                 Ok(()) => {
-                    let info = input_info(io, arrived, &shared.link);
+                    let info = input_info(io, arrived, &shared.link, &self.inputs[at].pending);
                     shared
                         .cell
                         .lock()
@@ -1228,6 +1251,12 @@ impl Ports {
                     InputRequest::Report(ask, ticket) => port.pending.report(io, ask, ticket),
                     InputRequest::Get(ask, ticket) => port.pending.get(io, ask, ticket),
                     InputRequest::Set(ask, ticket) => port.pending.set(io, ask, ticket),
+                    InputRequest::Subscribe(ask, ticket) => {
+                        port.pending.subscribe(io, ask, ticket);
+                    }
+                    InputRequest::Unsubscribe(ask, ticket) => {
+                        port.pending.unsubscribe(io, ask, ticket);
+                    }
                 }
             }
         }
@@ -1249,7 +1278,7 @@ impl Ports {
         answer: &Answer,
     ) {
         if let Some(port) = self.port_of(device) {
-            port.pending.answer(io, peer, answer);
+            port.pending.answer(io, &port.shared.link, peer, answer);
         }
     }
 
@@ -1319,7 +1348,12 @@ impl Ports {
                     if matches!(change, tutti_midi_hardware::PropertyChange::Dropped)
                         && let Some(port) = self.port_of(device)
                     {
-                        port.pending.lose_properties(*peer);
+                        port.pending.lose_properties(*peer, out);
+                    }
+                    if let tutti_midi_hardware::PropertyChange::Event(event) = change
+                        && let Some(port) = self.port_of(device)
+                    {
+                        port.pending.event(*peer, event, out);
                     }
                     // An event of the peer (its ResourceList, whose Get held one of
                     // its requests) may have made room for a call that waits.
@@ -1338,8 +1372,15 @@ impl Ports {
         for device in &profile_devices {
             self.sync_mpe_profiles(io, device);
         }
-        for port in &self.inputs {
-            if port.open.as_ref().is_some_and(|id| touched.contains(id)) {
+        for port in &mut self.inputs {
+            // A Subscription's data that changed, or whose lease dropped, is a
+            // change of the info too.
+            let held = port.pending.take_changed();
+            if port
+                .open
+                .as_ref()
+                .is_some_and(|id| held || touched.contains(id))
+            {
                 port.refresh(io, out);
             }
         }
@@ -1358,7 +1399,7 @@ impl Ports {
             let Some(device) = io.devices().list().into_iter().find(|d| d.id == id) else {
                 continue;
             };
-            self.disconnect_input(at, io, graph);
+            self.disconnect_input(at, io, graph, out);
             let result = self.connect_input(at, io, graph, &device);
             let shared = &self.inputs[at].shared;
             if result.is_err() {
@@ -1436,6 +1477,7 @@ impl crate::Midi<'_> {
     pub(crate) fn open_input_port(
         &mut self,
         id: ResourceId,
+        ids: crate::peer::ResourceIds,
         saved: DeviceInfo,
     ) -> Result<InputLoaded, MidiPortError> {
         let io = self.io.as_deref_mut().ok_or(MidiPortError::NoHardware)?;
@@ -1464,12 +1506,13 @@ impl crate::Midi<'_> {
         drop(writers);
         let landed = self.jobs.queue();
         let ingest = controls.clone();
+        let pending = Pending::new(ids);
         let shared = Arc::new_cyclic(|weak| {
             let link = PortLink::new(weak.clone(), landed);
             InputShared {
                 id,
                 cell: Mutex::new(Cell {
-                    info: Arc::new(input_info(io, &info, &link)),
+                    info: Arc::new(input_info(io, &info, &link, &pending)),
                     presence: Presence::Lost(PortCause::Unplugged),
                 }),
                 requests: Mutex::new(Inbox::default()),
@@ -1487,7 +1530,7 @@ impl crate::Midi<'_> {
             inlet: None,
             saved,
             open: None,
-            pending: Pending::default(),
+            pending,
         });
         let at = self.state.ports.inputs.len() - 1;
         if let Some(info) = found {
@@ -1500,7 +1543,12 @@ impl crate::Midi<'_> {
             }
             let io = self.io.as_deref().ok_or(MidiPortError::NoHardware)?;
             let mut cell = shared.cell.lock().unwrap_or_else(PoisonError::into_inner);
-            cell.info = Arc::new(input_info(io, &info, &shared.link));
+            cell.info = Arc::new(input_info(
+                io,
+                &info,
+                &shared.link,
+                &self.state.ports.inputs[at].pending,
+            ));
             cell.presence = Presence::Live;
         }
         self.compile_session_routes();
