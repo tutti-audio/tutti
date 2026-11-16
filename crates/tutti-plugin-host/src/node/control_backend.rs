@@ -460,7 +460,7 @@ mod off_main_tests {
     /// **With a collector that has never run, an off-main call answers
     /// "unavailable" and queues nothing**: it waits for no main thread.
     #[test]
-    fn a_never_run_collector_gets_the_unavailable_answer_at_once() {
+    fn a_never_run_collector_gets_the_unavailable_answer_and_queues_nothing() {
         let (collector, work) = MainWork::new();
         let (_client, handle) = load(&work);
         let id = ParamId::new(1);
@@ -477,17 +477,23 @@ mod off_main_tests {
         assert_eq!(collector.run(main_thread()), 0, "nothing was queued");
     }
 
-    /// **A collector that runs but is not run again answers "unavailable" after
-    /// the deadline**, not never.
+    /// **A collector that runs but is not run again answers "unavailable"**,
+    /// for a save and for a read, once the off-main wait ends.
     #[test]
-    fn a_stalled_main_thread_gets_the_unavailable_answer_after_the_deadline() {
+    fn a_stalled_main_thread_gets_the_unavailable_answer() {
         let (collector, work) = MainWork::new();
         let (_client, handle) = load(&work);
         assert_eq!(collector.run(main_thread()), 0);
         let id = ParamId::new(1);
-        let value = std::thread::spawn(move || handle.any_thread().parameter_value(id))
-            .join()
-            .expect("the job returns");
+        let (state, value) = std::thread::spawn(move || {
+            (
+                handle.any_thread().save_state(),
+                handle.any_thread().parameter_value(id),
+            )
+        })
+        .join()
+        .expect("the job returns");
+        assert!(matches!(state, Err(StateError::Unavailable)), "{state:?}");
         assert_eq!(value, None);
     }
 
@@ -552,10 +558,10 @@ mod off_main_tests {
         assert!(handle.any_thread().set_render_mode(RenderMode::Realtime));
     }
 
-    /// **Off the main thread an in-process bypass is lost and unread**, whether it is a parameter or a property: a tick on a pool
-    /// thread neither writes nor reads the plugin (the main thread's pump is not
-    /// asked), so it cannot be held up by it. A property write that took the
-    /// main thread's hop would be answered by the pump, not lost.
+    /// **Off the main thread an in-process bypass is lost and unread**, whether
+    /// it is a parameter or a property: a tick on a pool thread neither writes
+    /// nor reads the plugin (the main thread's pump is not asked). A write that
+    /// took the main thread's hop would be answered by the pump, not lost.
     #[test]
     fn off_the_main_thread_an_in_process_bypass_is_lost_and_unread() {
         let (_client, handle, _pump) = loaded();

@@ -110,7 +110,7 @@ fn assert_silent(unit: &mut Rig, what: &str) {
 ///
 /// The whole cycle on one plugin: running, refused (silent, visible, not
 /// dead, an invalidation raised), refused again, revived by a rate it takes,
-/// and a drop during a refusal that returns promptly.
+/// and a drop during a refusal that returns.
 #[test]
 fn a_refused_rate_is_silent_visible_and_retried() {
     let _lock = machine_lock();
@@ -191,7 +191,15 @@ fn a_refused_rate_is_silent_visible_and_retried() {
     reprepare(&mut unit, REFUSED_RATE);
     let status = wait_for(&mut unit, &handle, |s| !s.is_alive());
     assert!(refused_at(&status, REFUSED_RATE), "{status:?}");
-    drop(unit);
-    drop(probe.handle);
-    drop(handle);
+    // The drop returns: run on a thread, under a hang guard.
+    let (done, returned) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        drop(unit);
+        drop(probe.handle);
+        drop(handle);
+        let _ = done.send(());
+    });
+    returned
+        .recv_timeout(Duration::from_secs(60))
+        .expect("dropping a refused plugin never returned");
 }

@@ -232,6 +232,19 @@ mod stand_in_probe {
         }
     }
 
+    /// Drops `task` on a thread: a hang guard, so a drop that waits for the
+    /// probe fails instead of hanging the suite.
+    fn dropped_within_the_guard<T: Send + 'static>(task: T) {
+        let (done, returned) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            drop(task);
+            let _ = done.send(());
+        });
+        returned
+            .recv_timeout(Duration::from_secs(60))
+            .expect("the drop never returned");
+    }
+
     fn alive(pid: &str) -> bool {
         std::process::Command::new("kill")
             .args(["-0", pid])
@@ -253,7 +266,7 @@ mod stand_in_probe {
         let pid = running_pid(&pid_file);
         assert!(alive(&pid));
 
-        drop(task);
+        dropped_within_the_guard(task);
 
         assert!(!alive(&pid), "the probe (pid {pid}) outlived the drop");
         assert!(catalog.scan().is_ok(), "the drop released the pedal");
@@ -270,7 +283,7 @@ mod stand_in_probe {
         let task = catalog.measure(&plugin, None).expect("a file that exists");
         let pid = running_pid(&pid_file);
 
-        drop(task);
+        dropped_within_the_guard(task);
 
         assert!(!alive(&pid), "the probe (pid {pid}) outlived the drop");
     }

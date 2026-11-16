@@ -961,7 +961,7 @@ fn eight_real_plugins_half_stalled_never_wait_for_replies() {
 
     let warmed = warm_up(&mut units, Duration::from_secs(60));
     if !warmed {
-        eprintln!("{label}: still warming up after 10 s; measuring anyway");
+        eprintln!("{label}: still warming up after 60 s; measuring anyway");
     }
     let run = drive_series(&mut units, 500);
     report(label, &run);

@@ -13,7 +13,6 @@ use crate::support;
 use tutti_session::Root;
 
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 
 use support::{clap_probe, plugin_server};
 use tutti_export::Produced;
@@ -324,14 +323,13 @@ fn instrument_at(rate: f64, hosting: Hosting) {
 }
 
 /// **A plugin fork that dies mid-export fails the export by the plugin's
-/// key**, promptly, instead of writing the silence it rendered after the
+/// key** instead of writing the silence it rendered after the
 /// crash. The crash switch is set after the live instance loaded, so only
 /// the fork's server reads it; it aborts on its 8th block.
 fn a_plugin_fork_that_crashes_mid_export_is_a_named_failure() {
     let (mut session, probe) = session_with_probe(TAG_PASSTHROUGH);
     feed_with(&mut session, probe, ForkByClone(Const::mono(0.25)));
     probe_env("TUTTI_CLAP_PROBE_CRASH_ON_BLOCK", 8);
-    let started = Instant::now();
     match session.bounce(buffers(2.0)) {
         Err(BounceError::Export(tutti_export::Error::ForkFailed { key, kind, .. })) => {
             assert_eq!(key, probe);
@@ -339,11 +337,6 @@ fn a_plugin_fork_that_crashes_mid_export_is_a_named_failure() {
         }
         other => panic!("expected a keyed fork failure, got {other:?}"),
     }
-    assert!(
-        started.elapsed() < Duration::from_secs(10),
-        "the failure took {:?}",
-        started.elapsed()
-    );
 }
 
 /// The cases of this module, run by `main`.

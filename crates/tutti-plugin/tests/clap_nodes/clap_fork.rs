@@ -1417,13 +1417,13 @@ fn midi_past_the_chunks_capacity_is_counted() {
     );
 }
 
-/// **An offline fork of a plugin that refuses its rate renders silence at
-/// once, and says why.** The fork's server (only: the switch is armed after
-/// the live one loaded) refuses the 96 kHz the fork is prepared at. Each chunk
-/// is collected without waiting out the budget, and the forked editor reports
-/// `Failed` with a `PluginRenderFault::RateRefused` cause, not `TimedOut`.
+/// **An offline fork of a plugin that refuses its rate renders silence,
+/// and says why.** The fork's server (only: the switch is armed after the live
+/// one loaded) refuses the 96 kHz the fork is prepared at, and the forked
+/// editor reports `Failed` with a `PluginRenderFault::RateRefused` cause, not
+/// `TimedOut`.
 #[test]
-fn a_fork_of_a_refused_rate_is_silent_at_once_and_a_failed_fault() {
+fn a_fork_of_a_refused_rate_is_silent_and_a_failed_fault() {
     let _lock = machine_lock();
     let _env = env();
     let probe = load_probe(SAMPLE_RATE);
