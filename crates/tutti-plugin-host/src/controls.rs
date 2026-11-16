@@ -241,6 +241,16 @@ impl PluginControls {
         self.chunks.late()
     }
 
+    /// Chunks dropped because the plugin fell more than one chunk behind: the
+    /// bridge skipped the chunk (the shared ring holds one chunk behind the
+    /// newest) and never sent it, so it plays as silence and is never
+    /// answered. Telemetry beside [`missed_chunks`](Self::missed_chunks): it
+    /// means an overloaded plugin or machine, so raise the device buffer size.
+    /// RT-safe: one relaxed load.
+    pub fn skipped_chunks(&self) -> u64 {
+        self.chunks.skipped()
+    }
+
     /// Whether the chunk the node submitted last, and has not played yet,
     /// has been answered: `true` with none in flight.
     ///

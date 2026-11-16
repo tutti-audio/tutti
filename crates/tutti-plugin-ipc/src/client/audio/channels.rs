@@ -83,6 +83,11 @@ pub(super) struct Channels {
     /// and the rest of a SysEx that lost packets with it. Shared with the
     /// plugin node's controls, which add it to the node's own count.
     dropped_midi: Arc<AtomicU64>,
+    /// Chunks the bridge thread skipped as stale, ever: more than
+    /// `MAX_BEHIND` behind the newest submitted, so their slab slot is the
+    /// host's again. Shared with the pipeline's counters
+    /// (`ChunkCounters::attach_skipped`).
+    skipped: Arc<AtomicU64>,
     /// The control connection has something the bridge thread has not read:
     /// set by the watcher thread, cleared by the bridge thread after it has
     /// read the lane dry. The bridge's doorbell is rung with it, so a bridge
@@ -109,6 +114,7 @@ impl Channels {
             replies: Arc::new(AtomicU64::new(0)),
             dropped_param_events: Arc::new(AtomicU64::new(0)),
             dropped_midi: Arc::new(AtomicU64::new(0)),
+            skipped: Arc::new(AtomicU64::new(0)),
             news: Arc::default(),
             probe: Arc::default(),
         }
@@ -281,6 +287,17 @@ impl Channels {
         if n > 0 {
             self.dropped_midi.fetch_add(n, Ordering::Relaxed);
         }
+    }
+
+    /// Record a chunk skipped as stale. Bridge thread only; `Relaxed`: a count
+    /// nothing branches on.
+    pub(super) fn note_skipped(&self) {
+        self.skipped.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// The cell [`note_skipped`](Self::note_skipped) counts into.
+    pub(super) fn skipped_cell(&self) -> Arc<AtomicU64> {
+        Arc::clone(&self.skipped)
     }
 
     /// The cell [`note_dropped_midi`](Self::note_dropped_midi) counts into.

@@ -740,6 +740,25 @@ mod tests {
         assert_eq!(b.next_seq, 1, "0 means 'never published' in the slab");
     }
 
+    /// **A full list of unanswered chunks forgets the oldest**: the newest
+    /// misses are the ones whose slot can still show them, so a third miss
+    /// replaces the earliest of two, and `reset` forgets them all.
+    #[test]
+    fn a_full_unanswered_list_drops_the_oldest() {
+        let mut b = Batcher::new(2, 2, SampleFormat::Float32, MAX_CHUNK, slab(MAX_CHUNK));
+        b.remember_unanswered(5);
+        b.remember_unanswered(6);
+        let mut held = b.unanswered;
+        held.sort_unstable();
+        assert_eq!(held, [5, 6]);
+        b.remember_unanswered(7);
+        let mut held = b.unanswered;
+        held.sort_unstable();
+        assert_eq!(held, [6, 7], "5, the oldest, is replaced");
+        b.reset();
+        assert_eq!(b.unanswered, [0; RING_SLOTS]);
+    }
+
     /// `reset` (a seek) drops the in-flight chunk but must NOT rewind the
     /// sequence. Rewinding would let a chunk submitted before the seek be
     /// published after it and accepted as the new chunk 1, replaying a

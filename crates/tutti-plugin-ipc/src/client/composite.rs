@@ -404,6 +404,12 @@ impl PluginBridge {
         self.audio.audio_buffer()
     }
 
+    /// The bridge thread's count of chunks it skipped as stale. See
+    /// `AudioBridge::skipped_cell`.
+    pub fn skipped_cell(&self) -> Arc<std::sync::atomic::AtomicU64> {
+        self.audio.skipped_cell()
+    }
+
     /// The bridge thread's count of MIDI events it did not send. See
     /// `AudioBridge::dropped_midi_cell`.
     pub fn dropped_midi_cell(&self) -> Arc<std::sync::atomic::AtomicU64> {

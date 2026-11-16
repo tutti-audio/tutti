@@ -71,6 +71,16 @@ impl<'a> Diagnostics<'a> {
             .map_or(0, tutti_plugin_host::PluginControls::late_chunks)
     }
 
+    /// Chunks dropped because the plugin fell more than one chunk behind: the
+    /// pipeline never sent them, so they played as silence. Raise the buffer
+    /// size if it grows. Zero for a plugin that runs in this process.
+    pub fn skipped_chunks(&self) -> u64 {
+        self.hosted
+            .controls
+            .as_ref()
+            .map_or(0, tutti_plugin_host::PluginControls::skipped_chunks)
+    }
+
     /// The MIDI events on the node's event input that never reached the plugin,
     /// since it was bound: past the capacity of a block, in a block the plugin
     /// did not run, or the rest of a SysEx message that lost a packet. All of

@@ -12,8 +12,10 @@
 //! graph declares that latency. A silent block is a chunk the node collected
 //! unanswered (`PluginControls::missed_chunks`), and it is excused only when the
 //! server then published that chunk before its ring slot was reused
-//! (`late_chunks`): a late answer, which a loaded machine produces. A silent
-//! block whose chunk was never published, or that no collect missed, fails.
+//! (`late_chunks`), a late answer a loaded machine produces, or when the bridge
+//! skipped it as more than a chunk behind (`skipped_chunks`). A silent block
+//! whose chunk was neither, or that no collect missed, fails: a server that
+//! drops a chunk it finds overwritten is not counted, and fails the same way.
 //! A run in which more than a quarter of the judged blocks were late is rerun
 //! (twice at most) or reported as too loaded to judge.
 //!
@@ -82,6 +84,9 @@ struct Run {
     /// The blocks in which a missed chunk was counted late (`late_chunks`
     /// moved), once per chunk.
     lates: Vec<usize>,
+    /// The blocks in which the bridge skipped a chunk as stale
+    /// (`skipped_chunks` moved), once per chunk.
+    skips: Vec<usize>,
 }
 
 /// Keeps idle CPUs awake for the length of a paced run (Linux only).
@@ -153,19 +158,28 @@ impl Drop for KeepAwake {
 /// Callbacks a [`run_live`] burst makes back to back.
 const BURST: usize = 3;
 
-/// The missed blocks whose chunk the server published after all: a miss at
-/// block `b` is counted late in `b` (the same callback's submit), `b + 1` (the
-/// next collect) or `b + 2`, while the chunk's ring slot still shows it
-/// (`RING_SLOTS` chunks on). Each late count answers one miss, the earliest.
-fn excused(misses: &[usize], lates: &[usize]) -> Vec<usize> {
-    let mut free: Vec<usize> = lates.to_vec();
+/// How many blocks after a miss a skip may be counted: the bridge thread is
+/// the one that skips, and it can be a stall behind the audio thread.
+const SKIP_WINDOW: usize = RING_SLOTS + 2;
+
+/// The missed blocks whose chunk the plugin side accounts for: published
+/// after all, or skipped by the bridge. A miss at block `b` is counted late in
+/// `b` (the same callback's submit), `b + 1` (the next collect) or `b + 2`,
+/// while the chunk's ring slot still shows it (`RING_SLOTS` chunks on); a
+/// skip is counted within [`SKIP_WINDOW`] blocks of it. Each count answers
+/// one miss, the earliest.
+fn excused(misses: &[usize], lates: &[usize], skips: &[usize]) -> Vec<usize> {
+    let (mut lates, mut skips) = (lates.to_vec(), skips.to_vec());
     let mut excused = Vec::new();
     for &miss in misses {
-        if let Some(at) = free
-            .iter()
-            .position(|&late| (miss..=miss + RING_SLOTS).contains(&late))
-        {
-            free.remove(at);
+        let take = |events: &mut Vec<usize>, window: usize| {
+            events
+                .iter()
+                .position(|&e| (miss..=miss + window).contains(&e))
+                .map(|at| events.remove(at))
+                .is_some()
+        };
+        if take(&mut lates, RING_SLOTS) || take(&mut skips, SKIP_WINDOW) {
             excused.push(miss);
         }
     }
@@ -176,7 +190,7 @@ fn excused(misses: &[usize], lates: &[usize]) -> Vec<usize> {
 /// window: its blocks are not judged), was a missed chunk the server published
 /// late.
 fn judge_silence(run: &Run, from: usize, neutral: &Range<usize>) -> Result<(), String> {
-    let late = excused(&run.misses, &run.lates);
+    let late = excused(&run.misses, &run.lates, &run.skips);
     let mut unexplained = Vec::new();
     for &b in &run.silent {
         if b < from || neutral.contains(&b) {
@@ -185,15 +199,18 @@ fn judge_silence(run: &Run, from: usize, neutral: &Range<usize>) -> Result<(), S
         if !run.misses.contains(&b) {
             unexplained.push(format!("{b} (no collect missed: nothing was submitted)"));
         } else if !late.contains(&b) {
-            unexplained.push(format!("{b} (its chunk was never published)"));
+            unexplained.push(format!(
+                "{b} (its chunk was never published, nor counted skipped)"
+            ));
         }
     }
     if unexplained.is_empty() {
         Ok(())
     } else {
         Err(format!(
-            "silent blocks outside a late answer: {unexplained:?} (misses {:?}, late counts at {:?})",
-            run.misses, run.lates
+            "silent blocks outside a late answer or a skip: {unexplained:?} \
+             (misses {:?}, late counts at {:?}, skips at {:?})",
+            run.misses, run.lates, run.skips
         ))
     }
 }
@@ -242,9 +259,18 @@ fn run_live(rate: f64, quantum: usize, blocks: usize, burst_at: Option<usize>) -
     let warm_up = 8 + declared.get().div_ceil(quantum);
     let mut buf = vec![0.0f32; quantum];
     let (mut silent, mut wrong) = (Vec::new(), Vec::new());
-    let (mut misses, mut lates) = (Vec::new(), Vec::new());
+    let (mut misses, mut lates, mut skips) = (Vec::new(), Vec::new(), Vec::new());
+    let mut skipped = 0;
     let mut next = Instant::now();
     for b in 0..warm_up + blocks {
+        // The bridge thread counts a skip when it gets to the chunk, between
+        // callbacks: what it counted since the last callback began is the
+        // last block's.
+        let now_skipped = controls.skipped_chunks();
+        if b > warm_up {
+            skips.extend((skipped..now_skipped).map(|_| b - 1 - warm_up));
+        }
+        skipped = now_skipped;
         let (missed, late) = (controls.missed_chunks(), controls.late_chunks());
         engine.process(&mut InterleavedMut::new(&mut buf, ChannelLayout::MONO).unwrap());
         ed.collect();
@@ -280,6 +306,9 @@ fn run_live(rate: f64, quantum: usize, blocks: usize, burst_at: Option<usize>) -
         }
         std::thread::sleep(next - now);
     }
+    // A skip of the last chunks may still be on its way.
+    std::thread::sleep(period * 3);
+    skips.extend((skipped..controls.skipped_chunks()).map(|_| blocks - 1));
     drop(probe.handle);
     Run {
         declared,
@@ -288,47 +317,71 @@ fn run_live(rate: f64, quantum: usize, blocks: usize, burst_at: Option<usize>) -
         wrong,
         misses,
         lates,
+        skips,
     }
 }
 
 #[test]
-fn a_miss_is_late_only_when_a_late_count_follows_within_the_ring() {
-    assert!(excused(&[], &[]).is_empty());
-    assert_eq!(excused(&[10], &[10]), [10], "counted in its own callback");
-    assert_eq!(excused(&[10], &[11]), [10]);
-    assert_eq!(excused(&[10], &[12]), [10], "while its slot still shows it");
-    assert!(excused(&[10], &[13]).is_empty(), "past the ring");
-    assert!(excused(&[10], &[9]).is_empty(), "before the miss");
-    assert!(excused(&[10], &[]).is_empty(), "never published");
+fn a_miss_is_accounted_for_only_by_a_late_count_or_a_skip_in_its_window() {
+    assert!(excused(&[], &[], &[]).is_empty());
     assert_eq!(
-        excused(&[10, 11], &[12]),
+        excused(&[10], &[10], &[]),
+        [10],
+        "counted in its own callback"
+    );
+    assert_eq!(excused(&[10], &[11], &[]), [10]);
+    assert_eq!(
+        excused(&[10], &[12], &[]),
+        [10],
+        "while its slot still shows it"
+    );
+    assert!(excused(&[10], &[13], &[]).is_empty(), "past the ring");
+    assert!(excused(&[10], &[9], &[]).is_empty(), "before the miss");
+    assert!(excused(&[10], &[], &[]).is_empty(), "never published");
+    assert_eq!(
+        excused(&[10, 11], &[12], &[]),
         [10],
         "one late count answers one miss, the earliest"
+    );
+    assert_eq!(excused(&[10], &[], &[13]), [10], "a skip, a stall behind");
+    assert!(
+        excused(&[10], &[], &[15]).is_empty(),
+        "a skip past its window"
+    );
+    assert_eq!(
+        excused(&[10, 11], &[], &[11]),
+        [10],
+        "one skip answers one miss"
     );
 }
 
 #[test]
 fn a_silent_block_is_judged_by_what_the_collect_and_the_server_did() {
-    let run = |silent: &[usize], misses: &[usize], lates: &[usize]| Run {
+    let run = |silent: &[usize], misses: &[usize], lates: &[usize], skips: &[usize]| Run {
         declared: Samples(0),
         blocks: 200,
         silent: silent.to_vec(),
         wrong: Vec::new(),
         misses: misses.to_vec(),
         lates: lates.to_vec(),
+        skips: skips.to_vec(),
     };
-    assert!(judge_silence(&run(&[], &[], &[]), 0, &(0..0)).is_ok());
-    assert!(judge_silence(&run(&[20], &[20], &[21]), 0, &(0..0)).is_ok());
-    let never = judge_silence(&run(&[20], &[20], &[]), 0, &(0..0)).unwrap_err();
+    assert!(judge_silence(&run(&[], &[], &[], &[]), 0, &(0..0)).is_ok());
+    assert!(judge_silence(&run(&[20], &[20], &[21], &[]), 0, &(0..0)).is_ok());
+    assert!(
+        judge_silence(&run(&[20], &[20], &[], &[22]), 0, &(0..0)).is_ok(),
+        "a chunk the bridge skipped"
+    );
+    let never = judge_silence(&run(&[20], &[20], &[], &[]), 0, &(0..0)).unwrap_err();
     assert!(never.contains("never published"), "{never}");
-    let none = judge_silence(&run(&[20], &[], &[]), 0, &(0..0)).unwrap_err();
+    let none = judge_silence(&run(&[20], &[], &[], &[]), 0, &(0..0)).unwrap_err();
     assert!(none.contains("nothing was submitted"), "{none}");
     assert!(
-        judge_silence(&run(&[61, 62], &[], &[]), 0, &(60..65)).is_ok(),
+        judge_silence(&run(&[61, 62], &[], &[], &[]), 0, &(60..65)).is_ok(),
         "the neutral window is not judged"
     );
     assert!(
-        judge_silence(&run(&[3], &[], &[]), 10, &(0..0)).is_ok(),
+        judge_silence(&run(&[3], &[], &[], &[]), 10, &(0..0)).is_ok(),
         "before `from` is not judged"
     );
 }
@@ -337,9 +390,9 @@ fn a_silent_block_is_judged_by_what_the_collect_and_the_server_did() {
 const JUDGEABLE_RUNS: usize = 3;
 
 /// The first run of `run` that can be judged: no block wrong, no silent block
-/// outside a late answer (either fails at once, in any run, whatever the load),
-/// and no more than a quarter of the blocks judged (`from` on, outside
-/// `neutral`) answered late. More late answers than that and the run asserts
+/// outside a late answer or a skip (either fails at once, in any run, whatever
+/// the load), and no more than a quarter of the blocks judged (`from` on,
+/// outside `neutral`) answered late or skipped. More than that and the run asserts
 /// little about the pipeline, so it is run again on a fresh server, up to
 /// [`JUDGEABLE_RUNS`] times, and then reported.
 fn judgeable_run(
@@ -361,12 +414,14 @@ fn judgeable_run(
         let late = run
             .lates
             .iter()
+            .chain(&run.skips)
             .filter(|&&b| b >= from && !neutral.contains(&b))
             .count();
         eprintln!(
-            "{what}: run {attempt}: {} chunks missed, {late} late, of {judged} judged blocks, \
-             {} silent",
+            "{what}: run {attempt}: {} chunks missed, {late} late or skipped ({} skipped), of \
+             {judged} judged blocks, {} silent",
             run.misses.len(),
+            run.skips.len(),
             run.silent.len()
         );
         if let Err(why) = judge_silence(&run, from, &neutral) {
@@ -377,7 +432,7 @@ fn judgeable_run(
         }
         seen.push(format!("{late} of {judged}"));
     }
-    panic!("{what}: machine too loaded to judge: late chunks per run: {seen:?}");
+    panic!("{what}: machine too loaded to judge: late or skipped chunks per run: {seen:?}");
 }
 
 fn assert_live(rate: f64, quantum: usize) {

@@ -444,6 +444,7 @@ impl Ipc {
         {
             let slab = Arc::clone(bridge.audio_buffer());
             counters.attach(move |seq| slab.has_output(seq));
+            counters.attach_skipped(bridge.skipped_cell());
         }
         let events = Arc::new(Events {
             latency: AtomicUsize::new(loaded.latency_samples.get()),

@@ -1802,7 +1802,7 @@ fn a_stale_block_never_lets_a_sysex_through_with_a_gap() {
         offset: 0,
         ump: midi::note_on(MidiChannel::FIRST, 60, 1),
     };
-    let (three, four, dropped) = two_stale_blocks([
+    let (three, four, dropped, skipped) = two_stale_blocks([
         cut[..3].to_vec(),
         cut[3..6].to_vec(),
         cut[6..]
@@ -1822,6 +1822,7 @@ fn a_stale_block_never_lets_a_sysex_through_with_a_gap() {
         (3 + 3 + 4) as u64,
         "blocks 1 and 2, and the cut message's tail"
     );
+    assert_eq!(skipped, 2, "blocks 1 and 2 are skipped as stale");
 }
 
 /// **A stale block holding only a message's `START` cuts that message.**
@@ -1838,7 +1839,7 @@ fn a_stale_block_holding_only_a_start_cuts_its_message() {
     };
     // The `START` in the last stale block: an earlier one's `lost` would
     // cut it anyway.
-    let (three, four, dropped) = two_stale_blocks([
+    let (three, four, dropped, skipped) = two_stale_blocks([
         vec![note],
         vec![lost[0]],
         [lost[1]].into_iter().chain(other.iter().copied()).collect(),
@@ -1847,6 +1848,7 @@ fn a_stale_block_holding_only_a_start_cuts_its_message() {
     assert_eq!(three, other, "the lost START's END is not sent");
     assert_eq!(four, vec![note]);
     assert_eq!(dropped, 3, "blocks 1 and 2, and the END");
+    assert_eq!(skipped, 2, "blocks 1 and 2 are skipped as stale");
 }
 
 /// `len` payload bytes as SysEx7 packets on group 1.
@@ -1871,6 +1873,7 @@ fn two_stale_blocks(
 ) -> (
     Vec<tutti_plugin_types::WireMidi>,
     Vec<tutti_plugin_types::WireMidi>,
+    u64,
     u64,
 ) {
     use interprocess::local_socket::{ListenerOptions, traits::Listener as _};
@@ -1950,8 +1953,11 @@ fn two_stale_blocks(
     let dropped = bridge
         .dropped_midi_cell()
         .load(std::sync::atomic::Ordering::Relaxed);
+    let skipped = bridge
+        .skipped_cell()
+        .load(std::sync::atomic::Ordering::Relaxed);
     drop(thread);
     drop(bridge);
     server.join().unwrap();
-    (three, four, dropped)
+    (three, four, dropped, skipped)
 }

@@ -329,6 +329,12 @@ impl AudioBridge {
         self.channels.dropped_midi_cell()
     }
 
+    /// The count of chunks the bridge thread skipped as stale, shared: the
+    /// pipeline's counters read it beside the batcher's own.
+    pub(crate) fn skipped_cell(&self) -> Arc<std::sync::atomic::AtomicU64> {
+        self.channels.skipped_cell()
+    }
+
     /// The shared-memory slab the blocks travel in.
     pub fn audio_buffer(&self) -> &Arc<AudioSlab> {
         &self.audio_buffer
