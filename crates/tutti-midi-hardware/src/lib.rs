@@ -183,6 +183,8 @@
 //!
 //! ## Features
 //!
+//! - `serde`: `Serialize` and `Deserialize` for [`MidiHardwareOptions`] and
+//!   [`InputTiming`], so an app stores the options it opens with. Off by default.
 //! - `testing`: exports `test_support::FakeBackend`, a device list with no OS
 //!   behind it, for [`MidiSession::open_over`] in headless tests; its `plug` and
 //!   `unplug` drive hot-plug. Off by default.
@@ -195,9 +197,10 @@
 //!
 //! ## Where it sits
 //!
-//! Builds on `tutti-ump` (the wire vocabulary and its decoded `Message`) and `tutti-midi-runtime`
-//! (the graph's MIDI nodes), and re-exports the parts of both a
-//! hardware consumer needs. It does **not** include the file codecs: SMF and the
+//! Builds on `tutti-ump` (the wire vocabulary and its decoded `Message`),
+//! `tutti-midi-device` (devices, endpoints and their identity) and
+//! `tutti-midi-runtime` (the graph's MIDI nodes); their items are named from
+//! those crates. It does **not** include the file codecs: SMF and the
 //! path-level Clip File codec are in `tutti-midi-file`, so a consumer that only
 //! reads `.mid` files does not link CoreMIDI or ALSA. Re-exported by `tutti`.
 //!
