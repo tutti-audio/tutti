@@ -419,6 +419,37 @@ pub(crate) fn slice_out<'a>(
     (planes, n)
 }
 
+/// Runs `f` over the main input and output buses of a stateless through node, each cut to
+/// the whole block: the views of `inputs` channels in and `outputs` out. A bus with no
+/// channels has nothing to render.
+pub(crate) fn through_planes(
+    io: &mut Io<'_>,
+    inputs: usize,
+    outputs: usize,
+    f: impl FnOnce(Planes<'_, f32>, PlanesMut<'_, '_, f32>),
+) {
+    debug_assert_eq!(
+        inputs, outputs,
+        "a through node writes every channel it reads"
+    );
+    let frames = 0..io.frames();
+    let (ins, mut outs) = io.split();
+    let (input, _) = slice_in((0..inputs).map(|c| ins.get(c)), &frames);
+    let (mut output, _) = slice_out(outs.iter_mut().take(outputs), &frames);
+    let (n_in, n_out) = (inputs.min(MAX_PORTS), outputs.min(MAX_PORTS));
+    if let Ok(input) = Planes::new(&input[..n_in])
+        && let Ok(output) = PlanesMut::new(&mut output[..n_out])
+    {
+        f(input, output);
+        return;
+    }
+    // No view to render (a bus of no channels): every channel is silence, none is left as the
+    // arena had it.
+    for ch in &mut output[..n_out] {
+        ch.fill(0.0);
+    }
+}
+
 /// Where a block falls on the stream's grid: it has `size` frames, begins at stream frame
 /// `position` (frames since the last reset), and the grid has a point every `period` frames
 /// from frame 0.
