@@ -229,11 +229,7 @@ fn an_unknown_tail_is_never_narrowed_cut_or_parked() {
             let d = drive_input(node, &env, &[&x, &x], &[], &[]);
             assert_eq!(d.status, Some(Status::Modified), "block {block}");
             assert_eq!(d.reported_tail, None, "block {block}");
-            ring = d
-                .audio
-                .iter()
-                .flatten()
-                .fold(0.0f32, |p, &s| p.max(s.abs()));
+            ring = tutti_fixtures::signal::peak_planes(&d.audio);
         }
         ring
     };

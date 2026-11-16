@@ -136,7 +136,9 @@ impl OutputPolicyHandle<'_> {
     /// Sets the policy. It is checked against the device and the root now, and
     /// applied by the next [`Session::update`], live: the outputs ramp to their
     /// gains over the declick length, and a changed monitor or map folds from
-    /// the next block on (a cut, not a ramp).
+    /// the next block on, crossfading from the old routing to the new over the
+    /// declick length (a change made while a root change crossfades, or while
+    /// the last routing change still fades, cuts instead).
     ///
     /// # Errors
     ///

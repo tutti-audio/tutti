@@ -22,6 +22,14 @@
 //! Stream messages, or an OS that never delivers them) costs three sends and
 //! then is a [`Basis::Unanswered`] device, described by the OS.
 //!
+//! # The session as an Endpoint
+//!
+//! While the session presents an identity ([`MidiSession::present`](crate::MidiSession::present)),
+//! the device of a UMP Endpoint with an output may ask the session what it is
+//! as well: its Endpoint Discovery, Function Block Discovery and Stream
+//! Configuration Request are answered on the device's output as the Endpoint
+//! the identity describes ([`Endpoint::local`]), by [`Endpoint::reply`].
+//!
 //! # Identity Request
 //!
 //! A MIDI 1.0 port with an output has no UMP Stream to ask what it is
@@ -70,13 +78,14 @@ use std::time::Instant;
 use tutti_graph::{Losses, Offset};
 use tutti_midi_device::ResourceStore;
 use tutti_midi_device::{
-    Action, Connection, Ending, Endpoint, EntropyError, IdentityInquiry, InquiryAction, Learned,
+    Action, Capabilities, Connection, Ending, Endpoint, EntropyError, IdentityInquiry,
+    InquiryAction, Learned, Reply, Supports,
 };
 use tutti_midi_protocol::{Addressed, Read, Universal, read};
 use tutti_midi_runtime::Outgoing;
 use tutti_ump::{
-    DeviceIdentity, Message, MidiGroup, Protocol, Stream, StreamConfig, SysexAssembler, SysexStep,
-    Ump,
+    BlockFilter, BlockSelect, DeviceIdentity, DiscoveryFilter, Message, MidiGroup, Protocol,
+    Stream, StreamConfig, SysexAssembler, SysexStep, Ump,
 };
 
 use crate::capability::UmpCapability;
@@ -87,6 +96,7 @@ use crate::devices::OpenOutput;
 use crate::process::{self, ProcessChange, ReportAsk, ReportError};
 use crate::profiles::{ProfileError, ProfileSwitch, ProfilesChange, Snapshot};
 use crate::properties::{self, PropertyAsk, PropertyChange, PropertyError};
+use crate::session::Presented;
 use tutti_midi_device::DeviceId;
 
 /// Where an input's event times come from: what a device is asked to send, and
@@ -235,9 +245,67 @@ pub(crate) struct Negotiation {
     run: Run,
     inquire: Inquire,
     ci: Ci,
+    /// The Endpoint the session answers a peer's Stream messages as, with what
+    /// it was built from.
+    answering: Option<Answering>,
     timing: InputTiming,
     /// Where the request to stop JR Timestamps the input did not ask for is.
     stop: StopJr,
+}
+
+/// The Endpoint the session answers a device's Stream messages as.
+struct Answering {
+    /// What the Endpoint was built from.
+    presented: Presented,
+    endpoint: Endpoint,
+    /// Whether the device has been sent a Stream Configuration Notification, so
+    /// a later change of the Protocol in force is told to it (§7.1.6.3).
+    told: bool,
+}
+
+/// What a rebuilt answering Endpoint tells a peer that discovered the old one.
+struct Announce {
+    /// The Function Block's Groups changed: its Info is sent again.
+    blocks: bool,
+}
+
+const NO_FILTER: DiscoveryFilter = DiscoveryFilter {
+    endpoint_info: false,
+    device_identity: false,
+    endpoint_name: false,
+    product_instance_id: false,
+    stream_configuration: false,
+};
+
+const ALL_FILTER: DiscoveryFilter = DiscoveryFilter {
+    endpoint_info: true,
+    device_identity: true,
+    endpoint_name: true,
+    product_instance_id: true,
+    stream_configuration: true,
+};
+
+/// An Endpoint Discovery for `filter`, answered by `endpoint` into `out`: the
+/// unsolicited notifications of what the filter names.
+fn ask(endpoint: &mut Endpoint, filter: DiscoveryFilter, out: &mut Vec<Ump>) {
+    let _ = endpoint.reply(
+        Message::Stream(Stream::EndpointDiscovery {
+            version: endpoint.version(),
+            filter,
+        }),
+        out,
+    );
+}
+
+/// A configuration seen from the other end of the link: the device's `rx_jr`
+/// is what the session sends, so it is the session Endpoint's `tx_jr`, and the
+/// reverse. The Protocol is the link's.
+const fn mirrored(config: StreamConfig) -> StreamConfig {
+    StreamConfig {
+        protocol: config.protocol,
+        rx_jr: config.tx_jr,
+        tx_jr: config.rx_jr,
+    }
 }
 
 /// The request that stops JR Timestamps a device sends the input did not ask
@@ -384,6 +452,7 @@ impl Negotiation {
             run,
             inquire,
             ci: Ci::new(device),
+            answering: None,
             timing,
             stop: StopJr::Settled,
         }
@@ -511,7 +580,9 @@ impl Negotiation {
     /// Returns the stream when this call settled it, or, after that, changed
     /// it, and the peers' changes.
     ///
-    /// `ci` is the identity the session runs MIDI-CI with, if it has one.
+    /// `presented` is who the session is on the wire, if it presents anyone: its
+    /// identity is what MIDI-CI runs with, and its Endpoint answers what the
+    /// device asks of it ([`answer`](Self::answer)).
     ///
     /// MIDI-CI steps first: what a settle or an inquiry's end makes it start is
     /// started by the next poll, after the port has been asked to copy SysEx.
@@ -519,22 +590,177 @@ impl Negotiation {
         &mut self,
         now: Instant,
         heard: &Heard<'_>,
-        ci: Option<DeviceIdentity>,
+        presented: Option<Presented>,
         store: &Arc<Mutex<ResourceStore>>,
     ) -> Stepped {
+        let ci = presented.map(|p| p.identity.device);
         let changes = match &mut self.out {
             Some(out) => self.ci.poll(now, heard, ci, store, out),
             None => CiChanges::default(),
         };
         let stream = self.poll_stream(now, heard);
+        let granted = self.answer(heard, presented);
         Stepped {
-            stream,
+            stream: granted.or(stream),
             ci: changes.peers,
             profiles: changes.profiles,
             process: changes.process,
             properties: changes.properties,
             unstarted: changes.unstarted,
         }
+    }
+
+    /// Answers what the device asked of the session as an Endpoint (M2-104
+    /// §7.1): Endpoint Discovery, Function Block Discovery and a Stream
+    /// Configuration Request, each on the device's output. Only a UMP Endpoint
+    /// with an output is answered, and only while the session presents an
+    /// identity. Returns the device's stream when a granted request moved it.
+    ///
+    /// The Protocol in force is one state for both directions: the settled
+    /// [`DeviceStream`]'s. The answering Endpoint reports it (and a change of
+    /// it, once the session has told the device its configuration), and a
+    /// request granted here moves it, so the output follows what the
+    /// Notification said, Protocol and JR Timestamps both (the device's TXJR is
+    /// the Endpoint's RXJR). A request is granted within what the Endpoint
+    /// declares ([`supports`](Self::supports)); JR Timestamps asked off are
+    /// turned off, and the input is then timed by arrival. The session itself asks
+    /// only during its own negotiation, before the stream settles, and
+    /// afterwards only to turn off JR Timestamps the input did not ask for,
+    /// naming the Protocol in force; so answering a request starts none, and a
+    /// later request of the session's cannot undo a grant.
+    fn answer(&mut self, heard: &Heard<'_>, presented: Option<Presented>) -> Option<DeviceStream> {
+        let announce = self.rebuild(presented);
+        let (Some(answering), true) = (&mut self.answering, self.os.is_ump_endpoint()) else {
+            return None;
+        };
+        let mut replies: Vec<Ump> = Vec::new();
+        if let Run::Done { stream, .. } = &self.run {
+            let in_force = mirrored(stream.endpoint.active());
+            if answering.endpoint.active() != in_force {
+                answering.endpoint = answering.endpoint.with_active(in_force);
+                if answering.told {
+                    ask(
+                        &mut answering.endpoint,
+                        DiscoveryFilter {
+                            stream_configuration: true,
+                            ..NO_FILTER
+                        },
+                        &mut replies,
+                    );
+                }
+            }
+        }
+        if let Some(announce) = announce {
+            ask(
+                &mut answering.endpoint,
+                DiscoveryFilter {
+                    stream_configuration: false,
+                    ..ALL_FILTER
+                },
+                &mut replies,
+            );
+            if announce.blocks {
+                let _ = answering.endpoint.reply(
+                    Message::Stream(Stream::FunctionBlockDiscovery {
+                        block: BlockSelect::All,
+                        filter: BlockFilter {
+                            info: true,
+                            name: false,
+                        },
+                    }),
+                    &mut replies,
+                );
+            }
+        }
+        let mut granted = None;
+        for &ump in heard.packets {
+            if let Ok(message @ Message::Stream(stream)) = ump.decode()
+                && matches!(
+                    stream,
+                    Stream::EndpointDiscovery { .. }
+                        | Stream::FunctionBlockDiscovery { .. }
+                        | Stream::StreamConfigurationRequest(_)
+                )
+                && let Reply::Configured(configuration) =
+                    answering.endpoint.reply(message, &mut replies)
+            {
+                granted = Some(configuration.active());
+            }
+        }
+        answering.told |= replies.iter().any(|ump| {
+            matches!(
+                ump.decode(),
+                Ok(Message::Stream(Stream::StreamConfigurationNotification(_)))
+            )
+        });
+        for ump in replies {
+            queue(&mut self.out, ump, false);
+        }
+        let active = granted?;
+        let Run::Done { stream, listening } = &mut self.run else {
+            return None;
+        };
+        let config = mirrored(active);
+        if stream.endpoint.active() == config {
+            return None;
+        }
+        stream.endpoint = stream.endpoint.with_active(config);
+        if let Some(connection) = listening {
+            connection.adopt(config);
+        }
+        Some(**stream)
+    }
+
+    /// What the answering Endpoint declares it supports: both Protocols; JR
+    /// Timestamps received when the input asks the device for them
+    /// ([`InputTiming::JitterReduction`]), so a peer's request can keep them on;
+    /// and JR Timestamps sent, since the session's output JR-stamps for a device
+    /// whose configuration has it receiving them.
+    fn supports(&self) -> Supports {
+        Supports::of(Capabilities {
+            midi1: true,
+            midi2: true,
+            rx_jr: matches!(self.timing, InputTiming::JitterReduction),
+            tx_jr: true,
+        })
+    }
+
+    /// Makes the answering Endpoint the one `presented` describes: built when
+    /// the session starts presenting, kept while it does not change, rebuilt
+    /// when it does (the Protocol in use kept, or the settled stream's when it
+    /// is built after the settle). What a rebuild changes for a peer that
+    /// discovered the old one is returned: the Endpoint is announced again, and
+    /// its Function Block when the Groups changed.
+    fn rebuild(&mut self, presented: Option<Presented>) -> Option<Announce> {
+        let Some(now) = presented else {
+            self.answering = None;
+            return None;
+        };
+        if self.answering.as_ref().is_some_and(|a| a.presented == now) {
+            return None;
+        }
+        let was = self.answering.take();
+        let mut endpoint = Endpoint::local(self.supports(), now.groups)
+            .with_identity(now.identity.device)
+            .with_name(now.identity.name);
+        if let Some(id) = now.identity.instance {
+            endpoint = endpoint.with_instance_id(id);
+        }
+        if let Some(was) = &was {
+            endpoint = endpoint.with_active(was.endpoint.active());
+        } else if let Run::Done { stream, .. } = &self.run {
+            endpoint = endpoint.with_active(mirrored(stream.endpoint.active()));
+        }
+        let told = was.as_ref().is_some_and(|a| a.told);
+        let announce = was.as_ref().map(|a| Announce {
+            blocks: a.presented.groups != now.groups,
+        });
+        self.answering = Some(Answering {
+            presented: now,
+            endpoint,
+            told,
+        });
+        announce
     }
 
     fn poll_stream(&mut self, now: Instant, heard: &Heard<'_>) -> Option<DeviceStream> {
@@ -580,9 +806,15 @@ impl Negotiation {
                 // is asked once to stop (M2-104 §7.2.2.3), and again only
                 // after its TXJR has gone off and come back on.
                 let unwanted = stream.endpoint.active().tx_jr && !wanted.tx_jr;
+                // The Protocol in force is kept: the request is to stop JR
+                // Timestamps, not to move a Protocol a peer's request chose.
+                let asked = StreamConfig {
+                    tx_jr: wanted.tx_jr,
+                    ..stream.endpoint.active()
+                };
                 let out = &mut self.out;
                 self.stop = self.stop.next(unwanted, |retry| {
-                    let request = Stream::StreamConfigurationRequest(wanted);
+                    let request = Stream::StreamConfigurationRequest(asked);
                     queue(out, Ump::from(Message::Stream(request)), retry)
                 });
                 return reported;

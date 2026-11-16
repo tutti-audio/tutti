@@ -419,6 +419,7 @@ pub(super) fn handle(
             // payload so the pool doesn't leak, and push nothing — the audio
             // thread stopped expecting this block two blocks ago.
             if is_stale(seq, channels.newest_submitted()) {
+                channels.note_skipped();
                 // Its MIDI is lost, counted, and so is the rest of every
                 // SysEx open in it: the server's reassembler would otherwise
                 // complete it from the next block's packets, with these
@@ -456,7 +457,9 @@ pub(super) fn handle(
 
             payloads.recycle(payload);
 
-            let timeout = process_timeout(num_samples, channels.sample_rate());
+            let timeout = channels
+                .reply_wait()
+                .unwrap_or_else(|| process_timeout(num_samples, channels.sample_rate()));
             let sent = ipc::send(audio_stream, &msg);
             // The parameter-change buffer goes back to the audio thread's free
             // list once its contents are on the wire (sent or not: a failed

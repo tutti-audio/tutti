@@ -104,16 +104,6 @@ fn wait_until(mut cond: impl FnMut() -> bool) -> bool {
     false
 }
 
-fn unique_shm_name(label: &str) -> String {
-    static COUNTER: tutti_types::Mint = tutti_types::Mint::new();
-    format!(
-        "hostile_{}_{}_{}",
-        label,
-        std::process::id(),
-        COUNTER.mint()
-    )
-}
-
 fn stereo_layout() -> SlabLayout {
     SlabLayout {
         slots: RING_SLOTS as u32,
@@ -785,9 +775,10 @@ fn a_slab_setup_is_answered_refused_or_given_up_on_within_the_deadline() {
         _ => Action::Silent,
     });
     assert!(
-        ready
-            .bridge
-            .setup_shared_memory(unique_shm_name("slab-new"), layout.clone()),
+        ready.bridge.setup_shared_memory(
+            tutti_fixtures::unique_name("hostile_slab-new"),
+            layout.clone()
+        ),
         "the server's ready is the answer"
     );
 
@@ -799,9 +790,10 @@ fn a_slab_setup_is_answered_refused_or_given_up_on_within_the_deadline() {
     });
     let started = Instant::now();
     assert!(
-        !refusing
-            .bridge
-            .setup_shared_memory(unique_shm_name("slab-refused"), layout.clone()),
+        !refusing.bridge.setup_shared_memory(
+            tutti_fixtures::unique_name("hostile_slab-refused"),
+            layout.clone()
+        ),
         "the server's error is a refusal"
     );
     assert!(
@@ -814,9 +806,10 @@ fn a_slab_setup_is_answered_refused_or_given_up_on_within_the_deadline() {
     let silent = MockServer::start_with_timeouts("slab-silent", quick, |_| Action::Silent);
     let started = Instant::now();
     assert!(
-        !silent
-            .bridge
-            .setup_shared_memory(unique_shm_name("slab-silent"), layout.clone()),
+        !silent.bridge.setup_shared_memory(
+            tutti_fixtures::unique_name("hostile_slab-silent"),
+            layout.clone()
+        ),
         "no answer is a refusal"
     );
     assert!(
@@ -832,7 +825,7 @@ fn a_slab_setup_is_answered_refused_or_given_up_on_within_the_deadline() {
     assert!(
         !dying
             .bridge
-            .setup_shared_memory(unique_shm_name("slab-dies"), layout),
+            .setup_shared_memory(tutti_fixtures::unique_name("hostile_slab-dies"), layout),
         "a server that dies mid-swap is a refusal"
     );
     assert!(started.elapsed() < Duration::from_secs(10));

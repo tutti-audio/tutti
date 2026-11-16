@@ -379,14 +379,9 @@ impl<'a> Control<'a> {
             (0.0, 0.0)
         });
         let floor = self.last.map_or(0.0, |p| p.fraction);
-        // The end of a band is its `to` and nothing near it: `from + (to -
-        // from) * 1.0` can round off it, and the last band must land on 1.0.
-        let fraction = if within >= 1.0 {
-            to
-        } else {
-            from + (to - from) * within.clamp(0.0, 1.0)
-        }
-        .max(floor);
+        // The end of a band is its `to` exactly: the blend is exact at both ends, and
+        // the last band must land on 1.0.
+        let fraction = tutti_dsp::lerp(from, to, within.clamp(0.0, 1.0)).max(floor);
         let progress = Progress {
             stage,
             fraction,

@@ -62,7 +62,7 @@ use super::Loop;
 use super::interp::{
     MAX_WAVE_CHANNELS, Place, interpolate_taps, read_frame, read_looped_frame, tap_indices,
 };
-use super::loop_span::{LoopSpan, blend};
+use super::loop_span::LoopSpan;
 use super::types::Direction;
 use crate::streamer::StreamFile;
 
@@ -468,7 +468,7 @@ impl Pages {
             if let Some((lead, t)) = tap.fade {
                 let lead = self.frame(lead);
                 for (s, &l) in frame[..ch].iter_mut().zip(lead.iter()) {
-                    *s = blend(*s, l, t);
+                    *s = tutti_dsp::lerp(*s, l, t);
                 }
             }
         }

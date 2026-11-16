@@ -41,6 +41,7 @@
 //! well under that).
 
 use crate::support::{EncodeConfig, ExportConfig, RenderConfig};
+use tutti_fixtures::signal::rms_f64;
 
 use symphonia::core::codecs::audio::AudioDecoderOptions;
 use symphonia::core::formats::probe::Hint;
@@ -186,15 +187,6 @@ fn dominant_freq(samples: &[f32], channels: usize, rate: f64) -> f64 {
         }
     }
     crossings as f64 * rate / s.len() as f64
-}
-
-fn rms(samples: &[f32]) -> f64 {
-    (samples
-        .iter()
-        .map(|&s| (s as f64) * (s as f64))
-        .sum::<f64>()
-        / samples.len() as f64)
-        .sqrt()
 }
 
 /// The FLAC must hold what the WAV holds.
@@ -357,8 +349,8 @@ fn ogg_preserves_the_tone() {
     );
 
     // Vorbis at default quality holds level to well under a dB on a pure tone.
-    let wl = rms(&ws);
-    let ol = rms(&os);
+    let wl = rms_f64(&ws);
+    let ol = rms_f64(&os);
     let db = 20.0 * (ol / wl).log10();
     assert!(
         db.abs() < 1.0,

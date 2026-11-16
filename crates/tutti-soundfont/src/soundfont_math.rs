@@ -2,13 +2,12 @@
 // MeltySynth (Copyright (C) 2021 Nobuaki Tanaka). The MIT notice is
 // LICENSE-RUSTYSYNTH.txt, at the root of this crate.
 
-use std::f32::consts;
+use tutti_types::{Amplitude, Cents, Db};
 
 #[non_exhaustive]
 pub(crate) struct SoundFontMath {}
 
 impl SoundFontMath {
-    pub(crate) const HALF_PI: f32 = consts::PI / 2_f32;
     /// The level (-60 dB) below which a voice's envelope is dropped: tutti's
     /// threshold, not the spec's. A release time is the time to -100 dB, so a
     /// released voice is dropped at 0.6 of it. `LOG_NON_AUDIBLE` is its natural
@@ -34,24 +33,27 @@ impl SoundFontMath {
         }
     }
 
+    /// A time in absolute timecents as seconds: `2^(x / 1200)`, the 1200th root
+    /// of two per timecent.
     pub(crate) fn timecents_to_seconds(x: f32) -> f32 {
-        2_f32.powf((1_f32 / 1200_f32) * x)
+        Cents(x).to_pitch_ratio()
     }
 
     pub(crate) fn cents_to_hertz(x: f32) -> f32 {
-        8.176_f32 * 2_f32.powf((1_f32 / 1200_f32) * x)
+        8.176_f32 * Cents(x).to_pitch_ratio()
     }
 
     pub(crate) fn cents_to_multiplying_factor(x: f32) -> f32 {
-        2_f32.powf((1_f32 / 1200_f32) * x)
+        Cents(x).to_pitch_ratio()
     }
 
     pub(crate) fn decibels_to_linear(x: f32) -> f32 {
-        10_f32.powf(0.05_f32 * x)
+        Db(x).to_amplitude().get()
     }
 
+    /// `20 log10 x`: minus infinity for silence, as [`Db::from_amplitude`].
     pub(crate) fn linear_to_decibels(x: f32) -> f32 {
-        20_f32 * x.log10()
+        Db::from_amplitude(Amplitude(x)).get()
     }
 
     pub(crate) fn key_number_to_multiplying_factor(cents: i32, key: i32) -> f32 {
@@ -62,7 +64,7 @@ impl SoundFontMath {
         if x < SoundFontMath::LOG_NON_AUDIBLE as f64 {
             0_f64
         } else {
-            x.exp()
+            libm::exp(x)
         }
     }
 }

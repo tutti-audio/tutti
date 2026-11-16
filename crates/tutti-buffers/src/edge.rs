@@ -211,6 +211,10 @@ pub trait Sink {
     /// The format this sink takes.
     type Sample: Sample;
 
+    /// What closing the destination can fail with: [`std::io::Error`] for a
+    /// file, [`core::convert::Infallible`] for a sink in memory.
+    type Error: core::error::Error;
+
     /// How many channels one frame of this destination carries.
     ///
     /// Fixed for the life of the sink: it is what the file header was already
@@ -236,8 +240,8 @@ pub trait Sink {
     ///
     /// # Errors
     ///
-    /// The first write failure, or any I/O error from the final flush or commit.
-    fn finalize(self) -> std::io::Result<()>;
+    /// The first write failure, or any error from the final flush or commit.
+    fn finalize(self) -> Result<(), Self::Error>;
 }
 
 /// A [`Sink::write`] that failed, now or earlier.

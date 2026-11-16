@@ -16,6 +16,9 @@ mod midi;
 // MIDI ports as pool entries: absent, replugged, ambiguous, released, per-port ingest.
 #[cfg(feature = "midi-hardware")]
 mod midi_ports;
+// Who the session is on the wire (`MidiPolicy`): its Endpoint and MIDI-CI identity.
+#[cfg(feature = "midi-hardware")]
+mod midi_policy;
 // Route rules: the union of two on one target, and a disabled one.
 #[cfg(feature = "midi-hardware")]
 mod midi_routes;

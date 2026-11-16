@@ -1054,6 +1054,7 @@ fn rpns(events: impl IntoIterator<Item = UmpAt>, rpn: Rpn) -> Vec<(u8, u32)> {
 /// section 3.5, where MPE 1.1's manager starts at 2): RPN #00/00 = 48 on the
 /// manager, which passes as its own range, and RPN #00/07 = 48 on each
 /// member, whose bends are per-note.
+/// Spec: m2-120/3.5#4
 #[test]
 fn enabling_the_profile_starts_every_channel_at_48_semitones() {
     let mut ingest = MpeIngest::new(MpeMode::Disabled);
@@ -1088,6 +1089,7 @@ fn enabling_the_profile_starts_every_channel_at_48_semitones() {
 /// **A receiver stops the sounding notes and resets the controls of each
 /// channel that enters or leaves MPE control** (M2-120 section 3.3): the
 /// zone's channels on enabling, and on disabling the same.
+/// Spec: m2-120/3.3#1
 #[test]
 fn entering_and_leaving_the_profile_stops_and_resets_the_zones_channels() {
     let mut ingest = MpeIngest::new(MpeMode::Disabled);
@@ -1115,6 +1117,7 @@ fn only_the_channels_a_change_moves_are_stopped() {
 /// taken on both roles; Reset All Controllers and All Notes Off are the
 /// Manager's alone; Omni Off, Omni On, Mono Mode On and Poly Mode On are
 /// prohibited on both. A channel in no zone is conventional.
+/// Spec: m2-120/4.7#2, m2-120/4.7#4, m2-120/4.7#7, m2-120/4.7#10, m2-120/4.7#12, m2-120/4.7#14, m2-120/4.7#16
 #[test]
 fn the_profile_receive_table_for_channel_mode_messages() {
     let mut ingest = profiled(0, 5);
@@ -1179,6 +1182,7 @@ fn the_two_specifications_receive_different_tables() {
 /// every Member as a per-note sensitivity; a Member's is prohibited, so it
 /// is ignored and moves nobody. MPE 1.1 does the opposite: the Member's
 /// reaches the members and the Manager's moves no member.
+/// Spec: m2-120/3.5#1, m2-120/3.5#3
 #[test]
 fn the_pitch_bend_sensitivity_is_the_managers() {
     let sensitivity = |channel: u8, semitones: u8| {
@@ -1234,6 +1238,7 @@ fn the_pitch_bend_sensitivity_is_the_managers() {
 /// ignored in Polyphonic Channel Response and may be taken in Monophonic.
 /// Mono Mode On on the lowest Member Channel, MPE 1.1's switch, is prohibited
 /// and does nothing.
+/// Spec: m2-120/4.6#2, m2-120/4.6#4
 #[test]
 fn program_change_on_a_member_follows_the_channel_response() {
     let program = |channel: u8| at(0, midi::program_change(MidiChannel::of(channel), 5, None));
@@ -1256,6 +1261,7 @@ fn program_change_on_a_member_follows_the_channel_response() {
 /// section 2.2): a zone managed from channel 5 folds its Members' expression
 /// into per-note messages and passes its Manager's, and the channels below
 /// it are conventional.
+/// Spec: m2-120/4.3#2
 #[test]
 fn a_zone_managed_from_any_channel_folds_its_members() {
     let mut ingest = profiled(5, 4);
@@ -1285,6 +1291,7 @@ fn a_zone_managed_from_any_channel_folds_its_members() {
 /// (M2-120 sections 4.3 to 4.5, as MPE 1.1's 2.2.6 to 2.2.8): Pitch Bend,
 /// Channel Pressure and Control Change #74, tracked with no note sounding and
 /// combined with the Manager's.
+/// Spec: m2-120/4.3#3, m2-120/4.5#4
 #[test]
 fn what_a_member_was_told_goes_ahead_of_its_note_on() {
     let mut ingest = profiled(0, 4);
