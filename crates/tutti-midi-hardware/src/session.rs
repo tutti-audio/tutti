@@ -659,15 +659,18 @@ impl MidiSession {
         self.presented = who;
     }
 
-    /// The Product Instance Id the session made for an identity that carried
-    /// none ([`present`](Self::present)), `None` before there was one to make
-    /// (or when the operating system had no random bytes). An app keeps it
-    /// (it is serde with the `serde` feature) and puts it in the
-    /// [`MidiIdentity`] it presents next time, so the Id re-identifies the
+    /// The Product Instance Id in force: the presented identity's own when it
+    /// has one, else the one the session made for it
+    /// ([`present`](Self::present)), else `None` (before an identity without
+    /// one was presented, or when the operating system had no random bytes).
+    /// An app keeps it (it is serde with the `serde` feature) and puts it in
+    /// the [`MidiIdentity`] it presents next time, so the Id re-identifies the
     /// device after a power cycle.
     #[must_use]
-    pub const fn instance_id(&self) -> Option<ProductInstanceId> {
-        self.generated_instance
+    pub fn instance_id(&self) -> Option<ProductInstanceId> {
+        self.presented
+            .and_then(|who| who.identity.instance)
+            .or(self.generated_instance)
     }
 
     /// Who the session presents itself as ([`present`](Self::present)).

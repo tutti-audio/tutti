@@ -221,7 +221,25 @@ fn a_given_product_instance_id_is_kept_through_a_rebuild() {
         };
         assert_eq!((*form, &text[..7]), (Form::Complete, &b"SN-0042"[..]));
     }
-    assert_eq!(wire.session.instance_id(), None);
+    assert_eq!(wire.session.instance_id(), who.identity.instance);
+}
+
+/// `instance_id` is the Id in force: a given one as given, the generated one
+/// when the identity has none, and the generated one is kept across a switch to
+/// a given Id and back.
+#[test]
+fn the_session_reports_the_product_instance_id_in_force() {
+    let mut wire = presenting(Some(presented(identity())));
+    let generated = wire.session.instance_id().expect("the session made one");
+    let mut given = presented(identity());
+    let id = ProductInstanceId::new("SN-0042").unwrap();
+    given.identity.instance = Some(id);
+    wire.session.present(Some(given));
+    assert_eq!(wire.session.instance_id(), Some(id));
+    wire.session.present(Some(presented(identity())));
+    assert_eq!(wire.session.instance_id(), Some(generated));
+    wire.session.present(None);
+    assert_eq!(wire.session.instance_id(), Some(generated));
 }
 
 /// M2-104 §7.1.8: a Function Block Discovery for block 0 is answered with its
