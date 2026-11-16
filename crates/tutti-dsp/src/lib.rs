@@ -70,8 +70,7 @@
 //! - **No threading and no scheduling.** A host that wants these results on a
 //!   background thread owns that plumbing itself.
 //!
-//! The `tutti` crate re-exports this one as `tutti::dsp` behind its `dsp` feature. `tutti-nodes`, `tutti-sampler` and
-//! `tutti-export` use it.
+//! `tutti-nodes`, `tutti-sampler` and `tutti-export` use it.
 #![forbid(unsafe_code)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 //!
@@ -108,6 +107,9 @@
 //!   [`FreeverbBank`] (its comb feedback and damping [`Glide`]s in [`FreeverbGlides`]) and the
 //!   feedback delay network over buffers views ([`FdnBank`] over an [`FdnLayout`], its
 //!   parameters [`Glide`]s in [`FdnGlides`]). [`loop_gain`] and [`rt60_from_gain`] are the RT60 formula both ways.
+//! - **FIR design** (`fir.rs`): [`FirDesign`] describes a Kaiser windowed-sinc filter (a
+//!   [`FirResponse`], a transition and an attenuation) and designs it at a rate into a
+//!   [`Fir`], failing with a [`FirError`]; [`kaiser_beta`] is the window's parameter.
 //! - **Convolution**: [`Convolver`] over a shared [`IrSpectra`].
 //! - **Delay and modulation** (`delay.rs`, `modulation/`): [`DelayLine`] with an
 //!   [`InterpolationMode`]; the feedback delay ([`DelayBank`] over a [`DelayLayout`]: a
@@ -147,6 +149,7 @@ mod dither;
 mod dynamics;
 mod fft;
 mod filter;
+mod fir;
 mod glide;
 mod interp;
 mod level;
@@ -181,13 +184,14 @@ pub use dynamics::{
     LookaheadError, MultibandBank, MultibandLanes, MultibandSettings, amplitude_to_db,
     compute_compressor_gain_reduction, compute_limiter_gain,
 };
-pub use fft::{Complex32, FftScratch, RealFft};
+pub use fft::{Complex32, Complex64, FftScratch, RealFft};
 pub use filter::{
     Biquad, CrossoverBank, CrossoverCoefficients, CrossoverControls, CrossoverError,
     CrossoverModel, DirectForm1, LadderBank, LadderCoefficients, LadderCoeffs, LadderControls,
     LadderDesign, LadderModel, LadderType, Lanes, MAX_SPLITS, SOLVE_CEILING, SvfBank,
     SvfCoefficients, SvfCoeffs, SvfControls, SvfModel, SvfType, fit_to_rate, ladder_step, svf_step,
 };
+pub use fir::{Fir, FirDesign, FirError, FirResponse, MAX_ATTENUATION, kaiser_beta};
 pub use glide::{Glide, Lerp, Steps};
 pub use interp::{cubic_hermite, lerp};
 pub use model::{Lti, MaxDecay, MaxDecayError, Ring, System, TAIL_FLOOR};
@@ -212,7 +216,6 @@ pub use reverb::network::{
     LineModulation, MAX_CHANNELS, MAX_DENSE, MAX_LINES, MAX_STAGES, MAX_TAPS, Matrix, Network,
     NetworkCapacity, OutputMap, Stage, Tap, Taps, loop_gain, pre_delay_frames, rt60_from_gain,
 };
-pub use rustfft::num_complex::Complex64;
 pub use smoother::Smoother;
 pub use spatial::{
     HRTF_LATENCY, HRTF_STEP, HrirMeasurement, HrirSphere, HrtfBinaural, HrtfBinauralError,

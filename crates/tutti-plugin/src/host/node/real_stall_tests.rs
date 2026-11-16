@@ -38,7 +38,7 @@ use tutti_types::MaxBlock;
 use tutti_graph::{GraphBuilder, Prepare, Renderer};
 use tutti_types::{ChannelLayout, SampleRate, Samples};
 
-use crate::handles::PluginClient;
+use crate::PluginClient;
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_ipc::BridgeConfig;
 

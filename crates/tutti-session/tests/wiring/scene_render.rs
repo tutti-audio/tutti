@@ -156,7 +156,7 @@ fn assert_sounds(out: &[Vec<f32>], what: &str) {
 #[test]
 fn a_compensated_scene_delays_its_dry_channel_by_the_lookahead() {
     let mut s = scene(true);
-    let lookahead = s.session.graph_ref().latency_plan().total().get();
+    let lookahead = s.session.graph_ref().testing().latency_plan().total().get();
     // The limiter's default lookahead, in frames at `RATE`.
     assert!(lookahead > 0, "the limiter reports its lookahead");
     let b = render(&mut s.side, 9_600, 256);
@@ -375,7 +375,7 @@ fn pdc_is_the_compilers() {
         "nothing is spliced in; the plan delays the channel"
     );
     assert!(
-        s.session.graph_ref().latency_plan().total().get() > 0,
+        s.session.graph_ref().testing().latency_plan().total().get() > 0,
         "the limiter reports its lookahead"
     );
 }

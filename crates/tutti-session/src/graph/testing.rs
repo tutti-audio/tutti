@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use tutti_graph::{Compensation, Editor, Executor, NodeKey, Prepare, TransportPosition};
+use tutti_graph::{Compensation, Editor, Executor, NodeKey, Prepare, Topology, TransportPosition};
 
 use super::{Graph, render};
 
@@ -53,6 +53,31 @@ impl Testing<'_> {
     /// How many commits have sent a plan.
     pub fn commits_sent(&self) -> u64 {
         self.graph.commits
+    }
+
+    /// The audio wiring as it stands: the nodes, the edges into every input
+    /// port, the root's output sources and its input width, including edits
+    /// no commit has sent yet ([`Graph::is_edited`]). A read-only
+    /// view of what [`Graph::connect`] and its kin write; the
+    /// graph's other declarations (event edges, params, modes) are not part
+    /// of it.
+    ///
+    /// An edge that is fading out stays here until its fade ends.
+    pub fn topology(&self) -> &Topology {
+        &self.graph.editor.spec().topology
+    }
+
+    /// What compensation this graph needs, folded over the graph as edited
+    /// (committed or not): audio edges plus each node's event and
+    /// param-modulation sources. Mutates nothing.
+    pub fn latency_plan(&self) -> Compensation {
+        // The bus edges as the lanes they commit to; a spec whose bus edges
+        // do not lower has none to fold (the commit will say why).
+        let rate = self.graph.editor.prepare().sample_rate();
+        match self.graph.editor.lowered() {
+            Ok(lowered) => tutti_graph::latency_plan(&lowered.spec, rate),
+            Err(_) => tutti_graph::latency_plan(self.graph.editor.spec(), rate),
+        }
     }
 
     /// The compensation of the plan sent last: what the session publishes,

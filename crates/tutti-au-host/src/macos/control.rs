@@ -593,12 +593,12 @@ impl EditorWindow for AuLoaded {
         _scale: ContentScale,
     ) -> PluginResult<Size> {
         self.close_editor(main);
-        let editor = AuEditor::open(self.unit(), Some(parent), {
+        let editor = AuEditor::open(main, self.unit(), Some(parent), {
             let (width, height) = tutti_plugin_types::EditorUnit::DEFAULT_EXTENT;
             LogicalSize::new(width, height)
         })
         .map_err(|e| editor_error("AU open_editor failed", e))?;
-        let size = editor.editor_size();
+        let size = editor.editor_size(main);
         *self.editor_slot() = Some(editor);
         Ok(size.into())
     }
@@ -606,9 +606,9 @@ impl EditorWindow for AuLoaded {
     /// Detaches and releases the editor view. The teardown is AppKit's
     /// `removeFromSuperview` / `release`, which the `MainThreadMarker` proves is on
     /// the main thread.
-    fn close_editor(&mut self, _main: MainThreadMarker) {
+    fn close_editor(&mut self, main: MainThreadMarker) {
         if let Some(mut editor) = self.editor_slot().take() {
-            editor.close();
+            editor.close(main);
         }
     }
 

@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use tutti_clap_test_plugin::EXTRA_PARAM_BASE;
 use tutti_modulation::ControlProgram;
 use tutti_nodes::automation::{ControlLaneNode, LaneControls};
-use tutti_plugin::handles::PluginClient;
+use tutti_plugin::PluginClient;
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::ParamId;
 

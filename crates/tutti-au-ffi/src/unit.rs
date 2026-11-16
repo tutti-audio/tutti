@@ -201,7 +201,7 @@ impl Unit {
     }
 
     /// `AudioUnitInitialize`. Serialized with every other lifecycle call and with
-    /// a withdrawal's free ([`while_uninitialized`](Self::while_uninitialized)).
+    /// a withdrawal's free of what the AU's callbacks read.
     ///
     /// # Errors
     /// The `OSStatus` of the call. The unit is then taken to be uninitialized (a

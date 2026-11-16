@@ -1,8 +1,8 @@
 #![doc = include_str!("../README.md")]
 //! OS MIDI I/O for the Tutti audio engine: enumerate endpoints, connect
 //! them, send MIDI out and receive it back, through CoreMIDI (macOS), the
-//! ALSA UMP sequencer (Linux) and Windows Multimedia (Windows). Re-exported by
-//! `tutti` as `tutti::midi_hardware` (feature `midi-hardware`).
+//! ALSA UMP sequencer (Linux) and Windows Multimedia (Windows). `tutti::midi` names its
+//! device and profile types (feature `midi-hardware`).
 //!
 //! Events reach the wire as UMP words, not MIDI 1.0 bytes, so MIDI-2-only messages
 //! (per-note controllers, per-note pitch bend, JR Timestamps) survive where the

@@ -11,7 +11,7 @@ use std::os::raw::c_void;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 use tutti_plugin_types::TransportInfo;
-use tutti_types::value::units::{Beat, Bpm};
+use tutti_types::{Beat, Bpm};
 
 use coreaudio_sys::OSStatus;
 

@@ -152,7 +152,7 @@ pub fn snap_to_whole_frame(position: f64) -> f64 {
 ///
 /// Holds the frame→beat conversion ([`beat_at`](Self::beat_at)) and its
 /// inverse ([`frame_of`](Self::frame_of)), in one place. See the
-/// [module docs](self).
+/// module docs.
 ///
 /// Frames are counted on whatever clock the owner keeps (an engine's clock
 /// counts frames rolled since it started); `origin_frame` is where this

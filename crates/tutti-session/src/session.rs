@@ -30,7 +30,7 @@ pub enum Phase {
     /// set names the entries), then its releases (by key), then crossfades
     /// that waited out a re-prepare are retried, what bounces
     /// sent back is dropped (feature `export`; and a bounce in flight for
-    /// `BOUNCE_STALL_WARNING` of `PhaseCx::now` warned about, once), then
+    /// an hour of `PhaseCx::now` warned about, once), then
     /// `Editor::collect` frees what the audio thread retired (here, on the
     /// main thread) and, mid re-prepare, sends the resumed plan.
     Collect,
@@ -287,8 +287,8 @@ pub enum SessionEvent {
     /// [`ModState::problems`](crate::ModState::problems) lists. Reported
     /// once: a refusal when it starts or changes (the problems list holds it
     /// while it lasts), a target that has stayed unresolved for the session's
-    /// warning time ([`UNRESOLVED_WARNING`](crate::UNRESOLVED_WARNING) by
-    /// default) of [`PhaseCx::now`], likely a key no node is ever bound to,
+    /// warning time ([`SessionBuilder::unresolved_warning`](crate::SessionBuilder::unresolved_warning),
+    /// 4 s by default) of [`PhaseCx::now`], likely a key no node is ever bound to,
     /// once per stretch it stays unresolved.
     #[cfg(feature = "modulation")]
     Modulation(crate::Problem),

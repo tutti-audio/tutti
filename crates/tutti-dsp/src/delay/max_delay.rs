@@ -1,6 +1,6 @@
 //! [`MaxDelay`]: the longest delay a delay line is built to hold.
 
-use tutti_types::{SampleRate, Seconds};
+use tutti_types::{SampleRate, Samples, Seconds};
 
 tutti_types::ranged! {
     /// The longest delay a delay's time control may ask for, and the size of the line a
@@ -27,8 +27,8 @@ impl MaxDelay {
     /// product. Saturated at 16.7 million frames: a rate no device has must not make an
     /// allocation that aborts.
     #[must_use]
-    pub fn frames(self, rate: SampleRate) -> usize {
-        self.0.to_samples_ceil(rate).get().min(MAX_FRAMES)
+    pub fn frames(self, rate: SampleRate) -> Samples {
+        Samples(self.0.to_samples_ceil(rate).get().min(MAX_FRAMES))
     }
 }
 

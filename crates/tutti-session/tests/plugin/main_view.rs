@@ -24,7 +24,17 @@ use tutti_session::{DetachedSession, Opened, PluginChange, PluginEvent, Session,
 use tutti_types::{ChannelLayout, SampleRate};
 
 /// A backend that answers nothing: the editor route is the fake control's.
-struct Inert;
+#[derive(Default)]
+struct Inert {
+    /// The thread the backend dropped on: the last owner of the handle lets go there.
+    dropped_on: Arc<std::sync::Mutex<Option<std::thread::ThreadId>>>,
+}
+
+impl Drop for Inert {
+    fn drop(&mut self) {
+        *self.dropped_on.lock().unwrap() = Some(std::thread::current().id());
+    }
+}
 
 impl tutti_plugin_types::AnyThread for Inert {
     fn parameter_descriptors(&self) -> Option<Vec<ParameterInfo>> {
@@ -78,11 +88,16 @@ impl tutti_plugin_types::Health for Inert {
 
 /// A detached session with a fake plugin (with an editor) at a node.
 fn session_with_editor() -> (DetachedSession, NodeKey, FakePlugin) {
+    hosting(Inert::default())
+}
+
+/// [`session_with_editor`] over `backend`.
+fn hosting(backend: Inert) -> (DetachedSession, NodeKey, FakePlugin) {
     let (fake, loaded) = FakePlugin::new();
     fake.with_editor(true);
     let control: Arc<dyn tutti_plugin_host::MainThreadControl> = Arc::new(loaded);
     let handle = PluginHandle::from_backend(
-        Arc::new(Inert),
+        Arc::new(backend),
         Some(control),
         Default::default(),
         Default::default(),
@@ -227,6 +242,31 @@ fn a_removed_plugin_is_dropped_by_the_main_view_not_by_update() {
     assert_eq!(s.retired_plugins(), 1, "Session::update frees no plugin");
     let _ = s.main(tutti_fixtures::main_thread()).update();
     assert_eq!(s.retired_plugins(), 0, "the view's update drops it");
+}
+
+/// **An in-process plugin's record drops on the main thread, whichever thread
+/// removed it:** the removal on another thread leaves the backend alive, and
+/// the main view's update is where its last owner lets go.
+#[test]
+fn a_removed_in_process_plugin_drops_on_the_main_thread() {
+    let backend = Inert::default();
+    let dropped_on = Arc::clone(&backend.dropped_on);
+    let (mut s, node, _fake) = hosting(backend);
+    let remover = std::thread::spawn(move || {
+        s.remove(node).unwrap();
+        s
+    })
+    .join()
+    .unwrap();
+    let mut s = remover;
+    assert_eq!(s.retired_plugins(), 1, "the record is parked");
+    assert_eq!(*dropped_on.lock().unwrap(), None, "nothing dropped yet");
+    let _ = s.main(tutti_fixtures::main_thread()).update();
+    assert_eq!(
+        *dropped_on.lock().unwrap(),
+        Some(std::thread::current().id()),
+        "the main view's thread dropped it"
+    );
 }
 
 /// **A plugin removed with its editor open has the editor closed** when the

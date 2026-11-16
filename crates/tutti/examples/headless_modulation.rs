@@ -8,20 +8,22 @@
 //! no plan sent. Prints the output's level per 50 ms window.
 //!
 //! ```text
-//! cargo run -p tutti --features modulation --example headless_modulation
+//! cargo run -p tutti --example headless_modulation
 //! ```
 //!
 //! The umbrella's, so that it imports as an application does, from `tutti`'s
-//! root; what the root does not carry (the node contract, the testing
-//! oscillator) is named through `tutti::graph` and `tutti::nodes`.
+//! root; what the root does not carry (the node contract, the SVF
+//! filter) is named through `tutti::graph` and `tutti::nodes`; the testing
+//! oscillator is `tutti-nodes`'s, a dev-dependency of this crate.
 
 use tutti::graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
-use tutti::nodes::testing::Osc;
+use tutti::modulation::{Follower, Lfo};
 use tutti::nodes::{SvfFilterNode, SvfType};
 use tutti::{
-    ChannelLayout, Depth, Error, Follower, Hz, InPort, InterleavedMut, Lfo, MaxBlock, OutPort, Q,
-    Root, RouteSpec, SampleRate, Samples, Session, SessionEvent,
+    ChannelLayout, Depth, Error, Hz, InPort, InterleavedMut, MaxBlock, OutPort, Q, Root, RouteSpec,
+    SampleRate, Samples, Session, SessionEvent,
 };
+use tutti_nodes::testing::Osc;
 
 const RATE: f64 = 48_000.0;
 

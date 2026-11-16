@@ -30,9 +30,10 @@ use std::path::PathBuf;
 
 use tutti::midi::{Address, Message, MidiChannel, NoteNumber, TimedMidiEvent, U7, Ump, Voice1};
 use tutti::plugin::catalog::{CatalogConfig, PluginDb, PluginId, ScanPoll};
+use tutti::session::PoolEvent;
 use tutti::{
     Beat, Bounce, Catalog, Format, MaxBlock, Normalized, ParamId, Pcm, PluginEvent, PluginRef,
-    PoolEvent, PresetError, PresetKind, Range, Root, SampleRate, Samples, Session, SessionEvent,
+    PresetError, PresetKind, Range, Root, SampleRate, Samples, Session, SessionEvent,
 };
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -115,7 +116,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 4. Wire it: the plugin's outputs feed the root's channels. `node` is a
     //    `Key<PluginNode>`: ports come from it as from any node's key
-    //    (`node.out(0)`, `node.events_in()`), and with `modulation`
+    //    (`node.out(0)`, `node.events_in()`), and
     //    `node.param(id)` is the reference a route targets.
     session.graph().connect(node, Root)?;
 
