@@ -1,43 +1,87 @@
 #![doc = include_str!("../README.md")]
-//! Real-time-safe shared-memory primitives for the audio thread.
 //!
 //! ## What this is
 //!
-//! The structures the engine's audio callback touches, and the home of the
-//! engine's lock-free and `unsafe` runtime structures. It names one tutti crate, `tutti-types` (the units a
-//! [`Gauge`] reads); its other dependencies are `arc-lend`, `arrayvec` and `bytemuck` (and `loom`
-//! under `--cfg loom`).
+//! The structures the engine's audio callback touches, allocation-free on the
+//! audio path (`tests/no_alloc/rt_no_alloc.rs` gates it), and the home of the
+//! engine's lock-free and `unsafe` runtime structures. It names one tutti
+//! crate, `tutti-types` (the units a [`Gauge`] reads, and [`RequestBit`]'s range); its other dependencies are
+//! `arc-lend`, `arrayvec` and `bytemuck` (and `loom` under `--cfg loom`).
 //!
-//! - **`AudioThreadCell`** — interior mutability with a one-borrow-at-a-time
-//!   contract checked in every build, reached through `&self`.
-//! - **`RtVec`** — a capped collection through `&mut self`: refuses the write at the
-//!   cap rather than growing.
-//! - **`PosRing`** — frames a writer thread places ahead of the audio thread,
-//!   indexed by position (a disk stream's ring).
-//! - **`PackedAtomic`**, **`SeqWriter`/`SeqReader`**, **`RequestWord`**,
-//!   **`DirtySet`** — a value in one atomic word, a sequence lock, a request
-//!   bitset, and a sized set of dirty flags (an atomic bit per index) with no
-//!   capacity to overflow.
-//! - **`ring()`** — a bounded single-producer single-consumer queue of any
-//!   `Send` value, its full-ring policy chosen at construction and its losses counted by the ring.
-//! - **`RtScope`** — a per-thread "inside a block" marker that a `Drop` impl checks.
-//! - **`SplitMut`/`SplitRw`**, **`TaskGraph`**, **`JobGate`**, **`BlockWaits`** — the
-//!   parallel executor's claims, task list, job lending and wait settings.
-//! - **`with_no_denormals`** — runs a closure with subnormals flushed to zero and restores the mode after, unwinding included.
-//! - **`level_cell()`** — a peak and an energy the audio thread folds each block
+//! **Cells and collections**
+//!
+//! - [`AudioThreadCell`] — interior mutability through `&self` with a
+//!   one-borrow-at-a-time contract checked in every build (behind an `Arc` or
+//!   a COM object).
+//! - [`RtVec`] — a capped collection through `&mut self` that refuses the
+//!   write at the cap rather than growing, latching an overflow flag. An owner
+//!   that shares one behind an `Arc` puts it in an [`AudioThreadCell`].
+//! - [`PackedAtomic`] — a value of up to eight bytes in one atomic word, so a
+//!   reader never pairs one write's field with another's.
+//! - [`SeqWriter`] / [`SeqReader`] — a sequence lock for a `Pod` value one
+//!   writer overwrites in place and any thread copies whole.
+//! - [`level_cell()`] — a peak and an energy the audio thread folds each block
 //!   into and one reader takes whole since its last take (a level meter's lane).
-//! - **`Doorbell`** — wakes one parked thread from the audio thread (a futex wake only
-//!   if a sleeper is parked), with no wake-up lost between the sleeper's check and its park.
-//! - **`MainThreadMarker`** — proof that the holder is on the process's main thread, made only
-//!   where the OS says so (`!Send`, `!Sync`); what a plugin's main-thread entries take.
-//! - **`request_priority`** — asks the OS to raise the calling thread's priority and returns
-//!   what it granted (never real time on Linux), or the refusal.
-//! - **`spawn_named`** — starts a named, optionally prioritised control-side thread whose body
-//!   gets a `StopToken`; its `ThreadHandle` stops and joins on drop (or within a bound, `stop_within`) and reports a panic once.
-//! - **`sleep_until_ns`** — blocks a thread until an absolute `monotonic_ns` deadline, the
-//!   sleep of a thread that paces itself against deadlines.
-//! - **`ArcLend`/`Loan`/`Reader`** — the publish cell, re-exported from `arc-lend`:
-//!   a control thread publishes non-scalar state, the audio thread only borrows it.
+//! - [`gauge()`] / [`counter()`] — a reading a node writes and any thread reads:
+//!   a level that moves both ways ([`Gauge`]) or a count that only grows
+//!   ([`Counter`], the loss count of a [`ring()`]), each one word.
+//!
+//! **Queues and signals**
+//!
+//! - [`ring()`] — a bounded single-producer single-consumer queue of any `Send`
+//!   value, its full-ring policy ([`Overflow`]) chosen at construction and its
+//!   losses counted by the ring; values can be borrowed in place and a run of
+//!   them moves with one publish.
+//! - [`PosRing`] — frames a writer thread places ahead of the audio thread,
+//!   indexed by position (a disk stream's ring).
+//! - [`RequestWord`] — up to 32 kinds of request ([`RequestBit`]) raised from
+//!   any thread with one `fetch_or` and taken whole by a control thread.
+//! - [`DirtySet`] — a sized set of dirty flags, an atomic bit per index, with
+//!   no capacity to overflow.
+//! - [`FaultLatch`] — a flag a producer raises when it stops for good, read
+//!   before the ring so a failure never hides the frames pushed ahead of it.
+//! - [`drain_clock()`] — counts the drains the audio side begins, so the
+//!   control side can tell which of its writes a block has surely taken.
+//! - [`handoff()`] — one value that moves between a control thread and the
+//!   audio thread at a block boundary ([`Hand`] lends and recalls, [`Rt`]
+//!   trades).
+//! - [`Doorbell`] — wakes one parked thread from the audio thread (a futex
+//!   wake only if a sleeper is parked), with no wake-up lost between the
+//!   sleeper's check and its park.
+//! - [`RenderCount`] — the renders of one thing in flight, and a `quiescent`
+//!   check so a thread that cleared what they read frees only when none can
+//!   still read it.
+//! - [`ArcLend`] / [`Loan`] / [`Reader`] — the publish cell, re-exported from
+//!   `arc-lend`: a control thread publishes non-scalar state, the audio thread
+//!   only borrows it.
+//!
+//! **The parallel executor**
+//!
+//! - [`SplitMut`] / [`SplitRw`] — one slice borrowed by several threads, each
+//!   element or chunk claimed before use, so a borrow that would alias is
+//!   refused rather than made.
+//! - [`TaskGraph`] — a DAG of tasks run once per block by any number of
+//!   threads: self-resetting activation counters and a ready list.
+//! - [`JobGate`] — lends a borrowed job to a pool's helper threads for one call
+//!   and returns only when every helper has let go of it.
+//! - [`BlockWaits`] — how long the audio thread and a helper each wait inside a
+//!   parallel block before giving way.
+//!
+//! **Thread and OS**
+//!
+//! - [`RtScope`] — a per-thread "inside a block" marker that a `Drop` impl
+//!   checks ([`RtScope::check_outside`]).
+//! - [`with_no_denormals`] — runs a closure with subnormals flushed to zero and
+//!   restores the mode after, unwinding included.
+//! - [`MainThreadMarker`] — proof that the holder is on the process's main
+//!   thread, made only where the OS says so (`!Send`, `!Sync`).
+//! - [`request_priority`] — asks the OS to raise the calling thread's priority
+//!   and returns what it granted (never real time on Linux), or the refusal.
+//! - [`spawn_named`] — starts a named, optionally prioritised control-side
+//!   thread whose body gets a [`StopToken`]; its [`ThreadHandle`] stops and
+//!   joins on drop (or within a bound, `stop_within`) and reports a panic once.
+//! - [`monotonic_ns`] / [`sleep_until_ns`] — the OS clock, and a sleep until an
+//!   absolute deadline on it.
 //!
 //! **The root is the API.** Every item is re-exported at the root
 //! (`tutti_rt::RtVec`); the modules are private.
@@ -100,89 +144,6 @@
 #![deny(missing_docs)]
 #![deny(clippy::undocumented_unsafe_blocks, clippy::missing_safety_doc)]
 
-//! Real-time-safe shared-memory primitives for the audio thread.
-//!
-//! Interior mutability, fixed-capacity buffers, and the denormals flush: each
-//! is allocation-free on the audio path (`tests/no_alloc/rt_no_alloc.rs` gates it) and
-//! carries no engine dependency. The crate also holds the one thread-priority
-//! call, [`request_priority`], which says what the OS granted.
-//!
-//! # How the buffers relate
-//!
-//! There is one capped collection, [`RtVec`]: it answers "what happens at the
-//! cap?" — refuse the write, latch an overflow flag, never grow — with
-//! `&mut self` in and a borrowed `&[T]` out. An owner that holds the buffer
-//! behind an `Arc` (a CPAL callback's shared state, a COM object) puts the
-//! `RtVec` in an
-//! [`AudioThreadCell`] and reads it under that cell's borrow guard; it never
-//! lends a borrow into the storage out of a `&self` method, which would need
-//! an `UnsafeCell` and a single-thread contract the compiler cannot check.
-//!
-//! A scratch run whose length is chosen per block is a plain `Box<[T]>`
-//! sized off the audio thread and sliced at the use site, which states there
-//! what happens when a block asks for more than it holds.
-//!
-//! - [`AudioThreadCell`] — interior mutability with a "one borrow at a time"
-//!   contract, checked on every borrow in every build, reached through
-//!   `&self` (e.g. behind an `Arc` or a COM object).
-//! - [`RtVec`] — collect-then-lend through `&mut self`: a capped collection
-//!   that owns its storage and exposes it as `&[T]`. What a per-block pool
-//!   wants when its owner already has `&mut self`.
-//! - [`PosRing`] — frames a writer thread places ahead of the audio thread,
-//!   indexed by position rather than consumed in order (a disk stream's ring):
-//!   one [`PosWriter`] and one [`PosReader`], whose [`PosClaim`] reads any
-//!   position the window it took holds.
-//! - [`PackedAtomic`] — a value of up to eight bytes (a range's two `f32`
-//!   bounds) in one atomic word, so a reader never pairs one write's field
-//!   with another's.
-//! - [`SeqWriter`] / [`SeqReader`] — a `Pod` value one writer (the audio
-//!   thread, each block) overwrites in place and any thread copies whole: a
-//!   sequence lock, for a value whose writer may not allocate or free. The
-//!   writer is not `Clone`, so there is only one; a read that keeps losing
-//!   to writes says so ([`Contended`]) rather than spinning.
-//! - [`level_cell()`] — a peak and an energy the audio thread folds each block
-//!   into and one reader takes whole, since its last take: two slots and a
-//!   flip, so a block lands in one take with its peak and frames together.
-//! - [`gauge()`] / [`counter()`] — a reading a node writes and any thread reads: a
-//!   level that moves both ways ([`Gauge`]) or a count that only grows
-//!   ([`Counter`]), each one word, never reset by a read.
-//! - [`RenderCount`] — the renders of one thing in flight (an `enter` that
-//!   returns a [`RenderGuard`]), and a `quiescent` check for the thread that has
-//!   cleared what they read, so it frees only when none can still read it.
-//! - [`RequestWord`] — up to 32 kinds of request a callee raises from any
-//!   thread (one `fetch_or`) and a control thread takes whole.
-//! - [`ring()`] — a bounded single-producer single-consumer queue of any `Send` value, with the full-ring policy chosen at
-//!   construction ([`Overflow`]: refuse and count, or refuse and leave the count to the caller)
-//!   and the losses counted by the ring ([`RingWriter::take_lost`], [`RingWriter::lost`]); its
-//!   values can be borrowed in place, and a run of values moves with one publish. What the
-//!   engine's command, event and tap queues are.
-//! - [`drain_clock()`] — counts the drains the audio side begins, so the control
-//!   side can tell which of its writes a block has surely taken.
-//! - [`FaultLatch`] — a flag a producer raises when it stops for good, read
-//!   *before* the ring so a failure never hides the frames pushed ahead of it.
-//! - [`handoff()`] — one value that moves between a control thread and the
-//!   audio thread at a block boundary ([`Hand`] lends and recalls, [`Rt`]
-//!   trades between blocks): a plugin's Processor, lent to the graph and
-//!   recalled for a rate change.
-//! - [`Doorbell`] — wakes one parked thread from another (the audio thread
-//!   rings; a futex wake only if a sleeper is parked), with no wake-up lost
-//!   between its check and its park.
-//! - [`RtScope`] — a per-thread "inside a block" marker, which a `Drop`
-//!   impl checks ([`RtScope::check_outside`]) so a value that must be
-//!   freed on the control thread panics, in debug builds, when it is not.
-//! - [`SplitMut`] / [`SplitRw`] — one slice borrowed by several threads at
-//!   once, each element (or chunk) claimed before use, so a borrow that would
-//!   alias is refused rather than made: a parallel executor's buffers.
-//! - [`TaskGraph`] — a DAG of tasks run once per block by any number of
-//!   threads: self-resetting activation counters and a ready list.
-//! - [`JobGate`] — lends a borrowed job to a pool's helper threads for one
-//!   call and returns only when every helper has let go of it.
-//! - [`BlockWaits`] — how long the audio thread and a helper each wait
-//!   inside a parallel block before giving way (yielding its core, leaving
-//!   the block): a pool's setting.
-//! - [`with_no_denormals`] — runs a closure with subnormals flushed to zero, then
-//!   restores the FPU control register, on unwind too.
-
 mod cell;
 mod clock;
 mod denormals;
@@ -231,7 +192,7 @@ pub use pos_ring::{
 pub use priority::{PriorityOutcome, PriorityRequest, Scheduling, request_priority};
 pub use reclaim::Reclaim;
 pub use render_count::{RenderCount, RenderGuard};
-pub use request_word::{REQUEST_BITS, RequestBit, RequestBitOutOfRange, RequestBits, RequestWord};
+pub use request_word::{RequestBit, RequestBitOutOfRange, RequestBits, RequestWord};
 pub use ring::{Drain, Iter, Overflow, PushError, Returned, RingReader, RingWriter, ring};
 pub use scope::{RtScope, RtScopeGuard};
 pub use seq_cell::{Contended, SeqReader, SeqWriter};

@@ -541,7 +541,7 @@ jobs:
   miri:
     name: miri (tutti-rt)
     needs: changes
-    # `tutti-rt` depends on no other workspace crate, so the `loom` filter covers what miri reads.
+    # `tutti-rt` names `tutti-types` only for `ranged!`, so the `loom` filter covers what miri reads of it.
     if: needs.changes.outputs.loom == 'true' && needs.changes.outputs.full == 'true'
     runs-on: ubuntu-24.04
     # About 10 minutes on main; a hang fails here, not at GitHub's cap. Slow pure-arithmetic tests shrink under `cfg!(miri)`.

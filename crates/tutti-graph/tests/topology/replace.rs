@@ -143,7 +143,7 @@ struct DropProbe {
 
 impl Drop for DropProbe {
     fn drop(&mut self) {
-        let on_audio = RtScope::is_inside();
+        let on_audio = std::panic::catch_unwind(|| RtScope::check_outside("a node")).is_err();
         self.dropped
             .store(if on_audio { 2 } else { 1 }, Ordering::SeqCst);
     }

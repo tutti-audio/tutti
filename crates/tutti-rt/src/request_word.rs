@@ -34,7 +34,7 @@ mod sync {
 }
 
 /// Bits in a [`RequestWord`].
-pub const REQUEST_BITS: u8 = 32;
+pub(crate) const REQUEST_BITS: u8 = 32;
 
 tutti_types::ranged! {
     /// One kind of request: a position in a [`RequestWord`], `0..32`.

@@ -302,7 +302,7 @@ fn job_gate_run_and_help_are_allocation_free() {
     });
 }
 
-/// `RtScope::enter`, `is_inside`, `check_outside` and the guard's drop
+/// `RtScope::enter`, `check_outside` and the guard's drop
 /// neither allocate nor free.
 #[test]
 fn rt_scope_is_allocation_free() {
@@ -312,9 +312,7 @@ fn rt_scope_is_allocation_free() {
         for _ in 0..1_000 {
             RtScope::check_outside("a value");
             let guard = RtScope::enter();
-            assert!(RtScope::is_inside());
             drop(guard);
-            assert!(!RtScope::is_inside());
         }
     });
 }
