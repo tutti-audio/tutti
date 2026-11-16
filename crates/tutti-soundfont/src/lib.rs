@@ -160,8 +160,8 @@
 //! - No MIDI device I/O: that is `tutti-midi-hardware`; the message types are
 //!   `tutti-ump`'s.
 //!
-//! A file is decoded by `tutti-sf2` (`tutti_sf2::SoundFont`), which this crate does not re-export: one path for a type. The `tutti` crate re-exports it as `tutti::sf2`.
-//! The `tutti` crate re-exports this one as `tutti::soundfont` behind its
+//! A file is decoded by `tutti-sf2` (`tutti_sf2::SoundFont`), which this crate does not re-export: one path for a type.
+//! The `tutti` crate names this one as `tutti::soundfont` behind its
 //! `soundfont` feature.
 //!
 //! ## Features

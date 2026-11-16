@@ -26,12 +26,12 @@ fn skipped(dir: &str) -> bool {
     matches!(dir, "target" | ".git")
 }
 
-fn is_word(b: u8) -> bool {
+pub(super) fn is_word(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
 }
 
 /// `(::|\w+|[{},*])` tokens of a `use` body.
-fn tokens(body: &str) -> Vec<&str> {
+pub(super) fn tokens(body: &str) -> Vec<&str> {
     let b = body.as_bytes();
     let mut out = Vec::new();
     let mut i = 0;
@@ -114,7 +114,7 @@ fn tree(t: &[&str], k: &mut usize, pre: &[String], hit: &mut Vec<String>) {
 }
 
 /// `pub use` statements of lexed `code`, as `(start, end of the ';')`.
-fn pub_uses(code: &str) -> Vec<(usize, usize)> {
+pub(super) fn pub_uses(code: &str) -> Vec<(usize, usize)> {
     let b = code.as_bytes();
     let mut out = Vec::new();
     for (at, _) in code.match_indices("pub") {

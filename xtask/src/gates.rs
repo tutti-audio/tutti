@@ -41,6 +41,7 @@ mod spec_text;
 mod submodule_pins;
 mod test_paths;
 mod toml;
+mod umbrella;
 mod value_traits;
 mod vst3_sdk;
 
@@ -143,6 +144,8 @@ pub(crate) enum Gate {
     Buffers,
     /// A configured thing is built one way, bar the rows of the baseline.
     Building,
+    /// The `tutti` umbrella re-exports no crate whole and offers each item at one path.
+    Umbrella,
 }
 
 impl Gate {
@@ -170,6 +173,7 @@ impl Gate {
             Gate::Conformance => "gate check-conformance".to_owned(),
             Gate::Buffers => "gate check-buffers".to_owned(),
             Gate::Building => "gate check-building".to_owned(),
+            Gate::Umbrella => "gate check-umbrella".to_owned(),
         }
     }
 
@@ -198,6 +202,7 @@ impl Gate {
             Gate::DocIdents => doc_idents::check(&tree),
             Gate::PassiveTests => passive_tests::check(&tree),
             Gate::Comments => comments::check(&tree),
+            Gate::Umbrella => umbrella::check(&tree, umbrella::ALLOW),
             Gate::Buffers => buffers::check(&tree, buffers::MIN_SITES),
             Gate::Building => building::check(&tree, building::ALLOW, building::MIN_SITES),
             Gate::AllocBinaries => alloc_binaries::check(&tree, alloc_binaries::ALLOWED),

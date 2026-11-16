@@ -172,6 +172,11 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
         "tutti-session re-exports no crate whole",
     ),
     (
+        "check-umbrella",
+        "",
+        "tutti re-exports no crate whole and offers each item at one path",
+    ),
+    (
         "check-guards",
         "",
         "every plugin host callback runs under the panic guard",
@@ -553,6 +558,7 @@ impl Planner<'_> {
                 self.lines(&["cargo build --locked --release -p tutti-plugin-server --bin plugin-server"]);
             }
             "check-session" => self.out.push(Step::Gate(Gate::Session)),
+            "check-umbrella" => self.out.push(Step::Gate(Gate::Umbrella)),
             "check-guards" => self.out.push(Step::Gate(Gate::Guards)),
             "check-ffi" => self.out.push(Step::Gate(Gate::Ffi)),
             "check-errors" => self.out.push(Step::Gate(Gate::Errors)),
@@ -695,7 +701,7 @@ impl Planner<'_> {
                     "check-value-traits", "check-submodule-pins", "check-doc-refs",
                     "check-pointers", "check-comments", "check-platform-seam", "check-doc-idents",
                     "check-passive-tests", "check-alloc-binaries", "check-buffers",
-                    "check-building",
+                    "check-building", "check-umbrella",
                 ] {
                     self.dep(d)?;
                 }
@@ -771,7 +777,7 @@ const CHECK_FEATURES: &[&str] = &[
     r#"cargo clippy --locked -p tutti-cpal --features capture --all-targets -- -D warnings"#,
     r#"cargo clippy --locked -p tutti-session --features audio-io --all-targets -- -D warnings"#,
     r#"cargo clippy --locked -p tutti-session --features clap,export,modulation,midi-hardware,synth,soundfont,sampler,vst2,device,audio-io,serde --all-targets -- -D warnings"#,
-    r#"cargo clippy --locked -p tutti --features clap,export,modulation,sampler,dsp,midi-hardware,synth --all-targets -- -D warnings"#,
+    r#"cargo clippy --locked -p tutti --features clap,export,modulation,sampler,midi-hardware,synth --all-targets -- -D warnings"#,
     r#"cargo clippy --locked -p tutti --features audio-io --all-targets -- -D warnings"#,
     r#"cargo clippy --locked -p tutti --no-default-features --features io --all-targets -- -D warnings"#,
     r#"cargo clippy --locked -p tutti-export --lib -- -D warnings"#,
@@ -817,7 +823,7 @@ const TEST_FEATURES: &[&str] = &[
     r#"cargo nextest run --locked -p tutti-cpal --features capture"#,
     r#"cargo nextest run --locked -p tutti-session --features audio-io"#,
     r#"cargo nextest run --locked -p tutti-session --features clap,export,modulation,midi-hardware,synth,soundfont,sampler,vst2,device,audio-io,serde"#,
-    r#"cargo nextest run --locked -p tutti --features clap,export,modulation,sampler,dsp,midi-hardware,synth"#,
+    r#"cargo nextest run --locked -p tutti --features clap,export,modulation,sampler,midi-hardware,synth"#,
     r#"cargo nextest run --locked -p tutti --features audio-io"#,
     r#"cargo nextest run --locked -p tutti --no-default-features --features io"#,
     r#"cargo nextest run --locked -p tutti-session --features export,encode-flac,encode-aiff,encode-vorbis"#,

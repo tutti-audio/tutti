@@ -9,7 +9,7 @@
 //! offline export or a test never pulls one in.
 //!
 //! Use it directly when you assemble the engine yourself; the `tutti` facade
-//! re-exports it as `tutti::device` (feature `device`).
+//! names its `AudioHost` and `DeviceId` at the root (feature `device`).
 //!
 //! ## Quick start
 //!

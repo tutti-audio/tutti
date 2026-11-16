@@ -214,9 +214,7 @@
 //!
 //! None: `default = []`.
 //!
-//! The `tutti` crate re-exports this one as `tutti::measure` behind its `dsp`
-//! feature, which also turns on `tutti-dsp`. `tutti-export` uses it for loudness
-//! measurement.
+//! `tutti-export` uses it for loudness measurement.
 #![forbid(unsafe_code)]
 //!
 //! ## Items

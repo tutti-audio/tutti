@@ -1,13 +1,14 @@
-//! `FileOut` writes a `Format`, which `tutti::io` does not re-export: a build
-//! with `io` (or `audio-io`) and no format feature must still name one, and
-//! build a WAV sink from it.
+//! `FileOut` writes a `Format`: a build with `io` (or `audio-io`) and no format
+//! feature must still name one, and build a WAV sink from it. `FileOut` is
+//! `tutti-codec`'s, a dev-dependency of this crate.
 //!
 //! Compiled only with `io`.
 #![cfg(feature = "io")]
 
-use tutti::buffers::Sink;
-use tutti::codec::{FileOut, Format, Pcm, Spec};
-use tutti::types::{ChannelLayout, SampleRate};
+use tutti::codec::Spec;
+use tutti::types::Sink;
+use tutti::{ChannelLayout, SampleRate};
+use tutti_codec::{FileOut, Format, Pcm};
 
 #[test]
 fn io_reaches_a_wav_sink_without_a_format_feature() {
