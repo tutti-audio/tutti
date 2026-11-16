@@ -141,8 +141,8 @@ until it is un-parked. `vendor/` is third-party and never restyled.
   An application imports from the umbrella's **flat root**
   (`use tutti::{Session, SessionEvent, Root, Samples};`): `tutti` re-exports
   the app-facing items at its root by name, so a user never needs to know
-  which engine crate an item lives in; the per-crate modules (`tutti::graph`,
-  `tutti::session`, ...) stay for the deep, specialised API.
+  which engine crate an item lives in; the curated modules (`tutti::nodes`,
+  `tutti::session`, ...) list the rest by name, each item at one path.
 - **T17. Parameter order is consistent** (`M-PARAMETER-CONSISTENCY`): the same
   kinds of argument come in the same order across a crate (`(spec, target)`
   everywhere, never `(target, spec)` in one place).

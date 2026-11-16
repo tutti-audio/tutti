@@ -134,7 +134,7 @@ vendor/             third-party code we never edit
 
 ## Unit Types (MANDATORY)
 
-`tutti_types::value::units` defines the engine's measurement vocabulary. **Use
+`tutti_types` defines the engine's measurement vocabulary. **Use
 the unit newtype, never the bare float**, for any quantity one covers — in struct
 fields, function signatures, `Param<U>`, and return types alike.
 
@@ -700,9 +700,8 @@ comments and docs, and treat it as a bug when you find it:
   `tutti-cpal` would make the device layer depend on all of them and pull a
   device into the recorder and the offline path.)
   `crates/tutti/tests/no_logic.rs` enforces this by reading `lib.rs`, and
-  `cargo xtask check-paths` additionally requires every whole-crate
-  re-export there to be aliased (`pub use tutti_engine as engine`), so
-  `tutti::tutti_engine::…` is unspellable.
+  `cargo xtask check-umbrella` reads it too: no `pub use` re-exports a
+  crate whole, and no item is exported at two paths.
 
   `bevy-tutti` does **not** depend on `tutti`, deliberately: it would keep
   its direct edges anyway for their `bevy` features, ending with two edges to

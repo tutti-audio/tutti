@@ -2,7 +2,9 @@
 //!
 //! `src/lib.rs` must contain nothing but `pub use` and documentation. Logic
 //! that wires subsystems belongs in the crate that owns them, where
-//! every consumer gets it. Re-exporting other crates is fine.
+//! every consumer gets it. Re-exporting items of other crates is fine;
+//! `cargo xtask check-umbrella` holds that no crate is re-exported whole and
+//! no item sits at two paths.
 //!
 //! So the failure mode is specific and it is one `fn build()` away: someone
 //! adds a small convenience constructor here because it is the crate that can
@@ -85,36 +87,6 @@ fn the_facade_contains_no_code() {
         offenders
             .iter()
             .map(|(n, s)| format!("  line {n}: {s}"))
-            .collect::<Vec<_>>()
-            .join("\n")
-    );
-}
-
-/// **Every whole-crate re-export must be aliased.**
-///
-/// A bare `pub use tutti_engine;` would let a consumer write
-/// `tutti::tutti_engine::Engine`. Aliasing removes the spelling from the
-/// language rather than asking anyone to avoid it.
-#[test]
-fn every_crate_reexport_is_aliased() {
-    let bare: Vec<_> = code_lines()
-        .into_iter()
-        .filter(|(_, l)| {
-            l.starts_with("pub use tutti_")
-                && !l.contains(" as ")
-                // `pub use tutti_types::meter;` is a module re-export, not a
-                // crate one; it carries no `tutti_` segment into a consumer's
-                // path.
-                && !l.contains("::")
-        })
-        .collect();
-
-    assert!(
-        bare.is_empty(),
-        "a whole-crate re-export must be aliased (`as engine`, `as sampler`, …) \
-         so `tutti::tutti_engine::…` is unspellable. Found:\n{}",
-        bare.iter()
-            .map(|(n, l)| format!("  line {n}: {l}"))
             .collect::<Vec<_>>()
             .join("\n")
     );
