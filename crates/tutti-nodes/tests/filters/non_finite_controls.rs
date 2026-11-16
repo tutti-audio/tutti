@@ -278,6 +278,7 @@ fn svf_ladder_delay_moddelay_phaser_compressor_gate_hold_off_non_finite_controls
                     hold: Seconds::new(0.01),
                     release: Seconds::new(0.05),
                     range: Db::new(-80.0),
+                    ..GateControls::DEFAULT
                 },
             )
         },

@@ -360,6 +360,7 @@ fn a_keyed_node_and_a_split_are_blended_on_their_main_bus() {
                     hold: s(0.01),
                     release: s(0.05),
                     range: Db(-80.0),
+                    ..GateControls::DEFAULT
                 },
             )
         },

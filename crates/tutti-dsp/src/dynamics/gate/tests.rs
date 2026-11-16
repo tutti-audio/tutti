@@ -19,6 +19,7 @@ fn controls(threshold: f32, attack: f64, hold: f64, release: f64, range: f32) ->
         hold: Seconds(hold),
         release: Seconds(release),
         range: Db(range),
+        ..GateControls::DEFAULT
     }
 }
 

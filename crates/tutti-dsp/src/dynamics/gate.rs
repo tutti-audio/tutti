@@ -23,9 +23,10 @@
 //! gain only scales, so a silent signal is a silent output whatever the follower is doing).
 
 use tutti_buffers::{Float, Mono, Planes, PlanesMut, Sample};
-use tutti_types::{Amplitude, Db, SampleRate, Seconds};
+use tutti_types::{Amplitude, ChannelLayout, Db, Hz, Q, SampleRate, Seconds};
 
 use super::curves::{amplitude_to_db, gate_gain_at};
+use super::key_filter::{KeyFilter, KeyStage};
 use super::shared::{CHUNK, GAIN_GLIDE, key_levels};
 use crate::delay::finite_or;
 use crate::smoother::Smoother;
@@ -50,6 +51,11 @@ pub struct GateControls {
     /// effectively silent, a gentler value ducks, `0` is no gate at all). Above 0 reads
     /// as 0.
     pub range: Db,
+    /// The cutoff of the key filter: read only by a bank built with
+    /// [`key_filter`](GateBank::key_filter). Held in the SVF's range.
+    pub key_cutoff: Hz,
+    /// The Q of the key filter, read as `key_cutoff` is.
+    pub key_q: Q,
 }
 
 impl GateControls {
@@ -61,6 +67,8 @@ impl GateControls {
         hold: Seconds(0.0),
         release: Seconds(0.0),
         range: Db(0.0),
+        key_cutoff: KeyFilter::DEFAULT_CUTOFF,
+        key_q: KeyFilter::DEFAULT_Q,
     };
 }
 
@@ -147,6 +155,8 @@ pub struct GateBank {
     follower: f32,
     /// The frames of hold left.
     hold_counter: usize,
+    /// The filter on the key, if the bank has one.
+    key: Option<KeyStage>,
 }
 
 impl GateBank {
@@ -164,7 +174,19 @@ impl GateBank {
             rate,
             follower: 0.0,
             hold_counter: 0,
+            key: None,
         }
+    }
+
+    /// This bank with the detector hearing its key through `filter`, over `width` key
+    /// channels at the cutoff and Q [`aim`](Self::aim) gives it. [`KeyFilter::Off`] is no
+    /// filter. Allocates: build it on the control side.
+    #[must_use]
+    pub fn key_filter(mut self, filter: KeyFilter, width: ChannelLayout) -> Self {
+        self.key = filter
+            .response()
+            .map(|ty| KeyStage::new(ty, width, self.rate));
+        self
     }
 
     /// Back to silence: the gate closed and no hold left, and the range landed on its
@@ -173,17 +195,32 @@ impl GateBank {
         self.follower = 0.0;
         self.hold_counter = 0;
         self.range.settle();
+        if let Some(key) = &mut self.key {
+            key.reset();
+        }
     }
 
     /// Lands the range on its target now.
     pub fn settle(&mut self) {
         self.range.settle();
+        if let Some(key) = &mut self.key {
+            key.settle();
+        }
     }
 
     /// Aims at `controls`: the detector's figures land whole (the follower smooths them) and
-    /// the range glides over [`GAIN_GLIDE`]. No allocation.
+    /// the range glides over [`GAIN_GLIDE`]. The key filter, if any, glides to the cutoff and
+    /// Q over one grid period ([`COEFF_INTERVAL`](crate::COEFF_INTERVAL)); a non-finite one is
+    /// the default's. No allocation.
     pub fn aim(&mut self, controls: &GateControls) {
         self.design = Design::of(controls, self.rate);
+        if let Some(key) = &mut self.key {
+            let d = GateControls::DEFAULT;
+            key.aim(
+                Hz(finite_or(controls.key_cutoff.get(), d.key_cutoff.get())),
+                Q(finite_or(controls.key_q.get(), d.key_q.get())),
+            );
+        }
         self.range
             .aim_by(self.design.range.get(), Steps::Fixed(self.steps));
     }
@@ -192,7 +229,8 @@ impl GateBank {
     /// `key`.
     ///
     /// `key` is the signal the detector listens to: the side-chain bus, or `input` itself
-    /// for a gate on its own signal. Channel `c` of `input` feeds channel `c` of `output`;
+    /// for a gate on its own signal, through the key filter if the bank has one (the signal
+    /// it gains is never filtered). Channel `c` of `input` feeds channel `c` of `output`;
     /// a channel past the narrower of the two views is not touched, and the frames rendered
     /// are the fewest of the three views'. A NaN key sample reads as quiet and an infinite one
     /// as the largest finite level. Frame `i` reads the range at the glide's step
@@ -220,8 +258,11 @@ impl GateBank {
             let n = (frames - start).min(CHUNK);
             let end = start + n;
             let gains = &mut gains[..n];
-            // The key's level: the loudest channel at each frame.
-            key_levels(&key, start..end, gains);
+            // The key's level: the loudest channel at each frame, after the key filter.
+            match &mut self.key {
+                Some(stage) => stage.levels(&key, start..end, gains),
+                None => key_levels(&key, start..end, gains),
+            }
             for (k, g) in gains.iter_mut().enumerate() {
                 let i = start + k;
                 let level = *g;

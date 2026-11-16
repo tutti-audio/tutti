@@ -231,6 +231,21 @@ impl<K: Kernel> KernelNode<K> {
         }
     }
 
+    /// This node with its kernel made `kernel` of and its cells `set` of the set it has, at
+    /// the values they hold: the option of a node whose kernel or set depends on a build-time choice, applied
+    /// before the node is inserted. A control `set` adds starts at the base of its
+    /// [`assemble`](ControlSet::assemble). Allocates: control side.
+    #[must_use]
+    pub(crate) fn rebuilt(
+        self,
+        kernel: impl FnOnce(K) -> K,
+        set: impl FnOnce(K::Set) -> K::Set,
+    ) -> Self {
+        let held = self.params.held();
+        let set = set(self.params.set().clone());
+        Self::with_kernel(kernel(self.kernel), set, held)
+    }
+
     /// Back to silence: the grid counted from here, no ring-out owed, no input heard.
     fn clear(&mut self) {
         self.kernel.reset();
