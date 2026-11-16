@@ -1,9 +1,8 @@
 //! A `loom` model of [`FaultLatch`]: the shipped code, whose flag is loom's
 //! under the flag (see `src/fault_latch.rs`). The ring the items travel
-//! through is [`edit_ring`], itself a shipped, loom-checked structure, standing
-//! in for the [`ring`](tutti_rt::ring) a capture source's frames travel
-//! through; what is under test is the flag-before-ring order, which does not
-//! depend on which ring it is.
+//! through is the shipped [`ring`](tutti_rt::ring) (`Overflow::Refuse`), the one a
+//! capture source's frames travel through; what is under test is the
+//! flag-before-ring order.
 //!
 //! ```text
 //! RUSTFLAGS="--cfg loom" cargo test -p tutti-rt --release --test fault_latch_loom
