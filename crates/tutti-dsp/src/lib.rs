@@ -146,6 +146,9 @@
 //! - **Stereo and utility** (`polarity.rs`, `stereo.rs`): [`Polarity`], the channels a block
 //!   inverts; [`MidSide`] and [`WidthBank`] (the side scaled by a glided
 //!   [`StereoWidth`](tutti_types::StereoWidth)).
+//! - **Tremolo, auto-pan and ring modulation** (`tremolo.rs`, `ring_mod.rs`): [`Tremolo`] and
+//!   [`AutoPan`], an [`Oscillator`] scaling the level or placing it by [`pan_gains`];
+//!   [`RingModulator`], the input times a sine carrier.
 //! - **Small kernels**: [`cubic_hermite`], [`ShapeKind`], [`Smoother`].
 //!
 //! ## Import paths
@@ -171,6 +174,8 @@ mod oversample;
 mod pan;
 mod polarity;
 mod stereo;
+mod ring_mod;
+mod tremolo;
 mod waveshape;
 
 mod model;
@@ -236,6 +241,7 @@ pub use reverb::network::{
     LineModulation, MAX_CHANNELS, MAX_DENSE, MAX_LINES, MAX_STAGES, MAX_TAPS, Matrix, Network,
     NetworkCapacity, OutputMap, Stage, Tap, Taps, loop_gain, pre_delay_frames, rt60_from_gain,
 };
+pub use ring_mod::{RingModControls, RingModulator};
 pub use smoother::Smoother;
 pub use spatial::{
     HRTF_LATENCY, HRTF_STEP, HrirMeasurement, HrirSphere, HrtfBinaural, HrtfBinauralError,
@@ -247,5 +253,6 @@ pub use stft::error::StftError;
 pub use stft::geometry::StftGeometry;
 pub use stft::grid::{BinCount, BinIndex, FrameCount, FrameIndex, Grid};
 pub use stft::window::{CosineWindow, Window};
+pub use tremolo::{AutoPan, AutoPanControls, Tremolo, TremoloControls};
 pub use waveshape::{ShapeKind, WaveshaperBank, WaveshaperControls};
 pub use xorshift::Xorshift32;
