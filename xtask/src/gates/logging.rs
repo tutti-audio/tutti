@@ -6,8 +6,10 @@
 //!   counts).
 //! - **No `println!`, `eprintln!`, `print!`, `eprint!` or `dbg!`** in library code.
 //!   Exempt: `src/main.rs`, `src/bin/`, `build.rs`, a `tests`, `examples` or `benches`
-//!   directory, a `tests.rs` file and `#[cfg(test)]` items. Comments and string
-//!   literals are not code.
+//!   directory, a `tests.rs` file and test-only items (`#[cfg(test)]`, `#[cfg(all(..,
+//!   test, ..))]`). Only `src/main.rs` and `src/bin/**` count as a `main`: the other
+//!   modules of a binary crate are library code. Comments and string literals are not
+//!   code.
 //!
 //! A finding that is a row of [`ALLOW`], `(path, reason)`, is exempt: the path is the
 //! manifest (for a `log` dependency) or the source file (for a print). A row that
@@ -26,6 +28,9 @@ const SKIPPED_DIRS: &[&str] = &["target", ".git"];
 fn skipped(dir: &str) -> bool {
     SKIPPED_DIRS.contains(&dir)
 }
+
+/// The fewest manifests a real run finds; fewer means the walk is broken.
+pub(super) const MIN_MANIFESTS: usize = 20;
 
 const MACROS: &[&str] = &["println", "eprintln", "print", "eprint", "dbg"];
 
@@ -153,7 +158,7 @@ pub(super) fn check(tree: &dyn Tree, allow: &[(&str, &str)]) -> Report {
         }
     }
 
-    if manifests < 20 {
+    if manifests < MIN_MANIFESTS {
         bad.push(format!(
             "only {manifests} manifests found under crates/ and testing/; the scan is broken"
         ));
@@ -252,6 +257,11 @@ mod tests {
         }
         let nested = "fn f() { std::eprintln!(\"x\"); }\n";
         assert_eq!(findings(&[(LIB, nested)], &[]).len(), 2);
+        let path = "fn f() { std::println!(\"x\"); }\n";
+        let f = findings(&[(LIB, path)], &[]);
+        assert!(f[1].contains("`println!`"), "{f:?}");
+        let spaced = "fn f() { println !(\"x\"); }\n";
+        assert_eq!(findings(&[(LIB, spaced)], &[]).len(), 2);
     }
 
     #[test]
@@ -288,6 +298,14 @@ mod tests {
         assert!(f.is_empty(), "{f:?}");
         let after = format!("{src}pub fn g() {{ dbg!(1); }}\n");
         assert_eq!(findings(&[(LIB, &after)], &[]).len(), 2);
+    }
+
+    #[test]
+    fn a_cfg_test_fn_with_a_semicolon_in_its_signature_is_not_code() {
+        let src = "#[cfg(test)] fn f(x: [u8; 3]) { println!(); }\npub fn live() {}\n";
+        assert!(findings(&[(LIB, src)], &[]).is_empty());
+        let live = "#[cfg(not(test))] fn f(x: [u8; 3]) { println!(); }\n";
+        assert_eq!(findings(&[(LIB, live)], &[]).len(), 2);
     }
 
     #[test]
