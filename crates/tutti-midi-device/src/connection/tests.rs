@@ -114,6 +114,7 @@ fn discovery_words() -> [u32; 4] {
 // Configuration Request for MIDI 2.0 with JR both ways (§7.1.6.2: word 0
 // `0x02 << 8 | RXJR << 1 | TXJR`), then a Function Block Discovery for all
 // blocks, Info and Name (§7.1.7: block 0xFF, bits `n` and `i`).
+/// Spec: m2-104/7.1.1#1
 #[test]
 fn the_happy_path_reaches_midi2_with_jr() {
     let t0 = Instant::now();

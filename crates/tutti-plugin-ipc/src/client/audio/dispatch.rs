@@ -736,6 +736,23 @@ pub(super) fn handle(
             );
             reply.send(ok);
         }
+        Command::SetupSharedMemory {
+            shm_name,
+            layout,
+            reply,
+        } => {
+            ipc::send(stream, &HostMessage::SetupSharedMemory { shm_name, layout })?;
+            // The server's refusal (it could not open the slab) is an `Error`:
+            // no reason to wait out the deadline for a `Ready` that is not coming.
+            let ok = matches!(
+                ask(stream, inbox, owed, channels, lifecycle, |m| matches!(
+                    m,
+                    BridgeMessage::SharedMemoryReady | BridgeMessage::Error { .. }
+                ))?,
+                Some(BridgeMessage::SharedMemoryReady)
+            );
+            reply.send(ok);
+        }
         Command::GetCurrentPreset { reply } => {
             ipc::send(stream, &HostMessage::GetCurrentPreset)?;
             let value = match ask(stream, inbox, owed, channels, lifecycle, |m| {

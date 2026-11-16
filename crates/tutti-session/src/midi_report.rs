@@ -75,15 +75,6 @@ pub enum MidiReport {
         /// Events dropped so far, over every input.
         total: u64,
     },
-    /// The outputs dropped events (for want of an open output, or a sink that
-    /// refused them, or a tap with no room): the total so far, over every
-    /// output, reported when it rises, at most once per
-    /// [`MIDI_OUT_DROP_REPORT`](crate::MIDI_OUT_DROP_REPORT) of
-    /// [`PhaseCx::now`](crate::PhaseCx::now).
-    OutputDropped {
-        /// Events dropped so far.
-        total: u64,
-    },
     /// A [`Midi::load_file`](crate::Midi::load_file) ended: the file, or why
     /// not.
     FileLoaded {

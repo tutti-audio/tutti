@@ -9,12 +9,13 @@ use crate::common::{MF, Seen, blocks, note, play, tap};
 use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
 use tutti_midi_device::{DeviceInfo, EndpointId, PortDirection};
+use tutti_midi_hardware::UmpCapability;
 use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint, persistent_endpoint};
 use tutti_midi_runtime::MidiClipNode;
 use tutti_session::{
     Declared, EventInPort, HandleError, LoadError, MidiInputEntry, MidiPortError, MidiRouteRule,
-    Peer, PoolEvent, PoolState, PortCause, Presence, Resource, ResourceFact, Session, SessionEvent,
-    midi_input, midi_output,
+    OutputOptions, Peer, PoolEvent, PoolState, PortCause, Presence, Resource, ResourceFact,
+    Session, SessionEvent, midi_input, midi_output,
 };
 use tutti_types::{Beat, BeatDuration, SampleRate};
 use tutti_ump::{Address, CCNumber, KeyEvent, Message, MidiChannel, MidiGroup, U7, Voice2};
@@ -785,12 +786,12 @@ fn an_output_port_follows_its_device_through_an_unplug() {
     let events = s.update();
     assert_eq!(changed(&events, out.id()), [ResourceFact::Presence]);
     assert_eq!(out.presence(), Presence::Lost(PortCause::Unplugged));
-    let before = s.midi().out_drops();
+    let before = out.losses().refused;
     blocks(&s, 8);
     let _ = s.update();
     assert!(
-        s.midi().out_drops() > before,
-        "events with no device are dropped"
+        out.losses().refused > before,
+        "events with no device are counted refused by the port"
     );
 
     plug(&fake, 10, "Synth", PortDirection::Output);
@@ -825,4 +826,181 @@ fn a_ports_id_names_it_in_the_events() {
     let events = s.update();
     assert_eq!(changed(&events, a.id()), [ResourceFact::Presence]);
     assert!(changed(&events, b.id()).is_empty(), "only Keys went");
+}
+
+// --- Active Sensing ---
+
+const SYNTH: u32 = 10;
+
+/// Long against the thread's 270 ms interval, so a loaded machine cannot miss.
+const SECOND: std::time::Duration = std::time::Duration::from_secs(1);
+
+fn is_active_sensing(u: &tutti_ump::Ump) -> bool {
+    matches!(
+        u.decode(),
+        Ok(Message::System(_, tutti_ump::System::ActiveSensing))
+    )
+}
+
+/// A session with a MIDI 1.0 Protocol `Synth` output declared under `"synth"`
+/// with `options`.
+fn sensing_session(options: OutputOptions) -> (Session, FakeCounters) {
+    let (mut s, fake) = session();
+    let mut synth = persistent_endpoint(SYNTH, "Synth");
+    synth.capability = UmpCapability::midi1();
+    fake.plug(synth, PortDirection::Output);
+    let _ = s.update();
+    let device = device(&mut s, "Synth");
+    s.pool(vec![midi_output("synth", device).options(options)])
+        .expect("declares");
+    let _ = s.update();
+    (s, fake)
+}
+
+fn sent_by_the_port(fake: &FakeCounters) -> Vec<tutti_ump::Ump> {
+    fake.take_sent(EndpointId::from_raw(u64::from(SYNTH)))
+}
+
+/// **An idle output port with Active Sensing sends it before a receiver gives
+/// up, goes on sending it with no `update()` to drive it, and a re-declared
+/// node does not stop it.**
+#[test]
+fn an_idle_output_port_active_sensing_sends_it_with_no_update_to_drive_it() {
+    let (mut s, fake) = sensing_session(OutputOptions::new().active_sensing(true));
+    std::thread::sleep(SECOND);
+    let first = sent_by_the_port(&fake);
+    assert!(
+        !first.is_empty() && first.iter().all(is_active_sensing),
+        "{first:?}"
+    );
+    // The node's sources are replaced, and no update runs for most of a second.
+    let out = s.midi_output(&"synth").expect("loaded");
+    let (clip, _) = s.graph().add(MidiClipNode::new(note(
+        60,
+        MF,
+        Beat(0.0),
+        BeatDuration(1.0),
+    )));
+    s.graph()
+        .set_sources(EventInPort::new(out.node(), 0), [clip.events_out()])
+        .expect("the port's node takes events");
+    s.graph()
+        .set_sources(EventInPort::new(out.node(), 0), [])
+        .expect("and drops them");
+    std::thread::sleep(SECOND);
+    let later = sent_by_the_port(&fake);
+    assert!(
+        later.len() >= 2 && later.iter().all(is_active_sensing),
+        "and it goes on: {later:?}"
+    );
+}
+
+/// **An output port declared without the option never sends Active Sensing.**
+#[test]
+fn an_output_port_without_the_option_never_sends_active_sensing() {
+    let (_s, fake) = sensing_session(OutputOptions::new());
+    std::thread::sleep(SECOND);
+    assert!(sent_by_the_port(&fake).is_empty());
+}
+
+/// **Closing the port stops Active Sensing**: the entry released, nothing more
+/// reaches the device.
+#[test]
+fn closing_an_output_port_stops_its_active_sensing() {
+    let (mut s, fake) = sensing_session(OutputOptions::new().active_sensing(true));
+    std::thread::sleep(SECOND);
+    assert!(!sent_by_the_port(&fake).is_empty(), "precondition: it runs");
+    declare(&mut s, &[], &[]);
+    let _ = s.update();
+    let _ = sent_by_the_port(&fake);
+    std::thread::sleep(SECOND);
+    assert!(sent_by_the_port(&fake).is_empty());
+}
+
+/// **The option is part of the port's identity**: declaring the port again
+/// with it changed reopens the port (a new resource), and the new port sends.
+#[test]
+fn changing_the_active_sensing_option_reopens_the_port() {
+    let (mut s, fake) = sensing_session(OutputOptions::new());
+    let before = s.midi_output(&"synth").expect("loaded").id();
+    let same = device(&mut s, "Synth");
+    s.pool(vec![
+        midi_output("synth", same).options(OutputOptions::new()),
+    ])
+    .expect("declares");
+    let _ = s.update();
+    assert_eq!(
+        s.midi_output(&"synth").unwrap().id(),
+        before,
+        "the same options keep the port"
+    );
+    let device = device(&mut s, "Synth");
+    s.pool(vec![
+        midi_output("synth", device).options(OutputOptions::new().active_sensing(true)),
+    ])
+    .expect("declares");
+    let _ = s.update();
+    let _ = s.update();
+    assert_ne!(s.midi_output(&"synth").unwrap().id(), before, "reopened");
+    std::thread::sleep(SECOND);
+    assert!(sent_by_the_port(&fake).iter().any(is_active_sensing));
+}
+
+/// **A port whose device is in the MIDI 2.0 Protocol sends no Active Sensing**,
+/// the option set or not.
+#[test]
+fn a_midi2_protocol_output_port_sends_no_active_sensing() {
+    let (mut s, fake) = session();
+    plug(&fake, SYNTH, "Synth", PortDirection::Output);
+    let _ = s.update();
+    let device = device(&mut s, "Synth");
+    s.pool(vec![
+        midi_output("synth", device).options(OutputOptions::new().active_sensing(true)),
+    ])
+    .expect("declares");
+    let _ = s.update();
+    std::thread::sleep(SECOND);
+    assert!(sent_by_the_port(&fake).is_empty());
+}
+
+// --- Losses ---
+
+/// **A port counts what its device refused, in its own `losses()`.**
+#[test]
+fn an_output_port_counts_what_its_device_refused() {
+    let (backend, fake) = FakeBackend::build_with(vec![], vec![], 0);
+    let mut s = Session::builder()
+        .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareOptions::new())
+        .sample_rate(SampleRate::of(RATE))
+        .build()
+        .expect("builds");
+    plug(&fake, SYNTH, "Synth", PortDirection::Output);
+    let _ = s.update();
+    let synth = device(&mut s, "Synth");
+    declare(&mut s, &[], &[("synth", &synth)]);
+    let _ = s.update();
+    let out = s.midi_output(&"synth").expect("loaded");
+    s.midi_nodes().unwrap().clock_master.set_enabled(true);
+    roll(&s, 4_096);
+    let _ = s.update();
+    let losses = out.losses();
+    assert!(losses.refused > 0, "{losses:?}");
+    assert_eq!(losses.lost, 0);
+}
+
+/// **A port counts the events its node's tap had no room for**: a clock
+/// that outruns the tap between two updates.
+#[test]
+fn an_output_port_counts_the_events_its_tap_had_no_room_for() {
+    let (mut s, fake) = session();
+    plug(&fake, SYNTH, "Synth", PortDirection::Output);
+    let _ = s.update();
+    let synth = device(&mut s, "Synth");
+    declare(&mut s, &[], &[("synth", &synth)]);
+    let _ = s.update();
+    let out = s.midi_output(&"synth").expect("loaded");
+    s.midi_nodes().unwrap().clock_master.set_enabled(true);
+    roll(&s, 1_100_000);
+    let _ = s.update();
+    assert!(out.losses().lost > 0, "{:?}", out.losses());
 }
