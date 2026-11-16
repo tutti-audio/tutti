@@ -96,7 +96,7 @@ fn rig() -> Rig {
 }
 
 fn render(exec: &mut Executor) {
-    let mut out = vec![0.0f32; BLOCK];
+    let mut out = [0.0f32; BLOCK];
     exec.process(
         BLOCK,
         &TransportPosition::default(),
@@ -169,7 +169,7 @@ fn a_recall_is_answered_by_a_parked_node_without_allocating() {
     park(&mut r);
     assert!(r.hand.recall().is_none(), "the node holds it");
     assert_eq!(count(&r.returned), 0);
-    let mut out = vec![0.0f32; BLOCK];
+    let mut out = [0.0f32; BLOCK];
     assert_no_alloc::assert_no_alloc(|| {
         r.exec.process(
             BLOCK,
