@@ -105,7 +105,7 @@ struct Options {
     /// ([`input_opener`](Self::input_opener)).
     #[cfg(all(feature = "device", feature = "audio-io"))]
     input_opener: Option<Box<dyn crate::InputOpener>>,
-    render_worker_start: Option<crate::RenderWorkerStart>,
+    render_worker_start: Option<crate::graph::RenderWorkerStart>,
     /// The OS MIDI layer's options when it is on
     /// ([`midi_hardware`](Self::midi_hardware)); `None` is no OS MIDI layer.
     #[cfg(feature = "midi-hardware")]
@@ -162,9 +162,9 @@ impl Default for Options {
             #[cfg(feature = "midi")]
             midi_ports: tutti_midi_runtime::MidiInputPorts::FIRST_GROUP,
             #[cfg(feature = "modulation")]
-            unresolved_warning: crate::UNRESOLVED_WARNING,
+            unresolved_warning: crate::modulation::UNRESOLVED_WARNING,
             #[cfg(feature = "plugin")]
-            snapshot_interval: crate::SNAPSHOT_INTERVAL,
+            snapshot_interval: crate::plugin::SNAPSHOT_INTERVAL,
             #[cfg(feature = "plugin")]
             recovery: Some(crate::RecoveryPolicy::default()),
             #[cfg(feature = "plugin")]
@@ -667,7 +667,7 @@ impl<C: Clock> SessionBuilder<C> {
     /// documents.
     #[must_use]
     pub fn render_worker_start(mut self, hook: impl Fn(usize) + Send + Sync + 'static) -> Self {
-        self.opts.render_worker_start = Some(crate::RenderWorkerStart::new(hook));
+        self.opts.render_worker_start = Some(crate::graph::RenderWorkerStart::new(hook));
         self
     }
 
@@ -773,7 +773,7 @@ impl<C: Clock> SessionBuilder<C> {
     /// How long a modulation target may stay unresolved, measured on
     /// [`PhaseCx::now`](crate::PhaseCx::now), before it is logged and
     /// reported ([`SessionEvent::Modulation`](crate::SessionEvent::Modulation)).
-    /// Default [`UNRESOLVED_WARNING`](crate::UNRESOLVED_WARNING), 4 s.
+    /// Default 4 s.
     #[cfg(feature = "modulation")]
     #[must_use]
     pub fn unresolved_warning(mut self, after: std::time::Duration) -> Self {
@@ -784,7 +784,7 @@ impl<C: Clock> SessionBuilder<C> {
     /// How often a healthy hosted plugin's state is captured, measured on
     /// [`PhaseCx::now`](crate::PhaseCx::now)
     /// (a job on the session's spawner, [`spawn_with`](Self::spawn_with)).
-    /// Default [`SNAPSHOT_INTERVAL`](crate::SNAPSHOT_INTERVAL), 8 s.
+    /// Default 8 s.
     #[cfg(feature = "plugin")]
     #[must_use]
     pub fn snapshot_interval(mut self, every: std::time::Duration) -> Self {
