@@ -25,8 +25,12 @@ use crate::{Clock, Policy, Session};
 /// Groups the session hears
 /// ([`midi_groups`](crate::SessionBuilder::midi_groups)). The rest of the
 /// Endpoint is the session's: UMP 1.1, the MIDI 1.0 and MIDI 2.0 Protocols, JR
-/// Timestamps neither way, the Function Block static. A Stream Configuration
-/// Request is granted within that.
+/// Timestamps sent (a device output JR-stamps when its configuration has the
+/// device receiving them) and received only when the session's input timing is
+/// [`JitterReduction`](tutti_midi_hardware::InputTiming::JitterReduction), the
+/// Function Block static. The Protocol and JR Timestamps the Endpoint reports
+/// are the ones in force with the device, and a Stream Configuration Request is
+/// granted within what it declares and moves them, JR asked off included.
 ///
 /// A change applies in the next [`Session::update`](crate::Session::update):
 /// the MIDI-CI Devices of the old identity send Invalidate MUID for their MUIDs

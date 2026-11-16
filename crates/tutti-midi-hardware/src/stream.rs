@@ -78,8 +78,8 @@ use std::time::Instant;
 use tutti_graph::{Losses, Offset};
 use tutti_midi_device::ResourceStore;
 use tutti_midi_device::{
-    Action, Connection, Ending, Endpoint, EntropyError, IdentityInquiry, InquiryAction, Learned,
-    Reply,
+    Action, Capabilities, Connection, Ending, Endpoint, EntropyError, IdentityInquiry,
+    InquiryAction, Learned, Reply, Supports,
 };
 use tutti_midi_protocol::{Addressed, Read, Universal, read};
 use tutti_midi_runtime::Outgoing;
@@ -295,6 +295,17 @@ fn ask(endpoint: &mut Endpoint, filter: DiscoveryFilter, out: &mut Vec<Ump>) {
         }),
         out,
     );
+}
+
+/// A configuration seen from the other end of the link: the device's `rx_jr`
+/// is what the session sends, so it is the session Endpoint's `tx_jr`, and the
+/// reverse. The Protocol is the link's.
+const fn mirrored(config: StreamConfig) -> StreamConfig {
+    StreamConfig {
+        protocol: config.protocol,
+        rx_jr: config.tx_jr,
+        tx_jr: config.rx_jr,
+    }
 }
 
 /// The request that stops JR Timestamps a device sends the input did not ask
@@ -609,8 +620,10 @@ impl Negotiation {
     /// [`DeviceStream`]'s. The answering Endpoint reports it (and a change of
     /// it, once the session has told the device its configuration), and a
     /// request granted here moves it, so the output follows what the
-    /// Notification said. A request is granted within what the Endpoint
-    /// declares: both Protocols, JR Timestamps never. The session itself asks
+    /// Notification said, Protocol and JR Timestamps both (the device's TXJR is
+    /// the Endpoint's RXJR). A request is granted within what the Endpoint
+    /// declares ([`supports`](Self::supports)); JR Timestamps asked off are
+    /// turned off, and the input is then timed by arrival. The session itself asks
     /// only during its own negotiation, before the stream settles, and
     /// afterwards only to turn off JR Timestamps the input did not ask for,
     /// naming the Protocol in force; so answering a request starts none, and a
@@ -622,13 +635,9 @@ impl Negotiation {
         };
         let mut replies: Vec<Ump> = Vec::new();
         if let Run::Done { stream, .. } = &self.run {
-            let protocol = stream.endpoint.active().protocol;
-            if answering.endpoint.active().protocol != protocol {
-                answering.endpoint = answering.endpoint.with_active(StreamConfig {
-                    protocol,
-                    rx_jr: false,
-                    tx_jr: false,
-                });
+            let in_force = mirrored(stream.endpoint.active());
+            if answering.endpoint.active() != in_force {
+                answering.endpoint = answering.endpoint.with_active(in_force);
                 if answering.told {
                     ask(
                         &mut answering.endpoint,
@@ -691,12 +700,7 @@ impl Negotiation {
         let Run::Done { stream, listening } = &mut self.run else {
             return None;
         };
-        // The Endpoint's own view mirrored: what it receives, the device sends.
-        let config = StreamConfig {
-            protocol: active.protocol,
-            rx_jr: active.tx_jr,
-            tx_jr: active.rx_jr,
-        };
+        let config = mirrored(active);
         if stream.endpoint.active() == config {
             return None;
         }
@@ -705,6 +709,20 @@ impl Negotiation {
             connection.adopt(config);
         }
         Some(**stream)
+    }
+
+    /// What the answering Endpoint declares it supports: both Protocols; JR
+    /// Timestamps received when the input asks the device for them
+    /// ([`InputTiming::JitterReduction`]), so a peer's request can keep them on;
+    /// and JR Timestamps sent, since the session's output JR-stamps for a device
+    /// whose configuration has it receiving them.
+    fn supports(&self) -> Supports {
+        Supports::of(Capabilities {
+            midi1: true,
+            midi2: true,
+            rx_jr: matches!(self.timing, InputTiming::JitterReduction),
+            tx_jr: true,
+        })
     }
 
     /// Makes the answering Endpoint the one `presented` describes: built when
@@ -722,7 +740,7 @@ impl Negotiation {
             return None;
         }
         let was = self.answering.take();
-        let mut endpoint = Endpoint::local(now.groups)
+        let mut endpoint = Endpoint::local(self.supports(), now.groups)
             .with_identity(now.identity.device)
             .with_name(now.identity.name);
         if let Some(id) = now.identity.instance {
@@ -731,11 +749,7 @@ impl Negotiation {
         if let Some(was) = &was {
             endpoint = endpoint.with_active(was.endpoint.active());
         } else if let Run::Done { stream, .. } = &self.run {
-            endpoint = endpoint.with_active(StreamConfig {
-                protocol: stream.endpoint.active().protocol,
-                rx_jr: false,
-                tx_jr: false,
-            });
+            endpoint = endpoint.with_active(mirrored(stream.endpoint.active()));
         }
         let told = was.as_ref().is_some_and(|a| a.told);
         let announce = was.as_ref().map(|a| Announce {

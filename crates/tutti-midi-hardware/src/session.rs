@@ -598,7 +598,9 @@ impl MidiSession {
     /// Endpoint Discovery, Function Block Discovery and Stream Configuration
     /// Request are answered as the Endpoint it describes (M2-104 §7.1), one
     /// bidirectional Function Block over its Groups, UMP 1.1, the MIDI 1.0 and
-    /// MIDI 2.0 Protocols, JR Timestamps neither way. `None` presents nothing.
+    /// MIDI 2.0 Protocols, JR Timestamps sent (the output stamps for a device
+    /// that asks) and, when the session was opened with
+    /// [`InputTiming::JitterReduction`], received. `None` presents nothing.
     ///
     /// A session built by `tutti-session` has this set on every update from its
     /// `MidiPolicy`, which overwrites a call made here.

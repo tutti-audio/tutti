@@ -561,19 +561,13 @@ impl Endpoint {
     }
 
     /// The Endpoint a MIDI application presents for a port over `groups` from
-    /// Group 1: UMP version 1.1, the MIDI 1.0 and MIDI 2.0 Protocols, no JR
-    /// Timestamps either way, and one static, active, bidirectional Function
-    /// Block, number 0, over those Groups. Its identity and names are the
+    /// Group 1: UMP version 1.1, declaring `supports`, and one static, active,
+    /// bidirectional Function Block, number 0, over those Groups. Its identity and names are the
     /// application's ([`with_identity`](Self::with_identity),
     /// [`with_name`](Self::with_name)).
     #[must_use]
-    pub fn local(groups: GroupSpan) -> Self {
-        let mut endpoint = Self::new(Supports::of(Capabilities {
-            midi1: true,
-            midi2: true,
-            ..Capabilities::default()
-        }))
-        .with_static_function_blocks(true);
+    pub fn local(supports: Supports, groups: GroupSpan) -> Self {
+        let mut endpoint = Self::new(supports).with_static_function_blocks(true);
         if let (Some(id), Some(first)) = (FunctionBlockId::new(0), FirstGroup::new(0))
             && let Ok(block) =
                 FunctionBlock::builder(id, BlockDirection::Bidirectional, first, groups).build()

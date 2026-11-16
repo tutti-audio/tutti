@@ -14,10 +14,18 @@ const ASKING: UmpVersion = UmpVersion { major: 1, minor: 1 };
 
 /// A UMP Endpoint wire, settled, that presents `who` to its device.
 fn presenting(who: Option<crate::Presented>) -> Wire {
-    let mut wire = session_over(
+    presenting_timed(who, InputTiming::Arrival)
+}
+
+/// As [`presenting`], with inputs timed by `timing`: under
+/// [`InputTiming::JitterReduction`] the device (which offers JR both ways) is
+/// asked to send JR Timestamps and settles with them on.
+fn presenting_timed(who: Option<crate::Presented>, timing: InputTiming) -> Wire {
+    let mut wire = session_over_timing(
         UmpCapability::midi2(),
         PortDirection::Duplex,
         offering_both(),
+        timing,
     );
     wire.session.present(who);
     wire.open();
@@ -77,7 +85,8 @@ fn answered(wire: &mut Wire, stream: Stream, ms: u64) -> Vec<Stream> {
 
 /// M2-104 §7.1.2: an Endpoint Discovery asking for the endpoint info is
 /// answered with an Endpoint Info Notification: UMP 1.1, both Protocols, JR
-/// Timestamps neither way, the Function Blocks static and one. The Device
+/// Timestamps sent but not received (arrival timing), the Function Blocks
+/// static and one. The Device
 /// Identity, the Endpoint Name and the Stream Configuration the filter asks
 /// for follow, in the order of §7.1.1.
 /// Spec: m2-104/7.1.2#1
@@ -98,7 +107,7 @@ fn a_peers_endpoint_discovery_is_answered_with_the_presented_endpoint() {
     assert!(info.static_function_blocks);
     assert_eq!(info.function_blocks.count().map(|c| c.get()), Some(1));
     assert!(info.midi1 && info.midi2);
-    assert!(!info.rx_jr && !info.tx_jr);
+    assert!(!info.rx_jr && info.tx_jr);
     assert_eq!(*who, identity());
     assert_eq!(&name[..7], b"Session");
     assert_eq!(
@@ -181,8 +190,12 @@ fn a_stream_configuration_request_is_granted_within_what_the_endpoint_declares()
     let sent = answered(&mut wire, request(Protocol::Midi2, true, true), 200);
     assert_eq!(
         sent,
-        [notification(Protocol::Midi2, false)],
-        "JR Timestamps are neither received nor sent"
+        [Stream::StreamConfigurationNotification(StreamConfig {
+            protocol: Protocol::Midi2,
+            rx_jr: false,
+            tx_jr: true,
+        })],
+        "JR Timestamps are sent, and not received under arrival timing"
     );
 
     let sent = answered(&mut wire, request(Protocol::Midi1, false, false), 300);
@@ -353,8 +366,16 @@ fn the_request_to_stop_jr_keeps_the_protocol_a_peers_request_chose() {
     let sent = stream_sent(&wire);
     assert_eq!(
         sent,
-        [request(Protocol::Midi1, false, false)],
-        "one request, to stop JR, in the Protocol in force"
+        [
+            request(Protocol::Midi1, false, false),
+            // The Endpoint receives what the device sends, until it stops.
+            Stream::StreamConfigurationNotification(StreamConfig {
+                protocol: Protocol::Midi1,
+                rx_jr: true,
+                tx_jr: false,
+            }),
+        ],
+        "one request, to stop JR, in the Protocol in force, and the JR in force told"
     );
 }
 
@@ -397,4 +418,95 @@ fn a_change_of_the_groups_announces_the_function_block() {
         sent.iter().any(|s| matches!(s, Stream::EndpointInfo(_))),
         "{sent:?}"
     );
+}
+
+fn jr_wire() -> Wire {
+    let wire = presenting_timed(Some(presented(identity())), InputTiming::JitterReduction);
+    let config = wire.session.stream(&wire.id).unwrap().config();
+    assert!(config.tx_jr, "the device sends JR Timestamps to the input");
+    wire
+}
+
+/// M2-104 §7.1.6.3: the Stream Configuration Notification reports the
+/// Timestamps in force. Under JR timing the device sends them to the session,
+/// so the Endpoint receives them (RXJR), and says so, in the Notification and
+/// in the Endpoint Info it declares.
+#[test]
+fn under_jitter_reduction_the_notification_says_the_session_receives_jr() {
+    let mut wire = jr_wire();
+    let sent = answered(&mut wire, ask_everything(), 100);
+    let notification = sent.iter().find_map(|s| match s {
+        Stream::StreamConfigurationNotification(config) => Some(*config),
+        _ => None,
+    });
+    assert_eq!(
+        notification,
+        Some(StreamConfig {
+            protocol: Protocol::Midi2,
+            rx_jr: true,
+            tx_jr: false,
+        }),
+        "{sent:?}"
+    );
+    assert!(
+        sent.iter()
+            .any(|s| matches!(s, Stream::EndpointInfo(info) if info.rx_jr && info.tx_jr)),
+        "{sent:?}"
+    );
+}
+
+/// A request that keeps receiving JR on is granted with it on, and the input
+/// still reads the device's JR Timestamps; one that asks it off is honoured
+/// (§7.1.6.1 step 3: JR off is always possible), the device is no longer asked
+/// and the input is timed by arrival, with the Notification saying so.
+#[test]
+fn a_request_for_jr_on_keeps_the_input_on_jr_and_one_for_off_turns_it_off() {
+    let mut wire = jr_wire();
+    let sent = answered(&mut wire, request(Protocol::Midi2, true, false), 100);
+    assert_eq!(sent, [notification(Protocol::Midi2, true)]);
+    let config = wire.session.stream(&wire.id).unwrap().config();
+    assert!(config.tx_jr && config.protocol == Protocol::Midi2);
+
+    let sent = answered(&mut wire, request(Protocol::Midi2, false, false), 200);
+    assert_eq!(sent, [notification(Protocol::Midi2, false)]);
+    let config = wire.session.stream(&wire.id).unwrap().config();
+    assert!(!config.tx_jr, "the stream agrees with the Notification");
+}
+
+/// With arrival timing the session does not receive JR Timestamps: a request to
+/// receive them is granted with them off, and the stream agrees.
+#[test]
+fn under_arrival_timing_a_request_to_receive_jr_is_granted_with_it_off() {
+    let mut wire = presenting(Some(presented(identity())));
+    let sent = answered(&mut wire, request(Protocol::Midi2, true, false), 100);
+    assert_eq!(sent, [notification(Protocol::Midi2, false)]);
+    let config = wire.session.stream(&wire.id).unwrap().config();
+    assert!(!config.tx_jr && !config.rx_jr);
+}
+
+/// A peer that asks the session to send JR Timestamps (the Endpoint's TXJR) is
+/// granted: the Notification says so, the stream's RXJR is on, and the output
+/// then carries a JR Clock it is handed.
+#[test]
+fn a_request_for_the_session_to_send_jr_is_granted_and_the_output_stamps() {
+    let mut wire = presenting(Some(presented(identity())));
+    wire.connect_output();
+    let clock = Ump::from(Message::Utility(tutti_ump::Utility::JrClock(7)));
+    let note = midi::note_on(MidiChannel::FIRST, 60, 0xFFFF);
+    let events = [(Offset::ZERO, clock), (Offset::ZERO, note)];
+    wire.send(&events);
+    assert_eq!(received(&wire), [note], "no JR before the grant");
+
+    let sent = answered(&mut wire, request(Protocol::Midi2, false, true), 100);
+    assert_eq!(
+        sent,
+        [Stream::StreamConfigurationNotification(StreamConfig {
+            protocol: Protocol::Midi2,
+            rx_jr: false,
+            tx_jr: true,
+        })]
+    );
+    assert!(wire.session.stream(&wire.id).unwrap().config().rx_jr);
+    wire.send(&events);
+    assert_eq!(received(&wire), [clock, note], "JR after the grant");
 }

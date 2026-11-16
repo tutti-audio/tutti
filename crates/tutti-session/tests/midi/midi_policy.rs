@@ -48,9 +48,14 @@ fn policy(model: u8, name: &str) -> MidiPolicy {
 
 /// A session over a fake OS with one duplex UMP device, "Wire", connected.
 fn wired(last_group: u8) -> (Session, FakeCounters) {
+    wired_with(last_group, MidiHardwareOptions::new())
+}
+
+/// As [`wired`], with the session opened with `options`.
+fn wired_with(last_group: u8, options: MidiHardwareOptions) -> (Session, FakeCounters) {
     let (backend, fake) = FakeBackend::build_with(vec![], vec![], usize::MAX);
     let mut s = Session::builder()
-        .midi_hardware_over(backend, MidiHardwareOptions::new())
+        .midi_hardware_over(backend, options)
         .midi_groups(MidiGroup::of(last_group))
         .sample_rate(SampleRate::of(48_000.0))
         .build()
@@ -134,7 +139,8 @@ impl Clock {
         let mut peer = Endpoint::new(Supports::of(Capabilities {
             midi1: true,
             midi2: true,
-            ..Capabilities::default()
+            rx_jr: true,
+            tx_jr: true,
         }));
         let mut sent_ci = Vec::new();
         for _ in 0..ms {
@@ -234,7 +240,7 @@ fn a_peers_endpoint_discovery_is_answered_only_once_the_policy_names_an_identity
         "the Protocol the negotiation with the device settled on"
     );
     assert_eq!(info.function_blocks.count().map(|c| c.get()), Some(1));
-    assert!(info.midi1 && info.midi2 && !info.rx_jr && !info.tx_jr);
+    assert!(info.midi1 && info.midi2 && !info.rx_jr && info.tx_jr);
     assert_eq!(*who, device(2));
     assert_eq!(&name[..6], b"My App");
 
@@ -257,7 +263,7 @@ fn a_peers_endpoint_discovery_is_answered_only_once_the_policy_names_an_identity
 }
 
 /// M2-104 §7.1.6.1 step 3: a Stream Configuration Request is granted within
-/// the capabilities the Endpoint declared (both Protocols, JR neither way),
+/// the capabilities the Endpoint declared (both Protocols, JR sent and, under arrival timing, not received),
 /// and the session, as a discoverer of the same device, sends no request back.
 #[test]
 fn a_stream_configuration_request_is_granted_within_the_declared_capabilities() {
@@ -280,7 +286,7 @@ fn a_stream_configuration_request_is_granted_within_the_declared_capabilities() 
         [Stream::StreamConfigurationNotification(StreamConfig {
             protocol: Protocol::Midi2,
             rx_jr: false,
-            tx_jr: false,
+            tx_jr: true,
         })]
     );
     let sent = clock.say(&mut s, &fake, asked(Protocol::Midi1));
@@ -289,7 +295,7 @@ fn a_stream_configuration_request_is_granted_within_the_declared_capabilities() 
         [Stream::StreamConfigurationNotification(StreamConfig {
             protocol: Protocol::Midi1,
             rx_jr: false,
-            tx_jr: false,
+            tx_jr: true,
         })]
     );
 }
@@ -426,4 +432,31 @@ fn a_granted_request_moves_the_sessions_output_to_the_protocol_asked() {
         .map(|u| u.message_type())
         .collect();
     assert_eq!(notes, [2], "the note on, as MIDI 1.0");
+}
+
+/// M2-104 §7.1.6.3: under JR timing the device sends JR Timestamps to the
+/// session, so the Notification the session sends reports that it receives them.
+#[test]
+fn under_jitter_reduction_the_endpoint_reports_that_it_receives_jr() {
+    let (mut s, fake) = wired_with(
+        0,
+        MidiHardwareOptions::new().input_timing(tutti_midi_hardware::InputTiming::JitterReduction),
+    );
+    s.policy::<MidiPolicy>().set(policy(2, "My App")).unwrap();
+    let mut clock = Clock::new();
+    clock.run(&mut s, &fake, 50);
+    let sent = streams(&clock.say(&mut s, &fake, ask_everything()));
+    let config = sent.iter().find_map(|s| match s {
+        Stream::StreamConfigurationNotification(c) => Some(*c),
+        _ => None,
+    });
+    assert_eq!(
+        config,
+        Some(StreamConfig {
+            protocol: Protocol::Midi2,
+            rx_jr: true,
+            tx_jr: false,
+        }),
+        "{sent:?}"
+    );
 }
