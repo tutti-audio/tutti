@@ -25,7 +25,7 @@ pub enum FoldEnd {
 #[non_exhaustive]
 pub enum FoldError {
     /// A width is zero channels ([`BufferError::ZeroWidth`]) or does not fit a
-    /// channel layout ([`BufferError::TooWide`]).
+    /// channel layout ([`BufferError::Layout`], carrying a [`LayoutError`](tutti_types::LayoutError)).
     #[error(transparent)]
     Buffer(#[from] BufferError),
     /// Source channel `channel` (speaker `speaker`) has no place in the
@@ -762,7 +762,7 @@ impl<F: Float> Fold<F> {
     /// # Errors
     ///
     /// [`FoldError::Buffer`] with [`BufferError::ZeroWidth`] for no channels or
-    /// an empty source and [`BufferError::TooWide`] for more than `u16::MAX`
+    /// an empty source and [`BufferError::Layout`] for more than `u16::MAX`
     /// channels, and [`FoldError::NoSuchChannel`] for a channel at or past
     /// `src`'s width.
     pub fn select(src: ChannelLayout, channels: &[usize]) -> Result<Self, FoldError> {
@@ -770,12 +770,7 @@ impl<F: Float> Fold<F> {
             return Err(BufferError::ZeroWidth.into());
         }
         // A list is a destination width, which `narrow` later assumes fits.
-        if u16::try_from(channels.len()).is_err() {
-            return Err(BufferError::TooWide {
-                channels: channels.len(),
-            }
-            .into());
-        }
+        ChannelLayout::try_from(channels.len()).map_err(BufferError::from)?;
         let rows = channels
             .iter()
             .map(|&channel| {

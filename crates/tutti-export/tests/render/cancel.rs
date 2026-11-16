@@ -131,7 +131,7 @@ fn run_many(
                 config.file_target(path, None)
             } else {
                 FileTarget::new(path, second_format(), ChannelLayout::STEREO)
-                    .with_resample(config.resample)
+                    .resample(config.resample)
             };
             let spec = normalize.map(|n| {
                 if i == 0 {
@@ -140,7 +140,7 @@ fn run_many(
                     NormalizeSpec::from_output(n, 0)
                 }
             });
-            Output::master(target.with_normalize(spec))
+            Output::master(target.normalize(spec))
         })
         .collect();
     let outcome = render(

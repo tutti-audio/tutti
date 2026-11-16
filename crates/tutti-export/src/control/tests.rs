@@ -170,7 +170,7 @@ fn preparing_reports_steps_in_the_band_the_render_leaves() {
     let streaming = [Output::master(BufferTarget::new(ChannelLayout::STEREO))];
     let normalized = [Output::master(
         FileTarget::new("n.wav", Format::Wav(Pcm::Int16), ChannelLayout::STEREO)
-            .with_normalize(Some(NormalizeSpec::own(Normalize::peak(Db(-1.0))))),
+            .normalize(Some(NormalizeSpec::own(Normalize::peak(Db(-1.0))))),
     )];
     for (outputs, steps, end) in [
         (&streaming, [(2u32, 0.025f32), (4, 0.05)], 0.05f32),

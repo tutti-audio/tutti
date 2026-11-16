@@ -3452,10 +3452,8 @@ impl Graph {
             None => {
                 if let Some(placed) = &placed {
                     let outputs = self.outputs();
-                    let width = ChannelLayout::try_from(outputs).map_err(|_| {
-                        tutti_buffers::FoldError::from(tutti_buffers::BufferError::TooWide {
-                            channels: outputs,
-                        })
+                    let width = ChannelLayout::try_from(outputs).map_err(|e| {
+                        tutti_buffers::FoldError::from(tutti_buffers::BufferError::from(e))
                     })?;
                     tutti_graph::fold_to_topology(
                         &tutti_types::ChannelTopology::assumed(width),
