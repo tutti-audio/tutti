@@ -15,7 +15,7 @@ use tutti_types::MaxBlock;
 use tutti_graph::{ForkMode, GraphBuilder, Prepare, Renderer};
 use tutti_types::{ChannelLayout, SampleRate, Samples};
 
-use crate::handles::PluginClient;
+use crate::PluginClient;
 use tutti_fixtures::machine_lock;
 use tutti_plugin_ipc::BridgeConfig;
 use tutti_plugin_types::Timeouts;

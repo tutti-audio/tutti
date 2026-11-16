@@ -240,7 +240,7 @@ impl ModDelayBank {
     #[must_use]
     pub fn new(layout: &ModDelayLayout, rate: SampleRate) -> Self {
         let cap = layout.max_delay().frames(rate);
-        let cap_span = SampleSpan::from_samples(Samples::new(cap));
+        let cap_span = SampleSpan::from_samples(cap);
         let base = SampleSpan::from_seconds(layout.sweep.base(), rate)
             .unwrap_or(SampleSpan::ZERO)
             .min(cap_span);

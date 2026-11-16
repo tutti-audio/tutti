@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use tutti_fixtures::main_thread;
 
 use tutti_plugin::BridgeConfig;
-use tutti_plugin::handles::PluginClient;
+use tutti_plugin::PluginClient;
 use tutti_plugin_contract::spec::{self, Mode, Param};
 use tutti_plugin_contract::{
     Active, BLOCK, Clap, Format, RATE, Render, Transcript, Vst3, Vst3Cpp, bundle_of, clap_path,

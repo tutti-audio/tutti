@@ -35,7 +35,7 @@ use tutti_graph::{
     Editor, ForkError, ForkFaultKind, ForkMode, ForkTarget, IntoNode, Prepare, Renderer,
 };
 use tutti_graph::{OutPort, Source};
-use tutti_plugin::handles::PluginClient;
+use tutti_plugin::PluginClient;
 use tutti_plugin::{BridgeConfig, PluginRenderFault, Timeouts};
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::PluginForkError;

@@ -37,7 +37,7 @@ use tutti_graph::NodeKey;
 use tutti_graph::contract::Latent;
 use tutti_graph::{GraphBuilder, Prepare, Renderer, Unforkable};
 use tutti_plugin::BridgeConfig;
-use tutti_plugin::handles::{Bound, PluginClient};
+use tutti_plugin::{Bound, PluginClient};
 use tutti_plugin_host::{PluginControls, PluginHandle};
 use tutti_types::{ChannelLayout, Latency, SampleRate, Samples};
 

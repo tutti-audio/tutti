@@ -54,7 +54,7 @@ use crate::graph::Graph;
 /// or two for its node's commit, and a plugin's for its values' read; one
 /// still waiting after this long is likely never to resolve (a key no node
 /// is ever bound to).
-pub const UNRESOLVED_WARNING: Duration = Duration::from_secs(4);
+pub(crate) const UNRESOLVED_WARNING: Duration = Duration::from_secs(4);
 
 /// One modulatable parameter of a node in the session's graph.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]

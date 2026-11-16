@@ -31,6 +31,12 @@ fn lock() -> std::sync::MutexGuard<'static, ()> {
     AU_LOCK.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// The proof that this thread is the process main thread: the target is
+/// `harness = false`, so `main` runs every case there.
+fn on_main() -> tutti_plugin_types::MainThreadMarker {
+    tutti_plugin_types::MainThreadMarker::new().expect("the harness-less runner is the main thread")
+}
+
 const RATE: tutti_types::SampleRate = tutti_types::SampleRate::SR_48K;
 const BLOCK: u32 = 512;
 
@@ -52,7 +58,7 @@ unsafe fn open_headless(au: &Au) -> tutti_au_host::Result<AuEditor> {
     // what this crate hardcoded before the parameter existed, kept here so
     // these tests exercise the same request they always did.
     let preferred = dpi::LogicalSize::new(800, 600);
-    Ok(AuEditor::open(au.unit(), None, preferred)?)
+    Ok(AuEditor::open(on_main(), au.unit(), None, preferred)?)
 }
 
 /// Instantiate and initialize `unit`, panicking with its label on failure.
@@ -210,7 +216,7 @@ fn open_size_close_is_idempotent_and_reports_zero_after() {
         let mut editor = unsafe { open_headless(&au) }
             .unwrap_or_else(|e| panic!("{}: open failed: {e:?}", unit.label));
 
-        let size = editor.editor_size();
+        let size = editor.editor_size(on_main());
         assert_eq!(
             (size.width, size.height),
             (*want_w, *want_h),
@@ -222,8 +228,8 @@ fn open_size_close_is_idempotent_and_reports_zero_after() {
             size.height
         );
 
-        editor.close();
-        let after = editor.editor_size();
+        editor.close(on_main());
+        let after = editor.editor_size(on_main());
         assert_eq!(
             (after.width, after.height),
             (0, 0),
@@ -237,9 +243,9 @@ fn open_size_close_is_idempotent_and_reports_zero_after() {
         // Reaching the assertion below at all is the idempotence result: a
         // second `release` on the already-released view would have crashed the
         // process here rather than failed a test.
-        editor.close();
-        editor.close();
-        let after_repeat = editor.editor_size();
+        editor.close(on_main());
+        editor.close(on_main());
+        let after_repeat = editor.editor_size(on_main());
         assert_eq!(
             (after_repeat.width, after_repeat.height),
             (0, 0),
@@ -280,7 +286,7 @@ fn view_ptr_is_non_null_only_while_open() {
             unit.label
         );
 
-        editor.close();
+        editor.close(on_main());
         assert!(
             editor.view_ptr().is_null(),
             "{}: view_ptr() still points at the released NSView after close — \
@@ -317,7 +323,7 @@ fn repeated_open_close_cycles_stay_balanced() {
             let mut editor = unsafe { open_headless(&au) }.unwrap_or_else(|e| {
                 panic!("{}: open failed on cycle {cycle}: {e:?}", unit.label)
             });
-            let size = editor.editor_size();
+            let size = editor.editor_size(on_main());
             assert_eq!(
                 (size.width, size.height),
                 (*want_w, *want_h),
@@ -375,7 +381,7 @@ fn repeated_open_close_cycles_stay_balanced() {
             // retain is balanced by the `release` below.
             unsafe { retain(view) };
             let before = unsafe { retain_count(view) };
-            editor.close();
+            editor.close(on_main());
             let after = unsafe { retain_count(view) };
             if before < DRIFT_ATTRIBUTABLE_BELOW {
                 assert_eq!(
@@ -450,6 +456,37 @@ fn an_au_without_a_cocoa_view_is_refused_cleanly() {
 }
 
 gui_test! {
+/// An editor dropped off the main thread gives up its view without touching
+/// AppKit: exactly one view is counted in `leaked_editor_views`, and the unit
+/// is still usable (a new editor opens on it) afterwards.
+fn dropping_off_the_main_thread_leaks_and_counts_the_view() {
+    let _g = lock();
+    let (unit, _, _) = &WITH_COCOA_VIEW[0];
+    let au = ready(unit);
+    // SAFETY: `au` is live and initialized, and this runs on the main thread.
+    let editor = unsafe { open_headless(&au) }
+        .unwrap_or_else(|e| panic!("{}: open failed: {e:?}", unit.label));
+
+    let before = tutti_au_ffi::leaked_editor_views();
+    std::thread::spawn(move || drop(editor))
+        .join()
+        .expect("the drop off the main thread must not panic");
+    assert_eq!(
+        tutti_au_ffi::leaked_editor_views(),
+        before + 1,
+        "{}: a drop off the main thread leaks its view and counts it once",
+        unit.label
+    );
+
+    // SAFETY: as above.
+    let mut again = unsafe { open_headless(&au) }
+        .unwrap_or_else(|e| panic!("{}: reopen after the leak failed: {e:?}", unit.label));
+    assert!(!again.view_ptr().is_null());
+    again.close(on_main());
+}
+}
+
+gui_test! {
 /// Dropping an open editor without calling `close()` must be safe.
 ///
 /// `Drop` routes through `close`, which is the single teardown path. A host
@@ -480,7 +517,7 @@ fn dropping_without_closing_is_safe() {
             // SAFETY: as above.
             let mut editor = unsafe { open_headless(&au) }
                 .unwrap_or_else(|e| panic!("{}: open failed: {e:?}", unit.label));
-            editor.close();
+            editor.close(on_main());
             assert!(editor.view_ptr().is_null());
         }
 
@@ -522,18 +559,18 @@ fn two_editors_on_one_unit_are_independent() {
     );
 
     // Closing one must leave the other entirely untouched.
-    let second_size = second.editor_size();
-    first.close();
+    let second_size = second.editor_size(on_main());
+    first.close(on_main());
     assert!(first.view_ptr().is_null());
     assert!(
         !second.view_ptr().is_null(),
         "closing the first editor released the second's view"
     );
     assert_eq!(
-        second.editor_size(),
+        second.editor_size(on_main()),
         second_size,
         "closing the first editor changed the second's reported geometry"
     );
-    second.close();
+    second.close(on_main());
 }
 }

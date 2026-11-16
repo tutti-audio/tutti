@@ -1,4 +1,4 @@
-use tutti_types::{Amplitude, BusTopology, Gain, SampleRate, Seconds};
+use tutti_types::{Amplitude, BusTopology, Gain, SampleRate, Samples, Seconds};
 
 use super::*;
 use crate::MaxDelayError;
@@ -47,15 +47,15 @@ fn a_max_delay_keeps_the_range_checked_shape() {
 #[test]
 fn a_max_delay_is_a_line_of_the_exact_ceiling_of_its_frames() {
     let max = MaxDelay::of(Seconds(0.1));
-    assert_eq!(max.frames(SampleRate::SR_48K), 4800);
-    assert_eq!(max.frames(SampleRate::SR_44K1), 4410);
+    assert_eq!(max.frames(SampleRate::SR_48K), Samples(4800));
+    assert_eq!(max.frames(SampleRate::SR_44K1), Samples(4410));
     assert_eq!(
         MaxDelay::of(MaxDelay::CAP).frames(SampleRate::SR_192K),
-        1_920_000
+        Samples(1_920_000)
     );
     assert_eq!(
         max.frames(SampleRate::of(1e15)),
-        crate::delay::max_delay::MAX_FRAMES
+        Samples(crate::delay::max_delay::MAX_FRAMES)
     );
 }
 

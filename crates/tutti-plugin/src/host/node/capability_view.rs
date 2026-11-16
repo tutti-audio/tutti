@@ -13,7 +13,7 @@
 //!
 //! ```no_run
 //! # use tutti_transport::ProjectMeter;
-//! # use tutti_plugin::handles::PluginClient;
+//! # use tutti_plugin::PluginClient;
 //! # fn ex(client: &mut PluginClient, meter: ProjectMeter) {
 //! // `None` for a plugin that declined transport, so the install is not
 //! // reachable at all rather than reachable and inert.

@@ -15,22 +15,11 @@ use objc2_foundation::NSRect;
 use std::os::raw::c_void;
 
 use dpi::LogicalSize;
-use tutti_plugin_types::WindowHandle;
+use tutti_plugin_types::{MainThreadMarker, WindowHandle};
 
 use crate::error::Result;
 use crate::property::{CocoaUi, Element, Scope};
 use crate::unit::Unit;
-
-unsafe extern "C" {
-    fn pthread_main_np() -> std::os::raw::c_int;
-}
-
-/// Whether the caller is AppKit's main thread, by the OS's own answer (no
-/// marking needed, so it cannot be fooled by marking the wrong thread).
-fn on_main_thread() -> bool {
-    // SAFETY: `pthread_main_np` takes no arguments and reads no memory.
-    unsafe { pthread_main_np() != 0 }
-}
 
 static LEAKED_VIEWS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
@@ -43,7 +32,10 @@ pub fn leaked_editor_views() -> usize {
 ///
 /// The editor view is released when the handle is dropped. The handle is
 /// `Send` because the retained `NSView` pointer is self-contained, but all
-/// AppKit calls must still originate from the main thread.
+/// AppKit calls must still originate from the main thread: every entry takes
+/// the [`MainThreadMarker`] that proves it, and `Drop`, which cannot take one,
+/// asks `MainThreadMarker::new` and leaks the view off the main thread, counted
+/// in [`leaked_editor_views`].
 pub struct AuEditor {
     view: *mut AnyObject,
     unit: Unit,
@@ -55,10 +47,10 @@ impl std::fmt::Debug for AuEditor {
     }
 }
 
-// SAFETY: the view is touched only on the main thread: `open` refuses off it,
-// and `close` (so `Drop`) leaks the view instead of releasing it off it, so a
-// moved value never makes an AppKit call from another thread. The `Unit` it
-// holds is `Send`.
+// SAFETY: the view is touched only on the main thread: `open`, `close` and
+// `editor_size` take the marker, and `Drop` leaks the view instead of
+// releasing it off the main thread, so a moved value never makes an AppKit
+// call from another thread. The `Unit` it holds is `Send`.
 unsafe impl Send for AuEditor {}
 
 impl AuEditor {
@@ -78,26 +70,23 @@ impl AuEditor {
     /// its pointer is a live `NSView`.
     ///
     /// # Errors
-    /// `Error::Invalid` off the OS main thread (`pthread_main_np`), or if the AU
-    /// advertises no Cocoa view or the view factory fails to load.
+    /// If the AU advertises no Cocoa view or the view factory fails to load.
     pub fn open(
+        _main: MainThreadMarker,
         unit: &Unit,
         parent: Option<WindowHandle>,
         preferred: LogicalSize<u32>,
     ) -> Result<Self> {
-        if !on_main_thread() {
-            return Err(crate::Error::Invalid(
-                "an AU editor opens only on the main thread".into(),
-            ));
-        }
         let view = cocoa::create_view(unit, preferred)?;
 
         if let Some(handle) = parent {
             let parent_obj = handle.as_ptr() as *mut AnyObject;
             if !parent_obj.is_null() {
-                // SAFETY: `WindowHandle` carries its constructor's claim that
-                // the parent is a live NSView; `view` is the live view just
-                // created, and `addSubview:` retains it.
+                // SAFETY: the `MainThreadMarker` parameter proves this is the
+                // main thread, where AppKit may be called. `WindowHandle`
+                // carries its constructor's claim that the parent is a live
+                // NSView; `view` is the live view just created, and
+                // `addSubview:` retains it.
                 let _: () = unsafe { msg_send![parent_obj, addSubview: view] };
             }
         }
@@ -118,16 +107,13 @@ impl AuEditor {
     }
 
     /// Removes the view from its superview (if any) and releases it. Later calls
-    /// are no-ops. AppKit is touched only on the main thread: off it the view is
-    /// leaked instead. This is the single teardown path; `Drop` routes through it.
-    pub fn close(&mut self) {
+    /// are no-ops. This is the teardown on the main thread; `Drop` takes it
+    /// there and leaks the view elsewhere.
+    pub fn close(&mut self, _main: MainThreadMarker) {
         if !self.view.is_null() {
-            if !on_main_thread() {
-                self.leak_view();
-                return;
-            }
-            // SAFETY: `view` is the live +1 view this editor owns (non-null,
-            // checked); it leaves its superview and the reference is released
+            // SAFETY: the `MainThreadMarker` parameter proves this is the main
+            // thread, where AppKit may be called. `view` is the live +1 view
+            // this editor owns (non-null, checked); it leaves its superview and the reference is released
             // once, then the pointer is nulled below.
             unsafe {
                 let _: () = msg_send![self.view, removeFromSuperview];
@@ -139,11 +125,13 @@ impl AuEditor {
 
     /// Editor view frame size in points, rounded to whole points. Returns a
     /// zero size after [`close`](Self::close).
-    pub fn editor_size(&self) -> LogicalSize<u32> {
-        if self.view.is_null() || !on_main_thread() {
+    pub fn editor_size(&self, _main: MainThreadMarker) -> LogicalSize<u32> {
+        if self.view.is_null() {
             return LogicalSize::new(0, 0);
         }
-        // SAFETY: `view` is the live view this editor owns (non-null, checked).
+        // SAFETY: the `MainThreadMarker` parameter proves this is the main
+        // thread, where AppKit may be called. `view` is the live view this
+        // editor owns (non-null, checked).
         unsafe {
             let frame: NSRect = msg_send![self.view, frame];
             LogicalSize::new(frame.size.width, frame.size.height).cast()
@@ -177,9 +165,13 @@ impl AuEditor {
 
 impl Drop for AuEditor {
     fn drop(&mut self) {
-        // Single teardown path. Off the main thread `close` leaks the view rather
-        // than call AppKit from the wrong thread.
-        self.close();
+        // Off the main thread the view is leaked rather than sent to AppKit from
+        // the wrong thread.
+        match MainThreadMarker::new() {
+            Some(main) => self.close(main),
+            None if !self.view.is_null() => self.leak_view(),
+            None => {}
+        }
     }
 }
 
@@ -202,33 +194,5 @@ mod tests {
         let unit = Unit::new(comp, &handle).expect("instantiate");
         unit.initialize().expect("initialize");
         let _has = AuEditor::has_editor(&unit);
-    }
-
-    /// `open` off the main thread is refused, whatever thread was "marked".
-    #[test]
-    fn open_off_the_main_thread_is_refused() {
-        let desc = coreaudio_sys::AudioComponentDescription {
-            componentType: coreaudio_sys::kAudioUnitType_Effect,
-            componentSubType: u32::from_be_bytes(*b"dely"),
-            componentManufacturer: u32::from_be_bytes(*b"appl"),
-            componentFlags: 0,
-            componentFlagsMask: 0,
-        };
-        let comp = ComponentRef::first_matching(&desc).expect("AUDelay should be present");
-        let (_work, handle) = tutti_plugin_types::MainWork::new();
-        let unit = Unit::new(comp, &handle).expect("instantiate");
-        // The unit comes back, so it is dropped here, on its home thread, and disposed.
-        let (refused, unit) = std::thread::spawn(move || {
-            let size = LogicalSize::new(100, 100);
-            let refused = match AuEditor::open(&unit, None, size) {
-                Err(crate::Error::Invalid(why)) => why.contains("main thread"),
-                _ => false,
-            };
-            (refused, unit)
-        })
-        .join()
-        .expect("thread");
-        drop(unit);
-        assert!(refused);
     }
 }
