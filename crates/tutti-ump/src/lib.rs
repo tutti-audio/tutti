@@ -130,9 +130,9 @@ pub use message::{
     BlockSelect, ChordBass, ChordName, ChordPitch, Data128, DeviceIdentity, Direction,
     DiscoveryFilter, EndpointInfoNotification, Flex, FlexAddress, FlexTextKind, FlexTimeSignature,
     Form, FunctionBlockInfo, FunctionBlocks, KeySignature, Letter, Message, Metronome, Midi1Port,
-    MixedDataHeader, PerNoteManagement, Protocol, RegisteredPerNoteController, Stream,
-    StreamConfig, Sysex7Packet, Sysex8Packet, SysexStatus, System, UiHint, UmpVersion, Unknown,
-    Utility, Voice1, Voice2,
+    MixedDataHeader, NotASoftwareRevision, PerNoteManagement, Protocol,
+    RegisteredPerNoteController, SoftwareRevision, Stream, StreamConfig, Sysex7Packet,
+    Sysex8Packet, SysexStatus, System, UiHint, UmpVersion, Unknown, Utility, Voice1, Voice2,
 };
 pub use messages::{Join, Span, Spans, spans, spans_joined};
 pub use midi_channel::MidiChannel;

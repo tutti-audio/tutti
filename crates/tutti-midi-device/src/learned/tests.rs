@@ -1,4 +1,4 @@
-use tutti_ump::{DeviceIdentity, ManufacturerId, U7};
+use tutti_ump::{DeviceIdentity, ManufacturerId, SoftwareRevision, U7};
 
 use super::*;
 
@@ -7,7 +7,7 @@ fn identity(model: u8) -> DeviceIdentity {
         manufacturer: ManufacturerId::of(0x0042),
         family: [1, 0].map(U7::of),
         model: [model, 0].map(U7::of),
-        revision: [1, 2, 3, 4].map(U7::of),
+        revision: SoftwareRevision::from([1, 2, 3, 4].map(U7::of)),
     }
 }
 
