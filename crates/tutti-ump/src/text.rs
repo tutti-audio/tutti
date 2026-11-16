@@ -39,6 +39,14 @@ pub struct TextPackets<'a, const W: usize> {
     started: bool,
 }
 
+impl<'a, const W: usize> TextPackets<'a, W> {
+    /// The packets of `rest`, which is what is left of a text once `started`
+    /// says whether its first packet is out.
+    pub(crate) const fn resume(rest: &'a [u8], started: bool) -> Self {
+        Self { rest, started }
+    }
+}
+
 impl<const W: usize> Iterator for TextPackets<'_, W> {
     type Item = (Form, [u8; W]);
 
