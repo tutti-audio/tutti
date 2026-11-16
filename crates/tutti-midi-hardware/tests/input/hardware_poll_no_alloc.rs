@@ -30,7 +30,7 @@ use tutti_graph::{
     TapEvent, TransportPosition,
 };
 use tutti_midi_hardware::{HardwareMidiInputs, InputProducerHandle};
-use tutti_midi_runtime::{InputInlets, MidiIngestNode};
+use tutti_midi_runtime::{InputInlets, InputWriters, MidiIngestNode};
 use tutti_types::{Frame, SampleRate, Samples};
 use tutti_ump::{Message, MidiChannel, Ump, Utility};
 
@@ -183,8 +183,13 @@ fn hardware_input_is_allocation_free() {
 #[test]
 fn hardware_input_over_capacity_is_allocation_free() {
     let inputs = inputs(64);
+    let mut readers = Vec::new();
     let (mut ports, inlets): (Vec<InputProducerHandle>, Vec<EventInletNode>) = (0..4)
-        .map(|i| inputs.open_input_port(format!("Input {i}")))
+        .map(|i| {
+            let (writers, input) = InputWriters::new();
+            readers.push(input);
+            inputs.open_input_port_with(format!("Input {i}"), writers.split().0)
+        })
         .unzip();
     let mut rig = Rig::new(&inputs, inlets);
     rig.run(512);
@@ -198,7 +203,10 @@ fn hardware_input_over_capacity_is_allocation_free() {
             rig.run(512);
         }
     });
-    assert!(inputs.losses().lost > 0, "the rings were full");
+    assert!(
+        readers.iter().all(|input| input.lost.get() > 0),
+        "the rings were full"
+    );
 }
 
 /// A block size sweep, since the inlet resolves each event against the block's

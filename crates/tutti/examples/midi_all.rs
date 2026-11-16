@@ -18,12 +18,11 @@
 //! [`MidiInput`](tutti::midi::MidiInput) lists), which needs a peer device.
 
 use tutti::midi::{
-    self, AddedInstrument, Message, MidiChannel, MidiFile, MidiGroup, MidiHardwareOptions,
-    MidiRouteRule, NoteNumber, NoteVelocity, TakePlacement, Tick, TicksPerQuarterNote, Track, U7,
-    Voice1,
+    self, AddedInstrument, FileEvent, Message, MidiChannel, MidiFile, MidiGroup,
+    MidiHardwareOptions, MidiRouteRule, MpeMode, MpeZoneConfig, MpeZones, NoteNumber, NoteVelocity,
+    PitchBendSensitivity, SmfDivision, SmfFormat, TakePlacement, Tick, TicksPerQuarterNote, Track,
+    U7, Voice1,
 };
-use tutti::midi_file::{FileEvent, SmfDivision, SmfFormat};
-use tutti::midi_protocol::{MpeMode, MpeZoneConfig, MpeZones, PitchBendSensitivity};
 use tutti::polysynth::{PolySynth, SynthConfig};
 use tutti::{
     Beat, ChannelLayout, Error, EventCapacity, Frame, InterleavedMut, MaxBlock, SampleRate,

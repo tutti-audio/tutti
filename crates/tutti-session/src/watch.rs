@@ -405,7 +405,7 @@ impl DeviceWatch {
 /// How long a listing of the output devices may wait before the session
 /// reports it slow ([`DeviceEvent::OutputsListSlow`]): a healthy host
 /// answers in milliseconds, and one that has not in this long is likely stuck.
-pub const LISTING_WARNING: Duration = Duration::from_secs(5);
+pub(crate) const LISTING_WARNING: Duration = Duration::from_secs(5);
 
 /// A [`DeviceListing`] being waited for: the policy around the thread. The
 /// time is a value, as in [`Follow::step`].

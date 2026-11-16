@@ -153,7 +153,7 @@ fn an_update_with_no_edit_publishes_nothing() {
 #[test]
 fn the_latency_fold_and_the_compiled_plan_agree() {
     fn figures(s: &DetachedSession) -> (Vec<Samples>, Samples) {
-        let folded = s.graph_ref().latency_plan();
+        let folded = s.graph_ref().testing().latency_plan();
         let planned = s
             .graph_ref()
             .testing()

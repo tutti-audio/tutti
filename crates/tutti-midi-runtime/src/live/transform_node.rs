@@ -26,14 +26,13 @@
 //! no state of the notes: an offline render starts its clip from the top.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use tutti_graph::{
     Cost, Cx, Event, EventKind, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Losses,
     Node, NodeParts, Offset, Prepare, Shape, Status, UmpAt, note_off_room,
 };
 use tutti_midi_protocol::{MpeMode, Translator};
-use tutti_rt::{ArcLend, Reader};
+use tutti_rt::{ArcLend, Counter, CounterWriter, Reader, counter};
 use tutti_ump::MidiGroup;
 
 use super::ingest_node::{MIDI_INPUT_EVENT_CAPACITY, Staging};
@@ -71,14 +70,17 @@ pub struct MpeTransformNode {
     active: u16,
     /// The Groups that were sent the mode in force, one bit each.
     told: u16,
-    dropped: Arc<AtomicU64>,
+    /// Translated events a block had no room for.
+    dropped: CounterWriter<u64>,
+    /// The reading end of `dropped`, given to the controls.
+    dropped_reader: Counter<u64>,
 }
 
 impl std::fmt::Debug for MpeTransformNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MpeTransformNode")
             .field("mode", &self.mode)
-            .field("dropped", &self.dropped)
+            .field("dropped", &self.dropped_reader)
             .finish_non_exhaustive()
     }
 }
@@ -102,6 +104,7 @@ impl MpeTransformNode {
     #[must_use]
     pub fn new(mode: MpeMode) -> Self {
         let cell = Arc::new(ArcLend::new(mode));
+        let (dropped, dropped_reader) = counter();
         Self {
             translator: Translator::default(),
             mpe: MpeIngest::new(mode),
@@ -111,7 +114,8 @@ impl MpeTransformNode {
             capacity: MIDI_INPUT_EVENT_CAPACITY,
             active: 0,
             told: 0,
-            dropped: Arc::new(AtomicU64::new(0)),
+            dropped,
+            dropped_reader,
         }
     }
 }
@@ -122,7 +126,7 @@ pub struct MpeTransformControls {
     /// What the node reads; the controls publish to it and read it back with
     /// `ArcLend::current`.
     request: Arc<ArcLend<MpeMode>>,
-    dropped: Arc<AtomicU64>,
+    dropped: Counter<u64>,
 }
 
 impl MpeTransformControls {
@@ -147,7 +151,7 @@ impl MpeTransformControls {
     /// drops whole rather than cut partway.
     #[must_use]
     pub fn losses(&self) -> Losses {
-        Losses::refused(self.dropped.load(Ordering::Relaxed))
+        Losses::refused(self.dropped.get())
     }
 }
 
@@ -218,7 +222,7 @@ impl Node for MpeTransformNode {
         }
         let Staging { kept, dropped, .. } = staging;
         if dropped > 0 {
-            self.dropped.fetch_add(dropped, Ordering::Relaxed);
+            self.dropped.add(dropped);
             // The executor's too, so an export watching its count sees it.
             io.count_lost(dropped);
         }
@@ -259,7 +263,7 @@ impl IntoNode for MpeTransformNode {
         let request = Arc::clone(self.request.cell());
         let controls = MpeTransformControls {
             request: Arc::clone(&request),
-            dropped: Arc::clone(&self.dropped),
+            dropped: self.dropped_reader.clone(),
         };
         NodeParts {
             node: Box::new(self),

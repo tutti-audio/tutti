@@ -95,6 +95,8 @@ jobs:
       - run: cargo xtask check-submodule-pins
       # No Bevy crate in `tutti-session`'s closure with every feature on, and no whole-crate re-export.
       - run: cargo xtask check-session
+      # The umbrella re-exports no crate whole and offers each item at one path.
+      - run: cargo xtask check-umbrella
       - run: cargo xtask check-guards
       - run: cargo xtask check-ffi
       - run: cargo xtask check-errors
@@ -224,6 +226,23 @@ jobs:
       # AU alone: the one-format loop in `clippy` runs on Linux, where the AU row is empty. `--lib` because the
       # server's dev-dependency `tutti-vst3-host` builds the VST3 SDK, which this job does not check out.
       - run: cargo clippy --locked -p tutti-plugin-server --no-default-features --features au --lib -- -D warnings
+      # Rustdoc over what only macOS compiles, in the merge queue, so a broken link fails before it reaches main;
+      # `rustdoc` documents the rest of the workspace on Linux.
+      # `tutti-vst3-ffi` needs the VST3 SDK, which this job does not check out, so its macOS view code is the one
+      # piece left out.
+      - run: >-
+          cargo doc --locked --no-deps -p tutti-au-ffi -p tutti-au-host -p tutti-coremidi-ffi -p tutti-midi-hardware
+          -p tutti-plugin-types -p tutti-plugin-ipc-ffi -p tutti-clap-ffi -p tutti-rt
+        env:
+          RUSTDOCFLAGS: -D warnings --document-private-items
+      - run: cargo doc --locked --no-deps -p tutti-plugin --features au --lib
+        env:
+          RUSTDOCFLAGS: -D warnings --document-private-items
+      - run: >-
+          cargo doc --locked --no-deps -p tutti-plugin-server -p tutti-plugin-probe --no-default-features
+          --features tutti-plugin-server/clap,tutti-plugin-server/au,tutti-plugin-probe/clap,tutti-plugin-probe/au --lib
+        env:
+          RUSTDOCFLAGS: -D warnings --document-private-items
 
   # Not a required check: it finds out whether the shared plugin loads on a Windows runner.
   contract-windows:
@@ -272,7 +291,7 @@ jobs:
           cargo clippy --locked -p tutti-cpal --features capture --all-targets -- -D warnings
           cargo clippy --locked -p tutti-session --features audio-io --all-targets -- -D warnings
           cargo clippy --locked -p tutti-session --features clap,export,modulation,midi-hardware,synth,soundfont,sampler,vst2,device,audio-io,serde --all-targets -- -D warnings
-          cargo clippy --locked -p tutti --features clap,export,modulation,sampler,dsp,midi-hardware,synth --all-targets -- -D warnings
+          cargo clippy --locked -p tutti --features clap,export,modulation,sampler,midi-hardware,synth --all-targets -- -D warnings
           cargo clippy --locked -p tutti --features audio-io --all-targets -- -D warnings
           cargo clippy --locked -p tutti --no-default-features --features io --all-targets -- -D warnings
           cargo clippy --locked -p tutti-export --lib -- -D warnings
@@ -297,6 +316,7 @@ jobs:
           cargo clippy --locked -p tutti-midi-protocol --features serde --all-targets -- -D warnings
           cargo clippy --locked -p tutti-midi-device --features serde --all-targets -- -D warnings
           cargo clippy --locked -p tutti-tempo --features serde --all-targets -- -D warnings
+          cargo clippy --locked -p tutti-measure --features serde --all-targets -- -D warnings
           cargo clippy --locked -p tutti-dsp --lib -- -D warnings
           cargo clippy --locked -p tutti-plugin-types --lib --features contract -- -D warnings
           cargo clippy --locked -p tutti-midi-hardware --features sequencer-tests --all-targets -- -D warnings
@@ -322,7 +342,7 @@ jobs:
           cargo nextest run --locked -p tutti-cpal --features capture
           cargo nextest run --locked -p tutti-session --features audio-io
           cargo nextest run --locked -p tutti-session --features clap,export,modulation,midi-hardware,synth,soundfont,sampler,vst2,device,audio-io,serde
-          cargo nextest run --locked -p tutti --features clap,export,modulation,sampler,dsp,midi-hardware,synth
+          cargo nextest run --locked -p tutti --features clap,export,modulation,sampler,midi-hardware,synth
           cargo nextest run --locked -p tutti --features audio-io
           cargo nextest run --locked -p tutti --no-default-features --features io
           cargo nextest run --locked -p tutti-session --features export,encode-flac,encode-aiff,encode-vorbis
@@ -337,6 +357,7 @@ jobs:
           cargo nextest run --locked -p tutti-midi-protocol --features serde
           cargo nextest run --locked -p tutti-midi-device --features serde
           cargo nextest run --locked -p tutti-tempo --features serde
+          cargo nextest run --locked -p tutti-measure --features serde
           cargo nextest run --locked -p tutti-buffers --features serde
           cargo nextest run --locked -p tutti-plugin-types --features testing
           cargo nextest run --locked -p tutti-plugin-db --features serde
@@ -397,7 +418,10 @@ jobs:
       fail-fast: false
       matrix:
         os: ${{ fromJSON(needs.changes.outputs.test_os) }}
-    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
+    # The repository variable `MACOS_TEST_RUNNER` (a JSON label list, such as `["self-hosted","tutti-mac"]`) sends
+    # the macOS run to a self-hosted runner; unset, it runs on GitHub's. Clearing the variable is the switch back,
+    # with no pull request.
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || (matrix.os == 'macos-latest' && fromJSON(vars.MACOS_TEST_RUNNER || '"macos-latest"')) || matrix.os }}
     env:
       # Optimized dependencies with debug assertions still on: the suite is CPU-bound.
       CARGO_PROFILE_DEV_OPT_LEVEL: '1'
@@ -409,7 +433,9 @@ jobs:
         if: runner.os == 'Linux'
         uses: ./.github/actions/linux-audio-deps
       - run: rustup toolchain install
+      # A self-hosted runner keeps its own warm target, bounded on the machine; GitHub's cache is for GitHub's runners.
       - uses: Swatinem/rust-cache@v2
+        if: runner.environment == 'github-hosted'
         with:
           # One cache per OS for `test` and `test-more`; `test` writes it.
           shared-key: test
@@ -517,25 +543,6 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings --cfg docsrs
 
-  # The Linux job compiles the AU, CoreMIDI and macOS plugin paths to nothing, so a broken intra-doc link in them
-  # is invisible there. Submodules: `tutti-vst3-host`'s build script wants the VST3 SDK.
-  doc-macos:
-    name: rustdoc (macos)
-    needs: changes
-    if: needs.changes.outputs.macos_main == 'true'
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          submodules: recursive
-      - run: rustup toolchain install
-      - uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      - run: cargo doc --locked --workspace --no-deps
-        env:
-          RUSTDOCFLAGS: -D warnings --document-private-items
-
   # Miri over `tutti-rt`'s `unsafe`: most other `unsafe` is a C ABI miri does not execute, and `arc-lend` runs its
   # own miri and loom in its CI. Its own job because it needs nightly and is slow.
   miri:
@@ -574,8 +581,8 @@ jobs:
   # `code`: false when every change is prose nothing compiles (top-level `docs/`, or a root `*.md`). A crate's
   # README is pulled in by `include_str!`, so it counts as code. `canonical paths` still runs for prose.
   # `loom`: the change can affect a loom model: `tutti-rt`, `tutti-shm-model`, the lock, the toolchain or this file.
-  # `macos`: the change touches code that differs on macOS. It gates `clippy (macos)` and the macOS `test`;
-  # `macos_main` (editor, release and doctest runs, macOS rustdoc) is for pushes only.
+  # `macos`: the change touches code that differs on macOS. It gates `clippy (macos)` (which also runs rustdoc over
+  # the macOS-only crates) and the macOS `test`; the macOS editor, release and doctest runs are for pushes only.
   # `deps`: a manifest, the lock, `deny.toml`, the toolchain or this file changed, which is what `cargo deny` reads.
   # `full`: false on a pull request, which runs the light set (static gates, Linux clippy, the Linux `test`,
   # rustdoc, `cargo deny` when `deps`); the merge group and the push run the rest. `cargo xtask check-windows`
@@ -587,7 +594,6 @@ jobs:
       code: ${{ steps.diff.outputs.code }}
       loom: ${{ steps.diff.outputs.loom }}
       macos: ${{ steps.diff.outputs.macos }}
-      macos_main: ${{ steps.diff.outputs.macos_main }}
       test_os: ${{ steps.diff.outputs.test_os }}
       test_more_os: ${{ steps.diff.outputs.test_more_os }}
       deps: ${{ steps.diff.outputs.deps }}
@@ -605,7 +611,6 @@ jobs:
             echo "code=true" >> "$GITHUB_OUTPUT"
             echo "loom=true" >> "$GITHUB_OUTPUT"
             echo "macos=true" >> "$GITHUB_OUTPUT"
-            echo "macos_main=true" >> "$GITHUB_OUTPUT"
             echo 'test_os=["ubuntu-latest","macos-latest"]' >> "$GITHUB_OUTPUT"
             echo 'test_more_os=["ubuntu-latest","macos-latest"]' >> "$GITHUB_OUTPUT"
             echo "deps=true" >> "$GITHUB_OUTPUT"
@@ -631,9 +636,8 @@ jobs:
           else
             echo "loom=false" >> "$GITHUB_OUTPUT"
           fi
-          # The editor, release and doctest runs and the macOS rustdoc are for pushes only: Linux runs the same tests,
-          # and `clippy (macos)` lints what only macOS compiles.
-          echo "macos_main=false" >> "$GITHUB_OUTPUT"
+          # The macOS editor, release and doctest runs are for pushes only: Linux runs the same tests, and
+          # `clippy (macos)` lints and documents what only macOS compiles.
           echo 'test_more_os=["ubuntu-latest"]' >> "$GITHUB_OUTPUT"
           if echo "$changed" | grep -qE '^(Cargo\.(toml|lock)|deny\.toml|rust-toolchain\.toml|\.github/workflows/ci\.yml)$|/Cargo\.toml$'; then
             echo "deps=true" >> "$GITHUB_OUTPUT"
@@ -751,7 +755,6 @@ jobs:
       - test
       - test-more
       - doc
-      - doc-macos
       - miri
       - changes
       - loom

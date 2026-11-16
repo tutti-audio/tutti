@@ -37,7 +37,7 @@ use super::samples::Samples;
 /// The frames a node buffers as a side effect of processing: lookahead, an FFT
 /// block, a plugin's pipeline. Never a musical delay.
 ///
-/// See the [module docs](self) for why this is not a bare
+/// See the module docs for why this is not a bare
 /// [`Samples`].
 ///
 /// # Examples

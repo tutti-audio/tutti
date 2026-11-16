@@ -612,7 +612,8 @@ pub use event::{
     SortedEvents, SubBlocks, UmpAt, note_off_room,
 };
 pub use event_inlet::{
-    EventCapacity, EventCapacityError, EventInletNode, EventInletWriter, InletCounts, Stamp,
+    EventCapacity, EventCapacityError, EventInletNode, EventInletWriter, InletCounts, InletTotals,
+    Stamp,
 };
 pub use event_losses::Losses;
 pub use event_tap::{EventTapReader, EventTapWriter, TapEvent};
@@ -685,4 +686,25 @@ pub use tutti_types::PlayReading;
 pub mod __private {
     pub use crate::declare::{Cells, Row, Visit, base, input, ports, row, set};
     pub use tutti_types::{UnitAddr, UnitParam};
+}
+
+#[cfg(test)]
+mod error_bounds {
+    //! Each error type this crate returns is an `Error` a caller can box and move (`?` into
+    //! `Box<dyn Error + Send + Sync>`); the bound is checked where the function
+    //! is written, so a non-`Send` field fails the build.
+
+    fn err<T: std::error::Error + Send + Sync + 'static>() {}
+
+    #[allow(dead_code)]
+    fn the_errors_are_boxable() {
+        err::<crate::CompileError>();
+        err::<crate::EventCapacityError>();
+        err::<crate::EventOrderError>();
+        err::<crate::ForkError>();
+        err::<crate::ForkFault>();
+        err::<crate::ParamPortsError>();
+        err::<crate::TransportChangeRejected>();
+        err::<crate::VerifyError>();
+    }
 }

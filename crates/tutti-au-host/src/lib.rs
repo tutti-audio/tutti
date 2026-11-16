@@ -185,7 +185,7 @@
 //! steady state: render buffers are sized at initialization. Loading,
 //! initialization, state, presets and the editor belong on the main thread; the
 //! editor, state and preset-file methods take a `tutti_plugin_types::MainThreadMarker`,
-//! and `AuEditor` also asks the OS (`pthread_main_np`).
+//! and `AuEditor` takes the marker on `open`, `close` and `editor_size`.
 //!
 //! [`AuComponentInfo`]: crate::AuComponentInfo
 //! [`AuType`]: crate::AuType
@@ -232,4 +232,4 @@ pub use tutti_plugin_types::{TransportInfo, WindowHandle};
 // name a returned type cannot bind it — `tutti-plugin-server` depends on this
 // crate but not on `tutti-types`.
 pub use tutti_types::Samples;
-pub use tutti_types::value::units::Seconds;
+pub use tutti_types::Seconds;

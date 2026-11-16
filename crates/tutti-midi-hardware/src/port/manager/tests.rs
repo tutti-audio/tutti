@@ -1,10 +1,10 @@
 use super::*;
-use crate::Pushed;
+use crate::Delivered;
 use crate::testing::{RATE, Rig, ports};
 use std::time::{Duration, Instant};
 
 use tutti_fixtures::midi;
-use tutti_midi_runtime::InputInlets;
+use tutti_midi_runtime::{InputInlets, InputWriters};
 use tutti_ump::{Message, MidiChannel, Ump, Utility};
 
 fn now() -> Instant {
@@ -91,8 +91,8 @@ fn a_ports_events_reach_the_graph_on_their_frames_and_inputs() {
     rig.attach(inlet);
     let (mut b, inlet) = manager.open_input_port("B");
     rig.attach(inlet);
-    assert_eq!(a.push(note(60), rig.time_of(130)), Pushed::Sent);
-    assert_eq!(b.push(note(64), rig.time_of(200)), Pushed::Sent);
+    assert_eq!(a.push(note(60), rig.time_of(130)), Ok(Delivered::Sent));
+    assert_eq!(b.push(note(64), rig.time_of(200)), Ok(Delivered::Sent));
     rig.run(4);
     assert_eq!(rig.take(), vec![(0, 130, note(60)), (1, 200, note(64))]);
 }
@@ -108,7 +108,7 @@ fn arrivals_keep_their_spacing_and_the_lead_is_added_to_each() {
     let (mut port, inlet) = manager.open_input_port("A");
     rig.attach(inlet);
     for (n, frame) in [(60u8, 130u64), (61, 200), (62, 333)] {
-        assert_eq!(port.push(note(n), rig.time_of(frame)), Pushed::Sent);
+        assert_eq!(port.push(note(n), rig.time_of(frame)), Ok(Delivered::Sent));
     }
     rig.run(8);
     let frames: Vec<u64> = rig.take().iter().map(|e| e.1).collect();
@@ -121,20 +121,24 @@ fn arrivals_keep_their_spacing_and_the_lead_is_added_to_each() {
 #[test]
 fn an_arrival_past_its_block_is_emitted_late_and_counted() {
     let (manager, mut rig) = rig(64, Duration::ZERO);
-    let (mut port, inlet) = manager.open_input_port("A");
+    let (writers, readers) = InputWriters::new();
+    let (mut port, inlet) = manager.open_input_port_with("A", writers.split().0);
     rig.attach(inlet);
     rig.run(3); // with the block `rig` ran, frames 0..256 have been rendered
-    assert_eq!(port.push(note(60), rig.time_of(10)), Pushed::Sent);
+    assert_eq!(port.push(note(60), rig.time_of(10)), Ok(Delivered::Sent));
     rig.run(1);
     assert_eq!(
         rig.take(),
         vec![(0, 256, note(60))],
         "the next block's first frame"
     );
-    let info = manager.port_info(port.port()).unwrap();
     assert_eq!(
-        (info.losses.late, info.losses.dropped()),
-        (1, 0),
+        (
+            readers.inlet.late(),
+            readers.lost.get(),
+            readers.inlet.evicted()
+        ),
+        (1, 0, 0),
         "late, not lost"
     );
 }
@@ -152,14 +156,13 @@ fn an_inactive_port_discards_its_events() {
     manager.set_port_active(id, false);
     assert_eq!(
         port.push(note(60), rig.time_of(100)),
-        Pushed::Diverted,
+        Ok(Delivered::Diverted),
         "discarded, not lost"
     );
     manager.set_port_active(id, true);
-    assert_eq!(port.push(note(61), rig.time_of(120)), Pushed::Sent);
+    assert_eq!(port.push(note(61), rig.time_of(120)), Ok(Delivered::Sent));
     rig.run(4);
     assert_eq!(rig.take(), vec![(0, 120, note(61))]);
-    assert_eq!(manager.losses().dropped(), 0);
 }
 
 /// Concurrent creators each land their port: none is lost to another's open,
@@ -273,22 +276,24 @@ fn a_stale_id_cannot_reach_the_port_opened_after_it() {
     assert_eq!((info.name.as_str(), info.active), ("B", true));
 }
 
-/// **A full inlet counts what it drops**, per port and in total, and a removed
-/// port's drops stay in the total.
+/// **A full inlet counts what it drops** in the input's `lost` cell, which the
+/// removed port leaves as it was.
 #[test]
 fn a_full_inlet_counts_what_it_drops() {
     let (manager, mut rig) = rig(4, Duration::ZERO);
-    let (mut handle, inlet) = manager.open_input_port("Busy");
+    let (writers, readers) = InputWriters::new();
+    let (mut handle, inlet) = manager.open_input_port_with("Busy", writers.split().0);
     rig.attach(inlet);
     let id = handle.port();
     let taken = (0..10)
-        .filter(|_| handle.push(Ump::from(Message::Utility(Utility::Noop)), now()) == Pushed::Sent)
+        .filter(|_| {
+            handle.push(Ump::from(Message::Utility(Utility::Noop)), now()) == Ok(Delivered::Sent)
+        })
         .count();
     assert_eq!(taken, 4);
-    assert_eq!(manager.port_info(id).map(|p| p.losses.lost), Some(6));
-    assert_eq!(manager.losses().lost, 6);
+    assert_eq!(readers.lost.get(), 6);
     assert!(manager.remove_input_port(id));
-    assert_eq!(manager.losses().lost, 6, "a removed port's drops stay");
+    assert_eq!(readers.lost.get(), 6, "a removed port's drops stay");
 }
 
 /// **The stream drain is lazy**: it takes a message per step, so a caller that
@@ -315,7 +320,7 @@ fn the_stream_drain_takes_a_message_per_step() {
     };
     let (a, b, c) = (stream(0), stream(1), stream(2));
     for ump in [a, b, c] {
-        assert_eq!(port.push(ump, now()), Pushed::Diverted);
+        assert_eq!(port.push(ump, now()), Ok(Delivered::Diverted));
     }
     let mut drain = manager.drain_stream(slot);
     assert_eq!(drain.next(), Some(a));

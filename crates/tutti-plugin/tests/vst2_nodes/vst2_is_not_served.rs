@@ -8,7 +8,7 @@
 use std::path::PathBuf;
 
 use tutti_plugin::BridgeConfig;
-use tutti_plugin::handles::PluginClient;
+use tutti_plugin::PluginClient;
 use tutti_plugin_types::BridgeError;
 
 /// **A `.vst`, `.dll` or `.so` path is refused as `NotOutOfProcess`**, whether
