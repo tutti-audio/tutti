@@ -460,6 +460,7 @@ struct Failing {
 
 impl Sink for Failing {
     type Sample = f32;
+    type Error = std::io::Error;
 
     fn layout(&self) -> ChannelLayout {
         ChannelLayout::STEREO
@@ -473,7 +474,7 @@ impl Sink for Failing {
         Ok(())
     }
 
-    fn finalize(self) -> std::io::Result<()> {
+    fn finalize(self) -> Result<(), Self::Error> {
         Err(std::io::Error::other("disk full"))
     }
 }
@@ -552,6 +553,7 @@ fn what_cannot_be_armed_is_refused_where_it_is_made() {
     struct Mono;
     impl Sink for Mono {
         type Sample = f32;
+        type Error = core::convert::Infallible;
 
         fn layout(&self) -> ChannelLayout {
             ChannelLayout::MONO
@@ -559,7 +561,7 @@ fn what_cannot_be_armed_is_refused_where_it_is_made() {
         fn write(&mut self, _: Interleaved<'_>) -> Result<(), SinkFailed> {
             Ok(())
         }
-        fn finalize(self) -> std::io::Result<()> {
+        fn finalize(self) -> Result<(), Self::Error> {
             Ok(())
         }
     }
@@ -596,6 +598,7 @@ fn a_take_makes_a_clip_only_from_a_file() {
     struct Clean;
     impl Sink for Clean {
         type Sample = f32;
+        type Error = core::convert::Infallible;
 
         fn layout(&self) -> ChannelLayout {
             ChannelLayout::STEREO
@@ -603,7 +606,7 @@ fn a_take_makes_a_clip_only_from_a_file() {
         fn write(&mut self, _: Interleaved<'_>) -> Result<(), SinkFailed> {
             Ok(())
         }
-        fn finalize(self) -> std::io::Result<()> {
+        fn finalize(self) -> Result<(), Self::Error> {
             Ok(())
         }
     }

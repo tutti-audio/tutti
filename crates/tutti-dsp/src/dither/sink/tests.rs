@@ -19,6 +19,7 @@ struct Collect {
 
 impl Sink for Collect {
     type Sample = f32;
+    type Error = std::io::Error;
     fn layout(&self) -> ChannelLayout {
         ChannelLayout::STEREO
     }
@@ -30,7 +31,7 @@ impl Sink for Collect {
         self.got.extend_from_slice(block.samples());
         Ok(())
     }
-    fn finalize(self) -> std::io::Result<()> {
+    fn finalize(self) -> Result<(), Self::Error> {
         Err(std::io::Error::other("inner finalize"))
     }
 }
