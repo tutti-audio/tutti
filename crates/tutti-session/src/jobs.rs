@@ -395,6 +395,7 @@ impl Jobs {
 
     /// Where the typed jobs land: a handle that makes jobs without the session
     /// in hand makes its tickets on it.
+    #[cfg(feature = "midi-hardware")]
     pub(crate) fn queue(&self) -> LandedQueue {
         Arc::clone(&self.landed)
     }
