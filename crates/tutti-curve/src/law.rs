@@ -120,7 +120,7 @@ fn pow(x: f32, p: f32) -> f32 {
         let x2 = x * x;
         x2 * x2 * x
     } else if p == 0.5 {
-        x.sqrt()
+        libm::sqrtf(x)
     } else {
         libm::powf(x, p)
     }

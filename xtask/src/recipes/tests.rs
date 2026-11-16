@@ -412,6 +412,7 @@ fn check_no_std_builds_each_listed_crate_for_the_bare_metal_target() {
     assert_eq!(
         steps,
         [
+            "cargo build --locked -p tutti-curve --no-default-features --target aarch64-unknown-none",
             "cargo build --locked -p tutti-metering --no-default-features --target aarch64-unknown-none",
             "cargo build --locked -p tutti-types --no-default-features --target aarch64-unknown-none",
             "cargo build --locked -p tutti-types --no-default-features --target aarch64-unknown-none --features serde",
