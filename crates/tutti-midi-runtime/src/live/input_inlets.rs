@@ -25,18 +25,22 @@
 //! (`late` in [`InletCounts::losses`]), only when the
 //! thread's push comes more than the lead after its arrival.
 //!
-//! # Timing
+//! # Timing and losses
 //!
-//! Each [`DeviceInput`] reports how steady its map is through the
-//! [`ClockWriters`] it is opened with ([`open_with`](InputInlets::open_with)):
-//! a gauge of the latest correction the map made (signed, positive when a
-//! reading came late) and a counter of its re-anchors, a [`Resyncs`] each. The
-//! readers are made once, by [`ClockWriters::new`], and outlive any one
-//! connection: [`ClockWriters::reopen`] hands the writers to the next
-//! connection once the last has dropped, so the counter is cumulative across
-//! connections and the gauge holds its last reading until the next map writes
-//! one. The device's thread writes with atomic stores, so reading them blocks
-//! nothing.
+//! Each [`DeviceInput`] reports through the [`DeviceWriters`] it is opened with
+//! ([`open_with`](InputInlets::open_with)): a gauge of the latest correction its
+//! map made (signed, positive when a reading came late), a counter of its
+//! re-anchors, a [`Resyncs`] each, a counter of the pushes its ring had no room
+//! for, and the totals of what its inlet evicted, refused and emitted late
+//! ([`InletTotals`]). The MIDI-CI refusals of the device's output are the
+//! stream's own cell, the other half of [`InputWriters`].
+//!
+//! The readers ([`InputReaders`]) are made once, by [`InputWriters::new`], and
+//! outlive any one connection: [`InputWriters::reopen`] hands the writers to the
+//! next connection once the last has dropped, so the counts are cumulative
+//! across connections and the gauge holds its last reading until the next map
+//! writes one. The device's thread writes with atomic stores, so reading them
+//! blocks nothing.
 //!
 //! # One inlet per input
 //!
@@ -50,8 +54,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use tutti_graph::{EventCapacity, EventInletNode, EventInletWriter, InletCounts, Stamp};
-use tutti_rt::{ArcLend, Counter, CounterWriter, Gauge, GaugeWriter, Reader, counter, gauge};
+use tutti_graph::{
+    EventCapacity, EventInletNode, EventInletWriter, InletCounts, InletTotals, Stamp,
+};
+use tutti_rt::{
+    ArcLend, Counter, CounterWriter, Gauge, GaugeWriter, PushError, Reader, counter, gauge,
+};
 use tutti_types::{Moment, Resyncs, Seconds};
 use tutti_ump::Ump;
 
@@ -144,15 +152,15 @@ impl InputInlets {
     /// and the [`DeviceInput`] (dropped).
     #[must_use = "the node is the inlet's graph side: until it is added, what the device sends goes nowhere"]
     pub fn open(&self) -> (DeviceInput, EventInletNode) {
-        self.open_with(ClockWriters::new().0)
+        self.open_with(DeviceWriters::unread())
     }
 
-    /// [`open`](Self::open) with the input's timing written to `clock`: the
-    /// readers of its cells stay with whoever made them ([`ClockWriters::new`]).
+    /// [`open`](Self::open) with the input's cells written to `writers`: the
+    /// readers of its cells stay with whoever made them ([`InputWriters::new`]).
     #[must_use = "the node is the inlet's graph side: until it is added, what the device sends goes nowhere"]
-    pub fn open_with(&self, clock: ClockWriters) -> (DeviceInput, EventInletNode) {
+    pub fn open_with(&self, writers: DeviceWriters) -> (DeviceInput, EventInletNode) {
         let id = self.last.fetch_add(1, Ordering::Relaxed) + 1;
-        let (node, writer) = EventInletNode::pair(self.capacity);
+        let (node, writer) = EventInletNode::pair_with(self.capacity, &writers.inlet);
         let input = DeviceInput {
             id: InputId(NonZeroU64::new(id).unwrap_or(NonZeroU64::MAX)),
             counts: writer.counts(),
@@ -161,8 +169,9 @@ impl InputInlets {
             lead: Arc::clone(&self.lead),
             seen: None,
             map: None,
-            timing: clock.timing,
-            resyncs: clock.resyncs,
+            timing: writers.timing,
+            resyncs: writers.resyncs,
+            lost: writers.lost,
         };
         (input, node)
     }
@@ -172,35 +181,106 @@ fn nanos(d: Duration) -> u64 {
     u64::try_from(d.as_nanos()).unwrap_or(u64::MAX)
 }
 
-/// The writing ends of an input's timing cells: the latest correction its clock
-/// map made and the count of its re-anchors. One set writes at a time; the
-/// device's end ([`DeviceInput`]) owns it for a connection, and dropping the
-/// input closes the cells until [`reopen`](Self::reopen) hands the writers on.
+/// The writing ends of an input's cells: [`DeviceWriters`], which the device's
+/// end ([`DeviceInput`]) owns, and the writer of the MIDI-CI refusals, which the
+/// device's stream owns. One set writes at a time; dropping the input closes its
+/// cells until [`reopen`](Self::reopen) hands the writers on. [`split`](Self::split)
+/// gives each owner its own, so none is left unclaimed.
 #[derive(Debug)]
-#[must_use = "the writers are how an input reports its timing"]
-pub struct ClockWriters {
-    timing: GaugeWriter<Seconds>,
-    resyncs: CounterWriter<Resyncs>,
+#[must_use = "the writers are how an input reports its timing and its losses"]
+pub struct InputWriters {
+    device: DeviceWriters,
+    ci_refused: CounterWriter<u64>,
 }
 
-impl ClockWriters {
+/// The cells a [`DeviceInput`] writes: the latest correction its clock map made,
+/// the count of its re-anchors, and what its inlet lost (pushes the ring
+/// refused, and the totals of events evicted from the waiting list and events
+/// the port refused).
+#[derive(Debug)]
+#[must_use = "the writers are how an input reports its timing and its losses"]
+pub struct DeviceWriters {
+    timing: GaugeWriter<Seconds>,
+    resyncs: CounterWriter<Resyncs>,
+    lost: CounterWriter<u64>,
+    inlet: InletTotals,
+}
+
+/// The reading ends of an input's cells ([`InputWriters`]): made once with the
+/// writers, kept by whoever outlives the connections.
+#[derive(Clone, Debug)]
+pub struct InputReaders {
+    /// The latest correction the clock map made, in seconds.
+    pub timing: Gauge<Seconds>,
+    /// The clock map's re-anchors.
+    pub resyncs: Counter<Resyncs>,
+    /// The events the inlet had no room for.
+    pub lost: Counter<u64>,
+    /// The events the inlets dropped from their waiting lists for room, and
+    /// those their ports refused: totals the successive inlets share.
+    pub inlet: InletTotals,
+    /// The MIDI-CI messages the device's output refused.
+    pub ci_refused: Counter<u64>,
+}
+
+impl InputWriters {
     /// New cells and their writers, with their readers: a gauge reading 0 s
-    /// and a counter at zero. Allocates: control side.
-    pub fn new() -> (Self, Gauge<Seconds>, Counter<Resyncs>) {
-        let (timing, gauge) = gauge(Seconds::new(0.0));
-        let (resyncs, counter) = counter();
-        (Self { timing, resyncs }, gauge, counter)
+    /// and counters at zero. Allocates: control side.
+    pub fn new() -> (Self, InputReaders) {
+        let (timing, timing_reader) = gauge(Seconds::new(0.0));
+        let (resyncs, resyncs_reader) = counter();
+        let (lost, lost_reader) = counter();
+        let (ci_refused, ci_refused_reader) = counter();
+        let inlet = InletTotals::new();
+        (
+            Self {
+                device: DeviceWriters {
+                    timing,
+                    resyncs,
+                    lost,
+                    inlet: inlet.clone(),
+                },
+                ci_refused,
+            },
+            InputReaders {
+                timing: timing_reader,
+                resyncs: resyncs_reader,
+                lost: lost_reader,
+                inlet,
+                ci_refused: ci_refused_reader,
+            },
+        )
     }
 
     /// The writers of cells whose last writers have dropped; `None` while a
-    /// connection still holds them. The count carries on from where it was and
-    /// the gauge holds its last reading (it is not reset: it reads the latest
-    /// correction made, until the next map makes one). Control side.
-    pub fn reopen(timing: &Gauge<Seconds>, resyncs: &Counter<Resyncs>) -> Option<Self> {
-        // If only the first reopens, its writer drops here and closes it again.
-        let timing = timing.reopen()?;
-        let resyncs = resyncs.reopen()?;
-        Some(Self { timing, resyncs })
+    /// connection still holds them. The counts carry on from where they were
+    /// and the gauge holds its last reading (it is not reset: it reads the
+    /// latest correction made, until the next map makes one). Control side.
+    pub fn reopen(readers: &InputReaders) -> Option<Self> {
+        // If only some reopen, their writers drop here and close them again.
+        Some(Self {
+            device: DeviceWriters {
+                timing: readers.timing.reopen()?,
+                resyncs: readers.resyncs.reopen()?,
+                lost: readers.lost.reopen()?,
+                inlet: readers.inlet.clone(),
+            },
+            ci_refused: readers.ci_refused.reopen()?,
+        })
+    }
+
+    /// The device's writers, and the writer of the MIDI-CI refusals: the
+    /// conversation is the device stream's, not the inlet's.
+    pub fn split(self) -> (DeviceWriters, CounterWriter<u64>) {
+        (self.device, self.ci_refused)
+    }
+}
+
+impl DeviceWriters {
+    /// Writers whose readers nobody keeps: an input nobody reads the cells of.
+    /// Allocates: control side.
+    pub fn unread() -> Self {
+        InputWriters::new().0.device
     }
 }
 
@@ -221,6 +301,8 @@ pub struct DeviceInput {
     timing: GaugeWriter<Seconds>,
     /// The map's re-anchors.
     resyncs: CounterWriter<Resyncs>,
+    /// The pushes the ring refused.
+    lost: CounterWriter<u64>,
 }
 
 impl std::fmt::Debug for DeviceInput {
@@ -250,17 +332,26 @@ impl DeviceInput {
     /// Pushes `ump`, which the OS delivered at `arrival`, for the frame the
     /// block clock puts that time on, plus the lead; or for the next block
     /// while no reading exists (no engine yet, or `arrival` before frame 0).
-    /// `false` when the ring was full: the event is dropped and counted in
-    /// [`Losses::lost`](tutti_graph::Losses::lost). Lock-free and allocation-free, so safe to
-    /// call from a driver callback.
+    /// Lock-free and allocation-free, so safe to call from a driver callback.
+    ///
+    /// # Errors
+    ///
+    /// [`PushError::Full`] when the ring was full: the event is dropped and
+    /// counted in the input's `lost` cell ([`InputReaders::lost`], cumulative
+    /// across connections; the ring's own count, [`counts`](Self::counts), is
+    /// this connection's). [`PushError::Disconnected`] once the inlet's node is
+    /// gone: not counted, the event had nowhere to go.
     #[inline]
-    pub fn push(&mut self, ump: impl Into<Ump>, arrival: Instant) -> bool {
+    pub fn push(&mut self, ump: impl Into<Ump>, arrival: Instant) -> Result<(), PushError> {
         let ump = ump.into();
         let sent = match self.moment_of(arrival) {
             Some(at) => self.writer.push(at, ump),
             None => self.writer.push(Stamp::NextBlock, ump),
         };
-        sent.is_ok()
+        if sent == Err(PushError::Full) {
+            self.lost.add(1);
+        }
+        sent
     }
 
     /// The moment `arrival` plus the lead is, by the latest block reading.

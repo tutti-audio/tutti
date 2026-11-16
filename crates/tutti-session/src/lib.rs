@@ -178,8 +178,7 @@ pub use key::{
 pub use main_session::{EditorView, MainPlugin, MainSession, Opened};
 #[cfg(feature = "midi")]
 pub use midi::{
-    MIDI_INPUT_DROP_REPORT, Midi, MidiLoad, MidiRouteId, MidiRouteRule, NoSuchMidiRoute, Stamping,
-    TakePlacement,
+    Midi, MidiLoad, MidiRouteId, MidiRouteRule, NoSuchMidiRoute, Stamping, TakePlacement,
 };
 #[cfg(feature = "midi-hardware")]
 pub use midi_ci::{

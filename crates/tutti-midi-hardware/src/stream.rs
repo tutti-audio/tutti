@@ -75,7 +75,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use tutti_graph::{Losses, Offset};
+use tutti_graph::Offset;
 use tutti_midi_device::ResourceStore;
 use tutti_midi_device::{
     Action, Capabilities, Connection, Ending, Endpoint, EntropyError, IdentityInquiry,
@@ -83,6 +83,7 @@ use tutti_midi_device::{
 };
 use tutti_midi_protocol::{Addressed, Read, Universal, read};
 use tutti_midi_runtime::Outgoing;
+use tutti_rt::CounterWriter;
 use tutti_ump::{
     BlockFilter, BlockSelect, DeviceIdentity, DiscoveryFilter, Message, MidiGroup, Protocol,
     Stream, StreamConfig, SysexAssembler, SysexStep, Ump,
@@ -431,6 +432,7 @@ impl Negotiation {
         os: UmpCapability,
         out: Option<OpenOutput>,
         timing: InputTiming,
+        ci_refused: CounterWriter<u64>,
     ) -> Self {
         let asks = os.is_ump_endpoint() && out.is_some();
         let inquire = if !os.is_ump_endpoint() && out.is_some() {
@@ -454,7 +456,7 @@ impl Negotiation {
             out,
             run,
             inquire,
-            ci: Ci::new(device),
+            ci: Ci::new(device, ci_refused),
             answering: None,
             timing,
             stop: StopJr::Settled,
@@ -489,11 +491,6 @@ impl Negotiation {
     /// The MIDI-CI peers found on this device.
     pub(crate) fn ci_peers(&self) -> Arc<[CiPeerInfo]> {
         self.ci.peers()
-    }
-
-    /// The MIDI-CI messages this device's output refused.
-    pub(crate) const fn ci_losses(&self) -> Losses {
-        self.ci.losses()
     }
 
     /// The Profiles of the MIDI-CI peers found on this device.

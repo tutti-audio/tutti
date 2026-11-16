@@ -6,10 +6,10 @@ use std::time::Instant;
 
 use super::super::legacy_port::anchor::Anchor;
 use super::super::legacy_port::bytes::ByteIn;
+use crate::InputProducerHandle;
 use crate::endpoints::InputConnection;
 use crate::error::Result;
 use crate::guard::Guard;
-use crate::{InputProducerHandle, Pushed};
 use tutti_winmm_ffi::{Event, MidiIn};
 
 /// An open winmm input. Dropping it stops the port and returns its buffers.
@@ -38,10 +38,10 @@ pub(super) fn open(index: u32, mut producer: InputProducerHandle) -> Result<WinM
     let mut bytes = ByteIn::new();
     // Read before the port starts, so no stamp precedes it.
     let mut anchor = Anchor::new(Instant::now());
-    // A full inlet counts the drop itself (`HardwareMidiInputs::losses`); a log
+    // A full inlet counts the drop itself (the input's `lost` cell); a log
     // line here would run on winmm's thread.
     let mut push = move |ump, at| {
-        let _: Pushed = producer.push(ump, at);
+        let _ = producer.push(ump, at);
     };
     // winmm calls this on its own thread, and a panic must not leave it: the
     // guard catches it and ends the input.

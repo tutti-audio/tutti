@@ -25,7 +25,7 @@ use tutti_midi_hardware::{
     Answer, CiPeerInfo, DeviceStream, MidiSession, ProfileSwitch, ReportAsk,
 };
 use tutti_midi_runtime::{
-    ClockWriters, DeviceEpochs, JrStream, MidiIngestControls, MidiInputPorts,
+    DeviceEpochs, InputReaders, InputWriters, JrStream, MidiIngestControls, MidiInputPorts,
 };
 use tutti_rt::{Counter, Gauge};
 use tutti_types::{Resyncs, Seconds};
@@ -123,10 +123,10 @@ pub enum MidiPortError {
     /// Another port of this session holds the device open already.
     #[error("another port of this session holds {0:?} open")]
     InUse(DeviceId),
-    /// The device's previous connection still holds the port's timing cells, so
-    /// the new one would report nothing.
-    #[error("the previous connection of {0:?} still holds the port's timing readings")]
-    ClockHeld(DeviceId),
+    /// The device's previous connection still holds the port's cells (timing and
+    /// losses), so the new one would report nothing.
+    #[error("the previous connection of {0:?} still holds the port's cells")]
+    CellsHeld(DeviceId),
     /// The OS layer refused to open the device.
     #[error("MIDI hardware: {0}")]
     Hardware(Arc<tutti_midi_hardware::Error>),
@@ -250,11 +250,14 @@ pub(crate) struct InputShared {
     requests: Mutex<Inbox>,
     /// What the handles its info lists make requests through.
     link: PortLink,
-    /// The latest correction the port's clock map made. Made once with the
-    /// entry; a connection writes it and closes it when it ends.
-    timing: Gauge<Seconds>,
-    /// The port's re-anchors, cumulative across connections.
-    resyncs: Counter<Resyncs>,
+    /// The cells a connection's device input writes: the latest correction the
+    /// port's clock map made, its re-anchors and the events its inlet had no
+    /// room for. Made once with the entry; a connection writes them and closes
+    /// them when it ends, and the counts are cumulative across connections.
+    cells: InputReaders,
+    /// What the port's ingest node lost: translated events its mailbox had no
+    /// room for. The node outlives every connection.
+    ingest: MidiIngestControls,
 }
 
 /// What a handle asked of the device, for the session to send at its next poll,
@@ -556,7 +559,7 @@ impl MidiInput {
     /// and the new connection's first map writes over it.
     #[must_use]
     pub fn timing(&self) -> Gauge<Seconds> {
-        self.shared.timing.clone()
+        self.shared.cells.timing.clone()
     }
 
     /// How many times the port's clock map re-anchored (a reading too far from
@@ -569,7 +572,32 @@ impl MidiInput {
     /// clock: an offline session's readings re-anchor often.
     #[must_use]
     pub fn resyncs(&self) -> Counter<Resyncs> {
-        self.shared.resyncs.clone()
+        self.shared.cells.resyncs.clone()
+    }
+
+    /// What this port did not take in, cumulative over its life and across an
+    /// unplug and a replug: [`lost`](Losses::lost) are events its device's inlet
+    /// had no room for (a stalled audio callback with a busy controller),
+    /// [`evicted`](Losses::evicted) are events its inlet dropped from its waiting
+    /// list for room, [`late`](Losses::late) are events the inlet emitted at the
+    /// first frame of the block that found them, their frame having begun (they
+    /// sound, late), and [`refused`](Losses::refused) are events the inlet's
+    /// port refused, translated events its ingest node's mailbox had no room for
+    /// in one block, and the MIDI-CI messages its conversation sent that the
+    /// device's output refused (a refused message is
+    /// not sent again, so the count is how many a peer may never have heard).
+    /// The CI count is the input's because the input owns the conversation, its
+    /// peers and Profiles ([`MidiInputInfo::profiles`]); the session's MIDI
+    /// output never carries it.
+    #[must_use]
+    pub fn losses(&self) -> Losses {
+        Losses::lost(self.shared.cells.lost.get())
+            + self.shared.ingest.losses()
+            + Losses::evicted(self.shared.cells.inlet.evicted())
+            + Losses::late(self.shared.cells.inlet.late())
+            + Losses::refused(
+                self.shared.cells.inlet.refused() + self.shared.cells.ci_refused.get(),
+            )
     }
 }
 
@@ -919,8 +947,8 @@ impl Ports {
         // The previous connection's input has dropped with its device being
         // closed; one that still holds the cells is refused, never connected
         // without readings.
-        let clock = ClockWriters::reopen(&port.shared.timing, &port.shared.resyncs)
-            .ok_or_else(|| MidiPortError::ClockHeld(info.id.clone()))?;
+        let clock = InputWriters::reopen(&port.shared.cells)
+            .ok_or_else(|| MidiPortError::CellsHeld(info.id.clone()))?;
         match io
             .connect_input_with(&info.id, clock)
             .map_err(|e| MidiPortError::Hardware(Arc::new(e)))?
@@ -1376,9 +1404,10 @@ impl crate::Midi<'_> {
         let token = Arc::new(());
         let info = found.clone().unwrap_or_else(|| saved.clone());
         // The cells start closed: a connection reopens them.
-        let (writers, timing, resyncs) = ClockWriters::new();
+        let (writers, cells) = InputWriters::new();
         drop(writers);
         let landed = self.jobs.queue();
+        let ingest = controls.clone();
         let shared = Arc::new_cyclic(|weak| {
             let link = PortLink::new(weak.clone(), landed);
             InputShared {
@@ -1389,8 +1418,8 @@ impl crate::Midi<'_> {
                 }),
                 requests: Mutex::new(Inbox::default()),
                 link,
-                timing,
-                resyncs,
+                cells,
+                ingest,
             }
         });
         self.state.ports.inputs.push(InputPort {
