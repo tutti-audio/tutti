@@ -851,7 +851,7 @@ fn a_chord_larger_than_a_chunk_ends_and_the_export_counts_the_loss() {
                 Samples(0),
             )
             .expect("a render")
-            .with_event_loss(policy),
+            .event_loss(policy),
             tutti_types::ChannelLayout::MONO,
         );
         render_to_buffers(graph, &config, timeline.as_ref()).map(|outcome| {

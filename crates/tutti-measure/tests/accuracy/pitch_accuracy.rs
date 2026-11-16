@@ -18,7 +18,7 @@
 //! (integer periods instead of interpolated ones; the global minimum instead of
 //! the first local one below threshold) before being committed.
 
-use tutti_measure::{YinConfig, yin, yin_track};
+use tutti_measure::{FrequencyBand, YinConfig, yin, yin_track};
 use tutti_types::{Hz, SampleRate, Samples};
 
 const SR: f64 = 48_000.0;
@@ -260,7 +260,7 @@ fn the_note_name_agrees_with_the_frequency() {
 
 /// The range bounds must be honoured, not merely validated at construction.
 ///
-/// `YinConfig::new` refuses an inverted range, and that is tested. What is not:
+/// `FrequencyBand` refuses an inverted range, and that is tested. What is not:
 /// that a *valid* narrow range actually constrains the search. A tone outside
 /// the configured band must not be reported as if it were inside it.
 #[test]
@@ -268,7 +268,11 @@ fn a_tone_below_the_configured_range_is_not_reported_as_in_range() {
     // Search 400-2000 Hz, present a 100 Hz tone. The correct answers are
     // "unvoiced" or a harmonic inside the band — never 100 Hz, which the
     // configuration excludes.
-    let cfg = YinConfig::new(SampleRate::of(SR), Hz(400.0), Hz(2000.0)).expect("valid range");
+    let cfg = YinConfig::new(
+        SampleRate::of(SR),
+        FrequencyBand::new(Hz(400.0), Hz(2000.0)).unwrap(),
+    )
+    .expect("valid range");
     let est = yin(&cfg, &sine(100.0, 0.5, 0.5)).expect("long enough");
 
     if let Some(p) = est.pitch() {
