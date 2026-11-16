@@ -41,8 +41,8 @@
 //!
 //! # Lifecycle
 //!
-//! The host [`create`s](AudioSlab::create) the slab (the `Owner`, which
-//! unlinks the backing file on drop) and stamps its header; the server
+//! The host [`create`s](AudioSlab::create) the slab (the backing file ends with
+//! the creator's mapping) and stamps its header; the server
 //! [`open`s](AudioSlab::open) it (a `View`) using a matching [`SlabLayout`]
 //! and validates that header before trusting a byte.
 //!
@@ -74,26 +74,15 @@ use tutti_plugin_ipc_ffi::{
     Direction, MappingWriter, RING_SLOTS, SLAB_HEADER_BYTES, SharedMapping, SlabError, slot_for,
 };
 
-/// Who is responsible for the backing file's lifetime.
-#[derive(Debug)]
-enum Ownership {
-    /// Created the slab; unlinks the backing file on drop.
-    Owner,
-    /// Opened an existing slab; detaches on drop without deleting it.
-    View,
-}
-
 /// Named mmap region: a `SlabHeader`, then a ring per direction.
 ///
 /// Create on one side, open on the other with a matching [`SlabLayout`].
-/// The creator owns the backing file and unlinks it on drop; the opener
-/// is a view.
+/// The backing file ends with the creator's mapping; the opener is a view.
 #[derive(Debug)]
 pub struct AudioSlab {
     mapping: Arc<SharedMapping>,
     name: String,
     layout: SlabLayout,
-    ownership: Ownership,
 }
 
 impl AudioSlab {
@@ -103,7 +92,7 @@ impl AudioSlab {
     /// sizes it to hold the header and both rings, maps it, and stamps the
     /// header. Returns the writer of the inputs.
     ///
-    /// This side is the owner and unlinks the file on drop. Exactly one side
+    /// The file ends with this side's mapping. Exactly one side
     /// calls this; the other calls [`open`](Self::open) with a matching
     /// `layout`. The file is created exclusively: a name that already exists
     /// (a symlink included) is an error, never a file to truncate, since
@@ -123,7 +112,6 @@ impl AudioSlab {
             mapping: Arc::clone(writer.mapping()),
             name,
             layout,
-            ownership: Ownership::Owner,
         };
         Ok(SlabWriter::new(slab, writer, Direction::Input))
     }
@@ -152,7 +140,6 @@ impl AudioSlab {
             mapping: Arc::clone(writer.mapping()),
             name,
             layout,
-            ownership: Ownership::View,
         };
         Ok(SlabWriter::new(slab, writer, Direction::Output))
     }
@@ -559,16 +546,6 @@ fn check_layout(layout: &SlabLayout) -> Result<usize, SlabLayoutError> {
     layout
         .checked_byte_size_with_header(SLAB_HEADER_BYTES)
         .ok_or(SlabLayoutError::SizeOverflow)
-}
-
-impl Drop for AudioSlab {
-    /// Only the `Owner` unlinks the backing file; `View`s just detach.
-    ///
-    fn drop(&mut self) {
-        if matches!(self.ownership, Ownership::Owner) {
-            tutti_plugin_ipc_ffi::remove(&self.name);
-        }
-    }
 }
 
 /// Why a read or a write of a slab's channel was refused. `Copy` and free of
