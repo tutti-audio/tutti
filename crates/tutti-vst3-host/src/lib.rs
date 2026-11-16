@@ -90,7 +90,7 @@
 //! let inputs: [&[f32]; 2] = [&silence, &silence];
 //! let (mut left, mut right) = (vec![0.0f32; 512], vec![0.0f32; 512]);
 //! let mut outputs: [&mut [f32]; 2] = [&mut left, &mut right];
-//! let mut buffer = AudioBuffer::new(&inputs, &mut outputs, 48_000.0);
+//! let mut buffer = AudioBuffer::new(&inputs, &mut outputs, tutti_plugin_types::SampleRate::SR_48K);
 //!
 //! // The sample rate stays a raw `f64` here: this is a C ABI, which is where
 //! // the engine's unit newtypes deliberately stop.

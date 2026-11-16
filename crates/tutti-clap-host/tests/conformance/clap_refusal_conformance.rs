@@ -283,7 +283,7 @@ fn a_refused_activation_leaves_the_accepted_configuration_reported() {
     set_activate_refusal(ACTIVATE_REFUSE_NONE, 0);
 
     assert_eq!(
-        loaded.sample_rate(),
+        loaded.sample_rate().get(),
         BASE_RATE,
         "reporting 96k would tell the caller the plugin is configured for a rate it refused"
     );
@@ -295,7 +295,7 @@ fn a_refused_activation_leaves_the_accepted_configuration_reported() {
         .expect("the same instance activates at the accepted configuration");
     assert_eq!(activate_accepts(), 2);
     assert_eq!(last_accepted_activation(), Some((BASE_RATE, BASE_FRAMES)),);
-    assert_eq!(active.loaded().sample_rate(), BASE_RATE);
+    assert_eq!(active.loaded().sample_rate().get(), BASE_RATE);
 }
 
 /// A refused block-size growth leaves the block size the plugin accepted, so
@@ -350,7 +350,7 @@ fn a_plugin_still_processes_after_a_refused_activation() {
         inputs: &inputs,
         outputs: &mut outputs,
         num_samples: frames,
-        sample_rate: BASE_RATE,
+        sample_rate: tutti_plugin_types::SampleRate::of(BASE_RATE),
     };
 
     let ctx = tutti_clap_host::ClapProcessContext::default();
@@ -378,7 +378,7 @@ fn accepted_sample_rate_change_reaches_the_plugin() {
         Some((96_000.0, BASE_FRAMES)),
         "the new rate must reach the plugin's `activate`"
     );
-    assert_eq!(active.loaded().sample_rate(), 96_000.0);
+    assert_eq!(active.loaded().sample_rate().get(), 96_000.0);
 }
 
 // ---------------------------------------------------------------------------

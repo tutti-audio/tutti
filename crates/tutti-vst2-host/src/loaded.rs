@@ -27,7 +27,7 @@ use crate::types::{ChannelLayout, PluginInfo, PluginTail, Samples, Vst2Category}
 /// The rate and block size the plugin is told nothing of before its first
 /// activation, and answers `audioMasterGetSampleRate` / `GetBlockSize` with
 /// until then.
-const UNACTIVATED_RATE: f64 = 44_100.0;
+const UNACTIVATED_RATE: tutti_types::SampleRate = tutti_types::SampleRate::SR_44K1;
 const UNACTIVATED_BLOCK: usize = 512;
 
 /// Decode `effGetTailSize` into the shared [`PluginTail`] vocabulary.

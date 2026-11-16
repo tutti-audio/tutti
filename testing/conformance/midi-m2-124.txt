@@ -1,0 +1,257 @@
+# Network MIDI 2.0 (UDP) (M2-124 v1.0) inventory. The spec text is not in
+# the repo: `TUTTI_MIDI_SPECS=<dir> cargo xtask conformance-inventory midi`
+# regenerates the id, kind, section and facts columns from the text that
+# `pdftotext -layout` (26.01.0) makes of the M2-124 PDF in that directory (or a
+# .txt of it beside the PDF); the other columns are written by hand, in our own
+# words. `cargo xtask check-conformance` holds the generated columns to the
+# text when `TUTTI_MIDI_SPECS` is set. Nothing of the spec is quoted here: ids,
+# section numbers, keyword kinds and functional facts only.
+#
+# Columns: id | side | maturity | kind | section | paraphrase | facts | na-kind | cite
+#
+# Ids:
+#   m2-124/<section>#<n>          the nth sentence under the numbered section
+#                                 (appendix letters lowercase: d.2.1) that carries
+#                                 a conformance word. kind: shall is required,
+#                                 should recommended, may permitted; the negated
+#                                 forms keep the kind and carry the fact neg=1.
+# This document has its own conformance-word table (its Table 2), the same three
+# rows as M2-104's, and no negated forms either. Its Table 3 lists must,
+# will, can and might as words that are never conformance statements: a
+# sentence with only those has no row. Sentence rows only: no table of the
+# document has a row per item.
+# side: client, host or both (todo marks a row not yet read).
+m2-124/1.1#1 | both |  | permitted | M2-124 §1.1 | example uses of the transport: studio, live performance and similar networks |  |  |
+m2-124/1.4.1#1 | both |  | recommended | M2-124 §1.4.1 | glossary: Client, Command and Command Packet, definition only |  |  |
+m2-124/1.4.1#2 | both |  | permitted | M2-124 §1.4.1 | glossary: one UDP packet can hold several Command Packets, definition only |  |  |
+m2-124/1.4.1#3 | both |  | permitted | M2-124 §1.4.1 | glossary: a Transaction can have several replies, definition only |  |  |
+m2-124/1.4.1#4 | both |  | permitted | M2-124 §1.4.1 | glossary: a Transaction can be a longer exchange of inquiries and replies, definition only |  |  |
+m2-124/1.4.1#5 | both |  | permitted | M2-124 §1.4.1 | glossary: UMP devices can use Message Types beyond MIDI 1.0 byte streams, definition only |  |  |
+m2-124/2.1#1 | host |  | permitted | M2-124 §2.1 | a device can expose several Host UMP Endpoints, one UDP port each |  |  |
+m2-124/2.1#2 | host |  | permitted | M2-124 §2.1 | a Host Endpoint authenticates for itself and serves as many Clients as it has room for |  |  |
+m2-124/2.2#1 | client |  | required | M2-124 §2.2 | a Client uses its own UDP port to talk to a Host |  |  |
+m2-124/2.2#2 | client |  | required | M2-124 §2.2 | a Client runs no second session to one Host from the same port | neg=1 |  |
+m2-124/2.2#3 | client |  | required | M2-124 §2.2 | a second session to a Host needs a different Client port |  |  |
+m2-124/2.2#4 | both |  | permitted | M2-124 §2.2 | a device can be Host and Client at once |  |  |
+m2-124/2.4#1 | both |  | permitted | M2-124 §2.4 | network interruptions last from milliseconds to much longer |  |  |
+m2-124/2.4#2 | both |  | permitted | M2-124 §2.4 | a wireless LAN can offer little error recovery |  |  |
+m2-124/2.4#3 | both |  | recommended | M2-124 §2.4 | an implementation expects these errors and uses the transport's data integrity tools |  |  |
+m2-124/3.1#1 | both |  | required | M2-124 §3.1 | every device has at least one IPv4 address |  |  |
+m2-124/3.1#2 | both |  | recommended | M2-124 §3.1 | a device also supports IPv6 |  |  |
+m2-124/3.1#3 | both |  | required | M2-124 §3.1 | a device supports at least one of the listed address assignment options |  |  |
+m2-124/3.1#4 | both |  | recommended | M2-124 §3.1 | a device offers both of those options |  |  |
+m2-124/3.1#5 | host |  | required | M2-124 §3.1 | a Host that advertises exposes its addresses in A and AAAA records |  |  |
+m2-124/3.2#1 | host |  | required | M2-124 §3.2 | a Host holds one dedicated UDP port for its lifetime |  |  |
+m2-124/3.2#2 | host |  | required | M2-124 §3.2 | a Host sends from that port |  |  |
+m2-124/3.2#3 | host |  | required | M2-124 §3.2 | an advertising Host puts the port in the SRV record |  |  |
+m2-124/3.2#4 | host |  | required | M2-124 §3.2 | a Host tells its Clients apart by source IP address and port |  |  |
+m2-124/3.2#5 | host |  | required | M2-124 §3.2 | a device with several Hosts gives each its own port |  |  |
+m2-124/3.3#1 | client |  | required | M2-124 §3.3 | a Client holds one dedicated UDP port |  |  |
+m2-124/3.3#2 | client |  | recommended | M2-124 §3.3 | a Client takes a free port just before connecting |  |  |
+m2-124/3.3#3 | client |  | permitted | M2-124 §3.3 | a Client can free its port after the Session ends |  |  |
+m2-124/3.3#4 | client |  | permitted | M2-124 §3.3 | a Client can take a new port for each Session |  |  |
+m2-124/3.3#5 | client |  | permitted | M2-124 §3.3 | a constrained device can use one port for several Clients |  |  |
+m2-124/3.3#6 | client |  | required | M2-124 §3.3 | a Client does not connect twice at once to one Host from the same port | neg=1 |  |
+m2-124/3.3#7 | both |  | recommended | M2-124 §3.3 | a device that is both Host and Client does not share one port between the roles | neg=1 |  |
+m2-124/4.1#1 | both |  | required | M2-124 §4.1 | with Discovery on, Hosts are found by mDNS with DNS-SD |  |  |
+m2-124/4.1#2 | both |  | permitted | M2-124 §4.1 | an endpoint can connect directly by entering an address and port |  |  |
+m2-124/4.1#3 | both |  | permitted | M2-124 §4.1 | an application can use the OS mDNS service or its own to advertise |  |  |
+m2-124/4.1#4 | both |  | recommended | M2-124 §4.1 | developers follow the OS vendors' guidance, including a MIDI-specific API |  |  |
+m2-124/4.2#1 | host |  | permitted | M2-124 §4.2 | a device can advertise several service instances with several PTR records |  |  |
+m2-124/4.2#2 | host |  | required | M2-124 §4.2 | several Host instances on one hostname have unique Service Instance Names |  |  |
+m2-124/4.2#3 | host |  | recommended | M2-124 §4.2 | Service Instance Names stay the same across power cycles |  |  |
+m2-124/4.2#4 | both |  | recommended | M2-124 §4.2 | the Service Instance Name is not shown to the user | neg=1 |  |
+m2-124/4.2#5 | both |  | recommended | M2-124 §4.2 | the UMP Endpoint Name of the TXT record is what the user sees |  |  |
+m2-124/4.3#1 | host |  | required | M2-124 §4.3 | the hostname includes the .local domain |  |  |
+m2-124/4.3#2 | host |  | required | M2-124 §4.3 | hostnames are unique in a network |  |  |
+m2-124/4.3#3 | host |  | recommended | M2-124 §4.3 | a device lets the user set the hostname |  |  |
+m2-124/4.3#4 | host |  | recommended | M2-124 §4.3 | a device without a screen puts a unique id in its hostname |  |  |
+m2-124/4.4#1 | host |  | required | M2-124 §4.4 | every device has a TXT record with extra information about the service |  |  |
+m2-124/4.4#2 | both |  | permitted | M2-124 §4.4 | systems can use the Endpoint Name and Product Instance Id to recall a device on reconnect |  |  |
+m2-124/4.4#3 | both |  | recommended | M2-124 §4.4 | the UMPEndpointName field is the name shown to the user |  |  |
+m2-124/4.4#4 | host |  | required | M2-124 §4.4 | the TXT name equals the name in the Invitation replies and the Endpoint Name Notification |  |  |
+m2-124/4.4#5 | host |  | required | M2-124 §4.4 | the Endpoint Name is UTF-8 and at most 98 bytes |  |  |
+m2-124/4.4#6 | host |  | required | M2-124 §4.4 | each Host instance of a device has its own Endpoint Name |  |  |
+m2-124/4.4#7 | host |  | required | M2-124 §4.4 | the Product Instance Id is ASCII 32 to 126 only |  |  |
+m2-124/4.4#8 | host |  | required | M2-124 §4.4 | the TXT Product Instance Id equals the one in the Product Instance Id Notification |  |  |
+m2-124/4.4#9 | host |  | recommended | M2-124 §4.4 | the Product Instance Id is at most 42 bytes | neg=1 |  |
+m2-124/4.4#10 | host |  | recommended | M2-124 §4.4 | all Hosts of one device use the same Product Instance Id |  |  |
+m2-124/4.6#1 | host |  | recommended | M2-124 §4.6 | a Host keeps its service TTL to one minute or less | neg=1 |  |
+m2-124/5.1.1#1 | both |  | recommended | M2-124 §5.1.1 | a UDP packet stays within 1400 bytes | neg=1 |  |
+m2-124/5.1.1#2 | both |  | recommended | M2-124 §5.1.1 | an implementation takes care to avoid fragmented packets |  |  |
+m2-124/5.2#1 | both |  | required | M2-124 §5.2 | every UDP packet starts with the word 0x4D494449 |  |  |
+m2-124/5.2#2 | both |  | required | M2-124 §5.2 | a receiver checks that first word |  |  |
+m2-124/5.2#3 | both |  | required | M2-124 §5.2 | a packet that fails the check is ignored whole |  |  |
+m2-124/5.3#1 | both |  | required | M2-124 §5.3 | strings are UTF-8 with no byte order mark |  |  |
+m2-124/5.3#2 | both |  | required | M2-124 §5.3 | a string that ends inside a word is padded with zero bytes |  |  |
+m2-124/5.3#3 | both |  | required | M2-124 §5.3 | a receiver accepts a string bounded by the Command length |  |  |
+m2-124/5.3#4 | both |  | permitted | M2-124 §5.3 | an empty string at the end of a Command can be left out |  |  |
+m2-124/5.3#5 | both |  | required | M2-124 §5.3 | every Reserved field, byte and bit is sent as zero |  |  |
+m2-124/5.3#6 | both |  | required | M2-124 §5.3 | a receiver ignores Reserved bits even when not zero |  |  |
+m2-124/5.3#7 | both |  | required | M2-124 §5.3 | payload words beyond the defined fields are ignored if the length counts them |  |  |
+m2-124/5.3#8 | both |  | permitted | M2-124 §5.3 | future versions can add optional extensions |  |  |
+m2-124/5.4#1 | both |  | required | M2-124 §5.4 | unused Command Specific Data is zero |  |  |
+m2-124/5.5#1 | both |  | required | M2-124 §5.5 | an unknown Command Code gets a NAK, Command not supported |  |  |
+m2-124/5.5#2 | both |  | recommended | M2-124 §5.5 | a sender does not repeat a Command that was NAKed as not supported | neg=1 |  |
+m2-124/6.1#1 | both |  | permitted | M2-124 §6.1 | state: Idle means peers may know each other but no Invitation was sent |  |  |
+m2-124/6.2#1 | both |  | recommended | M2-124 §6.2 | some Commands are repeated until their reply or a timeout |  |  |
+m2-124/6.2#2 | both |  | recommended | M2-124 §6.2 | a reasonable delay is left before each repeat |  |  |
+m2-124/6.2#3 | both |  | required | M2-124 §6.2 | at its timeout a device stops repeating and sends a Bye, unless it was repeating a Bye |  |  |
+m2-124/6.2#4 | both |  | recommended | M2-124 §6.2 | the list of Commands that are repeated |  |  |
+m2-124/6.4#1 | client |  | required | M2-124 §6.4 | a Client starts a Session by sending an Invitation |  |  |
+m2-124/6.4#2 | both |  | permitted | M2-124 §6.4 | either side can end a pending Invitation with a Bye |  |  |
+m2-124/6.4#3 | client |  | recommended | M2-124 §6.4 | the Invitation is repeated with a delay until a reply arrives |  |  |
+m2-124/6.4#4 | client |  | permitted | M2-124 §6.4 | a Client can time out an Invitation after a reasonable time |  |  |
+m2-124/6.4#5 | client |  | required | M2-124 §6.4 | a failed Invitation is ended with Bye reason 0x80 |  |  |
+m2-124/6.4#6 | host |  | required | M2-124 §6.4 | a Host answers an Invitation with one of the listed replies |  |  |
+m2-124/6.4#7 | host |  | recommended | M2-124 §6.4 | a Host notes the address and port the Client wrote from |  |  |
+m2-124/6.4#8 | host |  | required | M2-124 §6.4 | an Invitation from a Client already in a Session is answered Accepted |  |  |
+m2-124/6.4#9 | client |  | required | M2-124 §6.4 | a Client with no Host role NAKs an Invitation, reason 0x02 |  |  |
+m2-124/6.4#10 | host |  | permitted | M2-124 §6.4 | a Host can ask for password authentication |  |  |
+m2-124/6.4#11 | host |  | permitted | M2-124 §6.4 | a Host can ask for user authentication |  |  |
+m2-124/6.4#12 | host |  | permitted | M2-124 §6.4 | a Host can fall back, for example to a manual confirmation |  |  |
+m2-124/6.4#13 | host |  | required | M2-124 §6.4 | a Host with no Pending fallback that requires authentication and finds no common method sends Bye 0x45 |  |  |
+m2-124/6.4#14 | client |  | required | M2-124 §6.4 | the Client gives the Host a name |  |  |
+m2-124/6.4#15 | client |  | required | M2-124 §6.4 | that name equals the Endpoint Name Notification |  |  |
+m2-124/6.4#16 | client |  | required | M2-124 §6.4 | the Client gives the Host a Product Instance Id |  |  |
+m2-124/6.4#17 | client |  | required | M2-124 §6.4 | that id equals the Product Instance Id Notification |  |  |
+m2-124/6.5#1 | host |  | permitted | M2-124 §6.5 | a Host can accept a pending Session with Invitation Reply: Accepted |  |  |
+m2-124/6.5#2 | both |  | permitted | M2-124 §6.5 | after that either side can send UMP Command Packets |  |  |
+m2-124/6.5#3 | client |  | required | M2-124 §6.5 | a Client already in a Session ignores another Accepted |  |  |
+m2-124/6.5#4 | client |  | required | M2-124 §6.5 | an Accepted with no pending Session gets Bye 0x06 |  |  |
+m2-124/6.5#5 | host |  | required | M2-124 §6.5 | the Host gives the Client a name |  |  |
+m2-124/6.5#6 | host |  | required | M2-124 §6.5 | that name equals the Endpoint Name Notification |  |  |
+m2-124/6.5#7 | host |  | required | M2-124 §6.5 | a mDNS Host uses the same name as in its TXT record |  |  |
+m2-124/6.5#8 | host |  | required | M2-124 §6.5 | the Host gives the Client a Product Instance Id |  |  |
+m2-124/6.5#9 | host |  | required | M2-124 §6.5 | a mDNS Host uses the same id as in its TXT record |  |  |
+m2-124/6.6#1 | host |  | permitted | M2-124 §6.6 | a Host can reply Pending while it decides or authenticates |  |  |
+m2-124/6.6#2 | client |  | required | M2-124 §6.6 | a Client waits for the next reply after a Pending |  |  |
+m2-124/6.6#3 | client |  | required | M2-124 §6.6 | a Pending outside a pending or established Session gets Bye 0x06 |  |  |
+m2-124/6.6#4 | host |  | required | M2-124 §6.6 | a Host that receives a Pending NAKs it, reason 0x02 |  |  |
+m2-124/6.7#1 | host |  | permitted | M2-124 §6.7 | a Host can reply Authentication Required when it needs authentication |  |  |
+m2-124/6.7#2 | host |  | required | M2-124 §6.7 | it does so only if the Client's Invitation flagged authentication support |  |  |
+m2-124/6.7#3 | client |  | required | M2-124 §6.7 | the Client uses the reply's nonce in its Invitation with Authentication |  |  |
+m2-124/6.7#4 | host |  | required | M2-124 §6.7 | the Host remembers the nonce it gave that Client |  |  |
+m2-124/6.7#5 | host |  | recommended | M2-124 §6.7 | a repeated Invitation gets the same nonce |  |  |
+m2-124/6.7#6 | host |  | required | M2-124 §6.7 | every new Session gets a new nonce |  |  |
+m2-124/6.7#7 | host |  | permitted | M2-124 §6.7 | a wrong username or digest can be answered with Authentication Required again |  |  |
+m2-124/6.7#8 | host |  | recommended | M2-124 §6.7 | that answer is delayed so brute force is impractical |  |  |
+m2-124/6.7#9 | host |  | required | M2-124 §6.7 | a Host that receives Authentication Required NAKs it, reason 0x02 |  |  |
+m2-124/6.7#10 | client |  | required | M2-124 §6.7 | a Client that receives it without inviting NAKs it, reason 0x02 |  |  |
+m2-124/6.7#11 | host |  | required | M2-124 §6.7 | the first challenge carries Authentication State 0x00 |  |  |
+m2-124/6.7#12 | host |  | required | M2-124 §6.7 | a failed authentication gets one of two listed replies |  |  |
+m2-124/6.8#1 | host |  | permitted | M2-124 §6.8 | a Host can reply User Authentication Required when it needs user authentication |  |  |
+m2-124/6.8#2 | host |  | required | M2-124 §6.8 | it does so only if the Client flagged user authentication support |  |  |
+m2-124/6.8#3 | client |  | required | M2-124 §6.8 | the Client uses the reply's nonce in its next Invitation |  |  |
+m2-124/6.8#4 | host |  | required | M2-124 §6.8 | the Host remembers the nonce as in section 6.7 |  |  |
+m2-124/6.8#5 | host |  | recommended | M2-124 §6.8 | a repeated Invitation gets the same nonce |  |  |
+m2-124/6.8#6 | host |  | recommended | M2-124 §6.8 | a failed attempt is answered after a delay |  |  |
+m2-124/6.8#7 | host |  | required | M2-124 §6.8 | a Host that receives User Authentication Required NAKs it, reason 0x02 |  |  |
+m2-124/6.8#8 | client |  | required | M2-124 §6.8 | a Client that receives it without inviting NAKs it, reason 0x02 |  |  |
+m2-124/6.8#9 | host |  | required | M2-124 §6.8 | the first user challenge carries Authentication State 0x00 |  |  |
+m2-124/6.8#10 | host |  | required | M2-124 §6.8 | a failed user authentication gets one of two listed replies |  |  |
+m2-124/6.9#1 | client |  | recommended | M2-124 §6.9 | a Client answers Authentication Required with an Invitation with Authentication |  |  |
+m2-124/6.9#2 | client |  | recommended | M2-124 §6.9 | the Client asks the user for the secret, or uses a cached one |  |  |
+m2-124/6.9#3 | host |  | required | M2-124 §6.9 | matching digests get Invitation Reply: Accepted |  |  |
+m2-124/6.9#4 | host |  | required | M2-124 §6.9 | a digest mismatch gets Authentication Required with the failed flag |  |  |
+m2-124/6.9#5 | host |  | recommended | M2-124 §6.9 | an authenticated Invitation with no prior Invitation is ended with Bye 0x41 |  |  |
+m2-124/6.9#6 | client |  | recommended | M2-124 §6.9 | the Client repeats this Command until a reply arrives |  |  |
+m2-124/6.9#7 | client |  | recommended | M2-124 §6.9 | after a reasonable time the Client treats the Invitation as failed and sends a Bye |  |  |
+m2-124/6.9#8 | host |  | recommended | M2-124 §6.9 | an authenticated Invitation with no prior Invitation is ended with Bye 0x41 |  |  |
+m2-124/6.9#9 | both |  | required | M2-124 §6.9 | the digest is SHA-256 of the nonce and the shared secret together |  |  |
+m2-124/6.10#1 | client |  | recommended | M2-124 §6.10 | a Client with user authentication answers with an Invitation with User Authentication |  |  |
+m2-124/6.10#2 | host |  | recommended | M2-124 §6.10 | the Host keeps a list of permitted users and passwords |  |  |
+m2-124/6.10#3 | client |  | permitted | M2-124 §6.10 | the Client can keep user and password pairs or ask for them |  |  |
+m2-124/6.10#4 | host |  | required | M2-124 §6.10 | the Host then follows one of two listed procedures |  |  |
+m2-124/6.10#5 | host |  | required | M2-124 §6.10 | an unknown username gets User Authentication Required with the user-not-found flag |  |  |
+m2-124/6.10#6 | both |  | permitted | M2-124 §6.10 | either side can end a pending Invitation with a Bye |  |  |
+m2-124/6.10#7 | client |  | recommended | M2-124 §6.10 | the Client repeats this Command until a reply arrives |  |  |
+m2-124/6.10#8 | client |  | recommended | M2-124 §6.10 | after a reasonable time the Client treats the Invitation as failed and sends a Bye |  |  |
+m2-124/6.10#9 | host |  | recommended | M2-124 §6.10 | a user Invitation with no prior Invitation is ended with Bye 0x41 |  |  |
+m2-124/6.10#10 | both |  | required | M2-124 §6.10 | the digest is SHA-256 of the nonce, username and password together |  |  |
+m2-124/6.11#1 | both |  | permitted | M2-124 §6.11 | either side can send Session Reset at any time in an active Session |  |  |
+m2-124/6.11#2 | both |  | recommended | M2-124 §6.11 | Session Reset is repeated until its reply or a timeout |  |  |
+m2-124/6.11#3 | both |  | required | M2-124 §6.11 | while waiting for the reply a device sends no UMP Data | neg=1 |  |
+m2-124/6.11#4 | both |  | required | M2-124 §6.11 | on the reply the Session is reset |  |  |
+m2-124/6.11#5 | both |  | required | M2-124 §6.11 | on timeout the Session ends with Bye 0x04 |  |  |
+m2-124/6.11#6 | both |  | recommended | M2-124 §6.11 | Session Reset is repeated until its reply or a timeout |  |  |
+m2-124/6.11#7 | both |  | required | M2-124 §6.11 | on timeout the Session ends with Bye 0x04 |  |  |
+m2-124/6.11#8 | both |  | required | M2-124 §6.11 | a receiver of Session Reset replies and resets the Session |  |  |
+m2-124/6.11#9 | both |  | required | M2-124 §6.11 | a Session Reset outside an active Session gets Bye 0x05 |  |  |
+m2-124/6.11#10 | both |  | required | M2-124 §6.11 | after a reset both devices act as if the Session were newly started |  |  |
+m2-124/6.11#11 | both |  | required | M2-124 §6.11 | Sequence Numbers return to 0 |  |  |
+m2-124/6.11#12 | both |  | required | M2-124 §6.11 | the FEC and Retransmit buffers are emptied |  |  |
+m2-124/6.12#1 | both |  | required | M2-124 §6.12 | a Session Reset is answered with Session Reset Reply |  |  |
+m2-124/6.12#2 | both |  | required | M2-124 §6.12 | the Reply resets the Session as the Reset does |  |  |
+m2-124/6.12#3 | both |  | recommended | M2-124 §6.12 | a Reply with no prior Reset makes the receiver send a Reset |  |  |
+m2-124/6.12#4 | both |  | required | M2-124 §6.12 | a Reply outside an active Session gets Bye 0x05 |  |  |
+m2-124/6.13#1 | both |  | permitted | M2-124 §6.13 | a Ping can be sent at any time in any Session State |  |  |
+m2-124/6.13#2 | both |  | recommended | M2-124 §6.13 | unanswered Pings over a long time end the Session |  |  |
+m2-124/6.13#3 | both |  | recommended | M2-124 §6.13 | a Bye with reason 0x04 is then sent |  |  |
+m2-124/6.13#4 | both |  | permitted | M2-124 §6.13 | the Ping Id is any value the Sender picks |  |  |
+m2-124/6.13#5 | both |  | required | M2-124 §6.13 | the Ping Id has no other use | neg=1 |  |
+m2-124/6.14#1 | both |  | required | M2-124 §6.14 | a Ping gets a Ping Reply as soon as possible |  |  |
+m2-124/6.14#2 | both |  | recommended | M2-124 §6.14 | a Ping Reply bypasses other pending Commands so round-trip timing stays true |  |  |
+m2-124/6.14#3 | both |  | permitted | M2-124 §6.14 | a Ping Reply that was not asked for, or has a wrong id, can get NAK 0x20 |  |  |
+m2-124/6.15#1 | both |  | recommended | M2-124 §6.15 | NAK text complements the reason and does not repeat it |  |  |
+m2-124/6.15#2 | both |  | required | M2-124 §6.15 | NAK text is UTF-8 |  |  |
+m2-124/6.15#3 | both |  | required | M2-124 §6.15 | NAK text that ends inside a word is zero padded |  |  |
+m2-124/6.16#1 | both |  | required | M2-124 §6.16 | a Bye ends a Session or a pending Invitation |  |  |
+m2-124/6.16#2 | both |  | recommended | M2-124 §6.16 | a Bye is repeated until its reply or a timeout |  |  |
+m2-124/6.16#3 | both |  | required | M2-124 §6.16 | a received Bye is answered with Bye Reply |  |  |
+m2-124/6.16#4 | both |  | required | M2-124 §6.16 | a Bye is answered even when no Session exists |  |  |
+m2-124/6.16#5 | both |  | required | M2-124 §6.16 | Bye text is UTF-8 with no byte order mark |  |  |
+m2-124/6.16#6 | both |  | required | M2-124 §6.16 | Bye text that ends inside a word is zero padded |  |  |
+m2-124/6.17#1 | both |  | required | M2-124 §6.17 | a Bye is answered with Bye Reply |  |  |
+m2-124/6.17#2 | both |  | required | M2-124 §6.17 | a Bye Reply stops the repeated Bye |  |  |
+m2-124/6.17#3 | both |  | required | M2-124 §6.17 | a Bye Reply with no Established Session is ignored |  |  |
+m2-124/7.1#1 | both |  | permitted | M2-124 §7.1 | in an Established Session both sides can send UMP Data |  |  |
+m2-124/7.1#2 | both |  | required | M2-124 §7.1 | UMP Data outside an Established Session gets Bye 0x05 |  |  |
+m2-124/7.1#3 | both |  | required | M2-124 §7.1 | a UMP Data Command is at most 64 words | neg=1 |  |
+m2-124/7.1#4 | both |  | required | M2-124 §7.1 | sequence numbers start at 0 and rise by one per UMP Data Command |  |  |
+m2-124/7.1#5 | both |  | recommended | M2-124 §7.1 | a receiver checks the numbers for missing, duplicate and reordered commands |  |  |
+m2-124/7.1#6 | both |  | permitted | M2-124 §7.1 | the payload is one of two listed forms |  |  |
+m2-124/7.1#7 | both |  | required | M2-124 §7.1 | several UMPs in one Command keep their order |  |  |
+m2-124/7.1#8 | both |  | permitted | M2-124 §7.1 | UMPs in one Command can be rendered together |  |  |
+m2-124/7.1#9 | both |  | required | M2-124 §7.1 | a UMP packet is sent whole inside one Command |  |  |
+m2-124/7.1#10 | both |  | permitted | M2-124 §7.1 | one UDP payload can hold several UMP Data Commands |  |  |
+m2-124/7.2#1 | both |  | permitted | M2-124 §7.2 | example: commands 1 and 2 can arrive as 2 then 1 |  |  |
+m2-124/7.2.1#1 | both |  | required | M2-124 §7.2.1 | a Sender with nothing to send declares it with a Zero Length UMP Data Command |  |  |
+m2-124/7.2.1#2 | both |  | required | M2-124 §7.2.1 | the first one comes within 300 ms of the last non-empty command |  |  |
+m2-124/7.2.1#3 | both |  | recommended | M2-124 §7.2.1 | timing-critical uses pick a shorter interval |  |  |
+m2-124/7.2.1#4 | both |  | recommended | M2-124 §7.2.1 | further idle Commands come at growing intervals |  |  |
+m2-124/7.2.1#5 | both |  | permitted | M2-124 §7.2.1 | the Sender picks those intervals |  |  |
+m2-124/7.2.1#6 | both |  | recommended | M2-124 §7.2.1 | the Sender widens the interval and finally stops sending them |  |  |
+m2-124/7.2.1#7 | both |  | required | M2-124 §7.2.1 | Zero Length Commands use Sequence Numbers like any other |  |  |
+m2-124/7.2.1#8 | both |  | recommended | M2-124 §7.2.1 | the Sender allows for receivers that prefer little traffic |  |  |
+m2-124/7.2.2#1 | both |  | recommended | M2-124 §7.2.2 | a Sender includes the two previously sent commands for FEC |  |  |
+m2-124/7.2.2#2 | both |  | permitted | M2-124 §7.2.2 | a Sender can send one repeat, or more than two |  |  |
+m2-124/7.2.2#3 | both |  | required | M2-124 §7.2.2 | a receiver skips commands it already has |  |  |
+m2-124/7.2.2#4 | both |  | recommended | M2-124 §7.2.2 | before an idle period the last commands are repeated in packets with idle Commands |  |  |
+m2-124/7.2.2#5 | both |  | recommended | M2-124 §7.2.2 | up to as many such packets as the FEC repeat count |  |  |
+m2-124/7.2.2#6 | both |  | recommended | M2-124 §7.2.2 | example: with 10 ms idle and two repeats, two more idle packets go out |  |  |
+m2-124/7.2.2#7 | both |  | required | M2-124 §7.2.2 | earlier payloads are put first, in the order they were sent |  |  |
+m2-124/7.2.3#1 | both |  | permitted | M2-124 §7.2.3 | a device can send a Retransmit Request |  |  |
+m2-124/7.2.3#2 | both |  | recommended | M2-124 §7.2.3 | it waits briefly, for example 10 ms, before asking |  |  |
+m2-124/7.2.3#3 | both |  | recommended | M2-124 §7.2.3 | the request is repeated with growing delay until data, an error, a NAK or a timeout |  |  |
+m2-124/7.2.3#4 | both |  | recommended | M2-124 §7.2.3 | a device that gets a request resends from the requested sequence number |  |  |
+m2-124/7.2.3#5 | both |  | recommended | M2-124 §7.2.3 | a device missing requested data sends a Retransmit Error naming the first missing number |  |  |
+m2-124/7.2.3#6 | both |  | recommended | M2-124 §7.2.3 | available commands after the gap are still resent |  |  |
+m2-124/7.2.3#7 | both |  | recommended | M2-124 §7.2.3 | the resend has no gaps |  |  |
+m2-124/7.2.3#8 | both |  | recommended | M2-124 §7.2.3 | the retransmit buffer is ordered with sequence wrap-around in mind |  |  |
+m2-124/7.2.3#9 | both |  | permitted | M2-124 §7.2.3 | a request for data already requested can be ignored |  |  |
+m2-124/7.2.3#10 | both |  | required | M2-124 §7.2.3 | a device without Retransmit NAKs a request, reason 0x01 |  |  |
+m2-124/7.2.3#11 | both |  | recommended | M2-124 §7.2.3 | the requester then stops sending requests | neg=1 |  |
+m2-124/7.2.3#12 | both |  | required | M2-124 §7.2.3 | a request outside an Established Session gets Bye 0x05 |  |  |
+m2-124/7.2.3#13 | both |  | permitted | M2-124 §7.2.3 | the Sender can ignore the count and resend everything since the number |  |  |
+m2-124/7.2.4#1 | both |  | required | M2-124 §7.2.4 | a device that cannot retransmit sends a Retransmit Error |  |  |
+m2-124/7.2.4#2 | both |  | required | M2-124 §7.2.4 | it does not resend the other available commands | neg=1 |  |
+m2-124/7.2.4#3 | both |  | permitted | M2-124 §7.2.4 | the receiver picks its own recovery, such as an all-notes-off |  |  |
+m2-124/7.2.4#4 | both |  | required | M2-124 §7.2.4 | a Retransmit Error outside an Established Session gets Bye 0x05 |  |  |
+m2-124/8#1 | both |  | permitted | M2-124 §8 | a Host can also connect to other Hosts as a Client |  |  |
+m2-124/8#2 | both |  | required | M2-124 §8 | a device in both roles uses one Endpoint Name and Product Instance Id in both |  |  |
+m2-124/8#3 | both |  | permitted | M2-124 §8 | equal names help others match an Invitation to a known Host |  |  |
+m2-124/8#4 | both |  | recommended | M2-124 §8 | the two roles use their own UDP ports |  |  |
+m2-124/9#1 | both |  | permitted | M2-124 §9 | a device can have several UMP Endpoints |  |  |
+m2-124/9#2 | host |  | required | M2-124 §9 | each exposed Endpoint is its own Host with its own port and name |  |  |
+m2-124/a.3#1 | both |  | permitted | M2-124 §A.3 | example: a Sender can send further packets with Zero Length UMP Data while idle |  |  |

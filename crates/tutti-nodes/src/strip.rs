@@ -393,7 +393,7 @@ impl BusStripNode {
 /// its one home.
 #[inline(always)]
 fn lerp(from: Amplitude, to: Amplitude, t: f32) -> Amplitude {
-    Amplitude(from.get() * (1.0 - t) + to.get() * t)
+    Amplitude(tutti_dsp::lerp(from.get(), to.get(), t))
 }
 
 /// `y = x · gain(frame)`, over one channel's block.

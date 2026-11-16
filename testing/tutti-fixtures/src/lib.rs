@@ -86,7 +86,8 @@ pub use machine_lock::{MachineLock, machine_lock};
 pub use main_thread::{main_thread, main_thread_cases};
 #[cfg(feature = "plugin")]
 pub use plugin::{
-    Activation, Active, Pump, StandInWindow, Whole, detached_work, pump, pumped_work, vst3_module,
+    Activation, Active, Pump, StandInWindow, Whole, detached_work, pump, pumped_work, tempo,
+    vst3_module,
 };
 pub use range_contract::{RangeContract, check_range_contract, check_range_serde};
 pub use round_trip::check_round_trip;

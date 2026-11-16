@@ -126,7 +126,7 @@ fn load() -> Loaded {
     )
     .unwrap_or_else(|e| panic!("in-process load of reference plugin at {path:?}: {e:?}"));
     Loaded {
-        unit: unit.bind(tempo()),
+        unit: unit.bind(tutti_fixtures::tempo()),
         handle,
         path,
     }
@@ -388,11 +388,6 @@ fn a_rate_change_keeps_the_render_mode() {
         cap.process_level, LEVEL_OFFLINE,
         "the rate change re-activated the plugin in realtime mode"
     );
-}
-
-/// The project's tempo map the node under test is bound to.
-fn tempo() -> tutti_transport::TempoReader {
-    tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo")
 }
 
 /// The cases run on the process's main thread (`harness = false`): the node's `prepare`

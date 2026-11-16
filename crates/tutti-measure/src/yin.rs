@@ -378,8 +378,8 @@ pub fn penalize_jumps(pitches: &[PitchEstimate], jump_penalty: Confidence) -> Ve
             continue;
         }
 
-        let cost = ((ratio.ln().abs() / MAJOR_THIRD_LN) - 1.0).max(0.0);
-        let attenuation = (-jump_penalty.get() * cost).exp();
+        let cost = ((libm::logf(ratio).abs() / MAJOR_THIRD_LN) - 1.0).max(0.0);
+        let attenuation = libm::expf(-jump_penalty.get() * cost);
         if let PitchEstimate::Voiced(pitch) = &mut result[i] {
             pitch.confidence = Confidence::new_clamped(pitch.confidence.get() * attenuation);
         }

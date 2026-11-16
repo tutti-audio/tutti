@@ -55,7 +55,7 @@ fn render_block(processor: &mut AuProcessor, level: f32, changes: &ParameterChan
             inputs: &inputs,
             outputs: &mut outputs,
             num_samples: BLOCK,
-            sample_rate: RATE.get(),
+            sample_rate: RATE,
         }),
         ctx: &ctx,
         out: &mut out,

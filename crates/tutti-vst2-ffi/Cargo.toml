@@ -39,7 +39,7 @@ bitflags = "2"
 libc = "0.2"
 libloading.workspace = true
 thiserror.workspace = true
-tracing = "0.1"
+tracing.workspace = true
 num-traits = "0.2"
 crossbeam-queue = { version = "0.3", default-features = false, features = ["alloc"] }
 tutti-graph = { version = "0.0.1", path = "../tutti-graph" }

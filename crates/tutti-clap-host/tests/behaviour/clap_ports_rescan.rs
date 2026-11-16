@@ -246,7 +246,7 @@ fn a_rate_change_rereads_the_port_layout() {
         inputs: &in_refs,
         outputs: &mut out_refs,
         num_samples: FRAMES,
-        sample_rate: 44_100.0,
+        sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
     };
     active
         .process(&mut buffer, &ClapProcessContext::default())
@@ -265,7 +265,7 @@ fn process_f32_block(active: &mut Active<f32>, channels: usize) -> Result<(), Cl
         inputs: &in_refs,
         outputs: &mut out_refs,
         num_samples: FRAMES,
-        sample_rate: 44_100.0,
+        sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
     };
     let ctx = ClapProcessContext::default();
     assert_no_alloc(|| active.process(&mut buffer, &ctx).map(|_| ()))
@@ -408,6 +408,6 @@ fn reactivate_rereads_the_port_layout_in_place() {
         3,
         "the plugin's new layout"
     );
-    assert_eq!(active.loaded().sample_rate(), 48_000.0);
+    assert_eq!(active.loaded().sample_rate().get(), 48_000.0);
     assert_eq!(active.loaded().block_size(), 512);
 }

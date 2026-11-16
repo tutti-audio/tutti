@@ -80,6 +80,7 @@ fn the_ported_gates_are_in_process_steps_and_ci_runs_them() {
         ("check-layout", "gate check-layout"),
         ("check-ffi", "gate check-ffi"),
         ("check-errors", "gate check-errors"),
+        ("check-logging", "gate check-logging"),
         ("check-guards", "gate check-guards"),
         ("check-hosting", "gate check-hosting"),
         ("check-session", "gate check-session"),
@@ -105,6 +106,7 @@ fn the_ported_gates_are_in_process_steps_and_ci_runs_them() {
         "gate check-layout",
         "gate check-ffi",
         "gate check-errors",
+        "gate check-logging",
         "gate check-guards",
         "gate check-hosting",
         "gate check-session",
@@ -429,6 +431,47 @@ fn public_api_lists_on_the_docs_nightly_or_diffs_from_a_base() {
         [
             "cargo +nightly-2026-10-14 public-api --package tutti-rt --all-features -s diff origin/main..HEAD"
         ]
+    );
+}
+
+/// `umbrella-api` needs the docs nightly, so neither `gates` nor `ci` plans it.
+#[test]
+fn umbrella_api_is_a_local_recipe_outside_gates_and_ci() {
+    let umbrella = |recipe: &str| {
+        plan(recipe, &[], &ctx())
+            .unwrap()
+            .iter()
+            .any(|s| matches!(s, Step::UmbrellaApi(_)))
+    };
+    assert!(umbrella("umbrella-api"));
+    for recipe in ["gates", "ci"] {
+        assert!(!umbrella(recipe), "{recipe}");
+    }
+}
+
+#[test]
+fn umbrella_api_takes_one_optional_directory() {
+    let step = |args: &[&str]| {
+        let args: Vec<String> = args.iter().map(|s| (*s).to_owned()).collect();
+        plan("umbrella-api", &args, &ctx())
+    };
+    assert!(matches!(&step(&[]).unwrap()[..], [Step::UmbrellaApi(None)]));
+    assert!(matches!(&step(&["texts"]).unwrap()[..], [Step::UmbrellaApi(Some(d))] if d == "texts"));
+    assert_eq!(
+        step(&["a", "b"]).unwrap_err(),
+        "`umbrella-api` takes at most 1 argument(s), got 2"
+    );
+}
+
+#[test]
+fn the_public_api_command_is_one_for_both_recipes() {
+    assert_eq!(
+        public_api_cmd("tutti-rt"),
+        "cargo +nightly-2026-10-14 public-api --package tutti-rt --all-features -s"
+    );
+    assert_eq!(
+        dry("public-api", &["tutti-rt"]),
+        [public_api_cmd("tutti-rt")]
     );
 }
 

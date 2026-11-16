@@ -103,6 +103,11 @@ impl EditorUnit {
     /// is measured the way the window system measures its own.
     pub const WINDOWING: Self = platform::WINDOWING;
 
+    /// The width and height a host offers an editor that names no size of its
+    /// own, in whichever unit the caller's format measures: pass it to
+    /// [`size`](Self::size).
+    pub const DEFAULT_EXTENT: (u32, u32) = (800, 600);
+
     /// The size of `width` by `height` in this unit.
     #[must_use]
     pub fn size(self, width: u32, height: u32) -> Size {
