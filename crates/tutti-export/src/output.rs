@@ -63,13 +63,13 @@ impl NormalizeSpec {
 
     /// The normalize policy.
     #[must_use]
-    pub fn mode(&self) -> Normalize {
+    pub(crate) fn mode(&self) -> Normalize {
         self.mode
     }
 
     /// Whose reading the gain comes from.
     #[must_use]
-    pub fn gain(&self) -> GainSource {
+    pub(crate) fn gain(&self) -> GainSource {
         self.gain
     }
 }

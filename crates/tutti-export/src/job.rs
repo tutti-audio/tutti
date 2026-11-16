@@ -10,7 +10,7 @@
 use tutti_types::{SampleRate, Samples};
 
 /// What a render does when the graph it renders dropped events
-/// ([`Job::on_event_loss`]).
+/// ([`Job::event_loss`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[non_exhaustive]
 pub enum EventLossPolicy {
@@ -121,7 +121,7 @@ impl Job {
     }
 
     /// What the render does when the graph dropped an event.
-    pub fn on_event_loss(&self) -> EventLossPolicy {
+    pub(crate) fn on_event_loss(&self) -> EventLossPolicy {
         self.on_event_loss
     }
 

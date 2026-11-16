@@ -335,24 +335,27 @@ impl Default for VelocityRange {
     }
 }
 
-impl VelocityRange {
-    /// Levels from `floor` to `ceiling`.
-    ///
+impl TryFrom<core::ops::RangeInclusive<GateLevel>> for VelocityRange {
+    type Error = Error;
+
     /// # Errors
     ///
-    /// [`Error::InvalidThreshold`] for a bound that is NaN or infinite;
     /// [`Error::EmptyVelocityRange`] unless `floor < ceiling`.
-    pub fn new(floor: impl Into<Db>, ceiling: impl Into<Db>) -> Result<Self> {
-        let (floor, ceiling) = (floor.into(), ceiling.into());
-        for bound in [floor, ceiling] {
-            if !bound.get().is_finite() {
-                return Err(Error::InvalidThreshold { threshold: bound });
-            }
-        }
+    fn try_from(range: core::ops::RangeInclusive<GateLevel>) -> Result<Self> {
+        let (floor, ceiling) = (range.start().get(), range.end().get());
         if floor >= ceiling {
             return Err(Error::EmptyVelocityRange { floor, ceiling });
         }
         Ok(Self { floor, ceiling })
+    }
+}
+
+impl VelocityRange {
+    /// Levels from `floor` to `ceiling`, or `None` unless `floor < ceiling`.
+    /// `TryFrom` over `floor..=ceiling` is the same check with the reason.
+    #[must_use]
+    pub fn new(floor: GateLevel, ceiling: GateLevel) -> Option<Self> {
+        Self::try_from(floor..=ceiling).ok()
     }
 
     /// The MIDI velocity of `level`, `1..=127`. A NaN level is 1.
@@ -768,6 +771,7 @@ fn build_note(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::chroma::FrequencyBand;
     use crate::yin::Pitch;
     use rand::{RngExt, SeedableRng, rngs::StdRng};
     use tutti_dsp::StftGeometry;
@@ -777,7 +781,11 @@ mod tests {
     const TAU: f64 = std::f64::consts::TAU;
 
     fn config(rate: f64, min_freq: f32, hop_div: usize, onset_window: usize) -> NoteConfig {
-        let yin = YinConfig::new(SampleRate::of(rate), Hz(min_freq), Hz(1000.0)).unwrap();
+        let yin = YinConfig::new(
+            SampleRate::of(rate),
+            FrequencyBand::new(Hz(min_freq), Hz(1000.0)).unwrap(),
+        )
+        .unwrap();
         let g = StftGeometry::new(
             SampleRate::of(rate),
             Samples(onset_window),
@@ -789,10 +797,29 @@ mod tests {
             .hop(PitchHop::of(Samples(yin.buffer_size().get() / hop_div)))
     }
 
-    /// How far a note's edge may sit from the true attack or release: one hop
-    /// for the frame grid plus the integration window, half the YIN frame.
+    /// How far a note's start or end may sit from the true attack or release
+    /// of a steady note: one hop for the frame grid plus the integration
+    /// window, half the YIN frame.
+    ///
+    /// The window is the bound because a frame whose window holds only the
+    /// first or last samples of a note still reads voiced (one holding none is
+    /// unvoiced): a start can be early, and an end late, by up to a window. A
+    /// start is never later than a hop and a period after the attack, and an
+    /// end is never earlier than a period and a hop before the release, and a
+    /// period is within a window. An onset-split boundary is as exact as the
+    /// onset, about one onset window; an onset within one onset window of a
+    /// note's start is taken as that start's own and cuts nothing.
+    ///
+    /// The bound holds away from the buffer's end: a note running to the end
+    /// stops at its last whole frame's start plus the window, which is at least
+    /// the window short of the end, and one starting in the final window is
+    /// lost.
     fn timing_tolerance(c: &NoteConfig) -> Samples {
         Samples(c.hop.get() + c.frame().get() / 2)
+    }
+
+    fn band(min: f32, max: f32) -> FrequencyBand {
+        FrequencyBand::new(Hz(min), Hz(max)).unwrap()
     }
 
     fn cfg() -> NoteConfig {
@@ -1199,7 +1226,7 @@ mod tests {
     /// reads NaN as the quietest.
     #[test]
     fn the_velocity_map_is_linear_and_clamped() {
-        let r = VelocityRange::new(Db(-60.0), Db(-20.0)).unwrap();
+        let r = VelocityRange::new(GateLevel::of(Db(-60.0)), GateLevel::of(Db(-20.0))).unwrap();
         assert_eq!(r.midi(Db(-60.0)), 1);
         assert_eq!(r.midi(Db(-20.0)), 127);
         assert_eq!(r.midi(Db(-40.0)), 64);
@@ -1207,10 +1234,18 @@ mod tests {
         assert_eq!(r.midi(Db(0.0)), 127);
         assert_eq!(r.midi(Db(f32::NEG_INFINITY)), 1);
         assert_eq!(r.midi(Db(f32::NAN)), 1);
-        assert!(VelocityRange::new(Db(-20.0), Db(-20.0)).is_err());
-        assert!(VelocityRange::new(Db(-20.0), Db(-30.0)).is_err());
-        assert!(VelocityRange::new(Db(f32::NAN), Db(0.0)).is_err());
-        assert!(VelocityRange::new(Db(-60.0), Db(f32::INFINITY)).is_err());
+        let level = |v: f32| GateLevel::of(Db(v));
+        assert!(VelocityRange::new(level(-20.0), level(-20.0)).is_none());
+        assert_eq!(
+            VelocityRange::try_from(level(-20.0)..=level(-30.0)),
+            Err(Error::EmptyVelocityRange {
+                floor: Db(-20.0),
+                ceiling: Db(-30.0)
+            })
+        );
+        // A NaN or infinite bound is not a `GateLevel`.
+        assert!(GateLevel::new(Db(f32::NAN)).is_none());
+        assert!(GateLevel::new(Db(f32::INFINITY)).is_none());
     }
 
     /// Scaling the input by a power of two (exact in floating point) changes
@@ -1372,12 +1407,12 @@ mod tests {
     fn settings_and_inputs_are_validated() {
         let g = StftGeometry::new(SampleRate::of(RATE), Samples(1024), Samples(256)).unwrap();
         let flux = OnsetConfig::new(g, DetectionFunction::SpectralFlux);
-        let huge = YinConfig::new(SampleRate::of(RATE), Hz(0.01), Hz(1000.0)).unwrap();
+        let huge = YinConfig::new(SampleRate::of(RATE), band(0.01, 1000.0)).unwrap();
         assert!(matches!(
             NoteConfig::new(huge, flux).unwrap_err(),
             Error::YinFrameTooLong { .. }
         ));
-        let yin = YinConfig::new(SampleRate::of(RATE), Hz(80.0), Hz(1000.0)).unwrap();
+        let yin = YinConfig::new(SampleRate::of(RATE), band(80.0, 1000.0)).unwrap();
         let energy = OnsetConfig::new(g, DetectionFunction::Energy);
         assert_eq!(
             NoteConfig::new(yin, energy).unwrap_err(),
@@ -1463,7 +1498,7 @@ mod tests {
     /// anything is allocated.
     #[test]
     fn too_many_frames_are_refused() {
-        let yin = YinConfig::new(SampleRate::of(RATE), Hz(5000.0), Hz(10000.0)).unwrap();
+        let yin = YinConfig::new(SampleRate::of(RATE), band(5000.0, 10000.0)).unwrap();
         let g = StftGeometry::new(SampleRate::of(RATE), Samples(1024), Samples(256)).unwrap();
         let c = NoteConfig::new(yin, OnsetConfig::new(g, DetectionFunction::SpectralFlux)).unwrap();
         assert!(c.frame().get() < 64, "{:?}", c.frame());

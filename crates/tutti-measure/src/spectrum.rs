@@ -159,8 +159,8 @@ impl Smoothing {
 /// window must be at least `rate / width` samples for a first band of `width`
 /// Hz, else [`SpectrumConfig::state`] refuses with [`Error::EmptyBand`].
 /// Bands do not merge or skip: a banding either has every band it names or is
-/// refused. The DC bin is in no band, and the Nyquist bin is in none when `max`
-/// is Nyquist. A band reads the summed power of its bins, so a sine inside one
+/// refused. The DC bin is in no band, and the Nyquist bin is in none when the
+/// band's top is Nyquist. A band reads the summed power of its bins, so a sine inside one
 /// reads about 1.76 dB over its amplitude with a Hann window.
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
@@ -168,8 +168,9 @@ pub enum Banding {
     /// One output per bin, `DC..=Nyquist`.
     Bins,
     /// `per_octave` bands per octave, band `j` spanning
-    /// `min * 2^(j / per_octave) .. min * 2^((j + 1) / per_octave)`, for as
-    /// many bands as end at or below `max` (3 per octave is third-octave).
+    /// `lower * 2^(j / per_octave) .. lower * 2^((j + 1) / per_octave)`, where
+    /// `lower` is the band's lower edge, for as many bands as end at or below
+    /// its upper edge (3 per octave is third-octave).
     Octave {
         /// Bands per octave.
         per_octave: BandsPerOctave,
@@ -177,7 +178,7 @@ pub enum Banding {
         /// ends at or below.
         band: FrequencyBand,
     },
-    /// `count` bands of equal ratio from `min` to `max`.
+    /// `count` bands of equal ratio from the band's lower edge to its upper edge.
     Log {
         /// The number of bands.
         count: BandCount,

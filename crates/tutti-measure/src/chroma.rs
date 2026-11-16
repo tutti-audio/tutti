@@ -125,6 +125,12 @@ pub struct FrequencyBand {
 }
 
 impl FrequencyBand {
+    /// The 50 to 2000 Hz vocal and instrument range.
+    pub(crate) const VOICE: Self = Self {
+        min: Hz(50.0),
+        max: Hz(2000.0),
+    };
+
     /// The band `min..=max`, or `None` where [`TryFrom`] would refuse it.
     #[must_use]
     pub fn new(min: impl Into<Hz>, max: impl Into<Hz>) -> Option<Self> {

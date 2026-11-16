@@ -15,6 +15,7 @@
 
 use tutti_types::{Cents, Confidence, Hz, Note, SampleRate, Samples};
 
+use crate::chroma::FrequencyBand;
 use crate::pitch::PitchDetector;
 use crate::{Error, Result};
 use tutti_dsp::FrameCount;
@@ -37,32 +38,17 @@ pub struct YinConfig {
 }
 
 impl YinConfig {
-    /// Rejects an inverted or empty range, non-positive bounds, and a maximum
-    /// above Nyquist.
-    ///
-    /// Refusing here matters: accepting `(sample_rate, 2000.0, 50.0)` would
-    /// invert the period bounds and report "unvoiced" forever. Two adjacent
-    /// frequency parameters make the transposition easy to write.
+    /// Searches `band` at `sample_rate`. The band holds an ordered, finite,
+    /// positive pair, so an inverted range (which would invert the period
+    /// bounds and report "unvoiced" forever) cannot be written.
     ///
     /// # Errors
     ///
-    /// [`Error::EmptyFrequencyRange`] when a bound is not positive or
-    /// `min_freq` is not below `max_freq`; [`Error::AboveNyquist`] when
-    /// `max_freq` exceeds half the sample rate.
-    pub fn new(
-        sample_rate: impl Into<SampleRate>,
-        min_freq: impl Into<Hz>,
-        max_freq: impl Into<Hz>,
-    ) -> Result<Self> {
+    /// [`Error::AboveNyquist`] when the band's top exceeds half the sample
+    /// rate.
+    pub fn new(sample_rate: impl Into<SampleRate>, band: FrequencyBand) -> Result<Self> {
         let sample_rate = sample_rate.into();
-        let (min_freq, max_freq) = (min_freq.into(), max_freq.into());
-
-        if min_freq.get() <= 0.0 || max_freq.get() <= 0.0 || min_freq >= max_freq {
-            return Err(Error::EmptyFrequencyRange {
-                min: min_freq,
-                max: max_freq,
-            });
-        }
+        let (min_freq, max_freq) = (band.min(), band.max());
 
         let nyquist = Hz((sample_rate.get() / 2.0) as f32);
         if max_freq > nyquist {
@@ -86,7 +72,7 @@ impl YinConfig {
     ///
     /// As [`new`](Self::new): [`Error::AboveNyquist`] at a rate below 4 kHz.
     pub fn standard(sample_rate: impl Into<SampleRate>) -> Result<Self> {
-        Self::new(sample_rate, Hz(50.0), Hz(2000.0))
+        Self::new(sample_rate, FrequencyBand::VOICE)
     }
 
     /// YIN's absolute threshold on the cumulative mean difference. The paper's
@@ -370,30 +356,29 @@ mod tests {
         )
     }
 
-    /// A construction error, rather than a silent runtime nothing.
+    /// No band is written from an inverted, empty, non-positive or NaN pair,
+    /// so there is no silent runtime nothing.
     #[test]
-    fn an_inverted_range_is_refused_at_construction() {
+    fn an_inverted_range_is_not_a_band() {
         assert_eq!(
-            YinConfig::new(SampleRate::SR_44K1, Hz(2000.0), Hz(50.0)),
+            FrequencyBand::try_from(Hz(2000.0)..=Hz(50.0)),
             Err(Error::EmptyFrequencyRange {
                 min: Hz(2000.0),
                 max: Hz(50.0),
             })
         );
-        assert!(matches!(
-            YinConfig::new(SampleRate::SR_44K1, Hz(50.0), Hz(50.0)),
-            Err(Error::EmptyFrequencyRange { .. })
-        ));
-        assert!(matches!(
-            YinConfig::new(SampleRate::SR_44K1, Hz(-10.0), Hz(2000.0)),
-            Err(Error::EmptyFrequencyRange { .. })
-        ));
+        for (lo, hi) in [(50.0, 50.0), (-10.0, 2000.0), (f32::NAN, 2000.0)] {
+            assert!(FrequencyBand::new(Hz(lo), Hz(hi)).is_none(), "{lo} {hi}");
+        }
     }
 
     #[test]
     fn a_maximum_above_nyquist_is_refused() {
         assert_eq!(
-            YinConfig::new(SampleRate::SR_8K, Hz(50.0), Hz(5000.0)),
+            YinConfig::new(
+                SampleRate::SR_8K,
+                FrequencyBand::new(Hz(50.0), Hz(5000.0)).unwrap()
+            ),
             Err(Error::AboveNyquist {
                 freq: Hz(5000.0),
                 nyquist: Hz(4000.0),
@@ -502,7 +487,11 @@ mod tests {
 
     #[test]
     fn periods_derive_from_the_range_and_cannot_contradict_it() {
-        let cfg = YinConfig::new(SampleRate::SR_44K1, Hz(100.0), Hz(1000.0)).unwrap();
+        let cfg = YinConfig::new(
+            SampleRate::SR_44K1,
+            FrequencyBand::new(Hz(100.0), Hz(1000.0)).unwrap(),
+        )
+        .unwrap();
         assert_eq!(cfg.min_period(), Samples(44)); // 44100 / 1000
         assert_eq!(cfg.max_period(), Samples(441)); // 44100 / 100
         assert_eq!(cfg.buffer_size(), Samples(882));
@@ -572,7 +561,11 @@ mod tests {
     /// soprano C. Both need the range widened past the standard default.
     #[test]
     fn reaches_the_ends_of_a_widened_range() {
-        let cfg = YinConfig::new(SampleRate::SR_44K1, Hz(40.0), Hz(2000.0)).unwrap();
+        let cfg = YinConfig::new(
+            SampleRate::SR_44K1,
+            FrequencyBand::new(Hz(40.0), Hz(2000.0)).unwrap(),
+        )
+        .unwrap();
 
         // E2, the guitar's low string.
         let low = yin(&cfg, &sine(44100.0, 82.41, 0.2)).unwrap();

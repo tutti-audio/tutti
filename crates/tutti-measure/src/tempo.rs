@@ -176,8 +176,7 @@ impl TempoConfig {
         self
     }
 
-    /// Prefer tempi near `centre`, falling to `exp(-1/2)` of the weight one
-    /// `spread` away, in octaves (a factor of two in tempo per octave).
+    /// Prefer tempi near `centre`: the prior's weight is highest there.
     #[must_use]
     pub fn prior_centre(mut self, centre: Bpm) -> Self {
         self.centre = centre;
