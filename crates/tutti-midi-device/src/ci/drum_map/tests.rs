@@ -86,6 +86,7 @@ fn the_profile_id_is_7e_20_03_01_and_the_level() {
     );
 }
 
+/// Spec: m2-125/4#1, m2-125/4.1#1
 #[test]
 fn each_instrument_matches_its_row_of_table_5() {
     let rows: Vec<_> = DrumInstrument::all().collect();
@@ -111,6 +112,7 @@ fn each_instrument_matches_its_row_of_table_5() {
     }
 }
 
+/// Spec: m2-125/4.1#3
 #[test]
 fn a_note_number_names_its_instrument_only_from_27_to_88() {
     // M2-125 §4.1: a device may add sounds on 0 to 26 and 89 to 127.

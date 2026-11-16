@@ -41,7 +41,8 @@
 //! document with [`Doc::implicit_levels`] also takes a heading whose missing
 //! ancestors would each be the first of their level (`6.2.1.1` straight after
 //! `6.2`); the missing levels count as seen. A document with
-//! [`Doc::dotted_top`] also takes a top-level heading written `1. Alpha`.
+//! [`Doc::dotted_top`] also takes a top-level heading written `1. Alpha`. A
+//! document with `implicit_levels` may open at `1.1`, with no heading `1`.
 //!
 //! The extraction never returns half a set: a message row whose Message Type
 //! has no size, two items with one id, or a configured table that is not
@@ -106,7 +107,7 @@ pub(super) struct Doc {
 /// The documents, one inventory file each.
 pub(super) const DOCS: &[Doc] = &[
     M2_101, M2_102, M2_103, M2_104, M2_115, M2_116, M2_105, M2_106, M2_107, M2_108, M2_109, M2_111,
-    M2_112, M2_117,
+    M2_112, M2_117, M2_113, M2_118, M2_119, M2_120, M2_121, M2_122, M2_123, M2_125,
 ];
 
 /// The header note of a document with its own Table 2 and no tables of rows.
@@ -319,6 +320,117 @@ pub(super) const M2_117: Doc = Doc {
     tables: Tables::None,
 };
 
+/// The header note of a document with no conformance-word table of its own.
+const NO_TABLE: &str = "\
+# This document has no conformance-word table; its keyword sentences are read
+# with the three rows of M2-104's Table 2 (shall is required, should
+# recommended, may permitted), and no negated forms. Sentence rows only.
+";
+
+pub(super) const M2_113: Doc = Doc {
+    prefix: "m2-113",
+    label: "M2-113",
+    title: "Default Control Change Mapping Profile (M2-113 v1.0)",
+    file: "midi-m2-113.txt",
+    source: "M2-113-UM",
+    sides: "sender, receiver or both",
+    note: NO_TABLE,
+    implicit_levels: false,
+    dotted_top: true,
+    tables: Tables::None,
+};
+
+pub(super) const M2_118: Doc = Doc {
+    prefix: "m2-118",
+    label: "M2-118",
+    title: "General MIDI 2 Function Block Profile (M2-118 v1.0.0)",
+    file: "midi-m2-118.txt",
+    source: "M2-118-UM",
+    sides: "sender, receiver or both",
+    note: SAME_TABLES,
+    implicit_levels: true,
+    dotted_top: false,
+    tables: Tables::None,
+};
+
+pub(super) const M2_119: Doc = Doc {
+    prefix: "m2-119",
+    label: "M2-119",
+    title: "General MIDI 2 Single Channel Profile (M2-119 v1.0.0)",
+    file: "midi-m2-119.txt",
+    source: "M2-119-UM",
+    sides: "sender, receiver or both",
+    note: SAME_TABLES,
+    implicit_levels: true,
+    dotted_top: false,
+    tables: Tables::None,
+};
+
+pub(super) const M2_120: Doc = Doc {
+    prefix: "m2-120",
+    label: "M2-120",
+    title: "MIDI Polyphonic Expression Profile (M2-120 v2.0.3)",
+    file: "midi-m2-120.txt",
+    source: "M2-120-UM",
+    sides: "sender, receiver or both",
+    note: SAME_TABLES,
+    implicit_levels: true,
+    dotted_top: false,
+    tables: Tables::None,
+};
+
+pub(super) const M2_121: Doc = Doc {
+    prefix: "m2-121",
+    label: "M2-121",
+    title: "Drawbar Organ Profile (M2-121 v1.0.2)",
+    file: "midi-m2-121.txt",
+    source: "M2-121-UM",
+    sides: "sender, receiver or both",
+    note: SAME_TABLES,
+    implicit_levels: true,
+    dotted_top: false,
+    tables: Tables::None,
+};
+
+pub(super) const M2_122: Doc = Doc {
+    prefix: "m2-122",
+    label: "M2-122",
+    title: "Rotary Speaker Profile (M2-122 v1.0.2)",
+    file: "midi-m2-122.txt",
+    source: "M2-122-UM",
+    sides: "sender, receiver or both",
+    note: SAME_TABLES,
+    implicit_levels: true,
+    dotted_top: false,
+    tables: Tables::None,
+};
+
+pub(super) const M2_123: Doc = Doc {
+    prefix: "m2-123",
+    label: "M2-123",
+    title: "Note On Orchestral Articulation Profile (M2-123 v1.0)",
+    file: "midi-m2-123.txt",
+    source: "M2-123-UM",
+    sides: "sender, receiver or both",
+    note: SAME_TABLES,
+    implicit_levels: true,
+    dotted_top: false,
+    tables: Tables::None,
+};
+
+pub(super) const M2_125: Doc = Doc {
+    prefix: "m2-125",
+    label: "M2-125",
+    title: "Default Drum Note Map Profile (M2-125 v1.0)",
+    file: "midi-m2-125.txt",
+    source: "M2-125-UM",
+    sides: "sender, receiver or both",
+    note: SAME_TABLES,
+    implicit_levels: true,
+    dotted_top: false,
+    tables: Tables::None,
+};
+
 /// How a message table's lines read as rows.
 #[derive(Clone, Copy)]
 pub(super) enum Rows {
@@ -424,7 +536,11 @@ fn parse_heading(line: &str, dotted_top: bool) -> Option<Label> {
     if let Some(rest) = t.strip_prefix("Appendix ") {
         let mut c = rest.chars();
         let letter = c.next().filter(char::is_ascii_uppercase)?;
-        let after = c.as_str().strip_prefix(':')?;
+        let after = c.as_str().trim_start_matches(' ');
+        // `Appendix A.` heads a heading; a line that closes a sentence is text.
+        let after = after
+            .strip_prefix(':')
+            .or_else(|| after.strip_prefix('.').filter(|_| !t.ends_with('.')))?;
         after.trim().chars().next()?;
         return Some((true, vec![u32::from(letter as u8 - b'A') + 1]));
     }
@@ -473,6 +589,8 @@ fn parse_heading(line: &str, dotted_top: bool) -> Option<Label> {
 #[derive(Default, Clone)]
 struct Outline {
     implicit: bool,
+    /// An appendix heading has been seen: the body's numbering is over.
+    in_appendix: bool,
     seen: BTreeSet<String>,
     last_child: BTreeMap<String, u32>,
 }
@@ -518,6 +636,7 @@ impl Outline {
         let (app, nums) = label;
         let (parent, number) = match (app, nums.len()) {
             (true, 1) => ("#".to_owned(), nums[0]),
+            (false, 1) if self.in_appendix => return false,
             (false, 1) => (String::new(), nums[0]),
             _ => {
                 let up: Label = (*app, nums[..nums.len() - 1].to_vec());
@@ -533,6 +652,7 @@ impl Outline {
         }
         self.last_child.insert(parent, number);
         self.seen.insert(render(label));
+        self.in_appendix |= *app;
         true
     }
 }
@@ -589,9 +709,15 @@ fn classify(lines: &[String], doc: &Doc) -> Result<Vec<Line>, String> {
         if let Some(label) = parse_heading(l, doc.dotted_top)
             .filter(|_| !(dotted_item(t) && next_to_dotted_item(lines, at)))
         {
-            let first = !started && label == (false, vec![1]);
+            let first = !started
+                && (label == (false, vec![1])
+                    || (doc.implicit_levels && label == (false, vec![1, 1])));
             if first || (started && outline.accept(&label)) {
                 if first {
+                    if label.1.len() == 2 {
+                        // A document that opens at `1.1` has no heading `1`.
+                        outline.accept(&(false, vec![1]));
+                    }
                     outline.accept(&label);
                     started = true;
                 }
@@ -1044,6 +1170,72 @@ mod tests {
             ids(&items),
             [("m2-104/1#1", "required"), ("m2-104/1.1#1", "permitted")]
         );
+    }
+
+    #[test]
+    fn a_document_may_open_at_1_1_when_it_takes_implicit_levels() {
+        let text = doc(&[
+            "Contents\n1.1 Alpha ........ 3\n",
+            "1.1 Alpha\nA frob shall spin.\n\n2 Beta\nA bar may ring.\n",
+            "",
+            "",
+        ]);
+        let implicit = Doc {
+            implicit_levels: true,
+            ..M2_104
+        };
+        let items = keyword_items(&classify(&clean(&text), &implicit).unwrap(), &implicit);
+        assert_eq!(
+            ids(&items),
+            [("m2-104/1.1#1", "required"), ("m2-104/2#1", "permitted")]
+        );
+        assert!(classify(&clean(&text), &M2_104).is_err());
+    }
+
+    #[test]
+    fn an_appendix_heading_may_end_its_letter_in_a_dot() {
+        let text = doc(&[
+            TOC,
+            "1 Alpha\nA frob shall spin.\nAppendix A. It is so.\n\nAppendix A. Table\nA bar may ring.\n3. Item\nA baz should hum.\n",
+            "",
+            "",
+        ]);
+        let items = keyword_items(&classify(&clean(&text), &M2_104).unwrap(), &M2_104);
+        assert_eq!(
+            ids(&items),
+            [
+                ("m2-104/1#1", "required"),
+                ("m2-104/a#1", "permitted"),
+                ("m2-104/a#2", "recommended")
+            ]
+        );
+    }
+
+    #[test]
+    fn an_appendix_heading_may_put_a_space_before_its_colon() {
+        let text = doc(&[
+            TOC,
+            "1 Alpha\nA frob shall spin.\n\nAppendix A : Table\nA bar may ring.\n",
+            "",
+            "",
+        ]);
+        let items = keyword_items(&classify(&clean(&text), &M2_104).unwrap(), &M2_104);
+        assert_eq!(
+            ids(&items),
+            [("m2-104/1#1", "required"), ("m2-104/a#1", "permitted")]
+        );
+    }
+
+    #[test]
+    fn numbered_items_in_an_appendix_are_not_top_level_headings() {
+        let text = doc(&[
+            TOC,
+            "1 Alpha\nA frob shall spin.\n\n2 Beta\nA bar may ring.\n\nAppendix A: Table\nA baz should hum.\n\n3 Item\nA qux shall stay.\n",
+            "",
+            "",
+        ]);
+        let items = keyword_items(&classify(&clean(&text), &M2_104).unwrap(), &M2_104);
+        assert_eq!(items.last().unwrap().id, "m2-104/a#2");
     }
 
     #[test]
