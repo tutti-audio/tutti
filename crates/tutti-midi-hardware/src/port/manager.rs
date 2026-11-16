@@ -10,8 +10,8 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, PoisonError};
 
-use tutti_graph::{EventInletNode, Losses};
-use tutti_midi_runtime::{InputId, InputInlets, InputWriters};
+use tutti_graph::EventInletNode;
+use tutti_midi_runtime::{DeviceWriters, InputId, InputInlets};
 
 use super::async_port::{HardwareMidiInput, InputProducerHandle, StreamDrain};
 use crate::InputTiming;
@@ -31,13 +31,6 @@ pub struct PortInfo {
     /// Whether the port delivers. An inactive port's events are discarded at
     /// the driver's thread, not queued.
     pub active: bool,
-    /// What the port's inlet has lost since the port opened, in events:
-    /// `lost` for want of room in its ring, `evicted` from its waiting list,
-    /// `refused` by the graph's port, and `late`: events that reached the graph
-    /// after their frame had begun and sounded at the first frame of the block
-    /// that found them (late, not lost; the lead the inlets place arrivals with
-    /// ([`InputInlets`]) is what prevents it).
-    pub losses: Losses,
     /// How many UMP Stream messages the port's stream ring had no room for,
     /// since the port opened.
     pub stream_lost: u64,
@@ -57,7 +50,6 @@ impl PortInfo {
             id,
             name: port.name().to_string(),
             active: port.is_active(),
-            losses: port.losses(),
             stream_lost: port.stream_lost(),
             jr_restarted: port.jr_restarted(),
             jr_late: port.jr_late(),
@@ -80,15 +72,10 @@ pub struct HardwareMidiInputs {
     ports: Mutex<Ports>,
 }
 
-/// The port list, keyed by each port's id (in the order they opened), and the
-/// losses of the ports removed so far. They share one lock so a port moves
-/// from the one to the other in one step, and a [`losses`](HardwareMidiInputs::losses)
-/// read never counts it twice or not at all.
+/// The port list, keyed by each port's id (in the order they opened).
 #[derive(Default)]
 struct Ports {
     live: BTreeMap<InputId, Arc<HardwareMidiInput>>,
-    /// A retired port's counts stay in [`losses`](HardwareMidiInputs::losses).
-    retired: Losses,
 }
 
 impl HardwareMidiInputs {
@@ -113,17 +100,6 @@ impl HardwareMidiInputs {
         self.ports.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// What the ports' inlets have lost, summed over all ports, current and
-    /// removed, since this list was built (see [`PortInfo::losses`]). An inlet
-    /// fills only when events arrive faster than blocks take them for long
-    /// enough to fill it. Control side.
-    #[must_use]
-    pub fn losses(&self) -> Losses {
-        let ports = self.ports();
-        let live: Losses = ports.live.values().map(|p| p.losses()).sum();
-        live + ports.retired
-    }
-
     /// Creates an input port named `name` and returns the **only** producer
     /// handle for it, with the inlet node the graph's owner adds;
     /// [`InputProducerHandle::port`] is the port's identity.
@@ -140,20 +116,20 @@ impl HardwareMidiInputs {
         &self,
         name: impl Into<String>,
     ) -> (InputProducerHandle, EventInletNode) {
-        self.open_input_port_with(name, InputWriters::new().0)
+        self.open_input_port_with(name, DeviceWriters::unread())
     }
 
     /// [`open_input_port`](Self::open_input_port), the port's clock map
-    /// reporting its timing to `clock` (see [`InputWriters`]).
+    /// reporting to `writers` (see [`DeviceWriters`]).
     #[must_use = "the handle is the port's only producer, and the node its graph side: dropping either leaves the port fed by nothing"]
     pub fn open_input_port_with(
         &self,
         name: impl Into<String>,
-        clock: InputWriters,
+        writers: DeviceWriters,
     ) -> (InputProducerHandle, EventInletNode) {
         let name = name.into();
         let mut ports = self.ports();
-        let (input, node) = self.inlets.open_with(clock);
+        let (input, node) = self.inlets.open_with(writers);
         let id = input.id();
         let (port, handle) = HardwareMidiInput::new(name, input);
         ports.live.insert(id, Arc::new(port));
@@ -169,13 +145,7 @@ impl HardwareMidiInputs {
     /// harmless, and whatever it pushes is lost. Control side.
     pub(crate) fn remove_input_port(&self, id: InputId) -> bool {
         let mut ports = self.ports();
-        match ports.live.remove(&id) {
-            Some(port) => {
-                ports.retired += port.losses();
-                true
-            }
-            None => false,
-        }
+        ports.live.remove(&id).is_some()
     }
 
     /// How many ports the list holds.

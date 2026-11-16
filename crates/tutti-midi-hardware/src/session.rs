@@ -52,7 +52,6 @@ use tutti_graph::EventInletNode;
 use tutti_midi_device::{CiDeviceId, ProfileChange, ProfileId};
 use tutti_midi_device::{DeviceId, DeviceInfo, EntropyError, Learned, MidiIdentity, SavedDevice};
 use tutti_midi_runtime::{InputInlets, InputWriters};
-use tutti_rt::counter;
 use tutti_ump::{GroupSpan, MidiGroup};
 
 /// The set of open MIDI inputs, and the endpoints available to open.
@@ -393,9 +392,9 @@ impl MidiSession {
     pub fn connect_input_with(
         &mut self,
         device: impl Into<DeviceQuery>,
-        mut writers: InputWriters,
+        writers: InputWriters,
     ) -> Result<Connected> {
-        let ci_refused = writers.take_ci_refused().unwrap_or_else(|| counter().0);
+        let (writers, ci_refused) = writers.split();
         let timing = self.options.input_timing;
         let id = device.into().pick(self.inputs())?;
         // An input whose reader died is replaced, not kept: it is silent.

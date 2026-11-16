@@ -147,15 +147,13 @@ impl InputInlets {
     /// and the [`DeviceInput`] (dropped).
     #[must_use = "the node is the inlet's graph side: until it is added, what the device sends goes nowhere"]
     pub fn open(&self) -> (DeviceInput, EventInletNode) {
-        self.open_with(InputWriters::new().0)
+        self.open_with(DeviceWriters::unread())
     }
 
     /// [`open`](Self::open) with the input's cells written to `writers`: the
-    /// readers of its cells stay with whoever made them ([`InputWriters::new`]). The
-    /// MIDI-CI writer, if still there, is dropped with them: take it first
-    /// ([`InputWriters::take_ci_refused`]).
+    /// readers of its cells stay with whoever made them ([`InputWriters::new`]).
     #[must_use = "the node is the inlet's graph side: until it is added, what the device sends goes nowhere"]
-    pub fn open_with(&self, writers: InputWriters) -> (DeviceInput, EventInletNode) {
+    pub fn open_with(&self, writers: DeviceWriters) -> (DeviceInput, EventInletNode) {
         let id = self.last.fetch_add(1, Ordering::Relaxed) + 1;
         let (node, writer) = EventInletNode::pair_with(self.capacity, &writers.inlet);
         let input = DeviceInput {
@@ -178,20 +176,29 @@ fn nanos(d: Duration) -> u64 {
     u64::try_from(d.as_nanos()).unwrap_or(u64::MAX)
 }
 
-/// The writing ends of an input's cells: the latest correction its clock map
-/// made, the count of its re-anchors, what its inlet lost (pushes the ring
-/// refused, events evicted from the waiting list, events the port refused) and
-/// the MIDI-CI messages its device's output refused. One set writes at a time;
-/// the device's end ([`DeviceInput`]) owns it for a connection, and dropping the
-/// input closes the cells until [`reopen`](Self::reopen) hands the writers on.
+/// The writing ends of an input's cells: [`DeviceWriters`], which the device's
+/// end ([`DeviceInput`]) owns, and the writer of the MIDI-CI refusals, which the
+/// device's stream owns. One set writes at a time; dropping the input closes its
+/// cells until [`reopen`](Self::reopen) hands the writers on. [`split`](Self::split)
+/// gives each owner its own, so none is left unclaimed.
 #[derive(Debug)]
 #[must_use = "the writers are how an input reports its timing and its losses"]
 pub struct InputWriters {
+    device: DeviceWriters,
+    ci_refused: CounterWriter<u64>,
+}
+
+/// The cells a [`DeviceInput`] writes: the latest correction its clock map made,
+/// the count of its re-anchors, and what its inlet lost (pushes the ring
+/// refused, and the totals of events evicted from the waiting list and events
+/// the port refused).
+#[derive(Debug)]
+#[must_use = "the writers are how an input reports its timing and its losses"]
+pub struct DeviceWriters {
     timing: GaugeWriter<Seconds>,
     resyncs: CounterWriter<Resyncs>,
     lost: CounterWriter<u64>,
     inlet: InletTotals,
-    ci_refused: Option<CounterWriter<u64>>,
 }
 
 /// The reading ends of an input's cells ([`InputWriters`]): made once with the
@@ -222,11 +229,13 @@ impl InputWriters {
         let inlet = InletTotals::new();
         (
             Self {
-                timing,
-                resyncs,
-                lost,
-                inlet: inlet.clone(),
-                ci_refused: Some(ci_refused),
+                device: DeviceWriters {
+                    timing,
+                    resyncs,
+                    lost,
+                    inlet: inlet.clone(),
+                },
+                ci_refused,
             },
             InputReaders {
                 timing: timing_reader,
@@ -245,18 +254,28 @@ impl InputWriters {
     pub fn reopen(readers: &InputReaders) -> Option<Self> {
         // If only some reopen, their writers drop here and close them again.
         Some(Self {
-            timing: readers.timing.reopen()?,
-            resyncs: readers.resyncs.reopen()?,
-            lost: readers.lost.reopen()?,
-            inlet: readers.inlet.clone(),
-            ci_refused: Some(readers.ci_refused.reopen()?),
+            device: DeviceWriters {
+                timing: readers.timing.reopen()?,
+                resyncs: readers.resyncs.reopen()?,
+                lost: readers.lost.reopen()?,
+                inlet: readers.inlet.clone(),
+            },
+            ci_refused: readers.ci_refused.reopen()?,
         })
     }
 
-    /// The writer of the MIDI-CI refusals: the conversation is the device
-    /// stream's, not the inlet's, so its owner takes the cell. `None` once taken.
-    pub fn take_ci_refused(&mut self) -> Option<CounterWriter<u64>> {
-        self.ci_refused.take()
+    /// The device's writers, and the writer of the MIDI-CI refusals: the
+    /// conversation is the device stream's, not the inlet's.
+    pub fn split(self) -> (DeviceWriters, CounterWriter<u64>) {
+        (self.device, self.ci_refused)
+    }
+}
+
+impl DeviceWriters {
+    /// Writers whose readers nobody keeps: an input nobody reads the cells of.
+    /// Allocates: control side.
+    pub fn unread() -> Self {
+        InputWriters::new().0.device
     }
 }
 

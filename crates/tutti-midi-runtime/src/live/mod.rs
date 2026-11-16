@@ -30,7 +30,7 @@ pub use ingest_node::{
     MidiIngestControls, MidiIngestNode, MidiInputPorts,
 };
 pub use input_inlets::{
-    ArrivalClock, DeviceInput, InputId, InputInlets, InputReaders, InputWriters,
+    ArrivalClock, DeviceInput, DeviceWriters, InputId, InputInlets, InputReaders, InputWriters,
 };
 pub use keys::{LIVE_INLET_CAPACITY, MidiKeys};
 pub use mpe_ingest::MpeIngest;

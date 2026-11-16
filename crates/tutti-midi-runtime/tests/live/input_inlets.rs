@@ -233,7 +233,7 @@ fn a_full_inlet_refuses_and_counts() {
 fn the_lost_count_carries_across_a_reopened_input() {
     let inlets = InputInlets::new(tutti_graph::EventCapacity::of(2), Duration::ZERO);
     let (writers, readers) = InputWriters::new();
-    let (mut device, _node) = inlets.open_with(writers);
+    let (mut device, _node) = inlets.open_with(writers.split().0);
     assert_eq!(readers.lost.get(), 0);
     for i in 0..4 {
         let _ = device.push(note(60 + i), Instant::now());
@@ -242,7 +242,7 @@ fn the_lost_count_carries_across_a_reopened_input() {
     drop(device);
     assert_eq!(readers.lost.get(), 2, "the count outlives the input");
     let again = InputWriters::reopen(&readers).expect("the input dropped");
-    let (mut device, _node) = inlets.open_with(again);
+    let (mut device, _node) = inlets.open_with(again.split().0);
     for i in 0..4 {
         let _ = device.push(note(60 + i), Instant::now());
     }
@@ -264,7 +264,7 @@ impl Timed {
         let inlets = inlets(Duration::ZERO);
         let (writers, readers) = InputWriters::new();
         let (timing, resyncs) = (readers.timing, readers.resyncs);
-        let (device, _node) = inlets.open_with(writers);
+        let (device, _node) = inlets.open_with(writers.split().0);
         let clock = BlockClock::new();
         inlets.set_clock(Some(clock.reader()));
         let mut timed = Self {
@@ -396,7 +396,7 @@ fn the_cells_carry_across_a_reopened_input() {
     let inlets = inlets(Duration::ZERO);
     let (writers, readers) = InputWriters::new();
     let (timing, resyncs) = (readers.timing.clone(), readers.resyncs.clone());
-    let (mut device, _node) = inlets.open_with(writers);
+    let (mut device, _node) = inlets.open_with(writers.split().0);
     let mut clock = BlockClock::new();
     inlets.set_clock(Some(clock.reader()));
     let t0 = Instant::now() + Duration::from_secs(3600);
@@ -419,7 +419,7 @@ fn the_cells_carry_across_a_reopened_input() {
     let again = InputWriters::reopen(&readers).expect("the input dropped");
     assert!(!timing.is_closed() && !resyncs.is_closed());
     assert_eq!(timing.get(), held);
-    let (mut device, _node) = inlets.open_with(again);
+    let (mut device, _node) = inlets.open_with(again.split().0);
     // The new map's first reading is not a resync; a far one after it is the second.
     let t1 = t0 + Duration::from_secs(10);
     clock.write(t1, Frame::new(5000), SampleRate::of(RATE));

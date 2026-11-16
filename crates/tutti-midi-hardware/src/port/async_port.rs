@@ -20,9 +20,8 @@ use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
 
-use tutti_graph::Losses;
 use tutti_midi_device::{ClockHeard, JrReceiver};
-use tutti_midi_runtime::{DeviceInput, InletCounts, InputId};
+use tutti_midi_runtime::{DeviceInput, InputId};
 use tutti_rt::{Overflow, PushError, RingReader, RingWriter, ring};
 use tutti_ump::{Message, Ump, Utility};
 
@@ -229,10 +228,9 @@ impl InputProducerHandle {
     /// # Errors
     ///
     /// [`PushError::Full`] when the device's inlet is full: the event is
-    /// dropped, not queued, and counted
-    /// ([`HardwareMidiInputs::losses`](super::HardwareMidiInputs::losses), and
-    /// the input's own `lost` cell, [`InputReaders::lost`](tutti_midi_runtime::InputReaders::lost)). A caller counts or
-    /// logs it.
+    /// dropped, not queued, and counted in the input's own `lost` cell
+    /// ([`InputReaders::lost`](tutti_midi_runtime::InputReaders::lost)). A caller
+    /// counts or logs it.
     #[inline]
     pub fn push(
         &mut self,
@@ -314,7 +312,6 @@ impl Iterator for StreamDrain {
 pub(crate) struct HardwareMidiInput {
     name: String,
     active: Arc<AtomicBool>,
-    counts: InletCounts,
     /// The reading end of the stream ring; control side, one reader at a time.
     stream: Mutex<RingReader<Ump>>,
     hear_sysex: Arc<AtomicBool>,
@@ -334,7 +331,6 @@ impl HardwareMidiInput {
             Self {
                 name: name.into(),
                 active: Arc::clone(&active),
-                counts: input.counts(),
                 stream: Mutex::new(stream_out),
                 hear_sysex: Arc::clone(&hear_sysex),
                 timing: Arc::clone(&timing),
@@ -349,11 +345,6 @@ impl HardwareMidiInput {
                 jr: JrInput::new(jr_counts),
             },
         )
-    }
-
-    /// What the inlet has lost.
-    pub(crate) fn losses(&self) -> Losses {
-        self.counts.losses()
     }
 
     /// How many Stream messages the ring had no room for.

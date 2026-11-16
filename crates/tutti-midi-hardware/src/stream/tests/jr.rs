@@ -372,5 +372,4 @@ fn a_repeated_clock_and_a_jump_are_counted_once_each() {
     send(ticks(300) + 15_625, 300);
     assert_eq!(counts(&wire), (before.0 + 1, before.1 + 1, before.2));
     rig.run(8);
-    assert_eq!(wire.session.ports().losses().dropped(), 0);
 }

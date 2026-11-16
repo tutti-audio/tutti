@@ -218,10 +218,10 @@ pub use held::HeldState;
 pub use ledger::{NoteLedger, Sending};
 pub use live::{
     ACTIVE_SENSING_JUDGE, ActiveSensing, ArrivalClock, CHANNELLESS_PORT, DeviceEpochs, DeviceInput,
-    InputId, InputInlets, InputReaders, InputWriters, LIVE_INLET_CAPACITY, MIDI_INPUT_DENSITY,
-    MIDI_INPUT_EVENT_CAPACITY, MIDI_INPUT_PORTS, MidiIngestControls, MidiIngestNode,
-    MidiInputPorts, MidiKeys, MpeIngest, MpeTransformControls, MpeTransformNode, RouteRule,
-    compile_routes,
+    DeviceWriters, InputId, InputInlets, InputReaders, InputWriters, LIVE_INLET_CAPACITY,
+    MIDI_INPUT_DENSITY, MIDI_INPUT_EVENT_CAPACITY, MIDI_INPUT_PORTS, MidiIngestControls,
+    MidiIngestNode, MidiInputPorts, MidiKeys, MpeIngest, MpeTransformControls, MpeTransformNode,
+    RouteRule, compile_routes,
 };
 pub use mpe_features::{MpeFeaturesError, ask_mpe_features, mpe_features};
 pub use mpe_zones::mpe_zones;

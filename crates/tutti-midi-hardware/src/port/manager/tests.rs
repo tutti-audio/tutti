@@ -4,7 +4,7 @@ use crate::testing::{RATE, Rig, ports};
 use std::time::{Duration, Instant};
 
 use tutti_fixtures::midi;
-use tutti_midi_runtime::InputInlets;
+use tutti_midi_runtime::{InputInlets, InputWriters};
 use tutti_ump::{Message, MidiChannel, Ump, Utility};
 
 fn now() -> Instant {
@@ -131,12 +131,6 @@ fn an_arrival_past_its_block_is_emitted_late_and_counted() {
         vec![(0, 256, note(60))],
         "the next block's first frame"
     );
-    let info = manager.port_info(port.port()).unwrap();
-    assert_eq!(
-        (info.losses.late, info.losses.dropped()),
-        (1, 0),
-        "late, not lost"
-    );
 }
 
 /// **An inactive port discards what its driver pushes**: nothing reaches the
@@ -159,7 +153,6 @@ fn an_inactive_port_discards_its_events() {
     assert_eq!(port.push(note(61), rig.time_of(120)), Ok(Delivered::Sent));
     rig.run(4);
     assert_eq!(rig.take(), vec![(0, 120, note(61))]);
-    assert_eq!(manager.losses().dropped(), 0);
 }
 
 /// Concurrent creators each land their port: none is lost to another's open,
@@ -273,12 +266,13 @@ fn a_stale_id_cannot_reach_the_port_opened_after_it() {
     assert_eq!((info.name.as_str(), info.active), ("B", true));
 }
 
-/// **A full inlet counts what it drops**, per port and in total, and a removed
-/// port's drops stay in the total.
+/// **A full inlet counts what it drops** in the input's `lost` cell, which the
+/// removed port leaves as it was.
 #[test]
 fn a_full_inlet_counts_what_it_drops() {
     let (manager, mut rig) = rig(4, Duration::ZERO);
-    let (mut handle, inlet) = manager.open_input_port("Busy");
+    let (writers, readers) = InputWriters::new();
+    let (mut handle, inlet) = manager.open_input_port_with("Busy", writers.split().0);
     rig.attach(inlet);
     let id = handle.port();
     let taken = (0..10)
@@ -287,10 +281,9 @@ fn a_full_inlet_counts_what_it_drops() {
         })
         .count();
     assert_eq!(taken, 4);
-    assert_eq!(manager.port_info(id).map(|p| p.losses.lost), Some(6));
-    assert_eq!(manager.losses().lost, 6);
+    assert_eq!(readers.lost.get(), 6);
     assert!(manager.remove_input_port(id));
-    assert_eq!(manager.losses().lost, 6, "a removed port's drops stay");
+    assert_eq!(readers.lost.get(), 6, "a removed port's drops stay");
 }
 
 /// **The stream drain is lazy**: it takes a message per step, so a caller that

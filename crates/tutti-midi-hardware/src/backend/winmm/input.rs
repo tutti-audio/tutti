@@ -38,7 +38,7 @@ pub(super) fn open(index: u32, mut producer: InputProducerHandle) -> Result<WinM
     let mut bytes = ByteIn::new();
     // Read before the port starts, so no stamp precedes it.
     let mut anchor = Anchor::new(Instant::now());
-    // A full inlet counts the drop itself (`HardwareMidiInputs::losses`); a log
+    // A full inlet counts the drop itself (the input's `lost` cell); a log
     // line here would run on winmm's thread.
     let mut push = move |ump, at| {
         let _ = producer.push(ump, at);
