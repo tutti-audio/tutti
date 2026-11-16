@@ -4,7 +4,7 @@ use tutti_buffers::{
     BufferError, Interleaved, InterleavedMut, Planes, PlanesMut, convert, convert_planes,
     deinterleave, interleave,
 };
-use tutti_types::{ChannelLayout, Samples};
+use tutti_types::{ChannelLayout, LayoutError, Samples};
 
 const ST: ChannelLayout = ChannelLayout::STEREO;
 
@@ -197,7 +197,7 @@ fn buffer_errors_say_what_was_refused() {
     );
     let e = BufferError::PartialFrame { len: 5, width: ST };
     assert!(e.to_string().contains("5 samples") && e.to_string().contains("Stereo"));
-    let e = BufferError::TooWide { channels: 70_000 };
+    let e = BufferError::from(LayoutError::TooWide(70_000));
     assert!(e.to_string().contains("70000"));
 }
 
@@ -319,4 +319,20 @@ fn interleave_inverts_deinterleave_at_every_width() {
         .unwrap();
         assert_eq!(back, data, "width {width}");
     }
+}
+
+/// More planes than a layout holds are refused with the layout's own error,
+/// the refused count intact and reachable through `source()`.
+#[test]
+fn planes_past_a_layout_keep_the_layout_error_as_the_cause() {
+    use std::error::Error;
+    let planes = vec![Vec::<f32>::new(); usize::from(u16::MAX) + 1];
+    let refused = Planes::from_vecs(&planes).unwrap_err();
+    assert_eq!(
+        refused,
+        BufferError::Layout(LayoutError::TooWide(u64::from(u16::MAX) + 1))
+    );
+    // `transparent` forwards `source()` to the layout error's own, which has none.
+    assert!(refused.source().is_none());
+    assert!(refused.to_string().contains("65536"));
 }

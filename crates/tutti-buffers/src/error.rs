@@ -1,6 +1,6 @@
 //! [`BufferError`], the one refusal a view's construction or a conversion gives.
 
-use tutti_types::{ChannelLayout, Samples};
+use tutti_types::{ChannelLayout, LayoutError, Samples};
 
 /// Why a view was not built, or a conversion was not run.
 ///
@@ -12,12 +12,9 @@ pub enum BufferError {
     /// The width is zero channels, so a frame count is undefined.
     #[error("a buffer needs at least one channel")]
     ZeroWidth,
-    /// The width does not fit a [`ChannelLayout`] (above `u16::MAX` channels).
-    #[error("{channels} channels do not fit a channel layout")]
-    TooWide {
-        /// The refused channel count.
-        channels: usize,
-    },
+    /// The width does not fit a [`ChannelLayout`].
+    #[error(transparent)]
+    Layout(#[from] LayoutError),
     /// An interleaved slice ends mid-frame.
     #[error("{len} samples are not a whole number of {width:?} frames")]
     PartialFrame {
