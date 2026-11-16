@@ -178,6 +178,52 @@ impl Source for Exploding {
     }
 }
 
+/// A sink whose close fails with a typed `io::Error`.
+struct DiskFull;
+
+impl tutti_buffers::Sink for DiskFull {
+    type Sample = f32;
+    type Error = std::io::Error;
+
+    fn layout(&self) -> ChannelLayout {
+        ChannelLayout::STEREO
+    }
+
+    fn write(
+        &mut self,
+        _: tutti_buffers::Interleaved<'_>,
+    ) -> Result<(), tutti_buffers::SinkFailed> {
+        Ok(())
+    }
+
+    fn finalize(self) -> Result<(), Self::Error> {
+        Err(std::io::Error::other("disk full"))
+    }
+}
+
+/// **A sink's close failure comes out of the recorder as `Sink`, the real
+/// `io::Error` still its source.**
+#[test]
+fn a_sink_that_fails_to_close_reports_its_own_error() {
+    let rec = Recorder::start_finite(
+        Ramp {
+            frames: 8,
+            pos: 0,
+            drained: Arc::new(AtomicBool::new(false)),
+            polls: Arc::new(AtomicUsize::new(0)),
+            delay: std::time::Duration::ZERO,
+        },
+        DiskFull,
+    )
+    .unwrap();
+    let err = rec.wait().expect_err("the sink failed to close");
+    assert!(matches!(err, RecorderError::Sink(_)), "{err:?}");
+    let cause = std::error::Error::source(&err)
+        .and_then(|e| e.downcast_ref::<std::io::Error>())
+        .expect("the source is the sink's io::Error");
+    assert_eq!(cause.to_string(), "disk full");
+}
+
 fn sink(path: &std::path::Path) -> FileOut {
     wav(path)
 }
@@ -313,7 +359,8 @@ fn a_starving_source_is_ended_only_by_stop() {
 /// **A panic on the pump thread becomes an error, not a lost take.**
 ///
 /// The join maps the pump's panic to
-/// [`RecorderError::Panicked`], reading "recording thread panicked: {message}".
+/// [`RecorderError::Panicked`], reading "thread `tutti-recorder` panicked:
+/// {message}".
 ///
 /// Safe to run only because this repo uses nextest, which gives every test its
 /// own process: the panic is caught by the join here, but a pump that used
@@ -345,9 +392,9 @@ fn a_panicking_source_surfaces_as_a_recording_thread_panic() {
         .finish()
         .expect_err("a panicked pump thread must be reported, not silently joined");
 
-    assert!(
-        err.to_string().contains("recording thread panicked"),
-        "expected the recording-thread panic, got: {err}"
+    assert_eq!(
+        err.to_string(),
+        "thread `tutti-recorder` panicked: the source fell over mid-take"
     );
     assert!(
         polled.load(Ordering::Acquire) >= 1,

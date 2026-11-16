@@ -89,11 +89,11 @@ pub enum RecorderError {
 
     /// The recording thread could not be spawned.
     #[error("the recording thread could not be spawned")]
-    Spawn(#[from] std::io::Error),
+    Spawn(#[source] std::io::Error),
 
     /// The recording thread panicked.
-    #[error("recording thread panicked: {0}")]
-    Panicked(String),
+    #[error(transparent)]
+    Panicked(#[from] tutti_rt::Panicked),
 }
 
 /// Why [`PumpLoop::finalize`] did not end cleanly.
@@ -609,7 +609,8 @@ impl<K> Recorder<K> {
             // Finalize exactly once, here, where the loop is owned. The result
             // rides the joined thread back to `finish`.
             pump_loop.finalize().map_err(RecorderError::from)
-        })?;
+        })
+        .map_err(RecorderError::Spawn)?;
         Ok(Self {
             stop: handle.token(),
             handle: Some(handle),
@@ -632,7 +633,8 @@ impl<K> Recorder<K> {
     /// [`RecorderError::SourceFailed`] if the source broke mid-take; the sink
     /// was finalized, so the file is valid and holds what was delivered.
     /// [`RecorderError::Sink`] if finalizing failed (for a WAV, the header was
-    /// left unpatched and the file is unreadable) or [`RecorderError::Panicked`] if the pump thread panicked.
+    /// left unpatched and the file is unreadable).
+    /// [`RecorderError::Panicked`] if the pump thread panicked.
     #[must_use = "the result says whether the take finalized"]
     pub fn finish(mut self) -> Result<(), RecorderError> {
         self.finish_in_place().unwrap_or(Ok(()))
@@ -703,8 +705,9 @@ impl<K> Recorder<K> {
     /// be moved out (a component, a field). `None` once the result was already
     /// collected, which is what makes a second finalize unrepresentable rather
     /// than a panic. A failed source comes back as
-    /// [`RecorderError::SourceFailed`]. Blocks for at most one pass (or one park);
-    /// after [`is_finished`](Self::is_finished) it does not block at all.
+    /// [`RecorderError::SourceFailed`]. Blocks for at most one pass (or one
+    /// park); after [`is_finished`](Self::is_finished) it does not block at
+    /// all.
     ///
     /// Requesting the stop is the half that matters for a **live** source:
     /// the loop exits on its own only for a finite one; a starving source
@@ -725,7 +728,7 @@ impl<K> Recorder<K> {
         self.handle.take().map(|handle| {
             handle
                 .join()
-                .unwrap_or_else(|panicked| Err(RecorderError::Panicked(panicked.message)))
+                .unwrap_or_else(|panicked| Err(RecorderError::Panicked(panicked)))
         })
     }
 }

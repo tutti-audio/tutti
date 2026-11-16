@@ -486,7 +486,14 @@ fn a_failed_sink_fails_the_take() {
     assert!(pump_loop.failed());
     let err = pump_loop.finalize().expect_err("the sink's error");
     assert!(
-        matches!(&err, FinalizeError::Sink(io) if io.get_ref().is_some()),
+        matches!(
+            &err,
+            FinalizeError::Sink(io)
+                if matches!(
+                    io.get_ref().and_then(|e| e.downcast_ref::<tutti_codec::Error>()),
+                    Some(tutti_codec::Error::WavTooLarge { limit_frames: 4 })
+                )
+        ),
         "{err:?}"
     );
     assert_eq!(hound::WavReader::open(&path).unwrap().len(), 8);

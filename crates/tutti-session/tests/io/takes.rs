@@ -499,10 +499,13 @@ fn a_sink_that_fails_mid_take_reports_failed_with_its_error() {
         panic!("not Failed: {takes:?}");
     };
     assert!(matches!(error, TakeError::Sink(_)), "{error:?}");
+    // `TakeError` is `Clone`, so the sink's error is shared behind an `Arc`,
+    // whose `Error` impl hides the concrete type from a downcast.
     assert_eq!(
         error.source().expect("the sink's error").to_string(),
         "disk full"
     );
+    assert_eq!(error.to_string(), "the take's sink failed");
     assert!(
         !takes
             .iter()

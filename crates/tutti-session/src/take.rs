@@ -595,7 +595,7 @@ pub enum TakeError {
     /// The sink failed: a write, or closing it (for a WAV, the header is then
     /// left unpatched and the file unreadable). What was written before the
     /// failure is in the sink.
-    #[error("the take's sink failed: {0}")]
+    #[error("the take's sink failed")]
     Sink(#[source] Arc<dyn std::error::Error + Send + Sync>),
     /// The sink refused a write, yet its `finalize` reported no error: it broke
     /// [`Sink`]'s contract, which has `finalize` report the first failure.
