@@ -283,6 +283,24 @@ fn a_bad_attenuation_is_the_designs_refusal() {
     ));
 }
 
+/// A rate at which no half-band can be designed, where `0.1 × rate` underflows or
+/// overflows `f32`, is refused at `plan`, for every factor; 48 kHz plans.
+#[test]
+fn a_rate_no_half_band_fits_is_refused() {
+    for factor in [
+        OversamplingFactor::X2,
+        OversamplingFactor::X4,
+        OversamplingFactor::X8,
+    ] {
+        let o = Oversampling::new(factor);
+        for hz in [1e-50, 1e308] {
+            let rate = SampleRate::new(hz).expect("a positive, finite rate");
+            assert!(o.plan(rate).is_err(), "{factor:?} at {hz} Hz");
+        }
+        assert!(o.plan(RATE).is_ok(), "{factor:?} at the test rate");
+    }
+}
+
 /// `Passband` keeps the range-checked shape: `(0, 1)` of the base Nyquist.
 #[test]
 fn a_passband_keeps_the_range_checked_shape() {
