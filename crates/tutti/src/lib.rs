@@ -527,7 +527,7 @@ pub mod plugin {
     };
     pub use tutti_plugin_host::RebindError;
     pub use tutti_plugin_ipc::RandomSourceError;
-    pub use tutti_plugin_ipc::SlabLayoutError;
+    pub use tutti_plugin_ipc::{SlabAccessError, SlabLayoutError};
     pub use tutti_plugin_types::bundle::ModuleKind;
     pub use tutti_plugin_types::{
         AuComponentType, AutomationModeError, Axis, BlockCounts, BridgeError, BridgeResult,
