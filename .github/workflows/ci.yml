@@ -20,9 +20,6 @@ env:
   CARGO_TERM_COLOR: always
   # CI builds from clean, so an incremental cache only costs time.
   CARGO_INCREMENTAL: 0
-  # Line tables only: backtraces keep file:line, and full debug info filled the runner's disk.
-  CARGO_PROFILE_DEV_DEBUG: line-tables-only
-  CARGO_PROFILE_TEST_DEBUG: line-tables-only
   RUST_BACKTRACE: 1
 
 # Every stable job installs the toolchain `rust-toolchain.toml` pins, and every cargo command that resolves
