@@ -85,3 +85,25 @@ fn a_tempo_writes_its_ten_ns_units_per_quarter() {
         assert!((back - bpm.get()).abs() < 1e-6, "{bpm:?} -> {back}");
     }
 }
+
+/// **The tempo field is read at the resolution of one 10 ns unit.** Section
+/// 7.5.3 leaves a sequencer to choose how many bits of the field it supports;
+/// this one supports all 32. The field is 10 ns units per quarter note, so a
+/// quarter of 5 s (500,000,000 units) is 60 / 5 = 12 bpm, 1 s (100,000,000) is
+/// 60 bpm, 0.5 s (50,000,000) is 120 bpm and one unit (10 ns) is
+/// 60 / 10e-9 = 6e9 bpm; and a field one unit above any of them is a slower
+/// tempo, so no low bit of the field is discarded.
+/// Spec: m2-104/7.5.3#7, m2-116/7.1.1#5
+#[test]
+fn the_tempo_field_is_read_to_the_unit() {
+    for (field, bpm) in [
+        (500_000_000u32, 12.0),
+        (100_000_000, 60.0),
+        (50_000_000, 120.0),
+        (1, 6.0e9),
+    ] {
+        assert_eq!(flex_tempo(field), Bpm::new(bpm), "{field}");
+        let slower = flex_tempo(field + 1).unwrap().get();
+        assert!(slower < bpm, "{field}: {slower}");
+    }
+}

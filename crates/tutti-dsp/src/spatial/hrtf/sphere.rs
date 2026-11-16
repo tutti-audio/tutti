@@ -1,29 +1,65 @@
-//! The measured HRIR sphere: parsed once from its bytes ([`HrirSphere`]),
-//! then prepared per sample rate into the spectra and face table the
-//! convolver reads ([`HrtfSet`]).
+//! The measured HRIR sphere: built from measurements or parsed from its bytes
+//! ([`HrirSphere`]), then prepared per sample rate into the spectra and face
+//! table the convolver reads ([`HrtfSet`]).
 //!
-//! The byte format is the one `hrir_sphere_builder` writes (and the `hrtf`
-//! crate read): `"HRIR"`, then little-endian `u32` source rate, response
-//! length, vertex count and index count, the face indices, and per vertex its
-//! position followed by its left and right responses as `f32`s.
+//! The byte format is `"HRIR"`, then little-endian `u32` source rate,
+//! response length, vertex count and index count, the face indices, and per
+//! vertex its position followed by its left and right responses as `f32`s. A
+//! position is a vector from the listener in the renderer's frame (+x right,
+//! +y up, +z behind), whose length does not matter; the faces are triangles
+//! wound counter-clockwise seen from outside.
+
+use tutti_buffers::{Mono, Sample};
+use tutti_types::{Direction, SampleRate};
 
 use crate::{Complex32, CosineWindow, RealFft, WindowedSinc};
 
-use super::{HrtfBinauralError, MAX_SPHERE_RATE, MIN_SPHERE_RATE};
+use super::hull::convex_hull;
+use super::{HrtfBinauralError, MAX_SPHERE_RATE, MIN_SPHERE_RATE, unit_vector};
 
 /// The range a vertex's distance from the origin must fall in. Closer, its
 /// direction does not survive normalization in `f32`.
 const MIN_DISTANCE: f64 = 1e-6;
 const MAX_DISTANCE: f64 = 1e6;
 
+/// The squared distance between two unit directions below which they are
+/// one direction.
+const DUPLICATE: f64 = 1e-12;
+
 /// The largest response sample magnitude accepted. A spectrum sums up to
 /// `fft_len` of them, so a sample near `f32::MAX` would overflow it.
 const MAX_SAMPLE: f32 = 1e6;
 
-/// The parsed dataset, at the rate it was measured at. Immutable once
-/// parsed: every renderer, clone and fork built from the same bytes shares
-/// one behind an `Arc`.
-pub(crate) struct HrirSphere {
+/// One measured direction and the two ears' impulse responses from it, in
+/// sample format `S`; the sphere keeps them as `f32`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct HrirMeasurement<'a, S: Sample = f32> {
+    direction: Direction,
+    left: Mono<'a, S>,
+    right: Mono<'a, S>,
+}
+
+impl<'a, S: Sample> HrirMeasurement<'a, S> {
+    /// The responses `left` and `right` as measured with the source at
+    /// `direction`, in the listener's frame of [`Direction`].
+    #[must_use]
+    pub const fn new(direction: Direction, left: Mono<'a, S>, right: Mono<'a, S>) -> Self {
+        Self {
+            direction,
+            left,
+            right,
+        }
+    }
+}
+
+/// A measured head-related impulse response set: the responses of both ears
+/// for directions around the listener, at the rate they were measured at, and
+/// the triangles that blend them.
+///
+/// Immutable once built: every renderer, clone and fork built from the same
+/// bytes shares one behind an `Arc`.
+#[derive(PartialEq)]
+pub struct HrirSphere {
     /// The file's own rate, an integral Hz as the format stores it.
     rate: u32,
     /// Response length in frames at `rate`, the same for every vertex.
@@ -75,10 +111,128 @@ impl Cursor<'_> {
 }
 
 impl HrirSphere {
+    /// Builds a sphere from measurements: the directions are triangulated by
+    /// their convex hull (the faces the renderer blends across), and the
+    /// result passes every check [`from_bytes`](Self::from_bytes) applies.
+    /// Control thread; allocates.
+    ///
+    /// `rate` is the rate the responses were measured at, a whole number of
+    /// hertz as the byte format stores it. Every
+    /// response has the same length, which becomes the sphere's.
+    ///
+    /// A set that leaves part of the sphere unmeasured (one hemisphere, say)
+    /// has no face there that a ray from the listener crosses: a direction
+    /// there takes its nearest measured direction's responses.
+    ///
+    /// # Errors
+    ///
+    /// An [`HrtfBinauralError`]: [`FractionalRate`](HrtfBinauralError::FractionalRate)
+    /// for a rate that is not a whole number of hertz, [`Rate`](HrtfBinauralError::Rate) or
+    /// [`ResponseTooLong`](HrtfBinauralError::ResponseTooLong) for a rate or
+    /// length out of range, [`ResponseLength`](HrtfBinauralError::ResponseLength)
+    /// for responses of unequal length,
+    /// [`Duplicate`](HrtfBinauralError::Duplicate) for two measurements in
+    /// one direction, [`NotEnclosing`](HrtfBinauralError::NotEnclosing) for
+    /// fewer than four directions or directions in one plane,
+    /// [`Inside`](HrtfBinauralError::Inside) for a direction the hull of the
+    /// others encloses, and
+    /// [`Vertex`](HrtfBinauralError::Vertex) for a non-finite direction or
+    /// a response sample out of range.
+    pub fn new<S: Sample>(
+        rate: SampleRate,
+        measurements: &[HrirMeasurement<'_, S>],
+    ) -> Result<Self, HrtfBinauralError> {
+        // The format stores a `u32`; a rate past it is refused by `check_shape`'s range.
+        let hz = rate.get();
+        if hz.fract() != 0.0 {
+            return Err(HrtfBinauralError::FractionalRate { rate });
+        }
+        let rate = hz.min(f64::from(u32::MAX)) as u32;
+        if measurements.len() < 4 {
+            return Err(HrtfBinauralError::NotEnclosing);
+        }
+        let len = measurements[0].left.samples().len();
+        for (vertex, m) in measurements.iter().enumerate() {
+            for found in [m.left.samples().len(), m.right.samples().len()] {
+                if found != len {
+                    return Err(HrtfBinauralError::ResponseLength {
+                        vertex,
+                        expected: len,
+                        found,
+                    });
+                }
+            }
+        }
+        check_shape(rate, len)?;
+        let positions: Vec<[f32; 3]> = measurements
+            .iter()
+            .map(|m| unit_vector(m.direction))
+            .collect();
+        let mut responses = Vec::with_capacity(measurements.len() * 2 * len);
+        for m in measurements {
+            let ears = m.left.samples().iter().chain(m.right.samples());
+            responses.extend(ears.map(|&s| s.convert_to::<f32>()));
+        }
+        // The check on the raw values comes first: a NaN direction would
+        // poison the duplicate test and the hull.
+        check_values(&positions, &responses, len)?;
+        let wide: Vec<[f64; 3]> = positions.iter().map(|p| p.map(f64::from)).collect();
+        for (second, p) in wide.iter().enumerate() {
+            let twin = wide[..second].iter().position(|q| {
+                let d = [p[0] - q[0], p[1] - q[1], p[2] - q[2]];
+                d[0] * d[0] + d[1] * d[1] + d[2] * d[2] < DUPLICATE
+            });
+            if let Some(first) = twin {
+                return Err(HrtfBinauralError::Duplicate { first, second });
+            }
+        }
+        let faces = convex_hull(&wide).ok_or(HrtfBinauralError::NotEnclosing)?;
+        every_vertex_on(&faces, positions.len())?;
+        let sphere = Self {
+            rate,
+            len,
+            positions,
+            faces,
+            responses,
+        };
+        sphere.check_faces()?;
+        Ok(sphere)
+    }
+
+    /// The sphere in the byte format [`from_bytes`](Self::from_bytes) reads.
+    #[must_use]
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let words = 5 + self.faces.len() * 3 + self.positions.len() * 3 + self.responses.len();
+        let mut bytes = Vec::with_capacity(words * 4);
+        bytes.extend_from_slice(b"HRIR");
+        for n in [
+            self.rate,
+            self.len as u32,
+            self.positions.len() as u32,
+            self.faces.len() as u32 * 3,
+        ] {
+            bytes.extend_from_slice(&n.to_le_bytes());
+        }
+        for &index in self.faces.iter().flatten() {
+            bytes.extend_from_slice(&index.to_le_bytes());
+        }
+        let responses = self.responses.chunks_exact(2 * self.len);
+        for (position, response) in self.positions.iter().zip(responses) {
+            for value in position.iter().chain(response) {
+                bytes.extend_from_slice(&value.to_le_bytes());
+            }
+        }
+        bytes
+    }
+
     /// Parses and validates a sphere. Every index, length and value is
     /// checked here, so nothing downstream (and nothing on the audio
     /// thread) has a malformed sphere to trip over.
-    pub(crate) fn parse(bytes: &[u8]) -> Result<Self, HrtfBinauralError> {
+    ///
+    /// # Errors
+    ///
+    /// An [`HrtfBinauralError`] naming the first thing wrong with the bytes.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, HrtfBinauralError> {
         if bytes.get(..4) != Some(b"HRIR".as_slice()) {
             return Err(HrtfBinauralError::NotASphere);
         }
@@ -87,16 +241,7 @@ impl HrirSphere {
         let len = cur.u32()? as usize;
         let vertices = cur.u32()? as usize;
         let indices = cur.u32()? as usize;
-        if !(MIN_SPHERE_RATE..=MAX_SPHERE_RATE).contains(&rate) {
-            return Err(HrtfBinauralError::Rate { rate });
-        }
-        if len == 0 {
-            return Err(HrtfBinauralError::Header("the response length is zero"));
-        }
-        let max = max_response(rate);
-        if len > max {
-            return Err(HrtfBinauralError::ResponseTooLong { len, max });
-        }
+        check_shape(rate, len)?;
         if vertices == 0 {
             return Err(HrtfBinauralError::Header("the sphere has no vertices"));
         }
@@ -129,55 +274,108 @@ impl HrirSphere {
         }
 
         let mut faces = Vec::with_capacity(indices / 3);
-        for face in 0..indices / 3 {
-            let mut tri = [0u32; 3];
-            for vertex in &mut tri {
-                *vertex = cur.u32()?;
-                if *vertex as usize >= vertices {
-                    return Err(HrtfBinauralError::FaceIndex {
-                        face,
-                        vertex: *vertex,
-                        vertices,
-                    });
-                }
-            }
-            faces.push(tri);
+        for _ in 0..indices / 3 {
+            faces.push([cur.u32()?, cur.u32()?, cur.u32()?]);
         }
-
         let mut positions = Vec::with_capacity(vertices);
         let mut responses = Vec::with_capacity(vertices * len * 2);
-        for vertex in 0..vertices {
-            let pos = [cur.f32()?, cur.f32()?, cur.f32()?];
-            let start = responses.len();
+        for _ in 0..vertices {
+            positions.push([cur.f32()?, cur.f32()?, cur.f32()?]);
             for _ in 0..2 * len {
                 responses.push(cur.f32()?);
             }
-            // NaN fails both comparisons, so a non-finite value is refused
-            // too.
-            let distance = pos
-                .iter()
-                .map(|&c| f64::from(c).powi(2))
-                .sum::<f64>()
-                .sqrt();
-            let placed = (MIN_DISTANCE..=MAX_DISTANCE).contains(&distance);
-            let bounded = responses[start..].iter().all(|s| s.abs() <= MAX_SAMPLE);
-            if !placed || !bounded {
-                return Err(HrtfBinauralError::Vertex { vertex });
-            }
-            positions.push(pos);
         }
-        if !faces.iter().any(|&f| Face::new(f, &positions).is_some()) {
-            return Err(HrtfBinauralError::NoFace);
-        }
-
-        Ok(Self {
+        let sphere = Self {
             rate,
             len,
             positions,
             faces,
             responses,
-        })
+        };
+        sphere.check_faces()?;
+        check_values(&sphere.positions, &sphere.responses, len)?;
+        Ok(sphere)
     }
+
+    /// Every face names vertices the sphere has, and at least one is a
+    /// triangle a ray from the centre can cross.
+    fn check_faces(&self) -> Result<(), HrtfBinauralError> {
+        let vertices = self.positions.len();
+        for (face, tri) in self.faces.iter().enumerate() {
+            if let Some(&vertex) = tri.iter().find(|&&v| v as usize >= vertices) {
+                return Err(HrtfBinauralError::FaceIndex {
+                    face,
+                    vertex,
+                    vertices,
+                });
+            }
+        }
+        if !self
+            .faces
+            .iter()
+            .any(|&f| Face::new(f, &self.positions).is_some())
+        {
+            return Err(HrtfBinauralError::NoFace);
+        }
+        Ok(())
+    }
+}
+
+/// Each of the `vertices` is a corner of some face: the hull dropped none of them as
+/// lying inside the others.
+fn every_vertex_on(faces: &[[u32; 3]], vertices: usize) -> Result<(), HrtfBinauralError> {
+    let mut on_hull = vec![false; vertices];
+    for &v in faces.iter().flatten() {
+        on_hull[v as usize] = true;
+    }
+    match on_hull.iter().position(|&on| !on) {
+        Some(vertex) => Err(HrtfBinauralError::Inside { vertex }),
+        None => Ok(()),
+    }
+}
+
+/// The rate and the response length are in range: the checks on a sphere's
+/// shape, before its content is read or allocated.
+fn check_shape(rate: u32, len: usize) -> Result<(), HrtfBinauralError> {
+    if !(MIN_SPHERE_RATE..=MAX_SPHERE_RATE).contains(&rate) {
+        return Err(HrtfBinauralError::Rate { rate });
+    }
+    if len == 0 {
+        return Err(HrtfBinauralError::Header("the response length is zero"));
+    }
+    let max = max_response(rate);
+    if len > max {
+        return Err(HrtfBinauralError::ResponseTooLong { len, max });
+    }
+    Ok(())
+}
+
+/// Each vertex sits at a usable distance from the origin and holds
+/// responses of bounded samples: `responses` is `2 * len` values per
+/// position.
+fn check_values(
+    positions: &[[f32; 3]],
+    responses: &[f32],
+    len: usize,
+) -> Result<(), HrtfBinauralError> {
+    for (vertex, (pos, response)) in positions
+        .iter()
+        .zip(responses.chunks_exact(2 * len))
+        .enumerate()
+    {
+        // NaN fails both comparisons, so a non-finite value is refused too.
+        let distance = pos
+            .iter()
+            .map(|&c| f64::from(c).powi(2))
+            .sum::<f64>()
+            .sqrt();
+        let placed = (MIN_DISTANCE..=MAX_DISTANCE).contains(&distance);
+        let bounded = response.iter().all(|s| s.abs() <= MAX_SAMPLE);
+        if !placed || !bounded {
+            return Err(HrtfBinauralError::Vertex { vertex });
+        }
+    }
+    Ok(())
 }
 
 /// The longest response a sphere at `rate` may carry: 50 ms of frames,

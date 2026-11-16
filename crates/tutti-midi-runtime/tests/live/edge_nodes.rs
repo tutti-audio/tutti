@@ -628,6 +628,47 @@ fn a_system_reset_ends_its_cables_notes_and_runs_and_is_not_echoed() {
     );
 }
 
+/// **A message with no Channel field applies to every Channel of its Group**
+/// (M2-104 section 2.1.2): a System Reset names a Group and no Channel, and the
+/// keys held on Channels 0, 5 and 15 of that Group all end at its frame, while
+/// the key held on Channel 5 of the other Group is not touched.
+/// Spec: m2-104/2.1.2#4
+#[test]
+fn a_system_reset_reaches_every_channel_of_its_group() {
+    let g2 = MidiGroup::of(1);
+    let two = MidiInputPorts::through(g2);
+    let reset = at(100, Ump::from(Message::System(G, tutti_ump::System::Reset)));
+    let other_group = at(
+        15,
+        midi::note_on(
+            Address::new(g2, MidiChannel::of(5)),
+            70,
+            widen_velocity(U7::of(100)).get(),
+        ),
+    );
+    let wire = Script::new(vec![vec![
+        note(0, 60, 10),
+        note(5, 61, 11),
+        note(15, 62, 12),
+        other_group,
+        reset,
+    ]]);
+    let (_ed, mut exec, _c, seen) = ingest(Ingest::new(wire).hearing(two), two.count() as u16, 512);
+    block(&mut exec, 512);
+    let got = heard(&seen);
+    let mut after: Vec<_> = got.iter().filter(|(f, _)| *f >= 100).cloned().collect();
+    after.sort();
+    assert_eq!(
+        after,
+        vec![
+            (100, "off 60".to_string()),
+            (100, "off 61".to_string()),
+            (100, "off 62".to_string()),
+        ],
+        "{got:?}"
+    );
+}
+
 /// **A requested MPE mode is adopted once and holds.** With the lower zone
 /// requested, a note on member channel 1 binds it; a channel bend there in
 /// each of the next two blocks folds into a per-note bend on the note. The

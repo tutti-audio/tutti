@@ -1198,10 +1198,7 @@ impl<C: Clock> Session<C> {
                 #[cfg(feature = "midi")]
                 {
                     let playhead = self.playhead();
-                    if self
-                        .midi_state
-                        .midi_out_phase(&mut self.graph, &playhead, cx.now, out)
-                    {
+                    if self.midi_state.midi_out_phase(&mut self.graph, &playhead) {
                         self.commit();
                     }
                 }

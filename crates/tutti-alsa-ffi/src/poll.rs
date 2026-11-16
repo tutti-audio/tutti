@@ -19,7 +19,7 @@ pub enum Wait {
     /// The sequencer has input.
     Ready,
     /// The time given to `wait` passed with nothing ready.
-    Timeout,
+    TimedOut,
     /// The stop descriptor is readable or closed.
     Stopped,
     /// A sequencer descriptor reports an error or hang-up.
@@ -110,7 +110,7 @@ impl Poller {
                 return Err(error);
             }
             if ready == 0 {
-                return Ok(Wait::Timeout);
+                return Ok(Wait::TimedOut);
             }
             // The stop descriptor is the last, pushed in `new`.
             let Some((stop, seq)) = self.polls.split_last() else {
@@ -174,7 +174,7 @@ mod tests {
         };
         let mut poller = Poller::over(vec![seq], stop_rx.as_raw_fd());
         let short = Some(Duration::from_millis(20));
-        assert_eq!(poller.wait(short).unwrap(), Wait::Timeout);
+        assert_eq!(poller.wait(short).unwrap(), Wait::TimedOut);
         seq_tx.write_all(b"x").unwrap();
         assert_eq!(poller.wait(short).unwrap(), Wait::Ready);
         stop_tx.write_all(b"x").unwrap();

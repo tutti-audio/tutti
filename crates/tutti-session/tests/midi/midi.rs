@@ -33,8 +33,8 @@ use tutti_ump::{MpeChannels, MpeZoneSpan};
 
 use tutti_fixtures::midi;
 use tutti_session::{
-    EventInPort, EventOutPort, Feeder, MIDI_OUT_DROP_REPORT, MidiError, MidiReport, PHASES,
-    PhaseCx, Session, SessionEvent, midi_sink,
+    EventInPort, EventOutPort, Feeder, MidiError, MidiReport, PHASES, PhaseCx, Session,
+    SessionEvent, midi_sink,
 };
 #[cfg(feature = "midi-hardware")]
 use tutti_session::{MidiRouteRule, NoSuchMidiRoute, RouteDeclarer};
@@ -524,92 +524,31 @@ fn clocked(sink: Arc<dyn tutti_midi_runtime::MidiOut>) -> Session {
 fn a_sink_is_drained_to_stamping_off() {
     let count = Arc::new(AtomicUsize::new(0));
     let mut s = clocked(Arc::new(CountingSink(Arc::clone(&count))));
-    let events = s.update();
+    let _ = s.update();
     assert!(
         count.load(Ordering::SeqCst) > 0,
         "the clock reached the sink, unstamped"
     );
-    assert_eq!(s.midi().out_drops(), 0);
     assert_eq!(s.midi_sink(&"out").unwrap().losses(), Losses::NONE);
-    assert!(
-        !events
-            .iter()
-            .any(|e| matches!(e, SessionEvent::Midi(MidiReport::OutputDropped { .. })))
-    );
 }
 
-/// **A sink that refuses events has them counted, per sink and in total, and
-/// the session says so when the count rises**, not on every update.
+/// **A sink that refuses events has them counted in its own losses.**
 #[test]
-fn a_refusing_sink_counts_what_it_refused_and_says_so() {
+fn a_refusing_sink_counts_what_it_refused() {
     let mut s = clocked(Arc::new(Refusing));
-    let events = s.update();
-    let dropped = s.midi().out_drops();
-    assert!(dropped > 0, "the ticks are refused, counted");
-    assert_eq!(
-        s.midi_sink(&"out").unwrap().losses(),
-        Losses::refused(dropped),
-        "the sink's share is all of it"
-    );
+    let _ = s.update();
+    let losses = s.midi_sink(&"out").unwrap().losses();
     assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, SessionEvent::Midi(MidiReport::OutputDropped { total }) if *total == dropped)),
-        "{events:?}"
+        losses.refused > 0,
+        "the ticks are refused, counted: {losses:?}"
     );
-    assert!(
-        !s.update()
-            .iter()
-            .any(|e| matches!(e, SessionEvent::Midi(MidiReport::OutputDropped { .. }))),
-        "reported when the count rises, not every update"
-    );
-}
-
-/// **A clock whose ticks a sink refuses is reported once per
-/// `MIDI_OUT_DROP_REPORT`, not every update.** The first update that drops
-/// reports the total; later updates within the second drop more and report
-/// nothing; the first update a second after the report reports the new
-/// total.
-#[test]
-fn dropped_ticks_are_reported_at_most_once_a_second() {
-    let mut s = clocked(Arc::new(Refusing));
-    let now = Instant::now();
-    let drops = |events: &[SessionEvent]| -> Vec<u64> {
-        events
-            .iter()
-            .filter_map(|e| match e {
-                SessionEvent::Midi(MidiReport::OutputDropped { total }) => Some(*total),
-                _ => None,
-            })
-            .collect()
-    };
-    let first = drops(&update_at(&mut s, now));
-    assert_eq!(
-        first,
-        vec![s.midi().out_drops()],
-        "the first drop, reported"
-    );
-
-    for at in [
-        Duration::ZERO,
-        Duration::from_millis(500),
-        Duration::from_millis(999),
-    ] {
-        roll(&s, 24_000);
-        let before = s.midi().out_drops();
-        assert!(drops(&update_at(&mut s, now + at)).is_empty(), "at {at:?}");
-        assert!(
-            s.midi().out_drops() > before,
-            "precondition: it dropped more"
-        );
-    }
-
+    assert_eq!(losses.lost, 0, "the tap had room for them");
+    let before = losses.refused;
     roll(&s, 24_000);
-    let later = drops(&update_at(&mut s, now + MIDI_OUT_DROP_REPORT));
-    assert_eq!(
-        later,
-        vec![s.midi().out_drops()],
-        "a second on, the new total"
+    let _ = s.update();
+    assert!(
+        s.midi_sink(&"out").unwrap().losses().refused > before,
+        "and the count only rises"
     );
 }
 
