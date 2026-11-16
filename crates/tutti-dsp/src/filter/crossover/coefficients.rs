@@ -113,7 +113,7 @@ impl Lerp for CrossoverCoefficients {
             .zip(self.split.iter().zip(&to.split))
             .take(splits)
         {
-            *o = Tpt::new(a.g + (b.g - a.g) * t);
+            *o = Tpt::new(crate::lerp(a.g, b.g, t));
         }
         out
     }

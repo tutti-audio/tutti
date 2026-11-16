@@ -445,7 +445,7 @@ impl MultibandBank {
                     } else if w == 1.0 {
                         x[i]
                     } else {
-                        y[i] * (1.0 - w) + x[i] * w
+                        crate::lerp(y[i], x[i], w)
                     };
                     *s += if a == 1.0 { v } else { v * a };
                 }

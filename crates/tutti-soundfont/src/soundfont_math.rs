@@ -2,15 +2,12 @@
 // MeltySynth (Copyright (C) 2021 Nobuaki Tanaka). The MIT notice is
 // LICENSE-RUSTYSYNTH.txt, at the root of this crate.
 
-use std::f32::consts;
-
 use tutti_types::{Amplitude, Cents, Db};
 
 #[non_exhaustive]
 pub(crate) struct SoundFontMath {}
 
 impl SoundFontMath {
-    pub(crate) const HALF_PI: f32 = consts::PI / 2_f32;
     /// The level (-60 dB) below which a voice's envelope is dropped: tutti's
     /// threshold, not the spec's. A release time is the time to -100 dB, so a
     /// released voice is dropped at 0.6 of it. `LOG_NON_AUDIBLE` is its natural

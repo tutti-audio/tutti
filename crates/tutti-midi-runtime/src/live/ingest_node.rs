@@ -128,7 +128,7 @@ pub const MIDI_INPUT_DENSITY: EventDensity = EventDensity::per_kiloframe(128);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MidiInputPorts {
     /// How many Groups, from the first: 1 to 16.
-    groups: u8,
+    groups: tutti_ump::GroupSpan,
 }
 
 impl MidiInputPorts {
@@ -140,27 +140,33 @@ impl MidiInputPorts {
     #[must_use]
     pub const fn through(last: MidiGroup) -> Self {
         Self {
-            groups: last.get() + 1,
+            groups: tutti_ump::GroupSpan::of(last.get() + 1),
         }
+    }
+
+    /// The Groups the node hears, from the first.
+    #[must_use]
+    pub const fn groups(self) -> tutti_ump::GroupSpan {
+        self.groups
     }
 
     /// How many event outputs the node has.
     #[must_use]
     pub const fn count(self) -> usize {
-        self.groups as usize * PORTS_PER_GROUP
+        self.groups.get() as usize * PORTS_PER_GROUP
     }
 
     /// The last Group the node hears.
     #[must_use]
     pub(crate) const fn last_group(self) -> MidiGroup {
-        MidiGroup::masked(self.groups - 1)
+        MidiGroup::masked(self.groups.get() - 1)
     }
 
     /// The port of `group`'s events with no channel (System, SysEx, Flex).
     /// `None` for a Group the node does not hear.
     #[must_use]
     pub const fn channelless(self, group: MidiGroup) -> Option<usize> {
-        if group.get() < self.groups {
+        if group.get() < self.groups.get() {
             Some(group.get() as usize * PORTS_PER_GROUP + CHANNELLESS_PORT)
         } else {
             None
@@ -171,7 +177,7 @@ impl MidiInputPorts {
     /// the node does not hear.
     #[must_use]
     pub const fn channel(self, group: MidiGroup, channel: MidiChannel) -> Option<usize> {
-        if group.get() < self.groups {
+        if group.get() < self.groups.get() {
             Some(group.get() as usize * PORTS_PER_GROUP + channel.get() as usize)
         } else {
             None
@@ -204,9 +210,9 @@ impl MidiInputPorts {
     ) -> impl Iterator<Item = usize> {
         let (from, to) = match group {
             Some(g) => (g.get(), g.get() + 1),
-            None => (0, self.groups),
+            None => (0, self.groups.get()),
         };
-        (from..to.min(self.groups)).flat_map(move |g| {
+        (from..to.min(self.groups.get())).flat_map(move |g| {
             let base = usize::from(g) * PORTS_PER_GROUP;
             let (a, b) = match channel {
                 Some(c) => (usize::from(c.get()), usize::from(c.get()) + 1),

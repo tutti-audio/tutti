@@ -17,6 +17,7 @@ use tutti_types::{Amplitude, Gain, Hz, SampleRate};
 use super::{
     Absorption, AllPass, AllPassForm, Band, Fdn, Line, MAX_CHANNELS, Matrix, Network, Stage, energy,
 };
+use crate::level::db_to_ratio_f64;
 use crate::{Complex64, Lti};
 
 const ZERO: Complex64 = Complex64::new(0.0, 0.0);
@@ -684,10 +685,10 @@ impl Fdn {
         }
         let mut worst = 0.0f64;
         for band in Band::ALL {
-            let Some((log_rho, log_sigma, _)) = self.slowest(band) else {
+            let Some((db_rho, db_sigma, _)) = self.slowest(band) else {
                 return f64::INFINITY;
             };
-            worst = worst.max(libm::pow(10.0, log_rho + log_sigma));
+            worst = worst.max(db_to_ratio_f64(db_rho + db_sigma));
         }
         worst
     }
@@ -726,8 +727,8 @@ impl Lti for Network {
     }
 
     /// The slowest decay per frame over the stages: for a loop, `sigma rho` of the
-    /// slowest band (`Fdn::rt60_bound`'s own figure, `10^(log rho + log
-    /// sigma)` per frame); a series all-pass's `|g|^(1/D)`; 0 for taps and a FIR; 1
+    /// slowest band (`Fdn::rt60_bound`'s own figure, `10^((dB rho + dB
+    /// sigma) / 20)` per frame); a series all-pass's `|g|^(1/D)`; 0 for taps and a FIR; 1
     /// for a lossless loop; infinity for what the analysis does not accept.
     fn spectral_radius(&self) -> f64 {
         self.stages

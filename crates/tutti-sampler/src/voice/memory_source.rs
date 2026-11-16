@@ -25,7 +25,7 @@ use super::clock::{BlockClock, Clock};
 use super::interp::{
     Gate, Place, hermite_lanes, place, place_tail, read_looped_frame, split_position, tap,
 };
-use super::loop_span::{Loop, LoopSpan, blend};
+use super::loop_span::{Loop, LoopSpan};
 use super::slot::Piece;
 use super::types::Direction;
 use crate::lanes::{Gather, Lane, UNPREPARED_FRAMES, audible, scale};
@@ -942,7 +942,7 @@ impl MemorySource {
                             let tap = taps[t];
                             let tail = wave[tap.frame];
                             match tap.fade {
-                                Some((lead, w)) => blend(tail, wave[lead], w),
+                                Some((lead, w)) => tutti_dsp::lerp(tail, wave[lead], w),
                                 None => tail,
                             }
                         };

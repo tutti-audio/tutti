@@ -601,8 +601,7 @@ impl FdnBank {
             let (mut out_l, mut out_r) = (0.0f32, 0.0f32);
             for j in 0..n {
                 let delay =
-                    (s.c_len[j] + s.c_mod_prev[j] + (s.c_mod_next[j] - s.c_mod_prev[j]) * t)
-                        .max(1.0);
+                    (s.c_len[j] + crate::lerp(s.c_mod_prev[j], s.c_mod_next[j], t)).max(1.0);
                 let line = &s.buf[j * cap..(j + 1) * cap];
                 d[j] = read(line, s.w, delay);
                 out_l += s.c_out[j][0] * d[j];
@@ -744,7 +743,7 @@ fn read(buf: &[f32], w: usize, delay: f32) -> f32 {
         return a;
     }
     let b = buf[(w + cap - whole - 1) % cap];
-    a * (1.0 - frac) + b * frac
+    crate::lerp(a, b, frac)
 }
 
 #[cfg(test)]

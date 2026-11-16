@@ -107,7 +107,7 @@ pub(super) struct Doc {
 /// The documents, one inventory file each.
 pub(super) const DOCS: &[Doc] = &[
     M2_101, M2_102, M2_103, M2_104, M2_115, M2_116, M2_105, M2_106, M2_107, M2_108, M2_109, M2_111,
-    M2_112, M2_117, M2_113, M2_118, M2_119, M2_120, M2_121, M2_122, M2_123, M2_125,
+    M2_112, M2_117, M2_113, M2_118, M2_119, M2_120, M2_121, M2_122, M2_123, M2_125, M2_124,
 ];
 
 /// The header note of a document with its own Table 2 and no tables of rows.
@@ -414,6 +414,19 @@ pub(super) const M2_123: Doc = Doc {
     sides: "sender, receiver or both",
     note: SAME_TABLES,
     implicit_levels: true,
+    dotted_top: false,
+    tables: Tables::None,
+};
+
+pub(super) const M2_124: Doc = Doc {
+    prefix: "m2-124",
+    label: "M2-124",
+    title: "Network MIDI 2.0 (UDP) (M2-124 v1.0)",
+    file: "midi-m2-124.txt",
+    source: "M2-124-UM_v1-0_",
+    sides: "client, host or both",
+    note: SAME_TABLES,
+    implicit_levels: false,
     dotted_top: false,
     tables: Tables::None,
 };

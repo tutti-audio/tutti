@@ -48,9 +48,9 @@ use crate::properties::{PropertyAsk, PropertyChange, PropertyError, PropertyPeer
 use crate::stream::{DeviceStream, InputTiming, Negotiation};
 use tutti_graph::EventInletNode;
 use tutti_midi_device::{CiDeviceId, ProfileChange, ProfileId};
-use tutti_midi_device::{DeviceId, DeviceInfo, EntropyError, Learned, SavedDevice};
+use tutti_midi_device::{DeviceId, DeviceInfo, EntropyError, Learned, MidiIdentity, SavedDevice};
 use tutti_midi_runtime::{ClockWriters, InputInlets};
-use tutti_ump::{DeviceIdentity, MidiGroup};
+use tutti_ump::{GroupSpan, MidiGroup};
 
 /// The set of open MIDI inputs, and the endpoints available to open.
 ///
@@ -82,9 +82,29 @@ pub struct MidiSession {
     devices: Devices,
     /// What the session was opened with.
     options: MidiHardwareOptions,
+    /// Who the session presents itself as on every input with an output; `None`
+    /// presents nothing ([`present`](MidiSession::present)).
+    presented: Option<Presented>,
     /// What the MIDI-CI devices' Property Exchange Responders serve
     /// ([`MidiSession::serve_properties`]); empty by default.
     properties: Arc<Mutex<ResourceStore>>,
+}
+
+/// An identity and the Groups its one Function Block spans: what
+/// [`MidiSession::present`] presents on every input with an output.
+///
+/// A [`MidiIdentity`] under
+/// [`ManufacturerId::NON_COMMERCIAL`](tutti_ump::ManufacturerId::NON_COMMERCIAL)
+/// is for development and research only: a Discovery carries a System
+/// Exclusive manufacturer id, tutti has none, and the one MIDI 1.0 sets aside
+/// for non-commercial use is not for a released product, so an app that ships
+/// says who it is with the id it registered.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Presented {
+    /// Who the session is.
+    pub identity: MidiIdentity,
+    /// The Groups of the Endpoint's one Function Block, from Group 1.
+    pub groups: GroupSpan,
 }
 
 /// What an OS MIDI layer is opened with: [`MidiSession::open`]'s second
@@ -93,39 +113,17 @@ pub struct MidiSession {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
 pub struct MidiHardwareOptions {
-    /// The identity MIDI-CI announces in Discovery; `None` is a session without
-    /// MIDI-CI.
-    pub ci: Option<DeviceIdentity>,
     /// Where the event times of the input ports come from.
     pub input_timing: InputTiming,
 }
 
 impl MidiHardwareOptions {
-    /// The options of a session opened with none: no MIDI-CI, inputs timed by
-    /// arrival.
+    /// The options of a session opened with none: inputs timed by arrival.
     #[must_use]
     pub const fn new() -> Self {
         Self {
-            ci: None,
             input_timing: InputTiming::Arrival,
         }
-    }
-
-    /// These options with MIDI-CI announcing `identity` in Discovery.
-    ///
-    /// **MIDI-CI is off unless the app gives an identity**: a Discovery carries a
-    /// System Exclusive manufacturer id, tutti has none, and the one MIDI 1.0
-    /// sets aside for non-commercial use (`7D`) is not for a released product. So
-    /// the app says who it is, with the id it registered. An identity under
-    /// [`ManufacturerId::NON_COMMERCIAL`](tutti_ump::ManufacturerId::NON_COMMERCIAL)
-    /// is for development and research only, never for a released product. A
-    /// device on an input starts at the first [`poll`](MidiSession::poll) after
-    /// the input's negotiation settled and any Identity Request in progress has
-    /// ended.
-    #[must_use]
-    pub const fn ci(mut self, identity: DeviceIdentity) -> Self {
-        self.ci = Some(identity);
-        self
     }
 
     /// These options with the event times of the input ports from `timing`:
@@ -303,6 +301,7 @@ impl MidiSession {
             ports: Arc::new(HardwareMidiInputs::new(inlets)),
             devices: Devices::open_over(backend)?,
             options,
+            presented: None,
             properties: Arc::default(),
         })
     }
@@ -547,14 +546,15 @@ impl MidiSession {
     /// rings and sends.
     pub fn poll(&mut self, now: Instant) -> std::vec::IntoIter<Polled> {
         let mut polled = Vec::new();
-        let ci = self.options.ci;
+        let presented = self.presented;
+        let ci = presented.is_some();
         let ports = &*self.ports;
         for (id, held) in &mut self.inputs {
             let slot = held.input.port();
             // The copy of the SysEx7 packets is on before a request goes out
             // and before MIDI-CI starts, which a step decides a poll ahead
             // (`Ci::Idle`), and off once nothing listens.
-            sync_hearing(ports, held, ci.is_some());
+            sync_hearing(ports, held, ci);
             // The ring's loss is read either side of the drain (`Heard`).
             let lost = || ports.port_info(slot).map_or(0, |p| p.stream_lost);
             let before = lost();
@@ -566,9 +566,9 @@ impl MidiSession {
                 lost_during: after > before,
             };
             held.lost_seen = after;
-            let stepped = held.stream.poll(now, &heard, ci, &self.properties);
+            let stepped = held.stream.poll(now, &heard, presented, &self.properties);
             // Off the moment nothing listens, so no packet is kept for no one.
-            sync_hearing(ports, held, ci.is_some());
+            sync_hearing(ports, held, ci);
             if let Some(stream) = stepped.stream {
                 follow_timing(ports, held);
                 polled.push(Polled::Stream(id.clone(), Box::new(stream)));
@@ -607,6 +607,33 @@ impl MidiSession {
             );
         }
         polled.into_iter()
+    }
+
+    /// Presents the session as `who` on every open input with an output and on
+    /// every one opened later, from the next [`poll`](Self::poll): MIDI-CI runs
+    /// as its identity (a Discovery from each device), and a peer's UMP
+    /// Endpoint Discovery, Function Block Discovery and Stream Configuration
+    /// Request are answered as the Endpoint it describes (M2-104 §7.1), one
+    /// bidirectional Function Block over its Groups, UMP 1.1, the MIDI 1.0 and
+    /// MIDI 2.0 Protocols, JR Timestamps sent (the output stamps for a device
+    /// that asks) and, when the session was opened with
+    /// [`InputTiming::JitterReduction`], received. `None` presents nothing.
+    ///
+    /// A session built by `tutti-session` has this set on every update from its
+    /// `MidiPolicy`, which overwrites a call made here.
+    ///
+    /// A change of identity ends the devices that ran (each sends Invalidate
+    /// MUID for its own MUID, its peers are lost) and the new identity starts
+    /// them again under fresh MUIDs, all in the next poll; a change of name or
+    /// Product Instance Id alone re-announces the Endpoint.
+    pub fn present(&mut self, who: Option<Presented>) {
+        self.presented = who;
+    }
+
+    /// Who the session presents itself as ([`present`](Self::present)).
+    #[must_use]
+    pub const fn presented(&self) -> Option<Presented> {
+        self.presented
     }
 
     /// What the session was opened with.
