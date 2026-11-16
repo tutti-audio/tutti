@@ -540,10 +540,10 @@ impl Executor {
     }
 
     /// The cell the control side stores the log filter into: what
-    /// [`Io::log`](crate::Io::log) lets through, per target, from the next
-    /// block on. Off until something stores a filter.
+    /// `Io::log` lets through, per target, from the next block on. Off until
+    /// something stores a filter.
     #[must_use]
-    pub fn log_gate(&self) -> crate::LogGate {
+    pub(crate) fn log_gate(&self) -> crate::rtlog::LogGate {
         self.logs.gate().clone()
     }
 
@@ -552,9 +552,8 @@ impl Executor {
     /// [`set_pool`](Self::set_pool). A reader whose executor sizing replaced
     /// its ring stays here until taken, so what it holds is still read.
     ///
-    /// Control thread, before the executor goes to the audio thread (the
-    /// readers are the only way to see what the nodes logged).
-    pub fn take_log_readers(&mut self) -> Vec<crate::RtLogReader> {
+    /// Control thread; [`RtLogReaders`](crate::RtLogReaders) is the one caller.
+    pub(crate) fn take_log_readers(&mut self) -> Vec<crate::rtlog::RtLogReader> {
         self.logs.take_readers()
     }
 

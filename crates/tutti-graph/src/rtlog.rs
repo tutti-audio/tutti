@@ -5,7 +5,7 @@
 //! write to a file. A node hands `Io::log` a fixed-size record; the
 //! participant that ran the node moves its records into a ring of its own
 //! after the node's `process` returns, and a control-side reader formats and
-//! emits them ([`RtLogReader`]). Counts stay the API
+//! emits them ([`RtLogReaders`]). Counts stay the API
 //! (`Counter<Losses>`, `Counter<Faults>`); the log is diagnostics, and
 //! nothing reads it back.
 //!
@@ -30,7 +30,7 @@
 //! its slots into its ring and clears them.
 //!
 //! The level gate is one [`LogFilter`] (the most verbose level per target)
-//! the control side stores into a [`LogGate`]; the executor loads it once per
+//! the control side stores through [`RtLogReaders::drain`]; the executor loads it once per
 //! block, and a call below its target's level returns at once. A new
 //! executor's gate is off.
 
@@ -150,7 +150,7 @@ impl From<usize> for RtValue {
 /// One line from the audio thread.
 ///
 /// Built by [`Io::log`](crate::Io::log) (and its siblings) and read back by
-/// [`RtLogReader`]; a plugin's own line is built with [`line`](Self::line).
+/// [`RtLogReaders`]; a plugin's own line is built with [`line`](Self::line).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RtRecord {
     level: RtLevel,
@@ -164,6 +164,8 @@ pub struct RtRecord {
     field_count: u8,
     text: [u8; TEXT_CAPACITY],
     text_len: u8,
+    /// Whether it is a line (`RtRecord::line`), empty or not.
+    line: bool,
     repeats: u32,
 }
 
@@ -187,6 +189,7 @@ impl RtRecord {
             field_count: 0,
             text: [0; TEXT_CAPACITY],
             text_len: 0,
+            line: false,
             repeats: 0,
         };
         let kept = fields.len().min(MAX_FIELDS);
@@ -206,6 +209,7 @@ impl RtRecord {
         }
         record.text[..end].copy_from_slice(&text.as_bytes()[..end]);
         record.text_len = end as u8;
+        record.line = true;
         record
     }
 
@@ -247,10 +251,10 @@ impl RtRecord {
         &self.fields[..usize::from(self.field_count)]
     }
 
-    /// The inline text of a plugin's line.
+    /// The inline text of a plugin's line (empty for an empty line).
     #[must_use]
     pub fn text(&self) -> Option<&str> {
-        if self.text_len == 0 {
+        if !self.line {
             return None;
         }
         std::str::from_utf8(&self.text[..usize::from(self.text_len)]).ok()
@@ -264,8 +268,8 @@ impl RtRecord {
 
     /// Whether a second call of the same record adds to this one's repeats.
     fn coalesces_with(&self, other: &Self) -> bool {
-        self.text_len == 0
-            && other.text_len == 0
+        !self.line
+            && !other.line
             && std::ptr::eq(self.message, other.message)
             && self.level == other.level
             && self.target == other.target
@@ -324,7 +328,7 @@ impl LogFilter {
 /// Where the control side stores the [`LogFilter`] an executor loads. A
 /// clone shares the cell.
 #[derive(Clone, Debug)]
-pub struct LogGate(Arc<PackedAtomic<LogFilter>>);
+pub(crate) struct LogGate(Arc<PackedAtomic<LogFilter>>);
 
 impl LogGate {
     fn off() -> Self {
@@ -332,13 +336,12 @@ impl LogGate {
     }
 
     /// Stores `filter`: the executor reads it at the start of its next block.
-    pub fn set(&self, filter: LogFilter) {
+    pub(crate) fn set(&self, filter: LogFilter) {
         self.0.store(filter);
     }
 
     /// The filter last stored.
-    #[must_use]
-    pub fn get(&self) -> LogFilter {
+    pub(crate) fn get(&self) -> LogFilter {
         self.0.load()
     }
 }
@@ -428,6 +431,16 @@ impl LogSlots {
         }
     }
 
+    /// Drops what the slots hold, counting the records already lost first.
+    #[inline]
+    pub(crate) fn discard(&self, sink: &mut LogSink) {
+        let lost = self.lost.replace(0);
+        if lost != 0 {
+            sink.lost.add(u64::from(lost));
+        }
+        self.len.set(0);
+    }
+
     /// Takes the block's filter.
     #[inline]
     pub(crate) fn set_filter(&self, filter: LogFilter) {
@@ -450,40 +463,34 @@ pub(crate) struct LogLane {
 /// The control side of one participant's ring: what it holds, and what was
 /// lost on the way (a full ring, or a fifth record in one node call).
 #[derive(Debug)]
-pub struct RtLogReader {
+pub(crate) struct RtLogReader {
     ring: RingReader<RtRecord>,
     slots_lost: Counter<u64>,
 }
 
 impl RtLogReader {
     /// The oldest record not yet taken.
-    pub fn pop(&mut self) -> Option<RtRecord> {
+    pub(crate) fn pop(&mut self) -> Option<RtRecord> {
         self.ring.pop()
-    }
-
-    /// The next record, not taken.
-    #[must_use]
-    pub fn peek(&self) -> Option<&RtRecord> {
-        self.ring.peek()
     }
 
     /// Whether nothing is waiting.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.ring.is_empty()
     }
 
     /// Whether the executor that wrote this ring no longer holds it: what is
     /// queued is all there will be.
     #[must_use]
-    pub fn is_disconnected(&self) -> bool {
+    pub(crate) fn is_disconnected(&self) -> bool {
         self.ring.is_disconnected()
     }
 
     /// Records lost since the ring was built: refused by a full ring, plus
     /// those past a node call's fourth.
     #[must_use]
-    pub fn lost(&self) -> u64 {
+    pub(crate) fn lost(&self) -> u64 {
         self.ring.lost() + self.slots_lost.get()
     }
 }
@@ -660,9 +667,12 @@ impl Logs {
 
     /// Loads the gate once for the block: every lane's slots take it.
     #[inline]
-    pub(crate) fn begin_block(&self) {
+    pub(crate) fn begin_block(&mut self) {
         let filter = self.gate.get();
-        for lane in &self.lanes {
+        for lane in &mut self.lanes {
+            // What a node left when it panicked mid-call belongs to no one:
+            // the losses are counted, the records dropped.
+            lane.slots.discard(&mut lane.sink);
             lane.slots.set_filter(filter);
         }
     }
@@ -766,6 +776,63 @@ mod tests {
         s.push(rec(SITE, 0), 0);
         assert_eq!((s.len.get(), s.lost.get()), (4, 1));
         assert_eq!(s.slots[0].get().repeats(), 1);
+    }
+
+    #[test]
+    fn the_same_site_at_another_level_or_target_takes_another_slot() {
+        static SITE: &str = "site";
+        let s = slots(ALL);
+        let at = |level, target| RtRecord::new(level, target, SITE, &[]);
+        s.push(at(RtLevel::Warn, RtTarget::Rt), 0);
+        s.push(at(RtLevel::Error, RtTarget::Rt), 0);
+        s.push(at(RtLevel::Warn, RtTarget::Plugin), 0);
+        assert_eq!(s.len.get(), 3);
+    }
+
+    #[test]
+    fn equal_fields_at_another_message_address_take_another_slot() {
+        // Two statics of different text: the compiler cannot merge them.
+        static ONE: &str = "one";
+        static TWO: &str = "two";
+        let s = slots(ALL);
+        s.push(rec(ONE, 1), 0);
+        s.push(rec(TWO, 1), 0);
+        assert_eq!(s.len.get(), 2);
+    }
+
+    #[test]
+    fn an_empty_line_is_a_line_that_never_coalesces() {
+        let s = slots(ALL);
+        let empty = RtRecord::line(RtLevel::Info, RtTarget::Plugin, "");
+        assert_eq!(empty.text(), Some(""));
+        s.push(empty, 0);
+        s.push(empty, 0);
+        assert_eq!(s.len.get(), 2);
+    }
+
+    #[test]
+    fn a_new_block_drops_what_a_panicked_node_left_and_keeps_its_counted_losses() {
+        let mut logs = Logs::new(1);
+        logs.gate().set(ALL);
+        logs.begin_block();
+        let lane = &logs.lanes[0];
+        for v in 0..5 {
+            lane.slots.push(rec("x", v), 0);
+        }
+        // The node panicked here: nothing flushed. The next block begins.
+        logs.begin_block();
+        let lane = &mut logs.lanes[0];
+        assert!(
+            lane.slots.is_idle(),
+            "nothing is left to flush under the next node"
+        );
+        let mut readers = logs.take_readers();
+        assert_eq!(
+            readers[0].lost(),
+            1,
+            "the fifth record's loss was counted first"
+        );
+        assert!(readers[0].pop().is_none());
     }
 
     #[test]
