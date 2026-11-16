@@ -231,10 +231,10 @@ impl<K: Kernel> KernelNode<K> {
         }
     }
 
-    /// This node with its kernel made `kernel` of and its cells `set` of the set it has, at
-    /// the values they hold: the option of a node whose kernel or set depends on a build-time choice, applied
-    /// before the node is inserted. A control `set` adds starts at the base of its
-    /// [`assemble`](ControlSet::assemble). Allocates: control side.
+    /// This node with its kernel mapped by `kernel` and its set by `set`, its controls at the
+    /// values they hold: a build-time option of a node whose kernel or set depends on it,
+    /// applied before the node is inserted. A control the new set adds starts at the base of
+    /// its [`assemble`](ControlSet::assemble). Allocates: control side.
     #[must_use]
     pub(crate) fn rebuilt(
         self,
