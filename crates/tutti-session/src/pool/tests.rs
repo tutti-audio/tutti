@@ -1144,7 +1144,8 @@ mod clock_switch {
         let _ = s.update();
         assert_eq!(ran.load(Ordering::SeqCst), 1, "the run fires when it loads");
         let (driver, spec) = card();
-        s.into_device_on(spec, driver)
+        let _live = s
+            .into_device_on(spec, driver)
             .unwrap_or_else(|e| panic!("then it goes through: {}", e.error()));
 
         let (mut live, spawned, stream) = live_session();
