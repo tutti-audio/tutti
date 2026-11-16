@@ -19,9 +19,10 @@
 //!   previous program reaches there, so its phase is continuous.
 //! - Refusals are by name ([`CompileError`]).
 
-use std::collections::{BTreeMap, BTreeSet};
-use std::fmt;
-use std::sync::Arc;
+use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::sync::Arc;
+use alloc::vec::Vec;
+use core::fmt;
 
 use tutti_curve::Law;
 use tutti_types::{

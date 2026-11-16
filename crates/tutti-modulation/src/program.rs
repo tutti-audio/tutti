@@ -13,8 +13,10 @@
 //! `tutti-nodes`' `ControlLaneNode`; the compiler that builds it from routes
 //! is [`compile`](fn@crate::compile).
 
-use std::fmt;
-use std::sync::Arc;
+use alloc::boxed::Box;
+use alloc::sync::Arc;
+use alloc::vec::Vec;
+use core::fmt;
 
 use tutti_curve::{Law, Piece};
 use tutti_types::{
@@ -358,7 +360,7 @@ impl PartialEq for ControlProgram {
     fn eq(&self, other: &Self) -> bool {
         let same_curve = match (&self.automation, &other.automation) {
             (None, None) => true,
-            (Some(a), Some(b)) => std::ptr::addr_eq(Arc::as_ptr(a), Arc::as_ptr(b)),
+            (Some(a), Some(b)) => core::ptr::addr_eq(Arc::as_ptr(a), Arc::as_ptr(b)),
             _ => false,
         };
         same_curve && self.layers == other.layers && self.inputs == other.inputs
@@ -413,7 +415,7 @@ impl ControlProgram {
             if l.has_nan() {
                 return Err(ProgramError::NotANumber(l.id));
             }
-            let waves = std::iter::once(&l.wave).chain(l.depth_by.as_ref().map(|d| &d.wave));
+            let waves = core::iter::once(&l.wave).chain(l.depth_by.as_ref().map(|d| &d.wave));
             for w in waves {
                 if let Waveform::Drawn(points) = w {
                     let in_range = points
@@ -836,7 +838,7 @@ impl Waveform {
     fn raw_limit(&self, cycles: f64, limit: Limit) -> f32 {
         let before = limit == Limit::Before;
         let c = if before { cycles - tol(cycles) } else { cycles };
-        let n = c.floor();
+        let n = libm::floor(c);
         let frac = c - n;
         match self {
             Self::Shape { shape, seed } => match shape {
@@ -864,7 +866,7 @@ impl Waveform {
     /// cycles, with zero crossings when `kinks`. `None` for a wave with
     /// none (a sine without kinks, an empty drawing).
     fn next_corner(&self, c: f64, forward: bool, kinks: bool) -> Option<f64> {
-        let n = c.floor();
+        let n = libm::floor(c);
         let t = tol(c);
         let mut best: Option<f64> = None;
         let mut consider = |x: f64| {
