@@ -112,3 +112,33 @@ fn channel_data_saturates_at_127_semitones_99_cents() {
     let whole = PitchBendSensitivity::of(48).to_channel_data();
     assert_eq!((whole.msb().get(), whole.lsb().get()), (48, 0));
 }
+
+/// **Every fractional bit of the 7.25 word is read.** Section 7.4.13.2 lets a
+/// receiver use as many fractional bits as it supports; this one reads all 25,
+/// so bit `k` of the word is `2^(k - 25)` semitones (section 7.4.13.1: an
+/// unsigned 7.25 fixed-point count of 100 cent units), and a word is the sum of
+/// its bits.
+/// Spec: m2-104/7.4.13.2#2
+#[test]
+fn every_fractional_bit_of_the_word_is_read() {
+    for k in 0..25u32 {
+        let bits = 1u32 << k;
+        let want = 2f32.powi(k as i32 - 25);
+        assert_eq!(
+            PitchBendSensitivity::from_rpn_bits(bits).semitones().get(),
+            want,
+            "bit {k}"
+        );
+    }
+    // 2 + 1/2 + 1/16 semitones, then the same with a bit 2^-16 more.
+    for (bits, want) in [
+        (0x0520_0000u32, 2.5625f32),
+        (0x0520_0200, 2.5625 + 2f32.powi(-16)),
+    ] {
+        assert_eq!(
+            PitchBendSensitivity::from_rpn_bits(bits).semitones().get(),
+            want,
+            "{bits:#010x}"
+        );
+    }
+}

@@ -224,6 +224,18 @@ pub(super) const ALLOW: &[Allow] = &[
         "loading a VST3 module the OS refuses: the failure is the OS's, not a value's",
     ),
     ty(
+        "crates/tutti-dsp/src/spatial/hrtf/sphere.rs",
+        "HrirSphere::new",
+        CTOR,
+        "the measurements are valid together (four or more distinct directions that enclose the listener, responses of one length): no single value's type holds it",
+    ),
+    ty(
+        "crates/tutti-dsp/src/spatial/hrtf/sphere.rs",
+        "HrirSphere::from_bytes",
+        CTOR,
+        "decoding a sphere's bytes: the failure is the bytes', not a value's",
+    ),
+    ty(
         "crates/tutti-sf2/",
         "SoundFont::open",
         CTOR,

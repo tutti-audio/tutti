@@ -302,6 +302,7 @@ fn a_disabled_mpe_profile_is_no_zone() {
     );
 }
 
+/// Spec: m2-104/7.1.8#4
 #[test]
 fn a_block_that_is_unknown_inactive_or_transmit_only_is_no_dialect() {
     // M2-104 §7.1.8: the Active flag and the Direction of a Function Block.

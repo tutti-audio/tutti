@@ -36,12 +36,14 @@ thread_local! {
 /// ```
 /// use tutti_rt::RtScope;
 ///
-/// assert!(!RtScope::is_inside());
+/// // `check_outside` panics, in a debug build, only inside a block.
+/// let outside = || std::panic::catch_unwind(|| RtScope::check_outside("a value")).is_ok();
+/// assert!(outside());
 /// {
 ///     let _block = RtScope::enter();
-///     assert!(RtScope::is_inside());
+///     assert_eq!(outside(), !cfg!(debug_assertions));
 /// }
-/// assert!(!RtScope::is_inside());
+/// assert!(outside());
 /// ```
 #[derive(Debug)]
 pub struct RtScope;
@@ -70,10 +72,9 @@ impl RtScope {
         }
     }
 
-    /// Returns whether the current thread is inside an [`enter`](Self::enter)
-    /// scope.
+    /// Whether the current thread is inside an [`enter`](Self::enter) scope.
     #[must_use]
-    pub fn is_inside() -> bool {
+    pub(crate) fn is_inside() -> bool {
         DEPTH.with(|d| d.get() > 0)
     }
 

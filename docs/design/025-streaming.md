@@ -888,7 +888,7 @@ Each stage is one PR that stays green. Line figures are estimates.
      and `tutti-cpal` cannot be a loom target (it links cpal); `StreamFaults`
      holds a `FaultLatch` for its disconnect and `MicIn::pull` goes through
      `StreamFaults::drain`. The model, `tests/fault_latch_loom.rs`, runs the
-     shipped `FaultLatch` over `edit_ring` (a shipped, loom-checked ring) as
+     shipped `FaultLatch` over `ring` (a shipped, loom-checked ring) as
      the stand-in for a capture ring: the claim it checks is the order of the
      two reads, which is the same whatever ring is behind the pop. It does not
      model `ringbuf`'s own atomics (that is the ring's claim, not this rule's).

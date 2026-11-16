@@ -34,7 +34,7 @@ mod hrtf;
 mod vbap;
 
 pub use hrtf::{
-    HRTF_LATENCY, HRTF_STEP, HrtfBinaural, HrtfBinauralError, MAX_PREPARED_RATE, MAX_SPHERE_RATE,
-    MIN_SPHERE_RATE,
+    HRTF_LATENCY, HRTF_STEP, HrirMeasurement, HrirSphere, HrtfBinaural, HrtfBinauralError,
+    MAX_PREPARED_RATE, MAX_SPHERE_RATE, MIN_SPHERE_RATE,
 };
 pub use vbap::{SpeakerGeometryError, SpeakerLayout, VbapGains, VbapKernel};
