@@ -8,9 +8,10 @@ use std::time::{Duration, Instant};
 use tutti_midi_device::{BodyLimit, BufferLimit, PeCiMessage, PeMessageKind};
 use tutti_midi_device::{
     CallError, CiCategories, CiHeader, CiMessage, Decoded, DiscoveryData, EndpointId, MaxSysexSize,
-    PE_TIMEOUT, PeCapabilities, PeData, PeHeader, PeLocalOn, PeReassemblyLimits, PeResource,
-    PeStatus, PortDirection, RequestRefused, ResourceEntry, ResourceResponder, ResourceStore,
-    ResourceTarget, ResponderAction, ResponderSettings, SimultaneousRequests, StreamLimit,
+    PE_TIMEOUT, PeCapabilities, PeData, PeExternalSync, PeHeader, PeLocalOn, PeReassemblyLimits,
+    PeResource, PeStatus, PortDirection, RequestRefused, ResourceEntry, ResourceResponder,
+    ResourceStore, ResourceTarget, ResponderAction, ResponderSettings, SimultaneousRequests,
+    StreamLimit,
 };
 use tutti_midi_hardware::test_support::FakeCounters;
 use tutti_session::Peer as _;
@@ -53,7 +54,7 @@ struct PePeer {
 }
 
 impl PePeer {
-    fn new(store: ResourceStore) -> Self {
+    fn new(store: ResourceStore, requests: u8) -> Self {
         use tutti_midi_device::{Capabilities, Endpoint, FunctionBlock, Supports};
         use tutti_ump::{Direction, FirstGroup, FunctionBlockId, GroupSpan, SysexAssembler};
         let block = FunctionBlock::builder(
@@ -80,7 +81,7 @@ impl PePeer {
             responder: ResourceResponder::new(
                 muid,
                 ResponderSettings {
-                    capabilities: PeCapabilities::new(SimultaneousRequests::of(4)),
+                    capabilities: PeCapabilities::new(SimultaneousRequests::of(requests)),
                     reassembly: PeReassemblyLimits {
                         streams: StreamLimit::of(8),
                         bytes: BufferLimit::of(1 << 16),
@@ -186,6 +187,11 @@ struct Wire {
 
 impl Wire {
     fn new(store: ResourceStore) -> Self {
+        Self::taking(store, 4)
+    }
+
+    /// A peer that takes `requests` requests at once.
+    fn taking(store: ResourceStore, requests: u8) -> Self {
         let (mut s, fake) = hot_plug_session_ci(DeviceIdentity {
             manufacturer: ManufacturerId::NON_COMMERCIAL,
             family: [U7::of(1); 2],
@@ -201,7 +207,7 @@ impl Wire {
             s,
             fake,
             port,
-            peer: PePeer::new(store),
+            peer: PePeer::new(store, requests),
             start: Instant::now(),
             ms: 0,
             landed: Vec::new(),
@@ -474,4 +480,124 @@ fn a_fetch_of_a_resource_that_needs_a_res_id_is_not_sent() {
         "{refused:?}"
     );
     assert!(wire.peer.asked.is_empty());
+}
+
+/// A second store Resource with data, for the tests of two Resources.
+fn synced() -> ResourceStore {
+    let mut store = store();
+    store.declare(ResourceEntry::new(PeResource::ExternalSync).unwrap());
+    store
+        .put(None, PeData::ExternalSync(PeExternalSync(true)))
+        .expect("declared");
+    store
+}
+
+/// M2-103 section 3.1: past the requests the peer's Capabilities say it takes at
+/// once, a call waits for room instead of failing: with a peer that takes one,
+/// two Gets of two Resources are both answered, and reach the wire one after the
+/// other in the order asked.
+#[test]
+fn calls_past_the_peers_simultaneous_requests_wait_for_room_and_all_land() {
+    let mut wire = Wire::taking(synced(), 1);
+    let first = wire.listed(&PeResource::LocalOn).fetch();
+    let second = wire.listed(&PeResource::ExternalSync).fetch();
+    let third = wire.listed(&PeResource::LocalOn).write(on(true));
+    wire.run(200);
+    assert_eq!(
+        wire.peer.asked,
+        [
+            Asked::Get("LocalOn".to_owned()),
+            Asked::Get("ExternalSync".to_owned()),
+            Asked::Set("LocalOn".to_owned())
+        ]
+    );
+    assert_eq!(wire.result(&first), Some(Ok(on(false))));
+    assert_eq!(
+        wire.result(&second),
+        Some(Ok(PeData::ExternalSync(PeExternalSync(true))))
+    );
+    assert!(matches!(wire.result(&third), Some(Ok(_))));
+}
+
+/// M2-103 section 14.2: a Set of a Resource the peer's entry says is read only is
+/// refused by the Initiator before anything is sent, and lands as not sent with
+/// the rule it broke.
+#[test]
+fn a_write_of_a_read_only_resource_is_not_sent_with_the_rule_it_broke() {
+    let table_6 = tutti_midi_device::PeJson::parse(
+        br#"{"version":"1.0","manufacturerId":[125,0,0],"manufacturer":"Educational Use",
+        "familyId":[0,0],"family":"Test Range","modelId":[48,0],"model":"Workbench",
+        "versionId":[0,0,1,0]}"#,
+    )
+    .expect("json");
+    let info = PeData::decode(&PeResource::DeviceInfo, &table_6).expect("DeviceInfo");
+    let mut wire = Wire::new(store());
+    let job = wire.listed(&PeResource::DeviceInfo).write(info);
+    assert_eq!(job.status(), JobStatus::Pending, "refused by the Initiator");
+    wire.run(30);
+    let Some(Err(PeerError::Refused(PeFailure::NotSent(CallError::Refused(refused))))) =
+        wire.result(&job)
+    else {
+        panic!("not sent: {:?}", wire.landed);
+    };
+    assert!(
+        matches!(refused, RequestRefused::CannotSet { .. }),
+        "{refused:?}"
+    );
+    assert!(wire.peer.asked.is_empty());
+}
+
+/// An identical Set joins the Set in flight: one is sent and both land.
+#[test]
+fn an_identical_repeated_write_shares_the_answer_and_is_sent_once() {
+    let mut wire = Wire::new(store());
+    let res = wire.listed(&PeResource::LocalOn);
+    let first = res.write(on(true));
+    let second = res.write(on(true));
+    wire.run(60);
+    assert_eq!(wire.peer.asked, [Asked::Set("LocalOn".to_owned())]);
+    assert!(matches!(wire.result(&first), Some(Ok(_))));
+    assert!(matches!(wire.result(&second), Some(Ok(_))));
+}
+
+/// A Get identical to one that waits behind a Set joins the waiting one: the
+/// peer is asked the Set and the Get once each, and both Gets read what the Set
+/// wrote.
+#[test]
+fn a_fetch_joins_an_identical_fetch_still_waiting_behind_a_write() {
+    let mut wire = Wire::new(store());
+    let res = wire.listed(&PeResource::LocalOn);
+    let set = res.write(on(true));
+    let first = res.fetch();
+    let second = res.fetch();
+    wire.run(100);
+    assert_eq!(
+        wire.peer.asked,
+        [
+            Asked::Set("LocalOn".to_owned()),
+            Asked::Get("LocalOn".to_owned())
+        ]
+    );
+    assert!(matches!(wire.result(&set), Some(Ok(_))));
+    assert_eq!(wire.result(&first), Some(Ok(on(true))));
+    assert_eq!(wire.result(&second), Some(Ok(on(true))));
+}
+
+/// A call pending when the device goes ends as `Disconnected`, and the port takes
+/// calls again once the device returns and its peer is found.
+#[test]
+fn a_call_pending_across_a_replug_ends_and_the_returned_port_takes_new_ones() {
+    let mut wire = Wire::new(store());
+    wire.peer.reply = Reply::Silent;
+    let pending = wire.listed(&PeResource::LocalOn).fetch();
+    wire.run(5);
+    wire.fake.unplug(EndpointId::from_raw(RAW));
+    wire.run(3);
+    assert_eq!(wire.result(&pending), Some(Err(PeerError::Disconnected)));
+    plug(&wire.fake, RAW, "Wire", PortDirection::Duplex);
+    wire.peer.reply = Reply::Serve;
+    wire.run(200);
+    let again = wire.listed(&PeResource::LocalOn).fetch();
+    wire.run(60);
+    assert_eq!(wire.result(&again), Some(Ok(on(false))));
 }

@@ -1321,6 +1321,11 @@ impl Ports {
                     {
                         port.pending.lose_properties(*peer);
                     }
+                    // An event of the peer (its ResourceList, whose Get held one of
+                    // its requests) may have made room for a call that waits.
+                    if let Some(port) = self.port_of(device) {
+                        port.pending.make_room_everywhere(io);
+                    }
                     device.clone()
                 }
                 // A kind of report this session does not know is not one.

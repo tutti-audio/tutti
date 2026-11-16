@@ -1,7 +1,8 @@
 //! How the Initiator's outcome of a Property Exchange call reaches the app.
 
 use tutti_midi_device::{
-    BodyLimit, PeOutcome, PeReply, PeResponse, PeStatus, PeTerminator, ResourceFailure,
+    BodyLimit, PaginationFault, PeOutcome, PeReply, PeRequestId, PeResponse, PeSignal, PeStatus,
+    PeTerminator, PeUnreadable, ResourceFailure,
 };
 
 use super::{PeFailure, PeerError};
@@ -61,4 +62,33 @@ fn a_terminate_a_too_large_body_and_a_timeout_are_their_own() {
         PeerError::Refused(PeFailure::TooLarge(BodyLimit::of(64)))
     );
     assert_eq!(of(PeOutcome::TimedOut), PeerError::TimedOut);
+}
+
+/// M2-103 section 12.1: a NAK of a failure other than a terminate is the peer's
+/// signal, unchanged.
+#[test]
+fn a_nak_that_does_not_terminate_lands_as_its_signal() {
+    let signal = PeSignal::OutOfSequence {
+        request_id: PeRequestId::of(5),
+    };
+    assert_eq!(
+        PeFailure::of(&ResourceFailure::Peer(Box::new(PeOutcome::Refused(signal)))),
+        PeerError::Refused(PeFailure::Nak(signal))
+    );
+}
+
+/// A reply or Property Data that cannot be used lands as unreadable, with the
+/// failure that says why, whichever layer found it.
+#[test]
+fn an_unusable_reply_or_body_lands_as_unreadable_with_its_failure() {
+    let failures = [
+        ResourceFailure::Peer(Box::new(PeOutcome::Unreadable(PeUnreadable::Abandoned))),
+        ResourceFailure::Pagination(PaginationFault::NoTotalCount),
+    ];
+    for failure in failures {
+        assert_eq!(
+            PeFailure::of(&failure),
+            PeerError::Refused(PeFailure::Unreadable(failure.clone()))
+        );
+    }
 }

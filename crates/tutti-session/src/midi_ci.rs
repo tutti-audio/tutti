@@ -21,8 +21,9 @@
 //! leaves before the job lands, [`PeerError::TimedOut`] when it does not answer
 //! in time, [`PeerError::Refused`] with its NAK (a Profile switch or a report) or
 //! its [`PeFailure`] (a Property Exchange call). A request made of a port that
-//! is lost, or of a peer, Profile or Resource the port no longer lists, fails at
-//! the call: the job is returned already ended.
+//! is lost, or of a peer, Profile or Resource the port no longer lists (a
+//! [`ListedResource`] whose peer's ResourceList changed since it was read), fails at
+//! the call: the job is returned already ended, as [`PeerError::Disconnected`].
 
 use std::sync::Weak;
 
@@ -115,6 +116,8 @@ impl PeFailure {
             PeOutcome::TooLarge(limit) => PeerError::Refused(Self::TooLarge(*limit)),
             PeOutcome::Refused(signal) => PeerError::Refused(Self::Nak(*signal)),
             PeOutcome::TimedOut => PeerError::TimedOut,
+            // `Success` never ends a call as a failure; a kind the session does
+            // not know is read as a reply that cannot be used.
             _ => PeerError::Refused(Self::Unreadable(failure.clone())),
         }
     }
@@ -153,9 +156,7 @@ impl PortLink {
         }
         job
     }
-}
 
-impl PortLink {
     /// A job that ended at the call, as `error`.
     fn failed<J: crate::JobKind>(&self, error: J::Error) -> Job<J> {
         let (job, ticket) = Ticket::new(&self.landed);
@@ -496,7 +497,7 @@ fn listing(entry: &ResourceEntry) -> impl FnOnce(&crate::MidiInputInfo, &Propert
         info.resource_peers()
             .iter()
             .map(ResourcePeer::peer)
-            .find(|peer| ask.check(std::iter::once(*peer)).is_ok())
+            .find(|peer| peer.group() == ask.peer().group() && peer.muid() == ask.peer().muid())
             .is_some_and(|peer| peer.resources().entry(entry.resource()) == Some(entry))
     }
 }
@@ -524,72 +525,71 @@ pub(crate) struct Pending {
     switches: Vec<Slot<ProfileSwitch, SwitchProfile>>,
     reports: Vec<Slot<ReportAsk, RequestReport>>,
     properties: Vec<PropertySlot>,
+    /// The peers whose last call found them out of requests to take: their
+    /// unsent calls wait for an answer or an event of the peer to make room.
+    full: Vec<PeerId>,
 }
 
-/// A Property Exchange call sent to a peer, or waiting to be, with the jobs that
-/// wait for its answer.
-struct PropertySlot {
-    peer: PeerId,
-    resource: PeResource,
-    ask: PropertyAsk,
-    sent: bool,
-    tickets: PropertyTickets,
-}
-
-/// The jobs of one call: the kind follows the call.
-enum PropertyTickets {
-    Get(Vec<Ticket<GetProperty>>),
-    Set(Vec<Ticket<SetProperty>>),
-}
-
-/// What a call's answer lands.
-enum Landing {
-    Body(Result<PeData, PeerError<PeFailure>>),
-    Status(Result<PeStatus, PeerError<PeFailure>>),
+/// A Property Exchange call sent to a peer, or waiting to be, in the order the
+/// handles made them: a Get and a Set of one Resource wait on each other.
+enum PropertySlot {
+    Get(Slot<PropertyAsk, GetProperty>),
+    Set(Slot<PropertyAsk, SetProperty>),
 }
 
 impl PropertySlot {
-    /// Lands `landing` on the jobs of the slot; one of the other kind ends as
-    /// disconnected.
-    fn end(self, landing: &Landing) {
-        match (self.tickets, landing) {
-            (PropertyTickets::Get(tickets), Landing::Body(result)) => {
-                for ticket in tickets {
-                    ticket.land(result.clone());
-                }
-            }
-            (PropertyTickets::Set(tickets), Landing::Status(result)) => {
-                for ticket in tickets {
-                    ticket.land(result.clone());
-                }
-            }
-            (PropertyTickets::Get(tickets), _) => {
-                for ticket in tickets {
-                    ticket.land(Err(PeerError::Disconnected));
-                }
-            }
-            (PropertyTickets::Set(tickets), _) => {
-                for ticket in tickets {
-                    ticket.land(Err(PeerError::Disconnected));
-                }
-            }
+    const fn peer(&self) -> PeerId {
+        match self {
+            Self::Get(s) => s.peer,
+            Self::Set(s) => s.peer,
         }
+    }
+
+    const fn ask(&self) -> &PropertyAsk {
+        match self {
+            Self::Get(s) => &s.request,
+            Self::Set(s) => &s.request,
+        }
+    }
+
+    const fn sent(&self) -> bool {
+        match self {
+            Self::Get(s) => s.sent,
+            Self::Set(s) => s.sent,
+        }
+    }
+
+    fn set_sent(&mut self, sent: bool) {
+        match self {
+            Self::Get(s) => s.sent = sent,
+            Self::Set(s) => s.sent = sent,
+        }
+    }
+
+    /// Whether `ask` is a call of the same Resource of the same peer.
+    fn is_target_of(&self, ask: &PropertyAsk) -> bool {
+        self.ask().call().resource() == ask.call().resource() && same_peer(self.ask(), ask)
     }
 
     /// Ends every job of the slot as `error`.
     fn fail(self, error: &PeerError<PeFailure>) {
-        match self.tickets {
-            PropertyTickets::Get(tickets) => {
-                for ticket in tickets {
-                    ticket.land(Err(error.clone()));
-                }
-            }
-            PropertyTickets::Set(tickets) => {
-                for ticket in tickets {
-                    ticket.land(Err(error.clone()));
-                }
-            }
+        match self {
+            Self::Get(slot) => end_slot(slot, || Err(error.clone())),
+            Self::Set(slot) => end_slot(slot, || Err(error.clone())),
         }
+    }
+}
+
+/// Whether two asks are of one peer of the port.
+fn same_peer(a: &PropertyAsk, b: &PropertyAsk) -> bool {
+    a.peer().group() == b.peer().group() && a.peer().muid() == b.peer().muid()
+}
+
+/// The peer `ask` is of.
+fn peer_of(ask: &PropertyAsk) -> PeerId {
+    PeerId {
+        group: ask.peer().group(),
+        muid: ask.peer().muid(),
     }
 }
 
@@ -651,13 +651,17 @@ impl Pending {
         ask: PropertyAsk,
         ticket: Ticket<GetProperty>,
     ) {
-        match self.joined(&ask).map(|at| &mut self.properties[at].tickets) {
-            Some(PropertyTickets::Get(tickets)) => tickets.push(ticket),
-            _ => {
-                self.queue_property(ask, PropertyTickets::Get(vec![ticket]));
-                self.send(io);
-            }
+        if let Some(PropertySlot::Get(slot)) = self.last_for(&ask).filter(|s| *s.ask() == ask) {
+            slot.tickets.push(ticket);
+            return;
         }
+        self.properties.push(PropertySlot::Get(Slot {
+            peer: peer_of(&ask),
+            request: ask,
+            sent: false,
+            tickets: vec![ticket],
+        }));
+        self.send(io);
     }
 
     /// Takes in a Set the app asked for: sent now when nothing else is out for
@@ -668,43 +672,40 @@ impl Pending {
         ask: PropertyAsk,
         ticket: Ticket<SetProperty>,
     ) {
-        match self.joined(&ask).map(|at| &mut self.properties[at].tickets) {
-            Some(PropertyTickets::Set(tickets)) => tickets.push(ticket),
-            _ => {
-                self.queue_property(ask, PropertyTickets::Set(vec![ticket]));
-                self.send(io);
-            }
-        }
-    }
-
-    /// The slot an identical call is out or waiting in, when it is the last for
-    /// its peer's Resource: a call behind one that differs reads what that one
-    /// leaves, so it never joins one before it.
-    fn joined(&self, ask: &PropertyAsk) -> Option<usize> {
-        let peer = ask.peer();
-        let resource = ask.call().resource()?;
-        let last = self
-            .properties
-            .iter()
-            .rposition(|s| s.resource == *resource && s.ask.peer().is(peer))?;
-        (self.properties[last].ask.call() == ask.call()).then_some(last)
-    }
-
-    fn queue_property(&mut self, ask: PropertyAsk, tickets: PropertyTickets) {
-        let Some(resource) = ask.call().resource().cloned() else {
-            // A call of no Resource is never asked of a handle.
+        if let Some(PropertySlot::Set(slot)) = self.last_for(&ask).filter(|s| *s.ask() == ask) {
+            slot.tickets.push(ticket);
             return;
-        };
-        self.properties.push(PropertySlot {
-            peer: PeerId {
-                group: ask.peer().group(),
-                muid: ask.peer().muid(),
-            },
-            resource,
-            ask,
+        }
+        self.properties.push(PropertySlot::Set(Slot {
+            peer: peer_of(&ask),
+            request: ask,
             sent: false,
-            tickets,
-        });
+            tickets: vec![ticket],
+        }));
+        self.send(io);
+    }
+
+    /// The last call for `ask`'s Resource of its peer, in flight or waiting: an
+    /// identical call joins it, and one that follows a different call queues its
+    /// own, since it reads what that one leaves.
+    fn last_for(&mut self, ask: &PropertyAsk) -> Option<&mut PropertySlot> {
+        self.properties
+            .iter_mut()
+            .rev()
+            .find(|s| s.is_target_of(ask))
+    }
+
+    /// Room may have opened in the requests `peer` takes: its waiting calls are
+    /// tried again at the next [`send`](Self::send).
+    pub(crate) fn make_room(&mut self, peer: PeerId) {
+        self.full.retain(|full| *full != peer);
+    }
+
+    /// Room may have opened in every peer's requests, as one of the peer's own
+    /// (the driver's, which this port did not make) ended.
+    pub(crate) fn make_room_everywhere(&mut self, io: &mut MidiSession) {
+        self.full.clear();
+        self.send(io);
     }
 
     /// Sends each request that waits for nothing, and ends one the device
@@ -744,14 +745,13 @@ impl Pending {
         let mut at = 0;
         while at < self.properties.len() {
             let slot = &self.properties[at];
-            let key = (slot.peer, &slot.resource);
             let busy = self.properties[..at]
                 .iter()
-                .any(|s| (s.peer, &s.resource) == key);
-            if busy || slot.sent {
+                .any(|s| s.is_target_of(slot.ask()));
+            if busy || slot.sent() || self.full.contains(&slot.peer()) {
                 at += 1;
-            } else if io.ask_property(slot.ask.clone()).is_ok() {
-                self.properties[at].sent = true;
+            } else if io.ask_property(slot.ask().clone()).is_ok() {
+                self.properties[at].set_sent(true);
                 at += 1;
             } else {
                 self.properties.remove(at).fail(&PeerError::Disconnected);
@@ -773,28 +773,37 @@ impl Pending {
             Answer::ReportLost => self.end_report(peer, &Err(PeerError::Disconnected)),
             Answer::ReportUnsupported => self.end_report(peer, &Err(PeerError::Unsupported)),
             Answer::Got { target, result } => {
-                let landing = Landing::Body(match result {
+                self.make_room(peer);
+                let result = match result {
                     Ok(data) => Ok(data.clone()),
                     Err(failure) => Err(PeFailure::of(failure)),
-                });
-                self.end_property(peer, false, target.resource(), &landing);
+                };
+                if let Some(at) = self.sent_call(peer, |s| {
+                    matches!(s, PropertySlot::Get(_))
+                        && s.ask().call().resource() == Some(target.resource())
+                }) && let PropertySlot::Get(slot) = self.properties.remove(at)
+                {
+                    end_slot(slot, || result.clone());
+                }
             }
             Answer::Set { resource, result } => {
-                let landing = Landing::Status(match result {
+                self.make_room(peer);
+                let result = match result {
                     Ok(status) => Ok(*status),
                     Err(failure) => Err(PeFailure::of(failure)),
-                });
-                self.end_property(peer, true, resource, &landing);
+                };
+                if let Some(at) = self.sent_call(peer, |s| {
+                    matches!(s, PropertySlot::Set(_)) && s.ask().call().resource() == Some(resource)
+                }) && let PropertySlot::Set(slot) = self.properties.remove(at)
+                {
+                    end_slot(slot, || result.clone());
+                }
             }
-            Answer::PropertyNotSent { call, error } => {
-                self.fail_property(
-                    peer,
-                    call,
-                    &PeerError::Refused(PeFailure::NotSent(error.clone())),
-                );
-            }
+            Answer::PropertyNotSent { call, error } => self.not_sent(peer, call, error),
             Answer::PropertyLost { call } => {
-                self.fail_property(peer, call, &PeerError::Disconnected);
+                if let Some(at) = self.sent_call(peer, |s| s.ask().call() == &**call) {
+                    self.properties.remove(at).fail(&PeerError::Disconnected);
+                }
             }
             // A kind of answer this session does not know ends nothing.
             _ => {}
@@ -818,27 +827,33 @@ impl Pending {
         }
     }
 
-    /// Ends the Get (or Set) of `resource` that is out for `peer`.
-    fn end_property(&mut self, peer: PeerId, set: bool, resource: &PeResource, landing: &Landing) {
-        let at = self.properties.iter().position(|s| {
-            s.sent
-                && s.peer == peer
-                && s.resource == *resource
-                && matches!(s.tickets, PropertyTickets::Set(_)) == set
-        });
-        if let Some(at) = at {
-            self.properties.remove(at).end(landing);
-        }
+    /// The call out for `peer` that `is` says is the one.
+    fn sent_call(&self, peer: PeerId, is: impl Fn(&PropertySlot) -> bool) -> Option<usize> {
+        self.properties
+            .iter()
+            .position(|s| s.sent() && s.peer() == peer && is(s))
     }
 
-    /// Ends the call that is out for `peer` as `error`.
-    fn fail_property(&mut self, peer: PeerId, call: &PropertyCall, error: &PeerError<PeFailure>) {
-        let at = self
-            .properties
-            .iter()
-            .position(|s| s.sent && s.peer == peer && s.ask.call() == call);
-        if let Some(at) = at {
-            self.properties.remove(at).fail(error);
+    /// The Initiator did not start the call out for `peer`. One that found the
+    /// peer out of requests (`TooManyRequests`, M2-103 §12) is not refused: the
+    /// peer is held to its count, and the call is sent once an answer or an
+    /// event of the peer makes room. Any other refusal ends the job.
+    fn not_sent(&mut self, peer: PeerId, call: &PropertyCall, error: &CallError) {
+        let Some(at) = self.sent_call(peer, |s| s.ask().call() == call) else {
+            return;
+        };
+        if matches!(
+            error,
+            CallError::Pe(tutti_midi_device::PeError::TooManyRequests { .. })
+        ) {
+            self.properties[at].set_sent(false);
+            if !self.full.contains(&peer) {
+                self.full.push(peer);
+            }
+        } else {
+            self.properties
+                .remove(at)
+                .fail(&PeerError::Refused(PeFailure::NotSent(error.clone())));
         }
     }
 
@@ -874,7 +889,7 @@ impl Pending {
     pub(crate) fn lose_properties(&mut self, peer: PeerId) {
         let (gone, kept) = std::mem::take(&mut self.properties)
             .into_iter()
-            .partition(|s| s.peer == peer);
+            .partition(|s| s.peer() == peer);
         self.properties = kept;
         for slot in gone {
             slot.fail(&PeerError::Disconnected);

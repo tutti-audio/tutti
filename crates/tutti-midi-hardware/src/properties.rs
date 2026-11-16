@@ -50,8 +50,7 @@ impl PropertyPeer {
 
     /// Whether `other` is the same peer of the same input: the ResourceList each
     /// was read with does not matter.
-    #[must_use]
-    pub fn is(&self, other: &Self) -> bool {
+    pub(crate) fn is(&self, other: &Self) -> bool {
         self.device == other.device && self.group == other.group && self.muid == other.muid
     }
 
@@ -151,7 +150,7 @@ impl PropertyAsk {
     /// # Errors
     ///
     /// [`PropertyError::NoSuchPeer`] when it is not.
-    pub fn check<'a>(
+    pub(crate) fn check<'a>(
         &self,
         peers: impl IntoIterator<Item = &'a PropertyPeer>,
     ) -> Result<(), PropertyError> {
