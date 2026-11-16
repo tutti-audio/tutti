@@ -46,7 +46,7 @@
 //! with macOS only, so nothing compares them to a source. They are held to the
 //! same row format and tag rules as the others.
 //!
-//! The rows whose id starts with a MIDI document's prefix (`m2-104/`,
+//! The rows whose id starts with a MIDI document's prefix (`m2-101/` to
 //! `m2-116/`) are held to that document's spec text in the directory
 //! `TUTTI_MIDI_SPECS` points at ([`super::midi_spec`]): the committed `(id,
 //! kind, section, facts)` quadruples equal the extracted ones. The MIDI specs
