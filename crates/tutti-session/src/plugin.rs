@@ -140,6 +140,8 @@ use tutti_types::{SampleRate, Samples};
 
 mod entry;
 mod lost;
+mod rebind;
+pub use rebind::PortsRefusal;
 mod state_job;
 pub(crate) use lost::Lost;
 
@@ -503,8 +505,26 @@ pub enum PluginChange {
         /// The new tail, which may be bounded, unbounded or unreported.
         tail: PluginTail,
     },
-    /// The plugin's bus layout changed: re-read it and rewire.
+    /// The plugin's bus layout changed. A pooled in-process plugin's node is
+    /// re-inserted at its key with the new ports by the session
+    /// ([`SessionEvent::Unwired`] names the wiring a narrower shape dropped);
+    /// another plugin's node keeps its ports, and the app re-reads and rewires.
+    /// The re-inserted plugin renders silence from the swap until its
+    /// Processor reaches the new node: the old node returns it at its next block
+    /// and the next update's pump lends it on. A node that is
+    /// [`Bypassed`](crate::NodeMode::Bypassed) is not run, so it hands nothing
+    /// back: a plugin's port change (and any restart) waits there until the
+    /// bypass ends. A plugin with a bypass of its own keeps running, and is not
+    /// held up.
     IoChanged,
+    /// The plugin's new ports were not made a node, and the node stays as it
+    /// is: they are wider than a block serves, or outside a served plugin's
+    /// shared-memory slab (laid out at launch), or the graph refused the swap
+    /// ([`PortsRefusal`]). Reported once for the ports: they count as handled.
+    PortsRefused {
+        /// Why the ports were refused.
+        why: PortsRefusal,
+    },
     /// The plugin asked its editor window to take a size (a zoom control, a
     /// collapsing panel), found while [`MainSession::update`](crate::MainSession::update)
     /// serviced the editor. Answer with
@@ -744,6 +764,60 @@ pub(crate) struct HostedPlugin {
     /// The pool entry this plugin's node is over, `None` for a plugin added
     /// outside the pool. Dropped when the record retires, which ends the hold.
     pub(crate) pooled: Option<PooledLink>,
+    /// What re-inserts this plugin's node when it changes its ports. `None` for
+    /// a plugin no pool entry holds, and for one that reported no ports.
+    pub(crate) rebind: Option<RebindState>,
+}
+
+/// What a pooled plugin's record keeps to re-insert its node when the plugin
+/// changes its ports: the builder of the new node and the ports the node at the
+/// key declares, built where those ports are known.
+#[derive(Debug)]
+pub(crate) enum RebindState {
+    /// The node declares `laid_out`; nothing is moving.
+    Idle {
+        rebinder: tutti_plugin::catalog::PluginRebinder,
+        laid_out: tutti_plugin_types::Layout,
+    },
+    /// A node over `laid_out` was swapped in and the plugin's Processor has not
+    /// reached it yet: no second rebuild starts before it does.
+    Settling {
+        rebinder: tutti_plugin::catalog::PluginRebinder,
+        laid_out: tutti_plugin_types::Layout,
+    },
+}
+
+impl RebindState {
+    /// The state of a node over the ports the plugin has now, or `None` for a
+    /// plugin that has reported none (a lost one).
+    pub(crate) fn new(rebinder: tutti_plugin::catalog::PluginRebinder) -> Option<Self> {
+        let laid_out = rebinder.layout()?;
+        Some(Self::Idle { rebinder, laid_out })
+    }
+
+    /// Whether a rebuilt node's Processor has not arrived.
+    #[cfg(feature = "testing")]
+    pub(crate) fn is_settling(&self) -> bool {
+        matches!(self, Self::Settling { .. })
+    }
+
+    pub(crate) fn laid_out(&self) -> &tutti_plugin_types::Layout {
+        match self {
+            Self::Idle { laid_out, .. } | Self::Settling { laid_out, .. } => laid_out,
+        }
+    }
+
+    /// The same builder, over the ports `laid_out`, settling when `settling`.
+    pub(crate) fn with(self, laid_out: tutti_plugin_types::Layout, settling: bool) -> Self {
+        let rebinder = match self {
+            Self::Idle { rebinder, .. } | Self::Settling { rebinder, .. } => rebinder,
+        };
+        if settling {
+            Self::Settling { rebinder, laid_out }
+        } else {
+            Self::Idle { rebinder, laid_out }
+        }
+    }
 }
 
 /// The part of a plugin's record a [`ParamGesture`](crate::ParamGesture) keeps:
@@ -865,6 +939,7 @@ impl HostedPlugin {
             mirror_token: Arc::new(()),
             silenced: false,
             pooled: None,
+            rebind: None,
         }
     }
 
@@ -939,6 +1014,8 @@ impl HostedPlugin {
         self.gate = Gate::default();
         // What the outgoing plugin reported and nobody drained is its own.
         (self.notices, self.hearing) = hear(&handle);
+        // The incoming plugin has a rebinder of its own, set by the caller.
+        self.rebind = None;
         let outgoing = Outgoing {
             handle: std::mem::replace(&mut self.handle, handle),
             editor_open: std::mem::replace(&mut self.editor_open, false),
@@ -1010,6 +1087,17 @@ impl HostedPlugin {
         self.mirror
             .get(tutti_plugin_types::ParamId::new(id))
             .map(|v| v.map(|v| v.get() as f32))
+    }
+
+    /// Sets the builder of the node that replaces this plugin's when it
+    /// changes its ports: only a pooled plugin's record keeps one, since
+    /// nothing else re-inserts its node.
+    pub(crate) fn set_rebinder(&mut self, rebinder: tutti_plugin::catalog::PluginRebinder) {
+        self.rebind = self
+            .pooled
+            .is_some()
+            .then(|| RebindState::new(rebinder))
+            .flatten();
     }
 
     /// Queues the announcement that every parameter value changed, as the
@@ -1253,29 +1341,30 @@ impl<C: crate::Clock> Session<C> {
         plugin: HostPlugin,
         mirror: Option<Mirror>,
         origin: Origin,
-    ) -> Key<PluginNode> {
+    ) -> (Key<PluginNode>, tutti_plugin::catalog::PluginRebinder) {
         let handle = plugin.handle().clone();
         let loaded_ref = plugin.plugin().clone();
         let meter = self.click_settings.project_meter();
-        let key = match plugin.into_client() {
+        let (key, rebinder) = match plugin.into_client() {
             Ok(client) => {
                 client.controls().set_meter(meter);
-                let key = self.graph.insert_plugin(client);
+                let (key, rebinder) = self.graph.insert_plugin_with_rebinder(client);
                 if let Some(hosted) = self.graph.plugins.get_mut(&key.erase()) {
                     hosted.origin = Some(origin);
                     hosted.recovery = self.recovery.map(Recovery::new);
                 }
-                key
+                (key, rebinder)
             }
             Err(plugin) => {
                 let node_controls = plugin.node_controls();
                 node_controls.set_meter(meter);
-                let (node, _) = self.graph.place((*plugin).bind(self.graph.tempo.clone()));
+                let (bound, rebinder) = (*plugin).bind_with_rebinder(self.graph.tempo.clone());
+                let (node, _) = self.graph.place(bound);
                 let mut hosted = HostedPlugin::new(handle, loaded_ref);
                 hosted.node = Some(node_controls);
                 self.graph.plugins.insert(node.erase(), hosted);
                 self.graph.write_own_bypass(node.erase());
-                Key::new(node.erase())
+                (Key::new(node.erase()), rebinder)
             }
         };
         if let Some(hosted) = self.graph.plugins.get_mut(&key.erase())
@@ -1285,7 +1374,7 @@ impl<C: crate::Clock> Session<C> {
             hosted.param_read = unread;
             hosted.gate.declare(&hosted.mirror);
         }
-        key
+        (key, rebinder)
     }
 
     /// The view of the plugin hosted at `node`, a borrow of its record: its
@@ -1563,13 +1652,17 @@ impl<C: crate::Clock> Session<C> {
         let latency_before = hosted.reload.latency_before;
         let withheld = hosted.reload.withheld_age;
         let attempts = recovery.as_ref().map_or(1, Recovery::failures);
-        match self.graph.replace_plugin(
+        match self.graph.replace_plugin_with_rebinder(
             node,
             client,
             tutti_graph::DECLICK,
             tutti_graph::FadeLaw::default(),
         ) {
-            Ok(()) => {}
+            Ok(rebinder) => {
+                if let Some(hosted) = self.graph.plugins.get_mut(&node) {
+                    hosted.set_rebinder(rebinder);
+                }
+            }
             Err(crate::ReplaceRefused::Busy(client)) => {
                 // Between a re-prepare's two commits: try again next phase.
                 if let Some(hosted) = self.graph.plugins.get_mut(&node) {

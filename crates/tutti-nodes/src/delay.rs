@@ -535,7 +535,7 @@ mod tests {
         assert!(out[0].iter().all(|&s| s == 0.0));
     }
 
-    /// A control the graph drives and the recurrence does not read per frame (the
+    /// A control the graph drives and the kernel does not read per frame (the
     /// cross-feedback) is sampled on the stream's 16-frame grid, not at the block's last
     /// frame, so what is heard does not depend on how the stream is cut into blocks; and
     /// the lane is heard, since the cell it overrides is zero.

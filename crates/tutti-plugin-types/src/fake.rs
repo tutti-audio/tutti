@@ -635,8 +635,10 @@ macro_rules! fake_control {
                 self.shared.log.push(Call::ServiceFd(id));
             }
 
-            /// The fake never asks for anything.
-            fn take_requests(&mut self, _main: MainThreadMarker, _out: &mut Vec<Request>) {}
+            /// What a test raised on [`FakePlugin::request_word`], taken once.
+            fn take_requests(&mut self, _main: MainThreadMarker, out: &mut Vec<Request>) {
+                out.extend(crate::taken(&self.shared.requests));
+            }
 
             /// As [`FakePlugin::take_render_mode`] set it; at activation by
             /// default, as VST3 takes it.

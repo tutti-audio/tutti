@@ -1,6 +1,11 @@
-//! [`System`]: what every processor answers, and [`Ring`], how long it rings.
+//! [`System`]: what every processor answers, [`Ring`], how long it rings, and the
+//! [`TAIL_FLOOR`] it is measured to.
 
 use tutti_types::{Db, Samples, Seconds};
+
+/// The level a tail is measured to when nothing says otherwise:
+/// -60 dB, the reverberation time's definition.
+pub const TAIL_FLOOR: Db = Db(-60.0);
 
 /// How long a system rings: [`System::tail`].
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -9,27 +14,6 @@ pub enum Ring {
     Finite(Seconds),
     /// It never does: a lossless loop, or one that grows.
     Unbounded,
-}
-
-impl Ring {
-    /// Whether this ring lasts at least as long as `other`.
-    #[must_use]
-    pub fn covers(self, other: Ring) -> bool {
-        match (self, other) {
-            (Ring::Unbounded, _) => true,
-            (Ring::Finite(_), Ring::Unbounded) => false,
-            (Ring::Finite(a), Ring::Finite(b)) => a.get() >= b.get(),
-        }
-    }
-
-    /// The finite figure, or `None` for [`Unbounded`](Self::Unbounded).
-    #[must_use]
-    pub fn seconds(self) -> Option<Seconds> {
-        match self {
-            Ring::Finite(s) => Some(s),
-            Ring::Unbounded => None,
-        }
-    }
 }
 
 /// A causal system from input signals to output signals:

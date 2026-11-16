@@ -228,6 +228,12 @@ pub enum HostOp {
     Reconfigure(Prepare),
     /// Rejoin the halves and stop rendering.
     Deactivate,
+    /// Bring the Processor back to the main thread and lend it again, with
+    /// no deactivation: the plugin keeps running, and the lend goes to the
+    /// realtime end [`Hand::install`](crate::Hand::install) named. On a plugin
+    /// that is not active, or while a plan is under way, this does nothing: an
+    /// activation in flight lends at its end.
+    Relend,
 }
 
 /// What the plugin called on the host.
@@ -425,6 +431,7 @@ enum Task {
     Activate(Prepare),
     ReadParams(RescanScope),
     RebuildMidiMapping,
+    Lend,
 }
 
 /// The effect a plan is waiting on.
@@ -695,6 +702,11 @@ impl State {
     }
 
     fn on_op(&mut self, op: HostOp, out: &mut Effects) {
+        // A relend asks for nothing an activation in flight does not do: it
+        // lends at its end.
+        if op == HostOp::Relend && self.plan.wait == Wait::Activate {
+            return;
+        }
         // An op raised while an activation is in flight cannot change the
         // plan yet: the latest one is replayed once the activation is answered.
         if self.plan.wait == Wait::Activate {
@@ -720,6 +732,11 @@ impl State {
                 (Wait::Idle, _) => self.begin(&[Task::Activate(p)], out),
                 _ => self.plan.set_activate(p),
             },
+            HostOp::Relend => {
+                if matches!((self.plan.wait, self.stage), (Wait::Idle, Stage::Active)) {
+                    self.begin(&[Task::Lend], out);
+                }
+            }
             HostOp::Deactivate => match (self.plan.wait, self.stage) {
                 (Wait::Idle, Stage::Active) => self.begin(&[Task::Deactivate], out),
                 (Wait::Recall | Wait::Parked, _) => {
@@ -787,6 +804,7 @@ impl State {
                     return;
                 }
                 Task::RebuildMidiMapping => emit(out, Effect::RebuildMidiMapping),
+                Task::Lend => emit(out, Effect::Lend),
                 Task::ReadParams(scope) => {
                     emit(out, Effect::ReadParams(scope));
                     if matches!(scope, RescanScope::Info | RescanScope::All) {

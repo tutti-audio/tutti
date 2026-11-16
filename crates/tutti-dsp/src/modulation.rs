@@ -1,5 +1,5 @@
-//! The modulated effects' algorithms: the swept delay of a chorus or flanger as a family,
-//! and the phaser, a swept all-pass chain, as a family too.
+//! The modulated effects' algorithms: the swept delay of a chorus or flanger as one bank,
+//! and the phaser, a swept all-pass chain, as another.
 
 pub(crate) mod allpass;
 pub(crate) mod mod_delay;

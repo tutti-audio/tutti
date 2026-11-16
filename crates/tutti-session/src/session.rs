@@ -990,10 +990,12 @@ impl<C: Clock> Session<C> {
                         .midi_out_phase(&mut self.graph, &playhead, cx.now, out)
                 }
             }
-            Phase::Plugins =>
-            {
+            Phase::Plugins => {
                 #[cfg(feature = "plugin")]
-                self.plugins_phase(cx, out)
+                {
+                    self.plugins_phase(cx, out);
+                    self.rebind_pooled_plugins(out);
+                }
             }
             Phase::RenderMode =>
             {

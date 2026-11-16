@@ -6,7 +6,7 @@
 //! force since may still need (never past the declared ceiling), and says how much of the
 //! next block is live. What it does with the answer (report it, cut the output, park) is the
 //! node's. The clock is shared by [`KernelNode`](crate::KernelNode) and
-//! [`FamilyNode`](crate::FamilyNode).
+//! [`ConvolverNode`](crate::ConvolverNode).
 
 use tutti_graph::MAX_NODE_TAIL;
 use tutti_types::{Samples, Tail};

@@ -19,7 +19,7 @@ default = []
 # test support, so off by default. This crate's own
 # tests turn it on through the self dev-dependency below; a node crate adding
 # rows turns it on in its dev-dependency on this crate.
-contract = []
+contract = ["dep:libm"]
 # `Reference`, the naive interpreter the differential suites compare the
 # executor with: test support (about 2,700 lines), so off by default. This
 # crate's own tests turn it on through the self dev-dependency below.
@@ -43,6 +43,9 @@ tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false
 # comes from the element type, the reinterpretation from a checked `Pod` cast,
 # and the disjoint borrows from `split_at_mut`. See `src/arena.rs`.
 bytemuck = { version = "1.16", features = ["derive"] }
+# `contract` only: the stimulus's sine is `libm`'s, so the snapshot does not
+# depend on the platform's C math library.
+libm = { version = "0.2.15", optional = true }
 # `testing` only: `TestPool::no_alloc` runs each participant under the gate.
 assert_no_alloc = { version = "1", default-features = false, optional = true }
 # `RenderMode`'s wire form, with `serde`.
@@ -57,6 +60,8 @@ tutti-graph = { path = ".", features = ["contract", "testing"] }
 tutti-fixtures = { path = "../../testing/tutti-fixtures" }
 assert_no_alloc = { version = "1", default-features = false }
 criterion.workspace = true
+# The benches' sine oscillator.
+libm = "0.2.15"
 proptest = "1.9.0"
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]

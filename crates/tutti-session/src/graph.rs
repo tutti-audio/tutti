@@ -872,15 +872,27 @@ impl Graph {
         &mut self,
         client: Box<tutti_plugin::handles::PluginClient>,
     ) -> Key<crate::PluginNode> {
+        self.insert_plugin_with_rebinder(client).0
+    }
+
+    /// [`insert_plugin`](Self::insert_plugin), and the builder of the node
+    /// that replaces this one when the plugin changes its audio ports.
+    #[cfg(feature = "plugin")]
+    pub(crate) fn insert_plugin_with_rebinder(
+        &mut self,
+        client: Box<tutti_plugin::handles::PluginClient>,
+    ) -> (
+        Key<crate::PluginNode>,
+        tutti_plugin::catalog::PluginRebinder,
+    ) {
         let node = NodeKey::fresh();
         let hosted = crate::plugin::HostedPlugin::new(client.handle(), client.plugin().clone())
             .with_controls(client.controls());
         let tempo = self.tempo.clone();
+        let bound = client.bind(tempo);
+        let rebinder = tutti_plugin::catalog::PluginRebinder::served(bound.rebinder());
         // A fresh key has no wiring recorded, so nothing is unwired.
-        let _controls = self
-            .editor
-            .insert(node, PLUGIN_KIND, client.bind(tempo))
-            .controls;
+        let _controls = self.editor.insert(node, PLUGIN_KIND, bound).controls;
         self.nodes.insert(
             node,
             Entry {
@@ -891,7 +903,7 @@ impl Graph {
         self.plugins.insert(node, hosted);
         self.write_own_bypass(node);
         self.edited = true;
-        Key::new(node)
+        (Key::new(node), rebinder)
     }
 
     /// Hosts a plugin the host inserted itself (an in-process plugin, a
@@ -956,6 +968,27 @@ impl Graph {
         fade: Seconds,
         law: FadeLaw,
     ) -> Result<(), ReplaceRefused<Box<tutti_plugin::handles::PluginClient>>> {
+        self.replace_plugin_with_rebinder(node, client, fade, law)
+            .map(|_| ())
+    }
+
+    /// [`replace_plugin`](Self::replace_plugin), and the builder of the node
+    /// that replaces the incoming one when the plugin changes its audio ports.
+    ///
+    /// # Errors
+    ///
+    /// As [`replace_plugin`](Self::replace_plugin).
+    #[cfg(feature = "plugin")]
+    pub(crate) fn replace_plugin_with_rebinder(
+        &mut self,
+        node: impl Into<NodeKey>,
+        client: Box<tutti_plugin::handles::PluginClient>,
+        fade: Seconds,
+        law: FadeLaw,
+    ) -> Result<
+        tutti_plugin::catalog::PluginRebinder,
+        ReplaceRefused<Box<tutti_plugin::handles::PluginClient>>,
+    > {
         let node = node.into();
         // Asked here, before binding: `replace` hands back what it refuses,
         // and a bound plugin cannot be unbound.
@@ -974,7 +1007,9 @@ impl Graph {
         let controls = client.controls();
         let plugin = client.plugin().clone();
         let tempo = self.tempo.clone();
-        match self.swap_unit(node, client.bind(tempo), fade, law) {
+        let bound = client.bind(tempo);
+        let rebinder = tutti_plugin::catalog::PluginRebinder::served(bound.rebinder());
+        match self.swap_unit(node, bound, fade, law) {
             Ok(_controls) => {
                 // The record is carried over to the incoming plugin (unlike
                 // `replace`, which takes it out): its handle is what the
@@ -995,7 +1030,7 @@ impl Graph {
                     }
                 }
                 self.write_own_bypass(node);
-                Ok(())
+                Ok(rebinder)
             }
             Err(ReplaceRefused::Failed(refused)) => Err(ReplaceRefused::Failed(refused)),
             Err(ReplaceRefused::Busy(_)) => unreachable!("checked above"),
@@ -1016,7 +1051,10 @@ impl Graph {
         plugin: Box<tutti_plugin::catalog::Plugin>,
         fade: Seconds,
         law: FadeLaw,
-    ) -> Result<(), ReplaceRefused<Box<tutti_plugin::catalog::Plugin>>> {
+    ) -> Result<
+        tutti_plugin::catalog::PluginRebinder,
+        ReplaceRefused<Box<tutti_plugin::catalog::Plugin>>,
+    > {
         if let Some(cause) = self.editor.poison_cause() {
             return Err(ReplaceRefused::Failed(CrossfadeRefused::Poisoned(
                 cause.to_owned(),
@@ -1031,7 +1069,7 @@ impl Graph {
         let handle = plugin.handle().clone();
         let controls = plugin.node_controls();
         let plugin_ref = plugin.plugin().clone();
-        let bound = (*plugin).bind(self.tempo.clone());
+        let (bound, rebinder) = (*plugin).bind_with_rebinder(self.tempo.clone());
         match self.swap_unit(node, bound, fade, law) {
             Ok(_) => {
                 match self.plugins.get_mut(&node) {
@@ -1045,11 +1083,34 @@ impl Graph {
                         self.plugins.insert(node, hosted);
                     }
                 }
-                Ok(())
+                Ok(rebinder)
             }
             Err(ReplaceRefused::Failed(refused)) => Err(ReplaceRefused::Failed(refused)),
             Err(ReplaceRefused::Busy(_)) => unreachable!("checked above"),
         }
+    }
+
+    /// Swaps the node of the plugin at `node` for `bound`, the node
+    /// [`PluginRebinder::prepare`](tutti_plugin::catalog::PluginRebinder::prepare)
+    /// built over the same plugin with the ports it has now: the key, and the
+    /// wiring to the ports the new node keeps, stay, and the wiring to the ports
+    /// it lacks is dropped and reported
+    /// ([`SessionEvent::Unwired`](crate::SessionEvent::Unwired)). The plugin's
+    /// record stays.
+    ///
+    /// # Errors
+    ///
+    /// [`ReplaceRefused::Busy`] while the graph re-prepares, handing `bound`
+    /// back unplaced; [`ReplaceRefused::Failed`] on a poisoned graph, a `node`
+    /// not in it, or an editor that refuses the swap.
+    #[cfg(feature = "plugin")]
+    pub(crate) fn replace_rebound(
+        &mut self,
+        node: NodeKey,
+        bound: tutti_plugin::catalog::BoundPlugin,
+    ) -> Result<(), ReplaceRefused<tutti_plugin::catalog::BoundPlugin>> {
+        self.swap_unit(node, bound, tutti_graph::DECLICK, FadeLaw::default())
+            .map(|_| ())
     }
 
     /// Puts the silent stand-in of a plugin that is gone at `node`
