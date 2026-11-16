@@ -397,6 +397,11 @@ fn a_refused_commit_is_an_event_of_its_update() {
     s.declare_root_topology(Some(smpte(2)))
         .expect("stereo again");
     assert_eq!(refused(s.update()), 0, "stereo again commits");
+    // A declaration made while that root crossfade runs waits for it, so the
+    // fade (240 frames) renders through first.
+    for _ in 0..5 {
+        let _ = out0(&mut s);
+    }
     s.declare_root_topology(Some(ChannelTopology::unassigned(layout(1))))
         .expect("an unassigned mono root");
     assert_eq!(
