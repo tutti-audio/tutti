@@ -313,8 +313,10 @@ impl<A: Activation> DerefMut for Active<A> {
 /// The bundle is `<profile>/vst3-bundles/<key>/`, keyed by the library's
 /// modified time and length. It is built in a directory of this process's own
 /// and published by renaming that directory to `<key>`, which fails where one
-/// is already there: the first process to publish wins, and a bundle is never
-/// changed once it is visible, so no process loads a path another is making.
+/// is already there: the first process to publish wins, and no process changes
+/// a bundle once it is visible, so no process loads a path another is making.
+/// The module is a hard link (a copy where linking fails), so a rebuild that
+/// replaces the library leaves a published bundle as it was.
 ///
 /// # Panics
 ///
@@ -353,11 +355,16 @@ pub fn vst3_module() -> PathBuf {
             if std::fs::hard_link(&real, &module).is_err() {
                 std::fs::copy(&real, &module).expect("copy the bundle module");
             }
-            if std::fs::rename(&tmp, root.join(key)).is_err() {
+            let renamed = std::fs::rename(&tmp, root.join(key));
+            if renamed.is_err() {
                 // Another process published first; its bundle is whole.
                 let _ = std::fs::remove_dir_all(&tmp);
             }
-            assert!(published.exists(), "no module at {}", published.display());
+            assert!(
+                published.exists(),
+                "no module at {} (publishing the bundle: {renamed:?})",
+                published.display()
+            );
             published
         })
         .clone()
