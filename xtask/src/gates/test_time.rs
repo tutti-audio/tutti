@@ -16,10 +16,18 @@
 //!   in a `while` condition is a wait loop bounded by a deadline, which only guards a
 //!   hang, so it is not counted; neither is a deadline held as an `Instant`
 //!   (`Instant::now() + timeout`, then `Instant::now() < deadline`), which holds no
-//!   `.elapsed()` or subtraction.
+//!   `.elapsed()` or subtraction. A busy-wait speed check written as a `while` is
+//!   therefore not caught. An `if t.elapsed() > T { panic!(..) }` hang guard is counted:
+//!   write it as an `Instant` deadline (`Instant::now() + T`, compared directly), which
+//!   is not. Only `<`, `<=`, `>` and `>=` count; `==` and `!=` do not. A value that is
+//!   the `.elapsed()` or `.duration_since(..)` of a synthetic or non-wall `Instant` is
+//!   counted when compared (a known false positive). In an `assert*!` only the compared
+//!   operands count: the first argument of `assert!`, the first two of `assert_eq!` and
+//!   `assert_ne!`, never a message argument.
 //! - **A sleep**: a call of `thread::sleep(..)` (so `std::thread::sleep(..)` too), or of
 //!   a bare `sleep(..)` in a file that imports it from `thread`. A method or a path that
-//!   does not end in `thread::sleep` (a primitive under test) is not a sleep.
+//!   does not end in `thread::sleep` (a primitive under test) is not a sleep, and a
+//!   `tokio` or other non-std sleep is not counted.
 //!
 //! [`BASELINE`] holds `<comparisons> <sleeps> <path>` for each file that held a site
 //! when the gate began. A file fails when either count is over its baseline, naming each
@@ -108,6 +116,10 @@ fn test_file(path: &str) -> bool {
 
 fn word_byte(c: u8) -> bool {
     c.is_ascii_alphanumeric() || c == b'_'
+}
+
+fn word_byte_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_'
 }
 
 fn skip_ws(b: &[u8], mut i: usize) -> usize {
@@ -217,10 +229,13 @@ fn compared_before(code: &str, at: usize) -> bool {
     }
 }
 
-/// Whether `at` sits inside the arguments of an `assert*!` macro call.
+/// Whether `at` sits in a compared operand of an `assert*!` macro call: the first
+/// argument of `assert!`, the first two of `assert_eq!` and `assert_ne!`. A message or
+/// format argument is not an operand.
 fn in_assert(code: &str, at: usize) -> bool {
     let b = code.as_bytes();
     let mut depth = 0usize;
+    let mut commas = 0usize;
     let mut i = at;
     while i > 0 {
         i -= 1;
@@ -239,11 +254,20 @@ fn in_assert(code: &str, at: usize) -> bool {
                     while s > 0 && word_byte(b[s - 1]) {
                         s -= 1;
                     }
-                    if code[s..name_end].contains("assert") {
-                        return true;
+                    let name = &code[s..name_end];
+                    if name.contains("assert") {
+                        let operands = if name.ends_with("_eq") || name.ends_with("_ne") {
+                            2
+                        } else {
+                            1
+                        };
+                        return commas < operands;
                     }
                 }
+                commas = 0;
             }
+            b'[' => commas = 0,
+            b',' if depth == 0 => commas += 1,
             b';' | b'{' | b'}' if depth == 0 => return false,
             _ => {}
         }
@@ -342,9 +366,12 @@ fn imports_sleep(code: &str) -> bool {
         from = at + 3;
         let end = code[from..].find(';').map_or(code.len(), |e| from + e);
         let item: String = code[from..end].split_whitespace().collect();
-        if item.contains("thread::sleep") || (item.contains("thread::{") && item.contains("sleep"))
-        {
-            return true;
+        let names_sleep = |tail: &str| find_word_from(tail, "sleep", 0).is_some();
+        if let Some(i) = item.find("thread::") {
+            let tail = &item[i + "thread::".len()..];
+            if names_sleep(tail) && (tail.starts_with("sleep") || tail.starts_with('{')) {
+                return true;
+            }
         }
     }
     false
@@ -364,7 +391,12 @@ fn sleeps(code: &str) -> Vec<usize> {
         let before = code[..at].trim_end();
         let hit = if before.ends_with("thread::") {
             true
-        } else if before.ends_with("::") || before.ends_with('.') || before.ends_with("fn") {
+        } else if before.ends_with("::")
+            || before.ends_with('.')
+            || before
+                .strip_suffix("fn")
+                .is_some_and(|p| !p.ends_with(word_byte_char))
+        {
             false
         } else {
             imported
@@ -425,10 +457,12 @@ pub(super) fn check(tree: &dyn Tree) -> Report {
     let mut over = Vec::new();
     let mut current: BTreeMap<String, Counts> = BTreeMap::new();
     let mut slack = 0;
+    let mut scanned = std::collections::BTreeSet::new();
     for path in paths {
         let Some(text) = tree.read(&path) else {
             continue;
         };
+        scanned.insert(path.clone());
         let s = sites(&path, &text);
         let (n, allowed) = (s.counts(), baseline.get(&path).copied().unwrap_or_default());
         if n != Counts::default() {
@@ -451,14 +485,11 @@ pub(super) fn check(tree: &dyn Tree) -> Report {
             }
         }
     }
-    slack += baseline
-        .iter()
-        .filter(|(p, _)| !current.contains_key(*p))
-        .map(|(p, c)| {
-            let have = current.get(p).copied().unwrap_or_default();
-            (c.compares - have.compares.min(c.compares)) + (c.sleeps - have.sleeps.min(c.sleeps))
-        })
-        .sum::<usize>();
+    let gone: Vec<&String> = baseline.keys().filter(|p| !scanned.contains(*p)).collect();
+    for p in &gone {
+        let c = baseline[*p];
+        slack += c.compares + c.sleeps;
+    }
     if over.is_empty() {
         r.say(format!("{GATE}: OK"));
     } else {
@@ -468,6 +499,11 @@ pub(super) fn check(tree: &dyn Tree) -> Report {
         for line in over {
             r.fail(line);
         }
+    }
+    for p in &gone {
+        r.say(format!(
+            "{GATE}: {BASELINE} names {p}, which no longer exists; remove the row"
+        ));
     }
     let total = |m: &BTreeMap<String, Counts>| {
         m.values().fold(Counts::default(), |a, c| Counts {
@@ -670,6 +706,69 @@ mod tests {
         assert!(!run(&[]).passed());
         assert!(!run(&[(BASELINE, "many 0 crates/a/tests/t.rs\n")]).passed());
         assert!(!run(&[(BASELINE, "1 crates/a/tests/t.rs\n")]).passed());
+    }
+
+    #[test]
+    fn a_zero_site_file_with_a_row_adds_its_slack_once() {
+        let r = run(&[
+            (BASELINE, "3 2 crates/a/tests/t.rs\n"),
+            ("crates/a/tests/t.rs", "fn a() {}\n"),
+        ]);
+        assert!(r.passed());
+        assert!(
+            r.out
+                .contains(&"check-test-time: xtask/test-time.txt can drop by 5; lower it to the current counts".to_owned()),
+            "{:?}",
+            r.out
+        );
+    }
+
+    #[test]
+    fn a_deleted_file_adds_its_slack_once_and_is_named() {
+        let r = run(&[
+            (BASELINE, "3 2 crates/a/tests/gone.rs\n"),
+            (LIB, "fn f() {}\n"),
+        ]);
+        assert!(r.passed());
+        assert!(r.out.contains(
+            &"check-test-time: xtask/test-time.txt can drop by 5; lower it to the current counts".to_owned()
+        ));
+        assert!(r.out.contains(
+            &"check-test-time: xtask/test-time.txt names crates/a/tests/gone.rs, which no longer exists; remove the row".to_owned()
+        ));
+    }
+
+    #[test]
+    fn a_message_argument_of_an_assert_is_not_an_operand() {
+        let t = "crates/a/tests/t.rs";
+        assert_eq!(
+            counts(t, "fn a() { assert!(ok, \"took {:?}\", t.elapsed()); }").compares,
+            0
+        );
+        assert_eq!(
+            counts(t, "fn a() { assert_eq!(a, t.elapsed().as_secs(), \"m\"); }").compares,
+            1
+        );
+        assert_eq!(
+            counts(
+                t,
+                "fn a() { assert_eq!(a, b, \"{:?}\", t.elapsed().as_secs()); }"
+            )
+            .compares,
+            0
+        );
+        assert_eq!(
+            counts(t, "fn a() { assert!(t.elapsed().is_zero(), \"m\"); }").compares,
+            1
+        );
+    }
+
+    #[test]
+    fn a_name_ending_in_fn_is_not_a_sleep_definition() {
+        let src = "use std::thread::sleep;\nfn t() { run_fn sleep(D); }\nfn sleep(d: D) {}\n";
+        assert_eq!(counts("crates/a/tests/t.rs", src).sleeps, 1);
+        let other = "use std::thread::sleeper;\nfn t() { sleep(D); }\n";
+        assert_eq!(counts("crates/a/tests/t.rs", other).sleeps, 0);
     }
 
     #[test]
