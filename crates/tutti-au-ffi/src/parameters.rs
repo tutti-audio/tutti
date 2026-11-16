@@ -55,11 +55,8 @@ impl Unit {
             // a CFString the caller owns one retain of (the header's rule).
             unsafe { take_string(raw.cfNameString) }.unwrap_or_default()
         } else {
-            // `name` is `[c_char; 52]`; reinterpret as bytes for the
-            // null-terminated fallback decode.
-            let bytes: Vec<u8> = raw.name.iter().map(|&c| c as u8).collect();
-            let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
-            String::from_utf8_lossy(&bytes[..end]).to_string()
+            // `name` is `[c_char; 52]`, NUL-terminated.
+            tutti_plugin_types::read_c_chars(&raw.name)
         };
         Ok((raw, name))
     }

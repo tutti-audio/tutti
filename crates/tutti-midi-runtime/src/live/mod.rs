@@ -11,8 +11,6 @@
 //!   is how a control thread sends into the graph (a keyboard, a preview).
 //! - [`MpeIngest`] is the inbound state that rewrites classic-MPE channel-spread
 //!   into native MIDI-2 per-note messages ([`MidiIngestNode`] is its caller).
-//! - [`MidiMailbox`] is the ring of the host's own **outbound** path (a host's
-//!   events to the session's drain), not a way into the graph.
 //! - [`compile_routes`] turns inbound routing rules into which of the input
 //!   node's ports each listener takes.
 
@@ -20,7 +18,6 @@ pub mod device_epochs;
 pub mod ingest_node;
 pub mod input_inlets;
 pub mod keys;
-pub mod mailbox;
 pub mod mpe_ingest;
 pub(crate) mod order;
 mod route;
@@ -34,7 +31,6 @@ pub use ingest_node::{
 };
 pub use input_inlets::{ArrivalClock, DeviceInput, InputId, InputInlets};
 pub use keys::{LIVE_INLET_CAPACITY, MidiKeys};
-pub use mailbox::{MAILBOX_CAPACITY, MidiMailbox, MidiReceiver, MidiSender};
 pub use mpe_ingest::MpeIngest;
 pub use route::{RouteRule, compile_routes};
 pub use sensing::{ACTIVE_SENSING_JUDGE, ActiveSensing};

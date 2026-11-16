@@ -77,8 +77,9 @@ pub enum MidiEvent {
         /// Events dropped so far, over every input.
         total: u64,
     },
-    /// The hardware out dropped events for want of an output: the total so
-    /// far, reported when it rises, at most once per
+    /// The outputs dropped events (for want of an open output, or a sink that
+    /// refused them, or a tap with no room): the total so far, over every
+    /// output, reported when it rises, at most once per
     /// [`MIDI_OUT_DROP_REPORT`](crate::MIDI_OUT_DROP_REPORT) of
     /// [`PhaseCx::now`](crate::PhaseCx::now).
     OutputDropped {

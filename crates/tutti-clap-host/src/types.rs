@@ -11,8 +11,8 @@ use std::fmt;
 
 pub use tutti_plugin_types::{
     AudioBuffer, AudioBuffer32, AudioBuffer64, ChannelLayout, ContentScale, EditorCapabilities,
-    NoteExpressionType, ParameterChanges, ParameterPoint, ParameterQueue, TransportInfo,
-    WindowHandle, WireMidi,
+    NoteExpressionType, ParameterChanges, ParameterPoint, ParameterQueue, PluginVersion,
+    TransportInfo, WindowHandle, WireMidi,
 };
 
 /// Metadata describing a loaded plugin, returned from
@@ -27,8 +27,9 @@ pub struct PluginInfo {
     pub name: String,
     /// Vendor name; empty when the descriptor omits it.
     pub vendor: String,
-    /// Vendor-formatted version string, not parsed or ordered by this crate.
-    pub version: String,
+    /// The `clap_plugin_descriptor` version string verbatim, not parsed or ordered by this
+    /// crate; [`PluginVersion::Absent`] when the descriptor omits it.
+    pub version: PluginVersion,
     /// Plugin homepage; empty when the descriptor omits it.
     pub url: String,
     /// One-line description; empty when the descriptor omits it.
@@ -50,7 +51,7 @@ impl PluginInfo {
             id: id.into(),
             name: name.into(),
             vendor: String::new(),
-            version: String::new(),
+            version: PluginVersion::Absent,
             url: String::new(),
             description: String::new(),
             features: Vec::new(),
@@ -66,10 +67,10 @@ impl PluginInfo {
         self
     }
 
-    /// Sets the plugin version string (builder style).
+    /// Sets the plugin version (builder style).
     #[must_use]
-    pub fn version(mut self, version: impl Into<String>) -> Self {
-        self.version = version.into();
+    pub fn version(mut self, version: PluginVersion) -> Self {
+        self.version = version;
         self
     }
 

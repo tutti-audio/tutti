@@ -6,12 +6,12 @@
 
 use serde::{Deserialize, Serialize};
 use tutti_fixtures::{RangeContract, check_range_contract};
-use tutti_types::{Cents, Db, SampleRate, Seconds};
+use tutti_types::{Cents, Confidence, Db, SampleRate, Samples, Seconds};
 
 use crate::{
-    BandCount, BandsPerOctave, HarmonicDecay, Harmonics, NoteSpan, PeakDecay, PeakFloor,
-    PitchSplit, PriorSpread, SelfTransition, Sharpness, SpectrumFloor, SpectrumTime, Tightness,
-    TuningOffset, WindowedRate,
+    Alternatives, BandCount, BandsPerOctave, FiniteLevel, HarmonicDecay, Harmonics, NoteSpan,
+    PeakDecay, PeakFloor, PitchHop, PitchSplit, PriorSpread, SelfTransition, Sharpness,
+    SpectrumFloor, SpectrumTime, Tightness, TuningOffset, WindowedRate, YinThreshold,
 };
 
 macro_rules! serde_through_try_from {
@@ -47,6 +47,10 @@ serde_through_try_from! {
     SelfTransition: f32,
     Sharpness: f32,
     WindowedRate: SampleRate,
+    FiniteLevel: Db,
+    PitchHop: Samples,
+    Alternatives: usize,
+    YinThreshold: Confidence,
 }
 
 const NAN: f32 = f32::NAN;
@@ -254,5 +258,58 @@ fn windowed_rate_keeps_the_range_checked_shape() {
         of: Some(WindowedRate::of),
         valid: &[SampleRate::SR_8K, SampleRate::SR_48K, SampleRate::SR_192K],
         invalid: &[SampleRate::of(7_999.0), SampleRate::of(192_001.0)],
+    });
+}
+
+/// Finite decibels.
+#[test]
+fn gate_level_keeps_the_range_checked_shape() {
+    check_range_contract(&RangeContract {
+        new: FiniteLevel::new,
+        get: FiniteLevel::get,
+        of: Some(FiniteLevel::of),
+        valid: &db(&[-300.0, -60.0, 0.0, 12.0, f32::MAX, f32::MIN]),
+        invalid: &db(&[NAN, INF, NEG_INF]),
+    });
+}
+
+/// One sample or more.
+#[test]
+fn pitch_hop_keeps_the_range_checked_shape() {
+    check_range_contract(&RangeContract {
+        new: PitchHop::new,
+        get: PitchHop::get,
+        of: Some(PitchHop::of),
+        valid: &[Samples(1), Samples(512), Samples(usize::MAX)],
+        invalid: &[Samples(0)],
+    });
+}
+
+/// `0..=16` runner-up tempi.
+#[test]
+fn alternatives_keep_the_range_checked_shape() {
+    check_range_contract(&RangeContract {
+        new: Alternatives::new,
+        get: Alternatives::get,
+        of: Some(Alternatives::of),
+        valid: &[0, 2, 16],
+        invalid: &[17, usize::MAX],
+    });
+}
+
+/// `0.01..=0.5`.
+#[test]
+fn yin_threshold_keeps_the_range_checked_shape() {
+    check_range_contract(&RangeContract {
+        new: YinThreshold::new,
+        get: YinThreshold::get,
+        of: Some(YinThreshold::of),
+        valid: &[Confidence(0.01), Confidence(0.1), Confidence(0.5)],
+        invalid: &[
+            Confidence(0.0),
+            Confidence(0.009),
+            Confidence(0.51),
+            Confidence(f32::NAN),
+        ],
     });
 }

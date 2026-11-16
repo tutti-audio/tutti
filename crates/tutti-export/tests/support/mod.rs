@@ -101,7 +101,7 @@ impl ExportConfig {
         };
         Ok(Job::new(r.sample_rate, length, r.latency, tail)
             .expect("a test names a render")
-            .with_event_loss(r.on_event_loss))
+            .event_loss(r.on_event_loss))
     }
 
     /// The file at `path`, normalized by `normalize` (measured on this
@@ -113,19 +113,19 @@ impl ExportConfig {
     ) -> FileTarget {
         let target = FileTarget::new(path, self.encode.format, self.encode.channels);
         match &self.encode.topology {
-            Some(topology) => target.with_topology(topology.clone()),
+            Some(topology) => target.topology(topology.clone()),
             None => target,
         }
-        .with_resample(self.resample)
-        .with_dither(self.dither)
-        .with_normalize(normalize.map(NormalizeSpec::own))
+        .resample(self.resample)
+        .dither(self.dither)
+        .normalize(normalize.map(NormalizeSpec::own))
     }
 
     /// The planes: `encode.channels` wide.
     pub fn buffer_target(&self) -> BufferTarget {
         let target = BufferTarget::new(self.encode.channels);
         match &self.encode.topology {
-            Some(topology) => target.with_topology(topology.clone()),
+            Some(topology) => target.topology(topology.clone()),
             None => target,
         }
     }

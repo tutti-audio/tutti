@@ -226,7 +226,7 @@ pub(super) fn rig_replying_after(label: &str, reply_delay: Duration) -> Rig {
             id: "test.plugin".into(),
             name: "Test Plugin".into(),
             vendor: String::new(),
-            version: String::new(),
+            version: tutti_plugin_types::PluginVersion::Absent,
             class: PluginClass::Unknown,
             editor: EditorPresence::Absent,
             measured: None,

@@ -160,6 +160,18 @@ impl FakeCounters {
         mine.into_iter().map(|(_, ump, at)| (ump, at)).collect()
     }
 
+    /// The devices whose input connection is open now, oldest first: a
+    /// connection closes when its port is closed or its session ends.
+    #[must_use]
+    pub fn connected_inputs(&self) -> Vec<EndpointId> {
+        self.producers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .map(|(device, _)| *device)
+            .collect()
+    }
+
     /// Events handed to the sink so far.
     #[must_use]
     pub fn sent(&self) -> usize {

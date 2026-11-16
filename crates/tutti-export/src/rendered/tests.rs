@@ -2,7 +2,7 @@
 //! `compile_fail` doctests on [`Rendered`](crate::Rendered).
 
 use crate::{Rendered, RenderedError};
-use tutti_types::{SampleRate, Samples};
+use tutti_types::{LayoutError, SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
@@ -46,9 +46,9 @@ fn more_planes_than_a_layout_holds_are_refused() {
     let planes = vec![Vec::new(); usize::from(u16::MAX) + 1];
     assert_eq!(
         Rendered::new(planes, RATE, 0),
-        Err(RenderedError::TooWide {
-            planes: usize::from(u16::MAX) + 1
-        })
+        Err(RenderedError::Layout(LayoutError::TooWide(
+            u64::from(u16::MAX) + 1
+        )))
     );
 }
 

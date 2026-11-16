@@ -31,8 +31,8 @@ use tutti_ump::StreamConfig;
 use crate::midi::UmpOut;
 use crate::pool::{Declared, HandleError, Life, Load, LoadError, PoolEntry};
 use crate::{
-    EventInPort, EventOutPort, Feeder, MidiEvent, Peer, PeerError, Presence, Resource,
-    ResourceFact, ResourceId, Session, SessionEvent,
+    EventInPort, EventOutPort, MidiEvent, Peer, PeerError, Presence, Resource, ResourceFact,
+    ResourceId, Session, SessionEvent,
 };
 
 // --- Vocabulary ---
@@ -513,7 +513,7 @@ impl MidiOutput {
     /// The port's output node: the node to wire to. What is wired to its event
     /// input (`Graph::set_sources`) is sent to the device each update, beside the
     /// session's MIDI clock, which feeds it as a feed of its own
-    /// ([`Feeder::Clock`]) that a host's `set_sources` does not replace. The node is
+    /// ([`Feeder::Clock`](crate::Feeder::Clock)) that a host's `set_sources` does not replace. The node is
     /// in the graph while the entry is loaded, and the same node serves the
     /// port across an unplug and a replug.
     #[must_use]
@@ -1239,9 +1239,9 @@ impl crate::Midi<'_> {
         })
     }
 
-    /// Opens the output port of `saved` as `id`: the output node joins the graph,
-    /// fed by the session's clock, and the device, when it is present, opens
-    /// into it.
+    /// Opens the output port of `saved` as `id`: the output node joins the graph
+    /// ([`add_output_node`](Self::add_output_node)) and the device, when it is
+    /// present, opens into it.
     pub(crate) fn open_output_port(
         &mut self,
         id: ResourceId,
@@ -1262,24 +1262,7 @@ impl crate::Midi<'_> {
             None => None,
         };
         let rate = self.graph.prepared().sample_rate();
-        let (key, _) = self.graph.add(tutti_graph::ForkByClone(
-            tutti_midi_runtime::MidiOutNode::new(),
-        ));
-        let node = key.erase();
-        if let Some(nodes) = self.nodes {
-            // The session's own clock goes out through every output.
-            self.graph
-                .set_feed(node, Feeder::Clock, vec![EventOutPort::new(nodes.clock, 0)]);
-        }
-        let tap = self
-            .graph
-            .taps()
-            .open_event(
-                EventOutPort::new(node, 0),
-                tutti_graph::TapAlign::ToOutput,
-                crate::midi::MIDI_OUT_TAP_CAPACITY,
-            )
-            .expect("the output node is in the graph with its event output");
+        let (node, tap) = self.add_output_node();
         let config = device.as_ref().map(tutti_midi_hardware::OpenOutput::config);
         let info = found.clone().unwrap_or_else(|| saved.clone());
         let token = Arc::new(());
@@ -1322,22 +1305,41 @@ impl crate::Midi<'_> {
 // --- Draining the outputs ---
 
 impl Ports {
-    /// Each output port's tap, read dry and routed to its device, and the tap
-    /// reopened where the graph was re-prepared at another rate.
-    pub(crate) fn drain_outputs(
+    /// Each output port's tap on one scale of frames, the rate it was opened
+    /// at: where the graph has been re-prepared at another, drains the old
+    /// reader and reopens that one tap. Whether any reopened.
+    pub(crate) fn reopen(
         &mut self,
         graph: &mut crate::graph::Graph,
-        drops: &crate::midi::MidiOutDrops,
+        drops: &crate::midi::OutDrops,
+        timing: Option<&crate::midi::OutputTiming>,
+    ) -> bool {
+        let mut edited = false;
+        for port in &mut self.outputs {
+            if port.tap.rate() != graph.prepared().sample_rate() {
+                let _ = crate::midi::drain_events(&mut port.tap, port.out.as_mut(), drops, timing);
+                if let Some(tap) = graph.taps().reopen_event(port.tap.id()) {
+                    port.tap = tap;
+                    let rate = graph.prepared().sample_rate();
+                    if let Some(out) = port.out.as_mut() {
+                        out.set_rate(rate);
+                    }
+                    port.parked = port.parked.map(|stream| stream.at_rate(rate));
+                    edited = true;
+                }
+            }
+        }
+        edited
+    }
+
+    /// Each output port's tap, read dry and routed to its device.
+    pub(crate) fn drain_outputs(
+        &mut self,
+        drops: &crate::midi::OutDrops,
         timing: Option<&crate::midi::OutputTiming>,
     ) {
         for port in &mut self.outputs {
-            if port.tap.rate() != graph.prepared().sample_rate() {
-                crate::midi::drain_events(&mut port.tap, port.out.as_mut(), drops, timing);
-                if let Some(tap) = graph.taps().reopen_event(port.tap.id()) {
-                    port.tap = tap;
-                }
-            }
-            crate::midi::drain_events(&mut port.tap, port.out.as_mut(), drops, timing);
+            let _ = crate::midi::drain_events(&mut port.tap, port.out.as_mut(), drops, timing);
         }
     }
 
@@ -1346,18 +1348,13 @@ impl Ports {
     pub(crate) fn route(
         &mut self,
         batch: &[(tutti_types::Frame, tutti_ump::Ump)],
-        drops: &crate::midi::MidiOutDrops,
+        drops: &crate::midi::OutDrops,
         timing: Option<&crate::midi::OutputTiming>,
     ) -> bool {
         let mut any = false;
         for port in &mut self.outputs {
             if let Some(out) = port.out.as_mut() {
-                crate::midi::MidiOutRouter {
-                    out: Some(out),
-                    drops: Some(drops),
-                    timing,
-                }
-                .route(batch);
+                crate::midi::route_batch(Some(out), drops, timing, batch);
                 any = true;
             }
         }

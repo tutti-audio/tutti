@@ -33,8 +33,8 @@ use std::collections::BTreeMap;
 use std::io::{Seek, SeekFrom, Write};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
-use std::thread::JoinHandle;
 use tutti_buffers::Interleaved;
+use tutti_rt::{ThreadHandle, spawn_named};
 
 /// Frames per FLAC block, every block but the last.
 const BLOCK_SIZE: usize = 4096;
@@ -85,7 +85,7 @@ impl<W: Write + Seek> FlacWriter<W> {
         sink.write_all(&header_bytes(&info)?)?;
 
         let workers = std::thread::available_parallelism().map_or(1, |n| n.get());
-        let frames = FrameWriter::start(workers, Arc::new(configs), info.clone(), channels, bits);
+        let frames = FrameWriter::start(workers, Arc::new(configs), info.clone(), channels, bits)?;
         Ok(Self {
             sink,
             frames,
@@ -166,8 +166,10 @@ type Encoded = (usize, std::result::Result<Frame, String>, FrameBuf);
 ///
 /// [`block`]: Self::block
 struct FrameWriter {
-    threads: Vec<JoinHandle<()>>,
+    /// Dropped before `threads`: closing the queue is what ends the workers, so
+    /// the handles' join on drop finds them finishing.
     jobs: Option<mpsc::SyncSender<(usize, FrameBuf)>>,
+    threads: Vec<ThreadHandle<()>>,
     done: mpsc::Receiver<Encoded>,
     /// Buffers back from the workers, ready to refill.
     free: Vec<FrameBuf>,
@@ -195,64 +197,73 @@ impl FrameWriter {
         info: StreamInfo,
         channels: usize,
         bits: usize,
-    ) -> Self {
+    ) -> Result<Self> {
         let workers = workers.max(1);
         let (job_tx, job_rx) = mpsc::sync_channel::<(usize, FrameBuf)>(workers);
         let (done_tx, done_rx) = mpsc::channel::<Encoded>();
         let job_rx = Arc::new(Mutex::new(job_rx));
-        let threads = (0..workers)
-            .map(|_| {
-                let job_rx = Arc::clone(&job_rx);
-                let configs = Arc::clone(&configs);
-                let done_tx = done_tx.clone();
-                // Every frame is encoded against the stream info as it stood
-                // before any frame, as flacenc's own parallel encoder does: a
-                // frame's encoding reads only its rate, width and depth.
-                let info = info.clone();
-                std::thread::spawn(move || {
-                    loop {
-                        // The lock is held only to take one job; a closed queue ends
-                        // the worker.
-                        let job = job_rx.lock().map(|rx| rx.recv());
-                        let Ok(Ok((n, buf))) = job else { return };
-                        let config = if buf.size() < MIN_BLOCK_SIZE {
-                            &configs.short
-                        } else {
-                            &configs.full
-                        };
-                        // A panic is caught and sent back as an error: the producer
-                        // waits on `done` while this worker's sender is alive in its
-                        // siblings, so a worker that unwound silently would leave it
-                        // waiting forever.
-                        let frame = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            #[cfg(test)]
-                            if configs.panic_at == Some(n) {
-                                panic!("injected at frame {n}");
-                            }
-                            encode_fixed_size_frame(config, &buf, n, &info).map(|mut f| {
-                                f.precompute_bitstream();
-                                f
-                            })
-                        }))
-                        .map_err(|payload| {
-                            let msg = payload
-                                .downcast_ref::<&str>()
-                                .map(|s| (*s).to_owned())
-                                .or_else(|| payload.downcast_ref::<String>().cloned())
-                                .unwrap_or_default();
-                            format!("panicked: {msg}")
-                        })
-                        .and_then(|r| r.map_err(|e| format!("{e:?}")));
-                        if done_tx.send((n, frame, buf)).is_err() {
-                            return;
+        let mut threads = Vec::with_capacity(workers);
+        for _ in 0..workers {
+            let job_rx = Arc::clone(&job_rx);
+            let configs = Arc::clone(&configs);
+            let done_tx = done_tx.clone();
+            // Every frame is encoded against the stream info as it stood
+            // before any frame, as flacenc's own parallel encoder does: a
+            // frame's encoding reads only its rate, width and depth.
+            let info = info.clone();
+            let spawned = spawn_named("tutti-flac-enc", None, move |_| {
+                loop {
+                    // The lock is held only to take one job; a closed queue ends
+                    // the worker.
+                    let job = job_rx.lock().map(|rx| rx.recv());
+                    let Ok(Ok((n, buf))) = job else { return };
+                    let config = if buf.size() < MIN_BLOCK_SIZE {
+                        &configs.short
+                    } else {
+                        &configs.full
+                    };
+                    // A panic is caught and sent back as an error: the producer
+                    // waits on `done` while this worker's sender is alive in its
+                    // siblings, so a worker that unwound silently would leave it
+                    // waiting forever.
+                    let frame = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        #[cfg(test)]
+                        if configs.panic_at == Some(n) {
+                            panic!("injected at frame {n}");
                         }
+                        encode_fixed_size_frame(config, &buf, n, &info).map(|mut f| {
+                            f.precompute_bitstream();
+                            f
+                        })
+                    }))
+                    .map_err(|payload| {
+                        let msg = payload
+                            .downcast_ref::<&str>()
+                            .map(|s| (*s).to_owned())
+                            .or_else(|| payload.downcast_ref::<String>().cloned())
+                            .unwrap_or_default();
+                        format!("panicked: {msg}")
+                    })
+                    .and_then(|r| r.map_err(|e| format!("{e:?}")));
+                    if done_tx.send((n, frame, buf)).is_err() {
+                        return;
                     }
-                })
-            })
-            .collect();
-        Self {
-            threads,
+                }
+            });
+            match spawned {
+                Ok(thread) => threads.push(thread),
+                Err(e) => {
+                    // The queue closes first: it is what ends the workers
+                    // already running, so their handles' join returns.
+                    drop(job_tx);
+                    drop(threads);
+                    return Err(e.into());
+                }
+            }
+        }
+        Ok(Self {
             jobs: Some(job_tx),
+            threads,
             done: done_rx,
             free: Vec::new(),
             pending: BTreeMap::new(),
@@ -266,7 +277,7 @@ impl FrameWriter {
             bytes_per_sample: bits.div_ceil(8),
             channels,
             sink: ByteSink::new(),
-        }
+        })
     }
 
     /// Queue one interleaved block: [`BLOCK_SIZE`] frames, or fewer for the

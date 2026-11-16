@@ -1,6 +1,7 @@
 //! Plugin specific structures.
 
 use num_enum::{IntoPrimitive, TryFromPrimitive};
+use tutti_plugin_types::read_c_str;
 
 use std::os::raw::c_void;
 use std::ptr;
@@ -1036,10 +1037,7 @@ impl HostCallback {
             buf.as_mut_ptr() as *mut c_void,
             opt,
         );
-        String::from_utf8_lossy(&buf)
-            .chars()
-            .take_while(|c| *c != '\0')
-            .collect()
+        read_c_str(&buf)
     }
 }
 

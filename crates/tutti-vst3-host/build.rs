@@ -232,21 +232,27 @@ fn build_audio_probe(sdk: &Path) {
     // probe's `version.h` includes it for FULL_VERSION_STR.
     let generated_include = out_dir.join("probe-gen");
     std::fs::create_dir_all(&generated_include).expect("create probe-gen dir");
+    // The probe's class version, written into the header below and exported to the tests as
+    // `VST3_PROBE_FULL_VERSION`, so a test reads what the probe was built with.
+    const PROBE_FULL_VERSION: &str = "3.8.0.0";
     std::fs::write(
         generated_include.join("projectversion.h"),
-        "#pragma once\n\
-         #define MAJOR_VERSION_STR \"3\"\n\
-         #define MAJOR_VERSION_INT 3\n\
-         #define SUB_VERSION_STR \"8\"\n\
-         #define SUB_VERSION_INT 8\n\
-         #define RELEASE_NUMBER_STR \"0\"\n\
-         #define RELEASE_NUMBER_INT 0\n\
-         #define BUILD_NUMBER_STR \"0\"\n\
-         #define BUILD_NUMBER_INT 0\n\
-         #define FULL_VERSION_STR \"3.8.0.0\"\n\
-         #define VERSION_STR \"3.8.0\"\n",
+        format!(
+            "#pragma once\n\
+             #define MAJOR_VERSION_STR \"3\"\n\
+             #define MAJOR_VERSION_INT 3\n\
+             #define SUB_VERSION_STR \"8\"\n\
+             #define SUB_VERSION_INT 8\n\
+             #define RELEASE_NUMBER_STR \"0\"\n\
+             #define RELEASE_NUMBER_INT 0\n\
+             #define BUILD_NUMBER_STR \"0\"\n\
+             #define BUILD_NUMBER_INT 0\n\
+             #define FULL_VERSION_STR \"{PROBE_FULL_VERSION}\"\n\
+             #define VERSION_STR \"3.8.0\"\n"
+        ),
     )
     .expect("write projectversion.h");
+    println!("cargo:rustc-env=VST3_PROBE_FULL_VERSION={PROBE_FULL_VERSION}");
 
     // Compile to objects. `cc` can only emit a static lib, and a static lib is
     // the wrong shape here: the linker would drop every member nothing
