@@ -27,7 +27,7 @@ use crate::protocol::{
     BridgeMessage, ChannelLayout, HostMessage, Normalized, PROTOCOL_VERSION, ParamId, SampleFormat,
     SlabLayout,
 };
-use crate::transport::shm::{AudioSlab, RING_SLOTS};
+use crate::transport::shm::RING_SLOTS;
 use crate::unique_socket_path;
 use std::io::{Read, Write};
 use std::sync::Arc;
@@ -344,18 +344,8 @@ impl MockServer {
             .create_sync()
             .expect("listen");
 
-        // The peer writes no audio here: only the shared, read-only slab is kept.
-        let slab = Arc::clone(
-            AudioSlab::create(
-                tutti_fixtures::unique_name(&format!("hostile_{label}")),
-                stereo_layout(),
-            )
-            .expect("create slab")
-            .slab(),
-        );
         let (bridge, thread) = PluginBridge::new(
             path.clone(),
-            slab,
             tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
             tutti_plugin_types::PluginFormat::Vst3,
             Some(crate::EditorLoader::new(
@@ -741,6 +731,76 @@ fn a_layout_with_absurdly_many_buses_is_dropped_on_receipt() {
     });
     assert_eq!(*layouts.lock(), [real], "only the plausible layout is kept");
     assert!(resyncs.load(Ordering::Relaxed) >= 1, "the resync is heard");
+}
+
+/// **A slab the server opens is taken; one it never answers, or dies over, fails
+/// within the deadline and leaves the caller its old slab.** The bridge only
+/// reports whether the server has the slab; what the caller keeps is its own.
+#[test]
+fn a_slab_setup_is_answered_refused_or_given_up_on_within_the_deadline() {
+    let layout = stereo_layout();
+    let ready = MockServer::start("slab-ready", |msg| match msg {
+        HostMessage::SetupSharedMemory { .. } => {
+            Action::Reply(Box::new(BridgeMessage::SharedMemoryReady))
+        }
+        _ => Action::Silent,
+    });
+    assert!(
+        ready.bridge.setup_shared_memory(
+            tutti_fixtures::unique_name("hostile_slab-new"),
+            layout.clone()
+        ),
+        "the server's ready is the answer"
+    );
+
+    let refusing = MockServer::start("slab-refused", |msg| match msg {
+        HostMessage::SetupSharedMemory { .. } => Action::Reply(Box::new(BridgeMessage::Error {
+            message: "the slab does not open".into(),
+        })),
+        _ => Action::Silent,
+    });
+    let started = Instant::now();
+    assert!(
+        !refusing.bridge.setup_shared_memory(
+            tutti_fixtures::unique_name("hostile_slab-refused"),
+            layout.clone()
+        ),
+        "the server's error is a refusal"
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "answered at once, not at the deadline"
+    );
+
+    let mut quick = Timeouts::default();
+    quick.param = Duration::from_millis(300);
+    let silent = MockServer::start_with_timeouts("slab-silent", quick, |_| Action::Silent);
+    let started = Instant::now();
+    assert!(
+        !silent.bridge.setup_shared_memory(
+            tutti_fixtures::unique_name("hostile_slab-silent"),
+            layout.clone()
+        ),
+        "no answer is a refusal"
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "bounded by the deadline, not by the server"
+    );
+
+    let dying = MockServer::start("slab-dies", |msg| match msg {
+        HostMessage::SetupSharedMemory { .. } => Action::Die,
+        _ => Action::Silent,
+    });
+    let started = Instant::now();
+    assert!(
+        !dying
+            .bridge
+            .setup_shared_memory(tutti_fixtures::unique_name("hostile_slab-dies"), layout),
+        "a server that dies mid-swap is a refusal"
+    );
+    assert!(started.elapsed() < Duration::from_secs(10));
+    dying.wait_for_crash("the bridge to say the server is gone");
 }
 
 /// A crash that happens **before** any listener exists is still reported.

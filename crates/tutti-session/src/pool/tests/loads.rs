@@ -8,10 +8,10 @@ use std::thread::{self, ThreadId};
 
 use tutti_rt::MainThreadMarker;
 
-use super::{Spawned, events, session, state};
+use super::{Spawned, events, session, state, took};
 use crate::{
-    Declared, HandleError, Life, Load, LoadError, PoolConfig, PoolEntry, PoolError, PoolOutcome,
-    Presence, RetryError, Session, jobs::JobFailed,
+    Declared, HandleError, JobStatus, Life, Load, LoadError, PoolConfig, PoolEntry, PoolError,
+    PoolOutcome, Presence, RetryError, Session, WorkerError,
 };
 
 /// What ran, and on which thread, in the order it ran.
@@ -125,7 +125,7 @@ impl PoolEntry for Stub {
         } = self.clone();
         let made = move || {
             if fail.load(Ordering::SeqCst) {
-                Err(LoadError::Job(JobFailed::Dropped))
+                Err(LoadError::Job(WorkerError::Dropped))
             } else {
                 Ok(Arc::new(Made {
                     value: version,
@@ -585,16 +585,21 @@ fn pool_loaded_lands_once_every_declared_entry_has_an_outcome_and_reports_each()
     ))
     .unwrap();
     let loaded = s.pool_loaded::<&'static str>();
-    assert!(loaded.take().is_none(), "nothing has an outcome");
+    assert_ne!(loaded.status(), JobStatus::Done, "nothing has an outcome");
     let mut jobs = spawned.take();
     jobs.remove(0).run();
-    let _ = s.update();
-    assert!(loaded.take().is_none(), "a and c landed, b has not");
+    let mut events = s.update();
+    assert!(
+        took(&mut events, &loaded).is_none(),
+        "a and c landed, b has not"
+    );
     for job in jobs {
         job.run();
     }
-    let _ = s.update();
-    let report = loaded.take().expect("every entry has an outcome");
+    let mut events = s.update();
+    let report = took(&mut events, &loaded)
+        .expect("every entry has an outcome")
+        .unwrap();
     let keys: Vec<_> = report.iter().map(|(key, _)| *key).collect();
     assert_eq!(keys, ["a", "b", "c"], "in declaration order");
     assert!(matches!(report.outcome(&"a"), Some(PoolOutcome::Loaded)));
@@ -605,7 +610,7 @@ fn pool_loaded_lands_once_every_declared_entry_has_an_outcome_and_reports_each()
         report.failures().map(|(key, _)| *key).collect::<Vec<_>>(),
         ["b"]
     );
-    assert!(loaded.take().is_none(), "it lands once");
+    assert!(took(&mut events, &loaded).is_none(), "it lands once");
 }
 
 #[test]
@@ -623,22 +628,47 @@ fn pool_loaded_lands_in_the_update_that_settles_the_last_entry_and_a_dropped_one
     drop(dropped);
     let _ = s.update();
     assert_eq!(s.pool.waiting(), 1, "a dropped handle's wait ended");
-    assert!(!loaded.has_landed());
+    assert_ne!(loaded.status(), JobStatus::Done);
     spawned.run_all();
-    let _ = s.update();
-    assert!(
-        loaded.has_landed(),
+    let mut events = s.update();
+    assert_eq!(
+        loaded.status(),
+        JobStatus::Done,
         "the update that landed both settled it"
     );
     assert_eq!(s.pool.waiting(), 0);
-    assert!(loaded.take().expect("landed").all_loaded());
+    assert!(
+        took(&mut events, &loaded)
+            .expect("landed")
+            .unwrap()
+            .all_loaded()
+    );
+}
+
+#[test]
+fn pool_loaded_waits_for_the_main_thread_while_an_entry_is_in_a_main_stage() {
+    let (s, spawned) = session();
+    let mut s = with_main_thread(s);
+    let log = Log::default();
+    s.pool(declare(&stub("a", How::Main, &log))).unwrap();
+    let job = s.pool_loaded::<&'static str>();
+    spawned.run_all();
+    // This thread is not the process's main thread: the wait would never end.
+    assert!(matches!(
+        job.wait(&mut s),
+        Err(crate::PoolJobError::Wait(crate::WaitError::NeedsMainThread))
+    ));
+    assert_eq!(job.status(), JobStatus::WaitingForMainThread);
 }
 
 #[test]
 fn an_empty_pool_reports_at_once() {
     let (mut s, _) = session();
     let loaded = s.pool_loaded::<&'static str>();
-    assert!(loaded.take().expect("nothing is pending").is_empty());
+    assert!(
+        loaded.wait(&mut s).unwrap().is_empty(),
+        "nothing is pending"
+    );
 }
 
 #[test]

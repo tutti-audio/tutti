@@ -56,7 +56,8 @@ use tutti_graph::{MissingSource, NodeKey, TapAlign, TapReader};
 use tutti_tempo::TempoMap;
 use tutti_types::{At, Beat, ChannelLayout, Frame, SampleRate, Samples, Seconds};
 
-use crate::jobs::{JobFailed, Landed, Landings};
+use crate::WorkerError;
+use crate::jobs::{Landings, Stream};
 use crate::recorder::IDLE_PARK;
 use crate::{Input, Session, SessionEvent, Trim};
 
@@ -603,7 +604,7 @@ pub enum TakeError {
     SinkRefused,
     /// The take's job panicked or was dropped by the spawner.
     #[error("the take's job did not finish: {0}")]
-    Job(#[from] JobFailed),
+    Job(#[from] WorkerError),
     /// The take was finished (or its handle dropped) before its punch-in was
     /// reached: it holds nothing.
     #[error("the take ended before its punch-in")]
@@ -834,12 +835,12 @@ impl<C: crate::Clock> Session<C> {
             },
             move |_session, landed, events: &mut Vec<SessionEvent>| {
                 events.push(SessionEvent::Take(match landed {
-                    Landed::Message(Started::Placed(placement)) => {
+                    Stream::Message(Started::Placed(placement)) => {
                         TakeEvent::Started { id, placement }
                     }
-                    Landed::Done(Ok(recorded)) => TakeEvent::Finished { id, recorded },
-                    Landed::Done(Err(error)) => TakeEvent::Failed { id, error },
-                    Landed::Failed(failed) => TakeEvent::Failed {
+                    Stream::Done(Ok(recorded)) => TakeEvent::Finished { id, recorded },
+                    Stream::Done(Err(error)) => TakeEvent::Failed { id, error },
+                    Stream::Failed(failed) => TakeEvent::Failed {
                         id,
                         error: failed.into(),
                     },
@@ -1164,7 +1165,7 @@ mod tests {
         session.jobs.submit_stream(
             move |landings: &Landings<Started>| pump.run(landings),
             move |_, landed, _| {
-                if let Landed::Done(end) = landed {
+                if let Stream::Done(end) = landed {
                     *into.lock().unwrap() = Some(end);
                 }
             },

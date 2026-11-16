@@ -9,12 +9,12 @@ use crate::pool::stamp::Stamp;
 /// What [`Session::refresh_pool`](crate::Session::refresh_pool) found: the
 /// entries it loaded again and the ones whose file it could not read.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct RefreshPool {
+pub struct RefreshReport {
     pub(crate) reloaded: Vec<PoolKey>,
     pub(crate) unreadable: Vec<(PoolKey, io::ErrorKind)>,
 }
 
-impl RefreshPool {
+impl RefreshReport {
     /// The entries whose file changed and that load again, in key order; each
     /// lands as a [`PoolEvent::Reloaded`](crate::PoolEvent::Reloaded), or
     /// [`Failed`](crate::PoolEvent::Failed).

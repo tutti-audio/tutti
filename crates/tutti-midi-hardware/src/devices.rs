@@ -19,7 +19,7 @@ use tutti_midi_device::{
     DeviceEvent, DeviceId, DeviceInfo, DeviceTable, EndpointId, OsChange, OsDevice, PortDirection,
     Resolved,
 };
-use tutti_midi_runtime::{InputId, Outgoing, Taken};
+use tutti_midi_runtime::{ClockWriters, InputId, Outgoing, Taken};
 use tutti_ump::StreamConfig;
 
 use crate::HardwareMidiInputs;
@@ -27,6 +27,7 @@ use crate::backend;
 use crate::capability::UmpCapability;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
 use crate::error::{Error, NotFound, Result};
+use crate::sensing::Heartbeat;
 use crate::wire::Wire;
 
 // Only a native backend reports through it; the stub has none.
@@ -320,6 +321,9 @@ impl Devices {
     /// returned with the [`OpenInput`], which holds the connection and the
     /// port, and dropping it closes both.
     ///
+    /// The input's clock map reports its timing to `clock`; its writers drop
+    /// with the [`OpenInput`], and with it on an error.
+    ///
     /// Control thread only: the backend may start a thread.
     ///
     /// Opening an id that is already open opens a second connection to the
@@ -339,9 +343,10 @@ impl Devices {
         &self,
         id: &DeviceId,
         ports: &Arc<HardwareMidiInputs>,
+        clock: ClockWriters,
     ) -> Result<(OpenInput, EventInletNode)> {
         let (info, handle) = self.present(id, PortDirection::is_input)?;
-        let (producer, inlet) = ports.open_input_port(info.name.as_str());
+        let (producer, inlet) = ports.open_input_port_with(info.name.as_str(), clock);
         let mut input = OpenInput {
             connection: None,
             port: producer.port(),
@@ -367,9 +372,10 @@ impl Devices {
         sink.follow(described.protocol);
         Ok(OpenOutput {
             info,
-            sink,
+            sink: Arc::from(sink),
             wire: Wire::new(described),
             refused: 0,
+            heartbeat: None,
         })
     }
 
@@ -588,8 +594,12 @@ impl OpenInput {
 /// ([`follow`](Self::follow) takes it from a
 /// [`MidiSession::poll`](crate::MidiSession::poll) report). UMP Stream messages pass in every form.
 pub struct OpenOutput {
+    /// The Active Sensing thread, once [`active_sensing`](Self::active_sensing)
+    /// started it. Declared first: it drops, and its thread ends holding the
+    /// sink, before the sink does, so the connection closes on the dropping thread.
+    heartbeat: Option<Heartbeat>,
     info: DeviceInfo,
-    sink: Box<dyn DeviceOut>,
+    sink: Arc<dyn DeviceOut>,
     wire: Wire,
     /// The packets the sink had no room for, for [`losses`](Self::losses).
     refused: u64,
@@ -604,6 +614,28 @@ impl core::fmt::Debug for OpenOutput {
 }
 
 impl OpenOutput {
+    /// Starts this output sending Active Sensing (`0xFE`) from a thread of its own
+    /// whenever it has been silent for
+    /// [`ACTIVE_SENSING_INTERVAL`](tutti_midi_runtime::ACTIVE_SENSING_INTERVAL),
+    /// until it is dropped: a transmitter that starts goes on (MIDI 1.0
+    /// Detailed Specification p. 32), so there is no stopping it short of
+    /// closing the output. The thread sends nothing while the output's
+    /// Protocol is MIDI 2.0, which has no Active Sensing, and sends again if
+    /// the Protocol returns to MIDI 1.0.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Io`] when the thread cannot start.
+    pub fn active_sensing(&mut self) -> Result<()> {
+        if self.heartbeat.is_none() {
+            self.heartbeat = Some(Heartbeat::start(
+                Arc::clone(&self.sink),
+                self.wire.config().protocol,
+            )?);
+        }
+        Ok(())
+    }
+
     /// Whether the output can still send; see
     /// [`DeviceOut::is_alive`].
     #[must_use]
@@ -649,6 +681,9 @@ impl OpenOutput {
     pub fn set_config(&mut self, config: StreamConfig) {
         self.wire.set_config(config);
         self.sink.follow(config.protocol);
+        if let Some(heartbeat) = &self.heartbeat {
+            heartbeat.follow(config.protocol);
+        }
     }
 
     /// Follows what a [`MidiSession::poll`](crate::MidiSession::poll) reported:
@@ -693,6 +728,12 @@ impl OpenOutput {
         self.wire.convert(events);
         let taken = self.sink.queue_timed(self.wire.batch());
         let refused = taken.left_of(self.wire.batch()) as u64;
+        // Every send passes here: a packet the device took is traffic.
+        if let Some(heartbeat) = &self.heartbeat
+            && (self.wire.batch().len() as u64) > refused
+        {
+            heartbeat.sent();
+        }
         (self.wire.accepted(taken, events), refused)
     }
 

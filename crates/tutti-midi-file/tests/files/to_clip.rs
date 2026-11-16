@@ -17,7 +17,7 @@ use tutti_midi_file::{
 use tutti_types::{Beat, Seconds};
 use tutti_ump::{
     BarAccents, Flex, FlexAddress, FlexTextKind, FlexTimeSignature, Form, KeySignature, Letter,
-    Message, Metronome, MidiGroup, SharpsFlats, SysexStatus,
+    Message, Metronome, MidiGroup, SharpsFlats, Stream, SysexStatus, Utility, split_stream,
 };
 
 const TPQ: u16 = 480;
@@ -239,6 +239,48 @@ fn copyright_and_lyrics_are_flex_text_over_several_packets() {
         .map(|(t, _)| t.0)
         .collect();
     assert_eq!(ticks, [0, 0, 10]);
+}
+
+/// M2-116 section 7.1.1: the first Set Tempo follows Start of Clip with a
+/// Delta Clockstamp of the value of the one before Start of Clip. A clip with no
+/// configuration header has a stamp of 0 before Start of Clip, and the Set
+/// Tempo after it has a stamp of 0.
+#[test]
+fn the_first_set_tempo_has_the_delta_clockstamp_of_start_of_clip() {
+    let smf = format0(vec![
+        (
+            0,
+            meta(Meta::Tempo {
+                micros_per_quarter: 500_000,
+                extra: Box::default(),
+            }),
+        ),
+        (480, note(0, 60)),
+    ]);
+    let bytes = smf.to_clip().unwrap().clip.to_bytes().unwrap();
+    let words: Vec<u32> = bytes[8..]
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|w| u32::from_be_bytes(*w))
+        .collect();
+    let packets: Vec<Message> = split_stream(&words)
+        .map(|u| u.decode().expect("a defined message"))
+        .collect();
+    let stamp = |p: &Message| match p {
+        Message::Utility(Utility::DeltaClockstamp(t)) => Some(t.get()),
+        _ => None,
+    };
+    let start = packets
+        .iter()
+        .position(|p| matches!(p, Message::Stream(Stream::StartOfClip)))
+        .expect("Start of Clip");
+    assert_eq!(stamp(&packets[start - 1]), Some(0));
+    assert_eq!(stamp(&packets[start + 1]), Some(0));
+    assert!(matches!(
+        packets[start + 2],
+        Message::Flex(_, Flex::SetTempo(DEFAULT_TEMPO))
+    ));
 }
 
 /// M2-104 section 7.7: seven bytes are a Start of six and an End of one.
@@ -772,7 +814,7 @@ fn is_signature(e: &FileEvent) -> bool {
 /// M2-104 section 7.5.3: in a file a Set Tempo sits on a 1/24-quarter-note
 /// position. At 480 ticks per quarter that is every 20 ticks; 29 is nearer 20
 /// than 40, 30 is the tie (taken later), and 40 is on the grid already.
-/// Spec: m2-104/7.5.3#4, m2-116/7.1.1#4
+/// Spec: m2-104/7.5.3#4, m2-116/7.1.1#4, m2-116/6.1.1#5
 #[test]
 fn a_tempo_off_the_clock_grid_moves_to_the_nearest_position() {
     let smf = format0(vec![
@@ -828,7 +870,7 @@ fn a_tempo_does_not_move_past_the_end_of_the_clip() {
 /// at 1500 goes to 1440; 6/8 is 1440 ticks a bar too (six eighths), counted
 /// from that moved signature at 1440, so a signature at 4160 goes to 4320, the
 /// bar line nearer than 2880.
-/// Spec: m2-104/7.5.4#3, m2-116/6.1.2#5, m2-116/7.1.2#3
+/// Spec: m2-104/7.5.4#3, m2-116/6.1.2#5, m2-116/7.1.2#3, m2-116/6.1.2#4
 #[test]
 fn a_time_signature_off_a_bar_line_moves_to_the_nearest_bar_boundary() {
     let smf = format0(vec![
