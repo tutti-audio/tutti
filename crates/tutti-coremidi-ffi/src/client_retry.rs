@@ -107,7 +107,10 @@ mod tests {
             waits.push(at - now);
             now = at;
         }
-        assert_eq!(waits, [ms(100), ms(200), ms(400), ms(800), ms(1000), ms(1000)]);
+        assert_eq!(
+            waits,
+            [ms(100), ms(200), ms(400), ms(800), ms(1000), ms(1000)]
+        );
     }
 
     #[test]
@@ -115,11 +118,11 @@ mod tests {
         let start = Instant::now();
         let mut rule = ClientRetry::new(start);
         let near = start + RETRY_BOUND - ms(50);
-        assert_eq!(rule.after(SERVER_GONE, near), Retry::At(start + RETRY_BOUND));
         assert_eq!(
-            rule.after(SERVER_GONE, start + RETRY_BOUND),
-            Retry::GiveUp
+            rule.after(SERVER_GONE, near),
+            Retry::At(start + RETRY_BOUND)
         );
+        assert_eq!(rule.after(SERVER_GONE, start + RETRY_BOUND), Retry::GiveUp);
         assert_eq!(
             rule.after(SERVER_GONE, start + RETRY_BOUND + ms(1)),
             Retry::GiveUp

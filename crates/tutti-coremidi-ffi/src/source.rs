@@ -9,6 +9,7 @@
 //! `MIDISourceCreateWithProtocol` and fed `MIDIReceivedEventList` with raw UMP
 //! words. That is what [`UmpSource`] does.
 
+use crate::client_retry::create_client;
 use core_foundation::base::TCFType;
 use core_foundation::string::CFString;
 use coremidi_sys::{
@@ -16,7 +17,6 @@ use coremidi_sys::{
     MIDIEventList, MIDIEventListAdd, MIDIEventListInit, MIDIProtocolID, MIDIReceivedEventList,
     MIDISourceCreateWithProtocol, MIDITimeStamp, kMIDIProtocol_1_0, kMIDIProtocol_2_0,
 };
-use crate::client_retry::create_client;
 use std::mem::MaybeUninit;
 use std::sync::Mutex;
 
