@@ -19,6 +19,9 @@
 //! the file and line. The rule reads names, so one item exported under two
 //! names is not seen, and a `cfg` pair offering one name from two sources needs
 //! a row.
+//!
+//! Its companion `cargo xtask umbrella-api` ([`super::umbrella_api`]) reads the
+//! other way: every type in the signature of an exported item is itself exported.
 
 use super::lex::{blank, find_word_from, line_of, matching};
 use super::session::{is_word, pub_uses, tokens};
@@ -42,6 +45,18 @@ pub(super) const ALLOW: &[(&str, &str)] = &[
         "the wrapper a node with params is inserted as (`graph::Params`) and a plugin's parameter view at the root: two types, one name",
     ),
     (
+        "KeyEvent",
+        "a plugin editor's key event (`session::KeyEvent`) and the UMP key event (`midi::KeyEvent`): two types, one name",
+    ),
+    (
+        "Stream",
+        "the sampler's disk stream at the root and the UMP stream message kind (`midi::Stream`): two types, one name",
+    ),
+    (
+        "Control",
+        "a plugin editor's control (`Control` at the root) and the node-author control a kernel's param set names (`nodes::Control`): two types, one name",
+    ),
+    (
         "Error",
         "the session's one error at the root and `midi::Error`, the MIDI error it nests (`tutti_session::MidiError`)",
     ),
@@ -53,15 +68,19 @@ fn skipped(dir: &str) -> bool {
 
 /// One leaf of a `pub use` tree.
 #[derive(Debug, PartialEq, Eq)]
-struct Leaf {
+pub(super) struct Leaf {
     /// The name the leaf exports; `*` for a glob.
-    name: String,
+    pub(super) name: String,
+    /// The item's own name, before an `as`.
+    pub(super) source: String,
+    /// The first segment of the path the item comes from; empty for a bare name.
+    pub(super) krate: String,
     /// The leaf re-exports a `tutti_` crate whole, or is a glob.
-    whole: bool,
+    pub(super) whole: bool,
 }
 
 /// The leaves of the use tree in `t` at `*k` under the prefix `pre`.
-fn leaves(t: &[&str], k: &mut usize, pre: &[String], out: &mut Vec<Leaf>) {
+pub(super) fn leaves(t: &[&str], k: &mut usize, pre: &[String], out: &mut Vec<Leaf>) {
     let mut path = pre.to_vec();
     if t.get(*k) == Some(&"::") {
         *k += 1;
@@ -84,6 +103,8 @@ fn leaves(t: &[&str], k: &mut usize, pre: &[String], out: &mut Vec<Leaf>) {
             *k += 1;
             out.push(Leaf {
                 name: "*".to_owned(),
+                source: "*".to_owned(),
+                krate: path.first().cloned().unwrap_or_default(),
                 whole: true,
             });
             return;
@@ -112,8 +133,15 @@ fn leaves(t: &[&str], k: &mut usize, pre: &[String], out: &mut Vec<Leaf>) {
             } else {
                 path.is_empty() && tok.starts_with("tutti_")
             };
+            let source = if self_leaf {
+                path.last().map_or(tok, String::as_str)
+            } else {
+                tok
+            };
             out.push(Leaf {
                 name: name.to_owned(),
+                source: source.to_owned(),
+                krate: path.first().cloned().unwrap_or_default(),
                 whole,
             });
             return;
@@ -311,7 +339,7 @@ pub mod types {
             assert_eq!(r.findings.len(), 2, "{src}: {:?}", r.findings);
             assert!(
                 r.findings[1].starts_with(&format!(
-                    "  crates/tutti/src/lib.rs:{line}: re-exports a crate whole"
+                    "  crates/tutti/src/lib.rs:{line}: re-exports a crate or module whole"
                 )),
                 "{src}: {:?}",
                 r.findings

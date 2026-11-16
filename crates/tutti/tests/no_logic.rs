@@ -16,15 +16,22 @@
 /// moved path.
 const LIB: &str = include_str!("../src/lib.rs");
 
-/// Lines that are neither blank, nor documentation, nor an attribute.
+/// Lines that are neither blank, nor documentation, nor part of an attribute
+/// (which may span lines).
 fn code_lines() -> Vec<(usize, &'static str)> {
-    LIB.lines()
-        .enumerate()
-        .map(|(i, l)| (i + 1, l.trim()))
-        .filter(|(_, l)| {
-            !l.is_empty() && !l.starts_with("//") && !l.starts_with("#!") && !l.starts_with("#[")
-        })
-        .collect()
+    let mut open = 0i32;
+    let mut out = Vec::new();
+    for (i, l) in LIB.lines().enumerate() {
+        let l = l.trim();
+        if open > 0 || l.starts_with("#[") {
+            open += l.matches('[').count() as i32 - l.matches(']').count() as i32;
+            continue;
+        }
+        if !l.is_empty() && !l.starts_with("//") && !l.starts_with("#!") {
+            out.push((i + 1, l));
+        }
+    }
+    out
 }
 
 /// The code lines, joined into whole statements.

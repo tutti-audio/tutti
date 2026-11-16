@@ -24,12 +24,16 @@ tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 tutti-types = { version = "0.0.1", path = "../tutti-types", default-features = false }
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
 tutti-nodes = { version = "0.0.1", path = "../tutti-nodes", default-features = false }
+# The types the node catalogue's signatures name; `tutti-nodes` links them already.
+tutti-dsp = { version = "0.0.1", path = "../tutti-dsp", default-features = false }
+tutti-modulation = { version = "0.0.1", path = "../tutti-modulation", default-features = false }
+tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
+tutti-curve = { version = "0.0.1", path = "../tutti-curve" }
 # The node contract (`tutti::graph`) and the graph's vocabulary at the root.
 tutti-graph = { version = "0.0.1", path = "../tutti-graph" }
 
 tutti-cpal = { version = "0.0.1", path = "../tutti-cpal", default-features = false, optional = true }
 tutti-codec = { version = "0.0.1", path = "../tutti-codec", optional = true }
-tutti-modulation = { version = "0.0.1", path = "../tutti-modulation", default-features = false, optional = true }
 tutti-sampler = { version = "0.0.1", path = "../tutti-sampler", default-features = false, optional = true }
 tutti-polysynth = { version = "0.0.1", path = "../tutti-polysynth", optional = true }
 tutti-soundfont = { version = "0.0.1", path = "../tutti-soundfont", optional = true }
@@ -37,7 +41,15 @@ tutti-midi-runtime = { version = "0.0.1", path = "../tutti-midi-runtime", defaul
 tutti-midi-file = { version = "0.0.1", path = "../tutti-midi-file", optional = true }
 tutti-midi-hardware = { version = "0.0.1", path = "../tutti-midi-hardware", optional = true }
 tutti-midi-device = { version = "0.0.1", path = "../tutti-midi-device", optional = true }
+tutti-midi-protocol = { version = "0.0.1", path = "../tutti-midi-protocol", optional = true }
+tutti-sf2 = { version = "0.0.1", path = "../tutti-sf2", optional = true }
+tutti-export = { version = "0.0.1", path = "../tutti-export", default-features = false, optional = true }
+tutti-engine = { version = "0.0.1", path = "../tutti-engine", optional = true }
 tutti-plugin = { version = "0.0.1", path = "../tutti-plugin", optional = true }
+tutti-plugin-db = { version = "0.0.1", path = "../tutti-plugin-db", optional = true }
+tutti-plugin-ipc = { version = "0.0.1", path = "../tutti-plugin-ipc", optional = true }
+tutti-plugin-host = { version = "0.0.1", path = "../tutti-plugin-host", optional = true }
+tutti-plugin-types = { version = "0.0.1", path = "../tutti-plugin-types", optional = true }
 # The API layer: a graph, its engine and its device behind one
 # `Session`. `default-features = false` (its default is empty anyway): each
 # feature below turns on the session's feature of the same name with `?`, so
@@ -68,7 +80,7 @@ tutti-fixtures = { path = "../../testing/tutti-fixtures" }
 # `default = ["session"]`: the API layer is what this umbrella is for. Set
 # `default-features = false` for the raw crates alone.
 default = ["session"]
-session = ["dep:tutti-session"]
+session = ["dep:tutti-session", "dep:tutti-engine"]
 
 # Everything a headless host can have. Plugin FORMATS stay opt-in — each
 # links an SDK.
@@ -125,6 +137,7 @@ io = ["session", "tutti-session/record", "encode-wav"]
 
 # --- MIDI, two axes --------------------------------------------------------
 midi = [
+    "dep:tutti-midi-protocol",
     "dep:tutti-midi-file",
     "dep:tutti-midi-runtime",
     "tutti-session?/midi",
@@ -136,21 +149,29 @@ midi-hardware = ["midi", "dep:tutti-midi-hardware", "dep:tutti-midi-device", "tu
 # Each also turns on the session's feature of the same name, with `?` because
 # `session` is optional.
 synth = ["dep:tutti-polysynth", "tutti-session?/synth"]
-soundfont = ["midi", "dep:tutti-soundfont", "tutti-session?/soundfont"]
+soundfont = ["midi", "dep:tutti-soundfont", "dep:tutti-sf2", "tutti-session?/soundfont"]
 sampler = ["decode-wav", "dep:tutti-sampler", "tutti-session?/sampler"]
 audio-io = ["io", "tutti-cpal?/capture", "tutti-session?/audio-io"]
 # Export. `export` is the offline renderer and WAV, which is pure Rust; FLAC and
 # AIFF are pure Rust and opt-in (`encode-flac`, `encode-aiff`), and `encode-vorbis` is the one path to C (the
 # Vorbis library, `ogg_next_sys`).
-export = ["encode-wav", "tutti-session?/export"]
-modulation = ["dep:tutti-modulation", "tutti-session?/modulation"]
+export = ["dep:tutti-export", "encode-wav", "tutti-session?/export"]
+modulation = ["tutti-session?/modulation"]
 
 # --- plugin hosting ---------------------------------------------------------
 #
 # No `tutti-plugin-server`: that is a BINARY the host spawns, not a library to
 # link. Build it with
 # `cargo build -p tutti-plugin-server`.
-plugin = ["dep:tutti-plugin", "midi", "tutti-session?/plugin"]
+plugin = [
+    "dep:tutti-plugin",
+    "dep:tutti-plugin-db",
+    "dep:tutti-plugin-host",
+    "dep:tutti-plugin-ipc",
+    "dep:tutti-plugin-types",
+    "midi",
+    "tutti-session?/plugin",
+]
 vst2 = ["plugin", "tutti-plugin/vst2", "tutti-session?/vst2"]
 vst3 = ["plugin", "tutti-plugin/vst3", "tutti-session?/vst3"]
 clap = ["plugin", "tutti-plugin/clap", "tutti-session?/clap"]

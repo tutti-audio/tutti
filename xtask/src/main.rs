@@ -150,6 +150,7 @@ fn execute(step: &Step, ctx: &Ctx) -> Result<(), u8> {
         }
         Step::DocFeatures => doc_features(ctx),
         Step::Package => package(ctx),
+        Step::UmbrellaApi => umbrella_api(ctx),
         Step::Release(v) => release::run(&ctx.root, v).map_err(|e| {
             eprintln!("xtask: release: {e}");
             1
@@ -250,6 +251,43 @@ fn doc_features(ctx: &Ctx) -> Result<(), u8> {
     }
     eprintln!("FAIL: rustdoc failed for: {}", failed.join(" "));
     Err(1)
+}
+
+/// `umbrella-api`: the unnameable types of what the umbrella exports.
+fn umbrella_api(ctx: &Ctx) -> Result<(), u8> {
+    let lib_path = ctx.root.join("crates/tutti/src/lib.rs");
+    let lib = std::fs::read_to_string(&lib_path).map_err(|e| {
+        eprintln!("xtask: cannot read {}: {e}", lib_path.display());
+        1
+    })?;
+    let mut texts = Vec::new();
+    for krate in gates::reexported_crates(&lib) {
+        let package = krate.replace('_', "-");
+        let c = Cmd::sh(&format!(
+            "cargo +{} public-api --package {package} --all-features -s",
+            recipes::DOCS_NIGHTLY
+        ));
+        println!("+ {}", c.display());
+        let out = command(&c, ctx)
+            .output()
+            .map_err(|e| spawn_failed(&c, &e))?;
+        if !out.status.success() {
+            eprintln!("xtask: `{}` failed ({})", c.display(), out.status);
+            eprint!("{}", String::from_utf8_lossy(&out.stderr));
+            return Err(1);
+        }
+        texts.push((krate, String::from_utf8_lossy(&out.stdout).into_owned()));
+    }
+    let refs: Vec<(&str, &str)> = texts
+        .iter()
+        .map(|(c, t)| (c.as_str(), t.as_str()))
+        .collect();
+    let missing = gates::unnameable(&refs, &lib);
+    for m in &missing {
+        println!("{m}");
+    }
+    println!("umbrella-api: {} unnameable type(s)", missing.len());
+    if missing.is_empty() { Ok(()) } else { Err(1) }
 }
 
 /// `cargo package` over every crate under `crates/`: a directory there holding
