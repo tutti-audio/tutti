@@ -67,10 +67,10 @@ const RATES: (f32, f32) = (0.05, 5.0);
 pub const MIN_DECAY: Seconds = Seconds(0.05);
 /// The widest stereo image.
 const MAX_WIDTH: f32 = 2.0;
-/// The wet gain at or below which the network is silent, in decibels.
-const SILENT_DB: f32 = -120.0;
+/// The wet gain at or below which the network is silent.
+const SILENT_WET: Db = Db(-120.0);
 /// The loudest wet gain.
-const MAX_WET_DB: f32 = 24.0;
+const MAX_WET: Db = Db(24.0);
 
 /// The controls of a feedback delay network, in tutti units.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -259,13 +259,13 @@ impl FdnLayout {
         let mod_rate = finite(c.rate.get(), d.rate.get()).clamp(RATES.0, RATES.1);
         let width = finite(c.width.get(), 1.0).clamp(0.0, MAX_WIDTH);
         let wet = {
-            let w = c.wet.get();
-            if w.is_nan() {
-                0.0
-            } else if w <= SILENT_DB {
-                f32::NEG_INFINITY
+            let w = c.wet;
+            if w.get().is_nan() {
+                Db(0.0)
+            } else if w <= SILENT_WET {
+                Db(f32::NEG_INFINITY)
             } else {
-                w.min(MAX_WET_DB)
+                w.min(MAX_WET)
             }
         };
 
@@ -351,7 +351,7 @@ impl FdnLayout {
             output: OutputMap { rows },
         }));
         out.width = StereoWidth(width);
-        out.wet = Db(wet);
+        out.wet = wet;
     }
 }
 

@@ -3,7 +3,9 @@
 //! [`check_range_contract`] and [`check_range_serde`], the checks a range-checked
 //! type keeps its contract and its serde form by, and [`check_round_trip`], a
 //! value's JSON spelling pinned both ways; [`noise`], a seeded stimulus, and
-//! [`Fnv`], a bit hash; and [`sf2`], a SoundFont built in memory.
+//! [`Fnv`], a bit hash; [`wait_until`], a bounded wait for another thread, and
+//! [`unique_name`], a name for what the OS shares; and [`sf2`], a SoundFont built
+//! in memory.
 //!
 //! A test finds a repo file through [`repo_root`] and [`asset`], never through
 //! a relative `..` path, so moving a crate never changes what a test reads.
@@ -64,8 +66,10 @@ mod round_trip;
 pub mod sf2;
 pub mod signal;
 pub mod tpt;
+mod unique;
 #[cfg(feature = "vst3-cpp")]
 mod vst3_cpp;
+mod wait;
 
 pub use alloc_count::{ThreadCounting, allocations};
 #[cfg(feature = "au")]
@@ -86,8 +90,10 @@ pub use plugin::{
 };
 pub use range_contract::{RangeContract, check_range_contract, check_range_serde};
 pub use round_trip::check_round_trip;
+pub use unique::unique_name;
 #[cfg(feature = "vst3-cpp")]
 pub use vst3_cpp::{bundle_of, vst3_cpp_module};
+pub use wait::wait_until;
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;

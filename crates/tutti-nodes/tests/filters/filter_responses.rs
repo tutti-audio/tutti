@@ -45,10 +45,7 @@ fn gains_db<N: Node + 'static>(node: N, freq: f64, amp: f32) -> Vec<f64> {
             acc.extend_from_slice(ch);
         }
     }
-    let rms = |v: &[f32]| -> f64 {
-        let s = &v[v.len() / 2..];
-        (s.iter().map(|&x| f64::from(x).powi(2)).sum::<f64>() / s.len() as f64).sqrt()
-    };
+    let rms = |v: &[f32]| tutti_fixtures::signal::rms_f64(&v[v.len() / 2..]);
     let reference = rms(&input);
     out.iter()
         .map(|ch| 20.0 * (rms(ch) / reference).log10())

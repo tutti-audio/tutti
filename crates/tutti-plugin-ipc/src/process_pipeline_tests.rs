@@ -113,11 +113,6 @@ impl Planar {
     }
 }
 
-fn unique_shm_name(label: &str) -> String {
-    static COUNTER: tutti_types::Mint = tutti_types::Mint::new();
-    format!("test_{}_{}_{}", label, std::process::id(), COUNTER.mint())
-}
-
 /// `None` on a clean EOF — the host side closing the socket at teardown is
 /// normal shutdown, not a failure, so it must not panic the server thread.
 fn recv_host_msg(stream: &interprocess::local_socket::Stream) -> Option<HostMessage> {
@@ -216,7 +211,7 @@ fn bridge_with_server(
     let listener = ListenerOptions::new().name(name).create_sync().unwrap();
 
     let out_channels: usize = layout.outputs.iter().map(|l| l.count() as usize).sum();
-    let shm_name = unique_shm_name("process-sync");
+    let shm_name = tutti_fixtures::unique_name("test_process-sync");
     let host_slab = AudioSlab::create(shm_name.clone(), layout.clone()).unwrap();
     // The server side maps the SAME backing file as a view, mirroring the real
     // subprocess: audio travels in shared memory, not over the socket.
@@ -920,7 +915,7 @@ fn bridge_with_no_server() -> (Arc<PluginBridge>, BridgeThread, SlabWriter) {
     let _ = std::fs::remove_file(&path);
 
     let layout = stereo_layout();
-    let shm_name = unique_shm_name("no-server");
+    let shm_name = tutti_fixtures::unique_name("test_no-server");
     let host_slab = AudioSlab::create(shm_name, layout).unwrap();
 
     let (bridge, bridge_thread) = PluginBridge::new(
@@ -1072,6 +1067,64 @@ fn the_chunk_counters_report_misses_and_answers() {
         counters.missed() > 0,
         "blocks that outran a stalled server were not counted"
     );
+
+    bridge_thread.shutdown();
+}
+
+/// **A chunk the server publishes after the node played its silence is counted
+/// late; one it never publishes is only missed.** A server that sleeps 50 ms
+/// per chunk, driven back to back: the second block collects the first chunk
+/// unanswered (a miss). Once the server has published it, the next block
+/// notices, counting it late, before its ring slot is reused.
+#[test]
+fn a_chunk_published_after_its_miss_is_counted_late() {
+    let (bridge, mut bridge_thread, _server, slab) =
+        bridge_with_server_stall(std::time::Duration::from_millis(50));
+    let counters = Arc::new(ChunkCounters::default());
+    let mut batcher = Batcher::new(CHANNELS, CHANNELS, SampleFormat::Float32, BATCH_SIZE, slab)
+        .with_counters(Arc::clone(&counters));
+    let input = Planar::new();
+    let mut output = Planar::new();
+    let mut midi_out = MidiEventVec::new();
+
+    drive_one_block(&mut batcher, &bridge, &input, &mut output, &mut midi_out);
+    drive_one_block(&mut batcher, &bridge, &input, &mut output, &mut midi_out);
+    assert_eq!(counters.missed(), 1, "chunk 1 was collected unanswered");
+    assert_eq!(counters.late(), 0, "and had not been published yet");
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !bridge.audio_buffer().has_output(1) {
+        assert!(std::time::Instant::now() < deadline, "chunk 1 never came");
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    drive_one_block(&mut batcher, &bridge, &input, &mut output, &mut midi_out);
+    assert_eq!(
+        counters.late(),
+        1,
+        "chunk 1, published after its miss, is counted late"
+    );
+    assert!(counters.late() <= counters.missed());
+
+    bridge_thread.shutdown();
+}
+
+/// A chunk the server never publishes is a miss and never late.
+#[test]
+fn a_chunk_never_published_is_missed_and_never_late() {
+    let (bridge, mut bridge_thread, _server, slab) =
+        bridge_with_server_stall(std::time::Duration::from_secs(60));
+    let counters = Arc::new(ChunkCounters::default());
+    let mut batcher = Batcher::new(CHANNELS, CHANNELS, SampleFormat::Float32, BATCH_SIZE, slab)
+        .with_counters(Arc::clone(&counters));
+    let input = Planar::new();
+    let mut output = Planar::new();
+    let mut midi_out = MidiEventVec::new();
+
+    for _ in 0..6 {
+        drive_one_block(&mut batcher, &bridge, &input, &mut output, &mut midi_out);
+    }
+    assert_eq!(counters.missed(), 5, "every chunk but the first collect");
+    assert_eq!(counters.late(), 0, "none of them was ever published");
 
     bridge_thread.shutdown();
 }
@@ -1428,7 +1481,7 @@ fn stamped_server(stall: std::time::Duration, first_only: bool, rate: SampleRate
     let listener = ListenerOptions::new().name(name).create_sync().unwrap();
 
     let layout = stereo_layout();
-    let shm_name = unique_shm_name("stamped");
+    let shm_name = tutti_fixtures::unique_name("test_stamped");
     let host_slab = AudioSlab::create(shm_name.clone(), layout.clone()).unwrap();
     let mut server_slab = AudioSlab::open(shm_name, layout).unwrap();
 
@@ -1697,7 +1750,8 @@ fn a_refused_chunk_reports_its_midi_lost() {
     let _lock = machine_lock();
     let path = unique_socket_path().expect("the OS has a random source");
     let _ = std::fs::remove_file(&path);
-    let slab = AudioSlab::create(unique_shm_name("refused"), stereo_layout()).unwrap();
+    let slab =
+        AudioSlab::create(tutti_fixtures::unique_name("test_refused"), stereo_layout()).unwrap();
     let (bridge, _thread) = PluginBridge::new(
         path,
         Arc::clone(slab.slab()),
@@ -1752,7 +1806,7 @@ fn a_stale_block_never_lets_a_sysex_through_with_a_gap() {
         offset: 0,
         ump: midi::note_on(MidiChannel::FIRST, 60, 1),
     };
-    let (three, four, dropped) = two_stale_blocks([
+    let (three, four, dropped, skipped) = two_stale_blocks([
         cut[..3].to_vec(),
         cut[3..6].to_vec(),
         cut[6..]
@@ -1772,6 +1826,7 @@ fn a_stale_block_never_lets_a_sysex_through_with_a_gap() {
         (3 + 3 + 4) as u64,
         "blocks 1 and 2, and the cut message's tail"
     );
+    assert_eq!(skipped, 2, "blocks 1 and 2 are skipped as stale");
 }
 
 /// **A stale block holding only a message's `START` cuts that message.**
@@ -1788,7 +1843,7 @@ fn a_stale_block_holding_only_a_start_cuts_its_message() {
     };
     // The `START` in the last stale block: an earlier one's `lost` would
     // cut it anyway.
-    let (three, four, dropped) = two_stale_blocks([
+    let (three, four, dropped, skipped) = two_stale_blocks([
         vec![note],
         vec![lost[0]],
         [lost[1]].into_iter().chain(other.iter().copied()).collect(),
@@ -1797,6 +1852,7 @@ fn a_stale_block_holding_only_a_start_cuts_its_message() {
     assert_eq!(three, other, "the lost START's END is not sent");
     assert_eq!(four, vec![note]);
     assert_eq!(dropped, 3, "blocks 1 and 2, and the END");
+    assert_eq!(skipped, 2, "blocks 1 and 2 are skipped as stale");
 }
 
 /// `len` payload bytes as SysEx7 packets on group 1.
@@ -1822,6 +1878,7 @@ fn two_stale_blocks(
     Vec<tutti_plugin_types::WireMidi>,
     Vec<tutti_plugin_types::WireMidi>,
     u64,
+    u64,
 ) {
     use interprocess::local_socket::{ListenerOptions, traits::Listener as _};
 
@@ -1830,7 +1887,11 @@ fn two_stale_blocks(
     let _ = std::fs::remove_file(&path);
     let name = crate::socket_name(&path).unwrap();
     let listener = ListenerOptions::new().name(name).create_sync().unwrap();
-    let slab = AudioSlab::create(unique_shm_name("stale-midi"), stereo_layout()).unwrap();
+    let slab = AudioSlab::create(
+        tutti_fixtures::unique_name("test_stale-midi"),
+        stereo_layout(),
+    )
+    .unwrap();
     let (bridge, thread) = PluginBridge::new(
         path.clone(),
         Arc::clone(slab.slab()),
@@ -1902,8 +1963,11 @@ fn two_stale_blocks(
     let dropped = bridge
         .dropped_midi_cell()
         .load(std::sync::atomic::Ordering::Relaxed);
+    let skipped = bridge
+        .skipped_cell()
+        .load(std::sync::atomic::Ordering::Relaxed);
     drop(thread);
     drop(bridge);
     server.join().unwrap();
-    (three, four, dropped)
+    (three, four, dropped, skipped)
 }

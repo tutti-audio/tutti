@@ -4,7 +4,7 @@
 
 use crate::render::Render;
 use tutti_sf2::{LoopMode, Pcm24, SamplePool};
-use tutti_types::SampleRate;
+use tutti_types::{SampleRate, Semitones};
 
 // In this class, fixed-point numbers are used for speed-up.
 // A fixed-point number is expressed by Int64, whose lower 24 bits represent the fraction part,
@@ -114,7 +114,7 @@ impl Oscillator {
 
     pub(crate) fn process(&mut self, data: SamplePool<'_>, block: &mut [f32], pitch: f32) -> bool {
         let pitch_change = self.pitch_change_scale * (pitch - self.root_key as f32) + self.tune;
-        let pitch_ratio = self.sample_rate_ratio * 2_f32.powf(pitch_change / 12_f32);
+        let pitch_ratio = self.sample_rate_ratio * Semitones(pitch_change).to_pitch_ratio();
         // The pool's width is matched once per block, not per point.
         match data {
             SamplePool::Pcm16(points) => self.fill_block(points, block, pitch_ratio as f64),
