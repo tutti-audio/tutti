@@ -211,7 +211,7 @@ impl FrameWriter {
             // before any frame, as flacenc's own parallel encoder does: a
             // frame's encoding reads only its rate, width and depth.
             let info = info.clone();
-            let spawned = spawn_named("tutti-flac-encode", None, move |_| {
+            let spawned = spawn_named("tutti-flac-enc", None, move |_| {
                 loop {
                     // The lock is held only to take one job; a closed queue ends
                     // the worker.

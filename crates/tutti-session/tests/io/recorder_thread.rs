@@ -312,8 +312,8 @@ fn a_starving_source_is_ended_only_by_stop() {
 
 /// **A panic on the pump thread becomes an error, not a lost take.**
 ///
-/// the join maps a poisoned join to
-/// `io::Error::other("recording thread panicked")`. Nothing exercised that arm,
+/// the join maps the pump's panic to
+/// `io::Error::other("recording thread panicked: {message}")`. Nothing exercised that arm,
 /// so a panicking source would have surfaced as… whatever `unwrap` does.
 ///
 /// Safe to run only because this repo uses nextest, which gives every test its

@@ -12,24 +12,20 @@
 //!
 //! # Faults
 //!
-//! A panic in the body is caught on its own thread and takes one path: the
-//! handle's [`FaultLatch`] is raised ([`ThreadHandle::panicked`]) and
-//! [`ThreadHandle::join`] returns it as [`Panicked`], once. A handle dropped
-//! without a join discards the report, and the dropping thread does not
-//! unwind.
+//! A panic in the body, or in the priority request before it, is caught on its
+//! own thread and takes one path: [`ThreadHandle::join`] returns it as
+//! [`Panicked`], once. A handle dropped without a join discards the report, and
+//! the dropping thread does not unwind.
 
 use std::any::Any;
 use std::io;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::mpsc;
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Condvar, Mutex, mpsc};
 use std::thread::{Builder, JoinHandle};
 use std::time::{Duration, Instant};
 
-use crate::fault_latch::FaultLatch;
 use crate::priority::{PriorityOutcome, PriorityRequest, request_priority};
-
-use std::sync::atomic::{AtomicBool, Ordering};
 
 /// A thread's body panicked.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -122,18 +118,13 @@ impl StopToken {
 #[must_use = "dropping the handle stops the thread and waits for it; `detach` lets it run on"]
 #[derive(Debug)]
 pub struct ThreadHandle<T> {
+    name: String,
     stop: StopToken,
-    fault: Arc<FaultLatch>,
     priority: Option<PriorityOutcome>,
     join: Option<JoinHandle<Result<T, Panicked>>>,
 }
 
 impl<T> ThreadHandle<T> {
-    /// Requests the stop without waiting. Idempotent.
-    pub fn request_stop(&self) {
-        self.stop.stop();
-    }
-
     /// A clone of the thread's token, to stop it from elsewhere.
     #[must_use]
     pub fn token(&self) -> StopToken {
@@ -144,12 +135,6 @@ impl<T> ThreadHandle<T> {
     #[must_use]
     pub fn is_finished(&self) -> bool {
         self.join.as_ref().is_none_or(JoinHandle::is_finished)
-    }
-
-    /// Whether the body panicked. Never blocks.
-    #[must_use]
-    pub fn panicked(&self) -> bool {
-        self.fault.is_raised()
     }
 
     /// What the OS did with the priority asked of [`spawn_named`], or `None`
@@ -164,22 +149,19 @@ impl<T> ThreadHandle<T> {
     ///
     /// # Errors
     ///
-    /// [`Panicked`] when the body panicked.
-    ///
-    /// # Panics
-    ///
-    /// Never in practice: the handle holds its thread until this call or the
-    /// drop, and the thread's wrapper catches the body's panic, so the join
-    /// finds a result.
+    /// [`Panicked`] when the body, or the priority request before it,
+    /// panicked.
     pub fn join(mut self) -> Result<T, Panicked> {
-        let join = self
-            .join
-            .take()
-            .expect("a handle is joined once, and only here");
-        // The body's panic is caught on its own thread, so the join finds the
-        // closure's result; the closure around the catch cannot unwind.
-        join.join()
-            .expect("the thread's closure catches the body's panic")
+        let lost = |name: &str| Panicked {
+            name: name.to_owned(),
+            message: "(not a string)".to_owned(),
+        };
+        match self.join.take() {
+            // The body's panic is caught on the thread, so a join error is a
+            // panic outside the catch, reported the same way.
+            Some(join) => join.join().unwrap_or_else(|_| Err(lost(&self.name))),
+            None => Err(lost(&self.name)),
+        }
     }
 
     /// Lets the thread run on, owned by nobody: no stop, no join.
@@ -209,9 +191,13 @@ fn message(payload: &(dyn Any + Send)) -> String {
 /// `priority` on it (a refusal is not an error: it is read from
 /// [`ThreadHandle::priority`]).
 ///
-/// `body` receives the thread's [`StopToken`]. A panic in it is caught and
-/// reported through the handle (see the module docs). The call returns once
-/// the thread has applied its priority and is about to run the body.
+/// `body` receives the thread's [`StopToken`]. A panic in it, or in the
+/// priority request, is caught and returned by [`ThreadHandle::join`]. The call
+/// returns once the thread has applied its priority and is about to run the
+/// body.
+///
+/// Linux truncates a thread name to 15 bytes; a longer `name` still names the
+/// thread for the rest of the program, but the OS shows only its first 15 bytes.
 ///
 /// # Errors
 ///
@@ -226,28 +212,26 @@ where
     F: FnOnce(&StopToken) -> T + Send + 'static,
 {
     let stop = StopToken::new();
-    let fault = Arc::new(FaultLatch::new());
     let (applied_tx, applied_rx) = mpsc::sync_channel::<Option<PriorityOutcome>>(1);
     let join = {
-        let (stop, fault, name_owned) = (stop.clone(), Arc::clone(&fault), name.to_owned());
+        let (stop, name_owned) = (stop.clone(), name.to_owned());
         Builder::new().name(name.to_owned()).spawn(move || {
-            let _ = applied_tx.send(priority.map(request_priority));
-            drop(applied_tx);
-            catch_unwind(AssertUnwindSafe(|| body(&stop))).map_err(|payload| {
-                fault.raise();
-                Panicked {
-                    name: name_owned,
-                    message: message(payload.as_ref()),
-                }
+            catch_unwind(AssertUnwindSafe(move || {
+                let _ = applied_tx.send(priority.map(request_priority));
+                body(&stop)
+            }))
+            .map_err(|payload| Panicked {
+                name: name_owned,
+                message: message(payload.as_ref()),
             })
         })?
     };
-    // The sender is dropped without a send only if the thread died before
-    // reaching it; there is no priority to report then.
+    // The sender is dropped unsent only if the request panicked; there is no
+    // outcome to report then, and `join` returns the panic.
     let priority = applied_rx.recv().ok().flatten();
     Ok(ThreadHandle {
+        name: name.to_owned(),
         stop,
-        fault,
         priority,
         join: Some(join),
     })

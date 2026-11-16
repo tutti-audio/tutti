@@ -582,7 +582,7 @@ impl Recorder<Finite> {
     /// As [`finish`](Self::finish).
     #[must_use = "the result says whether the take finalized"]
     pub fn wait(mut self) -> Result<(), RecorderError> {
-        // Not `finish_in_place`: that clears the stop flag and truncates the take.
+        // Not `finish_in_place`: that requests the stop and truncates the take.
         self.join_pump().unwrap_or(Ok(()))
     }
 }
@@ -710,7 +710,7 @@ impl<K> Recorder<K> {
     /// [`PumpLoop::finalize`]). Blocks for at most one pass (or one park);
     /// after [`is_finished`](Self::is_finished) it does not block at all.
     ///
-    /// Clearing the stop flag is the half that matters for a **live** source:
+    /// Requesting the stop is the half that matters for a **live** source:
     /// the loop exits on its own only for a finite one; a starving source
     /// parks and re-polls forever, so nothing else ever reaches the finalize
     /// below it.
@@ -723,7 +723,8 @@ impl<K> Recorder<K> {
     /// Joins the pump and surfaces its finalize result, leaving the stop
     /// token alone. The half [`finish_in_place`](Self::finish_in_place) and
     /// [`wait`](Self::wait) share, and the whole difference between them is
-    /// the flag clear before this call.
+    /// the stop requested before this call. A pump that panicked comes back as
+    /// an `io::Error` reading "recording thread panicked: {message}".
     fn join_pump(&mut self) -> Option<Result<(), RecorderError>> {
         self.handle.take().map(|handle| {
             handle

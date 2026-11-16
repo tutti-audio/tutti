@@ -110,7 +110,7 @@ impl<W: Write + Seek + Send + 'static> VorbisWriter<W> {
         let failure = Arc::new(Mutex::new(None));
         let failed = Arc::clone(&failure);
         // Built on the thread that uses it: the encoder cannot be sent.
-        let thread = spawn_named("tutti-vorbis-encode", None, move |_| {
+        let thread = spawn_named("tutti-ogg-enc", None, move |_| {
             match build(rate, ch, quality, sink) {
                 Ok(encoder) => {
                     let _ = built.send(Ok(()));

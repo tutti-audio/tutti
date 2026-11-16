@@ -33,26 +33,27 @@ fn dropping_the_handle_stops_and_joins() {
     );
 }
 
-/// The thread carries the name it was given.
+/// The thread carries the name it was given (one Linux keeps whole: 15 bytes).
 #[test]
 fn the_thread_has_the_given_name() {
-    let handle = spawn_named("tutti-test-name", None, |_| {
+    const NAME: &str = "tutti-test-name";
+    assert!(NAME.len() <= 15, "a longer name is truncated on Linux");
+    let handle = spawn_named(NAME, None, |_| {
         std::thread::current().name().map(str::to_owned)
     })
     .unwrap();
-    assert_eq!(handle.join().unwrap().as_deref(), Some("tutti-test-name"));
+    assert_eq!(handle.join().unwrap().as_deref(), Some(NAME));
 }
 
-/// A panic in the body raises the fault once, comes back from `join` once as
-/// `Panicked`, and a handle dropped over a panic does not unwind its dropper.
+/// A panic in the body comes back from `join` as `Panicked`, and a handle
+/// dropped over a panic does not unwind its dropper.
 #[test]
-fn a_panic_reaches_the_fault_path_once() {
+fn a_panic_comes_back_from_join_and_not_from_drop() {
     let handle = spawn_named("faulty", None, |_| -> u32 { panic!("boom {}", 7) }).unwrap();
     let token = handle.token();
     while !handle.is_finished() {
         std::thread::yield_now();
     }
-    assert!(handle.panicked(), "the latch is raised");
     assert!(!token.is_stopped(), "a panic is not a stop");
     let fault = handle.join().unwrap_err();
     assert_eq!(
@@ -82,7 +83,7 @@ fn a_waiting_body_wakes_on_stop() {
     })
     .unwrap();
     ready_rx.recv().unwrap();
-    handle.request_stop();
+    handle.token().stop();
     let (stopped, slept) = handle.join().unwrap();
     assert!(stopped, "wait reports the stop");
     assert!(slept < Duration::from_secs(5), "woke after {slept:?}");
@@ -125,4 +126,20 @@ fn a_requested_priority_reports_its_outcome() {
     assert_eq!(*requested, PriorityRequest::Raised);
     let none = spawn_named("plain", None, |_| ()).unwrap();
     assert!(none.priority().is_none());
+}
+
+/// `join` waits for the body to return by itself and hands back its value,
+/// without requesting the stop.
+#[test]
+fn join_returns_the_value_and_does_not_stop() {
+    let handle = spawn_named("returner", None, |token| {
+        // Work that takes a moment, so a join that returned early or a stop
+        // from the join would show.
+        std::thread::sleep(Duration::from_millis(30));
+        (7_u32, token.is_stopped())
+    })
+    .unwrap();
+    let token = handle.token();
+    assert_eq!(handle.join().unwrap(), (7, false), "the body ran unstopped");
+    assert!(!token.is_stopped(), "join does not request the stop");
 }
