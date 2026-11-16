@@ -20,8 +20,8 @@ mod gate;
 mod limiter;
 mod multiband;
 
-pub use brickwall::{BrickwallKernel, BrickwallLimiterNode};
-pub use compressor::{CompressorKernel, CompressorNode};
-pub use gate::{GateKernel, GateNode};
-pub use limiter::{LimiterKernel, LimiterNode};
+pub use brickwall::{BrickwallKernel, BrickwallLimiterNode, BrickwallSet};
+pub use compressor::{CompressorKernel, CompressorNode, CompressorSet};
+pub use gate::{GateKernel, GateNode, GateSet};
+pub use limiter::{LimiterKernel, LimiterNode, LimiterSet};
 pub use multiband::{BAND_PARAMS, MultibandCompressorNode, MultibandControls};
