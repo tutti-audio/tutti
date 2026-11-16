@@ -62,8 +62,9 @@ fn monitoring_changes_what_is_heard_and_never_the_root() {
     s.policy::<OutputPolicy>().set(policy).unwrap();
     let m = f32::MINUS_3_DB;
     let (l, r) = (1.0 + m * 3.0 + m * 5.0, 2.0 + m * 3.0 + m * 6.0);
-    // Heard: the stereo fold on outputs 3 and 4, silence elsewhere.
-    assert_eq!(last_frame(&mut s, 6, 128), [0.0, 0.0, l, r, 0.0, 0.0]);
+    // Heard once the routing's crossfade (the declick length) has run out: the
+    // stereo fold on outputs 3 and 4, silence elsewhere.
+    assert_eq!(last_frame(&mut s, 6, 512), [0.0, 0.0, l, r, 0.0, 0.0]);
 
     // The root is as fed, every frame the tap holds.
     let mut frame = [0.0f32; 6];
