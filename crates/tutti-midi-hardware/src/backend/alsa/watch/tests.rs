@@ -645,3 +645,29 @@ fn a_new_occupant_listed_by_a_look_that_did_not_quiet_has_its_start_still_to_com
     world.wake(heard(&REPLUG), |_| {});
     assert_eq!(world.shape(), pair("Two", "Two"));
 }
+
+/// A rename read in a look that did not quiet is a change of the occupant whose
+/// start was read: the old client exits and an identical one takes the number,
+/// and the new start is a new occupant, reported removed and added, whether the
+/// rename's change is read in the same wake as the replug or before it.
+#[test]
+fn a_rename_listed_by_a_look_that_did_not_quiet_does_not_hide_a_replug() {
+    for changes_first in [false, true] {
+        let mut world = World::with("One", &[]);
+        world.model.storm.set(true);
+        world.wake(heard(&[]), |m| {
+            *m.present.borrow_mut() = World::device("Renamed")
+        });
+        world.model.storm.set(false);
+        assert_eq!(world.shape(), pair("One", "Renamed"));
+        if changes_first {
+            world.wake(heard(&[Event::ClientChange(5)]), |_| {});
+            world.wake(heard(&REPLUG), |_| {});
+        } else {
+            let mut announced = vec![Event::ClientChange(5)];
+            announced.extend(REPLUG);
+            world.wake(heard(&announced), |_| {});
+        }
+        assert_eq!(world.shape(), pair("Renamed", "Renamed"));
+    }
+}

@@ -156,6 +156,12 @@ struct Tracker {
     /// confirms it and is no new occupant. A handle listed by a quiet look is not
     /// here, because the quiet read proves its client's start has been read.
     unconfirmed: BTreeSet<EndpointId>,
+    /// Reported handles a non-quiet look lists under another identity, and in
+    /// `unconfirmed` for it: a rename of the occupant (whose start was read) or a
+    /// new occupant (whose start is yet to come). The first announcement read
+    /// for the handle tells: a change is the rename, a port exit the new
+    /// occupant.
+    undecided: BTreeSet<EndpointId>,
     /// Handles whose own `PORT_START` may not have been read: the first one read
     /// for such a handle is its own, not a port made again. The kernel makes a
     /// port visible (`snd_seq_insert_port`) before it posts the start, so even a
@@ -187,6 +193,7 @@ impl Tracker {
             reporter,
             last: BTreeSet::new(),
             unconfirmed: BTreeSet::new(),
+            undecided: BTreeSet::new(),
             port_pending: BTreeSet::new(),
             pending: Vec::new(),
             failures: 0,
@@ -276,6 +283,14 @@ impl Tracker {
         );
         self.port_pending =
             Self::port_pending_after(fold.port_pending, &self.last, &handles, &events);
+        self.undecided = Self::undecided_after(
+            fold.undecided,
+            &self.last,
+            &changed,
+            &handles,
+            &events,
+            quiet,
+        );
         self.last = handles;
         self.reporter
             .report(present, |id| fold.replaced.contains(&id));
@@ -306,10 +321,59 @@ impl Tracker {
         };
         let listed_first = handles
             .iter()
-            .filter(|&&h| (!last.contains(&h) || changed.contains(&h)) && !started(h))
+            .filter(|&&h| {
+                (!last.contains(&h) || changed.contains(&h))
+                    && !started(h)
+                    && !Self::renamed(h, events)
+            })
             .copied();
         kept.into_iter()
             .chain(listed_first)
+            .filter(|h| handles.contains(h))
+            .collect()
+    }
+
+    /// What the first announcement in `events` about `handle`'s occupant says:
+    /// `Some(true)` for a change (the occupant was renamed), `Some(false)` for
+    /// the exit of its port or the start of its client (a replacement: the exit is
+    /// posted before the number is free), `None` for neither.
+    fn told(handle: EndpointId, events: &[Event]) -> Option<bool> {
+        let (n, p) = unpack_id(handle)?;
+        events.iter().find_map(|&e| match e {
+            Event::ClientChange(c) if c == n => Some(true),
+            Event::PortChange(c, q) if (c, q) == (n, p) => Some(true),
+            Event::PortExit(c, q) if (c, q) == (n, p) => Some(false),
+            Event::ClientStart(c) if c == n => Some(false),
+            _ => None,
+        })
+    }
+
+    fn renamed(handle: EndpointId, events: &[Event]) -> bool {
+        Self::told(handle, events) == Some(true)
+    }
+
+    /// The handles in [`Tracker::undecided`] after a look: none after a quiet
+    /// one; otherwise those that were and still are, and the reported handles it
+    /// lists under another identity whose `events` do not tell yet.
+    fn undecided_after(
+        kept: BTreeSet<EndpointId>,
+        last: &BTreeSet<EndpointId>,
+        changed: &BTreeSet<EndpointId>,
+        handles: &BTreeSet<EndpointId>,
+        events: &[Event],
+        quiet: bool,
+    ) -> BTreeSet<EndpointId> {
+        if quiet {
+            return BTreeSet::new();
+        }
+        let listed = handles
+            .iter()
+            .filter(|&&h| {
+                last.contains(&h) && changed.contains(&h) && Self::told(h, events).is_none()
+            })
+            .copied();
+        kept.into_iter()
+            .chain(listed)
             .filter(|h| handles.contains(h))
             .collect()
     }
@@ -349,6 +413,7 @@ impl Tracker {
         let mut fold = Fold {
             replaced: BTreeSet::new(),
             unconfirmed: self.unconfirmed.clone(),
+            undecided: self.undecided.clone(),
             port_pending: self.port_pending.clone(),
         };
         for &event in events {
@@ -359,6 +424,7 @@ impl Tracker {
                         .iter()
                         .filter(|&&h| unpack_id(h).is_some_and(|(client, _)| client == n))
                     {
+                        fold.undecided.remove(&h);
                         if !fold.unconfirmed.remove(&h) {
                             fold.replaced.insert(h);
                         }
@@ -374,10 +440,27 @@ impl Tracker {
                         }
                     }
                 }
-                Event::ClientExit(_)
-                | Event::ClientChange(_)
-                | Event::PortExit(..)
-                | Event::PortChange(..) => {}
+                Event::PortChange(n, p) => {
+                    let handle = pack_id(n, p);
+                    if fold.undecided.remove(&handle) {
+                        fold.unconfirmed.remove(&handle);
+                    }
+                }
+                Event::ClientChange(n) => {
+                    for &h in self
+                        .last
+                        .iter()
+                        .filter(|&&h| unpack_id(h).is_some_and(|(client, _)| client == n))
+                    {
+                        if fold.undecided.remove(&h) {
+                            fold.unconfirmed.remove(&h);
+                        }
+                    }
+                }
+                Event::PortExit(n, p) => {
+                    fold.undecided.remove(&pack_id(n, p));
+                }
+                Event::ClientExit(_) => {}
             }
         }
         fold
@@ -389,6 +472,7 @@ struct Fold {
     /// Reported handles with a new occupant.
     replaced: BTreeSet<EndpointId>,
     unconfirmed: BTreeSet<EndpointId>,
+    undecided: BTreeSet<EndpointId>,
     port_pending: BTreeSet<EndpointId>,
 }
 
