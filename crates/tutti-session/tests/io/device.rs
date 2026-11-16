@@ -624,8 +624,7 @@ fn a_host_can_hold_restarts() {
 /// arriving after the stall grace (500 ms, `tutti-cpal`'s `STALL_GRACE`) are
 /// promoted to `Disconnected`, reported again, and the policy answers it.
 /// This is how ALSA, which says `DeviceNotAvailable` rarely, loses a stream.
-/// The one real wait is the grace itself, which the faults record reads from
-/// the clock.
+/// The errors carry the instants the grace is measured between.
 #[test]
 fn a_stalled_backend_run_becomes_a_lost_stream() {
     let (driver, stream) = ManualStreamDriver::new();
@@ -645,7 +644,8 @@ fn a_stalled_backend_run_becomes_a_lost_stream() {
     poll(&mut session, base, 0);
 
     let (kind, message) = (BackendErrorKind::Other, "POLLERR");
-    stream.fail(kind, &message);
+    let run_start = Instant::now();
+    stream.fail_at(kind, &message, run_start);
     let events = poll(&mut session, base, 10);
     assert!(events.iter().any(
         |e| matches!(e, SessionEvent::Fault(f) if f.kind == tutti_engine::StreamFaultKind::Backend)
@@ -655,8 +655,7 @@ fn a_stalled_backend_run_becomes_a_lost_stream() {
         "a backend error alone is not a loss"
     );
 
-    std::thread::sleep(Duration::from_millis(600));
-    stream.fail(kind, &message);
+    stream.fail_at(kind, &message, run_start + Duration::from_millis(600));
     let events = poll(&mut session, base, 700);
     assert!(events.iter().any(|e| matches!(e, SessionEvent::Fault(f) if f.kind == tutti_engine::StreamFaultKind::Disconnected)), "{events:?}");
     assert_eq!(wants(&events), [DeviceSelector::Default]);
@@ -668,15 +667,18 @@ fn a_stalled_backend_run_becomes_a_lost_stream() {
 fn the_render_worker_start_hook_runs_once_per_live_helper() {
     let seen = Arc::new(Mutex::new(Vec::new()));
     let hook = Arc::clone(&seen);
-    let (driver, _stream) = ManualStreamDriver::new();
-    let _session = Session::builder()
+    let (driver, stream) = ManualStreamDriver::new();
+    let session = Session::builder()
         .render_workers(Workers::of(4))
         .render_worker_start(move |i| hook.lock().unwrap().push(i))
         .device(Default::default())
         .build_device_on(spec_at(48_000.0), driver)
         .expect("builds with no device");
     assert_eq!(indices_after(&seen, 3), [1, 2, 3]);
-    std::thread::sleep(Duration::from_millis(50));
+    // Dropping the session and the stream drops the pool, which joins its
+    // helpers: no hook runs after this.
+    drop(session);
+    drop(stream);
     assert_eq!(seen.lock().unwrap().len(), 3, "once per helper");
 }
 
@@ -692,8 +694,8 @@ fn per_core_workers_start_a_helper_for_every_core_but_the_callbacks() {
     );
     let seen = Arc::new(Mutex::new(Vec::new()));
     let hook = Arc::clone(&seen);
-    let (driver, _stream) = ManualStreamDriver::new();
-    let _live = Session::builder()
+    let (driver, stream) = ManualStreamDriver::new();
+    let live = Session::builder()
         .render_workers(Workers::PerCore)
         .render_worker_start(move |i| hook.lock().unwrap().push(i))
         .device(Default::default())
@@ -701,14 +703,18 @@ fn per_core_workers_start_a_helper_for_every_core_but_the_callbacks() {
         .expect("builds with no device");
     let helpers: Vec<usize> = (1..cores).collect();
     assert_eq!(indices_after(&seen, helpers.len()), helpers);
-    std::thread::sleep(Duration::from_millis(50));
+    // Dropping the session and the stream drops the pool, which joins its
+    // helpers: no hook runs after this.
+    drop(live);
+    drop(stream);
     assert_eq!(seen.lock().unwrap().len(), helpers.len(), "once per helper");
 }
 
-/// Wait (bounded) until `seen` holds `n` indices, then return them sorted.
+/// Wait until `seen` holds `n` indices (a hang guard of a minute), then
+/// return them sorted.
 fn indices_after(seen: &Mutex<Vec<usize>>, n: usize) -> Vec<usize> {
     let t = Instant::now();
-    while seen.lock().unwrap().len() < n && t.elapsed() < Duration::from_secs(5) {
+    while seen.lock().unwrap().len() < n && t.elapsed() < Duration::from_secs(60) {
         std::thread::yield_now();
     }
     let mut v = seen.lock().unwrap().clone();

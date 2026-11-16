@@ -1,6 +1,6 @@
 use std::sync::mpsc::sync_channel;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use tutti_types::SampleRate;
 
@@ -173,7 +173,7 @@ fn a_job_waiting_for_the_main_thread_is_not_waited_for_off_it() {
 }
 
 #[test]
-fn dropping_the_session_returns_within_the_bound_though_a_worker_is_stuck() {
+fn dropping_the_session_returns_though_a_worker_is_stuck() {
     let mut s = session(Session::builder());
     let (started, started_rx) = sync_channel::<()>(0);
     let (release, release_rx) = sync_channel::<()>(0);
@@ -185,14 +185,18 @@ fn dropping_the_session_returns_within_the_bound_though_a_worker_is_stuck() {
         |_, _, ticket: Ticket<Unit>| ticket.land(Ok(())),
     );
     started_rx.recv_timeout(LONG).unwrap();
-    let began = Instant::now();
-    drop(s);
-    assert!(
-        began.elapsed() < Duration::from_secs(5),
-        "drop does not wait on it"
-    );
-    drop(job);
+    // The worker stays stuck until `release` is sent below, so a drop that
+    // waited for it would never signal.
+    let (dropped, dropped_rx) = sync_channel::<()>(0);
+    let dropper = std::thread::spawn(move || {
+        drop(s);
+        let _ = dropped.send(());
+    });
+    let returned = dropped_rx.recv_timeout(LONG);
     let _ = release.send(());
+    returned.expect("drop returns though a worker is stuck");
+    dropper.join().unwrap();
+    drop(job);
 }
 
 job_kind!(Unit => (), EchoError);

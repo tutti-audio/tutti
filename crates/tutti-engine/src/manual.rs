@@ -8,7 +8,7 @@
 use std::convert::Infallible;
 use std::fmt::Display;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::callback::OutputBlock;
 use crate::faults::{BackendErrorKind, StreamFaults};
@@ -147,13 +147,20 @@ impl ManualStream {
     /// without unplugging a device. Does nothing before the stream is first
     /// opened.
     pub fn fail(&self, kind: BackendErrorKind, err: &dyn Display) {
+        self.fail_at(kind, err, Instant::now());
+    }
+
+    /// [`fail`](Self::fail) at the instant `now` ([`StreamFaults::record_at`]):
+    /// the stall grace is measured between the instants given, not on the
+    /// clock.
+    pub fn fail_at(&self, kind: BackendErrorKind, err: &dyn Display, now: Instant) {
         if let Some(faults) = self
             .faults
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .as_ref()
         {
-            faults.record(kind, err);
+            faults.record_at(kind, err, now);
         }
     }
 

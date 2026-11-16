@@ -445,8 +445,10 @@ impl StreamFaults {
         self.record_at(kind, err, Instant::now());
     }
 
-    /// [`record`](Self::record) at a given time, for tests.
-    pub(crate) fn record_at(&self, kind: BackendErrorKind, err: &dyn Display, now: Instant) {
+    /// [`record`](Self::record) at the instant `now`: the run's grace is
+    /// measured between the instants given, so a caller that stamps its
+    /// callbacks feeds them in.
+    pub fn record_at(&self, kind: BackendErrorKind, err: &dyn Display, now: Instant) {
         match kind {
             BackendErrorKind::Survivable => return,
             BackendErrorKind::DeviceGone => {

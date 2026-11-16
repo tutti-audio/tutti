@@ -346,13 +346,12 @@ fn a_mic_whose_backend_keeps_failing_without_audio_is_failed() {
     let mut mic = mic_without_a_device();
     let faults = mic.faults();
     let err = "`alsa::poll()` returned POLLERR";
-    faults.record(BackendErrorKind::Other, &err);
+    let run_start = std::time::Instant::now();
+    faults.record_at(BackendErrorKind::Other, &err, run_start);
     assert_eq!(verdict(&mut mic), Pull::Starved);
     // The run of errors becomes a disconnect once the grace has passed with no
-    // audio delivered; the faults' own test of the clock injects the time, which
-    // a mic's record cannot, so this waits it out.
-    std::thread::sleep(STALL_GRACE);
-    faults.record(BackendErrorKind::Other, &err);
+    // audio delivered.
+    faults.record_at(BackendErrorKind::Other, &err, run_start + STALL_GRACE);
     assert_eq!(verdict(&mut mic), Pull::Failed);
 }
 
