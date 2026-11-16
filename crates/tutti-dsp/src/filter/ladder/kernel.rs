@@ -110,8 +110,8 @@ impl<F: Float + Lanes> LadderCoefficients<F> {
     #[must_use]
     pub(crate) fn lerp(&self, to: &Self, t: F) -> Self {
         Self {
-            g1: self.g1 + (to.g1 - self.g1) * t,
-            k: self.k + (to.k - self.k) * t,
+            g1: crate::lerp(self.g1, to.g1, t),
+            k: crate::lerp(self.k, to.k, t),
         }
     }
 }

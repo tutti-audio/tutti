@@ -262,6 +262,7 @@ struct Collect(Arc<std::sync::Mutex<Vec<f32>>>);
 
 impl Sink for Collect {
     type Sample = f32;
+    type Error = core::convert::Infallible;
 
     fn layout(&self) -> ChannelLayout {
         ChannelLayout::STEREO
@@ -271,7 +272,7 @@ impl Sink for Collect {
         self.0.lock().unwrap().extend_from_slice(interleaved);
         Ok(())
     }
-    fn finalize(self) -> std::io::Result<()> {
+    fn finalize(self) -> Result<(), Self::Error> {
         Ok(())
     }
 }
@@ -436,7 +437,7 @@ fn a_dead_mic_fails_the_take_and_keeps_its_frames() {
         .finalize()
         .expect_err("a failed source is not a clean take");
     assert!(
-        matches!(RecorderError::from_take(err), RecorderError::SourceFailed),
+        matches!(err, FinalizeError::SourceFailed),
         "typed, not a bare io error"
     );
     let reader = hound::WavReader::open(&path).expect("the prefix is a readable file");
@@ -484,7 +485,17 @@ fn a_failed_sink_fails_the_take() {
     assert_eq!(pump_loop.pump_once(), PumpPass::Failed);
     assert!(pump_loop.failed());
     let err = pump_loop.finalize().expect_err("the sink's error");
-    assert!(err.get_ref().is_some());
+    assert!(
+        matches!(
+            &err,
+            FinalizeError::Sink(io)
+                if matches!(
+                    io.get_ref().and_then(|e| e.downcast_ref::<tutti_codec::Error>()),
+                    Some(tutti_codec::Error::WavTooLarge { limit_frames: 4 })
+                )
+        ),
+        "{err:?}"
+    );
     assert_eq!(hound::WavReader::open(&path).unwrap().len(), 8);
 }
 
@@ -577,6 +588,7 @@ fn the_loop_sums_what_the_source_lost() {
     struct F32Collect;
     impl Sink for F32Collect {
         type Sample = f32;
+        type Error = core::convert::Infallible;
 
         fn layout(&self) -> ChannelLayout {
             ChannelLayout::STEREO
@@ -584,7 +596,7 @@ fn the_loop_sums_what_the_source_lost() {
         fn write(&mut self, _: Interleaved<'_>) -> Result<(), SinkFailed> {
             Ok(())
         }
-        fn finalize(self) -> std::io::Result<()> {
+        fn finalize(self) -> Result<(), Self::Error> {
             Ok(())
         }
     }
@@ -631,6 +643,7 @@ struct Tally {
 
 impl Sink for Tally {
     type Sample = f32;
+    type Error = core::convert::Infallible;
 
     fn layout(&self) -> ChannelLayout {
         self.layout
@@ -640,7 +653,7 @@ impl Sink for Tally {
         self.written.extend_from_slice(frames);
         Ok(())
     }
-    fn finalize(self) -> std::io::Result<()> {
+    fn finalize(self) -> Result<(), Self::Error> {
         Ok(())
     }
 }
@@ -713,6 +726,7 @@ fn a_refusing_sink_is_the_pumps_error() {
     struct Refuse;
     impl Sink for Refuse {
         type Sample = f32;
+        type Error = core::convert::Infallible;
 
         fn layout(&self) -> ChannelLayout {
             ChannelLayout::STEREO
@@ -720,7 +734,7 @@ fn a_refusing_sink_is_the_pumps_error() {
         fn write(&mut self, _: Interleaved<'_>) -> Result<(), SinkFailed> {
             Err(SinkFailed)
         }
-        fn finalize(self) -> std::io::Result<()> {
+        fn finalize(self) -> Result<(), Self::Error> {
             Ok(())
         }
     }

@@ -89,7 +89,7 @@ impl Default for LoopRegion {
 /// dragging a brace should send the edit when the drag ends (or throttle it
 /// to a few a second), not one per frame: with the engine down or restarting
 /// the credits run out and a later `Play` is refused with
-/// [`ScheduleFull`](super::ScheduleFull). Edits are not coalesced: a pending
+/// [`TimedError::Full`](super::TimedError::Full). Edits are not coalesced: a pending
 /// command lives in a lock-free ring that the control side can only push to,
 /// and merging into it would need a second shared structure beside the
 /// ring.

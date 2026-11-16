@@ -301,7 +301,7 @@ impl FdnLayout {
             let mut norm = 0.0f64;
             for (i, x) in v.as_mut_slice().iter_mut().enumerate() {
                 let axis = if i == 0 { 1.0 } else { 0.0 };
-                let y = f64::from(1.0 - diffusion) * axis + f64::from(diffusion) * flat;
+                let y = crate::lerp(axis, flat, f64::from(diffusion));
                 *x = Gain::new(y as f32);
                 norm += y * y;
             }

@@ -810,3 +810,35 @@ fn a_negative_position_reads_the_end_of_the_cycle() {
         assert!((got - 0.5).abs() < 1e-6, "{got} at {}", cycle - 0.25);
     }
 }
+
+/// `splitmix64` is the published generator (Vigna's reference, seed 0): its n-th output is
+/// the mix of the state `n - 1` increments on, here the golden-ratio increment
+/// `0x9E3779B97F4A7C15` times `n - 1`. The first five outputs are 0xE220A8397B1DCDAF,
+/// 0x6E789E6AA1B965F4, 0x06C45D188009454F, 0xF88BB8A8724C81EC and 0x1B39896A51A8749B.
+#[test]
+fn splitmix64_reproduces_the_published_outputs() {
+    let gamma = 0x9E37_79B9_7F4A_7C15_u64;
+    let want = [
+        0xE220_A839_7B1D_CDAF_u64,
+        0x6E78_9E6A_A1B9_65F4,
+        0x06C4_5D18_8009_454F,
+        0xF88B_B8A8_724C_81EC,
+        0x1B39_896A_51A8_749B,
+    ];
+    for (n, want) in want.into_iter().enumerate() {
+        assert_eq!(
+            splitmix64((n as u64).wrapping_mul(gamma)),
+            want,
+            "output {}",
+            n + 1
+        );
+    }
+}
+
+/// The random LFO's value for cycle 0 is not a constant -1: the mix of index 0
+/// is not 0.
+#[test]
+fn the_hash_of_cycle_zero_is_inside_the_range_and_not_the_floor() {
+    let h = hash_bipolar(0);
+    assert!(h > -1.0 && h < 1.0, "{h}");
+}

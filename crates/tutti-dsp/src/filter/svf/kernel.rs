@@ -6,6 +6,7 @@
 
 use tutti_buffers::Float;
 
+use crate::level::db_to_ratio_f64;
 use crate::{Lanes, Lerp};
 use tutti_types::{Db, Hz, Q, SampleRate};
 
@@ -114,8 +115,8 @@ impl SvfCoeffs {
             gain_db.clamp(-Self::MAX_GAIN_DB, Self::MAX_GAIN_DB)
         };
         // `Db` is `f32` and the design is `f64` to 1e-9 (the closed-form tests), so the
-        // half-gain amplitude `10^(dB / 40)` is `libm`'s in `f64`.
-        let a = libm::pow(10.0, f64::from(gain_db) / 40.0);
+        // half-gain amplitude `10^(dB / 40)` is half the decibels, widened once.
+        let a = db_to_ratio_f64(0.5 * f64::from(gain_db));
 
         // RBJ cookbook shapes: a bell's damping is `1/(Q*A)`, and a shelf's
         // midpoint (half the dB gain) sits at `fc`, so its prototype is tuned
@@ -209,12 +210,12 @@ impl<F: Float + Lanes> Lerp for SvfCoefficients<F> {
     fn lerp(&self, to: &Self, k: u32, n: u32) -> Self {
         let t = F::from_f64(f64::from(k)) / F::from_f64(f64::from(n));
         Self {
-            a1: self.a1 + (to.a1 - self.a1) * t,
-            a2: self.a2 + (to.a2 - self.a2) * t,
-            a3: self.a3 + (to.a3 - self.a3) * t,
-            m0: self.m0 + (to.m0 - self.m0) * t,
-            m1: self.m1 + (to.m1 - self.m1) * t,
-            m2: self.m2 + (to.m2 - self.m2) * t,
+            a1: crate::lerp(self.a1, to.a1, t),
+            a2: crate::lerp(self.a2, to.a2, t),
+            a3: crate::lerp(self.a3, to.a3, t),
+            m0: crate::lerp(self.m0, to.m0, t),
+            m1: crate::lerp(self.m1, to.m1, t),
+            m2: crate::lerp(self.m2, to.m2, t),
         }
     }
 }

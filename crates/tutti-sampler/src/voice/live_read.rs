@@ -60,7 +60,6 @@ use crate::streamer::{Arrangement, Block, Cells, RingMap, RingReader, SharedRead
 use tutti_types::MAX_CHANNELS;
 
 use super::interp::{Place, hermite_lanes, interpolate_taps};
-use super::loop_span::blend;
 use crate::lanes::{Gather, Lane};
 
 /// Output frames of continuation rendered at a discontinuity: the refill gap
@@ -544,7 +543,7 @@ impl State {
                     let t = Fade::weight(fade.frames, fade.k + n);
                     let o = &self.old[(self.old_k + n) * w..(self.old_k + n + 1) * w];
                     for ((d, &o), &s) in out.iter_mut().zip(o).zip(&s[..w]) {
-                        *d = blend(o, s, t);
+                        *d = tutti_dsp::lerp(o, s, t);
                     }
                 }
                 _ => out.copy_from_slice(&s[..w]),
@@ -613,7 +612,7 @@ impl State {
             (true, Some(o)) if fade.k < fade.frames => {
                 let t = Fade::weight(fade.frames, fade.k).max(1.0 - out_ramp);
                 for (n, &o) in frame.iter_mut().zip(o) {
-                    *n = blend(o, *n, t);
+                    *n = tutti_dsp::lerp(o, *n, t);
                 }
                 fade.k += 1;
                 self.old_k += 1;

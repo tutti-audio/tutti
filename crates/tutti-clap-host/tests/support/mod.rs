@@ -10,6 +10,7 @@
 pub use tutti_fixtures::main_thread;
 
 pub mod active;
+pub mod logs;
 pub mod raw;
 
 /// The MIDI events an output list holds, as the processor drains them.

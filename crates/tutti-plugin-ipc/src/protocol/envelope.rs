@@ -413,7 +413,13 @@ pub enum BridgeMessage {
     PluginParamTitlesChanged,
     /// Plugin's bus arrangement changed and was re-enumerated server-side. The
     /// host should rewire its audio graph from the plugin's refreshed metadata.
-    PluginIoChanged,
+    PluginIoChanged {
+        /// The buses the plugin has now, when they differ from the ones the
+        /// host was last told (at load, or by an earlier message); `None` when
+        /// the host should only re-read (a plugin that stayed inactive after a
+        /// refusal, or one that was lost).
+        layout: Option<tutti_plugin_types::Layout>,
+    },
     /// Plugin was torn down and rebuilt in place at the plugin's request
     /// (`kReloadComponent`). The host should resync all plugin state — it is
     /// effectively a fresh instance.

@@ -28,9 +28,6 @@
 //! its controls move, on a grid of its own. They move in 20 ms of whole chunks, landing
 //! exactly (a size or a damping that jumped would click).
 //!
-//! Each comb and all-pass flushes a value under 1e-6 to zero, a nonlinearity far below the
-//! tail's floor, against denormals.
-//!
 //! **Format.** The state is `f32`; a view of another [`Float`] is converted at the edges.
 
 use core::cmp;
@@ -51,8 +48,6 @@ const STEREO_SPREAD: usize = 23;
 const COMBS: [usize; 8] = [1116, 1188, 1277, 1356, 1422, 1491, 1557, 1617];
 /// The all-pass lengths of the left channel at 44.1 kHz.
 const ALL_PASSES: [usize; 4] = [556, 441, 341, 225];
-/// The values under this are flushed to zero.
-const FLUSH: f32 = 1.0E-6;
 
 /// The longest line, in frames. No device rate reaches it (768 kHz needs 28,560 for the longest
 /// comb); a rate no device has saturates here, so a prepare cannot allocate without bound.
@@ -348,20 +343,9 @@ impl CombFilter {
 
                 let input = input_block[block_pos] * input_gain;
 
-                // The following ifs are to avoid performance problem due to denormalized number.
-                // The original implementation uses unsafe cast to detect denormalized number.
-                // I tried to reproduce the original implementation using Unsafe.As,
-                // but the simple Math.Abs version was faster according to some benchmarks.
-
-                let mut output = self.buffer[buffer_pos];
-                if output.abs() < FLUSH {
-                    output = 0_f32;
-                }
+                let output = self.buffer[buffer_pos];
 
                 self.filter_store = (output * self.damp2) + (self.filter_store * self.damp1);
-                if self.filter_store.abs() < FLUSH {
-                    self.filter_store = 0_f32;
-                }
 
                 self.buffer[buffer_pos] = input + (self.filter_store * self.feedback);
                 output_block[block_pos] += output;
@@ -416,10 +400,7 @@ impl AllPassFilter {
 
                 let input = block[block_pos];
 
-                let mut bufout = self.buffer[buffer_pos];
-                if bufout.abs() < FLUSH {
-                    bufout = 0_f32;
-                }
+                let bufout = self.buffer[buffer_pos];
 
                 block[block_pos] = bufout - input;
                 self.buffer[buffer_pos] = input + (bufout * self.feedback);

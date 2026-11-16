@@ -1,6 +1,5 @@
 //! Plugin specific structures.
 
-use num_enum::{IntoPrimitive, TryFromPrimitive};
 use tutti_plugin_types::read_c_str;
 
 use std::os::raw::c_void;
@@ -15,283 +14,285 @@ use crate::{
     host::{self, Host},
 };
 
-/// Plugin type. Generally either Effect or Synth.
-///
-/// Other types are not necessary to build a plugin and are only useful for the host to categorize
-/// the plugin.
-#[repr(isize)]
-#[derive(Clone, Copy, Debug, TryFromPrimitive, IntoPrimitive)]
-pub enum Category {
-    /// Unknown / not implemented
-    Unknown,
-    /// Any effect
-    Effect,
-    /// VST instrument
-    Synth,
-    /// Scope, tuner, spectrum analyser, etc.
-    Analysis,
-    /// Dynamics, etc.
-    Mastering,
-    /// Panners, etc.
-    Spacializer,
-    /// Delays and Reverbs
-    RoomFx,
-    /// Dedicated surround processor.
-    SurroundFx,
-    /// Denoiser, etc.
-    Restoration,
-    /// Offline processing.
-    OfflineProcess,
-    /// Contains other plugins.
-    Shell,
-    /// Tone generator, etc.
-    Generator,
+primitive_enum! {
+    /// Plugin type. Generally either Effect or Synth.
+    ///
+    /// Other types are not necessary to build a plugin and are only useful for the host to categorize
+    /// the plugin.
+    #[derive(Clone, Copy, Debug)]
+    pub enum Category: isize {
+        /// Unknown / not implemented
+        Unknown,
+        /// Any effect
+        Effect,
+        /// VST instrument
+        Synth,
+        /// Scope, tuner, spectrum analyser, etc.
+        Analysis,
+        /// Dynamics, etc.
+        Mastering,
+        /// Panners, etc.
+        Spacializer,
+        /// Delays and Reverbs
+        RoomFx,
+        /// Dedicated surround processor.
+        SurroundFx,
+        /// Denoiser, etc.
+        Restoration,
+        /// Offline processing.
+        OfflineProcess,
+        /// Contains other plugins.
+        Shell,
+        /// Tone generator, etc.
+        Generator,
+    }
 }
 
-#[repr(i32)]
-#[derive(Clone, Copy, Debug, TryFromPrimitive, IntoPrimitive)]
-#[doc(hidden)]
-pub enum OpCode {
-    /// Called when plugin is initialized.
-    Initialize,
-    /// Called when plugin is being shut down.
-    Shutdown,
+primitive_enum! {
+    #[derive(Clone, Copy, Debug)]
+    #[doc(hidden)]
+    pub enum OpCode: i32 {
+        /// Called when plugin is initialized.
+        Initialize,
+        /// Called when plugin is being shut down.
+        Shutdown,
 
-    /// [value]: preset number to change to.
-    ChangePreset,
-    /// [return]: current preset number.
-    GetCurrentPresetNum,
-    /// [ptr]: char array with new preset name, limited to `consts::MAX_PRESET_NAME_LEN`.
-    SetCurrentPresetName,
-    /// [ptr]: char buffer for current preset name, limited to `consts::MAX_PRESET_NAME_LEN`.
-    GetCurrentPresetName,
+        /// [value]: preset number to change to.
+        ChangePreset,
+        /// [return]: current preset number.
+        GetCurrentPresetNum,
+        /// [ptr]: char array with new preset name, limited to `consts::MAX_PRESET_NAME_LEN`.
+        SetCurrentPresetName,
+        /// [ptr]: char buffer for current preset name, limited to `consts::MAX_PRESET_NAME_LEN`.
+        GetCurrentPresetName,
 
-    /// [index]: parameter
-    /// [ptr]: char buffer, limited to `consts::MAX_PARAM_STR_LEN` (e.g. "db", "ms", etc)
-    GetParameterLabel,
-    /// [index]: parameter
-    /// [ptr]: char buffer, limited to `consts::MAX_PARAM_STR_LEN` (e.g. "0.5", "ROOM", etc).
-    GetParameterDisplay,
-    /// [index]: parameter
-    /// [ptr]: char buffer, limited to `consts::MAX_PARAM_STR_LEN` (e.g. "Release", "Gain")
-    GetParameterName,
+        /// [index]: parameter
+        /// [ptr]: char buffer, limited to `consts::MAX_PARAM_STR_LEN` (e.g. "db", "ms", etc)
+        GetParameterLabel,
+        /// [index]: parameter
+        /// [ptr]: char buffer, limited to `consts::MAX_PARAM_STR_LEN` (e.g. "0.5", "ROOM", etc).
+        GetParameterDisplay,
+        /// [index]: parameter
+        /// [ptr]: char buffer, limited to `consts::MAX_PARAM_STR_LEN` (e.g. "Release", "Gain")
+        GetParameterName,
 
-    /// Deprecated.
-    _GetVu,
+        /// Deprecated.
+        _GetVu,
 
-    /// [opt]: new sample rate.
-    SetSampleRate,
-    /// [value]: new maximum block size.
-    SetBlockSize,
-    /// [value]: 1 when plugin enabled, 0 when disabled.
-    StateChanged,
+        /// [opt]: new sample rate.
+        SetSampleRate,
+        /// [value]: new maximum block size.
+        SetBlockSize,
+        /// [value]: 1 when plugin enabled, 0 when disabled.
+        StateChanged,
 
-    /// [ptr]: Rect** receiving pointer to editor size.
-    EditorGetRect,
-    /// [ptr]: system dependent window pointer, eg HWND on Windows.
-    EditorOpen,
-    /// Close editor. No arguments.
-    EditorClose,
+        /// [ptr]: Rect** receiving pointer to editor size.
+        EditorGetRect,
+        /// [ptr]: system dependent window pointer, eg HWND on Windows.
+        EditorOpen,
+        /// Close editor. No arguments.
+        EditorClose,
 
-    /// Deprecated.
-    _EditorDraw,
-    /// Deprecated.
-    _EditorMouse,
-    /// Deprecated.
-    _EditorKey,
+        /// Deprecated.
+        _EditorDraw,
+        /// Deprecated.
+        _EditorMouse,
+        /// Deprecated.
+        _EditorKey,
 
-    /// Idle call from host.
-    EditorIdle,
+        /// Idle call from host.
+        EditorIdle,
 
-    /// Deprecated.
-    _EditorTop,
-    /// Deprecated.
-    _EditorSleep,
-    /// Deprecated.
-    _EditorIdentify,
+        /// Deprecated.
+        _EditorTop,
+        /// Deprecated.
+        _EditorSleep,
+        /// Deprecated.
+        _EditorIdentify,
 
-    /// [ptr]: pointer for chunk data address (void**).
-    /// [index]: 0 for bank, 1 for program
-    GetData,
-    /// [ptr]: data (void*)
-    /// [value]: data size in bytes
-    /// [index]: 0 for bank, 1 for program
-    SetData,
+        /// [ptr]: pointer for chunk data address (void**).
+        /// [index]: 0 for bank, 1 for program
+        GetData,
+        /// [ptr]: data (void*)
+        /// [value]: data size in bytes
+        /// [index]: 0 for bank, 1 for program
+        SetData,
 
-    /// [ptr]: VstEvents*
-    ProcessEvents,
-    /// [index]: param index
-    /// [return]: 1=true, 0=false
-    CanBeAutomated,
-    ///  [index]: param index
-    ///  [ptr]: parameter string
-    ///  [return]: true for success
-    StringToParameter,
+        /// [ptr]: VstEvents*
+        ProcessEvents,
+        /// [index]: param index
+        /// [return]: 1=true, 0=false
+        CanBeAutomated,
+        ///  [index]: param index
+        ///  [ptr]: parameter string
+        ///  [return]: true for success
+        StringToParameter,
 
-    /// Deprecated.
-    _GetNumCategories,
+        /// Deprecated.
+        _GetNumCategories,
 
-    /// [index]: program name
-    /// [ptr]: char buffer for name, limited to `consts::MAX_PRESET_NAME_LEN`
-    /// [return]: true for success
-    GetPresetName,
+        /// [index]: program name
+        /// [ptr]: char buffer for name, limited to `consts::MAX_PRESET_NAME_LEN`
+        /// [return]: true for success
+        GetPresetName,
 
-    /// Deprecated.
-    _CopyPreset,
-    /// Deprecated.
-    _ConnectIn,
-    /// Deprecated.
-    _ConnectOut,
+        /// Deprecated.
+        _CopyPreset,
+        /// Deprecated.
+        _ConnectIn,
+        /// Deprecated.
+        _ConnectOut,
 
-    /// [index]: input index
-    /// [ptr]: `VstPinProperties`
-    /// [return]: 1 if supported
-    GetInputInfo,
-    /// [index]: output index
-    /// [ptr]: `VstPinProperties`
-    /// [return]: 1 if supported
-    GetOutputInfo,
-    /// [return]: `PluginCategory` category.
-    GetCategory,
+        /// [index]: input index
+        /// [ptr]: `VstPinProperties`
+        /// [return]: 1 if supported
+        GetInputInfo,
+        /// [index]: output index
+        /// [ptr]: `VstPinProperties`
+        /// [return]: 1 if supported
+        GetOutputInfo,
+        /// [return]: `PluginCategory` category.
+        GetCategory,
 
-    /// Deprecated.
-    _GetCurrentPosition,
-    /// Deprecated.
-    _GetDestinationBuffer,
+        /// Deprecated.
+        _GetCurrentPosition,
+        /// Deprecated.
+        _GetDestinationBuffer,
 
-    /// [ptr]: `VstAudioFile` array
-    /// [value]: count
-    /// [index]: start flag
-    OfflineNotify,
-    /// [ptr]: `VstOfflineTask` array
-    /// [value]: count
-    OfflinePrepare,
-    /// [ptr]: `VstOfflineTask` array
-    /// [value]: count
-    OfflineRun,
+        /// [ptr]: `VstAudioFile` array
+        /// [value]: count
+        /// [index]: start flag
+        OfflineNotify,
+        /// [ptr]: `VstOfflineTask` array
+        /// [value]: count
+        OfflinePrepare,
+        /// [ptr]: `VstOfflineTask` array
+        /// [value]: count
+        OfflineRun,
 
-    /// [ptr]: `VstVariableIo`
-    /// [use]: used for variable I/O processing (offline e.g. timestretching)
-    ProcessVarIo,
-    /// [value]: input `*mut VstSpeakerArrangement`.
-    /// [ptr]: output `*mut VstSpeakerArrangement`.
-    SetSpeakerArrangement,
+        /// [ptr]: `VstVariableIo`
+        /// [use]: used for variable I/O processing (offline e.g. timestretching)
+        ProcessVarIo,
+        /// [value]: input `*mut VstSpeakerArrangement`.
+        /// [ptr]: output `*mut VstSpeakerArrangement`.
+        SetSpeakerArrangement,
 
-    /// Deprecated.
-    _SetBlocksizeAndSampleRate,
+        /// Deprecated.
+        _SetBlocksizeAndSampleRate,
 
-    /// Soft bypass (automatable).
-    /// [value]: 1 = bypass, 0 = nobypass.
-    SoftBypass,
-    // [ptr]: buffer for effect name, limited to `kVstMaxEffectNameLen`
-    GetEffectName,
+        /// Soft bypass (automatable).
+        /// [value]: 1 = bypass, 0 = nobypass.
+        SoftBypass,
+        // [ptr]: buffer for effect name, limited to `kVstMaxEffectNameLen`
+        GetEffectName,
 
-    /// Deprecated.
-    _GetErrorText,
+        /// Deprecated.
+        _GetErrorText,
 
-    /// [ptr]: buffer for vendor name, limited to `consts::MAX_VENDOR_STR_LEN`.
-    GetVendorName,
-    /// [ptr]: buffer for product name, limited to `consts::MAX_PRODUCT_STR_LEN`.
-    GetProductName,
-    /// [return]: vendor specific version.
-    GetVendorVersion,
-    /// no definition, vendor specific.
-    VendorSpecific,
-    /// [ptr]: "Can do" string.
-    /// [return]: 1 = yes, 0 = maybe, -1 = no.
-    CanDo,
-    /// [return]: tail size (e.g. reverb time). 0 is default, 1 means no tail.
-    GetTailSize,
+        /// [ptr]: buffer for vendor name, limited to `consts::MAX_VENDOR_STR_LEN`.
+        GetVendorName,
+        /// [ptr]: buffer for product name, limited to `consts::MAX_PRODUCT_STR_LEN`.
+        GetProductName,
+        /// [return]: vendor specific version.
+        GetVendorVersion,
+        /// no definition, vendor specific.
+        VendorSpecific,
+        /// [ptr]: "Can do" string.
+        /// [return]: 1 = yes, 0 = maybe, -1 = no.
+        CanDo,
+        /// [return]: tail size (e.g. reverb time). 0 is default, 1 means no tail.
+        GetTailSize,
 
-    /// Deprecated.
-    _Idle,
-    /// Deprecated.
-    _GetIcon,
-    /// Deprecated.
-    _SetVewPosition,
+        /// Deprecated.
+        _Idle,
+        /// Deprecated.
+        _GetIcon,
+        /// Deprecated.
+        _SetVewPosition,
 
-    /// [index]: param index
-    /// [ptr]: `*mut VstParamInfo`
-    /// [return]: 1 if supported
-    GetParamInfo,
+        /// [index]: param index
+        /// [ptr]: `*mut VstParamInfo`
+        /// [return]: 1 if supported
+        GetParamInfo,
 
-    /// Deprecated.
-    _KeysRequired,
+        /// Deprecated.
+        _KeysRequired,
 
-    /// [return]: 2400 for vst 2.4.
-    GetApiVersion,
+        /// [return]: 2400 for vst 2.4.
+        GetApiVersion,
 
-    /// [index]: ASCII char.
-    /// [value]: `Key` keycode.
-    /// [opt]: `flags::modifier_key` bitmask.
-    /// [return]: 1 if used.
-    EditorKeyDown,
-    /// [index]: ASCII char.
-    /// [value]: `Key` keycode.
-    /// [opt]: `flags::modifier_key` bitmask.
-    /// [return]: 1 if used.
-    EditorKeyUp,
-    /// [value]: 0 = circular, 1 = circular relative, 2 = linear.
-    EditorSetKnobMode,
+        /// [index]: ASCII char.
+        /// [value]: `Key` keycode.
+        /// [opt]: `flags::modifier_key` bitmask.
+        /// [return]: 1 if used.
+        EditorKeyDown,
+        /// [index]: ASCII char.
+        /// [value]: `Key` keycode.
+        /// [opt]: `flags::modifier_key` bitmask.
+        /// [return]: 1 if used.
+        EditorKeyUp,
+        /// [value]: 0 = circular, 1 = circular relative, 2 = linear.
+        EditorSetKnobMode,
 
-    /// [index]: MIDI channel.
-    /// [ptr]: `*mut MidiProgramName`.
-    /// [return]: number of used programs, 0 = unsupported.
-    GetMidiProgramName,
-    /// [index]: MIDI channel.
-    /// [ptr]: `*mut MidiProgramName`.
-    /// [return]: index of current program.
-    GetCurrentMidiProgram,
-    /// [index]: MIDI channel.
-    /// [ptr]: `*mut MidiProgramCategory`.
-    /// [return]: number of used categories.
-    GetMidiProgramCategory,
-    /// [index]: MIDI channel.
-    /// [return]: 1 if `MidiProgramName` or `MidiKeyName` has changed.
-    HasMidiProgramsChanged,
-    /// [index]: MIDI channel.
-    /// [ptr]: `*mut MidiKeyName`.
-    /// [return]: 1 = supported 0 = not.
-    GetMidiKeyName,
+        /// [index]: MIDI channel.
+        /// [ptr]: `*mut MidiProgramName`.
+        /// [return]: number of used programs, 0 = unsupported.
+        GetMidiProgramName,
+        /// [index]: MIDI channel.
+        /// [ptr]: `*mut MidiProgramName`.
+        /// [return]: index of current program.
+        GetCurrentMidiProgram,
+        /// [index]: MIDI channel.
+        /// [ptr]: `*mut MidiProgramCategory`.
+        /// [return]: number of used categories.
+        GetMidiProgramCategory,
+        /// [index]: MIDI channel.
+        /// [return]: 1 if `MidiProgramName` or `MidiKeyName` has changed.
+        HasMidiProgramsChanged,
+        /// [index]: MIDI channel.
+        /// [ptr]: `*mut MidiKeyName`.
+        /// [return]: 1 = supported 0 = not.
+        GetMidiKeyName,
 
-    /// Called before a preset is loaded.
-    BeginSetPreset,
-    /// Called after a preset is loaded.
-    EndSetPreset,
+        /// Called before a preset is loaded.
+        BeginSetPreset,
+        /// Called after a preset is loaded.
+        EndSetPreset,
 
-    /// [value]: inputs `*mut VstSpeakerArrangement`
-    /// [ptr]: Outputs `*mut VstSpeakerArrangement`
-    GetSpeakerArrangement,
-    /// [ptr]: buffer for plugin name, limited to `consts::MAX_PRODUCT_STR_LEN`.
-    /// [return]: next plugin's uniqueID.
-    ShellGetNextPlugin,
+        /// [value]: inputs `*mut VstSpeakerArrangement`
+        /// [ptr]: Outputs `*mut VstSpeakerArrangement`
+        GetSpeakerArrangement,
+        /// [ptr]: buffer for plugin name, limited to `consts::MAX_PRODUCT_STR_LEN`.
+        /// [return]: next plugin's uniqueID.
+        ShellGetNextPlugin,
 
-    /// No args. Called once before start of process call. This indicates that the process call
-    /// will be interrupted (e.g. Host reconfiguration or bypass when plugin doesn't support
-    /// SoftBypass)
-    StartProcess,
-    /// No arguments. Called after stop of process call.
-    StopProcess,
-    /// [value]: number of samples to process. Called in offline mode before process.
-    SetTotalSampleToProcess,
-    /// [value]: pan law `PanLaw`.
-    /// [opt]: gain.
-    SetPanLaw,
+        /// No args. Called once before start of process call. This indicates that the process call
+        /// will be interrupted (e.g. Host reconfiguration or bypass when plugin doesn't support
+        /// SoftBypass)
+        StartProcess,
+        /// No arguments. Called after stop of process call.
+        StopProcess,
+        /// [value]: number of samples to process. Called in offline mode before process.
+        SetTotalSampleToProcess,
+        /// [value]: pan law `PanLaw`.
+        /// [opt]: gain.
+        SetPanLaw,
 
-    /// [ptr]: `*mut VstPatchChunkInfo`.
-    /// [return]: -1 = bank cant be loaded, 1 = can be loaded, 0 = unsupported.
-    BeginLoadBank,
-    /// [ptr]: `*mut VstPatchChunkInfo`.
-    /// [return]: -1 = bank cant be loaded, 1 = can be loaded, 0 = unsupported.
-    BeginLoadPreset,
+        /// [ptr]: `*mut VstPatchChunkInfo`.
+        /// [return]: -1 = bank cant be loaded, 1 = can be loaded, 0 = unsupported.
+        BeginLoadBank,
+        /// [ptr]: `*mut VstPatchChunkInfo`.
+        /// [return]: -1 = bank cant be loaded, 1 = can be loaded, 0 = unsupported.
+        BeginLoadPreset,
 
-    /// [value]: 0 if 32 bit, anything else if 64 bit.
-    SetPrecision,
+        /// [value]: 0 if 32 bit, anything else if 64 bit.
+        SetPrecision,
 
-    /// [return]: number of used MIDI Inputs (1-15).
-    GetNumMidiInputs,
-    /// [return]: number of used MIDI Outputs (1-15).
-    GetNumMidiOutputs,
+        /// [return]: number of used MIDI Inputs (1-15).
+        GetNumMidiInputs,
+        /// [return]: number of used MIDI Outputs (1-15).
+        GetNumMidiOutputs,
+    }
 }
 
 /// A structure representing static plugin information.
@@ -543,7 +544,6 @@ pub trait Plugin: Send {
     /// ```
     /// // ...
     /// # extern crate tutti_vst2_ffi as vst;
-    /// # #[macro_use] extern crate log;
     /// # use tutti_vst2_ffi::plugin::{Plugin, Info};
     /// use tutti_vst2_ffi::plugin::HostCallback;
     ///
@@ -559,7 +559,7 @@ pub trait Plugin: Send {
     ///     }
     ///
     ///     fn init(&mut self) {
-    ///         info!("loaded with host vst version: {}", self.host.vst_version());
+    ///         tracing::info!("loaded with host vst version: {}", self.host.vst_version());
     ///     }
     ///
     ///     // ...

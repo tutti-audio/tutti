@@ -720,8 +720,9 @@ impl<C: Clock> SessionBuilder<C> {
     /// [`Midi::devices`](crate::Midi::devices) and opened by the pool's
     /// [`midi_input`](crate::midi_input) and [`midi_output`](crate::midi_output)
     /// entries, each input feeding the graph through an ingest node and an event
-    /// inlet of its own, with `options` (MIDI-CI, where input times come from).
-    /// Default off.
+    /// inlet of its own, with `options` (where input times come from). Who the
+    /// session is on the wire (MIDI-CI, its UMP Endpoint) is the session's
+    /// [`MidiPolicy`](crate::MidiPolicy). Default off.
     #[cfg(feature = "midi-hardware")]
     #[must_use]
     pub fn midi_hardware(mut self, options: tutti_midi_hardware::MidiHardwareOptions) -> Self {
@@ -968,6 +969,8 @@ impl<C: Clock> SessionBuilder<C> {
             mods: crate::modulation::ModSession::new(self.opts.unresolved_warning),
             #[cfg(feature = "midi-hardware")]
             midi_io: parts.midi_io,
+            #[cfg(feature = "midi-hardware")]
+            midi_policy: crate::MidiPolicy::default(),
             #[cfg(feature = "sampler")]
             disk_streamer,
             #[cfg(feature = "sampler")]

@@ -390,7 +390,7 @@ fn apply_spread(spread: Spread, gains: &mut [f32]) {
     }
     let equal_gain = 1.0 / (gains.len() as f32).sqrt();
     for gain in gains.iter_mut() {
-        *gain = *gain * (1.0 - spread) + equal_gain * spread;
+        *gain = crate::lerp(*gain, equal_gain, spread);
     }
     let sum_sq: f32 = gains.iter().map(|g| g * g).sum();
     if sum_sq > 0.0 {

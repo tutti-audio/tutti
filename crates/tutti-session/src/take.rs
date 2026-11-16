@@ -220,21 +220,33 @@ impl TakeTarget {
     /// A sink of the caller's. It must be as wide as the input and at the
     /// graph's rate (a sink carries no rate to check); a width that differs is
     /// [`TakeError::Width`].
-    pub fn sink(sink: impl Sink<Sample = f32> + Send + 'static) -> Self {
+    pub fn sink<S>(sink: S) -> Self
+    where
+        S: Sink<Sample = f32> + Send + 'static,
+        S::Error: Send + Sync + 'static,
+    {
         Self {
             kind: TargetKind::Sink(Box::new(sink)),
         }
     }
 }
 
+/// A sink's [`Error`](Sink::Error) behind the trait object that forces its type
+/// to be erased.
+type SinkClosed = Arc<dyn std::error::Error + Send + Sync>;
+
 /// A [`Sink`] that can be finalized through a box.
 trait DynSink: Send {
     fn layout(&self) -> ChannelLayout;
     fn write(&mut self, frames: Interleaved<'_, f32>) -> Result<(), SinkFailed>;
-    fn finalize(self: Box<Self>) -> std::io::Result<()>;
+    fn finalize(self: Box<Self>) -> Result<(), SinkClosed>;
 }
 
-impl<S: Sink<Sample = f32> + Send> DynSink for S {
+impl<S> DynSink for S
+where
+    S: Sink<Sample = f32> + Send,
+    S::Error: Send + Sync + 'static,
+{
     fn layout(&self) -> ChannelLayout {
         Sink::layout(self)
     }
@@ -243,8 +255,8 @@ impl<S: Sink<Sample = f32> + Send> DynSink for S {
         Sink::write(self, frames)
     }
 
-    fn finalize(self: Box<Self>) -> std::io::Result<()> {
-        Sink::finalize(*self)
+    fn finalize(self: Box<Self>) -> Result<(), SinkClosed> {
+        Sink::finalize(*self).map_err(|e| Arc::new(e) as SinkClosed)
     }
 }
 
@@ -584,8 +596,8 @@ pub enum TakeError {
     /// The sink failed: a write, or closing it (for a WAV, the header is then
     /// left unpatched and the file unreadable). What was written before the
     /// failure is in the sink.
-    #[error("the take's sink failed: {0}")]
-    Sink(#[source] Arc<std::io::Error>),
+    #[error("the take's sink failed")]
+    Sink(#[source] Arc<dyn std::error::Error + Send + Sync>),
     /// The sink refused a write, yet its `finalize` reported no error: it broke
     /// [`Sink`]'s contract, which has `finalize` report the first failure.
     #[error("the sink refused a write and its finalize reported no error")]
@@ -1013,7 +1025,7 @@ impl Pump {
         }
         let closed = self.sink.finalize();
         if let Err(error) = closed {
-            return Err(TakeError::Sink(Arc::new(error)));
+            return Err(TakeError::Sink(error));
         }
         if failed {
             return Err(TakeError::SinkRefused);
@@ -1078,6 +1090,7 @@ mod tests {
 
     impl Sink for Keep {
         type Sample = f32;
+        type Error = core::convert::Infallible;
         fn layout(&self) -> ChannelLayout {
             ChannelLayout::MONO
         }
@@ -1085,7 +1098,7 @@ mod tests {
             self.0.lock().unwrap().extend_from_slice(frames.samples());
             Ok(())
         }
-        fn finalize(self) -> std::io::Result<()> {
+        fn finalize(self) -> Result<(), Self::Error> {
             Ok(())
         }
     }

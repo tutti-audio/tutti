@@ -10,13 +10,13 @@ use tutti_graph::NodeKey;
 use tutti_graph::PrerollTable;
 use tutti_nodes::ClickSettings;
 use tutti_tempo::TempoMap;
-use tutti_transport::{FadeOut, LoopEdit, MotionEvent, QueueFull, ScheduleFull, Then, Transport};
+use tutti_transport::{FadeOut, LoopEdit, MotionEvent, Then, TimedError, Transport};
 use tutti_types::{At, Beat, Bpm, ChannelLayout, ChannelTopology, LoopRange, Samples};
 
 use crate::RootDeclaration;
 use crate::graph::{Committed, CrossfadeId, Graph, Retried};
 use crate::{Clock, Offline, RealTime};
-use crate::{HeardOpen, HeardTapError, Playhead, RemoveError, ScheduleError, TempoError};
+use crate::{HeardOpen, HeardTapError, Playhead, RemoveError, TempoError};
 
 /// One step of [`Session::update`]. [`PHASES`] is their order.
 ///
@@ -574,6 +574,9 @@ pub struct Session<C: Clock = Offline> {
     pub(crate) mods: crate::modulation::ModSession,
     #[cfg(feature = "midi-hardware")]
     pub(crate) midi_io: Option<tutti_midi_hardware::MidiSession>,
+    /// Who the session is on the wire, as set ([`Session::policy`]).
+    #[cfg(feature = "midi-hardware")]
+    pub(crate) midi_policy: crate::MidiPolicy,
     #[cfg(feature = "sampler")]
     pub(crate) disk_streamer: Option<tutti_sampler::DiskStreamer>,
     /// Names the [`SamplerLoad`](crate::SamplerLoad)s.
@@ -791,6 +794,8 @@ impl<C: Clock> Session<C> {
             mods,
             #[cfg(feature = "midi-hardware")]
             midi_io,
+            #[cfg(feature = "midi-hardware")]
+            midi_policy,
             #[cfg(feature = "sampler")]
             disk_streamer,
             #[cfg(feature = "sampler")]
@@ -855,6 +860,8 @@ impl<C: Clock> Session<C> {
                 mods,
                 #[cfg(feature = "midi-hardware")]
                 midi_io,
+                #[cfg(feature = "midi-hardware")]
+                midi_policy,
                 #[cfg(feature = "sampler")]
                 disk_streamer,
                 #[cfg(feature = "sampler")]
@@ -1212,6 +1219,10 @@ impl<C: Clock> Session<C> {
                 self.render_mode_phase()
             }
             Phase::Poll => {
+                // Who the session is on the wire is in force before the devices
+                // are stepped.
+                #[cfg(feature = "midi-hardware")]
+                self.apply_midi_policy();
                 // A device that connected is heard from the plan that holds
                 // its inlet: committed now, not an update later.
                 #[cfg(feature = "midi-hardware")]
@@ -1558,9 +1569,9 @@ impl<C: Clock> Session<C> {
     ///
     /// # Errors
     ///
-    /// [`QueueFull`] when the transport's command queue is full; the event
-    /// is handed back in it.
-    pub fn play(&self) -> Result<(), QueueFull> {
+    /// [`TimedError::Full`] when the transport's command queue is full; the
+    /// event is handed back in it.
+    pub fn play(&self) -> Result<(), TimedError<MotionEvent>> {
         self.transport.motion().try_send(MotionEvent::Play)?;
         self.rolling_sent.store(true, Ordering::Relaxed);
         Ok(())
@@ -1571,8 +1582,8 @@ impl<C: Clock> Session<C> {
     ///
     /// # Errors
     ///
-    /// [`QueueFull`], as [`play`](Self::play).
-    pub fn stop(&self, fade: FadeOut) -> Result<(), QueueFull> {
+    /// [`TimedError::Full`], as [`play`](Self::play).
+    pub fn stop(&self, fade: FadeOut) -> Result<(), TimedError<MotionEvent>> {
         self.transport
             .motion()
             .try_send(MotionEvent::Stop { fade })?;
@@ -1585,8 +1596,8 @@ impl<C: Clock> Session<C> {
     ///
     /// # Errors
     ///
-    /// [`QueueFull`], as [`play`](Self::play).
-    pub fn locate(&self, beat: Beat) -> Result<(), QueueFull> {
+    /// [`TimedError::Full`], as [`play`](Self::play).
+    pub fn locate(&self, beat: Beat) -> Result<(), TimedError<MotionEvent>> {
         self.transport
             .motion()
             .try_send(MotionEvent::locate(beat))?;
@@ -1612,9 +1623,13 @@ impl<C: Clock> Session<C> {
     ///
     /// # Errors
     ///
-    /// [`ScheduleError::Full`] when the timed-command list is full, and
-    /// [`ScheduleError::BeatWhileStopped`] for the command above.
-    pub fn schedule(&self, at: impl Into<At>, event: MotionEvent) -> Result<(), ScheduleError> {
+    /// [`TimedError::Full`] when the timed-command list is full, and
+    /// [`TimedError::BeatWhileStopped`] for the command above.
+    pub fn schedule(
+        &self,
+        at: impl Into<At>,
+        event: MotionEvent,
+    ) -> Result<(), TimedError<MotionEvent>> {
         let at = at.into();
         let starts = matches!(
             event,
@@ -1628,11 +1643,11 @@ impl<C: Clock> Session<C> {
         // session sent for the next block, or what the engine last rendered
         // (a transport started through `transport()` directly).
         let rolling = self.rolling_sent.load(Ordering::Relaxed) || self.playhead().playing();
-        if let At::Beat(beat) = at
+        if let At::Beat(_) = at
             && starts
             && !rolling
         {
-            return Err(ScheduleError::BeatWhileStopped { beat, event });
+            return Err(TimedError::BeatWhileStopped(event));
         }
         self.transport.motion().schedule(at, event)?;
         if at == At::NextBlock {
@@ -1681,9 +1696,9 @@ impl<C: Clock> Session<C> {
     ///
     /// # Errors
     ///
-    /// [`ScheduleFull`] when the timed-command list is full; the edit is handed
+    /// [`TimedError::Full`] when the timed-command list is full; the edit is handed
     /// back in it.
-    pub fn set_loop(&self, range: LoopRange) -> Result<(), ScheduleFull> {
+    pub fn set_loop(&self, range: LoopRange) -> Result<(), TimedError<LoopEdit>> {
         self.transport
             .motion()
             .schedule(At::NextBlock, LoopEdit::over(range))
@@ -1695,8 +1710,8 @@ impl<C: Clock> Session<C> {
     ///
     /// # Errors
     ///
-    /// [`ScheduleFull`], as [`set_loop`](Self::set_loop).
-    pub fn clear_loop(&self) -> Result<(), ScheduleFull> {
+    /// [`TimedError::Full`], as [`set_loop`](Self::set_loop).
+    pub fn clear_loop(&self) -> Result<(), TimedError<LoopEdit>> {
         self.transport
             .motion()
             .schedule(At::NextBlock, LoopEdit::armed(false))
@@ -1796,13 +1811,12 @@ impl<C: Clock> Session<C> {
     /// # Errors
     ///
     /// [`HeardTapError::Detached`] on a session without an engine,
-    /// and [`HeardTapError::Busy`] while another reader is alive. While the
+    /// and [`HeardTapError::Tap`]`(Busy)` while another reader is alive. While the
     /// audio thread has not taken the last installs it is not an error: the
     /// call returns [`HeardOpen::Retry`] and opens nothing.
     pub fn open_heard_tap(&self, capacity: Samples) -> Result<HeardOpen, HeardTapError> {
         let (taps, layout) = self.heard.as_ref().ok_or(HeardTapError::Detached)?;
-        taps.open(*layout, capacity)
-            .map_err(|_| HeardTapError::Busy)
+        Ok(taps.open(*layout, capacity)?)
     }
 
     /// Closes the tap [`open_heard_tap`](Self::open_heard_tap) opened, now
@@ -1812,14 +1826,11 @@ impl<C: Clock> Session<C> {
     /// # Errors
     ///
     /// [`HeardTapError::Detached`] on a session without an engine;
-    /// [`HeardTapError::NotOpen`] when no heard tap is open (never opened, or
+    /// [`HeardTapError::Tap`]`(NotOpen)` when no heard tap is open (never opened, or
     /// closed already); nothing changes.
     pub fn close_heard_tap(&self) -> Result<(), HeardTapError> {
         let (taps, _) = self.heard.as_ref().ok_or(HeardTapError::Detached)?;
-        taps.close().map_err(|e| match e {
-            tutti_engine::HeardTapError::NotOpen => HeardTapError::NotOpen,
-            _ => HeardTapError::Busy,
-        })
+        Ok(taps.close()?)
     }
 
     /// The master meter: the level of each graph output channel, one

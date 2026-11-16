@@ -219,6 +219,10 @@ pub enum BridgeEvent {
         /// The edit: the parameter, its value now and the gesture it falls in.
         edit: ParamEdit,
     },
+    /// The buses the plugin has now, which the host was not last told: sent
+    /// before the [`Resync`](Self::Resync) of [`Io`](ResyncKind::Io) it goes
+    /// with.
+    IoLayout(tutti_plugin_types::Layout),
     /// The plugin asked the host to resync some aspect of its state at runtime
     /// (preset load, param-title change, IO change, full reload). Carries no
     /// payload — the host re-reads from the plugin in response.
@@ -318,13 +322,16 @@ pub(super) struct Unsolicited {
     lifecycle: Option<super::lifecycle::Lifecycle>,
     reloaded: bool,
     io: bool,
+    /// The buses the last `PluginIoChanged` carried, until drained.
+    io_layout: Option<tutti_plugin_types::Layout>,
     param_titles: bool,
     param_values: bool,
     process_requested: bool,
     /// Transport requests, oldest first. Every one counts, so none is merged:
     /// past [`UNSOLICITED_TRANSPORT`] the oldest is dropped.
     transport: std::collections::VecDeque<tutti_plugin_types::TransportRequest>,
-    /// Parameter events dropped since the last [`take_dropped`](Self::take_dropped).
+    /// Events dropped (a parameter edit past the queue, a layout no plugin
+    /// has) since the last [`take_dropped`](Self::take_dropped).
     dropped: u64,
 }
 
@@ -339,6 +346,7 @@ impl Unsolicited {
             lifecycle: None,
             reloaded: false,
             io: false,
+            io_layout: None,
             param_titles: false,
             param_values: false,
             process_requested: false,
@@ -427,6 +435,18 @@ impl Unsolicited {
         self.rate = Some(refusal);
     }
 
+    /// The buses a `PluginIoChanged` carried; a later one replaces an earlier
+    /// one not yet drained. A layout no plugin has
+    /// ([`is_plausible`](tutti_plugin_types::Layout::is_plausible)) is dropped
+    /// and counted with the dropped events.
+    pub(super) fn io_layout(&mut self, layout: tutti_plugin_types::Layout) {
+        if layout.is_plausible() {
+            self.io_layout = Some(layout);
+        } else {
+            self.dropped += 1;
+        }
+    }
+
     /// A resync request; a second of the same kind adds nothing.
     pub(super) fn resync(&mut self, kind: ResyncKind) {
         *match kind {
@@ -443,6 +463,7 @@ impl Unsolicited {
     pub(super) fn drain(&mut self) -> impl Iterator<Item = BridgeEvent> + '_ {
         let raised =
             |flag: &mut bool, kind| std::mem::take(flag).then_some(BridgeEvent::Resync(kind));
+        let layout = self.io_layout.take().map(BridgeEvent::IoLayout);
         let structural = [
             raised(&mut self.reloaded, ResyncKind::Reloaded),
             raised(&mut self.io, ResyncKind::Io),
@@ -470,9 +491,9 @@ impl Unsolicited {
         let rate = self.rate.take().map(BridgeEvent::RateRefusal);
         let process =
             std::mem::take(&mut self.process_requested).then_some(BridgeEvent::ProcessRequested);
-        structural
+        layout
             .into_iter()
-            .flatten()
+            .chain(structural.into_iter().flatten())
             .chain(params)
             .chain(latency)
             .chain(tail)
@@ -503,9 +524,68 @@ mod tests {
                 BridgeEvent::ProcessRequested => "process".to_owned(),
                 BridgeEvent::Transport { request } => format!("transport {request:?}"),
                 BridgeEvent::Resync(kind) => format!("{kind:?}"),
+                BridgeEvent::IoLayout(_) => "io layout".to_owned(),
                 other => panic!("unexpected {other:?}"),
             })
             .collect()
+    }
+
+    /// **The buses a `PluginIoChanged` carried are heard before its resync,
+    /// once, the latest of two.** A resync with no layout is heard with none.
+    #[test]
+    fn the_announced_layout_precedes_its_resync() {
+        let layout = |channels| tutti_plugin_types::Layout {
+            inputs: vec![tutti_plugin_types::PluginBus::main(
+                tutti_types::ChannelLayout::from_count(channels),
+            )],
+            outputs: Vec::new(),
+        };
+        let mut inbox = Unsolicited::new();
+        inbox.io_layout(layout(2));
+        inbox.io_layout(layout(4));
+        inbox.resync(ResyncKind::Io);
+        let heard: Vec<BridgeEvent> = inbox.drain().collect();
+        assert!(
+            matches!(
+                heard.as_slice(),
+                [BridgeEvent::IoLayout(l), BridgeEvent::Resync(ResyncKind::Io)]
+                    if *l == layout(4)
+            ),
+            "{heard:?}"
+        );
+        inbox.resync(ResyncKind::Io);
+        assert_eq!(labels(&mut inbox), ["Io"]);
+    }
+
+    /// **A layout no plugin has is dropped and counted, and does not replace
+    /// the one held.**
+    #[test]
+    fn an_implausible_layout_is_dropped_and_counted() {
+        use tutti_plugin_types::{Layout, MAX_LAYOUT_BUSES, PluginBus};
+        let stereo = || PluginBus::main(tutti_types::ChannelLayout::STEREO);
+        let good = Layout {
+            inputs: vec![stereo()],
+            outputs: vec![stereo()],
+        };
+        let mut inbox = Unsolicited::new();
+        inbox.io_layout(good.clone());
+        inbox.io_layout(Layout {
+            inputs: vec![
+                PluginBus::main(tutti_types::ChannelLayout::from_count(0));
+                MAX_LAYOUT_BUSES + 1
+            ],
+            outputs: Vec::new(),
+        });
+        inbox.io_layout(Layout {
+            inputs: vec![stereo(); 9],
+            outputs: Vec::new(),
+        });
+        assert_eq!(inbox.take_dropped(), 2);
+        let heard: Vec<BridgeEvent> = inbox.drain().collect();
+        assert!(
+            matches!(heard.as_slice(), [BridgeEvent::IoLayout(l)] if *l == good),
+            "{heard:?}"
+        );
     }
 
     /// **A request to be processed again is heard once, after everything the

@@ -504,7 +504,9 @@ fn closing_the_heard_tap_names_one_that_is_not_open() {
     let s = offline();
     assert_eq!(
         s.close_heard_tap(),
-        Err(tutti_session::HeardTapError::NotOpen),
+        Err(tutti_session::HeardTapError::Tap(
+            tutti_engine::HeardTapError::NotOpen
+        )),
         "none was opened"
     );
     let tap = s
@@ -515,7 +517,9 @@ fn closing_the_heard_tap_names_one_that_is_not_open() {
     assert_eq!(s.close_heard_tap(), Ok(()));
     assert_eq!(
         s.close_heard_tap(),
-        Err(tutti_session::HeardTapError::NotOpen),
+        Err(tutti_session::HeardTapError::Tap(
+            tutti_engine::HeardTapError::NotOpen
+        )),
         "closed already"
     );
     drop(tap);
@@ -835,7 +839,9 @@ fn render_feeds_the_heard_tap_and_a_fork_does_not() {
         .expect("the audio thread is not behind");
     assert_eq!(
         s.open_heard_tap(Samples(8)).err(),
-        Some(tutti_session::HeardTapError::Busy)
+        Some(tutti_session::HeardTapError::Tap(
+            tutti_engine::HeardTapError::Busy
+        ))
     );
     let mut block = vec![0.0f32; 64 * 2];
     s.render(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
