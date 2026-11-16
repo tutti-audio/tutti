@@ -238,6 +238,10 @@ pub mod nodes {
         FreeverbKernel, GateKernel, Kernel, KernelNode, LadderKernel, LimiterKernel,
         ModDelayKernel, PhaserKernel, ReconcileError, SvfKernel,
     };
+    pub use tutti_nodes::{
+        BrickwallSet, CompressorSet, CrossoverSet, DelaySet, DistortionSet, FdnSet, FreeverbSet,
+        GateSet, HasControl, LadderSet, LimiterSet, ModDelaySet, PhaserSet, SvfSet,
+    };
 }
 
 /// The unit vocabulary (`tutti-types`, `tutti-buffers`) a program names less
@@ -334,6 +338,8 @@ pub mod session {
     };
     pub use tutti_metering::LoadRecorder;
     pub use tutti_modulation::PeriodPoint;
+    #[cfg(feature = "device")]
+    pub use tutti_session::ClockError;
     #[cfg(feature = "plugin")]
     pub use tutti_session::Param;
     pub use tutti_session::{
@@ -496,6 +502,7 @@ pub mod plugin {
         PluginEntry, ProbeFailure, ProbeFailureKind, ScanPhase, ScanProgress,
     };
     pub use tutti_plugin_host::RebindError;
+    pub use tutti_plugin_ipc::RandomSourceError;
     pub use tutti_plugin_ipc::SlabLayoutError;
     pub use tutti_plugin_types::bundle::ModuleKind;
     pub use tutti_plugin_types::{
@@ -507,6 +514,7 @@ pub mod plugin {
         ProbeConfig, SampleFormat, StateError, StateHash, TailVerdict, UnknownExtension, Verdict,
         VersionText, Vst2Category, Vst3PlugType, Vst3SubCategories,
     };
+    pub use tutti_plugin_types::{Timeouts, ZeroTimeout};
 
     /// The plugin catalog: scanning, the database and the descriptors it
     /// holds.

@@ -28,9 +28,7 @@
 //! Not asked for: a private `Sealed` trait, which is unnameable on purpose; a
 //! crate's `Result` alias, which expands to std's `Result` and an error type the
 //! umbrella exports; the rows of [`TESTING`], items a crate keeps behind its
-//! `testing` feature, which the all-features text still shows; and the rows of
-//! [`OWNER_PRIVATE`], `pub` items in a private module of their crate, which no
-//! path reaches.
+//! `testing` feature, which the all-features text still shows.
 
 use super::use_tree::{is_word, uses};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -182,25 +180,6 @@ const TESTING: &[(&str, &str)] = &[
     ("tutti_plugin_types", "FakeController"),
     ("tutti_plugin_types", "FakeLoaded"),
     ("tutti_plugin_types", "FakeProcessor"),
-];
-
-/// `(crate, type)` rows that are `pub` in a private module of their crate, so no
-/// path reaches them: the owning crate has to export them first.
-const OWNER_PRIVATE: &[(&str, &str)] = &[
-    ("tutti_nodes", "BrickwallSet"),
-    ("tutti_nodes", "CompressorSet"),
-    ("tutti_nodes", "CrossoverSet"),
-    ("tutti_nodes", "DelaySet"),
-    ("tutti_nodes", "DistortionSet"),
-    ("tutti_nodes", "FdnSet"),
-    ("tutti_nodes", "FreeverbSet"),
-    ("tutti_nodes", "GateSet"),
-    ("tutti_nodes", "HasControl"),
-    ("tutti_nodes", "LadderSet"),
-    ("tutti_nodes", "LimiterSet"),
-    ("tutti_nodes", "ModDelaySet"),
-    ("tutti_nodes", "PhaserSet"),
-    ("tutti_nodes", "SvfSet"),
 ];
 
 /// What `lib.rs` exports, as `(crate, item)`: the items, and the modules by name
@@ -381,7 +360,7 @@ fn edges(texts: &[(&str, &str)]) -> Edges {
 
 fn skip(t: &Ty) -> bool {
     let id = (t.krate.as_str(), t.name.as_str());
-    EXCLUDED.contains(&id.1) || TESTING.contains(&id) || OWNER_PRIVATE.contains(&id)
+    EXCLUDED.contains(&id.1) || TESTING.contains(&id)
 }
 
 fn internal_id(krate: &str, name: &str) -> bool {
@@ -614,7 +593,7 @@ pub use tutti_nodes::SvfType;
         let api = "pub fn tutti_graph::Node::a(&self) -> tutti_graph::Result<()>\n\
                    pub trait tutti_graph::Node: tutti_graph::private::Sealed\n\
                    pub fn tutti_graph::Node::b(&self, tutti_session::Detached)\n\
-                   pub fn tutti_graph::Node::c(&self, tutti_nodes::SvfSet)\n";
+";
         assert_eq!(missing(api), Vec::<String>::new());
     }
 

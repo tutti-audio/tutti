@@ -82,7 +82,7 @@ impl Leaf {
         self.path.first().map_or("", String::as_str)
     }
 
-    /// The item's full path, `tutti_x::module::Item`.
+    /// The item's full path, crate, modules and name.
     pub(super) fn item(&self) -> String {
         let mut p = self.path.clone();
         p.push(self.source.clone());

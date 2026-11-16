@@ -7,7 +7,7 @@
 //! 1. **No whole re-export**: `pub use tutti_x;`, `pub use tutti_x as y;`,
 //!    `pub use ::tutti_x ..`, `pub use tutti_x::{self}` and any glob are findings.
 //!    Each item is listed by name.
-//! 2. **One item, one path**: an item (its source path, `tutti_x::module::Item`) is
+//! 2. **One item, one path**: an item (its source path: crate, modules, name) is
 //!    exported once, under one name: `pub use tutti_x::A` and `pub use tutti_x::A
 //!    as B`, or `tutti_x::A` in two modules, are findings, and so is a module
 //!    exported by name (`pub use tutti_x::module`) together with one of its items.
