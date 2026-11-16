@@ -183,6 +183,7 @@ fn stopping_a_clip_that_is_not_there_names_the_target() {
 /// 2 file, which has no one timeline, is refused with that reason.
 #[test]
 fn a_file_plays_at_a_beat_and_a_format_2_file_is_refused() {
+    use tutti_midi_file::SmfDivision;
     use tutti_midi_file::{MidiFile, SmfFormat, Tick, Track};
     use tutti_ump::U7;
     let track = Track::new().note(
@@ -192,7 +193,12 @@ fn a_file_plays_at_a_beat_and_a_format_2_file_is_refused() {
         NoteNumber::of(62),
         U7::of(100),
     );
-    let file = MidiFile::smf(SmfFormat::SingleTrack, 480, vec![track.clone()]).unwrap();
+    let file = MidiFile::smf(
+        SmfFormat::SingleTrack,
+        SmfDivision::of(480),
+        vec![track.clone()],
+    )
+    .unwrap();
     let mut s = offline();
     let (synth, seen) = tap(&mut s);
     s.midi().play_file(synth, Beat(1.0), &file).unwrap();
@@ -200,7 +206,8 @@ fn a_file_plays_at_a_beat_and_a_format_2_file_is_refused() {
     roll(&s, 49_000);
     assert_eq!(note_ons(&seen), vec![(48_000, 62)]);
 
-    let sequential = MidiFile::smf(SmfFormat::Sequential, 480, vec![track]).unwrap();
+    let sequential =
+        MidiFile::smf(SmfFormat::Sequential, SmfDivision::of(480), vec![track]).unwrap();
     assert!(matches!(
         s.midi().play_file(synth, Beat(0.0), &sequential),
         Err(MidiError::File(tutti_midi_file::Error::NoCommonTimeline(_)))

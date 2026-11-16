@@ -5,7 +5,7 @@ use super::super::{
     Matrix, Network, NetworkCapacity, OutputMap, Stage, Tap, Taps, loop_gain,
 };
 use super::*;
-use crate::{Capacity as _, Lti as _};
+use crate::Lti as _;
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
@@ -52,7 +52,10 @@ fn the_tail_is_pre_delay_transit_and_the_decay_to_the_floor() {
         Matrix::Diagonal,
     ))]);
     n.pre_delay = Samples(4_800);
-    let seconds = |floor| n.tail(Db(floor)).seconds().unwrap().get();
+    let seconds = |floor| match n.tail(Db(floor)) {
+        Ring::Finite(s) => s.get(),
+        Ring::Unbounded => panic!("a damped line rings out"),
+    };
     assert!((seconds(-60.0) - 3.1).abs() < 1e-5, "{}", seconds(-60.0));
     assert!((seconds(-30.0) - 2.1).abs() < 1e-5);
     assert!((seconds(-90.0) - 4.1).abs() < 1e-5);
@@ -71,7 +74,10 @@ fn a_series_all_pass_rings_for_its_geometric_train() {
         form: AllPassForm::Lattice,
     };
     let n = network(&[Stage::AllPass(Inline::from_slice(&[ap, ap]).unwrap())]);
-    let t = n.tail(Db(-60.0)).seconds().unwrap().get();
+    let Ring::Finite(t) = n.tail(Db(-60.0)) else {
+        panic!("an all-pass chain rings out")
+    };
+    let t = t.get();
     assert!((t - 1100.0 / 48_000.0).abs() < 1e-7, "{t}");
     assert_eq!(n.rt60(Band::Low).get(), 0.0);
     assert!(n.is_stable() && !n.is_lossless());
@@ -415,9 +421,9 @@ fn the_shortest_path_decides_the_direct_path() {
     );
 }
 
-/// `NetworkCapacity::dominates` needs every figure, and `of` measures them.
+/// `NetworkCapacity::need` measures every figure of a network.
 #[test]
-fn a_bound_dominates_only_when_every_figure_does() {
+fn a_capacity_measures_every_figure_of_its_network() {
     let g = Absorption::Gain(Amplitude(0.5));
     let mut f = fdn(
         &[
@@ -444,32 +450,6 @@ fn a_bound_dominates_only_when_every_figure_does() {
         (b.line, b.delay, b.pre_delay),
         (SampleSpan::of(202.0), SampleSpan::of(302.0), Samples(10))
     );
-    assert!(b.dominates(&b));
-    let smaller: [fn(&mut NetworkCapacity); 8] = [
-        |b| b.lines -= 1,
-        |b| b.stages -= 1,
-        |b| b.outputs -= 1,
-        |b| b.line = b.line.saturating_sub(SampleSpan::of(1.0)),
-        |b| b.delay = b.delay.saturating_sub(SampleSpan::of(1.0)),
-        |b| b.pre_delay = Samples(b.pre_delay.get() - 1),
-        |b| b.tail = Ring::Finite(Seconds(0.0)),
-        |b| b.ir = Samples::ZERO,
-    ];
-    let mut with_taps_and_ir = b;
-    with_taps_and_ir.taps = 1;
-    with_taps_and_ir.ir = Samples(5);
-    for (i, shrink) in smaller.iter().enumerate() {
-        let mut s = if i == 7 { with_taps_and_ir } else { b };
-        shrink(&mut s);
-        let (big, small) = if i == 7 {
-            (&with_taps_and_ir, &s)
-        } else {
-            (&b, &s)
-        };
-        assert!(big.dominates(small), "row {i} the other way round");
-        assert!(!small.dominates(big), "row {i}");
-    }
-    assert!(!b.dominates(&with_taps_and_ir), "taps");
 }
 
 fn one_pole(gain: f32, damp: f32) -> Absorption {

@@ -942,10 +942,12 @@ impl<C: Clock> Session<C> {
                     }
                 }
             }
-            Phase::Plugins =>
-            {
+            Phase::Plugins => {
                 #[cfg(feature = "plugin")]
-                self.plugins_phase(cx, out)
+                {
+                    self.plugins_phase(cx, out);
+                    self.rebind_pooled_plugins(out);
+                }
             }
             Phase::RenderMode =>
             {

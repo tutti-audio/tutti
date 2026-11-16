@@ -219,6 +219,7 @@ where
         ids.iter().copied(),
         spares,
         None,
+        None,
     );
     Ok(Wired {
         client,
@@ -276,5 +277,6 @@ where
         parameters,
         spares,
         controls,
+        None,
     ))
 }

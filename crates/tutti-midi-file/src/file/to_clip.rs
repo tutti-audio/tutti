@@ -10,7 +10,8 @@ use core::num::NonZeroU8;
 
 use tutti_ump::{
     BarAccents, Flex, FlexAddress, FlexTextKind, KeySignature, Letter, Message, Metronome,
-    MidiGroup, SharpsFlats, SysexMessage, TimeSignature, Ump, flex_text_packets,
+    MidiGroup, SharpsFlats, SysexMessage, TicksPerQuarterNote, TimeSignature, Ump,
+    flex_text_packets,
 };
 
 use unicode_normalization::UnicodeNormalization;
@@ -175,8 +176,8 @@ const fn has_bar_grid(numerator: u8, denominator_power: u8) -> bool {
 /// The step in ticks between bar boundaries of a bar of `numerator` notes of
 /// `2^power` per whole note: `4 * numerator * tpq / 2^power` ticks, reduced to
 /// the whole-tick boundaries.
-fn bar_step(ticks_per_quarter: u16, numerator: u8, power: u8) -> u64 {
-    let bar = 4 * u64::from(numerator) * u64::from(ticks_per_quarter);
+fn bar_step(ticks_per_quarter: TicksPerQuarterNote, numerator: u8, power: u8) -> u64 {
+    let bar = 4 * u64::from(numerator) * u64::from(ticks_per_quarter.get());
     bar >> bar.trailing_zeros().min(u32::from(power))
 }
 
@@ -459,7 +460,7 @@ impl MidiFile {
             .max()
             .unwrap_or_default();
         let tpq = self.ticks_per_quarter();
-        let tempo_step = whole_tick_step(u64::from(tpq), 24);
+        let tempo_step = whole_tick_step(u64::from(tpq.get()), 24);
 
         // Where each event lands: tempos and time signatures on their grids,
         // in order. A bar grid starts at the last time signature's position

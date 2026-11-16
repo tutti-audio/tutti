@@ -201,7 +201,7 @@ pub use peer::{Peer, PeerError, Presence, Resource, ResourceFact, ResourceId};
 pub use plugin::{
     AddPluginError, LoadedPlugin, Plugin, PluginCause, PluginChange, PluginDeclaration,
     PluginEntry, PluginEvent, PluginHealth, PluginInfo, PluginNode, PluginPorts, PooledPlugin,
-    SNAPSHOT_INTERVAL, StateJobError, StateJobFailed, StateRestore, StateView,
+    PortsRefusal, SNAPSHOT_INTERVAL, StateJobError, StateJobFailed, StateRestore, StateView,
 };
 pub(crate) use pool::Pool;
 #[cfg(feature = "sampler")]

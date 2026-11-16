@@ -220,7 +220,7 @@ fn stimulus(ch: usize, frame: usize) -> f32 {
     };
     let hz = 110.0 * (ch + 2) as f32;
     let phase = frame as f32 * hz / SAMPLE_RATE.get() as f32;
-    let tone = (core::f32::consts::TAU * phase).sin();
+    let tone = libm::sinf(core::f32::consts::TAU * phase);
     // A fixed LCG on the frame and channel: the same noise every render.
     let seed = (frame as u32)
         .wrapping_mul(1_664_525)

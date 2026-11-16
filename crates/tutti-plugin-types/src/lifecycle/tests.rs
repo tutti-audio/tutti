@@ -173,6 +173,7 @@ enum Kind {
     ActivateOp,
     ReconfigureOp,
     DeactivateOp,
+    RelendOp,
     Request,
     Tick,
     Activated,
@@ -186,6 +187,7 @@ fn kind(event: &Event) -> Kind {
         Event::Op(HostOp::Activate(_)) => Kind::ActivateOp,
         Event::Op(HostOp::Reconfigure(_)) => Kind::ReconfigureOp,
         Event::Op(HostOp::Deactivate) => Kind::DeactivateOp,
+        Event::Op(HostOp::Relend) => Kind::RelendOp,
         Event::Request(_) => Kind::Request,
         Event::Tick => Kind::Tick,
         Event::Replied(Reply::Activated) => Kind::Activated,
@@ -1446,6 +1448,7 @@ proptest! {
                     HostOp::Reconfigure(p) => want = Some(p),
                     HostOp::Deactivate => want = None,
                     HostOp::Activate(p) => want = want.or(Some(p)),
+                    HostOp::Relend => {}
                 }
             }
             match want {
@@ -1457,6 +1460,27 @@ proptest! {
             }
         }
     }
+}
+
+/// **A relend of an active plugin recalls and lends again, and calls nothing
+/// on the plugin;** on a plugin that is not active, or one still activating, it
+/// asks for nothing.
+#[test]
+fn a_relend_recalls_and_lends_with_no_deactivation_or_activation() {
+    let p = prep(1);
+    let (s, fx) = go(active(RESTARTS, p), Event::Op(HostOp::Relend));
+    assert_eq!(fx, [Fx::Recall]);
+    let (s, fx) = reply(s, Reply::Returned);
+    assert_eq!(fx, [Fx::Lend]);
+    assert_eq!(s.stage(), Stage::Active);
+    assert!(!s.is_busy());
+    assert!(go(State::new(REST), Event::Op(HostOp::Relend)).1.is_empty());
+    assert!(go(refused(REST, p), Event::Op(HostOp::Relend)).1.is_empty());
+    let (s, _) = go(State::new(REST), Event::Op(HostOp::Activate(p)));
+    assert!(
+        go(s, Event::Op(HostOp::Relend)).1.is_empty(),
+        "left to the activation"
+    );
 }
 
 #[test]

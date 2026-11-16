@@ -7,6 +7,7 @@ mod common;
 mod smf_model;
 mod smf_wire;
 mod support;
+mod tick_at;
 mod to_clip;
 #[cfg(unix)]
 mod write_mode;
