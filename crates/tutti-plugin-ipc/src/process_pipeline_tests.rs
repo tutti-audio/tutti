@@ -33,7 +33,7 @@ use tutti_fixtures::machine_lock;
 const BATCH_SIZE: usize = 64;
 use crate::BlockPayload;
 use crate::unique_socket_path;
-use crate::{AudioSlab, RING_SLOTS, SlabWriter};
+use crate::{AudioSlab, FATES, RING_SLOTS, SlabWriter};
 use crate::{BridgeMessage, HostMessage, PROTOCOL_VERSION, SlabLayout};
 use std::sync::Arc;
 use tutti_fixtures::midi;
@@ -199,6 +199,26 @@ fn bridge_with_server(
     stall: std::time::Duration,
     route: fn(usize) -> usize,
 ) -> Rig {
+    bridge_with_server_mode(layout, stall, route, false, None)
+}
+
+/// A mock server's hold on chunk 1: it says it has the chunk (`got`), then
+/// waits to be told to go on (`release`), so a test stages later chunks while
+/// the server holds it.
+struct ServerGate {
+    got: std::sync::mpsc::Sender<()>,
+    release: std::sync::mpsc::Receiver<()>,
+}
+
+/// As [`bridge_with_server`]; a `mute` server answers no block at all (a
+/// server that drops chunks silently), and a `gate` holds chunk 1.
+fn bridge_with_server_mode(
+    layout: SlabLayout,
+    stall: std::time::Duration,
+    route: fn(usize) -> usize,
+    mute: bool,
+    gate: Option<ServerGate>,
+) -> Rig {
     use interprocess::local_socket::{ListenerOptions, traits::Listener as _};
 
     let path = unique_socket_path().expect("the OS has a random source");
@@ -261,12 +281,22 @@ fn bridge_with_server(
                         if !stall.is_zero() {
                             std::thread::sleep(stall);
                         }
+                        if let Some(gate) = gate.as_ref().filter(|_| data.seq == 1) {
+                            let _ = gate.got.send(());
+                            let _ = gate
+                                .release
+                                .recv_timeout(std::time::Duration::from_secs(10));
+                        }
+                        if mute {
+                            continue;
+                        }
                         let n = data.num_samples;
                         let seq = data.seq;
                         // Mirror the real server (`AudioPipeline::process`): read
                         // this block's INPUT slot, and write into its OUTPUT slot
                         // — two disjoint regions, not one shared in place.
-                        if server_slab.has_input(seq) {
+                        let refused = !server_slab.has_input(seq);
+                        if !refused {
                             for ch in 0..out_channels {
                                 let got = server_slab
                                     .read_input_into(seq, route(ch), &mut scratch[..n])
@@ -285,6 +315,7 @@ fn bridge_with_server(
                             seq,
                             midi_out: Default::default(),
                             status: Default::default(),
+                            refused,
                         }
                     }
                     _ => continue,
@@ -1128,6 +1159,126 @@ fn a_chunk_never_published_is_missed_and_never_late() {
     bridge_thread.shutdown();
 }
 
+/// Counters attached to the bridge's skipped cell, as the node's bind attaches
+/// them.
+fn counters_on(bridge: &PluginBridge) -> Arc<ChunkCounters> {
+    let counters = Arc::new(ChunkCounters::default());
+    counters.attach_skipped(bridge.skipped_cell());
+    counters
+}
+
+/// Waits until `done`, failing after ten seconds.
+fn wait_for(what: &str, mut done: impl FnMut() -> bool) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !done() {
+        assert!(std::time::Instant::now() < deadline, "{what}");
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+}
+
+/// **A chunk the server refuses is counted refused, and each resolved miss is
+/// accounted for once.** The mock server holds chunk 1 until the test has
+/// staged chunk 3 over its input slot, then refuses it (as the real one does
+/// for a recycled slot), saying so in its reply, and publishes chunks 2 and 3.
+/// Every step waits on an event: the server holding chunk 1, chunk 3 published,
+/// the bridge learning chunk 1's fate.
+#[test]
+fn a_chunk_the_server_refuses_is_counted_refused() {
+    let (got_tx, got) = std::sync::mpsc::channel();
+    let (release, release_rx) = std::sync::mpsc::channel();
+    let (bridge, mut bridge_thread, _server, slab) = bridge_with_server_mode(
+        stereo_layout(),
+        std::time::Duration::ZERO,
+        |out| out,
+        false,
+        Some(ServerGate {
+            got: got_tx,
+            release: release_rx,
+        }),
+    );
+    let counters = counters_on(&bridge);
+    let host_slab = Arc::clone(slab.slab());
+    let mut batcher = Batcher::new(CHANNELS, CHANNELS, SampleFormat::Float32, BATCH_SIZE, slab)
+        .with_counters(Arc::clone(&counters));
+    let input = Planar::new();
+    let mut output = Planar::new();
+    let mut midi_out = MidiEventVec::new();
+
+    let mut block = || drive_one_block(&mut batcher, &bridge, &input, &mut output, &mut midi_out);
+    block();
+    got.recv_timeout(std::time::Duration::from_secs(10))
+        .expect("the server holds chunk 1");
+    // Blocks 2 and 3 collect chunks 1 and 2 unanswered and stage chunk 3 over
+    // chunk 1's input slot.
+    block();
+    block();
+    release.send(()).unwrap();
+    wait_for("chunk 3 published", || host_slab.has_output(3));
+    // Block 4 sees chunk 2 in the ring; chunk 1's fate is not read yet.
+    block();
+    wait_for("chunk 1's fate", || {
+        bridge.chunk_fate(1) == Some(crate::Fate::Refused)
+    });
+    // Chunk 4 is answered before block 5, so block 5's collect finds it and
+    // neither of its two looks can count it late.
+    wait_for("chunk 4 published", || host_slab.has_output(4));
+    // Block 5 resolves chunk 1.
+    block();
+
+    assert_eq!(counters.refused(), 1, "chunk 1, the scripted refusal");
+    assert_eq!(counters.late(), 1, "chunk 2, published after its miss");
+    assert_eq!(counters.skipped(), 0, "the bridge kept up");
+    assert_eq!(counters.unanswered(), 0);
+    let resolved = counters.late() + counters.refused() + counters.skipped();
+    assert_eq!(
+        counters.missed(),
+        resolved,
+        "chunks 1 and 2 were missed; block 5's collect finds chunk 4 answered"
+    );
+
+    bridge_thread.shutdown();
+}
+
+/// **A chunk the server never accounts for is counted unanswered, not
+/// refused.** A mute server answers no chunk. Each block waits until the bridge
+/// has dealt with the last chunk (given up on it, or skipped it), then the
+/// batcher runs on past the window in which a fate can still be learned.
+#[test]
+fn a_chunk_the_server_never_accounts_for_is_counted_unanswered() {
+    let (bridge, mut bridge_thread, _server, slab) = bridge_with_server_mode(
+        stereo_layout(),
+        std::time::Duration::ZERO,
+        |out| out,
+        true,
+        None,
+    );
+    let counters = counters_on(&bridge);
+    let mut batcher = Batcher::new(CHANNELS, CHANNELS, SampleFormat::Float32, BATCH_SIZE, slab)
+        .with_counters(Arc::clone(&counters));
+    let input = Planar::new();
+    let mut output = Planar::new();
+    let mut midi_out = MidiEventVec::new();
+
+    for sent in 1..=2 * FATES as u64 {
+        drive_one_block(&mut batcher, &bridge, &input, &mut output, &mut midi_out);
+        wait_for("the bridge to deal with the chunk", || {
+            bridge.block_counts().abandoned
+                + bridge
+                    .skipped_cell()
+                    .load(std::sync::atomic::Ordering::Relaxed)
+                >= sent
+        });
+    }
+    assert_eq!(counters.refused(), 0, "the server said nothing");
+    assert_eq!(counters.late(), 0, "nothing was published");
+    assert!(
+        counters.unanswered() >= 1,
+        "chunks the server never answered, past the window, are unanswered"
+    );
+
+    bridge_thread.shutdown();
+}
+
 /// Nothing has ever been published, so every block takes the sequence-mismatch
 /// path into `silence_block`.
 #[test]
@@ -1560,6 +1711,7 @@ fn stamped_server(stall: std::time::Duration, first_only: bool, rate: SampleRate
                             seq,
                             midi_out,
                             status: status_for(seq),
+                            refused: false,
                         }
                     }
                     _ => continue,
@@ -1925,6 +2077,7 @@ fn two_stale_blocks(
                     seq: data.seq,
                     midi_out: Default::default(),
                     status: Default::default(),
+                    refused: false,
                 };
                 if try_send_bridge_msg(&server_stream, &reply).is_err() {
                     break;
