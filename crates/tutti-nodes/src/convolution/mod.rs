@@ -12,10 +12,8 @@
 //! which already owns WAV / FLAC / MP3 / OGG loading. This module is
 //! deliberately format-agnostic.
 
-mod ir;
 mod layout;
 mod node;
 
-pub use ir::{generate_room_ir, generate_room_ir_into, generate_test_ir, generate_test_ir_into};
 pub use layout::IrLayout;
 pub use node::{ConvolverError, ConvolverNode, PortSide};
