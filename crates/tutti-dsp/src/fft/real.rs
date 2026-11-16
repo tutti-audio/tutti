@@ -42,7 +42,7 @@ pub(crate) fn pass_twiddles(size: usize, direction: FftDirection) -> Vec<Complex
         .map(|k| {
             // The angle in f64, narrowed once, as `realfft` does.
             let angle = -2.0 * PI / size as f64 * k as f64;
-            let w = Complex32::new(angle.cos() as f32, angle.sin() as f32);
+            let w = Complex32::new(libm::cos(angle) as f32, libm::sin(angle) as f32);
             match direction {
                 FftDirection::Forward => w * 0.5,
                 FftDirection::Inverse => w.conj(),

@@ -423,7 +423,7 @@ fn render_lfo(param: UnitParam, range: ParamRange, depth: f32) -> (Vec<f32>, f32
 #[test]
 fn a_lane_drives_an_lfo_nodes_depth_and_rate() {
     let (out, knob) = render_lfo(UnitParam::Depth, ParamRange::new(0.0, 1.0), 0.5);
-    let peak = out.iter().copied().fold(0.0f32, |m, v| m.max(v.abs()));
+    let peak = tutti_fixtures::signal::peak(&out);
     assert!((peak - 0.75).abs() < 1e-3, "peaks at 0.75, not {peak}");
     assert_eq!(knob, 0.25, "the lane never writes the depth cell");
     assert_crossings(&out, 48_000, 1);

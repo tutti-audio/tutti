@@ -178,12 +178,13 @@ fn spawn_orphaned_server(tag: &str) -> Reaper {
 fn an_orphaned_server_exits_without_a_host() {
     let server = spawn_orphaned_server("orphan");
 
-    let exited = tutti_fixtures::wait_until(EXIT_DEADLINE, || has_exited(server.0));
-    assert!(
-        exited,
-        "server {} was still alive {EXIT_DEADLINE:?} after its parent exited; \
-         the watchdog never fired",
-        server.0
+    tutti_fixtures::wait_until(
+        &format!(
+            "server {} to exit after its parent exited; the watchdog never fired",
+            server.0
+        ),
+        EXIT_DEADLINE,
+        || has_exited(server.0),
     );
 }
 
@@ -280,25 +281,28 @@ fn a_subreaper_does_not_hide_the_hosts_death() {
     // been adopted by *us*. If this never becomes true the environment did not
     // do what the test assumes, and the exit assertion below would prove
     // nothing about the subreaper case.
-    let adopted = tutti_fixtures::wait_until(EXIT_DEADLINE, || ppid_of(server.0) == Some(me));
-    assert!(
-        adopted,
-        "server {} was never reparented to this test process ({me}); \
-         its ppid is {:?}. PR_SET_CHILD_SUBREAPER did not take effect, so \
-         this run does not exercise the subreaper case at all",
-        server.0,
-        ppid_of(server.0)
+    tutti_fixtures::wait_until(
+        &format!(
+            "server {} to be reparented to this test process ({me}); \
+             PR_SET_CHILD_SUBREAPER did not take effect if it never is, so \
+             this run does not exercise the subreaper case at all",
+            server.0
+        ),
+        EXIT_DEADLINE,
+        || ppid_of(server.0) == Some(me),
     );
 
     // Then: the server must exit regardless. Its parent is a live, non-1
     // process — the exact configuration in which `getppid() == 1` is silent.
-    let exited = tutti_fixtures::wait_until(EXIT_DEADLINE, || has_exited(server.0));
-    assert!(
-        exited,
-        "server {} survived being orphaned under a subreaper: its ppid became \
-         {me} rather than 1, so a watchdog comparing against pid 1 sees \
-         nothing wrong. The recorded-PID comparison is what must catch this",
-        server.0
+    tutti_fixtures::wait_until(
+        &format!(
+            "server {} to exit after being orphaned under a subreaper: its ppid became \
+             {me} rather than 1, so a watchdog comparing against pid 1 sees \
+             nothing wrong; the recorded-PID comparison is what must catch this",
+            server.0
+        ),
+        EXIT_DEADLINE,
+        || has_exited(server.0),
     );
 }
 
@@ -339,7 +343,11 @@ fn the_watchdog_takes_down_only_its_own_process() {
     let bystander_pid = bystander.id() as i32;
 
     let server = spawn_orphaned_server("bystander");
-    let exited = tutti_fixtures::wait_until(EXIT_DEADLINE, || has_exited(server.0));
+    tutti_fixtures::wait_until(
+        &format!("server {} to exit", server.0),
+        EXIT_DEADLINE,
+        || has_exited(server.0),
+    );
 
     // Probed by PID rather than with `try_wait`, because `has_exited` above
     // reaps every exited child indiscriminately — including this one, were it
@@ -351,7 +359,6 @@ fn the_watchdog_takes_down_only_its_own_process() {
     let _ = bystander.kill();
     let _ = bystander.wait();
 
-    assert!(exited, "server {} never exited", server.0);
     assert!(
         bystander_survived,
         "bystander {bystander_pid} died while the orphaned server was exiting; \

@@ -40,7 +40,8 @@
 //! `Appendix D:`), so a wrapped line that starts with a number is not one. A
 //! document with [`Doc::implicit_levels`] also takes a heading whose missing
 //! ancestors would each be the first of their level (`6.2.1.1` straight after
-//! `6.2`); the missing levels count as seen.
+//! `6.2`); the missing levels count as seen. A document with
+//! [`Doc::dotted_top`] also takes a top-level heading written `1. Alpha`.
 //!
 //! The extraction never returns half a set: a message row whose Message Type
 //! has no size, two items with one id, or a configured table that is not
@@ -97,16 +98,31 @@ pub(super) struct Doc {
     /// Take a heading whose missing ancestors are each the first of their
     /// level.
     implicit_levels: bool,
+    /// Take a top-level heading written with a closing dot (`1. Introduction`).
+    dotted_top: bool,
     pub(super) tables: Tables,
 }
 
 /// The documents, one inventory file each.
-pub(super) const DOCS: &[Doc] = &[M2_101, M2_102, M2_103, M2_104, M2_115, M2_116];
+pub(super) const DOCS: &[Doc] = &[
+    M2_101, M2_102, M2_103, M2_104, M2_115, M2_116, M2_105, M2_106, M2_107, M2_108, M2_109, M2_111,
+    M2_112, M2_117,
+];
 
 /// The header note of a document with its own Table 2 and no tables of rows.
 const SAME_TABLES: &str = "\
 # This document has its own conformance-word table (its Table 2), the same three
 # rows as M2-104's, and no negated forms either. Its Table 3 lists must,
+# will, can and might as words that are never conformance statements: a
+# sentence with only those has no row. Sentence rows only: no table of the
+# document has a row per item.
+";
+
+/// The header note of a document whose own conformance-word table is its
+/// Table 1 and whose Table 2 lists the words that are not.
+const TABLE_1: &str = "\
+# This document has its own conformance-word table (its Table 1), the same three
+# rows as M2-104's, and no negated forms either. Its Table 2 lists must,
 # will, can and might as words that are never conformance statements: a
 # sentence with only those has no row. Sentence rows only: no table of the
 # document has a row per item.
@@ -121,6 +137,7 @@ pub(super) const M2_101: Doc = Doc {
     sides: "initiator, responder or both",
     note: SAME_TABLES,
     implicit_levels: false,
+    dotted_top: false,
     tables: Tables::None,
 };
 
@@ -133,6 +150,7 @@ pub(super) const M2_102: Doc = Doc {
     sides: "initiator, responder or both",
     note: SAME_TABLES,
     implicit_levels: false,
+    dotted_top: false,
     tables: Tables::None,
 };
 
@@ -145,6 +163,7 @@ pub(super) const M2_103: Doc = Doc {
     sides: "initiator, responder or both",
     note: SAME_TABLES,
     implicit_levels: false,
+    dotted_top: false,
     tables: Tables::None,
 };
 
@@ -157,6 +176,7 @@ pub(super) const M2_115: Doc = Doc {
     sides: "sender, receiver or both",
     note: SAME_TABLES,
     implicit_levels: false,
+    dotted_top: false,
     tables: Tables::None,
 };
 
@@ -169,6 +189,7 @@ pub(super) const M2_104: Doc = Doc {
     sides: "sender, receiver or both",
     note: "",
     implicit_levels: false,
+    dotted_top: false,
     tables: Tables::Messages {
         mt_table: 4,
         messages: &[(34, Rows::Formats), (16, Rows::FlexStatus)],
@@ -190,7 +211,112 @@ pub(super) const M2_116: Doc = Doc {
 #                                 byte (1-based) and value
 ",
     implicit_levels: true,
+    dotted_top: false,
     tables: Tables::FileHeader { table: 5 },
+};
+
+pub(super) const M2_105: Doc = Doc {
+    prefix: "m2-105",
+    label: "M2-105",
+    title: "Property Exchange Foundational Resources (M2-105 v1.1.1)",
+    file: "midi-m2-105.txt",
+    source: "M2-105-UM",
+    sides: "initiator, responder or both",
+    note: SAME_TABLES,
+    implicit_levels: false,
+    dotted_top: false,
+    tables: Tables::None,
+};
+
+pub(super) const M2_106: Doc = Doc {
+    prefix: "m2-106",
+    label: "M2-106",
+    title: "Property Exchange Mode Resources (M2-106 v1.01)",
+    file: "midi-m2-106.txt",
+    source: "M2-106-UM",
+    sides: "initiator, responder or both",
+    note: TABLE_1,
+    implicit_levels: false,
+    dotted_top: true,
+    tables: Tables::None,
+};
+
+pub(super) const M2_107: Doc = Doc {
+    prefix: "m2-107",
+    label: "M2-107",
+    title: "Property Exchange ProgramList Resource (M2-107 v1.01)",
+    file: "midi-m2-107.txt",
+    source: "M2-107-UM",
+    sides: "initiator, responder or both",
+    note: TABLE_1,
+    implicit_levels: false,
+    dotted_top: true,
+    tables: Tables::None,
+};
+
+pub(super) const M2_108: Doc = Doc {
+    prefix: "m2-108",
+    label: "M2-108",
+    title: "Property Exchange Channel Resources (M2-108 v1.01)",
+    file: "midi-m2-108.txt",
+    source: "M2-108-UM",
+    sides: "initiator, responder or both",
+    note: TABLE_1,
+    implicit_levels: false,
+    dotted_top: true,
+    tables: Tables::None,
+};
+
+pub(super) const M2_109: Doc = Doc {
+    prefix: "m2-109",
+    label: "M2-109",
+    title: "Property Exchange LocalOn Resource (M2-109 v1.01)",
+    file: "midi-m2-109.txt",
+    source: "M2-109-UM",
+    sides: "initiator, responder or both",
+    note: TABLE_1,
+    implicit_levels: false,
+    dotted_top: true,
+    tables: Tables::None,
+};
+
+pub(super) const M2_111: Doc = Doc {
+    prefix: "m2-111",
+    label: "M2-111",
+    title: "Get and Set Device State (M2-111 v1.0)",
+    file: "midi-m2-111.txt",
+    source: "M2-111-UM",
+    sides: "initiator, responder or both",
+    note: TABLE_1,
+    implicit_levels: false,
+    dotted_top: true,
+    tables: Tables::None,
+};
+
+pub(super) const M2_112: Doc = Doc {
+    prefix: "m2-112",
+    label: "M2-112",
+    title: "Property Exchange ExternalSync Resource (M2-112 v1.0)",
+    file: "midi-m2-112.txt",
+    source: "M2-112-UM",
+    sides: "initiator, responder or both",
+    note: TABLE_1,
+    implicit_levels: false,
+    dotted_top: true,
+    tables: Tables::None,
+};
+
+pub(super) const M2_117: Doc = Doc {
+    prefix: "m2-117",
+    label: "M2-117",
+    title: "Property Exchange Controller Resources (M2-117 v1.0)",
+    file: "midi-m2-117.txt",
+    source: "M2-117-UM",
+    sides: "initiator, responder or both",
+    note: SAME_TABLES,
+    implicit_levels: false,
+    dotted_top: false,
+    tables: Tables::None,
 };
 
 /// How a message table's lines read as rows.
@@ -289,7 +415,7 @@ fn render(label: &Label) -> String {
 }
 
 /// A heading candidate: the label and nothing about whether it is expected.
-fn parse_heading(line: &str) -> Option<Label> {
+fn parse_heading(line: &str, dotted_top: bool) -> Option<Label> {
     let indent = line.len() - line.trim_start().len();
     let t = line.trim();
     if indent > 6 || t.contains(".....") || t.len() > 160 {
@@ -309,10 +435,17 @@ fn parse_heading(line: &str) -> Option<Label> {
         || !title
             .chars()
             .next()
-            .is_some_and(|c| c.is_ascii_alphanumeric())
+            .is_some_and(|c| c.is_ascii_alphanumeric() || c == '"')
     {
         return None;
     }
+    // A dotted label (`1. Introduction`) is a heading only in a document that
+    // writes its top-level headings so; elsewhere it is a list item.
+    let label = match label.strip_suffix('.') {
+        Some(bare) if dotted_top && !bare.contains('.') => bare,
+        Some(_) => return None,
+        None => label,
+    };
     let mut parts = label.split('.');
     let first = parts.next()?;
     let (app, head) = match first.as_bytes() {
@@ -404,6 +537,21 @@ impl Outline {
     }
 }
 
+/// A line that starts with a number and a closing dot (`3. Continue`).
+fn dotted_item(t: &str) -> bool {
+    let digits = t.bytes().take_while(u8::is_ascii_digit).count();
+    digits > 0 && t[digits..].starts_with(". ")
+}
+
+/// Whether the nearest text line before or after `lines[at]` is a dotted item
+/// too: a run of them is a list, and a dotted heading stands alone.
+fn next_to_dotted_item(lines: &[String], at: usize) -> bool {
+    let text = |l: &&String| !l.trim().is_empty();
+    let before = lines[..at].iter().rev().find(text);
+    let after = lines[at + 1..].iter().find(text);
+    before.is_some_and(|l| dotted_item(l.trim())) || after.is_some_and(|l| dotted_item(l.trim()))
+}
+
 fn caption(t: &str) -> Option<(bool, u32)> {
     let (is_table, rest) = match (t.strip_prefix("Table "), t.strip_prefix("Figure ")) {
         (Some(r), _) => (true, r),
@@ -430,7 +578,7 @@ fn classify(lines: &[String], doc: &Doc) -> Result<Vec<Line>, String> {
     };
     let mut out = Vec::new();
     let mut started = false;
-    for l in lines {
+    for (at, l) in lines.iter().enumerate() {
         let t = l.trim();
         if t.is_empty() {
             if started {
@@ -438,7 +586,9 @@ fn classify(lines: &[String], doc: &Doc) -> Result<Vec<Line>, String> {
             }
             continue;
         }
-        if let Some(label) = parse_heading(l) {
+        if let Some(label) = parse_heading(l, doc.dotted_top)
+            .filter(|_| !(dotted_item(t) && next_to_dotted_item(lines, at)))
+        {
             let first = !started && label == (false, vec![1]);
             if first || (started && outline.accept(&label)) {
                 if first {
@@ -841,6 +991,62 @@ mod tests {
     }
 
     #[test]
+    fn a_dotted_top_level_heading_is_a_heading_only_in_a_document_that_writes_them() {
+        let text = doc(&[
+            TOC,
+            "1. Alpha\nA frob shall spin.\n\n2. Beta\nA bar may ring.\n",
+            "",
+            "",
+        ]);
+        let dotted = Doc {
+            dotted_top: true,
+            ..M2_104
+        };
+        let items = keyword_items(&classify(&clean(&text), &dotted).unwrap(), &dotted);
+        assert_eq!(
+            ids(&items),
+            [("m2-104/1#1", "required"), ("m2-104/2#1", "permitted")]
+        );
+        // Without the flag no heading `1` exists.
+        assert!(classify(&clean(&text), &M2_104).is_err());
+    }
+
+    #[test]
+    fn a_dotted_heading_after_a_numbered_list_is_not_among_its_items() {
+        let text = doc(&[
+            TOC,
+            "1. Alpha\nA frob shall spin.\n\n2. Beta\nA bar shall follow:\n   1. One\n   2. Two\n   3. Three\nA baz may idle.\n\n3. Gamma\nA qux should hum.\n",
+            "",
+            "",
+        ]);
+        let dotted = Doc {
+            dotted_top: true,
+            ..M2_104
+        };
+        let items = keyword_items(&classify(&clean(&text), &dotted).unwrap(), &dotted);
+        assert_eq!(
+            ids(&items),
+            [
+                ("m2-104/1#1", "required"),
+                ("m2-104/2#1", "required"),
+                ("m2-104/2#2", "permitted"),
+                ("m2-104/3#1", "recommended"),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_heading_title_may_open_with_a_quote() {
+        let items = sentences_of(
+            "1 Alpha\nA frob shall spin.\n\n1.1 \"Beta\" Integration\nA bar may ring.\n",
+        );
+        assert_eq!(
+            ids(&items),
+            [("m2-104/1#1", "required"), ("m2-104/1.1#1", "permitted")]
+        );
+    }
+
+    #[test]
     fn keywords_map_to_kinds_and_count_per_section() {
         let items = sentences_of(
             "1 Alpha\nA frob shall spin. A frob should hum. A frob may idle.\n\n1.1 Beta\nA bar shall not ring. Plain.\n",
@@ -870,7 +1076,7 @@ mod tests {
     #[test]
     fn a_quoted_word_and_a_defining_table_row_are_not_uses() {
         let items = sentences_of(
-            "1 Alpha\nshall      Statements of requirement     All \u{2018}shall\u{2019} statements.\nA rule about \u{2018}should\u{2019} words.\nA frob shall spin.\n",
+            "1 Alpha\nshall      Statements of requirement     All \u{2018}shall\u{2019} statements.\nA rule about \u{2018}should\u{2019} words.\nA rule about \u{2019}may\u{2019} words.\nA frob shall spin.\n",
         );
         assert_eq!(ids(&items), [("m2-104/1#1", "required")]);
     }

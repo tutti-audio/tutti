@@ -46,3 +46,13 @@ fn an_lfo_sweeps_the_cutoff_by_half_its_depth_at_the_crest() {
         "the crest cutoff is {cutoff:?}, expected 1500 Hz"
     );
 }
+
+/// A control `x` off its centre scales the cutoff by `4^x`: two octaves per unit, so a half
+/// unit up doubles it, a half unit down halves it and the centre leaves it alone.
+#[test]
+fn the_cutoff_control_moves_two_octaves_per_unit() {
+    assert_eq!(two_octave_factor(0.0), 1.0);
+    assert!((two_octave_factor(0.5) - 2.0).abs() < 1e-6);
+    assert!((two_octave_factor(-0.5) - 0.5).abs() < 1e-6);
+    assert!((two_octave_factor(1.0) - 4.0).abs() < 1e-5);
+}

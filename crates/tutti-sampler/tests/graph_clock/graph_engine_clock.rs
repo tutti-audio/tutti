@@ -143,7 +143,7 @@ fn assert_tone(what: &str, out: &[f32], f: usize, src: usize) {
 }
 
 fn assert_sounds(what: &str, out: &[f32]) {
-    let peak = out.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+    let peak = tutti_fixtures::signal::peak(out);
     assert!(peak > 0.5, "{what}: near-silent ({peak})");
 }
 

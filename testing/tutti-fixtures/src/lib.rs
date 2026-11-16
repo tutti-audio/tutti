@@ -3,7 +3,9 @@
 //! [`check_range_contract`] and [`check_range_serde`], the checks a range-checked
 //! type keeps its contract and its serde form by, and [`check_round_trip`], a
 //! value's JSON spelling pinned both ways; [`noise`], a seeded stimulus, and
-//! [`Fnv`], a bit hash; and [`sf2`], a SoundFont built in memory.
+//! [`Fnv`], a bit hash; [`wait_until`], a bounded wait for another thread, and
+//! [`unique_name`], a name for what the OS shares; and [`sf2`], a SoundFont built
+//! in memory.
 //!
 //! A test finds a repo file through [`repo_root`] and [`asset`], never through
 //! a relative `..` path, so moving a crate never changes what a test reads.
@@ -64,8 +66,10 @@ mod round_trip;
 pub mod sf2;
 pub mod signal;
 pub mod tpt;
+mod unique;
 #[cfg(feature = "vst3-cpp")]
 mod vst3_cpp;
+mod wait;
 
 pub use alloc_count::{ThreadCounting, allocations};
 #[cfg(feature = "au")]
@@ -87,35 +91,13 @@ pub use plugin::{
 };
 pub use range_contract::{RangeContract, check_range_contract, check_range_serde};
 pub use round_trip::check_round_trip;
+pub use unique::unique_name;
 #[cfg(feature = "vst3-cpp")]
 pub use vst3_cpp::{bundle_of, vst3_cpp_module};
+pub use wait::wait_until;
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
-
-/// Polls `cond` until it holds or `deadline` elapses, and says whether it held.
-///
-/// The deadline is the point: a hang in the code under test becomes a failed
-/// assertion with a message, not a suite that never finishes. `cond` is read
-/// once more at the deadline.
-pub fn wait_until(deadline: std::time::Duration, mut cond: impl FnMut() -> bool) -> bool {
-    let start = std::time::Instant::now();
-    while start.elapsed() < deadline {
-        if cond() {
-            return true;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(2));
-    }
-    cond()
-}
-
-/// A name no other call in any process makes: `stem`, the process id and a
-/// per-process count. For a shared-memory segment or a socket that two tests of
-/// one run, or of two runs side by side, would otherwise both create.
-pub fn unique_name(stem: &str) -> String {
-    static COUNT: tutti_types::Mint = tutti_types::Mint::new();
-    format!("{stem}_{}_{}", std::process::id(), COUNT.mint())
-}
 
 /// The first ancestor of `start` (itself included) that holds a `Cargo.lock`.
 ///

@@ -306,6 +306,12 @@ impl AudioBridge {
         self.channels.dropped_midi_cell()
     }
 
+    /// The count of chunks the bridge thread skipped as stale, shared: the
+    /// pipeline's counters read it beside the batcher's own.
+    pub(crate) fn skipped_cell(&self) -> Arc<std::sync::atomic::AtomicU64> {
+        self.channels.skipped_cell()
+    }
+
     /// The shared-memory slab the blocks travel in.
     pub fn audio_buffer(&self) -> &Arc<AudioSlab> {
         &self.audio_buffer
@@ -375,6 +381,14 @@ impl AudioBridge {
     /// to audio the caller thought was already rendered.
     pub fn set_render_mode_rt(&self, mode: crate::protocol::RenderMode) -> bool {
         !self.lifecycle.is_crashed() && self.channels.push_command(Command::SetRenderMode { mode })
+    }
+
+    /// Makes the bridge thread wait `wait` for each block's reply, in place of
+    /// the few block periods a device's block is given, or the live bound again
+    /// with `None`. An offline render has no deadline: a reply that comes after
+    /// the live bound carries the block's MIDI-out all the same.
+    pub(crate) fn set_reply_wait(&self, wait: Option<Duration>) {
+        self.channels.set_reply_wait(wait);
     }
 
     /// Queues a reset of the plugin's processing state. Realtime-safe; `false`

@@ -14,6 +14,7 @@ use super::messages::{AudioResponse, Command};
 use crossbeam::queue::ArrayQueue;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 use tutti_rt::Doorbell;
 use tutti_types::{AtomicSampleRate, SampleRate};
 
@@ -44,6 +45,12 @@ pub(super) struct Channels {
     /// a constant sit orders of magnitude off the real block period, which
     /// starves the command queue.
     sample_rate: Arc<AtomicSampleRate>,
+    /// How long the bridge thread waits for a block's reply, in nanoseconds,
+    /// when it is not the live bound (the block period's few multiples, from
+    /// the dispatcher): `0` is the live bound, so a set wait is never stored as
+    /// `0`. An offline render has no deadline, so a reply the server is slow
+    /// to send is the server's, not an abandoned block's.
+    reply_wait_ns: Arc<AtomicU64>,
     /// How many owed replies the drain has taken back off the socket, ever.
     ///
     /// Pure instrumentation, and the only externally visible evidence that the
@@ -76,6 +83,11 @@ pub(super) struct Channels {
     /// and the rest of a SysEx that lost packets with it. Shared with the
     /// plugin node's controls, which add it to the node's own count.
     dropped_midi: Arc<AtomicU64>,
+    /// Chunks the bridge thread skipped as stale, ever: more than
+    /// `MAX_BEHIND` behind the newest submitted, so their slab slot is the
+    /// host's again. Shared with the pipeline's counters
+    /// (`ChunkCounters::attach_skipped`).
+    skipped: Arc<AtomicU64>,
     /// The control connection has something the bridge thread has not read:
     /// set by the watcher thread, cleared by the bridge thread after it has
     /// read the lane dry. The bridge's doorbell is rung with it, so a bridge
@@ -96,11 +108,13 @@ impl Channels {
             newest_seq: Arc::new(AtomicU64::new(0)),
             bell: Arc::new(Doorbell::new()),
             sample_rate: Arc::new(AtomicSampleRate::new(sample_rate)),
+            reply_wait_ns: Arc::new(AtomicU64::new(0)),
             settled: Arc::new(AtomicU64::new(0)),
             abandoned: Arc::new(AtomicU64::new(0)),
             replies: Arc::new(AtomicU64::new(0)),
             dropped_param_events: Arc::new(AtomicU64::new(0)),
             dropped_midi: Arc::new(AtomicU64::new(0)),
+            skipped: Arc::new(AtomicU64::new(0)),
             news: Arc::default(),
             probe: Arc::default(),
         }
@@ -114,6 +128,25 @@ impl Channels {
 
     pub(super) fn set_sample_rate(&self, rate: SampleRate) {
         self.sample_rate.store(rate, Ordering::Relaxed);
+    }
+
+    /// The bridge thread's wait for a block's reply, when it is not the live
+    /// one.
+    pub(super) fn reply_wait(&self) -> Option<Duration> {
+        match self.reply_wait_ns.load(Ordering::Relaxed) {
+            0 => None,
+            ns => Some(Duration::from_nanos(ns)),
+        }
+    }
+
+    /// Sets the wait, `None` for the live bound. `None` is stored as the `0`
+    /// sentinel, and a wait is raised to 1 ns so a zero wait is not read back
+    /// as the live bound; one past `u64::MAX` ns saturates.
+    pub(super) fn set_reply_wait(&self, wait: Option<Duration>) {
+        let ns = wait.map_or(0, |w| {
+            u64::try_from(w.as_nanos()).unwrap_or(u64::MAX).max(1)
+        });
+        self.reply_wait_ns.store(ns, Ordering::Relaxed);
     }
 
     /// Park the bridge thread until a command is queued or `stop` says to
@@ -160,7 +193,7 @@ impl Channels {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .as_ref()
-            .is_some_and(|watch| watch.wait_readable(std::time::Duration::ZERO))
+            .is_some_and(|watch| watch.wait_readable(Duration::ZERO))
     }
 
     /// The bridge thread has read the control connection dry. Cleared *after*
@@ -254,6 +287,17 @@ impl Channels {
         if n > 0 {
             self.dropped_midi.fetch_add(n, Ordering::Relaxed);
         }
+    }
+
+    /// Record a chunk skipped as stale. Bridge thread only; `Relaxed`: a count
+    /// nothing branches on.
+    pub(super) fn note_skipped(&self) {
+        self.skipped.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// The cell [`note_skipped`](Self::note_skipped) counts into.
+    pub(super) fn skipped_cell(&self) -> Arc<AtomicU64> {
+        Arc::clone(&self.skipped)
     }
 
     /// The cell [`note_dropped_midi`](Self::note_dropped_midi) counts into.
@@ -351,7 +395,7 @@ mod tests {
         (t, rx)
     }
 
-    const PATIENCE: std::time::Duration = std::time::Duration::from_secs(20);
+    const PATIENCE: Duration = Duration::from_secs(20);
 
     /// **A push wakes a parked bridge, and the audio thread's half
     /// allocates nothing.** The ring runs inside `assert_no_alloc` with the
