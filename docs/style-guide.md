@@ -74,10 +74,23 @@ until it is un-parked. `vendor/` is third-party and never restyled.
 - **T4. Private fields** (`C-STRUCT-PRIVATE`): a public struct has private fields
   unless it is a plain record with no invariant (and then it says so). A public
   tuple field on a newtype (`NodeKey(pub u64)`) is a finding.
-- **T5. Constructors** (`C-CTOR`): `new` for the obvious one, `with_*`/`from_*`
-  for others, a builder (`C-BUILDER`) past three or four optional knobs. A
-  constructor that can fail returns `Option` (one obvious reason) or `Result`.
-  It never clamps silently (`CLAUDE.md`, "Range-checked values").
+- **T5. One construction shape** (`C-CTOR`, `C-BUILDER`): a configured thing (a
+  node's config, a source, a spec, a request, an option) is `Type::new(required..)`
+  and then chained options: `self` by value, a bare name (`.frequency(..)`, never
+  `with_frequency`), one typed argument, `-> Self`. An option cannot fail: its
+  argument's type holds only valid values. `new` takes only what has no default
+  (a width where it is a choice, a filter's type, a delay's maximum), and no
+  context the running thing gets later: a sample rate, a transport or a block
+  geometry is bound by the call that takes the description (`patch`, `bounce`,
+  insertion), which also checks what depends on two settings together and
+  answers with a named error. A separate `*Builder` with a terminal `build()`
+  exists only where finishing does work or can fail (`SessionBuilder` makes the
+  engine and opens the device). A running thing changes through its knob, not a
+  `set_*` on the description. A constructor returns `Option` for a value outside
+  a range (prefer a `ranged!` argument, so it cannot) and `Result` only where
+  validity depends on two arguments together; it never clamps silently
+  (`CLAUDE.md`, "Range-checked values"). `cargo xtask check-building` holds the
+  lexical part of this, and lists each site not yet so.
 - **T6. Common traits** (`C-COMMON-TRAITS`, `C-DEBUG`): every public type is
   `Debug` (the workspace warns on `missing_debug_implementations`); value types
   derive `Clone`, `Copy` (if small and plain), `PartialEq`, `Eq`, `Hash`,
