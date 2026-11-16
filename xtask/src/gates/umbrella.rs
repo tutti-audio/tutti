@@ -30,36 +30,65 @@ use std::collections::BTreeMap;
 
 const SRC: &str = "crates/tutti/src";
 
-/// Names exported at two paths on purpose, each with its reason.
+/// Names exported at two paths on purpose: each is two distinct types that share a
+/// name and both must be reachable; the reason says which, as `crate` in `module`.
 pub(super) const ALLOW: &[(&str, &str)] = &[
+    ("Bank", "`sf2` in `soundfont`, `ump` in `midi`"),
+    ("Bus", "`graph` in `graph`, `session` in `session`"),
+    ("Channel", "`graph` in `graph`, `session` in `session`"),
     (
-        "DeviceId",
-        "the sound device's id (`tutti_cpal`) at the root and the MIDI device's (`tutti_midi_device`) in `midi`: two types, one name",
+        "Clock",
+        "`session` in the root, `modulation` in `modulation`",
     ),
+    ("DeviceId", "`cpal` in the root, `midi_device` in `midi`"),
     (
-        "Bus",
-        "the bus handle a node's shape issues (`graph::Bus`) and the session's bus key (`session::Bus`): two types, one name",
-    ),
-    (
-        "Params",
-        "the wrapper a node with params is inserted as (`graph::Params`) and a plugin's parameter view at the root: two types, one name",
-    ),
-    (
-        "KeyEvent",
-        "a plugin editor's key event (`session::KeyEvent`) and the UMP key event (`midi::KeyEvent`): two types, one name",
-    ),
-    (
-        "Stream",
-        "the sampler's disk stream at the root and the UMP stream message kind (`midi::Stream`): two types, one name",
-    ),
-    (
-        "Control",
-        "a plugin editor's control (`Control` at the root) and the node-author control a kernel's param set names (`nodes::Control`): two types, one name",
+        "Direction",
+        "`types` in `types`, `cpal` in `session`, `sampler` in `sampler`, `ump` in `midi`",
     ),
     (
         "Error",
-        "the session's one error at the root and `midi::Error`, the MIDI error it nests (`tutti_session::MidiError`)",
+        "`session` in the root, `export` in `session`, `codec` in `codec`, `sampler` in `sampler`, `sf2` in `soundfont`, `session` in `midi`",
     ),
+    ("Event", "`graph` in `graph`, `session` in `session`"),
+    ("Instrument", "`graph` in `session`, `sf2` in `soundfont`"),
+    ("Key", "`session` in the root, `ump` in `midi`"),
+    ("KeyEvent", "`plugin_types` in `plugin`, `ump` in `midi`"),
+    ("Load", "`session` in `session`, `plugin_types` in `plugin`"),
+    ("LoopRange", "`types` in `types`, `graph` in `graph`"),
+    ("Outcome", "`session` in `session`, `midi_device` in `midi`"),
+    ("OutputMap", "`dsp` in `nodes`, `engine` in `session`"),
+    ("Param", "`types` in `types`, `session` in `session`"),
+    (
+        "ParamUnit",
+        "`graph` in `graph`, `plugin_types` in `plugin`",
+    ),
+    ("Params", "`session` in the root, `graph` in `graph`"),
+    ("Pass", "`types` in `types`, `graph` in `graph`"),
+    ("Phase", "`types` in `types`, `session` in `session`"),
+    (
+        "Placement",
+        "`types` in `types`, `session` in `session`, `sampler` in `sampler`",
+    ),
+    (
+        "PluginEntry",
+        "`session` in `session`, `plugin_db` in `plugin`",
+    ),
+    ("Preset", "`sf2` in `soundfont`, `plugin` in `plugin`"),
+    ("Recorder", "`nodes` in `nodes`, `session` in `session`"),
+    ("Routing", "`nodes` in `nodes`, `engine` in `session`"),
+    ("RoutingError", "`nodes` in `nodes`, `engine` in `session`"),
+    ("Sample", "`buffers` in `types`, `codec` in `codec`"),
+    (
+        "SampleFormat",
+        "`buffers` in `types`, `plugin_types` in `plugin`",
+    ),
+    ("Stream", "`sampler` in `sampler`, `ump` in `midi`"),
+    (
+        "StreamFault",
+        "`engine` in `session`, `sampler` in `sampler`",
+    ),
+    ("Taps", "`dsp` in `nodes`, `session` in `session`"),
+    ("TempoError", "`tempo` in `tempo`, `session` in `session`"),
 ];
 
 fn skipped(dir: &str) -> bool {

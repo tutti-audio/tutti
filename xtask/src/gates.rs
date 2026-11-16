@@ -47,7 +47,7 @@ mod value_traits;
 mod vst3_sdk;
 
 pub(crate) use doc_features::doc_runs;
-pub(crate) use umbrella_api::{reexported_crates, unnameable};
+pub(crate) use umbrella_api::{analyze, reexported_crates};
 
 use std::fs;
 use std::path::{Path, PathBuf};
