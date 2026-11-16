@@ -171,9 +171,14 @@ fn stop_within_hands_back_a_body_that_has_not_ended() {
         9
     })
     .expect("spawn");
+    let asked = Instant::now();
     let handle = handle
         .stop_within(Duration::from_millis(20))
         .expect_err("the body ignores the stop and is still blocked");
+    assert!(
+        asked.elapsed() >= Duration::from_millis(20),
+        "the bound is waited out"
+    );
     assert!(handle.token().is_stopped(), "the stop stays requested");
     release.send(()).expect("the body is waiting");
     assert_eq!(

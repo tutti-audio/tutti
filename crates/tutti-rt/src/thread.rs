@@ -46,7 +46,9 @@ struct StopState {
     wake: Condvar,
 }
 
-/// Set once by the spawned thread when its body has returned or panicked.
+/// Set once by the spawned thread when the body's outcome is decided: it has
+/// returned or panicked. The thread's exit (its thread-local destructors)
+/// follows.
 #[derive(Debug, Default)]
 struct Ended {
     ended: Mutex<bool>,
@@ -73,6 +75,15 @@ impl Ended {
             .wait_timeout_while(ended, timeout, |ended| !*ended)
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .0
+    }
+}
+
+/// Sets [`Ended`] when dropped, on the thread's normal exit or its unwind.
+struct SetOnDrop(Arc<Ended>);
+
+impl Drop for SetOnDrop {
+    fn drop(&mut self) {
+        self.0.set();
     }
 }
 
@@ -145,7 +156,8 @@ impl StopToken {
 /// stop and joins.
 ///
 /// `T` is what the body returns. A body that never looks at its token ends
-/// by itself (a closed queue, say), and the drop's join waits for that.
+/// by itself (a closed queue, say), and the drop's join waits for that;
+/// [`stop_within`](Self::stop_within) bounds the wait.
 #[must_use = "dropping the handle stops the thread and waits for it; `detach` lets it run on"]
 #[derive(Debug)]
 pub struct ThreadHandle<T> {
@@ -199,14 +211,15 @@ impl<T> ThreadHandle<T> {
     /// Requests the stop and waits at most `timeout` for the body to end, then
     /// joins and hands back what [`join`](Self::join) would.
     ///
-    /// The bound covers the body; the join after it waits only for the
-    /// thread's own exit.
+    /// The bound covers the body; the join after it waits for the thread's
+    /// exit, which runs its thread-local destructors.
     ///
     /// # Errors
     ///
     /// The handle itself when the body has not ended within `timeout`. The
-    /// stop stays requested; the caller joins again, retries, or
-    /// [`detach`](Self::detach)es.
+    /// stop stays requested; the caller retries, joins, or
+    /// [`detach`](Self::detach)es. Dropping the returned handle joins again
+    /// without a bound; `detach` is the way to give up on a stuck thread.
     pub fn stop_within(self, timeout: Duration) -> Result<Result<T, Panicked>, Self> {
         self.stop.stop();
         if self.ended.wait(timeout) {
@@ -269,16 +282,15 @@ where
     let join = {
         let (stop, ended, name_owned) = (stop.clone(), Arc::clone(&ended), name.to_owned());
         Builder::new().name(name.to_owned()).spawn(move || {
-            let outcome = catch_unwind(AssertUnwindSafe(move || {
+            let _ended = SetOnDrop(ended);
+            catch_unwind(AssertUnwindSafe(move || {
                 let _ = applied_tx.send(priority.map(request_priority));
                 body(&stop)
             }))
             .map_err(|payload| Panicked {
                 name: name_owned,
                 message: message(payload.as_ref()),
-            });
-            ended.set();
-            outcome
+            })
         })?
     };
     // The sender is dropped unsent only if the request panicked; there is no
