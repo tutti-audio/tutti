@@ -22,7 +22,7 @@
 //!   crate defines the name, or, when it defines none, a path of the name its
 //!   text names.
 //!
-//! An all-capitals final segment (`tutti_x::MAX_CH`) is a constant, not a type.
+//! An all-capitals final segment (a `MAX_CH` of a crate path) is a constant, not a type.
 //! A whole-crate or glob export (`pub use tutti_x as x;`, `pub use tutti_x::m::*;`)
 //! is ignored: it names no item, so the recipe reads an umbrella that exports
 //! single items.
@@ -996,7 +996,7 @@ pub use tutti_nodes::SvfType;
         let api = "pub struct tutti_graph::Node\n\
                    pub fn tutti_graph::Node::a(&self) -> tutti_types::value::Unit\n\
                    pub fn tutti_graph::Hidden::a(&self) -> tutti_graph::Cx\n";
-        // The glob covers nothing, and the whole crate makes `Hidden` no export.
+        // The glob covers nothing, and the whole crate makes no export of its items.
         assert_eq!(
             run_in(lib, api).missing,
             ["tutti_types::value::Unit <- tutti_graph::Node"]
