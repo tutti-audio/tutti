@@ -81,7 +81,7 @@ fn a_full_ring_refuses_through_the_helper() {
     }
     assert_eq!(
         keys.note_off(Stamp::NextBlock, MidiChannel::FIRST, NoteNumber::of(60)),
-        Err(Refused::Full)
+        Err(PushError::Full)
     );
     assert_eq!(keys.counts().losses().lost, 1);
 }
