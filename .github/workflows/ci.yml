@@ -115,6 +115,7 @@ jobs:
       - run: cargo xtask check-buffers
       - run: cargo xtask check-building
       - run: cargo xtask check-logging
+      - run: cargo xtask check-test-time
       - run: cargo xtask check-platform-seam
       # The source of the locked `clap-sys` is fetched, not built, for the CLAP rows.
       - run: cargo fetch --locked
