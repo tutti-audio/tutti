@@ -26,7 +26,7 @@
 
 use loom::sync::Arc;
 use loom::thread;
-use tutti_rt::{Drained, FaultLatch, edit_ring};
+use tutti_rt::{Drained, FaultLatch, Overflow, ring};
 
 /// Executions loom ran, to report.
 static RUNS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
@@ -36,7 +36,7 @@ fn a_failure_is_never_read_before_the_frames_pushed_ahead_of_it() {
     loom::model(|| {
         RUNS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let latch = Arc::new(FaultLatch::new());
-        let (mut writer, mut reader) = edit_ring::<u32>(4);
+        let (mut writer, mut reader) = ring::<u32>(4, Overflow::Refuse);
 
         let producer = {
             let latch = Arc::clone(&latch);
@@ -82,7 +82,7 @@ fn a_failure_is_never_read_before_the_frames_pushed_ahead_of_it() {
 fn an_unraised_latch_never_reads_as_failed() {
     loom::model(|| {
         let latch = Arc::new(FaultLatch::new());
-        let (mut writer, mut reader) = edit_ring::<u32>(2);
+        let (mut writer, mut reader) = ring::<u32>(2, Overflow::Refuse);
         let producer = thread::spawn(move || {
             writer.push(7).expect("room");
         });

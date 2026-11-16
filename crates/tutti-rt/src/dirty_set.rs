@@ -45,7 +45,7 @@
 //! shape is one setter (the audio thread) and one taker (the control
 //! thread), but nothing breaks if it is not, so the set is shared as an
 //! `Arc<DirtySet>` rather than split into a `!Clone` writer and reader as
-//! [`edit_ring`](crate::edit_ring) is: that split guards a slot whose
+//! [`ring`](crate::ring) is: that split guards a slot whose
 //! hand-over needs exactly one writer and one reader, and a word of flags has
 //! no slot to guard.
 //!

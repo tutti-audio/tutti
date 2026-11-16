@@ -11,7 +11,9 @@
 //! An [`Edit`] goes the other way: a parameter write on an active plugin,
 //! queued to the Processor and applied at the head of its next block.
 
-use tutti_rt::{EditReader, EditWriter, RequestBit, RequestWord, RingFull, edit_ring};
+use tutti_rt::{
+    Overflow, PushError, RequestBit, RequestWord, RingReader, RingWriter, ring,
+};
 
 use crate::{Normalized, ParamEdit, ParamId, Request, RescanScope};
 
@@ -170,7 +172,7 @@ impl Edit {
 /// If `capacity` is zero.
 #[must_use]
 pub fn edits(capacity: usize) -> (EditSink, EditDrain) {
-    let (writer, reader) = edit_ring(capacity);
+    let (writer, reader) = ring(capacity, Overflow::DropNewest);
     (
         EditSink(writer),
         EditDrain {
@@ -182,23 +184,23 @@ pub fn edits(capacity: usize) -> (EditSink, EditDrain) {
 
 /// The main thread's end of an edit ring.
 #[derive(Debug)]
-pub struct EditSink(EditWriter<[u64; 2]>);
+pub struct EditSink(RingWriter<[u64; 2]>);
 
 impl EditSink {
     /// Queues `edit`.
     ///
     /// # Errors
     ///
-    /// [`RingFull`], counted in [`refused`](Self::refused). The caller keeps
+    /// [`PushError::Full`], counted in [`refused`](Self::refused). The caller keeps
     /// the latest value per parameter and retries on its next tick.
-    pub fn send(&mut self, edit: Edit) -> Result<(), RingFull> {
-        self.0.push(edit.encode())
+    pub fn send(&mut self, edit: Edit) -> Result<(), PushError> {
+        self.0.push(edit.encode()).map_err(|returned| returned.error)
     }
 
-    /// Edits refused for want of room.
+    /// Edits refused for want of room, saturating at `u32::MAX`.
     #[must_use]
     pub fn refused(&self) -> u32 {
-        self.0.refused()
+        u32::try_from(self.0.lost()).unwrap_or(u32::MAX)
     }
 }
 
@@ -286,7 +288,7 @@ impl EditQueue {
 /// The audio thread's end of an edit ring.
 #[derive(Debug)]
 pub struct EditDrain {
-    reader: EditReader<[u64; 2]>,
+    reader: RingReader<[u64; 2]>,
     undecodable: u32,
 }
 
@@ -299,7 +301,7 @@ impl EditDrain {
     /// [`undecodable`](Self::undecodable): only a producer of another version
     /// could write one.
     pub fn drain(&mut self, mut apply: impl FnMut(Edit)) {
-        for _ in 0..self.reader.pending() {
+        for _ in 0..self.reader.len() {
             let Some(raw) = self.reader.pop() else {
                 break;
             };
@@ -404,7 +406,7 @@ mod tests {
     #[test]
     fn an_unknown_entry_is_dropped_and_counted() {
         assert_eq!(Edit::decode([99 << 32, 0]), None);
-        let (mut writer, reader) = edit_ring::<[u64; 2]>(4);
+        let (mut writer, reader) = ring::<[u64; 2]>(4, Overflow::DropNewest);
         let good = Edit::Param {
             id: ParamId::new(1),
             value: Normalized::of(0.5),

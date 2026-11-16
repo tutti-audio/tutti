@@ -15,9 +15,9 @@
 //! - **`PosRing`** — frames a writer thread places ahead of the audio thread,
 //!   indexed by position (a disk stream's ring).
 //! - **`PackedAtomic`**, **`SeqWriter`/`SeqReader`**, **`RequestWord`**,
-//!   **`edit_ring`**, **`DirtySet`** — a value in one atomic word, a sequence lock, a request
-//!   bitset, a bounded single-producer single-consumer queue, and a sized set of
-//!   dirty flags (an atomic bit per index) with no capacity to overflow.
+//!   **`DirtySet`** — a value in one atomic word, a sequence lock, a request
+//!   bitset, and a sized set of dirty flags (an atomic bit per index) with no
+//!   capacity to overflow.
 //! - **`ring()`** — a bounded single-producer single-consumer queue of any
 //!   `Send` value, its full-ring policy chosen at construction and its losses counted by the ring.
 //! - **`RtScope`** — a per-thread "inside a block" marker that a `Drop` impl checks.
@@ -61,9 +61,6 @@
 //!   true by one atomic word (a writer bit and a reader count) checked on every
 //!   borrow in every build. A conflicting borrow panics, or its `try_` form
 //!   returns `None`, instead of aliasing.
-//! - `edit_ring` (`edits.rs`): single-producer single-consumer slots of
-//!   `UnsafeCell<u64>`, each touched only on its side of the `Release`/`Acquire`
-//!   indices.
 //! - `SplitMut`, `SplitRw` and `ClaimTable` (`split.rs`): one slice borrowed by
 //!   several threads, each element or chunk claimed in an atomic table before a
 //!   reference to it is made, so a second claim is refused rather than aliased.
@@ -157,9 +154,7 @@
 //! - [`WakeFlag`] — a flag any thread raises (one store) and the audio thread
 //!   takes (raised since the last take), so a parked node can be woken from
 //!   outside the block.
-//! - [`edit_ring()`] — a bounded single-producer single-consumer queue of small
-//!   `Copy` values, for edits the control thread hands the audio thread.
-//! - [`ring()`] — the same shape for any `Send` value, with the full-ring policy chosen at
+//! - [`ring()`] — a bounded single-producer single-consumer queue of any `Send` value, with the full-ring policy chosen at
 //!   construction ([`Overflow`]: refuse and count, or refuse and leave the count to the caller)
 //!   and the losses counted by the ring ([`RingWriter::take_lost`], [`RingWriter::lost`]); its
 //!   values can be borrowed in place, and a run of values moves with one publish. What the
@@ -197,7 +192,6 @@ mod denormals;
 mod dirty_set;
 mod doorbell;
 mod drain_clock;
-mod edits;
 mod fault_latch;
 mod gauge;
 mod handoff;
@@ -227,7 +221,6 @@ pub use denormals::with_no_denormals;
 pub use dirty_set::{DirtyIndex, DirtySet, Taken};
 pub use doorbell::Doorbell;
 pub use drain_clock::{DrainBeat, DrainMark, DrainWatch, drain_clock};
-pub use edits::{EditReader, EditWriter, RingFull, edit_ring};
 pub use fault_latch::{Drained, FaultLatch};
 pub use gauge::{Count, Counter, CounterWriter, Gauge, GaugeWriter, Reading, counter, gauge};
 pub use handoff::{Hand, Rt, handoff};
