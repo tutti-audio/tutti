@@ -36,9 +36,9 @@ impl Chunks {
     /// The counts since `before`, an earlier reading of the same counters.
     fn since(self, before: Chunks) -> Chunks {
         Chunks {
-            missed: self.missed - before.missed,
-            late: self.late - before.late,
-            skipped: self.skipped - before.skipped,
+            missed: self.missed.saturating_sub(before.missed),
+            late: self.late.saturating_sub(before.late),
+            skipped: self.skipped.saturating_sub(before.skipped),
         }
     }
 }
@@ -137,6 +137,19 @@ fn first_sound_in_window<S: Subject>(rig: &Rig, from: usize, stamp: usize) -> Re
 struct Judged {
     outcome: Result<(), String>,
     chunks: Chunks,
+}
+
+/// Blocks rendered after a case's verdict before its chunks are read: a late
+/// answer is counted on a later chunk, within the pipeline's ring, so a miss in
+/// the last blocks of the case is accounted for by then.
+const LATE_COUNT_BLOCKS: usize = 4;
+
+/// The chunks counted since `before`, read once a late answer to the case's
+/// last block has had [`LATE_COUNT_BLOCKS`] to be counted. It renders after the
+/// verdict, so it changes no frame the case judged.
+fn chunks_over_the_case<S: Subject>(rig: &mut Rig, before: Chunks) -> Chunks {
+    rig.render_to(rig.frame() + LATE_COUNT_BLOCKS * BLOCK);
+    S::chunks(rig).since(before)
 }
 
 /// Attempts a case may take to run on a machine the subject's pipeline keeps up
@@ -403,10 +416,8 @@ pub fn a_rate_change_keeps_the_note_on_its_frame<S: Subject>() {
             }
             Ok(())
         });
-        Judged {
-            outcome,
-            chunks: S::chunks(&rig).since(before),
-        }
+        let chunks = chunks_over_the_case::<S>(&mut rig, before);
+        Judged { outcome, chunks }
     });
 }
 
@@ -427,7 +438,12 @@ pub fn a_reading_taken_before_a_rate_change_keeps_its_instant<S: Subject>() {
 }
 
 fn rate_change_instant<S: Subject>(send_after_the_change: bool) {
-    judgeable::<S>("a rate change keeps a note's instant", || {
+    let what = if send_after_the_change {
+        "a reading taken before a rate change keeps its instant"
+    } else {
+        "a note queued before a rate change keeps its instant"
+    };
+    judgeable::<S>(what, || {
         rate_change_instant_once::<S>(send_after_the_change)
     });
 }
@@ -470,10 +486,9 @@ fn rate_change_instant_once<S: Subject>(send_after_the_change: bool) -> Judged {
     let at = rig.frame() + ahead;
     let from = rig.frame();
     rig.render_to(at + 4_000);
-    Judged {
-        outcome: first_sound_in_window::<S>(&rig, from, at),
-        chunks: S::chunks(&rig).since(before),
-    }
+    let outcome = first_sound_in_window::<S>(&rig, from, at);
+    let chunks = chunks_over_the_case::<S>(&mut rig, before);
+    Judged { outcome, chunks }
 }
 
 /// **An instrument has one handle at a time**: making a node an instrument
