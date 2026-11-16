@@ -2433,6 +2433,7 @@ dependencies = [
  "objc2",
  "objc2-foundation",
  "thiserror 2.0.21",
+ "tracing",
  "tutti-midi-protocol",
  "tutti-plugin-types",
  "tutti-rt",
