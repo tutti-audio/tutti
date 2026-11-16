@@ -86,7 +86,7 @@ impl Executor {
                 // Frames at the old rate name nothing at the new one.
                 self.clock.history.clear();
                 let ratio = new / old;
-                self.clock.frame = crate::command::rescale(self.clock.frame, ratio);
+                self.clock.frame = self.clock.frame.scaled(ratio);
                 self.clock.play.rescale(ratio);
                 self.inbox.commands.rescale(ratio, c.seq);
             }

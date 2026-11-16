@@ -330,7 +330,7 @@ impl ScheduleAudio {
             }
             if let At::Frame(_) = cmd.at {
                 cmd.pos *= ratio;
-                cmd.at = At::Frame(tutti_types::Frame::new(cmd.pos.round() as u64));
+                cmd.at = At::Frame(tutti_types::Frame::nearest(cmd.pos));
             }
         }
     }

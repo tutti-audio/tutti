@@ -186,7 +186,7 @@ impl PlayState {
     /// Rescales the count to the same wall-clock time at a new rate (a
     /// re-prepare's rate change, as the executor's frame is).
     pub(crate) fn rescale(&mut self, ratio: f64) {
-        self.next.play = crate::command::rescale(self.next.play, ratio);
+        self.next.play = self.next.play.scaled(ratio);
     }
 }
 
