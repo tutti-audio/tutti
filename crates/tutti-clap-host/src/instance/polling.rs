@@ -3,8 +3,8 @@
 
 use super::ClapLoaded;
 use crate::error::{ClapError, Result};
+use crate::host::HostState;
 use crate::host::state::TimerEntry;
-use crate::host::{HostState, LogRecord};
 use crate::types::{ContentScale, EditorCapabilities, WindowHandle};
 use dpi::Size;
 use std::sync::Arc;
@@ -273,31 +273,9 @@ impl ClapLoaded {
         self.host_state.take(&self.host_state.gui.closed)
     }
 
-    /// Drains every `clap.log` line the plugin has emitted since the last drain,
-    /// oldest first.
-    ///
-    /// Lines are also mirrored to stderr as they arrive; this is the
-    /// programmatic route. Draining rather than peeking keeps "have I seen this
-    /// line?" out of the caller, and the buffer is bounded by
-    /// [`LOG_CAPACITY`](crate::host::LOG_CAPACITY) for a caller that never
-    /// drains.
-    pub fn drain_log(&self) -> Vec<LogRecord> {
-        let mut records = self
-            .host_state
-            .log
-            .records
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
-        records.drain(..).collect()
-    }
-
-    /// How many log lines the host did not keep — cumulative, not consumed on
-    /// read, so callers track their own delta.
-    ///
-    /// Either the buffer was full, or the plugin logged from the audio thread,
-    /// where keeping the line would mean allocating and locking inside the
-    /// callback (see `host_log`). Counted together: a consumer cannot act
-    /// differently on the two.
+    /// How many `clap.log` lines the plugin sent from the audio thread, where
+    /// the host counts a line rather than emit it (emitting allocates).
+    /// Cumulative, not consumed on read, so callers track their own delta.
     pub fn log_lines_dropped(&self) -> u32 {
         self.host_state
             .log
