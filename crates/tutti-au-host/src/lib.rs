@@ -232,4 +232,4 @@ pub use tutti_plugin_types::{TransportInfo, WindowHandle};
 // name a returned type cannot bind it — `tutti-plugin-server` depends on this
 // crate but not on `tutti-types`.
 pub use tutti_types::Samples;
-pub use tutti_types::value::units::Seconds;
+pub use tutti_types::Seconds;

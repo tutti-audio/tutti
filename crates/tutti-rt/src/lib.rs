@@ -259,3 +259,19 @@ pub use wake_flag::WakeFlag;
 // The external `arc-lend` crate, which names nothing of tutti's; re-exported here
 // so the engine spells it `tutti_rt::ArcLend`.
 pub use arc_lend::{ArcLend, Loan, Reader};
+
+#[cfg(test)]
+mod error_bounds {
+    //! Each error type this crate returns is an `Error` a caller can box and move (`?` into
+    //! `Box<dyn Error + Send + Sync>`); the bound is checked where the function
+    //! is written, so a non-`Send` field fails the build.
+
+    fn err<T: std::error::Error + Send + Sync + 'static>() {}
+
+    #[allow(dead_code)]
+    fn the_errors_are_boxable() {
+        err::<crate::ClaimConflict>();
+        err::<crate::Contended>();
+        err::<crate::RequestBitOutOfRange>();
+    }
+}

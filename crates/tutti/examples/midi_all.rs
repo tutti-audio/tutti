@@ -19,16 +19,15 @@
 
 use tutti::midi::{
     self, AddedInstrument, FileEvent, Message, MidiChannel, MidiFile, MidiGroup,
-    MidiHardwareOptions, MidiRouteRule, NoteNumber, NoteVelocity, SmfFormat, TakePlacement, Tick,
-    TicksPerQuarterNote, Track, U7, Voice1,
+    MidiHardwareOptions, MidiRouteRule, MpeMode, MpeZoneConfig, MpeZones, NoteNumber, NoteVelocity,
+    PitchBendSensitivity, SmfDivision, SmfFormat, TakePlacement, Tick, TicksPerQuarterNote, Track,
+    U7, Voice1,
 };
 use tutti::polysynth::{PolySynth, SynthConfig};
 use tutti::{
     Beat, ChannelLayout, Error, EventCapacity, Frame, InterleavedMut, MaxBlock, SampleRate,
     Samples, Session, SessionEvent, Stamp,
 };
-use tutti_midi_file::SmfDivision;
-use tutti_midi_protocol::{MpeMode, MpeZoneConfig, MpeZones, PitchBendSensitivity};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 const BLOCK: usize = 512;

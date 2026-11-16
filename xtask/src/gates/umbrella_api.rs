@@ -24,9 +24,11 @@
 //!   re-export appears in the text as one `pub use` line per item, at the path
 //!   `lib.rs` names it at.
 //!
-//! A type a signature names at the path it is defined at (a private module of its
-//! crate) is covered by the umbrella's export of its name from that crate, when the
-//! umbrella exports one type of the crate by that name.
+//! A type a signature names at a path in no public module of its crate and that the
+//! crate's text does not re-export (the path of a private module) is covered by the umbrella's export of
+//! its name from that crate, when the umbrella exports one type of the crate by that
+//! name. The one false cover left: a private-module type that shares its name with a
+//! different exported type of the same crate counts as that type.
 //!
 //! A final segment is a constant when a `pub const` or `pub static` line of the
 //! texts defines that path, whatever its case; an all-capitals type is a type.
@@ -62,78 +64,122 @@ const INTERNAL: &[(&str, &str, &str)] = &[
     (
         "tutti_engine",
         "StreamDriver",
-        "a custom device backend's driver",
+        "a custom device backend's driver; owner: core-engine, lane core-leaks",
     ),
-    ("tutti_transport", "Transport", "the engine's transport"),
+    (
+        "tutti_transport",
+        "Transport",
+        "the engine's transport; owner: core-engine, lane core-leaks",
+    ),
     (
         "tutti_transport",
         "OfflineTransport",
-        "the export render's transport",
+        "the export render's transport; owner: core-engine, lane core-leaks",
     ),
     (
         "tutti_transport",
         "RenderClock",
-        "the export render's clock",
+        "the export render's clock; owner: core-engine, lane core-leaks",
     ),
     (
         "tutti_transport",
         "OfflineClock",
-        "the export render's clock",
+        "the export render's clock; owner: core-engine, lane core-leaks",
     ),
-    ("tutti_graph", "Editor", "the editor the session wraps"),
-    ("tutti_graph", "Topology", "the compiler's view of a graph"),
+    (
+        "tutti_graph",
+        "Editor",
+        "the editor the session wraps; owner: core-engine, lane core-leaks",
+    ),
+    (
+        "tutti_graph",
+        "Topology",
+        "the compiler's view of a graph; owner: core-engine, lane core-leaks",
+    ),
     (
         "tutti_graph",
         "GraphInvalid",
-        "the compiler's refusal of a graph",
+        "the compiler's refusal of a graph; owner: core-engine, lane core-leaks",
     ),
-    ("tutti_graph", "CompileError", "the compiler's error"),
-    ("tutti_graph", "VerifyError", "the compiler's error"),
-    ("tutti_graph", "InletNode", "the node behind an inlet"),
-    ("tutti_graph", "InletRing", "the ring behind an inlet"),
-    ("tutti_graph", "ParamMod", "a compiler record"),
-    ("tutti_graph", "ParamRange", "a compiler record"),
-    ("tutti_graph", "TapWriter", "the audio side of a tap"),
-    ("tutti_graph", "Compensation", "a compiler record"),
+    (
+        "tutti_graph",
+        "CompileError",
+        "the compiler's error; owner: core-engine, lane core-leaks",
+    ),
+    (
+        "tutti_graph",
+        "VerifyError",
+        "the compiler's error; owner: core-engine, lane core-leaks",
+    ),
+    (
+        "tutti_graph",
+        "InletNode",
+        "the node behind an inlet; owner: core-engine, lane core-leaks",
+    ),
+    (
+        "tutti_graph",
+        "InletRing",
+        "the ring behind an inlet; owner: core-engine, lane core-leaks",
+    ),
+    (
+        "tutti_graph",
+        "ParamMod",
+        "a compiler record; owner: core-engine, lane core-leaks",
+    ),
+    (
+        "tutti_graph",
+        "ParamRange",
+        "a compiler record; owner: core-engine, lane core-leaks",
+    ),
+    (
+        "tutti_graph",
+        "TapWriter",
+        "the audio side of a tap; owner: core-engine, lane core-leaks",
+    ),
+    (
+        "tutti_graph",
+        "Compensation",
+        "a compiler record; owner: core-engine, lane core-leaks",
+    ),
     (
         "tutti_graph",
         "EventEdge",
-        "the compiler's edge; the session's `EventEdge` is another",
+        "the compiler's edge; the session's `EventEdge` is another; owner: core-engine, lane core-leaks",
     ),
     (
         "tutti_graph",
         "Edge",
-        "the compiler's edge; the session's `Edge` is another",
+        "the compiler's edge; the session's `Edge` is another; owner: core-engine, lane core-leaks",
     ),
     (
         "tutti_graph",
         "InPort",
-        "the compiler's port; the session's `InPort` is another",
+        "the compiler's port; the session's `InPort` is another; owner: core-engine, lane core-leaks",
     ),
     (
         "tutti_graph",
         "OutPort",
-        "the compiler's port; the session's `OutPort` is another",
+        "the compiler's port; the session's `OutPort` is another; owner: core-engine, lane core-leaks",
     ),
     (
         "tutti_graph",
         "Source",
-        "a graph edge's source; the buffers' `Source` is another",
+        "a graph edge's source; the buffers' `Source` is another; owner: core-engine, lane core-leaks",
     ),
     (
         "tutti_graph",
         "Sink",
-        "a graph edge's sink; the buffers' `Sink` is another",
+        "a graph edge's sink; the buffers' `Sink` is another; owner: core-engine, lane core-leaks",
     ),
     (
         "tutti_plugin",
         "PluginClient",
-        "the host's client of a served plugin",
+        "the host's client of a served plugin; owner: core-engine, lane core-leaks",
     ),
     (
         "tutti_plugin_host",
         "PluginHandle",
-        "the host's control handle",
+        "the host's control handle; owner: core-engine, lane core-leaks",
     ),
     (
         "tutti_midi_protocol",
@@ -165,17 +211,17 @@ const INTERNAL: &[(&str, &str, &str)] = &[
     (
         "tutti_cpal",
         "Error",
-        "the backend's error; the session's `Error` wraps it",
+        "the backend's error; the session's `Error` wraps it; owner: core-engine, lane core-leaks",
     ),
     (
         "tutti_midi_file",
         "Error",
-        "the file codec's error; `midi::Error` nests it",
+        "the file codec's error; `midi::Error` nests it; owner: core-engine, lane core-leaks",
     ),
     (
         "tutti_midi_hardware",
         "Error",
-        "the hardware error; `midi::Error` nests it",
+        "the hardware error; `midi::Error` nests it; owner: core-engine, lane core-leaks",
     ),
     ("tutti_alsa_ffi", "*", "not a dependency of the umbrella"),
     ("tutti_measure", "*", "not a dependency of the umbrella"),
@@ -284,6 +330,14 @@ fn public(line: &str) -> Option<&str> {
         rest = rest[rest.find("] ")? + 2..].trim_start();
     }
     rest.strip_prefix("pub ")
+}
+
+/// The `(crate, modules)` a `pub mod` line of the text declares.
+fn public_module(line: &str) -> Option<(String, Vec<String>)> {
+    let path = public(line)?.strip_prefix("mod ")?.trim();
+    let mut segs = path.split("::").map(str::to_owned);
+    let krate = segs.next()?;
+    krate.starts_with("tutti_").then(|| (krate, segs.collect()))
 }
 
 /// `s` without leading `unsafe`, `const`, `auto`, `async`, `default` and
@@ -412,19 +466,17 @@ struct Covers {
 }
 
 impl Covers {
-    fn new(lib: &str, texts: &[(&str, &str)], consts: &Consts) -> Covers {
+    fn new(lib: &str, texts: &[(&str, &str)], consts: &Consts, named: &BTreeSet<Ty>) -> Covers {
         let mut defined = BTreeSet::new();
         let mut re_exported = BTreeSet::new();
+        let mut public_mods = BTreeSet::new();
         for (_, text) in texts {
+            public_mods.extend(text.lines().filter_map(public_module));
             for item in text.lines().filter_map(Item::read) {
                 defined.extend(item.defines());
                 re_exported.extend(item.re_exports());
             }
         }
-        let named: BTreeSet<Ty> = texts
-            .iter()
-            .flat_map(|(_, text)| types(text, consts))
-            .collect();
         let mut c = Covers {
             items: BTreeSet::new(),
             modules: Vec::new(),
@@ -481,12 +533,17 @@ impl Covers {
                     .count()
                     == 1
             {
-                // A crate's text prints a type at every path it publishes it at, and
-                // a signature of another crate names it at the path it is defined
-                // at: the type the umbrella exports under that name, when it
-                // exports one type of the crate by it.
+                // A signature names a type at the path it is defined at, which can
+                // be a private module (the text has no `pub mod` for it): that path
+                // is the type the umbrella exports under the name. A path in a
+                // public module, or one the text re-exports, is its own type.
                 for t in named.iter().filter(|t| {
-                    t.krate == e.krate && t.name == e.name && **t != e && !t.mods.is_empty()
+                    t.krate == e.krate
+                        && t.name == e.name
+                        && **t != e
+                        && !t.mods.is_empty()
+                        && !re_exported.contains(*t)
+                        && !public_mods.contains(&(t.krate.clone(), t.mods.clone()))
                 }) {
                     c.decisions.push(format!("{} -> {}", t.show(), e.show()));
                     c.foreign.insert(t.clone());
@@ -653,7 +710,8 @@ fn stale_rows(
 /// and the seeds ranked by how many each pulls in.
 fn analyze(texts: &[(&str, &str)], lib: &str) -> Analysis {
     let consts = consts(texts);
-    let covers = Covers::new(lib, texts, &consts);
+    let named: BTreeSet<Ty> = texts.iter().flat_map(|(_, t)| types(t, &consts)).collect();
+    let covers = Covers::new(lib, texts, &consts, &named);
     let edges = edges(texts, &consts);
     let loaded: BTreeSet<&str> = texts.iter().map(|(c, _)| *c).collect();
     let mut a = Analysis::default();
@@ -699,7 +757,6 @@ fn analyze(texts: &[(&str, &str)], lib: &str) -> Analysis {
     a.leaks = list(leaks);
     a.wanted.sort();
     a.wanted.dedup();
-    let named: BTreeSet<Ty> = texts.iter().flat_map(|(_, t)| types(t, &consts)).collect();
     a.decisions = covers.decisions;
     a.ambiguous = covers.ambiguous;
     a.stale = stale_rows(&named, &loaded, INTERNAL, TESTING, EXCLUDED);
@@ -1000,6 +1057,39 @@ pub use tutti_nodes::SvfType;
             analyze(&texts, lib).missing,
             ["tutti_types::value::samples::Samples <- tutti_graph::Node"]
         );
+    }
+
+    #[test]
+    fn a_private_path_is_not_aliased_when_the_name_is_exported_twice_or_the_path_is_published() {
+        let graph = "pub struct tutti_graph::Node\n\
+                     pub fn tutti_graph::Node::a(&self, tutti_types::hidden::Samples)\n";
+        let covered = |types: &'static str, lib: &str| {
+            analyze(&[("tutti_graph", graph), ("tutti_types", types)], lib).missing
+        };
+        let one = "pub struct tutti_types::Samples(pub usize)\n";
+        let lib = "pub use tutti_graph::Node;\npub use tutti_types::Samples;\n";
+        assert_eq!(covered(one, lib), none());
+        // Two exports of the name leave the private path unresolved.
+        let two = "pub struct tutti_types::Samples(pub usize)\n\
+                   pub struct tutti_types::other::Samples(pub usize)\n";
+        let lib2 = "pub use tutti_graph::Node;\npub use tutti_types::Samples;\n\
+                    pub use tutti_types::other::Samples as OtherSamples;\n";
+        assert_eq!(
+            covered(two, lib2),
+            ["tutti_types::hidden::Samples <- tutti_graph::Node"]
+        );
+        // A path in a public module, or with its own `pub use`, is its own type.
+        for own in [
+            "pub mod tutti_types::hidden\npub struct tutti_types::hidden::Samples(pub usize)\n",
+            "pub use tutti_types::hidden::Samples\n",
+        ] {
+            let text: &'static str = Box::leak(format!("{one}{own}").into_boxed_str());
+            assert_eq!(
+                covered(text, lib),
+                ["tutti_types::hidden::Samples <- tutti_graph::Node"],
+                "{own}"
+            );
+        }
     }
 
     #[test]

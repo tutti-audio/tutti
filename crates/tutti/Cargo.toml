@@ -57,16 +57,13 @@ tutti-plugin-types = { version = "0.0.1", path = "../tutti-plugin-types", option
 tutti-session = { version = "0.0.1", path = "../tutti-session", default-features = false, optional = true }
 
 [dev-dependencies]
-# `tutti::nodes::testing` for this crate's own test, examples and README
-# doctest. Dev-only: a consumer of the umbrella never sees the module.
+# The `testing` nodes (`Osc`, `Const`) this crate's own tests, examples and README
+# doctest build graphs from. Dev-only: the umbrella exports none of them.
 tutti-nodes = { path = "../tutti-nodes", default-features = false, features = ["testing"] }
 tempfile = "3.8"
-# Integrator and node-author crates this crate's examples and tests exercise
-# directly: the umbrella names none of them.
-tutti-codec = { path = "../tutti-codec" }
+# The loudness measurement `headless_export` reports; the umbrella does not export
+# `tutti-measure`.
 tutti-measure = { path = "../tutti-measure" }
-tutti-midi-file = { path = "../tutti-midi-file" }
-tutti-midi-protocol = { path = "../tutti-midi-protocol" }
 # The reference CLAP plugin the `plugin_midi_export` example plays, in a `plugin-server`
 # (built first: `cargo build -p tutti-plugin-server`; not a dev-dependency,
 # which would be a cycle through `tutti-plugin`), and the lookup that finds

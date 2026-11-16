@@ -147,3 +147,18 @@ impl RenderClock for FrozenClock {
         )
     }
 }
+
+#[cfg(test)]
+mod error_bounds {
+    //! Each error type this crate returns is an `Error` a caller can box and move
+    //! (`?` into `Box<dyn Error + Send + Sync>`); the bound is checked where the
+    //! function is written, so a non-`Send` field fails the build.
+
+    fn err<T: std::error::Error + Send + Sync + 'static>() {}
+
+    #[allow(dead_code)]
+    fn the_errors_are_boxable() {
+        err::<crate::AudioTaken>();
+        err::<crate::TimedError<crate::TransportCommand>>();
+    }
+}

@@ -17,10 +17,11 @@
 //! oscillator is `tutti-nodes`'s, a dev-dependency of this crate.
 
 use tutti::graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
+use tutti::modulation::{Follower, Lfo};
 use tutti::nodes::{SvfFilterNode, SvfType};
 use tutti::{
-    ChannelLayout, Depth, Error, Follower, Hz, InPort, InterleavedMut, Lfo, MaxBlock, OutPort, Q,
-    Root, RouteSpec, SampleRate, Samples, Session, SessionEvent,
+    ChannelLayout, Depth, Error, Hz, InPort, InterleavedMut, MaxBlock, OutPort, Q, Root, RouteSpec,
+    SampleRate, Samples, Session, SessionEvent,
 };
 use tutti_nodes::testing::Osc;
 

@@ -11,10 +11,11 @@
 //! needs are `tutti::session::` paths. Every fallible call returns the one
 //! `Error`, so `?` runs the whole program.
 
+use tutti::modulation::Lfo;
 use tutti::nodes::{FreeverbNode, SvfFilterNode, SvfType};
 use tutti::{
-    Amplitude, Beat, Bounce, Bpm, ChannelLayout, Clip, Depth, Error, Format, Hz, Lfo, MaxBlock,
-    Pcm, Q, Root, RouteSpec, SampleRate, Samples, Session, SessionEvent, Wave, Written,
+    Amplitude, Beat, Bounce, Bpm, ChannelLayout, Clip, Depth, Error, Format, Hz, MaxBlock, Pcm, Q,
+    Root, RouteSpec, SampleRate, Samples, Session, SessionEvent, Wave, Written,
 };
 
 const RATE: SampleRate = SampleRate::SR_48K;

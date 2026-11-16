@@ -104,7 +104,7 @@ pub(super) fn check(tree: &dyn Tree) -> Report {
                 .map(|a| format!("`{}` in {} ({})", a.name, a.module, a.place))
                 .collect();
             bad.push(format!(
-                "{}: `{item}` is exported {} times: {}; one path per item",
+                "{}: `{item}` is exported {} times: {}; keep one `pub use`",
                 at[1].place,
                 at.len(),
                 paths.join(", ")
@@ -116,7 +116,7 @@ pub(super) fn check(tree: &dyn Tree) -> Report {
                 break;
             }
             bad.push(format!(
-                "{}: `{under}` is also under `{item}`, which {} exports whole by name; one path per item",
+                "{}: `{under}` is also under `{item}`, which {} exports whole by name; keep one `pub use`",
                 inner[0].place, at[0].place
             ));
         }
@@ -124,9 +124,10 @@ pub(super) fn check(tree: &dyn Tree) -> Report {
 
     if bad.is_empty() {
         r.say(format!(
-            "check-umbrella: ok (tutti re-exports no crate whole and {} items sit at one path each; {} files)",
+            "check-umbrella: ok (tutti re-exports no crate whole and {} items sit at one path each; {} file{})",
             seen.len(),
-            files.len()
+            files.len(),
+            if files.len() == 1 { "" } else { "s" }
         ));
     } else {
         r.fail("check-umbrella: FAIL");
@@ -167,7 +168,7 @@ pub mod types {
         assert!(r.passed(), "{:?}", r.findings);
         assert_eq!(
             r.out[0],
-            "check-umbrella: ok (tutti re-exports no crate whole and 8 items sit at one path each; 1 files)"
+            "check-umbrella: ok (tutti re-exports no crate whole and 8 items sit at one path each; 1 file)"
         );
     }
 
