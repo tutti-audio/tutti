@@ -198,7 +198,7 @@ impl AudioSlab {
         seq: u64,
         channel: usize,
         output: &mut [T],
-    ) -> BridgeResult<usize> {
+    ) -> Result<usize, SlabAccessError> {
         self.read_region(Direction::Input, seq, channel, output)
     }
 
@@ -217,7 +217,7 @@ impl AudioSlab {
         seq: u64,
         channel: usize,
         output: &mut [T],
-    ) -> BridgeResult<usize> {
+    ) -> Result<usize, SlabAccessError> {
         self.read_region(Direction::Output, seq, channel, output)
     }
 
@@ -264,11 +264,11 @@ impl AudioSlab {
         seq: u64,
         channel: usize,
         data: &[T],
-    ) -> BridgeResult<()> {
+    ) -> Result<(), SlabAccessError> {
         self.check_width::<T>()?;
         let offset = self.offset_of(direction, seq, channel)?;
         if data.len() > self.layout.samples_per_channel {
-            return Err(oob("data length exceeds buffer capacity"));
+            return Err(SlabAccessError::Length);
         }
         writer.write(offset, bytemuck::cast_slice(data));
         Ok(())
@@ -280,7 +280,7 @@ impl AudioSlab {
         seq: u64,
         channel: usize,
         output: &mut [T],
-    ) -> BridgeResult<usize> {
+    ) -> Result<usize, SlabAccessError> {
         self.read_region_then(direction, seq, channel, output, || {})
     }
 
@@ -295,7 +295,7 @@ impl AudioSlab {
         channel: usize,
         output: &mut [T],
         between: impl FnOnce(),
-    ) -> BridgeResult<usize> {
+    ) -> Result<usize, SlabAccessError> {
         self.check_width::<T>()?;
         let offset = self.offset_of(direction, seq, channel)?;
         let copy_samples = self.layout.samples_per_channel.min(output.len());
@@ -324,9 +324,9 @@ impl AudioSlab {
     /// at: the layout's stride is in `sample_size()` bytes, so a wider type
     /// would write past its channel and a narrower one would read the wrong
     /// samples.
-    fn check_width<T: Sample>(&self) -> BridgeResult<()> {
+    fn check_width<T: Sample>(&self) -> Result<(), SlabAccessError> {
         if std::mem::size_of::<T>() != self.layout.sample_size() {
-            return Err(oob("sample type does not match the slab's sample format"));
+            return Err(SlabAccessError::SampleWidth);
         }
         Ok(())
     }
@@ -340,13 +340,18 @@ impl AudioSlab {
     /// Cannot overflow: the layout's whole size was computed with checked
     /// arithmetic when the slab was mapped (`byte_size`), and this offset is
     /// below it.
-    fn offset_of(&self, direction: Direction, seq: u64, channel: usize) -> BridgeResult<usize> {
+    fn offset_of(
+        &self,
+        direction: Direction,
+        seq: u64,
+        channel: usize,
+    ) -> Result<usize, SlabAccessError> {
         let channels = match direction {
             Direction::Input => self.layout.input_channels(),
             Direction::Output => self.layout.output_channels(),
         };
         if channel >= channels {
-            return Err(oob("channel index out of bounds"));
+            return Err(SlabAccessError::Channel);
         }
         let base = match direction {
             Direction::Input => SLAB_HEADER_BYTES,
@@ -417,7 +422,7 @@ impl SlabWriter {
         seq: u64,
         channel: usize,
         data: &[T],
-    ) -> BridgeResult<()> {
+    ) -> Result<(), SlabAccessError> {
         self.slab
             .write_region(&mut self.writer, self.direction, seq, channel, data)
     }
@@ -566,8 +571,26 @@ impl Drop for AudioSlab {
     }
 }
 
-fn oob(msg: &'static str) -> BridgeError {
-    BridgeError::SharedMemoryError(msg.into())
+/// Why a read or a write of a slab's channel was refused. `Copy` and free of
+/// text, so the audio thread can meet it without allocating; the control paths
+/// turn it into a [`BridgeError`] (`From`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+pub enum SlabAccessError {
+    /// The sample type is not the width the slab was laid out at.
+    #[error("sample type does not match the slab's sample format")]
+    SampleWidth,
+    /// The slab has no such channel in that direction.
+    #[error("channel index out of bounds")]
+    Channel,
+    /// The data is longer than a channel holds.
+    #[error("data length exceeds buffer capacity")]
+    Length,
+}
+
+impl From<SlabAccessError> for BridgeError {
+    fn from(error: SlabAccessError) -> Self {
+        Self::SharedMemoryError(error.to_string())
+    }
 }
 
 fn slab_err(e: SlabError) -> BridgeError {

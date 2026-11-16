@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::{Spawned, events, session, state};
-use crate::{Declared, Life, Load, LoadError, PoolEntry, PoolKey, RefreshPool};
+use crate::{Declared, Life, Load, LoadError, PoolEntry, PoolKey, RefreshReport};
 
 /// A kind that reads a whole file: the loaded value is its bytes.
 struct Read {
@@ -30,7 +30,7 @@ impl PoolEntry for Read {
             reads.fetch_add(1, Ordering::SeqCst);
             std::fs::read(path)
                 .map(Arc::new)
-                .map_err(|_| LoadError::Job(crate::jobs::JobFailed::Dropped))
+                .map_err(|_| LoadError::Job(crate::WorkerError::Dropped))
         })
     }
 
@@ -58,11 +58,10 @@ fn bytes(session: &crate::DetachedSession, key: &'static str) -> Vec<u8> {
 }
 
 /// Runs a refresh to its landing: the stat job, then the update that lands it.
-fn refreshed(s: &mut crate::DetachedSession, spawned: &Spawned) -> RefreshPool {
-    let wait = s.refresh_pool();
+fn refreshed(s: &mut crate::DetachedSession, spawned: &Spawned) -> RefreshReport {
+    let job = s.refresh_pool();
     spawned.run_all();
-    let _ = s.update();
-    wait.take().expect("landed").expect("the job finished")
+    job.wait(s).expect("the job finished")
 }
 
 fn loaded(dir: &Path, text: &[u8]) -> (crate::DetachedSession, Spawned, PathBuf, Arc<AtomicUsize>) {
@@ -101,6 +100,20 @@ fn a_refresh_loads_again_the_entry_whose_file_changed_and_keeps_the_old_value_un
     assert_eq!(reads.load(Ordering::SeqCst), 2);
     let again = refreshed(&mut s, &spawned);
     assert!(again.reloaded().is_empty(), "the new stamp is the file's");
+}
+
+#[test]
+fn a_dropped_refresh_job_starts_no_reload() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut s, spawned, path, reads) = loaded(dir.path(), b"one");
+    std::fs::write(&path, b"longer").unwrap();
+    let job = s.refresh_pool();
+    drop(job);
+    spawned.run_all();
+    let _ = s.update();
+    assert!(spawned.take().is_empty(), "no reload started");
+    assert_eq!(state(&s, "a").as_deref(), Some("loaded"));
+    assert_eq!(reads.load(Ordering::SeqCst), 1);
 }
 
 #[test]
@@ -179,10 +192,12 @@ fn an_entry_that_reloaded_meanwhile_is_not_reloaded_by_the_refresh_that_began_be
     std::fs::write(&other, b"other").unwrap();
     s.pool(read("a", &other, &reads)).unwrap();
     spawned.run_all();
-    let _ = s.update();
+    let mut landed = s.update();
     spawned.run_all();
-    let _ = events(&mut s);
-    let found = wait.take().expect("landed").expect("finished");
+    let _ = s.update();
+    let found = super::took(&mut landed, &wait)
+        .expect("landed")
+        .expect("finished");
     assert!(found.reloaded().is_empty(), "the stamp it checked is gone");
     assert_eq!(bytes(&s, "a"), b"other");
 }

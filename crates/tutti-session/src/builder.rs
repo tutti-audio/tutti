@@ -682,11 +682,15 @@ impl<C: Clock> SessionBuilder<C> {
 
     /// The spawner the session runs its blocking work on:
     /// a file load, a plugin round trip, a recording's pump. It is handed
-    /// each [`Job`](crate::Job) and calls [`Job::run`](crate::Job::run) on a
+    /// each [`Task`](crate::Task) and calls [`Task::run`](crate::Task::run) on a
     /// thread of its own (`tokio::task::spawn_blocking`, a rayon pool); what
     /// the job reports lands in [`Session::update`]. The default is a named
-    /// `std::thread` per job. A job the spawner drops unrun ends as failed,
-    /// so a spawner that refuses work loses none silently.
+    /// `tutti_rt::spawn_named` thread per task; dropping the session stops
+    /// them within 100 ms, and a thread still running then (a worker blocked on
+    /// the main thread) is detached with a `tracing` warning and outlives the
+    /// session. A task the spawner drops unrun ends as
+    /// [`WorkerError::Dropped`](crate::WorkerError::Dropped), so a spawner that
+    /// refuses work loses none silently.
     ///
     /// A recording take (`Session::record`, feature `audio-io`) holds one job for the whole take:
     /// over a bounded pool with no worker free it does not start until one is.
@@ -699,7 +703,7 @@ impl<C: Clock> SessionBuilder<C> {
     /// # let _ = builder;
     /// ```
     #[must_use]
-    pub fn spawn_with(mut self, spawn: impl Fn(crate::Job) + Send + Sync + 'static) -> Self {
+    pub fn spawn_with(mut self, spawn: impl Fn(crate::Task) + Send + Sync + 'static) -> Self {
         self.opts.spawner = crate::jobs::Spawner::new(spawn);
         self
     }

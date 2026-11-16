@@ -12,6 +12,7 @@ use tutti_alsa_ffi::{
 };
 use tutti_graph::Losses;
 use tutti_midi_device::{DeviceEvent, DeviceId, DeviceInfo, Identity};
+use tutti_midi_runtime::ClockWriters;
 
 /// Long enough to be a failure, not a race: the announce arrives at once.
 const PATIENCE: Duration = Duration::from_secs(20);
@@ -145,7 +146,9 @@ fn open_input_when_listed(
     ports: &std::sync::Arc<HardwareMidiInputs>,
 ) -> crate::OpenInput {
     when_listed(devices, || {
-        devices.open_input(id, ports).map(|(input, _inlet)| input)
+        devices
+            .open_input(id, ports, ClockWriters::new().0)
+            .map(|(input, _inlet)| input)
     })
 }
 
@@ -282,7 +285,11 @@ fn an_input_held_when_its_device_vanishes_is_reported_removed() {
     let connection = open_input_when_listed(&devices, &id, &ports);
     drop(device);
     until(&devices, removed(id.clone()));
-    assert!(devices.open_input(&id, &ports).is_err());
+    assert!(
+        devices
+            .open_input(&id, &ports, ClockWriters::new().0)
+            .is_err()
+    );
     drop(connection);
 }
 

@@ -871,6 +871,13 @@ impl Graph {
     /// which hands the editor its own fork source (a fork by state transfer)
     /// and declares its latency in its `Shape`. Capture its controls first:
     /// the plugin is out of reach once inserted.
+    ///
+    /// The node's rebinder is dropped: a plugin inserted this way is not
+    /// re-inserted when it changes its ports, and a served one is not
+    /// restarted into a new slab unless its owner ticks it (its handle's
+    /// `editor_idle` for an in-process plugin; for a served one only a pooled
+    /// plugin, which the session ticks, restarts). Pool the plugin
+    /// (`Session::add_pooled_plugin`) to have a port change applied.
     #[cfg(feature = "plugin")]
     pub fn insert_plugin(
         &mut self,
@@ -894,7 +901,7 @@ impl Graph {
             .with_controls(client.controls());
         let tempo = self.tempo.clone();
         let bound = client.bind(tempo);
-        let rebinder = tutti_plugin::catalog::PluginRebinder::served(bound.rebinder());
+        let rebinder = tutti_plugin::catalog::PluginRebinder::served(&bound);
         // A fresh key has no wiring recorded, so nothing is unwired.
         let _controls = self.editor.insert(node, PLUGIN_KIND, bound).controls;
         self.nodes.insert(
@@ -1012,7 +1019,7 @@ impl Graph {
         let plugin = client.plugin().clone();
         let tempo = self.tempo.clone();
         let bound = client.bind(tempo);
-        let rebinder = tutti_plugin::catalog::PluginRebinder::served(bound.rebinder());
+        let rebinder = tutti_plugin::catalog::PluginRebinder::served(&bound);
         match self.swap_unit(node, bound, fade, law) {
             Ok(_controls) => {
                 // The record is carried over to the incoming plugin (unlike

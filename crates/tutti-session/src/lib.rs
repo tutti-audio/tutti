@@ -79,6 +79,7 @@ mod hang;
 mod input;
 #[cfg(feature = "midi")]
 mod instrument;
+mod job;
 mod jobs;
 mod key;
 #[cfg(feature = "plugin")]
@@ -164,7 +165,8 @@ pub use graph::{
 pub use input::{Input, InputConfig, InputOpener, OpenedInput, Trim};
 #[cfg(feature = "midi")]
 pub use instrument::{AddedInstrument, AnyNode, InstrumentHandle, NotInstrument};
-pub use jobs::{Job, JobFailed};
+pub use job::{Job, JobId, JobKind, JobStatus, Landed, WaitError, WorkerError};
+pub use jobs::Task;
 pub use key::{
     Bus, BusSink, Channel, Connection, Edge, Event, EventEdge, EventInPort, EventOutPort,
     EventTapPort, Fanin, InPort, Inlet, Key, MainBus, MainSink, OutPort, Outlet, Root,
@@ -202,15 +204,16 @@ pub use peer::{Peer, PeerError, Presence, Resource, ResourceFact, ResourceId};
 pub use plugin::{
     AddPluginError, LoadedPlugin, Plugin, PluginCause, PluginChange, PluginDeclaration,
     PluginEntry, PluginEvent, PluginHealth, PluginInfo, PluginNode, PluginPorts, PooledPlugin,
-    PortsRefusal, SNAPSHOT_INTERVAL, StateJobError, StateJobFailed, StateRestore, StateView,
+    PortsRefusal, RestoreState, SNAPSHOT_INTERVAL, SaveState, StateJobError, StateJobFailed,
+    StateRestore, StateView,
 };
 pub(crate) use pool::Pool;
 #[cfg(feature = "sampler")]
 pub use pool::{AudioEntry, AudioFile, StreamInfo, Tier, audio_file};
 pub use pool::{
     Declared, HandleError, IntoPool, Life, Load, LoadError, OpenCx, Parking, PoolConfig, PoolEntry,
-    PoolError, PoolEvent, PoolKey, PoolOutcome, PoolReport, PoolSet, PoolState, PoolWait,
-    RefreshPool, RetryError, WhenLoadedError, stranded_loads,
+    PoolError, PoolEvent, PoolJobError, PoolKey, PoolLoaded, PoolOutcome, PoolReport, PoolSet,
+    PoolState, RefreshPool, RefreshReport, RetryError, WhenLoadedError, stranded_loads,
 };
 #[cfg(feature = "plugin")]
 pub(crate) use pool::{Hold, HoldKind};
