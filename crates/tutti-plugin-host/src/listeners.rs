@@ -252,11 +252,15 @@ mod tests {
         *own.lock() = Some(sub);
         let (done, finished) = mpsc::channel();
         let fired = listener.clone();
-        std::thread::spawn(move || {
+        // Detached: a deadlock is what `recv_timeout` below reports, and a
+        // handle's drop would wait on it for ever.
+        tutti_rt::spawn_named("listener-fire", None, move |_| {
             fired.fire(1);
             fired.fire(2);
             let _ = done.send(());
-        });
+        })
+        .expect("the firing thread starts")
+        .detach();
         finished
             .recv_timeout(Duration::from_secs(5))
             .expect("fire deadlocked on a callback that changed its own subscribers");

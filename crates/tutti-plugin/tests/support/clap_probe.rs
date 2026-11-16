@@ -407,11 +407,14 @@ pub struct LoadedProbe {
 /// If the load fails — these tests are about what a *loaded* plugin does, so a
 /// failure to load is a broken fixture rather than an outcome worth asserting.
 pub fn load_probe(sample_rate: f64) -> LoadedProbe {
-    load_probe_with(BridgeConfig::default(), sample_rate)
+    load_probe_with(
+        BridgeConfig::at(tutti_plugin::unique_socket_path().expect("the OS has a random source")),
+        sample_rate,
+    )
 }
 
-/// [`load_probe`] with a bridge config of the caller's (a shorter
-/// `timeout_ms`, say).
+/// [`load_probe`] with a bridge config of the caller's (shorter
+/// `Timeouts`, say).
 pub fn load_probe_with(config: BridgeConfig, sample_rate: f64) -> LoadedProbe {
     // SAFETY: `exclusive()` is held; see `ProbeEnv::set`.
     unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", plugin_server_path()) };

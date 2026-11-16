@@ -1,29 +1,28 @@
 //! [`OfflineWait`] — what an offline fork's batcher waits on, and what it
 //! latches when the wait fails.
 
-use crate::ProcessGuard;
+use crate::ServerWatch;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Mutex, MutexGuard, PoisonError, Weak};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 use tutti_plugin_types::PluginFailure;
 use tutti_types::{SampleRate, Samples};
 
 /// An offline fork's wait for the server: the per-block budget, and the
-/// latches the batcher sets when the wait fails (a missed budget, a dead
-/// server, a plugin that refused its rate).
+/// latches the batcher sets when the wait fails (a missed budget, a plugin that
+/// refused its rate). A dead server is the fork's [`ServerWatch`], the one latch
+/// every signal of the death sets.
 ///
 /// The batcher records the failure here and whoever probes the fork's health
 /// reads it back ([`gave_up`](Self::gave_up), [`death`](Self::death),
 /// [`refusal`](Self::refusal)): a render that ends before the next process
 /// poll drops the bridge with the executor, so the latch is what outlives it.
 pub struct OfflineWait {
-    /// The fork's server process. Weak: a probe the editor keeps must not keep
-    /// the fork alive after its node is gone.
-    server: Weak<ProcessGuard>,
+    /// Whether the fork's server is alive. Holds no process: a probe the editor
+    /// keeps does not keep the fork alive after its node is gone.
+    server: Arc<ServerWatch>,
     /// Latched when a block first misses `budget`.
     gave_up: AtomicBool,
-    /// Latched, with its exit status, when the server was found dead.
-    died: Mutex<Option<PluginFailure>>,
     /// Latched when the fork's plugin was found refusing its rate.
     refusal: Mutex<Option<(SampleRate, String)>>,
     /// The latency the fork's graph was compiled against, recorded once the
@@ -42,13 +41,12 @@ impl std::fmt::Debug for OfflineWait {
 }
 
 impl OfflineWait {
-    /// A wait of `budget` per chunk on the server behind `server`, with
+    /// A wait of `budget` per chunk on the server `server` watches, with
     /// nothing latched.
-    pub fn new(budget: Duration, server: Weak<ProcessGuard>) -> Self {
+    pub fn new(budget: Duration, server: Arc<ServerWatch>) -> Self {
         Self {
             server,
             gave_up: AtomicBool::new(false),
-            died: Mutex::new(None),
             refusal: Mutex::new(None),
             planned: AtomicUsize::new(usize::MAX),
             budget,
@@ -70,7 +68,7 @@ impl OfflineWait {
         }
     }
 
-    /// The per-block budget (`BridgeConfig::timeout_ms`).
+    /// The per-block budget (`Timeouts::call`).
     pub fn budget(&self) -> Duration {
         self.budget
     }
@@ -78,7 +76,7 @@ impl OfflineWait {
     /// Whether the wait should not wait at all any more: a block already
     /// missed its budget, or the server is dead.
     pub(crate) fn stopped_waiting(&self) -> bool {
-        self.gave_up() || lock(&self.died).is_some()
+        self.gave_up() || self.server.is_dead()
     }
 
     /// Whether a block missed its budget.
@@ -91,17 +89,9 @@ impl OfflineWait {
         self.gave_up.store(true, Ordering::Release);
     }
 
-    /// The latched death of the server (a cause or its exit status), if any.
+    /// The server's death, if the watch has one: the first signal's cause.
     pub fn death(&self) -> Option<PluginFailure> {
-        lock(&self.died).clone()
-    }
-
-    /// Latch a crash the bridge reported, unless a death is latched already.
-    pub(crate) fn latch_crash(&self, cause: Option<PluginFailure>) {
-        let mut died = lock(&self.died);
-        if died.is_none() {
-            *died = Some(cause.unwrap_or(PluginFailure::Unreported));
-        }
+        self.server.cause()
     }
 
     /// The latched rate refusal, if any.
@@ -118,17 +108,10 @@ impl OfflineWait {
         }
     }
 
-    /// Ask the process whether it has exited, and latch it if so.
+    /// Whether the server is gone, by any signal the watch has had: its
+    /// stream ending, its process ending, or the host ending it.
     pub fn server_died(&self) -> bool {
-        let mut died = lock(&self.died);
-        if died.is_some() {
-            return true;
-        }
-        let status = self.server.upgrade().and_then(|s| s.exited());
-        if let Some(status) = status {
-            *died = Some(PluginFailure::ServerExited { status });
-        }
-        died.is_some()
+        self.server.is_dead()
     }
 }
 
