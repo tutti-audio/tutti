@@ -177,7 +177,7 @@ pub use tutti_session::Params as PluginParams;
 pub use tutti_session::{
     AddPluginError, Diagnostics, Opened, Plugin, PluginBuses, PluginChange, PluginDeclaration,
     PluginEvent, PluginHealth, PluginInfo, PluginNode, PluginParamError, PooledPlugin, PortCounts,
-    PresetEntry, PresetKind, Presets, TypedParam,
+    PresetEntry, PresetKind, Presets, RestoreState, SaveState, TypedParam,
 };
 #[cfg(all(feature = "session", feature = "export"))]
 pub use tutti_session::{
@@ -186,9 +186,8 @@ pub use tutti_session::{
 #[cfg(feature = "session")]
 pub use tutti_session::{
     Clock, ConnectError, Edge, EventInPort, EventOutPort, InPort, Job, JobId, JobKind, JobStatus,
-    Key, Landed, NoSuchNode, Offline, OfflineSession, OutPort, Playhead, RealTime, RestoreState,
-    Root, SaveState, Session, SessionBuilder, SessionEvent, SystemClock, SystemSession,
-    TypedParamRef, WaitError, Workers,
+    Key, Landed, NoSuchNode, Offline, OfflineSession, OutPort, Playhead, RealTime, Root, Session,
+    SessionBuilder, SessionEvent, SystemClock, SystemSession, TypedParamRef, WaitError, Workers,
 };
 #[cfg(all(feature = "session", feature = "device"))]
 pub use tutti_session::{Device, DeviceClock, DeviceEvent, LiveSession};
