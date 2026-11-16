@@ -118,6 +118,10 @@ fn a_detached_thread_is_not_stopped() {
 
 /// A priority request is carried out on the thread and its outcome comes back.
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "calls the OS scheduler (pthread_getschedparam, setpriority), which miri does not support"
+)]
 fn a_requested_priority_reports_its_outcome() {
     let handle = spawn_named("raised", Some(PriorityRequest::Raised), |_| ()).unwrap();
     let outcome = handle.priority().expect("a request has an outcome");
