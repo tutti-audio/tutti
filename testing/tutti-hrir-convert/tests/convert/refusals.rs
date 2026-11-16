@@ -159,3 +159,14 @@ fn coplanar_directions_are_refused_by_the_sphere() {
         SofaError::Sphere(HrtfBinauralError::NotEnclosing)
     ));
 }
+
+#[test]
+fn a_rate_in_other_units_than_hertz_is_refused() {
+    let mut sofa = Sofa::octahedron();
+    sofa.rate = vec![48.0];
+    sofa.rate_units = Some("kilohertz");
+    assert!(matches!(
+        refused("rate_kilohertz", &sofa),
+        SofaError::RateUnits { found } if found == "kilohertz"
+    ));
+}

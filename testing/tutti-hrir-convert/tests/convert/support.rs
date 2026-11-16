@@ -25,6 +25,7 @@ pub struct Sofa {
     pub(crate) ir_shape: Vec<u64>,
     pub(crate) ir: Vec<f64>,
     pub(crate) rate: Vec<f64>,
+    pub(crate) rate_units: Option<&'static str>,
     pub(crate) delay: Option<(Vec<u64>, Vec<f64>)>,
     pub(crate) position_shape: Vec<u64>,
     pub(crate) positions: Vec<f64>,
@@ -50,6 +51,7 @@ impl Sofa {
             ir_shape: vec![m as u64, 2, TAPS as u64],
             ir,
             rate: vec![48_000.0],
+            rate_units: Some("hertz"),
             delay: Some((vec![1, 2], vec![0.0, 0.0])),
             position_shape: vec![m as u64, 3],
             positions: OCTAHEDRON.iter().flatten().copied().collect(),
@@ -68,8 +70,12 @@ impl Sofa {
         b.create_dataset("Data.IR")
             .with_f64_data(&self.ir)
             .with_shape(&self.ir_shape);
-        b.create_dataset("Data.SamplingRate")
+        let rate = b
+            .create_dataset("Data.SamplingRate")
             .with_f64_data(&self.rate);
+        if let Some(u) = self.rate_units {
+            rate.set_attr("Units", AttrValue::String(u.into()));
+        }
         if let Some((shape, values)) = &self.delay {
             b.create_dataset("Data.Delay")
                 .with_f64_data(values)

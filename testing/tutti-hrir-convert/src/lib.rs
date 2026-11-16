@@ -73,6 +73,12 @@ pub enum SofaError {
         /// The values found.
         found: Vec<f64>,
     },
+    /// `Data.SamplingRate`'s Units attribute is not `hertz`.
+    #[error("`Data.SamplingRate` has units `{found}`, expected `hertz`")]
+    RateUnits {
+        /// The units the attribute names.
+        found: String,
+    },
     /// A `Data.Delay` is not a whole, non-negative number of samples.
     #[error(
         "delay {value} of measurement {measurement}, receiver {receiver}, is not a whole, non-negative number of samples"
@@ -186,6 +192,12 @@ pub fn convert(path: &Path) -> Result<HrirSphere, SofaError> {
     }
     let (measurements, taps) = (measurements as usize, taps as usize);
 
+    if let Ok(dataset) = file.dataset("Data.SamplingRate") {
+        let attrs = read("Data.SamplingRate's attributes", dataset.attrs())?;
+        if let Some(found) = text(&attrs, "Units").filter(|u| u != "hertz") {
+            return Err(SofaError::RateUnits { found });
+        }
+    }
     let (_, rate) = variable(&file, "Data.SamplingRate")?;
     let rate = match rate[..] {
         [hz] if hz.fract() == 0.0 && (1.0..=f64::from(u32::MAX)).contains(&hz) => hz as u32,
