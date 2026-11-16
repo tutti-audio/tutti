@@ -1956,6 +1956,15 @@ impl Graph {
         Ok((applied, host.plugin_targets.into_inner()))
     }
 
+    /// Points each hosted plugin's driven parameters at the lanes `state` holds:
+    /// where a set of a driven parameter goes.
+    #[cfg(all(feature = "modulation", feature = "plugin"))]
+    pub(crate) fn refresh_driven(&self, state: &crate::modulation::ModState) {
+        for (&node, hosted) in &self.plugins {
+            hosted.driven.replace(state.plugin_lanes(node));
+        }
+    }
+
     /// Schedules the note-envelope resyncs `m` owes, after the commit that
     /// sent their nodes (`Modulation::send_resyncs`).
     #[cfg(feature = "modulation")]
@@ -3804,8 +3813,8 @@ struct ModHostOver<'a> {
     #[cfg(feature = "plugin")]
     plugins: &'a BTreeMap<NodeKey, crate::plugin::HostedPlugin>,
     keys: &'a dyn ModKeys,
-    /// Each plugin target the apply resolved, by node and parameter: where
-    /// `Phase::Plugins` writes a GUI edit (`ModState::plugin_target`).
+    /// Each plugin target the apply resolved, by node and parameter: which
+    /// plugin parameters a lane drives (`ModState::plugin_lanes`).
     plugin_targets: std::cell::RefCell<PluginTargets>,
 }
 

@@ -751,6 +751,9 @@ pub(crate) struct HostedPlugin {
     /// it still declare the parameter. Ended when the record retires or the
     /// plugin is replaced.
     pub(crate) gate: Gate,
+    /// The lane knobs of the parameters a modulation lane drives: where a set
+    /// of one goes.
+    pub(crate) driven: crate::plugin_params::Driven,
     /// The read that fills the mirror (a crossfade rebuilt it, the load's read
     /// was not answered, or the plugin announced a rescan), until
     /// `Phase::Plugins` hands it to the host as a job.
@@ -935,6 +938,7 @@ impl HostedPlugin {
             hearing,
             mirror,
             gate: Gate::default(),
+            driven: crate::plugin_params::Driven::default(),
             param_read: Some(read),
             mirror_token: Arc::new(()),
             silenced: false,
@@ -1469,6 +1473,8 @@ impl<C: crate::Clock> Session<C> {
         match values {
             Ok(values) => {
                 hosted.mirror.land(values);
+                #[cfg(feature = "modulation")]
+                hosted.driven.report_knobs(&hosted.mirror);
                 hosted.gate.declare(&hosted.mirror);
                 true
             }
@@ -2119,13 +2125,11 @@ impl<C: crate::Clock> Session<C> {
                     },
                 );
             }
-            #[cfg(feature = "modulation")]
-            let state = &self.mods.state;
-            hosted.mirror.drain_edits(|_id, _value| {
-                #[cfg(feature = "modulation")]
-                if let Some(target) = state.plugin_target(node, _id.get()) {
-                    state.set_knob(target, _value.get() as f32);
-                }
+            // A value the plugin reported or the host set goes into the knob
+            // of the lane driving that parameter, if one does.
+            let driven = &hosted.driven;
+            hosted.mirror.drain_edits(|id, value| {
+                driven.write(id, value);
             });
 
             if let Some(tail) = declared_tail {
