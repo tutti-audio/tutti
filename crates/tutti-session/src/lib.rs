@@ -197,7 +197,7 @@ pub use modulation::{
     RouteInfo, RouteMut, RouteSpec, SourceInfo, SourceName, TargetName, UNRESOLVED_WARNING,
     declare_targets,
 };
-pub use node::{Reclaimer, SessionNode};
+pub use node::{Reclaimer, Reclaims, SessionNode};
 pub use params::{ParamError, RangeError, TypedParamRef};
 pub use peer::{Peer, PeerError, Presence, Resource, ResourceFact, ResourceId};
 #[cfg(feature = "plugin")]
