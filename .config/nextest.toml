@@ -1,3 +1,18 @@
+# Every test fails by name once it runs five minutes: nextest reports it slow at
+# each minute and terminates it at the fifth, so a hang ends the run with the
+# test's name instead of holding a build slot for hours. The slowest healthy
+# tests take under a minute on CI (a VST3 concurrent-open test about 50 s, the
+# graph's differential crossfades about 25 s, the CLAP live tests up to 17 s);
+# five minutes leaves room for a loaded machine. Every profile inherits it.
+[profile.default]
+slow-timeout = { period = "60s", terminate-after = 5 }
+
+# Opening and dropping one VST3 image from many threads takes about 50 s on CI's
+# macOS runner, so it gets ten minutes.
+[[profile.default.overrides]]
+filter = 'package(tutti-vst3-host) and test(concurrent_opens_and_drops_of_one_image_do_not_corrupt_the_plugins_globals)'
+slow-timeout = { period = "60s", terminate-after = 10 }
+
 # A `tutti-rt` test that spins (a block counter that was not re-armed, a gate
 # that never closes) fails after a minute instead of hanging the run. The
 # longest healthy test in the crate takes a few seconds.
