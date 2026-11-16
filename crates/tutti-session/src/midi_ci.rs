@@ -1,7 +1,9 @@
 //! A request to a MIDI-CI peer is a typed [`Job`] (feature `midi-hardware`).
 //!
-//! The Profiles an input's peers list ([`MidiInputInfo::profiles`]) and the
-//! peers it can ask for a MIDI Message Report ([`MidiInputInfo::report_peers`])
+//! The Profiles an input's peers list
+//! ([`MidiInputInfo::profiles`](crate::MidiInputInfo::profiles)) and the peers it
+//! can ask for a MIDI Message Report
+//! ([`MidiInputInfo::report_peers`](crate::MidiInputInfo::report_peers))
 //! are handles that carry their port's request queue, so a request names only
 //! what the peer listed: [`ChannelProfile::enable`], [`WholeProfile::enable`]
 //! and `disable` return a [`Job<SwitchProfile>`](Job), [`ReportPeer::request`]
