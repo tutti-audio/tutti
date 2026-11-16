@@ -1,25 +1,18 @@
 use super::*;
 
-/// `record` must never wait on a reader holding the slots: it counts the fault
-/// and drops the message.
+/// `record` takes no lock: a reader holding the control side's slots neither
+/// stalls it nor costs it the message.
 #[test]
-fn record_while_last_is_locked_counts_and_returns() {
+fn record_while_the_control_side_is_reading_keeps_the_message() {
     let faults = StreamFaults::new();
     let held = faults.last_guard();
     faults.record(BackendErrorKind::DeviceGone, &"device not available");
     drop(held);
     assert_eq!(faults.count(), 1);
     assert!(faults.is_disconnected());
-    assert!(
-        faults.last().is_none(),
-        "the message was dropped, not waited for"
-    );
-
-    faults.record(BackendErrorKind::DeviceGone, &"device not available");
-    assert_eq!(faults.count(), 2);
     assert_eq!(
-        faults.last().map(|f| f.kind),
-        Some(StreamFaultKind::Disconnected)
+        faults.last().map(|f| f.message),
+        Some("device not available".to_string())
     );
 }
 
@@ -161,23 +154,13 @@ fn an_overrun_keeps_a_latching_message_and_a_panic_replaces_a_lesser_one() {
     );
 }
 
-/// **A panic after an owned message is the latest word, and nothing owned is
-/// touched:** the owned message stays where it was (a render-thread fault never
-/// replaces or frees it), and a later owned one is newer again.
+/// **A panic after a backend fault is the latest word, and a later backend
+/// fault outranks the panic:** the newest of the two is reported.
 #[test]
-fn a_panic_leaves_the_owned_message_alone_and_a_later_owned_one_outranks_it() {
+fn the_newest_of_a_backend_fault_and_a_panic_is_reported() {
     let faults = StreamFaults::new();
     faults.record(BackendErrorKind::Other, &"xrun");
     faults.record_panic("panicked");
-    assert_eq!(
-        faults
-            .last_guard()
-            .owned
-            .as_ref()
-            .map(|(_, f)| f.message.clone()),
-        Some(Cow::Owned::<str>("xrun".to_string())),
-        "the owned message was not replaced"
-    );
     let last = faults.last().expect("a fault");
     assert_eq!(last.kind, StreamFaultKind::CallbackPanicked);
     assert_eq!(last.message, "panicked");
@@ -216,16 +199,23 @@ fn a_render_side_fault_raised_repeatedly_is_read_with_its_latest_text() {
 }
 
 /// **A text longer than `RT_TEXT_BYTES` is cut at a character boundary**, never
-/// in the middle of one.
+/// in the middle of one, whether it is one piece or several.
 #[test]
-fn a_long_render_side_text_is_cut_at_a_character_boundary() {
+fn a_long_text_is_cut_at_a_character_boundary() {
     let faults = StreamFaults::new();
-    // 125 ASCII bytes then a 2-byte character straddling the limit.
-    let text: &'static str = Box::leak(format!("{}é{}", "a".repeat(125), "z").into_boxed_str());
-    faults.record_panic(text);
+    // Ascii up to one byte short of the limit, then a 2-byte character
+    // straddling it.
+    let text = format!("{}é{}", "a".repeat(RT_TEXT_BYTES - 1), "z");
+    faults.record(BackendErrorKind::Other, &text.as_str());
     let message = faults.last().expect("a fault").message;
-    assert_eq!(message, "a".repeat(125));
-    assert!(message.len() <= RT_TEXT_BYTES);
+    assert_eq!(message, "a".repeat(RT_TEXT_BYTES - 1));
+
+    let faults = StreamFaults::new();
+    faults.record(BackendErrorKind::DeviceGone, &format_args!("{text}{text}"));
+    assert_eq!(
+        faults.last().expect("a fault").message.len(),
+        RT_TEXT_BYTES - 1
+    );
 }
 
 /// **`take_last` shows each fault once, and an overrun it outranked does not
@@ -253,4 +243,103 @@ fn clear_forgets_render_side_faults() {
     assert_eq!(faults.count(), 0);
     faults.record_overrun("after");
     assert_eq!(faults.last().expect("a fault").message, "after");
+}
+
+/// **`take_last` forgets what existed when it began and no more:** a fault
+/// recorded after its snapshot is reported by the next `last`, not swallowed,
+/// and the overrun it outranked is gone with it.
+#[test]
+fn a_fault_after_take_lasts_snapshot_is_reported_by_the_next_last() {
+    let faults = StreamFaults::new();
+    faults.record_overrun("old");
+    let snapshot = faults.order.load(Ordering::Acquire);
+    faults.record_panic("late");
+    assert_eq!(
+        faults.take_up_to(snapshot).expect("a fault").message,
+        "old",
+        "the later panic is past the snapshot"
+    );
+    let last = faults.last().expect("the late fault survives the take");
+    assert_eq!(last.kind, StreamFaultKind::CallbackPanicked);
+    assert_eq!(last.message, "late");
+    assert_eq!(faults.take_last().expect("a fault").message, "late");
+    assert!(faults.last().is_none());
+}
+
+/// **Real threads: render-side writers against a control reader lose no fault
+/// and report none out of priority.** Two threads raise overruns and panics
+/// while the control side calls `last`, `take_last` and `count`: the count only
+/// grows and equals the raises, every message read is whole text one writer
+/// wrote with its own kind, and once the writers stop a panic outranks a newer
+/// overrun.
+#[test]
+fn render_side_writers_and_a_control_reader_agree_on_priority_and_lose_nothing() {
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+    use std::thread;
+
+    const RAISES: u64 = 20_000;
+    let faults = Arc::new(StreamFaults::new());
+    let stop = Arc::new(AtomicBool::new(false));
+
+    let overruns = {
+        let faults = Arc::clone(&faults);
+        thread::spawn(move || {
+            for _ in 0..RAISES {
+                faults.record_overrun("an overrun");
+            }
+        })
+    };
+    let panics = {
+        let faults = Arc::clone(&faults);
+        thread::spawn(move || {
+            for _ in 0..RAISES {
+                faults.record_panic("a panic");
+            }
+        })
+    };
+    let reader = {
+        let faults = Arc::clone(&faults);
+        let stop = Arc::clone(&stop);
+        thread::spawn(move || {
+            let mut last_count = 0;
+            while !stop.load(Ordering::Acquire) {
+                let count = faults.count();
+                assert!(count >= last_count, "the count only grows");
+                last_count = count;
+                if let Some(fault) = faults.last() {
+                    match fault.kind {
+                        StreamFaultKind::CallbackPanicked => {
+                            assert_eq!(fault.message, "a panic");
+                        }
+                        StreamFaultKind::Overrun => {
+                            assert_eq!(fault.message, "an overrun");
+                        }
+                        other => panic!("a kind nobody recorded: {other:?}"),
+                    }
+                }
+                if let Some(fault) = faults.take_last() {
+                    let expected = match fault.kind {
+                        StreamFaultKind::CallbackPanicked => "a panic",
+                        StreamFaultKind::Overrun => "an overrun",
+                        other => panic!("a kind nobody recorded: {other:?}"),
+                    };
+                    assert_eq!(fault.message, expected);
+                }
+            }
+        })
+    };
+    overruns.join().expect("overrun writer");
+    panics.join().expect("panic writer");
+    stop.store(true, Ordering::Release);
+    reader.join().expect("control reader");
+
+    assert_eq!(faults.count(), 2 * RAISES, "every raise was counted");
+    // One more of each, with no reader: the panic outranks the later overrun.
+    faults.take_last();
+    faults.record_panic("final panic");
+    faults.record_overrun("final overrun");
+    let last = faults.last().expect("a fault");
+    assert_eq!(last.kind, StreamFaultKind::CallbackPanicked);
+    assert_eq!(last.message, "final panic");
 }

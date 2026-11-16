@@ -19,9 +19,39 @@ fn raising_render_side_faults_repeatedly_allocates_nothing_and_is_read_afterward
         }
     });
 
-    assert_eq!(faults.count(), 1 + 2 + 20_000);
+    assert_eq!(faults.count(), 3 + 20_000);
     let last = faults.last().expect("a fault");
     assert_eq!(last.kind, StreamFaultKind::CallbackPanicked);
     assert_eq!(last.message, "the output callback panicked");
+    assert!(faults.is_disconnected());
+}
+
+/// An error whose `Display` writes in pieces, as a backend's does.
+struct Pieces;
+impl std::fmt::Display for Pieces {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("`alsa::poll()` ")?;
+        write!(f, "returned {}", 42)
+    }
+}
+
+/// **A backend error recorded where the error callback runs (the render
+/// thread, on CoreAudio) allocates and frees nothing**: not for a first
+/// error, a repeat, nor a disconnect, and
+/// the text is read on the control side.
+#[test]
+fn recording_a_backend_error_allocates_nothing_and_is_read_afterwards() {
+    let faults = StreamFaults::new();
+    faults.record(BackendErrorKind::Other, &Pieces);
+    assert_no_alloc::assert_no_alloc(|| {
+        for _ in 0..1000 {
+            faults.record(BackendErrorKind::Other, &Pieces);
+        }
+        faults.record(BackendErrorKind::DeviceGone, &Pieces);
+        faults.record(BackendErrorKind::Survivable, &Pieces);
+    });
+    let last = faults.last().expect("a fault");
+    assert_eq!(last.kind, StreamFaultKind::Disconnected);
+    assert_eq!(last.message, "`alsa::poll()` returned 42");
     assert!(faults.is_disconnected());
 }
