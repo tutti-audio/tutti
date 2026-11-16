@@ -115,6 +115,7 @@ fn serve_lane(
     stream: &interprocess::local_socket::Stream,
     mut slab: Option<SlabWriter>,
     log: &Record,
+    reply_delay: Duration,
 ) {
     let mut scratch = vec![0.0f32; CHUNK];
     while let Some((bytes, message)) = read_frame(stream) {
@@ -133,7 +134,13 @@ fn serve_lane(
             HostMessage::GetCurrentPreset => Some(BridgeMessage::CurrentPreset { id: None }),
             HostMessage::ProcessAudio(data) => {
                 log.lock().unwrap().push(bytes);
-                slab.as_mut().map(|slab| answer(slab, &mut scratch, data))
+                slab.as_mut().map(|slab| {
+                    let reply = answer(slab, &mut scratch, data);
+                    // The audio is published; the reply follows `reply_delay`
+                    // later, as a server the scheduler has not run yet.
+                    std::thread::sleep(reply_delay);
+                    reply
+                })
             }
             // The bridge holds every block behind a rate change until the
             // server answers it.
@@ -156,6 +163,12 @@ fn serve_lane(
 }
 
 pub(super) fn rig(label: &str) -> Rig {
+    rig_replying_after(label, Duration::ZERO)
+}
+
+/// [`rig`] whose server sends each block's reply `reply_delay` after it has
+/// published the block's audio.
+pub(super) fn rig_replying_after(label: &str, reply_delay: Duration) -> Rig {
     use interprocess::local_socket::{ListenerOptions, traits::Listener as _};
     static COUNTER: tutti_types::Mint = tutti_types::Mint::new();
     let shm = format!("diff_{label}_{}_{}", std::process::id(), COUNTER.mint());
@@ -196,13 +209,13 @@ pub(super) fn rig(label: &str) -> Rig {
         .name("mock-differential-control".into())
         .spawn({
             let log = Arc::clone(&record);
-            move || serve_lane(&control, None, &log)
+            move || serve_lane(&control, None, &log, Duration::ZERO)
         })
         .unwrap();
     let server = std::thread::Builder::new()
         .name("mock-differential-server".into())
         .spawn(move || {
-            serve_lane(&audio, Some(server_slab), &log);
+            serve_lane(&audio, Some(server_slab), &log, reply_delay);
             let _ = std::fs::remove_file(&path);
         })
         .unwrap();

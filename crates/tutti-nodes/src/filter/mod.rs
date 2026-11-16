@@ -7,10 +7,10 @@ pub mod ladder;
 pub mod svf;
 
 pub(crate) use crossover::Splits;
-pub use crossover::{CrossoverKernel, CrossoverNode};
+pub use crossover::{CrossoverKernel, CrossoverNode, CrossoverSet};
 pub use eq_band::EqBandNode;
-pub use ladder::{LadderFilterNode, LadderKernel};
-pub use svf::{SvfFilterNode, SvfKernel};
+pub use ladder::{LadderFilterNode, LadderKernel, LadderSet};
+pub use svf::{SvfFilterNode, SvfKernel, SvfSet};
 
 use tutti_types::{BusTopology, ChannelLayout};
 
