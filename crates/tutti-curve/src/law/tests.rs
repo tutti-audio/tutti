@@ -235,3 +235,24 @@ fn linear_is_the_identity_on_the_unit_interval() {
         }
     }
 }
+
+/// `Exp(k)` at the midpoint is `1 / (e^(k/2) + 1)`, since
+/// `(e^(k/2) - 1) / (e^k - 1)` factors with `e^k - 1 = (e^(k/2) - 1)(e^(k/2) + 1)`.
+/// A power law at `1/4` with exponent `1.5` is `(1/2)^3 = 1/8`, and at `1/2`
+/// with exponent `2.5` it is `2^-2.5`.
+#[test]
+fn exp_midpoint_and_fractional_power_meet_their_closed_forms() {
+    for k in [4.0f32, -4.0, 1.0, 12.0] {
+        let want = 1.0 / ((f64::from(k) / 2.0).exp() + 1.0);
+        let got = f64::from(Law::Exp(Curvature::of(k)).eval(0.5));
+        assert!(
+            (got - want).abs() < 1e-6,
+            "Exp({k}) midpoint: {got} vs {want}"
+        );
+    }
+    let got = f64::from(Law::PowerIn(Exponent::of(1.5)).eval(0.25));
+    assert!((got - 0.125).abs() < 1e-7, "0.25^1.5: {got}");
+    let got = f64::from(Law::PowerIn(Exponent::of(2.5)).eval(0.5));
+    let want = 2f64.powf(-2.5);
+    assert!((got - want).abs() < 1e-7, "0.5^2.5: {got} vs {want}");
+}

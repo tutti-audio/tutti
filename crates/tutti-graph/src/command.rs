@@ -451,7 +451,7 @@ impl CommandRx {
                 && let At::Frame(_) = cmd.at
             {
                 cmd.pos *= ratio;
-                cmd.at = At::Frame(tutti_types::Frame::new(cmd.pos.round() as u64));
+                cmd.at = At::Frame(tutti_types::Frame::nearest(cmd.pos));
             }
         }
     }
@@ -607,13 +607,6 @@ pub(crate) fn overlay_capacity(plan: &Plan, cap: usize, flushed: usize) -> usize
         .max()
         .unwrap_or(0);
     widest + flushed + COMMAND_CAPACITY
-}
-
-/// `f` at a rate `ratio` times the old one: the same wall-clock time, to the
-/// nearest frame (half away from zero). `f64` holds a frame exactly up to
-/// 2^53, about 5 900 years at 48 kHz.
-pub(crate) fn rescale(f: tutti_types::Frame, ratio: f64) -> tutti_types::Frame {
-    f.scaled(ratio)
 }
 
 #[cfg(test)]

@@ -47,7 +47,7 @@ use tutti_graph::{
     Cx, Inputs, IntoNode, Io, Node, NodeParts, Outputs, ParamNode, ParamSet, Prepare, Shape, Status,
 };
 use tutti_types::UnitParam;
-use tutti_types::{Amplitude, Balance, BusTopology, MAX_CHANNELS, Param, Speaker, Tail};
+use tutti_types::{Amplitude, Balance, BusTopology, MAX_CHANNELS, Param, Tail};
 
 // The params a [`BusStripNode`] lets the graph modulate, in port order.
 tutti_graph::declare_params!([] BusStripNode, n {
@@ -127,7 +127,7 @@ enum Side {
 }
 
 /// The side of each channel of `topology`: a speaker is `Left` or `Right` when
-/// its [`mirror`](Speaker::mirror) is also on the bus, and `Mid` otherwise. A bus
+/// its [`mirror`](tutti_types::Speaker::mirror) is also on the bus, and `Mid` otherwise. A bus
 /// with no placement or an ambisonic one has no pair, so every channel is `Mid`.
 /// Control side: runs once.
 fn sides_of(topology: &BusTopology) -> [Side; MAX_CHANNELS] {
@@ -137,7 +137,7 @@ fn sides_of(topology: &BusTopology) -> [Side; MAX_CHANNELS] {
     };
     for (side, &speaker) in sides.iter_mut().zip(positions) {
         if speaker.mirror().is_some_and(|m| positions.contains(&m)) {
-            *side = if is_left(speaker) {
+            *side = if speaker.is_left() {
                 Side::Left
             } else {
                 Side::Right
@@ -145,23 +145,6 @@ fn sides_of(topology: &BusTopology) -> [Side; MAX_CHANNELS] {
         }
     }
     sides
-}
-
-/// Whether `speaker` is the left one of its mirror pair.
-const fn is_left(speaker: Speaker) -> bool {
-    use Speaker::{
-        BackLeft, FrontLeft, FrontLeftOfCenter, SideLeft, TopBackLeft, TopFrontLeft, TopSideLeft,
-    };
-    matches!(
-        speaker,
-        FrontLeft
-            | BackLeft
-            | FrontLeftOfCenter
-            | SideLeft
-            | TopFrontLeft
-            | TopBackLeft
-            | TopSideLeft
-    )
 }
 
 /// The gain on each kind of channel: the left and right of a balanced pair, and

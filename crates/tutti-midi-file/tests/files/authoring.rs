@@ -9,16 +9,18 @@ use std::io::Cursor;
 use std::sync::Arc;
 
 use tutti_midi_file::{
-    ConfigError, Error, FileEvent, Meta, MidiFile, OutOfOrder, Refusal, SmfFormat, TextKind, Tick,
-    Track,
+    ConfigError, Error, FileEvent, Meta, MidiFile, OutOfOrder, Refusal, SmfDivision, SmfFormat,
+    TextKind, Tick, Track,
 };
 use tutti_types::{Beat, Bpm};
 use tutti_ump::{
-    Address, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, SysexStatus, U7, Ump,
-    Voice1, Voice2,
+    Address, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, SysexStatus,
+    TicksPerQuarterNote, U7, Ump, Voice1, Voice2,
 };
 
 const TPQ: u16 = 480;
+const DIVISION: TicksPerQuarterNote = TicksPerQuarterNote::of(TPQ);
+const SMF_DIVISION: SmfDivision = SmfDivision::of(TPQ);
 
 fn on(tick: u64, key: u8) -> (Tick, FileEvent) {
     (
@@ -37,7 +39,7 @@ fn file(tracks: Vec<Track>) -> MidiFile {
     } else {
         SmfFormat::Parallel
     };
-    MidiFile::smf(format, TPQ, tracks).unwrap()
+    MidiFile::smf(format, SMF_DIVISION, tracks).unwrap()
 }
 
 // ---- Tick ------------------------------------------------------------------
@@ -51,9 +53,9 @@ fn a_tick_moves_by_counts_and_a_quarter_is_the_division() {
     assert_eq!(t - 400, Tick(600));
     t += 24;
     assert_eq!(t, Tick(1_024));
-    assert_eq!(Tick::quarters(3, 96), Tick(288));
-    assert_eq!(Tick(720).beats(480), Beat(1.5));
-    assert_eq!(Tick::quarters(7, TPQ).beats(TPQ), Beat(7.0));
+    assert_eq!(Tick::quarters(3, TicksPerQuarterNote::of(96)), Tick(288));
+    assert_eq!(Tick(720).beats(TicksPerQuarterNote::of(480)), Beat(1.5));
+    assert_eq!(Tick::quarters(7, DIVISION).beats(DIVISION), Beat(7.0));
 }
 
 // ---- the builder -----------------------------------------------------------
@@ -95,7 +97,7 @@ fn notes_in_any_order_leave_the_events_in_tick_order() {
     assert_eq!(ticks, [0, 0, 480, 480, 960, 960]);
     assert_eq!(track.end, Tick(960));
     // And a file takes it as it is.
-    MidiFile::smf(SmfFormat::SingleTrack, TPQ, vec![track]).unwrap();
+    MidiFile::smf(SmfFormat::SingleTrack, SMF_DIVISION, vec![track]).unwrap();
 }
 
 /// `meta(tick, Meta::tempo(bpm))` is the one way to place a Set Tempo, and
@@ -258,7 +260,7 @@ fn a_format_2_file_has_no_timeline_but_each_track_has() {
         NoteNumber::of(60),
         U7::of(100),
     );
-    let f = MidiFile::smf(SmfFormat::Sequential, TPQ, vec![a, Track::new()]).unwrap();
+    let f = MidiFile::smf(SmfFormat::Sequential, SMF_DIVISION, vec![a, Track::new()]).unwrap();
     assert!(f.timeline().is_err());
     let beats: Vec<Beat> = f.tracks()[0]
         .timeline(f.ticks_per_quarter())
@@ -288,7 +290,7 @@ fn a_clip_files_timeline_is_its_packets_as_stored_without_the_header() {
         end: Tick(240),
         ..Track::new()
     };
-    let f = MidiFile::clip(TPQ, track).unwrap();
+    let f = MidiFile::clip(DIVISION, track).unwrap();
     let line: Vec<(Beat, Ump)> = f.timeline().unwrap().collect();
     assert_eq!(line, [(Beat(0.5), Ump::from(note))]);
 }
@@ -317,19 +319,13 @@ fn a_refused_track_list_names_the_rule_and_where() {
         other => panic!("not a config error: {other:?}"),
     };
     assert_eq!(
-        config(MidiFile::smf(SmfFormat::Parallel, TPQ, vec![])),
+        config(MidiFile::smf(SmfFormat::Parallel, SMF_DIVISION, vec![])),
         ConfigError::NoTracks
-    );
-    assert_eq!(
-        config(MidiFile::smf(SmfFormat::Parallel, 0, vec![Track::new()])),
-        ConfigError::Division {
-            ticks_per_quarter: 0
-        }
     );
     assert_eq!(
         config(MidiFile::smf(
             SmfFormat::SingleTrack,
-            TPQ,
+            SMF_DIVISION,
             vec![Track::new(), Track::new()]
         )),
         ConfigError::SingleTrack { tracks: 2 }
@@ -343,7 +339,7 @@ fn a_refused_track_list_names_the_rule_and_where() {
     assert_eq!(
         config(MidiFile::smf(
             SmfFormat::Parallel,
-            TPQ,
+            SMF_DIVISION,
             vec![Track::new(), back]
         )),
         ConfigError::OutOfOrder {
@@ -358,7 +354,7 @@ fn a_refused_track_list_names_the_rule_and_where() {
     );
     let t = Track::new().push(Tick(0), g2).unwrap();
     assert_eq!(
-        config(MidiFile::smf(SmfFormat::SingleTrack, TPQ, vec![t])),
+        config(MidiFile::smf(SmfFormat::SingleTrack, SMF_DIVISION, vec![t])),
         ConfigError::Refused {
             track: 0,
             in_header: false,
@@ -424,6 +420,6 @@ fn two_tempos_on_one_tick_are_kept_and_the_later_governs() {
             (Tick(0), FileEvent::Meta(Meta::tempo(Bpm::of(60.0)))),
         ]
     );
-    let file = MidiFile::smf(SmfFormat::SingleTrack, 480, vec![track]).unwrap();
+    let file = MidiFile::smf(SmfFormat::SingleTrack, SmfDivision::of(480), vec![track]).unwrap();
     assert_eq!(file.tempo_map().tempo_at(Beat(0.0)), Bpm::of(60.0));
 }

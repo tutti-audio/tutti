@@ -682,8 +682,8 @@ impl<C: crate::Clock> Session<C> {
             mirror,
             origin,
         } = install;
-        let node = self.install_plugin(plugin, mirror, origin);
-        self.link_pooled(node, pool_key, hold, standing);
+        let (node, rebinder) = self.install_plugin(plugin, mirror, origin);
+        self.link_pooled(node, pool_key, hold, standing, rebinder);
         Ok(node)
     }
 
@@ -695,6 +695,7 @@ impl<C: crate::Clock> Session<C> {
         key: PoolKey,
         hold: Hold,
         standing: Arc<Standing>,
+        rebinder: tutti_plugin::catalog::PluginRebinder,
     ) {
         standing.hosted.store(true, Ordering::Release);
         standing.release_handle();
@@ -704,6 +705,7 @@ impl<C: crate::Clock> Session<C> {
                 _hold: hold,
                 standing,
             });
+            hosted.set_rebinder(rebinder);
         }
     }
 
@@ -767,7 +769,9 @@ impl<C: crate::Clock> Session<C> {
         let swapped = match plugin.into_client() {
             Ok(client) => {
                 client.controls().set_meter(meter);
-                let swapped = self.graph.replace_plugin(node, client, fade, law);
+                let swapped = self
+                    .graph
+                    .replace_plugin_with_rebinder(node, client, fade, law);
                 if swapped.is_ok()
                     && let Some(hosted) = self.graph.plugins.get_mut(&node)
                 {
@@ -789,8 +793,8 @@ impl<C: crate::Clock> Session<C> {
             }
         };
         match swapped {
-            Ok(()) => {
-                self.link_pooled(Key::new(node), key.clone(), hold, standing);
+            Ok(rebinder) => {
+                self.link_pooled(Key::new(node), key.clone(), hold, standing, rebinder);
                 Swap::Done
             }
             Err(refused) => Swap::Refused(generation, LoadError::PluginSwap(Arc::new(refused))),

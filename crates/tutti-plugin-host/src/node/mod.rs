@@ -21,6 +21,8 @@ mod fork;
 mod graph;
 mod instance;
 mod loader;
+mod rebind;
 
 pub use client::{InProcClient, PluginNode};
 pub use loader::{client_over, load_client, load_client_restoring};
+pub use rebind::{Pending, PortLimit, RebindError, Rebinder, Settlement};

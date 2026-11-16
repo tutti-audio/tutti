@@ -73,8 +73,6 @@ tutti-curve  with-prefix  crates/tutti-curve/src/trajectory.rs::Trajectory::with
 # tutti-dsp
 tutti-dsp  with-prefix  crates/tutti-dsp/src/delay/layout.rs::DelayLayout::with_routing
 tutti-dsp  with-prefix  crates/tutti-dsp/src/delay/layout.rs::DelayLayout::with_times
-tutti-dsp  with-prefix  crates/tutti-dsp/src/model/inputs.rs::Inputs::with_key
-tutti-dsp  with-prefix  crates/tutti-dsp/src/model/inputs.rs::Inputs::with_lane
 tutti-dsp  with-prefix  crates/tutti-dsp/src/stft/geometry.rs::StftGeometry::with_window_fn
 tutti-dsp  chain-result  crates/tutti-dsp/src/delay/layout.rs::DelayLayout::with_routing
 tutti-dsp  chain-result  crates/tutti-dsp/src/delay/layout.rs::DelayLayout::with_times
@@ -366,10 +364,8 @@ tutti-nodes  node-ctor  crates/tutti-nodes/src/oscillator.rs::OscillatorNode::sa
 tutti-nodes  node-ctor  crates/tutti-nodes/src/oscillator.rs::OscillatorNode::sine
 tutti-nodes  node-ctor  crates/tutti-nodes/src/oscillator.rs::OscillatorNode::square
 tutti-nodes  node-ctor  crates/tutti-nodes/src/oscillator.rs::OscillatorNode::triangle
-tutti-nodes  node-ctor  crates/tutti-nodes/src/reverb.rs::FamilyNode::fixed
 tutti-nodes  node-ctor  crates/tutti-nodes/src/reverb_freeverb.rs::FreeverbNode::general_midi
 tutti-nodes  node-ctor  crates/tutti-nodes/src/reverb_freeverb.rs::FreeverbNode::live
-tutti-nodes  node-ctor  crates/tutti-nodes/src/reverb.rs::FamilyNode::live
 tutti-nodes  node-ctor  crates/tutti-nodes/src/reverb_fdn.rs::FdnNode::live
 tutti-nodes  node-ctor  crates/tutti-nodes/src/signal/follower.rs::SourceNode::from_decl
 tutti-nodes  node-ctor  crates/tutti-nodes/src/signal/follower.rs::SourceNode::new
