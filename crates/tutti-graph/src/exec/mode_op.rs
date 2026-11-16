@@ -106,7 +106,7 @@ pub(super) fn moded_node_op<A: AudioSlots, F: SlotFlags + ?Sized, E: EventSlots 
     ended
 }
 
-/// A parked node: not called. Its audio outputs are the aligned input (the
+/// A parked node: not processed, only polled for its handoffs. Its audio outputs are the aligned input (the
 /// bypass line, or the input itself when the node has no latency), its event
 /// outputs only what its held keys still owe, its events discarded.
 fn park<A: AudioSlots, F: SlotFlags + ?Sized, E: EventSlots + ?Sized>(
@@ -116,7 +116,7 @@ fn park<A: AudioSlots, F: SlotFlags + ?Sized, E: EventSlots + ?Sized>(
     [ain, aout, ein, eout]: [&[u32]; 4],
 ) {
     let rec = head.rec;
-    // A parked node is not called, so a wake raised meanwhile is consumed
+    // A parked node is not processed, so a wake raised meanwhile is consumed
     // here, as its discarded events are.
     u.node.take_wake();
     // The node's pending handoffs are answered (a plugin's recalled

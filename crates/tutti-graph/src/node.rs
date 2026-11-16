@@ -1434,11 +1434,11 @@ pub trait Node: Send + 'static {
     /// node that holds something the control side recalls (a plugin's
     /// Processor) would otherwise never hand it back.
     ///
-    /// The contract is narrow: answer pending handoffs only, and touch no
-    /// output, event or param port. It runs at the node's place in the
+    /// The contract is narrow: answer pending handoffs only. It runs at the node's place in the
     /// schedule, on the thread that would have run `process`, so the parallel
     /// executor sees what the serial one does. It is never called for a node
-    /// that is not parked. Audio thread: must not allocate, lock or block.
+    /// that is not parked, nor for one the executor skips as idle (that one is
+    /// woken through its [`Wake`] and processed). Audio thread: must not allocate, lock or block.
     ///
     /// The default does nothing.
     fn poll_parked(&mut self) {}

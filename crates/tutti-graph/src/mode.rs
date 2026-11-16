@@ -8,7 +8,7 @@
 //! A node is [`Active`](NodeMode::Active) (it runs), [`Muted`](NodeMode::Muted)
 //! (it runs and its audio outputs are silence) or
 //! [`Bypassed`](NodeMode::Bypassed) (its audio outputs are its inputs, delayed
-//! by its declared latency, and it is not called). The mode is **the
+//! by its declared latency, and its `process` is not called). The mode is **the
 //! executor's** for every node but one that declares
 //! [`Shape::with_own_bypass`](crate::Shape::with_own_bypass) (a plugin with a
 //! native bypass parameter): the executor neither blends nor parks such a node
@@ -131,7 +131,7 @@ use crate::spec::EventOut;
 /// - **`Bypassed`**: its audio outputs are its inputs delayed by its
 ///   declared latency (output `c` is input `c`; an output past the input
 ///   width, and every output of a node with no audio input, is silence), its
-///   event outputs are empty, and it is not called.
+///   event outputs are empty, and its `process` is not called.
 ///
 /// Set with [`Editor::set_mode`](crate::Editor::set_mode); absent from
 /// [`GraphSpec::modes`](crate::GraphSpec::modes) is `Active`.
@@ -141,7 +141,7 @@ pub enum NodeMode {
     #[default]
     Active,
     /// The node's audio inputs pass to its outputs, delayed by its declared
-    /// latency, and it is not called.
+    /// latency, and its `process` is not called.
     Bypassed,
     /// The node runs and its audio outputs are silence.
     Muted,
