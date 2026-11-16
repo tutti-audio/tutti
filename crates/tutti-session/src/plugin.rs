@@ -836,11 +836,12 @@ pub(crate) struct HostedPlugin {
     /// outside the pool. Dropped when the record retires, which ends the hold.
     pub(crate) pooled: Option<PooledLink>,
     /// What re-inserts this plugin's node when it changes its ports. `None` for
-    /// a plugin no pool entry holds, and for one that reported no ports.
+    /// a plugin the host inserted itself (`Graph::host_plugin`) and for one
+    /// that reported no ports.
     pub(crate) rebind: Option<RebindState>,
 }
 
-/// What a pooled plugin's record keeps to re-insert its node when the plugin
+/// What a hosted plugin's record keeps to re-insert its node when the plugin
 /// changes its ports: the builder of the new node and the ports the node at the
 /// key declares, built where those ports are known.
 #[derive(Debug)]
@@ -1184,14 +1185,10 @@ impl HostedPlugin {
     }
 
     /// Sets the builder of the node that replaces this plugin's when it
-    /// changes its ports: only a pooled plugin's record keeps one, since
-    /// nothing else re-inserts its node.
+    /// changes its ports, which `Phase::Plugins` ticks and re-inserts. `None`
+    /// for a plugin that reported no ports.
     pub(crate) fn set_rebinder(&mut self, rebinder: tutti_plugin::catalog::PluginRebinder) {
-        self.rebind = self
-            .pooled
-            .is_some()
-            .then(|| RebindState::new(rebinder))
-            .flatten();
+        self.rebind = RebindState::new(rebinder);
     }
 
     /// Queues the announcement that every parameter value changed, as the
