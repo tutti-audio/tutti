@@ -462,8 +462,9 @@ impl System for Network {
         if floor.get().is_nan() {
             return Ring::Unbounded;
         }
-        let depth = f64::from((-floor.get()).max(0.0));
-        let amplitude = libm::exp10(-depth / 20.0);
+        let floor = Db::new(floor.get().min(0.0));
+        let depth = f64::from(-floor.get());
+        let amplitude = f64::from(floor.to_amplitude().get());
         let mut decay = 0.0f64;
         let mut frames = self.pre_delay.get() as f64;
         for stage in self.stages.iter() {

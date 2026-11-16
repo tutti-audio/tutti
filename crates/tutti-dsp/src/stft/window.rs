@@ -228,7 +228,7 @@ impl CosineWindow {
         self.terms
             .iter()
             .enumerate()
-            .map(|(k, &a)| f64::from(a) * (k as f64 * phase).cos())
+            .map(|(k, &a)| f64::from(a) * libm::cos(k as f64 * phase))
             .sum()
     }
 
@@ -256,7 +256,7 @@ impl Window for CosineWindow {
             .enumerate()
             .map(|(k, &a)| {
                 let sign = if k % 2 == 0 { 1.0 } else { -1.0 };
-                sign * a * (k as f32 * phase).cos()
+                sign * a * libm::cosf(k as f32 * phase)
             })
             .sum()
     }

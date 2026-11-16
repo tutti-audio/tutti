@@ -108,6 +108,11 @@ fn channel_level(channel: &ChannelState) -> f32 {
     relative * relative
 }
 
+/// The cutoff factor of a control `x` off its centre: `4^x`, two octaves per unit.
+fn two_octave_factor(x: f32) -> f32 {
+    (Semitones::OCTAVE * (2.0 * x)).to_pitch_ratio()
+}
+
 /// The channel's pan (CC 10) as a pair of gains on a voice's own: RP-036's
 /// `cos` and `sin` of `Pi/2` along the pan, scaled by `sqrt(2)` so that the
 /// centre leaves the voice's own placement alone (its constant-power pan law
@@ -482,17 +487,17 @@ impl SynthVoice {
             // dividend's sign, so it is not a wrap for a negative phase.
             let step = PhaseIncrement::per_sample(lfo_rate, sample_rate) * frames as f32;
             self.lfo_phase = self.lfo_phase.advance(step);
-            let lfo_val = self.lfo_phase.to_radians().sin();
+            let lfo_val = self.lfo_phase.sin();
             cutoff *= 1.0 + lfo_val * fm.lfo_depth.get() * 0.5;
         }
 
         if self.cc_cutoff_value != 0.5 {
-            cutoff *= (4.0_f32).powf(self.cc_cutoff_value - 0.5);
+            cutoff *= two_octave_factor(self.cc_cutoff_value - 0.5);
         }
 
         // Slide modulates the cutoff around its center.
         if let Some(slide) = self.mpe.effective_slide() {
-            cutoff *= (4.0_f32).powf(slide.get() - SLIDE_CENTER.get());
+            cutoff *= two_octave_factor(slide.get() - SLIDE_CENTER.get());
         }
 
         Hz(cutoff)

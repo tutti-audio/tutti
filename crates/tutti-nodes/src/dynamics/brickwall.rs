@@ -82,7 +82,7 @@ control_set! {
         BrickwallControls::DEFAULT
     }
 
-    /// Designs again only for a ceiling that moved more than [`DEAD_BAND`] in amplitude.
+    /// Designs again only for a ceiling that moved more than `DEAD_BAND` in amplitude.
     fn moved(&self, applied: &BrickwallControls, target: &BrickwallControls) -> bool {
         let amplitude = |c: &BrickwallControls| c.ceiling.to_amplitude().get();
         (amplitude(target) - amplitude(applied)).abs() > DEAD_BAND

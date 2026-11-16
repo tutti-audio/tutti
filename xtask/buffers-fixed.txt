@@ -97,47 +97,14 @@ crates/tutti-graph/src/testing.rs::Pair::block_at  pending
 crates/tutti-graph/src/testing.rs::Pair::block_with_changes  pending
 crates/tutti-graph/src/testing.rs::bits  pending
 crates/tutti-graph/src/testing.rs::input_signal  pending
-crates/tutti-measure/src/align.rs::align  pending
-crates/tutti-measure/src/chroma.rs::chroma  pending
-crates/tutti-measure/src/chroma.rs::step_chroma  pending
-crates/tutti-measure/src/features.rs::spectral_centroid  pending
-crates/tutti-measure/src/features.rs::spectral_flatness  pending
-crates/tutti-measure/src/features.rs::spectral_rolloff  pending
-crates/tutti-measure/src/loudness.rs::LoudnessConfig::chunk_matches  pending
-crates/tutti-measure/src/loudness.rs::measure_loudness  pending
-crates/tutti-measure/src/loudness.rs::step_loudness  pending
-crates/tutti-measure/src/loudness.rs::step_windowed_loudness  pending
-crates/tutti-measure/src/notes.rs::frame_levels  pending
-crates/tutti-measure/src/notes.rs::transcribe  pending
-crates/tutti-measure/src/onset.rs::complex_domain_deviation  pending
-crates/tutti-measure/src/onset.rs::detect_onsets  pending
-crates/tutti-measure/src/onset.rs::spectral_energy  pending
-crates/tutti-measure/src/onset.rs::spectral_flux  pending
-crates/tutti-measure/src/onset.rs::step_onset  pending
-crates/tutti-measure/src/peaks.rs::PeakConfig::chunk_matches  pending
-crates/tutti-measure/src/peaks.rs::step_peaks  pending
-crates/tutti-measure/src/peaks.rs::summarize  pending
-crates/tutti-measure/src/peaks.rs::summarize_block  pending
-crates/tutti-measure/src/pitch.rs::PitchDetector::detect  pending
-crates/tutti-measure/src/silence.rs::step_silence  pending
-crates/tutti-measure/src/silence.rs::strip_silence  pending
-crates/tutti-measure/src/spectrum.rs::step_spectrum  pending
-crates/tutti-measure/src/stereo.rs::correlate  pending
-crates/tutti-measure/src/tempo.rs::estimate_tempo  pending
-crates/tutti-measure/src/tempo.rs::estimate_tempo_from_novelty  pending
-crates/tutti-measure/src/tempo.rs::track_beats  pending
-crates/tutti-measure/src/tempo.rs::track_beats_from_novelty  pending
-crates/tutti-measure/src/transform.rs::Stft::resynthesize_masked  pending
-crates/tutti-measure/src/transform.rs::istft  pending
-crates/tutti-measure/src/transform.rs::stft  pending
-crates/tutti-measure/src/transform.rs::stft_magnitude  pending
-crates/tutti-measure/src/transform.rs::stft_polar  pending
-crates/tutti-measure/src/vectorscope.rs::step_vectorscope  pending
-crates/tutti-measure/src/vectorscope.rs::vectorscope_points  pending
-crates/tutti-measure/src/xcorr.rs::CrossCorrelation::values  pending
-crates/tutti-measure/src/xcorr.rs::cross_correlate  pending
-crates/tutti-measure/src/yin.rs::yin  pending
-crates/tutti-measure/src/yin.rs::yin_track  pending
+crates/tutti-measure/src/features.rs::spectral_centroid  measured: a magnitude spectrum, not audio
+crates/tutti-measure/src/features.rs::spectral_flatness  measured: a magnitude spectrum, not audio
+crates/tutti-measure/src/features.rs::spectral_rolloff  measured: a magnitude spectrum, not audio
+crates/tutti-measure/src/onset.rs::complex_domain_deviation  measured: the previous frame's magnitude spectrum, not audio
+crates/tutti-measure/src/onset.rs::spectral_flux  measured: the previous frame's magnitude spectrum, not audio
+crates/tutti-measure/src/tempo.rs::estimate_tempo_from_novelty  measured: a novelty curve of readings, not audio
+crates/tutti-measure/src/tempo.rs::track_beats_from_novelty  measured: a novelty curve of readings, not audio
+crates/tutti-measure/src/xcorr.rs::CrossCorrelation::values  measured: the correlation at each lag, not audio
 crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::folded  pending
 crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::new  pending
 crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::per_channel  pending

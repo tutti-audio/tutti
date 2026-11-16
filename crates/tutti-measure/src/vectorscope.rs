@@ -10,7 +10,7 @@
 
 use core::num::NonZeroUsize;
 
-use tutti_buffers::StereoPlanes;
+use tutti_buffers::{Sample, StereoPlanes};
 
 /// One frame on the scope.
 ///
@@ -36,52 +36,77 @@ impl ScopePoint {
     }
 }
 
-/// Where the stride stands between blocks.
+/// How a stereo pair is decimated into scope points: every `decimate`-th
+/// frame is kept, and `1` keeps every frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VectorscopeConfig {
+    decimate: NonZeroUsize,
+}
+
+impl VectorscopeConfig {
+    /// A scope that keeps every `decimate`-th frame.
+    #[must_use]
+    pub fn new(decimate: NonZeroUsize) -> Self {
+        Self { decimate }
+    }
+
+    /// A meter at the start of a stream: the first frame is kept.
+    #[must_use]
+    pub fn measure(&self) -> VectorscopeMeter {
+        VectorscopeMeter {
+            decimate: self.decimate,
+            skip: 0,
+        }
+    }
+}
+
+/// A running vectorscope: where the stride stands between blocks.
+///
+/// There is no `finish`: the points go into the caller's `Vec` on every push.
 ///
 /// Carries how many frames to skip before the next point, so a stream fed in
-/// blocks keeps one stride phase instead of restarting it per block. Keep the
-/// same `decimate` for a run; a different one only changes the stride from the
-/// next point on.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct VectorscopeState {
+/// blocks keeps one stride phase instead of restarting it per block.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VectorscopeMeter {
+    decimate: NonZeroUsize,
     skip: usize,
 }
 
-impl VectorscopeState {
-    /// The start of a stream: the first frame is kept.
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
+impl VectorscopeMeter {
+    /// Appends every `decimate`-th frame of the next block to `out` as a
+    /// [`ScopePoint`].
+    ///
+    /// Writes into the caller's buffer, so a UI feeding blocks reuses one `Vec`
+    /// (clear it between draws). It grows `out` and so allocates when it is
+    /// full: not for the audio thread.
+    pub fn push<S: Sample>(&mut self, planes: StereoPlanes<'_, S>, out: &mut Vec<ScopePoint>) {
+        let frames = planes.frames().get();
+        let (left, right) = (planes.left(), planes.right());
+        let mut at = self.skip;
+        while at < frames {
+            out.push(ScopePoint::from_lr(
+                left[at].convert_to::<f32>(),
+                right[at].convert_to::<f32>(),
+            ));
+            at += self.decimate.get();
+        }
+        self.skip = at - frames;
     }
-}
 
-/// Appends every `decimate`-th frame of the next block to `out` as a
-/// [`ScopePoint`]. `1` keeps every frame.
-///
-/// Writes into the caller's buffer, so a UI feeding blocks reuses one `Vec`
-/// (clear it between draws). It grows `out` and so allocates when it is full:
-/// not for the audio thread.
-pub fn step_vectorscope(
-    state: &mut VectorscopeState,
-    planes: StereoPlanes<'_>,
-    decimate: NonZeroUsize,
-    out: &mut Vec<ScopePoint>,
-) {
-    let frames = planes.frames().get();
-    let (left, right) = (planes.left(), planes.right());
-    let mut at = state.skip;
-    while at < frames {
-        out.push(ScopePoint::from_lr(left[at], right[at]));
-        at += decimate.get();
+    /// Starts the stride over: the next frame is kept.
+    pub fn reset(&mut self) {
+        self.skip = 0;
     }
-    state.skip = at - frames;
 }
 
 /// Every `decimate`-th frame of one whole pair as a [`ScopePoint`], starting
-/// at the first: [`step_vectorscope`] over a fresh state. Allocates the result.
-pub fn vectorscope_points(planes: StereoPlanes<'_>, decimate: NonZeroUsize) -> Vec<ScopePoint> {
-    let mut out = Vec::with_capacity(planes.frames().get().div_ceil(decimate.get()));
-    step_vectorscope(&mut VectorscopeState::new(), planes, decimate, &mut out);
+/// at the first: a [`VectorscopeMeter`] fed the pair. Allocates the result.
+pub fn vectorscope_points<S: Sample>(
+    cfg: &VectorscopeConfig,
+    planes: StereoPlanes<'_, S>,
+) -> Vec<ScopePoint> {
+    let mut out = Vec::with_capacity(planes.frames().get().div_ceil(cfg.decimate.get()));
+    cfg.measure().push(planes, &mut out);
     out
 }
 
@@ -101,7 +126,10 @@ mod tests {
     }
 
     fn scope(l: &[f32], r: &[f32], decimate: NonZeroUsize) -> Vec<ScopePoint> {
-        vectorscope_points(StereoPlanes::new(l, r).unwrap(), decimate)
+        vectorscope_points(
+            &VectorscopeConfig::new(decimate),
+            StereoPlanes::new(l, r).unwrap(),
+        )
     }
 
     /// Mono lies on the mid axis, with the mono level times sqrt 2 as its
@@ -180,10 +208,10 @@ mod tests {
             let d = NonZeroUsize::new(decimate).unwrap();
             let batch = scope(&l, &r, d);
             for block in [1usize, 2, 5, 10, 64, 103] {
-                let mut state = VectorscopeState::new();
+                let mut meter = VectorscopeConfig::new(d).measure();
                 let mut out = Vec::new();
                 for (lb, rb) in l.chunks(block).zip(r.chunks(block)) {
-                    step_vectorscope(&mut state, StereoPlanes::new(lb, rb).unwrap(), d, &mut out);
+                    meter.push(StereoPlanes::new(lb, rb).unwrap(), &mut out);
                 }
                 assert_eq!(out, batch, "decimate {decimate}, block {block}");
             }
