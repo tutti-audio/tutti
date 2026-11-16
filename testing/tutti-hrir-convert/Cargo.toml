@@ -1,0 +1,20 @@
+[package]
+name = "tutti-hrir-convert"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Converts a SOFA SimpleFreeFieldHRIR file to the HRIR sphere `HrtfBinauralNode` loads"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/tutti-audio/tutti"
+# An offline tool, never a library anyone depends on.
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+hdf5-pure.workspace = true
+thiserror.workspace = true
+tutti-buffers = { path = "../../crates/tutti-buffers" }
+tutti-dsp = { path = "../../crates/tutti-dsp" }
+tutti-types = { path = "../../crates/tutti-types" }
