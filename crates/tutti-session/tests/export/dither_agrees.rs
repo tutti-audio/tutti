@@ -82,7 +82,7 @@ fn record(path: &std::path::Path, dither: Option<DitherShape>) {
 fn export(path: &std::path::Path, dither: Option<DitherShape>) {
     let rendered = Rendered::new(planes(), RATE, 0).expect("planes");
     let target =
-        FileTarget::new(path, Format::Wav(Pcm::Int16), ChannelLayout::STEREO).with_dither(dither);
+        FileTarget::new(path, Format::Wav(Pcm::Int16), ChannelLayout::STEREO).dither(dither);
     write_buffers(&rendered, &target, EventLossPolicy::Fail).expect("writes");
 }
 
