@@ -117,6 +117,17 @@ fn window<S: Subject>(rig: &Rig, stamp: usize) -> std::ops::RangeInclusive<usize
 }
 
 /// `Ok` iff the first sound at or after `from` is in the window of a note
+/// stamped at `stamp`, exactly.
+fn onset_in_window<S: Subject>(rig: &Rig, from: usize, stamp: usize) -> Result<(), String> {
+    let w = window::<S>(rig, stamp);
+    match rig.onset(from) {
+        Some(first) if w.contains(&first) => Ok(()),
+        Some(first) => Err(format!("first sound at {first}, wanted {w:?}")),
+        None => Err(format!("the note is silent, wanted {w:?}")),
+    }
+}
+
+/// `Ok` iff the first sound at or after `from` is in the window of a note
 /// stamped at `stamp`, with the slack of the rate ratio.
 fn first_sound_in_window<S: Subject>(rig: &Rig, from: usize, stamp: usize) -> Result<(), String> {
     let w = window::<S>(rig, stamp);
@@ -152,8 +163,7 @@ fn chunks_over_the_case<S: Subject>(rig: &mut Rig, before: Chunks) -> Chunks {
     S::chunks(rig).since(before)
 }
 
-/// Attempts a case may take to run on a machine the subject's pipeline keeps up
-/// with.
+/// Attempts a case gets before it fails as too loaded to judge.
 const JUDGEABLE_RUNS: usize = 3;
 
 /// Runs `attempt` on a fresh rig until one can be judged. A passing attempt is
@@ -220,44 +230,51 @@ pub fn only_an_instrument_is_one<S: Subject>() {
 /// latency and its lead): the first nonzero sample is in the subject's window.
 /// A stamp is a position in a block, so the case stamps off the block grid.
 pub fn note_on_sounds_at_its_stamp<S: Subject>() {
-    let mut rig = S::rig();
-    rig.at(rig.t(STAMP), note_on(0, 60, 100));
-    rig.render_to(rig.t(STAMP) + 4_000);
-    let first = rig.onset(rig.origin).expect("the note sounds");
-    let w = window::<S>(&rig, rig.t(STAMP));
-    assert!(w.contains(&first), "first sound at {first}, wanted {w:?}");
-    assert_eq!(
-        rig.peak(rig.origin..*w.start()),
-        0.0,
-        "nothing before the window"
-    );
-    let right = rig.right[*w.start()..]
-        .iter()
-        .fold(0.0f32, |a, v| a.max(v.abs()));
-    assert!(
-        right > 1e-4,
-        "the right channel is silent: the strip reads only the left"
-    );
+    judgeable::<S>("a note-on sounds on the frame it is stamped", || {
+        let mut rig = S::rig();
+        let before = S::chunks(&rig);
+        rig.at(rig.t(STAMP), note_on(0, 60, 100));
+        rig.render_to(rig.t(STAMP) + 4_000);
+        let w = window::<S>(&rig, rig.t(STAMP));
+        let outcome = onset_in_window::<S>(&rig, rig.origin, rig.t(STAMP)).and_then(|()| {
+            let early = rig.peak(rig.origin..*w.start());
+            if early != 0.0 {
+                return Err(format!("{early} before the window {w:?}"));
+            }
+            let right = rig.right[*w.start()..]
+                .iter()
+                .fold(0.0f32, |a, v| a.max(v.abs()));
+            if right <= 1e-4 {
+                return Err("the right channel is silent: the strip reads only the left".into());
+            }
+            Ok(())
+        });
+        let chunks = chunks_over_the_case::<S>(&mut rig, before);
+        Judged { outcome, chunks }
+    });
 }
 
 /// **A frame already past plays at the next block**, not never: a note-on
 /// stamped for a frame the engine has rendered sounds from the next block's
 /// first frame.
 pub fn a_frame_already_past_plays_at_the_next_block<S: Subject>() {
-    let mut rig = S::rig();
-    rig.render_to(rig.t(3 * BLOCK));
-    let next = rig.frame();
-    // The origin of the clock, long gone.
-    assert!(
-        rig.handle
-            .keys_mut()
-            .push(Frame::new(1), note_on(0, 60, 100))
-            .is_ok()
-    );
-    rig.render_to(next + 4_000);
-    let first = rig.onset(next).expect("a late note still sounds");
-    let w = window::<S>(&rig, next);
-    assert!(w.contains(&first), "first sound at {first}, wanted {w:?}");
+    judgeable::<S>("a frame already past plays at the next block", || {
+        let mut rig = S::rig();
+        rig.render_to(rig.t(3 * BLOCK));
+        let next = rig.frame();
+        let before = S::chunks(&rig);
+        // The origin of the clock, long gone.
+        assert!(
+            rig.handle
+                .keys_mut()
+                .push(Frame::new(1), note_on(0, 60, 100))
+                .is_ok()
+        );
+        rig.render_to(next + 4_000);
+        let outcome = onset_in_window::<S>(&rig, next, next);
+        let chunks = chunks_over_the_case::<S>(&mut rig, before);
+        Judged { outcome, chunks }
+    });
 }
 
 /// **A note-off releases**: held, then released at `OFF`, the output is
@@ -349,12 +366,15 @@ pub fn all_sound_off_cuts_at_its_stamp<S: Subject>() {
 /// window (an instrument is not tied to channel 0), and a pedal down on
 /// channel 2 holds nothing of channel 0's.
 pub fn another_channel_is_heard_and_holds_nothing<S: Subject>() {
-    let mut rig = S::rig();
-    rig.at(rig.t(STAMP), note_on(5, 60, 100));
-    rig.render_to(rig.t(STAMP) + 4_000);
-    let first = rig.onset(rig.origin).expect("a note on channel 5 sounds");
-    let w = window::<S>(&rig, rig.t(STAMP));
-    assert!(w.contains(&first), "first sound at {first}, wanted {w:?}");
+    judgeable::<S>("a note on channel 5 sounds in the window", || {
+        let mut rig = S::rig();
+        let before = S::chunks(&rig);
+        rig.at(rig.t(STAMP), note_on(5, 60, 100));
+        rig.render_to(rig.t(STAMP) + 4_000);
+        let outcome = onset_in_window::<S>(&rig, rig.origin, rig.t(STAMP));
+        let chunks = chunks_over_the_case::<S>(&mut rig, before);
+        Judged { outcome, chunks }
+    });
 
     let mut rig = S::rig();
     rig.at(rig.t(STAMP), cc(2, 64, 127));
