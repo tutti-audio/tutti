@@ -37,7 +37,7 @@ tutti-engine = { version = "0.0.1", path = "../tutti-engine" }
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 tutti-nodes = { version = "0.0.1", path = "../tutti-nodes", default-features = false }
 tracing = "0.1"
-thiserror.workspace = true
+thiserror = { workspace = true, features = ["std"] }
 serde = { version = "1", optional = true, features = ["derive"] }
 
 # The sound card. Off: offline only, and no ALSA headers needed.

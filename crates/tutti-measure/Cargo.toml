@@ -29,7 +29,7 @@ tutti-dsp = { version = "0.0.1", path = "../tutti-dsp", default-features = false
 ebur128 = "0.1"
 
 # The `Error` enum's Display/Error impls.
-thiserror.workspace = true
+thiserror = { workspace = true, features = ["std"] }
 
 [features]
 default = []

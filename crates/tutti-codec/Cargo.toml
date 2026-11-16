@@ -38,7 +38,7 @@ decode-ogg = ["dep:symphonia", "symphonia/ogg", "symphonia/vorbis"]
 serde = ["dep:serde"]
 
 [dependencies]
-thiserror.workspace = true
+thiserror = { workspace = true, features = ["std"] }
 # An unfinished file that cannot be removed is logged.
 tracing = "0.1"
 tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }

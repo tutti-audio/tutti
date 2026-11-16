@@ -14,7 +14,7 @@ categories = ["multimedia::audio"]
 workspace = true
 
 [dependencies]
-thiserror.workspace = true
+thiserror = { workspace = true, features = ["std"] }
 # A spill file that cannot be removed is logged, not an error: the render's
 # outcome is already decided.
 tracing = "0.1"
