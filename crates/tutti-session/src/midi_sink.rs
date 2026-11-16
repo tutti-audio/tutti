@@ -11,13 +11,14 @@
 //! swapped.
 
 use std::convert::Infallible;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 
 use tutti_graph::{EventTapReader, Losses, NodeKey};
 use tutti_midi_runtime::MidiOut;
 
-use crate::midi::{OutDrops, OutputTiming, Stamping, UmpOut, drain_events, route_batch};
+use crate::midi::{
+    LossReaders, LossWriters, OutputTiming, Stamping, UmpOut, drain_events, loss_cells, route_batch,
+};
 use crate::pool::{Declared, HandleError, Life, Load, PoolEntry};
 use crate::{Peer, Presence, Resource, ResourceId, Session};
 
@@ -127,10 +128,9 @@ impl PoolEntry for MidiSinkEntry {
 struct SinkShared {
     id: ResourceId,
     info: Arc<MidiSinkInfo>,
-    /// Events its node's tap had no room for.
-    lost: AtomicU64,
-    /// Events the sink refused, or that were scheduled too far ahead to send.
-    refused: AtomicU64,
+    /// What its node's tap had no room for, and what the sink refused or was
+    /// scheduled too far ahead to send.
+    losses: LossReaders,
 }
 
 /// What the pool holds of a loaded sink. Read it through the [`MidiSink`]
@@ -192,8 +192,7 @@ impl MidiSink {
     /// stamps is.
     #[must_use]
     pub fn losses(&self) -> Losses {
-        Losses::lost(self.shared.lost.load(Ordering::Relaxed))
-            + Losses::refused(self.shared.refused.load(Ordering::Relaxed))
+        self.shared.losses.get()
     }
 }
 
@@ -241,10 +240,10 @@ impl<C: crate::Clock> Session<C> {
 struct SinkPort {
     /// Upgrades while the entry's loaded value lives.
     token: Weak<()>,
-    shared: Arc<SinkShared>,
     node: NodeKey,
     tap: EventTapReader,
     out: UmpOut,
+    losses: LossWriters,
 }
 
 /// The sinks of the session.
@@ -266,19 +265,19 @@ impl crate::Midi<'_> {
         let (node, tap) = self.add_output_node();
         let mut out = UmpOut::new(sink, rate);
         out.set_stamping(options.stamping);
+        let (losses, readers) = loss_cells();
         let shared = Arc::new(SinkShared {
             id,
             info: Arc::new(MidiSinkInfo { options }),
-            lost: AtomicU64::new(0),
-            refused: AtomicU64::new(0),
+            losses: readers,
         });
         let token = Arc::new(());
         self.state.sinks.ports.push(SinkPort {
             token: Arc::downgrade(&token),
-            shared: Arc::clone(&shared),
             node,
             tap,
             out,
+            losses,
         });
         SinkLoaded {
             shared,
@@ -296,13 +295,12 @@ impl Sinks {
     pub(crate) fn reopen(
         &mut self,
         graph: &mut crate::graph::Graph,
-        drops: &OutDrops,
         timing: Option<&OutputTiming>,
     ) -> bool {
         let mut edited = false;
         for port in &mut self.ports {
             if port.tap.rate() != graph.prepared().sample_rate() {
-                port.drain(drops, timing);
+                port.drain(timing);
                 if let Some(tap) = graph.taps().reopen_event(port.tap.id()) {
                     port.tap = tap;
                     port.out.set_rate(graph.prepared().sample_rate());
@@ -319,12 +317,11 @@ impl Sinks {
     pub(crate) fn drain(
         &mut self,
         graph: &mut crate::graph::Graph,
-        drops: &OutDrops,
         timing: Option<&OutputTiming>,
     ) -> bool {
         let mut edited = false;
         self.ports.retain_mut(|port| {
-            port.drain(drops, timing);
+            port.drain(timing);
             let held = port.token.strong_count() > 0;
             if !held {
                 // A host that removed the node itself leaves nothing to take.
@@ -336,12 +333,18 @@ impl Sinks {
         edited
     }
 
+    /// Counts `n` events as refused by every sink.
+    pub(crate) fn refuse(&mut self, n: u64) {
+        for port in &mut self.ports {
+            port.losses.refused(n);
+        }
+    }
+
     /// Sends `batch` to every sink, each event on its frame. Whether there is
     /// one.
     pub(crate) fn route(
         &mut self,
         batch: &[(tutti_types::Frame, tutti_ump::Ump)],
-        drops: &OutDrops,
         timing: Option<&OutputTiming>,
     ) -> bool {
         for port in self
@@ -349,8 +352,7 @@ impl Sinks {
             .iter_mut()
             .filter(|port| port.token.strong_count() > 0)
         {
-            let refused = route_batch(Some(&mut port.out), drops, timing, batch);
-            port.shared.refused.fetch_add(refused, Ordering::Relaxed);
+            route_batch(Some(&mut port.out), &mut port.losses, timing, batch);
         }
         self.ports.iter().any(|port| port.token.strong_count() > 0)
     }
@@ -358,11 +360,7 @@ impl Sinks {
 
 impl SinkPort {
     /// Reads the tap dry to the sink, and counts what did not go.
-    fn drain(&mut self, drops: &OutDrops, timing: Option<&OutputTiming>) {
-        let losses = drain_events(&mut self.tap, Some(&mut self.out), drops, timing);
-        self.shared.lost.fetch_add(losses.lost, Ordering::Relaxed);
-        self.shared
-            .refused
-            .fetch_add(losses.refused, Ordering::Relaxed);
+    fn drain(&mut self, timing: Option<&OutputTiming>) {
+        drain_events(&mut self.tap, Some(&mut self.out), &mut self.losses, timing);
     }
 }

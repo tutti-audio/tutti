@@ -174,8 +174,8 @@ pub use key::{
 pub use main_session::{EditorView, MainPlugin, MainSession, Opened};
 #[cfg(feature = "midi")]
 pub use midi::{
-    MIDI_INPUT_DROP_REPORT, MIDI_OUT_DROP_REPORT, Midi, MidiLoad, MidiRouteId, MidiRouteRule,
-    NoSuchMidiRoute, Stamping, TakePlacement,
+    MIDI_INPUT_DROP_REPORT, Midi, MidiLoad, MidiRouteId, MidiRouteRule, NoSuchMidiRoute, Stamping,
+    TakePlacement,
 };
 #[cfg(feature = "midi")]
 pub use midi_follow::{FollowClock, FollowMachineControl, FollowTempo, SendMachineControl};

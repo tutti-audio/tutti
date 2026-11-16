@@ -27,6 +27,7 @@ use crate::backend;
 use crate::capability::UmpCapability;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
 use crate::error::{Error, NotFound, Result};
+use crate::sensing::Heartbeat;
 use crate::wire::Wire;
 
 // Only a native backend reports through it; the stub has none.
@@ -367,9 +368,10 @@ impl Devices {
         sink.follow(described.protocol);
         Ok(OpenOutput {
             info,
-            sink,
+            sink: Arc::from(sink),
             wire: Wire::new(described),
             refused: 0,
+            heartbeat: None,
         })
     }
 
@@ -588,8 +590,12 @@ impl OpenInput {
 /// ([`follow`](Self::follow) takes it from a
 /// [`MidiSession::poll`](crate::MidiSession::poll) report). UMP Stream messages pass in every form.
 pub struct OpenOutput {
+    /// The Active Sensing thread, once [`with_active_sensing`](Self::with_active_sensing)
+    /// started it. Declared first: it drops, and its thread ends holding the
+    /// sink, before the sink does, so the connection closes on the dropping thread.
+    heartbeat: Option<Heartbeat>,
     info: DeviceInfo,
-    sink: Box<dyn DeviceOut>,
+    sink: Arc<dyn DeviceOut>,
     wire: Wire,
     /// The packets the sink had no room for, for [`losses`](Self::losses).
     refused: u64,
@@ -604,6 +610,28 @@ impl core::fmt::Debug for OpenOutput {
 }
 
 impl OpenOutput {
+    /// This output, sending Active Sensing (`0xFE`) from a thread of its own
+    /// whenever it has been silent for
+    /// [`ACTIVE_SENSING_INTERVAL`](tutti_midi_runtime::ACTIVE_SENSING_INTERVAL),
+    /// until it is dropped: a transmitter that starts goes on (MIDI 1.0
+    /// Detailed Specification p. 32), so there is no stopping it short of
+    /// closing the output. The thread sends nothing while the output's
+    /// Protocol is MIDI 2.0, which has no Active Sensing, and sends again if
+    /// the Protocol returns to MIDI 1.0.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Io`] when the thread cannot start.
+    pub fn with_active_sensing(mut self) -> Result<Self> {
+        if self.heartbeat.is_none() {
+            self.heartbeat = Some(Heartbeat::start(
+                Arc::clone(&self.sink),
+                self.wire.config().protocol,
+            )?);
+        }
+        Ok(self)
+    }
+
     /// Whether the output can still send; see
     /// [`DeviceOut::is_alive`].
     #[must_use]
@@ -649,6 +677,9 @@ impl OpenOutput {
     pub fn set_config(&mut self, config: StreamConfig) {
         self.wire.set_config(config);
         self.sink.follow(config.protocol);
+        if let Some(heartbeat) = &self.heartbeat {
+            heartbeat.follow(config.protocol);
+        }
     }
 
     /// Follows what a [`MidiSession::poll`](crate::MidiSession::poll) reported:
@@ -682,6 +713,9 @@ impl OpenOutput {
     pub fn queue_timed(&mut self, events: &[Outgoing]) -> Taken {
         let (taken, refused) = self.offer(events);
         self.refused += refused;
+        if let Some(heartbeat) = &self.heartbeat {
+            heartbeat.sent();
+        }
         taken
     }
 

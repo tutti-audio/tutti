@@ -686,3 +686,116 @@ fn a_reference_to_the_events_iterates_the_queued_changes() {
     assert_eq!(queued, ["Drums", "Bass"], "oldest first");
     assert!(events.try_iter().next().is_none(), "the loop took them");
 }
+
+/// What the Active Sensing tests share: a fake output open over `Synth`, in
+/// `protocol`, and the fake that records what it was sent.
+mod sensing {
+    use std::time::Duration;
+
+    use tutti_graph::Offset;
+    use tutti_midi_device::{EndpointId, PortDirection};
+    use tutti_ump::{Message, MidiGroup, Protocol, StreamConfig, System, Ump};
+
+    use super::{Devices, FakeCounters, endpoint, fake, id_of, wake};
+    use crate::OpenOutput;
+
+    const SYNTH: u64 = 1;
+
+    fn active_sensing() -> Ump {
+        Ump::from(Message::System(MidiGroup::FIRST, System::ActiveSensing))
+    }
+
+    fn clock() -> Ump {
+        Ump::from(Message::System(MidiGroup::FIRST, System::TimingClock))
+    }
+
+    /// The spec's receiver turns notes off at 330 ms.
+    const RECEIVER_LIMIT: Duration = Duration::from_millis(330);
+
+    fn output_in(protocol: Protocol, sensing: bool) -> (OpenOutput, FakeCounters, Devices) {
+        let (devices, events, fake) = fake();
+        fake.plug(endpoint(SYNTH, "Synth"), PortDirection::Output);
+        wake(&events);
+        let mut out = devices.open_output(&id_of(&devices, "Synth")).unwrap();
+        out.set_config(StreamConfig {
+            protocol,
+            rx_jr: false,
+            tx_jr: false,
+        });
+        if sensing {
+            out = out.with_active_sensing().unwrap();
+        }
+        (out, fake, devices)
+    }
+
+    fn sent(fake: &FakeCounters) -> Vec<Ump> {
+        fake.take_sent(EndpointId::from_raw(SYNTH))
+    }
+
+    /// **An idle output with the option sends Active Sensing before a receiver
+    /// would give up (330 ms), and goes on sending it.**
+    #[test]
+    fn an_idle_output_sends_active_sensing_within_the_receivers_limit_and_keeps_sending() {
+        let (_out, fake, _devices) = output_in(Protocol::Midi1, true);
+        std::thread::sleep(RECEIVER_LIMIT);
+        assert_eq!(sent(&fake), [active_sensing()], "the first, in time");
+        std::thread::sleep(Duration::from_millis(600));
+        let later = sent(&fake);
+        assert!(
+            later.len() >= 2 && later.iter().all(|&u| u == active_sensing()),
+            "and more: {later:?}"
+        );
+    }
+
+    /// **Traffic defers it**: an output that sends something within every
+    /// interval is never silent, so none is sent; once it goes quiet one is.
+    #[test]
+    fn traffic_defers_active_sensing_until_the_output_is_silent() {
+        let (mut out, fake, _devices) = output_in(Protocol::Midi1, true);
+        for _ in 0..6 {
+            std::thread::sleep(Duration::from_millis(100));
+            let _ = out.queue(&[(Offset::ZERO, clock())]);
+        }
+        let busy = sent(&fake);
+        assert_eq!(busy.len(), 6, "only the traffic: {busy:?}");
+        assert!(busy.iter().all(|&u| u == clock()));
+        std::thread::sleep(RECEIVER_LIMIT);
+        assert_eq!(sent(&fake), [active_sensing()], "silence brings it back");
+    }
+
+    /// **Closing the output stops it.**
+    #[test]
+    fn closing_the_output_stops_active_sensing() {
+        let (out, fake, _devices) = output_in(Protocol::Midi1, true);
+        std::thread::sleep(RECEIVER_LIMIT);
+        assert!(!sent(&fake).is_empty(), "precondition: it was running");
+        drop(out);
+        let _ = sent(&fake);
+        std::thread::sleep(Duration::from_millis(700));
+        assert_eq!(sent(&fake), [], "nothing after the close");
+    }
+
+    /// **An output opened without the option never sends it.**
+    #[test]
+    fn an_output_without_the_option_never_sends_active_sensing() {
+        let (_out, fake, _devices) = output_in(Protocol::Midi1, false);
+        std::thread::sleep(Duration::from_millis(700));
+        assert_eq!(sent(&fake), []);
+    }
+
+    /// **A MIDI 2.0 Protocol output has no Active Sensing** even with the
+    /// option; it sends once the Protocol is MIDI 1.0.
+    #[test]
+    fn a_midi2_protocol_output_sends_no_active_sensing_until_it_is_in_midi1() {
+        let (mut out, fake, _devices) = output_in(Protocol::Midi2, true);
+        std::thread::sleep(Duration::from_millis(700));
+        assert_eq!(sent(&fake), [], "silent in the MIDI 2.0 Protocol");
+        out.set_config(StreamConfig {
+            protocol: Protocol::Midi1,
+            rx_jr: false,
+            tx_jr: false,
+        });
+        std::thread::sleep(RECEIVER_LIMIT);
+        assert!(!sent(&fake).is_empty(), "sending in the MIDI 1.0 Protocol");
+    }
+}
