@@ -12,7 +12,7 @@ use std::ops::{Add, AddAssign};
 /// each one's own getters.
 ///
 /// - [`lost`](Self::lost): gone without a trace, or refused at a full ring on
-///   the way in (the inlet's writer answers `Refused`).
+///   the way in (the inlet's writer answers `PushError::Full`).
 /// - [`evicted`](Self::evicted): held, then dropped to make room for another.
 ///   A full waiting list or a ring that overwrote its oldest.
 /// - [`refused`](Self::refused): a port or a node declined it: no room at the

@@ -279,7 +279,7 @@ pub use profiles::{
     ProfileSwitch, ProfilesChange, Whole, WholeProfile,
 };
 pub use properties::{PropertyAsk, PropertyCall, PropertyChange, PropertyError, PropertyPeer};
-pub use session::{Connected, DeviceQuery, MidiHardwareOptions, MidiSession, Polled};
+pub use session::{Connected, DeviceQuery, MidiHardwareOptions, MidiSession, Polled, Presented};
 pub use stream::{Basis, DeviceStream, InputTiming};
 pub use virtual_endpoint::{VirtualDestination, VirtualProtocol, VirtualSource, VirtualSpec};
 

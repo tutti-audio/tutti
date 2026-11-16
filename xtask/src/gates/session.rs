@@ -18,7 +18,7 @@
 //!    tree.
 
 use super::lex::{blank, line_of};
-use super::use_tree::{is_word, pub_uses, tokens};
+use super::use_tree::{Leaf, statements};
 use super::{Cargo, Report, Tree};
 
 const SESSION: &str = "tutti-session";
@@ -27,62 +27,26 @@ fn skipped(dir: &str) -> bool {
     matches!(dir, "target" | ".git")
 }
 
-/// Parse one use tree from `t` at `*k` under `pre`, recording the whole-crate
-/// leaves: a leaf starting at a `tutti_` crate that is the crate itself (with or
-/// without `as NAME`), `self`, or a glob at any depth.
-fn tree(t: &[&str], k: &mut usize, pre: &[String], hit: &mut Vec<String>) {
-    let mut path = pre.to_vec();
-    if t.get(*k) == Some(&"::") {
-        *k += 1;
-    }
-    let from_tutti = |path: &[String]| path.first().is_some_and(|p| p.starts_with("tutti_"));
-    while *k < t.len() {
-        let tok = t[*k];
-        if tok == "{" {
-            *k += 1;
-            while *k < t.len() && t[*k] != "}" {
-                tree(t, k, &path, hit);
-                if t.get(*k) == Some(&",") {
-                    *k += 1;
-                }
+/// The whole-crate leaves of one `pub use` statement, as the text the report
+/// shows: a crate itself (with or without `as NAME`), `self`, or a glob at any
+/// depth, each under a `tutti_` crate.
+fn whole(leaves: &[Leaf]) -> Vec<String> {
+    leaves
+        .iter()
+        .filter(|l| l.whole)
+        .filter_map(|l| {
+            let mut full: Vec<&str> = l.path.iter().map(String::as_str).collect();
+            if l.source == "*" {
+                full.push("*");
+                return l.krate().starts_with("tutti_").then(|| full.join("::"));
             }
-            *k += 1;
-            return;
-        }
-        if tok == "*" {
-            *k += 1;
-            if from_tutti(&path) {
-                hit.push(format!("{}::*", path.join("::")));
+            full.push(&l.source);
+            if l.is_self {
+                full.push("self");
             }
-            return;
-        }
-        if tok.bytes().all(is_word) {
-            *k += 1;
-            if t.get(*k) == Some(&"::") {
-                path.push(tok.to_owned());
-                *k += 1;
-                continue;
-            }
-            let full = if path.is_empty() {
-                tok.to_owned()
-            } else {
-                format!("{}::{tok}", path.join("::"))
-            };
-            if t.get(*k) == Some(&"as") {
-                *k += 2;
-            }
-            if tok == "self" {
-                if from_tutti(&path) {
-                    hit.push(full);
-                }
-            } else if path.is_empty() && tok.starts_with("tutti_") {
-                hit.push(full);
-            }
-            return;
-        }
-        *k += 1;
-        return;
-    }
+            Some(full.join("::"))
+        })
+        .collect()
 }
 
 pub(super) fn check(tree_: &dyn Tree, cargo: &dyn Cargo) -> Report {
@@ -135,12 +99,9 @@ pub(super) fn check(tree_: &dyn Tree, cargo: &dyn Cargo) -> Report {
     for path in &files {
         let src = tree_.read(path).unwrap_or_default();
         let code = blank(&src);
-        for (at, semi) in pub_uses(&code) {
-            let body = code[at + 3..semi].trim_start();
-            let body = &body["use".len()..];
-            let t = tokens(body);
-            let (mut k, mut hit) = (0, Vec::new());
-            tree(&t, &mut k, &[], &mut hit);
+        for stmt in statements(&code) {
+            let (at, semi) = (stmt.at, stmt.semi);
+            let hit = whole(&stmt.leaves);
             if hit.is_empty() {
                 continue;
             }

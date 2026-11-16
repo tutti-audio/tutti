@@ -77,12 +77,14 @@
 
 extern crate libc;
 extern crate libloading;
-extern crate num_enum;
 extern crate num_traits;
 #[macro_use]
-extern crate log;
+extern crate tracing;
 #[macro_use]
 extern crate bitflags;
+
+#[macro_use]
+mod primitive_enum;
 
 pub mod api;
 pub mod buffer;
@@ -95,8 +97,35 @@ pub mod midi;
 pub mod plugin;
 pub mod scratch;
 
+pub use primitive_enum::UnknownPrimitive;
+
 // Test-only global allocator for the RT-safety test of the render refusal; it aborts on
 // any allocation inside an `assert_no_alloc` scope.
 #[cfg(test)]
 #[global_allocator]
 static RT_NO_ALLOC_HARNESS: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
+
+#[cfg(test)]
+mod primitive_enum_tests {
+    use crate::UnknownPrimitive;
+
+    /// A value no variant has is refused and named, in every repr: the
+    /// dispatchers rely on the refusal to skip opcodes they do not know.
+    #[test]
+    fn a_value_no_variant_has_is_refused_with_that_value() {
+        assert_eq!(
+            crate::plugin::OpCode::try_from(i32::MAX).err(),
+            Some(UnknownPrimitive(i64::from(i32::MAX)))
+        );
+        assert_eq!(
+            crate::api::ProcessLevel::try_from(-1).err(),
+            Some(UnknownPrimitive(-1))
+        );
+        assert_eq!(
+            crate::plugin::Category::try_from(isize::MIN)
+                .err()
+                .map(UnknownPrimitive::get),
+            Some(isize::MIN as i64)
+        );
+    }
+}

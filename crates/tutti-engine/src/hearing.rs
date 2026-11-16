@@ -50,11 +50,11 @@ type Install = Option<Box<TapWriter>>;
 pub enum HeardTapError {
     /// A reader of the engine's tap is alive. Close it first (or drop it:
     /// the session's reclaim phase closes a tap whose reader is gone).
-    #[error("the output tap already has a reader; close it before opening again")]
+    #[error("the heard tap already has a reader; close it before opening again")]
     Busy,
     /// [`HeardTaps::close`] found no tap open (none was opened, or it was
     /// closed, or its dropped reader was reclaimed).
-    #[error("no output tap is open")]
+    #[error("no heard tap is open")]
     NotOpen,
 }
 

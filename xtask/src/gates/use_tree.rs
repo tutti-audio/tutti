@@ -5,6 +5,9 @@
 //! path it comes from and its own name), the name it exports (the alias when there
 //! is an `as`) and whether it re-exports a crate or module whole. `pub(crate) use`
 //! is not a re-export.
+//!
+//! One walker serves every reader: `check-session` reads the whole-crate leaves of
+//! each statement ([`statements`]) and `umbrella-api` the exported items ([`uses`]).
 
 use super::lex::{blank, find_word_from, line_of, matching};
 
@@ -13,7 +16,7 @@ pub(super) fn is_word(b: u8) -> bool {
 }
 
 /// `(::|\w+|[{},*])` tokens of a `use` body.
-pub(super) fn tokens(body: &str) -> Vec<&str> {
+fn tokens(body: &str) -> Vec<&str> {
     let b = body.as_bytes();
     let mut out = Vec::new();
     let mut i = 0;
@@ -38,7 +41,7 @@ pub(super) fn tokens(body: &str) -> Vec<&str> {
 }
 
 /// `pub use` statements of lexed `code`, as `(start, end of the ';')`.
-pub(super) fn pub_uses(code: &str) -> Vec<(usize, usize)> {
+fn pub_uses(code: &str) -> Vec<(usize, usize)> {
     let b = code.as_bytes();
     let mut out = Vec::new();
     for (at, _) in code.match_indices("pub") {
@@ -74,6 +77,9 @@ pub(super) struct Leaf {
     pub(super) source: String,
     /// The leaf is a glob, a bare crate or `self`: a crate or module whole.
     pub(super) whole: bool,
+    /// The leaf is `self` of a group (`m::{self}`): `source` is then the group's
+    /// own name and `path` what precedes it.
+    pub(super) is_self: bool,
 }
 
 impl Leaf {
@@ -139,9 +145,45 @@ fn leaves(t: &[&str], k: &mut usize, pre: &[String], out: &mut Vec<Leaf>) {
                 || (path.is_empty() && source.starts_with("tutti_")),
             path,
             source,
+            is_self: self_leaf,
         });
         return;
     }
+}
+
+/// A `pub use` statement of lexed code: where it sits and its leaves.
+pub(super) struct Statement {
+    /// Offset of the `pub`.
+    pub(super) at: usize,
+    /// Offset of the closing `;`.
+    pub(super) semi: usize,
+    pub(super) leaves: Vec<Leaf>,
+}
+
+/// The `pub use` statements of `code`, which [`blank`] has lexed.
+pub(super) fn statements(code: &str) -> Vec<Statement> {
+    pub_uses(code)
+        .into_iter()
+        .map(|(at, semi)| {
+            let body = code[at + 3..semi].trim_start();
+            let t = tokens(&body["use".len()..]);
+            let mut leaves_ = Vec::new();
+            leaves(&t, &mut 0, &[], &mut leaves_);
+            Statement {
+                at,
+                semi,
+                leaves: leaves_,
+            }
+        })
+        .collect()
+}
+
+/// The `pub use` leaves of the source `src`.
+pub(super) fn uses(src: &str) -> Vec<Leaf> {
+    statements(&blank(src))
+        .into_iter()
+        .flat_map(|s| s.leaves)
+        .collect()
 }
 
 /// A `pub use` leaf and where it stands.
@@ -153,23 +195,19 @@ pub(super) struct Use {
     pub(super) line: usize,
 }
 
-/// The `pub use` leaves of the source `src`.
-pub(super) fn uses(src: &str) -> Vec<Use> {
+/// The `pub use` leaves of the source `src` with their inline modules and lines.
+pub(super) fn placed_uses(src: &str) -> Vec<Use> {
     let code = blank(src);
     let mods = inline_mods(&code);
     let mut out = Vec::new();
-    for (at, semi) in pub_uses(&code) {
-        let body = code[at + 3..semi].trim_start();
-        let t = tokens(&body["use".len()..]);
-        let (mut k, mut found) = (0, Vec::new());
-        leaves(&t, &mut k, &[], &mut found);
+    for s in statements(&code) {
         let module: Vec<String> = mods
             .iter()
-            .filter(|(_, open, close)| *open < at && at < *close)
+            .filter(|(_, open, close)| *open < s.at && s.at < *close)
             .map(|(n, ..)| n.clone())
             .collect();
-        let line = line_of(&code, at);
-        out.extend(found.into_iter().map(|leaf| Use {
+        let line = line_of(&code, s.at);
+        out.extend(s.leaves.into_iter().map(|leaf| Use {
             leaf,
             module: module.clone(),
             line,
@@ -211,24 +249,40 @@ fn inline_mods(code: &str) -> Vec<(String, usize, usize)> {
 mod tests {
     use super::*;
 
-    fn items(src: &str) -> Vec<(String, String, bool)> {
+    fn items(src: &str) -> Vec<(Vec<String>, String, String, bool)> {
         uses(src)
             .into_iter()
-            .map(|u| (u.leaf.item(), u.leaf.name, u.leaf.whole))
+            .map(|l| (l.path, l.source, l.name, l.whole))
             .collect()
+    }
+
+    fn leaf(
+        path: &[&str],
+        source: &str,
+        name: &str,
+        whole: bool,
+    ) -> (Vec<String>, String, String, bool) {
+        (
+            path.iter().map(|p| (*p).to_owned()).collect(),
+            source.to_owned(),
+            name.to_owned(),
+            whole,
+        )
     }
 
     #[test]
     fn a_tree_is_read_into_the_item_each_leaf_names_and_the_name_it_exports() {
         let got =
             items("pub use tutti_x::{A, B as C, m::{D, self as E}};\npub(crate) use tutti_y::Z;\n");
-        let want = [
-            ("tutti_x::A", "A", false),
-            ("tutti_x::B", "C", false),
-            ("tutti_x::m::D", "D", false),
-            ("tutti_x::m", "E", true),
-        ];
-        assert_eq!(got, want.map(|(i, n, w)| (i.to_owned(), n.to_owned(), w)));
+        assert_eq!(
+            got,
+            [
+                leaf(&["tutti_x"], "A", "A", false),
+                leaf(&["tutti_x"], "B", "C", false),
+                leaf(&["tutti_x", "m"], "D", "D", false),
+                leaf(&["tutti_x"], "m", "E", true),
+            ]
+        );
     }
 
     #[test]
@@ -240,24 +294,34 @@ mod tests {
             "pub use tutti_x::m::*;",
             "pub use local::*;",
         ] {
-            assert!(items(src).iter().all(|i| i.2), "{src}");
+            assert!(items(src).iter().all(|i| i.3), "{src}");
         }
-        assert!(!items("pub use tutti_x::m;")[0].2);
+        assert!(!items("pub use tutti_x::m;")[0].3);
     }
 
     #[test]
-    fn an_inline_module_and_the_line_are_kept() {
-        let u =
-            uses("pub use a::A;\npub mod m {\n    pub mod n {\n        pub use b::B;\n    }\n}\n");
-        assert_eq!((u[0].module.clone(), u[0].line), (vec![], 1));
-        assert_eq!(
-            (u[1].module.clone(), u[1].line),
-            (vec!["m".to_owned(), "n".to_owned()], 4)
-        );
+    fn a_statement_knows_where_it_sits() {
+        let code = blank("// c\npub use tutti_x::{A, B};\n");
+        let s = statements(&code);
+        assert_eq!(s.len(), 1);
+        assert_eq!(&code[s[0].at..=s[0].semi], "pub use tutti_x::{A, B};");
+        assert_eq!(s[0].leaves.len(), 2);
     }
 
     #[test]
     fn comments_and_strings_are_not_code() {
         assert!(uses("// pub use a::A;\nconst S: &str = \"pub use b::B;\";\n").is_empty());
+    }
+
+    #[test]
+    fn an_inline_module_and_the_line_are_kept() {
+        let u = placed_uses(
+            "pub use a::A;\npub mod m {\n    pub mod n {\n        pub use b::B;\n    }\n}\n",
+        );
+        assert_eq!((u[0].module.clone(), u[0].line), (vec![], 1));
+        assert_eq!(
+            (u[1].module.clone(), u[1].line),
+            (vec!["m".to_owned(), "n".to_owned()], 4)
+        );
     }
 }

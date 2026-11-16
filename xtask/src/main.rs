@@ -263,64 +263,77 @@ fn umbrella_api(ctx: &Ctx, dir: Option<&str>) -> Result<(), u8> {
         eprintln!("xtask: cannot read {}: {e}", lib_path.display());
         1
     })?;
-    let mut texts: Vec<(String, String)> = Vec::new();
-    let mut want = gates::reexported_crates(&lib);
-    let mut tried: std::collections::BTreeSet<String> = want.iter().cloned().collect();
-    let analysis = loop {
-        for krate in std::mem::take(&mut want) {
-            if texts.iter().any(|(c, _)| *c == krate) {
-                continue;
-            }
-            let package = krate.replace('_', "-");
-            let text = if let Some(dir) = dir {
-                match std::fs::read_to_string(Path::new(dir).join(format!("{package}.txt"))) {
-                    Ok(t) => t,
-                    Err(_) => continue,
-                }
-            } else {
-                let c = Cmd::sh(&format!(
-                    "cargo +{} public-api --package {package} --all-features -s",
-                    recipes::DOCS_NIGHTLY
-                ));
-                println!("+ {}", c.display());
-                let out = command(&c, ctx)
-                    .output()
-                    .map_err(|e| spawn_failed(&c, &e))?;
-                if !out.status.success() {
-                    // A crate with no package of that name (a std path) is not read.
-                    continue;
-                }
-                String::from_utf8_lossy(&out.stdout).into_owned()
+    // `None` is a crate with no text: not a package, or no file in `dir`.
+    let fetch = |krate: &str| -> Result<Option<String>, String> {
+        let package = krate.replace('_', "-");
+        if let Some(dir) = dir {
+            return match std::fs::read_to_string(Path::new(dir).join(format!("{package}.txt"))) {
+                Ok(t) => Ok(Some(t)),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                Err(e) => Err(e.to_string()),
             };
-            texts.push((krate, text));
         }
-        let refs: Vec<(&str, &str)> = texts
+        let is_package = ["crates", "testing"]
             .iter()
-            .map(|(c, t)| (c.as_str(), t.as_str()))
-            .collect();
-        let a = gates::analyze(&refs, &lib);
-        let more: Vec<String> = a
-            .wanted
-            .iter()
-            .filter(|c| !texts.iter().any(|(t, _)| t == *c) && !tried.contains(*c))
-            .cloned()
-            .collect();
-        tried.extend(more.iter().cloned());
-        if more.is_empty() {
-            break a;
+            .any(|d| ctx.root.join(d).join(&package).join("Cargo.toml").is_file());
+        if !is_package {
+            return Ok(None);
         }
-        want = more;
+        let c = Cmd::sh(&recipes::public_api_cmd(&package));
+        println!("+ {}", c.display());
+        let out = command(&c, ctx)
+            .output()
+            .map_err(|e| format!("cannot run `{}`: {e}", c.display()))?;
+        if !out.status.success() {
+            return Err(format!(
+                "`{}` failed ({}):\n{}",
+                c.display(),
+                out.status,
+                String::from_utf8_lossy(&out.stderr).trim_end()
+            ));
+        }
+        Ok(Some(String::from_utf8_lossy(&out.stdout).into_owned()))
     };
+    let (_, analysis) = gates::collect(&lib, &fetch).map_err(|e| {
+        eprintln!("xtask: umbrella-api: {e}");
+        1
+    })?;
+    for krate in &analysis.skipped {
+        let why = if dir.is_some() {
+            "no public-api text"
+        } else {
+            "not a package"
+        };
+        println!("skipped {krate}: {why}");
+    }
     println!(
-        "seeds, by the unexported types each pulls in (and how many of them through an internal type):"
+        "seeds: unexported types pulled in, of them internal or behind an internal one, item:"
     );
-    for (n, hidden, seed) in &analysis.seeds {
-        println!("  {n:4}  {hidden:4}  {seed}");
+    for s in &analysis.seeds {
+        println!("  {:4}  {:4}  {}", s.pulled, s.internal_or_behind, s.item);
+    }
+    if !analysis.decisions.is_empty() {
+        println!("re-exports covered (re-exporter -> covered path):");
+        for d in &analysis.decisions {
+            println!("  {d}");
+        }
+    }
+    if !analysis.ambiguous.is_empty() {
+        println!("re-exports covering nothing (ambiguous or unresolved):");
+        for d in &analysis.ambiguous {
+            println!("  {d}");
+        }
     }
     if !analysis.leaks.is_empty() {
         println!("internal types the exported items name (findings for their owners):");
         for l in &analysis.leaks {
             println!("  {l}");
+        }
+    }
+    if !analysis.stale.is_empty() {
+        println!("rows that match no type the texts name (stale, or for a crate not reached):");
+        for r in &analysis.stale {
+            println!("  {r}");
         }
     }
     for m in &analysis.missing {

@@ -143,6 +143,7 @@ impl FileOut {
 
 impl Sink for FileOut {
     type Sample = f32;
+    type Error = std::io::Error;
 
     fn layout(&self) -> ChannelLayout {
         self.spec.layout()
@@ -181,7 +182,7 @@ impl Sink for FileOut {
         }
     }
 
-    fn finalize(self) -> std::io::Result<()> {
+    fn finalize(self) -> std::result::Result<(), Self::Error> {
         // A write that failed mid-stream is reported ahead of the finish
         // itself: the header may well back-patch cleanly over a truncated
         // recording, so finishing `Ok` would hide the real fault. The encoder

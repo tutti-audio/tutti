@@ -10,10 +10,10 @@ use tutti_midi_device::{
 };
 use tutti_ump::{MidiGroup, MpeChannels, MpeOverlap, MpeZoneSpan, U7};
 
-const GROUP_0: MidiGroup = MidiGroup::of(0);
+pub(super) const GROUP_0: MidiGroup = MidiGroup::of(0);
 
 /// The MIDI-CI messages among what the fake device received, with their Group.
-fn ci_sent(wire: &Wire) -> Vec<(MidiGroup, CiMessage)> {
+pub(super) fn ci_sent(wire: &Wire) -> Vec<(MidiGroup, CiMessage)> {
     payloads(&received(wire))
         .into_iter()
         .filter_map(|(group, payload)| match CiMessage::decode(&payload) {
@@ -37,7 +37,7 @@ fn peer_id() -> PeerId {
     }
 }
 
-fn peer() -> Muid {
+pub(super) fn peer() -> Muid {
     Muid::of(0x0012_3456)
 }
 
@@ -49,7 +49,7 @@ fn peer_data_of(categories: CiCategories) -> DiscoveryData {
     DiscoveryData::new(identity(), categories, MaxSysexSize::of(256))
 }
 
-fn polled(wire: &mut Wire, ms: u64) -> Vec<Polled> {
+pub(super) fn polled(wire: &mut Wire, ms: u64) -> Vec<Polled> {
     wire.session.poll(wire.at(ms)).collect()
 }
 
@@ -102,7 +102,7 @@ fn endpoint_wire(blocks: &[FunctionBlock]) -> Wire {
 
 /// A MIDI 1.0 port whose Identity Request was answered and whose MIDI-CI has
 /// started, with the MUID it drew; what was sent so far is read off.
-fn midi1_running() -> (Wire, Muid) {
+pub(super) fn midi1_running() -> (Wire, Muid) {
     let mut wire = midi1_wire_ci(Some(identity()));
     let _ = polled(&mut wire, 0);
     reply_at(&wire, identity_reply(0), 10);
@@ -528,7 +528,7 @@ fn midi_ci_is_off_by_default() {
         received(&wire).is_empty(),
         "a block that declares MIDI-CI, unasked"
     );
-    assert_eq!(wire.session.options().ci, None);
+    assert_eq!(wire.session.presented(), None);
 
     use tutti_midi_device::{INQUIRY_ATTEMPTS, INQUIRY_TIMEOUT};
     let mut wire = midi1_wire();
@@ -689,7 +689,7 @@ fn discoveries_of(sent: Vec<(MidiGroup, CiMessage)>) -> Vec<(MidiGroup, Muid)> {
 
 /// A MIDI 1.0 port whose peer declared `categories` and whose first inquiry
 /// went out; the wire's clock is at 50 ms. What was sent is read off.
-fn peer_declaring(categories: CiCategories) -> (Wire, Muid) {
+pub(super) fn peer_declaring(categories: CiCategories) -> (Wire, Muid) {
     let (mut wire, ours) = midi1_running();
     say(
         &wire,

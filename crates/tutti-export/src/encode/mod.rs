@@ -154,6 +154,7 @@ struct EncoderSink {
 
 impl Sink for EncoderSink {
     type Sample = f32;
+    type Error = std::io::Error;
 
     fn layout(&self) -> ChannelLayout {
         self.layout
@@ -183,7 +184,7 @@ impl Sink for EncoderSink {
 
     /// Export finishes the encoder itself ([`Chain::into_encoder`]), to keep
     /// the codec's error whole; this is the trait's form of the same step.
-    fn finalize(self) -> std::io::Result<()> {
+    fn finalize(self) -> std::result::Result<(), Self::Error> {
         self.encoder
             .finish()
             .map(drop)

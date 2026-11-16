@@ -25,6 +25,7 @@ fn table_with(address: CiDeviceId, level: DefaultCcLevel, enabled: bool) -> Prof
     profile_table(address, level.profile(), enabled)
 }
 
+/// Spec: m2-113/2.2.1#1
 #[test]
 fn the_profile_is_per_channel_and_only_an_enabled_one_counts() {
     // M2-113 §2.2.1: the Destination is a channel; §2.3: enabled by Set Profile On.
@@ -45,6 +46,7 @@ fn the_profile_is_per_channel_and_only_an_enabled_one_counts() {
     }
 }
 
+/// Spec: m2-113/2.2.1#1
 #[test]
 fn a_group_wide_enable_is_not_a_channel_enable() {
     let table = table_with(CiDeviceId::Group, DefaultCcLevel::MeetsMinimum, true);

@@ -182,6 +182,14 @@ impl Connection {
         }
     }
 
+    /// Takes `active` as the Protocol and JR Timestamps in use, for a
+    /// configuration changed by the peer's own Stream Configuration Request
+    /// that the owner granted: the peer's Notification that follows reads as
+    /// no change.
+    pub fn adopt(&mut self, active: StreamConfig) {
+        self.endpoint.active = active;
+    }
+
     /// Folds one message from the peer. One that is not a UMP Stream message,
     /// and one the step does not wait for, are ignored.
     ///

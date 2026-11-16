@@ -210,6 +210,7 @@ fn a_details_reply_of_the_wrong_length_or_with_a_count_above_16_is_refused() {
     );
 }
 
+/// Spec: m2-123/9.2.2#2
 #[test]
 fn the_custom_reply_is_96_bytes_one_declaration_per_custom_classification() {
     // M2-123 §9.2.2, Tables 24 and 25.
@@ -316,6 +317,7 @@ fn a_sound_the_receiver_has_is_played_as_requested() {
     assert_eq!(have.resolve(sound(PIZZICATO, 3)), Some(sound(PIZZICATO, 3)));
 }
 
+/// Spec: m2-123/6.1#2
 #[test]
 fn a_missing_variation_falls_back_to_a_variation_of_the_same_subclass() {
     // M2-123 §6.1, first rule: 4 Variations of Pizzicato have indices 0 to 3.
@@ -323,6 +325,7 @@ fn a_missing_variation_falls_back_to_a_variation_of_the_same_subclass() {
     assert_eq!(have.resolve(sound(PIZZICATO, 9)), Some(sound(PIZZICATO, 0)));
 }
 
+/// Spec: m2-123/6.1#3
 #[test]
 fn a_missing_subclass_falls_back_to_subclass_0_of_the_same_classification() {
     // M2-123 §6.1, second rule.
@@ -338,6 +341,7 @@ fn a_missing_subclass_falls_back_to_subclass_0_of_the_same_classification() {
     );
 }
 
+/// Spec: m2-123/6.1#4
 #[test]
 fn a_missing_classification_falls_back_to_the_normal_sustain() {
     // M2-123 §6.1, third rule: Classification 1 (attribute type 0x10), Subclass 0.

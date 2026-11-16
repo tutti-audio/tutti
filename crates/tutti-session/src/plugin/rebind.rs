@@ -120,13 +120,15 @@ impl<C: Clock> Session<C> {
         if now == laid_out {
             return state.with(laid_out, false);
         }
-        let Some(main) = main else {
-            return state.with(laid_out, false);
-        };
         match rebinder.prepare() {
             // A served plugin whose buses still fit its slab: its node stays.
             Ok(None) => state.with(now, false),
             Ok(Some(rebuilt)) => {
+                // The swap commits on the main thread; an update that is not on
+                // it asks again, the unplaced node dropped.
+                let Some(main) = main else {
+                    return state.with(laid_out, false);
+                };
                 let (bound, controls, commit) = rebuilt.into_parts();
                 controls.set_meter(self.click_settings.project_meter());
                 match self.graph.replace_rebound(node, bound) {

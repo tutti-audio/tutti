@@ -11,6 +11,7 @@ use std::sync::{Mutex, MutexGuard};
 
 use crate::support;
 use support::active::{Activate, Active, ActiveExt, drive_block};
+use support::logs::plugin_events;
 use support::main_thread;
 
 use tutti_clap_host::{ClapLoaded, ClapProcessContext, LoadOptions};
@@ -481,17 +482,19 @@ fn a_transport_request_from_the_audio_thread_is_refused() {
 fn a_flood_of_transport_requests_is_bounded_and_each_refusal_is_logged() {
     let probe = Probe::acquire();
     let mut inst = probe.load();
-    inst.drain_log();
 
-    probe.command(&mut inst, HOSTEXT_CMD_START_BURST, 100, 0);
+    let mut sent = 0;
+    let logged = plugin_events(|| {
+        probe.command(&mut inst, HOSTEXT_CMD_START_BURST, 100, 0);
+        sent = requests(&mut inst).len();
+    });
 
-    assert_eq!(requests(&mut inst).len(), 64);
-    let refused = inst
-        .drain_log()
-        .into_iter()
-        .filter(|r| {
-            r.severity == clap_sys::ext::log::CLAP_LOG_PLUGIN_MISBEHAVING
-                && r.message.starts_with("transport request Start refused")
+    assert_eq!(sent, 64);
+    let refused = logged
+        .iter()
+        .filter(|e| {
+            e.level == tracing::Level::ERROR
+                && e.message.starts_with("transport request Start refused")
         })
         .count();
     assert_eq!(refused, 100 - 64, "every refused request is logged once");

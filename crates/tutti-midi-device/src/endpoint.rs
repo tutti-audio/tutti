@@ -20,6 +20,20 @@ pub const MAX_FUNCTION_BLOCKS: usize = 32;
 /// The UMP version this core speaks (M2-104 Table 5: 1.1).
 pub const UMP_VERSION: UmpVersion = UmpVersion { major: 1, minor: 1 };
 
+/// Who an application is to its peers: the Device Identity, the Endpoint Name
+/// and the Product Instance Id it declares (M2-104 §7.1.3 to §7.1.5), the parts
+/// an [`Endpoint`] built with [`Endpoint::local`] takes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MidiIdentity {
+    /// The Device Identity (M2-104 §7.1.3), which MIDI-CI Discovery also
+    /// announces.
+    pub device: DeviceIdentity,
+    /// The Endpoint Name (M2-104 §7.1.4).
+    pub name: EndpointName,
+    /// The Product Instance Id (M2-104 §7.1.5), if there is one.
+    pub instance: Option<ProductInstanceId>,
+}
+
 /// What an Endpoint supports (M2-104 §7.1.2).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Capabilities {
@@ -547,19 +561,13 @@ impl Endpoint {
     }
 
     /// The Endpoint a MIDI application presents for a port over `groups` from
-    /// Group 1: UMP version 1.1, the MIDI 1.0 and MIDI 2.0 Protocols, no JR
-    /// Timestamps either way, and one static, active, bidirectional Function
-    /// Block, number 0, over those Groups. Its identity and names are the
+    /// Group 1: UMP version 1.1, declaring `supports`, and one static, active,
+    /// bidirectional Function Block, number 0, over those Groups. Its identity and names are the
     /// application's ([`with_identity`](Self::with_identity),
     /// [`with_name`](Self::with_name)).
     #[must_use]
-    pub fn local(groups: GroupSpan) -> Self {
-        let mut endpoint = Self::new(Supports::of(Capabilities {
-            midi1: true,
-            midi2: true,
-            ..Capabilities::default()
-        }))
-        .with_static_function_blocks(true);
+    pub fn local(supports: Supports, groups: GroupSpan) -> Self {
+        let mut endpoint = Self::new(supports).with_static_function_blocks(true);
         if let (Some(id), Some(first)) = (FunctionBlockId::new(0), FirstGroup::new(0))
             && let Ok(block) =
                 FunctionBlock::builder(id, BlockDirection::Bidirectional, first, groups).build()

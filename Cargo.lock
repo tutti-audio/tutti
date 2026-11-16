@@ -2437,6 +2437,7 @@ dependencies = [
  "objc2",
  "objc2-foundation",
  "thiserror 2.0.21",
+ "tracing",
  "tutti-midi-protocol",
  "tutti-plugin-types",
  "tutti-rt",
@@ -2488,8 +2489,8 @@ dependencies = [
  "clap-sys",
  "dpi",
  "libloading 0.9.1",
- "log",
  "thiserror 2.0.21",
+ "tracing",
  "tutti-clap-test-plugin",
  "tutti-fixtures",
  "tutti-graph",
@@ -2510,6 +2511,8 @@ dependencies = [
  "raw-window-handle",
  "rgb",
  "thiserror 2.0.21",
+ "tracing",
+ "tracing-subscriber",
  "tutti-clap-ffi",
  "tutti-clap-test-plugin",
  "tutti-fixtures",
@@ -3239,6 +3242,7 @@ name = "tutti-soundfont"
 version = "0.0.1"
 dependencies = [
  "assert_no_alloc",
+ "libm",
  "serde",
  "thiserror 2.0.21",
  "tutti-dsp",
@@ -3340,8 +3344,8 @@ dependencies = [
 name = "tutti-vst2-author"
 version = "0.3.0"
 dependencies = [
- "log",
  "rand",
+ "tracing",
  "tutti-vst2-ffi",
 ]
 
@@ -3354,10 +3358,9 @@ dependencies = [
  "crossbeam-queue",
  "libc",
  "libloading 0.9.1",
- "log",
  "num-traits",
- "num_enum",
  "thiserror 2.0.21",
+ "tracing",
  "tutti-fixtures",
  "tutti-graph",
  "tutti-midi-protocol",
@@ -3414,10 +3417,10 @@ dependencies = [
  "crossbeam-queue",
  "dpi",
  "libloading 0.9.1",
- "log",
  "parking_lot",
  "tempfile",
  "thiserror 2.0.21",
+ "tracing",
  "tutti-fixtures",
  "tutti-plugin-ipc-ffi",
  "tutti-plugin-types",

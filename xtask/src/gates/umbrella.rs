@@ -23,7 +23,7 @@
 
 use super::Report;
 use super::Tree;
-use super::use_tree::uses;
+use super::use_tree::placed_uses;
 use std::collections::BTreeMap;
 
 const SRC: &str = "crates/tutti/src";
@@ -71,7 +71,7 @@ pub(super) fn check(tree: &dyn Tree) -> Report {
     let mut seen: BTreeMap<String, Vec<At>> = BTreeMap::new();
     for path in &files {
         let src = tree.read(path).unwrap_or_default();
-        for u in uses(&src) {
+        for u in placed_uses(&src) {
             let place = format!("{path}:{}", u.line);
             if u.leaf.whole {
                 bad.push(format!(

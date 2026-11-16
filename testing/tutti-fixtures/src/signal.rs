@@ -1,7 +1,8 @@
 //! The signals a test feeds a node or checks one against, defined once: a sine,
-//! an impulse, the level readings [`peak`] and [`rms`], the bit patterns of a
-//! render ([`bits`]), the impulse responses [`decay_ir`] and [`room_ir`], and a float
-//! WAV on disk ([`write_wav_f32`], [`read_wav_f32`]).
+//! an impulse, the level readings [`peak`], [`peak_planes`], [`rms`] and
+//! [`rms_f64`], the bit patterns of a render ([`bits`]), the impulse responses
+//! [`decay_ir`] and [`room_ir`], and a float WAV on disk ([`write_wav_f32`],
+//! [`read_wav_f32`]).
 //!
 //! Noise is [`noise`](crate::noise) and a bit hash is [`Fnv`](crate::Fnv), both in
 //! this crate's root. Every figure here is plain
@@ -55,18 +56,31 @@ pub fn peak(x: &[f32]) -> f32 {
     x.iter().fold(0.0, |m, s| m.max(s.abs()))
 }
 
+/// The largest absolute sample over every plane of `planes` (`0.0` when there are none).
+///
+/// A `NaN` sample is skipped, as in [`peak`].
+pub fn peak_planes<P: AsRef<[f32]>>(planes: &[P]) -> f32 {
+    planes.iter().fold(0.0, |m, p| m.max(peak(p.as_ref())))
+}
+
 /// The root mean square of **every** sample of `x`: the square root of the
 /// mean of the squares, summed in `f64` and narrowed once. `0.0` for an empty
 /// slice.
 ///
 /// The denominator is `x.len()`, so a stereo reading is taken over each plane
 /// on its own (or over an interleaved slice as one signal), never over frames.
+/// [`rms_f64`] is the same figure before the narrowing.
 pub fn rms(x: &[f32]) -> f32 {
+    rms_f64(x) as f32
+}
+
+/// [`rms`] without the final narrowing to `f32`. An empty slice reads `0.0`.
+pub fn rms_f64(x: &[f32]) -> f64 {
     if x.is_empty() {
         return 0.0;
     }
     let sum: f64 = x.iter().map(|&s| f64::from(s) * f64::from(s)).sum();
-    (sum / x.len() as f64).sqrt() as f32
+    (sum / x.len() as f64).sqrt()
 }
 
 /// The IEEE bit pattern of each sample of `x`: what a bit-exact comparison
@@ -209,6 +223,32 @@ mod tests {
         assert_eq!(peak(&[0.25, -0.75, 0.5]), 0.75);
         assert_eq!(rms(&[3.0, -3.0, 3.0, -3.0]), 3.0);
         assert_eq!((peak(&[]), rms(&[])), (0.0, 0.0));
+    }
+
+    /// The peak over planes is the largest of the planes' peaks, whatever
+    /// the container, and nothing at all reads zero.
+    #[test]
+    fn the_peak_over_planes_is_the_largest_plane_peak() {
+        let planes = [vec![0.25, -0.5], vec![0.125, 0.75, -0.25]];
+        assert_eq!(peak_planes(&planes), 0.75);
+        assert_eq!(peak_planes(&[[0.5f32, -1.0], [0.25, 0.0]]), 1.0);
+        assert_eq!(peak_planes::<Vec<f32>>(&[]), 0.0);
+    }
+
+    /// A full-scale sine over whole periods reads `1 / sqrt 2`, at `f64`
+    /// precision, and `rms` is that figure narrowed once.
+    #[test]
+    fn a_full_scale_sine_reads_one_over_root_two_in_f64() {
+        let x = sine(
+            Hz(1_000.0),
+            Amplitude(1.0),
+            SampleRate::SR_48K,
+            Samples(48_000),
+        );
+        let want = std::f64::consts::FRAC_1_SQRT_2;
+        assert!((rms_f64(&x) - want).abs() < 1e-7, "{}", rms_f64(&x));
+        assert_eq!(rms(&x), rms_f64(&x) as f32);
+        assert_eq!(rms_f64(&[]), 0.0);
     }
 
     /// Negative zero has its own bits.

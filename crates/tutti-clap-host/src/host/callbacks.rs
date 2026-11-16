@@ -16,22 +16,6 @@ use std::time::Instant;
 use tutti_clap_ffi::{AudioPortsRescanFlags, HostCallbacks, LogSeverity, ParamsRescanFlags};
 use tutti_plugin_types::{Request, RescanScope, TrackInfo, TransportRequest};
 
-/// The stderr tag for each CLAP severity. Split out of the log method so the
-/// mapping is testable: inline, its seven arms were reachable only through
-/// the FFI, with stderr as the sole output.
-fn severity_label(severity: LogSeverity) -> &'static str {
-    match severity {
-        LogSeverity::Debug => "DEBUG",
-        LogSeverity::Info => "INFO",
-        LogSeverity::Warning => "WARN",
-        LogSeverity::Error => "ERROR",
-        LogSeverity::Fatal => "FATAL",
-        LogSeverity::HostMisbehaving => "HOST-MISBEHAVING",
-        LogSeverity::PluginMisbehaving => "PLUGIN-MISBEHAVING",
-        LogSeverity::Unknown(_) => "UNKNOWN",
-    }
-}
-
 impl HostCallbacks for HostState {
     fn is_main_thread(&self) -> bool {
         HostState::is_main_thread(self)
@@ -41,30 +25,44 @@ impl HostCallbacks for HostState {
         HostState::is_audio_thread(self)
     }
 
-    /// Routes one line off the audio thread. (An audio-thread line never
-    /// gets here: the FFI crate counts it through
+    /// Emits one line as a `tracing` event on target `tutti::plugin`, with the
+    /// plugin's id as the `plugin` field. (An audio-thread line never gets
+    /// here: the FFI crate counts it through
     /// [`log_dropped_on_audio_thread`](Self::log_dropped_on_audio_thread)
-    /// before decoding it, because building the `String` is itself one of
-    /// the allocations that guard exists to prevent.)
+    /// before decoding it, because building the `String` is itself one of the
+    /// allocations that guard exists to prevent.)
+    ///
+    /// Debug maps to `DEBUG`, info to `INFO`, warning to `WARN`; error, fatal
+    /// and both misbehaving severities to `ERROR`. A severity CLAP does not
+    /// name is `WARN`, with the raw value in `severity`.
     fn log(&self, severity: LogSeverity, message: &str) {
-        let label = severity_label(severity);
-        if let LogSeverity::Unknown(raw) = severity {
-            eprintln!("[clap-plugin ?{raw}] {message}");
-        } else {
-            eprintln!("[clap-plugin {label}] {message}");
+        let plugin = self.plugin_id.get().map_or("", String::as_str);
+        match severity {
+            LogSeverity::Debug => {
+                tracing::debug!(target: "tutti::plugin", plugin, "{message}");
+            }
+            LogSeverity::Info => {
+                tracing::info!(target: "tutti::plugin", plugin, "{message}");
+            }
+            LogSeverity::Warning => {
+                tracing::warn!(target: "tutti::plugin", plugin, "{message}");
+            }
+            LogSeverity::Error
+            | LogSeverity::Fatal
+            | LogSeverity::HostMisbehaving
+            | LogSeverity::PluginMisbehaving => {
+                tracing::error!(target: "tutti::plugin", plugin, "{message}");
+            }
+            LogSeverity::Unknown(raw) => {
+                tracing::warn!(target: "tutti::plugin", plugin, severity = raw, "{message}");
+            }
         }
-        // Retain the line so a consumer can route it somewhere other than
-        // stderr. Unrecognised severities are kept verbatim: see `LogRecord`.
-        self.log.push(severity.raw(), message.to_owned());
     }
 
-    /// `clap.log` is `[thread-safe]`, audio thread included, but recording a
-    /// line allocates, prints and takes a lock that
-    /// [`drain_log`](crate::ClapLoaded::drain_log) holds across a copy. So an
-    /// audio-thread line is counted, not recorded (visible through
-    /// [`log_lines_dropped`](crate::ClapLoaded::log_lines_dropped)). That
-    /// loses the message text, a real cost; the eventual answer is a
-    /// lock-free queue with pre-allocated slots.
+    /// `clap.log` is `[thread-safe]`, audio thread included, but emitting a
+    /// line allocates, so an audio-thread line is counted, not emitted
+    /// (visible through [`log_lines_dropped`](crate::ClapLoaded::log_lines_dropped)).
+    /// That loses the message text, a real cost.
     fn log_dropped_on_audio_thread(&self) {
         self.log.note_audio_thread_drop();
     }
@@ -186,8 +184,8 @@ impl HostCallbacks for HostState {
     }
 
     fn transport_request(&self, request: TransportRequest) {
-        // A refused request is the plugin's flood, so it lands in the log a
-        // consumer reads, as the plugin misbehaving.
+        // A refused request is the plugin's flood, so it is logged as the
+        // plugin misbehaving.
         if !self.transport.push(request) {
             self.log(
                 LogSeverity::PluginMisbehaving,
@@ -283,22 +281,5 @@ mod tests {
                 Request::Callback,
             ]
         );
-    }
-
-    /// Every CLAP severity has its tag, and one the host does not know is
-    /// `UNKNOWN` rather than a wrong label.
-    #[test]
-    fn each_severity_has_its_label() {
-        assert_eq!(
-            severity_label(LogSeverity::from_raw(clap_sys::ext::log::CLAP_LOG_WARNING)),
-            "WARN"
-        );
-        assert_eq!(
-            severity_label(LogSeverity::from_raw(
-                clap_sys::ext::log::CLAP_LOG_PLUGIN_MISBEHAVING
-            )),
-            "PLUGIN-MISBEHAVING"
-        );
-        assert_eq!(severity_label(LogSeverity::from_raw(99)), "UNKNOWN");
     }
 }

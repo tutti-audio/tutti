@@ -70,7 +70,7 @@ impl LadderCoeffs {
         let fc =
             f64::from(freq.get()).clamp(1.0, f64::from(sample_rate.nyquist_scaled(0.998).get()));
         LadderCoeffs {
-            g: (core::f64::consts::PI * fc / sample_rate.get()).tan(),
+            g: libm::tan(core::f64::consts::PI * fc / sample_rate.get()),
             k: 4.0 * f64::from(resonance.get().clamp(0.0, 1.0)),
         }
     }

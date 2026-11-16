@@ -87,6 +87,14 @@
 //! the root that was fading in: the root that was fading out is dropped, a
 //! step the session avoids by declaring only after the running fade ends.
 //!
+//! # A routing change
+//!
+//! A change of the output routing ([`OutputControl::set_routing`]) crossfades
+//! the same rendered channels from the old routing's fold to the new one over the
+//! declick length along [`FadeLaw::EqualAmplitude`], and a change made while a
+//! root change crossfades, or while the last routing change still fades, cuts.
+//! See the `output` module's docs.
+//!
 //! # Limits
 //!
 //! [`Engine::new`] bounds the graph's editor ([`Editor::set_limits`]) to
@@ -239,6 +247,23 @@ struct GraphRender {
     installed: Arc<AtomicU64>,
     /// Where each device output's gain ramp stands.
     stage: OutputStage,
+    /// Where the crossfade of the last routing change stands.
+    routing: RoutingRun,
+    /// The newest routing generation this thread has finished fading from or
+    /// cut, for the control side to drop its `previous` table by
+    /// ([`OutputControl::reclaim`]).
+    routing_ended: Arc<AtomicU64>,
+}
+
+/// How far the audio thread has got through a routing change's crossfade.
+#[derive(Clone, Copy)]
+struct RoutingRun {
+    /// The generation of the table the last block lent; `None` before the
+    /// first block, which adopts whatever it finds (nothing was heard to
+    /// fade from).
+    seen: Option<u64>,
+    /// Frames of the fade rendered since `seen` was first lent.
+    done: usize,
 }
 
 /// What the control side published, lent for one segment: the folds and the
@@ -257,14 +282,16 @@ const ROOT_BANKS: usize = 2;
 /// the root crossfade's four.
 const SCRATCH_CHUNKS: usize = ROOT_BANKS * MAX_CHANNELS + 4;
 
-/// The scratch a root crossfade folds through: the block's worth of each.
+/// The scratch a crossfade folds through (a root change's, or a routing
+/// change's): the block's worth of each.
 struct Mixing<'a> {
     /// One device channel of the new root's fold.
     fold: &'a mut [f32],
-    /// The same channel of the old root's.
+    /// The same channel of the old fold: the old root's, or the replaced
+    /// routing's of the same root.
     old: &'a mut [f32],
-    /// The gain of the old root at each frame of the block, and the new
-    /// root's.
+    /// The gain of the old side at each frame of the block, and the new
+    /// side's.
     gain_old: &'a mut [f32],
     gain_new: &'a mut [f32],
 }
@@ -274,10 +301,20 @@ struct Mixing<'a> {
 struct Crossfaded<'a, 'p> {
     /// The new root's fold into the device, and its channels.
     new: (&'a tutti_buffers::Fold, &'p [&'p [f32]]),
-    /// The old root's: `None` when its fold is not published, which fades
-    /// the new root in from silence.
+    /// The old fold of the same channels: the old root's, or the replaced
+    /// routing's of the same root. `None` when the old root's fold is not
+    /// published, which fades the new root in from silence.
     old: Option<(&'a tutti_buffers::Fold, &'p [&'p [f32]])>,
-    fade: tutti_graph::RootFade,
+    /// The fade's law and length, and the frames of it already rendered.
+    fade: FadeRun,
+}
+
+/// A fade over `length` frames along `law`, `done` of them behind it.
+#[derive(Clone, Copy)]
+struct FadeRun {
+    law: FadeLaw,
+    length: usize,
+    done: usize,
 }
 
 impl Mixing<'_> {
@@ -294,14 +331,18 @@ impl Mixing<'_> {
         let Crossfaded { new, old, fade } = roots;
         let frames = device.frames().get();
         let channels = device.channels();
-        let (length, first) = (fade.fade.duration.get(), fade.done.get());
+        let FadeRun {
+            law,
+            length,
+            done: first,
+        } = fade;
         for (i, (go, gn)) in self.gain_old[..frames]
             .iter_mut()
             .zip(&mut self.gain_new[..frames])
             .enumerate()
         {
             (*go, *gn) = if first + i < length {
-                fade.fade.law.gains(first + i, length)
+                law.gains(first + i, length)
             } else {
                 (0.0, 1.0)
             };
@@ -476,6 +517,11 @@ impl Engine {
                 clock,
                 installed: Arc::clone(output.installed()),
                 stage: OutputStage::new(),
+                routing: RoutingRun {
+                    seen: None,
+                    done: 0,
+                },
+                routing_ended: Arc::clone(output.routing_ended()),
             }),
             fader: AudioThreadCell::new(Fader::new(fade_frames(rate))),
             capacity: Samples(stride),
@@ -1411,7 +1457,21 @@ impl GraphRender {
         // block the live playhead still reads its first frame (the last
         // block's end), and it only moves forward.
         self.transport.publish_position();
+        // A new routing generation starts its fade from the first block that
+        // lends it; the first block of all has nothing to fade from.
+        let generation = lent.folds.generation();
+        let length = declick_frames(self.exec.prepare().sample_rate()).get();
+        if self.routing.seen != Some(generation) {
+            let first = self.routing.seen.is_none();
+            self.routing = RoutingRun {
+                seen: Some(generation),
+                done: if first { length } else { 0 },
+            };
+        }
         if width == 0 {
+            // No fold plays, so nothing fades: the replaced table is free.
+            self.routing.done = length;
+            self.routing_ended.store(generation, Ordering::Release);
             block.fill(0.0);
             return true;
         }
@@ -1430,10 +1490,32 @@ impl GraphRender {
                 for (slot, out) in table.iter_mut().zip(&outs).take(width) {
                     *slot = &out[..len];
                 }
+                // The routing change's fade: the table it replaced folds the
+                // same channels. A root fade, or a root the replaced table
+                // never held, cuts it.
+                let old_routing = lent
+                    .folds
+                    .previous()
+                    .filter(|_| fade.is_none() && self.routing.done < length)
+                    .and_then(|previous| previous.get(root, out_ch, width));
                 let folded = match fade {
-                    None => Planes::new(&table[..width]).and_then(|planes| {
-                        fold.fold_planar_to_interleaved(planes, device.reborrow())
-                    }),
+                    None => match old_routing {
+                        Some(old) => mixing.crossfade(
+                            Crossfaded {
+                                new: (fold, &table[..width]),
+                                old: Some((old, &table[..width])),
+                                fade: FadeRun {
+                                    law: FadeLaw::EqualAmplitude,
+                                    length,
+                                    done: self.routing.done,
+                                },
+                            },
+                            device.reborrow(),
+                        ),
+                        None => Planes::new(&table[..width]).and_then(|planes| {
+                            fold.fold_planar_to_interleaved(planes, device.reborrow())
+                        }),
+                    },
                     Some(fade) => {
                         // The old root's channels follow the new root's.
                         let old = fade.width.min(MAX_CHANNELS);
@@ -1448,12 +1530,26 @@ impl GraphRender {
                                     .folds
                                     .get(fade.old, out_ch, old)
                                     .map(|fold| (fold, &old_table[..old])),
-                                fade,
+                                fade: FadeRun {
+                                    law: fade.fade.law,
+                                    length: fade.fade.duration.get(),
+                                    done: fade.done.get(),
+                                },
                             },
                             device.reborrow(),
                         )
                     }
                 };
+                // Past the fade, or cut by a root fade or a missing fold: the
+                // control side may drop the replaced table.
+                if old_routing.is_some() {
+                    self.routing.done += len;
+                } else {
+                    self.routing.done = length;
+                }
+                if self.routing.done >= length {
+                    self.routing_ended.store(generation, Ordering::Release);
+                }
                 debug_assert!(
                     folded.is_ok(),
                     "the root's channels are a block long and the fold is for its width: {folded:?}"
@@ -1472,6 +1568,8 @@ impl GraphRender {
             // A root width that cannot be placed on this device: silent, and
             // the caller counts it.
             None => {
+                self.routing.done = length;
+                self.routing_ended.store(generation, Ordering::Release);
                 block.fill(0.0);
                 false
             }
@@ -2052,6 +2150,14 @@ mod tests {
         out[..device].to_vec()
     }
 
+    /// [`first_frame`] after a routing change's crossfade has run out.
+    fn first_frame_after_fade(engine: &Engine, device: usize) -> Vec<f32> {
+        let layout = ChannelLayout::try_from(device).expect("a test width is small");
+        let mut out = vec![0.0f32; device * (declick_frames(SampleRate::SR_48K).get() + 8)];
+        engine.process_segment(&mut InterleavedMut::new(&mut out, layout).unwrap());
+        first_frame(engine, device)
+    }
+
     /// A root of four independent buses, declared, stays by index on a 6-wide
     /// device: channels 2 and 3 land at 2 and 3. Undeclared, the same root is
     /// quad, and its rears land on the side pair at 4 and 5.
@@ -2405,14 +2511,17 @@ mod tests {
             ..Routing::default()
         });
         let (l, r) = (61.0 + m * 63.0 + m * 65.0, 62.0 + m * 63.0 + m * 66.0);
-        assert_eq!(first_frame(&engine, 6), [0.0, 0.0, l, r, 0.0, 0.0]);
+        assert_eq!(
+            first_frame_after_fade(&engine, 6),
+            [0.0, 0.0, l, r, 0.0, 0.0]
+        );
         // The same routing on a stereo device has no place for outputs 3 and 4:
         // no fold, so a commit or restart would name it.
         assert!(!control.has_fold(RootId::GENESIS, 6, ChannelLayout::STEREO));
         // Taken back: by speaker again.
         control.set_routing(Routing::default());
         assert_eq!(
-            first_frame(&engine, 6),
+            first_frame_after_fade(&engine, 6),
             [61.0, 62.0, 63.0, 64.0, 65.0, 66.0]
         );
     }
@@ -2441,7 +2550,7 @@ mod tests {
         });
         // Channels 61..66: L = 61 + 0.5 * 63 + 0.25 * 65, R likewise.
         assert_eq!(
-            first_frame(&engine, 2),
+            first_frame_after_fade(&engine, 2),
             [
                 61.0 + 0.5 * 63.0 + 0.25 * 65.0,
                 62.0 + 0.5 * 63.0 + 0.25 * 66.0
@@ -2575,14 +2684,14 @@ mod tests {
         let placed = control.device(stereo).unwrap();
         assert_eq!(placed.placement, Placement::Stated);
         assert_eq!(placed.topology, swapped);
-        assert_eq!(first_frame(&engine, 2), [22.0, 21.0]);
+        assert_eq!(first_frame_after_fade(&engine, 2), [22.0, 21.0]);
         // Taken back: the width's order.
         control.state_device(stereo, None).unwrap();
         assert_eq!(
             control.device(stereo).map(|d| d.placement),
             Some(Placement::Assumed)
         );
-        assert_eq!(first_frame(&engine, 2), [21.0, 22.0]);
+        assert_eq!(first_frame_after_fade(&engine, 2), [21.0, 22.0]);
         // A statement of another width than the device is refused.
         assert!(matches!(
             control.state_device(ChannelLayout::from(6u16), Some(swapped)),
@@ -2695,6 +2804,254 @@ mod tests {
         ed.spec_mut().root_id = id;
         feed(ed, width, channel);
         ed.commit().expect("commits");
+    }
+
+    /// An engine of a stereo `Ramp` (channels 21 and 22) into a four-output
+    /// device, routed by `map` and rendered past the routing's fade.
+    fn routed_engine(map: [usize; 2]) -> Engine {
+        use crate::{OutputMap, Routing};
+        let transport = Transport::new(SampleRate::SR_48K);
+        let (mut ed, exec) =
+            Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
+        rewire(&mut ed, 2);
+        let _ = first_frame(&engine, 4);
+        engine.output_control().set_routing(Routing {
+            map: OutputMap::channels(map).unwrap(),
+            ..Routing::default()
+        });
+        let _ = first_frame_after_fade(&engine, 4);
+        engine
+    }
+
+    /// Four-output frames of `frames` frames.
+    fn render_four(engine: &Engine, frames: usize) -> Vec<f32> {
+        let mut out = vec![-9.0f32; frames * 4];
+        engine.process_segment(
+            &mut InterleavedMut::new(&mut out, ChannelLayout::from(4u16)).unwrap(),
+        );
+        out
+    }
+
+    fn move_map(engine: &Engine, map: [usize; 2]) {
+        use crate::{OutputMap, Routing};
+        engine.output_control().set_routing(Routing {
+            map: OutputMap::channels(map).unwrap(),
+            ..Routing::default()
+        });
+    }
+
+    /// A map change from outputs 0 and 1 to 2 and 3 ramps: frame `k` of the
+    /// declick-long fade has the old outputs at the fade law's old-side gain
+    /// and the new at its new-side gain (from a channel of 21 and one of 22),
+    /// across block boundaries, and from the fade's length on only the new
+    /// outputs sound, exactly.
+    #[test]
+    fn a_routing_change_ramps_the_old_outputs_out_and_the_new_in_by_the_fade_law() {
+        let engine = routed_engine([0, 1]);
+        move_map(&engine, [2, 3]);
+        let n = declick_frames(SampleRate::SR_48K).get();
+        assert!(n > 64, "the fade spans blocks");
+        let out = render_four(&engine, n + 70);
+        for (k, frame) in out.as_chunks::<4>().0.iter().enumerate() {
+            let (go, gn) = if k < n {
+                FadeLaw::EqualAmplitude.gains(k, n)
+            } else {
+                (0.0, 1.0)
+            };
+            assert_eq!(
+                *frame,
+                [21.0 * go, 22.0 * go, 21.0 * gn, 22.0 * gn],
+                "frame {k}"
+            );
+        }
+    }
+
+    /// A routing change made while the last one still fades cuts: the next
+    /// block is the newest routing alone, with no third table held.
+    #[test]
+    fn a_routing_change_during_a_routing_fade_cuts_to_the_newest() {
+        let engine = routed_engine([0, 1]);
+        move_map(&engine, [2, 3]);
+        let _ = render_four(&engine, 64);
+        move_map(&engine, [1, 0]);
+        let out = render_four(&engine, 16);
+        for frame in out.as_chunks::<4>().0 {
+            assert_eq!(*frame, [22.0, 21.0, 0.0, 0.0]);
+        }
+        let held = engine.output_control().cell().current();
+        assert!(
+            held.previous().is_none(),
+            "a cut keeps nothing to fade from"
+        );
+    }
+
+    /// A routing change during a root fade cuts: the next block folds both
+    /// roots under the new routing from its first frame (the old root is the
+    /// constant on the left, the new on the right, heard swapped), and the
+    /// routing does not fade in after the root fade ends.
+    #[test]
+    fn a_routing_change_during_a_root_fade_cuts() {
+        use crate::{OutputMap, Routing};
+        let (engine, mut ed) = crossfading_engine(20);
+        let control = engine.output_control();
+        move_root(&mut ed, &control, None, 2, 1);
+        let mut heard = block_with(&engine, 2, || {});
+        control.set_routing(Routing {
+            map: OutputMap::channels([1, 0]).unwrap(),
+            ..Routing::default()
+        });
+        heard.extend((0..2).flat_map(|_| block_with(&engine, 2, || {})));
+        for (k, frame) in heard.as_chunks::<2>().0.iter().enumerate() {
+            let (out, new) = if k < 20 {
+                FadeLaw::EqualAmplitude.gains(k, 20)
+            } else {
+                (0.0, 1.0)
+            };
+            // Heard left goes to output 1 and heard right to output 0, from
+            // the block after the change.
+            let want = if k < 8 { [out, new] } else { [new, out] };
+            assert!(
+                (frame[0] - want[0]).abs() < 1e-6 && (frame[1] - want[1]).abs() < 1e-6,
+                "frame {k}: {frame:?} against {want:?}"
+            );
+        }
+        let _ = control.reclaim();
+        assert!(
+            control.cell().current().previous().is_none(),
+            "the cut table is not kept"
+        );
+    }
+
+    /// The table a routing change replaced is held while the fade runs, goes
+    /// at the first reclaim after the audio thread reports the fade ended, and
+    /// is freed (nothing keeps it) once no block lends the table that held it.
+    #[test]
+    fn the_replaced_routing_table_is_reclaimed_after_the_fade() {
+        let engine = routed_engine([0, 1]);
+        let control = engine.output_control();
+        move_map(&engine, [2, 3]);
+        let previous = {
+            let table = control.cell().current();
+            let held = table.previous().expect("the replaced table is held");
+            assert_eq!(Arc::strong_count(held), 1, "the control side's alone");
+            Arc::downgrade(held)
+        };
+        let n = declick_frames(SampleRate::SR_48K).get();
+        let _ = render_four(&engine, n / 2);
+        let _ = control.reclaim();
+        assert!(
+            control.cell().current().previous().is_some(),
+            "held while the fade runs"
+        );
+        let _ = render_four(&engine, n);
+        let _ = control.reclaim();
+        assert!(control.cell().current().previous().is_none());
+        let _ = render_four(&engine, 8);
+        assert_eq!(control.reclaim(), 0, "nothing is left pinned");
+        assert!(previous.upgrade().is_none(), "the replaced table is freed");
+    }
+
+    /// A routing change's replaced table is reclaimed even when no fold plays:
+    /// a block with no plan (width 0) and one whose root has no placed fold
+    /// both end the fade, so `previous` is not held while the stream is silent.
+    #[test]
+    fn the_replaced_routing_table_is_reclaimed_while_no_fold_plays() {
+        use crate::{OutputMap, Routing};
+        let change = || Routing {
+            map: OutputMap::channels([1, 0]).unwrap(),
+            ..Routing::default()
+        };
+        // No plan: width 0.
+        let transport = Transport::new(SampleRate::SR_48K);
+        let (mut ed, exec) =
+            Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
+        let control = engine.output_control();
+        let _ = first_frame(&engine, 2);
+        control.set_routing(change());
+        assert!(control.cell().current().previous().is_some());
+        let _ = first_frame(&engine, 2);
+        let _ = control.reclaim();
+        assert!(control.cell().current().previous().is_none(), "width 0");
+        // Five buses into three outputs have no fold.
+        let transport = Transport::new(SampleRate::SR_48K);
+        let (mut ed, exec) =
+            Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
+        rewire(&mut ed, 5);
+        let control = engine.output_control();
+        let _ = first_frame(&engine, 3);
+        assert!(!control.has_fold(RootId::GENESIS, 5, ChannelLayout::from(3u16)));
+        control.set_routing(change());
+        assert!(control.cell().current().previous().is_some());
+        let _ = first_frame(&engine, 3);
+        let _ = control.reclaim();
+        assert!(control.cell().current().previous().is_none(), "no fold");
+    }
+
+    /// A publish that is not a routing change (a device added mid-fade) neither
+    /// restarts nor extends the fade: the frames follow the law from where they
+    /// were and end at the declick length.
+    #[test]
+    fn an_unrelated_publish_mid_fade_leaves_the_fade_where_it_was() {
+        let engine = routed_engine([0, 1]);
+        move_map(&engine, [2, 3]);
+        let n = declick_frames(SampleRate::SR_48K).get();
+        let mut out = render_four(&engine, 100);
+        engine
+            .support_output(ChannelLayout::from(20u16))
+            .expect("a width");
+        out.extend(render_four(&engine, n + 70 - 100));
+        for (k, frame) in out.as_chunks::<4>().0.iter().enumerate() {
+            let (go, gn) = if k < n {
+                FadeLaw::EqualAmplitude.gains(k, n)
+            } else {
+                (0.0, 1.0)
+            };
+            assert_eq!(
+                *frame,
+                [21.0 * go, 22.0 * go, 21.0 * gn, 22.0 * gn],
+                "frame {k}"
+            );
+        }
+    }
+
+    /// A device statement is a routing change as well: swapping the stereo
+    /// device's front pair fades, so the first frame after it is still the
+    /// old order's and the swap is whole at the fade's length.
+    #[test]
+    fn a_device_statement_ramps_like_a_routing_change() {
+        let transport = Transport::new(SampleRate::SR_48K);
+        let (mut ed, exec) =
+            Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
+        rewire(&mut ed, 2);
+        let _ = first_frame(&engine, 2);
+        let swapped = ChannelTopology::new([
+            tutti_types::Speaker::FrontRight,
+            tutti_types::Speaker::FrontLeft,
+        ])
+        .unwrap();
+        engine
+            .output_control()
+            .state_device(ChannelLayout::STEREO, Some(swapped))
+            .unwrap();
+        let n = declick_frames(SampleRate::SR_48K).get();
+        let mut out = vec![0.0f32; (n + 8) * 2];
+        engine.process_segment(&mut InterleavedMut::new(&mut out, ChannelLayout::STEREO).unwrap());
+        for (k, frame) in out.as_chunks::<2>().0.iter().enumerate() {
+            let (go, gn) = if k < n {
+                FadeLaw::EqualAmplitude.gains(k, n)
+            } else {
+                (0.0, 1.0)
+            };
+            assert_eq!(
+                *frame,
+                [21.0 * go + 22.0 * gn, 22.0 * go + 21.0 * gn],
+                "frame {k}"
+            );
+        }
     }
 
     /// A root change crossfades: the old root's lanes ramp out by the

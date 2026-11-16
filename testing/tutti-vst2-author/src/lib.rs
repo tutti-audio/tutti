@@ -14,7 +14,7 @@
 #![allow(mismatched_lifetime_syntaxes)]
 
 #[macro_use]
-extern crate log;
+extern crate tracing;
 
 use std::ptr;
 
