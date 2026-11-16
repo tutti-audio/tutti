@@ -84,9 +84,10 @@ until it is un-parked. `vendor/` is third-party and never restyled.
   - *What `new` takes:* only what has no default (a filter's type, a delay's
     maximum). Where width is a choice it is the first argument, a
     `ChannelLayout` or a `BusTopology`, never a default or a preset by name. A
-    sample rate, a transport or a block geometry is bound where the description
-    is taken (`Graph::add`, `bounce`), which also checks settings that depend on
-    each other and answers with a named error.
+    sample rate or a transport is bound where the description is inserted
+    (`Graph::add` prepares the node at the graph's rate and binds the tempo
+    map). The terminal call that takes a spec (`bounce`) checks settings that
+    depend on each other and answers with a named error.
   - *Nodes:* a `*Node` has no public constructor. The app builds its `*Config`;
     the node is made from it at insertion.
   - *Builders:* a separate `*Builder` with a terminal `build()` exists only where
