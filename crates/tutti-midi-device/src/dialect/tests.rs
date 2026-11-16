@@ -228,6 +228,7 @@ fn two_mpe_profiles_on_separate_channels_are_two_zones_in_order() {
     assert_eq!(zones.zone_of(ch(8)).unwrap().manager(), ch(8));
 }
 
+/// Spec: m2-120/3.4#1
 #[test]
 fn overlapping_mpe_profiles_are_refused() {
     // M2-120 §3.4: two enabled Profiles shall not share a channel.
@@ -241,6 +242,7 @@ fn overlapping_mpe_profiles_are_refused() {
     );
 }
 
+/// Spec: m2-120/3.4#1
 #[test]
 fn zones_that_touch_are_not_overlapping() {
     let reports = table(&[(channel(0), Some(4)), (channel(4), Some(4))]);

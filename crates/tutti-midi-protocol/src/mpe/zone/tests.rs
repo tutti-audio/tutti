@@ -354,6 +354,7 @@ fn pzone(manager: u8, channels: u8) -> MpeZoneConfig {
 
 /// M2-120 section 3.5: a Profile starts at 48 for the Manager and for every
 /// Member, where MPE 1.1 starts the Manager at 2.
+/// Spec: m2-120/3.5#4
 #[test]
 fn the_profile_defaults_the_manager_to_48_and_mpe_1_1_to_2() {
     assert_eq!(
@@ -373,6 +374,7 @@ fn the_profile_defaults_the_manager_to_48_and_mpe_1_1_to_2() {
 /// M2-120 section 3.5: the Manager and every Member share one range, so a
 /// Profile zone answers the same for its Manager and for a Member, whatever
 /// range it was built with.
+/// Spec: m2-120/3.5#1
 #[test]
 fn a_profile_zone_answers_one_range_for_its_manager_and_a_member() {
     for range in [
@@ -424,6 +426,7 @@ fn the_manager_is_the_lowest_channel_and_the_members_follow_it() {
 
 /// M2-120 section 3.4: zones never share a channel; a set refuses one that does,
 /// and is the same set whichever order its zones were added.
+/// Spec: m2-120/3.4#1
 #[test]
 fn profile_zones_never_share_a_channel_and_a_set_has_no_order() {
     let low = pzone(0, 4);
