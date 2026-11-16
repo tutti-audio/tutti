@@ -2934,6 +2934,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tracing",
  "tutti-plugin-types",
+ "tutti-rt",
  "tutti-types",
 ]
 

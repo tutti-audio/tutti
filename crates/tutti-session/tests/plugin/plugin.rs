@@ -326,8 +326,11 @@ fn a_plugin_dead_for_the_window_stays_silent_at_its_node_and_is_reported_once() 
     assert_eq!(died.len(), 1, "one report: {died:?}");
     assert_eq!(died[0].0, node);
     assert!(
-        matches!(died[0].1, PluginFailure::StreamClosed),
-        "a server that aborted closed its stream, and the cause says so: {:?}",
+        matches!(
+            died[0].1,
+            PluginFailure::StreamClosed | PluginFailure::ServerExited { .. }
+        ),
+        "a server that aborted ended its process and closed its stream, and the cause is the first the host saw: {:?}",
         died[0].1
     );
     assert!(
@@ -780,8 +783,11 @@ fn a_plugin_that_crashes_every_time_is_given_up_on() {
     assert_eq!(*at, node);
     assert_eq!(why.failures, 3);
     assert!(
-        matches!(&why.last, ReloadCause::Died(PluginFailure::StreamClosed)),
-        "a replacement that aborts on its first block closed its stream: {:?}",
+        matches!(
+            &why.last,
+            ReloadCause::Died(PluginFailure::StreamClosed | PluginFailure::ServerExited { .. })
+        ),
+        "a replacement that aborts on its first block ended its process and closed its stream: {:?}",
         why.last
     );
     assert!(s.graph_ref().contains(node), "the node stays at its key");
@@ -844,7 +850,9 @@ fn a_reload_that_fails_to_load_carries_the_bridge_error_as_its_source() {
     assert!(
         matches!(
             causes.first(),
-            Some(ReloadCause::Died(PluginFailure::StreamClosed))
+            Some(ReloadCause::Died(
+                PluginFailure::StreamClosed | PluginFailure::ServerExited { .. }
+            ))
         ),
         "the first reload is for the death: {causes:?}"
     );

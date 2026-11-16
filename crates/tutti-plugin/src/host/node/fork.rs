@@ -104,7 +104,7 @@
 //! `tutti_graph::ForkHealth` probe `Editor::fork_health` reads):
 //! `ForkFaultKind::Crashed` when the fork's bridge has latched a crash,
 //! `ForkFaultKind::TimedOut` when a block missed its budget
-//! (`BridgeConfig::timeout_ms`), the cause a [`PluginRenderFault`]. After
+//! (`Timeouts::call`), the cause a [`PluginRenderFault`]. After
 //! the first miss an offline fork stops waiting, so a hung server costs one
 //! budget, not one per block. A renderer checks the probe after rendering
 //! and reports the render as failed (tutti-export: `Error::ForkFailed`).
@@ -141,10 +141,6 @@ use tutti_plugin_types::{PluginFailure, PluginForkError};
 pub(super) struct ForkWatch {
     /// The fork's controls: the latency it declares now.
     controls: PluginControls,
-    /// The fork's bridge. Weak: a probe the editor keeps must not keep the
-    /// fork alive after its node is gone (a dropped fork has nothing left to
-    /// fail), and the fork's own pipeline holds the wait.
-    bridge: Weak<PluginBridge>,
     /// What the fork's pipeline waits on and latches into (shared with it),
     /// and the latency its graph was compiled against (`OfflineWait::plan`,
     /// recorded by the node's `prepare` once the plugin has settled).
@@ -179,13 +175,6 @@ impl ForkHealth for ForkWatch {
         };
         if self.wait.server_died() {
             return self.wait.death().map(crashed);
-        }
-        if let Some(bridge) = self.bridge.upgrade()
-            && bridge.is_crashed()
-        {
-            return Some(crashed(
-                bridge.crash_cause().unwrap_or(PluginFailure::Unreported),
-            ));
         }
         if let Some((rate, reason)) = self.wait.refusal() {
             let cause = PluginRenderFault::RateRefused { rate, reason };
@@ -343,7 +332,6 @@ impl Capture {
         self.sources.install(&fork.controls);
         fork.fork_watch = Some(Arc::new(ForkWatch {
             controls: fork.controls.clone(),
-            bridge: Arc::downgrade(&fork.bridge),
             wait,
         }));
         fork.state.client.seed_delivery(&self.delivered);
@@ -466,6 +454,7 @@ impl PluginClient<Bound> {
 mod tests {
     use super::*;
     use std::time::Duration;
+    use tutti_plugin_ipc::ServerWatch;
     use tutti_plugin_types::PluginTail;
     use tutti_types::{SampleRate, Samples};
 
@@ -477,8 +466,10 @@ mod tests {
         let controls = PluginControls::new(Samples(137), PluginTail::default(), SampleRate::SR_48K);
         let watch = ForkWatch {
             controls: controls.clone(),
-            bridge: Weak::new(),
-            wait: Arc::new(OfflineWait::new(Duration::from_secs(1), Weak::new())),
+            wait: Arc::new(OfflineWait::new(
+                Duration::from_secs(1),
+                Arc::new(ServerWatch::new()),
+            )),
         };
         assert!(watch.fault().is_none(), "not planned yet");
         controls.set_pipeline(Samples(64));
