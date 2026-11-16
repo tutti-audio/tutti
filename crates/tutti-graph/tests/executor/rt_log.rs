@@ -1,14 +1,14 @@
-//! Logging from the audio thread: a node's `Io::log` reaches the readers the
-//! executor hands the control side, with the node and the frame the executor
-//! fills in, coalesced and gated as the spec says, on the serial executor and
-//! on the parallel one, which renders the same samples with logging on.
+//! Logging from the audio thread: a node's `Io::log` reaches the control
+//! side's `RtLogReaders`, with the node and the frame the executor fills in,
+//! coalesced, gated and merged by frame, on the serial executor and on the
+//! parallel one, which renders the same samples with logging on.
 
 use tutti_graph::testing as common;
 
 use common::{TestPool, prepare, test_pool};
 use tutti_graph::{
-    Cx, Editor, Executor, Io, LogFilter, LogGate, Node, NodeKey, Prepare, RtLevel, RtLogReader,
-    RtLogReaders, RtRecord, RtTarget, RtValue, Shape, Status, TransportPosition, Unforkable,
+    Cx, Editor, Executor, Io, LogFilter, Node, NodeKey, Prepare, RtLevel, RtLogReaders, RtRecord,
+    RtTarget, RtValue, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{OutPort, Source};
 use tutti_types::{ChannelLayout, Frame, Tail};
@@ -84,12 +84,13 @@ fn log(site: &'static str, offset: usize, value: i64) -> Act {
     }
 }
 
-/// `loggers` as sources 1.., each an output of the graph.
+/// `loggers` as sources 1.., each an output of the graph, and the registry of
+/// the executor's rings. The gate is off until a drain stores a filter.
 fn build(
     loggers: Vec<Vec<Act>>,
     max_block: usize,
     pool: Option<std::sync::Arc<dyn tutti_graph::Pool>>,
-) -> (Editor, Executor, Vec<RtLogReader>, LogGate) {
+) -> (Editor, Executor, RtLogReaders) {
     let (mut ed, mut exec) = Editor::new(prepare(max_block));
     if pool.is_some() {
         exec.set_pool(pool);
@@ -111,9 +112,8 @@ fn build(
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
-    let readers = exec.take_log_readers();
-    let gate = exec.log_gate();
-    (ed, exec, readers, gate)
+    let readers = RtLogReaders::new(&mut exec);
+    (ed, exec, readers)
 }
 
 fn render(exec: &mut Executor, frames: usize, outs: usize) -> Vec<Vec<f32>> {
@@ -123,24 +123,26 @@ fn render(exec: &mut Executor, frames: usize, outs: usize) -> Vec<Vec<f32>> {
     bufs
 }
 
-fn drain(readers: &mut [RtLogReader]) -> Vec<RtRecord> {
+/// Drains under `filter` (which the gate takes from the next block), the
+/// records ordered by frame and then node, and the losses since the last
+/// drain.
+fn take(readers: &RtLogReaders, filter: LogFilter) -> (Vec<RtRecord>, u64) {
     let mut out = Vec::new();
-    for r in readers {
-        while let Some(rec) = r.pop() {
-            out.push(rec);
-        }
-    }
+    let lost = readers.drain(filter, |r| out.push(*r));
     out.sort_by_key(|r| (r.frame(), r.source()));
-    out
+    (out, lost)
+}
+
+/// A registry whose gate is open from the next block.
+fn open(readers: &RtLogReaders) {
+    take(readers, ALL);
 }
 
 #[test]
-fn nothing_is_logged_while_the_gate_is_off() {
-    let (_ed, mut exec, mut readers, gate) = build(vec![vec![log(A, 0, 1)]], 64, None);
-    assert_eq!(gate.get(), LogFilter::OFF);
+fn nothing_is_logged_before_a_drain_opens_the_gate() {
+    let (_ed, mut exec, readers) = build(vec![vec![log(A, 0, 1)]], 64, None);
     render(&mut exec, 64, 1);
-    assert!(drain(&mut readers).is_empty());
-    assert_eq!(readers[0].lost(), 0);
+    assert_eq!(take(&readers, ALL), (vec![], 0));
 }
 
 #[test]
@@ -155,22 +157,26 @@ fn a_record_below_the_gates_level_for_its_target_writes_nothing() {
         log(LOUD, 0, 0),
         Act::Line("plugin line", 0),
     ];
-    let (_ed, mut exec, mut readers, gate) = build(vec![acts], 64, None);
-    gate.set(LogFilter::new(Some(RtLevel::Warn), None));
+    let (_ed, mut exec, readers) = build(vec![acts], 64, None);
+    take(&readers, LogFilter::new(Some(RtLevel::Warn), None));
     render(&mut exec, 64, 1);
-    let records = drain(&mut readers);
-    assert_eq!(records.len(), 1);
+    let (records, lost) = take(&readers, ALL);
+    assert_eq!(
+        (records.len(), lost),
+        (1, 0),
+        "only the loud one: {records:?}"
+    );
     assert_eq!(records[0].message(), LOUD);
 }
 
 #[test]
 fn a_record_carries_its_node_and_the_block_start_plus_its_offset() {
-    let (_ed, mut exec, mut readers, gate) =
-        build(vec![vec![log(A, 5, 1)], vec![log(B, 9, 2)]], 64, None);
-    gate.set(ALL);
+    let (_ed, mut exec, readers) = build(vec![vec![log(A, 5, 1)], vec![log(B, 9, 2)]], 64, None);
+    open(&readers);
     render(&mut exec, 64, 2);
     render(&mut exec, 32, 2);
-    let got: Vec<_> = drain(&mut readers)
+    let got: Vec<_> = take(&readers, ALL)
+        .0
         .iter()
         .map(|r| (r.message(), r.source(), r.frame()))
         .collect();
@@ -188,11 +194,11 @@ fn a_record_carries_its_node_and_the_block_start_plus_its_offset() {
 #[test]
 fn the_same_call_several_times_in_one_node_call_is_one_record_with_repeats() {
     let acts = vec![log(A, 0, 1), log(A, 3, 1), log(A, 4, 1), log(A, 5, 2)];
-    let (_ed, mut exec, mut readers, gate) = build(vec![acts], 64, None);
-    gate.set(ALL);
+    let (_ed, mut exec, readers) = build(vec![acts], 64, None);
+    open(&readers);
     render(&mut exec, 64, 1);
-    let records = drain(&mut readers);
-    let got: Vec<_> = records
+    let got: Vec<_> = take(&readers, ALL)
+        .0
         .iter()
         .map(|r| (r.fields()[0].1, r.repeats(), r.frame()))
         .collect();
@@ -206,69 +212,106 @@ fn the_same_call_several_times_in_one_node_call_is_one_record_with_repeats() {
 }
 
 #[test]
-fn a_plugin_line_keeps_its_text_and_its_target_and_never_coalesces() {
-    let acts = vec![Act::Line("same", 0), Act::Line("same", 0)];
-    let (_ed, mut exec, mut readers, gate) = build(vec![acts], 64, None);
-    gate.set(ALL);
+fn a_plugin_line_keeps_its_text_and_its_target_and_never_coalesces_not_even_an_empty_one() {
+    let acts = vec![
+        Act::Line("same", 0),
+        Act::Line("same", 0),
+        Act::Line("", 0),
+        Act::Line("", 0),
+    ];
+    let (_ed, mut exec, readers) = build(vec![acts], 64, None);
+    open(&readers);
     render(&mut exec, 64, 1);
-    let records = drain(&mut readers);
-    assert_eq!(records.len(), 2);
+    let records = take(&readers, ALL).0;
+    let texts: Vec<_> = records.iter().map(RtRecord::text).collect();
+    assert_eq!(texts, [Some("same"), Some("same"), Some(""), Some("")]);
     assert!(
-        records.iter().all(|r| r.text() == Some("same")
-            && r.target() == RtTarget::Plugin
-            && r.repeats() == 0)
+        records
+            .iter()
+            .all(|r| r.target() == RtTarget::Plugin && r.repeats() == 0)
     );
 }
 
 #[test]
 fn a_fifth_distinct_record_in_one_node_call_is_counted_lost() {
     let acts = (0..6).map(|v| log(A, 0, v)).collect();
-    let (_ed, mut exec, mut readers, gate) = build(vec![acts], 64, None);
-    gate.set(ALL);
+    let (_ed, mut exec, readers) = build(vec![acts], 64, None);
+    open(&readers);
     render(&mut exec, 64, 1);
-    assert_eq!(drain(&mut readers).len(), 4);
-    assert_eq!(readers[0].lost(), 2);
+    let (records, lost) = take(&readers, ALL);
+    assert_eq!((records.len(), lost), (4, 2));
 }
 
 #[test]
-fn a_full_ring_drops_the_newest_and_counts_each() {
+fn a_full_ring_drops_the_newest_and_counts_each_once() {
     // Four distinct records a block, no drain: 64 blocks fill the 256 slots.
     let acts = (0..4).map(|v| log(A, 0, v)).collect();
-    let (_ed, mut exec, mut readers, gate) = build(vec![acts], 8, None);
-    gate.set(ALL);
+    let (_ed, mut exec, readers) = build(vec![acts], 8, None);
+    open(&readers);
     for _ in 0..70 {
         render(&mut exec, 8, 1);
     }
-    assert_eq!(readers[0].lost(), 6 * 4);
-    let records = drain(&mut readers);
-    assert_eq!(records.len(), 256);
+    let (records, lost) = take(&readers, ALL);
+    assert_eq!((records.len(), lost), (256, 6 * 4));
     assert_eq!(
         records.last().map(RtRecord::frame),
         Some(Frame::new(63 * 8)),
         "the newest were the ones dropped"
     );
+    assert_eq!(take(&readers, ALL).1, 0, "a loss is reported once");
 }
 
 #[test]
-fn a_set_pool_hands_over_a_ring_per_participant_and_keeps_what_the_old_ones_hold() {
-    let (_ed, mut exec, mut old, gate) = build(vec![vec![log(A, 0, 1)]], 64, None);
-    gate.set(ALL);
-    render(&mut exec, 64, 1);
-    exec.set_pool(Some(test_pool(3)));
-    let fresh = exec.take_log_readers();
-    assert_eq!(fresh.len(), 3, "one ring per participant");
-    assert!(old[0].is_disconnected());
-    assert_eq!(drain(&mut old).len(), 1, "the retired ring still reads");
+fn a_drain_hands_the_records_of_every_node_in_frame_order_whatever_order_they_ran_in() {
+    // The first node logs late in the block, the second early: the ring holds
+    // them in the order they ran.
+    let (_ed, mut exec, readers) = build(vec![vec![log(A, 50, 0)], vec![log(B, 5, 0)]], 64, None);
+    open(&readers);
+    render(&mut exec, 64, 2);
+    let frames: Vec<_> = take(&readers, ALL).0.iter().map(RtRecord::frame).collect();
+    assert_eq!(frames, [Frame::new(5), Frame::new(50)]);
 }
 
-/// Four loggers (heavy by default) behind each other's outputs: enough for
-/// the cost model to spread, each logging at its own offsets.
+#[test]
+fn a_drain_across_a_pools_rings_is_ordered_by_frame_and_complete() {
+    let (_ed, mut exec, readers) = build(busy(), 64, Some(test_pool(3)));
+    open(&readers);
+    for _ in 0..8 {
+        render(&mut exec, 64, 4);
+    }
+    let (records, lost) = take(&readers, ALL);
+    assert_eq!(lost, 0);
+    assert_eq!(records.len(), 8 * 4 * 3);
+    assert!(records.windows(2).all(|w| w[0].frame() <= w[1].frame()));
+}
+
+#[test]
+fn resizing_the_executor_delivers_what_the_old_rings_held_and_reads_the_new_ones() {
+    let (_ed, mut exec, readers) = build(vec![vec![log(A, 1, 0)]], 64, None);
+    open(&readers);
+    render(&mut exec, 64, 1);
+    exec.set_pool(Some(test_pool(3)));
+    readers.adopt(&mut exec);
+    render(&mut exec, 64, 1);
+    let (records, lost) = take(&readers, ALL);
+    assert_eq!(lost, 0);
+    let frames: Vec<_> = records.iter().map(RtRecord::frame).collect();
+    assert_eq!(
+        frames,
+        [Frame::new(1), Frame::new(64 + 1)],
+        "the block before the resize, and the one after"
+    );
+}
+
+/// Four loggers (heavy by default), each logging a coalescing pair, one
+/// other record and a plugin line at its own offsets.
 fn busy() -> Vec<Vec<Act>> {
     (0..4)
         .map(|i| {
             vec![
                 log(BUSY, i, i as i64),
                 log(BUSY, i, i as i64),
+                Act::Line("a plugin line", i + 4),
                 log(OTHER, i + 8, 7),
             ]
         })
@@ -280,21 +323,30 @@ fn a_parallel_render_with_logging_on_is_bit_identical_to_the_serial_one_and_logs
     let blocks = [64usize, 17, 64, 12, 33];
     let run = |pool: Option<std::sync::Arc<dyn tutti_graph::Pool>>| {
         let parallel = pool.is_some();
-        let (_ed, mut exec, mut readers, gate) = build(busy(), 64, pool);
+        let (_ed, mut exec, readers) = build(busy(), 64, pool);
         assert_eq!(exec.is_parallel(), parallel);
-        gate.set(ALL);
+        open(&readers);
         let mut audio = Vec::new();
         for &n in &blocks {
             audio.extend(render(&mut exec, n, 4));
         }
-        let records: Vec<_> = drain(&mut readers)
+        let records: Vec<_> = take(&readers, ALL)
+            .0
             .iter()
-            .map(|r| (r.frame(), r.source(), r.message(), r.repeats()))
+            .map(|r| {
+                (
+                    r.frame(),
+                    r.source(),
+                    r.message(),
+                    r.text().map(str::to_owned),
+                    r.repeats(),
+                )
+            })
             .collect();
         (audio, records)
     };
     let serial = run(None);
-    assert_eq!(serial.1.len(), blocks.len() * 4 * 2);
+    assert_eq!(serial.1.len(), blocks.len() * 4 * 3);
     for workers in common::WORKERS {
         let parallel = run(Some(test_pool(workers)));
         assert_eq!(parallel.0, serial.0, "{workers} workers: the samples");
@@ -303,11 +355,11 @@ fn a_parallel_render_with_logging_on_is_bit_identical_to_the_serial_one_and_logs
 }
 
 #[test]
-fn logging_and_flushing_allocate_nothing_on_either_executor() {
+fn logging_lines_and_flushing_allocate_nothing_on_either_executor() {
     for workers in [1usize, 3] {
         let pool = (workers > 1).then(|| TestPool::no_alloc(workers) as _);
-        let (_ed, mut exec, mut readers, gate) = build(busy(), 64, pool);
-        gate.set(ALL);
+        let (_ed, mut exec, readers) = build(busy(), 64, pool);
+        open(&readers);
         let mut bufs = vec![vec![0.0f32; 64]; 4];
         for _ in 0..3 {
             let mut refs: Vec<&mut [f32]> = bufs.iter_mut().map(Vec::as_mut_slice).collect();
@@ -315,78 +367,7 @@ fn logging_and_flushing_allocate_nothing_on_either_executor() {
                 exec.process(64, &TransportPosition::default(), &[], &mut refs);
             });
             // The control side reads between blocks, off the gate.
-            assert_eq!(drain(&mut readers).len(), 8, "{workers} workers");
+            assert_eq!(take(&readers, ALL).0.len(), 12, "{workers} workers");
         }
     }
-}
-
-/// A registry over a fresh executor, its gate stored by the first drain.
-fn registry(loggers: Vec<Vec<Act>>, max_block: usize) -> (Editor, Executor, RtLogReaders) {
-    let (ed, mut exec, _readers, _gate) = build(loggers, max_block, None);
-    // `build` took the readers: this registry sees the executor as resized.
-    exec.set_pool(None);
-    let readers = RtLogReaders::new(&mut exec);
-    readers.drain(ALL, |_| {});
-    (ed, exec, readers)
-}
-
-fn collect(readers: &RtLogReaders) -> (Vec<RtRecord>, u64) {
-    let mut out = Vec::new();
-    let lost = readers.drain(ALL, |r| out.push(*r));
-    (out, lost)
-}
-
-#[test]
-fn a_drain_hands_the_records_of_every_node_in_frame_order_whatever_order_they_ran_in() {
-    // The first node logs late in the block, the second early: the ring holds
-    // them in the order they ran.
-    let (_ed, mut exec, readers) = registry(vec![vec![log(A, 50, 0)], vec![log(B, 5, 0)]], 64);
-    render(&mut exec, 64, 2);
-    let frames: Vec<_> = collect(&readers).0.iter().map(RtRecord::frame).collect();
-    assert_eq!(frames, [Frame::new(5), Frame::new(50)]);
-}
-
-#[test]
-fn a_drain_across_a_pools_rings_is_ordered_by_frame_and_complete() {
-    let (_ed, mut exec, _taken, _gate) = build(busy(), 64, None);
-    // The sizing the registry adopts: one ring per participant.
-    exec.set_pool(Some(test_pool(3)));
-    let readers = RtLogReaders::new(&mut exec);
-    readers.drain(ALL, |_| {});
-    for _ in 0..8 {
-        render(&mut exec, 64, 4);
-    }
-    let (records, lost) = collect(&readers);
-    assert_eq!(lost, 0);
-    assert_eq!(records.len(), 8 * 4 * 2);
-    assert!(records.windows(2).all(|w| w[0].frame() <= w[1].frame()));
-}
-
-#[test]
-fn records_past_a_rings_room_are_counted_once_in_the_drain_that_sees_them() {
-    let acts = (0..4).map(|v| log(A, 0, v)).collect();
-    let (_ed, mut exec, readers) = registry(vec![acts], 8);
-    for _ in 0..70 {
-        render(&mut exec, 8, 1);
-    }
-    let (records, lost) = collect(&readers);
-    assert_eq!((records.len(), lost), (256, 4 * 70 - 256));
-    assert_eq!(collect(&readers).1, 0, "a loss is reported once");
-}
-
-#[test]
-fn resizing_the_executor_delivers_what_the_old_rings_held_and_reads_the_new_ones() {
-    let (_ed, mut exec, readers) = registry(vec![vec![log(A, 1, 0)]], 64);
-    render(&mut exec, 64, 1);
-    exec.set_pool(Some(test_pool(3)));
-    readers.adopt(&mut exec);
-    render(&mut exec, 64, 1);
-    let (records, lost) = collect(&readers);
-    assert_eq!(lost, 0);
-    let frames: Vec<_> = records.iter().map(RtRecord::frame).collect();
-    assert_eq!(
-        frames,
-        [Frame::new(1), Frame::new(64 + 1)],
-        "the block before the resize, and the one after"
-    );
 }
