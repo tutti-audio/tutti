@@ -16,6 +16,12 @@
 //!   "the last writer dropped" is never final. Use a [`Counter`](super::Counter)
 //!   for a count with one writer that a reader must see end.
 //!
+//! **Freeing.** A writer held by an audio-side owner lives in its node, which
+//! is retired and dropped on the control side. A writer cloned on the audio
+//! thread is dropped there only while other handles to the cell live (the
+//! reader, or the owner's writer), so the audio thread never drops the last
+//! handle and never frees the cells.
+//!
 //! The tallies are independent, as a [`Counter`](super::Counter)'s are: a
 //! `get` that races an add may read one word before it and the next after it.
 //! Once every writer's thread has joined, `get` is exact.
@@ -85,7 +91,8 @@ impl<U: Count> Clone for TallyWriter<U> {
 }
 
 impl<U: Count> Tally<U> {
-    /// The total counted so far. No tally is less than in an earlier `get`.
+    /// The total counted so far. No tally is less than in an earlier `get`
+    /// until it wraps.
     /// Wait-free: one load per word; exact once every writer has finished.
     #[inline]
     #[must_use]

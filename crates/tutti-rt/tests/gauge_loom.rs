@@ -251,11 +251,15 @@ fn a_two_word_tally_reads_prefix_totals_and_is_exact_once_joined() {
         let observer = {
             let total = total.clone();
             thread::spawn(move || {
-                let Two([x, y]) = total.get();
-                assert!(
-                    matches!(x, 0..=2) && matches!(y, 0 | 10 | 20),
-                    "a tally is not a sum of adds: ({x}, {y})"
-                );
+                let Two([x1, y1]) = total.get();
+                let Two([x2, y2]) = total.get();
+                assert!(x2 >= x1 && y2 >= y1, "a tally went back");
+                for (x, y) in [(x1, y1), (x2, y2)] {
+                    assert!(
+                        matches!(x, 0..=2) && matches!(y, 0 | 10 | 20),
+                        "a tally is not a sum of adds: ({x}, {y})"
+                    );
+                }
             })
         };
         let first = thread::spawn(move || a.add(Two([1, 10])));

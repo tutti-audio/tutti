@@ -16,7 +16,8 @@
 //! A [`Tally<U>`] is a count with many writers ([`tally()`]): `Clone` writers
 //! that `fetch_add`, wrapping rather than saturating, with no closed flag.
 //!
-//! Nothing resets on read, and a reader never blocks: one load per word (one word for a gauge).
+//! Nothing resets on read, and a reader never blocks: one load per word (one
+//! word for a gauge).
 //! The writer is not `Clone` and writes through `&mut self`, so the cell has
 //! one writer at a time by type (a shared reference cannot write, and two
 //! threads cannot race a read-modify-write). Writing is audio-thread safe: no
@@ -130,6 +131,49 @@ where
 /// A [`Count`]'s tallies: `[u64; N]` with `N >= 1`, and nothing else. Sealed,
 /// so a count's width is fixed by its type and the counter's cells always
 /// match it.
+///
+/// A count of no tallies is refused when its counter is built, at compile
+/// time.
+///
+/// ```compile_fail,E0080
+/// use tutti_rt::{Count, counter};
+///
+/// #[derive(Clone, Copy)]
+/// struct ZeroCount;
+///
+/// impl Count for ZeroCount {
+///     type Words = [u64; 0];
+///     fn to_words(self) -> [u64; 0] {
+///         []
+///     }
+///     fn from_words(_: [u64; 0]) -> Self {
+///         ZeroCount
+///     }
+/// }
+///
+/// let _ = counter::<ZeroCount>();
+/// ```
+///
+/// A tally refuses it the same way.
+///
+/// ```compile_fail,E0080
+/// use tutti_rt::{Count, tally};
+///
+/// #[derive(Clone, Copy)]
+/// struct ZeroCount;
+///
+/// impl Count for ZeroCount {
+///     type Words = [u64; 0];
+///     fn to_words(self) -> [u64; 0] {
+///         []
+///     }
+///     fn from_words(_: [u64; 0]) -> Self {
+///         ZeroCount
+///     }
+/// }
+///
+/// let _ = tally::<ZeroCount>();
+/// ```
 pub trait Words: words::Sealed + Copy {
     /// The number of tallies: `N`, a compile error when `N` is 0.
     const LEN: usize;
