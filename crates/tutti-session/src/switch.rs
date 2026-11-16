@@ -194,9 +194,11 @@ impl Session<SystemClock> {
         };
         let channels = resolved.spec().channels;
         self.switch_to_device(channels, device, move |host, session| {
-            TuttiDriver::start_resolved(host, engine, resolved, |spec, stopped| {
-                session.rerate(spec, stopped, None, None)
-            })
+            engine
+                .start_resolved(host, resolved, |spec, stopped| {
+                    session.rerate(spec, stopped, None, None)
+                })
+                .map_err(Box::new)
         })
     }
 
@@ -218,9 +220,11 @@ impl Session<SystemClock> {
     {
         let channels = spec.channels;
         self.switch_to_device(channels, DeviceSelector::default(), move |host, session| {
-            TuttiDriver::start_on(host, spec, driver, |spec, stopped| {
-                session.rerate(spec, stopped, None, None)
-            })
+            AudioEngine::from_spec(spec)
+                .start_on(host, driver, |spec, stopped| {
+                    session.rerate(spec, stopped, None, None)
+                })
+                .map_err(Box::new)
         })
     }
 
@@ -234,7 +238,7 @@ impl Session<SystemClock> {
             tutti_engine::StreamHost,
             &mut Self,
         )
-            -> std::result::Result<TuttiDriver, (tutti_engine::StreamHost, Error)>,
+            -> std::result::Result<TuttiDriver, Box<(tutti_engine::StreamHost, Error)>>,
     ) -> std::result::Result<LiveSession, ClockError<Self>> {
         if let Err(e) = self.check_switch(channels) {
             return Err(ClockError::new(self, e));
@@ -248,7 +252,8 @@ impl Session<SystemClock> {
         let host = self.running.take_host();
         match start(host, &mut self) {
             Ok(driver) => Ok(self.on_device(driver, chosen, previous, unpolled)),
-            Err((host, switch)) => {
+            Err(failed) => {
+                let (host, switch) = *failed;
                 self.running.host = Some(host);
                 let undone = self.back_to_the_timer(old);
                 self.carried_events.append(&mut unpolled);

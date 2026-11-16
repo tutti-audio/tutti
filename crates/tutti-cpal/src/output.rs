@@ -245,6 +245,48 @@ impl AudioEngine {
         Ok((CpalDriver::new(device, format)?, spec, opened))
     }
 
+    /// Starts `resolved` (this engine's device, found by
+    /// [`resolve_device`](Self::resolve_device)) on `host`, a host whose stream
+    /// another driver ran (a timer): the device takes over the stream, `rerate`
+    /// runs between the stop and the start as in
+    /// [`TuttiDriver::restart_with`](crate::TuttiDriver::restart_with), and the
+    /// host's stream, fault record and latency cell are the same ones.
+    ///
+    /// # Errors
+    /// The hook's error, or what the driver's `open` reports, as `E`, **with
+    /// the host back** and its stream stopped at its old spec: nothing plays,
+    /// and the driver the host ran is to be started again by the caller.
+    pub fn start_resolved<E: From<Error>>(
+        self,
+        host: tutti_engine::StreamHost,
+        resolved: Resolved,
+        rerate: impl FnOnce(&OutputSpec, &tutti_engine::Stopped<'_>) -> core::result::Result<(), E>,
+    ) -> core::result::Result<crate::TuttiDriver, (tutti_engine::StreamHost, E)> {
+        let (spec, driver, opened) = resolved.into_parts();
+        crate::TuttiDriver::take_over(host, spec, driver, rerate, self.target, opened)
+    }
+
+    /// [`start_resolved`](Self::start_resolved) with a driver of the caller's
+    /// choosing at this engine's spec ([`from_spec`](Self::from_spec)): no
+    /// device is opened, as [`TuttiDriver::switch`](crate::TuttiDriver::switch)
+    /// opens none. Behind `testing`.
+    ///
+    /// # Errors
+    /// As [`start_resolved`](Self::start_resolved).
+    #[cfg(feature = "testing")]
+    pub fn start_on<D: StreamDriver, E: From<Error>>(
+        self,
+        host: tutti_engine::StreamHost,
+        driver: D,
+        rerate: impl FnOnce(&OutputSpec, &tutti_engine::Stopped<'_>) -> core::result::Result<(), E>,
+    ) -> core::result::Result<crate::TuttiDriver, (tutti_engine::StreamHost, E)>
+    where
+        D::Error: Into<Error>,
+    {
+        let spec = self.spec().clone();
+        crate::TuttiDriver::take_over(host, spec, driver, rerate, self.target, self.opened)
+    }
+
     /// Starts a stream at the current [`spec`](Self::spec) through `driver`.
     /// A stream that is already running is an error: the driver is not opened.
     ///

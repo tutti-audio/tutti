@@ -449,7 +449,7 @@ pub enum Error {
 
     /// A clock switch failed after the old stream stopped, and starting the old
     /// clock again failed too: the session is **stopped**, on the clock it was
-    /// on. Restart it ([`Session::restart`](crate::Session::restart) on a card)
+    /// on. Restart it (`Session::restart` on a card)
     /// once what broke is fixed.
     #[error("the clock switch failed ({switch}), and so did starting the old clock again ({undo})")]
     SwitchNotUndone {

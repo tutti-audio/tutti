@@ -179,47 +179,9 @@ impl TuttiDriver {
         Ok(())
     }
 
-    /// Starts `resolved` on `host`, a host whose stream another driver ran (a
-    /// timer): the device `engine` opened takes over the stream, `rerate` runs
-    /// between the stop and the start as in [`restart_with`](Self::restart_with),
-    /// and the host's stream, fault record and latency cell are the same ones.
-    ///
-    /// # Errors
-    /// The hook's error, or what the driver's `open` reports, as `E`, **with
-    /// the host back** and its stream stopped at its old spec: nothing plays,
-    /// and the driver the host ran is to be started again by the caller.
-    pub fn start_resolved<E: From<crate::Error>>(
-        host: StreamHost,
-        engine: AudioEngine,
-        resolved: crate::Resolved,
-        rerate: impl FnOnce(&OutputSpec, &Stopped<'_>) -> core::result::Result<(), E>,
-    ) -> core::result::Result<Self, (StreamHost, E)> {
-        let (spec, driver, opened) = resolved.into_parts();
-        let AudioEngine { target, .. } = engine;
-        Self::take_over(host, spec, driver, rerate, target, opened)
-    }
-
-    /// [`start_resolved`](Self::start_resolved) with a driver of the caller's
-    /// choosing at the caller's `spec`: no device is opened, as
-    /// [`switch`](Self::switch) opens none. Behind `testing`.
-    ///
-    /// # Errors
-    /// As [`start_resolved`](Self::start_resolved).
-    #[cfg(feature = "testing")]
-    pub fn start_on<D: StreamDriver, E: From<crate::Error>>(
-        host: StreamHost,
-        spec: OutputSpec,
-        driver: D,
-        rerate: impl FnOnce(&OutputSpec, &Stopped<'_>) -> core::result::Result<(), E>,
-    ) -> core::result::Result<Self, (StreamHost, E)>
-    where
-        D::Error: Into<crate::Error>,
-    {
-        Self::take_over(host, spec, driver, rerate, None, Opened::Supplied)
-    }
-
-    /// The one start both of the above make: `driver` takes the host's stream.
-    fn take_over<D: StreamDriver, E: From<crate::Error>>(
+    /// The one start [`AudioEngine::start_resolved`] and `start_on` make:
+    /// `driver` takes the host's stream.
+    pub(crate) fn take_over<D: StreamDriver, E: From<crate::Error>>(
         mut host: StreamHost,
         spec: OutputSpec,
         driver: D,
