@@ -272,7 +272,7 @@ fn headroom_ceiling(target: &FileTarget) -> Option<Db> {
     let depth = target.format().int_depth()?;
     // One LSB in the `[-1, 1]` float domain, as the dither scales it.
     let lsb = depth.lsb().get();
-    let dither_peak = match target.dither_setting() {
+    let dither_peak = match target.dither {
         None => 0.0,
         Some(DitherShape::Rectangular) => 0.5,
         Some(DitherShape::Triangular) => 1.0,

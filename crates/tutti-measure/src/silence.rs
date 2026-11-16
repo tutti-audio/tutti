@@ -15,7 +15,15 @@ use core::ops::Range;
 
 use tutti_types::{Db, SampleRate, Samples, Seconds};
 
-use crate::{Error, Result};
+use tutti_types::ranged;
+
+ranged! {
+    /// A level that is a finite number of decibels, under which audio is
+    /// silence: a NaN would make a config unequal to itself, and an infinity is
+    /// no level.
+    GateLevel(Db), GateLevelError, "a finite level",
+    |raw| raw.get().is_finite()
+}
 
 /// A half-open span of samples, `start..end`.
 ///
@@ -77,44 +85,38 @@ impl SilenceConfig {
     ///
     /// A `min_silence` under one sample cuts at every sample below the
     /// threshold.
-    ///
-    /// # Errors
-    ///
-    /// [`Error::InvalidThreshold`] for a threshold that is not finite
-    /// (a NaN would make every config unequal to itself and restart the scan
-    /// on each chunk).
+    #[must_use]
     pub fn new(
         sample_rate: impl Into<SampleRate>,
-        threshold: Db,
+        threshold: GateLevel,
         min_silence: impl Into<Seconds>,
-    ) -> Result<Self> {
+    ) -> Self {
         let rate = sample_rate.into();
-        if !threshold.get().is_finite() {
-            return Err(Error::InvalidThreshold { threshold });
-        }
-        Ok(Self {
+        let threshold = threshold.get();
+        Self {
             sample_rate: rate,
             threshold,
             floor: threshold.to_amplitude().get(),
             min_silence: min_silence.into().to_samples(rate).max(Samples(1)),
             pre_pad: Samples::ZERO,
             post_pad: Samples::ZERO,
-        })
+        }
     }
 
-    /// Audio kept before the first loud sample of a region and after its last,
-    /// so an attack or a tail is not clipped.
+    /// Audio kept before the first loud sample of a region, so an attack is not
+    /// clipped.
     #[must_use]
-    pub fn padding(mut self, pre: impl Into<Seconds>, post: impl Into<Seconds>) -> Self {
+    pub fn pre_padding(mut self, pre: impl Into<Seconds>) -> Self {
         self.pre_pad = pre.into().to_samples(self.sample_rate);
-        self.post_pad = post.into().to_samples(self.sample_rate);
         self
     }
 
-    /// The level at or above which a sample counts as signal.
-    #[inline]
-    pub fn threshold(&self) -> Db {
-        self.threshold
+    /// Audio kept after the last loud sample of a region, so a tail is not
+    /// clipped.
+    #[must_use]
+    pub fn post_padding(mut self, post: impl Into<Seconds>) -> Self {
+        self.post_pad = post.into().to_samples(self.sample_rate);
+        self
     }
 }
 
@@ -216,10 +218,9 @@ mod tests {
     fn cfg(threshold: Db, min_silence_ms: f32) -> SilenceConfig {
         SilenceConfig::new(
             SampleRate::of(RATE),
-            threshold,
+            GateLevel::new(threshold).unwrap(),
             Seconds::from_f32(min_silence_ms / 1000.0),
         )
-        .unwrap()
     }
 
     fn r(start: usize, end: usize) -> Region {
@@ -279,7 +280,9 @@ mod tests {
         x[5..10].fill(1.0);
         x[500..510].fill(1.0);
         x[990..995].fill(1.0);
-        let c = cfg(Db(-20.0), 10.0).padding(Seconds(0.02), Seconds(0.03));
+        let c = cfg(Db(-20.0), 10.0)
+            .pre_padding(Seconds(0.02))
+            .post_padding(Seconds(0.03));
         // 5..10 -> 0..40; 500..510 -> 480..540; 990..995 -> 970..1000.
         assert_eq!(
             strip_silence(&c, &x),
@@ -317,7 +320,9 @@ mod tests {
         x[200..260].fill(-0.9);
         x[400..401].fill(0.9);
         x[690..].fill(0.9);
-        let c = cfg(Db(-30.0), 40.0).padding(Seconds(0.005), Seconds(0.01));
+        let c = cfg(Db(-30.0), 40.0)
+            .pre_padding(Seconds(0.005))
+            .post_padding(Seconds(0.01));
         let batch = strip_silence(&c, &x);
         assert_eq!(batch.len(), 4);
         for chunk in [1usize, 7, 64, 199, 700] {
@@ -344,7 +349,9 @@ mod tests {
     #[test]
     fn finish_reads_the_scanned_config_and_an_unstepped_state_is_empty() {
         assert!(finish(&SilenceState::new()).is_empty());
-        let c = cfg(Db(-20.0), 10.0).padding(Seconds(0.004), Seconds(0.006));
+        let c = cfg(Db(-20.0), 10.0)
+            .pre_padding(Seconds(0.004))
+            .post_padding(Seconds(0.006));
         let mut state = SilenceState::new();
         let mut x = vec![0.0f32; 100];
         x[50..60].fill(1.0);
@@ -352,16 +359,5 @@ mod tests {
         assert_eq!(finish(&state), vec![r(46, 66)]);
         state.reset();
         assert!(finish(&state).is_empty());
-    }
-
-    /// A threshold that is not finite is refused: NaN would never equal itself.
-    #[test]
-    fn a_non_finite_threshold_is_refused() {
-        for t in [f32::NAN, f32::NEG_INFINITY, f32::INFINITY] {
-            assert!(matches!(
-                SilenceConfig::new(SampleRate::of(RATE), Db(t), Seconds(0.1)),
-                Err(Error::InvalidThreshold { .. })
-            ));
-        }
     }
 }

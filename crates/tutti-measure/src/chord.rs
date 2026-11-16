@@ -170,13 +170,6 @@ impl ChordConfig {
         self.sharpness = sharpness;
         self
     }
-
-    /// The window, hop and sample rate the chroma was taken at.
-    #[inline]
-    #[must_use]
-    pub fn geometry(&self) -> StftGeometry {
-        self.geometry
-    }
 }
 
 /// The chords of a chromagram, as spans in order. Where none is detected there

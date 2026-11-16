@@ -181,7 +181,7 @@
 //! A config is `Config::new(required..)` and then chained options (`self` in,
 //! a bare name, `Self` out). An option cannot fail: a setting with one range of
 //! its own is a range-checked type (`Harmonics`, `Tightness`, `SpectrumFloor`,
-//! `NoteSpan`, `GateLevel`, `Overlap`, ...) whose `new` refuses a value outside
+//! `NoteSpan`, `GateLevel`, `PitchHop`, ...) whose `new` refuses a value outside
 //! the range, and a setting that spans two values is one type (`FrequencyBand`,
 //! `PassBand`, `TempoRange`: a low below a high). What depends on the
 //! geometry or the input is checked by the call that takes the config: a band
@@ -319,9 +319,8 @@ pub use loudness::{
 // `finish_loudness` above: three modules each have a `finish`, and the bare name
 // says nothing about which accumulator it drains.
 pub use notes::{
-    GateLevel, GateLevelError, NoteConfig, NoteEvent, NoteSpan, NoteSpanError, Overlap,
-    OverlapError, PitchSplit, PitchSplitError, VelocityRange, frame_levels, notes_from_track,
-    transcribe,
+    NoteConfig, NoteEvent, NoteSpan, NoteSpanError, PitchHop, PitchHopError, PitchSplit,
+    PitchSplitError, VelocityRange, frame_levels, notes_from_track, transcribe,
 };
 pub use onset::{
     DetectionFunction, Onset, OnsetConfig, OnsetState, complex_domain_deviation, detect_onsets,
@@ -333,7 +332,8 @@ pub use peaks::{
     summarize, summarize_block,
 };
 pub use silence::{
-    Region, SilenceConfig, SilenceState, finish as finish_silence, step_silence, strip_silence,
+    GateLevel, GateLevelError, Region, SilenceConfig, SilenceState, finish as finish_silence,
+    step_silence, strip_silence,
 };
 pub use spectrum::{
     BandCount, BandCountError, Banding, BandsPerOctave, BandsPerOctaveError, PeakDecay,
@@ -344,9 +344,9 @@ pub use stereo::{
     Ballistics, BallisticsState, StereoLevels, StereoReading, correlate, step_ballistics,
 };
 pub use tempo::{
-    BeatGrid, PriorSpread, PriorSpreadError, Tempo, TempoCandidate, TempoConfig, TempoRange,
-    Tightness, TightnessError, estimate_tempo, estimate_tempo_from_novelty, track_beats,
-    track_beats_from_novelty,
+    Alternatives, AlternativesError, BeatGrid, PriorSpread, PriorSpreadError, Tempo,
+    TempoCandidate, TempoConfig, TempoRange, Tightness, TightnessError, estimate_tempo,
+    estimate_tempo_from_novelty, track_beats, track_beats_from_novelty,
 };
 pub use transform::{
     HopPolicy, NormalizedMagnitudes, RawMagnitudes, SampleRange, Stft, StftMagnitude, StftPolar,
@@ -354,7 +354,10 @@ pub use transform::{
 };
 pub use vectorscope::{ScopePoint, VectorscopeState, step_vectorscope, vectorscope_points};
 pub use xcorr::{CorrelationPeak, CrossCorrelation, cross_correlate};
-pub use yin::{Pitch, PitchEstimate, YinConfig, median_filter, penalize_jumps, yin, yin_track};
+pub use yin::{
+    Pitch, PitchEstimate, YinConfig, YinThreshold, YinThresholdError, median_filter,
+    penalize_jumps, yin, yin_track,
+};
 
 /// Notes and pitch classes, re-exported from the engine vocabulary: a
 /// [`Pitch`] names one, and callers should not need a second import to read it.

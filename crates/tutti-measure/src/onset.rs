@@ -146,13 +146,13 @@ impl OnsetConfig {
 
     /// The window, hop and sample rate onsets are detected on.
     #[inline]
-    pub fn geometry(&self) -> StftGeometry {
+    pub(crate) fn geometry(&self) -> StftGeometry {
         self.geometry
     }
 
     /// Which detection function measures novelty between frames.
     #[inline]
-    pub fn function(&self) -> DetectionFunction {
+    pub(crate) fn function(&self) -> DetectionFunction {
         self.function
     }
 }

@@ -233,7 +233,7 @@ impl PitchDetector {
         let mut tau = min_period;
 
         while tau < max_period {
-            if self.cumulative_mean[tau] < self.cfg.threshold_setting().get() {
+            if self.cumulative_mean[tau] < self.cfg.threshold.get() {
                 // Walk to the local minimum
                 while tau + 1 < max_period
                     && self.cumulative_mean[tau + 1] < self.cumulative_mean[tau]
@@ -358,10 +358,10 @@ mod tests {
         let mut det = detector();
         fill_cmndf(&mut det, &sine(freq, 1.0));
         assert!(
-            det.cumulative_mean[tau] < det.cfg.threshold_setting().get(),
+            det.cumulative_mean[tau] < det.cfg.threshold.get(),
             "d'({tau}) = {} was not below threshold {}",
             det.cumulative_mean[tau],
-            det.cfg.threshold_setting().get()
+            det.cfg.threshold.get()
         );
     }
 
@@ -386,7 +386,7 @@ mod tests {
             "precondition: the 2T dip ({dip_2t}) must be deeper than the T dip ({dip_t})"
         );
         assert!(
-            dip_t < det.cfg.threshold_setting().get(),
+            dip_t < det.cfg.threshold.get(),
             "precondition: the fundamental dip {dip_t} must be below threshold"
         );
 

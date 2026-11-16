@@ -24,7 +24,8 @@ fn a_spectrum_step_does_not_allocate() {
             band: FrequencyBand::new(Hz(400.0), Hz(20_000.0)).unwrap(),
         })
         .smoothing(Smoothing::Average(SpectrumTime::of(Seconds(0.2))))
-        .peak_hold(SpectrumTime::of(Seconds(0.5)), PeakDecay::of(Db(20.0)))
+        .peak_hold(SpectrumTime::of(Seconds(0.5)))
+        .peak_decay(PeakDecay::of(Db(20.0)))
         .spectrogram(FrameCount(7));
     let signal: Vec<f32> = (0..48_000)
         .map(|i| 0.4 * (std::f32::consts::TAU * 1234.5 * i as f32 / 48_000.0).sin())

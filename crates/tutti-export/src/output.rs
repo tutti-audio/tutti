@@ -78,7 +78,7 @@ impl NormalizeSpec {
 /// speakers they feed (whose length is the width). A target cannot hold both,
 /// so a topology of another width than the target is not writable.
 #[derive(Debug, Clone, PartialEq)]
-enum Width {
+pub(crate) enum Width {
     Count(ChannelLayout),
     Placed(ChannelTopology),
 }
@@ -91,7 +91,7 @@ impl Width {
         }
     }
 
-    fn topology(&self) -> Option<&ChannelTopology> {
+    pub(crate) fn topology(&self) -> Option<&ChannelTopology> {
         match self {
             Self::Count(_) => None,
             Self::Placed(topology) => Some(topology),
@@ -109,10 +109,10 @@ impl Width {
 pub struct FileTarget {
     path: PathBuf,
     format: Format,
-    width: Width,
-    resample: Option<Resample>,
-    dither: Option<DitherShape>,
-    normalize: Option<NormalizeSpec>,
+    pub(crate) width: Width,
+    pub(crate) resample: Option<Resample>,
+    pub(crate) dither: Option<DitherShape>,
+    pub(crate) normalize: Option<NormalizeSpec>,
 }
 
 impl FileTarget {
@@ -181,20 +181,20 @@ impl FileTarget {
 
     /// The container and its settings.
     #[must_use]
-    pub fn format(&self) -> Format {
+    pub(crate) fn format(&self) -> Format {
         self.format
     }
 
     /// The file's width.
     #[must_use]
-    pub fn channels(&self) -> ChannelLayout {
+    pub(crate) fn channels(&self) -> ChannelLayout {
         self.width.layout()
     }
 
     /// Whether the file's speakers are stated ([`topology`](Self::topology))
     /// or assumed from its width ([`ChannelTopology::assumed`]).
     #[must_use]
-    pub fn placement(&self) -> tutti_types::Placement {
+    pub(crate) fn placement(&self) -> tutti_types::Placement {
         match self.width {
             Width::Placed(_) => tutti_types::Placement::Stated,
             Width::Count(_) => tutti_types::Placement::Assumed,
@@ -210,30 +210,6 @@ impl FileTarget {
             Width::Count(layout) => ChannelTopology::assumed(*layout),
         }
     }
-
-    /// The speakers the file's channels feed, if stated.
-    #[must_use]
-    pub fn topology_setting(&self) -> Option<&ChannelTopology> {
-        self.width.topology()
-    }
-
-    /// The rate conversion on the way out, if any.
-    #[must_use]
-    pub fn resample_setting(&self) -> Option<Resample> {
-        self.resample
-    }
-
-    /// The dither, if any.
-    #[must_use]
-    pub fn dither_setting(&self) -> Option<DitherShape> {
-        self.dither
-    }
-
-    /// The normalize, if any.
-    #[must_use]
-    pub fn normalize_setting(&self) -> Option<NormalizeSpec> {
-        self.normalize
-    }
 }
 
 /// Planes in memory: an output rendered at the render's rate, not resampled
@@ -241,7 +217,7 @@ impl FileTarget {
 /// [`Rendered`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct BufferTarget {
-    width: Width,
+    pub(crate) width: Width,
 }
 
 impl BufferTarget {
@@ -265,12 +241,6 @@ impl BufferTarget {
     #[must_use]
     pub fn channels(&self) -> ChannelLayout {
         self.width.layout()
-    }
-
-    /// The speakers the planes are, if stated.
-    #[must_use]
-    pub fn topology_setting(&self) -> Option<&ChannelTopology> {
-        self.width.topology()
     }
 }
 

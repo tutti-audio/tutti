@@ -18,6 +18,14 @@ use tutti_types::{Cents, Confidence, Hz, Note, SampleRate, Samples};
 use crate::pitch::PitchDetector;
 use crate::{Error, Result};
 use tutti_dsp::FrameCount;
+use tutti_types::ranged;
+
+ranged! {
+    /// YIN's absolute threshold on the cumulative mean difference: within
+    /// `0.01..=0.5`.
+    YinThreshold(Confidence), YinThresholdError, "a YIN threshold within 0.01..=0.5",
+    |raw| raw.get() >= 0.01 && raw.get() <= 0.5
+}
 
 /// YIN parameters. Validated once, on construction.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -25,7 +33,7 @@ pub struct YinConfig {
     sample_rate: SampleRate,
     min_freq: Hz,
     max_freq: Hz,
-    threshold: Confidence,
+    pub(crate) threshold: Confidence,
 }
 
 impl YinConfig {
@@ -84,22 +92,15 @@ impl YinConfig {
     /// YIN's absolute threshold on the cumulative mean difference. The paper's
     /// default is 0.1; lower finds fewer pitches and fewer errors.
     #[must_use]
-    pub fn threshold(mut self, threshold: impl Into<Confidence>) -> Self {
-        self.threshold = Confidence::new_clamped(threshold.into().get().clamp(0.01, 0.5));
+    pub fn threshold(mut self, threshold: YinThreshold) -> Self {
+        self.threshold = threshold.get();
         self
     }
 
     /// The rate the analyzed buffer is denominated at.
     #[inline]
-    pub fn sample_rate(&self) -> SampleRate {
+    pub(crate) fn sample_rate(&self) -> SampleRate {
         self.sample_rate
-    }
-
-    /// The YIN aperiodicity cutoff as a [`Confidence`], `0.01..=0.5`. A
-    /// reading's threshold, not a blend.
-    #[inline]
-    pub fn threshold_setting(&self) -> Confidence {
-        self.threshold
     }
 
     /// Shortest period the range can express — set by the *highest* frequency.

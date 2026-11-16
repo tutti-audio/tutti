@@ -18,7 +18,8 @@
 //! window holds only the first samples of a note can read voiced. A frame whose
 //! window holds none of the note is unvoiced, so both edges are within the half
 //! frame of the true one, and a start is never later than a hop and a period
-//! after it (see [`NoteConfig::timing_tolerance`]). Where one note hands over to the next
+//! after it. A note's start or end is thus within one hop plus half the YIN
+//! frame of the true one. Where one note hands over to the next
 //! the boundary is put where the change is: at the onset, or, for a pitch
 //! change, midway between the centres of the last old and first new frame.
 //!
@@ -69,6 +70,7 @@ use tutti_dsp::FrameCount;
 use tutti_types::{Amplitude, Cents, Db, Note, SampleRate, Samples, Seconds};
 
 use crate::onset::{DetectionFunction, OnsetConfig, detect_onsets, onset_lag};
+use crate::silence::GateLevel;
 use crate::yin::{PitchEstimate, YinConfig, yin_track};
 use crate::{Error, Result};
 use tutti_dsp::FftScratch;
@@ -99,20 +101,11 @@ ranged! {
 }
 
 ranged! {
-    /// A level that is a finite number of decibels, under which a frame is
-    /// unvoiced: a NaN would make a config unequal to itself, and an infinity is
-    /// no level.
-    GateLevel(Db), GateLevelError, "a finite level",
-    |raw| raw.get().is_finite()
-}
-
-ranged! {
-    /// How many pitch frames overlap one YIN frame: within `1..=64`. The track's
-    /// hop is the YIN frame over it (at least one sample), so a hop of zero, a
-    /// hop wider than the frame and a hop that makes many more than 64 frames
-    /// overlap cannot be written.
-    Overlap(usize), OverlapError, "an overlap within 1..=64",
-    |raw| raw >= 1 && raw <= MAX_OVERLAP
+    /// How far the pitch track advances per frame: at least one sample. Whether
+    /// the hop suits the YIN frame (not wider than it, not under a sixty-fourth
+    /// of it) is checked by the call that takes the config.
+    PitchHop(Samples), PitchHopError, "a hop of at least one sample",
+    |raw| raw.get() >= 1
 }
 
 ranged! {
@@ -178,12 +171,14 @@ impl NoteConfig {
         })
     }
 
-    /// How many pitch frames overlap one YIN frame: the track advances by the
-    /// YIN frame over `overlap`, rounded down to a whole sample and at least
-    /// one.
+    /// How far the pitch track advances per frame.
+    ///
+    /// [`transcribe`], [`frame_levels`] and [`notes_from_track`] refuse a hop
+    /// wider than the YIN frame ([`Error::HopWiderThanWindow`]) or under 1/64 of
+    /// it ([`Error::TooManyOverlaps`]).
     #[must_use]
-    pub fn overlap(mut self, overlap: Overlap) -> Self {
-        self.hop = Samples((self.frame().get() / overlap.get()).max(1));
+    pub fn hop(mut self, hop: PitchHop) -> Self {
+        self.hop = hop.get();
         self
     }
 
@@ -228,61 +223,31 @@ impl NoteConfig {
         self
     }
 
-    /// The onset detector.
-    #[inline]
-    #[must_use]
-    pub fn onset(&self) -> &OnsetConfig {
-        &self.onset
-    }
-
-    /// How far the pitch track advances per frame, in [`Samples`].
-    #[inline]
-    #[must_use]
-    pub fn hop(&self) -> Samples {
-        self.hop
-    }
-
     /// The span one pitch frame covers, in [`Samples`]: YIN's buffer size.
     #[inline]
     #[must_use]
-    pub fn frame(&self) -> Samples {
+    pub(crate) fn frame(&self) -> Samples {
         self.yin.buffer_size()
     }
 
-    /// The dropout bridged inside a note, in [`Samples`], before the cap.
-    #[inline]
-    #[must_use]
-    pub fn hold_setting(&self) -> Samples {
-        self.hold
-    }
-
-    /// The level below which a frame is unvoiced, in dBFS.
-    #[inline]
-    #[must_use]
-    pub fn floor_setting(&self) -> Db {
-        self.floor
-    }
-
-    /// How far a note's start or end may sit from the true attack or release
-    /// of a steady note: one hop for the frame grid plus the integration
-    /// window, half the YIN frame.
-    ///
-    /// The window is the bound because a frame whose window holds only the
-    /// first or last samples of a note still reads voiced (one holding none is
-    /// unvoiced): a start can be early, and an end late, by up to a window. A
-    /// start is never later than a hop and a period after the attack, and an
-    /// end is never earlier than a period and a hop before the release, and a
-    /// period is within a window. An onset-split boundary is as exact as the
-    /// onset, about one onset window; an onset within one onset window of a
-    /// note's start is taken as that start's own and cuts nothing.
-    ///
-    /// The bound holds away from the buffer's end: a note running to the end
-    /// stops at its last whole frame's start plus the window, which is at least
-    /// the window short of the end, and one starting in the final window is
-    /// lost.
-    #[must_use]
-    pub fn timing_tolerance(&self) -> Samples {
-        Samples(self.hop.get() + span_of(self))
+    /// Whether the hop suits the YIN frame: not wider than it, and no more
+    /// than [`MAX_OVERLAP`] hops across it.
+    fn check_hop(&self) -> Result<()> {
+        let frame = self.frame().get();
+        if self.hop.get() > frame {
+            return Err(Error::HopWiderThanWindow {
+                hop: self.hop,
+                window: Samples(frame),
+            });
+        }
+        if frame.div_ceil(self.hop.get()) > MAX_OVERLAP {
+            return Err(Error::TooManyOverlaps {
+                window: Samples(frame),
+                hop: self.hop,
+                max: MAX_OVERLAP,
+            });
+        }
+        Ok(())
     }
 
     /// The most frames of dropout bridged: the hold in hops, capped one under
@@ -410,8 +375,9 @@ impl VelocityRange {
 ///
 /// # Errors
 ///
-/// [`Error::NonFiniteInput`] for a NaN or infinite sample;
-/// [`Error::InsufficientInput`] when shorter than one YIN frame;
+/// [`Error::HopWiderThanWindow`] or [`Error::TooManyOverlaps`] when the hop does
+/// not suit the YIN frame; [`Error::NonFiniteInput`] for a NaN or infinite
+/// sample; [`Error::InsufficientInput`] when shorter than one YIN frame;
 /// [`Error::NoSignal`] when the peak is under -90 dBFS;
 /// [`Error::TooManyFrames`] when the hop would make more than 4194304
 /// frames. Noise gives no notes rather than an error, and a buffer shorter
@@ -422,6 +388,7 @@ pub fn transcribe(
     samples: &[f32],
     fft: &mut FftScratch,
 ) -> Result<Vec<NoteEvent>> {
+    cfg.check_hop()?;
     if samples.iter().any(|s| !s.is_finite()) {
         return Err(Error::NonFiniteInput);
     }
@@ -444,7 +411,7 @@ pub fn transcribe(
     }
 
     let track = yin_track(&cfg.yin, samples, cfg.hop)?;
-    let levels = frame_levels(cfg, samples);
+    let levels = frame_levels(cfg, samples)?;
     let onsets: Vec<Samples> = detect_onsets(&cfg.onset, samples, fft)?
         .iter()
         .map(|o| cfg.attack(o.position))
@@ -462,14 +429,19 @@ fn too_many_frames(len: usize, frame: usize, hop: usize) -> bool {
 /// `i * hop .. i * hop + frame`, as [`yin_track`]'s does, so the result lines
 /// up with a track made at the config's hop. Empty for input shorter than a
 /// frame.
-#[must_use]
-pub fn frame_levels(cfg: &NoteConfig, samples: &[f32]) -> Vec<Amplitude> {
+///
+/// # Errors
+///
+/// [`Error::HopWiderThanWindow`] or [`Error::TooManyOverlaps`] when the hop
+/// does not suit the YIN frame.
+pub fn frame_levels(cfg: &NoteConfig, samples: &[f32]) -> Result<Vec<Amplitude>> {
+    cfg.check_hop()?;
     let frame = cfg.frame().get();
     if samples.len() < frame {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     let frames = (samples.len() - frame) / cfg.hop.get() + 1;
-    (0..frames)
+    Ok((0..frames)
         .map(|i| {
             let start = i * cfg.hop.get();
             let energy: f64 = samples[start..start + frame]
@@ -478,7 +450,7 @@ pub fn frame_levels(cfg: &NoteConfig, samples: &[f32]) -> Vec<Amplitude> {
                 .sum();
             Amplitude((energy / frame as f64).sqrt() as f32)
         })
-        .collect()
+        .collect())
 }
 
 /// Segments a pitch track into notes.
@@ -490,7 +462,9 @@ pub fn frame_levels(cfg: &NoteConfig, samples: &[f32]) -> Vec<Amplitude> {
 ///
 /// # Errors
 ///
-/// [`Error::LevelsLengthMismatch`] when `levels` and `track` differ in length;
+/// [`Error::HopWiderThanWindow`] or [`Error::TooManyOverlaps`] when the hop does
+/// not suit the YIN frame; [`Error::LevelsLengthMismatch`] when `levels` and
+/// `track` differ in length;
 /// [`Error::NegativeInput`] when a level is negative;
 /// [`Error::SmoothingTooLong`] when the smoothing span is over 1024 frames;
 /// [`Error::TooManyFrames`] when the track is over 4194304 frames;
@@ -502,6 +476,7 @@ pub fn notes_from_track(
     levels: &[Amplitude],
     onsets: &[Samples],
 ) -> Result<Vec<NoteEvent>> {
+    cfg.check_hop()?;
     if track.len() != levels.len() {
         return Err(Error::LevelsLengthMismatch {
             levels: levels.len(),
@@ -811,7 +786,13 @@ mod tests {
         .unwrap();
         NoteConfig::new(yin, OnsetConfig::new(g, DetectionFunction::SpectralFlux))
             .unwrap()
-            .overlap(Overlap::of(hop_div))
+            .hop(PitchHop::of(Samples(yin.buffer_size().get() / hop_div)))
+    }
+
+    /// How far a note's edge may sit from the true attack or release: one hop
+    /// for the frame grid plus the integration window, half the YIN frame.
+    fn timing_tolerance(c: &NoteConfig) -> Samples {
+        Samples(c.hop.get() + c.frame().get() / 2)
     }
 
     fn cfg() -> NoteConfig {
@@ -893,7 +874,7 @@ mod tests {
     /// A4, C5 and E5, each 250 ms, with gaps, come out as exactly those notes
     /// at several YIN frame lengths, hops, onset windows and sample rates.
     /// Starts are within a hop and a period of the true attack, and starts and
-    /// ends within the config's [`timing_tolerance`](NoteConfig::timing_tolerance).
+    /// ends within one hop plus half the YIN frame (`timing_tolerance`).
     ///
     /// The two 8192-sample onset windows are far wider than the pitch hop; an
     /// onset cut there would clip a note's edges, which the guards in
@@ -925,10 +906,10 @@ mod tests {
             for (n, &(a, b, hz, midi)) in notes.iter().zip(&melody) {
                 assert_eq!(u8::try_from(n.note), Ok(midi));
                 assert!(n.cents.get().abs() < 1.0, "{}", n.cents);
-                let tol = c.timing_tolerance();
+                let tol = timing_tolerance(&c);
                 let period = Samples((rate / hz) as usize);
                 // Never later than a hop and a period after the attack.
-                let late = (a * rate) as usize + c.hop().get() + period.get();
+                let late = (a * rate) as usize + c.hop.get() + period.get();
                 assert!(n.start.get() <= late, "start {:?} vs {a}", n.start);
                 assert!(
                     near(n.start, a, rate, tol),
@@ -992,11 +973,11 @@ mod tests {
             notes[1].start,
             dip_start + 0.03,
             RATE,
-            c.timing_tolerance()
+            timing_tolerance(&c)
         ));
 
-        let track = yin_track(&c.yin, &x, c.hop()).unwrap();
-        let levels = frame_levels(&c, &x);
+        let track = yin_track(&c.yin, &x, c.hop).unwrap();
+        let levels = frame_levels(&c, &x).unwrap();
         assert_eq!(notes_from_track(&c, &track, &levels, &[]).unwrap().len(), 1);
     }
 
@@ -1041,9 +1022,9 @@ mod tests {
         assert_eq!(u8::try_from(notes[1].note), Ok(70));
         // The onset the change makes cuts first, so the notes meet within a hop.
         assert!(notes[0].end <= notes[1].start);
-        assert!(notes[1].start.get() - notes[0].end.get() <= c.hop().get());
+        assert!(notes[1].start.get() - notes[0].end.get() <= c.hop.get());
         assert!(
-            near(notes[0].end, 0.4, RATE, c.timing_tolerance()),
+            near(notes[0].end, 0.4, RATE, timing_tolerance(&c)),
             "{:?}",
             notes[0].end
         );
@@ -1068,7 +1049,7 @@ mod tests {
         // Every position with the medians 10 frames apart more than 50 apart:
         // 8 c/frame * 10 = 80, so the stretch is the whole run of positions
         // 10..=50 and its middle is 30.
-        let (hop, half) = (c.hop().get(), c.frame().get() / 2);
+        let (hop, half) = (c.hop.get(), c.frame().get() / 2);
         let centre = |f: usize| f * hop + half / 2;
         assert_eq!(fast[0].end.get(), (centre(29) + centre(30)) / 2);
 
@@ -1158,7 +1139,7 @@ mod tests {
             x[10_000] = bad;
             assert_eq!(transcribe(&c, &x, &mut fft), Err(Error::NonFiniteInput));
         }
-        let n = c.frame().get() + 10 * c.hop().get() + c.hop().get() / 2;
+        let n = c.frame().get() + 10 * c.hop.get() + c.hop.get() / 2;
         let mut tail: Vec<f32> = (0..n)
             .map(|i| (TAU * 440.0 * i as f64 / RATE).sin() as f32 * 0.5)
             .collect();
@@ -1291,8 +1272,8 @@ mod tests {
             0.9,
         );
         let long = c.hold(NoteSpan::of(Seconds(60.0)));
-        let t = yin_track(&long.yin, &x, long.hop()).unwrap();
-        let notes = notes_from_track(&long, &t, &frame_levels(&long, &x), &[]).unwrap();
+        let t = yin_track(&long.yin, &x, long.hop).unwrap();
+        let notes = notes_from_track(&long, &t, &frame_levels(&long, &x).unwrap(), &[]).unwrap();
         assert_eq!(notes.len(), 2, "{notes:?}");
     }
 
@@ -1302,7 +1283,7 @@ mod tests {
     #[test]
     fn an_onset_splits_at_its_first_whole_frame() {
         let c = cfg().min_length(NoteSpan::of(Seconds(0.0)));
-        let hop = c.hop().get();
+        let hop = c.hop.get();
         let t = track(&vec![Some(440.0); 40]);
         let at = 17 * hop + 50;
         let notes = notes_from_track(&c, &t, &loud(40), &[Samples(at)]).unwrap();
@@ -1321,7 +1302,7 @@ mod tests {
         assert_eq!(a.len(), 3);
         // An onset within one onset window (1024) of the piece's start is its own
         // attack: one sample inside cuts nothing, at the window it cuts.
-        let guard = c.onset().geometry().window().get();
+        let guard = c.onset.geometry().window().get();
         let inside = notes_from_track(&c, &t, &loud(40), &[Samples(guard - 1)]).unwrap();
         assert_eq!(inside.len(), 1);
         let outside = notes_from_track(&c, &t, &loud(40), &[Samples(guard)]).unwrap();
@@ -1345,7 +1326,7 @@ mod tests {
     #[test]
     fn a_pitch_step_splits_at_the_frame_midpoint_and_blips_do_not() {
         let c = cfg();
-        let (hop, half) = (c.hop().get(), c.frame().get() / 2);
+        let (hop, half) = (c.hop.get(), c.frame().get() / 2);
         let mut step = vec![Some(440.0); 20];
         step.extend(vec![Some(523.2511); 20]);
         let notes = notes_from_track(&c, &track(&step), &loud(40), &[]).unwrap();
@@ -1372,7 +1353,7 @@ mod tests {
     #[test]
     fn a_note_does_not_read_its_neighbours_level() {
         let c = cfg();
-        let (hop, frame) = (c.hop().get(), c.frame().get());
+        let (hop, frame) = (c.hop.get(), c.frame().get());
         let k = 20;
         let mut levels = vec![Amplitude(0.1); 40];
         for l in &mut levels[k - frame / hop + 1..] {
@@ -1411,11 +1392,30 @@ mod tests {
 
         let c = cfg();
         let frame = c.frame().get();
-        // No overlap writes a zero hop, one wider than the frame, or one under
-        // a sixty-fourth of it: the hop is the frame over the overlap.
-        assert!(Overlap::new(0).is_none() && Overlap::new(65).is_none());
-        assert_eq!(c.overlap(Overlap::of(1)).hop(), Samples(frame));
-        assert_eq!(c.overlap(Overlap::of(64)).hop(), Samples(frame / 64));
+        // No hop writes zero; one wider than the frame, or under a sixty-fourth
+        // of it, is refused by the calls that take the config.
+        assert!(PitchHop::new(Samples(0)).is_none());
+        let hop = |h: usize| c.hop(PitchHop::of(Samples(h)));
+        let levels = |c: &NoteConfig| frame_levels(c, &vec![0.0; frame]).map(|_| ());
+        assert!(matches!(
+            levels(&hop(frame + 1)),
+            Err(Error::HopWiderThanWindow { .. })
+        ));
+        assert!(matches!(
+            levels(&hop(frame / 64 - 1)),
+            Err(Error::TooManyOverlaps { .. })
+        ));
+        assert!(levels(&hop(frame)).is_ok());
+        assert!(levels(&hop(frame.div_ceil(64))).is_ok());
+        let t = track(&[Some(440.0); 3]);
+        assert!(matches!(
+            notes_from_track(&hop(frame + 1), &t, &loud(3), &[]),
+            Err(Error::HopWiderThanWindow { .. })
+        ));
+        assert!(matches!(
+            transcribe(&hop(1), &vec![0.1; frame], &mut FftScratch::new()),
+            Err(Error::TooManyOverlaps { .. })
+        ));
 
         let t = track(&[Some(440.0); 10]);
         assert_eq!(
@@ -1467,8 +1467,7 @@ mod tests {
         let g = StftGeometry::new(SampleRate::of(RATE), Samples(1024), Samples(256)).unwrap();
         let c = NoteConfig::new(yin, OnsetConfig::new(g, DetectionFunction::SpectralFlux)).unwrap();
         assert!(c.frame().get() < 64, "{:?}", c.frame());
-        let c = c.overlap(Overlap::of(c.frame().get()));
-        assert_eq!(c.hop(), Samples(1));
+        let c = c.hop(PitchHop::of(Samples(1)));
         let x = vec![0.1f32; MAX_FRAMES + c.frame().get() + 1];
         assert_eq!(
             transcribe(&c, &x, &mut FftScratch::new()),
@@ -1497,7 +1496,7 @@ mod tests {
     #[test]
     fn a_note_at_the_end_of_the_buffer_stops_short_of_it() {
         let c = cfg();
-        let (frame, hop) = (c.frame().get(), c.hop().get());
+        let (frame, hop) = (c.frame().get(), c.hop.get());
         let n = (0.5 * RATE) as usize;
         let x = render(
             RATE,
@@ -1541,11 +1540,11 @@ mod tests {
         let c = cfg();
         assert_eq!(c.min_length, Samples(2646));
         assert_eq!(c.smoothing, Samples(1323));
-        assert_eq!(c.hold_setting(), Samples(441));
+        assert_eq!(c.hold, Samples(441));
         assert_eq!(c.pitch_split, PitchSplit::of(Cents(50.0)));
-        assert_eq!(c.floor_setting(), Db(-60.0));
+        assert_eq!(c.floor, Db(-60.0));
         assert!((secs(c.min_length) - 0.06).abs() < 1e-6);
-        let d = NoteConfig::new(c.yin, *c.onset()).unwrap();
-        assert_eq!(d.hop().get(), d.frame().get() / 8);
+        let d = NoteConfig::new(c.yin, c.onset).unwrap();
+        assert_eq!(d.hop.get(), d.frame().get() / 8);
     }
 }

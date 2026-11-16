@@ -62,6 +62,12 @@ const SILENCE_FLOOR: Db = Db(-90.0);
 const FLAT: f32 = f32::EPSILON;
 
 ranged! {
+    /// How many runner-up tempi a tempo estimate holds: within `0..=16`.
+    Alternatives(usize), AlternativesError, "an alternatives count within 0..=16",
+    |raw| raw <= MAX_ALTERNATIVES
+}
+
+ranged! {
     /// How wide the tempo prior is, in octaves (a factor of two in tempo per
     /// octave): finite and above zero. A ratio between two tempi, which no unit
     /// type covers.
@@ -94,20 +100,6 @@ impl TempoRange {
     #[must_use]
     pub fn new(min: Bpm, max: Bpm) -> Option<Self> {
         Self::try_from(min..=max).ok()
-    }
-
-    /// The slowest tempo searched.
-    #[inline]
-    #[must_use]
-    pub fn min(&self) -> Bpm {
-        self.min
-    }
-
-    /// The fastest tempo searched.
-    #[inline]
-    #[must_use]
-    pub fn max(&self) -> Bpm {
-        self.max
     }
 }
 
@@ -187,8 +179,15 @@ impl TempoConfig {
     /// Prefer tempi near `centre`, falling to `exp(-1/2)` of the weight one
     /// `spread` away, in octaves (a factor of two in tempo per octave).
     #[must_use]
-    pub fn prior(mut self, centre: Bpm, spread: PriorSpread) -> Self {
+    pub fn prior_centre(mut self, centre: Bpm) -> Self {
         self.centre = centre;
+        self
+    }
+
+    /// How wide the tempo prior is, in octaves: the weight falls to `exp(-1/2)`
+    /// one `spread` from the centre.
+    #[must_use]
+    pub fn prior_spread(mut self, spread: PriorSpread) -> Self {
         self.spread = spread;
         self
     }
@@ -203,19 +202,11 @@ impl TempoConfig {
         self
     }
 
-    /// How many runner-up tempi [`Tempo::alternatives`] holds, at most; capped
-    /// at 16.
+    /// How many runner-up tempi [`Tempo::alternatives`] holds, at most 16.
     #[must_use]
-    pub fn alternatives(mut self, count: usize) -> Self {
-        self.alternatives = count.min(MAX_ALTERNATIVES);
+    pub fn alternatives(mut self, count: Alternatives) -> Self {
+        self.alternatives = count.get();
         self
-    }
-
-    /// The slowest and fastest tempo searched.
-    #[inline]
-    #[must_use]
-    pub fn range_setting(&self) -> (Bpm, Bpm) {
-        (self.min, self.max)
     }
 }
 
@@ -806,15 +797,19 @@ mod tests {
         let weak = estimate_tempo(&TempoConfig::new(), geometry(), &train(0.1), &mut fft).unwrap();
         assert!((weak.bpm.get() - 60.0).abs() < 1.5, "{}", weak.bpm);
 
-        let centred = TempoConfig::new().prior(Bpm::of(60.0), PriorSpread::of(1.0));
+        let centred = TempoConfig::new()
+            .prior_centre(Bpm::of(60.0))
+            .prior_spread(PriorSpread::of(1.0));
         let low = estimate_tempo(&centred, geometry(), &half, &mut fft).unwrap();
         assert!((low.bpm.get() - 60.0).abs() < 1.5, "{}", low.bpm);
 
-        let narrow = TempoConfig::new().prior(Bpm::of(120.0), PriorSpread::of(0.1));
+        let narrow = TempoConfig::new()
+            .prior_centre(Bpm::of(120.0))
+            .prior_spread(PriorSpread::of(0.1));
         let high = estimate_tempo(&narrow, geometry(), &train(0.1), &mut fft).unwrap();
         assert!((high.bpm.get() - 120.0).abs() < 1.5, "{}", high.bpm);
 
-        let none = TempoConfig::new().alternatives(0);
+        let none = TempoConfig::new().alternatives(Alternatives::of(0));
         let bare = estimate_tempo(&none, geometry(), &half, &mut fft).unwrap();
         assert!(bare.alternatives.is_empty());
     }
@@ -1191,12 +1186,5 @@ mod tests {
             ),
             Err(Error::InsufficientInput { .. })
         ));
-    }
-
-    /// The alternatives are capped.
-    #[test]
-    fn the_alternative_count_is_capped() {
-        let cfg = TempoConfig::new().alternatives(usize::MAX);
-        assert_eq!(cfg.alternatives, MAX_ALTERNATIVES);
     }
 }

@@ -68,8 +68,8 @@ use crate::stereo::Ballistics;
 use crate::{Error, Result};
 use tutti_dsp::Complex32;
 use tutti_dsp::FftScratch;
+use tutti_dsp::FrameCount;
 use tutti_dsp::StftGeometry;
-use tutti_dsp::{BinCount, FrameCount};
 use tutti_types::ranged;
 
 /// The smallest and largest window accepted.
@@ -279,13 +279,19 @@ impl SpectrumConfig {
         self
     }
 
-    /// Holds each peak for `hold`, then lets it fall by `decay` per second.
+    /// Holds each peak for `hold` before it falls.
     ///
     /// [`state`](Self::state) refuses a `hold` of more than 4294967295 frames at
     /// the hop and rate in use ([`Error::PeakHoldTooLong`]).
     #[must_use]
-    pub fn peak_hold(mut self, hold: SpectrumTime, decay: PeakDecay) -> Self {
+    pub fn peak_hold(mut self, hold: SpectrumTime) -> Self {
         self.peak_hold = hold;
+        self
+    }
+
+    /// Lets a held peak fall by `decay` per second once its hold is over.
+    #[must_use]
+    pub fn peak_decay(mut self, decay: PeakDecay) -> Self {
         self.peak_decay = decay;
         self
     }
@@ -298,31 +304,6 @@ impl SpectrumConfig {
     pub fn spectrogram(mut self, columns: FrameCount) -> Self {
         self.columns = columns.get();
         self
-    }
-
-    /// The window, hop and sample rate frames are taken at.
-    #[inline]
-    #[must_use]
-    pub fn geometry(&self) -> StftGeometry {
-        self.geometry
-    }
-
-    /// The level silence reads.
-    #[inline]
-    #[must_use]
-    pub fn floor_setting(&self) -> Db {
-        self.floor.get()
-    }
-
-    /// Outputs per frame: bins or bands.
-    ///
-    /// # Errors
-    ///
-    /// As [`state`](Self::state), for the settings that make the outputs.
-    pub fn outputs(&self) -> Result<BinCount> {
-        Ok(BinCount(
-            self.layout()?.map_or(self.bins(), |e| e.len() - 1),
-        ))
     }
 
     /// Builds every buffer for this config and plans `fft` for its window, so
@@ -528,11 +509,11 @@ impl SpectrumState {
             next_due: size as u64,
             frames: 0,
             power: vec![0.0; outputs],
-            levels: vec![cfg.floor_setting(); outputs],
-            peaks: vec![cfg.floor_setting(); outputs],
-            anchor: vec![cfg.floor_setting().get(); outputs],
+            levels: vec![cfg.floor.get(); outputs],
+            peaks: vec![cfg.floor.get(); outputs],
+            anchor: vec![cfg.floor.get().get(); outputs],
             age: vec![0; outputs],
-            spectrogram: vec![cfg.floor_setting(); cfg.columns * outputs],
+            spectrogram: vec![cfg.floor.get(); cfg.columns * outputs],
             head: 0,
             filled: 0,
         };
@@ -543,7 +524,7 @@ impl SpectrumState {
     /// Forgets everything fed, keeping the buffers: the readings are the
     /// floor and the next frame is ready after a whole window.
     pub fn reset(&mut self) {
-        let floor = self.cfg.floor_setting();
+        let floor = self.cfg.floor.get();
         self.ring.fill(0.0);
         self.write = 0;
         self.fed = 0;
@@ -620,7 +601,7 @@ impl SpectrumState {
         let hold = cfg.peak_hold_frames().get() as u32;
         // One product per call: exact, then rounded once to the `f32` the loop runs in.
         let decay = (f64::from(cfg.peak_decay.get().get()) * dt.get()) as f32;
-        let floor = cfg.floor_setting();
+        let floor = cfg.floor.get();
 
         for i in 0..self.power.len() {
             let raw = if self.band_bins.is_empty() {
@@ -778,7 +759,7 @@ mod tests {
         let mut fft = FftScratch::new();
         let mut state = cfg.state(&mut fft).unwrap();
         let mut frames = Vec::new();
-        for block in signal.chunks(cfg.geometry().hop().get()) {
+        for block in signal.chunks(cfg.geometry.hop().get()) {
             if step_spectrum(cfg, &mut state, block, &mut fft).unwrap() {
                 frames.push(state.levels().to_vec());
             }
@@ -915,12 +896,12 @@ mod tests {
                     Some(o) if window[o] > 0.0 => {
                         db(10.0 * (4.0 * f64::from(window[o]).powi(2) / (gain * gain)).log10())
                     }
-                    _ => cfg.floor_setting().get(),
+                    _ => cfg.floor.get().get(),
                 };
                 for (k, l) in state.levels().iter().enumerate() {
                     // DC and an even window's Nyquist drop the factor 4.
                     let lone = k == 0 || (size.is_multiple_of(2) && k == size / 2);
-                    let level = if lone && level > cfg.floor_setting().get() {
+                    let level = if lone && level > cfg.floor.get().get() {
                         level - 6.0206
                     } else {
                         level
@@ -1062,7 +1043,9 @@ mod tests {
     fn peaks_hold_then_decay_at_the_configured_rate() {
         let (size, hop) = (1536, 512);
         let (hold, decay) = (Seconds(0.25), Db(30.0));
-        let cfg = config(size, hop).peak_hold(SpectrumTime::of(hold), PeakDecay::of(decay));
+        let cfg = config(size, hop)
+            .peak_hold(SpectrumTime::of(hold))
+            .peak_decay(PeakDecay::of(decay));
         let mut signal = tone(size * 3, 1000.0, 0.5);
         signal.resize(size * 3 + size * 40, 0.0);
 
@@ -1295,12 +1278,9 @@ mod tests {
     fn the_hold_is_a_whole_number_of_frames_without_over_holding() {
         let cfg = config(1920, 480);
         let frames = |hold: f32| {
-            cfg.peak_hold(
-                SpectrumTime::new(Seconds::from_f32(hold)).unwrap(),
-                PeakDecay::of(Db(20.0)),
-            )
-            .peak_hold_frames()
-            .get()
+            cfg.peak_hold(SpectrumTime::new(Seconds::from_f32(hold)).unwrap())
+                .peak_hold_frames()
+                .get()
         };
         assert_eq!(frames(1.0), 100);
         assert_eq!(frames(0.1), 10);
@@ -1313,8 +1293,10 @@ mod tests {
                 StftGeometry::new(SampleRate::of(10_000_000.0), Samples(64), Samples(1)).unwrap()
             )
             .unwrap()
-            .peak_hold(SpectrumTime::of(Seconds(3600.0)), PeakDecay::of(Db(1.0)))
-            .outputs(),
+            .peak_hold(SpectrumTime::of(Seconds(3600.0)))
+            .peak_decay(PeakDecay::of(Db(1.0)))
+            .state(&mut FftScratch::new())
+            .map(|_| ()),
             Err(Error::PeakHoldTooLong { .. })
         ));
     }
@@ -1349,11 +1331,15 @@ mod tests {
 
         let cfg = config(1024, 256);
         assert!(matches!(
-            cfg.spectrogram(FrameCount(usize::MAX)).outputs(),
+            cfg.spectrogram(FrameCount(usize::MAX))
+                .state(&mut FftScratch::new())
+                .map(|_| ()),
             Err(Error::SpectrogramTooLarge { .. })
         ));
         assert_eq!(
-            cfg.spectrogram(FrameCount((1 << 22) / 513 + 1)).outputs(),
+            cfg.spectrogram(FrameCount((1 << 22) / 513 + 1))
+                .state(&mut FftScratch::new())
+                .map(|_| ()),
             Err(Error::SpectrogramTooLarge {
                 cells: ((1 << 22) / 513 + 1) * 513,
                 max: 1 << 22
@@ -1361,7 +1347,8 @@ mod tests {
         );
         assert!(
             cfg.spectrogram(FrameCount((1 << 22) / 513))
-                .outputs()
+                .state(&mut FftScratch::new())
+                .map(|_| ())
                 .is_ok()
         );
         let banded = cfg
@@ -1369,7 +1356,8 @@ mod tests {
                 count: BandCount::of(4000),
                 band: band(100.0, 20_000.0),
             })
-            .outputs();
+            .state(&mut FftScratch::new())
+            .map(|_| ());
         assert!(
             matches!(banded, Err(Error::EmptyBand { .. })),
             "4000 bands of 513 bins cannot all hold a bin"
@@ -1382,12 +1370,16 @@ mod tests {
             })
         };
         assert!(matches!(
-            oct(48, 1e-30, 20_000.0).outputs(),
+            oct(48, 1e-30, 20_000.0)
+                .state(&mut FftScratch::new())
+                .map(|_| ()),
             Err(Error::TooManyBands { max: 4096, .. })
         ));
         assert!(
             matches!(
-                oct(48, 100.0, 20_000.0).outputs(),
+                oct(48, 100.0, 20_000.0)
+                    .state(&mut FftScratch::new())
+                    .map(|_| ()),
                 Err(Error::EmptyBand { .. })
             ),
             "1/48 octave is finer than the bins"
@@ -1407,19 +1399,26 @@ mod tests {
             );
         }
         assert!(matches!(
-            oct(1, 100.0, 30_000.0).outputs(),
+            oct(1, 100.0, 30_000.0)
+                .state(&mut FftScratch::new())
+                .map(|_| ()),
             Err(Error::AboveNyquist { .. })
         ));
         assert!(matches!(
-            oct(1, 100.0, 150.0).outputs(),
+            oct(1, 100.0, 150.0)
+                .state(&mut FftScratch::new())
+                .map(|_| ()),
             Err(Error::EmptyFrequencyRange { .. })
         ));
         // Returning to per-bin outputs multiplies the cells per column: a
         // spectrogram sized for 17 bands is not one for 513 bins.
         let banded = oct(3, 400.0, 20_000.0).spectrogram(FrameCount(100_000));
-        assert!(banded.outputs().is_ok());
+        assert!(banded.state(&mut FftScratch::new()).map(|_| ()).is_ok());
         assert!(matches!(
-            banded.banding(Banding::Bins).outputs(),
+            banded
+                .banding(Banding::Bins)
+                .state(&mut FftScratch::new())
+                .map(|_| ()),
             Err(Error::SpectrogramTooLarge { .. })
         ));
     }
@@ -1444,14 +1443,14 @@ mod tests {
         let cfg = config(256, 64).spectrogram(FrameCount(4));
         let mut fft = FftScratch::new();
         let mut state = cfg.state(&mut fft).unwrap();
-        assert!(state.levels().iter().all(|&l| l == cfg.floor_setting()));
+        assert!(state.levels().iter().all(|&l| l == cfg.floor.get()));
 
         step_spectrum(&cfg, &mut state, &vec![0.0; 1000], &mut fft).unwrap();
         assert!(
-            state.levels().iter().all(|&l| l == cfg.floor_setting()),
+            state.levels().iter().all(|&l| l == cfg.floor.get()),
             "silence"
         );
-        assert!(state.peaks().iter().all(|&l| l == cfg.floor_setting()));
+        assert!(state.peaks().iter().all(|&l| l == cfg.floor.get()));
 
         let before = state.levels().to_vec();
         for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
@@ -1482,7 +1481,7 @@ mod tests {
                 .levels()
                 .iter()
                 .chain(state.peaks())
-                .all(|&l| l == cfg.floor_setting())
+                .all(|&l| l == cfg.floor.get())
         );
         assert_eq!(state.spectrogram().len(), 0);
 

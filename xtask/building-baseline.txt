@@ -162,7 +162,6 @@ tutti-measure  ctor-result  crates/tutti-measure/src/loudness.rs::WindowedLoudne
 tutti-measure  ctor-result  crates/tutti-measure/src/loudness.rs::WindowedLoudnessState::new
 tutti-measure  ctor-result  crates/tutti-measure/src/notes.rs::NoteConfig::new
 tutti-measure  ctor-result  crates/tutti-measure/src/notes.rs::VelocityRange::new
-tutti-measure  ctor-result  crates/tutti-measure/src/silence.rs::SilenceConfig::new
 tutti-measure  ctor-result  crates/tutti-measure/src/spectrum.rs::SpectrumConfig::new
 tutti-measure  ctor-result  crates/tutti-measure/src/yin.rs::YinConfig::new
 tutti-measure  ctor-result  crates/tutti-measure/src/yin.rs::YinConfig::standard

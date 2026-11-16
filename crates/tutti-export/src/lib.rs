@@ -429,7 +429,7 @@ pub fn write_buffers(
     on_event_loss: EventLossPolicy,
 ) -> Result<Written> {
     frame_width(target.channels())?;
-    if target.normalize_setting().is_some() {
+    if target.normalize.is_some() {
         return Err(Error::Target {
             output: 0,
             why: TargetError::NormalizeOfPlanes,

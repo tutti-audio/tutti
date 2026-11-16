@@ -31,16 +31,14 @@ use tutti_types::{Amplitude, ChannelLayout, SampleRate, Samples};
 /// The rate the file is written at: the resample target, else the rate it is
 /// rendered at.
 pub(crate) fn output_rate(target: &FileTarget, render_rate: SampleRate) -> SampleRate {
-    target
-        .resample_setting()
-        .map_or(render_rate, |r| r.target_rate)
+    target.resample.map_or(render_rate, |r| r.target_rate)
 }
 
 /// What the file is written as: the target's format, width and speaker order at
 /// the output rate.
 fn spec(target: &FileTarget, source_rate: SampleRate) -> Spec {
     let rate = output_rate(target, source_rate);
-    match target.topology_setting() {
+    match target.width.topology() {
         Some(topology) => Spec::new(target.format(), topology.clone(), rate),
         None => Spec::of_width(target.format(), target.channels(), rate),
     }
@@ -210,7 +208,7 @@ pub(crate) fn resampler_for(
     // Frames handed to `write_buffers` already exist and carry their own
     // rate, which may not be the one a config was rendered at; reading
     // it from a config resamples from a rate the samples were never at.
-    Ok(match target.resample_setting() {
+    Ok(match target.resample {
         Some(r) if StreamingResampler::converts(source_rate, r.target_rate) => Some((
             StreamingResampler::new(ch, source_rate, r.target_rate, r.chunk)?,
             vec![Vec::<f32>::new(); ch],
@@ -417,7 +415,7 @@ pub(crate) fn write_planes(
         Some(
             crate::render::FileChannels {
                 layout: target.channels(),
-                topology: target.topology_setting(),
+                topology: target.width.topology(),
             }
             .fold_from(rendered.channels(), None)?,
         )

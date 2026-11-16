@@ -134,14 +134,14 @@ impl FrequencyBand {
     /// The lower edge.
     #[inline]
     #[must_use]
-    pub fn min(&self) -> Hz {
+    pub(crate) fn min(&self) -> Hz {
         self.min
     }
 
     /// The upper edge.
     #[inline]
     #[must_use]
-    pub fn max(&self) -> Hz {
+    pub(crate) fn max(&self) -> Hz {
         self.max
     }
 }
@@ -269,13 +269,6 @@ impl ChromaConfig {
     #[must_use]
     pub fn geometry(&self) -> StftGeometry {
         self.geometry
-    }
-
-    /// How the tuning is found.
-    #[inline]
-    #[must_use]
-    pub fn tuning_setting(&self) -> Tuning {
-        self.tuning
     }
 
     /// The bins a peak may sit on, `lo..=hi`, each with both neighbours inside

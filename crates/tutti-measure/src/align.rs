@@ -64,20 +64,6 @@ impl PassBand {
     ) -> Option<Self> {
         Self::try_from((sample_rate.into(), low.into(), high.into())).ok()
     }
-
-    /// The lower edge.
-    #[inline]
-    #[must_use]
-    pub fn low(&self) -> Hz {
-        self.low
-    }
-
-    /// The upper edge.
-    #[inline]
-    #[must_use]
-    pub fn high(&self) -> Hz {
-        self.high
-    }
 }
 
 impl TryFrom<(SampleRate, Hz, Hz)> for PassBand {
@@ -126,13 +112,6 @@ impl AlignConfig {
     pub fn band(mut self, band: PassBand) -> Self {
         self.band = Some(band);
         self
-    }
-
-    /// The pass band, as `(low, high)`, or `None` for the whole spectrum.
-    #[inline]
-    #[must_use]
-    pub fn band_setting(&self) -> Option<(Hz, Hz)> {
-        self.band.map(|b| (b.low, b.high))
     }
 }
 
@@ -555,7 +534,10 @@ mod tests {
         let open = AlignConfig::new(Samples(500));
         let banded =
             open.band(PassBand::new(SampleRate::of(1.0), Hz::new(0.03), Hz::new(0.09)).unwrap());
-        assert_eq!(banded.band_setting(), Some((Hz(0.03), Hz(0.09))));
+        assert_eq!(
+            banded.band.map(|b| (b.low, b.high)),
+            Some((Hz(0.03), Hz(0.09)))
+        );
         let open = align(&reference, &take, &open, &mut fft).unwrap();
         let banded = align(&reference, &take, &banded, &mut fft).unwrap();
         assert_eq!(banded.lag, 77);
@@ -731,7 +713,7 @@ mod tests {
 
         let mut fft = FftScratch::new();
         let cfg = AlignConfig::new(Samples(10));
-        assert_eq!(cfg.band_setting(), None);
+        assert_eq!(cfg.band, None);
         let one = [1.0f32];
         assert!(matches!(
             align(&[], &one, &cfg, &mut fft),
