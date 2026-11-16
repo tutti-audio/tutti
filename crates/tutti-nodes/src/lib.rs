@@ -24,7 +24,8 @@
 //!   read per frame when driven.
 //! - **Dynamics** — `CompressorNode`, `GateNode`, `BrickwallLimiterNode` and
 //!   `LimiterNode` (each a `KernelNode` over a bank of `tutti_dsp`: the compressor and the
-//!   gate read a typed `KeySource`, the limiter reports its lookahead as latency), and
+//!   gate read a typed `KeySource`, through an optional `KeyFilter`; the limiter reports its
+//!   lookahead as latency), and
 //!   `MultibandCompressorNode` (2 to 4 bands, a linked
 //!   compressor per band of a Linkwitz-Riley crossover, a hand-written node over
 //!   `tutti_dsp::MultibandBank`). Every setting is an indexed param: a
@@ -288,7 +289,9 @@ pub use dynamics::{
 };
 // The types in the dynamics nodes' constructors: the controls a node is built at, and the
 // key a compressor or a gate listens to.
-pub use tutti_dsp::{CompressorControls, GateControls, KeySource, LimiterControls, Lookahead};
+pub use tutti_dsp::{
+    CompressorControls, GateControls, KeyFilter, KeySource, LimiterControls, Lookahead,
+};
 
 // The mixer strip: volume, stereo balance, mute. Ungated: a fader is not a
 // spatial concept.

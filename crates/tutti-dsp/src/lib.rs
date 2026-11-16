@@ -21,7 +21,8 @@
 //! - **Dynamics** — the curves
 //!   `compute_compressor_gain_reduction`, `compute_limiter_gain` and
 //!   `LimiterCurve`; the compressor and the noise gate over buffers views (`CompressorBank` and
-//!   `GateBank`, each on a typed `KeySource`, a side-chain bus or the signal itself; the
+//!   `GateBank`, each on a typed `KeySource`, a side-chain bus or the signal itself, and
+//!   each able to hear that key through a `KeyFilter`, an SVF high-pass or band-pass; the
 //!   threshold a per-frame lane, the makeup and the range `Glide`s over `GAIN_GLIDE`); the
 //!   lookahead limiter (`LimiterBank`: threshold and ceiling per-frame lanes, every coefficient
 //!   landing whole, the lookahead its latency); the brickwall clipper (`BrickwallBank`); and
@@ -98,8 +99,8 @@
 //!   ([`BrickwallBank`], its ceiling a per-frame lane); the compressor ([`CompressorBank`],
 //!   keyed, its threshold a lane, its makeup a [`Glide`] over [`GAIN_GLIDE`]) and the noise
 //!   gate ([`GateBank`], its range gliding likewise). Both read a [`KeySource`]: a side-chain
-//!   bus or the signal itself. The multiband compressor ([`MultibandBank`]) is a crossover tree
-//!   per channel and a [`CompressorBank`] per band, each band's makeup, bypass and solo
+//!   bus or the signal itself, through a [`KeyFilter`] if the bank is built with one. The
+//!   multiband compressor ([`MultibandBank`]) is a crossover tree per channel and a [`CompressorBank`] per band, each band's makeup, bypass and solo
 //!   gliding over [`GAIN_GLIDE`].
 //! - **Reverb** (`reverb/`): the model, a [`Network`] of [`Stage`]s with
 //!   analytic queries ([`Network::rt60`], [`tail`](System::tail),
@@ -186,8 +187,8 @@ pub use dither::{DitherNoise, DitherShape};
 pub use dynamics::{
     BandReductions, BandSettings, BankShape, BrickwallBank, BrickwallControls, BrickwallLanes,
     CompressorBank, CompressorControls, CompressorLanes, GAIN_GLIDE, GateBank, GateControls,
-    GateLanes, KeySource, LimiterBank, LimiterControls, LimiterCurve, LimiterLanes, Lookahead,
-    LookaheadError, MultibandBank, MultibandLanes, MultibandSettings, amplitude_to_db,
+    GateLanes, KeyFilter, KeySource, LimiterBank, LimiterControls, LimiterCurve, LimiterLanes,
+    Lookahead, LookaheadError, MultibandBank, MultibandLanes, MultibandSettings, amplitude_to_db,
     compute_compressor_gain_reduction, compute_limiter_gain,
 };
 pub use fft::{Complex32, Complex64, FftScratch, RealFft};

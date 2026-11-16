@@ -40,6 +40,7 @@ fn compressor() {
                 attack: Seconds(0.005),
                 release: Seconds(0.05),
                 makeup: Db(2.0),
+                ..CompressorControls::DEFAULT
             },
         )
     })
@@ -76,6 +77,7 @@ fn gate() {
                 hold: Seconds(0.005),
                 release: Seconds(0.02),
                 range: Db(-40.0),
+                ..GateControls::DEFAULT
             },
         )
     })

@@ -17,8 +17,8 @@
 use tutti_graph::IntoNode;
 use tutti_graph::contract::BlockRig;
 use tutti_nodes::{
-    BrickwallLimiterNode, CompressorControls, CompressorNode, GateControls, GateNode, KeySource,
-    LimiterControls, LimiterNode, Lookahead, MultibandCompressorNode,
+    BrickwallLimiterNode, CompressorControls, CompressorNode, GateControls, GateNode, KeyFilter,
+    KeySource, LimiterControls, LimiterNode, Lookahead, MultibandCompressorNode,
 };
 use tutti_types::{BusTopology, ChannelLayout, CompressionRatio, Db, SampleRate, Seconds};
 
@@ -207,6 +207,7 @@ fn gate_mono_process_is_allocation_free() {
                 hold: Seconds::new(0.010),
                 release: Seconds::new(0.100),
                 range: Db::new(-60.0),
+                ..GateControls::DEFAULT
             },
         ),
         0.5,
@@ -227,12 +228,60 @@ fn gate_stereo_process_is_allocation_free() {
                 hold: Seconds::new(0.010),
                 release: Seconds::new(0.100),
                 range: Db::new(-80.0),
+                ..GateControls::DEFAULT
             },
         ),
         0.6,
         16,
         2_000,
     );
+}
+
+/// The key filter's stage, a high-pass on a mono compressor and a band-pass on a stereo one,
+/// runs without allocating.
+#[test]
+fn compressor_key_filter_process_is_allocation_free() {
+    for (topology, filter, amplitude) in [
+        (BusTopology::MONO, KeyFilter::HighPass, 0.7),
+        (BusTopology::STEREO, KeyFilter::BandPass, 0.6),
+    ] {
+        let node = CompressorNode::new(
+            topology,
+            KeySource::Sidechain,
+            CompressorControls {
+                threshold: Db::new(-20.0),
+                ratio: CompressionRatio::new(4.0),
+                attack: Seconds::new(0.005),
+                release: Seconds::new(0.050),
+                ..CompressorControls::DEFAULT
+            },
+        )
+        .key_filter(filter);
+        gate(node, amplitude, 16, 2_000);
+    }
+}
+
+#[test]
+fn gate_key_filter_process_is_allocation_free() {
+    for (topology, filter, amplitude) in [
+        (BusTopology::MONO, KeyFilter::HighPass, 0.5),
+        (BusTopology::STEREO, KeyFilter::BandPass, 0.6),
+    ] {
+        let node = GateNode::new(
+            topology,
+            KeySource::Sidechain,
+            GateControls {
+                threshold: Db::new(-60.0),
+                attack: Seconds::new(0.001),
+                hold: Seconds::new(0.010),
+                release: Seconds::new(0.100),
+                range: Db::new(-20.0),
+                ..GateControls::DEFAULT
+            },
+        )
+        .key_filter(filter);
+        gate(node, amplitude, 16, 2_000);
+    }
 }
 
 /// A lookahead limiter through a burst and its release, every block under

@@ -49,6 +49,7 @@ fn render(sends: Vec<(u64, ParamSegment)>, block: usize) -> Vec<f32> {
         attack: Seconds(0.0),
         release: Seconds(0.0),
         makeup: Db(0.0),
+        ..CompressorControls::DEFAULT
     };
     let mut g = GraphBuilder::new(
         tutti_types::ChannelLayout::MONO,
