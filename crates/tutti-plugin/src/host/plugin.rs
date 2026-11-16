@@ -738,7 +738,7 @@ impl Rebind for ServedRebind {
         let (node, pending) = self.rebinder.prepare()?;
         Ok(Rebuilt {
             bound: BoundPlugin {
-                bound: BoundPlaced::ServedNode(Box::new(node), self.fork.clone()),
+                bound: BoundPlaced::ServedNode(Box::new(node), Box::new(self.fork.clone())),
             },
             controls: None,
             commit: Commit(Box::new(move |main| pending.commit(main))),
@@ -831,7 +831,7 @@ enum BoundPlaced {
     /// the node it replaces.
     ServedNode(
         Box<tutti_plugin_host::PluginNode<tutti_plugin_ipc::Ipc>>,
-        crate::host::node::fork::ServedFork,
+        Box<crate::host::node::fork::ServedFork>,
     ),
     #[cfg(feature = "vst2")]
     Vst2(Box<tutti_plugin_host::PluginNode<tutti_vst2_host::Vst2Loaded>>),
@@ -890,7 +890,7 @@ impl tutti_graph::IntoNode for BoundPlugin {
             BoundPlaced::ServedNode(node, fork) => tutti_graph::NodeParts {
                 node,
                 controls: None,
-                fork: Some(Box::new(fork)),
+                fork: Some(fork),
             },
             #[cfg(feature = "vst2")]
             BoundPlaced::Vst2(c) => in_process!(c),
