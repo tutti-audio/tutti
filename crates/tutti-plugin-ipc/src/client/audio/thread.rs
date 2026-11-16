@@ -11,15 +11,15 @@ use super::payload_pool::PayloadPool;
 use crate::transport::control::{self as ipc, ControlStream};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::thread;
 use tutti_plugin_types::{BridgeError, PluginFailure};
+use tutti_rt::{StopToken, ThreadHandle};
 
 /// The bridge thread of an `AudioBridge`: it speaks to
 /// the server for the queues. Dropping it shuts it down and joins it.
 pub struct BridgeThread {
     channels: Channels,
     lifecycle: Lifecycle,
-    handle: Option<thread::JoinHandle<()>>,
+    handle: Option<ThreadHandle<()>>,
 }
 
 impl std::fmt::Debug for BridgeThread {
@@ -37,28 +37,25 @@ impl BridgeThread {
         lifecycle: Lifecycle,
         listener: ListenerSlot,
         socket_path: PathBuf,
-    ) -> Self {
+    ) -> std::io::Result<Self> {
         let thread_channels = channels.clone();
         let thread_payloads = payloads.clone();
         let thread_lifecycle = lifecycle.clone();
-        let handle = thread::Builder::new()
-            .name("plugin-bridge".to_string())
-            .spawn(move || {
-                run_thread(
-                    thread_channels,
-                    thread_payloads,
-                    thread_lifecycle,
-                    listener,
-                    socket_path,
-                )
-            })
-            .expect("failed to spawn bridge thread");
+        let handle = tutti_rt::spawn_named("plugin-bridge", None, move |_| {
+            run_thread(
+                thread_channels,
+                thread_payloads,
+                thread_lifecycle,
+                listener,
+                socket_path,
+            )
+        })?;
 
-        Self {
+        Ok(Self {
             channels,
             lifecycle,
             handle: Some(handle),
-        }
+        })
     }
 
     /// Asks the thread to stop and joins it. Idempotent.
@@ -68,6 +65,9 @@ impl BridgeThread {
         // The queue may have been full, so the push may have rung nothing.
         self.channels.wake();
         if let Some(handle) = self.handle.take() {
+            // The thread ends on the `Shutdown` it was sent, so this waits for
+            // that and asks for nothing more. A panic in it is not reported:
+            // the bridge is gone either way.
             let _ = handle.join();
         }
     }
@@ -153,11 +153,21 @@ fn run_thread(
     // The control connection is also read when the server speaks unprompted
     // (a request to be processed again, a latency change), whether or not a
     // command is waiting: a thread that only waits on it tells the bridge.
-    match ipc::Watch::of(&lanes.control.stream) {
+    let news = match ipc::Watch::of(&lanes.control.stream) {
         Ok(watch) => watch_control(Arc::new(watch), channels.clone(), lifecycle.clone()),
-        Err(e) => tracing::warn!("the bridge cannot watch the control connection: {e}"),
-    }
+        Err(e) => {
+            tracing::warn!("the bridge cannot watch the control connection: {e}");
+            None
+        }
+    };
     pump(&channels, &payloads, &lifecycle, &listener, &mut lanes);
+    // The watcher ends with the pump, whether the bridge was shut down or the
+    // connection failed: asked to stop, never waited for (it ends within one
+    // slice, and drops its duplicate of the connection then).
+    if let Some(news) = news {
+        news.token().stop();
+        news.detach();
+    }
 }
 
 /// How long the watcher waits before it re-checks that the bridge still runs.
@@ -166,28 +176,37 @@ fn run_thread(
 const WATCH_SLICE: std::time::Duration = std::time::Duration::from_millis(20);
 
 /// Spawns the watcher: it waits for the control connection to have bytes and
-/// tells the bridge thread, then waits for the bridge to have read them.
-fn watch_control(watch: Arc<ipc::Watch>, channels: Channels, lifecycle: Lifecycle) {
+/// tells the bridge thread, then waits for the bridge to have read them. Ends
+/// when the bridge stops running or its token is stopped.
+fn watch_control(
+    watch: Arc<ipc::Watch>,
+    channels: Channels,
+    lifecycle: Lifecycle,
+) -> Option<ThreadHandle<()>> {
     channels.set_probe(Arc::clone(&watch));
-    let spawned = thread::Builder::new()
-        .name("plugin-bridge-news".to_string())
-        .spawn(move || {
-            while lifecycle.is_running() {
-                if !watch.wait_readable(WATCH_SLICE) {
-                    continue;
-                }
-                channels.set_news();
-                // The bytes stay readable until the bridge reads them: wait
-                // for it, so this thread does not spin on them meanwhile.
-                while channels.news_pending() && lifecycle.is_running() {
-                    thread::park_timeout(std::time::Duration::from_millis(1));
+    let spawned = tutti_rt::spawn_named("plugin-news", None, move |stop: &StopToken| {
+        while lifecycle.is_running() && !stop.is_stopped() {
+            if !watch.wait_readable(WATCH_SLICE) {
+                continue;
+            }
+            channels.set_news();
+            // The bytes stay readable until the bridge reads them: wait
+            // for it, so this thread does not spin on them meanwhile.
+            while channels.news_pending() && lifecycle.is_running() {
+                if stop.wait(std::time::Duration::from_millis(1)) {
+                    break;
                 }
             }
-            // The bridge is done: the duplicate of its connection goes with it.
-            channels.clear_probe();
-        });
-    if let Err(e) = spawned {
-        tracing::warn!("the bridge cannot watch the control connection: {e}");
+        }
+        // The bridge is done: the duplicate of its connection goes with it.
+        channels.clear_probe();
+    });
+    match spawned {
+        Ok(handle) => Some(handle),
+        Err(e) => {
+            tracing::warn!("the bridge cannot watch the control connection: {e}");
+            None
+        }
     }
 }
 

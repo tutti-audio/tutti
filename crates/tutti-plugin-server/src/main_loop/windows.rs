@@ -129,29 +129,24 @@ pub(crate) fn wait_for_connection(_listener: &Listener) -> BridgeResult<super::W
         )
         .into());
     }
-    let armed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
-    let watch = std::sync::Arc::clone(&armed);
-    let spawned = std::thread::Builder::new()
-        .name("host-watchdog".to_string())
-        .spawn(move || {
-            while watch.load(std::sync::atomic::Ordering::Acquire) {
-                std::thread::sleep(HOST_POLL);
-                if watch.load(std::sync::atomic::Ordering::Acquire)
-                    && !tutti_plugin_ipc_ffi::process_exists(host)
-                {
-                    tracing::info!(
-                        "host process is gone while the server waits to accept; exiting"
-                    );
-                    std::process::exit(1);
-                }
+    let spawned = tutti_rt::spawn_named("host-watchdog", None, move |stop| {
+        while !stop.wait(HOST_POLL) {
+            if !tutti_plugin_ipc_ffi::process_exists(host) {
+                tracing::info!("host process is gone while the server waits to accept; exiting");
+                std::process::exit(1);
             }
-        });
-    if let Err(e) = spawned {
-        tracing::warn!("the host watchdog cannot start: {e}");
-        return Ok(super::Watching::nothing());
+        }
+    });
+    match spawned {
+        // The watch runs until the guard drops, which stops and joins it.
+        Ok(watch) => Ok(super::Watching {
+            _watch: Some(watch),
+        }),
+        Err(e) => {
+            tracing::warn!("the host watchdog cannot start: {e}");
+            Ok(super::Watching::nothing())
+        }
     }
-    // The watch runs while the flag holds: the guard's drop clears it.
-    Ok(super::Watching(Some(armed)))
 }
 
 /// Records the spawning host's process id: the host's own statement in

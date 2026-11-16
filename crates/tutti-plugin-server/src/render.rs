@@ -31,10 +31,9 @@
 //! command the main thread pushed before it answered the host is in effect for
 //! every block the host sends after that answer.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
-use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
+use tutti_rt::{StopToken, ThreadHandle};
 
 use tutti_plugin_ipc::{BridgeMessage, HostMessage, SlabWriter};
 use tutti_plugin_types::{
@@ -642,8 +641,7 @@ fn encode_midi_out(events: &MidiEventVec, dropped: usize) -> MidiEventVec {
 /// The thread that renders: owns the [`RenderSide`] and the host's audio
 /// connection until it is stopped.
 pub(crate) struct RenderThread {
-    handle: Option<JoinHandle<RenderSide>>,
-    stop: Arc<AtomicBool>,
+    handle: Option<ThreadHandle<RenderSide>>,
     /// Why the audio connection ended, if it did: the thread then only trades
     /// the Processor, until it is stopped.
     ended: Arc<OnceLock<BridgeError>>,
@@ -655,20 +653,16 @@ impl RenderThread {
     /// The thread asks the OS for the highest priority it grants
     /// ([`crate::server::request_audio_priority`]): it is the one that renders.
     pub(crate) fn spawn(side: RenderSide, audio: Box<dyn Transport>) -> std::io::Result<Self> {
-        let stop = Arc::new(AtomicBool::new(false));
         let ended = Arc::new(OnceLock::new());
-        let handle = std::thread::Builder::new()
-            .name("plugin-render".to_string())
-            .spawn({
-                let (stop, ended) = (Arc::clone(&stop), Arc::clone(&ended));
-                move || {
-                    crate::server::request_audio_priority("the render thread");
-                    run(side, audio, &stop, &ended)
-                }
-            })?;
+        let handle = tutti_rt::spawn_named("plugin-render", None, {
+            let ended = Arc::clone(&ended);
+            move |stop: &StopToken| {
+                crate::server::request_audio_priority("the render thread");
+                run(side, audio, stop, &ended)
+            }
+        })?;
         Ok(Self {
             handle: Some(handle),
-            stop,
             ended,
         })
     }
@@ -685,21 +679,16 @@ impl RenderThread {
     /// If the render thread panicked (a plugin that panics is caught at the
     /// lifecycle; anything else here is a bug).
     pub(crate) fn stop(mut self) -> RenderSide {
-        self.stop.store(true, Ordering::Release);
-        self.handle
-            .take()
-            .expect("stopped once")
-            .join()
-            .expect("the render thread does not panic")
+        let handle = self.handle.take().expect("stopped once");
+        handle.token().stop();
+        handle.join().expect("the render thread does not panic")
     }
 }
 
 impl Drop for RenderThread {
     fn drop(&mut self) {
-        self.stop.store(true, Ordering::Release);
-        if let Some(handle) = self.handle.take() {
-            let _ = handle.join();
-        }
+        // The handle's drop stops the thread and joins it.
+        drop(self.handle.take());
     }
 }
 
@@ -708,11 +697,11 @@ impl Drop for RenderThread {
 fn run(
     mut side: RenderSide,
     audio: Box<dyn Transport>,
-    stop: &AtomicBool,
+    stop: &StopToken,
     ended: &OnceLock<BridgeError>,
 ) -> RenderSide {
     let mut audio = Some(audio);
-    while !stop.load(Ordering::Acquire) {
+    while !stop.is_stopped() {
         if let Err(error) = side.step(audio.as_mut(), RENDER_WAIT) {
             // The connection is gone; the Processor may still be recalled, so
             // the thread keeps trading it until the main thread has it back.

@@ -145,7 +145,7 @@ impl AudioBridge {
             lifecycle.clone(),
             Arc::clone(&listener),
             socket_path,
-        );
+        )?;
         let bridge = Self {
             channels,
             payloads,

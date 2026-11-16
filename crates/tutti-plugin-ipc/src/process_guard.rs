@@ -8,11 +8,11 @@
 //! user-held handle has dropped).
 
 use crate::{BridgeConfig, BridgeThread, Reaped, ServerWatch};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 use tutti_plugin_ipc_ffi::ExitWait;
 use tutti_plugin_types::PluginFailure;
+use tutti_rt::{StopToken, ThreadHandle};
 
 /// How long the exit thread waits on the OS between looks at its stop flag.
 /// Only bounds how long a dropped guard waits to join it when the process was
@@ -25,15 +25,9 @@ pub struct ProcessGuard {
     /// locked on the audio thread.
     process: Arc<Mutex<Option<Reaped>>>,
     watch: Arc<ServerWatch>,
-    exit_thread: Option<ExitThread>,
+    exit_thread: Option<ThreadHandle<()>>,
     _bridge_thread: Option<BridgeThread>,
     config: BridgeConfig,
-}
-
-/// The thread that declares the process's end to the [`ServerWatch`].
-struct ExitThread {
-    stop: Arc<AtomicBool>,
-    handle: std::thread::JoinHandle<()>,
 }
 
 impl std::fmt::Debug for ProcessGuard {
@@ -52,17 +46,13 @@ impl ProcessGuard {
         let watch = Arc::new(ServerWatch::new());
         let wait = ExitWait::of(&process);
         let process = Arc::new(Mutex::new(Some(process)));
-        let stop = Arc::new(AtomicBool::new(false));
-        let spawned = std::thread::Builder::new()
-            .name("plugin-exit".to_string())
-            .spawn({
-                let process = Arc::clone(&process);
-                let watch = Arc::clone(&watch);
-                let stop = Arc::clone(&stop);
-                move || declare_exit(&process, &wait, &watch, &stop)
-            });
+        let spawned = tutti_rt::spawn_named("plugin-exit", None, {
+            let process = Arc::clone(&process);
+            let watch = Arc::clone(&watch);
+            move |stop: &StopToken| declare_exit(&process, &wait, &watch, stop)
+        });
         let exit_thread = match spawned {
-            Ok(handle) => Some(ExitThread { stop, handle }),
+            Ok(handle) => Some(handle),
             Err(e) => {
                 // The stream's end still declares a death, only later.
                 tracing::warn!("the server's exit cannot be watched: {e}");
@@ -131,7 +121,7 @@ impl Drop for ProcessGuard {
         // Stopped first, so the thread reads the end it is about to cause as
         // the guard's and declares nothing.
         if let Some(exit) = &self.exit_thread {
-            exit.stop.store(true, Ordering::Release);
+            exit.token().stop();
         }
         // Killed and reaped as it drops ([`Reaped`]), before the socket goes.
         let process = self
@@ -140,9 +130,8 @@ impl Drop for ProcessGuard {
             .unwrap_or_else(PoisonError::into_inner)
             .take();
         drop(process);
-        if let Some(exit) = self.exit_thread.take() {
-            let _ = exit.handle.join();
-        }
+        // Stops (again) and joins.
+        drop(self.exit_thread.take());
         let _ = std::fs::remove_file(&self.config.socket_path);
     }
 }
@@ -153,9 +142,9 @@ fn declare_exit(
     process: &Mutex<Option<Reaped>>,
     wait: &ExitWait,
     watch: &ServerWatch,
-    stop: &AtomicBool,
+    stop: &StopToken,
 ) {
-    while !stop.load(Ordering::Acquire) {
+    while !stop.is_stopped() {
         if !wait.wait(EXIT_SLICE) {
             continue;
         }
@@ -166,14 +155,18 @@ fn declare_exit(
         match process.try_wait() {
             Ok(Some(status)) => {
                 // Not a death the guard caused: its drop sets `stop` first.
-                if !stop.load(Ordering::Acquire) {
+                if !stop.is_stopped() {
                     watch.declare(PluginFailure::ServerExited { status });
                 }
                 return;
             }
             // Woken and not ended: a platform that wakes by sleeping, or a
             // wake that raced the status. Ask again at the next slice.
-            Ok(None) => std::thread::sleep(Duration::from_millis(2)),
+            Ok(None) => {
+                if stop.wait(Duration::from_millis(2)) {
+                    return;
+                }
+            }
             Err(e) => {
                 tracing::warn!("the server's exit status cannot be read: {e}");
                 return;

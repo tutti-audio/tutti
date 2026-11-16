@@ -117,20 +117,15 @@ const HOST_PID_ENV: &str = "TUTTI_PLUGIN_HOST_PID";
 /// returns. A platform whose wait is the check itself (Unix polls the
 /// listener) returns [`Watching::nothing`].
 #[derive(Debug, Default)]
-pub(crate) struct Watching(Option<std::sync::Arc<std::sync::atomic::AtomicBool>>);
+pub(crate) struct Watching {
+    /// Held for its drop, which stops the watch and joins it.
+    _watch: Option<tutti_rt::ThreadHandle<()>>,
+}
 
 impl Watching {
     /// No watch outlives the wait.
     pub(crate) fn nothing() -> Self {
-        Self(None)
-    }
-}
-
-impl Drop for Watching {
-    fn drop(&mut self) {
-        if let Some(armed) = &self.0 {
-            armed.store(false, std::sync::atomic::Ordering::Release);
-        }
+        Self { _watch: None }
     }
 }
 
