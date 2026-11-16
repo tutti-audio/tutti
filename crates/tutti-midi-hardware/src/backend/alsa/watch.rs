@@ -488,7 +488,7 @@ enum Woken {
     /// The sequencer announced something.
     Announced(Drained),
     /// The time given to `wait` passed with nothing announced.
-    Timeout,
+    TimedOut,
     Stopped,
 }
 
@@ -511,7 +511,7 @@ impl Announce {
     /// or `timeout` passes.
     fn wait(&mut self, timeout: Option<std::time::Duration>) -> Result<Woken> {
         match self.polls.wait(timeout)? {
-            Wait::Timeout => Ok(Woken::Timeout),
+            Wait::TimedOut => Ok(Woken::TimedOut),
             Wait::Stopped => Ok(Woken::Stopped),
             Wait::Broken => Err(Error::port("the sequencer descriptor failed")),
             Wait::Ready => Ok(Woken::Announced(self.drain())),
@@ -605,7 +605,7 @@ pub(super) fn start(
         let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             loop {
                 match announce.wait(tracker.retry_after()) {
-                    Ok(woken @ (Woken::Announced(_) | Woken::Timeout)) => {
+                    Ok(woken @ (Woken::Announced(_) | Woken::TimedOut)) => {
                         #[cfg(test)]
                         WAKES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                         let first = match woken {
