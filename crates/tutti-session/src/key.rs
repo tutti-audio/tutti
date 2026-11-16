@@ -441,7 +441,7 @@ impl From<EventInPort> for EventTapPort {
 
 /// One audio edge, named: what feeds which channel. What
 /// [`Graph::connect`] adds and a modulation route onto its gain
-/// (`ModTarget`, feature `modulation`) drives: the
+/// (`ModTarget`) drives: the
 /// **gain** of an edge is a weight of the sum its sink holds (doc 013, "Edge
 /// gain"). The edge must exist; a target whose edge is not in the graph yet
 /// is unresolved until it is.
@@ -471,7 +471,6 @@ impl Edge {
     }
 
     /// Whether the edge touches `node` (as its sink or its source).
-    #[cfg(feature = "modulation")]
     pub(crate) fn touches(self, node: NodeKey) -> bool {
         self.from.node() == Some(node) || self.to.node() == Some(node)
     }
@@ -494,7 +493,7 @@ impl Edge {
     /// polarity. A move of the gain is ramped over one block.
     ///
     /// **This is the knob, routed or not.** A modulation route onto the edge
-    /// (`Mods::route`, feature `modulation`) moves the gain around this value
+    /// (`Mods::route`) moves the gain around this value
     /// and removing the route returns to it: the one writer of the gain is the
     /// edge's cell.
     ///

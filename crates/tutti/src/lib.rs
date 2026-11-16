@@ -91,8 +91,8 @@
 //!   `DeviceId`. Off by default so an offline render, a CI job or a server builds
 //!   without ALSA or CoreAudio headers.
 //! - `jack` — JACK output through `tutti-cpal` (links libjack; implies `device`).
-//! - `decode-wav`, `decode-flac`, `decode-mp3`, `decode-ogg` — audio file decoders (each implies `codec`, and
-//!   enables the same decoder in the sampler when `sampler` is on).
+//! - `decode-wav`, `decode-flac`, `decode-mp3`, `decode-ogg` — audio file decoders (each implies `codec` and
+//!   turns on the same decoder in `tutti-codec`; a sampler decodes through it).
 //! - `encode-wav`, `encode-flac`, `encode-aiff`, `encode-vorbis` — the encoders
 //!   a `Format` names (each implies `codec`; none implies `export`, and
 //!   `encode-vorbis` is the one path to a C library).
@@ -104,7 +104,7 @@
 //! - `midi` — `tutti::midi`. `crates/tutti/examples/midi_all.rs` uses every piece together, offline.
 //! - `midi-hardware` — OS MIDI I/O in `tutti::midi` (implies `midi`).
 //! - `synth`, `soundfont`, `sampler` — the matching module.
-//!   `soundfont` implies `midi`; `sampler` implies `decode-wav`.
+//!   `synth` and `soundfont` imply `midi`; `sampler` implies no decoder.
 //! - `plugin` — `tutti::plugin` (implies `midi`), with one or more formats:
 //!   `vst2`, `vst3`, `clap`, `au`. Each format links its SDK, which is why none
 //!   is in `full`. The out-of-process plugin server is a separate binary,
@@ -386,6 +386,8 @@ pub mod session {
 
     #[cfg(any(feature = "io", feature = "export"))]
     pub use tutti_session::DitherShape;
+    #[cfg(feature = "sampler")]
+    pub use tutti_session::SamplerError;
     #[cfg(feature = "export")]
     pub use tutti_session::{
         AnyStem, BounceConfigError, BounceHandle, BounceJob, BounceRendered, BufferMaster,
@@ -398,8 +400,17 @@ pub mod session {
         Armed, InFlight, InputOpener, OpenedInput, Placement as RecordedPlacement, PunchError,
         Rolling, Start, TakeEnd, TakeId, Terms, Window,
     };
-    #[cfg(feature = "sampler")]
-    pub use tutti_session::{AudioEntry, AudioFile, SamplerError, StreamInfo, Tier, audio_file};
+    // The `audio_file` entry decodes a file, so it needs a decoder.
+    #[cfg(all(
+        feature = "sampler",
+        any(
+            feature = "decode-wav",
+            feature = "decode-flac",
+            feature = "decode-mp3",
+            feature = "decode-ogg"
+        )
+    ))]
+    pub use tutti_session::{AudioEntry, AudioFile, StreamInfo, Tier, audio_file};
     pub use tutti_session::{
         AutomationTake, MixRef, ModInput, ModKeys, ModRefusal, ModRouteId, ModSourceId, ModState,
         ModTarget, Mods, ModsView, NoAutomation, NoSuchModRoute, NoSuchModSource, Problem, Ranged,
@@ -460,13 +471,21 @@ pub mod codec {
 pub mod sampler {
     pub use tutti_sampler::{
         Block, Direction as PlaybackDirection, Error, OpenError, Placement as ClipPlacement,
-        ProbeError, RefusedPlacement, SampleFacts, Stream, StreamFault, StreamFile, StreamId,
-        StreamPhase, StreamReader, StreamStatus, VoiceNodeHandle,
+        RefusedPlacement, Stream, StreamFault, StreamFile, StreamId, StreamPhase, StreamReader,
+        StreamStatus, VoiceNodeHandle,
     };
+    // A file's probe needs a decoder.
     pub use tutti_sampler::{
         Loop, LoopError, PlaceError, Playback, SendError, StreamerGone, StreamingAddError,
         VoiceWindow,
     };
+    #[cfg(any(
+        feature = "decode-wav",
+        feature = "decode-flac",
+        feature = "decode-mp3",
+        feature = "decode-ogg"
+    ))]
+    pub use tutti_sampler::{ProbeError, SampleFacts};
 }
 
 /// Modulation (`tutti-modulation`): the sources and curves an application

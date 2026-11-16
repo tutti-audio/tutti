@@ -525,7 +525,6 @@ fn the_automation_mode_refusal_is_its_own_type() {
 
 /// **A plugin parameter is targeted by the same reference a native one is**
 /// (`modulation`): `Param::target` is the `ParamRef` a route takes.
-#[cfg(feature = "modulation")]
 #[test]
 fn a_plugin_parameter_targets_a_modulation_route_through_a_param_ref() {
     let (s, node, _, _) = ready();
@@ -539,7 +538,6 @@ fn a_plugin_parameter_targets_a_modulation_route_through_a_param_ref() {
 /// **A plugin's key names a parameter as a route's target** (`modulation`):
 /// `key.param(id)` is the reference `Param::target` gives, and a route onto it
 /// is declared and read back through the key, as a native param's is.
-#[cfg(feature = "modulation")]
 #[test]
 fn a_plugin_key_names_a_parameter_a_route_targets() {
     use tutti_session::{ParamRef, RouteSpec};

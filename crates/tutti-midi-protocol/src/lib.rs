@@ -138,6 +138,7 @@
 
 mod flex;
 mod midi1;
+mod mode;
 mod mpe;
 mod narrow;
 mod narrower;
@@ -154,6 +155,7 @@ mod voice;
 
 pub use flex::{flex_tempo, flex_tempo_field, flex_time_signature};
 pub use midi1::{NoMidi1Form, midi1, narrow, narrow_message};
+pub use mode::{ExtremeValues, PerNoteTranslation, TranslationMode};
 pub use mpe::{
     ChannelResponse, ControllerSupport, MpeFeatures, MpeMode, MpeSpec, MpeZone, MpeZoneConfig,
     MpeZones, PitchBendSupport,

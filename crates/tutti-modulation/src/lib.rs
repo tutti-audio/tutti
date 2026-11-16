@@ -4,7 +4,7 @@
 //! A host declares sources, routes and targets; [`compile()`] turns them into one
 //! [`ControlProgram`] per modulated target, a description of each
 //! signal-driven source's node, and the event edges between them. The
-//! `tutti` facade re-exports it as `tutti::modulation` (feature `modulation`).
+//! `tutti` facade re-exports it as `tutti::modulation`.
 //!
 //! ## What is here
 //!

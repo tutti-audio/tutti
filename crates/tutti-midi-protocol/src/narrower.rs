@@ -1,12 +1,16 @@
 //! The stateful MIDI 2.0 to MIDI 1.0 translation of M2-104 Appendix D.2: the
 //! [`Narrower`] an output edge runs.
 
-use crate::midi1;
+use crate::mode::avoid;
 use crate::scale;
+use crate::{ExtremeValues, PerNoteTranslation, TranslationMode, midi1};
+use members::Members;
 use tutti_ump::{
     Address, Bank, CCNumber, ControlValue, Message, Midi1Bytes, MidiChannel, MidiGroup, U7, Ump,
     Voice1, Voice2,
 };
+
+mod members;
 
 /// Every channel of every group.
 const SLOTS: usize = MidiGroup::COUNT as usize * MidiChannel::COUNT as usize;
@@ -62,6 +66,14 @@ struct Channel {
 ///   with no MIDI 1.0 form (D.2.8: relative and per-note controllers) send
 ///   nothing.
 ///
+/// [`new`](Self::new) is the Default Translation. [`with_mode`](Self::with_mode)
+/// runs an Alternate Translation Mode (D.4): near-extreme values kept off the
+/// minimum and maximum (D.1.5, [`ExtremeValues`]) and the per-note messages sent
+/// as MPE on a zone's member channels (D.2.8, [`PerNoteTranslation`]). In the MPE
+/// mode a Note On takes the member idle longest, or steals the oldest note's
+/// when all play; a per-note message for a note that does not sound sends
+/// nothing, and every message that is not per-note goes on the zone's Manager Channel.  A MIDI 1.0 message passes unchanged.
+///
 /// A Control Change that passes through and moves what this narrower tracks
 /// (CC 101, 100, 99, 98, CC 0 or 32, or CC 121) makes it forget that state, so
 /// the next controller selects in full. A receiver this narrower does not own
@@ -92,6 +104,9 @@ struct Channel {
 #[derive(Clone, Debug)]
 pub struct Narrower {
     channels: [Channel; SLOTS],
+    mode: TranslationMode,
+    /// The note allocation of the MPE mode; none in any other.
+    members: Option<Box<Members>>,
 }
 
 impl Default for Narrower {
@@ -110,14 +125,41 @@ impl Narrower {
                 selected: None,
                 bank: None,
             }; SLOTS],
+            mode: TranslationMode {
+                extremes: ExtremeValues::Scaled,
+                per_note: PerNoteTranslation::Dropped,
+            },
+            members: None,
         }
+    }
+
+    /// A narrower that translates by `mode`: [`new`](Self::new) is the Default
+    /// Translation, and any other mode is an Alternate Translation Mode
+    /// (M2-104 D.4). [`reset`](Self::reset) in the MPE mode forgets the notes
+    /// held without sending their Note Offs.
+    #[must_use]
+    pub fn with_mode(mode: TranslationMode) -> Self {
+        let members =
+            matches!(mode.per_note, PerNoteTranslation::Mpe(_)).then(|| Box::new(Members::new()));
+        Self {
+            mode,
+            members,
+            ..Self::new()
+        }
+    }
+
+    /// The mode this narrower translates by.
+    #[must_use]
+    pub const fn mode(&self) -> TranslationMode {
+        self.mode
     }
 
     /// Forgets every selection and bank, as at [`new`](Self::new): the next
     /// controller or bank sends its select or Bank Select again. Call it when
-    /// the receiver may have lost its state (it was reset, or reopened).
+    /// the receiver may have lost its state (it was reset, or reopened). In the
+    /// MPE mode the notes it holds are forgotten without a Note Off.
     pub fn reset(&mut self) {
-        *self = Self::new();
+        *self = Self::with_mode(self.mode);
     }
 
     /// Calls `out` with each MIDI 1.0 message `message` stands for, in the
@@ -141,7 +183,30 @@ impl Narrower {
                 return;
             }
         };
+        let extremes = self.mode.extremes;
+        if let (PerNoteTranslation::Mpe(zone), Some(members)) =
+            (self.mode.per_note, self.members.as_mut())
+            && members.route(&zone, extremes, address, voice, &mut out)
+        {
+            return;
+        }
+        // The zone is the destination of every other message (M2-120 sections
+        // 4.1 to 4.6: zone-wide messages, Program Change and Bank Select are
+        // the Manager Channel's), so the source channel names no MIDI 1.0
+        // channel.
+        let address = match self.mode.per_note {
+            PerNoteTranslation::Mpe(zone) => Address {
+                channel: zone.master_channel(),
+                ..address
+            },
+            PerNoteTranslation::Dropped => address,
+        };
         let channel = &mut self.channels[address.index()];
+        let plain = |out: &mut dyn FnMut(Midi1Bytes)| {
+            if let Ok(voice) = extremes.narrow(voice) {
+                out(voice.bytes(address.channel));
+            }
+        };
         let mut cc = |controller: CCNumber, value: U7| {
             out(Voice1::ControlChange { controller, value }.bytes(address.channel));
         };
@@ -151,13 +216,13 @@ impl Narrower {
                 let data = if scale::zero_extended(bank, index) {
                     narrow_rounded(value.get())
                 } else {
-                    narrow_data(value)
+                    narrow_data(extremes, value)
                 };
                 run(channel, selected, data, &mut cc);
             }
             Voice2::Assignable { bank, index, value } => {
                 let selected = Selected::Assignable { bank, index };
-                run(channel, selected, narrow_data(value), &mut cc);
+                run(channel, selected, narrow_data(extremes, value), &mut cc);
             }
             Voice2::ProgramChange {
                 program,
@@ -172,9 +237,9 @@ impl Narrower {
             }
             Voice2::ControlChange { controller, .. } => {
                 forget(channel, controller);
-                midi1(message).for_each(&mut out);
+                plain(&mut out);
             }
-            _ => midi1(message).for_each(&mut out),
+            _ => plain(&mut out),
         }
     }
 
@@ -225,8 +290,12 @@ fn run(channel: &mut Channel, selected: Selected, data: u16, cc: &mut impl FnMut
 /// The top 14 bits of a 32-bit controller word: the data of a Registered or
 /// Assignable Controller that M2-115 scales Min-Center-Max, narrowed by a right
 /// shift (as [`narrow_bend`](crate::narrow_bend) does a bend).
-fn narrow_data(value: ControlValue) -> u16 {
-    (value.get() >> 18) as u16
+fn narrow_data(extremes: ExtremeValues, value: ControlValue) -> u16 {
+    let data = u32::from((value.get() >> 18) as u16);
+    match extremes {
+        ExtremeValues::Scaled => data as u16,
+        ExtremeValues::Avoided => avoid(data, value.get(), 32, 14) as u16,
+    }
 }
 
 fn narrow_rounded(value: u32) -> u16 {

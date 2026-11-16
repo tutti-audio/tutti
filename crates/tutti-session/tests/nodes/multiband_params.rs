@@ -14,16 +14,13 @@ use std::f64::consts::{PI, TAU};
 
 use tutti_buffers::InterleavedMut;
 use tutti_graph::ForkByClone;
-#[cfg(feature = "modulation")]
 use tutti_modulation::Lfo;
 use tutti_nodes::testing::Osc;
 use tutti_nodes::{MultibandCompressorNode, MultibandControls};
-#[cfg(feature = "modulation")]
 use tutti_session::RouteSpec;
 use tutti_session::{InPort, Key, OutPort, Root, Session};
 use tutti_transport::MotionEvent;
 use tutti_types::{Amplitude, ChannelLayout, SampleRate};
-#[cfg(feature = "modulation")]
 use tutti_types::{BeatsPerCycle, Depth};
 use tutti_types::{CompressionRatio, Db, Hz, Seconds, UnitAddr, UnitParam};
 
@@ -239,7 +236,6 @@ fn the_meter_of_band_1_follows_its_threshold() {
 /// (`GAIN_GLIDE`), re-aimed at each grid point: that is a first-order lag of
 /// time constant 5 ms, so the swing is the sine through it, `1 / sqrt(1 +
 /// (w tau)^2)` of its depth and `atan(w tau)` late (0.992 and 0.125 rad at 4 Hz).
-#[cfg(feature = "modulation")]
 #[test]
 fn a_route_to_band_1_modulates_band_1_only() {
     let (mut s, mb, _) = rig();
