@@ -21,6 +21,7 @@ use crate::bus::{InBus, OutBus, PortSpan};
 use crate::event::{EventWriter, SortedEvents, SubBlocks};
 use crate::node::{ConstantMask, InPlaceMask, MainPorts, SilenceMask};
 use crate::param::ParamInput;
+use crate::rtlog::{LogSlots, RtLevel, RtRecord, RtTarget, RtValue};
 use crate::time::Offset;
 use tutti_types::MaxBlock;
 
@@ -89,6 +90,9 @@ pub struct Io<'a> {
     /// Where [`report_tail`](Self::report_tail) stores; `None` where nothing
     /// reads it (a hand-built `Io`).
     tail: Option<&'a std::cell::Cell<Option<Tail>>>,
+    /// Where [`log`](Self::log) writes; `None` where nothing reads it (a
+    /// hand-built `Io`).
+    log: Option<&'a LogSlots>,
 }
 
 impl std::fmt::Debug for Io<'_> {
@@ -270,6 +274,7 @@ impl<'a> Io<'a> {
             params: &[],
             lost: None,
             tail: None,
+            log: None,
         }
     }
 
@@ -341,6 +346,79 @@ impl<'a> Io<'a> {
     pub(crate) fn with_params(mut self, params: &'a [ParamInput<'a>]) -> Self {
         self.params = params;
         self
+    }
+
+    /// These buffers, with [`log`](Self::log) writing into `log`.
+    #[inline]
+    pub(crate) fn with_log(mut self, log: &'a LogSlots) -> Self {
+        self.log = Some(log);
+        self
+    }
+
+    /// Logs a record of `level` from the audio thread: `message` is the call
+    /// site's text, `offset` the frame in the block it is about, and
+    /// `fields` up to [`MAX_FIELDS`](crate::MAX_FIELDS) named values.
+    ///
+    /// Takes `&self`, allocates nothing and never waits. A level the
+    /// control side's `tracing` subscriber would not emit returns at once.
+    /// The same call (same literal, level and field values) several times in
+    /// one node call is one record whose `repeats` counts the rest; a fifth
+    /// distinct record in one node call is counted lost. The executor fills
+    /// in the node and the frame, and the session emits the record as a
+    /// `tracing` event on `tutti::rt`.
+    ///
+    /// ```text
+    /// io.log(RtLevel::Warn, "non-finite sample", offset, &[("channel", c.into())]);
+    /// ```
+    #[inline]
+    pub fn log(
+        &self,
+        level: RtLevel,
+        message: &'static str,
+        offset: Offset,
+        fields: &[(&'static str, RtValue)],
+    ) {
+        self.log_to(RtTarget::Rt, level, message, offset, fields);
+    }
+
+    /// As [`log`](Self::log), for a hosted plugin's record: the session
+    /// emits it on `tutti::plugin`, which a subscriber filters on its own.
+    #[inline]
+    pub fn log_plugin(
+        &self,
+        level: RtLevel,
+        message: &'static str,
+        offset: Offset,
+        fields: &[(&'static str, RtValue)],
+    ) {
+        self.log_to(RtTarget::Plugin, level, message, offset, fields);
+    }
+
+    /// Logs `record` (a plugin's line, built with [`RtRecord::line`]) at
+    /// `offset`, on the target it names. Its node and frame are the
+    /// executor's, whatever the record held.
+    #[inline]
+    pub fn log_line(&self, record: &RtRecord, offset: Offset) {
+        if let Some(log) = self.log {
+            log.push(*record, offset.get());
+        }
+    }
+
+    #[inline]
+    fn log_to(
+        &self,
+        target: RtTarget,
+        level: RtLevel,
+        message: &'static str,
+        offset: Offset,
+        fields: &[(&'static str, RtValue)],
+    ) {
+        if let Some(log) = self.log {
+            if !log.allows(target, level) {
+                return;
+            }
+            log.push(RtRecord::new(level, target, message, fields), offset.get());
+        }
     }
 
     /// These buffers, counting [`count_lost`](Self::count_lost) into `lost`.

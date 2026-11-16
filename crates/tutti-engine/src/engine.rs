@@ -205,6 +205,8 @@ pub struct Engine {
     /// The folds from the root to the device, published by
     /// [`support_output`](Self::support_output).
     output: OutputControl,
+    /// The readers of what the graph's nodes logged on the audio thread.
+    rt_log: crate::RtLogReaders,
     /// The audio thread's reader of `output`, lent once per call.
     folds: AudioThreadCell<Reader<OutputFolds>>,
     /// The gain each device output is ramped to, published beside the folds.
@@ -469,7 +471,7 @@ impl Engine {
     pub fn with_capacity(
         transport: &tutti_transport::Transport,
         editor: &mut Editor,
-        executor: Executor,
+        mut executor: Executor,
         capacity: Samples,
     ) -> Result<Self, GraphEngineError> {
         if !editor.is_paired_with(&executor) {
@@ -496,6 +498,7 @@ impl Engine {
         // Seeded from the executor; no test here can cover it, since the
         // executor is always fresh at `Engine::new`.
         let dropped_seen = executor.dropped_event_count();
+        let rt_log = crate::RtLogReaders::new(&mut executor);
         let (recorder, meter) = LoadMeter::pair();
         let (heard_taps, hearing) = crate::hearing::link();
         let clock = BlockClock::new();
@@ -531,6 +534,7 @@ impl Engine {
             heard_taps,
             clock_reader,
             output,
+            rt_log,
             folds,
             stage,
         })
@@ -581,6 +585,14 @@ impl Engine {
     /// folds this engine lends.
     pub fn output_control(&self) -> OutputControl {
         self.output.clone()
+    }
+
+    /// The readers of the records the graph's nodes logged on the audio
+    /// thread, to keep when this engine moves to the audio thread:
+    /// [`drain`](crate::RtLogReaders::drain) on any tick the control side
+    /// already has.
+    pub fn rt_log(&self) -> crate::RtLogReaders {
+        self.rt_log.clone()
     }
 
     /// Frees the folds [`support_output`](Self::support_output) replaced that a block

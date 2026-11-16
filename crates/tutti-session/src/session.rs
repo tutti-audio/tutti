@@ -1275,6 +1275,7 @@ impl<C: Clock> Session<C> {
                     taps.reclaim();
                 }
                 self.reclaim();
+                self.graph.drain_rt_log();
             }
         }
     }

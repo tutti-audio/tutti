@@ -1,0 +1,21 @@
+feat(graph,engine,session): a node logs through Io; the session emits the audio thread's records as tracing events
+
+A node calls `Io::log` (or `log_plugin`, `log_line` for a plugin's text line)
+with a fixed-size, Copy `RtRecord`: level, call-site text, up to three named
+values, inline text. The executor owns one ring and one set of four slots per
+pool participant, sized when it is built and in `set_pool`. A call that
+repeats a held record adds to its `repeats`; a fifth distinct record in one
+node call is counted lost. After a node's `process` its participant flushes
+the slots into its ring with the node's key and the frame. The parallel path
+reaches its lane through a claim table of the executor's own, beside `Par`'s.
+A level gate (one `PackedAtomic` of a level per target) is loaded once per
+block; below it `Io::log` returns at once.
+
+`tutti-engine` keeps `RtLogReaders`, which outlives plan swaps: it adopts the
+readers of each sizing after reading out the old ones, and `drain` hands each
+record, merged by frame, to a closure and returns the loss rise. The session
+drains it on its reclaim sweep and emits one `tracing` event per record on
+`tutti::rt` or `tutti::plugin`; the drain stores the subscriber's most verbose
+level per target into the gate.
+
+CLAUDE.md: the audio thread logs only through `Io::log`.
