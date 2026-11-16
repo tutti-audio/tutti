@@ -15,18 +15,18 @@ fn err<T: Error + Send + Sync + 'static>() {}
 
 fn types_errors_are_boxable() {
     use tutti::types::{
-        BeatsPerCycleOutOfRange, BpmOutOfRange, BusTooWide, ChannelCountOutOfRange,
-        DepthOutOfRange, InvalidBeatsPerBar, InvalidMaxBlock, InvalidNoteValue, LoopRangeError,
-        NotOnMidiScale, NoteNumberOutOfRange, SampleRateOutOfRange, UnitParamOutOfRange,
+        BeatsPerCycleOutOfRange, BpmOutOfRange, BusTooWide, DepthOutOfRange, InvalidBeatsPerBar,
+        InvalidMaxBlock, InvalidNoteValue, LayoutError, LoopRangeError, NotOnMidiScale,
+        NoteNumberOutOfRange, SampleRateOutOfRange, UnitParamOutOfRange,
     };
     err::<BeatsPerCycleOutOfRange>();
     err::<BpmOutOfRange>();
     err::<BusTooWide>();
-    err::<ChannelCountOutOfRange>();
     err::<DepthOutOfRange>();
     err::<InvalidBeatsPerBar>();
     err::<InvalidMaxBlock>();
     err::<InvalidNoteValue>();
+    err::<LayoutError>();
     err::<LoopRangeError>();
     err::<NotOnMidiScale>();
     err::<NoteNumberOutOfRange>();

@@ -45,8 +45,8 @@ use crate::writer::FormatWriter;
 use std::io::{Seek, Write};
 use std::num::{NonZeroU8, NonZeroU32};
 use std::sync::{Arc, Mutex, mpsc};
-use std::thread::JoinHandle;
 use tutti_buffers::{Interleaved, PlanesMut, deinterleave};
+use tutti_rt::{ThreadHandle, spawn_named};
 use tutti_types::{ChannelLayout, Speaker};
 use vorbis_rs::{VorbisBitrateManagementStrategy, VorbisEncoder, VorbisEncoderBuilder};
 
@@ -66,7 +66,7 @@ pub struct VorbisWriter<W> {
     spare: mpsc::Receiver<Vec<f32>>,
     /// The thread's first failure, until a `write` or `finish` reports it.
     failure: Arc<Mutex<Option<Error>>>,
-    thread: Option<JoinHandle<Result<W>>>,
+    thread: Option<ThreadHandle<Result<W>>>,
 }
 
 impl<W> std::fmt::Debug for VorbisWriter<W> {
@@ -110,16 +110,18 @@ impl<W: Write + Seek + Send + 'static> VorbisWriter<W> {
         let failure = Arc::new(Mutex::new(None));
         let failed = Arc::clone(&failure);
         // Built on the thread that uses it: the encoder cannot be sent.
-        let thread = std::thread::spawn(move || match build(rate, ch, quality, sink) {
-            Ok(encoder) => {
-                let _ = built.send(Ok(()));
-                run(encoder, layout, order.as_deref(), queue, back, &failed)
+        let thread = spawn_named("tutti-ogg-enc", None, move |_| {
+            match build(rate, ch, quality, sink) {
+                Ok(encoder) => {
+                    let _ = built.send(Ok(()));
+                    run(encoder, layout, order.as_deref(), queue, back, &failed)
+                }
+                Err(e) => {
+                    let _ = built.send(Err(()));
+                    Err(e)
+                }
             }
-            Err(e) => {
-                let _ = built.send(Err(()));
-                Err(e)
-            }
-        });
+        })?;
         let mut writer = Self {
             jobs: Some(jobs),
             spare,
@@ -138,7 +140,7 @@ impl<W: Write + Seek + Send + 'static> VorbisWriter<W> {
         let thread = self.thread.take().ok_or_else(stopped)?;
         thread
             .join()
-            .map_err(|_| Error::encoding(Codec::Ogg, "the encoder thread panicked"))?
+            .map_err(|panicked| Error::encoding(Codec::Ogg, panicked.to_string()))?
     }
 
     /// The thread's failure, once.

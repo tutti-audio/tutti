@@ -23,7 +23,7 @@ fn a_panicking_worker_ends_the_export_with_an_error() {
         let info = StreamInfo::new(48_000, 2, 16).unwrap();
         let pcm = vec![0i32; BLOCK_SIZE * 2];
         let mut out = Vec::new();
-        let mut writer = FrameWriter::start(4, configs, info, 2, 16);
+        let mut writer = FrameWriter::start(4, configs, info, 2, 16).unwrap();
         let pumped = (0..200).try_for_each(|_| writer.block(&pcm, &mut out));
         let finished = writer.finish(&mut out);
         let result = pumped.and(finished);
@@ -46,6 +46,7 @@ fn an_empty_stream_states_valid_sizes() {
     let info = StreamInfo::new(48_000, 2, 16).unwrap();
     let mut out = Vec::new();
     let info = FrameWriter::start(2, configs, info, 2, 16)
+        .unwrap()
         .finish(&mut out)
         .unwrap();
     assert!(out.is_empty(), "no frames");

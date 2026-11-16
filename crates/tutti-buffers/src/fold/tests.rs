@@ -1,7 +1,7 @@
 use super::*;
 use crate::{BufferError, InterleavedMut};
 use Speaker::*;
-use tutti_types::{AmbisonicFormat, AmbisonicOrder, AmbisonicOrdering};
+use tutti_types::{AmbisonicFormat, AmbisonicOrder, AmbisonicOrdering, LayoutError};
 
 fn smpte(n: u16) -> ChannelTopology {
     ChannelTopology::assumed(ChannelLayout::from(n))
@@ -1043,9 +1043,9 @@ fn select_refuses_a_list_past_u16() {
     let too_many = vec![1usize; usize::from(u16::MAX) + 1];
     assert_eq!(
         Fold::<f32>::select(wide, &too_many),
-        Err(FoldError::Buffer(BufferError::TooWide {
-            channels: usize::from(u16::MAX) + 1
-        }))
+        Err(FoldError::Buffer(BufferError::Layout(
+            LayoutError::TooWide(u64::from(u16::MAX) + 1)
+        )))
     );
 }
 

@@ -12,9 +12,7 @@ fn check<S: Sample, P: AsRef<[S]>>(planes: &[P]) -> Result<(ChannelLayout, Sampl
     let Some(first) = planes.first() else {
         return Err(BufferError::ZeroWidth);
     };
-    let layout = ChannelLayout::try_from(planes.len()).map_err(|_| BufferError::TooWide {
-        channels: planes.len(),
-    })?;
+    let layout = ChannelLayout::try_from(planes.len())?;
     let expected = Samples(first.as_ref().len());
     for (plane, p) in planes.iter().enumerate() {
         let found = Samples(p.as_ref().len());
@@ -108,7 +106,7 @@ impl<'a, S: Sample> Planes<'a, S> {
     ///
     /// # Errors
     ///
-    /// [`BufferError::ZeroWidth`] for no planes, [`BufferError::TooWide`] for
+    /// [`BufferError::ZeroWidth`] for no planes, [`BufferError::Layout`] for
     /// more than `u16::MAX`, and [`BufferError::RaggedPlane`] for a plane whose
     /// length differs from the first's. Nothing is truncated.
     pub fn new(planes: &'a [&'a [S]]) -> Result<Self, BufferError> {

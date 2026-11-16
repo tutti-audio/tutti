@@ -49,11 +49,7 @@ pub(crate) fn append(block: Interleaved<'_>, planes: &mut [Vec<f32>]) -> Result<
     if planes.len() != block.channels() {
         return Err(BufferError::WidthMismatch {
             src: block.layout(),
-            dst: u16::try_from(planes.len())
-                .map(ChannelLayout::from)
-                .map_err(|_| BufferError::TooWide {
-                    channels: planes.len(),
-                })?,
+            dst: ChannelLayout::try_from(planes.len()).map_err(BufferError::from)?,
         }
         .into());
     }
