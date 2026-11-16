@@ -38,7 +38,8 @@
 
 #![cfg(feature = "conformance")]
 
-use std::path::{Path, PathBuf};
+use crate::probe::probe_path;
+
 use std::sync::Mutex;
 use tutti_fixtures::main_thread;
 
@@ -46,9 +47,6 @@ use crate::active;
 #[allow(unused_imports)]
 use active::{Activate, Active, ActiveExt, LoadError, ParamExt, StateExt};
 use tutti_vst3_host::{AudioBuffer, InputEvents, LoadOptions, TransportInfo, Vst3Loaded};
-
-/// The in-repo probe bundle, built by `build.rs`.
-const PROBE_DIR_BUILT: &str = env!("VST3_PROBE_DIR");
 
 /// Guards `TUTTI_PROBE_MISBEHAVIOUR`, which is process-global.
 static PROBE_ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -146,19 +144,6 @@ impl Drop for Misbehaviour {
     }
 }
 
-fn probe_path() -> PathBuf {
-    let bundle = Path::new(PROBE_DIR_BUILT).join("audio-probe.vst3");
-    // The inner module's name is the platform's, not ours: `dylib_ext()` in
-    // build.rs spells it `.vst3` on Windows, `.so` on Linux, bare on macOS.
-    // Omitting one spelling is why 13 tests here once reported "audio-probe not
-    // found" while the bundle sat exactly where they were looking.
-    tutti_plugin_types::bundle::any_module_in_bundle(
-        &bundle,
-        tutti_plugin_types::bundle::ModuleKind::Vst3,
-    )
-    .unwrap_or(bundle)
-}
-
 const SAMPLE_RATE: f64 = 48_000.0;
 const BLOCK: usize = 128;
 
@@ -204,7 +189,7 @@ fn drive_block_with(inst: &mut Active, input: f32) -> Vec<Vec<f32>> {
         inputs: &in_refs,
         outputs: &mut out_refs,
         num_samples: BLOCK,
-        sample_rate: SAMPLE_RATE,
+        sample_rate: tutti_plugin_types::SampleRate::of(SAMPLE_RATE),
     };
     // A plugin that fails the block leaves the outputs cleared; the failure
     // itself is `try_process`'s to report.

@@ -286,7 +286,7 @@ unsafe fn embed_editor_sequence(
     if unit_of(api) != EditorUnit::Logical {
         call.set_scale(scale.get());
     }
-    let (width, height) = call.get_size().unwrap_or((800, 600));
+    let (width, height) = call.get_size().unwrap_or(EditorUnit::DEFAULT_EXTENT);
     if call.set_parent(window) == Some(false) {
         return Err(GuiError::SetParentFailed);
     }

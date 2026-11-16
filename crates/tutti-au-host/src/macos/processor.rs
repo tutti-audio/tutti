@@ -674,7 +674,7 @@ impl AuProcessor {
     /// the frames to the next whole beat. Allocation-free and lock-free. The
     /// distance to the next beat is stored before the snapshot, whose publication
     /// is what makes the callbacks start answering.
-    fn publish_transport(&mut self, transport: &TransportInfo, frames: usize, rate: f64) {
+    fn publish_transport(&mut self, transport: &TransportInfo, frames: usize, rate: SampleRate) {
         let Some(state) = &self.transport else {
             return;
         };
@@ -682,7 +682,7 @@ impl AuProcessor {
         // A snapshot without its own rate (a hand-built one) borrows the block's,
         // so the beat distance can still be derived.
         if !is_usable(snapshot.sample_rate) || snapshot.sample_rate <= 0.0 {
-            snapshot.sample_rate = rate;
+            snapshot.sample_rate = rate.get();
         }
         let frames = u32::try_from(frames).unwrap_or(u32::MAX);
         let changed = self.playhead.observe(&snapshot, frames);
@@ -905,7 +905,7 @@ mod tests {
             inputs: &inputs,
             outputs: &mut outputs,
             num_samples: 64,
-            sample_rate: 48_000.0,
+            sample_rate: tutti_plugin_types::SampleRate::SR_48K,
         });
         processor.render(&mut buffer, &ctx, &mut out).unwrap();
 
@@ -940,7 +940,7 @@ mod tests {
             inputs: &inputs,
             outputs: &mut outputs,
             num_samples: 64,
-            sample_rate: 48_000.0,
+            sample_rate: tutti_plugin_types::SampleRate::SR_48K,
         });
         processor.render(&mut buffer, &ctx, &mut out).unwrap();
 

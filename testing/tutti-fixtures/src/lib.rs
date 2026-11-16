@@ -74,7 +74,8 @@ pub use machine_lock::{MachineLock, machine_lock};
 pub use main_thread::{main_thread, main_thread_cases};
 #[cfg(feature = "plugin")]
 pub use plugin::{
-    Activation, Active, Pump, StandInWindow, Whole, detached_work, pump, pumped_work, vst3_module,
+    Activation, Active, Pump, StandInWindow, Whole, detached_work, pump, pumped_work, tempo,
+    vst3_module,
 };
 pub use range_contract::{RangeContract, check_range_contract, check_range_serde};
 pub use round_trip::check_round_trip;
@@ -83,6 +84,30 @@ pub use vst3_cpp::{bundle_of, vst3_cpp_module};
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
+
+/// Polls `cond` until it holds or `deadline` elapses, and says whether it held.
+///
+/// The deadline is the point: a hang in the code under test becomes a failed
+/// assertion with a message, not a suite that never finishes. `cond` is read
+/// once more at the deadline.
+pub fn wait_until(deadline: std::time::Duration, mut cond: impl FnMut() -> bool) -> bool {
+    let start = std::time::Instant::now();
+    while start.elapsed() < deadline {
+        if cond() {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    cond()
+}
+
+/// A name no other call in any process makes: `stem`, the process id and a
+/// per-process count. For a shared-memory segment or a socket that two tests of
+/// one run, or of two runs side by side, would otherwise both create.
+pub fn unique_name(stem: &str) -> String {
+    static COUNT: tutti_types::Mint = tutti_types::Mint::new();
+    format!("{stem}_{}_{}", std::process::id(), COUNT.mint())
+}
 
 /// The first ancestor of `start` (itself included) that holds a `Cargo.lock`.
 ///

@@ -209,7 +209,7 @@ fn drive(
             inputs: ins,
             outputs: outs,
             num_samples: FRAMES,
-            sample_rate: SAMPLE_RATE,
+            sample_rate: tutti_plugin_types::SampleRate::of(SAMPLE_RATE),
         };
         last = inst.process(&mut buffer, ctx).map(|_| ());
     }
@@ -297,7 +297,7 @@ fn process_with_midi_does_not_allocate() {
                 inputs: ins,
                 outputs: outs,
                 num_samples: FRAMES,
-                sample_rate: SAMPLE_RATE,
+                sample_rate: tutti_plugin_types::SampleRate::of(SAMPLE_RATE),
             };
             inst.process(&mut buffer, &ctx).expect("process");
         }
@@ -520,7 +520,7 @@ fn the_plugins_status_becomes_the_blocks_status() {
             inputs: ins,
             outputs: outs,
             num_samples: FRAMES,
-            sample_rate: SAMPLE_RATE,
+            sample_rate: tutti_plugin_types::SampleRate::of(SAMPLE_RATE),
         });
         inst.processor()
             .render(&mut buffer, &ctx, &mut out)
@@ -628,7 +628,7 @@ fn plugin_error_status_does_not_allocate() {
                 inputs: ins,
                 outputs: outs,
                 num_samples: FRAMES,
-                sample_rate: SAMPLE_RATE,
+                sample_rate: tutti_plugin_types::SampleRate::of(SAMPLE_RATE),
             };
             // The error is expected; what must not happen is an allocation
             // while producing it.
@@ -678,7 +678,7 @@ fn oversized_block_rejection_does_not_allocate() {
             inputs: ins,
             outputs: outs,
             num_samples: OVERSIZE,
-            sample_rate: SAMPLE_RATE,
+            sample_rate: tutti_plugin_types::SampleRate::of(SAMPLE_RATE),
         };
         let err = inst
             .process(&mut buffer, &ctx)
@@ -703,7 +703,7 @@ fn oversized_block_rejection_does_not_allocate() {
                 inputs: ins,
                 outputs: outs,
                 num_samples: OVERSIZE,
-                sample_rate: SAMPLE_RATE,
+                sample_rate: tutti_plugin_types::SampleRate::of(SAMPLE_RATE),
             };
             let _ = inst.process(&mut buffer, &ctx);
         }
@@ -779,7 +779,7 @@ fn drive_and_read_output(
         inputs: ins,
         outputs: outs,
         num_samples: FRAMES,
-        sample_rate: SAMPLE_RATE,
+        sample_rate: tutti_plugin_types::SampleRate::of(SAMPLE_RATE),
     };
     let out = inst.process(&mut buffer, &ctx).expect("process");
     let queues = out
@@ -1237,7 +1237,7 @@ fn drive_wide(inst: &mut Active<f32>, channels: usize, iters: usize) {
             inputs: &ins,
             outputs: &mut outs,
             num_samples: FRAMES,
-            sample_rate: SAMPLE_RATE,
+            sample_rate: tutti_plugin_types::SampleRate::of(SAMPLE_RATE),
         };
         inst.process(&mut buffer, &ctx).expect("warm-up process");
     }
@@ -1253,7 +1253,7 @@ fn drive_wide(inst: &mut Active<f32>, channels: usize, iters: usize) {
                 inputs: &ins,
                 outputs: &mut outs,
                 num_samples: FRAMES,
-                sample_rate: SAMPLE_RATE,
+                sample_rate: tutti_plugin_types::SampleRate::of(SAMPLE_RATE),
             };
             inst.process(&mut buffer, &ctx).expect("process");
         }

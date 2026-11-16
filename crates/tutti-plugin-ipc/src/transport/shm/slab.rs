@@ -605,8 +605,7 @@ mod tests {
     }
 
     fn name(tag: &str) -> String {
-        static N: tutti_types::Mint = tutti_types::Mint::new();
-        format!("slab_{tag}_{}_{}", std::process::id(), N.mint())
+        tutti_fixtures::unique_name(&format!("slab_{tag}"))
     }
 
     /// Both ends of one slab in this process: the host's input writer

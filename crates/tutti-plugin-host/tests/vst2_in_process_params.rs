@@ -94,7 +94,7 @@ fn load() -> (PluginNode<Vst2Loaded>, PluginHandle) {
         SampleRate::of(SAMPLE_RATE),
     )
     .unwrap_or_else(|e| panic!("in-process load of the probe at {path:?}: {e:?}"));
-    (client.bind(tempo()), handle)
+    (client.bind(tutti_fixtures::tempo()), handle)
 }
 
 /// The plugin's own value for parameter `i`.
@@ -272,11 +272,6 @@ fn an_export_renders_an_edit_made_in_the_plugin_as_live_does() {
         "the export plays the held lane over the edit live playback keeps"
     );
     drop(handle);
-}
-
-/// The project's tempo map the node under test is bound to.
-fn tempo() -> tutti_transport::TempoReader {
-    tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo")
 }
 
 /// The cases run on the process's main thread (`harness = false`): the node's `prepare`

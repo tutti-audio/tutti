@@ -169,21 +169,6 @@ fn spawn_orphaned_server(tag: &str) -> Reaper {
     Reaper(pid)
 }
 
-/// Poll until `cond` holds or `deadline` elapses. Returns whether it held.
-///
-/// The named deadline is the whole point: a hang in the server under test
-/// becomes a failed assertion with a message, not a suite that never finishes.
-fn wait_until(deadline: Duration, mut cond: impl FnMut() -> bool) -> bool {
-    let start = Instant::now();
-    while start.elapsed() < deadline {
-        if cond() {
-            return true;
-        }
-        std::thread::sleep(POLL_SLICE / 5);
-    }
-    cond()
-}
-
 /// (a) The parent dies → the server exits, within a bounded number of poll
 /// intervals.
 ///
@@ -193,7 +178,7 @@ fn wait_until(deadline: Duration, mut cond: impl FnMut() -> bool) -> bool {
 fn an_orphaned_server_exits_without_a_host() {
     let server = spawn_orphaned_server("orphan");
 
-    let exited = wait_until(EXIT_DEADLINE, || has_exited(server.0));
+    let exited = tutti_fixtures::wait_until(EXIT_DEADLINE, || has_exited(server.0));
     assert!(
         exited,
         "server {} was still alive {EXIT_DEADLINE:?} after its parent exited; \
@@ -295,7 +280,7 @@ fn a_subreaper_does_not_hide_the_hosts_death() {
     // been adopted by *us*. If this never becomes true the environment did not
     // do what the test assumes, and the exit assertion below would prove
     // nothing about the subreaper case.
-    let adopted = wait_until(EXIT_DEADLINE, || ppid_of(server.0) == Some(me));
+    let adopted = tutti_fixtures::wait_until(EXIT_DEADLINE, || ppid_of(server.0) == Some(me));
     assert!(
         adopted,
         "server {} was never reparented to this test process ({me}); \
@@ -307,7 +292,7 @@ fn a_subreaper_does_not_hide_the_hosts_death() {
 
     // Then: the server must exit regardless. Its parent is a live, non-1
     // process — the exact configuration in which `getppid() == 1` is silent.
-    let exited = wait_until(EXIT_DEADLINE, || has_exited(server.0));
+    let exited = tutti_fixtures::wait_until(EXIT_DEADLINE, || has_exited(server.0));
     assert!(
         exited,
         "server {} survived being orphaned under a subreaper: its ppid became \
@@ -354,7 +339,7 @@ fn the_watchdog_takes_down_only_its_own_process() {
     let bystander_pid = bystander.id() as i32;
 
     let server = spawn_orphaned_server("bystander");
-    let exited = wait_until(EXIT_DEADLINE, || has_exited(server.0));
+    let exited = tutti_fixtures::wait_until(EXIT_DEADLINE, || has_exited(server.0));
 
     // Probed by PID rather than with `try_wait`, because `has_exited` above
     // reaps every exited child indiscriminately — including this one, were it

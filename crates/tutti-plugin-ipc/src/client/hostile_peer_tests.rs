@@ -93,25 +93,8 @@ fn no_editor(
     })
 }
 
-fn wait_until(mut cond: impl FnMut() -> bool) -> bool {
-    let deadline = Instant::now() + NOTICE_TIMEOUT;
-    while Instant::now() < deadline {
-        if cond() {
-            return true;
-        }
-        std::thread::sleep(Duration::from_millis(2));
-    }
-    false
-}
-
 fn unique_shm_name(label: &str) -> String {
-    static COUNTER: tutti_types::Mint = tutti_types::Mint::new();
-    format!(
-        "hostile_{}_{}_{}",
-        label,
-        std::process::id(),
-        COUNTER.mint()
-    )
+    tutti_fixtures::unique_name(&format!("hostile_{label}"))
 }
 
 fn stereo_layout() -> SlabLayout {
@@ -136,9 +119,7 @@ fn recv_host_msg(stream: &Stream) -> std::io::Result<HostMessage> {
 
 fn send_bridge_msg(stream: &Stream, msg: &BridgeMessage) -> std::io::Result<()> {
     let mut stream = stream;
-    let data = postcard::to_allocvec(msg).expect("serialize");
-    stream.write_all(&(data.len() as u32).to_be_bytes())?;
-    stream.write_all(&data)
+    crate::protocol::frame::write_frame(&mut stream, msg).map_err(std::io::Error::other)
 }
 
 /// Write a raw frame the host must cope with but which no honest server would
@@ -451,7 +432,7 @@ impl MockServer {
     /// while the callback has not run. A test about the event must wait on the
     /// event — see `a_listener_hears_the_crash_with_its_cause`.
     fn wait_for_crash(&self) -> bool {
-        wait_until(|| self.bridge.is_crashed())
+        tutti_fixtures::wait_until(NOTICE_TIMEOUT, || self.bridge.is_crashed())
     }
 }
 
@@ -662,7 +643,7 @@ fn a_listener_hears_the_crash_with_its_cause() {
 
     let _ = mock.bridge.parameter(ParamId::new(1));
     assert!(
-        wait_until(|| !heard.lock().is_empty()),
+        tutti_fixtures::wait_until(NOTICE_TIMEOUT, || !heard.lock().is_empty()),
         "the peer died but no crash notification arrived within {NOTICE_TIMEOUT:?} \
          (crashed={}, cause={:?}) — a latched cause with no event means the \
          notification half of `crash` never fired",
@@ -719,7 +700,7 @@ fn an_unprompted_event_reaches_the_listener_while_no_command_waits() {
             .set_render_mode_rt(crate::protocol::RenderMode::Realtime)
     );
     assert!(
-        wait_until(|| !heard.lock().is_empty()),
+        tutti_fixtures::wait_until(NOTICE_TIMEOUT, || !heard.lock().is_empty()),
         "the server's unprompted latency change was not heard within {NOTICE_TIMEOUT:?}"
     );
     assert_eq!(*heard.lock(), [77]);
@@ -1100,7 +1081,10 @@ fn a_refused_rate_is_reported_without_crashing_the_bridge() {
         _ => Action::Silent,
     });
     assert!(mock.bridge.set_sample_rate_rt(SampleRate::SR_96K));
-    assert!(wait_until(|| mock.bridge.rate_refusal().is_some()));
+    assert!(tutti_fixtures::wait_until(NOTICE_TIMEOUT, || mock
+        .bridge
+        .rate_refusal()
+        .is_some()));
     assert_eq!(
         mock.bridge.rate_refusal(),
         Some((SampleRate::SR_96K, "no".to_string()))
@@ -1108,7 +1092,10 @@ fn a_refused_rate_is_reported_without_crashing_the_bridge() {
     assert!(!mock.bridge.is_crashed(), "a refusal is not a crash");
 
     assert!(mock.bridge.set_sample_rate_rt(SampleRate::SR_48K));
-    assert!(wait_until(|| mock.bridge.rate_refusal().is_none()));
+    assert!(tutti_fixtures::wait_until(NOTICE_TIMEOUT, || mock
+        .bridge
+        .rate_refusal()
+        .is_none()));
     assert!(!mock.bridge.is_crashed());
 }
 
@@ -1132,7 +1119,10 @@ fn an_unanswered_rate_change_is_a_refusal_and_its_late_answer_clears_it() {
         _ => Action::Silent,
     });
     assert!(mock.bridge.set_sample_rate_rt(SampleRate::SR_96K));
-    assert!(wait_until(|| mock.bridge.rate_refusal().is_some()));
+    assert!(tutti_fixtures::wait_until(NOTICE_TIMEOUT, || mock
+        .bridge
+        .rate_refusal()
+        .is_some()));
     let (rate, reason) = mock.bridge.rate_refusal().unwrap();
     assert_eq!(rate, SampleRate::SR_96K);
     assert!(reason.contains("did not answer"), "{reason}");
@@ -1151,7 +1141,7 @@ fn an_unanswered_rate_change_is_a_refusal_and_its_late_answer_clears_it() {
         "the reply is its own, not the late one"
     );
     assert!(
-        wait_until(|| mock.bridge.rate_refusal().is_none()),
+        tutti_fixtures::wait_until(NOTICE_TIMEOUT, || mock.bridge.rate_refusal().is_none()),
         "the late answer clears the refusal"
     );
     assert!(!mock.bridge.is_crashed());
@@ -1199,11 +1189,14 @@ fn a_late_rate_answer_does_not_override_a_later_one() {
             }
         });
     assert!(mock.bridge.set_sample_rate_rt(SampleRate::SR_96K));
-    assert!(wait_until(|| mock.bridge.rate_refusal().is_some()));
+    assert!(tutti_fixtures::wait_until(NOTICE_TIMEOUT, || mock
+        .bridge
+        .rate_refusal()
+        .is_some()));
     // B, queued behind A's wait; its answer follows A's on the stream.
     assert!(mock.bridge.set_sample_rate_rt(SampleRate::SR_88K2));
     release.send(()).expect("the mock is listening");
-    assert!(wait_until(|| mock
+    assert!(tutti_fixtures::wait_until(NOTICE_TIMEOUT, || mock
         .bridge
         .rate_refusal()
         .is_some_and(|(rate, _)| rate == SampleRate::SR_88K2)));
@@ -1756,7 +1749,7 @@ fn a_chatty_plugin_does_not_extend_the_budget() {
     // Sends the next request; its answer waits for the events to stop.
     let _ = mock.bridge.parameters();
     assert!(
-        wait_until(|| probe.load(Ordering::SeqCst) != 0),
+        tutti_fixtures::wait_until(NOTICE_TIMEOUT, || probe.load(Ordering::SeqCst) != 0),
         "the peer never finished its events"
     );
     assert_eq!(

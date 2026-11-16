@@ -17,7 +17,7 @@ use vst::host::RenderHandle;
 
 use tutti_plugin_types::{
     AudioBufferMut, Normalized, ParameterChanges, PluginError, PluginIo, PluginResult,
-    ProcessContext, ProcessOutput, Processor,
+    ProcessContext, ProcessOutput, Processor, SampleRate,
 };
 
 use crate::host::HostState;
@@ -342,7 +342,7 @@ impl Vst2Processor {
             let previous = self.time_info.last();
             let next = build_vst2_time_info(
                 t,
-                ctx.sample_rate,
+                ctx.sample_rate.get(),
                 previous.as_ref(),
                 self.host.automation(),
             );
@@ -355,13 +355,13 @@ impl Vst2Processor {
     /// musical position move on, and the bar start moves to the last bar line
     /// the position has passed; `kVstTransportChanged` was an edge of the
     /// block's first piece and does not repeat.
-    fn advance_transport(&mut self, frames: usize, sample_rate: f64) {
+    fn advance_transport(&mut self, frames: usize, sample_rate: SampleRate) {
         use vst::api::TimeInfoFlags as F;
         let Some(mut t) = self.time_info.last() else {
             return;
         };
         let flags = F::from_bits_truncate(t.flags);
-        let secs = frames as f64 / sample_rate;
+        let secs = frames as f64 / sample_rate.get();
         t.sample_pos += frames as f64;
         if flags.contains(F::NANOSECONDS_VALID) {
             t.nanoseconds += secs * 1e9;

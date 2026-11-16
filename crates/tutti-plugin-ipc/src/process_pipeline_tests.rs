@@ -114,8 +114,7 @@ impl Planar {
 }
 
 fn unique_shm_name(label: &str) -> String {
-    static COUNTER: tutti_types::Mint = tutti_types::Mint::new();
-    format!("test_{}_{}_{}", label, std::process::id(), COUNTER.mint())
+    tutti_fixtures::unique_name(&format!("test_{label}"))
 }
 
 /// `None` on a clean EOF — the host side closing the socket at teardown is
@@ -157,12 +156,8 @@ fn try_send_bridge_msg(
     stream: &interprocess::local_socket::Stream,
     msg: &BridgeMessage,
 ) -> std::io::Result<()> {
-    use std::io::Write;
     let mut stream = stream;
-    let data = postcard::to_allocvec(msg).unwrap();
-    let len = (data.len() as u32).to_be_bytes();
-    stream.write_all(&len)?;
-    stream.write_all(&data)
+    crate::protocol::frame::write_frame(&mut stream, msg).map_err(std::io::Error::other)
 }
 
 /// One stereo bus per direction — the common shape, and the one most easily

@@ -56,14 +56,10 @@ fn wav(path: &std::path::Path) -> FileOut {
 /// `wait_returns_a_complete_finite_take_without_sequencing_on_the_pump`, which
 /// is what this helper's absence looks like.
 fn wait_until(what: &str, cond: impl Fn() -> bool) {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    while !cond() {
-        assert!(
-            std::time::Instant::now() < deadline,
-            "timed out waiting for {what}"
-        );
-        std::thread::sleep(std::time::Duration::from_millis(1));
-    }
+    assert!(
+        tutti_fixtures::wait_until(std::time::Duration::from_secs(5), cond),
+        "timed out waiting for {what}"
+    );
 }
 
 /// A finite source: hands out `frames` frames of a known ramp, then reports
