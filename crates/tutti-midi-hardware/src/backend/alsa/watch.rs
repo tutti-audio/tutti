@@ -38,7 +38,6 @@
 use std::collections::BTreeSet;
 use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
-use std::thread::JoinHandle;
 
 use super::enumerate::{pack_id, unpack_id};
 use super::poll::ErrorRun;
@@ -53,6 +52,7 @@ use tutti_alsa_ffi::{
     Wait,
 };
 use tutti_midi_device::{EndpointId, OsDevice};
+use tutti_rt::{ThreadHandle, spawn_named};
 
 /// Announcements the watch thread has acted on, for the idle test.
 #[cfg(test)]
@@ -462,23 +462,21 @@ impl Announce {
     }
 }
 
-/// The running watch. Dropping it closes the stop pair, which wakes the thread,
-/// and joins it.
+/// The running watch. Dropping it closes the stop pair, which wakes the thread
+/// out of `poll`, and stops and joins the thread.
 struct AlsaWatch {
+    /// The thread polls the other end; closing this one is the wake.
     stop: Option<UnixStream>,
-    thread: Option<JoinHandle<()>>,
+    thread: Option<ThreadHandle<()>>,
 }
 
 impl Watch for AlsaWatch {}
 
 impl Drop for AlsaWatch {
     fn drop(&mut self) {
+        // Closing the pair wakes `poll`; the handle's drop then stops and joins.
         drop(self.stop.take());
-        if let Some(thread) = self.thread.take()
-            && thread.join().is_err()
-        {
-            tracing::error!("the ALSA device watch thread panicked");
-        }
+        drop(self.thread.take());
     }
 }
 
@@ -505,32 +503,30 @@ pub(super) fn start(
     let failures = sink.clone();
     let mut tracker = Tracker::new(Reporter::new(sink));
     tracker.seed(|| announce.drain(), || snapshot(&announce.seq))?;
-    let thread = std::thread::Builder::new()
-        .name(THREAD_NAME.to_string())
-        .spawn(move || {
-            let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                loop {
-                    match announce.wait(tracker.retry_after()) {
-                        Ok(woken @ (Woken::Announced(_) | Woken::Timeout)) => {
-                            #[cfg(test)]
-                            WAKES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                            let first = match woken {
-                                Woken::Announced(first) => first,
-                                _ => Drained::default(),
-                            };
-                            tracker.step(first, || announce.drain(), || snapshot(&announce.seq));
-                        }
-                        Ok(Woken::Stopped) => return None,
-                        Err(e) => return Some(e),
+    let thread = spawn_named(THREAD_NAME, None, move |_| {
+        let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            loop {
+                match announce.wait(tracker.retry_after()) {
+                    Ok(woken @ (Woken::Announced(_) | Woken::Timeout)) => {
+                        #[cfg(test)]
+                        WAKES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        let first = match woken {
+                            Woken::Announced(first) => first,
+                            _ => Drained::default(),
+                        };
+                        tracker.step(first, || announce.drain(), || snapshot(&announce.seq));
                     }
+                    Ok(Woken::Stopped) => return None,
+                    Err(e) => return Some(e),
                 }
-            }));
-            match run {
-                Ok(None) => {}
-                Ok(Some(why)) => failures.fail(why),
-                Err(_) => failures.fail(crate::WatchFailure::Panicked),
             }
-        })?;
+        }));
+        match run {
+            Ok(None) => {}
+            Ok(Some(why)) => failures.fail(why),
+            Err(_) => failures.fail(crate::WatchFailure::Panicked),
+        }
+    })?;
     Ok(Box::new(AlsaWatch {
         stop: Some(stop_tx),
         thread: Some(thread),

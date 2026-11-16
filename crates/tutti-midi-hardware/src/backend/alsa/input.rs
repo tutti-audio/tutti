@@ -18,6 +18,7 @@ use tutti_alsa_ffi::{
     UmpVersion, Wait,
 };
 use tutti_midi_device::EndpointId;
+use tutti_rt::{ThreadHandle, spawn_named};
 use tutti_ump::split_stream;
 
 /// Times the pump came back from `poll`, for the test that an idle pump sleeps.
@@ -64,7 +65,7 @@ pub struct AlsaInput {
     died: Arc<AtomicBool>,
     /// Disconnects when the pump ends, however it ends: the drop's bounded wait.
     ended: mpsc::Receiver<()>,
-    thread: Option<std::thread::JoinHandle<()>>,
+    thread: Option<ThreadHandle<()>>,
 }
 
 impl InputConnection for AlsaInput {
@@ -76,20 +77,21 @@ impl InputConnection for AlsaInput {
 impl Drop for AlsaInput {
     fn drop(&mut self) {
         drop(self.stop.take());
-        if let Some(t) = self.thread.take() {
+        if let Some(thread) = self.thread.take() {
             // Joining matters: the thread owns the `Client`, and letting it
             // outlive this would leave the port subscribed to a device the
             // caller believes it disconnected. But not for ever: a pump stuck in
             // alsa-lib is detached, and says so.
             match self.ended.recv_timeout(JOIN_BOUND) {
-                Err(mpsc::RecvTimeoutError::Timeout) => tracing::warn!(
-                    "ALSA MIDI pump did not stop within {JOIN_BOUND:?}; left running, still subscribed"
-                ),
-                // Disconnected: the pump has ended (or is ending), so the join
-                // is brief.
-                _ => {
-                    let _ = t.join();
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    tracing::warn!(
+                        "ALSA MIDI pump did not stop within {JOIN_BOUND:?}; left running, still subscribed"
+                    );
+                    thread.detach();
                 }
+                // Disconnected: the pump has ended (or is ending), so the
+                // handle's join is brief.
+                _ => drop(thread),
             }
         }
     }
@@ -173,16 +175,14 @@ pub(super) fn start(
     let died = Arc::new(AtomicBool::new(false));
     let flag = Arc::clone(&died);
     let (ending, ended) = mpsc::channel();
-    let thread = std::thread::Builder::new()
-        .name("tutti-midi-in".to_string())
-        .spawn(move || {
-            // Dropped when the pump returns or unwinds, which disconnects `ended`.
-            let _ending: mpsc::Sender<()> = ending;
-            // A panic in the pump ends it with the input held, so it is caught
-            // and marks the input dead, as an error does.
-            Guard::new(Arc::clone(&flag)).run(|| pump(seq, polls, clock, stop_rx, flag, producer));
-        })
-        .map_err(|e| crate::error::Error::device_from("spawn MIDI pump", e))?;
+    let thread = spawn_named("tutti-midi-in", None, move |_| {
+        // Dropped when the pump returns or unwinds, which disconnects `ended`.
+        let _ending: mpsc::Sender<()> = ending;
+        // A panic in the pump ends it with the input held, so it is caught
+        // and marks the input dead, as an error does.
+        Guard::new(Arc::clone(&flag)).run(|| pump(seq, polls, clock, stop_rx, flag, producer));
+    })
+    .map_err(|e| crate::error::Error::device_from("spawn MIDI pump", e))?;
 
     Ok(AlsaInput {
         stop: Some(stop_tx),
