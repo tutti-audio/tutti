@@ -414,7 +414,10 @@ jobs:
       fail-fast: false
       matrix:
         os: ${{ fromJSON(needs.changes.outputs.test_os) }}
-    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
+    # The repository variable `MACOS_TEST_RUNNER` (a JSON label list, such as `["self-hosted","tutti-mac"]`) sends
+    # the macOS run to a self-hosted runner; unset, it runs on GitHub's. Clearing the variable is the switch back,
+    # with no pull request.
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || (matrix.os == 'macos-latest' && fromJSON(vars.MACOS_TEST_RUNNER || '"macos-latest"')) || matrix.os }}
     env:
       # Optimized dependencies with debug assertions still on: the suite is CPU-bound.
       CARGO_PROFILE_DEV_OPT_LEVEL: '1'
@@ -426,7 +429,9 @@ jobs:
         if: runner.os == 'Linux'
         uses: ./.github/actions/linux-audio-deps
       - run: rustup toolchain install
+      # A self-hosted runner keeps its own warm target, bounded on the machine; GitHub's cache is for GitHub's runners.
       - uses: Swatinem/rust-cache@v2
+        if: runner.environment == 'github-hosted'
         with:
           # One cache per OS for `test` and `test-more`; `test` writes it.
           shared-key: test
