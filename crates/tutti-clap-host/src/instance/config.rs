@@ -82,7 +82,8 @@ pub(crate) struct AudioScratch {
     /// Atomic so the audio thread's `Relaxed` store is readable off-thread
     /// through
     /// [`ClapProcessor::last_process_status`](super::ClapProcessor::last_process_status).
-    /// A plain `AtomicI32` rather than `ArcLend` because this is a scalar — nothing here can be freed on the audio thread.
+    /// A plain `AtomicI32` rather than `ArcLend` because this is a scalar:
+    /// nothing here can be freed on the audio thread.
     pub last_process_status: AtomicI32,
 }
 
