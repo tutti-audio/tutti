@@ -131,12 +131,13 @@ fn folded_six_channel_convolver_process_is_allocation_free() {
     gate(ConvolverNode::folded(&refs, 256).unwrap());
 }
 
-/// Every curve of the shaper, unfed and with its drive port fed a per-frame ramp, 1 000
-/// blocks each under `assert_no_alloc`. `Direct` feeds the port, which `BlockRig` cannot.
+/// Every curve of the shaper, plain and at every oversampling factor, unfed and with its drive
+/// port fed a per-frame ramp, 1 000 blocks each under `assert_no_alloc`. `Direct` feeds the
+/// port, which `BlockRig` cannot.
 #[test]
 fn distortion_process_is_allocation_free_fed_and_unfed() {
     use tutti_graph::contract::Direct;
-    use tutti_nodes::{DistortionNode, ShapeKind};
+    use tutti_nodes::{DistortionNode, OversamplingFactor, ShapeKind};
     use tutti_types::SampleRate;
 
     let kinds = [
@@ -148,15 +149,23 @@ fn distortion_process_is_allocation_free_fed_and_unfed() {
         ShapeKind::SoftCrush,
     ];
     let drive: Vec<f32> = (0..64).map(|i| 1.0 + 0.0625 * i as f32).collect();
-    for kind in kinds {
+    let factors = [
+        None,
+        Some(OversamplingFactor::X2),
+        Some(OversamplingFactor::X4),
+        Some(OversamplingFactor::X8),
+    ];
+    for (kind, factor) in kinds.into_iter().flat_map(|k| factors.map(|f| (k, f))) {
         // The unfed render's first block, kept to prove the fed arm ran.
         let mut unfed: Vec<Vec<f32>> = Vec::new();
         for fed in [false, true] {
-            let mut node = Direct::new(
-                DistortionNode::with_channels(3u16, kind, Drive::new(2.0)),
-                SampleRate::SR_48K,
-                64,
-            );
+            let node = match factor {
+                None => DistortionNode::with_channels(3u16, kind, Drive::new(2.0)),
+                Some(f) => {
+                    DistortionNode::with_channels(3u16, kind, Drive::new(2.0)).oversampling(f)
+                }
+            };
+            let mut node = Direct::new(node, SampleRate::SR_48K, 64);
             for (c, x) in node.inputs_mut().iter_mut().enumerate() {
                 for (i, s) in x.iter_mut().enumerate() {
                     *s = 0.9 * (((i + 7 * c) % 13) as f32 / 6.0 - 1.0);
@@ -168,13 +177,13 @@ fn distortion_process_is_allocation_free_fed_and_unfed() {
             node.block();
             assert!(
                 (0..3).all(|c| node.output(c).iter().any(|s| s.abs() > 1e-6)),
-                "{kind:?} fed={fed} rendered a silent channel; the gate would walk no curve"
+                "{kind:?} {factor:?} fed={fed} rendered a silent channel; the gate would walk no curve"
             );
             let first: Vec<Vec<f32>> = (0..3).map(|c| node.output(c).to_vec()).collect();
             if fed {
                 assert_ne!(
                     first, unfed,
-                    "{kind:?}: the fed drive changed nothing; the gate would walk the unfed arm"
+                    "{kind:?} {factor:?}: the fed drive changed nothing; the gate would walk the unfed arm"
                 );
             } else {
                 unfed = first;

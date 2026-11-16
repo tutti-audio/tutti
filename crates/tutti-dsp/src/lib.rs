@@ -111,6 +111,11 @@
 //! - **FIR design** (`fir.rs`): [`FirDesign`] describes a Kaiser windowed-sinc filter (a
 //!   [`FirResponse`], a transition and an attenuation) and designs it at a rate into a
 //!   [`Fir`], failing with a [`FirError`]; [`kaiser_beta`] is the window's parameter.
+//! - **Oversampling** (`oversample.rs`): [`Oversampling`] describes a cascade of linear-phase
+//!   half-band 2x stages (an [`OversamplingFactor`], an attenuation and a [`Passband`]);
+//!   [`plan`](Oversampling::plan) designs it at a rate into an [`OversamplingPlan`], whose
+//!   [`state`](OversamplingPlan::state) is one channel's [`Oversampler`]. Its round trip is a
+//!   whole number of base frames, [`latency`](OversamplingPlan::latency).
 //! - **Convolution**: [`Convolver`] over a shared [`IrSpectra`].
 //! - **Delay and modulation** (`delay.rs`, `modulation/`): [`DelayLine`] with an
 //!   [`InterpolationMode`]; the feedback delay ([`DelayBank`] over a [`DelayLayout`]: a
@@ -156,6 +161,7 @@ mod interp;
 mod level;
 mod modulation;
 mod oscillator;
+mod oversample;
 mod pan;
 mod waveshape;
 
@@ -206,6 +212,9 @@ pub use modulation::phaser::{
 };
 pub use modulation::sweep::{Stagger, StaggerError, Sweep, SweepError};
 pub use oscillator::{Oscillator, OscillatorWave};
+pub use oversample::{
+    Oversampler, Oversampling, OversamplingFactor, OversamplingPlan, Passband, PassbandError,
+};
 pub use pan::{PanLaw, pan_gains};
 pub use resample::{ChunkSize, FftResampler, ResampleError, StreamingResampler, WindowedSinc};
 pub use reverb::fdn::bank::{FdnBank, FdnGlides};
