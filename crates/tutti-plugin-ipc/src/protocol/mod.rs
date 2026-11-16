@@ -110,10 +110,12 @@ pub(crate) mod wire;
 /// - **Version 41** adds to a plugin's wiring whether it has a bypass of its own
 ///   and the controller table it declares, to a parameter its role (now a
 ///   `ControlRole`) and its overview mark.
-/// - **Version 42** gave `PluginIoChanged` the buses the plugin has now, when they
+/// - **Version 42** writes a descriptor's `version` as a `PluginVersion` (absent, text,
+///   integer or dotted) where it was a string.
+/// - **Version 43** gave `PluginIoChanged` the buses the plugin has now, when they
 ///   differ from the ones the host was last told: the host's picture of a
 ///   served plugin's ports followed none of its changes.
-pub const PROTOCOL_VERSION: u32 = 42;
+pub const PROTOCOL_VERSION: u32 = 43;
 
 /// Largest control-socket frame body either end will allocate for, in bytes.
 ///

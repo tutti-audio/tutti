@@ -8,7 +8,7 @@
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::{ClapFeature, PluginRole, Vst3SubCategories};
+use crate::{ClapFeature, PluginRole, PluginVersion, Vst3SubCategories};
 
 /// The catalog identity of a discovered plugin.
 ///
@@ -26,8 +26,8 @@ pub struct PluginDescriptor {
     pub name: String,
     /// Vendor / author string (may be empty).
     pub vendor: String,
-    /// Version string (may be empty).
-    pub version: String,
+    /// The version the plugin declares, in its format's own shape.
+    pub version: PluginVersion,
     /// The plugin's native classification, carried verbatim from its format.
     ///
     /// [`PluginClass::role`] derives a cross-format [`PluginRole`] from it.
@@ -124,15 +124,15 @@ impl PluginDescriptor {
         self.editor.is_present()
     }
 
-    /// Creates a descriptor with an id, name and class; the vendor and version
-    /// are empty and [`editor`](Self::editor) is
+    /// Creates a descriptor with an id, name and class; the vendor is empty, the
+    /// version is [`PluginVersion::Absent`] and [`editor`](Self::editor) is
     /// [`EditorPresence::Unknown`].
     pub fn new(id: impl Into<String>, name: impl Into<String>, class: PluginClass) -> Self {
         Self {
             id: id.into(),
             name: name.into(),
             vendor: String::new(),
-            version: String::new(),
+            version: PluginVersion::Absent,
             class,
             editor: EditorPresence::Unknown,
             measured: None,
@@ -323,7 +323,7 @@ mod tests {
     #[test]
     fn a_catalog_record_without_the_field_still_loads() {
         let old = r#"{"id":"au.appl.dely","name":"AUDelay","vendor":"Apple",
-                      "version":"1.6.0","class":"Unknown"}"#;
+                      "version":{"Text":"1.6.0"},"class":"Unknown"}"#;
         let d: PluginDescriptor = serde_json::from_str(old).expect(
             "a record written before `editor` existed must still parse — the \
              whole database fails to deserialize on a parse error",

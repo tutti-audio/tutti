@@ -1,8 +1,6 @@
 use super::*;
-use crate::test_support::at;
 use crate::{ClockTransportState, MidiClockDecoder, MtcDecoder};
 use atomic_float::AtomicF64;
-use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool as StdAtomicBool;
 use tutti_graph::UmpAt;
@@ -62,7 +60,7 @@ struct Rig {
     cm: ClockMaster,
     controls: ClockControls,
     transport: Arc<TestTransport>,
-    out: crate::MidiSender,
+    out: Collected,
 }
 
 impl std::ops::Deref for Rig {
@@ -80,17 +78,15 @@ impl Rig {
     fn tick(&mut self, block_size: usize) {
         self.cm
             .tick(&self.transport.now(), Samples(block_size), &mut |e| {
-                let _ = self.out.queue(&[e]);
+                self.out.0.lock().unwrap().push(e);
             });
     }
 }
 
-fn master(
-    tempo: Bpm,
-    sample_rate: impl Into<SampleRate>,
-) -> (Rig, Arc<TestTransport>, crate::MidiReceiver) {
+fn master(tempo: Bpm, sample_rate: impl Into<SampleRate>) -> (Rig, Arc<TestTransport>, Collected) {
     let transport = Arc::new(TestTransport::new(tempo));
-    let (out, receiver) = crate::MidiMailbox::with_capacity(NonZeroUsize::new(4096).unwrap());
+    let receiver = Collected::default();
+    let out = receiver.clone();
     let (cm, controls) = ClockMaster::new(MidiGroup::FIRST, sample_rate.into());
     controls.set_enabled(true);
     let rig = Rig {
@@ -102,23 +98,13 @@ fn master(
     (rig, transport, receiver)
 }
 
-/// Drains a receiver fully into a `Vec`.
-fn drain_all(receiver: &crate::MidiReceiver) -> Vec<UmpAt> {
-    let mut out = Vec::new();
-    let mut buf = [(0, Ump([0; 4])); 256];
-    loop {
-        let n = receiver.poll_into(&mut buf);
-        // The ring's stamps here are block offsets (the rig queues them so).
-        out.extend(
-            buf[..n]
-                .iter()
-                .map(|&(stamp, ump)| at(usize::try_from(stamp).unwrap(), ump)),
-        );
-        if n < buf.len() {
-            break;
-        }
-    }
-    out
+/// What the rig's master emitted, in order.
+#[derive(Clone, Default)]
+struct Collected(Arc<std::sync::Mutex<Vec<UmpAt>>>);
+
+/// Takes everything emitted so far.
+fn drain_all(receiver: &Collected) -> Vec<UmpAt> {
+    std::mem::take(&mut *receiver.0.lock().unwrap())
 }
 
 fn is_status(ev: &UmpAt, status: u8) -> bool {
@@ -357,7 +343,7 @@ fn an_off_tick_locate_clocks_the_next_boundary() {
 fn run_at(
     cm: &mut Rig,
     transport: &TestTransport,
-    cons: &crate::MidiReceiver,
+    cons: &Collected,
     rate: f64,
     (block, blocks): (usize, usize),
     (beat, frame): (&mut f64, &mut u64),
@@ -689,7 +675,7 @@ fn timecode_rounds_to_the_nearest_even_frame() {
 /// A rig at 120 BPM and 48 kHz (24 000 frames a beat, a tick every 1 000)
 /// looping beats 1.0..1.1, so a block starting on beat 1.0 wraps on frame
 /// 2 400. Returns the rig, its transport and its receiver, rolling.
-fn looping_rig() -> (Rig, Arc<TestTransport>, crate::MidiReceiver) {
+fn looping_rig() -> (Rig, Arc<TestTransport>, Collected) {
     let (cm, transport, cons) = master(Bpm::of(120.0), SampleRate::SR_48K);
     transport.set_loop(1.0, 1.1);
     transport.set_beat(1.0);
@@ -1045,7 +1031,7 @@ fn full_messages(events: &[UmpAt]) -> Vec<(u32, Vec<u8>)> {
 }
 
 /// A rig at 120 BPM and 48 kHz sending MTC at `fps`, stopped at `beat`.
-fn mtc_rig(fps: MtcRate, beat: f64) -> (Rig, Arc<TestTransport>, crate::MidiReceiver) {
+fn mtc_rig(fps: MtcRate, beat: f64) -> (Rig, Arc<TestTransport>, Collected) {
     let (rig, transport, cons) = master(Bpm::of(120.0), SampleRate::SR_48K);
     rig.set_send_mtc(true);
     rig.set_mtc_fps(fps);

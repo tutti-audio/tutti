@@ -414,7 +414,7 @@ fn the_buses_a_plugin_announces_are_the_buses_the_host_sees() {
         sink.lock().unwrap().push(format!("{event:?}"));
     })));
     let main = main_thread();
-    let (_processor, mut controller) = activate(ipc, 32);
+    let (_processor, controller) = activate(ipc, 32);
     let at_load = controller.layout();
     assert_eq!(at_load.input_widths(), vec![ChannelLayout::STEREO]);
 

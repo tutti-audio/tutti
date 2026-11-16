@@ -165,18 +165,6 @@ impl Layout {
         check_widths(self.total_inputs(), self.total_outputs())
     }
 
-    /// The input buses' widths, in order.
-    #[must_use]
-    pub fn input_widths(&self) -> BusChannels {
-        widths(&self.inputs)
-    }
-
-    /// The output buses' widths, in order.
-    #[must_use]
-    pub fn output_widths(&self) -> BusChannels {
-        widths(&self.outputs)
-    }
-
     /// The total input channel width across all buses.
     #[must_use]
     pub fn total_inputs(&self) -> usize {
@@ -187,6 +175,18 @@ impl Layout {
     #[must_use]
     pub fn total_outputs(&self) -> usize {
         width(&self.outputs)
+    }
+
+    /// The input buses' widths, in order.
+    #[must_use]
+    pub fn input_widths(&self) -> BusChannels {
+        widths(&self.inputs)
+    }
+
+    /// The output buses' widths, in order.
+    #[must_use]
+    pub fn output_widths(&self) -> BusChannels {
+        widths(&self.outputs)
     }
 }
 

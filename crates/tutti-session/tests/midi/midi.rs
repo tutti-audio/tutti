@@ -1,5 +1,5 @@
 //! MIDI in the session: clips, live inputs, the hardware
-//! input's routes and the hardware out, on an offline session the test
+//! input's routes and the outputs, on an offline session the test
 //! renders. A [`Tap`] stands in for a synth: it logs every MIDI event its
 //! event input receives with its absolute frame.
 
@@ -13,13 +13,15 @@ use tutti_session::Stamp;
 use std::time::{Duration, Instant};
 #[cfg(feature = "midi-hardware")]
 use tutti_graph::NodeKey;
-use tutti_graph::Refused;
+use tutti_graph::{Losses, Refused};
 #[cfg(feature = "midi-hardware")]
 use tutti_midi_hardware::{EndpointId, PortDirection};
 #[cfg(feature = "midi-hardware")]
 use tutti_midi_runtime::{CHANNELLESS_PORT, MIDI_INPUT_PORTS};
 use tutti_midi_runtime::{LIVE_INLET_CAPACITY, TimedMidiEvent};
-use tutti_types::{Beat, BeatDuration, Frame, SampleRate};
+#[cfg(feature = "midi-hardware")]
+use tutti_types::SampleRate;
+use tutti_types::{Beat, BeatDuration, Frame};
 #[cfg(feature = "midi-hardware")]
 use tutti_ump::MidiGroup;
 #[cfg(feature = "midi-hardware")]
@@ -31,7 +33,7 @@ use tutti_ump::{MpeChannels, MpeZoneSpan};
 use tutti_fixtures::midi;
 use tutti_session::{
     EventInPort, EventOutPort, Feeder, MIDI_OUT_DROP_REPORT, MidiError, MidiEvent, PHASES, PhaseCx,
-    Session, SessionEvent, UmpOut,
+    Session, SessionEvent, midi_sink,
 };
 #[cfg(feature = "midi-hardware")]
 use tutti_session::{MidiRouteRule, NoSuchMidiRoute, RouteDeclarer};
@@ -48,6 +50,7 @@ fn update_at(s: &mut Session, now: Instant) -> Vec<SessionEvent> {
     out
 }
 
+#[cfg(feature = "midi-hardware")]
 const RATE: f64 = 48_000.0;
 
 /// Plays the transport from beat 0 and renders `frames` frames in 512-frame
@@ -180,6 +183,7 @@ fn stopping_a_clip_that_is_not_there_names_the_target() {
 /// 2 file, which has no one timeline, is refused with that reason.
 #[test]
 fn a_file_plays_at_a_beat_and_a_format_2_file_is_refused() {
+    use tutti_midi_file::SmfDivision;
     use tutti_midi_file::{MidiFile, SmfFormat, Tick, Track};
     use tutti_ump::U7;
     let track = Track::new().note(
@@ -189,7 +193,12 @@ fn a_file_plays_at_a_beat_and_a_format_2_file_is_refused() {
         NoteNumber::of(62),
         U7::of(100),
     );
-    let file = MidiFile::smf(SmfFormat::SingleTrack, 480, vec![track.clone()]).unwrap();
+    let file = MidiFile::smf(
+        SmfFormat::SingleTrack,
+        SmfDivision::of(480),
+        vec![track.clone()],
+    )
+    .unwrap();
     let mut s = offline();
     let (synth, seen) = tap(&mut s);
     s.midi().play_file(synth, Beat(1.0), &file).unwrap();
@@ -197,7 +206,8 @@ fn a_file_plays_at_a_beat_and_a_format_2_file_is_refused() {
     roll(&s, 49_000);
     assert_eq!(note_ons(&seen), vec![(48_000, 62)]);
 
-    let sequential = MidiFile::smf(SmfFormat::Sequential, 480, vec![track]).unwrap();
+    let sequential =
+        MidiFile::smf(SmfFormat::Sequential, SmfDivision::of(480), vec![track]).unwrap();
     assert!(matches!(
         s.midi().play_file(synth, Beat(0.0), &sequential),
         Err(MidiError::File(tutti_midi_file::Error::NoCommonTimeline(_)))
@@ -487,44 +497,59 @@ impl tutti_midi_runtime::MidiOut for CountingSink {
     }
 }
 
-/// The builder's clock, enabled, rolling for half a second: its Beat Clock
-/// reaches the hardware out node.
-fn clocked() -> Session {
+/// A sink that takes nothing: every event it is handed is refused.
+struct Refusing;
+impl tutti_midi_runtime::MidiOut for Refusing {
+    fn queue_timed(&self, batch: &[tutti_midi_runtime::Outgoing]) -> tutti_midi_runtime::Taken {
+        tutti_midi_runtime::Taken::within(batch, 0)
+    }
+}
+
+/// The builder's clock, enabled, rolling for half a second into the
+/// `midi_sink` entry declared on `sink`: its Beat Clock reaches the sink's node.
+fn clocked(sink: Arc<dyn tutti_midi_runtime::MidiOut>) -> Session {
     let mut s = offline();
-    let _ = s.update(); // the builder's nodes, committed
+    s.pool(midi_sink("out", sink)).expect("declares");
+    let _ = s.update(); // the sink's node, loaded and committed
     s.midi_nodes().unwrap().clock_master.set_enabled(true);
     roll(&s, 24_000);
     s
 }
 
-/// **The hardware out drains to the output with stamping off**: the
-/// `MidiOut` phase routes the clock's ticks to the output whether or not
-/// it JR-stamps (stamping gates timestamps, not delivery), and with no
-/// output it counts them as dropped and says so when the count rises
-/// (rate-limited: `dropped_ticks_are_reported_at_most_once_a_second`).
+/// **A sink is drained to with stamping off**: the `MidiOut` phase hands the
+/// sink the clock's ticks whether or not it JR-stamps (stamping gates
+/// timestamps, not delivery), and none is counted lost.
 #[test]
-fn the_hardware_out_drains_with_stamping_off() {
-    let mut s = clocked();
+fn a_sink_is_drained_to_stamping_off() {
     let count = Arc::new(AtomicUsize::new(0));
-    s.midi().set_hardware_out(Some(UmpOut::new(
-        Box::new(CountingSink(Arc::clone(&count))),
-        SampleRate::of(RATE),
-    )));
+    let mut s = clocked(Arc::new(CountingSink(Arc::clone(&count))));
     let events = s.update();
     assert!(
         count.load(Ordering::SeqCst) > 0,
         "the clock reached the sink, unstamped"
     );
+    assert_eq!(s.midi().out_drops(), 0);
+    assert_eq!(s.midi_sink(&"out").unwrap().losses(), Losses::NONE);
     assert!(
         !events
             .iter()
             .any(|e| matches!(e, SessionEvent::Midi(MidiEvent::OutputDropped { .. })))
     );
+}
 
-    let mut s = clocked();
+/// **A sink that refuses events has them counted, per sink and in total, and
+/// the session says so when the count rises**, not on every update.
+#[test]
+fn a_refusing_sink_counts_what_it_refused_and_says_so() {
+    let mut s = clocked(Arc::new(Refusing));
     let events = s.update();
     let dropped = s.midi().out_drops();
-    assert!(dropped > 0, "no output: the ticks are dropped, counted");
+    assert!(dropped > 0, "the ticks are refused, counted");
+    assert_eq!(
+        s.midi_sink(&"out").unwrap().losses(),
+        Losses::refused(dropped),
+        "the sink's share is all of it"
+    );
     assert!(
         events
             .iter()
@@ -539,14 +564,14 @@ fn the_hardware_out_drains_with_stamping_off() {
     );
 }
 
-/// **A clock dropping ticks with no output is reported once per
+/// **A clock whose ticks a sink refuses is reported once per
 /// `MIDI_OUT_DROP_REPORT`, not every update.** The first update that drops
 /// reports the total; later updates within the second drop more and report
 /// nothing; the first update a second after the report reports the new
 /// total.
 #[test]
 fn dropped_ticks_are_reported_at_most_once_a_second() {
-    let mut s = clocked();
+    let mut s = clocked(Arc::new(Refusing));
     let now = Instant::now();
     let drops = |events: &[SessionEvent]| -> Vec<u64> {
         events
@@ -637,12 +662,6 @@ fn device_events(events: &[SessionEvent]) -> Vec<(&'static str, String)> {
             _ => None,
         })
         .collect()
-}
-
-/// The session's OS MIDI layer, read.
-#[cfg(feature = "midi-hardware")]
-fn hw(s: &Session) -> &tutti_midi_hardware::MidiSession {
-    s.testing_midi_io().expect("the OS MIDI layer")
 }
 
 #[cfg(feature = "midi-hardware")]
@@ -899,23 +918,28 @@ fn a_dead_device_watch_is_reported_once() {
 }
 
 /// **An app holding a session restores a remembered device through it.** The
-/// fake OS names devices as ALSA does, so the saved device comes back as a
-/// same-name match, and as `Missing` once it is gone.
+/// fake OS names devices as ALSA does, so a `midi_input` of the saved device
+/// binds the present device as a same-name match and reads `Live`, and reads
+/// `Lost` once it is gone.
 #[cfg(feature = "midi-hardware")]
 #[test]
 fn a_remembered_device_resolves_through_the_session() {
-    use tutti_midi_hardware::Resolved;
+    use tutti_session::{PortCause, Presence, midi_input};
     let (mut s, fake) = hot_plug_session();
     plug(&fake, 1, "Keys", PortDirection::Input);
     let _ = s.update();
-    let saved = hw(&s).devices().list().remove(0);
+    let saved = s.midi().devices().remove(0);
+    s.pool(midi_input("keys", saved)).expect("declares");
+    let _ = s.update();
+    let port = s.midi_input(&"keys").expect("loaded");
     assert_eq!(
-        hw(&s).devices().resolve(&saved),
-        Resolved::SameName(saved.clone())
+        port.presence(),
+        Presence::Live,
+        "bound to the one of its name"
     );
     fake.unplug(EndpointId::from_raw(1));
     let _ = s.update();
-    assert_eq!(hw(&s).devices().resolve(&saved), Resolved::Missing);
+    assert_eq!(port.presence(), Presence::Lost(PortCause::Unplugged));
 }
 
 /// **The feeds are partial, as audio's declarations are: an edge a host

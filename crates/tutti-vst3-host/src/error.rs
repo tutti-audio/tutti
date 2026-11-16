@@ -8,6 +8,7 @@ use thiserror::Error;
 /// Re-exported from `tutti-plugin-types`, which shares it across all plugin
 /// formats; VST3 uses every phase.
 pub use tutti_plugin_types::LoadStage;
+use tutti_plugin_types::StateFrameError;
 
 /// Convenience alias for `Result<T, Vst3Error>`.
 pub type Result<T> = std::result::Result<T, Vst3Error>;
@@ -107,6 +108,11 @@ pub enum Vst3Error {
     /// format, or the plugin rejected the stream.
     #[error("State error: {0}")]
     StateError(String),
+
+    /// A saved state carries this host's container magic and the container is malformed.
+    /// Which way, is the [`StateFrameError`] variant.
+    #[error("State error: {0}")]
+    StateFrame(#[from] StateFrameError),
 }
 
 #[cfg(test)]

@@ -18,10 +18,10 @@
 //! [`MidiInput`](tutti::midi::MidiInput) lists), which needs a peer device.
 
 use tutti::midi::{self, MidiRouteRule, TakePlacement};
-use tutti::midi_file::{FileEvent, SmfFormat};
+use tutti::midi_file::{FileEvent, SmfDivision, SmfFormat};
 use tutti::midi_protocol::{MpeMode, MpeZoneConfig, MpeZones, PitchBendSensitivity};
 use tutti::polysynth::{PolySynth, SynthConfig};
-use tutti::ump::U7;
+use tutti::ump::{TicksPerQuarterNote, U7};
 use tutti::{
     AddedInstrument, Beat, ChannelLayout, Error, EventCapacity, Frame, InterleavedMut, MaxBlock,
     Message, MidiChannel, MidiFile, MidiGroup, NoteNumber, NoteVelocity, SampleRate, Samples,
@@ -31,7 +31,8 @@ use tutti_ump::Voice1;
 
 const RATE: SampleRate = SampleRate::SR_48K;
 const BLOCK: usize = 512;
-const TPQ: u16 = 480;
+const DIVISION: TicksPerQuarterNote = TicksPerQuarterNote::of(480);
+const SMF_DIVISION: SmfDivision = SmfDivision::of(480);
 
 /// What the run found, for the test below to hold it to.
 struct Outcome {
@@ -75,7 +76,7 @@ fn session() -> Result<Session, Error> {
 fn file() -> Result<MidiFile, Box<dyn std::error::Error>> {
     let track: Track = (0..4u8)
         .flat_map(|n| {
-            let at = Tick::quarters(n.into(), TPQ);
+            let at = Tick::quarters(n.into(), DIVISION);
             let key = NoteNumber::of(60 + 2 * n);
             let (on, off): (FileEvent, FileEvent) = (
                 Message::midi1(MidiChannel::FIRST, Voice1::note_on(key, U7::of(100))).into(),
@@ -84,7 +85,7 @@ fn file() -> Result<MidiFile, Box<dyn std::error::Error>> {
             [(at, on), (at + 240, off)]
         })
         .collect();
-    let built = MidiFile::smf(SmfFormat::SingleTrack, TPQ, vec![track])?;
+    let built = MidiFile::smf(SmfFormat::SingleTrack, SMF_DIVISION, vec![track])?;
     Ok(MidiFile::from_bytes(&built.to_bytes()?)?)
 }
 

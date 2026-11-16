@@ -359,6 +359,15 @@ pub struct Graph {
     output: Option<Placed>,
     /// The last widening [`widen_outputs`](Self::widen_outputs) refused.
     widen_refusal: Option<tutti_graph::RootError>,
+    /// Why the declaration that waited for a root crossfade, or a hard one
+    /// made through [`harden_root`](Self::harden_root), could not be applied;
+    /// the session takes it as its declaration refusal
+    /// ([`take_apply_refusal`](Self::take_apply_refusal)). A slot of its own,
+    /// so a widening neither hides nor erases it.
+    apply_refusal: Option<tutti_graph::RootError>,
+    /// A root declared while a root crossfade ran, applied when it ends:
+    /// the newest declaration (`Some(None)` takes the declaration back).
+    pending_root: Option<Option<tutti_types::ChannelTopology>>,
     /// The hosted plugins' records, by node (`plugin.rs`): kept here so a
     /// crossfade to another plugin and a removal update them where they
     /// happen.
@@ -523,6 +532,8 @@ impl Graph {
             root: None,
             output: None,
             widen_refusal: None,
+            apply_refusal: None,
+            pending_root: None,
             #[cfg(feature = "plugin")]
             plugins: BTreeMap::new(),
             #[cfg(feature = "plugin")]
@@ -3350,22 +3361,90 @@ impl Graph {
     }
 
     /// Makes the root declaration last made a cut: the commit that carries
-    /// it renders no old root.
+    /// it renders no old root. A declaration that waits for a running
+    /// crossfade is applied now instead, and is the cut.
     pub(crate) fn harden_root(&mut self) {
-        self.editor.set_root_fade(None);
+        match self.pending_root.take() {
+            Some(root) => self.apply_declared(root, true),
+            None => self.editor.set_root_fade(None),
+        }
+    }
+
+    /// Whether a root declaration waits for the running crossfade to end.
+    pub(crate) fn root_pending(&self) -> bool {
+        self.pending_root.is_some()
+    }
+
+    /// The refusal of a declaration when it was applied, taken: the session
+    /// holds it as its own. See [`apply_refusal`](Self).
+    pub(crate) fn take_apply_refusal(&mut self) -> Option<tutti_graph::RootError> {
+        self.apply_refusal.take()
+    }
+
+    /// The refusal of a declaration when it was applied, not yet taken.
+    pub(crate) fn apply_refusal(&self) -> Option<tutti_graph::RootError> {
+        self.apply_refusal
+    }
+
+    /// Applies the declaration that waited, once the crossfade it waited for
+    /// is over: the spec, the readers and the announcement change together.
+    /// A refusal now (the device no longer places it, the roots in flight are
+    /// at their limit) is [`take_apply_refusal`](Self::take_apply_refusal)'s.
+    fn apply_pending_root(&mut self) {
+        if self.editor.root_fade_running() {
+            return;
+        }
+        if let Some(root) = self.pending_root.take() {
+            self.apply_declared(root, false);
+        }
+    }
+
+    fn apply_declared(&mut self, root: Option<tutti_types::ChannelTopology>, hard: bool) {
+        let applied = self
+            .check_declaration(&root)
+            .and_then(|width| self.apply_root(root, hard, width));
+        if let Err(e) = applied {
+            self.apply_refusal = Some(e);
+        }
     }
 
     /// Declares the root's topology. A declaration that changes it is the next
     /// root, and the commit that carries it crossfades the old root's outputs
     /// into the new root's over the declick length (`Editor::set_root_fade`),
     /// unless `hard`: the new root takes over at the commit's block.
+    ///
+    /// While a root crossfade runs, a declaration that is not `hard` is held
+    /// (checked now, applied by [`collect`](Self::collect) once the fade is
+    /// over, the newest replacing an older one): the spec, the readers and the
+    /// root in force do not change until then. A declaration refused at the
+    /// call drops nothing: the one waiting still applies. The fade is over
+    /// when the executor has rendered it, so a held declaration also waits
+    /// while no blocks render, and travels with the graph through a restart,
+    /// to be checked against the device it finds when it is applied.
     pub(crate) fn declare_root(
         &mut self,
         root: Option<tutti_types::ChannelTopology>,
         hard: bool,
     ) -> Result<(), tutti_graph::RootError> {
+        let width = self.check_declaration(&root)?;
+        if !hard && self.editor.root_fade_running() {
+            self.pending_root = Some(root);
+            self.apply_refusal = None;
+            return Ok(());
+        }
+        self.pending_root = None;
+        self.apply_refusal = None;
+        self.apply_root(root, hard, width)
+    }
+
+    /// The width of the root `root` declares, if it can be placed on the
+    /// device: [`declare_root`](Self::declare_root)'s checks.
+    fn check_declaration(
+        &self,
+        root: &Option<tutti_types::ChannelTopology>,
+    ) -> Result<usize, tutti_graph::RootError> {
         let placed = self.placed_topology();
-        let width = match &root {
+        Ok(match root {
             Some(root) => {
                 Self::check_root(root, placed.as_ref())?;
                 usize::from(root.width().count())
@@ -3385,7 +3464,15 @@ impl Graph {
                 }
                 self.outputs()
             }
-        };
+        })
+    }
+
+    fn apply_root(
+        &mut self,
+        root: Option<tutti_types::ChannelTopology>,
+        hard: bool,
+        width: usize,
+    ) -> Result<(), tutti_graph::RootError> {
         // A changed declaration is the next root: its folds are published
         // first, so the commit that carries its id finds them. The engine
         // checks the device again, and a refusal there leaves the graph as it
@@ -3549,6 +3636,7 @@ impl Graph {
         if self.editor.settle_fades() {
             self.edited = true;
         }
+        self.apply_pending_root();
     }
 
     /// The output ports that lost events since the last call

@@ -4,7 +4,7 @@ use crate::guard::Out;
 use std::collections::HashMap;
 use std::ffi::{CStr, c_void};
 use std::sync::Arc;
-use tutti_plugin_types::ffi_guard;
+use tutti_plugin_types::{ffi_guard, write_utf16_units};
 
 use parking_lot::Mutex;
 use vst3::Steinberg::{
@@ -53,6 +53,9 @@ fn key_from_ptr(key: AttrID) -> Option<String> {
     }
     // SAFETY: `key` is non-null (checked above); the ABI passes an `AttrID` that is a NUL-
     // terminated string valid for the call.
+    // Strict, not lossy: a key names an attribute, and lossy decoding would give two
+    // distinct invalid keys the same name (`U+FFFD`), storing one under the other's. A key
+    // that is not UTF-8 names nothing and is refused.
     unsafe { CStr::from_ptr(key).to_str().ok().map(|s| s.to_string()) }
 }
 
@@ -168,17 +171,11 @@ impl IAttributeListTrait for AttributeList {
                     if max_chars == 0 {
                         return kInvalidArgument;
                     }
-                    let copy_len = v.len().min(max_chars);
-                    // SAFETY: `string` is non-null and valid for `max_chars`
-                    // units (`size_in_bytes / 2`), and `copy_len` is at most that.
-                    unsafe { std::ptr::copy_nonoverlapping(v.as_ptr(), string, copy_len) };
-                    // A full copy carries the stored value's terminator; a
-                    // truncated one lost it, so the last slot gets one back.
-                    if v.len() > max_chars {
-                        // SAFETY: slot `max_chars - 1` is inside the buffer
-                        // (`max_chars` is at least 1, checked above).
-                        unsafe { *string.add(max_chars - 1) = 0 };
-                    }
+                    // SAFETY: `string` is non-null and the ABI has it valid for writes of
+                    // `size_in_bytes` bytes, which is `max_chars` units, for the call.
+                    let out = unsafe { std::slice::from_raw_parts_mut(string, max_chars) };
+                    // Cut without splitting a surrogate pair, and terminated.
+                    write_utf16_units(out, v);
                     kResultOk
                 }
                 _ => kInvalidArgument,

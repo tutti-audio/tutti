@@ -28,7 +28,7 @@ use tutti_graph::UmpAt;
 
 use tutti_graph::Offset;
 use tutti_midi_device::TICK_HZ;
-use tutti_types::{Frame, SampleRate, Samples};
+use tutti_types::{Frame, SampleRate, Samples, Seconds};
 use tutti_ump::{Message, Ump, Utility};
 
 /// Converts sample positions to 16-bit JR ticks at a fixed sample rate. Cheap,
@@ -144,6 +144,9 @@ pub const JR_CLOCK_INTERVAL: Duration = Duration::from_millis(100);
 pub struct JrClockEmitter {
     clock: JrClock,
     sample_rate: SampleRate,
+    /// The configured period, which [`interval`](Self::interval) counts in
+    /// frames at the current rate.
+    period: Duration,
     interval: Samples,
     /// Absolute frame of the last emitted clock. `None` until the
     /// first, which is due immediately — a receiver needs a reference before it
@@ -173,7 +176,8 @@ impl JrClockEmitter {
         Self {
             clock: JrClock::new(sample_rate),
             sample_rate,
-            interval: Samples((interval.as_secs_f64() * sample_rate.get()).round() as usize),
+            period: interval,
+            interval: Seconds::new(interval.as_secs_f64()).to_samples(sample_rate),
             last_emit: None,
         }
     }
@@ -286,6 +290,31 @@ impl JrStream {
         }
         self.stamper.stamp_block(events, self.origin, out);
         self.origin += block;
+    }
+
+    /// This stream at another sample rate: the stamper and the clock count
+    /// ticks at `sample_rate`, the origin and the last clock's frame are
+    /// converted to its frames (rounded to the nearest frame), and the clock's
+    /// interval is its period counted again at `sample_rate`. JR time carries on
+    /// from where it stood, within half a frame, when the graph is re-rated.
+    #[must_use]
+    pub fn at_rate(self, sample_rate: impl Into<SampleRate>) -> Self {
+        let sample_rate = sample_rate.into();
+        let old = self.stamper.clock.sample_rate;
+        let convert = |frame: Frame| {
+            Frame::new((frame.get() as f64 * sample_rate.get() / old.get()).round() as u64)
+        };
+        Self {
+            stamper: JrStamper::new(sample_rate),
+            origin: convert(self.origin),
+            emitter: self.emitter.map(|emitter| JrClockEmitter {
+                clock: JrClock::new(sample_rate),
+                sample_rate,
+                period: emitter.period,
+                interval: Seconds::new(emitter.period.as_secs_f64()).to_samples(sample_rate),
+                last_emit: emitter.last_emit.map(convert),
+            }),
+        }
     }
 
     /// The absolute frame the next [`stamp`](Self::stamp) will start from.

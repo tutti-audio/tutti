@@ -1,20 +1,6 @@
 use super::*;
 use vst3::Steinberg::kResultOk;
 
-/// A string longer than the field is cut to 63 bytes and still terminated;
-/// a short one is copied whole.
-#[test]
-fn fill_char8_64_truncates_and_terminates() {
-    let mut dst = [1i8; 64];
-    fill_char8_64(&mut dst, &"x".repeat(100));
-    assert!(dst[..63].iter().all(|&b| b == b'x' as i8));
-    assert_eq!(dst[63], 0);
-
-    let mut dst = [1i8; 64];
-    fill_char8_64(&mut dst, "abc");
-    assert_eq!(&dst[..4], &[b'a' as i8, b'b' as i8, b'c' as i8, 0]);
-}
-
 /// `kNotImplemented` is a successful state call, a refusal is not.
 #[test]
 fn a_state_call_that_is_not_implemented_is_not_a_failure() {

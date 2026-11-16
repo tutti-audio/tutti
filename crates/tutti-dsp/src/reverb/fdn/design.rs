@@ -31,7 +31,7 @@ use crate::reverb::network::{
     Absorption, Fdn, Gains, Inline, Line, LineModulation, MAX_LINES, Matrix, Network,
     NetworkCapacity, OutputMap, Stage, pre_delay_frames,
 };
-use crate::{Capacity, MaxDecay, Ring, TAIL_FLOOR};
+use crate::{MaxDecay, Ring, TAIL_FLOOR};
 
 /// The line lengths at 44.1 kHz for a room size of 0.5 (the scale is
 /// `0.5 + size`), values near primes, so the delays share few factors.
@@ -63,7 +63,7 @@ pub const MAX_PRE_DELAY: Seconds = Seconds(0.5);
 const MAX_MODULATION: SampleSpan = SampleSpan::of(8.0);
 /// The modulation rates a control may ask for.
 const RATES: (f32, f32) = (0.05, 5.0);
-/// The shortest RT60 a control may ask for.
+/// The shortest RT60 a control may ask for, and the least a [`MaxDecay`] holds.
 pub const MIN_DECAY: Seconds = Seconds(0.05);
 /// The widest stereo image.
 const MAX_WIDTH: f32 = 2.0;
@@ -140,22 +140,18 @@ impl FdnLayout {
     const LINES: usize = 8;
 
     /// A design of `lines` lines (2 to 16, even: half feed each ear), RT60s up
-    /// to `max_decay` (at most [`MaxDecay::CAP`]), which holds its tail
-    /// on a freeze if `freezable`. `None` when the figures are out of range.
+    /// to `max_decay`, which holds its tail on a freeze if `freezable`. `None`
+    /// when `lines` is out of range (`max_decay` is range-checked by its type).
     ///
     /// **A design that can freeze has an unbounded tail reach**, so a node
     /// of it never has a finite tail to declare to an export (which spends the
     /// whole cap): freeze is opt-in for that reason.
     #[must_use]
-    pub fn new(lines: usize, max_decay: Seconds, freezable: bool) -> Option<Self> {
-        let ok = (2..=LENGTHS.len()).contains(&lines)
-            && lines.is_multiple_of(2)
-            && max_decay.get().is_finite()
-            && max_decay.get() >= MIN_DECAY.get()
-            && max_decay.get() <= MaxDecay::CAP.get();
+    pub fn new(lines: usize, max_decay: MaxDecay, freezable: bool) -> Option<Self> {
+        let ok = (2..=LENGTHS.len()).contains(&lines) && lines.is_multiple_of(2);
         ok.then_some(Self {
             lines,
-            max_decay,
+            max_decay: max_decay.get(),
             freezable,
         })
     }

@@ -54,7 +54,7 @@ pub(crate) const CLIP_FILE_MAGIC: [u8; 8] = *b"SMF2CLIP";
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ParsedClip {
     /// Ticks per quarter note (the DCTPQ), never zero.
-    pub(crate) ticks_per_quarter: u16,
+    pub(crate) ticks_per_quarter: TicksPerQuarterNote,
     /// The header's messages after the file header, as `(tick, packet)`: the
     /// leading Set Profile On packets at 0, then each message behind its DCS,
     /// ticks counted from the DCTPQ (the header's own clock, which runs

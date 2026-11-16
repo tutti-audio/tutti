@@ -50,7 +50,7 @@
 //! Clock or JR Timestamp a device sends anyway; with
 //! [`JitterReduction`](InputTiming::JitterReduction) TXJR is asked for, and a
 //! device that settles on it has its events placed by its JR Timestamps. JR on
-//! the output side is the session's `UmpOut` stamping, which follows the
+//! the output side is the session's output stamping, which follows the
 //! configuration the negotiation settled (`rx_jr`), so a device that is not
 //! asked is not sent it, and one that turns it on itself is.
 //!

@@ -46,6 +46,22 @@ fn a_time_before_the_anchor_is_extrapolated_back_until_frame_zero() {
     assert_eq!(map.frame_at(t0 - ms(21)), None);
 }
 
+// Before the anchor the offset rounds away from zero too: 10 417 ns back is
+// -0.5000 frame and lands one frame earlier; 10 416 ns back stays on the anchor.
+#[test]
+fn a_time_before_the_anchor_rounds_its_offset_away_from_zero() {
+    let t0 = base();
+    let map = map_at(t0, 4);
+    assert_eq!(
+        map.frame_at(t0 - Duration::from_nanos(10_417)),
+        Some(Frame::new(3))
+    );
+    assert_eq!(
+        map.frame_at(t0 - Duration::from_nanos(10_416)),
+        Some(Frame::new(4))
+    );
+}
+
 // Half a frame rounds away from zero: at 48 kHz a frame is 20 833.33 ns, so
 // 10 417 ns is 0.5000 frame and 10 416 ns is under half.
 #[test]

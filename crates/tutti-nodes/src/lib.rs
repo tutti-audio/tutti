@@ -154,7 +154,7 @@
 //! ## Features
 //!
 //! `default = []`. The FFT convolution reverb is not a feature: `ConvolverNode` at any width, with
-//! `IrChannelConfig`, over `tutti_dsp::Convolver`, whose FFT is
+//! `IrLayout`, over `tutti_dsp::Convolver` and `MatrixConvolver`, whose FFT is
 //! `tutti_dsp::RealFft` (scalar, so the output is CPU-independent). An IR's
 //! spectra are stored once (`tutti_dsp::IrSpectra`, behind an `Arc`) and shared
 //! by every channel and every fork of the graph.
@@ -176,8 +176,8 @@
 //! node holds none. Before `prepare` it declares no latency and an unknown tail, which the
 //! graph reads again after it, and renders silence. A setting that names a frequency is
 //! checked for what a rate does not change (finite, above 0, in order), and a frequency
-//! past the prepared rate's Nyquist is held under it, not refused. The nodes outside the
-//! families ([`LfoNode`], [`ConvolverNode`]) take their rate from `prepare` too. To drive a node
+//! past the prepared rate's Nyquist is held under it, not refused. The nodes that are not
+//! kernels ([`LfoNode`], [`ConvolverNode`]) take their rate from `prepare` too. To drive a node
 //! outside a graph, prepare it first (`tutti_graph::Solo`, or
 //! `tutti_graph::contract::prepared` in tests).
 //!
@@ -305,12 +305,9 @@ pub use strip::BusStripNode;
 // The one node over an effect's algorithm and state: the driver and the trait an
 // algorithm implements to run in it.
 mod kernel;
-pub use kernel::{ControlLanes, Kernel, KernelNode};
+pub use kernel::{ControlLanes, Kernel, KernelNode, MAX_LANES};
 
-// The reverb: any `tutti_dsp::Family` as a node.
-mod reverb;
 pub use params::{At, Control, ControlRead, ControlSet, ControlValid, Params};
-pub use reverb::{FamilyNode, NodeFamily, Rings, TailCeiling, TailCeilingError};
 
 // Freeverb as a `KernelNode`, and the send (mono in, stereo wet out) the SoundFont
 // player's General MIDI setup uses.
@@ -321,8 +318,8 @@ pub use reverb_freeverb::{FreeverbKernel, FreeverbNode};
 mod reverb_fdn;
 pub use reverb_fdn::{FdnKernel, FdnNode};
 
-// The families and controls that sit in a node's signature.
-pub use tutti_dsp::{FdnControls, FdnLayout, FreeverbControls};
+// The banks' controls that sit in a node's signature.
+pub use tutti_dsp::{FdnControls, FdnLayout, FreeverbControls, MaxDecay};
 
 // The spatial panners: VBAP speaker panning and binaural HRTF rendering.
 mod spatial;
@@ -351,7 +348,7 @@ mod reconcile;
 pub use reconcile::{Applied, Feed, ModHost, Modulation, ReconcileError, Target};
 mod convolution;
 pub use convolution::{
-    ConvolverError, ConvolverNode, IrChannelConfig, generate_room_ir, generate_room_ir_into,
+    ConvolverError, ConvolverNode, IrLayout, PortSide, generate_room_ir, generate_room_ir_into,
     generate_test_ir, generate_test_ir_into,
 };
 

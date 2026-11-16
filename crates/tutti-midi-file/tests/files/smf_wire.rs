@@ -4,10 +4,14 @@
 
 use crate::common::{note, track, unsorted};
 use crate::support::{Division, RawEvent, build_smf, write_vlq};
-use tutti_midi_file::{Error, FileEvent, Meta, MidiFile, SmfFormat, SmfParseError, TextKind, Tick};
-use tutti_ump::{Message, Voice1};
+use tutti_midi_file::{
+    Error, FileEvent, Meta, MidiFile, SmfDivision, SmfFormat, SmfParseError, TextKind, Tick,
+};
+use tutti_ump::{Message, TicksPerQuarterNote, Voice1};
 
 const TPQ: u16 = 96;
+const DIVISION: TicksPerQuarterNote = TicksPerQuarterNote::of(TPQ);
+const SMF_DIVISION: SmfDivision = SmfDivision::of(TPQ);
 
 fn file(events: Vec<RawEvent>) -> Vec<u8> {
     build_smf(0, Division::Metrical(TPQ), &[events])
@@ -74,7 +78,7 @@ fn a_quantity_writes_to_its_bytes() {
     for (value, bytes) in QUANTITIES {
         let written = MidiFile::smf(
             SmfFormat::SingleTrack,
-            TPQ,
+            SMF_DIVISION,
             vec![unsorted(vec![(
                 Tick(u64::from(value)),
                 FileEvent::Meta(Meta::Text {
@@ -250,7 +254,7 @@ fn a_longer_header_is_read() {
     bytes.extend_from_slice(&[0x00, 0xFF, 0x2F, 0x00]);
     assert_eq!(
         MidiFile::from_bytes(&bytes).unwrap().ticks_per_quarter(),
-        TPQ
+        DIVISION
     );
 }
 
@@ -334,7 +338,7 @@ fn an_end_of_track_that_is_not_last_is_refused() {
 
 fn track_body(events: Vec<(u64, FileEvent)>) -> Vec<u8> {
     let track = track(events);
-    let bytes = MidiFile::smf(SmfFormat::SingleTrack, TPQ, vec![track])
+    let bytes = MidiFile::smf(SmfFormat::SingleTrack, SMF_DIVISION, vec![track])
         .unwrap()
         .to_bytes()
         .unwrap();
@@ -389,8 +393,13 @@ fn a_written_file_reads_back_equal() {
         (0x0FFF_FFFF, note(0, 65)),
     ];
     let track = track(events);
-    let file = MidiFile::smf(SmfFormat::Parallel, TPQ, vec![track.clone(), track]).unwrap();
+    let file = MidiFile::smf(
+        SmfFormat::Parallel,
+        SMF_DIVISION,
+        vec![track.clone(), track],
+    )
+    .unwrap();
     let back = MidiFile::from_bytes(&file.to_bytes().unwrap()).unwrap();
     assert_eq!(back.tracks(), file.tracks());
-    assert_eq!(back.ticks_per_quarter(), TPQ);
+    assert_eq!(back.ticks_per_quarter(), DIVISION);
 }

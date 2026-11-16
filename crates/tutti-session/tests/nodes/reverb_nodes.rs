@@ -2,7 +2,7 @@
 //! FDN's three decays, and the tail each declares to the graph (the FDN's
 //! unbounded where it can freeze).
 
-use tutti_nodes::{FdnControls, FdnLayout, FdnNode};
+use tutti_nodes::{FdnControls, FdnLayout, FdnNode, MaxDecay};
 use tutti_session::{ParamError, Session};
 use tutti_types::MaxBlock;
 use tutti_types::{Samples, Seconds, Tail, UnitAddr, UnitParam};
@@ -20,7 +20,7 @@ fn session() -> Session {
 fn set_param_reaches_the_decay_it_names() {
     let mut s = session();
     let (node, cells) = s.graph().add::<FdnNode>(FdnNode::live(
-        FdnLayout::new(8, Seconds(8.0), true).unwrap(),
+        FdnLayout::new(8, MaxDecay::DEFAULT, true).unwrap(),
         FdnControls::DEFAULT,
     ));
     let at = |i| UnitAddr::new(UnitParam::Decay, i);
@@ -50,7 +50,7 @@ fn the_graph_sees_each_reverbs_ceiling() {
         .graph()
         .add::<FdnNode>(FdnNode::live(FdnLayout::default(), FdnControls::DEFAULT));
     let (frozen, _) = s.graph().add::<FdnNode>(FdnNode::live(
-        FdnLayout::new(8, Seconds(8.0), true).unwrap(),
+        FdnLayout::new(8, MaxDecay::DEFAULT, true).unwrap(),
         FdnControls::DEFAULT,
     ));
     let _ = s.update();

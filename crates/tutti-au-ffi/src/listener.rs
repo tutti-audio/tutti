@@ -106,7 +106,8 @@ unsafe extern "C" {
     /// A host never needs this for parameter values — that is what
     /// [`AUParameterSet`] is for. It exists here solely to *emit gestures*,
     /// which is otherwise the exclusive province of a plugin's own editor; see
-    /// [`emit_gesture`].
+    /// `emit_gesture`, the one caller, which the `testing` feature builds.
+    #[cfg(feature = "testing")]
     fn AUEventListenerNotify(
         sending_listener: AUEventListenerRef,
         sending_object: *mut c_void,
@@ -634,12 +635,15 @@ pub fn notify_parameter(
 
 /// Emits a gesture boundary to every listener registered on `unit`.
 ///
-/// Gestures normally originate in the *plugin's own editor* — the AU emits them
-/// when the user grabs and releases a control, and receiving them is this
-/// crate's job. This is the other direction, with two real uses:
+/// Gestures originate in the *plugin's own editor* — the AU emits them when the
+/// user grabs and releases a control, and receiving them is this crate's job. A
+/// test cannot drive an editor, so this stands in for one: it exercises the
+/// whole receive path. The host itself emits no gesture.
 ///
 /// # Errors
 /// Returns the `OSStatus` if AudioToolbox refuses.
+#[cfg(feature = "testing")]
+#[doc(hidden)]
 pub fn emit_gesture(
     unit: &Unit,
     id: AudioUnitParameterID,

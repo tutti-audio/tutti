@@ -33,12 +33,12 @@ fn convolver_process_is_allocation_free() {
     gate(ConvolverNode::new(&ir, 512));
 }
 #[test]
-fn stereo_convolver_process_is_allocation_free() {
+fn dual_mono_convolver_process_is_allocation_free() {
     use tutti_nodes::{ConvolverNode, generate_test_ir};
 
     let ir_l = generate_test_ir(2048, Seconds::new(0.3), SampleRate::SR_48K);
     let ir_r = generate_test_ir(2048, Seconds::new(0.4), SampleRate::SR_48K);
-    gate(ConvolverNode::stereo(&ir_l, &ir_r, 512));
+    gate(ConvolverNode::per_channel(&[&ir_l, &ir_r], 512).unwrap());
 }
 
 /// The incremental accumulation runs in every block between two partition

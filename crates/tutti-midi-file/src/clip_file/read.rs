@@ -280,14 +280,14 @@ fn dctpq_after_gap(input: &mut Input<'_>) -> Res<(Gap, Option<TicksPerQuarterNot
 /// The DCTPQ: it has a preceding Delta Clockstamp (DCS) of 0 ticks
 /// (M2-116 sections 3.2.1 and 6), after the Set Profile On messages and before any other, and
 /// declaring ticks.
-fn dctpq(input: &mut Input<'_>) -> Res<u16> {
+fn dctpq(input: &mut Input<'_>) -> Res<TicksPerQuarterNote> {
     let fault = fault_before_dctpq(input);
     let (before, ticks) = alt((dctpq_after_gap, halt(fault))).parse_next(input)?;
     if before.dcs != Some(0) || before.ticks() != 0 {
         return halt(Fault::DctpqDelta).parse_next(input);
     }
     match ticks {
-        Some(ticks) => Ok(ticks.get()),
+        Some(ticks) => Ok(ticks),
         None => halt(Fault::ZeroDctpq).parse_next(input),
     }
 }
@@ -413,7 +413,7 @@ fn second_start_of_clip(input: &mut Input<'_>) -> Res<Timed> {
 
 /// A clip as the grammar reads it.
 struct Clip {
-    ticks_per_quarter: u16,
+    ticks_per_quarter: TicksPerQuarterNote,
     preamble: Vec<Ump>,
     header: Vec<Timed>,
     /// The ticks of the DCS before Start of Clip.

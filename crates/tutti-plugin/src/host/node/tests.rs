@@ -189,7 +189,7 @@ fn handle_with_mock_server(
         id: "test.plugin".into(),
         name: "Test Plugin".into(),
         vendor: String::new(),
-        version: String::new(),
+        version: tutti_plugin_types::PluginVersion::Absent,
         class: PluginClass::Unknown,
         editor: EditorPresence::Present,
         measured: None,
@@ -280,7 +280,7 @@ fn handle_with_multi_reply_server(
         id: "test.plugin".into(),
         name: "Test Plugin".into(),
         vendor: String::new(),
-        version: String::new(),
+        version: tutti_plugin_types::PluginVersion::Absent,
         class: PluginClass::Unknown,
         editor: EditorPresence::Present,
         measured: None,
@@ -354,6 +354,7 @@ fn trailing_unsolicited_events_dont_poison_next_reply() {
             }
             BridgeEvent::TailChanged { .. }
             | BridgeEvent::Resync(_)
+            | BridgeEvent::IoLayout(_)
             | BridgeEvent::RateRefusal(_)
             | BridgeEvent::ProcessRequested
             | BridgeEvent::Transport { .. }

@@ -6,7 +6,7 @@
 //! force since may still need (never past the declared ceiling), and says how much of the
 //! next block is live. What it does with the answer (report it, cut the output, park) is the
 //! node's. The clock is shared by [`KernelNode`](crate::KernelNode) and
-//! [`FamilyNode`](crate::FamilyNode).
+//! [`ConvolverNode`](crate::ConvolverNode).
 
 use tutti_graph::MAX_NODE_TAIL;
 use tutti_types::{Samples, Tail};
@@ -96,6 +96,13 @@ impl TailClock {
     pub(crate) fn clear(&mut self) {
         self.ring = 0;
         self.since = UNBOUNDED;
+    }
+
+    /// Frames since the last non-silent input frame, up to the end of the previous block
+    /// ([`UNBOUNDED`] when there never was one). Blocks the graph skipped while the node was
+    /// parked are not counted, so across parking this is a lower bound.
+    pub(crate) fn silent_for(&self) -> u64 {
+        self.since
     }
 
     /// The ceiling, in frames.

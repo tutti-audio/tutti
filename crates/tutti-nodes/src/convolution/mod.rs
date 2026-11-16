@@ -2,7 +2,9 @@
 //!
 //! A partitioned FFT convolution ([`Convolver`](tutti_dsp::Convolver), over an IR's shared
 //! [`IrSpectra`](tutti_dsp::IrSpectra): uniform partitions for a short IR, a head and larger tail
-//! partitions for a long one) as a graph node ([`ConvolverNode`]), so a
+//! partitions for a long one; a [`MatrixConvolver`](tutti_dsp::MatrixConvolver) of those for
+//! true stereo and ambisonic responses) as a graph node ([`ConvolverNode`], its
+//! responses laid out by an [`IrLayout`]), so a
 //! convolution reverb lives in a graph alongside the built-in delay,
 //! modulation, dynamics, and spatial nodes.
 //!
@@ -11,7 +13,9 @@
 //! deliberately format-agnostic.
 
 mod ir;
+mod layout;
 mod node;
 
 pub use ir::{generate_room_ir, generate_room_ir_into, generate_test_ir, generate_test_ir_into};
-pub use node::{ConvolverError, ConvolverNode, IrChannelConfig};
+pub use layout::IrLayout;
+pub use node::{ConvolverError, ConvolverNode, PortSide};

@@ -26,11 +26,28 @@ mod write;
 pub(crate) use read::read;
 pub(crate) use write::write;
 
+use tutti_ump::TicksPerQuarterNote;
+
 use crate::file::{SmfFormat, Track};
+
+tutti_types::ranged! {
+    /// An SMF's division in ticks per quarter note, `1..=0x7FFF`: the header's
+    /// division word has 15 bits for it, and its top bit says SMPTE timing
+    /// (SMF 1.0 section 2.1), which this crate does not read or write. Zero is
+    /// no division.
+    SmfDivision(u16), SmfDivisionOutOfRange, "within 1..=32767", |raw| raw >= 1 && raw <= 0x7FFF
+}
+
+impl From<SmfDivision> for TicksPerQuarterNote {
+    fn from(division: SmfDivision) -> Self {
+        // `SmfDivision`'s range lies inside `TicksPerQuarterNote`'s (1..=65535).
+        TicksPerQuarterNote::of(division.get())
+    }
+}
 
 /// What an SMF holds, read: the header's format and division and the tracks.
 pub(crate) struct SmfParts {
     pub(crate) format: SmfFormat,
-    pub(crate) ticks_per_quarter: u16,
+    pub(crate) division: SmfDivision,
     pub(crate) tracks: Vec<Track>,
 }
