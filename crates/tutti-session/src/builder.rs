@@ -1050,10 +1050,8 @@ impl<C: Clock> SessionBuilder<C> {
             // how much is built before the refusal.
             Some(declared) => Graph::check_root(declared, Some(&placed))?,
             None => {
-                let width = ChannelLayout::try_from(root).map_err(|_| {
-                    tutti_buffers::FoldError::from(tutti_buffers::BufferError::TooWide {
-                        channels: root,
-                    })
+                let width = ChannelLayout::try_from(root).map_err(|e| {
+                    tutti_buffers::FoldError::from(tutti_buffers::BufferError::from(e))
                 })?;
                 tutti_graph::fold_to_topology(&ChannelTopology::assumed(width), &placed)?;
             }
