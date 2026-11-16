@@ -3,19 +3,19 @@
 //! beats bounced to a WAV file (the reverb's tail rings on past the eighth).
 //!
 //! ```text
-//! cargo run -p tutti --features "export,sampler,dsp,modulation" --example song_bounce -- <outdir>
+//! cargo run -p tutti --features "export,sampler" --example song_bounce -- <outdir>
 //! ```
 //!
-//! `tutti`'s root carries the session, the units, the sampler's `Clip`, the
-//! nodes, `Lfo`, `Bounce` and `Format`; the two bus names a fold
+//! `tutti`'s root carries the session, the units, the sampler's `Clip`,
+//! `Bounce` and `Format`; the `Lfo` is `tutti::modulation::Lfo`; the nodes are `tutti::nodes`; the two bus names a fold
 //! needs are `tutti::session::` paths. Every fallible call returns the one
 //! `Error`, so `?` runs the whole program.
 
-use tutti::export::Written;
+use tutti::modulation::Lfo;
+use tutti::nodes::{FreeverbNode, SvfFilterNode, SvfType};
 use tutti::{
-    Amplitude, Beat, Bounce, Bpm, ChannelLayout, Clip, Depth, Error, Format, FreeverbNode, Hz, Lfo,
-    MaxBlock, Pcm, Q, Root, RouteSpec, SampleRate, Samples, Session, SessionEvent, SvfFilterNode,
-    SvfType, Wave,
+    Amplitude, Beat, Bounce, Bpm, ChannelLayout, Clip, Depth, Error, Format, Hz, MaxBlock, Pcm, Q,
+    Root, RouteSpec, SampleRate, Samples, Session, SessionEvent, Wave, Written,
 };
 
 const RATE: SampleRate = SampleRate::SR_48K;

@@ -95,6 +95,8 @@ jobs:
       - run: cargo xtask check-submodule-pins
       # No Bevy crate in `tutti-session`'s closure with every feature on, and no whole-crate re-export.
       - run: cargo xtask check-session
+      # The umbrella re-exports no crate whole and offers each item at one path.
+      - run: cargo xtask check-umbrella
       - run: cargo xtask check-guards
       - run: cargo xtask check-ffi
       - run: cargo xtask check-errors
@@ -289,7 +291,7 @@ jobs:
           cargo clippy --locked -p tutti-cpal --features capture --all-targets -- -D warnings
           cargo clippy --locked -p tutti-session --features audio-io --all-targets -- -D warnings
           cargo clippy --locked -p tutti-session --features clap,export,modulation,midi-hardware,synth,soundfont,sampler,vst2,device,audio-io,serde --all-targets -- -D warnings
-          cargo clippy --locked -p tutti --features clap,export,modulation,sampler,dsp,midi-hardware,synth --all-targets -- -D warnings
+          cargo clippy --locked -p tutti --features clap,export,modulation,sampler,midi-hardware,synth --all-targets -- -D warnings
           cargo clippy --locked -p tutti --features audio-io --all-targets -- -D warnings
           cargo clippy --locked -p tutti --no-default-features --features io --all-targets -- -D warnings
           cargo clippy --locked -p tutti-export --lib -- -D warnings
@@ -339,7 +341,7 @@ jobs:
           cargo nextest run --locked -p tutti-cpal --features capture
           cargo nextest run --locked -p tutti-session --features audio-io
           cargo nextest run --locked -p tutti-session --features clap,export,modulation,midi-hardware,synth,soundfont,sampler,vst2,device,audio-io,serde
-          cargo nextest run --locked -p tutti --features clap,export,modulation,sampler,dsp,midi-hardware,synth
+          cargo nextest run --locked -p tutti --features clap,export,modulation,sampler,midi-hardware,synth
           cargo nextest run --locked -p tutti --features audio-io
           cargo nextest run --locked -p tutti --no-default-features --features io
           cargo nextest run --locked -p tutti-session --features export,encode-flac,encode-aiff,encode-vorbis

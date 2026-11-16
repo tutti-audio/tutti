@@ -4,7 +4,7 @@
 
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-use tutti_types::value::Samples;
+use tutti_types::Samples;
 
 /// The per-channel compensation of the plan sent last, indexed by output
 /// channel: how much the compiler delays that output to align it with the

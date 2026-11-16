@@ -11,26 +11,27 @@
 //! only what it wants.
 //!
 //! The imports group by *subsystem* rather than by crate boundary, which is
-//! the actual readability win. `tutti-dsp` and `tutti-measure` are reachable
-//! here.
+//! the actual readability win. The measurement is `tutti-measure`'s, a
+//! dev-dependency of this crate.
 //!
-//! Run: `cargo run -p tutti --features "export,dsp,wav" \
+//! Run: `cargo run -p tutti --features "export,decode-wav" \
 //!        --example headless_export -- <outdir>`
 
-use tutti::measure::{LoudnessConfig, measure_loudness};
-use tutti::nodes::testing::{Const, Osc};
+use tutti::graph::{ForkByClone, Node};
 use tutti::{
     Amplitude, Bounce, ChannelLayout, ChannelTopology, Format, Hz, Interleaved, Pcm, Range, Root,
     SampleRate, Seconds, Session,
 };
+use tutti_measure::{LoudnessConfig, measure_loudness};
+use tutti_nodes::testing::{Const, Osc};
 
 /// The rate every render below runs at.
 const RATE: SampleRate = SampleRate::SR_48K;
 
 /// A session whose outputs hear `node`, one second of a project.
-fn session_with(node: impl tutti::graph::Node + Clone + 'static) -> Session {
+fn session_with(node: impl Node + Clone + 'static) -> Session {
     let mut session = Session::new(RATE).expect("a session builds");
-    let (node, _) = session.graph().add(tutti::graph::ForkByClone(node));
+    let (node, _) = session.graph().add(ForkByClone(node));
     session.graph().connect(node, Root).unwrap();
     session
 }

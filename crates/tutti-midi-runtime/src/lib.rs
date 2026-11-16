@@ -1,8 +1,8 @@
 #![doc = include_str!("../README.md")]
 //! MIDI **runtime state** for the Tutti audio engine: the graph nodes that carry
 //! MIDI in, through and out of an audio graph, the lock-free rings MIDI crosses
-//! threads on, and the engine's outbound clocks. Re-exported by `tutti` as
-//! `tutti::midi_runtime` (feature `midi`).
+//! threads on, and the engine's outbound clocks. `tutti::midi` names its
+//! `MidiKeys` and `TimedMidiEvent` (feature `midi`).
 //!
 //! ## What this is
 //!
