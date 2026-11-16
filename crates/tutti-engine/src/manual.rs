@@ -143,24 +143,17 @@ impl ManualStream {
     }
 
     /// Delivers a backend error exactly as a driver's error callback would
-    /// ([`StreamFaults::record`]), so a test can exercise the fault path
-    /// without unplugging a device. Does nothing before the stream is first
-    /// opened.
-    pub fn fail(&self, kind: BackendErrorKind, err: &dyn Display) {
-        self.fail_at(kind, err, Instant::now());
-    }
-
-    /// [`fail`](Self::fail) at the instant `now` ([`StreamFaults::record_at`]):
-    /// the stall grace is measured between the instants given, not on the
-    /// clock.
-    pub fn fail_at(&self, kind: BackendErrorKind, err: &dyn Display, now: Instant) {
+    /// at the instant `now` ([`StreamFaults::record`]), so a test can exercise
+    /// the fault path without unplugging a device. Does nothing before the
+    /// stream is first opened.
+    pub fn fail(&self, kind: BackendErrorKind, err: &dyn Display, now: Instant) {
         if let Some(faults) = self
             .faults
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .as_ref()
         {
-            faults.record_at(kind, err, now);
+            faults.record(kind, err, now);
         }
     }
 

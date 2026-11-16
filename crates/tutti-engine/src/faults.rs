@@ -441,14 +441,10 @@ impl StreamFaults {
     /// loads: no record, no count, so a backend that spins on `POLLERR` does not
     /// flood a host that reports each new count. The message is written on the
     /// first error of a run and at the disconnect.
-    pub fn record(&self, kind: BackendErrorKind, err: &dyn Display) {
-        self.record_at(kind, err, Instant::now());
-    }
-
-    /// [`record`](Self::record) at the instant `now`: the run's grace is
-    /// measured between the instants given, so a caller that stamps its
-    /// callbacks feeds them in.
-    pub fn record_at(&self, kind: BackendErrorKind, err: &dyn Display, now: Instant) {
+    ///
+    /// `now` is the instant of the error callback: the grace is measured
+    /// between the instants given, never on the clock.
+    pub fn record(&self, kind: BackendErrorKind, err: &dyn Display, now: Instant) {
         match kind {
             BackendErrorKind::Survivable => return,
             BackendErrorKind::DeviceGone => {

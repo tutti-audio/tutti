@@ -347,7 +347,11 @@ fn an_explicit_device_is_not_replaced_by_the_default() {
     fake.show(&["A", "B"], Some("B"));
     assert!(wants(&poll(&mut session, base, 0)).is_empty());
     fake.show(&["B"], Some("B"));
-    stream.fail(BackendErrorKind::DeviceGone, &"device not available");
+    stream.fail(
+        BackendErrorKind::DeviceGone,
+        &"device not available",
+        Instant::now(),
+    );
     assert!(
         wants(&poll(&mut session, base, 5_000)).is_empty(),
         "A gone, B is not a substitute"
@@ -377,7 +381,11 @@ fn a_disconnect_fault_asks_for_a_restart_once() {
     let base = Instant::now();
     fake.show(&["A", "B"], Some("A"));
     poll(&mut session, base, 0);
-    stream.fail(BackendErrorKind::DeviceGone, &"device not available");
+    stream.fail(
+        BackendErrorKind::DeviceGone,
+        &"device not available",
+        Instant::now(),
+    );
     let events = poll(&mut session, base, 10);
     assert!(events.iter().any(|e| matches!(e, SessionEvent::Fault(_))));
     assert_eq!(wants(&events), [DeviceSelector::Default]);
@@ -408,7 +416,11 @@ fn a_flapping_device_is_not_restarted_on_every_change() {
     let mut asked = 0;
     for k in 0..100u64 {
         if k % 2 == 0 {
-            stream.fail(BackendErrorKind::DeviceGone, &"device not available");
+            stream.fail(
+                BackendErrorKind::DeviceGone,
+                &"device not available",
+                Instant::now(),
+            );
             fake.show(&[], None);
         } else {
             fake.show(&["A"], Some("A"));
@@ -579,14 +591,22 @@ fn a_fault_after_a_restart_is_reported_again() {
     session
         .restart_on(spec_at(48_000.0), driver, None, None)
         .unwrap();
-    second.fail(BackendErrorKind::DeviceGone, &"device not available");
+    second.fail(
+        BackendErrorKind::DeviceGone,
+        &"device not available",
+        Instant::now(),
+    );
     let events = poll(&mut session, base, 0);
     assert!(events.iter().any(|e| matches!(e, SessionEvent::Fault(_))));
     let (driver, third) = ManualStreamDriver::new();
     session
         .restart_on(spec_at(48_000.0), driver, None, None)
         .unwrap();
-    third.fail(BackendErrorKind::DeviceGone, &"device not available");
+    third.fail(
+        BackendErrorKind::DeviceGone,
+        &"device not available",
+        Instant::now(),
+    );
     let events = poll(&mut session, base, 20);
     assert!(
         events.iter().any(|e| matches!(e, SessionEvent::Fault(_))),
@@ -645,7 +665,7 @@ fn a_stalled_backend_run_becomes_a_lost_stream() {
 
     let (kind, message) = (BackendErrorKind::Other, "POLLERR");
     let run_start = Instant::now();
-    stream.fail_at(kind, &message, run_start);
+    stream.fail(kind, &message, run_start);
     let events = poll(&mut session, base, 10);
     assert!(events.iter().any(
         |e| matches!(e, SessionEvent::Fault(f) if f.kind == tutti_engine::StreamFaultKind::Backend)
@@ -655,7 +675,7 @@ fn a_stalled_backend_run_becomes_a_lost_stream() {
         "a backend error alone is not a loss"
     );
 
-    stream.fail_at(kind, &message, run_start + Duration::from_millis(600));
+    stream.fail(kind, &message, run_start + Duration::from_millis(600));
     let events = poll(&mut session, base, 700);
     assert!(events.iter().any(|e| matches!(e, SessionEvent::Fault(f) if f.kind == tutti_engine::StreamFaultKind::Disconnected)), "{events:?}");
     assert_eq!(wants(&events), [DeviceSelector::Default]);
