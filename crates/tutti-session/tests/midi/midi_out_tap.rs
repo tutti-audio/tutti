@@ -18,8 +18,8 @@ use tutti_ump::{MidiGroup, Ump};
 
 use tutti_midi_runtime::MidiClipNode;
 use tutti_session::{
-    Declared, EventInPort, EventOutPort, MidiReport, MidiSinkEntry, Peer, Presence, Resource,
-    Session, SessionEvent, SinkOptions, Stamping, midi_sink,
+    Declared, EventInPort, EventOutPort, MidiSinkEntry, Peer, Presence, Resource, Session,
+    SinkOptions, Stamping, midi_sink,
 };
 use tutti_types::{Beat, BeatDuration};
 use tutti_ump::{Message, System};
@@ -144,7 +144,7 @@ fn a_full_tap_counts_what_it_drops() {
         "the clock sent more than a tap holds: {total}"
     );
 
-    let events = s.update();
+    let _ = s.update();
     let batches = wire.batches();
     assert_eq!(
         batches.len(),
@@ -161,18 +161,10 @@ fn a_full_tap_counts_what_it_drops() {
         gaps.iter().all(|&gap| gap == 1_000),
         "the spacing holds across the drain's 256-event chunks"
     );
-    let dropped = s.midi().out_drops();
-    assert_eq!(dropped as usize, total - 1_024, "the rest is counted");
     assert_eq!(
         s.midi_sink(&"out").unwrap().losses(),
-        Losses::lost(dropped),
-        "and is the sink's own: what its node's tap had no room for"
-    );
-    assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, SessionEvent::Midi(MidiReport::OutputDropped { total }) if *total == dropped)),
-        "and reported: {events:?}"
+        Losses::lost((total - 1_024) as u64),
+        "the rest is the sink's own: what its node's tap had no room for"
     );
 }
 

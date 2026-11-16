@@ -530,7 +530,7 @@ fn watch_request_file(path: std::path::PathBuf) {
 /// Starts the thread behind `TUTTI_CLAP_PROBE_PORT_CHANGE_FILE`: when `path`
 /// exists and holds a `PortLayoutMode` number, the plugin takes that layout and
 /// asks its host to rescan its audio ports (`LIST | CHANNEL_COUNT`), then the
-/// file is deleted and the thread ends. A served plugin changing its ports
+/// file is deleted and the thread waits for the next one. A served plugin changing its ports
 /// while it runs, which no symbol can ask of another process.
 fn watch_port_change_file(path: std::path::PathBuf) {
     /// `CLAP_AUDIO_PORTS_RESCAN_LIST | CLAP_AUDIO_PORTS_RESCAN_CHANNEL_COUNT`.
@@ -547,7 +547,6 @@ fn watch_port_change_file(path: std::path::PathBuf) {
                     crate::tutti_test_plugin_request_ports_rescan(LIST_AND_CHANNEL_COUNT);
                 }
                 let _ = std::fs::remove_file(&path);
-                return;
             }
             std::thread::sleep(std::time::Duration::from_millis(1));
         }

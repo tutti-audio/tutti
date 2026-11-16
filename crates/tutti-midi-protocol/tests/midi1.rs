@@ -6,9 +6,10 @@
 use tutti_fixtures::midi;
 use tutti_midi_protocol::{NoMidi1Form, midi1, narrow, widen};
 use tutti_ump::{
-    Address, Attribute, Bank, CCNumber, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity,
-    PerNoteManagement, RegisteredPerNoteController, Sysex7Packet, SysexStatus, System, U7, U14,
-    Voice1, Voice2,
+    Address, Attribute, Bank, CCNumber, DeltaTicks, ManufacturerId, MdsChunkUmps, MdsIdentity,
+    Message, MidiChannel, MidiGroup, MixedDataSet, NoteNumber, NoteVelocity, PerNoteManagement,
+    RegisteredPerNoteController, Sysex7Packet, Sysex8Message, SysexStatus, System,
+    TicksPerQuarterNote, U4, U7, U14, Utility, Voice1, Voice2,
 };
 use tutti_ump::{BendValue, ControlValue};
 
@@ -317,4 +318,48 @@ fn narrow_message_refuses_what_narrow_refuses() {
         },
     );
     assert_eq!(narrow_message(bend), Err(NoMidi1Form::PerNote));
+}
+
+/// **SysEx 8, Mixed Data Set and Utility messages have no MIDI 1.0 bytes.**
+/// M2-104 Appendix D.2.9: outside the UMP Format these messages are not used
+/// with MIDI 1.0, so the byte stream an output writes holds none of them: every
+/// packet of a SysEx 8 message, of a Mixed Data Set of several chunks, and each
+/// Utility message is nothing.
+/// Spec: m2-104/d.2.9#1
+#[test]
+fn sysex8_mixed_data_and_utility_have_no_midi1_bytes() {
+    let g = MidiGroup::FIRST;
+    let sysex8: Vec<_> = Sysex8Message {
+        group: g,
+        stream_id: 0,
+        payload: &[0x80; 30],
+    }
+    .packets()
+    .collect();
+    assert!(sysex8.len() > 1, "a message of several packets");
+    let data = [0xAAu8; 40];
+    let set = MixedDataSet {
+        group: g,
+        mds_id: U4::of(1),
+        identity: MdsIdentity {
+            manufacturer: ManufacturerId::NON_COMMERCIAL,
+            device: 0xFFFF,
+            sub_id_1: 1,
+            sub_id_2: 2,
+        },
+        data: &data,
+    };
+    let mixed: Vec<_> = set.packets(MdsChunkUmps::of(1)).unwrap().collect();
+    assert!(mixed.len() > 2, "a set of several chunks");
+    let utility = [
+        Utility::Noop,
+        Utility::JrClock(0x1234),
+        Utility::JrTimestamp(0x0100),
+        Utility::TicksPerQuarterNote(TicksPerQuarterNote::of(96)),
+        Utility::DeltaClockstamp(DeltaTicks::masked(5)),
+    ]
+    .map(|u| tutti_ump::Ump::from(Message::Utility(u)));
+    for packet in sysex8.into_iter().chain(mixed).chain(utility) {
+        assert_eq!(midi1(packet).count(), 0, "{packet:?}");
+    }
 }

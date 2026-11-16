@@ -653,6 +653,7 @@ fn attr(kind: u8, data: u16) -> Attribute {
 /// attribute, which an articulation writes and the decoder reads for the whole
 /// range; no other type is one, and `Attribute::Reserved` holds only what
 /// neither spec defines.
+/// Spec: m2-104/7.4.14#9
 #[test]
 fn an_articulation_is_an_articulation_attribute_and_no_other_type_is() {
     let written = NoteArticulation::new(Articulation::NORMAL).to_attribute();
