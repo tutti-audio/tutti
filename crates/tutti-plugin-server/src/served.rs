@@ -3,7 +3,7 @@
 //! The host crate of each format is the interpreter of its plugin's lifecycle
 //! (activation, restarts, requests). This is the server's one shell over them:
 //! it loads through [`OutOfProcess::load_served`], activates through
-//! [`Loaded::activate`](tutti_plugin_types::Loaded::activate) into the realtime [`Processor`] and the main-thread
+//! [`Loaded::activate`](tutti_plugin_types::Loaded::activate) into the realtime [`Processor`](tutti_plugin_types::Processor) and the main-thread
 //! [`Controller`](tutti_plugin_types::Controller), and runs both through
 //! [`Lifecycle`], so a format is a type argument and a row of the
 //! `served!` table, not a loader.
