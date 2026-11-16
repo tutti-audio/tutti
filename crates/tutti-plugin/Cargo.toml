@@ -64,7 +64,7 @@ tutti-plugin-types = { version = "0.0.1", path = "../tutti-plugin-types", featur
 tutti-plugin-db = { version = "0.0.1", path = "../tutti-plugin-db" }
 
 # Logging
-tracing = "0.1"
+tracing.workspace = true
 
 thiserror.workspace = true
 

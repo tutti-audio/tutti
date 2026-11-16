@@ -17,7 +17,7 @@ workspace = true
 thiserror.workspace = true
 # A spill file that cannot be removed is logged, not an error: the render's
 # outcome is already decided.
-tracing = "0.1"
+tracing.workspace = true
 tutti-transport = { version = "0.0.1", path = "../tutti-transport" }
 tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 tutti-types = { version = "0.0.1", path = "../tutti-types", default-features = false }
