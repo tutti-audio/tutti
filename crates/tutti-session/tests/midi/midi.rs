@@ -1787,7 +1787,7 @@ fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {
     );
     let info = port.info();
     assert_eq!(
-        info.profiles()[0].mpe_zones(),
+        info.profiles()[0].profiles().mpe_zones(),
         Some(MpeZones::single(MpeZoneConfig::profile(
             MpeZoneSpan::new(MidiChannel::of(0), MpeChannels::of(4)).unwrap(),
             PitchBendSensitivity::MPE_PROFILE_DEFAULT
@@ -1822,7 +1822,7 @@ fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {
             .find_map(|l| l.take(&disable)),
         Some(Ok(ProfileState::Disabled))
     );
-    assert_eq!(port.info().profiles()[0].mpe_zones(), None);
+    assert_eq!(port.info().profiles()[0].profiles().mpe_zones(), None);
     assert!(fake.send_input(raw, omni_off(2), Instant::now()));
     let _ = run(&mut s, 5);
     assert_eq!(omni_offs(&seen), 2, "no zone, no rule");

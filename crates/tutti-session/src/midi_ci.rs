@@ -15,7 +15,6 @@
 //! is lost, or of a peer or Profile the port no longer lists, fails at the call:
 //! the job is returned already ended.
 
-use std::ops::Deref;
 use std::sync::Weak;
 
 use tutti_midi_device::{
@@ -88,7 +87,7 @@ impl std::fmt::Debug for PortLink {
 }
 
 /// One found peer's Profiles ([`MidiInputInfo::profiles`](crate::MidiInputInfo::profiles)):
-/// the readings of [`PeerProfiles`], and the Profiles it lists as handles to
+/// the Profiles it lists as handles to
 /// switch them from.
 #[derive(Clone, Debug)]
 pub struct ProfilePeer {
@@ -97,6 +96,13 @@ pub struct ProfilePeer {
 }
 
 impl ProfilePeer {
+    /// What the peer lists, as the OS layer read it: its Profiles' table, the
+    /// zones of the MPE Profile, and whether its inquiry is whole.
+    #[must_use]
+    pub const fn profiles(&self) -> &PeerProfiles {
+        &self.peer
+    }
+
     pub(crate) fn new(link: PortLink, peer: PeerProfiles) -> Self {
         Self { link, peer }
     }
@@ -117,14 +123,6 @@ impl ProfilePeer {
                 })
             }
         })
-    }
-}
-
-impl Deref for ProfilePeer {
-    type Target = PeerProfiles;
-
-    fn deref(&self) -> &PeerProfiles {
-        &self.peer
     }
 }
 
@@ -244,7 +242,7 @@ fn switch_job(link: &PortLink, switch: tutti_midi_hardware::ProfileSwitch) -> Jo
         switch,
         |info, switch| {
             switch
-                .check(info.profiles().iter().map(Deref::deref))
+                .check(info.profiles().iter().map(ProfilePeer::profiles))
                 .is_ok()
         },
         InputRequest::Profile,
@@ -261,6 +259,12 @@ pub struct ReportPeer {
 }
 
 impl ReportPeer {
+    /// The peer, by its device, Group and MUID.
+    #[must_use]
+    pub const fn peer(&self) -> &ListedReporter {
+        &self.peer
+    }
+
     pub(crate) fn new(link: PortLink, peer: ListedReporter) -> Self {
         Self { link, peer }
     }
@@ -271,19 +275,11 @@ impl ReportPeer {
         self.link.submit(
             self.peer.ask(what),
             |info, ask| {
-                ask.check(info.report_peers().iter().map(Deref::deref))
+                ask.check(info.report_peers().iter().map(ReportPeer::peer))
                     .is_ok()
             },
             InputRequest::Report,
         )
-    }
-}
-
-impl Deref for ReportPeer {
-    type Target = ListedReporter;
-
-    fn deref(&self) -> &ListedReporter {
-        &self.peer
     }
 }
 
