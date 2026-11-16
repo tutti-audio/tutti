@@ -397,7 +397,7 @@ pub use tutti_nodes::{ClickState, MetronomeMode};
 pub use tutti_rt::{ArcLend, Loan, Reader};
 pub use tutti_transport::{
     FadeOut, LoopEdit, LoopRegion, MotionEvent, MotionState, OfflineTimeline,
-    OfflineTimelineConfig, Then, Timeline, Transport, TransportCommand,
+    OfflineTimelineConfig, Then, TimedError, Timeline, Transport, TransportCommand,
 };
 
 // Units, channels, buffers, the edge traits and the musical meter.

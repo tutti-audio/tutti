@@ -77,21 +77,23 @@ impl From<MotionEvent> for TransportCommand {
     }
 }
 
-/// Why a timed command did not reach the timeline's queue. Each variant
-/// hands the command `E` back, so a caller can retry or reroute it.
+/// Why a timed command was refused instead of queued for the timeline. Each
+/// variant hands the command `E` back, so a caller can retry or reroute it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum TimedError<E: std::fmt::Debug> {
     /// [`SCHEDULE_CAPACITY`] commands were in flight (or
     /// [`IMMEDIATE_RESERVE`] more, for one due at the next block), so the
-    /// command was not sent. Retry it once the engine has applied some.
+    /// command was not sent, whatever time it was for. Retry it once the
+    /// engine has applied some.
     #[error("transport command queue full; {0:?} not sent")]
     Full(E),
     /// A command that starts the transport rolling was timed at a beat while
     /// the transport is stopped. A beat has a frame only once the transport
     /// rolls, so the command would wait for a playback that only it can
     /// start, and never fire. Start the transport first, or time it at a
-    /// frame or the next block.
+    /// frame or the next block. The session's verbs check this before
+    /// sending; [`MotionFsm`](super::MotionFsm)'s own sends never return it.
     #[error("{0:?} cannot fire: a stopped transport never reaches a beat")]
     BeatWhileStopped(E),
 }
