@@ -32,7 +32,7 @@ pub const MAX_CHANNELS: usize = 16;
 /// [`STEREO`](Self::STEREO), [`QUAD`](Self::QUAD), [`EMPTY`](Self::EMPTY)),
 /// [`From`]/[`Into`] from a `u8` or `u16` otherwise, and [`TryFrom`] from a
 /// `u32` or `usize`, which refuses a count above `u16::MAX` with
-/// [`ChannelCountOutOfRange`]. 5.1 and 7.1 get no names, because a name would
+/// [`LayoutError`]. 5.1 and 7.1 get no names, because a name would
 /// imply a speaker *order* this count-only type does not carry.
 ///
 /// Ordering is by channel count, so `a > b` reads as "a is wider than b".
@@ -151,11 +151,17 @@ impl ChannelLayout {
     }
 }
 
-/// A channel count above `u16::MAX`, refused by `ChannelLayout`'s `TryFrom`.
-/// Carries the refused count.
+/// Why a [`ChannelLayout`] was not built from a count.
+///
+/// Zero is not among the reasons: [`ChannelLayout::EMPTY`] is a layout. A
+/// caller that needs at least one channel refuses it with its own error.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("{} channels do not fit a layout (at most {})", .0, u16::MAX)]
-pub struct ChannelCountOutOfRange(pub u64);
+#[non_exhaustive]
+pub enum LayoutError {
+    /// The count is above `u16::MAX`. Carries the refused count.
+    #[error("{0} channels do not fit a layout (at most {max})", max = u16::MAX)]
+    TooWide(u64),
+}
 
 /// Build a layout from a width that cannot be too large: `u8` and `u16`.
 impl From<u8> for ChannelLayout {
@@ -181,12 +187,12 @@ impl From<u16> for ChannelLayout {
 macro_rules! count_try_from {
     ($($t:ty),*) => {$(
         impl TryFrom<$t> for ChannelLayout {
-            type Error = ChannelCountOutOfRange;
+            type Error = LayoutError;
 
             fn try_from(n: $t) -> Result<Self, Self::Error> {
                 u16::try_from(n).map(Self::from_count).map_err(|_| {
                     // `u64` holds every `u32` and `usize` here.
-                    ChannelCountOutOfRange(u64::try_from(n).unwrap_or(u64::MAX))
+                    LayoutError::TooWide(u64::try_from(n).unwrap_or(u64::MAX))
                 })
             }
         }
@@ -236,26 +242,30 @@ mod tests {
         assert_eq!(inferred.count(), 6);
     }
 
-    /// `from(65538usize)` used to be Stereo and `from(70000u32)` 4464 channels;
-    /// now they are errors carrying the refused count.
+    /// A count past `u16::MAX` is an error carrying the refused count, never a
+    /// narrower layout.
     #[test]
     fn a_count_beyond_u16_is_refused_not_truncated() {
         for raw in [65_536usize, 65_537, 65_538, 70_000] {
             assert_eq!(
                 ChannelLayout::try_from(raw),
-                Err(ChannelCountOutOfRange(raw as u64))
+                Err(LayoutError::TooWide(raw as u64))
             );
         }
         assert_eq!(
+            ChannelLayout::try_from(usize::from(u16::MAX)),
+            Ok(ChannelLayout::from(u16::MAX))
+        );
+        assert_eq!(
             ChannelLayout::try_from(70_000u32),
-            Err(ChannelCountOutOfRange(70_000))
+            Err(LayoutError::TooWide(70_000))
         );
         assert_eq!(
             ChannelLayout::try_from(u32::MAX),
-            Err(ChannelCountOutOfRange(u64::from(u32::MAX)))
+            Err(LayoutError::TooWide(u64::from(u32::MAX)))
         );
         assert!(
-            ChannelCountOutOfRange(65_536)
+            LayoutError::TooWide(65_536)
                 .to_string()
                 .contains("65536 channels")
         );
