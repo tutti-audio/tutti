@@ -6,7 +6,11 @@ use super::*;
 fn record_while_the_control_side_is_reading_keeps_the_message() {
     let faults = StreamFaults::new();
     let held = faults.last_guard();
-    faults.record(BackendErrorKind::DeviceGone, &"device not available");
+    faults.record(
+        BackendErrorKind::DeviceGone,
+        &"device not available",
+        Instant::now(),
+    );
     drop(held);
     assert_eq!(faults.count(), 1);
     assert!(faults.is_disconnected());
@@ -35,14 +39,14 @@ fn a_spinning_backend_error_with_no_audio_becomes_a_disconnect() {
     let err = pollerr();
     let ms = Duration::from_millis;
 
-    faults.record_at(BackendErrorKind::Other, &err, t0 + ms(1));
+    faults.record(BackendErrorKind::Other, &err, t0 + ms(1));
     assert!(!faults.is_disconnected());
     for i in 2..400 {
-        faults.record_at(BackendErrorKind::Other, &err, t0 + ms(i));
+        faults.record(BackendErrorKind::Other, &err, t0 + ms(i));
     }
     assert!(!faults.is_disconnected(), "inside the grace period");
     for i in 400..700 {
-        faults.record_at(BackendErrorKind::Other, &err, t0 + ms(i));
+        faults.record(BackendErrorKind::Other, &err, t0 + ms(i));
     }
     assert!(faults.is_disconnected());
     assert_eq!(faults.count(), 2);
@@ -53,7 +57,7 @@ fn a_spinning_backend_error_with_no_audio_becomes_a_disconnect() {
     assert!(faults.last().unwrap().message.contains("POLLERR"));
 
     // Further errors are ignored outright.
-    faults.record_at(BackendErrorKind::Other, &err, t0 + ms(900));
+    faults.record(BackendErrorKind::Other, &err, t0 + ms(900));
     assert_eq!(faults.count(), 2);
 }
 
@@ -68,7 +72,7 @@ fn xruns_between_delivered_blocks_never_disconnect() {
     for burst in 0..20u64 {
         let base = burst * 300;
         for i in 0..5 {
-            faults.record_at(BackendErrorKind::Other, &pollerr(), t0 + ms(base + i));
+            faults.record(BackendErrorKind::Other, &pollerr(), t0 + ms(base + i));
         }
         faults.delivered();
     }
@@ -81,13 +85,13 @@ fn xruns_between_delivered_blocks_never_disconnect() {
 fn clear_forgets_a_run_in_progress() {
     let faults = StreamFaults::new();
     let t0 = faults.epoch;
-    faults.record_at(
+    faults.record(
         BackendErrorKind::Other,
         &pollerr(),
         t0 + Duration::from_millis(1),
     );
     faults.clear();
-    faults.record_at(
+    faults.record(
         BackendErrorKind::Other,
         &pollerr(),
         t0 + Duration::from_millis(900),
@@ -101,8 +105,16 @@ fn clear_forgets_a_run_in_progress() {
 #[test]
 fn a_route_change_and_a_refused_promotion_record_nothing() {
     let faults = StreamFaults::new();
-    faults.record(BackendErrorKind::Survivable, &"device changed");
-    faults.record(BackendErrorKind::Survivable, &"real-time promotion denied");
+    faults.record(
+        BackendErrorKind::Survivable,
+        &"device changed",
+        Instant::now(),
+    );
+    faults.record(
+        BackendErrorKind::Survivable,
+        &"real-time promotion denied",
+        Instant::now(),
+    );
     assert!(!faults.is_faulted());
     assert_eq!(faults.count(), 0);
 }
@@ -131,7 +143,7 @@ fn each_overrun_counts_once_and_never_disconnects() {
 #[test]
 fn an_overrun_keeps_a_latching_message_and_a_panic_replaces_a_lesser_one() {
     let faults = StreamFaults::new();
-    faults.record(BackendErrorKind::DeviceGone, &"unplugged");
+    faults.record(BackendErrorKind::DeviceGone, &"unplugged", Instant::now());
     faults.record_overrun("late");
     let last = faults.last().expect("a fault");
     assert_eq!(last.kind, StreamFaultKind::Disconnected);
@@ -139,7 +151,7 @@ fn an_overrun_keeps_a_latching_message_and_a_panic_replaces_a_lesser_one() {
     assert_eq!(faults.count(), 2, "the overrun still counts");
 
     let faults = StreamFaults::new();
-    faults.record(BackendErrorKind::Other, &"xrun");
+    faults.record(BackendErrorKind::Other, &"xrun", Instant::now());
     faults.record_overrun("late");
     let kept = faults.last().expect("a fault");
     assert_eq!(kept.kind, StreamFaultKind::Backend);
@@ -159,13 +171,13 @@ fn an_overrun_keeps_a_latching_message_and_a_panic_replaces_a_lesser_one() {
 #[test]
 fn the_newest_of_a_backend_fault_and_a_panic_is_reported() {
     let faults = StreamFaults::new();
-    faults.record(BackendErrorKind::Other, &"xrun");
+    faults.record(BackendErrorKind::Other, &"xrun", Instant::now());
     faults.record_panic("panicked");
     let last = faults.last().expect("a fault");
     assert_eq!(last.kind, StreamFaultKind::CallbackPanicked);
     assert_eq!(last.message, "panicked");
 
-    faults.record(BackendErrorKind::DeviceGone, &"gone");
+    faults.record(BackendErrorKind::DeviceGone, &"gone", Instant::now());
     assert_eq!(faults.last().expect("a fault").message, "gone");
     faults.record_panic("second");
     assert_eq!(faults.last().expect("a fault").message, "second");
@@ -206,12 +218,16 @@ fn a_long_text_is_cut_at_a_character_boundary() {
     // Ascii up to one byte short of the limit, then a 2-byte character
     // straddling it.
     let text = format!("{}é{}", "a".repeat(RT_TEXT_BYTES - 1), "z");
-    faults.record(BackendErrorKind::Other, &text.as_str());
+    faults.record(BackendErrorKind::Other, &text.as_str(), Instant::now());
     let message = faults.last().expect("a fault").message;
     assert_eq!(message, "a".repeat(RT_TEXT_BYTES - 1));
 
     let faults = StreamFaults::new();
-    faults.record(BackendErrorKind::DeviceGone, &format_args!("{text}{text}"));
+    faults.record(
+        BackendErrorKind::DeviceGone,
+        &format_args!("{text}{text}"),
+        Instant::now(),
+    );
     assert_eq!(
         faults.last().expect("a fault").message.len(),
         RT_TEXT_BYTES - 1
@@ -223,7 +239,7 @@ fn a_long_text_is_cut_at_a_character_boundary() {
 #[test]
 fn take_last_forgets_everything_recorded_so_far() {
     let faults = StreamFaults::new();
-    faults.record(BackendErrorKind::Other, &"xrun");
+    faults.record(BackendErrorKind::Other, &"xrun", Instant::now());
     faults.record_overrun("late");
     assert_eq!(
         faults
