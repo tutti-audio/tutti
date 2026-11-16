@@ -173,6 +173,7 @@ unsafe extern "C" {
 }
 
 /// `AudioComponentPlugInInterface`; AudioToolbox reads it by offset.
+#[derive(Debug)]
 #[repr(C)]
 pub struct PlugInInterface {
     open: Option<unsafe extern "C" fn(*mut c_void, sys::AudioComponentInstance) -> sys::OSStatus>,
