@@ -62,7 +62,7 @@ fn device_info_reads_the_ids_of_table_6() {
     assert_eq!(info.identity.manufacturer, ManufacturerId::NON_COMMERCIAL);
     assert_eq!(info.identity.family.map(U7::get), [0, 0]);
     assert_eq!(info.identity.model.map(U7::get), [48, 0]);
-    assert_eq!(info.identity.revision.map(U7::get), [0, 0, 1, 0]);
+    assert_eq!(info.identity.revision.get().map(U7::get), [0, 0, 1, 0]);
     assert_eq!(info.manufacturer.as_str(), "Educational Use");
     assert_eq!(info.version.as_str(), "1.0");
     assert_eq!(info.links.len(), 2);

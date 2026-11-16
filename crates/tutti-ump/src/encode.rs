@@ -473,10 +473,10 @@ fn stream(s: Stream) -> [u32; 4] {
                 | (u7(d.family[1]) << 16)
                 | (u7(d.model[0]) << 8)
                 | u7(d.model[1]),
-            (u7(d.revision[0]) << 24)
-                | (u7(d.revision[1]) << 16)
-                | (u7(d.revision[2]) << 8)
-                | u7(d.revision[3]),
+            (u7(d.revision.get()[0]) << 24)
+                | (u7(d.revision.get()[1]) << 16)
+                | (u7(d.revision.get()[2]) << 8)
+                | u7(d.revision.get()[3]),
         ],
         Stream::EndpointName(f, b) => text14(stream_head(f, 0x03), b),
         Stream::ProductInstanceId(f, b) => text14(stream_head(f, 0x04), b),
