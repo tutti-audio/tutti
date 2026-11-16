@@ -10,9 +10,9 @@
 //! The classes do not exist before macOS 15. [`ump_endpoints`] asks the
 //! Objective-C runtime for the manager class first and returns `None` where it
 //! is absent, so a caller on an older system behaves as it did before. Every
-//! message send goes through [`catch`], so an Objective-C exception (the MIDI
-//! server being unreachable raises one) comes back as an [`ObjcException`]
-//! instead of unwinding into Rust, which aborts the process.
+//! message send goes through [`catch`], so an Objective-C exception CoreMIDI
+//! raises (as seen when no MIDI server is reachable) comes back as an
+//! [`ObjcException`] instead of unwinding into Rust, which aborts the process.
 
 use crate::objc_exception::{ObjcException, catch};
 use coremidi_sys::{MIDIObjectGetIntegerProperty, kMIDIPropertyUniqueID};
@@ -69,8 +69,8 @@ pub struct UmpEndpointInfo {
 ///
 /// # Errors
 ///
-/// [`ObjcException`] when CoreMIDI raises one (for instance in a process with no
-/// reachable MIDI server).
+/// [`ObjcException`] when CoreMIDI raises an Objective-C exception (as seen when
+/// no MIDI server is reachable).
 pub fn ump_endpoints() -> Result<Option<Vec<UmpEndpointInfo>>, ObjcException> {
     // `ClassType::class` panics on a missing class; the lookup by name is the
     // availability check.

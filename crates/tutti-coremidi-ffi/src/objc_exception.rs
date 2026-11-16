@@ -6,6 +6,8 @@
 //! goes through it.
 
 use objc2::exception;
+use objc2::rc::Retained;
+use objc2::sel;
 use objc2_foundation::NSException;
 use std::panic::AssertUnwindSafe;
 
@@ -26,26 +28,44 @@ pub(crate) fn catch<R>(f: impl FnOnce() -> R) -> Result<R, ObjcException> {
             name: String::from("nil"),
             reason: String::new(),
         },
-        Some(object) => match object.downcast::<NSException>() {
-            Ok(exception) => ObjcException {
-                name: exception.name().to_string(),
-                reason: exception
-                    .reason()
-                    .map(|r| r.to_string())
-                    .unwrap_or_default(),
-            },
-            Err(other) => ObjcException {
-                name: other.class().name().to_string_lossy().into_owned(),
-                reason: String::new(),
-            },
-        },
+        Some(object) => describe(object),
     })
+}
+
+/// The name and reason of a raised object. Each send runs inside its own
+/// `exception::catch`, so reading an exception cannot raise another one out;
+/// the class name and an empty reason stand in when it does.
+fn describe(object: Retained<exception::Exception>) -> ObjcException {
+    let class_name = object.class().name().to_string_lossy().into_owned();
+    // `isKindOfClass:` is NSObject's; an object that does not answer it is not
+    // an `NSException`.
+    let answers = exception::catch(AssertUnwindSafe(|| {
+        object.class().responds_to(sel!(isKindOfClass:))
+    }))
+    .unwrap_or(false);
+    if !answers {
+        return ObjcException {
+            name: class_name,
+            reason: String::new(),
+        };
+    }
+    let read = exception::catch(AssertUnwindSafe(|| {
+        let exception = object.downcast::<NSException>().ok()?;
+        let reason = exception.reason().map(|r| r.to_string());
+        Some((exception.name().to_string(), reason.unwrap_or_default()))
+    }));
+    match read {
+        Ok(Some((name, reason))) => ObjcException { name, reason },
+        _ => ObjcException {
+            name: class_name,
+            reason: String::new(),
+        },
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use objc2::rc::Retained;
     use objc2_foundation::NSString;
 
     /// A raised `NSException` comes back as an error carrying its name and
@@ -53,18 +73,14 @@ mod tests {
     #[test]
     fn a_raised_exception_is_returned_with_its_name_and_reason() {
         assert_eq!(catch(|| 7), Ok(7));
-        let raised = catch(|| {
-            // SAFETY: no `userInfo` is passed, so its generic type is unused.
-            let exception = unsafe {
-                NSException::exceptionWithName_reason_userInfo(
-                    &NSString::from_str("TuttiTest"),
-                    Some(&NSString::from_str("because")),
-                    None,
-                )
-            };
-            // SAFETY: `Exception` is the type `throw` takes for any thrown
-            // object, and an `NSException` is one.
-            exception::throw(unsafe { Retained::cast_unchecked::<exception::Exception>(exception) })
+        let raised = catch::<()>(|| {
+            NSException::new(
+                &NSString::from_str("TuttiTest"),
+                Some(&NSString::from_str("because")),
+                None,
+            )
+            .expect("an NSException is created")
+            .raise()
         });
         assert_eq!(
             raised,
