@@ -8,7 +8,10 @@
 //!   Payload recycling lives in [`PayloadPool`]; the batcher owns the block
 //!   sequence.
 //! - [`Lifecycle`] — running/crashed flags.
-//! - [`AudioSlab`] — bulk audio transport (created elsewhere; held as Arc).
+//!
+//! The bulk audio transport (the slab) is not the bridge's: the batcher owns the
+//! one it writes and reads, and the bridge only asks the server to open a new one
+//! ([`AudioBridge::setup_shared_memory`]).
 //!
 //! The bridge thread lives in [`BridgeThread`]; its `Drop` shuts it down.
 
