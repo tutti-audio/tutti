@@ -519,8 +519,7 @@ pub enum PluginChange {
     /// bypass lasts.
     IoChanged,
     /// The plugin's new ports were not made a node, and the node stays as it
-    /// is: they are wider than a block serves, or outside a served plugin's
-    /// shared-memory slab (laid out at launch), or the graph refused the swap
+    /// is: they are wider than a block serves, or the graph refused the swap
     /// ([`PortsRefusal`]). Reported once for the ports: they count as handled.
     PortsRefused {
         /// Why the ports were refused.

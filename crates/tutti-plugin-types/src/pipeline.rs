@@ -8,9 +8,10 @@ use std::sync::{Arc, OnceLock};
 /// callback a live plugin keeps in step with, and so the ceiling on the
 /// pipeline's declared latency (85 ms at 48 kHz).
 ///
-/// The shared-memory slab is sized to this at launch (`subprocess::launch`,
-/// the other consumer of this constant; or to the host's smaller
-/// `max_buffer_size`), before the node is prepared — so `tutti-plugin-ipc`'s batcher (`Batcher::prepare`)
+/// The shared-memory slab is sized to this when it is laid out, at launch and
+/// at each activation over other buses (`subprocess::launch`, the other
+/// consumer of this constant; or to the host's smaller `max_buffer_size`),
+/// before the node is prepared — so `tutti-plugin-ipc`'s batcher (`Batcher::prepare`)
 /// can only narrow the chunk, never widen it, and the slab and the batcher
 /// agree on the per-chunk ceiling by construction. A device calling back
 /// with more frames than this gets a chunk of this many, which no longer

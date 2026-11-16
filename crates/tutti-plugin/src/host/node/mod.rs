@@ -71,7 +71,7 @@
 //! [`PluginHandle`].
 
 mod capability_view;
-mod fork;
+pub(crate) mod fork;
 
 #[cfg(test)]
 mod ipc_node_tests;
@@ -107,7 +107,7 @@ use std::sync::atomic::Ordering;
 use tutti_graph::{IntoNode, Node, NodeParts, Shape};
 use tutti_plugin_host::{
     InProcClient, InvalidateSink, ParameterChangeSink, PluginControls, PluginHandle, PluginNode,
-    PortLimit, PortSource, Rebinder, RefreshSink, TransportSink, client_over,
+    Rebinder, RefreshSink, TransportSink, client_over,
 };
 use tutti_plugin_ipc::{
     BridgeConfig, BridgeEvent, Ipc, IpcController, IpcOrigin, Launched, PluginBridge,
@@ -526,22 +526,12 @@ impl PluginClient<Bound> {
     /// its audio ports ([`Rebinder::prepare`]). Made on the call from what the
     /// bound node holds, so take it before the client goes into a graph
     /// (`into_parts` consumes the client) and keep it beside the node's
-    /// controls. It is limited to the ports the plugin had when it was
-    /// launched: the shared-memory slab is laid out once, and a rebuilt node
-    /// over other ports is refused with
-    /// [`RebindError::OutsideSlab`](tutti_plugin_host::RebindError::OutsideSlab).
+    /// controls.
     ///
     /// The rebinder keeps the plugin instance alive until it is dropped.
     #[must_use]
     pub fn rebinder(&self) -> Rebinder<Ipc> {
-        let served = self.served.clone();
-        self.state.node.rebinder(PortSource::Served {
-            limit: PortLimit {
-                inputs: self.loaded.input_widths(),
-                outputs: self.loaded.output_widths(),
-            },
-            live: Arc::new(move || served.layout()),
-        })
+        self.state.node.rebinder()
     }
 }
 
