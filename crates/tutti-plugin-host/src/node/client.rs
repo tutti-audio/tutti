@@ -12,7 +12,7 @@
 //! silence too, counted by [`InProcClient::failed_blocks`].
 //!
 //! A block is one [`Processor::process`]: the graph's channel slices as an
-//! [`AudioBufferMut`], the block's MIDI, parameter chunk and transport as a
+//! [`AudioBufferMut`](tutti_plugin_types::AudioBufferMut), the block's MIDI, parameter chunk and transport as a
 //! [`ProcessContext`], and a [`ProcessOutput`] the client owns and clears each
 //! block. A block is allocation-free in steady state (verified by the
 //! `assert_no_alloc` test in `tests/`).
