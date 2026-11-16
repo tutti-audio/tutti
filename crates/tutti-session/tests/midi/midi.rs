@@ -665,7 +665,7 @@ fn hot_plug_session_ci(
 fn present(s: &mut Session, identity: tutti_ump::DeviceIdentity) {
     s.policy::<tutti_session::MidiPolicy>()
         .set(tutti_session::MidiPolicy {
-            identity: Some(tutti_midi_hardware::MidiIdentity {
+            identity: Some(tutti_midi_device::MidiIdentity {
                 device: identity,
                 name: tutti_midi_device::EndpointName::new("Session").unwrap(),
                 instance: None,

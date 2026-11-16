@@ -83,7 +83,7 @@ fn session_over_ci(
 /// The session presenting `device` over one Group, named "Session".
 fn presented(device: tutti_ump::DeviceIdentity) -> crate::Presented {
     crate::Presented {
-        identity: crate::MidiIdentity {
+        identity: tutti_midi_device::MidiIdentity {
             device,
             name: EndpointName::new("Session").unwrap(),
             instance: None,

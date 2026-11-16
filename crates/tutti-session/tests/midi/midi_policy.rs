@@ -4,21 +4,28 @@
 
 use std::time::{Duration, Instant};
 
+use crate::common::{MF, blocks, note, play};
 use tutti_midi_device::{
-    Capabilities, CiMessage, Decoded, Endpoint, EndpointId, EndpointName, PortDirection, Supports,
+    Capabilities, CiCategories, CiHeader, CiMessage, Decoded, DiscoveryData, Endpoint, EndpointId,
+    EndpointName, MaxSysexSize, MidiIdentity, Muid, PortDirection, Supports,
 };
 use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint};
-use tutti_midi_hardware::{MidiHardwareOptions, MidiIdentity};
+use tutti_midi_hardware::{MidiHardwareOptions, ProfilesChange};
+use tutti_midi_runtime::MidiClipNode;
+use tutti_session::Peer as _;
 use tutti_session::{
-    MidiPolicy, MidiPolicyError, PHASES, PhaseCx, Session, SessionEvent, midi_input,
+    EventInPort, MidiPolicy, MidiPolicyError, MidiReport, PHASES, PhaseCx, Session, SessionEvent,
+    midi_input, midi_output,
 };
 use tutti_types::SampleRate;
+use tutti_types::{Beat, BeatDuration};
 use tutti_ump::{
     DeviceIdentity, DiscoveryFilter, ManufacturerId, Message, MidiGroup, Protocol, Stream,
     StreamConfig, SysexAssembler, SysexStep, U7, Ump, UmpVersion,
 };
 
 const RAW: u64 = 7;
+const PEER: Muid = Muid::of(0x0012_3456);
 
 fn device(model: u8) -> DeviceIdentity {
     DeviceIdentity {
@@ -56,7 +63,11 @@ fn wired(last_group: u8) -> (Session, FakeCounters) {
         .into_iter()
         .find(|d| d.name == "Wire")
         .expect("Wire is listed");
-    s.pool([midi_input("wire", wire)]).expect("declares");
+    s.pool((
+        [midi_input("wire", wire.clone())],
+        [midi_output("out", wire)],
+    ))
+    .expect("declares");
     let _ = s.update();
     (s, fake)
 }
@@ -109,11 +120,11 @@ fn ask_everything() -> Ump {
 }
 
 /// The wire's clock: one update per millisecond from a fixed start.
-struct Clock(Instant, u64);
+struct Clock(Instant, u64, Vec<SessionEvent>);
 
 impl Clock {
     fn new() -> Self {
-        Self(Instant::now(), 0)
+        Self(Instant::now(), 0, Vec::new())
     }
 
     /// Runs `ms` updates, answering the session's own Stream negotiation as a
@@ -129,10 +140,34 @@ impl Clock {
         for _ in 0..ms {
             self.1 += 1;
             let now = self.0 + Duration::from_millis(self.1);
-            let _ = update_at(s, now);
+            self.2.extend(update_at(s, now));
             let sent = fake.take_sent(EndpointId::from_raw(RAW));
-            sent_ci.extend(ci(&sent));
             let mut answers: Vec<Ump> = Vec::new();
+            for message in ci(&sent) {
+                // The peer of the wire answers each Discovery, declaring
+                // Profile Configuration.
+                if let CiMessage::Discovery { header, .. } = &message {
+                    let data = DiscoveryData::new(
+                        device(1),
+                        CiCategories::PROFILE_CONFIGURATION,
+                        MaxSysexSize::of(256),
+                    );
+                    answers.extend(
+                        CiMessage::DiscoveryReply {
+                            header: CiHeader::new(PEER),
+                            to: header.source,
+                            data,
+                        }
+                        .packets(MidiGroup::FIRST),
+                    );
+                }
+                if matches!(
+                    message,
+                    CiMessage::Discovery { .. } | CiMessage::InvalidateMuid { .. }
+                ) {
+                    sent_ci.push(message);
+                }
+            }
             for stream in streams(&sent) {
                 let _ = peer.reply(Message::Stream(stream), &mut answers);
             }
@@ -141,6 +176,17 @@ impl Clock {
             }
         }
         sent_ci
+    }
+
+    /// The profile changes the updates reported since the last call.
+    fn profile_changes(&mut self) -> Vec<ProfilesChange> {
+        std::mem::take(&mut self.2)
+            .into_iter()
+            .filter_map(|event| match event {
+                SessionEvent::Midi(MidiReport::CiProfiles { change, .. }) => Some(change),
+                _ => None,
+            })
+            .collect()
     }
 
     /// The peer says `ump` and the session updates once; what it sent back.
@@ -177,11 +223,16 @@ fn a_peers_endpoint_discovery_is_answered_only_once_the_policy_names_an_identity
         Stream::EndpointInfo(info),
         Stream::DeviceIdentity(who),
         Stream::EndpointName(_, name),
-        Stream::StreamConfigurationNotification(_),
+        Stream::StreamConfigurationNotification(config),
     ] = sent.as_slice()
     else {
         panic!("Info, Identity, Name, Configuration: {sent:?}");
     };
+    assert_eq!(
+        config.protocol,
+        Protocol::Midi2,
+        "the Protocol the negotiation with the device settled on"
+    );
     assert_eq!(info.function_blocks.count().map(|c| c.get()), Some(1));
     assert!(info.midi1 && info.midi2 && !info.rx_jr && !info.tx_jr);
     assert_eq!(*who, device(2));
@@ -258,9 +309,16 @@ fn a_changed_identity_invalidates_the_old_muid_and_starts_discovery_as_the_new()
     };
     let (old, who) = (header.source, data.identity);
     assert_eq!(who, device(2));
+    let port = s.midi_input(&"wire").expect("loaded");
+    assert_eq!(port.info().peers().len(), 1, "the peer was found");
+    let _ = clock.profile_changes();
 
     s.policy::<MidiPolicy>().set(policy(9, "My App")).unwrap();
     let then = clock.run(&mut s, &fake, 400);
+    assert!(
+        clock.profile_changes().contains(&ProfilesChange::Dropped),
+        "the peer's Profiles went with its MUID"
+    );
     let [
         CiMessage::InvalidateMuid {
             header: from,
@@ -276,8 +334,22 @@ fn a_changed_identity_invalidates_the_old_muid_and_starts_discovery_as_the_new()
     assert_eq!(data.identity, device(9));
     let newer = header.source;
 
+    assert_eq!(
+        port.info().peers().len(),
+        1,
+        "found again under the new MUID"
+    );
+    let _ = clock.profile_changes();
     s.policy::<MidiPolicy>().set(MidiPolicy::default()).unwrap();
     let then = clock.run(&mut s, &fake, 400);
+    assert!(
+        clock.profile_changes().contains(&ProfilesChange::Dropped),
+        "the peer's Profiles were dropped"
+    );
+    assert!(
+        port.info().peers().is_empty(),
+        "no peer without an identity"
+    );
     assert!(
         matches!(
             then.as_slice(),
@@ -301,4 +373,57 @@ fn an_identity_is_refused_on_a_session_with_no_os_midi_layer() {
     );
     assert_eq!(s.policy::<MidiPolicy>().get().identity, None);
     assert_eq!(s.policy::<MidiPolicy>().set(MidiPolicy::default()), Ok(()));
+}
+
+/// M2-104 §7.1.6.2: after a Stream Configuration Request is granted, the
+/// session's output to that device sends in the Protocol granted, the
+/// Notification and the output reading one stream state. The output was
+/// MIDI 2.0 from the session's own negotiation, so a note it sends after the
+/// grant of MIDI 1.0 is a MIDI 1.0 message.
+#[test]
+fn a_granted_request_moves_the_sessions_output_to_the_protocol_asked() {
+    let (mut s, fake) = wired(0);
+    s.policy::<MidiPolicy>().set(policy(2, "My App")).unwrap();
+    let mut clock = Clock::new();
+    clock.run(&mut s, &fake, 50);
+    let out = s.midi_output(&"out").expect("loaded");
+    assert_eq!(out.info().config().protocol, Protocol::Midi2);
+
+    let ask = Ump::from(Message::Stream(Stream::StreamConfigurationRequest(
+        StreamConfig {
+            protocol: Protocol::Midi1,
+            rx_jr: false,
+            tx_jr: false,
+        },
+    )));
+    let sent = clock.say(&mut s, &fake, ask);
+    assert_eq!(
+        streams(&sent),
+        [Stream::StreamConfigurationNotification(StreamConfig {
+            protocol: Protocol::Midi1,
+            rx_jr: false,
+            tx_jr: false,
+        })]
+    );
+
+    let (clip, _) = s.graph().add(MidiClipNode::new(note(
+        60,
+        MF,
+        Beat(0.0),
+        BeatDuration(1.0),
+    )));
+    s.graph()
+        .set_sources(EventInPort::new(out.node(), 0), [clip.events_out()])
+        .expect("the port's node takes events");
+    let _ = s.update();
+    play(&s);
+    blocks(&s, 2);
+    let _ = s.update();
+    let sent = fake.take_sent(EndpointId::from_raw(RAW));
+    let notes: Vec<_> = sent
+        .iter()
+        .filter(|u| u.key_event().is_some())
+        .map(|u| u.message_type())
+        .collect();
+    assert_eq!(notes, [2], "the note on, as MIDI 1.0");
 }

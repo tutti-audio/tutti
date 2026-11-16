@@ -48,11 +48,9 @@ use crate::properties::{PropertyAsk, PropertyChange, PropertyError, PropertyPeer
 use crate::stream::{DeviceStream, InputTiming, Negotiation};
 use tutti_graph::EventInletNode;
 use tutti_midi_device::{CiDeviceId, ProfileChange, ProfileId};
-use tutti_midi_device::{
-    DeviceId, DeviceInfo, EndpointName, EntropyError, Learned, ProductInstanceId, SavedDevice,
-};
+use tutti_midi_device::{DeviceId, DeviceInfo, EntropyError, Learned, MidiIdentity, SavedDevice};
 use tutti_midi_runtime::InputInlets;
-use tutti_ump::{DeviceIdentity, GroupSpan, MidiGroup};
+use tutti_ump::{GroupSpan, MidiGroup};
 
 /// The set of open MIDI inputs, and the endpoints available to open.
 ///
@@ -92,28 +90,15 @@ pub struct MidiSession {
     properties: Arc<Mutex<ResourceStore>>,
 }
 
-/// Who the session is on the wire: the identity MIDI-CI announces in Discovery
-/// and the UMP Endpoint the session answers a peer's Endpoint Discovery with.
-///
-/// A Discovery carries a System Exclusive manufacturer id, tutti has none, and
-/// the one MIDI 1.0 sets aside for non-commercial use (`7D`) is not for a
-/// released product. So the app says who it is, with the id it registered. A
-/// [`DeviceIdentity`] under
-/// [`ManufacturerId::NON_COMMERCIAL`](tutti_ump::ManufacturerId::NON_COMMERCIAL)
-/// is for development and research only.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct MidiIdentity {
-    /// The Device Identity of MIDI-CI Discovery and of the Endpoint (M2-104
-    /// §7.1.3).
-    pub device: DeviceIdentity,
-    /// The Endpoint Name (M2-104 §7.1.4).
-    pub name: EndpointName,
-    /// The Product Instance Id (M2-104 §7.1.5), if the app has one.
-    pub instance: Option<ProductInstanceId>,
-}
-
 /// An identity and the Groups its one Function Block spans: what
 /// [`MidiSession::present`] presents on every input with an output.
+///
+/// A [`MidiIdentity`] under
+/// [`ManufacturerId::NON_COMMERCIAL`](tutti_ump::ManufacturerId::NON_COMMERCIAL)
+/// is for development and research only: a Discovery carries a System
+/// Exclusive manufacturer id, tutti has none, and the one MIDI 1.0 sets aside
+/// for non-commercial use is not for a released product, so an app that ships
+/// says who it is with the id it registered.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Presented {
     /// Who the session is.
@@ -614,6 +599,9 @@ impl MidiSession {
     /// Request are answered as the Endpoint it describes (M2-104 §7.1), one
     /// bidirectional Function Block over its Groups, UMP 1.1, the MIDI 1.0 and
     /// MIDI 2.0 Protocols, JR Timestamps neither way. `None` presents nothing.
+    ///
+    /// A session built by `tutti-session` has this set on every update from its
+    /// `MidiPolicy`, which overwrites a call made here.
     ///
     /// A change of identity ends the devices that ran (each sends Invalidate
     /// MUID for its own MUID, its peers are lost) and the new identity starts

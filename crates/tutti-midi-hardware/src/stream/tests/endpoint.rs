@@ -2,9 +2,11 @@
 //! the identity it presents, against a fake peer: the wire is the fake's sink
 //! and the input's producer.
 
-use super::ci::{GROUP_0, ci_sent, midi1_running, polled};
+use super::ci::{GROUP_0, ci_sent, peer, peer_declaring, polled};
 use super::*;
-use crate::MidiIdentity;
+use crate::{CiChange, Polled, ProfilesChange};
+use tutti_midi_device::CiCategories;
+use tutti_midi_device::MidiIdentity;
 use tutti_midi_device::{CiMessage, ProductInstanceId};
 use tutti_ump::{BlockFilter, BlockSelect, DiscoveryFilter, UmpVersion};
 
@@ -99,7 +101,11 @@ fn a_peers_endpoint_discovery_is_answered_with_the_presented_endpoint() {
     assert!(!info.rx_jr && !info.tx_jr);
     assert_eq!(*who, identity());
     assert_eq!(&name[..7], b"Session");
-    assert_eq!(config.protocol, Protocol::Midi1);
+    assert_eq!(
+        config.protocol,
+        Protocol::Midi2,
+        "the Protocol the negotiation settled on, which the output sends in"
+    );
     assert!(!config.rx_jr && !config.tx_jr);
 }
 
@@ -208,10 +214,22 @@ fn answering_a_request_starts_no_exchange_of_requests() {
 /// is now.
 #[test]
 fn a_new_identity_invalidates_the_old_muid_and_starts_discovery_as_the_new() {
-    let (mut wire, old) = midi1_running();
+    let (mut wire, old) = peer_declaring(CiCategories::PROFILE_CONFIGURATION);
     let other = model_identity(9);
     wire.session.present(Some(presented(other)));
-    let _ = polled(&mut wire, 100);
+    let reports = polled(&mut wire, 100);
+    assert!(
+        reports
+            .iter()
+            .any(|p| matches!(p, Polled::Ci(_, who, CiChange::Lost) if who.muid == peer())),
+        "the peer of the old MUID is lost: {reports:?}"
+    );
+    assert!(
+        reports.iter().any(
+            |p| matches!(p, Polled::Profile(_, who, ProfilesChange::Dropped) if who.muid == peer())
+        ),
+        "and its Profiles dropped: {reports:?}"
+    );
     let sent = ci_sent(&wire);
     assert!(
         matches!(
@@ -233,10 +251,22 @@ fn a_new_identity_invalidates_the_old_muid_and_starts_discovery_as_the_new() {
 /// an Invalidate MUID, and no Discovery after it.
 #[test]
 fn presenting_nothing_invalidates_the_muid_and_starts_nothing() {
-    let (mut wire, old) = midi1_running();
+    let (mut wire, old) = peer_declaring(CiCategories::PROFILE_CONFIGURATION);
     wire.session.present(None);
-    let _ = polled(&mut wire, 100);
-    let _ = polled(&mut wire, 200);
+    let mut reports = polled(&mut wire, 100);
+    reports.extend(polled(&mut wire, 200));
+    assert!(
+        reports
+            .iter()
+            .any(|p| matches!(p, Polled::Ci(_, who, CiChange::Lost) if who.muid == peer())),
+        "{reports:?}"
+    );
+    assert!(
+        reports
+            .iter()
+            .any(|p| matches!(p, Polled::Profile(_, _, ProfilesChange::Dropped))),
+        "{reports:?}"
+    );
     let sent = ci_sent(&wire);
     assert!(
         matches!(
@@ -277,5 +307,94 @@ fn a_new_name_is_announced_and_leaves_midi_ci_alone() {
     assert!(
         sent.iter().all(|ump| ump.message_type() != 3),
         "no MIDI-CI message: {sent:?}"
+    );
+}
+
+/// M2-104 §7.1.6.2: after a Stream Configuration Request is granted, all data
+/// uses the selected Protocol. The one stream state serves both directions: the
+/// Notification that said MIDI 1.0 is the Protocol the output then sends in,
+/// and the reverse.
+/// Spec: m2-104/7.1.6.2#2
+#[test]
+fn a_granted_request_moves_the_output_to_the_protocol_asked() {
+    let mut wire = presenting(Some(presented(identity())));
+    wire.connect_output();
+    let note = [(Offset::ZERO, midi::note_on(MidiChannel::FIRST, 60, 0xFFFF))];
+    wire.send(&note);
+    assert_eq!(received(&wire)[0].message_type(), 4, "negotiated MIDI 2.0");
+
+    let _ = answered(&mut wire, request(Protocol::Midi1, false, false), 100);
+    wire.send(&note);
+    assert_eq!(received(&wire)[0].message_type(), 2, "granted MIDI 1.0");
+    assert_eq!(
+        wire.session.stream(&wire.id).unwrap().config().protocol,
+        Protocol::Midi1
+    );
+
+    let _ = answered(&mut wire, request(Protocol::Midi2, false, false), 200);
+    wire.send(&note);
+    assert_eq!(received(&wire)[0].message_type(), 4, "granted MIDI 2.0");
+}
+
+/// What the session asks of a device after its peer's request moved the
+/// Protocol never undoes it: when the device sends JR Timestamps the input did
+/// not ask for, the request to stop them names the Protocol in force.
+#[test]
+fn the_request_to_stop_jr_keeps_the_protocol_a_peers_request_chose() {
+    let mut wire = presenting(Some(presented(identity())));
+    let _ = answered(&mut wire, request(Protocol::Midi1, false, false), 100);
+    let jr_on = Stream::StreamConfigurationNotification(StreamConfig {
+        protocol: Protocol::Midi1,
+        rx_jr: false,
+        tx_jr: true,
+    });
+    send_ump(&wire, jr_on, 200);
+    let _ = wire.poll(201);
+    let sent = stream_sent(&wire);
+    assert_eq!(
+        sent,
+        [request(Protocol::Midi1, false, false)],
+        "one request, to stop JR, in the Protocol in force"
+    );
+}
+
+/// The Stream Configuration Notification follows the Protocol in force once the
+/// device has been told one: a Notification the device sends moving the
+/// Protocol is followed by the session's own, so both ends read one state.
+#[test]
+fn a_change_of_the_protocol_in_force_is_told_to_a_device_that_was_told() {
+    let mut wire = presenting(Some(presented(identity())));
+    let sent = answered(&mut wire, ask_everything(), 100);
+    assert!(
+        sent.iter().any(
+            |s| matches!(s, Stream::StreamConfigurationNotification(c) if c.protocol == Protocol::Midi2)
+        ),
+        "{sent:?}"
+    );
+    send_ump(&wire, notification(Protocol::Midi1, false), 200);
+    let _ = wire.poll(201);
+    assert_eq!(stream_sent(&wire), [notification(Protocol::Midi1, false)]);
+}
+
+/// A rebuilt Endpoint over other Groups announces its Function Block again
+/// (M2-104 §7.1.8), after the Endpoint Info, so a peer learns the new span.
+#[test]
+fn a_change_of_the_groups_announces_the_function_block() {
+    let mut wire = presenting(Some(presented_over(2)));
+    wire.session.present(Some(presented_over(4)));
+    let _ = wire.poll(100);
+    let sent = stream_sent(&wire);
+    let block = sent.iter().find_map(|s| match s {
+        Stream::FunctionBlockInfo(block) => Some(block),
+        _ => None,
+    });
+    assert_eq!(
+        block.and_then(|b| b.groups_spanned.value()),
+        GroupSpan::new(4),
+        "{sent:?}"
+    );
+    assert!(
+        sent.iter().any(|s| matches!(s, Stream::EndpointInfo(_))),
+        "{sent:?}"
     );
 }

@@ -37,7 +37,7 @@ fn peer_id() -> PeerId {
     }
 }
 
-fn peer() -> Muid {
+pub(super) fn peer() -> Muid {
     Muid::of(0x0012_3456)
 }
 
@@ -689,7 +689,7 @@ fn discoveries_of(sent: Vec<(MidiGroup, CiMessage)>) -> Vec<(MidiGroup, Muid)> {
 
 /// A MIDI 1.0 port whose peer declared `categories` and whose first inquiry
 /// went out; the wire's clock is at 50 ms. What was sent is read off.
-fn peer_declaring(categories: CiCategories) -> (Wire, Muid) {
+pub(super) fn peer_declaring(categories: CiCategories) -> (Wire, Muid) {
     let (mut wire, ours) = midi1_running();
     say(
         &wire,

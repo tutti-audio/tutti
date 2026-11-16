@@ -5,7 +5,8 @@
 //! handle's [`Peer::info`](crate::Peer::info).
 
 use tutti_midi_device::DeviceInfo;
-use tutti_midi_hardware::{MidiIdentity, Presented};
+use tutti_midi_device::MidiIdentity;
+use tutti_midi_hardware::Presented;
 use tutti_midi_runtime::MidiInputPorts;
 
 use crate::midi::Midi;
@@ -34,7 +35,7 @@ use crate::{Clock, Policy, Session};
 ///
 /// ```
 /// use tutti_midi_device::EndpointName;
-/// use tutti_midi_hardware::MidiIdentity;
+/// use tutti_midi_device::MidiIdentity;
 /// use tutti_session::MidiPolicy;
 /// use tutti_ump::{DeviceIdentity, ManufacturerId, U7};
 ///

@@ -3,9 +3,8 @@
 //! An [`Endpoint`] is a value: the UMP version, the protocols and Jitter
 //! Reduction (JR) timestamps it supports and has active, who it is, and its
 //! Function Blocks. [`Endpoint::reply`] is the answering side as one pure step
-//! over a received message, with no allocation: a session that presents an
-//! identity answers a peer's Stream messages with the [`local`](Endpoint::local)
-//! Endpoint it describes. The asking side is [`Connection`](crate::Connection).
+//! over a received message, with no allocation. The asking side is
+//! [`Connection`](crate::Connection).
 
 use tutti_ump::{
     BlockFilter, BlockSelect, DeviceIdentity, Direction as BlockDirection, DiscoveryFilter,
@@ -20,6 +19,20 @@ pub const MAX_FUNCTION_BLOCKS: usize = 32;
 
 /// The UMP version this core speaks (M2-104 Table 5: 1.1).
 pub const UMP_VERSION: UmpVersion = UmpVersion { major: 1, minor: 1 };
+
+/// Who an application is to its peers: the Device Identity, the Endpoint Name
+/// and the Product Instance Id it declares (M2-104 §7.1.3 to §7.1.5), the parts
+/// an [`Endpoint`] built with [`Endpoint::local`] takes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MidiIdentity {
+    /// The Device Identity (M2-104 §7.1.3), which MIDI-CI Discovery also
+    /// announces.
+    pub device: DeviceIdentity,
+    /// The Endpoint Name (M2-104 §7.1.4).
+    pub name: EndpointName,
+    /// The Product Instance Id (M2-104 §7.1.5), if there is one.
+    pub instance: Option<ProductInstanceId>,
+}
 
 /// What an Endpoint supports (M2-104 §7.1.2).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]

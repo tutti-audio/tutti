@@ -6,17 +6,18 @@
 //! those that declare that (reported as [`ProcessChange`]), and Property Exchange with
 //! those that declare it (reported as [`PropertyChange`]).
 //!
-//! # Opt-in
+//! # Presenting an identity
 //!
-//! **It is off unless the app gives an identity**
+//! **It runs only while the session presents an identity**
 //! ([`MidiSession::present`](crate::MidiSession::present)). A Discovery
 //! announces a System Exclusive manufacturer id, and tutti has none of its own:
 //! M1 reserves `7D` for non-commercial use, never for a released product, and
-//! tutti is a library that apps ship. So no
-//! device is started, and the port copies no SysEx for MIDI-CI, until the app
-//! says who it is, with the id it registered. It reaches every input (a device
-//! starts at the first poll after the input's negotiation settled and any
-//! Identity Request in progress has ended).
+//! tutti is a library that apps ship. So no device is started, and the port
+//! copies no SysEx for MIDI-CI, until the app presents who it is, with the id it
+//! registered. It reaches every input (a device starts at the first poll after
+//! the input's negotiation settled and any Identity Request in progress has
+//! ended). A different identity, or none, ends the devices that ran and starts
+//! the new identity's in the same poll (see "When it ends").
 //!
 //! # When it ends
 //!
@@ -26,7 +27,9 @@
 //! is read again, and the Groups recomputed. A Group that stays keeps its
 //! device and peers; one that goes ends its device (Invalidate MUID, peers
 //! lost: M2-101 §3.3.2, a block that changes its Group location or number of
-//! Groups invalidates its MUID); a new one starts a device (Discovery). **A
+//! Groups invalidates its MUID); a new one starts a device (Discovery). A
+//! change of the presented identity ends every device the same way (Invalidate
+//! MUID, peers lost, Profiles dropped) and starts the new identity's. **A
 //! block that moves is by Group an end and a start**: the old Group's device
 //! ends and the new Group's begins under a fresh MUID.
 //!
