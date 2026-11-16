@@ -70,7 +70,7 @@
 //! can be used on its own. The algorithms are `tutti-dsp`'s (`tutti_dsp::DelayLine`,
 //! `tutti_dsp::CrossoverBank`, …); this crate re-exports only the types in a node's
 //! signature: `SvfType`, `LadderType`, `Lanes`, `CrossoverError`,
-//! `InterpolationMode` and `ShapeKind`.
+//! `InterpolationMode`, `OversamplingFactor` and `ShapeKind`.
 //!
 //! Nothing in this crate can fail: there is no `Error` type, and a node is ready
 //! to insert the moment it is built.
@@ -265,9 +265,9 @@ pub use tutti_dsp::{
 
 mod distortion;
 pub use distortion::{DistortionKernel, DistortionNode, DistortionSet};
-// `ShapeKind` is in `DistortionNode::new`'s signature; the curves behind it are
-// `tutti-dsp`'s.
-pub use tutti_dsp::ShapeKind;
+// `ShapeKind` and `OversamplingFactor` are in `DistortionNode`'s signatures; what is behind
+// them is `tutti-dsp`'s.
+pub use tutti_dsp::{OversamplingFactor, ShapeKind};
 
 mod filter;
 pub use filter::{

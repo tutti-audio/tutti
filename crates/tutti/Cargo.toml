@@ -15,38 +15,41 @@ categories = ["multimedia::audio"]
 workspace = true
 
 [dependencies]
-# Always present: the vocabulary, the runtime, the node contract, the DSP.
+# Always present: the vocabulary, the node catalogue and the graph's node contract.
 # Everything else is a feature.
 tutti-transport = { version = "0.0.1", path = "../tutti-transport" }
 tutti-tempo = { version = "0.0.1", path = "../tutti-tempo" }
 tutti-metering = { version = "0.0.1", path = "../tutti-metering" }
-tutti-engine = { version = "0.0.1", path = "../tutti-engine" }
 tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 tutti-types = { version = "0.0.1", path = "../tutti-types", default-features = false }
-tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
 tutti-nodes = { version = "0.0.1", path = "../tutti-nodes", default-features = false }
-# The audio graph: what an export renders, and what `Engine` runs.
-# `tutti-engine` already depends on it, so naming it here links nothing new.
+# The types the node catalogue's signatures name; `tutti-nodes` links them already.
+tutti-dsp = { version = "0.0.1", path = "../tutti-dsp", default-features = false }
+tutti-modulation = { version = "0.0.1", path = "../tutti-modulation", default-features = false }
+tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
+tutti-curve = { version = "0.0.1", path = "../tutti-curve" }
+# The node contract (`tutti::graph`) and the graph's vocabulary at the root.
 tutti-graph = { version = "0.0.1", path = "../tutti-graph" }
 
 tutti-cpal = { version = "0.0.1", path = "../tutti-cpal", default-features = false, optional = true }
 tutti-codec = { version = "0.0.1", path = "../tutti-codec", optional = true }
-tutti-export = { version = "0.0.1", path = "../tutti-export", default-features = false, optional = true }
-tutti-modulation = { version = "0.0.1", path = "../tutti-modulation", default-features = false, optional = true }
 tutti-sampler = { version = "0.0.1", path = "../tutti-sampler", default-features = false, optional = true }
 tutti-polysynth = { version = "0.0.1", path = "../tutti-polysynth", optional = true }
 tutti-soundfont = { version = "0.0.1", path = "../tutti-soundfont", optional = true }
-tutti-sf2 = { version = "0.0.1", path = "../tutti-sf2", optional = true }
-tutti-dsp = { version = "0.0.1", path = "../tutti-dsp", default-features = false, optional = true }
-tutti-measure = { version = "0.0.1", path = "../tutti-measure", optional = true }
-tutti-midi-protocol = { version = "0.0.1", path = "../tutti-midi-protocol", optional = true }
 tutti-midi-runtime = { version = "0.0.1", path = "../tutti-midi-runtime", default-features = false, optional = true }
 tutti-midi-file = { version = "0.0.1", path = "../tutti-midi-file", optional = true }
 tutti-midi-hardware = { version = "0.0.1", path = "../tutti-midi-hardware", optional = true }
 tutti-midi-device = { version = "0.0.1", path = "../tutti-midi-device", optional = true }
+tutti-midi-protocol = { version = "0.0.1", path = "../tutti-midi-protocol", optional = true }
+tutti-sf2 = { version = "0.0.1", path = "../tutti-sf2", optional = true }
+tutti-export = { version = "0.0.1", path = "../tutti-export", default-features = false, optional = true }
+tutti-engine = { version = "0.0.1", path = "../tutti-engine", optional = true }
 tutti-plugin = { version = "0.0.1", path = "../tutti-plugin", optional = true }
+tutti-plugin-db = { version = "0.0.1", path = "../tutti-plugin-db", optional = true }
+tutti-plugin-ipc = { version = "0.0.1", path = "../tutti-plugin-ipc", optional = true }
 tutti-plugin-host = { version = "0.0.1", path = "../tutti-plugin-host", optional = true }
+tutti-plugin-types = { version = "0.0.1", path = "../tutti-plugin-types", optional = true }
 # The API layer: a graph, its engine and its device behind one
 # `Session`. `default-features = false` (its default is empty anyway): each
 # feature below turns on the session's feature of the same name with `?`, so
@@ -54,10 +57,13 @@ tutti-plugin-host = { version = "0.0.1", path = "../tutti-plugin-host", optional
 tutti-session = { version = "0.0.1", path = "../tutti-session", default-features = false, optional = true }
 
 [dev-dependencies]
-# `tutti::nodes::testing` for this crate's own test, examples and README
-# doctest. Dev-only: a consumer of the umbrella never sees the module.
+# The `testing` nodes (`Osc`, `Const`) this crate's own tests, examples and README
+# doctest build graphs from. Dev-only: the umbrella exports none of them.
 tutti-nodes = { path = "../tutti-nodes", default-features = false, features = ["testing"] }
 tempfile = "3.8"
+# The loudness measurement `headless_export` reports; the umbrella does not export
+# `tutti-measure`.
+tutti-measure = { path = "../tutti-measure" }
 # The reference CLAP plugin the `plugin_midi_export` example plays, in a `plugin-server`
 # (built first: `cargo build -p tutti-plugin-server`; not a dev-dependency,
 # which would be a cycle through `tutti-plugin`), and the lookup that finds
@@ -71,7 +77,7 @@ tutti-fixtures = { path = "../../testing/tutti-fixtures" }
 # `default = ["session"]`: the API layer is what this umbrella is for. Set
 # `default-features = false` for the raw crates alone.
 default = ["session"]
-session = ["dep:tutti-session"]
+session = ["dep:tutti-session", "dep:tutti-engine"]
 
 # Everything a headless host can have. Plugin FORMATS stay opt-in — each
 # links an SDK.
@@ -91,8 +97,6 @@ full = [
     "encode-flac",
     "encode-aiff",
     "encode-vorbis",
-    "dsp",
-    "modulation",
 ]
 
 # The sound card. NOT default.
@@ -105,11 +109,11 @@ jack = ["device", "tutti-cpal/jack"]
 # --- codecs -----------------------------------------------------------------
 #
 # The decoder is `tutti-codec`'s, so a format turns on `codec` (below):
-# `Wave::read` and `FileIn` are reached as `tutti::codec::…`.
-decode-wav = ["codec", "tutti-codec/decode-wav", "tutti-sampler?/decode-wav"]
-decode-flac = ["codec", "tutti-codec/decode-flac", "tutti-sampler?/decode-flac"]
-decode-mp3 = ["codec", "tutti-codec/decode-mp3", "tutti-sampler?/decode-mp3"]
-decode-ogg = ["codec", "tutti-codec/decode-ogg", "tutti-sampler?/decode-ogg"]
+# `Wave::read` is reached at the root; `FileIn` is `tutti-codec`'s.
+decode-wav = ["codec", "tutti-codec/decode-wav"]
+decode-flac = ["codec", "tutti-codec/decode-flac"]
+decode-mp3 = ["codec", "tutti-codec/decode-mp3"]
+decode-ogg = ["codec", "tutti-codec/decode-ogg"]
 # The encoders `tutti-codec` writes (the codec's own names). None implies
 # `export`: a recording writes through them too.
 encode-wav = ["codec", "tutti-codec/encode-wav"]
@@ -117,13 +121,13 @@ encode-flac = ["codec", "tutti-codec/encode-flac"]
 encode-aiff = ["codec", "tutti-codec/encode-aiff"]
 encode-vorbis = ["codec", "tutti-codec/encode-vorbis"]
 
-# `tutti::codec` — `tutti-codec`: `Wave`, the decoder and the encoders `export`
+# `tutti::codec` and `Wave` — `tutti-codec`: the decoder and the encoders `export`
 # writes through. Implied by every format, so it is rarely named directly.
 codec = ["dep:tutti-codec"]
 
-# `tutti::io` — `Recorder` and its pump loop (`tutti-session`'s `record`). Implies
-# `session` and `codec` with the WAV writer: the sink is `tutti::codec::FileOut`,
-# which writes a `tutti::codec::Format`, and a `Format` has a value only with an
+# `Recorder` and its pump loop (`tutti-session`'s `record`, in `tutti::session`).
+# Implies `session` and `codec` with the WAV writer: the sink is `tutti-codec`'s
+# `FileOut`, which writes a `Format`, and a `Format` has a value only with an
 # `encode-*` feature. Implied by `audio-io`, so it is rarely named directly.
 io = ["session", "tutti-session/record", "encode-wav"]
 
@@ -140,25 +144,29 @@ midi-hardware = ["midi", "dep:tutti-midi-hardware", "dep:tutti-midi-device", "tu
 #
 # Each also turns on the session's feature of the same name, with `?` because
 # `session` is optional.
-synth = ["dep:tutti-polysynth", "tutti-session?/synth"]
+synth = ["midi", "dep:tutti-polysynth", "tutti-session?/synth"]
 soundfont = ["midi", "dep:tutti-soundfont", "dep:tutti-sf2", "tutti-session?/soundfont"]
-sampler = ["decode-wav", "dep:tutti-sampler", "tutti-session?/sampler"]
+sampler = ["dep:tutti-sampler", "tutti-session?/sampler"]
 audio-io = ["io", "tutti-cpal?/capture", "tutti-session?/audio-io"]
 # Export. `export` is the offline renderer and WAV, which is pure Rust; FLAC and
 # AIFF are pure Rust and opt-in (`encode-flac`, `encode-aiff`), and `encode-vorbis` is the one path to C (the
 # Vorbis library, `ogg_next_sys`).
 export = ["dep:tutti-export", "encode-wav", "tutti-session?/export"]
-modulation = ["dep:tutti-modulation", "tutti-session?/modulation"]
-
-# `tutti::dsp` and `tutti::measure` are both.
-dsp = ["dep:tutti-dsp", "dep:tutti-measure"]
 
 # --- plugin hosting ---------------------------------------------------------
 #
 # No `tutti-plugin-server`: that is a BINARY the host spawns, not a library to
 # link. Build it with
 # `cargo build -p tutti-plugin-server`.
-plugin = ["dep:tutti-plugin", "dep:tutti-plugin-host", "midi", "tutti-session?/plugin"]
+plugin = [
+    "dep:tutti-plugin",
+    "dep:tutti-plugin-db",
+    "dep:tutti-plugin-host",
+    "dep:tutti-plugin-ipc",
+    "dep:tutti-plugin-types",
+    "midi",
+    "tutti-session?/plugin",
+]
 vst2 = ["plugin", "tutti-plugin/vst2", "tutti-session?/vst2"]
 vst3 = ["plugin", "tutti-plugin/vst3", "tutti-session?/vst3"]
 clap = ["plugin", "tutti-plugin/clap", "tutti-session?/clap"]
@@ -171,7 +179,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [[example]]
 name = "headless_export"
-required-features = ["session", "export", "dsp", "decode-wav"]
+required-features = ["session", "export", "decode-wav"]
 
 # Cannot RUN in CI: it opens a sound card.
 [[example]]
@@ -182,13 +190,13 @@ required-features = ["session", "device"]
 # LFO on the cutoff, the transport and a bounce to a WAV.
 [[example]]
 name = "song_bounce"
-required-features = ["session", "export", "sampler", "dsp", "modulation"]
+required-features = ["session", "export", "sampler", "decode-wav"]
 test = true
 
 # Modulation, headless, in one import.
 [[example]]
 name = "headless_modulation"
-required-features = ["session", "modulation"]
+required-features = ["session"]
 
 # Load a plugin, play a MIDI file, export to WAV, in one
 # import. Run as a test (`test = true`) so CI plays it; it needs

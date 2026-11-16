@@ -96,7 +96,6 @@ mod midi_port;
 mod midi_report;
 #[cfg(feature = "midi")]
 mod midi_sink;
-#[cfg(feature = "modulation")]
 mod modulation;
 mod node;
 mod params;
@@ -152,7 +151,6 @@ pub use error::{
 pub use error::{MidiError, RouteDeclarer};
 #[cfg(feature = "soundfont")]
 pub use general_midi::GeneralMidi;
-#[cfg(feature = "modulation")]
 pub use graph::ModKeys;
 #[cfg(feature = "testing")]
 pub use graph::{AudioSide, Testing};
@@ -188,7 +186,6 @@ pub use midi_port::{
 pub use midi_report::MidiReport;
 #[cfg(feature = "midi")]
 pub use midi_sink::{MidiSink, MidiSinkEntry, MidiSinkInfo, SinkLoaded, SinkOptions, midi_sink};
-#[cfg(feature = "modulation")]
 pub use modulation::{
     AutomationTake, MixRef, ModRefusal, ModRouteId, ModSourceId, ModState, ModTarget, Mods,
     ModsView, NoAutomation, NoSuchModRoute, NoSuchModSource, ParamRef, Problem, Ranged, RouteError,
@@ -204,7 +201,7 @@ pub use plugin::{
     PortsRefusal, RestoreState, SaveState, StateJobError, StateJobFailed, StateRestore, StateView,
 };
 pub(crate) use pool::Pool;
-#[cfg(feature = "sampler")]
+#[cfg(all(feature = "sampler", codec))]
 pub use pool::{AudioEntry, AudioFile, StreamInfo, Tier, audio_file};
 pub use pool::{
     Declared, HandleError, IntoPool, Life, Load, LoadError, OpenCx, Parking, PoolConfig, PoolEntry,
@@ -242,7 +239,6 @@ pub use recovery::{
 pub use sampler::{SamplerError, SamplerEvent, SamplerLoad};
 #[cfg(feature = "midi")]
 pub use session::MidiNodes;
-#[cfg(feature = "modulation")]
 pub use session::ModInput;
 pub use session::{PHASES, Phase, PhaseCx, RootTopologyStatus, Session, SessionEvent};
 #[cfg(feature = "device")]

@@ -949,3 +949,21 @@ fn translated_channel_voice_messages_are_all_midi_2() {
         assert!(matches!(out[0], Message::Midi2(..)), "{out:?}");
     }
 }
+
+/// **D.1.5 up-scaling needs no special case**: the near-zero 7-bit value 1
+/// widens above 0 (to 0x0200 at 16 bits, D.1.3's `1 << 9`) and the near-maximum
+/// 126 below 0xFFFF (to 0xFDF7, from the scaleUp7to16 code), so a value never
+/// lands on an extreme it was not.
+/// Spec: m2-104/d.1.5#1
+#[test]
+fn near_extreme_midi_1_values_widen_off_the_extremes() {
+    let mut t = Translator::new();
+    for (velocity, wide) in [(1, 0x0200), (126, 0xFDF7), (127, 0xFFFF)] {
+        let on = Message::midi1(A, Voice1::note_on(NoteNumber::of(60), U7::of(velocity)));
+        let out = t.translate(on).and_then(|u| u.decode().ok());
+        assert!(
+            matches!(out, Some(Message::Midi2(_, Voice2::NoteOn { velocity, .. })) if velocity.get() == wide),
+            "{velocity}: {out:?}"
+        );
+    }
+}

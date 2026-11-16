@@ -9,8 +9,8 @@
 //! reason.
 //!
 //! What a file is, resident or streamed, is the pool's: an
-//! [`audio_file`](crate::audio_file) entry reads as an
-//! [`AudioEntry`](crate::AudioEntry), and a streamed one names the path
+//! `audio_file` entry (with a `tutti-codec` decoder on) reads as an
+//! `AudioEntry`, and a streamed one names the path
 //! [`open_stream`](Session::open_stream) opens.
 
 use std::path::PathBuf;

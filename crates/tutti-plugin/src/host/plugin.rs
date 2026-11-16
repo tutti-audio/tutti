@@ -802,8 +802,7 @@ impl PluginRebinder {
 
     /// Ticks the plugin's lifecycle where its handle does not (a served
     /// plugin's): the restart a change of buses plans runs from here. Main
-    /// thread. A served plugin nobody ticks (one inserted with no rebinder kept)
-    /// never restarts: its slab and node keep the buses they were laid out for.
+    /// thread.
     pub fn tick(&self, main: MainThreadMarker) {
         self.lock().tick(main);
     }

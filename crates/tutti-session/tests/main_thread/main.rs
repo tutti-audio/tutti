@@ -21,7 +21,7 @@ mod pooled;
 #[cfg(feature = "vst2")]
 mod vst2_off_main_handle;
 // Modulation lanes on the reference VST2 plugin's parameters.
-#[cfg(all(feature = "vst2", feature = "modulation"))]
+#[cfg(feature = "vst2")]
 mod vst2_modulation;
 // A pool load's worker output when its session ends: dropped on the main thread, or leaked and counted.
 mod pool_main;
@@ -54,7 +54,7 @@ fn main() {
     let mut cases: Vec<(&str, fn())> = Vec::new();
     #[cfg(feature = "vst2")]
     cases.extend_from_slice(vst2_off_main_handle::CASES);
-    #[cfg(all(feature = "vst2", feature = "modulation"))]
+    #[cfg(feature = "vst2")]
     cases.extend_from_slice(vst2_modulation::CASES);
     #[cfg(feature = "vst2")]
     cases.extend_from_slice(vst2_params::CASES);

@@ -156,6 +156,11 @@ pub fn correlate<S: Sample>(planes: StereoPlanes<'_, S>) -> StereoReading {
 }
 
 /// Meter ballistics: how fast a reading rises and falls.
+///
+/// A one-pole attack/release smoother that shapes how a reading moves: a
+/// meter's face ([`BallisticsMeter`]) and the spectrum meter's
+/// [`Smoothing`](crate::Smoothing). The loudness, peak and correlation readings
+/// are taken from the raw signal, never through it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Ballistics {
     attack: Seconds,

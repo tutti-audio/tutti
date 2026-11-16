@@ -1589,6 +1589,14 @@ mod tests {
     use tutti_types::MaxBlock;
     use tutti_types::Placement;
 
+    /// `GraphEngineError` is an `Error` a caller can box and move; the bound is
+    /// checked where the function is written, so a non-`Send` field fails the build.
+    #[allow(dead_code)]
+    fn the_engine_error_is_boxable() {
+        fn err<T: std::error::Error + Send + Sync + 'static>() {}
+        err::<GraphEngineError>();
+    }
+
     /// A graph walk's `Pieces` that stores a new tempo from "the control
     /// thread" while each piece runs: the store races the walk, staged
     /// deterministically.
