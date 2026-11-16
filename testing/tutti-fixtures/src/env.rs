@@ -60,7 +60,7 @@ impl Drop for ScopedEnv {
 ///
 /// # Panics
 ///
-/// Panics when `PROPTEST_CASES` is set and is not a `u32`.
+/// Panics when `PROPTEST_CASES` is set and is unreadable or not a `u32`.
 pub fn cases(default: u32) -> u32 {
     match std::env::var("PROPTEST_CASES") {
         Ok(v) => v

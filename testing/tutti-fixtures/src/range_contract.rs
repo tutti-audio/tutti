@@ -20,14 +20,16 @@ pub struct RangeContract<'a, T, R> {
     pub invalid: &'a [R],
 }
 
-/// # Panics
-///
-/// Panics, naming the raw, when the type breaks the contract.
+/// Checks that a type keeps the range contract.
 ///
 /// For each valid raw, `new`, `get`, `TryFrom`, `Into` and `of` agree. For each
 /// invalid raw, `new` is `None`, `TryFrom` errs with an error that carries the
 /// raw (its `Debug` shows it) and `of` panics. The serde half is
 /// [`check_range_serde`].
+///
+/// # Panics
+///
+/// Panics, naming the raw, when the type breaks the contract.
 pub fn check_range_contract<T, R>(c: &RangeContract<'_, T, R>)
 where
     T: TryFrom<R> + Into<R> + Copy + PartialEq + Debug,
@@ -60,15 +62,15 @@ where
     }
 }
 
-/// Panics, naming the raw, when the type's serde form is not its range.
-///
-/// # Panics
-///
-/// Panics, naming the raw, when the type breaks the serde contract.
+/// Checks that the type's serde form is its range.
 ///
 /// For each valid raw, the value serialises as the bare raw and deserialises
 /// back to itself. For each invalid raw, deserialising refuses. NaN and
 /// infinity reach serde as JSON `null`.
+///
+/// # Panics
+///
+/// Panics, naming the raw, when the type breaks the serde contract.
 pub fn check_range_serde<T, R>(c: &RangeContract<'_, T, R>)
 where
     T: Copy + PartialEq + Debug + Serialize + DeserializeOwned,

@@ -1,7 +1,8 @@
 //! `check-lints`: the workspace's lint table reaches every member.
 //!
-//! - **Every workspace member's `Cargo.toml` has `[lints]` with `workspace = true`**,
-//!   except the members in [`UNLINTED`], each with its reason. The members come from
+//! - **Every workspace member's `Cargo.toml` takes the workspace lints**, as the
+//!   `[lints]` table with `workspace = true`, the dotted key `lints.workspace = true` or
+//!   the inline `lints = { workspace = true }`, except the members in [`UNLINTED`], each with its reason. The members come from
 //!   the root manifest's `members`. A listed member that takes the table after all,
 //!   or is not a member, is a stale entry.
 //! - **The root `[workspace.lints.rust]` sets `missing_debug_implementations` to
@@ -45,8 +46,19 @@ const LINT: &str = "missing_debug_implementations";
 /// Fewer members than this means the root manifest was not read.
 const MIN_MEMBERS: usize = 20;
 
+/// Whether the manifest sets `workspace = true` under `lints`, in any of the three
+/// forms Cargo reads. A dotted or inline `lints` key belongs to the root table, so it
+/// counts only before the first `[header]`.
 fn takes_workspace_lints(manifest: &Toml) -> bool {
+    let inline = |v: &str| {
+        let body = v.trim().trim_start_matches('{').trim_end_matches('}');
+        body.split(',')
+            .filter_map(|kv| kv.split_once('='))
+            .any(|(k, v)| k.trim() == "workspace" && v.trim() == "true")
+    };
     manifest.value("lints", "workspace") == Some("true")
+        || manifest.value("", "lints.workspace") == Some("true")
+        || manifest.value("", "lints").is_some_and(inline)
 }
 
 pub(super) fn check(tree: &dyn Tree, unlinted: &[(&str, &str)]) -> Report {
@@ -81,7 +93,7 @@ pub(super) fn check(tree: &dyn Tree, unlinted: &[(&str, &str)]) -> Report {
         let takes = takes_workspace_lints(&Toml::parse(&text));
         match unlinted.iter().find(|(c, _)| c == dir) {
             None if !takes => bad.push(format!(
-                "{path}: missing `[lints] workspace = true` (a member that cannot take it yet goes in UNLINTED in xtask/src/gates/lints.rs, with a `temporary:` reason naming its owner)"
+                "{path}: missing `[lints] workspace = true` (or `lints.workspace = true`, or `lints = {{ workspace = true }}`) (a member that cannot take it yet goes in UNLINTED in xtask/src/gates/lints.rs, with a `temporary:` reason naming its owner)"
             )),
             Some((_, why)) if takes => bad.push(format!(
                 "{path}: takes the workspace lints but is listed in UNLINTED ({why}); remove the entry"
@@ -183,6 +195,41 @@ mod tests {
     }
 
     #[test]
+    fn workspace_false_is_not_the_workspace_table() {
+        let r = with(
+            clean(),
+            "crates/c3/Cargo.toml",
+            "[package]\nname = \"x\"\n\n[lints]\nworkspace = false\n",
+        );
+        assert!(r.findings[1].contains("crates/c3/Cargo.toml: missing"));
+    }
+
+    #[test]
+    fn the_dotted_and_inline_forms_take_the_workspace_lints() {
+        for text in [
+            "lints.workspace = true\n\n[package]\nname = \"x\"\n",
+            "lints = { workspace = true }\n\n[package]\nname = \"x\"\n",
+        ] {
+            let r = with(clean(), "crates/c3/Cargo.toml", text);
+            assert!(r.passed(), "{text}: {:?}", r.findings);
+        }
+    }
+
+    #[test]
+    fn the_dotted_and_inline_forms_with_false_fail() {
+        for text in [
+            "lints.workspace = false\n\n[package]\nname = \"x\"\n",
+            "lints = { workspace = false }\n\n[package]\nname = \"x\"\n",
+        ] {
+            let r = with(clean(), "crates/c3/Cargo.toml", text);
+            assert!(
+                r.findings[1].contains("crates/c3/Cargo.toml: missing"),
+                "{text}"
+            );
+        }
+    }
+
+    #[test]
     fn a_workspace_table_that_only_warns_fails() {
         let r = with(
             clean(),
@@ -222,12 +269,6 @@ mod tests {
         let mut m = clean();
         m.files.insert("Cargo.toml".to_owned(), root_with(3));
         assert!(check(&m, &[]).findings[1].contains("the scan is broken"));
-    }
-
-    #[test]
-    fn a_member_with_workspace_lints_passes_beside_one_without_in_the_list() {
-        let r = check(&clean(), &[]);
-        assert!(r.passed(), "{:?}", r.findings);
     }
 
     #[test]
