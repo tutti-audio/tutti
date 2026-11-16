@@ -332,6 +332,9 @@ struct Pending {
     event: PoolEvent,
 }
 
+/// The pool's entries by key, which a wait reads.
+type Slots = BTreeMap<PoolKey, Slot>;
+
 /// The pool: every key's entry, the loads in flight, and the events not yet
 /// reported.
 pub(crate) struct Pool<C: Clock> {
@@ -353,7 +356,7 @@ pub(crate) struct Pool<C: Clock> {
     /// The snapshot holds, with their order.
     ranks: Vec<Rank>,
     last_rank: u64,
-    waiters: Vec<Box<dyn FnMut(&Pool<C>) -> bool + Send>>,
+    waiters: Vec<Box<dyn FnMut(&Slots) -> bool + Send>>,
     /// Runs waiting for an entry to load, in the order they were asked.
     when_loaded: Vec<WhenLoaded<C>>,
     last_when: u64,
@@ -387,6 +390,63 @@ impl<C: Clock> Pool<C> {
             when_loaded: Vec::new(),
             last_when: 0,
         }
+    }
+
+    /// The same pool for a session on clock `K`: every entry, load in flight,
+    /// stage and wait carries over. The runs waiting for an entry to load
+    /// ([`when_loaded`](Self::when_loaded)) are typed to the session they were
+    /// asked of and do not: the caller has run or refused them first
+    /// ([`waiting_runs`](Self::waiting_runs)).
+    #[cfg(feature = "device")]
+    pub(crate) fn rebind<K: Clock>(self) -> Pool<K> {
+        debug_assert!(
+            self.when_loaded.is_empty(),
+            "no run waits when the session changes clock"
+        );
+        Pool {
+            config: self.config,
+            slots: self.slots,
+            last_generation: self.last_generation,
+            flights: self.flights,
+            queue: self.queue,
+            running: self.running,
+            openings: self.openings,
+            main: self.main,
+            main_seen: self.main_seen,
+            queued: self.queued,
+            released: self.released,
+            ranks: self.ranks,
+            last_rank: self.last_rank,
+            waiters: self.waiters,
+            when_loaded: Vec::new(),
+            last_when: self.last_when,
+        }
+    }
+
+    /// Whether a run is due: its entry is declared and loaded.
+    #[cfg(feature = "device")]
+    pub(crate) fn has_due_run(&self) -> bool {
+        self.when_loaded.iter().any(|run| {
+            self.slots
+                .get(&run.key)
+                .is_some_and(|slot| slot.declared && matches!(slot.state, PoolState::Loaded))
+        })
+    }
+
+    /// The entries the runs not yet run wait for, in the order asked: a run
+    /// whose entry is loading, failed or held. (One whose entry is loaded runs
+    /// at the next update; one whose entry was released is dropped there.)
+    #[cfg(feature = "device")]
+    pub(crate) fn waiting_runs(&self) -> Vec<PoolKey> {
+        self.when_loaded
+            .iter()
+            .filter(|run| {
+                self.slots
+                    .get(&run.key)
+                    .is_some_and(|slot| !(slot.declared && matches!(slot.state, PoolState::Loaded)))
+            })
+            .map(|run| run.key.clone())
+            .collect()
     }
 
     /// Whether a stage on the main thread will be run: the caller is on the main
@@ -954,9 +1014,9 @@ impl<C: Clock> Pool<C> {
 
     /// Every declared entry's outcome as a report of `K` keys, `None` while any
     /// declared entry is pending.
-    fn report<K: Clone + 'static>(&self) -> Option<PoolReport<K>> {
+    fn report<K: Clone + 'static>(slots: &Slots) -> Option<PoolReport<K>> {
         let mut entries: Vec<(usize, K, PoolOutcome)> = Vec::new();
-        for (key, slot) in self.slots.iter().filter(|(_, slot)| slot.declared) {
+        for (key, slot) in slots.iter().filter(|(_, slot)| slot.declared) {
             if slot.pending() {
                 return None;
             }
@@ -983,18 +1043,18 @@ impl<C: Clock> Pool<C> {
         &mut self,
         landing: Landing<PoolReport<K>>,
     ) {
-        let waiter = move |pool: &Pool<C>| {
+        let waiter = move |slots: &Slots| {
             if landing.orphaned() {
                 return true;
             }
-            let Some(report) = pool.report::<K>() else {
+            let Some(report) = Self::report::<K>(slots) else {
                 return false;
             };
             landing.land(report);
             true
         };
         let waiter = Box::new(waiter);
-        if !waiter(self) {
+        if !waiter(&self.slots) {
             self.waiters.push(waiter);
         }
     }
@@ -1003,7 +1063,7 @@ impl<C: Clock> Pool<C> {
     /// handle was dropped.
     pub(crate) fn poll_waiters(&mut self) {
         let mut waiters = std::mem::take(&mut self.waiters);
-        waiters.retain_mut(|waiter| !waiter(self));
+        waiters.retain_mut(|waiter| !waiter(&self.slots));
         waiters.append(&mut self.waiters);
         self.waiters = waiters;
     }

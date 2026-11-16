@@ -152,6 +152,7 @@ fn a_select_moved_behind_its_back_is_sent_again() {
 /// 0 to 31 round** (add half the range `1 << 17`, shift 18, clamp to 0x3FFF).
 /// 0x0001_FFFF is below the half (rounds down to 0); 0x0002_0000 is the half
 /// (rounds up to 1); 0xFFFF_FFFF would be 0x4000 and clamps to 0x3FFF.
+/// Spec: m2-115/4.1#1, m2-115/4.4#1, m2-115/4.4#2
 #[test]
 fn rpn_0_to_31_narrows_with_rounding() {
     let data = |value| {
@@ -167,6 +168,7 @@ fn rpn_0_to_31_narrows_with_rounding() {
 /// **Every other controller narrows by the plain shift** (M2-115 section 3.4):
 /// RPN index 32 and up, another bank, and every NRPN keep the top 14 bits,
 /// truncating where the zero-extended rule would round (0x0002_0000 is 0).
+/// Spec: m2-115/2.2#2
 #[test]
 fn other_controllers_narrow_by_shift() {
     let data = |message: Message| {

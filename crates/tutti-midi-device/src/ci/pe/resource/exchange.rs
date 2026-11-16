@@ -379,6 +379,7 @@ impl Link {
 
 // M2-103 §3.2 steps 2 and 3: after the Capabilities Reply the Initiator gets
 // ResourceList, which has an entry for each Resource and none for itself.
+/// Spec: m2-103/9.1#1
 #[test]
 fn the_resource_list_is_got_after_the_capabilities() {
     let link = Link::new(store(), 256);
@@ -566,6 +567,7 @@ fn the_responder_answers_415_for_an_encoding_the_entry_does_not_list() {
 }
 
 // M2-103 Table 15, §15.2: 406 is Flow Control that is not supported.
+/// Spec: m2-103/15.2#3
 #[test]
 fn the_responder_answers_406_for_flow_control_it_does_not_do() {
     let mut raw = Raw::new();
@@ -625,6 +627,7 @@ fn the_responder_answers_400_for_data_that_is_not_the_resources() {
 
 // M2-103 §8.6.2 Tables 19 to 22: a page is `limit` entries from `offset`, and the reply
 // gives the `totalCount` of the list.
+/// Spec: m2-103/8.6.2#4
 #[test]
 fn a_page_is_a_slice_of_the_list_with_its_total_count() {
     let mut raw = Raw::new();
@@ -659,6 +662,7 @@ fn a_page_is_a_slice_of_the_list_with_its_total_count() {
 
 // M2-103 §8.6.2: the walk asks for offset 0, then for the entries after those it
 // has, and ends with `totalCount` of them, in order.
+/// Spec: m2-103/8.6.2#5, m2-103/8.6.2#6
 #[test]
 fn the_walk_gathers_the_pages_of_a_list() {
     let mut link = Link::new(store(), 256);
@@ -697,6 +701,7 @@ fn the_walk_gathers_the_pages_of_a_list() {
 
 // M2-103 §8.6.2: "If offset and limit are not used, the Property Data shall contain
 // the whole list": a list whose entry does not paginate is got in one Get.
+/// Spec: m2-103/8.6.2#7
 #[test]
 fn a_list_that_does_not_paginate_is_got_whole() {
     let mut link = Link::new(store(), 256);
@@ -867,6 +872,7 @@ pub(super) fn program_page(from: u8, to: u8) -> PeJson {
 }
 
 // M2-103 §8.6.2: a reply to a paginated Get shall have `totalCount`.
+/// Spec: m2-103/8.6.2#4
 #[test]
 fn a_page_without_a_total_count_fails_the_walk() {
     let mut script = Script::new(&paginating_list());
@@ -963,6 +969,7 @@ fn set_replaces_the_data_and_get_reads_it_back() {
 
 // M2-103 §10.2 Tables 31 to 38: a Partial Set changes the two elements and the
 // Get after it has them.
+/// Spec: m2-103/10#4, m2-103/10#6
 #[test]
 fn a_partial_set_changes_what_a_later_get_returns() {
     let mut link = Link::new(store(), 256);
@@ -1035,6 +1042,7 @@ fn serving_a_peer_again_keeps_its_subscriptions() {
 
 // M2-103 §11.1, §11.4: Start Subscription gets a `subscribeId` from the Responder, the
 // Initiator has the data, and a `full` update replaces it.
+/// Spec: m2-103/11.1#7
 #[test]
 fn a_full_update_replaces_the_data_of_a_subscription() {
     let mut link = Link::new(store(), 256);
@@ -1077,6 +1085,7 @@ fn a_full_update_replaces_the_data_of_a_subscription() {
 
 // M2-103 §11.1, §10.2: a `partial` update uses the format of a Partial Set, and the
 // Initiator applies it to the data it holds.
+/// Spec: m2-103/11.1#5, m2-103/11.1#6
 #[test]
 fn a_partial_update_changes_the_data_the_initiator_holds() {
     let mut link = Link::new(store(), 256);
@@ -1108,6 +1117,7 @@ fn a_partial_update_changes_the_data_the_initiator_holds() {
 
 // M2-103 §11, §11.1.1: when an Initiator's Set changes the data of a Resource it
 // subscribed to, the Responder sends the update to the subscribers.
+/// Spec: m2-103/11#5
 #[test]
 fn a_set_is_announced_to_the_subscribers() {
     let mut link = Link::new(store(), 256);
@@ -1142,6 +1152,7 @@ fn a_set_is_announced_to_the_subscribers() {
 
 // M2-103 §11.1.1: when the data does not fit one chunk the Responder sends `notify`,
 // and the Initiator gets the Resource again.
+/// Spec: m2-103/11.1.1#4
 #[test]
 fn an_update_too_big_for_a_chunk_is_a_notify_and_a_get() {
     let mut link = Link::new(store(), 128);
@@ -1178,6 +1189,7 @@ fn an_update_too_big_for_a_chunk_is_a_notify_and_a_get() {
 }
 
 // M2-103 §11.5: the Initiator ends a Subscription, and the Responder's table has none.
+/// Spec: m2-103/11.5#1
 #[test]
 fn the_initiator_ends_a_subscription() {
     let mut link = Link::new(store(), 256);
@@ -1311,6 +1323,7 @@ pub(super) fn sent_gets(script: &Script) -> usize {
 
 // M2-103 §11.1: a `full` update of a Simple Property Resource is the value, which is
 // the whole Property Data (§11.1.1).
+/// Spec: m2-103/11.1.1#3
 #[test]
 fn a_full_update_of_a_simple_resource_is_its_value() {
     let (mut script, id) = subscribed_script();
@@ -1395,6 +1408,7 @@ fn an_update_for_an_unknown_subscription_is_answered_with_400() {
 
 // M2-103 §11.2: a failure in reply to a Subscription message may end the
 // Subscription, which this Responder does.
+/// Spec: m2-103/11.2#2
 #[test]
 fn a_failed_reply_to_an_update_ends_the_subscription() {
     let mut link = Link::new(store(), 256);

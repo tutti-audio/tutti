@@ -3,6 +3,7 @@ use super::*;
 use tutti_ump::DeviceIdentity;
 use tutti_ump::ManufacturerId;
 
+/// Spec: m2-101/3.3#1
 #[test]
 fn muid_refuses_the_reserved_range_and_the_broadcast_value() {
     assert_eq!(Muid::new(0), Some(Muid(0)));
@@ -137,6 +138,7 @@ fn a_message_that_is_not_read_keeps_its_header() {
 // §5.3: a message whose Message Format Version has reserved bits set is
 // answered with a NAK (error code 0x02); §5.4: the NAK uses the receiver's own
 // Message Format Version and Status Code 0x02.
+/// Spec: m2-101/5.3#7
 #[test]
 fn reserved_version_bits_are_nakked_with_0x02_in_the_receivers_version() {
     for version in [0x20, 0x40, 0x80, 0xE2, 0x7F] {
@@ -158,6 +160,7 @@ fn reserved_version_bits_are_nakked_with_0x02_in_the_receivers_version() {
 }
 
 // §5.4: Message Format Version 0x00 is deprecated.
+/// Spec: m2-101/5.4#3
 #[test]
 fn version_zero_is_refused() {
     let mut bytes = invalidate();
@@ -168,6 +171,7 @@ fn version_zero_is_refused() {
 // §5.3: a device that receives a version higher than its own processes only the
 // fields of its own version and ignores any appended ones: a version the reserved bits do not
 // forbid is read, with what it appended.
+/// Spec: m2-101/5.3#5, m2-101/5.4#6
 #[test]
 fn a_higher_version_is_read_and_its_appended_fields_ignored() {
     let mut bytes = invalidate();
@@ -232,6 +236,7 @@ fn a_source_no_device_can_own_is_unread_with_nobody_to_answer() {
 // Discovery and Invalidate MUID among them; Tables 6 and 12 give those two the
 // Broadcast MUID as destination. So the other three kinds refuse it, and those
 // two refuse a unicast one.
+/// Spec: m2-101/3.3.3#2, m2-101/3.3.3#3
 #[test]
 fn the_broadcast_rule_is_held_in_both_directions() {
     let mut discovery_to_one = CiMessage::Discovery {

@@ -137,6 +137,7 @@ fn a_text_that_runs_past_the_message_is_malformed() {
 // §5.10.4, rule 2, with its two examples, "Accepted Beat ♪" and
 // "残りわずか5バイト" (the spec writes the escape digits
 // in both cases; the writer writes lower case, the reader takes either).
+/// Spec: m2-101/5.10.4#4
 #[test]
 fn non_ascii_text_is_escaped_as_utf16_and_unescaped() {
     assert_eq!(wire("Accepted Beat ♪"), "Accepted Beat \\u266a");
@@ -161,6 +162,7 @@ fn non_ascii_text_is_escaped_as_utf16_and_unescaped() {
 
 // §5.10.4, rule 1: the backslash has the special meaning it has in JSON, and a
 // slash may optionally be escaped, so either spelling is read.
+/// Spec: m2-101/5.10.4#3
 #[test]
 fn the_backslash_is_escaped_and_a_slash_is_either() {
     assert_eq!(wire("a\\b"), "a\\\\b");
@@ -175,6 +177,7 @@ fn the_backslash_is_escaped_and_a_slash_is_either() {
 
 // §5.10.4, rule 3: a message uses no ASCII below 0x20 except 0x0A (line feed);
 // other such characters, tab and carriage return among them, are ignored.
+/// Spec: m2-101/5.10.4#5, m2-101/5.10.4#6
 #[test]
 fn control_characters_are_escaped_on_write_and_ignored_raw_on_read() {
     // The line feed is the one raw control character.

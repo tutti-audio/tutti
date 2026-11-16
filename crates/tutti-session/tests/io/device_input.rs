@@ -315,3 +315,42 @@ fn removing_an_inputs_node_closes_the_capture_and_a_restart_does_not_reopen_it()
         );
     }
 }
+
+/// **A switch to the timer ends the captures**: each input the session held is
+/// closed (the capture stream drops) and reported once as
+/// `DeviceEvent::InputClosed`; the input's node stays in the graph.
+#[test]
+fn a_switch_to_the_timer_ends_every_capture_and_reports_each_once() {
+    let record = Arc::new(Mutex::new(Record::default()));
+    let (live, _stream) = live(&record);
+    let mut session = live;
+    let first = session
+        .add_input(InputConfig::default().channels(&[0, 1]))
+        .expect("opens");
+    let second = session.add_input(InputConfig::default()).expect("opens");
+    let mut system = session
+        .into_system_clock()
+        .unwrap_or_else(|e| panic!("switches: {}", e.error()));
+    assert_eq!(
+        record.lock().unwrap().log,
+        ["open 48000", "open 48000", "closed", "closed"],
+        "both capture streams dropped"
+    );
+    let events = system.update();
+    let closed: Vec<_> = events
+        .iter()
+        .filter_map(|e| match e {
+            SessionEvent::Device(DeviceEvent::InputClosed { input }) => Some(*input),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(closed, [first, second], "{events:?}");
+    let again = system.update();
+    assert!(
+        !again
+            .iter()
+            .any(|e| matches!(e, SessionEvent::Device(DeviceEvent::InputClosed { .. }))),
+        "reported once"
+    );
+    assert!(system.graph_ref().contains(first.node()), "the node stays");
+}

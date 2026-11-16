@@ -281,6 +281,7 @@ fn rpn_and_nrpn_keep_their_own_numbers() {
 // fields and are zero-extended; every other is a 14-bit number, scaled
 // Min-Center-Max (section 3: maximum to maximum, centre to centre).
 
+/// Spec: m2-115/4.1#1, m2-115/4.3#1
 #[test]
 fn bank_0_registered_controllers_0_to_31_are_zero_extended() {
     for index in [0, 1, 6, 31] {
@@ -302,7 +303,7 @@ fn bank_0_registered_controllers_0_to_31_are_zero_extended() {
     }
 }
 
-/// Spec: m2-104/d.1.1#1
+/// Spec: m2-104/d.1.1#1, m2-115/3.1#1
 #[test]
 fn other_controllers_are_scaled_min_center_max() {
     // Registered bank 0 index 32, registered bank 1, and every NRPN.
@@ -464,7 +465,7 @@ fn bank_select_rides_on_the_next_program_change_only() {
     );
 }
 
-/// Spec: m2-104/d.3.1#1, m2-104/d.3.1#2
+/// Spec: m2-104/d.3.1#1, m2-104/d.3.1#2, m2-115/3.1#1
 #[test]
 fn stateless_messages_are_widened() {
     let mut t = Translator::new();

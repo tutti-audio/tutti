@@ -280,6 +280,15 @@ impl Inputs {
             .retain(|h| tutti_graph::NodeKey::from(h.node) != node);
     }
 
+    /// Closes every input: the capture streams drop and no restart reopens
+    /// them. The inputs closed, in the order they were added.
+    pub(crate) fn close_all(&mut self) -> Vec<Input> {
+        std::mem::take(&mut self.held)
+            .into_iter()
+            .map(|held| Input { node: held.node })
+            .collect()
+    }
+
     /// What a take reads the device's delay through.
     pub(crate) fn latency_probe(&self) -> crate::take::LatencyProbe {
         crate::take::LatencyProbe::new(Arc::clone(&self.latency), self.output_latency.clone())
