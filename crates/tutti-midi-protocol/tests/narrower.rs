@@ -414,22 +414,30 @@ fn avoided_extremes_cover_velocity_bend_pressure_and_controller_data() {
     );
 }
 
-/// **A zero-extended Registered Controller is no scaled value**: its halves are
-/// two fields, and no extreme of it is special (M2-115 section 4.1), so
-/// the avoiding mode narrows it as the default does.
+/// **A zero-extended Registered Controller is no scaled value** (D.1.5 names
+/// no property; M2-115 section 4.1 makes these fixed-point numbers or pairs of
+/// fields): both ends narrow as in the default. 1 rounds to 0 and 0xFFFF_FFFE
+/// clamps to the 14-bit maximum, MSB 127, LSB 127.
 #[test]
 fn avoided_extremes_leave_zero_extended_registered_controllers() {
-    let mut n = avoiding();
-    // RPN 0/0 at the smallest nonzero: rounds to 0 and stays 0.
-    assert_eq!(
-        feed(&mut n, rpn(A, 0, 0, 1)),
-        [
+    for (value, msb, lsb) in [(1, 0, 0), (0xFFFF_FFFE, 0x7F, 0x7F)] {
+        let want = [
             vec![0xB0, 101, 0],
             vec![0xB0, 100, 0],
-            vec![0xB0, 6, 0],
-            vec![0xB0, 38, 0]
-        ]
-    );
+            vec![0xB0, 6, msb],
+            vec![0xB0, 38, lsb],
+        ];
+        assert_eq!(
+            feed(&mut avoiding(), rpn(A, 0, 0, value)),
+            want,
+            "{value:#x}"
+        );
+        assert_eq!(
+            feed(&mut Narrower::new(), rpn(A, 0, 0, value)),
+            want,
+            "{value:#x}"
+        );
+    }
 }
 
 fn zone() -> MpeZoneConfig {
@@ -563,4 +571,121 @@ fn the_default_mode_is_the_default_translation() {
     assert_eq!(Narrower::new().mode(), TranslationMode::default());
     assert!(mpe(zone()).mode().is_alternate());
     assert!(avoiding().mode().is_alternate());
+}
+
+fn mpe_avoiding() -> Narrower {
+    Narrower::with_mode(TranslationMode {
+        extremes: ExtremeValues::Avoided,
+        per_note: PerNoteTranslation::Mpe(zone()),
+    })
+}
+
+/// **Every message that is not per-note goes on the Manager Channel** (M2-120
+/// sections 4.1 to 4.6): a Pitch Bend, a Program Change with its Bank Select
+/// and a Control Change from source Ch6 (index 5) go on Ch1 (index 0), the
+/// lower zone's Manager, not on Ch6 nor on a member.
+/// Spec: m2-104/d.2.8#1
+#[test]
+fn mpe_sends_channel_messages_on_the_manager_channel() {
+    let mut n = mpe(zone());
+    let from = Address::first(MidiChannel::of(5));
+    let bend = Message::Midi2(from, Voice2::PitchBend(BendValue::new(0x8000_0000)));
+    assert_eq!(feed(&mut n, bend), [vec![0xE0, 0x00, 0x40]]);
+    let program = Message::Midi2(
+        from,
+        Voice2::ProgramChange {
+            program: U7::of(8),
+            bank: Some(Bank {
+                msb: U7::of(1),
+                lsb: U7::of(3),
+            }),
+        },
+    );
+    assert_eq!(
+        feed(&mut n, program),
+        [vec![0xB0, 0, 1], vec![0xB0, 32, 3], vec![0xC0, 8]]
+    );
+    let volume = Message::Midi2(
+        from,
+        Voice2::ControlChange {
+            controller: CCNumber::of(7),
+            value: ControlValue::new(0xFFFF_FFFF),
+        },
+    );
+    assert_eq!(feed(&mut n, volume), [vec![0xB0, 7, 0x7F]]);
+}
+
+/// **Both modes together**: a per-note bend of 0x0000_0001 is the 14-bit 1
+/// (LSB 1, MSB 0) where the shift gives 0, and a Poly Pressure of 0xFFFF_FFFE
+/// is Channel Pressure 126 where the shift gives 127.
+/// Spec: m2-104/d.1.5#1
+#[test]
+fn mpe_and_avoided_extremes_combine() {
+    let mut n = mpe_avoiding();
+    let _ = feed(&mut n, note_on(60));
+    assert_eq!(feed(&mut n, per_note_bend(60, 1)), [vec![0xE1, 0x01, 0x00]]);
+    let pressure = Message::Midi2(
+        A,
+        Voice2::PolyPressure {
+            note: NoteNumber::of(60),
+            value: ControlValue::new(0xFFFF_FFFE),
+        },
+    );
+    assert_eq!(feed(&mut n, pressure), [vec![0xD1, 126]]);
+    let slide = Message::Midi2(
+        A,
+        Voice2::AssignablePerNote {
+            note: NoteNumber::of(60),
+            controller: 74,
+            value: ControlValue::new(1),
+        },
+    );
+    assert_eq!(feed(&mut n, slide), [vec![0xB1, 74, 1]]);
+}
+
+/// **The same key struck twice ends its first note** on the same member, so a
+/// single Note Off later ends the only one sounding.
+/// Spec: m2-104/d.2.8#1
+#[test]
+fn mpe_retriggers_a_key_on_its_member_after_a_note_off() {
+    let mut n = mpe(zone());
+    let _ = feed(&mut n, note_on(60));
+    assert_eq!(
+        feed(&mut n, note_on(60)),
+        [vec![0x81, 60, 0], vec![0x91, 60, 0x40]]
+    );
+}
+
+/// **A reused member starts from reset expression**: a slide sent to the first
+/// note is zeroed (M2-120 section 5 has initial values sent before a Note On
+/// and states none for CC 74) before the next note on that channel.
+/// Spec: m2-104/d.2.8#1
+#[test]
+fn mpe_zeroes_a_reused_members_slide() {
+    let mut n = mpe(one_member_zone());
+    let _ = feed(&mut n, note_on(60));
+    let slide = Message::Midi2(
+        A,
+        Voice2::AssignablePerNote {
+            note: NoteNumber::of(60),
+            controller: 74,
+            value: ControlValue::new(0xFFFF_FFFF),
+        },
+    );
+    let _ = feed(&mut n, slide);
+    let _ = feed(&mut n, note(false, 0));
+    // One member only: the next note reuses Ch2.
+    assert_eq!(
+        feed(&mut n, note_on(62)),
+        [vec![0xB1, 74, 0], vec![0x91, 62, 0x40]]
+    );
+}
+
+fn one_member_zone() -> MpeZoneConfig {
+    MpeZoneConfig::lower(
+        1,
+        PitchBendSensitivity::MPE_MASTER_DEFAULT,
+        PitchBendSensitivity::MPE_MEMBER_DEFAULT,
+    )
+    .unwrap()
 }

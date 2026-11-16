@@ -27,10 +27,11 @@ pub enum ExtremeValues {
     /// maximum to at most the maximum less 1. The minimum and the maximum
     /// narrow to themselves. It covers every Min-Center-Max scaled value: a
     /// velocity, a pressure, a Control Change, a Pitch Bend and the data of a
-    /// Registered or Assignable Controller that is scaled that way. The
-    /// zero-extended Registered Controllers (M2-115 section 4.1) are fixed-point
-    /// numbers or pairs of fields with no special extreme, and narrow as in
-    /// [`Scaled`](Self::Scaled).
+    /// Registered or Assignable Controller that is scaled that way. D.1.5 says
+    /// "some properties" and names none; this reads the Registered Controllers
+    /// that M2-115 section 4.1 zero-extends (indices 0 to 31) as not among
+    /// them, since they are fixed-point numbers or pairs of fields with no
+    /// special extreme, and they narrow as in [`Scaled`](Self::Scaled).
     Avoided,
 }
 

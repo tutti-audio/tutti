@@ -7,7 +7,7 @@ use tutti_ump::{
     Address, CCNumber, Midi1Bytes, MidiChannel, MidiGroup, NoteNumber, U7, U14, Voice1, Voice2,
 };
 
-use crate::{ExtremeValues, MpeZoneConfig, narrow_bend, narrow_value};
+use crate::{ExtremeValues, MpeZoneConfig};
 
 /// A note a member channel plays: the channel it was sent on and its number.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -24,10 +24,11 @@ struct Member {
     started: u32,
     /// The tick the channel was last freed: the longest idle is reused first.
     released: u32,
-    /// A bend or pressure was sent since the last Note On, so the next note
-    /// starts from a reset one.
+    /// A bend, pressure or Control Change 74 was sent since the last Note On,
+    /// so the next note starts from a reset one.
     bent: bool,
     pressed: bool,
+    slid: bool,
 }
 
 /// The sixteen channels of every Group.
@@ -46,6 +47,7 @@ impl Members {
                 released: 0,
                 bent: false,
                 pressed: false,
+                slid: false,
             }; MidiChannel::COUNT as usize]; MidiGroup::COUNT as usize],
             tick: 0,
         }
@@ -75,7 +77,8 @@ impl Members {
             Voice2::NoteOn { note, .. } => {
                 self.tick = self.tick.wrapping_add(1);
                 let tick = self.tick;
-                let member = find(members, note).unwrap_or_else(|| {
+                let held = find(members, note);
+                let member = held.unwrap_or_else(|| {
                     let free = zone
                         .member_channels()
                         .filter(|c| members[c.index()].held.is_none())
@@ -83,7 +86,7 @@ impl Members {
                     let chosen = free.unwrap_or_else(|| {
                         zone.member_channels()
                             .min_by_key(|c| Reverse(tick.wrapping_sub(members[c.index()].started)))
-                            .unwrap_or(zone.master_channel())
+                            .expect("an MPE zone has at least one member")
                     });
                     // A member that still plays is stolen: its note ends first.
                     if let Some(old) = members[chosen.index()].held {
@@ -95,6 +98,16 @@ impl Members {
                     }
                     chosen
                 });
+                if held.is_some() {
+                    // The same key struck again ends its earlier note.
+                    send(
+                        member,
+                        Voice1::NoteOff {
+                            note,
+                            velocity: U7::of(0),
+                        },
+                    );
+                }
                 let slot = &mut members[member.index()];
                 if slot.bent {
                     send(member, Voice1::PitchBend(U14::of(0x2000)));
@@ -102,11 +115,24 @@ impl Members {
                 if slot.pressed {
                     send(member, Voice1::ChannelPressure(U7::of(0)));
                 }
+                // M2-120 section 5 has a sender give initial values before a
+                // Note On but states none for Control Change 74; 0 is the
+                // lowest.
+                if slot.slid {
+                    send(
+                        member,
+                        Voice1::ControlChange {
+                            controller: CCNumber::BRIGHTNESS,
+                            value: U7::of(0),
+                        },
+                    );
+                }
                 *slot = Member {
                     held: Some(Held { source, note }),
                     started: tick,
                     bent: false,
                     pressed: false,
+                    slid: false,
                     ..*slot
                 };
                 if let Ok(on) = extremes.narrow(voice) {
@@ -126,13 +152,17 @@ impl Members {
             Voice2::PerNotePitchBend { note, value } => {
                 if let Some(member) = find(members, note) {
                     members[member.index()].bent = true;
-                    send(member, Voice1::PitchBend(narrow_bend(value)));
+                    if let Ok(bend) = extremes.narrow(Voice2::PitchBend(value)) {
+                        send(member, bend);
+                    }
                 }
             }
             Voice2::PolyPressure { note, value } => {
                 if let Some(member) = find(members, note) {
                     members[member.index()].pressed = true;
-                    send(member, Voice1::ChannelPressure(narrow_value(value)));
+                    if let Ok(pressure) = extremes.narrow(Voice2::ChannelPressure(value)) {
+                        send(member, pressure);
+                    }
                 }
             }
             Voice2::AssignablePerNote {
@@ -140,14 +170,18 @@ impl Members {
                 controller,
                 value,
             } if controller == CCNumber::BRIGHTNESS.get() => {
+                // Index 74 is the MPE convention for the third dimension of
+                // control (M2-120 section 4.5), the one `MpeIngest` makes of
+                // Control Change 74 on a member channel.
                 if let Some(member) = find(members, note) {
-                    send(
-                        member,
-                        Voice1::ControlChange {
-                            controller: CCNumber::BRIGHTNESS,
-                            value: narrow_value(value),
-                        },
-                    );
+                    members[member.index()].slid = true;
+                    let slide = Voice2::ControlChange {
+                        controller: CCNumber::BRIGHTNESS,
+                        value,
+                    };
+                    if let Ok(slide) = extremes.narrow(slide) {
+                        send(member, slide);
+                    }
                 }
             }
             Voice2::RegisteredPerNote { .. }

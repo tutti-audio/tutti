@@ -72,7 +72,7 @@ struct Channel {
 /// as MPE on a zone's member channels (D.2.8, [`PerNoteTranslation`]). In the MPE
 /// mode a Note On takes the member idle longest, or steals the oldest note's
 /// when all play; a per-note message for a note that does not sound sends
-/// nothing, and a message that is not per-note stays on its own channel.
+/// nothing, and every message that is not per-note goes on the zone's Manager Channel.
 ///
 /// A Control Change that passes through and moves what this narrower tracks
 /// (CC 101, 100, 99, 98, CC 0 or 32, or CC 121) makes it forget that state, so
@@ -135,7 +135,8 @@ impl Narrower {
 
     /// A narrower that translates by `mode`: [`new`](Self::new) is the Default
     /// Translation, and any other mode is an Alternate Translation Mode
-    /// (M2-104 D.4).
+    /// (M2-104 D.4). [`reset`](Self::reset) in the MPE mode forgets the notes
+    /// held without sending their Note Offs.
     #[must_use]
     pub fn with_mode(mode: TranslationMode) -> Self {
         let members =
@@ -155,7 +156,8 @@ impl Narrower {
 
     /// Forgets every selection and bank, as at [`new`](Self::new): the next
     /// controller or bank sends its select or Bank Select again. Call it when
-    /// the receiver may have lost its state (it was reset, or reopened).
+    /// the receiver may have lost its state (it was reset, or reopened). In the
+    /// MPE mode the notes it holds are forgotten without a Note Off.
     pub fn reset(&mut self) {
         *self = Self::with_mode(self.mode);
     }
@@ -188,6 +190,17 @@ impl Narrower {
         {
             return;
         }
+        // The zone is the destination of every other message (M2-120 sections
+        // 4.1 to 4.6: zone-wide messages, Program Change and Bank Select are
+        // the Manager Channel's), so the source channel names no MIDI 1.0
+        // channel.
+        let address = match self.mode.per_note {
+            PerNoteTranslation::Mpe(zone) => Address {
+                channel: zone.master_channel(),
+                ..address
+            },
+            PerNoteTranslation::Dropped => address,
+        };
         let channel = &mut self.channels[address.index()];
         let plain = |out: &mut dyn FnMut(Midi1Bytes)| {
             if let Ok(voice) = extremes.narrow(voice) {
