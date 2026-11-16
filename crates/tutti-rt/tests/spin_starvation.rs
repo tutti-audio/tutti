@@ -37,8 +37,8 @@
 //!   This case is asserted.
 //!
 //! A run whose caller found the task already finished (its wait under
-//! 1 ms: the helper ran its whole task before the caller's 20 µs sleep woke,
-//! which an equal-priority FIFO helper can do) did not exercise the wait. It
+//! 1 ms: the helper ran its whole task before the caller woke from its block
+//! on the helper's signal, which an equal-priority FIFO helper can do) did not exercise the wait. It
 //! is reported as such, and the assertion needs at least one run that did.
 //!
 //! In a real deployment the helper is not pinned, and the kernel's RT
@@ -129,12 +129,12 @@ fn measure(cpu: usize, caller: Policy, helper: Policy, iters: u64) -> Option<Out
     let mut g = TaskGraph::new(&[0, 1], &[0, 1, 1], &[1]);
     g.begin();
     let g = &g;
-    let holding = AtomicBool::new(false);
+    let (holding_tx, holding_rx) = std::sync::mpsc::channel::<()>();
     let refused = AtomicBool::new(false);
     let finished = AtomicBool::new(false);
     let aborted = AtomicBool::new(false);
     let wait = std::thread::scope(|s| {
-        let (holding, refused, finished, aborted) = (&holding, &refused, &finished, &aborted);
+        let (refused, finished, aborted) = (&refused, &finished, &aborted);
         s.spawn(move || {
             pin(cpu);
             if !set_policy(helper) {
@@ -144,7 +144,7 @@ fn measure(cpu: usize, caller: Policy, helper: Policy, iters: u64) -> Option<Out
             }
             g.work(Participant::Helper(1), BlockWaits::DEFAULT, |t| {
                 if t == 0 {
-                    holding.store(true, Ordering::Release);
+                    let _ = holding_tx.send(());
                     burn(iters);
                     std::thread::sleep(Duration::from_millis(1));
                     burn(iters);
@@ -174,10 +174,9 @@ fn measure(cpu: usize, caller: Policy, helper: Policy, iters: u64) -> Option<Out
                 g.abort();
                 return Duration::ZERO;
             }
-            // Sleep, not spin, so the helper gets the core to take task 0.
-            while !holding.load(Ordering::Acquire) && !g.is_aborted() {
-                std::thread::sleep(Duration::from_micros(20));
-            }
+            // Block, not spin, so the helper gets the core to take task 0. The
+            // helper's refusal drops its sender, which ends the wait.
+            let _ = holding_rx.recv();
             let t = Instant::now();
             g.work(Participant::Caller, BlockWaits::DEFAULT, |_| {});
             let wait = t.elapsed();

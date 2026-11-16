@@ -55,14 +55,18 @@ fn the_caller_yields_while_a_helper_holds_a_task() {
 
 /// The caller yields after the budget it is given, not the default: with
 /// a budget of an hour and its clock stepping the default budget per
-/// read, it waits 50 ms on a helper holding task 0 without yielding.
-/// Linux only, as the yield is.
+/// read, it reads the clock `READS` times waiting on a helper holding
+/// task 0 without yielding. The helper holds the task until it sees the
+/// reads counted; the 10 s bound is only how a caller that never waits
+/// fails rather than hangs. Linux only, as the yield is.
 #[test]
 fn the_caller_yields_after_the_pools_budget() {
     use std::sync::atomic::AtomicU32;
     use std::sync::mpsc;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
     static YIELDED: AtomicU32 = AtomicU32::new(0);
+    static READ: AtomicU32 = AtomicU32::new(0);
+    const READS: u32 = 8;
     let waits = BlockWaits {
         caller_yield_after: Duration::from_secs(3600),
         ..BlockWaits::DEFAULT
@@ -76,17 +80,24 @@ fn the_caller_yields_after_the_pools_budget() {
             g.work(Participant::Helper(1), waits, |t| {
                 if t == 0 {
                     held_tx.send(()).unwrap();
-                    std::thread::sleep(Duration::from_millis(50));
+                    let deadline = Instant::now() + Duration::from_secs(10);
+                    while READ.load(std::sync::atomic::Ordering::Acquire) < READS
+                        && Instant::now() < deadline
+                    {
+                        std::thread::yield_now();
+                    }
                 }
             });
         });
         held_rx.recv().unwrap();
         crate::spin::tests::yielding::count_yields_into(&YIELDED);
+        crate::spin::tests::count_clock_reads_into(&READ);
         crate::spin::tests::step_clock(BlockWaits::DEFAULT.caller_yield_after);
         g.work(Participant::Caller, waits, |t| {
             panic!("the caller took task {t}, which the helper holds or runs inline")
         });
     });
     assert!(g.done());
+    assert!(READ.load(std::sync::atomic::Ordering::Acquire) >= READS);
     assert_eq!(YIELDED.load(std::sync::atomic::Ordering::Acquire), 0);
 }

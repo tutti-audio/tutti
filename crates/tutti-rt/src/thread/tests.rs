@@ -19,7 +19,6 @@ fn dropping_the_handle_stops_and_joins() {
             saw_stop.store(true, Ordering::SeqCst);
             // Work after the stop is seen, which a drop that did not join
             // would return before.
-            std::thread::sleep(Duration::from_millis(50));
             finished.store(true, Ordering::SeqCst);
         })
         .unwrap()
@@ -71,22 +70,19 @@ fn a_panic_comes_back_from_join_and_not_from_drop() {
     drop(dropped);
 }
 
-/// A body asleep on the token wakes on the stop, long before its timeout.
+/// A body asleep on the token wakes on the stop and reports it, where a wait
+/// that slept out its timeout would report no stop.
 #[test]
 fn a_waiting_body_wakes_on_stop() {
     let (ready_tx, ready_rx) = mpsc::channel();
     let handle = spawn_named("sleeper", None, move |token| {
         ready_tx.send(()).unwrap();
-        let started = Instant::now();
-        let stopped = token.wait(Duration::from_secs(10));
-        (stopped, started.elapsed())
+        token.wait(Duration::from_secs(10))
     })
     .unwrap();
     ready_rx.recv().unwrap();
     handle.token().stop();
-    let (stopped, slept) = handle.join().unwrap();
-    assert!(stopped, "wait reports the stop");
-    assert!(slept < Duration::from_secs(5), "woke after {slept:?}");
+    assert!(handle.join().unwrap(), "wait reports the stop");
 }
 
 /// A wait that nobody stops returns `false` after its timeout.
@@ -136,13 +132,7 @@ fn a_requested_priority_reports_its_outcome() {
 /// without requesting the stop.
 #[test]
 fn join_returns_the_value_and_does_not_stop() {
-    let handle = spawn_named("returner", None, |token| {
-        // Work that takes a moment, so a join that returned early or a stop
-        // from the join would show.
-        std::thread::sleep(Duration::from_millis(30));
-        (7_u32, token.is_stopped())
-    })
-    .unwrap();
+    let handle = spawn_named("returner", None, |token| (7_u32, token.is_stopped())).unwrap();
     let token = handle.token();
     assert_eq!(handle.join().unwrap(), (7, false), "the body ran unstopped");
     assert!(!token.is_stopped(), "join does not request the stop");
@@ -175,6 +165,9 @@ fn stop_within_hands_back_a_body_that_has_not_ended() {
     let handle = handle
         .stop_within(Duration::from_millis(20))
         .expect_err("the body ignores the stop and is still blocked");
+    // A lower bound is the contract (the call returns only once the bound
+    // has passed, on the monotonic clock `Instant` reads), so it cannot flake
+    // under load; an upper bound is not asserted.
     assert!(
         asked.elapsed() >= Duration::from_millis(20),
         "the bound is waited out"
@@ -205,5 +198,32 @@ fn stop_within_returns_a_panic_as_panicked() {
             name: "panics".to_owned(),
             message: "on stop".to_owned()
         })
+    );
+}
+
+/// A deadline has the time left until it and nothing from its instant on,
+/// at constructed instants.
+#[test]
+fn a_deadline_has_the_time_left_until_its_instant() {
+    let t0 = Instant::now();
+    let deadline = Deadline::after(t0, Duration::from_secs(10));
+    assert_eq!(deadline.left(t0), Some(Duration::from_secs(10)));
+    assert_eq!(
+        deadline.left(t0 + Duration::from_secs(4)),
+        Some(Duration::from_secs(6))
+    );
+    assert_eq!(deadline.left(t0 + Duration::from_secs(10)), None);
+    assert_eq!(deadline.left(t0 + Duration::from_secs(11)), None);
+    assert_eq!(Deadline::after(t0, Duration::ZERO).left(t0), None);
+}
+
+/// A timeout the clock cannot represent never ends.
+#[test]
+fn an_overflowing_deadline_never_ends() {
+    let t0 = Instant::now();
+    let deadline = Deadline::after(t0, Duration::MAX);
+    assert_eq!(
+        deadline.left(t0 + Duration::from_secs(1_000_000)),
+        Some(Duration::MAX)
     );
 }

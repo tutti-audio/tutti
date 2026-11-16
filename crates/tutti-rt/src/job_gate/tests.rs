@@ -106,9 +106,9 @@ fn a_panicking_job_closes_the_gate() {
 }
 
 /// **`run` returns only after a helper inside the job has left it.** The
-/// helper stays in the job for 20 ms once the caller's share is done, then
-/// records that it left. Both waits are bounded, so a failure is an
-/// assertion rather than a hang.
+/// helper stays in the job until the caller has closed the gate, which the
+/// close does before it waits, then records that it left. Every wait is
+/// bounded, so a failure is an assertion rather than a hang.
 #[test]
 fn run_waits_for_a_helper_still_inside() {
     use std::time::{Duration, Instant};
@@ -133,7 +133,10 @@ fn run_waits_for_a_helper_still_inside() {
                     }
                 } else {
                     inside.store(true, Ordering::Release);
-                    std::thread::sleep(Duration::from_millis(20));
+                    let deadline = Instant::now() + Duration::from_secs(10);
+                    while gate.state.load(Ordering::Acquire) & 1 == 1 && Instant::now() < deadline {
+                        std::thread::yield_now();
+                    }
                     left.store(true, Ordering::Release);
                 }
             },
