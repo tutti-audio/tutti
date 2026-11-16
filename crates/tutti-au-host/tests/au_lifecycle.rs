@@ -672,10 +672,10 @@ const FRAMES: usize = 64;
 
 /// The unit is alive while the render thread still renders it, however the control side lets
 /// go; the render thread's drop of the last reference disposes nothing, it hands the
-/// disposal to the collector, and the control side's tick disposes it, once.
+/// disposal to the collector, and the control side's tick disposes it, once, on the thread
+/// that owns it.
 ///
-/// Spec: AudioComponent.h, `AudioComponentInstanceDispose`: the instance is disposed once,
-/// on the thread that owns it.
+/// Spec: au.select.AudioComponentInstanceDispose
 #[test]
 fn an_in_process_au_dropped_while_rendered_is_disposed_by_the_control_tick() {
     let main = main_thread();
