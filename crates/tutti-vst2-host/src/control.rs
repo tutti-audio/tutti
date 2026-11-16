@@ -22,6 +22,7 @@ pub(crate) fn plugin_error(error: Vst2Error) -> PluginError {
     match error {
         Vst2Error::LoadFailed { stage, reason, .. } => PluginError::Load { stage, reason },
         Vst2Error::StateError(reason) => PluginError::State(reason),
+        Vst2Error::StateFrame(frame) => PluginError::State(frame.to_string()),
         Vst2Error::EditorError(reason) => {
             PluginError::Editor(tutti_plugin_types::EditorError::PluginError(reason))
         }

@@ -38,7 +38,7 @@ use clap_sys::process::{
     CLAP_PROCESS_TAIL,
 };
 
-use crate::library::chars_to_string;
+use tutti_plugin_types::read_c_chars;
 
 /// How serious a `clap.log` line is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -287,8 +287,8 @@ impl ParamInfo {
         Self {
             id: info.id,
             flags: info.flags,
-            name: chars_to_string(&info.name),
-            module: chars_to_string(&info.module),
+            name: read_c_chars(&info.name),
+            module: read_c_chars(&info.module),
             min_value: info.min_value,
             max_value: info.max_value,
             default_value: info.default_value,
@@ -333,7 +333,7 @@ pub struct NoteName {
 impl NoteName {
     pub(crate) fn from_raw(info: &clap_note_name) -> Self {
         Self {
-            name: chars_to_string(&info.name),
+            name: read_c_chars(&info.name),
             port: info.port,
             channel: info.channel,
             key: info.key,
@@ -360,7 +360,7 @@ impl NotePortDecl {
             id: info.id,
             supported_dialects: info.supported_dialects,
             preferred_dialect: info.preferred_dialect,
-            name: chars_to_string(&info.name),
+            name: read_c_chars(&info.name),
         }
     }
 }
@@ -390,7 +390,7 @@ impl AudioPortsConfig {
     pub(crate) fn from_raw(config: &clap_audio_ports_config) -> Self {
         Self {
             id: config.id,
-            name: chars_to_string(&config.name),
+            name: read_c_chars(&config.name),
             input_port_count: config.input_port_count,
             output_port_count: config.output_port_count,
             has_main_input: config.has_main_input,

@@ -17,7 +17,9 @@ use std::sync::{Arc, Mutex, TryLockError};
 use std::thread::ThreadId;
 use std::{fmt, ptr, slice};
 
-use tutti_plugin_types::{MainThreadMarker, MainWorkHandle, WindowHandle, ffi_guard};
+use tutti_plugin_types::{
+    MainThreadMarker, MainWorkHandle, WindowHandle, c_str_prefix, ffi_guard, read_c_str,
+};
 
 use crate::{
     api::{self, AEffect, ChunkError, PluginFlags, PluginMain, Supported, TimeInfo, consts::*},
@@ -1039,11 +1041,10 @@ impl PluginInstance {
             if found.iter().any(|p| p.id == id) {
                 break;
             }
-            let name = String::from_utf8_lossy(&buf)
-                .chars()
-                .take_while(|c| *c != '\0')
-                .collect();
-            found.push(ShellPlugin { id, name });
+            found.push(ShellPlugin {
+                id,
+                name: read_c_str(&buf),
+            });
         }
         found
     }
@@ -1441,16 +1442,6 @@ fn zero_outputs<T: Float>(buffer: &mut AudioBuffer<'_, T>) {
     }
 }
 
-/// `string` up to its first NUL, then cut to at most `max_len` bytes at a char boundary.
-fn truncated_c_str(string: &str, max_len: usize) -> &str {
-    let string = string.split('\0').next().unwrap_or("");
-    let mut end = string.len().min(max_len);
-    while !string.is_char_boundary(end) {
-        end -= 1;
-    }
-    &string[..end]
-}
-
 /// The least room a string the plugin writes gets, whatever the spec's length is.
 const MIN_STRING_BUFFER: usize = 256;
 
@@ -1503,8 +1494,8 @@ trait Dispatch {
         max_len: usize,
         opt: f32,
     ) -> isize {
-        let string = CString::new(truncated_c_str(string, max_len))
-            .expect("`truncated_c_str` holds no interior NUL");
+        let string = CString::new(c_str_prefix(string, max_len.saturating_add(1)))
+            .expect("`c_str_prefix` holds no interior NUL");
         self.dispatch(opcode, index, value, string.as_ptr() as *mut c_void, opt)
     }
 
@@ -1524,10 +1515,7 @@ trait Dispatch {
         // more, and hosts commonly offer 256, so the buffer is never smaller than that.
         let mut buf = vec![0; max.max(MIN_STRING_BUFFER)];
         self.dispatch(opcode, index, value, buf.as_mut_ptr() as *mut c_void, opt);
-        String::from_utf8_lossy(&buf)
-            .chars()
-            .take_while(|c| *c != '\0')
-            .collect()
+        read_c_str(&buf)
     }
 }
 
@@ -4413,18 +4401,6 @@ mod tests {
             before,
             "the render path took the registry lock"
         );
-    }
-
-    /// `truncated_c_str`, directly: the NUL cut, the cap, and a char boundary.
-    #[test]
-    fn truncated_c_str_cuts_at_a_nul_a_cap_and_a_char_boundary() {
-        assert_eq!(truncated_c_str("abc", 10), "abc");
-        assert_eq!(truncated_c_str("abc", 2), "ab");
-        assert_eq!(truncated_c_str("a\0bc", 10), "a");
-        assert_eq!(truncated_c_str("\0abc", 10), "");
-        assert_eq!(truncated_c_str("aé", 2), "a");
-        assert_eq!(truncated_c_str("aé", 3), "aé");
-        assert_eq!(truncated_c_str("", 0), "");
     }
 
     /// **A plugin that writes through `effSetChunk`'s pointer writes into a copy.**

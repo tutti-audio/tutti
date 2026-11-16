@@ -1033,6 +1033,10 @@ pub struct Plan {
     /// Output channels the plan renders: the root's, then the bank's.
     pub(crate) rendered_outputs: usize,
     pub(crate) total_latency: Latency,
+    /// The output time the bank's channels align to (read only when the plan
+    /// has a bank): the total of the plan the root change was made from, kept
+    /// by a plan that continues the same crossfade.
+    pub(crate) bank_total: Latency,
     pub(crate) audio_values: Vec<Value>,
     pub(crate) event_values: Vec<Value>,
     pub(crate) value_readers: Vec<u32>,

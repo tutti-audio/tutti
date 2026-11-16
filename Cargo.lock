@@ -2802,7 +2802,6 @@ dependencies = [
  "assert_no_alloc",
  "atomic_float",
  "criterion",
- "crossbeam-queue",
  "serde",
  "thiserror 2.0.21",
  "tutti-buffers",

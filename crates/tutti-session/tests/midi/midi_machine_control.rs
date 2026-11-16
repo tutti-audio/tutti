@@ -16,7 +16,7 @@ use tutti_midi_protocol::{MtcRate, Recipient, SysexDeviceId};
 use tutti_midi_runtime::{ClockKind, MidiOut};
 use tutti_session::{
     FollowClock, FollowMachineControl, MidiError, MidiEvent, SendMachineControl, Session,
-    SessionEvent, TempoError, UmpOut,
+    SessionEvent, TempoError, midi_sink,
 };
 use tutti_transport::FadeOut;
 use tutti_types::{Beat, SampleRate};
@@ -388,10 +388,9 @@ fn sender(wire: &Wire, to: Recipient) -> Session {
         .build()
         .expect("builds");
     let _ = s.update();
-    s.midi().set_hardware_out(Some(UmpOut::new(
-        Box::new(wire.clone()),
-        SampleRate::of(RATE),
-    )));
+    s.pool(midi_sink("out", Arc::new(wire.clone())))
+        .expect("declares");
+    let _ = s.update();
     s.midi().send_machine_control(SendMachineControl {
         group: G,
         to,

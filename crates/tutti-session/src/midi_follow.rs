@@ -151,7 +151,7 @@ pub struct FollowMachineControl {
 
 /// What [`Midi::send_machine_control`](crate::Midi::send_machine_control) sends:
 /// the transport's play, stop and locate as MMC commands (RP-013 pp.20 and 28)
-/// to whatever the hardware out reaches.
+/// to every output (a `midi_output` or `midi_sink` entry).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SendMachineControl {
     /// The Group the SysEx goes out on.

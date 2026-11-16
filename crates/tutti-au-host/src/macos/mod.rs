@@ -107,9 +107,10 @@ pub use aupreset::{AuPresetIdentity, read_preset_metadata};
 // receives, and `EventAddress` is an argument to every `watch_*` method. All
 // three are unavoidable at the call site, and there is no shared
 // `tutti_plugin_types` notification vocabulary to translate into.
-pub use listener::{
-    AuEvent, AuParameterListener, EventAddress, emit_gesture, notify_all_parameters,
-};
+#[cfg(feature = "testing")]
+#[doc(hidden)]
+pub use listener::emit_gesture;
+pub use listener::{AuEvent, AuParameterListener, EventAddress, notify_all_parameters};
 // Flat-re-exported for the reason `AuParameterListener` is: `RenderNotify` is
 // the handle a host holds, `RenderNotification`/`RenderPhase` are what its
 // callback receives, and `ParamEvent`/`ScheduleAddress` are the arguments to

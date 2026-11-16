@@ -451,10 +451,7 @@ mod hardware {
         ))
         .expect("declares");
         let _ = s.update();
-        assert_eq!(
-            s.testing_midi_io().unwrap().connected_input_names(),
-            ["Keys"]
-        );
+        assert_eq!(fake.connected_inputs(), [EndpointId::from_raw(1)], "Keys");
         let out = s.midi_output(&"synth").expect("loaded");
         assert_eq!(out.presence(), Presence::Live);
         assert!(s.graph_ref().contains(out.node()), "the output's node");
@@ -466,10 +463,7 @@ mod hardware {
             .expect("declares nothing");
         let _ = s.update();
         assert!(
-            s.testing_midi_io()
-                .unwrap()
-                .connected_input_names()
-                .is_empty(),
+            fake.connected_inputs().is_empty(),
             "the input's connection closed with its entry"
         );
         assert_eq!(out.presence(), Presence::Closed);
