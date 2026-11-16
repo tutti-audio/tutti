@@ -71,7 +71,6 @@ fn pagination_limits_are_those_of_table_19() {
 }
 
 // §7.3 Table 14, §7.4: a reply has status first; an error reply says why.
-/// Spec: m2-103/7.4#1
 #[test]
 fn reply_examples_read() {
     assert_eq!(reply(r#"{"status":200}"#), PeReply::new(PeStatus::Ok));
@@ -145,7 +144,7 @@ fn mutual_encoding_is_one_of_the_three_standard_values() {
 
 // §7.2 Table 13: resource is 1 to 36 ASCII alphanumerics; §8.4: or the X- prefix
 // of a custom Resource.
-/// Spec: m2-103/8.4#3
+/// Spec: m2-103/8.4#3, m2-103/8#2
 #[test]
 fn resource_name_limits() {
     assert!(ResourceName::new(&"a".repeat(36)).is_some());

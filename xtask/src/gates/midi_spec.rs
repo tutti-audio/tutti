@@ -103,6 +103,15 @@ pub(super) struct Doc {
 /// The documents, one inventory file each.
 pub(super) const DOCS: &[Doc] = &[M2_101, M2_102, M2_103, M2_104, M2_115, M2_116];
 
+/// The header note of a document with its own Table 2 and no tables of rows.
+const SAME_TABLES: &str = "\
+# This document has its own conformance-word table (its Table 2), the same three
+# rows as M2-104's, and no negated forms either. Its Table 3 lists must,
+# will, can and might as words that are never conformance statements: a
+# sentence with only those has no row. Sentence rows only: no table of the
+# document has a row per item.
+";
+
 pub(super) const M2_101: Doc = Doc {
     prefix: "m2-101",
     label: "M2-101",
@@ -110,13 +119,7 @@ pub(super) const M2_101: Doc = Doc {
     file: "midi-m2-101.txt",
     source: "M2-101-UM",
     sides: "initiator, responder or both",
-    note: "\
-# M2-101 has its own conformance-word table (its Table 2), the same three
-# rows as M2-104's, and no negated forms either. Its Table 3 lists must,
-# will, can and might as words that are never conformance statements: a
-# sentence with only those has no row. Sentence rows only: no table of the
-# document has a row per item.
-",
+    note: SAME_TABLES,
     implicit_levels: false,
     tables: Tables::None,
 };
@@ -128,13 +131,7 @@ pub(super) const M2_102: Doc = Doc {
     file: "midi-m2-102.txt",
     source: "M2-102-U",
     sides: "initiator, responder or both",
-    note: "\
-# M2-102 has its own conformance-word table (its Table 2), the same three
-# rows as M2-104's, and no negated forms either. Its Table 3 lists must,
-# will, can and might as words that are never conformance statements: a
-# sentence with only those has no row. Sentence rows only: no table of the
-# document has a row per item.
-",
+    note: SAME_TABLES,
     implicit_levels: false,
     tables: Tables::None,
 };
@@ -146,13 +143,7 @@ pub(super) const M2_103: Doc = Doc {
     file: "midi-m2-103.txt",
     source: "M2-103-UM",
     sides: "initiator, responder or both",
-    note: "\
-# M2-103 has its own conformance-word table (its Table 2), the same three
-# rows as M2-104's, and no negated forms either. Its Table 3 lists must,
-# will, can and might as words that are never conformance statements: a
-# sentence with only those has no row. Sentence rows only: no table of the
-# document has a row per item.
-",
+    note: SAME_TABLES,
     implicit_levels: false,
     tables: Tables::None,
 };
@@ -164,13 +155,7 @@ pub(super) const M2_115: Doc = Doc {
     file: "midi-m2-115.txt",
     source: "M2-115-U",
     sides: "sender, receiver or both",
-    note: "\
-# M2-115 has its own conformance-word table (its Table 2), the same three
-# rows as M2-104's, and no negated forms either. Its Table 3 lists must,
-# will, can and might as words that are never conformance statements: a
-# sentence with only those has no row. Sentence rows only: no table of the
-# document has a row per item.
-",
+    note: SAME_TABLES,
     implicit_levels: false,
     tables: Tables::None,
 };

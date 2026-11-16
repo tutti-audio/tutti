@@ -444,7 +444,6 @@ fn an_endpoint_inquiry_to_us_is_nakked_for_we_have_no_id_to_give() {
     assert!(device.on_message(&inquiry(OTHER), now).is_empty());
 }
 
-/// Spec: m2-101/3.3.2#3
 #[test]
 fn a_new_muid_is_never_the_old_one_a_peer_or_reserved() {
     // Draws: ours, then the same again, a reserved one, the broadcast value, the

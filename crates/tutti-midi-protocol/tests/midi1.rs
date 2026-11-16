@@ -130,7 +130,6 @@ fn a_bank_is_three_messages() {
 
 /// MIDI 1.0 voice and System messages are their own bytes; a MIDI 2.0
 /// controller, pressure and bend narrow to the top bits.
-/// Spec: m2-115/2.2#2
 #[test]
 fn the_other_messages_are_their_bytes() {
     let channel = MidiChannel::of(1);

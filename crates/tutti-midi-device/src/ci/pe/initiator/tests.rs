@@ -725,7 +725,7 @@ fn a_set_sends_every_chunk_at_once_without_flow_control() {
 }
 
 // M2-103 §10.2: a Partial Set says so in its header.
-/// Spec: m2-103/10#4, m2-103/12.2#2
+/// Spec: m2-103/10#4
 #[test]
 fn a_partial_set_says_so() {
     let (mut i, now) = ready(1);

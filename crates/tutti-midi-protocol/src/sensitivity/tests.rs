@@ -73,6 +73,14 @@ fn channel_data_is_semitones_and_cents() {
     let sens = PitchBendSensitivity::from_channel_data(data);
     assert_eq!(sens.semitones().get(), 2.5);
     assert_eq!(sens.to_channel_data(), data);
+    // The 18 bits below the two fields are ignored.
+    assert_eq!(RegisteredData::from_word(data.to_word() | 0x3_FFFF), data);
+    assert_eq!(
+        PitchBendSensitivity::from_channel_data(RegisteredData::from_word(
+            data.to_word() | 0x3_FFFF
+        )),
+        sens
+    );
     // The word read as the per-note 7.25 fixed point is another figure.
     let binary = PitchBendSensitivity::from_rpn_bits(data.to_word())
         .semitones()

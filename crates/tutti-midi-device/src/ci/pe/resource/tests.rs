@@ -639,7 +639,7 @@ fn a_resource_without_a_type_is_opaque_json() {
 
 // M2-103 §8.4: a manufacturer Resource is named `X-` and 1 to 33 alphanumerics;
 // §8.6: a List Resource's name ends `List`.
-/// Spec: m2-103/8.4#3, m2-103/8#2, m2-103/8.6#1
+/// Spec: m2-103/8.4#3, m2-103/8.6#1
 #[test]
 fn resource_names_follow_8_4_and_8_6() {
     assert!(CustomResource::new("X-Anything").is_some());

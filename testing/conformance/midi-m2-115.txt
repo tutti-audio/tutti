@@ -15,7 +15,7 @@
 #                                 a conformance word. kind: shall is required,
 #                                 should recommended, may permitted; the negated
 #                                 forms keep the kind and carry the fact neg=1.
-# M2-115 has its own conformance-word table (its Table 2), the same three
+# This document has its own conformance-word table (its Table 2), the same three
 # rows as M2-104's, and no negated forms either. Its Table 3 lists must,
 # will, can and might as words that are never conformance statements: a
 # sentence with only those has no row. Sentence rows only: no table of the

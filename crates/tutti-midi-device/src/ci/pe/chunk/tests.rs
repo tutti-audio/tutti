@@ -217,7 +217,6 @@ fn a_chunk_holds_at_most_16383_data_bytes() {
 }
 
 // M2-101 §8.3.2: a header is not chunked, so it has to fit the maximum on its own.
-/// Spec: m2-101/8.3.2#1
 #[test]
 fn a_header_past_the_maximum_is_refused() {
     assert!(split_message(id(), &header_of(104), &[], SMALLEST).is_ok());
@@ -280,7 +279,6 @@ fn a_chunk_whose_lengths_do_not_fill_its_bytes_is_refused() {
 }
 
 // M2-103 §6.1.6: the data of a SysEx message is 7-bit.
-/// Spec: m2-103/6.1.5#2
 #[test]
 fn a_body_with_a_top_bit_is_refused() {
     assert_eq!(
