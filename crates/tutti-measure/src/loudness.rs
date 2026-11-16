@@ -391,7 +391,7 @@ fn true_peak_db(peak_linear: f64) -> Db {
     if peak_linear <= 0.0 {
         Db::FLOOR
     } else {
-        Db((20.0 * peak_linear.log10()) as f32)
+        Db((20.0 * libm::log10(peak_linear)) as f32)
     }
 }
 

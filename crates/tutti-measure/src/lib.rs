@@ -306,6 +306,7 @@ mod error;
 mod features;
 mod framing;
 mod key;
+mod level;
 mod loudness;
 mod notes;
 mod onset;
