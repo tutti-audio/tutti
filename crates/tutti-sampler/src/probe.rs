@@ -170,9 +170,6 @@ mod tests {
     /// create, read and remove the same bytes, and a probe could see a
     /// half-written or already-deleted file. Each test owning its `TempDir`
     /// removes the sharing, and the directory is cleaned up on drop.
-    ///
-    /// Gated to match its two callers, which are both `#[cfg(feature = "decode-wav")]`
-    /// — a build with a different codec on has no use for a hand-rolled WAV.
     fn write_wav(dir: &tempfile::TempDir, name: &str, frames: usize) -> std::path::PathBuf {
         let path = dir.path().join(name);
         let mut f = std::fs::File::create(&path).expect("create");

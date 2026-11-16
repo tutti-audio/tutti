@@ -9,7 +9,8 @@ repository.workspace = true
 readme = "README.md"
 keywords = ["audio", "wav", "flac", "aiff", "ogg"]
 categories = ["multimedia::audio"]
-# Only so the build script can tell `tutti-sampler` whether a decoder is on.
+# Only so the build script can tell its dependents' build scripts whether a
+# decoder is on.
 links = "tutti-codec"
 
 [lints]

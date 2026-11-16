@@ -2118,9 +2118,9 @@ impl<C: crate::Clock> Session<C> {
                 );
             }
             let state = &self.mods.state;
-            hosted.mirror.drain_edits(|_id, _value| {
-                if let Some(target) = state.plugin_target(node, _id.get()) {
-                    state.set_knob(target, _value.get() as f32);
+            hosted.mirror.drain_edits(|id, value| {
+                if let Some(target) = state.plugin_target(node, id.get()) {
+                    state.set_knob(target, value.get() as f32);
                 }
             });
 

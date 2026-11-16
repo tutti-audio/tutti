@@ -21,7 +21,7 @@
 //! stays until the new load lands; if that load fails the old value is dropped,
 //! its handles read closed, and the entry reads failed.
 //!
-//! Each kind of entry is a [`PoolEntry`]; `audio_file` (feature `sampler`) and
+//! Each kind of entry is a [`PoolEntry`]; `audio_file` (feature `sampler` and a `decode-*`) and
 //! `soundfont` (feature `soundfont`) are the data kinds, and
 //! `Session::plugin_entry` (feature `plugin`) declares a plugin, which a node
 //! then takes (`Session::add_pooled_plugin`). A load's outcome lands

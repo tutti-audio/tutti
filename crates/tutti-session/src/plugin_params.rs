@@ -303,9 +303,9 @@ impl<'a> Param<'a> {
         self.params.hosted.mirror.value_at(self.position)
     }
 
-    /// The reference that targets this parameter in a modulation route
-    ///: the one a native node's param method gives, so a
-    /// route targets a plugin's parameter and a native one through one type.
+    /// The reference that targets this parameter in a modulation route: the
+    /// one a native node's param method gives, so a route targets a plugin's
+    /// parameter and a native one through one type.
     #[must_use]
     pub fn target(&self) -> crate::ParamRef {
         crate::Key::<crate::PluginNode>::new(self.params.node).param(self.id())
