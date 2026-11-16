@@ -392,6 +392,54 @@ fn the_controller_reports_what_the_plugin_re_reports() {
     }));
 }
 
+/// **The buses a plugin announces are the ones the host sees, and not before.**
+/// The plugin has a stereo bus in and out at load; it announces a stereo main bus
+/// and a mono aux bus on the way in. The controller's layout, and the `wiring`
+/// its `Control` answers, follow the announcement; the slab's layout (what
+/// [`Ipc::loaded`] says, what the pipeline was built for) stays the one at load. A
+/// `PluginIoChanged` with no layout changes nothing.
+#[test]
+fn the_buses_a_plugin_announces_are_the_buses_the_host_sees() {
+    let _machine = machine_lock();
+    let (ipc, server) = mock();
+    let heard = Arc::new(Mutex::new(Vec::new()));
+    let sink = Arc::clone(&heard);
+    ipc.forward_events(Some(Arc::new(move |event| {
+        sink.lock().unwrap().push(format!("{event:?}"));
+    })));
+    let main = main_thread();
+    let (_processor, controller) = activate(ipc, 32);
+    let at_load = controller.layout();
+    assert_eq!(at_load.input_widths(), vec![ChannelLayout::STEREO]);
+
+    server.say(&BridgeMessage::PluginIoChanged { layout: None });
+    let announced = tutti_plugin_types::Layout {
+        inputs: vec![
+            PluginBus::main(ChannelLayout::STEREO),
+            PluginBus::new(ChannelLayout::MONO, tutti_plugin_types::BusRole::Aux),
+        ],
+        outputs: at_load.outputs.clone(),
+    };
+    server.say(&BridgeMessage::PluginIoChanged {
+        layout: Some(announced.clone()),
+    });
+    // An idle bridge reads nothing: the next command's reply reads it.
+    assert_eq!(controller.parameters(main).len(), 1);
+    let start = Instant::now();
+    while !heard.lock().unwrap().iter().any(|e| e.contains("IoLayout")) {
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "the host hears it"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+        let _ = controller.parameters(main);
+    }
+    assert_eq!(controller.layout(), announced);
+    let wiring = controller.wiring(main);
+    assert_eq!(wiring.inputs, announced.inputs, "the controller's wiring");
+    assert_eq!(wiring.outputs, announced.outputs);
+}
+
 /// **A served plugin with no origin cannot be reopened, and says so**, through
 /// both the token-free reopen and the trait's.
 #[test]

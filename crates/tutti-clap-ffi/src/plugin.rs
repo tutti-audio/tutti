@@ -1158,7 +1158,7 @@ impl Drop for Plugin {
                 collected: true,
                 _not_sync: PhantomData,
             };
-            log::warn!(
+            tracing::warn!(
                 "a CLAP plugin was dropped off the main thread; its destruction is handed to \
                  the main thread"
             );

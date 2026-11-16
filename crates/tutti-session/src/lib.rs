@@ -145,8 +145,7 @@ pub use edge::EdgeGainError;
 #[cfg(feature = "plugin")]
 pub use error::HostPluginError;
 pub use error::{
-    ConnectError, Error, HeardTapError, InletError, NoSuchNode, RemoveError, Result, ScheduleError,
-    TempoError,
+    ConnectError, Error, HeardTapError, InletError, NoSuchNode, RemoveError, Result, TempoError,
 };
 #[cfg(feature = "midi")]
 pub use error::{MidiError, RouteDeclarer};
@@ -222,6 +221,8 @@ pub use pool::{SoundFontFile, soundfont};
 use hang::HangDetector;
 #[cfg(feature = "plugin")]
 pub use hang::HangPolicy;
+#[cfg(feature = "midi-hardware")]
+pub use midi_hardware::{MidiPolicy, MidiPolicyError, MidiPolicyHandle};
 #[cfg(feature = "plugin")]
 pub use plugin_diagnostics::{Diagnostics, PluginBuses};
 #[cfg(feature = "plugin")]

@@ -444,6 +444,7 @@ fn a_unit_without_the_callbacks_is_not_published_to() {
         hand: Hand::local(),
         descriptor: Default::default(),
         wiring: Default::default(),
+        announced: Default::default(),
         requests: Vec::new(),
         edits: Vec::new(),
         events: Vec::new(),

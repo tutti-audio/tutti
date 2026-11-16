@@ -1652,7 +1652,7 @@ mod tests {
         assert!(
             s.drain_async_events(main_thread())
                 .iter()
-                .any(|m| matches!(m, BridgeMessage::PluginIoChanged)),
+                .any(|m| matches!(m, BridgeMessage::PluginIoChanged { .. })),
             "the host is told the instance can no longer run"
         );
         process_block(&mut s, &mut shm, 2, 0.5);

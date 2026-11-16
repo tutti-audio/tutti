@@ -261,7 +261,7 @@ fn a_prefetchable_support_change_restarts_the_plugin() {
     assert!(
         !events
             .iter()
-            .any(|e| matches!(e, BridgeMessage::PluginIoChanged)),
+            .any(|e| matches!(e, BridgeMessage::PluginIoChanged { .. })),
         "the layout was not asked about: {events:?}"
     );
     assert_eq!(
@@ -332,7 +332,7 @@ fn a_refused_rate_is_rolled_back_to_the_previous_one() {
     let told = instance.poll(main_thread());
     assert!(
         told.iter()
-            .all(|e| matches!(e, BridgeMessage::PluginIoChanged)),
+            .all(|e| matches!(e, BridgeMessage::PluginIoChanged { .. })),
         "{told:?}"
     );
     assert_eq!(instance.wiring.inputs, layout.inputs);

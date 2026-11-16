@@ -107,7 +107,7 @@ use std::sync::atomic::Ordering;
 use tutti_graph::{IntoNode, Node, NodeParts, Shape};
 use tutti_plugin_host::{
     InProcClient, InvalidateSink, ParameterChangeSink, PluginControls, PluginHandle, PluginNode,
-    PortLimit, Rebinder, RefreshSink, TransportSink, client_over,
+    PortLimit, PortSource, Rebinder, RefreshSink, TransportSink, client_over,
 };
 use tutti_plugin_ipc::{
     BridgeConfig, BridgeEvent, Ipc, IpcController, IpcOrigin, Launched, PluginBridge,
@@ -394,6 +394,8 @@ impl PluginClient<Unbound> {
             // The wake it raises is bound through `Control::bind_wake` and
             // raised by `Ipc` before this listener runs.
             BridgeEvent::ProcessRequested => {}
+            // The layout is read from the link when the `Io` resync that follows it lands.
+            BridgeEvent::IoLayout(_) => {}
             BridgeEvent::Transport { request } => listener_transport_sink.fire(request),
         })));
 
@@ -532,10 +534,14 @@ impl PluginClient<Bound> {
     /// The rebinder keeps the plugin instance alive until it is dropped.
     #[must_use]
     pub fn rebinder(&self) -> Rebinder<Ipc> {
-        self.state.node.rebinder(Some(PortLimit {
-            inputs: self.inputs,
-            outputs: self.outputs,
-        }))
+        let served = self.served.clone();
+        self.state.node.rebinder(PortSource::Served {
+            limit: PortLimit {
+                inputs: self.loaded.input_widths(),
+                outputs: self.loaded.output_widths(),
+            },
+            live: Arc::new(move || served.layout()),
+        })
     }
 }
 

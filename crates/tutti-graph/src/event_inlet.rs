@@ -50,7 +50,7 @@
 //! [`Losses`], read from [`InletCounts::losses`]:
 //!
 //! - `lost`: refused at the ring because it was full (the ring counts it and
-//!   `push` answers [`Refused::Full`]);
+//!   `push` answers [`PushError::Full`]);
 //! - `evicted`: dropped from the waiting list because more events wait than it
 //!   holds. The latest-due event that may be lost goes; a note-off or a panic
 //!   controller ([`Ump::is_panic_controller`]) is kept in preference to any
@@ -105,23 +105,6 @@ use crate::fork::{ForkCause, ForkMode, ForkSource, Forked};
 use crate::io::Io;
 use crate::node::{Cx, IntoNode, Node, NodeParts, Prepare, Shape, Status};
 use crate::time::Due;
-
-/// Why [`EventInletWriter::push`] did not queue.
-///
-/// A stamp cannot name a beat any more, so a full ring, or a node that is gone,
-/// are the only ways left.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
-#[non_exhaustive]
-pub enum Refused {
-    /// The ring is full: the event was dropped and counted
-    /// ([`Losses::lost`]).
-    #[error("the event inlet's ring is full")]
-    Full,
-    /// The node was dropped: the event was dropped and nothing counts it,
-    /// and every later push fails the same way.
-    #[error("the event inlet's node is gone")]
-    Disconnected,
-}
 
 /// When a pushed event is due, as the producer names it.
 ///
@@ -263,12 +246,12 @@ impl EventInletWriter {
     ///
     /// # Errors
     ///
-    /// [`Refused::Full`] when the ring is full (the event is dropped and
+    /// [`PushError::Full`] when the ring is full (the event is dropped and
     /// counted in [`Losses::lost`]; dropping a note-off whose note-on landed
     /// leaves a note stuck, so a caller must report it);
-    /// [`Refused::Disconnected`] once the node is dropped (not counted: the
+    /// [`PushError::Disconnected`] once the node is dropped (not counted: the
     /// event had nowhere to go, now or later).
-    pub fn push(&mut self, at: impl Into<Stamp>, ump: impl Into<Ump>) -> Result<(), Refused> {
+    pub fn push(&mut self, at: impl Into<Stamp>, ump: impl Into<Ump>) -> Result<(), PushError> {
         let ump = ump.into();
         let when = match at.into() {
             Stamp::NextBlock => When::NextBlock,
@@ -281,10 +264,7 @@ impl EventInletWriter {
         // The ring counts a full refusal; a node that is gone refuses uncounted.
         self.ring
             .push(Pushed { when, ump })
-            .map_err(|refused| match refused.error {
-                PushError::Full => Refused::Full,
-                PushError::Disconnected => Refused::Disconnected,
-            })
+            .map_err(|refused| refused.error)
     }
 
     /// Queues every `(stamp, ump)` in order, each as [`push`](Self::push)

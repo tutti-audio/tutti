@@ -12,6 +12,7 @@ fn a_value_is_low_up_to_7fffffff_and_high_from_80000000() {
     assert_eq!(state(0xFFFF_FFFF), TwoState::High);
 }
 
+/// Spec: m2-122/3.2.1#3
 #[test]
 fn a_two_position_sender_uses_the_ends_of_the_halves() {
     // M2-122 Table 5: 0x00000000 and 0xFFFFFFFF.

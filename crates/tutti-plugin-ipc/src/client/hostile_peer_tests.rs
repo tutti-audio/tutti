@@ -690,6 +690,59 @@ fn an_unprompted_event_reaches_the_listener_while_no_command_waits() {
     assert_eq!(*heard.lock(), [77]);
 }
 
+/// **A layout no plugin has is dropped on receipt; the next real one is kept.**
+/// The peer announces a hundred thousand zero-width buses, which every width
+/// check passes, then a stereo plugin's. The host hears the second layout only,
+/// once, and both resyncs.
+#[test]
+fn a_layout_with_absurdly_many_buses_is_dropped_on_receipt() {
+    use crate::client::audio::BridgeEvent;
+    use parking_lot::Mutex as PlMutex;
+    use tutti_plugin_types::{Layout, PluginBus};
+
+    let silly = Layout {
+        inputs: (0..100_000)
+            .map(|_| PluginBus::main(ChannelLayout::from_count(0)))
+            .collect(),
+        outputs: Vec::new(),
+    };
+    let real = Layout {
+        inputs: vec![PluginBus::main(ChannelLayout::STEREO)],
+        outputs: vec![PluginBus::main(ChannelLayout::STEREO)],
+    };
+    let sent = real.clone();
+    let mock = MockServer::start("silly-layout", move |msg| match msg {
+        HostMessage::SetRenderMode { .. } => Action::ReplyMany(vec![
+            BridgeMessage::PluginIoChanged {
+                layout: Some(silly.clone()),
+            },
+            BridgeMessage::PluginIoChanged {
+                layout: Some(sent.clone()),
+            },
+        ]),
+        _ => Action::Silent,
+    });
+    let layouts: Arc<PlMutex<Vec<Layout>>> = Arc::new(PlMutex::new(Vec::new()));
+    let resyncs = Arc::new(AtomicU64::new(0));
+    let (sink, count) = (Arc::clone(&layouts), Arc::clone(&resyncs));
+    mock.bridge.set_listener(Some(Arc::new(move |ev| match ev {
+        BridgeEvent::IoLayout(layout) => sink.lock().push(layout),
+        BridgeEvent::Resync(_) => {
+            count.fetch_add(1, Ordering::Relaxed);
+        }
+        _ => {}
+    })));
+    assert!(
+        mock.bridge
+            .set_render_mode_rt(crate::protocol::RenderMode::Realtime)
+    );
+    tutti_fixtures::wait_until("the real layout", NOTICE_TIMEOUT, || {
+        !layouts.lock().is_empty()
+    });
+    assert_eq!(*layouts.lock(), [real], "only the plausible layout is kept");
+    assert!(resyncs.load(Ordering::Relaxed) >= 1, "the resync is heard");
+}
+
 /// A crash that happens **before** any listener exists is still reported.
 ///
 /// This is the case a callback-only design loses. `PluginBridge::new` spawns

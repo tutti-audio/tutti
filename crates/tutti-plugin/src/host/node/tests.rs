@@ -355,6 +355,7 @@ fn trailing_unsolicited_events_dont_poison_next_reply() {
             }
             BridgeEvent::TailChanged { .. }
             | BridgeEvent::Resync(_)
+            | BridgeEvent::IoLayout(_)
             | BridgeEvent::RateRefusal(_)
             | BridgeEvent::ProcessRequested
             | BridgeEvent::Transport { .. }

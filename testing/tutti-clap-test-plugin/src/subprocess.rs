@@ -45,6 +45,10 @@
 //!   load, its state — what a fork by state transfer must report as an error
 //!   rather than render around.
 //!
+//! `TUTTI_CLAP_PROBE_PORT_CHANGE_FILE` names a file whose appearance, holding a
+//! layout number, changes the running plugin's ports and asks its host to
+//! rescan them.
+//!
 //! The port layout is also selectable by environment (`TUTTI_CLAP_PROBE_PORT_LAYOUT`,
 //! `..._RESTART_PORT_LAYOUT`, and the file), since a served plugin's layout has
 //! to be chosen per server. The render mode and the rest stay `extern "C"` where
@@ -236,6 +240,9 @@ pub(crate) fn configure() {
     }
     if let Some(path) = std::env::var_os("TUTTI_CLAP_PROBE_REQUEST_PROCESS_FILE") {
         watch_request_file(std::path::PathBuf::from(path));
+    }
+    if let Some(path) = std::env::var_os("TUTTI_CLAP_PROBE_PORT_CHANGE_FILE") {
+        watch_port_change_file(std::path::PathBuf::from(path));
     }
     if let Some(n) = u32_var("TUTTI_CLAP_PROBE_STALL_US") {
         STALL_US.store(n, Ordering::SeqCst);
@@ -512,6 +519,33 @@ fn watch_request_file(path: std::path::PathBuf) {
     std::thread::spawn(move || {
         loop {
             if path.exists() && request_process_now() {
+                let _ = std::fs::remove_file(&path);
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    });
+}
+
+/// Starts the thread behind `TUTTI_CLAP_PROBE_PORT_CHANGE_FILE`: when `path`
+/// exists and holds a `PortLayoutMode` number, the plugin takes that layout and
+/// asks its host to rescan its audio ports (`LIST | CHANNEL_COUNT`), then the
+/// file is deleted and the thread ends. A served plugin changing its ports
+/// while it runs, which no symbol can ask of another process.
+fn watch_port_change_file(path: std::path::PathBuf) {
+    /// `CLAP_AUDIO_PORTS_RESCAN_LIST | CLAP_AUDIO_PORTS_RESCAN_CHANNEL_COUNT`.
+    const LIST_AND_CHANNEL_COUNT: u32 = 0x24;
+    std::thread::spawn(move || {
+        loop {
+            if let Some(mode) = std::fs::read_to_string(&path)
+                .ok()
+                .and_then(|text| text.trim().parse::<u32>().ok())
+            {
+                // SAFETY: plain atomic stores; `unsafe` is on the signatures only.
+                unsafe {
+                    crate::tutti_test_plugin_set_port_layout(mode);
+                    crate::tutti_test_plugin_request_ports_rescan(LIST_AND_CHANNEL_COUNT);
+                }
                 let _ = std::fs::remove_file(&path);
                 return;
             }
