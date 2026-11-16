@@ -14,8 +14,7 @@
 //! turn; each is *covered* when `lib.rs` exports:
 //!
 //! - the type at its path (a `pub use` list covers each name in it, not its
-//!   alias; a crate's `Error` is not covered by another crate's, nor by the
-//!   same name at another module);
+//!   alias; a crate's `Error` is not covered by another crate's);
 //! - a module of its crate by name, which covers every path that starts with it;
 //! - the type from a crate that re-exports it: the crate's text holds a `pub use`
 //!   line for the name and no definition at that path, and the type is where the
@@ -24,6 +23,10 @@
 //!   several, or none, are listed as ambiguous and cover nothing. A glob
 //!   re-export appears in the text as one `pub use` line per item, at the path
 //!   `lib.rs` names it at.
+//!
+//! A type a signature names at the path it is defined at (a private module of its
+//! crate) is covered by the umbrella's export of its name from that crate, when the
+//! umbrella exports one type of the crate by that name.
 //!
 //! A final segment is a constant when a `pub const` or `pub static` line of the
 //! texts defines that path, whatever its case; an all-capitals type is a type.
@@ -51,6 +54,11 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 /// names one is a finding for its owner, listed in [`Analysis::leaks`]. A type of
 /// `*` is every type of the crate.
 const INTERNAL: &[(&str, &str, &str)] = &[
+    (
+        "tutti_engine",
+        "HeardTapError",
+        "the payload of session's HeardTapError::Tap, matched through its variants; it shares the name",
+    ),
     (
         "tutti_engine",
         "StreamDriver",
@@ -413,6 +421,10 @@ impl Covers {
                 re_exported.extend(item.re_exports());
             }
         }
+        let named: BTreeSet<Ty> = texts
+            .iter()
+            .flat_map(|(_, text)| types(text, consts))
+            .collect();
         let mut c = Covers {
             items: BTreeSet::new(),
             modules: Vec::new(),
@@ -420,7 +432,8 @@ impl Covers {
             decisions: Vec::new(),
             ambiguous: Vec::new(),
         };
-        for e in exports(lib) {
+        let exported = exports(lib);
+        for e in exported.iter().cloned() {
             if e.is_value() {
                 let mut path = e.mods.clone();
                 path.push(e.name.clone());
@@ -459,6 +472,24 @@ impl Covers {
                         "{}: unresolved: no signature of its crate names it",
                         e.show()
                     )),
+                }
+            }
+            if defined.contains(&e)
+                && exported
+                    .iter()
+                    .filter(|x| x.krate == e.krate && x.name == e.name)
+                    .count()
+                    == 1
+            {
+                // A crate's text prints a type at every path it publishes it at, and
+                // a signature of another crate names it at the path it is defined
+                // at: the type the umbrella exports under that name, when it
+                // exports one type of the crate by it.
+                for t in named.iter().filter(|t| {
+                    t.krate == e.krate && t.name == e.name && **t != e && !t.mods.is_empty()
+                }) {
+                    c.decisions.push(format!("{} -> {}", t.show(), e.show()));
+                    c.foreign.insert(t.clone());
                 }
             }
             c.items.insert(e);
@@ -792,14 +823,13 @@ pub use tutti_nodes::SvfType;
     }
 
     #[test]
-    fn an_exported_type_covers_its_path_and_no_other_module_s_namesake() {
+    fn an_exported_type_covers_every_path_of_its_name_in_its_crate_and_no_other_crate_s() {
         let api = "pub struct tutti_graph::Node\n\
                    pub fn tutti_graph::Node::a(&self) -> tutti_graph::Node\n\
                    pub fn tutti_graph::Node::b(&self) -> tutti_graph::deep::Node\n";
-        assert_eq!(
-            missing(api),
-            ["tutti_graph::deep::Node <- tutti_graph::Node"]
-        );
+        assert_eq!(missing(api), none());
+        let api = format!("{api}pub fn tutti_graph::Node::c(&self) -> tutti_nodes::Node\n");
+        assert_eq!(missing(&api), ["tutti_nodes::Node <- tutti_graph::Node"]);
     }
 
     #[test]
@@ -914,8 +944,8 @@ pub use tutti_nodes::SvfType;
 
     #[test]
     fn a_definition_with_a_qualifier_is_a_definition() {
-        // `Raw` is defined at the exported path, so `pub use` re-exports nothing
-        // else under that name and `other::Raw` stays uncovered.
+        // `Raw` is defined at the exported path, so the name is the umbrella's and
+        // `other::Raw`, the same name in the crate, is covered by it.
         for def in [
             "pub unsafe trait tutti_graph::Raw",
             "pub auto trait tutti_graph::Raw",
@@ -925,11 +955,7 @@ pub use tutti_nodes::SvfType;
                  pub fn tutti_graph::Node::a(&self) -> tutti_graph::other::Raw\n"
             );
             let lib = "pub use tutti_graph::{Node, Raw};\n";
-            assert_eq!(
-                run_in(lib, &api).missing,
-                ["tutti_graph::other::Raw <- tutti_graph::Node"],
-                "{def}"
-            );
+            assert_eq!(run_in(lib, &api).missing, none(), "{def}");
         }
     }
 
@@ -952,6 +978,28 @@ pub use tutti_nodes::SvfType;
                    pub struct tutti_graph::Node\n\
                    pub fn tutti_graph::Node::a(&self) -> tutti_graph::Shape\n";
         assert_eq!(missing(api), none());
+    }
+
+    #[test]
+    fn a_type_named_at_its_private_module_is_the_type_the_umbrella_exports_by_name() {
+        let texts = [
+            (
+                "tutti_graph",
+                "pub struct tutti_graph::Node\n\
+                 pub fn tutti_graph::Node::a(&self, tutti_types::value::samples::Samples)\n",
+            ),
+            (
+                "tutti_types",
+                "pub struct tutti_types::Samples(pub usize)\n",
+            ),
+        ];
+        let lib = "pub use tutti_graph::Node;\npub use tutti_types::Samples;\n";
+        assert_eq!(analyze(&texts, lib).missing, none());
+        let lib = "pub use tutti_graph::Node;\n";
+        assert_eq!(
+            analyze(&texts, lib).missing,
+            ["tutti_types::value::samples::Samples <- tutti_graph::Node"]
+        );
     }
 
     #[test]
