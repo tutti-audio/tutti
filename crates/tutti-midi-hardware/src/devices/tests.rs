@@ -7,6 +7,7 @@ use crate::capability::OsEndpoint;
 use crate::devices::reporter::{Reporter, os_devices};
 use crate::test_support::{FakeBackend, FakeCounters, endpoint};
 use tutti_midi_device::Identity;
+use tutti_midi_runtime::ClockWriters;
 
 /// Long enough to be a failure, not a race: a wake returns at once.
 const PATIENCE: Duration = Duration::from_secs(5);
@@ -220,7 +221,7 @@ fn a_dropped_input_retires_its_port() {
     wake(&events);
     let ports = ports();
     let (input, _inlet) = devices
-        .open_input(&id_of(&devices, "Keys"), &ports)
+        .open_input(&id_of(&devices, "Keys"), &ports, ClockWriters::new().0)
         .unwrap();
     assert_eq!(ports.list_input_ports().len(), 1);
     assert_eq!(input.name(), "Keys");
@@ -263,7 +264,7 @@ fn a_backend_failure_leaves_no_port() {
     let keys = id_of(&devices, "Keys");
     for _ in 0..3 {
         assert!(matches!(
-            devices.open_input(&keys, &ports),
+            devices.open_input(&keys, &ports, ClockWriters::new().0),
             Err(Error::MidiDevice { .. })
         ));
     }
@@ -378,12 +379,12 @@ fn open_input_takes_a_present_input_only() {
     }
     assert!(
         devices
-            .open_input(&id_of(&devices, "Keys"), &ports())
+            .open_input(&id_of(&devices, "Keys"), &ports(), ClockWriters::new().0)
             .is_ok()
     );
     let synth = id_of(&devices, "Synth");
     assert!(matches!(
-        devices.open_input(&synth, &ports()),
+        devices.open_input(&synth, &ports(), ClockWriters::new().0),
         Err(Error::WrongDirection { .. })
     ));
     assert!(devices.open_output(&synth).is_ok());
@@ -399,7 +400,7 @@ fn open_input_refuses_a_device_that_was_unplugged() {
     fake.unplug(EndpointId::from_raw(1));
     wake(&events);
     assert!(matches!(
-        devices.open_input(&keys, &ports()),
+        devices.open_input(&keys, &ports(), ClockWriters::new().0),
         Err(Error::NotFound(NotFound::Device(_)))
     ));
 }
@@ -411,7 +412,11 @@ fn a_duplex_device_opens_both_ways() {
     wake(&events);
     let id = id_of(&devices, "Box");
     assert_eq!(devices.list()[0].direction, PortDirection::Duplex);
-    assert!(devices.open_input(&id, &ports()).is_ok());
+    assert!(
+        devices
+            .open_input(&id, &ports(), ClockWriters::new().0)
+            .is_ok()
+    );
     assert!(devices.open_output(&id).is_ok());
 }
 
