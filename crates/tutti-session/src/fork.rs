@@ -87,13 +87,17 @@ impl PendingExport {
     /// thread).
     pub(crate) fn build(self) -> Result<ForkedPair, (Error, ForkRemains)> {
         let (editor, executor) = self.fork.build().map_err(|(e, r)| (fork_error(e), r))?;
+        let mut setup = Setup::new().rt_log(self.rt_log);
+        if let Some(pool) = self.pool {
+            setup = setup.pool(pool);
+        }
+        if let Some(root) = self.root {
+            setup = setup.root(root);
+        }
         Ok(ForkedPair {
             editor,
             executor,
-            setup: Setup::new()
-                .pool(self.pool)
-                .root(self.root)
-                .rt_log(Some(self.rt_log)),
+            setup,
         })
     }
 }

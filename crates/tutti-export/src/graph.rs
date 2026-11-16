@@ -64,39 +64,39 @@ impl Setup {
         Self::default()
     }
 
-    /// Render on `pool` (the parallel executor, doc 013), or with `None` on
-    /// the render's own thread. The render is bit for bit the same either
-    /// way; a pool only spreads each block's independent nodes across its
-    /// threads. Give an export its own pool (a `tutti_graph::WorkerPool`),
+    /// Render on `pool` (the parallel executor, doc 013). Left uncalled, the
+    /// render runs on its own thread. The render is bit for bit the same
+    /// either way; a pool only spreads each block's independent nodes across
+    /// its threads. Give an export its own pool (a `tutti_graph::WorkerPool`),
     /// not the live engine's: a job finds a pool busy with another caller's
     /// and runs on its caller alone.
     #[must_use]
-    pub fn pool(mut self, pool: Option<Arc<dyn Pool>>) -> Self {
-        self.pool = pool;
+    pub fn pool(mut self, pool: Arc<dyn Pool>) -> Self {
+        self.pool = Some(pool);
         self
     }
 
     /// States what the graph's output channels are, for the fold to the file:
     /// [`ChannelTopology::unassigned`] for independent buses, a named topology
-    /// for speaker feeds. `None` (the default) is the engine's order for the
-    /// width, as for a live graph that declared nothing.
+    /// for speaker feeds. Left uncalled, the channels are in the engine's
+    /// order for the width, as for a live graph that declared nothing.
     ///
     /// The render refuses a declaration that is not as wide as the graph's
     /// outputs, or that the file cannot take
     /// ([`ConfigError::Placement`]). Give it for a fork of a live graph that
     /// declared its root, so the file is placed as the device was.
     #[must_use]
-    pub fn root(mut self, root: Option<ChannelTopology>) -> Self {
-        self.root = root;
+    pub fn root(mut self, root: ChannelTopology) -> Self {
+        self.root = Some(root);
         self
     }
 
     /// Hands what the graph's nodes log on the audio thread to `sink`, drained
-    /// between blocks on the render's thread. With `None` (the default) the
-    /// render's log gate stays off and nothing is written.
+    /// between blocks on the render's thread. Left uncalled, the render's log
+    /// gate stays off and nothing is written.
     #[must_use]
-    pub fn rt_log(mut self, sink: Option<Arc<dyn RtLogSink>>) -> Self {
-        self.rt_log = sink;
+    pub fn rt_log(mut self, sink: Arc<dyn RtLogSink>) -> Self {
+        self.rt_log = Some(sink);
         self
     }
 }
