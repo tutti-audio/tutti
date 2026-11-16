@@ -24,6 +24,8 @@
 //! way to the reading ([`GAIN`]), at the new frame. So:
 //!
 //! - one late reading (a block's wake-up delayed by `j`) moves the map by `j/8`;
+//!   [`ClockMap::observe`] returns that step, signed (positive for a late
+//!   reading), and for a re-anchor the whole error;
 //! - a constant `ε` with readings `T` apart settles to a lag of `8·ε·T`;
 //! - a reading further than [`RESYNC`] from the prediction is not jitter (a
 //!   device restart, a suspend): the map re-anchors on it exactly.
@@ -86,18 +88,40 @@ impl ClockReading {
     }
 }
 
-/// What [`ClockMap::observe`] did with a reading.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+/// What [`ClockMap::observe`] did with a reading, and by how much it moved the
+/// map.
+///
+/// A **correction** is signed: positive when the reading came late (the OS
+/// clock read later than the map predicted for that frame), negative when it
+/// came early.
+#[derive(Clone, Copy, Debug, PartialEq)]
 #[must_use]
 pub enum Observed {
     /// The reading was within [`RESYNC`] of the prediction and moved the map
-    /// by `1 / GAIN` of the difference.
-    Followed,
+    /// by `1 / GAIN` of the error: `correction` is that step.
+    Followed {
+        /// How far the anchor moved, in time.
+        correction: Seconds,
+    },
     /// The reading was further than [`RESYNC`] off: the map is anchored on it.
-    Resynced,
+    Resynced {
+        /// The whole error: how far the reading was from the prediction.
+        correction: Seconds,
+    },
     /// The reading is earlier than the anchor in OS time or in frames, or names
     /// the anchor's frame at another time: the map is unchanged.
     Rejected,
+}
+
+impl Observed {
+    /// The signed correction the map made, or `None` for a rejected reading.
+    #[must_use]
+    pub const fn correction(self) -> Option<Seconds> {
+        match self {
+            Self::Followed { correction } | Self::Resynced { correction } => Some(correction),
+            Self::Rejected => None,
+        }
+    }
 }
 
 /// OS time to graph frame and back. The rule and its bound are in the module docs.
@@ -168,10 +192,13 @@ impl ClockMap {
         }
     }
 
-    /// Takes a new reading, by the rule in the module docs.
+    /// Takes a new reading, by the rule in the module docs, and says how far it
+    /// moved the map ([`Observed`]).
     pub fn observe(&mut self, at: ClockReading) -> Observed {
         if at == self.anchor {
-            return Observed::Followed;
+            return Observed::Followed {
+                correction: Seconds::new(0.0),
+            };
         }
         if at.os < self.anchor.os || at.frame <= self.anchor.frame {
             return Observed::Rejected;
@@ -183,9 +210,15 @@ impl ClockMap {
             Some(late) => (true, late),
             None => (false, predicted.duration_since(at.os)),
         };
+        let signed = |span: Duration| {
+            let seconds = span.as_secs_f64();
+            Seconds::new(if late { seconds } else { -seconds })
+        };
         if error > RESYNC {
             self.anchor = at;
-            return Observed::Resynced;
+            return Observed::Resynced {
+                correction: signed(error),
+            };
         }
         let step = error / GAIN;
         let os = if late {
@@ -196,7 +229,9 @@ impl ClockMap {
         // `step` is under `RESYNC`; only an `Instant` at its origin cannot
         // subtract it, and the reading itself is then the better anchor.
         self.anchor = ClockReading::new(os.unwrap_or(at.os), at.frame);
-        Observed::Followed
+        Observed::Followed {
+            correction: signed(step),
+        }
     }
 
     /// Counts frames at `rate` from now on, the anchor moved to the same

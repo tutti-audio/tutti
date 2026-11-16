@@ -19,7 +19,7 @@ use tutti_midi_device::{
     DeviceEvent, DeviceId, DeviceInfo, DeviceTable, EndpointId, OsChange, OsDevice, PortDirection,
     Resolved,
 };
-use tutti_midi_runtime::{InputId, Outgoing, Taken};
+use tutti_midi_runtime::{ClockWriters, InputId, Outgoing, Taken};
 use tutti_ump::StreamConfig;
 
 use crate::HardwareMidiInputs;
@@ -320,6 +320,9 @@ impl Devices {
     /// returned with the [`OpenInput`], which holds the connection and the
     /// port, and dropping it closes both.
     ///
+    /// The input's clock map reports its timing to `clock`; its writers drop
+    /// with the [`OpenInput`], and with it on an error.
+    ///
     /// Control thread only: the backend may start a thread.
     ///
     /// Opening an id that is already open opens a second connection to the
@@ -339,9 +342,10 @@ impl Devices {
         &self,
         id: &DeviceId,
         ports: &Arc<HardwareMidiInputs>,
+        clock: ClockWriters,
     ) -> Result<(OpenInput, EventInletNode)> {
         let (info, handle) = self.present(id, PortDirection::is_input)?;
-        let (producer, inlet) = ports.open_input_port(info.name.as_str());
+        let (producer, inlet) = ports.open_input_port_with(info.name.as_str(), clock);
         let mut input = OpenInput {
             connection: None,
             port: producer.port(),
