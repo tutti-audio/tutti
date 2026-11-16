@@ -112,7 +112,6 @@ fn mock_with(
 ) -> (Ipc, Mock) {
     use interprocess::local_socket::{ListenerOptions, traits::Listener as _};
     use std::io::{Read, Write};
-    static COUNTER: tutti_types::Mint = tutti_types::Mint::new();
     let layout = SlabLayout {
         samples_per_channel: CEILING,
         format: SampleFormat::Float32,
@@ -120,7 +119,7 @@ fn mock_with(
         inputs: vec![ChannelLayout::STEREO],
         outputs: vec![ChannelLayout::STEREO],
     };
-    let shm = format!("ipc_{}_{}", std::process::id(), COUNTER.mint());
+    let shm = tutti_fixtures::unique_name("ipc");
     let path = unique_socket_path().expect("the OS has a random source");
     let _ = std::fs::remove_file(&path);
     let listener = ListenerOptions::new()

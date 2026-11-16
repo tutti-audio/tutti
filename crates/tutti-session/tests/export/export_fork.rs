@@ -215,7 +215,7 @@ fn exports_render_their_graph_as_wired_fresh() {
         ("node", &fresh_node[..1], &forked_node[..]),
     ] {
         assert_eq!(fresh.len(), forked.len(), "{what}: width");
-        let peak = forked[0].iter().fold(0.0f32, |m, s| m.max(s.abs()));
+        let peak = tutti_fixtures::signal::peak(&forked[0]);
         assert!(peak > 0.1, "{what}: silent");
         for (c, (a, b)) in fresh.iter().zip(forked).enumerate() {
             assert_eq!(a.len(), b.len(), "{what}: length of channel {c}");

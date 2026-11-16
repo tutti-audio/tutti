@@ -113,11 +113,6 @@ impl Planar {
     }
 }
 
-fn unique_shm_name(label: &str) -> String {
-    static COUNTER: tutti_types::Mint = tutti_types::Mint::new();
-    format!("test_{}_{}_{}", label, std::process::id(), COUNTER.mint())
-}
-
 /// `None` on a clean EOF — the host side closing the socket at teardown is
 /// normal shutdown, not a failure, so it must not panic the server thread.
 fn recv_host_msg(stream: &interprocess::local_socket::Stream) -> Option<HostMessage> {
@@ -216,7 +211,7 @@ fn bridge_with_server(
     let listener = ListenerOptions::new().name(name).create_sync().unwrap();
 
     let out_channels: usize = layout.outputs.iter().map(|l| l.count() as usize).sum();
-    let shm_name = unique_shm_name("process-sync");
+    let shm_name = tutti_fixtures::unique_name("test_process-sync");
     let host_slab = AudioSlab::create(shm_name.clone(), layout.clone()).unwrap();
     // The server side maps the SAME backing file as a view, mirroring the real
     // subprocess: audio travels in shared memory, not over the socket.
@@ -920,7 +915,7 @@ fn bridge_with_no_server() -> (Arc<PluginBridge>, BridgeThread, SlabWriter) {
     let _ = std::fs::remove_file(&path);
 
     let layout = stereo_layout();
-    let shm_name = unique_shm_name("no-server");
+    let shm_name = tutti_fixtures::unique_name("test_no-server");
     let host_slab = AudioSlab::create(shm_name, layout).unwrap();
 
     let (bridge, bridge_thread) = PluginBridge::new(
@@ -1428,7 +1423,7 @@ fn stamped_server(stall: std::time::Duration, first_only: bool, rate: SampleRate
     let listener = ListenerOptions::new().name(name).create_sync().unwrap();
 
     let layout = stereo_layout();
-    let shm_name = unique_shm_name("stamped");
+    let shm_name = tutti_fixtures::unique_name("test_stamped");
     let host_slab = AudioSlab::create(shm_name.clone(), layout.clone()).unwrap();
     let mut server_slab = AudioSlab::open(shm_name, layout).unwrap();
 
@@ -1697,7 +1692,8 @@ fn a_refused_chunk_reports_its_midi_lost() {
     let _lock = machine_lock();
     let path = unique_socket_path().expect("the OS has a random source");
     let _ = std::fs::remove_file(&path);
-    let slab = AudioSlab::create(unique_shm_name("refused"), stereo_layout()).unwrap();
+    let slab =
+        AudioSlab::create(tutti_fixtures::unique_name("test_refused"), stereo_layout()).unwrap();
     let (bridge, _thread) = PluginBridge::new(
         path,
         Arc::clone(slab.slab()),
@@ -1830,7 +1826,11 @@ fn two_stale_blocks(
     let _ = std::fs::remove_file(&path);
     let name = crate::socket_name(&path).unwrap();
     let listener = ListenerOptions::new().name(name).create_sync().unwrap();
-    let slab = AudioSlab::create(unique_shm_name("stale-midi"), stereo_layout()).unwrap();
+    let slab = AudioSlab::create(
+        tutti_fixtures::unique_name("test_stale-midi"),
+        stereo_layout(),
+    )
+    .unwrap();
     let (bridge, thread) = PluginBridge::new(
         path.clone(),
         Arc::clone(slab.slab()),

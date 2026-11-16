@@ -250,7 +250,7 @@ fn assert_vbap_energy(what: &str, quad: &[Vec<f32>], from: usize) {
 
 /// Not vacuous: a render that is all zeros would agree with anything.
 fn assert_audible(planes: &[Vec<f32>]) {
-    let peak = planes.iter().flatten().fold(0.0f32, |m, s| m.max(s.abs()));
+    let peak = tutti_fixtures::signal::peak_planes(planes);
     assert!(peak > 0.05, "the render is (nearly) silent: peak {peak}");
 }
 
@@ -326,9 +326,7 @@ fn a_resampled_export_writes_its_render() {
     let r = hound::WavReader::new(std::io::Cursor::new(&bytes)).unwrap();
     assert_eq!(r.spec().sample_rate, 44_100, "not vacuous: it resampled");
     // A 1 kHz sine at half scale is in the passband: it keeps its level.
-    let peak = float_samples(&bytes)
-        .iter()
-        .fold(0.0f32, |m, s| m.max(s.abs()));
+    let peak = tutti_fixtures::signal::peak(&float_samples(&bytes));
     assert!((peak - 0.5).abs() < 0.01, "peak {peak}");
 }
 
@@ -354,9 +352,7 @@ fn a_peak_normalized_export_writes_its_normalized_render() {
         },
     );
     let target = Db(-1.0).to_amplitude().get();
-    let peak = float_samples(&bytes)
-        .iter()
-        .fold(0.0f32, |m, s| m.max(s.abs()));
+    let peak = tutti_fixtures::signal::peak(&float_samples(&bytes));
     assert!(
         peak <= target + 1e-6 && peak > target * 0.99,
         "sample peak {peak}, target {target}"
