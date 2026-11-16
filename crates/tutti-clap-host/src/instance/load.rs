@@ -11,12 +11,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tutti_clap_ffi::{AudioPortInfo, Bundle, DescriptorInfo, LoadError, PortKind, Stage};
 use tutti_plugin_types::{BusChannels, ChannelLayout, EditorPresence, PluginVersion};
-use tutti_plugin_types::{Load, MainThreadMarker, MainWorkHandle, Origin};
+use tutti_plugin_types::{Load, MainThreadMarker, MainWorkHandle, Origin, SampleRate};
 use tutti_types::LayoutError;
 
 /// A placeholder rate for the plugin until its first activation, whose
 /// `Prepare` carries the real one.
-const PLACEHOLDER_SAMPLE_RATE: f64 = 44_100.0;
+const PLACEHOLDER_SAMPLE_RATE: SampleRate = SampleRate::SR_44K1;
 /// A placeholder block size, for the same reason.
 const PLACEHOLDER_MAX_FRAMES: u32 = 512;
 
@@ -155,6 +155,10 @@ impl ClapLoaded {
         );
 
         let host_state = Arc::new(HostState::new(main));
+        // The id is set before `instantiate`: `init` may already log.
+        let _ = host_state
+            .plugin_id
+            .set(bundle.descriptors()[index].id.clone());
         let host = ClapHost::new(host_state.clone()).into_inner();
         let plugin = bundle
             .instantiate(index, host, host_state.roles.clone(), work)
@@ -240,10 +244,10 @@ fn port_channels(
         let Some(port) = source.port_info(main, i, is_input) else {
             break;
         };
-        let layout = layout_of_port(&port).map_err(|_| ClapError::PortTooWide {
+        let layout = layout_of_port(&port).map_err(|source| ClapError::PortTooWide {
             is_input,
             index: i,
-            channels: port.channel_count,
+            source,
         })?;
         channels.push(layout);
     }
@@ -566,7 +570,7 @@ mod enumeration_hole_tests {
             ClapError::PortTooWide {
                 is_input: true,
                 index: 0,
-                channels: 65_538
+                source: LayoutError::TooWide(65_538)
             }
         ));
         let message = err.to_string();

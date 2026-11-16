@@ -46,3 +46,34 @@ fn an_lfo_sweeps_the_cutoff_by_half_its_depth_at_the_crest() {
         "the crest cutoff is {cutoff:?}, expected 1500 Hz"
     );
 }
+
+/// A control `x` off its centre scales the cutoff by `4^x`: two octaves per unit, so a half
+/// unit up doubles it, a half unit down halves it and the centre leaves it alone.
+#[test]
+fn the_cutoff_control_moves_two_octaves_per_unit() {
+    assert_eq!(two_octave_factor(0.0), 1.0);
+    assert!((two_octave_factor(0.5) - 2.0).abs() < 1e-6);
+    assert!((two_octave_factor(-0.5) - 0.5).abs() < 1e-6);
+    assert!((two_octave_factor(1.0) - 4.0).abs() < 1e-5);
+}
+
+/// **A channel's pan is RP-036's gains times `sqrt(2)`**: the centre is exactly `(1, 1)`, hard
+/// left is `(sqrt(2), 0)` and hard right `(0, sqrt(2))`, the dead side exactly 0 with no
+/// tolerance, a pan past an end is that end, and a quarter right has the right over the left
+/// at `tan(Pi/4 * 1.25)`.
+#[test]
+fn a_channels_pan_is_rp_036_scaled_to_unity_at_the_centre_with_exact_dead_sides() {
+    let pair = |p: f32| {
+        let (l, r) = unity_centre_pan(Pan(p));
+        (l.get(), r.get())
+    };
+    let root = std::f32::consts::SQRT_2;
+    assert_eq!(pair(0.0), (1.0, 1.0));
+    assert_eq!(pair(-1.0), (root, 0.0));
+    assert_eq!(pair(1.0), (0.0, root));
+    assert_eq!(pair(-7.0), (root, 0.0));
+    assert_eq!(pair(f32::NAN), (1.0, 1.0));
+    let (l, r) = pair(0.25);
+    let want = (std::f64::consts::FRAC_PI_4 * 1.25).tan();
+    assert!((f64::from(r / l) - want).abs() < 1e-5, "{}", r / l);
+}

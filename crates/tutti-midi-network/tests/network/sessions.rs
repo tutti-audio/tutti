@@ -53,6 +53,7 @@ fn data_commands(sim: &Sim, dir: Direction) -> Vec<UmpData> {
 
 // ---- Establishing a Session ----
 
+/// Spec: m2-124/6.4#1, m2-124/6.5#1, m2-124/6.5#5, m2-124/6.5#8
 #[test]
 fn an_invitation_to_an_open_host_establishes_both_ends_and_each_learns_the_other() {
     let mut sim = Sim::open();
@@ -75,6 +76,7 @@ fn an_invitation_to_an_open_host_establishes_both_ends_and_each_learns_the_other
     );
 }
 
+/// Spec: m2-124/6.6#1, m2-124/6.6#2
 #[test]
 fn a_pending_reply_waits_for_the_application_then_accepts() {
     let mut sim = Sim::new(
@@ -120,6 +122,7 @@ fn a_declined_invitation_ends_with_the_user_declined_reason() {
     assert_eq!(sim.host.state(client_addr()), SessionState::Idle);
 }
 
+/// Spec: m2-124/6.4#3
 #[test]
 fn a_lost_invitation_is_repeated_and_the_lost_reply_is_answered_again() {
     let mut sim = Sim::open();
@@ -144,6 +147,7 @@ fn a_lost_invitation_is_repeated_and_the_lost_reply_is_answered_again() {
     assert_eq!(invitations, 2);
 }
 
+/// Spec: m2-124/6.4#4, m2-124/6.4#5
 #[test]
 fn an_unanswered_invitation_is_cancelled_with_a_bye_after_the_timeout() {
     let mut sim = Sim::open();
@@ -167,6 +171,7 @@ fn an_unanswered_invitation_is_cancelled_with_a_bye_after_the_timeout() {
     }));
 }
 
+/// Spec: m2-124/6.4#8
 #[test]
 fn a_repeated_invitation_in_an_established_session_is_accepted_again() {
     let mut sim = established();
@@ -222,6 +227,7 @@ fn a_host_at_its_limit_turns_a_newcomer_away_with_too_many_sessions() {
     assert_eq!(sim.host.state(client_addr()), SessionState::Established);
 }
 
+/// Spec: m2-124/6.5#4
 #[test]
 fn an_accepted_reply_with_no_invitation_gets_a_bye_for_no_pending_invitation() {
     let mut sim = Sim::open();
@@ -234,6 +240,7 @@ fn an_accepted_reply_with_no_invitation_gets_a_bye_for_no_pending_invitation() {
     );
 }
 
+/// Spec: m2-124/6.4#9
 #[test]
 fn a_client_without_a_host_naks_an_invitation_as_not_expected() {
     let mut sim = Sim::open();
@@ -260,6 +267,7 @@ fn secret_sim(client_secret: &str) -> Sim {
     )
 }
 
+/// Spec: m2-124/6.7#1, m2-124/6.7#3, m2-124/6.7#4, m2-124/6.7#11, m2-124/6.9#1, m2-124/6.9#3
 #[test]
 fn the_right_shared_secret_establishes_the_session() {
     let mut sim = secret_sim("5483");
@@ -279,6 +287,7 @@ fn the_right_shared_secret_establishes_the_session() {
     );
 }
 
+/// Spec: m2-124/6.7#7, m2-124/6.7#8, m2-124/6.7#12, m2-124/6.9#4
 #[test]
 fn a_wrong_secret_is_answered_after_a_delay_and_the_client_gives_up() {
     let mut sim = secret_sim("0000");
@@ -317,6 +326,7 @@ fn a_wrong_secret_is_answered_after_a_delay_and_the_client_gives_up() {
     assert_eq!(sim.host.state(client_addr()), SessionState::Idle);
 }
 
+/// Spec: m2-124/6.7#8
 #[test]
 fn the_delay_after_each_failed_digest_doubles() {
     let mut sim = secret_sim("5483");
@@ -351,6 +361,7 @@ fn the_delay_after_each_failed_digest_doubles() {
     assert_eq!(drain(&mut sim), 1);
 }
 
+/// Spec: m2-124/6.7#12
 #[test]
 fn five_failed_digests_end_the_invitation_with_authentication_failed() {
     let mut sim = Sim::new(
@@ -381,6 +392,7 @@ fn five_failed_digests_end_the_invitation_with_authentication_failed() {
     assert!(saw_bye);
 }
 
+/// Spec: m2-124/6.4#13
 #[test]
 fn a_client_with_no_matching_credentials_is_told_there_is_no_matching_method() {
     let mut sim = Sim::new(
@@ -426,6 +438,7 @@ fn a_host_without_a_nonce_refuses_the_invitation_that_needs_one() {
     assert_ne!(sim.client.state(), SessionState::Established);
 }
 
+/// Spec: m2-124/6.7#5, m2-124/6.7#6
 #[test]
 fn a_repeated_invitation_gets_the_same_nonce_and_a_new_session_a_new_one() {
     NONCE_CALLS.store(0, Ordering::SeqCst);
@@ -481,6 +494,7 @@ fn a_repeated_invitation_gets_the_same_nonce_and_a_new_session_a_new_one() {
     ));
 }
 
+/// Spec: m2-124/6.9#5, m2-124/6.9#8
 #[test]
 fn an_authenticated_invitation_without_an_invitation_is_rejected_for_no_prior_invitation() {
     let mut sim = secret_sim("5483");
@@ -504,6 +518,7 @@ fn users_sim(user: &str, password: &str) -> Sim {
     )
 }
 
+/// Spec: m2-124/6.8#1, m2-124/6.8#3, m2-124/6.8#4, m2-124/6.8#9, m2-124/6.10#1
 #[test]
 fn a_known_user_with_the_right_password_establishes_the_session() {
     let mut sim = users_sim("Rosa", "RPBqBno");
@@ -515,6 +530,7 @@ fn a_known_user_with_the_right_password_establishes_the_session() {
     ));
 }
 
+/// Spec: m2-124/6.8#10, m2-124/6.10#5
 #[test]
 fn an_unknown_user_is_told_the_user_was_not_found() {
     let mut sim = users_sim("Bob", "RPBqBno");
@@ -547,6 +563,7 @@ fn a_wrong_password_is_told_the_digest_is_wrong() {
 
 // ---- Data transfer ----
 
+/// Spec: m2-124/7.1#1, m2-124/6.5#2
 #[test]
 fn ump_arrives_once_in_order_and_sequence_numbers_start_at_zero() {
     let mut sim = established();
@@ -560,6 +577,7 @@ fn ump_arrives_once_in_order_and_sequence_numbers_start_at_zero() {
     assert_eq!(first, SequenceNumber::ZERO);
 }
 
+/// Spec: m2-124/7.1#4, m2-124/7.2.2#1, m2-124/7.2.2#7
 #[test]
 fn each_datagram_carries_the_two_previous_commands_before_the_new_one() {
     let mut sim = established();
@@ -645,6 +663,7 @@ fn lossy_sim(client: SessionConfig, lost: Vec<usize>) -> Sim {
     sim
 }
 
+/// Spec: m2-124/7.2.3#1, m2-124/7.2.3#4
 #[test]
 fn a_missing_command_is_requested_after_the_wait_and_retransmitted_in_order() {
     let mut sim = lossy_sim(no_fec(), vec![2]);
@@ -671,6 +690,7 @@ fn a_missing_command_is_requested_after_the_wait_and_retransmitted_in_order() {
     );
 }
 
+/// Spec: m2-124/7.2.4#1
 #[test]
 fn a_retransmit_request_the_sender_cannot_serve_reports_the_data_lost() {
     // Only the last command is kept; commands 1 and 2 are gone.
@@ -720,6 +740,7 @@ fn a_retransmit_request_the_sender_cannot_serve_reports_the_data_lost() {
     );
 }
 
+/// Spec: m2-124/7.2.3#10, m2-124/7.2.3#11
 #[test]
 fn a_peer_without_retransmit_naks_the_request_and_the_gap_is_given_up() {
     let mut sim = lossy_sim(no_fec().with_retransmit(Retransmit::Unsupported), vec![2]);
@@ -770,6 +791,7 @@ fn a_gap_that_is_never_filled_is_given_up_after_the_requests_are_spent() {
     assert_eq!(Sim::umps(&sim.host_events), vec![notes[0], notes[2]]);
 }
 
+/// Spec: m2-124/7.2.2#3
 #[test]
 fn duplicated_datagrams_deliver_each_ump_once() {
     let mut sim = established();
@@ -840,6 +862,7 @@ fn sequence_numbers_wrap_through_ffff_without_losing_or_repeating_a_command() {
     assert_eq!(last_seq, SequenceNumber::new(3));
 }
 
+/// Spec: m2-124/5.1.1#1, m2-124/7.1#7
 #[test]
 fn a_burst_larger_than_one_command_is_split_and_no_datagram_exceeds_1400_bytes() {
     let mut sim = established();
@@ -875,6 +898,7 @@ fn sending_before_a_session_is_established_fails_with_the_state() {
     );
 }
 
+/// Spec: m2-124/7.1#1, m2-124/6.5#2
 #[test]
 fn the_host_sends_to_the_client_too() {
     let mut sim = established();
@@ -896,6 +920,7 @@ fn zero_length(sim: &Sim) -> usize {
         .len()
 }
 
+/// Spec: m2-124/7.2.1#1, m2-124/7.2.1#7
 #[test]
 fn an_idle_period_is_declared_with_zero_length_commands_that_use_sequence_numbers() {
     let mut sim = established();
@@ -907,14 +932,17 @@ fn an_idle_period_is_declared_with_zero_length_commands_that_use_sequence_number
     // The two FEC repeats follow at the same interval.
     sim.advance(ms(20));
     assert_eq!(zero_length(&sim), 3);
-    let idle: Vec<_> = data_commands(&sim, Direction::ClientToHost)
+    let mut idle: Vec<_> = data_commands(&sim, Direction::ClientToHost)
         .iter()
         .filter(|d| d.is_idle())
         .map(|d| d.sequence().get())
         .collect();
-    assert!(
-        idle.starts_with(&[1, 1]) || idle.contains(&1),
-        "zero-length numbers continue the sequence: {idle:?}"
+    idle.sort_unstable();
+    idle.dedup();
+    assert_eq!(
+        idle,
+        [1, 2, 3],
+        "each zero-length command takes the next number after the note's 0"
     );
     assert!(
         sim.host_events
@@ -923,6 +951,7 @@ fn an_idle_period_is_declared_with_zero_length_commands_that_use_sequence_number
     );
 }
 
+/// Spec: m2-124/7.2.1#6
 #[test]
 fn zero_length_commands_slow_down_and_then_stop() {
     let mut sim = established();
@@ -939,6 +968,7 @@ fn zero_length_commands_slow_down_and_then_stop() {
     );
 }
 
+/// Spec: m2-124/7.2.1#2
 #[test]
 fn the_first_zero_length_command_comes_within_300_ms_whatever_is_configured() {
     let mut sim = Sim::new(
@@ -987,6 +1017,7 @@ fn quiet_peers_ping_each_other_and_keep_the_session_alive() {
     );
 }
 
+/// Spec: m2-124/6.14#1
 #[test]
 fn a_ping_gets_a_reply_with_the_same_id_in_any_state() {
     let mut sim = Sim::open();
@@ -1002,6 +1033,7 @@ fn a_ping_gets_a_reply_with_the_same_id_in_any_state() {
     );
 }
 
+/// Spec: m2-124/6.14#3
 #[test]
 fn a_ping_reply_nobody_asked_for_gets_a_bad_ping_reply_nak() {
     let mut sim = established();
@@ -1021,6 +1053,7 @@ fn a_ping_reply_nobody_asked_for_gets_a_bad_ping_reply_nak() {
     );
 }
 
+/// Spec: m2-124/6.13#2, m2-124/6.13#3, m2-124/6.16#2
 #[test]
 fn a_silent_peer_ends_the_session_with_a_timeout_bye_that_is_repeated() {
     let mut sim = established();
@@ -1056,6 +1089,7 @@ fn a_silent_peer_ends_the_session_with_a_timeout_bye_that_is_repeated() {
 
 // ---- Bye ----
 
+/// Spec: m2-124/6.16#3, m2-124/6.17#1
 #[test]
 fn a_bye_is_answered_once_and_both_ends_return_to_idle() {
     let mut sim = established();
@@ -1087,6 +1121,7 @@ fn a_bye_is_answered_once_and_both_ends_return_to_idle() {
     );
 }
 
+/// Spec: m2-124/6.16#4
 #[test]
 fn a_bye_from_a_peer_in_no_session_is_still_answered() {
     let mut sim = Sim::open();
@@ -1115,6 +1150,7 @@ fn a_host_that_powers_down_ends_every_session() {
     }));
 }
 
+/// Spec: m2-124/7.1#2
 #[test]
 fn data_outside_a_session_gets_a_bye_for_session_not_established() {
     let mut sim = Sim::open();
@@ -1131,6 +1167,7 @@ fn data_outside_a_session_gets_a_bye_for_session_not_established() {
 
 // ---- Session reset ----
 
+/// Spec: m2-124/6.11#4, m2-124/6.11#8, m2-124/6.11#11, m2-124/6.12#1, m2-124/6.12#2
 #[test]
 fn a_reset_zeroes_both_sequence_numbers_and_flushes_the_buffers() {
     let mut sim = established();
@@ -1160,8 +1197,19 @@ fn a_reset_zeroes_both_sequence_numbers_and_flushes_the_buffers() {
     );
     assert_eq!(sent[0].sequence(), SequenceNumber::ZERO);
     assert_eq!(Sim::umps(&sim.host_events), vec![note_on(100)]);
+    // The host's side restarts at 0 too, and the client takes it as the next.
+    sim.client_events.clear();
+    sim.host
+        .send(sim.now, client_addr(), &[note_on(101)])
+        .unwrap();
+    sim.flush();
+    let back = data_commands(&sim, Direction::HostToClient);
+    assert_eq!(back.len(), 1, "the host's flushed buffer leaves no repeat");
+    assert_eq!(back[0].sequence(), SequenceNumber::ZERO);
+    assert_eq!(Sim::umps(&sim.client_events), vec![note_on(101)]);
 }
 
+/// Spec: m2-124/6.11#2, m2-124/6.11#3, m2-124/6.11#6
 #[test]
 fn no_data_is_sent_while_a_reset_is_pending_and_the_reset_is_repeated() {
     let mut sim = established();
@@ -1190,6 +1238,7 @@ fn no_data_is_sent_while_a_reset_is_pending_and_the_reset_is_repeated() {
     assert!(resets >= 3, "{resets}");
 }
 
+/// Spec: m2-124/6.11#5, m2-124/6.11#7
 #[test]
 fn an_unanswered_reset_ends_the_session_with_a_timeout_bye() {
     let mut sim = established();
@@ -1208,6 +1257,7 @@ fn an_unanswered_reset_ends_the_session_with_a_timeout_bye() {
     );
 }
 
+/// Spec: m2-124/6.11#9
 #[test]
 fn a_reset_outside_a_session_gets_a_bye_for_session_not_established() {
     let mut sim = Sim::open();
@@ -1222,6 +1272,7 @@ fn a_reset_outside_a_session_gets_a_bye_for_session_not_established() {
 
 // ---- Unreadable and unknown commands ----
 
+/// Spec: m2-124/5.5#1
 #[test]
 fn an_unknown_command_gets_a_nak_for_command_not_supported() {
     let mut sim = established();
@@ -1254,6 +1305,7 @@ fn a_malformed_command_gets_a_nak_for_command_malformed() {
     ));
 }
 
+/// Spec: m2-124/5.2#3
 #[test]
 fn a_datagram_without_the_signature_changes_nothing() {
     let mut sim = established();

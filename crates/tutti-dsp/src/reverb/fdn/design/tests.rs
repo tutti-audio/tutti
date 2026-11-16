@@ -207,3 +207,16 @@ fn the_capacity_dominates_where_rounding_matters() {
         assert!(covered, "diffusion {k}%: {tail:?} over {:?}", bound.tail);
     }
 }
+
+/// The wet gain is held at or above silence and at most `MAX_WET`: -120 dB or less is minus
+/// infinity, a gain between passes through, and anything above 24 dB is 24 dB.
+#[test]
+fn the_wet_gain_is_silent_at_minus_120_and_held_at_24() {
+    let d = freezable();
+    let wet_of = |db: f32| design_of(&d, &with(|c| c.wet = Db(db))).wet;
+    assert_eq!(wet_of(-120.0), Db(f32::NEG_INFINITY));
+    assert_eq!(wet_of(-200.0), Db(f32::NEG_INFINITY));
+    assert_eq!(wet_of(-119.0), Db(-119.0));
+    assert_eq!(wet_of(6.0), Db(6.0));
+    assert_eq!(wet_of(30.0), Db(24.0));
+}

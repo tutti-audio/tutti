@@ -39,17 +39,22 @@
 //!
 //! # Streaming
 //!
-//! [`step_chroma`] folds one frame at a time into a [`ChromaState`] that keeps
-//! a running mean. Its buffers are built when the state adopts a config, so a
-//! step allocates nothing after the first, but the first transform of an
-//! [`FftScratch`] plans lazily. With [`Tuning::Estimate`] a step can only use
-//! the peaks seen so far, so early frames fold with a rougher tuning than
-//! [`chroma`]'s whole-buffer one; with a fixed tuning the two agree to the bit.
+//! [`ChromaConfig::measure`] makes a [`ChromaMeter`] that takes the buffer in
+//! chunks of any length, cuts its frames at the hop and keeps a running mean.
+//! Its buffers are built on the first frame, so a push allocates nothing after
+//! the first, but the first transform of the meter's scratch plans lazily. With
+//! [`Tuning::Estimate`] a meter can only use the peaks seen so far, so early
+//! frames fold with a rougher tuning than [`chroma`]'s whole-buffer one; with a
+//! fixed tuning the two agree to the bit.
 //!
 //! [`harmonic_decay`]: ChromaConfig::harmonic_decay
 
-use tutti_types::{Cents, Db, Hz, Note, Samples, Semitones};
+use crate::level::SILENCE_FLOOR;
+use tutti_buffers::{Mono, Sample};
+use tutti_types::{Cents, Db, Hz, Note, SampleRate, Samples, Semitones};
 
+use crate::convert::{all_finite, for_blocks, to_f32};
+use crate::framing::{FrameCutter, Framing, check_nyquist};
 use crate::{Error, Result};
 use tutti_dsp::Complex32;
 use tutti_dsp::FftScratch;
@@ -71,10 +76,6 @@ pub(crate) const MAX_FRAMES: usize = 1 << 19;
 /// The most hops in one window. Each frame is a whole transform, so this
 /// bounds the cost of a tiny hop.
 const MAX_OVERLAP: usize = 64;
-
-/// A frame whose strongest in-band partial is below this holds no pitch, as in
-/// note transcription.
-const SILENCE_FLOOR: Db = Db(-90.0);
 
 /// Smallest positive magnitude, standing in for an empty neighbour bin before
 /// its logarithm is taken.
@@ -115,7 +116,7 @@ impl TuningOffset {
 
 /// The frequencies a peak may sit between: `min` below `max`, both finite and
 /// above zero. Whether the band suits a sample rate and a window (under
-/// Nyquist, three bins wide) is checked by [`chroma`] and [`step_chroma`], which
+/// Nyquist, three bins wide) is checked by [`chroma`] and [`ChromaConfig::measure`], which
 /// know the geometry. `TryFrom` over `min..=max` names the reason a band is
 /// refused; [`new`](Self::new) is the same check as an `Option`.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -178,12 +179,13 @@ pub enum Tuning {
     Fixed(TuningOffset),
 }
 
-/// What [`chroma`] and [`step_chroma`] fold with. Immutable once built.
+/// What [`chroma`] and a [`ChromaMeter`] fold with. Immutable once built, and
+/// free of a sample rate: the call that takes the audio derives the geometry
+/// and checks the band against it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ChromaConfig {
-    geometry: StftGeometry,
-    min_freq: Hz,
-    max_freq: Hz,
+    framing: Framing,
+    band: Option<FrequencyBand>,
     harmonics: Harmonics,
     harmonic_decay: HarmonicDecay,
     peak_floor: PeakFloor,
@@ -191,54 +193,41 @@ pub struct ChromaConfig {
 }
 
 impl ChromaConfig {
-    /// Folds the peaks of `geometry`'s frames between 100 Hz and 5 kHz (or
-    /// Nyquist, if lower), each voting for itself and three subharmonics
-    /// weighted `0.6^(order - 1)`, ignoring peaks 40 dB under the frame's
-    /// strongest, with an estimated tuning.
-    ///
-    /// # Errors
-    ///
-    /// [`Error::WindowOutOfRange`] for a window under 64 or over 262144
-    /// samples; [`Error::TooManyOverlaps`] for a hop under a sixty-fourth of
-    /// the window; [`Error::EmptyFrequencyRange`] when the band holds fewer than three bins.
-    pub fn new(geometry: StftGeometry) -> Result<Self> {
-        let window = geometry.window().get();
-        if !(MIN_WINDOW..=MAX_WINDOW).contains(&window) {
-            return Err(Error::WindowOutOfRange {
-                window: Samples(window),
-                min: Samples(MIN_WINDOW),
-                max: Samples(MAX_WINDOW),
-            });
-        }
-        if window.div_ceil(geometry.hop().get()) > MAX_OVERLAP {
-            return Err(Error::TooManyOverlaps {
-                window: Samples(window),
-                hop: geometry.hop(),
-                max: MAX_OVERLAP,
-            });
-        }
-        let nyquist = geometry.sample_rate().get() as f32 / 2.0;
-        let config = Self {
-            geometry,
-            min_freq: Hz(100.0),
-            max_freq: Hz(5000.0f32.min(nyquist)),
+    /// Folds the peaks of frames of 4096 samples every 1024 between 100 Hz and
+    /// 5 kHz (or Nyquist, if lower), each voting for itself and three
+    /// subharmonics weighted `0.6^(order - 1)`, ignoring peaks 40 dB under the
+    /// frame's strongest, with an estimated tuning.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            framing: Framing::new(Samples(4096), Samples(1024)),
+            band: None,
             harmonics: Harmonics::of(4),
             harmonic_decay: HarmonicDecay::of(0.6),
             peak_floor: PeakFloor::of(Db(-40.0)),
             tuning: Tuning::Estimate,
-        };
-        config.band_bins()?;
-        Ok(config)
+        }
+    }
+
+    /// The window and hop frames are taken at.
+    ///
+    /// The call that takes the audio refuses a window under 64 or over 262144
+    /// samples ([`Error::WindowOutOfRange`]) and a hop under a sixty-fourth of
+    /// the window ([`Error::TooManyOverlaps`]).
+    #[must_use]
+    pub fn framing(mut self, framing: Framing) -> Self {
+        self.framing = framing;
+        self
     }
 
     /// Folds only peaks inside `band`.
     ///
-    /// [`chroma`] and [`step_chroma`] refuse a band that exceeds half the
+    /// The call that takes the audio refuses a band that exceeds half the
     /// sample rate ([`Error::AboveNyquist`]) or holds fewer than three bins
     /// ([`Error::EmptyFrequencyRange`]).
     #[must_use]
     pub fn band(mut self, band: FrequencyBand) -> Self {
-        (self.min_freq, self.max_freq) = (band.min, band.max);
+        self.band = Some(band);
         self
     }
 
@@ -270,13 +259,80 @@ impl ChromaConfig {
         self
     }
 
-    /// The window, hop and sample rate frames are taken at.
-    #[inline]
-    #[must_use]
-    pub fn geometry(&self) -> StftGeometry {
-        self.geometry
+    /// A meter that folds audio at `rate`, chunk by chunk.
+    ///
+    /// # Errors
+    ///
+    /// As [`chroma`], for what depends on the framing and the band at `rate`.
+    pub fn measure(&self, rate: impl Into<SampleRate>) -> Result<ChromaMeter> {
+        Ok(ChromaMeter::new(self.plan(rate.into())?))
     }
 
+    /// The config at `rate`.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::ZeroWindow`] or [`Error::ZeroHop`] for a zero window or hop;
+    /// [`Error::WindowOutOfRange`]
+    /// for a window under 64 or over 262144 samples;
+    /// [`Error::TooManyOverlaps`] for a hop under a sixty-fourth of the window;
+    /// [`Error::EmptyFrequencyRange`] when the band holds fewer than three bins;
+    /// [`Error::AboveNyquist`] when it exceeds half `rate`.
+    fn plan(&self, rate: SampleRate) -> Result<ChromaPlan> {
+        let geometry = self.framing.geometry(rate)?;
+        let window = geometry.window().get();
+        if !(MIN_WINDOW..=MAX_WINDOW).contains(&window) {
+            return Err(Error::WindowOutOfRange {
+                window: Samples(window),
+                min: Samples(MIN_WINDOW),
+                max: Samples(MAX_WINDOW),
+            });
+        }
+        if window.div_ceil(geometry.hop().get()) > MAX_OVERLAP {
+            return Err(Error::TooManyOverlaps {
+                window: Samples(window),
+                hop: geometry.hop(),
+                max: MAX_OVERLAP,
+            });
+        }
+        let nyquist = rate.get() as f32 / 2.0;
+        let (min_freq, max_freq) = match self.band {
+            Some(band) => (band.min, band.max),
+            None => (Hz(100.0), Hz(5000.0f32.min(nyquist))),
+        };
+        let plan = ChromaPlan {
+            geometry,
+            min_freq,
+            max_freq,
+            harmonics: self.harmonics,
+            harmonic_decay: self.harmonic_decay,
+            peak_floor: self.peak_floor,
+            tuning: self.tuning,
+        };
+        plan.band_bins()?;
+        Ok(plan)
+    }
+}
+
+impl Default for ChromaConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// A [`ChromaConfig`] at one sample rate, its framing and band checked.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ChromaPlan {
+    geometry: StftGeometry,
+    min_freq: Hz,
+    max_freq: Hz,
+    harmonics: Harmonics,
+    harmonic_decay: HarmonicDecay,
+    peak_floor: PeakFloor,
+    tuning: Tuning,
+}
+
+impl ChromaPlan {
     /// The bins a peak may sit on, `lo..=hi`, each with both neighbours inside
     /// the half spectrum; an error unless the band is valid and holds three.
     fn band_bins(&self) -> Result<(usize, usize)> {
@@ -285,10 +341,7 @@ impl ChromaConfig {
         if !(min.get().is_finite() && max.get().is_finite() && min.get() > 0.0 && min < max) {
             return Err(empty);
         }
-        let nyquist = Hz(self.geometry.sample_rate().get() as f32 / 2.0);
-        if max > nyquist {
-            return Err(Error::AboveNyquist { freq: max, nyquist });
-        }
+        check_nyquist(max, self.geometry.sample_rate())?;
         let width = self.bin_width();
         let lo = ((f64::from(min.get()) / width).ceil() as usize).max(1);
         let hi = ((f64::from(max.get()) / width).floor() as usize)
@@ -340,8 +393,8 @@ impl ChromaConfig {
         let off = off_grid(frequency);
         let turn = f64::from(off) * std::f64::consts::TAU;
         let w = f64::from(energy);
-        sums.cos += w * turn.cos();
-        sums.sin += w * turn.sin();
+        sums.cos += w * libm::cos(turn);
+        sums.sin += w * libm::sin(turn);
     }
 
     /// Folds a peak into the twelve classes at `tuning` semitones sharp.
@@ -382,14 +435,14 @@ fn class_of(frequency: f64, tuning: Semitones) -> usize {
 /// middle one is the peak: its offset from the middle bin, within
 /// `-0.5..=0.5`, and the magnitude there.
 fn interpolate(below: f32, mid: f32, above: f32) -> (f64, f32) {
-    let ln = |m: f32| f64::from(m).max(TINY).ln();
+    let ln = |m: f32| libm::log(f64::from(m).max(TINY));
     let (a, b, c) = (ln(below), ln(mid), ln(above));
     let curvature = a - 2.0 * b + c;
     if curvature.is_nan() || curvature >= 0.0 {
         return (0.0, mid);
     }
     let offset = (0.5 * (a - c) / curvature).clamp(-0.5, 0.5);
-    (offset, (b - 0.25 * (a - c) * offset).exp() as f32)
+    (offset, libm::exp(b - 0.25 * (a - c) * offset) as f32)
 }
 
 /// The energy-weighted circular mean of the peaks' off-grid distances, kept as
@@ -404,7 +457,7 @@ impl TuningSums {
     /// The mean distance, within `-50..=50` cents; 0 with no peak. `atan2` is
     /// within a half turn, so the offset is within a half semitone.
     fn offset(self) -> TuningOffset {
-        let turns = self.sin.atan2(self.cos) / std::f64::consts::TAU;
+        let turns = libm::atan2(self.sin, self.cos) / std::f64::consts::TAU;
         TuningOffset::new(Semitones(turns as f32).to_cents()).unwrap_or(TuningOffset::NONE)
     }
 
@@ -418,9 +471,20 @@ impl TuningSums {
 pub struct Chroma {
     grid: Grid<f32>,
     tuning: Cents,
+    framing: Framing,
 }
 
 impl Chroma {
+    /// A chroma of `grid` taken at `framing`, with `tuning`.
+    #[cfg(test)]
+    pub(crate) fn new(grid: Grid<f32>, tuning: Cents, framing: Framing) -> Self {
+        Self {
+            grid,
+            tuning,
+            framing,
+        }
+    }
+
     /// One row per frame, one column per pitch class from C, each `0..=1`.
     #[inline]
     #[must_use]
@@ -441,6 +505,13 @@ impl Chroma {
     pub fn mean(&self) -> [f32; CLASSES] {
         mean_of_rows(&self.grid)
     }
+
+    /// The window and hop the frames were taken at.
+    #[inline]
+    #[must_use]
+    pub fn framing(&self) -> Framing {
+        self.framing
+    }
 }
 
 /// The per-column mean of a `frames x 12` grid; all zero for no frames.
@@ -459,14 +530,11 @@ fn mean_of(sum: &[f64; CLASSES], frames: usize) -> [f32; CLASSES] {
     sum.map(|s| (s / n) as f32)
 }
 
-/// What a run of [`step_chroma`] carries between frames: a running mean and
-/// the tuning sums, and the buffers a frame is transformed in.
-#[derive(Debug, Clone, Default)]
-pub struct ChromaState {
-    /// The config this carry belongs to; a different one resets it.
-    config: Option<ChromaConfig>,
-    /// The geometry the buffers below were built for.
-    built: Option<StftGeometry>,
+/// What a run of frames carries: a running mean and the tuning sums, and the
+/// buffers a frame is transformed in.
+#[derive(Debug, Clone)]
+struct ChromaFold {
+    plan: ChromaPlan,
     window: Vec<f32>,
     spectrum: Vec<Complex32>,
     magnitudes: Vec<f32>,
@@ -475,151 +543,203 @@ pub struct ChromaState {
     sums: TuningSums,
 }
 
-impl ChromaState {
-    /// An empty carry.
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
+impl ChromaFold {
+    /// A state with every buffer built for `plan`.
+    fn new(plan: ChromaPlan) -> Self {
+        let window = plan.geometry.window().get();
+        Self {
+            plan,
+            window: plan.geometry.window_coefficients(),
+            spectrum: vec![Complex32::default(); window / 2 + 1],
+            magnitudes: vec![0.0; window / 2 + 1],
+            sum: [0.0; CLASSES],
+            frames: 0,
+            sums: TuningSums::default(),
+        }
     }
 
-    /// Forgets the carried frames and tuning, keeping the buffers: the next
-    /// step allocates nothing if its geometry is the last one's. Reads like a
-    /// fresh state: no frames, a zero mean and a zero tuning.
-    pub fn reset(&mut self) {
-        self.config = None;
+    /// Forgets the carried frames and tuning, keeping the buffers.
+    fn reset(&mut self) {
         self.sum = [0.0; CLASSES];
         self.frames = 0;
         self.sums = TuningSums::default();
     }
 
-    /// The mean of the frames folded so far, per class; all zero before the
-    /// first.
-    #[must_use]
-    pub fn mean(&self) -> [f32; CLASSES] {
+    /// The mean of the frames folded so far, per class.
+    fn mean(&self) -> [f32; CLASSES] {
         mean_of(&self.sum, self.frames)
     }
 
-    /// The tuning in use: the config's fixed value, or the estimate from the
+    /// The tuning in use: the plan's fixed value, or the estimate from the
     /// peaks seen so far (0 before any).
-    #[must_use]
-    pub fn tuning(&self) -> Cents {
-        match self.config.map(|c| c.tuning) {
-            Some(Tuning::Fixed(offset)) => offset.get(),
-            _ => self.sums.cents(),
+    fn tuning(&self) -> Cents {
+        match self.plan.tuning {
+            Tuning::Fixed(offset) => offset.get(),
+            Tuning::Estimate => self.sums.cents(),
         }
     }
 
-    /// Takes on `cfg`, discarding a carry that belongs to another. The
-    /// buffers are rebuilt only for a different geometry, so a change of
-    /// tuning, band or weights allocates nothing.
-    fn adopt(&mut self, cfg: &ChromaConfig) {
-        if self.config != Some(*cfg) {
-            self.reset();
-            self.config = Some(*cfg);
-        }
-        if self.built != Some(cfg.geometry) {
-            self.built = Some(cfg.geometry);
-            self.window = cfg.geometry.window_coefficients();
-            let window = cfg.geometry.window().get();
-            self.spectrum = vec![Complex32::default(); window / 2 + 1];
-            self.magnitudes = vec![0.0; window / 2 + 1];
-        }
-    }
-
-    /// Leaves the magnitudes of `samples`, one adopted frame, in
-    /// `self.magnitudes`.
+    /// Leaves the magnitudes of `samples`, one frame, in `self.magnitudes`.
     fn transform(&mut self, samples: &[f32], fft: &mut FftScratch) {
         fft.forward(samples, &self.window, &mut self.spectrum);
         for (m, bin) in self.magnitudes.iter_mut().zip(&self.spectrum) {
             *m = bin.norm();
         }
     }
-}
 
-/// Folds one frame of `samples` (exactly one window) and adds it to the
-/// running mean. Returns the frame's chroma, `0..=1` per class, zero for a
-/// frame with no pitch.
-///
-/// # Errors
-///
-/// [`Error::EmptyFrequencyRange`] or [`Error::AboveNyquist`] when the band does
-/// not suit the geometry (see [`ChromaConfig::band`]);
-/// [`Error::FrameLengthMismatch`] when `samples` is not one window long;
-/// [`Error::NonFiniteInput`] when it holds a NaN or infinity.
-pub fn step_chroma(
-    cfg: &ChromaConfig,
-    state: &mut ChromaState,
-    samples: &[f32],
-    fft: &mut FftScratch,
-) -> Result<[f32; CLASSES]> {
-    // Checked before the state adopts the config, so a bad frame leaves the
-    // carry as it was.
-    cfg.band_bins()?;
-    if samples.len() != cfg.geometry.window().get() {
-        return Err(Error::FrameLengthMismatch {
-            got: Samples(samples.len()),
-            window: cfg.geometry.window(),
-        });
-    }
-    if samples.iter().any(|s| !s.is_finite()) {
-        return Err(Error::NonFiniteInput);
-    }
-    state.adopt(cfg);
-    state.transform(samples, fft);
+    /// Folds one frame of `samples` (exactly one finite window) and adds it to
+    /// the running mean. Returns the frame's chroma, `0..=1` per class, zero
+    /// for a frame with no pitch.
+    fn fold_frame(&mut self, samples: &[f32], fft: &mut FftScratch) -> [f32; CLASSES] {
+        self.transform(samples, fft);
+        let plan = self.plan;
 
-    let mut frame = [0.0f32; CLASSES];
-    let tuning = match cfg.tuning {
-        Tuning::Fixed(offset) => offset.get(),
-        Tuning::Estimate => {
-            let sums = &mut state.sums;
-            cfg.peaks(&state.magnitudes, |f, e| ChromaConfig::tune(f, e, sums));
-            sums.cents()
+        let mut frame = [0.0f32; CLASSES];
+        let tuning = match plan.tuning {
+            Tuning::Fixed(offset) => offset.get(),
+            Tuning::Estimate => {
+                let sums = &mut self.sums;
+                plan.peaks(&self.magnitudes, |f, e| ChromaPlan::tune(f, e, sums));
+                sums.cents()
+            }
+        };
+        let tuning = tuning.to_semitones();
+        plan.peaks(&self.magnitudes, |f, e| plan.fold(f, e, tuning, &mut frame));
+
+        let max = frame.iter().copied().fold(0.0f32, f32::max);
+        if max > 0.0 {
+            frame.iter_mut().for_each(|v| *v /= max);
+        } else {
+            frame = [0.0; CLASSES];
         }
-    };
-    let tuning = tuning.to_semitones();
-    cfg.peaks(&state.magnitudes, |f, e| cfg.fold(f, e, tuning, &mut frame));
-
-    let max = frame.iter().copied().fold(0.0f32, f32::max);
-    if max > 0.0 {
-        frame.iter_mut().for_each(|v| *v /= max);
-    } else {
-        frame = [0.0; CLASSES];
+        for (s, &v) in self.sum.iter_mut().zip(&frame) {
+            *s += f64::from(v);
+        }
+        self.frames += 1;
+        frame
     }
-    for (s, &v) in state.sum.iter_mut().zip(&frame) {
-        *s += f64::from(v);
-    }
-    state.frames += 1;
-    Ok(frame)
 }
 
-/// The chromagram of a whole buffer.
+/// A running chroma at one rate: fed chunks of the buffer in order, of any
+/// length, it cuts the frames at the hop, folds each into a running mean and
+/// reports the mean and the tuning so far.
 ///
-/// With [`Tuning::Estimate`] the buffer is transformed twice, once to find the
-/// tuning of all its peaks and once to fold with it; the second pass is
-/// [`step_chroma`] with that tuning fixed, so streaming a buffer at a fixed
-/// tuning gives these frames bit for bit. Frame `i` covers samples
-/// `i * hop .. i * hop + window`.
+/// There is no `finish`: the reading, [`mean`](Self::mean) and
+/// [`tuning`](Self::tuning), is available after any push. With
+/// [`Tuning::Estimate`] the tuning is the estimate from the peaks seen so far;
+/// with a fixed tuning the frames equal [`chroma`]'s bit for bit.
+///
+/// A push allocates nothing once the meter is made (the transform is planned
+/// there), and its cost is a transform per frame: fit for a consumer thread
+/// that drains a tap, not for an audio callback.
+#[derive(Debug)]
+pub struct ChromaMeter {
+    fold: ChromaFold,
+    cutter: FrameCutter,
+    fft: FftScratch,
+}
+
+impl ChromaMeter {
+    fn new(plan: ChromaPlan) -> Self {
+        let mut fft = FftScratch::new();
+        let fold = ChromaFold::new(plan);
+        // Plans the transform and sizes its scratch, so a push allocates
+        // nothing.
+        let window = plan.geometry.window().get();
+        let mut spectrum = vec![Complex32::default(); window / 2 + 1];
+        fft.forward(&vec![0.0; window], &fold.window, &mut spectrum);
+        Self {
+            cutter: FrameCutter::new(Framing::new(plan.geometry.window(), plan.geometry.hop())),
+            fold,
+            fft,
+        }
+    }
+
+    /// Feeds the next chunk of the buffer, in order, and folds each frame it
+    /// completes. Returns the number of frames folded.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NonFiniteInput`] when the chunk holds a NaN or infinity. The
+    /// meter is untouched on error.
+    pub fn push<S: Sample>(&mut self, chunk: Mono<'_, S>) -> Result<usize> {
+        if !all_finite(chunk.samples()) {
+            return Err(Error::NonFiniteInput);
+        }
+        let mut folded = 0;
+        for_blocks(chunk.samples(), 1, |block| {
+            self.feed(block, |_| folded += 1);
+        });
+        Ok(folded)
+    }
+
+    /// Takes converted, finite samples and folds each frame they complete,
+    /// calling `each` with the frame's chroma.
+    fn feed(&mut self, block: &[f32], mut each: impl FnMut(&[f32; CLASSES])) {
+        let Self { fold, cutter, fft } = self;
+        cutter.feed(block, |_, samples| each(&fold.fold_frame(samples, fft)));
+    }
+
+    /// The mean of the frames folded so far, per class; all zero before the
+    /// first.
+    #[must_use]
+    pub fn mean(&self) -> [f32; CLASSES] {
+        self.fold.mean()
+    }
+
+    /// The tuning in use: the config's fixed value, or the estimate from the
+    /// peaks seen so far (0 before any).
+    #[must_use]
+    pub fn tuning(&self) -> Cents {
+        self.fold.tuning()
+    }
+
+    /// Forgets the carried frames and tuning, keeping the buffers: the next
+    /// push allocates nothing. Reads like a fresh meter.
+    pub fn reset(&mut self) {
+        self.fold.reset();
+        self.cutter.reset();
+    }
+}
+
+/// The chromagram of a whole buffer at `rate`.
+///
+/// With a fixed tuning this feeds one [`ChromaMeter`] the buffer, so streaming
+/// it gives these frames bit for bit. With [`Tuning::Estimate`] it is the one
+/// exception to "the one-shot is a meter fed the buffer": the buffer is
+/// transformed twice, once to find the tuning of all its peaks and once, in a
+/// meter with that tuning fixed, to fold with it, so a streaming estimate (which
+/// can only use the peaks seen so far) differs from it in its early frames.
+/// Frame `i` covers samples `i * hop .. i * hop + window`.
 ///
 /// # Errors
 ///
 /// [`Error::EmptyFrequencyRange`] or [`Error::AboveNyquist`] when the band does
-/// not suit the geometry (see [`ChromaConfig::band`]);
+/// not suit the framing and the rate (see [`ChromaConfig::band`]);
+/// [`Error::WindowOutOfRange`] or [`Error::TooManyOverlaps`] when the framing
+/// is not one a chroma accepts;
 /// [`Error::NonFiniteInput`] for a NaN or infinite sample;
 /// [`Error::InsufficientInput`] for less than one window;
 /// [`Error::TooManyFrames`] for more than 524288 frames.
-pub fn chroma(samples: &[f32], cfg: &ChromaConfig, fft: &mut FftScratch) -> Result<Chroma> {
-    cfg.band_bins()?;
-    if samples.iter().any(|s| !s.is_finite()) {
+pub fn chroma<S: Sample>(
+    cfg: &ChromaConfig,
+    samples: Mono<'_, S>,
+    rate: impl Into<SampleRate>,
+    fft: &mut FftScratch,
+) -> Result<Chroma> {
+    let plan = cfg.plan(rate.into())?;
+    if !all_finite(samples.samples()) {
         return Err(Error::NonFiniteInput);
     }
-    let window = cfg.geometry.window().get();
+    let samples = to_f32(samples.samples());
+    let window = plan.geometry.window().get();
     if samples.len() < window {
         return Err(Error::InsufficientInput {
             needed: Samples(window),
             got: Samples(samples.len()),
         });
     }
-    let frames = cfg.geometry.frames_for(Samples(samples.len()));
+    let frames = plan.geometry.frames_for(Samples(samples.len()));
     if frames.get() > MAX_FRAMES {
         return Err(Error::TooManyFrames {
             frames,
@@ -627,46 +747,51 @@ pub fn chroma(samples: &[f32], cfg: &ChromaConfig, fft: &mut FftScratch) -> Resu
         });
     }
     let frame_at = |i: usize| {
-        let at = i * cfg.geometry.hop().get();
+        let at = i * plan.geometry.hop().get();
         &samples[at..at + window]
     };
 
-    let tuning = match cfg.tuning {
+    let tuning = match plan.tuning {
         Tuning::Fixed(offset) => offset,
         Tuning::Estimate => {
-            let mut state = ChromaState::new();
-            state.adopt(cfg);
+            let mut state = ChromaFold::new(plan);
             for i in 0..frames.get() {
                 state.transform(frame_at(i), fft);
                 let sums = &mut state.sums;
-                cfg.peaks(&state.magnitudes, |f, e| ChromaConfig::tune(f, e, sums));
+                plan.peaks(&state.magnitudes, |f, e| ChromaPlan::tune(f, e, sums));
             }
             state.sums.offset()
         }
     };
 
-    let fixed = ChromaConfig {
+    let fixed = ChromaPlan {
         tuning: Tuning::Fixed(tuning),
-        ..*cfg
+        ..plan
     };
-    let mut state = ChromaState::new();
+    let mut meter = ChromaMeter::new(fixed);
+    core::mem::swap(&mut meter.fft, fft);
     let mut data = Vec::with_capacity(frames.get() * CLASSES);
-    for i in 0..frames.get() {
-        data.extend_from_slice(&step_chroma(&fixed, &mut state, frame_at(i), fft)?);
-    }
+    meter.feed(&samples, |frame| data.extend_from_slice(frame));
+    core::mem::swap(&mut meter.fft, fft);
     Ok(Chroma {
         grid: Grid::new(data, frames, BinCount(CLASSES))?,
         tuning: tuning.get(),
+        framing: cfg.framing,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tutti_types::SampleRate;
+
+    const RATE: SampleRate = SampleRate::SR_22K05;
 
     fn geometry(window: usize, hop: usize) -> StftGeometry {
-        StftGeometry::new(SampleRate::SR_22K05, Samples(window), Samples(hop)).unwrap()
+        StftGeometry::new(RATE, Samples(window), Samples(hop)).unwrap()
+    }
+
+    fn framing(window: usize, hop: usize) -> Framing {
+        Framing::new(Samples(window), Samples(hop))
     }
 
     fn sine(freq: f64, len: usize, amp: f64) -> Vec<f32> {
@@ -707,11 +832,11 @@ mod tests {
     const INTERP_BIAS_BINS: f64 = 0.02;
 
     fn run(x: &[f32], cfg: &ChromaConfig) -> Chroma {
-        chroma(x, cfg, &mut FftScratch::new()).unwrap()
+        chroma(cfg, Mono::new(x), RATE, &mut FftScratch::new()).unwrap()
     }
 
     fn cfg() -> ChromaConfig {
-        ChromaConfig::new(geometry(4096, 1024)).unwrap()
+        ChromaConfig::new()
     }
 
     /// Silence is all zero and finite, a sine under -90 dBFS is silence and one
@@ -832,10 +957,11 @@ mod tests {
         assert_eq!(at(-30.0)[10], 1.0);
     }
 
-    /// Streaming at the batch's tuning gives the batch's frames to the bit and
-    /// the same mean; the carry counts frames and resets.
+    /// A meter fed chunks of 1, an odd count, a window, a hop-and-a-bit and the
+    /// whole buffer at the batch's tuning gives the batch's last frame, mean
+    /// and frame count to the bit.
     #[test]
-    fn streaming_at_a_fixed_tuning_is_the_batch() {
+    fn a_meter_at_a_fixed_tuning_is_the_one_shot() {
         let x: Vec<f32> = sine(440.0, 12_000, 0.5)
             .iter()
             .zip(sine(660.0, 12_000, 0.3))
@@ -843,77 +969,94 @@ mod tests {
             .collect();
         let batch = run(&x, &cfg());
         let fixed = cfg().tuning(Tuning::Fixed(TuningOffset::new(batch.tuning()).unwrap()));
-        let (mut state, mut fft) = (ChromaState::new(), FftScratch::new());
-        for (i, row) in batch.grid().rows().enumerate() {
-            let at = i * 1024;
-            let frame = step_chroma(&fixed, &mut state, &x[at..at + 4096], &mut fft).unwrap();
-            assert_eq!(frame.as_slice(), row);
+        // At the batch's tuning, the one-shot is the meter's reference.
+        assert_eq!(run(&x, &fixed).grid(), batch.grid());
+        for chunk in [1usize, 777, 4096, 5000, x.len()] {
+            let mut meter = fixed.measure(RATE).unwrap();
+            let mut folded = 0;
+            for part in x.chunks(chunk) {
+                folded += meter.push(Mono::new(part)).unwrap();
+            }
+            assert_eq!(folded, batch.grid().frames().get(), "chunk {chunk}");
+            assert_eq!(meter.mean(), batch.mean(), "chunk {chunk}");
+            assert_eq!(meter.tuning(), batch.tuning(), "chunk {chunk}");
         }
-        assert_eq!(state.mean(), batch.mean());
-        assert_eq!(state.tuning(), batch.tuning());
-        state.reset();
-        assert_eq!(state.mean(), [0.0; CLASSES]);
+        let mut meter = fixed.measure(RATE).unwrap();
+        meter.push(Mono::new(&x)).unwrap();
+        meter.reset();
+        assert_eq!(meter.mean(), [0.0; CLASSES]);
+        assert_eq!(meter.tuning(), batch.tuning());
     }
 
-    /// With an estimated tuning the state reads the peaks seen so far.
+    /// Under an estimated tuning a meter's reading depends on what it has
+    /// seen, never on how the stream was cut: chunks of 1, an odd count and the
+    /// whole buffer give the same mean and tuning bit for bit.
+    #[test]
+    fn an_estimating_meter_does_not_depend_on_the_chunking() {
+        let x: Vec<f32> = sine(440.0 * (25.0f64 / 1200.0).exp2(), 12_000, 0.5)
+            .iter()
+            .zip(sine(660.0, 12_000, 0.3))
+            .map(|(a, b)| a + b)
+            .collect();
+        let read = |chunk: usize| {
+            let mut meter = cfg().measure(RATE).unwrap();
+            for part in x.chunks(chunk) {
+                meter.push(Mono::new(part)).unwrap();
+            }
+            (meter.mean(), meter.tuning())
+        };
+        let whole = read(x.len());
+        assert!(whole.1.get() != 0.0, "the estimate read the peaks");
+        for chunk in [1usize, 777] {
+            assert_eq!(read(chunk), whole, "chunk {chunk}");
+        }
+    }
+
+    /// With an estimated tuning the meter reads the peaks seen so far.
     #[test]
     fn a_running_estimate_follows_the_peaks_seen() {
         let x = sine(440.0 * (25.0f64 / 1200.0).exp2(), 4096, 0.5);
-        let (mut state, mut fft) = (ChromaState::new(), FftScratch::new());
-        assert_eq!(state.tuning(), Cents(0.0));
-        step_chroma(&cfg(), &mut state, &x, &mut fft).unwrap();
-        assert!((state.tuning().get() - 25.0).abs() < 1.0);
+        let mut meter = cfg().measure(RATE).unwrap();
+        assert_eq!(meter.tuning(), Cents(0.0));
+        assert_eq!(meter.push(Mono::new(&x)).unwrap(), 1);
+        assert!((meter.tuning().get() - 25.0).abs() < 1.0);
     }
 
-    /// A settings change resets the carry rather than mixing two grids.
+    /// A refused chunk leaves the carry alone, and `reset` reads like a fresh
+    /// meter.
     #[test]
-    fn a_new_config_resets_the_carry() {
-        let (mut state, mut fft) = (ChromaState::new(), FftScratch::new());
-        let x = sine(440.0, 4096, 0.5);
-        step_chroma(&cfg(), &mut state, &x, &mut fft).unwrap();
-        let other = cfg().harmonics(Harmonics::of(1));
-        step_chroma(&other, &mut state, &sine(330.0, 4096, 0.5), &mut fft).unwrap();
-        let mean = state.mean();
-        assert_eq!((mean[4], mean[9]), (1.0, 0.0), "{mean:?}");
-    }
-
-    /// A frame that is refused leaves the carry alone, even under a config
-    /// that differs, and `reset` reads like a fresh state.
-    #[test]
-    fn a_refused_frame_keeps_the_carry_and_reset_reads_fresh() {
-        let (mut state, mut fft) = (ChromaState::new(), FftScratch::new());
+    fn a_refused_chunk_keeps_the_carry_and_reset_reads_fresh() {
         let x = sine(440.0 * (25.0f64 / 1200.0).exp2(), 4096, 0.5);
-        step_chroma(&cfg(), &mut state, &x, &mut fft).unwrap();
-        let (mean, tuning) = (state.mean(), state.tuning());
-        let other = cfg().harmonics(Harmonics::of(1));
+        let mut meter = cfg().measure(RATE).unwrap();
+        meter.push(Mono::new(&x)).unwrap();
+        let (mean, tuning) = (meter.mean(), meter.tuning());
         let mut nan = x.clone();
         nan[7] = f32::NAN;
-        assert!(step_chroma(&other, &mut state, &nan, &mut fft).is_err());
-        assert!(step_chroma(&other, &mut state, &x[..100], &mut fft).is_err());
-        assert_eq!((state.mean(), state.tuning()), (mean, tuning));
+        assert_eq!(meter.push(Mono::new(&nan)), Err(Error::NonFiniteInput));
+        assert_eq!((meter.mean(), meter.tuning()), (mean, tuning));
 
-        state.reset();
-        assert_eq!(state.mean(), [0.0; CLASSES]);
-        assert_eq!(state.tuning(), Cents(0.0));
+        meter.reset();
+        assert_eq!(meter.mean(), [0.0; CLASSES]);
+        assert_eq!(meter.tuning(), Cents(0.0));
     }
 
-    /// The geometry is validated against what the fold can afford, and the band
-    /// against the bins it holds.
+    /// The framing is validated against what the fold can afford, and the band
+    /// against the bins it holds, where the rate binds.
     #[test]
-    fn the_geometry_and_band_are_validated() {
+    fn the_framing_and_band_are_validated() {
+        let at = |window, hop| cfg().framing(framing(window, hop)).measure(RATE);
+        assert!(matches!(at(32, 8), Err(Error::WindowOutOfRange { .. })));
         assert!(matches!(
-            ChromaConfig::new(geometry(32, 8)),
+            at(1 << 19, 1 << 17),
             Err(Error::WindowOutOfRange { .. })
         ));
+        assert!(matches!(at(4096, 32), Err(Error::TooManyOverlaps { .. })));
+        assert!(at(4096, 64).is_ok());
+        assert!(matches!(at(0, 8), Err(Error::ZeroWindow | Error::ZeroHop)));
         assert!(matches!(
-            ChromaConfig::new(geometry(1 << 19, 1 << 17)),
-            Err(Error::WindowOutOfRange { .. })
+            at(4096, 0),
+            Err(Error::ZeroWindow | Error::ZeroHop)
         ));
-        assert!(matches!(
-            ChromaConfig::new(geometry(4096, 32)),
-            Err(Error::TooManyOverlaps { .. })
-        ));
-        assert!(ChromaConfig::new(geometry(4096, 64)).is_ok());
         for (lo, hi) in [
             (500.0, 100.0),
             (0.0, 1000.0),
@@ -929,28 +1072,30 @@ mod tests {
                 "{lo} {hi}"
             );
         }
-        // The geometry decides what the terminals accept: a band of under
-        // three bins, or one above Nyquist.
+        // The rate decides what the terminals accept: a band of under three
+        // bins, or one above Nyquist.
         let x = sine(440.0, 8192, 0.5);
         let mut fft = FftScratch::new();
         let narrow = cfg().band(FrequencyBand::new(Hz(100.0), Hz(110.0)).unwrap());
         assert!(matches!(
-            chroma(&x, &narrow, &mut fft),
+            chroma(&narrow, Mono::new(&x), RATE, &mut fft),
             Err(Error::EmptyFrequencyRange { .. })
         ));
         let wide = cfg().band(FrequencyBand::new(Hz(100.0), Hz(12_000.0)).unwrap());
         assert!(matches!(
-            chroma(&x, &wide, &mut fft),
+            chroma(&wide, Mono::new(&x), RATE, &mut fft),
             Err(Error::AboveNyquist { .. })
         ));
-        let mut state = ChromaState::new();
         assert!(matches!(
-            step_chroma(&wide, &mut state, &x[..4096], &mut fft),
+            wide.measure(RATE),
             Err(Error::AboveNyquist { .. })
         ));
         // A low rate clamps the default band to Nyquist instead of failing.
-        let low = StftGeometry::new(SampleRate::SR_8K, Samples(1024), Samples(256)).unwrap();
-        assert_eq!(ChromaConfig::new(low).unwrap().max_freq, Hz(4000.0));
+        let low = cfg()
+            .framing(framing(1024, 256))
+            .plan(SampleRate::SR_8K)
+            .unwrap();
+        assert_eq!(low.max_freq, Hz(4000.0));
     }
 
     /// Bad input is an error, and a refused call computes nothing.
@@ -958,50 +1103,52 @@ mod tests {
     fn bad_input_is_refused() {
         let mut fft = FftScratch::new();
         let mut x = sine(440.0, 8192, 0.5);
+        let one_shot = |x: &[f32], cfg: &ChromaConfig, fft: &mut FftScratch| {
+            chroma(cfg, Mono::new(x), RATE, fft)
+        };
         x[100] = f32::NAN;
         assert_eq!(
-            chroma(&x, &cfg(), &mut fft).unwrap_err(),
+            one_shot(&x, &cfg(), &mut fft).unwrap_err(),
             Error::NonFiniteInput
         );
         x[100] = f32::INFINITY;
         assert_eq!(
-            chroma(&x, &cfg(), &mut fft).unwrap_err(),
+            one_shot(&x, &cfg(), &mut fft).unwrap_err(),
             Error::NonFiniteInput
         );
         x[100] = 0.25;
         assert_eq!(
-            chroma(&x[..4095], &cfg(), &mut fft).unwrap_err(),
+            one_shot(&x[..4095], &cfg(), &mut fft).unwrap_err(),
             Error::InsufficientInput {
                 needed: Samples(4096),
                 got: Samples(4095)
             }
         );
-        let tiny = ChromaConfig::new(geometry(64, 1)).unwrap();
+        let tiny = cfg().framing(framing(64, 1));
         let long = vec![0.0; MAX_FRAMES + 64];
         assert!(matches!(
-            chroma(&long, &tiny, &mut fft),
+            one_shot(&long, &tiny, &mut fft),
             Err(Error::TooManyFrames { .. })
         ));
         // A NaN between two frames is in no window but is still refused.
-        let sparse = ChromaConfig::new(geometry(64, 128)).unwrap();
+        let sparse = cfg().framing(framing(64, 128));
         let mut gap = sine(440.0, 512, 0.5);
         gap[100] = f32::NAN;
         assert_eq!(
-            chroma(&gap, &sparse, &mut fft).unwrap_err(),
+            one_shot(&gap, &sparse, &mut fft).unwrap_err(),
             Error::NonFiniteInput
         );
-        let mut state = ChromaState::new();
-        assert_eq!(
-            step_chroma(&cfg(), &mut state, &x[..4000], &mut fft),
-            Err(Error::FrameLengthMismatch {
-                got: Samples(4000),
-                window: Samples(4096)
-            })
-        );
-        x[100] = f32::NAN;
-        assert_eq!(
-            step_chroma(&cfg(), &mut state, &x[..4096], &mut fft).unwrap_err(),
-            Error::NonFiniteInput
-        );
+    }
+
+    /// A 16-bit buffer folds at its nominal level: the chroma of the integer
+    /// copy of a sine peaks on the sine's class.
+    #[test]
+    fn an_integer_buffer_folds_at_its_nominal_level() {
+        let x: Vec<i16> = sine(440.0, 8192, 0.5)
+            .iter()
+            .map(|&v| (v * f32::from(i16::MAX)) as i16)
+            .collect();
+        let c = chroma(&cfg(), Mono::new(&x), RATE, &mut FftScratch::new()).unwrap();
+        assert_eq!(c.mean()[9], 1.0);
     }
 }

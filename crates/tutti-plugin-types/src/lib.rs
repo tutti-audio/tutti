@@ -260,8 +260,8 @@ pub use c_string::{
     write_utf16_str, write_utf16_units,
 };
 pub use channels::{
-    AudioBuffer, AudioBuffer32, AudioBuffer64, AudioBufferMut, MAX_BLOCK_CHANNELS, PluginTooWide,
-    Sample, sanitize,
+    AudioBuffer, AudioBuffer32, AudioBuffer64, AudioBufferMut, ChannelTable, MAX_BLOCK_CHANNELS,
+    PluginTooWide, Sample, sanitize, silence,
 };
 pub use classification::{ClapFeature, PluginRole, Vst2Category, Vst3PlugType, Vst3SubCategories};
 pub use descriptor::{AuComponentType, EditorPresence, PluginClass, PluginDescriptor};
@@ -273,7 +273,9 @@ pub use editor::{
 pub use failure::{PluginFailure, TerminationReason};
 pub use format::{PluginFormat, PluginId, UnknownExtension};
 pub use guard::{contained_panics, ffi_guard};
-pub use host::{Control, Controller, Loaded, PluginIo, Processor, Refused, Stuck, Wraps};
+pub use host::{
+    Control, Controller, Loaded, PluginIo, Processor, Refused, Stuck, Wraps, process_block,
+};
 pub use hosting::{Editor, EditorWindow, InProcess, Load, Origin, OutOfProcess, Reopen};
 pub use invalidation::{PluginInvalidation, PluginRefresh, ResyncClass, ResyncKind};
 pub use order::{StableOrder, insertion_sort_by_key};
@@ -304,7 +306,8 @@ pub use measured::{
     LatencyVerdict, Measured, NotChecked, PROBE_FLOOR, ProbeConfig, StateHash, TailVerdict, Verdict,
 };
 pub use metadata::{
-    BusChannels, Layout, LoadedPlugin, PluginBus, PluginBuses, PluginTail, Processing,
+    BusChannels, Layout, LoadedPlugin, MAX_LAYOUT_BUSES, PluginBus, PluginBuses, PluginTail,
+    Processing,
 };
 pub use midi::{
     MIDI_STACK_CAPACITY, MidiEventVec, RT_MIDI_CAPACITY, RtMidiEvents, WireMidi, group_of_port,

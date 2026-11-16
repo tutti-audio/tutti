@@ -31,7 +31,7 @@ use tutti_types::{
 };
 
 use super::clock::{BlockClock, Run, Wrap};
-use super::loop_span::{LoopSpan, blend};
+use super::loop_span::LoopSpan;
 use super::memory_source::VoiceWindow;
 use crate::PlaceError;
 
@@ -501,7 +501,7 @@ pub(crate) fn read_looped_frame(
         let tap = taps[t];
         let tail = wave.at(c, tap.frame);
         match tap.fade {
-            Some((lead, w)) => blend(tail, wave.at(c, lead), w),
+            Some((lead, w)) => tutti_dsp::lerp(tail, wave.at(c, lead), w),
             None => tail,
         }
     });

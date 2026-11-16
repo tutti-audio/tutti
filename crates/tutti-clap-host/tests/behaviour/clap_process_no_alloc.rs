@@ -12,11 +12,7 @@
 //! rather than the default configuration.
 //!
 //! This says nothing about the `ArcLend` deallocation property, which is a
-//! race no allocation-sampling test can pin. Likewise the `clap.log` mutex: its
-//! allocations are gated below, but a priority inversion is invisible here and
-//! is handled by construction — the host refuses to reach the lock from the
-//! audio thread, which the same test pins from the other side by asserting the
-//! lines were counted as dropped.
+//! race no allocation-sampling test can pin.
 
 use std::path::Path;
 use std::sync::Mutex;
@@ -209,7 +205,7 @@ fn drive(
             inputs: ins,
             outputs: outs,
             num_samples: FRAMES,
-            sample_rate: SAMPLE_RATE,
+            sample_rate: tutti_plugin_types::SampleRate::of(SAMPLE_RATE),
         };
         last = inst.process(&mut buffer, ctx).map(|_| ());
     }
@@ -297,7 +293,7 @@ fn process_with_midi_does_not_allocate() {
                 inputs: ins,
                 outputs: outs,
                 num_samples: FRAMES,
-                sample_rate: SAMPLE_RATE,
+                sample_rate: tutti_plugin_types::SampleRate::of(SAMPLE_RATE),
             };
             inst.process(&mut buffer, &ctx).expect("process");
         }
@@ -520,7 +516,7 @@ fn the_plugins_status_becomes_the_blocks_status() {
             inputs: ins,
             outputs: outs,
             num_samples: FRAMES,
-            sample_rate: SAMPLE_RATE,
+            sample_rate: tutti_plugin_types::SampleRate::of(SAMPLE_RATE),
         });
         inst.processor()
             .render(&mut buffer, &ctx, &mut out)
@@ -628,7 +624,7 @@ fn plugin_error_status_does_not_allocate() {
                 inputs: ins,
                 outputs: outs,
                 num_samples: FRAMES,
-                sample_rate: SAMPLE_RATE,
+                sample_rate: tutti_plugin_types::SampleRate::of(SAMPLE_RATE),
             };
             // The error is expected; what must not happen is an allocation
             // while producing it.
@@ -678,7 +674,7 @@ fn oversized_block_rejection_does_not_allocate() {
             inputs: ins,
             outputs: outs,
             num_samples: OVERSIZE,
-            sample_rate: SAMPLE_RATE,
+            sample_rate: tutti_plugin_types::SampleRate::of(SAMPLE_RATE),
         };
         let err = inst
             .process(&mut buffer, &ctx)
@@ -703,7 +699,7 @@ fn oversized_block_rejection_does_not_allocate() {
                 inputs: ins,
                 outputs: outs,
                 num_samples: OVERSIZE,
-                sample_rate: SAMPLE_RATE,
+                sample_rate: tutti_plugin_types::SampleRate::of(SAMPLE_RATE),
             };
             let _ = inst.process(&mut buffer, &ctx);
         }
@@ -779,7 +775,7 @@ fn drive_and_read_output(
         inputs: ins,
         outputs: outs,
         num_samples: FRAMES,
-        sample_rate: SAMPLE_RATE,
+        sample_rate: tutti_plugin_types::SampleRate::of(SAMPLE_RATE),
     };
     let out = inst.process(&mut buffer, &ctx).expect("process");
     let queues = out
@@ -1094,14 +1090,11 @@ fn start_processing_failure_is_allocation_free() {
 }
 
 /// A plugin logging through `clap.log` from inside `process` must not make the
-/// host allocate, lock stderr, or take the log mutex.
+/// host allocate.
 ///
 /// CLAP marks `clap.log` `[thread-safe]`, which includes the audio thread.
-/// Treating such a line like a main-thread one would mean `into_owned()`,
-/// `eprintln!`, and `LogState::push` taking a `Mutex` that `drain_log` holds
-/// across a `.collect()`. The first two are allocations; the third is a
-/// priority inversion this gate cannot see, caught instead by the host refusing
-/// to reach the lock from this thread.
+/// Treating such a line like a main-thread one would mean decoding the message
+/// into a `String` and emitting a `tracing` event, both allocations.
 ///
 /// `log_lines_dropped` is asserted to move, so a host that silently discarded
 /// audio-thread logs would fail here rather than pass.
@@ -1237,7 +1230,7 @@ fn drive_wide(inst: &mut Active<f32>, channels: usize, iters: usize) {
             inputs: &ins,
             outputs: &mut outs,
             num_samples: FRAMES,
-            sample_rate: SAMPLE_RATE,
+            sample_rate: tutti_plugin_types::SampleRate::of(SAMPLE_RATE),
         };
         inst.process(&mut buffer, &ctx).expect("warm-up process");
     }
@@ -1253,7 +1246,7 @@ fn drive_wide(inst: &mut Active<f32>, channels: usize, iters: usize) {
                 inputs: &ins,
                 outputs: &mut outs,
                 num_samples: FRAMES,
-                sample_rate: SAMPLE_RATE,
+                sample_rate: tutti_plugin_types::SampleRate::of(SAMPLE_RATE),
             };
             inst.process(&mut buffer, &ctx).expect("process");
         }

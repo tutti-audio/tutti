@@ -432,20 +432,12 @@ fn a_session_is_send() {
     assert!(is_send(&session));
 }
 
-/// The options are stored as written: an identity and a timing survive a round
-/// trip, and a default value reads back as the default.
+/// The options are stored as written: a timing survives a round trip, and a
+/// default value reads back as the default.
 #[cfg(feature = "serde")]
 #[test]
 fn the_options_round_trip_through_serde() {
-    use tutti_ump::{DeviceIdentity, ManufacturerId, U7};
-    let options = MidiHardwareOptions::new()
-        .ci(DeviceIdentity {
-            manufacturer: ManufacturerId::NON_COMMERCIAL,
-            family: [U7::of(1); 2],
-            model: [U7::of(2); 2],
-            revision: [U7::of(3); 4],
-        })
-        .input_timing(InputTiming::JitterReduction);
+    let options = MidiHardwareOptions::new().input_timing(InputTiming::JitterReduction);
     let text = serde_json::to_string(&options).unwrap();
     assert_eq!(
         serde_json::from_str::<MidiHardwareOptions>(&text).unwrap(),

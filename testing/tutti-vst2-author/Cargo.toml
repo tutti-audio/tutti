@@ -29,7 +29,7 @@ authors = [
 
 [dependencies]
 tutti-vst2-ffi = { path = "../../crates/tutti-vst2-ffi" }
-log = "0.4"
+tracing.workspace = true
 
 # `util::parameter_transfer`'s test module does `extern crate rand`.
 [dev-dependencies]

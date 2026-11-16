@@ -12,7 +12,7 @@ use tutti_clap_ffi::PortScratch;
 use tutti_midi_protocol::Translator;
 use tutti_plugin_types::BusChannels;
 use tutti_plugin_types::RtMidiEvents;
-use tutti_plugin_types::SampleFormat;
+use tutti_plugin_types::{SampleFormat, SampleRate};
 
 /// How many converted note expressions one block can carry; reserved at
 /// activation so converting never grows the buffer.
@@ -21,7 +21,7 @@ pub(crate) const INPUT_NOTE_EXPRESSIONS: usize = 256;
 /// Audio format the host presents to the plugin.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct AudioConfig {
-    pub sample_rate: f64,
+    pub sample_rate: SampleRate,
     pub max_frames: u32,
     pub supports_f64: bool,
     /// Whether the current activation hands the plugin 64-bit buffers.
@@ -81,10 +81,9 @@ pub(crate) struct AudioScratch {
     ///
     /// Atomic so the audio thread's `Relaxed` store is readable off-thread
     /// through
-    /// [`ClapProcessor::last_process_status`](super::ClapProcessor::last_process_status);
-    /// as a plain field, TAIL and SLEEP reached callers only via an `eprintln!`
-    /// on the audio thread. A plain `AtomicI32` rather than `ArcLend` because
-    /// this is a scalar — nothing here can be freed on the audio thread.
+    /// [`ClapProcessor::last_process_status`](super::ClapProcessor::last_process_status).
+    /// A plain `AtomicI32` rather than `ArcLend` because this is a scalar:
+    /// nothing here can be freed on the audio thread.
     pub last_process_status: AtomicI32,
 }
 

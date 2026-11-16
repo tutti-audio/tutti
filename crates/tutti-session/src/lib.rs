@@ -117,6 +117,8 @@ mod recovery;
 #[cfg(feature = "sampler")]
 mod sampler;
 mod session;
+#[cfg(feature = "device")]
+mod switch;
 #[cfg(all(feature = "device", feature = "audio-io"))]
 mod take;
 #[cfg(feature = "device")]
@@ -143,8 +145,7 @@ pub use edge::EdgeGainError;
 #[cfg(feature = "plugin")]
 pub use error::HostPluginError;
 pub use error::{
-    ConnectError, Error, HeardTapError, InletError, NoSuchNode, RemoveError, Result, ScheduleError,
-    TempoError,
+    ConnectError, Error, HeardTapError, InletError, NoSuchNode, RemoveError, Result, TempoError,
 };
 #[cfg(feature = "midi")]
 pub use error::{MidiError, RouteDeclarer};
@@ -220,6 +221,8 @@ pub use pool::{SoundFontFile, soundfont};
 use hang::HangDetector;
 #[cfg(feature = "plugin")]
 pub use hang::HangPolicy;
+#[cfg(feature = "midi-hardware")]
+pub use midi_hardware::{MidiPolicy, MidiPolicyError, MidiPolicyHandle};
 #[cfg(feature = "plugin")]
 pub use plugin_diagnostics::{Diagnostics, PluginBuses};
 #[cfg(feature = "plugin")]
@@ -228,7 +231,9 @@ pub use plugin_params::{Param, ParamGesture, Params, PluginParamError, TypedPara
 pub use plugin_presets::{PresetEntry, PresetKind, Presets};
 pub use policy::{OutputPolicy, OutputPolicyError, OutputPolicyHandle, Policy};
 #[cfg(feature = "record")]
-pub use recorder::{Finite, IDLE_PARK, Live, PumpLoop, PumpPass, Recorder, RecorderError};
+pub use recorder::{
+    FinalizeError, Finite, IDLE_PARK, Live, PumpLoop, PumpPass, Recorder, RecorderError,
+};
 #[cfg(feature = "plugin")]
 pub use recovery::{
     GiveUp, PortCounts, Recovery, RecoveryAction, RecoveryEvent, RecoveryFailure, RecoveryPolicy,
@@ -241,6 +246,8 @@ pub use session::MidiNodes;
 #[cfg(feature = "modulation")]
 pub use session::ModInput;
 pub use session::{PHASES, Phase, PhaseCx, RootTopologyStatus, Session, SessionEvent};
+#[cfg(feature = "device")]
+pub use switch::ClockError;
 #[cfg(all(feature = "device", feature = "audio-io"))]
 pub use take::{
     Armed, InFlight, Placement, Punch, PunchError, Recorded, Rolling, Start, Take, TakeEnd,

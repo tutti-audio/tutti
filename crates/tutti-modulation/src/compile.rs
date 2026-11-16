@@ -33,7 +33,7 @@ use tutti_types::{
 use crate::curve::Curve;
 use crate::program::{
     Amount, Clock, ControlProgram, DepthBy, InputLayer, Layer, LayerId, ProgramError, ProgramTime,
-    RateAnchor, SourceId, Waveform,
+    RateAnchor, SourceId, Waveform, splitmix64,
 };
 use crate::shape::Polarity;
 
@@ -455,22 +455,13 @@ const MACRO_CLOCK: Clock = Clock::Beats {
     phase: PhaseIncrement(0.0),
 };
 
-/// The splitmix64 finalizer: a stable, platform-independent mix.
-#[inline]
-fn mix(mut z: u64) -> u64 {
-    z = z.wrapping_add(0x9E37_79B9_7F4A_7C15);
-    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-    z ^ (z >> 31)
-}
-
 /// The [`LayerId`] of `route`'s layer, scaled by `depth_by` (if any).
 /// Stable: keys only, so an edit that keeps both keys keeps the id.
 pub fn layer_id(route: RouteKey, depth_by: Option<RouteKey>) -> LayerId {
-    let h = mix(route.0);
+    let h = splitmix64(route.0);
     LayerId(match depth_by {
         None => h,
-        Some(d) => mix(h ^ mix(d.0 ^ 0xD1B5_4A32_D192_ED03)),
+        Some(d) => splitmix64(h ^ splitmix64(d.0 ^ 0xD1B5_4A32_D192_ED03)),
     })
 }
 

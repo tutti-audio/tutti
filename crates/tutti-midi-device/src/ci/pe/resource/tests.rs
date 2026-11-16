@@ -70,6 +70,7 @@ fn device_info_reads_the_ids_of_table_6() {
 }
 
 // M2-105 Table 5: the data is written back as the ids and names it holds.
+/// Spec: m2-105/3.2#2
 #[test]
 fn device_info_is_written_with_its_ids_in_bytes() {
     let text = r#"{"manufacturerId":[125,0,0],"manufacturer":"Educational Use","familyId":[0,0],
@@ -132,6 +133,7 @@ fn device_info_ids_are_7_bit_arrays_of_the_right_length() {
 
 // M2-103 §6.1.4: a property named `x-` is the manufacturer's, kept inside an AMEI
 // Resource; an unknown property that is not one is a later version's.
+/// Spec: m2-103/6.1.4#2
 #[test]
 fn a_manufacturer_property_is_kept_and_written_back() {
     let text = r#"{"manufacturerId":[125,0,0],"manufacturer":"Educational Use","familyId":[0,0],
@@ -155,6 +157,7 @@ fn a_manufacturer_property_is_kept_and_written_back() {
 }
 
 // An extension is the manufacturer's when its name starts `x-` (M2-103 §6.1.4).
+/// Spec: m2-103/6.1.4#2
 #[test]
 fn only_a_vendor_name_is_an_extension() {
     let mut extensions = PeExtensions::default();
@@ -440,6 +443,7 @@ fn all_ctrl_list_reads_table_6() {
 
 // M2-117 §2.1.1.2: a `valueSelect` control sends the values of a CtrlMapList, so
 // `ctrlMapId` shall be set.
+/// Spec: m2-117/2.1.1.2#2
 #[test]
 fn value_select_needs_a_map() {
     let entry = |extra: &str| {
@@ -461,6 +465,7 @@ fn value_select_needs_a_map() {
 }
 
 // M2-117 §2.1.1.3: `minMax` and `stepCount` shall not be on the same entry.
+/// Spec: m2-117/2.1.1#11, m2-117/2.1.1.3#2
 #[test]
 fn step_count_and_min_max_exclude_each_other() {
     let entry = |extra: &str| {
@@ -488,6 +493,7 @@ fn step_count_and_min_max_exclude_each_other() {
 
 // M2-117 Table 5: `priority` is 1 to 5, `default` is an unsigned 32-bit value, and
 // `numSigBits` is the bits of one.
+/// Spec: m2-117/2.1.1#1
 #[test]
 fn controller_numbers_have_the_ranges_of_table_5() {
     let entry = |extra: &str| {
@@ -551,6 +557,7 @@ fn a_controller_has_the_index_its_type_needs() {
 
 // M2-117 §2.1.3 Table 7: one controller may be listed twice, once for what it
 // sends and once for what it recognizes, and in no other case.
+/// Spec: m2-117/2.1.1#3, m2-117/2.1.3#1, m2-117/2.1.3#2
 #[test]
 fn a_controller_is_listed_twice_only_for_transmit_and_recognize() {
     let pair = r#"[{"title":"Vibrato","ctrlType":"cc","channel":1,"default":0,"ctrlIndex":[2],"transmit":"none"},
@@ -559,6 +566,25 @@ fn a_controller_is_listed_twice_only_for_transmit_and_recognize() {
     let twice = r#"[{"title":"A","ctrlType":"cc","channel":1,"ctrlIndex":[2]},
         {"title":"B","ctrlType":"cc","channel":1,"ctrlIndex":[2]}]"#;
     assert!(decode(&PeResource::AllCtrlList, twice).is_err());
+    // Two entries that both describe what is sent, or both what is recognized.
+    let entry = |extra: &str| {
+        format!(r#"{{"title":"T","ctrlType":"cc","channel":1,"ctrlIndex":[2],{extra}}}"#)
+    };
+    for (a, b) in [
+        (r#""transmit":"none""#, r#""transmit":"none""#),
+        (r#""recognize":"none""#, r#""recognize":"none""#),
+    ] {
+        let both = format!("[{},{}]", entry(a), entry(b));
+        assert!(decode(&PeResource::AllCtrlList, &both).is_err(), "{both}");
+    }
+    // A third entry of the pair's controller is a repeat.
+    let third = format!(
+        r#"[{},{},{}]"#,
+        entry(r#""transmit":"none""#),
+        entry(r#""recognize":"none""#),
+        entry(r#""transmit":"none""#)
+    );
+    assert!(decode(&PeResource::AllCtrlList, &third).is_err(), "{third}");
     // The same controller on another Channel is another entry.
     let other = twice.replace(
         r#""title":"B","ctrlType":"cc","channel":1"#,
@@ -637,6 +663,7 @@ fn a_resource_without_a_type_is_opaque_json() {
 
 // M2-103 §8.4: a manufacturer Resource is named `X-` and 1 to 33 alphanumerics;
 // §8.6: a List Resource's name ends `List`.
+/// Spec: m2-103/8.4#3, m2-103/8.6#1
 #[test]
 fn resource_names_follow_8_4_and_8_6() {
     assert!(CustomResource::new("X-Anything").is_some());
@@ -719,6 +746,7 @@ fn a_default_entry_is_minimal() {
 
 // M2-103 §14.3: canGet, canSet, requireResId, canPaginate and schema keep their
 // defaults on a Resource an AMEI/MMA specification defines.
+/// Spec: m2-103/14.3#3
 #[test]
 fn a_standard_resource_keeps_its_defaults() {
     let entry = |resource: PeResource| ResourceEntry::new(resource).unwrap();
@@ -756,6 +784,7 @@ fn a_standard_resource_keeps_its_defaults() {
 }
 
 // M2-103 §14: ResourceList has no entry for itself, and each Resource has one entry.
+/// Spec: m2-103/9.1#3, m2-103/14#4
 #[test]
 fn resource_list_does_not_list_itself_or_repeat() {
     assert_eq!(
@@ -798,6 +827,7 @@ fn only_a_list_resource_paginates_and_has_columns() {
 
 // M2-103 §14.4, Table 86: a manufacturer JSON Resource gives a schema with at least
 // a title.
+/// Spec: m2-103/14.4#2, m2-103/14.4#3
 #[test]
 fn a_custom_entry_needs_a_schema_with_a_title() {
     let wifi = custom("X-WIFIOn");
@@ -852,6 +882,7 @@ fn columns_name_a_property_or_a_link() {
 
 // M2-103 §8.5, §14.2: an entry that needs a `resId`, and a Resource that does not
 // have entries, as targets of an inquiry.
+/// Spec: m2-103/8.5#4
 #[test]
 fn a_target_has_a_res_id_when_the_resource_has_entries() {
     assert!(matches!(
@@ -870,6 +901,7 @@ fn a_target_has_a_res_id_when_the_resource_has_entries() {
 }
 
 // M2-103 §8.6.2: only a List Resource takes `offset` and `limit`.
+/// Spec: m2-103/8.6.2#2
 #[test]
 fn only_a_list_resource_is_asked_for_a_page() {
     let page = PePage {
@@ -962,6 +994,7 @@ fn a_get_is_checked_against_its_entry() {
 
 // M2-103 §10: a Full Set needs `canSet` of `full` or `partial`, and a Partial Set
 // needs `partial`.
+/// Spec: m2-103/10#3, m2-103/10#9
 #[test]
 fn a_set_is_checked_against_its_entry() {
     let target = ResourceTarget::new(PeResource::LocalOn).unwrap();

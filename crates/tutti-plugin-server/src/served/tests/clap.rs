@@ -16,6 +16,7 @@ use tutti_clap_host::ClapLoaded as HostLoaded;
 use tutti_fixtures::midi;
 use tutti_midi_protocol::widen_velocity;
 use tutti_plugin_types::{EditorPresence, Features, PluginTail, RenderModeSupport, Request};
+use tutti_types::ChannelLayout;
 use tutti_ump::U7;
 
 type ClapInstance = Served<HostLoaded>;
@@ -76,7 +77,7 @@ impl Served<HostLoaded> {
     fn take_io_changed(&mut self) -> bool {
         let before = self.events.len();
         self.events
-            .retain(|e| !matches!(e, BridgeMessage::PluginIoChanged));
+            .retain(|e| !matches!(e, BridgeMessage::PluginIoChanged { .. }));
         self.events.len() != before
     }
 
@@ -286,18 +287,29 @@ fn a_rate_change_that_changes_the_layout_raises_io_changed() {
     assert_eq!(instance.loaded().inputs.len(), 2, "stereo main + mono aux");
     assert_eq!(instance.loaded().total_inputs(), 3);
     let mut plugin = instance;
-    assert!(
-        plugin
-            .poll(main_thread())
-            .iter()
-            .any(|e| matches!(e, BridgeMessage::PluginIoChanged)),
-        "the host is told"
+    let told = plugin.poll(main_thread());
+    let announced: Vec<_> = told
+        .iter()
+        .filter_map(|e| match e {
+            BridgeMessage::PluginIoChanged { layout } => Some(layout.clone()),
+            _ => None,
+        })
+        .collect();
+    let [Some(layout)] = announced.as_slice() else {
+        panic!("the host is told once, with the buses it has now: {announced:?}");
+    };
+    let stereo_and_mono = vec![ChannelLayout::STEREO, ChannelLayout::MONO];
+    assert_eq!(
+        (layout.input_widths(), layout.output_widths()),
+        (stereo_and_mono.clone(), stereo_and_mono),
+        "the buses sent are the ones the fixture declares in this mode"
     );
+    assert_eq!(layout.inputs.len(), 2, "stereo main + mono aux");
     assert!(
         !plugin
             .poll(main_thread())
             .iter()
-            .any(|e| matches!(e, BridgeMessage::PluginIoChanged)),
+            .any(|e| matches!(e, BridgeMessage::PluginIoChanged { .. })),
         "once"
     );
 }
@@ -377,7 +389,7 @@ fn a_deactivated_instance_renders_silence_and_tells_the_host() {
         inputs: &input_slices,
         outputs: &mut output_slices,
         num_samples: 64,
-        sample_rate: 44100.0,
+        sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
     };
     let mut out = tutti_plugin_types::ProcessOutput::default();
     instance
@@ -467,11 +479,82 @@ fn a_served_ports_rescan_is_polled_as_io_changed() {
         plugin
             .poll(main_thread())
             .iter()
-            .any(|e| matches!(e, BridgeMessage::PluginIoChanged))
+            .any(|e| matches!(e, BridgeMessage::PluginIoChanged { .. }))
     };
     assert!(io_changed(&mut plugin), "the host is told");
     assert_eq!(plugin.loaded().total_inputs(), 3);
     assert!(!io_changed(&mut plugin), "once");
+}
+
+/// **The host is told the buses once per change, and nothing for a rescan that
+/// changes none.** Stereo to stereo-and-mono is sent whole; the same rescan
+/// again sends `layout: None`; and a plugin that goes back to where it began
+/// has the first layout sent again, not suppressed as "seen before".
+#[test]
+fn the_buses_are_announced_when_they_change_and_not_otherwise() {
+    use tutti_clap_test_plugin::PortLayoutMode::{AsymmetricAux, SymmetricStereo, TwoMono};
+    let _lock = crate::test_utils::plugin_load_lock();
+    let path = Path::new(clap_plugin());
+    let mut plugin =
+        ClapInstance::load_first(main_thread(), path, 44100.0, 512, false).expect("load");
+    // What the host is sent for a rescan after the plugin switches to `mode`.
+    let rescan = |plugin: &mut ClapInstance, mode| {
+        let _layout = crate::test_utils::clap_probe_port_layout(mode as u32);
+        let _asked = crate::test_utils::clap_probe_request_ports_rescan(RESCAN_LIST_AND_CHANNELS);
+        plugin.loaded_mut_unwrapped().on_main_thread(main_thread());
+        let told: Vec<_> = plugin
+            .poll(main_thread())
+            .into_iter()
+            .filter_map(|e| match e {
+                BridgeMessage::PluginIoChanged { layout } => Some(layout),
+                _ => None,
+            })
+            .collect();
+        told
+    };
+    let widths = |layout: &Option<tutti_plugin_types::Layout>| {
+        layout
+            .as_ref()
+            .map(|l| (l.input_widths(), l.output_widths()))
+    };
+    let of = |counts: &[u16]| -> Vec<ChannelLayout> {
+        counts
+            .iter()
+            .map(|&n| ChannelLayout::from_count(n))
+            .collect()
+    };
+
+    let first = rescan(&mut plugin, AsymmetricAux);
+    assert_eq!(
+        first.iter().map(widths).collect::<Vec<_>>(),
+        [Some((of(&[2, 1]), of(&[2, 1])))],
+        "the first change after load is sent whole"
+    );
+    let again = rescan(&mut plugin, AsymmetricAux);
+    assert!(
+        again.is_empty(),
+        "a rescan that changes no bus says nothing"
+    );
+    // What the host is sent when the plugin is lost, or a refusal leaves it
+    // silent, with the buses unchanged: the report, with no layout.
+    assert!(
+        matches!(
+            plugin.io_changed(),
+            BridgeMessage::PluginIoChanged { layout: None }
+        ),
+        "the buses the host was told are not sent again"
+    );
+    let other = rescan(&mut plugin, TwoMono);
+    assert_eq!(
+        other.iter().map(widths).collect::<Vec<_>>(),
+        [Some((of(&[1, 1]), of(&[1, 1])))]
+    );
+    let back = rescan(&mut plugin, SymmetricStereo);
+    assert_eq!(
+        back.iter().map(widths).collect::<Vec<_>>(),
+        [Some((of(&[2]), of(&[2])))],
+        "back to where it began, the layout is sent again"
+    );
 }
 
 /// **A rescan that re-activates but leaves the layout as it was is
@@ -911,7 +994,7 @@ fn process_blocks(instance: &mut ClapInstance, blocks: usize) {
             inputs: &input_slices,
             outputs: &mut output_slices,
             num_samples,
-            sample_rate: 44100.0,
+            sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
         };
         let mut out = tutti_plugin_types::ProcessOutput::default();
         instance
@@ -988,7 +1071,7 @@ fn test_clap_process_f32_silence() {
         inputs: &input_slices,
         outputs: &mut output_slices,
         num_samples,
-        sample_rate: 44100.0,
+        sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
     };
 
     let ctx = ProcessContext::new();
@@ -1039,7 +1122,7 @@ fn test_clap_process_f32_with_note() {
             inputs: &input_slices,
             outputs: &mut output_slices,
             num_samples,
-            sample_rate: 44100.0,
+            sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
         };
 
         let ctx = ProcessContext::new().midi(&note_on);
@@ -1074,7 +1157,7 @@ fn test_clap_process_f32_with_note() {
             inputs: &input_slices,
             outputs: &mut output_slices,
             num_samples,
-            sample_rate: 44100.0,
+            sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
         };
 
         let mut out = tutti_plugin_types::ProcessOutput::default();
@@ -1161,7 +1244,7 @@ fn test_reference_process_f32_silence() {
         inputs: &input_slices,
         outputs: &mut output_slices,
         num_samples,
-        sample_rate: 44100.0,
+        sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
     };
 
     let ctx = ProcessContext::new();
@@ -1201,7 +1284,7 @@ fn test_reference_process_f32_with_note() {
             inputs: &input_slices,
             outputs: &mut output_slices,
             num_samples,
-            sample_rate: 44100.0,
+            sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
         };
 
         let ctx = if i == 0 {
@@ -1277,7 +1360,7 @@ fn test_clap_lifecycle_processing_starts_on_process() {
         inputs: &input_slices,
         outputs: &mut output_slices,
         num_samples,
-        sample_rate: 44100.0,
+        sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
     };
     let mut out = tutti_plugin_types::ProcessOutput::default();
     instance
@@ -1661,7 +1744,7 @@ fn test_clap_process_with_param_automation() {
         inputs: &input_slices,
         outputs: &mut output_slices,
         num_samples,
-        sample_rate: 44100.0,
+        sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
     };
 
     let ctx = ProcessContext::new().params(&changes);
@@ -1704,7 +1787,7 @@ fn test_clap_process_with_note_expression() {
         inputs: &input_slices,
         outputs: &mut output_slices,
         num_samples,
-        sample_rate: 44100.0,
+        sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
     };
 
     let ctx = ProcessContext::new()
@@ -1741,7 +1824,7 @@ fn test_clap_process_with_transport() {
         inputs: &input_slices,
         outputs: &mut output_slices,
         num_samples,
-        sample_rate: 44100.0,
+        sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
     };
 
     let ctx = ProcessContext::new().transport(&transport);
@@ -1977,7 +2060,7 @@ fn test_clap_sample_rate_change() {
         inputs: &input_slices,
         outputs: &mut output_slices,
         num_samples,
-        sample_rate: 48000.0,
+        sample_rate: tutti_plugin_types::SampleRate::SR_48K,
     };
 
     let ctx = ProcessContext::new();
@@ -2013,7 +2096,7 @@ fn test_clap_sample_rate_cycle_multiple() {
             inputs: &input_slices,
             outputs: &mut output_slices,
             num_samples,
-            sample_rate: rate,
+            sample_rate: tutti_plugin_types::SampleRate::of(rate),
         };
 
         let ctx = ProcessContext::new();

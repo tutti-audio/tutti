@@ -3,7 +3,7 @@
 //! The host crate of each format is the interpreter of its plugin's lifecycle
 //! (activation, restarts, requests). This is the server's one shell over them:
 //! it loads through [`OutOfProcess::load_served`], activates through
-//! [`Loaded::activate`](tutti_plugin_types::Loaded::activate) into the realtime [`Processor`] and the main-thread
+//! [`Loaded::activate`](tutti_plugin_types::Loaded::activate) into the realtime [`Processor`](tutti_plugin_types::Processor) and the main-thread
 //! [`Controller`](tutti_plugin_types::Controller), and runs both through
 //! [`Lifecycle`], so a format is a type argument and a row of the
 //! `served!` table, not a loader.
@@ -21,12 +21,12 @@ use std::time::{Duration, Instant};
 
 use tutti_plugin_ipc::BridgeMessage;
 use tutti_plugin_types::{
-    AudioBuffer, AudioBufferMut, AutomationMode, Control, Effect, Event, Features, Hand, HostOp,
-    Lifecycle, Load, LoadStage, LoadedPlugin, MAX_BLOCK_CHANNELS, MainThreadMarker, MainWorkHandle,
-    MaxBlock, Normalized, Notice, OutOfProcess, ParamEdit, ParamId, ParamWriteError, ParameterInfo,
-    PluginDescriptor, PluginError, PluginIo, PluginResult, Prepare, Preset, PresetId,
-    ProcessContext, ProcessOutput, ProcessWake, Processor, RenderMode, RenderModeSupport, Request,
-    Sample, SampleFormat, SampleRate, Samples, Seat, Stage, State, StateUse, TrackInfo,
+    AudioBufferMut, AutomationMode, Control, Effect, Event, Features, Hand, HostOp, Layout,
+    Lifecycle, Load, LoadStage, LoadedPlugin, MainThreadMarker, MainWorkHandle, MaxBlock,
+    Normalized, Notice, OutOfProcess, ParamEdit, ParamId, ParamWriteError, ParameterInfo,
+    PluginDescriptor, PluginError, PluginResult, Prepare, Preset, PresetId, ProcessContext,
+    ProcessOutput, ProcessWake, RenderMode, RenderModeSupport, Request, SampleFormat, SampleRate,
+    Samples, Seat, Stage, State, StateUse, TrackInfo,
 };
 
 mod any;
@@ -200,6 +200,8 @@ pub(crate) struct Served<F: OutOfProcess> {
     hand: Hand<F::Processor>,
     descriptor: PluginDescriptor,
     wiring: LoadedPlugin,
+    /// The buses the host was last told: at load, or by `PluginIoChanged`.
+    announced: Layout,
     /// What the plugin asked of the host since the last pass, reused.
     requests: Vec<Request>,
     /// The parameter edits the plugin made since the last pass, reused.
@@ -343,6 +345,7 @@ impl<F: ServerSide> Served<F> {
             hand,
             descriptor: PluginDescriptor::default(),
             wiring: LoadedPlugin::default(),
+            announced: Layout::default(),
             requests: Vec::new(),
             edits: Vec::new(),
             events: Vec::new(),
@@ -390,6 +393,7 @@ impl<F: ServerSide> Served<F> {
             ));
         }
         this.refresh_wiring(main);
+        this.announced = Layout::from(&this.wiring);
         // Whatever the activation told the host is what the load reply carries.
         this.events.clear();
         Ok((this, state_error))
@@ -479,7 +483,8 @@ impl<F: ServerSide> Served<F> {
             }
             Notice::IoChanged => {
                 self.refresh_wiring(main);
-                self.events.push(BridgeMessage::PluginIoChanged);
+                let io = self.io_changed();
+                self.events.push(io);
             }
             Notice::ParamValuesChanged => {
                 self.events.push(BridgeMessage::PluginParamValuesChanged);
@@ -487,7 +492,16 @@ impl<F: ServerSide> Served<F> {
             Notice::ParamTitlesChanged => {
                 self.events.push(BridgeMessage::PluginParamTitlesChanged);
             }
-            Notice::Reloaded => self.events.push(BridgeMessage::PluginReloaded),
+            Notice::Reloaded => {
+                // A reload may change the buses: the host is told them first,
+                // so its picture is current when it re-reads everything.
+                self.refresh_wiring(main);
+                let io = self.io_changed();
+                if matches!(io, BridgeMessage::PluginIoChanged { layout: Some(_) }) {
+                    self.events.push(io);
+                }
+                self.events.push(BridgeMessage::PluginReloaded);
+            }
             Notice::Transport(request) => {
                 self.events
                     .push(BridgeMessage::TransportRequested { request });
@@ -511,7 +525,8 @@ impl<F: ServerSide> Served<F> {
                 // The wire has no "lost" message, and a new one would be a
                 // protocol change. `IoChanged` is the closest signal: it makes
                 // the host re-read an instance that now renders silence.
-                self.events.push(BridgeMessage::PluginIoChanged);
+                let io = self.io_changed();
+                self.events.push(io);
                 return Some(reason);
             }
         }
@@ -522,11 +537,25 @@ impl<F: ServerSide> Served<F> {
     /// silence, so it re-reads it. A refusal a rollback undid tells nothing.
     fn finish_refusals(&mut self) {
         if std::mem::take(&mut self.refused) && !self.is_active() {
-            self.events.push(BridgeMessage::PluginIoChanged);
+            let io = self.io_changed();
+            self.events.push(io);
         }
     }
 
-    /// Reads the plugin's wiring again into what the host is given.
+    /// The `PluginIoChanged` the host is sent now: the buses the plugin has
+    /// when they are not the ones the host was told last, and none otherwise.
+    fn io_changed(&mut self) -> BridgeMessage {
+        let now = Layout::from(&self.wiring);
+        let layout = (now != self.announced).then(|| {
+            self.announced = now.clone();
+            now
+        });
+        BridgeMessage::PluginIoChanged { layout }
+    }
+
+    /// Reads the plugin's wiring again into what the host is given. A plugin
+    /// with no control (lost) keeps the wiring it last had, so the host is
+    /// told no new buses for it.
     fn refresh_wiring(&mut self, main: MainThreadMarker) {
         if let Some(control) = self.lifecycle.control() {
             self.descriptor = control.info().clone();
@@ -665,55 +694,12 @@ impl<F: ServerSide> Render for Served<F> {
         // touched.
         let Some(processor) = self.lifecycle.processor() else {
             out.clear();
-            match buffer {
-                AudioBufferMut::F32(mut b) => b.clear_outputs(),
-                AudioBufferMut::F64(mut b) => b.clear_outputs(),
-            }
+            let mut buffer = buffer;
+            buffer.clear_outputs();
             return Ok(());
         };
-        // The closures are not redundant: the variant's constructor is one
-        // function over fixed lifetimes, `through` wants one for any lifetime.
-        #[allow(clippy::redundant_closure)]
-        match buffer {
-            AudioBufferMut::F32(b) => through(processor, b, ctx, out, |b| AudioBufferMut::F32(b)),
-            AudioBufferMut::F64(b) => through(processor, b, ctx, out, |b| AudioBufferMut::F64(b)),
-        }
+        buffer.process(processor, ctx, out)
     }
-}
-
-/// One block through the Processor: the same channels again in tables whose
-/// borrow is this call's own, because [`PluginIo`] holds one lifetime for
-/// tables and data and a `&mut [&mut _]` is invariant in the data's. An array,
-/// not a `Vec`: this is the audio thread.
-pub(crate) fn through<P: Processor, T: Sample>(
-    processor: &mut P,
-    buffer: AudioBuffer<'_, '_, T>,
-    ctx: &ProcessContext<'_>,
-    out: &mut ProcessOutput,
-    wrap: impl for<'a> FnOnce(AudioBuffer<'a, 'a, T>) -> AudioBufferMut<'a, 'a>,
-) -> PluginResult<()> {
-    let AudioBuffer {
-        inputs,
-        outputs,
-        num_samples,
-        sample_rate,
-    } = buffer;
-    // At most `MAX_BLOCK_CHANNELS`: the caller's table is the slab's width.
-    let width = outputs.len();
-    let mut rest = outputs.iter_mut();
-    let mut table: [&mut [T]; MAX_BLOCK_CHANNELS] =
-        std::array::from_fn(|_| rest.next().map_or(&mut [][..], |o| &mut **o));
-    let mut io = PluginIo {
-        buffer: wrap(AudioBuffer {
-            inputs,
-            outputs: &mut table[..width],
-            num_samples,
-            sample_rate,
-        }),
-        ctx,
-        out,
-    };
-    processor.process(&mut io)
 }
 
 impl<F: ServerSide> ServedPlugin for Served<F> {

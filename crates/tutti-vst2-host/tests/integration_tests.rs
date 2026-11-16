@@ -206,7 +206,7 @@ fn render_block(instance: &mut Active, midi: &[UmpAt]) -> Vec<Vec<f32>> {
     let mut output_slices: Vec<&mut [f32]> =
         output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
 
-    let ctx = Vst2ProcessContext::new(SAMPLE_RATE).midi(midi);
+    let ctx = Vst2ProcessContext::new(tutti_plugin_types::SampleRate::of(SAMPLE_RATE)).midi(midi);
     instance.process_f32(&input_slices, &mut output_slices, BLOCK, &ctx);
 
     output_data
@@ -1300,7 +1300,8 @@ fn process_with_transport() {
     let mut output_slices: Vec<&mut [f32]> =
         output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
 
-    let ctx = Vst2ProcessContext::new(SAMPLE_RATE).transport(&transport);
+    let ctx = Vst2ProcessContext::new(tutti_plugin_types::SampleRate::of(SAMPLE_RATE))
+        .transport(&transport);
     instance.process_f32(&input_slices, &mut output_slices, BLOCK, &ctx);
 }
 
@@ -1310,7 +1311,7 @@ fn process_empty_buffer() {
     let mut instance = load_probe();
     let input_slices: Vec<&[f32]> = vec![];
     let mut output_slices: Vec<&mut [f32]> = vec![];
-    let ctx = Vst2ProcessContext::new(SAMPLE_RATE);
+    let ctx = Vst2ProcessContext::new(tutti_plugin_types::SampleRate::of(SAMPLE_RATE));
     instance.process_f32(&input_slices, &mut output_slices, 0, &ctx);
 }
 

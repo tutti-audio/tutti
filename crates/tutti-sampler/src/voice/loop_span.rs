@@ -394,13 +394,6 @@ impl LoopSpan {
     }
 }
 
-/// Blend a tail sample `tail` toward its lead-in `lead` by the lead-in's
-/// weight `t`. One expression, so every reader blends the same way, bit for bit.
-#[inline]
-pub(crate) fn blend(tail: f32, lead: f32, t: f32) -> f32 {
-    tail * (1.0 - t) + lead * t
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

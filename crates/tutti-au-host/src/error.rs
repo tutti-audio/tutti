@@ -81,17 +81,16 @@ pub enum AuError {
     /// configured stream (wrong frame count, mismatched channels, etc.).
     #[error("invalid buffer: {0}")]
     InvalidBuffer(String),
-    /// A bus reports more channels than a layout holds (`u16::MAX`). Refused
-    /// rather than wrapped into a narrower bus.
-    #[error(
-        "AU {scope} bus reports {channels} channels; at most {} are supported",
-        u16::MAX
-    )]
+    /// A bus reports more channels than a layout holds. Refused rather than
+    /// wrapped into a narrower bus.
+    #[error("AU {scope} bus is too wide: {source}")]
     BusTooWide {
         /// Which side the bus is on: `"input"` or `"output"`.
         scope: &'static str,
-        /// The `mChannelsPerFrame` the AU reported.
-        channels: u32,
+        /// Why no layout holds the `mChannelsPerFrame` the AU reported;
+        /// carries the count.
+        #[source]
+        source: tutti_types::LayoutError,
     },
     /// The AU declined the requested sample rate: after the stream-format /
     /// `kAudioUnitProperty_SampleRate` writes, its ASBD still reports a

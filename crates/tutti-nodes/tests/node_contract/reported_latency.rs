@@ -400,7 +400,7 @@ mod convolver {
         Node::reset(&mut node);
 
         let out = drive(&mut node, SR, &[&[0.0; 256]], &[]);
-        let peak = out[0].iter().fold(0.0f32, |p, s| p.max(s.abs()));
+        let peak = tutti_fixtures::signal::peak(&out[0]);
         assert!(
             peak < 1e-6,
             "reset left {peak} of the previous take in the convolver"

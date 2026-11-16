@@ -12,13 +12,9 @@ pub enum HeardTapError {
     /// fed by its `render_frame`).
     #[error("this session has no engine to tap")]
     Detached,
-    /// A reader of the output tap is alive; close it first.
-    #[error("the output tap already has a reader; close it before opening again")]
-    Busy,
-    /// No heard tap is open to close (none was opened, it was closed, or its
-    /// dropped reader was reclaimed).
-    #[error("no heard tap is open")]
-    NotOpen,
+    /// The engine's tap refused: a reader is alive, or none is open.
+    #[error(transparent)]
+    Tap(#[from] tutti_engine::HeardTapError),
 }
 
 /// Why [`Graph::remove`](crate::Graph::remove) (or
@@ -30,28 +26,6 @@ pub enum RemoveError {
     /// The node is not in the graph: removed already, or never added.
     #[error("{0:?} is not in the graph")]
     NoSuchNode(tutti_graph::NodeKey),
-}
-
-/// Why [`Session::schedule`](crate::Session::schedule) refused a transport
-/// command. Nothing is sent.
-#[derive(Clone, Copy, Debug, PartialEq, Error)]
-#[non_exhaustive]
-pub enum ScheduleError {
-    /// The timed-command list was full; the command is handed back.
-    #[error(transparent)]
-    Full(#[from] tutti_transport::ScheduleFull),
-    /// A command that starts the transport rolling was timed at a beat while
-    /// the transport is stopped. A beat has a frame only once the transport
-    /// rolls, so the command would wait for a playback that only it can
-    /// start, and never fire. Start the transport first, or time it at a
-    /// frame or the next block.
-    #[error("{event:?} at {beat:?} cannot fire: a stopped transport never reaches a beat")]
-    BeatWhileStopped {
-        /// The beat it was timed at.
-        beat: tutti_types::Beat,
-        /// The command.
-        event: tutti_transport::MotionEvent,
-    },
 }
 
 /// The session refused to set the project tempo. Nothing is published.
@@ -100,9 +74,11 @@ pub enum HostPluginError {
     AlreadyHosted(tutti_graph::NodeKey),
 }
 
-impl From<tutti_transport::ScheduleFull> for Error {
-    fn from(full: tutti_transport::ScheduleFull) -> Self {
-        Self::Schedule(full.into())
+impl<E: Into<tutti_transport::TransportCommand> + std::fmt::Debug>
+    From<tutti_transport::TimedError<E>> for Error
+{
+    fn from(error: tutti_transport::TimedError<E>) -> Self {
+        Self::Timed(error.map(Into::into))
     }
 }
 
@@ -244,9 +220,9 @@ pub enum MidiError {
     #[error("MIDI load: {0}")]
     Job(#[from] crate::JobFailed),
 
-    /// A message was not queued ([`Refused::Full`](tutti_graph::Refused::Full)).
+    /// A message was not queued ([`PushError::Full`](tutti_rt::PushError::Full)).
     #[error("MIDI send: {0}")]
-    Send(#[from] tutti_graph::Refused),
+    Send(#[from] tutti_rt::PushError),
 
     /// There is no such route rule ([`Midi::unroute`](crate::Midi::unroute)).
     #[error(transparent)]
@@ -373,7 +349,7 @@ midi_cause_into_error!(
     #[cfg(feature = "midi-hardware")]
     tutti_midi_hardware::Error,
     tutti_midi_file::Error,
-    tutti_graph::Refused,
+    tutti_rt::PushError,
     crate::NoSuchMidiRoute,
 );
 
@@ -434,6 +410,32 @@ pub enum Error {
         device: tutti_types::ChannelLayout,
         /// What the map broke on.
         source: tutti_engine::RoutingError,
+    },
+
+    /// A clock switch was refused before anything stopped: runs asked with
+    /// [`Session::when_loaded`](crate::Session::when_loaded) wait for these
+    /// entries, which have not loaded. A run takes the session of the clock it
+    /// was asked of and cannot follow the session to another, so the switch
+    /// waits until they have run. Nothing moved, but the runs that were due
+    /// (their entry loaded) have run, as the next update would have run them.
+    #[error("a clock switch waits for runs pending on entries not loaded: {keys:?}")]
+    RunsPending {
+        /// The entries the runs wait for, in the order asked.
+        keys: Vec<crate::PoolKey>,
+    },
+
+    /// A clock switch failed after the old stream stopped, and starting the old
+    /// clock again failed too: the session is **stopped**, on the clock it was
+    /// on. Once what broke is fixed (a graph the re-prepare poisoned, a device
+    /// that is gone), restart it with `Session::restart` on a card; on the
+    /// system clock there is no restart, and the switch to a card
+    /// (`Session::into_device`) starts the stopped stream again.
+    #[error("the clock switch failed ({switch}), and so did starting the old clock again ({undo})")]
+    SwitchNotUndone {
+        /// Why the switch failed.
+        switch: Box<Error>,
+        /// Why the old clock could not be started again.
+        undo: Box<Error>,
     },
 
     /// An inlet refused its producer's ring ([`Graph::add_inlet`](crate::Graph::add_inlet)).
@@ -520,16 +522,12 @@ pub enum Error {
     #[error(transparent)]
     Mix(#[from] tutti_graph::MixError),
 
-    /// The transport's command queue was full ([`Session::play`](crate::Session::play)
-    /// and the other verbs).
+    /// A transport command was refused ([`Session::play`](crate::Session::play),
+    /// [`Session::schedule`](crate::Session::schedule) and the other verbs):
+    /// the queue was full, or the command cannot fire. The command is handed
+    /// back in it.
     #[error(transparent)]
-    Transport(#[from] tutti_transport::QueueFull),
-
-    /// A timed transport command was refused
-    /// ([`Session::schedule`](crate::Session::schedule)): the list was full, or
-    /// the command cannot fire.
-    #[error(transparent)]
-    Schedule(#[from] ScheduleError),
+    Timed(tutti_transport::TimedError<tutti_transport::TransportCommand>),
 
     /// A file could not be decoded (`Wave::read`, `FileIn`).
     #[error(transparent)]

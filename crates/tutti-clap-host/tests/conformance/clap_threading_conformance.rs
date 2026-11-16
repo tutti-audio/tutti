@@ -37,7 +37,9 @@ use std::sync::{Mutex, MutexGuard};
 
 use crate::support;
 use support::active::{Activate, Active, ActiveExt, drive_block};
+use support::logs::plugin_events;
 use support::main_thread;
+use tracing::Level;
 
 use tutti_clap_host::{ClapLoaded, ClapProcessContext, LoadOptions};
 use tutti_clap_test_plugin::{
@@ -50,17 +52,6 @@ use tutti_plugin_types::Control;
 /// every test in this binary. Serialize whole scenarios — reset → drive → read
 /// — so one test cannot observe another's sites or consume its latched command.
 static PROBE_LOCK: Mutex<()> = Mutex::new(());
-
-/// CLAP log severities, in the order the probe emits them. Pinned here rather
-/// than imported: these are the wire values the plugin sends across the FFI, so
-/// a failure names what the host actually received.
-const CLAP_LOG_DEBUG: i32 = 0;
-const CLAP_LOG_INFO: i32 = 1;
-const CLAP_LOG_WARNING: i32 = 2;
-const CLAP_LOG_ERROR: i32 = 3;
-const CLAP_LOG_FATAL: i32 = 4;
-const CLAP_LOG_HOST_MISBEHAVING: i32 = 5;
-const CLAP_LOG_PLUGIN_MISBEHAVING: i32 = 6;
 
 // ---------------------------------------------------------------------------
 // Fixture
@@ -539,7 +530,7 @@ fn a_sample_rate_change_deactivates_and_reactivates_the_plugin() {
     let mut inst = probe.activate();
     drive_block(&mut inst, 64, &ClapProcessContext::default());
 
-    let before = inst.loaded().sample_rate();
+    let before = inst.loaded().sample_rate().get();
     let target = if before == 48_000.0 {
         44_100.0
     } else {
@@ -554,7 +545,7 @@ fn a_sample_rate_change_deactivates_and_reactivates_the_plugin() {
         .expect("the reference plugin must accept an ordinary DAW sample rate");
 
     assert_eq!(
-        inst.loaded().sample_rate(),
+        inst.loaded().sample_rate().get(),
         target,
         "the host must report the rate it activated at; a stale reading here \
          means `process` would size its scratch from one rate while the plugin \
@@ -714,13 +705,12 @@ fn timer_registers_fires_on_the_main_thread_and_stops_after_unregister() {
 // 4. clap.log
 // ---------------------------------------------------------------------------
 
-/// Every CLAP severity a plugin logs at must reach the host, keep its severity,
-/// keep its message, and keep its order.
+/// Every CLAP severity a plugin logs at reaches `tracing` on target
+/// `tutti::plugin`, at the level the severity maps to, tagged with the
+/// plugin's id, with its message and in order.
 ///
-/// If `host_log` only printed, a swap between two severities — routing `ERROR`
-/// as `DEBUG` — would be invisible to anything but a human reading stderr. The
-/// messages are distinct per severity, so a
-/// host collapsing them onto one arm cannot pass on count alone.
+/// The messages are distinct per severity, so a host collapsing them onto one
+/// arm cannot pass on count alone.
 /// Spec: clap.ext.log.host.log
 #[test]
 fn host_routes_plugin_log_lines_at_every_severity() {
@@ -732,10 +722,10 @@ fn host_routes_plugin_log_lines_at_every_severity() {
     probe.command(CMD_LOG_ALL_SEVERITIES);
     drive_block(&mut inst, 64, &ClapProcessContext::default());
     assert!(callback_requested(inst.loaded_mut()));
-    // Drain anything the load/activate path logged so the comparison below sees
-    // only the probe's lines.
-    let _ = inst.loaded().drain_log();
-    inst.loaded_mut().on_main_thread(main_thread());
+    let id = inst.loaded().info().id.clone();
+    let got = plugin_events(|| {
+        inst.loaded_mut().on_main_thread(main_thread());
+    });
 
     let cap = probe.capture();
     assert!(
@@ -747,41 +737,29 @@ fn host_routes_plugin_log_lines_at_every_severity() {
         "the probe emits one line per CLAP severity"
     );
 
-    let got = inst.loaded().drain_log();
-    let want: Vec<(i32, &str)> = vec![
-        (CLAP_LOG_DEBUG, "tutti-probe severity debug"),
-        (CLAP_LOG_INFO, "tutti-probe severity info"),
-        (CLAP_LOG_WARNING, "tutti-probe severity warning"),
-        (CLAP_LOG_ERROR, "tutti-probe severity error"),
-        (CLAP_LOG_FATAL, "tutti-probe severity fatal"),
-        (
-            CLAP_LOG_HOST_MISBEHAVING,
-            "tutti-probe severity host-misbehaving",
-        ),
-        (
-            CLAP_LOG_PLUGIN_MISBEHAVING,
-            "tutti-probe severity plugin-misbehaving",
-        ),
+    let want = [
+        (Level::DEBUG, "tutti-probe severity debug"),
+        (Level::INFO, "tutti-probe severity info"),
+        (Level::WARN, "tutti-probe severity warning"),
+        (Level::ERROR, "tutti-probe severity error"),
+        (Level::ERROR, "tutti-probe severity fatal"),
+        (Level::ERROR, "tutti-probe severity host-misbehaving"),
+        (Level::ERROR, "tutti-probe severity plugin-misbehaving"),
     ];
-    let got_pairs: Vec<(i32, &str)> = got
-        .iter()
-        .map(|r| (r.severity, r.message.as_str()))
-        .collect();
+    let got_pairs: Vec<(Level, &str)> = got.iter().map(|e| (e.level, e.message.as_str())).collect();
     assert_eq!(
         got_pairs, want,
-        "each log line must reach the host with its severity and message intact, \
+        "each log line must reach tracing at its severity's level with its message intact, \
          in the order the plugin emitted them"
     );
-
     assert!(
-        inst.loaded().drain_log().is_empty(),
-        "drain_log() must consume — a caller that drains twice must not see the \
-         same lines again"
+        got.iter().all(|e| e.plugin.as_deref() == Some(id.as_str())),
+        "each line carries the plugin's id"
     );
     assert_eq!(
         inst.loaded().log_lines_dropped(),
         0,
-        "seven lines is far below the retention bound; nothing should have been dropped"
+        "main-thread lines are emitted, never counted as dropped"
     );
 }
 

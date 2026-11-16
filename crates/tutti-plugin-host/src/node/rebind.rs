@@ -26,7 +26,7 @@ use tutti_plugin_types::{
     Features, Loaded, MainThreadMarker, ParamId, PluginDescriptor, Successor,
 };
 use tutti_transport::TempoReader;
-use tutti_types::Samples;
+use tutti_types::{ParkedSampleRate, Samples};
 
 use super::client::{Declared, InProcClient, PluginNode, Reload};
 use super::instance::Instance;
@@ -48,33 +48,65 @@ pub enum RebindError {
     /// The plugin now has more channels in a direction than a block serves.
     #[error(transparent)]
     TooWide(#[from] tutti_plugin_types::PluginTooWide),
-    /// The ports the plugin now has differ from the ones the node's slab was
-    /// sized for.
+    /// The buses the plugin now has differ from the ones the node's slab was
+    /// laid out for: the slab's size follows every bus's width.
     #[error(
-        "the plugin now has {now_inputs} input and {now_outputs} output channels, \
-         but its slab holds {inputs} and {outputs}"
+        "the plugin now has input buses {now_inputs:?} and output buses {now_outputs:?}, \
+         but its slab holds {inputs:?} and {outputs:?}"
     )]
     OutsideSlab {
-        /// The input channels the pipeline was sized for.
-        inputs: usize,
-        /// The output channels the pipeline was sized for.
-        outputs: usize,
-        /// The input channels the plugin has now.
-        now_inputs: usize,
-        /// The output channels the plugin has now.
-        now_outputs: usize,
+        /// The input buses' widths the slab was laid out for.
+        inputs: Vec<tutti_types::ChannelLayout>,
+        /// The output buses' widths the slab was laid out for.
+        outputs: Vec<tutti_types::ChannelLayout>,
+        /// The input buses' widths the plugin has now.
+        now_inputs: Vec<tutti_types::ChannelLayout>,
+        /// The output buses' widths the plugin has now.
+        now_outputs: Vec<tutti_types::ChannelLayout>,
     },
 }
 
-/// The ports a node's shared slab was sized for, which a rebuilt node must not
-/// differ from: an out-of-process plugin's shared slab is laid out once, at
-/// launch.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// The buses a node's shared slab was laid out for, which a rebuilt node must
+/// not differ from: an out-of-process plugin's shared slab is laid out once,
+/// at launch, from the width of every bus.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PortLimit {
-    /// The input channels.
-    pub inputs: usize,
-    /// The output channels.
-    pub outputs: usize,
+    /// The input buses' widths.
+    pub inputs: Vec<tutti_types::ChannelLayout>,
+    /// The output buses' widths.
+    pub outputs: Vec<tutti_types::ChannelLayout>,
+}
+
+/// Where a rebinder reads the ports the plugin has now when its lifecycle does
+/// not follow them: the plugin's own report.
+pub type LiveLayout = Arc<dyn Fn() -> tutti_plugin_types::Layout + Send + Sync>;
+
+/// Where a rebinder reads a plugin's ports, and what they may be.
+#[derive(Clone)]
+pub enum PortSource {
+    /// An in-process plugin: its lifecycle follows its ports, and a node has no
+    /// fixed pipeline to fit.
+    InProcess,
+    /// A served plugin: its lifecycle holds the ports it launched with, so its
+    /// own report is read, and a rebuilt node must fit the slab.
+    Served {
+        /// The buses the slab was laid out for.
+        limit: PortLimit,
+        /// The plugin's own report of its buses now.
+        live: LiveLayout,
+    },
+}
+
+impl std::fmt::Debug for PortSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InProcess => f.write_str("InProcess"),
+            Self::Served { limit, .. } => f
+                .debug_struct("Served")
+                .field("limit", limit)
+                .finish_non_exhaustive(),
+        }
+    }
 }
 
 /// Builds the node that replaces a plugin node whose plugin changed its ports.
@@ -88,7 +120,7 @@ pub struct Rebinder<F: Loaded> {
     reload: Option<Reload>,
     features: Features,
     sample_rate: tutti_types::SampleRate,
-    pending_sample_rate: Arc<AtomicU64>,
+    pending_sample_rate: Arc<ParkedSampleRate>,
     unlent: Arc<AtomicU64>,
     parameters: Vec<ParamId>,
     spares: usize,
@@ -99,7 +131,7 @@ pub struct Rebinder<F: Loaded> {
     /// The node declares a bypass of the plugin's own.
     own_bypass: bool,
     tempo: TempoReader,
-    limit: Option<PortLimit>,
+    source: PortSource,
 }
 
 impl<F: Loaded> Clone for Rebinder<F> {
@@ -118,7 +150,7 @@ impl<F: Loaded> Clone for Rebinder<F> {
             pipeline: self.pipeline,
             own_bypass: self.own_bypass,
             tempo: self.tempo.clone(),
-            limit: self.limit,
+            source: self.source.clone(),
         }
     }
 }
@@ -127,7 +159,7 @@ impl<F: Loaded> std::fmt::Debug for Rebinder<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Rebinder")
             .field("descriptor", &self.descriptor)
-            .field("limit", &self.limit)
+            .field("source", &self.source)
             .finish_non_exhaustive()
     }
 }
@@ -200,15 +232,20 @@ where
         ))
     }
 
-    /// The ports the plugin has now, as its lifecycle last read them: what a
-    /// node [`prepare`](Self::prepare) builds now would declare. `None` for a
-    /// lost plugin or before a layout was read.
+    /// The ports the plugin has now: its own report where this rebinder reads
+    /// one (a [`PortSource::Served`]), else as its lifecycle
+    /// last read them. What a node [`prepare`](Self::prepare) built now would
+    /// declare. `None` for a lost plugin or before a layout was read.
     #[must_use]
     pub fn layout(&self) -> Option<tutti_plugin_types::Layout> {
-        self.inner
-            .lock()
-            .reading()
-            .map(|(layout, ..)| layout.clone())
+        // A lost plugin has no ports, whoever reports them. The lock is let go
+        // before the plugin's own report is read: that is not the instance's to
+        // hold.
+        let cached = self.inner.lock().reading()?.0.clone();
+        Some(match &self.source {
+            PortSource::InProcess => cached,
+            PortSource::Served { live, .. } => live(),
+        })
     }
 
     /// What [`prepare`](Self::prepare) would refuse before it changes anything:
@@ -218,18 +255,18 @@ where
     ///
     /// [`NoPorts`](RebindError::NoPorts) and [`OutsideSlab`](RebindError::OutsideSlab).
     pub fn check_ports(&self) -> Result<(), RebindError> {
-        let instance = self.inner.lock();
-        let (layout, ..) = instance.reading().ok_or(RebindError::NoPorts)?;
-        self.fits(layout)
+        let layout = self.layout().ok_or(RebindError::NoPorts)?;
+        layout.check_width()?;
+        self.fits(&layout)
     }
 
     fn fits(&self, layout: &tutti_plugin_types::Layout) -> Result<(), RebindError> {
-        if let Some(limit) = self.limit {
-            let (now_inputs, now_outputs) = (layout.total_inputs(), layout.total_outputs());
-            if (now_inputs, now_outputs) != (limit.inputs, limit.outputs) {
+        if let PortSource::Served { limit, .. } = &self.source {
+            let (now_inputs, now_outputs) = (layout.input_widths(), layout.output_widths());
+            if now_inputs != limit.inputs || now_outputs != limit.outputs {
                 return Err(RebindError::OutsideSlab {
-                    inputs: limit.inputs,
-                    outputs: limit.outputs,
+                    inputs: limit.inputs.clone(),
+                    outputs: limit.outputs.clone(),
                     now_inputs,
                     now_outputs,
                 });
@@ -308,18 +345,17 @@ impl<F: Loaded> PluginNode<F> {
     /// The [`Rebinder`] for this node, binding its successors to the tempo
     /// reader the node was bound to. See [`InProcClient::rebinder`].
     #[must_use]
-    pub fn rebinder(&self, limit: Option<PortLimit>) -> Rebinder<F> {
-        self.client.rebinder(self.tempo.clone(), limit)
+    pub fn rebinder(&self, source: PortSource) -> Rebinder<F> {
+        self.client.rebinder(self.tempo.clone(), source)
     }
 }
 
 impl<F: Loaded> InProcClient<F> {
     /// The [`Rebinder`] for this node, over the same plugin, binding its
-    /// successors to `tempo`. `limit` is the ports a rebuilt node may have:
-    /// `None` for a plugin whose node has no fixed pipeline, `Some` for a
-    /// served one.
+    /// successors to `tempo`. `source` says where the ports are read from
+    /// and what a rebuilt node may have.
     #[must_use]
-    pub fn rebinder(&self, tempo: TempoReader, limit: Option<PortLimit>) -> Rebinder<F> {
+    pub fn rebinder(&self, tempo: TempoReader, source: PortSource) -> Rebinder<F> {
         Rebinder {
             inner: Arc::clone(&self.inner),
             descriptor: self.descriptor.clone(),
@@ -334,7 +370,7 @@ impl<F: Loaded> InProcClient<F> {
             pipeline: self.pipeline,
             own_bypass: self.declared.ports.own_bypass,
             tempo,
-            limit,
+            source,
         }
     }
 }
@@ -412,8 +448,19 @@ mod tests {
             None,
         )
         .expect("the fake is narrow");
-        let rebinder = client.rebinder(tempo(), limit);
         let inner = Arc::clone(&client.inner);
+        let source = match limit {
+            None => PortSource::InProcess,
+            // What a served plugin reports is what its lifecycle read, here.
+            Some(limit) => {
+                let reads = Arc::clone(&inner);
+                PortSource::Served {
+                    limit,
+                    live: Arc::new(move || reads.lock().reading().expect("a layout").0.clone()),
+                }
+            }
+        };
+        let rebinder = client.rebinder(tempo(), source);
         let node = contract::prepared(client.bind(tempo()), SR, BLOCK);
         (fake, rebinder, node, inner)
     }
@@ -601,19 +648,20 @@ mod tests {
     /// where it was, and the node in the graph still renders.
     #[test]
     fn a_port_limit_refuses_new_ports_by_name_and_leaves_the_plugin_alone() {
+        let two = vec![tutti_types::ChannelLayout::STEREO];
         let (fake, rebinder, mut old, inner) = rig(Some(PortLimit {
-            inputs: 2,
-            outputs: 2,
+            inputs: two.clone(),
+            outputs: two.clone(),
         }));
         change_ports(&fake, &mut old, &inner, 4);
         let refused = rebind(&rebinder).expect_err("outside the slab");
         assert_eq!(
             refused,
             RebindError::OutsideSlab {
-                inputs: 2,
-                outputs: 2,
-                now_inputs: 2,
-                now_outputs: 4,
+                inputs: two.clone(),
+                outputs: two,
+                now_inputs: vec![tutti_types::ChannelLayout::STEREO],
+                now_outputs: vec![tutti_types::ChannelLayout::from_count(4)],
             }
         );
         assert_eq!(rebinder.settled(), Settlement::Idle, "nothing was rehanded");
@@ -709,5 +757,30 @@ mod tests {
             frame += BLOCK as u64;
             assert!(frame < 16 * BLOCK as u64, "the plugin never died");
         }
+    }
+
+    /// **A served plugin that dies has no ports, though its own report still
+    /// answers:** the rebuild is refused `NoPorts`, not judged from the stale
+    /// report.
+    #[test]
+    fn a_served_plugin_that_dies_has_no_ports() {
+        let two = vec![tutti_types::ChannelLayout::STEREO];
+        let (fake, rebinder, mut old, inner) = rig(Some(PortLimit {
+            inputs: two.clone(),
+            outputs: two,
+        }));
+        block(&mut old, 0);
+        assert!(rebinder.layout().is_some(), "alive, it reports its ports");
+        fake.panic_in_latency(true);
+        assert!(Request::LatencyChanged.raise(fake.request_word()));
+        let mut frame = BLOCK as u64;
+        while rebinder.settled() != Settlement::Lost {
+            block(&mut old, frame);
+            inner.lock().pump(main_thread());
+            frame += BLOCK as u64;
+            assert!(frame < 16 * BLOCK as u64, "the plugin never died");
+        }
+        assert_eq!(rebinder.layout(), None);
+        assert_eq!(rebinder.check_ports(), Err(RebindError::NoPorts));
     }
 }

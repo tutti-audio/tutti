@@ -28,6 +28,7 @@ mod junit;
 mod layout;
 mod lex;
 mod lints;
+mod logging;
 mod midi_spec;
 mod passive_tests;
 mod platform_seam;
@@ -41,10 +42,14 @@ mod spec_text;
 mod submodule_pins;
 mod test_paths;
 mod toml;
+// Backs the local `umbrella-api` recipe (it needs the docs nightly): not a gate.
+mod umbrella_api;
+mod use_tree;
 mod value_traits;
 mod vst3_sdk;
 
 pub(crate) use doc_features::doc_runs;
+pub(crate) use umbrella_api::collect;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -143,6 +148,8 @@ pub(crate) enum Gate {
     Buffers,
     /// A configured thing is built one way, bar the rows of the baseline.
     Building,
+    /// Logging is `tracing`: no `log` dependency, and nothing prints outside a `main`.
+    Logging,
 }
 
 impl Gate {
@@ -170,6 +177,7 @@ impl Gate {
             Gate::Conformance => "gate check-conformance".to_owned(),
             Gate::Buffers => "gate check-buffers".to_owned(),
             Gate::Building => "gate check-building".to_owned(),
+            Gate::Logging => "gate check-logging".to_owned(),
         }
     }
 
@@ -200,6 +208,7 @@ impl Gate {
             Gate::Comments => comments::check(&tree),
             Gate::Buffers => buffers::check(&tree, buffers::MIN_SITES),
             Gate::Building => building::check(&tree, building::ALLOW, building::MIN_SITES),
+            Gate::Logging => logging::check(&tree, logging::ALLOW),
             Gate::AllocBinaries => alloc_binaries::check(&tree, alloc_binaries::ALLOWED),
             Gate::PlatformSeam => platform_seam::check(&tree, platform_seam::ALLOW),
             Gate::Conformance => {
@@ -264,19 +273,12 @@ fn spec_text(var: &str, source: &str) -> Result<String, String> {
         .map(PathBuf::from)
         .ok_or_else(|| format!("{var} is not set"))?;
     let all = RealTree { root: dir.clone() }.files(".", &|_| false);
-    let find = |ext: &str| {
-        all.iter()
-            .find(|p| {
-                let name = p.rsplit('/').next().unwrap_or(p);
-                name.starts_with(source) && name.ends_with(ext)
-            })
-            .cloned()
-    };
-    if let Some(txt) = find(".txt") {
+    let find = |ext: &str| spec_text::pick(&all, source, ext);
+    if let Some(txt) = find(".txt")? {
         let bytes = fs::read(dir.join(&txt)).map_err(|e| format!("cannot read {txt}: {e}"))?;
         return Ok(String::from_utf8_lossy(&bytes).into_owned());
     }
-    let pdf = find(".pdf")
+    let pdf = find(".pdf")?
         .ok_or_else(|| format!("no {source}* .txt or .pdf under {} ({var})", dir.display()))?;
     let out = process::Command::new("pdftotext")
         .args(["-layout"])

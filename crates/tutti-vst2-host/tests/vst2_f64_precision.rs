@@ -157,7 +157,7 @@ fn render_f64(instance: &mut Active, input_value: f64) -> Vec<Vec<f64>> {
     let mut output_slices: Vec<&mut [f64]> =
         output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
 
-    let ctx = Vst2ProcessContext::new(SAMPLE_RATE);
+    let ctx = Vst2ProcessContext::new(tutti_plugin_types::SampleRate::of(SAMPLE_RATE));
     instance.process_f64(&input_slices, &mut output_slices, BLOCK, &ctx);
 
     output_data

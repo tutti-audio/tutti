@@ -29,10 +29,10 @@
 //! next tick. Fire-and-forget writes post and do not wait.
 
 use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
 use std::sync::mpsc::sync_channel;
 use std::time::Duration;
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
+use tutti_types::ParkedSampleRate;
 
 use parking_lot::Mutex;
 
@@ -56,7 +56,7 @@ pub(crate) struct ControlBackend<F: InProcess> {
     /// The cell the audio unit parks a rate change in, shared with the
     /// node. Drained here because telling a plugin its rate deactivates and
     /// activates it, which allocates.
-    pub(crate) pending_sample_rate: Arc<AtomicU64>,
+    pub(crate) pending_sample_rate: Arc<ParkedSampleRate>,
     /// Where a re-read that found the plugin's latency, tail or pins moved is
     /// reported (`PluginHandle::subscribe`).
     pub(crate) invalidate_sink: crate::InvalidateSink,

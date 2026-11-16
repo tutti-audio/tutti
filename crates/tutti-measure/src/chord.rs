@@ -36,7 +36,7 @@
 //!
 //! # Time
 //!
-//! Frame `i` of a [`StftGeometry`] covers `i * hop .. i * hop + window`, and
+//! Frame `i` of a [`Framing`] covers `i * hop .. i * hop + window`, and
 //! owns the samples up to the midpoints between its centre and its neighbours':
 //! a change between frames `j - 1` and `j` is at `j * hop + (window - hop) / 2`.
 //! A span that starts at frame 0 starts at sample 0, and one that ends at the
@@ -50,10 +50,8 @@
 //! half a hop from a centre. Frames between may read neither, which leaves a
 //! gap. Only triads are named: a seventh reads as its triad.
 //!
-//! The geometry must be the one the chroma was taken at; build the config with
-//! [`ChordConfig::from_chroma`] so it is. A different window or hop places the
-//! spans at the wrong samples without any error, because a grid holds no
-//! record of how it was made.
+//! The spans are placed on the framing the [`Chroma`] carries, so they sit at
+//! the samples its frames were taken at whatever framing that was.
 //!
 //! Where no chord is detected there is no span.
 
@@ -61,9 +59,9 @@ use tutti_types::{PitchClass, Samples};
 
 use tutti_types::ranged;
 
-use crate::chroma::{CLASSES, ChromaConfig};
+use crate::chroma::{CLASSES, Chroma};
+use crate::framing::Framing;
 use crate::{Error, Result};
-use tutti_dsp::StftGeometry;
 use tutti_dsp::{FrameCount, Grid};
 
 /// The states: 12 major roots, 12 minor roots, and "no chord".
@@ -128,33 +126,24 @@ ranged! {
     |raw| raw > 0.0 && raw <= 100.0
 }
 
-/// What [`detect_chords`] smooths with. Immutable once built.
+/// What [`detect_chords`] smooths with. Immutable once built. The framing the
+/// spans are placed on is the chroma's own ([`Chroma::framing`](crate::Chroma::framing)),
+/// so the config holds none.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ChordConfig {
-    geometry: StftGeometry,
     self_transition: SelfTransition,
     sharpness: Sharpness,
 }
 
 impl ChordConfig {
-    /// Places spans on `geometry`'s frames, which must be the ones the chroma
-    /// was taken at (see [`from_chroma`](Self::from_chroma)), with a self-transition of 0.9 and a
-    /// sharpness of 8: a chord must last about three frames to be kept.
+    /// A self-transition of 0.9 and a sharpness of 8: a chord must last about
+    /// three frames to be kept.
     #[must_use]
-    pub fn new(geometry: StftGeometry) -> Self {
+    pub fn new() -> Self {
         Self {
-            geometry,
             self_transition: SelfTransition::of(0.9),
             sharpness: Sharpness::of(8.0),
         }
-    }
-
-    /// A config for the chroma `chroma` makes: its geometry, with the default
-    /// smoothing. Prefer this to [`new`](Self::new) so the spans are placed on
-    /// the grid the frames were taken on.
-    #[must_use]
-    pub fn from_chroma(chroma: &ChromaConfig) -> Self {
-        Self::new(chroma.geometry())
     }
 
     /// The probability of staying in a state from one frame to the next.
@@ -172,17 +161,34 @@ impl ChordConfig {
     }
 }
 
-/// The chords of a chromagram, as spans in order. Where none is detected there
-/// is a gap.
+impl Default for ChordConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// The chords of a chromagram, as spans in order, placed at the samples of the
+/// chroma's own framing. Where none is detected there is a gap.
 ///
 /// # Errors
 ///
-/// [`Error::NotTwelveClasses`] when the grid is not 12 columns wide;
+/// [`Error::ZeroWindow`] or [`Error::ZeroHop`] for a zero window or hop in the
+/// chroma's framing; [`Error::NotTwelveClasses`] when the grid is not 12 columns wide;
 /// [`Error::NegativeInput`] when it holds a negative value;
 /// [`Error::TooManyFrames`] for more than 524288 frames;
 /// [`Error::SpanBeyondSampleCount`] when a span lies beyond the range of a
 /// sample count; [`Error::NonFiniteInput`] for a NaN or infinity.
-pub fn detect_chords(chroma: &Grid<f32>, cfg: &ChordConfig) -> Result<Vec<ChordSpan>> {
+pub fn detect_chords(chroma: &Chroma, cfg: &ChordConfig) -> Result<Vec<ChordSpan>> {
+    detect(chroma.grid(), chroma.framing(), cfg)
+}
+
+/// [`detect_chords`] over a grid and the framing it was taken at.
+pub(crate) fn detect(
+    chroma: &Grid<f32>,
+    framing: Framing,
+    cfg: &ChordConfig,
+) -> Result<Vec<ChordSpan>> {
+    framing.check()?;
     if chroma.bins().get() != CLASSES {
         return Err(Error::NotTwelveClasses {
             columns: chroma.bins().get(),
@@ -205,7 +211,7 @@ pub fn detect_chords(chroma: &Grid<f32>, cfg: &ChordConfig) -> Result<Vec<ChordS
         return Ok(Vec::new());
     }
     let path = viterbi(chroma, cfg);
-    spans(&path, cfg.geometry)
+    spans(&path, framing)
 }
 
 /// How well `frame` fits each state, in state order: the cosine similarity of
@@ -240,8 +246,8 @@ fn similarities(frame: &[f32]) -> [f64; STATES] {
 /// The best state per frame under the emission and transition model.
 fn viterbi(chroma: &Grid<f32>, cfg: &ChordConfig) -> Vec<u8> {
     let frames = chroma.frames().get();
-    let stay = Score::from(cfg.self_transition.get()).ln();
-    let switch = ((1.0 - Score::from(cfg.self_transition.get())) / (STATES - 1) as Score).ln();
+    let stay = libm::log(Score::from(cfg.self_transition.get()));
+    let switch = libm::log((1.0 - Score::from(cfg.self_transition.get())) / (STATES - 1) as Score);
     let emit =
         |frame: &[f32]| similarities(frame).map(|s| s as Score * Score::from(cfg.sharpness.get()));
 
@@ -282,12 +288,9 @@ fn viterbi(chroma: &Grid<f32>, cfg: &ChordConfig) -> Vec<u8> {
     path
 }
 
-/// Runs of one chord in `path`, placed on `geometry`'s samples.
-fn spans(path: &[u8], geometry: StftGeometry) -> Result<Vec<ChordSpan>> {
-    let (window, hop) = (
-        geometry.window().get() as u128,
-        geometry.hop().get() as u128,
-    );
+/// Runs of one chord in `path`, placed on `framing`'s samples.
+fn spans(path: &[u8], framing: Framing) -> Result<Vec<ChordSpan>> {
+    let (window, hop) = (framing.window().get() as u128, framing.hop().get() as u128);
     let frames = path.len() as u128;
     let sample = |v: u128| usize::try_from(v).map_err(|_| Error::SpanBeyondSampleCount);
     // The change before frame `j`: the midpoint of two centres.
@@ -333,14 +336,14 @@ mod tests {
     use super::*;
     use rand::{RngExt, SeedableRng, rngs::StdRng};
     use tutti_dsp::{BinCount, FrameCount};
-    use tutti_types::SampleRate;
+    use tutti_types::Cents;
 
-    fn geometry(window: usize, hop: usize) -> StftGeometry {
-        StftGeometry::new(SampleRate::SR_22K05, Samples(window), Samples(hop)).unwrap()
+    fn framing(window: usize, hop: usize) -> Framing {
+        Framing::new(Samples(window), Samples(hop))
     }
 
     fn cfg() -> ChordConfig {
-        ChordConfig::new(geometry(4096, 1024))
+        ChordConfig::new()
     }
 
     /// A triad's chroma: the three notes at 1.
@@ -357,7 +360,7 @@ mod tests {
     }
 
     fn run(rows: &[[f32; CLASSES]], cfg: &ChordConfig) -> Vec<ChordSpan> {
-        detect_chords(&grid(rows), cfg).unwrap()
+        detect(&grid(rows), framing(4096, 1024), cfg).unwrap()
     }
 
     fn roots(spans: &[ChordSpan]) -> Vec<(PitchClass, ChordQuality)> {
@@ -535,7 +538,7 @@ mod tests {
             let config = cfg()
                 .self_transition(SelfTransition::new(p).unwrap())
                 .sharpness(Sharpness::new(sharpness).unwrap());
-            let spans = detect_chords(&grid, &config).unwrap();
+            let spans = detect(&grid, framing(4096, 1024), &config).unwrap();
             assert_eq!(spans.len(), if kept { 3 } else { 1 }, "offset {offset}");
         }
     }
@@ -616,9 +619,9 @@ mod tests {
             (1000, 333),
             (512, 1500),
         ] {
-            let g = geometry(window, hop);
+            let g = framing(window, hop);
             let rows: Vec<_> = (0..12).map(|i| if i < 7 { c } else { f }).collect();
-            let spans = run(&rows, &ChordConfig::new(g));
+            let spans = detect(&grid(&rows), g, &cfg()).unwrap();
             let centre = |i: usize| (i * hop + window / 2) as f64;
             let boundary = (centre(6) + centre(7)) / 2.0;
             assert_eq!(spans.len(), 2, "{window}/{hop}");
@@ -653,7 +656,7 @@ mod tests {
     /// The shape, values and sizes of the input are validated.
     #[test]
     fn inputs_are_validated() {
-        let invalid = |g: &Grid<f32>| detect_chords(g, &cfg()).unwrap_err();
+        let invalid = |g: &Grid<f32>| detect(g, framing(4096, 1024), &cfg()).unwrap_err();
         let wide = Grid::new(vec![0.0; 13], FrameCount(1), BinCount(13)).unwrap();
         assert_eq!(invalid(&wide), Error::NotTwelveClasses { columns: 13 });
         let mut x = [0.5; CLASSES];
@@ -677,14 +680,29 @@ mod tests {
             }
         );
         let empty = Grid::new(Vec::new(), FrameCount(0), BinCount(CLASSES)).unwrap();
-        assert!(detect_chords(&empty, &cfg()).unwrap().is_empty());
-        let far = ChordConfig::new(
-            StftGeometry::new(SampleRate::SR_22K05, Samples(1024), Samples(usize::MAX)).unwrap(),
+        assert!(
+            detect(&empty, framing(4096, 1024), &cfg())
+                .unwrap()
+                .is_empty()
         );
         assert_eq!(
-            detect_chords(&grid(&[triad(0, false); 3]), &far),
+            detect(
+                &grid(&[triad(0, false); 3]),
+                framing(1024, usize::MAX),
+                &cfg()
+            ),
             Err(Error::SpanBeyondSampleCount)
         );
+        // A zero window or hop is refused, not placed.
+        for (zero, error) in [
+            (framing(0, 1024), Error::ZeroWindow),
+            (framing(4096, 0), Error::ZeroHop),
+        ] {
+            assert_eq!(
+                detect(&grid(&[triad(0, false); 3]), zero, &cfg()),
+                Err(error)
+            );
+        }
         // The most frames still smooth, in one pass.
         let max = Grid::new(
             vec![0.0; MAX_FRAMES * CLASSES],
@@ -692,6 +710,28 @@ mod tests {
             BinCount(CLASSES),
         )
         .unwrap();
-        assert!(detect_chords(&max, &cfg()).unwrap().is_empty());
+        assert!(
+            detect(&max, framing(4096, 1024), &cfg())
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    /// The spans sit at the samples of the framing the chroma was taken at:
+    /// the same frames read as a chroma of 2048/512 and of 4096/1024 place the
+    /// same change at different samples, each at its own frame centres.
+    #[test]
+    fn spans_follow_the_chromas_own_framing() {
+        let (c, f) = (triad(0, false), triad(5, false));
+        let rows: Vec<_> = (0..12).map(|i| if i < 7 { c } else { f }).collect();
+        for (window, hop) in [(2048, 512), (4096, 1024)] {
+            let chroma = Chroma::new(grid(&rows), Cents(0.0), framing(window, hop));
+            let spans = detect_chords(&chroma, &cfg()).unwrap();
+            let centre = |i: usize| (i * hop + window / 2) as f64;
+            let boundary = (centre(6) + centre(7)) / 2.0;
+            assert_eq!(spans.len(), 2, "{window}/{hop}");
+            assert!((spans[0].end.get() as f64 - boundary).abs() <= 1.0);
+            assert_eq!(spans[1].end, Samples(11 * hop + window));
+        }
     }
 }

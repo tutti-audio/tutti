@@ -84,7 +84,7 @@
 //! let mut out_refs: Vec<&mut [f32]> =
 //!     outputs.iter_mut().map(|v| v.as_mut_slice()).collect();
 //!
-//! let ctx = Vst2ProcessContext::new(48_000.0);
+//! let ctx = Vst2ProcessContext::new(tutti_plugin_types::SampleRate::SR_48K);
 //! let _midi_out: &tutti_vst2_host::MidiEventVec =
 //!     processor.process_f32(&in_refs, &mut out_refs, 512, &ctx);
 //!

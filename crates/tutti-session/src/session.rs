@@ -10,13 +10,13 @@ use tutti_graph::NodeKey;
 use tutti_graph::PrerollTable;
 use tutti_nodes::ClickSettings;
 use tutti_tempo::TempoMap;
-use tutti_transport::{FadeOut, LoopEdit, MotionEvent, QueueFull, ScheduleFull, Then, Transport};
+use tutti_transport::{FadeOut, LoopEdit, MotionEvent, Then, TimedError, Transport};
 use tutti_types::{At, Beat, Bpm, ChannelLayout, ChannelTopology, LoopRange, Samples};
 
 use crate::RootDeclaration;
 use crate::graph::{Committed, CrossfadeId, Graph, Retried};
 use crate::{Clock, Offline, RealTime};
-use crate::{HeardOpen, HeardTapError, Playhead, RemoveError, ScheduleError, TempoError};
+use crate::{HeardOpen, HeardTapError, Playhead, RemoveError, TempoError};
 
 /// One step of [`Session::update`]. [`PHASES`] is their order.
 ///
@@ -256,6 +256,16 @@ pub enum SessionEvent {
     /// A [`LoadMeter::reset`](tutti_metering::LoadMeter::reset) between
     /// updates restarts the count without an event.
     BlocksSilenced(u64),
+    /// The session's rate changed with its clock: a switch onto a sound card
+    /// that runs at another rate, or the card's rate carried to the timer. A
+    /// capture a host holds itself (not one the session added) is at the old
+    /// rate and is the host's to reopen.
+    RateChanged {
+        /// The rate the graph ran at.
+        from: tutti_types::SampleRate,
+        /// The rate it runs at now.
+        to: tutti_types::SampleRate,
+    },
     /// The stream of a real-time clock reported a fault: a device unplugged
     /// mid-session, a callback that panicked, a timer that fell behind. The
     /// most recent one since the last poll, as
@@ -351,6 +361,11 @@ impl std::fmt::Debug for SessionEvent {
                 .field("node", node)
                 .field("id", id)
                 .field("refused", refused)
+                .finish(),
+            Self::RateChanged { from, to } => f
+                .debug_struct("RateChanged")
+                .field("from", from)
+                .field("to", to)
                 .finish(),
             Self::Unwired {
                 node,
@@ -492,6 +507,11 @@ pub enum RootTopologyStatus {
 #[must_use = "dropping a session ends it, and on a real-time clock stops its stream"]
 #[derive(Debug)]
 pub struct Session<C: Clock = Offline> {
+    /// Runs the work other threads handed to the main thread when the session
+    /// drops on it, before anything else drops (the plugins then close, and
+    /// the last field collects what they hand over).
+    #[cfg(feature = "plugin")]
+    pub(crate) _early_work: EarlyWork,
     /// What runs the blocks (the clock's [`Running`](Clock::Running)). First,
     /// so a stream stops before the session's own state drops.
     pub(crate) running: C::Running,
@@ -549,6 +569,9 @@ pub struct Session<C: Clock = Offline> {
     pub(crate) mods: crate::modulation::ModSession,
     #[cfg(feature = "midi-hardware")]
     pub(crate) midi_io: Option<tutti_midi_hardware::MidiSession>,
+    /// Who the session is on the wire, as set ([`Session::policy`]).
+    #[cfg(feature = "midi-hardware")]
+    pub(crate) midi_policy: crate::MidiPolicy,
     #[cfg(feature = "sampler")]
     pub(crate) disk_streamer: Option<tutti_sampler::DiskStreamer>,
     /// Names the [`SamplerLoad`](crate::SamplerLoad)s.
@@ -586,7 +609,7 @@ pub struct Session<C: Clock = Offline> {
     #[cfg(feature = "export")]
     pub(crate) bounce: crate::bounce::BounceState,
     /// The blocking work running on the spawner, landed in `Phase::Collect`.
-    pub(crate) jobs: crate::jobs::Jobs<C>,
+    pub(crate) jobs: crate::jobs::Jobs,
     /// What every plugin this session loads hands to the main thread: the closes of
     /// a drop off the main thread. The handle is cloned into each load.
     #[cfg(feature = "plugin")]
@@ -596,24 +619,54 @@ pub struct Session<C: Clock = Offline> {
     /// close handed over while the session drops is still collected, and
     /// [`MainWork`](tutti_plugin_types::MainWork)'s own drop runs what is left.
     #[cfg(feature = "plugin")]
-    pub(crate) main_work: tutti_plugin_types::MainWork,
+    pub(crate) main_work: SharedWork,
+    /// Events the session kept for its next poll: what a clock switch reported
+    /// on the clock it left.
+    pub(crate) carried_events: Vec<SessionEvent>,
 }
 
+/// The fallback of `Session::close`, as a field: on the main thread, runs the
+/// work other threads handed over, and the plugins then drop with the fields,
+/// their closes collected by the last field's own drop.
+///
+/// End a session that hosted an in-process plugin with `close` on the main
+/// thread; dropped elsewhere, it leaks those plugins and counts them in
+/// `tutti_plugin_types::MainWork::stranded()`; `MainWork::deferred_drops()` and
+/// `contained_panics()`, both in `tutti_plugin_types`, are the other two
+/// process-wide readings. It is a field, not a `Drop` of the session, so a
+/// session moves to another clock field by field.
 #[cfg(feature = "plugin")]
-impl<C: Clock> Drop for Session<C> {
-    /// The fallback of `Session::close`: on the main
-    /// thread, runs the work other threads handed over, and the plugins then drop
-    /// with the fields, their closes collected by the last field's own drop.
-    ///
-    /// End a session that hosted an in-process plugin with `close` on the main
-    /// thread; dropped elsewhere, it leaks those plugins and counts them in
-    /// `tutti_plugin_types::MainWork::stranded()`; `MainWork::deferred_drops()` and
-    /// `contained_panics()`, both in `tutti_plugin_types`, are the other two
-    /// process-wide readings.
+#[derive(Debug)]
+pub(crate) struct EarlyWork(pub(crate) SharedWork);
+
+#[cfg(feature = "plugin")]
+impl Drop for EarlyWork {
     fn drop(&mut self) {
         if let Some(main) = tutti_plugin_types::MainThreadMarker::new() {
-            self.main_work.run(main);
+            self.0.run(main);
         }
+    }
+}
+
+/// The session's collector, held by the session's last field and its first:
+/// the collector's receiving end is not `Sync`, so it sits behind a lock the
+/// control thread alone takes.
+#[cfg(feature = "plugin")]
+#[derive(Clone, Debug)]
+pub(crate) struct SharedWork(Arc<std::sync::Mutex<tutti_plugin_types::MainWork>>);
+
+#[cfg(feature = "plugin")]
+impl SharedWork {
+    pub(crate) fn new(work: tutti_plugin_types::MainWork) -> Self {
+        Self(Arc::new(std::sync::Mutex::new(work)))
+    }
+
+    /// [`MainWork::run`](tutti_plugin_types::MainWork::run).
+    pub(crate) fn run(&self, main: tutti_plugin_types::MainThreadMarker) -> usize {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .run(main)
     }
 }
 
@@ -645,6 +698,13 @@ impl Session<Offline> {
 }
 
 impl<C: RealTime> Session<C> {
+    /// The configuration of the stream that renders the session's blocks: its
+    /// rate, width and block (the callback size, or the timer's block).
+    #[must_use]
+    pub fn stream_spec(&self) -> &tutti_engine::OutputSpec {
+        crate::clock::sealed::Streaming::output_stream(&self.running).spec()
+    }
+
     /// The stream's fault record: one entry each time the clock's stream
     /// failed, a device unplugged, a callback that panicked, a timer that fell
     /// more than four blocks behind and began its schedule again. The same
@@ -687,6 +747,152 @@ impl Session<crate::Detached> {
 }
 
 impl<C: Clock> Session<C> {
+    /// The same session on the clock `running` belongs to: every field moves,
+    /// the clock's own state is swapped, and the old one is handed back.
+    ///
+    /// Jobs in flight carry over: a job's lander is typed to nothing of the
+    /// clock, and lands on the converted session. The runs waiting for an
+    /// entry to load (`when_loaded`) are typed to the clock they were asked of
+    /// and do not: the caller has run or refused them first, so this runs no
+    /// closure of the app's.
+    #[cfg(feature = "device")]
+    pub(crate) fn with_clock<K: Clock>(self, running: K::Running) -> (Session<K>, C::Running) {
+        let Session {
+            #[cfg(feature = "plugin")]
+            _early_work,
+            running: old_running,
+            graph,
+            resource_ids,
+            pool,
+            #[cfg(feature = "plugin")]
+            pooled_swaps,
+            output_policy,
+            output_policy_staged,
+            transport,
+            load,
+            heard,
+            clock,
+            root_request,
+            root_refusal,
+            click,
+            click_settings,
+            compensation,
+            latency,
+            resumed,
+            silenced_seen,
+            rolling_sent,
+            #[cfg(feature = "midi")]
+            midi,
+            #[cfg(feature = "midi")]
+            midi_state,
+            #[cfg(feature = "modulation")]
+            mods,
+            #[cfg(feature = "midi-hardware")]
+            midi_io,
+            #[cfg(feature = "midi-hardware")]
+            midi_policy,
+            #[cfg(feature = "sampler")]
+            disk_streamer,
+            #[cfg(feature = "sampler")]
+            sampler_opens,
+            faults_seen,
+            #[cfg(feature = "device")]
+            output_listing,
+            #[cfg(feature = "device")]
+            outputs_listed,
+            #[cfg(all(feature = "device", feature = "audio-io"))]
+            inputs,
+            #[cfg(feature = "plugin")]
+            snapshot_interval,
+            #[cfg(feature = "plugin")]
+            recovery,
+            #[cfg(feature = "plugin")]
+            hang,
+            #[cfg(feature = "plugin")]
+            plugins_now,
+            #[cfg(feature = "plugin")]
+            render_mode,
+            #[cfg(feature = "export")]
+            bounce,
+            jobs,
+            #[cfg(feature = "plugin")]
+            work,
+            #[cfg(feature = "plugin")]
+            main_work,
+            carried_events,
+        } = self;
+        let pool = pool.rebind();
+        (
+            Session {
+                #[cfg(feature = "plugin")]
+                _early_work,
+                running,
+                graph,
+                resource_ids,
+                pool,
+                #[cfg(feature = "plugin")]
+                pooled_swaps,
+                output_policy,
+                output_policy_staged,
+                transport,
+                load,
+                heard,
+                clock,
+                root_request,
+                root_refusal,
+                click,
+                click_settings,
+                compensation,
+                latency,
+                resumed,
+                silenced_seen,
+                rolling_sent,
+                #[cfg(feature = "midi")]
+                midi,
+                #[cfg(feature = "midi")]
+                midi_state,
+                #[cfg(feature = "modulation")]
+                mods,
+                #[cfg(feature = "midi-hardware")]
+                midi_io,
+                #[cfg(feature = "midi-hardware")]
+                midi_policy,
+                #[cfg(feature = "sampler")]
+                disk_streamer,
+                #[cfg(feature = "sampler")]
+                sampler_opens,
+                faults_seen,
+                #[cfg(feature = "device")]
+                output_listing,
+                #[cfg(feature = "device")]
+                outputs_listed,
+                #[cfg(all(feature = "device", feature = "audio-io"))]
+                inputs,
+                #[cfg(feature = "plugin")]
+                snapshot_interval,
+                #[cfg(feature = "plugin")]
+                recovery,
+                #[cfg(feature = "plugin")]
+                hang,
+                #[cfg(feature = "plugin")]
+                plugins_now,
+                #[cfg(feature = "plugin")]
+                render_mode,
+                #[cfg(feature = "export")]
+                bounce,
+                jobs,
+                #[cfg(feature = "plugin")]
+                work,
+                #[cfg(feature = "plugin")]
+                main_work,
+                carried_events,
+            },
+            old_running,
+        )
+    }
+}
+
+impl<C: Clock> Session<C> {
     /// Ends the session on the main thread: runs the work other threads handed to
     /// it, drops the session's plugins (each closes on `main`, or hands its close
     /// to the session's collector), and runs what that handed over. Nothing a
@@ -704,10 +910,10 @@ impl<C: Clock> Session<C> {
         let mut session = self;
         session.main_work.run(main);
         // The plugins close in the drop below and hand what they cannot do
-        // there to their handles, which feed the collector taken out here;
+        // there to their handles, which feed the collector kept out here;
         // the session keeps an empty one.
         let (inert, _) = tutti_plugin_types::MainWork::new();
-        let collected = std::mem::replace(&mut session.main_work, inert);
+        let collected = std::mem::replace(&mut session.main_work, SharedWork::new(inert));
         drop(session);
         collected.run(main);
     }
@@ -1005,6 +1211,10 @@ impl<C: Clock> Session<C> {
                 self.render_mode_phase()
             }
             Phase::Poll => {
+                // Who the session is on the wire is in force before the devices
+                // are stepped.
+                #[cfg(feature = "midi-hardware")]
+                self.apply_midi_policy();
                 // A device that connected is heard from the plan that holds
                 // its inlet: committed now, not an update later.
                 #[cfg(feature = "midi-hardware")]
@@ -1043,6 +1253,7 @@ impl<C: Clock> Session<C> {
                         out.push(crate::MidiReport::ClockCommandsRefused(refused).into());
                     }
                 }
+                out.append(&mut self.carried_events);
                 let lost = self.fault_poll(out);
                 #[cfg(feature = "device")]
                 self.listing_poll(cx.now, out);
@@ -1294,7 +1505,7 @@ impl<C: Clock> Session<C> {
     /// its own kind, and a later fault that only bumps the count (an overrun
     /// the record keeps no message for beside a latched panic) is not read as
     /// the old message again.
-    fn fault_poll(&mut self, out: &mut Vec<SessionEvent>) -> bool {
+    pub(crate) fn fault_poll(&mut self, out: &mut Vec<SessionEvent>) -> bool {
         let Some(stream) = crate::clock::sealed::Running::stream(&self.running) else {
             return false;
         };
@@ -1350,9 +1561,9 @@ impl<C: Clock> Session<C> {
     ///
     /// # Errors
     ///
-    /// [`QueueFull`] when the transport's command queue is full; the event
-    /// is handed back in it.
-    pub fn play(&self) -> Result<(), QueueFull> {
+    /// [`TimedError::Full`] when the transport's command queue is full; the
+    /// event is handed back in it.
+    pub fn play(&self) -> Result<(), TimedError<MotionEvent>> {
         self.transport.motion().try_send(MotionEvent::Play)?;
         self.rolling_sent.store(true, Ordering::Relaxed);
         Ok(())
@@ -1363,8 +1574,8 @@ impl<C: Clock> Session<C> {
     ///
     /// # Errors
     ///
-    /// [`QueueFull`], as [`play`](Self::play).
-    pub fn stop(&self, fade: FadeOut) -> Result<(), QueueFull> {
+    /// [`TimedError::Full`], as [`play`](Self::play).
+    pub fn stop(&self, fade: FadeOut) -> Result<(), TimedError<MotionEvent>> {
         self.transport
             .motion()
             .try_send(MotionEvent::Stop { fade })?;
@@ -1377,8 +1588,8 @@ impl<C: Clock> Session<C> {
     ///
     /// # Errors
     ///
-    /// [`QueueFull`], as [`play`](Self::play).
-    pub fn locate(&self, beat: Beat) -> Result<(), QueueFull> {
+    /// [`TimedError::Full`], as [`play`](Self::play).
+    pub fn locate(&self, beat: Beat) -> Result<(), TimedError<MotionEvent>> {
         self.transport
             .motion()
             .try_send(MotionEvent::locate(beat))?;
@@ -1404,9 +1615,13 @@ impl<C: Clock> Session<C> {
     ///
     /// # Errors
     ///
-    /// [`ScheduleError::Full`] when the timed-command list is full, and
-    /// [`ScheduleError::BeatWhileStopped`] for the command above.
-    pub fn schedule(&self, at: impl Into<At>, event: MotionEvent) -> Result<(), ScheduleError> {
+    /// [`TimedError::Full`] when the timed-command list is full, and
+    /// [`TimedError::BeatWhileStopped`] for the command above.
+    pub fn schedule(
+        &self,
+        at: impl Into<At>,
+        event: MotionEvent,
+    ) -> Result<(), TimedError<MotionEvent>> {
         let at = at.into();
         let starts = matches!(
             event,
@@ -1420,11 +1635,11 @@ impl<C: Clock> Session<C> {
         // session sent for the next block, or what the engine last rendered
         // (a transport started through `transport()` directly).
         let rolling = self.rolling_sent.load(Ordering::Relaxed) || self.playhead().playing();
-        if let At::Beat(beat) = at
+        if let At::Beat(_) = at
             && starts
             && !rolling
         {
-            return Err(ScheduleError::BeatWhileStopped { beat, event });
+            return Err(TimedError::BeatWhileStopped(event));
         }
         self.transport.motion().schedule(at, event)?;
         if at == At::NextBlock {
@@ -1473,9 +1688,9 @@ impl<C: Clock> Session<C> {
     ///
     /// # Errors
     ///
-    /// [`ScheduleFull`] when the timed-command list is full; the edit is handed
+    /// [`TimedError::Full`] when the timed-command list is full; the edit is handed
     /// back in it.
-    pub fn set_loop(&self, range: LoopRange) -> Result<(), ScheduleFull> {
+    pub fn set_loop(&self, range: LoopRange) -> Result<(), TimedError<LoopEdit>> {
         self.transport
             .motion()
             .schedule(At::NextBlock, LoopEdit::over(range))
@@ -1487,8 +1702,8 @@ impl<C: Clock> Session<C> {
     ///
     /// # Errors
     ///
-    /// [`ScheduleFull`], as [`set_loop`](Self::set_loop).
-    pub fn clear_loop(&self) -> Result<(), ScheduleFull> {
+    /// [`TimedError::Full`], as [`set_loop`](Self::set_loop).
+    pub fn clear_loop(&self) -> Result<(), TimedError<LoopEdit>> {
         self.transport
             .motion()
             .schedule(At::NextBlock, LoopEdit::armed(false))
@@ -1588,13 +1803,12 @@ impl<C: Clock> Session<C> {
     /// # Errors
     ///
     /// [`HeardTapError::Detached`] on a session without an engine,
-    /// and [`HeardTapError::Busy`] while another reader is alive. While the
+    /// and [`HeardTapError::Tap`]`(Busy)` while another reader is alive. While the
     /// audio thread has not taken the last installs it is not an error: the
     /// call returns [`HeardOpen::Retry`] and opens nothing.
     pub fn open_heard_tap(&self, capacity: Samples) -> Result<HeardOpen, HeardTapError> {
         let (taps, layout) = self.heard.as_ref().ok_or(HeardTapError::Detached)?;
-        taps.open(*layout, capacity)
-            .map_err(|_| HeardTapError::Busy)
+        Ok(taps.open(*layout, capacity)?)
     }
 
     /// Closes the tap [`open_heard_tap`](Self::open_heard_tap) opened, now
@@ -1604,14 +1818,11 @@ impl<C: Clock> Session<C> {
     /// # Errors
     ///
     /// [`HeardTapError::Detached`] on a session without an engine;
-    /// [`HeardTapError::NotOpen`] when no heard tap is open (never opened, or
+    /// [`HeardTapError::Tap`]`(NotOpen)` when no heard tap is open (never opened, or
     /// closed already); nothing changes.
     pub fn close_heard_tap(&self) -> Result<(), HeardTapError> {
         let (taps, _) = self.heard.as_ref().ok_or(HeardTapError::Detached)?;
-        taps.close().map_err(|e| match e {
-            tutti_engine::HeardTapError::NotOpen => HeardTapError::NotOpen,
-            _ => HeardTapError::Busy,
-        })
+        Ok(taps.close()?)
     }
 
     /// The master meter: the level of each graph output channel, one

@@ -205,6 +205,7 @@ fn the_state_entry_lists_mcoded7_and_octet_stream() {
 
 // M2-111 §2.2, §3.2, §3.3: list the states, get one, and set it back; the body is
 // 3000 bytes under Flow Control so it takes many chunks each way.
+/// Spec: m2-111/2.1#1, m2-111/2.2#1, m2-111/2.3#1, m2-111/3.1#1, m2-111/3.2#1
 #[test]
 fn a_state_is_listed_fetched_and_restored_over_many_chunks() {
     let original = stored(3000);
@@ -291,6 +292,7 @@ fn chunks(link: &Link, to_responder: bool, kind: PeMessageKind) -> usize {
 
 // M2-111 §3.2: the reply to a Get of State names the media type and carries the
 // state's revision and time in its header.
+/// Spec: m2-111/3.1.1#1
 #[test]
 fn the_reply_header_carries_the_media_type_state_rev_and_timestamp() {
     let mut link = Link::new(store_with(&[("buffer", stored(10))]), 4096);
@@ -685,6 +687,7 @@ fn a_set_without_a_device_clears_the_stale_revision_and_lists_a_new_state() {
 // M2-111 §3.3: a Responder that finds the body wrong while it comes sends Terminate
 // Inquiry; the Initiator's Set ends terminated, the body sent stops short, and the
 // state it held stays.
+/// Spec: m2-111/3.3#4
 #[test]
 fn a_refused_body_is_ended_midway_with_terminate_inquiry() {
     let mut link = big_link();
@@ -714,6 +717,7 @@ fn a_refused_body_is_ended_midway_with_terminate_inquiry() {
 
 // M2-111 §3.3: the device judges what has come as it comes: each prefix is the start
 // of the body, decoded, and longer than the last, and the whole body is judged once.
+/// Spec: m2-111/3.3#2, m2-111/3.3#3
 #[test]
 fn the_device_is_asked_after_each_chunk_with_the_decoded_start_of_the_body() {
     let mut link = big_link();
@@ -761,6 +765,7 @@ fn a_body_refused_at_the_end_is_answered_400() {
 
 // M2-111 §3.2: a State with no declared size that grows past the Initiator's limit is
 // ended with Terminate Inquiry, and the call says it was too large.
+/// Spec: m2-111/3.2#2
 #[test]
 fn a_state_that_outgrows_the_limit_is_ended_with_terminate_inquiry() {
     let mut link = big_link();

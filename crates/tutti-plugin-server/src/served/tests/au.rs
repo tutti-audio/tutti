@@ -239,7 +239,7 @@ fn run(
         inputs: &inputs,
         outputs: &mut outputs,
         num_samples: frames,
-        sample_rate: RATE,
+        sample_rate: SAMPLE_RATE,
     };
     let mut ctx = ProcessContext::new();
     ctx.transport = transport;
@@ -444,6 +444,7 @@ fn a_unit_without_the_callbacks_is_not_published_to() {
         hand: Hand::local(),
         descriptor: Default::default(),
         wiring: Default::default(),
+        announced: Default::default(),
         requests: Vec::new(),
         edits: Vec::new(),
         events: Vec::new(),

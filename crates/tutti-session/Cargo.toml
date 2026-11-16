@@ -36,8 +36,8 @@ tutti-engine = { version = "0.0.1", path = "../tutti-engine" }
 # arrival stamps are related to it); `ArcLend` for the tests that publish.
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 tutti-nodes = { version = "0.0.1", path = "../tutti-nodes", default-features = false }
-tracing = "0.1"
 thiserror = { workspace = true, features = ["std"] }
+tracing.workspace = true
 serde = { version = "1", optional = true, features = ["derive"] }
 
 # The sound card. Off: offline only, and no ALSA headers needed.
@@ -111,7 +111,7 @@ au = ["plugin", "tutti-plugin/au"]
 # What a test reads of the graph's plumbing (`Graph::testing`, `take_audio_side`,
 # `AudioSide`). Off by default; this crate's own tests turn it on through the
 # dev-dependency on itself below, as `tutti-graph` does.
-testing = []
+testing = ["tutti-cpal?/testing"]
 
 [dev-dependencies]
 # Turns `testing` on for this crate's own tests, benches and doctests.

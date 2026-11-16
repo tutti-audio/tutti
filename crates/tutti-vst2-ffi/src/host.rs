@@ -1,6 +1,5 @@
 //! Host specific structures.
 
-use num_enum::{IntoPrimitive, TryFromPrimitive};
 use num_traits::Float;
 
 use libloading::Library;
@@ -29,169 +28,170 @@ use crate::{
     plugin::{self, Category, Info},
 };
 
-#[repr(i32)]
-#[derive(Clone, Copy, Debug, TryFromPrimitive, IntoPrimitive)]
-#[doc(hidden)]
-pub enum OpCode {
-    /// [index]: parameter index
-    /// [opt]: parameter value
-    Automate = 0,
-    /// [return]: host vst version (e.g. 2400 for VST 2.4)
-    Version,
-    /// [return]: current plugin ID (useful for shell plugins to figure out which plugin to load in
-    ///           `VSTPluginMain()`).
-    CurrentId,
-    /// No arguments. Give idle time to Host application, e.g. if plug-in editor is doing mouse
-    /// tracking in a modal loop.
-    Idle,
-    /// Deprecated.
-    _PinConnected = 4,
+primitive_enum! {
+    #[derive(Clone, Copy, Debug)]
+    #[doc(hidden)]
+    pub enum OpCode: i32 {
+        /// [index]: parameter index
+        /// [opt]: parameter value
+        Automate = 0,
+        /// [return]: host vst version (e.g. 2400 for VST 2.4)
+        Version,
+        /// [return]: current plugin ID (useful for shell plugins to figure out which plugin to load in
+        ///           `VSTPluginMain()`).
+        CurrentId,
+        /// No arguments. Give idle time to Host application, e.g. if plug-in editor is doing mouse
+        /// tracking in a modal loop.
+        Idle,
+        /// Deprecated.
+        _PinConnected = 4,
 
-    /// Deprecated.
-    _WantMidi = 6, // Not a typo
-    /// [value]: request mask. see `VstTimeInfoFlags`
-    /// [return]: `VstTimeInfo` pointer or null if not supported.
-    GetTime,
-    /// Inform host that the plugin has MIDI events ready to be processed. Should be called at the
-    /// end of `Plugin::process`.
-    /// [ptr]: `VstEvents*` the events to be processed.
-    /// [return]: 1 if supported and processed OK.
-    ProcessEvents,
-    /// Deprecated.
-    _SetTime,
-    /// Deprecated.
-    _TempoAt,
-    /// Deprecated.
-    _GetNumAutomatableParameters,
-    /// Deprecated.
-    _GetParameterQuantization,
+        /// Deprecated.
+        _WantMidi = 6, // Not a typo
+        /// [value]: request mask. see `VstTimeInfoFlags`
+        /// [return]: `VstTimeInfo` pointer or null if not supported.
+        GetTime,
+        /// Inform host that the plugin has MIDI events ready to be processed. Should be called at the
+        /// end of `Plugin::process`.
+        /// [ptr]: `VstEvents*` the events to be processed.
+        /// [return]: 1 if supported and processed OK.
+        ProcessEvents,
+        /// Deprecated.
+        _SetTime,
+        /// Deprecated.
+        _TempoAt,
+        /// Deprecated.
+        _GetNumAutomatableParameters,
+        /// Deprecated.
+        _GetParameterQuantization,
 
-    /// Notifies the host that the input/output setup has changed. This can allow the host to check
-    /// numInputs/numOutputs or call `getSpeakerArrangement()`.
-    /// [return]: 1 if supported.
-    IOChanged,
+        /// Notifies the host that the input/output setup has changed. This can allow the host to check
+        /// numInputs/numOutputs or call `getSpeakerArrangement()`.
+        /// [return]: 1 if supported.
+        IOChanged,
 
-    /// Deprecated.
-    _NeedIdle,
+        /// Deprecated.
+        _NeedIdle,
 
-    /// Request the host to resize the plugin window.
-    /// [index]: new width.
-    /// [value]: new height.
-    SizeWindow,
-    /// [return]: the current sample rate.
-    GetSampleRate,
-    /// [return]: the current block size.
-    GetBlockSize,
-    /// [return]: the input latency in samples.
-    GetInputLatency,
-    /// [return]: the output latency in samples.
-    GetOutputLatency,
+        /// Request the host to resize the plugin window.
+        /// [index]: new width.
+        /// [value]: new height.
+        SizeWindow,
+        /// [return]: the current sample rate.
+        GetSampleRate,
+        /// [return]: the current block size.
+        GetBlockSize,
+        /// [return]: the input latency in samples.
+        GetInputLatency,
+        /// [return]: the output latency in samples.
+        GetOutputLatency,
 
-    /// Deprecated.
-    _GetPreviousPlug,
-    /// Deprecated.
-    _GetNextPlug,
-    /// Deprecated.
-    _WillReplaceOrAccumulate,
+        /// Deprecated.
+        _GetPreviousPlug,
+        /// Deprecated.
+        _GetNextPlug,
+        /// Deprecated.
+        _WillReplaceOrAccumulate,
 
-    /// [return]: the current process level, see `VstProcessLevels`
-    GetCurrentProcessLevel,
-    /// [return]: the current automation state, see `VstAutomationStates`
-    GetAutomationState,
+        /// [return]: the current process level, see `VstProcessLevels`
+        GetCurrentProcessLevel,
+        /// [return]: the current automation state, see `VstAutomationStates`
+        GetAutomationState,
 
-    /// The plugin is ready to begin offline processing.
-    /// [index]: number of new audio files.
-    /// [value]: number of audio files.
-    /// [ptr]: `AudioFile*` the host audio files. Flags can be updated from plugin.
-    OfflineStart,
-    /// Called by the plugin to read data.
-    /// [index]: (bool)
-    ///    VST offline processing allows a plugin to overwrite existing files. If this value is
-    ///    true then the host will read the original file's samples, but if it is false it will
-    ///    read the samples which the plugin has written via `OfflineWrite`
-    /// [value]: see `OfflineOption`
-    /// [ptr]: `OfflineTask*` describing the task.
-    /// [return]: 1 on success
-    OfflineRead,
-    /// Called by the plugin to write data.
-    /// [value]: see `OfflineOption`
-    /// [ptr]: `OfflineTask*` describing the task.
-    OfflineWrite,
-    /// Unknown. Used in offline processing.
-    OfflineGetCurrentPass,
-    /// Unknown. Used in offline processing.
-    OfflineGetCurrentMetaPass,
+        /// The plugin is ready to begin offline processing.
+        /// [index]: number of new audio files.
+        /// [value]: number of audio files.
+        /// [ptr]: `AudioFile*` the host audio files. Flags can be updated from plugin.
+        OfflineStart,
+        /// Called by the plugin to read data.
+        /// [index]: (bool)
+        ///    VST offline processing allows a plugin to overwrite existing files. If this value is
+        ///    true then the host will read the original file's samples, but if it is false it will
+        ///    read the samples which the plugin has written via `OfflineWrite`
+        /// [value]: see `OfflineOption`
+        /// [ptr]: `OfflineTask*` describing the task.
+        /// [return]: 1 on success
+        OfflineRead,
+        /// Called by the plugin to write data.
+        /// [value]: see `OfflineOption`
+        /// [ptr]: `OfflineTask*` describing the task.
+        OfflineWrite,
+        /// Unknown. Used in offline processing.
+        OfflineGetCurrentPass,
+        /// Unknown. Used in offline processing.
+        OfflineGetCurrentMetaPass,
 
-    /// Deprecated.
-    _SetOutputSampleRate,
-    /// Deprecated.
-    _GetOutputSpeakerArrangement,
+        /// Deprecated.
+        _SetOutputSampleRate,
+        /// Deprecated.
+        _GetOutputSpeakerArrangement,
 
-    /// Get the vendor string.
-    /// [ptr]: `char*` for vendor string, limited to `MAX_VENDOR_STR_LEN`.
-    GetVendorString,
-    /// Get the product string.
-    /// [ptr]: `char*` for vendor string, limited to `MAX_PRODUCT_STR_LEN`.
-    GetProductString,
-    /// [return]: vendor-specific version
-    GetVendorVersion,
-    /// Vendor specific handling.
-    VendorSpecific,
+        /// Get the vendor string.
+        /// [ptr]: `char*` for vendor string, limited to `MAX_VENDOR_STR_LEN`.
+        GetVendorString,
+        /// Get the product string.
+        /// [ptr]: `char*` for vendor string, limited to `MAX_PRODUCT_STR_LEN`.
+        GetProductString,
+        /// [return]: vendor-specific version
+        GetVendorVersion,
+        /// Vendor specific handling.
+        VendorSpecific,
 
-    /// Deprecated.
-    _SetIcon,
+        /// Deprecated.
+        _SetIcon,
 
-    /// Check if the host supports a feature.
-    /// [ptr]: `char*` can do string
-    /// [return]: 1 if supported
-    CanDo,
-    /// Get the language of the host.
-    /// [return]: `VstHostLanguage`
-    GetLanguage,
+        /// Check if the host supports a feature.
+        /// [ptr]: `char*` can do string
+        /// [return]: 1 if supported
+        CanDo,
+        /// Get the language of the host.
+        /// [return]: `VstHostLanguage`
+        GetLanguage,
 
-    /// Deprecated.
-    _OpenWindow,
-    /// Deprecated.
-    _CloseWindow,
+        /// Deprecated.
+        _OpenWindow,
+        /// Deprecated.
+        _CloseWindow,
 
-    /// Get the current directory.
-    /// [return]: `FSSpec` on OS X, `char*` otherwise
-    GetDirectory,
-    /// Tell the host that the plugin's parameters have changed, refresh the UI.
-    ///
-    /// No arguments.
-    UpdateDisplay,
-    /// Tell the host that if needed, it should record automation data for a control.
-    ///
-    /// Typically called when the plugin editor begins changing a control.
-    ///
-    /// [index]: index of the control.
-    /// [return]: true on success.
-    BeginEdit,
-    /// A control is no longer being changed.
-    ///
-    /// Typically called after the plugin editor is done.
-    ///
-    /// [index]: index of the control.
-    /// [return]: true on success.
-    EndEdit,
-    /// Open the host file selector.
-    /// [ptr]: `VstFileSelect*`
-    /// [return]: true on success.
-    OpenFileSelector,
-    /// Close the host file selector.
-    /// [ptr]: `VstFileSelect*`
-    /// [return]: true on success.
-    CloseFileSelector,
+        /// Get the current directory.
+        /// [return]: `FSSpec` on OS X, `char*` otherwise
+        GetDirectory,
+        /// Tell the host that the plugin's parameters have changed, refresh the UI.
+        ///
+        /// No arguments.
+        UpdateDisplay,
+        /// Tell the host that if needed, it should record automation data for a control.
+        ///
+        /// Typically called when the plugin editor begins changing a control.
+        ///
+        /// [index]: index of the control.
+        /// [return]: true on success.
+        BeginEdit,
+        /// A control is no longer being changed.
+        ///
+        /// Typically called after the plugin editor is done.
+        ///
+        /// [index]: index of the control.
+        /// [return]: true on success.
+        EndEdit,
+        /// Open the host file selector.
+        /// [ptr]: `VstFileSelect*`
+        /// [return]: true on success.
+        OpenFileSelector,
+        /// Close the host file selector.
+        /// [ptr]: `VstFileSelect*`
+        /// [return]: true on success.
+        CloseFileSelector,
 
-    /// Deprecated.
-    _EditFile,
-    /// Deprecated.
-    /// [ptr]: char[2048] or sizeof (FSSpec).
-    /// [return]: 1 if supported.
-    _GetChunkFile,
-    /// Deprecated.
-    _GetInputSpeakerArrangement,
+        /// Deprecated.
+        _EditFile,
+        /// Deprecated.
+        /// [ptr]: char[2048] or sizeof (FSSpec).
+        /// [return]: 1 if supported.
+        _GetChunkFile,
+        /// Deprecated.
+        _GetInputSpeakerArrangement,
+    }
 }
 
 /// Implemented by all VST hosts.

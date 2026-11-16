@@ -384,7 +384,7 @@ impl Session {
                 // leaves it silent (`handle_process` publishes nothing) and
                 // the host is told, because a rolled-back plugin would
                 // otherwise render at its old rate against the host's blocks.
-                self.clock.sample_rate = rate.get();
+                self.clock.sample_rate = rate;
                 let error = match self.plugin.as_mut() {
                     Some(plugin) => match plugin.plugin_mut().set_sample_rate(main, rate) {
                         Ok(()) => None,
@@ -689,7 +689,7 @@ impl Session {
         let loaded = plugin.plugin().loaded().clone();
         let negotiated = plugin.plugin().negotiated(prefer_f64);
         self.clock = Clock {
-            sample_rate: sample_rate.get(),
+            sample_rate,
             format: negotiated,
         };
         self.max_block = block_size;
@@ -1238,7 +1238,7 @@ mod tests {
     #[test]
     fn new_session_defaults() {
         let s = Rig::new();
-        assert_eq!(s.clock.sample_rate, 44100.0);
+        assert_eq!(s.clock.sample_rate, SampleRate::SR_44K1);
         assert_eq!(s.clock.format, SampleFormat::Float32);
         assert!(s.plugin.is_none());
         assert!(!s.side().has_slab());
@@ -1351,7 +1351,7 @@ mod tests {
             r,
             BridgeMessage::SampleRateSet { rate, error: None } if rate.get() == 96000.0
         ));
-        assert_eq!(s.clock.sample_rate, 96000.0);
+        assert_eq!(s.clock.sample_rate, SampleRate::SR_96K);
     }
 
     /// A `LoadState` with no plugin loaded answers, and answers with a refusal.
@@ -1624,7 +1624,7 @@ mod tests {
             matches!(accepted, BridgeMessage::SampleRateSet { error: None, .. }),
             "{accepted:?}"
         );
-        assert_eq!(s.clock.sample_rate, 48000.0);
+        assert_eq!(s.clock.sample_rate, SampleRate::SR_48K);
         assert!(
             s.drain_async_events(main_thread()).is_empty(),
             "nothing changed"
@@ -1643,12 +1643,16 @@ mod tests {
             ),
             "the host is told, with a reason: {refused:?}"
         );
-        assert_eq!(s.clock.sample_rate, 96000.0, "the clock follows the host");
+        assert_eq!(
+            s.clock.sample_rate,
+            SampleRate::SR_96K,
+            "the clock follows the host"
+        );
         assert!(s.rate_refused.is_some());
         assert!(
             s.drain_async_events(main_thread())
                 .iter()
-                .any(|m| matches!(m, BridgeMessage::PluginIoChanged)),
+                .any(|m| matches!(m, BridgeMessage::PluginIoChanged { .. })),
             "the host is told the instance can no longer run"
         );
         process_block(&mut s, &mut shm, 2, 0.5);
@@ -1671,7 +1675,7 @@ mod tests {
             "{revived:?}"
         );
         assert!(s.rate_refused.is_none());
-        assert_eq!(s.clock.sample_rate, 88200.0);
+        assert_eq!(s.clock.sample_rate, SampleRate::SR_88K2);
         process_block(&mut s, &mut shm, 4, 0.5);
         assert!(shm.has_output(4), "a revived plugin publishes again");
         let mut out = vec![0.0f64; F64_FRAMES];
@@ -2576,7 +2580,7 @@ mod tests {
             r,
             BridgeMessage::SampleRateSet { error: None, .. }
         ));
-        assert_eq!(s.clock.sample_rate, 96000.0);
+        assert_eq!(s.clock.sample_rate, SampleRate::SR_96K);
     }
 
     #[test]

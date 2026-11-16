@@ -19,6 +19,7 @@ dpi.workspace = true
 bitflags = "2"
 clap-sys = "0.5"
 thiserror = "2"
+tracing.workspace = true
 tutti-clap-ffi = { version = "0.0.1", path = "../tutti-clap-ffi" }
 tutti-midi-protocol = { version = "0.0.1", path = "../tutti-midi-protocol" }
 tutti-plugin-types = { version = "0.0.1", path = "../tutti-plugin-types" }
@@ -45,6 +46,8 @@ rgb.workspace = true
 # Finds the reference plugins and the plugin-server beside the test binary.
 tutti-fixtures = { path = "../../testing/tutti-fixtures", features = ["plugin"] }
 assert_no_alloc = { version = "1", default-features = false }
+# The test collects the `tutti::plugin` events the host emits.
+tracing-subscriber.workspace = true
 # The reference plugin used by the clap_conformance harness. As a
 # dev-dependency, Cargo builds its cdylib in the same `cargo test`
 # invocation (no nested cargo / no target-dir-lock deadlock); the rlib

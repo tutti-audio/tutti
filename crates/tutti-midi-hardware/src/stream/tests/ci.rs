@@ -10,10 +10,10 @@ use tutti_midi_device::{
 };
 use tutti_ump::{MidiGroup, MpeChannels, MpeOverlap, MpeZoneSpan, U7};
 
-const GROUP_0: MidiGroup = MidiGroup::of(0);
+pub(super) const GROUP_0: MidiGroup = MidiGroup::of(0);
 
 /// The MIDI-CI messages among what the fake device received, with their Group.
-fn ci_sent(wire: &Wire) -> Vec<(MidiGroup, CiMessage)> {
+pub(super) fn ci_sent(wire: &Wire) -> Vec<(MidiGroup, CiMessage)> {
     payloads(&received(wire))
         .into_iter()
         .filter_map(|(group, payload)| match CiMessage::decode(&payload) {
@@ -37,7 +37,7 @@ fn peer_id() -> PeerId {
     }
 }
 
-fn peer() -> Muid {
+pub(super) fn peer() -> Muid {
     Muid::of(0x0012_3456)
 }
 
@@ -49,7 +49,7 @@ fn peer_data_of(categories: CiCategories) -> DiscoveryData {
     DiscoveryData::new(identity(), categories, MaxSysexSize::of(256))
 }
 
-fn polled(wire: &mut Wire, ms: u64) -> Vec<Polled> {
+pub(super) fn polled(wire: &mut Wire, ms: u64) -> Vec<Polled> {
     wire.session.poll(wire.at(ms)).collect()
 }
 
@@ -102,7 +102,7 @@ fn endpoint_wire(blocks: &[FunctionBlock]) -> Wire {
 
 /// A MIDI 1.0 port whose Identity Request was answered and whose MIDI-CI has
 /// started, with the MUID it drew; what was sent so far is read off.
-fn midi1_running() -> (Wire, Muid) {
+pub(super) fn midi1_running() -> (Wire, Muid) {
     let mut wire = midi1_wire_ci(Some(identity()));
     let _ = polled(&mut wire, 0);
     reply_at(&wire, identity_reply(0), 10);
@@ -123,6 +123,7 @@ fn midi1_running() -> (Wire, Muid) {
 /// opens with a Discovery to the Broadcast MUID from the Function Block's
 /// Device ID (`7F`): the bytes of Table 6. A block that declares none (M2-104
 /// §7.1.8) is sent nothing.
+/// Spec: m2-101/4.1#1, m2-101/5.5#1
 #[test]
 fn a_function_block_that_declares_midi_ci_is_sent_discovery_on_its_first_group() {
     let wire = endpoint_wire(&[ci_block(0, 2, 2), ci_block(1, 4, 0)]);
@@ -297,6 +298,7 @@ fn a_reply_to_discovery_makes_the_peer_appear_and_is_reported_once() {
 /// long after its own window closed, with a Reply to that device that echoes
 /// the Output Path ID (§5.6.1) and declares no Function Block (§5.6.2). A
 /// Discovery is not a peer found.
+/// Spec: m2-101/4.1#2, m2-101/5.6#1
 #[test]
 fn a_discovery_a_peer_sends_is_answered_long_after_the_window_closed() {
     let (mut wire, ours) = midi1_running();
@@ -328,6 +330,7 @@ fn a_discovery_a_peer_sends_is_answered_long_after_the_window_closed() {
 
 /// §5.9: an Invalidate MUID naming a found peer discards it, and `poll` reports
 /// the loss.
+/// Spec: m2-101/5.9#3
 #[test]
 fn an_invalidate_muid_of_a_found_peer_removes_it_and_is_reported() {
     let (mut wire, ours) = midi1_running();
@@ -453,6 +456,7 @@ fn the_inputs_disconnect_ends_midi_ci() {
 
 /// A Destination the Reply to Discovery is for is one device, never Broadcast
 /// (§3.3.3), as sent.
+/// Spec: m2-101/3.3.3#3
 #[test]
 fn a_reply_to_discovery_is_addressed_to_one_device() {
     let (mut wire, _) = midi1_running();
@@ -524,7 +528,7 @@ fn midi_ci_is_off_by_default() {
         received(&wire).is_empty(),
         "a block that declares MIDI-CI, unasked"
     );
-    assert_eq!(wire.session.options().ci, None);
+    assert_eq!(wire.session.presented(), None);
 
     use tutti_midi_device::{INQUIRY_ATTEMPTS, INQUIRY_TIMEOUT};
     let mut wire = midi1_wire();
@@ -685,7 +689,7 @@ fn discoveries_of(sent: Vec<(MidiGroup, CiMessage)>) -> Vec<(MidiGroup, Muid)> {
 
 /// A MIDI 1.0 port whose peer declared `categories` and whose first inquiry
 /// went out; the wire's clock is at 50 ms. What was sent is read off.
-fn peer_declaring(categories: CiCategories) -> (Wire, Muid) {
+pub(super) fn peer_declaring(categories: CiCategories) -> (Wire, Muid) {
     let (mut wire, ours) = midi1_running();
     say(
         &wire,
@@ -790,6 +794,7 @@ fn a_block_that_stops_declaring_midi_ci_ends_its_groups_device_and_no_other() {
 /// A block that moves to another Group is, by Group, an end and a start: the
 /// old Group's device is invalidated and the new Group gets a Discovery under a
 /// fresh MUID.
+/// Spec: m2-101/3.3.2#2, m2-101/3.3.2#3
 #[test]
 fn a_block_that_moves_ends_the_old_groups_device_and_starts_the_new() {
     let mut wire = endpoint_wire(&[ci_block(0, 2, 2)]);
@@ -997,6 +1002,7 @@ fn profile_events(polled: &[Polled]) -> Vec<&ProfilesChange> {
 /// Configuration for its Profiles, with a Profile Inquiry (Sub-ID#2 `0x20`) to
 /// the Function Block (`0x7F`), from its own MUID to the peer's. A peer that
 /// declared none is not asked.
+/// Spec: m2-101/7.2#1
 #[test]
 fn a_peer_that_declares_profile_configuration_is_sent_a_profile_inquiry() {
     let (mut wire, ours) = midi1_running();
@@ -1096,6 +1102,7 @@ fn the_replies_to_profile_inquiry_become_the_peers_profiles_once_the_final_one_a
 /// bytes, LSB first); the Profile Enabled Report of section 7.10 is its
 /// acknowledgement, resolving the request with the state and Channel count the
 /// peer reports and updating what the session holds.
+/// Spec: m2-101/7.8#1
 #[test]
 fn a_set_profile_on_names_the_channel_and_its_enabled_report_updates_the_table() {
     let (mut wire, ours) = peer_declaring(CiCategories::PROFILE_CONFIGURATION);
@@ -1327,6 +1334,7 @@ fn a_channel_response_notification_is_read_off_the_specific_data() {
 /// Number Channels Requested is 0x0000 (the width of what is addressed), and a
 /// Set Profile Off (Sub-ID#2 `0x23`, Table 25) names only the Profile; the Disabled
 /// Report of section 7.11 resolves it.
+/// Spec: m2-101/7.8#1, m2-101/7.9#1
 #[test]
 fn a_set_profile_on_a_group_asks_for_no_channels_and_off_is_resolved_by_the_disabled_report() {
     let (mut wire, ours) = peer_declaring(CiCategories::PROFILE_CONFIGURATION);
@@ -1411,6 +1419,7 @@ fn a_set_profile_on_a_group_asks_for_no_channels_and_off_is_resolved_by_the_disa
 /// M2-101 sections 7.4 and 7.5: a Profile Added Report lists a Profile (disabled)
 /// and a Removed Report takes it out, each reported. A handle made before the
 /// removal is then refused, since the peer no longer lists what it names.
+/// Spec: m2-102/2.4#5, m2-102/2.4#6
 #[test]
 fn added_and_removed_reports_change_the_list_and_a_stale_handle_is_refused() {
     let (mut wire, ours) = peer_declaring(CiCategories::PROFILE_CONFIGURATION);
@@ -1471,6 +1480,7 @@ fn added_and_removed_reports_change_the_list_and_a_stale_handle_is_refused() {
 /// its Initiator and the Profiles it held: they are reported dropped, the
 /// session holds none, and a handle made before is refused, as is a switch
 /// queued before it that the next poll would have sent.
+/// Spec: m2-101/5.9#3
 #[test]
 fn an_invalidate_muid_drops_the_peers_profiles_and_refuses_its_handles() {
     let (mut wire, ours) = peer_declaring(CiCategories::PROFILE_CONFIGURATION);
@@ -1660,6 +1670,7 @@ fn function_block_request() -> ReportRequest {
 /// Process Inquiry for its capabilities, with an Inquiry: Process Inquiry
 /// Capabilities (Sub-ID#2 `0x40`) to the Function Block (`0x7F`), from its own
 /// MUID to the peer's. A peer that declared none is not asked.
+/// Spec: m2-101/9.2#1
 #[test]
 fn a_peer_that_declares_process_inquiry_is_sent_a_capabilities_inquiry() {
     let (mut wire, ours) = midi1_running();
@@ -1793,6 +1804,7 @@ fn a_report_asks_with_table_43_and_ends_with_the_peers_end() {
 }
 
 /// M2-101 section 9.8.1: a NAK ends a report even with no End.
+/// Spec: m2-101/9.8.1#2
 #[test]
 fn a_nak_of_a_report_ends_it_and_is_reported() {
     let (mut wire, ours) = peer_declaring(CiCategories::PROCESS_INQUIRY);
@@ -1893,6 +1905,7 @@ fn a_lost_peer_drops_its_process_inquiry_and_refuses_its_handles() {
 /// M2-101 section 9.3 and 9.6: the session declares Process Inquiry, and answers a
 /// capabilities inquiry with D0, and a report of the Function Block with an empty
 /// Reply (`43`, all bitmaps 0) and the End (`44`) on the same Device ID.
+/// Spec: m2-101/9.3#1, m2-101/9.6#1, m2-101/9.8#1
 #[test]
 fn the_session_answers_a_process_inquiry_as_a_device_with_nothing_to_report() {
     let (mut wire, ours) = midi1_running();
@@ -2110,6 +2123,7 @@ fn answers(far: &mut Far, heard: &[CiMessage], ms: u64, wire: &Wire) -> Vec<CiMe
 /// M2-101 section 8.5: a peer that declared Property Exchange (Table 7, D3) is
 /// sent Inquiry: Property Exchange Capabilities (Sub-ID#2 `0x30`) from our MUID
 /// to its own, and has no handle until it answers.
+/// Spec: m2-101/8.5#1
 #[test]
 fn a_peer_that_declares_property_exchange_is_sent_a_capabilities_inquiry() {
     let (wire, ours, sent) = property_peer();
@@ -2131,6 +2145,7 @@ fn a_peer_that_declares_property_exchange_is_sent_a_capabilities_inquiry() {
 
 /// The session declares Property Exchange, so a peer's Capabilities Inquiry is
 /// answered with the Capabilities Reply (`0x31`) and not refused.
+/// Spec: m2-101/8.6#1
 #[test]
 fn the_session_answers_a_property_exchange_capabilities_inquiry_and_does_not_nak_it() {
     let (mut wire, ours, _) = property_peer();
@@ -2338,6 +2353,7 @@ fn resource_events(all: &[Polled]) -> Vec<ResourceEvent> {
 
 /// M2-103 section 11: a Subscription the peer allows starts with its Reply and ends
 /// with the Initiator's End.
+/// Spec: m2-103/11#4, m2-103/11.5#1
 #[test]
 fn a_subscription_starts_and_ends_through_the_session() {
     let (mut wire, _, mut far) = ready_property_peer(subscribable());

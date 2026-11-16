@@ -70,7 +70,7 @@ impl LadderCoeffs {
         let fc =
             f64::from(freq.get()).clamp(1.0, f64::from(sample_rate.nyquist_scaled(0.998).get()));
         LadderCoeffs {
-            g: (core::f64::consts::PI * fc / sample_rate.get()).tan(),
+            g: libm::tan(core::f64::consts::PI * fc / sample_rate.get()),
             k: 4.0 * f64::from(resonance.get().clamp(0.0, 1.0)),
         }
     }
@@ -110,8 +110,8 @@ impl<F: Float + Lanes> LadderCoefficients<F> {
     #[must_use]
     pub(crate) fn lerp(&self, to: &Self, t: F) -> Self {
         Self {
-            g1: self.g1 + (to.g1 - self.g1) * t,
-            k: self.k + (to.k - self.k) * t,
+            g1: crate::lerp(self.g1, to.g1, t),
+            k: crate::lerp(self.k, to.k, t),
         }
     }
 }
