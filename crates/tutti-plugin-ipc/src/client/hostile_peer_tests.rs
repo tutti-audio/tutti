@@ -104,16 +104,6 @@ fn wait_until(mut cond: impl FnMut() -> bool) -> bool {
     false
 }
 
-fn unique_shm_name(label: &str) -> String {
-    static COUNTER: tutti_types::Mint = tutti_types::Mint::new();
-    format!(
-        "hostile_{}_{}_{}",
-        label,
-        std::process::id(),
-        COUNTER.mint()
-    )
-}
-
 fn stereo_layout() -> SlabLayout {
     SlabLayout {
         slots: RING_SLOTS as u32,
@@ -380,9 +370,12 @@ impl MockServer {
 
         // The peer writes no audio here: only the shared, read-only slab is kept.
         let slab = Arc::clone(
-            AudioSlab::create(unique_shm_name(label), stereo_layout())
-                .expect("create slab")
-                .slab(),
+            AudioSlab::create(
+                tutti_fixtures::unique_name(&format!("hostile_{label}")),
+                stereo_layout(),
+            )
+            .expect("create slab")
+            .slab(),
         );
         let (bridge, thread) = PluginBridge::new(
             path.clone(),

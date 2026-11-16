@@ -609,7 +609,7 @@ fn a_reversed_voice_with_a_loop_set_stays_bounded() {
              the source"
         );
     }
-    let peak = out.iter().fold(0.0f32, |a, &b| a.max(b.abs()));
+    let peak = tutti_fixtures::signal::peak(&out);
     assert!(
         peak > 0.01,
         "a reversed voice with a loop set produced silence"
