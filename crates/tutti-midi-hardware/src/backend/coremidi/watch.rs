@@ -36,6 +36,7 @@ use crate::devices::reporter::Reporter;
 use crate::endpoints::{NoWatch, Watch};
 use crate::error::Result;
 use tutti_midi_device::OsDevice;
+use tutti_rt::spawn_named;
 
 /// A run loop that returns sooner than this had nothing to wait for. A loop that
 /// has a source but was stopped (`CFRunLoopStop`, which nothing here sends)
@@ -131,43 +132,43 @@ fn start_hub() -> std::result::Result<&'static Hub, String> {
             next: AtomicU64::new(0),
         }));
         let (ready, started) = mpsc::channel();
-        std::thread::Builder::new()
-            .name("tutti-devwatch".to_string())
-            .spawn(move || {
-                let client =
-                    Client::new_with_notifications("tutti-midi-watch", move |n: &Notification| {
-                        CALLBACKS.fetch_add(1, Ordering::Relaxed);
-                        if matches!(
-                            n,
-                            Notification::SetupChanged
-                                | Notification::ObjectAdded(_)
-                                | Notification::ObjectRemoved(_)
-                                | Notification::PropertyChanged(_)
-                        ) {
-                            hub.notify();
-                        }
-                    });
-                let _ = ready.send(client.as_ref().map(|_| ()).map_err(|s| *s));
-                // The client lives as long as the process.
-                let Ok(_client) = client else { return };
-                let mut looked = Instant::now();
-                loop {
-                    let started = Instant::now();
-                    CFRunLoop::run_current();
-                    if started.elapsed() < IDLE_RETURN {
-                        // The loop had nothing to wait for: no notification
-                        // can reach it, so look on a timer instead.
-                        std::thread::sleep(IDLE_REST);
-                        if looked.elapsed() >= IDLE_LOOK {
-                            hub.notify();
-                            looked = Instant::now();
-                        }
-                    } else {
+        // The hub thread lives as long as the process: no owner stops it.
+        spawn_named("tutti-devwatch", None, move |_| {
+            let client =
+                Client::new_with_notifications("tutti-midi-watch", move |n: &Notification| {
+                    CALLBACKS.fetch_add(1, Ordering::Relaxed);
+                    if matches!(
+                        n,
+                        Notification::SetupChanged
+                            | Notification::ObjectAdded(_)
+                            | Notification::ObjectRemoved(_)
+                            | Notification::PropertyChanged(_)
+                    ) {
+                        hub.notify();
+                    }
+                });
+            let _ = ready.send(client.as_ref().map(|_| ()).map_err(|s| *s));
+            // The client lives as long as the process.
+            let Ok(_client) = client else { return };
+            let mut looked = Instant::now();
+            loop {
+                let started = Instant::now();
+                CFRunLoop::run_current();
+                if started.elapsed() < IDLE_RETURN {
+                    // The loop had nothing to wait for: no notification
+                    // can reach it, so look on a timer instead.
+                    std::thread::sleep(IDLE_REST);
+                    if looked.elapsed() >= IDLE_LOOK {
+                        hub.notify();
                         looked = Instant::now();
                     }
+                } else {
+                    looked = Instant::now();
                 }
-            })
-            .map_err(|e| format!("spawn the CoreMIDI watch thread: {e}"))?;
+            }
+        })
+        .map_err(|e| format!("spawn the CoreMIDI watch thread: {e}"))?
+        .detach();
         match started.recv() {
             Ok(Ok(())) => Ok(hub),
             Ok(Err(status)) => Err(format!("CoreMIDI client status {status}")),

@@ -77,14 +77,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let flat = rendered.interleaved();
     // `tutti` exports no path to `Bed`, so the placement is the assumed one for
     // two channels, which is a stereo bed.
-    let cfg = LoudnessConfig::new(
-        rendered.sample_rate(),
-        ChannelTopology::assumed(ChannelLayout::STEREO),
-    )
-    .unwrap();
+    let cfg = LoudnessConfig::new(ChannelTopology::assumed(ChannelLayout::STEREO));
     let loudness = measure_loudness(
         &cfg,
         Interleaved::new(&flat, ChannelLayout::STEREO).unwrap(),
+        rendered.sample_rate(),
     )
     .expect("stereo is meterable");
     println!(

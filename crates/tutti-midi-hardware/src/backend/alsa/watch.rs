@@ -25,11 +25,19 @@
 //! port whose start was seen is a port made again on a live client: a new
 //! occupant too.
 //!
-//! Exits and changes are only events seen: an exit says nothing about the
-//! occupant the enumeration shows, and a rename is an identity change the
-//! enumeration shows by itself. An enumeration cut short is not a look; the
-//! watch asks to be woken again until one is whole, so a removal it has read
-//! does not wait for an unrelated announcement.
+//! A client exit says nothing about the occupant the enumeration shows, and a
+//! rename is an identity change the enumeration shows by itself. Both matter
+//! once, for a handle a look that did not quiet lists under another identity: a
+//! rename of its occupant (whose start was read) or a new occupant (whose start
+//! is yet to come). The first announcement read for it tells (`Tracker::told`):
+//! a change is the rename and costs no start read; a port exit or a start is the
+//! new occupant. The classification cannot tell a change read for an earlier
+//! rename from the rename of the listed identity, so a replug that follows a
+//! rename read in the same look can be reported twice, never missed.
+//!
+//! An enumeration cut short is not a look; the watch asks to be woken again
+//! until one is whole, so a removal it has read does not wait for an unrelated
+//! announcement.
 //!
 //! Enumeration runs on the watch's own client. A client opened to enumerate would
 //! announce its own start, port and exit to this very port, and the watch would
@@ -38,7 +46,6 @@
 use std::collections::BTreeSet;
 use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
-use std::thread::JoinHandle;
 
 use super::enumerate::{pack_id, unpack_id};
 use super::poll::ErrorRun;
@@ -53,6 +60,7 @@ use tutti_alsa_ffi::{
     Wait,
 };
 use tutti_midi_device::{EndpointId, OsDevice};
+use tutti_rt::{ThreadHandle, spawn_named};
 
 /// Announcements the watch thread has acted on, for the idle test.
 #[cfg(test)]
@@ -156,6 +164,12 @@ struct Tracker {
     /// confirms it and is no new occupant. A handle listed by a quiet look is not
     /// here, because the quiet read proves its client's start has been read.
     unconfirmed: BTreeSet<EndpointId>,
+    /// Reported handles a non-quiet look lists under another identity, and in
+    /// `unconfirmed` for it: a rename of the occupant (whose start was read) or a
+    /// new occupant (whose start is yet to come). The first announcement read
+    /// for the handle tells: a change is the rename, a port exit or a client start
+    /// the new occupant.
+    undecided: BTreeSet<EndpointId>,
     /// Handles whose own `PORT_START` may not have been read: the first one read
     /// for such a handle is its own, not a port made again. The kernel makes a
     /// port visible (`snd_seq_insert_port`) before it posts the start, so even a
@@ -187,6 +201,7 @@ impl Tracker {
             reporter,
             last: BTreeSet::new(),
             unconfirmed: BTreeSet::new(),
+            undecided: BTreeSet::new(),
             port_pending: BTreeSet::new(),
             pending: Vec::new(),
             failures: 0,
@@ -276,6 +291,8 @@ impl Tracker {
         );
         self.port_pending =
             Self::port_pending_after(fold.port_pending, &self.last, &handles, &events);
+        self.undecided =
+            Self::undecided_after(fold.undecided, &self.last, &changed, &handles, &events);
         self.last = handles;
         self.reporter
             .report(present, |id| fold.replaced.contains(&id));
@@ -283,9 +300,11 @@ impl Tracker {
 
     /// The handles whose client's start may still be unread after a look: none
     /// after a quiet one; after one that did not quiet, those listed first by it
-    /// or listed under another identity (a replacement, or a rename that then
-    /// costs one start read) that no start read in `events` names, and those that
-    /// were unconfirmed before and still are.
+    /// or listed under another identity that no start read in `events` names and
+    /// whose first announcement in `events` is not a change (a change is a rename
+    /// of the occupant whose start was read; a rename not yet read is
+    /// [`Tracker::undecided`] until its first announcement), and those that were
+    /// unconfirmed before and still are.
     fn unconfirmed_after(
         kept: BTreeSet<EndpointId>,
         last: &BTreeSet<EndpointId>,
@@ -306,10 +325,51 @@ impl Tracker {
         };
         let listed_first = handles
             .iter()
-            .filter(|&&h| (!last.contains(&h) || changed.contains(&h)) && !started(h))
+            .filter(|&&h| {
+                (!last.contains(&h) || changed.contains(&h))
+                    && !started(h)
+                    && Self::told(h, events) != Some(Told::Renamed)
+            })
             .copied();
         kept.into_iter()
             .chain(listed_first)
+            .filter(|h| handles.contains(h))
+            .collect()
+    }
+
+    /// What the first announcement in `events` about `handle`'s occupant says,
+    /// if it says: a change is a rename of the occupant, and the exit of its port
+    /// or the start of its client a replacement (the exit is posted before the
+    /// number is free).
+    fn told(handle: EndpointId, events: &[Event]) -> Option<Told> {
+        let (n, p) = unpack_id(handle)?;
+        events.iter().find_map(|&e| match e {
+            Event::ClientChange(c) if c == n => Some(Told::Renamed),
+            Event::PortChange(c, q) if (c, q) == (n, p) => Some(Told::Renamed),
+            Event::PortExit(c, q) if (c, q) == (n, p) => Some(Told::Replaced),
+            Event::ClientStart(c) if c == n => Some(Told::Replaced),
+            _ => None,
+        })
+    }
+
+    /// The handles in [`Tracker::undecided`] after a look: those that were and
+    /// still are, and the reported handles it lists under another identity whose
+    /// `events` do not tell yet.
+    fn undecided_after(
+        kept: BTreeSet<EndpointId>,
+        last: &BTreeSet<EndpointId>,
+        changed: &BTreeSet<EndpointId>,
+        handles: &BTreeSet<EndpointId>,
+        events: &[Event],
+    ) -> BTreeSet<EndpointId> {
+        let listed = handles
+            .iter()
+            .filter(|&&h| {
+                last.contains(&h) && changed.contains(&h) && Self::told(h, events).is_none()
+            })
+            .copied();
+        kept.into_iter()
+            .chain(listed)
             .filter(|h| handles.contains(h))
             .collect()
     }
@@ -349,6 +409,7 @@ impl Tracker {
         let mut fold = Fold {
             replaced: BTreeSet::new(),
             unconfirmed: self.unconfirmed.clone(),
+            undecided: self.undecided.clone(),
             port_pending: self.port_pending.clone(),
         };
         for &event in events {
@@ -359,6 +420,7 @@ impl Tracker {
                         .iter()
                         .filter(|&&h| unpack_id(h).is_some_and(|(client, _)| client == n))
                     {
+                        fold.undecided.remove(&h);
                         if !fold.unconfirmed.remove(&h) {
                             fold.replaced.insert(h);
                         }
@@ -374,10 +436,27 @@ impl Tracker {
                         }
                     }
                 }
-                Event::ClientExit(_)
-                | Event::ClientChange(_)
-                | Event::PortExit(..)
-                | Event::PortChange(..) => {}
+                Event::PortChange(n, p) => {
+                    let handle = pack_id(n, p);
+                    if fold.undecided.remove(&handle) {
+                        fold.unconfirmed.remove(&handle);
+                    }
+                }
+                Event::ClientChange(n) => {
+                    for &h in self
+                        .last
+                        .iter()
+                        .filter(|&&h| unpack_id(h).is_some_and(|(client, _)| client == n))
+                    {
+                        if fold.undecided.remove(&h) {
+                            fold.unconfirmed.remove(&h);
+                        }
+                    }
+                }
+                Event::PortExit(n, p) => {
+                    fold.undecided.remove(&pack_id(n, p));
+                }
+                Event::ClientExit(_) => {}
             }
         }
         fold
@@ -389,7 +468,19 @@ struct Fold {
     /// Reported handles with a new occupant.
     replaced: BTreeSet<EndpointId>,
     unconfirmed: BTreeSet<EndpointId>,
+    /// [`Tracker::undecided`] after the starts, changes and exits read.
+    undecided: BTreeSet<EndpointId>,
     port_pending: BTreeSet<EndpointId>,
+}
+
+/// What an announcement says about the occupant of a handle that a look lists
+/// under another identity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Told {
+    /// The occupant was renamed.
+    Renamed,
+    /// A new occupant took the number.
+    Replaced,
 }
 
 /// Why `Announce::wait` returned.
@@ -462,22 +553,27 @@ impl Announce {
     }
 }
 
-/// The running watch. Dropping it closes the stop pair, which wakes the thread,
-/// and joins it.
+/// The running watch. Dropping it closes the stop pair, which wakes the thread
+/// out of `poll`, and stops and joins the thread.
 struct AlsaWatch {
+    /// The thread polls the other end; closing this one is the wake.
     stop: Option<UnixStream>,
-    thread: Option<JoinHandle<()>>,
+    thread: Option<ThreadHandle<()>>,
 }
 
 impl Watch for AlsaWatch {}
 
 impl Drop for AlsaWatch {
     fn drop(&mut self) {
+        // Closing the pair wakes `poll`; the join then waits for the thread.
         drop(self.stop.take());
-        if let Some(thread) = self.thread.take()
-            && thread.join().is_err()
-        {
-            tracing::error!("the ALSA device watch thread panicked");
+        if let Some(thread) = self.thread.take() {
+            thread.token().stop();
+            // The thread reports its own panics to the sink; one that escapes
+            // that (inside `fail`) is reported here.
+            if let Err(panicked) = thread.join() {
+                tracing::error!("ALSA device watch: {panicked}");
+            }
         }
     }
 }
@@ -505,32 +601,30 @@ pub(super) fn start(
     let failures = sink.clone();
     let mut tracker = Tracker::new(Reporter::new(sink));
     tracker.seed(|| announce.drain(), || snapshot(&announce.seq))?;
-    let thread = std::thread::Builder::new()
-        .name(THREAD_NAME.to_string())
-        .spawn(move || {
-            let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                loop {
-                    match announce.wait(tracker.retry_after()) {
-                        Ok(woken @ (Woken::Announced(_) | Woken::Timeout)) => {
-                            #[cfg(test)]
-                            WAKES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                            let first = match woken {
-                                Woken::Announced(first) => first,
-                                _ => Drained::default(),
-                            };
-                            tracker.step(first, || announce.drain(), || snapshot(&announce.seq));
-                        }
-                        Ok(Woken::Stopped) => return None,
-                        Err(e) => return Some(e),
+    let thread = spawn_named(THREAD_NAME, None, move |_| {
+        let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            loop {
+                match announce.wait(tracker.retry_after()) {
+                    Ok(woken @ (Woken::Announced(_) | Woken::Timeout)) => {
+                        #[cfg(test)]
+                        WAKES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        let first = match woken {
+                            Woken::Announced(first) => first,
+                            _ => Drained::default(),
+                        };
+                        tracker.step(first, || announce.drain(), || snapshot(&announce.seq));
                     }
+                    Ok(Woken::Stopped) => return None,
+                    Err(e) => return Some(e),
                 }
-            }));
-            match run {
-                Ok(None) => {}
-                Ok(Some(why)) => failures.fail(why),
-                Err(_) => failures.fail(crate::WatchFailure::Panicked),
             }
-        })?;
+        }));
+        match run {
+            Ok(None) => {}
+            Ok(Some(why)) => failures.fail(why),
+            Err(_) => failures.fail(crate::WatchFailure::Panicked),
+        }
+    })?;
     Ok(Box::new(AlsaWatch {
         stop: Some(stop_tx),
         thread: Some(thread),

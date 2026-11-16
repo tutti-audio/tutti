@@ -43,6 +43,7 @@ fn a_request_id_is_0_to_127() {
 }
 
 // M2-101 §8.3, Table 33: a chunk count and number are 14-bit, and count from 1.
+/// Spec: m2-101/8.3#5
 #[test]
 fn chunk_numbers_count_from_1_in_14_bits() {
     assert_eq!(ChunkNo::new(0), None);
@@ -54,6 +55,7 @@ fn chunk_numbers_count_from_1_in_14_bits() {
 
 // M2-101 §8.3, Table 29: 0 is the unknown count, and a final chunk numbered 0
 // abandons the message.
+/// Spec: m2-101/8.3#7, m2-101/8.3#12
 #[test]
 fn zero_is_the_unknown_count_and_the_abandoning_number() {
     assert_eq!(ChunkTotal::from_wire(0), Some(ChunkTotal::Unknown));
@@ -67,6 +69,7 @@ fn zero_is_the_unknown_count_and_the_abandoning_number() {
 }
 
 // M2-101 §8.3: a message whose SysEx fits the peer's maximum is not broken.
+/// Spec: m2-101/8.3#2, m2-103/5.2#4
 #[test]
 fn a_body_that_fits_exactly_is_one_chunk() {
     let chunks = split_message(id(), &header(), &body(FIRST_ROOM), SMALLEST).unwrap();
@@ -78,6 +81,7 @@ fn a_body_that_fits_exactly_is_one_chunk() {
 
 // M2-101 §8.3: a message past the maximum is broken into chunks, each labelled
 // with the count and its number from 1.
+/// Spec: m2-101/8.3#2, m2-101/8.3#4, m2-103/5.2#4
 #[test]
 fn a_body_one_byte_over_is_two_chunks() {
     let body = body(FIRST_ROOM + 1);
@@ -97,6 +101,7 @@ fn a_body_one_byte_over_is_two_chunks() {
 }
 
 // M2-101 §8.3.1: Header Data is in the first chunk only; the rest have none.
+/// Spec: m2-101/8.3.1#1, m2-101/8.3.1#2
 #[test]
 fn only_the_first_chunk_carries_the_header() {
     let chunks = split_message(id(), &header(), &body(1000), SMALLEST).unwrap();
@@ -106,6 +111,7 @@ fn only_the_first_chunk_carries_the_header() {
 
 // M2-101 §8.3: many chunks, each a SysEx message within the maximum, the count
 // the same in all and the numbers sequential, the body intact.
+/// Spec: m2-101/8.3#4
 #[test]
 fn many_chunks_each_fit_and_are_numbered_in_order() {
     let body = body(1000);
@@ -125,6 +131,7 @@ fn many_chunks_each_fit_and_are_numbered_in_order() {
 }
 
 // M2-101 §8.3.2: a message with no Property Data is one chunk, 1 of 1.
+/// Spec: m2-101/8.3#6, m2-101/8.3.2#1, m2-101/8.3.2#2
 #[test]
 fn a_message_without_data_is_not_chunked() {
     let chunks = split_message(id(), &header(), &[], SMALLEST).unwrap();
@@ -223,6 +230,7 @@ fn a_header_past_the_maximum_is_refused() {
 }
 
 // M2-101 §8.3.1: chunks 2 and higher have a header length of 0.
+/// Spec: m2-101/8.3.1#2
 #[test]
 fn a_later_chunk_with_a_header_cannot_be_made_or_read() {
     let made = PeChunk::new(

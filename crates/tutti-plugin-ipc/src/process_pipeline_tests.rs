@@ -210,7 +210,7 @@ fn bridge_with_server(
 ) -> Rig {
     use interprocess::local_socket::{ListenerOptions, traits::Listener as _};
 
-    let path = unique_socket_path();
+    let path = unique_socket_path().expect("the OS has a random source");
     let _ = std::fs::remove_file(&path);
     let name = crate::socket_name(&path).unwrap();
     let listener = ListenerOptions::new().name(name).create_sync().unwrap();
@@ -232,6 +232,8 @@ fn bridge_with_server(
             tutti_fixtures::detached_work(),
         )),
         SampleRate::SR_48K,
+        Arc::new(crate::ServerWatch::new()),
+        tutti_plugin_types::Timeouts::default(),
     )
     .unwrap();
 
@@ -914,7 +916,7 @@ fn stalled_plugins_do_not_stall_the_audio_thread() {
 /// Returned deliberately without a server thread — the point is a bridge that
 /// never publishes to the slab.
 fn bridge_with_no_server() -> (Arc<PluginBridge>, BridgeThread, SlabWriter) {
-    let path = unique_socket_path();
+    let path = unique_socket_path().expect("the OS has a random source");
     let _ = std::fs::remove_file(&path);
 
     let layout = stereo_layout();
@@ -931,6 +933,8 @@ fn bridge_with_no_server() -> (Arc<PluginBridge>, BridgeThread, SlabWriter) {
             tutti_fixtures::detached_work(),
         )),
         SampleRate::SR_48K,
+        Arc::new(crate::ServerWatch::new()),
+        tutti_plugin_types::Timeouts::default(),
     )
     .unwrap();
 
@@ -1418,7 +1422,7 @@ fn bridge_with_first_block_stalled(stall: std::time::Duration) -> Rig {
 fn stamped_server(stall: std::time::Duration, first_only: bool, rate: SampleRate) -> Rig {
     use interprocess::local_socket::{ListenerOptions, traits::Listener as _};
 
-    let path = unique_socket_path();
+    let path = unique_socket_path().expect("the OS has a random source");
     let _ = std::fs::remove_file(&path);
     let name = crate::socket_name(&path).unwrap();
     let listener = ListenerOptions::new().name(name).create_sync().unwrap();
@@ -1438,6 +1442,8 @@ fn stamped_server(stall: std::time::Duration, first_only: bool, rate: SampleRate
             tutti_fixtures::detached_work(),
         )),
         rate,
+        Arc::new(crate::ServerWatch::new()),
+        tutti_plugin_types::Timeouts::default(),
     )
     .unwrap();
 
@@ -1689,7 +1695,7 @@ fn an_unstaged_chunk_reports_its_midi_lost() {
 #[test]
 fn a_refused_chunk_reports_its_midi_lost() {
     let _lock = machine_lock();
-    let path = unique_socket_path();
+    let path = unique_socket_path().expect("the OS has a random source");
     let _ = std::fs::remove_file(&path);
     let slab = AudioSlab::create(unique_shm_name("refused"), stereo_layout()).unwrap();
     let (bridge, _thread) = PluginBridge::new(
@@ -1702,6 +1708,8 @@ fn a_refused_chunk_reports_its_midi_lost() {
             tutti_fixtures::detached_work(),
         )),
         SampleRate::SR_48K,
+        Arc::new(crate::ServerWatch::new()),
+        tutti_plugin_types::Timeouts::default(),
     )
     .unwrap();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
@@ -1818,7 +1826,7 @@ fn two_stale_blocks(
     use interprocess::local_socket::{ListenerOptions, traits::Listener as _};
 
     assert_eq!(RING_SLOTS, 2, "blocks 1 and 2 of 4 are stale");
-    let path = unique_socket_path();
+    let path = unique_socket_path().expect("the OS has a random source");
     let _ = std::fs::remove_file(&path);
     let name = crate::socket_name(&path).unwrap();
     let listener = ListenerOptions::new().name(name).create_sync().unwrap();
@@ -1833,6 +1841,8 @@ fn two_stale_blocks(
             tutti_fixtures::detached_work(),
         )),
         SampleRate::SR_48K,
+        Arc::new(crate::ServerWatch::new()),
+        tutti_plugin_types::Timeouts::default(),
     )
     .unwrap();
     let server_stream = listener.accept().unwrap();

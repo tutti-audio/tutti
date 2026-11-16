@@ -159,7 +159,7 @@ pub(super) fn rig(label: &str) -> Rig {
     use interprocess::local_socket::{ListenerOptions, traits::Listener as _};
     static COUNTER: tutti_types::Mint = tutti_types::Mint::new();
     let shm = format!("diff_{label}_{}_{}", std::process::id(), COUNTER.mint());
-    let path = unique_socket_path();
+    let path = unique_socket_path().expect("the OS has a random source");
     let _ = std::fs::remove_file(&path);
     let listener = ListenerOptions::new()
         .name(tutti_plugin_ipc::socket_name(&path).unwrap())
@@ -177,6 +177,8 @@ pub(super) fn rig(label: &str) -> Rig {
             tutti_fixtures::detached_work(),
         )),
         SR,
+        Arc::new(tutti_plugin_ipc::ServerWatch::new()),
+        tutti_plugin_types::Timeouts::default(),
     )
     .unwrap();
     // The audio connection first, then the control one, as the server accepts
@@ -276,7 +278,9 @@ pub(super) fn new_node(
     rig: Rig,
     tempo: TempoReader,
 ) -> (Direct<tutti_plugin_host::PluginNode<Ipc>>, Record, Threads) {
-    let guard = Arc::new(ProcessGuard::for_test(BridgeConfig::default()));
+    let guard = Arc::new(ProcessGuard::for_test(BridgeConfig::at(
+        tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
+    )));
     let record = Arc::clone(&rig.record);
     let threads = rig.threads;
     let mut ipc = Ipc::new(IpcParts {

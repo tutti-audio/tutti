@@ -45,6 +45,27 @@ pub(super) fn keyword(sentence: &str, words: &Words) -> Option<(&'static str, bo
     best.map(|(_, k, n)| (k, n))
 }
 
+/// The file among `all` whose name starts with `source` and ends with `ext`.
+/// A copy in a subdirectory (a `superseded/` folder of older revisions) loses
+/// to one nearer the top; two at the same depth are an error.
+pub(crate) fn pick(all: &[String], source: &str, ext: &str) -> Result<Option<String>, String> {
+    let depth = |p: &str| p.matches('/').count();
+    let mut hits: Vec<&String> = all
+        .iter()
+        .filter(|p| {
+            let name = p.rsplit('/').next().unwrap_or(p);
+            name.starts_with(source) && name.ends_with(ext)
+        })
+        .collect();
+    hits.sort_by_key(|p| depth(p));
+    if let [a, b, ..] = hits[..]
+        && depth(a) == depth(b)
+    {
+        return Err(format!("{source}*{ext} matches both {a} and {b}"));
+    }
+    Ok(hits.first().map(|p| (*p).clone()))
+}
+
 /// A `0x`-prefixed hex token of at most `max_digits` digits.
 pub(super) fn hex(token: &str, max_digits: usize) -> Option<u32> {
     let digits = token
@@ -77,6 +98,23 @@ mod tests {
         );
         assert_eq!(keyword("The word \"shall\" is defined here.", &WORDS), None);
         assert_eq!(keyword("Nothing to do.", &WORDS), None);
+    }
+
+    #[test]
+    fn the_spec_file_nearest_the_top_wins_and_a_tie_is_an_error() {
+        let v = |l: &[&str]| l.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+        let all = v(&[
+            "M2-103-UM_v1-2_Common Rules.txt",
+            "superseded/M2-103-UM_v1-1_Common_Rules.txt",
+            "M2-104-UM_a.txt",
+        ]);
+        assert_eq!(
+            pick(&all, "M2-103-UM", ".txt").unwrap().as_deref(),
+            Some("M2-103-UM_v1-2_Common Rules.txt")
+        );
+        assert_eq!(pick(&all, "M2-103-UM", ".pdf").unwrap(), None);
+        let twice = v(&["a/M2-104-UM_x.txt", "b/M2-104-UM_y.txt"]);
+        assert!(pick(&twice, "M2-104-UM", ".txt").is_err());
     }
 
     #[test]

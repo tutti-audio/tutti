@@ -13,8 +13,12 @@
 //! An offline or UI-thread API: it allocates the padded spectra and the
 //! correlation on every call, through [`cross_correlate_shaped`].
 
-use tutti_types::{Confidence, Hz, SampleRate, Samples, Seconds};
+use tutti_buffers::{Mono, Sample};
+use tutti_types::{Confidence, SampleRate, Samples, Seconds};
 
+use crate::chroma::FrequencyBand;
+use crate::convert::to_f32;
+use crate::framing::check_nyquist;
 use crate::xcorr::{CrossCorrelation, cross_correlate_shaped};
 use crate::{Error, Result};
 use tutti_dsp::Complex32;
@@ -33,66 +37,12 @@ const PHAT_FLOOR: f32 = 1e-4;
 /// The share of the peak below which the peak's lobe is taken to have ended.
 const LOBE_FRACTION: f32 = 0.5;
 
-/// What [`align`] searches and weights.
+/// What [`align`] searches and weights. Free of a sample rate: [`align`] takes
+/// it and checks the band against its Nyquist.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AlignConfig {
     max_lag: Samples,
-    band: Option<PassBand>,
-}
-
-/// A pass band: the sample rate that maps bins to frequencies, and its edges.
-///
-/// The three are checked together, since the edges mean a frequency only at a
-/// rate: `0 <= low < high` and `high` at or under half the rate. `TryFrom` over
-/// `(SampleRate, low, high)` names the reason a band is refused;
-/// [`new`](Self::new) is the same check as an `Option`.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct PassBand {
-    sample_rate: SampleRate,
-    low: Hz,
-    high: Hz,
-}
-
-impl PassBand {
-    /// The band `low..=high` at `sample_rate`, or `None` where
-    /// [`TryFrom`] would refuse it.
-    #[must_use]
-    pub fn new(
-        sample_rate: impl Into<SampleRate>,
-        low: impl Into<Hz>,
-        high: impl Into<Hz>,
-    ) -> Option<Self> {
-        Self::try_from((sample_rate.into(), low.into(), high.into())).ok()
-    }
-}
-
-impl TryFrom<(SampleRate, Hz, Hz)> for PassBand {
-    type Error = Error;
-
-    /// # Errors
-    ///
-    /// [`Error::EmptyFrequencyRange`] when `low` is negative or not below
-    /// `high`; [`Error::AboveNyquist`] when `high` exceeds half the rate.
-    fn try_from((sample_rate, low, high): (SampleRate, Hz, Hz)) -> Result<Self> {
-        if !(low.get() >= 0.0 && low < high) {
-            return Err(Error::EmptyFrequencyRange {
-                min: low,
-                max: high,
-            });
-        }
-        let nyquist = Hz((sample_rate.get() / 2.0) as f32);
-        if high > nyquist {
-            return Err(Error::AboveNyquist {
-                freq: high,
-                nyquist,
-            });
-        }
-        Ok(Self {
-            sample_rate,
-            low,
-            high,
-        })
-    }
+    band: Option<FrequencyBand>,
 }
 
 impl AlignConfig {
@@ -107,9 +57,13 @@ impl AlignConfig {
 
     /// Weight only bins inside `band`, leaving the rest out of the
     /// correlation: a band where both takes carry the same source, away from
-    /// rumble or hiss that does not.
+    /// rumble or hiss that does not. A band's low edge is above 0 (a
+    /// [`FrequencyBand`] holds no zero), so a low-pass-only band is written with
+    /// a small low edge, which drops the DC bin from the PHAT weighting.
+    /// [`align`] refuses a band whose top exceeds half the sample rate
+    /// ([`Error::AboveNyquist`]).
     #[must_use]
-    pub fn band(mut self, band: PassBand) -> Self {
+    pub fn band(mut self, band: FrequencyBand) -> Self {
         self.band = Some(band);
         self
     }
@@ -168,16 +122,24 @@ impl Alignment {
 ///
 /// # Errors
 ///
+/// [`Error::AboveNyquist`] when the band's top exceeds half `rate`;
 /// [`Error::InsufficientInput`] when either buffer is empty;
 /// [`Error::NonFiniteInput`] when a sample is NaN or infinite;
 /// [`Error::NoSignal`] when there is nothing to correlate: a silent input, or
 /// a band that holds no spectrum bin.
-pub fn align(
-    reference: &[f32],
-    take: &[f32],
+pub fn align<S: Sample>(
+    reference: Mono<'_, S>,
+    take: Mono<'_, S>,
     config: &AlignConfig,
+    rate: impl Into<SampleRate>,
     fft: &mut FftScratch,
 ) -> Result<Alignment> {
+    let rate = rate.into();
+    if let Some(band) = config.band {
+        check_nyquist(band.max(), rate)?;
+    }
+    let (reference, take) = (to_f32(reference.samples()), to_f32(take.samples()));
+    let (reference, take) = (&reference[..], &take[..]);
     for buffer in [reference, take] {
         if buffer.is_empty() {
             return Err(Error::InsufficientInput {
@@ -191,7 +153,7 @@ pub fn align(
     }
     let mut signal = false;
     let correlation = cross_correlate_shaped(take, reference, fft, |bins| {
-        signal = phase_transform(bins, config.band);
+        signal = phase_transform(bins, config.band, rate);
     });
     if !signal {
         return Err(Error::NoSignal);
@@ -231,13 +193,13 @@ fn window(correlation: &CrossCorrelation, max_lag: Samples) -> (isize, isize) {
 /// below the band) does not set the level. Bins more than `PHAT_FLOOR` below
 /// the strongest are damped rather than boosted, so the whitening spans the
 /// source's dynamic range down to that level.
-fn phase_transform(bins: &mut [Complex32], band: Option<PassBand>) -> bool {
+fn phase_transform(bins: &mut [Complex32], band: Option<FrequencyBand>, rate: SampleRate) -> bool {
     // `bins` holds `size / 2 + 1` bins of a `size`-point transform.
     let size = (bins.len().saturating_sub(1) * 2).max(1);
     let in_band = |k: usize| {
         band.is_none_or(|b| {
-            let hz = k as f64 * b.sample_rate.get() / size as f64;
-            hz >= f64::from(b.low.get()) && hz <= f64::from(b.high.get())
+            let hz = k as f64 * rate.get() / size as f64;
+            hz >= f64::from(b.min().get()) && hz <= f64::from(b.max().get())
         })
     };
     let strongest = bins
@@ -320,6 +282,7 @@ mod tests {
     use super::*;
     use crate::cross_correlate;
     use rand::{RngExt, SeedableRng, rngs::StdRng};
+    use tutti_types::Hz;
 
     fn noise(len: usize, seed: u64) -> Vec<f32> {
         let mut rng = StdRng::seed_from_u64(seed);
@@ -346,10 +309,38 @@ mod tests {
 
     /// The lag plain cross-correlation picks for the same pair.
     fn plain_lag(reference: &[f32], take: &[f32], max_lag: usize) -> isize {
-        cross_correlate(take, reference, &mut FftScratch::new())
-            .peak_within(Samples(max_lag))
-            .unwrap()
-            .lag
+        cross_correlate(
+            Mono::new(take),
+            Mono::new(reference),
+            &mut FftScratch::new(),
+        )
+        .peak_within(Samples(max_lag))
+        .unwrap()
+        .lag
+    }
+
+    /// `align` at 48 kHz, the rate the tests that do not name one read at.
+    fn align(
+        reference: &[f32],
+        take: &[f32],
+        config: &AlignConfig,
+        fft: &mut FftScratch,
+    ) -> Result<Alignment> {
+        align_at(SampleRate::SR_48K, reference, take, config, fft)
+    }
+
+    fn align_at(
+        rate: SampleRate,
+        reference: &[f32],
+        take: &[f32],
+        config: &AlignConfig,
+        fft: &mut FftScratch,
+    ) -> Result<Alignment> {
+        super::align(Mono::new(reference), Mono::new(take), config, rate, fft)
+    }
+
+    fn band(low: f32, high: f32) -> FrequencyBand {
+        FrequencyBand::new(Hz(low), Hz(high)).unwrap()
     }
 
     /// A signal that fills the band, evaluable at fractional times: forty
@@ -532,14 +523,15 @@ mod tests {
 
         let mut fft = FftScratch::new();
         let open = AlignConfig::new(Samples(500));
-        let banded =
-            open.band(PassBand::new(SampleRate::of(1.0), Hz::new(0.03), Hz::new(0.09)).unwrap());
+        let banded = open.band(band(0.03, 0.09));
         assert_eq!(
-            banded.band.map(|b| (b.low, b.high)),
+            banded.band.map(|b| (b.min(), b.max())),
             Some((Hz(0.03), Hz(0.09)))
         );
-        let open = align(&reference, &take, &open, &mut fft).unwrap();
-        let banded = align(&reference, &take, &banded, &mut fft).unwrap();
+        // A rate of one sample per second: the band is cycles per sample.
+        let rate = SampleRate::of(1.0);
+        let open = align_at(rate, &reference, &take, &open, &mut fft).unwrap();
+        let banded = align_at(rate, &reference, &take, &banded, &mut fft).unwrap();
         assert_eq!(banded.lag, 77);
         assert!(
             banded.confidence.get() > 2.0 * open.confidence.get(),
@@ -557,10 +549,8 @@ mod tests {
         // 9 bins of a 16-point transform; at rate 16, bin `k` is `k` Hz.
         let mut bins = vec![Complex32::new(3.0, -4.0); 9];
         bins[1] = Complex32::new(5.0e6, 0.0);
-        let band = AlignConfig::new(Samples(1))
-            .band(PassBand::new(SampleRate::of(16.0), Hz::new(4.0), Hz::new(6.0)).unwrap())
-            .band;
-        assert!(phase_transform(&mut bins, band));
+        let band = AlignConfig::new(Samples(1)).band(band(4.0, 6.0)).band;
+        assert!(phase_transform(&mut bins, band, SampleRate::of(16.0)));
         for (k, bin) in bins.iter().enumerate() {
             if (4..=6).contains(&k) {
                 assert!((bin.norm() - 1.0).abs() < 1e-3, "bin {k}: {bin}");
@@ -612,8 +602,7 @@ mod tests {
     /// still reads as clear: the flanks of its lobe are not a second peak.
     #[test]
     fn a_wide_peak_is_not_its_own_runner_up() {
-        let cfg = AlignConfig::new(Samples(300))
-            .band(PassBand::new(SampleRate::SR_48K, Hz::new(1000.0), Hz::new(4000.0)).unwrap());
+        let cfg = AlignConfig::new(Samples(300)).band(band(1000.0, 4000.0));
         let x = band_noise(4096, 5, 1000.0 / 48_000.0, 4000.0 / 48_000.0);
         let mut fft = FftScratch::new();
         let clean = align(&x, &shifted(&x, 40), &cfg, &mut fft).unwrap();
@@ -733,19 +722,20 @@ mod tests {
         let x = noise(64, 3);
         assert_eq!(align(&x, &quiet, &cfg, &mut fft), Err(Error::NoSignal));
         assert_eq!(align(&quiet, &x, &cfg, &mut fft), Err(Error::NoSignal));
-        let gap =
-            cfg.band(PassBand::new(SampleRate::SR_48K, Hz::new(100.0), Hz::new(200.0)).unwrap());
+        let gap = cfg.band(band(100.0, 200.0));
         assert_eq!(align(&x, &x, &gap, &mut fft), Err(Error::NoSignal));
 
+        // A band above Nyquist is refused where the rate binds.
+        let high = cfg.band(band(100.0, 30_000.0));
         assert_eq!(
-            PassBand::try_from((SampleRate::SR_48K, Hz::new(100.0), Hz::new(30_000.0))),
+            align(&x, &x, &high, &mut fft),
             Err(Error::AboveNyquist {
                 freq: Hz(30_000.0),
                 nyquist: Hz(24_000.0)
             })
         );
         assert!(matches!(
-            PassBand::try_from((SampleRate::SR_48K, Hz::new(500.0), Hz::new(100.0))),
+            FrequencyBand::try_from(Hz(500.0)..=Hz(100.0)),
             Err(Error::EmptyFrequencyRange { .. })
         ));
     }

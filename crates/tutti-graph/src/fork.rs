@@ -178,6 +178,9 @@ impl Node for PinnedUnit {
     fn reset(&mut self) {
         self.get_mut().reset();
     }
+    fn poll_parked(&mut self) {
+        self.get_mut().poll_parked();
+    }
     fn param_base(&self, port: usize) -> Option<f32> {
         self.get().param_base(port)
     }

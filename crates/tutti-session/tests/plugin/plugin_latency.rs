@@ -220,7 +220,9 @@ fn a_crossfaded_plugins_latency_is_the_incoming_ones() {
     let outgoing = s.graph_ref().node_latency(node).unwrap();
 
     let incoming = PluginClient::new(
-        tutti_plugin::BridgeConfig::default(),
+        tutti_plugin::BridgeConfig::at(
+            tutti_plugin::unique_socket_path().expect("the OS has a random source"),
+        ),
         &tutti_fixtures::detached_work(),
         &Loadable::uncatalogued(PluginRef::file(clap_probe()).expect("a plugin file")),
         RATE,
@@ -286,7 +288,9 @@ fn a_restart_to_another_callback_size_re_declares_a_plugins_latency() {
         .expect("builds with no device");
 
     let client = PluginClient::new(
-        tutti_plugin::BridgeConfig::default(),
+        tutti_plugin::BridgeConfig::at(
+            tutti_plugin::unique_socket_path().expect("the OS has a random source"),
+        ),
         &tutti_fixtures::detached_work(),
         &Loadable::uncatalogued(PluginRef::file(clap_probe()).expect("a plugin file")),
         RATE,
@@ -318,6 +322,91 @@ fn a_restart_to_another_callback_size_re_declares_a_plugins_latency() {
         s.latency(),
         Samples(137 + 256),
         "PDC follows before the first block"
+    );
+}
+
+/// **A plugin keeps its handle across a clock switch and its latency follows
+/// the callback size of each clock**: on the system clock the callback is the
+/// timer's block; on the card it is the card's quantum. The node renders on
+/// both, its handle still answers (a state save round trips to the server), and
+/// the session's latency is the figure of the clock it is on.
+#[test]
+fn a_clock_switch_re_declares_a_plugins_latency_and_keeps_its_handle() {
+    set_server();
+    let mut s = Session::builder()
+        .sample_rate(RATE)
+        .max_block(MaxBlock::of(Samples(480)))
+        .system_clock()
+        .build()
+        .expect("builds");
+    let client = PluginClient::new(
+        tutti_plugin::BridgeConfig::at(
+            tutti_plugin::unique_socket_path().expect("the OS has a random source"),
+        ),
+        &tutti_fixtures::detached_work(),
+        &Loadable::uncatalogued(PluginRef::file(clap_probe()).expect("a plugin file")),
+        RATE,
+    )
+    .expect("the reference plugin loads");
+    let node = s.graph().insert_plugin(Box::new(client)).erase();
+    s.graph()
+        .set_sources(Root::output(0), [OutPort::new(node, 0)])
+        .unwrap();
+    let _ = s.update();
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    let _ = s.update();
+    assert_eq!(
+        s.graph_ref().node_latency(node).unwrap(),
+        Samples(137 + 480),
+        "one timer block"
+    );
+
+    let (driver, stream) = ManualStreamDriver::new();
+    let mut live = s
+        .into_device_on(
+            OutputSpec::new(
+                RATE,
+                ChannelLayout::STEREO,
+                tutti_buffers::SampleFormat::F32,
+            )
+            .with_quantum(MaxBlock::of(Samples(256))),
+            driver,
+        )
+        .unwrap_or_else(|e| panic!("switches: {}", e.error()));
+    let _ = stream.render_block(256).expect("the stream is open");
+    let _ = live.update();
+    assert_eq!(
+        live.graph_ref().node_latency(node).unwrap(),
+        Samples(137 + 256),
+        "one 256-frame callback"
+    );
+    assert_eq!(live.latency(), Samples(137 + 256));
+    assert!(
+        live.plugin_view(node)
+            .expect("hosted")
+            .state()
+            .save()
+            .is_ok(),
+        "the handle still answers"
+    );
+
+    let mut system = live
+        .into_system_clock()
+        .unwrap_or_else(|e| panic!("switches: {}", e.error()));
+    let _ = system.update();
+    assert!(
+        system
+            .plugin_view(node)
+            .expect("hosted")
+            .state()
+            .save()
+            .is_ok(),
+        "and on the timer"
+    );
+    assert_eq!(
+        system.graph_ref().node_latency(node).unwrap(),
+        Samples(137 + 480),
+        "one timer block again"
     );
 }
 

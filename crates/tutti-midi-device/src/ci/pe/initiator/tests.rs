@@ -208,6 +208,7 @@ fn received(sent_chunks: Vec<(PeMessageKind, PeChunk)>) -> PeReceived {
 
 // M2-103 §3.2 step 2, M2-101 §8.5: Property Exchange Capabilities is asked
 // before anything else, and Table 30 is its message.
+/// Spec: m2-101/8.5#1
 #[test]
 fn the_capabilities_inquiry_is_the_first_message_and_nothing_is_asked_before_the_reply() {
     let now = Instant::now();
@@ -298,6 +299,7 @@ fn the_capabilities_inquiry_times_out_at_three_seconds_and_a_nak_refuses_it() {
 
 // M2-101 Table 33 and M2-103 §15.2 Table 95: a Get is one chunk of Header Data and
 // no Property Data, numbered 1 of 1 (M2-101 §8.3.2), to the Function Block.
+/// Spec: m2-101/8.3.2#1, m2-101/8.3.2#2, m2-101/8.7#1
 #[test]
 fn a_get_is_one_header_only_chunk() {
     let (mut i, now) = ready(2);
@@ -456,6 +458,7 @@ fn a_notify_status_is_not_a_reply_status() {
 
 // M2-103 §15, §15.2: under Flow Control each chunk of the reply is acknowledged
 // with ACK 0x11 naming the chunk (Table 94), and the last too for a Get.
+/// Spec: m2-103/15.2#1
 #[test]
 fn a_get_under_flow_control_acknowledges_every_chunk_including_the_last() {
     let (mut i, now) = ready(2);
@@ -511,6 +514,7 @@ fn a_request_times_out_at_three_seconds_and_its_id_is_free() {
 }
 
 // M2-103 §12.2: the time between chunks is under 3 seconds, from each chunk.
+/// Spec: m2-103/12.2#2
 #[test]
 fn the_time_between_chunks_counts_from_each_chunk() {
     let (mut i, now) = ready(1);
@@ -551,6 +555,7 @@ fn timeout_wait(request: PeRequestId, tenths: u8) -> Decoded {
 
 // M2-103 §12.2.1: ACK 0x10 adds its wait, in tenths of a second, to the time that
 // is left; a wait of 0 adds nothing, and each wait counts on from the deadline.
+/// Spec: m2-103/12.2.1#2
 #[test]
 fn a_timeout_wait_adds_its_period_to_the_deadline() {
     let (mut i, now) = ready(1);
@@ -624,6 +629,7 @@ fn a_timeout_wait_holds_a_reply_that_has_begun() {
 
 // M2-103 §12.1.1: a NAK with Terminate and status data 0 from the Responder ends
 // the request, and both sides consider it concluded.
+/// Spec: m2-103/12.1.1#2, m2-103/12.1.1#4
 #[test]
 fn a_terminate_nak_ends_the_request() {
     let (mut i, now) = ready(1);
@@ -680,6 +686,7 @@ fn set(flow: PeFlowControl) -> PeSet {
 // M2-103 §10, M2-101 §8.3: a Set encodes its Property Data, splits it so that each
 // chunk fits the peer's receivable size, carries the header in chunk 1 only, and
 // sends every chunk at once when no Flow Control was asked.
+/// Spec: m2-101/8.9#1
 #[test]
 fn a_set_sends_every_chunk_at_once_without_flow_control() {
     let (mut i, now) = ready(1);
@@ -718,6 +725,7 @@ fn a_set_sends_every_chunk_at_once_without_flow_control() {
 }
 
 // M2-103 §10.2: a Partial Set says so in its header.
+/// Spec: m2-103/10#4
 #[test]
 fn a_partial_set_says_so() {
     let (mut i, now) = ready(1);
@@ -755,6 +763,7 @@ fn resend_nak(request: PeRequestId, last_good: Option<u16>) -> Decoded {
 // M2-103 §15, §15.3: under Flow Control the Sender sends chunk 1, and each next
 // chunk after the ACK for the one before; the last needs no ACK, since the reply
 // acknowledges the data.
+/// Spec: m2-103/15.3#1
 #[test]
 fn a_set_under_flow_control_sends_a_chunk_per_ack_and_needs_none_for_the_last() {
     let (mut i, now) = ready(1);
@@ -847,6 +856,7 @@ fn an_ack_resets_the_count_of_resends() {
 
 // M2-103 §15.5: no ACK within 3 seconds of a chunk sends it again, three times;
 // then the Sender fails and sends a Terminate NAK.
+/// Spec: m2-103/15.5#2, m2-103/15.5#3
 #[test]
 fn a_chunk_with_no_ack_is_sent_again_after_three_seconds_and_given_up_after_three_resends() {
     let (mut i, now) = ready(1);
@@ -879,6 +889,7 @@ fn a_chunk_with_no_ack_is_sent_again_after_three_seconds_and_given_up_after_thre
 }
 
 // M2-103 §12.2.1 holds for the wait on an ACK too.
+/// Spec: m2-103/12.2.1#2
 #[test]
 fn a_timeout_wait_holds_a_chunk_that_waits_for_its_ack() {
     let (mut i, now) = ready(1);
@@ -900,6 +911,7 @@ fn a_timeout_wait_holds_a_chunk_that_waits_for_its_ack() {
 
 // M2-103 §5.3: a Request ID is 0 to 127, no more requests are made at once than the
 // peer's count, and an ID is free when its transaction is complete.
+/// Spec: m2-101/8.4#4, m2-103/5.3#4, m2-103/5.3#8, m2-103/5.3#9
 #[test]
 fn requests_use_distinct_ids_up_to_the_peers_count_and_ids_come_free() {
     let (mut i, now) = ready(2);
@@ -925,6 +937,7 @@ fn requests_use_distinct_ids_up_to_the_peers_count_and_ids_come_free() {
 // §5.3: the reply that answers a request ends it for that ID only; a timeout frees
 // the ID too ("Requests that don't receive a response will time out and the Request ID
 // can be reused").
+/// Spec: m2-103/5.3#9
 #[test]
 fn a_timeout_frees_the_id_of_a_full_pool() {
     let (mut i, now) = ready(2);
@@ -940,6 +953,7 @@ fn a_timeout_frees_the_id_of_a_full_pool() {
 // a time; a peer takes at most 127 at once (M2-101 §8.5), so at the largest count
 // the pool gives 127 distinct IDs and refuses the next, and a freed slot goes to
 // the ID not yet given before the one just released.
+/// Spec: m2-101/8.4#4
 #[test]
 fn the_pool_gives_distinct_ids_up_to_the_largest_count_and_refuses_the_next() {
     let most = SimultaneousRequests::of(SimultaneousRequests::MAX);
@@ -958,6 +972,7 @@ fn the_pool_gives_distinct_ids_up_to_the_largest_count_and_refuses_the_next() {
 
 // M2-103 §5.3: an Initiator "shall not use more than the reported number": the
 // limit binds before the IDs run out, and an ID is not reused at once.
+/// Spec: m2-103/5.3#4
 #[test]
 fn the_pool_stops_at_the_peers_count_and_reuses_an_id_after_the_others() {
     let mut ids = RequestIds::default();
@@ -1089,6 +1104,7 @@ fn reply_status(actions: &[PeAction]) -> (PeRequestId, PeReply) {
 // M2-103 §11.1: Start is the header of a Get with the command `start` first; the
 // Responder assigns the Subscription Id in its reply, and the Initiator keeps a
 // table of it to the Resource.
+/// Spec: m2-103/11#4, m2-103/11.1#4
 #[test]
 fn start_subscription_is_a_get_shaped_header_and_the_reply_names_the_id() {
     let (mut i, now) = ready(2);
@@ -1146,6 +1162,7 @@ fn a_start_that_gives_no_id_or_fails_holds_no_subscription() {
 // M2-103 §11.1, §11.2: the Responder's `full` and `partial` updates carry Property
 // Data in the encoding they name; each is answered with a Reply to Subscription of
 // the same Request ID and status 200, and handed out against its Resource.
+/// Spec: m2-101/8.12#1, m2-103/11#10, m2-103/11.2#1
 #[test]
 fn a_full_and_a_partial_update_are_answered_and_handed_out() {
     let (mut i, now) = ready(2);
@@ -1277,6 +1294,7 @@ fn the_responder_ends_a_subscription() {
 
 // §11.5, §11.1: the Initiator ends it with `end` and `endedBy` `initiator`, which
 // leaves the table at once, and the reply is the end of the transaction.
+/// Spec: m2-103/11.5#1
 #[test]
 fn the_initiator_ends_a_subscription() {
     let (mut i, now) = ready(2);
@@ -1329,6 +1347,7 @@ fn messages_from_another_device_or_to_another_are_not_this_peers() {
 
 // M2-101 §8.2: the Device ID of every Property Exchange message is the Function
 // Block, and a message is sent from our MUID to the peer's.
+/// Spec: m2-101/8.2#1
 #[test]
 fn every_message_is_addressed_to_the_function_block_from_us_to_the_peer() {
     let (mut i, now) = ready(2);
@@ -1350,6 +1369,7 @@ fn notify(request: PeRequestId, status: PeStatus) -> Decoded {
 
 // M2-103 §12.1.3: a receiver terminates the request a Notify with status 144
 // names, whatever the transaction, and no NAK answers it.
+/// Spec: m2-103/12.1.3#3, m2-103/12.1.3#2, m2-103/12.1.3#5
 #[test]
 fn a_notify_terminate_ends_a_get_and_a_set_by_request_id() {
     let (mut i, now) = ready(2);
@@ -1381,6 +1401,7 @@ fn a_notify_terminate_ends_a_get_and_a_set_by_request_id() {
 
 // M2-103 §12.2.4: status 408 is handled as the NAK for a timeout: the request
 // ends with that signal, and nothing is sent back.
+/// Spec: m2-103/12.2.4#2
 #[test]
 fn a_notify_timed_out_ends_the_request_as_a_timeout_nak() {
     let (mut i, now) = ready(1);
@@ -1403,6 +1424,7 @@ fn a_notify_timed_out_ends_the_request_as_a_timeout_nak() {
 // M2-103 §12.2.2: status 100 is handled as the Timeout Wait ACK. A Notify names no
 // period, so the request is held one more timeout, and a reply that has begun is
 // held with it.
+/// Spec: m2-103/12.2.2#2
 #[test]
 fn a_notify_timeout_wait_holds_the_request_and_a_reply_that_has_begun() {
     let (mut i, now) = ready(1);
@@ -1462,6 +1484,7 @@ fn a_notify_that_is_not_for_a_request_in_flight_changes_nothing() {
 // M2-103 §12.1.3: all inquiries of the Request ID cease, so a Subscription message
 // the peer was sending in chunks is dropped by a Notify Terminate and its later
 // chunks start nothing.
+/// Spec: m2-103/12.1.3#3
 #[test]
 fn a_notify_terminate_drops_a_subscription_message_the_peer_was_sending() {
     let (mut i, now) = ready(2);

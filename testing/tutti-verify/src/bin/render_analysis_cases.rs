@@ -26,8 +26,8 @@ use std::f64::consts::TAU;
 use std::fmt::Write as _;
 use std::path::Path;
 
-use tutti_buffers::Interleaved;
-use tutti_measure::{LoudnessConfig, YinConfig, measure_loudness, yin, yin_track};
+use tutti_buffers::{Interleaved, Mono};
+use tutti_measure::{LoudnessConfig, PitchHop, YinConfig, measure_loudness, yin, yin_track};
 use tutti_types::SampleRate;
 use tutti_types::{Bed, ChannelLayout};
 
@@ -98,7 +98,7 @@ fn main() {
     // Chosen for the failure modes YIN actually has, not for coverage of the
     // frequency axis. A detector can nail every pure sine and still be wrong on
     // everything musical.
-    let cfg = YinConfig::standard(SampleRate::of(SR)).expect("standard range");
+    let cfg = YinConfig::new();
 
     // Pure sines across the range, including the extremes where the period
     // bounds bite. 55 Hz needs a long window; 1975 Hz sits near min_period,
@@ -148,7 +148,7 @@ fn main() {
     cases.push(("silence".into(), 0.0, vec![0.0; (SR * 0.5) as usize]));
 
     for (name, expected, samples) in &cases {
-        let est = yin(&cfg, samples).expect("buffer is long enough");
+        let est = yin(&cfg, Mono::new(samples), SampleRate::of(SR)).expect("buffer is long enough");
         let (hz, conf, voiced, note) = match est.pitch() {
             Some(p) => (p.frequency.get(), p.confidence.get(), true, p.note_name()),
             None => (0.0, 0.0, false, String::from("-")),
@@ -163,7 +163,10 @@ fn main() {
     // A frequency sweep judged per frame, which is what `yin_track` is for and
     // what no test measures the accuracy of.
     let mut sweep_csv = String::from("frame,expected_hz,tutti_hz,confidence\n");
-    let frame = cfg.buffer_size().get();
+    let frame = cfg
+        .buffer_size(SampleRate::of(SR))
+        .expect("standard band")
+        .get();
     let sweep_len = frame * 8;
     // Linear sweep 200 -> 800 Hz. Phase is the integral of frequency, so it is
     // accumulated rather than computed as f*t -- the latter sweeps at twice the
@@ -178,7 +181,13 @@ fn main() {
             s as f32
         })
         .collect();
-    let tracked = yin_track(&cfg, &sweep, tutti_types::Samples(frame)).expect("track");
+    let tracked = yin_track(
+        &cfg,
+        Mono::new(&sweep),
+        SampleRate::of(SR),
+        PitchHop::new(tutti_types::Samples(frame)).expect("a hop of at least one sample"),
+    )
+    .expect("track");
     for (i, est) in tracked.iter().enumerate() {
         // The expectation is the mean frequency over the part of the frame YIN
         // actually analyses, which is **not** the whole frame.
@@ -206,13 +215,14 @@ fn main() {
     //
     // EBU R128 is a published spec with absolute answers, so unlike pitch these
     // are checkable against a number rather than against another implementation.
-    let lcfg = LoudnessConfig::new(SampleRate::of(SR), Bed::Stereo.topology()).unwrap();
+    let lcfg = LoudnessConfig::new(Bed::Stereo.topology());
     for &amp in &[1.0, 0.5, 0.25, 0.1, 0.0891, 0.01] {
         let mono = sine(1000.0, 3.0, amp);
         let st = to_stereo(&mono);
         let l = measure_loudness(
             &lcfg,
             Interleaved::new(&st, ChannelLayout::STEREO).expect("whole stereo frames"),
+            SampleRate::of(SR),
         )
         .expect("stereo layout meters");
         writeln!(
@@ -234,10 +244,11 @@ fn main() {
             .map(|i| (0.5 * (TAU * 1000.0 * i as f64 / rate).sin()) as f32)
             .collect();
         let st = to_stereo(&mono);
-        let c = LoudnessConfig::new(SampleRate::of(rate), Bed::Stereo.topology()).unwrap();
+        let c = LoudnessConfig::new(Bed::Stereo.topology());
         let l = measure_loudness(
             &c,
             Interleaved::new(&st, ChannelLayout::STEREO).expect("whole stereo frames"),
+            SampleRate::of(rate),
         )
         .expect("stereo layout meters");
         writeln!(

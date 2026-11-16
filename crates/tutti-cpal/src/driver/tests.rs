@@ -36,7 +36,7 @@ fn a_plain_restart_refuses_a_new_rate_and_stays_stopped() {
     for attempt in 0..2 {
         let (d, stream) = ManualStreamDriver::new();
         let err = driver
-            .restart_on(
+            .switch(
                 spec_at(48_000.0),
                 d,
                 refuse_rate_change(driver.graph_rate()),
@@ -65,7 +65,7 @@ fn a_plain_restart_refuses_a_new_rate_and_stays_stopped() {
 
     let (d, stream) = ManualStreamDriver::new();
     driver
-        .restart_on(spec_at(44_100.0), d, refuse_rate_change(graph))
+        .switch(spec_at(44_100.0), d, refuse_rate_change(graph))
         .expect("the same rate restarts");
     assert!(driver.stream().is_running() && stream.is_open());
     drop(ed);

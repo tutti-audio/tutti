@@ -147,8 +147,13 @@ impl TuttiDriver {
         Ok(())
     }
 
-    /// Restarts like [`restart_with`](Self::restart_with), but on a driver of
-    /// the caller's choosing at the caller's `spec`, resolving no device.
+    /// Switches the stream to a driver of the caller's choosing at the caller's
+    /// `spec`, running `rerate` between the stop and the start, resolving no
+    /// device: a restart whose driver is given, not found. **The driver is now
+    /// the device**: the driver's errors are the device layer's
+    /// ([`Error`](crate::Error)), and the device is recorded as supplied (it
+    /// names none). [`move_to`](Self::move_to) is the move to a driver that is
+    /// not the device's.
     ///
     /// The device-free counterpart of `restart_with`, as
     /// [`start_with`](Self::start_with) is of `restart`: over a
@@ -159,7 +164,7 @@ impl TuttiDriver {
     ///
     /// The hook's error (the stream left stopped), or what the driver's
     /// `open` reports.
-    pub fn restart_on<D: StreamDriver, E: From<crate::Error>>(
+    pub fn switch<D: StreamDriver, E: From<crate::Error>>(
         &mut self,
         spec: OutputSpec,
         driver: D,
@@ -176,6 +181,63 @@ impl TuttiDriver {
             .map_err(Restart::into_user)?;
         self.opened = Opened::Supplied;
         Ok(())
+    }
+
+    /// The one start [`AudioEngine::start_resolved`] and `start_on` make:
+    /// `driver` takes the host's stream.
+    pub(crate) fn take_over<D: StreamDriver, E: From<crate::Error>>(
+        mut host: StreamHost,
+        spec: OutputSpec,
+        driver: D,
+        rerate: impl FnOnce(&OutputSpec, &Stopped<'_>) -> core::result::Result<(), E>,
+        target: Option<(DeviceHost, DeviceSelector)>,
+        opened: Opened,
+    ) -> core::result::Result<Self, (StreamHost, E)>
+    where
+        D::Error: Into<crate::Error>,
+    {
+        match host.restart_with(
+            || Ok((spec, driver)),
+            |spec, stopped| rerate(spec, stopped).map_err(Restart::Hook),
+        ) {
+            Ok(()) => Ok(Self {
+                host,
+                target,
+                opened,
+            }),
+            Err(e) => Err((host, e.into_user())),
+        }
+    }
+
+    /// Moves the stream, still this driver's, to `driver` at `spec`: a driver
+    /// that is not the device's (a timer), whose errors are its own and whose
+    /// move leaves the device on record, so a restart can open it again
+    /// ([`switch`](Self::switch) makes the driver the device). `rerate` runs between the stop and
+    /// the start, as in [`restart_with`](Self::restart_with); a failure leaves
+    /// the stream stopped at its old spec. [`into_host`](Self::into_host) hands
+    /// the stream on once the device is no longer wanted.
+    ///
+    /// # Errors
+    /// The hook's error, or what the driver's `open` reports, as `E`.
+    pub fn move_to<D: StreamDriver, E: From<StartError<D::Error>>>(
+        &mut self,
+        spec: OutputSpec,
+        driver: D,
+        rerate: impl FnOnce(&OutputSpec, &Stopped<'_>) -> core::result::Result<(), E>,
+    ) -> core::result::Result<(), E> {
+        self.host.restart_with(|| Ok((spec, driver)), rerate)
+    }
+
+    /// [`StreamHost::settle`] on this driver's stream.
+    pub fn settle(&mut self, prepared: &tutti_graph::Prepare) {
+        self.host.settle(prepared);
+    }
+
+    /// The stream host, taken out of the driver: the device is no longer this
+    /// driver's, and the stream is as it was left.
+    #[must_use]
+    pub fn into_host(self) -> StreamHost {
+        self.host
     }
 
     /// The stream this driver runs, for reads: [`spec`](OutputStream::spec),

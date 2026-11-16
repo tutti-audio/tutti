@@ -3,6 +3,7 @@
 //! a [`LaunchedServer`] ready for the RT bridge thread to connect.
 
 use super::Reaped;
+use crate::ProcessGuard;
 use crate::config::BridgeConfig;
 use crate::error::unexpected_message;
 use crate::protocol::{
@@ -20,21 +21,6 @@ use tutti_plugin_types::{BridgeError, BridgeResult};
 use tutti_plugin_types::{Helper, Load, Locator, PluginFormat};
 use tutti_types::SampleRate;
 
-/// How long to keep retrying the connect while the plugin-server binds.
-///
-/// This replaced a flat 500 ms `sleep`. The server binds its socket as its
-/// first real act — `main` reads one argv entry and calls `PluginServer::run`,
-/// which binds before anything else — so the wait was never for setup work, it
-/// was padding for process spawn. Paying it unconditionally cost half a second
-/// on *every* load, including the ones that were ready in five milliseconds,
-/// and a project with twenty plugins spent ten seconds sleeping.
-///
-/// A retry loop pays only what the spawn actually takes. The bound is generous
-/// rather than tight because the failure it guards is a slow machine under
-/// load, and the cost of being generous is only paid when the server never
-/// arrives at all — which is a failed load either way.
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
-
 /// How long to wait between connect attempts.
 ///
 /// Short enough that a fast spawn is not rounded up to something a user
@@ -42,18 +28,12 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 /// the common case returns in single-digit milliseconds.
 const CONNECT_RETRY_INTERVAL: Duration = Duration::from_millis(2);
 
-/// How long the server may take to restore a staged state once it has said it
-/// began ([`BridgeMessage::RestoringState`]). A restore is one opaque plugin call
-/// with nothing inside it to measure progress by, so this is one flat, generous
-/// window, not the bridge's 5 s: a large state restoring slowly is legal, and a
-/// plugin that has not answered in a minute is hung.
-pub(crate) const STATE_RESTORE_TIMEOUT: Duration = Duration::from_secs(60);
-
 /// A plugin-server that has loaded its plugin and waits for the bridge
 /// thread to connect ([`launch`]).
 pub struct LaunchedServer {
-    /// The server process, killed and reaped when this drops.
-    pub process: Reaped,
+    /// The server process, killed and reaped when this drops, and the watch
+    /// on whether it is alive.
+    pub server: ProcessGuard,
     /// Catalog identity (name, vendor, class, editor).
     pub descriptor: PluginDescriptor,
     /// Engine-wiring data from instantiation (bus widths, latency, f64).
@@ -72,7 +52,7 @@ pub struct LaunchedServer {
 impl std::fmt::Debug for LaunchedServer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LaunchedServer")
-            .field("process", &self.process)
+            .field("server", &self.server)
             .field("descriptor", &self.descriptor)
             .field("loaded", &self.loaded)
             .field("format", &self.format)
@@ -84,18 +64,12 @@ impl std::fmt::Debug for LaunchedServer {
 /// Spawn a plugin-server and bring it to the point where the RT bridge thread
 /// can connect.
 ///
-/// **Every failure after the spawn must reap the child.** `process` is a bare
-/// [`Child`], and `Child::drop` neither kills nor waits — it explicitly
-/// documents that the child keeps running. Ownership only transfers to
-/// `ProcessGuard` much later, in `PluginClient::new`, so a bare `?` anywhere in
-/// between leaves a `plugin-server` alive with nothing holding it: it survives
-/// the host, keeps its socket bound, and holds the plugin's audio device claim.
-/// A user retrying a failing plugin a few times accumulates them.
-///
-/// So the fallible work is done in one closure and the result captured, with
-/// teardown unconditional afterwards — the shape the probe's `run` already
-/// uses. Writing it as a sequence of `?` statements is what leaked; making the
-/// teardown structural rather than remembered is the point.
+/// **Every failure after the spawn must reap the child.** The child is held
+/// by a [`ProcessGuard`] from the moment it is spawned, which kills and reaps it
+/// when it drops, so no `?` between the spawn and the end of the launch leaves
+/// a `plugin-server` alive with nothing holding it (it would survive the host,
+/// keep its socket bound, and hold the plugin's audio device claim). The
+/// guard's watch is also what a failed connect asks whether the server died.
 ///
 /// # Errors
 ///
@@ -119,7 +93,6 @@ pub fn launch(
         sample_rate,
         state,
         state_use,
-        STATE_RESTORE_TIMEOUT,
     )
 }
 
@@ -149,7 +122,6 @@ pub(super) fn launch_with(
         sample_rate,
         None,
         StateUse::Project,
-        STATE_RESTORE_TIMEOUT,
     )
 }
 
@@ -167,16 +139,18 @@ pub(super) fn launch_with_state(
     sample_rate: SampleRate,
     state: Option<&[u8]>,
     state_use: StateUse,
-    restore_timeout: Duration,
 ) -> BridgeResult<LaunchedServer> {
-    let mut process = Reaped::new(spawn_process(locator, config)?);
+    config.timeouts.validate()?;
+    let server =
+        ProcessGuard::launched(Reaped::new(spawn_process(locator, config)?), config.clone())
+            .map_err(BridgeError::ExitUnwatched)?;
 
-    // `&mut process` rather than a move: the connect retry polls the child so a
+    // The guard is borrowed, not moved: the connect retry asks its watch so a
     // server that died on startup is reported at once, and the teardown below
-    // still needs to reap it.
-    let result = (|process: &mut Child| {
-        let mut stream = handshake(config, process)?;
-        let shm_name = next_shm_name();
+    // still needs to drop it.
+    let result = (|server: &ProcessGuard| {
+        let mut stream = handshake(config, server)?;
+        let shm_name = next_shm_name()?;
         // A state the server would not take (over the limit, a broken sequence)
         // is a refusal like any other: the plugin loads at its defaults. A stage
         // that got no answer is not: the stream may have a late reply in flight,
@@ -201,7 +175,6 @@ pub(super) fn launch_with_state(
             sample_rate,
             &shm_name,
             declared,
-            restore_timeout,
         )?;
         let state_restore = match staged {
             Some(Err(e)) => Some(Err(e)),
@@ -210,11 +183,11 @@ pub(super) fn launch_with_state(
         };
         let slab = setup_shm(&mut stream, config, &loaded, format, shm_name)?;
         Ok((descriptor, loaded, format, slab, state_restore))
-    })(&mut process);
+    })(&server);
 
     match result {
         Ok((descriptor, loaded, format, slab, state_restore)) => Ok(LaunchedServer {
-            process,
+            server,
             descriptor: *descriptor,
             loaded,
             format,
@@ -222,11 +195,10 @@ pub(super) fn launch_with_state(
             state_restore,
         }),
         Err(e) => {
-            // `process` drops here, killed and reaped. Best-effort and
+            // `server` drops here, killed and reaped, and its socket removed. Best-effort and
             // deliberately un-propagated: the launch error is the one worth
             // reporting, and a failed clean-up must not mask it.
-            drop(process);
-            let _ = std::fs::remove_file(&config.socket_path);
+            drop(server);
             Err(e)
         }
     }
@@ -268,19 +240,23 @@ fn spawn_process(locator: &Locator, config: &BridgeConfig) -> BridgeResult<Child
 /// (`unique_socket_path`), so a successful connect can only be *this* server —
 /// there is no stale socket from a previous run to attach to by mistake.
 ///
-/// `process` is polled between attempts. A server that died on startup — a
+/// The server's watch is asked between attempts. A server that died on startup — a
 /// missing dynamic library, an immediate panic — never binds, and without this
 /// the host would retry for the full timeout before reporting a failure whose
 /// cause was known within milliseconds.
-fn connect_when_listening(socket: &Path, process: &mut Child) -> BridgeResult<ControlStream> {
-    let deadline = Instant::now() + CONNECT_TIMEOUT;
+fn connect_when_listening(
+    socket: &Path,
+    server: &ProcessGuard,
+    patience: Duration,
+) -> BridgeResult<ControlStream> {
+    let deadline = Instant::now() + patience;
     loop {
         match ipc::connect(socket) {
             Ok(stream) => return Ok(stream),
             Err(e) => {
-                if let Ok(Some(status)) = process.try_wait() {
+                if let Some(cause) = server.watch().cause() {
                     return Err(BridgeError::ConnectionFailed(format!(
-                        "plugin-server exited before binding its socket ({status})"
+                        "plugin-server exited before binding its socket ({cause})"
                     )));
                 }
                 if Instant::now() >= deadline {
@@ -292,9 +268,9 @@ fn connect_when_listening(socket: &Path, process: &mut Child) -> BridgeResult<Co
     }
 }
 
-fn handshake(config: &BridgeConfig, process: &mut Child) -> BridgeResult<ControlStream> {
-    let mut stream = connect_when_listening(&config.socket_path, process)?;
-    let timeout = Duration::from_millis(config.timeout_ms);
+fn handshake(config: &BridgeConfig, server: &ProcessGuard) -> BridgeResult<ControlStream> {
+    let mut stream = connect_when_listening(&config.socket_path, server, config.timeouts.connect)?;
+    let timeout = config.timeouts.call;
     // A server from before version 27 frames its `Ready` in bincode, which does
     // not decode as one message of ours: say which binary is stale rather than
     // report a bare codec error.
@@ -323,7 +299,6 @@ fn load_plugin(
     sample_rate: SampleRate,
     shm_name: &str,
     state: Option<StagedState>,
-    restore_timeout: Duration,
 ) -> BridgeResult<(
     Box<PluginDescriptor>,
     LoadedPlugin,
@@ -351,7 +326,7 @@ fn load_plugin(
     // its own. A failure from then on is the state's to answer for
     // ([`BridgeError::StateRestoreError`]); one before it is a load failure, and
     // blames nothing.
-    let mut timeout = Duration::from_millis(config.timeout_ms);
+    let mut timeout = config.timeouts.call;
     let mut restoring = false;
     loop {
         let reply = match ipc::recv_within(stream, timeout) {
@@ -366,7 +341,7 @@ fn load_plugin(
         match reply {
             BridgeMessage::RestoringState => {
                 restoring = true;
-                timeout = restore_timeout;
+                timeout = config.timeouts.state_restore;
             }
             BridgeMessage::PluginLoaded {
                 descriptor,
@@ -407,7 +382,7 @@ fn stage_state(
             },
         )?;
     }
-    let timeout = Duration::from_millis(config.timeout_ms);
+    let timeout = config.timeouts.call;
     match ipc::recv_within(stream, timeout)? {
         BridgeMessage::StateLoaded { error: None } => Ok(Ok(())),
         BridgeMessage::StateLoaded { error: Some(e) } => Ok(Err(e)),
@@ -458,18 +433,18 @@ fn setup_shm(
 
     ipc::send(stream, &HostMessage::SetupSharedMemory { shm_name, layout })?;
 
-    let timeout = Duration::from_millis(config.timeout_ms);
+    let timeout = config.timeouts.call;
     match ipc::recv_within(stream, timeout)? {
         BridgeMessage::SharedMemoryReady => Ok(slab),
         ref other => Err(unexpected_message("SharedMemoryReady", other)),
     }
 }
 
-fn next_shm_name() -> String {
+fn next_shm_name() -> BridgeResult<String> {
     // Unguessable for the same reason as the socket (`unique_socket_path`):
     // `/dev/shm` is shared, and `AudioSlab::create` refuses a name that
     // exists, so a predictable one is a launch another user can block.
-    crate::config::unique_name("tutti_plugin")
+    Ok(crate::config::unique_name("tutti_plugin")?)
 }
 
 #[cfg(test)]
@@ -477,6 +452,7 @@ mod tests {
     use super::*;
     use crate::protocol::ChannelLayout;
     use crate::transport::shm::RING_SLOTS;
+    use tutti_plugin_types::Timeouts;
 
     /// A failed launch must not leave the subprocess running.
     ///
@@ -552,9 +528,12 @@ mod tests {
         }
 
         let config = BridgeConfig {
-            socket_path: crate::unique_socket_path(),
-            timeout_ms: 200,
-            ..Default::default()
+            timeouts: {
+                let mut t = Timeouts::default();
+                t.call = Duration::from_millis(200);
+                t
+            },
+            ..BridgeConfig::at(crate::unique_socket_path().expect("the OS has a random source"))
         };
 
         let err = match launch_with(
@@ -567,9 +546,8 @@ mod tests {
             Err(e) => e,
             // Cannot happen (`sleep` never sends `Ready`), but reap rather than
             // leak if the premise ever changes.
-            Ok(mut server) => {
-                let _ = server.process.kill();
-                let _ = server.process.wait();
+            Ok(server) => {
+                server.server.terminate();
                 panic!("a stand-in server that never speaks the protocol completed a launch");
             }
         };
@@ -607,8 +585,8 @@ mod tests {
     #[cfg(unix)]
     fn stateful_launch(
         env: &[(&str, &str)],
-        timeout_ms: u64,
-        restore_timeout: Duration,
+        call: Duration,
+        state_restore: Duration,
     ) -> (BridgeResult<LaunchedServer>, Duration) {
         // Held for the launch: the server inherits the switches when it spawns.
         let mut switches = tutti_fixtures::ScopedEnv::new();
@@ -616,9 +594,13 @@ mod tests {
             switches.set(k, v);
         }
         let config = BridgeConfig {
-            socket_path: crate::unique_socket_path(),
-            timeout_ms,
-            ..Default::default()
+            timeouts: {
+                let mut t = Timeouts::default();
+                t.call = call;
+                t.state_restore = state_restore;
+                t
+            },
+            ..BridgeConfig::at(crate::unique_socket_path().expect("the OS has a random source"))
         };
         let plugin = tutti_fixtures::clap_probe();
         let started = Instant::now();
@@ -631,17 +613,14 @@ mod tests {
             SampleRate::SR_48K,
             Some(&[0u8; 16]),
             StateUse::Project,
-            restore_timeout,
         );
         (launched, started.elapsed())
     }
 
     #[cfg(unix)]
     fn reap(server: BridgeResult<LaunchedServer>) {
-        if let Ok(mut server) = server {
-            let _ = server.process.kill();
-            let _ = server.process.wait();
-        }
+        // The guard kills and reaps the server as it drops.
+        drop(server);
     }
 
     /// **A slow restore that succeeds is a load.** The plugin takes 2.5 s over
@@ -655,7 +634,7 @@ mod tests {
     fn a_slow_restore_that_succeeds_is_a_load() {
         let (launched, took) = stateful_launch(
             &[("TUTTI_CLAP_PROBE_STATE_LOAD_SLEEP_MS", "2500")],
-            1_000,
+            Duration::from_secs(1),
             Duration::from_secs(20),
         );
         assert!(took >= Duration::from_millis(2_500), "{took:?}");
@@ -671,7 +650,7 @@ mod tests {
     fn a_restore_that_outlasts_its_window_is_blamed_on_the_state() {
         let (launched, _) = stateful_launch(
             &[("TUTTI_CLAP_PROBE_STATE_LOAD_SLEEP_MS", "6000")],
-            1_000,
+            Duration::from_secs(1),
             Duration::from_millis(1_500),
         );
         assert!(
@@ -687,7 +666,7 @@ mod tests {
     fn a_crash_in_the_restore_is_blamed_on_the_state() {
         let (launched, _) = stateful_launch(
             &[("TUTTI_CLAP_PROBE_CRASH_ON_STATE_LOAD", "1")],
-            2_000,
+            Duration::from_secs(2),
             Duration::from_secs(20),
         );
         assert!(
@@ -704,7 +683,7 @@ mod tests {
     fn a_crash_before_the_restore_is_not_blamed_on_the_state() {
         let (launched, _) = stateful_launch(
             &[("TUTTI_CLAP_PROBE_CRASH_ON_INIT", "1")],
-            2_000,
+            Duration::from_secs(2),
             Duration::from_secs(20),
         );
         assert!(
@@ -728,10 +707,8 @@ mod tests {
     #[cfg(unix)]
     fn a_library_that_is_not_a_plugin_fails_the_launch_with_the_loaders_reason() {
         let dir = tempfile::tempdir().expect("a private temp dir");
-        let config = BridgeConfig {
-            socket_path: crate::unique_socket_path(),
-            ..Default::default()
-        };
+        let config =
+            BridgeConfig::at(crate::unique_socket_path().expect("the OS has a random source"));
         // A copy in this test's own directory, not `publish_with_extension`:
         // that names the link `real.with_extension(..)`, which on Linux is the
         // cdylib's own path.
@@ -750,9 +727,8 @@ mod tests {
             SampleRate::SR_48K,
         ) {
             Err(e) => e,
-            Ok(mut server) => {
-                let _ = server.process.kill();
-                let _ = server.process.wait();
+            Ok(server) => {
+                server.server.terminate();
                 panic!("a library with no plugin entry point launched");
             }
         };
@@ -939,7 +915,7 @@ mod tests {
         // Unique per run. A fixed name collides with a leftover socket from an
         // earlier run, and `connect` then fails with EINVAL *before* the version
         // is ever compared — an IO error that would masquerade as a working gate.
-        let path = crate::unique_socket_path();
+        let path = crate::unique_socket_path().expect("the OS has a random source");
         let _ = std::fs::remove_file(&path);
         let name = crate::transport::control::socket_name(&path).unwrap();
         let listener = ListenerOptions::new().name(name).create_sync().unwrap();
@@ -955,18 +931,24 @@ mod tests {
         });
 
         let config = BridgeConfig {
-            socket_path: path.clone(),
-            timeout_ms: 2_000,
-            ..Default::default()
+            timeouts: {
+                let mut t = Timeouts::default();
+                t.call = Duration::from_secs(2);
+                t
+            },
+            ..BridgeConfig::at(path.clone())
         };
         // The listener above stands in for the server, so there is no child to
-        // poll — but `handshake` takes one to notice a spawn that died. A
-        // lingering stand-in stays alive for the whole test; it is killed below.
-        let mut stand_in = spawn_stand_in(StandIn::Lingers);
-        let err = handshake(&config, &mut stand_in)
+        // watch — but `handshake` takes a guard to notice a spawn that died. A
+        // lingering stand-in stays alive for the whole test; the guard kills it.
+        let stand_in = ProcessGuard::launched(
+            Reaped::new(spawn_stand_in(StandIn::Lingers)),
+            config.clone(),
+        )
+        .expect("the exit thread starts");
+        let err = handshake(&config, &stand_in)
             .expect_err("a stale server must not complete the handshake");
-        let _ = stand_in.kill();
-        let _ = stand_in.wait();
+        drop(stand_in);
         let _ = server.join();
         let _ = std::fs::remove_file(&path);
         err
@@ -1095,10 +1077,13 @@ mod tests {
             std::thread::sleep(Duration::from_millis(50));
         });
 
-        let mut stand_in = spawn_stand_in(StandIn::Lingers);
-        let result = connect_when_listening(&path, &mut stand_in);
-        let _ = stand_in.kill();
-        let _ = stand_in.wait();
+        let stand_in = ProcessGuard::launched(
+            Reaped::new(spawn_stand_in(StandIn::Lingers)),
+            BridgeConfig::at(path.clone()),
+        )
+        .expect("the exit thread starts");
+        let result = connect_when_listening(&path, &stand_in, Timeouts::default().connect);
+        drop(stand_in);
 
         assert!(
             result.is_ok(),
@@ -1113,8 +1098,8 @@ mod tests {
     /// A server that dies before binding is reported at once, not after the
     /// full timeout.
     ///
-    /// Without the `try_wait` poll this case is indistinguishable from a slow
-    /// spawn, so the host would retry for the whole `CONNECT_TIMEOUT` before
+    /// Without the watch on the process this case is indistinguishable from a slow
+    /// spawn, so the host would retry for the whole `Timeouts::connect` before
     /// reporting a failure whose cause was known in milliseconds. The elapsed
     /// assertion is the point — a test that only checked for `Err` would pass
     /// on the slow path too.
@@ -1125,16 +1110,21 @@ mod tests {
 
         // Exits immediately and binds nothing — the shape of a plugin-server
         // that dies on a missing dynamic library.
-        let mut dead = spawn_stand_in(StandIn::Exits);
+        let dead = ProcessGuard::launched(
+            Reaped::new(spawn_stand_in(StandIn::Exits)),
+            BridgeConfig::at(path.clone()),
+        )
+        .expect("the exit thread starts");
 
+        let patience = Timeouts::default().connect;
         let started = Instant::now();
-        let err = connect_when_listening(&path, &mut dead)
+        let err = connect_when_listening(&path, &dead, patience)
             .expect_err("a server that never binds cannot connect");
         let elapsed = started.elapsed();
 
         assert!(
-            elapsed < CONNECT_TIMEOUT / 2,
-            "a dead server must be noticed promptly, took {elapsed:?} of {CONNECT_TIMEOUT:?}"
+            elapsed < patience / 2,
+            "a dead server must be noticed promptly, took {elapsed:?} of {patience:?}"
         );
         assert!(
             format!("{err}").contains("exited before binding"),
@@ -1205,6 +1195,53 @@ mod tests {
     fn stand_in_lingers() {
         if std::env::var_os(STAND_IN_ENV).is_some() {
             thread::sleep(Duration::from_secs(30));
+        }
+    }
+
+    /// **A real plugin-server that is ended is declared dead by its process's
+    /// end**, with a failing status, though nothing reads its socket (no bridge
+    /// thread is attached, so the stream's EOF is not a signal here): the watch
+    /// does not wait on a timeout, and nothing would end this wait but the
+    /// process's end.
+    ///
+    /// No bridge is attached, so by construction only the process's end can set
+    /// the watch; the 5 s bound is a ceiling for a loaded machine, not a pace.
+    ///
+    /// Needs `cargo build -p tutti-plugin-server` first.
+    #[test]
+    fn an_ended_real_server_is_declared_dead_through_its_exit() {
+        use tutti_plugin_types::PluginFailure;
+
+        let config =
+            BridgeConfig::at(crate::unique_socket_path().expect("the OS has a random source"));
+        let launched = launch_with_state(
+            &Locator::at(tutti_fixtures::plugin_server()),
+            &config,
+            tutti_fixtures::clap_probe(),
+            PluginFormat::Clap,
+            &Load::new(),
+            SampleRate::SR_48K,
+            None,
+            StateUse::Project,
+        )
+        .expect("the reference plugin launches");
+        let guard = &launched.server;
+        assert!(!guard.watch().is_dead(), "a launched server is alive");
+        guard.terminate();
+
+        let started = Instant::now();
+        while !guard.watch().is_dead() {
+            assert!(
+                started.elapsed() < Duration::from_secs(5),
+                "the end of the process was never declared"
+            );
+            thread::sleep(Duration::from_millis(1));
+        }
+        match guard.watch().cause() {
+            Some(PluginFailure::ServerExited { status }) => {
+                assert!(!status.success(), "{status:?}");
+            }
+            other => panic!("expected the process's end, got {other:?}"),
         }
     }
 }

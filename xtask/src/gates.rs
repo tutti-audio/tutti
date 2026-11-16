@@ -272,19 +272,12 @@ fn spec_text(var: &str, source: &str) -> Result<String, String> {
         .map(PathBuf::from)
         .ok_or_else(|| format!("{var} is not set"))?;
     let all = RealTree { root: dir.clone() }.files(".", &|_| false);
-    let find = |ext: &str| {
-        all.iter()
-            .find(|p| {
-                let name = p.rsplit('/').next().unwrap_or(p);
-                name.starts_with(source) && name.ends_with(ext)
-            })
-            .cloned()
-    };
-    if let Some(txt) = find(".txt") {
+    let find = |ext: &str| spec_text::pick(&all, source, ext);
+    if let Some(txt) = find(".txt")? {
         let bytes = fs::read(dir.join(&txt)).map_err(|e| format!("cannot read {txt}: {e}"))?;
         return Ok(String::from_utf8_lossy(&bytes).into_owned());
     }
-    let pdf = find(".pdf")
+    let pdf = find(".pdf")?
         .ok_or_else(|| format!("no {source}* .txt or .pdf under {} ({var})", dir.display()))?;
     let out = process::Command::new("pdftotext")
         .args(["-layout"])

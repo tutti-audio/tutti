@@ -44,27 +44,16 @@ const PLUGINS: &str = "temporary: plugins moves it behind a module seam";
 
 /// `(file, platform cfgs outside a mod declaration, reason)`.
 pub(super) const ALLOW: &[(&str, usize, &str)] = &[
-    ("crates/tutti-rt/src/clock.rs", 7, CORE),
-    ("crates/tutti-rt/src/denormals.rs", 7, CORE),
-    ("crates/tutti-rt/src/denormals/tests.rs", 14, CORE),
-    ("crates/tutti-rt/src/job_gate/tests.rs", 2, CORE),
-    ("crates/tutti-rt/src/priority.rs", 8, CORE),
-    ("crates/tutti-rt/src/spin.rs", 13, CORE),
-    ("crates/tutti-rt/src/spin/tests.rs", 1, CORE),
-    ("crates/tutti-rt/src/task_graph/tests.rs", 2, CORE),
     (
         "crates/tutti-session/tests/export/export_fork_sampler.rs",
         2,
         CORE,
     ),
-    ("crates/tutti-session/tests/plugin/plugin.rs", 5, CORE),
     (
         "crates/tutti-session/tests/plugin/plugin_diagnostics.rs",
         1,
         CORE,
     ),
-    ("testing/tutti-fixtures/src/lib.rs", 9, CORE),
-    ("testing/tutti-fixtures/src/vst3_cpp.rs", 2, CORE),
     ("crates/tutti-au-host/src/unit_code.rs", 1, PLUGINS),
     (
         "crates/tutti-au-host/tests/au_gui_lifecycle_main.rs",
