@@ -267,7 +267,7 @@ fn a_long_block_name_splits_at_thirteen_bytes() {
 }
 
 // §7.1.7: 0xFF is every block, a number one block.
-/// Spec: m2-104/6.1#1, m2-104/7.1.8#2, m2-104/7.1.9#2
+/// Spec: m2-104/6.1#1, m2-104/7.1.8#2, m2-104/7.1.9#2, m2-104/1.4#1
 #[test]
 fn function_block_discovery_answers_one_block_or_all() {
     let all = ask(
@@ -428,7 +428,7 @@ fn a_message_that_is_not_a_request_is_not_answered() {
     assert!(out.is_empty());
 }
 
-/// Spec: m2-104/6.2#2, m2-104/6.2.1.1#1
+/// Spec: m2-104/6.2#2, m2-104/6.2.1.1#1, m2-104/6.2#1
 #[test]
 fn a_midi1_device_has_one_inferred_block() {
     let e = Endpoint::midi1_device(EndpointName::new("Keystep"));
@@ -853,7 +853,7 @@ fn a_block_added_sends_endpoint_info_then_its_block_info() {
 /// the block number then the text. The spec has no message that removes a
 /// name; this crate sends an empty one as one Complete message of zeros, which
 /// is pinned here.
-/// Spec: m2-104/7.1.8#3, m2-104/7.1.9#3
+/// Spec: m2-104/7.1.8#3, m2-104/7.1.9#3, m2-104/7.1.2#5
 #[test]
 fn a_changed_block_sends_the_part_that_changed() {
     let mut e = changeable();

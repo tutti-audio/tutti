@@ -242,6 +242,7 @@ mod tests {
     /// §7.4.15.2): 12 semitones above key 60 is 72.0, a quarter tone below is
     /// 59.75, and no range is assumed. A value that is not finite, or leaves
     /// `0..128`, has no message.
+    /// Spec: m2-104/c.3#3
     #[test]
     fn a_tuning_is_an_absolute_pitch_in_q7_25() {
         let note = NoteNumber::of(60);

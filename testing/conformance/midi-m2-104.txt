@@ -23,14 +23,14 @@
 # side: sender, receiver or both (todo marks a row not yet read).
 m2-104/1.3#1 | both |  | recommended | M2-104 §1.3 | the spec gives the packet payload only; each transport spec defines the wire format |  |  |
 m2-104/1.4#1 | both |  | permitted | M2-104 §1.4 | a device can have one or more Function Blocks |  |  |
-m2-104/1.6.1#1 | both |  | permitted | M2-104 §1.6.1 | glossary remark on a preferred pitch-interval term, no behaviour |  |  |
-m2-104/1.6.1#2 | both |  | permitted | M2-104 §1.6.1 | glossary: a Profile can list mandatory and optional messages, definition only |  |  |
+m2-104/1.6.1#1 | both |  | permitted | M2-104 §1.6.1 | glossary remark on a preferred pitch-interval term, no behaviour |  | other-side | M2-104 §1.6.1: subject is the spec's own terminology ("This term is preferred over semitone")
+m2-104/1.6.1#2 | both |  | permitted | M2-104 §1.6.1 | glossary: a Profile can list mandatory and optional messages, definition only |  | other-side | M2-104 §1.6.1: subject is a Profile, "An MA/AMEI specification" ("A Profile may have a defined minimum set")
 m2-104/1.6.1#3 | both |  | permitted | M2-104 §1.6.1 | glossary: Property Exchange reads another device's properties, definition only |  |  |
-m2-104/1.6.1#4 | both |  | recommended | M2-104 §1.6.1 | glossary: tempo is clocks per time unit, definition only |  |  |
+m2-104/1.6.1#4 | both |  | recommended | M2-104 §1.6.1 | glossary: tempo is clocks per time unit, definition only |  | other-side | M2-104 §1.6.1: subject is a passage of music ("The rate at which a passage of music is or should be played")
 m2-104/1.6.1#5 | both |  | permitted | M2-104 §1.6.1 | glossary: a Transaction can have several replies, definition only |  |  |
 m2-104/1.6.1#6 | both |  | permitted | M2-104 §1.6.1 | glossary: a Transaction can be a longer multi-step exchange, definition only |  |  |
 m2-104/1.6.1#7 | both |  | permitted | M2-104 §1.6.1 | glossary: UMP MIDI 1.0 devices can use the extended message types |  |  |
-m2-104/1.8#1 | both |  | permitted | M2-104 §1.8 | note: a message can define a text encoding other than the default |  |  |
+m2-104/1.8#1 | both |  | permitted | M2-104 §1.8 | note: a message can define a text encoding other than the default |  | other-side | M2-104 §1.8: subject is message definitions ("Some messages may define a different encoding")
 m2-104/1.8#2 | both |  | required | M2-104 §1.8 | text in a message carries no byte order mark | neg=1 |  |
 m2-104/2.1#1 | both |  | required | M2-104 §2.1 | a packet is one to four 32-bit words |  |  |
 m2-104/2.1#2 | both |  | required | M2-104 §2.1 | a packet holds one whole message or one part of a long data message, nothing more |  |  |
@@ -39,7 +39,7 @@ m2-104/2.1.2#1 | both |  | required | M2-104 §2.1.2 | the top four bits of ever
 m2-104/2.1.2#2 | both |  | required | M2-104 §2.1.2 | each Group has 16 channels, separate from every other Group's |  |  |
 m2-104/2.1.2#3 | both |  | permitted | M2-104 §2.1.2 | packets for different Groups can be interleaved in any order |  |  |
 m2-104/2.1.2#4 | both |  | required | M2-104 §2.1.2 | a message without a channel field applies to every channel of its Group |  |  |
-m2-104/2.1.2#5 | both |  | permitted | M2-104 §2.1.2 | a reserved message type may later be defined with or without a group field |  |  |
+m2-104/2.1.2#5 | both |  | permitted | M2-104 §2.1.2 | a reserved message type may later be defined with or without a group field |  | other-side | M2-104 §2.1.2: subject is the spec authors ("Other Message Types which are currently reserved may be defined in the future")
 m2-104/2.1.3#1 | sender |  | required | M2-104 §2.1.3 | a message marked reserved is never sent | neg=1 |  |
 m2-104/2.1.3#2 | sender |  | required | M2-104 §2.1.3 | reserved fields are written as zero and carry no meaning |  |  |
 m2-104/2.1.3#3 | sender |  | required | M2-104 §2.1.3 | bits marked r are written as zero and carry no meaning |  |  |
@@ -51,11 +51,11 @@ m2-104/3.2#2 | both |  | permitted | M2-104 §3.2 | it can add the extension mes
 m2-104/3.2#3 | sender |  | required | M2-104 §3.2 | a UMP MIDI 1.0 device never sends MIDI 2.0 Channel Voice messages | neg=1 |  |
 m2-104/3.2.1.2#1 | both |  | permitted | M2-104 §3.2.1.2 | extension message types usable by UMP MIDI 1.0 devices: utility, SysEx 8, Flex Data, Stream |  |  |
 m2-104/3.2.1.2#2 | sender |  | required | M2-104 §3.2.1.2 | restates that the MIDI 1.0 Protocol never uses message type 4 | neg=1 |  |
-m2-104/3.2.2#1 | both |  | required | M2-104 §3.2.2 | future messages will say whether UMP MIDI 1.0 devices can use them | neg=1 |  |
+m2-104/3.2.2#1 | both |  | required | M2-104 §3.2.2 | future messages will say whether UMP MIDI 1.0 devices can use them | neg=1 | other-side | M2-104 §3.2.2: subject is MMA/AMEI ("Whenever MMA/AMEI do define new messages ... it will be clearly specified")
 m2-104/3.3#1 | both |  | permitted | M2-104 §3.3 | a MIDI 2.0 Protocol device can use the core messages and other defined types in the same Group |  |  |
 m2-104/3.3.1#1 | both |  | permitted | M2-104 §3.3.1 | these message types carry MIDI 2.0 functionality |  |  |
 m2-104/3.3.1#2 | sender |  | required | M2-104 §3.3.1 | a MIDI 2.0 Protocol device never sends MIDI 1.0 Channel Voice messages | neg=1 |  |
-m2-104/3.3.2#1 | both |  | required | M2-104 §3.3.2 | future messages will say whether MIDI 2.0 Protocol devices can use them | neg=1 |  |
+m2-104/3.3.2#1 | both |  | required | M2-104 §3.3.2 | future messages will say whether MIDI 2.0 Protocol devices can use them | neg=1 | other-side | M2-104 §3.3.2: subject is MMA/AMEI ("Whenever MMA/AMEI do define new messages ... it will be clearly specified")
 m2-104/4.1#1 | both |  | permitted | M2-104 §4.1 | JR timestamps can also carry accurate timing across a link with jitter |  |  |
 m2-104/4.1.1#1 | both |  | required | M2-104 §4.1.1 | a translator that understands JR timestamps schedules MIDI 1.0 output by the received timestamps |  |  |
 m2-104/4.1.1#2 | both |  | permitted | M2-104 §4.1.1 | a translator can generate JR timestamps from reception time when the output has them |  |  |
@@ -186,9 +186,9 @@ m2-104/7.4.14#4 | sender |  | recommended | M2-104 §7.4.14 | attribute data tha
 m2-104/7.4.14#5 | sender |  | recommended | M2-104 §7.4.14 | attribute data of unknown type uses type 1 |  |  |
 m2-104/7.4.14#6 | receiver |  | recommended | M2-104 §7.4.14 | a device that does not know the active Profile ignores type 2 attribute data |  |  |
 m2-104/7.4.14#7 | sender |  | recommended | M2-104 §7.4.14 | note: profile-defined attribute type 2 is not used for properties shared by several Profiles | neg=1 |  |
-m2-104/7.4.14#8 | both |  | recommended | M2-104 §7.4.14 | standards bodies give properties shared across Profiles their own attribute types instead of type 2 |  |  |
+m2-104/7.4.14#8 | both |  | recommended | M2-104 §7.4.14 | standards bodies give properties shared across Profiles their own attribute types instead of type 2 |  | other-side | M2-104 §7.4.14: subject is MA/AMEI ("MA/AMEI should define dedicated Attribute Type values")
 m2-104/7.4.14#9 | sender |  | recommended | M2-104 §7.4.14 | attribute type 2 is not used for properties of widely used Profiles | neg=1 |  |
-m2-104/7.4.14#10 | both |  | recommended | M2-104 §7.4.14 | standards bodies give widely supported Profile data its own attribute type instead of type 2 |  |  |
+m2-104/7.4.14#10 | both |  | recommended | M2-104 §7.4.14 | standards bodies give widely supported Profile data its own attribute type instead of type 2 |  | other-side | M2-104 §7.4.14: subject is MA/AMEI ("MA/AMEI should define dedicated Attribute Type values")
 m2-104/7.4.14#11 | receiver |  | recommended | M2-104 §7.4.14 | with attribute type 3 the note number is only an index, implying no pitch |  |  |
 m2-104/7.4.15.2#1 | receiver |  | required | M2-104 §7.4.15.2 | the integer part of Pitch 7.25 is a 12-tone equal-tempered pitch with A at 440 Hz as note 69 |  |  |
 m2-104/7.4.15.2#2 | receiver |  | recommended | M2-104 §7.4.15.2 | support at least 9 fractional bits |  |  |
@@ -203,7 +203,7 @@ m2-104/7.5.1#4 | sender |  | required | M2-104 §7.5.1 | a Flex Data message has
 m2-104/7.5.2#1 | sender |  | recommended | M2-104 §7.5.2 | senders follow the rules on interspersing messages and ending Flex Data messages in a Group |  |  |
 m2-104/7.5.2#2 | sender |  | recommended | M2-104 §7.5.2 | between Start and End send only Continue packets of that message, real-time messages and JR Clocks | neg=1 |  |
 m2-104/7.5.2#3 | sender |  | permitted | M2-104 §7.5.2 | real-time and JR Clock messages can sit inside a Flex Data run for timing sync |  |  |
-m2-104/7.5.3#1 | both |  | permitted | M2-104 §7.5.3 | Set Tempo can improve timing synchronization over MIDI Clock alone |  |  |
+m2-104/7.5.3#1 | both |  | permitted | M2-104 §7.5.3 | Set Tempo can improve timing synchronization over MIDI Clock alone |  | other-side | M2-104 §7.5.3: subject is the Set Tempo message ("This may also help to increase the accuracy of timing synchronization")
 m2-104/7.5.3#2 | sender |  | required | M2-104 §7.5.3 | with MIDI Clock being sent, Set Tempo only occurs on a clock tick |  |  |
 m2-104/7.5.3#3 | sender |  | recommended | M2-104 §7.5.3 | without MIDI Clock, Set Tempo occurs only on the sender's 1/24-quarter-note timing |  |  |
 m2-104/7.5.3#4 | sender |  | required | M2-104 §7.5.3 | in a Standard MIDI File, Set Tempo only occurs on a 1/24-quarter-note position |  |  |
@@ -229,7 +229,7 @@ m2-104/7.5.9#2 | sender |  | required | M2-104 §7.5.9 | text data left over in 
 m2-104/7.5.9#3 | sender |  | required | M2-104 §7.5.9 | a zero byte occurs only in an End or Complete packet |  |  |
 m2-104/7.5.9.1#1 | sender |  | recommended | M2-104 §7.5.9.1 | Project Name text is addressed to the Group |  |  |
 m2-104/7.5.9.1#2 | sender |  | recommended | M2-104 §7.5.9.1 | MIDI Clip Name text is addressed to the Group |  |  |
-m2-104/7.5.9.1#3 | both |  | permitted | M2-104 §7.5.9.1 | example: a text message can name several people |  |  |
+m2-104/7.5.9.1#3 | both |  | permitted | M2-104 §7.5.9.1 | example: a text message can name several people |  | other-side | M2-104 §7.5.9.1: subject is the data an example message holds ("there may be multiple people to be represented")
 m2-104/7.5.9.1#4 | both |  | permitted | M2-104 §7.5.9.1 | several entities fit in one message or one message each |  |  |
 m2-104/7.5.9.1#5 | sender |  | recommended | M2-104 §7.5.9.1 | several entities in one text message are separated by commas |  |  |
 m2-104/7.5.9.2#1 | sender |  | required | M2-104 §7.5.9.2 | a Recording or Concert Date message uses the Text common format |  |  |

@@ -158,6 +158,7 @@ fn headers_carry_numbers_counts_and_sizes() {
 /// A written set reads back whole at the boundary sizes (none, one byte,
 /// exactly one payload UMP, one more, a chunk's worth and one more), for
 /// chunks of several sizes.
+/// Spec: m2-104/7.9#2, m2-104/7.9#3
 #[test]
 fn a_written_set_reads_back_whole() {
     let mut a = assembler(1);
