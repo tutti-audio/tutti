@@ -35,7 +35,11 @@ impl IntoNode for Src {
         IntoNode::into_parts(tutti_graph::Unforkable(self))
     }
 }
-impl SessionNode for Src {}
+impl SessionNode for Src {
+    fn reclaimer(_: &()) -> tutti_session::Reclaims {
+        tutti_session::Reclaims::Nothing
+    }
+}
 
 fn is_off(w: &[u32; 4]) -> bool {
     Ump(*w).is_note_off()
@@ -170,7 +174,11 @@ impl IntoNode for GroupSrc {
         IntoNode::into_parts(tutti_graph::Unforkable(self))
     }
 }
-impl SessionNode for GroupSrc {}
+impl SessionNode for GroupSrc {
+    fn reclaimer(_: &()) -> tutti_session::Reclaims {
+        tutti_session::Reclaims::Nothing
+    }
+}
 
 /// **A route by Group, cut with two notes held across it, hears one Note Off for
 /// each at offset 0 of the next block, and then nothing.** Group 2's channel 0
