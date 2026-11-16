@@ -842,8 +842,7 @@ pub(crate) struct HostedPlugin {
     /// outside the pool. Dropped when the record retires, which ends the hold.
     pub(crate) pooled: Option<PooledLink>,
     /// What re-inserts this plugin's node when it changes its ports. `None` for
-    /// a plugin the host inserted itself (`Graph::insert_plugin`) and for one
-    /// that reported no ports.
+    /// a plugin that reported no ports.
     pub(crate) rebind: Option<RebindState>,
 }
 
