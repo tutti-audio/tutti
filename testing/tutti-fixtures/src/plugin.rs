@@ -310,9 +310,11 @@ impl<A: Activation> DerefMut for Active<A> {
 /// The shared plugin's library as the module of a `.vst3` bundle,
 /// `<name>.vst3/Contents/<arch>/<module>`, the layout the VST3 host walks.
 ///
-/// The bundle is this process's own, under `<profile>/vst3-bundles/<pid>/`: it
-/// is made once, before any load, and no other process opens or changes a path
-/// in it, so a load never meets a bundle another process is making.
+/// The bundle is `<profile>/vst3-bundles/<key>/`, keyed by the library's
+/// modified time and length. It is built in a directory of this process's own
+/// and published by renaming that directory to `<key>`, which fails where one
+/// is already there: the first process to publish wins, and a bundle is never
+/// changed once it is visible, so no process loads a path another is making.
 ///
 /// # Panics
 ///
@@ -324,32 +326,41 @@ pub fn vst3_module() -> PathBuf {
     MODULE
         .get_or_init(|| {
             let real = cdylib("tutti_shared_plugin", "tutti-shared-plugin");
+            let meta = std::fs::metadata(&real).expect("the library's metadata");
+            let nanos = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or(0, |d| d.as_nanos());
+            let root = profile_dir().join("vst3-bundles");
             let name = real.file_name().expect("file name");
-            let bundle = profile_dir()
-                .join("vst3-bundles")
-                .join(std::process::id().to_string())
-                .join(Path::new(name).with_extension("vst3"));
-            let dir = bundle
+            let inside = Path::new(&format!("{nanos}-{}", meta.len()))
+                .join(Path::new(name).with_extension("vst3"))
                 .join("Contents")
-                .join(tutti_plugin_types::bundle::native_arch_subdirs()[0]);
-            // A bundle left by an earlier process of this id is not in use.
-            let _ = std::fs::remove_dir_all(&bundle);
-            std::fs::create_dir_all(&dir).expect("bundle directory");
-            let module = dir.join(name);
-            link_or_copy(&real, &module);
-            assert!(module.exists(), "no module at {}", module.display());
-            module
+                .join(tutti_plugin_types::bundle::native_arch_subdirs()[0])
+                .join(name);
+            let published = root.join(&inside);
+            if published.exists() {
+                return published;
+            }
+            let key = inside.components().next().expect("a key").as_os_str();
+            let tmp = root.join(format!(".tmp-{}", std::process::id()));
+            let module = tmp.join(inside.components().skip(1).collect::<PathBuf>());
+            // A directory of an earlier process of this id is not in use.
+            let _ = std::fs::remove_dir_all(&tmp);
+            std::fs::create_dir_all(module.parent().expect("module directory"))
+                .expect("bundle directory");
+            if std::fs::hard_link(&real, &module).is_err() {
+                std::fs::copy(&real, &module).expect("copy the bundle module");
+            }
+            if std::fs::rename(&tmp, root.join(key)).is_err() {
+                // Another process published first; its bundle is whole.
+                let _ = std::fs::remove_dir_all(&tmp);
+            }
+            assert!(published.exists(), "no module at {}", published.display());
+            published
         })
         .clone()
-}
-
-/// A symlink to `real` at `module`; a copy on Windows, where a link needs a
-/// privilege.
-fn link_or_copy(real: &Path, module: &Path) {
-    #[cfg(unix)]
-    std::os::unix::fs::symlink(real, module).expect("link the bundle module");
-    #[cfg(windows)]
-    std::fs::copy(real, module).expect("copy the bundle module");
 }
 
 #[cfg(test)]
