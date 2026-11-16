@@ -254,7 +254,7 @@ mod oscillator;
 pub use oscillator::OscillatorNode;
 
 mod delay;
-pub use delay::{DelayKernel, DelayNode};
+pub use delay::{DelayKernel, DelayNode, DelaySet};
 // `InterpolationMode` and the delay's controls are in `DelayNode::new`'s signature;
 // the ring itself (`DelayLine`) is `tutti-dsp`'s only.
 pub use tutti_dsp::{
@@ -263,15 +263,15 @@ pub use tutti_dsp::{
 };
 
 mod distortion;
-pub use distortion::{DistortionKernel, DistortionNode};
+pub use distortion::{DistortionKernel, DistortionNode, DistortionSet};
 // `ShapeKind` is in `DistortionNode::new`'s signature; the curves behind it are
 // `tutti-dsp`'s.
 pub use tutti_dsp::ShapeKind;
 
 mod filter;
 pub use filter::{
-    CrossoverKernel, CrossoverNode, EqBandNode, LadderFilterNode, LadderKernel, SvfFilterNode,
-    SvfKernel,
+    CrossoverKernel, CrossoverNode, CrossoverSet, EqBandNode, LadderFilterNode, LadderKernel,
+    LadderSet, SvfFilterNode, SvfKernel, SvfSet,
 };
 // The types in the filter nodes' signatures stay reachable from here; the
 // algorithms behind them (`SvfCoeffs`, `LadderCoeffs`, `CrossoverModel`) are
@@ -282,8 +282,9 @@ pub use tutti_dsp::{
 
 mod dynamics;
 pub use dynamics::{
-    BAND_PARAMS, BrickwallKernel, BrickwallLimiterNode, CompressorKernel, CompressorNode,
-    GateKernel, GateNode, LimiterKernel, LimiterNode, MultibandCompressorNode, MultibandControls,
+    BAND_PARAMS, BrickwallKernel, BrickwallLimiterNode, BrickwallSet, CompressorKernel,
+    CompressorNode, CompressorSet, GateKernel, GateNode, GateSet, LimiterKernel, LimiterNode,
+    LimiterSet, MultibandCompressorNode, MultibandControls,
 };
 // The types in the dynamics nodes' constructors: the controls a node is built at, and the
 // key a compressor or a gate listens to.
@@ -299,16 +300,16 @@ pub use strip::BusStripNode;
 mod kernel;
 pub use kernel::{ControlLanes, Kernel, KernelNode, MAX_LANES};
 
-pub use params::{At, Control, ControlRead, ControlSet, ControlValid, Params};
+pub use params::{At, Control, ControlRead, ControlSet, ControlValid, HasControl, Params};
 
 // Freeverb as a `KernelNode`, and the send (mono in, stereo wet out) the SoundFont
 // player's General MIDI setup uses.
 mod reverb_freeverb;
-pub use reverb_freeverb::{FreeverbKernel, FreeverbNode};
+pub use reverb_freeverb::{FreeverbKernel, FreeverbNode, FreeverbSet};
 
 // The feedback delay network as a `KernelNode`.
 mod reverb_fdn;
-pub use reverb_fdn::{FdnKernel, FdnNode};
+pub use reverb_fdn::{FdnKernel, FdnNode, FdnSet};
 
 // The banks' controls that sit in a node's signature.
 pub use tutti_dsp::{FdnControls, FdnLayout, FreeverbControls, MaxDecay};
@@ -318,7 +319,9 @@ mod spatial;
 pub use spatial::{HrtfBinauralNode, VbapError, VbapPannerNode};
 
 mod modulation;
-pub use modulation::{ModDelayKernel, ModDelayNode, PhaserKernel, PhaserNode};
+pub use modulation::{
+    ModDelayKernel, ModDelayNode, ModDelaySet, PhaserKernel, PhaserNode, PhaserSet,
+};
 // The sweep, its stagger and the controls are in `ModDelayNode::new`'s and `PhaserNode::new`'s
 // signatures.
 pub use tutti_dsp::{

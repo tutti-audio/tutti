@@ -577,7 +577,14 @@ fn a_discovery_is_answered_even_for_a_block_that_is_absent() {
 /// Spec: m2-104/7.1.8#5, m2-104/7.1.8#9
 #[test]
 fn a_local_endpoint_declares_one_static_block_over_its_groups() {
-    let mut e = Endpoint::local(GroupSpan::new(4).unwrap());
+    let mut e = Endpoint::local(
+        Supports::of(Capabilities {
+            midi1: true,
+            midi2: true,
+            ..Capabilities::default()
+        }),
+        GroupSpan::new(4).unwrap(),
+    );
     assert_eq!(e.version(), UMP_VERSION);
     assert_eq!(
         e.capabilities(),
@@ -657,7 +664,14 @@ fn a_ui_hint_the_direction_rules_out_is_refused() {
 /// Spec: m2-104/7.1.2#3, m2-104/7.1.2#4
 #[test]
 fn answering_discoveries_changes_no_block_of_a_static_endpoint() {
-    let mut e = Endpoint::local(GroupSpan::new(4).unwrap());
+    let mut e = Endpoint::local(
+        Supports::of(Capabilities {
+            midi1: true,
+            midi2: true,
+            ..Capabilities::default()
+        }),
+        GroupSpan::new(4).unwrap(),
+    );
     let before = e;
     ask(&mut e, discovery(ALL));
     ask(&mut e, block_discovery(BlockSelect::All, true, true));

@@ -25,7 +25,7 @@ pub(super) fn keyword(sentence: &str, words: &Words) -> Option<(&'static str, bo
         let word = sentence[from..to].to_ascii_lowercase();
         if let Some(rank) = words.iter().position(|(w, _)| *w == word) {
             let quoted = i > 0
-                && "'\"\u{2018}\u{201c}".contains(chars[i - 1].1)
+                && "'\"\u{2018}\u{2019}\u{201c}".contains(chars[i - 1].1)
                 && chars
                     .get(j)
                     .is_some_and(|c| "'\"\u{2019}\u{201d}".contains(c.1));

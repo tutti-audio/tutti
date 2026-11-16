@@ -1,0 +1,36 @@
+# Property Exchange Channel Resources (M2-108 v1.01) inventory. The spec text is not in
+# the repo: `TUTTI_MIDI_SPECS=<dir> cargo xtask conformance-inventory midi`
+# regenerates the id, kind, section and facts columns from the text that
+# `pdftotext -layout` (26.01.0) makes of the M2-108 PDF in that directory (or a
+# .txt of it beside the PDF); the other columns are written by hand, in our own
+# words. `cargo xtask check-conformance` holds the generated columns to the
+# text when `TUTTI_MIDI_SPECS` is set. Nothing of the spec is quoted here: ids,
+# section numbers, keyword kinds and functional facts only.
+#
+# Columns: id | side | maturity | kind | section | paraphrase | facts | na-kind | cite
+#
+# Ids:
+#   m2-108/<section>#<n>          the nth sentence under the numbered section
+#                                 (appendix letters lowercase: d.2.1) that carries
+#                                 a conformance word. kind: shall is required,
+#                                 should recommended, may permitted; the negated
+#                                 forms keep the kind and carry the fact neg=1.
+# This document has its own conformance-word table (its Table 1), the same three
+# rows as M2-104's, and no negated forms either. Its Table 2 lists must,
+# will, can and might as words that are never conformance statements: a
+# sentence with only those has no row. Sentence rows only: no table of the
+# document has a row per item.
+# side: initiator, responder or both (todo marks a row not yet read).
+m2-108/1.1#1 | responder |  | recommended | M2-108 §1.1 | a device with a complex channel use also implements ChannelList |  |  |
+m2-108/1.3#1 | both |  | permitted | M2-108 §1.3 | glossary: Property Exchange lets one device read another's properties, definition only |  |  |
+m2-108/2.1#1 | responder |  | required | M2-108 §2.1 | a device using ChannelMode does not use Multi-Mode | neg=1 |  |
+m2-108/2.1#2 | responder |  | recommended | M2-108 §2.1 | a device with a complex channel layout reports it in ChannelList instead |  |  |
+m2-108/2.2#1 | initiator |  | permitted | M2-108 §2.2 | an Initiator can read ChannelMode with a Get |  |  |
+m2-108/3.1#1 | responder |  | required | M2-108 §3.1 | a device using BasicChannelRx does not use Multi-Mode | neg=1 |  |
+m2-108/3.1#2 | responder |  | recommended | M2-108 §3.1 | a device with a complex channel layout reports it in ChannelList instead |  |  |
+m2-108/3.2#1 | initiator |  | permitted | M2-108 §3.2 | an Initiator can read BasicChannelRx with a Get |  |  |
+m2-108/3.3#1 | initiator |  | permitted | M2-108 §3.3 | an Initiator can write BasicChannelRx with a Set |  |  |
+m2-108/4.1#1 | responder |  | required | M2-108 §4.1 | a device using BasicChannelTx does not use Multi-Mode | neg=1 |  |
+m2-108/4.1#2 | responder |  | recommended | M2-108 §4.1 | a device with a complex channel layout reports it in ChannelList instead |  |  |
+m2-108/4.2#1 | initiator |  | permitted | M2-108 §4.2 | an Initiator can read BasicChannelTx with a Get |  |  |
+m2-108/4.3#1 | initiator |  | permitted | M2-108 §4.3 | an Initiator can write BasicChannelTx with a Set |  |  |

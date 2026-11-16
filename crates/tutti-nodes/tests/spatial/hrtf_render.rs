@@ -929,11 +929,11 @@ fn the_panner_takes_the_mean_of_a_stereo_pair() {
     let both = render(&x, &x);
     let one = render(&x, &silence);
     let anti = render(&x, &negated);
-    let peak = both.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+    let peak = tutti_fixtures::signal::peak(&both);
     assert!(peak > 0.1, "the reference render is audible ({peak})");
     for (b, o) in both.iter().zip(&one) {
         assert!((b - 2.0 * o).abs() <= 1e-4 * peak, "{b} is not twice {o}");
     }
-    let leak = anti.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+    let leak = tutti_fixtures::signal::peak(&anti);
     assert!(leak <= 1e-5 * peak, "an anti-phase pair leaves {leak}");
 }

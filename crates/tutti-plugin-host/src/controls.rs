@@ -230,6 +230,27 @@ impl PluginControls {
         self.chunks.missed()
     }
 
+    /// Of the [`missed_chunks`](Self::missed_chunks), how many the plugin-server
+    /// published after the node had played the silence, before the chunk's
+    /// slot in the shared ring was reused: a late answer, not a lost one.
+    /// Telemetry: a late chunk means an overloaded plugin or machine (raise
+    /// the device buffer size); a miss that is never counted late was lost,
+    /// the server never answered it. A late chunk is noticed on a later chunk,
+    /// within the ring's depth. RT-safe: one relaxed load.
+    pub fn late_chunks(&self) -> u64 {
+        self.chunks.late()
+    }
+
+    /// Chunks dropped because the plugin fell more than one chunk behind: the
+    /// bridge skipped the chunk (the shared ring holds one chunk behind the
+    /// newest) and never sent it, so it plays as silence and is never
+    /// answered. Telemetry beside [`missed_chunks`](Self::missed_chunks): it
+    /// means an overloaded plugin or machine, so raise the device buffer size.
+    /// RT-safe: one relaxed load.
+    pub fn skipped_chunks(&self) -> u64 {
+        self.chunks.skipped()
+    }
+
     /// Whether the chunk the node submitted last, and has not played yet,
     /// has been answered: `true` with none in flight.
     ///

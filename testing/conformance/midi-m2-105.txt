@@ -1,0 +1,54 @@
+# Property Exchange Foundational Resources (M2-105 v1.1.1) inventory. The spec text is not in
+# the repo: `TUTTI_MIDI_SPECS=<dir> cargo xtask conformance-inventory midi`
+# regenerates the id, kind, section and facts columns from the text that
+# `pdftotext -layout` (26.01.0) makes of the M2-105 PDF in that directory (or a
+# .txt of it beside the PDF); the other columns are written by hand, in our own
+# words. `cargo xtask check-conformance` holds the generated columns to the
+# text when `TUTTI_MIDI_SPECS` is set. Nothing of the spec is quoted here: ids,
+# section numbers, keyword kinds and functional facts only.
+#
+# Columns: id | side | maturity | kind | section | paraphrase | facts | na-kind | cite
+#
+# Ids:
+#   m2-105/<section>#<n>          the nth sentence under the numbered section
+#                                 (appendix letters lowercase: d.2.1) that carries
+#                                 a conformance word. kind: shall is required,
+#                                 should recommended, may permitted; the negated
+#                                 forms keep the kind and carry the fact neg=1.
+# This document has its own conformance-word table (its Table 2), the same three
+# rows as M2-104's, and no negated forms either. Its Table 3 lists must,
+# will, can and might as words that are never conformance statements: a
+# sentence with only those has no row. Sentence rows only: no table of the
+# document has a row per item.
+# side: initiator, responder or both (todo marks a row not yet read).
+m2-105/1.4.1#1 | both |  | permitted | M2-105 §1.4.1 | the Initiator and Responder roles can swap between two devices |  |  |
+m2-105/1.4.1#2 | both |  | permitted | M2-105 §1.4.1 | either device can start a Transaction at any time |  |  |
+m2-105/1.4.1#3 | both |  | permitted | M2-105 §1.4.1 | glossary: a Profile can list mandatory and optional messages and features, definition only |  |  |
+m2-105/1.4.1#4 | both |  | permitted | M2-105 §1.4.1 | glossary: Property Exchange lets one device read another's properties, definition only |  |  |
+m2-105/1.4.1#5 | both |  | permitted | M2-105 §1.4.1 | glossary: a Transaction can have several replies, definition only |  |  |
+m2-105/1.4.1#6 | both |  | permitted | M2-105 §1.4.1 | glossary: a Transaction can be a longer exchange of inquiries and replies, definition only |  |  |
+m2-105/2#1 | responder |  | required | M2-105 §2 | every Property Exchange device implements the DeviceInfo Resource |  |  |
+m2-105/2#2 | responder |  | recommended | M2-105 §2 | every Property Exchange device implements the ChannelList Resource |  |  |
+m2-105/2#3 | responder |  | required | M2-105 §2 | a device with manufacturer Resources whose schema is a midi+jsonschema reference implements the JSONSchema Resource |  |  |
+m2-105/3#1 | responder |  | required | M2-105 §3 | every Property Exchange device implements the DeviceInfo Resource |  |  |
+m2-105/3.1#1 | initiator |  | permitted | M2-105 §3.1 | an Initiator can read DeviceInfo with a Get |  |  |
+m2-105/3.2#1 | responder |  | required | M2-105 §3.2 | a Responder with DeviceInfo answers a Get with an object as the Property Data |  |  |
+m2-105/3.2#2 | responder |  | permitted | M2-105 §3.2 | a device can report a unique serial number |  |  |
+m2-105/3.2#3 | responder |  | required | M2-105 §3.2 | the family, model and version ids of DeviceInfo equal the fields of the Discovery message |  |  |
+m2-105/4.1#1 | responder |  | recommended | M2-105 §4.1 | a ChannelList the user can edit on the device is subscribable |  |  |
+m2-105/4.2#1 | initiator |  | permitted | M2-105 §4.2 | an Initiator can read ChannelList with a Get |  |  |
+m2-105/4.3#1 | responder |  | required | M2-105 §4.3 | a Responder with ChannelList answers a Get with its list as the Property Data |  |  |
+m2-105/4.3#2 | responder |  | permitted | M2-105 §4.3 | a ChannelList entry can have a Cluster; channels count on across the Groups of a Function Block |  |  |
+m2-105/4.3#3 | responder |  | permitted | M2-105 §4.3 | the Cluster start can equal the entry's channel or differ from it |  |  |
+m2-105/4.4#1 | responder |  | permitted | M2-105 §4.4 | the entry's channel can be a Basic, Global or Manager Channel, or none |  |  |
+m2-105/4.4#2 | responder |  | permitted | M2-105 §4.4 | a single channel with no Cluster is a Basic Channel, or both a Basic and a Manager Channel |  |  |
+m2-105/4.4#3 | responder |  | required | M2-105 §4.4 | a Basic Channel of Mode 3 or 4 with a Cluster is the first Channel of that Cluster |  |  |
+m2-105/4.4#4 | responder |  | required | M2-105 §4.4 | a Global or Manager Channel is not a member of its own Cluster | neg=1 |  |
+m2-105/4.4#5 | responder |  | required | M2-105 §4.4 | a Mode 1 or 2 device lists one entry for a Group whose Cluster spans channels 1 to 16 |  |  |
+m2-105/4.4#6 | responder |  | required | M2-105 §4.4 | that single entry is on the Basic Channel |  |  |
+m2-105/4.5#1 | responder |  | recommended | M2-105 §4.5 | an entry's links point to its ProgramList Resource |  |  |
+m2-105/4.5#2 | responder |  | permitted | M2-105 §4.5 | other linked Resources can be CtrlList or manufacturer Resources |  |  |
+m2-105/4.5.1#1 | responder |  | permitted | M2-105 §4.5.1 | example: a Channel can offer many Resource operations, standard and manufacturer |  |  |
+m2-105/4.5.2#1 | initiator |  | permitted | M2-105 §4.5.2 | an Initiator can offer the Program Collections of a Channel for the user to pick |  |  |
+m2-105/5#1 | responder |  | required | M2-105 §5 | a device whose manufacturer Resources reference a midi+jsonschema id implements the JSONSchema Resource |  |  |
+m2-105/5.1#1 | initiator |  | permitted | M2-105 §5.1 | an Initiator can read JSONSchema with a Get |  |  |

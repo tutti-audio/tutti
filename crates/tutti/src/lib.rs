@@ -234,7 +234,8 @@ pub use tutti_codec as codec;
 #[cfg(feature = "io")]
 pub mod io {
     pub use tutti_session::{
-        DitherShape, DitherSink, DitherSpec, IDLE_PARK, PumpLoop, PumpPass, Recorder, RecorderError,
+        DitherShape, DitherSink, DitherSpec, FinalizeError, IDLE_PARK, PumpLoop, PumpPass,
+        Recorder, RecorderError,
     };
 }
 
@@ -334,7 +335,10 @@ pub mod midi {
     };
 
     #[cfg(feature = "midi-hardware")]
-    pub use tutti_midi_device::{DeviceId, DeviceInfo, Learned, Match, SavedDevice};
+    pub use tutti_midi_device::{
+        DeviceId, DeviceInfo, EndpointName, Learned, Match, MidiIdentity, ProductInstanceId,
+        SavedDevice,
+    };
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_hardware::{
         ChannelCount, ChannelProfile, CiChange, CiPeerInfo, DeviceQuery, ListedProfile,
@@ -390,14 +394,14 @@ pub use tutti_plugin_host as plugin_host;
 pub use tutti_engine::Engine;
 pub use tutti_graph::{
     DECLICK, EventCapacity, EventInletNode, EventInletWriter, EventTapId, EventTapReader, FadeLaw,
-    Level, Losses, MeterReader, NodeMode, Refused, Stamp, TapAlign, TapEvent, TapId, TapReader,
+    Level, Losses, MeterReader, NodeMode, Stamp, TapAlign, TapEvent, TapId, TapReader,
 };
 pub use tutti_metering::{LoadMeter, LoadReading};
 pub use tutti_nodes::{ClickState, MetronomeMode};
 pub use tutti_rt::{ArcLend, Loan, Reader};
 pub use tutti_transport::{
     FadeOut, LoopEdit, LoopRegion, MotionEvent, MotionState, OfflineTimeline,
-    OfflineTimelineConfig, Then, Timeline, Transport, TransportCommand,
+    OfflineTimelineConfig, Then, TimedError, Timeline, Transport, TransportCommand,
 };
 
 // Units, channels, buffers, the edge traits and the musical meter.
@@ -457,8 +461,8 @@ pub use tutti_session::{
 pub use tutti_session::{
     Clock, ConnectError, Edge, EventInPort, EventOutPort, EventTapPort, HeardOpen, HeardTapError,
     InPort, Job, JobFailed, Key, NoSuchNode, Offline, OfflineSession, OutPort, Phase, Playhead,
-    RealTime, Root, ScheduleError, Session, SessionBuilder, SessionEvent, SystemClock,
-    SystemSession, TypedParamRef, Workers,
+    RealTime, Root, Session, SessionBuilder, SessionEvent, SystemClock, SystemSession,
+    TypedParamRef, Workers,
 };
 #[cfg(all(feature = "session", feature = "device"))]
 pub use tutti_session::{

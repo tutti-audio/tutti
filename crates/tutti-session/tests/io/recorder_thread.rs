@@ -28,6 +28,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use tutti_buffers::{FiniteSource, InterleavedMut, Pull, Source};
 use tutti_codec::{FileOut, Format, Pcm, Spec};
+use tutti_fixtures::wait_until;
 use tutti_session::{Recorder, RecorderError};
 use tutti_types::{ChannelLayout, SampleRate, Samples};
 
@@ -43,28 +44,11 @@ fn wav(path: &std::path::Path) -> FileOut {
     .expect("sink opens")
 }
 
-/// Block until `cond` holds, or fail the test at `deadline`.
-///
-/// Not a `sleep(n)` in disguise: the wait *length* carries no meaning and no
-/// assertion depends on it. The condition is a fact the pump thread publishes
-/// about itself, so this converts "the other thread got there" into something
-/// the test can sequence on. The deadline exists only so a broken driver fails
-/// with a message instead of hanging until nextest's timeout.
-///
-/// Only the live-source tests need this now. [`Recorder::wait`] awaits a
-/// *finite* take's natural end directly — see
-/// `wait_returns_a_complete_finite_take_without_sequencing_on_the_pump`, which
-/// is what this helper's absence looks like.
-fn wait_until(what: &str, cond: impl Fn() -> bool) {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    while !cond() {
-        assert!(
-            std::time::Instant::now() < deadline,
-            "timed out waiting for {what}"
-        );
-        std::thread::sleep(std::time::Duration::from_millis(1));
-    }
-}
+/// How long a wait for the pump thread runs before the test fails. The wait's
+/// length carries no meaning and no assertion depends on it: the deadline only
+/// makes a broken driver fail with a message instead of hanging until nextest's
+/// timeout.
+const WAIT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// A finite source: hands out `frames` frames of a known ramp, then reports
 /// end-of-stream. `the thread` must break its own loop on that.
@@ -178,6 +162,52 @@ impl Source for Exploding {
     }
 }
 
+/// A sink whose close fails with a typed `io::Error`.
+struct DiskFull;
+
+impl tutti_buffers::Sink for DiskFull {
+    type Sample = f32;
+    type Error = std::io::Error;
+
+    fn layout(&self) -> ChannelLayout {
+        ChannelLayout::STEREO
+    }
+
+    fn write(
+        &mut self,
+        _: tutti_buffers::Interleaved<'_>,
+    ) -> Result<(), tutti_buffers::SinkFailed> {
+        Ok(())
+    }
+
+    fn finalize(self) -> Result<(), Self::Error> {
+        Err(std::io::Error::other("disk full"))
+    }
+}
+
+/// **A sink's close failure comes out of the recorder as `Sink`, the real
+/// `io::Error` still its source.**
+#[test]
+fn a_sink_that_fails_to_close_reports_its_own_error() {
+    let rec = Recorder::start_finite(
+        Ramp {
+            frames: 8,
+            pos: 0,
+            drained: Arc::new(AtomicBool::new(false)),
+            polls: Arc::new(AtomicUsize::new(0)),
+            delay: std::time::Duration::ZERO,
+        },
+        DiskFull,
+    )
+    .unwrap();
+    let err = rec.wait().expect_err("the sink failed to close");
+    assert!(matches!(err, RecorderError::Sink(_)), "{err:?}");
+    let cause = std::error::Error::source(&err)
+        .and_then(|e| e.downcast_ref::<std::io::Error>())
+        .expect("the source is the sink's io::Error");
+    assert_eq!(cause.to_string(), "disk full");
+}
+
 fn sink(path: &std::path::Path) -> FileOut {
     wav(path)
 }
@@ -221,7 +251,7 @@ fn a_finite_source_ends_its_own_take_and_the_file_is_readable() {
     )
     .expect("stereo source into a stereo sink");
 
-    wait_until("the finite source to run dry", || {
+    wait_until("the finite source to run dry", WAIT, || {
         drained.load(Ordering::Acquire)
     });
 
@@ -295,6 +325,7 @@ fn a_starving_source_is_ended_only_by_stop() {
     // duration — see `wait_until`.
     wait_until(
         "the live source to survive a starve and be polled again",
+        WAIT,
         || polls.load(Ordering::Acquire) >= 3,
     );
 
@@ -313,7 +344,8 @@ fn a_starving_source_is_ended_only_by_stop() {
 /// **A panic on the pump thread becomes an error, not a lost take.**
 ///
 /// The join maps the pump's panic to
-/// `io::Error::other("recording thread panicked: {message}")`.
+/// [`RecorderError::Panicked`], reading "thread `tutti-recorder` panicked:
+/// {message}".
 ///
 /// Safe to run only because this repo uses nextest, which gives every test its
 /// own process: the panic is caught by the join here, but a pump that used
@@ -337,7 +369,7 @@ fn a_panicking_source_surfaces_as_a_recording_thread_panic() {
 
     // Sequence on the panic having happened, not on a duration: a stop
     // requested first lets the thread exit cleanly without ever polling.
-    wait_until("the source to be polled and panic", || {
+    wait_until("the source to be polled and panic", WAIT, || {
         polled.load(Ordering::Acquire) >= 1
     });
 
@@ -345,9 +377,9 @@ fn a_panicking_source_surfaces_as_a_recording_thread_panic() {
         .finish()
         .expect_err("a panicked pump thread must be reported, not silently joined");
 
-    assert!(
-        err.to_string().contains("recording thread panicked"),
-        "expected the recording-thread panic, got: {err}"
+    assert_eq!(
+        err.to_string(),
+        "thread `tutti-recorder` panicked: the source fell over mid-take"
     );
     assert!(
         polled.load(Ordering::Acquire) >= 1,
@@ -437,7 +469,9 @@ fn is_finished_reports_a_finite_take_ending_itself_without_blocking() {
     )
     .expect("stereo source into a stereo sink");
 
-    wait_until("the finite take to finish on its own", || rec.is_finished());
+    wait_until("the finite take to finish on its own", WAIT, || {
+        rec.is_finished()
+    });
     assert!(
         rec.is_running(),
         "no stop was requested: the source's Ended ended the take"
@@ -484,6 +518,7 @@ fn a_requested_stop_ends_a_live_take_without_blocking() {
 
     wait_until(
         "the live source to survive a starve and be polled again",
+        WAIT,
         || polls.load(Ordering::Acquire) >= 3,
     );
     assert!(
@@ -493,7 +528,7 @@ fn a_requested_stop_ends_a_live_take_without_blocking() {
 
     rec.request_stop();
     assert!(!rec.is_running());
-    wait_until("the pump to notice the request", || rec.is_finished());
+    wait_until("the pump to notice the request", WAIT, || rec.is_finished());
 
     rec.finish_in_place()
         .expect("the take had not been collected yet")
@@ -544,7 +579,7 @@ fn a_dead_source_ends_its_own_take() {
     let wav = sink(&path);
     let mut rec = Recorder::start(Dead { left: 7 }, wav).unwrap();
 
-    wait_until("the pump to stop on its own", || rec.is_finished());
+    wait_until("the pump to stop on its own", WAIT, || rec.is_finished());
     assert!(rec.failed());
     assert!(rec.finish_in_place().unwrap().is_err());
     assert_eq!(hound::WavReader::open(&path).unwrap().len(), 14);
@@ -559,7 +594,7 @@ fn wait_and_finish_report_a_failed_source() {
         let path = dir.path().join("dead.wav");
         let wav = sink(&path);
         let rec = Recorder::start_finite(Dead { left: 7 }, wav).unwrap();
-        wait_until("the pump to stop on its own", || rec.is_finished());
+        wait_until("the pump to stop on its own", WAIT, || rec.is_finished());
         let result = if use_wait { rec.wait() } else { rec.finish() };
         assert!(
             matches!(result, Err(RecorderError::SourceFailed)),
@@ -611,7 +646,7 @@ fn dropping_a_live_recorder_still_finalizes_the_wav() {
         sink(&path),
     )
     .expect("matching stereo widths");
-    wait_until("the live source to be polled", || {
+    wait_until("the live source to be polled", WAIT, || {
         polls.load(Ordering::Acquire) >= 3
     });
     drop(rec);
@@ -650,7 +685,9 @@ fn finish_in_place_finalizes_in_place_exactly_once() {
         sink(&path),
     )
     .expect("matching stereo widths");
-    wait_until("a pass to land", || polls.load(Ordering::Acquire) >= 1);
+    wait_until("a pass to land", WAIT, || {
+        polls.load(Ordering::Acquire) >= 1
+    });
 
     assert!(rec.is_running());
     assert!(

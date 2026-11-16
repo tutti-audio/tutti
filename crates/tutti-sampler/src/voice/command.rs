@@ -320,7 +320,7 @@ pub(crate) struct Queued {
 
 /// A command never reached the pool, and the work it carried is gone.
 ///
-/// Modelled on `tutti_transport::QueueFull`: the two failures are told apart
+/// Modelled on `tutti_transport::TimedError`: the two failures are told apart
 /// because a caller acts on them differently.
 ///
 /// A dropped add is a note that never sounds; a dropped remove is a voice

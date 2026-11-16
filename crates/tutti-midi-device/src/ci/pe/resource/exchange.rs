@@ -399,6 +399,7 @@ fn the_resource_list_is_got_after_the_capabilities() {
 }
 
 // M2-103 §8.2 Tables 17 and 18, M2-105 Table 6: Get DeviceInfo.
+/// Spec: m2-105/3.1#1, m2-105/3.2#1
 #[test]
 fn get_returns_the_data_of_the_resource() {
     let mut link = Link::new(store(), 256);
@@ -627,7 +628,7 @@ fn the_responder_answers_400_for_data_that_is_not_the_resources() {
 
 // M2-103 §8.6.2 Tables 19 to 22: a page is `limit` entries from `offset`, and the reply
 // gives the `totalCount` of the list.
-/// Spec: m2-103/8.6.2#4
+/// Spec: m2-103/8.6.2#4, m2-107/2.1.3#1
 #[test]
 fn a_page_is_a_slice_of_the_list_with_its_total_count() {
     let mut raw = Raw::new();
@@ -701,7 +702,7 @@ fn the_walk_gathers_the_pages_of_a_list() {
 
 // M2-103 §8.6.2: "If offset and limit are not used, the Property Data shall contain
 // the whole list": a list whose entry does not paginate is got in one Get.
-/// Spec: m2-103/8.6.2#7
+/// Spec: m2-103/8.6.2#7, m2-105/4.2#1, m2-105/4.3#1
 #[test]
 fn a_list_that_does_not_paginate_is_got_whole() {
     let mut link = Link::new(store(), 256);
@@ -944,6 +945,7 @@ fn a_failed_page_fails_the_walk_with_its_status() {
 }
 
 // M2-103 §8.7, M2-109 §2.3 Table: Set LocalOn, then Get it.
+/// Spec: m2-109/2.2#1, m2-109/2.3#1
 #[test]
 fn set_replaces_the_data_and_get_reads_it_back() {
     let mut link = Link::new(store(), 256);

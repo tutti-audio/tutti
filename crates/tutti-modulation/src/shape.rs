@@ -77,12 +77,10 @@ impl LfoShape {
     pub fn evaluate_periodic(&self, phase_t: Phase) -> f32 {
         let phase = phase_t.get();
         match self {
-            // The one arm with a named conversion: `to_radians` is documented
-            // as being for exactly this call. The arms below stay on the raw cycle
-            // position — quarters and
+            // The arms below stay on the raw cycle position: quarters and
             // halves of a cycle are not angles, so unwrapping once at the top
             // is right for them.
-            Self::Sine => phase_t.to_radians().sin(),
+            Self::Sine => phase_t.sin(),
             Self::Triangle => {
                 let p = phase * 4.0;
                 if p < 1.0 {
