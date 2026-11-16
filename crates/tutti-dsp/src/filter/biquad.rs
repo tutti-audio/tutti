@@ -107,7 +107,7 @@ pub(super) fn decay_ring(radius: f64, multiplicity: u32, floor: Db, rate: Sample
     if radius <= 0.0 {
         return Ring::Finite(Seconds::new(0.0));
     }
-    let eps = libm::log(libm::pow(10.0, f64::from(floor.get()) / 20.0));
+    let eps = libm::log(f64::from(floor.to_amplitude().get()));
     let per_frame = -libm::log(radius);
     let mut frames = eps / -per_frame;
     for _ in 0..3 {

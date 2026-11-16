@@ -276,7 +276,7 @@ impl System for SvfModel {
             best.1 = best.1.max(h(at).abs());
             at += step;
         }
-        let eps = libm::pow(10.0, f64::from(floor.get()) / 20.0);
+        let eps = f64::from(floor.to_amplitude().get());
         let target = eps * best.1;
         if target.is_nan() || target <= 0.0 {
             return Ring::Finite(Seconds::new(0.0));
