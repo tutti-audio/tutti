@@ -342,7 +342,7 @@ impl Vst2Processor {
             let previous = self.time_info.last();
             let next = build_vst2_time_info(
                 t,
-                ctx.sample_rate.get(),
+                ctx.sample_rate,
                 previous.as_ref(),
                 self.host.automation(),
             );

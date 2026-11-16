@@ -19,7 +19,7 @@ use tutti_plugin_types::{
     ExpressiveContext, Features, MAX_BLOCK_CHANNELS, MIDI_STACK_CAPACITY, MidiEventVec,
     NoteExpressionChanges, NoteExpressionIntChanges, NoteExpressionTextChanges, ParameterChanges,
     ProcessContext, ProcessOutput, Sample, SampleFormat, SampleRate, Samples, ScaleChanges,
-    TransportChange, TransportInfo, WireMidi, sanitize,
+    TransportChange, TransportInfo, WireMidi, sanitize, silence,
 };
 use tutti_ump::Ump;
 
@@ -462,9 +462,7 @@ impl AudioPipeline {
                             chan[..num_samples].fill(0.0);
                         }
                     }
-                    for chan in output.iter_mut().take(out_n) {
-                        chan[..num_samples].fill(0.0);
-                    }
+                    silence(&mut output[..out_n], num_samples);
                     // Stack-allocated slice tables — no per-block Vec::collect.
                     // The helper builds the `AudioBuffer` internally so its
                     // four field lifetimes unify in a single inner scope.
@@ -502,9 +500,7 @@ impl AudioPipeline {
                             chan[..num_samples].fill(0.0);
                         }
                     }
-                    for chan in output.iter_mut().take(out_n) {
-                        chan[..num_samples].fill(0.0);
-                    }
+                    silence(&mut output[..out_n], num_samples);
                     let processed = with_audio_buffer(
                         &input[..in_n],
                         &mut output[..out_n],
@@ -638,12 +634,15 @@ fn with_audio_buffer<T: Sample, R>(
     size: usize,
     sample_rate: SampleRate,
     f: impl FnOnce(AudioBufferMut<'_, '_>) -> R,
-) -> R {
+) -> R
+where
+    for<'a> AudioBufferMut<'a, 'a>: From<AudioBuffer<'a, 'a, T>>,
+{
     // At most `MAX_BLOCK_CHANNELS`: the caller's slices are the slab's widths.
     let in_refs: ChannelTable<&[T]> = inputs.iter().map(|chan| &chan[..size]).collect();
     let mut out_refs: ChannelTable<&mut [T]> =
         outputs.iter_mut().map(|chan| &mut chan[..size]).collect();
-    f(T::tagged(AudioBuffer {
+    f(AudioBufferMut::from(AudioBuffer {
         inputs: &in_refs,
         outputs: &mut out_refs,
         num_samples: size,
@@ -727,10 +726,12 @@ mod tests {
             _ctx: &ProcessContext,
             _out: &mut ProcessOutput,
         ) -> PluginResult<()> {
-            if let AudioBufferMut::F32(b) = buffer {
-                for chan in b.outputs.iter_mut() {
-                    chan.fill(self.fill);
-                }
+            match buffer {
+                AudioBufferMut::F32(b) => b.outputs.iter_mut().for_each(|c| c.fill(self.fill)),
+                AudioBufferMut::F64(b) => b
+                    .outputs
+                    .iter_mut()
+                    .for_each(|c| c.fill(f64::from(self.fill))),
             }
             Ok(())
         }
@@ -1177,21 +1178,20 @@ mod tests {
     /// it proves nothing about a loader's per-block conversions. See
     /// [`process_through_the_real_vst3_loader_is_alloc_free`], which drives the
     /// same gate through a real plugin.
-    #[test]
-    fn process_is_alloc_free() {
+    fn assert_alloc_free_at(format: SampleFormat) {
         const CH: usize = 2;
         const N: usize = 128;
         let layout = test_layout(
             N,
-            SampleFormat::Float32,
+            format,
             &[ChannelLayout::STEREO],
             &[ChannelLayout::STEREO],
         );
-        let name = format!("tutti_noalloc_test_{}", std::process::id());
+        let name = tutti_fixtures::unique_name("tutti_noalloc_test");
         let _guard = AudioSlab::create(name.clone(), layout.clone()).unwrap();
         let mut shm = AudioSlab::open(name, layout).unwrap();
 
-        let mut pipeline = AudioPipeline::new(SampleFormat::Float32);
+        let mut pipeline = AudioPipeline::new(format);
         // A finite-output fake; sanitize still runs, it just finds nothing.
         let mut plugin = NanPlugin {
             meta: meta(&[CH], &[CH]),
@@ -1199,7 +1199,7 @@ mod tests {
         };
         let clock = Clock {
             sample_rate: SampleRate::SR_48K,
-            format: SampleFormat::Float32,
+            format: format,
         };
 
         // Warm up: first call allocates the scratch buffers.
@@ -1234,6 +1234,17 @@ mod tests {
                     .unwrap();
             }
         });
+    }
+
+    #[test]
+    fn process_is_alloc_free() {
+        assert_alloc_free_at(SampleFormat::Float32);
+    }
+
+    /// The `Float64` scratch path builds its tables without allocating either.
+    #[test]
+    fn process_is_alloc_free_at_float64() {
+        assert_alloc_free_at(SampleFormat::Float64);
     }
 
     /// RT-safety regression for the multi-bus split: the per-direction channel

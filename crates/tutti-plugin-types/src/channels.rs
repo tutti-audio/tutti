@@ -59,29 +59,17 @@ pub struct PluginTooWide {
 pub trait Sample: Copy + Default + Send + 'static {
     /// Whether the value is neither NaN nor infinite.
     fn is_finite(self) -> bool;
-
-    /// `buffer` tagged with this width, as [`Processor::process`](crate::Processor::process)
-    /// takes it.
-    fn tagged<'t, 'd: 't>(buffer: AudioBuffer<'t, 'd, Self>) -> AudioBufferMut<'t, 'd>;
 }
 
 impl Sample for f32 {
     fn is_finite(self) -> bool {
         f32::is_finite(self)
     }
-
-    fn tagged<'t, 'd: 't>(buffer: AudioBuffer<'t, 'd, Self>) -> AudioBufferMut<'t, 'd> {
-        AudioBufferMut::F32(buffer)
-    }
 }
 
 impl Sample for f64 {
     fn is_finite(self) -> bool {
         f64::is_finite(self)
-    }
-
-    fn tagged<'t, 'd: 't>(buffer: AudioBuffer<'t, 'd, Self>) -> AudioBufferMut<'t, 'd> {
-        AudioBufferMut::F64(buffer)
     }
 }
 
@@ -143,8 +131,9 @@ impl<S> std::ops::DerefMut for ChannelTable<S> {
 
 /// Zeroes the first `frames` samples of every channel (all of a shorter one).
 /// Allocation-free and RT-safe.
-pub fn silence<T: Sample>(channels: &mut [&mut [T]], frames: usize) {
+pub fn silence<T: Sample, C: AsMut<[T]>>(channels: &mut [C], frames: usize) {
     for channel in channels {
+        let channel = channel.as_mut();
         let n = channel.len().min(frames);
         channel[..n].fill(T::default());
     }
@@ -251,7 +240,7 @@ impl<'t, 'd: 't, T: Sample> AudioBuffer<'t, 'd, T> {
     /// declines to render repeats stale audio rather than going quiet.
     /// Allocation-free and RT-safe.
     pub fn clear_outputs(&mut self) {
-        silence(self.outputs, self.num_samples);
+        silence(self.outputs, usize::MAX);
     }
 }
 
@@ -276,6 +265,18 @@ pub enum AudioBufferMut<'t, 'd: 't> {
     F32(AudioBuffer<'t, 'd, f32>),
     /// A 64-bit block, from a plugin that negotiated a 64-bit bus.
     F64(AudioBuffer<'t, 'd, f64>),
+}
+
+impl<'t, 'd: 't> From<AudioBuffer<'t, 'd, f32>> for AudioBufferMut<'t, 'd> {
+    fn from(buffer: AudioBuffer<'t, 'd, f32>) -> Self {
+        Self::F32(buffer)
+    }
+}
+
+impl<'t, 'd: 't> From<AudioBuffer<'t, 'd, f64>> for AudioBufferMut<'t, 'd> {
+    fn from(buffer: AudioBuffer<'t, 'd, f64>) -> Self {
+        Self::F64(buffer)
+    }
 }
 
 impl<'t, 'd: 't> AudioBufferMut<'t, 'd> {
@@ -307,7 +308,7 @@ impl<'t, 'd: 't> AudioBufferMut<'t, 'd> {
 
 #[cfg(test)]
 mod tests {
-    use super::{AudioBufferMut, ChannelTable, MAX_BLOCK_CHANNELS, Sample, sanitize, silence};
+    use super::{AudioBufferMut, ChannelTable, MAX_BLOCK_CHANNELS, sanitize, silence};
     use tutti_types::SampleRate;
 
     #[test]
@@ -340,10 +341,10 @@ mod tests {
     }
 
     #[test]
-    fn a_tagged_buffer_carries_its_width_and_rate() {
+    fn a_buffer_converts_to_its_width_and_carries_its_width_and_rate() {
         let (inputs, mut outputs) = ([[0.0_f64; 2].as_slice()], [[0.0_f64; 2]]);
         let mut outs = [outputs[0].as_mut_slice()];
-        let tagged = f64::tagged(super::AudioBuffer::new(
+        let tagged = AudioBufferMut::from(super::AudioBuffer::new(
             &inputs,
             &mut outs,
             SampleRate::SR_96K,

@@ -856,8 +856,8 @@ pub struct Stuck<P, C> {
     pub reason: PluginError,
 }
 
-/// One block through `processor`, over the channels `inputs` and `outputs`
-/// again in tables whose borrow is this call's own, because [`PluginIo`] holds
+/// Runs one block of `inputs` and `outputs` through `processor`. The outputs are
+/// borrowed again into a table of this call's own, because [`PluginIo`] holds
 /// one lifetime for tables and data and a `&mut [&mut _]` is invariant in the
 /// data's. The tables are stack arrays ([`ChannelTable`]), so this is callable
 /// on the audio thread.
@@ -874,10 +874,13 @@ pub fn process_block<P: Processor, T: Sample>(
     sample_rate: SampleRate,
     ctx: &ProcessContext<'_>,
     out: &mut ProcessOutput,
-) -> PluginResult<()> {
+) -> PluginResult<()>
+where
+    for<'a> AudioBufferMut<'a, 'a>: From<AudioBuffer<'a, 'a, T>>,
+{
     let mut table: ChannelTable<&mut [T]> = outputs.iter_mut().map(|o| &mut **o).collect();
     let mut io = PluginIo {
-        buffer: T::tagged(AudioBuffer {
+        buffer: AudioBufferMut::from(AudioBuffer {
             inputs,
             outputs: &mut table,
             num_samples,

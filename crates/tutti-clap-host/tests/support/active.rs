@@ -143,7 +143,7 @@ impl<T: Width> ActiveExt<T> for Active<T> {
         buffer: &mut AudioBuffer<T>,
         ctx: &ClapProcessContext<'_>,
     ) -> tutti_clap_host::Result<ProcessOutputRef<'_>> {
-        let mut wrapped = T::tagged(AudioBuffer {
+        let mut wrapped = AudioBufferMut::from(AudioBuffer {
             inputs: buffer.inputs,
             outputs: &mut *buffer.outputs,
             num_samples: buffer.num_samples,

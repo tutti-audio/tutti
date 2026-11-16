@@ -430,8 +430,16 @@ impl AtomicSampleRate {
 /// Empty is the bit pattern of `0.0`, which no `SampleRate` has, so a parked
 /// rate is never read as empty and the cell is one lock-free word. Parking over
 /// a rate nobody took replaces it: the taker only needs the latest.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct ParkedSampleRate(core::sync::atomic::AtomicU64);
+
+impl core::fmt::Debug for ParkedSampleRate {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let bits = self.0.load(core::sync::atomic::Ordering::Relaxed);
+        let parked = (bits != 0).then(|| SampleRate(f64::from_bits(bits)));
+        f.debug_tuple("ParkedSampleRate").field(&parked).finish()
+    }
+}
 
 impl ParkedSampleRate {
     /// A cell with nothing parked.

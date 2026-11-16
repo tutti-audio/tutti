@@ -68,7 +68,7 @@ impl<L: Loaded> Render for Active<L> {
         let mut refs: Vec<&mut [S]> = outs.iter_mut().map(Vec::as_mut_slice).collect();
         let mut out = ProcessOutput::default();
         let mut io = PluginIo {
-            buffer: S::tagged(AudioBuffer::new(&ins, &mut refs, self.prepare().rate())),
+            buffer: AudioBufferMut::from(AudioBuffer::new(&ins, &mut refs, self.prepare().rate())),
             ctx,
             out: &mut out,
         };
