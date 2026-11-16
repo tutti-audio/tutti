@@ -43,7 +43,7 @@ use tutti_plugin_types::{
 use tutti_rt::{Overflow, PushError, Returned, RingReader, RingWriter, Rt, ring};
 
 use crate::audio_pipeline::{AudioBlock, AudioPipeline, Clock, ProcessExtras};
-use crate::served::{Render, through};
+use crate::served::Render;
 use crate::transport::Transport;
 
 /// How long the render thread waits for a request before it looks at its
@@ -141,19 +141,11 @@ impl<P: Processor + 'static> Render for End<P> {
         // refused): the block is silence and the plugin is not touched.
         let Some(processor) = self.rt.held() else {
             out.clear();
-            match buffer {
-                AudioBufferMut::F32(mut b) => b.clear_outputs(),
-                AudioBufferMut::F64(mut b) => b.clear_outputs(),
-            }
+            let mut buffer = buffer;
+            buffer.clear_outputs();
             return Ok(());
         };
-        // The closures are not redundant: the variant's constructor is one
-        // function over fixed lifetimes, `through` wants one for any lifetime.
-        #[allow(clippy::redundant_closure)]
-        match buffer {
-            AudioBufferMut::F32(b) => through(processor, b, ctx, out, |b| AudioBufferMut::F32(b)),
-            AudioBufferMut::F64(b) => through(processor, b, ctx, out, |b| AudioBufferMut::F64(b)),
-        }
+        buffer.process(processor, ctx, out)
     }
 }
 

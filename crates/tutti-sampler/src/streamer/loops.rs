@@ -37,7 +37,7 @@ use crate::Loop;
 use crate::nonempty;
 use crate::voice::Direction;
 use crate::voice::interp::{split_position, tap_indices};
-use crate::voice::loop_span::{LoopSpan, blend};
+use crate::voice::loop_span::LoopSpan;
 
 /// A loop at most this many frames long keeps its body (`[resume, end)`)
 /// resident, so a streamed refill does not seek the decoder once per wrap.
@@ -353,7 +353,7 @@ impl RingLoop {
             };
             let at = (lead + fade - self.span.resume()) * ch;
             for (s, &l) in frame.iter_mut().zip(&self.lead_in[at..at + ch]) {
-                *s = blend(*s, l, weight);
+                *s = tutti_dsp::lerp(*s, l, weight);
             }
         }
     }

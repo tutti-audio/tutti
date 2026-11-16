@@ -152,12 +152,8 @@ fn try_send_bridge_msg(
     stream: &interprocess::local_socket::Stream,
     msg: &BridgeMessage,
 ) -> std::io::Result<()> {
-    use std::io::Write;
     let mut stream = stream;
-    let data = postcard::to_allocvec(msg).unwrap();
-    let len = (data.len() as u32).to_be_bytes();
-    stream.write_all(&len)?;
-    stream.write_all(&data)
+    crate::protocol::frame::write_frame(&mut stream, msg).map_err(std::io::Error::other)
 }
 
 /// One stereo bus per direction — the common shape, and the one most easily

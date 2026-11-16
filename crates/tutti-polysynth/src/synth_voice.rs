@@ -23,6 +23,7 @@ use crate::tuning::A4_FREQ;
 use crate::unison::MAX_UNISON_VOICES;
 use crate::{FilterModConfig, FilterType, SynthConfig};
 use crate::{MpeVoiceState, UnisonEngine, UnisonVoiceParams, UnisonVoices};
+use tutti_dsp::{PanLaw, pan_gains};
 use tutti_types::{
     Amplitude, Depth, Hz, Pan, Phase, PhaseIncrement, Resonance, SampleRate, Seconds, Semitones,
 };
@@ -119,13 +120,27 @@ fn two_octave_factor(x: f32) -> f32 {
 /// puts `sqrt(0.5)` in each channel at its centre, which a mono voice at the
 /// channel's centre keeps: RP-036's `cos (Pi/4)`). A mono voice panned by the
 /// channel alone thus has RP-036's gains exactly; a unison stack, whose
-/// sub-voices spread about the centre, is balanced by it.
-fn channel_pan(channel: &ChannelState) -> (f32, f32) {
+/// sub-voices spread about the centre, is balanced by it. A pan at an end puts
+/// exactly 0 in the far channel; a NaN pan is the centre.
+fn channel_pan(channel: &ChannelState) -> (Amplitude, Amplitude) {
+    unity_centre_pan(channel.pan())
+}
+
+/// [`channel_pan`] of a pan position.
+fn unity_centre_pan(pan: Pan) -> (Amplitude, Amplitude) {
+    let p = pan.get();
+    let p = if p.is_nan() { 0.0 } else { p.clamp(-1.0, 1.0) };
+    if p <= -1.0 {
+        return (Amplitude(std::f32::consts::SQRT_2), Amplitude::SILENT);
+    }
+    if p >= 1.0 {
+        return (Amplitude::SILENT, Amplitude(std::f32::consts::SQRT_2));
+    }
     // `sqrt(2) cos(Pi/4 + d)` is `cos d - sin d` and `sqrt(2) sin(Pi/4 + d)` is
     // `cos d + sin d`, with `d` the angle off the centre: written so, the centre
     // is 1 exactly, where `SQRT_2 * FRAC_PI_4.cos()` is one ulp short in `f32`.
-    let (sin, cos) = (std::f32::consts::FRAC_PI_4 * channel.pan().get()).sin_cos();
-    (cos - sin, cos + sin)
+    let (sin, cos) = (std::f32::consts::FRAC_PI_4 * p).sin_cos();
+    (Amplitude(cos - sin), Amplitude(cos + sin))
 }
 
 impl SynthVoice {
@@ -420,11 +435,12 @@ impl SynthVoice {
             bank.set_pitch(lane, Hz(freq * ratio));
             // Constant-power pan law, then the unison voice's own gain and the
             // voice's. Evaluated per control step, not per sample.
-            let (pan, g) = (pan.get(), amplitude.get() * gain);
+            let (left, right) = pan_gains(pan, PanLaw::SquareRoot);
+            let g = amplitude.get() * gain;
             bank.set_gains(
                 lane,
-                Amplitude(((1.0 - pan) * 0.5).sqrt() * g * pan_left),
-                Amplitude(((1.0 + pan) * 0.5).sqrt() * g * pan_right),
+                Amplitude(left.get() * g * pan_left.get()),
+                Amplitude(right.get() * g * pan_right.get()),
             );
             if self.snap_tone {
                 bank.snap_tone(lane);

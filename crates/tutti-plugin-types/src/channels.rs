@@ -22,6 +22,8 @@
 //!   extensions (e.g. `tutti-vst3-host`'s `Vst3Sample`) layer format-specific
 //!   constants on top.
 
+use tutti_types::SampleRate;
+
 /// The most channels, per direction, that a block's stack-built channel tables
 /// hold (the `&[&[T]]` and `&mut [&mut [T]]` slice tables of the plugin server's
 /// audio pipeline and of the in-process node's `process`).
@@ -71,6 +73,72 @@ impl Sample for f64 {
     }
 }
 
+/// The channel slices of one direction of a block, in a fixed table of
+/// [`MAX_BLOCK_CHANNELS`] slots on the stack: `ChannelTable<&[T]>` for inputs,
+/// `ChannelTable<&mut [T]>` for outputs. Collecting one allocates nothing,
+/// which is what lets the audio thread build the tables of a block.
+///
+/// It reads as the slice of the channels collected. A table is a plain array
+/// with no `Drop`, so a table of `&mut [T]` does not force its data to outlive
+/// it, which an `ArrayVec` of them would.
+pub struct ChannelTable<S> {
+    slots: [S; MAX_BLOCK_CHANNELS],
+    len: usize,
+}
+
+impl<S> std::fmt::Debug for ChannelTable<S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ChannelTable")
+            .field("channels", &self.len)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<S: Default> FromIterator<S> for ChannelTable<S> {
+    /// # Panics
+    ///
+    /// When more than [`MAX_BLOCK_CHANNELS`] channels are collected: a channel
+    /// is never dropped, and every caller's width was refused past the
+    /// maximum where it was first known ([`PluginTooWide`]).
+    fn from_iter<I: IntoIterator<Item = S>>(channels: I) -> Self {
+        let mut slots: [S; MAX_BLOCK_CHANNELS] = std::array::from_fn(|_| S::default());
+        let mut len = 0;
+        for channel in channels {
+            assert!(
+                len < MAX_BLOCK_CHANNELS,
+                "more than {MAX_BLOCK_CHANNELS} channels in a block"
+            );
+            slots[len] = channel;
+            len += 1;
+        }
+        Self { slots, len }
+    }
+}
+
+impl<S> std::ops::Deref for ChannelTable<S> {
+    type Target = [S];
+
+    fn deref(&self) -> &[S] {
+        &self.slots[..self.len]
+    }
+}
+
+impl<S> std::ops::DerefMut for ChannelTable<S> {
+    fn deref_mut(&mut self) -> &mut [S] {
+        &mut self.slots[..self.len]
+    }
+}
+
+/// Zeroes the first `frames` samples of every channel (all of a shorter one).
+/// Allocation-free and RT-safe.
+pub fn silence<T: Sample, C: AsMut<[T]>>(channels: &mut [C], frames: usize) {
+    for channel in channels {
+        let channel = channel.as_mut();
+        let n = channel.len().min(frames);
+        channel[..n].fill(T::default());
+    }
+}
+
 /// Replaces every NaN and infinite sample with zero and says whether any was
 /// replaced.
 ///
@@ -113,9 +181,8 @@ pub struct AudioBuffer<'t, 'd: 't, T: Sample = f32> {
     /// Block length in **frames**, not samples: each channel slice holds this
     /// many elements, so the total sample count is `num_samples * channels`.
     pub num_samples: usize,
-    /// Render rate in Hz. A raw `f64` because it is handed straight to a C ABI,
-    /// which is where the unit types stop.
-    pub sample_rate: f64,
+    /// The rate the block renders at.
+    pub sample_rate: SampleRate,
 }
 
 impl<T: Sample> std::fmt::Debug for AudioBuffer<'_, '_, T> {
@@ -137,7 +204,11 @@ impl<'t, 'd: 't, T: Sample> AudioBuffer<'t, 'd, T> {
     ///
     /// # Panics
     /// Panics if both `inputs` and `outputs` are empty.
-    pub fn new(inputs: &'t [&'d [T]], outputs: &'t mut [&'d mut [T]], sample_rate: f64) -> Self {
+    pub fn new(
+        inputs: &'t [&'d [T]],
+        outputs: &'t mut [&'d mut [T]],
+        sample_rate: SampleRate,
+    ) -> Self {
         let num_samples = outputs
             .first()
             .map(|s| s.len())
@@ -169,9 +240,7 @@ impl<'t, 'd: 't, T: Sample> AudioBuffer<'t, 'd, T> {
     /// declines to render repeats stale audio rather than going quiet.
     /// Allocation-free and RT-safe.
     pub fn clear_outputs(&mut self) {
-        for output in self.outputs.iter_mut() {
-            output.fill(T::default());
-        }
+        silence(self.outputs, usize::MAX);
     }
 }
 
@@ -198,6 +267,18 @@ pub enum AudioBufferMut<'t, 'd: 't> {
     F64(AudioBuffer<'t, 'd, f64>),
 }
 
+impl<'t, 'd: 't> From<AudioBuffer<'t, 'd, f32>> for AudioBufferMut<'t, 'd> {
+    fn from(buffer: AudioBuffer<'t, 'd, f32>) -> Self {
+        Self::F32(buffer)
+    }
+}
+
+impl<'t, 'd: 't> From<AudioBuffer<'t, 'd, f64>> for AudioBufferMut<'t, 'd> {
+    fn from(buffer: AudioBuffer<'t, 'd, f64>) -> Self {
+        Self::F64(buffer)
+    }
+}
+
 impl<'t, 'd: 't> AudioBufferMut<'t, 'd> {
     /// Block length in **frames**, whichever width this carries.
     pub fn num_samples(&self) -> usize {
@@ -207,8 +288,17 @@ impl<'t, 'd: 't> AudioBufferMut<'t, 'd> {
         }
     }
 
-    /// Render rate in Hz, whichever width this carries.
-    pub fn sample_rate(&self) -> f64 {
+    /// Zeroes every output channel, whichever width this carries
+    /// ([`AudioBuffer::clear_outputs`]).
+    pub fn clear_outputs(&mut self) {
+        match self {
+            Self::F32(b) => b.clear_outputs(),
+            Self::F64(b) => b.clear_outputs(),
+        }
+    }
+
+    /// The render rate, whichever width this carries.
+    pub fn sample_rate(&self) -> SampleRate {
         match self {
             Self::F32(b) => b.sample_rate,
             Self::F64(b) => b.sample_rate,
@@ -218,7 +308,50 @@ impl<'t, 'd: 't> AudioBufferMut<'t, 'd> {
 
 #[cfg(test)]
 mod tests {
-    use super::sanitize;
+    use super::{AudioBufferMut, ChannelTable, MAX_BLOCK_CHANNELS, sanitize, silence};
+    use tutti_types::SampleRate;
+
+    #[test]
+    fn a_channel_table_holds_the_channels_collected_in_order_without_allocating() {
+        let data = [[1.0_f32; 4], [2.0; 4], [3.0; 4]];
+        let table = assert_no_alloc::assert_no_alloc(|| {
+            data.iter()
+                .map(|c| c.as_slice())
+                .collect::<ChannelTable<&[f32]>>()
+        });
+        assert_eq!(table.len(), 3);
+        assert_eq!(table[2], &[3.0; 4][..]);
+    }
+
+    #[test]
+    #[should_panic(expected = "channels in a block")]
+    fn a_channel_table_refuses_a_channel_past_the_maximum_instead_of_dropping_it() {
+        let data = [0.0_f32; 1];
+        let _ = (0..=MAX_BLOCK_CHANNELS)
+            .map(|_| data.as_slice())
+            .collect::<ChannelTable<&[f32]>>();
+    }
+
+    #[test]
+    fn silence_zeroes_the_first_frames_of_every_channel_and_spares_the_rest() {
+        let (mut a, mut b) = ([1.0_f64; 4], [1.0_f64; 2]);
+        silence(&mut [&mut a[..], &mut b[..]], 3);
+        assert_eq!(a, [0.0, 0.0, 0.0, 1.0]);
+        assert_eq!(b, [0.0, 0.0]);
+    }
+
+    #[test]
+    fn a_buffer_converts_to_its_width_and_carries_its_width_and_rate() {
+        let (inputs, mut outputs) = ([[0.0_f64; 2].as_slice()], [[0.0_f64; 2]]);
+        let mut outs = [outputs[0].as_mut_slice()];
+        let tagged = AudioBufferMut::from(super::AudioBuffer::new(
+            &inputs,
+            &mut outs,
+            SampleRate::SR_96K,
+        ));
+        assert!(matches!(tagged, AudioBufferMut::F64(_)));
+        assert_eq!(tagged.sample_rate(), SampleRate::SR_96K);
+    }
 
     #[test]
     fn sanitize_zeroes_nan_and_both_infinities_and_keeps_finite_samples() {

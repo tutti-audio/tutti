@@ -377,7 +377,7 @@ impl HrtfBinaural {
                     // Reaches the new filter on the step's last frame, so the
                     // next step continues from it.
                     let t = (i + 1) as f32 * step;
-                    *w = z + (y - z) * t;
+                    *w = crate::lerp(z, y, t);
                 }
             } else {
                 wet.copy_from_slice(new);

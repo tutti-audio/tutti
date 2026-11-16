@@ -424,6 +424,48 @@ impl AtomicSampleRate {
     }
 }
 
+/// A [`SampleRate`] one thread leaves for another to take: an
+/// [`AtomicSampleRate`] that can also be empty.
+///
+/// Empty is the bit pattern of `0.0`, which no `SampleRate` has, so a parked
+/// rate is never read as empty and the cell is one lock-free word. Parking over
+/// a rate nobody took replaces it: the taker only needs the latest.
+#[derive(Default)]
+pub struct ParkedSampleRate(core::sync::atomic::AtomicU64);
+
+impl core::fmt::Debug for ParkedSampleRate {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let bits = self.0.load(core::sync::atomic::Ordering::Relaxed);
+        let parked = (bits != 0).then(|| SampleRate(f64::from_bits(bits)));
+        f.debug_tuple("ParkedSampleRate").field(&parked).finish()
+    }
+}
+
+impl ParkedSampleRate {
+    /// A cell with nothing parked.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self(core::sync::atomic::AtomicU64::new(0))
+    }
+
+    /// Parks `rate`, replacing one that was not taken.
+    #[inline]
+    pub fn park(&self, rate: SampleRate, order: core::sync::atomic::Ordering) {
+        self.0.store(rate.0.to_bits(), order);
+    }
+
+    /// Takes the parked rate, leaving the cell empty; `None` when nothing is
+    /// parked.
+    #[inline]
+    pub fn take(&self, order: core::sync::atomic::Ordering) -> Option<SampleRate> {
+        match self.0.swap(0, order) {
+            0 => None,
+            // Only `park` writes a nonzero word, from a `SampleRate`.
+            bits => Some(SampleRate(f64::from_bits(bits))),
+        }
+    }
+}
+
 /// A raw number that is not a sample rate: NaN, infinite, zero or negative
 /// (see [`SampleRate::new`]).
 #[derive(Debug, Clone, Copy, PartialEq, thiserror::Error)]

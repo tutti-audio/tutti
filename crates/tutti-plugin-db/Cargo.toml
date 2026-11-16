@@ -29,7 +29,7 @@ tutti-types = { version = "0.0.1", path = "../tutti-types", default-features = f
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 serde = { version = "1", features = ["derive"], optional = true }
 thiserror.workspace = true
-tracing = "0.1"
+tracing.workspace = true
 # The scan's progress and delta channels.
 crossbeam-channel = "0.5"
 

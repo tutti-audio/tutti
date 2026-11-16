@@ -1193,7 +1193,11 @@ pub fn process_does_not_allocate<F: Format>() {
     let mut outs = [left.as_mut_slice(), right.as_mut_slice()];
     let mut out = ProcessOutput::default();
     let mut io = PluginIo {
-        buffer: AudioBufferMut::F32(AudioBuffer::new(&refs, &mut outs, RATE)),
+        buffer: AudioBufferMut::F32(AudioBuffer::new(
+            &refs,
+            &mut outs,
+            tutti_plugin_types::SampleRate::of(RATE),
+        )),
         ctx: &ctx,
         out: &mut out,
     };

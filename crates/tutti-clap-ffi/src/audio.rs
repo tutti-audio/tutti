@@ -92,7 +92,7 @@ unsafe impl<T: Width> Send for Typed<T> {}
 /// A sample width CLAP carries: `f32` through `data32`, `f64` through
 /// `data64`. A fixed fact of each type; the width a scratch holds is the
 /// runtime [`SampleFormat`] in its [`Pool`].
-trait Width: Copy + Default + Send + 'static {
+trait Width: tutti_plugin_types::Sample {
     /// A port buffer over `channel_count` channel pointers at `ptrs`.
     fn port_buffer(ptrs: *mut *mut Self, channel_count: u32) -> clap_audio_buffer;
 }
@@ -325,15 +325,9 @@ impl Planar<'_, '_> {
 
     /// Silences the first `frames` of every output channel.
     fn silence_outputs(&mut self, frames: usize) {
-        fn zero<T: Width>(outputs: &mut [&mut [T]], frames: usize) {
-            for channel in outputs {
-                let n = channel.len().min(frames);
-                channel[..n].fill(T::default());
-            }
-        }
         match self {
-            Self::F32 { outputs, .. } => zero(outputs, frames),
-            Self::F64 { outputs, .. } => zero(outputs, frames),
+            Self::F32 { outputs, .. } => tutti_plugin_types::silence(outputs, frames),
+            Self::F64 { outputs, .. } => tutti_plugin_types::silence(outputs, frames),
         }
     }
 }

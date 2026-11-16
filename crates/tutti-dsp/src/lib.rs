@@ -148,8 +148,10 @@ mod fft;
 mod filter;
 mod glide;
 mod interp;
+mod level;
 mod modulation;
 mod oscillator;
+mod pan;
 mod waveshape;
 
 mod model;
@@ -186,7 +188,7 @@ pub use filter::{
     SvfCoefficients, SvfCoeffs, SvfControls, SvfModel, SvfType, fit_to_rate, ladder_step, svf_step,
 };
 pub use glide::{Glide, Lerp, Steps};
-pub use interp::cubic_hermite;
+pub use interp::{cubic_hermite, lerp};
 pub use model::{Lti, MaxDecay, MaxDecayError, Ring, System, TAIL_FLOOR};
 pub use modulation::allpass::{allpass_coeff, sweep_hz};
 pub use modulation::mod_delay::{
@@ -198,6 +200,7 @@ pub use modulation::phaser::{
 };
 pub use modulation::sweep::{Stagger, StaggerError, Sweep, SweepError};
 pub use oscillator::{Oscillator, OscillatorWave};
+pub use pan::{PanLaw, pan_gains};
 pub use resample::{ChunkSize, FftResampler, ResampleError, StreamingResampler, WindowedSinc};
 pub use reverb::fdn::bank::{FdnBank, FdnGlides};
 pub use reverb::fdn::design::{FdnControls, FdnLayout, MAX_PRE_DELAY, MIN_DECAY};

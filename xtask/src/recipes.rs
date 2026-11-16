@@ -256,6 +256,11 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
         "a configured thing is built by the one shape, bar the rows of xtask/building-baseline.txt and the gate's allow-list",
     ),
     (
+        "check-logging",
+        "",
+        "no `log` dependency, and no print macro outside a main, a test or an example",
+    ),
+    (
         "check-conformance",
         "",
         "spec inventories are well formed, test tags name rows, the CLAP inventory matches clap-sys and the VST3 one the SDK",
@@ -592,6 +597,7 @@ impl Planner<'_> {
             "check-platform-seam" => self.out.push(Step::Gate(Gate::PlatformSeam)),
             "check-buffers" => self.out.push(Step::Gate(Gate::Buffers)),
             "check-building" => self.out.push(Step::Gate(Gate::Building)),
+            "check-logging" => self.out.push(Step::Gate(Gate::Logging)),
             "check-conformance" => self.out.push(Step::Gate(Gate::Conformance)),
             "conformance" => {
                 let o = options(name, args, &["--results", "--out"])?;
@@ -719,7 +725,7 @@ impl Planner<'_> {
                     "check-value-traits", "check-submodule-pins", "check-doc-refs",
                     "check-pointers", "check-comments", "check-platform-seam", "check-doc-idents",
                     "check-passive-tests", "check-alloc-binaries", "check-buffers",
-                    "check-building", "check-umbrella",
+                    "check-building", "check-umbrella", "check-logging",
                 ] {
                     self.dep(d)?;
                 }

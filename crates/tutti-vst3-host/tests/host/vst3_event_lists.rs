@@ -462,7 +462,7 @@ fn a_stop_drops_an_open_sysex_once() {
     let [l, r] = &mut out;
     let outs: &mut [&mut [f32]] = &mut [&mut l[..], &mut r[..]];
     let ins: &[&[f32]] = &[&input[0][..], &input[1][..]];
-    let mut buffer = AudioBuffer::new(ins, outs, 48_000.0);
+    let mut buffer = AudioBuffer::new(ins, outs, tutti_plugin_types::SampleRate::SR_48K);
     let _ = plugin.process(
         &mut buffer,
         &midi_only(&open),

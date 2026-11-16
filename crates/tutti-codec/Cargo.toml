@@ -40,7 +40,7 @@ serde = ["dep:serde"]
 [dependencies]
 thiserror.workspace = true
 # An unfinished file that cannot be removed is logged.
-tracing = "0.1"
+tracing.workspace = true
 tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 tutti-types = { version = "0.0.1", path = "../tutti-types", default-features = false }
 # `spawn_named`: the encoders' worker threads, joined when the writer drops.

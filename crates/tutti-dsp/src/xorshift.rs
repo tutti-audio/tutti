@@ -43,6 +43,13 @@ impl Xorshift32 {
     pub fn to_unit(word: u32) -> f32 {
         word as f32 / u32::MAX as f32
     }
+
+    /// A word as a uniform draw in `[-1, 1]`: `2 * to_unit(word) - 1`.
+    #[inline]
+    #[must_use]
+    pub fn to_bipolar(word: u32) -> f32 {
+        2.0 * Self::to_unit(word) - 1.0
+    }
 }
 
 #[cfg(test)]

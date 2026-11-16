@@ -183,7 +183,7 @@ fn drive(inst: &mut Active<f32>, params: &ParameterChanges) -> Vec<f32> {
             inputs: &in_refs,
             outputs: &mut out_refs,
             num_samples: FRAMES,
-            sample_rate: SAMPLE_RATE,
+            sample_rate: tutti_plugin_types::SampleRate::of(SAMPLE_RATE),
         };
         let ctx = ClapProcessContext {
             params: Some(params),

@@ -438,16 +438,16 @@ impl SpectrumPlan {
         let (lo, hi) = (f64::from(min.get()), f64::from(max.get()));
         let edges: Vec<f64> = match per_octave {
             Some(n) => {
-                let bands = (n as f64 * (hi / lo).log2() + 1e-9).floor() as usize;
+                let bands = (n as f64 * libm::log2(hi / lo) + 1e-9).floor() as usize;
                 if bands == 0 {
                     return Err(empty);
                 }
                 (0..=bands)
-                    .map(|j| lo * (j as f64 / n as f64).exp2())
+                    .map(|j| lo * libm::exp2(j as f64 / n as f64))
                     .collect()
             }
             None => (0..=count)
-                .map(|j| lo * (hi / lo).powf(j as f64 / count as f64))
+                .map(|j| lo * libm::pow(hi / lo, j as f64 / count as f64))
                 .collect(),
         };
         Ok(Some(edges))
@@ -732,11 +732,11 @@ fn clamp_power(p: f32) -> f32 {
     }
 }
 
-/// `10 log10(power)`, at least `floor`; zero power reads the floor.
+/// [`Db::from_power`], at least `floor`; zero power reads the floor.
 #[inline]
 fn to_db(power: f32, floor: Db) -> Db {
     if power > 0.0 {
-        Db((10.0 * power.log10()).max(floor.get()))
+        Db::from_power(power).max(floor)
     } else {
         floor
     }

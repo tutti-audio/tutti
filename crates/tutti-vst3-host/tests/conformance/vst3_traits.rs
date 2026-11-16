@@ -5,7 +5,7 @@
 //! The probe reads `TUTTI_PROBE_MISBEHAVIOUR` once per instance, so every test
 //! holds [`PROBE_LOCK`] and a [`Probe`] guard.
 
-use std::path::PathBuf;
+use crate::probe::probe_path;
 use std::sync::{Mutex, MutexGuard};
 use tutti_fixtures::main_thread;
 
@@ -20,8 +20,6 @@ use tutti_vst3_host::{LoadOptions, ProcessorAny, Vst3Loaded};
 
 static PROBE_LOCK: Mutex<()> = Mutex::new(());
 
-const PROBE_DIR_BUILT: &str = env!("VST3_PROBE_DIR");
-
 /// `kParamMode`, `kParamRamp`, `kParamUiState` (`probeids.h`).
 const PARAM_MODE: u32 = 100;
 const PARAM_RAMP: u32 = 101;
@@ -35,15 +33,6 @@ const SET_ACTIVE_FAILS: &str = "1";
 const PROCESS_FAILS: &str = "4";
 const REFUSES_HIGH_RATES: &str = "14";
 const REFUSES_OFFLINE: &str = "15";
-
-fn probe_path() -> PathBuf {
-    let bundle = std::path::Path::new(PROBE_DIR_BUILT).join("audio-probe.vst3");
-    tutti_plugin_types::bundle::any_module_in_bundle(
-        &bundle,
-        tutti_plugin_types::bundle::ModuleKind::Vst3,
-    )
-    .unwrap_or(bundle)
-}
 
 fn prepare() -> Prepare {
     Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(256)))
@@ -126,7 +115,11 @@ fn render(
             let [a, b, c] = &mut o;
             let mut outputs = [a.as_mut_slice(), b.as_mut_slice(), c.as_mut_slice()];
             let mut io = PluginIo {
-                buffer: AudioBufferMut::F32(AudioBuffer::new(&inputs, &mut outputs, 48_000.0)),
+                buffer: AudioBufferMut::F32(AudioBuffer::new(
+                    &inputs,
+                    &mut outputs,
+                    tutti_plugin_types::SampleRate::SR_48K,
+                )),
                 ctx,
                 out: &mut out,
             };
@@ -140,7 +133,11 @@ fn render(
             let [a, b, c] = &mut o;
             let mut outputs = [a.as_mut_slice(), b.as_mut_slice(), c.as_mut_slice()];
             let mut io = PluginIo {
-                buffer: AudioBufferMut::F64(AudioBuffer::new(&inputs, &mut outputs, 48_000.0)),
+                buffer: AudioBufferMut::F64(AudioBuffer::new(
+                    &inputs,
+                    &mut outputs,
+                    tutti_plugin_types::SampleRate::SR_48K,
+                )),
                 ctx,
                 out: &mut out,
             };
@@ -416,7 +413,11 @@ impl Block {
         let mut channels = [a.as_mut_slice(), b.as_mut_slice(), c.as_mut_slice()];
         let ctx = ProcessContext::new();
         let mut io = PluginIo {
-            buffer: AudioBufferMut::F32(AudioBuffer::new(&inputs, &mut channels, 48_000.0)),
+            buffer: AudioBufferMut::F32(AudioBuffer::new(
+                &inputs,
+                &mut channels,
+                tutti_plugin_types::SampleRate::SR_48K,
+            )),
             ctx: &ctx,
             out,
         };

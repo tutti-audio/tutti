@@ -20,10 +20,10 @@ use crate::types::{ClapParamFlags, ParameterChanges, ParameterQueue, PluginInfo}
 use std::path::PathBuf;
 use std::sync::Arc;
 use tutti_clap_ffi::ActivateError;
-use tutti_plugin_types::MainThreadMarker;
 use tutti_plugin_types::{
     Control, PluginError, Prepare, Refused, Request, SampleFormat, negotiate, taken,
 };
+use tutti_plugin_types::{MainThreadMarker, SampleRate};
 use tutti_rt::ArcLend;
 
 /// Heap reservation for pooled per-call event scratch on a `ClapProcessor`,
@@ -71,10 +71,9 @@ impl ClapLoaded {
         &self.info
     }
 
-    /// Sample rate in Hz the plugin was last activated at. A bare `f64`
-    /// because it crosses to C as one; unit types stop at this boundary. A
-    /// placeholder until the first activation.
-    pub fn sample_rate(&self) -> f64 {
+    /// The sample rate the plugin was last activated at. A placeholder until
+    /// the first activation.
+    pub fn sample_rate(&self) -> SampleRate {
         self.audio.sample_rate
     }
 
@@ -150,7 +149,7 @@ impl ClapLoaded {
         // The rate and block size are fixed by `activate`; a refusal below
         // leaves the previous ones in place.
         let previous = self.audio;
-        self.audio.sample_rate = prepare.rate().get();
+        self.audio.sample_rate = prepare.rate();
         self.audio.max_frames = max_frames;
         // CLAP's render mode is `[main-thread]` and carries no activation
         // constraint; a plugin without the extension has declined, which is
@@ -296,9 +295,10 @@ impl ClapLoaded {
     /// Calls the plugin's `activate` FFI. Shared by `activate_now` and the
     /// transitions built on it.
     pub(crate) fn activate_plugin(&mut self, main: MainThreadMarker) -> Result<()> {
-        if let Err(e) = self
-            .plugin
-            .activate(main, self.audio.sample_rate, 1, self.audio.max_frames)
+        // `clap_plugin.activate` takes a bare `f64`: the unit stops at the C ABI.
+        if let Err(e) =
+            self.plugin
+                .activate(main, self.audio.sample_rate.get(), 1, self.audio.max_frames)
         {
             return Err(ClapError::LoadFailed {
                 path: PathBuf::new(),
