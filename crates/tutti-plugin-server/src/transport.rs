@@ -151,7 +151,9 @@ impl TransportListener {
     /// parked in the second accept with nothing to interrupt it. One orphaned
     /// process per loaded plugin, every time a DAW crashes or is force-quit.
     pub(crate) fn accept(&self) -> BridgeResult<SocketTransport> {
-        wait_for_connection(&self.listener)?;
+        // Held across the accept: where the wait cannot interrupt a blocked
+        // accept, this is what notices a host that dies during it.
+        let _watching = wait_for_connection(&self.listener)?;
         let stream = self.listener.accept()?;
         Ok(SocketTransport::new(stream))
     }
