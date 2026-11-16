@@ -115,14 +115,32 @@ fn two_octave_factor(x: f32) -> f32 {
 }
 
 /// The channel's pan (CC 10) as a pair of gains on a voice's own: RP-036's
-/// pan law scaled by `sqrt(2)` ([`PanLaw::Rp036UnityCentre`]) so that the
+/// `cos` and `sin` of `Pi/2` along the pan, scaled by `sqrt(2)` so that the
 /// centre leaves the voice's own placement alone (its constant-power pan law
 /// puts `sqrt(0.5)` in each channel at its centre, which a mono voice at the
 /// channel's centre keeps: RP-036's `cos (Pi/4)`). A mono voice panned by the
 /// channel alone thus has RP-036's gains exactly; a unison stack, whose
-/// sub-voices spread about the centre, is balanced by it.
+/// sub-voices spread about the centre, is balanced by it. A pan at an end puts
+/// exactly 0 in the far channel; a NaN pan is the centre.
 fn channel_pan(channel: &ChannelState) -> (Amplitude, Amplitude) {
-    pan_gains(channel.pan(), PanLaw::Rp036UnityCentre)
+    unity_centre_pan(channel.pan())
+}
+
+/// [`channel_pan`] of a pan position.
+fn unity_centre_pan(pan: Pan) -> (Amplitude, Amplitude) {
+    let p = pan.get();
+    let p = if p.is_nan() { 0.0 } else { p.clamp(-1.0, 1.0) };
+    if p <= -1.0 {
+        return (Amplitude(std::f32::consts::SQRT_2), Amplitude::SILENT);
+    }
+    if p >= 1.0 {
+        return (Amplitude::SILENT, Amplitude(std::f32::consts::SQRT_2));
+    }
+    // `sqrt(2) cos(Pi/4 + d)` is `cos d - sin d` and `sqrt(2) sin(Pi/4 + d)` is
+    // `cos d + sin d`, with `d` the angle off the centre: written so, the centre
+    // is 1 exactly, where `SQRT_2 * FRAC_PI_4.cos()` is one ulp short in `f32`.
+    let (sin, cos) = (std::f32::consts::FRAC_PI_4 * p).sin_cos();
+    (Amplitude(cos - sin), Amplitude(cos + sin))
 }
 
 impl SynthVoice {

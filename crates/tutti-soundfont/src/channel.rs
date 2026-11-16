@@ -193,11 +193,10 @@ mod tests {
     use super::*;
     use tutti_ump::ControlValue;
 
-    /// A chased effect send is the 7-bit value widened Min-Center-Max (M2-115
-    /// section 3): 0 stays 0, the centre 64 is exactly `0x8000_0000` and 127
-    /// is full scale, `0xFFFF_FFFF`, and a value below the centre shifts (1 is `1 << 25`);
-    /// a plain shift would put 127 at
-    /// `0xFE00_0000`.
+    /// A chased effect send is the 7-bit value widened Min-Center-Max (M2-115 section 3):
+    /// the centre 64 is exactly `0x8000_0000`, 127 is full scale, `0xFFFF_FFFF`, and a value
+    /// below the centre shifts (1 is `1 << 25`). A plain shift would put 127 at
+    /// `0xFE00_0000`. (0 is the fresh channel's value and is not chased.)
     #[test]
     fn a_chased_send_is_widened_to_the_corners_of_32_bits() {
         for (send, want) in [(64, 0x8000_0000_u32), (127, 0xFFFF_FFFF), (1, 1 << 25)] {

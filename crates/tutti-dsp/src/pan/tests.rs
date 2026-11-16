@@ -55,23 +55,10 @@ fn rp036_is_cos_and_sin_of_the_angle_along_the_pan() {
     assert_eq!(gains(1.0, PanLaw::Rp036), (0.0, 1.0));
 }
 
-/// The unity-centre form is RP-036's gains times `sqrt(2)`: exactly `(1, 1)` at
-/// the centre, `(sqrt 2, 0)` at hard left, and the ratio of the sides is RP-036's.
-#[test]
-fn the_unity_centre_form_is_rp036_times_sqrt_two() {
-    assert_eq!(gains(0.0, PanLaw::Rp036UnityCentre), (1.0, 1.0));
-    let root = 2.0_f64.sqrt();
-    for p in [-1.0, -0.6, 0.2, 0.9, 1.0] {
-        let (l, r) = gains(p, PanLaw::Rp036);
-        let (ul, ur) = gains(p, PanLaw::Rp036UnityCentre);
-        near((ul, ur), (root * f64::from(l), root * f64::from(r)));
-    }
-}
-
 /// A pan past an end reads as that end, and a NaN as the centre.
 #[test]
 fn a_pan_out_of_range_is_the_nearer_end_and_nan_is_the_centre() {
-    for law in [PanLaw::SquareRoot, PanLaw::Rp036, PanLaw::Rp036UnityCentre] {
+    for law in [PanLaw::SquareRoot, PanLaw::Rp036] {
         assert_eq!(gains(3.0, law), gains(1.0, law));
         assert_eq!(gains(-3.0, law), gains(-1.0, law));
         assert_eq!(gains(f32::NAN, law), gains(0.0, law));

@@ -811,28 +811,28 @@ fn a_negative_position_reads_the_end_of_the_cycle() {
     }
 }
 
-/// `splitmix64` is the published generator (Vigna): from state `s` the output
-/// is the finalizer of `s + 0x9E3779B97F4A7C15`. The first outputs from state 0
-/// are 0xE220A8397B1DCDAF, 0x6E789E6AA1B965F4 and 0x06C45D188009454F, and the
-/// generator's own state steps by the increment.
+/// `splitmix64` is the published generator (Vigna's reference, seed 0): its n-th output is
+/// the mix of the state `n - 1` increments on, here the golden-ratio increment
+/// `0x9E3779B97F4A7C15` times `n - 1`. The first five outputs are 0xE220A8397B1DCDAF,
+/// 0x6E789E6AA1B965F4, 0x06C45D188009454F, 0xF88BB8A8724C81EC and 0x1B39896A51A8749B.
 #[test]
-fn splitmix64_reproduces_the_reference_generator() {
+fn splitmix64_reproduces_the_published_outputs() {
     let gamma = 0x9E37_79B9_7F4A_7C15_u64;
-    let reference = |state: u64| {
-        let mut z = state.wrapping_add(gamma);
-        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-        z ^ (z >> 31)
-    };
-    // The generator's n-th output reads the state advanced n - 1 steps; the one mix takes
-    // the state before the increment.
-    for n in 0..100_u64 {
-        let state = n.wrapping_mul(gamma);
-        assert_eq!(splitmix64(state), reference(state));
+    let want = [
+        0xE220_A839_7B1D_CDAF_u64,
+        0x6E78_9E6A_A1B9_65F4,
+        0x06C4_5D18_8009_454F,
+        0xF88B_B8A8_724C_81EC,
+        0x1B39_896A_51A8_749B,
+    ];
+    for (n, want) in want.into_iter().enumerate() {
+        assert_eq!(
+            splitmix64((n as u64).wrapping_mul(gamma)),
+            want,
+            "output {}",
+            n + 1
+        );
     }
-    assert_eq!(splitmix64(0), 0xE220_A839_7B1D_CDAF);
-    assert_eq!(splitmix64(gamma), 0x6E78_9E6A_A1B9_65F4);
-    assert_eq!(splitmix64(2u64.wrapping_mul(gamma)), 0x06C4_5D18_8009_454F);
 }
 
 /// The random LFO's value for cycle 0 is not a constant -1: the mix of index 0

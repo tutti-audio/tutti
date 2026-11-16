@@ -139,9 +139,9 @@ impl Fdn {
 
     /// The RT60 of the network's loop in `band`, in seconds: **an estimate**,
     /// exact only for a diagonal `A` (each line is its own loop and the slowest
-    /// governs: the largest `-3 m / (fs log10 g)`) or when every line is set
+    /// governs: the largest `-60 m / (fs dB)`, `dB = 20 log10 g` per trip) or when every line is set
     /// from one RT60. For a mixing `A` it is the length-weighted
-    /// `-3 Σm / (fs Σ log10 g)`, a mean that can undercut the true decay when
+    /// `-60 Σm / (fs Σ dB)`, a mean that can undercut the true decay when
     /// the lines differ: use [`Network::tail`] where a figure
     /// must cover the ring. `m` is the effective length.
     #[must_use]
@@ -195,7 +195,7 @@ impl Fdn {
     }
 
     /// An RT60 in `band` that never undercuts the true decay: the slowest
-    /// line's, `-3 / (fs log10 (σ ρ))` with `ρ = max_i g_i^(1/m_i)` the slowest
+    /// line's, `-60 / (fs dB(σ ρ))`, `dB = 20 log10`, with `ρ = max_i g_i^(1/m_i)` the slowest
     /// amplitude factor per frame and `σ = max(‖A‖₂, 1)`. Infinite when
     /// `σρ ≥ 1` or a line cannot be analysed. For a diagonal `A` it equals
     /// [`rt60`](Self::rt60).

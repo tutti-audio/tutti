@@ -507,15 +507,16 @@ fn an_absurd_rate_neither_hangs_nor_allocates_without_bound() {
 /// loop decay of its combs: the sum of eight parallel exponentials, each with the RT60
 /// `-3 L / (rate log10 g)` of its own length `L`, so the render's RT60 (the -20 to -50 dB
 /// fall, doubled) lies between that of the shortest comb (1116 frames) and that of the
-/// longest of the right channel (1640 + 23), and nothing flushed it short: the curve runs
-/// to -90 dB and below.
+/// longest of the right channel (1617 + 23 = 1640), and nothing flushed it short: the curve
+/// runs to -90 dB and below. The 5% slack on each side covers the two-point read of the
+/// -20 to -50 dB fall on a sum of exponentials.
 #[test]
 fn the_render_schroeder_rt60_lies_between_the_shortest_and_longest_comb_t60() {
     let c = controls(0.5, 0.0);
     let g = f64::from(c.feedback().get());
     let comb_t60 = |l: f64| -3.0 * l / (RATE.get() * libm::log10(g));
     let (mut bank, mut glides) = settled(RATE, &c);
-    let frames = (4.0 * comb_t60(1663.0) * RATE.get()) as usize;
+    let frames = (4.0 * comb_t60(1640.0) * RATE.get()) as usize;
     let (l, r) = run(&mut bank, &mut glides, &impulse(frames), 512);
     let mut energy = vec![0.0f64; frames];
     let mut total = 0.0;
@@ -533,7 +534,7 @@ fn the_render_schroeder_rt60_lies_between_the_shortest_and_longest_comb_t60() {
             .expect("the curve falls")
     };
     let rt60 = 2.0 * (at(-50.0) - at(-20.0)) as f64 / RATE.get();
-    let (shortest, longest) = (comb_t60(1116.0), comb_t60(1663.0));
+    let (shortest, longest) = (comb_t60(1116.0), comb_t60(1640.0));
     assert!(
         rt60 > 0.95 * shortest && rt60 < 1.05 * longest,
         "{rt60} s outside {shortest}..{longest} s"
