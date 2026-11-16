@@ -210,3 +210,41 @@ fn a_gain_has_no_range_so_a_cell_holds_any_float() {
     assert_eq!(<Gain as Unit>::from_raw(-3.0), Gain(-3.0));
     assert!(<Gain as Unit>::from_raw(f32::NAN).get().is_nan());
 }
+
+#[test]
+fn minus_twenty_db_is_a_tenth_of_the_amplitude() {
+    assert!((Db(-20.0).to_amplitude().get() - 0.1).abs() < 1e-7);
+    assert!((Db(20.0).to_amplitude().get() - 10.0).abs() < 1e-5);
+}
+
+#[test]
+fn a_tenth_of_the_amplitude_is_minus_twenty_db() {
+    assert!((Db::from_amplitude(Amplitude(0.1)).get() + 20.0).abs() < 1e-5);
+}
+
+#[test]
+fn half_power_is_minus_three_point_zero_one_db() {
+    assert!((Db::from_power(0.5).get() + 3.010_3).abs() < 1e-4);
+    assert_eq!(Db::from_power(1.0), Db::UNITY);
+    assert!((Db::from_power(100.0).get() - 20.0).abs() < 1e-5);
+}
+
+#[test]
+fn power_is_the_square_of_amplitude_in_db() {
+    let amp = Amplitude(0.25);
+    let via_power = Db::from_power(amp.get() * amp.get()).get();
+    assert!((via_power - Db::from_amplitude(amp).get()).abs() < 1e-5);
+}
+
+#[test]
+fn zero_power_is_negative_infinity_not_the_floor() {
+    assert_eq!(Db::from_power(0.0).get(), f32::NEG_INFINITY);
+}
+
+/// A negative power or amplitude has no logarithm: the conversion is NaN,
+/// never a finite figure a caller could mistake for a level.
+#[test]
+fn a_negative_power_or_amplitude_is_nan() {
+    assert!(Db::from_power(-1.0).get().is_nan());
+    assert!(Db::from_amplitude(Amplitude(-0.5)).get().is_nan());
+}

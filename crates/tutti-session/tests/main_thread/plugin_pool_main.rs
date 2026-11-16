@@ -841,6 +841,9 @@ fn a_node_removed_while_its_rebuild_settles_leaves_nothing_behind() {
         Some(true),
         "the Processor has not reached the new node yet"
     );
+    // The plugin's own restart deactivated it already; what follows is the close.
+    probe().thread_reset();
+    assert!(!deactivation().observed);
     r.s.graph().remove(node).expect("the node is there");
     let events = r.until("the node to be gone", |s| s.plugin_view(node).is_err());
     assert!(
@@ -851,9 +854,20 @@ fn a_node_removed_while_its_rebuild_settles_leaves_nothing_behind() {
         )),
         "nothing is said of a removed node: {events:?}"
     );
-    // The pool entry alone keeps the plugin loaded: releasing it completes.
+    // The removed record waits in the graveyard for the main-thread update; the
+    // pool entry's hold goes with its release. Then nothing keeps the plugin open.
+    let _ = r.s.main(tutti_fixtures::main_thread()).update();
     r.s.pool::<&'static str>(()).unwrap();
     assert!(matches!(next_event(&mut r.s, "verb"), PoolEvent::Released));
+    let _ = r.until("the plugin to close", |s| {
+        let _ = s.main(tutti_fixtures::main_thread()).update();
+        deactivation().observed
+    });
+    let closed = deactivation();
+    assert!(
+        closed.observed && closed.is_main,
+        "the plugin was closed, on the main thread: no rebinder kept it open: {closed:?}"
+    );
     r.s.close(tutti_fixtures::main_thread());
 }
 

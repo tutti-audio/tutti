@@ -287,3 +287,23 @@ fn arc_degrees_composes_like_the_displacement_it_is() {
     assert_eq!(-ArcDegrees(20.0), ArcDegrees(-20.0));
     assert!(ArcDegrees(10.0) < ArcDegrees(20.0));
 }
+
+#[test]
+fn phase_sin_is_sine_of_a_turn() {
+    assert_eq!(Phase::START.sin(), 0.0);
+    assert_eq!(Phase(0.25).sin(), 1.0);
+    assert_eq!(Phase(0.75).sin(), -1.0);
+    assert!(Phase(0.5).sin().abs() < 1e-7);
+    assert!((Phase(1.0 / 12.0).sin() - 0.5).abs() < 1e-7);
+}
+
+/// The f64 sine of a phase and the f32 sine of its radians are one function
+/// to within f32 precision, over a whole turn.
+#[test]
+fn phase_sin_and_radians_sin_agree_within_a_millionth() {
+    for i in 0..=1024u16 {
+        let p = Phase(f32::from(i) / 1024.0);
+        let (a, b) = (p.sin(), p.to_radians().sin());
+        assert!((a - b).abs() < 1e-6, "{p:?}: {a} vs {b}");
+    }
+}

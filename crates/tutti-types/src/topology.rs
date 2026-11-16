@@ -146,6 +146,38 @@ impl Speaker {
         }
     }
 
+    /// Returns whether this speaker is on the listener's left: one of the seven
+    /// left speakers a [`mirror`](Self::mirror) pairs with a right one.
+    #[must_use]
+    pub const fn is_left(self) -> bool {
+        matches!(
+            self,
+            Self::FrontLeft
+                | Self::BackLeft
+                | Self::FrontLeftOfCenter
+                | Self::SideLeft
+                | Self::TopFrontLeft
+                | Self::TopBackLeft
+                | Self::TopSideLeft
+        )
+    }
+
+    /// Returns whether this speaker is on the listener's right: the
+    /// [`mirror`](Self::mirror) of a left one.
+    #[must_use]
+    pub const fn is_right(self) -> bool {
+        matches!(
+            self,
+            Self::FrontRight
+                | Self::BackRight
+                | Self::FrontRightOfCenter
+                | Self::SideRight
+                | Self::TopFrontRight
+                | Self::TopBackRight
+                | Self::TopSideRight
+        )
+    }
+
     /// Returns the speaker at the mirror image of this one across the
     /// listener's median plane: its left/right partner at the same depth and
     /// height (`FrontLeft` for `FrontRight`, `TopSideRight` for `TopSideLeft`).
@@ -573,6 +605,47 @@ mod tests {
         }
         assert_eq!(paired, 14, "seven left/right pairs");
         assert_eq!(Speaker::Unknown(7).mirror(), None);
+    }
+
+    /// A speaker has a mirror exactly when it is on one side, and its mirror is
+    /// on the other: the side predicates and the mirror describe one table.
+    #[test]
+    fn a_speaker_with_a_mirror_is_on_one_side_and_its_mirror_on_the_other() {
+        let mut lefts = 0;
+        for s in NAMED {
+            assert!(!(s.is_left() && s.is_right()), "{s:?} on both sides");
+            assert_eq!(
+                s.mirror().is_some(),
+                s.is_left() || s.is_right(),
+                "{s:?}: a mirror iff a side"
+            );
+            if let Some(m) = s.mirror() {
+                assert_eq!(s.is_left(), m.is_right(), "{s:?} / {m:?}");
+            }
+            lefts += usize::from(s.is_left());
+        }
+        assert_eq!(lefts, 7, "seven left speakers");
+        assert!(!Speaker::Unknown(3).is_left() && !Speaker::Unknown(3).is_right());
+    }
+
+    /// Wherever a bed places a left speaker, its azimuth is positive (tutti's
+    /// convention: 90 is left), and a right one's negative.
+    #[test]
+    fn a_bed_places_sided_speakers_at_the_azimuth_sign_of_their_side() {
+        let mut checked = 0;
+        for bed in Bed::ALL {
+            for s in NAMED {
+                let Some(d) = bed.direction(s) else { continue };
+                if s.is_left() {
+                    assert!(d.azimuth.0 > 0.0, "{bed:?}: {s:?} at {:?}", d.azimuth);
+                    checked += 1;
+                } else if s.is_right() {
+                    assert!(d.azimuth.0 < 0.0, "{bed:?}: {s:?} at {:?}", d.azimuth);
+                    checked += 1;
+                }
+            }
+        }
+        assert!(checked >= 20, "only {checked} placed sided speakers");
     }
 
     /// On the median plane or unplaced, a speaker has no mirror.

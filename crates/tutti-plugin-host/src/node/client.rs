@@ -200,8 +200,8 @@ pub struct InProcClient<F: Loaded> {
 ///
 /// It reads no lock: the instance may be held by the control thread that
 /// drops the node. A plugin that is lost (its flag, a latch set when its
-/// lifecycle poisons, through which nothing else is published) has no controller left to stop under, so its node does not run
-/// `stop`: the Processor drops with the end, as the Processor of a lost plugin
+/// lifecycle poisons, through which nothing else is published) has no
+/// controller left to stop under, so its node does not run `stop`: the Processor drops with the end, as the Processor of a lost plugin
 /// does when the session retires its node.
 impl<F: Loaded> Drop for InProcClient<F> {
     fn drop(&mut self) {
