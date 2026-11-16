@@ -161,7 +161,10 @@ pub const MAX_LAYOUT_BUSES: usize = 32;
 impl Layout {
     /// Whether this is a layout a plugin can have: at most
     /// [`MAX_LAYOUT_BUSES`] buses in a direction and a width a block serves.
-    /// What a layout that came off a wire passes before it is kept.
+    /// What a layout that came off a wire passes before it is kept: an
+    /// implausible `PluginIoChanged` layout is dropped and counted with the
+    /// dropped events, and the host keeps the layout it held, so no
+    /// `PortsRefused` follows.
     #[must_use]
     pub fn is_plausible(&self) -> bool {
         self.inputs.len() <= MAX_LAYOUT_BUSES
