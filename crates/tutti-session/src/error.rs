@@ -196,9 +196,8 @@ pub enum ConnectError {
     Bus(#[from] tutti_graph::BusError),
 }
 
-/// Why a MIDI call of the session failed (design 030, convention 2: one error
-/// for the area, each cause carried as its source). `tutti::midi::Error` in
-/// the umbrella; the session's own [`Error::Midi`] holds it, and every cause
+/// Why a MIDI call of the session failed: one error for the area, each cause
+/// carried as its source. `tutti::midi::Error` in the umbrella; the session's own [`Error::Midi`] holds it, and every cause
 /// below converts into both with `?`.
 #[cfg(feature = "midi")]
 #[derive(Error, Debug)]
@@ -472,8 +471,8 @@ pub enum Error {
     Device(#[from] tutti_cpal::Error),
 
     /// A MIDI failure of any kind: the OS port layer, a file, a send, a
-    /// route, or a target that takes no MIDI. One variant for the area
-    /// (design 030, convention 2); [`MidiError`] says which, each with its
+    /// route, or a target that takes no MIDI. One variant for the area;
+    /// [`MidiError`] says which, each with its
     /// own error as the source.
     #[cfg(feature = "midi")]
     #[error(transparent)]

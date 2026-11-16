@@ -801,7 +801,7 @@ pub enum DeviceEvent {
     /// once.
     OutputsListFailed(tutti_cpal::Error),
     /// The listing started with [`Session::list_outputs`] has not answered
-    /// after [`LISTING_WARNING`](crate::LISTING_WARNING) of
+    /// after 5 s of
     /// [`PhaseCx::now`](crate::PhaseCx::now): the host's enumeration is
     /// stuck or slow. Reported once; the listing goes on waiting.
     OutputsListSlow(Duration),
@@ -820,7 +820,7 @@ impl<C: RealTime> Session<C> {
     /// [`Phase::Poll`](crate::Phase::Poll) and reported once, as
     /// [`DeviceEvent::OutputsListed`] or [`DeviceEvent::OutputsListFailed`];
     /// [`DeviceEvent::OutputsListSlow`] is reported once if it takes
-    /// [`LISTING_WARNING`](crate::LISTING_WARNING). Replaces a listing still
+    /// 5 s. Replaces a listing still
     /// waiting, whose thread is left to end on its own.
     pub fn list_outputs(&mut self, listing: tutti_cpal::DeviceListing) {
         self.output_listing = Some(crate::watch::OutputListing::new(listing));

@@ -38,7 +38,7 @@
 //! **A token that never drops** (a job `mem::forget`ed, or kept unrun
 //! forever) keeps the bounce in flight: the plugins stay Offline and every
 //! later bounce is refused. [`Phase::Collect`](crate::Phase::Collect) warns,
-//! once, when one has been in flight for [`BOUNCE_STALL_WARNING`] of its
+//! once, when one has been in flight for an hour of its
 //! `now`.
 //!
 //! **Leftovers drop on the main thread.** The rendered graph, what a failed
@@ -885,8 +885,8 @@ impl<M: Master> Bounced<M> {
 ///
 /// - [`frozen`](Self::frozen): no musical time (an effect tail, a synth
 ///   patch, a test tone). The renderer's transport is stopped at beat 0.
-/// - [`timeline`](Self::timeline): an `OfflineTimeline` (or any clock that
-///   is also an `OfflineClock`: never the live transport), seeded at the
+/// - [`timeline`](Self::timeline): an `OfflineTimeline`
+///   (never the live transport), seeded at the
 ///   tempo and beat to render from, at the render's rate.
 #[derive(Clone)]
 pub struct ExportClock(Clock);
@@ -908,10 +908,7 @@ impl ExportClock {
 
     /// Renders against `timeline`: the renderer advances it, and every
     /// node reads its block's transport from it through `Env`.
-    pub fn timeline<T>(timeline: Arc<T>) -> Self
-    where
-        T: RenderClock + tutti_transport::OfflineClock + 'static,
-    {
+    pub fn timeline(timeline: Arc<OfflineTimeline>) -> Self {
         Self(Clock::Timeline {
             clock: timeline.clone() as Arc<dyn RenderClock>,
             timeline: OfflineTransport::new(timeline),
@@ -1123,7 +1120,7 @@ pub type PrepareEdit = Box<dyn for<'a> FnOnce(PreparedGraph<'a>) + Send>;
 /// [`Phase::Collect`](crate::Phase::Collect) is given, before it warns that
 /// its token may have leaked: an hour. Generous: an offline render of a
 /// long project, with plugin forks that launch servers, takes minutes.
-pub const BOUNCE_STALL_WARNING: Duration = Duration::from_secs(60 * 60);
+pub(crate) const BOUNCE_STALL_WARNING: Duration = Duration::from_secs(60 * 60);
 
 /// The session's bounce state: the token every bounce holds a clone of,
 /// the channel leftovers come back on, and the stall watch.
@@ -1163,7 +1160,7 @@ impl BounceState {
     }
 
     /// Watches for a leaked token at `now`: warns once when an bounce has
-    /// been in flight (as the collects saw it) for [`BOUNCE_STALL_WARNING`].
+    /// been in flight (as the collects saw it) for an hour.
     /// Its clock restarts when nothing is in flight, and when an bounce
     /// starts ([`restart_stall_watch`](Self::restart_stall_watch)).
     pub(crate) fn watch_stall(&mut self, now: Instant) {
@@ -1382,7 +1379,7 @@ const PREPARING_STEPS: u32 = 4;
 /// stays in flight, hosted plugins stay Offline, and every later
 /// [`Session::bounce_start`] is refused with [`BounceError::InFlight`].
 /// Nothing else reports it; the session warns once after
-/// [`BOUNCE_STALL_WARNING`].
+/// an hour.
 #[must_use = "a bounce renders nothing until it is run and finished"]
 pub struct BounceJob<M: Master> {
     pending: ToMain<PendingExport>,

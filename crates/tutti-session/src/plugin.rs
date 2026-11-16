@@ -72,7 +72,7 @@
 //!   per parameter, landed in a later [`Session::update`]. Until then the
 //!   mirror is not ready, and a lane on the plugin waits for it.
 //! - **Snapshots.** A healthy plugin's state is captured every
-//!   [`SNAPSHOT_INTERVAL`] of `now` (`SessionBuilder::snapshot_interval`),
+//!   `SessionBuilder::snapshot_interval` (8 s by default) of `now`,
 //!   as a job on the same spawner (a blocking round trip), landed in a later
 //!   update. One is in flight per plugin at most: the landing holds the
 //!   plugin's snapshot token until it lands, whether the job ran, panicked or
@@ -162,7 +162,7 @@ use crate::{
 /// How often a healthy plugin's state is captured, by default: 8 s (design 015 §4.4).
 /// [`SessionBuilder::snapshot_interval`](crate::SessionBuilder::snapshot_interval)
 /// sets another.
-pub const SNAPSHOT_INTERVAL: Duration = Duration::from_secs(8);
+pub(crate) const SNAPSHOT_INTERVAL: Duration = Duration::from_secs(8);
 
 /// A plugin load: what the pool's plugin entry runs, and what a recovery reload
 /// runs again. [`run`](Self::run) blocks (a `plugin-server` launch, half a
