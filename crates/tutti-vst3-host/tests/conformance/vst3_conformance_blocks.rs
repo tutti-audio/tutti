@@ -168,7 +168,7 @@ fn every_audio_class_survives_a_block() {
                         inputs: &in_refs,
                         outputs: &mut out_refs,
                         num_samples: 512,
-                        sample_rate: 48_000.0,
+                        sample_rate: tutti_plugin_types::SampleRate::SR_48K,
                     };
                     inst.process(
                         &mut buffer,

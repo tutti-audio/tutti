@@ -4,6 +4,7 @@
 //! adds the VST2-specific ones, [`PluginInfo`] and [`Vst2ProcessContext`].
 
 use tutti_graph::UmpAt;
+use tutti_plugin_types::SampleRate;
 pub use tutti_plugin_types::{Samples, WireMidi};
 
 pub use tutti_plugin_types::{
@@ -74,7 +75,7 @@ pub type MidiEventVec = Vec<WireMidi>;
 ///
 /// [`Vst2Processor::process_f32`]: crate::Vst2Processor::process_f32
 /// [`Vst2Processor::process_f64`]: crate::Vst2Processor::process_f64
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct Vst2ProcessContext<'a> {
     /// Events to deliver before the block renders, each carrying its own frame
     /// offset within the block. Empty is normal for an effect.
@@ -83,11 +84,17 @@ pub struct Vst2ProcessContext<'a> {
     /// reporting a stopped transport, which is what a plugin syncing to host
     /// tempo will see.
     pub transport: Option<&'a TransportInfo>,
-    /// Sample rate in Hz, reported to the plugin in its `VstTimeInfo` when
+    /// The sample rate, reported to the plugin in its `VstTimeInfo` when
     /// [`transport`](Self::transport) is set. It does not reconfigure the
     /// plugin: the rate it runs at is the activation's
     /// ([`Prepare::rate`](tutti_plugin_types::Prepare::rate)).
-    pub sample_rate: f64,
+    pub sample_rate: SampleRate,
+}
+
+impl Default for Vst2ProcessContext<'_> {
+    fn default() -> Self {
+        Self::new(SampleRate::DEFAULT)
+    }
 }
 
 impl<'a> Vst2ProcessContext<'a> {
@@ -95,7 +102,7 @@ impl<'a> Vst2ProcessContext<'a> {
     /// `sample_rate` in Hz. Layer the rest on with [`Self::midi`] and
     /// [`Self::transport`].
     #[must_use]
-    pub fn new(sample_rate: f64) -> Self {
+    pub fn new(sample_rate: SampleRate) -> Self {
         Self {
             midi: &[],
             transport: None,

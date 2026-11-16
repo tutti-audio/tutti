@@ -243,7 +243,7 @@ pub fn drive_block(inst: &mut Active<f32>, frames: usize, ctx: &ClapProcessConte
         inputs: ins,
         outputs: outs,
         num_samples: frames,
-        sample_rate: 48_000.0,
+        sample_rate: tutti_plugin_types::SampleRate::SR_48K,
     };
     inst.process(&mut buffer, ctx).expect("process succeeds");
 }

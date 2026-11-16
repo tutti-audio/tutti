@@ -42,13 +42,8 @@ struct Mock {
 impl Mock {
     /// The server says something unprompted, as a plugin does.
     fn say(&self, message: &BridgeMessage) {
-        use std::io::Write;
-        let data = postcard::to_allocvec(message).unwrap();
         let mut stream = &*self.stream;
-        stream
-            .write_all(&(data.len() as u32).to_be_bytes())
-            .unwrap();
-        stream.write_all(&data).unwrap();
+        crate::protocol::frame::write_frame(&mut stream, message).unwrap();
     }
 
     /// Waits for `want` messages of the server's record to satisfy `found`.
@@ -111,7 +106,7 @@ fn mock_with(
     load_editor: Option<crate::EditorLoader>,
 ) -> (Ipc, Mock) {
     use interprocess::local_socket::{ListenerOptions, traits::Listener as _};
-    use std::io::{Read, Write};
+    use std::io::Read;
     let layout = SlabLayout {
         samples_per_channel: CEILING,
         format: SampleFormat::Float32,
@@ -142,12 +137,8 @@ fn mock_with(
     // them. Blocks and resets arrive on the first and are only logged.
     let audio = Arc::new(listener.accept().unwrap());
     let reply = |stream: &interprocess::local_socket::Stream, message: &BridgeMessage| {
-        let data = postcard::to_allocvec(message).unwrap();
         let mut stream = stream;
-        stream
-            .write_all(&(data.len() as u32).to_be_bytes())
-            .unwrap();
-        stream.write_all(&data).unwrap();
+        crate::protocol::frame::write_frame(&mut stream, message).unwrap();
     };
     // The host connects the control stream only once it has the audio one's
     // `Ready`.
@@ -652,7 +643,7 @@ fn render_silence(processor: &mut IpcProcessor, frames: usize) {
             inputs: &inputs,
             outputs: &mut outputs,
             num_samples: frames,
-            sample_rate: RATE.get(),
+            sample_rate: RATE,
         }),
         ctx: &ctx,
         out: &mut out,

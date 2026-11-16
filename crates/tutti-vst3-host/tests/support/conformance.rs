@@ -489,7 +489,7 @@ pub fn drive_blocks_in_mode<T: Vst3Sample + Default + Copy>(
             inputs: &in_refs,
             outputs: &mut out_refs,
             num_samples: block.frames,
-            sample_rate,
+            sample_rate: tutti_plugin_types::SampleRate::of(sample_rate),
         };
         let events = InputEvents {
             midi: block.midi,
@@ -531,18 +531,7 @@ pub fn require_probe() -> Vst3Loaded {
     require_sample("audio-probe.vst3")
 }
 
-/// The path of `audio-probe`'s module, panicking with the build command when it
-/// is absent.
-#[track_caller]
-pub fn probe_path() -> PathBuf {
-    sample_path("audio-probe.vst3").unwrap_or_else(|| {
-        panic!(
-            "audio-probe.vst3 is not present in {PROBE_DIR_BUILT:?}. `build.rs` builds it \
-             when the `conformance` feature is on:\n\n  \
-             cargo build -p tutti-vst3-host --features conformance --tests\n"
-        )
-    })
-}
+pub use crate::probe::probe_path;
 
 /// Loads the C++ twin of the shared test plugin (`testing/tutti-shared-plugin-vst3-cpp`).
 /// Cargo builds it with the tests, through `tutti-fixtures`' `vst3-cpp` feature,

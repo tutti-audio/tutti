@@ -211,27 +211,128 @@ pub(super) fn matching(blanked: &str, open: usize, o: u8, c: u8) -> Option<usize
     None
 }
 
-/// The byte ranges of items behind `#[cfg(test)]`, in blanked text.
+/// The byte ranges of test-only items, in blanked text: an item behind
+/// `#[cfg(test)]` or `#[cfg(all(.., test, ..))]` (any spacing), and the enclosing
+/// block, or the rest of the file at its top level, of an inner `#![cfg(test)]`.
+/// An item runs to its body's closing brace or to the `;` that ends it, skipping
+/// `()` and `[]` groups so a `;` in an array type or a `where` bound does not end
+/// it. `cfg(any(test, ..))` and `cfg(not(..))` are not test-only and are not ranges.
 pub(super) fn test_ranges(code: &str) -> Vec<(usize, usize)> {
-    let mut out = Vec::new();
+    let b = code.as_bytes();
+    let mut out: Vec<(usize, usize)> = Vec::new();
     let mut from = 0;
-    while let Some(p) = code[from..].find("#[cfg(test)]") {
+    while let Some(p) = code[from..].find('#') {
         let at = from + p;
-        let after = at + "#[cfg(test)]".len();
-        from = after;
-        let Some(stop) = code[after..].find(['{', ';']).map(|i| after + i) else {
+        from = at + 1;
+        let mut i = skip_ws(b, at + 1);
+        let inner = b.get(i) == Some(&b'!');
+        if inner {
+            i = skip_ws(b, i + 1);
+        }
+        if b.get(i) != Some(&b'[') {
+            continue;
+        }
+        let Some(close) = matching(code, i, b'[', b']') else {
             continue;
         };
-        if code.as_bytes()[stop] == b'{' {
-            if let Some(end) = matching(code, stop, b'{', b'}') {
-                out.push((at, end));
-                from = end;
-            }
-        } else {
-            out.push((at, stop));
+        let body = code[i + 1..close].trim();
+        let Some(pred) = body
+            .strip_prefix("cfg")
+            .map(str::trim_start)
+            .and_then(|r| r.strip_prefix('('))
+            .and_then(|r| r.trim_end().strip_suffix(')'))
+        else {
+            continue;
+        };
+        let pred: String = pred.split_whitespace().collect();
+        if !test_only(&pred) {
+            continue;
         }
+        if out.last().is_some_and(|&(_, e)| at < e) {
+            continue;
+        }
+        let range = if inner {
+            let open = enclosing_open(code, at);
+            let end = open
+                .and_then(|o| matching(code, o, b'{', b'}'))
+                .map_or(code.len(), |c| c + 1);
+            (open.unwrap_or(0), end)
+        } else {
+            (at, item_end(code, close + 1))
+        };
+        from = range.1.max(from);
+        out.push(range);
     }
     out
+}
+
+/// Whether a `cfg` predicate (whitespace removed) holds only under `cfg(test)`.
+fn test_only(pred: &str) -> bool {
+    if pred == "test" {
+        return true;
+    }
+    let Some(args) = pred.strip_prefix("all(").and_then(|r| r.strip_suffix(')')) else {
+        return false;
+    };
+    split_args(args).into_iter().any(test_only)
+}
+
+/// `args` split at the commas outside parentheses.
+fn split_args(args: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let (mut depth, mut start) = (0usize, 0);
+    for (i, c) in args.char_indices() {
+        match c {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                out.push(&args[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    out.push(&args[start..]);
+    out
+}
+
+fn skip_ws(b: &[u8], mut i: usize) -> usize {
+    while b.get(i).is_some_and(u8::is_ascii_whitespace) {
+        i += 1;
+    }
+    i
+}
+
+/// The offset of the `{` that encloses `at`, or `None` at the top level.
+fn enclosing_open(code: &str, at: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    for (i, &c) in code.as_bytes()[..at].iter().enumerate().rev() {
+        match c {
+            b'}' => depth += 1,
+            b'{' if depth == 0 => return Some(i),
+            b'{' => depth -= 1,
+            _ => {}
+        }
+    }
+    None
+}
+
+/// The end of the item that starts at `from`: just past its body's `}` or its `;`,
+/// skipping balanced `()` and `[]` groups.
+fn item_end(code: &str, from: usize) -> usize {
+    let b = code.as_bytes();
+    let mut i = from;
+    while i < b.len() {
+        match b[i] {
+            b'(' => i = matching(code, i, b'(', b')').unwrap_or(b.len()),
+            b'[' => i = matching(code, i, b'[', b']').unwrap_or(b.len()),
+            b'{' => return matching(code, i, b'{', b'}').map_or(b.len(), |c| c + 1),
+            b';' => return i + 1,
+            _ => {}
+        }
+        i += 1;
+    }
+    b.len()
 }
 
 #[cfg(test)]
@@ -290,5 +391,51 @@ mod tests {
         assert_eq!(find_word("not_unsafe unsafe", "unsafe"), Some(11));
         assert_eq!(find_word("unsafe_code", "unsafe"), None);
         assert_eq!(line_of("a\nb\nc", 4), 3);
+    }
+
+    #[test]
+    fn a_test_item_ends_at_its_body_not_at_a_semicolon_in_its_signature() {
+        let src = "#[cfg(test)] fn f(x: [u8; 3]) -> [u8; 2] { a(); }\nfn live() {}\n";
+        let r = test_ranges(src);
+        assert_eq!(r.len(), 1, "{r:?}");
+        assert_eq!(&src[r[0].0..r[0].1], &src[..src.find('\n').unwrap()]);
+        let bound = "#[cfg(test)] fn g<T>() where T: Into<[u8; 1]> { x(); }\nfn live() {}\n";
+        let r = test_ranges(bound);
+        assert!(bound[r[0].0..r[0].1].ends_with("x(); }"), "{r:?}");
+        let semi = "#[cfg(test)] use a::b;\nfn live() { x(); }\n";
+        let r = test_ranges(semi);
+        assert_eq!(&semi[r[0].0..r[0].1], "#[cfg(test)] use a::b;");
+    }
+
+    #[test]
+    fn test_only_predicates_are_ranges_and_the_rest_are_not() {
+        for yes in [
+            "#[cfg(test)] mod m {}",
+            "#[ cfg ( test ) ] mod m {}",
+            "#[cfg(all(test, feature = \"x\"))] mod m {}",
+            "#[cfg(all(unix, all(feature = \"x\", test)))] mod m {}",
+        ] {
+            assert_eq!(test_ranges(yes).len(), 1, "{yes}");
+        }
+        for no in [
+            "#[cfg(any(test, feature = \"x\"))] mod m {}",
+            "#[cfg(not(test))] mod m {}",
+            "#[cfg(all(unix, feature = \"x\"))] mod m {}",
+            "#[cfg_attr(test, derive(Debug))] struct S;",
+            "#[derive(Debug)] struct S;",
+        ] {
+            assert!(test_ranges(no).is_empty(), "{no}");
+        }
+    }
+
+    #[test]
+    fn an_inner_cfg_test_covers_its_block_or_the_file() {
+        let file = "fn live() {}\n#![cfg(test)]\nfn t() {}\n";
+        let r = test_ranges(file);
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].1, file.len());
+        let nested = "mod m { #![cfg(test)] fn t() {} }\nfn live() {}\n";
+        let r = test_ranges(nested);
+        assert_eq!(&nested[r[0].0..r[0].1], "{ #![cfg(test)] fn t() {} }");
     }
 }

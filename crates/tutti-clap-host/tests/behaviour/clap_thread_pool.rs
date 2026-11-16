@@ -105,7 +105,7 @@ fn block(inst: &mut Active<f32>) {
         inputs: ins,
         outputs: outs,
         num_samples: FRAMES,
-        sample_rate: SAMPLE_RATE,
+        sample_rate: tutti_plugin_types::SampleRate::of(SAMPLE_RATE),
     };
     inst.process(&mut buffer, &ClapProcessContext::default())
         .expect("block processes");

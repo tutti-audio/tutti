@@ -50,7 +50,7 @@ impl Vst3Loaded {
             })?;
 
         Ok(size.unwrap_or_else(|| {
-            let (width, height) = DEFAULT_EDITOR_SIZE;
+            let (width, height) = tutti_plugin_types::EditorUnit::DEFAULT_EXTENT;
             tutti_vst3_ffi::rect_size(width, height)
         }))
     }
@@ -155,5 +155,3 @@ impl Vst3Loaded {
             })
     }
 }
-
-pub(super) const DEFAULT_EDITOR_SIZE: (u32, u32) = (800, 600);

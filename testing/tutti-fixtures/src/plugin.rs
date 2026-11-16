@@ -10,6 +10,11 @@ use crate::{cdylib, main_thread, profile_dir};
 use tutti_plugin_types::{Loaded, MainWork, MainWorkHandle, PluginError, Prepare, WindowHandle};
 use tutti_rt::MainThreadMarker;
 
+/// The constant 120 BPM a plugin node's tests render under.
+pub fn tempo() -> tutti_transport::TempoReader {
+    tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo")
+}
+
 /// A [`MainWorkHandle`] whose collector is gone: for a test that loads a plugin
 /// and does not look at what an off-thread drop hands over. A close sent to it
 /// runs at once on the main thread and is otherwise counted in

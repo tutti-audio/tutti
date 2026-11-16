@@ -58,8 +58,7 @@ fn handle_over(
 }
 
 fn unique_shm_name(label: &str) -> String {
-    static COUNTER: tutti_types::Mint = tutti_types::Mint::new();
-    format!("test_{}_{}_{}", label, std::process::id(), COUNTER.mint())
+    tutti_fixtures::unique_name(&format!("test_{label}"))
 }
 
 /// Read a `HostMessage` from an interprocess socket (blocking).
@@ -76,12 +75,8 @@ fn recv_host_msg(stream: &interprocess::local_socket::Stream) -> HostMessage {
 
 /// Send a `BridgeMessage` to an interprocess socket (blocking).
 fn send_bridge_msg(stream: &interprocess::local_socket::Stream, msg: &BridgeMessage) {
-    use std::io::Write;
     let mut stream = stream;
-    let data = postcard::to_allocvec(msg).unwrap();
-    let len = (data.len() as u32).to_be_bytes();
-    stream.write_all(&len).unwrap();
-    stream.write_all(&data).unwrap();
+    tutti_plugin_ipc::write_frame(&mut stream, msg).unwrap();
 }
 
 /// Accepts the host's audio connection and then its control one, as the

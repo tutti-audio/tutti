@@ -239,7 +239,7 @@ fn run(
         inputs: &inputs,
         outputs: &mut outputs,
         num_samples: frames,
-        sample_rate: RATE,
+        sample_rate: SAMPLE_RATE,
     };
     let mut ctx = ProcessContext::new();
     ctx.transport = transport;

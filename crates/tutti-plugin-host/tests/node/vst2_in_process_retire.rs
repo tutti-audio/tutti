@@ -69,7 +69,7 @@ fn a_removed_vst2_node_is_dropped_on_the_control_side() {
         SampleRate::of(RATE),
         MaxBlock::of(Samples(BLOCK)),
     ));
-    editor.insert(key, "vst2", Unforkable(unit.bind(tempo())));
+    editor.insert(key, "vst2", Unforkable(unit.bind(tutti_fixtures::tempo())));
     editor
         .spec_mut()
         .topology
@@ -115,9 +115,4 @@ fn a_removed_vst2_node_is_dropped_on_the_control_side() {
         before + 1,
         "the control-side drop closed the plugin, once"
     );
-}
-
-/// The project's tempo map the node under test is bound to.
-fn tempo() -> tutti_transport::TempoReader {
-    tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo")
 }

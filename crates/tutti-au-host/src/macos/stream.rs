@@ -270,7 +270,7 @@ impl StreamConfig {
 /// The layout of a bus whose stream format the AU accepted with `channels`
 /// channels per frame, or [`AuError::BusTooWide`] when no layout holds that.
 fn accepted_layout(scope: &'static str, channels: u32) -> Result<ChannelLayout> {
-    ChannelLayout::try_from(channels).map_err(|_| AuError::BusTooWide { scope, channels })
+    ChannelLayout::try_from(channels).map_err(|source| AuError::BusTooWide { scope, source })
 }
 
 #[cfg(test)]
