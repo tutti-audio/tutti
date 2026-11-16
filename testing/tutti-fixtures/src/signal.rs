@@ -1,7 +1,8 @@
 //! The signals a test feeds a node or checks one against, defined once: a sine,
-//! an impulse, the level readings [`peak`], [`peak_planes`], [`rms`] and [`rms_f64`], the bit patterns of a
-//! render ([`bits`]), the impulse responses [`decay_ir`] and [`room_ir`], and a float
-//! WAV on disk ([`write_wav_f32`], [`read_wav_f32`]).
+//! an impulse, the level readings [`peak`], [`peak_planes`], [`rms`] and
+//! [`rms_f64`], the bit patterns of a render ([`bits`]), the impulse responses
+//! [`decay_ir`] and [`room_ir`], and a float WAV on disk ([`write_wav_f32`],
+//! [`read_wav_f32`]).
 //!
 //! Noise is [`noise`](crate::noise) and a bit hash is [`Fnv`](crate::Fnv), both in
 //! this crate's root. Every figure here is plain
@@ -73,7 +74,7 @@ pub fn rms(x: &[f32]) -> f32 {
     rms_f64(x) as f32
 }
 
-/// [`rms`] without the final narrowing to `f32`.
+/// [`rms`] without the final narrowing to `f32`. An empty slice reads `0.0`.
 pub fn rms_f64(x: &[f32]) -> f64 {
     if x.is_empty() {
         return 0.0;
