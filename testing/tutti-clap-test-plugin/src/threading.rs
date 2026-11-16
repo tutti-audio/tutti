@@ -65,14 +65,23 @@ use clap_sys::plugin::clap_plugin;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
 pub enum Site {
+    /// `clap_plugin.init`.
     Init = 0,
+    /// `clap_plugin.activate`.
     Activate = 1,
+    /// `clap_plugin.start_processing`.
     StartProcessing = 2,
+    /// `clap_plugin.process`.
     Process = 3,
+    /// `clap_plugin.on_main_thread`.
     OnMainThread = 4,
+    /// `clap_plugin_timer_support.on_timer`.
     OnTimer = 5,
+    /// `clap_plugin.reset`.
     Reset = 6,
+    /// `clap_plugin_params.flush`.
     ParamsFlush = 7,
+    /// `clap_plugin.deactivate`.
     Deactivate = 8,
 }
 

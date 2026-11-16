@@ -38,3 +38,6 @@ libloading = { workspace = true, optional = true }
 
 [features]
 probe = ["dep:libloading"]
+
+[lints]
+workspace = true

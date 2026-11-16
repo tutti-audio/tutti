@@ -83,13 +83,21 @@ static EXTRA_VALUES: [AtomicU64; MAX_EXTRA_PARAMS] =
 /// One parameter the probe advertises. `pub` and reachable through the rlib so
 /// the conformance test asserts against *this* table rather than a hand-copied
 /// second one that could drift.
+#[derive(Debug)]
 pub struct ProbeParam {
+    /// The parameter id.
     pub id: u32,
+    /// The parameter name, without a terminator.
     pub name: &'static [u8],
+    /// The module path the parameter sits under, without a terminator.
     pub module: &'static [u8],
+    /// The minimum plain value.
     pub min: f64,
+    /// The maximum plain value.
     pub max: f64,
+    /// The default plain value.
     pub default: f64,
+    /// The `CLAP_PARAM_*` flags.
     pub flags: u32,
 }
 
@@ -343,10 +351,15 @@ fn index_of_id(id: u32) -> Option<usize> {
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CapturedParamEvent {
+    /// The event time in frames from the start of the block.
     pub time: u32,
+    /// The CLAP event type.
     pub event_type: u16,
+    /// Padding that keeps `param_id` aligned in the `repr(C)` layout.
     pub _pad: u16,
+    /// The parameter id.
     pub param_id: u32,
+    /// The parameter value.
     pub value: f64,
 }
 
@@ -364,6 +377,7 @@ pub const MAX_CAPTURED_INDICATIONS: usize = 16;
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CapturedIndication {
+    /// The parameter id.
     pub param_id: u32,
     /// The raw `CLAP_PARAM_INDICATION_AUTOMATION_*` value.
     pub state: u32,
@@ -383,6 +397,7 @@ pub struct ParamStateCapture {
     pub flush_calls: u32,
     /// Events on the most recent flush's input list, in the order presented.
     pub flush_event_count: u32,
+    /// The events on the most recent flush input list, in the order presented.
     pub flush_events: [CapturedParamEvent; MAX_CAPTURED_PARAM_EVENTS],
 
     /// Number of `state.save` calls (both plain and context-flavoured).
@@ -393,15 +408,18 @@ pub struct ParamStateCapture {
     /// save/load; 0 when the plain (non-context) entry point was used, which is
     /// how a test tells the two apart (CLAP's context values start at 1).
     pub last_save_context: u32,
+    /// The `clap_plugin_state_context_type` of the most recent context load; 0 for the plain entry point.
     pub last_load_context: u32,
     /// Bytes the probe received on the most recent `state.load`.
     pub loaded_len: u32,
+    /// The first bytes the most recent `state.load` received.
     pub loaded_bytes: [u8; MAX_CAPTURED_STATE],
     /// Total bytes the probe's most recent `state.save` handed the host's
     /// ostream, and how many `write` calls it took. The probe deliberately
     /// writes in several small chunks so a host that honours only the first
     /// write is caught.
     pub saved_len: u32,
+    /// The number of `write` calls the most recent `state.save` made.
     pub save_write_calls: u32,
     /// Whether the most recent `state.load` read to EOF — i.e. the host's
     /// istream returned 0 only after the payload was exhausted, never early.
@@ -410,6 +428,7 @@ pub struct ParamStateCapture {
     /// [`MAX_CAPTURED_INDICATIONS`]; `indications` holds the first ones in
     /// call order.
     pub indication_calls: u32,
+    /// The first `set_automation` calls, in call order.
     pub indications: [CapturedIndication; MAX_CAPTURED_INDICATIONS],
 }
 

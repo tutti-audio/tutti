@@ -82,6 +82,10 @@ fn changes(points: &[(Param, i32, f64)]) -> ParameterChanges {
 
 /// Each input channel lands in its own output slot: `out = in + tag`.
 /// Spec: clap.plugin.process, vst3.IAudioProcessor.process, vst2.field.processReplacing, au.select.AudioUnitRender
+///
+/// # Panics
+///
+/// Panics when an assertion of the case fails.
 pub fn routing_tag_oracle<F: Format>() {
     let mut a = active_in::<F>(Mode::Tag);
     let ins = [ramp(BLOCK, 0.25), ramp(BLOCK, 0.5)];
@@ -94,6 +98,10 @@ pub fn routing_tag_oracle<F: Format>() {
 }
 
 /// A rate and block change reaches the plugin and rendering goes on.
+///
+/// # Panics
+///
+/// Panics when an assertion of the case fails.
 pub fn reconfigure_keeps_rendering<F: Format>() {
     let mut a = active_in::<F>(Mode::Tag);
     a.silent(BLOCK);
@@ -112,6 +120,10 @@ pub fn reconfigure_keeps_rendering<F: Format>() {
 /// The plugin's buses as the host reports them, loaded and active: one stereo
 /// main bus a side, with the role the format gives it.
 /// Spec: clap.ext.audio_ports.count, clap.ext.audio_ports.get, vst3.IComponent.getBusCount, vst3.IComponent.getBusInfo, vst2.field.numInputs, vst2.field.numOutputs
+///
+/// # Panics
+///
+/// Panics when an assertion of the case fails.
 pub fn buses_reported<F: Format>() {
     let main = main_thread();
     let want = [(spec::MAIN_BUS, BusRole::Main)];
@@ -127,6 +139,10 @@ pub fn buses_reported<F: Format>() {
 
 /// Reported latency follows the plugin's mode.
 /// Spec: clap.ext.latency.get, vst3.IAudioProcessor.getLatencySamples, vst2.field.initialDelay, au.prop.Latency
+///
+/// # Panics
+///
+/// Panics when an assertion of the case fails.
 pub fn latency_reported<F: Format>() {
     assert_eq!(
         active_in::<F>(Mode::Delay)
@@ -143,6 +159,10 @@ pub fn latency_reported<F: Format>() {
 }
 
 /// The reported latency is the delay the plugin applies, across blocks.
+///
+/// # Panics
+///
+/// Panics when an assertion of the case fails.
 pub fn latency_applied<F: Format>() {
     let mut a = active_with::<F>(Mode::Delay, 128, SampleFormat::Float32);
     let frames = 100;
@@ -168,6 +188,10 @@ pub fn latency_applied<F: Format>() {
 /// The oracle is the spec's own delay, [`spec::LATENCY`]; the silence after the
 /// reset is longer than it, so a remembered impulse would be heard.
 /// Spec: clap.plugin.reset, vst3.IAudioProcessor.setProcessing, vst2.eff.StopProcess, au.select.AudioUnitReset
+///
+/// # Panics
+///
+/// Panics when an assertion of the case fails.
 pub fn reset_clears_the_delay_line<F: Format>() {
     let mut a = active_with::<F>(Mode::Delay, 128, SampleFormat::Float32);
     let frames = 100;
@@ -192,6 +216,10 @@ pub fn reset_clears_the_delay_line<F: Format>() {
 
 /// The tail the plugin reports.
 /// Spec: clap.ext.tail.get, vst3.IAudioProcessor.getTailSamples, vst2.eff.GetTailSize, au.prop.TailTime
+///
+/// # Panics
+///
+/// Panics when an assertion of the case fails.
 pub fn tail_reported<F: Format>() {
     assert_eq!(
         active_in::<F>(Mode::Tag).controller().tail(main_thread()),
@@ -203,6 +231,10 @@ pub fn tail_reported<F: Format>() {
 /// graph bounds (`MAX_NODE_TAIL`, 60 s) is the finite figure the plugin gave,
 /// not a clamped one (a clamp here would cut a longer ring-out off), and the
 /// format's infinite marker is `Unbounded`, not a huge finite count.
+///
+/// # Panics
+///
+/// Panics when an assertion of the case fails.
 pub fn tail_markers_reported<F: Format>() {
     let spec = F::SURFACE;
     if !spec.selects_tail {
@@ -226,6 +258,10 @@ pub fn tail_markers_reported<F: Format>() {
 /// format reports it, that they are automatable. Not step counts: CLAP's stepped
 /// flag carries none, and VST2 has no steps.
 /// Spec: clap.ext.params.count, clap.ext.params.get_info, vst3.IEditController.getParameterCount, vst3.IEditController.getParameterInfo, vst2.field.numParams, vst2.eff.GetParamName, au.prop.ParameterList, au.prop.ParameterInfo
+///
+/// # Panics
+///
+/// Panics when an assertion of the case fails.
 pub fn parameters_listed<F: Format>() {
     let mut got = F::load().parameters(main_thread());
     // The bypass parameter some formats list is the bypass cases' witness.
@@ -273,6 +309,10 @@ pub fn parameters_listed<F: Format>() {
 /// host reads the bypass back (a bypass it cannot read is not claimed), so every
 /// write is confirmed against the plugin.
 /// Spec: clap.ext.params.get_info, vst3.IEditController.getParameterInfo, vst2.eff.SetBypass, au.prop.BypassEffect
+///
+/// # Panics
+///
+/// Panics when an assertion of the case fails.
 pub fn own_bypass_is_declared_and_written<F: Format>() {
     let main = main_thread();
     let site = |wiring: tutti_plugin_types::LoadedPlugin, when: &str| {
@@ -323,6 +363,10 @@ pub fn own_bypass_is_declared_and_written<F: Format>() {
 /// bypass, and left out of `controls`; where it is a property (AU) there is no
 /// parameter to leave out. The four other parameters are controls either way.
 /// Spec: clap.ext.params.get_info, vst3.IEditController.getParameterInfo, vst2.eff.SetBypass, au.prop.BypassEffect
+///
+/// # Panics
+///
+/// Panics when an assertion of the case fails.
 pub fn the_bypass_parameter_is_not_a_listed_control<F: Format>() {
     let main = main_thread();
     let loaded = F::load();
@@ -403,6 +447,10 @@ pub fn a_control_carries_what_the_plugin_declares_of_it<F: Format>() {
 /// other slot is mapped) and an AU's mapping table. CLAP and VST2 have no such
 /// table, so they list none.
 /// Spec: vst3.IMidiMapping.getMidiControllerAssignment, au.prop.AllParameterMIDIMappings
+///
+/// # Panics
+///
+/// Panics when an assertion of the case fails.
 pub fn the_plugins_midi_assignments_are_listed<F: Format>() {
     let main = main_thread();
     let loaded = F::load();
@@ -519,6 +567,10 @@ pub fn parameter_round_trip<F: Format>() {
 }
 
 /// An id the plugin lacks reads `None`.
+///
+/// # Panics
+///
+/// Panics when an assertion of the case fails.
 pub fn unlisted_parameter_is_none<F: Format>() {
     let loaded = F::load();
     assert_eq!(
@@ -545,6 +597,10 @@ pub fn unlisted_parameter_is_none<F: Format>() {
 /// VST2 is not applicable by its spec: no opcode carries a read-only bit
 /// (`effGetParameterProperties` has none), so the format has no read-only
 /// parameter to refuse a write to ([`spec::Surface::reports_access`]).
+///
+/// # Panics
+///
+/// Panics when an assertion of the case fails.
 pub fn read_only_parameter_write_is_refused<F: Format>() {
     if !F::SURFACE.reports_access {
         return;
@@ -587,6 +643,10 @@ pub fn read_only_parameter_write_is_refused<F: Format>() {
 /// that delivers a point directly leaves no event for either, so the transcript
 /// half is vacuous there, as in [`read_only_parameter_write_is_refused`]; VST2
 /// is not applicable for the same spec reason.)
+///
+/// # Panics
+///
+/// Panics when an assertion of the case fails.
 pub fn automation_to_a_read_only_parameter_is_not_applied<F: Format>() {
     if !F::SURFACE.reports_access {
         return;
@@ -623,6 +683,10 @@ pub fn automation_to_a_read_only_parameter_is_not_applied<F: Format>() {
 /// `tutti-au-host`'s processor; VST2's is `Vst2Processor::write_automation`, which
 /// turns an id outside `numParams` into a refusal before `setParameter` and
 /// counts it.)
+///
+/// # Panics
+///
+/// Panics when an assertion of the case fails.
 pub fn automation_to_an_undeclared_parameter_is_not_applied<F: Format>() {
     let mut a = active_in::<F>(Mode::Level);
     let mut points = ParameterChanges::reserved(2, 4);
@@ -648,6 +712,10 @@ pub fn automation_to_an_undeclared_parameter_is_not_applied<F: Format>() {
 
 /// A write to an id the plugin does not declare fails at the call with a named
 /// error, loaded and active (`ParamWriteError`, one policy for every format).
+///
+/// # Panics
+///
+/// Panics when an assertion of the case fails.
 pub fn undeclared_parameter_write_is_refused<F: Format>() {
     let main = main_thread();
     let refused = Err(ParamWriteError::Undeclared(spec::UNLISTED));
@@ -667,6 +735,10 @@ pub fn undeclared_parameter_write_is_refused<F: Format>() {
 }
 
 /// A write to an active plugin is applied at the head of its next block.
+///
+/// # Panics
+///
+/// Panics when an assertion of the case fails.
 pub fn active_write_applied<F: Format>() {
     let mut a = active_in::<F>(Mode::Level);
     assert!(
@@ -681,6 +753,10 @@ pub fn active_write_applied<F: Format>() {
 /// A parameter point lands at its sample offset, or at the block head where
 /// the format cannot place it.
 /// Spec: clap.event.param_value, vst3.IParamValueQueue.getPoint, vst3.IParamValueQueue.getPointCount, au.select.AudioUnitScheduleParameters, au.param.event.Immediate
+///
+/// # Panics
+///
+/// Panics when an assertion of the case fails.
 pub fn automation_point_offset<F: Format>() {
     let mut a = active_in::<F>(Mode::Level);
     let points = changes(&[(Param::Level, 32, 0.75)]);
@@ -698,6 +774,10 @@ pub fn automation_point_offset<F: Format>() {
 /// length, and the step as a point; a format that takes points receives the
 /// points.
 /// Spec: clap.event.param_value, vst3.IParamValueQueue.getPoint, vst3.IParamValueQueue.getPointCount, au.select.AudioUnitScheduleParameters, au.param.event.Immediate, au.param.event.Ramped
+///
+/// # Panics
+///
+/// Panics when an assertion of the case fails.
 pub fn automation_segment_and_step<F: Format>() {
     let [(from_at, from), (to_at, to)] = spec::SEGMENT;
     let step = spec::SEGMENT_STEP;
@@ -765,6 +845,10 @@ pub fn automation_segment_and_step<F: Format>() {
 
 /// A note starts and stops at its sample offset.
 /// Spec: clap.event.note_on, clap.event.note_off, vst3.IEventList.getEvent, vst2.eff.ProcessEvents, vst2.event.kVstMidiType, au.midi.MusicDeviceMIDIEventList
+///
+/// # Panics
+///
+/// Panics when an assertion of the case fails.
 pub fn note_at_offset<F: Format>() {
     let mut a = active_in::<F>(Mode::Notes);
     let events = [note(10, true), note(40, false)];
@@ -777,6 +861,10 @@ pub fn note_at_offset<F: Format>() {
 }
 
 /// What the host sent arrives as sent: events by offset, blocks by size.
+///
+/// # Panics
+///
+/// Panics when an assertion of the case fails.
 pub fn arrival_is_ordered_and_sized<F: Format>() {
     let mut a = active_in::<F>(Mode::Notes);
     let events = [note(5, true), note(20, false), note(30, true)];
@@ -851,6 +939,10 @@ fn transport(playing: bool, tempo: f64, beat: f64) -> TransportInfo {
 /// was given it: rolling, then stopped, each with its tempo and position, both
 /// flagged valid. The figures are exact in every format's encoding (CLAP's
 /// beat is a fixed point of 2^31 per beat).
+///
+/// # Panics
+///
+/// Panics when an assertion of the case fails.
 pub fn transport_reaches_the_plugin<F: Format>() {
     let mut a = active_in::<F>(Mode::Tag);
     let (rolling, stopped) = (transport(true, 132.0, 6.5), transport(false, 90.0, 12.0));
@@ -894,6 +986,10 @@ pub fn transport_reaches_the_plugin<F: Format>() {
 /// own: CLAP has an event for it (`CLAP_EVENT_TRANSPORT`); VST3 and VST2 have
 /// none, and are gaps.
 /// Spec: clap.event.transport
+///
+/// # Panics
+///
+/// Panics when an assertion of the case fails.
 pub fn transport_change_is_told_at_its_frame<F: Format>() {
     let mut a = active_in::<F>(Mode::Tag);
     let head = transport(true, 120.0, 4.0);
@@ -974,6 +1070,10 @@ fn surfaced<F: Format>(c: &mut dyn Control) -> Surfaced {
 /// and in an active one, and each answer is the spec's row for the format. A
 /// format that has no editor, no render mode, or reports nothing outside a
 /// block answers so in both states.
+///
+/// # Panics
+///
+/// Panics when an assertion of the case fails.
 pub fn the_control_surface_answers_alike_loaded_and_active<F: Format>() {
     let spec = F::SURFACE;
     let mut loaded = F::load();
@@ -1007,6 +1107,10 @@ pub fn gesture_edits() -> Vec<ParamEdit> {
 /// CLAP's plugin says it in the first block after the state load (its output
 /// events); the others at the load, and a block after it adds nothing.
 /// Spec: clap.event.param_gesture_begin, clap.event.param_gesture_end, clap.event.param_value, vst3.IComponentHandler.beginEdit, vst3.IComponentHandler.performEdit, vst3.IComponentHandler.endEdit, vst2.audioMaster.BeginEdit, vst2.audioMaster.Automate, vst2.audioMaster.EndEdit
+///
+/// # Panics
+///
+/// Panics when an assertion of the case fails.
 pub fn a_gesture_is_reported_in_order<F: Format>() {
     let mut a = active_in::<F>(Mode::Tag);
     let main = main_thread();
@@ -1035,6 +1139,10 @@ pub fn a_gesture_is_reported_in_order<F: Format>() {
 
 /// State round-trips what the plugin persists.
 /// Spec: clap.ext.state.save, clap.ext.state.load, clap.stream.istream.read, clap.stream.ostream.write, vst3.IComponent.getState, vst3.IComponent.setState, vst3.IBStream.read, vst3.IBStream.write, vst2.eff.GetChunk, vst2.eff.SetChunk, au.prop.ClassInfo
+///
+/// # Panics
+///
+/// Panics when an assertion of the case fails.
 pub fn state_round_trip<F: Format>() {
     let mut loaded = F::load();
     write(&mut loaded, Param::Level, 0.75);
@@ -1052,6 +1160,10 @@ pub fn state_round_trip<F: Format>() {
 }
 
 /// A parameter written to a loaded plugin reaches its audio at the first block.
+///
+/// # Panics
+///
+/// Panics when an assertion of the case fails.
 pub fn loaded_write_reaches_the_audio<F: Format>() {
     let mut loaded = F::load();
     set_mode::<F, _>(&mut loaded, Mode::Level);
@@ -1062,6 +1174,10 @@ pub fn loaded_write_reaches_the_audio<F: Format>() {
 
 /// A parameter written to a loaded plugin and saved before it ever renders is
 /// in the state; a restore of that state reads it back and renders it.
+///
+/// # Panics
+///
+/// Panics when an assertion of the case fails.
 pub fn loaded_write_survives_a_save<F: Format>() {
     let mut loaded = F::load();
     set_mode::<F, _>(&mut loaded, Mode::Level);
@@ -1081,6 +1197,10 @@ pub fn loaded_write_survives_a_save<F: Format>() {
 /// A reopen is a fresh instance of the same plugin, from the same file: its
 /// identity, its defaults and nothing of the one it came from, which it leaves
 /// as it was; and it renders.
+///
+/// # Panics
+///
+/// Panics when an assertion of the case fails.
 // Not covered: a reopen that carries the original's state over (`reopen` takes
 // `&self`, and saving a state takes `&mut`, so the impl cannot write one); the fresh-
 // default read is what would catch it.
@@ -1110,6 +1230,10 @@ where
 /// The level and the mode go in through the state, so they sit in the component
 /// itself: a host that carries a later write to the component's first block
 /// cannot hide a plugin that loses them on a refusal.
+///
+/// # Panics
+///
+/// Panics when an assertion of the case fails.
 pub fn corrupt_state_leaves_plugin_usable<F: Format>() {
     let mut loaded = F::load();
     set_mode::<F, _>(&mut loaded, Mode::Level);
@@ -1125,6 +1249,10 @@ pub fn corrupt_state_leaves_plugin_usable<F: Format>() {
 }
 
 /// Halves of two activations do not rejoin.
+///
+/// # Panics
+///
+/// Panics when an assertion of the case fails.
 pub fn halves_of_two_activations_are_stuck<F: Format>() {
     let p = prepare(RATE, BLOCK, SampleFormat::Float32);
     let (pa, ca) = F::load()
@@ -1141,6 +1269,10 @@ pub fn halves_of_two_activations_are_stuck<F: Format>() {
 }
 
 /// 64-bit audio carries the same arithmetic, at 64 bits: 0.1 is not exact in 32.
+///
+/// # Panics
+///
+/// Panics when an assertion of the case fails.
 pub fn f64_carries_same_audio<F: Format>() {
     let mut a = active_with::<F>(Mode::Tag, BLOCK, SampleFormat::Float64);
     let ins = [vec![0.1f64; BLOCK], vec![0.2f64; BLOCK]];
@@ -1159,6 +1291,10 @@ pub fn f64_carries_same_audio<F: Format>() {
 
 /// A plugin whose log overflowed fails the oracle instead of passing on the
 /// part it kept.
+///
+/// # Panics
+///
+/// Panics when an assertion of the case fails.
 pub fn overflowing_log_fails_the_oracle<F: Format>() {
     let mut a = active_in::<F>(Mode::Tag);
     for _ in 0..=spec::LOG_BLOCKS {
@@ -1182,6 +1318,10 @@ pub fn overflowing_log_fails_the_oracle<F: Format>() {
 ///
 /// A failure aborts the process, so under plain `cargo test` it takes the whole
 /// test binary with it, and a [`Gap`](crate::Gap) cannot express it.
+///
+/// # Panics
+///
+/// Panics when an assertion of the case fails.
 pub fn process_does_not_allocate<F: Format>() {
     let mut a = active_in::<F>(Mode::Notes);
     let events = [note(5, true), note(20, false)];
