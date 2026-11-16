@@ -11,9 +11,7 @@
 //! An [`Edit`] goes the other way: a parameter write on an active plugin,
 //! queued to the Processor and applied at the head of its next block.
 
-use tutti_rt::{
-    Overflow, PushError, RequestBit, RequestWord, RingReader, RingWriter, ring,
-};
+use tutti_rt::{Overflow, PushError, RequestBit, RequestWord, RingReader, RingWriter, ring};
 
 use crate::{Normalized, ParamEdit, ParamId, Request, RescanScope};
 
@@ -194,7 +192,9 @@ impl EditSink {
     /// [`PushError::Full`], counted in [`refused`](Self::refused). The caller keeps
     /// the latest value per parameter and retries on its next tick.
     pub fn send(&mut self, edit: Edit) -> Result<(), PushError> {
-        self.0.push(edit.encode()).map_err(|returned| returned.error)
+        self.0
+            .push(edit.encode())
+            .map_err(|returned| returned.error)
     }
 
     /// Edits refused for want of room, saturating at `u32::MAX`.
