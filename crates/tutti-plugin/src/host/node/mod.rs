@@ -107,7 +107,7 @@ use std::sync::atomic::Ordering;
 use tutti_graph::{IntoNode, Node, NodeParts, Shape};
 use tutti_plugin_host::{
     InProcClient, InvalidateSink, ParameterChangeSink, PluginControls, PluginHandle, PluginNode,
-    RefreshSink, TransportSink, client_over,
+    PortLimit, Rebinder, RefreshSink, TransportSink, client_over,
 };
 use tutti_plugin_ipc::{
     BridgeConfig, BridgeEvent, Ipc, IpcController, IpcOrigin, Launched, PluginBridge,
@@ -432,7 +432,7 @@ impl PluginClient<Unbound> {
             prepare,
             descriptor.clone(),
             &loaded,
-            params,
+            params.iter().copied(),
             ParameterChanges::SPARE_QUEUES,
             Some(controls.clone()),
         )
@@ -494,6 +494,7 @@ impl PluginClient<Unbound> {
             fork_watch,
             state: Unbound { client },
         } = self;
+
         PluginClient {
             bridge,
             descriptor,
@@ -515,6 +516,26 @@ impl PluginClient<Unbound> {
                 tempo,
             },
         }
+    }
+}
+
+impl PluginClient<Bound> {
+    /// The builder of the node that replaces this one when the plugin changes
+    /// its audio ports ([`Rebinder::prepare`]). Made on the call from what the
+    /// bound node holds, so take it before the client goes into a graph
+    /// (`into_parts` consumes the client) and keep it beside the node's
+    /// controls. It is limited to the ports the plugin had when it was
+    /// launched: the shared-memory slab is laid out once, and a rebuilt node
+    /// over other ports is refused with
+    /// [`RebindError::OutsideSlab`](tutti_plugin_host::RebindError::OutsideSlab).
+    ///
+    /// The rebinder keeps the plugin instance alive until it is dropped.
+    #[must_use]
+    pub fn rebinder(&self) -> Rebinder<Ipc> {
+        self.state.node.rebinder(Some(PortLimit {
+            inputs: self.inputs,
+            outputs: self.outputs,
+        }))
     }
 }
 

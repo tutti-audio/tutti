@@ -38,7 +38,7 @@ pub const MAX_BLOCK_CHANNELS: usize = 16;
 ///
 /// A width is refused, never narrowed: a node over a plugin that is handed
 /// only some of its channels would run it on another layout than it declared.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 #[error("the plugin has {channels} {direction} channels, at most {MAX_BLOCK_CHANNELS} are served")]
 pub struct PluginTooWide {
     /// `"input"` or `"output"`.

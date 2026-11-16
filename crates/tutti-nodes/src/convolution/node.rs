@@ -1,35 +1,39 @@
-//! [`ConvolverNode`]: [`Convolver`] as a graph node, at any channel
-//! width.
+//! [`ConvolverNode`]: [`Convolver`] as a graph node, N channels in and M out.
 //!
-//! One node for every width: each channel runs the same "convolve, gain"
-//! step. The width is a property of the value (how many
-//! convolvers it was built with), and which IR each channel hears is an
-//! [`IrChannelConfig`].
+//! One node for every shape: the channel counts are a property of the value, and how its
+//! impulse responses lie over the channels is an [`IrLayout`]. A per-channel layout runs one
+//! [`Convolver`] per channel; true stereo and ambisonic run a [`MatrixConvolver`] whose
+//! paths are the same engine.
 //!
-//! The node composes a [`Convolver`] per channel (the DSP engine) with one
-//! wet-path gain, shared across channels. It outputs its wet signal alone: the
-//! blend with the dry input is the graph's (`Editor::set_mix`).
+//! The node outputs its wet signal alone, scaled by one wet-path gain shared by every
+//! output channel: the blend with the dry input is the graph's (`Editor::set_mix`).
 //!
 //! **An IR's FFT partitions are stored once**, in its
-//! [`IrSpectra`](tutti_dsp::IrSpectra) behind an `Arc`: under
-//! [`IrChannelConfig::Mono`] every channel reads the one set, and a fork of
-//! the node ([`ParamNode::fork_fresh`]) reads the live node's, since nothing
-//! writes them after they are built. Each channel and each fork keeps only
-//! its own running state.
+//! [`IrSpectra`](tutti_dsp::IrSpectra) behind an `Arc`: a shared IR is read by every
+//! channel, and a fork of the node ([`ParamNode::fork_fresh`]) reads the live node's, since
+//! nothing writes them after they are built. Each channel and each fork keeps only its own
+//! running state.
 
-use tutti_buffers::{Fold, FoldError, MonoMut, Planes};
+use tutti_buffers::{Fold, FoldError, Mono, MonoMut, Planes, PlanesMut, Sample};
 use tutti_graph::{
-    Cx, Inputs, IntoNode, Io, Node, NodeParts, Outputs, ParamNode, ParamSet, Prepare, Shape,
-    Status, fold_to_width,
+    Buses, Cx, Inputs, IntoNode, Io, Node, NodeParts, Outputs, ParamNode, ParamSet, Prepare, Shape,
+    Status,
 };
 use tutti_types::{
-    Amplitude, ChannelLayout, ChannelTopology, MAX_CHANNELS, Param, Samples, UnitParam,
+    AmbisonicFormat, AmbisonicOrder, Amplitude, BusTopology, ChannelLayout, ChannelTopology,
+    MAX_CHANNELS, Param, Samples, UnitParam,
 };
 use tutti_types::{Latency, Tail};
 
+use super::IrLayout;
+use crate::kernel::{slice_in, slice_out};
 use crate::ramp::LastGood;
-use tutti_dsp::Convolver;
+use crate::tail_clock::{Heard, TailClock, tail_frames};
 use tutti_dsp::Glide;
+use tutti_dsp::{Convolver, MatrixConvolver, MatrixConvolverError};
+
+/// The block a folded node's scratch holds before `prepare` sizes it to the graph's.
+const FOLD_SCRATCH: usize = 512;
 
 /// The tail of an FIR whose impulse response is `ir_length` samples long.
 ///
@@ -49,17 +53,73 @@ pub(super) fn ring_out(ir_length: usize) -> Tail {
     }
 }
 
-/// Why a [`ConvolverNode`] could not be built from the impulse responses given.
+/// Why a [`ConvolverNode`] could not be built from the layout and impulse responses given.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum ConvolverError {
     /// No impulse response, or a layout of no channels: a node has at least one.
     #[error("a ConvolverNode needs at least one channel")]
     NoChannels,
-    /// More channels than a [`ChannelLayout`] counts.
-    #[error("a ConvolverNode has at most {} channels, not {channels}", u16::MAX)]
+    /// More channels than a bus has.
+    #[error(
+        "a ConvolverNode has at most {} channels, not {channels}",
+        MAX_CHANNELS
+    )]
     TooWide {
         /// The channels asked for.
+        channels: usize,
+    },
+    /// The number of impulse responses is not what the layout takes.
+    #[error("the layout takes {want} impulse responses, not {got}")]
+    IrCount {
+        /// What the layout takes ([`IrLayout::ir_count`]).
+        want: usize,
+        /// What was given.
+        got: usize,
+    },
+    /// The layout's width on a side is not that port's.
+    #[error("the layout is {layout:?} wide at the {side:?} and the node's port is {ports:?}")]
+    PortWidth {
+        /// The side.
+        side: PortSide,
+        /// The layout's width there.
+        layout: ChannelLayout,
+        /// The port's width.
+        ports: ChannelLayout,
+    },
+    /// An ambisonic set on a side whose order does not give the port's channel count.
+    #[error(
+        "an ambisonic order of {order:?} at the {side:?} is {width:?}, not the port's {ports:?}"
+    )]
+    AmbisonicOrder {
+        /// The side.
+        side: PortSide,
+        /// The format's order.
+        order: AmbisonicOrder,
+        /// The channels that order has, `(order + 1)^2`.
+        width: ChannelLayout,
+        /// The port's width.
+        ports: ChannelLayout,
+    },
+    /// The layout and a port are of one width but do not place their channels alike.
+    #[error(
+        "the layout does not place its channels at the {side:?} as the node's port does: {ports:?}"
+    )]
+    PortPlacement {
+        /// The side.
+        side: PortSide,
+        /// The port.
+        ports: BusTopology,
+    },
+    /// The matrix of an ambisonic or true stereo layout could not be built.
+    #[error(transparent)]
+    Matrix(#[from] MatrixConvolverError),
+    /// A topology that is not a bus: wider than one holds.
+    #[error("the {side:?} topology of {channels} channels is not a bus")]
+    NotABus {
+        /// The side.
+        side: PortSide,
+        /// The channels it has.
         channels: usize,
     },
     /// A folded node whose width has no fold to mono.
@@ -73,38 +133,79 @@ pub enum ConvolverError {
     },
 }
 
-/// How a [`ConvolverNode`]'s impulse responses map onto its channels.
-///
-/// Mirrors Ardour's convolution-reverb wiring options, generalised from a
-/// stereo pair to any width. Every configuration has as many inputs as
-/// outputs.
-#[derive(Clone, Copy, Debug, PartialEq, Hash, Eq)]
-pub enum IrChannelConfig {
-    /// One IR applied independently to every channel — the same room heard
-    /// from each channel's own position, with no cross-coupling. A 1-channel
-    /// node is this configuration.
-    Mono,
-    /// All inputs folded to mono (the engine's [`Fold`] to one channel), then
-    /// convolved with one IR per output channel. At width 2 this is the classic
-    /// mono-to-stereo reverb: one source, two decorrelated tails.
-    MonoToStereo,
-    /// One IR per channel, channel `c` convolved with IR `c` and nothing else.
-    /// At width 2 this is true stereo (L with IR-L, R with IR-R).
-    Stereo,
+/// A side of a node: its input ports or its output ports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PortSide {
+    /// The input ports.
+    Input,
+    /// The output ports.
+    Output,
 }
 
-/// Convolution reverb as a graph node, `width`-in / `width`-out.
+/// The convolution of a node: one engine per channel, or one matrix of paths.
+#[derive(Clone, Debug)]
+enum Engine {
+    /// One convolver per channel; its length is the width.
+    PerChannel(Vec<Convolver>),
+    /// Every (input, output) path.
+    Matrix(Box<MatrixConvolver>),
+}
+
+impl Engine {
+    fn ir_length(&self) -> usize {
+        match self {
+            Self::PerChannel(cs) => cs.iter().map(Convolver::ir_length).max().unwrap_or(0),
+            Self::Matrix(m) => m.ir_length(),
+        }
+    }
+
+    fn latency(&self) -> usize {
+        match self {
+            Self::PerChannel(cs) => cs[0].latency(),
+            Self::Matrix(m) => m.latency(),
+        }
+    }
+
+    fn fresh(&self) -> Self {
+        match self {
+            Self::PerChannel(cs) => Self::PerChannel(cs.iter().map(Convolver::fresh).collect()),
+            Self::Matrix(m) => Self::Matrix(Box::new(m.fresh())),
+        }
+    }
+
+    fn reset(&mut self) {
+        match self {
+            Self::PerChannel(cs) => cs.iter_mut().for_each(Convolver::reset),
+            Self::Matrix(m) => m.reset(),
+        }
+    }
+}
+
+/// Convolution reverb as a graph node, N channels in and M out.
 ///
-/// Built at a fixed width with an [`IrChannelConfig`] saying which IR each
-/// channel hears; [`new`](Self::new) / [`with_ir`](Self::with_ir) build the
-/// 1-channel node. Latency is one FFT block, the same on every channel,
-/// declared in its [`Shape`] for the **whole** output. Its tail is the longest
-/// IR's ring-out.
+/// Built at fixed channel counts with an [`IrLayout`] saying which impulse response each
+/// path from an input to an output has; [`new`](Self::new) / [`with_ir`](Self::with_ir)
+/// build the 1-channel node. Latency is one FFT block, the same on every output, declared
+/// in its [`Shape`] for the **whole** output. Its tail is the longest IR's ring-out.
 ///
-/// The output is the wet signal alone, scaled by one wet-path [`Amplitude`]
-/// shared by every channel, read once per block. The blend with the dry input
-/// is the graph's: `Editor::set_mix` mixes the output with the input delayed by
-/// the latency declared here.
+/// The output is the wet signal alone, scaled by one wet-path [`Amplitude`] shared by every
+/// output channel, read once per block. A gain that moves between blocks ramps across the
+/// next piece the node renders, so a render is bit-identical across block splits for a
+/// constant gain, and for a gain driven on the `Volume` port, which is per frame. A finite
+/// gain is applied as it is, so a huge one (1e20) passes and the output is not guarded; a
+/// non-finite one reads as the last finite. The blend with the dry input is the graph's:
+/// `Editor::set_mix` mixes the output with the input delayed by the latency declared here.
+///
+/// # Silence, parking and resume
+///
+/// The output is exact zeros past the latency plus the longest IR's ring-out after the last
+/// non-zero input frame. A block wholly past it, with silent input, answers
+/// [`Status::Silent`] without rendering, which is what lets the graph park the node. When
+/// input resumes after a gap at least that long, every output of the earlier input has been
+/// written, so the engine restarts from zero at the first non-zero frame and the gain starts
+/// flat on its current value. The render is then the same bits whatever the block sizes and
+/// whether the graph parked the node: a block is cut where the tail ends and where the
+/// engine restarts, and a resumed burst is a fresh node's.
 ///
 /// # In a graph
 ///
@@ -127,19 +228,24 @@ pub enum IrChannelConfig {
 /// than as an error. Supply IRs already at the graph's rate.
 #[derive(Clone)]
 pub struct ConvolverNode {
-    /// One convolver per channel; `convolvers.len()` is the width. Built at
-    /// construction — never resized in `process` (RT no-alloc).
-    convolvers: Vec<Convolver>,
-    config: IrChannelConfig,
+    engine: Engine,
+    layout: IrLayout,
+    /// The input bus, checked against `layout` at construction.
+    inputs: BusTopology,
+    /// The output bus, checked against `layout` at construction.
+    outputs: BusTopology,
     /// The wet path's linear gain, floored at 0.
     gain: Param<Amplitude>,
     latency_samples: usize,
-    /// The fold of every input to mono, for
-    /// [`MonoToStereo`](IrChannelConfig::MonoToStereo); `None` for the other
-    /// configurations. Built at construction, applied to whole planes.
+    /// The ring-out owed after the last non-silent input frame: the longest IR's, past the
+    /// latency. It says when a block is wholly past the tail and the node parks.
+    clock: TailClock,
+    /// The fold of every input to mono, for a [`folded`](Self::folded) node; `None`
+    /// otherwise. Built at construction, applied to whole planes.
     fold: Option<Fold>,
-    /// The folded mono block, for [`MonoToStereo`](IrChannelConfig::MonoToStereo).
-    /// Sized at `prepare` for the graph's maximum block.
+    /// The folded mono block, for a folded node. [`FOLD_SCRATCH`] frames from construction, and
+    /// at `prepare` the graph's maximum block, which is also the longest piece a call renders
+    /// at once.
     mono: Vec<f32>,
     /// The gain the previous block ended on — where this block's ramp starts.
     /// `None` until the first block and after `reset`, which then starts on the
@@ -154,8 +260,8 @@ pub struct ConvolverNode {
 impl std::fmt::Debug for ConvolverNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ConvolverNode")
-            .field("convolvers", &self.convolvers)
-            .field("config", &self.config)
+            .field("engine", &self.engine)
+            .field("layout", &self.layout)
             .field("gain", &self.gain)
             .field("latency_samples", &self.latency_samples)
             .field("last", &self.last)
@@ -165,39 +271,108 @@ impl std::fmt::Debug for ConvolverNode {
 }
 
 impl ConvolverNode {
-    /// The node over `convolvers`, checked: at least one, a width a
-    /// [`ChannelLayout`] counts and, folded, one that folds to mono.
-    fn build(convolvers: Vec<Convolver>, config: IrChannelConfig) -> Result<Self, ConvolverError> {
-        if convolvers.is_empty() {
+    /// The node of `layout` over `irs`, with the buses `inputs` and `outputs` at its ports.
+    ///
+    /// `block_size` is rounded up to a power of two; it is the latency. The responses of a
+    /// layout are in the order its docs give ([`IrLayout`]).
+    ///
+    /// # Errors
+    ///
+    /// By name, before any convolver is built: [`ConvolverError::NoChannels`] for a layout
+    /// of no channels, [`ConvolverError::TooWide`] past a bus's width,
+    /// [`ConvolverError::IrCount`] when `irs` is not what the layout takes,
+    /// [`ConvolverError::PortWidth`] / [`ConvolverError::AmbisonicOrder`] /
+    /// [`ConvolverError::PortPlacement`] when the layout does not match a port.
+    pub fn from_layout<S: Sample>(
+        layout: IrLayout,
+        inputs: BusTopology,
+        outputs: BusTopology,
+        irs: &[Mono<'_, S>],
+        block_size: usize,
+    ) -> Result<Self, ConvolverError> {
+        let (n_in, n_out) = (layout.inputs(), layout.outputs());
+        if n_in.count() == 0 || n_out.count() == 0 {
             return Err(ConvolverError::NoChannels);
         }
-        let width = u16::try_from(convolvers.len()).map_err(|_| ConvolverError::TooWide {
-            channels: convolvers.len(),
-        })?;
-        let fold = match config {
-            IrChannelConfig::MonoToStereo => Some(
-                fold_to_width(
-                    &ChannelTopology::assumed(ChannelLayout::from(width)),
-                    ChannelLayout::MONO,
-                )
-                .map_err(|source| ConvolverError::NoFold { width, source })?,
+        for width in [n_in, n_out] {
+            if usize::from(width.count()) > MAX_CHANNELS {
+                return Err(ConvolverError::TooWide {
+                    channels: usize::from(width.count()),
+                });
+            }
+        }
+        if irs.len() != layout.ir_count() {
+            return Err(ConvolverError::IrCount {
+                want: layout.ir_count(),
+                got: irs.len(),
+            });
+        }
+        Self::check_port(PortSide::Input, &layout.input(), inputs)?;
+        Self::check_port(PortSide::Output, &layout.output(), outputs)?;
+        let engine = match &layout {
+            IrLayout::PerChannel(_) => Engine::PerChannel(
+                irs.iter()
+                    .map(|ir| Convolver::from_samples(*ir, block_size))
+                    .collect(),
             ),
-            IrChannelConfig::Mono | IrChannelConfig::Stereo => None,
+            IrLayout::TrueStereo | IrLayout::Ambisonic { .. } => Engine::Matrix(Box::new(
+                MatrixConvolver::new(n_in, n_out, irs, block_size)?,
+            )),
         };
-        Ok(Self::assemble(convolvers, config, fold))
+        Ok(Self::assemble(engine, layout, inputs, outputs, None))
     }
 
-    /// The node over `convolvers`, which a caller has checked as [`build`](Self::build) does.
-    fn assemble(convolvers: Vec<Convolver>, config: IrChannelConfig, fold: Option<Fold>) -> Self {
-        let latency_samples = convolvers[0].latency();
-        // Every constructor builds all channels with one block size, so one
-        // figure is true of the whole node.
-        debug_assert!(convolvers.iter().all(|c| c.latency() == latency_samples));
+    /// One side of the layout, `topology`, against that side's port: the same width, and the
+    /// same placement.
+    fn check_port(
+        side: PortSide,
+        topology: &ChannelTopology,
+        ports: BusTopology,
+    ) -> Result<(), ConvolverError> {
+        let (width, port_width) = (topology.width(), ports.layout());
+        if width != port_width {
+            return Err(match topology.ambisonic() {
+                Some(format) => ConvolverError::AmbisonicOrder {
+                    side,
+                    order: format.order(),
+                    width,
+                    ports: port_width,
+                },
+                None => ConvolverError::PortWidth {
+                    side,
+                    layout: width,
+                    ports: port_width,
+                },
+            });
+        }
+        if BusTopology::try_from(topology).ok() == Some(ports) {
+            Ok(())
+        } else {
+            Err(ConvolverError::PortPlacement { side, ports })
+        }
+    }
+
+    /// The node over `engine`, which a caller has checked as [`from_layout`](Self::from_layout) does.
+    fn assemble(
+        engine: Engine,
+        layout: IrLayout,
+        inputs: BusTopology,
+        outputs: BusTopology,
+        fold: Option<Fold>,
+    ) -> Self {
+        let latency_samples = engine.latency();
+        let clock = TailClock::new(
+            tail_frames(ring_out(engine.ir_length())),
+            latency_samples as u64,
+        );
         Self {
-            convolvers,
-            config,
+            engine,
+            layout,
+            inputs,
+            outputs,
             gain: Param::new(Amplitude::UNITY),
             latency_samples,
+            clock,
             fold,
             mono: Vec::new(),
             last: None,
@@ -205,27 +380,16 @@ impl ConvolverNode {
         }
     }
 
-    /// One convolver per IR, all at `block_size`. The count is checked before
-    /// any convolver is built.
-    fn per_ir(
-        irs: &[&[f32]],
-        block_size: usize,
-        config: IrChannelConfig,
-    ) -> Result<Self, ConvolverError> {
-        if irs.is_empty() {
-            return Err(ConvolverError::NoChannels);
-        }
-        if u16::try_from(irs.len()).is_err() {
-            return Err(ConvolverError::TooWide {
-                channels: irs.len(),
-            });
-        }
-        Self::build(
-            irs.iter()
-                .map(|ir| Convolver::new(ir, block_size))
-                .collect(),
-            config,
-        )
+    /// `width` unassigned channels: a width a node is built for with no placement stated.
+    fn unassigned(width: usize) -> Result<(IrLayout, BusTopology), ConvolverError> {
+        let layout = ChannelLayout::try_from(width)
+            .map_err(|_| ConvolverError::TooWide { channels: width })?;
+        let ports =
+            BusTopology::unassigned(layout).ok_or(ConvolverError::TooWide { channels: width })?;
+        Ok((
+            IrLayout::PerChannel(ChannelTopology::unassigned(layout)),
+            ports,
+        ))
     }
 
     /// A 1-channel convolver from an impulse response with an explicit block
@@ -236,8 +400,10 @@ impl ConvolverNode {
     #[must_use]
     pub fn new(ir: &[f32], block_size: usize) -> Self {
         Self::assemble(
-            vec![Convolver::new(ir, block_size)],
-            IrChannelConfig::Mono,
+            Engine::PerChannel(vec![Convolver::new(ir, block_size)]),
+            IrLayout::PerChannel(ChannelTopology::from(tutti_types::Bed::Mono)),
+            BusTopology::MONO,
+            BusTopology::MONO,
             None,
         )
     }
@@ -247,89 +413,144 @@ impl ConvolverNode {
     /// The rate caveat on the type applies unchanged.
     #[must_use]
     pub fn with_ir(ir: &[f32]) -> Self {
-        Self::assemble(vec![Convolver::with_ir(ir)], IrChannelConfig::Mono, None)
+        Self::assemble(
+            Engine::PerChannel(vec![Convolver::with_ir(ir)]),
+            IrLayout::PerChannel(ChannelTopology::from(tutti_types::Bed::Mono)),
+            BusTopology::MONO,
+            BusTopology::MONO,
+            None,
+        )
     }
 
     /// The same IR applied independently to each of `channels` channels
-    /// ([`IrChannelConfig::Mono`]).
+    /// ([`IrLayout::PerChannel`] at unassigned channels).
     ///
     /// The IR is partitioned and transformed once, and every channel reads
     /// those spectra (see the module docs); each keeps its own running state.
     ///
     /// # Errors
     ///
-    /// [`ConvolverError::NoChannels`] for a layout of no channels.
+    /// [`ConvolverError::NoChannels`] for a layout of no channels and
+    /// [`ConvolverError::TooWide`] past a bus's width.
     pub fn shared_ir(
         channels: impl Into<ChannelLayout>,
         ir: &[f32],
         block_size: usize,
     ) -> Result<Self, ConvolverError> {
         let n = usize::from(channels.into().count());
+        if n == 0 {
+            return Err(ConvolverError::NoChannels);
+        }
+        let (layout, ports) = Self::unassigned(n)?;
         let head = Convolver::new(ir, block_size);
-        Self::build(
-            (0..n).map(|_| head.fresh()).collect(),
-            IrChannelConfig::Mono,
-        )
+        Ok(Self::assemble(
+            Engine::PerChannel((0..n).map(|_| head.fresh()).collect()),
+            layout,
+            ports,
+            ports,
+            None,
+        ))
     }
 
-    /// One IR per channel ([`IrChannelConfig::Stereo`]): channel `c` is
-    /// convolved with `irs[c]`, and the width is `irs.len()`.
+    /// One IR per channel, at unassigned channels ([`IrLayout::PerChannel`]): channel `c`
+    /// is convolved with `irs[c]` and nothing else, and the width is `irs.len()`. At two
+    /// channels this is dual mono, not [true stereo](Self::true_stereo).
     ///
     /// # Errors
     ///
     /// [`ConvolverError::NoChannels`] if `irs` is empty and
-    /// [`ConvolverError::TooWide`] if it is longer than `u16::MAX`.
+    /// [`ConvolverError::TooWide`] if it is wider than a bus.
     pub fn per_channel(irs: &[&[f32]], block_size: usize) -> Result<Self, ConvolverError> {
-        Self::per_ir(irs, block_size, IrChannelConfig::Stereo)
+        let (layout, ports) = Self::unassigned(irs.len())?;
+        let irs: Vec<Mono<'_, f32>> = irs.iter().map(|ir| Mono::new(ir)).collect();
+        Self::from_layout(layout, ports, ports, &irs, block_size)
     }
 
-    /// Every input folded to mono, then convolved with one IR per output
-    /// ([`IrChannelConfig::MonoToStereo`]); the width is `irs.len()`.
+    /// Every input folded to mono, then convolved with one IR per output; the width is
+    /// `irs.len()`. The inputs are folded as the engine's order for that width places them
+    /// ([`ChannelTopology::assumed`], the one place this node reads a count as a placement,
+    /// since a folded node's inputs have no layout to state).
     ///
     /// # Errors
     ///
     /// As [`per_channel`](Self::per_channel), and [`ConvolverError::NoFold`] for a
     /// width with no fold to mono: only 1, 2, 4, 6, 8 and 12 have an order
-    /// ([`fold_to_width`] places any other by index and refuses to narrow it).
+    /// ([`Fold::between`] places any other by index and refuses to narrow it).
     pub fn folded(irs: &[&[f32]], block_size: usize) -> Result<Self, ConvolverError> {
-        Self::per_ir(irs, block_size, IrChannelConfig::MonoToStereo)
+        let mut node = Self::per_channel(irs, block_size)?;
+        // Sized before `prepare` so an unprepared node renders in pieces rather than index
+        // an empty scratch; `prepare` resizes it to the graph's block.
+        node.mono = vec![0.0; FOLD_SCRATCH];
+        let width = node.layout.inputs().count();
+        node.fold = Some(
+            Fold::between(
+                &ChannelTopology::assumed(ChannelLayout::from(width)),
+                &ChannelTopology::assumed(ChannelLayout::MONO),
+            )
+            .map_err(|source| ConvolverError::NoFold { width, source })?,
+        );
+        Ok(node)
     }
 
-    /// True stereo: L with `ir_l`, R with `ir_r`, as
-    /// [`per_channel(&[ir_l, ir_r], …)`](Self::per_channel) builds it.
+    /// True stereo ([`IrLayout::TrueStereo`]): the four paths `ll`, `lr` (L into R), `rl`
+    /// (R into L) and `rr`, with `out_L = in_L * ll + in_R * rl` and
+    /// `out_R = in_L * lr + in_R * rr`.
+    ///
     #[must_use]
-    pub fn stereo(ir_l: &[f32], ir_r: &[f32], block_size: usize) -> Self {
+    pub fn true_stereo<S: Sample>(
+        ll: Mono<'_, S>,
+        lr: Mono<'_, S>,
+        rl: Mono<'_, S>,
+        rr: Mono<'_, S>,
+        block_size: usize,
+    ) -> Self {
         Self::assemble(
-            vec![
-                Convolver::new(ir_l, block_size),
-                Convolver::new(ir_r, block_size),
-            ],
-            IrChannelConfig::Stereo,
+            Engine::Matrix(Box::new(MatrixConvolver::two_by_two(
+                [ll, lr, rl, rr],
+                block_size,
+            ))),
+            IrLayout::TrueStereo,
+            BusTopology::STEREO,
+            BusTopology::STEREO,
             None,
         )
     }
 
-    /// How the node's impulse responses map onto its channels.
+    /// An ambisonic set of `input` in and `output` out ([`IrLayout::Ambisonic`]), one response
+    /// for each (input, output) path, input-major.
     ///
-    /// Fixed at construction — the config picks which constructor built it, so
-    /// changing it means building a new node.
-    pub fn config(&self) -> IrChannelConfig {
-        self.config
+    /// # Errors
+    ///
+    /// [`ConvolverError::IrCount`] when `irs` is not `input width * output width` long,
+    /// [`ConvolverError::NotABus`] for an output that is not a bus (wider than one), and
+    /// [`ConvolverError::NoChannels`] for an output of none.
+    pub fn ambisonic<S: Sample>(
+        input: AmbisonicFormat,
+        output: ChannelTopology,
+        irs: &[Mono<'_, S>],
+        block_size: usize,
+    ) -> Result<Self, ConvolverError> {
+        let outputs = BusTopology::try_from(&output).map_err(|_| ConvolverError::NotABus {
+            side: PortSide::Output,
+            channels: usize::from(output.width().count()),
+        })?;
+        Self::from_layout(
+            IrLayout::Ambisonic { input, output },
+            BusTopology::ambisonic(input),
+            outputs,
+            irs,
+            block_size,
+        )
     }
 
-    /// The channel width this node was built for (inputs == outputs).
-    pub fn layout(&self) -> ChannelLayout {
-        self.shape_width()
+    /// The channels in.
+    pub fn inputs(&self) -> ChannelLayout {
+        self.inputs.layout()
     }
 
-    /// The width as a layout; `build` refused a node wider than `u16::MAX`.
-    fn shape_width(&self) -> ChannelLayout {
-        ChannelLayout::try_from(self.width()).expect("build refused a width above u16::MAX")
-    }
-
-    #[inline]
-    fn width(&self) -> usize {
-        self.convolvers.len()
+    /// The channels out.
+    pub fn outputs(&self) -> ChannelLayout {
+        self.outputs.layout()
     }
 
     /// A handle on the shared wet-path [`Amplitude`] cell.
@@ -349,7 +570,7 @@ impl ConvolverNode {
     }
 
     /// The node's latency in [`Samples`] — one FFT block, the same on every
-    /// channel.
+    /// output.
     ///
     /// Partitioned convolution cannot emit a sample until its first block is
     /// full, so this delay is inherent. A graph mixing this against a dry path
@@ -358,7 +579,7 @@ impl ConvolverNode {
         Samples(self.latency_samples)
     }
 
-    /// Scale channel `c`'s already-convolved block `out` by the wet gain, in
+    /// Scale one output channel's already-convolved block `out` by the wet gain, in
     /// place, ramped across the block (see [`begin_block`](Self::begin_block)).
     #[inline]
     fn apply_gain(out: &mut [f32], glide: &Glide<f32>, held: Option<Amplitude>) {
@@ -410,7 +631,7 @@ enum WetGain<'a> {
 
 impl ConvolverNode {
     /// Frames `at..at + size` of the block (`size` at most the `mono`
-    /// scratch's length): convolve each channel's run, then scale it
+    /// scratch's length): convolve, then scale each channel's run
     /// by the wet gain. The gain is read once, here, and ramped if it moved.
     fn render(
         &mut self,
@@ -433,58 +654,70 @@ impl ConvolverNode {
                 WetGain::Ramped(glide, held)
             }
         };
-        let n = self.width();
-        // Every channel reads the driven lane from the same last finite value.
-        let good = self.good;
-        match self.config {
-            IrChannelConfig::Mono | IrChannelConfig::Stereo => {
-                for c in 0..n {
-                    let out = &mut outputs.get(c)[at..at + size];
-                    self.convolvers[c].process_block(input(c), out);
-                    match &gain {
-                        WetGain::Driven(lane) => {
-                            self.good = good;
-                            Self::apply_driven_gain(out, lane, &mut self.good);
-                        }
-                        WetGain::Ramped(glide, held) => Self::apply_gain(out, glide, *held),
+        let n_in = usize::from(self.inputs.layout().count());
+        let n = usize::from(self.outputs.layout().count());
+        match &mut self.engine {
+            Engine::PerChannel(convolvers) => match &self.fold {
+                None => {
+                    for (c, convolver) in convolvers.iter_mut().enumerate() {
+                        convolver.process_block(input(c), &mut outputs.get(c)[at..at + size]);
+                    }
+                }
+                Some(fold) => {
+                    // Folded once per block, not once per output channel.
+                    // The inputs, a block long each, as one table on the stack: a
+                    // fold exists only at a width with an order, at most one bus.
+                    let width = usize::from(fold.src_layout().count()).min(MAX_CHANNELS);
+                    let mut table: [&[f32]; MAX_CHANNELS] = [&[]; MAX_CHANNELS];
+                    for (c, slot) in table.iter_mut().enumerate().take(width) {
+                        *slot = input(c);
+                    }
+                    let folded = Planes::new(&table[..width]).and_then(|planes| {
+                        fold.fold_planar_channel(planes, 0, MonoMut::new(&mut self.mono[..size]))
+                    });
+                    debug_assert!(
+                        folded.is_ok(),
+                        "the inputs are a block long and the fold's width: {folded:?}"
+                    );
+                    if folded.is_err() {
+                        // Not folded: silent, never the previous block's mono.
+                        self.mono[..size].fill(0.0);
+                    }
+                    for (c, convolver) in convolvers.iter_mut().enumerate() {
+                        convolver
+                            .process_block(&self.mono[..size], &mut outputs.get(c)[at..at + size]);
+                    }
+                }
+            },
+            Engine::Matrix(matrix) => {
+                let frames = at..at + size;
+                let (heard, heard_n) = slice_in((0..n_in).map(|c| inputs.get(c)), &frames);
+                let (mut wet, wet_n) = slice_out(outputs.iter_mut(), &frames);
+                let rendered = Planes::new(&heard[..heard_n]).and_then(|input| {
+                    PlanesMut::new(&mut wet[..wet_n]).map(|output| matrix.process(input, output))
+                });
+                debug_assert!(
+                    rendered.is_ok(),
+                    "every plane is a block long: {rendered:?}"
+                );
+                if rendered.is_err() {
+                    // Not rendered: silent, never stale output.
+                    for plane in &mut wet[..wet_n] {
+                        plane.fill(0.0);
                     }
                 }
             }
-            IrChannelConfig::MonoToStereo => {
-                // Folded once per block, not once per output channel.
-                let fold = self
-                    .fold
-                    .as_ref()
-                    .expect("a MonoToStereo node builds its fold");
-                // The inputs, a block long each, as one table on the stack: a
-                // fold exists only at a width with an order, at most one bus.
-                let width = usize::from(fold.src_layout().count()).min(MAX_CHANNELS);
-                let mut table: [&[f32]; MAX_CHANNELS] = [&[]; MAX_CHANNELS];
-                for (c, slot) in table.iter_mut().enumerate().take(width) {
-                    *slot = input(c);
+        }
+        // Every channel reads the driven lane from the same last finite value.
+        let good = self.good;
+        for c in 0..n {
+            let out = &mut outputs.get(c)[at..at + size];
+            match &gain {
+                WetGain::Driven(lane) => {
+                    self.good = good;
+                    Self::apply_driven_gain(out, lane, &mut self.good);
                 }
-                let folded = Planes::new(&table[..width]).and_then(|planes| {
-                    fold.fold_planar_channel(planes, 0, MonoMut::new(&mut self.mono[..size]))
-                });
-                debug_assert!(
-                    folded.is_ok(),
-                    "the inputs are a block long and the fold's width: {folded:?}"
-                );
-                if folded.is_err() {
-                    // Not folded: silent, never the previous block's mono.
-                    self.mono[..size].fill(0.0);
-                }
-                for c in 0..n {
-                    let out = &mut outputs.get(c)[at..at + size];
-                    self.convolvers[c].process_block(&self.mono[..size], out);
-                    match &gain {
-                        WetGain::Driven(lane) => {
-                            self.good = good;
-                            Self::apply_driven_gain(out, lane, &mut self.good);
-                        }
-                        WetGain::Ramped(glide, held) => Self::apply_gain(out, glide, *held),
-                    }
-                }
+                WetGain::Ramped(glide, held) => Self::apply_gain(out, glide, *held),
             }
         }
     }
@@ -495,22 +728,54 @@ tutti_graph::declare_params!([] ConvolverNode, n {
     Volume => Amplitude = &n.gain,
 });
 
+impl ConvolverNode {
+    /// Renders frames `span` of the block, in pieces of the scratch's length (one piece in a
+    /// graph, whose blocks fit it; a longer block driven by hand renders in several).
+    fn render_span(
+        &mut self,
+        span: std::ops::Range<usize>,
+        inputs: &Inputs<'_>,
+        outputs: &mut Outputs<'_, '_>,
+        driven: Option<&[f32]>,
+    ) {
+        let step = self.mono.len().max(1);
+        let mut at = span.start;
+        while at < span.end {
+            let n = step.min(span.end - at);
+            self.render(at, n, inputs, outputs, driven);
+            at += n;
+        }
+    }
+
+    /// Zeros the outputs of a silent run that began at `run_start` after `quiet_before` silent
+    /// frames, from the frame it stops sounding (`owed` frames after the last input) to `end`.
+    fn silence_past_tail(
+        outputs: &mut Outputs<'_, '_>,
+        run_start: usize,
+        quiet_before: u64,
+        owed: u64,
+        end: usize,
+    ) {
+        let sounding = usize::try_from(owed.saturating_sub(quiet_before)).unwrap_or(usize::MAX);
+        let from = run_start.saturating_add(sounding);
+        if from >= end {
+            return;
+        }
+        for c in 0..outputs.len() {
+            outputs.get(c)[from..end].fill(0.0);
+        }
+    }
+}
+
 impl Node for ConvolverNode {
     /// `N` in, `N` out; one FFT block of latency for the whole output, and the
     /// longest IR's ring-out as its tail — exact rather than estimated, a
     /// convolution being linear and finite. The tail excludes the FFT block
     /// latency, which is declared on its own and compensated.
     fn shape(&self) -> Shape {
-        let width = self.shape_width();
-        Shape::through_unassigned(width)
+        Shape::buses(Buses::main(self.inputs), Buses::main(self.outputs))
             .with_latency(Latency::new(Samples(self.latency_samples)))
-            .with_tail(ring_out(
-                self.convolvers
-                    .iter()
-                    .map(Convolver::ir_length)
-                    .max()
-                    .unwrap_or(0),
-            ))
+            .with_tail(ring_out(self.engine.ir_length()))
             .with_param_addrs(self.declared_ports().as_slice())
     }
 
@@ -523,30 +788,69 @@ impl Node for ConvolverNode {
     }
 
     /// Channel-outer over planar slices: each channel's convolver consumes its
-    /// whole block in partition-sized runs, then the blend runs over the block.
+    /// whole block in partition-sized runs (a matrix runs every path), then the
+    /// gain runs over the block.
     fn process(&mut self, _cx: &Cx<'_>, mut io: Io<'_>) -> Status {
         let size = io.frames();
+        let n_in = usize::from(self.inputs.layout().count());
+        let all_silent = io.silent().covers(n_in);
+        // The last frame of the block whose input is not zero, on any channel.
+        let last = if all_silent {
+            None
+        } else {
+            (0..n_in)
+                .filter_map(|c| io.input(c)[..size].iter().rposition(|&s| s != 0.0))
+                .max()
+        };
+        let ring = self.clock.ceiling();
+        let silent_for = self.clock.silent_for();
+        let owed = self.clock.advance(
+            ring,
+            Heard {
+                size,
+                last_input: last,
+            },
+        );
+        if owed.live == 0 {
+            // Wholly past the tail, with silent input: nothing rings, and the output is
+            // silence (the graph zeroes it).
+            return Status::Silent;
+        }
         let driven = self
             .declared_param::<{ UnitParam::Volume as u16 }>(&io)
             .frames();
         let (inputs, mut outputs) = io.split();
-        // One piece in a graph, whose blocks fit the scratch; a longer block
-        // driven by hand renders in scratch-sized pieces.
-        let step = self.mono.len().max(1);
-        let mut at = 0;
-        while at < size {
-            let n = step.min(size - at);
-            self.render(at, n, &inputs, &mut outputs, driven);
-            at += n;
+        // Walk the block's silent runs: cut the output where a run stops sounding and restart
+        // the engine where input resumes after one that long (see the type's docs).
+        let owed_frames = ring.saturating_add(self.latency_samples as u64);
+        let nonzero = |n: usize| !all_silent && (0..n_in).any(|c| inputs.get(c)[n] != 0.0);
+        // The silent run in progress: it began at `run_start`, after `quiet_before` silent
+        // frames that came before it (`silent_for` for the block's first run).
+        let (mut run_start, mut quiet_before, mut rendered) = (0usize, silent_for, 0usize);
+        for n in 0..size {
+            if !nonzero(n) {
+                continue;
+            }
+            let gap = quiet_before.saturating_add((n - run_start) as u64);
+            if gap >= owed_frames {
+                self.render_span(rendered..n, &inputs, &mut outputs, driven);
+                Self::silence_past_tail(&mut outputs, run_start, quiet_before, owed_frames, n);
+                self.engine.reset();
+                self.last = None;
+                rendered = n;
+            }
+            run_start = n + 1;
+            quiet_before = 0;
         }
+        self.render_span(rendered..size, &inputs, &mut outputs, driven);
+        Self::silence_past_tail(&mut outputs, run_start, quiet_before, owed_frames, size);
         Status::Modified
     }
 
     fn reset(&mut self) {
-        for c in &mut self.convolvers {
-            c.reset();
-        }
+        self.engine.reset();
         self.last = None;
+        self.clock.clear();
     }
 }
 
@@ -563,10 +867,13 @@ impl ParamNode for ConvolverNode {
         let mut gain = self.gain.clone();
         gain.detach();
         Self {
-            convolvers: self.convolvers.iter().map(Convolver::fresh).collect(),
-            config: self.config,
+            engine: self.engine.fresh(),
+            layout: self.layout.clone(),
+            inputs: self.inputs,
+            outputs: self.outputs,
             gain,
             latency_samples: self.latency_samples,
+            clock: TailClock::new(self.clock.ceiling(), self.latency_samples as u64),
             fold: self.fold.clone(),
             mono: vec![0.0; self.mono.len()],
             last: None,
@@ -620,6 +927,13 @@ mod tests {
             ConvolverNode::per_channel(&irs, 64).err(),
             Some(ConvolverError::TooWide {
                 channels: irs.len()
+            })
+        );
+        let past_a_bus = vec![&[1.0_f32][..]; MAX_CHANNELS + 1];
+        assert_eq!(
+            ConvolverNode::per_channel(&past_a_bus, 64).err(),
+            Some(ConvolverError::TooWide {
+                channels: MAX_CHANNELS + 1
             })
         );
     }
@@ -714,7 +1028,7 @@ mod tests {
     /// follows no live write.
     #[test]
     fn a_fork_keeps_the_gain_and_shares_no_cell() {
-        let node = ConvolverNode::stereo(&[1.0, 0.5], &[0.25], 64);
+        let node = ConvolverNode::per_channel(&[&[1.0, 0.5], &[0.25]], 64).unwrap();
         assert_eq!(node.param_set().params().count(), 1);
         assert!(node.param_set().set(UnitParam::Volume, 0.7));
         assert_eq!(node.gain().load(), Amplitude(0.7));
@@ -749,7 +1063,7 @@ mod tests {
     /// last value (0.5) on both channels of a stereo node.
     #[test]
     fn a_non_finite_driven_frame_holds_the_same_value_on_every_channel() {
-        let mut node = prepared(ConvolverNode::stereo(&[1.0], &[1.0], 64));
+        let mut node = prepared(ConvolverNode::per_channel(&[&[1.0], &[1.0]], 64).unwrap());
         let ones = [1.0; 256];
         drive(&mut node, RATE, &[&ones, &ones], &[Some(&[0.5; 256])]);
         let mut lane = [0.25; 256];
@@ -765,21 +1079,24 @@ mod tests {
     fn the_spectra_are_stored_once_and_a_fork_shares_them() {
         let ir = generate_test_ir(4_096, Seconds::new(0.3), SampleRate::SR_48K);
         let node = ConvolverNode::shared_ir(6u16, &ir, 256).unwrap();
-        let first = node.convolvers[0].spectra();
-        assert!(
-            node.convolvers
+        let spectra = |n: &ConvolverNode| match &n.engine {
+            Engine::PerChannel(cs) => cs
                 .iter()
-                .all(|c| Arc::ptr_eq(c.spectra(), first)),
+                .map(|c| Arc::clone(c.spectra()))
+                .collect::<Vec<_>>(),
+            Engine::Matrix(_) => unreachable!("a shared IR is per channel"),
+        };
+        let all = spectra(&node);
+        let first = Arc::clone(&all[0]);
+        assert!(
+            all.iter().all(|s| Arc::ptr_eq(s, &first)),
             "every channel reads the one transform"
         );
         let fork = node.fork_fresh();
-        assert!(
-            fork.convolvers
-                .iter()
-                .all(|c| Arc::ptr_eq(c.spectra(), first))
-        );
-        // Each channel, the fork and the node: one set of spectra.
-        assert_eq!(Arc::strong_count(first), 12);
+        assert!(spectra(&fork).iter().all(|s| Arc::ptr_eq(s, &first)));
+        drop(all);
+        // Each channel, the fork and the node, and the local handle: one set of spectra.
+        assert_eq!(Arc::strong_count(&first), 13);
     }
 
     /// A fork starts from a fresh node's state, not the live node's: after
@@ -788,10 +1105,22 @@ mod tests {
     fn a_fork_carries_none_of_the_live_state() {
         let ir = generate_test_ir(700, Seconds::new(0.3), SampleRate::SR_48K);
         let x = crate::test_support::noise(5, 512);
-        let mut live = prepared(ConvolverNode::stereo(&ir, &ir, 64));
+        let mut live = prepared(ConvolverNode::true_stereo(
+            Mono::new(&ir),
+            Mono::new(&ir),
+            Mono::new(&ir),
+            Mono::new(&ir),
+            64,
+        ));
         drive_block(&mut live, &[&x, &x]);
         let mut fork = prepared(live.fork_fresh());
-        let mut new = prepared(ConvolverNode::stereo(&ir, &ir, 64));
+        let mut new = prepared(ConvolverNode::true_stereo(
+            Mono::new(&ir),
+            Mono::new(&ir),
+            Mono::new(&ir),
+            Mono::new(&ir),
+            64,
+        ));
         let silent = [0.0f32; 512];
         assert_eq!(
             drive_block(&mut fork, &[&silent, &silent]),
@@ -862,25 +1191,6 @@ mod tests {
         assert_eq!(node.gain().load(), Amplitude::new(1.5));
         node.set_gain(Amplitude::new(-0.5));
         assert_eq!(node.gain().load(), Amplitude::new(0.0));
-    }
-
-    #[test]
-    fn reset_zeroes_state() {
-        let ir = generate_test_ir(256, Seconds::new(0.2), SampleRate::SR_48K);
-        let mut node = prepared(ConvolverNode::new(&ir, 64));
-        drive_frames(&mut node, &[&[1.0; 100]]);
-        Node::reset(&mut node);
-        let out = drive_frames(&mut node, &[&[0.0]]);
-        assert!(out[0][0].abs() < 1e-6);
-    }
-
-    #[test]
-    fn stereo_convolver_true_stereo_produces_finite_output() {
-        let ir_l = generate_test_ir(512, Seconds::new(0.3), SampleRate::SR_48K);
-        let ir_r = generate_test_ir(512, Seconds::new(0.4), SampleRate::SR_48K);
-        let mut node = prepared(ConvolverNode::stereo(&ir_l, &ir_r, 64));
-        let out = drive_frames(&mut node, &[&[1.0], &[0.5]]);
-        assert!(out[0][0].is_finite() && out[1][0].is_finite());
     }
 
     #[test]
@@ -966,8 +1276,8 @@ mod direct_sum {
                 vec![(&ir_a[..], 0), (&ir_a[..], 1)],
             ),
             (
-                "stereo",
-                ConvolverNode::stereo(&ir_a, &ir_b, 128),
+                "per_channel",
+                ConvolverNode::per_channel(&[&ir_a, &ir_b], 128).unwrap(),
                 vec![(&ir_a[..], 0), (&ir_b[..], 1)],
             ),
             (
@@ -979,7 +1289,7 @@ mod direct_sum {
         for (name, node, outputs) in cases {
             node.set_gain(Amplitude::new(gain as f32));
             let lat = node.latency_samples().0;
-            let x = signal(node.width(), FRAMES);
+            let x = signal(usize::from(node.inputs().count()), FRAMES);
             let mut mono = vec![0.0f32; FRAMES];
             if x.len() == 2 {
                 Fold::between(
@@ -1037,7 +1347,7 @@ mod direct_sum {
             (shape.audio_in().count(), shape.audio_out().count()),
             (6, 6)
         );
-        assert_eq!(wide.layout(), ChannelLayout::from(6u16));
+        assert_eq!(wide.outputs(), ChannelLayout::from(6u16));
         let x = signal(6, 900);
         let got = render(wide, &x);
         for c in 0..6 {
@@ -1128,6 +1438,473 @@ mod direct_sum {
                 run.r[c][63].to_bits(),
                 run.j[c][63].to_bits(),
                 "gain: ch{c}: the block must end exactly on the new value"
+            );
+        }
+    }
+}
+
+/// The matrix layouts and per-channel dual mono, against convolution's definition.
+#[cfg(test)]
+mod layouts {
+    use super::*;
+    use crate::test_support::{RATE, noise, prepared};
+    use tutti_graph::contract::drive;
+    use tutti_types::{AmbisonicFormat, Bed};
+
+    const BLOCK: usize = 64;
+
+    /// A response of one tap: `gain` at `delay`.
+    fn tap(delay: usize, gain: f32) -> Vec<f32> {
+        let mut ir = vec![0.0; delay + 1];
+        ir[delay] = gain;
+        ir
+    }
+
+    fn views(irs: &[Vec<f32>]) -> Vec<Mono<'_, f32>> {
+        irs.iter().map(|ir| Mono::new(ir)).collect()
+    }
+
+    /// The node over `x` in calls of `lens` (cycled), prepared for 1024-frame blocks.
+    fn render(node: &mut ConvolverNode, x: &[Vec<f32>], lens: &[usize]) -> Vec<Vec<f32>> {
+        let frames = x[0].len();
+        let mut out = vec![Vec::new(); x.len()];
+        let (mut at, mut k) = (0, 0);
+        while at < frames {
+            let n = lens[k % lens.len()].min(frames - at);
+            let ins: Vec<&[f32]> = x.iter().map(|c| &c[at..at + n]).collect();
+            for (o, b) in out.iter_mut().zip(drive(node, RATE, &ins, &[])) {
+                o.extend(b);
+            }
+            at += n;
+            k += 1;
+        }
+        out
+    }
+
+    /// [`render`] in blocks of [`BLOCK`] for a node with `outputs` channels out.
+    fn render_wide(node: &mut ConvolverNode, x: &[Vec<f32>], outputs: usize) -> Vec<Vec<f32>> {
+        let frames = x[0].len();
+        let mut out = vec![Vec::new(); outputs];
+        let mut at = 0;
+        while at < frames {
+            let n = BLOCK.min(frames - at);
+            let ins: Vec<&[f32]> = x.iter().map(|c| &c[at..at + n]).collect();
+            for (o, b) in out.iter_mut().zip(drive(node, RATE, &ins, &[])) {
+                o.extend(b);
+            }
+            at += n;
+        }
+        out
+    }
+
+    /// An impulse on channel `j` of a `width`-wide node, `frames` long.
+    fn impulse_on(width: usize, j: usize, frames: usize) -> Vec<Vec<f32>> {
+        let mut x = vec![vec![0.0f32; frames]; width];
+        x[j][0] = 1.0;
+        x
+    }
+
+    /// The four paths of a true stereo node are four distinct single taps. An impulse on
+    /// one input puts exactly the two responses of its row on the two outputs, at the
+    /// declared latency plus the tap's delay and with the tap's gain, so a swapped or
+    /// dropped path is a different figure; both inputs at once are the sum, by linearity.
+    #[test]
+    fn true_stereo_routes_each_input_through_its_row_of_paths() {
+        // `[LL, LR, RL, RR]`, `XY` being input `X` to output `Y`.
+        let irs = [tap(3, 0.5), tap(9, -0.25), tap(14, 0.75), tap(6, 0.125)];
+        let make = || {
+            prepared(ConvolverNode::true_stereo(
+                Mono::new(&irs[0]),
+                Mono::new(&irs[1]),
+                Mono::new(&irs[2]),
+                Mono::new(&irs[3]),
+                BLOCK,
+            ))
+        };
+        let lat = make().latency_samples().get();
+        for j in 0..2 {
+            let got = render(&mut make(), &impulse_on(2, j, 200), &[BLOCK]);
+            for (o, g) in got.iter().enumerate() {
+                let ir = &irs[j * 2 + o];
+                let mut want = vec![0.0f32; 200];
+                want[lat + ir.len() - 1] = ir[ir.len() - 1];
+                for (n, (&g, &w)) in g.iter().zip(&want).enumerate() {
+                    assert!((g - w).abs() < 1e-6, "in {j} out {o} frame {n}: {g} vs {w}");
+                }
+            }
+        }
+        let (a, b) = (noise(1, 300), noise(2, 300));
+        let silent = vec![0.0f32; 300];
+        let both = render(&mut make(), &[a.clone(), b.clone()], &[BLOCK]);
+        let only_a = render(&mut make(), &[a, silent.clone()], &[BLOCK]);
+        let only_b = render(&mut make(), &[silent, b], &[BLOCK]);
+        for o in 0..2 {
+            for n in 0..300 {
+                let want = only_a[o][n] + only_b[o][n];
+                assert!((both[o][n] - want).abs() < 1e-5, "out {o} frame {n}");
+            }
+        }
+    }
+
+    /// First-order ambisonic: sixteen paths, each with its own tap. An impulse on input `j`
+    /// is, on every output `i`, the response of path `(j, i)`, and only that.
+    #[test]
+    fn an_ambisonic_impulse_on_an_input_is_each_outputs_path_response() {
+        let format = AmbisonicFormat::ambix(tutti_types::AmbisonicOrder::of(1));
+        let irs: Vec<Vec<f32>> = (0..16)
+            .map(|p| tap(2 + 3 * p, 0.0625 * (p as f32 + 1.0)))
+            .collect();
+        let make = || {
+            prepared(
+                ConvolverNode::ambisonic(
+                    format,
+                    ChannelTopology::from(format),
+                    &views(&irs),
+                    BLOCK,
+                )
+                .unwrap(),
+            )
+        };
+        let lat = make().latency_samples().get();
+        for j in 0..4 {
+            let got = render(&mut make(), &impulse_on(4, j, 200), &[BLOCK]);
+            for (i, g) in got.iter().enumerate() {
+                let ir = &irs[j * 4 + i];
+                let mut want = vec![0.0f32; 200];
+                want[lat + ir.len() - 1] = ir[ir.len() - 1];
+                for (n, (&g, &w)) in g.iter().zip(&want).enumerate() {
+                    assert!((g - w).abs() < 1e-6, "in {j} out {i} frame {n}: {g} vs {w}");
+                }
+            }
+        }
+    }
+
+    /// Per-channel at a stereo topology is dual mono: an impulse on L leaves its own IR on
+    /// L and exactly nothing on R, and R likewise, whatever the other IR is.
+    #[test]
+    fn per_channel_stereo_is_dual_mono() {
+        let (l, r) = (tap(4, 0.5), tap(11, -0.75));
+        let stereo = ChannelTopology::from(Bed::Stereo);
+        let ports = BusTopology::try_from(&stereo).unwrap();
+        let make = || {
+            prepared(
+                ConvolverNode::from_layout(
+                    IrLayout::PerChannel(stereo.clone()),
+                    ports,
+                    ports,
+                    &views(&[l.clone(), r.clone()]),
+                    BLOCK,
+                )
+                .unwrap(),
+            )
+        };
+        let lat = make().latency_samples().get();
+        let on_l = render(&mut make(), &impulse_on(2, 0, 200), &[BLOCK]);
+        assert!((on_l[0][lat + 4] - 0.5).abs() < 1e-6);
+        assert!(on_l[1].iter().all(|&v| v.abs() < 1e-6), "L leaked into R");
+        let on_r = render(&mut make(), &impulse_on(2, 1, 200), &[BLOCK]);
+        assert!((on_r[1][lat + 11] + 0.75).abs() < 1e-6);
+        assert!(on_r[0].iter().all(|&v| v.abs() < 1e-6), "R leaked into L");
+    }
+
+    /// The ambisonic and true stereo nodes are the definition of a matrix convolution: output
+    /// `i` is `sum_j x_j * h(j, i)`, `latency` late, on noise through long responses that
+    /// the engine cuts into levels.
+    #[test]
+    fn a_matrix_node_is_the_direct_sum_of_its_paths() {
+        let irs: Vec<Vec<f32>> = (0..4)
+            .map(|p| {
+                noise(40 + p, 1500 + 700 * p as usize)
+                    .iter()
+                    .map(|v| v * 0.05)
+                    .collect()
+            })
+            .collect();
+        let x: Vec<Vec<f32>> = (0..2).map(|c| noise(3 + c, 2200)).collect();
+        let mut node = prepared(ConvolverNode::true_stereo(
+            Mono::new(&irs[0]),
+            Mono::new(&irs[1]),
+            Mono::new(&irs[2]),
+            Mono::new(&irs[3]),
+            32,
+        ));
+        let lat = node.latency_samples().get();
+        let got = render(&mut node, &x, &[100]);
+        for (o, out) in got.iter().enumerate() {
+            for (n, &g) in out.iter().enumerate() {
+                let want: f64 = n.checked_sub(lat).map_or(0.0, |m| {
+                    (0..2)
+                        .map(|j| {
+                            (0..=m.min(irs[j * 2 + o].len() - 1))
+                                .map(|k| f64::from(irs[j * 2 + o][k]) * f64::from(x[j][m - k]))
+                                .sum::<f64>()
+                        })
+                        .sum()
+                });
+                assert!(
+                    (f64::from(g) - want).abs() < 3e-4,
+                    "out {o} frame {n}: {g} vs {want}"
+                );
+            }
+        }
+    }
+
+    /// A count of impulse responses the layout does not take, a layout a port does not
+    /// match, and an ambisonic order whose width is not the port's are each refused by name,
+    /// at the side that is wrong.
+    #[test]
+    fn a_layout_that_does_not_fit_is_refused_by_name() {
+        let one = [1.0f32];
+        let irs = |n: usize| vec![Mono::new(&one[..]); n];
+        let stereo = ChannelTopology::from(Bed::Stereo);
+        let foa = AmbisonicFormat::ambix(tutti_types::AmbisonicOrder::of(1));
+        let foa_bus = BusTopology::ambisonic(foa);
+        let build = |layout, i, o, n| ConvolverNode::from_layout(layout, i, o, &irs(n), 64).err();
+        let ambisonic = IrLayout::Ambisonic {
+            input: foa,
+            output: stereo.clone(),
+        };
+
+        assert_eq!(
+            build(
+                IrLayout::PerChannel(stereo.clone()),
+                BusTopology::STEREO,
+                BusTopology::STEREO,
+                3
+            ),
+            Some(ConvolverError::IrCount { want: 2, got: 3 })
+        );
+        assert_eq!(
+            build(
+                IrLayout::TrueStereo,
+                BusTopology::STEREO,
+                BusTopology::STEREO,
+                2
+            ),
+            Some(ConvolverError::IrCount { want: 4, got: 2 })
+        );
+        assert_eq!(
+            build(ambisonic.clone(), foa_bus, BusTopology::STEREO, 4),
+            Some(ConvolverError::IrCount { want: 8, got: 4 })
+        );
+        assert_eq!(
+            build(
+                IrLayout::TrueStereo,
+                BusTopology::MONO,
+                BusTopology::STEREO,
+                4
+            ),
+            Some(ConvolverError::PortWidth {
+                side: PortSide::Input,
+                layout: ChannelLayout::STEREO,
+                ports: ChannelLayout::MONO
+            })
+        );
+        assert_eq!(
+            build(ambisonic.clone(), foa_bus, BusTopology::MONO, 8),
+            Some(ConvolverError::PortWidth {
+                side: PortSide::Output,
+                layout: ChannelLayout::STEREO,
+                ports: ChannelLayout::MONO
+            })
+        );
+        // An order-1 set is four channels; three ports are not its.
+        let three = BusTopology::unassigned(ChannelLayout::from(3u16)).unwrap();
+        assert_eq!(
+            build(ambisonic.clone(), three, BusTopology::STEREO, 8),
+            Some(ConvolverError::AmbisonicOrder {
+                side: PortSide::Input,
+                order: foa.order(),
+                width: ChannelLayout::QUAD,
+                ports: ChannelLayout::from(3u16)
+            })
+        );
+        // The right width with the wrong placement.
+        let two = BusTopology::unassigned(ChannelLayout::STEREO).unwrap();
+        assert_eq!(
+            build(ambisonic.clone(), foa_bus, two, 8),
+            Some(ConvolverError::PortPlacement {
+                side: PortSide::Output,
+                ports: two
+            })
+        );
+        let four = BusTopology::unassigned(ChannelLayout::QUAD).unwrap();
+        assert_eq!(
+            build(ambisonic, four, BusTopology::STEREO, 8),
+            Some(ConvolverError::PortPlacement {
+                side: PortSide::Input,
+                ports: four
+            })
+        );
+    }
+
+    /// First-order ambisonic in, stereo out: eight paths, each its own tap. An impulse on
+    /// input `j` is, on each of the two outputs `i`, the response of path `(j, i)` and
+    /// only that; the node's ports are four in and two out.
+    #[test]
+    fn first_order_ambisonic_to_stereo_routes_each_path_by_its_own_response() {
+        let foa = AmbisonicFormat::ambix(tutti_types::AmbisonicOrder::of(1));
+        let irs: Vec<Vec<f32>> = (0..8)
+            .map(|p| tap(2 + 5 * p, 0.125 * (p as f32 + 1.0)))
+            .collect();
+        let make = || {
+            prepared(
+                ConvolverNode::ambisonic(
+                    foa,
+                    ChannelTopology::from(Bed::Stereo),
+                    &views(&irs),
+                    BLOCK,
+                )
+                .unwrap(),
+            )
+        };
+        let shape = make().shape();
+        assert_eq!(
+            (shape.audio_in().count(), shape.audio_out().count()),
+            (4, 2)
+        );
+        let lat = make().latency_samples().get();
+        for j in 0..4 {
+            let got = render_wide(&mut make(), &impulse_on(4, j, 200), 2);
+            for (i, g) in got.iter().enumerate() {
+                let ir = &irs[j * 2 + i];
+                let mut want = vec![0.0f32; 200];
+                want[lat + ir.len() - 1] = ir[ir.len() - 1];
+                for (n, (&g, &w)) in g.iter().zip(&want).enumerate() {
+                    assert!((g - w).abs() < 1e-6, "in {j} out {i} frame {n}: {g} vs {w}");
+                }
+            }
+        }
+    }
+
+    /// A node's nodes of each layout, with responses long enough to be cut into levels.
+    fn long_layouts() -> Vec<(&'static str, ConvolverNode)> {
+        let long = |seed: u32, len: usize| -> Vec<f32> {
+            noise(seed, len).iter().map(|v| v * 0.05).collect()
+        };
+        let four: Vec<Vec<f32>> = (0..4)
+            .map(|p| long(10 + p, 2500 + 90 * p as usize))
+            .collect();
+        let foa = AmbisonicFormat::ambix(tutti_types::AmbisonicOrder::of(1));
+        let sixteen: Vec<Vec<f32>> = (0..16)
+            .map(|p| long(50 + p, 600 + 40 * p as usize))
+            .collect();
+        let two: Vec<Vec<f32>> = (0..2).map(|p| long(90 + p, 3000)).collect();
+        vec![
+            (
+                "true stereo",
+                ConvolverNode::true_stereo(
+                    Mono::new(&four[0]),
+                    Mono::new(&four[1]),
+                    Mono::new(&four[2]),
+                    Mono::new(&four[3]),
+                    32,
+                ),
+            ),
+            (
+                "ambisonic",
+                ConvolverNode::ambisonic(foa, ChannelTopology::from(foa), &views(&sixteen), 32)
+                    .unwrap(),
+            ),
+            (
+                "per channel",
+                ConvolverNode::per_channel(&[&two[0], &two[1]], 32).unwrap(),
+            ),
+        ]
+    }
+
+    /// Every call length, from one frame to past the partition and the whole stream, gives
+    /// the same bits, in every layout.
+    #[test]
+    fn any_block_size_gives_the_same_bits_in_every_layout() {
+        for (name, node) in long_layouts() {
+            let width = usize::from(node.inputs().count());
+            let x: Vec<Vec<f32>> = (0..width).map(|c| noise(5 + c as u32, 1800)).collect();
+            let want = render(&mut prepared(node.fork_fresh()), &x, &[1800]);
+            for lens in [&[1usize][..], &[7, 61, 64, 127], &[31, 33], &[900, 3]] {
+                let got = render(&mut prepared(node.fork_fresh()), &x, lens);
+                assert!(
+                    got.iter()
+                        .flatten()
+                        .zip(want.iter().flatten())
+                        .all(|(a, b)| a.to_bits() == b.to_bits()),
+                    "{name}: calls {lens:?} differ from one call"
+                );
+            }
+        }
+    }
+
+    /// A reset node renders the bits of a fresh one, and a clone made after running shares
+    /// no state with the node it came from: rendering the clone first leaves the node's
+    /// render what it would have been.
+    #[test]
+    fn reset_equals_fresh_and_a_clone_shares_nothing() {
+        for (name, node) in long_layouts() {
+            let width = usize::from(node.inputs().count());
+            let warm: Vec<Vec<f32>> = (0..width).map(|c| noise(70 + c as u32, 700)).collect();
+            let x: Vec<Vec<f32>> = (0..width).map(|c| noise(5 + c as u32, 900)).collect();
+            let fresh = render(&mut prepared(node.fork_fresh()), &x, &[64]);
+
+            let mut used = prepared(node.fork_fresh());
+            render(&mut used, &warm, &[64]);
+            Node::reset(&mut used);
+            assert_eq!(render(&mut used, &x, &[64]), fresh, "{name}: reset");
+
+            let mut a = prepared(node.fork_fresh());
+            render(&mut a, &warm, &[64]);
+            let mut b = a.clone();
+            let from_clone = render(&mut b, &x, &[64]);
+            let from_node = render(&mut a, &x, &[64]);
+            assert_eq!(from_clone, from_node, "{name}: a clone is the node's state");
+            assert_ne!(
+                from_node, fresh,
+                "{name}: the warm-up left nothing to share"
+            );
+        }
+    }
+
+    /// The declared latency is the partition and the tail is the longest response less one,
+    /// in every layout: four taps at delays 40, 90, 10 and 200 make 200, and the long layouts'
+    /// longest responses are 2770 (true stereo), 1200 (ambisonic, `600 + 40 * 15`) and 3000.
+    #[test]
+    fn latency_and_tail_are_as_declared() {
+        let irs = [tap(40, 0.5), tap(90, -0.25), tap(10, 0.75), tap(200, 0.125)];
+        let node = ConvolverNode::true_stereo(
+            Mono::new(&irs[0]),
+            Mono::new(&irs[1]),
+            Mono::new(&irs[2]),
+            Mono::new(&irs[3]),
+            64,
+        );
+        let shape = node.shape();
+        assert_eq!(shape.latency, Latency::new(Samples(64)));
+        assert_eq!(shape.tail, Tail::Finite(Samples(200)));
+        for ((name, node), tail) in long_layouts().into_iter().zip([2769, 1199, 2999]) {
+            let shape = node.shape();
+            assert_eq!(shape.latency, Latency::new(Samples(32)), "{name}");
+            assert_eq!(shape.tail, Tail::Finite(Samples(tail)), "{name}");
+        }
+    }
+
+    /// An unprepared folded node renders (in pieces of its construction scratch) rather
+    /// than index an empty one: an impulse on every input comes out of both outputs at the
+    /// latency and nowhere before it.
+    #[test]
+    fn an_unprepared_folded_node_does_not_panic() {
+        let mut node = ConvolverNode::folded(&[&[1.0], &[1.0]], 32).unwrap();
+        let lat = node.latency_samples().get();
+        let out = drive(
+            &mut node,
+            RATE,
+            &[&impulse_on(1, 0, 100)[0], &impulse_on(1, 0, 100)[0]],
+            &[],
+        );
+        for ch in &out {
+            assert!(ch[..lat].iter().all(|&v| v.abs() < 1e-6));
+            assert!(
+                ch[lat].abs() > 0.1,
+                "the impulse is at the latency: {}",
+                ch[lat]
             );
         }
     }

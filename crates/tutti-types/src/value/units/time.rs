@@ -75,6 +75,31 @@ impl Seconds {
         Self::frames(self.0 * sample_rate.into().get(), f64::ceil)
     }
 
+    /// Signed frames in this span at `sample_rate`, rounded to nearest, half
+    /// away from zero.
+    ///
+    /// The *offset* form of [`to_samples`](Self::to_samples): a shift of a
+    /// position can be negative (a device that reports too much latency, a
+    /// peer's clock ahead of ours), and `to_samples` clamps a negative span to
+    /// zero. A NaN gives 0, and a span too large for `i64` (an infinite one
+    /// included) saturates.
+    ///
+    /// It returns a bare `i64` because tutti has no signed frame unit:
+    /// [`Frame`](crate::Frame) is a `u64` position. A
+    /// [`std::time::Duration`] is unsigned, so a caller holding one builds a
+    /// `Seconds` from it and signs it by direction.
+    ///
+    /// ```
+    /// use tutti_types::{SampleRate, Seconds};
+    /// assert_eq!(Seconds::new(-0.5).to_frame_offset(SampleRate::SR_48K), -24_000);
+    /// ```
+    #[inline]
+    pub fn to_frame_offset(self, sample_rate: impl Into<SampleRate>) -> i64 {
+        let raw = self.0 * sample_rate.into().get();
+        // `as` saturates out-of-range and infinite values into `i64`.
+        if raw.is_nan() { 0 } else { raw.round() as i64 }
+    }
+
     /// The per-sample coefficient of a one-pole smoother with this time
     /// constant at `rate`: `c = 1 − exp(−1 / (τ · rate))`, the fraction of
     /// the remaining gap one sample closes (`y += c · (x − y)`; 1 is
@@ -305,6 +330,14 @@ impl SampleRate {
     /// its value only affects rate-dependent defaults computed before
     /// `prepare` (a filter's initial coefficients).
     pub const DEFAULT: Self = Self::SR_44K1;
+
+    /// The frames in one second at this rate, rounded up: what a buffer holding
+    /// a second of audio needs. A rate is above zero, so at least one frame.
+    #[inline]
+    #[must_use]
+    pub fn one_second(self) -> Samples {
+        Seconds::new(1.0).to_samples_ceil(self)
+    }
 
     /// The Nyquist frequency: the highest representable at this rate.
     ///

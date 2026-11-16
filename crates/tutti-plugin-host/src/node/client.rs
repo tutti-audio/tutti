@@ -29,7 +29,7 @@ use tutti_rt::Rt;
 use arrayvec::ArrayVec;
 use parking_lot::Mutex;
 use tutti_graph::{Bus, Buses, Cx, Offset, Shape};
-use tutti_plugin_types::{LoadedPlugin, PluginBus};
+use tutti_plugin_types::{Layout, LoadedPlugin, PluginBus};
 use tutti_tempo::TempoView;
 use tutti_transport::TempoReader;
 use tutti_types::{BusTopology, ChannelLayout, SampleRate, Samples};
@@ -70,6 +70,8 @@ pub struct InProcClient<F: Loaded> {
     pub(super) inner: Arc<Mutex<Instance<F>>>,
     /// The realtime end the plugin's Processor is lent to.
     pub(super) rt: Rt<F::Processor>,
+    /// Whether the plugin is lost, read with no lock ([`Instance::lost_flag`]).
+    lost: Arc<std::sync::atomic::AtomicBool>,
     pub(super) descriptor: PluginDescriptor,
     /// Where the plugin came from, for an in-process one: what a fork loads
     /// again. `None` for a hosting that reopens another way.
@@ -85,6 +87,10 @@ pub struct InProcClient<F: Loaded> {
     /// counters and the chunk counters are the node's own. `None` for an
     /// in-process plugin, whose figures are the control side's.
     pub(super) controls: Option<PluginControls>,
+    /// The parameters the delivery has a slot for, and the spare slots it
+    /// learns unlisted ones into: what a successor node's delivery is made from.
+    pub(super) parameters: Vec<ParamId>,
+    pub(super) spares: usize,
     /// The pin counts, latency and tail the plugin declared when the node was
     /// built: what `shape` and `process` size by while the instance lock is
     /// held elsewhere. Moves are reported through the handle
@@ -117,7 +123,7 @@ pub struct InProcClient<F: Loaded> {
     /// the out-of-process client gets from its command queue.
     ///
     /// Shared with the control backend, which drains it.
-    pending_sample_rate: Arc<AtomicU64>,
+    pub(super) pending_sample_rate: Arc<AtomicU64>,
     /// Blocks rendered silent because the realtime end held no Processor.
     /// Shared with the loader's handle side.
     pub(super) unlent: Arc<AtomicU64>,
@@ -181,6 +187,31 @@ pub struct InProcClient<F: Loaded> {
     pub(super) out_events: MidiEventVec,
 }
 
+/// A node dropped while its realtime end holds the Processor and a recall is
+/// raised (a [`Pending`](super::Pending) commit raises one) hands it back
+/// through the handoff instead of dropping it: the control side collects it at
+/// the instance's next pump. Without a raised recall the Processor drops with
+/// the end, as for any node that leaves the graph.
+///
+/// The node is off the audio thread by then (a node leaves the graph before it
+/// is dropped), so this call is the end's only user. The handoff runs
+/// [`Processor::stop`] on the dropping thread, the control thread, as a
+/// retune's poll does between blocks.
+///
+/// It reads no lock: the instance may be held by the control thread that
+/// drops the node. A plugin that is lost (its flag, a latch set when its
+/// lifecycle poisons, through which nothing else is published) has no
+/// controller left to stop under, so its node does not run `stop`: the Processor drops with the end, as the Processor of a lost plugin
+/// does when the session retires its node.
+impl<F: Loaded> Drop for InProcClient<F> {
+    fn drop(&mut self) {
+        if self.lost.load(std::sync::atomic::Ordering::Acquire) || self.rt.held().is_none() {
+            return;
+        }
+        let _ = self.rt.poll(Processor::stop);
+    }
+}
+
 /// Omits `inner`: formatting must not wait on the control side's lock.
 impl<F: Loaded> std::fmt::Debug for InProcClient<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -209,22 +240,39 @@ impl Declared {
     /// [`PluginTooWide`] when the plugin has more channels in a direction than
     /// a block serves.
     pub(super) fn of(loaded: &LoadedPlugin) -> Result<Self, PluginTooWide> {
-        loaded.check_width()?;
-        let ports = Shape::buses(buses_of(&loaded.inputs), buses_of(&loaded.outputs)).with_ports(
-            ChannelLayout::clamped(loaded.total_inputs()),
-            ChannelLayout::clamped(loaded.total_outputs()),
-        );
+        let mut declared =
+            Self::from_layout(&Layout::from(loaded), loaded.latency_samples, loaded.tail)?;
+        // A plugin with a bypass of its own keeps running in
+        // `NodeMode::Bypassed`: the host writes that bypass
+        // ([`PluginHandle::set_bypassed`](crate::PluginHandle::set_bypassed)).
+        if loaded.own_bypass.is_some() {
+            declared.ports = declared.ports.with_own_bypass();
+        }
+        Ok(declared)
+    }
+
+    /// What the plugin reports now: the ports of the layout the lifecycle last
+    /// read ([`State::layout`](tutti_plugin_types::State::layout)), and the
+    /// figures `latency` and `tail`. A bypass of the plugin's own is not part of
+    /// a layout: the caller keeps it ([`Rebinder`](super::Rebinder) does).
+    ///
+    /// # Errors
+    ///
+    /// [`PluginTooWide`] when the layout has more channels in a direction than
+    /// a block serves.
+    pub(super) fn from_layout(
+        layout: &Layout,
+        latency: Samples,
+        tail: PluginTail,
+    ) -> Result<Self, PluginTooWide> {
+        layout.check_width()?;
         Ok(Self {
-            // A plugin with a bypass of its own keeps running in
-            // `NodeMode::Bypassed`: the host writes that bypass
-            // ([`PluginHandle::set_bypassed`](crate::PluginHandle::set_bypassed)).
-            ports: if loaded.own_bypass.is_some() {
-                ports.with_own_bypass()
-            } else {
-                ports
-            },
-            latency: loaded.latency_samples,
-            tail: loaded.tail,
+            ports: Shape::buses(buses_of(&layout.inputs), buses_of(&layout.outputs)).with_ports(
+                ChannelLayout::clamped(layout.total_inputs()),
+                ChannelLayout::clamped(layout.total_outputs()),
+            ),
+            latency,
+            tail,
         })
     }
 }
@@ -454,6 +502,8 @@ pub(super) struct Reload {
 }
 
 impl<F: Loaded> InProcClient<F> {
+    /// A client over `inner`, which it locks once for the plugin's lost flag:
+    /// a caller must not hold that lock.
     pub(super) fn new(
         inner: Arc<Mutex<Instance<F>>>,
         rt: Rt<F::Processor>,
@@ -467,30 +517,39 @@ impl<F: Loaded> InProcClient<F> {
         parameters: impl IntoIterator<Item = ParamId>,
         spares: usize,
         controls: Option<PluginControls>,
+        pipeline: Option<Samples>,
     ) -> Self {
         // A slot per declared parameter: every parameter can move in one
         // block. Its point room is sized in `prepare`. `spares` is how many
         // addresses the plugin did not list the delivery may learn (none:
         // the node addresses only its declared parameters).
         let mut rt = rt;
-        let pipeline = rt
-            .poll(Processor::stop)
-            .map_or(Samples(0), |processor| processor.latency());
+        // The pipeline is the Processor's own figure; a node built over an end
+        // the Processor has not reached yet is given the one its predecessor
+        // read, and keeps it until a `prepare` that retunes the Processor
+        // reads it again.
+        let pipeline = pipeline.unwrap_or_else(|| {
+            rt.poll(Processor::stop)
+                .map_or(Samples(0), |processor| processor.latency())
+        });
         if let Some(controls) = &controls {
             controls.set_pipeline(pipeline);
         }
         let counters = controls
             .as_ref()
             .map_or_else(Arc::default, PluginControls::delivery_counters);
-        let params = ParamDelivery::with_spares(parameters, counters, spares);
+        let parameters: Vec<ParamId> = parameters.into_iter().collect();
+        let params = ParamDelivery::with_spares(parameters.iter().copied(), counters, spares);
         let transport = controls
             .as_ref()
             .map_or_else(TransportFeed::new, |c| TransportFeed::over(c.meter()));
         let mut segments = SegmentPoints::default();
         segments.prepare(params.room());
+        let lost = inner.lock().lost_flag();
         Self {
             inner,
             rt,
+            lost,
             descriptor,
             reload,
             pipeline,
@@ -500,6 +559,8 @@ impl<F: Loaded> InProcClient<F> {
             out: ProcessOutput::default(),
             transport,
             controls,
+            parameters,
+            spares,
             features,
             sample_rate,
             pending_sample_rate,
