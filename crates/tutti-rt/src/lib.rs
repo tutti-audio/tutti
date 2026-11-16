@@ -149,6 +149,8 @@
 //! - [`gauge()`] / [`counter()`] — a reading a node writes and any thread reads: a
 //!   level that moves both ways ([`Gauge`]) or a count that only grows
 //!   ([`Counter`], one or several tallies), each tally one word, never reset by a read.
+//! - [`tally()`] — a count with many writers ([`Tally`], [`TallyWriter`]): `Clone`
+//!   writers that `fetch_add`, for owners whose writers overlap.
 //! - [`RenderCount`] — the renders of one thing in flight (an `enter` that
 //!   returns a [`RenderGuard`]), and a `quiescent` check for the thread that has
 //!   cleared what they read, so it frees only when none can still read it.
@@ -230,7 +232,8 @@ pub use drain_clock::{DrainBeat, DrainMark, DrainWatch, drain_clock};
 pub use edits::{EditReader, EditWriter, RingFull, edit_ring};
 pub use fault_latch::{Drained, FaultLatch};
 pub use gauge::{
-    Count, Counter, CounterWriter, Gauge, GaugeWriter, Reading, Words, counter, gauge,
+    Count, Counter, CounterWriter, Gauge, GaugeWriter, Reading, Tally, TallyWriter, Words, counter,
+    gauge, tally,
 };
 pub use handoff::{Hand, Rt, handoff};
 pub use job_gate::JobGate;

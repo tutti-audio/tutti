@@ -13,6 +13,9 @@
 //!   ([`Count`]). [`CounterWriter::add`] adds to each and saturates it;
 //!   no tally of [`Counter::get`] is less than in an earlier `get`.
 //!
+//! A [`Tally<U>`] is a count with many writers ([`tally()`]): `Clone` writers
+//! that `fetch_add`, wrapping rather than saturating, with no closed flag.
+//!
 //! Nothing resets on read, and a reader never blocks: one load per word (one word for a gauge).
 //! The writer is not `Clone` and writes through `&mut self`, so the cell has
 //! one writer at a time by type (a shared reference cannot write, and two
@@ -39,6 +42,9 @@
 //! The model in `tests/gauge_loom.rs` runs this code.
 
 use std::marker::PhantomData;
+
+mod tally;
+pub use tally::{Tally, TallyWriter, tally};
 
 use sync::{Arc, AtomicBool, AtomicU64, Ordering};
 use tutti_types::Unit;

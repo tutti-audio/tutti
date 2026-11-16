@@ -1,6 +1,6 @@
 use tutti_types::{Db, SamplePosition, Samples};
 
-use super::{Count, Counter, CounterWriter, Gauge, GaugeWriter, Reading, counter, gauge};
+use super::{Count, Counter, CounterWriter, Gauge, GaugeWriter, Reading, counter, gauge, tally};
 
 /// A count of dropped events, as an owner would name one.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -272,4 +272,73 @@ fn a_reader_of_a_two_tally_counter_never_sees_a_tally_go_back() {
             late: 20_000
         }
     );
+}
+
+#[test]
+fn two_tally_writers_add_to_one_exact_total() {
+    let total = tally::<u64>();
+    let handles: Vec<_> = (0..2)
+        .map(|_| {
+            let mut writer = total.writer();
+            std::thread::spawn(move || {
+                for _ in 0..50_000 {
+                    writer.add(1);
+                }
+            })
+        })
+        .collect();
+    for h in handles {
+        h.join().unwrap();
+    }
+    assert_eq!(total.get(), 100_000, "an add was lost to the other writer");
+}
+
+#[test]
+fn a_tally_adds_each_tally_of_a_two_tally_count() {
+    let total = tally::<Two>();
+    let mut a = total.writer();
+    let mut b = a.clone();
+    a.add(Two { lost: 1, late: 10 });
+    b.add(Two { lost: 2, late: 0 });
+    assert_eq!(total.clone().get(), Two { lost: 3, late: 10 });
+}
+
+#[test]
+fn a_tally_reader_never_sees_a_tally_go_back() {
+    let total = tally::<Two>();
+    let mut writers = [total.writer(), total.writer()];
+    let reader = std::thread::spawn({
+        let total = total.clone();
+        move || {
+            let mut last = Two { lost: 0, late: 0 };
+            for _ in 0..10_000 {
+                let now = total.get();
+                assert!(now.lost >= last.lost && now.late >= last.late);
+                last = now;
+            }
+        }
+    });
+    for _ in 0..10_000 {
+        for w in &mut writers {
+            w.add(Two { lost: 1, late: 2 });
+        }
+    }
+    reader.join().unwrap();
+    assert_eq!(
+        total.get(),
+        Two {
+            lost: 20_000,
+            late: 40_000
+        }
+    );
+}
+
+#[test]
+fn a_tally_outlives_every_writer_and_mints_more() {
+    let total = tally::<u64>();
+    let mut first = total.writer();
+    first.add(2);
+    drop(first);
+    total.writer().add(3);
+    assert_eq!(total.get(), 5);
 }

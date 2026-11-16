@@ -1,0 +1,131 @@
+//! [`Tally`] and [`TallyWriter`]: a [`Count`] that many writers add to.
+//!
+//! A [`Counter`](super::Counter) has one writer, by type, and a `reopen` that
+//! fails while the old writer lives. A tally is for a count whose writers
+//! overlap (two inlets of one port while a device is replugged): every
+//! [`TallyWriter`] is `Clone` and adds with one `fetch_add` per word, so each
+//! add is wait-free and none is lost to another writer.
+//!
+//! - **Not saturating.** A saturating add over many writers is a compare-and-swap
+//!   loop, which is not wait-free. A word wraps after 2^64 events: 584 years at
+//!   10^9 events a second.
+//! - **Relaxed.** A tally publishes no data: nothing a reader may read is
+//!   written before an add. Each word is read in its own coherence order, so
+//!   no tally of a [`Tally::get`] is less than in an earlier `get`.
+//! - **No closed flag.** The reader mints writers ([`Tally::writer`]), so
+//!   "the last writer dropped" is never final. Use a [`Counter`](super::Counter)
+//!   for a count with one writer that a reader must see end.
+//!
+//! The tallies are independent, as a [`Counter`](super::Counter)'s are: a
+//! `get` that races an add may read one word before it and the next after it.
+//! Once every writer's thread has joined, `get` is exact.
+
+use std::marker::PhantomData;
+
+use super::sync::{Arc, AtomicU64, Ordering};
+use super::{Count, Words};
+
+#[derive(Debug)]
+struct Cells {
+    words: Box<[AtomicU64]>,
+}
+
+/// A cumulative count, added to by any number of [`TallyWriter`]s and read by
+/// any thread. `Clone`: every clone reads and mints for the same cell.
+///
+/// ```
+/// use tutti_rt::tally;
+///
+/// let lost = tally::<u64>();
+/// let (mut a, mut b) = (lost.writer(), lost.writer());
+/// a.add(2);
+/// b.add(3);
+/// assert_eq!(lost.get(), 5);
+/// ```
+pub struct Tally<U: Count> {
+    cells: Arc<Cells>,
+    _count: PhantomData<fn() -> U>,
+}
+
+/// A writing end of a [`Tally`]: `Clone`, one per adding thread or owner.
+#[must_use]
+pub struct TallyWriter<U: Count> {
+    cells: Arc<Cells>,
+    _count: PhantomData<fn(U)>,
+}
+
+/// A tally at zero. Allocates: control side.
+#[must_use]
+pub fn tally<U: Count>() -> Tally<U> {
+    let len = <U::Words as Words>::LEN;
+    Tally {
+        cells: Arc::new(Cells {
+            words: (0..len).map(|_| AtomicU64::new(0)).collect(),
+        }),
+        _count: PhantomData,
+    }
+}
+
+impl<U: Count> Clone for Tally<U> {
+    fn clone(&self) -> Self {
+        Self {
+            cells: Arc::clone(&self.cells),
+            _count: PhantomData,
+        }
+    }
+}
+
+impl<U: Count> Clone for TallyWriter<U> {
+    fn clone(&self) -> Self {
+        Self {
+            cells: Arc::clone(&self.cells),
+            _count: PhantomData,
+        }
+    }
+}
+
+impl<U: Count> Tally<U> {
+    /// The total counted so far. No tally is less than in an earlier `get`.
+    /// Wait-free: one load per word; exact once every writer has finished.
+    #[inline]
+    #[must_use]
+    pub fn get(&self) -> U {
+        let mut words = U::Words::zeroed();
+        for (word, cell) in words.as_mut_slice().iter_mut().zip(&*self.cells.words) {
+            *word = cell.load(Ordering::Relaxed);
+        }
+        U::from_words(words)
+    }
+
+    /// A new writer for the cell. Control side: it clones one `Arc`.
+    pub fn writer(&self) -> TallyWriter<U> {
+        TallyWriter {
+            cells: Arc::clone(&self.cells),
+            _count: PhantomData,
+        }
+    }
+}
+
+impl<U: Count> TallyWriter<U> {
+    /// Adds `by` to the total, one `fetch_add` per word, wrapping at 2^64.
+    /// Wait-free; allocates nothing.
+    #[inline]
+    pub fn add(&mut self, by: U) {
+        let by = by.to_words();
+        for (add, cell) in by.as_slice().iter().zip(&*self.cells.words) {
+            cell.fetch_add(*add, Ordering::Relaxed);
+        }
+    }
+}
+
+impl<U: Count> std::fmt::Debug for Tally<U> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Tally").finish_non_exhaustive()
+    }
+}
+
+impl<U: Count> std::fmt::Debug for TallyWriter<U> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TallyWriter").finish_non_exhaustive()
+    }
+}

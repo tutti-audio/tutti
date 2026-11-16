@@ -13,6 +13,8 @@
 //!   the writer wrote (the last gauge value, the whole count);
 //! - **a multi-word counter's tallies each never go back**, and a closed one
 //!   reads whole (every tally of every add);
+//! - **a tally with two writers**: each word never goes back and is a prefix
+//!   total mid-run, and the total is exact once both writers have joined;
 //! - **a gauge is never torn**: a read returns the initial value or one store;
 //! - **a reopened writer starts from the last value** the dropped one wrote;
 //! - **of two concurrent reopens exactly one wins**, and none wins while a
@@ -21,7 +23,7 @@
 #![cfg(loom)]
 
 use loom::thread;
-use tutti_rt::{Count, Reading, counter, gauge};
+use tutti_rt::{Count, Reading, counter, gauge, tally};
 
 /// Two halves of one word: a torn read would pair halves of two stores.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -215,5 +217,52 @@ fn of_two_concurrent_reopens_exactly_one_wins() {
             1,
             "two writers or none"
         );
+    });
+}
+
+#[test]
+fn a_two_writer_tally_never_goes_back_and_is_exact_once_joined() {
+    loom::model(|| {
+        let total = tally::<u64>();
+        let (mut a, mut b) = (total.writer(), total.writer());
+        let observer = {
+            let total = total.clone();
+            thread::spawn(move || {
+                let first = total.get();
+                let second = total.get();
+                assert!(second >= first, "a tally went back");
+                assert!(second <= 2, "a tally is not a sum of adds");
+            })
+        };
+        let first = thread::spawn(move || a.add(1));
+        let second = thread::spawn(move || b.add(1));
+        first.join().unwrap();
+        second.join().unwrap();
+        observer.join().unwrap();
+        assert_eq!(total.get(), 2, "an add was lost");
+    });
+}
+
+#[test]
+fn a_two_word_tally_reads_prefix_totals_and_is_exact_once_joined() {
+    loom::model(|| {
+        let total = tally::<Two>();
+        let (mut a, mut b) = (total.writer(), total.writer());
+        let observer = {
+            let total = total.clone();
+            thread::spawn(move || {
+                let Two([x, y]) = total.get();
+                assert!(
+                    matches!(x, 0..=2) && matches!(y, 0 | 10 | 20),
+                    "a tally is not a sum of adds: ({x}, {y})"
+                );
+            })
+        };
+        let first = thread::spawn(move || a.add(Two([1, 10])));
+        let second = thread::spawn(move || b.add(Two([1, 10])));
+        first.join().unwrap();
+        second.join().unwrap();
+        observer.join().unwrap();
+        assert_eq!(total.get(), Two([2, 20]), "an add was lost");
     });
 }
