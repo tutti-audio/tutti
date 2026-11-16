@@ -380,7 +380,7 @@ fn a_ci_send_the_device_refuses_counts_on_the_input_port() {
     fake.refuse_sends(true);
     s.policy::<MidiPolicy>().set(policy(2, "My App")).unwrap();
     let _ = clock.run(&mut s, &fake, 400);
-    assert!(input.losses().refused > 0, "{:?}", input.losses());
+    assert_eq!(input.losses().refused, 1, "the one Discovery");
     assert_eq!(input.losses().lost, 0);
     assert_eq!(output.losses(), Losses::NONE);
 }

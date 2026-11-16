@@ -123,9 +123,10 @@
 //! room for, the session tells the reader ([`Heard`]), and the assembler drops
 //! its open messages ([`SysexAssembler::lost_tail`]) before the next packets.
 //! What a device sends goes out as SysEx7 on its Group, on the output of the
-//! negotiation, never the session's MIDI output; a refused send is logged, counted
-//! (the `refused` cell [`MidiSession::connect_input_with`](crate::MidiSession::connect_input_with) is given) and not repeated, since
-//! the protocol is built to tolerate loss.
+//! negotiation, never the session's MIDI output; a refused send is logged,
+//! counted in the `refused` cell that
+//! [`MidiSession::connect_input_with`](crate::MidiSession::connect_input_with)
+//! is given, and not repeated, since the protocol is built to tolerate loss.
 //!
 //! # What it declares
 //!

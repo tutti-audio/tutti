@@ -478,7 +478,9 @@ impl MidiInput {
     /// unplug and a replug: [`lost`](Losses::lost) are events its device's inlet
     /// had no room for (a stalled audio callback with a busy controller),
     /// [`evicted`](Losses::evicted) are events its inlet dropped from its waiting
-    /// list for room, and [`refused`](Losses::refused) are events the inlet's
+    /// list for room, [`late`](Losses::late) are events the inlet emitted at the
+    /// first frame of the block that found them, their frame having begun (they
+    /// sound, late), and [`refused`](Losses::refused) are events the inlet's
     /// port refused, translated events its ingest node's mailbox had no room for
     /// in one block, and the MIDI-CI messages its conversation sent that the
     /// device's output refused (a refused message is
@@ -491,6 +493,7 @@ impl MidiInput {
         Losses::lost(self.shared.cells.lost.get())
             + self.shared.ingest.losses()
             + Losses::evicted(self.shared.cells.inlet.evicted())
+            + Losses::late(self.shared.cells.inlet.late())
             + Losses::refused(
                 self.shared.cells.inlet.refused() + self.shared.cells.ci_refused.get(),
             )

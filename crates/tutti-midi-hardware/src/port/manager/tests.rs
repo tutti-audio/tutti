@@ -121,7 +121,8 @@ fn arrivals_keep_their_spacing_and_the_lead_is_added_to_each() {
 #[test]
 fn an_arrival_past_its_block_is_emitted_late_and_counted() {
     let (manager, mut rig) = rig(64, Duration::ZERO);
-    let (mut port, inlet) = manager.open_input_port("A");
+    let (writers, readers) = InputWriters::new();
+    let (mut port, inlet) = manager.open_input_port_with("A", writers.split().0);
     rig.attach(inlet);
     rig.run(3); // with the block `rig` ran, frames 0..256 have been rendered
     assert_eq!(port.push(note(60), rig.time_of(10)), Ok(Delivered::Sent));
@@ -130,6 +131,15 @@ fn an_arrival_past_its_block_is_emitted_late_and_counted() {
         rig.take(),
         vec![(0, 256, note(60))],
         "the next block's first frame"
+    );
+    assert_eq!(
+        (
+            readers.inlet.late(),
+            readers.lost.get(),
+            readers.inlet.evicted()
+        ),
+        (1, 0, 0),
+        "late, not lost"
     );
 }
 

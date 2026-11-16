@@ -158,3 +158,57 @@ fn an_inlet_eviction_raises_the_ports_count_and_carries_across_a_replug() {
     blocks(&s, 2);
     assert_eq!(port.losses().evicted, 200, "cumulative across the replug");
 }
+
+/// **An ingest node whose block translates more than its mailbox holds counts
+/// the rest as refused on its port**: 2,000 events due in one block overrun the
+/// mailbox, and the port's reading says so, with nothing lost at the inlet.
+#[test]
+fn an_ingest_mailbox_overflow_counts_as_refused_on_the_port() {
+    let (mut s, fake) = session();
+    plug(&fake);
+    let _ = s.update();
+    let saved = keys(&mut s);
+    s.pool(midi_input("keys", saved)).expect("declares");
+    let _ = s.update();
+    let port = s.midi_input(&"keys").expect("loaded");
+    blocks(&s, 2);
+    push(&fake, 2_000);
+    blocks(&s, 2);
+    let losses = port.losses();
+    assert!(losses.refused > 0, "{losses:?}");
+    assert_eq!(losses.lost, 0);
+}
+
+/// **An arrival past its block is counted late on the port**, across a replug:
+/// an event stamped a second before now reaches a block that began after it.
+#[test]
+fn a_late_arrival_is_counted_on_the_port_across_a_replug() {
+    let (mut s, fake) = session();
+    plug(&fake);
+    let _ = s.update();
+    let saved = keys(&mut s);
+    s.pool(midi_input("keys", saved)).expect("declares");
+    let _ = s.update();
+    let port = s.midi_input(&"keys").expect("loaded");
+    let late = |fake: &FakeCounters| {
+        let ump = Ump::from(Message::midi2(
+            MidiChannel::FIRST,
+            Voice2::note_on(NoteNumber::of(60), NoteVelocity::new(0x8000)),
+        ));
+        let at = Instant::now() - Duration::from_millis(500);
+        let _ = fake.send_input(EndpointId::from_raw(u64::from(KEYS)), ump, at);
+    };
+    blocks(&s, 400);
+    late(&fake);
+    blocks(&s, 2);
+    assert_eq!(port.losses().late, 1);
+
+    fake.unplug(EndpointId::from_raw(u64::from(KEYS)));
+    let _ = s.update();
+    plug(&fake);
+    let _ = s.update();
+    blocks(&s, 400);
+    late(&fake);
+    blocks(&s, 2);
+    assert_eq!(port.losses().late, 2, "cumulative across the replug");
+}

@@ -27,17 +27,20 @@
 //!
 //! # Timing and losses
 //!
-//! Each [`DeviceInput`] reports through the [`InputWriters`] it is opened with
+//! Each [`DeviceInput`] reports through the [`DeviceWriters`] it is opened with
 //! ([`open_with`](InputInlets::open_with)): a gauge of the latest correction its
 //! map made (signed, positive when a reading came late), a counter of its
-//! re-anchors, a [`Resyncs`] each, and counters of what its inlet lost
-//! (pushes it had no room for, events evicted, events its port refused) and of
-//! the MIDI-CI messages its device's output refused. The readers ([`InputReaders`]) are made once, by
-//! [`InputWriters::new`], and outlive any one connection:
-//! [`InputWriters::reopen`] hands the writers to the next connection once the
-//! last has dropped, so the counters are cumulative across connections and the
-//! gauge holds its last reading until the next map writes one. The device's thread writes with atomic stores, so reading them blocks
-//! nothing.
+//! re-anchors, a [`Resyncs`] each, a counter of the pushes its ring had no room
+//! for, and the totals of what its inlet evicted, refused and emitted late
+//! ([`InletTotals`]). The MIDI-CI refusals of the device's output are the
+//! stream's own cell, the other half of [`InputWriters`].
+//!
+//! The readers ([`InputReaders`]) are made once, by [`InputWriters::new`], and
+//! outlive any one connection: [`InputWriters::reopen`] hands the writers to the
+//! next connection once the last has dropped, so the counts are cumulative
+//! across connections and the gauge holds its last reading until the next map
+//! writes one. The device's thread writes with atomic stores, so reading them
+//! blocks nothing.
 //!
 //! # One inlet per input
 //!
@@ -54,7 +57,9 @@ use std::time::{Duration, Instant};
 use tutti_graph::{
     EventCapacity, EventInletNode, EventInletWriter, InletCounts, InletTotals, Stamp,
 };
-use tutti_rt::{ArcLend, Counter, CounterWriter, Gauge, GaugeWriter, Reader, counter, gauge};
+use tutti_rt::{
+    ArcLend, Counter, CounterWriter, Gauge, GaugeWriter, PushError, Reader, counter, gauge,
+};
 use tutti_types::{Moment, Resyncs, Seconds};
 use tutti_ump::Ump;
 
@@ -327,19 +332,23 @@ impl DeviceInput {
     /// Pushes `ump`, which the OS delivered at `arrival`, for the frame the
     /// block clock puts that time on, plus the lead; or for the next block
     /// while no reading exists (no engine yet, or `arrival` before frame 0).
-    /// `false` when the ring was full: the event is dropped and counted in
-    /// [`Losses::lost`](tutti_graph::Losses::lost) and in the input's own `lost`
-    /// cell ([`InputReaders::lost`]). Lock-free and allocation-free, so safe to
-    /// call from a driver callback.
+    /// Lock-free and allocation-free, so safe to call from a driver callback.
+    ///
+    /// # Errors
+    ///
+    /// [`PushError::Full`] when the ring was full: the event is dropped and
+    /// counted in the input's `lost` cell ([`InputReaders::lost`], cumulative
+    /// across connections; the ring's own count, [`counts`](Self::counts), is
+    /// this connection's). [`PushError::Disconnected`] once the inlet's node is
+    /// gone: not counted, the event had nowhere to go.
     #[inline]
-    pub fn push(&mut self, ump: impl Into<Ump>, arrival: Instant) -> bool {
+    pub fn push(&mut self, ump: impl Into<Ump>, arrival: Instant) -> Result<(), PushError> {
         let ump = ump.into();
         let sent = match self.moment_of(arrival) {
             Some(at) => self.writer.push(at, ump),
             None => self.writer.push(Stamp::NextBlock, ump),
         };
-        let sent = sent.is_ok();
-        if !sent {
+        if sent == Err(PushError::Full) {
             self.lost.add(1);
         }
         sent

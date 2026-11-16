@@ -171,18 +171,19 @@ struct Waiting {
 /// The counts the node and the writer share.
 #[derive(Debug, Default)]
 struct Counts {
-    late: AtomicU64,
+    late: Arc<AtomicU64>,
     evicted: Arc<AtomicU64>,
     refused: Arc<AtomicU64>,
 }
 
-/// The evicted and refused totals of successive inlets of one owner: each
-/// inlet made over them ([`EventInletNode::pair_with`]) adds to the same two
+/// The evicted, refused and late totals of successive inlets of one owner: each
+/// inlet made over them ([`EventInletNode::pair_with`]) adds to the same three
 /// counts, so an owner that replaces its inlet (a device that is unplugged and
 /// plugged again) reads one cumulative figure. The adds are atomic, so an old
 /// inlet still leaving the graph and its successor may count at once.
 #[derive(Clone, Debug, Default)]
 pub struct InletTotals {
+    late: Arc<AtomicU64>,
     evicted: Arc<AtomicU64>,
     refused: Arc<AtomicU64>,
 }
@@ -205,6 +206,13 @@ impl InletTotals {
     #[must_use]
     pub fn refused(&self) -> u64 {
         self.refused.load(Ordering::Relaxed)
+    }
+
+    /// Events the inlets emitted at offset 0 for being past their frame, as
+    /// [`Losses::late`].
+    #[must_use]
+    pub fn late(&self) -> u64 {
+        self.late.load(Ordering::Relaxed)
     }
 }
 
@@ -454,7 +462,7 @@ impl EventInletNode {
     pub fn pair_with(capacity: EventCapacity, totals: &InletTotals) -> (Self, EventInletWriter) {
         let (producer, consumer) = ring::<Pushed>(capacity.slots(), Overflow::DropNewest);
         let counts = Arc::new(Counts {
-            late: AtomicU64::new(0),
+            late: Arc::clone(&totals.late),
             evicted: Arc::clone(&totals.evicted),
             refused: Arc::clone(&totals.refused),
         });

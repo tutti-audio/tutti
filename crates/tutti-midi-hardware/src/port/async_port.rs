@@ -227,7 +227,8 @@ impl InputProducerHandle {
     ///
     /// # Errors
     ///
-    /// [`PushError::Full`] when the device's inlet is full: the event is
+    /// [`PushError::Disconnected`] once the inlet's node is gone (the port was
+    /// removed): nothing is counted. [`PushError::Full`] when the device's inlet is full: the event is
     /// dropped, not queued, and counted in the input's own `lost` cell
     /// ([`InputReaders::lost`](tutti_midi_runtime::InputReaders::lost)). A caller
     /// counts or logs it.
@@ -256,11 +257,9 @@ impl InputProducerHandle {
         if event.message_type() == SYSEX7 && self.hear_sysex.load(Ordering::Relaxed) {
             let _ = self.stream.push(event);
         }
-        if self.input.push(event, self.jr.place(timestamp)) {
-            Ok(Delivered::Sent)
-        } else {
-            Err(PushError::Full)
-        }
+        self.input
+            .push(event, self.jr.place(timestamp))
+            .map(|()| Delivered::Sent)
     }
 
     /// The identity of the port this handle feeds: the key to pass to
