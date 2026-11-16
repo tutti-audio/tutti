@@ -563,6 +563,7 @@ fn a_wrong_password_is_told_the_digest_is_wrong() {
 
 // ---- Data transfer ----
 
+/// Spec: m2-124/7.1#1, m2-124/6.5#2
 #[test]
 fn ump_arrives_once_in_order_and_sequence_numbers_start_at_zero() {
     let mut sim = established();
@@ -739,7 +740,7 @@ fn a_retransmit_request_the_sender_cannot_serve_reports_the_data_lost() {
     );
 }
 
-/// Spec: m2-124/5.5#2, m2-124/7.2.3#10, m2-124/7.2.3#11
+/// Spec: m2-124/7.2.3#10, m2-124/7.2.3#11
 #[test]
 fn a_peer_without_retransmit_naks_the_request_and_the_gap_is_given_up() {
     let mut sim = lossy_sim(no_fec().with_retransmit(Retransmit::Unsupported), vec![2]);
@@ -861,7 +862,7 @@ fn sequence_numbers_wrap_through_ffff_without_losing_or_repeating_a_command() {
     assert_eq!(last_seq, SequenceNumber::new(3));
 }
 
-/// Spec: m2-124/5.1.1#1
+/// Spec: m2-124/5.1.1#1, m2-124/7.1#7
 #[test]
 fn a_burst_larger_than_one_command_is_split_and_no_datagram_exceeds_1400_bytes() {
     let mut sim = established();
@@ -897,6 +898,7 @@ fn sending_before_a_session_is_established_fails_with_the_state() {
     );
 }
 
+/// Spec: m2-124/7.1#1, m2-124/6.5#2
 #[test]
 fn the_host_sends_to_the_client_too() {
     let mut sim = established();
@@ -930,14 +932,17 @@ fn an_idle_period_is_declared_with_zero_length_commands_that_use_sequence_number
     // The two FEC repeats follow at the same interval.
     sim.advance(ms(20));
     assert_eq!(zero_length(&sim), 3);
-    let idle: Vec<_> = data_commands(&sim, Direction::ClientToHost)
+    let mut idle: Vec<_> = data_commands(&sim, Direction::ClientToHost)
         .iter()
         .filter(|d| d.is_idle())
         .map(|d| d.sequence().get())
         .collect();
-    assert!(
-        idle.starts_with(&[1, 1]) || idle.contains(&1),
-        "zero-length numbers continue the sequence: {idle:?}"
+    idle.sort_unstable();
+    idle.dedup();
+    assert_eq!(
+        idle,
+        [1, 2, 3],
+        "each zero-length command takes the next number after the note's 0"
     );
     assert!(
         sim.host_events
@@ -1192,6 +1197,16 @@ fn a_reset_zeroes_both_sequence_numbers_and_flushes_the_buffers() {
     );
     assert_eq!(sent[0].sequence(), SequenceNumber::ZERO);
     assert_eq!(Sim::umps(&sim.host_events), vec![note_on(100)]);
+    // The host's side restarts at 0 too, and the client takes it as the next.
+    sim.client_events.clear();
+    sim.host
+        .send(sim.now, client_addr(), &[note_on(101)])
+        .unwrap();
+    sim.flush();
+    let back = data_commands(&sim, Direction::HostToClient);
+    assert_eq!(back.len(), 1, "the host's flushed buffer leaves no repeat");
+    assert_eq!(back[0].sequence(), SequenceNumber::ZERO);
+    assert_eq!(Sim::umps(&sim.client_events), vec![note_on(101)]);
 }
 
 /// Spec: m2-124/6.11#2, m2-124/6.11#3, m2-124/6.11#6
@@ -1290,6 +1305,7 @@ fn a_malformed_command_gets_a_nak_for_command_malformed() {
     ));
 }
 
+/// Spec: m2-124/5.2#3
 #[test]
 fn a_datagram_without_the_signature_changes_nothing() {
     let mut sim = established();

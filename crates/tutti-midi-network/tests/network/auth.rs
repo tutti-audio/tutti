@@ -2,6 +2,7 @@
 
 use tutti_midi_network::{Digest, Nonce, Username};
 
+/// Spec: m2-124/6.9#9
 #[test]
 fn shared_secret_digest_matches_the_specification_example() {
     let nonce = Nonce::new(*b"nUWrn*@#$hjfwnkL").unwrap();
@@ -13,6 +14,7 @@ fn shared_secret_digest_matches_the_specification_example() {
     assert_eq!(Digest::of_secret(&nonce, "5483").get(), expected);
 }
 
+/// Spec: m2-124/6.10#10
 #[test]
 fn user_digest_matches_the_specification_example() {
     let nonce = Nonce::new(*b"XI|~=NNRVaD;XCPL").unwrap();

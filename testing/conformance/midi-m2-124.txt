@@ -110,7 +110,7 @@ m2-124/6.4#9 | client |  | required | M2-124 §6.4 | a Client with no Host role 
 m2-124/6.4#10 | host |  | permitted | M2-124 §6.4 | a Host can ask for password authentication |  |  |
 m2-124/6.4#11 | host |  | permitted | M2-124 §6.4 | a Host can ask for user authentication |  |  |
 m2-124/6.4#12 | host |  | permitted | M2-124 §6.4 | a Host can fall back, for example to a manual confirmation |  |  |
-m2-124/6.4#13 | host |  | required | M2-124 §6.4 | a Host that requires authentication and finds no common method sends Bye 0x45 |  |  |
+m2-124/6.4#13 | host |  | required | M2-124 §6.4 | a Host with no Pending fallback that requires authentication and finds no common method sends Bye 0x45 |  |  |
 m2-124/6.4#14 | client |  | required | M2-124 §6.4 | the Client gives the Host a name |  |  |
 m2-124/6.4#15 | client |  | required | M2-124 §6.4 | that name equals the Endpoint Name Notification |  |  |
 m2-124/6.4#16 | client |  | required | M2-124 §6.4 | the Client gives the Host a Product Instance Id |  |  |
