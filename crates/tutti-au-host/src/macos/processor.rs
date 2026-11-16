@@ -19,8 +19,8 @@ use tutti_au_ffi::{
 use tutti_graph::UmpAt;
 use tutti_plugin_types::{
     AudioBufferMut, MIDI_STACK_CAPACITY, ParamId, ParamMapping, ParamWriteError, PlayheadWatch,
-    PluginError, PluginIo, PluginResult, ProcessContext, ProcessOutput, Processor, TransportInfo,
-    WireMidi, is_usable,
+    PluginError, PluginIo, PluginResult, ProcessContext, ProcessOutput, Processor, SampleRate,
+    TransportInfo, WireMidi, is_usable,
 };
 use tutti_rt::Reader;
 use tutti_ump::SysexAssembler;
