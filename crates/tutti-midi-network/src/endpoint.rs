@@ -4,6 +4,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
 use std::num::NonZeroUsize;
+use std::sync::Arc;
 use std::time::Instant;
 
 use tutti_midi_device::EntropyError;
@@ -36,14 +37,27 @@ pub trait NetworkEndpoint {
     /// The next event for the application, if one is queued.
     fn poll_event(&mut self) -> Option<Event>;
 
+    /// How many events were dropped because [`MAX_QUEUED_EVENTS`] were
+    /// already waiting for [`poll_event`](Self::poll_event), since the
+    /// endpoint was made. An application that polls events never sees the
+    /// count rise; one that does not has the first events and this count of
+    /// the ones it missed.
+    fn events_lost(&self) -> u64;
+
     /// When [`on_timeout`](Self::on_timeout) next has work, if ever.
     fn deadline(&self) -> Option<Instant>;
 }
+
+/// The most events an endpoint holds for the application. A queue that is full
+/// drops the event that would join it and counts it, so an application that
+/// never polls costs the endpoint a bounded amount of memory.
+pub const MAX_QUEUED_EVENTS: usize = 4096;
 
 #[derive(Debug, Default)]
 struct Outbox {
     transmits: VecDeque<Transmit>,
     events: VecDeque<Event>,
+    events_lost: u64,
 }
 
 impl Outbox {
@@ -56,7 +70,13 @@ impl Outbox {
                 .into_iter()
                 .map(|payload| Transmit { to: peer, payload }),
         );
-        self.events.extend(events);
+        for event in events {
+            if self.events.len() < MAX_QUEUED_EVENTS {
+                self.events.push_back(event);
+            } else {
+                self.events_lost += 1;
+            }
+        }
     }
 }
 
@@ -165,6 +185,10 @@ impl NetworkEndpoint for Client {
         self.outbox.events.pop_front()
     }
 
+    fn events_lost(&self) -> u64 {
+        self.outbox.events_lost
+    }
+
     fn deadline(&self) -> Option<Instant> {
         self.session.deadline()
     }
@@ -202,7 +226,12 @@ impl HostConfig {
 /// A Host: serves any number of Clients, each known by its address and port.
 #[derive(Debug)]
 pub struct Host {
-    config: HostConfig,
+    identity: EndpointIdentity,
+    /// Shared with each session that answers an Invitation, so no datagram
+    /// copies it.
+    admission: Arc<Admission>,
+    max_sessions: NonZeroUsize,
+    session_config: SessionConfig,
     nonce_source: fn() -> Result<Nonce, EntropyError>,
     sessions: HashMap<SocketAddr, Session>,
     outbox: Outbox,
@@ -222,8 +251,17 @@ impl Host {
         config: HostConfig,
         nonce_source: fn() -> Result<Nonce, EntropyError>,
     ) -> Self {
+        let HostConfig {
+            identity,
+            admission,
+            max_sessions,
+            session,
+        } = config;
         Self {
-            config,
+            identity,
+            admission: Arc::new(admission),
+            max_sessions,
+            session_config: session,
             nonce_source,
             sessions: HashMap::new(),
             outbox: Outbox::default(),
@@ -328,15 +366,15 @@ impl NetworkEndpoint for Host {
         // refused the same way.
         let mut session = Session::new(
             Role::Host {
-                admission: self.config.admission.clone(),
+                admission: Arc::clone(&self.admission),
                 nonce_source: self.nonce_source,
             },
-            self.config.session,
-            self.config.identity,
+            self.session_config,
+            self.identity,
             from,
             now,
         );
-        session.set_capacity(if self.session_count() >= self.config.max_sessions.get() {
+        session.set_capacity(if self.session_count() >= self.max_sessions.get() {
             Capacity::Full
         } else {
             Capacity::Available
@@ -365,6 +403,10 @@ impl NetworkEndpoint for Host {
 
     fn poll_event(&mut self) -> Option<Event> {
         self.outbox.events.pop_front()
+    }
+
+    fn events_lost(&self) -> u64 {
+        self.outbox.events_lost
     }
 
     fn deadline(&self) -> Option<Instant> {

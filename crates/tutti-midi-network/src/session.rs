@@ -3,6 +3,7 @@
 
 use std::collections::VecDeque;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use tutti_midi_device::EntropyError;
@@ -82,7 +83,7 @@ enum Phase {
 pub(crate) enum Role {
     Client(Credentials),
     Host {
-        admission: Admission,
+        admission: Arc<Admission>,
         nonce_source: fn() -> Result<Nonce, EntropyError>,
     },
 }
@@ -549,7 +550,7 @@ impl Session {
             // A Client with no Host behind this port.
             return self.nak(NakReason::NotExpected, header);
         };
-        let (admission, nonce_source) = (admission.clone(), *nonce_source);
+        let (admission, nonce_source) = (Arc::clone(admission), *nonce_source);
         match &self.phase {
             // A peer the Host already admitted asks again: it missed the reply.
             Phase::Established | Phase::Resetting(_) => {
@@ -572,7 +573,7 @@ impl Session {
         }
         self.remote = Some(invitation.identity);
         let needed = admission.required();
-        match admission {
+        match &*admission {
             Admission::Open => self.establish(now),
             Admission::Confirm => {
                 self.out.push(Command::Pending(self.local));
@@ -658,7 +659,7 @@ impl Session {
             return Verdict::Ignored;
         };
         match &self.phase {
-            Phase::Challenged(c) if c.kind == kind => check(admission, &c.nonce),
+            Phase::Challenged(c) if c.kind == kind => check(admission.as_ref(), &c.nonce),
             Phase::Challenged(_) => {
                 self.nak(NakReason::NotExpected, header);
                 Verdict::Ignored

@@ -2,16 +2,16 @@
 //! authentication, data transfer with loss, keep-alive, reset and Bye.
 
 use std::sync::atomic::{AtomicU8, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tutti_midi_device::EntropyError;
 
 use tutti_midi_network::{
-    Admission, AuthChallenge, AuthFailure, AuthMethods, AuthState, Bye, ByeReason, Command,
-    Credentials, DatagramBuilder, Digest, EndedBy, Event, Fec, HostConfig, Invitation, NakReason,
-    NetworkEndpoint, Nonce, PingId, Requests, Retransmit, RetransmitRequest, SendError,
-    SequenceNumber, SessionConfig, SessionState, UmpData, UserAuthChallenge, UserAuthState,
-    Username,
+    Admission, AuthChallenge, AuthFailure, AuthMethods, AuthState, Bye, ByeReason, Client, Command,
+    Credentials, DatagramBuilder, Digest, EndedBy, Event, Fec, Host, HostConfig, Invitation,
+    MAX_QUEUED_EVENTS, NakReason, NetworkEndpoint, Nonce, PingId, Requests, Retransmit,
+    RetransmitRequest, SendError, SequenceNumber, SessionConfig, SessionState, UmpData,
+    UserAuthChallenge, UserAuthState, Username,
 };
 
 use crate::sim::{Direction, Fate, Sim, client_addr, fixed_nonce, host_addr, identity, note_on};
@@ -1049,6 +1049,57 @@ fn the_host_sends_to_the_client_too() {
         .unwrap();
     sim.flush();
     assert_eq!(Sim::umps(&sim.client_events), vec![note_on(72)]);
+}
+
+/// An edge counts what it loses: an application that never polls events keeps
+/// the first [`MAX_QUEUED_EVENTS`] and the count of the rest.
+#[test]
+fn a_full_event_queue_keeps_what_it_holds_and_counts_the_rest() {
+    // A Client whose events nobody polls: datagrams cross by hand.
+    let now = Instant::now();
+    let mut host = Host::new(HostConfig::new(identity("Studio", "HOST-1")));
+    let mut client = Client::new(
+        identity("Laptop", "CLIENT-1"),
+        Credentials::none(),
+        SessionConfig::default(),
+        host_addr(),
+        now,
+    );
+    let deliver = |host: &mut Host, client: &mut Client, now| loop {
+        let mut moved = false;
+        while let Some(t) = client.poll_transmit() {
+            moved = true;
+            host.on_message(client_addr(), &t.payload, now);
+        }
+        while let Some(t) = host.poll_transmit() {
+            moved = true;
+            client.on_message(host_addr(), &t.payload, now);
+        }
+        if !moved {
+            break;
+        }
+    };
+    client.connect(now);
+    deliver(&mut host, &mut client, now);
+    assert_eq!(client.state(), SessionState::Established);
+    let batches = 300;
+    let per_batch = 16;
+    for _ in 0..batches {
+        host.send(now, client_addr(), &[note_on(60); 16]).unwrap();
+        deliver(&mut host, &mut client, now);
+    }
+    // One Established event, then one per UMP delivered.
+    let total = 1 + batches * per_batch;
+    assert!(total > MAX_QUEUED_EVENTS);
+    assert_eq!(client.events_lost(), (total - MAX_QUEUED_EVENTS) as u64);
+    let mut held = 0;
+    let mut first = None;
+    while let Some(event) = client.poll_event() {
+        first.get_or_insert(event);
+        held += 1;
+    }
+    assert_eq!(held, MAX_QUEUED_EVENTS);
+    assert!(matches!(first, Some(Event::Established { .. })));
 }
 
 // ---- Idle periods ----
