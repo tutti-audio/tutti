@@ -18,6 +18,17 @@ fn drain(held: &mut HeldState, group: Option<MidiGroup>) -> Vec<Ump> {
     out
 }
 
+/// Whether nothing is held: a release that is refused its first message
+/// keeps everything, so it only probes.
+fn is_empty(held: &mut HeldState) -> bool {
+    let mut any = false;
+    held.release(None, |_| {
+        any = true;
+        false
+    });
+    !any
+}
+
 fn on(group: MidiGroup, channel: u8, note: u8) -> Ump {
     midi::note_on(Address::new(group, MidiChannel::of(channel)), note, 0xFFFF)
 }
@@ -39,7 +50,7 @@ fn a_release_ends_the_keys_still_down_and_only_those() {
         sent,
         vec![midi::note_off(Address::new(G0, MidiChannel::of(0)), 64, 0)]
     );
-    assert!(held.is_empty());
+    assert!(is_empty(&mut held));
     assert!(drain(&mut held, None).is_empty());
 }
 
@@ -51,9 +62,9 @@ fn a_midi1_note_on_at_velocity_zero_ends_the_key() {
     let mut held = HeldState::new();
     let m1_on = |v: u8| midi::m1_note_on(MidiChannel::of(2), 60, U7::of(v));
     held.observe(m1_on(100));
-    assert!(!held.is_empty());
+    assert!(!is_empty(&mut held));
     held.observe(m1_on(0));
-    assert!(held.is_empty());
+    assert!(is_empty(&mut held));
 }
 
 /// **Notes first, then pedals and bend** (MIDI 1.0 Detailed Specification
@@ -102,7 +113,7 @@ fn a_release_for_one_group_leaves_the_others_held() {
         sent,
         vec![midi::note_off(Address::new(G1, MidiChannel::of(0)), 61, 0)]
     );
-    assert!(!held.is_empty());
+    assert!(!is_empty(&mut held));
     let rest = drain(&mut held, Some(G0));
     assert_eq!(
         rest,
