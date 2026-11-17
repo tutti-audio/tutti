@@ -425,10 +425,18 @@ fn kinds() -> Vec<(&'static str, Make)> {
         )
     }
     fn dual_mono() -> ConvolverNode {
-        ConvolverNode::per_channel(&[&tap(200, 0.5), &tap(120, -0.75)], 64).unwrap()
+        ConvolverNode::per_channel(
+            &[Mono::new(&tap(200, 0.5)), Mono::new(&tap(120, -0.75))],
+            64,
+        )
+        .unwrap()
     }
     fn folded() -> ConvolverNode {
-        ConvolverNode::folded(&[&tap(200, 0.5), &tap(120, -0.75)], 64).unwrap()
+        ConvolverNode::folded(
+            &[Mono::new(&tap(200, 0.5)), Mono::new(&tap(120, -0.75))],
+            64,
+        )
+        .unwrap()
     }
     vec![
         ("true stereo", true_stereo as Make),
