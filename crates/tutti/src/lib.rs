@@ -238,7 +238,7 @@ pub mod nodes {
     };
     pub use tutti_nodes::{
         BAND_PARAMS, BitCrusherConfig, BitCrusherControls, BitCrusherNode, BrickwallLimiterNode,
-        BusStripNode, ChannelTimes, ChannelTimesError, ClickNode, ClickSettings, ClickState,
+        BusStripNode, ChannelTimes, ChannelTimesError, ClickSettings, ClickState,
         CompressorControls, CompressorNode, ConvolverError, ConvolverNode, CrossoverControls,
         CrossoverError, CrossoverNode, DcBlockerConfig, DcBlockerControls, DcBlockerNode,
         DelayControls, DelayLayout, DelayNode, DistortionNode, EnvelopeFollowerNode, EqBandNode,

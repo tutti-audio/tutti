@@ -7,7 +7,6 @@ use tutti_engine::StreamFaultKind;
 use tutti_graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_nodes::testing::Const;
 use tutti_session::{OutPort, Root, Session, SessionEvent, SystemSession};
-use tutti_transport::MotionEvent;
 use tutti_types::{ChannelLayout, MaxBlock, SampleRate, Samples};
 
 const BLOCK: usize = 480;
@@ -49,10 +48,7 @@ fn a_system_session_renders_its_graph_with_no_device() {
     };
     assert_eq!(tap.width(), 2);
 
-    s.transport()
-        .motion()
-        .try_send(MotionEvent::Play)
-        .expect("room");
+    s.play().expect("room");
     let mut heard = vec![0.0f32; 2 * BLOCK];
     loop {
         let _ = s.update();

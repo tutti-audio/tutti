@@ -14,7 +14,7 @@ use tutti_graph::{FadeLaw, ForkByClone};
 use tutti_nodes::testing::{Osc, Through};
 use tutti_nodes::{LimiterControls, LimiterNode};
 use tutti_session::{Crossfade, Error, InPort, LiveSession, OutPort, Root, Session};
-use tutti_transport::{MotionEvent, Timeline};
+use tutti_transport::MotionEvent;
 use tutti_types::{At, ChannelLayout, Db, Frame, Hz, MaxBlock, SampleRate, Samples, Seconds};
 
 const OLD: f64 = 44_100.0;
@@ -114,17 +114,19 @@ fn period(x: &[f32]) -> f64 {
 #[test]
 fn a_restart_at_a_new_rate_re_rates_the_graph_and_everything_on_it() {
     let (mut s, old, _, lim) = engine();
-    let t = s.transport().clone();
-    t.motion().try_send(MotionEvent::Play).expect("room");
-    t.motion()
-        .schedule(At::Frame(Frame::new(66_150)), MotionEvent::stop_unfaded())
+    let t = s.transport_handle();
+    t.play().expect("room");
+    t.schedule(At::Frame(Frame::new(66_150)), MotionEvent::stop_unfaded())
         .expect("room");
     let before = play(&mut s, &old, 441, 100);
     assert!(
         (period(&before[4_410..]) - 44.1).abs() < 0.01,
         "1 kHz at 44.1 kHz"
     );
-    assert!((t.beat().get() - 2.0).abs() < 1e-9, "one second");
+    assert!(
+        (s.playhead().beat().get() - 1.98).abs() < 1e-9,
+        "one second, less the last block the playhead has not reached"
+    );
     let old_latency = s.graph_ref().node_latency(lim).unwrap();
     assert_eq!(s.latency(), old_latency, "the 44.1 kHz figure is published");
 
@@ -136,7 +138,7 @@ fn a_restart_at_a_new_rate_re_rates_the_graph_and_everything_on_it() {
         s.graph_ref().testing().prepared().sample_rate(),
         SampleRate::of(NEW)
     );
-    assert_eq!(t.sample_rate(), SampleRate::of(NEW), "the transport's rate");
+    assert_eq!(s.sample_rate(), SampleRate::of(NEW), "the transport's rate");
     // Before the first block: the re-prepare finished inside the hook, and
     // the figures a disk source pre-rolls by are the new rate's.
     let new_latency = s.graph_ref().node_latency(lim).unwrap();
@@ -155,8 +157,7 @@ fn a_restart_at_a_new_rate_re_rates_the_graph_and_everything_on_it() {
     // Sent after the restart, before the first block at the new rate: already
     // in 48 kHz frames (1.75 s of wall clock), so the rate's adoption must
     // leave it where it is.
-    t.motion()
-        .schedule(At::Frame(Frame::new(84_000)), MotionEvent::Play)
+    t.schedule(At::Frame(Frame::new(84_000)), MotionEvent::Play)
         .expect("room");
 
     let mut after = play(&mut s, &new, 480, 1);
@@ -166,24 +167,24 @@ fn a_restart_at_a_new_rate_re_rates_the_graph_and_everything_on_it() {
          of a re-prepare with its units out"
     );
     assert!(
-        (t.beat().get() - 2.02).abs() < 1e-9,
-        "the beat carries on from 2.0 at the new rate, not from {}",
-        t.beat().get()
+        (s.playhead().beat().get() - 2.0).abs() < 1e-9,
+        "the first block at the new rate starts at beat 2.0, not at {}",
+        s.playhead().beat().get()
     );
     after.extend(play(&mut s, &new, 480, 54));
     // One frame of 48 kHz is 1/24 000 of a beat: 1e-9 pins the frame.
-    assert!(!t.is_rolling(), "the stop landed");
+    assert!(!s.playhead().playing(), "the stop landed");
     assert!(
-        (t.beat().get() - 3.0).abs() < 1e-9,
+        (s.playhead().beat().get() - 3.0).abs() < 1e-9,
         "the stop lands on 1.5 s of wall clock, frame 72 000 (beat 3), not at beat {}",
-        t.beat().get()
+        s.playhead().beat().get()
     );
     after.extend(play(&mut s, &new, 480, 45));
-    assert!(t.is_rolling(), "the later play landed");
+    assert!(s.playhead().playing(), "the later play landed");
     assert!(
-        (t.beat().get() - 3.5).abs() < 1e-9,
-        "rolling again from frame 84 000, 12 000 frames to go (beat 3.5), not beat {}",
-        t.beat().get()
+        (s.playhead().beat().get() - 3.48).abs() < 1e-9,
+        "rolling again from frame 84 000, one block short of beat 3.5, not beat {}",
+        s.playhead().beat().get()
     );
     assert!(
         (period(&after[4_800..]) - 48.0).abs() < 0.01,

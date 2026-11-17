@@ -6,7 +6,6 @@ use std::sync::Arc;
 
 use tutti_buffers::InterleavedMut;
 use tutti_session::{OutPort, Root, Session};
-use tutti_transport::MotionEvent;
 use tutti_types::{ChannelLayout, SampleRate};
 
 const RATE: f64 = 48_000.0;
@@ -22,10 +21,7 @@ fn offline() -> Session {
 /// `frames` stereo frames of `s` in `block`-frame device blocks, the
 /// transport rolling from the first block.
 fn run(s: &Session, frames: usize, block: usize) -> Vec<f32> {
-    s.transport()
-        .motion()
-        .try_send(MotionEvent::Play)
-        .expect("room");
+    s.play().expect("room");
     let mut out = Vec::with_capacity(frames * 2);
     let mut buf = vec![0.0f32; block * 2];
     while out.len() < frames * 2 {

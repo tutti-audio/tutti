@@ -11,7 +11,6 @@ use tutti_nodes::testing::{Const, Through};
 use tutti_session::{
     Error, InPort, LiveSession, OutPort, Root, Session, SessionEvent, SystemSession,
 };
-use tutti_transport::MotionEvent;
 use tutti_types::{ChannelLayout, ChannelTopology, MaxBlock, SampleRate, Samples};
 
 const BLOCK: usize = 480;
@@ -55,10 +54,7 @@ fn wait_until(what: &str, mut done: impl FnMut() -> bool) {
 }
 
 fn play<C: tutti_session::Clock>(s: &Session<C>) {
-    s.transport()
-        .motion()
-        .try_send(MotionEvent::Play)
-        .expect("room");
+    s.play().expect("room");
 }
 
 fn frame<C: tutti_session::Clock>(s: &Session<C>) -> u64 {
@@ -275,7 +271,7 @@ fn a_poisoned_graph_comes_back_stopped() {
     let s = err.into_session();
     assert_eq!(
         s.stream_spec().sample_rate,
-        s.transport().sample_rate(),
+        s.sample_rate(),
         "the host says what the graph is prepared at"
     );
     let stopped_at = frame(&s);
@@ -354,7 +350,7 @@ fn a_switch_to_a_device_at_another_rate_reports_the_change() {
         )),
         "{events:?}"
     );
-    assert_eq!(live.transport().sample_rate(), SampleRate::SR_44K1);
+    assert_eq!(live.sample_rate(), SampleRate::SR_44K1);
     assert_eq!(live.device().graph_rate(), SampleRate::SR_44K1);
 }
 
@@ -477,11 +473,7 @@ fn a_card_that_fails_to_open_after_the_stop_returns_the_session_running_on_the_t
         err.error()
     );
     let mut s = err.into_session();
-    assert_eq!(
-        s.transport().sample_rate(),
-        SampleRate::SR_48K,
-        "the old rate again"
-    );
+    assert_eq!(s.sample_rate(), SampleRate::SR_48K, "the old rate again");
     let stream = s.stream_spec();
     assert_eq!(
         stream.sample_rate,

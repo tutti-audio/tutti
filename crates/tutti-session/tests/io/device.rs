@@ -142,7 +142,7 @@ fn a_rerate_keeps_the_published_compensation_in_step_with_the_plan() {
         s.graph_ref().testing().prepared().sample_rate(),
         SampleRate::SR_96K
     );
-    assert_eq!(s.transport().sample_rate(), SampleRate::SR_96K);
+    assert_eq!(s.sample_rate(), SampleRate::SR_96K);
     let at96 = in_step(&s, "96 kHz, before the first block");
     assert_eq!(at96, Samples(2 * at48.0), "the lookahead is a time");
 

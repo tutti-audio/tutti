@@ -19,7 +19,6 @@ use tutti_nodes::testing::Osc;
 use tutti_nodes::{MultibandCompressorNode, MultibandControls};
 use tutti_session::RouteSpec;
 use tutti_session::{InPort, Key, OutPort, Root, Session};
-use tutti_transport::MotionEvent;
 use tutti_types::{Amplitude, ChannelLayout, SampleRate};
 use tutti_types::{BeatsPerCycle, Depth};
 use tutti_types::{CompressionRatio, Db, Hz, Seconds, UnitAddr, UnitParam};
@@ -88,10 +87,7 @@ fn rig() -> (Session, Key<MultibandCompressorNode>, MultibandControls) {
 
 /// Renders `frames` frames from a rolling transport, in blocks of 128.
 fn render(s: &mut Session, frames: usize) -> [Vec<f32>; 2] {
-    s.transport()
-        .motion()
-        .try_send(MotionEvent::Play)
-        .expect("room");
+    s.play().expect("room");
     let mut all = [Vec::new(), Vec::new()];
     let mut buf = vec![0.0f32; 128 * 2];
     for _ in 0..frames / 128 {

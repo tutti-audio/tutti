@@ -10,7 +10,6 @@ use tutti_buffers::InterleavedMut;
 use tutti_graph::Params;
 use tutti_modulation::Lfo;
 use tutti_session::{OutPort, ParamError, ParamRef, Root, RouteSpec, Session};
-use tutti_transport::MotionEvent;
 use tutti_types::{BeatsPerCycle, Db, Depth, ParamAddr, UnitAddr, UnitParam};
 use tutti_types::{ChannelLayout, SampleRate};
 
@@ -32,10 +31,7 @@ fn offline() -> Session {
 /// Renders `frames` frames from a rolling transport, in blocks of 128;
 /// returns the two output channels.
 fn render(s: &mut Session, frames: usize) -> [Vec<f32>; 2] {
-    s.transport()
-        .motion()
-        .try_send(MotionEvent::Play)
-        .expect("room");
+    s.play().expect("room");
     let mut all = [Vec::new(), Vec::new()];
     let mut buf = vec![0.0f32; 128 * 2];
     for _ in 0..frames / 128 {

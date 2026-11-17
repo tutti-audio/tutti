@@ -27,7 +27,6 @@ use tutti_nodes::testing::Const;
 use tutti_nodes::{LimiterControls, LimiterNode};
 use tutti_sampler::{DiskVoice, MemorySource, Placement, StreamPhase, VoiceWindow};
 use tutti_session::{InPort, OutPort, Root, SamplerEvent, Session, SessionEvent};
-use tutti_transport::MotionEvent;
 use tutti_types::{Beat, ChannelLayout, Db, SampleRate, Samples};
 
 const RATE: f64 = 48_000.0;
@@ -178,10 +177,7 @@ fn render(tier: Tier) -> (Vec<f32>, Vec<f32>, Samples) {
         );
     }
 
-    s.transport()
-        .motion()
-        .try_send(MotionEvent::Play)
-        .expect("room");
+    s.play().expect("room");
     let frames = AT + 2_000;
     let (mut left, mut right) = (Vec::new(), Vec::new());
     let mut block = vec![0.0f32; BLOCK * 4];

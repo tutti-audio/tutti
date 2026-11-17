@@ -1115,7 +1115,7 @@ mod tests {
         assert_eq!(prepared.sample_rate(), SampleRate::SR_48K);
         assert_eq!(prepared.max_block(), LIVE_MAX_BLOCK);
         assert_eq!(session.graph_ref().outputs(), 2);
-        assert_eq!(session.transport().sample_rate(), SampleRate::SR_48K);
+        assert_eq!(session.sample_rate(), SampleRate::SR_48K);
         assert_eq!(
             session.heard.as_ref().map(|(_, layout)| *layout),
             Some(ChannelLayout::STEREO)

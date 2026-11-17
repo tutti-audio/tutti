@@ -4,8 +4,8 @@
 use tutti_buffers::InterleavedMut;
 use tutti_session::Session;
 use tutti_transport::TimedError;
-use tutti_transport::{FadeOut, MotionEvent, Timeline};
-use tutti_types::{At, Beat, Bpm, ChannelLayout, Frame, LoopRange, MaxBlock, SampleRate, Samples};
+use tutti_transport::{FadeOut, MotionEvent};
+use tutti_types::{Beat, Bpm, ChannelLayout, Frame, LoopRange, MaxBlock, SampleRate, Samples};
 
 fn offline() -> Session {
     Session::builder()
@@ -13,6 +13,10 @@ fn offline() -> Session {
         .build()
         .expect("builds")
 }
+
+/// A block of the offline session in beats at 60 BPM: the playhead describes a
+/// render call's first frame, so it stands one block behind the frames rendered.
+const BLOCK_BEATS: f64 = 1_000.0 / 48_000.0;
 
 fn render(s: &Session, frames: usize) {
     let mut block = vec![0.0f32; 1_000 * 2];
@@ -31,14 +35,14 @@ fn locate_play_and_stop_move_the_playhead_on_the_set_tempo() {
     s.locate(Beat(2.0)).unwrap();
     s.play().unwrap();
     render(&s, 48_000);
-    let beat = s.transport().beat().get();
-    assert!((beat - 3.0).abs() < 1e-3, "{beat}");
+    let beat = s.playhead().beat().get();
+    assert!((beat - (3.0 - BLOCK_BEATS)).abs() < 1e-3, "{beat}");
 
     s.stop(FadeOut::Immediate).unwrap();
     render(&s, 2_000);
-    let held = s.transport().beat().get();
+    let held = s.playhead().beat().get();
     render(&s, 10_000);
-    assert_eq!(s.transport().beat().get(), held, "stopped");
+    assert_eq!(s.playhead().beat().get(), held, "stopped");
 }
 
 /// **A scheduled play starts on its frame, not at the next block**: a play
@@ -50,8 +54,8 @@ fn a_scheduled_play_starts_on_its_frame() {
     s.set_tempo(Bpm::of(60.0)).expect("not following");
     s.schedule(Frame::new(24_000), MotionEvent::Play).unwrap();
     render(&s, 48_000);
-    let beat = s.transport().beat().get();
-    assert!((beat - 0.5).abs() < 1e-3, "{beat}");
+    let beat = s.playhead().beat().get();
+    assert!((beat - (0.5 - BLOCK_BEATS)).abs() < 1e-3, "{beat}");
 }
 
 /// **A beat schedules as it stands**: a stop scheduled at beat 1 of a rolling
@@ -64,8 +68,10 @@ fn a_stop_scheduled_at_a_beat_halts_there() {
     s.play().unwrap();
     render(&s, 3_000);
     render(&s, 45_000);
-    let beat = s.transport().beat().get();
-    assert!((beat - 1.0).abs() < 0.01, "{beat}");
+    render(&s, 5_000);
+    let beat = s.playhead().beat().get();
+    assert!((beat - 1.0).abs() < 1e-3, "{beat}");
+    assert!(!s.playhead().playing(), "the stop landed");
 }
 
 /// **The session's playhead is one read of the last block.** At 60 BPM a beat
@@ -133,15 +139,18 @@ fn set_loop_wraps_a_rolling_render_at_the_loops_end() {
         .unwrap();
     looped.play().unwrap();
     render(&looped, 72_000);
-    let beat = looped.transport().beat().get();
-    assert!((beat - 0.5).abs() < 1e-3, "looped: {beat}");
+    let beat = looped.playhead().beat().get();
+    assert!((beat - (0.5 - BLOCK_BEATS)).abs() < 1e-3, "looped: {beat}");
 
     let free = offline();
     free.set_tempo(Bpm::of(60.0)).expect("not following");
     free.play().unwrap();
     render(&free, 72_000);
-    let beat = free.transport().beat().get();
-    assert!((beat - 1.5).abs() < 1e-3, "unlooped: {beat}");
+    let beat = free.playhead().beat().get();
+    assert!(
+        (beat - (1.5 - BLOCK_BEATS)).abs() < 1e-3,
+        "unlooped: {beat}"
+    );
 }
 
 /// **`clear_loop` stops the wrapping and keeps the bounds.** Looped over beats
@@ -157,36 +166,23 @@ fn clear_loop_stops_wrapping_and_keeps_the_bounds() {
     render(&s, 24_000);
     s.clear_loop().unwrap();
     render(&s, 48_000);
-    let beat = s.transport().beat().get();
-    assert!((beat - 1.5).abs() < 1e-3, "{beat}");
-    let region = s.transport().motion().loop_region();
+    let beat = s.playhead().beat().get();
+    assert!((beat - (1.5 - BLOCK_BEATS)).abs() < 1e-3, "{beat}");
+    let region = s.transport_handle().loop_region();
     assert_eq!(region.bounds(), range, "the bounds are kept");
     assert!(!region.is_armed());
 }
 
 /// **A play timed at a beat while the transport is stopped is refused where it
 /// is made.** A beat has a frame only while the transport rolls, so such a play
-/// waits for a playback only it can start: sent straight to the transport it
-/// is still pending, and the playhead has not moved, after three seconds
-/// rendered. `Session::schedule` names that, for a play and for a locate that
-/// rolls, sends nothing, and still takes a command that does not start playback
-/// (a stop) and a play timed at a frame.
+/// waits for a playback only it can start, and would stay pending.
+/// `Session::schedule` names that, for a play and for a locate that rolls,
+/// sends nothing, and still takes a command that does not start playback (a
+/// stop) and a play timed at a frame.
 #[test]
 fn a_play_at_a_beat_on_a_stopped_transport_is_refused() {
     let s = offline();
     s.set_tempo(Bpm::of(60.0)).expect("not following");
-
-    // What the refusal is for: the transport itself accepts it, and it never fires.
-    s.transport()
-        .motion()
-        .schedule(At::Beat(Beat(1.0)), MotionEvent::Play)
-        .unwrap();
-    render(&s, 144_000);
-    assert_eq!(s.transport().beat().get(), 0.0, "it never started");
-    assert_eq!(s.transport().motion().scheduled_outstanding(), 1);
-    s.transport().motion().cancel_scheduled();
-    render(&s, 1_000);
-    assert_eq!(s.transport().motion().scheduled_outstanding(), 0);
 
     assert_eq!(
         s.schedule(Beat(1.0), MotionEvent::Play),
@@ -198,7 +194,7 @@ fn a_play_at_a_beat_on_a_stopped_transport_is_refused() {
         Err(TimedError::BeatWhileStopped(roll))
     );
     assert_eq!(
-        s.transport().motion().scheduled_outstanding(),
+        s.transport_handle().scheduled_outstanding(),
         0,
         "nothing sent"
     );
@@ -218,11 +214,11 @@ fn a_play_at_a_beat_right_after_play_is_taken_and_fires() {
     s.play().unwrap();
     s.schedule(Beat(1.0), MotionEvent::Play).unwrap();
     // The play and the timed play, neither applied yet.
-    assert_eq!(s.transport().motion().scheduled_outstanding(), 2);
+    assert_eq!(s.transport_handle().scheduled_outstanding(), 2);
     render(&s, 24_000);
-    assert_eq!(s.transport().motion().scheduled_outstanding(), 1, "not yet");
+    assert_eq!(s.transport_handle().scheduled_outstanding(), 1, "not yet");
     render(&s, 36_000);
-    assert_eq!(s.transport().motion().scheduled_outstanding(), 0, "fired");
+    assert_eq!(s.transport_handle().scheduled_outstanding(), 0, "fired");
 
     s.stop(FadeOut::Immediate).unwrap();
     render(&s, 2_000);

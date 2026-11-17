@@ -127,7 +127,6 @@ use tutti_nodes::{BusStripNode, ConvolverNode, LimiterControls, LimiterNode};
 use tutti_polysynth::{Adsr, FilterType, OscillatorType, PolySynth, SynthConfig};
 use tutti_sampler::{MemorySource, Playback, SlotId, VoicePool, VoiceWindow};
 use tutti_session::{InPort, OutPort, Root, Session, Workers};
-use tutti_transport::MotionEvent;
 use tutti_types::{
     Amplitude, Beat, Cents, ChannelLayout, Db, Hz, MaxBlock, PlaybackRate, Resonance, SampleRate,
     Samples, Seconds,
@@ -349,10 +348,7 @@ fn scene(block: usize, workers: Workers, variant: Variant) -> Session {
             .unwrap();
     }
     let _ = s.update();
-    s.transport()
-        .motion()
-        .try_send(MotionEvent::Play)
-        .expect("room");
+    s.play().expect("room");
     s
 }
 

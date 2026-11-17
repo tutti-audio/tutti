@@ -9,7 +9,6 @@ use std::time::{Duration, Instant};
 use tutti_graph::UmpAt;
 use tutti_midi_runtime::{MidiOut, Outgoing, Taken};
 use tutti_session::{Session, midi_sink};
-use tutti_transport::MotionEvent;
 use tutti_types::{MaxBlock, SampleRate, Samples};
 use tutti_ump::{Message, MidiGroup, System, Ump};
 
@@ -45,10 +44,7 @@ fn the_midi_clock_reaches_the_output_on_the_timers_blocks() {
     s.pool(midi_sink("out", Arc::new(wire.clone())))
         .expect("declares");
     let _ = s.update();
-    s.transport()
-        .motion()
-        .try_send(MotionEvent::Play)
-        .expect("room");
+    s.play().expect("room");
 
     let tick = Ump::from(Message::System(MidiGroup::FIRST, System::TimingClock));
     let limit = Instant::now() + Duration::from_secs(10);

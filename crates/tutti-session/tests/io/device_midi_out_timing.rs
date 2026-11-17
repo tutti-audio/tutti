@@ -13,7 +13,6 @@ use tutti_engine::{ManualStream, ManualStreamDriver, OutputSpec};
 use tutti_midi_runtime::{MidiClipNode, TimedMidiEvent};
 use tutti_midi_runtime::{MidiOut, Outgoing, OutputLatency, OutputOffset, SendAt, Taken};
 use tutti_session::{EventInPort, LiveSession, Session, midi_sink};
-use tutti_transport::MotionEvent;
 use tutti_types::{Beat, ChannelLayout, SampleRate, Seconds};
 use tutti_ump::{Message, MidiGroup, System, Ump};
 use tutti_ump::{MidiChannel, NoteNumber, NoteVelocity, Voice2};
@@ -71,10 +70,7 @@ fn rig(wire: &Wire) -> (LiveSession, ManualStream) {
         .expect("declares");
     let _ = s.update();
     s.midi_nodes().unwrap().clock_master.set_enabled(true);
-    s.transport()
-        .motion()
-        .try_send(MotionEvent::Play)
-        .expect("room");
+    s.play().expect("room");
     (s, stream)
 }
 
