@@ -16,8 +16,10 @@
 //! [`Acquire`](Ordering::Acquire), and only `memcpy` out if it matches. Without
 //! the pair a reader may observe the new sequence number alongside the *old*
 //! samples. The header's atomics are `loom`'s under `--cfg loom`, and
-//! `tests/header_loom.rs` runs `publish`, `sequence`, `initialize` and
-//! `validate` under every interleaving and reordering the memory model permits.
+//! the `loom_model` module below runs `publish`, `sequence`, `initialize` and
+//! `validate` under every interleaving and reordering the memory model permits
+//! between threads; it does not cover a reader in another process or a creator
+//! that crashed mid-initialize.
 //!
 //! # Sequence numbers, not a "newest" index
 //!
@@ -32,7 +34,7 @@ use crossbeam_utils::CachePadded;
 use std::mem::{align_of, offset_of, size_of};
 
 /// The header's atomics: `std`'s, and `loom`'s under `--cfg loom`, so the model
-/// in `tests/header_loom.rs` runs this code. The mapped layout is the `std` one.
+/// in `loom_model` runs this code. The mapped layout is the `std` one.
 mod sync {
     #[cfg(loom)]
     pub(super) use loom::sync::atomic::{AtomicU32, AtomicU64, Ordering};
@@ -101,7 +103,7 @@ pub struct SlabHeader {
 // the atomics slower, never wrong; correctness rests entirely on the
 // Release/Acquire pair. But the cost is real and lands in the worst possible
 // place: the host stores `input_seq` and the server stores `output_seq` every
-// block, ~750 times a second each, from different processes on different cores.
+// block, every block, from different processes on different cores.
 // Sharing a line would ping-pong it between caches on the audio thread's
 // critical path, paying the full price of contention over data that is not
 // actually shared.
@@ -170,7 +172,7 @@ impl SlabHeader {
     /// publication point for the rest of the header: a peer that observes the
     /// magic with `Acquire` (see [`validate`](Self::validate)) is guaranteed to
     /// see the version and slot count that were written before it.
-    pub fn initialize(&self) {
+    pub(crate) fn initialize(&self) {
         self.control
             .header_version
             .store(HEADER_VERSION, Ordering::Relaxed);
@@ -195,7 +197,7 @@ impl SlabHeader {
     ///
     /// [`SlabError::Header`] when the magic, the header version or the slot
     /// count is not this build's.
-    pub fn validate(&self) -> Result<(), SlabError> {
+    pub(crate) fn validate(&self) -> Result<(), SlabError> {
         let magic = self.control.magic.load(Ordering::Acquire);
         if magic != SLAB_MAGIC {
             return Err(SlabError::Header(format!(
@@ -299,6 +301,19 @@ mod tests {
         assert!(h.validate().is_ok());
     }
 
+    /// A creator that crashed after the version and slot count but before the
+    /// magic leaves a header `validate` refuses on the magic.
+    #[test]
+    fn a_header_without_its_magic_is_refused_on_the_magic() {
+        let h = header();
+        h.control
+            .header_version
+            .store(HEADER_VERSION, Ordering::Relaxed);
+        h.control.slots.store(RING_SLOTS as u32, Ordering::Relaxed);
+        let err = h.validate().unwrap_err().to_string();
+        assert!(err.contains("not a tutti audio slab"), "{err}");
+    }
+
     /// Corrupt magic is rejected. This is the first line of defence against
     /// mapping something that is not ours and reading it as audio.
     #[test]
@@ -380,7 +395,7 @@ mod tests {
     /// A smoke test of the code end to end: it catches a publish that stamps
     /// the wrong slot, a reader that checks the wrong direction or a sequence
     /// that goes backwards. A strongly ordered CPU passes it with any ordering;
-    /// the ordering is `tests/header_loom.rs`'s.
+    /// the ordering is `loom_model`'s.
     #[test]
     fn a_million_blocks_never_show_a_sequence_without_its_data() {
         use std::sync::Arc;
@@ -467,5 +482,113 @@ mod tests {
             0,
             "audio regions start right after the header and must stay aligned"
         );
+    }
+}
+
+/// Loom models of the block ring's Release/Acquire pair and the setup magic's,
+/// run against this file's code under `--cfg loom`.
+#[cfg(all(test, loom))]
+mod loom_model {
+    use super::{Direction, RING_SLOTS, SlabHeader, slot_for};
+    use loom::sync::Arc;
+    use loom::sync::atomic::{AtomicU64, Ordering};
+    use loom::thread;
+
+    /// A header and the words standing for the samples it guards: one per slot,
+    /// written `Relaxed` before the publish and read `Relaxed` after the sequence
+    /// check, so all the ordering is the header's.
+    struct Region {
+        header: SlabHeader,
+        data: [AtomicU64; RING_SLOTS],
+    }
+
+    impl Region {
+        fn new() -> Arc<Self> {
+            Arc::new(Self {
+                header: SlabHeader::zeroed(),
+                data: std::array::from_fn(|_| AtomicU64::new(0)),
+            })
+        }
+
+        fn publish(&self, direction: Direction, seq: u64) {
+            let slot = slot_for(seq);
+            self.data[slot].store(seq, Ordering::Relaxed);
+            self.header.publish(direction, slot, seq);
+        }
+
+        /// The slot's data when its sequence is `want`, `None` when it is not yet.
+        fn read(&self, direction: Direction, want: u64) -> Option<u64> {
+            let slot = slot_for(want);
+            (self.header.sequence(direction, slot) == want)
+                .then(|| self.data[slot].load(Ordering::Relaxed))
+        }
+    }
+
+    /// A reader that observes a published sequence number observes the samples
+    /// published before it, in both directions.
+    #[test]
+    fn a_matched_sequence_implies_its_data_is_visible() {
+        for direction in [Direction::Input, Direction::Output] {
+            loom::model(move || {
+                let region = Region::new();
+                let writer = {
+                    let region = Arc::clone(&region);
+                    thread::spawn(move || region.publish(direction, 1))
+                };
+                if let Some(data) = region.read(direction, 1) {
+                    assert_eq!(data, 1, "the sequence was visible without its samples");
+                }
+                writer.join().expect("writer thread");
+            });
+        }
+    }
+
+    /// Two blocks in the two slots: a reader asking for block N is never satisfied
+    /// by another block's samples, and a block is never seen before the previous
+    /// one's publish landed in its own slot.
+    #[test]
+    fn a_slot_reused_by_a_later_block_is_not_mistaken_for_an_earlier_one() {
+        loom::model(|| {
+            let region = Region::new();
+            let writer = {
+                let region = Arc::clone(&region);
+                thread::spawn(move || {
+                    region.publish(Direction::Output, 1);
+                    region.publish(Direction::Output, 2);
+                })
+            };
+            for want in 1..=2u64 {
+                if let Some(data) = region.read(Direction::Output, want) {
+                    assert_eq!(
+                        data, want,
+                        "a read of block {want} got block {data}'s samples"
+                    );
+                }
+            }
+            writer.join().expect("writer thread");
+        });
+    }
+
+    /// A peer that acquires the magic sees the rest of the header: `validate` on
+    /// a header being initialized fails only on the magic, never on the version or
+    /// the slot count that `initialize` wrote before it.
+    #[test]
+    fn a_validated_magic_implies_the_rest_of_the_header_is_visible() {
+        loom::model(|| {
+            let header = Arc::new(SlabHeader::zeroed());
+            let creator = {
+                let header = Arc::clone(&header);
+                thread::spawn(move || header.initialize())
+            };
+            if let Err(error) = header.validate() {
+                let error = error.to_string();
+                assert!(
+                    error.contains("not a tutti audio slab"),
+                    "the magic was visible without the header it publishes: {error}"
+                );
+            }
+            creator.join().expect("creator thread");
+            header.validate().expect("an initialized header validates");
+        });
     }
 }
