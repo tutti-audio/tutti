@@ -25,20 +25,16 @@
 
 use parking_lot::Mutex;
 use tutti_plugin_types::ffi_guard;
-use vst3::Steinberg::{IPlugFrame, IPlugView, ViewRect, kInvalidArgument, kResultOk, tresult};
+use vst3::Steinberg::{IPlugView, ViewRect, kInvalidArgument, kResultOk, tresult};
 use vst3::{Class, ComWrapper};
 
 use dpi::Size;
 
 use crate::view::size_of_rect;
 
-#[cfg(target_os = "linux")]
 use std::sync::Arc;
-#[cfg(target_os = "linux")]
-use vst3::Steinberg::Linux::IRunLoop;
 
-#[cfg(target_os = "linux")]
-use super::run_loop::RunLoop;
+use super::run_loop::{Owner, PlugFrameInterfaces, RunLoop};
 
 /// The host's `IPlugFrame` (and, on Linux, `IRunLoop`): what the plugin's view is
 /// given, and where its `resizeView` requests land until the host takes them.
@@ -46,36 +42,29 @@ pub(crate) struct HostPlugFrame {
     /// The latest `resizeView` request not yet taken.
     resize_request: Mutex<Option<Size>>,
     /// Shared with `HostApplication` — see `run_loop.rs`.
-    #[cfg(target_os = "linux")]
+    #[allow(
+        dead_code,
+        reason = "read by the `IRunLoop` impl, which exists only on Linux"
+    )]
     run_loop: Arc<RunLoop>,
     /// The plugin whose editor this frame serves: see `HostApplication::owner`.
-    #[cfg(target_os = "linux")]
-    owner: Option<super::run_loop::Owner>,
+    #[allow(
+        dead_code,
+        reason = "read by the `IRunLoop` impl, which exists only on Linux"
+    )]
+    owner: Option<Owner>,
 }
 
-#[cfg(target_os = "linux")]
 impl Class for HostPlugFrame {
-    // `IRunLoop` alongside `IPlugFrame`: the plugin's toolkit finds it by
-    // querying the frame it was handed via `IPlugView::setFrame`.
-    type Interfaces = (IPlugFrame, IRunLoop);
-}
-
-#[cfg(not(target_os = "linux"))]
-impl Class for HostPlugFrame {
-    type Interfaces = (IPlugFrame,);
+    type Interfaces = PlugFrameInterfaces;
 }
 
 impl HostPlugFrame {
     /// A frame with no pending request and, on Linux, the shared `run_loop`.
-    pub(crate) fn new(
-        #[cfg(target_os = "linux")] run_loop: Arc<RunLoop>,
-        #[cfg(target_os = "linux")] owner: Option<super::run_loop::Owner>,
-    ) -> ComWrapper<Self> {
+    pub(crate) fn new(run_loop: Arc<RunLoop>, owner: Option<Owner>) -> ComWrapper<Self> {
         ComWrapper::new(Self {
             resize_request: Mutex::new(None),
-            #[cfg(target_os = "linux")]
             run_loop,
-            #[cfg(target_os = "linux")]
             owner,
         })
     }
@@ -106,7 +95,6 @@ impl vst3::Steinberg::IPlugFrameTrait for HostPlugFrame {
     }
 }
 
-#[cfg(target_os = "linux")]
 super::run_loop::delegate_run_loop!(HostPlugFrame);
 
 opaque_debug!(HostPlugFrame);
@@ -114,7 +102,7 @@ opaque_debug!(HostPlugFrame);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vst3::Steinberg::IPlugFrameTrait;
+    use vst3::Steinberg::{IPlugFrame, IPlugFrameTrait};
 
     /// The pending request, in pixels (a request is the same pair in either unit
     /// at scale 1).
@@ -125,12 +113,7 @@ mod tests {
     }
 
     fn frame() -> ComWrapper<HostPlugFrame> {
-        HostPlugFrame::new(
-            #[cfg(target_os = "linux")]
-            RunLoop::new(),
-            #[cfg(target_os = "linux")]
-            None,
-        )
+        HostPlugFrame::new(RunLoop::new(), None)
     }
 
     fn rect(width: i32, height: i32) -> ViewRect {

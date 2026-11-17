@@ -226,10 +226,10 @@ impl RingMap {
 /// read it ([`RingMap`]), the direction it is read in, and the loop as the
 /// streamer applied it.
 ///
-/// Published through the ring's one `ArcLend` by the streamer, which is its
+/// Published through the ring's one `Publisher` by the streamer, which is its
 /// only publisher, and lent once per block to the audio thread (the voice
 /// reads the map from it) and read by an export fork on the control side
-/// (`ArcLend::current`). One cell for all three, so a reader never sees a map
+/// (`Publisher::current`). One cell for all three, so a reader never sees a map
 /// of one edit with the direction or the loop of another.
 ///
 /// The direction is the newest arrangement's own ([`RingMap::after`]'s
