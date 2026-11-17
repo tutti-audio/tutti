@@ -38,7 +38,7 @@ pub(crate) use controllers::Controllers;
 use tutti_ump::{KeyBitset, KeyEvent, MidiGroup, Ump};
 
 /// The notes and controllers a source has started and not ended.
-pub struct HeldState {
+pub(crate) struct HeldState {
     keys: Box<KeyBitset>,
     controllers: Controllers,
 }
@@ -65,12 +65,6 @@ impl HeldState {
             keys: Box::default(),
             controllers: Controllers::new(),
         }
-    }
-
-    /// Whether nothing is held: no note, no pedal down, no bend off centre.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.keys.is_empty() && !self.controllers.any()
     }
 
     /// Forgets everything held, sending nothing.

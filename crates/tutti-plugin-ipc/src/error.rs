@@ -73,8 +73,7 @@ pub(crate) fn unexpected_message(
     }
 }
 
-/// A postcard failure as the [`BridgeError`] it is on the wire, keeping the
-/// codec's message.
+/// A postcard failure as the [`BridgeError`] it is on the wire.
 pub(crate) fn codec(e: postcard::Error) -> BridgeError {
-    BridgeError::Serialization(e.to_string())
+    BridgeError::Serialization(e)
 }

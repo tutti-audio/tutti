@@ -88,6 +88,25 @@ fn an_arrival_sounds_on_the_frame_the_clock_puts_it_on_plus_the_lead() {
     }
 }
 
+/// **A lead set after the inlets were built is the lead each arrival gets**: an
+/// arrival 100 frames after `t0` sounds on frame 1100 under a zero lead and,
+/// once the lead is set to 10 ms (480 frames), on frame 1580.
+#[test]
+fn a_lead_set_later_applies_to_the_next_arrival() {
+    let inlets = inlets(Duration::ZERO);
+    let mut rig = Rig::new(&inlets);
+    let t0 = Instant::now();
+    let mut clock = BlockClock::new();
+    inlets.set_clock(Some(clock.reader()));
+    clock.write(t0, Frame::new(1000), SampleRate::of(RATE));
+    assert!(rig.input.push(note(60), after(t0, 100)).is_ok());
+    inlets.set_lead(Duration::from_secs_f64(480.0 / RATE));
+    assert!(rig.input.push(note(61), after(t0, 100)).is_ok());
+    rig.run(6);
+    let frames: Vec<u64> = rig.take().iter().map(|e| e.0).collect();
+    assert_eq!(frames, vec![1100, 1580]);
+}
+
 /// **The map follows the clock across readings**: a second reading puts the
 /// OS time `t0 + 10 ms` at frame 1480 (480 frames on, on the nominal rate), and
 /// an arrival after it is placed from it.

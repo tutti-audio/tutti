@@ -16,7 +16,7 @@
 #![cfg(feature = "clap")]
 
 use tutti_nodes::automation::Exponent;
-use tutti_types::MaxBlock;
+use tutti_types::{Hz, MaxBlock};
 
 use crate::clap_probe::{ProbeEnv, Rig, load_probe, render};
 use tutti_fixtures::machine_lock;
@@ -114,7 +114,7 @@ fn a_bound_plugin_does_not_allocate_on_the_audio_thread() {
         let v = if k % 2 == 0 { 0.2 } else { 0.9 };
         env.add_breakpoint(Breakpoint::with_law(
             Beat::new(f64::from(k) * 2.0),
-            v,
+            Hz(v),
             Law::PowerIn(Exponent::of(2.0)),
         ));
     }

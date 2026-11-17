@@ -7,11 +7,14 @@
 //! transposed `(group, channel)` pair does not compile. [`Message`] is one
 //! defined message as a `Copy` value with no lifetime. [`Ump::decode`]
 //! (and `TryFrom<Ump> for Message`) and `From<Message> for Ump` hold the bit
-//! positions of every message; the one other reader is `Ump::is_note_off` (and
-//! `Ump::words`, which reads the type nibble), which a test ties to
-//! `Ump::decode`. MIDI 1.0 on the wire is the other place that knows bit
-//! positions: [`Voice1::bytes`] and [`System::bytes`] write a message's bytes,
-//! [`frame`] adds a SysEx's delimiters, and [`Midi1Parser`] reads a byte stream
+//! positions of every message. The packet-level readers and writers on [`Ump`]
+//! (`words`, `message_type`, `group`, `channel`, `is_note_off`,
+//! `is_system_real_time`, `key_event`, `note_off`, `sustain_up`) are the only
+//! other code that shifts a packet's bits, and each agrees with `decode` and
+//! `encode` on every packet (a test holds it). MIDI 1.0 on the wire is the
+//! other place that knows bit positions: [`Voice1::bytes`] and
+//! [`System::bytes`] write a message's bytes, [`frame`] adds a SysEx's
+//! delimiters, and [`Midi1Parser`] reads a byte stream
 //! into [`Message`]s. [`NoteId`] is a note's identity (`channel * 128 + note`,
 //! the plugin formats' wire value), and [`SysexMessage`] and [`SysexAssembler`]
 //! are a checked complete SysEx and the one SysEx7 reassembler (a stream per
@@ -64,7 +67,7 @@
 //! a whole string or SysEx message is reassembled above the codec, off the audio
 //! thread, by [`FlexTextAssembler`] and [`SysexAssembler`]. The limits on a
 //! reassembled name (Endpoint Name, Function Block Name, Product Instance Id)
-//! are not the codec's: `tutti-midi-device` checks them where it builds a name.
+//! are not the codec's: a consumer checks them where it builds a name.
 //!
 //! The fields are typed ([`NoteNumber`], [`U4`], [`U7`], [`U14`], [`Pitch`] and
 //! the address types). A public `new` refuses an out-of-range raw, `of` builds
@@ -119,8 +122,8 @@ pub use cc_number::CCNumber;
 pub use control_value::ControlValue;
 pub use field::{
     ChordType, DeltaTicks, FirstGroup, FunctionBlockCount, FunctionBlockId, GroupSpan,
-    MonoChannels, MpeChannels, NoteNumber, OutOfRange, Pitch, SharpsFlats, TicksPerQuarterNote, U4,
-    U7, U14, U28, first_non_seven_bit,
+    MonoChannels, MpeChannels, NotSharpsFlats, NoteNumber, OutOfRange, Pitch, SharpsFlats,
+    TicksPerQuarterNote, U4, U7, U14, U28, first_non_seven_bit,
 };
 pub use flex_text::{FlexText, FlexTextAssembler, FlexTextStep};
 pub use flex_write::{

@@ -22,25 +22,18 @@
 use crate::error::codec;
 use std::cell::RefCell;
 use std::io::{Read, Write};
-use tutti_plugin_types::{BridgeError, BridgeResult};
+use tutti_plugin_types::{BridgeError, BridgeResult, FrameTooLarge};
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use thiserror::Error;
 
 use super::MAX_FRAME_BYTES;
 
-/// A frame whose length is over [`MAX_FRAME_BYTES`].
-#[derive(Error, Debug, Clone, Copy, PartialEq, Eq)]
-#[error("frame of {len} bytes is over the {MAX_FRAME_BYTES}-byte protocol limit")]
-pub(crate) struct FrameTooLarge {
-    /// The body length, in bytes, that was advertised or about to be sent.
-    pub len: usize,
-}
-
-impl From<FrameTooLarge> for BridgeError {
-    fn from(e: FrameTooLarge) -> Self {
-        Self::ConnectionFailed(e.to_string())
+/// The error for a frame of `len` bytes, over [`MAX_FRAME_BYTES`].
+const fn too_large(len: usize) -> FrameTooLarge {
+    FrameTooLarge {
+        len,
+        limit: MAX_FRAME_BYTES,
     }
 }
 
@@ -51,7 +44,7 @@ impl From<FrameTooLarge> for BridgeError {
 /// [`FrameTooLarge`] when `body_len` is over [`MAX_FRAME_BYTES`].
 pub fn encode_prefix(body_len: usize) -> std::result::Result<[u8; 4], FrameTooLarge> {
     if body_len > MAX_FRAME_BYTES {
-        return Err(FrameTooLarge { len: body_len });
+        return Err(too_large(body_len));
     }
     // The cap is checked at compile time to fit a `u32` (the `const _` below).
     Ok((body_len as u32).to_be_bytes())
@@ -66,7 +59,7 @@ pub fn encode_prefix(body_len: usize) -> std::result::Result<[u8; 4], FrameTooLa
 pub fn decode_prefix(prefix: [u8; 4]) -> std::result::Result<usize, FrameTooLarge> {
     let len = u32::from_be_bytes(prefix) as usize;
     if len > MAX_FRAME_BYTES {
-        return Err(FrameTooLarge { len });
+        return Err(too_large(len));
     }
     Ok(len)
 }
@@ -80,11 +73,10 @@ pub fn decode_prefix(prefix: [u8; 4]) -> std::result::Result<usize, FrameTooLarg
 pub fn decode_body<T: DeserializeOwned>(body: &[u8]) -> BridgeResult<T> {
     match postcard::take_from_bytes(body).map_err(codec)? {
         (msg, []) => Ok(msg),
-        (_, rest) => Err(BridgeError::Serialization(format!(
-            "{} bytes left after the message in a {}-byte frame",
-            rest.len(),
-            body.len()
-        ))),
+        (_, rest) => Err(BridgeError::TrailingBytes {
+            left: rest.len(),
+            frame: body.len(),
+        }),
     }
 }
 
@@ -116,7 +108,7 @@ thread_local! {
 ///
 /// # Errors
 ///
-/// `FrameTooLarge` (as `BridgeError::ConnectionFailed`) when the body is
+/// `FrameTooLarge` (as `BridgeError::FrameTooLarge`) when the body is
 /// over the cap, with nothing written; a serialization or I/O error otherwise.
 pub fn write_frame<W: Write, T: Serialize>(w: &mut W, msg: &T) -> BridgeResult<()> {
     OUT.with_borrow_mut(|frame| {
@@ -145,7 +137,7 @@ pub fn write_frame<W: Write, T: Serialize>(w: &mut W, msg: &T) -> BridgeResult<(
 /// # Errors
 ///
 /// An I/O error on EOF or a short read; `FrameTooLarge` (as
-/// [`BridgeError::ConnectionFailed`]) for an advertised length over the cap,
+/// [`BridgeError::FrameTooLarge`]) for an advertised length over the cap,
 /// before any allocation; a codec error for a body that does not decode as
 /// exactly one message.
 pub fn read_frame<R: Read, T: DeserializeOwned>(r: &mut R) -> BridgeResult<T> {
@@ -222,8 +214,8 @@ mod tests {
     fn a_body_with_bytes_after_the_message_is_refused() {
         assert_eq!(decode_body::<u16>(&[0x82, 0x02]).unwrap(), 0x0102);
         match decode_body::<u16>(&[0x82, 0x02, 0x00]) {
-            Err(BridgeError::Serialization(m)) => assert!(m.contains("1 bytes left"), "{m}"),
-            other => panic!("expected a Serialization error, got {other:?}"),
+            Err(BridgeError::TrailingBytes { left: 1, frame: 3 }) => {}
+            other => panic!("expected TrailingBytes, got {other:?}"),
         }
     }
 
@@ -235,16 +227,12 @@ mod tests {
         assert_eq!(decode_prefix(at.to_be_bytes()), Ok(MAX_FRAME_BYTES));
         assert_eq!(
             decode_prefix((at + 1).to_be_bytes()),
-            Err(FrameTooLarge {
-                len: MAX_FRAME_BYTES + 1
-            })
+            Err(too_large(MAX_FRAME_BYTES + 1))
         );
         assert_eq!(encode_prefix(MAX_FRAME_BYTES), Ok(at.to_be_bytes()));
         assert_eq!(
             encode_prefix(MAX_FRAME_BYTES + 1),
-            Err(FrameTooLarge {
-                len: MAX_FRAME_BYTES + 1
-            })
+            Err(too_large(MAX_FRAME_BYTES + 1))
         );
     }
 
@@ -254,10 +242,8 @@ mod tests {
     fn read_frame_refuses_an_oversize_prefix_without_a_body() {
         let prefix = u32::try_from(MAX_FRAME_BYTES + 1).unwrap().to_be_bytes();
         match read_frame::<_, u16>(&mut prefix.as_slice()) {
-            Err(BridgeError::ConnectionFailed(m)) => {
-                assert!(m.contains(&(MAX_FRAME_BYTES + 1).to_string()), "{m}");
-            }
-            other => panic!("expected ConnectionFailed, got {other:?}"),
+            Err(BridgeError::FrameTooLarge(e)) => assert_eq!(e.len, MAX_FRAME_BYTES + 1),
+            other => panic!("expected FrameTooLarge, got {other:?}"),
         }
     }
 }

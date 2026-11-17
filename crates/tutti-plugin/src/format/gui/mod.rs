@@ -29,7 +29,7 @@ pub(crate) fn load_gui_instance(
         #[cfg(all(feature = "au", target_os = "macos"))]
         PluginFormat::AudioUnit => editor::<tutti_au_host::AuLoaded>(main, work, path, load, "AU"),
         PluginFormat::Vst2 => Err(BridgeError::LoadFailed {
-            path: path.to_path_buf(),
+            path: Some(path.to_path_buf()),
             stage: LoadStage::Opening,
             reason: "VST2 plugins use the in-process backend (enable the \
                      `vst2` feature) — they don't go through the subprocess \
@@ -41,7 +41,7 @@ pub(crate) fn load_gui_instance(
         // removed it then failed to build tutti-plugin with every format on
         // macOS).
         _ => Err(BridgeError::LoadFailed {
-            path: path.to_path_buf(),
+            path: Some(path.to_path_buf()),
             stage: LoadStage::Opening,
             reason: format!("No in-process GUI support for format {format:?}"),
         }),
@@ -64,7 +64,7 @@ where
     F::Editor: 'static,
 {
     let editor = F::load_editor(main, work, path, load).map_err(|e| BridgeError::LoadFailed {
-        path: path.to_path_buf(),
+        path: Some(path.to_path_buf()),
         stage: LoadStage::Opening,
         reason: format!("{format} GUI-only load failed: {e}"),
     })?;
@@ -80,7 +80,7 @@ pub(crate) fn load_gui_instance(
     _load: &Load,
 ) -> BridgeResult<Box<dyn Editor>> {
     Err(BridgeError::LoadFailed {
-        path: path.to_path_buf(),
+        path: Some(path.to_path_buf()),
         stage: LoadStage::Opening,
         reason: "In-process GUI support not built (no gui features enabled)".into(),
     })

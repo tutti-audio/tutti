@@ -52,6 +52,9 @@ pub enum ClockTransportState {
 #[derive(Debug, Clone)]
 pub struct MidiClockDecoder {
     tick_count: u64,
+    /// Whether a tick has been counted since the last Start, Continue or Song
+    /// Position Pointer, so `tick_count` names a tick that arrived.
+    ticked: bool,
     transport: ClockTransportState,
     last_tick: Option<Seconds>,
     fit: PeriodFit,
@@ -97,6 +100,7 @@ impl MidiClockDecoder {
     pub fn new() -> Self {
         Self {
             tick_count: 0,
+            ticked: false,
             transport: ClockTransportState::Stopped,
             last_tick: None,
             fit: PeriodFit::new(),
@@ -135,6 +139,7 @@ impl MidiClockDecoder {
     pub fn tick(&mut self, at: Seconds) {
         if self.transport == ClockTransportState::Playing {
             self.tick_count += 1;
+            self.ticked = true;
         }
 
         if let Some(last) = self.last_tick {
@@ -157,6 +162,7 @@ impl MidiClockDecoder {
     /// Handles MIDI Start (0xFA).
     pub fn start_msg(&mut self) {
         self.tick_count = 0;
+        self.ticked = false;
         self.transport = ClockTransportState::Playing;
     }
 
@@ -166,6 +172,7 @@ impl MidiClockDecoder {
         // A pointer counts sixteenths, a quarter of a beat each.
         let clocks_per_sixteenth = u64::from(System::TIMING_CLOCKS_PER_QUARTER / 4);
         self.tick_count = u64::from(position.get()) * clocks_per_sixteenth;
+        self.ticked = false;
     }
 
     /// Handles MIDI Stop (0xFC).
@@ -175,6 +182,7 @@ impl MidiClockDecoder {
 
     /// Handles MIDI Continue (0xFB).
     pub fn continue_msg(&mut self) {
+        self.ticked = false;
         self.transport = ClockTransportState::Playing;
     }
 
@@ -187,6 +195,20 @@ impl MidiClockDecoder {
     /// Current position in beats (based on tick count at 24 PPQN).
     pub fn beat_position(&self) -> Beat {
         Beat::new(self.tick_count as f64 / f64::from(System::TIMING_CLOCKS_PER_QUARTER))
+    }
+
+    /// The position of the Timing Clock that arrived last, or `None` when none
+    /// has since the last Start, Continue or Song Position Pointer.
+    ///
+    /// A Start or Continue "does not start the sequence until the next Timing
+    /// Clock" (M1 p.30), so the first Timing Clock after a Start is beat 0, the
+    /// `k`-th is `(k - 1) / 24`, and the first after a Song Position Pointer of
+    /// `n` and a Continue is `n / 4` (M1 p.28). [`beat_position`](Self::beat_position)
+    /// is the position of the *next* one.
+    pub fn last_tick_beat(&self) -> Option<Beat> {
+        self.ticked.then(|| {
+            Beat::new((self.tick_count - 1) as f64 / f64::from(System::TIMING_CLOCKS_PER_QUARTER))
+        })
     }
 
     /// Whether the decoded transport is currently running.
@@ -225,6 +247,7 @@ impl MidiClockDecoder {
     /// [`stop_msg`](Self::stop_msg) already keeps the position for a Continue.
     pub fn reset(&mut self) {
         self.tick_count = 0;
+        self.ticked = false;
         self.transport = ClockTransportState::Stopped;
         self.last_tick = None;
         self.fit.clear();

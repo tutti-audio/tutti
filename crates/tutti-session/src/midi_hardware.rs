@@ -73,14 +73,14 @@ pub struct MidiPolicy {
 pub enum MidiPolicyError {
     /// The session has no OS MIDI layer, so there is no device to present an
     /// identity to.
-    #[error("the session has no OS MIDI layer; build it with `midi_hardware(options)`")]
-    NoHardware,
+    #[error(transparent)]
+    NoHardware(#[from] crate::NoHardware),
 }
 
 impl Policy for MidiPolicy {
     type Handle<'a> = MidiPolicyHandle<'a>;
 
-    fn handle<C: Clock>(session: &mut Session<C>) -> MidiPolicyHandle<'_> {
+    fn handle<K: crate::AppKey, C: Clock>(session: &mut Session<K, C>) -> MidiPolicyHandle<'_> {
         MidiPolicyHandle {
             attached: session.midi_io.is_some(),
             policy: &mut session.midi_policy,
@@ -111,14 +111,14 @@ impl MidiPolicyHandle<'_> {
     /// accepted.
     pub fn set(&mut self, policy: MidiPolicy) -> Result<(), MidiPolicyError> {
         if policy.identity.is_some() && !self.attached {
-            return Err(MidiPolicyError::NoHardware);
+            return Err(crate::NoHardware.into());
         }
         *self.policy = policy;
         Ok(())
     }
 }
 
-impl<C: Clock> Session<C> {
+impl<K: crate::AppKey, C: Clock> Session<K, C> {
     /// Makes the OS MIDI layer present what the policy says, in
     /// [`Phase::Poll`](crate::Phase::Poll), before the devices are stepped.
     pub(crate) fn apply_midi_policy(&mut self) {

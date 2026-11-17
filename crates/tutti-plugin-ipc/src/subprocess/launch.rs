@@ -256,9 +256,7 @@ fn connect_when_listening(
             Ok(stream) => return Ok(stream),
             Err(e) => {
                 if let Some(cause) = server.watch().cause() {
-                    return Err(BridgeError::ConnectionFailed(format!(
-                        "plugin-server exited before binding its socket ({cause})"
-                    )));
+                    return Err(BridgeError::ServerExited { cause });
                 }
                 if Instant::now() >= deadline {
                     return Err(e);
@@ -276,10 +274,11 @@ fn handshake(config: &BridgeConfig, server: &ProcessGuard) -> BridgeResult<Contr
     // not decode as one message of ours: say which binary is stale rather than
     // report a bare codec error.
     let ready = ipc::recv_within(&mut stream, timeout).map_err(|e| match e {
-        BridgeError::Serialization(why) => BridgeError::Serialization(format!(
-            "the plugin-server's handshake does not decode ({why}): a server from \
-             another build (protocol 26 or older?), rebuild the plugin-server"
-        )),
+        undecodable @ (BridgeError::Serialization(_) | BridgeError::TrailingBytes { .. }) => {
+            BridgeError::StaleServer {
+                cause: Box::new(undecodable),
+            }
+        }
         other => other,
     })?;
     match ready {
@@ -311,13 +310,13 @@ impl LoadPhase {
     }
 
     /// `error` as this phase answers for it: a restore's failure is the
-    /// state's ([`BridgeError::StateRestoreError`]); an open's is its own.
+    /// state's ([`BridgeError::StateRestore`]); an open's is its own.
     fn blame(self, error: BridgeError) -> BridgeError {
         match self {
             Self::Opening => error,
-            Self::Restoring => BridgeError::StateRestoreError(format!(
-                "the plugin did not finish restoring its state: {error}"
-            )),
+            Self::Restoring => BridgeError::StateRestore {
+                cause: Box::new(error),
+            },
         }
     }
 }
@@ -356,7 +355,7 @@ fn load_plugin(
     // is one opaque plugin call with no signal inside it to measure progress by,
     // and a large state is legitimately slow to restore, so it gets a window of
     // its own. A failure from then on is the state's to answer for
-    // ([`BridgeError::StateRestoreError`]); one before it is a load failure, and
+    // ([`BridgeError::StateRestore`]); one before it is a load failure, and
     // blames nothing.
     let mut phase = LoadPhase::Opening;
     loop {
@@ -495,9 +494,7 @@ pub(crate) fn swap_slab(
     if bridge.setup_shared_memory(shm_name, layout) {
         Ok(Some(slab))
     } else {
-        Err(BridgeError::ConnectionFailed(
-            "the plugin-server did not take the new audio slab".into(),
-        ))
+        Err(BridgeError::SlabRefused)
     }
 }
 
@@ -703,7 +700,7 @@ mod tests {
     }
 
     /// **A restore that never returns is the state's to answer for**: past its
-    /// window the launch fails as `StateRestoreError`. The window is 200 ms and
+    /// window the launch fails as `StateRestore`. The window is 200 ms and
     /// the plugin sleeps far past it, so the restore outlasts its window in
     /// every run. `a_restore_is_waited_on_for_its_own_window` pins that the
     /// window is `Timeouts::state_restore` once the server says it is restoring.
@@ -716,7 +713,7 @@ mod tests {
             Duration::from_millis(200),
         );
         assert!(
-            matches!(&launched, Err(BridgeError::StateRestoreError(_))),
+            matches!(&launched, Err(BridgeError::StateRestore { .. })),
             "{:?}",
             launched.as_ref().err()
         );
@@ -733,7 +730,7 @@ mod tests {
             Duration::from_secs(60),
         );
         assert!(
-            matches!(&launched, Err(BridgeError::StateRestoreError(_))),
+            matches!(&launched, Err(BridgeError::StateRestore { .. })),
             "{:?}",
             launched.as_ref().err()
         );
@@ -751,8 +748,8 @@ mod tests {
         assert_eq!(LoadPhase::Restoring.window(&t), Duration::from_secs(20));
 
         let timed_out = || BridgeError::Timeout {
-            operation: "a reply".into(),
-            duration_ms: 1,
+            operation: "a reply",
+            after: Duration::from_millis(1),
             partial: false,
         };
         assert!(matches!(
@@ -761,7 +758,7 @@ mod tests {
         ));
         assert!(matches!(
             LoadPhase::Restoring.blame(timed_out()),
-            BridgeError::StateRestoreError(_)
+            BridgeError::StateRestore { cause } if matches!(*cause, BridgeError::Timeout { .. })
         ));
     }
 
@@ -776,7 +773,7 @@ mod tests {
             Duration::from_secs(60),
         );
         assert!(
-            launched.is_err() && !matches!(&launched, Err(BridgeError::StateRestoreError(_))),
+            launched.is_err() && !matches!(&launched, Err(BridgeError::StateRestore { .. })),
             "{:?}",
             launched.as_ref().err()
         );
@@ -1131,10 +1128,10 @@ mod tests {
         bincode_ready.extend_from_slice(&26u32.to_le_bytes());
 
         match handshake_against(bincode_ready) {
-            BridgeError::Serialization(m) => {
-                assert!(m.contains("rebuild the plugin-server"), "{m}");
+            stale @ BridgeError::StaleServer { .. } => {
+                assert!(stale.to_string().contains("rebuild the plugin-server"));
             }
-            other => panic!("expected a Serialization error naming a rebuild, got: {other}"),
+            other => panic!("expected StaleServer, got: {other}"),
         }
     }
 
@@ -1208,7 +1205,7 @@ mod tests {
             .expect_err("a server that never binds cannot connect");
 
         assert!(
-            format!("{err}").contains("exited before binding"),
+            matches!(err, BridgeError::ServerExited { .. }),
             "the error must say the server died rather than blaming the socket, got: {err}"
         );
 
@@ -1244,7 +1241,7 @@ mod tests {
     /// - `Lingers` runs [`stand_in_lingers`] alone, with [`STAND_IN_ENV`] set so
     ///   it sleeps. If that name ever stops matching, the child exits at once
     ///   instead and `the_connect_waits_for_a_socket_that_is_not_bound_yet`
-    ///   fails with "exited before binding" — the drift cannot pass silently.
+    ///   fails with `ServerExited` — the drift cannot pass silently.
     fn spawn_stand_in(kind: StandIn) -> Child {
         let exe = std::env::current_exe().expect("the test binary's own path");
         let mut cmd = Command::new(exe);

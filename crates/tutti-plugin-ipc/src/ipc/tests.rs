@@ -72,7 +72,7 @@ fn no_editor(
     _: &tutti_plugin_types::Load,
 ) -> tutti_plugin_types::BridgeResult<Box<dyn tutti_plugin_types::Editor>> {
     Err(tutti_plugin_types::BridgeError::LoadFailed {
-        path: path.to_path_buf(),
+        path: Some(path.to_path_buf()),
         stage: tutti_plugin_types::LoadStage::Opening,
         reason: "no editor in these tests".into(),
     })
@@ -719,7 +719,7 @@ fn recording_editor(
 ) -> tutti_plugin_types::BridgeResult<Box<dyn tutti_plugin_types::Editor>> {
     *EDITOR_LOAD.lock().unwrap() = Some((format, load.clone()));
     Err(tutti_plugin_types::BridgeError::LoadFailed {
-        path: path.to_path_buf(),
+        path: Some(path.to_path_buf()),
         stage: tutti_plugin_types::LoadStage::Opening,
         reason: "records the choice and loads nothing".into(),
     })
@@ -965,13 +965,13 @@ const CHUNKS_AFTER: usize = 90;
 /// `before`, panicking with what it had when [`POLL_GUARD`] runs out.
 fn wait_off_the_budget(bridge: &PluginBridge, before: u64) {
     let deadline = Instant::now() + POLL_GUARD;
-    while bridge.abandoned_replies() < before + OFF_THE_BUDGET {
+    while bridge.block_counts().abandoned < before + OFF_THE_BUDGET {
         assert!(
             Instant::now() < deadline,
             "the bridge abandoned {} blocks in {POLL_GUARD:?} after {CHUNKS_AFTER} \
              chunks, wanted {OFF_THE_BUDGET}: it is holding a block for the \
              fork's budget",
-            bridge.abandoned_replies() - before
+            bridge.block_counts().abandoned - before
         );
         std::thread::sleep(Duration::from_millis(5));
     }
@@ -980,7 +980,7 @@ fn wait_off_the_budget(bridge: &PluginBridge, before: u64) {
 /// Waits for the bridge to have abandoned one block (the first, at the budget).
 fn wait_first_abandoned(bridge: &PluginBridge) {
     let deadline = Instant::now() + POLL_GUARD;
-    while bridge.abandoned_replies() < 1 {
+    while bridge.block_counts().abandoned < 1 {
         assert!(
             Instant::now() < deadline,
             "the bridge never abandoned the first block"
@@ -1019,7 +1019,7 @@ fn a_silent_server_holds_the_bridge_for_one_budget_not_one_per_chunk() {
         "the second render's collect misses its budget"
     );
     wait_first_abandoned(&bridge);
-    let before = bridge.abandoned_replies();
+    let before = bridge.block_counts().abandoned;
     render_chunks(&mut processor, CHUNKS_AFTER);
     wait_off_the_budget(&bridge, before);
 }
@@ -1044,7 +1044,7 @@ fn a_reactivation_after_a_give_up_does_not_wait_the_budget_again() {
     wait_first_abandoned(&bridge);
     let ipc = Ipc::deactivate(main, processor, controller).expect("the halves rejoin");
     let (mut processor, _controller) = activate(ipc, 32);
-    let before = bridge.abandoned_replies();
+    let before = bridge.block_counts().abandoned;
     render_chunks(&mut processor, CHUNKS_AFTER);
     wait_off_the_budget(&bridge, before);
 }
