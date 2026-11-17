@@ -45,8 +45,9 @@ pub(super) const MAX_KNEE_DB: f32 = 400.0;
 /// [`Seconds::one_pole_coeff`] says. `Ballistics::new` refuses those, so a hostile control is
 /// brought into range here.
 pub(super) fn floored(attack: Seconds, release: Seconds) -> Ballistics {
-    // A time that is not below `f64::MAX` seconds is infinite to the coefficient: its decay
-    // length `t * rate` overflows to infinity at every rate above 1 Hz, which holds.
+    // `max` reads NaN and a negative time as 0. `clamp` caps +inf at `f64::MAX` seconds, whose
+    // coefficient is 0 at every rate: `t * rate` overflows to infinity above 1 Hz, and below
+    // it `exp(-1 / (t * rate))` of a subnormal exponent is exactly 1.
     let time = |t: Seconds| Seconds(t.get().max(0.0).clamp(0.0, f64::MAX));
     Ballistics::new(time(attack), time(release))
         .expect("a time floored at 0 and capped at f64::MAX is finite and not negative")
@@ -87,3 +88,6 @@ impl Follower {
         Smoother::toward(state, target, coeff)
     }
 }
+
+#[cfg(test)]
+mod tests;

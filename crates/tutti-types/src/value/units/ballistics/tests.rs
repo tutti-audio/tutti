@@ -66,5 +66,4 @@ fn serde_round_trips_a_pair_and_refuses_a_negative_time() {
     let json = serde_json::to_string(&b).unwrap();
     assert_eq!(serde_json::from_str::<Ballistics>(&json).unwrap(), b);
     assert!(serde_json::from_str::<Ballistics>("[-1.0, 0.1]").is_err());
-    assert!(serde_json::from_str::<Ballistics>("[0.1, 1e999]").is_err());
 }

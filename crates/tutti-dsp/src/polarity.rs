@@ -62,7 +62,9 @@ impl Polarity {
                 channel,
                 width: width.count(),
             })?;
-            inverted[named.get()] = true;
+            if let Some(slot) = inverted.get_mut(named.get()) {
+                *slot = true;
+            }
         }
         Ok(Self { width, inverted })
     }

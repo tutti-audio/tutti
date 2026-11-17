@@ -179,7 +179,7 @@ impl StereoSmoother {
     ///
     /// # Panics
     ///
-    /// Never: 10 ms and 100 ms are finite and not negative, the only times `Ballistics::new` refuses.
+    /// Never: 10 ms and 100 ms are finite and not negative, which `Ballistics::new` accepts.
     #[must_use]
     pub fn standard() -> Self {
         Self::new(

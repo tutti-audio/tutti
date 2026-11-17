@@ -88,8 +88,8 @@ impl Ballistics {
     }
 }
 
-/// The wire form of [`Ballistics`] is the pair `(attack, release)` in seconds, so a document
-/// cannot hold a refused time.
+/// The wire form of [`Ballistics`] is the pair `(attack, release)` in seconds, read back
+/// through [`Ballistics::new`], so a document cannot hold a refused time.
 #[cfg(feature = "serde")]
 impl From<Ballistics> for (f64, f64) {
     fn from(b: Ballistics) -> Self {

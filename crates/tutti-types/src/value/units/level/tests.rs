@@ -18,9 +18,9 @@ use super::*;
 /// - `From<Gain> for Amplitude` — a negative gain has no amplitude. `to_amplitude`
 ///   refuses it; `magnitude` names dropping the sign. (`From<Amplitude> for Gain`
 ///   is present: total and lossless.)
-/// - `Db(f64)`, `Amplitude(f64)`, a method on `Db` taking or returning `f64` — the `f64`
-///   path is the two associated functions `Db::to_amplitude_f64` and `Db::from_amplitude_f64`
-///   over bare `f64`, a working precision for design and analysis, not a second unit.
+/// - `Db(f64)`, `Amplitude(f64)`, an `f64` method on a `Db` value — `f64` is a working
+///   precision for design and analysis, not a second unit. The one `f64` path is the pair of
+///   associated functions `Db::to_amplitude_f64` and `Db::from_amplitude_f64` over bare `f64`.
 /// - `From<raw> for Unit`, `From<Unit> for raw`, so `.into()` between a unit and
 ///   its bare number — a bare float must not become a unit unnamed at the call
 ///   site, and a unit must not leave as a float by an `.into()` that hides which
