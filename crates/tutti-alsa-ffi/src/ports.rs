@@ -4,6 +4,7 @@ use std::ffi::CStr;
 use std::os::raw::c_char;
 
 use crate::client::Client;
+use crate::error::Error;
 use crate::records::{ClientRecord, PortRecord};
 use crate::sys;
 use crate::ump::UmpEndpoint;
@@ -31,7 +32,7 @@ pub struct PortEntry {
 }
 
 /// What [`Client::list_ports`] found.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct Ports {
     /// The ports found, in the sequencer's order.
     pub ports: Vec<PortEntry>,
@@ -39,6 +40,10 @@ pub struct Ports {
     /// that stopped on another error (a client that exits mid-walk answers
     /// `-ENXIO`) is short, and is not a look.
     pub complete: bool,
+    /// The first Endpoint query that failed, which is why `complete` is false.
+    /// A walk can also be short with no error here (a query that answered
+    /// `-ENXIO`).
+    pub failed: Option<Error>,
 }
 
 /// A C string alsa-lib owns, copied. `None` for NULL: "the library reported no
@@ -69,6 +74,7 @@ impl Client {
         let mut out = Ports {
             ports: Vec::new(),
             complete: true,
+            failed: None,
         };
         let (Ok(cinfo), Ok(pinfo)) = (ClientRecord::new(), PortRecord::new()) else {
             out.complete = false;
@@ -118,25 +124,25 @@ impl Client {
                 // SAFETY: as above; the name is copied before the record changes.
                 let name = owned(unsafe { sys::snd_seq_port_info_get_name(pinfo.as_ptr()) })
                     .unwrap_or_else(|| format!("Port {port}"));
-                let endpoint = match &ump {
-                    Some(endpoint) => endpoint.clone(),
-                    None => match self.ump_endpoint(client) {
-                        Ok(endpoint) => ump.insert(endpoint).clone(),
+                if ump.is_none() {
+                    match self.ump_endpoint(client) {
+                        Ok(endpoint) => ump = Some(endpoint),
                         // Not knowing a port's Endpoint is not a legacy port: the
                         // client's ports are left out and the look is short.
-                        Err(_) => {
+                        Err(error) => {
                             out.complete = false;
+                            out.failed.get_or_insert(error);
                             break;
                         }
-                    },
-                };
+                    }
+                }
                 out.ports.push(PortEntry {
                     client,
                     client_name: client_name.clone(),
                     port,
                     name,
                     caps,
-                    ump: endpoint,
+                    ump: ump.clone().flatten(),
                 });
             }
         }

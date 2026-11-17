@@ -5,10 +5,9 @@
 //! the last read and the wait wakes it.
 
 use std::io;
-use std::ops::Deref;
-use std::os::fd::{AsRawFd, OwnedFd};
+use std::os::fd::{AsRawFd, OwnedFd, RawFd};
 use std::os::raw::{c_short, c_uint};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::client::Client;
 use crate::error::{Operation, Result, check};
@@ -28,22 +27,23 @@ pub enum Wait {
 /// A client together with the stop descriptor it is waited on with.
 ///
 /// It owns both, so the descriptors it polls cannot be closed under it: the
-/// client closes with it, and so does the stop descriptor. It derefs to the
-/// [`Client`] for reads and sends.
+/// client closes with it, and so does the stop descriptor. Reads and sends go
+/// through [`client`](Self::client).
 #[derive(Debug)]
 pub struct Poller {
     client: Client,
-    /// The client's descriptors, then the stop descriptor last.
-    polls: Vec<libc::pollfd>,
-    /// Polled through `polls`: owned here, so the number there stays an open
-    /// descriptor for as long as the client is polled.
-    _stop: OwnedFd,
+    /// The client's input descriptors, as numbers the client owns. Room is kept
+    /// for one more, which a wait uses for the stop descriptor.
+    seq: Vec<libc::pollfd>,
+    /// The stop descriptor, owned here: the number a wait polls for it stays an
+    /// open descriptor for as long as the client is polled.
+    stop: OwnedFd,
 }
 
-impl Deref for Poller {
-    type Target = Client;
-
-    fn deref(&self) -> &Client {
+impl Poller {
+    /// The client that is polled, for reads and sends.
+    #[must_use]
+    pub fn client(&self) -> &Client {
         &self.client
     }
 }
@@ -80,15 +80,11 @@ impl Client {
             )
         };
         check(rc, Operation::PollDescriptors)?;
-        polls.push(libc::pollfd {
-            fd: stop.as_raw_fd(),
-            events: libc::POLLIN,
-            revents: 0,
-        });
+        polls.reserve_exact(1);
         Ok(Poller {
             client: self,
-            polls,
-            _stop: stop,
+            seq: polls,
+            stop,
         })
     }
 }
@@ -101,27 +97,66 @@ impl Poller {
     /// The OS error of `poll`, but an interrupted wait, which is retried.
     pub fn wait(&mut self) -> io::Result<Wait> {
         loop {
-            if let Some(wait) = wait_on(&mut self.polls, -1)? {
+            if let Some(wait) = wait_on(&mut self.seq, self.stop.as_raw_fd(), None)? {
                 return Ok(wait);
             }
         }
     }
 
     /// As [`wait`](Self::wait), and `None` when `timeout` passes with nothing
-    /// ready.
+    /// ready. An interrupted wait is retried with the time left of `timeout`.
     ///
     /// # Errors
     ///
     /// The OS error of `poll`, but an interrupted wait, which is retried.
     pub fn wait_for(&mut self, timeout: Duration) -> io::Result<Option<Wait>> {
-        wait_on(&mut self.polls, timeout_ms(timeout))
+        let deadline = Instant::now() + timeout;
+        wait_on(&mut self.seq, self.stop.as_raw_fd(), Some(deadline))
     }
 }
 
-/// Polls `polls`, the stop descriptor last, for `timeout_ms` (-1 waits for
-/// ever); `None` when the time passes with nothing ready.
-fn wait_on(polls: &mut [libc::pollfd], timeout_ms: i32) -> io::Result<Option<Wait>> {
+/// Polls `seq` and `stop` until something is ready or `deadline` passes (`None`
+/// waits for ever); `None` when the deadline passes with nothing ready. `seq`
+/// has room for one more, which holds `stop` during the call and is taken off
+/// again, so no wait allocates.
+fn wait_on(
+    seq: &mut Vec<libc::pollfd>,
+    stop: RawFd,
+    deadline: Option<Instant>,
+) -> io::Result<Option<Wait>> {
+    let count = seq.len();
+    seq.push(libc::pollfd {
+        fd: stop,
+        events: libc::POLLIN,
+        revents: 0,
+    });
+    let ready = poll_until(seq, deadline);
+    let stopped = seq[count].revents != 0;
+    seq.truncate(count);
+    if !ready? {
+        return Ok(None);
+    }
+    let broken = libc::POLLERR | libc::POLLHUP | libc::POLLNVAL;
+    Ok(Some(if stopped {
+        Wait::Stopped
+    } else if seq.iter().any(|p| p.revents & broken != 0) {
+        Wait::Broken
+    } else {
+        Wait::Ready
+    }))
+}
+
+/// `poll` over `polls` until one is ready (true) or `deadline` passes (false).
+/// An interrupted `poll` goes again with the time left.
+fn poll_until(polls: &mut [libc::pollfd], deadline: Option<Instant>) -> io::Result<bool> {
     loop {
+        let timeout_ms = match deadline {
+            None => -1,
+            Some(deadline) => {
+                let left = deadline.saturating_duration_since(Instant::now());
+                if left.is_zero() { 0 } else { timeout_ms(left) }
+            }
+        };
         for p in polls.iter_mut() {
             p.revents = 0;
         }
@@ -135,20 +170,13 @@ fn wait_on(polls: &mut [libc::pollfd], timeout_ms: i32) -> io::Result<Option<Wai
             }
             return Err(error);
         }
-        if ready == 0 {
-            return Ok(None);
+        if ready > 0 {
+            return Ok(true);
         }
-        let Some((stop, seq)) = polls.split_last() else {
-            return Ok(Some(Wait::Broken));
-        };
-        if stop.revents != 0 {
-            return Ok(Some(Wait::Stopped));
+        // Nothing ready: the wait is over when the deadline has passed.
+        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            return Ok(false);
         }
-        let broken = libc::POLLERR | libc::POLLHUP | libc::POLLNVAL;
-        if seq.iter().any(|p| p.revents & broken != 0) {
-            return Ok(Some(Wait::Broken));
-        }
-        return Ok(Some(Wait::Ready));
     }
 }
 
@@ -175,32 +203,34 @@ mod tests {
         assert_eq!(timeout_ms(Duration::from_secs(u64::MAX / 2000)), i32::MAX);
     }
 
-    /// A socket stands in for the sequencer's descriptor, so the wait is
-    /// tested without the sequencer (CI's kernel has no `snd-seq`): nothing
-    /// readable times out, the stand-in readable is `Ready`, and a readable
-    /// stop descriptor is `Stopped` even with input pending.
+    /// Two sockets stand in for the sequencer's descriptor and the stop
+    /// descriptor, so the wait is tested without the sequencer (CI's kernel has
+    /// no `snd-seq`): nothing readable passes the deadline, the stand-in
+    /// readable is `Ready`, a hung-up one is `Broken`, and a readable stop
+    /// descriptor is `Stopped` even with input pending.
     #[test]
-    fn the_wait_reports_input_timeout_and_stop_with_stop_first() {
+    fn the_wait_reports_input_timeout_hang_up_and_stop_with_stop_first() {
         use std::io::Write;
         use std::os::unix::net::UnixStream;
+        let past = Some(Instant::now());
+        let soon = || Some(Instant::now() + Duration::from_millis(20));
         let (mut seq_tx, seq_rx) = UnixStream::pair().unwrap();
         let (mut stop_tx, stop_rx) = UnixStream::pair().unwrap();
-        let mut polls = vec![
-            libc::pollfd {
-                fd: seq_rx.as_raw_fd(),
-                events: libc::POLLIN,
-                revents: 0,
-            },
-            libc::pollfd {
-                fd: stop_rx.as_raw_fd(),
-                events: libc::POLLIN,
-                revents: 0,
-            },
-        ];
-        assert_eq!(wait_on(&mut polls, 20).unwrap(), None);
+        let mut seq = vec![libc::pollfd {
+            fd: seq_rx.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        }];
+        seq.reserve_exact(1);
+        let stop = stop_rx.as_raw_fd();
+        assert_eq!(wait_on(&mut seq, stop, past).unwrap(), None);
+        assert_eq!(wait_on(&mut seq, stop, soon()).unwrap(), None);
         seq_tx.write_all(b"x").unwrap();
-        assert_eq!(wait_on(&mut polls, 20).unwrap(), Some(Wait::Ready));
+        assert_eq!(wait_on(&mut seq, stop, soon()).unwrap(), Some(Wait::Ready));
+        drop(seq_tx);
+        assert_eq!(wait_on(&mut seq, stop, soon()).unwrap(), Some(Wait::Broken));
         stop_tx.write_all(b"x").unwrap();
-        assert_eq!(wait_on(&mut polls, -1).unwrap(), Some(Wait::Stopped));
+        assert_eq!(wait_on(&mut seq, stop, None).unwrap(), Some(Wait::Stopped));
+        assert_eq!(seq.len(), 1, "the stop slot is taken off again");
     }
 }

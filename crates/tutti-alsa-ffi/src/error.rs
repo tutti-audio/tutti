@@ -113,13 +113,17 @@ impl std::fmt::Display for Operation {
 /// alsa-lib reports failure as a negated code. Nearly all are `errno` values,
 /// which `source` carries and prints; the few that are alsa-lib's own
 /// (`SND_ERROR_*`, from 500000: `snd_seq_open` answers
-/// `SND_ERROR_INCOMPATIBLE_VERSION` for a kernel with another sequencer
-/// protocol) are not `errno`s, so [`errno`](Self::errno) hands back the raw code
-/// either way and `source` prints those as an unknown OS error.
+/// `SND_ERROR_INCOMPATIBLE_VERSION` (500000) for a kernel with another sequencer
+/// protocol) are not `errno`s and have no OS text, so [`errno`](Self::errno)
+/// hands back the raw code either way and `source` prints those as an unknown
+/// OS error.
+///
+/// `Display` names the call alone; the OS error is the
+/// [`source`](std::error::Error::source), so print the chain to show both.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// An alsa-lib call returned a negative code.
-    #[error("ALSA {operation}: {source}")]
+    #[error("ALSA {operation} failed")]
     Call {
         /// The alsa-lib function that failed.
         operation: Operation,
@@ -209,6 +213,11 @@ pub(crate) fn check(code: i32, operation: Operation) -> Result<i32> {
 mod tests {
     use super::*;
 
+    /// alsa-lib's `SND_ERROR_INCOMPATIBLE_VERSION`: the kernel's sequencer
+    /// protocol is not the one the library speaks. Not an `errno`, so the OS has
+    /// no text for it.
+    const SND_ERROR_INCOMPATIBLE_VERSION: i32 = 500_000;
+
     #[test]
     fn a_negative_code_is_the_failure_and_zero_is_a_value() {
         let failed = check(-2, Operation::Open).unwrap_err();
@@ -224,20 +233,21 @@ mod tests {
 
     #[test]
     fn a_code_that_is_no_errno_is_kept_whole() {
-        // `SND_ERROR_INCOMPATIBLE_VERSION`, alsa-lib's own code.
         assert_eq!(
-            check(-500_000, Operation::Open).unwrap_err().errno(),
-            Some(500_000)
+            check(-SND_ERROR_INCOMPATIBLE_VERSION, Operation::Open)
+                .unwrap_err()
+                .errno(),
+            Some(SND_ERROR_INCOMPATIBLE_VERSION)
         );
     }
 
     #[test]
-    fn a_call_error_names_the_function_and_the_os_error() {
-        let text = check(-2, Operation::CreateSimplePort)
-            .unwrap_err()
-            .to_string();
-        assert!(text.contains("snd_seq_create_simple_port"));
-        assert!(text.contains("No such file"));
+    fn a_call_error_names_the_function_and_its_source_is_the_os_error() {
+        use std::error::Error as _;
+        let failed = check(-2, Operation::CreateSimplePort).unwrap_err();
+        assert_eq!(failed.to_string(), "ALSA snd_seq_create_simple_port failed");
+        let source = failed.source().expect("the OS error is the source");
+        assert!(source.to_string().contains("No such file"));
     }
 
     #[test]

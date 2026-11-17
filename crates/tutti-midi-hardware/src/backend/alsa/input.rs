@@ -124,7 +124,8 @@ pub(super) fn version_for(endpoint: Option<&tutti_alsa_ffi::UmpEndpoint>) -> Ump
 /// [`Error::Os`](crate::Error::Os) if the sequencer cannot be opened, the
 /// port created, or the subscription made, and
 /// [`Error::MidiDevice`](crate::Error::MidiDevice) if the pump thread cannot be
-/// spawned.
+/// spawned. A source client that exits while the open reads its Endpoint record
+/// fails the open (`ENOENT`) rather than opening as a legacy port.
 pub fn open(id: EndpointId, producer: InputProducerHandle) -> Result<Box<dyn InputConnection>> {
     let (src_client, src_port) = unpack_id(id).ok_or(crate::error::NotFound::Endpoint(id))?;
 
@@ -215,7 +216,7 @@ fn pump(
         latest: None,
     };
     loop {
-        let read = seq.read_event();
+        let read = seq.client().read_event();
         #[cfg(test)]
         let read = if INJECT_READ_ERROR.load(Ordering::SeqCst) {
             Err(tutti_alsa_ffi::Error::Call {
@@ -252,9 +253,9 @@ fn pump(
             Err(e) => {
                 // An overrun or a failing read: try again at once, a few times
                 // in a row at most (a level-triggered descriptor would spin).
-                tracing::debug!("ALSA MIDI input: {e}");
+                tracing::debug!("ALSA MIDI input: {}", super::chain(&e));
                 if errors.failed() {
-                    return die(&e.to_string());
+                    return die(&super::chain(&e));
                 }
                 continue;
             }
@@ -267,7 +268,7 @@ fn pump(
         }
         let words = received.ump;
         let now = match received.stamp {
-            Some(t) => arrivals.at(&seq, t),
+            Some(t) => arrivals.at(seq.client(), t),
             // A port that is not stamping: the read is the best there is.
             None => Instant::now(),
         };

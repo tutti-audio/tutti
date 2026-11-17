@@ -245,8 +245,9 @@ impl Client {
         )
     }
 
-    /// Reads one event, skipping a read that succeeds with none. A blocking client waits for one; a non-blocking client
-    /// answers [`Read::Empty`] when none is queued.
+    /// Reads one event, skipping a read that succeeds with none. A blocking
+    /// client waits for one; a non-blocking client answers [`Read::Empty`] when
+    /// none is queued.
     ///
     /// # Errors
     ///
@@ -257,17 +258,18 @@ impl Client {
             let mut ev: *mut sys::snd_seq_ump_event_t = std::ptr::null_mut();
             // SAFETY: `self.seq` is open; `ev` is a valid out-pointer. On
             // success alsa-lib points it at a buffer it owns, valid until the
-            // next call on this client, which `&self` cannot make while `ev` is
-            // read below.
+            // next call on this client. `ev` is copied by value at once below,
+            // before any such call, and a `Client` is `!Sync`, so no other
+            // thread calls into it meanwhile.
             let rc = unsafe { sys::snd_seq_ump_event_input(self.seq, &mut ev) };
             if rc == EAGAIN {
                 return Ok(Read::Empty);
             }
             check(rc, Operation::UmpEventInput)?;
+            // A success with no event is read again.
             // SAFETY: `rc >= 0` means alsa-lib wrote a complete event at `ev`,
             // which `as_ref` checks for NULL; it is copied out by value before
             // any other call.
-            // A success with no event is read again.
             if let Some(ev) = unsafe { ev.as_ref() } {
                 return Ok(Read::Event(Received::from_event(ev)));
             }
@@ -276,7 +278,6 @@ impl Client {
 
     /// Sends one UMP message to everything subscribed to `port` (see
     /// [`connect_to`](Self::connect_to)), immediately, bypassing any queue.
-    ///
     ///
     /// # Errors
     ///
@@ -584,13 +585,14 @@ pub struct QueueClock {
 }
 
 impl QueueClock {
-    /// The queue's real time now, as the time since it started.
+    /// The queue's real time now, as the time since it started. `client` is the
+    /// one that made the queue: another client has no such queue, and the call
+    /// fails.
     ///
     /// # Errors
     ///
     /// `snd_seq_get_queue_status`'s code, or [`Error::NoQueueTime`] when the
-    /// sequencer will not say. `client` is the one that made the queue: another
-    /// client has no such queue, and the call fails.
+    /// sequencer will not say.
     pub fn now(&mut self, client: &Client) -> Result<Duration> {
         // SAFETY: `client.seq` is open and `status` is a live record.
         let rc = unsafe {

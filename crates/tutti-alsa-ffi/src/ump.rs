@@ -36,7 +36,7 @@ fn c_name_of(name: Option<&str>) -> Result<CString> {
 /// kernel client (the System, Midi Through or a hardware port). Any other code,
 /// `ENOENT` for a client that has exited among them, is a failure.
 fn is_absent(rc: i32) -> bool {
-    matches!(-rc, libc::ENODEV | libc::EBADFD)
+    matches!(rc.checked_neg(), Some(libc::ENODEV | libc::EBADFD))
 }
 
 /// The Endpoint's protocol bits (`SND_UMP_EP_INFO_PROTO_MIDI_MASK`): which of

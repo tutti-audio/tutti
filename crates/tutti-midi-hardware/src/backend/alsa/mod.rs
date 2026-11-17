@@ -90,6 +90,21 @@ impl AlsaEndpoints {
     }
 }
 
+/// An error and the errors under it, as one line: `outer: inner: innermost`.
+///
+/// alsa-ffi's `Call` names the failed call and keeps the OS error as its
+/// source, so a log line prints the chain to show both.
+fn chain(error: &dyn std::error::Error) -> String {
+    let mut text = error.to_string();
+    let mut source = error.source();
+    while let Some(under) = source {
+        text.push_str(": ");
+        text.push_str(&under.to_string());
+        source = under.source();
+    }
+    text
+}
+
 /// Every device now, enumerated on `seq`; `None` when the enumeration was cut
 /// short by an error.
 fn devices(seq: &Client) -> Option<Vec<OsDevice>> {

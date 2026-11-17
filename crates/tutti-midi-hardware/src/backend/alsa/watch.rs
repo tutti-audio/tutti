@@ -522,14 +522,14 @@ impl Announce {
         let mut found = Drained::default();
         let mut errors = ErrorRun::default();
         loop {
-            let received = match self.seq.read_event() {
+            let received = match self.seq.client().read_event() {
                 Ok(Read::Event(received)) => received,
                 Ok(Read::Empty) => return found,
                 Err(e) => {
                     // An overrun drops announcements and is not a quiet read: it
                     // makes the settle look again. A descriptor that keeps
                     // failing ends the drain.
-                    tracing::debug!("ALSA announce: {e}");
+                    tracing::debug!("ALSA announce: {}", super::chain(&e));
                     found.failed();
                     if errors.failed() {
                         return found;
@@ -595,7 +595,7 @@ pub(super) fn start(
     };
     let failures = sink.clone();
     let mut tracker = Tracker::new(Reporter::new(sink));
-    tracker.seed(|| announce.drain(), || snapshot(&announce.seq))?;
+    tracker.seed(|| announce.drain(), || snapshot(announce.seq.client()))?;
     let thread = spawn_named(THREAD_NAME, None, move |_| {
         let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             loop {
@@ -607,7 +607,11 @@ pub(super) fn start(
                             Woken::Announced(first) => first,
                             _ => Drained::default(),
                         };
-                        tracker.step(first, || announce.drain(), || snapshot(&announce.seq));
+                        tracker.step(
+                            first,
+                            || announce.drain(),
+                            || snapshot(announce.seq.client()),
+                        );
                     }
                     Ok(Woken::Stopped) => return None,
                     Err(e) => return Some(e),
