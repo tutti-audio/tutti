@@ -33,8 +33,9 @@
 //! [`InputProducerHandle`]: crate::InputProducerHandle
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
+use tutti_rt::LockExt;
 
 use tutti_midi_device::ResourceStore;
 
@@ -723,10 +724,7 @@ impl MidiSession {
     /// cannot be subscribed to (M2-103 §11.1). Publishing to subscribers is not
     /// offered.
     pub fn serve_properties(&mut self, store: ResourceStore) {
-        *self
-            .properties
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner) = store.without_subscriptions();
+        *self.properties.lock_recover() = store.without_subscriptions();
     }
 
     /// The store the devices serve: what [`serve_properties`](Self::serve_properties)

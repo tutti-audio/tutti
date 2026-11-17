@@ -6,8 +6,9 @@
 //! filling up between two of its packets cuts it; that is the one way a message
 //! goes in part, and the packets it lost are counted ([`DeviceOut::losses`]).
 
-use std::sync::{Mutex, PoisonError};
+use std::sync::Mutex;
 use tutti_graph::Losses;
+use tutti_rt::LockExt;
 
 use super::enumerate::unpack_id;
 use crate::backend::by_message::{Refused, by_message};
@@ -71,7 +72,7 @@ impl AlsaOutput {
     /// alsa-lib leaves the client usable. A panic here would take down the
     /// output drain over a fault that is already past.
     fn sender(&self) -> std::sync::MutexGuard<'_, Sender> {
-        self.inner.lock().unwrap_or_else(PoisonError::into_inner)
+        self.inner.lock_recover()
     }
 }
 

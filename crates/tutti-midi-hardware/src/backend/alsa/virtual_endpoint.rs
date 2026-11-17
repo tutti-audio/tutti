@@ -13,6 +13,7 @@ use tutti_alsa_ffi::{
     TYPE_APPLICATION, TYPE_MIDI_GENERIC, UmpBlock, UmpEndpoint, UmpVersion,
 };
 use tutti_midi_device::FunctionBlock;
+use tutti_rt::LockExt;
 use tutti_ump::Direction;
 
 use super::input::{self, AlsaInput};
@@ -107,10 +108,7 @@ impl SourceBackend for AlsaVirtualSource {
     fn send(&self, words: &[u32]) -> Result<()> {
         // A poisoned lock guards a client handle and a port number, which a
         // panic cannot leave half-written.
-        let inner = self
-            .inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let inner = self.inner.lock_recover();
         inner.0.send_to_subscribers(inner.1, words)?;
         Ok(())
     }

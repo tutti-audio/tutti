@@ -21,8 +21,9 @@
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Sender};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::JoinHandle;
+use tutti_rt::LockExt;
 
 use crate::InputProducerHandle;
 use crate::capability::{OsEndpoint, UmpCapability};
@@ -153,7 +154,7 @@ impl FakeCounters {
     /// Takes the packets sent to the output of device `id` since the last call,
     /// oldest first: what the fake device received on the wire.
     pub fn take_sent(&self, id: EndpointId) -> Vec<tutti_ump::Ump> {
-        let mut log = self.log.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut log = self.log.lock_recover();
         let (mine, rest) = log.drain(..).partition(|(device, ..)| *device == id);
         *log = rest;
         mine.into_iter().map(|(_, ump, _)| ump).collect()
@@ -165,7 +166,7 @@ impl FakeCounters {
         &self,
         id: EndpointId,
     ) -> Vec<(tutti_ump::Ump, tutti_midi_runtime::SendAt)> {
-        let mut log = self.log.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut log = self.log.lock_recover();
         let (mine, rest) = log.drain(..).partition(|(device, ..)| *device == id);
         *log = rest;
         mine.into_iter().map(|(_, ump, at)| (ump, at)).collect()
@@ -176,8 +177,7 @@ impl FakeCounters {
     #[must_use]
     pub fn connected_inputs(&self) -> Vec<EndpointId> {
         self.producers
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .lock_recover()
             .iter()
             .map(|(device, _)| *device)
             .collect()
@@ -200,10 +200,7 @@ impl FakeCounters {
         ump: tutti_ump::Ump,
         arrival: std::time::Instant,
     ) -> bool {
-        let mut producers = self
-            .producers
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let mut producers = self.producers.lock_recover();
         producers
             .iter_mut()
             .find(|(device, _)| *device == id)
@@ -223,7 +220,7 @@ impl FakeCounters {
     }
 
     fn devices(&self) -> MutexGuard<'_, FakeDevices> {
-        self.devices.lock().unwrap_or_else(PoisonError::into_inner)
+        self.devices.lock_recover()
     }
 
     /// Plugs `endpoint` in, as `direction` says, and tells every running
@@ -294,8 +291,7 @@ impl Drop for FakeWatch {
     fn drop(&mut self) {
         // The thread ends when its channel's last sender is gone.
         self.devices
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .lock_recover()
             .watches
             .retain(|(key, _)| *key != self.key);
         if let Some(thread) = self.thread.take() {
@@ -322,20 +318,14 @@ struct FakeConn {
 
 impl InputConnection for FakeConn {
     fn is_alive(&self) -> bool {
-        !self
-            .devices
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .dead_inputs
-            .contains(&self.id)
+        !self.devices.lock_recover().dead_inputs.contains(&self.id)
     }
 }
 
 impl Drop for FakeConn {
     fn drop(&mut self) {
         self.producers
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .lock_recover()
             .retain(|(device, _)| *device != self.id);
     }
 }
@@ -364,15 +354,12 @@ impl MidiOut for FakeSink {
             self.accepts
         };
         let taken = Taken::within(events, accepts);
-        self.log
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .extend(
-                events
-                    .iter()
-                    .take(taken.packets())
-                    .map(|e| (self.id, e.ump, e.send)),
-            );
+        self.log.lock_recover().extend(
+            events
+                .iter()
+                .take(taken.packets())
+                .map(|e| (self.id, e.ump, e.send)),
+        );
         taken
     }
 }
@@ -471,7 +458,7 @@ impl FakeBackend {
 
 impl FakeBackend {
     fn devices(&self) -> MutexGuard<'_, FakeDevices> {
-        self.devices.lock().unwrap_or_else(PoisonError::into_inner)
+        self.devices.lock_recover()
     }
 }
 
@@ -535,10 +522,7 @@ impl MidiEndpoints for FakeBackend {
             devices.dead_inputs.retain(|dead| *dead != id);
         }
         self.opens.fetch_add(1, Ordering::SeqCst);
-        self.producers
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push((id, producer));
+        self.producers.lock_recover().push((id, producer));
         Ok(Box::new(FakeConn {
             producers: Arc::clone(&self.producers),
             devices: Arc::clone(&self.devices),

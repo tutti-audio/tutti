@@ -10,8 +10,9 @@
 //! Active Sensing.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
+use tutti_rt::LockExt;
 
 use tutti_graph::Offset;
 use tutti_midi_runtime::ActiveSensingSender;
@@ -118,7 +119,7 @@ impl Drop for Heartbeat {
 }
 
 fn lock(schedule: &Mutex<ActiveSensingSender>) -> MutexGuard<'_, ActiveSensingSender> {
-    schedule.lock().unwrap_or_else(PoisonError::into_inner)
+    schedule.lock_recover()
 }
 
 /// Sleeps to the schedule's deadline, sends what is due, and repeats until
