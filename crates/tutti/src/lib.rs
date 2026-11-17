@@ -199,10 +199,6 @@ pub use tutti_session::{Device, DeviceClock, DeviceEvent, LiveSession};
 pub use tutti_session::{
     Input, InputConfig, Punch, Recorded, Take, TakeError, TakeEvent, TakeTarget, Trim,
 };
-#[cfg(all(feature = "session", feature = "midi"))]
-pub use tutti_session::{InstrumentHandle, Midi, MidiReport};
-#[cfg(all(feature = "session", feature = "midi-hardware"))]
-pub use tutti_session::{MidiInput, MidiOutput};
 #[cfg(all(feature = "session", feature = "plugin"))]
 pub use tutti_session::{OtherPeer, PeerState, SavedPeer};
 #[cfg(feature = "session")]
@@ -419,6 +415,8 @@ pub mod session {
         Rolling, Start, TakeEnd, TakeId, Terms, Window,
     };
     // The `audio_file` entry decodes a file, so it needs a decoder.
+    #[cfg(feature = "midi")]
+    pub use tutti_session::MidiNodes;
     #[cfg(all(
         feature = "sampler",
         any(
@@ -451,15 +449,8 @@ pub mod session {
         RecoveryEvent, RecoveryFailure, RecoveryPolicy, ReloadCause, StateJobError, StateJobFailed,
         StateRestore, StateView,
     };
-    #[cfg(feature = "midi")]
-    pub use tutti_session::{
-        FollowClock, FollowMachineControl, MidiNodes, MidiRouteId, NoSuchMidiRoute, NotInstrument,
-        SendMachineControl, SinkLoaded,
-    };
     #[cfg(feature = "soundfont")]
     pub use tutti_session::{GeneralMidi, SoundFontFile, soundfont};
-    #[cfg(feature = "midi-hardware")]
-    pub use tutti_session::{InputLoaded, MidiInputEntry, MidiOutputEntry, OutputLoaded};
 }
 
 /// Audio file settings (`tutti-codec`): the `Spec` a file is written with, the
@@ -595,10 +586,13 @@ pub mod plugin {
 /// a file (`MidiFile`, `Track`, `Tick`), a message (`Message`, `Ump`,
 /// `MidiChannel`, `MidiGroup`, `NoteNumber`, `NoteVelocity`, `Voice1`, `SysexAssembler`, `Midi1Parser`), a timed event, the keys
 /// that play an instrument or a live input (`MidiKeys`),
-/// the session's route rule, events and errors (`MidiRouteRule`, `MidiReport`,
-/// `midi::Error`), a host's own output (`midi_sink`, `MidiSink`), and under `midi-hardware` a device (`DeviceId`,
+/// the session's MIDI (`Midi`, `InstrumentHandle`), its route rule, events and
+/// errors (`MidiRouteRule`, `MidiRouteId`, `MidiReport`, `midi::Error`), its
+/// followers (`FollowTempo`, `FollowClock`, `FollowMachineControl`,
+/// `SendMachineControl`), a host's own output (`midi_sink`, `MidiSink`,
+/// `SinkLoaded`), and under `midi-hardware` a device (`MidiDeviceId`,
 /// `DeviceInfo`), the ports the pool opens for them (`midi_input`, `midi_output`,
-/// `MidiInput`, `MidiOutput`) and what an open one said of itself (`Learned`, `SavedDevice`, `Match`), and the Profiles
+/// `MidiInput`, `MidiOutput`, their entries and loaded reports) and what an open one said of itself (`Learned`, `SavedDevice`, `Match`), and the Profiles
 /// its MIDI-CI peers support and how to switch one (`PeerProfiles`,
 /// `ListedProfile`, `SwitchProfile`, `ProfilesChange`). The translation layer
 /// (`Translator`, `Narrower`), the runtime's clock sync and the MIDI-CI codec
@@ -685,8 +679,14 @@ pub mod midi {
     pub use tutti_session::RouteDeclarer;
     #[cfg(feature = "session")]
     pub use tutti_session::{
-        AddedInstrument, AnyNode, FollowTempo, MidiLoad, MidiRouteRule, MidiSink, MidiSinkEntry,
-        MidiSinkInfo, SinkOptions, Stamping, TakePlacement, midi_sink,
+        AddedInstrument, AnyNode, FollowClock, FollowMachineControl, FollowTempo, InstrumentHandle,
+        Midi, MidiLoad, MidiReport, MidiRouteId, MidiRouteRule, MidiSink, MidiSinkEntry,
+        MidiSinkInfo, NotInstrument, SendMachineControl, SinkLoaded, SinkOptions, Stamping,
+        TakePlacement, midi_sink,
+    };
+    #[cfg(all(feature = "session", feature = "midi-hardware"))]
+    pub use tutti_session::{
+        InputLoaded, MidiInput, MidiInputEntry, MidiOutput, MidiOutputEntry, OutputLoaded,
     };
 
     #[cfg(feature = "midi-hardware")]
@@ -703,8 +703,8 @@ pub mod midi {
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
     pub use tutti_session::{
         ChannelProfile, ListedProfile, MidiInputInfo, MidiOutputInfo, MidiPolicy, MidiPolicyError,
-        MidiPolicyHandle, MidiPortError, OutputOptions, PortCause, ProfilePeer, ReportPeer,
-        RequestReport, SwitchProfile, WholeProfile, midi_input, midi_output,
+        MidiPolicyHandle, MidiPortError, NoHardware, OutputOptions, PortCause, ProfilePeer,
+        ReportPeer, RequestReport, SwitchProfile, WholeProfile, midi_input, midi_output,
     };
     /// MIDI-CI Property Exchange (M2-103 and its resource specifications): a
     /// peer's resources, read, written and subscribed to through the session.

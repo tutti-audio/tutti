@@ -73,8 +73,8 @@ pub struct MidiPolicy {
 pub enum MidiPolicyError {
     /// The session has no OS MIDI layer, so there is no device to present an
     /// identity to.
-    #[error("the session has no OS MIDI layer; build it with `midi_hardware(options)`")]
-    NoHardware,
+    #[error(transparent)]
+    NoHardware(#[from] crate::NoHardware),
 }
 
 impl Policy for MidiPolicy {
@@ -111,7 +111,7 @@ impl MidiPolicyHandle<'_> {
     /// accepted.
     pub fn set(&mut self, policy: MidiPolicy) -> Result<(), MidiPolicyError> {
         if policy.identity.is_some() && !self.attached {
-            return Err(MidiPolicyError::NoHardware);
+            return Err(crate::NoHardware.into());
         }
         *self.policy = policy;
         Ok(())

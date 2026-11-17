@@ -39,7 +39,7 @@ use tutti_session::{
 #[cfg(feature = "midi-hardware")]
 use tutti_session::{MidiReport, PHASES, PhaseCx};
 #[cfg(feature = "midi-hardware")]
-use tutti_session::{MidiRouteRule, NoSuchMidiRoute, RouteDeclarer};
+use tutti_session::{MidiRouteRule, RouteDeclarer};
 #[cfg(feature = "midi-hardware")]
 use tutti_session::{Peer as _, Resource as _};
 use tutti_ump::{Message, Voice2};
@@ -384,7 +384,7 @@ fn route_rules_wire_the_hardware_input() {
     assert!(
         matches!(
             s.midi().unroute(all),
-            Err(MidiError::NoSuchRoute(NoSuchMidiRoute(id))) if id == all
+            Err(MidiError::NoSuchRoute(id)) if id == all
         ),
         "a removed rule is not there"
     );
