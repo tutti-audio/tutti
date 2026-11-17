@@ -189,13 +189,7 @@ impl SvfModel {
     /// `|H(e^jw)|` and the response itself, from the trapezoidal form (accurate
     /// down to DC: no cancellation between the polynomial's terms).
     fn at(&self, w: f64) -> Complex64 {
-        let SvfCoeffs {
-            g, k, m0, m1, m2, ..
-        } = self.coeffs;
-        // The warped frequency in units of the prototype's cutoff: tan(w/2) / g.
-        let t = libm::tan(w / 2.0) / g;
-        let d = Complex64::new(1.0 - t * t, k * t);
-        m0 + Complex64::new(m2, m1 * t) / d
+        self.coeffs.response(w)
     }
 
     /// `g_n`, the impulse response of the all-pole part `1 / (1 + a1 z^-1 + a2

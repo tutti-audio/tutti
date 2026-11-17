@@ -12,7 +12,10 @@ use tutti_nodes::{
     MultibandCompressorNode, PeakDetection, PhaserControls, PhaserNode, RingModConfig, RingModNode,
     SvfFilterNode, TremoloConfig, TremoloNode,
 };
-use tutti_nodes::{BitCrusherConfig, BitCrusherNode, DcBlockerConfig, DcBlockerNode};
+use tutti_nodes::{
+    BitCrusherConfig, BitCrusherNode, CutFilterConfig, CutFilterNode, DcBlockerConfig,
+    DcBlockerNode, SosResponse,
+};
 use tutti_types::{
     BitDepth, BusTopology, ChannelLayout, Db, Drive, Feedback, Frame, HoldFactor, Hz, MaxBlock,
     Mix, Q, Resonance, SampleRate, Samples, Seconds,
@@ -102,6 +105,13 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
             Box::new(DcBlockerNode::from(DcBlockerConfig::new(
                 ChannelLayout::STEREO,
             ))),
+        ),
+        (
+            "cut filter",
+            Box::new(CutFilterNode::from(
+                CutFilterConfig::new(ChannelLayout::STEREO, SosResponse::LowPass, 8)
+                    .linkwitz_riley(),
+            )),
         ),
         ("gate", Box::new(GateNode::mono(GateControls::DEFAULT))),
         (
