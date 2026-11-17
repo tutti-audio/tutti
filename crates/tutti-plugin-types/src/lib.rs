@@ -8,7 +8,7 @@
 //! load-time wiring snapshot), [`ParameterInfo`] with its [`ParamId`] /
 //! [`ParamRange`] / [`ParamFlags`] parts, [`ProcessContext`] and [`ProcessOutput`],
 //! [`TransportInfo`], [`ParameterChanges`] automation queues, note expression and
-//! harmony changes, [`AudioBuffer`] in its f32/f64 forms, editor vocabulary
+//! harmony changes, [`PluginAudio`], one block's audio in either width, editor vocabulary
 //! ([`WindowHandle`], [`EditorUnit`], [`EditorCapabilities`]), presets, and the
 //! [`Features`] capability bitset.
 //!
@@ -149,7 +149,7 @@
 //! [`ProcessOutput`]: crate::ProcessOutput
 //! [`TransportInfo`]: crate::TransportInfo
 //! [`ParameterChanges`]: crate::ParameterChanges
-//! [`AudioBuffer`]: crate::AudioBuffer
+//! [`PluginAudio`]: crate::PluginAudio
 //! [`WindowHandle`]: crate::WindowHandle
 //! [`EditorUnit`]: crate::EditorUnit
 //! [`EditorCapabilities`]: crate::EditorCapabilities
@@ -171,6 +171,7 @@
 #![deny(clippy::undocumented_unsafe_blocks, clippy::missing_safety_doc)]
 
 mod any_thread;
+mod audio;
 mod automation;
 mod automation_mode;
 mod bridge_error;
@@ -253,6 +254,7 @@ pub use layout_support::LayoutSupport;
 pub use tutti_types::{BarNumber, BeatsPerBar, NoteValue, Seconds, TimeSignature};
 
 pub use any_thread::{AnyThread, Health};
+pub use audio::PluginAudio;
 pub use automation::{ParameterChanges, ParameterPoint, ParameterQueue};
 pub use automation_mode::{AutomationMode, AutomationModeError};
 pub use bridge_error::{BridgeError, BridgeResult, PluginForkError};
@@ -260,10 +262,7 @@ pub use c_string::{
     c_str_prefix, read_c_chars, read_c_str, read_utf16_str, write_c_chars, write_c_str,
     write_utf16_str, write_utf16_units,
 };
-pub use channels::{
-    AudioBuffer, AudioBuffer32, AudioBuffer64, AudioBufferMut, ChannelTable, MAX_BLOCK_CHANNELS,
-    PluginTooWide, sanitize, silence,
-};
+pub use channels::{ChannelTable, MAX_BLOCK_CHANNELS, PluginTooWide, sanitize, silence};
 pub use classification::{ClapFeature, PluginRole, Vst2Category, Vst3PlugType, Vst3SubCategories};
 pub use descriptor::{AuComponentType, EditorPresence, PluginClass, PluginDescriptor};
 pub use driver::{Hand, Lifecycle, Seat, Successor};

@@ -4,7 +4,7 @@ use tutti_graph::Offset;
 use tutti_graph::UmpAt;
 use tutti_midi_protocol::{widen_bend, widen_value};
 use tutti_types::Samples;
-use tutti_ump::{CCNumber, KeyEvent, MidiChannel, MidiGroup, Sysex7Packets, System, U7, U14};
+use tutti_ump::{CCNumber, MidiChannel, MidiGroup, NoteKeyEvent, Sysex7Packets, System, U7, U14};
 
 /// A packet from its words, zero-padded to four, at offset 0.
 fn raw(words: &[u32]) -> UmpAt {
@@ -169,7 +169,7 @@ fn route_cc_events_splits_mapped_cc_into_params() {
     assert!(
         filtered
             .iter()
-            .any(|e| matches!(e.1.key_event(), Some(KeyEvent::On(_))))
+            .any(|e| matches!(e.1.note_key_event(), Some(NoteKeyEvent::On(_))))
     );
 }
 

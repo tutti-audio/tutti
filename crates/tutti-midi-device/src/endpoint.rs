@@ -7,10 +7,9 @@
 //! [`Connection`](crate::Connection).
 
 use tutti_ump::{
-    BlockFilter, BlockSelect, DeviceIdentity, Direction as BlockDirection, DiscoveryFilter,
-    FirstGroup, FunctionBlockCount, FunctionBlockId, FunctionBlockInfo, GroupSpan, Message,
-    Midi1Port, Protocol, Stream, StreamConfig, Sysex8StreamIds, UiHint, Ump, UmpVersion,
-    text_packets,
+    BlockDirection, BlockFilter, BlockSelect, DeviceIdentity, DiscoveryFilter, FirstGroup,
+    FunctionBlockCount, FunctionBlockId, FunctionBlockInfo, GroupSpan, Message, Midi1Port,
+    Protocol, Stream, StreamConfig, Sysex8StreamIds, UiHint, Ump, UmpVersion, text_packets,
 };
 
 use crate::name::{BlockName, EndpointName, ProductInstanceId};

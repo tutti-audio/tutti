@@ -197,7 +197,7 @@ fn an_export_is_the_live_render_on_a_native_param() {
     settle(&mut s);
     // Past the connect's declick, stopped; then the knobs move.
     render_n(&mut side, 2, 1_024, 128);
-    s.graph().set_param(a.cutoff(), Hz(450.0)).unwrap();
+    s.set(a.cutoff().to(Hz(450.0))).unwrap();
     let _ = s.update();
     // The same write lands on the live side before it plays.
     render_n(&mut side, 2, 128, 128);
@@ -332,7 +332,7 @@ fn a_removed_source_leaves_no_node_and_no_layer() {
 }
 
 /// **A knob written after a route edit is the knob.** The cutoff's knob is
-/// the node's own cell, written through `Graph::set_param`; a depth edit
+/// the node's own cell, written through `Session::set`; a depth edit
 /// republishes the lane and writes no knob, so the knob written before it and
 /// the one written after it are each the base the LFO rides on.
 #[test]
@@ -350,7 +350,7 @@ fn a_knob_written_after_a_route_edit_is_the_knob() {
     settle(&mut s);
     render(&mut side, 1_024, 128);
 
-    s.graph().set_param(probe.cutoff(), Hz(300.0)).unwrap();
+    s.set(probe.cutoff().to(Hz(300.0))).unwrap();
     let _ = s.update();
     s.mods_mut()
         .route_of(route)
@@ -358,7 +358,7 @@ fn a_knob_written_after_a_route_edit_is_the_knob() {
         .set_depth(Depth::of(0.2));
     let _ = s.update();
     let a = render(&mut side, 2_048, 128);
-    s.graph().set_param(probe.cutoff(), Hz(700.0)).unwrap();
+    s.set(probe.cutoff().to(Hz(700.0))).unwrap();
     let _ = s.update();
     let b = render(&mut side, 2_048, 128);
 
@@ -1193,7 +1193,7 @@ fn a_fork_renders_a_modulated_param_as_live_does() {
             .unwrap();
     }
     settle(&mut s);
-    s.graph().set_param(written.drive(), Drive(6.0)).unwrap();
+    s.set(written.drive().to(Drive(6.0))).unwrap();
     let _ = s.update();
 
     // Past the lanes' connect declick (256 frames).

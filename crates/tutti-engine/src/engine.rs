@@ -2031,6 +2031,13 @@ mod tests {
         Ok(id)
     }
 
+    /// The frames of `samples` read as `width`-channel interleaved audio.
+    fn frames_of(samples: &[f32], width: u16) -> impl Iterator<Item = &[f32]> {
+        tutti_buffers::Interleaved::new(samples, ChannelLayout::from(width))
+            .expect("whole frames")
+            .iter()
+    }
+
     /// One graph block as `process_segment` runs it, with `between` run after
     /// `settle` and before `render`: the control thread's commit landing in
     /// the gap.
@@ -2141,7 +2148,7 @@ mod tests {
         let mut out = vec![-9.0f32; 20 * 8];
         engine.process_segment(&mut InterleavedMut::new(&mut out, wide).unwrap());
         // Ramp(2) writes 21, 22: the front pair, the rest zero-filled.
-        for frame in out.as_chunks::<20>().0 {
+        for frame in frames_of(&out, 20) {
             assert_eq!(&frame[..2], &[21.0, 22.0]);
             assert!(frame[2..].iter().all(|&s| s == 0.0));
         }
@@ -2923,7 +2930,7 @@ mod tests {
         let n = declick_frames(SampleRate::SR_48K).get();
         assert!(n > 64, "the fade spans blocks");
         let out = render_four(&engine, n + 70);
-        for (k, frame) in out.as_chunks::<4>().0.iter().enumerate() {
+        for (k, frame) in frames_of(&out, 4).enumerate() {
             let (go, gn) = if k < n {
                 FadeLaw::EqualAmplitude.gains(k, n)
             } else {
@@ -2946,7 +2953,7 @@ mod tests {
         let _ = render_four(&engine, 64);
         move_map(&engine, [1, 0]);
         let out = render_four(&engine, 16);
-        for frame in out.as_chunks::<4>().0 {
+        for frame in frames_of(&out, 4) {
             assert_eq!(*frame, [22.0, 21.0, 0.0, 0.0]);
         }
         let held = engine.output_control().cell().current();
@@ -2972,7 +2979,7 @@ mod tests {
             ..Routing::default()
         });
         heard.extend((0..2).flat_map(|_| block_with(&engine, 2, || {})));
-        for (k, frame) in heard.as_chunks::<2>().0.iter().enumerate() {
+        for (k, frame) in frames_of(&heard, 2).enumerate() {
             let (out, new) = if k < 20 {
                 FadeLaw::EqualAmplitude.gains(k, 20)
             } else {
@@ -3075,7 +3082,7 @@ mod tests {
             .support_output(ChannelLayout::from(20u16))
             .expect("a width");
         out.extend(render_four(&engine, n + 70 - 100));
-        for (k, frame) in out.as_chunks::<4>().0.iter().enumerate() {
+        for (k, frame) in frames_of(&out, 4).enumerate() {
             let (go, gn) = if k < n {
                 FadeLaw::EqualAmplitude.gains(k, n)
             } else {
@@ -3113,7 +3120,7 @@ mod tests {
         let n = declick_frames(SampleRate::SR_48K).get();
         let mut out = vec![0.0f32; (n + 8) * 2];
         engine.process_segment(&mut InterleavedMut::new(&mut out, ChannelLayout::STEREO).unwrap());
-        for (k, frame) in out.as_chunks::<2>().0.iter().enumerate() {
+        for (k, frame) in frames_of(&out, 2).enumerate() {
             let (go, gn) = if k < n {
                 FadeLaw::EqualAmplitude.gains(k, n)
             } else {
@@ -3139,7 +3146,7 @@ mod tests {
         let control = engine.output_control();
         move_root(&mut ed, &control, None, 2, 1);
         let heard: Vec<f32> = (0..4).flat_map(|_| block_with(&engine, 2, || {})).collect();
-        for (k, frame) in heard.as_chunks::<2>().0.iter().enumerate() {
+        for (k, frame) in frames_of(&heard, 2).enumerate() {
             let (out, new) = if k < 20 {
                 equal_amplitude(k, 20)
             } else {
@@ -3163,7 +3170,7 @@ mod tests {
         move_root(&mut ed, &control, Some(Bed::Surround51.topology()), 6, 2);
         let heard: Vec<f32> = (0..3).flat_map(|_| block_with(&engine, 2, || {})).collect();
         let centre = std::f32::consts::FRAC_1_SQRT_2;
-        for (k, frame) in heard.as_chunks::<2>().0.iter().enumerate().take(24) {
+        for (k, frame) in frames_of(&heard, 2).enumerate().take(24) {
             let (out, new) = if k < 20 {
                 equal_amplitude(k, 20)
             } else {
@@ -3244,7 +3251,7 @@ mod tests {
         ed.spec_mut().topology.set_outputs([dc, dc]);
         ed.commit().expect("commits");
         heard.extend((0..3).flat_map(|_| block_with(&engine, 2, || {})));
-        for (k, frame) in heard.as_chunks::<2>().0.iter().enumerate() {
+        for (k, frame) in frames_of(&heard, 2).enumerate() {
             let (out, new) = if k < 20 {
                 equal_amplitude(k, 20)
             } else {
@@ -3355,7 +3362,7 @@ mod tests {
         // The counter's value at absolute frame `t` is `t + 1`; delayed by 16
         // it is `t - 15` from frame 16 on.
         let delayed = |t: usize| (t as f32 - 15.0).max(0.0);
-        for (k, frame) in heard.as_chunks::<2>().0.iter().enumerate().take(24) {
+        for (k, frame) in frames_of(&heard, 2).enumerate().take(24) {
             let t = 16 + k;
             let (out, new) = if k < 20 {
                 equal_amplitude(k, 20)
@@ -3435,7 +3442,7 @@ mod tests {
         heard.extend((0..2).flat_map(|_| block_with(&engine, 2, || {})));
         // The counter at absolute frame `t` is `t + 1`; the old root's copy is
         // 16 behind from frame 16 on.
-        for (k, frame) in heard.as_chunks::<2>().0.iter().enumerate() {
+        for (k, frame) in frames_of(&heard, 2).enumerate() {
             let t = 16 + k;
             let (out, new) = if k < 20 {
                 equal_amplitude(k, 20)

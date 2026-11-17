@@ -22,8 +22,8 @@ use tutti_midi_hardware::{
 };
 use tutti_midi_runtime::InputInlets;
 use tutti_ump::{
-    Bank, CCNumber, Direction, FirstGroup, FunctionBlockId, GroupSpan, Message, MidiChannel, Rpn,
-    U7, UiHint, Ump, Utility, Voice1,
+    Bank, BlockDirection, CCNumber, FirstGroup, FunctionBlockId, GroupSpan, Message, MidiChannel,
+    Rpn, U7, UiHint, Ump, Utility, Voice1,
 };
 
 const PATIENCE: Duration = Duration::from_secs(30);
@@ -151,7 +151,7 @@ fn jr_messages_a_client_sends_are_not_heard_by_an_arrival_port() {
 fn block() -> FunctionBlock {
     FunctionBlock::builder(
         FunctionBlockId::new(1).unwrap(),
-        Direction::Bidirectional,
+        BlockDirection::Bidirectional,
         FirstGroup::new(4).unwrap(),
         GroupSpan::new(2).unwrap(),
     )

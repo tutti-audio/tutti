@@ -1,7 +1,7 @@
 //! [`Taken`]: how much of a batch a sink took, always a whole number of
 //! messages.
 
-use tutti_ump::Span;
+use tutti_ump::PacketSpan;
 
 use crate::Outgoing;
 
@@ -38,7 +38,7 @@ impl Taken {
     /// This and the packets of `message`, the next message of the batch after
     /// what is taken. A sink that sends one message at a time adds each as it
     /// goes and stops at the first it cannot send.
-    pub const fn through<T>(self, message: Span<'_, T>) -> Self {
+    pub const fn through<T>(self, message: PacketSpan<'_, T>) -> Self {
         Self(self.0 + message.len())
     }
 

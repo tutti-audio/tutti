@@ -169,7 +169,7 @@ impl Stretch {
         view: &mut TempoView<'_>,
     ) -> bool {
         let rate = view.rate().get();
-        let looping = t.looping.and_then(|l| LoopRange::new(l.start, l.end));
+        let looping = t.looping;
         if t.playing != self.playing || t.recording() != self.recording || looping != self.looping {
             return false;
         }

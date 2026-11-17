@@ -391,21 +391,17 @@ impl SysexStatus {
 }
 
 impl Sysex7Packet {
-    /// The packet of the first six (or fewer) of `payload`, and the bytes
-    /// after them. `payload` is 7-bit by its owner's type, so `masked` drops
-    /// no bit.
-    pub(crate) fn take(started: bool, payload: &[u8]) -> (Self, &[u8]) {
-        let (chunk, rest) = payload.split_at(payload.len().min(6));
+    /// The packet of `status` and up to six bytes of `data` (the rest of a
+    /// longer slice is not read).
+    pub(crate) fn of_chunk(status: SysexStatus, data: &[U7]) -> Self {
+        let chunk = &data[..data.len().min(6)];
         let mut bytes = [U7::default(); 6];
-        for (slot, &b) in bytes.iter_mut().zip(chunk) {
-            *slot = U7::masked(b);
-        }
-        let packet = Self {
-            status: SysexStatus::of_run(started, !rest.is_empty()),
+        bytes[..chunk.len()].copy_from_slice(chunk);
+        Self {
+            status,
             len: chunk.len() as u8,
             bytes,
-        };
-        (packet, rest)
+        }
     }
 
     /// The packet, or `None` for more than 6 bytes or a byte of 128 or more.
@@ -1623,7 +1619,7 @@ pub struct BlockFilter {
 /// A Function Block's connection direction (§7.1.8); `0b00` is reserved.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum Direction {
+pub enum BlockDirection {
     /// Receives only.
     Input,
     /// Transmits only.
@@ -1671,7 +1667,7 @@ pub struct FunctionBlockInfo {
     /// Which block.
     pub id: Field<FunctionBlockId>,
     /// Its direction.
-    pub direction: Direction,
+    pub direction: BlockDirection,
     /// Its UI hint.
     pub ui_hint: UiHint,
     /// MIDI 1.0 port status.

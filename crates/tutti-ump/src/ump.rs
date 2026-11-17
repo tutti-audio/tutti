@@ -11,7 +11,7 @@ use crate::{Address, CCNumber, Lane, MidiChannel, MidiGroup, NoteNumber, Protoco
 /// The type is storage. It names no message and checks no field. Its readers
 /// and writers (the header fields, [`is_note_off`](Self::is_note_off),
 /// [`is_panic_controller`](Self::is_panic_controller),
-/// [`key_event`](Self::key_event), [`note_off`](Self::note_off),
+/// [`note_key_event`](Self::note_key_event), [`note_off`](Self::note_off),
 /// [`sustain_up`](Self::sustain_up)) are the packet-level bit reads that
 /// consumers without a decoded `Message` need; each agrees with
 /// [`decode`](Self::decode) and `From<Message> for Ump` on every packet.
@@ -180,7 +180,7 @@ impl Ump {
     /// [`is_note_off`](Self::is_note_off).
     #[inline]
     #[must_use]
-    pub const fn key_event(&self) -> Option<KeyEvent> {
+    pub const fn note_key_event(&self) -> Option<NoteKeyEvent> {
         let w = self.0[0];
         let status = (w >> 20) & 0xf;
         let m2 = w >> 28 == 0x4;
@@ -189,14 +189,14 @@ impl Ump {
             None => return None,
         };
         let note = NoteNumber::masked((w >> 8) as u8);
-        let key = Key::pack(m2, address, note);
+        let key = NoteKey::pack(m2, address, note);
         match status {
-            0x8 => Some(KeyEvent::Off(key)),
+            0x8 => Some(NoteKeyEvent::Off(key)),
             0x9 => {
                 if !m2 && w & 0x7f == 0 {
-                    Some(KeyEvent::Off(key))
+                    Some(NoteKeyEvent::Off(key))
                 } else {
-                    Some(KeyEvent::On(key))
+                    Some(NoteKeyEvent::On(key))
                 }
             }
             0xb if (w >> 8) & 0x7f == CCNumber::SUSTAIN.get() as u32 => {
@@ -205,7 +205,7 @@ impl Ump {
                 } else {
                     w & 0x7f >= 64
                 };
-                Some(KeyEvent::Sustain {
+                Some(NoteKeyEvent::Sustain {
                     protocol: key.protocol(),
                     address,
                     down,
@@ -218,7 +218,7 @@ impl Ump {
     /// The note-off that closes `key`, velocity 0 (M1: status 8, M2: status 8
     /// with a zero 16-bit velocity).
     #[must_use]
-    pub const fn note_off(key: Key) -> Ump {
+    pub const fn note_off(key: NoteKey) -> Ump {
         let address = key.address();
         let head = ((address.group.get() as u32) << 24)
             | (0x8 << 20)
@@ -317,9 +317,9 @@ impl core::fmt::UpperHex for Ump {
 /// A held-note key: protocol, group, channel and note (M2-104 identifies a
 /// note by the last three), packed in 16 bits.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Key(u16);
+pub struct NoteKey(u16);
 
-impl Key {
+impl NoteKey {
     /// The key of `note` on `address` in `protocol`, or `None` for a protocol
     /// that has no channel voice message ([`Protocol::Reserved`]).
     #[must_use]
@@ -332,7 +332,7 @@ impl Key {
     }
 
     const fn pack(m2: bool, address: Address, note: NoteNumber) -> Self {
-        Key(((m2 as u16) << 15) | ((address.index() as u16) << 7) | note.get() as u16)
+        NoteKey(((m2 as u16) << 15) | ((address.index() as u16) << 7) | note.get() as u16)
     }
 
     /// Packed form, `0..=65535`.
@@ -344,7 +344,7 @@ impl Key {
     /// From the packed form.
     #[must_use]
     pub const fn from_index(i: u16) -> Self {
-        Key(i)
+        NoteKey(i)
     }
 
     /// The protocol of the packet that opened the key: [`Protocol::Midi1`] or
@@ -385,13 +385,13 @@ impl Key {
     }
 }
 
-/// What [`Ump::key_event`] reads.
+/// What [`Ump::note_key_event`] reads.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum KeyEvent {
+pub enum NoteKeyEvent {
     /// A note starts.
-    On(Key),
+    On(NoteKey),
     /// A note ends.
-    Off(Key),
+    Off(NoteKey),
     /// The sustain pedal of a channel changes.
     Sustain {
         /// The protocol of the packet: [`Protocol::Midi1`] or [`Protocol::Midi2`].

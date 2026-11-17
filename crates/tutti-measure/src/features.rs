@@ -245,11 +245,11 @@ mod tests {
             );
         }
         let mut x = vec![0.0f32; size];
-        fft.inverse(&bins, &mut x);
+        fft.inverse(&bins, tutti_buffers::MonoMut::new(&mut x));
         let width = RATE as f32 / size as f32;
         let row = {
             let mut out = vec![tutti_dsp::Complex32::default(); size / 2 + 1];
-            fft.forward(&x, &vec![1.0; size], &mut out);
+            fft.forward(tutti_buffers::Mono::new(&x), &vec![1.0; size], &mut out);
             out.iter().map(|b| b.norm()).collect::<Vec<_>>()
         };
         let r = spectral_rolloff(&row, Hz(width), 0.99);

@@ -26,7 +26,6 @@ tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 # Value vocabulary (the `Curve` trait), for `impl Curve for Trajectory`.
 tutti-types = { version = "0.0.1", path = "../tutti-types", default-features = false }
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
-tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
 
 # The modulation compiler and its vocabulary (`ControlProgram`, `Curve`,
 # `LfoShape`, `compile`): the control lane evaluates its programs, and the
@@ -52,6 +51,7 @@ thiserror = { workspace = true, features = ["std"] }
 serde = { version = "1", optional = true, default-features = false, features = ["derive"] }
 
 [dev-dependencies]
+tutti-ump = { path = "../tutti-ump", default-features = false }
 libm = "0.2.15"
 tutti-nodes = { path = ".", features = ["testing", "serde"] }
 serde_json = "1"

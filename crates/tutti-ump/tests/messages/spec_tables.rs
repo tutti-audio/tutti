@@ -9,7 +9,7 @@
 //! Discovery flags, the Metronome bytes), where a swap would not show.
 //!
 //! Tables here: 16 (Flex text, all 18 statuses), 13 and 15 (the accidental),
-//! and the Function Block Info fields of §7.1.8 (User Interface Hint, Direction,
+//! and the Function Block Info fields of §7.1.8 (User Interface Hint, BlockDirection,
 //! MIDI 1.0) and the Protocol field of §7.1.6 (Figures 18 and 19).
 //! Tables pinned elsewhere: Registered Per-Note Controllers (Table 22,
 //! `spec_words.rs`), the MIDI 1.0 controller roster (`cc_number.rs`).
@@ -18,10 +18,11 @@
 use core::num::NonZeroU8;
 use tutti_ump::FunctionBlockCount;
 use tutti_ump::{
-    Accidental, Alteration, AlterationKind, BarAccents, ChordBass, ChordName, ChordPitch,
-    ChordType, Direction, DiscoveryFilter, EndpointInfoNotification, FirstGroup, Flex, FlexAddress,
-    FlexTextKind, Form, FunctionBlockId, FunctionBlockInfo, GroupSpan, Letter, Message, Metronome,
-    Midi1Port, MidiGroup, Protocol, Stream, StreamConfig, U4, UiHint, Ump, UmpVersion,
+    Accidental, Alteration, AlterationKind, BarAccents, BlockDirection, ChordBass, ChordName,
+    ChordPitch, ChordType, DiscoveryFilter, EndpointInfoNotification, FirstGroup, Flex,
+    FlexAddress, FlexTextKind, Form, FunctionBlockId, FunctionBlockInfo, GroupSpan, Letter,
+    Message, Metronome, Midi1Port, MidiGroup, Protocol, Stream, StreamConfig, U4, UiHint, Ump,
+    UmpVersion,
 };
 
 /// Decode gives the message, and encode gives the words back.
@@ -167,14 +168,14 @@ fn function_block_fields() {
     ] {
         pin(
             [0xF011_0001 | bits << 4, word2, 0, 0],
-            info(Direction::Input, hint, Midi1Port::No),
+            info(BlockDirection::Input, hint, Midi1Port::No),
         );
     }
-    // Direction: 0b01 input, 0b10 output, 0b11 bidirectional (0b00 reserved).
+    // BlockDirection: 0b01 input, 0b10 output, 0b11 bidirectional (0b00 reserved).
     for (bits, direction) in [
-        (0b01, Direction::Input),
-        (0b10, Direction::Output),
-        (0b11, Direction::Bidirectional),
+        (0b01, BlockDirection::Input),
+        (0b10, BlockDirection::Output),
+        (0b11, BlockDirection::Bidirectional),
     ] {
         pin(
             [0xF011_0000 | bits, word2, 0, 0],
@@ -187,7 +188,7 @@ fn function_block_fields() {
     else {
         panic!()
     };
-    assert!(matches!(zero.direction, Direction::Reserved(r) if r.get() == 0));
+    assert!(matches!(zero.direction, BlockDirection::Reserved(r) if r.get() == 0));
     // MIDI 1.0: 0x00 not, 0x01 yes unrestricted, 0x02 yes restricted to
     // 31.25 kbps, 0x03 reserved.
     for (bits, port) in [
@@ -197,7 +198,7 @@ fn function_block_fields() {
     ] {
         pin(
             [0xF011_0001 | bits << 2, word2, 0, 0],
-            info(Direction::Input, UiHint::Unknown, port),
+            info(BlockDirection::Input, UiHint::Unknown, port),
         );
     }
     let Ok(Message::Stream(Stream::FunctionBlockInfo(three))) =

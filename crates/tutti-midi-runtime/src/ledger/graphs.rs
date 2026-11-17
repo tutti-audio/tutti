@@ -20,11 +20,11 @@ use tutti_graph::NodeKey;
 use tutti_graph::contract::Direct;
 use tutti_graph::{
     Cx, Editor, Event, EventIn, EventKind, EventOut, Executor, ForkCause, ForkMode, ForkSource,
-    ForkTarget, Forked, IntoNode, Io, LoopRange, Node, NodeParts, Offset, Prepare, Shape, Status,
+    ForkTarget, Forked, IntoNode, Io, Node, NodeParts, Offset, Prepare, Shape, Status,
     TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, InPort, OutPort, Source};
-use tutti_types::{Beat, Bpm, ChannelLayout, Latency, SampleRate, Samples};
+use tutti_types::{Beat, Bpm, ChannelLayout, Latency, LoopRange, SampleRate, Samples};
 use tutti_ump::{CCNumber, MidiChannel, MidiGroup, NoteId, NoteNumber, Ump};
 
 /// The clip clock at 120 BPM and 48 kHz and the helpers that build on it.
@@ -1029,10 +1029,7 @@ fn span(events: &[TimedMidiEvent]) -> u64 {
 /// then stops for 12 blocks.
 fn play(exec: &mut Executor, events: &[TimedMidiEvent], passes: u64) {
     let len = span(events);
-    let lp = (passes > 1).then(|| LoopRange {
-        start: Beat(0.0),
-        end: beat_of(len),
-    });
+    let lp = (passes > 1).then(|| LoopRange::new(Beat(0.0), beat_of(len)).expect("a loop"));
     for f in 0..len * passes {
         if f % 64 == 0 {
             let t = TransportPosition::new(true, Bpm::of(120.0), beat_of(f % len), lp);

@@ -27,7 +27,7 @@ use tutti_midi_runtime::{
 };
 use tutti_types::{Beat, Bpm, Frame, SampleRate, Samples};
 use tutti_ump::{
-    Address, CCNumber, KeyEvent, Message, MidiChannel, MidiGroup, MpeChannels, MpeZoneSpan,
+    Address, CCNumber, Message, MidiChannel, MidiGroup, MpeChannels, MpeZoneSpan, NoteKeyEvent,
     NoteNumber, System, U7, U14, Ump, Voice2,
 };
 
@@ -477,9 +477,9 @@ fn heard(seen: &Seen) -> Vec<(u64, String)> {
         .unwrap()
         .iter()
         .map(|&(_, frame, ump)| {
-            let what = match (ump.key_event(), ump.decode()) {
-                (Some(KeyEvent::On(k)), _) => format!("on {}", k.note().get()),
-                (Some(KeyEvent::Off(k)), _) => format!("off {}", k.note().get()),
+            let what = match (ump.note_key_event(), ump.decode()) {
+                (Some(NoteKeyEvent::On(k)), _) => format!("on {}", k.note().get()),
+                (Some(NoteKeyEvent::Off(k)), _) => format!("off {}", k.note().get()),
                 (_, Ok(Message::Midi2(_, Voice2::ControlChange { controller, value }))) => {
                     format!("cc {} {:#x}", controller.get(), value.get())
                 }
@@ -952,7 +952,7 @@ fn a_member_bend_range_fans_out_over_the_zones_ports() {
     }
     let notes: Vec<(usize, u64)> = seen
         .iter()
-        .filter(|s| matches!(s.2.key_event(), Some(KeyEvent::On(_))))
+        .filter(|s| matches!(s.2.note_key_event(), Some(NoteKeyEvent::On(_))))
         .map(|s| (s.0, s.1))
         .collect();
     assert_eq!(notes, vec![(1, 5)]);
@@ -1311,7 +1311,7 @@ fn a_clock_flood_past_the_port_capacity_is_counted() {
 /// wrap's Song Position and the tick on the loop's start.
 #[test]
 fn a_segment_boundary_on_a_wrap_sends_the_song_position_once() {
-    use tutti_graph::LoopRange;
+    use tutti_types::LoopRange;
     // The loop starts at beat 1, a quarter note: 4 MIDI beats (sixteenths).
     const LOOP_START: u16 = 4;
     let (_ed, mut exec, _clock, seen) = rig(
@@ -1323,10 +1323,7 @@ fn a_segment_boundary_on_a_wrap_sends_the_song_position_once() {
         1,
         4096,
     );
-    let looping = Some(LoopRange {
-        start: Beat(1.0),
-        end: Beat(1.1),
-    });
+    let looping = Some(LoopRange::new(Beat(1.0), Beat(1.1)).expect("a loop"));
     let rolling = TransportPosition::new(true, Bpm::of(120.0), Beat(1.0), looping);
     let mut changes = TransportChanges::NONE;
     changes
@@ -1372,9 +1369,9 @@ fn a_segment_boundary_on_a_wrap_sends_the_song_position_once() {
 /// the blocks sent, exactly.
 #[test]
 fn a_short_loop_in_a_long_block_is_counted_past_the_cap() {
-    use tutti_graph::LoopRange;
     use tutti_midi_runtime::SYNC_OUT_EVENT_CAPACITY;
     use tutti_types::FrameClock;
+    use tutti_types::LoopRange;
     const TOTAL: usize = 16_384;
     let end = 47.3 / 24_000.0;
 
@@ -1388,10 +1385,7 @@ fn a_short_loop_in_a_long_block_is_counted_past_the_cap() {
             1,
             TOTAL,
         );
-        let looping = Some(LoopRange {
-            start: Beat(0.0),
-            end: Beat(end),
-        });
+        let looping = Some(LoopRange::new(Beat(0.0), Beat(end)).expect("a loop"));
         let region = tutti_types::LoopRange::new(Beat::new(0.0), Beat::new(end));
         let mut host = FrameClock::new(Beat(0.0), Bpm::of(120.0), SampleRate::of(RATE));
         for _ in 0..TOTAL / len {

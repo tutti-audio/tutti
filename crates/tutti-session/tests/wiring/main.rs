@@ -25,4 +25,5 @@ mod transport_handle;
 mod transport_verbs;
 mod typed_params;
 mod unwired;
+mod values;
 mod vocabulary;

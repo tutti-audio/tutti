@@ -10,7 +10,7 @@
 //! planner (what `realfft` always uses) picks AVX, SSE or NEON at run time, and
 //! those round differently from scalar in most bins. `realfft` cannot be given
 //! a planner, so the real-FFT passes are written out here over
-//! [`FftPlannerScalar`]. Everything else is plain `f32` Rust, which the compiler
+//! [`FftPlannerScalar`]. Everything else is plain Rust over the float `F`, which the compiler
 //! does not contract into FMAs. The transform's arithmetic is therefore
 //! CPU-independent by construction. Its twiddles come from the C library's `sin`
 //! and `cos`, so the output is the same bits across CPUs on the same OS, libm
@@ -26,12 +26,18 @@
 //! immutable and cheap to clone (the plans are shared); the scratch is the
 //! caller's, one per thread that transforms. A transform allocates nothing.
 
-use rustfft::{Fft as InnerFft, FftDirection, FftPlannerScalar};
+use rustfft::{Fft as InnerFft, FftDirection, FftNum, FftPlannerScalar};
 use std::f64::consts::PI;
 use std::sync::Arc;
+use tutti_buffers::{Float, Mono, MonoMut, Sample};
 
-/// num-complex 0.4's `Complex<f32>`, re-exported from rustfft, so it follows
-/// rustfft's semver: a rustfft bump that changes num-complex changes this type.
+/// num-complex 0.4's complex number, re-exported from rustfft beside
+/// [`Complex32`]: a spectrum bin over the float the transform runs in.
+/// [`Complex`] and [`Complex32`] follow rustfft's semver: a rustfft bump that
+/// changes num-complex changes both.
+pub use rustfft::num_complex::Complex;
+
+/// num-complex 0.4's `Complex<f32>`, re-exported from rustfft beside [`Complex`].
 pub use rustfft::num_complex::Complex32;
 
 /// num-complex 0.4's complex number over `f64`, re-exported from rustfft beside
@@ -41,30 +47,41 @@ pub use rustfft::num_complex::Complex64;
 /// The pass twiddles of an even `size`: `size / 4` rounded up, minus the DC
 /// term. Forward carries `w^k / 2`, inverse the conjugate of `w^k`, with
 /// `w = exp(-2 pi i / size)`.
-pub(crate) fn pass_twiddles(size: usize, direction: FftDirection) -> Vec<Complex32> {
+pub(crate) fn pass_twiddles<F: Float + FftNum>(
+    size: usize,
+    direction: FftDirection,
+) -> Vec<Complex<F>> {
     (1..size.div_ceil(4))
         .map(|k| {
             // The angle in f64, narrowed once, as `realfft` does.
             let angle = -2.0 * PI / size as f64 * k as f64;
-            let w = Complex32::new(libm::cos(angle) as f32, libm::sin(angle) as f32);
+            let w = twiddle(angle);
             match direction {
-                FftDirection::Forward => w * 0.5,
+                FftDirection::Forward => w * <F as Float>::from_f32(0.5),
                 FftDirection::Inverse => w.conj(),
             }
         })
         .collect()
 }
 
-/// One direction of the even-size transform: the inner FFT (`size / 2` points)
-/// and the pass twiddles.
-struct EvenPass {
-    inner: Arc<dyn InnerFft<f32>>,
-    /// [`pass_twiddles`].
-    twiddles: Vec<Complex32>,
+/// `exp(i * angle)`, computed in f64 and narrowed once.
+pub(crate) fn twiddle<F: Float + FftNum>(angle: f64) -> Complex<F> {
+    Complex::new(
+        <F as Sample>::from_f64(libm::cos(angle)),
+        <F as Sample>::from_f64(libm::sin(angle)),
+    )
 }
 
-impl EvenPass {
-    fn new(size: usize, direction: FftDirection, planner: &mut FftPlannerScalar<f32>) -> Self {
+/// One direction of the even-size transform: the inner FFT (`size / 2` points)
+/// and the pass twiddles.
+struct EvenPass<F: Float + FftNum> {
+    inner: Arc<dyn InnerFft<F>>,
+    /// [`pass_twiddles`].
+    twiddles: Vec<Complex<F>>,
+}
+
+impl<F: Float + FftNum> EvenPass<F> {
+    fn new(size: usize, direction: FftDirection, planner: &mut FftPlannerScalar<F>) -> Self {
         Self {
             inner: planner.plan_fft(size / 2, direction),
             twiddles: pass_twiddles(size, direction),
@@ -76,27 +93,39 @@ impl EvenPass {
     }
 }
 
-enum Plans {
+enum Plans<F: Float + FftNum> {
     Even {
-        forward: EvenPass,
-        inverse: EvenPass,
+        forward: EvenPass<F>,
+        inverse: EvenPass<F>,
     },
     Odd {
-        forward: Arc<dyn InnerFft<f32>>,
-        inverse: Arc<dyn InnerFft<f32>>,
+        forward: Arc<dyn InnerFft<F>>,
+        inverse: Arc<dyn InnerFft<F>>,
     },
 }
 
 /// Forward and inverse plans for one real frame length.
 ///
-/// The module docs (above) state the determinism guarantee.
-#[derive(Clone)]
-pub struct RealFft {
+/// Generic over the float `F` it runs in, `f32` by default: `F` is `f32` or
+/// `f64`, the implementors of tutti-buffers' sealed [`Float`]. `FftNum` is in
+/// the bound because the plan is rustfft's, and rustfft implements it for
+/// exactly those two. The module docs (above) state the determinism
+/// guarantee.
+pub struct RealFft<F: Float + FftNum = f32> {
     size: usize,
-    plans: Arc<Plans>,
+    plans: Arc<Plans<F>>,
 }
 
-impl RealFft {
+impl<F: Float + FftNum> Clone for RealFft<F> {
+    fn clone(&self) -> Self {
+        Self {
+            size: self.size,
+            plans: Arc::clone(&self.plans),
+        }
+    }
+}
+
+impl<F: Float + FftNum> RealFft<F> {
     /// Plans for a frame of `size` samples (`size >= 1`). Allocates.
     ///
     /// # Panics
@@ -104,7 +133,7 @@ impl RealFft {
     #[must_use]
     pub fn new(size: usize) -> Self {
         assert!(size >= 1, "BUG: an FFT frame has at least one sample");
-        let mut planner = FftPlannerScalar::<f32>::new();
+        let mut planner = FftPlannerScalar::<F>::new();
         let plans = if size.is_multiple_of(2) {
             Plans::Even {
                 forward: EvenPass::new(size, FftDirection::Forward, &mut planner),
@@ -141,8 +170,8 @@ impl RealFft {
     }
 
     /// A zeroed scratch of [`scratch_len`](Self::scratch_len) elements.
-    pub fn new_scratch(&self) -> Vec<Complex32> {
-        vec![Complex32::new(0.0, 0.0); self.scratch_len()]
+    pub fn new_scratch(&self) -> Vec<Complex<F>> {
+        vec![Complex::new(F::ZERO, F::ZERO); self.scratch_len()]
     }
 
     fn forward_scratch_len(&self) -> usize {
@@ -165,7 +194,8 @@ impl RealFft {
     /// # Panics
     /// If a slice length is wrong or `scratch` is shorter than
     /// [`scratch_len`](Self::scratch_len).
-    pub fn forward(&self, real: &[f32], bins: &mut [Complex32], scratch: &mut [Complex32]) {
+    pub fn forward(&self, real: Mono<'_, F>, bins: &mut [Complex<F>], scratch: &mut [Complex<F>]) {
+        let real = real.samples();
         assert_eq!(real.len(), self.size, "BUG: frame is one window");
         assert_eq!(
             bins.len(),
@@ -178,11 +208,11 @@ impl RealFft {
             Plans::Odd { forward, .. } => {
                 let (work, inner) = scratch.split_at_mut(self.size);
                 for (point, &x) in work.iter_mut().zip(real) {
-                    *point = Complex32::new(x, 0.0);
+                    *point = Complex::new(x, F::ZERO);
                 }
                 forward.process_with_scratch(work, &mut inner[..forward.get_inplace_scratch_len()]);
                 bins.copy_from_slice(&work[..bins.len()]);
-                bins[0].im = 0.0;
+                bins[0].im = F::ZERO;
             }
         }
     }
@@ -199,7 +229,13 @@ impl RealFft {
     /// # Panics
     /// If a slice length is wrong or `scratch` is shorter than
     /// [`scratch_len`](Self::scratch_len).
-    pub fn inverse(&self, bins: &mut [Complex32], real: &mut [f32], scratch: &mut [Complex32]) {
+    pub fn inverse(
+        &self,
+        bins: &mut [Complex<F>],
+        mut real: MonoMut<'_, F>,
+        scratch: &mut [Complex<F>],
+    ) {
+        let real = real.samples_mut();
         assert_eq!(
             bins.len(),
             self.bins(),
@@ -213,7 +249,7 @@ impl RealFft {
                 let (work, inner) = scratch.split_at_mut(self.size);
                 // The conjugate-symmetric spectrum, rebuilt from the half,
                 // with DC's imaginary part dropped.
-                work[0] = Complex32::new(bins[0].re, 0.0);
+                work[0] = Complex::new(bins[0].re, F::ZERO);
                 for (k, &bin) in bins.iter().enumerate().skip(1) {
                     work[k] = bin;
                     work[self.size - k] = bin.conj();
@@ -228,15 +264,17 @@ impl RealFft {
 
     fn forward_even(
         &self,
-        pass: &EvenPass,
-        real: &[f32],
-        bins: &mut [Complex32],
-        scratch: &mut [Complex32],
+        pass: &EvenPass<F>,
+        real: &[F],
+        bins: &mut [Complex<F>],
+        scratch: &mut [Complex<F>],
     ) {
         let half = self.size / 2;
         let (work, inner) = scratch.split_at_mut(half);
+        // Packs the even and odd samples into one complex value each for the
+        // half-size FFT; not a channel interleave.
         for (point, pair) in work.iter_mut().zip(real.as_chunks::<2>().0) {
-            *point = Complex32::new(pair[0], pair[1]);
+            *point = Complex::new(pair[0], pair[1]);
         }
         pass.inner.process_outofplace_with_scratch(
             work,
@@ -249,10 +287,10 @@ impl RealFft {
 
     fn inverse_even(
         &self,
-        pass: &EvenPass,
-        bins: &mut [Complex32],
-        real: &mut [f32],
-        scratch: &mut [Complex32],
+        pass: &EvenPass<F>,
+        bins: &mut [Complex<F>],
+        real: &mut [F],
+        scratch: &mut [Complex<F>],
     ) {
         let half = self.size / 2;
         inverse_pre_pass(&pass.twiddles, bins);
@@ -263,6 +301,8 @@ impl RealFft {
             work,
             &mut inner[..pass.scratch_len()],
         );
+        // Unpacks each complex value into its even and odd samples; not a
+        // channel interleave.
         for (pair, point) in real.as_chunks_mut::<2>().0.iter_mut().zip(work.iter()) {
             pair[0] = point.re;
             pair[1] = point.im;
@@ -272,15 +312,19 @@ impl RealFft {
 
 /// The even-size forward transform after its inner FFT: `bins[..size / 2]`
 /// holds that FFT's output, and becomes the `size / 2 + 1` bins.
-pub(crate) fn forward_post_pass(twiddles: &[Complex32], bins: &mut [Complex32]) {
+pub(crate) fn forward_post_pass<F: Float + FftNum>(
+    twiddles: &[Complex<F>],
+    bins: &mut [Complex<F>],
+) {
     let half = bins.len() - 1;
     // DC and Nyquist are the sum and difference of the first point's parts.
     let first = bins[0];
-    bins[0] = Complex32::new(first.re + first.im, 0.0);
-    bins[half] = Complex32::new(first.re - first.im, 0.0);
+    bins[0] = Complex::new(first.re + first.im, F::ZERO);
+    bins[half] = Complex::new(first.re - first.im, F::ZERO);
 
     // The rest, two mirrored bins at a time. The mirror bin's twiddle is
     // this one's with the real part negated, which halves the multiplies.
+    let one_half = <F as Float>::from_f32(0.5);
     let bins_len = bins.len();
     let (left, right) = bins.split_at_mut(bins_len / 2);
     let right_len = right.len();
@@ -295,14 +339,14 @@ pub(crate) fn forward_post_pass(twiddles: &[Complex32], bins: &mut [Complex32]) 
         let twiddled_im_sum = sum * twiddle.im;
         let twiddled_re_diff = diff * twiddle.re;
         let twiddled_im_diff = diff * twiddle.im;
-        let half_sum_re = 0.5 * sum.re;
-        let half_diff_im = 0.5 * diff.im;
+        let half_sum_re = one_half * sum.re;
+        let half_diff_im = one_half * diff.im;
 
         let twiddled_real = twiddled_re_sum.im + twiddled_im_diff.re;
         let twiddled_im = twiddled_im_sum.im - twiddled_re_diff.re;
 
-        *low = Complex32::new(half_sum_re + twiddled_real, half_diff_im + twiddled_im);
-        *high = Complex32::new(half_sum_re - twiddled_real, twiddled_im - half_diff_im);
+        *low = Complex::new(half_sum_re + twiddled_real, half_diff_im + twiddled_im);
+        *high = Complex::new(half_sum_re - twiddled_real, twiddled_im - half_diff_im);
     }
 
     // An odd bin count leaves the centre bin unpaired.
@@ -313,17 +357,20 @@ pub(crate) fn forward_post_pass(twiddles: &[Complex32], bins: &mut [Complex32]) 
 
 /// The even-size inverse transform before its inner FFT: `bins` become the
 /// `size / 2` points that FFT takes, in `bins[..size / 2]`.
-pub(crate) fn inverse_pre_pass(twiddles: &[Complex32], bins: &mut [Complex32]) {
+pub(crate) fn inverse_pre_pass<F: Float + FftNum>(
+    twiddles: &[Complex<F>],
+    bins: &mut [Complex<F>],
+) {
     let half = bins.len() - 1;
-    bins[0].im = 0.0;
-    bins[half].im = 0.0;
+    bins[0].im = F::ZERO;
+    bins[half].im = F::ZERO;
 
     // Fold DC and Nyquist into the first inner point.
     let first = bins[0];
     let last = bins[half];
     let sum = first + last;
     let diff = first - last;
-    bins[0] = Complex32::new(sum.re - sum.im, diff.re - diff.im);
+    bins[0] = Complex::new(sum.re - sum.im, diff.re - diff.im);
 
     let bins_len = bins.len();
     let (left, right) = bins.split_at_mut(bins_len / 2);
@@ -343,8 +390,8 @@ pub(crate) fn inverse_pre_pass(twiddles: &[Complex32], bins: &mut [Complex32]) {
         let twiddled_real = twiddled_re_sum.im + twiddled_im_diff.re;
         let twiddled_im = twiddled_im_sum.im - twiddled_re_diff.re;
 
-        *low = Complex32::new(sum.re - twiddled_real, diff.im - twiddled_im);
-        *high = Complex32::new(sum.re + twiddled_real, -twiddled_im - diff.im);
+        *low = Complex::new(sum.re - twiddled_real, diff.im - twiddled_im);
+        *high = Complex::new(sum.re + twiddled_real, -twiddled_im - diff.im);
     }
 
     // An odd bin count leaves the centre bin unpaired.
@@ -354,7 +401,7 @@ pub(crate) fn inverse_pre_pass(twiddles: &[Complex32], bins: &mut [Complex32]) {
     }
 }
 
-impl std::fmt::Debug for RealFft {
+impl<F: Float + FftNum> std::fmt::Debug for RealFft<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RealFft").field("size", &self.size).finish()
     }

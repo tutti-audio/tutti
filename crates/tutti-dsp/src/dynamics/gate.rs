@@ -27,7 +27,7 @@ use tutti_types::{Amplitude, ChannelLayout, Db, Hz, Q, SampleRate, Seconds};
 
 use super::curves::{amplitude_to_db, gate_gain_at};
 use super::key_filter::{KeyFilter, KeyStage};
-use super::shared::{Ballistics, CHUNK, GAIN_GLIDE, key_levels};
+use super::shared::{CHUNK, GAIN_GLIDE, floored, key_levels};
 use crate::delay::finite_or;
 use crate::smoother::Smoother;
 use crate::{Glide, Steps};
@@ -105,14 +105,14 @@ impl Design {
         let d = GateControls::DEFAULT;
         let threshold = Db(finite_or(c.threshold.get(), d.threshold.get()));
         // A NaN hold reads as 0 (`max` ignores it); an infinite one saturates to the
-        // longest count. `Ballistics::of` floors the attack and release.
+        // longest count. `floored` floors the attack and release.
         let hold = Seconds(c.hold.get().max(0.0));
-        let ballistics = Ballistics::of(c.attack, c.release, rate);
+        let (attack, release) = floored(c.attack, c.release).coeffs(rate);
         Self {
             threshold_linear: threshold.to_amplitude().get(),
             silence_opens: Db::FLOOR >= threshold,
-            attack: ballistics.attack,
-            release: ballistics.release,
+            attack,
+            release,
             hold_samples: hold.to_samples_floor(rate).get(),
             range: Db(finite_or(c.range.get(), d.range.get()).min(0.0)),
         }

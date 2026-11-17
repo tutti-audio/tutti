@@ -41,7 +41,7 @@ use tutti_rt::{ControlDrop, FaultLatch};
 use tutti_rt::{Overflow, RingReader, RingWriter, ring};
 use tutti_types::{ChannelLayout, Frame, Samples};
 
-use crate::slots::{AudioSlots, for_f32};
+use crate::slots::AudioSlots;
 use tutti_buffers::Float;
 
 /// The executor's end of a tap: every lane's ring producer, written together.
@@ -52,9 +52,9 @@ use tutti_buffers::Float;
 /// writes and one reads, which is why the minimums below are safe: a ring's
 /// vacancy only grows under the reader and its occupancy only grows under the
 /// writer, so a count taken before a push can only be an underestimate.
-pub struct TapWriter {
+pub struct TapWriter<F: Float = f32> {
     _control: ControlDrop<Self>,
-    lanes: Vec<RingWriter<f32>>,
+    lanes: Vec<RingWriter<F>>,
     /// One [`Run`] for each block written, pushed before its samples.
     runs: RingWriter<Run>,
     /// The frame the next block of a writer that is not an op of a plan
@@ -66,7 +66,7 @@ pub struct TapWriter {
 }
 
 /// Whether a lane's reader is still held.
-fn is_open(lane: &RingWriter<f32>) -> bool {
+fn is_open<F: Float>(lane: &RingWriter<F>) -> bool {
     !lane.is_disconnected()
 }
 
@@ -85,13 +85,13 @@ struct Run {
 /// cannot hold more runs than frames.
 const MAX_RUNS: usize = 4096;
 
-impl std::fmt::Debug for TapWriter {
+impl<F: Float> std::fmt::Debug for TapWriter<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TapWriter").finish_non_exhaustive()
     }
 }
 
-impl TapWriter {
+impl<F: Float> TapWriter<F> {
     /// How many lanes (channels) this writer fills.
     #[must_use]
     pub fn width(&self) -> usize {
@@ -107,7 +107,7 @@ impl TapWriter {
     /// The block's frame is the count of frames offered before it: a writer
     /// that is not an op of a plan numbers its frames from zero.
     #[inline]
-    pub fn push_interleaved(&mut self, block: &[f32]) {
+    pub fn push_interleaved(&mut self, block: &[F]) {
         let width = self.lanes.len();
         if width == 0 || !self.lanes.first().is_some_and(is_open) {
             return;
@@ -183,7 +183,7 @@ impl TapWriter {
 /// or count.
 #[inline]
 pub(crate) fn tap_op<F: Float, A: AudioSlots<F>>(
-    tap: &mut TapWriter,
+    tap: &mut TapWriter<F>,
     arena: &A,
     srcs: &[u32],
     start: Frame,
@@ -197,10 +197,7 @@ pub(crate) fn tap_op<F: Float, A: AudioSlots<F>>(
         tap.note(start, take);
     }
     for (lane, &src) in tap.lanes.iter_mut().zip(srcs) {
-        let mut pushed = 0;
-        for_f32(&arena.slot(src, frames)[..take], |chunk| {
-            pushed += lane.push_slice(chunk);
-        });
+        let pushed = lane.push_slice(&arena.slot(src, frames)[..take]);
         // A reader dropped since the check above refuses its pushes.
         debug_assert!(
             pushed == take || lane.is_disconnected(),
@@ -218,11 +215,11 @@ pub(crate) fn tap_op<F: Float, A: AudioSlots<F>>(
 /// Drain it from a thread of your own. Dropping it leaves the tap open until
 /// the editor closes or reaps it; the audio thread then writes nothing for it.
 /// It must not be dropped on the audio thread (debug builds panic there).
-pub struct TapReader {
+pub struct TapReader<F: Float = f32> {
     _control: ControlDrop<Self>,
     /// The tap's id in a topology; `None` for a reader outside any.
     id: Option<TapId>,
-    lanes: Vec<RingReader<f32>>,
+    lanes: Vec<RingReader<F>>,
     lost: Arc<AtomicU64>,
     /// The writer's [`Run`]s not yet read through.
     runs: RingReader<Run>,
@@ -237,7 +234,7 @@ pub struct TapReader {
     end: Arc<FaultLatch>,
 }
 
-impl std::fmt::Debug for TapReader {
+impl<F: Float> std::fmt::Debug for TapReader<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TapReader")
             .field("id", &self.id)
@@ -246,28 +243,28 @@ impl std::fmt::Debug for TapReader {
     }
 }
 
-impl TapReader {
+impl<F: Float> TapReader<F> {
     /// A reader outside any topology and the writer that fills it: `width`
     /// lanes, each holding `capacity` frames (at least one). A plan's tap gets
     /// its reader from the editor, which names it; a writer that is not an op
     /// of a plan (the engine's, after the fader; an inlet's producer) takes
     /// one here, and its reader has no [`id`](Self::id).
     #[must_use]
-    pub fn pair(width: usize, capacity: Samples) -> (Self, TapWriter) {
+    pub fn pair(width: usize, capacity: Samples) -> (Self, TapWriter<F>) {
         Self::build(None, width, capacity)
     }
 
     /// The reader of the tap `id` names, and its writer.
-    pub(crate) fn named(id: TapId, width: usize, capacity: Samples) -> (Self, TapWriter) {
+    pub(crate) fn named(id: TapId, width: usize, capacity: Samples) -> (Self, TapWriter<F>) {
         Self::build(Some(id), width, capacity)
     }
 
-    fn build(id: Option<TapId>, width: usize, capacity: Samples) -> (Self, TapWriter) {
+    fn build(id: Option<TapId>, width: usize, capacity: Samples) -> (Self, TapWriter<F>) {
         let lost = Arc::new(AtomicU64::new(0));
         let end = Arc::new(FaultLatch::new());
         let (run_prod, run_cons) = ring::<Run>(capacity.get().clamp(1, MAX_RUNS), Overflow::Refuse);
         let (cons, prods): (Vec<_>, Vec<_>) = (0..width)
-            .map(|_| ring::<f32>(capacity.get().max(1), Overflow::Refuse))
+            .map(|_| ring::<F>(capacity.get().max(1), Overflow::Refuse))
             .map(|(prod, cons)| (cons, prod))
             .unzip();
         let reader = Self {
@@ -347,7 +344,7 @@ impl TapReader {
     /// Pops whole frames into `out`, interleaved `width` samples a frame, as
     /// many as fit; returns the frame count. A tail of `out` shorter than a
     /// frame is left as it was.
-    pub fn pop_into(&mut self, out: &mut [f32]) -> Samples {
+    pub fn pop_into(&mut self, out: &mut [F]) -> Samples {
         let width = self.width();
         if width == 0 {
             return Samples(0);
@@ -380,7 +377,7 @@ impl TapReader {
     /// If a plane is shorter than the frames popped.
     pub fn pop_planes<'p>(
         &mut self,
-        planes: impl IntoIterator<Item = &'p mut [f32]>,
+        planes: impl IntoIterator<Item = &'p mut [F]>,
         want: Samples,
     ) -> Samples {
         let frames = self.available().get().min(want.get());
@@ -484,12 +481,12 @@ impl TapReader {
 ///
 /// Like every [`Source`] it carries no sample rate: a tap runs at the graph's,
 /// so build a sink at that rate or the file plays at the wrong speed.
-impl Source for TapReader {
-    type Sample = f32;
+impl<F: Float> Source for TapReader<F> {
+    type Sample = F;
 
     /// As wide as the tap: one channel a lane.
     fn layout(&self) -> ChannelLayout {
-        TapReader::layout(self)
+        Self::layout(self)
     }
 
     /// Pops up to `out.len()` frames into `out` ([`pop_into`](TapReader::pop_into)).
@@ -502,8 +499,8 @@ impl Source for TapReader {
     /// sources can end: once every node it read was removed and the frames
     /// before the removal are read, it answers [`Ended`](Pull::Ended)
     /// ([`source_gone`](TapReader::source_gone)).
-    fn pull(&mut self, mut out: InterleavedMut<'_, f32>) -> Pull {
-        if out.layout() != TapReader::layout(self) {
+    fn pull(&mut self, mut out: InterleavedMut<'_, F>) -> Pull {
+        if out.layout() != Self::layout(self) {
             return Pull::Failed;
         }
         // The latch first, then the ring: `FaultLatch::drain`'s order.
@@ -521,7 +518,7 @@ impl Source for TapReader {
     /// The frames the executor could not push since the last call
     /// ([`TapReader::take_lost`]).
     fn take_lost(&mut self) -> Samples {
-        TapReader::take_lost(self)
+        Self::take_lost(self)
     }
 }
 
@@ -530,22 +527,20 @@ mod tests {
     use super::*;
     use crate::arena::Arena;
 
-    /// An `f64` block of 600 frames crosses `for_f32`'s 256-sample chunks
-    /// twice and ends on a short one (88): the tap holds the block narrowed
-    /// to `f32`, sample by sample, in order.
+    /// An `f64` block reaches an `f64` tap sample for sample, with the
+    /// digits `f32` cannot hold.
     #[test]
-    fn an_f64_block_reaches_the_tap_narrowed_to_f32_across_chunks() {
+    fn an_f64_block_reaches_the_f64_tap_unnarrowed() {
         const FRAMES: usize = 600;
         let mut arena = Arena::<f64>::new(1, FRAMES);
-        // Not representable in `f32`: the narrowing is visible.
+        // Not representable in `f32`: a narrowing would be visible.
         let block: Vec<f64> = (0..FRAMES).map(|i| 0.1 * (i + 1) as f64).collect();
         arena.slot_mut(0, FRAMES).copy_from_slice(&block);
-        let (mut reader, mut writer) = TapReader::pair(1, Samples(1024));
+        let (mut reader, mut writer) = TapReader::<f64>::pair(1, Samples(1024));
         tap_op::<f64, _>(&mut writer, &arena, &[0], Frame::ZERO, FRAMES);
-        let mut out = vec![0.0f32; FRAMES];
+        let mut out = vec![0.0f64; FRAMES];
         assert_eq!(reader.pop_into(&mut out), Samples(FRAMES));
-        let want: Vec<f32> = block.iter().map(|&x| x as f32).collect();
-        assert_eq!(out, want);
-        assert_ne!(f64::from(out[0]), block[0], "the block was narrowed");
+        assert_eq!(out, block);
+        assert_ne!(f64::from(block[0] as f32), block[0]);
     }
 }
