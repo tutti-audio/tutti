@@ -122,9 +122,11 @@
 //! plugin is told per `tutti_plugin_host::needs_announcement`: on a change of
 //! mode, or if it was never told.
 
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex};
+
 use std::time::{Duration, Instant};
 use tutti_plugin_types::MainThreadMarker;
+use tutti_rt::LockExt;
 
 use tutti_graph::NodeKey;
 use tutti_plugin::catalog::{
@@ -581,24 +583,19 @@ pub(crate) fn event(node: NodeKey, change: PluginChange) -> SessionEvent {
     SessionEvent::Plugin(PluginEvent { node, change })
 }
 
-/// `m`'s contents, whether or not a panic poisoned it: the queues hold plain values.
-fn locked<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(PoisonError::into_inner)
-}
-
 /// What a plugin reported, waiting for the next `Phase::Plugins`.
 pub(crate) type Notices = Arc<Mutex<Vec<Notice>>>;
 
 /// Queues `notice` as if the plugin had reported it.
 pub(crate) fn queue(notices: &Notices, notice: Notice) {
-    locked(notices).push(notice);
+    notices.lock_recover().push(notice);
 }
 
 /// A queue for what `handle` reports and the subscription that fills it.
 fn hear(handle: &PluginHandle) -> (Notices, Subscription) {
     let notices = Notices::default();
     let queue = Arc::clone(&notices);
-    let hearing = handle.subscribe(move |notice| locked(&queue).push(notice));
+    let hearing = handle.subscribe(move |notice| queue.lock_recover().push(notice));
     (notices, hearing)
 }
 
@@ -890,17 +887,17 @@ struct GateState {
 impl Gate {
     /// The plugin is gone: removed or replaced.
     pub(crate) fn end(&self) {
-        locked(&self.0).ended = true;
+        self.0.lock_recover().ended = true;
     }
 
     /// The ids the mirror declares now (a read landed).
     pub(crate) fn declare(&self, mirror: &tutti_plugin_host::PluginParamValues) {
-        locked(&self.0).declared = mirror.descriptors().iter().map(|p| p.id()).collect();
+        self.0.lock_recover().declared = mirror.descriptors().iter().map(|p| p.id()).collect();
     }
 
     /// Whether the plugin is still there and declares `id`.
     pub(crate) fn holds(&self, id: ParamId) -> bool {
-        let state = locked(&self.0);
+        let state = self.0.lock_recover();
         !state.ended && state.declared.contains(&id)
     }
 }
@@ -2118,7 +2115,7 @@ impl<C: crate::Clock> Session<C> {
             }
             // What the plugin reported since the last update, in the order
             // it reported it.
-            let heard = std::mem::take(&mut *locked(&hosted.notices));
+            let heard = std::mem::take(&mut *hosted.notices.lock_recover());
             // A rescan the plugin announced re-reads what it declares and the
             // value of each, as a job below.
             if heard.iter().any(|notice| {
@@ -2451,7 +2448,7 @@ mod tests {
         let queue = Arc::clone(&held);
         let mut session = Session::builder()
             .snapshot_interval(Duration::from_secs(1))
-            .spawn_with(move |job| locked(&queue).push(job))
+            .spawn_with(move |job| queue.lock_recover().push(job))
             .build_detached(SampleRate::SR_48K)
             .unwrap();
         let saves = Arc::new(AtomicUsize::new(0));
@@ -2534,7 +2531,7 @@ mod tests {
         /// `Phase::Plugins` at `t0 + ms`: the jobs it submitted.
         fn plugins_at(&mut self, ms: u64) -> Vec<Task> {
             let _ = self.events_at(ms);
-            std::mem::take(&mut *locked(&self.held))
+            std::mem::take(&mut *self.held.lock_recover())
         }
 
         /// `Phase::Collect`: what the jobs sent lands; the events it reported.
