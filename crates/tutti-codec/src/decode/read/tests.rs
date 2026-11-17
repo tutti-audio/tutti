@@ -47,3 +47,35 @@ fn a_track_with_no_sample_rate_is_refused() {
         tutti_types::SampleRate::SR_48K
     );
 }
+
+/// A header stating far more frames than the source holds reserves a bounded
+/// count, however large the stated figure and however few the channels.
+#[test]
+fn the_reserve_for_a_stated_frame_count_is_bounded() {
+    assert_eq!(reserved_frames(100, 2), 100);
+    assert_eq!(reserved_frames(u64::MAX, 1), RESERVE_SAMPLES as usize);
+    assert_eq!(reserved_frames(u64::MAX, 8), RESERVE_SAMPLES as usize / 8);
+}
+
+/// A mono 16-bit header whose data length (`0x4500_0040` bytes) far exceeds the
+/// 32 bytes present decodes to the 16 frames present.
+#[test]
+fn a_data_length_far_past_the_source_decodes_the_frames_present() {
+    let mut bytes = b"RIFF".to_vec();
+    bytes.extend(0xFFF7_FFFFu32.to_le_bytes());
+    bytes.extend(b"WAVEfmt ");
+    bytes.extend(16u32.to_le_bytes());
+    for field in [1u16, 1] {
+        bytes.extend(field.to_le_bytes());
+    }
+    bytes.extend(8_000u32.to_le_bytes());
+    bytes.extend(16_000u32.to_le_bytes());
+    bytes.extend(2u16.to_le_bytes());
+    bytes.extend(16u16.to_le_bytes());
+    bytes.extend(b"data");
+    bytes.extend(0x4500_0040u32.to_le_bytes());
+    bytes.extend([0u8; 32]);
+    let wave = Wave::from_bytes(bytes).expect("decodes");
+    assert_eq!(wave.channels(), 1);
+    assert_eq!(wave.len().0, 16);
+}

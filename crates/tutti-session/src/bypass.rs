@@ -228,7 +228,8 @@ pub(crate) mod tests {
     use tutti_plugin_types::{
         AnyThread, AutomationMode, AutomationModeError, BlockCounts, BypassWrite, Health,
         LoadedPlugin, Normalized, OwnBypass, ParamFlags, ParamId, ParameterInfo, PluginDescriptor,
-        PluginFailure, RenderMode, StateError, TerminationReason, bypass_value, is_bypassed,
+        PluginFailure, RenderMode, StateError, StateUse, TerminationReason, bypass_value,
+        is_bypassed,
     };
 
     use tutti_graph::NodeMode;
@@ -295,7 +296,7 @@ pub(crate) mod tests {
         fn parameter_value_from_text(&self, _id: ParamId, _text: &str) -> Option<Normalized> {
             None
         }
-        fn save_state(&self) -> Result<Vec<u8>, StateError> {
+        fn save_state(&self, _: StateUse) -> Result<Vec<u8>, StateError> {
             Err(StateError::NoStateRoute)
         }
         fn set_render_mode(&self, _mode: RenderMode) -> bool {
