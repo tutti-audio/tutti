@@ -34,9 +34,8 @@ tutti-types = { version = "0.0.1", path = "../tutti-types" }
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 vst3 = "0.3"
-
-# The Linux `IRunLoop` polls the descriptors a plugin registered.
-[target.'cfg(target_os = "linux")'.dependencies]
+# The Linux `IRunLoop` polls the descriptors a plugin registered; the run loop's
+# typed values (`Ready`, `Interest`, `FdId`) are named on every platform.
 tutti-plugin-ipc-ffi = { version = "0.0.1", path = "../tutti-plugin-ipc-ffi" }
 
 # The VST3 macOS module entry point is `bundleEntry(CFBundleRef)`, so building a

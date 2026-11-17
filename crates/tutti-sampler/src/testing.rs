@@ -15,6 +15,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use tutti_buffers::Planes;
 
 use tutti_graph::{Env, Node, TransportChanges, TransportPosition, contract};
 use tutti_types::{Beat, Bpm, Frame, SampleRate, Samples};
@@ -140,7 +141,7 @@ pub fn block(
     frames: usize,
 ) -> Vec<Vec<f32>> {
     let env = t.env(frames, rate);
-    contract::drive_input(node, &env, &[], &[], &[]).audio
+    contract::drive_input(node, &env, Planes::default(), &[], &[]).audio
 }
 
 /// `frames` of `node` in blocks of `block_len`, the transport moved after

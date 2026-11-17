@@ -32,7 +32,8 @@ const SR: SampleRate = SampleRate::SR_48K;
 /// Broadband input from a cheap LCG, so the bench needs no `rand`.
 fn fill_noise<N: Node>(d: &mut Direct<N>) {
     let mut state = 0x2545_f491_u32;
-    for ch in d.inputs_mut() {
+    for ch in d.inputs_mut().iter_mut() {
+        let ch = ch.into_samples_mut();
         for s in ch.iter_mut() {
             state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
             *s = (state >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0;
@@ -107,7 +108,7 @@ fn strip(c: &mut Criterion) {
         g.bench_with_input(BenchmarkId::new("steady", width), &width, |b, _| {
             b.iter(|| {
                 d.block();
-                black_box(d.output(0)[BLOCK - 1]);
+                black_box(d.output().plane(0).samples()[BLOCK - 1]);
             })
         });
 
@@ -117,7 +118,7 @@ fn strip(c: &mut Criterion) {
                 flip = !flip;
                 d.node.set_volume(Amplitude(if flip { 0.75 } else { 0.5 }));
                 d.block();
-                black_box(d.output(0)[BLOCK - 1]);
+                black_box(d.output().plane(0).samples()[BLOCK - 1]);
             })
         });
 
@@ -127,7 +128,7 @@ fn strip(c: &mut Criterion) {
         g.bench_with_input(BenchmarkId::new("fed", width), &width, |b, _| {
             b.iter(|| {
                 d.block();
-                black_box(d.output(0)[BLOCK - 1]);
+                black_box(d.output().plane(0).samples()[BLOCK - 1]);
             })
         });
     }
@@ -138,7 +139,7 @@ fn strip(c: &mut Criterion) {
     g.bench_function(BenchmarkId::new("reference", 2), |b| {
         b.iter(|| {
             d.block();
-            black_box(d.output(0)[BLOCK - 1]);
+            black_box(d.output().plane(0).samples()[BLOCK - 1]);
         })
     });
 
@@ -146,7 +147,7 @@ fn strip(c: &mut Criterion) {
     g.bench_function(BenchmarkId::new("empty", 2), |b| {
         b.iter(|| {
             d.block();
-            black_box(d.output(0)[BLOCK - 1]);
+            black_box(d.output().plane(0).samples()[BLOCK - 1]);
         })
     });
     g.finish();

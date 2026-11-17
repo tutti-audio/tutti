@@ -469,7 +469,7 @@ mod tests {
             for chunk in x.chunks(64) {
                 let rate = lane.map(|v| vec![v; chunk.len()]);
                 let params = [rate.as_deref(), None, None];
-                y.extend(drive(&mut node, RATE, &[chunk], &params).remove(0));
+                y.extend(drive(&mut node, RATE, Planes::new(&[chunk]).unwrap(), &params).remove(0));
             }
             y
         };
@@ -509,7 +509,7 @@ mod tests {
         for chunk in x.chunks(64) {
             let lane = vec![8.0f32; chunk.len()];
             let params = [None, Some(&lane[..]), None];
-            y.extend(drive(&mut node, RATE, &[chunk], &params).remove(0));
+            y.extend(drive(&mut node, RATE, Planes::new(&[chunk]).unwrap(), &params).remove(0));
         }
         let w = std::f64::consts::TAU * 1_000.0 / RATE.get();
         let worst = (n - 256..n)
@@ -542,7 +542,9 @@ mod tests {
                 let at = n * block;
                 let l = &lane[at..at + chunk.len()];
                 let params = [None, driven.then_some(l), None];
-                out.extend(drive(&mut node, RATE, &[chunk], &params).remove(0));
+                out.extend(
+                    drive(&mut node, RATE, Planes::new(&[chunk]).unwrap(), &params).remove(0),
+                );
             }
             out
         };
@@ -575,7 +577,7 @@ mod tests {
                     assert!(set.set(UnitParam::Depth, 0.2));
                     assert!(set.set(UnitParam::Feedback, 0.1));
                 }
-                out.extend(drive(&mut node, RATE, &[chunk], &[]).remove(0));
+                out.extend(drive(&mut node, RATE, Planes::new(&[chunk]).unwrap(), &[]).remove(0));
             }
             out
         };
@@ -603,7 +605,13 @@ mod tests {
             let mut node = prepared(node, SampleRate::SR_44K1, 1_024);
             let mut x = [0.0f32; 1_024];
             x[0] = 1.0;
-            let y = drive(&mut node, SampleRate::SR_44K1, &[&x], &[]).remove(0);
+            let y = drive(
+                &mut node,
+                SampleRate::SR_44K1,
+                Planes::new(&[&x]).unwrap(),
+                &[],
+            )
+            .remove(0);
             y[500..].iter().fold(0.0f32, |m, s| m.max(s.abs()))
         };
         assert!(ring(0.9) > 1e-3, "feedback rings: {}", ring(0.9));
@@ -891,7 +899,7 @@ mod tests {
         let blocks = |node: &mut PhaserNode, from: usize| -> Vec<f32> {
             let mut out = Vec::new();
             for chunk in x[from..].chunks(37) {
-                out.extend(drive(node, RATE, &[chunk, chunk], &[]).remove(0));
+                out.extend(drive(node, RATE, Planes::new(&[chunk, chunk]).unwrap(), &[]).remove(0));
             }
             out
         };
@@ -923,7 +931,7 @@ mod tests {
                     assert!(set.set(UnitParam::Depth, 0.2));
                     assert!(set.set(UnitParam::Feedback, 0.1));
                 }
-                out.extend(drive(&mut node, RATE, &[chunk], &[]).remove(0));
+                out.extend(drive(&mut node, RATE, Planes::new(&[chunk]).unwrap(), &[]).remove(0));
             }
             out
         };
@@ -947,7 +955,7 @@ mod tests {
         };
         let blocks = |node: &mut PhaserNode| -> Vec<f32> {
             x.chunks(64)
-                .flat_map(|c| drive(node, RATE, &[c], &[]).remove(0))
+                .flat_map(|c| drive(node, RATE, Planes::new(&[c]).unwrap(), &[]).remove(0))
                 .collect()
         };
         let mut used = prepared(
