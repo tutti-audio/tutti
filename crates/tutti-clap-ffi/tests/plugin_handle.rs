@@ -25,6 +25,7 @@ use tutti_clap_ffi::{
 };
 use tutti_clap_test_plugin::{PLUGIN_ID, REPORTED_LATENCY_SAMPLES, probe_tag};
 use tutti_plugin_types::SampleFormat;
+use tutti_types::{MaxBlock, SampleRate, Samples};
 
 fn probe_path() -> &'static str {
     use std::sync::OnceLock;
@@ -211,7 +212,7 @@ fn a_bundle_selects_by_id_and_refuses_an_unknown_one() {
     );
     assert!(bundle.select(Some(PLUGIN_ID.to_str().unwrap())).is_ok());
     let err = bundle.select(Some("no.such.plugin")).unwrap_err();
-    assert!(err.reason().contains("no.such.plugin"), "{err}");
+    assert!(err.to_string().contains("no.such.plugin"), "{err}");
 }
 
 /// The main-thread half answers extension reads, and a `Plugin` is not
@@ -220,7 +221,10 @@ fn a_bundle_selects_by_id_and_refuses_an_unknown_one() {
 fn the_main_thread_half_reads_the_plugins_extensions() {
     let _g = lock();
     let plugin = load(Arc::default());
-    assert_eq!(plugin.latency(main_thread()), REPORTED_LATENCY_SAMPLES);
+    assert_eq!(
+        plugin.latency(main_thread()),
+        Samples(REPORTED_LATENCY_SAMPLES as usize)
+    );
     assert!(plugin.param_count(main_thread()) > 0);
     assert!(plugin.audio_port_count(main_thread(), false) > 0);
     assert!(plugin.audio_port_info(main_thread(), 0, false).is_some());
@@ -239,13 +243,21 @@ fn activation_hands_out_one_audio_half_and_refuses_a_second_activation() {
     let mut plugin = load(Arc::default());
     assert!(plugin.audio_side().is_none(), "inactive: no audio half");
     plugin
-        .activate(main_thread(), 48_000.0, 1, 512)
+        .activate(
+            main_thread(),
+            SampleRate::SR_48K,
+            MaxBlock::of(Samples(512)),
+        )
         .expect("activates");
     let side = plugin.audio_side().expect("active: an audio half");
     assert_eq!(plugin.audio_sides(), 1);
     assert!(plugin.owns(&side));
     assert_eq!(
-        plugin.activate(main_thread(), 48_000.0, 1, 512),
+        plugin.activate(
+            main_thread(),
+            SampleRate::SR_48K,
+            MaxBlock::of(Samples(512))
+        ),
         Err(ActivateError::ProcessorStillAlive),
         "the half is still alive: its own error, not a refusal"
     );
@@ -264,7 +276,11 @@ fn a_block_runs_the_plugin_through_the_bound_channels() {
     set_render_mode(RENDER_TAG_ONLY);
     let mut plugin = load(Arc::default());
     plugin
-        .activate(main_thread(), 48_000.0, 1, 512)
+        .activate(
+            main_thread(),
+            SampleRate::SR_48K,
+            MaxBlock::of(Samples(512)),
+        )
         .expect("activates");
     let mut side = plugin.audio_side().unwrap();
     let mut scratch = PortScratch::new(SampleFormat::Float32);
@@ -287,7 +303,11 @@ fn a_short_channel_is_refused_without_calling_the_plugin() {
     let _g = lock();
     let mut plugin = load(Arc::default());
     plugin
-        .activate(main_thread(), 48_000.0, 1, 512)
+        .activate(
+            main_thread(),
+            SampleRate::SR_48K,
+            MaxBlock::of(Samples(512)),
+        )
         .expect("activates");
     let mut side = plugin.audio_side().unwrap();
     let mut scratch = PortScratch::new(SampleFormat::Float32);
@@ -377,7 +397,11 @@ fn a_retired_audio_half_calls_nothing() {
     let _g = lock();
     let mut plugin = load(Arc::default());
     plugin
-        .activate(main_thread(), 48_000.0, 1, 512)
+        .activate(
+            main_thread(),
+            SampleRate::SR_48K,
+            MaxBlock::of(Samples(512)),
+        )
         .expect("activates");
     let mut side = plugin.audio_side().unwrap();
     let mut scratch = PortScratch::new(SampleFormat::Float32);
@@ -406,7 +430,11 @@ fn a_mismatched_block_is_refused_before_the_retired_check() {
     let _g = lock();
     let mut plugin = load(Arc::default());
     plugin
-        .activate(main_thread(), 48_000.0, 1, 512)
+        .activate(
+            main_thread(),
+            SampleRate::SR_48K,
+            MaxBlock::of(Samples(512)),
+        )
         .expect("activates");
     let mut side = plugin.audio_side().unwrap();
     drop(plugin);
@@ -444,7 +472,11 @@ fn a_deactivated_plugins_audio_half_is_retired() {
     let _g = lock();
     let mut plugin = load(Arc::default());
     plugin
-        .activate(main_thread(), 48_000.0, 1, 512)
+        .activate(
+            main_thread(),
+            SampleRate::SR_48K,
+            MaxBlock::of(Samples(512)),
+        )
         .expect("activates");
     let mut side = plugin.audio_side().unwrap();
     plugin.deactivate(main_thread());
@@ -468,7 +500,11 @@ fn deactivating_a_processing_plugin_stops_it_and_a_drop_tears_it_down() {
     {
         let mut plugin = load(Arc::default());
         plugin
-            .activate(main_thread(), 48_000.0, 1, 512)
+            .activate(
+                main_thread(),
+                SampleRate::SR_48K,
+                MaxBlock::of(Samples(512)),
+            )
             .expect("activates");
         let mut side = plugin.audio_side().unwrap();
         let mut scratch = PortScratch::new(SampleFormat::Float32);
@@ -481,17 +517,30 @@ fn deactivating_a_processing_plugin_stops_it_and_a_drop_tears_it_down() {
         plugin.deactivate(main_thread());
         assert!(!side.is_processing(), "deactivate stops processing first");
         assert_eq!(
-            plugin.activate(main_thread(), 48_000.0, 1, 512),
+            plugin.activate(
+                main_thread(),
+                SampleRate::SR_48K,
+                MaxBlock::of(Samples(512))
+            ),
             Err(ActivateError::ProcessorStillAlive)
         );
         drop(side);
         assert!(
-            plugin.activate(main_thread(), 48_000.0, 1, 512).is_ok(),
+            plugin
+                .activate(
+                    main_thread(),
+                    SampleRate::SR_48K,
+                    MaxBlock::of(Samples(512))
+                )
+                .is_ok(),
             "and activates again once gone"
         );
     }
     let plugin = load(Arc::default());
-    assert_eq!(plugin.latency(main_thread()), REPORTED_LATENCY_SAMPLES);
+    assert_eq!(
+        plugin.latency(main_thread()),
+        Samples(REPORTED_LATENCY_SAMPLES as usize)
+    );
 }
 
 /// Calls an exported `extern "C" fn(u32)` switch of the reference plugin.
@@ -526,7 +575,11 @@ unsafe impl TaskPool for CountingPool {
 /// Activates `plugin` and returns its audio half and a scratch for it.
 fn start(plugin: &mut Plugin, max_frames: u32) -> (tutti_clap_ffi::AudioSide, PortScratch) {
     plugin
-        .activate(main_thread(), 48_000.0, 1, max_frames)
+        .activate(
+            main_thread(),
+            SampleRate::SR_48K,
+            MaxBlock::new(Samples(max_frames as usize)).expect("a block"),
+        )
         .expect("activates");
     let mut scratch = PortScratch::new(SampleFormat::Float32);
     scratch.resize_for(&[2], &[2], max_frames as usize);
@@ -633,7 +686,11 @@ fn state_gated_entries_are_refused_while_active() {
     );
 
     plugin
-        .activate(main_thread(), 48_000.0, 1, 512)
+        .activate(
+            main_thread(),
+            SampleRate::SR_48K,
+            MaxBlock::of(Samples(512)),
+        )
         .expect("activates");
     assert_eq!(
         plugin.select_audio_ports_config(main_thread(), 0),
@@ -759,7 +816,11 @@ fn one_process_call_runs_either_width_and_refuses_a_mismatch() {
     switch_u32(b"tutti_test_plugin_set_ports_64bit\0", 3);
     let mut plugin = load(Arc::default());
     plugin
-        .activate(main_thread(), 48_000.0, 1, 512)
+        .activate(
+            main_thread(),
+            SampleRate::SR_48K,
+            MaxBlock::of(Samples(512)),
+        )
         .expect("activates");
     let mut side = plugin.audio_side().unwrap();
 
@@ -848,45 +909,41 @@ fn an_active_plugin_is_not_activated_again_even_with_no_audio_half() {
     let _g = lock();
     let mut plugin = load(Arc::default());
     plugin
-        .activate(main_thread(), 48_000.0, 1, 512)
+        .activate(
+            main_thread(),
+            SampleRate::SR_48K,
+            MaxBlock::of(Samples(512)),
+        )
         .expect("activates");
     assert_eq!(plugin.audio_sides(), 0, "no half was taken");
     assert_eq!(
-        plugin.activate(main_thread(), 44_100.0, 1, 256),
+        plugin.activate(
+            main_thread(),
+            SampleRate::SR_44K1,
+            MaxBlock::of(Samples(256))
+        ),
         Err(ActivateError::AlreadyActive)
     );
     plugin.deactivate(main_thread());
     plugin
-        .activate(main_thread(), 44_100.0, 1, 256)
+        .activate(
+            main_thread(),
+            SampleRate::SR_44K1,
+            MaxBlock::of(Samples(256)),
+        )
         .expect("after a deactivation it activates again");
 }
 
-/// The numbers `activate` hands the plugin are the ones CLAP allows: a rate
-/// that is finite and positive, at least one frame, and a minimum no larger
-/// than the maximum. Anything else is refused with the plugin uncalled.
+/// A block of one frame is the smallest CLAP allows, and activation takes it.
 /// Spec: clap.plugin.activate
 #[test]
-fn activation_refuses_numbers_clap_forbids() {
+fn a_one_frame_block_is_a_legal_activation() {
     let _g = lock();
     let mut plugin = load(Arc::default());
-    for (rate, min, max) in [
-        (0.0, 1, 512),
-        (-48_000.0, 1, 512),
-        (f64::NAN, 1, 512),
-        (f64::INFINITY, 1, 512),
-        (48_000.0, 0, 512),
-        (48_000.0, 513, 512),
-    ] {
-        assert_eq!(
-            plugin.activate(main_thread(), rate, min, max),
-            Err(ActivateError::BadConfig),
-            "{rate} {min} {max}"
-        );
-        assert!(!plugin.is_active(), "the plugin was not called");
-    }
     plugin
-        .activate(main_thread(), 48_000.0, 1, 1)
+        .activate(main_thread(), SampleRate::SR_48K, MaxBlock::of(Samples(1)))
         .expect("a one-frame block is legal");
+    assert!(plugin.is_active());
 }
 
 /// `process` is refused, plugin uncalled, for a block outside the activation's
@@ -937,6 +994,90 @@ fn a_block_outside_the_activation_is_refused_before_the_plugin_is_called() {
     assert!(!side.is_processing(), "the plugin was never called");
     render(&mut side, &mut scratch, &mut outputs, FRAMES as u32)
         .expect("the plugin's own layout runs");
+}
+
+/// How many times the reference plugin's `reset` ran, through its exported
+/// thread capture.
+fn reset_visits() -> u32 {
+    use tutti_clap_test_plugin::{Site, ThreadCapture};
+    let mut capture = ThreadCapture::default();
+    // SAFETY: the reference cdylib's exported capture, documented signature,
+    // over a valid `ThreadCapture`.
+    unsafe {
+        let get: libloading::Symbol<unsafe extern "C" fn(*mut ThreadCapture) -> bool> = library()
+            .get(b"tutti_test_plugin_thread_capture\0")
+            .expect("capture symbol");
+        assert!(get(&mut capture));
+    }
+    capture.sites[Site::Reset as usize].visits
+}
+
+/// An event list the plugin asks the size of during `params.flush`, which an
+/// active plugin runs under the audio claim: the wrapped closure runs there, on the
+/// main thread, while the claim is held, and the list is empty. The closure
+/// runs there.
+struct AtFlush<F: Fn()>(F);
+
+impl<F: Fn()> EventSource for AtFlush<F> {
+    fn len(&self) -> usize {
+        (self.0)();
+        0
+    }
+
+    fn get(&self, _index: usize) -> Option<EventRef<'_>> {
+        None
+    }
+}
+
+/// A block never waits on the main thread. While an active `params.flush`
+/// holds the instance, a block is refused `Busy` and the plugin is not called,
+/// a `reset` is owed and runs first on the next block, and a `stop` returns
+/// without waiting and leaves the plugin processing.
+/// `reset` and `stop_processing` are audio-thread entries, serialised with
+/// `process`.
+/// Spec: clap.plugin.reset, clap.plugin.stop_processing, clap.ext.params.flush
+#[test]
+fn a_flush_holding_the_instance_refuses_a_block_owes_a_reset_and_does_not_wait_for_a_stop() {
+    use std::cell::RefCell;
+    let _g = lock();
+    set_render_mode(RENDER_TAG_ONLY);
+    let mut plugin = load(Arc::default());
+    let (side, scratch) = start(&mut plugin, 512);
+    let mut left = vec![0.0f32; FRAMES];
+    let mut right = vec![0.0f32; FRAMES];
+    let mut outputs: Vec<&mut [f32]> = vec![&mut left, &mut right];
+    let side = RefCell::new(side);
+    let scratch = RefCell::new(scratch);
+    let outputs = RefCell::new(&mut outputs);
+    let block = || {
+        render(
+            &mut side.borrow_mut(),
+            &mut scratch.borrow_mut(),
+            &mut outputs.borrow_mut(),
+            FRAMES as u32,
+        )
+    };
+    block().expect("a first block starts processing");
+    assert!(side.borrow().is_processing());
+    let resets = reset_visits();
+
+    let during_flush = AtFlush(|| {
+        assert_eq!(block(), Err(ProcessError::Busy));
+        side.borrow_mut().reset();
+        side.borrow_mut().stop();
+        assert!(
+            side.borrow().is_processing(),
+            "a stop meanwhile does not wait"
+        );
+        assert_eq!(reset_visits(), resets, "the reset waits for the claim");
+    });
+    assert!(plugin.params_flush(main_thread(), &during_flush, &mut Count::default()));
+
+    block().expect("the next block runs");
+    assert_eq!(reset_visits(), resets + 1, "the owed reset ran, once");
+    assert!(side.borrow().is_processing());
+    side.borrow_mut().stop();
+    assert!(!side.borrow().is_processing(), "an uncontended stop stops");
 }
 
 /// Dropping a `Plugin` with an open editor destroys the editor first: CLAP

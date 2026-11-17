@@ -32,8 +32,8 @@ pub enum ProcessError {
     /// scratch was sized for; nothing was called.
     #[error("the block is longer than the plugin was activated for")]
     BlockTooLarge,
-    /// The block is shorter than the plugin was activated for (`min_frames`,
-    /// at least one); nothing was called.
+    /// The block is shorter than the plugin was activated for (an
+    /// empty block); nothing was called.
     #[error("the block is shorter than the plugin was activated for")]
     BlockTooSmall,
     /// The call's port channel counts are not the plugin's own audio ports as
@@ -492,7 +492,7 @@ impl AudioSide {
             return Err(ProcessError::FormatMismatch);
         }
         // Never waits on the main thread: a block it holds the instance for
-        // is refused, as the other formats refuse one.
+        // is refused as `Busy`.
         let Some(_claim) = self.core.roles.try_claim() else {
             return Err(ProcessError::Busy);
         };
@@ -505,7 +505,7 @@ impl AudioSide {
         if frames > self.core.max_frames.load(Ordering::Acquire) {
             return Err(ProcessError::BlockTooLarge);
         }
-        if frames < self.core.min_frames.load(Ordering::Acquire) {
+        if frames < crate::plugin::MIN_FRAMES {
             return Err(ProcessError::BlockTooSmall);
         }
         // The plugin indexes `audio_inputs`/`audio_outputs` by the ports it

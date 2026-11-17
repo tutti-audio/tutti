@@ -584,10 +584,10 @@ impl AudioBridge {
         // copying a gigabyte into a command that is only going to be rejected,
         // and it answers on the calling thread rather than after a round trip
         // through the bridge.
-        if data.len() > crate::protocol::MAX_STATE_BYTES {
+        if data.len() > tutti_plugin_types::MAX_STATE_BYTES {
             return Err(StateError::TooLarge {
                 bytes: data.len(),
-                limit: crate::protocol::MAX_STATE_BYTES,
+                limit: tutti_plugin_types::MAX_STATE_BYTES,
             });
         }
         let (ask_resp, reply) = ask::<std::result::Result<(), StateError>>();

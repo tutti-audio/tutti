@@ -186,7 +186,7 @@ fn assert_roles(cap: &ThreadCapture, site: Site, want_main: bool, want_audio: bo
 
 /// The host must answer `clap.thread-check` correctly at every plugin entry
 /// point, and the two roles must stay mutually exclusive *on the real
-/// paths* — not just when a test calls `claim_audio_thread()` by hand.
+/// paths* — not just where a test claims the audio-thread role by hand.
 ///
 /// The interesting sites are `start_processing` and `process`, driven here from
 /// the OS main thread, so a host comparing `current().id() == main_thread_id`
