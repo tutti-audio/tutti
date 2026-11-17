@@ -17,7 +17,10 @@ fn initiator() -> (ProfileInitiator, Instant) {
     initiator.on_message(&Decoded::Message(CiMessage::ProfileReply {
         header: CiHeader::new(Muid::of(PEER)),
         to: Muid::of(OURS),
-        profiles: tutti_midi_device::ProfileLists::new(vec![ProfileId::MPE], vec![]).unwrap(),
+        profiles: tutti_midi_device::ProfileLists::new(
+            tutti_midi_device::ProfileList::try_from(vec![ProfileId::MPE]).unwrap(),
+            tutti_midi_device::ProfileList::default(),
+        ),
     }));
     (initiator, now)
 }

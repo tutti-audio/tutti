@@ -353,7 +353,7 @@ impl PeReassembler {
                 send: None,
             });
         }
-        let header = PeHeader::parse(chunk.header()).map_err(|e| PeRefused {
+        let header = PeHeader::try_from(chunk.header()).map_err(|e| PeRefused {
             error: e.into(),
             send: Some(PeSignal::Malformed { request_id: id }),
         })?;
