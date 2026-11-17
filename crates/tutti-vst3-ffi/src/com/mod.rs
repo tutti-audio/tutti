@@ -11,7 +11,11 @@ mod message;
 mod param_changes;
 mod param_queue;
 mod plug_frame;
+// The one platform seam: the Linux run loop, or its zero-sized stand-in with the same surface.
 #[cfg(target_os = "linux")]
+mod run_loop;
+#[cfg(not(target_os = "linux"))]
+#[path = "no_run_loop.rs"]
 mod run_loop;
 mod stream;
 
@@ -49,6 +53,5 @@ pub(crate) use param_changes::param_changes_ptr;
 pub use param_changes::{Busy, ParamStaging, ParameterChangesImpl};
 pub use param_queue::MIN_POINT_ROOM;
 pub(crate) use plug_frame::HostPlugFrame;
-#[cfg(target_os = "linux")]
 pub(crate) use run_loop::{OwnedScope, Owner, RunLoop};
 pub(crate) use stream::BStream;

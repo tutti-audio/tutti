@@ -101,7 +101,7 @@ crates/             everything shipped, directory name = package name
   tutti-types       # Engine value vocabulary + io::{Source, Sink, Pull}.
                     #   No workspace dependency; forbids `unsafe`.
   tutti-rt          # Real-time-safe shared-memory primitives: the lock-free and
-                    #   `unsafe` runtime structure, every loom model, `ArcLend`.
+                    #   `unsafe` runtime structure, every loom model, `Publisher`.
   tutti-graph       # The graph: `Node` contract, Topology->Plan compiler (PDC),
                     #   executor. Design doc 013.
   tutti-transport   # Transport: tempo, loop, motion state machine, timed commands
@@ -184,14 +184,14 @@ same behaviour is not a type.
 
 Non-scalar state handed from a control thread to the audio thread — a routing
 table, a `MeterMap`, a coefficient set — goes through
-`tutti_rt::{ArcLend, Loan}`, re-exported from the `arc-lend` crate
+`tutti_rt::{Publisher, Reader, Loan}`, re-exported from the `arc-lend` crate
 (github.com/tutti-audio/arc-lend, <https://docs.rs/arc-lend>). Scalars
 keep using `Param<U>`. (It was `RtPublish`/`RtRef` in `tutti-types` until it
 moved into its own crate.)
 
 **The invariant: the audio thread never holds an owning handle to published
 state.** A reading thread lends through a `Reader`, registered on the cell
-(`ArcLend::reader`, from an `Arc` of it) on the control side and kept by the
+(`Publisher::reader`) on the control side and kept by the
 node or structure that reads. `Reader::lend` returns a `Loan`: a borrow,
 `!Send`, lifetime-tied to the reader, with no way to get an owning `Arc` back
 out. `publish()` is control-thread only: it frees every retired value no
@@ -213,9 +213,9 @@ Rules:
   takes the publisher's lock and may allocate a block of slots, so it happens
   where the node (or the streamer's cycle, or the MIDI drain) is built, and
   the reader is stored beside what it reads. A fork builds its node over a
-  new cell and registers there. `Reader::clone` registers a new reader on the
-  same cell, so a derived `Clone` on a node holding one is a node with its
-  own reader, never a shared slot.
+  new cell and registers there. A `Reader` is not `Clone`: a node that clones
+  pairs its reader with the cell's `Publisher` and registers a new reader in a
+  hand `Clone`, so a cloned node has its own reader, never a shared slot.
 - **Lend once per block, never per sample.** A lend is a `Release` store, a
   `SeqCst` fence, an `Acquire` load and a `Relaxed` store, all on the
   reader's own cache line but the load. Measured at 20-30 ns p50 per block
@@ -263,8 +263,8 @@ Rules:
   per cell.
 - **Never `publish` from the audio thread** — it takes the publisher's lock
   *and* frees inside it.
-- Nullable hot-swap slots go through `ArcLend` as well, as
-  `ArcLend<Option<Arc<_>>>`. The plugin nodes' meter was one, holding the
+- Nullable hot-swap slots go through `Publisher` as well, as
+  `Publisher<Option<Arc<_>>>`. The plugin nodes' meter was one, holding the
   installed meter cell's `Arc`; it was `ArcSwapOption` until a host that
   installed a meter it did not keep, then replaced it mid-block, was shown to
   free the whole cell on the audio thread (the guard-debt hazard below).
@@ -274,8 +274,7 @@ Rules:
   enumeration in `tutti-midi-hardware`, and the per-channel compensation
   table (`PrerollTable`, a lock), which the session writes and only a host
   reads. The hardware MIDI per-block port set,
-  which the audio thread does read, is an `ArcLend` behind a publisher
-  lock.
+  which the audio thread does read, goes through a `Publisher`.
 
 **The guarantee is structural.** The cell (then `RtPublish`) used to wrap `ArcSwap`, which made
 RT deallocation very unlikely and bounded but not *impossible*: a guard whose

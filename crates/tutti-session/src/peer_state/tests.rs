@@ -102,8 +102,8 @@ mod device {
     /// the OS renumbered and renamed the port.
     #[test]
     fn a_device_is_the_same_peer_under_another_listing_row() {
-        let saved = peer(listed(1, "Keys"), Learned::new().with_identity(model(7)));
-        let now = peer(listed(9, "Keys 2"), Learned::new().with_identity(model(7)));
+        let saved = peer(listed(1, "Keys"), Learned::new().identified(model(7)));
+        let now = peer(listed(9, "Keys 2"), Learned::new().identified(model(7)));
         assert_eq!(state_of(&saved).check_for(&now), Ok(()));
     }
 
@@ -111,8 +111,8 @@ mod device {
     #[test]
     fn another_model_under_the_same_listing_row_is_another_peer() {
         let info = listed(1, "Keys");
-        let saved = peer(info.clone(), Learned::new().with_identity(model(7)));
-        let now = peer(info, Learned::new().with_identity(model(8)));
+        let saved = peer(info.clone(), Learned::new().identified(model(7)));
+        let now = peer(info, Learned::new().identified(model(8)));
         let refused = state_of(&saved).check_for(&now).expect_err("another model");
         assert_eq!(refused.found(), &saved);
         assert_eq!(refused.expected(), &now);
@@ -129,9 +129,7 @@ mod device {
         let with = |id: &str| {
             peer(
                 listed(1, "Keys"),
-                Learned::new()
-                    .with_identity(model(7))
-                    .with_instance_id(unit(id)),
+                Learned::new().identified(model(7)).instanced(unit(id)),
             )
         };
         let state = state_of(&with("SN-1"));
@@ -142,7 +140,7 @@ mod device {
     /// **A device that said nothing is another peer**, on either side.
     #[test]
     fn a_device_with_no_identity_on_one_side_is_another_peer() {
-        let known = peer(listed(1, "Keys"), Learned::new().with_identity(model(7)));
+        let known = peer(listed(1, "Keys"), Learned::new().identified(model(7)));
         let unknown = peer(listed(1, "Keys"), Learned::new());
         assert!(state_of(&known).check_for(&unknown).is_err());
         assert!(state_of(&unknown).check_for(&known).is_err());
@@ -153,7 +151,7 @@ mod device {
     #[cfg(feature = "plugin")]
     #[test]
     fn a_device_and_a_plugin_are_other_peers() {
-        let device = peer(listed(1, "Keys"), Learned::new().with_identity(model(7)));
+        let device = peer(listed(1, "Keys"), Learned::new().identified(model(7)));
         let other = SavedPeer::Plugin(plugin("/p/a.clap"));
         assert!(state_of(&device).check_for(&other).is_err());
         assert!(
