@@ -1,10 +1,10 @@
-//! [`UdpDriver`]: an [`Endpoint`] over a `std::net::UdpSocket`.
+//! [`UdpDriver`]: a [`NetworkEndpoint`] over a `std::net::UdpSocket`.
 
 use std::io;
 use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
 use std::time::{Duration, Instant};
 
-use crate::{Endpoint, Event, MAX_DATAGRAM_BYTES};
+use crate::{Event, MAX_DATAGRAM_BYTES, NetworkEndpoint};
 
 /// The longest a [`poll`](UdpDriver::poll) blocks when the endpoint has no
 /// deadline of its own.
@@ -13,20 +13,20 @@ const IDLE_WAIT_MAX: Duration = Duration::from_millis(100);
 /// The shortest a poll blocks: a socket read timeout of zero means forever.
 const WAIT_MIN: Duration = Duration::from_millis(1);
 
-/// Runs an [`Endpoint`] over a UDP socket: it reads datagrams, keeps the
+/// Runs a [`NetworkEndpoint`] over a UDP socket: it reads datagrams, keeps the
 /// endpoint's clock, and sends what the endpoint queues.
 ///
 /// One thread calls [`poll`](Self::poll) in a loop; between calls the
 /// application reads [`Event`]s and hands the endpoint UMP through
 /// [`endpoint_mut`](Self::endpoint_mut).
 #[derive(Debug)]
-pub struct UdpDriver<E: Endpoint> {
+pub struct UdpDriver<E: NetworkEndpoint> {
     socket: UdpSocket,
     endpoint: E,
     buffer: Vec<u8>,
 }
 
-impl<E: Endpoint> UdpDriver<E> {
+impl<E: NetworkEndpoint> UdpDriver<E> {
     /// A driver over `socket`, which is the one source address the peer sees:
     /// a Host's listening port, a Client's own.
     #[must_use]
