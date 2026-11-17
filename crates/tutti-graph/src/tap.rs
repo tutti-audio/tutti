@@ -37,7 +37,7 @@ use std::sync::{Arc, Weak};
 
 use crate::TapId;
 use tutti_buffers::{InterleavedMut, Pull, Source};
-use tutti_rt::{FaultLatch, RtScope};
+use tutti_rt::{ControlDrop, FaultLatch};
 use tutti_rt::{Overflow, RingReader, RingWriter, ring};
 use tutti_types::{ChannelLayout, Frame, Samples};
 
@@ -52,6 +52,7 @@ use crate::slots::AudioSlots;
 /// vacancy only grows under the reader and its occupancy only grows under the
 /// writer, so a count taken before a push can only be an underestimate.
 pub struct TapWriter {
+    _control: ControlDrop<Self>,
     lanes: Vec<RingWriter<f32>>,
     /// One [`Run`] for each block written, pushed before its samples.
     runs: RingWriter<Run>,
@@ -86,12 +87,6 @@ const MAX_RUNS: usize = 4096;
 impl std::fmt::Debug for TapWriter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TapWriter").finish_non_exhaustive()
-    }
-}
-
-impl Drop for TapWriter {
-    fn drop(&mut self) {
-        RtScope::check_outside("a tap writer");
     }
 }
 
@@ -220,6 +215,7 @@ pub(crate) fn tap_op<A: AudioSlots>(
 /// the editor closes or reaps it; the audio thread then writes nothing for it.
 /// It must not be dropped on the audio thread (debug builds panic there).
 pub struct TapReader {
+    _control: ControlDrop<Self>,
     /// The tap's id in a topology; `None` for a reader outside any.
     id: Option<TapId>,
     lanes: Vec<RingReader<f32>>,
@@ -243,12 +239,6 @@ impl std::fmt::Debug for TapReader {
             .field("id", &self.id)
             .field("width", &self.lanes.len())
             .finish_non_exhaustive()
-    }
-}
-
-impl Drop for TapReader {
-    fn drop(&mut self) {
-        RtScope::check_outside("a tap reader");
     }
 }
 
@@ -277,6 +267,7 @@ impl TapReader {
             .map(|(prod, cons)| (cons, prod))
             .unzip();
         let reader = Self {
+            _control: ControlDrop::new(),
             id,
             lanes: cons,
             lost: Arc::clone(&lost),
@@ -287,6 +278,7 @@ impl TapReader {
             end,
         };
         let writer = TapWriter {
+            _control: ControlDrop::new(),
             lanes: prods,
             runs: run_prod,
             next: Frame::ZERO,
