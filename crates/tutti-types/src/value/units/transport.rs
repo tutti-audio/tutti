@@ -109,7 +109,9 @@ impl Bpm {
     }
 
     /// How long one beat lasts at this tempo: 60 over its beats per minute,
-    /// the inverse of [`from_beat_period`](Self::from_beat_period).
+    /// the inverse of [`from_beat_period`](Self::from_beat_period). A tempo
+    /// below about `3.3e-307` has an infinite period, which
+    /// `from_beat_period` answers with `None`.
     ///
     /// ```
     /// use tutti_types::{Bpm, Seconds};
