@@ -241,20 +241,21 @@ pub mod nodes {
     };
     pub use tutti_nodes::{
         BAND_PARAMS, BitCrusherConfig, BitCrusherControls, BitCrusherNode, BrickwallLimiterNode,
-        BusStripNode, ButterworthOrder, ChannelTimes, ChannelTimesError, ClickSettings, ClickState,
-        CompressorControls, CompressorNode, ConvolverError, ConvolverNode, CrossoverControls,
-        CrossoverError, CrossoverNode, CutAlignment, CutFilterConfig, CutFilterControls,
-        CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerControls, DcBlockerNode,
-        DelayControls, DelayLayout, DelayNode, DistortionNode, EnvelopeFollowerNode, EqBandNode,
-        FdnControls, FdnLayout, FdnNode, FreeverbControls, FreeverbNode, GateControls, GateNode,
-        HrtfBinauralNode, InterpolationMode, IrLayout, KeyFilter, KeySource, LadderControls,
-        LadderFilterNode, LadderType, LfoClock, LfoNode, LimiterControls, LimiterNode,
-        MetronomeMode, ModDelayControls, ModDelayNode, MultibandCompressorNode, MultibandControls,
-        NoteEnvelopeNode, OscillatorNode, OversamplingFactor, PhaserControls, PhaserNode, PortSide,
-        Routing as FeedbackRouting, RoutingError as FeedbackRoutingError, SOURCE_EVENT_CAPACITY,
-        ShapeKind, SourceNode, SourcePorts, Stages, StagesError, Stagger, StaggerError,
-        SvfControls, SvfFilterNode, SvfType, Sweep, SweepError, SweepRange, SweepRangeError,
-        VbapError, VbapPannerNode, VolumeOutOfRange,
+        BusStripNode, ButterworthOrder, ChannelTimes, ChannelTimesError, ClickConfig,
+        ClickSettings, ClickState, CompressorControls, CompressorNode, ConvolverError,
+        ConvolverNode, CrossoverControls, CrossoverError, CrossoverNode, CutAlignment,
+        CutFilterConfig, CutFilterControls, CutFilterNode, CutResponse, DcBlockerConfig,
+        DcBlockerControls, DcBlockerNode, DelayControls, DelayLayout, DelayNode, DistortionNode,
+        EnvelopeFollowerNode, EqBandNode, FdnControls, FdnLayout, FdnNode, FreeverbControls,
+        FreeverbNode, GateControls, GateNode, HrtfBinauralNode, InterpolationMode, IrLayout,
+        KeyFilter, KeySource, LadderControls, LadderFilterNode, LadderType, LfoClock, LfoNode,
+        LimiterControls, LimiterNode, MetronomeMode, ModDelayControls, ModDelayNode,
+        MultibandCompressorNode, MultibandControls, NoteEnvelopeNode, OscillatorNode,
+        OversamplingFactor, PhaserControls, PhaserNode, PortSide, Routing as FeedbackRouting,
+        RoutingError as FeedbackRoutingError, SOURCE_EVENT_CAPACITY, ShapeKind, SourceNode,
+        SourcePorts, Stages, StagesError, Stagger, StaggerError, SvfControls, SvfFilterNode,
+        SvfType, Sweep, SweepError, SweepRange, SweepRangeError, VbapError, VbapPannerNode,
+        VolumeOutOfRange,
     };
     pub use tutti_nodes::{
         BitCrusherKernel, BrickwallKernel, CompressorKernel, Control, ControlLanes, ControlRead,
@@ -284,7 +285,7 @@ pub mod types {
     pub use tutti_curve::{Curvature, CurvatureError, Exponent, ExponentError, Law, Piece};
     pub use tutti_rt::{
         Count, Counter, CounterWriter, Drained, Gauge, GaugeWriter, LevelSpan, Panicked, PosFrame,
-        Reading, Reclaim, Tally, TallyWriter, Words,
+        Reading, Reclaim, Setting, SettingWord, Tally, TallyWriter, Words,
     };
     pub use tutti_types::{
         Adsr, AmbisonicFormat, AmbisonicNormalization, AmbisonicOrder, AmbisonicOrderOutOfRange,
