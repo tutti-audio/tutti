@@ -578,7 +578,7 @@ impl MidiSession {
             // (`Ci::Idle`), and off once nothing listens.
             sync_hearing(ports, held, ci);
             // The ring's loss is read either side of the drain (`Heard`).
-            let lost = || ports.port_info(slot).map_or(0, |p| p.stream_lost);
+            let lost = || ports.port_info(slot).map_or(0, |p| p.losses.lost);
             let before = lost();
             let said: Vec<_> = ports.drain_stream(slot).collect();
             let after = lost();
@@ -751,9 +751,8 @@ impl MidiSession {
     }
 
     /// Asks a peer for a Property Exchange call, as the Initiator (M2-103): the
-    /// request is made at the next [`poll`](Self::poll), a
-    /// [`PropertyChange::Started`] names its call and the
-    /// [`PropertyChange::Event`]s that follow end it. Make the [`PropertyAsk`]
+    /// request is made at the next [`poll`](Self::poll), and an [`Answer::Got`] or
+    /// [`Answer::Set`] ends it. Make the [`PropertyAsk`]
     /// from a handle in [`property_peers`](Self::property_peers).
     ///
     /// # Errors

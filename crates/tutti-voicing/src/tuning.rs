@@ -31,6 +31,8 @@
 //! from the currently selected preset, and each message offsets from the
 //! original preset, not from the modified tuning, so a message replaces the channel's twelve offsets.
 
+use alloc::boxed::Box;
+use alloc::vec;
 use tutti_midi_protocol::{KeyTable, OctaveOffsets, TuningFrequency};
 use tutti_types::Semitones;
 use tutti_ump::{NoteNumber, U7};

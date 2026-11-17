@@ -1989,6 +1989,19 @@ fn property_events(polled: &[Polled]) -> Vec<&PropertyChange> {
         .collect()
 }
 
+fn property_answers(polled: &[Polled]) -> Vec<&Answer> {
+    polled
+        .iter()
+        .filter_map(|p| match p {
+            Polled::Answer(_, who, answer) => {
+                assert_eq!(*who, peer_id(), "every answer names the peer");
+                Some(answer)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
 fn pe_limits() -> PeReassemblyLimits {
     PeReassemblyLimits {
         streams: StreamLimit::of(8),
@@ -2236,19 +2249,17 @@ fn the_session_initiates_property_exchange_with_a_peer_that_declared_it() {
         &wire,
     );
     all.extend(pump(&mut wire, &mut far, said, 302));
-    let changes = property_events(&all);
-    assert!(
-        matches!(changes.first(), Some(PropertyChange::Started(_))),
-        "{changes:?}"
-    );
-    let got = changes.iter().find_map(|c| match c {
-        PropertyChange::Event(e) => match &**e {
-            ResourceEvent::Got { result, .. } => Some(result.clone()),
-            _ => None,
-        },
+    let got = property_answers(&all).into_iter().find_map(|a| match a {
+        Answer::Got { target, result } => Some((target.clone(), result.clone())),
         _ => None,
     });
-    assert_eq!(got, Some(Ok(PeData::LocalOn(PeLocalOn(false)))));
+    assert_eq!(
+        got,
+        Some((
+            ResourceTarget::new(PeResource::LocalOn).unwrap(),
+            Ok(PeData::LocalOn(PeLocalOn(false)))
+        ))
+    );
 }
 
 /// The session serves what the app gave: a peer's Initiator gets the
@@ -2355,16 +2366,6 @@ fn ask_and_pump(wire: &mut Wire, far: &mut Far, call: PropertyCall, ms: u64) -> 
     all
 }
 
-fn resource_events(all: &[Polled]) -> Vec<ResourceEvent> {
-    property_events(all)
-        .into_iter()
-        .filter_map(|c| match c {
-            PropertyChange::Event(e) => Some((**e).clone()),
-            _ => None,
-        })
-        .collect()
-}
-
 /// M2-103 section 11: a Subscription the peer allows starts with its Reply and ends
 /// with the Initiator's End.
 /// Spec: m2-103/11#4, m2-103/11.5#1
@@ -2373,37 +2374,210 @@ fn a_subscription_starts_and_ends_through_the_session() {
     let (mut wire, _, mut far) = ready_property_peer(subscribable());
     let get = ResourceGet::new(ResourceTarget::new(PeResource::LocalOn).unwrap());
     let all = ask_and_pump(&mut wire, &mut far, PropertyCall::Subscribe(get), 300);
-    let events = resource_events(&all);
-    let Some(id) = events.iter().find_map(|e| match e {
-        ResourceEvent::Subscribed { subscribe_id, .. } => Some(subscribe_id.clone()),
+    let answers = property_answers(&all);
+    let Some(id) = answers.iter().find_map(|a| match a {
+        Answer::Subscribed { subscribe_id, .. } => Some(subscribe_id.clone()),
         _ => None,
     }) else {
-        panic!("a Subscription started: {events:?}");
+        panic!("a Subscription started: {answers:?}");
     };
     assert_eq!(far.resp.subscriptions().count(), 1);
 
     let all = ask_and_pump(&mut wire, &mut far, PropertyCall::Unsubscribe(id), 600);
-    let events = resource_events(&all);
+    let answers = property_answers(&all);
     assert!(
-        events
+        answers
             .iter()
-            .any(|e| matches!(e, ResourceEvent::Unsubscribed { result: Ok(_), .. })),
-        "{events:?}"
+            .any(|a| matches!(a, Answer::Unsubscribed { result: Ok(_), .. })),
+        "{answers:?}"
     );
     assert_eq!(far.resp.subscriptions().count(), 0);
+}
+
+/// The statuses of the Subscription replies the session sent.
+fn subscription_replies(wire: &Wire) -> Vec<tutti_midi_device::PeStatus> {
+    use tutti_midi_device::{PeHeader, PeMessageKind};
+    ci_sent(wire)
+        .into_iter()
+        .filter_map(|(_, message)| match message {
+            CiMessage::PropertyExchange {
+                message: PeCiMessage::Chunk { kind, chunk },
+                ..
+            } if kind == PeMessageKind::SUBSCRIPTION_REPLY => {
+                match PeHeader::parse(chunk.header()) {
+                    Ok(PeHeader::Reply(reply)) => Some(reply.status),
+                    _ => None,
+                }
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// A Subscription inquiry of the peer: a header and its data, in `total` chunks
+/// of which this is the `at`th.
+fn subscription_chunk(
+    ours: Muid,
+    request: u8,
+    total: u16,
+    at: u16,
+    header: &str,
+    data: &str,
+) -> CiMessage {
+    use tutti_midi_device::{
+        ChunkNo, ChunkPosition, ChunkTotal, PeChunk, PeMessageKind, PeRequestId,
+    };
+    CiMessage::PropertyExchange {
+        header: CiHeader::new(peer()),
+        to: ours,
+        message: PeCiMessage::Chunk {
+            kind: PeMessageKind::SUBSCRIPTION_INQUIRY,
+            chunk: PeChunk::new(
+                PeRequestId::of(request),
+                ChunkTotal::Known(ChunkNo::of(total)),
+                ChunkPosition::Number(ChunkNo::of(at)),
+                header.as_bytes().to_vec(),
+                data.as_bytes().to_vec(),
+            )
+            .expect("a chunk"),
+        },
+    }
+}
+
+/// A subscribed far end whose Subscription the session's Initiator holds.
+fn held_subscription() -> (Wire, Muid, Far, tutti_midi_device::SubscribeId) {
+    let (mut wire, ours, mut far) = ready_property_peer(subscribable());
+    let get = ResourceGet::new(ResourceTarget::new(PeResource::LocalOn).unwrap());
+    let all = ask_and_pump(&mut wire, &mut far, PropertyCall::Subscribe(get), 300);
+    let id = property_answers(&all)
+        .into_iter()
+        .find_map(|a| match a {
+            Answer::Subscribed { subscribe_id, .. } => Some(subscribe_id.clone()),
+            _ => None,
+        })
+        .expect("a Subscription started");
+    (wire, ours, far, id)
+}
+
+/// M2-103 section 11.1: an update of a Subscription the session holds is answered
+/// once, by its Initiator, with 200; the Responder, which would refuse it as
+/// something only a Responder sends, hears nothing of it.
+#[test]
+fn an_update_of_a_held_subscription_is_answered_once_with_200_and_not_by_the_responder() {
+    let (mut wire, _, mut far, _) = held_subscription();
+    let _ = ci_sent(&wire);
+    let now = wire.at(600);
+    let target = ResourceTarget::new(PeResource::LocalOn).unwrap();
+    let actions = far
+        .resp
+        .publish(&target, PeData::LocalOn(PeLocalOn(false)), now)
+        .expect("publishes");
+    for action in actions {
+        if let tutti_midi_device::ResponderAction::Send(message) = action {
+            say(&wire, GROUP_0, &message, 600);
+        }
+    }
+    let _ = polled(&mut wire, 610);
+    assert_eq!(
+        subscription_replies(&wire),
+        [tutti_midi_device::PeStatus::Ok]
+    );
+}
+
+/// An update in several chunks is the Initiator's from its first chunk to its last:
+/// the session answers it once, with 200, and the Responder says nothing for any
+/// chunk.
+#[test]
+fn a_chunked_update_is_answered_once_by_the_initiator_and_not_by_the_responder() {
+    let (mut wire, ours, _far, id) = held_subscription();
+    let _ = ci_sent(&wire);
+    let header = format!(r#"{{"command":"full","subscribeId":"{}"}}"#, id.as_str());
+    say(
+        &wire,
+        GROUP_0,
+        &subscription_chunk(ours, 9, 2, 1, &header, "tr"),
+        600,
+    );
+    let _ = polled(&mut wire, 610);
+    assert!(
+        subscription_replies(&wire).is_empty(),
+        "nothing answers the first of two chunks"
+    );
+    say(
+        &wire,
+        GROUP_0,
+        &subscription_chunk(ours, 9, 2, 2, "", "ue"),
+        620,
+    );
+    let _ = polled(&mut wire, 630);
+    assert_eq!(
+        subscription_replies(&wire),
+        [tutti_midi_device::PeStatus::Ok]
+    );
+}
+
+/// M2-103 section 11.3: the End of a Subscription the session holds, sent by the
+/// peer, reaches the Initiator, which reports it and answers 200; the Responder
+/// does not answer it as the end of a Subscription it never had.
+#[test]
+fn the_peers_end_of_a_held_subscription_reaches_the_initiator() {
+    let (mut wire, _, mut far, id) = held_subscription();
+    let _ = ci_sent(&wire);
+    let now = wire.at(600);
+    for action in far.resp.end_subscription(&id, now) {
+        if let tutti_midi_device::ResponderAction::Send(message) = action {
+            say(&wire, GROUP_0, &message, 600);
+        }
+    }
+    let all = polled(&mut wire, 610);
+    let ended = property_events(&all).into_iter().any(|c| {
+        matches!(c, PropertyChange::Event(e)
+            if matches!(**e, ResourceEvent::SubscriptionEnded { .. }))
+    });
+    assert!(ended, "the Initiator reported the end");
+    assert_eq!(
+        subscription_replies(&wire),
+        [tutti_midi_device::PeStatus::Ok]
+    );
+}
+
+/// The End of a Subscription the session does not hold is the Responder's: it
+/// answers it 404, as it does the end of a Subscription it never started.
+#[test]
+fn the_end_of_an_unheld_subscription_reaches_the_responder_and_is_answered_404() {
+    let (mut wire, ours, _far, _) = held_subscription();
+    let _ = ci_sent(&wire);
+    say(
+        &wire,
+        GROUP_0,
+        &subscription_chunk(
+            ours,
+            11,
+            1,
+            1,
+            r#"{"command":"end","subscribeId":"unheld"}"#,
+            "",
+        ),
+        600,
+    );
+    let _ = polled(&mut wire, 610);
+    assert_eq!(
+        subscription_replies(&wire),
+        [tutti_midi_device::PeStatus::NotFound]
+    );
 }
 
 /// A call the peer's ResourceList does not allow is refused when it is started,
 /// with the reason, and nothing is sent.
 #[test]
-fn a_call_the_peers_resource_list_refuses_is_a_not_sent_change() {
+fn a_call_the_peers_resource_list_refuses_is_a_not_sent_answer() {
     let (mut wire, _, mut far) = ready_property_peer(subscribable());
     let get = ResourceGet::new(ResourceTarget::new(PeResource::DeviceInfo).unwrap());
     let all = ask_and_pump(&mut wire, &mut far, PropertyCall::Get(get), 300);
-    let changes = property_events(&all);
+    let answers = property_answers(&all);
     assert!(
-        matches!(changes.as_slice(), [PropertyChange::NotSent { .. }]),
-        "{changes:?}"
+        matches!(answers.as_slice(), [Answer::PropertyNotSent { .. }]),
+        "{answers:?}"
     );
 }
 
@@ -2432,12 +2606,12 @@ fn a_call_for_a_peer_that_is_gone_is_refused_or_reported_not_sent() {
         300,
     );
     let all = polled(&mut wire, 310);
-    let changes = property_events(&all);
+    let answers = property_answers(&all);
     assert!(
-        changes
+        answers
             .iter()
-            .any(|c| matches!(c, PropertyChange::PeerGone { .. })),
-        "{changes:?}"
+            .any(|a| matches!(a, Answer::PropertyLost { .. })),
+        "{answers:?}"
     );
     assert_eq!(
         wire.session.ask_property(handle.ask(get())),

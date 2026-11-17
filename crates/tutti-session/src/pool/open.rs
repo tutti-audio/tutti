@@ -54,6 +54,19 @@ impl<'a> OpenCx<'a> {
         self.ids.mint()
     }
 
+    /// The session's source of ids, for a peer that mints the ids of what it holds
+    /// as it goes.
+    #[cfg_attr(
+        not(feature = "midi-hardware"),
+        expect(
+            dead_code,
+            reason = "the pool's MIDI input ports (feature `midi-hardware`) take it"
+        )
+    )]
+    pub(crate) fn resource_ids(&self) -> crate::peer::ResourceIds {
+        self.ids.clone()
+    }
+
     /// The graph's sample rate now.
     #[must_use]
     pub fn rate(&self) -> SampleRate {

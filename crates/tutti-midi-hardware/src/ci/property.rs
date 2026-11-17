@@ -9,13 +9,15 @@ use std::time::Instant;
 
 use tutti_midi_device::Muid;
 use tutti_midi_device::{
-    BodyLimit, BufferLimit, CiCategories, CiMessage, Decoded, PeCapabilities, PeReassemblyLimits,
-    PeSettings, ResourceAction, ResourceInitiator, ResourceResponder, ResourceStore,
-    ResponderAction, ResponderSettings, SimultaneousRequests, StreamLimit,
+    BodyLimit, BufferLimit, ChunkPosition, ChunkTotal, CiCategories, CiMessage, Decoded,
+    PeCapabilities, PeCiMessage, PeHeader, PeMessageKind, PeReassemblyLimits, PeSettings,
+    PeSubscription, ResourceAction, ResourceEvent, ResourceInitiator, ResourceResponder,
+    ResourceStore, ResponderAction, ResponderSettings, SimultaneousRequests, StreamLimit,
 };
 use tutti_ump::MidiGroup;
 
 use super::{CiChanges, Member, PeerId, Running};
+use crate::answer::Answer;
 use crate::properties::{PropertyAsk, PropertyCall, PropertyChange};
 
 /// The requests of a peer this device takes at once.
@@ -41,6 +43,17 @@ const RESPONDER: ResponderSettings = ResponderSettings {
 /// the session serves.
 pub(super) fn responder(own: Muid, store: Arc<Mutex<ResourceStore>>) -> ResourceResponder {
     ResourceResponder::sharing(own, RESPONDER, store)
+}
+
+/// Which side of a device a Property Exchange message is for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Route {
+    /// The Responder and every Initiator: each keeps or ignores it.
+    Both,
+    /// The Initiators alone.
+    Initiators,
+    /// The Responder alone.
+    Responder,
 }
 
 impl Member {
@@ -96,6 +109,7 @@ impl Member {
     /// goes.
     pub(super) fn forget_property(&mut self, muid: Muid, changes: &mut CiChanges) {
         self.server.forget(muid);
+        self.updates.retain(|(from, _)| *from != muid);
         if self.properties.remove(&muid).is_some() {
             changes
                 .properties
@@ -143,15 +157,67 @@ impl Member {
         {
             sends.push((self.group, nak));
         }
-        let served = self.server.on_message(decoded, now);
-        self.carry_out_served(served, sends, changes);
-        let heard: Vec<_> = self
-            .properties
-            .iter_mut()
-            .map(|(&muid, initiator)| (muid, initiator.on_message(decoded, now)))
-            .collect();
+        let route = self.route_of(decoded);
+        if route != Route::Initiators {
+            let served = self.server.on_message(decoded, now);
+            self.carry_out_served(served, sends, changes);
+        }
+        let heard: Vec<_> = if route == Route::Responder {
+            Vec::new()
+        } else {
+            self.properties
+                .iter_mut()
+                .map(|(&muid, initiator)| (muid, initiator.on_message(decoded, now)))
+                .collect()
+        };
         for (muid, actions) in heard {
             self.carry_out_property(muid, actions, sends, changes);
+        }
+    }
+
+    /// Who a message is for. A Subscription inquiry is the Initiator's when it is
+    /// an update, which only a Responder sends (M2-103 §11.1), or the end of a
+    /// Subscription the Initiator of its peer holds, and every chunk of such a
+    /// message follows its first; any other is the Responder's, which serves what
+    /// peers ask of the store. Each side would refuse what is the other's.
+    fn route_of(&mut self, decoded: &Decoded) -> Route {
+        let Decoded::Message(CiMessage::PropertyExchange {
+            header,
+            message: PeCiMessage::Chunk { kind, chunk },
+            ..
+        }) = decoded
+        else {
+            return Route::Both;
+        };
+        if *kind != PeMessageKind::SUBSCRIPTION_INQUIRY {
+            return Route::Both;
+        }
+        let source = header.source;
+        let key = (source, chunk.request_id());
+        let owned = if chunk.header().is_empty() {
+            self.updates.contains(&key)
+        } else {
+            match PeHeader::parse(chunk.header()) {
+                Ok(PeHeader::Subscription(PeSubscription::Update { .. })) => true,
+                Ok(PeHeader::Subscription(PeSubscription::End { subscribe_id, .. })) => self
+                    .properties
+                    .get(&source)
+                    .is_some_and(|i| i.subscriptions().any(|(id, ..)| *id == subscribe_id)),
+                _ => false,
+            }
+        };
+        let last = matches!(
+            (chunk.position(), chunk.total()),
+            (ChunkPosition::Number(n), ChunkTotal::Known(total)) if n == total
+        ) || chunk.position() == ChunkPosition::Abandoned;
+        self.updates.retain(|k| *k != key);
+        if owned && !last {
+            self.updates.push(key);
+        }
+        if owned {
+            Route::Initiators
+        } else {
+            Route::Responder
         }
     }
 
@@ -187,9 +253,9 @@ impl Member {
     ) {
         let muid = ask.peer.muid;
         let Some(initiator) = self.properties.get_mut(&muid) else {
-            changes.properties.push((
+            changes.answers.push((
                 self.peer_id(muid),
-                PropertyChange::PeerGone {
+                Answer::PropertyLost {
                     call: Box::new(ask.call.clone()),
                 },
             ));
@@ -204,13 +270,10 @@ impl Member {
         };
         let id = self.peer_id(muid);
         match started {
-            Ok((call, actions)) => {
-                changes.properties.push((id, PropertyChange::Started(call)));
-                self.carry_out_property(muid, actions, sends, changes);
-            }
-            Err(error) => changes.properties.push((
+            Ok((_, actions)) => self.carry_out_property(muid, actions, sends, changes),
+            Err(error) => changes.answers.push((
                 id,
-                PropertyChange::NotSent {
+                Answer::PropertyNotSent {
                     call: Box::new(ask.call.clone()),
                     error,
                 },
@@ -230,9 +293,44 @@ impl Member {
         for action in actions {
             match action {
                 ResourceAction::Send(message) => sends.push((self.group, message)),
-                ResourceAction::Event(event) => {
-                    changes.properties.push((id, PropertyChange::Event(event)))
-                }
+                ResourceAction::Event(event) => match *event {
+                    ResourceEvent::Got { target, result, .. } => {
+                        changes.answers.push((id, Answer::Got { target, result }));
+                    }
+                    ResourceEvent::Set {
+                        resource, result, ..
+                    } => changes.answers.push((id, Answer::Set { resource, result })),
+                    ResourceEvent::Subscribed {
+                        subscribe_id,
+                        target,
+                        ..
+                    } => changes.answers.push((
+                        id,
+                        Answer::Subscribed {
+                            target,
+                            subscribe_id,
+                        },
+                    )),
+                    ResourceEvent::SubscribeFailed {
+                        target, failure, ..
+                    } => changes
+                        .answers
+                        .push((id, Answer::SubscribeFailed { target, failure })),
+                    ResourceEvent::Unsubscribed {
+                        subscribe_id,
+                        result,
+                        ..
+                    } => changes.answers.push((
+                        id,
+                        Answer::Unsubscribed {
+                            subscribe_id,
+                            result,
+                        },
+                    )),
+                    other => changes
+                        .properties
+                        .push((id, PropertyChange::Event(Box::new(other)))),
+                },
                 _ => {}
             }
         }
@@ -278,12 +376,12 @@ impl Running {
         let mut sends = Vec::new();
         for ask in asks.drain(..) {
             let Some(member) = self.members.iter_mut().find(|m| m.group == ask.peer.group) else {
-                changes.properties.push((
+                changes.answers.push((
                     PeerId {
                         group: ask.peer.group,
                         muid: ask.peer.muid,
                     },
-                    PropertyChange::PeerGone {
+                    Answer::PropertyLost {
                         call: Box::new(ask.call.clone()),
                     },
                 ));

@@ -153,6 +153,13 @@ pub enum UnitParam {
     /// moves away from on a signal that is already a left/right pair. Not
     /// [`Pan`](Self::Pan), which places a source by a pan law.
     Balance = 36,
+    /// A quantizer's word length (`BitDepth`, `1..=32`): fractional values are
+    /// depths between two whole ones.
+    BitDepth = 37,
+    /// A sample-and-hold's frames per held sample (`HoldFactor`, `>= 1`), read
+    /// rounded to a whole number of frames. Not [`Hold`](Self::Hold), a gate's
+    /// time in seconds.
+    HoldFactor = 38,
 }
 
 /// The error converting a `u16` that is not a known [`UnitParam`]
@@ -208,6 +215,8 @@ impl TryFrom<u16> for UnitParam {
             34 => CrossFeedback,
             35 => Frequency,
             36 => Balance,
+            37 => BitDepth,
+            38 => HoldFactor,
             other => return Err(UnitParamOutOfRange(other)),
         })
     }
@@ -536,8 +545,8 @@ impl<U> From<ParamKey<U>> for UnitAddr {
 }
 
 use super::units::{
-    Amplitude, Azimuth, Balance, CentsSpan, CompressionRatio, Db, Depth, Drive, Elevation,
-    Feedback, Hz, Mix, Q, Seconds, Spread, StereoWidth,
+    Amplitude, Azimuth, Balance, BitDepth, CentsSpan, CompressionRatio, Db, Depth, Drive,
+    Elevation, Feedback, HoldFactor, Hz, Mix, Q, Seconds, Spread, StereoWidth,
 };
 
 /// Defines the typed keys, and — from the same lines — the registry
@@ -633,6 +642,14 @@ param_keys! {
     Balance {
         /// A strip's stereo balance.
         BALANCE = Balance;
+    }
+    BitDepth {
+        /// A quantizer's word length.
+        BIT_DEPTH = BitDepth;
+    }
+    HoldFactor {
+        /// A sample-and-hold's frames per held sample.
+        HOLD_FACTOR = HoldFactor;
     }
 }
 
@@ -765,7 +782,7 @@ mod tests {
         assert_eq!(UnitParam::try_from(26), Ok(UnitParam::Diffusion));
         assert_eq!(UnitParam::try_from(27), Ok(UnitParam::Freeze));
         assert_eq!(UnitParam::try_from(28), Ok(UnitParam::Azimuth));
-        assert_eq!(UnitParam::try_from(37), Err(UnitParamOutOfRange(37)));
+        assert_eq!(UnitParam::try_from(39), Err(UnitParamOutOfRange(39)));
         // Decay's three bands are indices of one kind.
         for (index, packed) in [(0u8, 0x0019u16), (1, 0x0119), (2, 0x0219)] {
             assert_eq!(UnitAddr::new(UnitParam::Decay, index).to_u16(), packed);
@@ -776,7 +793,7 @@ mod tests {
     /// (and is `AudioParam`'s `P`), so this table is the compatibility
     /// record: a renumbered or re-ordered variant fails here by name, which
     /// `u16_round_trips` (any id maps to *some* variant) cannot say.
-    const PINNED: [(UnitParam, u16); 36] = [
+    const PINNED: [(UnitParam, u16); 38] = [
         (UnitParam::Cutoff, 0),
         (UnitParam::Q, 1),
         (UnitParam::GainDb, 2),
@@ -813,6 +830,8 @@ mod tests {
         (UnitParam::CrossFeedback, 34),
         (UnitParam::Frequency, 35),
         (UnitParam::Balance, 36),
+        (UnitParam::BitDepth, 37),
+        (UnitParam::HoldFactor, 38),
     ];
 
     /// **Index 0 is the plain id**, for every param: the packed form of

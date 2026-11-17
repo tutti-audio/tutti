@@ -356,6 +356,9 @@ pub struct Graph {
     /// folds to publish exactly when it has a device to place them on; a
     /// graph with no engine has neither, and nothing folds its root.
     output: Option<Placed>,
+    /// What the nodes logged on the audio thread, once an engine renders the
+    /// graph: drained by the session's reclaim sweep ([`Graph::drain_rt_log`]).
+    rt_log: Option<tutti_graph::RtLogReaders>,
     /// The last widening [`widen_outputs`](Self::widen_outputs) refused.
     widen_refusal: Option<tutti_graph::RootError>,
     /// Why the declaration that waited for a root crossfade, or a hard one
@@ -534,6 +537,7 @@ impl Graph {
             removed: Vec::new(),
             root: None,
             output: None,
+            rt_log: None,
             widen_refusal: None,
             apply_refusal: None,
             pending_root: None,
@@ -624,11 +628,15 @@ impl Graph {
     ) -> crate::Result<tutti_engine::Engine> {
         let mut exec = self.take_executor();
         exec.set_pool(self.render_pool("tutti-worker", self.render_worker_start.as_ref()));
+        // Built here, on the control side, after the pool sized the
+        // executor: the engine moves to the audio thread and holds none.
+        let rt_log = tutti_graph::RtLogReaders::new(&mut exec);
         let engine = tutti_engine::Engine::new(transport, &mut self.editor, exec)?;
         let control = engine.output_control();
         control.support(device)?;
         control.state_device(device, topology)?;
         self.output = Some(Placed { control, device });
+        self.rt_log = Some(rt_log);
         Ok(engine)
     }
 
@@ -1159,6 +1167,17 @@ impl Graph {
             pool,
             root,
         )
+    }
+
+    /// Emits what the nodes logged on the audio thread as `tracing` events
+    /// (`rt_log.rs`), naming each node by its kind in the current graph; a
+    /// node removed since it logged is named by its id alone. Control
+    /// thread: the session's [`Reclaim`](crate::Phase::Reclaim) phase.
+    pub(crate) fn drain_rt_log(&self) {
+        if let Some(readers) = &self.rt_log {
+            let nodes = &self.editor.spec().topology.nodes;
+            crate::rt_log::drain(readers, |key| nodes.get(&key).map(|n| n.kind.as_str()));
+        }
     }
 
     /// Runs every node's reclaimer ([`SessionNode::reclaimer`], kept by

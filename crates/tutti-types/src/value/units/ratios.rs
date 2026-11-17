@@ -2,13 +2,14 @@ use super::*;
 
 // ── Dimensionless ratios ────────────────────────────────────────────────────
 //
-// Three types. They share only the property of being bare numbers; their
+// Four types. They share only the property of being bare numbers; their
 // ranges do not overlap and one cannot be substituted for another:
 //
 //   CompressionRatio  [1, inf)  1:1 is no compression; below 1 would EXPAND
 //   Q                 (0, inf)  filter sharpness; 0.707 is flat, high is a
 //                               narrow peak
 //   Resonance         [0, 1]    ladder feedback; 1.0 self-oscillates
+//   HoldFactor        [1, inf)  frames per held sample; read rounded
 //
 // `Q` and `Resonance` are the sharp case: both describe "how resonant", but a
 // ladder at 1.0 self-oscillates while a Q of 1.0 is a mild bell. Passing one
@@ -35,6 +36,37 @@ impl CompressionRatio {
     #[must_use]
     pub fn new_clamped(v: f32) -> CompressionRatio {
         CompressionRatio(if v < 1.0 { 1.0 } else { v })
+    }
+}
+
+unit! {
+    /// A sample-and-hold factor: the frames each held sample lasts, `>= 1`.
+    ///
+    /// A `1` holds nothing (every frame is its own sample) and `4` holds each
+    /// sample for four frames. It is a real number so that it can be automated
+    /// like any control; where it counts frames it is read **rounded to the
+    /// nearest whole number, ties to even** by the hold stage, so `2.4`
+    /// holds for 2 frames and `2.6` for 3. A factor too large for a count of frames, and
+    /// `+inf`, hold for the longest count; NaN is no hold.
+    ///
+    /// Not a [`CompressionRatio`] despite the matching range (a unitless
+    /// input:output ratio of level changes), and not a `Samples` count: a count is whole and this
+    /// moves continuously.
+    pub struct HoldFactor(pub f32): Unit, Ordered, Bounded;
+}
+// NOT `Additive`: two holds do not sum into a third.
+// NOT `Scalable`: a scaled factor falls below 1 or between whole frames, and
+// "twice the hold" is a statement about frames, made on the rounded count.
+
+impl HoldFactor {
+    /// No hold: every frame is a new sample.
+    pub const NONE: HoldFactor = HoldFactor(1.0);
+
+    /// Constrain to at least 1. NaN stays NaN.
+    #[inline]
+    #[must_use]
+    pub fn new_clamped(v: f32) -> HoldFactor {
+        HoldFactor(if v < 1.0 { 1.0 } else { v })
     }
 }
 

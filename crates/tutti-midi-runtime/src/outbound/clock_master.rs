@@ -44,9 +44,10 @@
 //!   piece 0 after it.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use tutti_graph::{Losses, Offset, TransportPosition, UmpAt};
+use tutti_rt::{Counter, CounterWriter, counter};
 use tutti_types::{
     AtomicSampleRate, Beat, BeatDuration, LoopRange, Pass, PassEnd, SampleRate, Samples, Seconds,
     first_frame_at_or_after,
@@ -121,8 +122,8 @@ struct Shared {
     /// Events a [`ClockNode`](crate::ClockNode) could not send because one
     /// block produced more than its
     /// [`CLOCK_EVENT_CAPACITY`](crate::CLOCK_EVENT_CAPACITY). Counted, never
-    /// logged: the count is bumped on the audio thread.
-    dropped: AtomicU64,
+    /// logged: the audio half's [`CounterWriter`] adds to it.
+    losses: Counter<Losses>,
 }
 
 /// The control side of a clock: turn it on, pick MTC and its frame rate, read
@@ -197,7 +198,7 @@ impl ClockControls {
     /// means the receiver missed ticks and should be resynced.
     #[must_use]
     pub fn losses(&self) -> Losses {
-        Losses::refused(self.shared.dropped.load(Ordering::Relaxed))
+        self.shared.losses.get()
     }
 
     fn settings(&self) -> Settings {
@@ -228,6 +229,8 @@ impl ClockControls {
 #[derive(Debug)]
 pub struct ClockMaster {
     shared: Arc<Shared>,
+    /// The writer of [`ClockControls::losses`].
+    losses: CounterWriter<Losses>,
     /// UMP group stamped on every emitted event.
     group: MidiGroup,
     /// The device rate: what turns the transport's beats into frame offsets.
@@ -315,10 +318,11 @@ impl ClockMaster {
     /// output is connected.
     #[must_use]
     pub fn new(group: MidiGroup, sample_rate: SampleRate) -> (Self, ClockControls) {
+        let (losses_writer, losses) = counter();
         let shared = Arc::new(Shared {
             settings: AtomicU32::new(Settings::OFF.bits()),
             sample_rate: AtomicSampleRate::new(sample_rate),
-            dropped: AtomicU64::new(0),
+            losses,
         });
         let controls = ClockControls {
             shared: Arc::clone(&shared),
@@ -326,6 +330,7 @@ impl ClockMaster {
         };
         let master = Self {
             shared,
+            losses: losses_writer,
             group,
             sample_rate,
             fps: Settings::OFF.fps,
@@ -341,9 +346,9 @@ impl ClockMaster {
     }
 
     /// Adds `n` to [`ClockControls::losses`].
-    pub(crate) fn count_dropped(&self, n: u64) {
+    pub(crate) fn count_dropped(&mut self, n: u64) {
         if n > 0 {
-            self.shared.dropped.fetch_add(n, Ordering::Relaxed);
+            self.losses.add(Losses::refused(n));
         }
     }
 

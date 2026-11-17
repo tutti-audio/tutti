@@ -57,6 +57,15 @@ fn handle_over(
     )
 }
 
+/// Waits until `seen` holds, polling: a hang guard of a minute, not a speed claim.
+fn eventually(what: &str, mut seen: impl FnMut() -> bool) {
+    let guard = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while !seen() {
+        assert!(std::time::Instant::now() < guard, "never happened: {what}");
+        std::thread::yield_now();
+    }
+}
+
 fn unique_shm_name(label: &str) -> String {
     tutti_fixtures::unique_name(&format!("test_{label}"))
 }
@@ -179,9 +188,6 @@ fn handle_with_mock_server(
         }
     });
 
-    // Give the bridge thread time to start up and register I/O.
-    std::thread::sleep(std::time::Duration::from_millis(50));
-
     let descriptor = PluginDescriptor {
         id: "test.plugin".into(),
         name: "Test Plugin".into(),
@@ -270,8 +276,6 @@ fn handle_with_multi_reply_server(
             }
         }
     });
-
-    std::thread::sleep(std::time::Duration::from_millis(50));
 
     let descriptor = PluginDescriptor {
         id: "test.plugin".into(),
@@ -372,9 +376,11 @@ fn trailing_unsolicited_events_dont_poison_next_reply() {
         Some(Normalized::of(0.5))
     );
 
-    // Give the bridge thread a moment to fire the listener after the
-    // dispatch that drained the unsolicited queue.
-    std::thread::sleep(std::time::Duration::from_millis(50));
+    // The bridge thread fires the listener after the dispatch that drained the
+    // unsolicited queue: wait for both events.
+    eventually("the listener saw both events", || {
+        latency_seen.load(Ordering::Acquire) == 256 && param_seen.lock().is_some()
+    });
     assert_eq!(latency_seen.load(Ordering::Acquire), 256);
     assert_eq!(*param_seen.lock(), Some((7, 0.42)));
 }
@@ -433,7 +439,9 @@ fn a_tail_change_reaches_the_listener() {
         Some(Normalized::of(0.5))
     );
 
-    std::thread::sleep(std::time::Duration::from_millis(50));
+    eventually("the listener saw the tail change", || {
+        tail_seen.lock().is_some()
+    });
     assert_eq!(
         *tail_seen.lock(),
         Some(PluginTail::Unbounded),

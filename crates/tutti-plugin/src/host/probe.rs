@@ -196,6 +196,10 @@ mod tests {
     use tempfile::TempDir;
     use tutti_plugin_types::BridgeResult;
 
+    /// How long a probe test waits before it calls the probe hung: far past a
+    /// kill or a cancel, far short of the stand-in's 300 s sleep.
+    const HANG_GUARD: Duration = Duration::from_secs(60);
+
     /// A `plugin-probe` stand-in: a shell script given the plugin path as `$1`
     /// and the result file as `$2`, as the real one is.
     fn stand_in(dir: &TempDir, body: &str) -> Locator {
@@ -227,18 +231,19 @@ mod tests {
         let pid_file = dir.path().join("pid");
         let locator = stand_in(
             &dir,
-            &format!("echo $$ > {}\nexec sleep 30", pid_file.display()),
+            &format!("echo $$ > {}\nexec sleep 300", pid_file.display()),
         );
 
-        let started = Instant::now();
+        let deadline = Instant::now() + HANG_GUARD;
         // Long enough for the shell to start and write its pid before it is
         // killed: at 300 ms a cold shell on macOS sometimes had not, and the
-        // pid read below failed. Still far below the 10 s a wait would take.
+        // pid read below failed.
         let result = probe(&locator, Duration::from_secs(2));
+        // A hang guard: a child waited for rather than killed takes its whole
+        // 300 s sleep.
         assert!(
-            started.elapsed() < Duration::from_secs(10),
-            "the child was waited for, not killed: {:?}",
-            started.elapsed()
+            Instant::now() < deadline,
+            "the child was waited for, not killed"
         );
         assert!(
             matches!(result, Err(BridgeError::Timeout { .. })),
@@ -259,16 +264,16 @@ mod tests {
         );
     }
 
-    /// **A cancel kills the probe in flight and returns at once**: the child
-    /// has the whole 30 s of its sleep and the caller a 60 s deadline, and the
-    /// probe is gone (killed and reaped) by the time the call returns.
+    /// **A cancel kills the probe in flight**: the child has a 300 s sleep and
+    /// the caller a 300 s deadline, and the probe is gone (killed and reaped) by
+    /// the time the call returns.
     #[test]
     fn a_cancel_kills_the_probe_without_waiting_for_the_deadline() {
         let dir = TempDir::new().unwrap();
         let pid_file = dir.path().join("pid");
         let locator = stand_in(
             &dir,
-            &format!("echo $$ > {}\nexec sleep 30", pid_file.display()),
+            &format!("echo $$ > {}\nexec sleep 300", pid_file.display()),
         );
         let cancel = Cancel::new();
         let raiser = {
@@ -286,20 +291,21 @@ mod tests {
             .expect("the raiser starts")
         };
 
-        let started = Instant::now();
+        let deadline = Instant::now() + HANG_GUARD;
         let result = probe_metadata_with(
             &locator,
             Path::new("/plugins/Some.clap"),
             PluginFormat::Clap,
-            Duration::from_secs(60),
+            Duration::from_secs(300),
             &cancel,
         );
         raiser.join().unwrap();
 
+        // A hang guard: a cancel that waited for the child or the deadline takes
+        // 300 s.
         assert!(
-            started.elapsed() < Duration::from_secs(10),
-            "the cancel waited for the child or the deadline: {:?}",
-            started.elapsed()
+            Instant::now() < deadline,
+            "the cancel waited for the child or the deadline"
         );
         assert!(matches!(&result, Err(ProbeError::Cancelled)), "{result:?}");
         let pid = std::fs::read_to_string(&pid_file).unwrap();

@@ -31,6 +31,8 @@
 //!   `GAIN_GLIDE`).
 //! - **Convolution** — `Convolver`, a uniform or non-uniform partitioned FFT
 //!   convolution over an IR's shared, read-only `IrSpectra`.
+//! - **Bit crusher** (`bit_crush.rs`): [`BitCrusher`], a sample-and-hold every [`hold_frames`]
+//!   frames, then [`quantize`] to a `BitDepth`.
 //! - **DC blocker** (`dc_block.rs`): [`DcBlocker`], a first-order high-pass with its pole from
 //!   [`dc_pole`], reached along a line over [`COEFF_INTERVAL`] frames.
 //! - **Delay** — `DelayLine`, a fractional-read ring with an `InterpolationMode`;
@@ -146,6 +148,9 @@
 //! - **Stereo and utility** (`polarity.rs`, `stereo.rs`): [`Polarity`], the channels a block
 //!   inverts; [`MidSide`] and [`WidthBank`] (the side scaled by a glided
 //!   [`StereoWidth`](tutti_types::StereoWidth)).
+//! - **Tremolo, auto-pan and ring modulation** (`tremolo.rs`, `ring_mod.rs`): [`Tremolo`] and
+//!   [`AutoPan`], an [`Oscillator`] scaling the level or placing it by [`pan_gains`];
+//!   [`RingModulator`], the input times a sine carrier.
 //! - **Small kernels**: [`cubic_hermite`], [`ShapeKind`], [`Smoother`].
 //!
 //! ## Import paths
@@ -153,6 +158,7 @@
 //! Every public item is re-exported at the crate root; import from there
 //! (`tutti_dsp::RealFft`). No module is public.
 
+mod bit_crush;
 mod control;
 mod convolver;
 mod dc_block;
@@ -170,7 +176,9 @@ mod oscillator;
 mod oversample;
 mod pan;
 mod polarity;
+mod ring_mod;
 mod stereo;
+mod tremolo;
 mod waveshape;
 
 mod model;
@@ -183,6 +191,7 @@ mod stft;
 mod testing;
 mod xorshift;
 
+pub use bit_crush::{BitCrusher, BitCrusherControls, DEFAULT_BIT_DEPTH, hold_frames, quantize};
 pub use control::{COEFF_INTERVAL, LANES};
 pub use convolver::{Convolver, IrSpectra, MatrixConvolver, MatrixConvolverError};
 pub use dc_block::{DC_CORNER, DcBlocker, DcBlockerControls, MIN_DC_CORNER, dc_pole};
@@ -236,6 +245,7 @@ pub use reverb::network::{
     LineModulation, MAX_CHANNELS, MAX_DENSE, MAX_LINES, MAX_STAGES, MAX_TAPS, Matrix, Network,
     NetworkCapacity, OutputMap, Stage, Tap, Taps, loop_gain, pre_delay_frames, rt60_from_gain,
 };
+pub use ring_mod::{RingModControls, RingModulator};
 pub use smoother::Smoother;
 pub use spatial::{
     HRTF_LATENCY, HRTF_STEP, HrirMeasurement, HrirSphere, HrtfBinaural, HrtfBinauralError,
@@ -247,5 +257,6 @@ pub use stft::error::StftError;
 pub use stft::geometry::StftGeometry;
 pub use stft::grid::{BinCount, BinIndex, FrameCount, FrameIndex, Grid};
 pub use stft::window::{CosineWindow, Window};
+pub use tremolo::{AutoPan, AutoPanControls, Tremolo, TremoloControls};
 pub use waveshape::{ShapeKind, WaveshaperBank, WaveshaperControls};
 pub use xorshift::Xorshift32;

@@ -399,12 +399,12 @@ fn ending_an_outbox_returns_the_held_events_and_the_one_in_hand() {
 
 #[test]
 fn a_sender_that_panics_leaves_a_dead_mailbox_that_counts_what_it_dropped() {
-    let mailbox = Mailbox::new();
+    let (mailbox, writer) = Mailbox::new();
     let now = Instant::now();
     assert_eq!(mailbox.state().take(8, [(now, 1), (now, 2), (now, 3)]), 3);
     let sent = std::cell::RefCell::new(Vec::new());
     let ended = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        run(&mailbox, || {
+        run(&mailbox, writer, || {
             (
                 |event| -> std::result::Result<(), String> {
                     assert!(event != 2, "the sender fails on the second");
@@ -428,10 +428,10 @@ fn a_sender_that_panics_leaves_a_dead_mailbox_that_counts_what_it_dropped() {
 
 #[test]
 fn a_sender_whose_setup_panics_is_a_dead_mailbox_too() {
-    let mailbox = Mailbox::new();
+    let (mailbox, writer) = Mailbox::new();
     mailbox.state().take(8, [(Instant::now(), 1)]);
     let ended = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        run(&mailbox, || -> (
+        run(&mailbox, writer, || -> (
             fn(i32) -> std::result::Result<(), String>,
             fn(Option<Duration>) -> std::result::Result<(), String>,
         ) {
@@ -445,11 +445,11 @@ fn a_sender_whose_setup_panics_is_a_dead_mailbox_too() {
 
 #[test]
 fn a_send_the_device_refuses_is_lost_and_the_sender_goes_on() {
-    let mailbox = Mailbox::new();
+    let (mailbox, writer) = Mailbox::new();
     let now = Instant::now();
     mailbox.state().take(8, [(now, 1), (now, 2)]);
     let mut waits = 0;
-    run(&mailbox, || {
+    run(&mailbox, writer, || {
         (
             |event| if event == 1 { Err("refused") } else { Ok(()) },
             |_| -> std::result::Result<(), &str> {

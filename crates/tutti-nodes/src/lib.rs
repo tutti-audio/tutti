@@ -38,6 +38,8 @@
 //!   with no feedback and a finite tail) and `PhaserNode` (a `KernelNode` over `PhaserKernel`, its `Stages`
 //!   and `SweepRange` checked; the rate is floored at 0.01 Hz, a lane's value and a cell's alike), both any width.
 //! - **Distortion** — `DistortionNode` and its `ShapeKind` waveshapers.
+//! - **Bit crusher** — `BitCrusherNode`, a sample-and-hold and a quantizer, with no tail,
+//!   from a `BitCrusherConfig`.
 //! - **DC blocker** — `DcBlockerNode`, a first-order high-pass with a finite tail, from a
 //!   `DcBlockerConfig`.
 //! - **Modulation sources** — `LfoNode`, the per-sample LFO over
@@ -47,6 +49,9 @@
 //! - **Oscillator** — [`OscillatorNode`], a mono source: a sine, or a saw, square or triangle
 //!   band-limited by `tutti_dsp::Oscillator`; its frequency (`Frequency`) and level (`Volume`) are read per frame.
 //! - **Dry/wet** — the convolver, delay, chorus/flanger, phaser and the two reverbs output their wet signal only; blend with the input through the graph's `set_mix`.
+//! - **Level and pan modulation** — `TremoloNode` and `AutoPanNode` (an LFO of a chosen
+//!   `OscillatorWave` scales the level, or places a stereo pair by a `PanLaw`) and `RingModNode`
+//!   (the input times a sine carrier), from a `TremoloConfig`, `AutoPanConfig` and `RingModConfig`.
 //! - **Mixing** — `BusStripNode` (volume / balance; a mute or bypass is the graph's `NodeMode`).
 //!   Summing is the graph's: a port or an output channel sums its sources; so is
 //!   folding between layouts (a bus edge between declared buses).
@@ -237,9 +242,9 @@ mod tail_clock;
 mod test_support;
 
 pub use tutti_types::{
-    Amplitude, ArcDegrees, Azimuth, Bpm, Cents, CentsSpan, CompressionRatio, Db, Depth, Drive,
-    Elevation, Feedback, Hz, Mix, Param, Q, Resonance, SampleRate, Seconds, Semitones, Spread,
-    StereoWidth, Unit,
+    Amplitude, ArcDegrees, Azimuth, BitDepth, Bpm, Cents, CentsSpan, CompressionRatio, Db, Depth,
+    Drive, Elevation, Feedback, HoldFactor, Hz, Mix, Param, Q, Resonance, SampleRate, Seconds,
+    Semitones, Spread, StereoWidth, Unit,
 };
 
 // The boundary this crate holds: pure DSP graph nodes plus the `ParamSet` /
@@ -273,6 +278,11 @@ pub use distortion::{DistortionKernel, DistortionNode, DistortionSet};
 // `ShapeKind` and `OversamplingFactor` are in `DistortionNode`'s signatures; what is behind
 // them is `tutti-dsp`'s.
 pub use tutti_dsp::{OversamplingFactor, ShapeKind};
+
+// A sample-and-hold and a quantizer.
+mod bit_crusher;
+pub use bit_crusher::{BitCrusherConfig, BitCrusherKernel, BitCrusherNode, BitCrusherSet};
+pub use tutti_dsp::BitCrusherControls;
 
 // A first-order high-pass that removes a constant offset.
 mod dc_blocker;
@@ -312,6 +322,16 @@ pub use polarity::{PolarityConfig, PolarityError, PolarityNode};
 pub use stereo_width::{StereoWidthConfig, StereoWidthKernel, StereoWidthNode, StereoWidthSet};
 // The controls a width node starts at, and the channel a polarity config can get wrong.
 pub use tutti_dsp::{ChannelOutOfRange, WidthControls};
+
+// Modulation effects on the level and the signal: tremolo, auto-pan and ring modulation.
+mod auto_pan;
+mod ring_mod;
+mod tremolo;
+pub use auto_pan::{AutoPanConfig, AutoPanKernel, AutoPanNode, AutoPanSet};
+pub use ring_mod::{RingModConfig, RingModKernel, RingModNode, RingModSet};
+pub use tremolo::{TremoloConfig, TremoloKernel, TremoloNode, TremoloSet};
+// The controls those start at, the wave of their LFOs and the law an auto-pan places by.
+pub use tutti_dsp::{AutoPanControls, OscillatorWave, PanLaw, RingModControls, TremoloControls};
 
 // The mixer strip: volume, stereo balance, mute. Ungated: a fader is not a
 // spatial concept.
