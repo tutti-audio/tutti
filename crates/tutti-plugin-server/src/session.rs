@@ -1723,7 +1723,7 @@ mod tests {
     #[cfg(feature = "clap")]
     fn clap_round_trip<T>(name: &str, mask: u32, format: SampleFormat, input: T) -> RoundTrip<T>
     where
-        T: tutti_plugin_types::Sample + bytemuck::Pod,
+        T: tutti_buffers::Float,
     {
         const SEQ: u64 = 1;
         let _ports = crate::test_utils::clap_probe_ports_64bit(mask);

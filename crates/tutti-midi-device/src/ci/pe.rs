@@ -126,7 +126,7 @@ pub use initiator::{
 pub use limits::{
     MediaType, NotValid, PeMessage, PropertyName, ResourceId, ResourceName, SubscribeId,
 };
-pub use partial::{JsonPointer, PartialError, PartialUpdate};
+pub use partial::{JsonPointer, PartialError, PartialUpdate, PartialValue};
 pub use reassemble::{
     BufferLimit, NotABufferLimit, NotAStreamLimit, PeBuffered, PeExpired, PeFlowControl, PeHeld,
     PeReassembler, PeReassemblyError, PeReassemblyLimits, PeReceived, PeRefused, PeStep,
@@ -145,11 +145,12 @@ pub use resource::{
     PeLink, PeLocalOn, PeMidiMode, PeModeEntry, PeModeList, PeOpaque, PeProgramEntry,
     PeProgramList, PeResource, PeResourceList, PeState, PeStateEntry, PeStateList, PeText,
     Priority, PublishError, RefusedAt, RequestRefused, ResIdUse, ResourceAction, ResourceDefaults,
-    ResourceEntry, ResourceEvent, ResourceFailure, ResourceGet, ResourceInitiator,
-    ResourceResponder, ResourceSet, ResourceStore, ResourceTarget, ResponderAction, ResponderEvent,
-    ResponderSettings, RestoreError, RoleName, SavedState, SelectorAction, SetBody,
-    SignificantBits, SimpleAction, StateDevice, StateId, StateRev, StateSize, StateStamp,
-    StepCount, StoreError, TypeHint, UnixSeconds, UpdateKind, Verdict, WrongDevice,
+    ResourceEntry, ResourceEntryBuilder, ResourceEvent, ResourceFailure, ResourceGet,
+    ResourceInitiator, ResourceResponder, ResourceSet, ResourceStore, ResourceTarget,
+    ResponderAction, ResponderEvent, ResponderSettings, RestoreError, RoleName, SavedState,
+    SelectorAction, SetBody, SignificantBits, SimpleAction, StateDevice, StateId, StateRev,
+    StateSize, StateStamp, StepCount, StoreError, TypeHint, UnixSeconds, UpdateKind, Verdict,
+    WrongDevice,
 };
 pub use tree::{PE_JSON_MAX_DEPTH, PeDecimal, PeJson, PeJsonError, PeObject};
 pub use value::{PeExtra, PeExtraError};

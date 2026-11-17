@@ -30,6 +30,8 @@ bitflags = "2"
 # `WindowHandle`, the one value whose unsafe constructor carries the claim that
 # a parent window is valid; the editor entries take it by reference.
 tutti-plugin-types = { version = "0.0.1", path = "../tutti-plugin-types" }
+# The sample width of a channel table (`Float`).
+tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 # `GraphPool`: a graph worker pool as the `TaskPool` that serves `clap.thread-pool`.
 tutti-graph = { version = "0.0.1", path = "../tutti-graph" }
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }

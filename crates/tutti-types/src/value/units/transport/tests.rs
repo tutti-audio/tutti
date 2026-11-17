@@ -376,3 +376,19 @@ fn a_beat_period_is_sixty_over_its_seconds() {
         assert_eq!(tempo, None, "{bad}");
     }
 }
+
+/// **At 120 bpm a beat lasts exactly half a second, and the period leads back
+/// to its tempo.**
+#[test]
+fn a_tempos_beat_period_is_sixty_over_its_bpm() {
+    assert_eq!(Bpm::of(120.0).beat_period(), Seconds::new(0.5));
+    assert_eq!(Bpm::of(30.0).beat_period(), Seconds::new(2.0));
+    for bpm in [30.0, 60.0, 120.0, 240.0] {
+        let tempo = Bpm::of(bpm);
+        assert_eq!(
+            Bpm::from_beat_period(tempo.beat_period()),
+            Some(tempo),
+            "{bpm}"
+        );
+    }
+}
