@@ -16,11 +16,13 @@
 use crate::param_reads::ParamReads as _;
 use crate::pooled::{LoadPlugin, Spec};
 use crate::support;
+use tutti_rt::LockExt;
 use tutti_session::InPort;
 use tutti_session::Root;
 use tutti_session::{PluginChange, PluginEvent};
 
 use std::sync::atomic::{AtomicBool, Ordering};
+
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tutti_types::MaxBlock;
@@ -363,10 +365,7 @@ struct DropWitness(Arc<Mutex<Vec<std::thread::ThreadId>>>);
 
 impl Drop for DropWitness {
     fn drop(&mut self) {
-        self.0
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .push(std::thread::current().id());
+        self.0.lock_recover().push(std::thread::current().id());
     }
 }
 

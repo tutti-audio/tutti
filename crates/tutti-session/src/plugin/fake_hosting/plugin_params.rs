@@ -5,7 +5,7 @@
 
 use super::host;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex};
 
 use crate::{
     DetachedSession, Key, PluginChange, PluginEvent, PluginNode, PluginParamError, Session,
@@ -18,16 +18,13 @@ use tutti_plugin_types::{
     AnyThread, AutomationMode, AutomationModeError, Health, Normalized, ParamFlags, ParamId,
     ParamUnit, ParameterInfo, PluginFailure, PluginRefresh, RenderMode,
 };
+use tutti_rt::LockExt;
 use tutti_types::{ChannelLayout, Db, Hz, SampleRate};
 
 const CUTOFF: ParamId = ParamId::new(1);
 const LEVEL: ParamId = ParamId::new(2);
 const MODE: ParamId = ParamId::new(3);
 const LOCKED: ParamId = ParamId::new(4);
-
-fn locked<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(PoisonError::into_inner)
-}
 
 /// What a plugin declares: `cutoff` in hertz over `20..=20000`, `level` in
 /// decibels over `-60..=12`, `mode` with no unit and a read-only `locked`.
@@ -58,22 +55,24 @@ struct Fake {
 impl Fake {
     fn new() -> Arc<Self> {
         let fake = Arc::new(Self::default());
-        *locked(&fake.infos) = declared();
+        *fake.infos.lock_recover() = declared();
         for (id, value) in [(CUTOFF, 0.5), (LEVEL, 0.25), (MODE, 0.0), (LOCKED, 0.25)] {
-            locked(&fake.values).insert(id, Normalized::of(value));
+            fake.values.lock_recover().insert(id, Normalized::of(value));
         }
         fake
     }
 
     fn range(&self, id: ParamId) -> Option<(f64, f64)> {
-        locked(&self.infos)
+        self.infos
+            .lock_recover()
             .iter()
             .find(|i| i.id() == id)
             .and_then(|i| i.bounds())
     }
 
     fn sets(&self) -> Vec<(ParamId, f64)> {
-        locked(&self.sets)
+        self.sets
+            .lock_recover()
             .iter()
             .map(|&(id, v)| (id, v.get()))
             .collect()
@@ -82,14 +81,14 @@ impl Fake {
 
 impl AnyThread for Fake {
     fn parameter_descriptors(&self) -> Option<Vec<ParameterInfo>> {
-        Some(locked(&self.infos).clone())
+        Some(self.infos.lock_recover().clone())
     }
     fn parameter_value(&self, id: ParamId) -> Option<Normalized> {
-        locked(&self.values).get(&id).copied()
+        self.values.lock_recover().get(&id).copied()
     }
     fn set_parameter_value(&self, id: ParamId, value: Normalized) {
-        locked(&self.values).insert(id, value);
-        locked(&self.sets).push((id, value));
+        self.values.lock_recover().insert(id, value);
+        self.sets.lock_recover().push((id, value));
     }
     fn parameter_plain(&self, id: ParamId, value: Normalized) -> Option<f64> {
         let (min, max) = self.range(id)?;
@@ -351,7 +350,7 @@ fn a_typed_read_of_a_silent_plugin_is_an_error_not_the_default() {
         .unwrap();
     assert_eq!(cutoff.get(), Ok(Hz::new(10_010.0)));
 
-    locked(&fake.infos).clear();
+    fake.infos.lock_recover().clear();
     assert_eq!(cutoff.get(), Err(PluginParamError::NoPlainValue(CUTOFF)));
 }
 
@@ -417,14 +416,18 @@ fn a_rescan_replaces_the_declarations_and_the_values_with_them() {
 
     // The plugin drops `mode` and gains `shape`, and moves `cutoff`.
     let shape = ParamId::new(7);
-    *locked(&fake.infos) = vec![
+    *fake.infos.lock_recover() = vec![
         ParameterInfo::new(CUTOFF, "Cutoff")
             .with_plain_range(20.0, 20_000.0, 1_000.0)
             .with_measures(Some(ParamUnit::Hertz)),
         ParameterInfo::new(shape, "Shape").with_normalized_default(0.5),
     ];
-    locked(&fake.values).insert(CUTOFF, Normalized::of(0.75));
-    locked(&fake.values).insert(shape, Normalized::of(0.5));
+    fake.values
+        .lock_recover()
+        .insert(CUTOFF, Normalized::of(0.75));
+    fake.values
+        .lock_recover()
+        .insert(shape, Normalized::of(0.5));
     refresh.fire(PluginRefresh::ParamTitles);
 
     // The notice is heard by this update, which submits the read; the old
@@ -612,7 +615,8 @@ fn a_gesture_spans_updates_and_refuses_once_the_plugin_is_gone() {
 fn a_gesture_on_a_parameter_the_rescan_dropped_is_refused() {
     let (mut s, node, fake, refresh) = ready();
     let gesture = cutoff(&s, node).edit().unwrap();
-    *locked(&fake.infos) = vec![ParameterInfo::new(MODE, "Mode").with_normalized_default(0.0)];
+    *fake.infos.lock_recover() =
+        vec![ParameterInfo::new(MODE, "Mode").with_normalized_default(0.0)];
     refresh.fire(PluginRefresh::ParamTitles);
     let _ = update(&mut s);
     assert_eq!(
