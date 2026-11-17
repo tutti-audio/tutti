@@ -51,7 +51,7 @@ use crate::time::Offset;
 ///   the raw `f32`), because one event port carries ramps for parameters of
 ///   different units and an `Event` has to be one `Copy` type. The raw value
 ///   is private: nothing reads a built-in ramp without naming its key.
-/// - **Foreign params** ([`ParamRamp::foreign`]) carry a [`ParamId`](tutti_types::ParamId) and
+/// - **Foreign params** ([`ParamRamp::foreign`]) carry a [`ParamId`] and
 ///   a raw value in the foreign unit's own normalisation. That is the C ABI
 ///   boundary the units rule stops at: tutti does not know the unit.
 ///
