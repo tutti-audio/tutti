@@ -1034,8 +1034,8 @@ fn harmony_events_are_not_midi() {
 mod message {
     use super::*;
     use tutti_ump::{
-        Address, Attribute, Bank, Data128, Flex, NoteNumber, Sysex7Packet, Sysex8Packet,
-        SysexStatus, Utility, Voice1,
+        Address, Attribute, Bank, Flex, NoteNumber, Sysex7Packet, Sysex8StreamIds, SysexStatus,
+        Utility, Voice1,
     };
 
     fn address(channel: u8) -> Address {
@@ -1420,10 +1420,14 @@ mod message {
                 },
             ),
             Message::Flex(MidiGroup::FIRST, Flex::SetTempo(50_000_000)),
-            Message::Data128(
-                MidiGroup::FIRST,
-                Data128::Sysex8(Sysex8Packet::new(SysexStatus::Complete, 1, &[1, 2, 3]).unwrap()),
-            ),
+            Sysex8StreamIds::undiscovered()
+                .open()
+                .unwrap()
+                .packets(MidiGroup::FIRST, &[1, 2, 3])
+                .next()
+                .unwrap()
+                .decode()
+                .unwrap(),
         ];
         let mut events = Vec::new();
         for message in messages {

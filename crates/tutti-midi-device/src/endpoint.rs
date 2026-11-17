@@ -9,7 +9,8 @@
 use tutti_ump::{
     BlockFilter, BlockSelect, DeviceIdentity, Direction as BlockDirection, DiscoveryFilter,
     FirstGroup, FunctionBlockCount, FunctionBlockId, FunctionBlockInfo, GroupSpan, Message,
-    Midi1Port, Protocol, Stream, StreamConfig, UiHint, Ump, UmpVersion, text_packets,
+    Midi1Port, Protocol, Stream, StreamConfig, Sysex8StreamIds, UiHint, Ump, UmpVersion,
+    text_packets,
 };
 
 use crate::name::{BlockName, EndpointName, ProductInstanceId};
@@ -205,7 +206,7 @@ impl FunctionBlockBuilder {
 
     /// The block's MIDI-CI Message Version/Format (`0` is none, the default,
     /// §7.1.8) and the number of simultaneous SysEx 8 streams it supports (`0`
-    /// none, `1` one, `2..=255` that many).
+    /// none: no System Exclusive 8 at all, `1` one, `2..=255` that many).
     pub const fn midi_ci(mut self, version: u8, max_sysex8_streams: u8) -> Self {
         self.block.midi_ci_version = version;
         self.block.max_sysex8_streams = max_sysex8_streams;
@@ -330,10 +331,19 @@ impl FunctionBlock {
         self.midi_ci_version
     }
 
-    /// Its simultaneous SysEx 8 streams.
+    /// Its simultaneous SysEx 8 streams: `0` is none, no System Exclusive 8 at all.
     #[must_use]
     pub const fn max_sysex8_streams(&self) -> u8 {
         self.max_sysex8_streams
+    }
+
+    /// The SysEx 8 Stream IDs a sender may use towards this block: its
+    /// [`max_sysex8_streams`](Self::max_sysex8_streams), where `0` is a block
+    /// that takes no System Exclusive 8 and `1` is one stream. A sender that
+    /// has not discovered the block uses [`Sysex8StreamIds::undiscovered`].
+    #[must_use]
+    pub const fn sysex8_streams(&self) -> Sysex8StreamIds {
+        Sysex8StreamIds::discovered(self.max_sysex8_streams)
     }
 
     /// Its name, when it has one.

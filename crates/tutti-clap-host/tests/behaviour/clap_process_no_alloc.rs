@@ -52,7 +52,7 @@ const MAX_FRAMES: u32 = 512;
 use tutti_clap_test_plugin::rt_probe::status;
 use tutti_clap_test_plugin::{StatusMode, WideLayout};
 use tutti_fixtures::midi;
-use tutti_ump::{Data128, Message, MidiChannel, MidiGroup, Sysex8Packet, SysexStatus, Ump};
+use tutti_ump::{Message, MidiChannel, MidiGroup, Sysex8StreamIds, Ump};
 
 /// A block long enough for every offset these tests use.
 const BLOCK: usize = 64;
@@ -313,11 +313,13 @@ fn process_with_every_message_kind_does_not_allocate() {
     let mut bufs = StereoBufs::new();
     let transport = TransportInfo::default();
 
-    let sysex8 = Ump::from(Message::Data128(
-        MidiGroup::FIRST,
-        Data128::Sysex8(Sysex8Packet::new(SysexStatus::Complete, 1, &[1, 2, 3]).unwrap()),
-    ))
-    .0;
+    let sysex8 = Sysex8StreamIds::undiscovered()
+        .open()
+        .unwrap()
+        .packets(MidiGroup::FIRST, &[1, 2, 3])
+        .next()
+        .unwrap()
+        .0;
     let table: Vec<(&str, [u32; 4])> = vec![
         ("utility", [0x0000_0000, 0, 0, 0]),
         ("system", [0x10F8_0000, 0, 0, 0]),
