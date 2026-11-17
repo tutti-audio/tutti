@@ -27,7 +27,7 @@ use tutti_types::{
 };
 
 use super::clock::{BlockClock, Clock};
-use super::fault::FaultLatch;
+use super::fault::FirstError;
 use super::interp::{Gate, Place, past_window, place};
 use super::live_read::{LiveRead, Out};
 use super::memory_source::VoiceWindow;
@@ -281,7 +281,7 @@ struct Offline {
     /// file unreadable, no render rate), what the fork's health probe
     /// reports ([`fault`](DiskVoice::fault)). Fresh at every fork, so a copy
     /// never reports another's.
-    fault: Arc<FaultLatch>,
+    fault: Arc<FirstError>,
 }
 
 /// Why a forked disk voice renders silence where its file should be, other
@@ -314,7 +314,7 @@ pub(crate) struct LiveDiskFork;
 
 /// A forked voice's failure latch, as the fork's health probe: a failure it
 /// latched is [`ForkFaultKind::Failed`].
-pub(crate) struct VoiceHealth(pub(crate) Arc<FaultLatch>);
+pub(crate) struct VoiceHealth(pub(crate) Arc<FirstError>);
 
 impl ForkHealth for VoiceHealth {
     fn fault(&self) -> Option<(ForkFaultKind, ForkCause)> {
@@ -462,7 +462,7 @@ impl DiskVoice {
         copy.inner.sever();
         copy.shared_state = Arc::new(self.shared_state.detached());
         copy.clock = Clock::new();
-        let fault = Arc::new(FaultLatch::default());
+        let fault = Arc::new(FirstError::default());
         let (read, direction) = match &self.origin {
             Some(origin) if origin.status.closed() => {
                 fault.latch(OfflineFault::StreamGone);
@@ -509,7 +509,7 @@ impl DiskVoice {
     }
 
     /// A fork's failure latch; `None` live.
-    pub(crate) fn fault(&self) -> Option<Arc<FaultLatch>> {
+    pub(crate) fn fault(&self) -> Option<Arc<FirstError>> {
         self.offline.as_ref().map(|o| Arc::clone(&o.fault))
     }
 

@@ -22,7 +22,7 @@
 //! # A failure is the render's, not silence
 //!
 //! A file that cannot be opened, sought or decoded renders silence from that
-//! point, and the first such failure is latched ([`FaultLatch`]): the fork
+//! point, and the first such failure is latched ([`FirstError`]): the fork
 //! hands the latch to the graph (its `Forked` carries it as the fork's
 //! `ForkHealth`), and the export
 //! fails naming the node and the path rather than writing the silence as a
@@ -40,7 +40,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use super::fault::FaultLatch;
+use super::fault::FirstError;
 #[cfg(codec)]
 use tutti_buffers::Source;
 use tutti_codec::Wave;
@@ -118,7 +118,7 @@ pub(crate) struct OfflineRead {
     /// closed reader know a position past the end without opening again.
     len: Option<usize>,
     /// Where a failure goes. Shared with the fork's probe.
-    fault: Arc<FaultLatch>,
+    fault: Arc<FirstError>,
     /// Opening failed once. Kept so a missing file costs one attempt, not one
     /// per frame.
     failed: bool,
@@ -150,7 +150,7 @@ impl std::fmt::Debug for OfflineRead {
 impl OfflineRead {
     /// A reader for `file` looped as `loop_`, latching its failures into
     /// `fault`. Opens nothing yet.
-    pub(crate) fn new(file: Arc<StreamFile>, loop_: Option<Loop>, fault: Arc<FaultLatch>) -> Self {
+    pub(crate) fn new(file: Arc<StreamFile>, loop_: Option<Loop>, fault: Arc<FirstError>) -> Self {
         Self {
             file,
             loop_,
@@ -169,7 +169,7 @@ impl OfflineRead {
 
     /// This reader, closed, latching into `fault` from now on: what a fork
     /// of a fork keeps, with the new fork's latch.
-    pub(crate) fn relatched(mut self, fault: Arc<FaultLatch>) -> Self {
+    pub(crate) fn relatched(mut self, fault: Arc<FirstError>) -> Self {
         self.open = None;
         self.failed = false;
         self.fault = fault;
@@ -300,7 +300,7 @@ impl Open {
     /// Open `file`: the streamer's decoded copy when its cache holds one, else
     /// the file by its path — header only when it can seek, a whole decode
     /// when it cannot.
-    fn from_file(file: &StreamFile, fault: Arc<FaultLatch>) -> Result<Self, ReadFault> {
+    fn from_file(file: &StreamFile, fault: Arc<FirstError>) -> Result<Self, ReadFault> {
         if let Some(wave) = file.resident() {
             return Ok(Self::Resident(Arc::clone(wave)));
         }
@@ -308,7 +308,7 @@ impl Open {
     }
 
     #[cfg(codec)]
-    fn open_path(file: &StreamFile, fault: Arc<FaultLatch>) -> Result<Self, ReadFault> {
+    fn open_path(file: &StreamFile, fault: Arc<FirstError>) -> Result<Self, ReadFault> {
         let decoder = tutti_codec::FileIn::open(file.path())?;
         let channels = usize::from(decoder.layout().count());
         match decoder.total_frames().filter(|_| decoder.seekable()) {
@@ -335,7 +335,7 @@ impl Open {
 
     /// No codec compiled in: nothing can be decoded, here or by the streamer.
     #[cfg(not(codec))]
-    fn open_path(_file: &StreamFile, _fault: Arc<FaultLatch>) -> Result<Self, ReadFault> {
+    fn open_path(_file: &StreamFile, _fault: Arc<FirstError>) -> Result<Self, ReadFault> {
         Err(ReadFault::NoCodec)
     }
 
@@ -399,7 +399,7 @@ struct Pages {
     #[cfg(codec)]
     decoder: tutti_codec::FileIn,
     path: PathBuf,
-    fault: Arc<FaultLatch>,
+    fault: Arc<FirstError>,
     /// The file's width. Every page is interleaved at it.
     channels: usize,
     /// The file's length in frames.
@@ -668,7 +668,7 @@ mod tests {
 
     /// `OfflineRead::read_into` latches a damaged file's fault. The FLAC
     /// fixture cut to 90% ends short of its frame count; a read before the
-    /// cut returns frames, and the `FaultLatch` holds the decode failure.
+    /// cut returns frames, and the `FirstError` holds the decode failure.
     /// Called on the reader directly, not through a voice render.
     #[test]
     fn a_damaged_file_latches_a_fault_and_keeps_its_frames() {
@@ -678,7 +678,7 @@ mod tests {
         let path = dir.path().join("cut.flac");
         std::fs::write(&path, &bytes[..bytes.len() * 9 / 10]).expect("write");
 
-        let fault = Arc::<FaultLatch>::default();
+        let fault = Arc::<FirstError>::default();
         let mut read = OfflineRead::new(
             Arc::new(StreamFile::new(path, SampleRate::SR_44K1, None)),
             None,
