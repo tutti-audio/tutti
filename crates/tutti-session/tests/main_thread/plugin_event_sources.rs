@@ -120,8 +120,41 @@ fn an_in_process_editors_timer_is_served_by_the_views_update() {
     probe.set(ClapSwitch::TimerPeriod, 0);
 }
 
+/// **A bare `Session::update` on the OS main thread does the main thread's
+/// share**: it services an open editor (the plugin's descriptor is served) and
+/// drops a removed in-process plugin from the graveyard, with no marker passed.
+fn a_bare_update_on_the_main_thread_services_editors_and_exhumes() {
+    let (mut s, editor) = session_with_open_editor(CMD_REGISTER_FD);
+    let probe = probe();
+    assert!(probe.fd_poke(), "the plugin's pipe takes a byte");
+    let _ = s.update();
+    assert_eq!(
+        probe.thread_capture().fd_fires,
+        1,
+        "the open editor was serviced"
+    );
+
+    s.remove(editor.node()).expect("the plugin is hosted");
+    assert_eq!(
+        s.retired_plugins(),
+        1,
+        "removal parks the in-process record"
+    );
+    let _ = s.update();
+    assert_eq!(
+        s.retired_plugins(),
+        0,
+        "the update on the main thread dropped it"
+    );
+    assert!(
+        !editor.is_open(),
+        "the removed plugin's editor reads closed"
+    );
+}
+
 /// The cases of this module, run by `main`.
 pub(crate) const CASES: &[(&str, fn())] = tutti_fixtures::cases!["plugin_event_sources";
 an_in_process_editors_descriptor_is_served_by_the_views_update,
 an_in_process_editors_timer_is_served_by_the_views_update,
+a_bare_update_on_the_main_thread_services_editors_and_exhumes,
 ];

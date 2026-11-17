@@ -292,3 +292,43 @@ fn a_removal_ends_the_editor() {
     assert_eq!(closes(&fake), 1, "the main thread's update closed it");
     assert!(!editor.is_open());
 }
+
+/// **Two editors of one plugin share its one open editor**: the second `open`
+/// is refused by name while the first is open, the plugin's open is not called
+/// twice, and the first's drop closes nothing the second opened after the first
+/// closed.
+#[test]
+fn a_second_editor_cannot_open_over_the_first_and_a_closed_one_closes_nothing() {
+    let (mut s, node, fake) = session_with_editor();
+    let main = tutti_fixtures::main_thread();
+    let opens = |fake: &FakePlugin| {
+        fake.calls()
+            .iter()
+            .filter(|c| **c == Call::OpenEditor)
+            .count()
+    };
+    let mut a = s.editor(node, &main).unwrap();
+    let mut b = s.editor(node, &main).unwrap();
+    a.open(&StandInWindow, ContentScale::IDENTITY).unwrap();
+    assert!(
+        b.is_open(),
+        "the plugin's editor is open, whoever opened it"
+    );
+    assert!(matches!(
+        b.open(&StandInWindow, ContentScale::IDENTITY),
+        Err(EditorCallError::AlreadyOpen)
+    ));
+    assert_eq!(opens(&fake), 1, "the plugin was not asked to open twice");
+
+    a.close();
+    b.open(&StandInWindow, ContentScale::IDENTITY).unwrap();
+    assert_eq!(opens(&fake), 2);
+    let before = closes(&fake);
+    drop(a);
+    assert_eq!(
+        closes(&fake),
+        before,
+        "a closed editor's drop closes nothing"
+    );
+    assert!(b.is_open());
+}

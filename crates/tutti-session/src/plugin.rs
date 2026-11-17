@@ -46,7 +46,8 @@
 //! [`Session::retired_plugins`] counts what waits, and `Phase::Plugins` warns
 //! once when more than a handful do. A served plugin's record drops where it
 //! is retired, on the control thread; only an editor it left open waits for
-//! the main thread, to be closed.
+//! the main thread, to be closed, through the registry of open editors
+//! (`Editors`).
 //!
 //! # `Phase::Plugins`
 //!

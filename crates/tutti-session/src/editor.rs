@@ -61,21 +61,36 @@ use tutti_plugin_types::{
 
 use crate::{Clock, NoSuchNode, Session};
 
-/// What an [`Editor`] and the session's registry share: the plugin instance
-/// the editor was made for, and whether that instance is gone.
+/// What an [`Editor`] and the session's registry share: no plugin handle, so
+/// the control thread that reads it never holds the last owner of a plugin.
 #[derive(Debug)]
-pub(crate) struct EditorState {
+struct EditorFlags {
     node: NodeKey,
-    handle: PluginHandle,
     /// Set when the node is removed or the plugin replaced: the instance this
     /// editor is for no longer serves its node.
     ended: AtomicBool,
+    /// Set once the main thread closed the plugin's editor of an ended editor.
+    closed: AtomicBool,
+}
+
+/// The plugin instance an editor is for: held by the [`Editor`] alone. The
+/// registry's weak reference to it is upgraded only on the main thread, where
+/// the editor lives, so the last owner of the handle drops there.
+#[derive(Debug)]
+struct EditorOwner {
+    handle: PluginHandle,
+}
+
+#[derive(Debug)]
+struct Entry {
+    flags: Weak<EditorFlags>,
+    owner: Weak<EditorOwner>,
 }
 
 /// The editors that are alive: weak, so an editor the app dropped is not kept.
 #[derive(Debug, Default)]
 pub(crate) struct Editors {
-    live: Vec<Weak<EditorState>>,
+    live: Vec<Entry>,
 }
 
 impl Editors {
@@ -87,58 +102,74 @@ impl Editors {
         handle: PluginHandle,
         main: MainThreadMarker,
     ) -> Editor {
-        let state = Arc::new(EditorState {
+        let flags = Arc::new(EditorFlags {
             node,
-            handle,
             ended: AtomicBool::new(false),
+            closed: AtomicBool::new(false),
         });
-        self.live.retain(|w| w.strong_count() > 0);
-        self.live.push(Arc::downgrade(&state));
+        let owner = Arc::new(EditorOwner { handle });
+        self.live.retain(|e| e.flags.strong_count() > 0);
+        self.live.push(Entry {
+            flags: Arc::downgrade(&flags),
+            owner: Arc::downgrade(&owner),
+        });
         Editor {
-            state,
+            flags,
+            owner,
             main,
             opened: false,
         }
     }
 
-    fn states(&self) -> impl Iterator<Item = Arc<EditorState>> + '_ {
-        self.live.iter().filter_map(Weak::upgrade)
-    }
-
     /// The editors of the plugin at `node` end: it was removed or replaced.
+    /// Control thread: reads flags only.
     pub(crate) fn end(&mut self, node: NodeKey) {
-        for state in self.states().filter(|s| s.node == node) {
-            state.ended.store(true, Ordering::Release);
+        for flags in self.live.iter().filter_map(|e| e.flags.upgrade()) {
+            if flags.node == node {
+                flags.ended.store(true, Ordering::Release);
+            }
         }
     }
 
     /// How many ended editors still wait to be closed on the main thread.
     pub(crate) fn waiting(&self) -> usize {
-        self.states()
-            .filter(|s| s.ended.load(Ordering::Acquire) && s.handle.is_editor_open())
+        self.live
+            .iter()
+            .filter_map(|e| e.flags.upgrade())
+            .filter(|f| f.ended.load(Ordering::Acquire) && !f.closed.load(Ordering::Acquire))
             .count()
     }
 
     /// Closes the plugin side of every ended editor, on the main thread, and
     /// forgets them.
     pub(crate) fn close_ended(&mut self, main: MainThreadMarker) {
-        for state in self.states() {
-            if state.ended.load(Ordering::Acquire) && state.handle.is_editor_open() {
-                state.handle.close_editor(main);
+        for entry in &self.live {
+            let (Some(flags), Some(owner)) = (entry.flags.upgrade(), entry.owner.upgrade()) else {
+                continue;
+            };
+            if flags.ended.load(Ordering::Acquire) {
+                if owner.handle.is_editor_open() {
+                    owner.handle.close_editor(main);
+                }
+                flags.closed.store(true, Ordering::Release);
             }
         }
-        self.live.retain(|w| {
-            w.upgrade()
-                .is_some_and(|s| !s.ended.load(Ordering::Acquire))
+        self.live.retain(|e| {
+            e.flags
+                .upgrade()
+                .is_some_and(|f| !f.ended.load(Ordering::Acquire))
         });
     }
 
     /// The idle tick of every open editor.
     pub(crate) fn service(&mut self, main: MainThreadMarker) {
-        self.live.retain(|w| w.strong_count() > 0);
-        for state in self.states() {
-            if !state.ended.load(Ordering::Acquire) && state.handle.is_editor_open() {
-                state.handle.editor_idle(main);
+        self.live.retain(|e| e.flags.strong_count() > 0);
+        for entry in &self.live {
+            let (Some(flags), Some(owner)) = (entry.flags.upgrade(), entry.owner.upgrade()) else {
+                continue;
+            };
+            if !flags.ended.load(Ordering::Acquire) && owner.handle.is_editor_open() {
+                owner.handle.editor_idle(main);
             }
         }
     }
@@ -176,6 +207,10 @@ pub enum EditorCallError {
     /// the plugin was replaced or reloaded. Ask the session for a new editor.
     #[error("the editor's plugin is gone: its node was removed or the plugin replaced")]
     Ended,
+    /// The plugin's editor is open already (through this editor or another
+    /// for the same plugin): close it first.
+    #[error("the plugin's editor is open already")]
+    AlreadyOpen,
     /// The plugin refused.
     #[error(transparent)]
     Plugin(#[from] EditorError),
@@ -205,7 +240,8 @@ pub enum Opened {
 /// replacement puts at the node.
 #[derive(Debug)]
 pub struct Editor {
-    state: Arc<EditorState>,
+    flags: Arc<EditorFlags>,
+    owner: Arc<EditorOwner>,
     main: MainThreadMarker,
     /// Whether this editor opened the plugin's editor: only that one closes it
     /// on drop.
@@ -215,25 +251,26 @@ pub struct Editor {
 impl Editor {
     /// The node of the plugin this editor is for.
     pub fn node(&self) -> NodeKey {
-        self.state.node
+        self.flags.node
     }
 
     fn live(&self) -> Result<&PluginHandle, EditorCallError> {
-        if self.state.ended.load(Ordering::Acquire) {
+        if self.flags.ended.load(Ordering::Acquire) {
             return Err(EditorCallError::Ended);
         }
-        Ok(&self.state.handle)
+        Ok(&self.owner.handle)
     }
 
     /// Whether the plugin has an editor to open.
     pub fn exists(&self) -> bool {
-        self.state.handle.has_editor()
+        self.owner.handle.has_editor()
     }
 
-    /// Whether the editor is open: opened through this editor, not closed
-    /// since, and its plugin still serves the node.
+    /// Whether the plugin's editor is open (the plugin handle's one reading,
+    /// whichever editor of the plugin opened it) and this editor's plugin
+    /// still serves the node.
     pub fn is_open(&self) -> bool {
-        self.live().is_ok() && self.state.handle.is_editor_open()
+        self.live().is_ok() && self.owner.handle.is_editor_open()
     }
 
     /// Opens the editor in `window` (a winit window, or any
@@ -246,7 +283,8 @@ impl Editor {
     ///
     /// # Errors
     ///
-    /// [`EditorCallError::Ended`] for a plugin that is gone. Otherwise the
+    /// [`EditorCallError::Ended`] for a plugin that is gone,
+    /// [`EditorCallError::AlreadyOpen`] when its editor is open. Otherwise the
     /// plugin has no editor, refuses it, or `window` has no handle a plugin
     /// can embed into.
     pub fn open(
@@ -256,6 +294,9 @@ impl Editor {
     ) -> Result<Opened, EditorCallError> {
         let main = self.main;
         let handle = self.live()?;
+        if handle.is_editor_open() {
+            return Err(EditorCallError::AlreadyOpen);
+        }
         let opened = if handle.loaded().features.contains(Features::EDITOR_FLOATING) {
             handle.open_floating_editor(main)?;
             Opened::Floating
@@ -324,14 +365,14 @@ impl Editor {
     /// is open.
     pub fn close(&mut self) {
         self.opened = false;
-        self.state.handle.close_editor(self.main);
+        self.owner.handle.close_editor(self.main);
     }
 }
 
 impl Drop for Editor {
     fn drop(&mut self) {
         if self.opened {
-            self.state.handle.close_editor(self.main);
+            self.owner.handle.close_editor(self.main);
         }
     }
 }
