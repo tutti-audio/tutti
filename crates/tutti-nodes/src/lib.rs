@@ -38,6 +38,8 @@
 //!   with no feedback and a finite tail) and `PhaserNode` (a `KernelNode` over `PhaserKernel`, its `Stages`
 //!   and `SweepRange` checked; the rate is floored at 0.01 Hz, a lane's value and a cell's alike), both any width.
 //! - **Distortion** — `DistortionNode` and its `ShapeKind` waveshapers.
+//! - **Bit crusher** — `BitCrusherNode`, a sample-and-hold and a quantizer, with no tail,
+//!   from a `BitCrusherConfig`.
 //! - **DC blocker** — `DcBlockerNode`, a first-order high-pass with a finite tail, from a
 //!   `DcBlockerConfig`.
 //! - **Modulation sources** — `LfoNode`, the per-sample LFO over
@@ -240,9 +242,9 @@ mod tail_clock;
 mod test_support;
 
 pub use tutti_types::{
-    Amplitude, ArcDegrees, Azimuth, Bpm, Cents, CentsSpan, CompressionRatio, Db, Depth, Drive,
-    Elevation, Feedback, Hz, Mix, Param, Q, Resonance, SampleRate, Seconds, Semitones, Spread,
-    StereoWidth, Unit,
+    Amplitude, ArcDegrees, Azimuth, BitDepth, Bpm, Cents, CentsSpan, CompressionRatio, Db, Depth,
+    Drive, Elevation, Feedback, HoldFactor, Hz, Mix, Param, Q, Resonance, SampleRate, Seconds,
+    Semitones, Spread, StereoWidth, Unit,
 };
 
 // The boundary this crate holds: pure DSP graph nodes plus the `ParamSet` /
@@ -276,6 +278,11 @@ pub use distortion::{DistortionKernel, DistortionNode, DistortionSet};
 // `ShapeKind` and `OversamplingFactor` are in `DistortionNode`'s signatures; what is behind
 // them is `tutti-dsp`'s.
 pub use tutti_dsp::{OversamplingFactor, ShapeKind};
+
+// A sample-and-hold and a quantizer.
+mod bit_crusher;
+pub use bit_crusher::{BitCrusherConfig, BitCrusherKernel, BitCrusherNode, BitCrusherSet};
+pub use tutti_dsp::BitCrusherControls;
 
 // A first-order high-pass that removes a constant offset.
 mod dc_blocker;

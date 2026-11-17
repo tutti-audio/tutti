@@ -31,6 +31,8 @@
 //!   `GAIN_GLIDE`).
 //! - **Convolution** — `Convolver`, a uniform or non-uniform partitioned FFT
 //!   convolution over an IR's shared, read-only `IrSpectra`.
+//! - **Bit crusher** (`bit_crush.rs`): [`BitCrusher`], a sample-and-hold every [`hold_frames`]
+//!   frames, then [`quantize`] to a `BitDepth`.
 //! - **DC blocker** (`dc_block.rs`): [`DcBlocker`], a first-order high-pass with its pole from
 //!   [`dc_pole`], reached along a line over [`COEFF_INTERVAL`] frames.
 //! - **Delay** — `DelayLine`, a fractional-read ring with an `InterpolationMode`;
@@ -156,6 +158,7 @@
 //! Every public item is re-exported at the crate root; import from there
 //! (`tutti_dsp::RealFft`). No module is public.
 
+mod bit_crush;
 mod control;
 mod convolver;
 mod dc_block;
@@ -188,6 +191,7 @@ mod stft;
 mod testing;
 mod xorshift;
 
+pub use bit_crush::{BitCrusher, BitCrusherControls, DEFAULT_BIT_DEPTH, hold_frames, quantize};
 pub use control::{COEFF_INTERVAL, LANES};
 pub use convolver::{Convolver, IrSpectra, MatrixConvolver, MatrixConvolverError};
 pub use dc_block::{DC_CORNER, DcBlocker, DcBlockerControls, MIN_DC_CORNER, dc_pole};

@@ -12,10 +12,10 @@ use tutti_nodes::{
     MultibandCompressorNode, PhaserControls, PhaserNode, RingModConfig, RingModNode, SvfFilterNode,
     TremoloConfig, TremoloNode,
 };
-use tutti_nodes::{DcBlockerConfig, DcBlockerNode};
+use tutti_nodes::{BitCrusherConfig, BitCrusherNode, DcBlockerConfig, DcBlockerNode};
 use tutti_types::{
-    BusTopology, ChannelLayout, Db, Drive, Feedback, Frame, Hz, MaxBlock, Mix, Q, Resonance,
-    SampleRate, Samples, Seconds,
+    BitDepth, BusTopology, ChannelLayout, Db, Drive, Feedback, Frame, HoldFactor, Hz, MaxBlock,
+    Mix, Q, Resonance, SampleRate, Samples, Seconds,
 };
 
 const SR: SampleRate = SampleRate::SR_48K;
@@ -69,6 +69,17 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
         (
             "compressor",
             Box::new(CompressorNode::mono(CompressorControls::DEFAULT)),
+        ),
+        (
+            // A hold of 91 frames captures the poisoned frame (273 is 3 x 91) and holds it
+            // past the block's end: the node's reset is what ends it. The reset matters for NaN only;
+            // an infinity quantizes to +-1, which is finite, and the next capture replaces it.
+            "bit crusher",
+            Box::new(BitCrusherNode::from(
+                BitCrusherConfig::new(ChannelLayout::STEREO)
+                    .bits(BitDepth::new(12.0))
+                    .hold(HoldFactor::new(91.0)),
+            )),
         ),
         (
             "dc blocker",

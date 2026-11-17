@@ -23,7 +23,7 @@ use tutti_nodes::{
     PhaserNode, RingModConfig, RingModNode, ShapeKind, Stages, SvfControls, SvfFilterNode, SvfType,
     TremoloConfig, TremoloNode,
 };
-use tutti_nodes::{DcBlockerConfig, DcBlockerNode};
+use tutti_nodes::{BitCrusherConfig, BitCrusherNode, DcBlockerConfig, DcBlockerNode};
 use tutti_nodes::{StereoWidthConfig, StereoWidthNode};
 use tutti_types::{
     Amplitude, BusTopology, ChannelLayout, CompressionRatio, Db, Depth, Drive, Feedback, Hz, Q,
@@ -172,6 +172,20 @@ fn distortion() {
     })
     .control("drive", |d| {
         assert!(d.param_set().set(UnitParam::Drive, 8.0))
+    })
+    .check();
+}
+
+#[test]
+fn bit_crusher() {
+    IsolateRow::new("BitCrusherNode (stereo)", || {
+        BitCrusherNode::from(BitCrusherConfig::new(ChannelLayout::STEREO))
+    })
+    .control("bits", |b| {
+        assert!(b.param_set().set(UnitParam::BitDepth, 3.0))
+    })
+    .control("hold", |b| {
+        assert!(b.param_set().set(UnitParam::HoldFactor, 5.0))
     })
     .check();
 }

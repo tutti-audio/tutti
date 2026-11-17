@@ -74,14 +74,14 @@ mod transport;
 use super::samples::Samples;
 
 pub use amounts::{
-    Balance, Depth, DepthOutOfRange, Drive, Feedback, Mix, Pan, Spread, StereoWidth,
+    Balance, BitDepth, Depth, DepthOutOfRange, Drive, Feedback, Mix, Pan, Spread, StereoWidth,
 };
 pub use angles::{ArcDegrees, Azimuth, Direction, Elevation, Phase, PhaseIncrement, Radians};
 pub use frames::{SampleSpan, SampleSpanOutOfRange};
 pub use level::{Amplitude, Db, Gain};
 pub use measures::{Confidence, Correlation, StereoBalance, Velocity};
 pub use ratios::{
-    Cents, CentsSpan, CentsSpanOutOfRange, CompressionRatio, Q, Resonance, Semitones,
+    Cents, CentsSpan, CentsSpanOutOfRange, CompressionRatio, HoldFactor, Q, Resonance, Semitones,
 };
 pub use time::{AtomicSampleRate, Hz, ParkedSampleRate, SampleRate, SampleRateOutOfRange, Seconds};
 pub use transport::{

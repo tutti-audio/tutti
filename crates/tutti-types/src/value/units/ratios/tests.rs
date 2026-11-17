@@ -11,6 +11,9 @@ use super::*;
 /// - `CentsSpan * f32`, `-CentsSpan` — a negative factor leaves the range.
 ///   Scale the raw number and call `new` (or `clamped`, where saturating is
 ///   meant).
+/// - `HoldFactor + HoldFactor`, `HoldFactor * f32` — a hold is a count of frames
+///   read after rounding; a sum or a scaled factor can fall below 1. Build the
+///   new factor from the raw number with `HoldFactor::new_clamped`.
 /// - `From<raw> for Unit`, `From<Unit> for raw`, so `.into()` between a unit and
 ///   its bare number — a bare float must not become a unit unnamed at the call
 ///   site, and a unit must not leave as a float by an `.into()` that hides which
@@ -126,4 +129,16 @@ fn a_semitone_is_the_twelfth_root_of_two() {
     let want = 1.059_463_1_f32;
     assert!((Semitones(1.0).to_pitch_ratio() - want).abs() < 1e-6);
     assert!((Cents(100.0).to_pitch_ratio() - want).abs() < 1e-6);
+}
+
+/// A hold factor is at least 1: `new_clamped` raises a smaller value to `NONE`,
+/// passes a larger one, fractional or not, and leaves NaN to the reader.
+#[test]
+fn a_hold_factor_is_at_least_one() {
+    assert_eq!(HoldFactor::new_clamped(0.5), HoldFactor::NONE);
+    assert_eq!(HoldFactor::new_clamped(-4.0), HoldFactor::NONE);
+    assert_eq!(HoldFactor::new_clamped(2.6), HoldFactor::new(2.6));
+    assert_eq!(HoldFactor::new_clamped(f32::INFINITY).get(), f32::INFINITY);
+    assert!(HoldFactor::new_clamped(f32::NAN).get().is_nan());
+    assert_eq!(HoldFactor::NONE.get(), 1.0);
 }

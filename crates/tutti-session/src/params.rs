@@ -206,6 +206,8 @@ param_methods! {
     stereo_spread, stereo_spread_at => StereoSpread;
     pan, pan_at => Pan;
     balance, balance_at => Balance;
+    bit_depth, bit_depth_at => BitDepth;
+    hold_factor, hold_factor_at => HoldFactor;
     knee, knee_at => Knee;
     decay, decay_at => Decay;
     diffusion, diffusion_at => Diffusion;
