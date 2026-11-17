@@ -123,9 +123,14 @@ fn play<M: Master>(
     s.graph().connect(synth, Root).unwrap();
 
     let file = MidiFile::read(midi)?; // an SMF or a Clip File
+    // A file timed in SMPTE frames has no beats, so no tempo map to adopt and
+    // no beat to end on: this example plays metrical files only.
+    let (Some(tempo_map), Some(end)) = (file.tempo_map(), file.beat_at(file.end())) else {
+        return Err("a file timed in SMPTE frames has no beats to play on".into());
+    };
     // A file's tempo track is the file's data, not the project's: the project
     // adopts it on import, here, by an explicit call (a shared map, no copy).
-    s.set_tempo_map(file.tempo_map().clone())?;
+    s.set_tempo_map(tempo_map.clone())?;
     // Its messages on the file's timeline (a format 2 file has none), as the
     // packets they are: the clip translates them when it is loaded.
     s.midi().play_file(synth, Beat(0.0), &file)?;
@@ -135,7 +140,7 @@ fn play<M: Master>(
     // beat 0, the latency is the plan's, the tail is the plugin's declared
     // one, and the file is as wide as the root.
     let job = s.bounce_start(master(
-        Bounce::project().range(Range::Beats(Beat(0.0), file.end_beat())),
+        Bounce::project().range(Range::Beats(Beat(0.0), end)),
     ))?; // the plugin hears Offline from here
     let bounced = s.finish_bounce(job.run())?; // and Realtime from here
     Ok(bounced.into_master())
