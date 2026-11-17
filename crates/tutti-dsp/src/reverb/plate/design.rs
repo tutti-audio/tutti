@@ -12,7 +12,9 @@
 //! B_R -> A_L` (a permutation matrix): line `A` is the modulated lattice, the first delay and
 //! the damping with its decay gain, line `B` the second lattice, the second delay and the decay
 //! gain. The four input diffusers are four [`Stage::AllPass`] stages. The output taps (table 2,
-//! read inside the tank) are the bank's alone: the network's output map is empty.
+//! read inside the tank) are the bank's alone: the network's output map is empty, so only its
+//! `tail` and `rt60` queries are meaningful for the plate; its frequency-response and density
+//! queries describe no output.
 //!
 //! **Decay.** The control is the RT60 of the tank's loop, mapped to the paper's decay
 //! coefficient `c`. A trip round the tank passes the decay gain four times, so the loop gain

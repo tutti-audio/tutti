@@ -280,9 +280,9 @@ impl PlateBank {
             }),
             ceiling: tail_of(
                 match PlateControls::capacity(rate).tail {
-                    Ring::Finite(t) => Ring::Finite(Seconds(
-                        t.get() + bandwidth_ring(MIN_BANDWIDTH.get(), rate).get(),
-                    )),
+                    Ring::Finite(t) => {
+                        Ring::Finite(Seconds(t.get() + bandwidth_ring(MIN_BANDWIDTH, rate).get()))
+                    }
                     other => other,
                 },
                 rate,
@@ -336,10 +336,9 @@ impl PlateBank {
     }
 
     /// How long `controls` ring from now, with `glides` as they are: the network's own tail at
-    /// the floor (it counts the damping one-pole's group delay at DC in each half's loop, so
-    /// the loop it bounds is the real one), plus the ring of the bandwidth one-pole before
-    /// the tank (`ln(floor) / ln(pole)` frames), plus the pre-delay still to fall; at most the
-    /// ceiling ([`tail`](Self::tail)). No allocation; the audio state is not touched.
+    /// the floor (it counts each damping one-pole's peak delay, so the loop it bounds is the
+    /// real one), plus the ring of the bandwidth one-pole (`ln(floor) / ln(pole)` frames), plus
+    /// the pre-delay still to fall; at most the ceiling ([`tail`](Self::tail)). No allocation.
     pub fn tail_of(&mut self, glides: &PlateGlides, controls: &PlateControls) -> Tail {
         self.design(controls);
         let Ring::Finite(t) = self.network.tail(TAIL_FLOOR) else {
@@ -347,7 +346,7 @@ impl PlateBank {
         };
         let pre = (self.network.pre_delay.get() as f32).clamp(0.0, self.shape.pre as f32);
         let behind = f64::from((glides.pre.now() - pre).max(0.0));
-        let input = bandwidth_ring(controls.bandwidth_at(self.rate).get(), self.rate);
+        let input = bandwidth_ring(controls.bandwidth_at(self.rate), self.rate);
         tail_of(
             Ring::Finite(Seconds(t.get() + input.get() + behind / self.rate.get())),
             self.rate,
@@ -521,8 +520,8 @@ impl PlateBank {
 /// [`TAIL_FLOOR`]: its pole `q = exp(-2 pi fc / fs)` leaves `q^n`, which is under the floor
 /// after `ln(floor) / ln(q)` frames. Added to the tank's ring: the tank hears the input that
 /// long after it stops.
-fn bandwidth_ring(cutoff: f32, rate: SampleRate) -> Seconds {
-    let pole = libm::exp(-std::f64::consts::TAU * f64::from(cutoff) / rate.get());
+fn bandwidth_ring(cutoff: Hz, rate: SampleRate) -> Seconds {
+    let pole = libm::exp(-std::f64::consts::TAU * f64::from(cutoff.get()) / rate.get());
     let floor = f64::from(TAIL_FLOOR.to_amplitude().get());
     if pole <= 0.0 {
         return Seconds(0.0);

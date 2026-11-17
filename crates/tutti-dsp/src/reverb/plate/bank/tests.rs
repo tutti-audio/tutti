@@ -170,45 +170,47 @@ fn the_first_sound_is_the_pre_delay_plus_the_earliest_tap() {
 }
 
 /// The reported tail covers the impulse response: past it nothing is above the floor below the
-/// response's peak, and the tail never exceeds the ceiling. The sets include the worst corners
-/// of what the tail adds to the network's own: damping 0.999 (each half's one-pole adds
+/// response's peak, and the tail never exceeds the ceiling, at 48 and 44.1 kHz. The sets include
+/// the worst corners of what the tail adds to the network's own: damping 0.999 (each half's one-pole adds
 /// `p / (1 - p)` = 999 frames to the loop, more than the bound's slack at diffusion 0) and
 /// bandwidth 10 Hz (the input's one-pole rings on for thousands of frames).
 #[test]
 fn the_tail_covers_the_response_falling_under_the_floor() {
-    let rate = SampleRate::SR_48K;
     let floor = 10f64.powf(f64::from(crate::TAIL_FLOOR.get()) / 20.0);
-    // (decay, damping, bandwidth, diffusion, pre-delay)
-    for (decay, damping, bandwidth, diffusion, pre) in [
-        (1.0, 0.0, 20_000.0, 1.0, 0.0),
-        (4.0, 0.3, 20_000.0, 1.0, 0.2),
-        (8.0, 0.0005, 20_000.0, 1.0, 0.2),
-        (3.0, 0.999, 10.0, 0.0, 0.0),
-        (3.0, 0.999, 10.0, 1.0, 0.0),
-        (8.0, 0.999, 10.0, 0.0, 0.0),
-        (8.0, 0.5, 20_000.0, 0.0, 0.0),
-    ] {
-        let c = PlateControls {
-            damping: Mix(damping),
-            bandwidth: Hz(bandwidth),
-            diffusion: Mix(diffusion),
-            pre_delay: Seconds(pre),
-            ..still(decay)
-        };
-        let (mut bank, mut glides) = landed(rate, &c);
-        let (Tail::Finite(tail), Tail::Finite(ceiling)) = (bank.tail_of(&glides, &c), bank.tail())
-        else {
-            panic!("finite tails")
-        };
-        assert!(tail <= ceiling);
-        let [l, r] = run(&mut bank, &mut glides, &impulse(tail.get() + 48_000), 512);
-        let peak = l.iter().chain(&r).fold(0.0f32, |m, x| m.max(x.abs()));
-        let late =
-            (l[tail.get()..].iter().chain(&r[tail.get()..])).fold(0.0f32, |m, x| m.max(x.abs()));
-        assert!(
-            f64::from(late) <= floor * f64::from(peak),
-            "{c:?}: {late} past the tail {tail:?}, peak {peak}"
-        );
+    for rate in [SampleRate::SR_48K, SampleRate::SR_44K1] {
+        // (decay, damping, bandwidth, diffusion, pre-delay)
+        for (decay, damping, bandwidth, diffusion, pre) in [
+            (1.0, 0.0, 20_000.0, 1.0, 0.0),
+            (4.0, 0.3, 20_000.0, 1.0, 0.2),
+            (8.0, 0.0005, 20_000.0, 1.0, 0.2),
+            (3.0, 0.999, 10.0, 0.0, 0.0),
+            (3.0, 0.999, 10.0, 1.0, 0.0),
+            (8.0, 0.999, 10.0, 0.0, 0.0),
+            (8.0, 0.5, 20_000.0, 0.0, 0.0),
+        ] {
+            let c = PlateControls {
+                damping: Mix(damping),
+                bandwidth: Hz(bandwidth),
+                diffusion: Mix(diffusion),
+                pre_delay: Seconds(pre),
+                ..still(decay)
+            };
+            let (mut bank, mut glides) = landed(rate, &c);
+            let (Tail::Finite(tail), Tail::Finite(ceiling)) =
+                (bank.tail_of(&glides, &c), bank.tail())
+            else {
+                panic!("finite tails")
+            };
+            assert!(tail <= ceiling);
+            let [l, r] = run(&mut bank, &mut glides, &impulse(tail.get() + 48_000), 512);
+            let peak = l.iter().chain(&r).fold(0.0f32, |m, x| m.max(x.abs()));
+            let late = (l[tail.get()..].iter().chain(&r[tail.get()..]))
+                .fold(0.0f32, |m, x| m.max(x.abs()));
+            assert!(
+                f64::from(late) <= floor * f64::from(peak),
+                "{c:?}: {late} past the tail {tail:?}, peak {peak}"
+            );
+        }
     }
 }
 
@@ -246,13 +248,12 @@ fn a_lattice_has_the_direct_term_minus_g_and_unit_energy() {
 }
 
 /// The modulated delays sweep as the paper's excursion says. At diffusion 0 the tank's first
-/// lattices are plain delays read at `D + m(t)`, so an impulse put in at frame `T` reaches the
-/// first output tap at `T + (input delays) + D + m(t) + tap`; the arrival's centroid gives
-/// `m(t)`. With depth 1 it is the excursion `A = 16 rate / 29761` frames: the left half's
-/// `A sin(2 pi t)` (read off the right output, whose earliest tap, 353 frames at 29761 Hz, is in
-/// the left half) and the right half's `A cos(2 pi t)` (the left output, earliest tap 266), at 1
-/// Hz, within 0.1 frame, at eight times across the period. A sweep of zero, another rate or
-/// the quarter turn the other way misses by many frames (`A` is 26).
+/// lattices are plain delays read at `D + m(t)`, so an impulse put in at frame `T` arrives at
+/// `T + (input delays) + D + m(t) + tap` and the arrival's centroid gives `m(t)`. At depth 1,
+/// 1 Hz, it is `A sin(2 pi t)` for the left half (heard on the right output, earliest tap 353)
+/// and `A cos(2 pi t)` for the right (left output, tap 266), `A = 16 rate / 29761` = 26 frames,
+/// within 0.1 frame at eight times across the period: a zero sweep, another rate or the other
+/// quarter turn misses by many frames.
 #[test]
 fn the_modulated_delays_sweep_the_papers_excursion_in_quadrature() {
     let rate = SampleRate::SR_48K;
@@ -300,4 +301,13 @@ fn the_modulated_delays_sweep_the_papers_excursion_in_quadrature() {
             );
         }
     }
+}
+
+/// A bank that was never aimed renders silence.
+#[test]
+fn an_unaimed_bank_renders_silence() {
+    let mut bank = PlateBank::new(SampleRate::SR_48K);
+    let mut glides = bank.glides();
+    let out = run(&mut bank, &mut glides, &impulse(2_000), 256);
+    assert!(out.iter().flatten().all(|&x| x == 0.0));
 }

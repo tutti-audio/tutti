@@ -1,4 +1,4 @@
-use tutti_types::{Depth, Hz, Mix, SampleRate, Seconds};
+use tutti_types::{Hz, Mix, SampleRate, Seconds};
 
 use super::*;
 use crate::System;
@@ -73,7 +73,7 @@ fn the_decay_coefficient_gives_the_designed_rt60_by_the_closed_form() {
 
 /// The paper's table 2 as it prints it: node, offset at 29761 Hz, sign; left output then right.
 /// `node24_30`, `31_33` and `33_39` are the left half's first delay, second lattice and second
-/// delay; `48_54`, `55_59` and `59_63` the right half's. The last term is `y = acc - 0.6 x node`.
+/// delay; `48_54`, `55_59` and `59_63` the right half's.
 const PAPER_TAPS: [[(&str, u32, f32); 7]; 2] = [
     [
         ("48_54", 266, 1.0),
@@ -183,22 +183,13 @@ fn diffusion_scales_every_lattice_coefficient_and_zero_makes_them_delays() {
     assert_eq!(none, [0.0; 6]);
 }
 
-/// The tank is a stable ring, wet only, with a finite tail, and its modulation is the paper's
-/// 16 frames at 29761 Hz at full depth.
+/// The tank is a stable ring, wet only, with a finite tail.
 #[test]
 fn the_network_is_stable_wet_only_and_finite() {
-    let rate = SampleRate::SR_48K;
-    let c = PlateControls {
-        modulation: Depth::of(1.0),
-        ..PlateControls::DEFAULT
-    };
-    let n = design(&c, rate);
+    let n = design(&PlateControls::DEFAULT, SampleRate::SR_48K);
     assert!(fdn_of(&n).is_stable());
     assert!(!n.has_direct_path());
     assert!(matches!(n.tail(crate::TAIL_FLOOR), crate::Ring::Finite(_)));
-    let m = fdn_of(&n).lines[0].diffuser.unwrap().modulation;
-    assert!((m.depth.get() - 16.0 * 48_000.0 / 29_761.0).abs() < 1e-9);
-    assert_eq!(m.rate, Hz(1.0));
 }
 
 /// A non-finite control is its default and one past its range is clamped.
