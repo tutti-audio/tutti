@@ -5,8 +5,13 @@
 //! `crates/`, `testing/` and `xtask/` with its comments and literals blanked, and counts,
 //! per file and in test code only, two kinds of site.
 //!
-//! Test code is a file under a `tests` directory, a `tests.rs` file, and the items behind
-//! `#[cfg(test)]` (or `#[cfg(all(.., test, ..))]`) in any other file.
+//! Test code is a file under a `tests` directory, a `tests.rs` file, a file reached
+//! through a `#[cfg(test)] mod name;` declaration (and every module that file declares in
+//! turn), and the items behind `#[cfg(test)]` (or `#[cfg(all(.., test, ..))]`) in any
+//! other file. A declaration resolves as the compiler does: `name.rs` or `name/mod.rs` in
+//! the module directory of the declaring file (its own directory for `lib.rs`, `main.rs`
+//! and `mod.rs`, a directory named for the file otherwise, plus one per enclosing inline
+//! `mod`), or the `#[path = ".."]` literal relative to that directory.
 //!
 //! - **A wall-clock comparison**: a time value that is compared with `<`, `<=`, `>` or
 //!   `>=` (on either side), or is an argument of an `assert*!` macro. A time value is a
@@ -37,6 +42,7 @@
 //! them.
 
 use super::lex::{blank, find_word_from, line_of, matching, test_ranges};
+use super::use_tree::inline_mods;
 use super::{Report, Tree};
 use std::collections::BTreeMap;
 
@@ -408,9 +414,153 @@ fn sleeps(code: &str) -> Vec<usize> {
     out
 }
 
-fn sites(path: &str, text: &str) -> Sites {
+/// The module directory of the file at `path`: where the files its `mod name;`
+/// declarations name sit.
+fn module_dir(path: &str) -> String {
+    let (dir, file) = path.rsplit_once('/').unwrap_or(("", path));
+    match file.strip_suffix(".rs") {
+        Some("lib" | "main" | "mod") | None => dir.to_owned(),
+        Some(stem) if dir.is_empty() => stem.to_owned(),
+        Some(stem) => format!("{dir}/{stem}"),
+    }
+}
+
+/// `dir/rel` with `.` and `..` segments folded.
+fn join(dir: &str, rel: &str) -> String {
+    let mut segs: Vec<&str> = dir.split('/').filter(|s| !s.is_empty()).collect();
+    for seg in rel.split('/') {
+        match seg {
+            "" | "." => {}
+            ".." => {
+                segs.pop();
+            }
+            s => segs.push(s),
+        }
+    }
+    segs.join("/")
+}
+
+/// The `#[path = ".."]` literal among the attributes that precede the `mod` at `at`
+/// (read from `text`; `code` is the same file blanked, at the same offsets).
+fn path_attr(code: &str, text: &str, at: usize) -> Option<String> {
+    let b = code.as_bytes();
+    let mut end = code[..at].trim_end().len();
+    let head = &code[..end];
+    if head.ends_with(')') {
+        let open = head.rfind('(')?;
+        let before = head[..open].trim_end();
+        if before.ends_with("pub") {
+            end = before.len() - 3;
+        }
+    } else if head.ends_with("pub") {
+        end -= 3;
+    }
+    let mut path = None;
+    loop {
+        end = code[..end].trim_end().len();
+        if end == 0 || b[end - 1] != b']' {
+            return path;
+        }
+        let mut depth = 0usize;
+        let mut open = None;
+        for i in (0..end).rev() {
+            match b[i] {
+                b']' => depth += 1,
+                b'[' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        open = Some(i);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let open = open?;
+        let hash = code[..open].trim_end();
+        if !hash.ends_with('#') {
+            return path;
+        }
+        let body = text[open + 1..end - 1].trim();
+        if let Some(r) = body.strip_prefix("path")
+            && let Some(r) = r.trim_start().strip_prefix('=')
+            && let Some(r) = r.trim().strip_prefix('"')
+            && let Some(lit) = r.strip_suffix('"')
+        {
+            path = Some(lit.to_owned());
+        }
+        end = hash.len() - 1;
+    }
+}
+
+/// The files the `mod name;` declarations of the file at `path` name, as
+/// `(declaration offset, candidate paths)`.
+fn declared(path: &str, text: &str, code: &str) -> Vec<(usize, Vec<String>)> {
+    let b = code.as_bytes();
+    let inline = inline_mods(code);
+    let mut out = Vec::new();
+    let mut from = 0;
+    while let Some(at) = find_word_from(code, "mod", from) {
+        from = at + 3;
+        let s = skip_ws(b, from);
+        let name_len = b[s..].iter().take_while(|&&c| word_byte(c)).count();
+        if name_len == 0 || b.get(skip_ws(b, s + name_len)) != Some(&b';') {
+            continue;
+        }
+        let name = &code[s..s + name_len];
+        let mut nested: Vec<&(String, usize, usize)> = inline
+            .iter()
+            .filter(|(_, open, close)| *open < at && at < *close)
+            .collect();
+        nested.sort_by_key(|(_, open, _)| *open);
+        let mut dir = module_dir(path);
+        for (m, _, _) in &nested {
+            dir = join(&dir, m);
+        }
+        let found = match path_attr(code, text, at) {
+            Some(lit) if nested.is_empty() => {
+                vec![join(path.rsplit_once('/').map_or("", |(d, _)| d), &lit)]
+            }
+            Some(lit) => vec![join(&dir, &lit)],
+            None => vec![
+                join(&dir, &format!("{name}.rs")),
+                join(&dir, &format!("{name}/mod.rs")),
+            ],
+        };
+        out.push((at, found));
+    }
+    out
+}
+
+/// The files, among `files`, that are test code because a `cfg(test)` module
+/// declaration reaches them, directly or through another file that is test code.
+fn cfg_test_files(files: &BTreeMap<String, String>) -> std::collections::BTreeSet<String> {
+    let mut found = std::collections::BTreeSet::new();
+    let mut work: Vec<&String> = files.keys().collect();
+    while let Some(path) = work.pop() {
+        let text = &files[path];
+        let code = blank(text);
+        let whole = test_file(path) || found.contains(path);
+        let ranges = test_ranges(&code);
+        for (at, candidates) in declared(path, text, &code) {
+            if !whole && !ranges.iter().any(|&(s, e)| at >= s && at <= e) {
+                continue;
+            }
+            for c in candidates {
+                if let Some((p, _)) = files.get_key_value(&c)
+                    && found.insert(p.clone())
+                {
+                    work.push(p);
+                }
+            }
+        }
+    }
+    found
+}
+
+fn scan(path: &str, text: &str, whole: bool) -> Sites {
     let code = blank(text);
-    let ranges = if test_file(path) {
+    let ranges = if whole {
         vec![(0, code.len())]
     } else {
         test_ranges(&code)
@@ -458,13 +608,15 @@ pub(super) fn check(tree: &dyn Tree) -> Report {
     let mut current: BTreeMap<String, Counts> = BTreeMap::new();
     let mut slack = 0;
     let mut scanned = std::collections::BTreeSet::new();
-    for path in paths {
-        let Some(text) = tree.read(&path) else {
-            continue;
-        };
+    let files: BTreeMap<String, String> = paths
+        .into_iter()
+        .filter_map(|p| tree.read(&p).map(|t| (p, t)))
+        .collect();
+    let reached = cfg_test_files(&files);
+    for (path, text) in &files {
         scanned.insert(path.clone());
-        let s = sites(&path, &text);
-        let (n, allowed) = (s.counts(), baseline.get(&path).copied().unwrap_or_default());
+        let s = scan(path, text, test_file(path) || reached.contains(path));
+        let (n, allowed) = (s.counts(), baseline.get(path).copied().unwrap_or_default());
         if n != Counts::default() {
             current.insert(path.clone(), n);
         }
@@ -542,6 +694,10 @@ mod tests {
 
     fn run(files: &[(&str, &str)]) -> Report {
         check(&Mem::with(files))
+    }
+
+    fn sites(path: &str, text: &str) -> Sites {
+        scan(path, text, test_file(path))
     }
 
     fn counts(path: &str, src: &str) -> Counts {
@@ -776,5 +932,102 @@ mod tests {
         let r = run(&[(BASELINE, ""), (LIB, "fn f() {}\n")]);
         assert!(r.passed());
         assert_eq!(r.out[0], "check-test-time: OK");
+    }
+
+    const SLEEP: &str = "fn t() { thread::sleep(D); }\n";
+
+    /// The failure lines a tree with an empty baseline gives.
+    fn failing(files: &[(&str, &str)]) -> Vec<String> {
+        let mut all = vec![(BASELINE, "")];
+        all.extend_from_slice(files);
+        run(&all).findings
+    }
+
+    #[test]
+    fn a_file_declared_by_a_cfg_test_mod_is_test_code() {
+        let f = failing(&[
+            (LIB, "#[cfg(test)]\nmod x_tests;\n"),
+            ("crates/a/src/x_tests.rs", SLEEP),
+        ]);
+        assert!(f.contains(&"  crates/a/src/x_tests.rs: 1 sleeps, baseline 0".to_owned()));
+        let f = failing(&[
+            (LIB, "#[cfg(all(test, unix))]\npub(crate) mod x_tests;\n"),
+            ("crates/a/src/x_tests/mod.rs", SLEEP),
+        ]);
+        assert!(f.contains(&"  crates/a/src/x_tests/mod.rs: 1 sleeps, baseline 0".to_owned()));
+    }
+
+    #[test]
+    fn a_file_declared_without_cfg_test_is_library_code() {
+        let f = failing(&[
+            (LIB, "mod x_tests;\n#[cfg(unix)]\nmod y;\n"),
+            ("crates/a/src/x_tests.rs", SLEEP),
+            ("crates/a/src/y.rs", SLEEP),
+        ]);
+        assert!(f.is_empty(), "{f:?}");
+    }
+
+    #[test]
+    fn modules_a_cfg_test_file_declares_are_test_code_transitively() {
+        let f = failing(&[
+            (LIB, "#[cfg(test)]\nmod a;\n"),
+            ("crates/a/src/a.rs", "mod b;\n"),
+            ("crates/a/src/a/b.rs", "mod c;\n"),
+            ("crates/a/src/a/b/c.rs", SLEEP),
+        ]);
+        assert!(f.contains(&"  crates/a/src/a/b/c.rs: 1 sleeps, baseline 0".to_owned()));
+    }
+
+    #[test]
+    fn a_mod_rs_file_resolves_its_modules_beside_it() {
+        let f = failing(&[
+            (LIB, "#[cfg(test)]\nmod a;\n"),
+            ("crates/a/src/a/mod.rs", "mod b;\n"),
+            ("crates/a/src/a/b.rs", SLEEP),
+        ]);
+        assert!(f.contains(&"  crates/a/src/a/b.rs: 1 sleeps, baseline 0".to_owned()));
+    }
+
+    #[test]
+    fn a_mod_declared_inside_an_inline_cfg_test_mod_is_test_code() {
+        let f = failing(&[
+            (LIB, "#[cfg(test)]\nmod t {\n    mod h;\n}\n"),
+            ("crates/a/src/t/h.rs", SLEEP),
+        ]);
+        assert!(f.contains(&"  crates/a/src/t/h.rs: 1 sleeps, baseline 0".to_owned()));
+    }
+
+    #[test]
+    fn a_path_attribute_names_the_file_relative_to_the_declaring_directory() {
+        let f = failing(&[
+            (
+                "crates/a/src/lib.rs",
+                "#[cfg(test)]\n#[path = \"../support/m.rs\"]\nmod x;\n",
+            ),
+            ("crates/a/support/m.rs", SLEEP),
+            ("crates/a/src/x.rs", SLEEP),
+        ]);
+        assert!(f.contains(&"  crates/a/support/m.rs: 1 sleeps, baseline 0".to_owned()));
+        assert!(!f.iter().any(|l| l.contains("src/x.rs")), "{f:?}");
+        let f = failing(&[
+            (
+                "crates/a/src/lib.rs",
+                "#[path = \"m.rs\"]\n#[cfg(test)]\nmod x;\n",
+            ),
+            ("crates/a/src/m.rs", SLEEP),
+        ]);
+        assert!(f.contains(&"  crates/a/src/m.rs: 1 sleeps, baseline 0".to_owned()));
+    }
+
+    #[test]
+    fn a_cfg_test_file_inside_a_non_mod_rs_file_resolves_in_its_module_directory() {
+        let f = failing(&[
+            (LIB, "mod a;\n"),
+            ("crates/a/src/a.rs", "#[cfg(test)]\nmod b;\n"),
+            ("crates/a/src/a/b.rs", SLEEP),
+            ("crates/a/src/b.rs", SLEEP),
+        ]);
+        assert!(f.contains(&"  crates/a/src/a/b.rs: 1 sleeps, baseline 0".to_owned()));
+        assert!(!f.iter().any(|l| l.contains("src/b.rs")), "{f:?}");
     }
 }
