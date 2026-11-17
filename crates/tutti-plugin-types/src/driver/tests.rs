@@ -149,7 +149,7 @@ fn activation_splits_the_plugin_and_reads_its_figures() {
 #[test]
 fn a_block_with_no_output_channel_reaches_the_processor_with_its_frames() {
     let mut rig = Rig::new();
-    rig.activate(prepare(48_000.0));
+    rig.op(HostOp::Activate(prepare(48_000.0)));
     let ctx = ProcessContext::new();
     let mut out = ProcessOutput::default();
     let processor = rig.lifecycle.processor().expect("held");

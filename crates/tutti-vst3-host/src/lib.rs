@@ -90,6 +90,7 @@
 //! let (mut left, mut right) = (vec![0.0f32; 512], vec![0.0f32; 512]);
 //! let mut outputs: [&mut [f32]; 2] = [&mut left, &mut right];
 //! let mut buffer = InputOutput::new(
+//!     Samples(512),
 //!     Planes::new(&inputs).expect("two equal planes"),
 //!     PlanesMut::new(&mut outputs).expect("two equal planes"),
 //! )
