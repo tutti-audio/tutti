@@ -207,8 +207,8 @@ mod wait_tests {
         )
     }
 
-    /// **A quiet socket's wait ends unreadable at its timeout, and a byte ends
-    /// the wait.** The loop's idle tick is the first; a block's request reaching
+    /// **A quiet socket's wait ends unreadable when nothing arrives, and a byte
+    /// ends the wait.** The loop's idle tick is the first; a block's request reaching
     /// the plugin as it arrives is the second: the readable wait's timeout
     /// outlasts the test harness's limit, so a wait that ran it out fails.
     #[test]
