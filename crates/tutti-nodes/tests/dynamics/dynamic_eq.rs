@@ -4,6 +4,7 @@
 
 use core::f64::consts::PI;
 
+use tutti_buffers::Planes;
 use tutti_dsp::DynamicMode;
 use tutti_graph::Node;
 use tutti_graph::contract::{drive, prepared};
@@ -77,7 +78,7 @@ fn de_esser() -> DynamicEqNode {
 
 fn render(node: DynamicEqNode, inputs: &[&[f32]]) -> Vec<f32> {
     let mut node = prepared(node, SR, inputs[0].len());
-    drive(&mut node, SR, inputs, &[]).remove(0)
+    drive(&mut node, SR, Planes::new(inputs).unwrap(), &[]).remove(0)
 }
 
 /// A sibilance-band sine is cut by the de-esser's static curve (threshold -24 dB, 6 dB knee,
