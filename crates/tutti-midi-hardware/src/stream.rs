@@ -217,10 +217,10 @@ impl DeviceStream {
             .endpoint
             .identity()
             .map_or_else(Learned::new, |identity| {
-                Learned::new().with_identity(*identity)
+                Learned::new().identified(*identity)
             });
         match self.endpoint.instance_id() {
-            Some(id) => learned.with_instance_id(*id),
+            Some(id) => learned.instanced(*id),
             None => learned,
         }
     }
@@ -565,7 +565,7 @@ impl Negotiation {
                     let Run::Done { stream, .. } = &mut self.run else {
                         return None;
                     };
-                    stream.endpoint = stream.endpoint.with_identity(identity);
+                    stream.endpoint = stream.endpoint.identified(identity);
                     stream.basis = Basis::Inquired;
                     return Some(**stream);
                 }
@@ -638,7 +638,7 @@ impl Negotiation {
         if let Run::Done { stream, .. } = &self.run {
             let in_force = mirrored(stream.endpoint.active());
             if answering.endpoint.active() != in_force {
-                answering.endpoint = answering.endpoint.with_active(in_force);
+                answering.endpoint = answering.endpoint.in_use(in_force);
                 if answering.told {
                     ask(
                         &mut answering.endpoint,
@@ -705,7 +705,7 @@ impl Negotiation {
         if stream.endpoint.active() == config {
             return None;
         }
-        stream.endpoint = stream.endpoint.with_active(config);
+        stream.endpoint = stream.endpoint.in_use(config);
         if let Some(connection) = listening {
             connection.adopt(config);
         }
@@ -742,15 +742,15 @@ impl Negotiation {
         }
         let was = self.answering.take();
         let mut endpoint = Endpoint::local(self.supports(), now.groups)
-            .with_identity(now.identity.device)
-            .with_name(now.identity.name);
+            .identified(now.identity.device)
+            .named(now.identity.name);
         if let Some(id) = now.identity.instance {
-            endpoint = endpoint.with_instance_id(id);
+            endpoint = endpoint.instanced(id);
         }
         if let Some(was) = &was {
-            endpoint = endpoint.with_active(was.endpoint.active());
+            endpoint = endpoint.in_use(was.endpoint.active());
         } else if let Run::Done { stream, .. } = &self.run {
-            endpoint = endpoint.with_active(mirrored(stream.endpoint.active()));
+            endpoint = endpoint.in_use(mirrored(stream.endpoint.active()));
         }
         let told = was.as_ref().is_some_and(|a| a.told);
         let announce = was.as_ref().map(|a| Announce {
