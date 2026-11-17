@@ -82,6 +82,18 @@ impl Default for Narrower {
 }
 
 impl Narrower {
+    /// The most MIDI 1.0 messages one [`feed`](Self::feed) sends: an MPE Note
+    /// On on a member channel that still sounds or whose last note moved it is
+    /// a Note Off, a centred Pitch Bend, Channel Pressure 0, Control Change 74
+    /// at 0x40, then the Note On. The Default Translation sends at most four,
+    /// a controller's sequence (D.2.3).
+    pub const MAX_MESSAGES: usize = 5;
+
+    /// The most bytes one [`feed`](Self::feed) sends: the Note On sequence of
+    /// [`MAX_MESSAGES`](Self::MAX_MESSAGES), four 3-byte messages and the
+    /// 2-byte Channel Pressure. The Default Translation sends at most 12.
+    pub const MAX_BYTES: usize = 14;
+
     /// A narrower that translates by the Default Translation.
     #[must_use]
     pub const fn new() -> Self {
