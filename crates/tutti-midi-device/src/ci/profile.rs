@@ -8,7 +8,7 @@
 //! Each message's destination follows its table in M2-101 §7. The four reports
 //! (Added, Removed, Enabled, Disabled) always go to the Broadcast MUID and carry
 //! no `to`; the Inquiry, the Reply, Set On, Set Off and the two Details messages
-//! go to one MUID; Profile Specific Data carries a [`Destination`](super::Destination),
+//! go to one MUID; Profile Specific Data carries a [`Destination`],
 //! since §7.12 allows the Broadcast MUID only where the Profile defines it. A
 //! message of the wrong kind decodes to an [`Unread`](super::Unread) with
 //! [`WrongDestination`](super::UnreadReason::WrongDestination). A Message Format
@@ -24,7 +24,11 @@
 
 use std::vec::Vec;
 
-use tutti_ump::{ManufacturerId, U7, U14, U28, first_non_seven_bit};
+use tutti_ump::{ManufacturerId, MidiChannel, MidiGroup, U7, U14, U28, Ump, first_non_seven_bit};
+
+use super::{
+    CI_VERSION, CiDeviceId, CiVersion, Destination, encode_preamble, read, sysex7_packets,
+};
 
 /// Profile Inquiry, Sub-ID#2 `0x20` (§7.2).
 pub const SUB_ID2_PROFILE_INQUIRY: u8 = 0x20;
@@ -470,6 +474,167 @@ impl DetailsData {
             in_use: count(a, b),
             max: count(c, d),
         })
+    }
+}
+
+/// A Profile Id and its Number of Channels as a Set Profile On, Profile Enabled
+/// or Profile Disabled message carries them (§7.8, §7.10, §7.11).
+pub(super) fn encode_with_count(
+    profile: ProfileId,
+    channels: ProfileChannels,
+    out: &mut impl Extend<u8>,
+) {
+    out.extend(profile.to_bytes());
+    out.extend(channels.to_le7());
+}
+
+/// A Set Profile On that names no peer (M2-116 section 6.2): its Source and
+/// Destination MUIDs are both Broadcast, as a Clip File's header carries it.
+///
+/// [`CiMessage::SetProfileOn`](super::CiMessage::SetProfileOn) is the message on a link, between two MUIDs;
+/// this is the same message at rest. The Device ID and the Number of Channels
+/// Requested go together as §7.8's note asks: a Group or Function Block
+/// address asks for 0 Channels, so only a Channel carries a count.
+///
+/// ```
+/// use tutti_midi_device::{ProfileChannels, ProfileId, ProfileOnRequest};
+/// use tutti_ump::MidiChannel;
+///
+/// let on = ProfileOnRequest::Channel {
+///     channel: MidiChannel::FIRST,
+///     profile: ProfileId::MPE,
+///     channels: ProfileChannels::of(15),
+/// };
+/// assert_eq!(ProfileOnRequest::try_from(&on.encode()[..]), Ok(on));
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ProfileOnRequest {
+    /// For one MIDI Channel of the Group, asking for `channels` Channels.
+    Channel {
+        /// The Channel the Profile is for.
+        channel: MidiChannel,
+        /// The Profile to enable.
+        profile: ProfileId,
+        /// The Number of Channels Requested.
+        channels: ProfileChannels,
+    },
+    /// For the whole Group: 0 Channels requested.
+    Group(ProfileId),
+    /// For the whole Function Block: 0 Channels requested.
+    FunctionBlock(ProfileId),
+}
+
+/// Why bytes are not a [`ProfileOnRequest`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
+#[non_exhaustive]
+pub enum NotSetProfileOn {
+    /// Not a MIDI-CI Set Profile On: the bytes are not `7E <device> 0D 22` and
+    /// a preamble, or are too short for one.
+    #[error("not a MIDI-CI Set Profile On")]
+    NotThatMessage,
+    /// The Message Format Version byte is 0 or has a reserved bit set.
+    #[error("{0:#04x} is not a MIDI-CI Message Format Version")]
+    Version(u8),
+    /// The Device ID is a reserved value (`10` to `7D`).
+    #[error("{0:#04x} is not a MIDI-CI Device ID (reserved)")]
+    DeviceId(u8),
+    /// The Profile Id or the Number of Channels Requested is not one (a byte
+    /// with its top bit set, or a manufacturer id that is not one).
+    #[error("the Profile Id or Number of Channels of a Set Profile On is not one")]
+    Body,
+    /// A Group or Function Block address with a Number of Channels other than 0
+    /// (§7.8's note).
+    #[error("a Set Profile On to the Group or Function Block asks for {0} Channels, not 0")]
+    ChannelsForBlock(u16),
+}
+
+impl TryFrom<&[u8]> for ProfileOnRequest {
+    type Error = NotSetProfileOn;
+
+    /// Reads a CI byte payload. The MUIDs are not read: whatever they are, the
+    /// message is a request for the Profile. A Message Format Version 1
+    /// message, which has no Number of Channels field, asks for 0.
+    ///
+    /// # Errors
+    ///
+    /// [`NotSetProfileOn`], naming the first thing that is wrong.
+    fn try_from(bytes: &[u8]) -> Result<Self, NotSetProfileOn> {
+        let Some((preamble, body)) = read::preamble(bytes) else {
+            return Err(NotSetProfileOn::NotThatMessage);
+        };
+        if preamble.sub_id2 != SUB_ID2_SET_PROFILE_ON {
+            return Err(NotSetProfileOn::NotThatMessage);
+        }
+        CiVersion::new(preamble.version).ok_or(NotSetProfileOn::Version(preamble.version))?;
+        let device_id = CiDeviceId::new(preamble.device_id)
+            .ok_or(NotSetProfileOn::DeviceId(preamble.device_id))?;
+        let (profile, channels) =
+            read::profile_with_count_body(body).ok_or(NotSetProfileOn::Body)?;
+        match device_id {
+            CiDeviceId::Channel(channel) => Ok(Self::Channel {
+                channel,
+                profile,
+                channels,
+            }),
+            CiDeviceId::Group | CiDeviceId::FunctionBlock if !channels.is_by_address() => {
+                Err(NotSetProfileOn::ChannelsForBlock(channels.get()))
+            }
+            CiDeviceId::Group => Ok(Self::Group(profile)),
+            CiDeviceId::FunctionBlock => Ok(Self::FunctionBlock(profile)),
+        }
+    }
+}
+
+impl ProfileOnRequest {
+    /// The Profile to enable.
+    #[must_use]
+    pub const fn profile(self) -> ProfileId {
+        match self {
+            Self::Channel { profile, .. } | Self::Group(profile) | Self::FunctionBlock(profile) => {
+                profile
+            }
+        }
+    }
+
+    /// The Device ID the message is addressed to.
+    #[must_use]
+    pub const fn device_id(self) -> CiDeviceId {
+        match self {
+            Self::Channel { channel, .. } => CiDeviceId::Channel(channel),
+            Self::Group(_) => CiDeviceId::Group,
+            Self::FunctionBlock(_) => CiDeviceId::FunctionBlock,
+        }
+    }
+
+    /// The Number of Channels Requested: 0 for a Group or Function Block.
+    #[must_use]
+    pub const fn channels(self) -> ProfileChannels {
+        match self {
+            Self::Channel { channels, .. } => channels,
+            Self::Group(_) | Self::FunctionBlock(_) => ProfileChannels::BY_ADDRESS,
+        }
+    }
+
+    /// The CI byte payload, as [`CiMessage::encode`](super::CiMessage::encode)
+    /// gives one: Message Format Version [`CI_VERSION`], both MUIDs Broadcast.
+    #[must_use]
+    pub fn encode(self) -> Vec<u8> {
+        let mut out = Vec::new();
+        encode_preamble(
+            self.device_id(),
+            SUB_ID2_SET_PROFILE_ON,
+            CI_VERSION,
+            Destination::Broadcast.to_bytes(),
+            Destination::Broadcast,
+            &mut out,
+        );
+        encode_with_count(self.profile(), self.channels(), &mut out);
+        out
+    }
+
+    /// The message as SysEx7 packets on `group` (M2-104 section 7.7).
+    pub fn packets(self, group: MidiGroup) -> std::vec::IntoIter<Ump> {
+        sysex7_packets(group, &self.encode())
     }
 }
 
