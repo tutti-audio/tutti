@@ -678,7 +678,14 @@ impl Track {
         let packets = packets(&self.header);
         let leading = clip_file::leading_profile_len(&packets);
         clip_file::profiles(packets[..leading].iter().map(|&(_, ump)| ump))
-            .filter_map(Result::ok)
+            .map(|request| {
+                // A header holds only Set Profile On messages that read: a
+                // read file's are checked by `check_header` when it is built,
+                // and `profile_on` writes whole ones.
+                debug_assert!(request.is_ok(), "a built header's profiles read");
+                request
+            })
+            .flatten()
             .collect()
     }
 
@@ -828,7 +835,8 @@ enum Timebase {
     /// `ticks_per_quarter` to a quarter note.
     Beats(TicksPerQuarterNote),
     /// `ticks` in `per` seconds: a frame rate times the ticks per frame, as the
-    /// exact fraction (29.97 is 30000/1001).
+    /// exact fraction. The header's -29 is 29.97: the specification says "-29
+    /// corresponds to 30 drop frame", the 30 drop-frame rate being 30000/1001.
     Seconds { ticks: u64, per: u64 },
 }
 
@@ -1276,12 +1284,12 @@ impl MidiFile {
     ///
     /// # Errors
     ///
-    /// [`NoCommonTimeline`] for a format 2 file (or a format above 2), whose
+    /// [`TimelineError::NoCommonTimeline`] for a format 2 file (or a format above 2), whose
     /// sequences are independent and have no common timeline to merge on:
     /// read each [`Track`] with [`beat_at`](Self::beat_at).
     pub fn events(
         &self,
-    ) -> std::result::Result<impl Iterator<Item = (FileTime, &FileEvent)>, NoCommonTimeline> {
+    ) -> std::result::Result<impl Iterator<Item = (FileTime, &FileEvent)>, TimelineError> {
         let merged = self.merged()?;
         Ok(merged.into_iter().map(move |(tick, event)| {
             let time = match self.container.timebase() {
@@ -1293,9 +1301,9 @@ impl MidiFile {
     }
 
     /// The events of the file's one timeline merged by tick.
-    fn merged(&self) -> std::result::Result<Vec<(Tick, &FileEvent)>, NoCommonTimeline> {
+    fn merged(&self) -> std::result::Result<Vec<(Tick, &FileEvent)>, TimelineError> {
         if !self.container.shares_timeline() {
-            return Err(NoCommonTimeline);
+            return Err(TimelineError::NoCommonTimeline);
         }
         let mut all: Vec<(Tick, &FileEvent)> = self
             .tracks
@@ -1384,19 +1392,14 @@ impl MidiFile {
     }
 }
 
-/// A format 2 file (or one of a format above 2) has no one timeline: its
-/// sequences are independent ([`MidiFile::events`], [`MidiFile::timeline`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("a format 2 file has no common timeline: its sequences are independent")]
-pub struct NoCommonTimeline;
-
-/// Why a file has no timeline of beats ([`MidiFile::timeline`]).
+/// Why a file has no one timeline ([`MidiFile::events`], [`MidiFile::timeline`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum TimelineError {
-    /// The sequences are independent.
-    #[error(transparent)]
-    NoCommonTimeline(#[from] NoCommonTimeline),
+    /// A format 2 file (or one of a format above 2): its sequences are
+    /// independent, so there is no common timeline to merge on.
+    #[error("a format 2 file has no common timeline: its sequences are independent")]
+    NoCommonTimeline,
     /// The file is in SMPTE time: its events are at seconds, with no beat grid
     /// to put a clip on.
     #[error("a file in SMPTE time has no beats: its events are at seconds")]

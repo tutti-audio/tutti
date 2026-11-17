@@ -667,11 +667,11 @@ pub mod midi {
     };
     pub use tutti_midi_file::{
         Altered, Converted, DropReason, Dropped, FileTime, LyricChange, MalformedMeta,
-        MicrosPerQuarter, MicrosPerQuarterOutOfRange, MidiFileKind, Moved, NoCommonTimeline,
-        OtherMetaKind, OtherMetaKindOutOfRange, OtherSmfFormat, OtherSmfFormatOutOfRange,
-        OutOfOrder, PairedNote, SmfDivision, SmfTicksPerFrame, SmfTicksPerFrameOutOfRange,
-        SmfTicksPerQuarter, SmfTicksPerQuarterOutOfRange, TextKind, Timeline, TimelineDrop,
-        TimelineError, WriteOptions,
+        MicrosPerQuarter, MicrosPerQuarterOutOfRange, MidiFileKind, Moved, OtherMetaKind,
+        OtherMetaKindOutOfRange, OtherSmfFormat, OtherSmfFormatOutOfRange, OutOfOrder, PairedNote,
+        SmfDivision, SmfTicksPerFrame, SmfTicksPerFrameOutOfRange, SmfTicksPerQuarter,
+        SmfTicksPerQuarterOutOfRange, TextKind, Timeline, TimelineDrop, TimelineError,
+        WriteOptions,
     };
     pub use tutti_midi_file::{
         ClipFileError, ReadError, Refusal, SmfParseError, ToClipError, TrackPart, TracksError,

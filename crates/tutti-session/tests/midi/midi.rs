@@ -218,7 +218,18 @@ fn a_file_plays_at_a_beat_and_a_format_2_file_is_refused() {
     .unwrap();
     assert!(matches!(
         s.midi().play_file(synth, Beat(0.0), &sequential),
-        Err(MidiError::NoTimeline(_))
+        Err(MidiError::NoTimeline(
+            tutti_midi_file::TimelineError::NoCommonTimeline
+        ))
+    ));
+
+    // SMPTE time (-25 frames a second, 40 ticks a frame: `E7 28`) has seconds
+    // and no beats to play on.
+    let smpte = MidiFile::from_bytes(b"MThd\0\0\0\x06\0\0\0\x01\xE7\x28MTrk\0\0\0\x04\0\xFF\x2F\0")
+        .unwrap();
+    assert!(matches!(
+        s.midi().play_file(synth, Beat(0.0), &smpte),
+        Err(MidiError::NoTimeline(tutti_midi_file::TimelineError::Smpte))
     ));
 }
 

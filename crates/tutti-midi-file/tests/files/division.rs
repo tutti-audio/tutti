@@ -4,9 +4,8 @@
 use crate::support::{Division, RawEvent, build_smf};
 use tutti_fixtures::{RangeContract, check_range_contract};
 use tutti_midi_file::{
-    FileEvent, FileTime, Meta, MicrosPerQuarter, MidiFile, NoCommonTimeline, OtherSmfFormat,
-    ReadError, SmfDivision, SmfFormat, SmfParseError, SmfTicksPerFrame, SmfTicksPerQuarter, Tick,
-    TimelineError,
+    FileEvent, FileTime, Meta, MicrosPerQuarter, MidiFile, OtherSmfFormat, ReadError, SmfDivision,
+    SmfFormat, SmfParseError, SmfTicksPerFrame, SmfTicksPerQuarter, Tick, TimelineError,
 };
 use tutti_midi_protocol::MtcRate;
 use tutti_types::{Beat, Seconds};
@@ -199,11 +198,14 @@ fn a_format_3_file_reads_as_its_tracks_and_writes_back_exactly() {
     assert_eq!(file.to_bytes(), bytes);
     // Nothing says the tracks share a timeline, so they are kept apart as a
     // format 2 file's are.
-    assert!(matches!(file.events(), Err(NoCommonTimeline)));
+    assert!(matches!(
+        file.events(),
+        Err(TimelineError::NoCommonTimeline)
+    ));
     assert!(file.tempo_map_of(1).is_some());
     assert_eq!(
         file.timeline().unwrap_err(),
-        TimelineError::NoCommonTimeline(NoCommonTimeline)
+        TimelineError::NoCommonTimeline
     );
 }
 

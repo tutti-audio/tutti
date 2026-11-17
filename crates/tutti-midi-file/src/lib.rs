@@ -132,7 +132,7 @@ pub use error::{ReadError, WriteError};
 pub use fault::SmfParseError;
 pub use file::{
     Altered, Converted, DropReason, Dropped, FileEvent, FileTime, LyricChange, MalformedMeta, Meta,
-    MicrosPerQuarter, MicrosPerQuarterOutOfRange, MidiFile, Moved, NoCommonTimeline, OtherMetaKind,
+    MicrosPerQuarter, MicrosPerQuarterOutOfRange, MidiFile, Moved, OtherMetaKind,
     OtherMetaKindOutOfRange, OtherSmfFormat, OtherSmfFormatOutOfRange, PairedNote, SmfFormat,
     TextKind, Tick, Timeline, TimelineDrop, TimelineError, ToClipError, Track,
 };

@@ -17,7 +17,8 @@ pub enum SmfParseError {
     /// and -30).
     #[error("invalid SMPTE frame rate")]
     InvalidFrameRate,
-    /// An SMPTE division of zero ticks per frame.
+    /// An SMPTE division of zero ticks per frame. The specification is silent
+    /// on it; this crate refuses it because a tick of no frame has no time.
     #[error("zero ticks-per-frame")]
     ZeroTicksPerFrame,
     /// The file does not begin with the header chunk.

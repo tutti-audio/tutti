@@ -78,7 +78,8 @@ pub enum SmfDivision {
     /// Ticks per quarter note.
     Metrical(SmfTicksPerQuarter),
     /// SMPTE time: a frame rate and ticks per frame. The rate is one of the
-    /// four the header names (-24, -25, -29 for 29.97 drop-frame, -30).
+    /// four the header names: -24, -25, -29 and -30, where the specification
+    /// says "-29 corresponds to 30 drop frame", read as the 30000/1001 rate.
     Smpte {
         /// Frames per second.
         fps: MtcRate,
