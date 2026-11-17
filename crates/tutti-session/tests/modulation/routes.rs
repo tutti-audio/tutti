@@ -157,7 +157,12 @@ fn recording_where_nothing_is_automated_is_refused() {
     use tutti_types::Hz;
 
     let mut s = session();
-    let a = filter(&mut s);
+    let (lp, _) = s.graph().add(SvfFilterNode::<f32>::new(
+        SvfType::LowPass,
+        Hz(1_000.0),
+        Q(0.7),
+    ));
+    let a = lp.cutoff();
     let mut m = s.mods_mut();
     let take = || AutomationTake::record(RecordMode::Touch, Hz(0.0), Hz(1.0));
     assert_eq!(
@@ -166,9 +171,9 @@ fn recording_where_nothing_is_automated_is_refused() {
             target: ModTarget::from(a)
         })
     );
-    assert!(m.take_mut::<Hz>(a).is_none());
+    assert!(m.take_mut(a).is_none());
 
     m.automate(a, Arc::new(Trajectory::<Hz>::default()));
     m.record(a, take()).unwrap();
-    assert!(m.take_mut::<Hz>(a).is_some());
+    assert!(m.take_mut(a).is_some());
 }

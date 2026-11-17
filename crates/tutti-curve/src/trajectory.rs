@@ -20,7 +20,7 @@ pub struct Breakpoint<U: Unit<Raw = f32>> {
 impl<U: Unit<Raw = f32>> Breakpoint<U> {
     /// A breakpoint whose piece is [`Law::Linear`].
     #[must_use]
-    pub fn new(time: Beat, value: U) -> Self {
+    pub const fn new(time: Beat, value: U) -> Self {
         Self::with_law(time, value, Law::Linear)
     }
 

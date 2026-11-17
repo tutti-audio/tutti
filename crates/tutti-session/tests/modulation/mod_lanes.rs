@@ -448,6 +448,7 @@ fn a_take_suspends_the_automation_then_restores_it() {
     let (probe, _) = s.graph().add(ProbeUnit::new(300.0));
     master(&mut s, &[probe.erase()]);
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
+    let cutoff_key = probe.cutoff();
     let mut lane = Trajectory::new().with_range(Hz(0.0), Hz(1_000.0));
     lane.add_breakpoint(Breakpoint::new(Beat(0.0), Hz(800.0)));
     let mut m = s.mods_mut();
@@ -463,11 +464,11 @@ fn a_take_suspends_the_automation_then_restores_it() {
 
     let mut m = s.mods_mut();
     m.record(
-        cutoff,
+        cutoff_key,
         AutomationTake::record(RecordMode::Touch, Hz(0.0), Hz(1_000.0)),
     )
     .unwrap();
-    m.take_mut::<Hz>(cutoff)
+    m.take_mut(cutoff_key)
         .expect("the take is open")
         .recorder_mut()
         .touch(Beat(0.0), Hz(650.0));
@@ -479,13 +480,13 @@ fn a_take_suspends_the_automation_then_restores_it() {
     );
 
     s.mods_mut()
-        .take_mut::<Hz>(cutoff)
+        .take_mut(cutoff_key)
         .expect("still open")
         .recorder_mut()
         .release(Beat(1.0), Hz(650.0));
     let _ = s.update();
     assert!(
-        s.mods_mut().take_mut::<Hz>(cutoff).is_none(),
+        s.mods_mut().take_mut(cutoff_key).is_none(),
         "the take closed"
     );
     assert_eq!(

@@ -9,7 +9,7 @@ use super::*;
 //   Mix        [0, 1]     NOT scalable  a blend position between two signals
 //   Pan        [-1, 1]    NOT scalable  a position on the left/right axis
 //   Feedback   [0, 0.99]  NOT scalable  a recirculation coefficient
-//   Depth      [-1, 1]    signed, range-checked (hand-written)
+//   Depth      [-1, 1]    signed, range-checked
 //   Bipolar    [-1, 1]    signed, range-checked, a control's own value
 //   Drive      [0, inf)   NOT scalable  shaper-curve intensity
 //   BitDepth   [1, 32]    NOT scalable  a quantizer's word length, fractional
@@ -223,31 +223,34 @@ impl Feedback {
     }
 }
 
-/// A bipolar modulation amount, `-1..=1`.
-///
-/// Signed on purpose: a negative depth inverts the modulator, so an LFO at
-/// `Depth::INVERTED` is the same shape phase-flipped. That is the whole reason
-/// this is not just an [`Amplitude`] — and the reason it has a sign where `Mix`
-/// and `Feedback` do not.
-///
-/// **Range-checked**: [`new`](Self::new) refuses NaN, the infinities and
-/// anything outside `-1..=1`, and so do `TryFrom<f32>` and serde.
-/// [`of`](Self::of) is for a literal. [`clamped`](Self::clamped) is the one
-/// saturating constructor, for a value that arrives from a lane or a knob;
-/// [`Unit::from_raw`] is it too, since a cell holds any float.
-///
-/// ```
-/// use tutti_types::Depth;
-///
-/// assert_eq!(Depth::new(0.25).map(Depth::get), Some(0.25));
-/// assert_eq!(Depth::new(1.5), None);
-/// assert_eq!(Depth::clamped(1.5), Depth::FULL);
-/// ```
-#[repr(transparent)]
-#[derive(Copy, Clone, Debug, PartialEq, Default)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(try_from = "f32", into = "f32"))]
-pub struct Depth(f32);
+crate::ranged! {
+    /// A bipolar modulation amount, `-1..=1`.
+    ///
+    /// Signed on purpose: a negative depth inverts the modulator, so an LFO at
+    /// `Depth::INVERTED` is the same shape phase-flipped. That is the whole reason
+    /// this is not just an [`Amplitude`] — and the reason it has a sign where `Mix`
+    /// and `Feedback` do not.
+    ///
+    /// **Range-checked**: [`new`](Self::new) refuses NaN, the infinities and
+    /// anything outside `-1..=1`, and so do `TryFrom<f32>` and serde.
+    /// [`of`](Self::of) is for a literal. [`clamped`](Self::clamped) is the one
+    /// saturating constructor, for a value that arrives from a lane or a knob;
+    /// [`Unit::from_raw`] is it too, since a cell holds any float.
+    ///
+    /// ```
+    /// use tutti_types::Depth;
+    ///
+    /// assert_eq!(Depth::new(0.25).map(Depth::get), Some(0.25));
+    /// assert_eq!(Depth::new(1.5), None);
+    /// assert_eq!(Depth::clamped(1.5), Depth::FULL);
+    /// ```
+    #[repr(transparent)]
+    #[derive(Default)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[cfg_attr(feature = "serde", serde(try_from = "f32", into = "f32"))]
+    Depth(f32), DepthOutOfRange, "within -1..=1",
+    |raw| raw >= -1.0 && raw <= 1.0
+}
 
 // NOT `Additive` and NOT `Scalable`: a sum or a scaled depth can leave
 // `-1..=1`. Do the arithmetic on the raw number and call `new` (or
@@ -259,34 +262,6 @@ impl Depth {
     pub const FULL: Depth = Depth(1.0);
     /// Full inverted modulation.
     pub const INVERTED: Depth = Depth(-1.0);
-
-    /// The depth, or `None` when `raw` is NaN, infinite or outside `-1..=1`.
-    #[inline]
-    #[must_use]
-    pub const fn new(raw: f32) -> Option<Depth> {
-        if raw >= -1.0 && raw <= 1.0 {
-            Some(Depth(raw))
-        } else {
-            None
-        }
-    }
-
-    /// The depth for a literal or a constant. For a value that arrives from
-    /// outside, use [`new`](Self::new).
-    ///
-    /// # Panics
-    ///
-    /// When `raw` is NaN or outside `-1..=1`; in a `const` that is a compile
-    /// error.
-    #[inline]
-    #[must_use]
-    #[track_caller]
-    pub const fn of(raw: f32) -> Depth {
-        match Self::new(raw) {
-            Some(depth) => depth,
-            None => panic!("a depth is within -1..=1"),
-        }
-    }
 
     /// `raw` constrained into `-1..=1`; NaN is [`NONE`](Self::NONE).
     #[inline]
@@ -301,13 +276,6 @@ impl Depth {
         } else {
             Depth(raw)
         }
-    }
-
-    /// Returns the raw amount, for a boundary the unit types do not cross.
-    #[inline]
-    #[must_use]
-    pub const fn get(self) -> f32 {
-        self.0
     }
 
     /// Returns the smaller of the two, in this unit.
@@ -372,36 +340,14 @@ impl Unit for Depth {
     }
 }
 
-impl TryFrom<f32> for Depth {
-    type Error = DepthOutOfRange;
-
-    #[inline]
-    fn try_from(raw: f32) -> Result<Depth, DepthOutOfRange> {
-        Depth::new(raw).ok_or(DepthOutOfRange(raw))
-    }
-}
-
-impl From<Depth> for f32 {
-    #[inline]
-    fn from(depth: Depth) -> f32 {
-        depth.0
-    }
-}
-
-/// A raw number that is not a depth: NaN, infinite or outside `-1..=1` (see
-/// [`Depth::new`]).
-#[derive(Debug, Clone, Copy, PartialEq, thiserror::Error)]
-#[error("a depth is within -1..=1, got {0}")]
-pub struct DepthOutOfRange(pub f32);
-
 crate::ranged! {
     /// A signed amount, `-1..=1`: the value of a control with no target of its
     /// own, such as a macro's position.
     ///
-    /// The range of [`Depth`] and [`Pan`] with the algebra of neither: a
-    /// [`Depth`] is the amount of one modulation route and a [`Pan`] a position
-    /// on the stereo axis, while a `Bipolar` is a stored and automated signed
-    /// value. It negates (`-x` is the same amount the other way) and orders.
+    /// The same range and algebra as [`Depth`], with a distinct meaning: the
+    /// stored, automated value of a control that has no route or position of its
+    /// own, where a [`Depth`] is the amount of one modulation route. It negates
+    /// (`-x` is the same amount the other way) and orders.
     ///
     /// **Range-checked**: [`new`](Self::new) refuses NaN, the infinities and
     /// anything outside `-1..=1`, and so do `TryFrom<f32>` and serde.

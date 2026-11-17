@@ -15,9 +15,9 @@
 //! A [`Piece`] is a value moving from one endpoint to another along a `Law`, read at
 //! a progress: the one formula every consumer evaluates.
 //!
-//! A [`Trajectory`], typed over the unit it automates, is the least a lane or a recorder needs of
-//! automation: breakpoints in [`Beat`](tutti_types::Beat), each with the `Law`
-//! of the piece it starts, read at a beat.
+//! A [`Trajectory`] is the least a lane or a recorder needs of automation:
+//! breakpoints in [`Beat`](tutti_types::Beat), each with a value in the unit
+//! the trajectory automates and the `Law` of the piece it starts, read at a beat.
 //!
 //! ```
 //! use tutti_curve::{Breakpoint, Exponent, Law, Piece, Trajectory};

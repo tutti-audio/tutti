@@ -140,9 +140,6 @@ impl<U: Unit<Raw = f32>> Recorder<U> {
     #[must_use]
     pub fn with_config(mode: RecordMode, min: U, max: U, config: RecordingConfig) -> Self {
         Self {
-            // `0.0` is the trajectory's *target label*, not a value — the label is
-            // unused here (the host's map key addresses the lane), and `Curve`'s
-            // blanket impl ignores it beyond its thread bounds.
             trajectory: Trajectory::new().with_range(min, max),
             mode,
             take: None,

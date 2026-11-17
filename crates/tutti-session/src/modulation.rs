@@ -1622,12 +1622,19 @@ impl Mods<'_> {
     /// # Errors
     ///
     /// [`NoAutomation`] when `target` has no automation; the take is dropped.
+    ///
+    /// The take's unit is the target's: a [`Ranged`] target names it, so a take
+    /// in another unit does not compile. This API is interim until
+    /// the typed automation target and the recording of moves replace it.
     #[must_use = "a refused take is dropped, and the target records nothing"]
-    pub fn record<U: Unit<Raw = f32> + Send + Sync + 'static>(
+    pub fn record<T: Ranged>(
         &mut self,
-        target: impl Into<ModTarget>,
-        take: AutomationTake<U>,
-    ) -> Result<(), NoAutomation> {
+        target: T,
+        take: AutomationTake<T::Unit>,
+    ) -> Result<(), NoAutomation>
+    where
+        T::Unit: Unit<Raw = f32> + Send + Sync + 'static,
+    {
         let target = target.into();
         let key = self.own.key_of(target);
         match self.own.automation.get_mut(&key) {
@@ -1639,12 +1646,13 @@ impl Mods<'_> {
         }
     }
 
-    /// The open take on `target`, to feed its recorder. `None` when there is
-    /// no take, or its unit is not `U`.
-    pub fn take_mut<U: Unit<Raw = f32> + Send + Sync + 'static>(
-        &mut self,
-        target: impl Into<ModTarget>,
-    ) -> Option<&mut AutomationTake<U>> {
+    /// The open take on `target`, to feed its recorder; `None` when no take is
+    /// open on it. A take is opened only through [`record`](Self::record), whose
+    /// take is in the target's own unit, so the take read back is in that unit.
+    pub fn take_mut<T: Ranged>(&mut self, target: T) -> Option<&mut AutomationTake<T::Unit>>
+    where
+        T::Unit: Unit<Raw = f32> + Send + Sync + 'static,
+    {
         let key = self.own.key_of(target.into());
         self.own
             .automation
