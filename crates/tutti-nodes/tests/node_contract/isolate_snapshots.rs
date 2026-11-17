@@ -24,8 +24,8 @@ use tutti_nodes::{
     TremoloConfig, TremoloNode,
 };
 use tutti_nodes::{
-    BitCrusherConfig, BitCrusherNode, CutFilterConfig, CutFilterNode, DcBlockerConfig,
-    DcBlockerNode, SosResponse,
+    BitCrusherConfig, BitCrusherNode, ButterworthOrder, CutAlignment, CutFilterConfig,
+    CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerNode,
 };
 use tutti_nodes::{StereoWidthConfig, StereoWidthNode};
 use tutti_types::{
@@ -234,8 +234,8 @@ fn cut_filter() {
     IsolateRow::new("CutFilterNode (stereo)", || {
         CutFilterNode::from(CutFilterConfig::new(
             ChannelLayout::STEREO,
-            SosResponse::HighPass,
-            6,
+            CutResponse::HighPass,
+            CutAlignment::Butterworth(ButterworthOrder::of(6)),
         ))
     })
     .control("cutoff", |d| {

@@ -3,8 +3,8 @@
 
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
-    Butterworth, Glide, LinkwitzRiley, MAX_ORDER, MAX_SECTIONS, Ring, Sos, SosBank,
-    SosCoefficients, SosResponse, System, TAIL_FLOOR,
+    Butterworth, ButterworthOrder, CutResponse, Glide, LinkwitzRiley, MAX_SECTIONS, Ring, Sos,
+    SosBank, SosCoefficients, System, TAIL_FLOOR,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_types::{BusTopology, ChannelLayout, Hz, MaxBlock, SampleRate, Samples, Tail};
@@ -12,8 +12,7 @@ use tutti_types::{BusTopology, ChannelLayout, Hz, MaxBlock, SampleRate, Samples,
 use super::filter_bus;
 use crate::kernel::{ControlLanes, Kernel, KernelNode};
 
-/// The lowest cutoff a filter takes: 10 Hz, which bounds the ring-out of the slowest design
-/// (LR96) at a few seconds.
+/// The lowest cutoff a filter takes: 10 Hz.
 pub const MIN_CUT_CUTOFF: Hz = Hz(10.0);
 
 /// The steps the coefficients take to a new design: one grid period.
@@ -37,37 +36,40 @@ impl CutFilterControls {
     };
 }
 
-/// What a [`CutFilterNode`] is made from: its width, response and order, and optionally its
-/// alignment and cutoff.
+/// The family and order of a [`CutFilterNode`]'s design.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
+pub enum CutAlignment {
+    /// A [`Butterworth`] filter of this order: `6 * order` dB per octave, `-3 dB` at the cutoff.
+    Butterworth(ButterworthOrder),
+    /// A [`LinkwitzRiley`] filter of twice this order (the Butterworth order it squares):
+    /// `12 * order` dB per octave, `-6 dB` at the cutoff.
+    LinkwitzRiley(ButterworthOrder),
+}
+
+/// What a [`CutFilterNode`] is made from: its width, response and alignment, and optionally
+/// its cutoff.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CutFilterConfig {
     width: ChannelLayout,
-    response: SosResponse,
-    order: u8,
-    linkwitz_riley: bool,
+    response: CutResponse,
+    alignment: CutAlignment,
     controls: CutFilterControls,
 }
 
 impl CutFilterConfig {
-    /// A Butterworth filter of `width` channels, `response` and `order` (read within 1 and
-    /// [`MAX_ORDER`]: `6 * order` dB per octave) at 1 kHz.
+    /// A filter of `width` channels, `response` and `alignment`, at 1 kHz.
     #[must_use]
-    pub fn new(width: impl Into<ChannelLayout>, response: SosResponse, order: u8) -> Self {
+    pub fn new(
+        width: impl Into<ChannelLayout>,
+        response: CutResponse,
+        alignment: CutAlignment,
+    ) -> Self {
         Self {
             width: width.into(),
             response,
-            order,
-            linkwitz_riley: false,
+            alignment,
             controls: CutFilterControls::DEFAULT,
-        }
-    }
-
-    /// A Linkwitz-Riley filter instead: the order is read as even, within 2 and [`MAX_ORDER`].
-    #[must_use]
-    pub fn linkwitz_riley(self) -> Self {
-        Self {
-            linkwitz_riley: true,
-            ..self
         }
     }
 
@@ -127,9 +129,8 @@ control_set! {
 #[derive(Clone, Debug)]
 pub struct CutFilterKernel {
     input: BusTopology,
-    response: SosResponse,
-    order: u8,
-    linkwitz_riley: bool,
+    response: CutResponse,
+    alignment: CutAlignment,
     bank: SosBank<f64>,
     coefficients: Glide<SosCoefficients<f64>>,
     /// The design in progress, its room for [`MAX_SECTIONS`] sections held.
@@ -146,16 +147,10 @@ impl CutFilterKernel {
     /// `prepare`, which an unprepared node renders nothing before.
     fn new(input: BusTopology, config: &CutFilterConfig) -> Self {
         let rate = SampleRate::SR_48K;
-        let order = config.order.clamp(1, MAX_ORDER);
         let mut kernel = Self {
             input,
             response: config.response,
-            order: if config.linkwitz_riley {
-                (order & !1).max(2)
-            } else {
-                order
-            },
-            linkwitz_riley: config.linkwitz_riley,
+            alignment: config.alignment,
             bank: SosBank::new(input.layout()),
             coefficients: Glide::landed(SosCoefficients::THROUGH),
             scratch: Sos::new(Vec::with_capacity(MAX_SECTIONS), rate),
@@ -172,19 +167,13 @@ impl CutFilterKernel {
     fn design(&mut self, cutoff: Hz) -> SosCoefficients<f64> {
         let top = self.rate.nyquist_scaled(0.99).get();
         let cutoff = Hz(cutoff.get().clamp(MIN_CUT_CUTOFF.get(), top));
-        let done = if self.linkwitz_riley {
-            LinkwitzRiley::new(self.response, self.order).design_into(
-                cutoff,
-                self.rate,
-                &mut self.scratch,
-            )
-        } else {
-            Butterworth::new(self.response, self.order).design_into(
-                cutoff,
-                self.rate,
-                &mut self.scratch,
-            )
-        };
+        let done =
+            match self.alignment {
+                CutAlignment::Butterworth(order) => Butterworth::new(self.response, order)
+                    .design_into(cutoff, self.rate, &mut self.scratch),
+                CutAlignment::LinkwitzRiley(half) => LinkwitzRiley::new(self.response, half)
+                    .design_into(cutoff, self.rate, &mut self.scratch),
+            };
         done.ok()
             .and_then(|()| SosCoefficients::new(&self.scratch))
             .unwrap_or_else(|| self.coefficients.target())
@@ -207,6 +196,7 @@ impl Kernel for CutFilterKernel {
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
         self.rate = rate;
+        self.scratch = Sos::new(Vec::with_capacity(MAX_SECTIONS), rate);
         self.coefficients =
             Glide::landed(self.design(CutFilterControls::DEFAULT.cutoff)).by(GLIDE_STEPS);
         self.landed = false;
@@ -273,8 +263,17 @@ mod tests {
     use tutti_graph::{Node, ParamNode};
     use tutti_types::UnitParam;
 
-    const LP: SosResponse = SosResponse::LowPass;
-    const HP: SosResponse = SosResponse::HighPass;
+    const LP: CutResponse = CutResponse::LowPass;
+    const HP: CutResponse = CutResponse::HighPass;
+
+    fn bw(order: u8) -> CutAlignment {
+        CutAlignment::Butterworth(ButterworthOrder::of(order))
+    }
+
+    /// A Linkwitz-Riley alignment of twice `half` the order.
+    fn lr(half: u8) -> CutAlignment {
+        CutAlignment::LinkwitzRiley(ButterworthOrder::of(half))
+    }
 
     fn node(config: CutFilterConfig) -> CutFilterNode {
         prepared(CutFilterNode::from(config))
@@ -306,7 +305,7 @@ mod tests {
     }
 
     /// The analog Butterworth magnitude at the bilinear image of `f`.
-    fn analog(response: SosResponse, order: u8, fc: f64, f: f64) -> f64 {
+    fn analog(response: CutResponse, order: u8, fc: f64, f: f64) -> f64 {
         let t = libm::tan(PI * f / RATE.get()) / libm::tan(PI * fc / RATE.get());
         let ratio = if response == LP { t } else { 1.0 / t };
         1.0 / (1.0 + ratio.powi(2 * i32::from(order))).sqrt()
@@ -315,14 +314,14 @@ mod tests {
     /// A fork starts from the cutoff last set and shares no cell.
     #[test]
     fn a_fork_shares_no_cell() {
-        assert_param_fork(CutFilterNode::from(CutFilterConfig::new(2u16, LP, 4)));
+        assert_param_fork(CutFilterNode::from(CutFilterConfig::new(2u16, LP, bw(4))));
     }
 
     /// The shape is the width in and out, `Moderate`, declares the cutoff and a finite
     /// tail once prepared; the cutoff starts at the configured one.
     #[test]
     fn the_shape_declares_the_cutoff_and_a_finite_tail() {
-        let n = node(CutFilterConfig::new(3u16, HP, 8).cutoff(Hz(120.0)));
+        let n = node(CutFilterConfig::new(3u16, HP, bw(8)).cutoff(Hz(120.0)));
         let shape = n.shape();
         assert_eq!(
             (shape.audio_in().count(), shape.audio_out().count()),
@@ -342,9 +341,9 @@ mod tests {
             for order in [1u8, 2, 3, 5, 8, 16] {
                 for f in [51, 137, 171, 256, 683].map(bin) {
                     let want = analog(response, order, 1000.0, f64::from(f));
-                    let got = gain(CutFilterConfig::new(1u16, response, order), f);
+                    let got = gain(CutFilterConfig::new(1u16, response, bw(order)), f);
                     assert!(
-                        (got - want).abs() < 2e-5 + 1e-4 * want,
+                        (got - want).abs() < 5e-7 + 1e-4 * want,
                         "{response:?} {order} at {f}: {got} vs {want}"
                     );
                 }
@@ -357,15 +356,12 @@ mod tests {
     #[test]
     fn linkwitz_riley_is_6_db_down_and_the_pair_sums_to_an_allpass() {
         for order in [2u8, 4, 6, 8, 16] {
-            let lr = |response| {
-                CutFilterConfig::new(1u16, response, order)
-                    .linkwitz_riley()
-                    .cutoff(Hz(bin(171)))
-            };
+            let lr =
+                |response| CutFilterConfig::new(1u16, response, lr(order / 2)).cutoff(Hz(bin(171)));
             assert!((gain(lr(LP), bin(171)) - 0.5).abs() < 1e-4, "LR{order}");
             for f in [34, 120, 171, 512].map(bin) {
                 let want = analog(LP, order / 2, f64::from(bin(171)), f64::from(f)).powi(2);
-                assert!((gain(lr(LP), f) - want).abs() < 2e-5 + 1e-4 * want);
+                assert!((gain(lr(LP), f) - want).abs() < 5e-7 + 1e-4 * want);
                 let input = generate_sine(f, 48_000.0, 16_384);
                 let lows = render(&mut node(lr(LP)), &input);
                 let highs = render(&mut node(lr(HP)), &input);
@@ -383,7 +379,7 @@ mod tests {
     /// designed response, and renders the same however the host cuts its blocks.
     #[test]
     fn a_cutoff_glide_stays_finite_and_settles_on_the_design() {
-        let make = || CutFilterNode::from(CutFilterConfig::new(1u16, LP, 16).linkwitz_riley());
+        let make = || CutFilterNode::from(CutFilterConfig::new(1u16, LP, lr(8)));
         let sine = generate_sine(bin(256), 48_000.0, 8_192);
         let (mut node, out) = {
             let n = assert_cell_glides(
@@ -414,29 +410,49 @@ mod tests {
         assert!((level(&settled[16_384..]) - want).abs() < 1e-4);
     }
 
-    /// The order and the cutoff are read within their range: an order past the table, an
-    /// odd Linkwitz-Riley order and a cutoff past Nyquist build a stable filter.
+    /// A cutoff past the range is read as its end, bit for bit: 1 Hz as [`MIN_CUT_CUTOFF`],
+    /// and one past the Nyquist as 0.99 of it.
     #[test]
-    fn an_order_and_cutoff_out_of_range_are_read_within_it() {
-        for config in [
-            CutFilterConfig::new(1u16, LP, 40),
-            CutFilterConfig::new(1u16, HP, 0),
-            CutFilterConfig::new(1u16, LP, 5).linkwitz_riley(),
-            CutFilterConfig::new(1u16, HP, 4).cutoff(Hz(90_000.0)),
-            CutFilterConfig::new(1u16, HP, 4).cutoff(Hz(1.0)),
-        ] {
-            let out = render(&mut node(config), &generate_sine(500.0, 48_000.0, 4_096));
-            assert!(
-                out.iter().all(|v| v.is_finite() && v.abs() < 2.0),
-                "{config:?}"
-            );
+    fn a_cutoff_out_of_range_is_read_as_the_end_of_it() {
+        let input = generate_sine(500.0, 48_000.0, 4_096);
+        let at = |hz: f32| {
+            let config = CutFilterConfig::new(1u16, HP, bw(4)).cutoff(Hz(hz));
+            render(&mut node(config), &input)
+        };
+        assert_eq!(at(1.0), at(MIN_CUT_CUTOFF.get()));
+        assert_eq!(at(90_000.0), at(RATE.nyquist_scaled(0.99).get()));
+        assert_ne!(at(10.0), at(100.0));
+    }
+
+    /// An odd order has a first-order section: a cutoff swept across the decades stays
+    /// bounded and the response settles on the design.
+    #[test]
+    fn an_odd_order_sweep_stays_bounded_and_settles() {
+        let sine = generate_sine(bin(256), 48_000.0, 8_192);
+        for response in [LP, HP] {
+            for order in [3u8, 5] {
+                let mut node = node(CutFilterConfig::new(1u16, response, bw(order)));
+                for hz in [30.0, 12_000.0, 60.0, 9_000.0, 4_000.0] {
+                    assert!(node.param_set().set(UnitParam::Cutoff, hz));
+                    let out = render(&mut node, &sine);
+                    let peak = out.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+                    // The state of one cutoff meets the next's: a transient of a few times the input.
+                    assert!(peak < 4.0, "{response:?} {order} at {hz}: {peak}");
+                }
+                let settled = render(&mut node, &generate_sine(bin(256), 48_000.0, 24_576));
+                let want = analog(response, order, 4_000.0, f64::from(bin(256)));
+                assert!(
+                    (level(&settled[16_384..]) - want).abs() < 1e-4,
+                    "{response:?} {order}"
+                );
+            }
         }
     }
 
     /// The frames an `f64` impulse response (transposed direct form II, never the kernel's
     /// realization) of LR16 at `cutoff` last carries the tail floor of its peak.
-    fn ring_at(response: SosResponse, cutoff: f32) -> usize {
-        let sos = LinkwitzRiley::new(response, 16)
+    fn ring_at(response: CutResponse, cutoff: f32) -> usize {
+        let sos = LinkwitzRiley::new(response, ButterworthOrder::of(8))
             .design(Hz(cutoff), RATE)
             .unwrap();
         let mut z = vec![[0.0f64; 2]; sos.sections().len()];
@@ -462,7 +478,7 @@ mod tests {
     /// is the lowest rung's. Reporting the rung above fails the cover.
     #[test]
     fn the_tail_narrows_to_the_octave_below_the_cutoff() {
-        let config = CutFilterConfig::new(1u16, LP, 16).linkwitz_riley();
+        let config = CutFilterConfig::new(1u16, LP, lr(8));
         let frames = |t: Tail| match t {
             Tail::Finite(s) => s.get(),
             other => panic!("{other:?}"),

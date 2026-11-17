@@ -116,10 +116,9 @@
 //! - **FIR design** (`fir.rs`): [`FirDesign`] describes a Kaiser windowed-sinc filter (a
 //!   [`FirResponse`], a transition and an attenuation) and designs it at a rate into a
 //!   [`Fir`], failing with a [`FirError`]; [`kaiser_beta`] is the window's parameter.
-//! - **Cascaded sections** (`sos.rs`): [`Sos`], a list of [`Biquad`]s as scipy's `butter(output='sos')`
-//!   returns it, an [`Lti`] whose [`tail`](System::tail) is the whole cascade's; the closed-form
+//! - **Cascaded sections** (`sos.rs`): [`Sos`], a list of [`Biquad`]s, an [`Lti`] whose [`tail`](System::tail) is the whole cascade's; the closed-form
 //!   [`Butterworth`] and [`LinkwitzRiley`] designs (6 to 96 dB per octave) and [`SosBank`], which
-//!   runs one as state-variable sections ([`svf_form`]) over [`SosCoefficients`].
+//!   runs one as state-variable sections (`svf_form`) over [`SosCoefficients`].
 //! - **Oversampling** (`oversample.rs`): [`Oversampling`] describes a cascade of linear-phase
 //!   half-band 2x stages (an [`OversamplingFactor`], an attenuation and a [`Passband`]);
 //!   [`plan`](Oversampling::plan) designs it at a rate into an [`OversamplingPlan`], whose
@@ -254,8 +253,8 @@ pub use reverb::network::{
 pub use ring_mod::{RingModControls, RingModulator};
 pub use smoother::Smoother;
 pub use sos::{
-    Butterworth, LinkwitzRiley, MAX_ORDER, MAX_SECTIONS, Sos, SosBank, SosCoefficients, SosError,
-    SosResponse, svf_form,
+    Butterworth, ButterworthOrder, ButterworthOrderError, CutResponse, LinkwitzRiley, MAX_SECTIONS,
+    Sos, SosBank, SosCoefficients, SosError,
 };
 pub use spatial::{
     HRTF_LATENCY, HRTF_STEP, HrirMeasurement, HrirSphere, HrtfBinaural, HrtfBinauralError,

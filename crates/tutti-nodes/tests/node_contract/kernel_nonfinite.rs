@@ -13,8 +13,8 @@ use tutti_nodes::{
     SvfFilterNode, TremoloConfig, TremoloNode,
 };
 use tutti_nodes::{
-    BitCrusherConfig, BitCrusherNode, CutFilterConfig, CutFilterNode, DcBlockerConfig,
-    DcBlockerNode, SosResponse,
+    BitCrusherConfig, BitCrusherNode, ButterworthOrder, CutAlignment, CutFilterConfig,
+    CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerNode,
 };
 use tutti_types::{
     BitDepth, BusTopology, ChannelLayout, Db, Drive, Feedback, Frame, HoldFactor, Hz, MaxBlock,
@@ -108,10 +108,11 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
         ),
         (
             "cut filter",
-            Box::new(CutFilterNode::from(
-                CutFilterConfig::new(ChannelLayout::STEREO, SosResponse::LowPass, 8)
-                    .linkwitz_riley(),
-            )),
+            Box::new(CutFilterNode::from(CutFilterConfig::new(
+                ChannelLayout::STEREO,
+                CutResponse::LowPass,
+                CutAlignment::LinkwitzRiley(ButterworthOrder::of(4)),
+            ))),
         ),
         ("gate", Box::new(GateNode::mono(GateControls::DEFAULT))),
         (

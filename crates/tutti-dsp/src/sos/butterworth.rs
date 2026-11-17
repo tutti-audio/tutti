@@ -8,34 +8,28 @@ use tutti_types::{Hz, SampleRate};
 use super::Sos;
 use crate::{Biquad, Complex64};
 
-/// The highest order a design takes: 96 dB per octave.
-pub const MAX_ORDER: u8 = 16;
+tutti_types::ranged! {
+    /// The order of a Butterworth filter, `1..=16`: `6 * order` dB per octave, up to 96. A
+    /// [`LinkwitzRiley`] filter of this order halves has twice it.
+    ButterworthOrder(u8), ButterworthOrderError, "an order within 1..=16",
+    |raw| raw >= 1 && raw <= 16
+}
 
 /// What a [`Butterworth`] or [`LinkwitzRiley`] passes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
-pub enum SosResponse {
+pub enum CutResponse {
     /// Passes below the cutoff, a gain of 1 at DC.
     LowPass,
     /// Passes above the cutoff, a gain of 1 at Nyquist.
     HighPass,
 }
 
-/// What [`Butterworth::design`] and [`LinkwitzRiley::design`] refuse.
+/// What [`Butterworth::design`] and [`LinkwitzRiley::design`] refuse: a cutoff that is not
+/// inside `(0, Nyquist)`, which depends on the rate.
 #[derive(Debug, Clone, Copy, PartialEq, thiserror::Error)]
 #[non_exhaustive]
 pub enum SosError {
-    /// An order below the design's lowest or above [`MAX_ORDER`].
-    #[error("order {order} is not in {min}..={MAX_ORDER}")]
-    OrderOutOfRange {
-        /// The rejected order.
-        order: u8,
-        /// The design's lowest order.
-        min: u8,
-    },
-    /// An odd Linkwitz-Riley order: its order is twice a Butterworth one.
-    #[error("Linkwitz-Riley order {0} is not even")]
-    OrderOdd(u8),
     /// A cutoff at or below 0 Hz, at or above Nyquist, or not a number.
     #[error("cutoff {cutoff:?} is not inside (0, {nyquist:?})")]
     CutoffOutOfRange {
@@ -52,17 +46,17 @@ pub enum SosError {
 /// cutoff and `6 N` dB per octave.
 ///
 /// Built as `Butterworth::new(response, order)`; [`design`](Self::design) binds a cutoff
-/// and the rate. As scipy's `butter(order, cutoff, output='sos')`.
+/// and the rate.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Butterworth {
-    response: SosResponse,
-    order: u8,
+    response: CutResponse,
+    order: ButterworthOrder,
 }
 
 impl Butterworth {
-    /// A Butterworth filter of `order` (1 to [`MAX_ORDER`]).
+    /// A Butterworth filter of `order`.
     #[must_use]
-    pub fn new(response: SosResponse, order: u8) -> Self {
+    pub fn new(response: CutResponse, order: ButterworthOrder) -> Self {
         Self { response, order }
     }
 
@@ -71,10 +65,9 @@ impl Butterworth {
     ///
     /// # Errors
     ///
-    /// [`SosError::OrderOutOfRange`] for an order outside `1..=`[`MAX_ORDER`] and
     /// [`SosError::CutoffOutOfRange`] for a cutoff outside `(0, Nyquist)`.
     pub fn design(&self, cutoff: Hz, rate: SampleRate) -> Result<Sos, SosError> {
-        let mut sos = Sos::new(Vec::with_capacity(usize::from(self.order)), rate);
+        let mut sos = Sos::new(Vec::with_capacity(usize::from(self.order.get())), rate);
         self.design_into(cutoff, rate, &mut sos)?;
         Ok(sos)
     }
@@ -91,28 +84,33 @@ impl Butterworth {
         rate: SampleRate,
         into: &mut Sos,
     ) -> Result<(), SosError> {
-        cascade(self.response, self.order, 1, cutoff, rate, into)
+        cascade(self.response, self.order.get(), 1, cutoff, rate, into)
     }
 }
 
 /// A Linkwitz-Riley filter, described without a sample rate: a Butterworth filter of half
 /// the order cascaded with itself, so `-6 dB` at the cutoff and `6 N` dB per octave for the
-/// order `N`. `LinkwitzRiley::new(response, 16)` is LR96, Butterworth order 8 squared.
+/// order `N`. `LinkwitzRiley::new(response, ButterworthOrder::of(8))` is LR96, Butterworth order 8
+/// squared.
 ///
-/// A low-pass and a high-pass of one order sum to a flat magnitude when the order is a
-/// multiple of 4 (they are in phase); at the others (2, 6, 10, 14) they are in antiphase
+/// A low-pass and a high-pass of one order sum to a flat magnitude when the order (twice
+/// the half) is a multiple of 4 (they are in phase); at the others (2, 6, 10, 14) they are in antiphase
 /// and their difference is the allpass.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LinkwitzRiley {
-    response: SosResponse,
-    order: u8,
+    response: CutResponse,
+    order: ButterworthOrder,
 }
 
 impl LinkwitzRiley {
-    /// A Linkwitz-Riley filter of `order` (even, 2 to [`MAX_ORDER`]).
+    /// A Linkwitz-Riley filter of twice `half` the order: `half` is the Butterworth order it
+    /// squares.
     #[must_use]
-    pub fn new(response: SosResponse, order: u8) -> Self {
-        Self { response, order }
+    pub fn new(response: CutResponse, half: ButterworthOrder) -> Self {
+        Self {
+            response,
+            order: half,
+        }
     }
 
     /// Designs the filter at `cutoff` and `rate`: each section of the Butterworth filter of
@@ -120,11 +118,10 @@ impl LinkwitzRiley {
     ///
     /// # Errors
     ///
-    /// [`SosError::OrderOdd`] and [`SosError::OrderOutOfRange`] for an order that is odd or
-    /// outside `2..=`[`MAX_ORDER`], and [`SosError::CutoffOutOfRange`] as for a
+    /// [`SosError::CutoffOutOfRange`] as for a
     /// [`Butterworth`] design.
     pub fn design(&self, cutoff: Hz, rate: SampleRate) -> Result<Sos, SosError> {
-        let mut sos = Sos::new(Vec::with_capacity(usize::from(self.order)), rate);
+        let mut sos = Sos::new(Vec::with_capacity(2 * usize::from(self.order.get())), rate);
         self.design_into(cutoff, rate, &mut sos)?;
         Ok(sos)
     }
@@ -140,16 +137,7 @@ impl LinkwitzRiley {
         rate: SampleRate,
         into: &mut Sos,
     ) -> Result<(), SosError> {
-        if self.order % 2 == 1 {
-            return Err(SosError::OrderOdd(self.order));
-        }
-        if !(2..=MAX_ORDER).contains(&self.order) {
-            return Err(SosError::OrderOutOfRange {
-                order: self.order,
-                min: 2,
-            });
-        }
-        cascade(self.response, self.order / 2, 2, cutoff, rate, into)
+        cascade(self.response, self.order.get(), 2, cutoff, rate, into)
     }
 }
 
@@ -161,16 +149,13 @@ impl LinkwitzRiley {
 /// `1 + a1 z^-1 + a2 z^-2` with `a1 = -2 Re z`, `a2 = |z|^2`, over the zeros at `-1`
 /// (low-pass) or `1` scaled to a gain of 1 at DC or Nyquist.
 fn cascade(
-    response: SosResponse,
+    response: CutResponse,
     order: u8,
     repeats: usize,
     cutoff: Hz,
     rate: SampleRate,
     into: &mut Sos,
 ) -> Result<(), SosError> {
-    if !(1..=MAX_ORDER).contains(&order) {
-        return Err(SosError::OrderOutOfRange { order, min: 1 });
-    }
     let nyquist = rate.get() / 2.0;
     let fc = f64::from(cutoff.get());
     if !(fc > 0.0 && fc < nyquist) {
@@ -183,8 +168,8 @@ fn cascade(
     let n = usize::from(order);
     let section = |a1: f64, a2: f64, first: bool| {
         let (gain, sign) = match response {
-            SosResponse::LowPass => ((1.0 + a1 + a2) / if first { 2.0 } else { 4.0 }, 1.0),
-            SosResponse::HighPass => ((1.0 - a1 + a2) / if first { 2.0 } else { 4.0 }, -1.0),
+            CutResponse::LowPass => ((1.0 + a1 + a2) / if first { 2.0 } else { 4.0 }, 1.0),
+            CutResponse::HighPass => ((1.0 - a1 + a2) / if first { 2.0 } else { 4.0 }, -1.0),
         };
         if first {
             // The first-order sections have a2 = 0: gain = (1 +- a1) / 2.
@@ -216,8 +201,8 @@ fn cascade(
         let theta = PI * (2 * m + 1) as f64 / (2 * n) as f64;
         let p = Complex64::new(-libm::sin(theta), libm::cos(theta));
         let s = match response {
-            SosResponse::LowPass => p * g,
-            SosResponse::HighPass => Complex64::new(g, 0.0) / p,
+            CutResponse::LowPass => p * g,
+            CutResponse::HighPass => Complex64::new(g, 0.0) / p,
         };
         let z = (1.0 + s) / (1.0 - s);
         push(section(-2.0 * z.re, z.norm_sqr(), false));

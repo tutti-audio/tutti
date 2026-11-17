@@ -1,10 +1,9 @@
 //! [`Sos`]: a cascade of second-order sections, the design and analysis form of an IIR
 //! filter of any order, and the [`Butterworth`] and [`LinkwitzRiley`] designs that make one.
 //!
-//! A [`Sos`] is plain data, as scipy's `butter(output='sos')` is: a list of [`Biquad`]s
-//! whose product is the response. A first-order section is a [`Biquad`] with `b2 = a2 = 0`.
+//! A [`Sos`] is plain data: a list of [`Biquad`]s whose product is the response. A first-order section is a [`Biquad`] with `b2 = a2 = 0`.
 //! [`SosBank`] runs one as a cascade of trapezoidal state-variable sections (each section's
-//! [`svf_form`] is its equivalent), never as direct-form biquads, which misbehave when their
+//! `svf_form` is its equivalent), never as direct-form biquads, which misbehave when their
 //! coefficients move and at a low cutoff in `f32`.
 
 mod bank;
@@ -16,7 +15,9 @@ use crate::filter::{integrator_gains, section_l1};
 use crate::{Biquad, Complex64, Lti, Ring, SvfCoeffs, System, svf_step};
 
 pub use bank::{MAX_SECTIONS, SosBank, SosCoefficients};
-pub use butterworth::{Butterworth, LinkwitzRiley, MAX_ORDER, SosError, SosResponse};
+pub use butterworth::{
+    Butterworth, ButterworthOrder, ButterworthOrderError, CutResponse, LinkwitzRiley, SosError,
+};
 
 /// The longest impulse response [`Sos::tail`](System::tail) follows, in frames: a longer
 /// ring-out reads as [`Ring::Unbounded`].
@@ -58,7 +59,7 @@ impl Sos {
 /// section's own, `k = 2`, and a zero cancelling the second: `H(s) = (c0 + c1 s) / (1 + s)`
 /// is `(c1 s^2 + (c0 + c1) s + c0) / (1 + s)^2`.
 #[must_use]
-pub fn svf_form(b: &Biquad) -> SvfCoeffs {
+pub(crate) fn svf_form(b: &Biquad) -> SvfCoeffs {
     let (g, k, [m0, m1, m2]) = if b.a2 == 0.0 && b.b2 == 0.0 {
         let g = (1.0 + b.a1) / (1.0 - b.a1);
         let c0 = (g + 1.0) * (b.b0 + b.b1) / (2.0 * g);
@@ -119,10 +120,12 @@ impl System for Sos {
     /// pole's oscillation (the most a sample can fall short of the envelope's crossing), so the
     /// figure errs long.
     ///
-    /// Never the longest of the sections' tails: a pole repeated `m` times (a
-    /// Linkwitz-Riley section is a Butterworth one twice) rings as `n^(m-1) r^n`, which peaks
-    /// `(m - 1)` time constants (`1 / -ln r`) in and falls to the floor long after one
-    /// section alone has. A partial-fraction bound is not used: the residues of a
+    /// Not the longest of the sections' tails: a pole repeated `m` times (a Linkwitz-Riley
+    /// section is a Butterworth one twice) rings as `n^(m-1) r^n`, which peaks `(m - 1)`
+    /// time constants (`1 / -ln r`) in, so a cascade whose peak is its slow response (a
+    /// low-pass) falls to the floor after one section alone has. A high-pass peaks in its
+    /// first frames, and a section alone, relative to its own peak, can ring longer than the
+    /// cascade does. A partial-fraction bound is not used: the residues of a
     /// narrow high-order cascade are a ratio of near-equal poles to the order, and their
     /// sum cancels to nothing in `f64`. The run ends once it is past the peak of
     /// the slowest envelope (one time constant per pole) and a window of `3` time constants and a

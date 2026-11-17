@@ -194,7 +194,7 @@
 //! ## Items
 //!
 //! - Filters: [`SvfFilterNode`] ([`SvfType`]), [`LadderFilterNode`]
-//!   ([`LadderType`]), [`EqBandNode`], [`CutFilterNode`] ([`SosResponse`]); the coefficient solvers
+//!   ([`LadderType`]), [`EqBandNode`], [`CutFilterNode`] ([`CutResponse`]); the coefficient solvers
 //!   [`SvfCoeffs::new`](tutti_dsp::SvfCoeffs::new) and
 //!   [`LadderCoeffs::new`](tutti_dsp::LadderCoeffs::new); the `f32`/`f64` state type
 //!   is `tutti_buffers::Float` with [`Lanes`].
@@ -292,11 +292,11 @@ pub use tutti_dsp::DcBlockerControls;
 
 mod filter;
 pub use filter::{
-    CrossoverKernel, CrossoverNode, CrossoverSet, CutFilterConfig, CutFilterControls,
+    CrossoverKernel, CrossoverNode, CrossoverSet, CutAlignment, CutFilterConfig, CutFilterControls,
     CutFilterKernel, CutFilterNode, CutFilterSet, EqBandNode, LadderFilterNode, LadderKernel,
     LadderSet, MIN_CUT_CUTOFF, SvfFilterNode, SvfKernel, SvfSet,
 };
-pub use tutti_dsp::SosResponse;
+pub use tutti_dsp::{ButterworthOrder, CutResponse};
 // The types in the filter nodes' signatures stay reachable from here; the
 // algorithms behind them (`SvfCoeffs`, `LadderCoeffs`, `CrossoverModel`) are
 // `tutti-dsp`'s only.
