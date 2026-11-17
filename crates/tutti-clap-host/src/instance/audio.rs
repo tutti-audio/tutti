@@ -16,10 +16,10 @@ use clap_sys::process::{CLAP_PROCESS_SLEEP, CLAP_PROCESS_TAIL, clap_process_stat
 use std::sync::atomic::Ordering;
 use tutti_clap_ffi::{Planar, ProcessCall, ProcessError};
 use tutti_graph::UmpAt;
+use tutti_plugin_types::PluginAudio;
 use tutti_plugin_types::TransportChange;
 use tutti_plugin_types::WireMidi;
 use tutti_plugin_types::is_usable;
-use tutti_plugin_types::{ChannelTable, PluginAudio};
 
 /// Owned snapshot of the plugin's per-block output. Returned for
 /// non-RT consumers (tests, offline render) via
@@ -168,14 +168,9 @@ impl ClapProcessor {
         match buffer {
             PluginAudio::F32(io) => {
                 let frames = io.frames();
-                let (input, mut output) = io.split();
-                let inputs = ChannelTable::of_planes(input);
-                let mut outputs = ChannelTable::of_planes_mut(&mut output);
+                let (inputs, outputs) = io.split();
                 self.process_impl(
-                    Planar::F32 {
-                        inputs: &inputs,
-                        outputs: &mut outputs,
-                    },
+                    Planar::F32 { inputs, outputs },
                     frames.0,
                     ctx.midi,
                     params,
@@ -186,14 +181,9 @@ impl ClapProcessor {
             }
             PluginAudio::F64(io) => {
                 let frames = io.frames();
-                let (input, mut output) = io.split();
-                let inputs = ChannelTable::of_planes(input);
-                let mut outputs = ChannelTable::of_planes_mut(&mut output);
+                let (inputs, outputs) = io.split();
                 self.process_impl(
-                    Planar::F64 {
-                        inputs: &inputs,
-                        outputs: &mut outputs,
-                    },
+                    Planar::F64 { inputs, outputs },
                     frames.0,
                     ctx.midi,
                     params,

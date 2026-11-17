@@ -133,7 +133,7 @@ pub fn silence<T: Float, C: AsMut<[T]>>(channels: &mut [C], frames: usize) {
     for channel in channels {
         let channel = channel.as_mut();
         let n = channel.len().min(frames);
-        channel[..n].fill(T::SILENCE);
+        channel[..n].fill(T::ZERO);
     }
 }
 
@@ -148,7 +148,7 @@ pub fn sanitize<T: Float>(samples: &mut [T]) -> bool {
     let mut replaced = false;
     for s in samples {
         if !s.is_finite() {
-            *s = T::SILENCE;
+            *s = T::ZERO;
             replaced = true;
         }
     }

@@ -89,7 +89,11 @@
 //! let inputs: [&[f32]; 2] = [&silence, &silence];
 //! let (mut left, mut right) = (vec![0.0f32; 512], vec![0.0f32; 512]);
 //! let mut outputs: [&mut [f32]; 2] = [&mut left, &mut right];
-//! let mut buffer = InputOutput::new(Planes::new(&inputs)?, PlanesMut::new(&mut outputs)?)?;
+//! let mut buffer = InputOutput::new(
+//!     Planes::new(&inputs).expect("two equal planes"),
+//!     PlanesMut::new(&mut outputs).expect("two equal planes"),
+//! )
+//! .expect("equal lengths");
 //!
 //! let midi: [(Offset, Ump); 1] = [(
 //!     Offset::ZERO,

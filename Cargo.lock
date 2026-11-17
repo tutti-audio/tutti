@@ -2765,6 +2765,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "tutti-fuzz"
+version = "0.0.0"
+dependencies = [
+ "tutti-codec",
+ "tutti-fixtures",
+]
+
+[[package]]
 name = "tutti-graph"
 version = "0.0.1"
 dependencies = [

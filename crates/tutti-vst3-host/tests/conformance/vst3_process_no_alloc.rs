@@ -71,9 +71,8 @@ fn drive_silent(inst: &mut Active, iters: usize, transport: &TransportInfo) {
     let midi: [UmpAt; 0] = [];
     for _ in 0..iters {
         let outs: &mut [&mut [f32]] = &mut [&mut out_l[..], &mut out_r[..]];
-        let ins: &[&[f32]] = &[];
         let mut buffer = InputOutput::new(
-            Planes::new(ins).expect("equal channels"),
+            Planes::default(),
             PlanesMut::new(outs).expect("equal channels"),
         )
         .expect("equal lengths");
@@ -126,9 +125,8 @@ fn process_with_automation_does_not_allocate() {
     let mut drive = |inst: &mut Active, iters: usize| {
         for _ in 0..iters {
             let outs: &mut [&mut [f32]] = &mut [&mut out_l[..], &mut out_r[..]];
-            let ins: &[&[f32]] = &[];
             let mut buffer = InputOutput::new(
-                Planes::new(ins).expect("equal channels"),
+                Planes::default(),
                 PlanesMut::new(outs).expect("equal channels"),
             )
             .expect("equal lengths");
@@ -180,9 +178,8 @@ fn process_with_midi_does_not_allocate() {
     // allocator.
     {
         let outs: &mut [&mut [f32]] = &mut [&mut out_l[..], &mut out_r[..]];
-        let ins: &[&[f32]] = &[];
         let mut buffer = InputOutput::new(
-            Planes::new(ins).expect("equal channels"),
+            Planes::default(),
             PlanesMut::new(outs).expect("equal channels"),
         )
         .expect("equal lengths");
@@ -209,9 +206,8 @@ fn process_with_midi_does_not_allocate() {
                 _ => &[],
             };
             let outs: &mut [&mut [f32]] = &mut [&mut out_l[..], &mut out_r[..]];
-            let ins: &[&[f32]] = &[];
             let mut buffer = InputOutput::new(
-                Planes::new(ins).expect("equal channels"),
+                Planes::default(),
                 PlanesMut::new(outs).expect("equal channels"),
             )
             .expect("equal lengths");
@@ -275,9 +271,8 @@ fn process_with_hundreds_of_events_does_not_allocate() {
     let mut drive = |inst: &mut Active, exprs: &[NoteExpressionValue], iters: usize| {
         for _ in 0..iters {
             let outs: &mut [&mut [f32]] = &mut [&mut out_l[..], &mut out_r[..]];
-            let ins: &[&[f32]] = &[];
             let mut buffer = InputOutput::new(
-                Planes::new(ins).expect("equal channels"),
+                Planes::default(),
                 PlanesMut::new(outs).expect("equal channels"),
             )
             .expect("equal lengths");

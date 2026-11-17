@@ -10,6 +10,7 @@ use clap_sys::audio_buffer::clap_audio_buffer;
 use clap_sys::events::clap_event_transport;
 use clap_sys::process::{CLAP_PROCESS_CONTINUE, CLAP_PROCESS_ERROR, clap_process};
 
+use tutti_buffers::{Planes, PlanesMut};
 use tutti_plugin_types::SampleFormat;
 
 use crate::events::{EventSink, EventSource, with_input, with_output};
@@ -26,7 +27,7 @@ pub enum ProcessError {
     #[error("start_processing failed")]
     StartFailed,
     /// A channel slice is shorter than the block; nothing was called.
-    #[error("a channel slice is shorter than the block")]
+    #[error("a view is shorter than the block")]
     BufferTooShort,
     /// The block is longer than the plugin was activated for, or than the
     /// scratch was sized for; nothing was called.
@@ -166,22 +167,22 @@ impl<T: Width> Typed<T> {
     }
 
     /// Points the tables at this block's channels, padding the missing ones
-    /// with silence. `None` when a channel slice is shorter than the block or
+    /// with silence. `None` when a view is shorter than the block or
     /// the pad cannot cover the layout.
     fn bind(
         &mut self,
-        inputs: &[&[T]],
-        outputs: &mut [&mut [T]],
+        inputs: Planes<'_, T>,
+        outputs: &mut PlanesMut<'_, '_, T>,
         input_ports: &[u32],
         output_ports: &[u32],
         frames: usize,
     ) -> Result<(), ProcessError> {
         let wanted_in: usize = input_ports.iter().map(|&c| c as usize).sum();
         let wanted_out: usize = output_ports.iter().map(|&c| c as usize).sum();
-        let used_in = inputs.len().min(wanted_in);
-        let used_out = outputs.len().min(wanted_out);
-        if inputs[..used_in].iter().any(|s| s.len() < frames)
-            || outputs[..used_out].iter().any(|s| s.len() < frames)
+        let used_in = inputs.channels().min(wanted_in);
+        let used_out = outputs.channels().min(wanted_out);
+        if (used_in > 0 && inputs.frames().0 < frames)
+            || (used_out > 0 && outputs.frames().0 < frames)
         {
             return Err(ProcessError::BufferTooShort);
         }
@@ -208,16 +209,24 @@ impl<T: Width> Typed<T> {
 
         // Input channels. The plugin reads them; `*mut` is the C struct's
         // type, not a licence to write (`process.h`: inputs are const).
-        self.input_ptrs
-            .extend(inputs[..used_in].iter().map(|s| s.as_ptr().cast_mut()));
+        self.input_ptrs.extend(
+            inputs
+                .iter()
+                .take(used_in)
+                .map(|plane| plane.samples().as_ptr().cast_mut()),
+        );
         let mut pad = self.pad.iter_mut();
         while self.input_ptrs.len() < wanted_in {
             let channel = pad.next().ok_or(ProcessError::BlockTooLarge)?;
             channel[..frames].fill(T::default());
             self.input_ptrs.push(channel.as_mut_ptr());
         }
-        self.output_ptrs
-            .extend(outputs[..used_out].iter_mut().map(|s| s.as_mut_ptr()));
+        self.output_ptrs.extend(
+            outputs
+                .iter_mut()
+                .take(used_out)
+                .map(|mut plane| plane.samples_mut().as_mut_ptr()),
+        );
         while self.output_ptrs.len() < wanted_out {
             let channel = pad.next().ok_or(ProcessError::BlockTooLarge)?;
             channel[..frames].fill(T::default());
@@ -302,16 +311,16 @@ pub enum Planar<'a, 'b> {
     /// 32-bit channels.
     F32 {
         /// Input channels.
-        inputs: &'a [&'b [f32]],
+        inputs: Planes<'a, f32>,
         /// Output channels.
-        outputs: &'a mut [&'b mut [f32]],
+        outputs: PlanesMut<'a, 'b, f32>,
     },
     /// 64-bit channels.
     F64 {
         /// Input channels.
-        inputs: &'a [&'b [f64]],
+        inputs: Planes<'a, f64>,
         /// Output channels.
-        outputs: &'a mut [&'b mut [f64]],
+        outputs: PlanesMut<'a, 'b, f64>,
     },
 }
 
@@ -323,11 +332,11 @@ impl Planar<'_, '_> {
         }
     }
 
-    /// Silences the first `frames` of every output channel.
-    fn silence_outputs(&mut self, frames: usize) {
+    /// Silences every output channel.
+    fn silence_outputs(&mut self) {
         match self {
-            Self::F32 { outputs, .. } => tutti_plugin_types::silence(outputs, frames),
-            Self::F64 { outputs, .. } => tutti_plugin_types::silence(outputs, frames),
+            Self::F32 { outputs, .. } => outputs.silence(),
+            Self::F64 { outputs, .. } => outputs.silence(),
         }
     }
 }
@@ -519,11 +528,11 @@ impl AudioSide {
         // width-independent: the tables are `clap_audio_buffer`s.
         let (input_bufs, output_bufs) = match (&mut scratch.pool, &mut audio) {
             (Pool::F32(typed), Planar::F32 { inputs, outputs }) => {
-                typed.bind(inputs, outputs, input_ports, output_ports, frames as usize)?;
+                typed.bind(*inputs, outputs, input_ports, output_ports, frames as usize)?;
                 typed.tables()
             }
             (Pool::F64(typed), Planar::F64 { inputs, outputs }) => {
-                typed.bind(inputs, outputs, input_ports, output_ports, frames as usize)?;
+                typed.bind(*inputs, outputs, input_ports, output_ports, frames as usize)?;
                 typed.tables()
             }
             // Unreachable: the widths were compared above.
@@ -570,7 +579,7 @@ impl AudioSide {
         };
 
         if status == CLAP_PROCESS_ERROR {
-            audio.silence_outputs(frames as usize);
+            audio.silence_outputs();
             return Err(ProcessError::PluginReturnedError);
         }
         Ok(crate::ProcessStatus::from_raw(status))
@@ -598,6 +607,41 @@ impl AudioSide {
 mod tests {
     use super::*;
 
+    /// `Typed::bind` over slice tables: the views a caller holds, built once.
+    trait BindSlices<T: Width> {
+        fn bind_slices(
+            &mut self,
+            inputs: &[&[T]],
+            outputs: &mut [&mut [T]],
+            input_ports: &[u32],
+            output_ports: &[u32],
+            frames: usize,
+        ) -> Result<(), ProcessError>;
+    }
+
+    impl<T: Width> BindSlices<T> for Typed<T> {
+        fn bind_slices(
+            &mut self,
+            inputs: &[&[T]],
+            outputs: &mut [&mut [T]],
+            input_ports: &[u32],
+            output_ports: &[u32],
+            frames: usize,
+        ) -> Result<(), ProcessError> {
+            let input = if inputs.is_empty() {
+                Planes::default()
+            } else {
+                Planes::new(inputs).expect("equal planes")
+            };
+            let mut output = if outputs.is_empty() {
+                PlanesMut::default()
+            } else {
+                PlanesMut::new(outputs).expect("equal planes")
+            };
+            self.bind(input, &mut output, input_ports, output_ports, frames)
+        }
+    }
+
     /// RT regression: once the scratch has been sized at activation, `bind`
     /// only reuses capacity, with no heap grow.
     #[test]
@@ -619,7 +663,7 @@ mod tests {
         // Warm up: the first call primes the pointer and buffer tables.
         let mut outputs: [&mut [f32]; 2] = [&mut out_a, &mut out_b];
         scratch
-            .bind(
+            .bind_slices(
                 &inputs,
                 &mut outputs,
                 &input_ports,
@@ -631,7 +675,7 @@ mod tests {
         assert_no_alloc::assert_no_alloc(|| {
             for _ in 0..10_000 {
                 scratch
-                    .bind(
+                    .bind_slices(
                         &inputs,
                         &mut outputs,
                         &input_ports,
@@ -660,12 +704,12 @@ mod tests {
         assert_no_alloc::assert_no_alloc(|| {
             // 5 + 1 = 6 channels: within the pad total (6), past the input side (4).
             assert_eq!(
-                scratch.bind(&inputs, &mut outputs, &[5], &[1], 512),
+                scratch.bind_slices(&inputs, &mut outputs, &[5], &[1], 512),
                 Err(ProcessError::LayoutMismatch)
             );
             // Three ports where two were sized for.
             assert_eq!(
-                scratch.bind(&inputs, &mut outputs, &[1, 1, 1], &[2], 512),
+                scratch.bind_slices(&inputs, &mut outputs, &[1, 1, 1], &[2], 512),
                 Err(ProcessError::LayoutMismatch)
             );
         });
@@ -692,7 +736,7 @@ mod tests {
         let mut outputs: [&mut [f32]; 1] = [&mut out_ch];
 
         scratch
-            .bind(
+            .bind_slices(
                 &inputs,
                 &mut outputs,
                 &input_ports,
@@ -703,7 +747,7 @@ mod tests {
         assert_no_alloc::assert_no_alloc(|| {
             for _ in 0..1_000 {
                 scratch
-                    .bind(
+                    .bind_slices(
                         &inputs,
                         &mut outputs,
                         &input_ports,
@@ -738,7 +782,7 @@ mod tests {
         let inputs: [&[f32]; 1] = [&short];
         let mut outputs: [&mut [f32]; 1] = [&mut out];
         assert_eq!(
-            scratch.bind(&inputs, &mut outputs, &ports, &ports, 64),
+            scratch.bind_slices(&inputs, &mut outputs, &ports, &ports, 64),
             Err(ProcessError::BufferTooShort)
         );
     }
@@ -752,7 +796,7 @@ mod tests {
         scratch.resize_for(&ports, &ports, 16);
         let mut outputs: [&mut [f32]; 0] = [];
         assert_eq!(
-            scratch.bind(&[], &mut outputs, &ports, &ports, 64),
+            scratch.bind_slices(&[], &mut outputs, &ports, &ports, 64),
             Err(ProcessError::BlockTooLarge)
         );
     }
@@ -774,16 +818,16 @@ mod tests {
         let inputs: [&[f64]; 1] = [&in_ch];
         let mut outputs: [&mut [f64]; 1] = [&mut out_ch];
         scratch
-            .bind(&inputs, &mut outputs, &input_ports, &output_ports, 256)
+            .bind_slices(&inputs, &mut outputs, &input_ports, &output_ports, 256)
             .unwrap();
         assert_no_alloc::assert_no_alloc(|| {
             for _ in 0..1_000 {
                 scratch
-                    .bind(&inputs, &mut outputs, &input_ports, &output_ports, 256)
+                    .bind_slices(&inputs, &mut outputs, &input_ports, &output_ports, 256)
                     .unwrap();
             }
             assert_eq!(
-                scratch.bind(&inputs, &mut outputs, &[5], &[1], 256),
+                scratch.bind_slices(&inputs, &mut outputs, &[5], &[1], 256),
                 Err(ProcessError::LayoutMismatch)
             );
         });
@@ -802,7 +846,7 @@ mod tests {
         let mut mono = Typed::<f64>::new();
         mono.resize_for(&[1], &[1], 256);
         assert_eq!(
-            mono.bind(&short_in, &mut one_out, &[1], &[1], 256),
+            mono.bind_slices(&short_in, &mut one_out, &[1], &[1], 256),
             Err(ProcessError::BufferTooShort)
         );
     }

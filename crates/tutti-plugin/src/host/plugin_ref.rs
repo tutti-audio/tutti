@@ -1,5 +1,4 @@
-//! [`PluginRef`]: which plugin, in which file; and [`PluginState`]: a saved
-//! state with the plugin it belongs to.
+//! [`PluginRef`]: which plugin, in which file.
 //!
 //! A file can export several plugins (a CLAP or VST3 bundle, an AU component),
 //! so a path alone does not name one. A [`PluginRef`] is the path, the format
@@ -7,6 +6,7 @@
 //! scan reports for each plugin, and what a project file keeps to find the
 //! plugin again. A load takes a [`Loadable`](crate::host::loadable::Loadable).
 
+use std::fmt;
 use std::path::{Path, PathBuf};
 use tutti_plugin_db::{PluginEntry, format_from_path};
 use tutti_plugin_types::{Load, PluginFormat};
@@ -79,7 +79,7 @@ impl PluginRef {
     /// have an id, the same id; when either has none (it names the file's first
     /// plugin), the same file.
     #[must_use]
-    pub(crate) fn is_same_plugin(&self, other: &Self) -> bool {
+    pub fn is_same_plugin(&self, other: &Self) -> bool {
         self.format == other.format
             && match (&self.id, &other.id) {
                 (Some(a), Some(b)) => a == b,
@@ -116,13 +116,14 @@ impl PluginRef {
             ..self.clone()
         }
     }
+}
 
-    /// The plugin as text, for an error: its id, else its file.
-    #[must_use]
-    pub(crate) fn describe(&self) -> String {
+/// The plugin as text, for an error: its id, else its file.
+impl fmt::Display for PluginRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.id {
-            Some(id) => id.clone(),
-            None => self.path.display().to_string(),
+            Some(id) => f.write_str(id),
+            None => write!(f, "{}", self.path.display()),
         }
     }
 }
@@ -133,65 +134,6 @@ impl From<&PluginEntry<'_>> for PluginRef {
             path: entry.path.to_path_buf(),
             format: entry.format,
             id: Some(entry.descriptor.id.clone()),
-        }
-    }
-}
-
-/// A plugin's saved state and the plugin it was saved from.
-///
-/// A state is the plugin's own opaque bytes. Restoring them into another
-/// plugin is meaningless at best, so a state carries its [`PluginRef`] and a
-/// restore into a plugin that is not that one (`PluginRef::is_same_plugin`) is
-/// refused with
-/// [`StateError::OtherPlugin`](tutti_plugin_types::StateError::OtherPlugin).
-/// A version of the plugin is not part of the identity: plugins read the
-/// states of their older versions.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct PluginState {
-    plugin: PluginRef,
-    bytes: Vec<u8>,
-}
-
-impl PluginState {
-    /// `bytes`, the state `plugin` saved.
-    #[must_use]
-    pub fn new(plugin: PluginRef, bytes: Vec<u8>) -> Self {
-        Self { plugin, bytes }
-    }
-
-    /// The plugin that saved it.
-    #[must_use]
-    pub fn plugin(&self) -> &PluginRef {
-        &self.plugin
-    }
-
-    /// The plugin's own bytes.
-    #[must_use]
-    pub fn bytes(&self) -> &[u8] {
-        &self.bytes
-    }
-
-    /// The plugin's own bytes, by value.
-    #[must_use]
-    pub fn into_bytes(self) -> Vec<u8> {
-        self.bytes
-    }
-
-    /// Whether this state may be restored into `plugin`.
-    ///
-    /// # Errors
-    ///
-    /// [`StateError::OtherPlugin`](tutti_plugin_types::StateError::OtherPlugin)
-    /// when it was saved from another plugin.
-    pub fn check_for(&self, plugin: &PluginRef) -> Result<(), tutti_plugin_types::StateError> {
-        if self.plugin.is_same_plugin(plugin) {
-            Ok(())
-        } else {
-            Err(tutti_plugin_types::StateError::OtherPlugin {
-                expected: plugin.describe(),
-                found: self.plugin.describe(),
-            })
         }
     }
 }
@@ -258,6 +200,15 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    /// **A ref reads as its id, else its file.**
+    #[test]
+    fn a_ref_displays_as_its_id_else_its_file() {
+        let with_id = entry_ref("/p/bundle.clap", PluginFormat::Clap, Some("the.id"));
+        assert_eq!(with_id.to_string(), "the.id");
+        let first = entry_ref("/p/bundle.clap", PluginFormat::Clap, None);
+        assert_eq!(first.to_string(), "/p/bundle.clap");
+    }
+
     /// **A file's ref has the extension's format, and refuses what is no plugin.**
     #[test]
     fn a_file_ref_takes_its_format_from_the_extension() {
@@ -265,21 +216,5 @@ mod tests {
         assert_eq!(r.format(), PluginFormat::Clap);
         assert_eq!(r.id(), None);
         assert!(PluginRef::file("/p/notes.txt").is_none());
-    }
-
-    /// **A state is refused by another plugin, and taken by its own.**
-    #[test]
-    fn a_state_checks_the_plugin_it_is_restored_into() {
-        let a = entry_ref("/p/bundle.clap", PluginFormat::Clap, Some("a"));
-        let b = entry_ref("/p/bundle.clap", PluginFormat::Clap, Some("b"));
-        let state = PluginState::new(a.clone(), vec![1, 2, 3]);
-        assert_eq!(state.check_for(&a), Ok(()));
-        assert_eq!(
-            state.check_for(&b),
-            Err(tutti_plugin_types::StateError::OtherPlugin {
-                expected: "b".into(),
-                found: "a".into(),
-            })
-        );
     }
 }
