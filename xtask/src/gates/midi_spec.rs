@@ -20,6 +20,13 @@
 //!   the words are used solely for conformance. M2-101, M2-102, M2-103 and
 //!   M2-115 carry the same Table 2 (and a Table 3 of words that are not conformance
 //!   words: must, will, can, might).
+//!   A description cell of a table row that says its value is copied or
+//!   echoed from another Command ([`COPY_WORDS`]) and has no conformance word
+//!   is a `required` row too, with the fact `cell=1`; it is numbered after the
+//!   keyword rows of its section, so adding it moves no existing id. A later
+//!   keyword row in the same section renumbers the cell rows after it, as
+//!   keyword rows renumber each other. A definition list's `shall` sentence
+//!   is an ordinary keyword row.
 //! - `m2-104/mt/<mt>`: one per Message Type of the allocation table
 //!   ([`Tables::Messages`]), facts `mt` and `bytes`, the UMP size.
 //! - `m2-104/msg/<mt>/<status>`: one per defined message of the message
@@ -917,6 +924,81 @@ fn keyword_items(lines: &[Line], doc: &Doc) -> Vec<Item> {
     out
 }
 
+/// Words that make a field description state that the field's value is taken
+/// from another Command (`copied from the received Ping Command`): the spec
+/// fixes the field by reference, with no conformance word. The list is
+/// closed: a cell that states a derived value (a length, a count) is not
+/// taken.
+const COPY_WORDS: [&str; 2] = ["copied", "echoed"];
+
+/// The `<doc>/<section>#<n>` rows that carry no conformance word: a row of a
+/// table whose description cells (every cell after the field name, over the
+/// row's wrapped lines) hold one of [`COPY_WORDS`]. A row is the run of lines
+/// between blank lines that starts with a line of two or more cells. A row with
+/// a conformance word is already a keyword row. The rows are numbered after
+/// the keyword rows of their section, so adding this kind moves no existing id;
+/// a later keyword row in a section renumbers the cell rows after it. A table
+/// ends at the first line of prose (a line of one cell that is not a wrapped
+/// line of a row), at a caption or at a heading.
+fn cell_items(lines: &[Line], doc: &Doc, taken: &[Item]) -> Vec<Item> {
+    let mut count: BTreeMap<&str, u32> = BTreeMap::new();
+    for it in taken {
+        if let Some((section, _)) = it.id.rsplit_once('#') {
+            *count.entry(section).or_default() += 1;
+        }
+    }
+    let mut added: BTreeMap<String, u32> = BTreeMap::new();
+    let mut out: Vec<Item> = Vec::new();
+    let (mut section, mut in_table) = (String::new(), false);
+    let mut row: Vec<String> = Vec::new();
+    let mut flush = |row: &mut Vec<String>, section: &str, in_table: bool, out: &mut Vec<Item>| {
+        let text = row.join(" ");
+        let described = text.split_whitespace().any(|w| {
+            let w = w.trim_matches(|c: char| !c.is_alphanumeric());
+            COPY_WORDS.iter().any(|c| w.eq_ignore_ascii_case(c))
+        });
+        if in_table && described && spec_text::keyword(&text, &WORDS).is_none() {
+            let key = format!("{}/{section}", doc.prefix);
+            let extra = added.entry(key.clone()).or_default();
+            *extra += 1;
+            let n = count.get(key.as_str()).copied().unwrap_or(0) + *extra;
+            out.push(Item {
+                id: format!("{key}#{n}"),
+                kind: "required",
+                section: format!("{} \u{a7}{}", doc.label, section.to_ascii_uppercase()),
+                facts: "cell=1".to_owned(),
+                text,
+            });
+        }
+        row.clear();
+    };
+    for l in lines {
+        match l {
+            Line::Text(t) if !row.is_empty() || cells(t.trim()).len() > 1 => {
+                // A row's first line has two or more cells; its wrapped lines
+                // follow with no blank between.
+                let cs = cells(t.trim());
+                let skip = usize::from(row.is_empty());
+                row.extend(cs[skip..].iter().map(|c| (*c).to_owned()));
+            }
+            other => {
+                flush(&mut row, &section, in_table, &mut out);
+                match other {
+                    Line::Heading(label) => {
+                        section = label.to_ascii_lowercase();
+                        in_table = false;
+                    }
+                    Line::Caption(true, _) => in_table = true,
+                    Line::Text(_) => in_table = false,
+                    _ => {}
+                }
+            }
+        }
+    }
+    flush(&mut row, &section, in_table, &mut out);
+    out
+}
+
 /// The lines of table `n`: from its caption to the next caption or heading.
 fn table_lines(lines: &[Line], n: u32) -> Result<Vec<&str>, String> {
     let at = lines
@@ -1087,6 +1169,8 @@ fn header_items(lines: &[Line], doc: &Doc, table: u32) -> Result<Vec<Item>, Stri
 pub(super) fn extract(doc: &Doc, text: &str) -> Result<Vec<Item>, String> {
     let lines = classify(&clean(text), doc)?;
     let mut out = keyword_items(&lines, doc);
+    let cells = cell_items(&lines, doc, &out);
+    out.extend(cells);
     out.extend(match doc.tables {
         Tables::Messages { mt_table, messages } => message_items(&lines, doc, mt_table, messages)?,
         Tables::FileHeader { table } => header_items(&lines, doc, table)?,
@@ -1127,6 +1211,79 @@ mod tests {
     fn sentences_of(body: &str) -> Vec<Item> {
         let text = doc(&[TOC, body, "", ""]);
         keyword_items(&classify(&clean(&text), &M2_104).unwrap(), &M2_104)
+    }
+
+    fn extracted(body: &str) -> Vec<Item> {
+        extract(&M2_124, &doc(&[TOC, body, "", ""])).unwrap()
+    }
+
+    #[test]
+    fn a_shall_sentence_in_a_definition_list_is_a_row_and_a_plain_definition_is_not() {
+        let items = extracted(
+            "1 Alpha\nA frob shall spin.\n\nFrobId\nThis is a random value for the frob. It shall be 16 bytes long.\n\nFrobName\nThis is a label for the frob.\n",
+        );
+        assert_eq!(
+            ids(&items),
+            [("m2-124/1#1", "required"), ("m2-124/1#2", "required")]
+        );
+        assert_eq!(items[1].text, "It shall be 16 bytes long.");
+    }
+
+    #[test]
+    fn a_table_cell_that_copies_a_field_is_a_row_numbered_after_the_keyword_rows() {
+        let items = extracted(
+            "1 Alpha\nA frob sends a Nak.\nTable 1 Nak Command\n   Field        Size   Values   Description\nCode           1      0x8F\n\nSaved Header     4              Header of the original\nValue                           Command, copied directly from the\n                                received Command.\n\nText     2   string   An optional text.\n\nThe frob shall report a reason.\n",
+        );
+        assert_eq!(
+            ids(&items),
+            [("m2-124/1#1", "required"), ("m2-124/1#2", "required")]
+        );
+        assert_eq!(items[0].facts, "");
+        assert_eq!(items[1].facts, "cell=1");
+        assert!(items[1].text.contains("copied directly"));
+    }
+
+    #[test]
+    fn a_description_without_a_copy_word_and_a_copy_word_outside_a_table_are_not_rows() {
+        let items = extracted(
+            "1 Alpha\nThe value is copied from the request.\nTable 1 Nak Command\n   Field        Size   Values   Description\nCode           1      0x8F\n\nText     2   string   An optional text.\n\nIt may be sent.\n",
+        );
+        assert_eq!(ids(&items), [("m2-124/1#1", "permitted")]);
+    }
+
+    #[test]
+    fn a_table_ends_at_the_prose_after_it() {
+        let items = extracted(
+            "1 Alpha\nTable 1 Nak Command\n   Field        Size   Values   Description\nCode           1      0x8F\n\nSaved     4    word   The id copied from the request.\n\nThe frob then rests.\n\nOther     4    word   The id copied from the reply.\n",
+        );
+        assert_eq!(ids(&items), [("m2-124/1#1", "required")]);
+        assert!(items[0].text.contains("request"));
+    }
+
+    #[test]
+    fn two_copy_cells_in_a_section_follow_its_keyword_rows() {
+        let items = extracted(
+            "1 Alpha\nA frob shall spin.\nTable 1 Nak Command\n   Field        Size   Values   Description\nCode           1      0x8F\n\nSaved     4    word   The id copied from the request.\n\nOther     4    word   The id echoed from the reply.\n",
+        );
+        assert_eq!(
+            ids(&items),
+            [
+                ("m2-124/1#1", "required"),
+                ("m2-124/1#2", "required"),
+                ("m2-124/1#3", "required")
+            ]
+        );
+        assert_eq!(items[0].facts, "");
+        assert_eq!(items[2].facts, "cell=1");
+    }
+
+    #[test]
+    fn a_copy_cell_that_has_a_conformance_word_is_one_row_not_two() {
+        let items = extracted(
+            "1 Alpha\nTable 1 Nak Command\n   Field        Size   Values   Description\nCode           1      0x8F\n\nSaved     4    word   The id shall be copied from the request.\n",
+        );
+        assert_eq!(ids(&items), [("m2-124/1#1", "required")]);
+        assert_eq!(items[0].facts, "");
     }
 
     #[test]

@@ -31,11 +31,17 @@ use std::ptr;
 use tutti_clap_ffi::{EventRef, EventSink, PluginEvent};
 use tutti_graph::UmpAt;
 use tutti_plugin_types::{
-    LinearRange, Normalized, ParamEdit, ParamId, ParamMapping, RtMidiEvents,
+    Edit, LinearRange, Normalized, ParamEdit, ParamId, ParamMapping, RtMidiEvents,
     SYSEX_MESSAGE_CAPACITY, StableOrder, WireMidi, expression_of_per_note_controller,
     group_of_port, note_id_to_channel_note, per_note_message, per_note_tuning, plugin_note_id,
     push_sysex, sysex_assembler,
 };
+use tutti_rt::{CappedVec, RtVec, Tally, TallyWriter, tally};
+
+/// The parameter edits the Controller can have queued to the Processor before
+/// the ring refuses one: one block holds as many, and the Processor reserves
+/// event room for them.
+pub(crate) const EDIT_CAPACITY: usize = 256;
 
 use crate::types::RtNoteExpressions;
 use tutti_midi_protocol::{
@@ -832,6 +838,11 @@ pub trait EventList {
     fn clear(&mut self);
 }
 
+/// The room [`InputEventList::new`] holds until [`InputEventList::reserve`]
+/// fixes it: what a test or a one-off conversion needs. A list that reaches
+/// `process` has been reserved.
+const TEST_ROOM: usize = 1024;
+
 /// Owned list of input events passed into `clap_plugin.process()`.
 ///
 /// The plugin reads it through the FFI crate's `clap_input_events`, built over
@@ -839,7 +850,9 @@ pub trait EventList {
 /// call.
 #[derive(Debug)]
 pub struct InputEventList {
-    pub(crate) events: Vec<ClapEvent>,
+    /// The block's events, in a list whose room is fixed when it is built
+    /// ([`reserve`](Self::reserve)): a push past it is refused and counted.
+    pub(crate) events: CappedVec<ClapEvent>,
     /// [`sort_by_time`](Self::sort_by_time)'s scratch, reserved with the
     /// events so the sort never allocates.
     order: StableOrder,
@@ -848,15 +861,30 @@ pub struct InputEventList {
     /// ([`set_param_point_room`](Self::set_param_point_room)). Unbounded
     /// until set.
     pub(crate) param_room: usize,
+    /// The Controller's parameter edits one block may add, the note
+    /// expressions and the transport changes: each source's room, set with
+    /// [`set_source_rooms`](Self::set_source_rooms). Unbounded until set.
+    edit_room: usize,
+    expression_room: usize,
+    transport_room: usize,
+    /// What each of those sources has added this block.
+    edits_pushed: usize,
+    expressions_pushed: usize,
+    transport_pushed: usize,
+    /// Edits, note expressions and transport changes refused for want of
+    /// their source's room: see [`refused`](Self::refused).
+    refused: u64,
+    /// Whether [`reserve`](Self::reserve) has fixed the room.
+    reserved: bool,
     /// Parameter points not handed on whole since the list was built: see
-    /// [`param_points_dropped`](Self::param_points_dropped).
-    param_points_dropped: u64,
+    /// [`param_points_dropped`](Self::param_points_dropped). A tally, so an
+    /// app reads it from any thread.
+    param_points_dropped: TallyWriter<u64>,
+    /// The reading end of `param_points_dropped`.
+    param_points_tally: Tally<u64>,
     /// MIDI messages a banked Program Change could not stage for lack of
     /// room: see [`midi_dropped`](Self::midi_dropped).
     midi_dropped: u64,
-    /// Set by [`reserve`](Self::reserve): MIDI then stays within the reserved
-    /// room, where an unreserved list (a test, an off-RT build) just grows.
-    bounded: bool,
     /// The per-note state of the MIDI added so far (M2-104 section 7.4): each
     /// Group, channel and Note Number's held values, the notes that respond
     /// to them and each channel's bend sensitivity. Kept across blocks
@@ -886,13 +914,22 @@ pub struct InputEventList {
 impl InputEventList {
     /// Creates an empty input event list.
     pub fn new() -> Self {
+        let param_points_tally = tally::<u64>();
         Self {
-            events: Vec::new(),
+            events: CappedVec::with_capacity(TEST_ROOM),
             order: StableOrder::default(),
             param_room: usize::MAX,
-            param_points_dropped: 0,
+            edit_room: usize::MAX,
+            expression_room: usize::MAX,
+            transport_room: usize::MAX,
+            edits_pushed: 0,
+            expressions_pushed: 0,
+            transport_pushed: 0,
+            param_points_dropped: param_points_tally.writer(),
+            param_points_tally,
             midi_dropped: 0,
-            bounded: false,
+            refused: 0,
+            reserved: false,
             notes: Self::per_note_state(1),
             narrower: Narrower::new(),
             ports: 1,
@@ -925,8 +962,9 @@ impl InputEventList {
     /// Forgets the per-note state and every MIDI 1.0 selection, and allocates
     /// it (about 270 KiB for each port): off the audio thread, at activation.
     /// The dialect is read at activation and re-activation only: a plugin that
-    /// changes its note ports (`poll_note_ports_changed`) is not heard
-    /// differently until the embedder re-activates it.
+    /// changes its note ports raises an I/O change
+    /// ([`Request::IoChanged`](tutti_plugin_types::Request::IoChanged)), and
+    /// is not heard differently until the lifecycle re-activates it.
     pub fn set_note_ports(&mut self, midi: &[bool]) {
         let ports = midi
             .len()
@@ -972,34 +1010,21 @@ impl InputEventList {
         self.groups_dropped
     }
 
-    /// Creates an input event list pre-populated with the given events.
-    pub fn from_events(events: Vec<ClapEvent>) -> Self {
-        Self {
-            // Reserved for the list's whole capacity, as `reserve` does, so
-            // `sort_by_time` stays `n log n` (`flush_params` sorts one).
-            order: StableOrder::with_capacity(events.capacity()),
-            events,
-            param_room: usize::MAX,
-            param_points_dropped: 0,
-            midi_dropped: 0,
-            bounded: false,
-            notes: Self::per_note_state(1),
-            narrower: Narrower::new(),
-            ports: 1,
-            midi_ports: 0,
-            midi_capable: u16::MAX,
-            groups_dropped: 0,
-            sysex: SysexAssembler::new(Box::default(), 0, 0),
-        }
+    /// Fixes the list's room at `n` events, the most a block holds, and
+    /// reserves the sort's scratch with it. Off-RT only; call once during
+    /// plugin activation so steady-state `add_*` calls don't touch the
+    /// allocator. A push past the room is refused and counted. The list is
+    /// empty: events held are dropped.
+    pub fn reserve(&mut self, n: usize) {
+        self.events = CappedVec::with_capacity(n);
+        self.order.reserve(n);
+        self.reserved = true;
     }
 
-    /// Reserve heap capacity for at least `n` events. Off-RT only; call
-    /// once during plugin activation so steady-state `add_*` calls don't
-    /// touch the allocator. `clear()` keeps the reserved capacity.
-    pub fn reserve(&mut self, n: usize) {
-        self.bounded = true;
-        self.events.reserve(n);
-        self.order.reserve(self.events.capacity());
+    /// Whether [`reserve`](Self::reserve) has fixed the room: a list built
+    /// with [`new`](Self::new) holds a room for tests until it has.
+    pub(crate) fn is_reserved(&self) -> bool {
+        self.reserved
     }
 
     /// Bound the parameter events one
@@ -1016,21 +1041,49 @@ impl InputEventList {
         self.param_room = points;
     }
 
+    /// Bound the Controller's parameter edits, the note expressions and the
+    /// transport changes one block adds to the room the caller reserved for
+    /// each (with [`reserve`](Self::reserve), on top of the MIDI room and the
+    /// parameter points). A source past its room is refused and counted
+    /// ([`refused`](Self::refused)), so none grows the list on the audio
+    /// thread or takes another source's room. Off-RT; call it at activation.
+    pub(crate) fn set_source_rooms(&mut self, edits: usize, expressions: usize, transport: usize) {
+        self.edit_room = edits;
+        self.expression_room = expressions;
+        self.transport_room = transport;
+    }
+
     /// How many more MIDI events fit without growing a reserved list: its
-    /// room less what is set aside for parameter points.
+    /// room less what is set aside for the other sources.
     fn midi_room(&self) -> usize {
-        if !self.bounded {
-            return usize::MAX;
-        }
-        let aside = if self.param_room == usize::MAX {
-            0
-        } else {
-            self.param_room
-        };
+        let aside = [
+            self.param_room,
+            self.edit_room,
+            self.expression_room,
+            self.transport_room,
+        ]
+        .into_iter()
+        .filter(|&room| room != usize::MAX)
+        .fold(0usize, usize::saturating_add);
         self.events
             .capacity()
             .saturating_sub(aside)
             .saturating_sub(self.events.len())
+    }
+
+    /// `event` onto the list; one refused is counted ([`refused`](Self::refused)).
+    fn push(&mut self, event: ClapEvent) -> bool {
+        let pushed = self.events.push(event);
+        if !pushed {
+            self.refused += 1;
+        }
+        pushed
+    }
+
+    /// Edits, note expressions and transport changes refused since the list
+    /// was built, each past the room its source was given at activation.
+    pub fn refused(&self) -> u64 {
+        self.refused
     }
 
     /// MIDI events refused since the list was built, for lack of reserved
@@ -1047,7 +1100,13 @@ impl InputEventList {
     /// since the list was built; zero while the host stays within the room
     /// it was activated for.
     pub fn param_points_dropped(&self) -> u64 {
-        self.param_points_dropped
+        self.param_points_tally.get()
+    }
+
+    /// The reading end of the count [`param_points_dropped`](Self::param_points_dropped)
+    /// gives, for a reader on another thread.
+    pub fn param_points_tally(&self) -> Tally<u64> {
+        self.param_points_tally.clone()
     }
 
     /// Reserve the SysEx reassembly buffer
@@ -1080,8 +1139,7 @@ impl InputEventList {
 
     /// The plugin is being reset: it has forgotten its notes and its MIDI 1.0
     /// state. Drops what was held per note (every value, every note that still
-    /// responds, every bend sensitivity), forgets which RPN, NRPN and bank each
-    /// channel has had selected so the next controller selects in full, and
+    /// responds, every bend sensitivity), resets the narrower, and
     /// drops the open SysEx ([`reset_sysex`](Self::reset_sysex)). Never
     /// allocates.
     pub fn reset_midi(&mut self) {
@@ -1128,7 +1186,8 @@ impl InputEventList {
     /// controller, channel pitch bend and pressure, a program change, an RPN
     /// or NRPN) is `clap_event_midi` bytes through the list's
     /// [`Narrower`]: an RPN or NRPN is the Control Changes of M2-104
-    /// Appendix D.2.3 and a bank is sent only when it changes. UMP variants
+    /// Appendix D.2.3 and a Program Change with a bank is Bank Select MSB and LSB
+    /// then the Program Change (D.2.4). UMP variants
     /// without a CLAP or MIDI 1.0 form are silently skipped. Add a block's MIDI
     /// in frame order, so a sensitivity applies to the bends after it.
     ///
@@ -1156,6 +1215,10 @@ impl InputEventList {
                 if self.midi_capable >> port & 1 == 0 {
                     return self;
                 }
+                if self.midi_room() == 0 {
+                    self.midi_dropped += 1;
+                    return self;
+                }
                 let bytes = self.sysex.message(message).bytes();
                 #[allow(
                     clippy::cast_possible_truncation,
@@ -1177,7 +1240,7 @@ impl InputEventList {
                     buffer: bytes.as_ptr(),
                     size,
                 };
-                self.events.push(ClapEvent::MidiSysex {
+                self.push(ClapEvent::MidiSysex {
                     inner,
                     _data: Vec::new(),
                 });
@@ -1286,8 +1349,7 @@ impl InputEventList {
 
     /// `message` as `clap_event_midi` on its Group's note port, through the
     /// narrower: all of its messages fit the list's room or none is staged (a
-    /// bank is not sent without its program), and a refusal forgets what the
-    /// narrower thinks it has selected, so the next one is sent in full.
+    /// bank is not sent without its program).
     fn add_bytes(&mut self, time: u32, address: Address, message: Message) {
         let Some(port) = self.port_of(address) else {
             return;
@@ -1301,9 +1363,7 @@ impl InputEventList {
                 n += 1;
             }
         });
-        if !self.push_bytes(time, port, &staged[..n]) {
-            self.narrower.reset();
-        }
+        self.push_bytes(time, port, &staged[..n]);
     }
 
     /// `bytes` as MIDI events on `port`, all or none; `false` when they did not
@@ -1318,7 +1378,9 @@ impl InputEventList {
             return false;
         }
         for &data in bytes {
-            self.events.push(ClapEvent::midi(time, port, data));
+            if !self.push(ClapEvent::midi(time, port, data)) {
+                self.midi_dropped += 1;
+            }
         }
         true
     }
@@ -1328,10 +1390,8 @@ impl InputEventList {
         let Some(event) = event else {
             return;
         };
-        if self.midi_room() == 0 {
+        if self.midi_room() == 0 || !self.push(event) {
             self.midi_dropped += 1;
-        } else {
-            self.events.push(event);
         }
     }
 
@@ -1373,13 +1433,15 @@ impl InputEventList {
 
         let mut room = self.midi_room();
         let mut dropped = 0u64;
-        let mut push = |events: &mut Vec<ClapEvent>, event: Option<ClapEvent>| {
+        let mut push = |events: &mut CappedVec<ClapEvent>, event: Option<ClapEvent>| {
             if let Some(event) = event {
                 if room == 0 {
                     dropped += 1;
                 } else {
                     room -= 1;
-                    events.push(event);
+                    if !events.push(event) {
+                        dropped += 1;
+                    }
                 }
             }
         };
@@ -1499,21 +1561,60 @@ impl InputEventList {
                     value,
                 );
                 if pushed < self.param_room {
-                    self.events.push(event);
-                    pushed += 1;
-                    pushed_here = true;
+                    if self.events.push(event) {
+                        pushed += 1;
+                        pushed_here = true;
+                    } else {
+                        // The list is full: the point is refused like one past
+                        // the room.
+                        self.param_points_dropped.add(1);
+                    }
                     continue;
                 }
                 // Past the room: the parameter's previous point gives way, so
                 // it still ends on its latest value; with none, the point is
                 // lost. Counted either way.
-                self.param_points_dropped += 1;
-                if pushed_here && let Some(last) = self.events.last_mut() {
+                self.param_points_dropped.add(1);
+                if pushed_here && let Some(last) = self.events.as_mut_slice().last_mut() {
                     *last = event;
                 }
             }
         }
         self
+    }
+
+    /// Adds the block's queued edits. `drain` hands each queued edit to the
+    /// callback it is given, oldest first. A [`Edit::Reset`] voids the edits
+    /// before it; the edits kept are added in order, and any past the room
+    /// [`set_source_rooms`](Self::set_source_rooms) gave them, or past the
+    /// [`EDIT_CAPACITY`] the block can hold, are refused and counted
+    /// ([`refused`](Self::refused)).
+    pub(crate) fn add_param_edits(
+        &mut self,
+        ranges: &[ParamBounds],
+        plugin_claims_params: bool,
+        drain: impl FnOnce(&mut dyn FnMut(Edit)),
+    ) {
+        let mut edits: RtVec<(u32, f64), EDIT_CAPACITY> = RtVec::new();
+        let mut surplus = 0u64;
+        drain(&mut |edit| match edit {
+            Edit::Param { id, value } => {
+                if !edits.push((id.get(), value.get())) {
+                    surplus += 1;
+                }
+            }
+            // The Controller reset the stream (a state or preset load): the
+            // edits queued before it are not to be sent.
+            Edit::Reset => {
+                edits.clear();
+                surplus = 0;
+            }
+            _ => {}
+        });
+        self.refused += surplus;
+        for &(id, value) in &edits {
+            self.add_param_edit(id, value, ranges, plugin_claims_params);
+        }
     }
 
     /// Appends one `PARAM_VALUE` event at the head of the block (time 0) for a
@@ -1522,8 +1623,9 @@ impl InputEventList {
     /// [`add_param_changes`](Self::add_param_changes) does a point, including
     /// its rule for an id the table lacks.
     ///
-    /// An edit does not count against the parameter room: the ring that carried
-    /// it is bounded, and the list reserves room for as many on top of it.
+    /// An edit does not count against the parameter room: it has its own
+    /// ([`set_source_rooms`](Self::set_source_rooms)), and one past it is
+    /// refused and counted ([`refused`](Self::refused)).
     pub(crate) fn add_param_edit(
         &mut self,
         param_id: u32,
@@ -1542,7 +1644,13 @@ impl InputEventList {
             None if plugin_claims_params => return self,
             None => value,
         };
-        self.events.push(ClapEvent::param_value(0, param_id, plain));
+        if self.edits_pushed >= self.edit_room {
+            self.refused += 1;
+            return self;
+        }
+        if self.push(ClapEvent::param_value(0, param_id, plain)) {
+            self.edits_pushed += 1;
+        }
         self
     }
 
@@ -1561,7 +1669,13 @@ impl InputEventList {
                 expr.note_id,
                 expr.value,
             ) {
-                self.events.push(event);
+                if self.expressions_pushed >= self.expression_room {
+                    self.refused += 1;
+                    continue;
+                }
+                if self.push(event) {
+                    self.expressions_pushed += 1;
+                }
             }
         }
         self
@@ -1572,16 +1686,23 @@ impl InputEventList {
     /// on (the block's own transport, `clap_process.transport`, is the one at
     /// frame 0). Added before [`sort_by_time`](Self::sort_by_time), it takes
     /// its place in time order among the block's other events, after those
-    /// already added at the same frame. Room is the caller's
-    /// ([`reserve`](Self::reserve)): at most the graph's
-    /// `MAX_TRANSPORT_CHANGES` a block.
+    /// already added at the same frame. At most the room
+    /// [`set_source_rooms`](Self::set_source_rooms) gave transport changes a
+    /// block; one past it is refused and counted
+    /// ([`refused`](Self::refused)).
     pub(crate) fn add_transport(
         &mut self,
         time: u32,
         mut event: clap_event_transport,
     ) -> &mut Self {
+        if self.transport_pushed >= self.transport_room {
+            self.refused += 1;
+            return self;
+        }
         event.header.time = time;
-        self.events.push(ClapEvent::Transport(event));
+        if self.push(ClapEvent::Transport(event)) {
+            self.transport_pushed += 1;
+        }
         self
     }
 
@@ -1607,7 +1728,7 @@ impl InputEventList {
     /// and the plugin will process nothing).
     pub fn clamp_times(&mut self, frames_count: u32) -> &mut Self {
         let last = frames_count.saturating_sub(1);
-        for event in &mut self.events {
+        for event in self.events.as_mut_slice() {
             let header = event.header_mut();
             if header.time > last {
                 header.time = last;
@@ -1629,18 +1750,13 @@ impl InputEventList {
     /// scratch. A list already in order (the common case) is left as it is.
     pub fn sort_by_time(&mut self) -> &mut Self {
         self.order
-            .sort_by_key(&mut self.events, |e| e.header().time);
+            .sort_by_key(self.events.as_mut_slice(), |e| e.header().time);
         self
     }
 
     /// Borrows the events currently in the list.
     pub fn events(&self) -> &[ClapEvent] {
-        &self.events
-    }
-
-    /// Moves the events out of the list, leaving it empty.
-    pub fn take_events(&mut self) -> Vec<ClapEvent> {
-        std::mem::take(&mut self.events)
+        self.events.as_slice()
     }
 }
 
@@ -1659,6 +1775,9 @@ impl EventList for InputEventList {
     /// (their events go with it), keeping a message still open.
     fn clear(&mut self) {
         self.events.clear();
+        self.edits_pushed = 0;
+        self.expressions_pushed = 0;
+        self.transport_pushed = 0;
         self.sysex.begin_block();
     }
 }
@@ -1673,41 +1792,91 @@ impl tutti_clap_ffi::EventSource for InputEventList {
     /// built, in the event's own `_data`); the FFI crate checks the event's
     /// pointer lies inside whichever it is handed.
     fn get(&self, index: usize) -> Option<EventRef<'_>> {
-        Some(match self.events.get(index)? {
-            ClapEvent::NoteOn(e)
-            | ClapEvent::NoteOff(e)
-            | ClapEvent::NoteChoke(e)
-            | ClapEvent::NoteEnd(e) => EventRef::Note(e),
-            ClapEvent::Midi(e) => EventRef::Midi(e),
-            ClapEvent::NoteExpression(e) => EventRef::NoteExpression(e),
-            ClapEvent::Transport(e) => EventRef::Transport(e),
-            ClapEvent::ParamValue(e) => EventRef::ParamValue(e),
-            ClapEvent::ParamMod(e) => EventRef::ParamMod(e),
-            ClapEvent::ParamGestureBegin(e) | ClapEvent::ParamGestureEnd(e) => {
-                EventRef::ParamGesture(e)
-            }
-            ClapEvent::MidiSysex { inner, _data } => EventRef::Sysex {
-                event: inner,
-                backing: if _data.is_empty() {
-                    self.sysex.bytes()
-                } else {
-                    _data
-                },
-            },
-        })
+        Some(event_ref(
+            self.events.as_slice().get(index)?,
+            self.sysex.bytes(),
+        ))
     }
 }
 
-/// How many SysEx payload buffers [`OutputEventList::reserve`] pre-warms.
-/// Far below the event reserve: SysEx is rare, so one buffer per *possible*
-/// event would be 256 allocations against a case that emits one. Past this the
-/// pool grows itself once and then recycles.
-const SYSEX_POOL_PREWARM: usize = 8;
+/// `event` as the FFI crate lends it to the plugin: a SysEx message's bytes
+/// are the event's own (`_data`), or `reassembled`, the assembler's buffer,
+/// when it has none.
+fn event_ref<'a>(event: &'a ClapEvent, reassembled: &'a [u8]) -> EventRef<'a> {
+    match event {
+        ClapEvent::NoteOn(e)
+        | ClapEvent::NoteOff(e)
+        | ClapEvent::NoteChoke(e)
+        | ClapEvent::NoteEnd(e) => EventRef::Note(e),
+        ClapEvent::Midi(e) => EventRef::Midi(e),
+        ClapEvent::NoteExpression(e) => EventRef::NoteExpression(e),
+        ClapEvent::Transport(e) => EventRef::Transport(e),
+        ClapEvent::ParamValue(e) => EventRef::ParamValue(e),
+        ClapEvent::ParamMod(e) => EventRef::ParamMod(e),
+        ClapEvent::ParamGestureBegin(e) | ClapEvent::ParamGestureEnd(e) => {
+            EventRef::ParamGesture(e)
+        }
+        ClapEvent::MidiSysex { inner, _data } => EventRef::Sysex {
+            event: inner,
+            backing: if _data.is_empty() { reassembled } else { _data },
+        },
+    }
+}
 
-/// Capacity each pre-warmed SysEx buffer starts with — enough for the common
-/// short messages (identity replies, GS/XG mode sets, MPE config) without a
-/// grow. A bulk dump grows its buffer once and keeps that capacity in the pool.
-const SYSEX_PREWARM_BYTES: usize = 64;
+/// The events of one `params.flush` call, in time order: what a parameter
+/// flush sends a plugin outside `process`. It has no MIDI stage: no per-note
+/// state, no SysEx assembler and no note ports, which a [`InputEventList`]
+/// carries for a plugin's audio blocks.
+#[derive(Debug)]
+pub struct FlushEvents {
+    events: Vec<ClapEvent>,
+    /// [`sort_by_time`](Self::sort_by_time)'s scratch, reserved with the
+    /// events.
+    order: StableOrder,
+}
+
+impl FlushEvents {
+    /// The flush of `events`, in the order given until sorted.
+    pub fn new(events: Vec<ClapEvent>) -> Self {
+        Self {
+            order: StableOrder::with_capacity(events.capacity()),
+            events,
+        }
+    }
+
+    /// Puts the events in non-decreasing time order, equal times in the order
+    /// given (CLAP's requirement of an input list).
+    pub fn sort_by_time(&mut self) -> &mut Self {
+        self.order
+            .sort_by_key(&mut self.events, |e| e.header().time);
+        self
+    }
+
+    /// The events.
+    pub fn events(&self) -> &[ClapEvent] {
+        &self.events
+    }
+}
+
+impl tutti_clap_ffi::EventSource for FlushEvents {
+    fn len(&self) -> usize {
+        self.events.len()
+    }
+
+    fn get(&self, index: usize) -> Option<EventRef<'_>> {
+        Some(event_ref(self.events.get(index)?, &[]))
+    }
+}
+
+/// How many SysEx payload buffers [`OutputEventList::reserve`] allocates: the
+/// SysEx messages one block can carry out of a plugin. Far below the event
+/// room: SysEx is rare, so one buffer per *possible* event would be 256
+/// allocations against a case that emits one. A ninth is refused and counted.
+const SYSEX_POOL_BUFFERS: usize = 8;
+
+/// Capacity of each SysEx payload buffer: the longest message a reserved
+/// [`OutputEventList`] accepts. A longer one is refused and counted.
+const SYSEX_BUFFER_BYTES: usize = 1024;
 
 /// Owned list that collects events produced by the plugin during
 /// `clap_plugin.process()`.
@@ -1722,8 +1891,11 @@ pub struct OutputEventList {
     /// CLAP's `try_push` buffer is plugin-owned and valid only for that call, so
     /// the host must copy — on the audio thread, per event, per block.
     /// [`Self::clear`] moves each payload `Vec` here instead of dropping it and
-    /// `try_push` refills one, so the allocator is touched only for a payload
-    /// larger than any buffer yet seen.
+    /// `try_push` refills one. A reserved list ([`reserve`](Self::reserve))
+    /// holds [`SYSEX_POOL_BUFFERS`] buffers of [`SYSEX_BUFFER_BYTES`], and a
+    /// message with no buffer free, or longer than one, is refused and counted
+    /// ([`events_refused`](Self::events_refused)): the pool never grows. An
+    /// unreserved list allocates a payload as it needs one.
     ///
     /// Whole `Vec`s rather than one arena: `ClapEvent::MidiSysex`'s `buffer`
     /// pointer aliases its own payload, and an arena reallocating mid-fill would
@@ -1813,7 +1985,8 @@ impl OutputEventList {
     /// or a `PARAM_VALUE` past the room set with
     /// [`set_param_room`](Self::set_param_room) whose id is not one of the
     /// plugin's parameters (a listed one keeps its latest value instead), or
-    /// an event of another space or smaller than its type's struct.
+    /// an event of another space or smaller than its type's struct, or a SysEx
+    /// message longer than a pool buffer or with none free.
     /// Counted since the list was built; zero while the plugin stays within
     /// the room.
     pub fn events_refused(&self) -> u64 {
@@ -1834,18 +2007,15 @@ impl OutputEventList {
     /// events have their own room ([`set_param_room`](Self::set_param_room))
     /// and never take from this one. Off-RT only; call it at activation.
     ///
-    /// Also pre-warms the SysEx payload pool: the pool is fed only by `clear`,
-    /// so without priming, the first block emitting SysEx still allocates on
-    /// the audio thread.
+    /// Also fills the SysEx payload pool (8 buffers of 1024 bytes), the only room a SysEx message has.
     pub fn reserve(&mut self, n: usize) {
         self.room = n;
         self.reserve_events();
 
-        let wanted = n.min(SYSEX_POOL_PREWARM);
-        self.sysex_pool.reserve(wanted);
+        let wanted = n.min(SYSEX_POOL_BUFFERS);
+        self.sysex_pool.reserve_exact(wanted);
         while self.sysex_pool.len() < wanted {
-            self.sysex_pool
-                .push(Vec::with_capacity(SYSEX_PREWARM_BYTES));
+            self.sysex_pool.push(Vec::with_capacity(SYSEX_BUFFER_BYTES));
         }
     }
 
@@ -2187,7 +2357,19 @@ impl EventSink for OutputEventList {
             },
             PluginEvent::Sysex { event, data } => {
                 if !data.is_empty() {
-                    let mut payload = self.sysex_pool.pop().unwrap_or_default();
+                    let mut payload = match self.sysex_pool.pop() {
+                        Some(buf) => buf,
+                        None if self.room == usize::MAX => Vec::new(),
+                        None => {
+                            self.refused += 1;
+                            return false;
+                        }
+                    };
+                    if self.room != usize::MAX && data.len() > payload.capacity() {
+                        self.sysex_pool.push(payload);
+                        self.refused += 1;
+                        return false;
+                    }
                     payload.clear();
                     payload.extend_from_slice(data);
                     // The buffer pointer aliases `payload`; the `ClapEvent`
@@ -2280,12 +2462,12 @@ mod tests {
         )
     }
 
-    /// The first event `event` adds to a fresh list: the one CLAP event a
-    /// packet is, at the default per-note state.
-    fn from_midi(event: &UmpAt) -> Option<ClapEvent> {
+    /// A fresh list `event` was added to: its first event is the one CLAP
+    /// event a packet is, at the default per-note state.
+    fn from_midi(event: &UmpAt) -> InputEventList {
         let mut list = InputEventList::new();
         list.add_midi(event);
-        list.events.into_iter().next()
+        list
     }
 
     /// A Note On at the address and key of the per-note `event`, at velocity
@@ -2306,17 +2488,17 @@ mod tests {
     }
 
     /// [`from_midi`] for a per-note message, with its note already sounding:
-    /// the first event the message adds once a Note On on its key has
+    /// the list holds what the message adds once a Note On on its key has
     /// started (a per-note controller of a number with no note is held, and
     /// makes none: M2-104 Appendix C.3).
-    fn from_midi_live(event: &UmpAt) -> Option<ClapEvent> {
+    fn from_midi_live(event: &UmpAt) -> InputEventList {
         let mut list = InputEventList::new();
         if let Some(on) = note_on_for(event) {
             list.add_midi(&on);
-            list.take_events();
+            list.clear();
         }
         list.add_midi(event);
-        list.events.into_iter().next()
+        list
     }
 
     /// The message `midi` carries.
@@ -2488,7 +2670,8 @@ mod tests {
     #[test]
     fn a_midi1_note_on_at_velocity_zero_releases_at_half() {
         let midi1 = packet(0, &[0x2091_3C00]);
-        let Some(ClapEvent::NoteOff(e)) = from_midi(&midi1) else {
+        let list = from_midi(&midi1);
+        let Some(ClapEvent::NoteOff(e)) = list.events().first() else {
             panic!("a MIDI 1.0 Note On at velocity 0 is a Note Off");
         };
         assert_eq!((e.channel, e.key), (1, 60));
@@ -2499,7 +2682,8 @@ mod tests {
         );
 
         let midi2 = packet(0, &[0x4091_3C00, 0]);
-        let Some(ClapEvent::NoteOn(e)) = from_midi(&midi2) else {
+        let list = from_midi(&midi2);
+        let Some(ClapEvent::NoteOn(e)) = list.events().first() else {
             panic!("a MIDI 2.0 Note On at velocity 0 is a note-on");
         };
         assert_eq!((e.channel, e.key, e.velocity), (1, 60, 0.0));
@@ -2519,7 +2703,7 @@ mod tests {
                         0xFFFF_1234,
                     ],
                 );
-                match from_midi(&midi) {
+                match from_midi(&midi).events().first() {
                     Some(ClapEvent::NoteOn(e)) if on => assert_eq!(e.velocity, 1.0),
                     Some(ClapEvent::NoteOff(e)) if !on => assert_eq!(e.velocity, 1.0),
                     other => panic!("attribute {attribute_type:#x}: got {other:?}"),
@@ -2630,7 +2814,7 @@ mod tests {
         let packets: Vec<UmpAt> = table.iter().map(|(_, words)| packet(2, words)).collect();
         for midi_notes in [false, true] {
             let mut list = InputEventList::new();
-            list.reserve(64);
+            list.reserve(128);
             list.reserve_sysex();
             list.set_note_ports(&[midi_notes]);
             list.add_midi_events(&packets);
@@ -2657,6 +2841,77 @@ mod tests {
             assert_eq!(list.len(), converted);
             assert_eq!(list.midi_dropped(), 0);
         }
+    }
+
+    /// **A refused message leaves an MPE note's member channel as it was**: the
+    /// narrower's note allocation survives a message the list has no port for,
+    /// so the note's per-note bend still goes to its channel (M2-104 D.2.8).
+    #[test]
+    fn a_refused_message_keeps_an_mpe_notes_channel() {
+        use tutti_midi_protocol::{
+            ExtremeValues, MpeZoneConfig, PerNoteTranslation, PitchBendSensitivity, TranslationMode,
+        };
+        use tutti_ump::{Attribute, BendValue, ControlValue, NoteNumber, NoteVelocity};
+        let zone = MpeZoneConfig::lower(
+            2,
+            PitchBendSensitivity::MPE_MASTER_DEFAULT,
+            PitchBendSensitivity::MPE_MEMBER_DEFAULT,
+        )
+        .unwrap();
+        let mut list = InputEventList::new();
+        list.narrower = Narrower::with_mode(TranslationMode {
+            extremes: ExtremeValues::Scaled,
+            per_note: PerNoteTranslation::Mpe(zone),
+        });
+        let address = Address::new(tutti_ump::MidiGroup::FIRST, tutti_ump::MidiChannel::FIRST);
+        let note = NoteNumber::of(60);
+        list.add_bytes(
+            0,
+            address,
+            Message::midi2(
+                address,
+                Voice2::NoteOn {
+                    note,
+                    velocity: NoteVelocity::new(0x8000),
+                    attribute: Attribute::None,
+                },
+            ),
+        );
+        // The port takes no MIDI: the RPN is refused whole.
+        list.set_midi_capable_ports(&[false]);
+        list.add_bytes(
+            0,
+            address,
+            Message::midi2(
+                address,
+                Voice2::registered(
+                    tutti_ump::Rpn::PITCH_BEND_SENSITIVITY,
+                    ControlValue::new(12 << 25),
+                ),
+            ),
+        );
+        list.set_midi_capable_ports(&[true]);
+        list.add_bytes(
+            0,
+            address,
+            Message::midi2(
+                address,
+                Voice2::PerNotePitchBend {
+                    note,
+                    value: BendValue::new(0x8000_0000),
+                },
+            ),
+        );
+        let bytes: Vec<[u8; 3]> = list
+            .events
+            .iter()
+            .filter_map(|e| match e {
+                ClapEvent::Midi(m) => Some(m.data),
+                _ => None,
+            })
+            .collect();
+        // Note On on member channel 2 (0x91), then its Pitch Bend, centre 0x2000.
+        assert_eq!(bytes, [[0x91, 60, 0x40], [0xE1, 0x00, 0x40]]);
     }
 
     /// **The plugin-output path converts without allocating**: every MIDI 1.0
@@ -2880,7 +3135,10 @@ mod tests {
                 .collect()
         };
         let mut reference = build();
-        reference.events.sort_by_key(|e| e.header().time);
+        reference
+            .events
+            .as_mut_slice()
+            .sort_by_key(|e| e.header().time);
         let mut list = build();
         assert_eq!(list.len(), 200 * points + 6);
         assert_no_alloc::assert_no_alloc(|| {
@@ -2933,6 +3191,224 @@ mod tests {
         );
         assert!(got.iter().all(|&(id, _)| id != 3));
         assert_eq!(list.param_points_dropped(), 3);
+    }
+
+    /// An input list reserved as activation reserves it: a MIDI room of 8,
+    /// parameter points 4, and a room of 3 edits, 3 expressions and 2
+    /// transport changes.
+    fn reserved_list() -> InputEventList {
+        let mut list = InputEventList::new();
+        list.set_note_ports(&[false]);
+        list.reserve(8 + 4 + 3 + 3 + 2);
+        list.set_param_point_room(4);
+        list.set_source_rooms(3, 3, 2);
+        list
+    }
+
+    /// **Every input source stays within its own room, and a source past it
+    /// is refused and counted without taking another's.** MIDI is filled to
+    /// its room (and counted past it), then more edits, expressions and
+    /// transport changes than each has room for are added: the list never
+    /// grows (no allocation), each source ends at its room, and the refusals
+    /// are the surplus.
+    #[test]
+    fn each_input_source_stays_within_its_own_room() {
+        let mut list = reserved_list();
+        let capacity = list.events.capacity();
+        let notes: Vec<UmpAt> = (0..12)
+            .map(|k| (at(0), midi::note_on(MidiChannel::FIRST, 40 + k, 0x8000)))
+            .collect();
+        let expressions: Vec<ClapNoteExpression> = (0..5)
+            .map(|k| ClapNoteExpression::new(NoteExpressionType::Volume, k, 0.5))
+            .collect();
+        let transport = clap_event_transport {
+            header: clap_event_header {
+                size: std::mem::size_of::<clap_event_transport>() as u32,
+                time: 0,
+                space_id: CLAP_CORE_EVENT_SPACE_ID,
+                type_: clap_sys::events::CLAP_EVENT_TRANSPORT,
+                flags: 0,
+            },
+            flags: 0,
+            song_pos_beats: 0,
+            song_pos_seconds: 0,
+            tempo: 120.0,
+            tempo_inc: 0.0,
+            loop_start_beats: 0,
+            loop_end_beats: 0,
+            loop_start_seconds: 0,
+            loop_end_seconds: 0,
+            bar_start: 0,
+            bar_number: 0,
+            tsig_num: 4,
+            tsig_denom: 4,
+        };
+        assert_no_alloc::assert_no_alloc(|| {
+            list.add_midi_events(&notes);
+            for id in 0..5 {
+                list.add_param_edit(id, 0.5, &[], false);
+            }
+            list.add_note_expressions(&expressions);
+            for time in 0..4 {
+                list.add_transport(time, transport);
+            }
+        });
+        assert_eq!(list.events.capacity(), capacity, "the list grew");
+        let count = |pick: fn(&ClapEvent) -> bool| list.events.iter().filter(|e| pick(e)).count();
+        assert_eq!(count(|e| matches!(e, ClapEvent::NoteOn(_))), 8);
+        assert_eq!(count(|e| matches!(e, ClapEvent::ParamValue(_))), 3);
+        assert_eq!(count(|e| matches!(e, ClapEvent::NoteExpression(_))), 3);
+        assert_eq!(count(|e| matches!(e, ClapEvent::Transport(_))), 2);
+        assert_eq!(list.midi_dropped(), 4);
+        assert_eq!(list.refused(), 2 + 2 + 2);
+        // A cleared block has every room back.
+        list.clear();
+        list.add_param_edit(1, 0.5, &[], false);
+        assert_eq!(list.refused(), 6);
+    }
+
+    /// **Parameter points past the list's room are refused and counted, and
+    /// nothing allocates.** A list with room for 3 events is given a chunk of
+    /// 5 points on one parameter: 3 are kept, 2 are counted in the tally an
+    /// app reads from another thread, and the list's capacity is unchanged.
+    #[test]
+    fn param_points_past_the_lists_room_are_counted_in_the_tally() {
+        let mut changes = ParameterChanges::reserved(1, 5);
+        for k in 0..5 {
+            changes.add_change(1u32.into(), k, 0.5);
+        }
+        let mut list = InputEventList::new();
+        list.reserve(3);
+        let tally = list.param_points_tally();
+        let capacity = list.events.capacity();
+        assert_no_alloc::assert_no_alloc(|| {
+            list.add_param_changes(&changes, &[], false);
+        });
+        assert_eq!(list.events.len(), 3);
+        assert!(list.events.is_overflowed());
+        assert_eq!(list.events.capacity(), capacity, "the list grew");
+        assert_eq!(tally.get(), 2);
+        assert_eq!(list.param_points_dropped(), 2);
+    }
+
+    /// **An edit past the room a block holds for edits is refused and
+    /// counted.** One more than the room is queued; the room's worth is kept.
+    #[test]
+    fn an_edit_past_the_edit_room_is_refused_and_counted() {
+        let mut list = InputEventList::new();
+        list.reserve(EDIT_CAPACITY + 8);
+        list.set_source_rooms(EDIT_CAPACITY, 0, 0);
+        let capacity = list.events.capacity();
+        assert_no_alloc::assert_no_alloc(|| {
+            list.add_param_edits(&[], false, |each| {
+                for id in 0..=EDIT_CAPACITY as u32 {
+                    each(Edit::Param {
+                        id: ParamId::new(id),
+                        value: Normalized::clamped(0.5),
+                    });
+                }
+            });
+        });
+        assert_eq!(list.events.len(), EDIT_CAPACITY);
+        assert_eq!(list.events.capacity(), capacity);
+        assert_eq!(list.refused(), 1);
+    }
+
+    /// A reset in the block's edits voids the ones before it.
+    #[test]
+    fn a_reset_voids_the_edits_before_it() {
+        let mut list = InputEventList::new();
+        list.reserve(8);
+        let param = |id| Edit::Param {
+            id: ParamId::new(id),
+            value: Normalized::clamped(0.5),
+        };
+        list.add_param_edits(&[], false, |each| {
+            each(param(1));
+            each(Edit::Reset);
+            each(param(2));
+        });
+        let ids: Vec<u32> = list
+            .events()
+            .iter()
+            .filter_map(|e| match e {
+                ClapEvent::ParamValue(v) => Some(v.param_id),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(ids, [2]);
+        assert_eq!(list.refused(), 0);
+    }
+
+    /// **SysEx takes only the MIDI room.** A list whose MIDI room holds three
+    /// events is sent five SysEx messages: three are kept and two counted in
+    /// `midi_dropped`, and the edits added after them all fit.
+    #[test]
+    fn sysex_cannot_take_the_edit_room() {
+        let mut list = InputEventList::new();
+        list.set_note_ports(&[true]);
+        list.reserve(3 + 3);
+        list.reserve_sysex();
+        list.set_source_rooms(3, 0, 0);
+        for k in 0..5 {
+            list.add_midi_events(&sysex_packets(&[1, 2, 3], k));
+        }
+        assert_eq!(list.events().len(), 3);
+        assert_eq!(list.midi_dropped(), 2);
+        list.add_param_edits(&[], false, |each| {
+            for id in 0..3 {
+                each(Edit::Param {
+                    id: ParamId::new(id),
+                    value: Normalized::clamped(0.5),
+                });
+            }
+        });
+        assert_eq!(list.events().len(), 6);
+        assert_eq!(list.refused(), 0);
+    }
+
+    /// **A SysEx message past the pool or past a buffer is refused and
+    /// counted, and nothing allocates.** A reserved output list holds
+    /// `SYSEX_POOL_BUFFERS` buffers of `SYSEX_BUFFER_BYTES`: a message longer
+    /// than one is refused, so are the ones past the last free buffer, and a
+    /// cleared block has every buffer back.
+    #[test]
+    fn output_sysex_is_bounded_by_the_pool_and_counted() {
+        let mut list = OutputEventList::new();
+        list.reserve(32);
+        let event = clap_event_midi_sysex {
+            header: clap_event_header {
+                size: header_size::<clap_event_midi_sysex>(),
+                time: 0,
+                space_id: CLAP_CORE_EVENT_SPACE_ID,
+                type_: CLAP_EVENT_MIDI_SYSEX,
+                flags: 0,
+            },
+            port_index: 0,
+            buffer: std::ptr::null(),
+            size: 0,
+        };
+        let short = [0xF0, 1, 2, 0xF7];
+        let long = vec![0x55; SYSEX_BUFFER_BYTES + 1];
+        let mut accepted = 0;
+        assert_no_alloc::assert_no_alloc(|| {
+            assert!(!list.push(PluginEvent::Sysex { event, data: &long }));
+            for _ in 0..SYSEX_POOL_BUFFERS + 2 {
+                accepted += usize::from(list.push(PluginEvent::Sysex {
+                    event,
+                    data: &short,
+                }));
+            }
+            list.clear();
+        });
+        assert_eq!(accepted, SYSEX_POOL_BUFFERS);
+        assert_eq!(list.events_refused(), 1 + 2);
+        assert_eq!(list.sysex_pool.len(), SYSEX_POOL_BUFFERS);
+        assert!(
+            list.sysex_pool
+                .iter()
+                .all(|buf| buf.capacity() == SYSEX_BUFFER_BYTES)
+        );
     }
 
     #[test]
@@ -3300,7 +3776,8 @@ mod tests {
                 },
             )),
         );
-        let ClapEvent::NoteExpression(e) = from_midi_live(&full).expect("converts") else {
+        let list = from_midi_live(&full);
+        let ClapEvent::NoteExpression(e) = list.events().first().expect("converts") else {
             panic!("expected NoteExpression");
         };
         assert_eq!(e.expression_id, CLAP_NOTE_EXPRESSION_VOLUME);
@@ -3322,7 +3799,8 @@ mod tests {
                 },
             )),
         );
-        let ClapEvent::NoteExpression(e) = from_midi_live(&zero).expect("converts") else {
+        let list = from_midi_live(&zero);
+        let ClapEvent::NoteExpression(e) = list.events().first().expect("converts") else {
             panic!("expected NoteExpression");
         };
         assert!(
@@ -3449,7 +3927,11 @@ mod tests {
             at(11),
             midi::per_note_pitch_bend(MidiChannel::of(3), 60, bend.get()),
         );
-        match from_midi_live(&midi).expect("per-note bend converts") {
+        match from_midi_live(&midi)
+            .events()
+            .first()
+            .expect("per-note bend converts")
+        {
             ClapEvent::NoteExpression(e) => {
                 assert_eq!(e.header.time, 11);
                 assert_eq!(e.expression_id, CLAP_NOTE_EXPRESSION_TUNING);
@@ -3505,7 +3987,7 @@ mod tests {
         for channel in [3, 4] {
             list.add_midi(&(at(0), midi::note_on(MidiChannel::of(channel), 60, 0x8000)));
         }
-        list.take_events();
+        list.clear();
         list.add_midi(&(
             at(0),
             midi::registered(
@@ -3560,7 +4042,11 @@ mod tests {
             at(0),
             midi::poly_pressure(MidiChannel::of(2), 48, unit_f32_to_value(0.75).get()),
         );
-        match from_midi_live(&midi).expect("poly pressure converts") {
+        match from_midi_live(&midi)
+            .events()
+            .first()
+            .expect("poly pressure converts")
+        {
             ClapEvent::NoteExpression(e) => {
                 assert_eq!(e.expression_id, CLAP_NOTE_EXPRESSION_PRESSURE);
                 assert_minted(e.note_id);
@@ -3584,7 +4070,11 @@ mod tests {
                 },
             )),
         );
-        match from_midi_live(&midi).expect("per-note cc converts") {
+        match from_midi_live(&midi)
+            .events()
+            .first()
+            .expect("per-note cc converts")
+        {
             ClapEvent::NoteExpression(e) => {
                 assert_eq!(e.expression_id, CLAP_NOTE_EXPRESSION_BRIGHTNESS);
                 assert_minted(e.note_id);
@@ -3609,13 +4099,13 @@ mod tests {
                 },
             )),
         );
-        assert!(from_midi(&midi).is_none());
+        assert!(from_midi(&midi).events().is_empty());
     }
 
     #[test]
     fn from_midi_event_note_on_decodes_to_typed_note_on() {
         let midi = (at(7), midi::note_on(MidiChannel::of(1), 60, 0x8000));
-        match from_midi(&midi).expect("note on converts") {
+        match from_midi(&midi).events().first().expect("note on converts") {
             ClapEvent::NoteOn(e) => {
                 assert_eq!(e.header.time, 7);
                 assert_eq!(e.channel, 1);
@@ -3704,7 +4194,11 @@ mod tests {
         use tutti_midi_protocol::velocity_to_unit_f32;
         let rel = 0x6000u16; // ~0.375 of full scale
         let midi = (at(9), midi::note_off(MidiChannel::of(4), 55, rel));
-        match from_midi(&midi).expect("note off converts") {
+        match from_midi(&midi)
+            .events()
+            .first()
+            .expect("note off converts")
+        {
             ClapEvent::NoteOff(e) => {
                 assert_eq!(e.key, 55);
                 let expected = f64::from(velocity_to_unit_f32(NoteVelocity::new(rel)));
@@ -3742,7 +4236,7 @@ mod tests {
         // The MIDI velocity-0 NoteOn quirk: widening reads it as a NoteOff, so
         // a raw MIDI-1 velocity-0 NoteOn converts to a CLAP NoteOff.
         let midi = midi1_event(&[0x90, 60, 0]);
-        match from_midi(&midi).expect("converts") {
+        match from_midi(&midi).events().first().expect("converts") {
             ClapEvent::NoteOff(e) => {
                 assert_eq!(e.key, 60);
             }
@@ -3756,7 +4250,7 @@ mod tests {
             at(0),
             midi::cc(MidiChannel::FIRST, CCNumber::VOLUME, 0x8000_0000),
         ); // volume, ~half
-        match from_midi(&midi).expect("cc converts") {
+        match from_midi(&midi).events().first().expect("cc converts") {
             ClapEvent::Midi(e) => {
                 assert_eq!(e.data[0] & 0xF0, 0xB0, "status should be CC");
                 assert_eq!(e.data[1], 7, "controller number");
@@ -4147,7 +4641,7 @@ mod tests {
         let mut list = InputEventList::new();
         // The note sounds first: a pressure with no note is held.
         list.add_midi(&midi1_event(&[0x93, 60, 100]));
-        list.take_events();
+        list.clear();
         list.add_midi(&event);
         assert!(matches!(list.events()[0], ClapEvent::NoteExpression(_)));
     }

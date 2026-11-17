@@ -116,11 +116,6 @@ pub(super) const ALLOW: &[(&str, usize, &str)] = &[
         PLUGINS,
     ),
     (
-        "crates/tutti-plugin/tests/clap_nodes/clap_live.rs",
-        2,
-        PLUGINS,
-    ),
-    (
         "crates/tutti-plugin/tests/real_plugin_pressure.rs",
         9,
         PLUGINS,

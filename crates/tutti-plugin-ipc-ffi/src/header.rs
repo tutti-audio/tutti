@@ -1,54 +1,48 @@
 //! The slab's synchronization header: what makes a read *meaningful*.
 //!
-//! # Why this exists
-//!
 //! The audio regions below this header carry no evidence of who wrote them: a
 //! freshly-mapped region of zeros and one the peer just filled are byte-identical
-//! to the reader. That is exactly how the out-of-process bypass shipped — with
-//! input and output aliased, an unmatched read handed the host its own input back
-//! at unity gain, and every test passed because a plausible signal came out.
-//!
-//! So the evidence goes *in the shared region*, beside the data it describes: a
-//! per-slot sequence number the writer stamps after the last sample and the
-//! reader checks before the first. This is the shape JACK and PipeWire ship, and
-//! it is what finally justifies [`SharedMapping`]'s `unsafe impl Sync` — the
-//! justification can cite a Release/Acquire pair rather than a handshake in a
-//! layer the type system cannot see.
+//! to the reader. The evidence goes *in the shared region*, beside the data it
+//! describes: a per-slot sequence number the writer stamps after the last sample
+//! and the reader checks before the first. That Release/Acquire pair is what
+//! justifies [`SharedMapping`]'s `unsafe impl Sync`.
 //!
 //! [`SharedMapping`]: crate::SharedMapping
 //!
-//! # The ordering, and why it is not decorative
+//! # The ordering
 //!
 //! Publish is `memcpy` every channel, *then* store `seq` with
 //! [`Release`](Ordering::Release). Read is the mirror: load `seq` with
-//! [`Acquire`](Ordering::Acquire), and only `memcpy` out if it matches.
-//!
-//! Without the pair a reader may legally observe the new sequence number
-//! alongside the *old* samples — CPU and compiler are both free to reorder plain
-//! stores around a `Relaxed` atomic, and on aarch64 (one of the two architectures
-//! this engine targets) that is real hardware behaviour, not just a permitted
-//! one.
-//!
-//! This property cannot be tested into existence: a stress test on
-//! strongly-ordered x86-64 passes either way, and on aarch64 it fails only
-//! probabilistically. **Code review is the net here, not the test suite.** Each
-//! ordering appears in exactly one place below, with its reason for not being
-//! `Relaxed`.
+//! [`Acquire`](Ordering::Acquire), and only `memcpy` out if it matches. Without
+//! the pair a reader may observe the new sequence number alongside the *old*
+//! samples. The header's atomics are `loom`'s under `--cfg loom`, and
+//! the `loom_model` module below runs `publish`, `sequence`, `initialize` and
+//! `validate` under every interleaving and reordering the memory model permits
+//! between threads; it does not cover a reader in another process or a creator
+//! that crashed mid-initialize.
 //!
 //! # Sequence numbers, not a "newest" index
 //!
-//! Per-slot, because the reader wants a *specific* block — the one it submitted
-//! a fixed number of blocks ago — not the newest. A single newest-index would let
-//! a skipped block (server error, shm never set up) hand back N-2 as though it
-//! were N-1: wrong audio, not silence.
-//!
-//! Sequences start at **1**: a fresh slab is zeroed, so 0 must mean "nothing was
-//! ever published here".
+//! Per-slot, because the reader wants a *specific* block, the one it submitted a
+//! fixed number of blocks ago, not the newest. A single newest-index would let a
+//! skipped block hand back N-2 as though it were N-1: wrong audio, not silence.
+//! Sequences start at **1**: a fresh slab is zeroed, so 0 means "nothing was ever
+//! published here".
 
 use crate::SlabError;
 use crossbeam_utils::CachePadded;
 use std::mem::{align_of, offset_of, size_of};
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+
+/// The header's atomics: `std`'s, and `loom`'s under `--cfg loom`, so the model
+/// in `loom_model` runs this code. The mapped layout is the `std` one.
+mod sync {
+    #[cfg(loom)]
+    pub(super) use loom::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+    #[cfg(not(loom))]
+    pub(super) use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+}
+
+use sync::{AtomicU32, AtomicU64, Ordering};
 
 /// Identifies a tutti audio slab. Checked by the opening side before it trusts
 /// a single byte of the mapping.
@@ -109,7 +103,7 @@ pub struct SlabHeader {
 // the atomics slower, never wrong; correctness rests entirely on the
 // Release/Acquire pair. But the cost is real and lands in the worst possible
 // place: the host stores `input_seq` and the server stores `output_seq` every
-// block, ~750 times a second each, from different processes on different cores.
+// block, every block, from different processes on different cores.
 // Sharing a line would ping-pong it between caches on the audio thread's
 // critical path, paying the full price of contention over data that is not
 // actually shared.
@@ -144,32 +138,6 @@ const _: () = assert!(
 /// begin here.
 pub const SLAB_HEADER_BYTES: usize = size_of::<SlabHeader>();
 
-// The four orderings of the two documented protocols, named once and used at
-// exactly one site each.
-//
-// **Why constants rather than the literals inline.** The module docs above
-// state a protocol — Release on publish, Acquire on read — and the correctness
-// of the audio regions rests entirely on that statement being true of the
-// code. But the property cannot be tested into existence (x86-64 passes with
-// `Relaxed`, aarch64 fails only probabilistically), so the docs conclude that
-// review is the net. A named constant makes the claim *checkable*: a test can
-// assert the value the writer will actually use, and a weakening edit either
-// changes a constant a test reads or leaves the constant and changes nothing.
-// It does not make the protocol correct — it makes a silent divergence between
-// the prose and the code into a failing test.
-
-/// The publication point of a block's samples. See [`SlabHeader::publish`].
-pub(crate) const PUBLISH_ORDERING: Ordering = Ordering::Release;
-
-/// The pairing acquire. See [`SlabHeader::sequence`].
-pub(crate) const SEQUENCE_ORDERING: Ordering = Ordering::Acquire;
-
-/// The publication point of the whole header. See [`SlabHeader::initialize`].
-pub(crate) const INITIALIZE_ORDERING: Ordering = Ordering::Release;
-
-/// The pairing acquire. See [`SlabHeader::validate`].
-pub(crate) const VALIDATE_ORDERING: Ordering = Ordering::Acquire;
-
 /// Which direction a sequence belongs to. The two arrays are structurally
 /// identical, so an untyped index would make "host writes the server's array" a
 /// silent bug rather than a compile error.
@@ -182,6 +150,21 @@ pub enum Direction {
 }
 
 impl SlabHeader {
+    /// A header of zeros in ordinary memory: the state a fresh mapping is in. A
+    /// `loom` atomic is not a bit pattern, so a model builds its header here.
+    #[cfg(loom)]
+    pub fn zeroed() -> Self {
+        Self {
+            control: CachePadded::new(Control {
+                magic: AtomicU64::new(0),
+                header_version: AtomicU32::new(0),
+                slots: AtomicU32::new(0),
+            }),
+            input_seq: CachePadded::new(std::array::from_fn(|_| AtomicU64::new(0))),
+            output_seq: CachePadded::new(std::array::from_fn(|_| AtomicU64::new(0))),
+        }
+    }
+
     /// Stamp a newly created slab. Called only by the creating side, before the
     /// peer has been told the slab exists.
     ///
@@ -199,7 +182,7 @@ impl SlabHeader {
         for seq in self.input_seq.iter().chain(self.output_seq.iter()) {
             seq.store(0, Ordering::Relaxed);
         }
-        self.control.magic.store(SLAB_MAGIC, INITIALIZE_ORDERING);
+        self.control.magic.store(SLAB_MAGIC, Ordering::Release);
     }
 
     /// Check that this mapping is a tutti slab of a recognized shape.
@@ -209,8 +192,14 @@ impl SlabHeader {
     /// correct precisely *because* of that pairing — the acquire already
     /// establishes happens-before with everything the creator wrote first, so
     /// re-synchronizing on each field would be redundant.
+    ///
+    /// # Errors
+    ///
+    /// [`SlabError::BadMagic`], [`SlabError::BadVersion`] or
+    /// [`SlabError::BadSlots`] when the magic, the header version or the slot
+    /// count is not this build's.
     pub(crate) fn validate(&self) -> Result<(), SlabError> {
-        let magic = self.control.magic.load(VALIDATE_ORDERING);
+        let magic = self.control.magic.load(Ordering::Acquire);
         if magic != SLAB_MAGIC {
             return Err(SlabError::BadMagic {
                 found: magic,
@@ -254,7 +243,7 @@ impl SlabHeader {
     /// the region below; see the module docs.
     #[inline]
     pub fn publish(&self, direction: Direction, slot: usize, seq: u64) {
-        self.array(direction)[slot].store(seq, PUBLISH_ORDERING);
+        self.array(direction)[slot].store(seq, Ordering::Release);
     }
 
     /// The block currently published in `slot`, or 0 if nothing ever was.
@@ -265,7 +254,7 @@ impl SlabHeader {
     /// or loading `Relaxed`, would defeat the ordering entirely.
     #[inline]
     pub fn sequence(&self, direction: Direction, slot: usize) -> u64 {
-        self.array(direction)[slot].load(SEQUENCE_ORDERING)
+        self.array(direction)[slot].load(Ordering::Acquire)
     }
 }
 
@@ -280,7 +269,7 @@ pub fn slot_for(seq: u64) -> usize {
     (seq % RING_SLOTS as u64) as usize
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(loom)))]
 mod tests {
     use super::*;
 
@@ -314,6 +303,19 @@ mod tests {
         let h = header();
         h.initialize();
         assert!(h.validate().is_ok());
+    }
+
+    /// A creator that crashed after the version and slot count but before the
+    /// magic leaves a header `validate` refuses on the magic.
+    #[test]
+    fn a_header_without_its_magic_is_refused_on_the_magic() {
+        let h = header();
+        h.control
+            .header_version
+            .store(HEADER_VERSION, Ordering::Relaxed);
+        h.control.slots.store(RING_SLOTS as u32, Ordering::Relaxed);
+        let err = h.validate().unwrap_err();
+        assert!(matches!(err, SlabError::BadMagic { .. }), "{err}");
     }
 
     /// Corrupt magic is rejected. This is the first line of defence against
@@ -405,79 +407,14 @@ mod tests {
         }
     }
 
-    /// The publish/read protocol the module docs describe, asserted against the
-    /// values the code will actually use.
-    ///
-    /// # What this proves, and what it emphatically does not
-    ///
-    /// It proves the code agrees with its own documentation. It does **not**
-    /// prove the ordering is sufficient — that is a claim about the C++/Rust
-    /// memory model and about hardware, and no test on this machine can settle
-    /// it (see the module docs: x86-64 passes with `Relaxed` too).
-    ///
-    /// What it buys is that the *specific* regression the docs warn about —
-    /// someone weakening a store to `Relaxed`, in a file where "each ordering
-    /// appears in exactly one place with its reason for not being `Relaxed`" —
-    /// stops being invisible on the only hardware in CI. Reviewing prose
-    /// against code is what this replaces, and it is the whole reason the
-    /// orderings are named constants rather than inline literals.
-    #[test]
-    fn the_block_protocol_uses_the_documented_orderings() {
-        assert_eq!(
-            PUBLISH_ORDERING,
-            Ordering::Release,
-            "publish is the point at which a block's samples become visible; \
-             `Relaxed` here lets a reader observe the new sequence number \
-             beside the previous block's samples"
-        );
-        assert_eq!(
-            SEQUENCE_ORDERING,
-            Ordering::Acquire,
-            "the acquire that pairs with publish's release; without it the \
-             samples read after this load are not ordered against it"
-        );
-    }
-
-    /// The setup protocol, on the same terms as the block protocol above.
-    ///
-    /// The magic is stored last precisely so it publishes the whole header, so
-    /// its ordering is load-bearing in the same way and for the same reason —
-    /// a peer that acquires the magic must see the version and slot count
-    /// written before it.
-    ///
-    /// No behavioural test can witness the ordering: `initialize_then_validate_round_trips`
-    /// passes either way, on any hardware, because it is single-threaded.
-    #[test]
-    fn the_setup_protocol_uses_the_documented_orderings() {
-        assert_eq!(INITIALIZE_ORDERING, Ordering::Release);
-        assert_eq!(VALIDATE_ORDERING, Ordering::Acquire);
-        // The two `Relaxed` loads in `validate` are correct *because* of the
-        // acquire above them, so the pair is what has to hold — asserting the
-        // relaxed loads individually would pin an implementation detail whose
-        // justification lives in the acquire.
-    }
-
     /// Two threads run the real publish/read protocol against a real header for
     /// a million blocks, and no read ever sees a sequence number without the
     /// data that sequence number promises.
     ///
-    /// # This is a smoke test, and it is not the proof
-    ///
-    /// It must pass here, and it would catch a gross mistake — a publish that
-    /// stamps the wrong slot, a reader that checks the wrong direction, a
-    /// sequence that goes backwards. It cannot catch a weakened ordering.
-    /// x86-64 is strongly ordered: every store is effectively a release and
-    /// every load an acquire in hardware, so this test passes identically with
-    /// `Relaxed` everywhere. On aarch64 it would fail only probabilistically,
-    /// which is worse than not testing — an intermittent failure gets retried.
-    ///
-    /// It is deliberately *not* `#[ignore]`d. An ignored test rots; this one
-    /// runs on every CI pass and stands as a live exercise of the protocol,
-    /// with its limits stated here rather than encoded as a skip. The proof
-    /// that the orderings are the documented ones is
-    /// [`the_block_protocol_uses_the_documented_orderings`]; the proof that the
-    /// protocol is *correct* under a weak model is the loom model in the
-    /// `tutti-shm-model` crate.
+    /// A smoke test of the code end to end: it catches a publish that stamps
+    /// the wrong slot, a reader that checks the wrong direction or a sequence
+    /// that goes backwards. A strongly ordered CPU passes it with any ordering;
+    /// the ordering is `loom_model`'s.
     #[test]
     fn a_million_blocks_never_show_a_sequence_without_its_data() {
         use std::sync::Arc;
@@ -564,5 +501,113 @@ mod tests {
             0,
             "audio regions start right after the header and must stay aligned"
         );
+    }
+}
+
+/// Loom models of the block ring's Release/Acquire pair and the setup magic's,
+/// run against this file's code under `--cfg loom`.
+#[cfg(all(test, loom))]
+mod loom_model {
+    use super::{Direction, RING_SLOTS, SlabHeader, slot_for};
+    use loom::sync::Arc;
+    use loom::sync::atomic::{AtomicU64, Ordering};
+    use loom::thread;
+
+    /// A header and the words standing for the samples it guards: one per slot,
+    /// written `Relaxed` before the publish and read `Relaxed` after the sequence
+    /// check, so all the ordering is the header's.
+    struct Region {
+        header: SlabHeader,
+        data: [AtomicU64; RING_SLOTS],
+    }
+
+    impl Region {
+        fn new() -> Arc<Self> {
+            Arc::new(Self {
+                header: SlabHeader::zeroed(),
+                data: std::array::from_fn(|_| AtomicU64::new(0)),
+            })
+        }
+
+        fn publish(&self, direction: Direction, seq: u64) {
+            let slot = slot_for(seq);
+            self.data[slot].store(seq, Ordering::Relaxed);
+            self.header.publish(direction, slot, seq);
+        }
+
+        /// The slot's data when its sequence is `want`, `None` when it is not yet.
+        fn read(&self, direction: Direction, want: u64) -> Option<u64> {
+            let slot = slot_for(want);
+            (self.header.sequence(direction, slot) == want)
+                .then(|| self.data[slot].load(Ordering::Relaxed))
+        }
+    }
+
+    /// A reader that observes a published sequence number observes the samples
+    /// published before it, in both directions.
+    #[test]
+    fn a_matched_sequence_implies_its_data_is_visible() {
+        for direction in [Direction::Input, Direction::Output] {
+            loom::model(move || {
+                let region = Region::new();
+                let writer = {
+                    let region = Arc::clone(&region);
+                    thread::spawn(move || region.publish(direction, 1))
+                };
+                if let Some(data) = region.read(direction, 1) {
+                    assert_eq!(data, 1, "the sequence was visible without its samples");
+                }
+                writer.join().expect("writer thread");
+            });
+        }
+    }
+
+    /// Two blocks in the two slots: a reader asking for block N is never satisfied
+    /// by another block's samples, and a block is never seen before the previous
+    /// one's publish landed in its own slot.
+    #[test]
+    fn a_slot_reused_by_a_later_block_is_not_mistaken_for_an_earlier_one() {
+        loom::model(|| {
+            let region = Region::new();
+            let writer = {
+                let region = Arc::clone(&region);
+                thread::spawn(move || {
+                    region.publish(Direction::Output, 1);
+                    region.publish(Direction::Output, 2);
+                })
+            };
+            for want in 1..=2u64 {
+                if let Some(data) = region.read(Direction::Output, want) {
+                    assert_eq!(
+                        data, want,
+                        "a read of block {want} got block {data}'s samples"
+                    );
+                }
+            }
+            writer.join().expect("writer thread");
+        });
+    }
+
+    /// A peer that acquires the magic sees the rest of the header: `validate` on
+    /// a header being initialized fails only on the magic, never on the version or
+    /// the slot count that `initialize` wrote before it.
+    #[test]
+    fn a_validated_magic_implies_the_rest_of_the_header_is_visible() {
+        loom::model(|| {
+            let header = Arc::new(SlabHeader::zeroed());
+            let creator = {
+                let header = Arc::clone(&header);
+                thread::spawn(move || header.initialize())
+            };
+            if let Err(error) = header.validate() {
+                let error = error.to_string();
+                assert!(
+                    error.contains("not a tutti audio slab"),
+                    "the magic was visible without the header it publishes: {error}"
+                );
+            }
+            creator.join().expect("creator thread");
+            header.validate().expect("an initialized header validates");
+        });
     }
 }

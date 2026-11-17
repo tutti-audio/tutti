@@ -1,5 +1,5 @@
-//! Pressure test: many real out-of-process plugins, driven at audio-callback
-//! timing, some of them stalled, timed per step.
+//! Pressure test: many real out-of-process plugins, some of them stalled, driven
+//! block by block and timed per step.
 //!
 //! # What this exists to catch
 //!
@@ -32,9 +32,8 @@
 //! [`EXCLUSIVE`]).
 //!
 //! Callback wall time and deadline misses are printed, not asserted: see
-//! `eight_real_plugins_half_stalled_never_wait_for_replies`. What is asserted
-//! about cost is a working step's median on-CPU time, against the old
-//! 200 us per-plugin ceiling (`assert_working_steps_cheap`).
+//! `eight_real_plugins_half_stalled_never_wait_for_replies`. What a working
+//! step costs is the `pressure` bench's figure, not an assertion.
 //!
 //! How many blocks carry audio depends on the plugin subprocess running at
 //! the highest priority the OS grants (`plugin-server`'s `request_audio_priority`). Without it the
@@ -46,14 +45,14 @@
 //! `plugin_server_audio_thread_is_raised_where_the_os_allows` checks it
 //! directly.
 //!
-//! # The timing constraint these tests must respect
+//! # The constraint these tests must respect
 //!
 //! Driving blocks in a tight loop makes every block read back silent, and that
 //! is CORRECT: the subprocess gets no wall-clock time to run, so nothing is ever
-//! published and the host substitutes silence. A real callback spends one block
-//! period per block (1.33 ms at 64/48k); a bare loop runs thousands in that
-//! time. So these tests pace themselves to the real period — otherwise they
-//! would measure starvation rather than throughput.
+//! published and the host substitutes silence. So each block here waits for the
+//! answers of the plugins that answer in time (`PluginControls::
+//! chunk_in_flight_answered`) before the next one starts; a stalled plugin is
+//! not waited for.
 //!
 //! That starvation path is worth a test of its own, and gets one below.
 
@@ -67,198 +66,19 @@
 #[path = "support/clap_probe.rs"]
 mod clap_probe;
 
+// The rig the bench shares: plugins as graph units, and the probe loaders.
+#[path = "support/pressure_rig.rs"]
+mod pressure_rig;
+
+use pressure_rig::{
+    BLOCK, GraphUnit, Planes, SAMPLE_RATE, STALL, fill_sine, load_half_stalled, load_n,
+    load_stalled, peak,
+};
 use std::time::{Duration, Instant};
 use tutti_fixtures::machine_lock;
 
-/// Planar scratch, `channels` × [`BLOCK`] frames: what this harness fills and
-/// measures.
-struct Planes(Vec<Vec<f32>>);
-
-impl Planes {
-    fn new(channels: usize) -> Self {
-        Self(vec![vec![0.0; BLOCK]; channels])
-    }
-
-    fn clear(&mut self) {
-        for c in &mut self.0 {
-            c.fill(0.0);
-        }
-    }
-
-    fn at(&self, channel: usize, i: usize) -> f32 {
-        self.0[channel][i]
-    }
-}
-
-/// A loaded plugin as the only node of a graph, driven with the
-/// buffer types this suite fills and measures (`fill_sine`, `peak`).
-///
-/// A block reaches the plugin node through the executor, with the `Env` the
-/// engine would give it.
-/// The global inputs feed its inputs, its outputs feed the global outputs.
-struct GraphUnit {
-    renderer: tutti_graph::Renderer,
-    inputs: usize,
-    outputs: usize,
-    ins: Vec<Vec<f32>>,
-    outs: Vec<Vec<f32>>,
-}
-
-impl GraphUnit {
-    fn new<N: tutti_graph::IntoNode>(node: N, inputs: usize, outputs: usize) -> Self {
-        assert!(
-            inputs <= 16 && outputs <= 16,
-            "`run` holds 16 ports on the stack"
-        );
-        let layout =
-            |n: usize| tutti_types::ChannelLayout::from_count(u16::try_from(n).expect("ports"));
-        let mut g = tutti_graph::GraphBuilder::new(layout(inputs), layout(outputs));
-        let (key, _controls) = g.add_with_controls(node);
-        g.pipe_input(key).pipe_output(key);
-        let renderer = g
-            .renderer(tutti_graph::Prepare::new(
-                tutti_types::SampleRate::of(SAMPLE_RATE),
-                tutti_types::MaxBlock::of(tutti_types::Samples(BLOCK)),
-            ))
-            .expect("a one-plugin graph compiles");
-        Self {
-            renderer,
-            inputs,
-            outputs,
-            ins: vec![vec![0.0; BLOCK]; inputs],
-            outs: vec![vec![0.0; BLOCK]; outputs],
-        }
-    }
-
-    fn inputs(&self) -> usize {
-        self.inputs
-    }
-
-    fn outputs(&self) -> usize {
-        self.outputs
-    }
-
-    /// One block: `input`'s first `inputs` channels in, the plugin's outputs
-    /// into `output`'s first `outputs` channels. [`stage`](Self::stage),
-    /// [`run`](Self::run) and [`read`](Self::read) in one, for the untimed
-    /// callers.
-    fn process(&mut self, size: usize, input: &Planes, output: &mut Planes) {
-        self.stage(size, input);
-        self.run(size);
-        self.read(size, output);
-    }
-
-    /// Copy `input` into this unit's planar input buffers. Not the plugin
-    /// path: outside a timed region.
-    fn stage(&mut self, size: usize, input: &Planes) {
-        for (c, ch) in self.ins.iter_mut().enumerate() {
-            for (i, s) in ch[..size].iter_mut().enumerate() {
-                *s = input.at(c, i);
-            }
-        }
-    }
-
-    /// The plugin path, and nothing else: one executor block over the staged
-    /// buffers, the port tables on the stack. What a timed region measures.
-    fn run(&mut self, size: usize) {
-        const MAX: usize = 16;
-        let mut ins: [&[f32]; MAX] = [&[]; MAX];
-        for (slot, c) in ins.iter_mut().zip(&self.ins) {
-            *slot = &c[..size];
-        }
-        let mut outs: [&mut [f32]; MAX] = std::array::from_fn(|_| Default::default());
-        for (slot, c) in outs.iter_mut().zip(self.outs.iter_mut()) {
-            *slot = &mut c[..size];
-        }
-        let transport = tutti_graph::TransportPosition::default();
-        self.renderer.executor_mut().process(
-            size,
-            &transport,
-            &ins[..self.inputs],
-            &mut outs[..self.outputs],
-        );
-    }
-
-    /// Copy the last block's output out, and drain what the executor sent
-    /// back. Outside a timed region.
-    fn read(&mut self, size: usize, output: &mut Planes) {
-        self.renderer.editor_mut().collect();
-        for (c, ch) in self.outs.iter().enumerate() {
-            for (i, &s) in ch[..size].iter().enumerate() {
-                output.0[c][i] = s;
-            }
-        }
-    }
-}
-
-const SAMPLE_RATE: f64 = 48_000.0;
-const BLOCK: usize = 64;
-
 /// One block's worth of wall time — the audio callback's deadline.
 const PERIOD: Duration = Duration::from_nanos((BLOCK as f64 / SAMPLE_RATE * 1e9) as u64);
-
-/// `count` instances of the **reference CLAP probe**, through the real
-/// `plugin-server` subprocess and shared-memory bridge.
-///
-/// Returns the units and their handles; the handles must outlive the units
-/// (they share the subprocess guard), so the caller keeps both.
-///
-/// **Read the resulting numbers as a bridge measurement, not a plugin
-/// one.** The probe is a trivial fixture, so the per-block cost here is the
-/// cost of the submit/collect pipeline, the socket and the shm slab, with
-/// almost no DSP under it. That is the right quantity for "does hosting
-/// out-of-process cost anything".
-fn load_n(count: usize) -> (Vec<GraphUnit>, Vec<tutti_plugin_host::PluginHandle>) {
-    // **The probe defaults to `RenderMode::Inert`, which writes nothing.**
-    // Left at the default it reports `non-silent 0/N` on a perfectly healthy
-    // bridge, and every throughput figure in this file becomes a measurement
-    // of the fixture. `TAG_PASSTHROUGH` writes `in + tag`, so the output is
-    // both non-silent and *provably derived from the input* — a synth that
-    // ignored its input could not show that audio traversed the graph.
-    //
-    // Set before the first spawn: the probe reads these on load, in the
-    // subprocess, having inherited them. Held across the whole loop so every
-    // instance gets it, and dropped after — by then each subprocess has its
-    // own copy.
-    let _env = clap_probe::ProbeEnv::new().render_mode(clap_probe::render::TAG_PASSTHROUGH);
-
-    let mut units: Vec<GraphUnit> = Vec::with_capacity(count);
-    let mut handles = Vec::with_capacity(count);
-    for _ in 0..count {
-        let probe = clap_probe::load_probe(SAMPLE_RATE);
-        let (ins, outs) = (probe.client.inputs(), probe.client.outputs());
-        units.push(GraphUnit::new(
-            probe.client.bind(
-                tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0))
-                    .expect("a tempo"),
-            ),
-            ins,
-            outs,
-        ));
-        handles.push(probe.handle);
-    }
-    (units, handles)
-}
-
-/// A sine block at full-ish scale, so "audio arrived" is unambiguous.
-fn fill_sine(input: &mut Planes, channels: usize, block_index: usize) {
-    for ch in 0..channels {
-        for i in 0..BLOCK {
-            let t = (block_index * BLOCK + i) as f32 / SAMPLE_RATE as f32;
-            input.0[ch][i] = (t * 440.0 * std::f32::consts::TAU).sin() * 0.5;
-        }
-    }
-}
-
-fn peak(buf: &Planes, channels: usize) -> f32 {
-    (0..channels)
-        .map(|ch| {
-            (0..BLOCK)
-                .map(|i| buf.at(ch, i).abs())
-                .fold(0.0f32, f32::max)
-        })
-        .fold(0.0f32, f32::max)
-}
 
 /// One plugin's step in one block, as [`StepClock`] measured it.
 #[cfg_attr(
@@ -299,8 +119,8 @@ struct Run {
     /// Block-major, as `steps`: whether that output carried audio.
     audible: Vec<bool>,
     plugins: usize,
-    /// From the start of the first block to the end of the last, pacing
-    /// included.
+    /// From the start of the first block to the end of the last, the waits for
+    /// answers included.
     wall: Duration,
 }
 
@@ -311,13 +131,6 @@ impl Run {
 
     fn took(&self) -> impl Iterator<Item = Duration> + '_ {
         self.steps.iter().map(|s| s.took)
-    }
-
-    /// The steps of the plugins at `plugins`, every block.
-    fn steps_of<'a>(&'a self, plugins: &'a [usize]) -> impl Iterator<Item = &'a Step> + 'a {
-        self.steps
-            .chunks(self.plugins)
-            .flat_map(move |b| plugins.iter().map(move |&p| &b[p]))
     }
 
     /// How many blocks plugin `p`'s output carried audio in.
@@ -353,9 +166,8 @@ impl Run {
 /// switches were waits or incidental.
 ///
 /// **On Linux both must be readable, or the test fails** rather than falling
-/// back: the blocked-step bound in [`assert_no_waiting`] and the cost bound
-/// in [`assert_working_steps_cheap`] are Linux's, and a quiet fallback to
-/// wall time would turn them off. `schedstat` needs `CONFIG_SCHED_INFO`,
+/// back: the blocked-step bound in [`assert_no_waiting`] is Linux's, and a quiet
+/// fallback to wall time would turn it off. `schedstat` needs `CONFIG_SCHED_INFO`,
 /// which every distribution kernel (Ubuntu's generic one included, so CI's
 /// runners) enables; `RUSAGE_THREAD` is in every Linux since 2.6.26.
 ///
@@ -490,8 +302,9 @@ fn median(samples: impl Iterator<Item = Duration>) -> Duration {
     sorted[sorted.len() / 2]
 }
 
-/// Drive `units` in series for `blocks` blocks at real callback pacing, and
-/// time each plugin's step *inside* processing (excluding the pacing sleep).
+/// Drive `units` in series for `blocks` blocks, each once the plugins that
+/// answer in time have answered the one before, and time each plugin's step
+/// *inside* processing (excluding that wait).
 fn drive_series(units: &mut [GraphUnit], blocks: usize) -> Run {
     let mut steps = Vec::with_capacity(blocks * units.len());
     let mut block_wall = Vec::with_capacity(blocks);
@@ -542,9 +355,12 @@ fn drive_series(units: &mut [GraphUnit], blocks: usize) -> Run {
             audible.push(peak(&output, max_ch) > 0.0);
         }
 
-        // Pace to the real callback rate, minus what processing already took.
-        if let Some(rest) = PERIOD.checked_sub(cost) {
-            std::thread::sleep(rest);
+        // The next block comes once each plugin that answers in time has
+        // answered this one: the pipeline never waits for a reply, so a block
+        // run before the server publishes reads as silence. A stalled plugin
+        // answers late by design and is not waited for.
+        for unit in units.iter().filter(|u| !u.stalled) {
+            clap_probe::await_answer(&unit.controls);
         }
     }
     Run {
@@ -683,8 +499,7 @@ fn most_blocked(steps: usize) -> usize {
 /// milliseconds.
 ///
 /// What a plugin that answers in time costs is not this function's: a
-/// waiting design never waits for one. [`assert_working_steps_cheap`] bounds
-/// that.
+/// waiting design never waits for one. The `pressure` bench reports that.
 ///
 /// **Not covered:** a spinning wait shorter than [`SYNC_WAIT_BUDGET`], or on
 /// a minority of steps, of a plugin's steps and of blocks, or under load that
@@ -744,54 +559,6 @@ fn assert_no_waiting(label: &str, run: &Run) {
     check("blocks", blocks, run.blocks());
 }
 
-/// The most a step that drives a working plugin may cost, as a median: the
-/// ceiling these tests used to assert per plugin, of wall time.
-const CEILING_PER_PLUGIN: Duration = Duration::from_micros(200);
-
-/// Assert that the plugins at `working` (ones that answer in time) cost a
-/// median step under [`CEILING_PER_PLUGIN`] of on-CPU time.
-///
-/// This is the bound on a working transfer: submit, collect, the copies
-/// through the shm slab. A bridge that got slow without ever waiting (a
-/// spin, a copy gone quadratic) shows only here, since
-/// [`assert_no_waiting`] judges against a far larger budget.
-///
-/// Measured, idle and under the bursty load in [`assert_no_waiting`]'s notes:
-/// over 10 runs each, a working step's median was 43-47 us idle and
-/// 95-106 us under load in the eight-plugin test, and 46-69 us idle and
-/// 66-148 us under load in [`working_plugins_cost_under_the_old_ceiling`].
-/// A spin of 300 us per collect puts it at 352-364 us idle. An earlier version bounded the *block*
-/// median at 200 us per plugin of wall time, and failed on unchanged code at
-/// a load average of 17 (239 us per plugin): on-CPU time takes out what load
-/// took, which is what lets the old ceiling stand.
-///
-/// **Linux only** ([`StepClock::ON_CPU`]). Off Linux the step clock reads
-/// wall time, and a wall-time bound loose enough not to fail on a loaded
-/// machine is several times the ceiling, too loose to catch a step that
-/// costs 2x what it should; the figure is still printed by `report`. No CI
-/// job runs this suite off Linux.
-fn assert_working_steps_cheap(label: &str, run: &Run, working: &[usize]) {
-    if !StepClock::ON_CPU {
-        eprintln!("{label}: working-step cost not asserted: the clock is wall time here");
-        return;
-    }
-    let mut took: Vec<Duration> = run.steps_of(working).map(|s| s.took).collect();
-    took.sort_unstable();
-    let p50 = took[took.len() / 2];
-    eprintln!(
-        "{label}: working steps p10 {:?}  p25 {:?}  p50 {p50:?}  p75 {:?}",
-        took[took.len() / 10],
-        took[took.len() / 4],
-        took[took.len() * 3 / 4]
-    );
-    assert!(
-        p50 < CEILING_PER_PLUGIN,
-        "{label}: the median step of a plugin that answers in time took {p50:?} \
-         of on-CPU time, at or over {CEILING_PER_PLUGIN:?}. Load is not counted \
-         in that figure, so the bridge itself got slower."
-    );
-}
-
 /// The audio floor for a bridge that delivers most blocks, in percent: see
 /// [`assert_heard`].
 const DELIVERS: usize = 70;
@@ -809,7 +576,7 @@ const WORKS: usize = 50;
 /// and what correct code measured over 10 runs in the eight-plugin test:
 /// 493-500 of 500 idle, 413-451 (83-90%) under the bursty load.
 /// [`WORKS`] (half) asserts only that the steps were working transfers, for
-/// [`working_plugins_cost_under_the_old_ceiling`], whose answering plugins
+/// [`answering_plugins_carry_audio_beside_stalled_ones`], whose answering plugins
 /// carried audio in 146-174 of 200 under that load, too close to 70%.
 ///
 /// `warmed` is what [`warm_up`] returned. A broken bridge never warms up, so
@@ -834,63 +601,6 @@ fn assert_heard(label: &str, run: &Run, working: &[usize], warmed: bool, floor: 
     }
 }
 
-/// How late a stalled probe answers every block: far beyond any reply budget
-/// (the bridge's is four block periods, 5.3 ms; the synchronous design's was
-/// [`SYNC_WAIT_BUDGET`]), so the plugin never publishes in time and a design
-/// that waits for it waits its whole budget. A missed budget costs the block,
-/// not the connection (see `dispatch`'s reply timeout), so the probe stays
-/// live throughout.
-///
-/// Far beyond the *block* too, and by more than a little: a stalled plugin
-/// that publishes in time for the next block is not stalled for it. With
-/// 10 ms, bursty load on the test's core stretched the paced blocks enough
-/// that one stalled probe carried audio in 116 of 200, and a waiting design
-/// pays nothing on those.
-const STALL: Duration = Duration::from_millis(500);
-
-/// `count` instances of the reference CLAP probe, each stalled by [`STALL`]
-/// on every block: alive, answering, and always late.
-///
-/// Stalled by a sleep (`stall_every_block`), not parked with `block_from`:
-/// a parked probe spins, `plugin-server` runs its audio thread at raised
-/// priority (nice -20 here), and eight spinning servers would take the host's
-/// cores, which is the time these tests measure.
-fn load_stalled(count: usize) -> (Vec<GraphUnit>, Vec<tutti_plugin_host::PluginHandle>) {
-    let _env = clap_probe::ProbeEnv::new()
-        .render_mode(clap_probe::render::TAG_PASSTHROUGH)
-        .stall_every_block(STALL);
-    let mut units: Vec<GraphUnit> = Vec::with_capacity(count);
-    let mut handles = Vec::with_capacity(count);
-    for _ in 0..count {
-        let probe = clap_probe::load_probe(SAMPLE_RATE);
-        let (ins, outs) = (probe.client.inputs(), probe.client.outputs());
-        units.push(GraphUnit::new(
-            probe.client.bind(
-                tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0))
-                    .expect("a tempo"),
-            ),
-            ins,
-            outs,
-        ));
-        handles.push(probe.handle);
-    }
-    (units, handles)
-}
-
-/// `pairs` stalled probes ([`load_stalled`]) and `pairs` answering plugins
-/// ([`load_n`]), alternating: stalled at even positions, answering at odd.
-fn load_half_stalled(pairs: usize) -> (Vec<GraphUnit>, Vec<tutti_plugin_host::PluginHandle>) {
-    let (stalled, mut handles) = load_stalled(pairs);
-    let (answering, answering_handles) = load_n(pairs);
-    handles.extend(answering_handles);
-    let units = stalled
-        .into_iter()
-        .zip(answering)
-        .flat_map(|(s, a)| [s, a])
-        .collect();
-    (units, handles)
-}
-
 /// Assert that the plugins at `stalled` really were stalled for `run`, so
 /// that [`assert_no_waiting`] measured what it claims to.
 ///
@@ -898,7 +608,8 @@ fn load_half_stalled(pairs: usize) -> (Vec<GraphUnit>, Vec<tutti_plugin_host::Pl
 /// handles one block at a time, so over the run's wall time it can publish at
 /// most `wall / STALL` blocks, plus one in flight at each end. The bound holds
 /// however slow the machine is, and bites wherever the run is short against
-/// the stall: 200 paced blocks take ~0.3 s idle, which allows 2.
+/// the stall: 200 blocks, each waiting for the answering plugins, take well
+/// under a stall's length, which allows 2.
 fn assert_stalled(label: &str, run: &Run, stalled: impl Iterator<Item = usize>) {
     let most = (run.wall.as_nanos() / STALL.as_nanos()) as usize + 2;
     for p in stalled {
@@ -916,7 +627,8 @@ fn assert_stalled(label: &str, run: &Run, stalled: impl Iterator<Item = usize>) 
 }
 
 /// **Eight real plugin subprocesses, four of them stalled, cost the audio
-/// thread no waiting**, over 500 blocks at true callback pacing.
+/// thread no waiting**, over 500 blocks, each once the answering plugins have answered the one
+/// before.
 ///
 /// Stalled and answering instances alternate, starting with a stalled one and
 /// ending with an answering one. All eight are the reference probe (see
@@ -925,8 +637,7 @@ fn assert_stalled(label: &str, run: &Run, stalled: impl Iterator<Item = usize>) 
 /// # What this test asserts, and what it only reports
 ///
 /// It asserts that each answering plugin carried audio in at least 70% of
-/// the blocks ([`assert_heard`]), that their median step stayed under the old
-/// per-plugin ceiling of on-CPU time ([`assert_working_steps_cheap`]), that
+/// the blocks ([`assert_heard`]), that
 /// the stalled ones were stalled ([`assert_stalled`]), and that no step
 /// waited for a stalled one ([`assert_no_waiting`]).
 ///
@@ -967,7 +678,6 @@ fn eight_real_plugins_half_stalled_never_wait_for_replies() {
     let answering: Vec<usize> = (1..run.plugins).step_by(2).collect();
     assert_heard(label, &run, &answering, warmed, DELIVERS);
     assert_stalled(label, &run, (0..run.plugins).step_by(2));
-    assert_working_steps_cheap(label, &run, &answering);
     assert_no_waiting(label, &run);
 }
 
@@ -981,7 +691,7 @@ fn eight_real_plugins_half_stalled_never_wait_for_replies() {
 /// correct step is measured on a quieter machine.
 ///
 /// No plugin here answers in time, so this says nothing about what a working
-/// step costs: [`working_plugins_cost_under_the_old_ceiling`] does.
+/// step does: [`answering_plugins_carry_audio_beside_stalled_ones`] does.
 #[test]
 fn stalled_plugins_cost_no_waiting_at_any_count() {
     let _machine = machine_lock();
@@ -989,9 +699,6 @@ fn stalled_plugins_cost_no_waiting_at_any_count() {
     for count in [1usize, 2, 4, 8] {
         let label = format!("{count} stalled plugin(s)");
         let (mut units, _handles) = load_stalled(count);
-        // Let the previous iteration's subprocesses finish exiting before
-        // measuring this one; otherwise the two overlap and starve each other.
-        std::thread::sleep(Duration::from_millis(300));
         // Nothing to wait for: a stalled plugin never warms up. This only
         // gets past the first blocks' one-off costs.
         drive_series(&mut units, 16);
@@ -1003,16 +710,14 @@ fn stalled_plugins_cost_no_waiting_at_any_count() {
     }
 }
 
-/// **A working step costs under the old per-plugin ceiling**, at 1, 2 and 4
-/// answering instances, each after a stalled one, as in
+/// **Plugins that answer in time carry audio beside stalled ones**, at 1, 2
+/// and 4 answering instances, each after a stalled one, as in
 /// [`eight_real_plugins_half_stalled_never_wait_for_replies`].
 ///
-/// The bound the stalled-only test cannot give: what driving a plugin that
-/// answers costs the audio thread, as on-CPU time
-/// ([`assert_working_steps_cheap`]), with each answering plugin carrying
-/// audio in at least half the blocks ([`assert_heard`]) so the steps
-/// measured are working transfers and not a bridge that returns early with
-/// silence.
+/// Each answering plugin carries audio in at least half the blocks
+/// ([`assert_heard`]), so the steps measured are working transfers and not a
+/// bridge that returns early with silence; what they cost is the `pressure`
+/// bench's figure.
 ///
 /// **Why each answering plugin follows a stalled one.** A plugin that
 /// answers wakes its server, and when that server shares the host's core
@@ -1024,14 +729,12 @@ fn stalled_plugins_cost_no_waiting_at_any_count() {
 /// follows a stalled probe, whose server sleeps through the block. That is the machine, not
 /// the bridge, so the arrangement keeps it out of the figure.
 #[test]
-fn working_plugins_cost_under_the_old_ceiling() {
+fn answering_plugins_carry_audio_beside_stalled_ones() {
     let _machine = machine_lock();
 
     for pairs in [1usize, 2, 4] {
         let label = format!("{pairs} answering after {pairs} stalled");
         let (mut units, _handles) = load_half_stalled(pairs);
-        // As in the stalled test: let the last iteration's servers exit.
-        std::thread::sleep(Duration::from_millis(300));
         let warmed = warm_up(&mut units, Duration::from_secs(60));
         let run = drive_series(&mut units, 200);
         report(&label, &run);
@@ -1039,7 +742,6 @@ fn working_plugins_cost_under_the_old_ceiling() {
         let answering: Vec<usize> = (1..run.plugins).step_by(2).collect();
         assert_heard(&label, &run, &answering, warmed, WORKS);
         assert_stalled(&label, &run, (0..run.plugins).step_by(2));
-        assert_working_steps_cheap(&label, &run, &answering);
     }
 }
 

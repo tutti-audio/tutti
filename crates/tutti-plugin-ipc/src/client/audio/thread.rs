@@ -393,7 +393,7 @@ mod tests {
 
         let channels = Channels::new(SampleRate::SR_48K, Arc::default()).0;
         for n in [3, 0, 2] {
-            let mut payload = Box::new(ProcessPayload::empty());
+            let mut payload = Box::new(ProcessPayload::empty(SampleRate::SR_48K));
             for _ in 0..n {
                 payload.midi_events.push(WireMidi {
                     offset: 0,
@@ -419,7 +419,7 @@ mod tests {
             Arc::new(crate::ServerWatch::new()),
             tutti_plugin_types::Timeouts::default(),
         );
-        let mut payload = Box::new(ProcessPayload::empty());
+        let mut payload = Box::new(ProcessPayload::empty(SampleRate::SR_48K));
         for _ in 0..4 {
             payload.midi_events.push(WireMidi {
                 offset: 0,
@@ -432,7 +432,11 @@ mod tests {
         run_thread(
             channels.clone(),
             sleeper,
-            PayloadPool::new(channels.refusal_writer(), channels.leak_writer()),
+            PayloadPool::new(
+                SampleRate::SR_48K,
+                channels.refusal_writer(),
+                channels.leak_writer(),
+            ),
             lifecycle.clone(),
             Arc::new(parking_lot::Mutex::new(None)),
             socket,

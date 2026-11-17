@@ -16,9 +16,8 @@
 //!
 //! A stop that also moved the position sends STOP alone. MMC carries no time of
 //! its own: the message belongs on the frame the look was made at.
-//! [`MachineControlNode`](crate::MachineControlNode) looks once per transport
-//! segment of a block, so a change on frame `N` of a block is a message on frame
-//! `N`.
+//! [`SyncOut`](crate::SyncOut) looks once per transport segment of a block, so a
+//! change on frame `N` of a block is a message on frame `N`.
 
 use tutti_midi_protocol::{MmcCommands, MmcPayload, MmcPosition, MtcRate, Recipient};
 use tutti_types::{Frame, SampleRate, Seconds};
@@ -75,6 +74,14 @@ impl MachineControlSender {
         }
     }
 
+    /// Sends to `to` and states time codes at `rate` from the next look on,
+    /// keeping what the last look saw: a change of either is no transport
+    /// change.
+    pub(crate) fn retarget(&mut self, to: Recipient, rate: MtcRate) {
+        self.to = to;
+        self.rate = rate;
+    }
+
     /// Forgets the last look: the next one compares against nothing and
     /// sends nothing, as the first of a new sender.
     pub(crate) fn reset(&mut self) {
@@ -101,8 +108,9 @@ impl MachineControlSender {
     ///
     /// # Errors
     ///
-    /// [`NoTimeCode`] when the transport moved to a time no time code names;
-    /// nothing is sent.
+    /// [`NoTimeCode`] when the transport moved to a time no time code names
+    /// (`MmcPosition::from_seconds` is `None`: before zero, NaN, a day or
+    /// more); nothing is sent, and [`SyncOut`](crate::SyncOut) counts it refused.
     pub fn observe(
         &mut self,
         playing: bool,

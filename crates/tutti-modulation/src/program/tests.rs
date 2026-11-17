@@ -4,7 +4,7 @@
 use super::*;
 use tutti_curve::{Breakpoint, Trajectory};
 use tutti_curve::{Curvature, Exponent};
-use tutti_types::UnitParam;
+use tutti_types::{Azimuth, Hz, UnitParam};
 
 const SR: f64 = 48_000.0;
 
@@ -66,8 +66,8 @@ fn program(layers: Vec<Layer>) -> ControlProgram {
 /// A 500 at beat 0 → 0 at beat 4 trajectory.
 fn ramp() -> Arc<dyn Curve> {
     let mut e = Trajectory::new();
-    e.add_breakpoint(Breakpoint::new(Beat(0.0), 500.0));
-    e.add_breakpoint(Breakpoint::new(Beat(4.0), 0.0));
+    e.add_breakpoint(Breakpoint::new(Beat(0.0), Hz(500.0)));
+    e.add_breakpoint(Breakpoint::new(Beat(4.0), Hz(0.0)));
     Arc::new(e)
 }
 
@@ -89,7 +89,7 @@ fn automation_replaces_the_knob() {
         p.value_at(None, None, &at_beat(2.0), 100.0, &[]),
         Some(250.0)
     );
-    let empty: Arc<dyn Curve> = Arc::new(Trajectory::new());
+    let empty: Arc<dyn Curve> = Arc::new(Trajectory::<Hz>::new());
     let p = ControlProgram::from_curve(empty);
     assert_eq!(
         p.value_at(None, Some(1000.0), &at_beat(2.0), 100.0, &[]),
@@ -350,8 +350,8 @@ fn the_left_limit_is_the_level_before_a_jump() {
     assert_eq!(before, r.value_at(None, Some(0.0), &at_beat(2.5), 1.0, &[]));
     assert_ne!(before, r.value_at(None, Some(0.0), &at_beat(3.0), 1.0, &[]));
     let mut e = Trajectory::new();
-    e.add_breakpoint(Breakpoint::with_law(Beat(0.0), 100.0, Law::Hold));
-    e.add_breakpoint(Breakpoint::new(Beat(2.0), 300.0));
+    e.add_breakpoint(Breakpoint::with_law(Beat(0.0), Hz(100.0), Law::Hold));
+    e.add_breakpoint(Breakpoint::new(Beat(2.0), Hz(300.0)));
     let a = ControlProgram::from_curve(Arc::new(e));
     assert_eq!(a.value_at(None, None, &at_beat(2.0), 1.0, &[]), Some(300.0));
     assert_eq!(
@@ -404,7 +404,7 @@ impl Curve for Thawed {
     }
     fn frozen(&self) -> Option<Arc<dyn Curve>> {
         let mut e = Trajectory::new();
-        e.add_breakpoint(Breakpoint::new(Beat(0.0), 2.0));
+        e.add_breakpoint(Breakpoint::new(Beat(0.0), Hz(2.0)));
         Some(Arc::new(e))
     }
 }
@@ -723,8 +723,8 @@ fn new_refuses_a_nan() {
 #[test]
 fn a_circular_params_value_takes_the_short_arc_and_wraps_its_sum() {
     let mut e = Trajectory::new();
-    e.add_breakpoint(Breakpoint::new(Beat(0.0), 170.0));
-    e.add_breakpoint(Breakpoint::new(Beat(4.0), -170.0));
+    e.add_breakpoint(Breakpoint::new(Beat(0.0), Azimuth(170.0)));
+    e.add_breakpoint(Breakpoint::new(Beat(4.0), Azimuth(-170.0)));
     let p = ControlProgram::from_curve(Arc::new(e));
     let az = UnitParam::Azimuth;
     for b in [0.5f64, 1.0, 1.9, 2.0, 2.1, 3.0, 3.5] {

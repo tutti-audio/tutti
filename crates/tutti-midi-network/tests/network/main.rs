@@ -3,6 +3,7 @@
 
 mod auth;
 mod discovery;
+mod props;
 mod sessions;
 mod sim;
 mod udp;

@@ -192,9 +192,9 @@ impl TransportState {
     /// beat is inaudible (see the module docs).
     pub fn set_transport(&self, info: &TransportInfo, changed: bool) {
         self.tempo_bits
-            .store(info.timing.tempo.to_bits(), Ordering::Relaxed);
+            .store(info.timing.tempo.get().to_bits(), Ordering::Relaxed);
         self.beat_bits
-            .store(info.position.beats.to_bits(), Ordering::Relaxed);
+            .store(info.position.beat.get().to_bits(), Ordering::Relaxed);
         // `outCurrentSampleInTimeLine` is project time — the clock that jumps
         // back on a loop. `continuous_samples` is the free-running one that
         // deliberately does not, so substituting it here is not a fallback but
@@ -209,11 +209,16 @@ impl TransportState {
         self.sample_time_bits
             .store(sample_time.to_bits(), Ordering::Relaxed);
         self.measure_downbeat_bits
-            .store(info.bar.start_beats.to_bits(), Ordering::Relaxed);
+            .store(info.bar.start.get().to_bits(), Ordering::Relaxed);
+        // The bounds only mean something while cycling (the header says so); with
+        // no cycle they read 0.
+        let (cycle_start, cycle_end) = info
+            .loop_region
+            .map_or((0.0, 0.0), |l| (l.range.start().get(), l.range.end().get()));
         self.cycle_start_bits
-            .store(info.loop_region.start_beats.to_bits(), Ordering::Relaxed);
+            .store(cycle_start.to_bits(), Ordering::Relaxed);
         self.cycle_end_bits
-            .store(info.loop_region.end_beats.to_bits(), Ordering::Relaxed);
+            .store(cycle_end.to_bits(), Ordering::Relaxed);
         // Apple's "numerator"/"denominator" are the notated beats-per-bar and
         // note value — 7 and 8 for 7/8. Deliberately NOT `bar_length()`, which
         // is 3.5 quarter-notes for 7/8: the AU wants the signature as written,
@@ -229,7 +234,7 @@ impl TransportState {
         self.recording
             .store(info.state.recording, Ordering::Relaxed);
         self.cycling
-            .store(info.state.cycle_active, Ordering::Relaxed);
+            .store(info.loop_region.is_some(), Ordering::Relaxed);
         if changed {
             self.state_changed.store(true, Ordering::Release);
         }
@@ -267,14 +272,13 @@ impl TransportState {
         self.samples_to_next_beat.store(samples, Ordering::Relaxed);
     }
 
-    /// Current tempo; `None` when the last transport carried none a [`Bpm`]
-    /// holds (zero, negative, NaN or infinite).
-    pub fn tempo(&self) -> Option<Bpm> {
-        Bpm::new(self.tempo_raw())
+    /// Current tempo: the published snapshot's, or 120 BPM before one. The
+    /// stored bits are always a [`Bpm`]'s, so the default is never read.
+    pub fn tempo(&self) -> Bpm {
+        Bpm::new(self.tempo_raw()).unwrap_or_default()
     }
 
-    /// The tempo as published, zero or NaN included: what the C callback
-    /// hands back, as the host gave it.
+    /// The tempo as published: what the C callback hands back.
     fn tempo_raw(&self) -> f64 {
         f64::from_bits(self.tempo_bits.load(Ordering::Relaxed))
     }

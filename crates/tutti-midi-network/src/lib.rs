@@ -11,8 +11,8 @@
 //!   section 6, authentication, keep-alive Pings, Session Reset, forward error
 //!   correction, retransmit and the idle declaration. They take datagrams and
 //!   an [`Instant`](std::time::Instant), and hand back [`Transmit`]s and
-//!   [`Event`]s ([`Endpoint`]); they own no socket and read no clock.
-//! - [`UdpDriver`] runs an [`Endpoint`] over a `std::net::UdpSocket`.
+//!   [`Event`]s ([`NetworkEndpoint`]); they own no socket and read no clock.
+//! - [`UdpDriver`] runs a [`NetworkEndpoint`] over a `std::net::UdpSocket`.
 //! - [`Advertisement`] and [`Browser`] publish and find Hosts by mDNS.
 //!
 //! ```
@@ -20,8 +20,8 @@
 //! use std::time::Instant;
 //! use tutti_midi_device::{EndpointName, ProductInstanceId};
 //! use tutti_midi_network::{
-//!     Client, Credentials, Endpoint, EndpointIdentity, Event, Host, HostConfig, SessionConfig,
-//!     SessionState,
+//!     Client, Credentials, EndpointIdentity, Event, Host, HostConfig, NetworkEndpoint,
+//!     SessionConfig, SessionState,
 //! };
 //!
 //! let identity = |name: &str, id: &str| EndpointIdentity {
@@ -89,9 +89,9 @@ pub use discovery::{
     Advertisement, Browser, DiscoveryError, FoundHost, HostEvent, KEY_ENDPOINT_NAME,
     KEY_PRODUCT_INSTANCE_ID, SERVICE_TYPE, instance_name, txt_properties,
 };
-pub use endpoint::{Client, Endpoint, Host, HostConfig};
+pub use endpoint::{Client, Host, HostConfig, MAX_QUEUED_EVENTS, NetworkEndpoint};
 pub use event::{AuthFailure, EndedBy, Event, SendError, SessionState, Transmit};
 pub use policy::{Admission, Credentials};
 pub use sequence::SequenceNumber;
-pub use text::{BoundedText, Text, TextError, Username};
+pub use text::{BoundedText, ByeText, NakText, TextError, Username};
 pub use udp::UdpDriver;
