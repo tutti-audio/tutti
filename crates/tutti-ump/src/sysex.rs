@@ -165,19 +165,9 @@ impl Iterator for Sysex7Packets<'_> {
         if self.started && self.rest.is_empty() {
             return None;
         }
-        let status = match (self.started, self.rest.len() > 6) {
-            (false, false) => SysexStatus::Complete,
-            (false, true) => SysexStatus::Start,
-            (true, true) => SysexStatus::Continue,
-            (true, false) => SysexStatus::End,
-        };
-        let (chunk, rest) = self.rest.split_at(self.rest.len().min(6));
+        let (packet, rest) = Sysex7Packet::take(self.started, self.rest);
         self.rest = rest;
         self.started = true;
-        let mut data = [0u8; 6];
-        data[..chunk.len()].copy_from_slice(chunk);
-        let packet = Sysex7Packet::new(status, &data[..chunk.len()])
-            .expect("at most six bytes, each below 128");
         Some(Ump::from(Message::Sysex7(self.group, packet)))
     }
 
@@ -486,8 +476,8 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> SysexAssembler<B> {
     /// If `message` is not one this assembler returned this block.
     #[must_use]
     pub fn message(&self, message: SysexRef) -> SysexMessage<'_> {
-        SysexMessage::from_framed(&self.bytes()[message.range()])
-            .expect("a completed message is F0, 7-bit bytes, F7")
+        // The assembler wrote this range as `0xF0`, 7-bit packet bytes, `0xF7`.
+        SysexMessage(&self.bytes()[message.range()])
     }
 
     /// Messages dropped whole since this assembler was made (a

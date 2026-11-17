@@ -242,6 +242,16 @@ impl MdsChunkUmps {
     const fn data_len(self) -> usize {
         self.0 as usize * PAYLOAD_BYTES
     }
+
+    /// The first chunk of `data`: its bytes (at most [`data_len`](Self::data_len)),
+    /// its size and the bytes after it. A chunk of at most 4094 payload UMPs
+    /// is at most `16 + 16 * 4094` bytes, which fits 16 bits.
+    fn take(self, data: &[u8]) -> (&[u8], MdsChunkSize, &[u8]) {
+        let (chunk, rest) = data.split_at(data.len().min(self.data_len()));
+        let umps = chunk.len().div_ceil(PAYLOAD_BYTES);
+        let size = MdsChunkSize((UMP_BYTES as usize + chunk.len() + 2 * umps) as u16);
+        (chunk, size, rest)
+    }
 }
 
 impl From<MdsChunkUmps> for u16 {
@@ -272,11 +282,10 @@ impl<'a> MixedDataSet<'a> {
     /// chunks, the most a 16-bit chunk count names.
     #[must_use]
     pub fn packets(self, chunk: MdsChunkUmps) -> Option<MixedDataPackets<'a>> {
-        let per_chunk = chunk.data_len();
-        let total = u16::try_from(self.data.len().div_ceil(per_chunk).max(1)).ok()?;
+        let total = u16::try_from(self.data.len().div_ceil(chunk.data_len()).max(1)).ok()?;
         Some(MixedDataPackets {
             set: self,
-            per_chunk,
+            chunk_umps: chunk,
             total,
             chunk: 0,
             pending: &[],
@@ -319,8 +328,8 @@ impl<'a> MixedDataSet<'a> {
 #[derive(Clone, Debug)]
 pub struct MixedDataPackets<'a> {
     set: MixedDataSet<'a>,
-    /// The data bytes of a full chunk.
-    per_chunk: usize,
+    /// The most payload UMPs of a chunk.
+    chunk_umps: MdsChunkUmps,
     total: u16,
     /// The number of the chunk whose header was last written; 0 before any.
     chunk: u16,
@@ -340,12 +349,10 @@ impl Iterator for MixedDataPackets<'_> {
                 return None;
             }
             self.chunk += 1;
-            let (this, rest) = self.rest.split_at(self.rest.len().min(self.per_chunk));
+            let (this, chunk_size, rest) = self.chunk_umps.take(self.rest);
             self.pending = this;
             self.rest = rest;
             self.header_due = this.is_empty();
-            let chunk_size = MdsChunkSize::from_data_len(this.len())
-                .expect("a chunk holds at most 4094 payload UMPs");
             return Some(Ump::from(Message::Data128(
                 self.set.group,
                 Data128::MixedDataHeader(MixedDataHeader {

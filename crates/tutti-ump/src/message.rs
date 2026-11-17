@@ -309,7 +309,38 @@ pub struct Sysex7Packet {
     bytes: [U7; 6],
 }
 
+impl SysexStatus {
+    /// The status of the next packet of a run: a first packet is a `Complete`
+    /// when nothing follows it and a `Start` otherwise, a later one an `End`
+    /// or a `Continue`.
+    pub(crate) const fn of_run(started: bool, more: bool) -> Self {
+        match (started, more) {
+            (false, false) => Self::Complete,
+            (false, true) => Self::Start,
+            (true, true) => Self::Continue,
+            (true, false) => Self::End,
+        }
+    }
+}
+
 impl Sysex7Packet {
+    /// The packet of the first six (or fewer) of `payload`, and the bytes
+    /// after them. `payload` is 7-bit by its owner's type, so `masked` drops
+    /// no bit.
+    pub(crate) fn take(started: bool, payload: &[u8]) -> (Self, &[u8]) {
+        let (chunk, rest) = payload.split_at(payload.len().min(6));
+        let mut bytes = [U7::default(); 6];
+        for (slot, &b) in bytes.iter_mut().zip(chunk) {
+            *slot = U7::masked(b);
+        }
+        let packet = Self {
+            status: SysexStatus::of_run(started, !rest.is_empty()),
+            len: chunk.len() as u8,
+            bytes,
+        };
+        (packet, rest)
+    }
+
     /// The packet, or `None` for more than 6 bytes or a byte of 128 or more.
     #[must_use]
     pub fn new(status: SysexStatus, data: &[u8]) -> Option<Self> {
@@ -372,6 +403,21 @@ pub struct Sysex8Packet {
 }
 
 impl Sysex8Packet {
+    /// The packet of the first 13 (or fewer) of `payload`, and the bytes after
+    /// them.
+    pub(crate) fn take(started: bool, stream_id: u8, payload: &[u8]) -> (Self, &[u8]) {
+        let (chunk, rest) = payload.split_at(payload.len().min(13));
+        let mut bytes = [0; 13];
+        bytes[..chunk.len()].copy_from_slice(chunk);
+        let packet = Self {
+            status: SysexStatus::of_run(started, !rest.is_empty()),
+            stream_id,
+            len: chunk.len() as u8,
+            bytes,
+        };
+        (packet, rest)
+    }
+
     /// The packet, or `None` for more than 13 data bytes. Only a
     /// [`Sysex8Stream`](crate::Sysex8Stream) writes packets; the others are
     /// decoded.
