@@ -82,11 +82,9 @@ impl PluginServer {
         // recorded here, and recording it later would sample a reaper instead
         // of the real spawner. See `main_loop::record_parent_pid`.
         crate::main_loop::record_parent_pid();
-        let main = MainThreadMarker::new().ok_or_else(|| {
-            BridgeError::ProtocolError(
-                "the plugin server must be built on the process's main thread".into(),
-            )
-        })?;
+        let main = MainThreadMarker::new().ok_or(BridgeError::ProtocolError(
+            "the plugin server must be built on the process's main thread",
+        ))?;
         let (session, render) = Session::new();
         Ok(Self {
             config,
@@ -150,7 +148,7 @@ impl PluginServer {
         let side = self
             .render
             .take()
-            .ok_or_else(|| BridgeError::ProtocolError("the audio phase runs once".to_string()))?;
+            .ok_or(BridgeError::ProtocolError("the audio phase runs once"))?;
         let render = RenderThread::spawn(side, Box::new(audio))?;
         let served = self.control_phase(&mut control, &render);
         // The plugin goes home before the render thread stops: its Processor

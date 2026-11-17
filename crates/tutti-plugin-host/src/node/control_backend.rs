@@ -269,7 +269,7 @@ where
             })
         }) {
             Some(Some(state)) => state.map_err(StateError::Rejected),
-            Some(None) => Err(StateError::Rejected("the plugin is lost".into())),
+            Some(None) => Err(StateError::PluginCrashed),
             None => Err(StateError::Unavailable),
         }
     }

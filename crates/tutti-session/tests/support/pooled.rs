@@ -170,7 +170,7 @@ pub fn prime(plugin: &PluginRef) {
     }
 }
 
-impl<C: tutti_session::Clock> LoadPlugin for Session<C> {
+impl<K: tutti_session::AppKey, C: tutti_session::Clock> LoadPlugin for Session<K, C> {
     fn load_plugin_keyed(
         &mut self,
         main: MainThreadMarker,
@@ -241,7 +241,7 @@ pub trait LoadEntry {
     ) -> Result<Key<PluginNode>, LoadError>;
 }
 
-impl<C: tutti_session::Clock> LoadEntry for Session<C> {
+impl<K: tutti_session::AppKey, C: tutti_session::Clock> LoadEntry for Session<K, C> {
     fn declare_entry(
         &mut self,
         main: MainThreadMarker,
@@ -296,11 +296,17 @@ pub trait LandOn<J: tutti_session::JobKind> {
     /// result: a test thread is not the OS's main thread, so
     /// [`Job::wait`](tutti_session::Job::wait) cannot run a job that waits for
     /// it. The deadline only guards a hang.
-    fn land_on<C: tutti_session::Clock>(self, s: &mut Session<C>) -> Result<J::Output, J::Error>;
+    fn land_on<K: tutti_session::AppKey, C: tutti_session::Clock>(
+        self,
+        s: &mut Session<K, C>,
+    ) -> Result<J::Output, J::Error>;
 }
 
 impl<J: tutti_session::JobKind> LandOn<J> for tutti_session::Job<J> {
-    fn land_on<C: tutti_session::Clock>(self, s: &mut Session<C>) -> Result<J::Output, J::Error> {
+    fn land_on<K: tutti_session::AppKey, C: tutti_session::Clock>(
+        self,
+        s: &mut Session<K, C>,
+    ) -> Result<J::Output, J::Error> {
         let main = tutti_fixtures::main_thread();
         let deadline = Instant::now() + Duration::from_secs(60);
         loop {
