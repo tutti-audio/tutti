@@ -61,4 +61,7 @@ pub enum ResampleError {
         /// The chunk count the carry should have drained within.
         chunks: usize,
     },
+    /// The channel count is more than a `ChannelLayout` holds.
+    #[error(transparent)]
+    Buffer(#[from] tutti_buffers::BufferError),
 }

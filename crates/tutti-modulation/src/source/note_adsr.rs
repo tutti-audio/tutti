@@ -1,7 +1,7 @@
 //! [`NoteAdsr`]: an ADSR driven by note-ons and note-offs.
 
 use tutti_types::{Adsr, Frame, SampleRate, Samples};
-use tutti_ump::{Key, KeyEvent, Ump};
+use tutti_ump::{NoteKey, NoteKeyEvent, Ump};
 
 use super::{ControlSource, Leg, PlayGrid};
 
@@ -19,7 +19,7 @@ enum Stage {
 
 /// The held-note table's index of `key`: its group, channel and note, the
 /// protocol dropped, so the same note in either protocol is one note.
-fn slot(key: Key) -> usize {
+fn slot(key: NoteKey) -> usize {
     key.address().index() * 128 + usize::from(key.note().get())
 }
 
@@ -39,7 +39,7 @@ fn slot(key: Key) -> usize {
 ///   leaves the envelope where it is, sounding for the note still held. A
 ///   note-off for a note not held does nothing. Notes are told apart by group,
 ///   channel and note number (a MIDI 1.0 note-on at velocity 0 is a note-off,
-///   [`Ump::key_event`]).
+///   [`Ump::note_key_event`]).
 /// - **Release from the level there**: a note-off mid-attack releases from the
 ///   attack's current level, over the full `release`.
 /// - **A play start** forgets every held note and leaves it idle at 0.
@@ -148,10 +148,10 @@ impl ControlSource for NoteAdsr {
     }
 
     fn heard(&mut self, t: Frame, level: f32, ump: Ump) -> Option<Leg> {
-        let (on, key) = match ump.key_event()? {
-            KeyEvent::On(key) => (true, key),
-            KeyEvent::Off(key) => (false, key),
-            KeyEvent::Sustain { .. } => return None,
+        let (on, key) = match ump.note_key_event()? {
+            NoteKeyEvent::On(key) => (true, key),
+            NoteKeyEvent::Off(key) => (false, key),
+            NoteKeyEvent::Sustain { .. } => return None,
         };
         let key = slot(key);
         let (word, bit) = (key / 64, 1u64 << (key % 64));

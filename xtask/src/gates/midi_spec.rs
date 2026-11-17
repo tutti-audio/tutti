@@ -428,9 +428,9 @@ pub(super) const M2_123: Doc = Doc {
 pub(super) const M2_124: Doc = Doc {
     prefix: "m2-124",
     label: "M2-124",
-    title: "Network MIDI 2.0 (UDP) (M2-124 v1.0)",
+    title: "Network MIDI 2.0 (UDP) (M2-124 v1.0.1)",
     file: "midi-m2-124.txt",
-    source: "M2-124-UM_v1-0_",
+    source: "M2-124-UM_v1-0-1_",
     sides: "client, host or both",
     note: SAME_TABLES,
     implicit_levels: false,

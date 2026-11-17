@@ -1,7 +1,7 @@
 use super::*;
 use crate::filter::ladder::kernel::{LadderCoefficients, ladder_step};
 use crate::{Complex32, RealFft, Ring};
-use tutti_buffers::Float;
+use tutti_buffers::{Float, Mono};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
@@ -83,7 +83,7 @@ fn the_small_signal_response_is_the_models() {
             let fft = RealFft::new(N);
             let mut scratch = fft.new_scratch();
             let mut bins = vec![Complex32::new(0.0, 0.0); fft.bins()];
-            fft.forward(&ir, &mut bins, &mut scratch);
+            fft.forward(Mono::new(&ir), &mut bins, &mut scratch);
             let (mut num, mut den) = (0.0f64, 0.0f64);
             for (i, b) in bins.iter().enumerate().step_by(7) {
                 let want = at(&m, (i as f64 * RATE.get() / N as f64) as f32);

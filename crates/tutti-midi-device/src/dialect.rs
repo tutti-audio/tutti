@@ -20,7 +20,7 @@
 //! Profiles on channels that do not overlap (M2-120 §3.4).
 
 use tutti_ump::{
-    Direction, FunctionBlockId, Midi1Port, MidiChannel, MpeChannels, MpeOverlap, MpeZoneSet,
+    BlockDirection, FunctionBlockId, Midi1Port, MidiChannel, MpeChannels, MpeOverlap, MpeZoneSet,
     MpeZoneSpan, Protocol,
 };
 
@@ -148,7 +148,7 @@ impl Dialect {
         }
         if !matches!(
             declared.direction(),
-            Direction::Input | Direction::Bidirectional
+            BlockDirection::Input | BlockDirection::Bidirectional
         ) {
             return Err(NoDialect::NotReceiving(block));
         }

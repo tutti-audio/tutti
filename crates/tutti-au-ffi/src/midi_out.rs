@@ -832,7 +832,7 @@ mod tests {
     use super::*;
     use std::mem::size_of;
     use std::sync::atomic::AtomicU64;
-    use tutti_ump::KeyEvent;
+    use tutti_ump::NoteKeyEvent;
 
     /// The hand-declared callback struct must match Apple's: an
     /// `AUMIDIOutputCallback` function pointer then a `void *userData`, 16 bytes
@@ -1018,8 +1018,8 @@ mod tests {
         // SAFETY: `list` is the packet list this test just built.
         let events = unsafe { decode_packet_list_for_test(list) };
         assert_eq!(events.len(), 5);
-        let note_on = |e: &WireMidi| match e.ump.key_event() {
-            Some(KeyEvent::On(key)) => Some(key.note().get()),
+        let note_on = |e: &WireMidi| match e.ump.note_key_event() {
+            Some(NoteKeyEvent::On(key)) => Some(key.note().get()),
             _ => None,
         };
         assert_eq!(note_on(&events[0]), Some(60));

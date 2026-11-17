@@ -203,6 +203,7 @@ fn a_malformed_invitation_is_a_protocol_error_bye() {
     );
 }
 
+/// Spec: m2-124/8#4
 #[test]
 fn a_host_at_its_limit_turns_a_newcomer_away_with_too_many_sessions() {
     let mut config = host_with(Admission::Open);
@@ -268,7 +269,7 @@ fn secret_sim(client_secret: &str) -> Sim {
     )
 }
 
-/// Spec: m2-124/6.7#1, m2-124/6.7#3, m2-124/6.7#4, m2-124/6.7#11, m2-124/6.9#1, m2-124/6.9#3
+/// Spec: m2-124/6.7#1, m2-124/6.7#3, m2-124/6.7#4, m2-124/6.7#12, m2-124/6.9#1, m2-124/6.9#3
 #[test]
 fn the_right_shared_secret_establishes_the_session() {
     let mut sim = secret_sim("5483");
@@ -288,7 +289,7 @@ fn the_right_shared_secret_establishes_the_session() {
     );
 }
 
-/// Spec: m2-124/6.7#7, m2-124/6.7#8, m2-124/6.7#12, m2-124/6.9#4
+/// Spec: m2-124/6.7#7, m2-124/6.7#8, m2-124/6.7#13, m2-124/6.9#4
 #[test]
 fn a_wrong_secret_is_answered_after_a_delay_and_the_client_gives_up() {
     let mut sim = secret_sim("0000");
@@ -362,7 +363,7 @@ fn the_delay_after_each_failed_digest_doubles() {
     assert_eq!(drain(&mut sim), 1);
 }
 
-/// Spec: m2-124/6.7#12
+/// Spec: m2-124/6.7#13
 #[test]
 fn five_failed_digests_end_the_invitation_with_authentication_failed() {
     let mut sim = Sim::new(
@@ -495,7 +496,7 @@ fn a_repeated_invitation_gets_the_same_nonce_and_a_new_session_a_new_one() {
     ));
 }
 
-/// Spec: m2-124/6.9#5, m2-124/6.9#8
+/// Spec: m2-124/6.9#5
 #[test]
 fn an_authenticated_invitation_without_an_invitation_is_rejected_for_no_prior_invitation() {
     let mut sim = secret_sim("5483");
@@ -519,7 +520,7 @@ fn users_sim(user: &str, password: &str) -> Sim {
     )
 }
 
-/// Spec: m2-124/6.8#1, m2-124/6.8#3, m2-124/6.8#4, m2-124/6.8#9, m2-124/6.10#1
+/// Spec: m2-124/6.8#1, m2-124/6.8#3, m2-124/6.8#4, m2-124/6.8#10, m2-124/6.10#1
 #[test]
 fn a_known_user_with_the_right_password_establishes_the_session() {
     let mut sim = users_sim("Rosa", "RPBqBno");
@@ -531,7 +532,7 @@ fn a_known_user_with_the_right_password_establishes_the_session() {
     ));
 }
 
-/// Spec: m2-124/6.8#10, m2-124/6.10#5
+/// Spec: m2-124/6.8#11, m2-124/6.10#5
 #[test]
 fn an_unknown_user_is_told_the_user_was_not_found() {
     let mut sim = users_sim("Bob", "RPBqBno");
@@ -612,6 +613,7 @@ fn a_client_that_sent_no_invitation_naks_a_challenge_as_not_expected() {
 
 /// M2-124 sections 6.7 and 6.8: a Client that did not advertise the method in
 /// its Invitation answers its challenge with NAK 0x02 (Command Not Expected).
+/// Spec: m2-124/6.7#11, m2-124/6.8#9
 #[test]
 fn a_client_naks_a_challenge_for_a_method_its_invitation_did_not_advertise() {
     let cases = [
@@ -655,7 +657,7 @@ fn a_client_naks_a_challenge_for_a_method_its_invitation_did_not_advertise() {
 }
 
 /// A NAK quotes the refused command's header as it arrived, reserved bits included.
-/// Spec: m2-124/5.3#6
+/// Spec: m2-124/5.3#6, m2-124/6.15#4
 #[test]
 fn a_nak_quotes_the_header_as_received() {
     let mut sim = established();
@@ -1288,7 +1290,7 @@ fn quiet_peers_ping_each_other_and_keep_the_session_alive() {
     );
 }
 
-/// Spec: m2-124/6.14#1
+/// Spec: m2-124/6.14#1, m2-124/6.14#4
 #[test]
 fn a_ping_gets_a_reply_with_the_same_id_in_any_state() {
     let mut sim = Sim::open();

@@ -12,12 +12,12 @@ use tutti_types::MaxBlock;
 use crate::common::{beat_of, connect, rolling};
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Cx, Editor, EventKind, Executor, ForkMode, ForkTarget, Harmony, Io, LoopRange, Node, Prepare,
-    Shape, Status, TransportPosition,
+    Cx, Editor, EventKind, Executor, ForkMode, ForkTarget, Harmony, Io, Node, Prepare, Shape,
+    Status, TransportPosition,
 };
 use tutti_graph::{OutPort, Source};
 use tutti_midi_runtime::{HarmonyControls, HarmonyNode, TimedHarmony};
-use tutti_types::{Beat, Bpm, SampleRate, Samples};
+use tutti_types::{Beat, Bpm, LoopRange, SampleRate, Samples};
 
 const RATE: f64 = 48_000.0;
 
@@ -156,10 +156,7 @@ fn a_seek_restates_the_context_and_a_stop_sends_nothing() {
 #[test]
 fn a_loop_wrap_restates_the_context_at_the_wrap() {
     let (_ed, mut exec, _c, seen) = rig(HarmonyNode::new(lanes()), 512);
-    let lp = Some(LoopRange {
-        start: Beat(0.5),
-        end: Beat(1.5),
-    });
+    let lp = Some(LoopRange::new(Beat(0.5), Beat(1.5)).expect("a loop"));
     block(
         &mut exec,
         512,
@@ -187,10 +184,7 @@ fn a_loop_pass_restates_only_what_changed() {
     let lanes = || vec![at(0, C), at(0, C_MAJOR), at(12_000, G)];
     let render = |start: u64, end: u64| {
         let (_ed, mut exec, _c, seen) = rig(HarmonyNode::new(lanes()), 2_048);
-        let lp = Some(LoopRange {
-            start: beat_of(start),
-            end: beat_of(end),
-        });
+        let lp = Some(LoopRange::new(beat_of(start), beat_of(end)).expect("a loop"));
         block(
             &mut exec,
             2_048,
@@ -228,10 +222,7 @@ fn a_loop_pass_restates_only_what_changed() {
 fn a_change_on_the_loops_start_is_each_passs_context() {
     let lanes = vec![at(0, F_OVER_A), at(12_000, C), at(12_200, G)];
     let (_ed, mut exec, _c, seen) = rig(HarmonyNode::new(lanes), 2_048);
-    let lp = Some(LoopRange {
-        start: beat_of(12_000),
-        end: beat_of(12_375),
-    });
+    let lp = Some(LoopRange::new(beat_of(12_000), beat_of(12_375)).expect("a loop"));
     block(
         &mut exec,
         2_048,

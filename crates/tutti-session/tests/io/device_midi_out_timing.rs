@@ -251,9 +251,9 @@ fn a_clips_notes_are_sent_when_their_frames_are_heard() {
     let sends: Vec<(bool, Instant)> = wire
         .take()
         .iter()
-        .filter_map(|e| match (e.ump.key_event(), e.send) {
-            (Some(tutti_ump::KeyEvent::On(_)), SendAt::At(at)) => Some((true, at)),
-            (Some(tutti_ump::KeyEvent::Off(_)), SendAt::At(at)) => Some((false, at)),
+        .filter_map(|e| match (e.ump.note_key_event(), e.send) {
+            (Some(tutti_ump::NoteKeyEvent::On(_)), SendAt::At(at)) => Some((true, at)),
+            (Some(tutti_ump::NoteKeyEvent::Off(_)), SendAt::At(at)) => Some((false, at)),
             _ => None,
         })
         .collect();

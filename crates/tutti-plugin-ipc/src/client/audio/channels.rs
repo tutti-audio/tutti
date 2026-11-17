@@ -119,6 +119,11 @@ pub(super) struct Channels {
     /// has not read are there, which `news` alone misses between the bridge's
     /// clearing it and the watcher's setting it again.
     probe: Arc<std::sync::Mutex<Option<Arc<crate::transport::control::Watch>>>>,
+    /// Notified on the bridge thread when a response is queued and when it has
+    /// finished a turn (a lane read dry, a command answered): what a control or
+    /// worker thread waiting on the bridge sleeps on. The server's watch
+    /// notifies it too, so a waiter wakes at the server's end.
+    progress: Arc<crate::Wake>,
 }
 
 /// How many chunks back [`Fates`] remembers.
@@ -183,7 +188,7 @@ impl Fates {
 impl Channels {
     /// The channels and the [`Sleeper`] of the bridge thread's doorbell,
     /// which that thread alone waits on.
-    pub(super) fn new(sample_rate: SampleRate) -> (Self, Sleeper) {
+    pub(super) fn new(sample_rate: SampleRate, progress: Arc<crate::Wake>) -> (Self, Sleeper) {
         let (bell, sleeper) = doorbell();
         let (dropped_param_events, dropped_midi, skipped) = (tally(), tally(), tally());
         let (abandoned, late, commands_refused, leaked_buffers, responses_lost) =
@@ -215,6 +220,7 @@ impl Channels {
             fates: Arc::new(Fates::new()),
             news: Arc::default(),
             probe: Arc::default(),
+            progress,
         };
         (channels, sleeper)
     }
@@ -467,6 +473,18 @@ impl Channels {
         if self.audio_responses.push(resp).is_err() {
             self.responses_lost_writer.add(1);
         }
+        self.progress.notify();
+    }
+
+    /// The gate a waiter on the bridge's progress sleeps on.
+    pub(super) fn progress(&self) -> &Arc<crate::Wake> {
+        &self.progress
+    }
+
+    /// The bridge thread finished a turn: it answered what it was asked and
+    /// read the lane it was woken for.
+    pub(super) fn turn_done(&self) {
+        self.progress.notify();
     }
 
     pub(super) fn pop_audio_response(&self) -> Option<AudioResponse> {
@@ -479,7 +497,7 @@ mod tests {
     use super::*;
 
     fn channels() -> (Channels, Sleeper) {
-        Channels::new(SampleRate::SR_48K)
+        Channels::new(SampleRate::SR_48K, Arc::default())
     }
 
     /// Abandoned blocks, owed replies collected late and replies are separate

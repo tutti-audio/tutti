@@ -1,4 +1,4 @@
-# Network MIDI 2.0 (UDP) (M2-124 v1.0) inventory. The spec text is not in
+# Network MIDI 2.0 (UDP) (M2-124 v1.0.1) inventory. The spec text is not in
 # the repo: `TUTTI_MIDI_SPECS=<dir> cargo xtask conformance-inventory midi`
 # regenerates the id, kind, section and facts columns from the text that
 # `pdftotext -layout` (26.01.0) makes of the M2-124 PDF in that directory (or a
@@ -70,15 +70,17 @@ m2-124/4.3#2 | host |  | required | M2-124 §4.3 | hostnames are unique in a net
 m2-124/4.3#3 | host |  | recommended | M2-124 §4.3 | a device lets the user set the hostname |  |  |  | c1a420c50760cb57
 m2-124/4.3#4 | host |  | recommended | M2-124 §4.3 | a device without a screen puts a unique id in its hostname |  |  |  | 3ed2a355a86643aa
 m2-124/4.4#1 | host |  | required | M2-124 §4.4 | every device has a TXT record with extra information about the service |  |  |  | 397c769600f31177
-m2-124/4.4#2 | both |  | permitted | M2-124 §4.4 | systems can use the Endpoint Name and Product Instance Id to recall a device on reconnect |  |  |  | d555e478348240bb
+m2-124/4.4#2 | both |  | permitted | M2-124 §4.4 | systems can use the Endpoint Name and Product Instance Id to recall a device on reconnect |  |  |  | 68499c4e38601f9d
 m2-124/4.4#3 | both |  | recommended | M2-124 §4.4 | the UMPEndpointName field is the name shown to the user |  |  |  | 0c3c5a04a22826fa
 m2-124/4.4#4 | host |  | required | M2-124 §4.4 | the TXT name equals the name in the Invitation replies and the Endpoint Name Notification |  |  |  | b6328540f21913ba
-m2-124/4.4#5 | host |  | required | M2-124 §4.4 | the Endpoint Name is UTF-8 and at most 98 bytes |  |  |  | 761471fc0358b49d
-m2-124/4.4#6 | host |  | required | M2-124 §4.4 | each Host instance of a device has its own Endpoint Name |  |  |  | 75d085e184658410
-m2-124/4.4#7 | host |  | required | M2-124 §4.4 | the Product Instance Id is ASCII 32 to 126 only |  |  |  | 67ffe6505d7bfb57
-m2-124/4.4#8 | host |  | required | M2-124 §4.4 | the TXT Product Instance Id equals the one in the Product Instance Id Notification |  |  |  | 2502fd5ba7b1b2cf
-m2-124/4.4#9 | host |  | recommended | M2-124 §4.4 | the Product Instance Id is at most 42 bytes | neg=1 |  |  | 224711d0ed300496
-m2-124/4.4#10 | host |  | recommended | M2-124 §4.4 | all Hosts of one device use the same Product Instance Id |  |  |  | 273e0f11f79d5967
+m2-124/4.4#5 | host |  | required | M2-124 §4.4 | the TXT Endpoint Name is not empty | neg=1 |  |  | 7b7fe800d3ec9967
+m2-124/4.4#6 | host |  | required | M2-124 §4.4 | the Endpoint Name is UTF-8 and at most 98 bytes |  |  |  | 761471fc0358b49d
+m2-124/4.4#7 | host |  | required | M2-124 §4.4 | each Host instance of a device has its own Endpoint Name |  |  |  | 75d085e184658410
+m2-124/4.4#8 | host |  | required | M2-124 §4.4 | the Product Instance Id is ASCII 32 to 126 only |  |  |  | 1e86074807b77ecf
+m2-124/4.4#9 | host |  | required | M2-124 §4.4 | the TXT Product Instance Id equals the one in the Product Instance Id Notification |  |  |  | 2502fd5ba7b1b2cf
+m2-124/4.4#10 | host |  | required | M2-124 §4.4 | the TXT Product Instance Id is not empty | neg=1 |  |  | b5483350aa7c4a92
+m2-124/4.4#11 | host |  | recommended | M2-124 §4.4 | the Product Instance Id is at most 42 bytes | neg=1 |  |  | 224711d0ed300496
+m2-124/4.4#12 | host |  | recommended | M2-124 §4.4 | all Hosts of one device use the same Product Instance Id |  |  |  | 273e0f11f79d5967
 m2-124/4.6#1 | host |  | recommended | M2-124 §4.6 | a Host keeps its service TTL to one minute or less | neg=1 |  |  | abaf5132c1bac8ad
 m2-124/5.1.1#1 | both |  | recommended | M2-124 §5.1.1 | a UDP packet stays within 1400 bytes | neg=1 |  |  | 129470b6b2cfd548
 m2-124/5.1.1#2 | both |  | recommended | M2-124 §5.1.1 | an implementation takes care to avoid fragmented packets |  |  |  | 74351551eb0f31bf
@@ -103,10 +105,10 @@ m2-124/6.2#3 | both |  | required | M2-124 §6.2 | at its timeout a device stops
 m2-124/6.2#4 | both |  | recommended | M2-124 §6.2 | the list of Commands that are repeated |  |  |  | 46e6eed9f3effcda
 m2-124/6.4#1 | client |  | required | M2-124 §6.4 | a Client starts a Session by sending an Invitation |  |  |  | 3cdf1be6f0ec6eed
 m2-124/6.4#2 | both |  | permitted | M2-124 §6.4 | either side can end a pending Invitation with a Bye |  |  |  | ea30d72942084038
-m2-124/6.4#3 | client |  | recommended | M2-124 §6.4 | the Invitation is repeated with a delay until a reply arrives |  |  |  | 0e7262141c4fabf8
-m2-124/6.4#4 | client |  | permitted | M2-124 §6.4 | a Client can time out an Invitation after a reasonable time |  |  |  | bae7966493cc67e2
+m2-124/6.4#3 | client |  | recommended | M2-124 §6.4 | the Invitation is repeated with a delay until a reply arrives |  |  |  | 18de37f2d06a36a7
+m2-124/6.4#4 | client |  | permitted | M2-124 §6.4 | a Client can time out an Invitation after a reasonable time |  |  |  | b30b3b39f8ed505c
 m2-124/6.4#5 | client |  | required | M2-124 §6.4 | a failed Invitation is ended with Bye reason 0x80 |  |  |  | 68b7cc9df5d67745
-m2-124/6.4#6 | host |  | required | M2-124 §6.4 | a Host answers an Invitation with one of the listed replies |  |  |  | 5bf264e06860b10f
+m2-124/6.4#6 | host |  | required | M2-124 §6.4 | a Host answers an Invitation with one of the listed replies |  |  |  | e4e5e2461bdd283e
 m2-124/6.4#7 | host |  | recommended | M2-124 §6.4 | a Host notes the address and port the Client wrote from |  |  |  | 326f88e3b2a97b68
 m2-124/6.4#8 | host |  | required | M2-124 §6.4 | an Invitation from a Client already in a Session is answered Accepted |  |  |  | 5c0444eb596f76b2
 m2-124/6.4#9 | client |  | required | M2-124 §6.4 | a Client with no Host role NAKs an Invitation, reason 0x02 |  |  |  | 4d1e53e3e79cafa1
@@ -116,8 +118,10 @@ m2-124/6.4#12 | host |  | permitted | M2-124 §6.4 | a Host can fall back, for e
 m2-124/6.4#13 | host |  | required | M2-124 §6.4 | a Host with no Pending fallback that requires authentication and finds no common method sends Bye 0x45 |  |  |  | f8322f222c808ad7
 m2-124/6.4#14 | client |  | required | M2-124 §6.4 | the Client gives the Host a name |  |  |  | 49cd0fa5f24ea59e
 m2-124/6.4#15 | client |  | required | M2-124 §6.4 | that name equals the Endpoint Name Notification |  |  |  | ad4df49676800277
-m2-124/6.4#16 | client |  | required | M2-124 §6.4 | the Client gives the Host a Product Instance Id |  |  |  | 48c37373b4a1e17d
-m2-124/6.4#17 | client |  | required | M2-124 §6.4 | that id equals the Product Instance Id Notification |  |  |  | 2502fd5ba7b1b2cf
+m2-124/6.4#16 | client |  | required | M2-124 §6.4 | the Client's Endpoint Name is not empty | neg=1 |  |  | 3c79ff9ea57713ff
+m2-124/6.4#17 | client |  | required | M2-124 §6.4 | the Client gives the Host a Product Instance Id |  |  |  | 48c37373b4a1e17d
+m2-124/6.4#18 | client |  | required | M2-124 §6.4 | the Client's Product Instance Id is not empty | neg=1 |  |  | f1775bdb88b4630a
+m2-124/6.4#19 | client |  | required | M2-124 §6.4 | that id equals the Product Instance Id Notification |  |  |  | 2502fd5ba7b1b2cf
 m2-124/6.5#1 | host |  | permitted | M2-124 §6.5 | a Host can accept a pending Session with Invitation Reply: Accepted |  |  |  | 6256dbd628c9252d
 m2-124/6.5#2 | both |  | permitted | M2-124 §6.5 | after that either side can send UMP Command Packets |  |  |  | c26d2334cf7669ae
 m2-124/6.5#3 | client |  | required | M2-124 §6.5 | a Client already in a Session ignores another Accepted |  |  |  | 3928ba05c23e4b64
@@ -137,12 +141,14 @@ m2-124/6.7#3 | client |  | required | M2-124 §6.7 | the Client uses the reply's
 m2-124/6.7#4 | host |  | required | M2-124 §6.7 | the Host remembers the nonce it gave that Client |  |  |  | ac8429a29c170f0c
 m2-124/6.7#5 | host |  | recommended | M2-124 §6.7 | a repeated Invitation gets the same nonce |  |  |  | 4f8952bc0f60f2d8
 m2-124/6.7#6 | host |  | required | M2-124 §6.7 | every new Session gets a new nonce |  |  |  | 682c2f1f4cffb13b
-m2-124/6.7#7 | host |  | permitted | M2-124 §6.7 | a wrong username or digest can be answered with Authentication Required again |  |  |  | 3e9560c7fa96a96e
+m2-124/6.7#7 | host |  | permitted | M2-124 §6.7 | a wrong username or digest can be answered with Authentication Required again |  |  |  | 9788477fefe49da7
 m2-124/6.7#8 | host |  | recommended | M2-124 §6.7 | that answer is delayed so brute force is impractical |  |  |  | 16ac3fce4e64c475
 m2-124/6.7#9 | host |  | required | M2-124 §6.7 | a Host that receives Authentication Required NAKs it, reason 0x02 |  |  |  | fc341842967a318a
 m2-124/6.7#10 | client |  | required | M2-124 §6.7 | a Client that receives it without inviting NAKs it, reason 0x02 |  |  |  | e97d22fd4815f38a
-m2-124/6.7#11 | host |  | required | M2-124 §6.7 | the first challenge carries Authentication State 0x00 |  |  |  | d190f796cb55ed18
-m2-124/6.7#12 | host |  | required | M2-124 §6.7 | a failed authentication gets one of two listed replies |  |  |  | 2786e312379d5df1
+m2-124/6.7#11 | client |  | required | M2-124 §6.7 | a Client that receives it without having flagged authentication support NAKs it, reason 0x02 |  |  |  | 784527e9b91146b9
+m2-124/6.7#12 | host |  | required | M2-124 §6.7 | the first challenge carries Authentication State 0x00 |  |  |  | d190f796cb55ed18
+m2-124/6.7#13 | host |  | required | M2-124 §6.7 | a failed authentication gets one of two listed replies |  |  |  | 2786e312379d5df1
+m2-124/6.7#14 | host |  | required | M2-124 §6.7 | the nonce is 16 bytes of ASCII 32 to 126 with no null termination |  |  |  | 34ba3771dfcc2ffb
 m2-124/6.8#1 | host |  | permitted | M2-124 §6.8 | a Host can reply User Authentication Required when it needs user authentication |  |  |  | 763d6304924b80ad
 m2-124/6.8#2 | host |  | required | M2-124 §6.8 | it does so only if the Client flagged user authentication support |  |  |  | 9daebb3f05d171be
 m2-124/6.8#3 | client |  | required | M2-124 §6.8 | the Client uses the reply's nonce in its next Invitation |  |  |  | b227fe9b935e7811
@@ -151,8 +157,9 @@ m2-124/6.8#5 | host |  | recommended | M2-124 §6.8 | a repeated Invitation gets
 m2-124/6.8#6 | host |  | recommended | M2-124 §6.8 | a failed attempt is answered after a delay |  |  |  | 16ac3fce4e64c475
 m2-124/6.8#7 | host |  | required | M2-124 §6.8 | a Host that receives User Authentication Required NAKs it, reason 0x02 |  |  |  | fc341842967a318a
 m2-124/6.8#8 | client |  | required | M2-124 §6.8 | a Client that receives it without inviting NAKs it, reason 0x02 |  |  |  | 092a4db8678cf96a
-m2-124/6.8#9 | host |  | required | M2-124 §6.8 | the first user challenge carries Authentication State 0x00 |  |  |  | bd96a4b528473bd3
-m2-124/6.8#10 | host |  | required | M2-124 §6.8 | a failed user authentication gets one of two listed replies |  |  |  | 2786e312379d5df1
+m2-124/6.8#9 | client |  | required | M2-124 §6.8 | a Client that receives it without having flagged user authentication support NAKs it, reason 0x02 |  |  |  | d056ccb63a28234a
+m2-124/6.8#10 | host |  | required | M2-124 §6.8 | the first user challenge carries Authentication State 0x00 |  |  |  | bd96a4b528473bd3
+m2-124/6.8#11 | host |  | required | M2-124 §6.8 | a failed user authentication gets one of two listed replies |  |  |  | 2786e312379d5df1
 m2-124/6.9#1 | client |  | recommended | M2-124 §6.9 | a Client answers Authentication Required with an Invitation with Authentication |  |  |  | 533695943ffab324
 m2-124/6.9#2 | client |  | recommended | M2-124 §6.9 | the Client asks the user for the secret, or uses a cached one |  |  |  | cad1717f7bfe6dff
 m2-124/6.9#3 | host |  | required | M2-124 §6.9 | matching digests get Invitation Reply: Accepted |  |  |  | 8628495bc6c52411
@@ -160,8 +167,7 @@ m2-124/6.9#4 | host |  | required | M2-124 §6.9 | a digest mismatch gets Authen
 m2-124/6.9#5 | host |  | recommended | M2-124 §6.9 | an authenticated Invitation with no prior Invitation is ended with Bye 0x41 |  |  |  | 8fa493e45a64f0a2
 m2-124/6.9#6 | client |  | recommended | M2-124 §6.9 | the Client repeats this Command until a reply arrives |  |  |  | f7febcf3fc3300a0
 m2-124/6.9#7 | client |  | recommended | M2-124 §6.9 | after a reasonable time the Client treats the Invitation as failed and sends a Bye |  |  |  | 7aa6714b73a6bd99
-m2-124/6.9#8 | host |  | recommended | M2-124 §6.9 | an authenticated Invitation with no prior Invitation is ended with Bye 0x41 |  |  |  | 8fa493e45a64f0a2
-m2-124/6.9#9 | both |  | required | M2-124 §6.9 | the digest is SHA-256 of the nonce and the shared secret together |  |  |  | 5a8b3484ee60abc0
+m2-124/6.9#8 | both |  | required | M2-124 §6.9 | the digest is SHA-256 of the nonce and the shared secret together |  |  |  | 5a8b3484ee60abc0
 m2-124/6.10#1 | client |  | recommended | M2-124 §6.10 | a Client with user authentication answers with an Invitation with User Authentication |  |  |  | 1dfeead129bdc6eb
 m2-124/6.10#2 | host |  | recommended | M2-124 §6.10 | the Host keeps a list of permitted users and passwords |  |  |  | 594a4c5d91286f31
 m2-124/6.10#3 | client |  | permitted | M2-124 §6.10 | the Client can keep user and password pairs or ask for them |  |  |  | 9d364b5d8f730ab9
@@ -172,6 +178,7 @@ m2-124/6.10#7 | client |  | recommended | M2-124 §6.10 | the Client repeats thi
 m2-124/6.10#8 | client |  | recommended | M2-124 §6.10 | after a reasonable time the Client treats the Invitation as failed and sends a Bye |  |  |  | 7aa6714b73a6bd99
 m2-124/6.10#9 | host |  | recommended | M2-124 §6.10 | a user Invitation with no prior Invitation is ended with Bye 0x41 |  |  |  | 98d897e110b85317
 m2-124/6.10#10 | both |  | required | M2-124 §6.10 | the digest is SHA-256 of the nonce, username and password together |  |  |  | ed8f364181cf8de5
+m2-124/6.10#11 | client |  | required | M2-124 §6.10 | the username is not empty | neg=1 |  |  | 7b9579fe80683e6f
 m2-124/6.11#1 | both |  | permitted | M2-124 §6.11 | either side can send Session Reset at any time in an active Session |  |  |  | 53f44eb87ac5b534
 m2-124/6.11#2 | both |  | recommended | M2-124 §6.11 | Session Reset is repeated until its reply or a timeout |  |  |  | 68a74528117c2726
 m2-124/6.11#3 | both |  | required | M2-124 §6.11 | while waiting for the reply a device sends no UMP Data | neg=1 |  |  | 778dd401650b414f
@@ -239,8 +246,8 @@ m2-124/7.2.3#2 | both |  | recommended | M2-124 §7.2.3 | it waits briefly, for 
 m2-124/7.2.3#3 | both |  | recommended | M2-124 §7.2.3 | the request is repeated with growing delay until data, an error, a NAK or a timeout |  |  |  | bb39ed34c9ce98d8
 m2-124/7.2.3#4 | both |  | recommended | M2-124 §7.2.3 | a device that gets a request resends from the requested sequence number |  |  |  | 4e52707ecc88d773
 m2-124/7.2.3#5 | both |  | recommended | M2-124 §7.2.3 | a device missing requested data sends a Retransmit Error naming the first missing number |  |  |  | 6bb505ce2f166d7e
-m2-124/7.2.3#6 | both |  | recommended | M2-124 §7.2.3 | available commands after the gap are still resent |  |  |  | f7c258b8049dccea
-m2-124/7.2.3#7 | both |  | recommended | M2-124 §7.2.3 | the resend has no gaps |  |  |  | b255477edf72d619
+m2-124/7.2.3#6 | both |  | recommended | M2-124 §7.2.3 | available commands after the gap are still resent |  |  |  | 2fc916aec7df50c9
+m2-124/7.2.3#7 | both |  | recommended | M2-124 §7.2.3 | the resend has no gaps |  |  |  | b927cc37eec3d509
 m2-124/7.2.3#8 | both |  | recommended | M2-124 §7.2.3 | the retransmit buffer is ordered with sequence wrap-around in mind |  |  |  | 0a206281d7278afb
 m2-124/7.2.3#9 | both |  | permitted | M2-124 §7.2.3 | a request for data already requested can be ignored |  |  |  | 00b846956bbc4331
 m2-124/7.2.3#10 | both |  | required | M2-124 §7.2.3 | a device without Retransmit NAKs a request, reason 0x01 |  |  |  | 8c7181f524bf2681
@@ -251,12 +258,17 @@ m2-124/7.2.4#1 | both |  | required | M2-124 §7.2.4 | a device that cannot retr
 m2-124/7.2.4#2 | both |  | required | M2-124 §7.2.4 | it does not resend the other available commands | neg=1 |  |  | f07eec3aedfbbf2b
 m2-124/7.2.4#3 | both |  | permitted | M2-124 §7.2.4 | the receiver picks its own recovery, such as an all-notes-off |  |  |  | 7695bdd1c02e5952
 m2-124/7.2.4#4 | both |  | required | M2-124 §7.2.4 | a Retransmit Error outside an Established Session gets Bye 0x05 |  |  |  | 4297d448091ac537
-m2-124/8#1 | both |  | permitted | M2-124 §8 | a Host can also connect to other Hosts as a Client |  |  |  | 00bf233a1289b36a
-m2-124/8#2 | both |  | required | M2-124 §8 | a device in both roles uses one Endpoint Name and Product Instance Id in both |  |  |  | 90b92ce1e2f400a8
-m2-124/8#3 | both |  | permitted | M2-124 §8 | equal names help others match an Invitation to a known Host |  |  |  | 79bf30c2cb00528d
-m2-124/8#4 | both |  | recommended | M2-124 §8 | the two roles use their own UDP ports |  |  |  | 4c8a0230ef52cb46
-m2-124/9#1 | both |  | permitted | M2-124 §9 | a device can have several UMP Endpoints |  |  |  | 3bf93c0f3a111977
-m2-124/9#2 | host |  | required | M2-124 §9 | each exposed Endpoint is its own Host with its own port and name |  |  |  | 589da054b3fc3f17
+m2-124/8#1 | host |  | permitted | M2-124 §8 | several Clients can connect to one Host |  |  |  | 3b4c7bcd71c21f24
+m2-124/8#2 | host |  | permitted | M2-124 §8 | a Host can have a limit on its Sessions |  |  |  | 85613a22e5f10d34
+m2-124/8#3 | host |  | permitted | M2-124 §8 | that limit can keep further Clients from opening a Session |  |  |  | ca2e333cc090dda7
+m2-124/8#4 | host |  | required | M2-124 §8 | a Host that cannot take another Session answers the Invitation with Bye 0x40 |  |  |  | 7ce3ed9eb5a636f3
+m2-124/8#5 | host |  | required | M2-124 §8 | a Host answers a Ping from any Client even when it takes no more Sessions |  |  |  | 99161167b65f8ec4
+m2-124/9#1 | both |  | permitted | M2-124 §9 | a device can also connect to other Hosts as a Client |  |  |  | 00bf233a1289b36a
+m2-124/9#2 | both |  | required | M2-124 §9 | a device in both roles uses one Endpoint Name and Product Instance Id in both |  |  |  | 90b92ce1e2f400a8
+m2-124/9#3 | both |  | permitted | M2-124 §9 | equal names help others match an Invitation to a known Host |  |  |  | 79bf30c2cb00528d
+m2-124/9#4 | both |  | recommended | M2-124 §9 | the two roles use their own UDP ports |  |  |  | 4c8a0230ef52cb46
+m2-124/10#1 | both |  | permitted | M2-124 §10 | a device can have several UMP Endpoints |  |  |  | 3bf93c0f3a111977
+m2-124/10#2 | host |  | required | M2-124 §10 | each exposed Endpoint is its own Host with its own port and name |  |  |  | 589da054b3fc3f17
 m2-124/a.3#1 | both |  | permitted | M2-124 §A.3 | example: a Sender can send further packets with Zero Length UMP Data while idle |  |  |  | 80fdd3861249199b
 m2-124/6.14#4 | both |  | required | M2-124 §6.14 | a Ping Reply carries the Ping Id of the Ping it answers | cell=1 |  |  | c7ffa7ea4d563e8f
 m2-124/6.15#4 | both |  | required | M2-124 §6.15 | a NAK carries the header word of the Command it answers | cell=1 |  |  | 337432a84933efb9
