@@ -95,28 +95,33 @@ fn an_in_process_editors_descriptor_is_served_by_the_views_update() {
     );
 }
 
-/// **A timer the plugin registered is served by the view's `update` once its
-/// period has passed**, and not before.
-fn an_in_process_editors_timer_is_served_by_the_views_update_at_its_period() {
-    probe().set(ClapSwitch::TimerPeriod, 200);
+/// **A timer the plugin registered is served by the view's `update`**: the
+/// view calls the plugin's `on_timer` once the timer is due. (When a timer is
+/// due, and that its period restarts, is `take_due_timers`' rule, tested over
+/// constructed instants in `tutti-clap-host`.)
+fn an_in_process_editors_timer_is_served_by_the_views_update() {
+    // The shortest period the host keeps.
+    probe().set(ClapSwitch::TimerPeriod, 10);
     let mut s = session_with_open_editor(CMD_REGISTER_TIMER);
     let probe = probe();
     assert!(probe.thread_capture().timer_registered);
     let ticks = || probe.thread_capture().sites[Site::OnTimer as usize].visits;
 
     let mut ui = s.main(tutti_fixtures::main_thread());
-    let _ = ui.update();
-    assert_eq!(ticks(), 0, "not before its period");
-    std::thread::sleep(Duration::from_millis(250));
-    let _ = ui.update();
-    assert_eq!(ticks(), 1, "once its period has passed");
-    let _ = ui.update();
-    assert_eq!(ticks(), 1, "and its period restarts");
+    // Updates until the timer is served: a hang guard, not a speed claim.
+    let guard = std::time::Instant::now() + Duration::from_secs(60);
+    while ticks() == 0 {
+        assert!(
+            std::time::Instant::now() < guard,
+            "the view's update never served the timer"
+        );
+        let _ = ui.update();
+    }
     probe.set(ClapSwitch::TimerPeriod, 0);
 }
 
 /// The cases of this module, run by `main`.
 pub(crate) const CASES: &[(&str, fn())] = tutti_fixtures::cases!["plugin_event_sources";
 an_in_process_editors_descriptor_is_served_by_the_views_update,
-an_in_process_editors_timer_is_served_by_the_views_update_at_its_period,
+an_in_process_editors_timer_is_served_by_the_views_update,
 ];

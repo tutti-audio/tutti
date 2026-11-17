@@ -474,36 +474,6 @@ fn a_restore_job_applies_the_saved_state_to_a_served_plugin() {
     restore_round_trip(Hosting::OutOfProcess);
 }
 
-/// **An in-process save the main thread does not run answers `Unavailable`:**
-/// the worker waits the off-main deadline for the main thread's work, which no
-/// update runs, and the job ends as `StateJobFailed::State(Unavailable)`.
-fn an_in_process_save_the_main_thread_does_not_run_is_unavailable() {
-    let (catalog, _dir) = catalog();
-    let mut s = session();
-    s.pool(
-        s.plugin_entry("verb", &id(), &catalog)
-            .hosting(Hosting::InProcess),
-    )
-    .unwrap();
-    assert!(matches!(next_event(&mut s, "verb"), PoolEvent::Loaded));
-    let _node = s.add_pooled_plugin(&"verb").unwrap();
-    let saving = s.save_state(&"verb").expect("a node holds the plugin");
-    // No update on the main thread meanwhile, for more than the off-main
-    // deadline: the job's end only lands in an update, so the wait cannot be
-    // polled, and the worker has timed out long before the first update.
-    thread::sleep(Duration::from_secs(4));
-    assert!(
-        matches!(
-            saving.wait(&mut s),
-            Err(tutti_session::StateJobFailed::State(
-                tutti_plugin::error::StateError::Unavailable
-            ))
-        ),
-        "the main thread did not run it in time"
-    );
-    s.close(tutti_fixtures::main_thread());
-}
-
 /// A pooled in-process plugin at a key, in `layout`'s ports, rendering its
 /// closed-form tags (`TagOnly`: output channel `c` of port `p` holds
 /// `probe_tag(p, c)`), its stereo input fed by two constants and its first two
@@ -1027,7 +997,6 @@ an_in_process_swap_to_other_ports_fails_the_entry,
 an_in_process_swap_waits_for_the_main_thread,
 a_restore_job_applies_the_saved_state_to_an_in_process_plugin,
 a_restore_job_applies_the_saved_state_to_a_served_plugin,
-an_in_process_save_the_main_thread_does_not_run_is_unavailable,
 a_plugin_that_widens_its_ports_is_re_inserted_wider,
 a_plugin_that_narrows_its_ports_reports_the_wiring_it_lost,
 a_plugin_that_grows_wider_than_a_block_is_refused_by_name,

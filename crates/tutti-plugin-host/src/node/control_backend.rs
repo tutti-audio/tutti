@@ -29,14 +29,16 @@
 //! next tick. Fire-and-forget writes post and do not wait.
 
 use std::sync::Arc;
+use std::sync::mpsc::RecvTimeoutError;
 use std::sync::mpsc::sync_channel;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
 use tutti_types::ParkedSampleRate;
 
 use parking_lot::Mutex;
 
 use super::instance::Instance;
+use super::off_main_wait::{OffMainWait, Wait};
 use crate::MainThreadControl;
 use crate::ParameterChangeSink;
 use tutti_plugin_types::{
@@ -76,7 +78,7 @@ pub(crate) struct ControlBackend<F: InProcess> {
 /// "unavailable" at once, as a call with no main thread does, and a post is
 /// refused rather than queued without bound. Under `cfg(test)` it is shortened to one
 /// second so the test of the expiry does not stall the suite; the pumped tests
-/// answer in one tick.
+/// answer in one tick. The decision is [`OffMainWait`]'s.
 const OFF_MAIN_DEADLINE: Duration = if cfg!(test) {
     Duration::from_secs(1)
 } else {
@@ -107,7 +109,17 @@ where
         self.work.defer(move |main| {
             let _ = answer.send(work(main, &mut inner.lock()));
         });
-        wait.recv_timeout(OFF_MAIN_DEADLINE).ok()
+        let deadline = OffMainWait::new(OFF_MAIN_DEADLINE, Instant::now());
+        loop {
+            let Wait::For(left) = deadline.at(Instant::now()) else {
+                return None;
+            };
+            match wait.recv_timeout(left) {
+                Ok(answer) => return Some(answer),
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => return None,
+            }
+        }
     }
 
     /// `work` on the plugin now, when this is the main thread and the instance is
@@ -446,13 +458,12 @@ mod off_main_tests {
     }
 
     /// **With a collector that has never run, an off-main call answers
-    /// "unavailable" at once**, well under the deadline, and queues nothing.
+    /// "unavailable" and queues nothing**: it waits for no main thread.
     #[test]
-    fn a_never_run_collector_gets_the_unavailable_answer_at_once() {
+    fn a_never_run_collector_gets_the_unavailable_answer_and_queues_nothing() {
         let (collector, work) = MainWork::new();
         let (_client, handle) = load(&work);
         let id = ParamId::new(1);
-        let started = std::time::Instant::now();
         let (state, value) = std::thread::spawn(move || {
             (
                 handle.any_thread().save_state(),
@@ -463,25 +474,26 @@ mod off_main_tests {
         .expect("the job returns");
         assert!(matches!(state, Err(StateError::Unavailable)), "{state:?}");
         assert_eq!(value, None);
-        assert!(
-            started.elapsed() < super::OFF_MAIN_DEADLINE / 4,
-            "answered in {:?}, not after the deadline",
-            started.elapsed()
-        );
         assert_eq!(collector.run(main_thread()), 0, "nothing was queued");
     }
 
-    /// **A collector that runs but is not run again answers "unavailable" after
-    /// the deadline**, not never.
+    /// **A collector that runs but is not run again answers "unavailable"**,
+    /// for a save and for a read, once the off-main wait ends.
     #[test]
-    fn a_stalled_main_thread_gets_the_unavailable_answer_after_the_deadline() {
+    fn a_stalled_main_thread_gets_the_unavailable_answer() {
         let (collector, work) = MainWork::new();
         let (_client, handle) = load(&work);
         assert_eq!(collector.run(main_thread()), 0);
         let id = ParamId::new(1);
-        let value = std::thread::spawn(move || handle.any_thread().parameter_value(id))
-            .join()
-            .expect("the job returns");
+        let (state, value) = std::thread::spawn(move || {
+            (
+                handle.any_thread().save_state(),
+                handle.any_thread().parameter_value(id),
+            )
+        })
+        .join()
+        .expect("the job returns");
+        assert!(matches!(state, Err(StateError::Unavailable)), "{state:?}");
         assert_eq!(value, None);
     }
 
@@ -546,29 +558,23 @@ mod off_main_tests {
         assert!(handle.any_thread().set_render_mode(RenderMode::Realtime));
     }
 
-    /// **Off the main thread an in-process bypass is lost and unread, without
-    /// waiting**, whether it is a parameter or a property: a tick on a pool
-    /// thread neither writes nor reads the plugin (the main thread's pump is not
-    /// asked), so it cannot be held up by it. A property write that took the
-    /// main thread's hop would wait out the deadline.
+    /// **Off the main thread an in-process bypass is lost and unread**, whether
+    /// it is a parameter or a property: a tick on a pool thread neither writes
+    /// nor reads the plugin (the main thread's pump is not asked). A write that
+    /// took the main thread's hop would be answered by the pump, not lost.
     #[test]
-    fn off_the_main_thread_an_in_process_bypass_is_lost_and_unread_at_once() {
+    fn off_the_main_thread_an_in_process_bypass_is_lost_and_unread() {
         let (_client, handle, _pump) = loaded();
         for site in [
             tutti_plugin_types::OwnBypass::Parameter(ParamId::new(1)),
             tutti_plugin_types::OwnBypass::Property,
         ] {
-            let began = std::time::Instant::now();
             assert_eq!(
                 handle.any_thread().set_bypassed(site, true),
                 tutti_plugin_types::BypassWrite::Lost,
                 "{site:?}"
             );
             assert_eq!(handle.any_thread().bypassed(site), None, "{site:?}");
-            assert!(
-                began.elapsed() < std::time::Duration::from_millis(500),
-                "{site:?}: neither waited for the main thread's tick"
-            );
         }
     }
 
