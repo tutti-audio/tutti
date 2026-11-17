@@ -28,7 +28,7 @@
 //! [`Tail::Unknown`](tutti_types::Tail::Unknown).
 
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_types::{ChannelLayout, Hz, Q, SampleRate, Samples, Seconds, Semitones};
+use tutti_types::{Amplitude, ChannelLayout, Db, Hz, Q, SampleRate, Samples, Seconds, Semitones};
 
 use super::SvfBank;
 use super::svf::{SvfCoefficients, SvfControls, SvfModel, SvfType};
@@ -84,7 +84,7 @@ pub struct EnvelopeFilterBank<F: Float + Lanes = f64> {
     rate: SampleRate,
     follower: Follower,
     /// The envelope, in `[0, 1]`: 0 until a level is heard.
-    env: f32,
+    env: Amplitude,
     bank: SvfBank<F>,
     coefficients: Glide<SvfCoefficients<F>>,
     controls: EnvelopeFilterControls,
@@ -102,7 +102,7 @@ impl<F: Float + Lanes> EnvelopeFilterBank<F> {
             ty,
             rate,
             follower: Follower::of(floored(controls.attack, controls.release), rate),
-            env: 0.0,
+            env: Amplitude::SILENT,
             bank: SvfBank::new(width),
             coefficients: Glide::landed(SvfCoefficients::from(&SvfModel::new(
                 SvfControls::DEFAULT,
@@ -120,10 +120,10 @@ impl<F: Float + Lanes> EnvelopeFilterBank<F> {
     /// Back to silence: the envelope at 0, the filter cleared, the cutoff landed at the
     /// design for an envelope of 0, and the grid counted from here. No allocation.
     pub fn reset(&mut self) {
-        self.env = 0.0;
+        self.env = Amplitude::SILENT;
         self.bank.reset();
         self.phase = 0;
-        self.coefficients.aim(self.design(0.0));
+        self.coefficients.aim(self.design(Amplitude::SILENT));
         self.coefficients.settle();
     }
 
@@ -139,34 +139,33 @@ impl<F: Float + Lanes> EnvelopeFilterBank<F> {
     pub fn aim(&mut self, controls: &EnvelopeFilterControls) {
         let d = EnvelopeFilterControls::DEFAULT;
         let max = EnvelopeFilterControls::MAX_DEPTH.get();
+        let times = floored(controls.attack, controls.release);
         self.controls = EnvelopeFilterControls {
             base: Hz(finite_or(controls.base.get(), d.base.get())),
             depth: Semitones(finite_or(controls.depth.get(), 0.0).clamp(-max, max)),
             q: Q(finite_or(controls.q.get(), d.q.get())),
-            attack: Seconds(controls.attack.get().max(0.0)),
-            release: Seconds(controls.release.get().max(0.0)),
+            attack: times.attack(),
+            release: times.release(),
         };
-        self.follower = Follower::of(floored(controls.attack, controls.release), self.rate);
+        self.follower = Follower::of(times, self.rate);
     }
 
-    /// The cutoff at the envelope `env` (0 to 1): `base * 2^(depth / 12 * env)`, held within 1
-    /// Hz and 0.998 of the Nyquist.
+    /// The cutoff at the envelope `env` (0 to 1): the base moved by `depth * env`
+    /// ([`Semitones::to_pitch_ratio`]), held within 1 Hz and 0.998 of the Nyquist.
     #[must_use]
-    pub(crate) fn cutoff_at(&self, env: f32) -> Hz {
-        let octaves = f64::from(self.controls.depth.get()) / 12.0 * f64::from(env);
-        let hz = f64::from(self.controls.base.get()) * libm::exp2(octaves);
-        let top = f64::from(self.rate.nyquist_scaled(0.998).get());
-        Hz(hz.clamp(1.0, top) as f32)
+    pub(crate) fn cutoff_at(&self, env: Amplitude) -> Hz {
+        let ratio = (self.controls.depth * env.get()).to_pitch_ratio();
+        (self.controls.base * ratio).clamp(Hz(1.0), self.rate.nyquist_scaled(0.998))
     }
 
     /// The coefficients at the envelope `env`.
-    fn design(&self, env: f32) -> SvfCoefficients<F> {
+    fn design(&self, env: Amplitude) -> SvfCoefficients<F> {
         SvfCoefficients::from(&SvfModel::new(
             SvfControls {
                 ty: self.ty,
                 freq: self.cutoff_at(env),
                 q: self.controls.q,
-                gain: tutti_types::Db(0.0),
+                gain: Db::UNITY,
             },
             self.rate,
         ))
@@ -193,7 +192,7 @@ impl<F: Float + Lanes> EnvelopeFilterBank<F> {
             let levels = &mut levels[..n];
             key_levels(&input, start..end, levels);
             for l in levels.iter() {
-                self.env = self.follower.follow(self.env, l.min(1.0));
+                self.env = Amplitude(self.follower.follow(self.env.get(), l.min(1.0)));
             }
             let range = Samples(start)..Samples(end);
             self.bank.process(

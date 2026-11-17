@@ -1,5 +1,5 @@
 use tutti_buffers::{Planes, PlanesMut};
-use tutti_types::{Hz, Q, SampleRate, Seconds, Semitones};
+use tutti_types::{Amplitude, Hz, Q, SampleRate, Seconds, Semitones};
 
 use super::*;
 use crate::testing::amplitude_at;
@@ -152,11 +152,14 @@ fn the_controls_are_held_in_range() {
     );
     let y = run(&mut b, &sine(TONE, 0.5, 2_000), 128);
     assert!(y.iter().all(|s| s.is_finite()));
-    assert_eq!(b.cutoff_at(1.0), EnvelopeFilterControls::DEFAULT.base);
+    assert_eq!(
+        b.cutoff_at(Amplitude(1.0)),
+        EnvelopeFilterControls::DEFAULT.base
+    );
     // Ten octaves above 1 kHz is past the Nyquist: the cutoff stops just short of it.
     let wide = bank(SvfType::LowPass, &controls(1_000.0, 1.0e9, 0.707));
-    assert_eq!(wide.cutoff_at(1.0), RATE.nyquist_scaled(0.998));
-    assert_eq!(wide.cutoff_at(0.0), Hz(1_000.0));
+    assert_eq!(wide.cutoff_at(Amplitude(1.0)), RATE.nyquist_scaled(0.998));
+    assert_eq!(wide.cutoff_at(Amplitude::SILENT), Hz(1_000.0));
 }
 
 /// A tone over full scale reads as 1 in the envelope: `min(|x|, 1)` of a sine of amplitude 2
