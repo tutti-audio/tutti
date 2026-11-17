@@ -86,6 +86,10 @@ pub(crate) struct Ring {
     /// ([`control_reader`](Self::control_reader)). The streamer is its only
     /// publisher.
     control: Publisher<RingControl>,
+    /// Readers registered through [`control_reader`](Self::control_reader)
+    /// (tests).
+    #[cfg(test)]
+    registered: std::sync::atomic::AtomicUsize,
 }
 
 impl std::fmt::Debug for Ring {
@@ -129,7 +133,17 @@ impl Ring {
     /// this ring: it lends once per block, never per sample, never parked
     /// across blocks. Control thread: registering may allocate.
     pub(crate) fn control_reader(&self) -> Reader<RingControl> {
+        #[cfg(test)]
+        self.registered
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         self.control.reader()
+    }
+
+    /// How many readers [`control_reader`](Self::control_reader) has
+    /// registered (tests).
+    #[cfg(test)]
+    pub(crate) fn registered_readers(&self) -> usize {
+        self.registered.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// The ring's control cell, for the stream's handle to read the applied
@@ -449,6 +463,8 @@ impl RegionBuffer {
             core: writer.watch(),
             fade_frames,
             control: Publisher::new(RingControl::new(RingMap::plain(arrangement, 0), None)),
+            #[cfg(test)]
+            registered: std::sync::atomic::AtomicUsize::new(0),
         });
         let writer = RegionOut {
             ring: Arc::clone(&ring),
