@@ -39,6 +39,7 @@ use coremidi::{
 };
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use tutti_rt::LockExt;
 
 use crate::InputProducerHandle;
 use crate::backend::by_message::{Refused, by_message};
@@ -72,9 +73,7 @@ pub(crate) use virtual_source::UmpVirtualSource;
 pub(crate) fn shared_client() -> std::result::Result<&'static Client, coremidi::OSStatus> {
     hub_first();
     static CLIENT: std::sync::Mutex<Option<&'static Client>> = std::sync::Mutex::new(None);
-    let mut slot = CLIENT
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut slot = CLIENT.lock_recover();
     if let Some(client) = *slot {
         return Ok(client);
     }

@@ -25,8 +25,9 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
+use tutti_rt::LockExt;
 
 use core_foundation::runloop::CFRunLoop;
 use coremidi::{Client, Notification};
@@ -108,7 +109,7 @@ type Shared = Arc<Mutex<Watcher>>;
 /// CoreMIDI, and a thread holding the hub lock across such a call would block
 /// the notification callback that CoreMIDI may be waiting on.
 fn look(watcher: &Shared) {
-    let mut watcher = watcher.lock().unwrap_or_else(PoisonError::into_inner);
+    let mut watcher = watcher.lock_recover();
     if !watcher.live {
         return;
     }
@@ -132,7 +133,7 @@ pub(super) struct Hub {
 
 impl Hub {
     fn watches(&self) -> MutexGuard<'_, Vec<(u64, Shared)>> {
-        self.watches.lock().unwrap_or_else(PoisonError::into_inner)
+        self.watches.lock_recover()
     }
 
     /// Has every registered watch look again.
@@ -148,7 +149,7 @@ impl Hub {
 /// client). A refusal is not kept: the next watch tries again.
 pub(super) fn hub() -> std::result::Result<&'static Hub, String> {
     static HUB: Mutex<Option<&'static Hub>> = Mutex::new(None);
-    let mut slot = HUB.lock().unwrap_or_else(PoisonError::into_inner);
+    let mut slot = HUB.lock_recover();
     if let Some(hub) = *slot {
         return Ok(hub);
     }
@@ -224,10 +225,7 @@ impl Watch for CoreMidiWatch {}
 impl Drop for CoreMidiWatch {
     fn drop(&mut self) {
         self.hub.watches().retain(|(key, _)| *key != self.key);
-        self.watcher
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .live = false;
+        self.watcher.lock_recover().live = false;
     }
 }
 
