@@ -26,7 +26,7 @@ use tutti_ump::{
     U7, UiHint, Ump, Utility, Voice1,
 };
 
-const PATIENCE: Duration = Duration::from_secs(5);
+const PATIENCE: Duration = Duration::from_secs(30);
 
 fn spec(tag: &str) -> VirtualSpec {
     VirtualSpec::new(
@@ -266,8 +266,17 @@ fn a_message_with_no_midi1_form_is_refused_by_a_midi1_source() {
             tutti_midi_protocol::NoMidi1Form::PerNote
         ))
     ));
-    std::thread::sleep(Duration::from_millis(100));
-    assert!(matches!(peer.read_event(), Ok(Read::Empty)));
+    // The refusal sent nothing: the next message through is the one that follows
+    // it, with nothing before it.
+    let after = note_on(MidiChannel::of(2), 60, 0x8000);
+    source.send(after).expect("sends");
+    let got = read(&peer, 1);
+    // The note reaches a MIDI 1.0 subscriber as a type 2 Note On of key 60.
+    let word = got[0][0];
+    assert_eq!(
+        (word >> 28, (word >> 20) & 0xF, (word >> 8) & 0x7F),
+        (2, 9, 60)
+    );
 }
 
 /// A MIDI 2.0 Program Change with a bank sent into a MIDI 1.0 source reaches a

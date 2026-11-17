@@ -5,15 +5,18 @@
 //! plugin is never marked edited by the phase.
 //!
 //! The plugin is a fake backend (`PluginHandle::from_backend`) hosted at a
-//! node with `Graph::host_plugin`, so no `plugin-server` is needed; what the
+//! node over `host`, so no `plugin-server` is needed; what the
 //! plugin reports (`SessionEvent::Plugin`'s `ParamChanged` and the rest) is driven through the same fake's listeners. The real
 //! plugin's death is `plugin.rs`'s
 //! `a_plugin_dead_for_the_window_is_removed_and_reported_once`.
 
+use super::host;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tutti_types::ChannelLayout;
 
+use crate::{DetachedSession, Phase, PhaseCx, PluginHealth, Session, SessionEvent};
+use crate::{PluginChange, PluginEvent};
 use tutti_graph::ForkByClone;
 use tutti_graph::NodeKey;
 use tutti_nodes::testing::Const;
@@ -21,8 +24,6 @@ use tutti_plugin_host::Liveness;
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::{BridgeError, ParameterInfo, PluginFailure};
 use tutti_plugin_types::{Normalized, ParamId};
-use tutti_session::{DetachedSession, Phase, PhaseCx, PluginHealth, Session, SessionEvent};
-use tutti_session::{PluginChange, PluginEvent};
 use tutti_types::SampleRate;
 
 /// A backend whose liveness is whatever the test says it is.
@@ -98,13 +99,12 @@ fn session_with(cause: Option<PluginFailure>) -> (DetachedSession, NodeKey) {
         .build_detached(SampleRate::DEFAULT)
         .expect("a detached session builds");
     let (node, _) = s.graph().add(ForkByClone(Const::mono(0.0)));
-    s.graph()
-        .host_plugin(
-            node,
-            handle_with(cause),
-            tutti_plugin::catalog::PluginRef::file("fake.clap").expect("a plugin file"),
-        )
-        .expect("the node is in the graph");
+    host(
+        &mut s,
+        node,
+        handle_with(cause),
+        tutti_plugin::catalog::PluginRef::file("fake.clap").expect("a plugin file"),
+    );
     // The insert is an edit: send it, so the flag starts clear.
     s.commit();
     (s, node.erase())
@@ -279,13 +279,12 @@ fn session_reporting() -> (
         .build_detached(SampleRate::DEFAULT)
         .expect("a detached session builds");
     let (node, _) = s.graph().add(ForkByClone(Const::mono(0.0)));
-    s.graph()
-        .host_plugin(
-            node,
-            handle,
-            tutti_plugin::catalog::PluginRef::file("fake.clap").expect("a plugin file"),
-        )
-        .expect("the node is in the graph");
+    host(
+        &mut s,
+        node,
+        handle,
+        tutti_plugin::catalog::PluginRef::file("fake.clap").expect("a plugin file"),
+    );
     s.commit();
     (s, node.erase(), params, refresh, invalidate)
 }

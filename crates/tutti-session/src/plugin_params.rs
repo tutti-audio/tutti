@@ -207,7 +207,7 @@ impl<'a> Params<'a> {
 
     /// Whether the plugin's parameters have been read. A plugin loaded through
     /// the session is read at load; one the host inserted itself
-    /// ([`Graph::host_plugin`](crate::Graph::host_plugin)) is read by a job
+    /// ([`Graph::insert_plugin`](crate::Graph::insert_plugin)) is read by a job
     /// on the session's spawner, landed in [`Session::update`](crate::Session::update).
     #[must_use]
     pub fn is_ready(&self) -> bool {

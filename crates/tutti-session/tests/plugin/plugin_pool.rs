@@ -1099,3 +1099,59 @@ mod process {
         });
     }
 }
+
+/// **A plugin's losses are cumulative across a reload at its node.** A block
+/// of 300 notes holds `MIDI_STACK_CAPACITY` of them: the rest are `lost`, and
+/// only those. The server is terminated and recovery reloads the plugin at the
+/// same key; the reloaded plugin's own count starts at zero, and the node's
+/// `losses()` keeps what the first one lost and adds what the second does.
+#[test]
+fn losses_survive_a_reload_of_the_plugin_at_its_node() {
+    use tutti_fixtures::midi;
+    use tutti_graph::EventCapacity;
+    use tutti_session::{Losses, Root, Stamp};
+    use tutti_ump::MidiChannel;
+
+    let past_capacity = Losses::lost(300 - tutti_plugin_types::MIDI_STACK_CAPACITY as u64);
+    let (catalog, _dir) = catalog();
+    let (mut s, node) = with_node(&catalog);
+    s.graph().connect(node, Root).unwrap();
+    let (inlet, mut writer) = s.graph().open_event_inlet(EventCapacity::of(512));
+    s.graph()
+        .connect(inlet.events_out(), node.events_in())
+        .unwrap();
+    let notes = || (0..300).map(|i| midi::note_on(MidiChannel::FIRST, (i % 128) as u8, 0xFFFF));
+    let losses = |s: &Session| s.plugin_view(node).unwrap().losses();
+    let _ = pump(&mut s);
+    assert_eq!(losses(&s), Losses::NONE, "nothing sent yet");
+
+    writer.push_all(notes().map(|n| (Stamp::NextBlock, n)));
+    let _ = pump(&mut s);
+    assert_eq!(losses(&s), past_capacity);
+
+    let first = pid_of(&s, node).expect("served");
+    s.plugin_view(node)
+        .unwrap()
+        .diagnostics()
+        .terminate(TerminationReason::Hung {
+            blocks: 16,
+            held: Duration::from_secs(5),
+        });
+    pump_until(&mut s, "the reload to land", |s| {
+        pid_of(s, node).is_some_and(|pid| pid != first)
+            && matches!(s.plugin_view(node).unwrap().health(), PluginHealth::Running)
+    });
+    assert_eq!(
+        losses(&s),
+        past_capacity,
+        "the reloaded plugin has lost nothing, and the first one's count stays"
+    );
+
+    writer.push_all(notes().map(|n| (Stamp::NextBlock, n)));
+    let _ = pump(&mut s);
+    assert_eq!(
+        losses(&s),
+        past_capacity + past_capacity,
+        "the reloaded plugin's losses add to the first one's"
+    );
+}

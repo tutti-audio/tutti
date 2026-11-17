@@ -41,6 +41,7 @@ mod sf2_spec;
 mod spec_text;
 mod submodule_pins;
 mod test_paths;
+mod test_time;
 mod toml;
 mod umbrella;
 // Backs the local `umbrella-api` recipe (it needs the docs nightly): not a gate.
@@ -153,6 +154,8 @@ pub(crate) enum Gate {
     Umbrella,
     /// Logging is `tracing`: no `log` dependency, and nothing prints outside a `main`.
     Logging,
+    /// A test asserts no wall-clock time and sleeps for no event (a per-file ratchet).
+    TestTime,
 }
 
 impl Gate {
@@ -182,6 +185,7 @@ impl Gate {
             Gate::Building => "gate check-building".to_owned(),
             Gate::Umbrella => "gate check-umbrella".to_owned(),
             Gate::Logging => "gate check-logging".to_owned(),
+            Gate::TestTime => "gate check-test-time".to_owned(),
         }
     }
 
@@ -214,6 +218,7 @@ impl Gate {
             Gate::Buffers => buffers::check(&tree, buffers::MIN_SITES),
             Gate::Building => building::check(&tree, building::ALLOW, building::MIN_SITES),
             Gate::Logging => logging::check(&tree, logging::ALLOW),
+            Gate::TestTime => test_time::check(&tree),
             Gate::AllocBinaries => alloc_binaries::check(&tree, alloc_binaries::ALLOWED),
             Gate::PlatformSeam => platform_seam::check(&tree, platform_seam::ALLOW),
             Gate::Conformance => {
