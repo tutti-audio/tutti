@@ -2,3 +2,4 @@
 
 mod dynamics_nodes;
 mod key_filter;
+mod transient_shaper;

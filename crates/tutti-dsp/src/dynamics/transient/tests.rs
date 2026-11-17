@@ -1,0 +1,201 @@
+use tutti_buffers::{Planes, PlanesMut};
+use tutti_types::{Db, SampleRate, Seconds};
+
+use super::*;
+use crate::testing::noise;
+
+const RATE: SampleRate = SampleRate::SR_48K;
+const FAST: Seconds = Seconds(0.001);
+const SLOW: Seconds = Seconds(0.02);
+const LEVEL: f64 = 0.5;
+
+/// A shaper at `RATE` at rest on the amounts `attack` and `sustain` dB.
+fn shaper(attack: f64, sustain: f64) -> TransientBank {
+    let mut bank = TransientBank::new(RATE, FAST, SLOW);
+    bank.aim(&TransientControls {
+        attack: Db(attack as f32),
+        sustain: Db(sustain as f32),
+    });
+    bank.settle();
+    bank
+}
+
+/// `audio` (one slice per channel) through `bank` in calls of at most `block` frames.
+fn run(bank: &mut TransientBank, audio: &[&[f32]], block: usize) -> Vec<Vec<f32>> {
+    let n = audio[0].len();
+    let mut out = vec![vec![0.0f32; n]; audio.len()];
+    let mut at = 0;
+    while at < n {
+        let end = (at + block).min(n);
+        let a: Vec<&[f32]> = audio.iter().map(|c| &c[at..end]).collect();
+        let mut outs: Vec<&mut [f32]> = out.iter_mut().map(|c| &mut c[at..end]).collect();
+        bank.process(Planes::new(&a).unwrap(), PlanesMut::new(&mut outs).unwrap());
+        at = end;
+    }
+    out
+}
+
+/// The one-pole pole `a = exp(-1 / (tau * rate))` of a follower of time constant `tau`.
+fn pole(tau: Seconds) -> f64 {
+    (-1.0 / (tau.get() * RATE.get())).exp()
+}
+
+/// The amplitude of `db`, from the definition.
+fn amplitude(db: f64) -> f64 {
+    10f64.powf(db / 20.0)
+}
+
+/// A level of `LEVEL` held for `n` frames: a square wave, whose magnitude is steady.
+fn steady(n: usize) -> Vec<f32> {
+    (0..n)
+        .map(|i| {
+            if i % 2 == 0 {
+                LEVEL as f32
+            } else {
+                -LEVEL as f32
+            }
+        })
+        .collect()
+}
+
+/// With the fast and slow envelopes at one level (a steady magnitude), the gain is 0 dB
+/// whatever the amounts are: the closed form's `f = s` branch.
+#[test]
+fn a_steady_level_is_left_alone_at_any_amounts() {
+    for (attack, sustain) in [(0.0, 0.0), (12.0, -12.0), (-24.0, 24.0), (24.0, 24.0)] {
+        let mut bank = shaper(attack, sustain);
+        let x = steady(48_000);
+        let y = run(&mut bank, &[&x], 480).remove(0);
+        // A settled steady level: both envelopes are at the level to `f32`'s rounding, so
+        // the gain is 0 dB to within the ratio's last bits.
+        for (i, (a, b)) in x.iter().zip(&y).enumerate().skip(40_000) {
+            assert!(
+                (f64::from(*b) - f64::from(*a)).abs() < 1e-4,
+                "frame {i} at ({attack}, {sustain}) dB: {a} -> {b}"
+            );
+        }
+    }
+}
+
+/// From silence into a constant level `L`, the envelopes are `L (1 - a^n)` after `n` frames,
+/// so the gain in dB at frame `n - 1` is `attack * (1 - (1 - as^n) / (1 - af^n))`.
+#[test]
+fn the_gain_on_a_step_onset_follows_the_two_followers_step_responses() {
+    let attack: f64 = 12.0;
+    let mut bank = shaper(attack, -12.0);
+    let x = vec![LEVEL as f32; 2_000];
+    let y = run(&mut bank, &[&x], 64).remove(0);
+    let (af, asl) = (pole(FAST), pole(SLOW));
+    let mut peak = 0.0f64;
+    for (i, got) in y.iter().enumerate() {
+        let n = (i + 1) as i32;
+        let g = attack * (1.0 - (1.0 - asl.powi(n)) / (1.0 - af.powi(n)));
+        peak = peak.max(g);
+        let want = LEVEL * amplitude(g);
+        assert!(
+            (f64::from(*got) - want).abs() < 2e-5,
+            "frame {i}: gain {got} vs {want} ({g} dB)"
+        );
+    }
+    assert!(
+        peak > 0.5 * attack,
+        "the onset reaches into the attack amount: {peak} dB"
+    );
+}
+
+/// After a steady `L`, a drop to a constant `L2` moves the envelopes to
+/// `L2 + (L - L2) a^n`, and the fast one is under the slow one: the gain in dB is
+/// `sustain * (1 - f / s)`.
+#[test]
+fn the_gain_on_a_decay_follows_the_two_followers_step_responses() {
+    let sustain: f64 = 9.0;
+    let mut bank = shaper(-6.0, sustain);
+    let low = LEVEL / 4.0;
+    let mut x = vec![LEVEL as f32; 48_000];
+    x.extend(std::iter::repeat_n(low as f32, 2_000));
+    let y = run(&mut bank, &[&x], 100).remove(0);
+    let (af, asl) = (pole(FAST), pole(SLOW));
+    let mut deepest = 0.0f64;
+    for i in 0..2_000 {
+        let n = (i + 1) as i32;
+        let f = low + (LEVEL - low) * af.powi(n);
+        let s = low + (LEVEL - low) * asl.powi(n);
+        let g = sustain * (1.0 - f / s);
+        deepest = deepest.max(g);
+        let want = low * amplitude(g);
+        let got = f64::from(y[48_000 + i]);
+        assert!(
+            (got - want).abs() < 2e-5,
+            "decay frame {i}: {got} vs {want} ({g} dB)"
+        );
+    }
+    assert!(
+        deepest > 0.5 * sustain,
+        "the decay reaches into the sustain amount: {deepest} dB"
+    );
+}
+
+/// A shaper at 0 dB on both amounts passes any signal bit for bit.
+#[test]
+fn zero_amounts_are_the_identity() {
+    let mut bank = shaper(0.0, 0.0);
+    let x = noise(3, 4_000, 0.9);
+    let y = run(&mut bank, &[&x], 256).remove(0);
+    assert_eq!(x, y);
+}
+
+/// One gain serves every channel, read from the louder one: the gain on both channels is the
+/// closed-form decay of the loudest level (`0.5` falling to `0.25`), which a detector per
+/// channel would not give (the quieter channel's own level never falls).
+#[test]
+fn the_channels_share_one_gain_from_the_loudest() {
+    let sustain: f64 = 9.0;
+    let mut bank = shaper(0.0, sustain);
+    let (hi, lo) = (0.5f64, 0.25f64);
+    let settled = 48_000;
+    let after = 1_500;
+    // The loud channel steps from 0.5 to 0.1 and the other from 0.1 to 0.25: the loudest
+    // level falls from 0.5 to 0.25 while the second channel's own level rises.
+    let mut l = vec![hi as f32; settled];
+    l.extend(std::iter::repeat_n(0.1f32, after));
+    let mut r = vec![0.1f32; settled];
+    r.extend(std::iter::repeat_n(lo as f32, after));
+    let y = run(&mut bank, &[&l, &r], 77);
+    let (af, asl) = (pole(FAST), pole(SLOW));
+    for i in 0..after {
+        let n = (i + 1) as i32;
+        let f = lo + (hi - lo) * af.powi(n);
+        let s = lo + (hi - lo) * asl.powi(n);
+        let want = amplitude(sustain * (1.0 - f / s));
+        for (c, x) in [(0usize, &l), (1usize, &r)] {
+            let got = f64::from(y[c][settled + i]) / f64::from(x[settled + i]);
+            assert!(
+                (got - want).abs() < 1e-4,
+                "channel {c}, frame {i}: gain {got} vs {want}"
+            );
+        }
+    }
+}
+
+/// A request past `MAX_AMOUNT` is the bound, which the step-onset closed form then follows,
+/// and a non-finite amount is 0 dB (the identity).
+#[test]
+fn the_amounts_are_held_within_the_range_and_a_non_finite_one_is_zero() {
+    let x = vec![LEVEL as f32; 600];
+    let (af, asl) = (pole(FAST), pole(SLOW));
+    for (asked, bound) in [(1_000.0, 24.0), (-1_000.0, -24.0)] {
+        let y = run(&mut shaper(asked, 0.0), &[&x], 600).remove(0);
+        for (i, got) in y.iter().enumerate() {
+            let n = (i + 1) as i32;
+            let g = bound * (1.0 - (1.0 - asl.powi(n)) / (1.0 - af.powi(n)));
+            let want = LEVEL * amplitude(g);
+            assert!(
+                (f64::from(*got) - want).abs() < 2e-5,
+                "asked {asked}, frame {i}"
+            );
+        }
+    }
+    for asked in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert_eq!(run(&mut shaper(asked, asked), &[&x], 600).remove(0), x);
+    }
+}

@@ -19,9 +19,13 @@ mod compressor;
 mod gate;
 mod limiter;
 mod multiband;
+mod transient;
 
 pub use brickwall::{BrickwallKernel, BrickwallLimiterNode, BrickwallSet};
 pub use compressor::{CompressorKernel, CompressorNode, CompressorSet};
 pub use gate::{GateKernel, GateNode, GateSet};
 pub use limiter::{LimiterKernel, LimiterNode, LimiterSet};
 pub use multiband::{BAND_PARAMS, MultibandCompressorNode, MultibandControls};
+pub use transient::{
+    TransientShaperConfig, TransientShaperKernel, TransientShaperNode, TransientShaperSet,
+};

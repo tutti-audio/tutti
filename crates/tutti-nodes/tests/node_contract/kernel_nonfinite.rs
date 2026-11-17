@@ -15,7 +15,8 @@ use tutti_nodes::{
 };
 use tutti_nodes::{
     BitCrusherConfig, BitCrusherNode, ButterworthOrder, CutAlignment, CutFilterConfig,
-    CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerNode,
+    CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerNode, TransientShaperConfig,
+    TransientShaperNode,
 };
 use tutti_types::{
     BitDepth, BusTopology, ChannelLayout, Db, Drive, Feedback, Frame, HoldFactor, Hz, MaxBlock,
@@ -114,6 +115,14 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
                 CutResponse::LowPass,
                 CutAlignment::LinkwitzRiley(ButterworthOrder::of(4)),
             ))),
+        ),
+        (
+            "transient shaper",
+            Box::new(TransientShaperNode::from(
+                TransientShaperConfig::new(ChannelLayout::STEREO)
+                    .attack(Db(12.0))
+                    .sustain(Db(-6.0)),
+            )),
         ),
         ("gate", Box::new(GateNode::mono(GateControls::DEFAULT))),
         (

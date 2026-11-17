@@ -25,12 +25,13 @@ use tutti_nodes::{
 };
 use tutti_nodes::{
     BitCrusherConfig, BitCrusherNode, ButterworthOrder, CutAlignment, CutFilterConfig,
-    CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerNode,
+    CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerNode, TransientShaperConfig,
+    TransientShaperNode,
 };
 use tutti_nodes::{StereoWidthConfig, StereoWidthNode};
 use tutti_types::{
     Amplitude, BusTopology, ChannelLayout, CompressionRatio, Db, Depth, Drive, Feedback, Hz, Q,
-    Resonance, Seconds, StereoWidth, UnitParam,
+    Resonance, Seconds, StereoWidth, UnitAddr, UnitParam,
 };
 
 #[test]
@@ -240,6 +241,24 @@ fn cut_filter() {
     })
     .control("cutoff", |d| {
         assert!(d.param_set().set(UnitParam::Cutoff, 400.0))
+    })
+    .check();
+}
+
+#[test]
+fn transient_shaper() {
+    IsolateRow::new("TransientShaperNode (stereo)", || {
+        TransientShaperNode::from(
+            TransientShaperConfig::new(ChannelLayout::STEREO)
+                .attack(Db(6.0))
+                .sustain(Db(-3.0)),
+        )
+    })
+    .control("attack", |d| {
+        assert!(d.param_set().set(UnitAddr::new(UnitParam::GainDb, 0), 12.0))
+    })
+    .control("sustain", |d| {
+        assert!(d.param_set().set(UnitAddr::new(UnitParam::GainDb, 1), 9.0))
     })
     .check();
 }

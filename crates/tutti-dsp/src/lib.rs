@@ -105,6 +105,7 @@
 //!   keyed, its threshold a lane, its makeup a [`Glide`] over [`GAIN_GLIDE`]) and the noise
 //!   gate ([`GateBank`], its range gliding likewise). Both read a [`KeySource`]: a side-chain
 //!   bus or the signal itself, through a [`KeyFilter`] if the bank is built with one. The
+//!   transient shaper ([`TransientBank`]) takes one gain from a fast and a slow [`PeakFollower`]. The
 //!   multiband compressor ([`MultibandBank`]) is a crossover tree per channel and a [`CompressorBank`] per band, each band's makeup, bypass and solo
 //!   gliding over [`GAIN_GLIDE`].
 //! - **Reverb** (`reverb/`): the model, a [`Network`] of [`Stage`]s with
@@ -212,7 +213,8 @@ pub use dynamics::{
     CompressorBank, CompressorControls, CompressorLanes, GAIN_GLIDE, GateBank, GateControls,
     GateLanes, KeyFilter, KeySource, LimiterBank, LimiterControls, LimiterCurve, LimiterLanes,
     Lookahead, LookaheadError, MultibandBank, MultibandLanes, MultibandSettings, PeakDetection,
-    TruePeakError, amplitude_to_db, compute_compressor_gain_reduction, compute_limiter_gain,
+    PeakFollower, TransientBank, TransientControls, TruePeakError, amplitude_to_db,
+    compute_compressor_gain_reduction, compute_limiter_gain,
 };
 pub use fft::{Complex32, Complex64, FftScratch, RealFft};
 pub use filter::{

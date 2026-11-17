@@ -250,19 +250,20 @@ pub mod nodes {
         OversamplingFactor, PhaserControls, PhaserNode, PortSide, Routing as FeedbackRouting,
         RoutingError as FeedbackRoutingError, SOURCE_EVENT_CAPACITY, ShapeKind, SourceNode,
         SourcePorts, Stages, StagesError, Stagger, StaggerError, SvfControls, SvfFilterNode,
-        SvfType, Sweep, SweepError, SweepRange, SweepRangeError, VbapError, VbapPannerNode,
-        VolumeOutOfRange,
+        SvfType, Sweep, SweepError, SweepRange, SweepRangeError, TransientControls,
+        TransientShaperConfig, TransientShaperNode, VbapError, VbapPannerNode, VolumeOutOfRange,
     };
     pub use tutti_nodes::{
         BitCrusherKernel, BrickwallKernel, CompressorKernel, Control, ControlLanes, ControlRead,
         ControlSet, ControlValid, CrossoverKernel, CutFilterKernel, DcBlockerKernel, DelayKernel,
         DistortionKernel, FdnKernel, Feed, FreeverbKernel, GateKernel, Kernel, KernelNode,
         LadderKernel, LimiterKernel, ModDelayKernel, PhaserKernel, ReconcileError, SvfKernel,
+        TransientShaperKernel,
     };
     pub use tutti_nodes::{
         BitCrusherSet, BrickwallSet, CompressorSet, CrossoverSet, CutFilterSet, DcBlockerSet,
         DelaySet, DistortionSet, FdnSet, FreeverbSet, GateSet, HasControl, LadderSet, LimiterSet,
-        ModDelaySet, PhaserSet, SvfSet,
+        ModDelaySet, PhaserSet, SvfSet, TransientShaperSet,
     };
 }
 
