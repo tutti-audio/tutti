@@ -230,6 +230,13 @@ pub mod nodes {
         RecordMode, RecordingConfig, Trajectory,
     };
     pub use tutti_nodes::{
+        AutoPanConfig, AutoPanControls, AutoPanKernel, AutoPanNode, AutoPanSet, ChannelOutOfRange,
+        MidSideConfig, MidSideNode, OscillatorWave, PanLaw, PolarityConfig, PolarityError,
+        PolarityNode, RingModConfig, RingModControls, RingModKernel, RingModNode, RingModSet,
+        StereoWidthConfig, StereoWidthKernel, StereoWidthNode, StereoWidthSet, TremoloConfig,
+        TremoloControls, TremoloKernel, TremoloNode, TremoloSet, WidthControls,
+    };
+    pub use tutti_nodes::{
         BAND_PARAMS, BrickwallLimiterNode, BusStripNode, ChannelTimes, ChannelTimesError,
         ClickNode, ClickSettings, ClickState, CompressorControls, CompressorNode, ConvolverError,
         ConvolverNode, CrossoverControls, CrossoverError, CrossoverNode, DcBlockerConfig,

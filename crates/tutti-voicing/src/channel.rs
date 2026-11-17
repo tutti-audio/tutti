@@ -270,17 +270,16 @@ impl ChannelState {
             Rpn::PITCH_BEND_SENSITIVITY => {
                 // MSB semitones, LSB cents: `bend_sensitivity`'s inverse.
                 let hundredths =
-                    (self.bend.range.get() * 100.0).round().clamp(0.0, 12_799.0) as u32;
+                    libm::roundf(self.bend.range.get() * 100.0).clamp(0.0, 12_799.0) as u32;
                 Some(registered(hundredths / 100, hundredths % 100).to_word())
             }
             Rpn::CHANNEL_FINE_TUNING => {
-                let fourteen = ((self.bend.fine.get() + 1.0) * 8192.0)
-                    .round()
-                    .clamp(0.0, 16_383.0);
+                let fourteen =
+                    libm::roundf((self.bend.fine.get() + 1.0) * 8192.0).clamp(0.0, 16_383.0);
                 Some(RegisteredData::from_fourteen(U14::masked(fourteen as u16)).to_word())
             }
             Rpn::CHANNEL_COARSE_TUNING => {
-                let msb = (self.bend.coarse.get() + 64.0).round().clamp(0.0, 127.0);
+                let msb = libm::roundf(self.bend.coarse.get() + 64.0).clamp(0.0, 127.0);
                 Some(registered(msb as u32, 0).to_word())
             }
             Rpn::TUNING_PROGRAM_SELECT => {
@@ -292,10 +291,8 @@ impl ChannelState {
             Rpn::MODULATION_DEPTH_RANGE => {
                 // MSB semitones, LSB 100/128 cent: `set_modulation_range`'s inverse.
                 let cents = self.modulation_range.get().clamp(0.0, 12_700.0);
-                let semitones = (cents / 100.0).floor();
-                let eighths = ((cents - semitones * 100.0) * 128.0 / 100.0)
-                    .round()
-                    .min(127.0);
+                let semitones = libm::floorf(cents / 100.0);
+                let eighths = libm::roundf((cents - semitones * 100.0) * 128.0 / 100.0).min(127.0);
                 Some(registered(semitones as u32, eighths as u32).to_word())
             }
             _ => None,

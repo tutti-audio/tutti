@@ -809,6 +809,7 @@ const NO_STD_CRATES: &[(&str, &[&str])] = &[
     ("tutti-metering", &[]),
     ("tutti-tempo", &["serde"]),
     ("tutti-modulation", &[]),
+    ("tutti-voicing", &[]),
 ];
 
 const CHECK_FEATURES: &[&str] = &[

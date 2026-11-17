@@ -1,0 +1,82 @@
+//! [`RingModulator`]: the input multiplied by a sine carrier.
+//!
+//! The carrier is `c[n] = sin(2 pi phi[n])` with the phase `phi` in cycles, starting at 0 and
+//! advanced by `f / fs` a frame, so a change of frequency bends the phase's slope and never
+//! jumps it. The output is `y = x c`, whose spectrum for a sine input at `f1` holds
+//! `f1 + fc` and `f1 - fc` and nothing at `f1`. A dry/wet blend is the graph's, per node.
+
+use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_types::{Hz, SampleRate};
+
+use crate::{Oscillator, OscillatorWave};
+
+/// The controls of a [`RingModulator`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RingModControls {
+    /// The carrier's frequency. At or below 0 the phase holds and past the Nyquist it runs
+    /// at it; one that is not finite holds the phase.
+    pub frequency: Hz,
+}
+
+impl RingModControls {
+    /// A 440 Hz carrier.
+    pub const DEFAULT: Self = Self {
+        frequency: Hz(440.0),
+    };
+}
+
+/// A ring modulator of any width: one carrier, in phase across the channels.
+///
+/// Built on the control side for one rate; nothing it holds grows.
+#[derive(Clone, Copy, Debug)]
+pub struct RingModulator {
+    carrier: Oscillator,
+    rate: SampleRate,
+    controls: RingModControls,
+}
+
+impl RingModulator {
+    /// A modulator at `rate` and the default controls, the carrier at phase 0.
+    #[must_use]
+    pub fn new(rate: SampleRate) -> Self {
+        Self {
+            carrier: Oscillator::new(OscillatorWave::Sine),
+            rate,
+            controls: RingModControls::DEFAULT,
+        }
+    }
+
+    /// Takes `controls`; the carrier's phase is kept. No allocation.
+    pub fn aim(&mut self, controls: &RingModControls) {
+        self.controls = *controls;
+    }
+
+    /// Back to carrier phase 0.
+    pub fn reset(&mut self) {
+        self.carrier.reset();
+    }
+
+    /// Runs `input` into `output`. The channels rendered are the fewer of the two views',
+    /// the frames the fewer of the two views'. No allocation.
+    pub fn process<S: Float>(&mut self, input: Planes<'_, S>, mut output: PlanesMut<'_, '_, S>) {
+        let frames = input.frames().get().min(output.frames().get());
+        let width = input.channels().min(output.channels());
+        let RingModControls { frequency } = self.controls;
+        let start = self.carrier;
+        let mut end = start;
+        for c in 0..width {
+            let mut carrier = start;
+            let x = &input.plane(c).samples()[..frames];
+            let mut plane = output.plane_mut(c);
+            let y = &mut plane.samples_mut()[..frames];
+            for (y, &x) in y.iter_mut().zip(x) {
+                *y = x * S::from_f32(carrier.step(frequency, self.rate));
+            }
+            end = carrier;
+        }
+        self.carrier = end;
+    }
+}
+
+#[cfg(test)]
+mod tests;
