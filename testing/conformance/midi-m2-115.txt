@@ -7,7 +7,10 @@
 # text when `TUTTI_MIDI_SPECS` is set. Nothing of the spec is quoted here: ids,
 # section numbers, keyword kinds and functional facts only.
 #
-# Columns: id | side | maturity | kind | section | paraphrase | facts | na-kind | cite
+# Columns: id | side | maturity | kind | section | paraphrase | facts | na-kind | cite | digest
+# digest is the FNV-1a 64 of the row's sentence, whitespace normalised: the hand
+# columns follow it when a revision shifts the numbers. side `changed` is a row
+# whose sentence changed under hand columns: reread it and rewrite them.
 #
 # Ids:
 #   m2-115/<section>#<n>          the nth sentence under the numbered section
@@ -21,24 +24,24 @@
 # sentence with only those has no row. Sentence rows only: no table of the
 # document has a row per item.
 # side: sender, receiver or both (todo marks a row not yet read).
-m2-115/1.3#1 | both |  | required | M2-115 §1.3 | special per-controller translation rules defined in the MIDI 1.0 spec replace this document's rules for those controllers |  |  |
-m2-115/1.4#1 | both |  | recommended | M2-115 §1.4 | new specifications define values at 16 or 32 bits |  |  |
-m2-115/1.6.1#1 | both |  | permitted | M2-115 §1.6.1 | glossary: Property Exchange lets one device read another's data, definition only |  |  |
-m2-115/1.6.1#2 | both |  | permitted | M2-115 §1.6.1 | glossary: a Transaction can have several replies, definition only |  |  |
-m2-115/1.6.1#3 | both |  | permitted | M2-115 §1.6.1 | glossary: a Transaction can be a longer multi-step exchange, definition only |  |  |
-m2-115/2#1 | sender |  | permitted | M2-115 §2 | a device can capture fewer significant bits than the Protocol field holds |  |  |
-m2-115/2.1#1 | sender |  | required | M2-115 §2.1 | a sender upscales the data it has to the full width of the target field before sending, with this document's methods |  |  |
-m2-115/2.2#1 | receiver |  | required | M2-115 §2.2 | a receiver takes every received value as expressed at the full field width |  |  |
-m2-115/2.2#2 | receiver |  | required | M2-115 §2.2 | a receiver that cannot hold the full width downscales the value with this document's methods |  |  |
-m2-115/2.3#1 | both |  | required | M2-115 §2.3 | a translator upscales or downscales as needed so the target field has its full width |  |  |
-m2-115/2.3#2 | both |  | permitted | M2-115 §2.3 | after a narrowing translation the value read back can differ from the one sent | neg=1 |  |
-m2-115/2.4#1 | sender |  | permitted | M2-115 §2.4 | relative controller steps with fewer significant bits than the receiver's own may leave the controller unchanged |  |  |
-m2-115/3.1#1 | both |  | required | M2-115 §3.1 | a translator scales the listed controllers (Control Change, Pitch Bend, pressure and similar) Min-Center-Max |  |  |
-m2-115/4#1 | both |  | recommended | M2-115 §4 | a receiver ignores the low-bit noise zero-extension leaves, and a sender does not send it |  |  |
-m2-115/4.1#1 | both |  | required | M2-115 §4.1 | a translator zero-extends the Registered Controller (RPN) messages whose index is 0 to 31, rounding when narrowing |  |  |
-m2-115/4.3#1 | both |  | recommended | M2-115 §4.3 | zero-extension upscaling fills the new low bits with zero, a left shift |  |  |
-m2-115/4.3#2 | both |  | recommended | M2-115 §4.3 | zero-extension is not used to upscale a one-bit on/off value | neg=1 |  |
-m2-115/4.3#3 | both |  | permitted | M2-115 §4.3 | a one-bit value of one lands at the halfway point after zero-extension, which may be too coarse to use | neg=1 |  |
-m2-115/4.4#1 | receiver |  | recommended | M2-115 §4.4 | fixed-point values narrowing to fewer bits are rounded |  |  |
-m2-115/4.4#2 | receiver |  | permitted | M2-115 §4.4 | rounding on narrowing is followed by a clamp, because rounding can leave the range |  |  |
-m2-115/5#1 | both |  | recommended | M2-115 §5 | stepped values and enumerations keep the full resolution |  |  |
+m2-115/1.3#1 | both |  | required | M2-115 §1.3 | special per-controller translation rules defined in the MIDI 1.0 spec replace this document's rules for those controllers |  |  |  | 912cc06e7a7d86d7
+m2-115/1.4#1 | both |  | recommended | M2-115 §1.4 | new specifications define values at 16 or 32 bits |  |  |  | 4eeb10f9f1034b6d
+m2-115/1.6.1#1 | both |  | permitted | M2-115 §1.6.1 | glossary: Property Exchange lets one device read another's data, definition only |  |  |  | ecca8c2b10f7ba80
+m2-115/1.6.1#2 | both |  | permitted | M2-115 §1.6.1 | glossary: a Transaction can have several replies, definition only |  |  |  | 92dea0536f6b0292
+m2-115/1.6.1#3 | both |  | permitted | M2-115 §1.6.1 | glossary: a Transaction can be a longer multi-step exchange, definition only |  |  |  | bbe806d164dfe0e4
+m2-115/2#1 | sender |  | permitted | M2-115 §2 | a device can capture fewer significant bits than the Protocol field holds |  |  |  | f04468e17cf3d9a9
+m2-115/2.1#1 | sender |  | required | M2-115 §2.1 | a sender upscales the data it has to the full width of the target field before sending, with this document's methods |  |  |  | 99b981eb48967bbf
+m2-115/2.2#1 | receiver |  | required | M2-115 §2.2 | a receiver takes every received value as expressed at the full field width |  |  |  | 72caeb04c3e4f51d
+m2-115/2.2#2 | receiver |  | required | M2-115 §2.2 | a receiver that cannot hold the full width downscales the value with this document's methods |  |  |  | 191d7cd7ae502cb5
+m2-115/2.3#1 | both |  | required | M2-115 §2.3 | a translator upscales or downscales as needed so the target field has its full width |  |  |  | 1c31baa5d76a6b50
+m2-115/2.3#2 | both |  | permitted | M2-115 §2.3 | after a narrowing translation the value read back can differ from the one sent | neg=1 |  |  | a0dd21308b10ae54
+m2-115/2.4#1 | sender |  | permitted | M2-115 §2.4 | relative controller steps with fewer significant bits than the receiver's own may leave the controller unchanged |  |  |  | 01fc0c8e31fae874
+m2-115/3.1#1 | both |  | required | M2-115 §3.1 | a translator scales the listed controllers (Control Change, Pitch Bend, pressure and similar) Min-Center-Max |  |  |  | 90aaebd2c8aeeab6
+m2-115/4#1 | both |  | recommended | M2-115 §4 | a receiver ignores the low-bit noise zero-extension leaves, and a sender does not send it |  |  |  | 4e9a339653b587b3
+m2-115/4.1#1 | both |  | required | M2-115 §4.1 | a translator zero-extends the Registered Controller (RPN) messages whose index is 0 to 31, rounding when narrowing |  |  |  | ce8ec5f4b753e8d6
+m2-115/4.3#1 | both |  | recommended | M2-115 §4.3 | zero-extension upscaling fills the new low bits with zero, a left shift |  |  |  | 40e0b07b4343eb51
+m2-115/4.3#2 | both |  | recommended | M2-115 §4.3 | zero-extension is not used to upscale a one-bit on/off value | neg=1 |  |  | d590f32d784aae7c
+m2-115/4.3#3 | both |  | permitted | M2-115 §4.3 | a one-bit value of one lands at the halfway point after zero-extension, which may be too coarse to use | neg=1 |  |  | 70afb66533bbfd74
+m2-115/4.4#1 | receiver |  | recommended | M2-115 §4.4 | fixed-point values narrowing to fewer bits are rounded |  |  |  | 8c2d70cef35e290c
+m2-115/4.4#2 | receiver |  | permitted | M2-115 §4.4 | rounding on narrowing is followed by a clamp, because rounding can leave the range |  |  |  | acf167d317c6b17e
+m2-115/5#1 | both |  | recommended | M2-115 §5 | stepped values and enumerations keep the full resolution |  |  |  | 3a6a7fde7efcebc4

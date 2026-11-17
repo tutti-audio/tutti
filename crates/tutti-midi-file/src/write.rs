@@ -5,12 +5,12 @@ use std::fs::OpenOptions;
 use std::io::{ErrorKind, Write};
 use std::path::Path;
 
-use crate::{Error, IoStep, MidiFile, Result};
+use crate::{MidiFile, WriteError};
 
 /// What a write does when `path` already holds a file.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Existing {
-    /// The write fails with [`Error::Exists`].
+    /// The write fails with [`WriteError::Exists`].
     Refuse,
     /// The staged file atomically replaces it.
     Replace,
@@ -49,16 +49,16 @@ impl WriteOptions<'_> {
     ///
     /// # Errors
     ///
-    /// [`Error::Exists`] if something (a file, a directory or a symlink) is at
-    /// `path` and `replace` was not called; [`Error::Io`] if the staging or
-    /// the rename fails. A filesystem without an atomic no-replace rename
-    /// falls back to a hard link; on one with neither the write fails with
-    /// [`Error::Io`] and never overwrites. Otherwise as
-    /// [`MidiFile::to_bytes`].
-    pub fn write(self, path: impl AsRef<Path>) -> Result<()> {
+    /// [`WriteError::Exists`] if something (a file, a directory or a symlink)
+    /// is at `path` and `replace` was not called; [`WriteError::Stage`] or
+    /// [`WriteError::Rename`] if the staging or the rename fails. A filesystem
+    /// without an atomic no-replace rename falls back to a hard link; on one
+    /// with neither the write fails with [`WriteError::Rename`] and never
+    /// overwrites.
+    pub fn write(self, path: impl AsRef<Path>) -> Result<(), WriteError> {
         let Self { file, existing } = self;
         let path = path.as_ref().to_path_buf();
-        let bytes = file.to_bytes()?;
+        let bytes = file.to_bytes();
         let dir = match path.parent() {
             Some(dir) if !dir.as_os_str().is_empty() => dir,
             _ => Path::new("."),
@@ -68,24 +68,21 @@ impl WriteOptions<'_> {
             .make_in(dir, |temp| {
                 OpenOptions::new().write(true).create_new(true).open(temp)
             })
-            .map_err(Error::io(IoStep::Stage))?;
-        staged.write_all(&bytes).map_err(Error::io(IoStep::Stage))?;
-        staged
-            .as_file()
-            .sync_all()
-            .map_err(Error::io(IoStep::Stage))?;
+            .map_err(WriteError::Stage)?;
+        staged.write_all(&bytes).map_err(WriteError::Stage)?;
+        staged.as_file().sync_all().map_err(WriteError::Stage)?;
         match existing {
             Existing::Replace => {
                 staged
                     .persist(&path)
-                    .map_err(|e| Error::io(IoStep::Rename)(e.error))?;
+                    .map_err(|e| WriteError::Rename(e.error))?;
             }
             Existing::Refuse => {
                 staged.persist_noclobber(&path).map_err(|e| {
                     if e.error.kind() == ErrorKind::AlreadyExists {
-                        Error::Exists { path: path.clone() }
+                        WriteError::Exists { path: path.clone() }
                     } else {
-                        Error::io(IoStep::Rename)(e.error)
+                        WriteError::Rename(e.error)
                     }
                 })?;
             }

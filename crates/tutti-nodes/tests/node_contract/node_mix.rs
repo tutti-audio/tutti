@@ -24,7 +24,7 @@ use tutti_graph::{IntoNode, Prepare, Solo};
 use tutti_nodes::{
     ChannelTimes, CompressorControls, CompressorNode, CrossoverNode, DelayControls, DelayLayout,
     DelayNode, FdnNode, FreeverbNode, GateControls, GateNode, InterpolationMode, KeySource,
-    MaxDelay, ModDelayNode, PhaserControls, PhaserNode, Stages,
+    MaxDelay, ModDelayNode, PhaserControls, PhaserNode, PlateReverbConfig, PlateReverbNode, Stages,
 };
 use tutti_types::MaxBlock;
 use tutti_types::{
@@ -264,7 +264,7 @@ fn the_chorus_flanger_and_phaser_are_blended_by_the_graph() {
     );
 }
 
-/// The Freeverb and the feedback delay network, mono in and stereo out, are
+/// The Freeverb and the feedback delay network (mono in) and the plate (stereo in), all stereo out, are
 /// blended by the graph like the rest: WET is the node alone, DRY the aligned
 /// input on **both** sides (a mono source is a centre, which the fold sends to
 /// left and right at gain 1.0: the design places its channels,
@@ -289,6 +289,13 @@ fn the_reverbs_are_blended_by_the_graph() {
         "fdn",
         &|| FdnNode::live(FdnLayout::default(), FdnControls::DEFAULT),
         1,
+        2,
+        0,
+    );
+    check_io(
+        "plate",
+        &|| PlateReverbNode::from(PlateReverbConfig::new()),
+        2,
         2,
         0,
     );

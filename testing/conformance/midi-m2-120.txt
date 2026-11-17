@@ -7,7 +7,10 @@
 # text when `TUTTI_MIDI_SPECS` is set. Nothing of the spec is quoted here: ids,
 # section numbers, keyword kinds and functional facts only.
 #
-# Columns: id | side | maturity | kind | section | paraphrase | facts | na-kind | cite
+# Columns: id | side | maturity | kind | section | paraphrase | facts | na-kind | cite | digest
+# digest is the FNV-1a 64 of the row's sentence, whitespace normalised: the hand
+# columns follow it when a revision shifts the numbers. side `changed` is a row
+# whose sentence changed under hand columns: reread it and rewrite them.
 #
 # Ids:
 #   m2-120/<section>#<n>          the nth sentence under the numbered section
@@ -21,84 +24,84 @@
 # sentence with only those has no row. Sentence rows only: no table of the
 # document has a row per item.
 # side: sender, receiver or both (todo marks a row not yet read).
-m2-120/1.2#1 | sender |  | permitted | M2-120 §1.2 | a note on its own Channel can be shaped separately from notes on other Channels |  |  |
-m2-120/1.4.1#1 | both |  | permitted | M2-120 §1.4.1 | glossary: the term Hundred Cent Unit is preferred over semitone, definition only |  |  |
-m2-120/1.4.1#2 | receiver |  | required | M2-120 §1.4.1 | monophonic Channel response: a new note stops the old one, possibly as a legato transition |  |  |
-m2-120/1.4.1#3 | receiver |  | permitted | M2-120 §1.4.1 | glossary: a polyphonic Member Channel can play several notes, definition only |  |  |
-m2-120/1.4.1#4 | receiver |  | required | M2-120 §1.4.1 | polyphonic Channel response: a new note starts a new note |  |  |
-m2-120/1.4.1#5 | receiver |  | permitted | M2-120 §1.4.1 | glossary: a released note can keep sounding through its release or a pedal, definition only |  |  |
-m2-120/1.4.1#6 | both |  | permitted | M2-120 §1.4.1 | glossary: the third dimension of control is CC 74 or RC 0x20 0x21, definition only |  |  |
-m2-120/3.1#1 | sender |  | required | M2-120 §3.1 | Set Profile On asks for no more Channels than the Responder declared | neg=1 |  |
-m2-120/3.1#2 | both |  | permitted | M2-120 §3.1 | the example steps can overlap with those of the Common Rules for Profiles |  |  |
-m2-120/3.3#1 | receiver |  | required | M2-120 §3.3 | entering or leaving MPE stops all sounding notes and resets controls to defaults |  |  |
-m2-120/3.4#1 | both |  | required | M2-120 §3.4 | two MPE Profile instances do not use overlapping Channels | neg=1 |  |
-m2-120/3.4#2 | receiver |  | required | M2-120 §3.4 | a Set Profile On on a Channel already in an MPE Profile is refused or replaces the older Profile |  |  |
-m2-120/3.5#1 | receiver |  | required | M2-120 §3.5 | the Manager and every Member Channel share one Pitch Bend range, set on the Manager Channel |  |  |
-m2-120/3.5#2 | sender |  | required | M2-120 §3.5 | the Pitch Bend range is not sent to Member Channels | neg=1 |  |
-m2-120/3.5#3 | receiver |  | required | M2-120 §3.5 | a receiver follows Pitch Bend Sensitivity on the Manager Channel |  |  |
-m2-120/3.5#4 | receiver |  | required | M2-120 §3.5 | the range is 48 Hundred Cent Units when the Profile turns on |  |  |
-m2-120/3.5#5 | sender |  | permitted | M2-120 §3.5 | RC 0x00 0x00 on the Manager Channel changes the range at any time |  |  |
-m2-120/3.5#6 | receiver |  | recommended | M2-120 §3.5 | a device supports ranges from 0 to 96 Hundred Cent Units |  |  |
-m2-120/3.5#7 | sender |  | recommended | M2-120 §3.5 | a device sends whole units in the MSB and zero in the LSB |  |  |
-m2-120/3.5#8 | sender |  | permitted | M2-120 §3.5 | a Sender can give the Manager Channel its own Pitch Bend amount by the steps that follow |  |  |
-m2-120/3.5#9 | sender |  | recommended | M2-120 §3.5 | the Sender sets the sensitivity to the widest range |  |  |
-m2-120/3.5#10 | sender |  | recommended | M2-120 §3.5 | for a narrower Manager amount the Sender sends only part of the Pitch Bend value range |  |  |
-m2-120/3.6.1#1 | sender |  | required | M2-120 §3.6.1 | a controller gives each new note its own Channel until none is free |  |  |
-m2-120/3.6.1#2 | sender |  | required | M2-120 §3.6.1 | with no free Channel a new note shares a Channel with an existing note |  |  |
-m2-120/3.6.2#1 | receiver |  | required | M2-120 §3.6.2 | monophonic Channel response: a new note on a busy Channel stops the older one |  |  |
-m2-120/3.7#1 | both |  | permitted | M2-120 §3.7 | a device can use the high resolution forms of Channel Pressure or the third dimension, not both |  |  |
-m2-120/3.7#2 | receiver |  | permitted | M2-120 §3.7 | a device can respond to the Channel Response Type notification, found by Profile Details |  |  |
-m2-120/3.8#1 | both |  | permitted | M2-120 §3.8 | Property Exchange can tell the mapping of MPE controls |  |  |
-m2-120/3.8#2 | both |  | permitted | M2-120 §3.8 | Property Exchange can be used on Manager and Member Channels |  |  |
-m2-120/4.1#1 | sender |  | recommended | M2-120 §4.1 | Manager-level messages are sent on the Manager Channel only |  |  |
-m2-120/4.1#2 | receiver |  | recommended | M2-120 §4.1 | a Manager-level message that arrives on a Member Channel is ignored |  |  |
-m2-120/4.2#1 | receiver |  | required | M2-120 §4.2 | Pitch Bend on a Manager and a Member Channel is combined sensibly |  |  |
-m2-120/4.3#1 | sender |  | permitted | M2-120 §4.3 | a device can send Pitch Bend on the Manager and on Member Channels |  |  |
-m2-120/4.3#2 | receiver |  | required | M2-120 §4.3 | a receiver responds to Pitch Bend on both Manager and Member Channels |  |  |
-m2-120/4.3#3 | receiver |  | required | M2-120 §4.3 | a receiver tracks Pitch Bend even while no note plays |  |  |
-m2-120/4.3#4 | receiver |  | required | M2-120 §4.3 | a released note ignores Member Pitch Bend after its Note Off |  |  |
-m2-120/4.3#5 | receiver |  | recommended | M2-120 §4.3 | Pitch Bend is linear across the sensitivity range |  |  |
-m2-120/4.4#1 | sender |  | permitted | M2-120 §4.4 | a device can send Channel Pressure on the Manager and on Member Channels |  |  |
-m2-120/4.4#2 | receiver |  | required | M2-120 §4.4 | a receiver responds to Channel Pressure on both Manager and Member Channels |  |  |
-m2-120/4.4#3 | receiver |  | required | M2-120 §4.4 | a receiver tracks Channel Pressure even while no note plays |  |  |
-m2-120/4.4#4 | receiver |  | required | M2-120 §4.4 | Manager and Member Channel Pressure combine sensibly for each sounding note |  |  |
-m2-120/4.4#5 | both |  | permitted | M2-120 §4.4 | RC 0x20 0x20 can serve as a bipolar alternative to Channel Pressure |  |  |
-m2-120/4.5#1 | sender |  | permitted | M2-120 §4.5 | MPE controllers can give a third dimension of continuous control |  |  |
-m2-120/4.5#2 | sender |  | permitted | M2-120 §4.5 | a device can send CC 74 on the Manager and on Member Channels |  |  |
-m2-120/4.5#3 | receiver |  | required | M2-120 §4.5 | a receiver responds to the third dimension on Manager and Member Channels |  |  |
-m2-120/4.5#4 | receiver |  | required | M2-120 §4.5 | a receiver tracks CC 74 even while no note plays |  |  |
-m2-120/4.5#5 | receiver |  | required | M2-120 §4.5 | Manager and Member CC 74 combine sensibly for each sounding note |  |  |
-m2-120/4.5#6 | both |  | permitted | M2-120 §4.5 | RC 0x20 0x21 can serve as a bipolar alternative to CC 74 |  |  |
-m2-120/4.6#1 | sender |  | required | M2-120 §4.6 | with polyphonic response Program Change goes on the Manager Channel, never on Member Channels | neg=1 |  |
-m2-120/4.6#2 | receiver |  | required | M2-120 §4.6 | with polyphonic response a receiver takes Program Change on the Manager Channel only |  |  |
-m2-120/4.6#3 | sender |  | permitted | M2-120 §4.6 | with monophonic response a Sender can send Program Change on Member Channels |  |  |
-m2-120/4.6#4 | receiver |  | required | M2-120 §4.6 | a receiver takes Program Change on the Manager Channel and can on Member Channels |  |  |
-m2-120/4.7#1 | sender |  | permitted | M2-120 §4.7 | a Sender can send All Sounds Off on a Manager or Member Channel |  |  |
-m2-120/4.7#2 | receiver |  | recommended | M2-120 §4.7 | receivers respond to All Sounds Off on both kinds of Channel |  |  |
-m2-120/4.7#3 | sender |  | permitted | M2-120 §4.7 | a Sender can send Reset All Controllers on the Manager Channel |  |  |
-m2-120/4.7#4 | receiver |  | required | M2-120 §4.7 | receivers respond to Reset All Controllers on the Manager Channel |  |  |
-m2-120/4.7#5 | both |  | required | M2-120 §4.7 | Reset All Controllers is neither sent nor answered on Member Channels | neg=1 |  |
-m2-120/4.7#6 | sender |  | permitted | M2-120 §4.7 | a Sender can send All Notes Off on the Manager Channel |  |  |
-m2-120/4.7#7 | receiver |  | required | M2-120 §4.7 | receivers respond to All Notes Off on the Manager Channel |  |  |
-m2-120/4.7#8 | both |  | required | M2-120 §4.7 | All Notes Off is neither sent nor answered on Member Channels | neg=1 |  |
-m2-120/4.7#9 | sender |  | required | M2-120 §4.7 | Omni Off is not sent on any MPE Channel | neg=1 |  |
-m2-120/4.7#10 | receiver |  | required | M2-120 §4.7 | Omni Off is not answered on any MPE Channel | neg=1 |  |
-m2-120/4.7#11 | sender |  | required | M2-120 §4.7 | Omni On is not sent on any MPE Channel | neg=1 |  |
-m2-120/4.7#12 | receiver |  | required | M2-120 §4.7 | Omni On is not answered on any MPE Channel | neg=1 |  |
-m2-120/4.7#13 | sender |  | required | M2-120 §4.7 | Mono Mode On is not sent on any MPE Channel | neg=1 |  |
-m2-120/4.7#14 | receiver |  | required | M2-120 §4.7 | Mono Mode On is not answered on any MPE Channel | neg=1 |  |
-m2-120/4.7#15 | sender |  | required | M2-120 §4.7 | Poly Mode On is not sent on any MPE Channel | neg=1 |  |
-m2-120/4.7#16 | receiver |  | required | M2-120 §4.7 | Poly Mode On is not answered on any MPE Channel | neg=1 |  |
-m2-120/4.8#1 | both |  | permitted | M2-120 §4.8 | a device can use two bipolar RCs of higher resolution instead of Channel Pressure or CC 74 |  |  |
-m2-120/4.9#1 | both |  | required | M2-120 §4.9 | MPE devices use Profile Details to learn whether the default or bipolar controllers apply |  |  |
-m2-120/4.9#2 | sender |  | required | M2-120 §4.9 | a Sender using bipolar pressure does not send Channel Pressure | neg=1 |  |
-m2-120/4.9#3 | sender |  | required | M2-120 §4.9 | a Sender using bipolar third dimension does not send CC 74 | neg=1 |  |
-m2-120/4.9#4 | both |  | required | M2-120 §4.9 | bipolar controllers are used on Manager and Member Channels, with the stated centre values and RPN data sent as an atomic MSB and LSB pair |  |  |
-m2-120/5#1 | sender |  | recommended | M2-120 §5 | a Sender sends initial controller values before a Note On |  |  |
-m2-120/5#2 | sender |  | permitted | M2-120 §5 | a Sender decides whether other controllers need an initial value |  |  |
-m2-120/a.3#1 | sender |  | required | M2-120 §A.3 | the Number of Channels does not exceed the Maximum the Responder declared | neg=1 |  |
-m2-120/b#1 | sender |  | recommended | M2-120 §B | a Sender's Channel allocation is designed with the listed considerations |  |  |
-m2-120/b#2 | sender |  | permitted | M2-120 §B | example: a note can bend away before a second note starts at the old pitch |  |  |
-m2-120/c.3#1 | sender |  | recommended | M2-120 §C.3 | pbMan and pbMem are kept as state, so pbTotal is the sum of their latest values |  |  |
-m2-120/d#1 | sender |  | permitted | M2-120 §D | some controllers start Channel Pressure above zero before a Note On |  |  |
-m2-120/d#2 | both |  | permitted | M2-120 §D | a maker can choose its own way of combining Manager and Member expression |  |  |
+m2-120/1.2#1 | sender |  | permitted | M2-120 §1.2 | a note on its own Channel can be shaped separately from notes on other Channels |  |  |  | db33dd43f058ba61
+m2-120/1.4.1#1 | both |  | permitted | M2-120 §1.4.1 | glossary: the term Hundred Cent Unit is preferred over semitone, definition only |  |  |  | 3bc720205482076b
+m2-120/1.4.1#2 | receiver |  | required | M2-120 §1.4.1 | monophonic Channel response: a new note stops the old one, possibly as a legato transition |  |  |  | d012b0a9a25b59f0
+m2-120/1.4.1#3 | receiver |  | permitted | M2-120 §1.4.1 | glossary: a polyphonic Member Channel can play several notes, definition only |  |  |  | 2d59fc8a11f0b79a
+m2-120/1.4.1#4 | receiver |  | required | M2-120 §1.4.1 | polyphonic Channel response: a new note starts a new note |  |  |  | 2e77d1bd9692b56b
+m2-120/1.4.1#5 | receiver |  | permitted | M2-120 §1.4.1 | glossary: a released note can keep sounding through its release or a pedal, definition only |  |  |  | e23263b5d95a720b
+m2-120/1.4.1#6 | both |  | permitted | M2-120 §1.4.1 | glossary: the third dimension of control is CC 74 or RC 0x20 0x21, definition only |  |  |  | 2039300977a57e78
+m2-120/3.1#1 | sender |  | required | M2-120 §3.1 | Set Profile On asks for no more Channels than the Responder declared | neg=1 |  |  | 96d57ae4cda67e9d
+m2-120/3.1#2 | both |  | permitted | M2-120 §3.1 | the example steps can overlap with those of the Common Rules for Profiles |  |  |  | 5f1ca699cfd02342
+m2-120/3.3#1 | receiver |  | required | M2-120 §3.3 | entering or leaving MPE stops all sounding notes and resets controls to defaults |  |  |  | 6fe1c239a93a4138
+m2-120/3.4#1 | both |  | required | M2-120 §3.4 | two MPE Profile instances do not use overlapping Channels | neg=1 |  |  | dac6f0c6509d009b
+m2-120/3.4#2 | receiver |  | required | M2-120 §3.4 | a Set Profile On on a Channel already in an MPE Profile is refused or replaces the older Profile |  |  |  | 59b4169a03f08f43
+m2-120/3.5#1 | receiver |  | required | M2-120 §3.5 | the Manager and every Member Channel share one Pitch Bend range, set on the Manager Channel |  |  |  | c922a67a76a47bd3
+m2-120/3.5#2 | sender |  | required | M2-120 §3.5 | the Pitch Bend range is not sent to Member Channels | neg=1 |  |  | 108b1530c3ed5d8b
+m2-120/3.5#3 | receiver |  | required | M2-120 §3.5 | a receiver follows Pitch Bend Sensitivity on the Manager Channel |  |  |  | b6bb13b2482cc7bf
+m2-120/3.5#4 | receiver |  | required | M2-120 §3.5 | the range is 48 Hundred Cent Units when the Profile turns on |  |  |  | 704ecb8f16a5ceaf
+m2-120/3.5#5 | sender |  | permitted | M2-120 §3.5 | RC 0x00 0x00 on the Manager Channel changes the range at any time |  |  |  | e4ea60c6f7e01ccc
+m2-120/3.5#6 | receiver |  | recommended | M2-120 §3.5 | a device supports ranges from 0 to 96 Hundred Cent Units |  |  |  | f4bae4a4e98a4e8f
+m2-120/3.5#7 | sender |  | recommended | M2-120 §3.5 | a device sends whole units in the MSB and zero in the LSB |  |  |  | 71649c4fcc4245d7
+m2-120/3.5#8 | sender |  | permitted | M2-120 §3.5 | a Sender can give the Manager Channel its own Pitch Bend amount by the steps that follow |  |  |  | f57cf2fe8cb6a454
+m2-120/3.5#9 | sender |  | recommended | M2-120 §3.5 | the Sender sets the sensitivity to the widest range |  |  |  | b8c6844c272bd4a0
+m2-120/3.5#10 | sender |  | recommended | M2-120 §3.5 | for a narrower Manager amount the Sender sends only part of the Pitch Bend value range |  |  |  | f52151740e155d54
+m2-120/3.6.1#1 | sender |  | required | M2-120 §3.6.1 | a controller gives each new note its own Channel until none is free |  |  |  | 2357c1b7b22b19f5
+m2-120/3.6.1#2 | sender |  | required | M2-120 §3.6.1 | with no free Channel a new note shares a Channel with an existing note |  |  |  | 3e8528d0ee534b96
+m2-120/3.6.2#1 | receiver |  | required | M2-120 §3.6.2 | monophonic Channel response: a new note on a busy Channel stops the older one |  |  |  | 29fb297a77158ef7
+m2-120/3.7#1 | both |  | permitted | M2-120 §3.7 | a device can use the high resolution forms of Channel Pressure or the third dimension, not both |  |  |  | 0b09dc747be3b300
+m2-120/3.7#2 | receiver |  | permitted | M2-120 §3.7 | a device can respond to the Channel Response Type notification, found by Profile Details |  |  |  | fdf8b55339115786
+m2-120/3.8#1 | both |  | permitted | M2-120 §3.8 | Property Exchange can tell the mapping of MPE controls |  |  |  | 4a79e2abeb4ff19c
+m2-120/3.8#2 | both |  | permitted | M2-120 §3.8 | Property Exchange can be used on Manager and Member Channels |  |  |  | 58debd2e7196a4f4
+m2-120/4.1#1 | sender |  | recommended | M2-120 §4.1 | Manager-level messages are sent on the Manager Channel only |  |  |  | 2127bdbbd2370ea7
+m2-120/4.1#2 | receiver |  | recommended | M2-120 §4.1 | a Manager-level message that arrives on a Member Channel is ignored |  |  |  | 936d02b548ab1cb2
+m2-120/4.2#1 | receiver |  | required | M2-120 §4.2 | Pitch Bend on a Manager and a Member Channel is combined sensibly |  |  |  | c4d01cfcdcea39ef
+m2-120/4.3#1 | sender |  | permitted | M2-120 §4.3 | a device can send Pitch Bend on the Manager and on Member Channels |  |  |  | 0315f1691dcda8df
+m2-120/4.3#2 | receiver |  | required | M2-120 §4.3 | a receiver responds to Pitch Bend on both Manager and Member Channels |  |  |  | d3bbeda085d820fe
+m2-120/4.3#3 | receiver |  | required | M2-120 §4.3 | a receiver tracks Pitch Bend even while no note plays |  |  |  | 2455c25ebe7abe94
+m2-120/4.3#4 | receiver |  | required | M2-120 §4.3 | a released note ignores Member Pitch Bend after its Note Off |  |  |  | 4b8724c407e24093
+m2-120/4.3#5 | receiver |  | recommended | M2-120 §4.3 | Pitch Bend is linear across the sensitivity range |  |  |  | eb0647c0268d9ce9
+m2-120/4.4#1 | sender |  | permitted | M2-120 §4.4 | a device can send Channel Pressure on the Manager and on Member Channels |  |  |  | 1160e307673b07b0
+m2-120/4.4#2 | receiver |  | required | M2-120 §4.4 | a receiver responds to Channel Pressure on both Manager and Member Channels |  |  |  | 1099d41f40c8670d
+m2-120/4.4#3 | receiver |  | required | M2-120 §4.4 | a receiver tracks Channel Pressure even while no note plays |  |  |  | 31795ef98c8f76dd
+m2-120/4.4#4 | receiver |  | required | M2-120 §4.4 | Manager and Member Channel Pressure combine sensibly for each sounding note |  |  |  | 98a62c88a9684724
+m2-120/4.4#5 | both |  | permitted | M2-120 §4.4 | RC 0x20 0x20 can serve as a bipolar alternative to Channel Pressure |  |  |  | adfa2a96c65b72b3
+m2-120/4.5#1 | sender |  | permitted | M2-120 §4.5 | MPE controllers can give a third dimension of continuous control |  |  |  | fe776fd64d112485
+m2-120/4.5#2 | sender |  | permitted | M2-120 §4.5 | a device can send CC 74 on the Manager and on Member Channels |  |  |  | 51161fa79b29d06b
+m2-120/4.5#3 | receiver |  | required | M2-120 §4.5 | a receiver responds to the third dimension on Manager and Member Channels |  |  |  | 7fe945179f510c11
+m2-120/4.5#4 | receiver |  | required | M2-120 §4.5 | a receiver tracks CC 74 even while no note plays |  |  |  | e59ea5d4279cecc0
+m2-120/4.5#5 | receiver |  | required | M2-120 §4.5 | Manager and Member CC 74 combine sensibly for each sounding note |  |  |  | 1ef81604e035a1c4
+m2-120/4.5#6 | both |  | permitted | M2-120 §4.5 | RC 0x20 0x21 can serve as a bipolar alternative to CC 74 |  |  |  | 5c3fdeeb9c1c814d
+m2-120/4.6#1 | sender |  | required | M2-120 §4.6 | with polyphonic response Program Change goes on the Manager Channel, never on Member Channels | neg=1 |  |  | b32bd4e6836adc5b
+m2-120/4.6#2 | receiver |  | required | M2-120 §4.6 | with polyphonic response a receiver takes Program Change on the Manager Channel only |  |  |  | f0425d2024e9670c
+m2-120/4.6#3 | sender |  | permitted | M2-120 §4.6 | with monophonic response a Sender can send Program Change on Member Channels |  |  |  | 6cd0442f862558ce
+m2-120/4.6#4 | receiver |  | required | M2-120 §4.6 | a receiver takes Program Change on the Manager Channel and can on Member Channels |  |  |  | 1a09b60c897c535e
+m2-120/4.7#1 | sender |  | permitted | M2-120 §4.7 | a Sender can send All Sounds Off on a Manager or Member Channel |  |  |  | 4627a0863e8e0fd2
+m2-120/4.7#2 | receiver |  | recommended | M2-120 §4.7 | receivers respond to All Sounds Off on both kinds of Channel |  |  |  | 339083bcd30928bd
+m2-120/4.7#3 | sender |  | permitted | M2-120 §4.7 | a Sender can send Reset All Controllers on the Manager Channel |  |  |  | 3ca90687c42f0cd8
+m2-120/4.7#4 | receiver |  | required | M2-120 §4.7 | receivers respond to Reset All Controllers on the Manager Channel |  |  |  | a874e1c364d47898
+m2-120/4.7#5 | both |  | required | M2-120 §4.7 | Reset All Controllers is neither sent nor answered on Member Channels | neg=1 |  |  | b47e3e25c994292c
+m2-120/4.7#6 | sender |  | permitted | M2-120 §4.7 | a Sender can send All Notes Off on the Manager Channel |  |  |  | 9d980112c7797e82
+m2-120/4.7#7 | receiver |  | required | M2-120 §4.7 | receivers respond to All Notes Off on the Manager Channel |  |  |  | a874e1c364d47898
+m2-120/4.7#8 | both |  | required | M2-120 §4.7 | All Notes Off is neither sent nor answered on Member Channels | neg=1 |  |  | b47e3e25c994292c
+m2-120/4.7#9 | sender |  | required | M2-120 §4.7 | Omni Off is not sent on any MPE Channel | neg=1 |  |  | b4fb738177c6f1e2
+m2-120/4.7#10 | receiver |  | required | M2-120 §4.7 | Omni Off is not answered on any MPE Channel | neg=1 |  |  | 8e8ada0c698a96be
+m2-120/4.7#11 | sender |  | required | M2-120 §4.7 | Omni On is not sent on any MPE Channel | neg=1 |  |  | 227a808bb896b9a9
+m2-120/4.7#12 | receiver |  | required | M2-120 §4.7 | Omni On is not answered on any MPE Channel | neg=1 |  |  | 8e8ada0c698a96be
+m2-120/4.7#13 | sender |  | required | M2-120 §4.7 | Mono Mode On is not sent on any MPE Channel | neg=1 |  |  | ad2fd1e56203f6d9
+m2-120/4.7#14 | receiver |  | required | M2-120 §4.7 | Mono Mode On is not answered on any MPE Channel | neg=1 |  |  | 8e8ada0c698a96be
+m2-120/4.7#15 | sender |  | required | M2-120 §4.7 | Poly Mode On is not sent on any MPE Channel | neg=1 |  |  | 8444cbc91460c547
+m2-120/4.7#16 | receiver |  | required | M2-120 §4.7 | Poly Mode On is not answered on any MPE Channel | neg=1 |  |  | 8e8ada0c698a96be
+m2-120/4.8#1 | both |  | permitted | M2-120 §4.8 | a device can use two bipolar RCs of higher resolution instead of Channel Pressure or CC 74 |  |  |  | 0c941426a7e270a0
+m2-120/4.9#1 | both |  | required | M2-120 §4.9 | MPE devices use Profile Details to learn whether the default or bipolar controllers apply |  |  |  | 715a2dae97704d49
+m2-120/4.9#2 | sender |  | required | M2-120 §4.9 | a Sender using bipolar pressure does not send Channel Pressure | neg=1 |  |  | e7862cfaa1f4aad1
+m2-120/4.9#3 | sender |  | required | M2-120 §4.9 | a Sender using bipolar third dimension does not send CC 74 | neg=1 |  |  | 5475e1400ee28137
+m2-120/4.9#4 | both |  | required | M2-120 §4.9 | bipolar controllers are used on Manager and Member Channels, with the stated centre values and RPN data sent as an atomic MSB and LSB pair |  |  |  | 88648caae7770aea
+m2-120/5#1 | sender |  | recommended | M2-120 §5 | a Sender sends initial controller values before a Note On |  |  |  | 8e1549310894ba85
+m2-120/5#2 | sender |  | permitted | M2-120 §5 | a Sender decides whether other controllers need an initial value |  |  |  | 0a2f279705a6e32a
+m2-120/a.3#1 | sender |  | required | M2-120 §A.3 | the Number of Channels does not exceed the Maximum the Responder declared | neg=1 |  |  | b6f8f0cfd0873241
+m2-120/b#1 | sender |  | recommended | M2-120 §B | a Sender's Channel allocation is designed with the listed considerations |  |  |  | 08f7e9ddd21f265e
+m2-120/b#2 | sender |  | permitted | M2-120 §B | example: a note can bend away before a second note starts at the old pitch |  |  |  | 965d716df9caa767
+m2-120/c.3#1 | sender |  | recommended | M2-120 §C.3 | pbMan and pbMem are kept as state, so pbTotal is the sum of their latest values |  |  |  | 46c47d1ebbfed247
+m2-120/d#1 | sender |  | permitted | M2-120 §D | some controllers start Channel Pressure above zero before a Note On |  |  |  | fbb07aa4341ded56
+m2-120/d#2 | both |  | permitted | M2-120 §D | a maker can choose its own way of combining Manager and Member expression |  |  |  | 86f6b3f4a71733b9

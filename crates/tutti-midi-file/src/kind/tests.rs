@@ -8,8 +8,7 @@ fn detect_tells_the_two_midi_formats_apart() {
         crate::Track::default(),
     )
     .unwrap()
-    .to_bytes()
-    .unwrap();
+    .to_bytes();
     assert_eq!(MidiFileKind::detect(&clip), Some(MidiFileKind::ClipFile));
 
     let smf = MidiFile::smf(
@@ -18,8 +17,7 @@ fn detect_tells_the_two_midi_formats_apart() {
         vec![crate::Track::default()],
     )
     .unwrap()
-    .to_bytes()
-    .unwrap();
+    .to_bytes();
     assert_eq!(
         MidiFileKind::detect(&smf),
         Some(MidiFileKind::StandardMidiFile)
@@ -56,7 +54,7 @@ fn detect_path_reads_the_magic_not_the_extension() {
         Some(MidiFileKind::ClipFile)
     );
     assert_eq!(
-        MidiFile::read(&misnamed).unwrap().to_bytes().unwrap()[..8],
+        MidiFile::read(&misnamed).unwrap().to_bytes()[..8],
         crate::clip_file::CLIP_FILE_MAGIC
     );
 

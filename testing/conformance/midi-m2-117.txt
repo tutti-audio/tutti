@@ -7,7 +7,10 @@
 # text when `TUTTI_MIDI_SPECS` is set. Nothing of the spec is quoted here: ids,
 # section numbers, keyword kinds and functional facts only.
 #
-# Columns: id | side | maturity | kind | section | paraphrase | facts | na-kind | cite
+# Columns: id | side | maturity | kind | section | paraphrase | facts | na-kind | cite | digest
+# digest is the FNV-1a 64 of the row's sentence, whitespace normalised: the hand
+# columns follow it when a revision shifts the numbers. side `changed` is a row
+# whose sentence changed under hand columns: reread it and rewrite them.
 #
 # Ids:
 #   m2-117/<section>#<n>          the nth sentence under the numbered section
@@ -21,60 +24,60 @@
 # sentence with only those has no row. Sentence rows only: no table of the
 # document has a row per item.
 # side: initiator, responder or both (todo marks a row not yet read).
-m2-117/1.1#1 | both |  | permitted | M2-117 §1.1 | introduction: examples of use, no requirement |  |  |
-m2-117/1.4.1#1 | both |  | permitted | M2-117 §1.4.1 | the Initiator and Responder roles can swap between two devices |  |  |
-m2-117/1.4.1#2 | both |  | permitted | M2-117 §1.4.1 | either device can start a Transaction at any time |  |  |
-m2-117/1.4.1#3 | both |  | permitted | M2-117 §1.4.1 | glossary: a Profile can list mandatory and optional messages and features, definition only |  |  |
-m2-117/1.4.1#4 | both |  | permitted | M2-117 §1.4.1 | glossary: Property Exchange lets one device read another's properties, definition only |  |  |
-m2-117/1.4.1#5 | both |  | permitted | M2-117 §1.4.1 | glossary: a Transaction can have several replies, definition only |  |  |
-m2-117/1.4.1#6 | both |  | permitted | M2-117 §1.4.1 | glossary: a Transaction can be a longer exchange of inquiries and replies, definition only |  |  |
-m2-117/2.1#1 | initiator |  | permitted | M2-117 §2.1 | an Initiator can read AllCtrlList with a Get |  |  |
-m2-117/2.1.1#1 | responder |  | permitted | M2-117 §2.1.1 | an AllCtrlList entry can carry a priority |  |  |
-m2-117/2.1.1#2 | responder |  | recommended | M2-117 §2.1.1 | AllCtrlList entries are listed in priority order |  |  |
-m2-117/2.1.1#3 | responder |  | required | M2-117 §2.1.1 | an Active Controller Message is listed once, unless its transmit and recognize entries differ | neg=1 |  |
-m2-117/2.1.1#4 | initiator |  | permitted | M2-117 §2.1.1 | an entry's title can be shown to the user |  |  |
-m2-117/2.1.1#5 | initiator |  | permitted | M2-117 §2.1.1 | an entry's description can be shown to the user |  |  |
-m2-117/2.1.1#6 | responder |  | recommended | M2-117 §2.1.1 | AllCtrlList entries are ordered by priority |  |  |
-m2-117/2.1.1#7 | initiator |  | recommended | M2-117 §2.1.1 | an Initiator uses the list order to refine the priority |  |  |
-m2-117/2.1.1#8 | initiator |  | permitted | M2-117 §2.1.1 | an Initiator chooses how to show or handle entries by priority |  |  |
-m2-117/2.1.1#9 | initiator |  | recommended | M2-117 §2.1.1 | the typeHint says which control mechanism an Initiator uses |  |  |
-m2-117/2.1.1#10 | responder |  | required | M2-117 §2.1.1 | ctrlMapId gives the resId to use with CtrlMapList |  |  |
-m2-117/2.1.1#11 | responder |  | permitted | M2-117 §2.1.1 | an entry can declare the minimum and maximum it recognizes |  |  |
-m2-117/2.1.1.1#1 | initiator |  | recommended | M2-117 §2.1.1.1 | priority 1 entries are shown to the user whenever possible |  |  |
-m2-117/2.1.1.1#2 | initiator |  | recommended | M2-117 §2.1.1.1 | priority 2 entries are usually shown to the user |  |  |
-m2-117/2.1.1.1#3 | initiator |  | permitted | M2-117 §2.1.1.1 | priority 3 entries may or may not be shown by default |  |  |
-m2-117/2.1.1.1#4 | initiator |  | recommended | M2-117 §2.1.1.1 | priority 4 entries are usually not shown by default |  |  |
-m2-117/2.1.1.1#5 | initiator |  | recommended | M2-117 §2.1.1.1 | priority 5 entries are not shown to end users | neg=1 |  |
-m2-117/2.1.1.1#6 | responder |  | permitted | M2-117 §2.1.1.1 | a device has limited room for priority 1 entries |  |  |
-m2-117/2.1.1.1#7 | responder |  | recommended | M2-117 §2.1.1.1 | the priority 1 list is kept as short as possible |  |  |
-m2-117/2.1.1.1#8 | initiator |  | permitted | M2-117 §2.1.1.1 | when a priority class does not fit, earlier entries are shown first |  |  |
-m2-117/2.1.1.2#1 | initiator |  | recommended | M2-117 §2.1.1.2 | momentary and toggle controls send two values |  |  |
-m2-117/2.1.1.2#2 | responder |  | required | M2-117 §2.1.1.2 | a valueSelect entry has a ctrlMapId |  |  |
-m2-117/2.1.1.2#3 | initiator |  | recommended | M2-117 §2.1.1.2 | a valueSelect control sends only the values of its CtrlMapList |  |  |
-m2-117/2.1.1.2#4 | initiator |  | recommended | M2-117 §2.1.1.2 | a continuous control sends values between its minMax bounds |  |  |
-m2-117/2.1.1.2#5 | initiator |  | recommended | M2-117 §2.1.1.2 | a relative control sends relative values |  |  |
-m2-117/2.1.1.3#1 | initiator |  | permitted | M2-117 §2.1.1.3 | messages outside the declared range can be ignored or have odd effects |  |  |
-m2-117/2.1.1.3#2 | responder |  | required | M2-117 §2.1.1.3 | an entry does not carry both minMax and stepCount | neg=1 |  |
-m2-117/2.1.3#1 | responder |  | permitted | M2-117 §2.1.3 | a controller both sent and recognized can have two entries for one ctrlIndex |  |  |
-m2-117/2.1.3#2 | responder |  | permitted | M2-117 §2.1.3 | a type, index and channel is listed twice only as a transmit and a recognize entry |  |  |
-m2-117/2.3#1 | initiator |  | recommended | M2-117 §2.3 | an Initiator matches incoming messages to AllCtrlList entries by type, index and channel |  |  |
-m2-117/3.1#1 | initiator |  | permitted | M2-117 §3.1 | an Initiator can read ChCtrlList with a Get |  |  |
-m2-117/3.1.1#1 | responder |  | permitted | M2-117 §3.1.1 | a ChCtrlList entry can carry a priority |  |  |
-m2-117/3.1.1#2 | responder |  | recommended | M2-117 §3.1.1 | ChCtrlList entries are listed in priority order |  |  |
-m2-117/3.1.1#3 | responder |  | required | M2-117 §3.1.1 | an Active Controller Message is listed once, unless its transmit and recognize entries differ | neg=1 |  |
-m2-117/3.1.1#4 | initiator |  | permitted | M2-117 §3.1.1 | an entry's title can be shown to the user |  |  |
-m2-117/3.1.1#5 | initiator |  | permitted | M2-117 §3.1.1 | an entry's description can be shown to the user |  |  |
-m2-117/3.1.1#6 | responder |  | recommended | M2-117 §3.1.1 | ChCtrlList entries are ordered by priority |  |  |
-m2-117/3.1.1#7 | initiator |  | recommended | M2-117 §3.1.1 | an Initiator uses the list order to refine the priority |  |  |
-m2-117/3.1.1#8 | initiator |  | permitted | M2-117 §3.1.1 | an Initiator chooses how to show or handle entries by priority |  |  |
-m2-117/3.1.1#9 | initiator |  | recommended | M2-117 §3.1.1 | the typeHint says which control mechanism an Initiator uses |  |  |
-m2-117/3.1.1#10 | responder |  | required | M2-117 §3.1.1 | ctrlMapId gives the resId to use with CtrlMapList |  |  |
-m2-117/3.1.1#11 | responder |  | permitted | M2-117 §3.1.1 | an entry can declare the minimum and maximum it recognizes |  |  |
-m2-117/3.1.3#1 | responder |  | permitted | M2-117 §3.1.3 | a controller both sent and recognized can have two entries for one ctrlIndex |  |  |
-m2-117/3.1.3#2 | responder |  | permitted | M2-117 §3.1.3 | a type and index is listed twice only as a transmit and a recognize entry |  |  |
-m2-117/3.3#1 | initiator |  | recommended | M2-117 §3.3 | an Initiator matches incoming messages to ChCtrlList entries by type and index |  |  |
-m2-117/3.4.1#1 | responder |  | permitted | M2-117 §3.4.1 | a ChannelList entry can declare a Cluster of Channels |  |  |
-m2-117/3.4.1#2 | responder |  | required | M2-117 §3.4.1 | a ChCtrlList link for a Cluster carries the role cluster |  |  |
-m2-117/4#1 | responder |  | permitted | M2-117 §4 | CtrlMapList can name the meanings of specific controller values |  |  |
-m2-117/4#2 | responder |  | permitted | M2-117 §4 | those values can mark points along a control |  |  |
-m2-117/4.1#1 | initiator |  | permitted | M2-117 §4.1 | an Initiator can read CtrlMapList with a Get |  |  |
+m2-117/1.1#1 | both |  | permitted | M2-117 §1.1 | introduction: examples of use, no requirement |  |  |  | b99095071582c942
+m2-117/1.4.1#1 | both |  | permitted | M2-117 §1.4.1 | the Initiator and Responder roles can swap between two devices |  |  |  | 5d9716ac6e1c99fc
+m2-117/1.4.1#2 | both |  | permitted | M2-117 §1.4.1 | either device can start a Transaction at any time |  |  |  | 6f10ad435d4adcf0
+m2-117/1.4.1#3 | both |  | permitted | M2-117 §1.4.1 | glossary: a Profile can list mandatory and optional messages and features, definition only |  |  |  | bf579e6555af5f31
+m2-117/1.4.1#4 | both |  | permitted | M2-117 §1.4.1 | glossary: Property Exchange lets one device read another's properties, definition only |  |  |  | 9157e2b19d116c9f
+m2-117/1.4.1#5 | both |  | permitted | M2-117 §1.4.1 | glossary: a Transaction can have several replies, definition only |  |  |  | 92dea0536f6b0292
+m2-117/1.4.1#6 | both |  | permitted | M2-117 §1.4.1 | glossary: a Transaction can be a longer exchange of inquiries and replies, definition only |  |  |  | bbe806d164dfe0e4
+m2-117/2.1#1 | initiator |  | permitted | M2-117 §2.1 | an Initiator can read AllCtrlList with a Get |  |  |  | 77f7bad809a32d47
+m2-117/2.1.1#1 | responder |  | permitted | M2-117 §2.1.1 | an AllCtrlList entry can carry a priority |  |  |  | c8b1c525eb8cb66e
+m2-117/2.1.1#2 | responder |  | recommended | M2-117 §2.1.1 | AllCtrlList entries are listed in priority order |  |  |  | 31b823d4119d37e3
+m2-117/2.1.1#3 | responder |  | required | M2-117 §2.1.1 | an Active Controller Message is listed once, unless its transmit and recognize entries differ | neg=1 |  |  | 31c07c8e55f401ce
+m2-117/2.1.1#4 | initiator |  | permitted | M2-117 §2.1.1 | an entry's title can be shown to the user |  |  |  | 565355550058a020
+m2-117/2.1.1#5 | initiator |  | permitted | M2-117 §2.1.1 | an entry's description can be shown to the user |  |  |  | 565355550058a020
+m2-117/2.1.1#6 | responder |  | recommended | M2-117 §2.1.1 | AllCtrlList entries are ordered by priority |  |  |  | 36479ba7a9f977a4
+m2-117/2.1.1#7 | initiator |  | recommended | M2-117 §2.1.1 | an Initiator uses the list order to refine the priority |  |  |  | 514e973b4ef777bf
+m2-117/2.1.1#8 | initiator |  | permitted | M2-117 §2.1.1 | an Initiator chooses how to show or handle entries by priority |  |  |  | 0f573002e754df46
+m2-117/2.1.1#9 | initiator |  | recommended | M2-117 §2.1.1 | the typeHint says which control mechanism an Initiator uses |  |  |  | 6fb369b237ec4f06
+m2-117/2.1.1#10 | responder |  | required | M2-117 §2.1.1 | ctrlMapId gives the resId to use with CtrlMapList |  |  |  | 58a04676993368fd
+m2-117/2.1.1#11 | responder |  | permitted | M2-117 §2.1.1 | an entry can declare the minimum and maximum it recognizes |  |  |  | a92aefefc121ae6b
+m2-117/2.1.1.1#1 | initiator |  | recommended | M2-117 §2.1.1.1 | priority 1 entries are shown to the user whenever possible |  |  |  | 83fcabddf2c4fa13
+m2-117/2.1.1.1#2 | initiator |  | recommended | M2-117 §2.1.1.1 | priority 2 entries are usually shown to the user |  |  |  | e15758f6fb49db79
+m2-117/2.1.1.1#3 | initiator |  | permitted | M2-117 §2.1.1.1 | priority 3 entries may or may not be shown by default |  |  |  | c2914eef18b68a2d
+m2-117/2.1.1.1#4 | initiator |  | recommended | M2-117 §2.1.1.1 | priority 4 entries are usually not shown by default |  |  |  | f38b677f09b26a4a
+m2-117/2.1.1.1#5 | initiator |  | recommended | M2-117 §2.1.1.1 | priority 5 entries are not shown to end users | neg=1 |  |  | 64b08792c7affb5c
+m2-117/2.1.1.1#6 | responder |  | permitted | M2-117 §2.1.1.1 | a device has limited room for priority 1 entries |  |  |  | 302a99630077d173
+m2-117/2.1.1.1#7 | responder |  | recommended | M2-117 §2.1.1.1 | the priority 1 list is kept as short as possible |  |  |  | eda6eff869a08167
+m2-117/2.1.1.1#8 | initiator |  | permitted | M2-117 §2.1.1.1 | when a priority class does not fit, earlier entries are shown first |  |  |  | 60fef6761361f8aa
+m2-117/2.1.1.2#1 | initiator |  | recommended | M2-117 §2.1.1.2 | momentary and toggle controls send two values |  |  |  | 5ef545272bd1ac95
+m2-117/2.1.1.2#2 | responder |  | required | M2-117 §2.1.1.2 | a valueSelect entry has a ctrlMapId |  |  |  | 87a4f1c8695af2b1
+m2-117/2.1.1.2#3 | initiator |  | recommended | M2-117 §2.1.1.2 | a valueSelect control sends only the values of its CtrlMapList |  |  |  | 76ab860bcbeab3e9
+m2-117/2.1.1.2#4 | initiator |  | recommended | M2-117 §2.1.1.2 | a continuous control sends values between its minMax bounds |  |  |  | dcc7660e8a4e2b67
+m2-117/2.1.1.2#5 | initiator |  | recommended | M2-117 §2.1.1.2 | a relative control sends relative values |  |  |  | d6194a5c1754c97a
+m2-117/2.1.1.3#1 | initiator |  | permitted | M2-117 §2.1.1.3 | messages outside the declared range can be ignored or have odd effects |  |  |  | 4d5ce269c7faa175
+m2-117/2.1.1.3#2 | responder |  | required | M2-117 §2.1.1.3 | an entry does not carry both minMax and stepCount | neg=1 |  |  | aa66b272c825e119
+m2-117/2.1.3#1 | responder |  | permitted | M2-117 §2.1.3 | a controller both sent and recognized can have two entries for one ctrlIndex |  |  |  | 84e02e6ecb878e8a
+m2-117/2.1.3#2 | responder |  | permitted | M2-117 §2.1.3 | a type, index and channel is listed twice only as a transmit and a recognize entry |  |  |  | 30bc8d5687ed7c79
+m2-117/2.3#1 | initiator |  | recommended | M2-117 §2.3 | an Initiator matches incoming messages to AllCtrlList entries by type, index and channel |  |  |  | 0d89cc862b70d3de
+m2-117/3.1#1 | initiator |  | permitted | M2-117 §3.1 | an Initiator can read ChCtrlList with a Get |  |  |  | 0a4d22999d2087d7
+m2-117/3.1.1#1 | responder |  | permitted | M2-117 §3.1.1 | a ChCtrlList entry can carry a priority |  |  |  | c8b1c525eb8cb66e
+m2-117/3.1.1#2 | responder |  | recommended | M2-117 §3.1.1 | ChCtrlList entries are listed in priority order |  |  |  | 31b823d4119d37e3
+m2-117/3.1.1#3 | responder |  | required | M2-117 §3.1.1 | an Active Controller Message is listed once, unless its transmit and recognize entries differ | neg=1 |  |  | 31c07c8e55f401ce
+m2-117/3.1.1#4 | initiator |  | permitted | M2-117 §3.1.1 | an entry's title can be shown to the user |  |  |  | 565355550058a020
+m2-117/3.1.1#5 | initiator |  | permitted | M2-117 §3.1.1 | an entry's description can be shown to the user |  |  |  | 565355550058a020
+m2-117/3.1.1#6 | responder |  | recommended | M2-117 §3.1.1 | ChCtrlList entries are ordered by priority |  |  |  | 3415e9f17b70fc3a
+m2-117/3.1.1#7 | initiator |  | recommended | M2-117 §3.1.1 | an Initiator uses the list order to refine the priority |  |  |  | 4343562ab82a0667
+m2-117/3.1.1#8 | initiator |  | permitted | M2-117 §3.1.1 | an Initiator chooses how to show or handle entries by priority |  |  |  | 0f573002e754df46
+m2-117/3.1.1#9 | initiator |  | recommended | M2-117 §3.1.1 | the typeHint says which control mechanism an Initiator uses |  |  |  | 6fb369b237ec4f06
+m2-117/3.1.1#10 | responder |  | required | M2-117 §3.1.1 | ctrlMapId gives the resId to use with CtrlMapList |  |  |  | 58a04676993368fd
+m2-117/3.1.1#11 | responder |  | permitted | M2-117 §3.1.1 | an entry can declare the minimum and maximum it recognizes |  |  |  | a92aefefc121ae6b
+m2-117/3.1.3#1 | responder |  | permitted | M2-117 §3.1.3 | a controller both sent and recognized can have two entries for one ctrlIndex |  |  |  | 84e02e6ecb878e8a
+m2-117/3.1.3#2 | responder |  | permitted | M2-117 §3.1.3 | a type and index is listed twice only as a transmit and a recognize entry |  |  |  | 0df2efb3c1bc4104
+m2-117/3.3#1 | initiator |  | recommended | M2-117 §3.3 | an Initiator matches incoming messages to ChCtrlList entries by type and index |  |  |  | a7e57edad1795423
+m2-117/3.4.1#1 | responder |  | permitted | M2-117 §3.4.1 | a ChannelList entry can declare a Cluster of Channels |  |  |  | 1b30b0981aa45450
+m2-117/3.4.1#2 | responder |  | required | M2-117 §3.4.1 | a ChCtrlList link for a Cluster carries the role cluster |  |  |  | ef06c4920aceb0dd
+m2-117/4#1 | responder |  | permitted | M2-117 §4 | CtrlMapList can name the meanings of specific controller values |  |  |  | 3110a3de5e2c340a
+m2-117/4#2 | responder |  | permitted | M2-117 §4 | those values can mark points along a control |  |  |  | 79792da4fdef3997
+m2-117/4.1#1 | initiator |  | permitted | M2-117 §4.1 | an Initiator can read CtrlMapList with a Get |  |  |  | 08108e8ddaece9da

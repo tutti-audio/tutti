@@ -7,7 +7,10 @@
 # text when `TUTTI_MIDI_SPECS` is set. Nothing of the spec is quoted here: ids,
 # section numbers, keyword kinds and functional facts only.
 #
-# Columns: id | side | maturity | kind | section | paraphrase | facts | na-kind | cite
+# Columns: id | side | maturity | kind | section | paraphrase | facts | na-kind | cite | digest
+# digest is the FNV-1a 64 of the row's sentence, whitespace normalised: the hand
+# columns follow it when a revision shifts the numbers. side `changed` is a row
+# whose sentence changed under hand columns: reread it and rewrite them.
 #
 # Ids:
 #   m2-108/<section>#<n>          the nth sentence under the numbered section
@@ -21,16 +24,16 @@
 # sentence with only those has no row. Sentence rows only: no table of the
 # document has a row per item.
 # side: initiator, responder or both (todo marks a row not yet read).
-m2-108/1.1#1 | responder |  | recommended | M2-108 §1.1 | a device with a complex channel use also implements ChannelList |  |  |
-m2-108/1.3#1 | both |  | permitted | M2-108 §1.3 | glossary: Property Exchange lets one device read another's properties, definition only |  |  |
-m2-108/2.1#1 | responder |  | required | M2-108 §2.1 | a device using ChannelMode does not use Multi-Mode | neg=1 |  |
-m2-108/2.1#2 | responder |  | recommended | M2-108 §2.1 | a device with a complex channel layout reports it in ChannelList instead |  |  |
-m2-108/2.2#1 | initiator |  | permitted | M2-108 §2.2 | an Initiator can read ChannelMode with a Get |  |  |
-m2-108/3.1#1 | responder |  | required | M2-108 §3.1 | a device using BasicChannelRx does not use Multi-Mode | neg=1 |  |
-m2-108/3.1#2 | responder |  | recommended | M2-108 §3.1 | a device with a complex channel layout reports it in ChannelList instead |  |  |
-m2-108/3.2#1 | initiator |  | permitted | M2-108 §3.2 | an Initiator can read BasicChannelRx with a Get |  |  |
-m2-108/3.3#1 | initiator |  | permitted | M2-108 §3.3 | an Initiator can write BasicChannelRx with a Set |  |  |
-m2-108/4.1#1 | responder |  | required | M2-108 §4.1 | a device using BasicChannelTx does not use Multi-Mode | neg=1 |  |
-m2-108/4.1#2 | responder |  | recommended | M2-108 §4.1 | a device with a complex channel layout reports it in ChannelList instead |  |  |
-m2-108/4.2#1 | initiator |  | permitted | M2-108 §4.2 | an Initiator can read BasicChannelTx with a Get |  |  |
-m2-108/4.3#1 | initiator |  | permitted | M2-108 §4.3 | an Initiator can write BasicChannelTx with a Set |  |  |
+m2-108/1.1#1 | responder |  | recommended | M2-108 §1.1 | a device with a complex channel use also implements ChannelList |  |  |  | 18b7a983b9bfa315
+m2-108/1.3#1 | both |  | permitted | M2-108 §1.3 | glossary: Property Exchange lets one device read another's properties, definition only |  |  |  | ab84069d7a4b5f42
+m2-108/2.1#1 | responder |  | required | M2-108 §2.1 | a device using ChannelMode does not use Multi-Mode | neg=1 |  |  | 7b2a220a32478dab
+m2-108/2.1#2 | responder |  | recommended | M2-108 §2.1 | a device with a complex channel layout reports it in ChannelList instead |  |  |  | 573986e090c10ff0
+m2-108/2.2#1 | initiator |  | permitted | M2-108 §2.2 | an Initiator can read ChannelMode with a Get |  |  |  | 596ecd0047fc9ef5
+m2-108/3.1#1 | responder |  | required | M2-108 §3.1 | a device using BasicChannelRx does not use Multi-Mode | neg=1 |  |  | 7b2a220a32478dab
+m2-108/3.1#2 | responder |  | recommended | M2-108 §3.1 | a device with a complex channel layout reports it in ChannelList instead |  |  |  | 573986e090c10ff0
+m2-108/3.2#1 | initiator |  | permitted | M2-108 §3.2 | an Initiator can read BasicChannelRx with a Get |  |  |  | b3985ec4d32fccda
+m2-108/3.3#1 | initiator |  | permitted | M2-108 §3.3 | an Initiator can write BasicChannelRx with a Set |  |  |  | be564629c5a049bf
+m2-108/4.1#1 | responder |  | required | M2-108 §4.1 | a device using BasicChannelTx does not use Multi-Mode | neg=1 |  |  | 7b2a220a32478dab
+m2-108/4.1#2 | responder |  | recommended | M2-108 §4.1 | a device with a complex channel layout reports it in ChannelList instead |  |  |  | 97a221833239b3d8
+m2-108/4.2#1 | initiator |  | permitted | M2-108 §4.2 | an Initiator can read BasicChannelTx with a Get |  |  |  | 3ed65b1b09061e8c
+m2-108/4.3#1 | initiator |  | permitted | M2-108 §4.3 | an Initiator can write BasicChannelTx with a Set |  |  |  | de03beacde4905d5

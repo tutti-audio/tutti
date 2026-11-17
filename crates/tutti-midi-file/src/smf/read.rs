@@ -8,7 +8,7 @@
 //!
 //! 1. **Framing** ([`chunk`], [`smf`]): the header chunk, then chunks of
 //!    `type, length, body` until the input ends. A chunk cut off anywhere is
-//!    [`Fault::Truncated`]; an unknown chunk type is skipped (SMF 1.0 section
+//!    [`SmfParseError::ChunkCutOff`]; an unknown chunk type is skipped (SMF 1.0 section
 //!    2: a program expects alien chunks and treats them as absent).
 //! 2. **Tracks** ([`track`]): each `MTrk` body into events.
 //!
@@ -35,11 +35,11 @@
 //! # What this reads strictly
 //!
 //! A chunk that runs past the end, fewer tracks than the header declares
-//! ([`Fault::Truncated`]); more tracks than declared, a format 0 file without
+//! ([`SmfParseError::TracksCutOff`]); more tracks than declared, a format 0 file without
 //! exactly one track, a second header chunk, a data byte with its top bit set,
 //! a running status with none active, a variable-length quantity over four
 //! bytes, an event cut off inside its chunk, a zero division
-//! ([`Fault::Malformed`]); and an SMPTE division ([`Fault::Timecode`]). A track
+//! ([`SmfParseError`]); and an SMPTE division ([`Fault::Smpte`]). A track
 //! with no End of Track ends at its last event, and an End of Track that is
 //! not the track's last event is refused (SMF 1.0 section 3.3: it is the last
 //! event in the track).
@@ -48,7 +48,7 @@ use std::iter::successors;
 
 use winnow::Parser;
 use winnow::binary::{be_u16, be_u32, length_take, u8 as byte};
-use winnow::combinator::{alt, dispatch, eof, fail, peek, repeat, repeat_till};
+use winnow::combinator::{alt, dispatch, eof, fail, peek, repeat};
 use winnow::error::ContextError;
 use winnow::token::{literal, take};
 
@@ -59,17 +59,15 @@ use crate::file::{
     FileEvent, MalformedMeta, Meta, MicrosPerQuarter, OtherMetaKind, SmfFormat, TextKind, Tick,
     Track,
 };
-use crate::{Error, Result, SmfParseError, Truncated};
+use crate::{ReadError, SmfParseError};
 
-/// Why a parser refused, carried as winnow context and mapped to [`enum@Error`]
-/// once, in [`read`].
+/// Why a parser refused, carried as winnow context and mapped to
+/// [`ReadError`] once, in [`refused`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Fault {
-    /// The input ended inside a chunk, or before the declared tracks.
-    Truncated(Truncated),
     /// SMPTE division: no beat grid.
-    Timecode,
-    /// Not a well-formed SMF, and what.
+    Smpte,
+    /// Not a well-formed SMF, or cut off, and what.
     Malformed(SmfParseError),
 }
 
@@ -128,7 +126,7 @@ fn division(input: &mut &[u8]) -> Res<SmfDivision> {
     // With the top bit set, the high byte is the negated frame rate as an i8.
     // With the top bit clear, the only word out of range is 0.
     match (SmfDivision::new(raw), i8::from_be_bytes([high])) {
-        (_, -24 | -25 | -29 | -30) => fail.context(Fault::Timecode).parse_next(input),
+        (_, -24 | -25 | -29 | -30) => fail.context(Fault::Smpte).parse_next(input),
         (_, ..0) => refuse(SmfParseError::InvalidFrameRate).parse_next(input),
         (Some(division), _) => Ok(division),
         (None, _) => refuse(SmfParseError::ZeroTicksPerBeat).parse_next(input),
@@ -140,13 +138,8 @@ fn division(input: &mut &[u8]) -> Res<SmfDivision> {
 /// adds).
 fn header_body(input: &mut &[u8]) -> Res<Header> {
     let format = be_u16
-        .verify_map(|f| match f {
-            0 => Some(SmfFormat::SingleTrack),
-            1 => Some(SmfFormat::Parallel),
-            2 => Some(SmfFormat::Sequential),
-            _ => None,
-        })
-        .context(malformed(SmfParseError::UnknownFormat))
+        .verify_map(SmfFormat::from_word)
+        .context(malformed(SmfParseError::UnknownSmfFormat))
         .parse_next(input)?;
     let tracks = be_u16.parse_next(input)?;
     let division = division.parse_next(input)?;
@@ -163,7 +156,7 @@ fn header(input: &mut &[u8]) -> Res<Header> {
         .context(malformed(SmfParseError::MissingHeader))
         .parse_next(input)?;
     let mut body = counted(be_u32)
-        .context(Fault::Truncated(Truncated::Chunk))
+        .context(malformed(SmfParseError::ChunkCutOff))
         .parse_next(input)?;
     header_body
         .context(malformed(SmfParseError::ShortHeader))
@@ -179,7 +172,7 @@ enum Chunk<'a> {
 /// `type, length, body`, framed and not yet read.
 fn chunk<'a>(input: &mut &'a [u8]) -> Res<Chunk<'a>> {
     let (kind, body) = (take(4usize), counted(be_u32))
-        .context(Fault::Truncated(Truncated::Chunk))
+        .context(malformed(SmfParseError::ChunkCutOff))
         .parse_next(input)?;
     match kind {
         b"MTrk" => Ok(Chunk::Track(body)),
@@ -188,17 +181,22 @@ fn chunk<'a>(input: &mut &'a [u8]) -> Res<Chunk<'a>> {
     }
 }
 
-/// The whole file, framed: the header and the bodies of its `MTrk` chunks.
-fn smf<'a>(input: &mut &'a [u8]) -> Res<(Header, Vec<&'a [u8]>)> {
-    let header = header.parse_next(input)?;
-    let (chunks, _): (Vec<_>, _) = repeat_till(0.., chunk, eof).parse_next(input)?;
-    let tracks = chunks
-        .into_iter()
-        .filter_map(|c| match c {
-            Chunk::Track(body) => Some(body),
-            Chunk::Alien => None,
-        })
-        .collect();
+/// The whole file, framed: the header and the offset and body of each `MTrk`
+/// chunk.
+fn smf(bytes: &[u8]) -> Result<(Header, Vec<(usize, &[u8])>), ReadError> {
+    let mut input = bytes;
+    let header = header
+        .parse_next(&mut input)
+        .map_err(|e| refused(None, 0, &faults(&e)))?;
+    let mut tracks = Vec::new();
+    while !input.is_empty() {
+        let at = bytes.len() - input.len();
+        match chunk.parse_next(&mut input) {
+            Ok(Chunk::Track(body)) => tracks.push((at, body)),
+            Ok(Chunk::Alien) => {}
+            Err(e) => return Err(refused(None, at, &faults(&e))),
+        }
+    }
     Ok((header, tracks))
 }
 
@@ -242,15 +240,6 @@ fn meta_of(kind: u8, data: &[u8]) -> Item {
     };
     let meta = match (kind, data) {
         (0x2F, []) => return Item::EndOfTrack,
-        (0x01, _) => text(TextKind::Text),
-        (0x02, _) => text(TextKind::Copyright),
-        (0x03, _) => text(TextKind::TrackName),
-        (0x04, _) => text(TextKind::InstrumentName),
-        (0x05, _) => text(TextKind::Lyric),
-        (0x06, _) => text(TextKind::Marker),
-        (0x07, _) => text(TextKind::CuePoint),
-        (0x08, _) => text(TextKind::ProgramName),
-        (0x09, _) => text(TextKind::DeviceName),
         (0x51, &[a, b, c, ref extra @ ..]) => Meta::Tempo {
             micros_per_quarter: MicrosPerQuarter::from_wire([a, b, c]),
             extra: extra.into(),
@@ -276,12 +265,13 @@ fn meta_of(kind: u8, data: &[u8]) -> Item {
             minor: minor == 1,
             extra: extra.into(),
         },
-        _ => match OtherMetaKind::new(kind) {
-            Some(kind) => Meta::Other {
+        _ => match (TextKind::from_meta_type(kind), OtherMetaKind::new(kind)) {
+            (Some(text_kind), _) => text(text_kind),
+            (None, Some(kind)) => Meta::Other {
                 kind,
                 data: data.into(),
             },
-            None => Meta::Malformed(MalformedMeta::new(kind, data)),
+            (None, None) => Meta::Malformed(MalformedMeta::new(kind, data)),
         },
     };
     Item::Event(FileEvent::Meta(meta))
@@ -315,32 +305,46 @@ fn event<'a>(running: Status) -> impl Parser<&'a [u8], (u32, Item, Status), Cont
     })
 }
 
-/// One step of a track: the event at `delta`, the bytes after it, and the
-/// status after it. `None` at the end of the bytes.
+/// One step of a track: the event at `delta`, where it starts, the bytes
+/// after it, and the status after it. `None` at the end of the bytes.
 struct Step<'a> {
+    at: usize,
     delta: u32,
     event: Item,
     rest: &'a [u8],
     status: Status,
 }
 
-fn step(input: &[u8], running: Status) -> Res<Option<Step<'_>>> {
+/// A refusal inside a track body: where the event that was refused starts, and
+/// the faults that refused it.
+struct Failure {
+    at: usize,
+    faults: Vec<Fault>,
+}
+
+fn step<'a>(body: &'a [u8], input: &'a [u8], running: Status) -> Result<Option<Step<'a>>, Failure> {
+    let at = body.len() - input.len();
     alt((eof.value(None), event(running).map(Some)))
         .parse_peek(input)
         .map(|(rest, parsed)| {
             parsed.map(|(delta, event, status)| Step {
+                at,
                 delta,
                 event,
                 rest,
                 status,
             })
         })
+        .map_err(|e| Failure {
+            at,
+            faults: faults(&e),
+        })
 }
 
 /// Every step of a track body, an error ending the sequence.
-fn steps(body: &[u8]) -> impl Iterator<Item = Res<Step<'_>>> {
-    successors(Some(step(body, None)), |prev| match prev {
-        Ok(Some(s)) => Some(step(s.rest, s.status)),
+fn steps(body: &[u8]) -> impl Iterator<Item = Result<Step<'_>, Failure>> {
+    successors(Some(step(body, body, None)), |prev| match prev {
+        Ok(Some(s)) => Some(step(body, s.rest, s.status)),
         _ => None,
     })
     .map_while(std::result::Result::transpose)
@@ -348,29 +352,30 @@ fn steps(body: &[u8]) -> impl Iterator<Item = Res<Step<'_>>> {
 
 /// A track body: its events at absolute ticks, and its end. The last event,
 /// if it is an End of Track (`FF 2F 00`), is the track's end and not an event.
-fn track(body: &[u8]) -> Res<Track> {
+fn track(body: &[u8]) -> Result<Track, Failure> {
     let items = steps(body)
         .scan(0u64, |tick, step| {
             Some(step.map(|s| {
                 *tick += u64::from(s.delta);
-                (Tick(*tick), s.event)
+                (Tick(*tick), s.event, s.at)
             }))
         })
-        .collect::<Res<Vec<_>>>()?;
+        .collect::<Result<Vec<_>, _>>()?;
     // SMF 1.0 section 3.3: an end-of-track event is the last
     // event in the track. One before the last is refused, not read as the
     // track's end: what follows it would be dropped, and the model is lossless.
     let count = items.len();
     let mut events = Vec::with_capacity(count);
     let mut end = None;
-    for (index, (tick, item)) in items.into_iter().enumerate() {
+    for (index, (tick, item, at)) in items.into_iter().enumerate() {
         match item {
             Item::Event(event) => events.push((tick, event)),
             Item::EndOfTrack if index + 1 == count => end = Some(tick),
             Item::EndOfTrack => {
-                return Err(refuse::<Track>(SmfParseError::EndOfTrackNotLast)
-                    .parse_peek(body)
-                    .unwrap_err());
+                return Err(Failure {
+                    at,
+                    faults: vec![malformed(SmfParseError::EndOfTrackNotLast)],
+                });
             }
         }
     }
@@ -388,23 +393,29 @@ fn track(body: &[u8]) -> Res<Track> {
 
 // ---- the edge --------------------------------------------------------------
 
-/// The one place winnow's error becomes ours.
-fn error_of(e: &ContextError<Fault>) -> Error {
-    let faults: Vec<Fault> = e.context().copied().collect();
-    let truncated = faults.iter().find_map(|f| match f {
-        Fault::Truncated(what) => Some(*what),
-        _ => None,
-    });
-    if let Some(what) = truncated {
-        Error::Truncated(what)
-    } else if faults.contains(&Fault::Timecode) {
-        Error::MidiUnsupportedTiming
-    } else {
-        let what = faults.iter().find_map(|f| match f {
-            Fault::Malformed(w) => Some(*w),
-            _ => None,
-        });
-        Error::MidiFileParse(what.unwrap_or(SmfParseError::Unexpected))
+/// The faults a parser refused with, innermost first.
+fn faults(e: &ContextError<Fault>) -> Vec<Fault> {
+    e.context().copied().collect()
+}
+
+/// The one place winnow's error becomes ours: the error of the refusal
+/// `faults` at byte `offset`. A refusal that names no rule ran out of bytes
+/// inside an event.
+fn refused(track: Option<usize>, offset: usize, faults: &[Fault]) -> ReadError {
+    if faults.contains(&Fault::Smpte) {
+        return ReadError::SmpteDivision;
+    }
+    let cause = faults
+        .iter()
+        .find_map(|f| match f {
+            Fault::Malformed(what) => Some(*what),
+            Fault::Smpte => None,
+        })
+        .unwrap_or(SmfParseError::EventCutOff);
+    ReadError::Smf {
+        track,
+        offset,
+        cause,
     }
 }
 
@@ -412,28 +423,35 @@ fn error_of(e: &ContextError<Fault>) -> Error {
 ///
 /// # Errors
 ///
-/// - [`Error::Truncated`] if the file is cut off.
-/// - [`Error::MidiUnsupportedTiming`] for an SMPTE division.
-/// - [`Error::MidiFileParse`] for anything else malformed.
-pub(crate) fn read(bytes: &[u8]) -> Result<SmfParts> {
-    let (header, bodies) = smf.parse(bytes).map_err(|e| error_of(e.inner()))?;
+/// - [`ReadError::SmpteDivision`] for an SMPTE division.
+/// - [`ReadError::Smf`] for anything else malformed or cut off, with where.
+pub(crate) fn read(bytes: &[u8]) -> Result<SmfParts, ReadError> {
+    let (header, chunks) = smf(bytes)?;
     let declared = usize::from(header.tracks);
     // Fewer than declared is a cut file; more, or a format 0 with other
     // than one, disagrees with its own header.
-    if bodies.len() < declared {
-        return Err(Error::Truncated(Truncated::Tracks));
+    let smf_error = |offset, cause| ReadError::Smf {
+        track: None,
+        offset,
+        cause,
+    };
+    if chunks.len() < declared {
+        return Err(smf_error(bytes.len(), SmfParseError::TracksCutOff));
     }
-    if bodies.len() > declared {
-        return Err(Error::MidiFileParse(SmfParseError::ExtraTracks));
+    if chunks.len() > declared {
+        return Err(smf_error(chunks[declared].0, SmfParseError::ExtraTracks));
     }
     if header.format == SmfFormat::SingleTrack && declared != 1 {
-        return Err(Error::MidiFileParse(SmfParseError::FormatZeroTracks));
+        return Err(smf_error(0, SmfParseError::FormatZeroTracks));
     }
-    let tracks = bodies
+    let tracks = chunks
         .iter()
-        .map(|body| track(body))
-        .collect::<Res<Vec<_>>>()
-        .map_err(|e| error_of(&e))?;
+        .enumerate()
+        .map(|(index, &(at, body))| {
+            // The body starts after the chunk's type and length.
+            track(body).map_err(|f| refused(Some(index), at + 8 + f.at, &f.faults))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(SmfParts {
         format: header.format,
         division: header.division,
