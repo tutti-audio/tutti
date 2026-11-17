@@ -268,6 +268,9 @@ impl WorkerPoolBuilder {
         for i in 1..=helpers {
             let shared = Arc::clone(&pool.shared);
             let hook = self.start_handler.clone();
+            // A raw thread: a helper stops by the pool's own flag and doorbell and
+            // joins in the pool's drop, and `spawn_named`'s handle would own a
+            // second stop and join, and its own priority request, beside them.
             let thread = std::thread::Builder::new()
                 .name((self.thread_name)(i))
                 .spawn(move || {
