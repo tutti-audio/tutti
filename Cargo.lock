@@ -3265,6 +3265,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tracing",
+ "tracing-subscriber",
  "tutti-buffers",
  "tutti-clap-test-plugin",
  "tutti-codec",

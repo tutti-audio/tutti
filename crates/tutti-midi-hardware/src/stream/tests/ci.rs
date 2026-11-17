@@ -1994,6 +1994,19 @@ fn property_events(polled: &[Polled]) -> Vec<&PropertyChange> {
         .collect()
 }
 
+fn property_answers(polled: &[Polled]) -> Vec<&Answer> {
+    polled
+        .iter()
+        .filter_map(|p| match p {
+            Polled::Answer(_, who, answer) => {
+                assert_eq!(*who, peer_id(), "every answer names the peer");
+                Some(answer)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
 fn pe_limits() -> PeReassemblyLimits {
     PeReassemblyLimits {
         streams: StreamLimit::of(8),
@@ -2241,19 +2254,17 @@ fn the_session_initiates_property_exchange_with_a_peer_that_declared_it() {
         &wire,
     );
     all.extend(pump(&mut wire, &mut far, said, 302));
-    let changes = property_events(&all);
-    assert!(
-        matches!(changes.first(), Some(PropertyChange::Started(_))),
-        "{changes:?}"
-    );
-    let got = changes.iter().find_map(|c| match c {
-        PropertyChange::Event(e) => match &**e {
-            ResourceEvent::Got { result, .. } => Some(result.clone()),
-            _ => None,
-        },
+    let got = property_answers(&all).into_iter().find_map(|a| match a {
+        Answer::Got { target, result } => Some((target.clone(), result.clone())),
         _ => None,
     });
-    assert_eq!(got, Some(Ok(PeData::LocalOn(PeLocalOn(false)))));
+    assert_eq!(
+        got,
+        Some((
+            ResourceTarget::new(PeResource::LocalOn).unwrap(),
+            Ok(PeData::LocalOn(PeLocalOn(false)))
+        ))
+    );
 }
 
 /// The session serves what the app gave: a peer's Initiator gets the
@@ -2401,14 +2412,14 @@ fn a_subscription_starts_and_ends_through_the_session() {
 /// A call the peer's ResourceList does not allow is refused when it is started,
 /// with the reason, and nothing is sent.
 #[test]
-fn a_call_the_peers_resource_list_refuses_is_a_not_sent_change() {
+fn a_call_the_peers_resource_list_refuses_is_a_not_sent_answer() {
     let (mut wire, _, mut far) = ready_property_peer(subscribable());
     let get = ResourceGet::new(ResourceTarget::new(PeResource::DeviceInfo).unwrap());
     let all = ask_and_pump(&mut wire, &mut far, PropertyCall::Get(get), 300);
-    let changes = property_events(&all);
+    let answers = property_answers(&all);
     assert!(
-        matches!(changes.as_slice(), [PropertyChange::NotSent { .. }]),
-        "{changes:?}"
+        matches!(answers.as_slice(), [Answer::PropertyNotSent { .. }]),
+        "{answers:?}"
     );
 }
 
@@ -2437,12 +2448,12 @@ fn a_call_for_a_peer_that_is_gone_is_refused_or_reported_not_sent() {
         300,
     );
     let all = polled(&mut wire, 310);
-    let changes = property_events(&all);
+    let answers = property_answers(&all);
     assert!(
-        changes
+        answers
             .iter()
-            .any(|c| matches!(c, PropertyChange::PeerGone { .. })),
-        "{changes:?}"
+            .any(|a| matches!(a, Answer::PropertyLost { .. })),
+        "{answers:?}"
     );
     assert_eq!(
         wire.session.ask_property(handle.ask(get())),

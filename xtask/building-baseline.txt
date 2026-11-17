@@ -117,8 +117,6 @@ tutti-engine  ctor-result  crates/tutti-engine/src/routing.rs::OutputMap::channe
 tutti-export  ctor-result  crates/tutti-export/src/graph.rs::RenderGraph::assemble
 tutti-export  ctor-result  crates/tutti-export/src/job.rs::Job::new
 tutti-export  ctor-result  crates/tutti-export/src/rendered.rs::Rendered::new
-tutti-export  option-arg  crates/tutti-export/src/graph.rs::Setup::pool
-tutti-export  option-arg  crates/tutti-export/src/graph.rs::Setup::root
 tutti-export  option-arg  crates/tutti-export/src/output.rs::FileTarget::dither
 tutti-export  option-arg  crates/tutti-export/src/output.rs::FileTarget::normalize
 tutti-export  option-arg  crates/tutti-export/src/output.rs::FileTarget::resample
