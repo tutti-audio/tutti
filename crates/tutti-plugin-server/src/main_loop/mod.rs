@@ -41,7 +41,8 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use tutti_plugin_types::{BridgeError, BridgeResult, MainThreadMarker, Ready, Wakeups};
+use tutti_plugin_ipc_ffi::Ready;
+use tutti_plugin_types::{BridgeError, BridgeResult, MainThreadMarker, Wakeups};
 
 use crate::render::RenderThread;
 use crate::session::{Reaction, Session};

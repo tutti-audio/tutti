@@ -2,6 +2,7 @@
 //! at most one block of output, and every block after that block is finite, for every
 //! effect `KernelNode` runs and the multiband compressor that runs kernels.
 
+use tutti_buffers::Planes;
 use tutti_dsp::{FdnControls, FdnLayout, FreeverbControls, LadderType, ShapeKind, Stages, SvfType};
 use tutti_graph::contract::drive_input;
 use tutti_graph::{Env, Node, PlayClock, Prepare, TransportChanges, TransportPosition};
@@ -205,7 +206,7 @@ fn poisoned_blocks(node: Box<dyn Node>, bad: f32) -> Vec<u64> {
             changes: TransportChanges::NONE,
             play: PlayClock::ZERO,
         };
-        let d = drive_input(&mut *node, &env, &inputs, &[], &[]);
+        let d = drive_input(&mut *node, &env, Planes::new(&inputs).unwrap(), &[], &[]);
         if d.audio.iter().flatten().any(|s| !s.is_finite()) {
             out.push(block);
         }

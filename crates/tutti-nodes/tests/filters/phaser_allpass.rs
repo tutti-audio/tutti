@@ -9,6 +9,7 @@
 //! turn, so two stages invert a sine: half the dry and half the wet cancel
 //! (the phaser's notch), which a graph's 50% mix would render as silence.
 
+use tutti_buffers::Planes;
 use tutti_fixtures::signal::sine;
 use tutti_graph::contract::{drive, prepared};
 use tutti_nodes::{PhaserControls, PhaserNode, Stages, Stagger, SweepRange};
@@ -40,7 +41,14 @@ fn wet(stages: usize, hz: f32) -> Vec<f32> {
     while pos < LEN {
         let n = [64, 17, 1, 33][k % 4].min(LEN - pos);
         k += 1;
-        out.extend(&drive(&mut node, SR, &[&x[pos..pos + n]], &[])[0]);
+        out.extend(
+            &drive(
+                &mut node,
+                SR,
+                Planes::new(&[&x[pos..pos + n]]).unwrap(),
+                &[],
+            )[0],
+        );
         pos += n;
     }
     out

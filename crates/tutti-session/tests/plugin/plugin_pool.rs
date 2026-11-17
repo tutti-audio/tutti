@@ -11,7 +11,7 @@ use tutti_buffers::InterleavedMut;
 use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status, Unforkable};
 use tutti_plugin::catalog::{Catalog, Hosting, PluginId, PluginRef};
 use tutti_plugin::error::StateError;
-use tutti_plugin_db::PluginFormat;
+use tutti_plugin_types::PluginFormat;
 use tutti_plugin_types::{Normalized, ParamId, StateUse};
 use tutti_plugin_types::{PluginFailure, TerminationReason};
 use tutti_session::{

@@ -128,7 +128,8 @@ impl Plugin {
     /// ```no_run
     /// # fn ex() -> Result<(), Box<dyn std::error::Error>> {
     /// use tutti_plugin::catalog::{Catalog, CatalogConfig, NO_SCAN_DIRS, Plugin, PluginId};
-    /// use tutti_plugin_db::{PluginDb, PluginFormat};
+    /// use tutti_plugin_db::PluginDb;
+    /// use tutti_plugin_types::PluginFormat;
     /// # let dir = std::path::PathBuf::from("/my/app/state");
     /// let catalog = Catalog::new(PluginDb::new(), CatalogConfig::new(dir, NO_SCAN_DIRS), |_| Ok(()));
     /// let foo = catalog

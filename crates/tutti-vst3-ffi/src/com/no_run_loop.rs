@@ -8,7 +8,8 @@
 
 use std::sync::Arc;
 use std::time::Instant;
-use tutti_plugin_types::{MainThreadMarker, Ready, Wakeups};
+use tutti_plugin_ipc_ffi::Ready;
+use tutti_plugin_types::{MainThreadMarker, Wakeups};
 use vst3::Steinberg::IPlugFrame;
 use vst3::Steinberg::TUID;
 use vst3::Steinberg::Vst::{IHostApplication, IPlugInterfaceSupport};

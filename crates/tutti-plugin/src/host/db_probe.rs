@@ -5,13 +5,13 @@ use super::probe::{ProbeError, measure_metadata_with, probe_metadata_with};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tracing::debug;
-use tutti_plugin_db::{
-    Cancel, PluginFormat, ProbeFailure, ProbeFailureKind, probe_plugin_fallback,
-};
+use tutti_plugin_db::{ProbeFailure, ProbeFailureKind, probe_plugin_fallback};
 use tutti_plugin_ipc::CatalogConfig;
 use tutti_plugin_types::BridgeError;
 use tutti_plugin_types::Locator;
 use tutti_plugin_types::PluginDescriptor;
+use tutti_plugin_types::PluginFormat;
+use tutti_rt::StopToken;
 
 /// How long a measuring probe may take, spawn, load and both renders included
 /// (two configurations, each up to the render budget of `MAX_NODE_TAIL` and 5 s of
@@ -36,7 +36,7 @@ pub(crate) struct Probing {
 pub(crate) fn probe_fn(
     config: &CatalogConfig,
     how: Probing,
-) -> impl Fn(&Path, PluginFormat, &Cancel) -> Result<Vec<PluginDescriptor>, ProbeFailure>
+) -> impl Fn(&Path, PluginFormat, &StopToken) -> Result<Vec<PluginDescriptor>, ProbeFailure>
 + Send
 + Sync
 + 'static {
@@ -46,18 +46,11 @@ pub(crate) fn probe_fn(
     } else {
         config.probe_timeout.unwrap_or(DEFAULT_PROBE_TIMEOUT)
     };
-    move |path, format, cancel| {
+    move |path, format, stop| {
         let probed = if how.measure {
-            measure_metadata_with(
-                &locator,
-                path,
-                format,
-                timeout,
-                cancel,
-                how.state.as_deref(),
-            )
+            measure_metadata_with(&locator, path, format, timeout, stop, how.state.as_deref())
         } else {
-            probe_metadata_with(&locator, path, format, timeout, cancel)
+            probe_metadata_with(&locator, path, format, timeout, stop)
         };
         interpret_probe(probed, path, format, how.fallback)
     }
@@ -107,7 +100,7 @@ fn interpret_probe(
 ) -> Result<Vec<PluginDescriptor>, ProbeFailure> {
     match result {
         Ok(plugins) => Ok(plugins),
-        // The scan that cancelled it discards what a probe returns after that.
+        // The scan that stopped it discards what a probe returns after that.
         Err(e @ ProbeError::Cancelled) => Err(ProbeFailure {
             reason: e.to_string(),
             kind: ProbeFailureKind::Environment,

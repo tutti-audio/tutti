@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use thiserror::Error;
+use tutti_plugin_ipc_ffi::SlabError;
 
 use crate::{
     EditorError, FrameTooLarge, LoadStage, PluginError, PluginFailure, ResultError,
@@ -148,10 +149,9 @@ pub enum BridgeError {
         got: u32,
     },
 
-    /// The shared-memory audio slab could not be created or mapped: the
-    /// operating system's refusal, as text.
-    #[error("the shared memory failed: {0}")]
-    SharedMemoryError(String),
+    /// The shared-memory audio slab could not be made, opened or trusted.
+    #[error(transparent)]
+    Slab(#[from] SlabError),
 
     /// The audio slab's layout is a shape this build does not serve.
     #[error(transparent)]

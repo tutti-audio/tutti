@@ -62,7 +62,13 @@ impl<N: Node> Rig<N> {
             play: tutti_graph::PlayClock::ZERO,
         };
         self.frame += input.len() as u64;
-        drive_input(&mut self.node, &env, &[input], params, &[])
+        drive_input(
+            &mut self.node,
+            &env,
+            Planes::new(&[input]).unwrap(),
+            params,
+            &[],
+        )
     }
 
     fn silent(&mut self) -> tutti_graph::contract::Driven {

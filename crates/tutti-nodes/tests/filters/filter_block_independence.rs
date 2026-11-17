@@ -7,6 +7,7 @@
 //! impulse into a filter with no state answers with its first coefficient set, so
 //! the output at the impulse is the coefficient set in force there).
 
+use tutti_buffers::Planes;
 use tutti_dsp::{SvfCoefficients, SvfModel};
 use tutti_graph::contract::{drive_input, prepared};
 use tutti_graph::{Env, Node, ParamNode, PlayClock, TransportChanges, TransportPosition};
@@ -56,7 +57,14 @@ fn render<N: Node + ParamNode + 'static>(
             changes: TransportChanges::NONE,
             play: PlayClock::ZERO,
         };
-        let driven = drive_input(&mut node as &mut dyn Node, &env, &ins, &params, &[]).audio;
+        let driven = drive_input(
+            &mut node as &mut dyn Node,
+            &env,
+            Planes::new(&ins).unwrap(),
+            &params,
+            &[],
+        )
+        .audio;
         out.resize(driven.len(), Vec::new());
         for (all, part) in out.iter_mut().zip(driven) {
             all.extend(part);

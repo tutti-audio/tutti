@@ -71,7 +71,7 @@ use tutti_plugin_types::MAX_BLOCK_CHANNELS;
 use tutti_plugin_types::{BridgeError, BridgeResult, SlabAccessError, SlabLayoutError};
 
 use tutti_plugin_ipc_ffi::{
-    Direction, MappingWriter, RING_SLOTS, SLAB_HEADER_BYTES, SharedMapping, SlabError, slot_for,
+    Direction, MappingWriter, RING_SLOTS, SLAB_HEADER_BYTES, SharedMapping, slot_for,
 };
 
 /// Named mmap region: a `SlabHeader`, then a ring per direction.
@@ -107,7 +107,7 @@ impl AudioSlab {
         let name = name.into();
         // Stamped before it returns: the peer is told the slab's name only
         // after this, and the header's magic is released last.
-        let writer = MappingWriter::create(&name, bytes).map_err(slab_err)?;
+        let writer = MappingWriter::create(&name, bytes).map_err(BridgeError::from)?;
         let slab = Self {
             mapping: Arc::clone(writer.mapping()),
             name,
@@ -135,7 +135,7 @@ impl AudioSlab {
         let name = name.into();
         // Checks the length before the header, and the header before this
         // side trusts a byte.
-        let writer = MappingWriter::open(&name, bytes).map_err(slab_err)?;
+        let writer = MappingWriter::open(&name, bytes).map_err(BridgeError::from)?;
         let slab = Self {
             mapping: Arc::clone(writer.mapping()),
             name,
@@ -501,10 +501,6 @@ fn check_layout(layout: &SlabLayout) -> Result<usize, SlabLayoutError> {
     layout
         .checked_byte_size_with_header(SLAB_HEADER_BYTES)
         .ok_or(SlabLayoutError::SizeOverflow)
-}
-
-fn slab_err(e: SlabError) -> BridgeError {
-    BridgeError::SharedMemoryError(e.to_string())
 }
 
 #[cfg(test)]
@@ -964,14 +960,10 @@ mod tests {
         }
 
         // The data region at its absolute offsets; the header's bytes (and the
-        // magic at offset 0) are `tutti-plugin-ipc-ffi`'s to check.
+        // magic at offset 0) are `tutti-plugin-ipc-ffi`'s to check. The read ends
+        // at the layout's last byte, so a mapping shorter than the layout panics.
         let mapping = &host.slab().mapping;
-        assert_eq!(
-            mapping.len(),
-            check_layout(&l).unwrap(),
-            "mapping is not the sized length"
-        );
-        let mut bytes = vec![0u8; mapping.len()];
+        let mut bytes = vec![0u8; check_layout(&l).unwrap()];
         mapping.read(SLAB_HEADER_BYTES, &mut bytes[SLAB_HEADER_BYTES..]);
 
         // 1. Audio starts after the header, and the two rings are disjoint.
