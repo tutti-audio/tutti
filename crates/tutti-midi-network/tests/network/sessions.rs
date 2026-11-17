@@ -7,10 +7,11 @@ use std::time::Duration;
 use tutti_midi_device::EntropyError;
 
 use tutti_midi_network::{
-    Admission, AuthFailure, AuthMethods, AuthState, Bye, ByeReason, Command, Credentials,
-    DatagramBuilder, Digest, EndedBy, Event, Fec, HostConfig, Invitation, NakReason,
+    Admission, AuthChallenge, AuthFailure, AuthMethods, AuthState, Bye, ByeReason, Command,
+    Credentials, DatagramBuilder, Digest, EndedBy, Event, Fec, HostConfig, Invitation, NakReason,
     NetworkEndpoint, Nonce, PingId, Requests, Retransmit, RetransmitRequest, SendError,
-    SequenceNumber, SessionConfig, SessionState, UmpData, UserAuthState, Username,
+    SequenceNumber, SessionConfig, SessionState, UmpData, UserAuthChallenge, UserAuthState,
+    Username,
 };
 
 use crate::sim::{Direction, Fate, Sim, client_addr, fixed_nonce, host_addr, identity, note_on};
@@ -559,6 +560,114 @@ fn a_wrong_password_is_told_the_digest_is_wrong() {
         peer: host_addr(),
         cause: AuthFailure::DigestWrong
     }));
+}
+
+/// What a Client answers when a challenge reaches it: the NAKs, as a Host
+/// would see them.
+fn naks_from_client(sim: &Sim) -> Vec<(NakReason, u32)> {
+    sim.commands(Direction::ClientToHost)
+        .into_iter()
+        .filter_map(|c| match c {
+            Command::Nak(n) => Some((n.reason, n.refused.word())),
+            _ => None,
+        })
+        .collect()
+}
+
+fn auth_required() -> Command {
+    Command::AuthRequired(AuthChallenge {
+        state: AuthState::First,
+        nonce: fixed_nonce(),
+        identity: identity("Studio", "HOST-1"),
+    })
+}
+
+fn user_auth_required() -> Command {
+    Command::UserAuthRequired(UserAuthChallenge {
+        state: UserAuthState::First,
+        nonce: fixed_nonce(),
+        identity: identity("Studio", "HOST-1"),
+    })
+}
+
+/// Spec: m2-124/6.7#10, m2-124/6.8#8
+#[test]
+fn a_client_that_sent_no_invitation_naks_a_challenge_as_not_expected() {
+    for challenge in [auth_required(), user_auth_required()] {
+        let mut sim = Sim::new(
+            HostConfig::new(identity("Studio", "HOST-1")),
+            Credentials::none().with_secret("1234"),
+            SessionConfig::default(),
+        );
+        sim.client
+            .on_message(host_addr(), &datagram(&challenge), sim.now);
+        sim.flush();
+        assert_eq!(
+            naks_from_client(&sim),
+            vec![(NakReason::NotExpected, challenge.header().word())]
+        );
+        assert_eq!(sim.client.state(), SessionState::Idle);
+    }
+}
+
+/// M2-124 sections 6.7 and 6.8: a Client that did not advertise the method in
+/// its Invitation answers its challenge with NAK 0x02 (Command Not Expected).
+#[test]
+fn a_client_naks_a_challenge_for_a_method_its_invitation_did_not_advertise() {
+    let cases = [
+        // Holds a user, advertised USER: a shared-secret challenge is unexpected.
+        (
+            Credentials::none().with_user(Username::new("Rosa").unwrap(), "pw"),
+            auth_required(),
+        ),
+        // Holds a secret, advertised SHARED_SECRET: a user challenge is unexpected.
+        (
+            Credentials::none().with_secret("1234"),
+            user_auth_required(),
+        ),
+        // Advertised nothing: neither is expected.
+        (Credentials::none(), auth_required()),
+        (Credentials::none(), user_auth_required()),
+    ];
+    for (credentials, challenge) in cases {
+        // A Host that holds the Invitation pending leaves it unanswered.
+        let mut sim = Sim::new(
+            host_with(Admission::Confirm),
+            credentials,
+            SessionConfig::default(),
+        );
+        sim.client.connect(sim.now);
+        sim.client
+            .on_message(host_addr(), &datagram(&challenge), sim.now);
+        sim.flush();
+        assert_eq!(
+            naks_from_client(&sim),
+            vec![(NakReason::NotExpected, challenge.header().word())]
+        );
+        assert_eq!(sim.client.state(), SessionState::PendingInvitation);
+        assert!(
+            !sim.client_events
+                .iter()
+                .any(|e| matches!(e, Event::AuthenticationFailed { .. })),
+            "an unexpected challenge is not a failed authentication"
+        );
+    }
+}
+
+/// Spec: m2-124/5.3#6, m2-124/6.15 (a NAK quotes the refused command's header
+/// as it arrived, reserved bits included)
+#[test]
+fn a_nak_quotes_the_header_as_received() {
+    let mut sim = established();
+    // A Ping Reply for a Ping never sent, with its reserved data bits set.
+    let mut bytes = b"MIDI".to_vec();
+    bytes.extend_from_slice(&[0x21, 0x01, 0x12, 0x34, 0, 0, 0, 9]);
+    sim.client.on_message(host_addr(), &bytes, sim.now);
+    sim.flush();
+    assert_eq!(
+        naks_from_client(&sim),
+        vec![(NakReason::BadPingReply, 0x2101_1234)]
+    );
 }
 
 // ---- Data transfer ----

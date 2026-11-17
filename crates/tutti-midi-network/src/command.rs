@@ -7,24 +7,24 @@ use tutti_ump::{Ump, split_stream};
 use crate::{BoundedText, ByeText, Digest, NakText, Nonce, SequenceNumber, TextError, Username};
 
 /// Command Codes (M2-124 Table 8).
-mod code {
-    pub(super) const INVITATION: u8 = 0x01;
-    pub(super) const INVITATION_AUTH: u8 = 0x02;
-    pub(super) const INVITATION_USER_AUTH: u8 = 0x03;
-    pub(super) const ACCEPTED: u8 = 0x10;
-    pub(super) const PENDING: u8 = 0x11;
-    pub(super) const AUTH_REQUIRED: u8 = 0x12;
-    pub(super) const USER_AUTH_REQUIRED: u8 = 0x13;
-    pub(super) const PING: u8 = 0x20;
-    pub(super) const PING_REPLY: u8 = 0x21;
-    pub(super) const RETRANSMIT_REQUEST: u8 = 0x80;
-    pub(super) const RETRANSMIT_ERROR: u8 = 0x81;
-    pub(super) const SESSION_RESET: u8 = 0x82;
-    pub(super) const SESSION_RESET_REPLY: u8 = 0x83;
-    pub(super) const NAK: u8 = 0x8F;
-    pub(super) const BYE: u8 = 0xF0;
-    pub(super) const BYE_REPLY: u8 = 0xF1;
-    pub(super) const UMP_DATA: u8 = 0xFF;
+pub(crate) mod code {
+    pub(crate) const INVITATION: u8 = 0x01;
+    pub(crate) const INVITATION_AUTH: u8 = 0x02;
+    pub(crate) const INVITATION_USER_AUTH: u8 = 0x03;
+    pub(crate) const ACCEPTED: u8 = 0x10;
+    pub(crate) const PENDING: u8 = 0x11;
+    pub(crate) const AUTH_REQUIRED: u8 = 0x12;
+    pub(crate) const USER_AUTH_REQUIRED: u8 = 0x13;
+    pub(crate) const PING: u8 = 0x20;
+    pub(crate) const PING_REPLY: u8 = 0x21;
+    pub(crate) const RETRANSMIT_REQUEST: u8 = 0x80;
+    pub(crate) const RETRANSMIT_ERROR: u8 = 0x81;
+    pub(crate) const SESSION_RESET: u8 = 0x82;
+    pub(crate) const SESSION_RESET_REPLY: u8 = 0x83;
+    pub(crate) const NAK: u8 = 0x8F;
+    pub(crate) const BYE: u8 = 0xF0;
+    pub(crate) const BYE_REPLY: u8 = 0xF1;
+    pub(crate) const UMP_DATA: u8 = 0xFF;
 }
 
 /// The most 32-bit words a UMP Data Command carries (M2-124 Table 29).

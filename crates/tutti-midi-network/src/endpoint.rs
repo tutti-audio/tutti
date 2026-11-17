@@ -63,12 +63,12 @@ impl Outbox {
 /// Feeds the commands of a datagram to a session. A datagram that does not
 /// carry the signature is ignored whole.
 fn feed(session: &mut Session, now: Instant, datagram: &[u8]) {
-    let Ok(commands) = datagram::parse(datagram) else {
+    let Ok(mut commands) = datagram::parse(datagram) else {
         return;
     };
-    for command in commands {
-        match command {
-            Ok(command) => session.on_message(command, now),
+    while let Some(received) = commands.next_received() {
+        match received {
+            Ok((header, command)) => session.on_message(header, command, now),
             Err(refused) => session.refuse_command(now, refused.header, refused.error),
         }
     }
