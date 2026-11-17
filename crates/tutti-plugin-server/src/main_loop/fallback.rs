@@ -2,7 +2,8 @@
 //! Windows: nothing to wait on or to key liveness on, so a read blocks.
 
 use crate::transport::Transport;
-use tutti_plugin_types::{BridgeResult, MainThreadMarker, Ready, Wakeups};
+use tutti_plugin_ipc_ffi::Ready;
+use tutti_plugin_types::{BridgeResult, MainThreadMarker, Wakeups};
 
 pub(crate) type Listener = interprocess::local_socket::Listener;
 pub(crate) type Stream = interprocess::local_socket::Stream;

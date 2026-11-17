@@ -1,13 +1,15 @@
 //! Structures and types for interfacing with the VST 2.4 API.
 
+use std::marker::PhantomData;
 use std::os::raw::c_void;
+use std::ptr::NonNull;
 
 /// Why an `effGetChunk` produced no usable buffer.
 ///
 /// Distinct from an empty chunk, because "nothing saved" and "the save failed"
 /// call for opposite host behaviour.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
-pub enum ChunkError {
+pub enum GetChunkError {
     /// The plugin returned a negative length: an explicit error return.
     #[error("plugin returned a negative effGetChunk length ({0})")]
     Failed(isize),
@@ -553,13 +555,13 @@ pub struct Events {
 /// ```compile_fail,E0624
 /// # use tutti_vst2_ffi::api::{Events, PluginEvents};
 /// let raw = Events { num_events: i32::MAX, _reserved: 0, events: [std::ptr::null_mut(); 2] };
-/// let _ = PluginEvents::new(&raw);
+/// let _ = unsafe { PluginEvents::new(std::ptr::NonNull::from(&raw)) };
 /// ```
 ///
 /// ```compile_fail,E0451
 /// # use tutti_vst2_ffi::api::{Events, PluginEvents};
 /// let raw = Events { num_events: i32::MAX, _reserved: 0, events: [std::ptr::null_mut(); 2] };
-/// let _ = PluginEvents { events: &raw };
+/// let _ = PluginEvents { events: std::ptr::NonNull::from(&raw), list: std::marker::PhantomData };
 /// ```
 ///
 /// ```compile_fail,E0599
@@ -569,7 +571,11 @@ pub struct Events {
 /// ```
 #[derive(Debug)]
 pub struct PluginEvents<'a> {
-    events: &'a Events,
+    /// The plugin's list, from the pointer the callback received: it keeps the provenance of
+    /// the whole allocation behind the header, not only of the declared `[_; 2]` array, so
+    /// indexing past that array stays inside what the pointer may reach.
+    events: NonNull<Events>,
+    list: PhantomData<&'a Events>,
 }
 
 /// An event a plugin sent the host, copied out of its list by [`PluginEvents::iter`].
@@ -617,8 +623,16 @@ impl SysExMessage<'_> {
 impl<'a> PluginEvents<'a> {
     /// The view of a list the host callback has checked is non-null and aligned, and which the
     /// VST2 contract has the plugin keep valid for the call.
-    pub(crate) fn new(events: &'a Events) -> Self {
-        Self { events }
+    ///
+    /// # Safety
+    ///
+    /// `events` points at a `VstEvents` header that is readable for `'a`, and every entry
+    /// the header's count names lies in the same allocation and is readable for `'a`.
+    pub(crate) unsafe fn new(events: NonNull<Events>) -> Self {
+        Self {
+            events,
+            list: PhantomData,
+        }
     }
 
     /// A view of any `Events`, for the host crate's tests, which craft lists of null entries,
@@ -629,7 +643,9 @@ impl<'a> PluginEvents<'a> {
     #[cfg(feature = "testing")]
     #[doc(hidden)]
     pub fn for_test(events: &'a Events) -> Self {
-        Self::new(events)
+        // SAFETY: a reference is non-null, aligned and readable for `'a`; the caller points
+        // every entry at memory it owns, and keeps the count within the declared array.
+        unsafe { Self::new(NonNull::from(events)) }
     }
 
     /// The events, each copied out.
@@ -639,10 +655,17 @@ impl<'a> PluginEvents<'a> {
     /// integers, never as the [`EventType`] enum, because the plugin's memory can hold a value
     /// that is no variant. An event of another type is skipped.
     pub fn iter(&self) -> impl Iterator<Item = PluginEvent<'a>> + use<'a> {
-        let events: &'a Events = self.events;
+        let header = self.events.as_ptr();
+        // SAFETY: the header is readable (`new`'s contract); the fields are read through the
+        // raw pointer, so `base` keeps the provenance of the plugin's whole allocation.
+        let (count, base) = unsafe {
+            (
+                std::ptr::addr_of!((*header).num_events).read(),
+                std::ptr::addr_of!((*header).events).cast::<*mut Event>(),
+            )
+        };
         // A negative count is no events; it must not become `usize::MAX`.
-        let num = usize::try_from(events.num_events).unwrap_or(0);
-        let base = events.events.as_ptr();
+        let num = usize::try_from(count).unwrap_or(0);
         (0..num).filter_map(move |i| {
             // SAFETY: the VST2 contract has the plugin supply `num_events` valid event
             // pointers in the flexible array for the duration of the callback; a view is made

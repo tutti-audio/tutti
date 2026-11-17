@@ -30,6 +30,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use tutti_buffers::Planes;
 
 use tutti_codec::Wave;
 use tutti_graph::{Env, Node, TransportChanges, contract};
@@ -89,7 +90,7 @@ impl Clock {
             changes: TransportChanges::NONE,
             play: tutti_graph::PlayClock::ZERO,
         };
-        contract::drive_input(node, &env, &[], &[], &[]).audio
+        contract::drive_input(node, &env, Planes::default(), &[], &[]).audio
     }
 }
 

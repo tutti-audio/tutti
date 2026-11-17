@@ -9,7 +9,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
 
 use mdns_sd::{ResolvedService, ServiceDaemon, ServiceEvent, ServiceInfo};
-use tutti_midi_device::{EndpointName, NameError, ProductInstanceId};
+use tutti_midi_device::NameError;
 
 use crate::EndpointIdentity;
 
@@ -187,8 +187,8 @@ impl FoundHost {
         Ok(Self {
             fullname: service.get_fullname().to_owned(),
             identity: EndpointIdentity {
-                name: EndpointName::parse(name).map_err(DiscoveryError::EndpointName)?,
-                instance_id: ProductInstanceId::parse(id).map_err(DiscoveryError::InstanceId)?,
+                name: name.parse().map_err(DiscoveryError::EndpointName)?,
+                instance_id: id.parse().map_err(DiscoveryError::InstanceId)?,
             },
             addresses,
         })

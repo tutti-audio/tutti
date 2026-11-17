@@ -124,13 +124,13 @@ mod learned {
 
     fn said() -> Learned {
         Learned::new()
-            .with_identity(DeviceIdentity {
+            .identified(DeviceIdentity {
                 manufacturer: ManufacturerId::of(0x0042),
                 family: [1, 0].map(U7::of),
                 model: [7, 0].map(U7::of),
                 revision: SoftwareRevision::from([1, 2, 3, 4].map(U7::of)),
             })
-            .with_instance_id(ProductInstanceId::new("SN-1").unwrap())
+            .instanced(ProductInstanceId::new("SN-1").unwrap())
     }
 
     #[test]
@@ -216,15 +216,15 @@ mod saved_state {
     #[test]
     fn a_binary_state_reads_back_with_its_device_revision_and_time() {
         let state = PeState::octets(vec![0, 127, 128, 255])
-            .with_rev(StateRev::new("buui890adj").unwrap())
-            .with_timestamp(UnixSeconds::of(1_586_786_400));
+            .revised(StateRev::new("buui890adj").unwrap())
+            .stamped(UnixSeconds::of(1_586_786_400));
         let saved = saved(state);
         assert_eq!(round_trip(&saved), saved);
     }
 
     #[test]
     fn a_json_state_reads_back_as_json() {
-        let json = PeJson::parse(br#"{"a":[1,2]}"#).unwrap();
+        let json = PeJson::try_from(br#"{"a":[1,2]}"#.as_slice()).unwrap();
         let saved = saved(PeState::json(json));
         let back = round_trip(&saved);
         assert_eq!(back, saved);
@@ -235,7 +235,7 @@ mod saved_state {
     fn the_document_names_each_part() {
         let state = PeState::binary(MediaType::new("audio/wav").unwrap(), vec![9])
             .unwrap()
-            .with_timestamp(UnixSeconds::of(5));
+            .stamped(UnixSeconds::of(5));
         assert_eq!(
             serde_json::to_string(&saved(state)).unwrap(),
             r#"{"device":{"manufacturer":66,"family":[1,0],"model":[7,0],"revision":[1,2,3,4]},"state_id":"fullState","rev":null,"timestamp":5,"media_type":"audio/wav","bytes":[9]}"#

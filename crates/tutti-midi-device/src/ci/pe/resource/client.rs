@@ -384,12 +384,15 @@ impl ResourceInitiator {
     /// # Errors
     ///
     /// [`CallError::Refused`] when the entry of the ResourceList does not allow
-    /// the inquiry, [`CallError::Pe`] when it cannot be started.
+    /// the inquiry, and [`RequestRefused::NotPaginable`] for a page of a Resource
+    /// that is no List Resource, entry or not; [`CallError::Pe`] when it cannot be
+    /// started.
     pub fn get(
         &mut self,
         get: &ResourceGet,
         now: Instant,
     ) -> Result<(CallId, Vec<ResourceAction>), CallError> {
+        get.check_page_target()?;
         if let Some(entry) = self.entry(get.target().resource())? {
             get.check_get(entry)?;
         }
@@ -433,7 +436,7 @@ impl ResourceInitiator {
         let first = get.clone().paged(PePage {
             offset: 0,
             limit: page_size,
-        })?;
+        });
         if let Some(entry) = self.entry(get.target().resource())? {
             first.check_get(entry)?;
         }
@@ -501,13 +504,14 @@ impl ResourceInitiator {
     ///
     /// # Errors
     ///
-    /// As for [`get`](Self::get), and [`RequestRefused::CannotSubscribe`] for an
-    /// entry that is not `canSubscribe`.
+    /// As for [`get`](Self::get), including [`RequestRefused::NotPaginable`], and
+    /// [`RequestRefused::CannotSubscribe`] for an entry that is not `canSubscribe`.
     pub fn subscribe(
         &mut self,
         get: &ResourceGet,
         now: Instant,
     ) -> Result<(CallId, Vec<ResourceAction>), CallError> {
+        get.check_page_target()?;
         if let Some(entry) = self.entry(get.target().resource())? {
             get.check_subscribe(entry)?;
         }
@@ -739,7 +743,6 @@ impl ResourceInitiator {
                 offset: have,
                 limit: walk.size,
             });
-        let Ok(next) = next else { return };
         let call = PeCall::Get(pe_get(&next));
         match self.pe.start(call, now) {
             Ok((id, actions)) => {
@@ -880,7 +883,7 @@ fn pe_get(get: &ResourceGet) -> PeGet {
 }
 
 fn parse(response: &PeResponse) -> Result<PeJson, ResourceFailure> {
-    Ok(PeJson::parse(&response.body)?)
+    Ok(PeJson::try_from(response.body.as_slice())?)
 }
 
 /// The data of a reply: JSON, or the bytes of its media type.
@@ -902,7 +905,7 @@ fn read_full(
 
 /// The data with the changes of a `partial` update made, when they can be.
 fn apply_partial(held: &PeData, bytes: &[u8]) -> Option<PeData> {
-    let update = PartialUpdate::from_json(&PeJson::parse(bytes).ok()?).ok()?;
+    let update = PartialUpdate::try_from(&PeJson::try_from(bytes).ok()?).ok()?;
     let changed = update.apply(&held.to_json()?).ok()?;
     PeData::decode(&held.resource(), &changed).ok()
 }

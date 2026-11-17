@@ -3,7 +3,7 @@
 use crate::guard::Out;
 use std::ffi::c_void;
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
-use tutti_plugin_types::ffi_guard;
+use tutti_plugin_types::{MAX_STATE_BYTES, ffi_guard};
 
 use parking_lot::Mutex;
 use vst3::Steinberg::{
@@ -15,9 +15,9 @@ use vst3::{Class, ComWrapper};
 
 use crate::sdk::sdk_enum_i32;
 
-/// The most a stream may hold (1 GiB): a plugin's state is far smaller, and a
-/// seek then a write otherwise zero-fills up to any position a plugin names.
-const MAX_STREAM_BYTES: u64 = 1 << 30;
+/// The most a stream may hold: a plugin's state is far smaller, and a seek
+/// then a write otherwise zero-fills up to any position a plugin names.
+const MAX_STREAM_BYTES: u64 = MAX_STATE_BYTES as u64;
 
 /// COM-wrapped in-memory stream.
 ///
@@ -370,7 +370,8 @@ mod tests {
 
     /// **A plugin cannot make the host allocate past the cap by seeking far and
     /// writing.** `Cursor<Vec<u8>>` zero-fills up to the position, so a seek to
-    /// 1 TiB and a one-byte write used to ask for a terabyte.
+    /// 1 TiB and a one-byte write would ask for a terabyte; the write is
+    /// refused.
     #[test]
     fn a_far_seek_then_a_write_is_refused() {
         let stream = BStream::new();

@@ -73,10 +73,7 @@ fn endpoint_of(blocks: &[FunctionBlock]) -> Endpoint {
         midi2: true,
         ..Capabilities::default()
     }));
-    blocks
-        .iter()
-        .cloned()
-        .fold(device, Endpoint::with_function_block)
+    blocks.iter().cloned().fold(device, Endpoint::block)
 }
 
 /// A negotiated UMP Endpoint with `blocks`, and the poll after the settle,
@@ -920,8 +917,8 @@ fn a_ci_peers_product_instance_id_fills_what_the_device_left() {
 
 use crate::{ChannelCount, ProfileError, ProfilesChange, Switcher, Whole};
 use tutti_midi_device::{
-    Outcome, PEER_REPLY_TIMEOUT, ProfileChange, ProfileChannels, ProfileId, ProfileLists,
-    ProfileState, ProfileTarget, Request, StandardProfile,
+    Outcome, PEER_REPLY_TIMEOUT, ProfileChange, ProfileChannels, ProfileId, ProfileList,
+    ProfileLists, ProfileState, ProfileTarget, Request, StandardProfile,
 };
 use tutti_ump::MidiChannel;
 
@@ -963,7 +960,10 @@ fn reply_at_address(
                 ..CiHeader::new(peer())
             },
             to: ours,
-            profiles: ProfileLists::new(enabled, disabled).unwrap(),
+            profiles: ProfileLists::new(
+                ProfileList::try_from(enabled).unwrap(),
+                ProfileList::try_from(disabled).unwrap(),
+            ),
         },
         ms,
     );
@@ -2011,7 +2011,7 @@ fn pe_limits() -> PeReassemblyLimits {
 
 fn local_on(on: bool) -> ResourceStore {
     let mut store = ResourceStore::new();
-    store.declare(ResourceEntry::new(PeResource::LocalOn).unwrap());
+    store.declare(ResourceEntry::builder(PeResource::LocalOn).build().unwrap());
     store
         .put(None, PeData::LocalOn(PeLocalOn(on)))
         .expect("declared");
@@ -2234,7 +2234,7 @@ fn the_session_initiates_property_exchange_with_a_peer_that_declared_it() {
     let [handle] = &*peers else {
         panic!("the peer is listed: {peers:?}");
     };
-    let get = ResourceGet::new(ResourceTarget::new(PeResource::LocalOn).unwrap());
+    let get = ResourceGet::new(ResourceTarget::try_from(PeResource::LocalOn).unwrap());
     wire.session
         .ask_property(handle.ask(PropertyCall::Get(get)))
         .unwrap();
@@ -2256,7 +2256,7 @@ fn the_session_initiates_property_exchange_with_a_peer_that_declared_it() {
     assert_eq!(
         got,
         Some((
-            ResourceTarget::new(PeResource::LocalOn).unwrap(),
+            ResourceTarget::try_from(PeResource::LocalOn).unwrap(),
             Ok(PeData::LocalOn(PeLocalOn(false)))
         ))
     );
@@ -2277,7 +2277,7 @@ fn the_session_serves_its_store_to_a_peer_that_declared_property_exchange() {
     });
     assert_eq!(list, Some(local_on(true).resource_list()));
 
-    let get = ResourceGet::new(ResourceTarget::new(PeResource::LocalOn).unwrap());
+    let get = ResourceGet::new(ResourceTarget::try_from(PeResource::LocalOn).unwrap());
     let init = far.init.as_mut().unwrap();
     let (_, actions) = init.get(&get, wire.at(300)).unwrap();
     let said = Far::sends_of(actions);
@@ -2334,9 +2334,10 @@ fn a_lost_peer_drops_its_property_exchange() {
 fn subscribable() -> ResourceStore {
     let mut store = ResourceStore::new();
     store.declare(
-        ResourceEntry::new(PeResource::LocalOn)
-            .unwrap()
-            .with_can_subscribe(true),
+        ResourceEntry::builder(PeResource::LocalOn)
+            .can_subscribe(true)
+            .build()
+            .unwrap(),
     );
     store
         .put(None, PeData::LocalOn(PeLocalOn(true)))
@@ -2372,7 +2373,7 @@ fn ask_and_pump(wire: &mut Wire, far: &mut Far, call: PropertyCall, ms: u64) -> 
 #[test]
 fn a_subscription_starts_and_ends_through_the_session() {
     let (mut wire, _, mut far) = ready_property_peer(subscribable());
-    let get = ResourceGet::new(ResourceTarget::new(PeResource::LocalOn).unwrap());
+    let get = ResourceGet::new(ResourceTarget::try_from(PeResource::LocalOn).unwrap());
     let all = ask_and_pump(&mut wire, &mut far, PropertyCall::Subscribe(get), 300);
     let answers = property_answers(&all);
     let Some(id) = answers.iter().find_map(|a| match a {
@@ -2404,7 +2405,7 @@ fn subscription_replies(wire: &Wire) -> Vec<tutti_midi_device::PeStatus> {
                 message: PeCiMessage::Chunk { kind, chunk },
                 ..
             } if kind == PeMessageKind::SUBSCRIPTION_REPLY => {
-                match PeHeader::parse(chunk.header()) {
+                match PeHeader::try_from(chunk.header()) {
                     Ok(PeHeader::Reply(reply)) => Some(reply.status),
                     _ => None,
                 }
@@ -2447,7 +2448,7 @@ fn subscription_chunk(
 /// A subscribed far end whose Subscription the session's Initiator holds.
 fn held_subscription() -> (Wire, Muid, Far, tutti_midi_device::SubscribeId) {
     let (mut wire, ours, mut far) = ready_property_peer(subscribable());
-    let get = ResourceGet::new(ResourceTarget::new(PeResource::LocalOn).unwrap());
+    let get = ResourceGet::new(ResourceTarget::try_from(PeResource::LocalOn).unwrap());
     let all = ask_and_pump(&mut wire, &mut far, PropertyCall::Subscribe(get), 300);
     let id = property_answers(&all)
         .into_iter()
@@ -2467,7 +2468,7 @@ fn an_update_of_a_held_subscription_is_answered_once_with_200_and_not_by_the_res
     let (mut wire, _, mut far, _) = held_subscription();
     let _ = ci_sent(&wire);
     let now = wire.at(600);
-    let target = ResourceTarget::new(PeResource::LocalOn).unwrap();
+    let target = ResourceTarget::try_from(PeResource::LocalOn).unwrap();
     let actions = far
         .resp
         .publish(&target, PeData::LocalOn(PeLocalOn(false)), now)
@@ -2572,7 +2573,7 @@ fn the_end_of_an_unheld_subscription_reaches_the_responder_and_is_answered_404()
 #[test]
 fn a_call_the_peers_resource_list_refuses_is_a_not_sent_answer() {
     let (mut wire, _, mut far) = ready_property_peer(subscribable());
-    let get = ResourceGet::new(ResourceTarget::new(PeResource::DeviceInfo).unwrap());
+    let get = ResourceGet::new(ResourceTarget::try_from(PeResource::DeviceInfo).unwrap());
     let all = ask_and_pump(&mut wire, &mut far, PropertyCall::Get(get), 300);
     let answers = property_answers(&all);
     assert!(
@@ -2590,7 +2591,7 @@ fn a_call_for_a_peer_that_is_gone_is_refused_or_reported_not_sent() {
     let handle = wire.session.property_peers(&wire.id)[0].clone();
     let get = || {
         PropertyCall::Get(ResourceGet::new(
-            ResourceTarget::new(PeResource::LocalOn).unwrap(),
+            ResourceTarget::try_from(PeResource::LocalOn).unwrap(),
         ))
     };
 

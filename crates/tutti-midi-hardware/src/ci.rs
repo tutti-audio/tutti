@@ -1562,7 +1562,9 @@ mod tests {
         let (mut running, _) = Running::start(&[G0], identity(), &mut entropy, now, &mut out);
         let mut store = ResourceStore::new();
         store.declare(
-            tutti_midi_device::ResourceEntry::new(tutti_midi_device::PeResource::LocalOn).unwrap(),
+            tutti_midi_device::ResourceEntry::builder(tutti_midi_device::PeResource::LocalOn)
+                .build()
+                .unwrap(),
         );
         let shared = Arc::new(Mutex::new(store));
         running.serve(&shared);
@@ -1629,9 +1631,9 @@ mod tests {
         let (mut running, _) = Running::start(&[G0, G1], identity(), &mut entropy, now, &mut out);
         let mut store = ResourceStore::new();
         store.declare(
-            ResourceEntry::new(PeResource::LocalOn)
-                .unwrap()
-                .with_can_set(CanSet::Full)
+            ResourceEntry::builder(PeResource::LocalOn)
+                .can_set(CanSet::Full)
+                .build()
                 .unwrap(),
         );
         store
@@ -1650,7 +1652,7 @@ mod tests {
             },
             body_limit: tutti_midi_device::BodyLimit::of(1 << 16),
         };
-        let target = ResourceTarget::new(PeResource::LocalOn).unwrap();
+        let target = ResourceTarget::try_from(PeResource::LocalOn).unwrap();
         let mut ends = Vec::new();
         for member in &mut running.members {
             member.server.accept(peer, MAX_SYSEX);
@@ -1766,7 +1768,7 @@ mod tests {
                 "{group:?}"
             );
             let call = PropertyCall::Get(ResourceGet::new(
-                ResourceTarget::new(tutti_midi_device::PeResource::LocalOn).unwrap(),
+                ResourceTarget::try_from(tutti_midi_device::PeResource::LocalOn).unwrap(),
             ));
             running.start_properties(
                 &mut vec![PropertyAsk {

@@ -311,7 +311,7 @@ pub(super) fn merged(old: &PartialUpdate, new: &PartialUpdate) -> Option<Partial
     }
     let mut all = old.clone();
     for (pointer, value) in new.iter() {
-        all = all.with(pointer.clone(), value.clone()).ok()?;
+        all = all.with(pointer.clone(), value.clone());
     }
     (all.iter().count() <= MAX_QUEUED_CHANGES).then_some(all)
 }
@@ -352,8 +352,10 @@ impl ResourceResponder {
     /// Gives the device a say over the states Initiators set: it judges each body
     /// as it comes and gives an accepted state its revision and time (M2-111
     /// §3.3). Without one every state is accepted with no stamp.
-    pub fn set_state_device(&mut self, device: Box<dyn StateDevice>) {
+    #[must_use]
+    pub fn state_device(mut self, device: Box<dyn StateDevice>) -> Self {
         self.device = Some(device);
+        self
     }
 
     /// The Resources served, locked while the guard lives: drop it before the
@@ -891,7 +893,7 @@ impl ResourceResponder {
         let target = |resource: PeResource| {
             match request.res_id.clone() {
                 Some(id) => ResourceTarget::entry(resource, id),
-                None => ResourceTarget::new(resource),
+                None => ResourceTarget::try_from(resource),
             }
             .map_err(|e| refusal(PeStatus::BadRequest, e.to_string()))
         };
@@ -1046,9 +1048,9 @@ impl ResourceResponder {
                 (data, Announce::Full, ChangeKind::Full)
             }
             PeSetScope::Partial => {
-                let json = PeJson::parse(&bytes)
+                let json = PeJson::try_from(bytes.as_slice())
                     .map_err(|e| refusal(PeStatus::BadRequest, e.to_string()))?;
-                let update = PartialUpdate::from_json(&json)
+                let update = PartialUpdate::try_from(&json)
                     .map_err(|e| refusal(PeStatus::BadRequest, e.to_string()))?;
                 let data = self.changed(&target, &update).map_err(|e| match e {
                     PublishError::NoData(_) => refusal(PeStatus::NotFound, e.to_string()),

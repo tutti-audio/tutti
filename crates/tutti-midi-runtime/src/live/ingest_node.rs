@@ -16,8 +16,8 @@
 //! to Channels in another), so a Group has its own sixteen channel ports and
 //! its own channelless port, which carries that Group's System, SysEx and Flex
 //! messages. The node hears the first Group unless built to hear more
-//! ([`MidiIngestNode::hearing`]), so a one-Group device is the seventeen ports
-//! it always was. A message with no Group (Utility, UMP Stream: they address
+//! ([`MidiIngestNode::hearing`]), so a one-Group device has [`MIDI_INPUT_PORTS`]
+//! ports. A message with no Group (Utility, UMP Stream: they address
 //! the Endpoint, not a Group) leaves the first Group's channelless port.
 //! **Routing is wiring**: a synth listening to channel 3 of a Group takes event
 //! edges from that Group's port 3 and its channelless port, one listening to a
@@ -71,7 +71,6 @@
 //!
 //! Its fork is silent: an offline render reads no wire.
 
-use std::sync::Arc;
 use tutti_graph::{Losses, UmpAt};
 
 use tutti_graph::{
@@ -80,7 +79,7 @@ use tutti_graph::{
 };
 use tutti_midi_protocol::Translator;
 use tutti_midi_protocol::{MpeMode, MpeZones};
-use tutti_rt::{ArcLend, Counter, CounterWriter, Reader, counter};
+use tutti_rt::{Counter, CounterWriter, Publisher, Reader, counter};
 use tutti_types::{Frame, SampleRate, Samples};
 use tutti_ump::{Message, MidiChannel, MidiGroup, System, Ump};
 
@@ -260,9 +259,11 @@ pub struct MidiIngestNode {
     ports: MidiInputPorts,
     /// The MPE mode in force.
     mpe_mode: MpeMode,
-    /// What a host asked for, read once per block. The reader owns its cell
-    /// (`Reader::cell`), which the controls publish to.
+    /// What a host asked for, read once per block.
     mpe_request: Reader<Requests>,
+    /// The cell `mpe_request` reads, which the controls publish to; the node
+    /// never touches it.
+    mpe_request_cell: Publisher<Requests>,
     /// The Profile zones in force on the device's Groups: what the requests
     /// last read set.
     profiles: GroupProfiles,
@@ -425,10 +426,11 @@ impl MidiIngestNode {
     /// A node with its one event input, with MPE ingestion off.
     #[must_use]
     pub fn new() -> Self {
-        let cell = Arc::new(ArcLend::new(Requests::new()));
+        let cell = Publisher::new(Requests::new());
         let (dropped, dropped_reader) = counter();
         Self {
             mpe_request: cell.reader(),
+            mpe_request_cell: cell,
             device: Device::new(MpeMode::Disabled),
             profiles: NO_PROFILES,
             profiles_generation: 0,
@@ -504,8 +506,8 @@ impl MidiIngestNode {
 #[derive(Clone, Debug)]
 pub struct MidiIngestControls {
     /// What the node reads; the controls publish to it and read it back with
-    /// `ArcLend::current`.
-    request: Arc<ArcLend<Requests>>,
+    /// `Publisher::current`.
+    request: Publisher<Requests>,
     dropped: Counter<Losses>,
 }
 
@@ -720,7 +722,27 @@ impl Node for MidiIngestNode {
         Status::Modified
     }
 
-    fn reset(&mut self) {}
+    /// The device state of a freshly prepared node: the translator and the MPE
+    /// ingest start empty (the MPE mode in force stays), nothing is held or
+    /// owed, no Group has sent an Active Sensing, and the Profile zones in
+    /// force are read again from the requests. What the node held is not
+    /// released: `reset` has no output to release into. The executor, when it
+    /// parks a bypassed node, ends the keys and the sustain pedal the node held
+    /// on its event outputs (the graph's held set covers keys and sustain
+    /// only), so after a bypass the sostenuto, soft and hold-2 pedals and the
+    /// bend the device left are neither lifted nor remembered.
+    fn reset(&mut self) {
+        self.device.translator.reset();
+        self.device.mpe = MpeIngest::new(self.mpe_mode);
+        self.device.held.forget();
+        self.device.sensing.forget_all();
+        self.device.owing = 0;
+        self.profiles = NO_PROFILES;
+        // A published request's generation is at least 1 (`edit_profiles`
+        // bumps it before publishing), so generation 0 reads the requests again
+        // whenever one was published.
+        self.profiles_generation = 0;
+    }
 }
 
 /// The block's translated events, as they are made.
@@ -799,7 +821,7 @@ impl IntoNode for MidiIngestNode {
     fn into_parts(self) -> NodeParts<MidiIngestControls> {
         let fork = SilentInput { ports: self.ports };
         let controls = MidiIngestControls {
-            request: Arc::clone(self.mpe_request.cell()),
+            request: self.mpe_request_cell.clone(),
             dropped: self.dropped_reader.clone(),
         };
         NodeParts {

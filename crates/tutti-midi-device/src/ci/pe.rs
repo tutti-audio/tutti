@@ -11,7 +11,7 @@
 //! property the spec does not name, a manufacturer-specific `x-` property
 //! among them (§6.1.4), is kept in the header's [`PeExtra`] and written back.
 //!
-//! [`PeHeader::parse`] reads the bytes of a Header Data field and
+//! [`PeHeader`] reads the bytes of a Header Data field and
 //! [`PeHeader::encode`] writes them, holding the header to the Receivable Maximum
 //! SysEx Message Size from Discovery.
 //!
@@ -47,7 +47,7 @@
 //! let request = PeRequest::new(ResourceName::new("ChannelList").unwrap());
 //! let bytes = PeHeader::Request(request.clone()).encode(MaxSysexSize::of(512)).unwrap();
 //! assert_eq!(bytes, br#"{"resource":"ChannelList"}"#);
-//! assert_eq!(PeHeader::parse(&bytes), Ok(PeHeader::Request(request)));
+//! assert_eq!(PeHeader::try_from(bytes.as_slice()), Ok(PeHeader::Request(request)));
 //! ```
 //!
 //! A message sent in chunks, and received:
@@ -126,7 +126,7 @@ pub use initiator::{
 pub use limits::{
     MediaType, NotValid, PeMessage, PropertyName, ResourceId, ResourceName, SubscribeId,
 };
-pub use partial::{JsonPointer, PartialError, PartialUpdate};
+pub use partial::{JsonPointer, PartialError, PartialUpdate, PartialValue};
 pub use reassemble::{
     BufferLimit, NotABufferLimit, NotAStreamLimit, PeBuffered, PeExpired, PeFlowControl, PeHeld,
     PeReassembler, PeReassemblyError, PeReassemblyLimits, PeReceived, PeRefused, PeStep,
@@ -135,21 +135,22 @@ pub use reassemble::{
 pub use resource::{
     ActionError, Arrival, CallError, CallId, CanSet, CcIndex, ChangeKind, ClusterKind,
     ColumnSource, CommonState, ConfirmIcon, ConfirmType, Confirmation, CtrlControl, CtrlKind,
-    CtrlRange, CtrlValueKind, CustomResource, DefaultMapNotCc, EntryError, GetStateError, LinkRole,
-    ListedTwice, MAX_LIST_ENTRIES, ModeId, NotAPeChannel, NotAPriority, NotAStateSize,
-    NotAStepCount, NotSignificantBits, NotUnixSeconds, NotVendorName, OpaqueBody, PaginationFault,
-    ParamPath, PeAllCtrlEntry, PeAllCtrlList, PeBankProgram, PeBasicChannelRx, PeBasicChannelTx,
+    CtrlRange, CtrlValueKind, CustomResource, EntryError, GetStateError, LinkRole, ListedTwice,
+    MAX_LIST_ENTRIES, ModeId, NotAPeChannel, NotAPriority, NotAStateSize, NotAStepCount,
+    NotSignificantBits, NotUnixSeconds, NotVendorName, OpaqueBody, PaginationFault, ParamPath,
+    PeAllCtrlEntry, PeAllCtrlList, PeBankProgram, PeBasicChannelRx, PeBasicChannelTx,
     PeChCtrlEntry, PeChCtrlList, PeChannel, PeChannelEntry, PeChannelList, PeChannelMode,
     PeCluster, PeColumn, PeController, PeCtrl, PeCtrlMapEntry, PeCtrlMapList, PeCurrentMode,
     PeData, PeDataError, PeDataFault, PeDeviceInfo, PeExtensions, PeExternalSync, PeJsonSchema,
     PeLink, PeLocalOn, PeMidiMode, PeModeEntry, PeModeList, PeOpaque, PeProgramEntry,
     PeProgramList, PeResource, PeResourceList, PeState, PeStateEntry, PeStateList, PeText,
     Priority, PublishError, RefusedAt, RequestRefused, ResIdUse, ResourceAction, ResourceDefaults,
-    ResourceEntry, ResourceEvent, ResourceFailure, ResourceGet, ResourceInitiator,
-    ResourceResponder, ResourceSet, ResourceStore, ResourceTarget, ResponderAction, ResponderEvent,
-    ResponderSettings, RestoreError, RoleName, SavedState, SelectorAction, SetBody,
-    SignificantBits, SimpleAction, StateDevice, StateId, StateRev, StateSize, StateStamp,
-    StepCount, StoreError, TypeHint, UnixSeconds, UpdateKind, Verdict, WrongDevice,
+    ResourceEntry, ResourceEntryBuilder, ResourceEvent, ResourceFailure, ResourceGet,
+    ResourceInitiator, ResourceResponder, ResourceSet, ResourceStore, ResourceTarget,
+    ResponderAction, ResponderEvent, ResponderSettings, RestoreError, RoleName, SavedState,
+    SelectorAction, SetBody, SignificantBits, SimpleAction, StateDevice, StateId, StateRev,
+    StateSize, StateStamp, StepCount, StoreError, TypeHint, UnixSeconds, UpdateKind, Verdict,
+    WrongDevice,
 };
 pub use tree::{PE_JSON_MAX_DEPTH, PeDecimal, PeJson, PeJsonError, PeObject};
 pub use value::{PeExtra, PeExtraError};

@@ -14,7 +14,7 @@ use super::super::header::{
 };
 use super::super::initiator::{PeCall, PeSet};
 use super::super::limits::{MediaType, ResourceName};
-use super::super::partial::{JsonPointer, PartialUpdate};
+use super::super::partial::{JsonPointer, PartialError, PartialUpdate, PartialValue};
 use super::super::reassemble::PeFlowControl;
 use super::super::tree::{PeJson, PeObject};
 use super::super::value::{PeExtra, PeExtraError};
@@ -101,7 +101,7 @@ fn chunks_of(actions: &[ResponderAction]) -> Vec<(PeMessageKind, PeChunk)> {
 }
 
 fn header_of(chunk: &PeChunk) -> PeHeader {
-    PeHeader::parse(chunk.header()).unwrap()
+    PeHeader::try_from(chunk.header()).unwrap()
 }
 
 fn acks_and_naks(actions: &[ResponderAction]) -> Vec<PeSignal> {
@@ -183,7 +183,7 @@ fn an_update_waits_for_a_free_request_id_and_carries_the_data_as_it_is_then() {
     };
     assert_eq!(*command, PeUpdateCommand::Full);
     assert_eq!(
-        PeJson::parse(body).unwrap(),
+        PeJson::try_from(body.as_slice()).unwrap(),
         channels(3).to_json().unwrap(),
         "the newest data goes, and the two before it with it"
     );
@@ -210,11 +210,7 @@ fn pointer(text: &str) -> JsonPointer {
 #[test]
 fn queued_partial_updates_fold_into_one() {
     let (mut link, target) = subscribed_link(1, custom("X-ProgramEdit"), Some("abcd"));
-    let change = |p: &str, n: i64| {
-        PartialUpdate::new()
-            .with(pointer(p), PeJson::Integer(n))
-            .unwrap()
-    };
+    let change = |p: &str, n: i64| PartialUpdate::new().with(pointer(p), PartialValue::Integer(n));
     let first = link
         .resp
         .change(&target, change("/lfoSpeed", 10), link.now)
@@ -236,8 +232,11 @@ fn queued_partial_updates_fold_into_one() {
     };
     assert_eq!(*command, PeUpdateCommand::Partial);
     assert_eq!(
-        PeJson::parse(body).unwrap(),
-        PeJson::parse(br#"{"/pitchEnvelope/rates/0":81,"/pitchEnvelope/levels/0":60}"#).unwrap()
+        PeJson::try_from(body.as_slice()).unwrap(),
+        PeJson::try_from(
+            br#"{"/pitchEnvelope/rates/0":81,"/pitchEnvelope/levels/0":60}"#.as_slice()
+        )
+        .unwrap()
     );
 }
 
@@ -245,11 +244,7 @@ fn queued_partial_updates_fold_into_one() {
 // too many, is told as a `full` of the data as it is.
 #[test]
 fn partial_updates_that_cannot_fold_are_told_as_a_full() {
-    let one = |p: &str| {
-        PartialUpdate::new()
-            .with(pointer(p), PeJson::Integer(1))
-            .unwrap()
-    };
+    let one = |p: &str| PartialUpdate::new().with(pointer(p), PartialValue::Integer(1));
     assert!(super::server::merged(&one("/a"), &one("/b")).is_some());
     assert!(super::server::merged(&one("/a"), &one("/a")).is_some());
     assert!(super::server::merged(&one(""), &one("/a")).is_none());
@@ -273,7 +268,7 @@ fn partial_updates_that_cannot_fold_are_told_as_a_full() {
     match command {
         PeUpdateCommand::Full => {
             let held = link.resp.store().get(&target).unwrap().to_json().unwrap();
-            assert_eq!(PeJson::parse(body).unwrap(), held);
+            assert_eq!(PeJson::try_from(body.as_slice()).unwrap(), held);
         }
         other => assert_eq!(*other, PeUpdateCommand::Notify),
     }
@@ -418,7 +413,7 @@ fn a_flow_controlled_reply_goes_a_chunk_for_each_ack() {
     let mark = link.wire.len();
     let made = link
         .init
-        .get(&get(PeResource::ChannelList).with_flow_control(), link.now);
+        .get(&get(PeResource::ChannelList).flow_controlled(), link.now);
     let call = link.call(made);
     let Ok(PeData::ChannelList(list)) = link.got(call) else {
         panic!("{:?}", link.events);
@@ -674,7 +669,7 @@ fn reply_header(link: &Link, to_initiator: bool) -> Vec<super::super::header::Pe
             CiMessage::PropertyExchange {
                 message: PeCiMessage::Chunk { chunk, .. },
                 ..
-            } => match PeHeader::parse(chunk.header()) {
+            } => match PeHeader::try_from(chunk.header()) {
                 Ok(PeHeader::Reply(r)) => Some(r),
                 _ => None,
             },
@@ -816,9 +811,7 @@ fn only_an_untyped_resource_holds_binary_data() {
 fn a_partial_change_does_not_apply_to_binary_data() {
     let mut link = Link::new(store(), 256);
     let blob = super::exchange::target(custom("X-Blob"));
-    let update = PartialUpdate::new()
-        .with(pointer("/a"), PeJson::Integer(1))
-        .unwrap();
+    let update = PartialUpdate::new().with(pointer("/a"), PartialValue::Integer(1));
     assert!(matches!(
         link.resp.change(&blob, update, link.now),
         Err(PublishError::Data(_))
@@ -863,7 +856,7 @@ fn a_simple_action_is_a_set_of_its_prop_data() {
         })),
         ..PeLink::new(custom("X-Copy"))
     };
-    let set = ResourceSet::from_simple_action(&link).unwrap();
+    let set = ResourceSet::try_from(&link).unwrap();
     assert_eq!(set.target().resource(), &custom("X-Copy"));
     let SetBody::Full(data) = set.body() else {
         panic!("not a full set");
@@ -871,7 +864,7 @@ fn a_simple_action_is_a_set_of_its_prop_data() {
     assert_eq!(data.to_wire(), (None, br#""0_1_1""#.to_vec()));
     // A Link that is no simple action is not one.
     assert!(matches!(
-        ResourceSet::from_simple_action(&PeLink::new(custom("X-Copy"))),
+        ResourceSet::try_from(&PeLink::new(custom("X-Copy"))),
         Err(ActionError::NotThatAction(_))
     ));
 }
@@ -1001,13 +994,12 @@ fn a_header_property_and_a_change_are_scalars_of_the_one_json_type() {
         Err(PeExtraError::NotScalar)
     );
     assert!(extra.insert(name, PeJson::Integer(1)).is_ok());
-    assert!(
-        PartialUpdate::new()
-            .with(pointer("/a"), PeJson::Object(PeObject::new()))
-            .is_err()
+    assert_eq!(
+        PartialValue::try_from(&PeJson::Object(PeObject::new())),
+        Err(PartialError::NotAChange)
     );
     // The grammar of Header Data has no whitespace and no nesting; Property Data has both.
-    assert!(PeHeader::parse(br#"{"resource": "A"}"#).is_err());
-    assert!(PeHeader::parse(br#"{"resource":"A","x-n":[1]}"#).is_err());
-    assert!(PeJson::parse(br#"{"resource": "A", "x-n": [1]}"#).is_ok());
+    assert!(PeHeader::try_from(br#"{"resource": "A"}"#.as_slice()).is_err());
+    assert!(PeHeader::try_from(br#"{"resource":"A","x-n":[1]}"#.as_slice()).is_err());
+    assert!(PeJson::try_from(br#"{"resource": "A", "x-n": [1]}"#.as_slice()).is_ok());
 }

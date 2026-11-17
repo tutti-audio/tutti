@@ -3,6 +3,7 @@
 //! infinity never reaches the output.
 
 use std::sync::atomic::Ordering;
+use tutti_buffers::Planes;
 use tutti_types::MaxBlock;
 
 use tutti_graph::contract::drive;
@@ -32,7 +33,7 @@ fn renders_finite(node: &mut dyn Node, blocks: usize) -> bool {
     for k in 0..blocks {
         let chans = block(width, k);
         let refs: Vec<&[f32]> = chans.iter().map(|c| &c[..]).collect();
-        ok &= drive(node, RATE, &refs, &[])
+        ok &= drive(node, RATE, Planes::new(&refs).unwrap(), &[])
             .iter()
             .flatten()
             .all(|s| s.is_finite());

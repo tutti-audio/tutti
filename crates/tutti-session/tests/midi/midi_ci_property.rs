@@ -8,9 +8,9 @@ use std::time::{Duration, Instant};
 use tutti_midi_device::{BodyLimit, BufferLimit, PeCiMessage, PeMessageKind};
 use tutti_midi_device::{
     CallError, CiCategories, CiHeader, CiMessage, Decoded, DiscoveryData, EndpointId, JsonPointer,
-    MaxSysexSize, PE_TIMEOUT, PartialUpdate, PeCapabilities, PeData, PeExternalSync, PeHeader,
-    PeJson, PeLocalOn, PeReassemblyLimits, PeResource, PeStatus, PeSubscription, PortDirection,
-    RequestRefused, ResourceEntry, ResourceResponder, ResourceStore, ResourceTarget,
+    MaxSysexSize, PE_TIMEOUT, PartialUpdate, PartialValue, PeCapabilities, PeData, PeExternalSync,
+    PeHeader, PeJson, PeLocalOn, PeReassemblyLimits, PeResource, PeStatus, PeSubscription,
+    PortDirection, RequestRefused, ResourceEntry, ResourceResponder, ResourceStore, ResourceTarget,
     ResponderAction, ResponderSettings, SimultaneousRequests, StreamLimit,
 };
 use tutti_midi_hardware::test_support::FakeCounters;
@@ -78,7 +78,7 @@ impl PePeer {
                 midi2: true,
                 ..Capabilities::default()
             }))
-            .with_function_block(block),
+            .block(block),
             assembler: SysexAssembler::new(vec![0; room].into_boxed_slice(), 1024, 16),
             muid,
             responder: ResourceResponder::new(
@@ -151,7 +151,7 @@ impl PePeer {
             }) = &decoded
                 && *kind == PeMessageKind::SUBSCRIPTION_INQUIRY
                 && !chunk.header().is_empty()
-                && let Ok(PeHeader::Subscription(subscription)) = PeHeader::parse(chunk.header())
+                && let Ok(PeHeader::Subscription(subscription)) = PeHeader::try_from(chunk.header())
             {
                 match subscription {
                     PeSubscription::Start(request) => {
@@ -167,7 +167,7 @@ impl PePeer {
                 ..
             }) = &decoded
                 && !chunk.header().is_empty()
-                && let Ok(PeHeader::Request(request)) = PeHeader::parse(chunk.header())
+                && let Ok(PeHeader::Request(request)) = PeHeader::try_from(chunk.header())
             {
                 let name = request.resource.as_str().to_owned();
                 // The ResourceList is the session's own, not the app's.
@@ -196,8 +196,12 @@ impl PePeer {
 
 fn store() -> ResourceStore {
     let mut store = ResourceStore::new();
-    store.declare(ResourceEntry::new(PeResource::LocalOn).unwrap());
-    store.declare(ResourceEntry::new(PeResource::DeviceInfo).unwrap());
+    store.declare(ResourceEntry::builder(PeResource::LocalOn).build().unwrap());
+    store.declare(
+        ResourceEntry::builder(PeResource::DeviceInfo)
+            .build()
+            .unwrap(),
+    );
     store
         .put(None, PeData::LocalOn(PeLocalOn(false)))
         .expect("declared");
@@ -327,7 +331,7 @@ fn a_write_lands_status_200_and_the_peer_holds_the_data() {
     };
     assert_eq!(status.code(), 200);
     assert_eq!(wire.peer.asked, [Asked::Set("LocalOn".to_owned())]);
-    let target = ResourceTarget::new(PeResource::LocalOn).unwrap();
+    let target = ResourceTarget::try_from(PeResource::LocalOn).unwrap();
     assert_eq!(wire.peer.responder.store().get(&target), Some(&on(true)));
 }
 
@@ -501,7 +505,7 @@ fn a_session_dropped_with_a_call_pending_ends_the_job() {
 #[test]
 fn a_fetch_of_a_resource_that_needs_a_res_id_is_not_sent() {
     let mut states = ResourceStore::new();
-    states.declare(ResourceEntry::new(PeResource::State).unwrap());
+    states.declare(ResourceEntry::builder(PeResource::State).build().unwrap());
     let mut wire = Wire::new(states);
     let job = wire.listed(&PeResource::State).fetch();
     assert_eq!(job.status(), JobStatus::Done);
@@ -521,7 +525,11 @@ fn a_fetch_of_a_resource_that_needs_a_res_id_is_not_sent() {
 /// A second store Resource with data, for the tests of two Resources.
 fn synced() -> ResourceStore {
     let mut store = store();
-    store.declare(ResourceEntry::new(PeResource::ExternalSync).unwrap());
+    store.declare(
+        ResourceEntry::builder(PeResource::ExternalSync)
+            .build()
+            .unwrap(),
+    );
     store
         .put(None, PeData::ExternalSync(PeExternalSync(true)))
         .expect("declared");
@@ -560,10 +568,11 @@ fn calls_past_the_peers_simultaneous_requests_wait_for_room_and_all_land() {
 /// the rule it broke.
 #[test]
 fn a_write_of_a_read_only_resource_is_not_sent_with_the_rule_it_broke() {
-    let table_6 = tutti_midi_device::PeJson::parse(
+    let table_6 = tutti_midi_device::PeJson::try_from(
         br#"{"version":"1.0","manufacturerId":[125,0,0],"manufacturer":"Educational Use",
         "familyId":[0,0],"family":"Test Range","modelId":[48,0],"model":"Workbench",
-        "versionId":[0,0,1,0]}"#,
+        "versionId":[0,0,1,0]}"#
+            .as_slice(),
     )
     .expect("json");
     let info = PeData::decode(&PeResource::DeviceInfo, &table_6).expect("DeviceInfo");
@@ -646,7 +655,7 @@ fn device_info(model: &str) -> PeData {
         "familyId":[0,0],"family":"Test Range","modelId":[48,0],"model":"{model}",
         "versionId":[0,0,1,0]}}"#
     );
-    let json = PeJson::parse(json.as_bytes()).expect("json");
+    let json = PeJson::try_from(json.as_bytes()).expect("json");
     PeData::decode(&PeResource::DeviceInfo, &json).expect("DeviceInfo")
 }
 
@@ -654,14 +663,16 @@ fn device_info(model: &str) -> PeData {
 fn subscribable() -> ResourceStore {
     let mut store = ResourceStore::new();
     store.declare(
-        ResourceEntry::new(PeResource::LocalOn)
-            .unwrap()
-            .with_can_subscribe(true),
+        ResourceEntry::builder(PeResource::LocalOn)
+            .can_subscribe(true)
+            .build()
+            .unwrap(),
     );
     store.declare(
-        ResourceEntry::new(PeResource::DeviceInfo)
-            .unwrap()
-            .with_can_subscribe(true),
+        ResourceEntry::builder(PeResource::DeviceInfo)
+            .can_subscribe(true)
+            .build()
+            .unwrap(),
     );
     store.put(None, on(true)).expect("declared");
     store.put(None, device_info("Workbench")).expect("declared");
@@ -692,7 +703,7 @@ impl Wire {
     }
 
     fn target(resource: PeResource) -> ResourceTarget {
-        ResourceTarget::new(resource).expect("a Resource with no entries")
+        ResourceTarget::try_from(resource).expect("a Resource with no entries")
     }
 
     /// How many times the peer was told of a change of the info of the port.
@@ -756,12 +767,10 @@ fn a_partial_update_is_merged_into_the_data_the_record_holds() {
     let mut wire = Wire::new(subscribable());
     let _lease = wire.subscribed(&PeResource::DeviceInfo);
     let now = wire.now();
-    let update = PartialUpdate::new()
-        .with(
-            JsonPointer::new("/model").expect("a pointer"),
-            PeJson::from("Renamed"),
-        )
-        .expect("an update");
+    let update = PartialUpdate::new().with(
+        JsonPointer::new("/model").expect("a pointer"),
+        PartialValue::String("Renamed".to_owned()),
+    );
     let actions = wire
         .peer
         .responder

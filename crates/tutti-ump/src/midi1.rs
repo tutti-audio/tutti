@@ -68,31 +68,6 @@ impl Midi1Bytes {
     }
 }
 
-impl U14 {
-    /// `0x2000`, a pitch bend at rest (M1).
-    pub const CENTER: Self = Self::of(0x2000);
-
-    /// The value whose upper seven bits are `msb` and lower seven `lsb`: the
-    /// inverse of [`msb`](Self::msb) and [`lsb`](Self::lsb).
-    #[must_use]
-    pub const fn from_halves(msb: U7, lsb: U7) -> Self {
-        Self::masked((msb.get() as u16) << 7 | lsb.get() as u16)
-    }
-
-    /// The upper seven bits: the second data byte of a pitch bend or a song
-    /// position.
-    #[must_use]
-    pub const fn msb(self) -> U7 {
-        U7::masked((self.get() >> 7) as u8)
-    }
-
-    /// The lower seven bits: the first data byte.
-    #[must_use]
-    pub const fn lsb(self) -> U7 {
-        U7::masked((self.get() & 0x7F) as u8)
-    }
-}
-
 impl Voice1 {
     /// How many data bytes follow a channel voice `status` byte: one for a
     /// Program Change (`C0`..`CF`) or Channel Pressure (`D0`..`DF`), two for

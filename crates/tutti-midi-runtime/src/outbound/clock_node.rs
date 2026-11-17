@@ -15,13 +15,12 @@
 
 use tutti_graph::UmpAt;
 
-use std::sync::Arc;
 use tutti_graph::{
     Cx, Event, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Node, NodeParts, Offset,
     Prepare, Shape, Status,
 };
 
-use tutti_rt::{ArcLend, Reader, RtVec};
+use tutti_rt::{Publisher, Reader, RtVec};
 use tutti_types::{MeterMap, SampleRate};
 use tutti_ump::MidiGroup;
 
@@ -51,12 +50,11 @@ pub const CLOCK_EVENT_CAPACITY: usize = 256;
 /// use tutti_graph::{Editor, Prepare};
 /// use tutti_midi_runtime::ClockNode;
 /// use tutti_ump::MidiGroup;
-/// use tutti_rt::ArcLend;
+/// use tutti_rt::Publisher;
 /// use tutti_types::MeterMap;
-/// use std::sync::Arc;
 ///
 /// let (mut editor, _exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
-/// let clock = editor.insert(NodeKey(1), "clock", ClockNode::new(MidiGroup::FIRST, SampleRate::SR_48K, Arc::new(ArcLend::new(MeterMap::default())).reader())).controls;
+/// let clock = editor.insert(NodeKey(1), "clock", ClockNode::new(MidiGroup::FIRST, SampleRate::SR_48K, Publisher::new(MeterMap::default()).reader())).controls;
 /// clock.set_sends(tutti_midi_runtime::ClockSends { timing: true, ..Default::default() });
 /// ```
 #[derive(Debug)]
@@ -106,8 +104,8 @@ impl Node for ClockNode {
         let block_len = cx.env.block_len;
         self.pending.clear();
         let pending = &mut self.pending;
-        // A segment's events lie inside it, so inside the block; the clamp is
-        // what the sort's `offset_of` did to a stray one.
+        // A segment's events lie inside it, so inside the block; the clamp keeps
+        // a stray one on the last frame.
         let mut dropped = 0u64;
         for (start, seg) in cx.env.segments() {
             let base = start.get();
@@ -131,7 +129,10 @@ impl Node for ClockNode {
         Status::Modified
     }
 
-    fn reset(&mut self) {}
+    fn reset(&mut self) {
+        self.master.reset();
+        self.pending.clear();
+    }
 }
 
 /// A [`ClockNode`]'s fork: a node over a master of its own, disabled, that
@@ -144,7 +145,7 @@ struct SilentClock {
 impl ForkSource for SilentClock {
     fn fork(&self, _mode: ForkMode) -> Result<Forked, ForkCause> {
         // Silent, so the meter it reads is never stated: a constant one.
-        let meter = Arc::new(ArcLend::new(MeterMap::default())).reader();
+        let meter = Publisher::new(MeterMap::default()).reader();
         Ok(Forked::new(Box::new(ClockNode::new(
             self.group,
             self.sample_rate,
@@ -170,3 +171,6 @@ impl IntoNode for ClockNode {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

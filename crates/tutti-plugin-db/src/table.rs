@@ -6,23 +6,22 @@
 //!
 //! The table belongs to one thread, the control thread that holds the
 //! [`PluginDb`]. It never crosses a thread: a scan works on a clone and sends
-//! [`Delta`]s back, and [`PluginDb::apply`] is the only code that changes a row.
+//! [`RowChange`]s back, and [`PluginDb::apply`] is the only code that changes a row.
 
 use crate::facts::{self, FileFacts};
-use crate::format::{PluginDescriptor, PluginFormat, PluginRole};
+use crate::mtime::Mtime;
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
+use tutti_plugin_types::{PluginDescriptor, PluginFormat, PluginRole};
 
 /// What the database knows about one plugin file.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct FileRow {
-    /// Which format's loader opens the file.
-    pub format: PluginFormat,
-    /// Seconds since the Unix epoch of the file's last modification when it was
-    /// probed, or `None` if the file had no readable time. A row is out of date
-    /// when the file's time differs from this one.
-    pub mtime: Option<u64>,
+    /// The file's last modification when it was probed, or `None` if the file
+    /// had no readable time. A row is out of date when the file's time differs
+    /// from this one, and a row without one is always out of date.
+    pub mtime: Option<Mtime>,
     /// What the probe found.
     pub state: FileState,
 }
@@ -34,10 +33,16 @@ pub struct FileRow {
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum FileState {
-    /// The plugins the file holds, in the probe's order: every descriptor of a
-    /// CLAP factory, every audio class of a VST3 factory, every unit of an AU
-    /// bundle, every sub-plugin of a VST2 shell; one for any other file.
-    Probed(Vec<PluginDescriptor>),
+    /// The file probed as `format`.
+    Probed {
+        /// Which format's loader opened the file.
+        format: PluginFormat,
+        /// The plugins the file holds, in the probe's order: every descriptor
+        /// of a CLAP factory, every audio class of a VST3 factory, every unit
+        /// of an AU bundle, every sub-plugin of a VST2 shell; one for any other
+        /// file.
+        plugins: Vec<PluginDescriptor>,
+    },
     /// The file brought a scan down and will not be opened.
     Blacklisted {
         /// Why, so a host can report it and offer to load the file anyway.
@@ -50,38 +55,48 @@ impl FileRow {
     #[must_use]
     pub fn probed(format: PluginFormat, facts: &FileFacts, plugins: Vec<PluginDescriptor>) -> Self {
         Self {
-            format,
             mtime: facts.mtime,
-            state: FileState::Probed(plugins),
+            state: FileState::Probed { format, plugins },
         }
     }
 
     /// The row for a blacklisted file, stamped with `facts`' time so that a
-    /// reinstall or an update re-admits it. The format is the one the extension
-    /// names, or VST3 when it names none.
+    /// reinstall or an update re-admits it. A blacklisted row names no format:
+    /// the file never probed.
     #[must_use]
     pub fn blacklisted(reason: String, facts: &FileFacts) -> Self {
         Self {
-            format: facts.format.unwrap_or(PluginFormat::Vst3),
             mtime: facts.mtime,
             state: FileState::Blacklisted { reason },
+        }
+    }
+
+    /// The format and plugins of a probed file; `None` when it is blacklisted.
+    #[must_use]
+    pub fn probe_result(&self) -> Option<(PluginFormat, &[PluginDescriptor])> {
+        match &self.state {
+            FileState::Probed { format, plugins } => Some((*format, plugins)),
+            FileState::Blacklisted { .. } => None,
         }
     }
 
     /// The plugins the file holds; none when it is blacklisted.
     #[must_use]
     pub fn plugins(&self) -> &[PluginDescriptor] {
-        match &self.state {
-            FileState::Probed(plugins) => plugins,
-            FileState::Blacklisted { .. } => &[],
-        }
+        self.probe_result().map_or(&[], |(_, plugins)| plugins)
+    }
+
+    /// The format the file probed as; none when it is blacklisted.
+    #[must_use]
+    pub fn format(&self) -> Option<PluginFormat> {
+        self.probe_result().map(|(format, _)| format)
     }
 
     /// Why the file is blacklisted, or `None` if it is not.
     #[must_use]
     pub fn blacklist_reason(&self) -> Option<&str> {
         match &self.state {
-            FileState::Probed(_) => None,
+            FileState::Probed { .. } => None,
             FileState::Blacklisted { reason } => Some(reason),
         }
     }
@@ -89,27 +104,27 @@ impl FileRow {
 
 /// One change to the table: replace a file's row, or drop it.
 ///
-/// A delta carries a whole row, so a reader sees a file's old row or its new one
+/// A change carries a whole row, so a reader sees a file's old row or its new one
 /// and never a mixture.
 #[derive(Debug, Clone, PartialEq)]
-#[must_use = "a delta changes nothing until PluginDb::apply takes it"]
-pub struct Delta {
+#[must_use = "a row change does nothing until PluginDb::apply takes it"]
+pub struct RowChange {
     path: PathBuf,
-    change: Change,
+    edit: Edit,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-enum Change {
+enum Edit {
     Put(FileRow),
     Remove,
 }
 
-impl Delta {
+impl RowChange {
     /// Replace the row for `path`, or add one.
     pub fn put(path: impl Into<PathBuf>, row: FileRow) -> Self {
         Self {
             path: path.into(),
-            change: Change::Put(row),
+            edit: Edit::Put(row),
         }
     }
 
@@ -117,22 +132,22 @@ impl Delta {
     pub fn remove(path: impl Into<PathBuf>) -> Self {
         Self {
             path: path.into(),
-            change: Change::Remove,
+            edit: Edit::Remove,
         }
     }
 
-    /// The file the delta is about.
+    /// The file the change is about.
     #[must_use]
     pub fn path(&self) -> &Path {
         &self.path
     }
 
-    /// The row the delta puts, or `None` for a removal.
+    /// The row the change puts, or `None` for a removal.
     #[must_use]
     pub fn row(&self) -> Option<&FileRow> {
-        match &self.change {
-            Change::Put(row) => Some(row),
-            Change::Remove => None,
+        match &self.edit {
+            Edit::Put(row) => Some(row),
+            Edit::Remove => None,
         }
     }
 }
@@ -181,7 +196,7 @@ pub struct BlacklistedFile<'a> {
 /// [`apply`](Self::apply).
 ///
 /// A path matches exactly; the table never touches the filesystem to resolve
-/// one. A scan, the pedal's recovery and `tutti_plugin::catalog::Catalog` key
+/// one. A scan and the pedal's recovery key
 /// rows by [`canonical_path`](crate::canonical_path), so a caller that reads
 /// this table directly asks with a canonical path too: an alias of a file finds
 /// no row.
@@ -200,13 +215,13 @@ impl PluginDb {
     }
 
     /// The only code that changes a row.
-    pub fn apply(&mut self, delta: Delta) {
-        match delta.change {
-            Change::Put(row) => {
-                self.files.insert(delta.path, row);
+    pub fn apply(&mut self, change: RowChange) {
+        match change.edit {
+            Edit::Put(row) => {
+                self.files.insert(change.path, row);
             }
-            Change::Remove => {
-                self.files.remove(&delta.path);
+            Edit::Remove => {
+                self.files.remove(&change.path);
             }
         }
     }
@@ -236,13 +251,18 @@ impl PluginDb {
 
     /// The plugins of every file that is not blacklisted.
     pub fn plugins(&self) -> impl Iterator<Item = PluginEntry<'_>> {
-        self.rows().flat_map(|(path, row)| {
-            row.plugins().iter().map(move |descriptor| PluginEntry {
-                path,
-                format: row.format,
-                descriptor,
+        self.rows()
+            .filter_map(|(path, row)| {
+                row.probe_result()
+                    .map(|(format, plugins)| (path, format, plugins))
             })
-        })
+            .flat_map(|(path, format, plugins)| {
+                plugins.iter().map(move |descriptor| PluginEntry {
+                    path,
+                    format,
+                    descriptor,
+                })
+            })
     }
 
     /// The blacklisted files, so a UI can show what was hidden and why.
@@ -275,7 +295,7 @@ impl PluginDb {
 
     /// Blacklists `path` with a reason, stamped with the file's time in `facts`.
     pub fn blacklist(&mut self, path: &Path, reason: String, facts: &FileFacts) {
-        self.apply(Delta::put(path, FileRow::blacklisted(reason, facts)));
+        self.apply(RowChange::put(path, FileRow::blacklisted(reason, facts)));
     }
 
     /// Lifts the blacklist on `path` by dropping its row, so the next scan
@@ -287,7 +307,7 @@ impl PluginDb {
     pub fn unblacklist(&mut self, path: &Path) -> bool {
         let found = self.is_blacklisted(path);
         if found {
-            self.apply(Delta::remove(path));
+            self.apply(RowChange::remove(path));
         }
         found
     }
@@ -296,7 +316,7 @@ impl PluginDb {
     pub fn clear_blacklist(&mut self) -> Vec<PathBuf> {
         let paths: Vec<PathBuf> = self.blacklisted().map(|b| b.path.to_path_buf()).collect();
         for path in &paths {
-            self.apply(Delta::remove(path));
+            self.apply(RowChange::remove(path));
         }
         paths
     }
@@ -305,9 +325,14 @@ impl PluginDb {
     /// paths. `present` is the set of row paths that exist on disk, gathered by
     /// the caller.
     pub fn prune_missing(&mut self, present: &HashSet<PathBuf>) -> Vec<PathBuf> {
-        let missing = facts::missing(self.rows().map(|(path, _)| path), present);
+        let missing: Vec<PathBuf> = self
+            .rows()
+            .map(|(path, _)| path)
+            .filter(|path| !present.contains(*path))
+            .map(Path::to_path_buf)
+            .collect();
         for path in &missing {
-            self.apply(Delta::remove(path));
+            self.apply(RowChange::remove(path));
         }
         missing
     }
@@ -317,14 +342,16 @@ impl PluginDb {
 mod tests {
     use super::*;
     use crate::facts::{ScanDecision, classify};
-    use crate::format::PluginClass;
+    use tutti_plugin_types::PluginClass;
 
     const T: u64 = 1_700_000_000;
 
     pub(crate) fn facts(mtime: u64) -> FileFacts {
         FileFacts {
             exists: true,
-            mtime: Some(mtime),
+            mtime: Mtime::new(
+                std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(mtime),
+            ),
             format: Some(PluginFormat::Vst3),
         }
     }
@@ -339,20 +366,23 @@ mod tests {
 
     fn db_with(path: &str, row: FileRow) -> PluginDb {
         let mut db = PluginDb::new();
-        db.apply(Delta::put(path, row));
+        db.apply(RowChange::put(path, row));
         db
     }
 
     #[test]
     fn apply_puts_replaces_and_removes_a_row() {
         let mut db = db_with("/p/a.vst3", row(T));
-        db.apply(Delta::put("/p/a.vst3", row(T + 1)));
+        db.apply(RowChange::put("/p/a.vst3", row(T + 1)));
         assert_eq!(db.len(), 1);
-        assert_eq!(db.row(Path::new("/p/a.vst3")).unwrap().mtime, Some(T + 1));
+        assert_eq!(
+            db.row(Path::new("/p/a.vst3")).unwrap().mtime,
+            facts(T + 1).mtime
+        );
 
-        db.apply(Delta::remove("/p/a.vst3"));
+        db.apply(RowChange::remove("/p/a.vst3"));
         assert!(db.is_empty());
-        db.apply(Delta::remove("/p/absent.vst3"));
+        db.apply(RowChange::remove("/p/absent.vst3"));
         assert!(db.is_empty());
     }
 
@@ -390,7 +420,7 @@ mod tests {
         db.blacklist(Path::new("/p/new.vst3"), "boom".into(), &facts(T));
         assert!(db.is_blacklisted_and_unchanged(Path::new("/p/new.vst3"), &facts(T)));
 
-        db.apply(Delta::put("/p/old.vst3", row(T)));
+        db.apply(RowChange::put("/p/old.vst3", row(T)));
         db.blacklist(Path::new("/p/old.vst3"), "boom".into(), &facts(T + 7));
         assert!(db.is_blacklisted_and_unchanged(Path::new("/p/old.vst3"), &facts(T + 7)));
         assert_eq!(db.len(), 2);
@@ -400,7 +430,7 @@ mod tests {
     #[test]
     fn a_blacklisted_file_lists_no_plugins_and_a_probed_one_lists_its_own() {
         let mut db = db_with("/p/good.vst3", row(T));
-        db.apply(Delta::put("/p/bad.vst3", row(T)));
+        db.apply(RowChange::put("/p/bad.vst3", row(T)));
         db.blacklist(Path::new("/p/bad.vst3"), "boom".into(), &facts(T));
 
         let listed: Vec<_> = db.plugins().map(|p| p.path).collect();
@@ -408,6 +438,21 @@ mod tests {
         let hidden: Vec<_> = db.blacklisted().collect();
         assert_eq!(hidden.len(), 1);
         assert_eq!(hidden[0].reason, "boom");
+    }
+
+    /// A blacklisted row names no format: the file never probed.
+    #[test]
+    fn a_blacklisted_row_names_no_format_and_a_probed_one_names_its_own() {
+        let mut db = db_with(
+            "/p/good.clap",
+            FileRow::probed(PluginFormat::Clap, &facts(T), vec![]),
+        );
+        db.blacklist(Path::new("/p/bad.vst3"), "boom".into(), &facts(T));
+        assert_eq!(
+            db.row(Path::new("/p/good.clap")).unwrap().format(),
+            Some(PluginFormat::Clap)
+        );
+        assert_eq!(db.row(Path::new("/p/bad.vst3")).unwrap().format(), None);
     }
 
     /// A file may hold several plugins and each is listed under the file's path.
@@ -436,7 +481,7 @@ mod tests {
         );
         assert!(!db.unblacklist(Path::new("/p/a.vst3")));
 
-        db.apply(Delta::put("/p/healthy.vst3", row(T)));
+        db.apply(RowChange::put("/p/healthy.vst3", row(T)));
         assert!(!db.unblacklist(Path::new("/p/healthy.vst3")));
         assert_eq!(db.len(), 1, "a healthy row is left alone");
     }

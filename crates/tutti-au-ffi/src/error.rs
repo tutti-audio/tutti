@@ -35,16 +35,32 @@ pub enum Error {
     /// minimum deployment target, looked up at run time).
     #[error("{0} is not available on this macOS")]
     Unavailable(&'static str),
-    /// A render call failed; `last` is the unit's own last-render-error
-    /// property, when it reports one.
+    /// A render call failed. The unit's own last-render-error property is not
+    /// read on the render path: the control side reads it with
+    /// [`Unit::last_render_error`](crate::Unit::last_render_error).
     #[error("{function} failed with OSStatus {status}")]
     RenderFailed {
         /// The AudioToolbox function that failed.
         function: &'static str,
         /// The `OSStatus` it returned.
         status: i32,
-        /// What `kAudioUnitProperty_LastRenderError` reports, if non-zero.
-        last: Option<i32>,
+    },
+    /// A render asked for more frames than the buffers were sized for; nothing
+    /// was rendered.
+    #[error("{frames} frames exceed the block size {max}")]
+    BlockTooLarge {
+        /// The frames asked for.
+        frames: u32,
+        /// The block size the buffers were sized for.
+        max: u32,
+    },
+    /// A push render needs buses its scratch does not have; nothing was rendered.
+    #[error("{function} needs {needs}")]
+    MissingBus {
+        /// The AudioToolbox function that was to render.
+        function: &'static str,
+        /// The buses it needs.
+        needs: &'static str,
     },
 }
 
@@ -54,7 +70,10 @@ impl Error {
         match self {
             Error::Os(e) => Some(e.status),
             Error::RenderFailed { status, .. } => Some(*status),
-            Error::Invalid(_) | Error::Unavailable(_) => None,
+            Error::Invalid(_)
+            | Error::Unavailable(_)
+            | Error::BlockTooLarge { .. }
+            | Error::MissingBus { .. } => None,
         }
     }
 }

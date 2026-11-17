@@ -466,7 +466,7 @@ impl ListedResource {
     /// be got, and any other call the ResourceList refuses ends the job as
     /// [`PeFailure::NotSent`].
     pub fn fetch(&self) -> Job<GetProperty> {
-        match ResourceTarget::new(self.resource().clone()) {
+        match ResourceTarget::try_from(self.resource().clone()) {
             Ok(target) => self.link.submit(
                 self.peer.ask(PropertyCall::Get(ResourceGet::new(target))),
                 listing(&self.entry),
@@ -481,7 +481,7 @@ impl ListedResource {
     /// subscribed to ends the job as [`PeFailure::NotSent`]. Two calls make two
     /// Subscriptions: none is shared.
     pub fn subscribe(&self) -> Job<Subscribe> {
-        match ResourceTarget::new(self.resource().clone()) {
+        match ResourceTarget::try_from(self.resource().clone()) {
             Ok(target) => self.link.submit(
                 self.peer
                     .ask(PropertyCall::Subscribe(ResourceGet::new(target))),
@@ -496,7 +496,7 @@ impl ListedResource {
     /// another Resource's ends the job as [`PeFailure::NotSent`], as the
     /// ResourceList's refusal of a Set does.
     pub fn write(&self, data: PeData) -> Job<SetProperty> {
-        let set = ResourceTarget::new(self.resource().clone())
+        let set = ResourceTarget::try_from(self.resource().clone())
             .and_then(|target| ResourceSet::full(target, data));
         match set {
             Ok(set) => self.link.submit(

@@ -4,29 +4,25 @@
 //! (`FileFacts::read`, in `fs.rs`); everything here decides from that value and
 //! a table row, touching no disk and no clock.
 
-use crate::format::PluginFormat;
+use crate::mtime::Mtime;
 use crate::table::FileRow;
-use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use tutti_plugin_types::PluginFormat;
 
 /// What the scan found on disk for one candidate, read once.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FileFacts {
-    /// Whether the path exists. Only `tutti_plugin::catalog::Catalog::prune_missing`
-    /// reads it.
+    /// Whether the path exists.
     pub exists: bool,
-    /// Seconds since the Unix epoch of the file's last modification, if it has
-    /// one. A row stamped without a time matches a file that reads without one.
-    pub mtime: Option<u64>,
+    /// The file's last modification, or `None` if it cannot be read or lies
+    /// before the Unix epoch. A file without a time is always rescanned.
+    pub mtime: Option<Mtime>,
     /// The format the path's extension names.
     pub format: Option<PluginFormat>,
 }
 
 /// What a scan does with one discovered plugin.
-///
-/// Exhaustive: these three are the whole outcome, and callers match on them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ScanDecision {
+pub(crate) enum ScanDecision {
     /// Blacklisted, and the file has not changed since: skip it.
     Blacklisted,
     /// Recorded, and the file has not changed since: skip it.
@@ -41,7 +37,7 @@ pub enum ScanDecision {
 /// The blacklist is mtime-aware: a blacklisted file whose time changed on disk
 /// (a reinstall, a vendor update) is probed again rather than skipped forever.
 #[must_use]
-pub fn classify(row: Option<&FileRow>, facts: &FileFacts) -> ScanDecision {
+pub(crate) fn classify(row: Option<&FileRow>, facts: &FileFacts) -> ScanDecision {
     match row {
         Some(r) if is_blacklisted_and_unchanged(r, facts) => ScanDecision::Blacklisted,
         Some(r) if !needs_rescan(r, facts) => ScanDecision::UpToDate,
@@ -49,40 +45,43 @@ pub fn classify(row: Option<&FileRow>, facts: &FileFacts) -> ScanDecision {
     }
 }
 
-/// Returns `true` if the file's modification time differs from the one the row
-/// stamped.
+/// Returns `true` unless the file's modification time equals the one the row
+/// stamped. A time missing on either side is never equal, so a file or a row
+/// without one is always rescanned.
 #[must_use]
-pub fn needs_rescan(row: &FileRow, facts: &FileFacts) -> bool {
-    facts.mtime != row.mtime
+pub(crate) fn needs_rescan(row: &FileRow, facts: &FileFacts) -> bool {
+    match (row.mtime, facts.mtime) {
+        (Some(stamped), Some(read)) => stamped != read,
+        _ => true,
+    }
 }
 
 /// Returns `true` if the row is blacklisted and its file has not changed since
 /// the blacklist was stamped.
+///
+/// A file with no readable time is never unchanged, so a blacklisted one is
+/// probed again on every scan. That costs time, not safety, because the probe
+/// runs out of process; a blacklist that held without a time could miss a
+/// reinstall, which is worse.
 #[must_use]
-pub fn is_blacklisted_and_unchanged(row: &FileRow, facts: &FileFacts) -> bool {
+pub(crate) fn is_blacklisted_and_unchanged(row: &FileRow, facts: &FileFacts) -> bool {
     row.blacklist_reason().is_some() && !needs_rescan(row, facts)
-}
-
-/// Returns the paths among `paths` that are not in `present`.
-#[must_use]
-pub fn missing<'a>(
-    paths: impl Iterator<Item = &'a Path>,
-    present: &HashSet<PathBuf>,
-) -> Vec<PathBuf> {
-    paths
-        .filter(|path| !present.contains(*path))
-        .map(Path::to_path_buf)
-        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::format::{PluginClass, PluginDescriptor};
+    use tutti_plugin_types::{PluginClass, PluginDescriptor};
+
+    use std::time::Duration;
 
     const T: u64 = 1_700_000_000;
 
-    fn facts(mtime: Option<u64>) -> FileFacts {
+    fn at(secs: u64) -> Option<Mtime> {
+        Mtime::new(std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(secs))
+    }
+
+    fn facts(mtime: Option<Mtime>) -> FileFacts {
         FileFacts {
             exists: true,
             mtime,
@@ -90,7 +89,7 @@ mod tests {
         }
     }
 
-    fn healthy(mtime: Option<u64>) -> FileRow {
+    fn healthy(mtime: Option<Mtime>) -> FileRow {
         FileRow::probed(
             PluginFormat::Clap,
             &facts(mtime),
@@ -98,56 +97,86 @@ mod tests {
         )
     }
 
-    fn bad(mtime: Option<u64>) -> FileRow {
+    fn bad(mtime: Option<Mtime>) -> FileRow {
         FileRow::blacklisted("crashed".into(), &facts(mtime))
     }
 
     #[test]
     fn an_unknown_plugin_is_probed() {
-        assert_eq!(classify(None, &facts(Some(T))), ScanDecision::Probe);
+        assert_eq!(classify(None, &facts(at(T))), ScanDecision::Probe);
     }
 
     #[test]
     fn a_changed_file_is_probed_whichever_way_the_time_moved() {
-        let r = healthy(Some(T));
-        assert_eq!(classify(Some(&r), &facts(Some(T + 1))), ScanDecision::Probe);
-        assert_eq!(classify(Some(&r), &facts(Some(T - 1))), ScanDecision::Probe);
+        let r = healthy(at(T));
+        assert_eq!(classify(Some(&r), &facts(at(T + 1))), ScanDecision::Probe);
+        assert_eq!(classify(Some(&r), &facts(at(T - 1))), ScanDecision::Probe);
     }
 
     #[test]
     fn an_unchanged_row_is_up_to_date() {
-        let r = healthy(Some(T));
-        assert_eq!(classify(Some(&r), &facts(Some(T))), ScanDecision::UpToDate);
+        let r = healthy(at(T));
+        assert_eq!(classify(Some(&r), &facts(at(T))), ScanDecision::UpToDate);
     }
 
     #[test]
     fn an_unchanged_blacklisted_row_is_skipped_as_blacklisted() {
-        let r = bad(Some(T));
-        assert_eq!(
-            classify(Some(&r), &facts(Some(T))),
-            ScanDecision::Blacklisted
-        );
+        let r = bad(at(T));
+        assert_eq!(classify(Some(&r), &facts(at(T))), ScanDecision::Blacklisted);
     }
 
     #[test]
     fn a_changed_blacklisted_file_is_readmitted() {
-        let r = bad(Some(T));
-        assert_eq!(classify(Some(&r), &facts(Some(T + 5))), ScanDecision::Probe);
-        assert!(!is_blacklisted_and_unchanged(&r, &facts(Some(T + 5))));
+        let r = bad(at(T));
+        assert_eq!(classify(Some(&r), &facts(at(T + 5))), ScanDecision::Probe);
+        assert!(!is_blacklisted_and_unchanged(&r, &facts(at(T + 5))));
     }
 
     #[test]
     fn a_healthy_unchanged_row_is_not_blacklisted() {
-        let r = healthy(Some(T));
-        assert!(!is_blacklisted_and_unchanged(&r, &facts(Some(T))));
+        let r = healthy(at(T));
+        assert!(!is_blacklisted_and_unchanged(&r, &facts(at(T))));
     }
 
-    /// A file with no readable time matches only a row stamped without one.
+    /// A row stamped with a time and a file that reads without one are never
+    /// equal: the file is rescanned.
     #[test]
-    fn a_missing_time_matches_only_a_row_stamped_without_one() {
-        assert!(!needs_rescan(&healthy(None), &facts(None)));
-        assert!(needs_rescan(&healthy(Some(T)), &facts(None)));
-        assert!(needs_rescan(&healthy(None), &facts(Some(T))));
+    fn a_file_without_a_time_is_always_rescanned() {
+        assert!(needs_rescan(&healthy(at(T)), &facts(None)));
+        assert_eq!(
+            classify(Some(&healthy(at(T))), &facts(None)),
+            ScanDecision::Probe
+        );
+    }
+
+    /// A row stamped without a time is never equal to any file, one with a
+    /// time or one without.
+    #[test]
+    fn a_row_without_a_time_is_always_rescanned() {
+        assert!(needs_rescan(&healthy(None), &facts(at(T))));
+        assert!(needs_rescan(&healthy(None), &facts(None)));
+        assert_eq!(
+            classify(Some(&healthy(None)), &facts(None)),
+            ScanDecision::Probe
+        );
+    }
+
+    /// A blacklist stamped without a time never holds, so the file is probed
+    /// again rather than skipped.
+    #[test]
+    fn a_blacklist_without_a_time_never_holds() {
+        assert!(!is_blacklisted_and_unchanged(&bad(None), &facts(None)));
+        assert_eq!(
+            classify(Some(&bad(None)), &facts(None)),
+            ScanDecision::Probe
+        );
+    }
+
+    /// Equal times are not rescanned: the other tests in this module are not
+    /// vacuous.
+    #[test]
+    fn equal_times_need_no_rescan() {
+        assert!(!needs_rescan(&healthy(at(T)), &facts(at(T))));
     }
 
     /// Facts at T2 over a row at T1, then a blacklisting with those facts: the
@@ -155,45 +184,19 @@ mod tests {
     /// row is stamped with the facts the decision saw).
     #[test]
     fn blacklisting_a_changed_file_with_the_facts_makes_it_skipped() {
-        let r = healthy(Some(T));
-        let f = facts(Some(T + 9));
+        let r = healthy(at(T));
+        let f = facts(at(T + 9));
         assert_eq!(classify(Some(&r), &f), ScanDecision::Probe);
         let out = FileRow::blacklisted("boom".into(), &f);
-        assert_eq!(out.mtime, Some(T + 9));
+        assert_eq!(out.mtime, at(T + 9));
         assert_eq!(classify(Some(&out), &f), ScanDecision::Blacklisted);
     }
 
     #[test]
-    fn a_blacklisted_row_takes_the_format_and_the_time_from_the_facts() {
-        let out = FileRow::blacklisted("boom".into(), &facts(Some(T)));
-        assert_eq!(out.format, PluginFormat::Clap);
-        assert_eq!(out.mtime, Some(T));
+    fn a_blacklisted_row_takes_the_time_from_the_facts() {
+        let out = FileRow::blacklisted("boom".into(), &facts(at(T)));
+        assert_eq!(out.mtime, at(T));
         assert_eq!(out.blacklist_reason(), Some("boom"));
         assert!(out.plugins().is_empty());
-    }
-
-    #[test]
-    fn a_blacklisted_row_for_an_unrecognised_extension_defaults_to_vst3() {
-        let none = FileFacts {
-            exists: false,
-            mtime: None,
-            format: None,
-        };
-        let out = FileRow::blacklisted("boom".into(), &none);
-        assert_eq!(out.format, PluginFormat::Vst3);
-        assert_eq!(out.mtime, None);
-    }
-
-    #[test]
-    fn missing_is_exactly_the_paths_not_present() {
-        let a = Path::new("/plugins/a.clap");
-        let b = Path::new("/plugins/b.clap");
-        let present: HashSet<PathBuf> = [a.to_path_buf()].into();
-        assert_eq!(missing([a, b].into_iter(), &present), vec![b.to_path_buf()]);
-        assert!(missing([a].into_iter(), &present).is_empty());
-        assert_eq!(
-            missing([a].into_iter(), &HashSet::new()),
-            vec![a.to_path_buf()]
-        );
     }
 }

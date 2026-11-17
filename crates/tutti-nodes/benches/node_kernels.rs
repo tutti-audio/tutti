@@ -40,7 +40,8 @@ const SR: SampleRate = SampleRate::SR_48K;
 /// Broadband input from a cheap LCG, so the bench needs no `rand`.
 fn fill_noise<N: Node>(d: &mut Direct<N>) {
     let mut state = 0x2545_f491_u32;
-    for ch in d.inputs_mut() {
+    for ch in d.inputs_mut().iter_mut() {
+        let ch = ch.into_samples_mut();
         for s in ch.iter_mut() {
             state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
             *s = (state >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0;
@@ -74,7 +75,7 @@ fn run<N: Node>(
         g.bench_function(BenchmarkId::new(case, block), |b| {
             b.iter(|| {
                 d.block();
-                black_box(d.output(0)[block - 1]);
+                black_box(d.output().plane(0).samples()[block - 1]);
             })
         });
     }

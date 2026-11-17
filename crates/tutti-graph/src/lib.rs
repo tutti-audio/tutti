@@ -421,7 +421,7 @@
 //!   the serial one. Share through an edge, or make it one node.
 //! - **Allocate, lock or block in `process`.** It runs on the audio thread:
 //!   size every buffer in `prepare` (against [`Prepare::max_block`]), and
-//!   publish non-scalar state to it through `tutti_rt`'s `ArcLend`, never by
+//!   publish non-scalar state to it through `tutti_rt`'s `Publisher`, never by
 //!   swapping an `Arc` the audio thread then drops.
 //! - **Report a musical delay as latency.** Latency is processing delay only.
 //! - **Read a driven param by port index.** Use the declaration
@@ -616,7 +616,7 @@ pub use controls::{ParamFork, ParamNode, ParamSet, ParamSetBuilder, Params, para
 pub use cost::{Cost, Schedule, Work};
 pub use declare::{HasParam, HasParams, ParamUnit, Scalar};
 pub use editor::{
-    CloseError, CommitError, Editor, Limits, MissingSource, Placed, RootGate, Unwired,
+    CloseError, CommitError, Editor, Limits, MissingSource, Placed, Rewired, RootGate, Unwired,
 };
 pub use event::{
     Event, EventDensity, EventKind, EventOrderError, EventRejected, EventWriter, Harmony,
@@ -657,7 +657,8 @@ pub use mode::{MixError, ModeError, NodeMix, NodeMode};
 pub use node::{
     Chase, ConstantMask, Cx, Env, InPlaceMask, IntoNode, LoopRange, MAX_PORTS,
     MAX_TRANSPORT_CHANGES, Node, NodeParts, Prepare, Resolution, Scratch, Shape, SilenceMask,
-    Status, TransportChange, TransportChangeRejected, TransportChanges, TransportPosition,
+    Status, TransportChange, TransportChangeRejected, TransportChanges, TransportPosition, Wired,
+    WiredMask,
 };
 pub use par::Pool;
 pub use param::{
@@ -696,6 +697,7 @@ pub use tutti_types::PlayReading;
 #[doc(hidden)]
 pub mod __private {
     pub use crate::declare::{Cells, Row, Visit, base, input, ports, row, set};
+    pub use tutti_rt::{Setting, SettingWord};
     pub use tutti_types::{UnitAddr, UnitParam};
 }
 

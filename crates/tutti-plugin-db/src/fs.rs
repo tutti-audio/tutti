@@ -1,23 +1,11 @@
 //! Filesystem primitives for plugin discovery.
 
 use super::facts::FileFacts;
-use super::format::PluginFormat;
+use crate::mtime::Mtime;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use tracing::debug;
-
-/// Disambiguates concurrent temp files within one process.
-static TMP_COUNTER: tutti_types::Mint = tutti_types::Mint::new();
-
-/// Infers the [`PluginFormat`] from a path's extension.
-///
-/// The extension decides through [`PluginFormat::from_extension`]
-/// (case-insensitive); a path with no extension, or one no format claims, is
-/// `None`.
-pub fn format_from_path(path: impl AsRef<Path>) -> Option<PluginFormat> {
-    let ext = path.as_ref().extension().and_then(|s| s.to_str())?;
-    PluginFormat::from_extension(ext).ok()
-}
+use tutti_plugin_types::PluginFormat;
 
 impl FileFacts {
     /// Reads the facts for `path`.
@@ -29,7 +17,7 @@ impl FileFacts {
     /// by `tutti_plugin_types::bundle`, the one bundle walk.
     pub fn read(path: impl AsRef<Path>) -> Self {
         let path = path.as_ref();
-        Self::read_as(path, format_from_path(path))
+        Self::read_as(path, PluginFormat::from_path(path))
     }
 
     /// Reads the facts for `path`, taking the format from the caller instead of
@@ -39,13 +27,11 @@ impl FileFacts {
     pub(crate) fn read_as(path: impl AsRef<Path>, format: Option<PluginFormat>) -> Self {
         let path = path.as_ref();
         let metadata = std::fs::metadata(path);
-        let mut mtime = metadata.as_ref().ok().and_then(modified_secs);
+        let mut mtime = metadata.as_ref().ok().and_then(modified);
         if metadata.as_ref().is_ok_and(|m| m.is_dir())
             && let Some(module) = module_in_bundle(path, format)
         {
-            let inner = std::fs::metadata(module)
-                .ok()
-                .and_then(|m| modified_secs(&m));
+            let inner = std::fs::metadata(module).ok().and_then(|m| modified(&m));
             mtime = mtime.max(inner);
         }
         Self {
@@ -56,12 +42,10 @@ impl FileFacts {
     }
 }
 
-fn modified_secs(metadata: &std::fs::Metadata) -> Option<u64> {
-    metadata
-        .modified()
-        .ok()
-        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_secs())
+/// The file's modification time, or `None` if the platform cannot read it or it
+/// lies before the Unix epoch, which the stored record cannot hold.
+fn modified(metadata: &std::fs::Metadata) -> Option<Mtime> {
+    metadata.modified().ok().and_then(Mtime::new)
 }
 
 /// The module inside a bundle directory, preferring the one this target loads.
@@ -93,26 +77,17 @@ pub fn canonical_path(path: &Path) -> PathBuf {
 /// Recursively discovers plugin files across `dirs`, with the format each
 /// extension names.
 ///
-/// The pure half of a scan: walks the filesystem and returns what it found,
-/// touching no database and spawning no subprocess. Pair with a probe to build
-/// rows yourself when you own persistence.
-///
-/// What you forfeit going this way is what the database buys: incremental
-/// rescan (probing is a subprocess spawn with a multi-second timeout, so a
-/// large plugin folder is minutes of work that mtime comparison otherwise
-/// skips) and crash recovery (the dead-man's pedal needs state that outlives
-/// the probe that killed the process). [`Scanner`](super::Scanner) is the
-/// batteries-included path.
-///
 /// Each directory and each plugin is visited once, by its canonical path, so a
 /// symlink that loops back to an ancestor ends the walk there and two routes to
 /// one plugin report it once. A plugin is reported under its canonical path,
 /// with the format its walked name carries, so the same file is the same key
 /// whichever route or root found it. A path that cannot be resolved (a dangling
-/// link) is skipped. Unreadable directories are skipped
-/// too, not reported: discovery over a list of standard install locations must
-/// not fail because one of them is absent.
-pub fn discover(dirs: impl IntoIterator<Item = impl AsRef<Path>>) -> Vec<(PathBuf, PluginFormat)> {
+/// link) is skipped. Unreadable directories are skipped too, not reported:
+/// discovery over a list of standard install locations must not fail because
+/// one of them is absent.
+pub(crate) fn discover(
+    dirs: impl IntoIterator<Item = impl AsRef<Path>>,
+) -> Vec<(PathBuf, PluginFormat)> {
     let mut walk = Walk::default();
     for dir in dirs {
         walk.dir(dir.as_ref());
@@ -129,7 +104,7 @@ struct Walk {
 
 impl Walk {
     /// VST3 bundles are directories with a `.vst3` extension, so
-    /// `format_from_path` is checked before recursing.
+    /// `PluginFormat::from_path` is checked before recursing.
     fn dir(&mut self, dir: &Path) {
         let Ok(real) = dir.canonicalize() else {
             debug!("cannot resolve directory {:?}", dir);
@@ -143,7 +118,7 @@ impl Walk {
             return;
         };
         for path in entries.flatten().map(|e| e.path()) {
-            match format_from_path(&path) {
+            match PluginFormat::from_path(&path) {
                 Some(format) => self.plugin(path, format),
                 None if path.is_dir() => self.dir(&path),
                 None => {}
@@ -164,8 +139,10 @@ impl Walk {
 
 /// Replaces `path` with what `fill` writes, leaving the old file if anything
 /// fails. The temp file is a sibling so the rename stays on one filesystem
-/// (a cross-device rename fails with EXDEV). Used for every file this crate
-/// keeps whole across a crash: the database and the pedal.
+/// (a cross-device rename fails with EXDEV), named by the process id: the
+/// pedal's writers are serialized per path by the scan's claim. Keeps the pedal
+/// whole across a crash. Safe only under that claim: a second writer in the
+/// process would share the temp name.
 pub(super) fn replace_file(
     path: &Path,
     fill: impl FnOnce(&mut std::fs::File) -> std::io::Result<()>,
@@ -175,7 +152,9 @@ pub(super) fn replace_file(
     {
         std::fs::create_dir_all(parent)?;
     }
-    let tmp = path.with_extension(format!("tmp-{}-{}", std::process::id(), TMP_COUNTER.mint()));
+    let mut tmp = path.as_os_str().to_owned();
+    tmp.push(format!(".tmp-{}", std::process::id()));
+    let tmp = PathBuf::from(tmp);
     let written = (|| {
         let mut f = std::fs::File::create(&tmp)?;
         fill(&mut f)?;
@@ -201,74 +180,8 @@ mod tests {
         path
     }
 
-    #[test]
-    fn format_from_path_detection() {
-        assert_eq!(
-            format_from_path(Path::new("a.vst3")),
-            Some(PluginFormat::Vst3)
-        );
-        assert_eq!(
-            format_from_path(Path::new("a.vst")),
-            Some(PluginFormat::Vst2)
-        );
-        assert_eq!(
-            format_from_path(Path::new("a.clap")),
-            Some(PluginFormat::Clap)
-        );
-        assert_eq!(
-            format_from_path(Path::new("a.component")),
-            Some(PluginFormat::AudioUnit)
-        );
-        assert_eq!(format_from_path(Path::new("a.txt")), None);
-        // A WASM audio node is a host's own format, hosted outside this crate;
-        // tutti must not claim `.wasm` as a plugin extension.
-        assert_eq!(format_from_path(Path::new("a.wasm")), None);
-    }
-
-    /// `.VST3` / `.CLAP` are the same extension on a case-insensitive volume
-    /// (macOS APFS, Windows NTFS). Matching case-sensitively would make those
-    /// bundles invisible, and because a `.VST3` bundle is a *directory*, the
-    /// scanner would then recurse into it and find nothing — silently.
-    #[test]
-    fn format_from_path_is_case_insensitive() {
-        assert_eq!(
-            format_from_path(Path::new("Reverb.VST3")),
-            Some(PluginFormat::Vst3)
-        );
-        assert_eq!(
-            format_from_path(Path::new("Comp.CLAP")),
-            Some(PluginFormat::Clap)
-        );
-        assert_eq!(
-            format_from_path(Path::new("Synth.Component")),
-            Some(PluginFormat::AudioUnit)
-        );
-        assert_eq!(
-            format_from_path(Path::new("Legacy.Vst")),
-            Some(PluginFormat::Vst2)
-        );
-        assert_eq!(
-            format_from_path(Path::new("Legacy.DLL")),
-            Some(PluginFormat::Vst2)
-        );
-    }
-
-    /// VST2 on Windows/Linux ships as a bare `.dll` / `.so`: both name VST2,
-    /// or no VST2 plugin is discoverable on those platforms.
-    #[test]
-    fn vst2_bare_libraries_are_recognised() {
-        assert_eq!(
-            format_from_path(Path::new("Synth1.dll")),
-            Some(PluginFormat::Vst2)
-        );
-        assert_eq!(
-            format_from_path(Path::new("Synth1.so")),
-            Some(PluginFormat::Vst2)
-        );
-    }
-
-    /// A `.VST3` bundle directory must be reported as a plugin, not recursed
-    /// Into. This is the silent-invisibility half of
+    /// A `.VST3` bundle directory is reported as a plugin, not recursed into:
+    /// walking into it would find nothing, silently.
     #[test]
     fn discover_treats_uppercase_bundle_dir_as_plugin() {
         let dir = TempDir::new().unwrap();
@@ -324,7 +237,7 @@ mod tests {
 
         let present = FileFacts::read(&file);
         assert!(present.exists);
-        assert!(present.mtime.is_some_and(|t| t > 0));
+        assert!(present.mtime.is_some());
         assert_eq!(present.format, Some(PluginFormat::Clap));
 
         let absent = FileFacts::read(dir.path().join("gone.vst3"));
@@ -393,8 +306,11 @@ mod tests {
 
         /// A bundle directory holding one bare-stem binary, with the binary's and the
         /// directory's times set; returns the facts read.
+        fn at(secs: u64) -> Option<Mtime> {
+            Mtime::new(std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(secs))
+        }
+
         fn facts_of_bundle(name: &str, module_secs: u64, dir_secs: u64) -> FileFacts {
-            use std::time::{Duration, UNIX_EPOCH};
             let dir = TempDir::new().unwrap();
             let bundle = dir.path().join(name);
             let arch = bundle
@@ -406,7 +322,7 @@ mod tests {
             let set = |p: &Path, secs: u64| {
                 std::fs::File::open(p)
                     .unwrap()
-                    .set_modified(UNIX_EPOCH + Duration::from_secs(secs))
+                    .set_modified(at(secs).unwrap().get())
                     .unwrap();
             };
             set(&module, module_secs);
@@ -420,10 +336,10 @@ mod tests {
         fn a_bundle_whose_binary_changed_reads_as_changed() {
             for name in ["Reverb.vst3", "Legacy.vst", "Synth.clap", "Verb.component"] {
                 let facts = facts_of_bundle(name, 2_000_000_000, 1_000_000_000);
-                assert_eq!(facts.mtime, Some(2_000_000_000), "{name}");
+                assert_eq!(facts.mtime, at(2_000_000_000), "{name}");
                 // The directory later than the binary still wins.
                 let facts = facts_of_bundle(name, 1_000_000_000, 3_000_000_000);
-                assert_eq!(facts.mtime, Some(3_000_000_000), "{name}");
+                assert_eq!(facts.mtime, at(3_000_000_000), "{name}");
             }
         }
     }

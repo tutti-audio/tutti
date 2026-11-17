@@ -11,15 +11,14 @@
 //! that is not possible, serializing fails rather than dropping the row.
 
 use super::os_path;
-use super::table::{Delta, FileRow, PluginDb};
+use super::table::{FileRow, PluginDb, RowChange};
+use serde::de::{Error as _, IgnoredAny, MapAccess, SeqAccess, Visitor};
 use serde::ser::Error as _;
-use serde::{Deserialize, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::path::{Path, PathBuf};
 
 /// The version of the record layout [`PluginDb`] serializes and deserializes.
-/// 4: a plugin's version is a `PluginVersion`, not a string; 3: a file's row lists every
-/// plugin it holds; 2: a bus's speakers name a channel with no speaker `Unassigned`.
-pub const DB_VERSION: u64 = 4;
+pub const DB_VERSION: u64 = 5;
 
 /// Why a record is not a database this version can read.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -37,26 +36,24 @@ pub enum InvalidDb {
 }
 
 /// A path as the record holds it: text, or the raw bytes of a name that is not
-/// UTF-8.
+/// UTF-8. Externally tagged, so a format with no self-description reads it.
 #[derive(Serialize)]
-#[serde(untagged)]
 enum StoredPath<'a> {
     Text(&'a str),
-    Bytes { bytes: &'a [u8] },
+    Bytes(&'a [u8]),
 }
 
 #[derive(Deserialize)]
-#[serde(untagged)]
 enum StoredPathOwned {
     Text(String),
-    Bytes { bytes: Vec<u8> },
+    Bytes(Vec<u8>),
 }
 
 impl<'a> StoredPath<'a> {
     fn of(path: &'a Path) -> Option<Self> {
         match path.to_str() {
             Some(text) => Some(Self::Text(text)),
-            None => os_path::raw_bytes(path).map(|bytes| Self::Bytes { bytes }),
+            None => os_path::raw_bytes(path).map(Self::Bytes),
         }
     }
 }
@@ -65,7 +62,7 @@ impl StoredPathOwned {
     fn into_path(self) -> PathBuf {
         match self {
             Self::Text(text) => PathBuf::from(text),
-            Self::Bytes { bytes } => os_path::from_bytes(&bytes),
+            Self::Bytes(bytes) => os_path::from_bytes(&bytes),
         }
     }
 }
@@ -77,11 +74,89 @@ struct Out<'a> {
 }
 
 /// The record as read, before it is checked.
-#[derive(Deserialize)]
+///
+/// The version is read first and the rows only when it is this one: a record of
+/// another version, whatever its rows look like, is [`InvalidDb::Version`] and
+/// never a decoding error. A refused record holds no rows.
 pub(crate) struct Raw {
-    #[serde(default)]
     version: u64,
     files: Vec<(StoredPathOwned, FileRow)>,
+}
+
+#[derive(Deserialize)]
+#[serde(field_identifier, rename_all = "lowercase")]
+enum Field {
+    Version,
+    Files,
+}
+
+struct RawVisitor;
+
+impl<'de> Visitor<'de> for RawVisitor {
+    type Value = Raw;
+
+    fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("a plugin database record")
+    }
+
+    /// A format that writes a struct as a sequence (postcard): the version is
+    /// the first element.
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Raw, A::Error> {
+        let version: u64 = seq
+            .next_element()?
+            .ok_or_else(|| A::Error::invalid_length(0, &self))?;
+        if version != DB_VERSION {
+            return Ok(Raw::refused(version));
+        }
+        let files = seq
+            .next_element()?
+            .ok_or_else(|| A::Error::invalid_length(1, &self))?;
+        Ok(Raw { version, files })
+    }
+
+    /// A format that writes a struct as a map (JSON): the writer puts `version`
+    /// first, so a record whose first key is another is one with no version.
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Raw, A::Error> {
+        let version = match map.next_key::<Field>()? {
+            Some(Field::Version) => map.next_value::<u64>()?,
+            Some(Field::Files) => {
+                map.next_value::<IgnoredAny>()?;
+                0
+            }
+            None => 0,
+        };
+        if version != DB_VERSION {
+            while map.next_entry::<IgnoredAny, IgnoredAny>()?.is_some() {}
+            return Ok(Raw::refused(version));
+        }
+        let mut files = None;
+        while let Some(field) = map.next_key::<Field>()? {
+            match field {
+                Field::Version => return Err(A::Error::duplicate_field("version")),
+                Field::Files if files.is_some() => {
+                    return Err(A::Error::duplicate_field("files"));
+                }
+                Field::Files => files = Some(map.next_value()?),
+            }
+        }
+        let files = files.ok_or_else(|| A::Error::missing_field("files"))?;
+        Ok(Raw { version, files })
+    }
+}
+
+impl Raw {
+    fn refused(version: u64) -> Self {
+        Self {
+            version,
+            files: Vec::new(),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for Raw {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer.deserialize_struct("PluginDb", &["version", "files"], RawVisitor)
+    }
 }
 
 impl TryFrom<Raw> for PluginDb {
@@ -97,7 +172,7 @@ impl TryFrom<Raw> for PluginDb {
             if db.row(&path).is_some() {
                 return Err(InvalidDb::DuplicatePath(path));
             }
-            db.apply(Delta::put(path, row));
+            db.apply(RowChange::put(path, row));
         }
         Ok(db)
     }
@@ -126,18 +201,19 @@ impl Serialize for PluginDb {
 mod tests {
     use super::*;
     use crate::facts::FileFacts;
-    use crate::format::{PluginClass, PluginDescriptor, PluginFormat};
     use crate::table::FileState;
     use tutti_plugin_types::{
-        LatencyVerdict, MaxBlock, Measured, NotChecked, PROBE_FLOOR, ProbeConfig, StateHash,
-        TailVerdict, Verdict,
+        LatencyVerdict, MaxBlock, Measured, NotChecked, PROBE_FLOOR, PluginClass, PluginDescriptor,
+        PluginFormat, ProbeConfig, StateHash, TailVerdict, Verdict,
     };
     use tutti_types::{Db, SampleRate, Samples};
 
     fn row(name: &str) -> FileRow {
         let facts = FileFacts {
             exists: true,
-            mtime: Some(1_700_000_000),
+            mtime: crate::mtime::Mtime::new(
+                std::time::UNIX_EPOCH + std::time::Duration::new(1_700_000_000, 123),
+            ),
             format: Some(PluginFormat::Vst3),
         };
         FileRow::probed(
@@ -151,7 +227,7 @@ mod tests {
         let mut db = PluginDb::new();
         for name in names {
             let name = name.as_ref();
-            db.apply(Delta::put(format!("/plugins/{name}.vst3"), row(name)));
+            db.apply(RowChange::put(format!("/plugins/{name}.vst3"), row(name)));
         }
         db
     }
@@ -164,18 +240,28 @@ mod tests {
         }
     }
 
-    fn to_json(db: &PluginDb) -> serde_json::Value {
-        serde_json::to_value(db).unwrap()
+    /// The record as text, `version` first as the writer emits it.
+    fn to_json(db: &PluginDb) -> String {
+        serde_json::to_string(db).unwrap()
     }
 
-    fn from_json(value: serde_json::Value) -> Result<PluginDb, serde_json::Error> {
-        serde_json::from_value(value)
+    fn from_json(text: &str) -> Result<PluginDb, serde_json::Error> {
+        serde_json::from_str(text)
+    }
+
+    fn raw_of(text: &str) -> Raw {
+        serde_json::from_str(text).unwrap()
+    }
+
+    /// The text of the current version's `version` entry.
+    fn version_entry(version: u64) -> String {
+        format!("\"version\":{version}")
     }
 
     /// A row of one plugin whose `measured` is `measured`.
     fn measured_row(name: &str, measured: Measured) -> FileRow {
         let mut row = row(name);
-        let FileState::Probed(plugins) = &mut row.state else {
+        let FileState::Probed { plugins, .. } = &mut row.state else {
             unreachable!("a probed row");
         };
         plugins[0].measured = Some(measured);
@@ -231,13 +317,13 @@ mod tests {
         ];
         for (k, (tail, latency)) in verdicts.into_iter().enumerate() {
             let name = format!("plugin{k}");
-            db.apply(Delta::put(
+            db.apply(RowChange::put(
                 format!("/plugins/{name}.vst3"),
                 measured_row(&name, measurement(tail, latency)),
             ));
         }
 
-        let back = from_json(to_json(&db)).unwrap();
+        let back = from_json(&to_json(&db)).unwrap();
 
         assert_eq!(back, db);
         assert_eq!(back.len(), 7);
@@ -254,10 +340,36 @@ mod tests {
         );
     }
 
+    /// **A populated database survives a format with no self-description**:
+    /// postcard reads back exactly what it wrote, a blacklisted row and a
+    /// measured one included.
+    #[test]
+    fn a_populated_database_round_trips_through_postcard() {
+        let mut db = db_of(&["reverb", "delay"]);
+        db.blacklist(
+            Path::new("/plugins/crashy.vst3"),
+            "segfault".into(),
+            &no_file(),
+        );
+        db.apply(RowChange::put(
+            "/plugins/measured.vst3",
+            measured_row(
+                "measured",
+                measurement(TailVerdict::Honest, LatencyVerdict::Honest),
+            ),
+        ));
+
+        let bytes = postcard::to_stdvec(&db).unwrap();
+        let back: PluginDb = postcard::from_bytes(&bytes).unwrap();
+
+        assert_eq!(back, db);
+    }
+
     /// A serialized database declares the version it deserializes.
     #[test]
     fn a_serialized_database_declares_the_version_it_reads() {
-        assert_eq!(to_json(&db_of(&["a"]))["version"], DB_VERSION);
+        let value: serde_json::Value = serde_json::from_str(&to_json(&db_of(&["a"]))).unwrap();
+        assert_eq!(value["version"], DB_VERSION);
     }
 
     /// Rows come out in path order, so the same table serializes to the same
@@ -276,16 +388,14 @@ mod tests {
     fn a_record_of_another_version_is_refused() {
         let current = to_json(&db_of(&["reverb"]));
         for found in [DB_VERSION - 1, DB_VERSION + 1, 41] {
-            let mut value = current.clone();
-            value["version"] = found.into();
+            let text = current.replace(&version_entry(DB_VERSION), &version_entry(found));
 
-            let raw: Raw = serde_json::from_value(value.clone()).unwrap();
             assert_eq!(
-                PluginDb::try_from(raw),
+                PluginDb::try_from(raw_of(&text)),
                 Err(InvalidDb::Version { found }),
                 "version {found}"
             );
-            let message = from_json(value).unwrap_err().to_string();
+            let message = from_json(&text).unwrap_err().to_string();
             assert!(
                 message.contains(&format!("version {found}")),
                 "version {found}: {message}"
@@ -293,18 +403,49 @@ mod tests {
         }
     }
 
+    /// A record of an older layout, whose rows this version cannot read, is
+    /// refused by its version and not by a decoding error: the rows are never
+    /// read. The text is a version 4 record, with an untagged path and a
+    /// format on the row.
+    #[test]
+    fn an_older_layout_is_refused_by_its_version_not_decoded() {
+        let text = r#"{"version":4,"files":[["/plugins/a.vst3",{"format":"Vst3","mtime":1700000000,"state":{"Probed":[]}}]]}"#;
+
+        assert_eq!(
+            PluginDb::try_from(raw_of(text)),
+            Err(InvalidDb::Version { found: 4 })
+        );
+        let message = from_json(text).unwrap_err().to_string();
+        assert!(message.contains("version 4"), "{message}");
+    }
+
+    /// The same holds for a format that writes a struct as a sequence: the
+    /// version is the first element, and bytes after an older one are not read.
+    #[test]
+    fn an_older_layout_is_refused_by_its_version_in_postcard() {
+        let older = [4_u8, 1, 0xff, 0xff, 0xff];
+
+        let raw: Raw = postcard::from_bytes(&older).unwrap();
+
+        assert_eq!(
+            PluginDb::try_from(raw),
+            Err(InvalidDb::Version { found: 4 })
+        );
+        assert!(postcard::from_bytes::<PluginDb>(&older).is_err());
+    }
+
     /// A record with no version is version `0`, not the current one.
     #[test]
     fn a_record_with_no_version_is_refused() {
-        let mut value = to_json(&db_of(&["reverb"]));
-        value.as_object_mut().unwrap().remove("version");
+        let current = to_json(&db_of(&["reverb"]));
+        let text = current.replace(&format!("{},", version_entry(DB_VERSION)), "");
+        assert!(!text.contains(&version_entry(DB_VERSION)));
 
-        let raw: Raw = serde_json::from_value(value.clone()).unwrap();
         assert_eq!(
-            PluginDb::try_from(raw),
+            PluginDb::try_from(raw_of(&text)),
             Err(InvalidDb::Version { found: 0 })
         );
-        assert!(from_json(value).is_err());
+        assert!(from_json(&text).is_err());
     }
 
     /// A path listed twice is refused, naming the path: the record does not say
@@ -312,18 +453,18 @@ mod tests {
     #[test]
     fn a_path_listed_twice_is_refused() {
         let (first, second) = (row("first"), row("second"));
-        let value = serde_json::json!({
-            "version": DB_VERSION,
-            "files": [["/plugins/a.vst3", first], ["/plugins/a.vst3", second]],
-        });
+        let text = serde_json::json!({
+            "files": [[{"Text": "/plugins/a.vst3"}, first], [{"Text": "/plugins/a.vst3"}, second]],
+        })
+        .to_string()
+        .replacen('{', &format!("{{{},", version_entry(DB_VERSION)), 1);
 
-        let raw: Raw = serde_json::from_value(value.clone()).unwrap();
         assert_eq!(
-            PluginDb::try_from(raw),
+            PluginDb::try_from(raw_of(&text)),
             Err(InvalidDb::DuplicatePath("/plugins/a.vst3".into()))
         );
         assert!(
-            from_json(value)
+            from_json(&text)
                 .unwrap_err()
                 .to_string()
                 .contains("/plugins/a.vst3")
@@ -333,13 +474,14 @@ mod tests {
     /// The current version with a body of the wrong shape does not deserialize.
     #[test]
     fn the_current_version_with_a_bad_body_is_refused() {
+        let v = version_entry(DB_VERSION);
         for body in [
-            serde_json::json!({ "version": DB_VERSION, "files": 7 }),
-            serde_json::json!({ "version": DB_VERSION }),
-            serde_json::json!({ "version": DB_VERSION, "files": [["/p/a.vst3", 5]] }),
-            serde_json::json!([]),
+            format!("{{{v},\"files\":7}}"),
+            format!("{{{v}}}"),
+            format!("{{{v},\"files\":[[\"/p/a.vst3\",5]]}}"),
+            "[]".to_string(),
         ] {
-            assert!(from_json(body.clone()).is_err(), "{body}");
+            assert!(from_json(&body).is_err(), "{body}");
         }
     }
 
@@ -357,10 +499,24 @@ mod tests {
             let odd = PathBuf::from(std::ffi::OsStr::from_bytes(b"/plugins/caf\xe9.vst3"));
             db.blacklist(&odd, "boom".into(), &no_file());
 
-            let back = from_json(to_json(&db)).unwrap();
+            let back = from_json(&to_json(&db)).unwrap();
 
             assert_eq!(back, db);
             assert!(back.is_blacklisted(&odd));
+        }
+
+        /// The same holds in a format with no self-description.
+        #[test]
+        fn a_non_utf8_path_round_trips_through_postcard() {
+            use std::os::unix::ffi::OsStrExt;
+            let mut db = db_of(&["kept"]);
+            let odd = PathBuf::from(std::ffi::OsStr::from_bytes(b"/plugins/caf\xe9.vst3"));
+            db.blacklist(&odd, "boom".into(), &no_file());
+
+            let bytes = postcard::to_stdvec(&db).unwrap();
+            let back: PluginDb = postcard::from_bytes(&bytes).unwrap();
+
+            assert_eq!(back, db);
         }
     }
 }

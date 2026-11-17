@@ -127,7 +127,6 @@ impl ExpressionInt {
 }
 
 /// `DataEvent` with its bytes inline.
-#[derive(Debug, Clone, Copy)]
 ///
 /// The fields are private: `size` is what the plugin is told it may read from
 /// `bytes`, so it must never exceed [`CAPACITY`](Self::CAPACITY), and every
@@ -138,6 +137,7 @@ impl ExpressionInt {
 ///
 /// let _ = Data { size: 1_000_000, data_type: 0, bytes: [0; 16] };
 /// ```
+#[derive(Debug, Clone, Copy)]
 pub struct Data {
     /// Valid bytes in `bytes`, at most 16.
     size: u32,

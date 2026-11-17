@@ -41,8 +41,8 @@ pub enum ConfigError {
         /// The tick that went backwards.
         at: Tick,
     },
-    /// Two events are further apart than the wire's delta (28 bits in an SMF,
-    /// 32 in a Clip File).
+    /// Two events are further apart than an SMF's delta (28 bits). A Clip File
+    /// has no such gap.
     #[error("track {track}: the gap before tick {} is wider than the wire holds", at.0)]
     Gap {
         /// The track.
@@ -56,14 +56,6 @@ pub enum ConfigError {
         /// The track.
         track: usize,
         /// The tick that went backwards.
-        at: Tick,
-    },
-    /// Two header messages are further apart than a Delta Clockstamp holds.
-    #[error("track {track}: the header's gap before tick {} is wider than the wire holds", at.0)]
-    HeaderGap {
-        /// The track.
-        track: usize,
-        /// The tick the gap ends at.
         at: Tick,
     },
     /// The track ends before its last event.
@@ -90,15 +82,6 @@ pub enum ConfigError {
         /// Where it ends.
         end: Tick,
     },
-    /// The header ends further after its last message than a Delta Clockstamp
-    /// holds.
-    #[error("track {track}: the header ends at tick {}, too long after its last message", end.0)]
-    HeaderEndTooFar {
-        /// The track.
-        track: usize,
-        /// Where it ends.
-        end: Tick,
-    },
     /// A Flex Data message (a text of several packets) is interrupted by
     /// another message, or has no End: a message between its Start and End
     /// is only a Continue of it or a System Real Time message (M2-104 section
@@ -119,28 +102,26 @@ pub enum ConfigError {
         /// Which rule it broke.
         refusal: Refusal,
     },
-    /// A count or length the SMF's fields cannot hold: an event past 2^28
-    /// bytes, a chunk past 4 GB, a delta past 28 bits.
-    #[error("a track, event or delta too long for an SMF's length fields")]
+    /// A count or length the writer cannot hold. An SMF's event past 2^28
+    /// bytes, chunk past 4 GB or delta past 28 bits is past the format's
+    /// fields (SMF 1.0 section 1.1). A Clip File's limit is the writer's own
+    /// bound on what it allocates, not M2-116's: the format holds any gap with
+    /// Null restarts (section 3.2.2), and the writer refuses a gap whose
+    /// restarts alone would be over 4 GB.
+    #[error("the file is larger than the writer holds")]
     TooLarge,
 }
 
 /// Why a container cannot hold an event ([`ConfigError::Refused`]).
-#[derive(Error, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Error, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Refusal {
-    /// An SMF holds Group 0 only.
-    #[error("an SMF holds group 0 only")]
+    /// An SMF holds the first Group only.
+    #[error("an SMF holds the first group only")]
     SmfGroup,
     /// An SMF holds MIDI 1.0 channel messages, not packets.
     #[error("an SMF holds MIDI 1.0 channel messages, not packets")]
     SmfPacket,
-    /// A Set Tempo over the wire's 24 bits.
-    #[error("a Set Tempo of {micros_per_quarter} us is over 24 bits")]
-    TempoOver24Bits {
-        /// The microseconds per quarter note refused.
-        micros_per_quarter: u32,
-    },
     /// A Clip File holds packets, not SMF events (`SysEx`, `Escape`, `Meta`).
     #[error("a Clip File holds packets, not SMF events")]
     ClipSmfEvent,
@@ -148,7 +129,7 @@ pub enum Refusal {
     #[error("a Utility message is the Clip File's own structure")]
     ClipUtility,
     /// Start and End of Clip are the Clip File's own structure.
-    #[error("Start and End of Clip are the Clip File's own structure")]
+    #[error("Start of Clip and End of Clip are the Clip File's own structure")]
     ClipStructure,
     /// A MIDI-CI Property Exchange message (M2-116 sections 6.4 and 7.2).
     #[error("a Clip File holds no Property Exchange message (M2-116 sections 6.4 and 7.2)")]

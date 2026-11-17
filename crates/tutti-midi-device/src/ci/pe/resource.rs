@@ -23,11 +23,11 @@ pub use client::{
     ResourceFailure, ResourceInitiator, UpdateKind,
 };
 pub use controllers::{
-    CcIndex, CtrlControl, CtrlRange, DefaultMapNotCc, ListedTwice, PeAllCtrlEntry, PeAllCtrlList,
-    PeChCtrlEntry, PeChCtrlList, PeController, PeCtrl, PeCtrlMapEntry, PeCtrlMapList,
+    CcIndex, CtrlControl, CtrlRange, ListedTwice, PeAllCtrlEntry, PeAllCtrlList, PeChCtrlEntry,
+    PeChCtrlList, PeController, PeCtrl, PeCtrlMapEntry, PeCtrlMapList,
 };
 pub use data::{OpaqueBody, PeData, PeOpaque};
-pub use entry::{EntryError, PeResourceList, ResourceEntry};
+pub use entry::{EntryError, PeResourceList, ResourceEntry, ResourceEntryBuilder};
 pub use fields::{
     ClusterKind, CtrlKind, CtrlValueKind, ModeId, NotAPeChannel, NotAPriority, NotAStepCount,
     NotSignificantBits, NotVendorName, ParamPath, PeBankProgram, PeChannel, PeDataError,

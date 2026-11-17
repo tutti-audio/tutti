@@ -95,13 +95,15 @@ pub struct ResourceTarget {
     res_id: Option<ResourceId>,
 }
 
-impl ResourceTarget {
+impl TryFrom<PeResource> for ResourceTarget {
+    type Error = RequestRefused;
+
     /// The Resource without an entry.
     ///
     /// # Errors
     ///
     /// [`RequestRefused::ResIdRequired`] for a Resource that has entries.
-    pub fn new(resource: PeResource) -> Result<Self, RequestRefused> {
+    fn try_from(resource: PeResource) -> Result<Self, RequestRefused> {
         if resource.res_id_use() == ResIdUse::Required {
             return Err(RequestRefused::ResIdRequired(resource.as_str().to_owned()));
         }
@@ -109,6 +111,16 @@ impl ResourceTarget {
             resource,
             res_id: None,
         })
+    }
+}
+
+impl ResourceTarget {
+    /// The State list, a Resource with no entry.
+    pub(super) fn state_list() -> Self {
+        Self {
+            resource: PeResource::StateList,
+            res_id: None,
+        }
     }
 
     /// The entry `res_id` of the Resource.
@@ -189,19 +201,12 @@ impl ResourceGet {
     }
 
     /// Asks for a page of a List Resource: `offset` and `limit` together
-    /// (M2-103 §8.6.2).
-    ///
-    /// # Errors
-    ///
-    /// [`RequestRefused::NotPaginable`] for a Resource that is no List Resource.
-    pub fn paged(mut self, page: PePage) -> Result<Self, RequestRefused> {
-        if !self.target.resource.is_list() {
-            return Err(RequestRefused::NotPaginable(
-                self.target.resource.as_str().to_owned(),
-            ));
-        }
+    /// (M2-103 §8.6.2). [`check_get`](Self::check_get) refuses a page of a
+    /// Resource that is no List Resource.
+    #[must_use]
+    pub fn paged(mut self, page: PePage) -> Self {
         self.page = Some(page);
-        Ok(self)
+        self
     }
 
     /// Asks for the reply in `encoding`.
@@ -213,7 +218,7 @@ impl ResourceGet {
 
     /// Asks for the reply under Flow Control, when the Resource declares it.
     #[must_use]
-    pub fn with_flow_control(mut self) -> Self {
+    pub fn flow_controlled(mut self) -> Self {
         self.flow = PeFlowControl::On;
         self
     }
@@ -269,9 +274,21 @@ impl ResourceGet {
         self.check_header(entry)
     }
 
+    /// Refuses a page of a Resource that is no List Resource, which needs no
+    /// entry of the ResourceList (M2-103 §8.6.2).
+    pub(super) fn check_page_target(&self) -> Result<(), RequestRefused> {
+        if self.page.is_some() && !self.target.resource.is_list() {
+            return Err(RequestRefused::NotPaginable(
+                self.target.resource.as_str().to_owned(),
+            ));
+        }
+        Ok(())
+    }
+
     fn check_header(&self, entry: &ResourceEntry) -> Result<(), RequestRefused> {
         let name = || self.target.resource.as_str().to_owned();
         self.target.agrees_with(entry)?;
+        self.check_page_target()?;
         if self.page.is_some() && !entry.can_paginate() {
             return Err(RequestRefused::NotDeclaredPaginable(name()));
         }
@@ -304,6 +321,28 @@ pub struct ResourceSet {
     target: ResourceTarget,
     body: SetBody,
     encoding: PeEncoding,
+}
+
+impl TryFrom<&PeLink> for ResourceSet {
+    type Error = ActionError;
+
+    /// The Set a `simpleAction` Link asks for: its Resource and entry, and its
+    /// `propData` as the Property Data (M2-103 §13.1.1).
+    ///
+    /// # Errors
+    ///
+    /// [`ActionError`] for a Link that is no `simpleAction` and for `propData`
+    /// that is not the Resource's.
+    fn try_from(link: &PeLink) -> Result<Self, ActionError> {
+        let Some(LinkRole::Simple(action)) = &link.role else {
+            return Err(ActionError::NotThatAction("simpleAction"));
+        };
+        let data = PeData::decode(&link.resource, &action.prop_data)?;
+        Ok(Self::full(
+            link_target(&link.resource, link.res_id.as_ref())?,
+            data,
+        )?)
+    }
 }
 
 impl ResourceSet {
@@ -407,24 +446,6 @@ impl ResourceSet {
         Ok(())
     }
 
-    /// The Set a `simpleAction` Link asks for: its Resource and entry, and its
-    /// `propData` as the Property Data (M2-103 §13.1.1).
-    ///
-    /// # Errors
-    ///
-    /// [`ActionError`] for a Link that is no `simpleAction` and for `propData`
-    /// that is not the Resource's.
-    pub fn from_simple_action(link: &PeLink) -> Result<Self, ActionError> {
-        let Some(LinkRole::Simple(action)) = &link.role else {
-            return Err(ActionError::NotThatAction("simpleAction"));
-        };
-        let data = PeData::decode(&link.resource, &action.prop_data)?;
-        Ok(Self::full(
-            link_target(&link.resource, link.res_id.as_ref())?,
-            data,
-        )?)
-    }
-
     /// The Set a `selectorAction` Link asks for once the user chose `chosen`, an
     /// entry of the List Resource of the Link: the action Resource, with the
     /// `selectedProperty` of the entry as the Property Data (M2-103 §13.1.2).
@@ -452,7 +473,7 @@ fn link_target(
 ) -> Result<ResourceTarget, RequestRefused> {
     match res_id {
         Some(id) => ResourceTarget::entry(resource.clone(), id.clone()),
-        None => ResourceTarget::new(resource.clone()),
+        None => ResourceTarget::try_from(resource.clone()),
     }
 }
 

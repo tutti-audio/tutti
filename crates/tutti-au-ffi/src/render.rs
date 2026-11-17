@@ -10,8 +10,8 @@ use coreaudio_sys::{AudioBuffer, AudioBufferList, AudioTimeStamp, AudioUnitRende
 
 use crate::callback::with_state_mut;
 use crate::error::{Error, Result, check};
-use crate::property::{Element, LastRenderStatus, Scope, SetRenderCallback};
-use crate::status::{CANNOT_DO_IN_CURRENT_CONTEXT, NO_ERR};
+use crate::property::{Element, Scope, SetRenderCallback};
+use crate::status::CANNOT_DO_IN_CURRENT_CONTEXT;
 use crate::unit::Unit;
 
 /// Input/output channel layouts for an AU.
@@ -364,15 +364,16 @@ impl Renderer {
     /// Returns whether the unit declared the block silent.
     ///
     /// # Errors
-    /// [`Error::Invalid`] when `frames` exceeds the block size the buffers were
-    /// sized for (nothing is rendered), else [`Error::RenderFailed`] with the status of `AudioUnitRender` and the
-    /// unit's last-render-error property.
+    /// [`Error::BlockTooLarge`] when `frames` exceeds the block size the buffers
+    /// were sized for (nothing is rendered), else [`Error::RenderFailed`] with
+    /// the status of `AudioUnitRender`; the control side reads the unit's
+    /// last-render-error property ([`Unit::last_render_error`]).
     pub fn render(&mut self, frames: u32) -> Result<bool> {
         if frames > self.block_size {
-            return Err(Error::Invalid(format!(
-                "frames ({frames}) > block_size ({})",
-                self.block_size
-            )));
+            return Err(Error::BlockTooLarge {
+                frames,
+                max: self.block_size,
+            });
         }
         let (abl, sample_time) = {
             let scratch = self.scratch();
@@ -390,7 +391,7 @@ impl Renderer {
             coreaudio_sys::AudioUnitRender(self.unit.raw(), &mut flags, &timestamp, 0, frames, abl)
         };
         drop(in_flight);
-        check_render("AudioUnitRender", status, &self.unit)?;
+        check_render("AudioUnitRender", status)?;
         Ok(flags & coreaudio_sys::kAudioUnitRenderAction_OutputIsSilence != 0)
     }
 }
@@ -783,15 +784,16 @@ unsafe fn bind_list(
 /// same thing whichever push function produced the audio.
 ///
 /// # Errors
-/// * `Error::Invalid` if `frames` exceeds the scratch's block size, or
-///   if the scratch has no input bus 0 / no output bus 0. The frame bound is
+/// * `Error::BlockTooLarge` if `frames` exceeds the scratch's block size, and
+///   `Error::MissingBus` if the scratch has no input bus 0 / no output bus 0.
+///   The frame bound is
 ///   checked here rather than left to the AU because the host owns the buffer:
 ///   `bind_list` would report `frames * 4` bytes for storage sized to
 ///   `block_size`, and the AU would write past it. (The AU *also* refuses —
 ///   measured `-10874`, `kAudioUnitErr_TooManyFramesToProcess`, for a 256-frame
 ///   render on a 64-frame AUDelay — but only after being handed a buffer list
 ///   that lies about its size.)
-/// * `Error::RenderFailed` with the AU's `LastRenderStatus` attached when
+/// * `Error::RenderFailed` with the call's status when
 ///   `AudioUnitProcess` itself fails, which for most units means `unimpErr`.
 ///
 pub fn process_push(
@@ -800,15 +802,16 @@ pub fn process_push(
     frames: u32,
 ) -> Result<AudioUnitRenderActionFlags> {
     if frames > scratch.block_size {
-        return Err(Error::Invalid(format!(
-            "frames ({frames}) > block_size ({})",
-            scratch.block_size
-        )));
+        return Err(Error::BlockTooLarge {
+            frames,
+            max: scratch.block_size,
+        });
     }
     if scratch.input_audio.is_empty() || scratch.output_audio.is_empty() {
-        return Err(Error::Invalid(
-            "AudioUnitProcess needs one input bus and one output bus".to_string(),
-        ));
+        return Err(Error::MissingBus {
+            function: "AudioUnitProcess",
+            needs: "one input bus and one output bus",
+        });
     }
 
     scratch.bind_inputs(frames);
@@ -823,7 +826,7 @@ pub fn process_push(
         coreaudio_sys::AudioUnitProcess(unit.raw(), &mut flags, &timestamp, frames, list)
     };
     drop(in_flight);
-    check_render("AudioUnitProcess", status, unit)?;
+    check_render("AudioUnitProcess", status)?;
 
     // `OutputIsSilence` is honoured for the reason `Renderer::render` documents:
     // when the AU sets it, the buffer contents are explicitly *not* guaranteed
@@ -870,10 +873,10 @@ fn copy_in_bus0_to_out_bus0(scratch: &mut PushScratch, silent: bool, frames: u32
 /// to.
 ///
 /// # Errors
-/// * `Error::Invalid` if `frames` exceeds the scratch's block size, or
-///   if the scratch has no output bus at all — an AU must write somewhere, and a
+/// * `Error::BlockTooLarge` if `frames` exceeds the scratch's block size, and
+///   `Error::MissingBus` if the scratch has no output bus at all — an AU must write somewhere, and a
 ///   zero-length output array is not a render.
-/// * `Error::RenderFailed` carrying the AU's `LastRenderStatus`. An AU handed
+/// * `Error::RenderFailed` carrying the call's status. An AU handed
 ///   more input lists than it has input elements reports
 ///   `kAudioUnitErr_InvalidElement` here, and one that does not implement the
 ///   selector reports `unimpErr`. Both surface rather than being absorbed: a
@@ -886,15 +889,16 @@ pub fn process_push_multiple(
     frames: u32,
 ) -> Result<AudioUnitRenderActionFlags> {
     if frames > scratch.block_size {
-        return Err(Error::Invalid(format!(
-            "frames ({frames}) > block_size ({})",
-            scratch.block_size
-        )));
+        return Err(Error::BlockTooLarge {
+            frames,
+            max: scratch.block_size,
+        });
     }
     if scratch.output_audio.is_empty() {
-        return Err(Error::Invalid(
-            "AudioUnitProcessMultiple needs at least one output bus".to_string(),
-        ));
+        return Err(Error::MissingBus {
+            function: "AudioUnitProcessMultiple",
+            needs: "at least one output bus",
+        });
     }
 
     scratch.bind_inputs(frames);
@@ -923,7 +927,7 @@ pub fn process_push_multiple(
         )
     };
     drop(in_flight);
-    check_render("AudioUnitProcessMultiple", status, unit)?;
+    check_render("AudioUnitProcessMultiple", status)?;
 
     // As in `process_push`: an AU that flags the block silent has not promised
     // its output buffers are zeroed, so zero them rather than emit stale audio.
@@ -939,27 +943,12 @@ pub fn process_push_multiple(
     Ok(flags)
 }
 
-/// The AU's `kAudioUnitProperty_LastRenderError`, when it is readable and
-/// non-`noErr`.
-///
-/// Only called on a *failed* render, exactly as the equivalent read in
-/// `Renderer::render` is, so the property read it performs cannot affect the
-/// no-alloc guarantee on the steady-state path.
-///
-/// # Safety
-/// `unit` must be a live `AudioUnit`.
-fn last_render_error(unit: &Unit) -> Option<i32> {
-    unit.get::<LastRenderStatus>(Scope::GLOBAL, Element::ZERO)
-        .ok()
-        .filter(|&e| e != NO_ERR)
-}
-
-/// `check` for a render call: a failure carries the unit's last render error.
-fn check_render(function: &'static str, status: i32, unit: &Unit) -> Result<()> {
+/// `check` for a render call: a failure carries the call and its `OSStatus`, and
+/// nothing else (no property read, no allocation).
+fn check_render(function: &'static str, status: i32) -> Result<()> {
     check(function, status).map_err(|e| Error::RenderFailed {
         function: e.function,
         status: e.status,
-        last: last_render_error(unit),
     })
 }
 
@@ -1606,7 +1595,16 @@ mod tests {
             },
             64,
         );
-        assert!(matches!(renderer.render(65), Err(Error::Invalid(_))));
-        assert!(matches!(renderer.render(u32::MAX), Err(Error::Invalid(_))));
+        assert!(matches!(
+            renderer.render(65),
+            Err(Error::BlockTooLarge {
+                frames: 65,
+                max: 64
+            })
+        ));
+        assert!(matches!(
+            renderer.render(u32::MAX),
+            Err(Error::BlockTooLarge { max: 64, .. })
+        ));
     }
 }

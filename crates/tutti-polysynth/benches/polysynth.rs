@@ -111,7 +111,7 @@ fn held(cfg: SynthConfig, n: usize) -> Direct<PolySynth> {
 
 fn drive(synth: &mut Direct<PolySynth>) {
     synth.block();
-    black_box(synth.output(0)[0]);
+    black_box(synth.output().plane(0).samples()[0]);
 }
 
 /// **The headline: cost against held-voice count.**

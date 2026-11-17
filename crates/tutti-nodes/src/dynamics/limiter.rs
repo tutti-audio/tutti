@@ -580,7 +580,8 @@ mod tests {
         for _ in 0..40 {
             let l = noise(&mut seed, 1024, 4.0);
             let r = noise(&mut seed, 1024, 4.0);
-            output.extend(drive(&mut lim, RATE_44K, &[&l, &r], &[]).remove(0));
+            output
+                .extend(drive(&mut lim, RATE_44K, Planes::new(&[&l, &r]).unwrap(), &[]).remove(0));
         }
         let mut limited = 0;
         for (i, &y) in output.iter().enumerate().skip(latency) {
@@ -601,7 +602,7 @@ mod tests {
             let x = vec![level; 1024];
             let mut out = Vec::new();
             for _ in 0..16 {
-                out = drive(&mut lim, RATE_44K, &[&x, &x], &[]).remove(0);
+                out = drive(&mut lim, RATE_44K, Planes::new(&[&x, &x]).unwrap(), &[]).remove(0);
             }
             let want = level * want;
             for &y in &out[512..] {
@@ -625,7 +626,7 @@ mod tests {
             let x = vec![level; 1024];
             let mut out = Vec::new();
             for _ in 0..16 {
-                out = drive(&mut lim, RATE_44K, &[&x, &x], &[]).remove(0);
+                out = drive(&mut lim, RATE_44K, Planes::new(&[&x, &x]).unwrap(), &[]).remove(0);
             }
             let want = level * gain;
             assert!(
@@ -643,7 +644,7 @@ mod tests {
         let x = vec![level; 1024];
         let mut out = Vec::new();
         for _ in 0..16 {
-            out = drive(&mut lim, RATE_44K, &[&x, &x], &[]).remove(0);
+            out = drive(&mut lim, RATE_44K, Planes::new(&[&x, &x]).unwrap(), &[]).remove(0);
         }
         let ceiling_lin = ceiling.to_amplitude().get();
         // The output never exceeds the ceiling (to a rounding step), in
@@ -722,13 +723,13 @@ mod tests {
         let latency = lim.shape().latency.samples().get();
         let mut x = vec![1.0f32; 1024];
         x[10] = f32::NAN;
-        let out = drive(&mut lim, RATE_44K, &[&x, &x], &[]).remove(0);
+        let out = drive(&mut lim, RATE_44K, Planes::new(&[&x, &x]).unwrap(), &[]).remove(0);
         assert!(
             out[10 + latency].is_nan(),
             "the NaN is delayed, not dropped"
         );
         let x = vec![1.0f32; 1024];
-        let out = drive(&mut lim, RATE_44K, &[&x, &x], &[]).remove(0);
+        let out = drive(&mut lim, RATE_44K, Planes::new(&[&x, &x]).unwrap(), &[]).remove(0);
         for (i, &y) in out.iter().enumerate().skip(latency + 1) {
             assert!(
                 (y - limit).abs() <= SETTLED * limit,
@@ -770,7 +771,9 @@ mod tests {
             x[400..500].fill(-0.001);
             let mut output = Vec::new();
             for _ in 0..4 {
-                output.extend(drive(&mut lim, RATE_44K, &[&x, &x], &[]).remove(0));
+                output.extend(
+                    drive(&mut lim, RATE_44K, Planes::new(&[&x, &x]).unwrap(), &[]).remove(0),
+                );
             }
             for (i, &y) in output.iter().enumerate() {
                 assert!(y.is_finite(), "threshold {threshold}: frame {i} is {y}");
@@ -797,7 +800,7 @@ mod tests {
                 RATE_44K,
             );
             assert_eq!(lim.shape().latency, Latency::new(Samples(221)));
-            let out = drive(&mut lim, RATE_44K, &[&x, &x], &[]).remove(0);
+            let out = drive(&mut lim, RATE_44K, Planes::new(&[&x, &x]).unwrap(), &[]).remove(0);
             // The tone is a quarter of the rate, so its crest is a sample or a half between
             // two: the largest of the samples and of the pairs' quadrature (a quarter-rate
             // tone through two neighbours `a`, `b` peaks at `hypot(a, b)`).

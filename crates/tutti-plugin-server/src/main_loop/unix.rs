@@ -6,7 +6,8 @@
 //! loop's logic.
 
 use crate::transport::Transport;
-use tutti_plugin_types::{BridgeResult, FdId, Interest, MainThreadMarker, Ready, Wakeups};
+use tutti_plugin_ipc_ffi::{Interest, Ready, Watch};
+use tutti_plugin_types::{BridgeResult, MainThreadMarker, Wakeups};
 
 /// The platform's concrete listener and stream, not the crate's dispatch enum.
 ///
@@ -20,9 +21,8 @@ pub(crate) type Stream = interprocess::os::unix::uds_local_socket::Stream;
 /// allocates nothing.
 #[derive(Debug, Default)]
 pub(crate) struct Native {
-    poller: tutti_plugin_ipc_ffi::Poller,
-    asked: Vec<(i32, u8)>,
-    got: Vec<(i32, u8)>,
+    asked: Vec<Watch>,
+    got: Vec<Ready>,
 }
 
 /// How long a transport with no descriptor of its own (an in-memory one) is
@@ -64,17 +64,9 @@ impl Native {
         } else {
             let readable = transport.wait_readable(timeout.min(NO_DESCRIPTOR_SLICE))?;
             self.asked.clear();
-            self.asked.extend(
-                wakeups
-                    .watches()
-                    .iter()
-                    .map(|w| (w.fd.0, w.interest.bits())),
-            );
+            self.asked.extend_from_slice(wakeups.watches());
             tutti_plugin_ipc_ffi::poll_now(&self.asked, &mut self.got);
-            ready.extend(self.got.iter().map(|&(fd, bits)| Ready {
-                fd: FdId(fd),
-                events: Interest::from_bits(bits),
-            }));
+            ready.extend_from_slice(&self.got);
             readable
         };
         self.pump(main);
@@ -92,38 +84,28 @@ impl Native {
         use std::os::fd::AsFd;
 
         self.asked.clear();
-        self.asked.extend(
-            wakeups
-                .watches()
-                .iter()
-                .map(|w| (w.fd.0, w.interest.bits())),
-        );
+        self.asked.extend_from_slice(wakeups.watches());
         let bell = crate::bell::bell();
-        self.asked.push((bell.fd(), tutti_plugin_ipc_ffi::READ));
-        // Rounded up: a wait of 0.3 ms must not become a busy `poll(0)` loop.
-        let ms = i32::try_from(timeout.as_micros().div_ceil(1000)).unwrap_or(i32::MAX);
+        self.asked.push(Watch {
+            fd: bell.fd(),
+            interest: Interest::READ,
+        });
         let readable = loop {
-            match self
-                .poller
-                .wait(Some(stream.as_fd()), &self.asked, ms, &mut self.got)
-            {
+            match tutti_plugin_ipc_ffi::poll_wait(
+                Some(stream.as_fd()),
+                &self.asked,
+                Some(timeout),
+                &mut self.got,
+            ) {
                 // A signal during the wait is not a failure; wait again.
                 Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
                 other => break other?,
             }
         };
-        if self.got.iter().any(|&(fd, _)| fd == bell.fd()) {
+        if self.got.iter().any(|r| r.fd == bell.fd()) {
             bell.drain();
         }
-        ready.extend(
-            self.got
-                .iter()
-                .filter(|&&(fd, _)| fd != bell.fd())
-                .map(|&(fd, bits)| Ready {
-                    fd: FdId(fd),
-                    events: Interest::from_bits(bits),
-                }),
-        );
+        ready.extend(self.got.iter().filter(|r| r.fd != bell.fd()).copied());
         Ok(readable)
     }
 
@@ -142,10 +124,8 @@ impl Native {
 pub(crate) fn wait_readable(stream: &Stream, timeout: std::time::Duration) -> BridgeResult<bool> {
     use std::os::fd::AsFd;
 
-    // Rounded up: a wait of 0.3 ms must not become a busy `poll(0)` loop.
-    let ms = i32::try_from(timeout.as_micros().div_ceil(1000)).unwrap_or(i32::MAX);
     loop {
-        match tutti_plugin_ipc_ffi::wait_readable(stream.as_fd(), ms) {
+        match tutti_plugin_ipc_ffi::wait_readable(stream.as_fd(), Some(timeout)) {
             // A signal during the wait is not a failure; wait again.
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
             other => return Ok(other?),
@@ -172,10 +152,10 @@ pub(crate) fn wait_for_connection(listener: &Listener) -> BridgeResult<super::Wa
     /// How long each `poll` waits before host liveness is re-checked. Also the
     /// worst-case delay this adds to a connection arriving between two polls,
     /// so it stays well inside the host's handshake timeout.
-    const POLL_SLICE_MS: i32 = 50;
+    const POLL_SLICE: std::time::Duration = std::time::Duration::from_millis(50);
 
     loop {
-        match tutti_plugin_ipc_ffi::wait_readable(listener.as_fd(), POLL_SLICE_MS) {
+        match tutti_plugin_ipc_ffi::wait_readable(listener.as_fd(), Some(POLL_SLICE)) {
             // A signal during the wait is not a failure; poll again.
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
             Err(e) => return Err(e.into()),
@@ -202,7 +182,7 @@ pub(crate) fn wait_for_connection(listener: &Listener) -> BridgeResult<super::Wa
 /// The PID of the spawning host, sampled once at startup.
 ///
 /// Compared against rather than tested for pid 1 — see [`parent_is_alive`].
-static ORIGINAL_PPID: std::sync::OnceLock<i32> = std::sync::OnceLock::new();
+static ORIGINAL_PPID: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
 
 use super::HOST_PID_ENV;
 
@@ -234,7 +214,7 @@ pub(crate) fn record_parent_pid() {
         let _ = ORIGINAL_PPID.get_or_init(|| {
             std::env::var(HOST_PID_ENV)
                 .ok()
-                .and_then(|v| v.parse::<i32>().ok())
+                .and_then(|v| v.parse::<u32>().ok())
                 .filter(|&pid| pid > 1)
                 .unwrap_or_else(current_parent)
         });
@@ -265,9 +245,9 @@ fn parent_is_alive() -> bool {
     )
 }
 
-/// `getppid()`, as the `i32` PID the watchdog compares.
-fn current_parent() -> i32 {
-    i32::try_from(std::os::unix::process::parent_id()).expect("a PID fits an i32")
+/// `getppid()`, as the PID the watchdog compares.
+fn current_parent() -> u32 {
+    std::os::unix::process::parent_id()
 }
 
 /// The watchdog's whole decision, as a pure function of the two PIDs.
@@ -303,9 +283,9 @@ fn current_parent() -> i32 {
 /// toward waiting, which is the safe direction, and is the same tradeoff the
 /// Windows path makes.
 fn parent_is_alive_given(
-    original: Option<i32>,
-    current: i32,
-    exists: impl Fn(i32) -> bool,
+    original: Option<u32>,
+    current: u32,
+    exists: impl Fn(u32) -> bool,
 ) -> bool {
     // `> 1` still catches the plain-init case even if nothing recorded a PID
     // (a library embedder that never called `record_parent_pid`), which keeps
@@ -331,12 +311,12 @@ mod watchdog_tests {
 
     /// A liveness oracle that says everything is alive. Pairs with
     /// [`all_dead`] so each test states which world it is in.
-    fn all_alive(_pid: i32) -> bool {
+    fn all_alive(_pid: u32) -> bool {
         true
     }
 
     /// A liveness oracle that says nothing is alive.
-    fn all_dead(_pid: i32) -> bool {
+    fn all_dead(_pid: u32) -> bool {
         false
     }
 
@@ -444,8 +424,8 @@ mod watchdog_tests {
     /// dead-host oracle, only "still our parent" reads as alive.
     #[test]
     fn only_still_being_our_parent_survives_a_dead_host() {
-        for original in [2i32, 7, 1000, 32768, i32::MAX] {
-            for current in [2i32, 7, 1000, 32768, i32::MAX] {
+        for original in [2u32, 7, 1000, 32768, u32::MAX] {
+            for current in [2u32, 7, 1000, 32768, u32::MAX] {
                 assert_eq!(
                     parent_is_alive_given(Some(original), current, all_dead),
                     original == current,

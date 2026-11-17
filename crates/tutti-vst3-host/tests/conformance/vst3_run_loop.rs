@@ -14,7 +14,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use tutti_fixtures::main_thread;
 
-use tutti_plugin_types::{ContentScale, Interest, MainThreadMarker, Ready, Wakeups};
+use tutti_plugin_ipc_ffi::{Interest, Ready};
+use tutti_plugin_types::{ContentScale, MainThreadMarker, Wakeups};
 use tutti_vst3_ffi::{Module, Plugin};
 
 /// One pass of the run loop at an instant an hour on, so a timer the loop still

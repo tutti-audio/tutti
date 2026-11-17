@@ -1,0 +1,42 @@
+//! The session's MIDI ports on a build without the OS MIDI layer (feature
+//! `midi-hardware` off): none are ever opened, so each step over them does
+//! nothing. `midi_port` is this module's twin when the layer is built.
+
+use tutti_graph::NodeKey;
+
+use crate::midi::OutputTiming;
+
+/// The ports of a session with no OS MIDI layer: none.
+#[derive(Default)]
+pub(crate) struct Ports;
+
+impl Ports {
+    /// No input port has an ingest node.
+    pub(crate) fn input_nodes(&self) -> Vec<NodeKey> {
+        Vec::new()
+    }
+
+    /// No node is an input port's ingest node.
+    pub(crate) fn is_input_node(&self, _node: NodeKey) -> bool {
+        false
+    }
+
+    /// No output port to send to.
+    pub(crate) fn route(
+        &mut self,
+        _batch: &[(tutti_types::Frame, tutti_ump::Ump)],
+        _: Option<&OutputTiming>,
+    ) {
+    }
+
+    /// No output port to count it against.
+    pub(crate) fn refuse(&mut self, _n: u64) {}
+
+    /// No output tap to reopen: the graph is not edited.
+    pub(crate) fn reopen(&mut self, _: &mut crate::graph::Graph, _: Option<&OutputTiming>) -> bool {
+        false
+    }
+
+    /// No output tap to drain.
+    pub(crate) fn drain_outputs(&mut self, _: Option<&OutputTiming>) {}
+}

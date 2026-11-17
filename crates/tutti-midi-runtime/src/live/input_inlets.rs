@@ -56,10 +56,10 @@ use std::time::{Duration, Instant};
 
 use tutti_graph::{EventCapacity, EventInletNode, EventInletWriter, InletCounts, Losses, Stamp};
 use tutti_rt::{
-    ArcLend, Counter, CounterWriter, Gauge, GaugeWriter, PushError, Reader, Tally, counter, gauge,
-    tally,
+    Counter, CounterWriter, Gauge, GaugeWriter, Publisher, PushError, Reader, Tally, counter,
+    gauge, tally,
 };
-use tutti_types::{Moment, Resyncs, Seconds};
+use tutti_types::{Moment, Param64, Resyncs, Seconds};
 use tutti_ump::Ump;
 
 use crate::clock_map::{ClockMap, ClockReading, Observed};
@@ -97,11 +97,11 @@ pub struct InputInlets {
     /// The last id minted.
     last: AtomicU64,
     capacity: EventCapacity,
-    /// Nanoseconds: what each device's thread adds to an arrival's frame.
-    lead: Arc<AtomicU64>,
+    /// What each device's thread adds to an arrival's frame.
+    lead: Arc<Param64<Seconds>>,
     /// The engine's block clock, lent to each device's thread. `None` until
     /// the owner has an engine ([`set_clock`](Self::set_clock)).
-    clock: Arc<ArcLend<Option<ArrivalClock>>>,
+    clock: Publisher<Option<ArrivalClock>>,
 }
 
 impl std::fmt::Debug for InputInlets {
@@ -120,8 +120,8 @@ impl InputInlets {
         Arc::new(Self {
             last: AtomicU64::new(0),
             capacity,
-            lead: Arc::new(AtomicU64::new(nanos(lead))),
-            clock: Arc::new(ArcLend::new(None)),
+            lead: Arc::new(Param64::new(Seconds::new(lead.as_secs_f64()))),
+            clock: Publisher::new(None),
         })
     }
 
@@ -135,14 +135,7 @@ impl InputInlets {
     /// Sets the lead (see the module docs); each device's thread reads it on
     /// its next event.
     pub fn set_lead(&self, lead: Duration) {
-        self.lead.store(nanos(lead), Ordering::Relaxed);
-    }
-
-    /// Frees the clocks the devices' threads have let go of; control side, from
-    /// the owner's tick (a session's `Reclaim` phase). Returns how many are
-    /// still held.
-    pub fn reclaim(&self) -> usize {
-        self.clock.reclaim()
+        self.lead.store(Seconds::new(lead.as_secs_f64()));
     }
 
     /// Makes one input's inlet: the end its thread pushes through and the
@@ -176,8 +169,13 @@ impl InputInlets {
     }
 }
 
-fn nanos(d: Duration) -> u64 {
-    u64::try_from(d.as_nanos()).unwrap_or(u64::MAX)
+impl tutti_rt::Reclaim for InputInlets {
+    /// Frees the clocks the devices' threads have let go of; control side, from
+    /// the owner's tick (a session's `Reclaim` phase). Returns how many are
+    /// still held.
+    fn reclaim(&self) -> usize {
+        self.clock.reclaim()
+    }
 }
 
 /// The writing ends of an input's cells: [`DeviceWriters`], which the device's
@@ -292,7 +290,7 @@ pub struct DeviceInput {
     writer: EventInletWriter,
     counts: InletCounts,
     clock: Reader<Option<ArrivalClock>>,
-    lead: Arc<AtomicU64>,
+    lead: Arc<Param64<Seconds>>,
     /// The latest reading the map was fed.
     seen: Option<(Instant, Moment)>,
     map: Option<ClockMap>,
@@ -363,7 +361,7 @@ impl DeviceInput {
             self.seen = Some(reading);
             self.follow(reading);
         }
-        let lead = Duration::from_nanos(self.lead.load(Ordering::Relaxed));
+        let lead = Duration::try_from_secs_f64(self.lead.load().get()).unwrap_or(Duration::ZERO);
         let at = arrival.checked_add(lead).unwrap_or(arrival);
         self.map.as_ref()?.moment_at(at)
     }

@@ -10,7 +10,7 @@
 //! picks the format and where the bytes live.
 //!
 //! ```no_run
-//! # fn ex() -> Result<(), tutti_plugin_db::ScanBusy> {
+//! # fn ex() -> Result<(), tutti_plugin_db::ScanError> {
 //! use tutti_plugin::catalog::{Catalog, CatalogConfig, PersistError};
 //! use tutti_plugin_db::{PluginDb, ScanPoll};
 //! use std::path::PathBuf;
@@ -45,7 +45,7 @@
 //! three discovery operations, [`scan`](Catalog::scan),
 //! [`register`](Catalog::register) and [`measure`](Catalog::measure), each
 //! return a task ([`Scan`]) that works on a snapshot on its own thread and sends
-//! [`Delta`]s back; [`try_apply`](Catalog::try_apply) applies them on the owner
+//! [`RowChange`]s back; [`try_apply`](Catalog::try_apply) applies them on the owner
 //! and never blocks. The catalog is readable throughout. Dropping a task
 //! cancels it: the probe process in flight is killed and the drop returns
 //! without waiting for the probe's deadline. Nothing here runs on or reaches
@@ -58,12 +58,12 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError, RwLock};
 use tutti_plugin_db::{
-    BlacklistedFile, Delta, FileFacts, FilesError, PluginDb, PluginEntry, PluginFormat, Scan,
-    ScanBusy, ScanPoll, Scanner, format_from_path,
+    BlacklistedFile, FileFacts, FilesError, PluginDb, PluginEntry, RowChange, Scan, ScanBusy,
+    ScanError, ScanPoll, Scanner,
 };
 use tutti_plugin_ipc::CatalogConfig;
 use tutti_plugin_types::{BridgeError, BridgeResult};
-use tutti_plugin_types::{PluginDescriptor, PluginId};
+use tutti_plugin_types::{PluginDescriptor, PluginFormat, PluginId};
 use tutti_rt::LockExt;
 
 /// Why the persistence a catalog was given could not store the database.
@@ -165,7 +165,7 @@ fn blacklisted_rows(db: &PluginDb) -> PluginDb {
         .rows()
         .filter(|(_, row)| row.blacklist_reason().is_some())
     {
-        rows.apply(Delta::put(path, row.clone()));
+        rows.apply(RowChange::put(path, row.clone()));
     }
     rows
 }
@@ -331,23 +331,20 @@ impl Catalog {
     ///
     /// # Errors
     ///
-    /// [`ScanBusy`] while a task, or a recovery, is already using this
-    /// catalog's pedal: its worker has not exited yet.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the operating system cannot spawn the scanner thread.
+    /// [`ScanError::Busy`] while a task, or a recovery, is already using this
+    /// catalog's pedal: its worker has not exited yet. [`ScanError::Spawn`] when
+    /// the operating system cannot spawn the scanner thread.
     ///
     /// # Examples
     ///
     /// ```no_run
     /// # use tutti_plugin::catalog::Catalog;
     /// # use tutti_plugin_db::ScanPoll;
-    /// # fn ex(mut plugins: Catalog) -> Result<(), tutti_plugin_db::ScanBusy> {
+    /// # fn ex(mut plugins: Catalog) -> Result<(), tutti_plugin_db::ScanError> {
     /// let mut scan = plugins.scan()?;
     /// loop {
-    ///     while let Ok(progress) = scan.progress_rx.try_recv() {
-    ///         println!("{}/{}", progress.current, progress.total);
+    ///     for progress in scan.progress() {
+    ///         println!("{progress:?}");
     ///     }
     ///     match plugins.try_apply(&mut scan) {
     ///         ScanPoll::Running => std::thread::sleep(std::time::Duration::from_millis(10)),
@@ -358,7 +355,7 @@ impl Catalog {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn scan(&mut self) -> std::result::Result<Scan, ScanBusy> {
+    pub fn scan(&mut self) -> std::result::Result<Scan, ScanError> {
         self.finish_pending_save();
         let save = self.autosave();
         self.change(|db, scanner, config| scanner.spawn(db, &config.scan_dirs, save))
@@ -367,7 +364,7 @@ impl Catalog {
     /// Probes the file at `path` on a background thread, whether or not the
     /// catalog holds a current row for it, and records what it holds, as a scan
     /// would; the task is the one [`scan`](Self::scan) returns, so
-    /// [`try_apply`](Self::try_apply) applies its delta. The way to add a plugin
+    /// [`try_apply`](Self::try_apply) applies its change. The way to add a plugin
     /// outside the scanned directories. The file is probed as a scan probes it,
     /// and a plugin that crashes, hangs or will not load is **blacklisted**, as in
     /// a scan; a failure that says nothing about the plugin (the probe binary is
@@ -382,21 +379,17 @@ impl Catalog {
     ///
     /// [`FilesError::Missing`] when `path` is not a file (checked first),
     /// [`FilesError::UnrecognizedFormat`] when its extension names no plugin
-    /// format, and [`FilesError::Busy`] as for [`scan`](Self::scan). A file the
+    /// format, and [`FilesError::Scan`] as for [`scan`](Self::scan). A file the
     /// probe fails on is not an error of the call: the result's
     /// [`failures`](tutti_plugin_db::ScanResult::failures) name it and say why
     /// ([`ProbeFailureKind`](tutti_plugin_db::ProbeFailureKind)), a missing
     /// `plugin-probe` among them.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the operating system cannot spawn the scanner thread.
     pub fn register(&mut self, path: impl AsRef<Path>) -> std::result::Result<Scan, FilesError> {
         let path = path.as_ref();
         if !path.exists() {
             return Err(FilesError::Missing(path.to_path_buf()));
         }
-        let format = format_from_path(path)
+        let format = PluginFormat::from_path(path)
             .ok_or_else(|| FilesError::UnrecognizedFormat(path.to_path_buf()))?;
         let probing = Probing {
             fallback: false,
@@ -637,7 +630,7 @@ impl Catalog {
     pub fn remove(&mut self, path: impl AsRef<Path>) {
         let path = key(path.as_ref());
         self.forget_in_pedal(&path);
-        self.change(|db, _, _| db.apply(Delta::remove(path)));
+        self.change(|db, _, _| db.apply(RowChange::remove(path)));
     }
 
     /// Measures the file `plugin` names, as the format `plugin` has, on a
@@ -645,7 +638,7 @@ impl Catalog {
     /// plugins reports, against what it renders, in each descriptor's
     /// [`measured`](PluginDescriptor::measured). The row is replaced, so the file
     /// is probed again too. The task is the one [`scan`](Self::scan) returns:
-    /// [`try_apply`](Self::try_apply) applies its delta.
+    /// [`try_apply`](Self::try_apply) applies its change.
     ///
     /// `state` is a file of the bytes the plugin's own `save_state` wrote: the
     /// plugin is put in that state before it is measured, so the figure is of that
@@ -664,10 +657,6 @@ impl Catalog {
     ///
     /// [`FilesError`] as for [`register`](Self::register), the format being the
     /// ref's.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the operating system cannot spawn the scanner thread.
     pub fn measure(
         &mut self,
         plugin: &PluginRef,
@@ -681,11 +670,11 @@ impl Catalog {
         self.spawn_file(probing, plugin.path(), plugin.format())
     }
 
-    /// Applies a delta the caller built to the catalog, such as a
-    /// [`Delta::put`] of a row from its own source. A task's deltas go through
+    /// Applies a change the caller built to the catalog, such as a
+    /// [`RowChange::put`] of a row from its own source. A task's changes go through
     /// [`try_apply`](Self::try_apply). Call [`save`](Self::save) to persist.
-    pub fn apply(&mut self, delta: Delta) {
-        self.change(|db, _, _| db.apply(delta));
+    pub fn apply(&mut self, change: RowChange) {
+        self.change(|db, _, _| db.apply(change));
     }
 
     /// Writes the in-memory catalog through the catalog's persistence.
@@ -753,7 +742,7 @@ mod tests {
     use super::*;
     use crate::host::loadable::BindError;
     use crate::host::plugin::Plugin;
-    use tutti_plugin_db::{FileRow, PluginFormat, ScanPoll, ScanResult};
+    use tutti_plugin_db::{FileRow, ScanPoll, ScanResult};
     use tutti_types::SampleRate;
 
     /// Runs a scan to its end on the calling thread, applying as it goes.
@@ -777,7 +766,7 @@ mod tests {
     fn catalog_with(path: &Path, row: FileRow) -> Catalog {
         let mut db = PluginDb::new();
         // Rows are keyed by canonical path, as a scan keys them.
-        db.apply(Delta::put(key(path), row));
+        db.apply(RowChange::put(key(path), row));
         Catalog::new(
             db,
             CatalogConfig::new("/nonexistent", crate::catalog::NO_SCAN_DIRS),
@@ -790,7 +779,7 @@ mod tests {
     /// with their own ids, and a ref with no id is the first.
     #[test]
     fn a_bundle_of_two_plugins_is_two_refs_and_info_finds_each() {
-        use tutti_plugin_db::{FileFacts, PluginFormat};
+        use tutti_plugin_db::FileFacts;
         use tutti_plugin_types::{PluginClass, PluginDescriptor};
         let path = std::env::temp_dir().join("tutti-two-plugins.clap");
         std::fs::write(&path, b"x").unwrap();
@@ -865,7 +854,9 @@ mod tests {
         // Record the blacklist against a *different* mtime than the file has,
         // which is what a reinstall produces.
         let mut row = blacklisted_row(&path, "crashed once");
-        row.mtime = row.mtime.map(|t| t.saturating_sub(1_000));
+        row.mtime = row.mtime.and_then(|t| {
+            tutti_plugin_db::Mtime::new(t.get() - std::time::Duration::from_secs(1_000))
+        });
         let plugins = catalog_with(&path, row);
 
         plugins
@@ -909,10 +900,12 @@ mod tests {
 
         // Now the vendor ships a fix. Backdating the *record* rather than
         // rewriting the file is what the sibling test does, and for a reason:
-        // the modification time is second-resolution, so a rewrite inside
-        // the same second leaves the times equal and the test proves nothing.
+        // a rewrite inside the filesystem's timestamp granularity leaves the
+        // times equal and the test proves nothing.
         let mut stale = blacklisted_row(&path, "SIGSEGV during probe");
-        stale.mtime = stale.mtime.map(|t| t.saturating_sub(1_000));
+        stale.mtime = stale.mtime.and_then(|t| {
+            tutti_plugin_db::Mtime::new(t.get() - std::time::Duration::from_secs(1_000))
+        });
         let plugins = catalog_with(&path, stale);
 
         assert!(
@@ -1057,7 +1050,7 @@ mod tests {
         let mut db = PluginDb::new();
         for path in [&b, &a] {
             std::fs::write(path, b"x").unwrap();
-            db.apply(Delta::put(
+            db.apply(RowChange::put(
                 key(path),
                 FileRow::probed(
                     PluginFormat::Clap,
@@ -1100,7 +1093,7 @@ mod tests {
 
         let mut db = PluginDb::new();
         for path in [&here, &gone] {
-            db.apply(Delta::put(
+            db.apply(RowChange::put(
                 path,
                 FileRow::probed(
                     PluginFormat::Vst3,

@@ -3,14 +3,12 @@
 //!
 //! The pieces, from pure to stateful:
 //!
-//! - [`discover`] walks directories and returns plugin paths. It touches no
-//!   database.
-//! - [`classify`], [`needs_rescan`] and the rest of the decisions are pure
-//!   functions of a [`FileFacts`] read once at the edge and a [`FileRow`].
+//! - [`FileFacts`] is what the scan reads once from disk for a candidate; the
+//!   decisions of what to probe are pure functions of it and a [`FileRow`].
 //! - [`PluginDb`] is a plain table, `path -> FileRow` (modification time, then
 //!   either the plugins the file holds or a blacklist). The file is the unit
 //!   because a crash blacklists a file before any plugin id is known. A
-//!   [`Delta`] replaces or drops one row, and [`PluginDb::apply`] is the only
+//!   [`RowChange`] replaces or drops one row, and [`PluginDb::apply`] is the only
 //!   code that changes the table. With feature `serde` it is `Serialize` and
 //!   `Deserialize` as a versioned record: the app picks the file format and where
 //!   it lives, and a database of another version, or a path listed twice, does
@@ -18,7 +16,7 @@
 //! - [`Scanner`] probes the files that are new or changed since their row was
 //!   stamped, through the probe it is given (the host supplies an out-of-process
 //!   one). A scan runs on a worker over a snapshot of the table and sends
-//!   deltas; the owner applies them with [`Scan::poll`], so the table stays
+//!   changes; the owner applies them with [`Scan::poll`], so the table stays
 //!   readable for the whole scan. A sentinel file (the dead-man's pedal)
 //!   outlives a host that dies mid-probe and blacklists the culprit on the next
 //!   run.
@@ -28,8 +26,8 @@
 #![forbid(unsafe_code)]
 
 mod facts;
-mod format;
 mod fs;
+mod mtime;
 mod os_path;
 mod pedal;
 mod scanner;
@@ -37,18 +35,13 @@ mod table;
 #[cfg(feature = "serde")]
 mod wire;
 
-pub use facts::{
-    FileFacts, ScanDecision, classify, is_blacklisted_and_unchanged, missing, needs_rescan,
-};
-pub use format::{
-    AuComponentType, ClapFeature, PluginClass, PluginDescriptor, PluginFormat, PluginRole,
-    Vst2Category, Vst3PlugType, Vst3SubCategories,
-};
-pub use fs::{canonical_path, discover, format_from_path};
+pub use facts::FileFacts;
+pub use fs::canonical_path;
+pub use mtime::{BeforeEpoch, Mtime};
 pub use scanner::{
-    Cancel, FileFailure, FilesError, ProbeFailure, ProbeFailureKind, Scan, ScanBusy, ScanPhase,
-    ScanPoll, ScanProgress, ScanResult, Scanner, probe_plugin_fallback,
+    FileFailure, FilesError, ProbeFailure, ProbeFailureKind, Scan, ScanBusy, ScanError, ScanPoll,
+    ScanProgress, ScanResult, Scanner, probe_plugin_fallback,
 };
-pub use table::{BlacklistedFile, Delta, FileRow, FileState, PluginDb, PluginEntry};
+pub use table::{BlacklistedFile, FileRow, FileState, PluginDb, PluginEntry, RowChange};
 #[cfg(feature = "serde")]
 pub use wire::{DB_VERSION, InvalidDb};
