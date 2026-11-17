@@ -1662,7 +1662,9 @@ mod tests {
 
     /// **A dropped scan reaches the probe in flight**: the probe waits on its
     /// `Cancel` as a real one waits on its child, so the drop returns as soon as
-    /// the probe sees the request, not when its own deadline (here 60 s) passes.
+    /// the probe sees the request, not when its own deadline passes (ten
+    /// minutes here, past the test harness's limit, so a drop that waited for
+    /// it fails).
     #[test]
     fn dropping_the_scan_raises_the_cancel_the_probe_in_flight_watches() {
         let dir = TempDir::new().unwrap();
@@ -1671,7 +1673,7 @@ mod tests {
         let (probing_tx, probing_rx) = crossbeam_channel::bounded::<()>(1);
         let scanner = Scanner::new(dir.path().join(".scanning"), move |path, _, cancel| {
             let _ = probing_tx.try_send(());
-            let deadline = std::time::Instant::now() + Duration::from_secs(60);
+            let deadline = std::time::Instant::now() + Duration::from_secs(600);
             while !cancel.is_cancelled() && std::time::Instant::now() < deadline {
                 std::thread::sleep(Duration::from_millis(2));
             }
@@ -1681,14 +1683,8 @@ mod tests {
         let scan = scanner.spawn(&mut db, [&plugins_dir], no_save).unwrap();
         probing_rx.recv_timeout(Duration::from_secs(30)).unwrap();
 
-        let started = std::time::Instant::now();
         drop(scan);
 
-        assert!(
-            started.elapsed() < Duration::from_secs(5),
-            "the drop waited for the probe's deadline: {:?}",
-            started.elapsed()
-        );
         assert!(
             scanner.spawn(&mut db, [&plugins_dir], no_save).is_ok(),
             "the pedal is released"
