@@ -127,3 +127,24 @@ fn notifications_reach_the_hub_when_a_virtual_source_comes_first() {
     }
     drop(source);
 }
+
+/// **A hub whose loop has no source looks once per `IDLE_LOOK`**: a run shorter
+/// than `IDLE_RETURN` is idle, a look is due an interval after the last, and a
+/// run that waited starts the interval over.
+#[test]
+fn an_idle_hub_looks_once_per_interval_and_a_waiting_loop_restarts_it() {
+    let t0 = Instant::now();
+    assert!(IdleLooks::is_idle(IDLE_RETURN - Duration::from_millis(1)));
+    assert!(!IdleLooks::is_idle(IDLE_RETURN));
+    let mut looks = IdleLooks::new(t0);
+    assert!(!looks.look_due(t0 + IDLE_LOOK - Duration::from_millis(1)));
+    assert!(looks.look_due(t0 + IDLE_LOOK));
+    assert!(
+        !looks.look_due(t0 + IDLE_LOOK + IDLE_REST),
+        "taken at the last look"
+    );
+    assert!(looks.look_due(t0 + IDLE_LOOK * 2));
+    looks.waited(t0 + IDLE_LOOK * 2 + Duration::from_millis(10));
+    assert!(!looks.look_due(t0 + IDLE_LOOK * 3));
+    assert!(looks.look_due(t0 + IDLE_LOOK * 3 + Duration::from_millis(10)));
+}

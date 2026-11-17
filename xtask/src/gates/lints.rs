@@ -14,32 +14,7 @@ use super::{Report, Tree};
 
 /// `(member path, why it does not take the workspace lints yet)`. A reason starts
 /// with `temporary:` and names the owner.
-pub(super) const UNLINTED: &[(&str, &str)] = &[
-    (
-        "testing/tutti-clap-test-plugin",
-        "temporary: plugin lane adds [lints] (its task #147)",
-    ),
-    (
-        "testing/tutti-plugin-contract",
-        "temporary: plugin lane adds [lints] (its task #147)",
-    ),
-    (
-        "testing/tutti-shared-plugin",
-        "temporary: plugin lane adds [lints] (its task #147)",
-    ),
-    (
-        "testing/tutti-shared-plugin-vst3-cpp",
-        "temporary: plugin lane adds [lints] (its task #147)",
-    ),
-    (
-        "testing/tutti-vst2-shell-plugin",
-        "temporary: plugin lane adds [lints] (its task #147)",
-    ),
-    (
-        "testing/tutti-vst2-test-plugin",
-        "temporary: plugin lane adds [lints] (its task #147)",
-    ),
-];
+pub(super) const UNLINTED: &[(&str, &str)] = &[];
 
 const LINT: &str = "missing_debug_implementations";
 

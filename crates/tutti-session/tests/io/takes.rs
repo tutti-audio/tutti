@@ -149,6 +149,12 @@ impl Rig {
     }
 }
 
+fn started(events: &[SessionEvent]) -> bool {
+    events
+        .iter()
+        .any(|e| matches!(e, SessionEvent::Take(TakeEvent::Started { .. })))
+}
+
 fn finished(events: &[SessionEvent]) -> bool {
     events.iter().any(|e| {
         matches!(
@@ -357,10 +363,10 @@ fn started_then_finished_once() {
         .expect("armed");
     let id = take.id();
     rig.run_until(finished);
-    // More updates see nothing more of it.
+    // `Finished` is the job's end: the pump has returned, and what it sent
+    // before landed first. More updates see nothing more of it.
     for _ in 0..8 {
         rig.step(BLOCK);
-        std::thread::sleep(Duration::from_millis(2));
     }
     let takes = rig.takes();
     assert_eq!(takes.len(), 2, "{takes:?}");
@@ -398,8 +404,8 @@ fn an_open_ended_take_is_finished_by_its_handle() {
     }
     let rolling = rolling.unwrap();
     let first = rolling.placement().first_frame();
-    rig.step(BLOCK);
-    std::thread::sleep(Duration::from_millis(20));
+    // `Started` lands once the pump has written the take's first frame.
+    rig.run_until(started);
     let done = rolling.finish().expect("closed cleanly");
     assert_eq!(done.placement().first_frame(), first);
     assert!(done.frames().get() > 0);
@@ -426,17 +432,13 @@ fn a_take_ends_when_its_input_is_removed() {
         .session
         .record(&rig.input, Punch::now(), TakeTarget::wav(path.clone()))
         .expect("armed");
-    rig.run_until(|events| {
-        events
-            .iter()
-            .any(|e| matches!(e, SessionEvent::Take(TakeEvent::Started { .. })))
-    });
+    rig.run_until(started);
     rig.step(BLOCK);
     rig.session.remove(rig.input.node()).unwrap();
     rig.run_until(finished);
+    // `Finished` is the job's end: more updates see nothing more of it.
     for _ in 0..8 {
         rig.step(BLOCK);
-        std::thread::sleep(Duration::from_millis(2));
     }
     let takes = rig.takes();
     assert_eq!(takes.len(), 2, "started, then finished once: {takes:?}");

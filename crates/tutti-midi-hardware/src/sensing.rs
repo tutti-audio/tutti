@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 use tutti_graph::Offset;
 use tutti_midi_runtime::ActiveSensingSender;
 use tutti_rt::{StopToken, ThreadHandle, spawn_named};
-use tutti_ump::{MidiGroup, Protocol};
+use tutti_ump::{MidiGroup, Protocol, Ump};
 
 use crate::endpoints::DeviceOut;
 
@@ -24,10 +24,50 @@ use crate::endpoints::DeviceOut;
 /// its stop token, so it ends at once unless the sink is stuck in a send.
 const STOP_BOUND: Duration = Duration::from_secs(1);
 
+/// The schedule of one output's Active Sensing and the Protocol gate on it:
+/// every method that depends on the time takes it as `now`.
+pub(crate) struct Pulse {
+    schedule: Mutex<ActiveSensingSender>,
+    midi1: AtomicBool,
+}
+
+impl Pulse {
+    /// A pulse for an output in `protocol` that has been silent since `now`.
+    pub(crate) fn new(protocol: Protocol, now: Instant) -> Self {
+        Self {
+            schedule: Mutex::new(ActiveSensingSender::new(MidiGroup::FIRST, now)),
+            midi1: AtomicBool::new(protocol == Protocol::Midi1),
+        }
+    }
+
+    /// The output sent something at `now`: it is not silent.
+    pub(crate) fn sent(&self, now: Instant) {
+        lock(&self.schedule).sent(now);
+    }
+
+    /// The output's Protocol is `protocol` from now on.
+    pub(crate) fn follow(&self, protocol: Protocol) {
+        self.midi1
+            .store(protocol == Protocol::Midi1, Ordering::Relaxed);
+    }
+
+    /// When [`due`](Self::due) next has a message.
+    pub(crate) fn deadline(&self) -> Instant {
+        lock(&self.schedule).deadline()
+    }
+
+    /// The Active Sensing to send at `now`: due after an interval of silence,
+    /// and only in the MIDI 1.0 Protocol. A due message in the MIDI 2.0
+    /// Protocol is consumed, so the schedule moves on.
+    pub(crate) fn due(&self, now: Instant) -> Option<Ump> {
+        let due = lock(&self.schedule).poll(now);
+        due.filter(|_| self.midi1.load(Ordering::Relaxed))
+    }
+}
+
 /// The running heartbeat. Dropping it stops the thread and waits for it.
 pub(crate) struct Heartbeat {
-    schedule: Arc<Mutex<ActiveSensingSender>>,
-    midi1: Arc<AtomicBool>,
+    pulse: Arc<Pulse>,
     thread: Option<ThreadHandle<()>>,
 }
 
@@ -38,32 +78,25 @@ impl Heartbeat {
     ///
     /// The OS's error when the thread cannot start.
     pub(crate) fn start(sink: Arc<dyn DeviceOut>, protocol: Protocol) -> std::io::Result<Self> {
-        let schedule = Arc::new(Mutex::new(ActiveSensingSender::new(
-            MidiGroup::FIRST,
-            Instant::now(),
-        )));
-        let midi1 = Arc::new(AtomicBool::new(protocol == Protocol::Midi1));
+        let pulse = Arc::new(Pulse::new(protocol, Instant::now()));
         let thread = spawn_named("tutti-midi-sense", None, {
-            let schedule = Arc::clone(&schedule);
-            let midi1 = Arc::clone(&midi1);
-            move |stop| beat(&sink, &schedule, &midi1, stop)
+            let pulse = Arc::clone(&pulse);
+            move |stop| beat(&sink, &pulse, stop)
         })?;
         Ok(Self {
-            schedule,
-            midi1,
+            pulse,
             thread: Some(thread),
         })
     }
 
     /// The output sent something now: it is not silent.
     pub(crate) fn sent(&self) {
-        lock(&self.schedule).sent(Instant::now());
+        self.pulse.sent(Instant::now());
     }
 
     /// The output's Protocol is `protocol` from now on.
     pub(crate) fn follow(&self, protocol: Protocol) {
-        self.midi1
-            .store(protocol == Protocol::Midi1, Ordering::Relaxed);
+        self.pulse.follow(protocol);
     }
 }
 
@@ -90,24 +123,17 @@ fn lock(schedule: &Mutex<ActiveSensingSender>) -> MutexGuard<'_, ActiveSensingSe
 
 /// Sleeps to the schedule's deadline, sends what is due, and repeats until
 /// `stop` is requested.
-fn beat(
-    sink: &Arc<dyn DeviceOut>,
-    schedule: &Mutex<ActiveSensingSender>,
-    midi1: &AtomicBool,
-    stop: &StopToken,
-) {
+fn beat(sink: &Arc<dyn DeviceOut>, pulse: &Pulse, stop: &StopToken) {
     loop {
-        let wait = lock(schedule)
-            .deadline()
-            .saturating_duration_since(Instant::now());
+        let wait = pulse.deadline().saturating_duration_since(Instant::now());
         if stop.wait(wait) {
             return;
         }
-        let due = lock(schedule).poll(Instant::now());
-        if let Some(ump) = due
-            && midi1.load(Ordering::Relaxed)
-        {
+        if let Some(ump) = pulse.due(Instant::now()) {
             let _ = sink.queue(&[(Offset::ZERO, ump)]);
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

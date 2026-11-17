@@ -219,6 +219,7 @@
 
 // No `///` on these: a doc comment on a `pub mod` shadows the module's own
 // `//!` and re-resolves its intra-doc links in this scope.
+mod answer;
 mod backend;
 // Compiled everywhere so its tests run on every platform; only the native
 // backends (ALSA, CoreMIDI) convert an OS block, so it is dead where the stub
@@ -265,6 +266,7 @@ mod wire;
 #[cfg(any(test, feature = "testing"))]
 pub mod test_support;
 
+pub use answer::{Answer, ReportEnd};
 pub use capability::{OsEndpoint, UmpCapability};
 pub use ci::{CiChange, CiPeerInfo, PeerId};
 pub use devices::{
@@ -274,10 +276,10 @@ pub use devices::{
 pub use endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
 pub use error::{Error, NotFound, Result};
 pub use port::{Delivered, HardwareMidiInputs, InputProducerHandle, PortInfo, StreamDrain};
-pub use process::{ProcessChange, ReportAsk, ReportError, ReportPeer};
+pub use process::{ProcessChange, ReportAsk, ReportError, Reporter};
 pub use profiles::{
-    ChannelCount, ChannelProfile, ListedProfile, NotAChannelCount, PeerProfiles, ProfileError,
-    ProfileSwitch, ProfilesChange, Whole, WholeProfile,
+    ChannelCount, ChannelSwitcher, NotAChannelCount, PeerProfiles, ProfileError, ProfileSwitch,
+    ProfilesChange, Switcher, Whole, WholeSwitcher,
 };
 pub use properties::{PropertyAsk, PropertyCall, PropertyChange, PropertyError, PropertyPeer};
 pub use session::{Connected, DeviceQuery, MidiHardwareOptions, MidiSession, Polled, Presented};

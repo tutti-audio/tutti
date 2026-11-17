@@ -20,6 +20,7 @@ mod parallel;
 mod parked_poll;
 mod pool_spawn_refusal;
 mod root_fade;
+mod rt_log;
 mod rt_no_alloc;
 mod tap;
 mod tap_audio_in;

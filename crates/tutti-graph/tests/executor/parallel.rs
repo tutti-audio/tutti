@@ -644,19 +644,27 @@ fn a_panic_on_a_worker_reaches_the_caller() {
 /// cannot fail spuriously.)
 #[test]
 fn the_executor_waits_by_its_pools_budget() {
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
     use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant};
     use tutti_graph::{BlockWaits, Pool};
 
+    /// The order the events happened in: each event takes the next number.
     #[derive(Default)]
     struct Times {
         started: AtomicBool,
-        slow_done: Mutex<Option<Instant>>,
-        helper_left: Mutex<Option<Instant>>,
+        next: AtomicU64,
+        slow_done: Mutex<Option<u64>>,
+        helper_left: Mutex<Option<u64>>,
+    }
+    impl Times {
+        fn tick(&self) -> u64 {
+            self.next.fetch_add(1, Ordering::SeqCst)
+        }
     }
 
-    /// Sleeps 50 ms per block, marking when it started and finished.
+    /// Sleeps 50 ms per block (simulated work), marking when it started and
+    /// finished.
     struct Slow(Arc<Times>);
     impl Node for Slow {
         fn shape(&self) -> Shape {
@@ -666,7 +674,7 @@ fn the_executor_waits_by_its_pools_budget() {
         fn process(&mut self, _: &Cx<'_>, _: Io<'_>) -> Status {
             self.0.started.store(true, Ordering::Release);
             std::thread::sleep(Duration::from_millis(50));
-            *self.0.slow_done.lock().expect("times") = Some(Instant::now());
+            *self.0.slow_done.lock().expect("times") = Some(self.0.tick());
             Status::Silent
         }
         fn reset(&mut self) {}
@@ -692,7 +700,7 @@ fn the_executor_waits_by_its_pools_budget() {
                     std::hint::spin_loop();
                 }
                 job(w);
-                *self.times.helper_left.lock().expect("times") = Some(Instant::now());
+                *self.times.helper_left.lock().expect("times") = Some(self.times.tick());
             });
         }
         fn waits(&self) -> BlockWaits {
@@ -766,8 +774,7 @@ fn the_executor_waits_by_its_pools_budget() {
     if let Some(left) = helper_left {
         assert!(
             left >= slow_done,
-            "the helper left {:?} before the slow task finished",
-            slow_done - left
+            "the helper left (event {left}) before the slow task finished (event {slow_done})"
         );
     }
 }

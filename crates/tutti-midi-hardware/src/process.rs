@@ -1,6 +1,6 @@
 //! The Process Inquiry of a MIDI-CI peer, as the session drives it: the peers
-//! that can be asked for a MIDI Message Report ([`ReportPeer`]), the request
-//! ([`ReportAsk`]) and what happened ([`ProcessChange`]).
+//! that can be asked for a MIDI Message Report ([`Reporter`]), the request
+//! ([`ReportAsk`]) and what the peer's Process Inquiry did ([`ProcessChange`]).
 //!
 //! The session is the Initiator (M2-101 §9): it asks every peer that declared
 //! Process Inquiry for its capabilities when it is found, and lists those whose
@@ -9,29 +9,26 @@
 //! answered that it lacks the feature. The handle is a snapshot: the peer may be
 //! lost before the request is sent, and that is refused ([`ReportError::NoSuchPeer`]).
 //!
-//! A report is a Reply, the MIDI messages themselves, and an End. The session
-//! tells of the first and the last ([`ProcessChange::ReportBegan`],
-//! [`ProcessChange::ReportEnded`]); the messages between them arrive on the
-//! input as the MIDI they are, in order (§9.8.2), and reach the graph like any
-//! other message of the device.
+//! A report is a Reply, the MIDI messages themselves, and an End. The End is an
+//! [`Answer::Report`](crate::Answer::Report); the messages between the Reply and
+//! it arrive on the input as the MIDI they are, in order (§9.8.2), and reach the
+//! graph like any other message of the device.
 
 use std::sync::Arc;
 
-use tutti_midi_device::{
-    DeviceId, Muid, Nak, ProcessError, ProcessFeatures, ReportRequest, ReportScope,
-};
+use tutti_midi_device::{DeviceId, Muid, ProcessFeatures, ReportRequest};
 use tutti_ump::MidiGroup;
 
 /// A peer that declared Process Inquiry and answered that it supports MIDI
 /// Message Report: the handle a [`ReportAsk`] is made from.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ReportPeer {
+pub struct Reporter {
     pub(crate) device: DeviceId,
     pub(crate) group: MidiGroup,
     pub(crate) muid: Muid,
 }
 
-impl ReportPeer {
+impl Reporter {
     /// The input device the peer was found on.
     #[must_use]
     pub const fn device(&self) -> &DeviceId {
@@ -62,11 +59,11 @@ impl ReportPeer {
 }
 
 /// A request for a MIDI Message Report from one peer. Made only from a
-/// [`ReportPeer`], and it names the input device that handle was read from, so it
+/// [`Reporter`], and it names the input device that handle was read from, so it
 /// cannot be sent to another.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReportAsk {
-    pub(crate) peer: ReportPeer,
+    pub(crate) peer: Reporter,
     pub(crate) request: ReportRequest,
 }
 
@@ -93,8 +90,11 @@ impl ReportAsk {
     ///
     /// [`ReportError::NoSuchPeer`] when the peer is gone or no longer supports
     /// MIDI Message Report.
-    pub fn check(&self, peers: &[ReportPeer]) -> Result<(), ReportError> {
-        if peers.contains(&self.peer) {
+    pub fn check<'a>(
+        &self,
+        peers: impl IntoIterator<Item = &'a Reporter>,
+    ) -> Result<(), ReportError> {
+        if peers.into_iter().any(|peer| *peer == self.peer) {
             Ok(())
         } else {
             Err(ReportError::NoSuchPeer)
@@ -103,7 +103,7 @@ impl ReportAsk {
 }
 
 /// The peers of one input that can be asked for a report.
-pub(crate) type Snapshot = Arc<[ReportPeer]>;
+pub(crate) type Snapshot = Arc<[Reporter]>;
 
 /// A change in the Process Inquiry of one peer, once each from
 /// [`MidiSession::poll`](crate::MidiSession::poll); the [`PeerId`](crate::PeerId)
@@ -119,27 +119,6 @@ pub enum ProcessChange {
     CapabilitiesTimedOut,
     /// The peer NAKed the capabilities inquiry: it has no Process Inquiry.
     CapabilitiesRefused,
-    /// The peer's Reply to MIDI Message Report arrived, with the kinds of
-    /// message it will send, of those asked: the messages of the report follow
-    /// on the input.
-    ReportBegan(ReportScope),
-    /// The peer's End of MIDI Message Report arrived: the report is complete.
-    ReportEnded,
-    /// The peer NAKed the report (§9.8.1), which ends it, complete or not. The
-    /// NAK's status says whether to retry.
-    ReportRefused(Nak),
-    /// The peer did not finish the report in time.
-    ReportTimedOut,
-    /// A [`ReportAsk`] a call accepted was not queued: the peer went between the
-    /// call and the next poll. A call that is refused at once
-    /// (`ReportAsk::check`) never gets here.
-    NotQueued(ReportError),
-    /// A [`ReportAsk`] was not sent: one was already waiting, or the peer has since
-    /// said it does not support MIDI Message Report.
-    NotSent(ProcessError),
-    /// A [`ReportAsk`] was not sent: the peer was lost between the request and
-    /// the poll that would have sent it.
-    PeerGone,
     /// The peer is gone (lost, or MIDI-CI ended): its Initiator went with it.
     Dropped,
 }

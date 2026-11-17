@@ -46,7 +46,7 @@ use tutti_ump::{Message, Voice2};
 
 /// Every phase at `now`: one update, at a time the test picks.
 #[cfg(feature = "midi-hardware")]
-fn update_at(s: &mut Session, now: Instant) -> Vec<SessionEvent> {
+pub(crate) fn update_at(s: &mut Session, now: Instant) -> Vec<SessionEvent> {
     let mut out = Vec::new();
     for &phase in PHASES {
         s.run_phase(phase, PhaseCx::at(now), &mut out);
@@ -595,7 +595,7 @@ fn hot_plug_session() -> (Session, tutti_midi_hardware::test_support::FakeCounte
 
 /// As [`hot_plug_session`], with MIDI-CI under `identity` from the start.
 #[cfg(feature = "midi-hardware")]
-fn hot_plug_session_ci(
+pub(crate) fn hot_plug_session_ci(
     identity: tutti_ump::DeviceIdentity,
 ) -> (Session, tutti_midi_hardware::test_support::FakeCounters) {
     let (mut s, fake) = hot_plug_session();
@@ -636,7 +636,7 @@ fn device_events(events: &[SessionEvent]) -> Vec<(&'static str, String)> {
 }
 
 #[cfg(feature = "midi-hardware")]
-fn plug(
+pub(crate) fn plug(
     fake: &tutti_midi_hardware::test_support::FakeCounters,
     raw: u64,
     name: &str,
@@ -699,7 +699,7 @@ fn keyboards() -> (
 /// its key), whole, and updates: the entries load and their ingest nodes and
 /// inlets are in the plan.
 #[cfg(feature = "midi-hardware")]
-fn connect(s: &mut Session, names: &[&'static str]) {
+pub(crate) fn connect(s: &mut Session, names: &[&'static str]) {
     let list = s.midi().devices();
     let ports: Vec<_> = names
         .iter()
@@ -1104,21 +1104,22 @@ fn a_midi_ci_peer_that_answers_discovery_is_in_the_ports_info() {
 /// Initiator** (M2-101 section 7): a peer whose Discovery Reply declares Profile
 /// Configuration is sent a Profile Inquiry by the session's tick; its Replies
 /// make the Profiles the port's info lists (`MidiReport::CiProfiles`, `Known`
-/// at the final Reply on the Function Block); a request made from a listed
-/// handle with `MidiInput::set_profile` is sent as a Set Profile On (Sub-ID#2
-/// `0x22`) with the Channel count asked, and the peer's Profile Enabled Report
-/// resolves it and updates the list. Once the port's entry is released, the
-/// same request fails at the call with `PeerError::Released`.
+/// at the final Reply on the Function Block); `enable` of a listed handle is
+/// sent as a Set Profile On (Sub-ID#2 `0x22`) with the Channel count asked, and
+/// the peer's Profile Enabled Report lands the job with `Enabled` and updates
+/// the list. A request of a Profile the peer took off, of a lost port or of a
+/// released one fails at the call.
 #[cfg(feature = "midi-hardware")]
 #[test]
 fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
     use tutti_midi_device::{
         BlockName, CI_VERSION, CiCategories, CiDeviceId, CiHeader, CiMessage, Decoded,
-        DiscoveryData, MaxSysexSize, Muid, Outcome, ProfileChannels, ProfileId, ProfileLists,
-        ProfileState, StandardProfile,
+        DiscoveryData, MaxSysexSize, Muid, ProfileChannels, ProfileId, ProfileLists, ProfileState,
+        StandardProfile,
     };
     use tutti_midi_device::{Capabilities, Endpoint, FunctionBlock, Supports};
-    use tutti_midi_hardware::{ChannelCount, ListedProfile, ProfilesChange};
+    use tutti_midi_hardware::{ChannelCount, ProfilesChange};
+    use tutti_session::ListedProfile;
     use tutti_ump::{
         DeviceIdentity, Direction, FirstGroup, FunctionBlockId, GroupSpan, ManufacturerId,
         SysexAssembler, SysexStep, U7,
@@ -1132,11 +1133,9 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
     };
     let (mut s, fake) = hot_plug_session_ci(identity(ManufacturerId::NON_COMMERCIAL));
     plug(&fake, 7, "Wire", PortDirection::Duplex);
-    plug(&fake, 8, "Other", PortDirection::Input);
     let _ = s.update();
-    connect(&mut s, &["wire", "other"]);
+    connect(&mut s, &["wire"]);
     let port = s.midi_input(&"wire").expect("loaded");
-    let other = s.midi_input(&"other").expect("loaded");
     let block = FunctionBlock::builder(
         FunctionBlockId::new(0).unwrap(),
         Direction::Bidirectional,
@@ -1171,24 +1170,27 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
     let start = Instant::now();
     let mut seen = Vec::new();
     let mut set_on = Vec::new();
-    let mut switched = false;
+    let mut enable = None;
+    let mut enabled = None;
     for ms in 0..80 {
         let now = start + Duration::from_millis(ms);
         for event in update_at(&mut s, now) {
-            if let SessionEvent::Midi(MidiReport::CiProfiles { change, .. }) = event {
-                seen.push(change);
+            match event {
+                SessionEvent::Midi(MidiReport::CiProfiles { change, .. }) => seen.push(change),
+                SessionEvent::Landed(mut landed) => {
+                    enabled = enable.as_ref().and_then(|job| landed.take(job)).or(enabled);
+                }
+                _ => {}
             }
         }
-        if !switched && seen.iter().any(|c| matches!(c, ProfilesChange::Known)) {
+        if enable.is_none() && seen.iter().any(|c| matches!(c, ProfilesChange::Known)) {
             let info = port.info();
             let listed: Vec<_> = info.profiles()[0].listed().collect();
             let [ListedProfile::Channel(c)] = listed.as_slice() else {
                 panic!("one Profile on a Channel: {listed:?}");
             };
             assert_eq!(listed[0].state(), ProfileState::Disabled);
-            port.set_profile(c.enable(ChannelCount::new(2).unwrap()))
-                .expect("the peer lists it");
-            switched = true;
+            enable = Some(c.enable(ChannelCount::new(2).unwrap()));
         }
         let mut answers: Vec<Ump> = Vec::new();
         for ump in fake.take_sent(raw) {
@@ -1262,15 +1264,10 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
         )],
         "one Set Profile On, for Channel 1 and two Channels"
     );
-    assert!(
-        seen.iter().any(|c| matches!(
-            c,
-            ProfilesChange::Resolved {
-                outcome: Outcome::Reported { state: ProfileState::Enabled, channels },
-                ..
-            } if *channels == ProfileChannels::of(2)
-        )),
-        "{seen:?}"
+    assert_eq!(
+        enabled,
+        Some(Ok(ProfileState::Enabled)),
+        "the Enabled Report lands the job"
     );
     let info = port.info();
     let listed: Vec<_> = info.profiles()[0].listed().collect();
@@ -1280,15 +1277,8 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
     let [ListedProfile::Channel(c)] = listed.as_slice() else {
         panic!("one Profile on a Channel: {listed:?}");
     };
-    // A switch made from this input names a peer another input does not have.
-    assert!(matches!(
-        other.set_profile(c.disable()),
-        Err(tutti_session::PeerError::Refused(
-            tutti_midi_hardware::ProfileError::NotOpen
-        ))
-    ));
-    // The peer lists a second Profile and then takes it off: a switch made while
-    // it was listed is refused at the call as no longer listed.
+    // The peer lists a second Profile and then takes it off: a switch of the
+    // handle made while it was listed fails at the call once it is not.
     let second = ProfileId::Standard(StandardProfile::new(
         U7::of(0x21),
         U7::of(3),
@@ -1324,43 +1314,33 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
             profile: second,
         },
     );
-    assert!(matches!(
-        port.set_profile(stale.disable()),
-        Err(tutti_session::PeerError::Refused(
-            tutti_midi_hardware::ProfileError::NotListed
-        ))
-    ));
+    assert_eq!(
+        stale.disable().wait(&mut s),
+        Err(tutti_session::PeerError::Disconnected),
+        "a Profile the peer no longer lists fails at the call"
+    );
     // A request the call accepts and the device then leaves before the next
-    // update ends as an event with its reason.
-    port.set_profile(c.disable()).expect("the peer lists it");
+    // update ends as `Disconnected`.
+    let gone = c.disable();
     fake.unplug(raw);
-    let events = s.update();
-    assert!(
-        events.iter().any(|e| matches!(
-            e,
-            SessionEvent::Midi(MidiReport::CiProfiles {
-                change: ProfilesChange::NotQueued(tutti_midi_hardware::ProfileError::NotOpen),
-                ..
-            })
-        )),
-        "{events:?}"
+    assert_eq!(
+        gone.wait(&mut s),
+        Err(tutti_session::PeerError::Disconnected)
     );
     // A request on a lost port fails at the call.
-    assert!(matches!(
-        port.set_profile(c.disable()),
+    assert_eq!(
+        c.disable().wait(&mut s),
         Err(tutti_session::PeerError::Disconnected)
-    ));
-    // The device returns with no peers found yet: a switch made from the old
-    // listing names a peer the port does not have, and is refused at the call.
+    );
+    // The device returns with no peers found yet: a request made from the old
+    // listing names a peer the port does not have, and fails at the call.
     plug(&fake, 7, "Wire", PortDirection::Duplex);
     let _ = s.update();
     assert_eq!(port.presence(), tutti_session::Presence::Live);
-    assert!(matches!(
-        port.set_profile(c.disable()),
-        Err(tutti_session::PeerError::Refused(
-            tutti_midi_hardware::ProfileError::NoSuchPeer
-        ))
-    ));
+    assert_eq!(
+        c.disable().wait(&mut s),
+        Err(tutti_session::PeerError::Disconnected)
+    );
     // A request on a released port fails at the call.
     s.pool(Vec::<
         tutti_session::Declared<&str, tutti_session::MidiInputEntry>,
@@ -1368,27 +1348,60 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
         .expect("declares nothing");
     let _ = s.update();
     assert_eq!(port.presence(), tutti_session::Presence::Closed);
-    assert!(matches!(
-        port.set_profile(c.disable()),
+    assert_eq!(
+        c.disable().wait(&mut s),
         Err(tutti_session::PeerError::Released)
-    ));
+    );
+}
+
+/// How a fake MIDI-CI peer answers a request.
+#[cfg(feature = "midi-hardware")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Reply {
+    /// As the spec has it: the Report, or the Reply, the report's message and the
+    /// End.
+    Answer,
+    /// A NAK.
+    Refuse,
+    /// Nothing.
+    Silent,
+}
+
+/// What the session asked a fake MIDI-CI peer, in the order it arrived.
+#[cfg(feature = "midi-hardware")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Asked {
+    /// A Set Profile On, with the Number of Channels.
+    On(tutti_midi_device::ProfileChannels),
+    /// A Set Profile Off.
+    Off,
+    /// An Inquiry: MIDI Message Report, with the scope asked.
+    Report(tutti_midi_device::ReportScope),
 }
 
 /// A MIDI-CI peer that lists the MPE Profile (M2-120 section 3.2) disabled on
 /// Channel 1, enables it when asked with the Number of Channels (appendix A.3
-/// and A.4) and disables it when asked, over the fake OS.
+/// and A.4) and disables it when asked, and sends a MIDI Message Report of one
+/// Note On when asked for one, over the fake OS. `switch` and `report` say how
+/// it answers those requests.
 #[cfg(feature = "midi-hardware")]
-struct MpePeer {
+pub(crate) struct MpePeer {
     device: tutti_midi_device::Endpoint,
     assembler: tutti_ump::SysexAssembler<Box<[u8]>>,
-    muid: tutti_midi_device::Muid,
+    pub(crate) muid: tutti_midi_device::Muid,
+    pub(crate) switch: Reply,
+    pub(crate) report: Reply,
+    /// What the session asked of it so far.
+    pub(crate) asked: Vec<Asked>,
 }
 
 #[cfg(feature = "midi-hardware")]
 impl MpePeer {
-    const RAW: u64 = 7;
+    pub(crate) const RAW: u64 = 7;
+    /// The Note Number of the one message its report holds.
+    pub(crate) const REPORTED_NOTE: u8 = 61;
 
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         use tutti_midi_device::{Capabilities, Endpoint, FunctionBlock, Supports};
         use tutti_ump::{Direction, FirstGroup, FunctionBlockId, GroupSpan, SysexAssembler};
         let block = FunctionBlock::builder(
@@ -1411,14 +1424,22 @@ impl MpePeer {
             .with_function_block(block),
             assembler: SysexAssembler::new(vec![0; room].into_boxed_slice(), 256, 16),
             muid: tutti_midi_device::Muid::of(0x0012_3456),
+            switch: Reply::Answer,
+            report: Reply::Answer,
+            asked: Vec::new(),
         }
     }
 
     /// What the session sent the peer, answered as the peer would.
-    fn answer(&mut self, fake: &tutti_midi_hardware::test_support::FakeCounters, now: Instant) {
+    pub(crate) fn answer(
+        &mut self,
+        fake: &tutti_midi_hardware::test_support::FakeCounters,
+        now: Instant,
+    ) {
         use tutti_midi_device::{
             CI_VERSION, CiCategories, CiDeviceId, CiHeader, CiMessage, Decoded, DiscoveryData,
-            MaxSysexSize, ProfileId, ProfileLists,
+            MaxSysexSize, Nak, ProfileId, ProfileLists, SUB_ID2_MESSAGE_REPORT_INQUIRY,
+            SUB_ID2_SET_PROFILE_OFF, SUB_ID2_SET_PROFILE_ON,
         };
         use tutti_ump::{DeviceIdentity, ManufacturerId, SysexStep, U7};
         let at = |device_id| CiHeader {
@@ -1436,7 +1457,18 @@ impl MpePeer {
             let SysexStep::Complete(done) = self.assembler.push(ump) else {
                 continue;
             };
-            match CiMessage::decode(self.assembler.message(done).payload()) {
+            let decoded = CiMessage::decode(self.assembler.message(done).payload());
+            match &decoded {
+                Decoded::Message(CiMessage::SetProfileOn { channels, .. }) => {
+                    self.asked.push(Asked::On(*channels));
+                }
+                Decoded::Message(CiMessage::SetProfileOff { .. }) => self.asked.push(Asked::Off),
+                Decoded::Message(CiMessage::MessageReportInquiry { scope, .. }) => {
+                    self.asked.push(Asked::Report(*scope));
+                }
+                _ => {}
+            }
+            match decoded {
                 Decoded::Message(CiMessage::Discovery { header, .. }) => {
                     let data = DiscoveryData::new(
                         DeviceIdentity {
@@ -1445,7 +1477,7 @@ impl MpePeer {
                             model: [U7::of(2); 2],
                             revision: tutti_ump::SoftwareRevision::from([U7::of(3); 4]),
                         },
-                        CiCategories::PROFILE_CONFIGURATION,
+                        CiCategories::PROFILE_CONFIGURATION | CiCategories::PROCESS_INQUIRY,
                         MaxSysexSize::of(256),
                     );
                     answers.extend(
@@ -1477,22 +1509,97 @@ impl MpePeer {
                 }
                 Decoded::Message(CiMessage::SetProfileOn {
                     header, channels, ..
-                }) => answers.extend(
-                    CiMessage::ProfileEnabled {
-                        header: at(header.device_id),
-                        profile: ProfileId::MPE,
-                        channels,
+                }) => match self.switch {
+                    Reply::Answer => answers.extend(
+                        CiMessage::ProfileEnabled {
+                            header: at(header.device_id),
+                            profile: ProfileId::MPE,
+                            channels,
+                        }
+                        .packets(MidiGroup::FIRST),
+                    ),
+                    Reply::Refuse => answers.extend(
+                        CiMessage::Nak {
+                            header: at(header.device_id),
+                            to: header.source,
+                            nak: Nak::new(
+                                U7::of(SUB_ID2_SET_PROFILE_ON),
+                                Nak::STATUS_PROFILE_NOT_SUPPORTED,
+                            ),
+                        }
+                        .packets(MidiGroup::FIRST),
+                    ),
+                    Reply::Silent => {}
+                },
+                Decoded::Message(CiMessage::SetProfileOff { header, .. }) => match self.switch {
+                    Reply::Answer => answers.extend(
+                        CiMessage::ProfileDisabled {
+                            header: at(header.device_id),
+                            profile: ProfileId::MPE,
+                            channels: tutti_midi_device::ProfileChannels::of(4),
+                        }
+                        .packets(MidiGroup::FIRST),
+                    ),
+                    Reply::Refuse => answers.extend(
+                        CiMessage::Nak {
+                            header: at(header.device_id),
+                            to: header.source,
+                            nak: Nak::new(
+                                U7::of(SUB_ID2_SET_PROFILE_OFF),
+                                Nak::STATUS_PROFILE_NOT_SUPPORTED,
+                            ),
+                        }
+                        .packets(MidiGroup::FIRST),
+                    ),
+                    Reply::Silent => {}
+                },
+                Decoded::Message(CiMessage::ProcessCapabilitiesInquiry { header, .. }) => answers
+                    .extend(
+                        CiMessage::ProcessCapabilitiesReply {
+                            header: at(CiDeviceId::FunctionBlock),
+                            to: header.source,
+                            features: tutti_midi_device::ProcessFeatures::MIDI_MESSAGE_REPORT,
+                        }
+                        .packets(MidiGroup::FIRST),
+                    ),
+                Decoded::Message(CiMessage::MessageReportInquiry { header, scope, .. }) => {
+                    match self.report {
+                        Reply::Answer => {
+                            answers.extend(
+                                CiMessage::MessageReportReply {
+                                    header: at(header.device_id),
+                                    to: header.source,
+                                    scope,
+                                }
+                                .packets(MidiGroup::FIRST),
+                            );
+                            answers.push(midi::m1_note_on(
+                                MidiChannel::of(0),
+                                Self::REPORTED_NOTE,
+                                U7::of(100),
+                            ));
+                            answers.extend(
+                                CiMessage::MessageReportEnd {
+                                    header: at(header.device_id),
+                                    to: header.source,
+                                }
+                                .packets(MidiGroup::FIRST),
+                            );
+                        }
+                        Reply::Refuse => answers.extend(
+                            CiMessage::Nak {
+                                header: at(header.device_id),
+                                to: header.source,
+                                nak: Nak::new(
+                                    U7::of(SUB_ID2_MESSAGE_REPORT_INQUIRY),
+                                    Nak::STATUS_TERMINATE,
+                                ),
+                            }
+                            .packets(MidiGroup::FIRST),
+                        ),
+                        Reply::Silent => {}
                     }
-                    .packets(MidiGroup::FIRST),
-                ),
-                Decoded::Message(CiMessage::SetProfileOff { header, .. }) => answers.extend(
-                    CiMessage::ProfileDisabled {
-                        header: at(header.device_id),
-                        profile: ProfileId::MPE,
-                        channels: tutti_midi_device::ProfileChannels::of(4),
-                    }
-                    .packets(MidiGroup::FIRST),
-                ),
+                }
                 _ => {}
             }
         }
@@ -1515,8 +1622,9 @@ impl MpePeer {
 fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {
     use tutti_fixtures::midi::BendRanges;
     use tutti_midi_device::{ProfileChange, ProfileState};
-    use tutti_midi_hardware::{ChannelCount, ListedProfile, ProfilesChange};
+    use tutti_midi_hardware::{ChannelCount, ProfilesChange};
     use tutti_midi_protocol::{MpeZoneConfig, MpeZones, PitchBendSensitivity};
+    use tutti_session::ListedProfile;
     use tutti_ump::{CCNumber, Message, Voice2};
 
     let (mut s, fake) = hot_plug_session_ci(tutti_ump::DeviceIdentity {
@@ -1537,6 +1645,7 @@ fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {
     play(&s);
     let start = Instant::now();
     let clock = std::cell::Cell::new(0u64);
+    let landed = std::cell::RefCell::new(Vec::<tutti_session::Landed>::new());
     // Runs the session and the peer for `ms` milliseconds; the profile
     // changes the session reported.
     let mut run = |s: &mut Session, ms: u64| {
@@ -1545,8 +1654,12 @@ fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {
             clock.set(clock.get() + 1);
             let now = start + Duration::from_millis(clock.get());
             for event in update_at(s, now) {
-                if let SessionEvent::Midi(MidiReport::CiProfiles { device, change, .. }) = event {
-                    changes.push((device, change));
+                match event {
+                    SessionEvent::Midi(MidiReport::CiProfiles { device, change, .. }) => {
+                        changes.push((device, change));
+                    }
+                    SessionEvent::Landed(l) => landed.borrow_mut().push(l),
+                    _ => {}
                 }
             }
             peer.answer(&fake, now);
@@ -1596,9 +1709,12 @@ fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {
     assert_eq!(omni_offs(&seen), 1, "no zone, no rule");
 
     // Enabled with four Channels from Channel 1.
-    port.set_profile(listed.enable(ChannelCount::new(4).unwrap()))
-        .expect("the peer lists it");
+    let enable = listed.enable(ChannelCount::new(4).unwrap());
     let changes = run(&mut s, 60);
+    assert_eq!(
+        landed.borrow_mut().iter_mut().find_map(|l| l.take(&enable)),
+        Some(Ok(ProfileState::Enabled))
+    );
     assert!(
         changes.iter().any(|(_, c)| matches!(
             c,
@@ -1611,7 +1727,7 @@ fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {
     );
     let info = port.info();
     assert_eq!(
-        info.profiles()[0].mpe_zones(),
+        info.profiles()[0].profiles().mpe_zones(),
         Some(MpeZones::single(MpeZoneConfig::profile(
             MpeZoneSpan::new(MidiChannel::of(0), MpeChannels::of(4)).unwrap(),
             PitchBendSensitivity::MPE_PROFILE_DEFAULT
@@ -1637,9 +1753,16 @@ fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {
     let [ListedProfile::Channel(listed)] = listed.as_slice() else {
         panic!("one Profile on a Channel: {listed:?}");
     };
-    port.set_profile(listed.disable()).expect("lists it");
+    let disable = listed.disable();
     let _ = run(&mut s, 60);
-    assert_eq!(port.info().profiles()[0].mpe_zones(), None);
+    assert_eq!(
+        landed
+            .borrow_mut()
+            .iter_mut()
+            .find_map(|l| l.take(&disable)),
+        Some(Ok(ProfileState::Disabled))
+    );
+    assert_eq!(port.info().profiles()[0].profiles().mpe_zones(), None);
     assert!(fake.send_input(raw, omni_off(2), Instant::now()));
     let _ = run(&mut s, 5);
     assert_eq!(omni_offs(&seen), 2, "no zone, no rule");
@@ -1648,10 +1771,10 @@ fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {
 /// **A MIDI-CI peer's MIDI Message Report is asked for through the session**
 /// (M2-101 section 9): a peer whose Discovery Reply declares Process Inquiry is
 /// sent an Inquiry: Process Inquiry Capabilities by the session's tick; its reply
-/// with MIDI Message Report makes it a `Midi::report_peers` handle
-/// (`MidiReport::CiProcess`); `Midi::report` sends an Inquiry: MIDI Message Report
-/// (Sub-ID#2 `0x42`) with the bitmaps asked, and the peer's Reply and End are
-/// reported as `ReportBegan` and `ReportEnded`.
+/// with MIDI Message Report makes it a `MidiInputInfo::report_peers` handle
+/// (`MidiReport::CiProcess`); `ReportPeer::request` sends an Inquiry: MIDI
+/// Message Report (Sub-ID#2 `0x42`) with the bitmaps asked, and the peer's End
+/// lands the job.
 #[cfg(feature = "midi-hardware")]
 #[test]
 fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
@@ -1675,11 +1798,9 @@ fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
     };
     let (mut s, fake) = hot_plug_session_ci(identity(ManufacturerId::NON_COMMERCIAL));
     plug(&fake, 7, "Wire", PortDirection::Duplex);
-    plug(&fake, 8, "Other", PortDirection::Input);
     let _ = s.update();
-    connect(&mut s, &["wire", "other"]);
+    connect(&mut s, &["wire"]);
     let port = s.midi_input(&"wire").expect("loaded");
-    let other = s.midi_input(&"other").expect("loaded");
     let block = FunctionBlock::builder(
         FunctionBlockId::new(0).unwrap(),
         Direction::Bidirectional,
@@ -1713,15 +1834,20 @@ fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
     let start = Instant::now();
     let mut seen = Vec::new();
     let mut inquiries = Vec::new();
-    let mut asked_for = false;
+    let mut request = None;
+    let mut ended = None;
     for ms in 0..80 {
         let now = start + Duration::from_millis(ms);
         for event in update_at(&mut s, now) {
-            if let SessionEvent::Midi(MidiReport::CiProcess { change, .. }) = event {
-                seen.push(change);
+            match event {
+                SessionEvent::Midi(MidiReport::CiProcess { change, .. }) => seen.push(change),
+                SessionEvent::Landed(mut landed) => {
+                    ended = request.as_ref().and_then(|job| landed.take(job)).or(ended);
+                }
+                _ => {}
             }
         }
-        if !asked_for
+        if request.is_none()
             && seen
                 .iter()
                 .any(|c| matches!(c, ProcessChange::Capabilities(_)))
@@ -1730,9 +1856,7 @@ fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
             let [handle] = info.report_peers() else {
                 panic!("one peer that can be asked: {:?}", info.report_peers());
             };
-            port.report(handle.ask(ReportRequest::new(DataControl::Full, asked)))
-                .expect("the peer supports it");
-            asked_for = true;
+            request = Some(handle.request(ReportRequest::new(DataControl::Full, asked)));
         }
         let mut answers: Vec<Ump> = Vec::new();
         for ump in fake.take_sent(raw) {
@@ -1805,53 +1929,34 @@ fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
         [(CiDeviceId::FunctionBlock, DataControl::Full, asked)],
         "one Inquiry: MIDI Message Report, on the Function Block, as asked"
     );
-    let ended = [
-        ProcessChange::ReportBegan(asked),
-        ProcessChange::ReportEnded,
-    ];
-    let report: Vec<_> = seen
-        .iter()
-        .filter(|c| !matches!(c, ProcessChange::Capabilities(_)))
-        .collect();
-    assert_eq!(report, ended.iter().collect::<Vec<_>>());
+    assert_eq!(ended, Some(Ok(())), "the peer's End lands the job");
 
     // A request the call accepts and the device then leaves before the next
-    // update ends as an event with its reason; on a lost port the call fails; and
+    // update ends as `Disconnected`; on a lost port it fails at the call; and
     // once the device is back with no peers found, a request made from the old
-    // listing is refused at the call.
-    let ask = port.info().report_peers()[0].ask(ReportRequest::new(DataControl::Full, asked));
-    // A request made from this input names a peer another input does not have.
-    assert!(matches!(
-        other.report(ask.clone()),
-        Err(tutti_session::PeerError::Refused(
-            tutti_midi_hardware::ReportError::NotOpen
-        ))
-    ));
-    port.report(ask.clone()).expect("the peer supports it");
+    // listing fails at the call.
+    let info = port.info();
+    let handle = &info.report_peers()[0];
+    let gone = handle.request(ReportRequest::new(DataControl::Full, asked));
     fake.unplug(raw);
-    let events = s.update();
-    assert!(
-        events.iter().any(|e| matches!(
-            e,
-            SessionEvent::Midi(MidiReport::CiProcess {
-                change: ProcessChange::NotQueued(tutti_midi_hardware::ReportError::NotOpen),
-                ..
-            })
-        )),
-        "{events:?}"
-    );
-    assert!(matches!(
-        port.report(ask.clone()),
+    assert_eq!(
+        gone.wait(&mut s),
         Err(tutti_session::PeerError::Disconnected)
-    ));
+    );
+    assert_eq!(
+        handle
+            .request(ReportRequest::new(DataControl::Full, asked))
+            .wait(&mut s),
+        Err(tutti_session::PeerError::Disconnected)
+    );
     plug(&fake, 7, "Wire", PortDirection::Duplex);
     let _ = s.update();
-    assert!(matches!(
-        port.report(ask),
-        Err(tutti_session::PeerError::Refused(
-            tutti_midi_hardware::ReportError::NoSuchPeer
-        ))
-    ));
+    assert_eq!(
+        handle
+            .request(ReportRequest::new(DataControl::Full, asked))
+            .wait(&mut s),
+        Err(tutti_session::PeerError::Disconnected)
+    );
 }
 
 /// Runs the Stream negotiation of the open duplex device `raw`, the input port

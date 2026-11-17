@@ -204,6 +204,7 @@ use crate::node::Prepare;
 use crate::par::{Par, Pool};
 use crate::plan::Plan;
 use crate::play::PlayState;
+use crate::rtlog::Logs;
 use crate::slots::{AudioSlots, EventSlots, SlotFlags};
 use crate::{EdgeFade, EdgeId};
 
@@ -315,6 +316,9 @@ pub struct Executor {
     /// Commits taken off the queue by [`set_pool`](Self::set_pool), to apply
     /// first: room for every commit the queue holds.
     stash: std::collections::VecDeque<Box<Commit>>,
+    /// One ring and one set of slots per pool participant for the nodes'
+    /// log records (`rtlog.rs`), sized with the pool.
+    logs: Logs,
 }
 
 /// The executor's end of the rings to its editor, and the commands it
@@ -482,6 +486,7 @@ impl Executor {
             root_fade: None,
             root_fade_ended: ends.root_fade_ended,
             stash: std::collections::VecDeque::with_capacity(QUEUE_CAPACITY),
+            logs: Logs::new(1),
         }
     }
 
@@ -508,6 +513,7 @@ impl Executor {
     pub fn set_pool(&mut self, pool: Option<Arc<dyn Pool>>) -> Option<Arc<dyn Pool>> {
         let old = std::mem::replace(&mut self.pool, pool);
         let participants = self.pool.as_ref().map(|p| p.participants());
+        self.logs.size(participants.unwrap_or(1));
         // Commits staged from here on are built for this pool.
         self.pool_participants
             .store(participants.unwrap_or(0), Ordering::Release);
@@ -531,6 +537,24 @@ impl Executor {
             )
         });
         old
+    }
+
+    /// The cell the control side stores the log filter into: what
+    /// `Io::log` lets through, per target, from the next block on. Off until
+    /// something stores a filter.
+    #[must_use]
+    pub(crate) fn log_gate(&self) -> crate::rtlog::LogGate {
+        self.logs.gate().clone()
+    }
+
+    /// The readers of the log rings built since the last call: the
+    /// executor's when it was built, and again by each
+    /// [`set_pool`](Self::set_pool). A reader whose executor sizing replaced
+    /// its ring stays here until taken, so what it holds is still read.
+    ///
+    /// Control thread; [`RtLogReaders`](crate::RtLogReaders) is the one caller.
+    pub(crate) fn take_log_readers(&mut self) -> Vec<crate::rtlog::RtLogReader> {
+        self.logs.take_readers()
     }
 
     /// The pool blocks run on, if any.

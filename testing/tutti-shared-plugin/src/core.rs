@@ -406,29 +406,61 @@ pub struct BadState;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Ev {
     /// A parameter value at a sample offset.
-    Param { id: u32, offset: u32, value: f64 },
+    Param {
+        /// The parameter's id.
+        id: u32,
+        /// The frame within the block the value takes effect at.
+        offset: u32,
+        /// The normalized value.
+        value: f64,
+    },
     /// A parameter ramp (AU `kParameterEvent_Ramped`): the plain values and the
     /// start offset as the host wrote them, the offset negative when the ramp
     /// began before this block.
     Ramp {
+        /// The parameter's id.
         id: u32,
+        /// The frame the ramp starts at, negative when it began before this block.
         offset: i32,
+        /// The ramp's length in frames.
         duration: u32,
+        /// The plain value at the start of the ramp.
         start: f32,
+        /// The plain value at the end of the ramp.
         end: f32,
     },
     /// A note on.
-    NoteOn { offset: u32, key: u8 },
+    NoteOn {
+        /// The frame within the block the note starts at.
+        offset: u32,
+        /// The MIDI key number.
+        key: u8,
+    },
     /// A note off.
-    NoteOff { offset: u32, key: u8 },
+    NoteOff {
+        /// The frame within the block the note ends at.
+        offset: u32,
+        /// The MIDI key number.
+        key: u8,
+    },
     /// A control change: recorded, never acted on.
     Control {
+        /// The frame within the block the change arrives at.
         offset: u32,
+        /// The controller number.
         controller: u8,
+        /// The controller value.
         value: u8,
     },
     /// A VST3 data event (`kMidiSysEx`): recorded, never acted on.
-    Data { offset: u32, first: u8, size: u32 },
+    Data {
+        /// The frame within the block the event arrives at.
+        offset: u32,
+        /// The first byte of the payload, 0 when it is empty.
+        first: u8,
+        /// The payload length in bytes.
+        size: u32,
+    },
     /// A VST3 process call whose `inputParameterChanges` was null.
     NullParams,
     /// A VST3 process call with `numSamples == 0`.

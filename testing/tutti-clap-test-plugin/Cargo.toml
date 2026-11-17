@@ -35,3 +35,6 @@ libc = "0.2"
 
 [features]
 probe = ["dep:libloading"]
+
+[lints]
+workspace = true

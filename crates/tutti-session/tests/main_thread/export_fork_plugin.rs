@@ -323,7 +323,7 @@ fn instrument_at(rate: f64, hosting: Hosting) {
 }
 
 /// **A plugin fork that dies mid-export fails the export by the plugin's
-/// key** instead of writing the silence it rendered after the
+/// key**, instead of writing the silence it rendered after the
 /// crash. The crash switch is set after the live instance loaded, so only
 /// the fork's server reads it; it aborts on its 8th block.
 fn a_plugin_fork_that_crashes_mid_export_is_a_named_failure() {

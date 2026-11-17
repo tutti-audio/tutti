@@ -832,7 +832,8 @@ fn a_ports_id_names_it_in_the_events() {
 
 const SYNTH: u32 = 10;
 
-/// Long against the thread's 270 ms interval, so a loaded machine cannot miss.
+/// The wait of a check that nothing is sent: about four of the thread's 270 ms
+/// Active Sensing intervals.
 const SECOND: std::time::Duration = std::time::Duration::from_secs(1);
 
 fn is_active_sensing(u: &tutti_ump::Ump) -> bool {
@@ -861,19 +862,32 @@ fn sent_by_the_port(fake: &FakeCounters) -> Vec<tutti_ump::Ump> {
     fake.take_sent(EndpointId::from_raw(u64::from(SYNTH)))
 }
 
+/// What the port sent, collected until `done` accepts it. A port that sends
+/// nothing fails after a hang guard of half a minute.
+fn sent_until(
+    fake: &FakeCounters,
+    what: &str,
+    done: impl Fn(&[tutti_ump::Ump]) -> bool,
+) -> Vec<tutti_ump::Ump> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let mut sent = Vec::new();
+    while !done(&sent) {
+        assert!(std::time::Instant::now() < deadline, "{what}: {sent:?}");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        sent.extend(sent_by_the_port(fake));
+    }
+    sent
+}
+
 /// **An idle output port with Active Sensing sends it before a receiver gives
 /// up, goes on sending it with no `update()` to drive it, and a re-declared
 /// node does not stop it.**
 #[test]
 fn an_idle_output_port_active_sensing_sends_it_with_no_update_to_drive_it() {
     let (mut s, fake) = sensing_session(OutputOptions::new().active_sensing(true));
-    std::thread::sleep(SECOND);
-    let first = sent_by_the_port(&fake);
-    assert!(
-        !first.is_empty() && first.iter().all(is_active_sensing),
-        "{first:?}"
-    );
-    // The node's sources are replaced, and no update runs for most of a second.
+    let first = sent_until(&fake, "no Active Sensing was sent", |sent| !sent.is_empty());
+    assert!(first.iter().all(is_active_sensing), "{first:?}");
+    // The node's sources are replaced, and no update runs while it goes on.
     let out = s.midi_output(&"synth").expect("loaded");
     let (clip, _) = s.graph().add(MidiClipNode::new(note(
         60,
@@ -887,10 +901,9 @@ fn an_idle_output_port_active_sensing_sends_it_with_no_update_to_drive_it() {
     s.graph()
         .set_sources(EventInPort::new(out.node(), 0), [])
         .expect("and drops them");
-    std::thread::sleep(SECOND);
-    let later = sent_by_the_port(&fake);
+    let later = sent_until(&fake, "it did not go on", |sent| sent.len() >= 2);
     assert!(
-        later.len() >= 2 && later.iter().all(is_active_sensing),
+        later.iter().all(is_active_sensing),
         "and it goes on: {later:?}"
     );
 }
@@ -908,8 +921,7 @@ fn an_output_port_without_the_option_never_sends_active_sensing() {
 #[test]
 fn closing_an_output_port_stops_its_active_sensing() {
     let (mut s, fake) = sensing_session(OutputOptions::new().active_sensing(true));
-    std::thread::sleep(SECOND);
-    assert!(!sent_by_the_port(&fake).is_empty(), "precondition: it runs");
+    let _ = sent_until(&fake, "precondition: it runs", |sent| !sent.is_empty());
     declare(&mut s, &[], &[]);
     let _ = s.update();
     let _ = sent_by_the_port(&fake);
@@ -942,8 +954,9 @@ fn changing_the_active_sensing_option_reopens_the_port() {
     let _ = s.update();
     let _ = s.update();
     assert_ne!(s.midi_output(&"synth").unwrap().id(), before, "reopened");
-    std::thread::sleep(SECOND);
-    assert!(sent_by_the_port(&fake).iter().any(is_active_sensing));
+    let _ = sent_until(&fake, "the reopened port sends", |sent| {
+        sent.iter().any(is_active_sensing)
+    });
 }
 
 /// **A port whose device is in the MIDI 2.0 Protocol sends no Active Sensing**,

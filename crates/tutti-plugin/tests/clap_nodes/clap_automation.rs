@@ -24,7 +24,7 @@ use tutti_graph::{
 use tutti_graph::{OutPort, Source};
 use tutti_modulation::ControlProgram;
 use tutti_nodes::automation::{Breakpoint, ControlLaneNode, Curve, Trajectory};
-use tutti_transport::{OfflineTimeline, OfflineTimelineConfig};
+use tutti_transport::{OfflineTimeline, OfflineTimelineConfig, RenderClock};
 use tutti_types::{At, Frame};
 use tutti_types::{Beat, SampleRate, Samples};
 

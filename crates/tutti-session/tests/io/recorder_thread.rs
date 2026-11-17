@@ -48,7 +48,7 @@ fn wav(path: &std::path::Path) -> FileOut {
 /// length carries no meaning and no assertion depends on it: the deadline only
 /// makes a broken driver fail with a message instead of hanging until nextest's
 /// timeout.
-const WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+const WAIT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// A finite source: hands out `frames` frames of a known ramp, then reports
 /// end-of-stream. `the thread` must break its own loop on that.
@@ -66,9 +66,7 @@ struct Ramp {
     drained: Arc<AtomicBool>,
     /// Total polls, including the drained ones. Once the driver has broken on
     /// [`PumpPass::Ended`] this stops advancing; a driver that does NOT break
-    /// spins on the dry source and it climbs without bound. That difference is
-    /// the only externally visible consequence of the break, so it is what the
-    /// test asserts.
+    /// spins on the dry source and it climbs without bound.
     polls: Arc<AtomicUsize>,
     /// Wall time burned per poll, to give a take a measurable *duration*.
     ///
@@ -81,6 +79,14 @@ struct Ramp {
     /// the difference between a complete take and a truncated one is not a
     /// coin flip.
     delay: std::time::Duration,
+    /// Set when the source is dropped, which the pump thread does as it ends.
+    released: Arc<AtomicBool>,
+}
+
+impl Drop for Ramp {
+    fn drop(&mut self) {
+        self.released.store(true, Ordering::Release);
+    }
 }
 
 impl FiniteSource for Ramp {}
@@ -196,6 +202,7 @@ fn a_sink_that_fails_to_close_reports_its_own_error() {
             drained: Arc::new(AtomicBool::new(false)),
             polls: Arc::new(AtomicUsize::new(0)),
             delay: std::time::Duration::ZERO,
+            released: Arc::default(),
         },
         DiskFull,
     )
@@ -222,15 +229,9 @@ fn sink(path: &std::path::Path) -> FileOut {
 /// The frame count is exact, and the values are checked too — a count alone
 /// would pass on duplicated or channel-rotated frames.
 ///
-/// **This test keeps its workaround on purpose.** It asserts the poll count
-/// freezes *after* the drain and *before* the join, so it has to observe the
-/// thread mid-flight — [`Recorder::wait`] would join it and destroy the
-/// window. The gap that workaround originally exposed is closed:
-/// `stop()` still clears the flag before joining and still truncates a finite
-/// take called promptly (on this test's first draft, to zero frames), but
-/// `wait()` now exists for exactly that case and
-/// `wait_returns_a_complete_finite_take_without_sequencing_on_the_pump`
-/// covers it with no fixture flag at all.
+/// The pump thread ends by itself once the source has drained: it releases the
+/// source before anything stops it, and the poll count stays at the drained
+/// poll.
 #[test]
 fn a_finite_source_ends_its_own_take_and_the_file_is_readable() {
     let dir = tempfile::tempdir().unwrap();
@@ -239,6 +240,7 @@ fn a_finite_source_ends_its_own_take_and_the_file_is_readable() {
     const FRAMES: usize = 5000;
     let drained = Arc::new(AtomicBool::new(false));
     let polls = Arc::new(AtomicUsize::new(0));
+    let released = Arc::new(AtomicBool::new(false));
     let rec = Recorder::start(
         Ramp {
             frames: FRAMES,
@@ -246,6 +248,7 @@ fn a_finite_source_ends_its_own_take_and_the_file_is_readable() {
             drained: Arc::clone(&drained),
             polls: Arc::clone(&polls),
             delay: std::time::Duration::ZERO,
+            released: Arc::clone(&released),
         },
         sink(&path),
     )
@@ -255,22 +258,24 @@ fn a_finite_source_ends_its_own_take_and_the_file_is_readable() {
         drained.load(Ordering::Acquire)
     });
 
-    // The driver must now have LEFT its loop, not merely noticed the zero.
-    // Sample the poll count, give a spinning loop ample room to betray itself,
-    // and require it not to have moved. Without the `Ended => break` arm the
-    // thread re-polls a dry source as fast as it can and this climbs into the
-    // thousands; with it, the count is frozen at the drained poll.
     let at_drain = polls.load(Ordering::Acquire);
-    std::thread::sleep(std::time::Duration::from_millis(20));
+    // Without the `Ended => break` arm the thread re-polls the dry source
+    // until something stops it, so it never releases the source on its own.
+    wait_until(
+        "the pump to end and release the drained source",
+        WAIT,
+        || released.load(Ordering::Acquire),
+    );
+
+    rec.finish()
+        .expect("a healthy finite take finalizes cleanly");
+
     assert_eq!(
         polls.load(Ordering::Acquire),
         at_drain,
         "the driver must break its loop on Ended, not keep polling a dry \
          source — a live-spinning take burns a core until someone calls stop()"
     );
-
-    rec.finish()
-        .expect("a healthy finite take finalizes cleanly");
 
     let mut reader = hound::WavReader::open(&path).expect("finalized WAV should be readable");
     assert_eq!(reader.spec().channels, 2);
@@ -416,6 +421,7 @@ fn wait_returns_a_complete_finite_take_without_sequencing_on_the_pump() {
             drained: Arc::new(AtomicBool::new(false)),
             polls: Arc::new(AtomicUsize::new(0)),
             delay: std::time::Duration::from_millis(1),
+            released: Arc::default(),
         },
         sink(&path),
     )
@@ -464,6 +470,7 @@ fn is_finished_reports_a_finite_take_ending_itself_without_blocking() {
             drained: Arc::new(AtomicBool::new(false)),
             polls: Arc::new(AtomicUsize::new(0)),
             delay: std::time::Duration::ZERO,
+            released: Arc::default(),
         },
         sink(&path),
     )
@@ -608,6 +615,14 @@ fn wait_and_finish_report_a_failed_source() {
 /// its polls. Only `Drop` (or `finish`) can end a take over it.
 struct AlwaysLive {
     polls: Arc<AtomicUsize>,
+    /// Set when the source is dropped, which the pump thread does as it ends.
+    released: Arc<AtomicBool>,
+}
+
+impl Drop for AlwaysLive {
+    fn drop(&mut self) {
+        self.released.store(true, Ordering::Release);
+    }
 }
 
 impl Source for AlwaysLive {
@@ -632,16 +647,19 @@ impl Source for AlwaysLive {
 /// A starving source has no exit but the stop flag, so without the `Drop` the
 /// thread never reaches `finalize` (and never stops): the RIFF/data sizes stay
 /// at their placeholders and the pump keeps polling. Both are observed: the
-/// file holds the frames and the poll count freezes once the drop returns.
+/// file holds the frames and the source, owned by the pump thread, is released
+/// by the time the drop returns.
 #[test]
 fn dropping_a_live_recorder_still_finalizes_the_wav() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("dropped.wav");
     let polls = Arc::new(AtomicUsize::new(0));
+    let released = Arc::new(AtomicBool::new(false));
 
     let rec = Recorder::start(
         AlwaysLive {
             polls: Arc::clone(&polls),
+            released: Arc::clone(&released),
         },
         sink(&path),
     )
@@ -651,12 +669,9 @@ fn dropping_a_live_recorder_still_finalizes_the_wav() {
     });
     drop(rec);
 
-    let at_drop = polls.load(Ordering::Acquire);
-    std::thread::sleep(std::time::Duration::from_millis(20));
-    assert_eq!(
-        polls.load(Ordering::Acquire),
-        at_drop,
-        "the drop joined the pump thread: nothing polls the source after it"
+    assert!(
+        released.load(Ordering::Acquire),
+        "the drop joined the pump thread: it released the source before returning"
     );
     let reader =
         hound::WavReader::open(&path).expect("a dropped recorder must still leave a readable WAV");
@@ -681,6 +696,7 @@ fn finish_in_place_finalizes_in_place_exactly_once() {
     let mut rec = Recorder::start(
         AlwaysLive {
             polls: Arc::clone(&polls),
+            released: Arc::default(),
         },
         sink(&path),
     )

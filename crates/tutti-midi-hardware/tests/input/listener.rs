@@ -108,6 +108,25 @@ impl Listener {
         self.listen(SETTLE)
     }
 
+    /// Plays until `probe`, which the caller sends into the wire, is heard, then
+    /// drains the probes still in flight. The wait is for the connection to
+    /// carry an event, not a span guessed to be long enough: nothing is
+    /// buffered when it returns, and an event sent after it is the test's.
+    pub fn ready(&mut self, mut probe: impl FnMut(), patience: Duration) {
+        let end = Instant::now() + patience;
+        loop {
+            probe();
+            if !self.listen(Duration::from_millis(20)).is_empty() {
+                break;
+            }
+            assert!(
+                Instant::now() < end,
+                "the connection never carried an event"
+            );
+        }
+        self.listen(SETTLE);
+    }
+
     /// Plays for `span` of real time and returns what arrived.
     pub fn listen(&mut self, span: Duration) -> Vec<Ump> {
         let end = Instant::now() + span;

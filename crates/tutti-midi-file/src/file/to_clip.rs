@@ -202,7 +202,7 @@ enum Rank {
     Other,
 }
 
-fn event(ump: Ump) -> FileEvent {
+pub(super) fn event(ump: Ump) -> FileEvent {
     match ump.decode() {
         Ok(message) => FileEvent::Message(message),
         Err(unknown) => FileEvent::Unknown(unknown),

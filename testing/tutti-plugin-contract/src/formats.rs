@@ -4,6 +4,7 @@ use crate::active::main_thread;
 use crate::{Format, Gap, ParamTiming, plugin, spec};
 
 /// CLAP.
+#[derive(Debug)]
 pub struct Clap;
 
 impl Format for Clap {
@@ -50,6 +51,7 @@ const VST2_NO_BYPASS: (&str, Gap) = (
 );
 
 /// VST2.
+#[derive(Debug)]
 pub struct Vst2;
 
 impl Format for Vst2 {
@@ -84,6 +86,7 @@ fn vst3(module: std::path::PathBuf) -> tutti_vst3_host::Vst3Loaded {
 
 /// VST3, from the Rust plugin: one object that is both the component and the
 /// controller.
+#[derive(Debug)]
 pub struct Vst3;
 
 impl Format for Vst3 {
@@ -102,6 +105,7 @@ impl Format for Vst3 {
 /// VST3, from the C++ plugin on the Steinberg SDK classes: a separate
 /// component and controller, and none of the `vst3` crate's bindings the host
 /// shares with the Rust plugin.
+#[derive(Debug)]
 pub struct Vst3Cpp;
 
 impl Format for Vst3Cpp {
@@ -122,6 +126,7 @@ impl Format for Vst3Cpp {
 /// that declares it (`plugin::au_bundle`). The unit exists in this process
 /// only, so there is no served (out-of-process) run of it.
 #[cfg(target_os = "macos")]
+#[derive(Debug)]
 pub struct Au;
 
 #[cfg(target_os = "macos")]

@@ -16,6 +16,10 @@ pub const BLOCK: usize = 64;
 const UNWRITTEN: f64 = 9.0;
 
 /// A `Prepare` for realtime rendering.
+///
+/// # Panics
+///
+/// Panics when `block` is zero.
 #[must_use]
 pub fn prepare(rate: f64, block: usize, format: SampleFormat) -> Prepare {
     let block = MaxBlock::new(Samples(block)).expect("a case renders at least one frame");

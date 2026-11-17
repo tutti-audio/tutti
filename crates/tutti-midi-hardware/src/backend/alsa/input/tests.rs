@@ -25,3 +25,26 @@ fn an_event_is_never_placed_before_the_one_ahead_of_it() {
     );
     assert_eq!(in_order(&mut latest, t0 + ms(8)), t0 + ms(8));
 }
+
+/// **A held pairing is read again when none is held, when the event came after
+/// it, and once it is older than `PAIRING_AGE`**; an event at or before its
+/// clock reading, inside the age, reuses it.
+#[test]
+fn a_pairing_is_read_again_when_missing_late_or_older_than_its_age() {
+    let t0 = Instant::now();
+    let s = Duration::from_secs;
+    let paired = Paired::read(|| Ok::<_, std::convert::Infallible>(s(10))).unwrap();
+    let held = Some((paired, t0));
+    assert!(pairing_is_stale(None, s(9), t0));
+    assert!(!pairing_is_stale(held, s(9), t0));
+    assert!(!pairing_is_stale(held, s(10), t0 + PAIRING_AGE));
+    assert!(pairing_is_stale(
+        held,
+        s(10),
+        t0 + PAIRING_AGE + Duration::from_millis(1)
+    ));
+    assert!(
+        pairing_is_stale(held, s(11), t0),
+        "an event after the pairing"
+    );
+}
