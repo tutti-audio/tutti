@@ -1062,11 +1062,7 @@ fn a_chunk_the_server_never_accounts_for_is_counted_unanswered() {
     for sent in 1..=2 * FATES as u64 {
         drive_one_block(&mut batcher, &bridge, &input, &mut output, &mut midi_out);
         wait_for("the bridge to deal with the chunk", || {
-            bridge.block_counts().abandoned
-                + bridge
-                    .skipped_cell()
-                    .load(std::sync::atomic::Ordering::Relaxed)
-                >= sent
+            bridge.block_counts().abandoned + bridge.skipped_cell().get() >= sent
         });
     }
     assert_eq!(counters.refused(), 0, "the server said nothing");
@@ -1904,12 +1900,8 @@ fn two_stale_blocks(
     assert_eq!(seq, 3);
     let (seq, four) = got.recv_timeout(wait).expect("block 4 sent");
     assert_eq!(seq, 4);
-    let dropped = bridge
-        .dropped_midi_cell()
-        .load(std::sync::atomic::Ordering::Relaxed);
-    let skipped = bridge
-        .skipped_cell()
-        .load(std::sync::atomic::Ordering::Relaxed);
+    let dropped = bridge.dropped_midi_cell().get();
+    let skipped = bridge.skipped_cell().get();
     drop(thread);
     drop(bridge);
     server.join().unwrap();

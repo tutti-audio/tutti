@@ -39,6 +39,7 @@
 #![cfg(target_os = "macos")]
 
 use std::sync::Mutex;
+use tutti_rt::LockExt;
 
 mod support;
 use support::corpus::{
@@ -53,7 +54,7 @@ static AU_LOCK: Mutex<()> = Mutex::new(());
 
 /// Poison recovery — the guard only serializes, so one panic must not cascade.
 fn lock() -> std::sync::MutexGuard<'static, ()> {
-    AU_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    AU_LOCK.lock_recover()
 }
 
 const RATE: tutti_types::SampleRate = tutti_types::SampleRate::SR_48K;

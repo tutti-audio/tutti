@@ -908,6 +908,7 @@ impl<C: Clock> SessionBuilder<C> {
             let (clock, clock_master) = graph.add(tutti_midi_runtime::ClockNode::new(
                 tutti_ump::MidiGroup::FIRST,
                 rate,
+                click_settings.project_meter().reader(),
             ));
             Some(crate::MidiNodes {
                 input_ports: self.opts.midi_ports,

@@ -170,9 +170,13 @@ fn every_midi_node_is_light() {
     assert_eq!(clip(0).shape().cost, Cost::Light);
     assert_eq!(HarmonyNode::new([]).shape().cost, Cost::Light);
     assert_eq!(
-        ClockNode::new(tutti_ump::MidiGroup::FIRST, tutti_types::SampleRate::SR_48K)
-            .shape()
-            .cost,
+        ClockNode::new(
+            tutti_ump::MidiGroup::FIRST,
+            tutti_types::SampleRate::SR_48K,
+            tutti_transport::ProjectMeter::default().reader()
+        )
+        .shape()
+        .cost,
         Cost::Light
     );
     assert_eq!(

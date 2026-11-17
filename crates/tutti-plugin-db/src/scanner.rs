@@ -14,8 +14,9 @@ use super::table::{Delta, FileRow, PluginDb};
 use crossbeam_channel::{Receiver, Sender, TryRecvError};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 use tracing::{debug, info, warn};
+use tutti_rt::LockExt;
 
 /// Progress information emitted during a scan.
 #[derive(Debug, Clone)]
@@ -319,7 +320,7 @@ struct Claim(PathBuf);
 impl Claim {
     fn take(pedal: &Pedal) -> Result<Self, ScanBusy> {
         let file = canonical_path(pedal.path());
-        let mut in_use = IN_USE.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut in_use = IN_USE.lock_recover();
         if in_use.contains(&file) {
             return Err(ScanBusy);
         }
@@ -330,7 +331,7 @@ impl Claim {
 
 impl Drop for Claim {
     fn drop(&mut self) {
-        let mut in_use = IN_USE.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut in_use = IN_USE.lock_recover();
         in_use.retain(|p| *p != self.0);
     }
 }

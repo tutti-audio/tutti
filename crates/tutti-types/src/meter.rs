@@ -608,21 +608,42 @@ fn floor_div_rem(value: BeatDuration, unit: BeatDuration) -> (i64, BeatDuration)
 
 /// Bar/beat for `beat` under a single signature, measured from `origin`.
 ///
-/// Shared by both [`Meter`] impls: the constant case passes beat 0 and bar 1, and
-/// [`MeterMap`] passes the start of whichever segment `beat` lands in.
+/// Shared by both [`Meter`] impls: the constant case passes beat 0, bar 1 and no
+/// last bar, and [`MeterMap`] passes the start of whichever segment `beat` lands
+/// in and, before the last change, the index of that segment's last bar, so a
+/// position just under the next change stays in this segment.
 #[inline]
 fn bar_position_within(
     beat: Beat,
     origin: Beat,
     origin_bar: BarNumber,
     signature: TimeSignature,
+    last_bar: Option<i64>,
 ) -> BarPosition {
     let bar_length = signature.bar_length();
-    let (bars, into_bar) = floor_div_rem(beat - origin, bar_length);
-    let bar_start = origin + bar_length * bars as f64;
+    // Bar `k` starts at `origin + bar_length * k`, rounded as `Meter::bar_start`
+    // rounds it. The quotient can land a rounding step either side of that line
+    // when `origin` is not a dyadic beat (`4.1 - 0.1` divides to just under 1),
+    // so the bar is settled against the start itself: the last bar whose start
+    // is at or before `beat`. `bar_at(bar_start(n))` is then bar `n`, on its
+    // downbeat, at every origin.
+    let start_of = |bars: i64| origin + bar_length * bars as f64;
+    let (mut bars, _) = floor_div_rem(beat - origin, bar_length);
+    if start_of(bars.saturating_add(1)) <= beat {
+        bars = bars.saturating_add(1);
+    } else if start_of(bars) > beat {
+        bars -= 1;
+    }
+    if let Some(last) = last_bar {
+        bars = bars.min(last);
+    }
+    let bar_start = start_of(bars);
+    // In `[0, bar_length)`: `bar_start <= beat < start_of(bars + 1)`, and a
+    // difference that rounds up to the bar length is the bar's last offset.
+    let into_bar = (beat - bar_start).min(BeatDuration(bar_length.get().next_down()));
 
     let (beat_index, fraction) = floor_div_rem(into_bar, signature.beat_length());
-    // No clamp here. `floor_div_rem` returns `into_bar` in `[0, bar_length)`, and
+    // No clamp here. `into_bar` is in `[0, bar_length)` (above), and
     // `bar_length == beats_per_bar * beat_length` exactly (every denominator is a
     // power of two, so the division is exact in binary), so the index is always
     // in `0..beats_per_bar`. A clamp would only mask a regression in
@@ -653,7 +674,7 @@ impl Meter for TimeSignature {
 
     #[inline]
     fn bar_at(&self, beat: Beat) -> BarPosition {
-        bar_position_within(beat, Beat(0.0), BarNumber::FIRST, *self)
+        bar_position_within(beat, Beat(0.0), BarNumber::FIRST, *self, None)
     }
 
     #[inline]
@@ -885,7 +906,17 @@ impl Meter for MeterMap {
     fn bar_at(&self, beat: Beat) -> BarPosition {
         let i = self.segment_at(beat);
         let change = self.changes[i];
-        bar_position_within(beat, change.beat, self.starts[i], change.signature)
+        let last_bar = self
+            .starts
+            .get(i + 1)
+            .map(|next| (*next - self.starts[i]).get() - 1);
+        bar_position_within(
+            beat,
+            change.beat,
+            self.starts[i],
+            change.signature,
+            last_bar,
+        )
     }
 
     fn bar_start(&self, bar: BarNumber) -> Beat {
@@ -1085,6 +1116,99 @@ mod tests {
             assert!(round_trip.is_downbeat());
             assert_eq!(round_trip.bar_start, start);
         }
+    }
+
+    /// Every bar start is its own bar's downbeat, also when a meter change sits
+    /// at a beat that is not a dyadic fraction (`0.1`, `1/3`), where the division
+    /// in `bar_at` rounds a hair under the bar line.
+    #[test]
+    fn a_bar_start_is_the_downbeat_of_its_own_bar_at_any_change_beat() {
+        let sixty_fourth = TimeSignature::new(BeatsPerBar::of(1), NoteValue::of(64));
+        let three_four = TimeSignature::new(BeatsPerBar::of(3), NoteValue::QUARTER);
+        let signatures = [
+            TimeSignature::default(),
+            seven_eight(),
+            three_four,
+            sixty_fourth,
+        ];
+        for origin in [0.1, 0.3, 1.0 / 3.0, 4.1, 64.1, 1000.7] {
+            for second in signatures {
+                let map = MeterMap::new([
+                    MeterChange::new(Beat(0.0), TimeSignature::default()),
+                    MeterChange::new(Beat(origin), second),
+                ]);
+                for bar in 1..=400 {
+                    let bar = BarNumber(bar);
+                    let start = map.bar_start(bar);
+                    let at = map.bar_at(start);
+                    assert_eq!(at.bar, bar, "{second} @ {origin}: bar {bar} at {start:?}");
+                    assert!(at.is_downbeat(), "{second} @ {origin}: bar {bar}");
+                    assert_eq!(at.bar_start, start, "{second} @ {origin}: bar {bar}");
+                }
+            }
+        }
+    }
+
+    /// A position just under a change belongs to a bar of the segment before it.
+    /// The edge is a change one step above where the segment before it would
+    /// start a bar: that bar start is under the change, so it is in the earlier
+    /// segment, but the change begins the next bar number.
+    #[test]
+    fn a_position_just_under_a_change_stays_in_the_segment_before() {
+        let sixty_fourth = TimeSignature::new(BeatsPerBar::of(1), NoteValue::of(64));
+        for first in [0.1, 1.0 / 3.0, 4.1] {
+            for signature in [sixty_fourth, seven_eight(), TimeSignature::default()] {
+                for bars in [1i64, 3, 7, 40] {
+                    let rounded_start = first + signature.bar_length().get() * bars as f64;
+                    let second = rounded_start.next_up();
+                    let map = MeterMap::new([
+                        MeterChange::new(Beat(0.0), TimeSignature::default()),
+                        MeterChange::new(Beat(first), signature),
+                        MeterChange::new(Beat(second), TimeSignature::default()),
+                    ]);
+                    let at_change = map.bar_at(Beat(second));
+                    let under = map.bar_at(Beat(rounded_start));
+                    assert!(
+                        under.bar < at_change.bar,
+                        "{signature} @ {first}, {bars} bars: {rounded_start} is bar {} and the change bar {}",
+                        under.bar,
+                        at_change.bar
+                    );
+                    assert_eq!(under.signature, signature);
+                    assert!(at_change.is_downbeat());
+                }
+            }
+        }
+    }
+
+    /// The reported cases: 4/4 changing to 4/4 at beat 0.1, and 1/64 there.
+    #[test]
+    fn bars_after_a_change_at_beat_0_1_start_where_bar_start_says() {
+        let four_four = MeterMap::new([
+            MeterChange::new(Beat(0.0), TimeSignature::default()),
+            MeterChange::new(Beat(0.1), TimeSignature::default()),
+        ]);
+        assert_eq!(
+            four_four.bar_at(four_four.bar_start(BarNumber(3))).bar,
+            BarNumber(3)
+        );
+        assert_eq!(
+            four_four.bar_at(four_four.bar_start(BarNumber(18))).bar,
+            BarNumber(18)
+        );
+        let sixty_fourth = MeterMap::new([
+            MeterChange::new(Beat(0.0), TimeSignature::default()),
+            MeterChange::new(
+                Beat(0.1),
+                TimeSignature::new(BeatsPerBar::of(1), NoteValue::of(64)),
+            ),
+        ]);
+        assert_eq!(
+            sixty_fourth
+                .bar_at(sixty_fourth.bar_start(BarNumber(5)))
+                .bar,
+            BarNumber(5)
+        );
     }
 
     #[test]

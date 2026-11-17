@@ -44,6 +44,8 @@
 
 use std::mem::MaybeUninit;
 
+use crate::ControlDrop;
+
 use sync::{Arc, AtomicU32, Ordering, UnsafeCell};
 
 mod sync {
@@ -224,10 +226,11 @@ pub struct Hand<T> {
 /// The audio end of a [`handoff`]: holds the value it was lent and trades it
 /// at [`poll`](Self::poll), between blocks.
 ///
-/// A value it holds drops with it, wherever it is dropped. Drop it on the
-/// control side (a graph node's retirement path does), or recall the value
-/// first: a Processor's drop must not run on the audio thread.
+/// It is dropped on the control side (a graph node's retirement path does),
+/// with any value it holds: a Processor's drop must not run on the audio
+/// thread, and a debug build panics when this end drops inside an audio block.
 pub struct Rt<T> {
+    _control: ControlDrop<Self>,
     shared: Arc<Shared<T>>,
     held: Option<T>,
 }
@@ -244,7 +247,11 @@ pub fn handoff<T: Send>() -> (Hand<T>, Rt<T>) {
         Hand {
             shared: Arc::clone(&shared),
         },
-        Rt { shared, held: None },
+        Rt {
+            _control: ControlDrop::new(),
+            shared,
+            held: None,
+        },
     )
 }
 

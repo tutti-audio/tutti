@@ -3,9 +3,10 @@
 
 use crate::ServerWatch;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 use tutti_plugin_types::PluginFailure;
+use tutti_rt::LockExt;
 use tutti_types::{SampleRate, Samples};
 
 /// An offline fork's wait for the server: the per-block budget, and the
@@ -124,7 +125,7 @@ impl OfflineWait {
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(PoisonError::into_inner)
+    m.lock_recover()
 }
 
 #[cfg(test)]

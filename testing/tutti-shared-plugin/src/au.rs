@@ -35,6 +35,9 @@
 //! - **Offline render and element names.** `kAudioUnitProperty_OfflineRender` is
 //!   kept and read back. Each stream element's name is a heap `CFString` the
 //!   instance owns and hands out under the Copy rule.
+//! - **Factory presets.** `kAudioUnitProperty_FactoryPresets` lists the programs of
+//!   `core::PROGRAM_LIST` as presets `0`, `1` and `2`, and
+//!   `kAudioUnitProperty_PresentPreset` reads and selects one.
 //! - **No notice, no gesture, no editor**: the shell does not read the notice
 //!   byte as a report (AudioToolbox coalesces the changes of a gesture), and
 //!   offers no Cocoa view.
@@ -46,7 +49,9 @@
 
 use std::ffi::c_void;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+use tutti_rt::LockExt;
 
+use core_foundation::array::CFArrayCreate;
 use core_foundation::base::{CFGetTypeID, CFRetain, TCFType};
 use core_foundation::data::{CFData, CFDataGetTypeID};
 use core_foundation::dictionary::{CFDictionary, CFDictionaryGetValue};
@@ -104,6 +109,35 @@ const _: () = assert!(std::mem::size_of::<MidiMapping>() == 32);
 struct ClumpNameInfo {
     id: u32,
     name: sys::CFStringRef,
+}
+
+/// The factory presets the unit lists (`core::PROGRAM_LIST`), numbered `0`, `1` and `2`: the bare
+/// `AUPreset` structs a `kAudioUnitProperty_FactoryPresets` array points at, and the strings
+/// their names are.
+struct FactoryPresets {
+    _names: [CFString; 3],
+    presets: [sys::AUPreset; 3],
+}
+
+// SAFETY: built once and never changed; a `CFString` is immutable and thread-safe, and each
+// struct holds a pointer to one of the strings kept beside it.
+unsafe impl Send for FactoryPresets {}
+// SAFETY: as `Send`: nothing is written after construction.
+unsafe impl Sync for FactoryPresets {}
+
+fn factory_presets() -> &'static FactoryPresets {
+    static PRESETS: OnceLock<FactoryPresets> = OnceLock::new();
+    PRESETS.get_or_init(|| {
+        let names = core::PROGRAM_LIST.2.map(CFString::new);
+        let presets = std::array::from_fn(|i| sys::AUPreset {
+            presetNumber: i as i32,
+            presetName: names[i].as_concrete_TypeRef() as sys::CFStringRef,
+        });
+        FactoryPresets {
+            _names: names,
+            presets,
+        }
+    })
 }
 
 /// Channels the unit's one bus has a side.
@@ -266,7 +300,7 @@ struct Instance {
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(|e| e.into_inner())
+    m.lock_recover()
 }
 
 impl Instance {
@@ -500,6 +534,12 @@ fn property_shape(
         }
         x if x == sys::kAudioUnitProperty_AudioUnitMIDIProtocol && global => (4, false),
         x if x == sys::kAudioUnitProperty_OfflineRender && global => (4, true),
+        x if x == sys::kAudioUnitProperty_FactoryPresets && global => {
+            (std::mem::size_of::<*const c_void>() as u32, false)
+        }
+        x if x == sys::kAudioUnitProperty_PresentPreset && global => {
+            (std::mem::size_of::<sys::AUPreset>() as u32, true)
+        }
         x if x == sys::kAudioUnitProperty_ElementName => {
             if !is_stream_scope(scope) {
                 return Err(ERR_INVALID_SCOPE);
@@ -743,6 +783,33 @@ unsafe extern "C" fn get_property(
                     let offline = lock(&i.ctl).offline;
                     write_property(data, io_size, offline)
                 }
+                // The array is the caller's (Copy rule); it holds the bare structs of
+                // `factory_presets`, which it neither retains nor frees.
+                x if x == sys::kAudioUnitProperty_FactoryPresets => {
+                    let listed = factory_presets();
+                    let values: [*const c_void; 3] =
+                        std::array::from_fn(|n| std::ptr::from_ref(&listed.presets[n]).cast());
+                    let array = CFArrayCreate(
+                        std::ptr::null(),
+                        values.as_ptr(),
+                        values.len() as isize,
+                        std::ptr::null(),
+                    );
+                    write_property(data, io_size, array)
+                }
+                // The program `Core::program` holds, as its number and name; the name is a
+                // reference the caller owns (Copy rule).
+                x if x == sys::kAudioUnitProperty_PresentPreset => {
+                    let preset = factory_presets().presets[i.core.program() as usize];
+                    write_property(
+                        data,
+                        io_size,
+                        sys::AUPreset {
+                            presetNumber: preset.presetNumber,
+                            presetName: CFRetain(preset.presetName.cast()) as sys::CFStringRef,
+                        },
+                    )
+                }
                 // Copy rule: the caller owns the reference it is given.
                 x if x == sys::kAudioUnitProperty_ElementName => {
                     let name = &i.names[usize::from(scope == sys::kAudioUnitScope_Output)];
@@ -835,6 +902,19 @@ unsafe extern "C" fn set_property(
                         return ERR_INVALID_PROPERTY_VALUE;
                     };
                     ctl.offline = u32::from(offline != 0);
+                    0
+                }
+                // A factory preset's number selects the program; a number
+                // the unit does not list is refused.
+                x if x == sys::kAudioUnitProperty_PresentPreset => {
+                    let Some(preset) = read_property::<sys::AUPreset>(data, size) else {
+                        return ERR_INVALID_PROPERTY_VALUE;
+                    };
+                    let last = core::PROGRAM_LIST.2.len() as i32 - 1;
+                    if !(0..=last).contains(&preset.presetNumber) {
+                        return ERR_INVALID_PROPERTY_VALUE;
+                    }
+                    i.core.set_program(preset.presetNumber as u32);
                     0
                 }
                 // The host's write of the bypass is the plugin's parameter

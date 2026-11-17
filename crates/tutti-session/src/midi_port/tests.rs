@@ -52,7 +52,13 @@ fn the_stamp_stream_is_carried_across_a_closed_output() {
             rx_jr: true,
             tx_jr: false,
         });
-    s.midi_nodes().unwrap().clock_master.set_enabled(true);
+    s.midi_nodes()
+        .unwrap()
+        .clock_master
+        .set_sends(tutti_midi_runtime::ClockSends {
+            timing: true,
+            ..Default::default()
+        });
     s.play().expect("room");
     render(&s, 8);
     let _ = s.update();

@@ -7,6 +7,7 @@
 use std::ffi::{c_char, c_void};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::SeqCst};
+use tutti_rt::LockExt;
 
 use vst3::{Class, ComPtr, ComRef, ComWrapper, Steinberg::Vst::*, Steinberg::*, uid};
 
@@ -131,7 +132,7 @@ impl Plugin {
             core::NOTICE_GESTURE_ON_LOAD => &core::GESTURE_VALUES,
             _ => return,
         };
-        let handler = self.handler.lock().unwrap_or_else(|e| e.into_inner());
+        let handler = self.handler.lock_recover();
         if let Some(h) = handler.as_ref() {
             // SAFETY: `h` is the host's handler, held since `setComponentHandler`.
             unsafe {
@@ -348,7 +349,7 @@ impl IAudioProcessorTrait for Plugin {
         // SAFETY, for this function's `unsafe` blocks: `setup` is valid for the call.
         let s = unsafe { &*setup };
         self.core.prepare(
-            &mut self.dsp.lock().unwrap_or_else(|e| e.into_inner()),
+            &mut self.dsp.lock_recover(),
             s.sampleRate,
             s.maxSamplesPerBlock.max(0) as usize,
         );
@@ -359,15 +360,14 @@ impl IAudioProcessorTrait for Plugin {
             return kInternalError;
         }
         if state == 0 {
-            self.core
-                .reset(&mut self.dsp.lock().unwrap_or_else(|e| e.into_inner()));
+            self.core.reset(&mut self.dsp.lock_recover());
         }
         kResultOk
     }
     unsafe fn process(&self, data: *mut ProcessData) -> tresult {
         // SAFETY, for this function's `unsafe` blocks: `data` and the lists, buses and channel pointers in it are valid for the call (ivstaudioprocessor.h); a channel holds `numSamples` samples.
         let d = unsafe { &*data };
-        let mut guard = self.dsp.lock().unwrap_or_else(|e| e.into_inner());
+        let mut guard = self.dsp.lock_recover();
         let dsp = &mut *guard;
 
         if let Some(ctx) = unsafe { d.processContext.as_ref() } {
@@ -552,6 +552,16 @@ impl IMidiMappingTrait for Plugin {
     }
 }
 
+/// The default of a parameter VST3 lists: the program-change parameter selects the first
+/// program.
+fn default_of(id: u32) -> Option<f64> {
+    if id == core::PROGRAM {
+        Some(0.0)
+    } else {
+        core::default_of(id)
+    }
+}
+
 impl IUnitInfoTrait for Plugin {
     unsafe fn getUnitCount(&self) -> i32 {
         core::UNITS.len() as i32
@@ -567,17 +577,39 @@ impl IUnitInfoTrait for Plugin {
         info.id = id;
         info.parentUnitId = parent;
         put_wstring(name, &mut info.name);
-        info.programListId = kNoProgramListId;
+        info.programListId = if id == core::PROGRAM_UNIT {
+            core::PROGRAM_LIST.0
+        } else {
+            kNoProgramListId
+        };
         kResultOk
     }
     unsafe fn getProgramListCount(&self) -> i32 {
-        0
+        1
     }
-    unsafe fn getProgramListInfo(&self, _index: i32, _info: *mut ProgramListInfo) -> tresult {
-        kInvalidArgument
+    unsafe fn getProgramListInfo(&self, index: i32, info: *mut ProgramListInfo) -> tresult {
+        let (id, name, programs) = core::PROGRAM_LIST;
+        if index != 0 {
+            return kInvalidArgument;
+        }
+        // SAFETY: `info` is an out-pointer the host owns for the call.
+        let info = unsafe { &mut *info };
+        info.id = id;
+        put_wstring(name, &mut info.name);
+        info.programCount = programs.len() as i32;
+        kResultOk
     }
-    unsafe fn getProgramName(&self, _list: i32, _index: i32, _name: *mut String128) -> tresult {
-        kInvalidArgument
+    unsafe fn getProgramName(&self, list: i32, index: i32, name: *mut String128) -> tresult {
+        let (id, _, programs) = core::PROGRAM_LIST;
+        let Some(program) = usize::try_from(index).ok().and_then(|i| programs.get(i)) else {
+            return kInvalidArgument;
+        };
+        if list != id {
+            return kInvalidArgument;
+        }
+        // SAFETY: `name` is an out-pointer the host owns for the call.
+        put_wstring(program, unsafe { &mut *name });
+        kResultOk
     }
     unsafe fn getProgramInfo(
         &self,
@@ -660,16 +692,16 @@ impl IEditControllerTrait for Plugin {
         kResultOk
     }
     unsafe fn getParameterCount(&self) -> i32 {
-        core::LISTED as i32
+        core::VST3_LISTED_IDS.len() as i32
     }
     unsafe fn getParameterInfo(&self, index: i32, info: *mut ParameterInfo) -> tresult {
         let Some(&id) = usize::try_from(index)
             .ok()
-            .and_then(|i| core::LISTED_IDS.get(i))
+            .and_then(|i| core::VST3_LISTED_IDS.get(i))
         else {
             return kInvalidArgument;
         };
-        let Some(default) = core::default_of(id) else {
+        let Some(default) = default_of(id) else {
             return kInvalidArgument;
         };
         // The id is the parameter's, not its position in the list.
@@ -684,25 +716,30 @@ impl IEditControllerTrait for Plugin {
             core::MODE => (core::MODES - 1) as i32,
             // A switch: two positions.
             core::BYPASS => 1,
+            core::PROGRAM => core::PROGRAM_LIST.2.len() as i32 - 1,
             _ => 0,
         };
         info.defaultNormalizedValue = default;
-        info.unitId = if index as u32 == core::AUX {
-            core::AUX_UNIT
-        } else {
-            0
+        info.unitId = match index as u32 {
+            core::AUX => core::AUX_UNIT,
+            core::PROGRAM => core::PROGRAM_UNIT,
+            _ => 0,
         };
         let can_automate: i32 = sdk(ParameterInfo_::ParameterFlags_::kCanAutomate);
         let is_bypass: i32 = sdk(ParameterInfo_::ParameterFlags_::kIsBypass);
+        let is_program_change: i32 = sdk(ParameterInfo_::ParameterFlags_::kIsProgramChange);
+        let is_list: i32 = sdk(ParameterInfo_::ParameterFlags_::kIsList);
+        let is_program = is_program_change | is_list;
         info.flags = match index as u32 {
             core::METER => sdk(ParameterInfo_::ParameterFlags_::kIsReadOnly),
             core::BYPASS => can_automate | is_bypass,
+            core::PROGRAM => can_automate | is_program,
             _ => can_automate,
         };
         kResultOk
     }
     unsafe fn getParamStringByValue(&self, id: u32, v: f64, s: *mut String128) -> tresult {
-        if core::default_of(id).is_none() {
+        if default_of(id).is_none() {
             return kInvalidArgument;
         }
         // SAFETY, for this function's `unsafe` blocks: `s` is a valid `String128` the host owns for the call.
@@ -710,7 +747,7 @@ impl IEditControllerTrait for Plugin {
         kResultOk
     }
     unsafe fn getParamValueByString(&self, id: u32, s: *mut TChar, v: *mut f64) -> tresult {
-        if core::default_of(id).is_none() {
+        if default_of(id).is_none() {
             return kInvalidArgument;
         }
         let mut units = Vec::new();
@@ -746,19 +783,22 @@ impl IEditControllerTrait for Plugin {
         }
     }
     unsafe fn getParamNormalized(&self, id: u32) -> f64 {
+        if id == core::PROGRAM {
+            return self.core.program_normalized();
+        }
         self.core.param(id).unwrap_or(0.0)
     }
     unsafe fn setParamNormalized(&self, id: u32, v: f64) -> tresult {
-        if core::default_of(id).is_none() {
+        if default_of(id).is_none() {
             return kInvalidArgument;
         }
-        self.core.set_param(id, v);
+        self.core.apply(id, v);
         kResultOk
     }
     unsafe fn setComponentHandler(&self, h: *mut IComponentHandler) -> tresult {
         // SAFETY: `h` is the host's handler or null; `ComRef` checks for null.
         let handler = unsafe { ComRef::from_raw(h) }.map(|r| r.to_com_ptr());
-        *self.handler.lock().unwrap_or_else(|e| e.into_inner()) = handler;
+        *self.handler.lock_recover() = handler;
         kResultOk
     }
     unsafe fn createView(&self, _name: *const c_char) -> *mut IPlugView {

@@ -29,7 +29,8 @@
 //! reports values in future needs the same filter.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
+use tutti_rt::LockExt;
 
 use crate::{Notice, PluginHandle, Subscription};
 use tutti_plugin_types::{Normalized, ParamId, ParamRange, ParameterInfo};
@@ -48,10 +49,7 @@ pub struct ParamReporter(Edits);
 impl ParamReporter {
     /// Queues a value as if the plugin had reported it.
     pub fn report(&self, id: ParamId, value: Normalized) {
-        self.0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push((id, value));
+        self.0.lock_recover().push((id, value));
     }
 }
 
@@ -171,10 +169,7 @@ impl PluginParamValues {
             if let Notice::Param(edit) = notice
                 && let Some(value) = edit.value()
             {
-                queue
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .push((edit.id(), value));
+                queue.lock_recover().push((edit.id(), value));
             }
         });
         let mirror = Self {
@@ -212,10 +207,7 @@ impl PluginParamValues {
     /// Queues a value as if the plugin had reported it: the host set it, and
     /// reads of it answer it at once.
     pub fn report(&self, id: ParamId, value: Normalized) {
-        self.edits
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push((id, value));
+        self.edits.lock_recover().push((id, value));
     }
 
     /// A handle that reports into this mirror without borrowing it.
@@ -260,8 +252,7 @@ impl PluginParamValues {
     /// The newest value queued for `id`, if one is.
     fn latest(&self, id: ParamId) -> Option<Normalized> {
         self.edits
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .lock_recover()
             .iter()
             .rev()
             .find_map(|&(at, value)| (at == id).then_some(value))
@@ -312,7 +303,7 @@ impl PluginParamValues {
         let Some(declared) = self.declared.as_mut() else {
             return;
         };
-        let edits = std::mem::take(&mut *self.edits.lock().unwrap_or_else(PoisonError::into_inner));
+        let edits = std::mem::take(&mut *self.edits.lock_recover());
         for (id, value) in edits {
             if let Some(&at) = declared.index.get(&id) {
                 declared.values[at] = value;

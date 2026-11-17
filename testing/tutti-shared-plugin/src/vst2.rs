@@ -5,6 +5,7 @@
 extern crate tutti_vst2_author as vst;
 
 use std::sync::{Arc, Mutex};
+use tutti_rt::LockExt;
 
 use vst::api::{self, AEffect, HostCallbackProc, TimeInfoFlags};
 use vst::buffer::AudioBuffer;
@@ -55,6 +56,20 @@ impl PluginParameters for Params {
             }
             _ => false,
         }
+    }
+    fn change_preset(&self, preset: i32) {
+        if let Ok(index) = u32::try_from(preset) {
+            self.0.set_program(index);
+        }
+    }
+    fn get_preset_num(&self) -> i32 {
+        self.0.program() as i32
+    }
+    fn get_preset_name(&self, preset: i32) -> String {
+        usize::try_from(preset)
+            .ok()
+            .and_then(|i| core::PROGRAM_LIST.2.get(i))
+            .map_or(String::new(), |name| (*name).to_string())
     }
     fn get_parameter_name(&self, index: i32) -> String {
         usize::try_from(index)
@@ -111,7 +126,7 @@ impl Plugin for Shared {
             unique_id: UNIQUE_ID,
             version: 1,
             parameters: core::PARAMS as i32,
-            presets: 1,
+            presets: core::PROGRAM_LIST.2.len() as i32,
             inputs: 2,
             outputs: 2,
             midi_inputs: 1,
@@ -135,18 +150,14 @@ impl Plugin for Shared {
         self.double = double;
     }
     fn resume(&mut self) {
-        self.core.prepare(
-            &mut self.dsp.lock().unwrap_or_else(|e| e.into_inner()),
-            self.rate,
-            self.block,
-        );
+        self.core
+            .prepare(&mut self.dsp.lock_recover(), self.rate, self.block);
     }
     /// What a plugin does on `effStopProcess`: forgets its signal history. The header gives
     /// the opcode no meaning beyond "no arguments" (`aeffectx.h`); a delay or reverb that
     /// clears its buffers when it stops is the practice a host's `reset` relies on.
     fn stop_process(&mut self) {
-        self.core
-            .reset(&mut self.dsp.lock().unwrap_or_else(|e| e.into_inner()));
+        self.core.reset(&mut self.dsp.lock_recover());
     }
     fn can_do(&self, can_do: CanDo) -> api::Supported {
         match can_do {
@@ -162,7 +173,7 @@ impl Plugin for Shared {
     }
 
     fn process_events(&mut self, events: &api::Events) {
-        let mut dsp = self.dsp.lock().unwrap_or_else(|e| e.into_inner());
+        let mut dsp = self.dsp.lock_recover();
         for i in 0..events.num_events.max(0) as usize {
             // SAFETY: `Events` is a flexible array of `num_events` pointers.
             let ev = unsafe { *events.events.as_ptr().add(i) };
@@ -238,7 +249,7 @@ impl Shared {
             inputs.len().min(MAX_CHANNELS),
             outputs.len().min(MAX_CHANNELS),
         );
-        let mut dsp = self.dsp.lock().unwrap_or_else(|e| e.into_inner());
+        let mut dsp = self.dsp.lock_recover();
         self.ask_time();
         let scratch = self
             .core

@@ -41,6 +41,7 @@ use tutti_rt::LockExt;
 use tutti_types::{ChannelLayout, SampleRate};
 
 use super::{HostPlugin, Mirror, Open, Origin, PluginLoad, PluginLoaded, PluginNode};
+use crate::PluginPresets;
 use crate::peer::{ResourceIds, sealed};
 use crate::{
     Declared, GiveUp, HandleError, Hold, HoldKind, IntoPool, Key, Life, Load, LoadError, Peer,
@@ -116,6 +117,8 @@ impl<T: Send + 'static> Drop for Affine<T> {
 /// node takes it out ([`release_handle`](Self::release_handle)), so a handle
 /// to the entry never keeps a server alive past its node.
 struct Standing {
+    /// The loaded plugin instance this standing belongs to.
+    instance: ResourceId,
     handle: Mutex<Option<Affine<PluginHandle>>>,
     /// The session recovers a plugin that dies at its node.
     recovery: bool,
@@ -179,7 +182,30 @@ pub(crate) struct PooledLink {
     standing: Arc<Standing>,
 }
 
+/// A node's hold on one plugin instance, read from another thread: which
+/// instance it is, and whether a node still hosts it.
+#[derive(Clone)]
+pub(crate) struct Hosted(Arc<Standing>);
+
+impl Hosted {
+    /// The plugin instance the node hosts: the one its loads reach.
+    pub(crate) fn instance(&self) -> ResourceId {
+        self.0.instance
+    }
+
+    /// Whether a node still hosts the instance: not once the node is removed,
+    /// or a swap replaced the plugin.
+    pub(crate) fn is_hosted(&self) -> bool {
+        self.0.hosted.load(Ordering::Acquire)
+    }
+}
+
 impl PooledLink {
+    /// The node's hold on its plugin instance.
+    pub(crate) fn hosted(&self) -> Hosted {
+        Hosted(Arc::clone(&self.standing))
+    }
+
     /// Recovery gave up on the plugin.
     pub(crate) fn gave_up(&self, why: GiveUp) {
         *self.standing.gave_up.lock_recover() = Some(why);
@@ -204,6 +230,7 @@ pub struct PluginInfo {
     descriptor: PluginDescriptor,
     hosting: Hosting,
     server_pid: Option<u32>,
+    presets: PluginPresets,
 }
 
 impl PluginInfo {
@@ -231,6 +258,14 @@ impl PluginInfo {
     #[must_use]
     pub const fn hosting(&self) -> Hosting {
         self.hosting
+    }
+
+    /// What the plugin does with presets, and its list. The list belongs to this
+    /// plugin instance: read once for it ([`PluginPresets::is_read`]), never per
+    /// call, and a reload makes a new instance with a new info.
+    #[must_use]
+    pub const fn presets(&self) -> &PluginPresets {
+        &self.presets
     }
 }
 
@@ -273,11 +308,14 @@ impl fmt::Debug for LoadedPlugin {
 }
 
 impl LoadedPlugin {
+    /// `main` is the proof of the main thread where the load lands there (an
+    /// in-process plugin), and `None` for a served plugin.
     fn new(
         cx: &Context,
         open: Open,
         loadable: Loadable,
         config: AudioConfig,
+        main: Option<MainThreadMarker>,
     ) -> Result<Self, LoadError> {
         let Open {
             plugin,
@@ -289,17 +327,34 @@ impl LoadedPlugin {
         let served = hosting == Hosting::OutOfProcess;
         let handle = plugin.handle().clone();
         let ports = ports_of(&handle);
+        let id = cx.ids.mint();
+        let presets = PluginPresets::new(handle.preset_support(), id);
+        if presets.support().can_list() {
+            match main {
+                Some(main) => presets.fill(handle.presets(main)),
+                // A served plugin's list is a round trip that takes the main
+                // thread's proof: the first update there reads it. The closure
+                // holds a clone of the plugin's handle until that update runs,
+                // so a session never updated on the main thread keeps it.
+                None => {
+                    let (list, handle) = (presets.clone(), handle.clone());
+                    cx.work.defer(move |main| list.fill(handle.presets(main)));
+                }
+            }
+        }
         let info = PluginInfo {
             plugin: plugin.plugin().clone(),
             descriptor: handle.descriptor().clone(),
             hosting,
             server_pid: handle.server_pid(),
+            presets,
         };
         let main_only = !served;
         Ok(Self {
-            id: cx.ids.mint(),
+            id,
             info: Arc::new(info),
             standing: Arc::new(Standing {
+                instance: id,
                 handle: Mutex::new(Some(Affine::new(handle, &cx.work, main_only))),
                 recovery: cx.recovery,
                 hosted: AtomicBool::new(false),
@@ -452,7 +507,7 @@ fn land(
     main: Option<MainThreadMarker>,
 ) -> Result<LoadedPlugin, LoadError> {
     let (loadable, config, open) = loaded.finish(main);
-    LoadedPlugin::new(cx, open, loadable, config)
+    LoadedPlugin::new(cx, open, loadable, config, main)
 }
 
 /// A plugin to keep loaded, under `key`: what [`Session::plugin_entry`]

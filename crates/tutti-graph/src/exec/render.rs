@@ -1,6 +1,7 @@
 //! Rendering a block: the serial and parallel paths over a plan's ops.
 
 use std::sync::atomic::Ordering;
+use tutti_buffers::Float;
 
 use tutti_rt::RingWriter;
 use tutti_rt::{RtScope, with_no_denormals};
@@ -28,10 +29,10 @@ use crate::slots::{EventSlots, SlotFlags};
 /// waiting behind it, if any — from the next block on.
 #[cold]
 #[inline(never)]
-pub(super) fn end_fades(
+pub(super) fn end_fades<F: Float>(
     plan: &Plan,
-    store: &mut [Option<Unit>],
-    fade_back: &mut RingWriter<Box<Crossfade>>,
+    store: &mut [Option<Unit<F>>],
+    fade_back: &mut RingWriter<Box<Crossfade<F>>>,
     inject: &mut [Inject],
     has_inject: &mut [bool],
 ) {
@@ -72,7 +73,7 @@ pub(super) fn end_fades(
     }
 }
 
-impl Executor {
+impl<F: Float> Executor<F> {
     /// Renders one block of `frames` into `outputs`, reading `inputs`.
     ///
     /// `inputs` must have a slice per global input channel the plan reads, and
@@ -90,8 +91,8 @@ impl Executor {
         &mut self,
         frames: usize,
         transport: &TransportPosition,
-        inputs: &[&[f32]],
-        outputs: &mut [&mut [f32]],
+        inputs: &[&[F]],
+        outputs: &mut [&mut [F]],
     ) {
         self.process_with_changes(frames, transport, &TransportChanges::NONE, inputs, outputs);
     }
@@ -113,8 +114,8 @@ impl Executor {
         frames: usize,
         transport: &TransportPosition,
         changes: &TransportChanges,
-        inputs: &[&[f32]],
-        outputs: &mut [&mut [f32]],
+        inputs: &[&[F]],
+        outputs: &mut [&mut [F]],
     ) {
         with_no_denormals(|| {
             self.apply_pending();
@@ -149,8 +150,8 @@ impl Executor {
         frames: usize,
         transport: &TransportPosition,
         changes: &TransportChanges,
-        inputs: &[&[f32]],
-        outputs: &mut [&mut [f32]],
+        inputs: &[&[F]],
+        outputs: &mut [&mut [F]],
     ) {
         let _rt = RtScope::enter();
         // `move` captures `self` as one pointer; the precise capture of every
@@ -165,7 +166,7 @@ impl Executor {
                 // playhead sees the transport move. A command whose time passes
                 // meanwhile lands late when the units are back.
                 for o in outputs.iter_mut() {
-                    o[..frames].fill(0.0);
+                    o[..frames].fill(F::ZERO);
                 }
                 let rate = next.sample_rate();
                 let mut env = Env {
@@ -244,7 +245,7 @@ impl Executor {
             let history: &TransportHistory = history;
             let Some(plan) = plan.as_ref() else {
                 for o in outputs.iter_mut() {
-                    o[..frames].fill(0.0);
+                    o[..frames].fill(F::ZERO);
                 }
                 *frame += Samples(frames);
                 return;
@@ -261,7 +262,7 @@ impl Executor {
                     plan.rendered_outputs()
                 );
                 for o in outputs.iter_mut() {
-                    o[..frames].fill(0.0);
+                    o[..frames].fill(F::ZERO);
                 }
                 commands.observe(&env);
                 *frame += Samples(frames);
@@ -357,7 +358,7 @@ impl Executor {
                         event_fb,
                         taps,
                         event_taps,
-                        meters: &*meters,
+                        meters,
                         lanes: &mut lanes[..],
                         inject,
                         has_inject,
@@ -500,7 +501,7 @@ impl Executor {
                             }
                         }
                         Op::Meter { meter, srcs } => {
-                            if let Some(meter) = meters[meter as usize].as_ref() {
+                            if let Some(meter) = meters[meter as usize].as_mut() {
                                 meter_op(
                                     meter,
                                     &*st.arena,

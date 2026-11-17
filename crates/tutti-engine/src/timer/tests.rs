@@ -1,6 +1,6 @@
 use std::cell::{Cell, RefCell};
-use std::sync::atomic::{AtomicBool, Ordering};
 
+use tutti_rt::StopToken;
 use tutti_types::SampleRate;
 
 use super::pacer::{Due, MAX_LAG_BLOCKS, Pacer, Timebase};
@@ -42,7 +42,7 @@ impl Timebase for Scripted {
 /// Runs the loop until `blocks` have rendered; returns the deadlines it was
 /// handed and how many times it re-anchored.
 fn blocks_on(time: &Scripted, pacer: &mut Pacer, blocks: usize) -> (Vec<i64>, usize) {
-    let stop = AtomicBool::new(false);
+    let stop = StopToken::new();
     let rendered = RefCell::new(Vec::new());
     let overruns = Cell::new(0);
     run(
@@ -52,7 +52,7 @@ fn blocks_on(time: &Scripted, pacer: &mut Pacer, blocks: usize) -> (Vec<i64>, us
         |os_ns| {
             rendered.borrow_mut().push(os_ns);
             if rendered.borrow().len() == blocks {
-                stop.store(true, Ordering::Release);
+                stop.stop();
             }
         },
         || overruns.set(overruns.get() + 1),
@@ -153,7 +153,7 @@ fn a_blocks_os_time_is_its_deadline_not_its_wake_up() {
     let time = Scripted::at(0);
     time.wake_late.set(3 * MS);
     let mut pacer = pacer_at(0);
-    let stop = AtomicBool::new(false);
+    let stop = StopToken::new();
     let seen = RefCell::new(Vec::<i64>::new());
     run(
         &time,
@@ -162,7 +162,7 @@ fn a_blocks_os_time_is_its_deadline_not_its_wake_up() {
         |os_ns| {
             seen.borrow_mut().push(os_ns);
             if seen.borrow().len() == 20 {
-                stop.store(true, Ordering::Release);
+                stop.stop();
             }
         },
         || {},
@@ -204,7 +204,7 @@ fn a_stall_re_anchors_once_and_records_exactly_one_fault() {
         stalled: Cell::new(false),
     };
     let faults = StreamFaults::new();
-    let stop = AtomicBool::new(false);
+    let stop = StopToken::new();
     let rendered = RefCell::new(Vec::<i64>::new());
     let mut pacer = pacer_at(0);
     run(
@@ -214,7 +214,7 @@ fn a_stall_re_anchors_once_and_records_exactly_one_fault() {
         |os_ns| {
             rendered.borrow_mut().push(os_ns);
             if rendered.borrow().len() == 30 {
-                stop.store(true, Ordering::Release);
+                stop.stop();
             }
         },
         || faults.record_overrun("late"),

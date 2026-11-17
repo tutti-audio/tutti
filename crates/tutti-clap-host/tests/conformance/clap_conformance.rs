@@ -21,6 +21,7 @@
 
 use std::path::Path;
 use std::sync::Mutex;
+use tutti_rt::LockExt;
 
 use crate::support;
 use support::active::{Activate, Active, ActiveExt};
@@ -128,7 +129,7 @@ fn drive_once(
     frames: usize,
     ctx: &ClapProcessContext<'_>,
 ) -> ProcessCapture {
-    let _lock = CAPTURE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let _lock = CAPTURE_LOCK.lock_recover();
     let mut out_l = vec![0.0f32; frames];
     let mut out_r = vec![0.0f32; frames];
     let in_l = vec![0.0f32; frames];

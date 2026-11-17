@@ -28,7 +28,8 @@
 //! holder.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
+use tutti_rt::LockExt;
 
 use tutti_plugin_types::{ChunkCounters, PluginInvalidation, PluginTail};
 use tutti_transport::ProjectMeter;
@@ -406,7 +407,7 @@ impl PluginControls {
 ///
 /// Public for `tutti-plugin`'s node of a served plugin, which drives the same piece.
 pub fn lock_tail(tail: &Mutex<PluginTail>) -> std::sync::MutexGuard<'_, PluginTail> {
-    tail.lock().unwrap_or_else(PoisonError::into_inner)
+    tail.lock_recover()
 }
 
 /// The live node's sources as a fork's gather read them

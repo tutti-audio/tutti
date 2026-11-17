@@ -1,6 +1,7 @@
 //! What the executor holds for a plan: its units, delay rings and
 //! injections, and the state a plan's ops run against.
 
+use tutti_buffers::Float;
 use tutti_types::Tail;
 
 use super::commit::{Crossfade, NodeBox};
@@ -18,9 +19,9 @@ use crate::par::Par;
 use crate::param::ParamState;
 use crate::tap::TapWriter;
 
-pub(crate) struct Unit {
+pub(crate) struct Unit<F: Float = f32> {
     pub(super) generation: u32,
-    pub(super) node: NodeBox,
+    pub(super) node: NodeBox<F>,
     /// Consecutive frames of fully silent input, saturating.
     pub(super) quiet: u64,
     /// Whether the last call (or skip) left every output silent and wrote no
@@ -35,23 +36,23 @@ pub(crate) struct Unit {
     /// inputs and reports.
     pub(super) reported: Option<Tail>,
     /// The crossfade running here: `node` is its incoming unit.
-    pub(super) fade: Option<Box<Crossfade>>,
+    pub(super) fade: Option<Box<Crossfade<F>>>,
     /// A crossfade waiting for `fade` to end.
-    pub(super) queued: Option<Box<Crossfade>>,
+    pub(super) queued: Option<Box<Crossfade<F>>>,
     /// Its declared params' modulation state and per-frame buffers.
     pub(super) params: ParamState,
     /// The keys its event outputs hold or owe (`held.rs`).
     pub(super) keys: Keys,
     /// Its mode and the state that applies it (`mode.rs`).
-    pub(super) mode: ModeState,
+    pub(super) mode: ModeState<F>,
 }
 
-impl Unit {
+impl<F: Float> Unit<F> {
     pub(super) fn new(
         generation: u32,
-        node: NodeBox,
+        node: NodeBox<F>,
         params: ParamState,
-        mode: ModeState,
+        mode: ModeState<F>,
         keys: Keys,
     ) -> Self {
         Self {
@@ -88,8 +89,8 @@ pub(super) struct Gone {
     pub(super) held_refused: Vec<(NodeKey, u32)>,
 }
 
-pub(crate) enum Ring {
-    Audio(AudioRing),
+pub(crate) enum Ring<F: Float = f32> {
+    Audio(AudioRing<F>),
     Event(EventFifo),
 }
 
@@ -198,16 +199,16 @@ impl Inject {
 /// Everything the executor rebuilds when applying: the arenas, the delay and
 /// feedback state, and pending injections. Retired into the commit box
 /// whole, so the old one is freed on the control side.
-pub(super) struct State {
-    pub(super) arena: Arena,
+pub(super) struct State<F: Float = f32> {
+    pub(super) arena: Arena<F>,
     /// Per audio slot, what is known about its block: [`SILENT`] and
     /// [`CONSTANT`] bits. One byte per slot, so a node's input masks are
     /// built with a load and two shifts per channel. The parallel executor
     /// runs on a shared atomic copy (`par.rs`).
     pub(super) flags: Vec<u8>,
     pub(super) events: Vec<Vec<Event>>,
-    pub(super) rings: Vec<Option<Ring>>,
-    pub(super) audio_fb: Vec<Option<AudioRing>>,
+    pub(super) rings: Vec<Option<Ring<F>>>,
+    pub(super) audio_fb: Vec<Option<AudioRing<F>>>,
     pub(super) event_fb: Vec<Option<EventFifo>>,
     /// One producer per planned tap lane (`None`: nobody opened it).
     pub(super) taps: Vec<Option<TapWriter>>,
@@ -230,7 +231,7 @@ pub(super) struct State {
     pub(super) par: Option<Par>,
 }
 
-impl State {
+impl<F: Float> State<F> {
     pub(super) fn empty(max_block: usize) -> Self {
         Self {
             arena: Arena::new(1, max_block),

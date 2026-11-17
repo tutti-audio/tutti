@@ -77,6 +77,7 @@
 
 mod support;
 use support::corpus;
+use tutti_rt::LockExt;
 
 use std::sync::Mutex;
 
@@ -92,7 +93,7 @@ static AU_LOCK: Mutex<()> = Mutex::new(());
 /// Poison is recovered rather than propagated, so one panicking test does not
 /// turn every later one into a spurious `PoisonError`.
 fn lock() -> std::sync::MutexGuard<'static, ()> {
-    AU_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    AU_LOCK.lock_recover()
 }
 
 const RATE: tutti_types::SampleRate = tutti_types::SampleRate::SR_48K;

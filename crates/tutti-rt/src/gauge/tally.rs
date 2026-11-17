@@ -3,8 +3,9 @@
 //! A [`Counter`](super::Counter) has one writer, by type, and a `reopen` that
 //! fails while the old writer lives. A tally is for a count whose writers
 //! overlap (two inlets of one port while a device is replugged): every
-//! [`TallyWriter`] is `Clone` and adds with one `fetch_add` per word, so each
-//! add is wait-free and none is lost to another writer.
+//! [`TallyWriter`] is `Clone` and adds through `&self` with one `fetch_add` per
+//! word, so one writer may also be shared by reference across threads. Each add
+//! is wait-free and none is lost to another writer.
 //!
 //! - **Not saturating.** A saturating add over many writers is a compare-and-swap
 //!   loop, which is not wait-free. A word wraps after 2^64 events: 584 years at
@@ -43,7 +44,7 @@ struct Cells {
 /// use tutti_rt::tally;
 ///
 /// let lost = tally::<u64>();
-/// let (mut a, mut b) = (lost.writer(), lost.writer());
+/// let (a, b) = (lost.writer(), lost.writer());
 /// a.add(2);
 /// b.add(3);
 /// assert_eq!(lost.get(), 5);
@@ -53,7 +54,8 @@ pub struct Tally<U: Count> {
     _count: PhantomData<fn() -> U>,
 }
 
-/// A writing end of a [`Tally`]: `Clone`, one per adding thread or owner.
+/// A writing end of a [`Tally`]: `Clone`, one per owner, shared by reference
+/// among the threads that add through it.
 #[must_use]
 pub struct TallyWriter<U: Count> {
     cells: Arc<Cells>,
@@ -104,7 +106,8 @@ impl<U: Count> Tally<U> {
         U::from_words(words)
     }
 
-    /// A new writer for the cell. Control side: it clones one `Arc`.
+    /// A new writer for the cell. It clones one `Arc`, so mint writers on the
+    /// control side and add through them from any thread.
     pub fn writer(&self) -> TallyWriter<U> {
         TallyWriter {
             cells: Arc::clone(&self.cells),
@@ -115,9 +118,10 @@ impl<U: Count> Tally<U> {
 
 impl<U: Count> TallyWriter<U> {
     /// Adds `by` to the total, one `fetch_add` per word, wrapping at 2^64.
-    /// Wait-free; allocates nothing.
+    /// Wait-free; allocates nothing. `&self`: writers on any number of threads
+    /// add at once, through one shared writer or several.
     #[inline]
-    pub fn add(&mut self, by: U) {
+    pub fn add(&self, by: U) {
         let by = by.to_words();
         for (add, cell) in by.as_slice().iter().zip(&*self.cells.words) {
             cell.fetch_add(*add, Ordering::Relaxed);
