@@ -1,4 +1,4 @@
-use std::io::Cursor;
+use std::io::{self, Cursor};
 
 use super::*;
 use crate::{DecodeError, Wave};
@@ -209,4 +209,109 @@ fn a_file_of_65535_channels_is_refused_by_the_path_entry_points() {
         Wave::read_metadata(&path),
         Err(DecodeError::Unsupported(_))
     ));
+}
+
+/// A source that counts the bytes read from it.
+struct Counting<'a> {
+    inner: Cursor<&'a [u8]>,
+    read: usize,
+}
+
+impl Read for Counting<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let n = self.inner.read(buf)?;
+        self.read += n;
+        Ok(n)
+    }
+}
+
+impl Seek for Counting<'_> {
+    fn seek(&mut self, to: SeekFrom) -> io::Result<u64> {
+        self.inner.seek(to)
+    }
+}
+
+/// A source that opens as a FLAC or Ogg stream this build reads is not scanned for a WAVE
+/// header: at most the opening bytes are read, though a bad WAVE follows.
+#[test]
+fn a_source_opening_as_another_container_is_not_scanned() {
+    let bad = wav(&[], &basic_fmt(PCM, 65_535, 16));
+    let mut openings: Vec<&[u8]> = Vec::new();
+    if cfg!(feature = "decode-flac") {
+        openings.push(b"fLaC");
+    }
+    if cfg!(feature = "decode-ogg") {
+        openings.push(b"OggS");
+    }
+    assert!(!openings.is_empty(), "run with the decode features");
+    for opening in openings {
+        let mut bytes = opening.to_vec();
+        bytes.extend(vec![0u8; 20_000]);
+        bytes.extend(&bad);
+        let mut source = Counting {
+            inner: Cursor::new(&bytes),
+            read: 0,
+        };
+        assert!(check(&mut source).is_ok());
+        assert!(source.read <= 12, "{opening:?} read {}", source.read);
+    }
+}
+
+/// An ID3v2 tag is skipped by its syncsafe size: a `RIFF` inside it is not the
+/// anchor, the one after it is.
+#[test]
+fn an_id3v2_tag_holding_riff_is_skipped_past() {
+    let bad = wav(&[], &basic_fmt(PCM, 65_535, 16));
+    let good = wav(&[], &basic_fmt(PCM, 2, 16));
+    let mut tag = b"ID3\x04\0\0".to_vec();
+    let size = bad.len() as u32;
+    tag.extend([
+        (size >> 21) as u8 & 0x7f,
+        (size >> 14) as u8 & 0x7f,
+        (size >> 7) as u8 & 0x7f,
+        size as u8 & 0x7f,
+    ]);
+    tag.extend(&bad);
+    let mut skipped = tag.clone();
+    skipped.extend(&good);
+    assert!(guard(&skipped).is_ok());
+    let mut refused = tag;
+    refused.extend(&bad);
+    assert!(guard(&refused).is_err());
+}
+
+/// Only the first `RIFF....WAVE` is the anchor, and a `RIFF` of another form
+/// before it is walked past.
+#[test]
+fn only_the_first_riff_after_the_start_is_checked() {
+    let mut bytes = wav(&[], &basic_fmt(PCM, 2, 16));
+    bytes.extend(wav(&[], &basic_fmt(PCM, 65_535, 16)));
+    assert!(guard(&bytes).is_ok());
+}
+
+/// The fuzzer's second input: a `RIFF` of another form, then a WAVE header with
+/// a 65,535-channel `fmt `, is refused.
+#[test]
+fn a_riff_of_another_form_does_not_hide_a_later_wave_header() {
+    let mut bytes = b"RIFF\x64\0\0\0AVI ".to_vec();
+    bytes.extend(wav(&[], &basic_fmt(PCM, 65_535, 16)));
+    assert!(guard(&bytes).is_err());
+}
+
+/// A source opening with a bare MP3 frame sync, or the marker of a container
+/// this build does not read, is still scanned: the probe scans past both.
+#[test]
+fn a_bad_mp3_sync_before_a_wave_header_does_not_hide_it() {
+    let mut bytes = vec![0xFF, 0xFF, 0xFF, 0x89];
+    bytes.extend(wav(&[], &basic_fmt(PCM, 65_535, 16)));
+    assert!(guard(&bytes).is_err());
+}
+
+/// The fuzzer's `FORM` prefix: AIFF is not read here, so the probe scans on to
+/// the WAVE header.
+#[test]
+fn a_form_marker_does_not_hide_a_later_wave_header() {
+    let mut bytes = b"FORM".to_vec();
+    bytes.extend(wav(&[], &basic_fmt(PCM, 65_535, 16)));
+    assert!(guard(&bytes).is_err());
 }

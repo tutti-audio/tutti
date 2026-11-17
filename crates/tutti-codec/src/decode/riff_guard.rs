@@ -7,16 +7,17 @@
 //! A build with overflow checks panics there, so [`check`] refuses such a
 //! chunk first: a wrong value is refused before it reaches the arithmetic.
 //!
-//! The probe anchors on the first container marker in the first
-//! [`SCAN_DEPTH`] bytes, which may follow a prefix, so [`check`] walks the
-//! chunks of every `RIFF....WAVE` header in that range, up to the `data` chunk
-//! the demuxer stops at. It reads through a fixed buffer and allocates nothing.
+//! The probe anchors on the first `RIFF....WAVE` header, which may follow a
+//! prefix or an ID3v2 tag, so [`check`] walks the chunks of that header, up to
+//! the `data` chunk the demuxer stops at, looking no further than
+//! [`SCAN_DEPTH`] bytes past the tag. A source that opens as another container
+//! is not scanned. It reads through a fixed buffer and allocates nothing.
 
 use std::io::{self, Read, Seek, SeekFrom};
 
 use symphonia::core::errors::Error;
 
-/// How far into a source a marker is looked for: the probe's own default depth.
+/// How far past the start (or the ID3v2 tag) a marker is looked for: the probe's own default depth.
 const SCAN_DEPTH: u64 = 1 << 20;
 /// The bytes read per step of the marker scan.
 const WINDOW: usize = 4096;
@@ -53,19 +54,31 @@ pub(super) fn check<R: Read + Seek + ?Sized>(source: &mut R) -> Result<(), Error
     result
 }
 
-/// Checks the WAVE chunks behind every `RIFF` in the first [`SCAN_DEPTH`] bytes.
+/// Checks the WAVE chunks behind the first `RIFF....WAVE` in the first [`SCAN_DEPTH`]
+/// bytes after any ID3v2 tag, unless the source starts as another container.
 fn scan<R: Read + Seek + ?Sized>(source: &mut R, start: u64) -> Result<(), Error> {
     let mut window = [0u8; WINDOW];
     let mut base = start;
+    source.seek(SeekFrom::Start(base)).map_err(Error::IoError)?;
+    let mut n = read_up_to(source, &mut window[..12]).map_err(Error::IoError)?;
+    if let Some(tag_len) = id3v2_len(&window[..n]) {
+        base += tag_len;
+        source.seek(SeekFrom::Start(base)).map_err(Error::IoError)?;
+        n = read_up_to(source, &mut window[..12]).map_err(Error::IoError)?;
+    }
+    if is_other_container(&window[..n]) {
+        return Ok(());
+    }
+    let limit = base + SCAN_DEPTH;
     loop {
         source.seek(SeekFrom::Start(base)).map_err(Error::IoError)?;
         let n = read_up_to(source, &mut window).map_err(Error::IoError)?;
         for at in 0..n.saturating_sub(3) {
-            if &window[at..at + 4] == b"RIFF" {
-                check_riff(source, base + at as u64)?;
+            if &window[at..at + 4] == b"RIFF" && check_riff(source, base + at as u64)? {
+                return Ok(());
             }
         }
-        if n < WINDOW || base + n as u64 >= start + SCAN_DEPTH {
+        if n < WINDOW || base + n as u64 >= limit {
             return Ok(());
         }
         // Three bytes overlap, so a marker cut by the window's end is found by the next.
@@ -73,12 +86,34 @@ fn scan<R: Read + Seek + ?Sized>(source: &mut R, start: u64) -> Result<(), Error
     }
 }
 
+/// The length of the ID3v2 tag `head` opens, header and footer included.
+fn id3v2_len(head: &[u8]) -> Option<u64> {
+    if head.len() < 10 || &head[..3] != b"ID3" || head[6..10].iter().any(|b| b & 0x80 != 0) {
+        return None;
+    }
+    let size = head[6..10]
+        .iter()
+        .fold(0u64, |size, b| size << 7 | u64::from(*b));
+    let footer = if head[5] & 0x10 != 0 { 10 } else { 0 };
+    Some(10 + size + footer)
+}
+
+/// Whether `head` opens a container this build reads that is not RIFF, which
+/// the probe takes at the first byte: FLAC or Ogg. A marker of a container the
+/// build does not read (AIFF's `FORM`, an MP4 `ftyp` box) or a bare MP3 frame
+/// sync is no anchor: the probe scans past it, so a WAVE header may follow.
+fn is_other_container(head: &[u8]) -> bool {
+    (cfg!(feature = "decode-flac") && head.starts_with(b"fLaC"))
+        || (cfg!(feature = "decode-ogg") && head.starts_with(b"OggS"))
+}
+
 /// Walks the chunks of the RIFF header at `at`, checking each `fmt ` chunk,
 /// until the `data` chunk, the end of the RIFF chunk or the end of the source.
-fn check_riff<R: Read + Seek + ?Sized>(source: &mut R, at: u64) -> Result<(), Error> {
+/// Returns whether the header is a WAVE one, the anchor the probe takes.
+fn check_riff<R: Read + Seek + ?Sized>(source: &mut R, at: u64) -> Result<bool, Error> {
     let mut head = [0u8; 8];
     if !read_header(source, at + 4, &mut head)? || &head[4..8] != b"WAVE" {
-        return Ok(());
+        return Ok(false);
     }
     let riff_len = u32::from_le_bytes([head[0], head[1], head[2], head[3]]);
     let end = if riff_len == u32::MAX {
@@ -89,18 +124,18 @@ fn check_riff<R: Read + Seek + ?Sized>(source: &mut R, at: u64) -> Result<(), Er
     let mut pos = at + 12;
     while pos.saturating_add(8) <= end {
         if !read_header(source, pos, &mut head)? {
-            return Ok(());
+            return Ok(true);
         }
         let len = u32::from_le_bytes([head[4], head[5], head[6], head[7]]);
         match &head[0..4] {
-            b"data" => return Ok(()),
+            b"data" => return Ok(true),
             b"fmt " => check_fmt(source, pos + 8, len)?,
             _ => {}
         }
         // A chunk is padded to an even length.
         pos += 8 + u64::from(len) + u64::from(len & 1);
     }
-    Ok(())
+    Ok(true)
 }
 
 /// Checks the `fmt ` chunk body at `at`, `len` bytes long.
