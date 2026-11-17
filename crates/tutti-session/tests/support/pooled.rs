@@ -13,19 +13,19 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tutti_plugin::catalog::{
-    Catalog, CatalogConfig, Hosting, Locator, NO_SCAN_DIRS, PluginId, PluginRef, PluginState,
+    Catalog, CatalogConfig, Hosting, Locator, NO_SCAN_DIRS, PluginId, PluginRef,
 };
 use tutti_plugin_db::{PluginDb, ScanPoll};
 use tutti_plugin_types::MainThreadMarker;
 use tutti_rt::LockExt;
-use tutti_session::{Key, LoadError, PluginNode, PoolEvent, Session, SessionEvent};
+use tutti_session::{Key, LoadError, PeerState, PluginNode, PoolEvent, Session, SessionEvent};
 
 /// A plugin to load: its ref, where it runs, and the state it starts from.
 #[derive(Clone, Debug)]
 pub struct Spec {
     plugin: PluginRef,
     hosting: Hosting,
-    state: Option<PluginState>,
+    state: Option<PeerState>,
 }
 
 impl Spec {
@@ -46,7 +46,7 @@ impl Spec {
     /// With `state` restored before the plugin is activated (the entry checks
     /// that it is the plugin's own).
     #[must_use]
-    pub fn restoring(mut self, state: PluginState) -> Self {
+    pub fn restoring(mut self, state: PeerState) -> Self {
         self.state = Some(state);
         self
     }
@@ -212,7 +212,7 @@ pub trait LoadEntry {
         catalog: &Catalog,
         id: &PluginId,
         hosting: Hosting,
-        state: Option<PluginState>,
+        state: Option<PeerState>,
     ) -> Result<Key<PluginNode>, LoadError> {
         let key = self.declare_entry(main, catalog, id, hosting, state);
         self.await_entry(main, key)
@@ -226,7 +226,7 @@ pub trait LoadEntry {
         catalog: &Catalog,
         id: &PluginId,
         hosting: Hosting,
-        state: Option<PluginState>,
+        state: Option<PeerState>,
     ) -> u64;
 
     /// Updates until the entry under `key` lands, and adds its node.
@@ -248,7 +248,7 @@ impl<C: tutti_session::Clock> LoadEntry for Session<C> {
         catalog: &Catalog,
         id: &PluginId,
         hosting: Hosting,
-        state: Option<PluginState>,
+        state: Option<PeerState>,
     ) -> u64 {
         let key = KEYS.fetch_add(1, Ordering::Relaxed);
         let _ = self.update_on(main);

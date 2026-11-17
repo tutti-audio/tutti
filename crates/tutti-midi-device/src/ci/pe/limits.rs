@@ -18,6 +18,8 @@ macro_rules! text_type {
     ($(#[$meta:meta])* $name:ident, $what:literal, $valid:expr) => {
         $(#[$meta])*
         #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+        #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+        #[cfg_attr(feature = "serde", serde(try_from = "String", into = "String"))]
         pub struct $name(String);
 
         impl $name {
@@ -40,6 +42,14 @@ macro_rules! text_type {
 
             fn try_from(text: &str) -> Result<Self, NotValid> {
                 Self::new(text).ok_or(NotValid { what: $what })
+            }
+        }
+
+        impl TryFrom<String> for $name {
+            type Error = NotValid;
+
+            fn try_from(text: String) -> Result<Self, NotValid> {
+                Self::try_from(text.as_str())
             }
         }
 

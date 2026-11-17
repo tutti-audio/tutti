@@ -14,7 +14,7 @@ use super::super::tree::{PeJson, PeObject};
 use super::super::value::PeExtra;
 use super::client::{CallError, CallId, ResourceInitiator};
 use super::data::{OpaqueBody, PeData};
-use super::entry::{EntryError, ResourceEntry};
+use super::entry::{EntryError, ResourceEntry, ResourceEntryBuilder};
 use super::fields::{
     Fields, PeDataError, PeDataFault, PeExtensions, PeText, integer, required_text, text,
 };
@@ -291,14 +291,14 @@ impl PeState {
 
     /// The state with its revision.
     #[must_use]
-    pub fn with_rev(mut self, rev: StateRev) -> Self {
+    pub fn revised(mut self, rev: StateRev) -> Self {
         self.rev = Some(rev);
         self
     }
 
     /// The state with the time it was last changed.
     #[must_use]
-    pub fn with_timestamp(mut self, timestamp: UnixSeconds) -> Self {
+    pub fn stamped(mut self, timestamp: UnixSeconds) -> Self {
         self.timestamp = Some(timestamp);
         self
     }
@@ -512,18 +512,25 @@ impl ResourceEntry {
     /// one state to each `resId`, Mcoded7 and `application/octet-stream`.
     #[must_use]
     pub fn device_state() -> Self {
+        Self::device_state_builder()
+            .build()
+            .unwrap_or_else(|_: EntryError| unreachable!("State takes its own defaults"))
+    }
+
+    /// The builder of the entry of State, with those defaults.
+    pub(super) fn device_state_builder() -> ResourceEntryBuilder {
         let octets = MediaType::new("application/octet-stream")
             .unwrap_or_else(|| unreachable!("a valid media type"));
-        Self::new(PeResource::State)
-            .and_then(|e| e.with_encodings(vec![PeEncoding::Mcoded7]))
-            .and_then(|e| e.with_media_types(vec![octets]))
-            .unwrap_or_else(|_: EntryError| unreachable!("State takes its own defaults"))
+        Self::builder(PeResource::State)
+            .encodings(vec![PeEncoding::Mcoded7])
+            .media_types(vec![octets])
     }
 
     /// The entry of StateList.
     #[must_use]
     pub fn state_list() -> Self {
-        Self::new(PeResource::StateList)
+        Self::builder(PeResource::StateList)
+            .build()
             .unwrap_or_else(|_: EntryError| unreachable!("StateList has no custom name"))
     }
 }
@@ -761,7 +768,7 @@ impl ResourceInitiator {
             .resource_list()
             .and_then(|l| l.entry(get.target().resource()))
             .is_some_and(ResourceEntry::fc_on_get);
-        if flows { get.with_flow_control() } else { get }
+        if flows { get.flow_controlled() } else { get }
     }
 
     /// Gets the list of the device's states. The result is a

@@ -113,13 +113,13 @@ impl UmpCapability {
                 tx_jr: false,
             }))
         };
-        endpoint = endpoint.with_active(StreamConfig {
+        endpoint = endpoint.in_use(StreamConfig {
             protocol,
             rx_jr: false,
             tx_jr: false,
         });
         for block in &self.blocks {
-            endpoint = endpoint.with_function_block(*block);
+            endpoint = endpoint.block(*block);
         }
         endpoint
     }
