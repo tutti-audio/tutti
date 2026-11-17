@@ -30,8 +30,6 @@ au = ["dep:tutti-au-host"]
 
 [dependencies]
 tutti-plugin-types = { version = "0.0.1", path = "../tutti-plugin-types", features = ["probe-wire"] }
-# `--as` names a format by the catalog's own `PluginFormat::extension_id`.
-tutti-plugin-db = { version = "0.0.1", path = "../tutti-plugin-db" }
 # The experiment's units and stimulus: counts and levels, a note, and where in a
 # block it sits.
 tutti-types = { version = "0.0.1", path = "../tutti-types" }

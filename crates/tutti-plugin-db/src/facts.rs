@@ -4,16 +4,13 @@
 //! (`FileFacts::read`, in `fs.rs`); everything here decides from that value and
 //! a table row, touching no disk and no clock.
 
-use crate::format::PluginFormat;
 use crate::table::FileRow;
-use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use tutti_plugin_types::PluginFormat;
 
 /// What the scan found on disk for one candidate, read once.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FileFacts {
-    /// Whether the path exists. Only `tutti_plugin::catalog::Catalog::prune_missing`
-    /// reads it.
+    /// Whether the path exists.
     pub exists: bool,
     /// Seconds since the Unix epoch of the file's last modification, if it has
     /// one. A row stamped without a time matches a file that reads without one.
@@ -23,10 +20,8 @@ pub struct FileFacts {
 }
 
 /// What a scan does with one discovered plugin.
-///
-/// Exhaustive: these three are the whole outcome, and callers match on them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ScanDecision {
+pub(crate) enum ScanDecision {
     /// Blacklisted, and the file has not changed since: skip it.
     Blacklisted,
     /// Recorded, and the file has not changed since: skip it.
@@ -41,7 +36,7 @@ pub enum ScanDecision {
 /// The blacklist is mtime-aware: a blacklisted file whose time changed on disk
 /// (a reinstall, a vendor update) is probed again rather than skipped forever.
 #[must_use]
-pub fn classify(row: Option<&FileRow>, facts: &FileFacts) -> ScanDecision {
+pub(crate) fn classify(row: Option<&FileRow>, facts: &FileFacts) -> ScanDecision {
     match row {
         Some(r) if is_blacklisted_and_unchanged(r, facts) => ScanDecision::Blacklisted,
         Some(r) if !needs_rescan(r, facts) => ScanDecision::UpToDate,
@@ -52,33 +47,21 @@ pub fn classify(row: Option<&FileRow>, facts: &FileFacts) -> ScanDecision {
 /// Returns `true` if the file's modification time differs from the one the row
 /// stamped.
 #[must_use]
-pub fn needs_rescan(row: &FileRow, facts: &FileFacts) -> bool {
+pub(crate) fn needs_rescan(row: &FileRow, facts: &FileFacts) -> bool {
     facts.mtime != row.mtime
 }
 
 /// Returns `true` if the row is blacklisted and its file has not changed since
 /// the blacklist was stamped.
 #[must_use]
-pub fn is_blacklisted_and_unchanged(row: &FileRow, facts: &FileFacts) -> bool {
+pub(crate) fn is_blacklisted_and_unchanged(row: &FileRow, facts: &FileFacts) -> bool {
     row.blacklist_reason().is_some() && !needs_rescan(row, facts)
-}
-
-/// Returns the paths among `paths` that are not in `present`.
-#[must_use]
-pub fn missing<'a>(
-    paths: impl Iterator<Item = &'a Path>,
-    present: &HashSet<PathBuf>,
-) -> Vec<PathBuf> {
-    paths
-        .filter(|path| !present.contains(*path))
-        .map(Path::to_path_buf)
-        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::format::{PluginClass, PluginDescriptor};
+    use tutti_plugin_types::{PluginClass, PluginDescriptor};
 
     const T: u64 = 1_700_000_000;
 
@@ -182,18 +165,5 @@ mod tests {
         let out = FileRow::blacklisted("boom".into(), &none);
         assert_eq!(out.format, PluginFormat::Vst3);
         assert_eq!(out.mtime, None);
-    }
-
-    #[test]
-    fn missing_is_exactly_the_paths_not_present() {
-        let a = Path::new("/plugins/a.clap");
-        let b = Path::new("/plugins/b.clap");
-        let present: HashSet<PathBuf> = [a.to_path_buf()].into();
-        assert_eq!(missing([a, b].into_iter(), &present), vec![b.to_path_buf()]);
-        assert!(missing([a].into_iter(), &present).is_empty());
-        assert_eq!(
-            missing([a].into_iter(), &HashSet::new()),
-            vec![a.to_path_buf()]
-        );
     }
 }
