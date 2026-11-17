@@ -8,6 +8,8 @@
 //! place the distinction bites is the two MPE 1.1 zone anchors: the lower
 //! zone's master is `0` and the upper zone's is `15`.
 
+#[cfg(feature = "serde")]
+use alloc::vec::Vec;
 use tutti_ump::{
     Address, ControlValue, Message, MidiChannel, MidiGroup, MpeZoneSet, MpeZoneSpan, Rpn, Ump,
     Voice2,

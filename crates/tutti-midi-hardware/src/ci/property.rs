@@ -10,12 +10,13 @@ use std::time::Instant;
 use tutti_midi_device::Muid;
 use tutti_midi_device::{
     BodyLimit, BufferLimit, CiCategories, CiMessage, Decoded, PeCapabilities, PeReassemblyLimits,
-    PeSettings, ResourceAction, ResourceInitiator, ResourceResponder, ResourceStore,
+    PeSettings, ResourceAction, ResourceEvent, ResourceInitiator, ResourceResponder, ResourceStore,
     ResponderAction, ResponderSettings, SimultaneousRequests, StreamLimit,
 };
 use tutti_ump::MidiGroup;
 
 use super::{CiChanges, Member, PeerId, Running};
+use crate::answer::Answer;
 use crate::properties::{PropertyAsk, PropertyCall, PropertyChange};
 
 /// The requests of a peer this device takes at once.
@@ -187,9 +188,9 @@ impl Member {
     ) {
         let muid = ask.peer.muid;
         let Some(initiator) = self.properties.get_mut(&muid) else {
-            changes.properties.push((
+            changes.answers.push((
                 self.peer_id(muid),
-                PropertyChange::PeerGone {
+                Answer::PropertyLost {
                     call: Box::new(ask.call.clone()),
                 },
             ));
@@ -204,13 +205,10 @@ impl Member {
         };
         let id = self.peer_id(muid);
         match started {
-            Ok((call, actions)) => {
-                changes.properties.push((id, PropertyChange::Started(call)));
-                self.carry_out_property(muid, actions, sends, changes);
-            }
-            Err(error) => changes.properties.push((
+            Ok((_, actions)) => self.carry_out_property(muid, actions, sends, changes),
+            Err(error) => changes.answers.push((
                 id,
-                PropertyChange::NotSent {
+                Answer::PropertyNotSent {
                     call: Box::new(ask.call.clone()),
                     error,
                 },
@@ -230,9 +228,17 @@ impl Member {
         for action in actions {
             match action {
                 ResourceAction::Send(message) => sends.push((self.group, message)),
-                ResourceAction::Event(event) => {
-                    changes.properties.push((id, PropertyChange::Event(event)))
-                }
+                ResourceAction::Event(event) => match *event {
+                    ResourceEvent::Got { target, result, .. } => {
+                        changes.answers.push((id, Answer::Got { target, result }));
+                    }
+                    ResourceEvent::Set {
+                        resource, result, ..
+                    } => changes.answers.push((id, Answer::Set { resource, result })),
+                    other => changes
+                        .properties
+                        .push((id, PropertyChange::Event(Box::new(other)))),
+                },
                 _ => {}
             }
         }
@@ -278,12 +284,12 @@ impl Running {
         let mut sends = Vec::new();
         for ask in asks.drain(..) {
             let Some(member) = self.members.iter_mut().find(|m| m.group == ask.peer.group) else {
-                changes.properties.push((
+                changes.answers.push((
                     PeerId {
                         group: ask.peer.group,
                         muid: ask.peer.muid,
                     },
-                    PropertyChange::PeerGone {
+                    Answer::PropertyLost {
                         call: Box::new(ask.call.clone()),
                     },
                 ));

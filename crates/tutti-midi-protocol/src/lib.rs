@@ -135,6 +135,9 @@
 //! carries the 32 RPN bits.
 
 #![forbid(unsafe_code)]
+#![cfg_attr(not(test), no_std)]
+
+extern crate alloc;
 
 mod flex;
 mod midi1;

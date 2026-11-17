@@ -50,6 +50,9 @@
 //! - **Mixing** — `BusStripNode` (volume / balance; a mute or bypass is the graph's `NodeMode`).
 //!   Summing is the graph's: a port or an output channel sums its sources; so is
 //!   folding between layouts (a bus edge between declared buses).
+//! - **Utilities** — `PolarityNode` (chosen channels inverted, from a `PolarityConfig`),
+//!   `MidSideNode` (stereo L/R to M/S and back, from a `MidSideConfig`) and `StereoWidthNode`
+//!   (the side scaled by a gliding `StereoWidth`, from a `StereoWidthConfig`).
 //! - **Spatial** — `VbapPannerNode` (stereo in, one output per channel of a `Bed`)
 //!   and `HrtfBinauralNode` (two outputs, by FFT convolution against a
 //!   caller-supplied HRIR sphere), both steered by their params (bearing,
@@ -299,6 +302,16 @@ pub use dynamics::{
 pub use tutti_dsp::{
     CompressorControls, GateControls, KeyFilter, KeySource, LimiterControls, Lookahead,
 };
+
+// Utilities: polarity, mid/side and stereo width.
+mod mid_side;
+mod polarity;
+mod stereo_width;
+pub use mid_side::{MidSideConfig, MidSideNode};
+pub use polarity::{PolarityConfig, PolarityError, PolarityNode};
+pub use stereo_width::{StereoWidthConfig, StereoWidthKernel, StereoWidthNode, StereoWidthSet};
+// The controls a width node starts at, and the channel a polarity config can get wrong.
+pub use tutti_dsp::{ChannelOutOfRange, WidthControls};
 
 // The mixer strip: volume, stereo balance, mute. Ungated: a fader is not a
 // spatial concept.

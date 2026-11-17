@@ -49,9 +49,9 @@ mod segmentation;
 mod values;
 mod write;
 
-use std::fmt;
-use std::hash::{Hash, Hasher};
-use std::marker::PhantomData;
+use core::fmt;
+use core::hash::{Hash, Hasher};
+use core::marker::PhantomData;
 
 use tutti_ump::first_non_seven_bit;
 
@@ -375,7 +375,7 @@ impl MmcPayload {
     }
 }
 
-impl std::ops::Deref for MmcPayload {
+impl core::ops::Deref for MmcPayload {
     type Target = [u8];
 
     fn deref(&self) -> &[u8] {

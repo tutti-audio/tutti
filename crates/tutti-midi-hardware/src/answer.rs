@@ -1,6 +1,7 @@
 //! How a request the session made of a MIDI-CI peer ended.
 //!
-//! A request ([`ProfileSwitch`](crate::ProfileSwitch), [`ReportAsk`](crate::ReportAsk))
+//! A request ([`ProfileSwitch`](crate::ProfileSwitch), [`ReportAsk`](crate::ReportAsk),
+//! [`PropertyAsk`](crate::PropertyAsk))
 //! is sent at a [`poll`](crate::MidiSession::poll), and its end is one
 //! [`Answer`], reported once from a later poll as
 //! [`Polled::Answer`](crate::Polled::Answer) beside the peer it is from. An
@@ -8,10 +9,14 @@
 //! through [`ProfilesChange`](crate::ProfilesChange) and
 //! [`ProcessChange`](crate::ProcessChange).
 
-use tutti_midi_device::{Nak, Outcome, Request};
+use tutti_midi_device::{
+    CallError, Nak, Outcome, PeData, PeResource, PeStatus, Request, ResourceFailure, ResourceTarget,
+};
+
+use crate::properties::PropertyCall;
 
 /// How a request to a peer ended.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub enum Answer {
     /// A Set Profile On or Off ended: the peer reported the Profile's state,
@@ -36,6 +41,34 @@ pub enum Answer {
     /// A report was not sent: the peer has since said it does not support MIDI
     /// Message Report.
     ReportUnsupported,
+    /// A Get of a Resource ended: the Property Data, or why not.
+    Got {
+        /// The Resource got.
+        target: ResourceTarget,
+        /// The data, or why not.
+        result: Result<PeData, ResourceFailure>,
+    },
+    /// A Set of a Resource ended: the status of the reply, 200 or 201, or why
+    /// not.
+    Set {
+        /// The Resource set.
+        resource: PeResource,
+        /// The status, or why not.
+        result: Result<PeStatus, ResourceFailure>,
+    },
+    /// A Property Exchange call was not started: the Initiator refused it.
+    PropertyNotSent {
+        /// What was asked.
+        call: Box<PropertyCall>,
+        /// Why not.
+        error: CallError,
+    },
+    /// A Property Exchange call was not started: the peer was lost between the
+    /// request and the poll that would have started it.
+    PropertyLost {
+        /// What was asked.
+        call: Box<PropertyCall>,
+    },
 }
 
 /// How a MIDI Message Report ended.
