@@ -69,7 +69,7 @@ fn frames_between_lands_on_a_frame_within_the_tolerance() {
 #[test]
 fn time_ramp_matches_closed_form() {
     let m = TempoMap::new([
-        pt(0.0, 120.0, Transition::RampTime),
+        pt(0.0, 120.0, Transition::RampTime { end: None }),
         pt(4.0, 180.0, Transition::Step),
     ])
     .unwrap();
@@ -90,7 +90,7 @@ fn time_ramp_matches_closed_form() {
 #[test]
 fn beat_ramp_matches_closed_form() {
     let m = TempoMap::new([
-        pt(0.0, 120.0, Transition::RampBeats),
+        pt(0.0, 120.0, Transition::RampBeats { end: None }),
         pt(4.0, 180.0, Transition::Step),
     ])
     .unwrap();
@@ -113,10 +113,10 @@ fn beat_ramp_matches_closed_form() {
 #[test]
 fn seconds_agree_with_numeric_integration() {
     let m = TempoMap::new([
-        pt(0.0, 90.0, Transition::RampTime),
-        pt(8.0, 150.0, Transition::RampBeats),
+        pt(0.0, 90.0, Transition::RampTime { end: None }),
+        pt(8.0, 150.0, Transition::RampBeats { end: None }),
         pt(20.0, 70.0, Transition::Step),
-        pt(30.0, 200.0, Transition::RampTime),
+        pt(30.0, 200.0, Transition::RampTime { end: None }),
         pt(31.0, 50.0, Transition::Step),
     ])
     .unwrap();
@@ -159,8 +159,8 @@ fn long_session_round_trip() {
     for i in 0..20_000 {
         let shape = match (rng.next() * 3.0) as u32 {
             0 => Transition::Step,
-            1 => Transition::RampTime,
-            _ => Transition::RampBeats,
+            1 => Transition::RampTime { end: None },
+            _ => Transition::RampBeats { end: None },
         };
         pts.push(pt(
             i as f64 * 2.0,
@@ -259,7 +259,11 @@ fn edit_in_the_past() {
 /// never gets here: `Bpm` refuses it.
 #[test]
 fn refusals() {
-    use Transition::{RampBeats, RampTime, Step};
+    use Transition::Step;
+    let (ramp_time, ramp_beats) = (
+        Transition::RampTime { end: None },
+        Transition::RampBeats { end: None },
+    );
     assert_eq!(TempoMap::new([]).unwrap_err(), TempoError::Empty);
     assert_eq!(
         TempoMap::new([pt(1.0, 120.0, Step)]).unwrap_err(),
@@ -306,16 +310,16 @@ fn refusals() {
         TempoError::BadOrder(2)
     );
     assert_eq!(
-        TempoMap::new([pt(0.0, 120.0, RampTime)]).unwrap_err(),
+        TempoMap::new([pt(0.0, 120.0, ramp_time)]).unwrap_err(),
         TempoError::RampWithoutEnd
     );
     assert_eq!(
-        TempoMap::new([pt(0.0, 120.0, RampBeats)]).unwrap_err(),
+        TempoMap::new([pt(0.0, 120.0, ramp_beats)]).unwrap_err(),
         TempoError::RampWithoutEnd
     );
     // A tempo whose square overflows, a span whose duration overflows.
     assert_eq!(
-        TempoMap::new([pt(0.0, 1e200, RampTime), pt(4.0, 1e200 * 2.0, Step)]).unwrap_err(),
+        TempoMap::new([pt(0.0, 1e200, ramp_time), pt(4.0, 1e200 * 2.0, Step)]).unwrap_err(),
         TempoError::Unrepresentable(0)
     );
     assert_eq!(
@@ -325,7 +329,7 @@ fn refusals() {
     // Squares overflow while the ramp's rate of change stays finite: only the
     // check that the closed forms agree end to end sees it.
     assert_eq!(
-        TempoMap::new([pt(0.0, 9e155, RampTime), pt(1.0, 9.009e155, Step)]).unwrap_err(),
+        TempoMap::new([pt(0.0, 9e155, ramp_time), pt(1.0, 9.009e155, Step)]).unwrap_err(),
         TempoError::Unrepresentable(0)
     );
     // The error reads as a sentence and is a `std::error::Error`.
@@ -342,8 +346,8 @@ fn a_views_hint_agrees_with_cold_lookup() {
         .map(|i| {
             let shape = [
                 Transition::Step,
-                Transition::RampTime,
-                Transition::RampBeats,
+                Transition::RampTime { end: None },
+                Transition::RampBeats { end: None },
             ][(rng.next() * 3.0) as usize];
             pt(
                 i as f64 * 1.5,
@@ -382,9 +386,9 @@ fn a_views_hint_agrees_with_cold_lookup() {
 #[test]
 fn a_point_belongs_to_the_segment_it_starts() {
     let m = TempoMap::new([
-        pt(0.0, 120.0, Transition::RampTime),
+        pt(0.0, 120.0, Transition::RampTime { end: None }),
         pt(4.0, 180.0, Transition::Step),
-        pt(8.0, 90.0, Transition::RampBeats),
+        pt(8.0, 90.0, Transition::RampBeats { end: None }),
         pt(12.0, 60.0, Transition::Step),
     ])
     .unwrap();
@@ -413,7 +417,10 @@ fn a_point_belongs_to_the_segment_it_starts() {
 /// is a ramp (a count-in has a time, and `sqrt` of a negative is not asked).
 #[test]
 fn a_first_ramp_extrapolates_at_its_first_tempo() {
-    for shape in [Transition::RampTime, Transition::RampBeats] {
+    for shape in [
+        Transition::RampTime { end: None },
+        Transition::RampBeats { end: None },
+    ] {
         let m = TempoMap::new([pt(0.0, 120.0, shape), pt(4.0, 240.0, Transition::Step)]).unwrap();
         assert_eq!(m.seconds_at(Beat(-1.0)).get(), -0.5);
         assert_eq!(m.beat_at_seconds(Seconds(-0.5)), Beat(-1.0));
@@ -433,8 +440,8 @@ fn a_tempo_at_its_point_is_the_given_tempo_to_the_bit() {
         .map(|i| {
             let shape = [
                 Transition::Step,
-                Transition::RampTime,
-                Transition::RampBeats,
+                Transition::RampTime { end: None },
+                Transition::RampBeats { end: None },
             ][i % 3];
             pt(
                 i as f64 * 1.5,
@@ -497,18 +504,16 @@ fn constant_tempo_is_the_single_points_tempo_to_the_bit() {
     assert_eq!(TempoMap::constant(odd).unwrap().constant_tempo(), Some(odd));
     for shape in [
         Transition::Step,
-        Transition::RampTime,
-        Transition::RampBeats,
+        Transition::RampTime { end: None },
+        Transition::RampBeats { end: None },
     ] {
         let two = TempoMap::new([
             TempoPoint {
-                arrive: None,
                 beat: Beat(0.0),
                 tempo: odd,
                 transition: shape,
             },
             TempoPoint {
-                arrive: None,
                 beat: Beat(4.0),
                 tempo: odd,
                 transition: Transition::Step,
@@ -526,14 +531,14 @@ fn constant_tempo_is_the_single_points_tempo_to_the_bit() {
 #[test]
 fn tempo_on_a_frame_is_the_tempo_at_that_second() {
     let time = TempoMap::new([
-        pt(0.0, 120.0, Transition::RampTime),
+        pt(0.0, 120.0, Transition::RampTime { end: None }),
         pt(4.0, 180.0, Transition::Step),
     ])
     .unwrap();
     assert_eq!(time.view(R).tempo_at_frame(Frame::new(0)), Bpm::of(120.0));
     assert!((time.view(R).tempo_at_frame(Frame::new(38_400)).get() - 150.0).abs() < 1e-12);
     let beats = TempoMap::new([
-        pt(0.0, 120.0, Transition::RampBeats),
+        pt(0.0, 120.0, Transition::RampBeats { end: None }),
         pt(4.0, 180.0, Transition::Step),
     ])
     .unwrap();
@@ -550,7 +555,7 @@ fn tempo_on_a_frame_is_the_tempo_at_that_second() {
 #[test]
 fn the_slope_is_held_inside_the_segment_it_starts_in() {
     let m = TempoMap::new([
-        pt(0.0, 120.0, Transition::RampTime),
+        pt(0.0, 120.0, Transition::RampTime { end: None }),
         pt(4.0, 180.0, Transition::Step),
         pt(8.0, 60.0, Transition::Step),
     ])
@@ -572,7 +577,7 @@ fn the_slope_is_held_inside_the_segment_it_starts_in() {
     // past its end (4 ln 1.5 = 1.6219 s) is the chord to that end, not to the
     // span's own: (180 - 120 e^0.125) / (1.6219 - 0.5).
     let beats = TempoMap::new([
-        pt(0.0, 120.0, Transition::RampBeats),
+        pt(0.0, 120.0, Transition::RampBeats { end: None }),
         pt(4.0, 180.0, Transition::Step),
     ])
     .unwrap();
@@ -591,7 +596,7 @@ fn the_slope_is_held_inside_the_segment_it_starts_in() {
 fn a_view_answers_the_closed_forms_across_a_step_and_a_ramp() {
     let m = TempoMap::new([
         pt(0.0, 90.0, Transition::Step),
-        pt(4.0, 120.0, Transition::RampTime),
+        pt(4.0, 120.0, Transition::RampTime { end: None }),
         pt(8.0, 180.0, Transition::Step),
     ])
     .unwrap();
@@ -707,38 +712,26 @@ fn time_and_beat_round_trip_across_a_ramps_step() {
     assert!((map.beat_at_seconds(Seconds(2.6)).get() - 5.5).abs() < 1e-12);
 }
 
-/// **An `arrive` needs a ramp before it**: after a step, or at the first point,
-/// the map is refused and names the point.
+/// **One map has one representation**: a ramp whose end is the next point's
+/// tempo is the same map as one with no end (the end folds to `None`), and an
+/// end that differs is kept.
 #[test]
-fn an_arrive_after_no_ramp_is_refused() {
-    let with = |beat: f64, shape| TempoPoint {
-        arrive: Some(Bpm::of(100.0)),
-        ..pt(beat, 90.0, shape)
+fn a_ramp_end_equal_to_the_next_tempo_folds_away() {
+    let ending = |end| Transition::RampTime { end };
+    let point = |end| {
+        [
+            TempoPoint {
+                transition: ending(end),
+                ..pt(0.0, 120.0, Transition::Step)
+            },
+            pt(4.0, 180.0, Transition::Step),
+        ]
     };
-    assert_eq!(
-        TempoMap::new([with(0.0, Transition::Step)]).unwrap_err(),
-        TempoError::ArriveWithoutRamp(0)
-    );
-    assert_eq!(
-        TempoMap::new([
-            pt(0.0, 120.0, Transition::Step),
-            with(4.0, Transition::Step)
-        ])
-        .unwrap_err(),
-        TempoError::ArriveWithoutRamp(1)
-    );
-    assert_eq!(
-        TempoMap::builder(Bpm::of(120.0))
-            .then_step(Bpm::of(90.0))
-            .build()
-            .unwrap_err(),
-        TempoError::ArriveWithoutRamp(0)
-    );
-    assert!(
-        TempoMap::new([
-            pt(0.0, 120.0, Transition::RampTime),
-            with(4.0, Transition::Step)
-        ])
-        .is_ok()
-    );
+    let plain = TempoMap::new(point(None)).unwrap();
+    let folded = TempoMap::new(point(Some(Bpm::of(180.0)))).unwrap();
+    assert_eq!(folded, plain);
+    assert_eq!(folded.points()[0].transition, ending(None));
+    let kept = TempoMap::new(point(Some(Bpm::of(150.0)))).unwrap();
+    assert_eq!(kept.points()[0].transition, ending(Some(Bpm::of(150.0))));
+    assert_ne!(kept, plain);
 }

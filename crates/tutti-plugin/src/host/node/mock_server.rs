@@ -83,7 +83,7 @@ fn no_editor(
     _: &tutti_plugin_types::Load,
 ) -> tutti_plugin_types::BridgeResult<Box<dyn tutti_plugin_types::Editor>> {
     Err(tutti_plugin_types::BridgeError::LoadFailed {
-        path: path.to_path_buf(),
+        path: Some(path.to_path_buf()),
         stage: tutti_plugin_types::LoadStage::Opening,
         reason: "no editor in these tests".into(),
     })
@@ -274,7 +274,6 @@ fn answer(slab: &mut SlabWriter, scratch: &mut [f32], data: ProcessAudioData) ->
 /// A map at 120 BPM that steps to 90 at `beat`.
 pub(super) fn tempo(beat: f64) -> TempoReader {
     let point = |beat: f64, bpm: f64| TempoPoint {
-        arrive: None,
         beat: Beat(beat),
         tempo: Bpm::of(bpm),
         transition: Transition::Step,

@@ -631,7 +631,7 @@ pub(crate) fn step_at(
         builder.step_to(beat, tempo)
     } else {
         // The ramp is cut at `beat`: it reaches what the map has there, which
-        // is a ramp's arrival where a point of the map sits on `beat`.
+        // is the ramp's `end` where a point of the map sits on `beat`.
         let reached = points
             .get(kept)
             .filter(|p| p.beat == beat)
@@ -642,18 +642,27 @@ pub(crate) fn step_at(
 }
 
 /// `point` as the next point of a builder, reached from the last by
-/// `transition`, keeping the step it makes where it ends a ramp.
+/// `transition`, keeping the step a ramp's `end` makes.
 fn extend(builder: TempoMapBuilder, transition: Transition, point: &TempoPoint) -> TempoMapBuilder {
-    let (beat, reached) = (point.beat, point.arrival());
-    let builder = match transition {
-        Transition::Step => builder.step_to(beat, reached),
-        Transition::RampTime => builder.ramp_time_to(beat, reached),
-        Transition::RampBeats => builder.ramp_beats_to(beat, reached),
-    };
-    if point.arrive.is_some() {
-        builder.then_step(point.tempo)
-    } else {
-        builder
+    let beat = point.beat;
+    match transition {
+        Transition::Step => builder.step_to(beat, point.tempo),
+        Transition::RampTime { end } => {
+            let builder = builder.ramp_time_to(beat, end.unwrap_or(point.tempo));
+            if end.is_some() {
+                builder.then_step(point.tempo)
+            } else {
+                builder
+            }
+        }
+        Transition::RampBeats { end } => {
+            let builder = builder.ramp_beats_to(beat, end.unwrap_or(point.tempo));
+            if end.is_some() {
+                builder.then_step(point.tempo)
+            } else {
+                builder
+            }
+        }
     }
 }
 
@@ -745,7 +754,6 @@ mod tests {
             points[1].beat, at,
             "the ramp ends and the step is at one beat"
         );
-        assert_eq!(points[1].arrive, Some(cut), "the ramp ends at the cut");
         assert_eq!(points[1].tempo, bpm(100.0));
         assert_eq!(
             points[1].transition,
@@ -771,7 +779,10 @@ mod tests {
             .build()
             .unwrap();
         let new = step_at(&old, Beat(5.0), bpm(100.0)).unwrap().unwrap();
-        assert_eq!(new.points()[0].transition, Transition::RampBeats);
+        assert!(matches!(
+            new.points()[0].transition,
+            Transition::RampBeats { end: Some(_) }
+        ));
         for b in [1.0, 4.0, 5.0] {
             let (a, n) = (old.seconds_at(Beat(b)).get(), new.seconds_at(Beat(b)).get());
             assert!((a - n).abs() < 1e-9, "beat {b}: {a} vs {n}");

@@ -11,8 +11,8 @@ fn queries_do_not_allocate() {
     let map = TempoMap::new((0..64).map(|i| {
         let shape = [
             Transition::Step,
-            Transition::RampTime,
-            Transition::RampBeats,
+            Transition::RampTime { end: None },
+            Transition::RampBeats { end: None },
         ][i % 3];
         pt(
             i as f64 * 2.0,

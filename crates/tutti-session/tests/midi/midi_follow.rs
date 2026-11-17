@@ -279,8 +279,10 @@ fn a_step_in_a_project_ramp_cuts_the_ramp() {
         "the ramp ends and the step is at one beat"
     );
     assert_eq!(
-        points[1].arrive,
-        Some(ramp.tempo_at(beat)),
+        points[0].transition,
+        Transition::RampTime {
+            end: Some(ramp.tempo_at(beat))
+        },
         "the ramp as it stood"
     );
     assert_eq!(points[1].tempo, Bpm::of(150.0));

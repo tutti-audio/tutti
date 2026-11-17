@@ -184,10 +184,10 @@ pub use tutti_session::{
 };
 #[cfg(feature = "session")]
 pub use tutti_session::{
-    BlockDates, Clock, ConnectError, Edge, EventInPort, EventOutPort, InPort, Job, JobId, JobKind,
-    JobStatus, Key, Landed, NoSuchNode, Offline, OfflineSession, OutPort, Playhead, RealTime, Root,
-    Session, SessionBuilder, SessionEvent, SystemClock, SystemSession, TransportHandle,
-    TypedParamRef, WaitError, Workers,
+    AppKey, BlockDates, Clock, ConnectError, Edge, EventInPort, EventOutPort, InPort, Job, JobId,
+    JobKind, JobStatus, Key, Landed, NoSuchNode, Offline, OfflineSession, OutPort, Playhead,
+    RealTime, Root, Session, SessionBuilder, SessionEvent, SystemClock, SystemSession,
+    TransportHandle, TypedParamRef, WaitError, Workers,
 };
 #[cfg(all(feature = "session", feature = "export"))]
 pub use tutti_session::{
@@ -242,27 +242,28 @@ pub mod nodes {
         ConvolverNode, CrossoverControls, CrossoverError, CrossoverNode, CutAlignment,
         CutFilterConfig, CutFilterControls, CutFilterNode, CutResponse, DcBlockerConfig,
         DcBlockerControls, DcBlockerNode, DelayControls, DelayLayout, DelayNode, DistortionNode,
-        EnvelopeFollowerNode, EqBandNode, FdnControls, FdnLayout, FdnNode, FreeverbControls,
-        FreeverbNode, GateControls, GateNode, HrtfBinauralNode, InterpolationMode, IrLayout,
-        KeyFilter, KeySource, LadderControls, LadderFilterNode, LadderType, LfoClock, LfoNode,
-        LimiterControls, LimiterNode, MetronomeMode, ModDelayControls, ModDelayNode,
-        MultibandCompressorNode, MultibandControls, NoteEnvelopeNode, OscillatorNode,
-        OversamplingFactor, PhaserControls, PhaserNode, PortSide, Routing as FeedbackRouting,
-        RoutingError as FeedbackRoutingError, SOURCE_EVENT_CAPACITY, ShapeKind, SourceNode,
-        SourcePorts, Stages, StagesError, Stagger, StaggerError, SvfControls, SvfFilterNode,
-        SvfType, Sweep, SweepError, SweepRange, SweepRangeError, VbapError, VbapPannerNode,
-        VolumeOutOfRange,
+        DynamicEqConfig, DynamicEqControls, DynamicEqNode, DynamicMode, EnvelopeFollowerNode,
+        EqBandNode, FdnControls, FdnLayout, FdnNode, FreeverbControls, FreeverbNode, GateControls,
+        GateNode, HrtfBinauralNode, InterpolationMode, IrLayout, KeyFilter, KeySource,
+        LadderControls, LadderFilterNode, LadderType, LfoClock, LfoNode, LimiterControls,
+        LimiterNode, MetronomeMode, ModDelayControls, ModDelayNode, MultibandCompressorNode,
+        MultibandControls, NoteEnvelopeNode, OscillatorNode, OversamplingFactor, PhaserControls,
+        PhaserNode, PortSide, Routing as FeedbackRouting, RoutingError as FeedbackRoutingError,
+        SOURCE_EVENT_CAPACITY, ShapeKind, SourceNode, SourcePorts, Stages, StagesError, Stagger,
+        StaggerError, SvfControls, SvfFilterNode, SvfType, Sweep, SweepError, SweepRange,
+        SweepRangeError, VbapError, VbapPannerNode, VolumeOutOfRange,
     };
     pub use tutti_nodes::{
         BitCrusherKernel, BrickwallKernel, CompressorKernel, Control, ControlLanes, ControlRead,
         ControlSet, ControlValid, CrossoverKernel, CutFilterKernel, DcBlockerKernel, DelayKernel,
-        DistortionKernel, FdnKernel, Feed, FreeverbKernel, GateKernel, Kernel, KernelNode,
-        LadderKernel, LimiterKernel, ModDelayKernel, PhaserKernel, ReconcileError, SvfKernel,
+        DistortionKernel, DynamicEqKernel, FdnKernel, Feed, FreeverbKernel, GateKernel, Kernel,
+        KernelNode, LadderKernel, LimiterKernel, ModDelayKernel, PhaserKernel, ReconcileError,
+        SvfKernel,
     };
     pub use tutti_nodes::{
         BitCrusherSet, BrickwallSet, CompressorSet, CrossoverSet, CutFilterSet, DcBlockerSet,
-        DelaySet, DistortionSet, FdnSet, FreeverbSet, GateSet, HasControl, LadderSet, LimiterSet,
-        ModDelaySet, PhaserSet, SvfSet,
+        DelaySet, DistortionSet, DynamicEqSet, FdnSet, FreeverbSet, GateSet, HasControl, LadderSet,
+        LimiterSet, ModDelaySet, PhaserSet, SvfSet,
     };
 }
 
@@ -552,12 +553,11 @@ pub mod plugin {
     };
     pub use tutti_plugin_db::ScanBusy;
     pub use tutti_plugin_db::{
-        BlacklistedFile, FileFacts, FileFailure, FileRow, FileState, FilesError, PluginEntry,
-        ProbeFailure, ProbeFailureKind, RowChange, ScanError, ScanProgress,
+        BeforeEpoch, BlacklistedFile, FileFacts, FileFailure, FileRow, FileState, FilesError,
+        Mtime, PluginEntry, ProbeFailure, ProbeFailureKind, RowChange, ScanError, ScanProgress,
     };
     pub use tutti_plugin_host::RebindError;
     pub use tutti_plugin_ipc::RandomSourceError;
-    pub use tutti_plugin_ipc::{SlabAccessError, SlabLayoutError};
     pub use tutti_plugin_types::PresetSupport;
     pub use tutti_plugin_types::bundle::ModuleKind;
     pub use tutti_plugin_types::features::{FeatureReport, Features};
@@ -571,6 +571,9 @@ pub mod plugin {
         VersionText, Vst2Category, Vst3PlugType, Vst3SubCategories,
     };
     pub use tutti_plugin_types::{EditorError, LoadStage, TerminationReason};
+    pub use tutti_plugin_types::{
+        FrameTooLarge, ResultError, SlabAccessError, SlabError, SlabLayoutError,
+    };
     pub use tutti_plugin_types::{Timeouts, ZeroTimeout};
 
     /// The plugin catalog: scanning, the database and the descriptors it
@@ -619,12 +622,14 @@ pub mod midi {
     };
     pub use tutti_midi_file::Error as FileError;
     pub use tutti_midi_file::{
-        ClipFileError, ConfigError as FileConfigError, Refusal, SmfParseError, ToClipError,
-        Truncated,
+        Altered, Converted, DropReason, Dropped, LyricChange, MalformedMeta, MicrosPerQuarter,
+        MicrosPerQuarterOutOfRange, MidiFileKind, Moved, NoCommonTimeline, OtherMetaKind,
+        OtherMetaKindOutOfRange, OutOfOrder, PairedNote, SmfDivision, SmfDivisionOutOfRange,
+        TextKind, Timeline, TimelineDrop, WriteOptions,
     };
     pub use tutti_midi_file::{
-        Converted, DropReason, Dropped, MidiFileKind, Moved, NoCommonTimeline, OutOfOrder,
-        PairedNote, SmfDivision, SmfDivisionOutOfRange, TextKind, WriteOptions,
+        ClipFileError, ConfigError as FileConfigError, IoStep, Refusal, SmfParseError, ToClipError,
+        Truncated,
     };
     pub use tutti_midi_file::{FileEvent, Meta, MidiFile, SmfFormat, Tick, Track};
     #[cfg(feature = "midi-hardware")]
@@ -657,11 +662,11 @@ pub mod midi {
         FunctionBlocks, GroupSpan, Key, KeyEvent, KeySignature, Lane, Letter, MdsChunk,
         MdsChunkSize, MdsChunks, MdsIdentity, Metronome, Midi1Bytes, Midi1Port, MixedDataHeader,
         MpeChannels, MpeOverlap, MpeZoneSet, MpeZoneSpan, NotChunkSize, NotManufacturerId,
-        OutOfRange, PerNoteManagement, Pitch, RegisteredData, RegisteredPerNoteController,
-        Reserved, ReservedAccents, ReservedAttribute, Rpn, SharpsFlats, Stream, Sysex7Packet,
-        Sysex7Packets, Sysex8Packet, Sysex8Packets, Sysex8Stream, Sysex8StreamIds, SysexError,
-        SysexMessage, SysexRef, SysexStatus, SysexStep, System, U4, UiHint, UmpVersion, Unknown,
-        Utility, Voice2,
+        NotSharpsFlats, OutOfRange, PerNoteManagement, Pitch, RegisteredData,
+        RegisteredPerNoteController, Reserved, ReservedAccents, ReservedAttribute, Rpn,
+        SharpsFlats, Stream, Sysex7Packet, Sysex7Packets, Sysex8Packet, Sysex8Packets,
+        Sysex8Stream, Sysex8StreamIds, SysexError, SysexMessage, SysexRef, SysexStatus, SysexStep,
+        System, U4, UiHint, UmpVersion, Unknown, Utility, Voice2,
     };
     pub use tutti_ump::{
         Address, CCNumber, DeviceIdentity, ManufacturerId, Message, Midi1Parser, MidiChannel,

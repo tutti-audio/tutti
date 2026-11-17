@@ -4,7 +4,7 @@ use tutti_types::{Beat, Bpm};
 ///
 /// Named for the transition between two points (a segment of the map), not for
 /// a drawing: it is the law of the tempo across that segment.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Transition {
     /// Hold this tempo until the next point.
     Step,
@@ -12,20 +12,24 @@ pub enum Transition {
     ///
     /// This is CLAP's `tempo_inc` (a constant increment per sample), and the
     /// default for import and export.
-    RampTime,
+    RampTime {
+        /// The tempo the ramp reaches at the next point's beat. `None` reaches
+        /// the next point's own tempo; `Some` ends there and the next point's
+        /// tempo is a step from it: one beat holds the ramp's end and the
+        /// step, with no plateau between. [`TempoMap::new`](crate::TempoMap::new)
+        /// folds an end equal to the next tempo into `None`.
+        end: Option<Bpm>,
+    },
     /// Move to the next point's tempo, tempo linear in beats.
     ///
     /// Time is a logarithm of the beat. This is the ramp Ardour draws.
-    RampBeats,
+    RampBeats {
+        /// The tempo the ramp reaches, as for [`RampTime`](Self::RampTime).
+        end: Option<Bpm>,
+    },
 }
 
 /// A tempo from `beat` on.
-///
-/// One beat carries two tempos only where a ramp ends in a step: `arrive` is
-/// the tempo the ramp before reaches at `beat`, and `tempo` is the one the
-/// point departs with. A queried tempo at `beat` is the departing one (the map is
-/// right-continuous), and the time of `beat` is the ramp's, so a step changes
-/// the tempo and never the time.
 ///
 /// A plain value: [`TempoMap::new`](crate::TempoMap::new) is where it is
 /// checked. A ramp's target is the next point's own tempo, so a ramp point
@@ -42,11 +46,6 @@ pub struct TempoPoint {
     pub tempo: Bpm,
     /// How it gets to the next point.
     pub transition: Transition,
-    /// The tempo the ramp before this point ends at, when that is not `tempo`:
-    /// the ramp arrives at `arrive` and the tempo steps to `tempo` at `beat`.
-    /// `None` reaches `tempo`. Only a point after a ramp may set it
-    /// ([`TempoError::ArriveWithoutRamp`](crate::TempoError::ArriveWithoutRamp)).
-    pub arrive: Option<Bpm>,
 }
 
 impl TempoPoint {
@@ -57,7 +56,6 @@ impl TempoPoint {
             beat,
             tempo,
             transition: Transition::Step,
-            arrive: None,
         }
     }
 
@@ -68,8 +66,7 @@ impl TempoPoint {
         Self {
             beat,
             tempo,
-            transition: Transition::RampTime,
-            arrive: None,
+            transition: Transition::RampTime { end: None },
         }
     }
 
@@ -80,15 +77,7 @@ impl TempoPoint {
         Self {
             beat,
             tempo,
-            transition: Transition::RampBeats,
-            arrive: None,
+            transition: Transition::RampBeats { end: None },
         }
-    }
-
-    /// The tempo the segment before this point reaches at `beat`: `arrive`,
-    /// else `tempo`.
-    #[must_use]
-    pub fn arrival(&self) -> Bpm {
-        self.arrive.unwrap_or(self.tempo)
     }
 }

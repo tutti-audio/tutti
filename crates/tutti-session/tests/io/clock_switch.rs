@@ -36,7 +36,10 @@ fn system() -> SystemSession {
 }
 
 /// Wires a constant to both outputs and commits it.
-fn wire_constant<C: tutti_session::Clock>(s: &mut Session<C>, level: f32) {
+fn wire_constant<K: tutti_session::AppKey, C: tutti_session::Clock>(
+    s: &mut Session<K, C>,
+    level: f32,
+) {
     let (node, _) = s.graph().add(ForkByClone(Const::mono(level)));
     for port in 0..2 {
         s.graph()
@@ -54,11 +57,11 @@ fn wait_until(what: &str, mut done: impl FnMut() -> bool) {
     }
 }
 
-fn play<C: tutti_session::Clock>(s: &Session<C>) {
+fn play<K: tutti_session::AppKey, C: tutti_session::Clock>(s: &Session<K, C>) {
     s.play().expect("room");
 }
 
-fn frame<C: tutti_session::Clock>(s: &Session<C>) -> u64 {
+fn frame<K: tutti_session::AppKey, C: tutti_session::Clock>(s: &Session<K, C>) -> u64 {
     s.playhead().frame().get()
 }
 

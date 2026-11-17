@@ -120,7 +120,6 @@ fn load() -> (PluginNode<Vst2Loaded>, PluginHandle) {
 fn scene_map(blocks: usize) -> tutti_tempo::TempoMap {
     use tutti_tempo::{TempoMap, TempoPoint, Transition};
     let point = |beat: f64, bpm: f64| TempoPoint {
-        arrive: None,
         beat: Beat(beat),
         tempo: Bpm::of(bpm),
         transition: Transition::Step,

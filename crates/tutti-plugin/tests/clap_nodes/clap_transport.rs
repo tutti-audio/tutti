@@ -115,7 +115,6 @@ fn scene(b: usize, block: usize) -> (TransportPosition, TransportChanges) {
 fn scene_map(blocks: usize) -> tutti_tempo::TempoMap {
     use tutti_tempo::{TempoMap, TempoPoint, Transition};
     let point = |beat: f64, bpm: f64| TempoPoint {
-        arrive: None,
         beat: Beat(beat),
         tempo: Bpm::of(bpm),
         transition: Transition::Step,
@@ -342,13 +341,11 @@ fn ramp_tempo() -> tutti_transport::TempoReader {
     use tutti_tempo::{TempoMap, TempoPoint, Transition};
     let map = TempoMap::new([
         TempoPoint {
-            arrive: None,
             beat: Beat(0.0),
             tempo: Bpm::of(120.0),
-            transition: Transition::RampTime,
+            transition: Transition::RampTime { end: None },
         },
         TempoPoint {
-            arrive: None,
             beat: Beat(4.0),
             tempo: Bpm::of(180.0),
             transition: Transition::Step,
@@ -426,14 +423,13 @@ fn event_echo(out: &[f32]) -> Vec<[f64; 5]> {
 fn two_ramps() -> tutti_transport::TempoReader {
     use tutti_tempo::{TempoMap, TempoPoint, Transition};
     let point = |beat: f64, bpm: f64, transition| TempoPoint {
-        arrive: None,
         beat: Beat(beat),
         tempo: Bpm::of(bpm),
         transition,
     };
     let map = TempoMap::new([
-        point(0.0, 120.0, Transition::RampTime),
-        point(4.0, 180.0, Transition::RampTime),
+        point(0.0, 120.0, Transition::RampTime { end: None }),
+        point(4.0, 180.0, Transition::RampTime { end: None }),
         point(8.0, 60.0, Transition::Step),
     ])
     .expect("a map");

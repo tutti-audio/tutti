@@ -67,7 +67,7 @@ pub enum PresetJobFailed {
     Wait(#[from] WaitError),
 }
 
-impl<C: crate::Clock> Session<C> {
+impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// Loads the listed `preset` into the plugin in the node over the entry
     /// under `key`, in the first [`update`](Self::update) on the main thread:
     /// the outcome lands there, and the parameter mirror is read again by the
@@ -82,13 +82,13 @@ impl<C: crate::Clock> Session<C> {
     /// [`PresetJobError::NoNode`] when the plugin is in no node;
     /// [`PresetJobError::OtherPlugin`] when `preset` was listed by another
     /// plugin (nothing is sent).
-    pub fn load_preset<K>(
+    pub fn load_preset<P>(
         &mut self,
-        key: &K,
+        key: &P,
         preset: &ListedPreset,
-    ) -> Result<Job<LoadPreset>, PresetJobError<K>>
+    ) -> Result<Job<LoadPreset>, PresetJobError<P>>
     where
-        K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
+        P: crate::AppKey,
     {
         self.start_load(key, preset.id().clone(), Some(preset.plugin), None)
     }
@@ -105,13 +105,13 @@ impl<C: crate::Clock> Session<C> {
     ///
     /// [`PresetJobError::Entry`] when the key has no loaded plugin entry;
     /// [`PresetJobError::NoNode`] when the plugin is in no node.
-    pub fn load_preset_file<K>(
+    pub fn load_preset_file<P>(
         &mut self,
-        key: &K,
+        key: &P,
         path: impl Into<PathBuf>,
-    ) -> Result<Job<LoadPreset>, PresetJobError<K>>
+    ) -> Result<Job<LoadPreset>, PresetJobError<P>>
     where
-        K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
+        P: crate::AppKey,
     {
         let id = PresetId::Location(path.into());
         self.start_load(key, id, None, Some(PresetSupport::LoadByPath))
@@ -120,9 +120,9 @@ impl<C: crate::Clock> Session<C> {
     /// The preset the plugin says is loaded, when it will say: not every
     /// format has the query, and the plugin may decline. Never "the first
     /// one". A plugin in no node, or gone, answers `None`.
-    pub fn current_preset<K>(&self, key: &K, main: MainThreadMarker) -> Option<PresetId>
+    pub fn current_preset<P>(&self, key: &P, main: MainThreadMarker) -> Option<PresetId>
     where
-        K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
+        P: crate::AppKey,
     {
         let (handle, ..) = self.state_parts(key).ok()?;
         handle.current_preset(main)
@@ -130,15 +130,15 @@ impl<C: crate::Clock> Session<C> {
 
     /// Posts the load of `id` to the main thread; with `needs`, a plugin whose
     /// support is another answers `Unsupported`.
-    fn start_load<K>(
+    fn start_load<P>(
         &mut self,
-        key: &K,
+        key: &P,
         id: PresetId,
         listed_by: Option<ResourceId>,
         needs: Option<PresetSupport>,
-    ) -> Result<Job<LoadPreset>, PresetJobError<K>>
+    ) -> Result<Job<LoadPreset>, PresetJobError<P>>
     where
-        K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
+        P: crate::AppKey,
     {
         let (handle, _, notices, hosted) = self.state_parts(key)?;
         // The plugin the load reaches is the node's, which a landed reload

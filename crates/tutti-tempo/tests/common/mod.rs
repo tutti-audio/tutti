@@ -6,7 +6,6 @@ pub const R: SampleRate = SampleRate::SR_48K;
 
 pub fn pt(beat: f64, tempo: f64, shape: Transition) -> TempoPoint {
     TempoPoint {
-        arrive: None,
         beat: Beat(beat),
         tempo: Bpm::of(tempo),
         transition: shape,

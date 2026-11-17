@@ -387,14 +387,12 @@ impl Processor for RecProcessor {
 /// A map at 120 BPM, with a step to 90 at `to_90` beats when given.
 fn tempo(to_90: Option<f64>) -> TempoReader {
     let mut points = vec![TempoPoint {
-        arrive: None,
         beat: Beat(0.0),
         tempo: Bpm::of(120.0),
         transition: Transition::Step,
     }];
     if let Some(beat) = to_90 {
         points.push(TempoPoint {
-            arrive: None,
             beat: Beat(beat),
             tempo: Bpm::of(90.0),
             transition: Transition::Step,
@@ -814,13 +812,11 @@ fn a_tempo_ramp_across_a_block_boundary_gives_the_chunks_slope() {
     let ramp = TempoReader::fixed(Arc::new(
         TempoMap::new(vec![
             TempoPoint {
-                arrive: None,
                 beat: Beat(0.0),
                 tempo: Bpm::of(120.0),
-                transition: Transition::RampTime,
+                transition: Transition::RampTime { end: None },
             },
             TempoPoint {
-                arrive: None,
                 beat: Beat(100.0),
                 tempo: Bpm::of(90.0),
                 transition: Transition::Step,
@@ -883,14 +879,12 @@ fn the_midi_in_flight_at_a_reset_is_lost_and_counted() {
 fn transport_changes_past_the_bound_are_dropped_and_counted() {
     let rig = Rig::new(Some(64), Features::TRANSPORT);
     let mut points = vec![TempoPoint {
-        arrive: None,
         beat: Beat(0.0),
         tempo: Bpm::of(120.0),
         transition: Transition::Step,
     }];
     for i in 0..12u32 {
         points.push(TempoPoint {
-            arrive: None,
             beat: Beat(4.0 + (4.5 + 4.0 * f64::from(i)) * BEATS_PER_FRAME),
             tempo: Bpm::of(100.0 - f64::from(i)),
             transition: Transition::Step,

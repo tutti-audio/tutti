@@ -1698,7 +1698,7 @@ fn span(
     }
 }
 
-impl<C: crate::Clock> Session<C> {
+impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// Starts a bounce: checks what it names, derives what it does not,
     /// gathers its fork of the live graph here (what it reads of the live graph
     /// and its nodes, now; an in-process VST2 plugin's second instance is built
@@ -2149,13 +2149,11 @@ mod tests {
     fn stepped() -> TempoMap {
         TempoMap::new([
             TempoPoint {
-                arrive: None,
                 beat: Beat(0.0),
                 tempo: Bpm::of(120.0),
                 transition: Transition::Step,
             },
             TempoPoint {
-                arrive: None,
                 beat: Beat(4.0),
                 tempo: Bpm::of(60.0),
                 transition: Transition::Step,

@@ -81,7 +81,7 @@ impl AlsaEndpoints {
         let mut held = self.enumerator.lock_recover();
         if held.is_none() {
             *held = client::open("tutti-enum", Blocking::NonBlock, UmpVersion::Midi2)
-                .inspect_err(|e| tracing::debug!("ALSA enumeration: {e}"))
+                .inspect_err(|e| tracing::debug!("ALSA enumeration: {}", crate::error::chain(e)))
                 .ok();
         }
         held.as_ref()

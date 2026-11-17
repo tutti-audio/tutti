@@ -671,7 +671,6 @@ mod tests {
                     .iter()
                     .enumerate()
                     .map(|(i, &(beat, bpm))| TempoPoint {
-                        arrive: None,
                         beat: Beat(beat),
                         tempo: Bpm::of(bpm),
                         transition: if i == last { Transition::Step } else { shape },
@@ -766,7 +765,10 @@ mod tests {
     #[test]
     fn a_ramp_is_followed_cell_by_cell() {
         let ramp = OfflineTimeline::new(&OfflineTimelineConfig {
-            tempo_map: map(&[(0.0, 97.0), (4.0, 120.0)], Transition::RampTime),
+            tempo_map: map(
+                &[(0.0, 97.0), (4.0, 120.0)],
+                Transition::RampTime { end: None },
+            ),
             ..config(0.0)
         });
         let (r0, r1) = (97.0 / 60.0, 120.0 / 60.0);
@@ -786,7 +788,10 @@ mod tests {
     #[test]
     fn the_timeline_reports_the_map_it_was_given() {
         use crate::Timeline;
-        let given = map(&[(0.0, 97.0), (4.0, 120.0)], Transition::RampTime);
+        let given = map(
+            &[(0.0, 97.0), (4.0, 120.0)],
+            Transition::RampTime { end: None },
+        );
         let t = OfflineTimeline::new(&OfflineTimelineConfig {
             tempo_map: Arc::clone(&given),
             ..config(0.0)

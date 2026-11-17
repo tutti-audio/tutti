@@ -13,7 +13,7 @@
 use crate::common;
 
 use proptest::prelude::*;
-use tutti_ump::{Message, Ump, Unknown, Voice1, Voice2};
+use tutti_ump::{CCNumber, Message, System, Ump, Unknown, Voice1, Voice2};
 
 fn any_words() -> impl Strategy<Value = [u32; 4]> {
     any::<[u32; 4]>()
@@ -274,6 +274,70 @@ proptest! {
             _ => false,
         };
         prop_assert_eq!(Ump(w).is_note_off(), by_decode, "{:08x?}", w);
+    }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(common::cases(100_000)))]
+
+    /// `Ump::is_system_real_time` and `decode` agree on every packet that
+    /// decodes: a System message is Real Time exactly when it is Timing Clock,
+    /// Start, Continue, Stop, Active Sensing or Reset (M2-104 §7.6), and no
+    /// other message is.
+    #[test]
+    fn is_system_real_time_agrees_with_decode(mut w in any::<[u32; 4]>(), force in 0u8..3) {
+        if force == 0 {
+            w[0] = 0x1000_0000 | (w[0] & 0x0FFF_FFFF);
+        }
+        if let Ok(message) = Ump(w).decode() {
+            let by_decode = matches!(
+                message,
+                Message::System(
+                    _,
+                    System::TimingClock
+                        | System::Start
+                        | System::Continue
+                        | System::Stop
+                        | System::ActiveSensing
+                        | System::Reset
+                )
+            );
+            prop_assert_eq!(Ump(w).is_system_real_time(), by_decode, "{:08x?}", w);
+        }
+    }
+
+    /// `Ump::is_panic_controller` and `decode` agree on every packet that
+    /// decodes: a Control Change of All Sound Off or All Notes Off, in either
+    /// protocol.
+    #[test]
+    fn is_panic_controller_agrees_with_decode(
+        mut w in any::<[u32; 4]>(),
+        force in 0u8..4,
+        pick in 0u8..3,
+    ) {
+        match force {
+            0 => w[0] = 0x2000_0000 | (w[0] & 0x0FFF_FFFF),
+            1 => w[0] = 0x4000_0000 | (w[0] & 0x0FFF_FFFF),
+            // A Control Change of 120, 123 or a random controller, so the
+            // positive cases are common.
+            2 => {
+                let controller = [120, 123, (w[0] >> 8) & 0x7F][usize::from(pick)];
+                let ty = if w[1] & 1 == 0 { 0x2000_0000 } else { 0x4000_0000 };
+                w[0] = ty | (w[0] & 0x0F0F_00FF) | (0xB << 20) | (controller << 8);
+            }
+            _ => {}
+        }
+        if let Ok(message) = Ump(w).decode() {
+            let panic = |controller: CCNumber| {
+                controller == CCNumber::ALL_SOUND_OFF || controller == CCNumber::ALL_NOTES_OFF
+            };
+            let by_decode = match message {
+                Message::Midi1(_, Voice1::ControlChange { controller, .. })
+                | Message::Midi2(_, Voice2::ControlChange { controller, .. }) => panic(controller),
+                _ => false,
+            };
+            prop_assert_eq!(Ump(w).is_panic_controller(), by_decode, "{:08x?}", w);
+        }
     }
 }
 

@@ -80,7 +80,6 @@ struct Sent {
 fn map(points: &[(f64, f64, Transition)]) -> Arc<TempoMap> {
     Arc::new(
         TempoMap::new(points.iter().map(|&(beat, bpm, shape)| TempoPoint {
-            arrive: None,
             beat: Beat(beat),
             tempo: Bpm::of(bpm),
             transition: shape,
@@ -102,7 +101,7 @@ fn steps() -> Arc<TempoMap> {
 /// 60 to 240 BPM over 8 beats, linear in time, then 240.
 fn ramp() -> Arc<TempoMap> {
     map(&[
-        (0.0, 60.0, Transition::RampTime),
+        (0.0, 60.0, Transition::RampTime { end: None }),
         (8.0, 240.0, Transition::Step),
     ])
 }

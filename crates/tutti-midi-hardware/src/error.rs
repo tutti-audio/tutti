@@ -88,6 +88,16 @@ pub enum Error {
     #[error(transparent)]
     Os(#[from] crate::backend::OsError),
 
+    /// An output's pool has fewer free cells than a message of several packets
+    /// needs, so none of it was sent.
+    #[error("MIDI output pool has {free} free cells, and the message needs {needed}")]
+    OutputPoolFull {
+        /// Free cells now.
+        free: usize,
+        /// Cells the message needs.
+        needed: usize,
+    },
+
     /// A backend seeded its device list twice, or after reporting a change.
     #[error(transparent)]
     Seed(#[from] crate::SeedError),
@@ -117,6 +127,21 @@ pub enum Error {
     // A parse failure is not a port failure — a consumer that reads files owns
     // that error itself (`tutti_midi_file::Error`, which this crate does not
     // depend on).
+}
+
+/// An error and the errors under it, as one line: `outer: inner: innermost`.
+///
+/// A failed call's error names the call and keeps the OS error as its source
+/// (alsa-ffi's `Call` does), so a log line prints the chain to show both.
+pub(crate) fn chain(error: &dyn std::error::Error) -> String {
+    let mut text = error.to_string();
+    let mut source = error.source();
+    while let Some(under) = source {
+        text.push_str(": ");
+        text.push_str(&under.to_string());
+        source = under.source();
+    }
+    text
 }
 
 impl Error {

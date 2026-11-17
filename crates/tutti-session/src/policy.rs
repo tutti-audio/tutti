@@ -19,7 +19,7 @@ pub trait Policy {
     type Handle<'a>;
 
     /// The handle on `session`'s setting.
-    fn handle<C: Clock>(session: &mut Session<C>) -> Self::Handle<'_>;
+    fn handle<K: crate::AppKey, C: Clock>(session: &mut Session<K, C>) -> Self::Handle<'_>;
 }
 
 /// Where the mix lands: the format the root is heard in, the root's channels to
@@ -102,7 +102,7 @@ pub enum OutputPolicyError {
 impl Policy for OutputPolicy {
     type Handle<'a> = OutputPolicyHandle<'a>;
 
-    fn handle<C: Clock>(session: &mut Session<C>) -> OutputPolicyHandle<'_> {
+    fn handle<K: crate::AppKey, C: Clock>(session: &mut Session<K, C>) -> OutputPolicyHandle<'_> {
         OutputPolicyHandle {
             graph: &session.graph,
             policy: &mut session.output_policy,
@@ -165,7 +165,7 @@ impl OutputPolicyHandle<'_> {
     }
 }
 
-impl<C: Clock> Session<C> {
+impl<K: crate::AppKey, C: Clock> Session<K, C> {
     /// The setting `P`, to read and change: `session.policy::<OutputPolicy>()`.
     pub fn policy<P: Policy>(&mut self) -> P::Handle<'_> {
         P::handle(self)

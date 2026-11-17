@@ -730,7 +730,7 @@ impl Peer for MidiOutput {
     }
 }
 
-impl<C: crate::Clock> Session<C> {
+impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// The input port of the `midi_input` entry under `key`.
     ///
     /// # Errors
@@ -739,11 +739,11 @@ impl<C: crate::Clock> Session<C> {
     /// released); [`HandleError::WrongKind`] when it is another kind of entry;
     /// [`HandleError::NotLoaded`] before the load lands, or after it failed (an
     /// ambiguous saved device: the state carries the candidates).
-    pub fn midi_input<K>(&self, key: &K) -> Result<MidiInput, HandleError<K>>
+    pub fn midi_input<P>(&self, key: &P) -> Result<MidiInput, HandleError<P>>
     where
-        K: Ord + Clone + std::fmt::Debug + Send + Sync + 'static,
+        P: crate::AppKey,
     {
-        self.pool.handle::<K, MidiInputEntry>(key)
+        self.pool.handle::<P, MidiInputEntry>(key)
     }
 
     /// The output port of the `midi_output` entry under `key`.
@@ -751,11 +751,11 @@ impl<C: crate::Clock> Session<C> {
     /// # Errors
     ///
     /// As [`midi_input`](Self::midi_input).
-    pub fn midi_output<K>(&self, key: &K) -> Result<MidiOutput, HandleError<K>>
+    pub fn midi_output<P>(&self, key: &P) -> Result<MidiOutput, HandleError<P>>
     where
-        K: Ord + Clone + std::fmt::Debug + Send + Sync + 'static,
+        P: crate::AppKey,
     {
-        self.pool.handle::<K, MidiOutputEntry>(key)
+        self.pool.handle::<P, MidiOutputEntry>(key)
     }
 }
 

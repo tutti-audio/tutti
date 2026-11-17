@@ -16,6 +16,15 @@ pub struct TempoMap {
     segs: Vec<Seg>,
 }
 
+/// The tempo a segment out of a point with `transition` reaches at the beat of
+/// `next`: the ramp's own end, else `next`'s tempo.
+fn reached(transition: Transition, next: &TempoPoint) -> Bpm {
+    match transition {
+        Transition::RampTime { end } | Transition::RampBeats { end } => end.unwrap_or(next.tempo),
+        Transition::Step => next.tempo,
+    }
+}
+
 /// A lookup hint, owned by a [`TempoView`]. Audio asks for
 /// nearly monotone positions, so the segment found last time is nearly always
 /// right; a wrong hint costs one binary search and never changes a result.
@@ -44,10 +53,10 @@ impl TempoMap {
     /// # Errors
     ///
     /// A [`TempoError`] naming what is wrong: no points, a first point off
-    /// beat 0, beats that are not finite and strictly increasing, a last point that ramps, an `arrive` after a segment that does not ramp, or a segment
+    /// beat 0, beats that are not finite and strictly increasing, a last point that ramps, or a segment
     /// whose duration an `f64` cannot hold.
     pub fn new(points: impl IntoIterator<Item = TempoPoint>) -> Result<Self, TempoError> {
-        let pts: Vec<TempoPoint> = points.into_iter().collect();
+        let mut pts: Vec<TempoPoint> = points.into_iter().collect();
         let first = pts.first().ok_or(TempoError::Empty)?;
         if first.beat.get() != 0.0 {
             return Err(TempoError::FirstNotAtZero);
@@ -60,9 +69,15 @@ impl TempoMap {
         if pts.last().is_some_and(|p| p.transition != Transition::Step) {
             return Err(TempoError::RampWithoutEnd);
         }
-        for (i, p) in pts.iter().enumerate() {
-            if p.arrive.is_some() && !(i > 0 && pts[i - 1].transition != Transition::Step) {
-                return Err(TempoError::ArriveWithoutRamp(i));
+        // One representation per map: a ramp's end equal to the next tempo is
+        // no end. The last point is a step, so no ramp is left without a next.
+        for i in 1..pts.len() {
+            let next = pts[i].tempo;
+            if let Transition::RampTime { end } | Transition::RampBeats { end } =
+                &mut pts[i - 1].transition
+                && *end == Some(next)
+            {
+                *end = None;
             }
         }
         // Anchors: a Neumaier-compensated running sum of segment durations, so
@@ -71,7 +86,7 @@ impl TempoMap {
         let (mut sum, mut comp) = (0.0f64, 0.0f64);
         for (i, p) in pts.iter().enumerate() {
             let (r1, db) = match pts.get(i + 1) {
-                Some(n) => (n.arrival().get() / 60.0, n.beat - p.beat),
+                Some(n) => (reached(p.transition, n).get() / 60.0, n.beat - p.beat),
                 None => (p.tempo.get() / 60.0, BeatDuration(f64::INFINITY)),
             };
             let s = Seg::new(p.beat, Seconds(sum + comp), p.tempo, r1, p.transition, db);
@@ -226,8 +241,8 @@ impl TempoMap {
 
     /// The tempo at `beat`. A point's own beat belongs to that point (the map is
     /// right-continuous): a step reads its new tempo there, a ramp the tempo it
-    /// was given, and a point that ends a ramp and steps reads the tempo it
-    /// steps to, the ramp's own end being [`TempoPoint::arrival`].
+    /// was given, and a point that ends a ramp at an `end` reads the tempo it
+    /// steps to.
     #[must_use]
     pub fn tempo_at(&self, beat: Beat) -> Bpm {
         self.tempo_at_from(beat, &mut Cursor::default())

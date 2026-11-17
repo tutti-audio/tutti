@@ -14,9 +14,6 @@ pub enum TempoError {
     /// The last point is a ramp, which has no next tempo to move to.
     #[error("the last tempo point cannot ramp: it has no next tempo")]
     RampWithoutEnd,
-    /// A point sets `arrive`, but the point before it does not ramp.
-    #[error("tempo point {0} arrives at a tempo, but the point before it does not ramp")]
-    ArriveWithoutRamp(usize),
     /// A segment whose duration cannot be held in an `f64` (a tempo or a span
     /// so extreme that its square or its quotient overflows).
     #[error("the segment from tempo point {0} is not representable")]

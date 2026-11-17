@@ -24,7 +24,6 @@ const RATE: f64 = 48_000.0;
 
 fn point(beat: f64, bpm: f64, shape: Transition) -> TempoPoint {
     TempoPoint {
-        arrive: None,
         beat: Beat(beat),
         tempo: Bpm::of(bpm),
         transition: shape,
@@ -182,8 +181,8 @@ fn step_map() -> TempoMap {
 /// 96 000 frames, -120 / 96 000 a frame), then a step at 60.
 fn ramps_map() -> TempoMap {
     TempoMap::new([
-        point(0.0, 120.0, Transition::RampTime),
-        point(4.0, 180.0, Transition::RampTime),
+        point(0.0, 120.0, Transition::RampTime { end: None }),
+        point(4.0, 180.0, Transition::RampTime { end: None }),
         point(8.0, 60.0, Transition::Step),
     ])
     .expect("a map")
