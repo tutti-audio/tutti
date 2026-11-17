@@ -72,6 +72,7 @@ fn drive_silent(inst: &mut Active, iters: usize, transport: &TransportInfo) {
     for _ in 0..iters {
         let outs: &mut [&mut [f32]] = &mut [&mut out_l[..], &mut out_r[..]];
         let mut buffer = InputOutput::new(
+            Samples(64),
             Planes::default(),
             PlanesMut::new(outs).expect("equal channels"),
         )
@@ -126,6 +127,7 @@ fn process_with_automation_does_not_allocate() {
         for _ in 0..iters {
             let outs: &mut [&mut [f32]] = &mut [&mut out_l[..], &mut out_r[..]];
             let mut buffer = InputOutput::new(
+                Samples(64),
                 Planes::default(),
                 PlanesMut::new(outs).expect("equal channels"),
             )
@@ -179,6 +181,7 @@ fn process_with_midi_does_not_allocate() {
     {
         let outs: &mut [&mut [f32]] = &mut [&mut out_l[..], &mut out_r[..]];
         let mut buffer = InputOutput::new(
+            Samples(64),
             Planes::default(),
             PlanesMut::new(outs).expect("equal channels"),
         )
@@ -207,6 +210,7 @@ fn process_with_midi_does_not_allocate() {
             };
             let outs: &mut [&mut [f32]] = &mut [&mut out_l[..], &mut out_r[..]];
             let mut buffer = InputOutput::new(
+                Samples(64),
                 Planes::default(),
                 PlanesMut::new(outs).expect("equal channels"),
             )
@@ -272,6 +276,7 @@ fn process_with_hundreds_of_events_does_not_allocate() {
         for _ in 0..iters {
             let outs: &mut [&mut [f32]] = &mut [&mut out_l[..], &mut out_r[..]];
             let mut buffer = InputOutput::new(
+                Samples(64),
                 Planes::default(),
                 PlanesMut::new(outs).expect("equal channels"),
             )

@@ -51,7 +51,12 @@ fn render_block(processor: &mut AuProcessor, level: f32, changes: &ParameterChan
     let ctx = ProcessContext::new().params(changes);
     let mut out = ProcessOutput::default();
     let mut io = PluginIo {
-        buffer: PluginAudio::new(&inputs, &mut outputs).expect("equal channels"),
+        buffer: PluginAudio::new(
+            tutti_plugin_types::Samples(inputs[0].len()),
+            &inputs,
+            &mut outputs,
+        )
+        .expect("equal channels"),
         ctx: &ctx,
         out: &mut out,
     };

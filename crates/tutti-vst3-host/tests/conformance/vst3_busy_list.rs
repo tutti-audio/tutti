@@ -28,6 +28,7 @@ fn a_block_is_skipped_while_the_plugin_holds_the_input_list() {
         let outs: &mut [&mut [f32]] = &mut [&mut l[..], &mut r[..]];
         let ins: &[&[f32]] = &[&input[0][..], &input[1][..]];
         let mut buffer = InputOutput::new(
+            tutti_plugin_types::Samples(ins[0].len()),
             Planes::new(ins).expect("equal channels"),
             PlanesMut::new(outs).expect("equal channels"),
         )
@@ -80,6 +81,7 @@ fn a_block_is_skipped_while_the_plugin_holds_a_parameter_queue() {
         let outs: &mut [&mut [f32]] = &mut [&mut l[..], &mut r[..]];
         let ins: &[&[f32]] = &[&input[0][..], &input[1][..]];
         let mut buffer = InputOutput::new(
+            tutti_plugin_types::Samples(ins[0].len()),
             Planes::new(ins).expect("equal channels"),
             PlanesMut::new(outs).expect("equal channels"),
         )
@@ -135,6 +137,7 @@ fn a_refused_set_processing_fails_the_block() {
     let outs: &mut [&mut [f32]] = &mut [&mut l[..], &mut r[..]];
     let ins: &[&[f32]] = &[&input[0][..], &input[1][..]];
     let mut buffer = InputOutput::new(
+        tutti_plugin_types::Samples(ins[0].len()),
         Planes::new(ins).expect("equal channels"),
         PlanesMut::new(outs).expect("equal channels"),
     )

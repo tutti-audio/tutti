@@ -36,9 +36,10 @@ use crate::{
 };
 use crate::{Delivered, ParamEdit, bypass_parameter, bypass_value, is_bypassed};
 use crate::{
-    FdId, MainThreadMarker, Prepare, Ready, RenderMode, RenderModeSupport, Request, RescanScope,
-    RestartRules, StateUse, TimerId, TrackInfo, Wakeups,
+    MainThreadMarker, Prepare, RenderMode, RenderModeSupport, Request, RescanScope, RestartRules,
+    StateUse, TimerId, TrackInfo, Wakeups,
 };
+use tutti_plugin_ipc_ffi::{FdId, Ready};
 
 /// Writes the plugin's bypass parameter, if it lists one: the default of
 /// [`Control::set_bypassed`] and what a wrapped plugin's write goes through, so
@@ -861,7 +862,7 @@ pub struct Stuck<P, C> {
 /// one lifetime for tables and data and a `&mut [&mut _]` is invariant in the
 /// data's. The tables are stack arrays ([`ChannelTable`]), so this is callable
 /// on the audio thread. No inputs is an empty `inputs`; no outputs an empty
-/// `outputs`, a block of no frames.
+/// `outputs`; the block has its `frames` either way.
 ///
 /// # Errors
 ///
@@ -871,6 +872,7 @@ pub fn process_block<P: Processor, S: Float>(
     processor: &mut P,
     inputs: &[&[S]],
     outputs: &mut [&mut [S]],
+    frames: Samples,
     ctx: &ProcessContext<'_>,
     out: &mut ProcessOutput,
 ) -> PluginResult<()>
@@ -878,7 +880,7 @@ where
     for<'a> PluginAudio<'a>: From<InputOutput<'a, 'a, 'a, S>>,
 {
     let mut table: ChannelTable<&mut [S]> = outputs.iter_mut().map(|o| &mut **o).collect();
-    let audio = PluginAudio::new(inputs, &mut table)
+    let audio = PluginAudio::new(frames, inputs, &mut table)
         .map_err(|_| PluginError::Block("the block's channels differ in length"))?;
     audio.process(processor, ctx, out)
 }

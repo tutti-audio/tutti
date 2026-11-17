@@ -235,7 +235,12 @@ fn run(
     let mut output = vec![vec![0.0f32; frames]; 2];
     let inputs: Vec<&[f32]> = input.iter().map(|v| v.as_slice()).collect();
     let mut outputs: Vec<&mut [f32]> = output.iter_mut().map(|v| v.as_mut_slice()).collect();
-    let buffer = PluginAudio::new(&inputs, &mut outputs).expect("equal channels");
+    let buffer = PluginAudio::new(
+        tutti_plugin_types::Samples(inputs[0].len()),
+        &inputs,
+        &mut outputs,
+    )
+    .expect("equal channels");
     let mut ctx = ProcessContext::new();
     ctx.transport = transport;
     ctx.param_changes = changes;

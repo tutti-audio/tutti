@@ -221,6 +221,7 @@ fn render(
     let mut out_refs: Vec<&mut [f32]> = outs.iter_mut().map(|v| v.as_mut_slice()).collect();
 
     let mut buffer = InputOutput::new(
+        tutti_plugin_types::Samples(in_refs[0].len()),
         Planes::new(&in_refs).expect("equal channels"),
         PlanesMut::new(&mut out_refs).expect("equal channels"),
     )
@@ -384,6 +385,7 @@ fn a_block_past_the_activated_length_is_refused() {
         let in_refs: Vec<&[f32]> = input.iter().map(Vec::as_slice).collect();
         let mut out_refs: Vec<&mut [f32]> = output.iter_mut().map(Vec::as_mut_slice).collect();
         let mut buffer = InputOutput::new(
+            tutti_plugin_types::Samples(in_refs[0].len()),
             Planes::new(&in_refs).expect("equal channels"),
             PlanesMut::new(&mut out_refs).expect("equal channels"),
         )
@@ -759,6 +761,7 @@ fn f64_path_carries_the_same_audio() {
     let mut out_refs: Vec<&mut [f64]> = outs.iter_mut().map(|v| v.as_mut_slice()).collect();
 
     let mut buffer = InputOutput::new(
+        tutti_plugin_types::Samples(in_refs[0].len()),
         Planes::new(&in_refs).expect("equal channels"),
         PlanesMut::new(&mut out_refs).expect("equal channels"),
     )
@@ -1071,6 +1074,7 @@ fn note_expression_reaches_the_plugin_with_its_value() {
     let in_refs: Vec<&[f32]> = ins.iter().map(|v| v.as_slice()).collect();
     let mut out_refs: Vec<&mut [f32]> = outs.iter_mut().map(|v| v.as_mut_slice()).collect();
     let mut buffer = InputOutput::new(
+        tutti_plugin_types::Samples(in_refs[0].len()),
         Planes::new(&in_refs).expect("equal channels"),
         PlanesMut::new(&mut out_refs).expect("equal channels"),
     )
@@ -1155,6 +1159,7 @@ fn a_per_note_pitch_bend_reaches_the_plugin_as_tuning() {
     let in_refs: Vec<&[f32]> = ins.iter().map(|v| v.as_slice()).collect();
     let mut out_refs: Vec<&mut [f32]> = outs.iter_mut().map(|v| v.as_mut_slice()).collect();
     let mut buffer = InputOutput::new(
+        tutti_plugin_types::Samples(in_refs[0].len()),
         Planes::new(&in_refs).expect("equal channels"),
         PlanesMut::new(&mut out_refs).expect("equal channels"),
     )
@@ -1205,6 +1210,7 @@ fn midi_emitted_by_the_plugin_reaches_the_host() {
         let in_refs: Vec<&[f32]> = ins.iter().map(|v| v.as_slice()).collect();
         let mut out_refs: Vec<&mut [f32]> = outs.iter_mut().map(|v| v.as_mut_slice()).collect();
         let mut buffer = InputOutput::new(
+            tutti_plugin_types::Samples(in_refs[0].len()),
             Planes::new(&in_refs).expect("equal channels"),
             PlanesMut::new(&mut out_refs).expect("equal channels"),
         )

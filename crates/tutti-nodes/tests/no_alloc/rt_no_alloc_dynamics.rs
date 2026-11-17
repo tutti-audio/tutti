@@ -27,7 +27,8 @@ use tutti_types::{BusTopology, ChannelLayout, CompressionRatio, Db, SampleRate, 
 /// blocks, then `blocks` 64-frame blocks under `assert_no_alloc`.
 fn gate<N: IntoNode>(node: N, amplitude: f32, warm: usize, blocks: usize) {
     let (mut rig, _controls) = BlockRig::new(node, SampleRate::SR_48K, 64);
-    for c in rig.inputs_mut() {
+    for c in rig.inputs_mut().iter_mut() {
+        let c = c.into_samples_mut();
         for (i, x) in c.iter_mut().enumerate() {
             *x = if i % 2 == 0 { amplitude } else { -amplitude };
         }
@@ -36,7 +37,11 @@ fn gate<N: IntoNode>(node: N, amplitude: f32, warm: usize, blocks: usize) {
         rig.block();
     }
     assert!(
-        rig.output(0).iter().any(|s| s.abs() > 1e-6),
+        rig.output()
+            .plane(0)
+            .samples()
+            .iter()
+            .any(|s| s.abs() > 1e-6),
         "the node rendered silence; the gate would walk no DSP"
     );
     assert_no_alloc::assert_no_alloc(|| {
@@ -115,7 +120,8 @@ fn compressor_fed_threshold_and_moving_cells_are_allocation_free() {
         SampleRate::SR_48K,
         64,
     );
-    for c in node.inputs_mut() {
+    for c in node.inputs_mut().iter_mut() {
+        let c = c.into_samples_mut();
         for (i, x) in c.iter_mut().enumerate() {
             *x = if i % 2 == 0 { 0.8 } else { -0.8 };
         }
@@ -316,7 +322,8 @@ fn limiter_node_burst_and_release_are_allocation_free() {
     });
     let (mut rig, _controls) = BlockRig::new(node, SampleRate::SR_48K, 64);
     let fill = |rig: &mut BlockRig, amplitude: f32| {
-        for c in rig.inputs_mut() {
+        for c in rig.inputs_mut().iter_mut() {
+            let c = c.into_samples_mut();
             for (i, x) in c.iter_mut().enumerate() {
                 *x = if i % 2 == 0 { amplitude } else { -amplitude };
             }
@@ -335,7 +342,11 @@ fn limiter_node_burst_and_release_are_allocation_free() {
         }
     });
     assert!(
-        rig.output(0).iter().any(|s| s.abs() > 1e-6),
+        rig.output()
+            .plane(0)
+            .samples()
+            .iter()
+            .any(|s| s.abs() > 1e-6),
         "the limiter rendered silence after the release"
     );
 }
@@ -355,7 +366,8 @@ fn brickwall_limiter_fed_ceiling_process_is_allocation_free() {
         SampleRate::SR_48K,
         64,
     );
-    for c in node.inputs_mut() {
+    for c in node.inputs_mut().iter_mut() {
+        let c = c.into_samples_mut();
         for (i, x) in c.iter_mut().enumerate() {
             *x = if i % 2 == 0 { 1.5 } else { -1.5 };
         }
@@ -365,9 +377,9 @@ fn brickwall_limiter_fed_ceiling_process_is_allocation_free() {
     node.block();
     let first = tutti_types::Db(-12.0).to_amplitude().get();
     assert!(
-        (node.output(5)[0] - first).abs() < 1e-5,
+        (node.output().plane(5).samples()[0] - first).abs() < 1e-5,
         "the fed ceiling did not reach the clip: {}",
-        node.output(5)[0]
+        node.output().plane(5).samples()[0]
     );
     assert_no_alloc::assert_no_alloc(|| {
         for _ in 0..1_000 {
@@ -394,7 +406,8 @@ fn brickwall_limiter_moving_cell_and_hostile_lane_are_allocation_free() {
         SampleRate::SR_48K,
         64,
     );
-    for c in node.inputs_mut() {
+    for c in node.inputs_mut().iter_mut() {
+        let c = c.into_samples_mut();
         for (i, x) in c.iter_mut().enumerate() {
             *x = if i % 2 == 0 { 1.5 } else { -1.5 };
         }
@@ -430,7 +443,8 @@ fn limiter_node_fed_ceiling_and_threshold_process_is_allocation_free() {
         SampleRate::SR_48K,
         64,
     );
-    for c in node.inputs_mut() {
+    for c in node.inputs_mut().iter_mut() {
+        let c = c.into_samples_mut();
         for (i, x) in c.iter_mut().enumerate() {
             *x = if i % 2 == 0 { 1.5 } else { -1.5 };
         }
@@ -444,7 +458,11 @@ fn limiter_node_fed_ceiling_and_threshold_process_is_allocation_free() {
         node.block();
     }
     assert!(
-        node.output(0).iter().any(|y| y.abs() < 1.0),
+        node.output()
+            .plane(0)
+            .samples()
+            .iter()
+            .any(|y| y.abs() < 1.0),
         "the limiter was not reducing; the gate would walk no gain curve"
     );
     assert_no_alloc::assert_no_alloc(|| {
@@ -472,7 +490,8 @@ fn a_limiter_cloned_mid_release_processes_allocation_free() {
     });
     let mut d = Direct::new(node, SampleRate::SR_48K, 64);
     let fill = |d: &mut Direct<LimiterNode>, amplitude: f32| {
-        for c in d.inputs_mut() {
+        for c in d.inputs_mut().iter_mut() {
+            let c = c.into_samples_mut();
             for (i, x) in c.iter_mut().enumerate() {
                 *x = if i % 2 == 0 { amplitude } else { -amplitude };
             }
@@ -495,7 +514,7 @@ fn a_limiter_cloned_mid_release_processes_allocation_free() {
         }
     });
     assert!(
-        d.output(0).iter().any(|s| s.abs() > 1e-6),
+        d.output().plane(0).iter().any(|s| s.abs() > 1e-6),
         "the clone rendered silence after the release"
     );
 }
@@ -536,7 +555,8 @@ pub(crate) fn sweep<N: tutti_graph::Node + tutti_graph::ParamNode>(
     use tutti_types::{MaxBlock, Samples};
 
     let fill = |d: &mut Direct<N>, amplitude: f32| {
-        for c in d.inputs_mut() {
+        for c in d.inputs_mut().iter_mut() {
+            let c = c.into_samples_mut();
             for (i, x) in c.iter_mut().enumerate() {
                 *x = if i % 2 == 0 { amplitude } else { -amplitude };
             }
@@ -565,11 +585,13 @@ pub(crate) fn sweep<N: tutti_graph::Node + tutti_graph::ParamNode>(
                         // Silent from 65 to 80 percent of the window: a node that parks
                         // parks and wakes.
                         if b == blocks * 65 / 100 {
-                            for c in d.inputs_mut() {
+                            for c in d.inputs_mut().iter_mut() {
+                                let c = c.into_samples_mut();
                                 c.fill(0.0);
                             }
                         } else if b == blocks * 80 / 100 {
-                            for c in d.inputs_mut() {
+                            for c in d.inputs_mut().iter_mut() {
+                                let c = c.into_samples_mut();
                                 for (i, x) in c.iter_mut().enumerate() {
                                     *x = if i % 2 == 0 { amplitude } else { -amplitude };
                                 }
@@ -589,7 +611,8 @@ pub(crate) fn sweep<N: tutti_graph::Node + tutti_graph::ParamNode>(
                         if let Some(k) = key_from {
                             let hot = b % 50 == 5 && b < blocks * 65 / 100;
                             let silent = (blocks * 65 / 100..blocks * 80 / 100).contains(&b);
-                            for c in &mut d.inputs_mut()[k..] {
+                            for mut c in d.inputs_mut().iter_mut().skip(k) {
+                                let c = c.samples_mut();
                                 c[0] = if hot {
                                     f32::INFINITY
                                 } else if silent {
@@ -601,7 +624,7 @@ pub(crate) fn sweep<N: tutti_graph::Node + tutti_graph::ParamNode>(
                         }
                         d.block();
                         for c in 0..outs {
-                            for &s in d.output(c) {
+                            for &s in d.output().plane(c).samples() {
                                 finite &= s.is_finite();
                                 within &= s.abs() <= corners.bound;
                             }

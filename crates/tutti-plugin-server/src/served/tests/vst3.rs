@@ -100,7 +100,12 @@ fn activations_seen_by_the_plugin(instance: &mut Vst3Instance) -> u32 {
         let input_slices: Vec<&[f32]> = input.iter().map(|v| v.as_slice()).collect();
         let mut output_slices: Vec<&mut [f32]> =
             output.iter_mut().map(|v| v.as_mut_slice()).collect();
-        let buffer = PluginAudio::new(&input_slices, &mut output_slices).expect("equal channels");
+        let buffer = PluginAudio::new(
+            tutti_plugin_types::Samples(input_slices[0].len()),
+            &input_slices,
+            &mut output_slices,
+        )
+        .expect("equal channels");
         instance.render(buffer, &ctx, &mut out).expect("renders");
     }
     (output[0][0] - ACTIVATION_COUNT_BASE) as u32
@@ -668,7 +673,12 @@ fn test_vst3_process_f32_silence() {
     let mut output_slices: Vec<&mut [f32]> =
         output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
 
-    let buffer = PluginAudio::new(&input_slices, &mut output_slices).expect("equal channels");
+    let buffer = PluginAudio::new(
+        tutti_plugin_types::Samples(input_slices[0].len()),
+        &input_slices,
+        &mut output_slices,
+    )
+    .expect("equal channels");
 
     let ctx = tutti_plugin_types::ProcessContext::new();
     // Should not panic
@@ -700,7 +710,12 @@ fn test_vst3_process_f32_with_note() {
         let mut output_slices: Vec<&mut [f32]> =
             output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
 
-        let buffer = PluginAudio::new(&input_slices, &mut output_slices).expect("equal channels");
+        let buffer = PluginAudio::new(
+            tutti_plugin_types::Samples(input_slices[0].len()),
+            &input_slices,
+            &mut output_slices,
+        )
+        .expect("equal channels");
 
         let ctx = tutti_plugin_types::ProcessContext::new().midi(&note_on);
         let mut out = tutti_plugin_types::ProcessOutput::default();
@@ -725,7 +740,12 @@ fn test_vst3_process_f32_with_note() {
         let mut output_slices: Vec<&mut [f32]> =
             output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
 
-        let buffer = PluginAudio::new(&input_slices, &mut output_slices).expect("equal channels");
+        let buffer = PluginAudio::new(
+            tutti_plugin_types::Samples(input_slices[0].len()),
+            &input_slices,
+            &mut output_slices,
+        )
+        .expect("equal channels");
 
         let mut out = tutti_plugin_types::ProcessOutput::default();
 
@@ -838,7 +858,12 @@ fn test_voxengo_span_process_f64() {
     let mut output_slices: Vec<&mut [f64]> =
         output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
 
-    let buffer = PluginAudio::new(&input_slices, &mut output_slices).expect("equal channels");
+    let buffer = PluginAudio::new(
+        tutti_plugin_types::Samples(input_slices[0].len()),
+        &input_slices,
+        &mut output_slices,
+    )
+    .expect("equal channels");
 
     let ctx = tutti_plugin_types::ProcessContext::new();
     let mut out = tutti_plugin_types::ProcessOutput::default();
@@ -892,7 +917,12 @@ fn test_voxengo_boogex_process_f64() {
     let mut output_slices: Vec<&mut [f64]> =
         output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
 
-    let buffer = PluginAudio::new(&input_slices, &mut output_slices).expect("equal channels");
+    let buffer = PluginAudio::new(
+        tutti_plugin_types::Samples(input_slices[0].len()),
+        &input_slices,
+        &mut output_slices,
+    )
+    .expect("equal channels");
 
     let ctx = tutti_plugin_types::ProcessContext::new();
     let mut out = tutti_plugin_types::ProcessOutput::default();

@@ -488,6 +488,7 @@ pub fn drive_blocks_in_mode<T: Vst3Sample + Default + Copy>(
         let mut out_refs: Vec<&mut [T]> = outs.iter_mut().map(|v| v.as_mut_slice()).collect();
 
         let mut buffer = InputOutput::new(
+            tutti_plugin_types::Samples(in_refs[0].len()),
             Planes::new(&in_refs).expect("equal channels"),
             PlanesMut::new(&mut out_refs).expect("equal channels"),
         )

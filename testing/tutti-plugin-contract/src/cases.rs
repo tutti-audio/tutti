@@ -1433,7 +1433,7 @@ pub fn process_does_not_allocate<F: Format>() {
     let mut outs = [left.as_mut_slice(), right.as_mut_slice()];
     let mut out = ProcessOutput::default();
     let mut io = PluginIo {
-        buffer: PluginAudio::new(&refs, &mut outs).expect("equal channels"),
+        buffer: PluginAudio::new(Samples(BLOCK), &refs, &mut outs).expect("equal channels"),
         ctx: &ctx,
         out: &mut out,
     };

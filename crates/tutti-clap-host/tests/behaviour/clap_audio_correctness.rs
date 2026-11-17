@@ -220,7 +220,12 @@ fn drive_block(
     {
         let in_refs: Vec<&[f32]> = inputs.iter().map(|v| v.as_slice()).collect();
         let mut out_refs: Vec<&mut [f32]> = outs.iter_mut().map(|v| v.as_mut_slice()).collect();
-        let mut buffer = PluginAudio::new(&in_refs, &mut out_refs).expect("equal channels");
+        let mut buffer = PluginAudio::new(
+            tutti_plugin_types::Samples(in_refs[0].len()),
+            &in_refs,
+            &mut out_refs,
+        )
+        .expect("equal channels");
         inst.process(&mut buffer, &ClapProcessContext::default())
             .expect("process succeeds");
     }
@@ -483,7 +488,12 @@ fn host_handles_in_place_style_buffers() {
     {
         let in_refs: Vec<&[f32]> = inputs.iter().map(|v| v.as_slice()).collect();
         let mut out_refs: Vec<&mut [f32]> = outs.iter_mut().map(|v| v.as_mut_slice()).collect();
-        let mut buffer = PluginAudio::new(&in_refs, &mut out_refs).expect("equal channels");
+        let mut buffer = PluginAudio::new(
+            tutti_plugin_types::Samples(in_refs[0].len()),
+            &in_refs,
+            &mut out_refs,
+        )
+        .expect("equal channels");
         inst.process(&mut buffer, &ClapProcessContext::default())
             .expect("process succeeds");
     }
@@ -969,7 +979,12 @@ fn drive_midi_block(inst: &mut Active<f32>, midi: &[UmpAt]) {
     let mut outs: Vec<Vec<f32>> = (0..2).map(|_| vec![0.0; frames]).collect();
     let in_refs: Vec<&[f32]> = ins.iter().map(|v| v.as_slice()).collect();
     let mut out_refs: Vec<&mut [f32]> = outs.iter_mut().map(|v| v.as_mut_slice()).collect();
-    let mut buffer = PluginAudio::new(&in_refs, &mut out_refs).expect("equal channels");
+    let mut buffer = PluginAudio::new(
+        tutti_plugin_types::Samples(in_refs[0].len()),
+        &in_refs,
+        &mut out_refs,
+    )
+    .expect("equal channels");
     let ctx = ClapProcessContext {
         midi,
         ..ClapProcessContext::default()

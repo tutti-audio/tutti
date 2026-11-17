@@ -348,7 +348,12 @@ fn a_plugin_still_processes_after_a_refused_activation() {
     let inputs: Vec<&[f32]> = input_data.iter().map(|v| v.as_slice()).collect();
     let mut outputs: Vec<&mut [f32]> = output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
 
-    let mut buffer = PluginAudio::new(&inputs, &mut outputs).expect("equal channels");
+    let mut buffer = PluginAudio::new(
+        tutti_plugin_types::Samples(inputs[0].len()),
+        &inputs,
+        &mut outputs,
+    )
+    .expect("equal channels");
 
     let ctx = tutti_clap_host::ClapProcessContext::default();
     active

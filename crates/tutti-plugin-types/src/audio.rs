@@ -34,15 +34,16 @@ impl<'a> From<InputOutput<'a, 'a, 'a, f64>> for PluginAudio<'a> {
 }
 
 impl<'a> PluginAudio<'a> {
-    /// The block over `inputs` and `outputs`, one slice per channel. No inputs
-    /// is an empty `inputs`; no outputs an empty `outputs`, which makes a block
-    /// of no frames.
+    /// The block of `frames` over `inputs` and `outputs`, one slice per
+    /// channel. No inputs is an empty `inputs`; no outputs an empty `outputs`,
+    /// and the block still has its `frames`.
     ///
     /// # Errors
     ///
     /// [`BufferError`] when the channels of a direction differ in length, or
-    /// the two directions do.
+    /// a direction with channels does not hold `frames`.
     pub fn new<S: Float>(
+        frames: Samples,
         inputs: &'a [&'a [S]],
         outputs: &'a mut [&'a mut [S]],
     ) -> Result<Self, BufferError>
@@ -59,7 +60,7 @@ impl<'a> PluginAudio<'a> {
         } else {
             PlanesMut::new(outputs)?
         };
-        InputOutput::new(input, output).map(Self::from)
+        InputOutput::new(frames, input, output).map(Self::from)
     }
 }
 
@@ -102,6 +103,7 @@ mod tests {
         let mut outputs = [&mut l[..], &mut r[..]];
         let mut audio = PluginAudio::from(
             InputOutput::new(
+                Samples(4),
                 Planes::new(&input).expect("one plane"),
                 PlanesMut::new(&mut outputs).expect("two planes"),
             )
@@ -111,5 +113,15 @@ mod tests {
         audio.clear_outputs();
         assert_eq!((l, r), ([0.0; 4], [0.0; 4]));
         assert_eq!(input_data, [0.25; 4]);
+    }
+
+    /// A block with no output channel still has the frames it was made with: a
+    /// plugin with no audio output (MIDI-only) sees the block's length.
+    #[test]
+    fn a_block_with_no_output_channel_keeps_its_frames() {
+        let mut none: [&mut [f32]; 0] = [];
+        let audio =
+            PluginAudio::new(Samples(96), &[], &mut none).expect("no channels fit any block");
+        assert_eq!(audio.frames(), Samples(96));
     }
 }

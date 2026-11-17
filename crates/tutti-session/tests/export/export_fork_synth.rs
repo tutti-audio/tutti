@@ -181,7 +181,7 @@ fn reference<N: Node>(unit: N, rate: f64) -> Vec<f32> {
     let mut out = Vec::with_capacity(NOTE);
     while out.len() < NOTE {
         unit.block();
-        out.extend_from_slice(unit.output(0));
+        out.extend_from_slice(unit.output().plane(0).samples());
     }
     out
 }

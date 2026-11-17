@@ -90,9 +90,9 @@ dependencies = [
 
 [[package]]
 name = "arc-lend"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a635e15efd57166db2ad255188dc750b0228c9a3c9b1bd32694485f197109040"
+checksum = "f17e01608ff396d9faa8e721d6964584d0a2374ed1c9770ff3c4ddaa47f4b74c"
 dependencies = [
  "loom",
 ]
@@ -2520,7 +2520,6 @@ dependencies = [
  "objc2",
  "objc2-foundation",
  "thiserror 2.0.21",
- "tracing",
  "tutti-midi-protocol",
  "tutti-plugin-types",
  "tutti-rt",
@@ -2605,6 +2604,7 @@ dependencies = [
  "tutti-fixtures",
  "tutti-graph",
  "tutti-midi-protocol",
+ "tutti-plugin-ipc-ffi",
  "tutti-plugin-types",
  "tutti-rt",
  "tutti-types",
@@ -3138,7 +3138,6 @@ dependencies = [
  "tutti-clap-host",
  "tutti-fixtures",
  "tutti-graph",
- "tutti-plugin-db",
  "tutti-plugin-types",
  "tutti-types",
  "tutti-ump",
@@ -3196,6 +3195,7 @@ dependencies = [
  "tutti-fixtures",
  "tutti-graph",
  "tutti-midi-protocol",
+ "tutti-plugin-ipc-ffi",
  "tutti-plugin-types",
  "tutti-rt",
  "tutti-types",
@@ -3368,6 +3368,7 @@ dependencies = [
  "libm",
  "serde",
  "thiserror 2.0.21",
+ "tutti-buffers",
  "tutti-dsp",
  "tutti-fixtures",
  "tutti-graph",
@@ -3576,6 +3577,7 @@ dependencies = [
  "tutti-fixtures",
  "tutti-graph",
  "tutti-midi-protocol",
+ "tutti-plugin-ipc-ffi",
  "tutti-plugin-types",
  "tutti-rt",
  "tutti-shared-plugin",
@@ -3592,6 +3594,7 @@ name = "tutti-winmm-ffi"
 version = "0.0.1"
 dependencies = [
  "thiserror 2.0.21",
+ "tracing",
  "tutti-fixtures",
  "windows-sys",
 ]

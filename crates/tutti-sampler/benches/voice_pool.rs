@@ -88,7 +88,8 @@ impl Rig {
             self.t.seek(Beat::new(0.0));
         }
         self.direct
-            .output(0)
+            .output()
+            .plane(0)
             .iter()
             .fold(0.0f32, |a, s| a.max(s.abs()))
     }
@@ -497,7 +498,7 @@ impl Clips {
         let mut peak = 0.0f32;
         for d in &mut self.nodes {
             d.block_in(&env);
-            peak = peak.max(d.output(0)[self.block - 1].abs());
+            peak = peak.max(d.output().plane(0).samples()[self.block - 1].abs());
         }
         self.t.advance(self.block as i64, SampleRate::of(SR));
         if self.t.beat().get() >= WRAP_BEATS {
@@ -549,7 +550,7 @@ fn bench_sources(c: &mut Criterion) {
         let mut peak = 0.0f32;
         for d in &mut nodes {
             d.block_in(&env);
-            peak = peak.max(d.output(0)[BLOCK - 1].abs());
+            peak = peak.max(d.output().plane(0).samples()[BLOCK - 1].abs());
         }
         t.advance(BLOCK as i64, SampleRate::of(SR));
         if t.beat().get() >= WRAP_BEATS {

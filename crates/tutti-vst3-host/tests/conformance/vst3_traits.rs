@@ -116,7 +116,12 @@ fn render(
             let [a, b, c] = &mut o;
             let mut outputs = [a.as_mut_slice(), b.as_mut_slice(), c.as_mut_slice()];
             let mut io = PluginIo {
-                buffer: PluginAudio::new(&inputs, &mut outputs).expect("equal channels"),
+                buffer: PluginAudio::new(
+                    tutti_plugin_types::Samples(inputs[0].len()),
+                    &inputs,
+                    &mut outputs,
+                )
+                .expect("equal channels"),
                 ctx,
                 out: &mut out,
             };
@@ -130,7 +135,12 @@ fn render(
             let [a, b, c] = &mut o;
             let mut outputs = [a.as_mut_slice(), b.as_mut_slice(), c.as_mut_slice()];
             let mut io = PluginIo {
-                buffer: PluginAudio::new(&inputs, &mut outputs).expect("equal channels"),
+                buffer: PluginAudio::new(
+                    tutti_plugin_types::Samples(inputs[0].len()),
+                    &inputs,
+                    &mut outputs,
+                )
+                .expect("equal channels"),
                 ctx,
                 out: &mut out,
             };
@@ -406,7 +416,12 @@ impl Block {
         let mut channels = [a.as_mut_slice(), b.as_mut_slice(), c.as_mut_slice()];
         let ctx = ProcessContext::new();
         let mut io = PluginIo {
-            buffer: PluginAudio::new(&inputs, &mut channels).expect("equal channels"),
+            buffer: PluginAudio::new(
+                tutti_plugin_types::Samples(inputs[0].len()),
+                &inputs,
+                &mut channels,
+            )
+            .expect("equal channels"),
             ctx: &ctx,
             out,
         };

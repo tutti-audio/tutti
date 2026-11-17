@@ -13,7 +13,7 @@ use tutti_au_ffi::{RenderNotify, Renderer};
 use tutti_plugin_types::{
     Loaded, MainThreadMarker, PluginError, Prepare, Refused, RestartRules, Stuck, sysex_assembler,
 };
-use tutti_rt::ArcLend;
+use tutti_rt::Publisher;
 
 use crate::automation::{Stage, schedule_pending};
 use crate::control::plugin_error;
@@ -200,7 +200,7 @@ impl AuLoaded {
             });
         }
 
-        let ranges = Arc::new(ArcLend::new(self.range_snapshot()));
+        let ranges = Publisher::new(self.range_snapshot());
         let processor = AuProcessor::new(ProcessorParts {
             rendering,
             unit,

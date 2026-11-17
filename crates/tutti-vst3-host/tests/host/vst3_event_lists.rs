@@ -464,6 +464,7 @@ fn a_stop_drops_an_open_sysex_once() {
     let outs: &mut [&mut [f32]] = &mut [&mut l[..], &mut r[..]];
     let ins: &[&[f32]] = &[&input[0][..], &input[1][..]];
     let mut buffer = InputOutput::new(
+        tutti_plugin_types::Samples(ins[0].len()),
         Planes::new(ins).expect("equal channels"),
         PlanesMut::new(outs).expect("equal channels"),
     )

@@ -483,7 +483,12 @@ mod halves {
                 output.iter_mut().map(|v| v.as_mut_slice()).collect();
             let mut out = ProcessOutput::default();
             let mut io = PluginIo {
-                buffer: PluginAudio::new(&inputs, &mut outputs).expect("equal channels"),
+                buffer: PluginAudio::new(
+                    tutti_plugin_types::Samples(inputs[0].len()),
+                    &inputs,
+                    &mut outputs,
+                )
+                .expect("equal channels"),
                 ctx: &ctx,
                 out: &mut out,
             };

@@ -137,7 +137,8 @@ fn drive_once(
     let in_r = vec![0.0f32; frames];
     let outs: &mut [&mut [f32]] = &mut [&mut out_l[..], &mut out_r[..]];
     let ins: &[&[f32]] = &[&in_l[..], &in_r[..]];
-    let mut buffer = PluginAudio::new(ins, outs).expect("equal channels");
+    let mut buffer = PluginAudio::new(tutti_plugin_types::Samples(ins[0].len()), ins, outs)
+        .expect("equal channels");
     inst.process(&mut buffer, ctx).expect("process succeeds");
     read_capture()
 }

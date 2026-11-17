@@ -96,6 +96,7 @@ impl Rig {
         let mut io = PluginIo {
             buffer: PluginAudio::F32(
                 InputOutput::new(
+                    tutti_plugin_types::Samples(inputs[0].len()),
                     Planes::new(&inputs).expect("two planes"),
                     PlanesMut::new(&mut outputs).expect("two planes"),
                 )
@@ -140,6 +141,21 @@ fn activation_splits_the_plugin_and_reads_its_figures() {
     );
     rig.render(64).unwrap();
     assert_eq!(rig.plugin.calls().last(), Some(&Call::Process(64)));
+}
+
+/// **A block with no output channel reaches the Processor with its frames**: a
+/// plugin with no audio output (MIDI-only, an analyzer) sees the block's length,
+/// through `process_block` as the graph node calls it.
+#[test]
+fn a_block_with_no_output_channel_reaches_the_processor_with_its_frames() {
+    let mut rig = Rig::new();
+    rig.activate(prepare(48_000.0));
+    let ctx = ProcessContext::new();
+    let mut out = ProcessOutput::default();
+    let processor = rig.lifecycle.processor().expect("held");
+    crate::process_block::<_, f32>(processor, &[], &mut [], Samples(96), &ctx, &mut out)
+        .expect("a block with no channels renders");
+    assert_eq!(rig.plugin.calls().last(), Some(&Call::Process(96)));
 }
 
 /// **A refused activation leaves `Refused` with the plugin intact and no half
@@ -465,6 +481,7 @@ fn the_processor_renders_without_allocating() {
     let mut io = PluginIo {
         buffer: PluginAudio::F32(
             InputOutput::new(
+                tutti_plugin_types::Samples(inputs[0].len()),
                 Planes::new(&inputs).expect("two planes"),
                 PlanesMut::new(&mut outputs).expect("two planes"),
             )

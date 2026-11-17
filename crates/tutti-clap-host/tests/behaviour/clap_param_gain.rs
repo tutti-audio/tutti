@@ -181,7 +181,12 @@ fn drive(inst: &mut Active<f32>, params: &ParameterChanges) -> Vec<f32> {
     {
         let in_refs: Vec<&[f32]> = ins.iter().map(|v| v.as_slice()).collect();
         let mut out_refs: Vec<&mut [f32]> = outs.iter_mut().map(|v| v.as_mut_slice()).collect();
-        let mut buffer = PluginAudio::new(&in_refs, &mut out_refs).expect("equal channels");
+        let mut buffer = PluginAudio::new(
+            tutti_plugin_types::Samples(in_refs[0].len()),
+            &in_refs,
+            &mut out_refs,
+        )
+        .expect("equal channels");
         let ctx = ClapProcessContext {
             params: Some(params),
             ..ClapProcessContext::default()

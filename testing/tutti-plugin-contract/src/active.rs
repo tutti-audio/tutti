@@ -30,18 +30,30 @@ pub fn prepare(rate: f64, block: usize, format: SampleFormat) -> Prepare {
 /// A sample width a case can render at.
 pub trait Width: Float + Into<f64> + From<f32> {
     /// The block over `inputs` and `outputs`, in the width's variant.
-    fn audio<'a>(inputs: &'a [&'a [Self]], outputs: &'a mut [&'a mut [Self]]) -> PluginAudio<'a>;
+    fn audio<'a>(
+        frames: Samples,
+        inputs: &'a [&'a [Self]],
+        outputs: &'a mut [&'a mut [Self]],
+    ) -> PluginAudio<'a>;
 }
 
 impl Width for f32 {
-    fn audio<'a>(inputs: &'a [&'a [Self]], outputs: &'a mut [&'a mut [Self]]) -> PluginAudio<'a> {
-        PluginAudio::new(inputs, outputs).expect("equal channels")
+    fn audio<'a>(
+        frames: Samples,
+        inputs: &'a [&'a [Self]],
+        outputs: &'a mut [&'a mut [Self]],
+    ) -> PluginAudio<'a> {
+        PluginAudio::new(frames, inputs, outputs).expect("equal channels")
     }
 }
 
 impl Width for f64 {
-    fn audio<'a>(inputs: &'a [&'a [Self]], outputs: &'a mut [&'a mut [Self]]) -> PluginAudio<'a> {
-        PluginAudio::new(inputs, outputs).expect("equal channels")
+    fn audio<'a>(
+        frames: Samples,
+        inputs: &'a [&'a [Self]],
+        outputs: &'a mut [&'a mut [Self]],
+    ) -> PluginAudio<'a> {
+        PluginAudio::new(frames, inputs, outputs).expect("equal channels")
     }
 }
 
@@ -84,7 +96,7 @@ impl<L: Loaded> Render for Active<L> {
         let mut refs: Vec<&mut [S]> = outs.iter_mut().map(Vec::as_mut_slice).collect();
         let mut out = ProcessOutput::default();
         let mut io = PluginIo {
-            buffer: S::audio(&ins, &mut refs),
+            buffer: S::audio(Samples(frames), &ins, &mut refs),
             ctx,
             out: &mut out,
         };

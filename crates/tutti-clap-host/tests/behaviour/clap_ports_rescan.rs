@@ -244,7 +244,12 @@ fn a_rate_change_rereads_the_port_layout() {
     let in_refs: Vec<&[f32]> = ins.iter().map(Vec::as_slice).collect();
     let mut outs = vec![vec![0.0f32; FRAMES]; 3];
     let mut out_refs: Vec<&mut [f32]> = outs.iter_mut().map(Vec::as_mut_slice).collect();
-    let mut buffer = PluginAudio::new(&in_refs, &mut out_refs).expect("equal channels");
+    let mut buffer = PluginAudio::new(
+        tutti_plugin_types::Samples(in_refs[0].len()),
+        &in_refs,
+        &mut out_refs,
+    )
+    .expect("equal channels");
     active
         .process(&mut buffer, &ClapProcessContext::default())
         .expect("a block in the new layout processes");
@@ -258,7 +263,12 @@ fn process_f32_block(active: &mut Active<f32>, channels: usize) -> Result<(), Cl
     let in_refs: Vec<&[f32]> = ins.iter().map(Vec::as_slice).collect();
     let mut outs = vec![vec![0.0f32; FRAMES]; channels];
     let mut out_refs: Vec<&mut [f32]> = outs.iter_mut().map(Vec::as_mut_slice).collect();
-    let mut buffer = PluginAudio::new(&in_refs, &mut out_refs).expect("equal channels");
+    let mut buffer = PluginAudio::new(
+        tutti_plugin_types::Samples(in_refs[0].len()),
+        &in_refs,
+        &mut out_refs,
+    )
+    .expect("equal channels");
     let ctx = ClapProcessContext::default();
     assert_no_alloc(|| active.process(&mut buffer, &ctx).map(|_| ()))
 }

@@ -136,7 +136,12 @@ fn render(processor: &mut ClapProcessor, format: SampleFormat) -> Result<(), Plu
             let inputs = [input.as_slice(), input.as_slice()];
             let mut outputs = [left.as_mut_slice(), right.as_mut_slice()];
             let mut io = PluginIo {
-                buffer: PluginAudio::new(&inputs, &mut outputs).expect("equal channels"),
+                buffer: PluginAudio::new(
+                    tutti_plugin_types::Samples(inputs[0].len()),
+                    &inputs,
+                    &mut outputs,
+                )
+                .expect("equal channels"),
                 ctx: &ctx,
                 out: &mut out,
             };
@@ -149,7 +154,12 @@ fn render(processor: &mut ClapProcessor, format: SampleFormat) -> Result<(), Plu
             let inputs = [input.as_slice(), input.as_slice()];
             let mut outputs = [left.as_mut_slice(), right.as_mut_slice()];
             let mut io = PluginIo {
-                buffer: PluginAudio::new(&inputs, &mut outputs).expect("equal channels"),
+                buffer: PluginAudio::new(
+                    tutti_plugin_types::Samples(inputs[0].len()),
+                    &inputs,
+                    &mut outputs,
+                )
+                .expect("equal channels"),
                 ctx: &ctx,
                 out: &mut out,
             };
@@ -657,7 +667,12 @@ fn an_errored_block_does_not_allocate() {
     let inputs = [input.as_slice(), input.as_slice()];
     let mut outputs = [left.as_mut_slice(), right.as_mut_slice()];
     let mut io = PluginIo {
-        buffer: PluginAudio::new(&inputs, &mut outputs).expect("equal channels"),
+        buffer: PluginAudio::new(
+            tutti_plugin_types::Samples(inputs[0].len()),
+            &inputs,
+            &mut outputs,
+        )
+        .expect("equal channels"),
         ctx: &ctx,
         out: &mut out,
     };

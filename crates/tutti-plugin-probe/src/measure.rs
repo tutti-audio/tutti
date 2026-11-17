@@ -131,7 +131,7 @@ impl<'p, P: Processor> Render<'p, P> {
         let mut outs: Vec<&mut [f32]> = self.outs.iter_mut().map(Vec::as_mut_slice).collect();
         let ctx = ProcessContext::new().midi(events);
         let mut io = PluginIo {
-            buffer: PluginAudio::new(&ins, &mut outs).expect("equal channels"),
+            buffer: PluginAudio::new(Samples(self.block), &ins, &mut outs).expect("equal channels"),
             ctx: &ctx,
             out: &mut self.out,
         };

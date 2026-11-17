@@ -13,17 +13,17 @@ use std::time::Duration;
 
 #[derive(Debug)]
 pub(super) struct Imp {
-    /// The queue the exit event arrives on; `None` when it could not be made or
-    /// the registration was refused (the process had ended already, say): the
-    /// wait then only sleeps, and the owner's `try_wait` reads the status.
-    queue: Option<OwnedFd>,
+    /// The queue the exit event arrives on.
+    queue: OwnedFd,
     /// The event was taken. It is delivered once, so later waits answer from
     /// here: the status may become readable a moment after the event.
     seen: AtomicBool,
 }
 
 impl Imp {
-    pub(super) fn of(child: &Child) -> Self {
+    /// `None` when the queue could not be made or the registration was refused
+    /// (the process had ended already, say).
+    pub(super) fn of(child: &Child) -> Option<Self> {
         let queue = kqueue().ok().filter(|queue| {
             let change = Event::new(
                 EventFilter::Proc {
@@ -43,17 +43,13 @@ impl Imp {
             // event list is empty and the zero timeout never blocks.
             unsafe { kevent_timespec(queue, &[change], &mut none[..], Some(&now)) }.is_ok()
         });
-        Self {
+        queue.map(|queue| Self {
             queue,
             seen: AtomicBool::new(false),
-        }
+        })
     }
 
     pub(super) fn wait(&self, timeout: Duration) -> bool {
-        let Some(queue) = &self.queue else {
-            std::thread::sleep(timeout.min(super::NAP));
-            return true;
-        };
         if self.seen.load(Ordering::Acquire) {
             return true;
         }
@@ -64,7 +60,7 @@ impl Imp {
         let mut taken = [MaybeUninit::<Event>::uninit(); 1];
         // SAFETY: no change is submitted, so no event refers to a descriptor;
         // the event list is a live buffer of one slot.
-        let ready = unsafe { kevent_timespec(queue, &[], &mut taken[..], Some(&timeout)) };
+        let ready = unsafe { kevent_timespec(&self.queue, &[], &mut taken[..], Some(&timeout)) };
         match ready {
             Ok(([], _)) => false,
             Ok(_) => {

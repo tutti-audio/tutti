@@ -11,7 +11,7 @@
 //! primes it), and each test drives a plugin switch that *provokes* the corner
 //! rather than the default configuration.
 //!
-//! This says nothing about the `ArcLend` deallocation property, which is a
+//! This says nothing about the `Publisher` deallocation property, which is a
 //! race no allocation-sampling test can pin.
 
 use std::path::Path;
@@ -203,7 +203,8 @@ fn drive(
     for _ in 0..iters {
         let outs: &mut [&mut [f32]] = &mut [&mut bufs.out_l[..], &mut bufs.out_r[..]];
         let ins: &[&[f32]] = &[&bufs.in_l[..], &bufs.in_r[..]];
-        let mut buffer = PluginAudio::new(ins, outs).expect("equal channels");
+        let mut buffer = PluginAudio::new(tutti_plugin_types::Samples(ins[0].len()), ins, outs)
+            .expect("equal channels");
         last = inst.process(&mut buffer, ctx).map(|_| ());
     }
     last
@@ -286,7 +287,8 @@ fn process_with_midi_does_not_allocate() {
             };
             let outs: &mut [&mut [f32]] = &mut [&mut bufs.out_l[..], &mut bufs.out_r[..]];
             let ins: &[&[f32]] = &[&bufs.in_l[..], &bufs.in_r[..]];
-            let mut buffer = PluginAudio::new(ins, outs).expect("equal channels");
+            let mut buffer = PluginAudio::new(tutti_plugin_types::Samples(ins[0].len()), ins, outs)
+                .expect("equal channels");
             inst.process(&mut buffer, &ctx).expect("process");
         }
     });
@@ -504,7 +506,8 @@ fn the_plugins_status_becomes_the_blocks_status() {
         let outs: &mut [&mut [f32]] = &mut [&mut out_l[..], &mut out_r[..]];
         let ins: &[&[f32]] = &[&in_l[..], &in_r[..]];
         let mut out = ProcessOutput::default();
-        let mut buffer = PluginAudio::new(ins, outs).expect("equal channels");
+        let mut buffer = PluginAudio::new(tutti_plugin_types::Samples(ins[0].len()), ins, outs)
+            .expect("equal channels");
         inst.processor()
             .render(&mut buffer, &ctx, &mut out)
             .expect("render");
@@ -607,7 +610,8 @@ fn plugin_error_status_does_not_allocate() {
         for _ in 0..128 {
             let outs: &mut [&mut [f32]] = &mut [&mut bufs.out_l[..], &mut bufs.out_r[..]];
             let ins: &[&[f32]] = &[&bufs.in_l[..], &bufs.in_r[..]];
-            let mut buffer = PluginAudio::new(ins, outs).expect("equal channels");
+            let mut buffer = PluginAudio::new(tutti_plugin_types::Samples(ins[0].len()), ins, outs)
+                .expect("equal channels");
             // The error is expected; what must not happen is an allocation
             // while producing it.
             let _ = inst.process(&mut buffer, &ctx);
@@ -652,7 +656,8 @@ fn oversized_block_rejection_does_not_allocate() {
     {
         let outs: &mut [&mut [f32]] = &mut [&mut out_l[..], &mut out_r[..]];
         let ins: &[&[f32]] = &[&in_l[..], &in_r[..]];
-        let mut buffer = PluginAudio::new(ins, outs).expect("equal channels");
+        let mut buffer = PluginAudio::new(tutti_plugin_types::Samples(ins[0].len()), ins, outs)
+            .expect("equal channels");
         let err = inst
             .process(&mut buffer, &ctx)
             .expect_err("a block past max_frames must be rejected, not truncated");
@@ -672,7 +677,8 @@ fn oversized_block_rejection_does_not_allocate() {
         for _ in 0..128 {
             let outs: &mut [&mut [f32]] = &mut [&mut out_l[..], &mut out_r[..]];
             let ins: &[&[f32]] = &[&in_l[..], &in_r[..]];
-            let mut buffer = PluginAudio::new(ins, outs).expect("equal channels");
+            let mut buffer = PluginAudio::new(tutti_plugin_types::Samples(ins[0].len()), ins, outs)
+                .expect("equal channels");
             let _ = inst.process(&mut buffer, &ctx);
         }
     });
@@ -743,7 +749,8 @@ fn drive_and_read_output(
     };
     let outs: &mut [&mut [f32]] = &mut [&mut bufs.out_l[..], &mut bufs.out_r[..]];
     let ins: &[&[f32]] = &[&bufs.in_l[..], &bufs.in_r[..]];
-    let mut buffer = PluginAudio::new(ins, outs).expect("equal channels");
+    let mut buffer = PluginAudio::new(tutti_plugin_types::Samples(ins[0].len()), ins, outs)
+        .expect("equal channels");
     let out = inst.process(&mut buffer, &ctx).expect("process");
     let queues = out
         .param_changes
@@ -1193,7 +1200,9 @@ fn drive_wide(inst: &mut Active<f32>, channels: usize, iters: usize) {
     for _ in 0..8 {
         let ins: Vec<&[f32]> = ins_storage.iter().map(|v| v.as_slice()).collect();
         let mut outs: Vec<&mut [f32]> = outs_storage.iter_mut().map(|v| v.as_mut_slice()).collect();
-        let mut buffer = PluginAudio::new(&ins, &mut outs).expect("equal channels");
+        let mut buffer =
+            PluginAudio::new(tutti_plugin_types::Samples(ins[0].len()), &ins, &mut outs)
+                .expect("equal channels");
         inst.process(&mut buffer, &ctx).expect("warm-up process");
     }
 
@@ -1202,7 +1211,8 @@ fn drive_wide(inst: &mut Active<f32>, channels: usize, iters: usize) {
     let ins: Vec<&[f32]> = ins_storage.iter().map(|v| v.as_slice()).collect();
     let mut outs: Vec<&mut [f32]> = outs_storage.iter_mut().map(|v| v.as_mut_slice()).collect();
 
-    let mut buffer = PluginAudio::new(&ins, &mut outs).expect("equal channels");
+    let mut buffer = PluginAudio::new(tutti_plugin_types::Samples(ins[0].len()), &ins, &mut outs)
+        .expect("equal channels");
 
     assert_no_alloc::assert_no_alloc(|| {
         for _ in 0..iters {

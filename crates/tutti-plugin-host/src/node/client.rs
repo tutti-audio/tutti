@@ -330,7 +330,7 @@ pub(super) enum RateDelivery {
 /// the cell `audioMasterGetTime` reads), then calls the plugin.
 ///
 /// A clone shares the meter slot and reads it through a reader of its own
-/// (`Reader::clone` registers one on the same cell), and carries the counter
+/// (`Publisher::reader` registers one on the same cell), and carries the counter
 /// and the last snapshot as they stand. Only a test clones a feed.
 #[derive(Clone, Debug)]
 pub(super) struct TransportFeed {
@@ -863,7 +863,7 @@ pub(super) fn render_with<P: Processor>(
     if let Some(expressive) = with.expressive {
         ctx = ctx.expressive(expressive);
     }
-    let processed = process_block(processor, inputs, outputs, &ctx, out);
+    let processed = process_block(processor, inputs, outputs, block, &ctx, out);
     match processed {
         Ok(()) => {
             // A plugin's NaN or infinity would poison every node downstream of it.

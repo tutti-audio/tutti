@@ -641,7 +641,7 @@ where
     let in_refs: ChannelTable<&[S]> = inputs.iter().map(|chan| &chan[..size]).collect();
     let mut out_refs: ChannelTable<&mut [S]> =
         outputs.iter_mut().map(|chan| &mut chan[..size]).collect();
-    let buffer = PluginAudio::new(&in_refs, &mut out_refs)
+    let buffer = PluginAudio::new(Samples(size), &in_refs, &mut out_refs)
         .map_err(|_| PluginError::Block("the block's channels differ in length"))?;
     plugin.render(buffer, ctx, out)
 }
