@@ -117,7 +117,8 @@
 //!   [`FirResponse`], a transition and an attenuation) and designs it at a rate into a
 //!   [`Fir`], failing with a [`FirError`]; [`kaiser_beta`] is the window's parameter.
 //! - **Cascaded sections** (`sos.rs`): [`Sos`], a list of [`Biquad`]s, an [`Lti`] whose [`tail`](System::tail) is the whole cascade's; the closed-form
-//!   [`Butterworth`] and [`LinkwitzRiley`] designs (6 to 96 dB per octave) and [`SosBank`], which
+//!   [`Butterworth`] and [`LinkwitzRiley`] designs (6 to 96 dB per octave), the [`MatchedBell`]
+//!   peaking equalizer, the [`Tilt`] shelf and [`SosBank`], which
 //!   runs one as state-variable sections (`svf_form`) over [`SosCoefficients`].
 //! - **Oversampling** (`oversample.rs`): [`Oversampling`] describes a cascade of linear-phase
 //!   half-band 2x stages (an [`OversamplingFactor`], an attenuation and a [`Passband`]);
@@ -253,8 +254,8 @@ pub use reverb::network::{
 pub use ring_mod::{RingModControls, RingModulator};
 pub use smoother::Smoother;
 pub use sos::{
-    Butterworth, ButterworthOrder, ButterworthOrderError, CutResponse, LinkwitzRiley, MAX_SECTIONS,
-    Sos, SosBank, SosCoefficients, SosError,
+    Butterworth, ButterworthOrder, ButterworthOrderError, CutResponse, LinkwitzRiley,
+    MAX_GAIN_MAGNITUDE, MAX_SECTIONS, MatchedBell, Sos, SosBank, SosCoefficients, SosError, Tilt,
 };
 pub use spatial::{
     HRTF_LATENCY, HRTF_STEP, HrirMeasurement, HrirSphere, HrtfBinaural, HrtfBinauralError,
