@@ -414,14 +414,27 @@ fn sleeps(code: &str) -> Vec<usize> {
     out
 }
 
-/// The module directory of the file at `path`: where the files its `mod name;`
-/// declarations name sit.
+/// The module directory of the file at `path` when no declaration loaded it: where the
+/// files its `mod name;` declarations name sit. A crate root (`lib.rs`, `main.rs`,
+/// `build.rs`, `src/bin/*.rs`, and a direct child of `tests/`, `examples/` or `benches/`
+/// outside `src`) and a `mod.rs` keep them beside the file; any other file keeps them in
+/// a directory named for it.
 fn module_dir(path: &str) -> String {
     let (dir, file) = path.rsplit_once('/').unwrap_or(("", path));
+    let segs: Vec<&str> = dir.split('/').collect();
+    let in_src = segs.contains(&"src");
+    let root = match file.strip_suffix(".rs") {
+        Some("lib" | "main" | "mod") | None => true,
+        Some("build") => !in_src,
+        Some(_) => {
+            segs.ends_with(&["src", "bin"])
+                || (!in_src && matches!(segs.last(), Some(&("tests" | "examples" | "benches"))))
+        }
+    };
     match file.strip_suffix(".rs") {
-        Some("lib" | "main" | "mod") | None => dir.to_owned(),
-        Some(stem) if dir.is_empty() => stem.to_owned(),
-        Some(stem) => format!("{dir}/{stem}"),
+        Some(stem) if !root && dir.is_empty() => stem.to_owned(),
+        Some(stem) if !root => format!("{dir}/{stem}"),
+        _ => dir.to_owned(),
     }
 }
 
@@ -493,9 +506,12 @@ fn path_attr(code: &str, text: &str, at: usize) -> Option<String> {
     }
 }
 
-/// The files the `mod name;` declarations of the file at `path` name, as
-/// `(declaration offset, candidate paths)`.
-fn declared(path: &str, text: &str, code: &str) -> Vec<(usize, Vec<String>)> {
+/// A file a `mod name;` declaration names, and the module directory of that file.
+type Resolved = (String, String);
+
+/// The files the `mod name;` declarations of the file at `path`, whose module directory
+/// is `base`, name, as `(declaration offset, candidates)`.
+fn declared(path: &str, base: &str, text: &str, code: &str) -> Vec<(usize, Vec<Resolved>)> {
     let b = code.as_bytes();
     let inline = inline_mods(code);
     let mut out = Vec::new();
@@ -513,19 +529,28 @@ fn declared(path: &str, text: &str, code: &str) -> Vec<(usize, Vec<String>)> {
             .filter(|(_, open, close)| *open < at && at < *close)
             .collect();
         nested.sort_by_key(|(_, open, _)| *open);
-        let mut dir = module_dir(path);
+        let mut dir = base.to_owned();
         for (m, _, _) in &nested {
             dir = join(&dir, m);
         }
         let found = match path_attr(code, text, at) {
-            Some(lit) if nested.is_empty() => {
-                vec![join(path.rsplit_once('/').map_or("", |(d, _)| d), &lit)]
+            Some(lit) => {
+                let from_dir = if nested.is_empty() {
+                    path.rsplit_once('/').map_or("", |(d, _)| d)
+                } else {
+                    &dir
+                };
+                let file = join(from_dir, &lit);
+                let own = file.rsplit_once('/').map_or("", |(d, _)| d).to_owned();
+                vec![(file, own)]
             }
-            Some(lit) => vec![join(&dir, &lit)],
-            None => vec![
-                join(&dir, &format!("{name}.rs")),
-                join(&dir, &format!("{name}/mod.rs")),
-            ],
+            None => {
+                let own = join(&dir, name);
+                vec![
+                    (format!("{own}.rs"), own.clone()),
+                    (format!("{own}/mod.rs"), own),
+                ]
+            }
         };
         out.push((at, found));
     }
@@ -535,18 +560,45 @@ fn declared(path: &str, text: &str, code: &str) -> Vec<(usize, Vec<String>)> {
 /// The files, among `files`, that are test code because a `cfg(test)` module
 /// declaration reaches them, directly or through another file that is test code.
 fn cfg_test_files(files: &BTreeMap<String, String>) -> std::collections::BTreeSet<String> {
+    // Every declaration, test or not, fixes the module directory of the file it loads;
+    // a file no declaration loads is a root and keeps `module_dir`.
+    let mut dirs: BTreeMap<&str, String> = BTreeMap::new();
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for (path, text) in files {
+            let base = dirs
+                .get(path.as_str())
+                .cloned()
+                .unwrap_or_else(|| module_dir(path));
+            for (_, candidates) in declared(path, &base, text, &blank(text)) {
+                for (c, own) in candidates {
+                    if let Some((p, _)) = files.get_key_value(&c)
+                        && !dirs.contains_key(p.as_str())
+                    {
+                        dirs.insert(p, own);
+                        changed = true;
+                    }
+                }
+            }
+        }
+    }
     let mut found = std::collections::BTreeSet::new();
     let mut work: Vec<&String> = files.keys().collect();
     while let Some(path) = work.pop() {
         let text = &files[path];
         let code = blank(text);
+        let base = dirs
+            .get(path.as_str())
+            .cloned()
+            .unwrap_or_else(|| module_dir(path));
         let whole = test_file(path) || found.contains(path);
         let ranges = test_ranges(&code);
-        for (at, candidates) in declared(path, text, &code) {
+        for (at, candidates) in declared(path, &base, text, &code) {
             if !whole && !ranges.iter().any(|&(s, e)| at >= s && at <= e) {
                 continue;
             }
-            for c in candidates {
+            for (c, _) in candidates {
                 if let Some((p, _)) = files.get_key_value(&c)
                     && found.insert(p.clone())
                 {
@@ -1029,5 +1081,79 @@ mod tests {
         ]);
         assert!(f.contains(&"  crates/a/src/a/b.rs: 1 sleeps, baseline 0".to_owned()));
         assert!(!f.iter().any(|l| l.contains("src/b.rs")), "{f:?}");
+    }
+
+    #[test]
+    fn a_mod_behind_cfg_not_test_or_cfg_any_test_is_library_code() {
+        let f = failing(&[
+            (
+                LIB,
+                "#[cfg(not(test))]\nmod a;\n#[cfg(any(test, feature = \"x\"))]\nmod b;\n",
+            ),
+            ("crates/a/src/a.rs", SLEEP),
+            ("crates/a/src/b.rs", SLEEP),
+        ]);
+        assert!(f.is_empty(), "{f:?}");
+    }
+
+    #[test]
+    fn a_path_attribute_inside_an_inline_cfg_test_mod_is_resolved_in_its_directory() {
+        let f = failing(&[
+            (
+                LIB,
+                "#[cfg(test)]\nmod t {\n    #[path = \"x.rs\"]\n    mod y;\n}\n",
+            ),
+            ("crates/a/src/t/x.rs", SLEEP),
+            ("crates/a/src/x.rs", SLEEP),
+        ]);
+        assert!(f.contains(&"  crates/a/src/t/x.rs: 1 sleeps, baseline 0".to_owned()));
+        assert!(!f.iter().any(|l| l.contains("src/x.rs")), "{f:?}");
+    }
+
+    #[test]
+    fn a_child_of_a_path_loaded_file_sits_beside_it() {
+        let f = failing(&[
+            (LIB, "#[cfg(test)]\n#[path = \"sup/m.rs\"]\nmod m;\n"),
+            ("crates/a/src/sup/m.rs", "mod k;\n"),
+            ("crates/a/src/sup/k.rs", SLEEP),
+            ("crates/a/src/sup/m/k.rs", SLEEP),
+        ]);
+        assert!(f.contains(&"  crates/a/src/sup/k.rs: 1 sleeps, baseline 0".to_owned()));
+        assert!(!f.iter().any(|l| l.contains("sup/m/k.rs")), "{f:?}");
+    }
+
+    #[test]
+    fn a_child_of_a_non_lib_crate_root_sits_beside_it() {
+        for root in [
+            "crates/a/src/bin/foo.rs",
+            "crates/a/build.rs",
+            "crates/a/examples/e.rs",
+            "crates/a/benches/b.rs",
+        ] {
+            let beside = join(root.rsplit_once('/').unwrap().0, "k.rs");
+            let under = join(root.strip_suffix(".rs").unwrap(), "k.rs");
+            let f = failing(&[
+                (root, "#[cfg(test)]\nmod k;\n"),
+                (&beside, SLEEP),
+                (&under, SLEEP),
+            ]);
+            assert!(
+                f.contains(&format!("  {beside}: 1 sleeps, baseline 0")),
+                "{root}"
+            );
+            assert!(!f.iter().any(|l| l.contains(&under)), "{root}: {f:?}");
+        }
+    }
+
+    #[test]
+    fn a_module_file_under_src_keeps_its_children_in_its_own_directory() {
+        let f = failing(&[
+            (LIB, "mod build;\n"),
+            ("crates/a/src/build.rs", "#[cfg(test)]\nmod k;\n"),
+            ("crates/a/src/build/k.rs", SLEEP),
+            ("crates/a/src/k.rs", SLEEP),
+        ]);
+        assert!(f.contains(&"  crates/a/src/build/k.rs: 1 sleeps, baseline 0".to_owned()));
+        assert!(!f.iter().any(|l| l.contains("src/k.rs")), "{f:?}");
     }
 }
