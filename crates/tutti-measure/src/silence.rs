@@ -17,6 +17,8 @@ use core::ops::Range;
 use tutti_buffers::{Mono, Sample};
 use tutti_types::{Db, SampleRate, Samples, Seconds};
 
+use core::marker::PhantomData;
+
 use crate::convert::for_blocks;
 use crate::{Measure, Meter, Result};
 use tutti_types::ranged;
@@ -115,7 +117,7 @@ impl SilenceConfig {
     }
 
     /// The meter at `rate`; no setting here depends on it, so it cannot fail.
-    fn bind(&self, rate: SampleRate) -> SilenceMeter {
+    fn bind<S: Sample>(&self, rate: SampleRate) -> SilenceMeter<S> {
         SilenceMeter {
             floor: self.threshold.to_amplitude().get(),
             min_silence: self.min_silence.to_samples(rate).max(Samples(1)).get(),
@@ -124,16 +126,17 @@ impl SilenceConfig {
             seen: 0,
             open: None,
             closed: Vec::new(),
+            sample: PhantomData,
         }
     }
 }
 
-impl Measure for SilenceConfig {
+impl<S: Sample> Measure<S> for SilenceConfig {
     type Context = SampleRate;
-    type Meter = SilenceMeter;
+    type Meter = SilenceMeter<S>;
 
     /// A meter that scans audio at `rate`, chunk by chunk. Never fails.
-    fn measure(&self, rate: SampleRate) -> Result<SilenceMeter> {
+    fn measure(&self, rate: SampleRate) -> Result<SilenceMeter<S>> {
         Ok(self.bind(rate))
     }
 }
@@ -145,7 +148,7 @@ impl Measure for SilenceConfig {
 /// Not for the audio thread: it keeps one entry per region found, so it grows
 /// with the audio and allocates. Feed it from the offline or UI side.
 #[derive(Debug, Clone)]
-pub struct SilenceMeter {
+pub struct SilenceMeter<S: Sample = f32> {
     /// The threshold as a linear magnitude.
     floor: f32,
     min_silence: usize,
@@ -157,9 +160,10 @@ pub struct SilenceMeter {
     open: Option<(usize, usize)>,
     /// Regions already cut off, as `(first loud, one past last loud)`.
     closed: Vec<(usize, usize)>,
+    sample: PhantomData<fn(S)>,
 }
 
-impl SilenceMeter {
+impl<S: Sample> SilenceMeter<S> {
     fn scan(&mut self, samples: &[f32]) {
         for (offset, &sample) in samples.iter().enumerate() {
             // Below the floor, or NaN, is silence.
@@ -188,13 +192,13 @@ impl SilenceMeter {
     }
 }
 
-impl Meter for SilenceMeter {
-    type Input<'a> = Mono<'a>;
+impl<S: Sample> Meter for SilenceMeter<S> {
+    type Input<'a> = Mono<'a, S>;
     type Item = ();
     type Output = Vec<Region>;
 
-    fn push(&mut self, chunk: Mono<'_>, _: &mut impl Extend<()>) -> Result<()> {
-        self.scan(chunk.samples());
+    fn push(&mut self, chunk: Mono<'_, S>, _: &mut impl Extend<()>) -> Result<()> {
+        for_blocks(chunk.samples(), 1, |block| self.scan(block));
         Ok(())
     }
 
@@ -226,7 +230,8 @@ pub fn strip_silence<S: Sample>(
     rate: impl Into<SampleRate>,
 ) -> Vec<Region> {
     let mut meter = cfg.bind(rate.into());
-    for_blocks(samples.samples(), 1, |block| meter.scan(block));
+    // A silence meter takes any chunk, so the push cannot fail.
+    let _ = meter.push(samples, &mut ());
     meter.finish()
 }
 
@@ -392,7 +397,12 @@ mod tests {
         let c = cfg(Db(-20.0), 10.0)
             .pre_padding(Seconds(0.004))
             .post_padding(Seconds(0.006));
-        assert!(c.measure(SampleRate::of(RATE)).unwrap().finish().is_empty());
+        assert!(
+            Measure::<f32>::measure(&c, SampleRate::of(RATE))
+                .unwrap()
+                .finish()
+                .is_empty()
+        );
         let mut meter = c.measure(SampleRate::of(RATE)).unwrap();
         let mut x = vec![0.0f32; 100];
         x[50..60].fill(1.0);

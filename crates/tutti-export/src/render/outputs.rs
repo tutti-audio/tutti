@@ -16,7 +16,7 @@ use std::path::PathBuf;
 
 use tutti_buffers::{Fold, Interleaved, InterleavedMut, Planes};
 use tutti_graph::TapReader;
-use tutti_measure::{Loudness, Measure as _};
+use tutti_measure::Loudness;
 use tutti_transport::RenderClock;
 use tutti_types::{ChannelLayout, ChannelTopology, Db, SampleRate, Samples};
 
@@ -188,9 +188,11 @@ fn check_outputs(outputs: &[Output]) -> Result<()> {
             && matches!(normalize.mode(), Normalize::Lufs { .. })
         {
             // Loudness is weighted by placement: refused here, not after the render.
-            if tutti_measure::LoudnessConfig::new(file.effective_topology())
-                .measure(tutti_types::SampleRate::SR_48K)
-                .is_err()
+            if tutti_measure::Measure::<f32>::measure(
+                &tutti_measure::LoudnessConfig::new(file.effective_topology()),
+                tutti_types::SampleRate::SR_48K,
+            )
+            .is_err()
             {
                 return Err(target_error(TargetError::UnplacedLoudness {
                     channels: file.channels(),

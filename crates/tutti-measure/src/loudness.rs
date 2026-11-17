@@ -42,11 +42,13 @@
 //! channel label of its weight. A topology without positions (an unplaced set of
 //! speakers) and an ambisonic one are refused: neither has an angle to weigh.
 
+use core::marker::PhantomData;
+
 use ebur128::{Channel, EbuR128, Mode};
 use tutti_buffers::{Interleaved, Sample};
 use tutti_types::{ChannelLayout, ChannelTopology, Db, Direction, SampleRate};
 
-use crate::convert::{all_finite, for_blocks};
+use crate::convert::{BLOCK, all_finite, for_blocks};
 use crate::{Error, Measure, Meter, Result};
 
 /// What a loudness meter measures: the channel topology of the frames fed to
@@ -84,9 +86,9 @@ impl LoudnessConfig {
     }
 }
 
-impl Measure for LoudnessConfig {
+impl<S: Sample> Measure<S> for LoudnessConfig {
     type Context = SampleRate;
-    type Meter = LoudnessMeter;
+    type Meter = LoudnessMeter<S>;
 
     /// A meter for frames at `rate`.
     ///
@@ -96,7 +98,7 @@ impl Measure for LoudnessConfig {
     /// [`Error::UnplacedLoudnessChannels`] for speakers that are not a
     /// [`Bed`](tutti_types::Bed)'s, whose angles are unknown;
     /// [`Error::MeterUnavailable`] when `ebur128` cannot meter the rate.
-    fn measure(&self, rate: SampleRate) -> Result<LoudnessMeter> {
+    fn measure(&self, rate: SampleRate) -> Result<LoudnessMeter<S>> {
         let labels = channel_labels(&self.topology)?;
         let layout = self.topology.width();
         let mut meter = EbuR128::new(
@@ -108,7 +110,11 @@ impl Measure for LoudnessConfig {
         meter
             .set_channel_map(&labels)
             .map_err(|_| Error::MeterUnavailable)?;
-        Ok(LoudnessMeter { layout, meter })
+        Ok(LoudnessMeter {
+            layout,
+            meter,
+            sample: PhantomData,
+        })
     }
 }
 
@@ -196,13 +202,14 @@ impl Loudness {
 /// Wraps `EbuR128`, which accumulates internally. Not for the audio thread: the
 /// meter keeps the gating blocks of the whole run, so it grows with the audio
 /// and allocates.
-pub struct LoudnessMeter {
+pub struct LoudnessMeter<S: Sample = f32> {
     layout: ChannelLayout,
     meter: EbuR128,
+    sample: PhantomData<fn(S)>,
 }
 
 // `EbuR128` is not `Debug`; report what the meter was built for instead.
-impl std::fmt::Debug for LoudnessMeter {
+impl<S: Sample> std::fmt::Debug for LoudnessMeter<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LoudnessMeter")
             .field("layout", &self.layout)
@@ -210,15 +217,15 @@ impl std::fmt::Debug for LoudnessMeter {
     }
 }
 
-impl LoudnessMeter {
+impl<S: Sample> LoudnessMeter<S> {
     /// Forgets everything fed: the readings start over.
     pub fn reset(&mut self) {
         self.meter.reset();
     }
 }
 
-impl Meter for LoudnessMeter {
-    type Input<'a> = Interleaved<'a>;
+impl<S: Sample> Meter for LoudnessMeter<S> {
+    type Input<'a> = Interleaved<'a, S>;
     type Item = ();
     type Output = Loudness;
 
@@ -234,16 +241,19 @@ impl Meter for LoudnessMeter {
     /// [`Error::ChunkLayoutMismatch`] when `chunk` is not the topology's width:
     /// the meter's channel count is fixed, so a chunk of another width would be
     /// split into the wrong number of frames and read as a different signal.
-    fn push(&mut self, chunk: Interleaved<'_>, _: &mut impl Extend<()>) -> Result<()> {
+    fn push(&mut self, chunk: Interleaved<'_, S>, _: &mut impl Extend<()>) -> Result<()> {
         if chunk.layout() != self.layout {
             return Err(Error::ChunkLayoutMismatch {
                 chunk: chunk.layout(),
                 config: self.layout,
             });
         }
-        // The width was checked above, and the chunk is whole frames, so the
-        // meter takes it; a metering miss must not fail a render.
-        let _ = self.meter.add_frames_f32(chunk.samples());
+        let Self { meter, .. } = self;
+        for_blocks(chunk.samples(), chunk.channels(), |block| {
+            // The width was checked above, and the block is whole frames, so
+            // the meter takes it; a metering miss must not fail a render.
+            let _ = meter.add_frames_f32(block);
+        });
         Ok(())
     }
 
@@ -288,9 +298,9 @@ impl Meter for LoudnessMeter {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct TruePeakConfig;
 
-impl Measure for TruePeakConfig {
+impl<S: Sample> Measure<S> for TruePeakConfig {
     type Context = (SampleRate, ChannelLayout);
-    type Meter = TruePeakMeter;
+    type Meter = TruePeakMeter<S>;
 
     /// A meter for frames `layout` wide at `rate`.
     ///
@@ -298,7 +308,7 @@ impl Measure for TruePeakConfig {
     ///
     /// [`Error::MeterUnavailable`] when `ebur128` cannot meter the width or the
     /// rate.
-    fn measure(&self, (rate, layout): (SampleRate, ChannelLayout)) -> Result<TruePeakMeter> {
+    fn measure(&self, (rate, layout): (SampleRate, ChannelLayout)) -> Result<TruePeakMeter<S>> {
         EbuR128::new(
             u32::from(layout.count()),
             rate.get().round() as u32,
@@ -308,7 +318,8 @@ impl Measure for TruePeakConfig {
         .map(|meter| TruePeakMeter {
             layout,
             meter,
-            scratch: Vec::new(),
+            scratch: vec![0.0; BLOCK.max(usize::from(layout.count()))],
+            sample: PhantomData,
         })
     }
 }
@@ -316,18 +327,19 @@ impl Measure for TruePeakConfig {
 /// A running true-peak meter: the largest inter-sample peak over every
 /// channel, made by a [`TruePeakConfig`].
 ///
-/// Not for the audio thread: a push widens the chunk into a scratch that grows
-/// to the longest chunk fed, and the meter's own buffers allocate.
-pub struct TruePeakMeter {
+/// Not for the audio thread: the meter's own buffers allocate as it grows. A
+/// push widens the chunk to the meter's `f64` in blocks of a scratch built with
+/// the meter, and allocates nothing itself.
+pub struct TruePeakMeter<S: Sample = f32> {
     layout: ChannelLayout,
     meter: EbuR128,
-    /// A chunk widened to the meter's `f64`, reused so a push allocates only
-    /// when a chunk is longer than any before it.
+    /// One block of a chunk widened to the meter's `f64`.
     scratch: Vec<f64>,
+    sample: PhantomData<fn(S)>,
 }
 
 // `EbuR128` is not `Debug`.
-impl std::fmt::Debug for TruePeakMeter {
+impl<S: Sample> std::fmt::Debug for TruePeakMeter<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TruePeakMeter")
             .field("layout", &self.layout)
@@ -335,15 +347,15 @@ impl std::fmt::Debug for TruePeakMeter {
     }
 }
 
-impl TruePeakMeter {
+impl<S: Sample> TruePeakMeter<S> {
     /// Forgets everything fed: the peak reads the floor again.
     pub fn reset(&mut self) {
         self.meter.reset();
     }
 }
 
-impl Meter for TruePeakMeter {
-    type Input<'a> = Interleaved<'a>;
+impl<S: Sample> Meter for TruePeakMeter<S> {
+    type Input<'a> = Interleaved<'a, S>;
     type Item = ();
     type Output = Db;
 
@@ -353,18 +365,21 @@ impl Meter for TruePeakMeter {
     /// # Errors
     ///
     /// [`Error::ChunkLayoutMismatch`] when `chunk` is not the meter's width.
-    fn push(&mut self, chunk: Interleaved<'_>, _: &mut impl Extend<()>) -> Result<()> {
+    fn push(&mut self, chunk: Interleaved<'_, S>, _: &mut impl Extend<()>) -> Result<()> {
         if chunk.layout() != self.layout {
             return Err(Error::ChunkLayoutMismatch {
                 chunk: chunk.layout(),
                 config: self.layout,
             });
         }
-        if !chunk.is_empty() {
-            self.scratch.clear();
-            self.scratch
-                .extend(chunk.samples().iter().map(|s| s.to_f64()));
-            let _ = self.meter.add_frames_f64(&self.scratch);
+        let channels = chunk.channels().max(1);
+        let run = (self.scratch.len() / channels).max(1) * channels;
+        for part in chunk.samples().chunks(run) {
+            let widened = &mut self.scratch[..part.len()];
+            for (slot, s) in widened.iter_mut().zip(part) {
+                *slot = s.to_f64();
+            }
+            let _ = self.meter.add_frames_f64(widened);
         }
         Ok(())
     }
@@ -391,25 +406,8 @@ pub fn measure_true_peak<S: Sample>(
     rate: impl Into<SampleRate>,
 ) -> Result<Db> {
     let mut meter = TruePeakConfig.measure((rate.into(), buffer.layout()))?;
-    feed(&mut meter, &buffer)?;
+    meter.push(buffer, &mut ())?;
     Ok(meter.finish())
-}
-
-/// Pushes `buffer` through `meter` in blocks of whole frames converted to
-/// `f32`, stopping at the first chunk the meter refuses.
-fn feed<S: Sample, M>(meter: &mut M, buffer: &Interleaved<'_, S>) -> Result<()>
-where
-    M: for<'a> Meter<Input<'a> = Interleaved<'a>, Item = ()>,
-{
-    let mut refused = Ok(());
-    for_blocks(buffer.samples(), buffer.channels(), |block| {
-        if refused.is_ok()
-            && let Ok(whole) = Interleaved::new(block, buffer.layout())
-        {
-            refused = meter.push(whole, &mut ());
-        }
-    });
-    refused
 }
 
 /// An `f64` true-peak amplitude as dBTP, pinning silence at [`Db::FLOOR`].
@@ -461,9 +459,9 @@ impl WindowedLoudnessConfig {
     }
 }
 
-impl Measure for WindowedLoudnessConfig {
+impl<S: Sample> Measure<S> for WindowedLoudnessConfig {
     type Context = SampleRate;
-    type Meter = WindowedMeter;
+    type Meter = WindowedMeter<S>;
 
     /// A meter for frames at `rate`. Allocates its three-second window here: at
     /// most 3 s of `f64` samples of every channel, 192 kHz x 16 channels x 3 s x
@@ -475,7 +473,7 @@ impl Measure for WindowedLoudnessConfig {
     /// [`Error::AmbisonicLoudness`] or [`Error::UnplacedLoudnessChannels`] for
     /// a topology with no placement to weigh; [`Error::MeterUnavailable`] if the
     /// meter cannot be built.
-    fn measure(&self, rate: SampleRate) -> Result<WindowedMeter> {
+    fn measure(&self, rate: SampleRate) -> Result<WindowedMeter<S>> {
         if !(WINDOWED_MIN_RATE..=WINDOWED_MAX_RATE).contains(&rate) {
             return Err(Error::SampleRateOutOfRange {
                 rate,
@@ -499,6 +497,7 @@ impl Measure for WindowedLoudnessConfig {
             rate,
             meter,
             frames: 0,
+            sample: PhantomData,
         })
     }
 }
@@ -536,16 +535,17 @@ impl WindowedReading {
 /// Each push yields the [`WindowedReading`] after it, and
 /// [`finish`](Meter::finish) reads the last one. Not for the audio thread (see
 /// [`push`](Meter::push)).
-pub struct WindowedMeter {
+pub struct WindowedMeter<S: Sample = f32> {
     layout: ChannelLayout,
     rate: SampleRate,
     meter: EbuR128,
     /// Whole frames fed since construction or the last reset.
     frames: u64,
+    sample: PhantomData<fn(S)>,
 }
 
 // `EbuR128` is not `Debug`.
-impl std::fmt::Debug for WindowedMeter {
+impl<S: Sample> std::fmt::Debug for WindowedMeter<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("WindowedMeter")
             .field("layout", &self.layout)
@@ -555,7 +555,7 @@ impl std::fmt::Debug for WindowedMeter {
     }
 }
 
-impl WindowedMeter {
+impl<S: Sample> WindowedMeter<S> {
     /// Forgets everything fed: the windows read the floor again and the peak
     /// is cleared. Keeps the buffers.
     pub fn reset(&mut self) {
@@ -596,8 +596,8 @@ impl WindowedMeter {
     }
 }
 
-impl Meter for WindowedMeter {
-    type Input<'a> = Interleaved<'a>;
+impl<S: Sample> Meter for WindowedMeter<S> {
+    type Input<'a> = Interleaved<'a, S>;
     type Item = WindowedReading;
     type Output = WindowedReading;
 
@@ -624,7 +624,7 @@ impl Meter for WindowedMeter {
     /// meter is untouched on the first two.
     fn push(
         &mut self,
-        chunk: Interleaved<'_>,
+        chunk: Interleaved<'_, S>,
         out: &mut impl Extend<WindowedReading>,
     ) -> Result<()> {
         if chunk.layout() != self.layout {
@@ -636,10 +636,18 @@ impl Meter for WindowedMeter {
         if !all_finite(chunk.samples()) {
             return Err(Error::NonFiniteInput);
         }
-        if self.meter.add_frames_f32(chunk.samples()).is_err() {
+        let channels = chunk.channels();
+        let mut rejected = false;
+        for_blocks(chunk.samples(), channels, |block| {
+            if self.meter.add_frames_f32(block).is_err() {
+                rejected = true;
+            } else {
+                self.frames += (block.len() / channels) as u64;
+            }
+        });
+        if rejected {
             return Err(Error::MeterRejectedFrames);
         }
-        self.frames += chunk.frames().get() as u64;
         out.extend([self.reading()]);
         Ok(())
     }
@@ -677,13 +685,7 @@ pub fn measure_loudness<S: Sample>(
     rate: impl Into<SampleRate>,
 ) -> Result<Loudness> {
     let mut meter = cfg.measure(rate.into())?;
-    if buffer.layout() != meter.layout {
-        return Err(Error::ChunkLayoutMismatch {
-            chunk: buffer.layout(),
-            config: meter.layout,
-        });
-    }
-    feed(&mut meter, &buffer)?;
+    meter.push(buffer, &mut ())?;
     Ok(meter.finish())
 }
 
@@ -1215,7 +1217,7 @@ mod tests {
         // the rate binds.
         for rate in [7_999.0, 192_001.0] {
             assert!(matches!(
-                cfg.0.measure(SampleRate::of(rate)),
+                Measure::<f32>::measure(&cfg.0, SampleRate::of(rate)),
                 Err(Error::SampleRateOutOfRange { .. })
             ));
         }
@@ -1388,27 +1390,21 @@ mod tests {
         let ambisonic: ChannelTopology = AmbisonicFormat::ambix(AmbisonicOrder::of(1)).into();
         let unplaced = ChannelTopology::unassigned(ChannelLayout::from(3u16));
         assert_eq!(
-            LoudnessConfig::new(ambisonic.clone())
-                .measure(rate)
-                .unwrap_err(),
+            Measure::<f32>::measure(&LoudnessConfig::new(ambisonic.clone()), rate).unwrap_err(),
             Error::AmbisonicLoudness
         );
         assert_eq!(
-            LoudnessConfig::new(unplaced.clone())
-                .measure(rate)
-                .unwrap_err(),
+            Measure::<f32>::measure(&LoudnessConfig::new(unplaced.clone()), rate).unwrap_err(),
             Error::UnplacedLoudnessChannels {
                 width: ChannelLayout::from(3u16)
             }
         );
         assert_eq!(
-            WindowedLoudnessConfig::new(ambisonic)
-                .measure(rate)
-                .unwrap_err(),
+            Measure::<f32>::measure(&WindowedLoudnessConfig::new(ambisonic), rate).unwrap_err(),
             Error::AmbisonicLoudness
         );
         assert!(matches!(
-            WindowedLoudnessConfig::new(unplaced).measure(rate),
+            Measure::<f32>::measure(&WindowedLoudnessConfig::new(unplaced), rate),
             Err(Error::UnplacedLoudnessChannels { .. })
         ));
     }

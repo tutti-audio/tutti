@@ -80,8 +80,10 @@
 //! changes only through `push` and `reset`, counts the frames pushed (a push
 //! takes no position) and owns its transform scratch. `push` returns a `Result`
 //! exactly where the chunk can be refused (a NaN, a width that is not the
-//! meter's). A meter takes `f32` views; the one-shots take any sample format and
-//! convert it block by block.
+//! meter's). A config is a `Measure<S>` for every sample format `S` (`f32` by
+//! default, so `A: Measure` means `f32`), and its meter reads views of `S`,
+//! converting block by block on the stack; `Measure::<i16>::measure(&config,
+//! context)` names another format when a push does not fix it.
 //!
 //! | Analysis | Config | One-shot | Meter | Context | Input | Item | Output | Audio thread |
 //! |---|---|---|---|---|---|---|---|---|

@@ -28,3 +28,13 @@ pub(crate) fn for_blocks<S: Sample>(data: &[S], channels: usize, mut f: impl FnM
         f(out);
     }
 }
+
+/// An `out` that drops every item: the one-shot entry points feed a meter
+/// through it and keep only its output.
+pub(crate) struct Discard;
+
+impl<T> Extend<T> for Discard {
+    fn extend<I: IntoIterator<Item = T>>(&mut self, items: I) {
+        items.into_iter().for_each(drop);
+    }
+}

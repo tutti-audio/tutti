@@ -50,10 +50,12 @@
 //! [`harmonic_decay`]: ChromaConfig::harmonic_decay
 
 use crate::level::SILENCE_FLOOR;
+use core::marker::PhantomData;
+
 use tutti_buffers::{Mono, Sample};
 use tutti_types::{Cents, Db, Hz, Note, SampleRate, Samples, Semitones};
 
-use crate::convert::{all_finite, to_f32};
+use crate::convert::{all_finite, for_blocks, to_f32};
 use crate::framing::{FrameCutter, Framing, check_nyquist};
 use crate::{Error, Measure, Meter, Result};
 use tutti_dsp::Complex32;
@@ -304,16 +306,16 @@ impl ChromaConfig {
     }
 }
 
-impl Measure for ChromaConfig {
+impl<S: Sample> Measure<S> for ChromaConfig {
     type Context = SampleRate;
-    type Meter = ChromaMeter;
+    type Meter = ChromaMeter<S>;
 
     /// A meter that folds audio at `rate`, chunk by chunk.
     ///
     /// # Errors
     ///
     /// As [`chroma`], for what depends on the framing and the band at `rate`.
-    fn measure(&self, rate: SampleRate) -> Result<ChromaMeter> {
+    fn measure(&self, rate: SampleRate) -> Result<ChromaMeter<S>> {
         Ok(ChromaMeter::new(self.plan(rate)?))
     }
 }
@@ -651,13 +653,14 @@ pub struct ChromaSummary {
 /// there), and its cost is a transform per frame: fit for a consumer thread
 /// that drains a tap, not for an audio callback.
 #[derive(Debug)]
-pub struct ChromaMeter {
+pub struct ChromaMeter<S: Sample = f32> {
     fold: ChromaFold,
     cutter: FrameCutter,
     fft: FftScratch,
+    sample: PhantomData<fn(S)>,
 }
 
-impl ChromaMeter {
+impl<S: Sample> ChromaMeter<S> {
     fn new(plan: ChromaPlan) -> Self {
         let mut fft = FftScratch::new();
         let fold = ChromaFold::new(plan);
@@ -670,13 +673,16 @@ impl ChromaMeter {
             cutter: FrameCutter::new(Framing::new(plan.geometry.window(), plan.geometry.hop())),
             fold,
             fft,
+            sample: PhantomData,
         }
     }
 
     /// Takes finite samples and folds each frame they complete, calling `each`
     /// with the frame's chroma.
     fn feed(&mut self, block: &[f32], mut each: impl FnMut(&[f32; CLASSES])) {
-        let Self { fold, cutter, fft } = self;
+        let Self {
+            fold, cutter, fft, ..
+        } = self;
         cutter.feed(block, |_, samples| each(&fold.fold_frame(samples, fft)));
     }
 
@@ -702,8 +708,8 @@ impl ChromaMeter {
     }
 }
 
-impl Meter for ChromaMeter {
-    type Input<'a> = Mono<'a>;
+impl<S: Sample> Meter for ChromaMeter<S> {
+    type Input<'a> = Mono<'a, S>;
     type Item = [f32; CLASSES];
     type Output = ChromaSummary;
 
@@ -714,11 +720,13 @@ impl Meter for ChromaMeter {
     ///
     /// [`Error::NonFiniteInput`] when the chunk holds a NaN or infinity. The
     /// meter is untouched on error.
-    fn push(&mut self, chunk: Mono<'_>, out: &mut impl Extend<[f32; CLASSES]>) -> Result<()> {
+    fn push(&mut self, chunk: Mono<'_, S>, out: &mut impl Extend<[f32; CLASSES]>) -> Result<()> {
         if !all_finite(chunk.samples()) {
             return Err(Error::NonFiniteInput);
         }
-        self.feed(chunk.samples(), |frame| out.extend([*frame]));
+        for_blocks(chunk.samples(), 1, |block| {
+            self.feed(block, |frame| out.extend([*frame]));
+        });
         Ok(())
     }
 
@@ -797,7 +805,7 @@ pub fn chroma<S: Sample>(
         tuning: Tuning::Fixed(tuning),
         ..plan
     };
-    let mut meter = ChromaMeter::new(fixed);
+    let mut meter: ChromaMeter = ChromaMeter::new(fixed);
     core::mem::swap(&mut meter.fft, fft);
     let mut data = Vec::with_capacity(frames.get() * CLASSES);
     meter.feed(&samples, |frame| data.extend_from_slice(frame));
@@ -1080,7 +1088,7 @@ mod tests {
     /// against the bins it holds, where the rate binds.
     #[test]
     fn the_framing_and_band_are_validated() {
-        let at = |window, hop| cfg().framing(framing(window, hop)).measure(RATE);
+        let at = |window, hop| Measure::<f32>::measure(&cfg().framing(framing(window, hop)), RATE);
         assert!(matches!(at(32, 8), Err(Error::WindowOutOfRange { .. })));
         assert!(matches!(
             at(1 << 19, 1 << 17),
@@ -1123,7 +1131,7 @@ mod tests {
             Err(Error::AboveNyquist { .. })
         ));
         assert!(matches!(
-            wide.measure(RATE),
+            Measure::<f32>::measure(&wide, RATE),
             Err(Error::AboveNyquist { .. })
         ));
         // A low rate clamps the default band to Nyquist instead of failing.

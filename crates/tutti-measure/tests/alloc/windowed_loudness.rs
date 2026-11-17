@@ -62,3 +62,27 @@ fn a_windowed_loudness_step_does_not_allocate() {
     });
     assert_eq!(reset, 0, "a reset and a step");
 }
+
+/// A push of 16-bit frames allocates nothing either, for a chunk longer than
+/// the conversion block.
+#[test]
+fn an_integer_windowed_loudness_step_does_not_allocate() {
+    let cfg = WindowedLoudnessConfig::new(Bed::Stereo.topology());
+    let mut state = cfg.measure(SampleRate::SR_48K).unwrap();
+    let tone: Vec<i16> = (0..48_000 * 2)
+        .map(|i| {
+            ((std::f32::consts::TAU * 997.0 * (i / 2) as f32 / 48_000.0).sin() * 3_000.0) as i16
+        })
+        .collect();
+    let steps = allocations(|| {
+        for _ in 0..4 {
+            state
+                .push(
+                    Interleaved::new(&tone, ChannelLayout::STEREO).unwrap(),
+                    &mut Discard,
+                )
+                .unwrap();
+        }
+    });
+    assert_eq!(steps, 0, "i16 steps");
+}

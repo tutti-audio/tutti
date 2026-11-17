@@ -30,7 +30,9 @@
 use tutti_buffers::{Interleaved, Mono, PlanesMut, Sample, deinterleave};
 use tutti_types::{Amplitude, ChannelLayout, Samples};
 
-use crate::convert::for_blocks;
+use core::marker::PhantomData;
+
+use crate::convert::{Discard, for_blocks};
 use crate::{Error, Measure, Meter, Result};
 
 /// One block of a waveform summary, for one channel.
@@ -251,7 +253,7 @@ impl PeakConfig {
     }
 
     /// The meter for chunks `layout` wide.
-    fn bind(&self, layout: ChannelLayout) -> Result<PeakMeter> {
+    fn bind<S: Sample>(&self, layout: ChannelLayout) -> Result<PeakMeter<S>> {
         if self.samples_per_block.is_zero() {
             return Err(Error::ZeroBlock);
         }
@@ -262,20 +264,21 @@ impl PeakConfig {
             pending: vec![Vec::new(); channels],
             planes: vec![Vec::new(); channels],
             runs: vec![Vec::new(); channels],
+            sample: PhantomData,
         })
     }
 }
 
-impl Measure for PeakConfig {
+impl<S: Sample> Measure<S> for PeakConfig {
     type Context = ChannelLayout;
-    type Meter = PeakMeter;
+    type Meter = PeakMeter<S>;
 
     /// A meter that blocks chunks `layout` wide.
     ///
     /// # Errors
     ///
     /// [`Error::ZeroBlock`] for a block of zero samples.
-    fn measure(&self, layout: ChannelLayout) -> Result<PeakMeter> {
+    fn measure(&self, layout: ChannelLayout) -> Result<PeakMeter<S>> {
         self.bind(layout)
     }
 }
@@ -314,7 +317,7 @@ fn block_of(samples: &[f32]) -> PeakBlock {
 /// Not for the audio thread: the summary grows with the audio, so a push
 /// allocates.
 #[derive(Debug, Clone)]
-pub struct PeakMeter {
+pub struct PeakMeter<S: Sample = f32> {
     block: usize,
     layout: ChannelLayout,
     /// Per channel: samples of an incomplete block, all the same length.
@@ -323,9 +326,10 @@ pub struct PeakMeter {
     planes: Vec<Vec<f32>>,
     /// Per channel: the blocks completed so far.
     runs: Vec<Vec<PeakBlock>>,
+    sample: PhantomData<fn(S)>,
 }
 
-impl PeakMeter {
+impl<S: Sample> PeakMeter<S> {
     /// Splits one chunk of whole frames into planes and cuts each into blocks.
     fn step(&mut self, chunk: Interleaved<'_>) {
         let frames = chunk.frames().get();
@@ -357,8 +361,8 @@ impl PeakMeter {
     }
 }
 
-impl Meter for PeakMeter {
-    type Input<'a> = Interleaved<'a>;
+impl<S: Sample> Meter for PeakMeter<S> {
+    type Input<'a> = Interleaved<'a, S>;
     type Item = (usize, PeakBlock);
     type Output = PeakBlocks;
 
@@ -374,7 +378,7 @@ impl Meter for PeakMeter {
     /// onto it would realign at the wrong stride.
     fn push(
         &mut self,
-        chunk: Interleaved<'_>,
+        chunk: Interleaved<'_, S>,
         out: &mut impl Extend<(usize, PeakBlock)>,
     ) -> Result<()> {
         if chunk.layout() != self.layout {
@@ -384,7 +388,12 @@ impl Meter for PeakMeter {
             });
         }
         let before: Vec<usize> = self.runs.iter().map(Vec::len).collect();
-        self.step(chunk);
+        for_blocks(chunk.samples(), chunk.channels(), |block| {
+            // `for_blocks` cuts whole frames, so the block is always one.
+            if let Ok(whole) = Interleaved::new(block, self.layout) {
+                self.step(whole);
+            }
+        });
         for (channel, (run, &done)) in self.runs.iter().zip(&before).enumerate() {
             out.extend(run[done..].iter().map(|&block| (channel, block)));
         }
@@ -455,12 +464,7 @@ fn cut_blocks(pending: &mut Vec<f32>, block: usize, samples: &[f32], out: &mut V
 /// [`Error::ZeroBlock`] for a block of zero samples.
 pub fn summarize<S: Sample>(cfg: &PeakConfig, buffer: Interleaved<'_, S>) -> Result<PeakBlocks> {
     let mut meter = cfg.bind(buffer.layout())?;
-    for_blocks(buffer.samples(), buffer.channels(), |block| {
-        // `for_blocks` cuts whole frames, so the block is always one.
-        if let Ok(whole) = Interleaved::new(block, buffer.layout()) {
-            meter.step(whole);
-        }
-    });
+    meter.push(buffer, &mut Discard)?;
     Ok(meter.finish())
 }
 
@@ -746,7 +750,9 @@ mod tests {
         assert!(empty.to_mono().is_empty());
         assert!(empty.as_flat().is_empty());
 
-        let blocks = mono(100).measure(ChannelLayout::MONO).unwrap().finish();
+        let blocks = Measure::<f32>::measure(&mono(100), ChannelLayout::MONO)
+            .unwrap()
+            .finish();
         assert!(blocks.is_empty(), "finish on an empty meter emits nothing");
     }
 
@@ -756,7 +762,9 @@ mod tests {
     fn an_empty_summary_has_no_channels_until_a_width_is_measured() {
         assert_eq!(PeakBlocks::default().layout(), ChannelLayout::EMPTY);
         assert_eq!(PeakBlocks::default().channel(0), None);
-        let blocks = mono(64).measure(ChannelLayout::STEREO).unwrap().finish();
+        let blocks = Measure::<f32>::measure(&mono(64), ChannelLayout::STEREO)
+            .unwrap()
+            .finish();
         assert_eq!(blocks.layout(), ChannelLayout::STEREO);
         assert!(blocks.is_empty());
     }

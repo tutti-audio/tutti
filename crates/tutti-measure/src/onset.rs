@@ -14,10 +14,12 @@
 //! complex-domain deviation both need the previous frame, which a meter
 //! carries, so a run cannot diff its first frame against another run's last.
 
+use core::marker::PhantomData;
+
 use tutti_buffers::{Mono, Sample};
 use tutti_types::{Amplitude, SampleRate, Samples, Seconds};
 
-use crate::convert::to_f32;
+use crate::convert::{for_blocks, to_f32};
 use crate::framing::{FrameCutter, Framing};
 use crate::{Measure, Meter, Result};
 use tutti_dsp::Complex32;
@@ -204,9 +206,9 @@ impl OnsetConfig {
     }
 }
 
-impl Measure for OnsetConfig {
+impl<S: Sample> Measure<S> for OnsetConfig {
     type Context = SampleRate;
-    type Meter = OnsetMeter;
+    type Meter = OnsetMeter<S>;
 
     /// A meter that detects onsets in audio at `rate`, chunk by chunk.
     ///
@@ -214,7 +216,7 @@ impl Measure for OnsetConfig {
     ///
     /// [`Error::ZeroWindow`](crate::Error::ZeroWindow) or
     /// [`Error::ZeroHop`](crate::Error::ZeroHop) for a zero window or hop.
-    fn measure(&self, rate: SampleRate) -> Result<OnsetMeter> {
+    fn measure(&self, rate: SampleRate) -> Result<OnsetMeter<S>> {
         Ok(OnsetMeter::new(self.plan(rate)?))
     }
 }
@@ -285,7 +287,7 @@ pub(crate) fn onset_lag(geometry: StftGeometry) -> usize {
 ///
 /// Not for the audio thread: it keeps one novelty value per frame, so it grows
 /// with the audio and allocates.
-pub struct OnsetMeter {
+pub struct OnsetMeter<S: Sample = f32> {
     plan: OnsetPlan,
     cutter: FrameCutter,
     fft: FftScratch,
@@ -298,9 +300,10 @@ pub struct OnsetMeter {
     /// Novelty per frame, in analysis order. Thresholding is global, so peaks
     /// can only be picked once the run is complete.
     novelty: Vec<(Samples, f32)>,
+    sample: PhantomData<fn(S)>,
 }
 
-impl core::fmt::Debug for OnsetMeter {
+impl<S: Sample> core::fmt::Debug for OnsetMeter<S> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("OnsetMeter")
             .field("plan", &self.plan)
@@ -309,7 +312,7 @@ impl core::fmt::Debug for OnsetMeter {
     }
 }
 
-impl OnsetMeter {
+impl<S: Sample> OnsetMeter<S> {
     fn new(plan: OnsetPlan) -> Self {
         let bins = plan.geometry.bins_per_frame().get();
         Self {
@@ -319,6 +322,7 @@ impl OnsetMeter {
             previous: vec![0.0; bins],
             spectrum: vec![Complex32::default(); bins],
             novelty: Vec::new(),
+            sample: PhantomData,
             plan,
         }
     }
@@ -334,6 +338,7 @@ impl OnsetMeter {
             previous,
             spectrum,
             novelty,
+            ..
         } = self;
         cutter.feed(block, |index, samples| {
             // Every spectral branch stores its magnitudes, including the ones
@@ -389,15 +394,17 @@ impl OnsetMeter {
     }
 }
 
-impl Meter for OnsetMeter {
-    type Input<'a> = Mono<'a>;
+impl<S: Sample> Meter for OnsetMeter<S> {
+    type Input<'a> = Mono<'a, S>;
     type Item = (Samples, f32);
     type Output = Vec<Onset>;
 
     /// Feeds the next chunk of the buffer, in order, and extends `out` with the
     /// `(position, novelty)` of each frame the chunk completes.
-    fn push(&mut self, chunk: Mono<'_>, out: &mut impl Extend<(Samples, f32)>) -> Result<()> {
-        self.feed(chunk.samples(), |item| out.extend([item]));
+    fn push(&mut self, chunk: Mono<'_, S>, out: &mut impl Extend<(Samples, f32)>) -> Result<()> {
+        for_blocks(chunk.samples(), 1, |block| {
+            self.feed(block, |item| out.extend([item]));
+        });
         Ok(())
     }
 
@@ -623,15 +630,13 @@ mod tests {
             .iter()
             .map(|&s| (s * f32::from(i16::MAX)) as i16)
             .collect();
-        let mut fft = FftScratch::new();
-        let float = detect_onsets(&cfg, Mono::new(&samples), rate(), &mut fft).unwrap();
-        let int = detect_onsets(&cfg, Mono::new(&ints), rate(), &mut fft).unwrap();
-        assert_eq!(float.len(), 2);
-        assert_eq!(float.len(), int.len());
-        for (a, b) in float.iter().zip(&int) {
-            assert_eq!(a.position, b.position);
-            let (a, b) = (a.strength.get(), b.strength.get());
-            assert!((a - b).abs() <= 1e-2 * a.max(1.0), "{a} {b}");
+        let mut float = cfg.measure(rate()).unwrap();
+        float.push(Mono::new(&samples), &mut Vec::new()).unwrap();
+        let mut int = cfg.measure(rate()).unwrap();
+        int.push(Mono::new(&ints), &mut Vec::new()).unwrap();
+        assert_eq!(float.novelty().len(), int.novelty().len());
+        for (a, b) in float.novelty().iter().zip(int.novelty()) {
+            assert!((a.1 - b.1).abs() <= 1e-2 * a.1.max(1.0), "{a:?} {b:?}");
         }
     }
 
@@ -870,7 +875,7 @@ mod tests {
         ] {
             let cfg = flux().framing(framing);
             assert!(matches!(
-                cfg.measure(rate()),
+                Measure::<f32>::measure(&cfg, rate()),
                 Err(crate::Error::ZeroWindow | crate::Error::ZeroHop)
             ));
             assert!(matches!(

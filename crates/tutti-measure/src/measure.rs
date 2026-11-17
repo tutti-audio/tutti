@@ -1,6 +1,8 @@
 //! The two traits every streaming analysis implements: a config that builds a
 //! meter, and a meter that folds chunks of one stream.
 
+use tutti_buffers::Sample;
+
 use crate::Result;
 
 /// A config that builds a meter for one stream.
@@ -10,7 +12,11 @@ use crate::Result;
 /// [`SampleRate`](tutti_types::SampleRate), a
 /// [`ChannelLayout`](tutti_types::ChannelLayout), a pair of them, or `()`), and
 /// the call checks what depends on the config and the context together.
-pub trait Measure {
+///
+/// `S` is the sample type of the audio the meter reads (`f32` by default, so a
+/// consumer bound `A: Measure` takes `f32` views); a meter converts each chunk
+/// to `f32` block by block on a stack scratch, allocating nothing.
+pub trait Measure<S: Sample = f32> {
     /// What binding the config to a stream needs.
     type Context;
     /// The meter this config builds.
@@ -63,7 +69,7 @@ pub trait Meter {
 /// the stream to the frame range it is given and pushes that view. Returns
 /// every item the pushes yielded, in order, and the output.
 #[cfg(test)]
-pub(crate) fn fold_uneven<M: Measure>(
+pub(crate) fn fold_uneven<S: Sample, M: Measure<S>>(
     cfg: &M,
     context: M::Context,
     frames: usize,

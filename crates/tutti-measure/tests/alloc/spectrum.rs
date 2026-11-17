@@ -57,3 +57,20 @@ fn a_spectrum_step_does_not_allocate() {
         assert_eq!(after_reset, 0, "reset and steps");
     }
 }
+
+/// A push of 16-bit audio allocates nothing either, for blocks longer than the
+/// conversion block.
+#[test]
+fn an_integer_spectrum_step_does_not_allocate() {
+    let cfg = SpectrumConfig::new().framing(Framing::new(Samples(1024), Samples(256)));
+    let signal: Vec<i16> = (0..48_000)
+        .map(|i| ((std::f32::consts::TAU * 1234.5 * i as f32 / 48_000.0).sin() * 8_000.0) as i16)
+        .collect();
+    let mut state = cfg.measure(SampleRate::SR_48K).unwrap();
+    let steps = allocations(|| {
+        for block in signal.chunks(10_000) {
+            state.push(Mono::new(block), &mut Discard).unwrap();
+        }
+    });
+    assert_eq!(steps, 0, "i16 steps");
+}

@@ -42,3 +42,16 @@ fn no_push_allocates() {
     });
     assert_eq!(reset, 0, "reset and a push");
 }
+
+/// A push of 16-bit audio converts block by block on the stack: it allocates
+/// nothing either, for a chunk longer than the conversion block.
+#[test]
+fn an_integer_push_allocates_nothing() {
+    let cfg = ChromaConfig::new().framing(Framing::new(Samples(2048), Samples(512)));
+    let long: Vec<i16> = (0..20_000)
+        .map(|i| ((std::f32::consts::TAU * 440.0 * i as f32 / 22_050.0).sin() * 8_000.0) as i16)
+        .collect();
+    let mut meter = cfg.measure(SampleRate::SR_22K05).unwrap();
+    let pushed = allocations(|| meter.push(Mono::new(&long), &mut Discard).unwrap());
+    assert_eq!(pushed, 0, "an i16 push");
+}

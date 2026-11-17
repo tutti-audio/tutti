@@ -60,11 +60,13 @@
 //! push then allocates nothing, including after a
 //! [`reset`](SpectrumMeter::reset) (`tests/alloc/spectrum.rs`).
 
-use tutti_buffers::Mono;
+use core::marker::PhantomData;
+
+use tutti_buffers::{Mono, Sample};
 use tutti_types::{Db, Hz, SampleRate, Samples, Seconds};
 
 use crate::chroma::FrequencyBand;
-use crate::convert::all_finite;
+use crate::convert::{all_finite, for_blocks};
 use crate::framing::{Framing, check_nyquist};
 use crate::stereo::Ballistics;
 use crate::{Error, Measure, Meter, Result};
@@ -330,9 +332,9 @@ impl SpectrumConfig {
     }
 }
 
-impl Measure for SpectrumConfig {
+impl<S: Sample> Measure<S> for SpectrumConfig {
     type Context = SampleRate;
-    type Meter = SpectrumMeter;
+    type Meter = SpectrumMeter<S>;
 
     /// A meter that analyses audio at `rate`, block by block. Builds every
     /// buffer and plans the transform, so that pushing allocates nothing.
@@ -351,7 +353,7 @@ impl Measure for SpectrumConfig {
     /// rate; [`Error::SpectrogramTooLarge`] when the columns times the outputs
     /// exceed 4194304 cells; [`Error::PeakHoldTooLong`] when the peak hold is
     /// more than 4294967295 frames at the hop and rate in use.
-    fn measure(&self, rate: SampleRate) -> Result<SpectrumMeter> {
+    fn measure(&self, rate: SampleRate) -> Result<SpectrumMeter<S>> {
         SpectrumMeter::build(&self.plan(rate)?)
     }
 }
@@ -507,7 +509,7 @@ impl SpectrumPlan {
 /// Pushing allocates nothing once the meter is built, but each frame is a
 /// transform and every output is smoothed, so it belongs on the consumer side of
 /// a tap, not in an audio callback.
-pub struct SpectrumMeter {
+pub struct SpectrumMeter<S: Sample = f32> {
     cfg: SpectrumPlan,
     fft: FftScratch,
     window: Vec<f32>,
@@ -534,9 +536,10 @@ pub struct SpectrumMeter {
     /// The next column to write, and how many hold a frame.
     head: usize,
     filled: usize,
+    sample: PhantomData<fn(S)>,
 }
 
-impl core::fmt::Debug for SpectrumMeter {
+impl<S: Sample> core::fmt::Debug for SpectrumMeter<S> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("SpectrumMeter")
             .field("cfg", &self.cfg)
@@ -545,7 +548,7 @@ impl core::fmt::Debug for SpectrumMeter {
     }
 }
 
-impl SpectrumMeter {
+impl<S: Sample> SpectrumMeter<S> {
     /// The meter of a plan whose layout holds.
     fn build(cfg: &SpectrumPlan) -> Result<Self> {
         let mut fft = FftScratch::new();
@@ -587,6 +590,7 @@ impl SpectrumMeter {
             spectrogram: vec![cfg.floor.get(); cfg.columns * outputs],
             head: 0,
             filled: 0,
+            sample: PhantomData,
         };
         state.reset();
         Ok(state)
@@ -748,7 +752,7 @@ fn to_db(power: f32, floor: Db) -> Db {
     }
 }
 
-impl SpectrumMeter {
+impl<S: Sample> SpectrumMeter<S> {
     /// Feeds samples and analyses each frame that completes in them, calling
     /// `each` after every one.
     fn step(&mut self, block: &[f32], mut each: impl FnMut()) {
@@ -771,8 +775,8 @@ impl SpectrumMeter {
     }
 }
 
-impl Meter for SpectrumMeter {
-    type Input<'a> = Mono<'a>;
+impl<S: Sample> Meter for SpectrumMeter<S> {
+    type Input<'a> = Mono<'a, S>;
     type Item = ();
     type Output = Vec<Db>;
 
@@ -788,11 +792,13 @@ impl Meter for SpectrumMeter {
     ///
     /// [`Error::NonFiniteInput`] for a NaN or infinite sample. The meter is
     /// untouched on error.
-    fn push(&mut self, block: Mono<'_>, out: &mut impl Extend<()>) -> Result<()> {
+    fn push(&mut self, block: Mono<'_, S>, out: &mut impl Extend<()>) -> Result<()> {
         if !all_finite(block.samples()) {
             return Err(Error::NonFiniteInput);
         }
-        self.step(block.samples(), || out.extend([()]));
+        for_blocks(block.samples(), 1, |converted| {
+            self.step(converted, || out.extend([()]));
+        });
         Ok(())
     }
 
@@ -1307,9 +1313,7 @@ mod tests {
             lower,
             upper,
             window,
-        }) = config(4096, 1024)
-            .banding(banding)
-            .measure(SampleRate::of(RATE))
+        }) = Measure::<f32>::measure(&config(4096, 1024).banding(banding), SampleRate::of(RATE))
         else {
             panic!("a 4096-point window cannot hold the lowest third-octave band");
         };
@@ -1318,9 +1322,7 @@ mod tests {
         assert!((upper.get() - 20.0 * 2f32.powf(2.0 / 3.0)).abs() < 1e-4);
         assert_eq!(window, Samples(16_384));
         assert!(
-            config(16_384, 4096)
-                .banding(banding)
-                .measure(SampleRate::of(RATE))
+            Measure::<f32>::measure(&config(16_384, 4096).banding(banding), SampleRate::of(RATE))
                 .is_ok()
         );
     }
@@ -1385,11 +1387,13 @@ mod tests {
         // A hair over a frame holds the next.
         assert_eq!(frames(0.0101), 2);
         assert!(matches!(
-            config(64, 1)
-                .peak_hold(SpectrumTime::of(Seconds(3600.0)))
-                .peak_decay(PeakDecay::of(Db(1.0)))
-                .measure(SampleRate::of(10_000_000.0))
-                .map(|_| ()),
+            Measure::<f32>::measure(
+                &config(64, 1)
+                    .peak_hold(SpectrumTime::of(Seconds(3600.0)))
+                    .peak_decay(PeakDecay::of(Db(1.0))),
+                SampleRate::of(10_000_000.0)
+            )
+            .map(|_: SpectrumMeter| ()),
             Err(Error::PeakHoldTooLong { .. })
         ));
     }
@@ -1398,7 +1402,7 @@ mod tests {
     /// anything is allocated.
     #[test]
     fn bad_settings_are_errors() {
-        let new = |size, hop| config(size, hop).measure(SampleRate::of(RATE));
+        let new = |size, hop| Measure::<f32>::measure(&config(size, hop), SampleRate::of(RATE));
         for size in [63, 65_537] {
             assert!(matches!(
                 new(size, size),
@@ -1415,22 +1419,26 @@ mod tests {
         assert!(new(64, 1).is_ok() && new(65_536, 65_536).is_ok() && new(4096, 64).is_ok());
         for rate in [0.5, 1e9] {
             assert!(matches!(
-                config(256, 64).measure(SampleRate::of(rate)),
+                Measure::<f32>::measure(&config(256, 64), SampleRate::of(rate)),
                 Err(Error::SampleRateOutOfRange { .. })
             ));
         }
 
         let cfg = config(1024, 256);
         assert!(matches!(
-            cfg.spectrogram(FrameCount(usize::MAX))
-                .measure(SampleRate::of(RATE))
-                .map(|_| ()),
+            Measure::<f32>::measure(
+                &cfg.spectrogram(FrameCount(usize::MAX)),
+                SampleRate::of(RATE)
+            )
+            .map(|_: SpectrumMeter| ()),
             Err(Error::SpectrogramTooLarge { .. })
         ));
         assert_eq!(
-            cfg.spectrogram(FrameCount((1 << 22) / 513 + 1))
-                .measure(SampleRate::of(RATE))
-                .map(|_| ()),
+            Measure::<f32>::measure(
+                &cfg.spectrogram(FrameCount((1 << 22) / 513 + 1)),
+                SampleRate::of(RATE)
+            )
+            .map(|_: SpectrumMeter| ()),
             Err(Error::SpectrogramTooLarge {
                 cells: ((1 << 22) / 513 + 1) * 513,
                 max: 1 << 22
@@ -1439,7 +1447,7 @@ mod tests {
         assert!(
             cfg.spectrogram(FrameCount((1 << 22) / 513))
                 .measure(SampleRate::of(RATE))
-                .map(|_| ())
+                .map(|_: SpectrumMeter| ())
                 .is_ok()
         );
         let banded = cfg
@@ -1448,7 +1456,7 @@ mod tests {
                 band: band(100.0, 20_000.0),
             })
             .measure(SampleRate::of(RATE))
-            .map(|_| ());
+            .map(|_: SpectrumMeter| ());
         assert!(
             matches!(banded, Err(Error::EmptyBand { .. })),
             "4000 bands of 513 bins cannot all hold a bin"
@@ -1463,14 +1471,14 @@ mod tests {
         assert!(matches!(
             oct(48, 1e-30, 20_000.0)
                 .measure(SampleRate::of(RATE))
-                .map(|_| ()),
+                .map(|_: SpectrumMeter| ()),
             Err(Error::TooManyBands { max: 4096, .. })
         ));
         assert!(
             matches!(
                 oct(48, 100.0, 20_000.0)
                     .measure(SampleRate::of(RATE))
-                    .map(|_| ()),
+                    .map(|_: SpectrumMeter| ()),
                 Err(Error::EmptyBand { .. })
             ),
             "1/48 octave is finer than the bins"
@@ -1492,24 +1500,29 @@ mod tests {
         assert!(matches!(
             oct(1, 100.0, 30_000.0)
                 .measure(SampleRate::of(RATE))
-                .map(|_| ()),
+                .map(|_: SpectrumMeter| ()),
             Err(Error::AboveNyquist { .. })
         ));
         assert!(matches!(
             oct(1, 100.0, 150.0)
                 .measure(SampleRate::of(RATE))
-                .map(|_| ()),
+                .map(|_: SpectrumMeter| ()),
             Err(Error::EmptyFrequencyRange { .. })
         ));
         // Returning to per-bin outputs multiplies the cells per column: a
         // spectrogram sized for 17 bands is not one for 513 bins.
         let banded = oct(3, 400.0, 20_000.0).spectrogram(FrameCount(100_000));
-        assert!(banded.measure(SampleRate::of(RATE)).map(|_| ()).is_ok());
+        assert!(
+            banded
+                .measure(SampleRate::of(RATE))
+                .map(|_: SpectrumMeter| ())
+                .is_ok()
+        );
         assert!(matches!(
             banded
                 .banding(Banding::Bins)
                 .measure(SampleRate::of(RATE))
-                .map(|_| ()),
+                .map(|_: SpectrumMeter| ()),
             Err(Error::SpectrogramTooLarge { .. })
         ));
     }
