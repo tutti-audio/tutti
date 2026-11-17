@@ -1,3 +1,5 @@
+use alloc::vec;
+use alloc::vec::Vec;
 use tutti_types::Beat;
 
 use crate::{Law, Piece};

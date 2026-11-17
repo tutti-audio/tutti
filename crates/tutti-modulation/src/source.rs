@@ -15,7 +15,7 @@ mod note_adsr;
 pub use follower::LevelFollower;
 pub use note_adsr::NoteAdsr;
 
-use std::num::NonZeroU32;
+use core::num::NonZeroU32;
 
 use tutti_curve::{Law, Piece};
 use tutti_types::{Frame, SampleRate, Samples};

@@ -27,6 +27,7 @@ fn count() {
 
 /// The system allocator, counting each allocation and reallocation on the
 /// calling thread.
+#[derive(Debug)]
 pub struct ThreadCounting;
 
 // SAFETY: every method forwards to `System` unchanged; the counter is the only

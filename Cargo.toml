@@ -99,7 +99,7 @@ missing_errors_doc = "warn"
 missing_panics_doc = "warn"
 
 [workspace.dependencies]
-thiserror = "2"
+thiserror = { version = "2", default-features = false }
 tracing = "0.1.44"
 tracing-subscriber = "0.3.23"
 libloading = "0.9"
@@ -131,8 +131,8 @@ coremidi = "0.9"
 # bindings below reach them.
 coremidi-sys = "3.2"
 core-foundation = "0.10"
-objc2 = { version = "0.6", default-features = false, features = ["std"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSEnumerator", "NSString"] }
+objc2 = { version = "0.6", default-features = false, features = ["std", "exception"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSEnumerator", "NSException", "NSObjCRuntime", "NSString"] }
 objc2-core-midi = { version = "0.3", default-features = false, features = ["std", "objc2", "objc2-foundation", "MIDIMessages", "MIDIServices", "MIDIUMPCI", "MIDIUMPEndpoint", "MIDIUMPEndpointManager", "MIDIUMPFunctionBlock"] }
 
 # Release codegen with line tables, for a sampling profiler:
@@ -143,6 +143,14 @@ objc2-core-midi = { version = "0.3", default-features = false, features = ["std"
 inherits = "release"
 debug = "line-tables-only"
 strip = "none"
+
+# Line tables only: a backtrace keeps file and line, and codegen, linking and
+# disk use shrink. Dependencies carry no debuginfo. `test` inherits all of it.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
 
 # `aeffect_params` compares function addresses across crates, which holds only
 # when nothing is optimized, so this crate stays at opt-level 0.

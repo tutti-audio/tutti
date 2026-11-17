@@ -3,6 +3,7 @@ use crate::error::TempoError;
 use crate::point::{TempoPoint, Transition};
 use crate::segment::Seg;
 use crate::view::TempoView;
+use alloc::vec::Vec;
 use tutti_types::{Beat, BeatDuration, Bpm, Frame, SampleRate, Seconds, first_frame_at_or_after};
 
 /// An immutable tempo map.

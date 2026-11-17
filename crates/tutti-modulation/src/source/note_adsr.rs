@@ -121,7 +121,7 @@ impl ControlSource for NoteAdsr {
         self.held = [0; NOTE_WORDS];
         self.holding = 0;
         self.boundary = None;
-        let was = std::mem::replace(&mut self.stage, Stage::Idle);
+        let was = core::mem::replace(&mut self.stage, Stage::Idle);
         (was != Stage::Idle).then_some(Leg::hold(0.0))
     }
 

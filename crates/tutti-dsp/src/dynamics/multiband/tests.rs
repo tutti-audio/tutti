@@ -41,6 +41,7 @@ fn band(
             attack: Seconds(attack),
             release: Seconds(release),
             makeup: Db(makeup),
+            ..CompressorControls::DEFAULT
         },
         bypass: false,
         solo: false,

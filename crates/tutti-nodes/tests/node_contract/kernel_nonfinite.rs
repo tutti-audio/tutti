@@ -11,6 +11,7 @@ use tutti_nodes::{
     LimiterControls, LimiterNode, MaxDelay, ModDelayNode, MultibandCompressorNode, PhaserControls,
     PhaserNode, SvfFilterNode,
 };
+use tutti_nodes::{DcBlockerConfig, DcBlockerNode};
 use tutti_types::{
     BusTopology, ChannelLayout, Db, Drive, Feedback, Frame, Hz, MaxBlock, Mix, Q, Resonance,
     SampleRate, Samples, Seconds,
@@ -67,6 +68,12 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
         (
             "compressor",
             Box::new(CompressorNode::mono(CompressorControls::DEFAULT)),
+        ),
+        (
+            "dc blocker",
+            Box::new(DcBlockerNode::from(DcBlockerConfig::new(
+                ChannelLayout::STEREO,
+            ))),
         ),
         ("gate", Box::new(GateNode::mono(GateControls::DEFAULT))),
         (

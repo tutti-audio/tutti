@@ -43,7 +43,7 @@ bytemuck = "1.16"
 # `monotonic_ns`: the OS clock read, `clock_gettime` on Unix and
 # `QueryPerformanceCounter` on Windows.
 # The `Error` derive of the crate's error types.
-thiserror = { workspace = true }
+thiserror = { workspace = true, features = ["std"] }
 # `Reading` for every `Unit`: a `Gauge<Db>` holds a unit, and the unit vocabulary is below this crate.
 # `ranged!`, which writes `RequestBit`.
 tutti-types = { version = "0.0.1", path = "../tutti-types", default-features = false }

@@ -10,6 +10,7 @@ static ALLOC: AllocDisabler = AllocDisabler;
 mod rt_no_alloc;
 mod rt_no_alloc_convolver;
 mod rt_no_alloc_crossover;
+mod rt_no_alloc_dc_blocker;
 mod rt_no_alloc_dynamics;
 mod rt_no_alloc_engine;
 mod rt_no_alloc_filter;

@@ -14,7 +14,7 @@ categories = ["external-ffi-bindings", "multimedia::audio", "os::windows-apis"]
 workspace = true
 
 [target.'cfg(windows)'.dependencies]
-thiserror = { workspace = true }
+thiserror = { workspace = true, features = ["std"] }
 windows-sys = { version = "0.61", features = [
   "Win32_Foundation",
   "Win32_Media",

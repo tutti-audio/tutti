@@ -33,10 +33,6 @@ mod plugin_pool;
 // of the ref's `Hosting`: the reference CLAP plugin.
 #[cfg(feature = "clap")]
 mod plugin_hosting;
-// What `Phase::Plugins` does with a hosted plugin's health, over a fake
-// backend (no `plugin-server`).
-#[cfg(feature = "plugin")]
-mod plugin_health;
 // A hosted plugin's latency is the session's, across a crossfade and a
 // restart: the reference CLAP plugin in a real `plugin-server`.
 #[cfg(all(feature = "clap", feature = "device", feature = "export"))]
@@ -45,14 +41,6 @@ mod plugin_latency;
 // crossfade, and an export equal to the live render.
 #[cfg(all(feature = "clap", feature = "export"))]
 mod plugin_modulation;
-// The main-thread view: editors serviced by its update, the sizes they ask
-// for, and the graveyard it empties; a fake plugin with an editor.
-#[cfg(feature = "plugin")]
-mod main_view;
-// A hosted plugin's parameters through the session's views: gestures, typed units, rescans; a
-// fake backend.
-#[cfg(feature = "plugin")]
-mod plugin_params;
 // The reference VST2 plugin, in process: the project meter it is given.
 #[cfg(feature = "vst2")]
 mod vst2_meter;

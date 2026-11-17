@@ -983,8 +983,30 @@ fn the_constructor_holds_the_header_duration_to_the_header() {
 }
 
 fn text_packets(kind: tutti_ump::FlexTextKind, text: &str) -> Vec<(Tick, FileEvent)> {
-    tutti_ump::flex_text_packets(MidiGroup::FIRST, tutti_ump::FlexAddress::Group, kind, text)
-        .unwrap()
+    use tutti_ump::{
+        FlexAddress, FlexTextKind, LyricKind, PlainTextKind, Syllable, SyllableBody, SyllableEnd,
+        Text, flex_lyric_packets, flex_text_packets,
+    };
+    let (group, address) = (MidiGroup::FIRST, FlexAddress::Group);
+    let lyric = |kind| {
+        let syllable = Syllable {
+            body: SyllableBody::try_from(text).unwrap(),
+            end: SyllableEnd::None,
+        };
+        flex_lyric_packets(group, address, kind, &syllable).collect::<Vec<_>>()
+    };
+    let plain = |kind| {
+        let text = Text::try_from(text).unwrap();
+        flex_text_packets(group, address, kind, &text).collect::<Vec<_>>()
+    };
+    let umps = match kind {
+        FlexTextKind::Lyrics => lyric(LyricKind::Lyrics),
+        FlexTextKind::Ruby => lyric(LyricKind::Ruby),
+        FlexTextKind::Composer => plain(PlainTextKind::Composer),
+        FlexTextKind::Arranger => plain(PlainTextKind::Arranger),
+        other => panic!("{other:?}"),
+    };
+    umps.into_iter()
         .map(|ump| (Tick(10), packet(ump.decode().unwrap())))
         .collect()
 }
@@ -1123,4 +1145,128 @@ fn simultaneous_events_share_a_delta_clockstamp_in_presentation_order() {
     }
     let back = MidiFile::from_bytes(&file.to_bytes().unwrap()).unwrap();
     assert_eq!(back.tracks()[0].events, *events);
+}
+
+/// M2-104 section 7.5.2: within a Group, between the Start and the End of a
+/// Flex Data message a sender puts only Continue packets of that message and
+/// System Real Time messages, so a clip with anything else of that Group
+/// there, a Continue or End with no Start, or a message with no End, is
+/// refused when it is built, at the tick of the offending message; a message
+/// of another Group, and a System Real Time message of any, is no
+/// interruption.
+/// Spec: m2-104/7.5.2#2, m2-104/7.5.2#3
+#[test]
+fn a_flex_message_is_not_interrupted_in_a_clip() {
+    use tutti_midi_file::ConfigError;
+    use tutti_ump::FlexTextKind::{Arranger, Composer};
+    use tutti_ump::System;
+    // 25 bytes: a Start, a Continue and an End, at ticks 10, 20 and 30.
+    let text = "0123456789ab0123456789abX";
+    let at = |tick: u64, (_, event): (Tick, FileEvent)| (Tick(tick), event);
+    let parts = |kind| -> Vec<(Tick, FileEvent)> {
+        text_packets(kind, text)
+            .into_iter()
+            .zip([10, 20, 30])
+            .map(|(e, tick)| at(tick, e))
+            .collect()
+    };
+    let build = |events: Vec<(Tick, FileEvent)>| {
+        MidiFile::clip(
+            DIVISION,
+            Track {
+                end: Tick(100),
+                events,
+                ..Track::default()
+            },
+        )
+    };
+    let interrupted = |events| match build(events) {
+        Err(Error::Config(ConfigError::TextInterrupted { at })) => Some(at),
+        Ok(_) => None,
+        Err(other) => panic!("{other:?}"),
+    };
+    let composer = parts(Composer);
+    let note = (Tick(15), packet(on(60, 1).decode().unwrap()));
+    let real_time = |system, tick| {
+        (
+            Tick(tick),
+            packet(Message::System(MidiGroup::FIRST, system)),
+        )
+    };
+    let with = |extra: (Tick, FileEvent)| {
+        let mut events = composer.clone();
+        events.insert(1, extra);
+        events
+    };
+
+    assert_eq!(interrupted(composer.clone()), None);
+    // A note of the Group, between Start and Continue or Continue and End.
+    assert_eq!(interrupted(with(note.clone())), Some(Tick(15)));
+    let mut between_continue_and_end = composer.clone();
+    between_continue_and_end.insert(2, (Tick(25), note.1.clone()));
+    assert_eq!(interrupted(between_continue_and_end), Some(Tick(25)));
+    // Every System Real Time message is allowed, of any Group.
+    for system in [
+        System::TimingClock,
+        System::Start,
+        System::Continue,
+        System::Stop,
+        System::ActiveSensing,
+        System::Reset,
+    ] {
+        assert_eq!(interrupted(with(real_time(system, 15))), None, "{system:?}");
+    }
+    let mut other_group_clock = real_time(System::TimingClock, 15);
+    other_group_clock.1 = packet(Message::System(MidiGroup::of(9), System::TimingClock));
+    assert_eq!(interrupted(with(other_group_clock)), None);
+    // A System Common message is not real time.
+    assert_eq!(
+        interrupted(with(real_time(System::TuneRequest, 15))),
+        Some(Tick(15))
+    );
+    // A note of another Group, and a message of another Group, are not in
+    // the way.
+    let mut other_note = note.clone();
+    other_note.1 = packet(Message::Midi1(
+        Address {
+            group: MidiGroup::of(4),
+            channel: MidiChannel::of(0),
+        },
+        tutti_ump::Voice1::NoteOn {
+            note: NoteNumber::of(60),
+            velocity: U7::of(1),
+        },
+    ));
+    assert_eq!(interrupted(with(other_note)), None);
+    let mut elsewhere = with(note.clone());
+    elsewhere[1].1 = packet(Message::Flex(
+        MidiGroup::of(1),
+        Flex::Text {
+            address: tutti_ump::FlexAddress::Group,
+            kind: Arranger,
+            form: tutti_ump::Form::Complete,
+            bytes: *b"other group!",
+        },
+    ));
+    assert_eq!(interrupted(elsewhere), None);
+    // A Complete message of the Group, or a Start of another text, interrupts.
+    let mut complete = with((Tick(15), composer[2].1.clone()));
+    complete[1].1 = packet(Message::Flex(
+        MidiGroup::FIRST,
+        Flex::Text {
+            address: tutti_ump::FlexAddress::Group,
+            kind: Arranger,
+            form: tutti_ump::Form::Complete,
+            bytes: *b"interrupting",
+        },
+    ));
+    assert_eq!(interrupted(complete), Some(Tick(15)));
+    // A message that never ends is reported at the last event; a Continue or
+    // End with no Start, or of another text, at its own tick.
+    assert_eq!(interrupted(composer[..2].to_vec()), Some(Tick(20)));
+    assert_eq!(interrupted(composer[1..].to_vec()), Some(Tick(20)));
+    assert_eq!(interrupted(composer[2..].to_vec()), Some(Tick(30)));
+    let mut other_kind = composer.clone();
+    other_kind[1] = at(20, parts(Arranger).remove(1));
+    assert_eq!(interrupted(other_kind), Some(Tick(20)));
 }

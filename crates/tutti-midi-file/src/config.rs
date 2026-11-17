@@ -99,6 +99,16 @@ pub enum ConfigError {
         /// Where it ends.
         end: Tick,
     },
+    /// A Flex Data message (a text of several packets) is interrupted by
+    /// another message, or has no End: a message between its Start and End
+    /// is only a Continue of it or a System Real Time message (M2-104 section
+    /// 7.5.2).
+    #[error("a Flex Data message is interrupted or left open at tick {}", at.0)]
+    TextInterrupted {
+        /// The tick of the message that interrupts it, or of the last event
+        /// of the track if it is never ended.
+        at: Tick,
+    },
     /// The container cannot hold an event.
     #[error("track {track}{}: {refusal}", if *.in_header { " header" } else { "" })]
     Refused {

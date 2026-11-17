@@ -20,7 +20,7 @@ tutti-graph = { version = "0.0.1", path = "../tutti-graph" }
 
 # Lock-free / concurrent
 atomic_float = "1.1"
-thiserror = { workspace = true }
+thiserror = { workspace = true, features = ["std"] }
 tutti-types = { version = "0.0.1", path = "../tutti-types", default-features = false }
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }

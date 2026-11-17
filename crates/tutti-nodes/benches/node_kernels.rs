@@ -336,6 +336,7 @@ fn gate_controls() -> GateControls {
         hold: Seconds::new(0.01),
         release: Seconds::new(0.1),
         range: Db::new(-80.0),
+        ..GateControls::DEFAULT
     }
 }
 

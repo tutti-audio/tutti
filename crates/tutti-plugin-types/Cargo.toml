@@ -57,7 +57,7 @@ dpi.workspace = true
 # The editor key vocabulary (`KeyEvent`).
 keyboard-types.workspace = true
 # Structured editor-open errors (`EditorError`).
-thiserror.workspace = true
+thiserror = { workspace = true, features = ["std"] }
 # The track's colour (`TrackInfo::color`).
 rgb.workspace = true
 
