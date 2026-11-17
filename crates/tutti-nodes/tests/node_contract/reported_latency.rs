@@ -10,6 +10,7 @@
 //! whose DSP drifted away from it.
 
 use tutti_buffers::Mono;
+use tutti_buffers::Planes;
 use tutti_graph::contract::{drive, prepared};
 use tutti_graph::{GraphBuilder, IntoNode, Node, Prepare};
 use tutti_nodes::testing::Through;
@@ -74,7 +75,7 @@ fn mixed_impulse_response<N: IntoNode>(node: N, frames: usize, mix: Mix) -> Vec<
     let ins: Vec<&[f32]> = (0..usize::from(shape.audio_in().count()))
         .map(|_| &chunk[..])
         .collect();
-    r.render_input(&ins)
+    r.render_input(Planes::new(&ins).unwrap())
 }
 
 /// The latency a node declares: one figure for its whole output (a graph
@@ -288,7 +289,7 @@ fn a_limiter_summed_with_a_dry_path_reports_the_limiter_latency() {
     );
     let mut impulse = vec![0.0f32; 512];
     impulse[0] = 0.25;
-    let out = r.render_input(&[&impulse]).remove(0);
+    let out = r.render_input(Planes::new(&[&impulse]).unwrap()).remove(0);
     assert_eq!(
         onsets(&out),
         vec![lookahead.get()],

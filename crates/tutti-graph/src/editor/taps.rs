@@ -1,6 +1,7 @@
 //! Taps, event taps and meters: opening, closing and reaping the copies
 //! out of the graph.
 
+use tutti_buffers::Float;
 use tutti_types::Samples;
 
 use super::outlets::Closed;
@@ -15,7 +16,7 @@ use crate::{
     TapSpec,
 };
 
-impl Editor {
+impl<F: Float> Editor<F> {
     /// Declares a tap on `sources` (one lane each, any ports) and returns its
     /// reader. It takes effect at the next [`commit`](Self::commit), which
     /// compiles the tap's ops and hands the executor its producers; until

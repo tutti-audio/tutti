@@ -8,6 +8,7 @@
 //! the block the toggle lands on; each render below is longer, and only the
 //! frames after it are compared.
 
+use tutti_buffers::Planes;
 use tutti_fixtures::signal::bits;
 use tutti_graph::{IntoNode, NodeMode, Prepare, Solo, declick_frames};
 use tutti_nodes::{BusStripNode, EqBandNode, SvfType};
@@ -53,7 +54,7 @@ fn a_bypassed_band_is_its_input_bit_for_bit() {
     ));
     set_mode(&mut s, NodeMode::Bypassed);
     let x = input();
-    let y = s.render_input(&[&x]).remove(0);
+    let y = s.render_input(Planes::new(&[&x]).unwrap()).remove(0);
     let from = declick_frames(RATE).get();
     assert_eq!(bits(&y[from..]), bits(&x[from..]));
 }
@@ -70,7 +71,7 @@ fn a_muted_strip_is_silence_and_un_muted_is_its_fader() {
     let from = declick_frames(RATE).get();
 
     set_mode(&mut s, NodeMode::Muted);
-    let muted = s.render_input(&[&x, &x]);
+    let muted = s.render_input(Planes::new(&[&x, &x]).unwrap());
     for (c, y) in muted.iter().enumerate() {
         assert!(
             y[from..].iter().all(|v| v.to_bits() == 0),
@@ -79,7 +80,7 @@ fn a_muted_strip_is_silence_and_un_muted_is_its_fader() {
     }
 
     set_mode(&mut s, NodeMode::Active);
-    let back = s.render_input(&[&x, &x]);
+    let back = s.render_input(Planes::new(&[&x, &x]).unwrap());
     let fader = Amplitude(0.75).get();
     for (c, y) in back.iter().enumerate() {
         let want: Vec<u32> = x[from..].iter().map(|v| (v * fader).to_bits()).collect();

@@ -281,7 +281,7 @@ fn the_graphs_mix_is_aligned_to_the_kernels_latency() {
         .expect("a mix");
     let mut x = vec![0.0; BLOCK];
     x.extend(impulse_block());
-    let out = solo.render_input(&[&x]).remove(0);
+    let out = solo.render_input(Planes::new(&[&x]).unwrap()).remove(0);
     let spikes: Vec<(usize, f32)> = out
         .iter()
         .enumerate()

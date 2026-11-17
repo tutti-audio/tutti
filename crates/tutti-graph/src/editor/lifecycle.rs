@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use tutti_buffers::Float;
 
 use super::{BusLanes, CommitError, Editor, panic_text};
 use crate::NodeKey;
@@ -13,7 +14,7 @@ use crate::spec::GraphSpec;
 
 /// What a re-prepare's second half builds: the plan, the resume delta, every
 /// unit, and the weights of the bus lanes the plan has.
-pub(super) type Resumed = (Plan, Delta, BTreeMap<NodeKey, Box<dyn Node>>, BusLanes);
+pub(super) type Resumed<F> = (Plan, Delta, BTreeMap<NodeKey, Box<dyn Node<F>>>, BusLanes);
 
 /// The spec and shapes a commit compiled the running plan from.
 #[derive(Clone)]
@@ -27,7 +28,7 @@ pub(super) struct Committed {
 /// leaves the units out, for good. The states are exclusive (a poisoned editor
 /// is not re-preparing, and a re-prepare cannot start poisoned), so the
 /// type says so.
-pub(super) enum Lifecycle {
+pub(super) enum Lifecycle<F: Float> {
     /// Nothing has been sent.
     Unplanned,
     /// `sent` is the plan sent last.
@@ -36,7 +37,7 @@ pub(super) enum Lifecycle {
     /// before it, which the resume compiles against.
     Repreparing {
         sent: Option<Sent>,
-        reprepare: Box<Reprepare>,
+        reprepare: Box<Reprepare<F>>,
     },
     /// A re-prepare failed with its units out: `cause` says why, and `sent`
     /// is the plan that was running.
@@ -53,7 +54,7 @@ pub(super) struct Sent {
     committed: Option<Box<Committed>>,
 }
 
-impl Lifecycle {
+impl<F: Float> Lifecycle<F> {
     /// The plan sent last, in whichever state.
     pub(super) fn plan(&self) -> Option<&Arc<Plan>> {
         match self {
@@ -139,10 +140,10 @@ impl Lifecycle {
 /// A re-prepare waiting for the executor to hand its units back: the graph
 /// as it was checked, and the uncommitted units it places, already
 /// re-prepared.
-pub(super) struct Reprepare {
+pub(super) struct Reprepare<F: Float> {
     spec: GraphSpec,
     shapes: Shapes,
-    pending: BTreeMap<NodeKey, Box<dyn Node>>,
+    pending: BTreeMap<NodeKey, Box<dyn Node<F>>>,
     /// Whether the sample rate changes: the resume carries no time-based
     /// state.
     rate_changed: bool,
@@ -165,7 +166,7 @@ pub(super) fn refresh(key: NodeKey, shape: Shape, spec: &mut GraphSpec, shapes: 
     }
 }
 
-impl Editor {
+impl<F: Float> Editor<F> {
     /// Changes the sample rate or the maximum block of a running graph.
     ///
     /// A [`Prepare`] change is a **full recompile with every unit
@@ -312,7 +313,7 @@ impl Editor {
     /// executor suspended, so a node that panics in `prepare`, or shapes that
     /// no longer compile, poison the editor instead (see
     /// [`CommitError::Poisoned`]).
-    pub(super) fn resume(&mut self, mut done: Box<Commit>) {
+    pub(super) fn resume(&mut self, mut done: Box<Commit<F>>) {
         self.touch();
         let returned = done.take_retired();
         drop(done);
@@ -355,9 +356,9 @@ impl Editor {
     #[allow(clippy::type_complexity)]
     fn finish_reprepare(
         &mut self,
-        returned: Vec<(NodeKey, Box<dyn Node>)>,
-        rep: Reprepare,
-    ) -> Result<Resumed, CompileError> {
+        returned: Vec<(NodeKey, Box<dyn Node<F>>)>,
+        rep: Reprepare<F>,
+    ) -> Result<Resumed<F>, CompileError> {
         let Reprepare {
             mut spec,
             mut shapes,
@@ -366,7 +367,7 @@ impl Editor {
         } = rep;
         let base = self.life.plan().cloned();
         let prepare = self.prepare;
-        let mut units: BTreeMap<NodeKey, Box<dyn Node>> = BTreeMap::new();
+        let mut units: BTreeMap<NodeKey, Box<dyn Node<F>>> = BTreeMap::new();
         for (key, mut unit) in returned {
             // A unit the checked spec removed or regenerated is not coming
             // back: it is freed here, on the control thread.
