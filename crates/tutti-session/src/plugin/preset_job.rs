@@ -88,7 +88,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
         preset: &ListedPreset,
     ) -> Result<Job<LoadPreset>, PresetJobError<P>>
     where
-        P: Ord + Clone + fmt::Debug + Send + Sync + 'static,
+        P: crate::AppKey,
     {
         self.start_load(key, preset.id().clone(), Some(preset.plugin), None)
     }
@@ -111,7 +111,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
         path: impl Into<PathBuf>,
     ) -> Result<Job<LoadPreset>, PresetJobError<P>>
     where
-        P: Ord + Clone + fmt::Debug + Send + Sync + 'static,
+        P: crate::AppKey,
     {
         let id = PresetId::Location(path.into());
         self.start_load(key, id, None, Some(PresetSupport::LoadByPath))
@@ -122,7 +122,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// one". A plugin in no node, or gone, answers `None`.
     pub fn current_preset<P>(&self, key: &P, main: MainThreadMarker) -> Option<PresetId>
     where
-        P: Ord + Clone + fmt::Debug + Send + Sync + 'static,
+        P: crate::AppKey,
     {
         let (handle, ..) = self.state_parts(key).ok()?;
         handle.current_preset(main)
@@ -138,7 +138,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
         needs: Option<PresetSupport>,
     ) -> Result<Job<LoadPreset>, PresetJobError<P>>
     where
-        P: Ord + Clone + fmt::Debug + Send + Sync + 'static,
+        P: crate::AppKey,
     {
         let (handle, _, notices, hosted) = self.state_parts(key)?;
         // The plugin the load reaches is the node's, which a landed reload

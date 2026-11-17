@@ -734,7 +734,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// ambiguous saved device: the state carries the candidates).
     pub fn midi_input<P>(&self, key: &P) -> Result<MidiInput, HandleError<P>>
     where
-        P: Ord + Clone + std::fmt::Debug + Send + Sync + 'static,
+        P: crate::AppKey,
     {
         self.pool.handle::<P, MidiInputEntry>(key)
     }
@@ -746,7 +746,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// As [`midi_input`](Self::midi_input).
     pub fn midi_output<P>(&self, key: &P) -> Result<MidiOutput, HandleError<P>>
     where
-        P: Ord + Clone + std::fmt::Debug + Send + Sync + 'static,
+        P: crate::AppKey,
     {
         self.pool.handle::<P, MidiOutputEntry>(key)
     }

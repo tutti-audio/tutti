@@ -228,7 +228,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// [`HandleError::NotLoaded`] before the load lands.
     pub fn midi_sink<P>(&self, key: &P) -> Result<MidiSink, HandleError<P>>
     where
-        P: Ord + Clone + std::fmt::Debug + Send + Sync + 'static,
+        P: crate::AppKey,
     {
         self.pool.handle::<P, MidiSinkEntry>(key)
     }

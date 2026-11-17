@@ -681,7 +681,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// failed.
     pub fn plugin<P>(&self, key: &P) -> Result<PooledPlugin, HandleError<P>>
     where
-        P: Ord + Clone + fmt::Debug + Send + Sync + 'static,
+        P: crate::AppKey,
     {
         self.pool.handle::<P, PluginEntry>(key)
     }
@@ -706,7 +706,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// [`retry`](Self::retry)).
     pub fn add_pooled_plugin<P>(&mut self, key: &P) -> Result<Key<PluginNode>, AddPluginError<P>>
     where
-        P: Ord + Clone + fmt::Debug + Send + Sync + 'static,
+        P: crate::AppKey,
     {
         let pool_key = PoolKey::new(key);
         if self.pool.loaded::<P, PluginEntry>(key)?.standing.lost() {

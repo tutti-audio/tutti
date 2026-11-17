@@ -129,7 +129,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// set whole: nothing of it is applied.
     pub fn pool<P>(&mut self, parts: impl IntoPool<P>) -> Result<(), PoolError<P>>
     where
-        P: Ord + Clone + fmt::Debug + Send + Sync + 'static,
+        P: crate::AppKey,
     {
         let mut set = PoolSet::new();
         parts.into_pool(&mut set);
@@ -156,7 +156,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// the main thread when no update has run on it and this call is not on it.
     pub fn retry<P>(&mut self, key: &P) -> Result<(), RetryError<P>>
     where
-        P: Ord + Clone + fmt::Debug + Send + Sync + 'static,
+        P: crate::AppKey,
     {
         let start = self.pool.retry(key)?;
         self.pool_start(start.into_iter().collect());
@@ -169,11 +169,11 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// waits on this job ([`Job::wait`](crate::Job::wait)) before it renders.
     /// Dropping the [`Job`](crate::Job) ends the wait.
     ///
-    /// `K` is the type of the keys the pool was declared with; keys of another
+    /// `P` is the type of the keys the pool was declared with; keys of another
     /// type are not in the report.
     pub fn pool_loaded<P>(&mut self) -> crate::Job<PoolLoaded<P>>
     where
-        P: Ord + Clone + fmt::Debug + Send + Sync + 'static,
+        P: crate::AppKey,
     {
         let (job, ticket) = self.jobs.new_job();
         self.pool.wait_loaded(ticket);
@@ -208,7 +208,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
         then: impl FnOnce(&mut Self) + Send + 'static,
     ) -> Result<(), WhenLoadedError<P>>
     where
-        P: Ord + Clone + fmt::Debug + Send + Sync + 'static,
+        P: crate::AppKey,
     {
         self.pool.when_loaded(key, Box::new(then))
     }
@@ -249,7 +249,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     #[must_use]
     pub fn pool_state<P>(&self, key: &P) -> Option<PoolState>
     where
-        P: Ord + Clone + fmt::Debug + Send + Sync + 'static,
+        P: crate::AppKey,
     {
         self.pool.state(&PoolKey::new(key))
     }
@@ -270,7 +270,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// [`HandleError::NotLoaded`] before the load lands, or after it failed.
     pub fn audio<P>(&self, key: &P) -> Result<AudioEntry, HandleError<P>>
     where
-        P: Ord + Clone + fmt::Debug + Send + Sync + 'static,
+        P: crate::AppKey,
     {
         self.pool.handle::<P, AudioFile>(key)
     }
@@ -288,7 +288,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// [`HandleError::NotLoaded`] before the load lands, or after it failed.
     pub fn soundfont<P>(&self, key: &P) -> Result<Arc<tutti_sf2::SoundFont>, HandleError<P>>
     where
-        P: Ord + Clone + fmt::Debug + Send + Sync + 'static,
+        P: crate::AppKey,
     {
         self.pool.handle::<P, SoundFontFile>(key)
     }

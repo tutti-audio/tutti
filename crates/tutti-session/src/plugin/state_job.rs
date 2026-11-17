@@ -119,7 +119,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
         state_use: StateUse,
     ) -> Result<Job<SaveState>, StateJobError<P>>
     where
-        P: Ord + Clone + fmt::Debug + Send + Sync + 'static,
+        P: crate::AppKey,
     {
         let (handle, plugin, _, _) = self.state_parts(key)?;
         Ok(self.jobs.submit_job(
@@ -164,7 +164,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
         state: PeerState,
     ) -> Result<Job<RestoreState>, StateJobError<P>>
     where
-        P: Ord + Clone + fmt::Debug + Send + Sync + 'static,
+        P: crate::AppKey,
     {
         let (handle, plugin, notices, _) = self.state_parts(key)?;
         state
@@ -191,7 +191,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
         key: &P,
     ) -> Result<(PluginHandle, PluginRef, super::Notices, Hosted), NodeLookup<P>>
     where
-        P: Ord + Clone + fmt::Debug + Send + Sync + 'static,
+        P: crate::AppKey,
     {
         self.pool.loaded::<P, PluginEntry>(key)?;
         let pool_key = PoolKey::new(key);

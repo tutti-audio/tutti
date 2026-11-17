@@ -520,9 +520,7 @@ pub enum RootTopologyStatus {
 #[must_use = "dropping a session ends it, and on a real-time clock stops its stream"]
 #[derive(Debug)]
 pub struct Session<K: AppKey = &'static str, C: Clock = Offline> {
-    /// The app's key type. Nothing in the session holds a `K` yet: the
-    /// session's key-typed values (knobs, value errors, the patch) take it
-    /// next. `fn() -> K` makes `Send` and `Sync` follow the clock alone.
+    /// No `K` is held; `fn() -> K` keeps `Send` and `Sync` following the clock.
     pub(crate) _key: std::marker::PhantomData<fn() -> K>,
     /// Runs the work other threads handed to the main thread when the session
     /// drops on it, before anything else drops (the plugins then close, and

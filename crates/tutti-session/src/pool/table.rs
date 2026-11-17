@@ -401,7 +401,7 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
         }
     }
 
-    /// The same pool for a session on clock `K`: every entry, load in flight,
+    /// The same pool for a session on clock `N`: every entry, load in flight,
     /// stage and wait carries over. The runs waiting for an entry to load
     /// ([`when_loaded`](Self::when_loaded)) are typed to the session they were
     /// asked of and do not: the caller has run or refused them first
