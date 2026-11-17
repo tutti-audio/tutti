@@ -348,59 +348,106 @@ fn from_bytes_decodes_what_load_decodes() {
     }
 }
 
-/// The integers `hound`, an independent reader, finds in a PCM WAV, one `Vec`
-/// per channel.
-fn hound_planes(name: &str) -> (Vec<Vec<i32>>, u16) {
-    let mut reader = hound::WavReader::open(asset(name)).expect("hound opens the fixture");
-    let spec = reader.spec();
-    let mut planes = vec![Vec::new(); usize::from(spec.channels)];
-    for (i, s) in reader.samples::<i32>().enumerate() {
-        planes[i % usize::from(spec.channels)].push(s.expect("a sample"));
+/// A PCM WAV built byte by byte from the RIFF/WAVE layout: a `fmt ` chunk
+/// (format 1, `planes.len()` channels, 48 kHz, `bits` per sample) and a `data`
+/// chunk holding the planes' integers frame by frame, little-endian.
+fn pcm_wav(planes: &[Vec<i32>], bits: u16) -> Vec<u8> {
+    let channels = planes.len() as u16;
+    let width = bits / 8;
+    let frames = planes[0].len();
+    let data_len = (frames * usize::from(channels) * usize::from(width)) as u32;
+    let mut out = b"RIFF".to_vec();
+    out.extend((36 + data_len).to_le_bytes());
+    out.extend(b"WAVEfmt ");
+    out.extend(16u32.to_le_bytes());
+    out.extend(1u16.to_le_bytes());
+    out.extend(channels.to_le_bytes());
+    out.extend(48_000u32.to_le_bytes());
+    out.extend((48_000 * u32::from(channels) * u32::from(width)).to_le_bytes());
+    out.extend((channels * width).to_le_bytes());
+    out.extend(bits.to_le_bytes());
+    out.extend(b"data");
+    out.extend(data_len.to_le_bytes());
+    for i in 0..frames {
+        for plane in planes {
+            out.extend(&plane[i].to_le_bytes()[..usize::from(width)]);
+        }
     }
-    (planes, spec.bits_per_sample)
+    out
 }
 
-/// A decode as the file's own format keeps every integer the file holds: a
-/// 16-bit WAV read as `i16` and a 24-bit one as `I24` are the samples `hound`
-/// finds in the file, and the header names those formats.
+/// Two channels of `frames` integers in `min..=max`: the extremes, -1 and 0
+/// first, then a ramp that sweeps the range with a different slope per channel.
+fn integer_planes(min: i32, max: i32, frames: usize) -> Vec<Vec<i32>> {
+    let head = [min, max, -1, 0, 1, min + 1, max - 1];
+    let span = i64::from(max) - i64::from(min);
+    (0..2)
+        .map(|c| {
+            (0..frames)
+                .map(|i| match head.get(i) {
+                    Some(&v) if c == 0 => v,
+                    Some(&v) => -1 - v,
+                    None => (i64::from(min) + (i as i64 * (7 + 4 * c as i64) * 977) % span) as i32,
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// A decode as the file's own format keeps every integer the file holds: the
+/// bytes of a 16-bit and a 24-bit PCM WAV written from the format's layout
+/// decode as `i16` and `I24` to exactly the integers put in, extremes
+/// included, and the header names those formats.
 #[test]
 fn a_native_decode_returns_the_files_exact_integers() {
     use tutti_buffers::{I24, SampleFormat};
-    let meta = read_wave_metadata(asset("stereo_s16.wav")).expect("probe");
-    assert_eq!(meta.format, SampleFormat::I16);
-    let (want, bits) = hound_planes("stereo_s16.wav");
-    assert_eq!(bits, 16);
-    let wave = read_wave::<i16>(asset("stereo_s16.wav")).expect("decode");
-    for (c, plane) in want.iter().enumerate() {
-        let got: Vec<i32> = wave.channel(c).iter().map(|&s| i32::from(s)).collect();
-        assert_eq!(&got, plane, "16-bit channel {c}");
-    }
-
-    let meta = read_wave_metadata(asset("stereo_s24.wav")).expect("probe");
-    assert_eq!(meta.format, SampleFormat::I24);
-    let (want, bits) = hound_planes("stereo_s24.wav");
-    assert_eq!(bits, 24);
-    let wave = read_wave::<I24>(asset("stereo_s24.wav")).expect("decode");
-    for (c, plane) in want.iter().enumerate() {
-        let got: Vec<i32> = wave.channel(c).iter().map(|s| s.get()).collect();
-        assert_eq!(&got, plane, "24-bit channel {c}");
+    let dir = tempfile::tempdir().expect("tmp dir");
+    for (bits, min, max, format) in [
+        (
+            16u16,
+            i32::from(i16::MIN),
+            i32::from(i16::MAX),
+            SampleFormat::I16,
+        ),
+        (24, I24::MIN.get(), I24::MAX.get(), SampleFormat::I24),
+    ] {
+        let want = integer_planes(min, max, 3000);
+        let bytes = pcm_wav(&want, bits);
+        let path = dir.path().join(format!("pcm{bits}.wav"));
+        std::fs::write(&path, &bytes).expect("write");
+        assert_eq!(read_wave_metadata(&path).expect("probe").format, format);
+        let got: Vec<Vec<i32>> = if bits == 16 {
+            let wave = read_wave_bytes::<i16>(bytes).expect("decode");
+            (0..2)
+                .map(|c| wave.channel(c).iter().map(|&s| i32::from(s)).collect())
+                .collect()
+        } else {
+            let wave = read_wave_bytes::<I24>(bytes).expect("decode");
+            (0..2)
+                .map(|c| wave.channel(c).iter().map(|s| s.get()).collect())
+                .collect()
+        };
+        assert_eq!(got, want, "{bits}-bit");
     }
 }
 
-/// `FileIn` as `i16` streams the same integers, across packets.
+/// `FileIn` as `i16` streams the same integers, across several pulls.
 #[test]
 fn a_native_stream_returns_the_files_exact_integers() {
-    let (want, _) = hound_planes("stereo_s16.wav");
-    let mut dec = FileIn::<i16>::open(asset("stereo_s16.wav")).expect("open");
-    let mut got = vec![Vec::new(); want.len()];
-    let mut buf = vec![0i16; 1000 * want.len()];
+    let want = integer_planes(i32::from(i16::MIN), i32::from(i16::MAX), 3000);
+    let dir = tempfile::tempdir().expect("tmp dir");
+    let path = dir.path().join("stream.wav");
+    std::fs::write(&path, pcm_wav(&want, 16)).expect("write");
+    let mut dec = FileIn::<i16>::open(&path).expect("open");
+    let mut got = vec![Vec::new(); 2];
+    let mut buf = vec![0i16; 1000 * 2];
     loop {
         let out = InterleavedMut::new(&mut buf, dec.layout()).unwrap();
         let Pull::Frames(n) = dec.pull(out) else {
             break;
         };
         for (i, &s) in buf[..n.interleaved_len(dec.layout())].iter().enumerate() {
-            got[i % want.len()].push(i32::from(s));
+            got[i % 2].push(i32::from(s));
         }
     }
     assert_eq!(got, want);
