@@ -428,15 +428,6 @@ impl Plugin {
         }
     }
 
-    /// Holds the audio-thread claim as a main-thread call holding the instance
-    /// does, until the returned guard drops: a block meanwhile is refused
-    /// [`ProcessError::Busy`](crate::ProcessError::Busy).
-    #[cfg(feature = "testing")]
-    #[doc(hidden)]
-    pub fn hold_audio_claim_for_test(&self) -> impl Sized + '_ {
-        self.core.roles.claim()
-    }
-
     /// Whether the plugin implements `clap.state-context`.
     #[must_use]
     pub fn supports_state_context(&self) -> bool {

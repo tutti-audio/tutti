@@ -56,14 +56,15 @@ use tutti_types::{Beat, BeatDuration};
 use crate::guard::{lossy, or_abort};
 use crate::plugin::Plain;
 
+use crate::types::{AudioPortsRescanFlags, LogSeverity, ParamsRescanFlags};
+use tutti_plugin_types::ffi_guard;
+
 /// The host version this crate reports: its own.
 const HOST_VERSION: &CStr =
     match CStr::from_bytes_with_nul(concat!(env!("CARGO_PKG_VERSION"), "\0").as_bytes()) {
         Ok(version) => version,
         Err(_) => panic!("the package version has no interior nul"),
     };
-use crate::types::{AudioPortsRescanFlags, LogSeverity, ParamsRescanFlags};
-use tutti_plugin_types::ffi_guard;
 
 /// What a plugin's calls into the host reach.
 ///

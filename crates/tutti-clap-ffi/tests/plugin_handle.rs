@@ -996,27 +996,87 @@ fn a_block_outside_the_activation_is_refused_before_the_plugin_is_called() {
         .expect("the plugin's own layout runs");
 }
 
-/// A block never waits on the main thread: while a main-thread call holds the
-/// instance a block is refused at once and the plugin is not called.
-#[cfg(feature = "testing")]
+/// How many times the reference plugin's `reset` ran, through its exported
+/// thread capture.
+fn reset_visits() -> u32 {
+    use tutti_clap_test_plugin::{Site, ThreadCapture};
+    let mut capture = ThreadCapture::default();
+    // SAFETY: the reference cdylib's exported capture, documented signature,
+    // over a valid `ThreadCapture`.
+    unsafe {
+        let get: libloading::Symbol<unsafe extern "C" fn(*mut ThreadCapture) -> bool> = library()
+            .get(b"tutti_test_plugin_thread_capture\0")
+            .expect("capture symbol");
+        assert!(get(&mut capture));
+    }
+    capture.sites[Site::Reset as usize].visits
+}
+
+/// An event list the plugin asks the size of during `params.flush`, which an
+/// active plugin runs under the audio claim: the wrapped closure runs there, on the
+/// main thread, while the claim is held, and the list is empty. The closure
+/// runs there.
+struct AtFlush<F: Fn()>(F);
+
+impl<F: Fn()> EventSource for AtFlush<F> {
+    fn len(&self) -> usize {
+        (self.0)();
+        0
+    }
+
+    fn get(&self, _index: usize) -> Option<EventRef<'_>> {
+        None
+    }
+}
+
+/// A block never waits on the main thread. While an active `params.flush`
+/// holds the instance, a block is refused `Busy` and the plugin is not called,
+/// a `reset` is owed and runs first on the next block, and a `stop` returns
+/// without waiting and leaves the plugin processing.
+/// Spec: clap.plugin (`reset` and `stop_processing` are audio-thread entries,
+/// serialised with `process`)
 #[test]
-fn a_block_the_main_thread_holds_is_refused_busy_and_the_plugin_is_not_called() {
+fn a_flush_holding_the_instance_refuses_a_block_owes_a_reset_and_does_not_wait_for_a_stop() {
+    use std::cell::RefCell;
     let _g = lock();
     set_render_mode(RENDER_TAG_ONLY);
     let mut plugin = load(Arc::default());
-    let (mut side, mut scratch) = start(&mut plugin, 512);
+    let (side, scratch) = start(&mut plugin, 512);
     let mut left = vec![0.0f32; FRAMES];
     let mut right = vec![0.0f32; FRAMES];
     let mut outputs: Vec<&mut [f32]> = vec![&mut left, &mut right];
-    {
-        let _held = plugin.hold_audio_claim_for_test();
-        assert_eq!(
-            render(&mut side, &mut scratch, &mut outputs, FRAMES as u32),
-            Err(ProcessError::Busy)
+    let side = RefCell::new(side);
+    let scratch = RefCell::new(scratch);
+    let outputs = RefCell::new(&mut outputs);
+    let block = || {
+        render(
+            &mut side.borrow_mut(),
+            &mut scratch.borrow_mut(),
+            &mut outputs.borrow_mut(),
+            FRAMES as u32,
+        )
+    };
+    block().expect("a first block starts processing");
+    assert!(side.borrow().is_processing());
+    let resets = reset_visits();
+
+    let during_flush = AtFlush(|| {
+        assert_eq!(block(), Err(ProcessError::Busy));
+        side.borrow_mut().reset();
+        side.borrow_mut().stop();
+        assert!(
+            side.borrow().is_processing(),
+            "a stop meanwhile does not wait"
         );
-        assert!(!side.is_processing(), "the plugin was not called");
-    }
-    render(&mut side, &mut scratch, &mut outputs, FRAMES as u32).expect("the next block runs");
+        assert_eq!(reset_visits(), resets, "the reset waits for the claim");
+    });
+    assert!(plugin.params_flush(main_thread(), &during_flush, &mut Count::default()));
+
+    block().expect("the next block runs");
+    assert_eq!(reset_visits(), resets + 1, "the owed reset ran, once");
+    assert!(side.borrow().is_processing());
+    side.borrow_mut().stop();
+    assert!(!side.borrow().is_processing(), "an uncontended stop stops");
 }
 
 /// Dropping a `Plugin` with an open editor destroys the editor first: CLAP

@@ -59,10 +59,14 @@ fn stage_of(stage: Stage) -> LoadStage {
 }
 
 fn load_failed(bundle_path: &Path, error: LoadError) -> ClapError {
+    let mut reason = error.to_string();
+    if let Some(cause) = std::error::Error::source(&error) {
+        reason = format!("{reason}: {cause}");
+    }
     ClapError::LoadFailed {
         path: bundle_path.to_path_buf(),
         stage: stage_of(error.stage()),
-        reason: error.to_string(),
+        reason,
     }
 }
 

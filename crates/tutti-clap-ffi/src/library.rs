@@ -43,13 +43,13 @@ pub enum Stage {
 #[non_exhaustive]
 pub enum LoadError {
     /// The library could not be opened.
-    #[error("failed to load the library: {0}")]
+    #[error("failed to load the library")]
     Library(#[source] libloading::Error),
     /// The library has no `clap_entry` symbol.
-    #[error("no clap_entry symbol: {0}")]
+    #[error("no clap_entry symbol")]
     NoEntrySymbol(#[source] libloading::Error),
     /// The path is not a C string.
-    #[error("invalid path: {0}")]
+    #[error("invalid path")]
     InvalidPath(#[source] NulError),
     /// The entry's `init` answered `false`.
     #[error("entry init failed")]
@@ -101,7 +101,7 @@ pub enum LoadError {
         available: Vec<String>,
     },
     /// The plugin id is not a C string.
-    #[error("invalid plugin id: {0}")]
+    #[error("invalid plugin id")]
     InvalidPluginId(#[source] NulError),
     /// The factory returned no instance.
     #[error("failed to create the plugin instance")]
