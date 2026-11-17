@@ -48,7 +48,7 @@ use tutti_ump::{DeviceIdentity, FunctionBlockId, ManufacturerId, SoftwareRevisio
 use super::{
     CI_SUB_ID_1, CI_UNIVERSAL_SYSEX, CiCategories, CiDeviceId, DataControl, Destination,
     DetailsData, DiscoveryData, InquiryTarget, MaxSysexSize, MessageText, Muid, ProcessFeatures,
-    ProfileChannels, ProfileId, ProfileLists, ReportScope, SpecificData,
+    ProfileChannels, ProfileId, ProfileLists, ProfileTarget, ReportScope, SpecificData,
 };
 
 type Res<T> = winnow::ModalResult<T, ContextError>;
@@ -302,6 +302,17 @@ pub(super) fn profile_with_count_body(mut body: &[u8]) -> Option<(ProfileId, Pro
     )
         .parse_next(&mut body)
         .ok()
+}
+
+/// A Profile Id and the target it is for at `address`, or `None` when malformed
+/// or when a Group or Function Block address carries a count other than 0
+/// (§7.8, §7.10, §7.11 notes).
+pub(super) fn profile_target_body(
+    address: CiDeviceId,
+    body: &[u8],
+) -> Option<(ProfileTarget, ProfileId)> {
+    let (profile, channels) = profile_with_count_body(body)?;
+    Some((ProfileTarget::from_wire(address, channels).ok()?, profile))
 }
 
 /// The Profile Id and Inquiry Target of a Profile Details Inquiry.

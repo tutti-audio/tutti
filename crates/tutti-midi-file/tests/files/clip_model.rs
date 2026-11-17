@@ -5,7 +5,9 @@
 use crate::common::{track, unsorted};
 
 use tutti_fixtures::midi;
-use tutti_midi_device::{NotSetProfileOn, ProfileChannels, ProfileId, ProfileOnRequest};
+use tutti_midi_device::{
+    NotSetProfileOn, ProfileChannels, ProfileId, ProfileOnRequest, ProfileTarget,
+};
 use tutti_midi_file::{
     ClipFileError, Error, FileEvent, Meta, MidiFile, MidiFileKind, SmfDivision, SmfFormat, Tick,
     Track, Truncated,
@@ -1297,13 +1299,21 @@ fn the_headers_profile_is_read_typed() {
     assert_eq!(
         file.tracks()[0].profiles(),
         Ok(vec![
-            ProfileOnRequest::Group(ProfileId::GM2_FUNCTION_BLOCK),
-            ProfileOnRequest::Channel {
-                channel: MidiChannel::of(2),
-                profile: ProfileId::MPE,
-                channels: ProfileChannels::of(15),
+            ProfileOnRequest {
+                target: ProfileTarget::Group,
+                profile: ProfileId::GM2_FUNCTION_BLOCK
             },
-            ProfileOnRequest::FunctionBlock(ProfileId::GM2_FUNCTION_BLOCK),
+            ProfileOnRequest {
+                target: ProfileTarget::Channel {
+                    channel: MidiChannel::of(2),
+                    channels: ProfileChannels::of(15)
+                },
+                profile: ProfileId::MPE
+            },
+            ProfileOnRequest {
+                target: ProfileTarget::FunctionBlock,
+                profile: ProfileId::GM2_FUNCTION_BLOCK
+            },
         ])
     );
     // The write keeps them.
@@ -1319,10 +1329,12 @@ fn a_version_1_set_profile_on_loads_with_no_channels() {
     let file = read_with_leading(&profile_payload(0x03, 1, MPE, &[])).unwrap();
     assert_eq!(
         file.tracks()[0].profiles(),
-        Ok(vec![ProfileOnRequest::Channel {
-            channel: MidiChannel::of(3),
-            profile: ProfileId::MPE,
-            channels: ProfileChannels::of(0),
+        Ok(vec![ProfileOnRequest {
+            target: ProfileTarget::Channel {
+                channel: MidiChannel::of(3),
+                channels: ProfileChannels::of(0)
+            },
+            profile: ProfileId::MPE
         }])
     );
 }
@@ -1357,7 +1369,10 @@ fn a_malformed_set_profile_on_is_refused_by_its_fault() {
 /// Spec: m2-116/6.2#3, m2-116/6#3
 #[test]
 fn a_profile_is_written_at_the_start_of_the_header() {
-    let on = ProfileOnRequest::Group(ProfileId::MPE);
+    let on = ProfileOnRequest {
+        target: ProfileTarget::Group,
+        profile: ProfileId::MPE,
+    };
     let mut track = Track::new();
     track
         .header
@@ -1374,7 +1389,10 @@ fn a_profile_is_written_at_the_start_of_the_header() {
     assert!(bytes.starts_with(&want));
     assert_eq!(MidiFile::from_bytes(&bytes).unwrap(), file);
     // A second Profile goes after the first and before the other messages.
-    let second = ProfileOnRequest::FunctionBlock(ProfileId::GM2_FUNCTION_BLOCK);
+    let second = ProfileOnRequest {
+        target: ProfileTarget::FunctionBlock,
+        profile: ProfileId::GM2_FUNCTION_BLOCK,
+    };
     let both = file.tracks()[0].clone().profile_on(second);
     assert_eq!(both.profiles(), Ok(vec![on, second]));
     assert_eq!(

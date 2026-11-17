@@ -351,25 +351,11 @@ impl<R: FnMut() -> u32> CiDevice<R> {
                     }));
                 }
             }
-            CiMessage::SetProfileOn {
-                header,
-                to,
-                profile,
-                ..
-            }
-            | CiMessage::SetProfileOff {
-                header,
-                to,
-                profile,
-                ..
-            }
-            | CiMessage::ProfileDetailsInquiry {
-                header,
-                to,
-                profile,
-                ..
-            } => {
+            CiMessage::SetProfileOn { to, profile, .. }
+            | CiMessage::SetProfileOff { to, profile, .. }
+            | CiMessage::ProfileDetailsInquiry { to, profile, .. } => {
                 if *to == self.muid {
+                    let header = message.header();
                     let nak = Nak::new(
                         U7::new(message.sub_id2()).unwrap_or_default(),
                         Nak::STATUS_PROFILE_NOT_SUPPORTED,
