@@ -14,7 +14,7 @@ use tutti_types::{Beat, Bpm};
 use tutti_ump::{MidiChannel, Ump};
 
 /// Frames in a beat at 120 BPM and 48 kHz, so a frame is exact in beats.
-pub const FRAMES_PER_BEAT: f64 = 24_000.0;
+const FRAMES_PER_BEAT: f64 = 24_000.0;
 
 /// The beat `frame` frames in.
 pub fn beat_of(frame: u64) -> Beat {
@@ -56,7 +56,7 @@ pub fn connect(ed: &mut Editor, from: u64, to: u64) {
 }
 
 /// The ring's capacity the deleted node had, in events.
-pub const SINK_CAPACITY: tutti_graph::EventCapacity = tutti_graph::EventCapacity::of(1024);
+const SINK_CAPACITY: tutti_graph::EventCapacity = tutti_graph::EventCapacity::of(1024);
 
 /// The readers of the taps [`sink`] opened.
 pub struct Sink {

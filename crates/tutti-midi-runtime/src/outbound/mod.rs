@@ -1,6 +1,6 @@
 //! MIDI the engine *produces*, as opposed to plumbing it moves.
 //!
-//! - [`ClockMaster`] (and its [`ClockControls`]) generates outbound Beat Clock and MTC from the
+//! - `ClockMaster` (and its [`ClockControls`]) generates outbound Beat Clock and MTC from the
 //!   transport; [`ClockNode`] ticks it in the graph and sends it out of an
 //!   event port.
 //! - [`MidiOutNode`] is the graph's end of a device output: what is wired to it
@@ -23,11 +23,9 @@ pub mod machine_control_out;
 pub mod out_node;
 
 pub use active_sensing::{ACTIVE_SENSING_INTERVAL, ActiveSensingSender};
-pub use clock_master::{ClockControls, ClockMaster, ClockSends};
+pub use clock_master::{ClockControls, ClockSends};
 pub use clock_node::{CLOCK_EVENT_CAPACITY, ClockNode};
-pub use jr_timestamp::{
-    JR_CLOCK_INTERVAL, JR_CLOCK_MAX_INTERVAL, JrClock, JrClockEmitter, JrStamper, JrStream,
-};
+pub use jr_timestamp::{JrClock, JrStream};
 pub use machine_control_node::{
     MACHINE_CONTROL_EVENT_CAPACITY, MachineControlControls, MachineControlNode,
 };
