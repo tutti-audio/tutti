@@ -106,23 +106,20 @@ const SKIP_WINDOW: usize = RING_SLOTS + 2;
 
 /// The missed blocks whose chunk the plugin side accounts for: published
 /// after all, refused by the server, or skipped by the bridge. Each is counted
-/// within [`SKIP_WINDOW`] blocks of the miss, and answers one miss, the
-/// earliest.
+/// within [`SKIP_WINDOW`] blocks of the miss, and answers one miss. The three
+/// kinds share the window, so they are pooled and each miss, earliest first,
+/// takes the earliest count in its window: that matches as many misses as any
+/// assignment does, whatever the kind of a count.
 fn excused(misses: &[usize], lates: &[usize], refuses: &[usize], skips: &[usize]) -> Vec<usize> {
-    let (mut lates, mut refuses, mut skips) = (lates.to_vec(), refuses.to_vec(), skips.to_vec());
+    let mut counts: Vec<usize> = [lates, refuses, skips].concat();
+    counts.sort_unstable();
     let mut excused = Vec::new();
     for &miss in misses {
-        let take = |events: &mut Vec<usize>, window: usize| {
-            events
-                .iter()
-                .position(|&e| (miss..=miss + window).contains(&e))
-                .map(|at| events.remove(at))
-                .is_some()
-        };
-        if take(&mut lates, SKIP_WINDOW)
-            || take(&mut refuses, SKIP_WINDOW)
-            || take(&mut skips, SKIP_WINDOW)
+        if let Some(at) = counts
+            .iter()
+            .position(|&e| (miss..=miss + SKIP_WINDOW).contains(&e))
         {
+            counts.remove(at);
             excused.push(miss);
         }
     }
@@ -338,6 +335,11 @@ fn a_miss_is_accounted_for_only_by_a_late_refused_or_skipped_count_in_its_window
         excused(&[10, 11], &[], &[], &[11]),
         [10],
         "one skip answers one miss"
+    );
+    assert_eq!(
+        excused(&[61, 62, 63, 65], &[64, 66], &[64], &[62]),
+        [61, 62, 63, 65],
+        "a late count of one kind never starves a miss another kind's count answers"
     );
 }
 
