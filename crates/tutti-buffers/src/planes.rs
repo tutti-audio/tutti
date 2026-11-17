@@ -635,6 +635,20 @@ impl<'s, 'a, S: Sample> PlanesMut<'s, 'a, S> {
     }
 }
 
+impl<S: Sample> Default for PlanesMut<'_, '_, S> {
+    /// No planes, no frames: the empty view, which writes nothing. It has no
+    /// channel, so [`plane_mut(0)`](PlanesMut::plane_mut) panics on it;
+    /// [`iter_mut`](PlanesMut::iter_mut) yields nothing.
+    fn default() -> Self {
+        Self {
+            planes: MutTable::Slices(&mut []),
+            layout: ChannelLayout::EMPTY,
+            start: 0,
+            frames: 0,
+        }
+    }
+}
+
 impl<S: Sample> fmt::Debug for PlanesMut<'_, '_, S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PlanesMut")

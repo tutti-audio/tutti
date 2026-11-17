@@ -8,6 +8,7 @@
 //! `client_over` as a served plugin is. No format and no server is involved.
 
 use std::sync::Arc;
+use tutti_buffers::Planes;
 
 use tutti_fixtures::main_thread;
 
@@ -78,7 +79,7 @@ fn input(impulse: bool) -> Vec<f32> {
 
 fn drive(node: &mut dyn Node, frame: u64, impulse: bool) -> contract::Driven {
     let x = input(impulse);
-    drive_input(node, &env(frame), &[&x, &x], &[], &[])
+    drive_input(node, &env(frame), Planes::new(&[&x, &x]).unwrap(), &[], &[])
 }
 
 fn processed(fake: &FakePlugin) -> usize {

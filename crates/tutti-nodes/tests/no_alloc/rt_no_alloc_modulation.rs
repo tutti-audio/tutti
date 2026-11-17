@@ -30,7 +30,8 @@ use tutti_ump::{MidiChannel, U7};
 /// `assert_no_alloc`, `between(i)` run before each (a control move).
 fn gate<N: IntoNode>(node: N, amplitude: f32, blocks: usize, mut between: impl FnMut(usize)) {
     let (mut rig, _controls) = BlockRig::new(node, SampleRate::SR_48K, 64);
-    for c in rig.inputs_mut() {
+    for mut c in rig.inputs_mut().iter_mut() {
+        let c = c.samples_mut();
         for (i, x) in c.iter_mut().enumerate() {
             *x = if i % 2 == 0 { amplitude } else { -amplitude };
         }
@@ -40,7 +41,11 @@ fn gate<N: IntoNode>(node: N, amplitude: f32, blocks: usize, mut between: impl F
         rig.block();
     }
     assert!(
-        rig.output(0).iter().any(|s| s.abs() > 1e-6),
+        rig.output()
+            .plane(0)
+            .samples()
+            .iter()
+            .any(|s| s.abs() > 1e-6),
         "the node rendered silence; the gate would walk no DSP"
     );
     assert_no_alloc::assert_no_alloc(|| {
@@ -222,7 +227,8 @@ fn delay_and_modulation_with_moving_controls_are_allocation_free() {
 fn a_delay_with_its_lanes_fed_is_allocation_free() {
     for width in [2u16, 6] {
         let mut rig = Direct::new(delay(width, 0.01, 0.4, 0.3), SampleRate::SR_48K, 64);
-        for c in rig.inputs_mut() {
+        for mut c in rig.inputs_mut().iter_mut() {
+            let c = c.samples_mut();
             for (i, x) in c.iter_mut().enumerate() {
                 *x = if i % 2 == 0 { 0.5 } else { -0.5 };
             }
@@ -240,7 +246,11 @@ fn a_delay_with_its_lanes_fed_is_allocation_free() {
             rig.block();
         }
         assert!(
-            rig.output(0).iter().any(|s| s.abs() > 1e-6),
+            rig.output()
+                .plane(0)
+                .samples()
+                .iter()
+                .any(|s| s.abs() > 1e-6),
             "the delay rendered silence; the gate would walk no DSP"
         );
         assert_no_alloc::assert_no_alloc(|| {
@@ -259,7 +269,8 @@ fn a_delay_with_its_lanes_fed_is_allocation_free() {
 fn a_chorus_with_its_lanes_fed_is_allocation_free() {
     for width in [2u16, 6] {
         let mut rig = Direct::new(ModDelayNode::chorus(bus(width)), SampleRate::SR_48K, 64);
-        for c in rig.inputs_mut() {
+        for mut c in rig.inputs_mut().iter_mut() {
+            let c = c.samples_mut();
             for (i, x) in c.iter_mut().enumerate() {
                 *x = if i % 2 == 0 { 0.5 } else { -0.5 };
             }
@@ -277,7 +288,11 @@ fn a_chorus_with_its_lanes_fed_is_allocation_free() {
             rig.block();
         }
         assert!(
-            rig.output(0).iter().any(|s| s.abs() > 1e-6),
+            rig.output()
+                .plane(0)
+                .samples()
+                .iter()
+                .any(|s| s.abs() > 1e-6),
             "the chorus rendered silence; the gate would walk no DSP"
         );
         assert_no_alloc::assert_no_alloc(|| {
@@ -304,7 +319,8 @@ fn a_phaser_with_its_lanes_fed_is_allocation_free() {
         )
         .expect("a step fits any width");
         let mut rig = Direct::new(phaser, SampleRate::SR_48K, 64);
-        for c in rig.inputs_mut() {
+        for mut c in rig.inputs_mut().iter_mut() {
+            let c = c.samples_mut();
             for (i, x) in c.iter_mut().enumerate() {
                 *x = if i % 2 == 0 { 0.5 } else { -0.5 };
             }
@@ -322,7 +338,11 @@ fn a_phaser_with_its_lanes_fed_is_allocation_free() {
             rig.block();
         }
         assert!(
-            rig.output(0).iter().any(|s| s.abs() > 1e-6),
+            rig.output()
+                .plane(0)
+                .samples()
+                .iter()
+                .any(|s| s.abs() > 1e-6),
             "the phaser rendered silence; the gate would walk no DSP"
         );
         assert_no_alloc::assert_no_alloc(|| {
@@ -1455,8 +1475,9 @@ fn corner<N: Node + ParamNode>(
 ) {
     let cells = node.param_set();
     let mut rig = Direct::new(node, rate, 64);
-    let width = rig.inputs_mut().len();
-    for c in rig.inputs_mut() {
+    let width = rig.inputs_mut().channels();
+    for mut c in rig.inputs_mut().iter_mut() {
+        let c = c.samples_mut();
         for (i, x) in c.iter_mut().enumerate() {
             *x = if i % 2 == 0 { INPUT } else { -INPUT };
         }
@@ -1468,7 +1489,13 @@ fn corner<N: Node + ParamNode>(
     for i in 0..8 {
         between(&cells, i);
         rig.block();
-        heard += rig.output(0).iter().map(|s| s.abs()).sum::<f32>();
+        heard += rig
+            .output()
+            .plane(0)
+            .samples()
+            .iter()
+            .map(|s| s.abs())
+            .sum::<f32>();
     }
     assert!(
         heard > 1e-6,
@@ -1480,7 +1507,7 @@ fn corner<N: Node + ParamNode>(
             between(&cells, i);
             rig.block();
             for c in 0..width {
-                for s in rig.output(c) {
+                for s in rig.output().plane(c).samples() {
                     finite &= s.is_finite();
                     peak = peak.max(s.abs());
                 }

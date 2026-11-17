@@ -147,3 +147,13 @@ fn planes_mut_slice_past_the_end_panics() {
     let mut out = PlanesMut::new(&mut slices).unwrap();
     let _ = out.slice_mut(Samples(1)..Samples(3));
 }
+
+#[test]
+fn the_default_planes_mut_is_the_empty_view_with_no_channel() {
+    let mut empty = PlanesMut::<f32>::default();
+    assert_eq!(empty.channels(), 0);
+    assert_eq!(empty.frames(), Samples(0));
+    assert!(empty.get_plane(0).is_none());
+    assert!(empty.get_plane_mut(0).is_none());
+    assert!(empty.iter_mut().next().is_none());
+}

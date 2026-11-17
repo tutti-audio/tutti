@@ -339,7 +339,13 @@ mod tests {
         let mut node = prepared_at(comp(-20.0, 4.0, 0.0001, 0.1), RATE_44K);
         let audio = vec![0.5f32; 1024];
         let sc = vec![0.9f32; 1024];
-        let out = drive(&mut node, RATE_44K, &[&audio, &sc], &[]).remove(0);
+        let out = drive(
+            &mut node,
+            RATE_44K,
+            Planes::new(&[&audio, &sc]).unwrap(),
+            &[],
+        )
+        .remove(0);
         assert!(out[1023] < 0.5, "the loud sidechain reduced the tail");
     }
 
@@ -352,7 +358,13 @@ mod tests {
         let audio = vec![0.5f32; 256];
         let sc = vec![0.9f32; 256];
         for _ in 0..16 {
-            let out = drive(&mut node, RATE_44K, &[&audio, &sc], &[]).remove(0);
+            let out = drive(
+                &mut node,
+                RATE_44K,
+                Planes::new(&[&audio, &sc]).unwrap(),
+                &[],
+            )
+            .remove(0);
             assert!(out.iter().all(|s| s.is_finite()), "NaN ratio");
             assert!(
                 out.iter().all(|&s| s == 0.5),
@@ -362,13 +374,25 @@ mod tests {
         assert!(node.param_set().set(UnitParam::Ratio, 4.0));
         let mut last = 0.5;
         for _ in 0..16 {
-            let out = drive(&mut node, RATE_44K, &[&audio, &sc], &[]).remove(0);
+            let out = drive(
+                &mut node,
+                RATE_44K,
+                Planes::new(&[&audio, &sc]).unwrap(),
+                &[],
+            )
+            .remove(0);
             assert!(out.iter().all(|s| s.is_finite()), "after the write");
             last = out[255];
         }
         assert!(last < 0.5, "the finite ratio compresses: {last}");
         Node::reset(&mut node);
-        let out = drive(&mut node, RATE_44K, &[&audio, &sc], &[]).remove(0);
+        let out = drive(
+            &mut node,
+            RATE_44K,
+            Planes::new(&[&audio, &sc]).unwrap(),
+            &[],
+        )
+        .remove(0);
         assert!(out.iter().all(|s| s.is_finite()), "after reset");
     }
 
@@ -640,7 +664,13 @@ mod tests {
         let n = 64;
         let (audio, key) = (vec![0.5f32; n], vec![0.5f32; n]);
         let lane: Vec<f32> = (0..n).map(|i| if i < 5 { 20.0 } else { -40.0 }).collect();
-        let out = drive(&mut node, RATE_44K, &[&audio, &key], &[Some(&lane)]).remove(0);
+        let out = drive(
+            &mut node,
+            RATE_44K,
+            Planes::new(&[&audio, &key]).unwrap(),
+            &[Some(&lane)],
+        )
+        .remove(0);
         assert_eq!(out[4], 0.5, "over the 20 dB threshold: no reduction");
         assert!(
             out[5] < 0.2,
@@ -683,12 +713,14 @@ mod tests {
         let mut node = tutti_graph::contract::prepared(comp(0.0, 1.0, 0.0, 0.0), rate, 64);
         let (audio, key) = (vec![0.5f32; 64], vec![0.0f32; 64]);
         for _ in 0..4 {
-            drive(&mut node, rate, &[&audio, &key], &[]);
+            drive(&mut node, rate, Planes::new(&[&audio, &key]).unwrap(), &[]);
         }
         assert!(node.param_set().set(UnitParam::GainDb, 6.0));
         let mut out = Vec::new();
         for _ in 0..8 {
-            out.extend(drive(&mut node, rate, &[&audio, &key], &[]).remove(0));
+            out.extend(
+                drive(&mut node, rate, Planes::new(&[&audio, &key]).unwrap(), &[]).remove(0),
+            );
         }
         // The write is sampled on the grid (within 16 frames), then 240 frames of glide.
         assert!(

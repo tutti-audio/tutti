@@ -1063,7 +1063,7 @@ fn direct_driving_events_does_not_allocate() {
         }
     });
     assert!(
-        pulse.output(0).iter().any(|&s| s != 0.0),
+        pulse.output().plane(0).samples().iter().any(|&s| s != 0.0),
         "the events played"
     );
 }

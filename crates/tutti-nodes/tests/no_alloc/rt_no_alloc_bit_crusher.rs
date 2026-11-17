@@ -11,7 +11,8 @@ use tutti_types::{ChannelLayout, SampleRate, UnitParam};
 fn bit_crusher_process_is_allocation_free_with_the_controls_moving() {
     let node = BitCrusherNode::from(BitCrusherConfig::new(ChannelLayout::STEREO));
     let (mut rig, controls) = BlockRig::new(node, SampleRate::SR_48K, 64);
-    for (c, ch) in rig.inputs_mut().iter_mut().enumerate() {
+    for (c, mut ch) in rig.inputs_mut().iter_mut().enumerate() {
+        let ch = ch.samples_mut();
         for (i, x) in ch.iter_mut().enumerate() {
             *x = ((i as f32) * 0.07 * (c as f32 + 1.0)).sin() * 0.8;
         }
@@ -24,7 +25,11 @@ fn bit_crusher_process_is_allocation_free_with_the_controls_moving() {
         rig.block();
     }
     assert!(
-        rig.output(0).iter().any(|s| s.abs() > 1e-6),
+        rig.output()
+            .plane(0)
+            .samples()
+            .iter()
+            .any(|s| s.abs() > 1e-6),
         "the node rendered silence; the gate would walk no DSP"
     );
     assert_no_alloc::assert_no_alloc(|| {

@@ -223,12 +223,13 @@ impl IntoNode for OscillatorNode {
 mod tests {
     use super::*;
     use crate::test_support::{RATE, amplitude_at, mean};
+    use tutti_buffers::Planes;
     use tutti_graph::contract::{Direct, assert_param_fork, drive};
 
     fn render(node: OscillatorNode, frames: usize) -> Vec<f32> {
         let mut d = Direct::new(node, RATE, frames);
         d.block();
-        d.output(0).to_vec()
+        d.output().plane(0).samples().to_vec()
     }
 
     #[test]
@@ -310,7 +311,7 @@ mod tests {
             .collect();
         d.feed(0, Some(&lane));
         d.block();
-        let out = d.output(0);
+        let out = d.output().plane(0).samples();
         // 1 kHz for 48 samples is one cycle, so the 2 kHz half starts at phase 0
         // and runs two cycles in the next 48.
         for (n, &y) in out.iter().enumerate().skip(48) {
@@ -328,23 +329,30 @@ mod tests {
         let mut d = Direct::new(OscillatorNode::sine(Hz(500.0)), RATE, 16);
         d.feed(0, Some(&lane));
         d.block();
-        for (n, &y) in d.output(0).iter().enumerate() {
+        for (n, &y) in d.output().plane(0).samples().iter().enumerate() {
             let exact = libm::sin(2.0 * core::f64::consts::PI * 1_000.0 * n as f64 / 48_000.0);
             assert!((f64::from(y) - exact).abs() < 1e-6, "sample {n}");
         }
         let mut level = Direct::new(OscillatorNode::sine(Hz(1_000.0)), RATE, 4);
         level.feed(1, Some(&[0.5, f32::NAN, f32::NEG_INFINITY, 0.5]));
         level.block();
-        let held = level.output(0)[1];
+        let held = level.output().plane(0).samples()[1];
         assert!(held.is_finite());
-        assert!(level.output(0).iter().all(|v| v.is_finite()));
+        assert!(
+            level
+                .output()
+                .plane(0)
+                .samples()
+                .iter()
+                .all(|v| v.is_finite())
+        );
     }
 
     #[test]
     fn an_unprepared_node_renders_silence() {
         let mut node = OscillatorNode::sine(Hz(440.0));
         let ones = [1.0f32; 32];
-        let out = drive(&mut node, RATE, &[], &[None, Some(&ones)]);
+        let out = drive(&mut node, RATE, Planes::default(), &[None, Some(&ones)]);
         assert!(out[0].iter().all(|&v| v == 0.0));
     }
 
@@ -352,10 +360,10 @@ mod tests {
     fn reset_restarts_the_cycle() {
         let mut d = Direct::new(OscillatorNode::triangle(Hz(300.0)), RATE, 64);
         d.block();
-        let first = d.output(0).to_vec();
+        let first = d.output().plane(0).samples().to_vec();
         d.node.reset();
         d.block();
-        assert_eq!(d.output(0), &first[..]);
+        assert_eq!(d.output().plane(0).samples(), &first[..]);
     }
 
     #[test]
@@ -366,7 +374,7 @@ mod tests {
         d.block();
         cell.store(Hz(2_000.0));
         d.block();
-        let out = d.output(0);
+        let out = d.output().plane(0).samples();
         // 1 kHz filled one cycle, so the block starts at phase 0 and holds two
         // cycles of 2 kHz.
         let exact = libm::sin(2.0 * core::f64::consts::PI * 2_000.0 * 12.0 / 48_000.0);

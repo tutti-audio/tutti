@@ -68,7 +68,8 @@ fn lane(shape: usize, lo: f32, hi: f32, bad: f32) -> Vec<f32> {
 const SHAPES: usize = 7;
 
 fn fill(rig: &mut Direct<impl Node>) {
-    for (n, c) in rig.inputs_mut().iter_mut().enumerate() {
+    for (n, mut c) in rig.inputs_mut().iter_mut().enumerate() {
+        let c = c.samples_mut();
         for (i, x) in c.iter_mut().enumerate() {
             *x = match (i + n) % 5 {
                 0 | 1 => 0.5,
@@ -103,7 +104,7 @@ fn walk<N: Node>(
             rig.set_block_len(BLOCKS[i % BLOCKS.len()]);
             rig.block();
             for c in 0..outputs {
-                for &s in rig.output(c) {
+                for &s in rig.output().plane(c).samples() {
                     finite &= s.is_finite();
                     peak = peak.max(s.abs());
                 }

@@ -12,7 +12,8 @@ use tutti_types::{ChannelLayout, SampleRate, UnitParam};
 /// blocks under `assert_no_alloc`, `between` run before each.
 fn gate<N: IntoNode>(node: N, mut between: impl FnMut(&N::Controls, usize)) {
     let (mut rig, controls) = BlockRig::new(node, SampleRate::SR_48K, 64);
-    for (c, ch) in rig.inputs_mut().iter_mut().enumerate() {
+    for (c, mut ch) in rig.inputs_mut().iter_mut().enumerate() {
+        let ch = ch.samples_mut();
         for (i, x) in ch.iter_mut().enumerate() {
             *x = 0.25 + if (i / 8).is_multiple_of(2) { 0.5 } else { -0.5 } * (c as f32 + 1.0) * 0.5;
         }
@@ -22,7 +23,11 @@ fn gate<N: IntoNode>(node: N, mut between: impl FnMut(&N::Controls, usize)) {
         rig.block();
     }
     assert!(
-        rig.output(0).iter().any(|s| s.abs() > 1e-6),
+        rig.output()
+            .plane(0)
+            .samples()
+            .iter()
+            .any(|s| s.abs() > 1e-6),
         "the node rendered silence; the gate would walk no DSP"
     );
     assert_no_alloc::assert_no_alloc(|| {

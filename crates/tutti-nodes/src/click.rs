@@ -653,6 +653,7 @@ impl IntoNode for ClickNode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tutti_buffers::Planes;
     use tutti_graph::contract::{drive_input, prepared};
     use tutti_graph::{Offset, TransportChanges};
     use tutti_types::Frame;
@@ -736,7 +737,7 @@ mod tests {
 
     /// One block, as `[left, right]`.
     fn block(node: &mut ClickNode, env: &Env) -> [Vec<f32>; 2] {
-        let out = drive_input(node, env, &[], &[], &[]).audio;
+        let out = drive_input(node, env, Planes::default(), &[], &[]).audio;
         let [l, r]: [Vec<f32>; 2] = out.try_into().expect("stereo");
         [l, r]
     }
