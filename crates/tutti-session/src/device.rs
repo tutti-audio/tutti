@@ -21,7 +21,7 @@
 //!   ([`root_width`](crate::root_width)), never narrowed;
 //! - the transport's rate, the hardware MIDI input's timestamp rate, the
 //!   session's disk streamer (every open stream's conversion ratio) and,
-//!   through the re-prepare, the MIDI clock node;
+//!   through the re-prepare, the MIDI sync node;
 //! - the compensation figures in samples ([`Session::compensation`],
 //!   [`Session::latency`]), published before the first block.
 //!

@@ -59,7 +59,7 @@ use std::sync::Arc;
 
 use tutti_engine::Playhead;
 use tutti_graph::EventTapReader;
-use tutti_midi_protocol::{MtcRate, Recipient, SysexDeviceId};
+use tutti_midi_protocol::SysexDeviceId;
 use tutti_midi_runtime::{
     ClockEvent, ClockFollower, ClockKind, ClockPosition, Followed, MachineControlEvent,
     MachineControlFollower, TempoFollower,
@@ -147,19 +147,6 @@ pub struct FollowMachineControl {
     /// This session's MMC device ID. A command to it, to a group it was assigned
     /// to, or to the all-call (`7F`, always accepted) is followed.
     pub device: SysexDeviceId,
-}
-
-/// What [`Midi::send_machine_control`](crate::Midi::send_machine_control) sends:
-/// the transport's play, stop and locate as MMC commands (RP-013 pp.20 and 28)
-/// to every output (a `midi_output` or `midi_sink` entry).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SendMachineControl {
-    /// The Group the SysEx goes out on.
-    pub group: MidiGroup,
-    /// The device, group or all-call the commands are addressed to.
-    pub to: Recipient,
-    /// The frame rate locate targets are stated in.
-    pub rate: MtcRate,
 }
 
 /// The maps a follower overlays: the project's, and what the follower has

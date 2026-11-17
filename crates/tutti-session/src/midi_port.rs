@@ -1648,26 +1648,6 @@ impl Ports {
             port.fold_device_losses();
         }
     }
-
-    /// Sends `batch` to every output port, each event on its frame; a port with
-    /// no device counts them refused.
-    pub(crate) fn route(
-        &mut self,
-        batch: &[(tutti_types::Frame, tutti_ump::Ump)],
-        timing: Option<&crate::midi::OutputTiming>,
-    ) {
-        for port in &mut self.outputs {
-            crate::midi::route_batch(port.out.as_mut(), &mut port.losses, timing, batch);
-            port.fold_device_losses();
-        }
-    }
-
-    /// Counts `n` events as refused by every output port.
-    pub(crate) fn refuse(&mut self, n: u64) {
-        for port in &mut self.outputs {
-            port.losses.refused(n);
-        }
-    }
 }
 
 #[cfg(test)]

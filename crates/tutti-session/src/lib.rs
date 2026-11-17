@@ -188,7 +188,7 @@ pub use midi_ci::{
     SwitchProfile, WholeProfile,
 };
 #[cfg(feature = "midi")]
-pub use midi_follow::{FollowClock, FollowMachineControl, FollowTempo, SendMachineControl};
+pub use midi_follow::{FollowClock, FollowMachineControl, FollowTempo};
 #[cfg(feature = "midi-hardware")]
 pub use midi_port::{
     InputLoaded, MidiInput, MidiInputEntry, MidiInputInfo, MidiOutput, MidiOutputEntry,

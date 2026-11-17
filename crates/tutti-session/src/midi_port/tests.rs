@@ -54,10 +54,11 @@ fn the_stamp_stream_is_carried_across_a_closed_output() {
         });
     s.midi_nodes()
         .unwrap()
-        .clock_master
-        .set_sends(tutti_midi_runtime::ClockSends {
-            timing: true,
-            ..Default::default()
+        .sync_controls
+        .messages()
+        .set(tutti_midi_runtime::SyncMessages {
+            clock: true,
+            ..tutti_midi_runtime::SyncMessages::OFF
         });
     s.play().expect("room");
     render(&s, 8);

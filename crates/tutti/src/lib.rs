@@ -455,7 +455,7 @@ pub mod session {
     #[cfg(feature = "midi")]
     pub use tutti_session::{
         FollowClock, FollowMachineControl, MidiNodes, MidiRouteId, NoSuchMidiRoute, NotInstrument,
-        SendMachineControl, SinkLoaded,
+        SinkLoaded,
     };
     #[cfg(feature = "soundfont")]
     pub use tutti_session::{GeneralMidi, SoundFontFile, soundfont};
@@ -649,8 +649,9 @@ pub mod midi {
         SmpteFrameRate, SysexDeviceId, TuningFrequency, UnknownFrameRate,
     };
     pub use tutti_midi_runtime::{
-        ClockControls, ClockKind, ClockSends, MidiClipControls, MidiClipNode, MidiInputPorts,
-        OffsetOutOfRange, OutputLatency, OutputOffset, OutputTerms, SegmentFault,
+        ClockKind, MidiClipControls, MidiClipNode, MidiInputPorts, OffsetOutOfRange, OutputLatency,
+        OutputOffset, OutputTerms, SegmentFault, SyncMessages, SyncOut, SyncOutConfig,
+        SyncOutControls,
     };
     pub use tutti_midi_runtime::{MidiKeys, MidiOut, Outgoing, SendAt, Taken, TimedMidiEvent};
     pub use tutti_ump::{
