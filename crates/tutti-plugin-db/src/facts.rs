@@ -4,8 +4,8 @@
 //! (`FileFacts::read`, in `fs.rs`); everything here decides from that value and
 //! a table row, touching no disk and no clock.
 
+use crate::mtime::Mtime;
 use crate::table::FileRow;
-use std::time::SystemTime;
 use tutti_plugin_types::PluginFormat;
 
 /// What the scan found on disk for one candidate, read once.
@@ -15,7 +15,7 @@ pub struct FileFacts {
     pub exists: bool,
     /// The file's last modification, or `None` if it cannot be read or lies
     /// before the Unix epoch. A file without a time is always rescanned.
-    pub mtime: Option<SystemTime>,
+    pub mtime: Option<Mtime>,
     /// The format the path's extension names.
     pub format: Option<PluginFormat>,
 }
@@ -58,6 +58,11 @@ pub(crate) fn needs_rescan(row: &FileRow, facts: &FileFacts) -> bool {
 
 /// Returns `true` if the row is blacklisted and its file has not changed since
 /// the blacklist was stamped.
+///
+/// A file with no readable time is never unchanged, so a blacklisted one is
+/// probed again on every scan. That costs time, not safety, because the probe
+/// runs out of process; a blacklist that held without a time could miss a
+/// reinstall, which is worse.
 #[must_use]
 pub(crate) fn is_blacklisted_and_unchanged(row: &FileRow, facts: &FileFacts) -> bool {
     row.blacklist_reason().is_some() && !needs_rescan(row, facts)
@@ -72,11 +77,11 @@ mod tests {
 
     const T: u64 = 1_700_000_000;
 
-    fn at(secs: u64) -> Option<SystemTime> {
-        Some(SystemTime::UNIX_EPOCH + Duration::from_secs(secs))
+    fn at(secs: u64) -> Option<Mtime> {
+        Mtime::new(std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(secs))
     }
 
-    fn facts(mtime: Option<SystemTime>) -> FileFacts {
+    fn facts(mtime: Option<Mtime>) -> FileFacts {
         FileFacts {
             exists: true,
             mtime,
@@ -84,7 +89,7 @@ mod tests {
         }
     }
 
-    fn healthy(mtime: Option<SystemTime>) -> FileRow {
+    fn healthy(mtime: Option<Mtime>) -> FileRow {
         FileRow::probed(
             PluginFormat::Clap,
             &facts(mtime),
@@ -92,7 +97,7 @@ mod tests {
         )
     }
 
-    fn bad(mtime: Option<SystemTime>) -> FileRow {
+    fn bad(mtime: Option<Mtime>) -> FileRow {
         FileRow::blacklisted("crashed".into(), &facts(mtime))
     }
 
@@ -133,23 +138,45 @@ mod tests {
         assert!(!is_blacklisted_and_unchanged(&r, &facts(at(T))));
     }
 
-    /// A time missing on either side is never equal: the file is rescanned,
-    /// and a blacklist stamped without a time never holds.
+    /// A row stamped with a time and a file that reads without one are never
+    /// equal: the file is rescanned.
     #[test]
-    fn a_missing_time_on_either_side_is_always_rescanned() {
-        assert!(needs_rescan(&healthy(None), &facts(None)));
+    fn a_file_without_a_time_is_always_rescanned() {
         assert!(needs_rescan(&healthy(at(T)), &facts(None)));
+        assert_eq!(
+            classify(Some(&healthy(at(T))), &facts(None)),
+            ScanDecision::Probe
+        );
+    }
+
+    /// A row stamped without a time is never equal to any file, one with a
+    /// time or one without.
+    #[test]
+    fn a_row_without_a_time_is_always_rescanned() {
         assert!(needs_rescan(&healthy(None), &facts(at(T))));
-        assert!(!needs_rescan(&healthy(at(T)), &facts(at(T))));
+        assert!(needs_rescan(&healthy(None), &facts(None)));
         assert_eq!(
             classify(Some(&healthy(None)), &facts(None)),
             ScanDecision::Probe
         );
+    }
+
+    /// A blacklist stamped without a time never holds, so the file is probed
+    /// again rather than skipped.
+    #[test]
+    fn a_blacklist_without_a_time_never_holds() {
+        assert!(!is_blacklisted_and_unchanged(&bad(None), &facts(None)));
         assert_eq!(
             classify(Some(&bad(None)), &facts(None)),
             ScanDecision::Probe
         );
-        assert!(!is_blacklisted_and_unchanged(&bad(None), &facts(None)));
+    }
+
+    /// Equal times are not rescanned: the other tests in this module are not
+    /// vacuous.
+    #[test]
+    fn equal_times_need_no_rescan() {
+        assert!(!needs_rescan(&healthy(at(T)), &facts(at(T))));
     }
 
     /// Facts at T2 over a row at T1, then a blacklisting with those facts: the

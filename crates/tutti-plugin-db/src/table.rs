@@ -9,9 +9,9 @@
 //! [`RowChange`]s back, and [`PluginDb::apply`] is the only code that changes a row.
 
 use crate::facts::{self, FileFacts};
+use crate::mtime::Mtime;
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
 use tutti_plugin_types::{PluginDescriptor, PluginFormat, PluginRole};
 
 /// What the database knows about one plugin file.
@@ -21,7 +21,7 @@ pub struct FileRow {
     /// The file's last modification when it was probed, or `None` if the file
     /// had no readable time. A row is out of date when the file's time differs
     /// from this one, and a row without one is always out of date.
-    pub mtime: Option<SystemTime>,
+    pub mtime: Option<Mtime>,
     /// What the probe found.
     pub state: FileState,
 }
@@ -349,7 +349,9 @@ mod tests {
     pub(crate) fn facts(mtime: u64) -> FileFacts {
         FileFacts {
             exists: true,
-            mtime: Some(SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(mtime)),
+            mtime: Mtime::new(
+                std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(mtime),
+            ),
             format: Some(PluginFormat::Vst3),
         }
     }

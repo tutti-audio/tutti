@@ -722,9 +722,10 @@ pub fn probe_plugin_fallback(path: &Path, format: PluginFormat) -> PluginDescrip
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mtime::Mtime;
     use crate::table::FileState;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+    use std::time::{Duration, UNIX_EPOCH};
     use tempfile::TempDir;
 
     fn create_fake_plugin(dir: &Path, name: &str) -> PathBuf {
@@ -733,14 +734,18 @@ mod tests {
         path.canonicalize().unwrap()
     }
 
-    fn at(secs: u64) -> SystemTime {
-        UNIX_EPOCH + Duration::from_secs(secs)
+    fn at(secs: u64) -> Mtime {
+        Mtime::new(UNIX_EPOCH + Duration::from_secs(secs)).unwrap()
+    }
+
+    fn earlier(time: Option<Mtime>, by: Duration) -> Option<Mtime> {
+        time.and_then(|t| Mtime::new(t.get() - by))
     }
 
     fn set_mtime(path: &Path, secs: u64) {
         std::fs::File::open(path)
             .unwrap()
-            .set_modified(at(secs))
+            .set_modified(at(secs).get())
             .unwrap();
     }
 
@@ -902,7 +907,7 @@ mod tests {
         };
         let dir = TempDir::new().unwrap();
         let plugins_dir = plugins_dir(&dir);
-        let measured_row = |plugin: &Path, mtime: Option<SystemTime>| {
+        let measured_row = |plugin: &Path, mtime: Option<Mtime>| {
             let mut descriptor = PluginDescriptor::new("p", "p", PluginClass::Unknown);
             descriptor.measured = Some(Measured {
                 tail: None,
@@ -1110,7 +1115,7 @@ mod tests {
 
         // Simulate a reinstall: the file's mtime moves.
         let mut row = db.row(&bad).unwrap().clone();
-        row.mtime = row.mtime.map(|t| t - Duration::from_secs(1));
+        row.mtime = earlier(row.mtime, Duration::from_secs(1));
         db.apply(RowChange::put(&bad, row));
 
         assert!(db.is_blacklisted(&bad), "flag is still set");
@@ -1207,7 +1212,7 @@ mod tests {
 
         // And it is not permanent: reinstalling the plugin re-admits it.
         let mut row = db.row(&broken).unwrap().clone();
-        row.mtime = row.mtime.map(|t| t - Duration::from_secs(1));
+        row.mtime = earlier(row.mtime, Duration::from_secs(1));
         db.apply(RowChange::put(&broken, row));
         assert!(
             matches!(

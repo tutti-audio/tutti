@@ -1,9 +1,9 @@
 //! Filesystem primitives for plugin discovery.
 
 use super::facts::FileFacts;
+use crate::mtime::Mtime;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
 use tracing::debug;
 use tutti_plugin_types::PluginFormat;
 
@@ -44,11 +44,8 @@ impl FileFacts {
 
 /// The file's modification time, or `None` if the platform cannot read it or it
 /// lies before the Unix epoch, which the stored record cannot hold.
-fn modified(metadata: &std::fs::Metadata) -> Option<SystemTime> {
-    metadata
-        .modified()
-        .ok()
-        .filter(|time| *time >= SystemTime::UNIX_EPOCH)
+fn modified(metadata: &std::fs::Metadata) -> Option<Mtime> {
+    metadata.modified().ok().and_then(Mtime::new)
 }
 
 /// The module inside a bundle directory, preferring the one this target loads.
@@ -309,8 +306,8 @@ mod tests {
 
         /// A bundle directory holding one bare-stem binary, with the binary's and the
         /// directory's times set; returns the facts read.
-        fn at(secs: u64) -> Option<SystemTime> {
-            Some(SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(secs))
+        fn at(secs: u64) -> Option<Mtime> {
+            Mtime::new(std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(secs))
         }
 
         fn facts_of_bundle(name: &str, module_secs: u64, dir_secs: u64) -> FileFacts {
@@ -325,7 +322,7 @@ mod tests {
             let set = |p: &Path, secs: u64| {
                 std::fs::File::open(p)
                     .unwrap()
-                    .set_modified(at(secs).unwrap())
+                    .set_modified(at(secs).unwrap().get())
                     .unwrap();
             };
             set(&module, module_secs);

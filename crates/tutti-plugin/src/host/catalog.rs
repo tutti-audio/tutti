@@ -854,7 +854,9 @@ mod tests {
         // Record the blacklist against a *different* mtime than the file has,
         // which is what a reinstall produces.
         let mut row = blacklisted_row(&path, "crashed once");
-        row.mtime = row.mtime.map(|t| t - std::time::Duration::from_secs(1_000));
+        row.mtime = row.mtime.and_then(|t| {
+            tutti_plugin_db::Mtime::new(t.get() - std::time::Duration::from_secs(1_000))
+        });
         let plugins = catalog_with(&path, row);
 
         plugins
@@ -901,9 +903,9 @@ mod tests {
         // a rewrite inside the filesystem's timestamp granularity leaves the
         // times equal and the test proves nothing.
         let mut stale = blacklisted_row(&path, "SIGSEGV during probe");
-        stale.mtime = stale
-            .mtime
-            .map(|t| t - std::time::Duration::from_secs(1_000));
+        stale.mtime = stale.mtime.and_then(|t| {
+            tutti_plugin_db::Mtime::new(t.get() - std::time::Duration::from_secs(1_000))
+        });
         let plugins = catalog_with(&path, stale);
 
         assert!(
