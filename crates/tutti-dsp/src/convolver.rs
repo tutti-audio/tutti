@@ -69,9 +69,10 @@
 
 use std::sync::Arc;
 
-use tutti_buffers::{Mono, MonoMut, Sample};
+use rustfft::FftNum;
+use tutti_buffers::{Float, Mono, MonoMut, Sample};
 
-use crate::Complex32;
+use crate::Complex;
 use crate::fft::StagedRealFft;
 
 /// Default FFT block size when the caller doesn't pick one. A power of two,
@@ -189,21 +190,25 @@ fn plan_levels(ir_len: usize, head: usize) -> Vec<Plan> {
 }
 
 /// Zeroed complex spectrum of `bins` bins.
-fn zeros(bins: usize) -> Vec<Complex32> {
-    vec![Complex32::new(0.0, 0.0); bins]
+fn zeros<F: Float>(bins: usize) -> Vec<Complex<F>> {
+    vec![Complex::new(F::ZERO, F::ZERO); bins]
 }
 
 /// `dst[..src.len()] = src`, the rest zero.
 #[inline]
-fn copy_and_pad(dst: &mut [f32], src: &[f32]) {
+fn copy_and_pad<F: Float>(dst: &mut [F], src: &[F]) {
     dst[..src.len()].copy_from_slice(src);
-    dst[src.len()..].fill(0.0);
+    dst[src.len()..].fill(F::ZERO);
 }
 
 /// `result += a × b`, bin by bin: the complex multiply-accumulate of the
 /// partitioned convolution, in `fft-convolver`'s operand order.
 #[inline]
-fn complex_multiply_accumulate(result: &mut [Complex32], a: &[Complex32], b: &[Complex32]) {
+fn complex_multiply_accumulate<F: Float>(
+    result: &mut [Complex<F>],
+    a: &[Complex<F>],
+    b: &[Complex<F>],
+) {
     debug_assert!(result.len() == a.len() && result.len() == b.len());
     for ((r, a), b) in result.iter_mut().zip(a).zip(b) {
         r.re += a.re * b.re - a.im * b.im;
@@ -214,7 +219,7 @@ fn complex_multiply_accumulate(result: &mut [Complex32], a: &[Complex32], b: &[C
 /// One level of an impulse response, transformed: `segments.len()` spectra of
 /// `part` frames each, and the two transforms of `2 × part` points that
 /// produced them and that every convolver over it runs.
-struct Level {
+struct Level<F: Float + FftNum> {
     part: usize,
     /// Frames from the level's uniform output (latency `part`) to its due
     /// time (latency `B`): `start + B - part`. Zero for the head.
@@ -226,19 +231,19 @@ struct Level {
     steps: Vec<usize>,
     forward_steps: usize,
     /// `part + 1` bins each.
-    segments: Vec<Vec<Complex32>>,
+    segments: Vec<Vec<Complex<F>>>,
     /// Both directions, `2 × part` points, in steps.
-    fft: StagedRealFft,
+    fft: StagedRealFft<F>,
 }
 
 /// An impulse response, transformed: its levels, built once and
 /// read-only after that. Nothing on the audio thread (or anywhere) writes it,
 /// so any number of convolvers (a node's channels, a clone, a fork) share one
 /// behind an `Arc`.
-pub struct IrSpectra {
+pub struct IrSpectra<F: Float + FftNum = f32> {
     block_size: usize,
     ir_len: usize,
-    levels: Vec<Level>,
+    levels: Vec<Level<F>>,
     /// Power-of-two lengths of the input ring (the newest `part` frames plus
     /// the first step's offset, of every level) and the output ring (the
     /// furthest frame a level writes ahead of the read cursor).
@@ -246,7 +251,7 @@ pub struct IrSpectra {
     output_ring: usize,
 }
 
-impl std::fmt::Debug for IrSpectra {
+impl<F: Float + FftNum> std::fmt::Debug for IrSpectra<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("IrSpectra")
             .field("block_size", &self.block_size)
@@ -257,10 +262,10 @@ impl std::fmt::Debug for IrSpectra {
     }
 }
 
-impl IrSpectra {
+impl<F: Float + FftNum> IrSpectra<F> {
     /// Partition and transform `ir` at `block_size`, which must be a power
     /// of two. Allocates; control thread.
-    fn new(ir: &[f32], block_size: usize) -> Self {
+    fn new(ir: &[F], block_size: usize) -> Self {
         debug_assert!(block_size.is_power_of_two());
         Self::from_plan(
             ir,
@@ -272,11 +277,11 @@ impl IrSpectra {
 
     /// `ir` cut into the levels of `plan`, whose tail transforms are cut into
     /// sub-FFTs of at most `max_sub` points.
-    fn from_plan(ir: &[f32], block_size: usize, plan: &[Plan], max_sub: usize) -> Self {
+    fn from_plan(ir: &[F], block_size: usize, plan: &[Plan], max_sub: usize) -> Self {
         // A tail level's transforms (`2 * part` real points, `part` complex)
         // run in `part / max_sub` sub-FFTs and the passes around them; a
         // head's run whole, at its start.
-        let ffts: Vec<StagedRealFft> = plan
+        let ffts: Vec<StagedRealFft<F>> = plan
             .iter()
             .enumerate()
             .map(|(j, l)| {
@@ -298,13 +303,13 @@ impl IrSpectra {
             .sum();
         let slot = (block_size / (tail_steps + 1)).max(1);
         let mut taken = 0;
-        let levels: Vec<Level> = plan
+        let levels: Vec<Level<F>> = plan
             .iter()
             .zip(ffts)
             .enumerate()
             .map(|(j, (l, fft))| {
                 let mut scratch = fft.new_scratch();
-                let mut buffer = vec![0.0f32; 2 * l.part];
+                let mut buffer = vec![F::ZERO; 2 * l.part];
                 let segments = (0..l.count)
                     .map(|i| {
                         let lo = l.start + i * l.part;
@@ -372,27 +377,27 @@ impl IrSpectra {
 /// One convolver's running state for one [`Level`]: everything here is this
 /// convolver's own; the spectra are only read.
 #[derive(Clone)]
-struct LevelState {
+struct LevelState<F: Float + FftNum> {
     /// The input's spectra, one per partition: a ring whose write slot is
     /// `current`; the block before is at `current + 1`.
-    history: Vec<Vec<Complex32>>,
+    history: Vec<Vec<Complex<F>>>,
     current: usize,
     /// `2 × part`: the padded input going in, the product coming out.
-    buffer: Vec<f32>,
+    buffer: Vec<F>,
     /// Both transforms' scratch, which holds a transform between its steps.
-    scratch: Vec<Complex32>,
+    scratch: Vec<Complex<F>>,
     /// The older partitions' products for the *next* block, summed a few
     /// partitions at a time ([`accumulate_to`](Self::accumulate_to)):
     /// partitions `1..=accumulated` are in, and `begun` says the sum was
     /// zeroed for this block.
-    building: Vec<Complex32>,
+    building: Vec<Complex<F>>,
     accumulated: usize,
     begun: bool,
     /// The finished sum for the block whose multiply is pending.
-    ready: Vec<Complex32>,
-    conv: Vec<Complex32>,
+    ready: Vec<Complex<F>>,
+    conv: Vec<Complex<F>>,
     /// The second half of the last block's product, added to the next.
-    overlap: Vec<f32>,
+    overlap: Vec<F>,
     /// The frame (frames pushed so far) at which the block being transformed
     /// was complete, and the next of the level's steps to run for it
     /// (`Level::steps`, which are offsets from `base`).
@@ -408,7 +413,7 @@ struct LevelState {
     crossed: bool,
 }
 
-impl std::fmt::Debug for LevelState {
+impl<F: Float + FftNum> std::fmt::Debug for LevelState<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LevelState")
             .field("current", &self.current)
@@ -423,21 +428,21 @@ impl std::fmt::Debug for LevelState {
     }
 }
 
-impl LevelState {
+impl<F: Float + FftNum> LevelState<F> {
     /// A level's state in its freshly built state. Allocates.
-    fn new(lv: &Level) -> Self {
-        let zero = Complex32::new(0.0, 0.0);
+    fn new(lv: &Level<F>) -> Self {
+        let zero = Complex::new(F::ZERO, F::ZERO);
         Self {
             history: vec![vec![zero; lv.part + 1]; lv.segments.len()],
             current: 0,
-            buffer: vec![0.0; 2 * lv.part],
+            buffer: vec![F::ZERO; 2 * lv.part],
             scratch: lv.fft.new_scratch(),
             building: zeros(lv.part + 1),
             accumulated: 0,
             begun: false,
             ready: zeros(lv.part + 1),
             conv: zeros(lv.part + 1),
-            overlap: vec![0.0; lv.part],
+            overlap: vec![F::ZERO; lv.part],
             base: lv.part as u64,
             step: 0,
             spread_from: None,
@@ -447,13 +452,13 @@ impl LevelState {
     }
 
     /// The frame at which the next step runs.
-    fn next_frame(&self, lv: &Level) -> u64 {
+    fn next_frame(&self, lv: &Level<F>) -> u64 {
         self.base + lv.steps[self.step] as u64
     }
 
     /// The step due: a step of the block's forward transform, then of its
     /// multiply and inverse transform, then the next block's.
-    fn run_step(&mut self, lv: &Level, input: &[f32], output: &mut [f32]) {
+    fn run_step(&mut self, lv: &Level<F>, input: &[F], output: &mut [F]) {
         let at = self.next_frame(lv);
         if self.step < lv.forward_steps {
             self.forward(lv, input, at);
@@ -473,10 +478,10 @@ impl LevelState {
     /// between two blocks, and each bin sums its partitions in ascending
     /// order from zero, as one whole-block pass would, so any split of the
     /// partitions into calls gives the same bits.
-    fn accumulate_to(&mut self, lv: &Level, upto: usize) {
+    fn accumulate_to(&mut self, lv: &Level<F>, upto: usize) {
         let count = lv.segments.len();
         if !self.begun {
-            self.building.fill(Complex32::new(0.0, 0.0));
+            self.building.fill(Complex::new(F::ZERO, F::ZERO));
             self.begun = true;
         }
         let upto = upto.min(count - 1);
@@ -491,7 +496,7 @@ impl LevelState {
     /// takes the block of `part` frames that ended `steps[0]` frames ago from
     /// the input ring, and starts its transform; the last writes the spectrum
     /// into the write slot.
-    fn forward(&mut self, lv: &Level, input: &[f32], at: u64) {
+    fn forward(&mut self, lv: &Level<F>, input: &[F], at: u64) {
         if self.step == 0 {
             if self.seeded {
                 self.accumulate_to(lv, usize::MAX);
@@ -505,7 +510,7 @@ impl LevelState {
             for (r, b) in self.buffer[..lv.part].iter_mut().enumerate() {
                 *b = input[first.wrapping_add(r) & mask];
             }
-            self.buffer[lv.part..].fill(0.0);
+            self.buffer[lv.part..].fill(F::ZERO);
         }
         lv.fft.forward_step(
             self.step,
@@ -528,7 +533,7 @@ impl LevelState {
     /// partitions' sum plus the newest partition. The last
     /// normalises the result, adds it to the overlap, and sums it into the
     /// output ring where the level's output is due.
-    fn inverse(&mut self, lv: &Level, k: usize, output: &mut [f32]) {
+    fn inverse(&mut self, lv: &Level<F>, k: usize, output: &mut [F]) {
         if k == 0 {
             let count = lv.segments.len();
             let newest = (self.current + 1) % count;
@@ -551,7 +556,7 @@ impl LevelState {
             return;
         }
         // The inverse is unnormalised.
-        let len = self.buffer.len() as f32;
+        let len = <F as Float>::from_f32(self.buffer.len() as f32);
         for x in &mut self.buffer {
             *x /= len;
         }
@@ -564,9 +569,9 @@ impl LevelState {
     }
 
     /// Clear the running state; the spectra stay.
-    fn reset(&mut self, lv: &Level) {
-        let zero = Complex32::new(0.0, 0.0);
-        self.buffer.fill(0.0);
+    fn reset(&mut self, lv: &Level<F>) {
+        let zero = Complex::new(F::ZERO, F::ZERO);
+        self.buffer.fill(F::ZERO);
         for h in &mut self.history {
             h.fill(zero);
         }
@@ -575,7 +580,7 @@ impl LevelState {
         self.conv.fill(zero);
         self.accumulated = 0;
         self.begun = false;
-        self.overlap.fill(0.0);
+        self.overlap.fill(F::ZERO);
         self.current = 0;
         self.base = lv.part as u64;
         self.step = 0;
@@ -592,19 +597,19 @@ impl LevelState {
 /// state, all sized at construction. The hot path (`process_sample`,
 /// `process_block`) never allocates.
 #[derive(Clone)]
-pub struct Convolver {
-    spectra: Arc<IrSpectra>,
-    levels: Vec<LevelState>,
+pub struct Convolver<F: Float + FftNum = f32> {
+    spectra: Arc<IrSpectra<F>>,
+    levels: Vec<LevelState<F>>,
     /// The newest input frames, a ring of `spectra.input_ring`.
-    input: Vec<f32>,
+    input: Vec<F>,
     /// The output not yet read: every level's blocks summed at the frames they
     /// are due, a ring of `spectra.output_ring`, zeroed as it is read.
-    output: Vec<f32>,
+    output: Vec<F>,
     /// Frames consumed since construction or the last reset.
     pushed: u64,
 }
 
-impl std::fmt::Debug for Convolver {
+impl<F: Float + FftNum> std::fmt::Debug for Convolver<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Convolver")
             .field("spectra", &self.spectra)
@@ -614,29 +619,29 @@ impl std::fmt::Debug for Convolver {
     }
 }
 
-impl Convolver {
+impl<F: Float + FftNum> Convolver<F> {
     /// Creates a new convolver from an impulse response.
     ///
     /// `block_size` is rounded up to the next power of two; it is the head
     /// partition and the latency.
     #[must_use]
-    pub fn new(ir: &[f32], block_size: usize) -> Self {
+    pub fn new(ir: Mono<'_, F>, block_size: usize) -> Self {
         let block_size = block_size.next_power_of_two().max(2);
-        Self::over(Arc::new(IrSpectra::new(ir, block_size)))
+        Self::over(Arc::new(IrSpectra::new(ir.samples(), block_size)))
     }
 
     /// A convolver over `ir` at `block_size` (a power of two) cut by `parts`
     /// (the partition of each level, ascending, the head first) rather than
     /// by the cost model.
     #[cfg(test)]
-    fn with_parts(ir: &[f32], block_size: usize, parts: &[usize]) -> Self {
+    fn with_parts(ir: &[F], block_size: usize, parts: &[usize]) -> Self {
         Self::with_parts_split(ir, block_size, parts, MAX_SUB_FFT)
     }
 
     /// [`with_parts`](Self::with_parts), with the tail transforms cut into
     /// sub-FFTs of at most `max_sub` points.
     #[cfg(test)]
-    fn with_parts_split(ir: &[f32], block_size: usize, parts: &[usize], max_sub: usize) -> Self {
+    fn with_parts_split(ir: &[F], block_size: usize, parts: &[usize], max_sub: usize) -> Self {
         assert_eq!(parts[0], block_size);
         let plan = build_plan(ir.len(), parts);
         Self::over(Arc::new(IrSpectra::from_plan(
@@ -645,11 +650,11 @@ impl Convolver {
     }
 
     /// A convolver over `spectra`, in its freshly built state.
-    fn over(spectra: Arc<IrSpectra>) -> Self {
+    fn over(spectra: Arc<IrSpectra<F>>) -> Self {
         Self {
             levels: spectra.levels.iter().map(LevelState::new).collect(),
-            input: vec![0.0; spectra.input_ring],
-            output: vec![0.0; spectra.output_ring],
+            input: vec![F::ZERO; spectra.input_ring],
+            output: vec![F::ZERO; spectra.output_ring],
             pushed: 0,
             spectra,
         }
@@ -664,21 +669,21 @@ impl Convolver {
     }
 
     /// The IR's spectra this convolver reads, shared.
-    pub fn spectra(&self) -> &Arc<IrSpectra> {
+    pub fn spectra(&self) -> &Arc<IrSpectra<F>> {
         &self.spectra
     }
 
-    /// [`new`](Self::new) over an impulse response in any sample format, converted to `f32`.
+    /// [`new`](Self::new) over an impulse response in any sample format, converted to `F`.
     #[must_use]
     pub fn from_samples<S: Sample>(ir: Mono<'_, S>, block_size: usize) -> Self {
-        let ir: Vec<f32> = ir.iter().map(|s| s.convert_to::<f32>()).collect();
-        Self::new(&ir, block_size)
+        let ir: Vec<F> = ir.iter().map(|s| s.convert_to::<F>()).collect();
+        Self::new(Mono::new(&ir), block_size)
     }
 
-    /// Creates a convolver with the default block size (`512`).
+    /// [`from_samples`](Self::from_samples) at the default block size (`512`).
     #[must_use]
-    pub fn with_ir(ir: &[f32]) -> Self {
-        Self::new(ir, DEFAULT_BLOCK_SIZE)
+    pub fn with_ir<S: Sample>(ir: Mono<'_, S>) -> Self {
+        Self::from_samples(ir, DEFAULT_BLOCK_SIZE)
     }
 
     /// IR length in samples.
@@ -694,9 +699,9 @@ impl Convolver {
     /// Produces one convolved sample. Returns `0.0` for the first
     /// `block_size` samples (fill-up latency).
     #[inline]
-    pub fn process_sample(&mut self, input: f32) -> f32 {
-        let mut out = [0.0f32];
-        self.process_block(&[input], &mut out);
+    pub fn process_sample(&mut self, input: F) -> F {
+        let mut out = [F::ZERO];
+        self.process_block(Mono::new(&[input]), MonoMut::new(&mut out));
         out[0]
     }
 
@@ -710,7 +715,8 @@ impl Convolver {
     /// before the output frame that needs it. A call costs the transforms
     /// whose frames it contains, the share of every level's older partitions
     /// its length is due, and the copy.
-    pub fn process_block(&mut self, input: &[f32], output: &mut [f32]) {
+    pub fn process_block(&mut self, input: Mono<'_, F>, mut output: MonoMut<'_, F>) {
+        let (input, output) = (input.samples(), output.samples_mut());
         debug_assert_eq!(input.len(), output.len());
         let Self {
             spectra,
@@ -734,7 +740,7 @@ impl Convolver {
             for (r, o) in output[done..done + run].iter_mut().enumerate() {
                 let slot = &mut out_ring[at.wrapping_add(r) & out_mask];
                 *o = *slot;
-                *slot = 0.0;
+                *slot = F::ZERO;
             }
             for (r, &x) in input[done..done + run].iter().enumerate() {
                 ring[at.wrapping_add(r) & in_mask] = x;
@@ -784,8 +790,8 @@ impl Convolver {
     /// discontinuities (a seek, a region change), so that leak lands exactly
     /// where a ghost of the previous audio is most audible.
     pub fn reset(&mut self) {
-        self.input.fill(0.0);
-        self.output.fill(0.0);
+        self.input.fill(F::ZERO);
+        self.output.fill(F::ZERO);
         self.pushed = 0;
         for (lv, st) in self.spectra.levels.iter().zip(&mut self.levels) {
             st.reset(lv);

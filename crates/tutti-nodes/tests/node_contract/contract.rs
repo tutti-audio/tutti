@@ -23,6 +23,7 @@
 //!
 //! Every row is a graph node (`Row::new`).
 
+use tutti_buffers::Mono;
 use tutti_graph::contract::{Detect, Excite, Row};
 use tutti_graph::contract_tests;
 use tutti_nodes::{
@@ -140,7 +141,7 @@ mod convolution {
     fn convolver_row() -> Row {
         Row::new(
             "ConvolverNode (256-frame block)",
-            move || Box::new(ConvolverNode::new(&[1.0], 256)),
+            move || Box::new(ConvolverNode::new(Mono::new(&[1.0]), 256)),
             impulse(0),
             Detect::Threshold(1e-3),
         )

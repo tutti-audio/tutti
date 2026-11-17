@@ -20,9 +20,6 @@ crates/tutti-codec/src/wave.rs::Wave::channel_mut  pending
 crates/tutti-codec/src/wave.rs::Wave::from_samples  pending
 crates/tutti-codec/src/wave.rs::Wave::push_frame  pending
 crates/tutti-codec/src/writer.rs::FormatWriter::write  pending
-crates/tutti-dsp/src/convolver.rs::Convolver::new  pending
-crates/tutti-dsp/src/convolver.rs::Convolver::process_block  pending
-crates/tutti-dsp/src/convolver.rs::Convolver::with_ir  pending
 crates/tutti-dsp/src/dither.rs::DitherNoise::apply  pending
 crates/tutti-dsp/src/filter/biquad.rs::DirectForm1::hold  pending
 crates/tutti-dsp/src/filter/biquad.rs::DirectForm1::process  pending
@@ -60,11 +57,6 @@ crates/tutti-measure/src/onset.rs::spectral_flux  measured: the previous frame's
 crates/tutti-measure/src/tempo.rs::estimate_tempo_from_novelty  measured: a novelty curve of readings, not audio
 crates/tutti-measure/src/tempo.rs::track_beats_from_novelty  measured: a novelty curve of readings, not audio
 crates/tutti-measure/src/xcorr.rs::CrossCorrelation::values  measured: the correlation at each lag, not audio
-crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::folded  pending
-crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::new  pending
-crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::per_channel  pending
-crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::shared_ir  pending
-crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::with_ir  pending
 crates/tutti-nodes/src/params.rs::ControlSet::assemble  pending
 crates/tutti-nodes/src/params.rs::ControlSet::flatten  pending
 crates/tutti-nodes/src/testing.rs::Const::frame  pending

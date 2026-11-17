@@ -22,7 +22,7 @@ fn direct_convolve(x: &[f32], h: &[f32]) -> Vec<f32> {
 
 /// Run `x` through the convolver and drop the reported latency.
 fn run(ir: &[f32], x: &[f32], block: usize) -> Vec<f32> {
-    let mut c = Convolver::new(ir, block);
+    let mut c = Convolver::new(Mono::new(ir), block);
     let lat = c.latency();
     // Feed `lat` extra zeros so the tail that latency delays still comes out.
     let mut out: Vec<f32> = x
@@ -108,7 +108,7 @@ fn a_unit_impulse_ir_passes_the_signal_through_unchanged() {
 fn reported_latency_is_the_real_latency() {
     let ir = [1.0f32];
     for block in [2usize, 8, 64, 512] {
-        let mut c = Convolver::new(&ir, block);
+        let mut c = Convolver::new(Mono::new(&ir), block);
         let lat = c.latency();
 
         // Impulse at 0; with a unit IR the output impulse must land at
@@ -143,16 +143,19 @@ fn block_path_is_bit_identical_to_the_per_sample_path() {
         .map(|i| ((i as f32) * 0.173).sin() * 0.8 + if i % 97 == 0 { 0.5 } else { 0.0 })
         .collect();
     for block in [2usize, 8, 64] {
-        let mut per_sample = Convolver::new(&ir, block);
+        let mut per_sample = Convolver::new(Mono::new(&ir), block);
         let want: Vec<f32> = x.iter().map(|&s| per_sample.process_sample(s)).collect();
 
-        let mut blocked = Convolver::new(&ir, block);
+        let mut blocked = Convolver::new(Mono::new(&ir), block);
         let mut got = vec![0.0f32; x.len()];
         let lens = [1usize, 7, 64, 3, 16, 33, 5, 64, 9];
         let (mut at, mut k) = (0, 0);
         while at < x.len() {
             let n = lens[k % lens.len()].min(x.len() - at);
-            blocked.process_block(&x[at..at + n], &mut got[at..at + n]);
+            blocked.process_block(
+                Mono::new(&x[at..at + n]),
+                MonoMut::new(&mut got[at..at + n]),
+            );
             at += n;
             k += 1;
         }
@@ -185,7 +188,7 @@ fn block_path_is_bit_identical_to_the_per_sample_path() {
 fn a_nan_input_propagates_and_then_leaves() {
     let ir: Vec<f32> = vec![0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2];
     let block = 4;
-    let mut c = Convolver::new(&ir, block);
+    let mut c = Convolver::new(Mono::new(&ir), block);
     let out: Vec<f32> = std::iter::once(f32::NAN)
         .chain(std::iter::repeat_n(0.0, 64))
         .map(|x| c.process_sample(x))
@@ -225,7 +228,10 @@ fn run_blocks(c: &mut Convolver, x: &[f32], lens: &[usize]) -> Vec<f32> {
     let (mut at, mut k) = (0, 0);
     while at < x.len() {
         let n = lens[k % lens.len()].min(x.len() - at);
-        c.process_block(&x[at..at + n], &mut got[at..at + n]);
+        c.process_block(
+            Mono::new(&x[at..at + n]),
+            MonoMut::new(&mut got[at..at + n]),
+        );
         at += n;
         k += 1;
     }
@@ -283,9 +289,9 @@ fn incremental_path_is_linear() {
     let (a, b) = (0.75f32, -1.25f32);
     let mix: Vec<f32> = x.iter().zip(&y).map(|(&p, &q)| a * p + b * q).collect();
     let lens = [13usize, 64, 5];
-    let cx = run_blocks(&mut Convolver::new(&ir, 64), &x, &lens);
-    let cy = run_blocks(&mut Convolver::new(&ir, 64), &y, &lens);
-    let cm = run_blocks(&mut Convolver::new(&ir, 64), &mix, &lens);
+    let cx = run_blocks(&mut Convolver::new(Mono::new(&ir), 64), &x, &lens);
+    let cy = run_blocks(&mut Convolver::new(Mono::new(&ir), 64), &y, &lens);
+    let cm = run_blocks(&mut Convolver::new(Mono::new(&ir), 64), &mix, &lens);
     for i in 0..n {
         assert!((cm[i] - (a * cx[i] + b * cy[i])).abs() < 2e-3, "sample {i}");
     }
@@ -333,12 +339,12 @@ fn accumulation_is_spread_across_the_calls_of_a_partition() {
     // Nothing is summed before the first block's transform: the history
     // is zero, so the first cycle is not measured.
     for _ in 0..8 {
-        c.process_block(&x, &mut out);
+        c.process_block(Mono::new(&x), MonoMut::new(&mut out));
     }
     for cycle in 0..4 {
         let mut last = 0;
         for call in 0..8 {
-            c.process_block(&x, &mut out);
+            c.process_block(Mono::new(&x), MonoMut::new(&mut out));
             if call < 7 {
                 let now = c.levels[0].accumulated;
                 assert!(
@@ -374,13 +380,13 @@ fn the_spread_sum_is_the_ascending_sum() {
     let mut out = [0.0f32; 4];
     let mut checked = 0;
     for (n, call) in x.chunks(4).enumerate() {
-        c.process_block(call, &mut out);
+        c.process_block(Mono::new(call), MonoMut::new(&mut out));
         // Nothing is summed before the first block's transform.
         if n % 4 != 2 || n < 4 {
             continue;
         }
         assert_eq!(c.levels[0].accumulated, count - 1, "sum complete, call {n}");
-        let mut want = vec![Complex32::new(0.0f32, 0.0); part + 1];
+        let mut want = vec![Complex::new(0.0f32, 0.0); part + 1];
         for i in 1..count {
             let seg = &c.spectra.levels[0].segments[i];
             let hist = &c.levels[0].history[(c.levels[0].current + i) % count];
@@ -415,7 +421,7 @@ fn a_call_that_crosses_a_boundary_leaves_the_next_cycle_unstarted() {
     for k in 0..40 {
         let n = lens[k % 4];
         let x = vec![0.25f32; n];
-        c.process_block(&x, &mut out[..n]);
+        c.process_block(Mono::new(&x), MonoMut::new(&mut out[..n]));
         if fill + n > part {
             crossings += 1;
             assert_eq!(c.levels[0].accumulated, 0, "call {k} crossed");
@@ -445,7 +451,7 @@ fn an_inverse_step_does_not_suppress_the_spread() {
     let mut advanced = 0;
     for _ in 0..40 * 256 {
         let (step, acc) = (c.levels[tail].step, c.levels[tail].accumulated);
-        c.process_block(&[0.25], &mut out);
+        c.process_block(Mono::new(&[0.25]), MonoMut::new(&mut out));
         let st = &c.levels[tail];
         let inverse_only = step >= forward && st.step > step;
         if inverse_only && st.accumulated > acc {
@@ -466,7 +472,7 @@ fn reset_clears_the_convolution_tail() {
     let ir: Vec<f32> = vec![0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2];
     let block = 8;
 
-    let mut c = Convolver::new(&ir, block);
+    let mut c = Convolver::new(Mono::new(&ir), block);
     // Drive it hard so there is a substantial tail in flight.
     for _ in 0..64 {
         c.process_sample(1.0);
@@ -721,10 +727,14 @@ fn the_render_is_independent_of_the_call_lengths() {
     }
     // The layout the cost model picks for a long IR, at odd calls.
     let ir = flat_ir(6000);
-    let mut per_sample = Convolver::new(&ir, 32);
+    let mut per_sample = Convolver::new(Mono::new(&ir), 32);
     assert!(per_sample.spectra().levels.len() > 1);
     let want: Vec<f32> = x.iter().map(|&s| per_sample.process_sample(s)).collect();
-    let got = run_blocks(&mut Convolver::new(&ir, 32), &x, &[33, 5, 100, 1, 31]);
+    let got = run_blocks(
+        &mut Convolver::new(Mono::new(&ir), 32),
+        &x,
+        &[33, 5, 100, 1, 31],
+    );
     assert!(
         got.iter()
             .zip(&want)
@@ -793,7 +803,7 @@ fn layouts_are_contiguous_and_schedule_inside_their_slack() {
 #[test]
 fn a_long_ir_is_cut_into_levels() {
     let ir = vec![0.1f32; 6000];
-    assert!(Convolver::new(&ir, 32).spectra().shape().len() > 1);
+    assert!(Convolver::new(Mono::new(&ir), 32).spectra().shape().len() > 1);
 }
 
 /// The cost model keeps the uniform layout where an extra level does not
@@ -803,7 +813,11 @@ fn a_long_ir_is_cut_into_levels() {
 /// most [`MIN_GAIN`] of the uniform one.
 #[test]
 fn the_cost_model_picks_uniform_for_short_irs_and_levels_for_long_ones() {
-    let shape = |len: usize, head: usize| Convolver::new(&vec![0.1; len], head).spectra().shape();
+    let shape = |len: usize, head: usize| {
+        Convolver::new(Mono::new(&vec![0.1; len]), head)
+            .spectra()
+            .shape()
+    };
     assert_eq!(shape(0, 512), vec![]);
     assert_eq!(shape(100, 512), vec![(512, 1)]);
     assert_eq!(shape(3 * 512, 512), vec![(512, 3)]);
@@ -833,7 +847,7 @@ fn the_cost_model_picks_uniform_for_short_irs_and_levels_for_long_ones() {
 /// sub-FFTs, so each transform's steps are spread over that many calls.
 #[test]
 fn transforms_land_in_different_host_blocks() {
-    let steps_run = |st: &LevelState, lv: &Level| {
+    let steps_run = |st: &LevelState<f32>, lv: &Level<f32>| {
         ((st.base - lv.part as u64) / lv.part as u64) as usize * lv.steps.len() + st.step
     };
     for (head, parts, max_sub) in [
@@ -859,7 +873,7 @@ fn transforms_land_in_different_host_blocks() {
                 .zip(&c.spectra.levels)
                 .map(|(st, lv)| steps_run(st, lv))
                 .collect();
-            c.process_block(&x, &mut out);
+            c.process_block(Mono::new(&x), MonoMut::new(&mut out));
             let events: Vec<usize> = c
                 .levels
                 .iter()
@@ -966,7 +980,7 @@ fn a_split_render_is_independent_of_the_call_lengths() {
 /// An empty IR is silence at the declared latency, with no panic.
 #[test]
 fn an_empty_ir_is_silence() {
-    let mut c = Convolver::new(&[], 64);
+    let mut c = Convolver::new(Mono::new(&[]), 64);
     let x = noise(300);
     let got = run_blocks(&mut c, &x, &[7, 100]);
     assert!(got.iter().all(|&s| s == 0.0));
@@ -1021,7 +1035,7 @@ fn a_reset_convolver_renders_as_a_fresh_one() {
         ),
         (
             "cost model, 512",
-            Box::new(|| Convolver::new(&flat_ir(100_000), 512)),
+            Box::new(|| Convolver::new(Mono::new(&flat_ir(100_000)), 512)),
         ),
     ];
     for (name, make) in &cases {
@@ -1041,4 +1055,45 @@ fn a_reset_convolver_renders_as_a_fresh_one() {
             }
         }
     }
+}
+
+/// An `f64` convolver over a two-level IR gives a sum of delayed, scaled copies of
+/// the IR, as the definition of convolution says for an input of a few spikes, to the
+/// rounding of a double (far below `f32`'s).
+#[test]
+fn an_f64_convolver_sums_the_scaled_delayed_copies_of_the_ir() {
+    let ir: Vec<f64> = (0..1000)
+        .map(|k| ((k * 37 % 101) as f64 - 50.0) / 50.0)
+        .collect();
+    let spikes = [(0usize, 1.0f64), (3, -0.5), (40, 0.25), (41, 0.75)];
+    let frames = 1400;
+    let mut x = vec![0.0f64; frames];
+    for &(at, amp) in &spikes {
+        x[at] = amp;
+    }
+    let mut want = vec![0.0f64; frames];
+    for (n, w) in want.iter_mut().enumerate() {
+        for &(at, amp) in &spikes {
+            if let Some(&h) = n.checked_sub(at).and_then(|k| ir.get(k)) {
+                *w += amp * h;
+            }
+        }
+    }
+    let mut c = Convolver::<f64>::with_parts(&ir, 32, &[32, 128]);
+    assert_eq!(
+        c.spectra().shape().len(),
+        2,
+        "the IR is cut into two levels"
+    );
+    let lat = c.latency();
+    let mut got = vec![0.0f64; frames + lat];
+    let padded: Vec<f64> = x.iter().copied().chain(vec![0.0; lat]).collect();
+    for (xs, ys) in padded.chunks(77).zip(got.chunks_mut(77)) {
+        c.process_block(Mono::new(xs), MonoMut::new(ys));
+    }
+    let worst = want
+        .iter()
+        .zip(&got[lat..])
+        .fold(0.0f64, |a, (w, g)| a.max((w - g).abs()));
+    assert!(worst < 1e-12, "the f64 render is off by {worst}");
 }

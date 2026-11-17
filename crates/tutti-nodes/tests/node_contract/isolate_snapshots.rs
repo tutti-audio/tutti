@@ -13,6 +13,7 @@
 //! is read-only, or frozen by its fork when it is not — its own unit test
 //! `a_fork_freezes_a_live_curve`) and the `testing` stimulus nodes.
 
+use tutti_buffers::Mono;
 use tutti_graph::ParamNode;
 use tutti_graph::contract::IsolateRow;
 use tutti_nodes::{
@@ -430,7 +431,9 @@ fn convolver() {
             white * (-(n as f32) / 128.0).exp()
         })
         .collect();
-    IsolateRow::new("ConvolverNode (mono)", move || ConvolverNode::new(&ir, 64))
-        .control("gain", |c| c.set_gain(Amplitude(0.3)))
-        .check();
+    IsolateRow::new("ConvolverNode (mono)", move || {
+        ConvolverNode::new(Mono::new(&ir), 64)
+    })
+    .control("gain", |c| c.set_gain(Amplitude(0.3)))
+    .check();
 }
