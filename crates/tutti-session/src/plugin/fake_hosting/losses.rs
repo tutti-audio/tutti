@@ -5,7 +5,6 @@
 //! control's dropped edits.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use tutti_graph::{ForkByClone, Losses, NodeKey};
 use tutti_nodes::testing::Const;
@@ -40,7 +39,7 @@ fn plugin() -> tutti_plugin::catalog::PluginRef {
 struct Counters {
     controls: PluginControls,
     /// The bridge thread's count of the MIDI events it did not send.
-    bridge_midi: Arc<AtomicU64>,
+    bridge_midi: tutti_rt::Tally<u64>,
     delivery: ParamDelivery,
     /// The points a parameter's queue holds in the chunk the delivery is prepared for.
     queue_room: usize,
@@ -51,8 +50,8 @@ impl Counters {
         let (controls, _) =
             PluginControls::new(Samples(0), PluginTail::default(), SampleRate::SR_48K);
         let delivery_counters = controls.delivery_counters();
-        let bridge_midi = Arc::new(AtomicU64::new(0));
-        delivery_counters.attach_bridge_midi(Arc::clone(&bridge_midi));
+        let bridge_midi = tutti_rt::tally();
+        delivery_counters.attach_bridge_midi(bridge_midi.clone());
         let mut delivery = ParamDelivery::new([ParamId::new(0)], delivery_counters);
         let queue_room = delivery.prepare(64);
         delivery.begin();
@@ -66,7 +65,7 @@ impl Counters {
 
     /// `n` MIDI events that never reached the plugin.
     fn lose_midi(&self, n: u64) {
-        self.bridge_midi.fetch_add(n, Ordering::Relaxed);
+        self.bridge_midi.writer().add(n);
     }
 
     /// One grid point lost to a full queue, one point that replaced the last
