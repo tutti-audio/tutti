@@ -15,7 +15,8 @@ use crate::Result;
 ///
 /// `S` is the sample type of the audio the meter reads (`f32` by default, so a
 /// consumer bound `A: Measure` takes `f32` views); a meter converts each chunk
-/// to `f32` block by block on a stack scratch, allocating nothing.
+/// to `f32` block by block on a block scratch and never copies the whole chunk.
+/// What a push allocates is the meter's own doc.
 pub trait Measure<S: Sample = f32> {
     /// What binding the config to a stream needs.
     type Context;
@@ -61,6 +62,7 @@ pub trait Meter {
     fn push(&mut self, input: Self::Input<'_>, out: &mut impl Extend<Self::Item>) -> Result<()>;
 
     /// The answer over everything pushed, consuming the meter.
+    #[must_use]
     fn finish(self) -> Self::Output;
 }
 

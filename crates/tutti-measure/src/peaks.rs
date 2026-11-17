@@ -232,6 +232,20 @@ impl PeakBlocks {
     }
 }
 
+/// One whole block of a [`PeakMeter`] stream, with where it stands.
+///
+/// There is no channel-index type in the workspace, so the channel is its
+/// position in the layout.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ChannelBlock {
+    /// The channel the block summarizes, from 0.
+    pub channel: usize,
+    /// The frame the block starts at, in [`Samples`] of the stream.
+    pub frame: Samples,
+    /// The block's summary.
+    pub block: PeakBlock,
+}
+
 /// How input is blocked: how many samples of one channel each block
 /// summarizes. The channel layout is the audio's, bound where it is measured
 /// ([`summarize`] takes it from its view, [`PeakConfig::measure`] from its
@@ -251,22 +265,6 @@ impl PeakConfig {
             samples_per_block: samples_per_block.into(),
         }
     }
-
-    /// The meter for chunks `layout` wide.
-    fn bind<S: Sample>(&self, layout: ChannelLayout) -> Result<PeakMeter<S>> {
-        if self.samples_per_block.is_zero() {
-            return Err(Error::ZeroBlock);
-        }
-        let channels = layout.count() as usize;
-        Ok(PeakMeter {
-            block: self.samples_per_block.get(),
-            layout,
-            pending: vec![Vec::new(); channels],
-            planes: vec![Vec::new(); channels],
-            runs: vec![Vec::new(); channels],
-            sample: PhantomData,
-        })
-    }
 }
 
 impl<S: Sample> Measure<S> for PeakConfig {
@@ -279,7 +277,18 @@ impl<S: Sample> Measure<S> for PeakConfig {
     ///
     /// [`Error::ZeroBlock`] for a block of zero samples.
     fn measure(&self, layout: ChannelLayout) -> Result<PeakMeter<S>> {
-        self.bind(layout)
+        if self.samples_per_block.is_zero() {
+            return Err(Error::ZeroBlock);
+        }
+        let channels = layout.count() as usize;
+        Ok(PeakMeter {
+            block: self.samples_per_block.get(),
+            layout,
+            pending: vec![Vec::new(); channels],
+            planes: vec![Vec::new(); channels],
+            runs: vec![Vec::new(); channels],
+            sample: PhantomData,
+        })
     }
 }
 
@@ -330,8 +339,9 @@ pub struct PeakMeter<S: Sample = f32> {
 }
 
 impl<S: Sample> PeakMeter<S> {
-    /// Splits one chunk of whole frames into planes and cuts each into blocks.
-    fn step(&mut self, chunk: Interleaved<'_>) {
+    /// Splits one chunk of whole frames into planes and cuts each into blocks,
+    /// calling `emit` with each whole block, channel by channel.
+    fn step(&mut self, chunk: Interleaved<'_>, emit: &mut impl FnMut(ChannelBlock)) {
         let frames = chunk.frames().get();
         for plane in &mut self.planes {
             plane.clear();
@@ -339,13 +349,22 @@ impl<S: Sample> PeakMeter<S> {
         }
         let split = PlanesMut::from_vecs(&mut self.planes).and_then(|out| deinterleave(chunk, out));
         debug_assert!(split.is_ok(), "the chunk is the meter's width: {split:?}");
-        for ((pending, plane), run) in self
+        for (channel, ((pending, plane), run)) in self
             .pending
             .iter_mut()
             .zip(&self.planes)
             .zip(&mut self.runs)
+            .enumerate()
         {
+            let done = run.len();
             cut_blocks(pending, self.block, plane, run);
+            for (i, &block) in run[done..].iter().enumerate() {
+                emit(ChannelBlock {
+                    channel,
+                    frame: Samples((done + i) * self.block),
+                    block,
+                });
+            }
         }
     }
 
@@ -363,11 +382,11 @@ impl<S: Sample> PeakMeter<S> {
 
 impl<S: Sample> Meter for PeakMeter<S> {
     type Input<'a> = Interleaved<'a, S>;
-    type Item = (usize, PeakBlock);
+    type Item = ChannelBlock;
     type Output = PeakBlocks;
 
-    /// Blocks a chunk, extending `out` with each whole block it completes as
-    /// `(channel, block)`, channel by channel.
+    /// Blocks a chunk, extending `out` with each whole block it completes as a
+    /// [`ChannelBlock`], channel by channel.
     ///
     /// Chunks need not align to block boundaries; the remainder is carried.
     ///
@@ -379,7 +398,7 @@ impl<S: Sample> Meter for PeakMeter<S> {
     fn push(
         &mut self,
         chunk: Interleaved<'_, S>,
-        out: &mut impl Extend<(usize, PeakBlock)>,
+        out: &mut impl Extend<ChannelBlock>,
     ) -> Result<()> {
         if chunk.layout() != self.layout {
             return Err(Error::ChunkLayoutMismatch {
@@ -387,16 +406,12 @@ impl<S: Sample> Meter for PeakMeter<S> {
                 config: self.layout,
             });
         }
-        let before: Vec<usize> = self.runs.iter().map(Vec::len).collect();
         for_blocks(chunk.samples(), chunk.channels(), |block| {
             // `for_blocks` cuts whole frames, so the block is always one.
             if let Ok(whole) = Interleaved::new(block, self.layout) {
-                self.step(whole);
+                self.step(whole, &mut |item| out.extend([item]));
             }
         });
-        for (channel, (run, &done)) in self.runs.iter().zip(&before).enumerate() {
-            out.extend(run[done..].iter().map(|&block| (channel, block)));
-        }
         Ok(())
     }
 
@@ -463,7 +478,7 @@ fn cut_blocks(pending: &mut Vec<f32>, block: usize, samples: &[f32], out: &mut V
 ///
 /// [`Error::ZeroBlock`] for a block of zero samples.
 pub fn summarize<S: Sample>(cfg: &PeakConfig, buffer: Interleaved<'_, S>) -> Result<PeakBlocks> {
-    let mut meter = cfg.bind(buffer.layout())?;
+    let mut meter = Measure::<S>::measure(cfg, buffer.layout())?;
     meter.push(buffer, &mut Discard)?;
     Ok(meter.finish())
 }
@@ -911,10 +926,41 @@ mod tests {
         for channel in 0..2 {
             let streamed: Vec<PeakBlock> = items
                 .iter()
-                .filter(|(c, _)| *c == channel)
-                .map(|&(_, block)| block)
+                .filter(|item| item.channel == channel)
+                .map(|item| item.block)
                 .collect();
             assert_eq!(streamed, ch(&batch, channel)[..15], "channel {channel}");
+            let frames: Vec<Samples> = items
+                .iter()
+                .filter(|item| item.channel == channel)
+                .map(|item| item.frame)
+                .collect();
+            let starts: Vec<Samples> = (0..15).map(|i| Samples(i * 16)).collect();
+            assert_eq!(frames, starts, "each block names the frame it starts at");
+        }
+    }
+
+    /// With 3 and 6 channels over 5000 frames (runs that do not divide the
+    /// conversion block), channel `c` holding the constant `c + 1` summarizes to
+    /// blocks of exactly `c + 1` in channel `c`: a run cut off a frame boundary
+    /// moves a sample to another channel and breaks it.
+    #[test]
+    fn an_odd_and_a_wide_layout_keep_every_sample_on_its_channel() {
+        for channels in [3u16, 6] {
+            let layout = ChannelLayout::from(channels);
+            let width = usize::from(channels);
+            let samples: Vec<f32> = (0..5000 * width).map(|i| (i % width + 1) as f32).collect();
+            let blocks = summarize(&mono(100), Interleaved::new(&samples, layout).unwrap());
+            assert_eq!(blocks.blocks_per_channel(), 50);
+            for c in 0..width {
+                let want = (c + 1) as f32;
+                assert!(
+                    ch(&blocks, c)
+                        .iter()
+                        .all(|b| b.min == want && b.max == want && b.rms.0 == want),
+                    "channel {c} of {channels}"
+                );
+            }
         }
     }
 }

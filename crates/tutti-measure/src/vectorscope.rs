@@ -53,7 +53,9 @@ impl VectorscopeConfig {
         Self { decimate }
     }
 
-    /// The meter at the start of a stream.
+    /// The meter at the start of a stream: the infallible core of
+    /// [`Measure::measure`], which `vectorscope_points` calls so its own result
+    /// needs no `Result`.
     fn bind<S: Sample>(&self) -> VectorscopeMeter<S> {
         VectorscopeMeter {
             decimate: self.decimate,

@@ -626,6 +626,16 @@ impl ChromaFold {
     }
 }
 
+/// One analysed frame of a [`ChromaMeter`]: its chroma and where it starts.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ChromaFrame {
+    /// The frame's first sample, in [`Samples`] of the stream.
+    pub frame: Samples,
+    /// The frame's chroma, `0..=1` per pitch class from C; all zero for a frame
+    /// with no pitch.
+    pub bins: [f32; CLASSES],
+}
+
 /// The reading of a [`ChromaMeter`]: the mean of the frames folded and the
 /// tuning in use.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -679,11 +689,17 @@ impl<S: Sample> ChromaMeter<S> {
 
     /// Takes finite samples and folds each frame they complete, calling `each`
     /// with the frame's chroma.
-    fn feed(&mut self, block: &[f32], mut each: impl FnMut(&[f32; CLASSES])) {
+    fn feed(&mut self, block: &[f32], mut each: impl FnMut(ChromaFrame)) {
         let Self {
             fold, cutter, fft, ..
         } = self;
-        cutter.feed(block, |_, samples| each(&fold.fold_frame(samples, fft)));
+        let hop = fold.plan.geometry.hop().get();
+        cutter.feed(block, |index, samples| {
+            each(ChromaFrame {
+                frame: Samples(index * hop),
+                bins: fold.fold_frame(samples, fft),
+            });
+        });
     }
 
     /// The mean of the frames folded so far, per class; all zero before the
@@ -710,7 +726,7 @@ impl<S: Sample> ChromaMeter<S> {
 
 impl<S: Sample> Meter for ChromaMeter<S> {
     type Input<'a> = Mono<'a, S>;
-    type Item = [f32; CLASSES];
+    type Item = ChromaFrame;
     type Output = ChromaSummary;
 
     /// Feeds the next chunk of the buffer, in order, folds each frame it
@@ -720,12 +736,12 @@ impl<S: Sample> Meter for ChromaMeter<S> {
     ///
     /// [`Error::NonFiniteInput`] when the chunk holds a NaN or infinity. The
     /// meter is untouched on error.
-    fn push(&mut self, chunk: Mono<'_, S>, out: &mut impl Extend<[f32; CLASSES]>) -> Result<()> {
+    fn push(&mut self, chunk: Mono<'_, S>, out: &mut impl Extend<ChromaFrame>) -> Result<()> {
         if !all_finite(chunk.samples()) {
             return Err(Error::NonFiniteInput);
         }
         for_blocks(chunk.samples(), 1, |block| {
-            self.feed(block, |frame| out.extend([*frame]));
+            self.feed(block, |frame| out.extend([frame]));
         });
         Ok(())
     }
@@ -808,7 +824,7 @@ pub fn chroma<S: Sample>(
     let mut meter: ChromaMeter = ChromaMeter::new(fixed);
     core::mem::swap(&mut meter.fft, fft);
     let mut data = Vec::with_capacity(frames.get() * CLASSES);
-    meter.feed(&samples, |frame| data.extend_from_slice(frame));
+    meter.feed(&samples, |frame| data.extend_from_slice(&frame.bins));
     core::mem::swap(&mut meter.fft, fft);
     Ok(Chroma {
         grid: Grid::new(data, frames, BinCount(CLASSES))?,
@@ -1016,7 +1032,12 @@ mod tests {
                 meter.push(Mono::new(part), &mut items).unwrap();
             }
             assert_eq!(items.len(), batch.grid().frames().get(), "chunk {chunk}");
-            assert!(items.iter().zip(batch.grid().rows()).all(|(a, b)| a == b));
+            assert!(
+                items
+                    .iter()
+                    .zip(batch.grid().rows())
+                    .all(|(a, b)| a.bins == b)
+            );
             assert_eq!(meter.mean(), batch.mean(), "chunk {chunk}");
             assert_eq!(meter.tuning(), batch.tuning(), "chunk {chunk}");
         }
@@ -1210,7 +1231,20 @@ mod tests {
         .unwrap();
         assert_eq!(items.len(), batch.grid().frames().get());
         assert!(items.len() > 3);
-        assert!(items.iter().zip(batch.grid().rows()).all(|(a, b)| a == b));
+        assert!(
+            items
+                .iter()
+                .zip(batch.grid().rows())
+                .all(|(a, b)| a.bins == b)
+        );
+        let hop = batch.framing().hop().get();
+        assert!(
+            items
+                .iter()
+                .enumerate()
+                .all(|(i, f)| f.frame == Samples(i * hop)),
+            "each frame names the sample it starts at"
+        );
         assert_eq!(summary.mean, batch.mean());
         assert_eq!(summary.tuning, batch.tuning());
     }

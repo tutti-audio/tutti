@@ -264,6 +264,16 @@ impl Onset {
     }
 }
 
+/// One frame of an onset detection curve: the detection function after the
+/// config's sensitivity, at the frame's first sample.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Novelty {
+    /// The frame's first sample, in [`Samples`] of the stream.
+    pub frame: Samples,
+    /// The novelty at the frame, in the detection function's own scale.
+    pub value: f32,
+}
+
 /// How far after the start of its frame the onset a spectral-flux peak marks
 /// sits: `3 * window / 4 - hop / 2`.
 ///
@@ -299,7 +309,7 @@ pub struct OnsetMeter<S: Sample = f32> {
     spectrum: Vec<Complex32>,
     /// Novelty per frame, in analysis order. Thresholding is global, so peaks
     /// can only be picked once the run is complete.
-    novelty: Vec<(Samples, f32)>,
+    novelty: Vec<Novelty>,
     sample: PhantomData<fn(S)>,
 }
 
@@ -329,7 +339,7 @@ impl<S: Sample> OnsetMeter<S> {
 
     /// Takes samples and steps each frame they complete, calling `each` with
     /// the frame's position and novelty.
-    fn feed(&mut self, block: &[f32], mut each: impl FnMut((Samples, f32))) {
+    fn feed(&mut self, block: &[f32], mut each: impl FnMut(Novelty)) {
         let Self {
             plan,
             cutter,
@@ -368,7 +378,10 @@ impl<S: Sample> OnsetMeter<S> {
                 }
             };
             let position = Samples(index * plan.geometry.hop().get());
-            let item = (position, value * plan.sensitivity.get());
+            let item = Novelty {
+                frame: position,
+                value: value * plan.sensitivity.get(),
+            };
             novelty.push(item);
             each(item);
         });
@@ -382,7 +395,7 @@ impl<S: Sample> OnsetMeter<S> {
     /// [`DetectionFunction`] and is only comparable within one run.
     #[inline]
     #[must_use]
-    pub fn novelty(&self) -> &[(Samples, f32)] {
+    pub fn novelty(&self) -> &[Novelty] {
         &self.novelty
     }
 
@@ -396,12 +409,12 @@ impl<S: Sample> OnsetMeter<S> {
 
 impl<S: Sample> Meter for OnsetMeter<S> {
     type Input<'a> = Mono<'a, S>;
-    type Item = (Samples, f32);
+    type Item = Novelty;
     type Output = Vec<Onset>;
 
     /// Feeds the next chunk of the buffer, in order, and extends `out` with the
     /// `(position, novelty)` of each frame the chunk completes.
-    fn push(&mut self, chunk: Mono<'_, S>, out: &mut impl Extend<(Samples, f32)>) -> Result<()> {
+    fn push(&mut self, chunk: Mono<'_, S>, out: &mut impl Extend<Novelty>) -> Result<()> {
         for_blocks(chunk.samples(), 1, |block| {
             self.feed(block, |item| out.extend([item]));
         });
@@ -479,7 +492,7 @@ pub fn suppress_close_onsets(onsets: &mut Vec<Onset>, min_gap: Samples) {
 /// Strict local maxima above an adaptive `mean + k·σ` threshold.
 ///
 /// Endpoints are never reported: a maximum needs both neighbours.
-fn pick_peaks(cfg: &OnsetPlan, novelty: &[(Samples, f32)]) -> Vec<Onset> {
+fn pick_peaks(cfg: &OnsetPlan, novelty: &[Novelty]) -> Vec<Onset> {
     if novelty.len() < 3 {
         return Vec::new();
     }
@@ -487,7 +500,8 @@ fn pick_peaks(cfg: &OnsetPlan, novelty: &[(Samples, f32)]) -> Vec<Onset> {
     let len = novelty.len() as f32;
     let (sum, sum_sq, max) = novelty
         .iter()
-        .fold((0.0f32, 0.0f32, 0.0f32), |(s, sq, mx), &(_, v)| {
+        .fold((0.0f32, 0.0f32, 0.0f32), |(s, sq, mx), n| {
+            let v = n.value;
             (s + v, sq + v * v, mx.max(v))
         });
     let mean = sum / len;
@@ -496,9 +510,12 @@ fn pick_peaks(cfg: &OnsetPlan, novelty: &[(Samples, f32)]) -> Vec<Onset> {
 
     (1..novelty.len() - 1)
         .filter_map(|i| {
-            let (position, value) = novelty[i];
-            let rising = value > novelty[i - 1].1;
-            let falling = value > novelty[i + 1].1;
+            let Novelty {
+                frame: position,
+                value,
+            } = novelty[i];
+            let rising = value > novelty[i - 1].value;
+            let falling = value > novelty[i + 1].value;
             (rising && falling && value > threshold).then(|| Onset {
                 position,
                 strength: Amplitude(if max > 0.0 {
@@ -566,15 +583,15 @@ mod tests {
             meter
         };
         let (one, three) = (run(1.0), run(3.0));
-        for (i, &(position, _)) in one.novelty().iter().enumerate() {
-            assert_eq!(position, Samples(i * 512));
+        for (i, n) in one.novelty().iter().enumerate() {
+            assert_eq!(n.frame, Samples(i * 512));
         }
         for (a, b) in one.novelty().iter().zip(three.novelty()) {
-            assert!((b.1 - 3.0 * a.1).abs() <= 1e-4 * a.1.max(1.0));
+            assert!((b.value - 3.0 * a.value).abs() <= 1e-4 * a.value.max(1.0));
         }
         // Frames holding the click (samples 8820..8870) carry its energy; a
         // frame wholly before it carries none.
-        let at = |s: usize| one.novelty()[s / 512].1;
+        let at = |s: usize| one.novelty()[s / 512].value;
         assert!(at(8820) > 1.0 && at(2048) == 0.0);
 
         let mut cleared = one;
@@ -636,7 +653,10 @@ mod tests {
         int.push(Mono::new(&ints), &mut Vec::new()).unwrap();
         assert_eq!(float.novelty().len(), int.novelty().len());
         for (a, b) in float.novelty().iter().zip(int.novelty()) {
-            assert!((a.1 - b.1).abs() <= 1e-2 * a.1.max(1.0), "{a:?} {b:?}");
+            assert!(
+                (a.value - b.value).abs() <= 1e-2 * a.value.max(1.0),
+                "{a:?} {b:?}"
+            );
         }
     }
 

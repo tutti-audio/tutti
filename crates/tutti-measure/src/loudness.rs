@@ -46,9 +46,9 @@ use core::marker::PhantomData;
 
 use ebur128::{Channel, EbuR128, Mode};
 use tutti_buffers::{Interleaved, Sample};
-use tutti_types::{ChannelLayout, ChannelTopology, Db, Direction, SampleRate};
+use tutti_types::{ChannelLayout, ChannelTopology, Db, Direction, SampleRate, Samples};
 
-use crate::convert::{BLOCK, all_finite, for_blocks};
+use crate::convert::{BLOCK, Discard, all_finite, for_blocks, run_len};
 use crate::{Error, Measure, Meter, Result};
 
 /// What a loudness meter measures: the channel topology of the frames fed to
@@ -372,8 +372,7 @@ impl<S: Sample> Meter for TruePeakMeter<S> {
                 config: self.layout,
             });
         }
-        let channels = chunk.channels().max(1);
-        let run = (self.scratch.len() / channels).max(1) * channels;
+        let run = run_len(self.scratch.len(), chunk.channels());
         for part in chunk.samples().chunks(run) {
             let widened = &mut self.scratch[..part.len()];
             for (slot, s) in widened.iter_mut().zip(part) {
@@ -406,7 +405,7 @@ pub fn measure_true_peak<S: Sample>(
     rate: impl Into<SampleRate>,
 ) -> Result<Db> {
     let mut meter = TruePeakConfig.measure((rate.into(), buffer.layout()))?;
-    meter.push(buffer, &mut ())?;
+    meter.push(buffer, &mut Discard)?;
     Ok(meter.finish())
 }
 
@@ -517,6 +516,9 @@ pub struct WindowedReading {
     /// The largest true peak since the meter was built or reset, in dBTP.
     /// [`Db::FLOOR`] for silence.
     pub true_peak: Db,
+    /// The frame the reading ends at: the frames fed since the meter was
+    /// built or reset, in [`Samples`] of the stream.
+    pub frame: Samples,
 }
 
 impl WindowedReading {
@@ -592,6 +594,7 @@ impl<S: Sample> WindowedMeter<S> {
                 self.meter.loudness_shortterm().ok(),
             ),
             true_peak: true_peak_db(peak),
+            frame: Samples(self.frames as usize),
         }
     }
 }
@@ -685,7 +688,7 @@ pub fn measure_loudness<S: Sample>(
     rate: impl Into<SampleRate>,
 ) -> Result<Loudness> {
     let mut meter = cfg.measure(rate.into())?;
-    meter.push(buffer, &mut ())?;
+    meter.push(buffer, &mut Discard)?;
     Ok(meter.finish())
 }
 
@@ -1658,6 +1661,65 @@ mod tests {
         .unwrap();
         assert_eq!(items.last(), Some(&reading));
         assert_eq!(last, reading);
+        assert_eq!(
+            reading.frame,
+            Samples(buf.len() / 2),
+            "the reading names its end frame"
+        );
         assert!(reading.momentary.get() > -30.0, "{reading:?}");
+    }
+
+    /// A 997 Hz tone in one channel of a 5.1 stream over 5000 frames, which no
+    /// conversion block divides: in a surround channel it reads the 1.41 weight
+    /// (+1.49 dB) above the same tone in the left channel, and in the LFE it
+    /// reads nothing. A sample moved to another channel by a run cut off a frame
+    /// boundary breaks all three.
+    #[test]
+    fn a_wide_layout_keeps_every_sample_on_its_channel() {
+        let c = Rated(
+            LoudnessConfig::new(Bed::Surround51.topology()),
+            SampleRate::SR_48K,
+        );
+        let frames = 48_000;
+        let tone = |at: usize| {
+            let mut buf = vec![0.0f32; frames * 6];
+            for (n, frame) in buf.as_chunks_mut::<6>().0.iter_mut().enumerate() {
+                frame[at] = 0.3 * (std::f32::consts::TAU * 997.0 * n as f32 / 48_000.0).sin();
+            }
+            measure_loudness(&c, Interleaved::new(&buf, Bed::Surround51.width()).unwrap())
+                .unwrap()
+                .lufs
+                .get()
+        };
+        let (left, surround, lfe) = (tone(0), tone(4), tone(3));
+        assert!(
+            (surround - left - 10.0 * 1.41f32.log10()).abs() < 0.05,
+            "{left} {surround}"
+        );
+        assert_eq!(lfe, -70.0, "the LFE adds no loudness");
+    }
+
+    /// The true peak of a sine in one channel of 3 and of 6 equals the mono
+    /// true peak of that sine, to the bit: each channel's samples stay in its
+    /// own stream whatever the run length.
+    #[test]
+    fn the_true_peak_of_a_channel_does_not_depend_on_the_layout_width() {
+        let rate = SampleRate::SR_48K;
+        let sine: Vec<f32> = (0..5000)
+            .map(|n| 0.4 * (std::f32::consts::TAU * 3_001.0 * n as f32 / 48_000.0).sin())
+            .collect();
+        let mono =
+            measure_true_peak(Interleaved::new(&sine, ChannelLayout::MONO).unwrap(), rate).unwrap();
+        for width in [3u16, 6] {
+            let layout = ChannelLayout::from(width);
+            let w = usize::from(width);
+            let mut buf = vec![0.0f32; 5000 * w];
+            for (frame, &v) in buf.chunks_exact_mut(w).zip(&sine) {
+                frame[w - 1] = v;
+            }
+            let peak = measure_true_peak(Interleaved::new(&buf, layout).unwrap(), rate).unwrap();
+            assert_eq!(peak, mono, "{width} channels");
+        }
+        assert!((mono.get() - 20.0 * 0.4f32.log10()).abs() < 0.3, "{mono:?}");
     }
 }

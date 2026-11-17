@@ -88,13 +88,13 @@
 //! | Analysis | Config | One-shot | Meter | Context | Input | Item | Output | Audio thread |
 //! |---|---|---|---|---|---|---|---|---|
 //! | silence | [`SilenceConfig`] | [`strip_silence`] | [`SilenceMeter`] | `SampleRate` | `Mono` | `()` | `Vec<Region>` | no: grows per region |
-//! | onsets | [`OnsetConfig`] | [`detect_onsets`] | [`OnsetMeter`] | `SampleRate` | `Mono` | `(Samples, f32)`, a frame's novelty | `Vec<Onset>` | no: grows per frame |
+//! | onsets | [`OnsetConfig`] | [`detect_onsets`] | [`OnsetMeter`] | `SampleRate` | `Mono` | [`Novelty`], a frame's novelty | `Vec<Onset>` | no: grows per frame |
 //! | spectrum | [`SpectrumConfig`] | none | [`SpectrumMeter`] | `SampleRate` | `Mono` | `()` per analysed frame | `Vec<Db>`, the levels | no: a transform per frame, but no allocation |
-//! | chroma | [`ChromaConfig`] | [`chroma()`] | [`ChromaMeter`] | `SampleRate` | `Mono` | `[f32; 12]`, a frame's chroma | [`ChromaSummary`] | no: a transform per frame, no allocation |
+//! | chroma | [`ChromaConfig`] | [`chroma()`] | [`ChromaMeter`] | `SampleRate` | `Mono` | [`ChromaFrame`], a frame's chroma | [`ChromaSummary`] | no: a transform per frame, no allocation |
 //! | loudness | [`LoudnessConfig`] | [`measure_loudness`] | [`LoudnessMeter`] | `SampleRate` | `Interleaved` | `()` | [`Loudness`] | no: grows with the run |
 //! | windowed loudness | [`WindowedLoudnessConfig`] | none | [`WindowedMeter`] | `SampleRate` | `Interleaved` | [`WindowedReading`] per push | the last [`WindowedReading`] | no: reads 3 s per push, no allocation |
-//! | true peak | [`TruePeakConfig`] | [`measure_true_peak`] | [`TruePeakMeter`] | `(SampleRate, ChannelLayout)` | `Interleaved` | `()` | dBTP as `Db` | no: grows to the longest chunk |
-//! | waveform blocks | [`PeakConfig`] | [`summarize`] | [`PeakMeter`] | `ChannelLayout` | `Interleaved` | `(usize, PeakBlock)`, a whole block of a channel | [`PeakBlocks`] | no: grows per block |
+//! | true peak | [`TruePeakConfig`] | [`measure_true_peak`] | [`TruePeakMeter`] | `(SampleRate, ChannelLayout)` | `Interleaved` | `()` | dBTP as `Db` | no: the meter's own buffers grow, and a push converts on a fixed scratch |
+//! | waveform blocks | [`PeakConfig`] | [`summarize`] | [`PeakMeter`] | `ChannelLayout` | `Interleaved` | [`ChannelBlock`], a whole block of a channel | [`PeakBlocks`] | no: grows per block |
 //! | vectorscope | [`VectorscopeConfig`] | [`vectorscope_points`] | [`VectorscopeMeter`] | `()` | `StereoPlanes` | [`ScopePoint`] | `()` | no: grows the caller's collection |
 //!
 //! [`StereoSmoother`] (from [`Ballistics`]) is not a [`Meter`]: it is a display
@@ -340,7 +340,7 @@ pub use chord::{
     SharpnessError, detect_chords,
 };
 pub use chroma::{
-    Chroma, ChromaConfig, ChromaMeter, ChromaSummary, FrequencyBand, HarmonicDecay,
+    Chroma, ChromaConfig, ChromaFrame, ChromaMeter, ChromaSummary, FrequencyBand, HarmonicDecay,
     HarmonicDecayError, Harmonics, HarmonicsError, PeakFloor, PeakFloorError, Tuning, TuningOffset,
     TuningOffsetError, chroma,
 };
@@ -362,11 +362,14 @@ pub use notes::{
     PitchSplitError, VelocityRange, frame_levels, notes_from_track, transcribe,
 };
 pub use onset::{
-    DetectionFunction, Onset, OnsetConfig, OnsetGap, OnsetGapError, OnsetMeter, OnsetSensitivity,
-    OnsetSensitivityError, OnsetThreshold, OnsetThresholdError, complex_domain_deviation,
-    detect_onsets, high_frequency_content, spectral_energy, spectral_flux, suppress_close_onsets,
+    DetectionFunction, Novelty, Onset, OnsetConfig, OnsetGap, OnsetGapError, OnsetMeter,
+    OnsetSensitivity, OnsetSensitivityError, OnsetThreshold, OnsetThresholdError,
+    complex_domain_deviation, detect_onsets, high_frequency_content, spectral_energy,
+    spectral_flux, suppress_close_onsets,
 };
-pub use peaks::{PeakBlock, PeakBlocks, PeakConfig, PeakMeter, summarize, summarize_block};
+pub use peaks::{
+    ChannelBlock, PeakBlock, PeakBlocks, PeakConfig, PeakMeter, summarize, summarize_block,
+};
 pub use silence::{
     FiniteLevel, FiniteLevelError, Region, SilenceConfig, SilenceMeter, strip_silence,
 };

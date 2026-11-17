@@ -116,7 +116,8 @@ impl SilenceConfig {
         self
     }
 
-    /// The meter at `rate`; no setting here depends on it, so it cannot fail.
+    /// The meter at `rate`: the infallible core of [`Measure::measure`], which
+    /// `strip_silence` calls so its own result needs no `Result`.
     fn bind<S: Sample>(&self, rate: SampleRate) -> SilenceMeter<S> {
         SilenceMeter {
             floor: self.threshold.to_amplitude().get(),
@@ -229,9 +230,8 @@ pub fn strip_silence<S: Sample>(
     samples: Mono<'_, S>,
     rate: impl Into<SampleRate>,
 ) -> Vec<Region> {
-    let mut meter = cfg.bind(rate.into());
-    // A silence meter takes any chunk, so the push cannot fail.
-    let _ = meter.push(samples, &mut ());
+    let mut meter = cfg.bind::<S>(rate.into());
+    for_blocks(samples.samples(), 1, |block| meter.scan(block));
     meter.finish()
 }
 
