@@ -19,19 +19,16 @@ use tutti_plugin_types::{
     BlockStatus, BridgeResult, ChannelTable, ChordChanges, ExpressiveContext, Features,
     MAX_BLOCK_CHANNELS, MIDI_STACK_CAPACITY, MidiEventVec, NoteExpressionChanges,
     NoteExpressionIntChanges, NoteExpressionTextChanges, ParameterChanges, PluginAudio,
-    PluginError, PluginResult, ProcessContext, ProcessOutput, SampleFormat, SampleRate, Samples,
-    ScaleChanges, TransportChange, TransportInfo, WireMidi, sanitize, silence,
+    PluginError, PluginResult, ProcessContext, ProcessOutput, SampleFormat, Samples, ScaleChanges,
+    TransportChange, TransportInfo, WireMidi, sanitize, silence,
 };
 use tutti_ump::Ump;
 
-/// Sample-rate + negotiated sample format; travel together.
+/// The negotiated sample format.
 ///
-/// Both are fixed at plugin load and change only on an explicit host request,
-/// so the audio path reads them without synchronisation.
+/// Fixed at plugin load, so the audio path reads it without synchronisation.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Clock {
-    /// Frames per second, as the plugin was configured.
-    pub sample_rate: SampleRate,
     /// The format negotiated at load — `Float64` only when the host asked for it
     /// *and* the plugin advertised `F64_AUDIO`. Selects the scratch variant.
     pub format: SampleFormat,
@@ -40,7 +37,6 @@ pub(crate) struct Clock {
 impl Default for Clock {
     fn default() -> Self {
         Self {
-            sample_rate: SampleRate::SR_44K1,
             format: SampleFormat::Float32,
         }
     }

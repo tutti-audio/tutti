@@ -465,8 +465,8 @@ impl Vst2Processor {
                 };
                 let frames = io.frames().0;
                 let (input, mut output) = io.split();
-                let inputs = ChannelTable::of_planes(input);
-                let mut outputs = ChannelTable::of_planes_mut(&mut output);
+                let inputs = ChannelTable::of_planes(input)?;
+                let mut outputs = ChannelTable::of_planes_mut(&mut output)?;
                 self.process_f32(&inputs, &mut outputs, frames, &host_ctx)
             }
             PluginAudio::F64(io) => {
@@ -478,8 +478,8 @@ impl Vst2Processor {
                 };
                 let frames = io.frames().0;
                 let (input, mut output) = io.split();
-                let inputs = ChannelTable::of_planes(input);
-                let mut outputs = ChannelTable::of_planes_mut(&mut output);
+                let inputs = ChannelTable::of_planes(input)?;
+                let mut outputs = ChannelTable::of_planes_mut(&mut output)?;
                 self.process_f64(&inputs, &mut outputs, frames, &host_ctx)
             }
         };

@@ -60,27 +60,42 @@ impl<'a, T: Sample> ChannelTable<&'a [T]> {
     /// The channels of `planes`, read-only: the table a format's channel
     /// pointers are built from.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// When `planes` has more than [`MAX_BLOCK_CHANNELS`] channels.
-    #[must_use]
-    pub fn of_planes(planes: Planes<'a, T>) -> Self {
-        planes.iter().map(|plane| plane.samples()).collect()
+    /// [`PluginTooWide`] for an `"input"` past [`MAX_BLOCK_CHANNELS`] channels.
+    /// A plugin's width is checked at activation, so a block of an activated
+    /// plugin is never refused here.
+    pub fn of_planes(planes: Planes<'a, T>) -> Result<Self, PluginTooWide> {
+        Self::fitting(planes.channels(), "input")?;
+        Ok(planes.iter().map(|plane| plane.samples()).collect())
     }
 }
 
 impl<'a, T: Sample> ChannelTable<&'a mut [T]> {
     /// The channels of `planes`, writable, for as long as `planes` is borrowed.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// When `planes` has more than [`MAX_BLOCK_CHANNELS`] channels.
-    #[must_use]
-    pub fn of_planes_mut(planes: &'a mut PlanesMut<'_, '_, T>) -> Self {
-        planes
+    /// [`PluginTooWide`] for an `"output"` past [`MAX_BLOCK_CHANNELS`] channels,
+    /// which activation's width check keeps an activated plugin's block from.
+    pub fn of_planes_mut(planes: &'a mut PlanesMut<'_, '_, T>) -> Result<Self, PluginTooWide> {
+        Self::fitting(planes.channels(), "output")?;
+        Ok(planes
             .iter_mut()
             .map(tutti_buffers::MonoMut::into_samples_mut)
-            .collect()
+            .collect())
+    }
+}
+
+impl<S> ChannelTable<S> {
+    fn fitting(channels: usize, direction: &'static str) -> Result<(), PluginTooWide> {
+        if channels > MAX_BLOCK_CHANNELS {
+            return Err(PluginTooWide {
+                direction,
+                channels,
+            });
+        }
+        Ok(())
     }
 }
 
@@ -210,5 +225,20 @@ mod tests {
         let mut bad = [f64::NAN];
         assert!(sanitize(&mut bad));
         assert_eq!(bad, [0.0]);
+    }
+
+    #[test]
+    fn a_table_of_planes_past_the_maximum_is_a_typed_refusal_not_a_panic() {
+        let data = [0.0_f32; 2];
+        let slices = vec![&data[..]; MAX_BLOCK_CHANNELS + 1];
+        let planes = tutti_buffers::Planes::new(&slices).expect("equal planes");
+        let refused = ChannelTable::of_planes(planes).expect_err("17 channels");
+        assert_eq!(
+            refused,
+            crate::PluginTooWide {
+                direction: "input",
+                channels: MAX_BLOCK_CHANNELS + 1
+            }
+        );
     }
 }

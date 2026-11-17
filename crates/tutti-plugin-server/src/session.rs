@@ -380,12 +380,9 @@ impl Session {
             M::SetSampleRate { rate } => {
                 // A rate no clock can run at is refused by the wire itself: a
                 // `SampleRate` does not decode from one.
-                // The clock follows the rate the host runs at, so a plugin
-                // that takes a later rate is on the right one. A refusal
-                // leaves it silent (`handle_process` publishes nothing) and
+                // A refusal leaves it silent (`handle_process` publishes nothing) and
                 // the host is told, because a rolled-back plugin would
                 // otherwise render at its old rate against the host's blocks.
-                self.clock.sample_rate = rate;
                 let error = match self.plugin.as_mut() {
                     Some(plugin) => match plugin.plugin_mut().set_sample_rate(main, rate) {
                         Ok(()) => None,
@@ -689,10 +686,7 @@ impl Session {
         let descriptor = plugin.plugin().descriptor().clone();
         let loaded = plugin.plugin().loaded().clone();
         let negotiated = plugin.plugin().negotiated(prefer_f64);
-        self.clock = Clock {
-            sample_rate,
-            format: negotiated,
-        };
+        self.clock = Clock { format: negotiated };
         self.max_block = block_size;
         // The plugin's own parameter output is held in fixed storage
         // reserved by the render thread before its first block: a queue per
@@ -1245,7 +1239,6 @@ mod tests {
     #[test]
     fn new_session_defaults() {
         let s = Rig::new();
-        assert_eq!(s.clock.sample_rate, SampleRate::SR_44K1);
         assert_eq!(s.clock.format, SampleFormat::Float32);
         assert!(s.plugin.is_none());
         assert!(!s.side().has_slab());
@@ -1343,7 +1336,7 @@ mod tests {
     }
 
     #[test]
-    fn set_sample_rate_no_plugin_updates_clock() {
+    fn set_sample_rate_with_no_plugin_is_answered_without_error() {
         let mut s = Rig::new();
         let r = s
             .handle(
@@ -1358,7 +1351,6 @@ mod tests {
             r,
             BridgeMessage::SampleRateSet { rate, error: None } if rate.get() == 96000.0
         ));
-        assert_eq!(s.clock.sample_rate, SampleRate::SR_96K);
     }
 
     /// A `LoadState` with no plugin loaded answers, and answers with a refusal.
@@ -1598,7 +1590,7 @@ mod tests {
     }
 
     /// **A refused rate is answered, silent, and retried by the next rate.**
-    /// The clock follows the host's rate throughout. The plugin here drops
+    /// The plugin here drops
     /// its 64-bit ports, so the refusal leaves it deactivated; it publishes
     /// nothing while refused (the host reads silence), refuses again at the
     /// same rate, and a later rate it can take revives it, with audio at the
@@ -1631,7 +1623,6 @@ mod tests {
             matches!(accepted, BridgeMessage::SampleRateSet { error: None, .. }),
             "{accepted:?}"
         );
-        assert_eq!(s.clock.sample_rate, SampleRate::SR_48K);
         assert!(
             s.drain_async_events(main_thread()).is_empty(),
             "nothing changed"
@@ -1649,11 +1640,6 @@ mod tests {
                     if rate.get() == 96000.0 && !e.is_empty()
             ),
             "the host is told, with a reason: {refused:?}"
-        );
-        assert_eq!(
-            s.clock.sample_rate,
-            SampleRate::SR_96K,
-            "the clock follows the host"
         );
         assert!(s.rate_refused.is_some());
         assert!(
@@ -1682,7 +1668,6 @@ mod tests {
             "{revived:?}"
         );
         assert!(s.rate_refused.is_none());
-        assert_eq!(s.clock.sample_rate, SampleRate::SR_88K2);
         process_block(&mut s, &mut shm, 4, 0.5);
         assert!(shm.has_output(4), "a revived plugin publishes again");
         let mut out = vec![0.0f64; F64_FRAMES];
@@ -2587,7 +2572,6 @@ mod tests {
             r,
             BridgeMessage::SampleRateSet { error: None, .. }
         ));
-        assert_eq!(s.clock.sample_rate, SampleRate::SR_96K);
     }
 
     #[test]

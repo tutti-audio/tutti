@@ -782,15 +782,15 @@ impl AuProcessor {
             PluginAudio::F32(io) => {
                 let frames = io.frames().0 as u32;
                 let (input, mut output) = io.split();
-                let inputs = ChannelTable::of_planes(input);
-                let mut outputs = ChannelTable::of_planes_mut(&mut output);
+                let inputs = ChannelTable::of_planes(input)?;
+                let mut outputs = ChannelTable::of_planes_mut(&mut output)?;
                 self.render_f32(&inputs, &mut outputs, frames)
             }
             PluginAudio::F64(io) => {
                 let frames = io.frames().0 as u32;
                 let (input, mut output) = io.split();
-                let inputs = ChannelTable::of_planes(input);
-                let mut outputs = ChannelTable::of_planes_mut(&mut output);
+                let inputs = ChannelTable::of_planes(input)?;
+                let mut outputs = ChannelTable::of_planes_mut(&mut output)?;
                 self.render_f64(&inputs, &mut outputs, frames)
             }
         };

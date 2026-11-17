@@ -509,8 +509,15 @@ impl<T: Vst3Sample> Vst3Processor<T> {
         // a sink. Channels beyond the scratch's flat width are dropped.
         let frames = buffer.frames();
         let (input, mut output) = buffer.split();
-        let input_table = ChannelTable::of_planes(input);
-        let mut output_table = ChannelTable::of_planes_mut(&mut output);
+        let (Ok(input_table), Ok(mut output_table)) = (
+            ChannelTable::of_planes(input),
+            ChannelTable::of_planes_mut(&mut output),
+        ) else {
+            buffer.output().silence();
+            return Err(ProcessFailed {
+                error: tutti_vst3_ffi::Vst3Error::InvalidArgument,
+            });
+        };
         let bound = T::bind_inputs(&mut self.audio.input.buses, &input_table).and_then(|inputs| {
             T::bind_outputs(&mut self.audio.output.buses, &mut output_table)
                 .map(|outputs| (inputs, outputs))

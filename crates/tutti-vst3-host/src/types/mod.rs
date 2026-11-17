@@ -241,7 +241,7 @@ impl PluginInfo {
 /// and the constants below must agree with the buffers the FFI crate binds for
 /// each; `Float` is sealed to those two.
 pub trait Vst3Sample: tutti_buffers::Float {
-    /// The format of this sample type.
+    /// The format of this sample type: not named `FORMAT`, which `Float` already uses.
     const PLUGIN_FORMAT: SampleFormat;
     /// The width of this sample type.
     const WIDTH: SampleWidth;

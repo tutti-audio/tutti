@@ -158,6 +158,28 @@ fn a_block_with_no_output_channel_reaches_the_processor_with_its_frames() {
     assert_eq!(rig.plugin.calls().last(), Some(&Call::Process(96)));
 }
 
+/// **`process_block` refuses channels of unequal length with `PluginError::Block`
+/// and does not enter the Processor.**
+#[test]
+fn process_block_refuses_ragged_channels_without_entering_the_processor() {
+    let mut rig = Rig::new();
+    rig.op(HostOp::Activate(prepare(48_000.0)));
+    let ctx = ProcessContext::new();
+    let mut out = ProcessOutput::default();
+    let (mut left, mut right) = ([0.0f32; 64], [0.0f32; 32]);
+    let mut outputs = [&mut left[..], &mut right[..]];
+    let processor = rig.lifecycle.processor().expect("held");
+    let refused =
+        crate::process_block::<_, f32>(processor, &[], &mut outputs, Samples(64), &ctx, &mut out);
+    assert!(matches!(refused, Err(PluginError::Block(_))), "{refused:?}");
+    assert!(
+        !rig.plugin
+            .calls()
+            .iter()
+            .any(|c| matches!(c, Call::Process(_)))
+    );
+}
+
 /// **A refused activation leaves `Refused` with the plugin intact and no half
 /// pair; a later rate revives it.** The host is told once.
 #[test]

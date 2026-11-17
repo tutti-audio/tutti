@@ -124,4 +124,24 @@ mod tests {
             PluginAudio::new(Samples(96), &[], &mut none).expect("no channels fit any block");
         assert_eq!(audio.frames(), Samples(96));
     }
+
+    /// Channels of unequal length are refused, never trimmed.
+    #[test]
+    fn channels_of_unequal_length_are_refused() {
+        let (long, short) = ([0.0f32; 4], [0.0f32; 3]);
+        let inputs = [&long[..], &short[..]];
+        let (mut l, mut r) = ([0.0f32; 4], [0.0f32; 4]);
+        let mut outputs = [&mut l[..], &mut r[..]];
+        assert!(PluginAudio::new(Samples(4), &inputs, &mut outputs).is_err());
+    }
+
+    /// A direction that does not hold the block's frames is refused.
+    #[test]
+    fn a_direction_that_does_not_hold_the_frames_is_refused() {
+        let input = [0.0f32; 4];
+        let inputs = [&input[..]];
+        let mut l = [0.0f32; 4];
+        let mut outputs = [&mut l[..]];
+        assert!(PluginAudio::new(Samples(8), &inputs, &mut outputs).is_err());
+    }
 }

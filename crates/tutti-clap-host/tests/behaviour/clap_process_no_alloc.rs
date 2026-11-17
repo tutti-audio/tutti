@@ -656,7 +656,7 @@ fn oversized_block_rejection_does_not_allocate() {
     {
         let outs: &mut [&mut [f32]] = &mut [&mut out_l[..], &mut out_r[..]];
         let ins: &[&[f32]] = &[&in_l[..], &in_r[..]];
-        let mut buffer = PluginAudio::new(tutti_plugin_types::Samples(ins[0].len()), ins, outs)
+        let mut buffer = PluginAudio::new(tutti_plugin_types::Samples(OVERSIZE), ins, outs)
             .expect("equal channels");
         let err = inst
             .process(&mut buffer, &ctx)

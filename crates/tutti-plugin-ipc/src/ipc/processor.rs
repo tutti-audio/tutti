@@ -70,8 +70,8 @@ impl Processor for IpcProcessor {
         };
         let frames = buffer.frames().0;
         let (input, mut output) = buffer.split();
-        let inputs = ChannelTable::of_planes(input);
-        let mut outputs = ChannelTable::of_planes_mut(&mut output);
+        let inputs = ChannelTable::of_planes(input)?;
+        let mut outputs = ChannelTable::of_planes_mut(&mut output)?;
         let mut piece = Piece {
             ctx: io.ctx,
             out: &mut *io.out,
