@@ -113,7 +113,7 @@ fn serve_lane(
     stream: &interprocess::local_socket::Stream,
     mut slab: Option<SlabWriter>,
     log: &Record,
-    reply_delay: Duration,
+    gate: Option<ReplyGate>,
 ) {
     let mut scratch = vec![0.0f32; CHUNK];
     while let Some((bytes, message)) = read_frame(stream) {
@@ -134,9 +134,13 @@ fn serve_lane(
                 log.lock().unwrap().push(bytes);
                 slab.as_mut().map(|slab| {
                     let reply = answer(slab, &mut scratch, data);
-                    // The audio is published; the reply follows `reply_delay`
-                    // later, as a server the scheduler has not run yet.
-                    std::thread::sleep(reply_delay);
+                    // The audio is published; the reply is held until the
+                    // test releases it, as a server the scheduler has not run
+                    // yet.
+                    if let Some(gate) = &gate {
+                        let _ = gate.published.send(());
+                        let _ = gate.release.recv_timeout(Duration::from_secs(60));
+                    }
                     reply
                 })
             }
@@ -161,12 +165,19 @@ fn serve_lane(
 }
 
 pub(super) fn rig(label: &str) -> Rig {
-    rig_replying_after(label, Duration::ZERO)
+    rig_gated(label, None)
 }
 
-/// [`rig`] whose server sends each block's reply `reply_delay` after it has
-/// published the block's audio.
-pub(super) fn rig_replying_after(label: &str, reply_delay: Duration) -> Rig {
+/// What holds a mock server's replies: the server signals `published` once a
+/// block's audio is in the slab, then sends the reply only when `release`
+/// gets a message. The test owns the other ends.
+pub(super) struct ReplyGate {
+    pub(super) published: std::sync::mpsc::Sender<()>,
+    pub(super) release: std::sync::mpsc::Receiver<()>,
+}
+
+/// [`rig`] whose server holds each block's reply behind `gate`, if given.
+pub(super) fn rig_gated(label: &str, gate: Option<ReplyGate>) -> Rig {
     use interprocess::local_socket::{ListenerOptions, traits::Listener as _};
     let shm = tutti_fixtures::unique_name(&format!("diff_{label}"));
     let path = unique_socket_path().expect("the OS has a random source");
@@ -205,17 +216,16 @@ pub(super) fn rig_replying_after(label: &str, reply_delay: Duration) -> Rig {
         .name("mock-differential-control".into())
         .spawn({
             let log = Arc::clone(&record);
-            move || serve_lane(&control, None, &log, Duration::ZERO)
+            move || serve_lane(&control, None, &log, None)
         })
         .unwrap();
     let server = std::thread::Builder::new()
         .name("mock-differential-server".into())
         .spawn(move || {
-            serve_lane(&audio, Some(server_slab), &log, reply_delay);
+            serve_lane(&audio, Some(server_slab), &log, gate);
             let _ = std::fs::remove_file(&path);
         })
         .unwrap();
-    std::thread::sleep(Duration::from_millis(50));
     Rig {
         bridge,
         slab,

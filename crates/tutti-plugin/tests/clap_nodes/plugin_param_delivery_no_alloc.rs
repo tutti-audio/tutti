@@ -14,8 +14,6 @@
 
 use tutti_types::MaxBlock;
 
-use std::time::Duration;
-
 use crate::clap_probe::Rig;
 use crate::param_probe::{knobs, load_param_probe};
 use tutti_fixtures::machine_lock;
@@ -57,7 +55,6 @@ fn two_hundred_moving_parameters_do_not_allocate_on_the_audio_thread() {
     let inputs: Vec<&[f32]> = (0..rig.inputs()).map(|_| &silence[..]).collect();
     let mut out = vec![vec![0.0f32; BLOCK]; rig.outputs()];
     let mut outs: Vec<&mut [f32]> = out.iter_mut().map(|c| &mut c[..]).collect();
-    let pace = Duration::from_millis(15);
     let block = |b: usize, rig: &mut Rig, outs: &mut [&mut [f32]]| {
         for (i, k) in knobs.iter().enumerate() {
             // A new value for every parameter every block: sixteenths,
@@ -73,7 +70,8 @@ fn two_hundred_moving_parameters_do_not_allocate_on_the_audio_thread() {
             outs,
         );
         if (b + 1).is_multiple_of(PASSES) {
-            std::thread::sleep(pace);
+            // The server answers the pass's chunk before the next pass.
+            crate::clap_probe::await_answer(&rig.controls);
         }
     };
 

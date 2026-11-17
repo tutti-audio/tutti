@@ -19,8 +19,8 @@ use tutti_types::{Beat, Bpm, Frame, Samples};
 use tutti_ump::MidiChannel;
 
 use super::mock_server::{
-    BEATS_PER_FRAME_120, CHUNK, PARAMS, Record, SR, STEP_BEAT, STEP_FRAME, at, beat_at, new_node,
-    rig, rig_replying_after, tempo,
+    BEATS_PER_FRAME_120, CHUNK, PARAMS, Record, ReplyGate, SR, STEP_BEAT, STEP_FRAME, at, beat_at,
+    new_node, rig, rig_gated, tempo,
 };
 use tutti_midi_protocol::widen_velocity;
 use tutti_ump::{Message, NoteNumber, U7, Voice2};
@@ -51,20 +51,17 @@ fn sent(record: &Record) -> Vec<Sent> {
 /// Waits for the server to have been sent `chunks` chunks: the last one the
 /// schedule completed is on its way asynchronously.
 fn wait_for_chunks(record: &Record, chunks: usize) -> Vec<Sent> {
-    let start = std::time::Instant::now();
-    loop {
-        let all = sent(record);
-        let n = all.iter().filter(|s| matches!(s, Sent::Chunk(_))).count();
-        if n >= chunks {
-            return all;
-        }
-        // A hang guard: the chunks arrive, however slowly.
-        assert!(
-            start.elapsed() < std::time::Duration::from_secs(60),
-            "the server was sent {n} of {chunks} chunks"
-        );
-        std::thread::sleep(std::time::Duration::from_millis(5));
-    }
+    let mut all = Vec::new();
+    // A hang guard: the chunks arrive, however slowly.
+    tutti_fixtures::wait_until(
+        "the server to be sent its chunks",
+        std::time::Duration::from_secs(60),
+        || {
+            all = sent(record);
+            all.iter().filter(|s| matches!(s, Sent::Chunk(_))).count() >= chunks
+        },
+    );
+    all
 }
 
 /// The block at stream frame `frame`, rolling from beat 4 at the map's tempo.
@@ -125,17 +122,30 @@ fn a_click_comes_out_one_declared_latency_later() {
 }
 
 /// **An offline render's MIDI-out is the plugin's, whenever the server's reply
-/// comes.** The mock server publishes a chunk's audio and sends its reply a
-/// quarter of a second later (a scheduler that has not run it: far past the
-/// few block periods a live block waits). A note at frame 10 of the first
-/// chunk is echoed at frame 10 of the second, as it is with a prompt server.
+/// comes.** The mock server publishes a chunk's audio and holds its reply until
+/// the test releases it, once the audio is in the slab (a scheduler that has
+/// not run the server). A note at frame 10 of the first chunk is echoed at
+/// frame 10 of the second, as it is with a prompt server.
 #[test]
 fn a_late_reply_still_carries_its_midi_out_offline() {
     let _machine = machine_lock();
-    let (mut unit, _record, _threads) = new_node(
-        rig_replying_after("late", std::time::Duration::from_millis(250)),
-        tempo(STEP_BEAT),
-    );
+    let (published, audio_in_slab) = std::sync::mpsc::channel();
+    let (release, released) = std::sync::mpsc::channel();
+    let gate = ReplyGate {
+        published,
+        release: released,
+    };
+    // The test's side of the gate: each block's audio is published, then its
+    // reply is released.
+    let releaser = std::thread::spawn(move || {
+        for _ in 0..3 {
+            audio_in_slab
+                .recv_timeout(std::time::Duration::from_secs(60))
+                .expect("the server published a chunk's audio");
+            release.send(()).expect("the server awaits the release");
+        }
+    });
+    let (mut unit, _record, _threads) = new_node(rig_gated("late", Some(gate)), tempo(STEP_BEAT));
     let mut heard = Vec::new();
     for (block, frame) in [(0usize, 0u64), (1, 128), (2, 256)] {
         let events: Vec<Event> = if block == 0 {
@@ -152,6 +162,7 @@ fn a_late_reply_still_carries_its_midi_out_offline() {
                 .collect::<Vec<_>>(),
         );
     }
+    releaser.join().expect("the releaser ran");
     let want: [&[usize]; 3] = [&[], &[10], &[]];
     for (block, (heard, want)) in heard.iter().zip(want).enumerate() {
         assert_eq!(heard, want, "block {block}: the plugin's MIDI-out");
