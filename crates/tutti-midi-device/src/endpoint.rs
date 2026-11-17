@@ -547,7 +547,7 @@ impl Endpoint {
             midi1: true,
             ..Capabilities::default()
         }))
-        .with_static_function_blocks(true);
+        .static_blocks(true);
         endpoint.name = name;
         endpoint.insert_inferred_block();
         endpoint
@@ -573,11 +573,11 @@ impl Endpoint {
     /// The Endpoint a MIDI application presents for a port over `groups` from
     /// Group 1: UMP version 1.1, declaring `supports`, and one static, active,
     /// bidirectional Function Block, number 0, over those Groups. Its identity and names are the
-    /// application's ([`with_identity`](Self::with_identity),
-    /// [`with_name`](Self::with_name)).
+    /// application's ([`identified`](Self::identified),
+    /// [`named`](Self::named)).
     #[must_use]
     pub fn local(supports: Supports, groups: GroupSpan) -> Self {
-        let mut endpoint = Self::new(supports).with_static_function_blocks(true);
+        let mut endpoint = Self::new(supports).static_blocks(true);
         if let (Some(id), Some(first)) = (FunctionBlockId::new(0), FirstGroup::new(0))
             && let Ok(block) =
                 FunctionBlock::builder(id, BlockDirection::Bidirectional, first, groups).build()
@@ -603,28 +603,28 @@ impl Endpoint {
     /// Endpoint whose state an OS reports rather than one that was asked
     /// (§7.1.6.3). Nothing is checked against its capabilities.
     #[must_use]
-    pub const fn with_active(mut self, active: StreamConfig) -> Self {
+    pub const fn in_use(mut self, active: StreamConfig) -> Self {
         self.active = active;
         self
     }
 
     /// The Endpoint with a Device Identity (§7.1.3).
     #[must_use]
-    pub const fn with_identity(mut self, identity: DeviceIdentity) -> Self {
+    pub const fn identified(mut self, identity: DeviceIdentity) -> Self {
         self.identity = Some(identity);
         self
     }
 
     /// The Endpoint with a name (§7.1.4).
     #[must_use]
-    pub const fn with_name(mut self, name: EndpointName) -> Self {
+    pub const fn named(mut self, name: EndpointName) -> Self {
         self.name = Some(name);
         self
     }
 
     /// The Endpoint with a Product Instance Id (§7.1.5).
     #[must_use]
-    pub const fn with_instance_id(mut self, id: ProductInstanceId) -> Self {
+    pub const fn instanced(mut self, id: ProductInstanceId) -> Self {
         self.instance_id = Some(id);
         self
     }
@@ -632,7 +632,7 @@ impl Endpoint {
     /// The Endpoint declaring whether its Function Blocks never change
     /// (§7.1.2).
     #[must_use]
-    pub const fn with_static_function_blocks(mut self, is_static: bool) -> Self {
+    pub const fn static_blocks(mut self, is_static: bool) -> Self {
         self.static_function_blocks = is_static;
         self
     }
@@ -640,7 +640,7 @@ impl Endpoint {
     /// The Endpoint with a Function Block, replacing the one of that number.
     /// The block count it declares is the highest number plus one.
     #[must_use]
-    pub fn with_function_block(mut self, block: FunctionBlock) -> Self {
+    pub fn block(mut self, block: FunctionBlock) -> Self {
         self.insert_block(block);
         self
     }

@@ -17,7 +17,7 @@ fn a_spec_with_function_blocks_is_refused_by_name() {
     .build()
     .unwrap();
     let spec = VirtualSpec::new(tutti_midi_device::EndpointName::new("tutti-blocks").unwrap())
-        .with_function_block(block);
+        .block(block);
     assert!(matches!(
         UmpVirtualSource::open(&spec),
         Err(Error::VirtualBlocksUnsupported)
