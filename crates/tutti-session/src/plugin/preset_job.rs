@@ -6,9 +6,7 @@
 //! main thread's proof): it is posted to the session's main work and runs in
 //! the first `update` on the main thread, for a served plugin as for an
 //! in-process one, as [`Session::restore_state`] does. A plugin that declines
-//! lands [`PresetError::Refused`] and one that is gone [`PresetError::Lost`]. A
-//! job lands in an `update` of its session, and dropping the [`Job`] cancels a
-//! load not yet run.
+//! lands [`PresetError::Refused`] and one that is gone [`PresetError::Lost`].
 
 use std::fmt;
 use std::path::PathBuf;
@@ -16,11 +14,10 @@ use std::path::PathBuf;
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::{MainThreadMarker, PluginRefresh, PresetError, PresetId, PresetSupport};
 
-use super::entry::PluginEntry;
 use super::state_job::NodeLookup;
 use super::{Notice, queue};
 use crate::job::job_kind;
-use crate::{HandleError, Job, ListedPreset, Resource, Session, WaitError, WorkerError};
+use crate::{HandleError, Job, ListedPreset, ResourceId, Session, WaitError, WorkerError};
 
 /// Why [`Session::load_preset`] or [`Session::load_preset_file`] started no job.
 #[derive(Clone, Debug, thiserror::Error)]
@@ -32,7 +29,8 @@ pub enum PresetJobError<K: fmt::Debug> {
     /// The entry's plugin is in no node.
     #[error("the plugin of {0:?} has no node")]
     NoNode(K),
-    /// The preset was listed by another plugin: nothing is sent.
+    /// The preset was listed by another plugin instance than the node's: nothing
+    /// is sent.
     #[error("the preset was listed by another plugin")]
     OtherPlugin,
 }
@@ -48,7 +46,7 @@ impl<K: fmt::Debug> From<NodeLookup<K>> for PresetJobError<K> {
 
 job_kind! {
     /// A preset loaded into a plugin ([`Session::load_preset`],
-    /// [`Session::load_preset_file`]).
+    /// [`Session::load_preset_file`]); the job lands `()` when the plugin took it.
     pub LoadPreset => (), PresetJobFailed
 }
 
@@ -74,7 +72,9 @@ impl<C: crate::Clock> Session<C> {
     /// under `key`, in the first [`update`](Self::update) on the main thread:
     /// the outcome lands there, and the parameter mirror is read again by the
     /// next plugin phase when the plugin took it. **Dropping the [`Job`]
-    /// cancels the load** if the main thread has not started it.
+    /// cancels the load** if the main thread has not started it. The preset
+    /// must be one the node's own plugin listed: after a reload landed and
+    /// before its swap, the new plugin's presets are refused.
     ///
     /// # Errors
     ///
@@ -90,10 +90,7 @@ impl<C: crate::Clock> Session<C> {
     where
         K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
     {
-        if self.pool.handle::<K, PluginEntry>(key)?.id() != preset.plugin {
-            return Err(PresetJobError::OtherPlugin);
-        }
-        self.start_load(key, preset.id().clone(), None)
+        self.start_load(key, preset.id().clone(), Some(preset.plugin), None)
     }
 
     /// Loads the preset file at `path` into the plugin in the node over the
@@ -102,6 +99,7 @@ impl<C: crate::Clock> Session<C> {
     /// [`LoadByPath`](PresetSupport::LoadByPath), CLAP), as
     /// [`load_preset`](Self::load_preset) does. A plugin that lists its
     /// presets takes no file: the job lands [`PresetError::Unsupported`].
+    /// Dropping the [`Job`] cancels a load the main thread has not started.
     ///
     /// # Errors
     ///
@@ -116,7 +114,7 @@ impl<C: crate::Clock> Session<C> {
         K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
     {
         let id = PresetId::Location(path.into());
-        self.start_load(key, id, Some(PresetSupport::LoadByPath))
+        self.start_load(key, id, None, Some(PresetSupport::LoadByPath))
     }
 
     /// The preset the plugin says is loaded, when it will say: not every
@@ -126,7 +124,7 @@ impl<C: crate::Clock> Session<C> {
     where
         K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
     {
-        let (handle, _, _) = self.state_parts(key).ok()?;
+        let (handle, ..) = self.state_parts(key).ok()?;
         handle.current_preset(main)
     }
 
@@ -136,17 +134,28 @@ impl<C: crate::Clock> Session<C> {
         &mut self,
         key: &K,
         id: PresetId,
+        listed_by: Option<ResourceId>,
         needs: Option<PresetSupport>,
     ) -> Result<Job<LoadPreset>, PresetJobError<K>>
     where
         K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
     {
-        let (handle, _, notices) = self.state_parts(key)?;
+        let (handle, _, notices, hosted) = self.state_parts(key)?;
+        // The plugin the load reaches is the node's, which a landed reload
+        // replaces only at its swap: a preset of any other instance is refused.
+        if listed_by.is_some_and(|plugin| plugin != hosted.instance()) {
+            return Err(PresetJobError::OtherPlugin);
+        }
         let (job, ticket) = self.jobs.new_job();
         ticket.waiting_for_main_thread();
         self.work.defer(move |main| {
             // A dropped job loads nothing.
             ticket.complete(|| {
+                // A node removed, or a plugin swapped out, since the call: the
+                // plugin it reached is gone.
+                if !hosted.is_hosted() {
+                    return Err(PresetJobFailed::Preset(PresetError::Lost));
+                }
                 let loaded = load(&handle, main, &id, needs);
                 if loaded.is_ok() {
                     queue(&notices, Notice::Refresh(PluginRefresh::ParamValues));

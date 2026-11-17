@@ -7,10 +7,10 @@
 //! its saved state); VST2 over the reference plugin in process, whose program
 //! count the environment sets.
 
-use crate::pooled::{LandOn as _, LoadPlugin, Spec};
-use tutti_plugin::catalog::PluginRef;
+use crate::pooled::{LandOn as _, LoadEntry as _, LoadPlugin, Spec};
+use tutti_plugin::catalog::{Hosting, PluginRef};
 use tutti_plugin_types::{PresetError, PresetSupport};
-use tutti_session::{Peer as _, PresetJobError, PresetJobFailed, Session};
+use tutti_session::{Peer as _, PoolEvent, PresetJobError, PresetJobFailed, Session, SessionEvent};
 
 #[cfg(feature = "clap")]
 mod clap {
@@ -141,6 +141,98 @@ mod clap {
     }
 }
 
+#[cfg(feature = "vst3")]
+mod vst3 {
+    use super::*;
+    use crate::support::plugin_server;
+    use tutti_plugin_types::PresetId;
+    use tutti_session::{PHASES, PhaseCx, PoolEvent, SessionEvent};
+    use tutti_types::{ChannelLayout, SampleRate};
+
+    /// **A served plugin's list is read by the first update on the main
+    /// thread.** The shared plugin's VST3 declares one program list, `Factory`,
+    /// of three programs. The load lands in updates that do not carry the main
+    /// thread's proof (a served load needs none): the info is there, its list
+    /// not yet read and empty. The first update on the main thread reads it,
+    /// and the info the load handed out (an `Arc` a caller kept) shows it, as
+    /// does a new one, in the plugin's order and bank.
+    #[test]
+    fn a_served_list_is_read_by_the_first_main_thread_update() {
+        // SAFETY: nextest runs each test in its own process, and this is set
+        // from the test's own thread before the first server is spawned.
+        unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", plugin_server()) };
+        let module = tutti_fixtures::vst3_module();
+        let bundle = tutti_plugin_types::bundle::bundle_dir_of(
+            &module,
+            tutti_plugin_types::bundle::ModuleKind::Vst3,
+        )
+        .expect("a .vst3 bundle around the module");
+        let plugin = PluginRef::file(bundle.to_path_buf()).expect("a plugin bundle");
+        let (catalog, id, _dir) = crate::pooled::catalog_of(&plugin);
+        let mut s = Session::builder()
+            .spawn_with(|job| job.run())
+            .outputs_floor(ChannelLayout::STEREO)
+            .build_detached(SampleRate::DEFAULT)
+            .expect("a detached session builds");
+        s.pool(s.plugin_entry(0u64, &id, &catalog)).unwrap();
+
+        // Phases with no proof of the main thread: nothing runs main work.
+        let mut now = std::time::Instant::now();
+        let deadline = now + std::time::Duration::from_secs(60);
+        let kept = 'landed: loop {
+            now += std::time::Duration::from_millis(20);
+            let mut out = Vec::new();
+            for &phase in PHASES {
+                s.run_phase(phase, PhaseCx::at(now), &mut out);
+            }
+            for event in out {
+                if let SessionEvent::Pool { event, .. } = event
+                    && matches!(event, PoolEvent::Loaded)
+                {
+                    break 'landed s.plugin(&0u64).unwrap().info();
+                }
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the load never landed"
+            );
+            std::thread::yield_now();
+        };
+        assert!(kept.presets().support().can_list());
+        assert!(!kept.presets().is_read());
+        assert_eq!(kept.presets().iter().count(), 0);
+
+        let _ = s.update_on(tutti_fixtures::main_thread());
+        let fresh = s.plugin(&0u64).unwrap().info();
+        for info in [&kept, &fresh] {
+            assert!(info.presets().is_read());
+            let listed: Vec<_> = info
+                .presets()
+                .iter()
+                .map(|p| {
+                    (
+                        p.id().clone(),
+                        p.name().to_owned(),
+                        p.bank().map(str::to_owned),
+                    )
+                })
+                .collect();
+            let expected: Vec<_> = ["Init", "Pad", "Lead"]
+                .iter()
+                .zip(0u32..)
+                .map(|(name, index)| {
+                    (
+                        PresetId::Program { list_id: 1, index },
+                        (*name).to_owned(),
+                        Some("Factory".to_owned()),
+                    )
+                })
+                .collect();
+            assert_eq!(listed, expected);
+        }
+    }
+}
+
 #[cfg(feature = "vst2")]
 mod vst2 {
     use super::*;
@@ -255,5 +347,145 @@ mod vst2 {
             "{:?}",
             refused.map(|_| ())
         );
+    }
+
+    /// A session with the probe's three programs loaded through an entry the
+    /// test declares itself: its catalog, id and entry key stay in hand for a
+    /// reload.
+    fn declared() -> (
+        DetachedSession,
+        tutti_plugin::catalog::Catalog,
+        tutti_plugin::catalog::PluginId,
+        u64,
+        tutti_graph::NodeKey,
+        ScopedEnv,
+        tempfile::TempDir,
+    ) {
+        let mut env = ScopedEnv::new();
+        env.set("TUTTI_VST2_PROBE_PROGRAMS", "3");
+        let mut s = Session::builder()
+            .outputs_floor(ChannelLayout::STEREO)
+            .build_detached(SampleRate::DEFAULT)
+            .expect("a detached session builds");
+        let plugin = PluginRef::file(tutti_fixtures::vst2_probe().to_path_buf()).expect("a file");
+        let (catalog, id, dir) = crate::pooled::catalog_of(&plugin);
+        let main = tutti_fixtures::main_thread();
+        let key = s.declare_entry(main, &catalog, &id, Hosting::Auto, None);
+        let node = s.await_entry(main, key).expect("the VST2 loads").erase();
+        (s, catalog, id, key, node, env, dir)
+    }
+
+    /// **A preset of a reloaded plugin is refused until the node has it.** The
+    /// entry reloads (its hosting changes) and the new plugin lands; this
+    /// thread is not the process's main thread, so the in-process swap waits.
+    /// A preset listed from the new info is not the node's plugin's: it is
+    /// refused at the call and nothing is sent, while one the node's own plugin
+    /// listed still loads.
+    #[test]
+    fn a_preset_of_a_landed_reload_is_refused_until_the_swap() {
+        let (mut s, catalog, id, key, _node, _env, _dir) = declared();
+        let main = tutti_fixtures::main_thread();
+        let old = s
+            .plugin(&key)
+            .unwrap()
+            .info()
+            .presets()
+            .iter()
+            .next()
+            .unwrap();
+        s.pool(
+            s.plugin_entry(key, &id, &catalog)
+                .hosting(Hosting::InProcess),
+        )
+        .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        'reloaded: loop {
+            for event in s.update_on(main) {
+                if let SessionEvent::Pool { key: k, event } = event
+                    && k.get::<u64>() == Some(&key)
+                    && matches!(event, PoolEvent::Reloaded)
+                {
+                    break 'reloaded;
+                }
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the reload never landed"
+            );
+            std::thread::yield_now();
+        }
+        let new = s
+            .plugin(&key)
+            .unwrap()
+            .info()
+            .presets()
+            .iter()
+            .nth(2)
+            .unwrap();
+        assert_ne!(new, old, "another plugin instance listed it");
+
+        let before = s.current_preset(&key, main);
+        let refused = s.load_preset(&key, &new);
+        assert!(
+            matches!(refused, Err(PresetJobError::OtherPlugin)),
+            "{:?}",
+            refused.map(|_| ())
+        );
+        let _ = s.update_on(main);
+        assert_eq!(s.current_preset(&key, main), before, "nothing was sent");
+
+        s.load_preset(&key, &old)
+            .unwrap()
+            .land_on(&mut s)
+            .expect("the node's own plugin lists it");
+    }
+
+    /// **A load for a node removed before the update lands `Lost`**: the plugin
+    /// is gone, so nothing is asked.
+    #[test]
+    fn a_load_for_a_removed_node_lands_lost() {
+        let (mut s, _catalog, _id, key, node, _env, _dir) = declared();
+        let third = s
+            .plugin(&key)
+            .unwrap()
+            .info()
+            .presets()
+            .iter()
+            .nth(2)
+            .unwrap();
+        let job = s.load_preset(&key, &third).unwrap();
+        s.graph().remove(node).expect("the node is removed");
+        let landed = job.land_on(&mut s);
+        assert!(
+            matches!(landed, Err(PresetJobFailed::Preset(PresetError::Lost))),
+            "{landed:?}"
+        );
+    }
+
+    /// **Dropping a load's job before the update cancels it**: the plugin is
+    /// never asked, so its own current program is where it was.
+    #[test]
+    fn a_dropped_load_is_not_run() {
+        let (mut s, _catalog, _id, key, _node, _env, _dir) = declared();
+        let main = tutti_fixtures::main_thread();
+        let third = s
+            .plugin(&key)
+            .unwrap()
+            .info()
+            .presets()
+            .iter()
+            .nth(2)
+            .unwrap();
+        let before = s.current_preset(&key, main);
+        drop(s.load_preset(&key, &third).unwrap());
+        let _ = s.update_on(main);
+        assert_eq!(s.current_preset(&key, main), before);
+        assert_ne!(Some(third.id().clone()), before);
+        // The same load, kept, does move it.
+        s.load_preset(&key, &third)
+            .unwrap()
+            .land_on(&mut s)
+            .unwrap();
+        assert_eq!(s.current_preset(&key, main), Some(third.id().clone()));
     }
 }

@@ -12,7 +12,7 @@
 
 use std::sync::{Arc, OnceLock};
 
-use tutti_plugin_types::{Preset, PresetId, PresetSupport};
+use tutti_plugin_types::{Preset, PresetError, PresetId, PresetSupport};
 
 use crate::ResourceId;
 
@@ -28,8 +28,9 @@ pub struct PluginPresets {
 }
 
 impl PluginPresets {
-    /// The presets of the plugin `plugin` as `support` says; `list` is the
-    /// read, set once ([`fill`](Self::fill)).
+    /// The presets of the plugin instance `plugin`, as `support` says. A
+    /// plugin that lists none has its (empty) list read at once; any other has
+    /// it set once by [`fill`](Self::fill).
     pub(crate) fn new(support: PresetSupport, plugin: ResourceId) -> Self {
         let this = Self {
             support,
@@ -38,19 +39,18 @@ impl PluginPresets {
         };
         // A plugin that lists nothing has nothing to read.
         if !support.can_list() {
-            this.fill(Vec::new());
+            this.fill(Ok(Vec::new()));
         }
         this
     }
 
-    /// The list's cell, to be filled from the main thread.
-    pub(crate) fn cell(&self) -> Arc<OnceLock<Vec<Preset>>> {
-        Arc::clone(&self.list)
-    }
-
-    /// Sets the list, if it was not set.
-    pub(crate) fn fill(&self, presets: Vec<Preset>) {
-        let _ = self.list.set(presets);
+    /// Sets the list from the plugin's answer, if it was not set. An answer
+    /// that is an error (the plugin is gone, or has no route) sets nothing, so
+    /// the list reads as not read rather than as empty.
+    pub(crate) fn fill(&self, answer: Result<Vec<Preset>, PresetError>) {
+        if let Ok(presets) = answer {
+            let _ = self.list.set(presets);
+        }
     }
 
     /// What the plugin's format does with presets: a list to load from
@@ -64,7 +64,8 @@ impl PluginPresets {
 
     /// Whether the plugin's list has been read. A served plugin's is read by the
     /// first update on the main thread after the load; until then
-    /// [`iter`](Self::iter) is empty although the plugin lists some.
+    /// [`iter`](Self::iter) is empty although the plugin lists some. A read the
+    /// plugin could not answer (it was gone) leaves this `false` for good.
     #[must_use]
     pub fn is_read(&self) -> bool {
         self.list.get().is_some()

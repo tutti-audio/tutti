@@ -381,8 +381,9 @@ pub use tutti_plugin_types::RenderMode;
 // this type, so a consumer that reads a capability bit — e.g. deciding whether
 // to open an editor floating — must be able to name it.
 pub use tutti_plugin_types::Features;
-// A session's `PluginPresets` lists these, and `load_preset` takes one, so a
-// caller must be able to name them without depending on tutti-plugin-types.
+// `PluginPresets::support` answers a `PresetSupport` and `ListedPreset::id` a
+// `PresetId`, so a caller must be able to name them without depending on
+// tutti-plugin-types.
 pub use tutti_plugin_types::{FeatureReport, Preset, PresetId, PresetSupport};
 // `AnyThread::parameter_descriptors` lists `ParamId`s, and
 // `set_parameter_value` takes a `Normalized`.

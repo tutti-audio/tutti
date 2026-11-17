@@ -29,7 +29,7 @@ use tutti_plugin::error::StateError;
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::PluginRefresh;
 
-use super::entry::PluginEntry;
+use super::entry::{Hosted, PluginEntry};
 use super::{Notice, PluginRef, PluginState, queue};
 use crate::job::job_kind;
 use crate::{HandleError, Job, PoolKey, Session, WaitError, WorkerError};
@@ -115,7 +115,7 @@ impl<C: crate::Clock> Session<C> {
     where
         K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
     {
-        let (handle, plugin, _) = self.state_parts(key)?;
+        let (handle, plugin, _, _) = self.state_parts(key)?;
         Ok(self.jobs.submit_job(
             move |cancel| {
                 if cancel.is_cancelled() {
@@ -160,7 +160,7 @@ impl<C: crate::Clock> Session<C> {
     where
         K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
     {
-        let (handle, plugin, notices) = self.state_parts(key)?;
+        let (handle, plugin, notices, _) = self.state_parts(key)?;
         state
             .check_for(&plugin)
             .map_err(StateJobError::OtherPlugin)?;
@@ -183,7 +183,7 @@ impl<C: crate::Clock> Session<C> {
     pub(super) fn state_parts<K>(
         &self,
         key: &K,
-    ) -> Result<(PluginHandle, PluginRef, super::Notices), NodeLookup<K>>
+    ) -> Result<(PluginHandle, PluginRef, super::Notices, Hosted), NodeLookup<K>>
     where
         K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
     {
@@ -192,21 +192,22 @@ impl<C: crate::Clock> Session<C> {
         // At most one node links a key: `add_pooled_plugin` refuses a key a
         // node already holds (`AddPluginError::Installed`) and a swap keeps
         // the node it replaces, so the first match is the only one.
-        let hosted = self
+        let (hosted, link) = self
             .graph
             .plugins
             .values()
-            .find(|hosted| {
-                hosted
-                    .pooled
-                    .as_ref()
-                    .is_some_and(|link| link.key == pool_key)
+            .find_map(|hosted| {
+                let link = hosted.pooled.as_ref().filter(|link| link.key == pool_key)?;
+                Some((hosted, link))
             })
             .ok_or_else(|| NodeLookup::NoNode(key.clone()))?;
         Ok((
             hosted.handle.clone(),
             hosted.plugin.clone(),
             hosted.notices.clone(),
+            // The node's own instance: a reload that landed and is not yet
+            // swapped in is not this one.
+            link.hosted(),
         ))
     }
 }
