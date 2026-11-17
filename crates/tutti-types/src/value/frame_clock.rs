@@ -492,6 +492,45 @@ impl FrameClock {
 mod tests {
     use super::*;
 
+    /// A region crosses serde as its `(start, end)` pair and comes back equal.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn a_loop_range_round_trips_serde_as_its_pair() {
+        let range = LoopRange::new(Beat(2.0), Beat(6.5)).expect("a loop");
+        let json = serde_json::to_string(&range).unwrap();
+        assert_eq!(json, "[2.0,6.5]");
+        assert_eq!(serde_json::from_str::<LoopRange>(&json).unwrap(), range);
+    }
+
+    /// A pair that is not a region is refused with the reason, through the
+    /// pair's `TryFrom` and through deserialize alike: reversed, empty, and a
+    /// NaN bound.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn a_pair_that_is_not_a_region_is_refused_on_the_wire() {
+        assert_eq!(
+            LoopRange::try_from((Beat(6.0), Beat(2.0))),
+            Err(LoopRangeError::Reversed {
+                start: Beat(6.0),
+                end: Beat(2.0)
+            })
+        );
+        assert_eq!(
+            LoopRange::try_from((Beat(3.0), Beat(3.0))),
+            Err(LoopRangeError::Empty { at: Beat(3.0) })
+        );
+        assert!(matches!(
+            LoopRange::try_from((Beat(f64::NAN), Beat(3.0))),
+            Err(LoopRangeError::NotFinite { .. })
+        ));
+        for refused in ["[6.0,2.0]", "[3.0,3.0]", "[null,3.0]"] {
+            assert!(
+                serde_json::from_str::<LoopRange>(refused).is_err(),
+                "{refused} must not deserialize"
+            );
+        }
+    }
+
     const SR: SampleRate = SampleRate::of(48_000.0);
 
     /// A region is refused with the reason it is wrong: an end before the

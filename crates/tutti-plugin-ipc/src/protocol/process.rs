@@ -223,6 +223,34 @@ mod tests {
         assert_eq!(back.transport.system_time_ns, Some(5_001_000_000));
     }
 
+    /// **A cycle crosses the wire whole**: its beat range and its seconds.
+    #[test]
+    fn a_cycle_with_its_seconds_crosses_the_wire() {
+        let region = tutti_plugin_types::LoopRegion {
+            seconds: Some((
+                tutti_plugin_types::Seconds(1.0),
+                tutti_plugin_types::Seconds(4.5),
+            )),
+            ..tutti_plugin_types::LoopRegion::new(
+                tutti_types::LoopRange::new(tutti_types::Beat(2.0), tutti_types::Beat(8.0))
+                    .expect("a loop"),
+            )
+        };
+        let block = ProcessAudioData {
+            transport: info().with_loop(region),
+            ..ProcessAudioData::empty(SampleRate::SR_48K)
+        };
+        let back: ProcessAudioData =
+            postcard::from_bytes(&postcard::to_allocvec(&block).unwrap()).unwrap();
+        assert_eq!(back.transport.loop_region, Some(region));
+        assert_eq!(
+            ProcessAudioData::empty(SampleRate::SR_48K)
+                .transport
+                .loop_region,
+            None
+        );
+    }
+
     /// **The tempo and its slope cross the wire**: the plugin server hands
     /// CLAP's `tempo_inc` the host's figure.
     #[test]

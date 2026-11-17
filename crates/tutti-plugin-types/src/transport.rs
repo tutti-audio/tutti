@@ -89,7 +89,7 @@ pub struct TransportInfo {
     /// `None` when the producer has no clock that relates to the audio: an
     /// offline render runs faster or slower than real time, and a hand-built
     /// snapshot has none. A raw `i64` because that is the ABI's type and an
-    /// exact count: `Seconds` (`f32`) cannot carry a nanosecond reading.
+    /// exact integer count, as the ABI has it.
     pub system_time_ns: Option<i64>,
 }
 
@@ -188,7 +188,9 @@ pub struct TransportPosition {
     pub beat: Beat,
     /// Seconds from song start (clap `song_pos_seconds`): the engine's
     /// plugin node fills it as [`samples`](Self::samples) over the rate,
-    /// unrounded. A host reads `.get()` where it hands the value to a C ABI.
+    /// unrounded. It is the only source of CLAP's seconds timeline: a host
+    /// derives nothing from `samples` when it is zero. A host reads `.get()`
+    /// where it hands the value to a C ABI.
     pub seconds: Seconds,
 }
 
