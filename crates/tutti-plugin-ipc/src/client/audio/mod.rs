@@ -303,13 +303,13 @@ impl AudioBridge {
     /// The count of MIDI events the bridge thread did not send (a block it
     /// skipped as stale, and the rest of every SysEx open in it), shared:
     /// the plugin node's controls read it beside the node's own.
-    pub(crate) fn dropped_midi_cell(&self) -> Arc<std::sync::atomic::AtomicU64> {
+    pub(crate) fn dropped_midi_cell(&self) -> tutti_rt::Tally<u64> {
         self.channels.dropped_midi_cell()
     }
 
     /// The count of chunks the bridge thread skipped as stale, shared: the
     /// pipeline's counters read it beside the batcher's own.
-    pub(crate) fn skipped_cell(&self) -> Arc<std::sync::atomic::AtomicU64> {
+    pub(crate) fn skipped_cell(&self) -> tutti_rt::Tally<u64> {
         self.channels.skipped_cell()
     }
 

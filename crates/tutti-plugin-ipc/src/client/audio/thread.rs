@@ -403,12 +403,7 @@ mod tests {
         }
         drain_with_errors(&channels);
         assert!(channels.pop_command().is_none());
-        assert_eq!(
-            channels
-                .dropped_midi_cell()
-                .load(std::sync::atomic::Ordering::Relaxed),
-            5
-        );
+        assert_eq!(channels.dropped_midi_cell().get(), 5);
     }
 
     /// **A bridge that never connects counts the MIDI queued before it
@@ -443,12 +438,7 @@ mod tests {
         );
         assert!(lifecycle.is_crashed());
         assert!(channels.pop_command().is_none());
-        assert_eq!(
-            channels
-                .dropped_midi_cell()
-                .load(std::sync::atomic::Ordering::Relaxed),
-            4
-        );
+        assert_eq!(channels.dropped_midi_cell().get(), 4);
     }
 
     /// **A drain hands every held event to the listener and publishes the
