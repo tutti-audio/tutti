@@ -12,6 +12,7 @@
 
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
+use tutti_rt::LockExt;
 
 use crate::support::active::{Activate, Active, ActiveExt};
 use crate::support::main_thread;
@@ -40,7 +41,7 @@ const LAYOUT_ASYMMETRIC_AUX: u32 = 1;
 
 impl Probe {
     fn acquire() -> Self {
-        let lock = PROBE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let lock = PROBE_LOCK.lock_recover();
         unsafe {
             let lib = libloading::Library::new(tutti_fixtures::clap_probe())
                 .expect("re-open reference plugin");

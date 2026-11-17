@@ -8,6 +8,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, TryLockError};
 use std::thread::ThreadId;
+use tutti_rt::LockExt;
 
 use tutti_plugin_types::MainThreadMarker;
 
@@ -96,7 +97,7 @@ impl ThreadRoles {
     /// Takes the roles lock without becoming the audio thread: for the
     /// `[main-thread]` entries that must not overlap audio-side ones.
     pub fn claim_lifecycle(&self) -> LifecycleClaim<'_> {
-        let guard = self.lock.lock().unwrap_or_else(|p| p.into_inner());
+        let guard = self.lock.lock_recover();
         LifecycleClaim {
             roles: self,
             _guard: guard,
@@ -127,7 +128,7 @@ impl ThreadRoles {
     /// been released. A poisoned lock is taken as is: the guarded value is
     /// `()`, so a panicking claimant broke no invariant.
     pub fn claim(&self) -> AudioClaim<'_> {
-        let guard = self.lock.lock().unwrap_or_else(|p| p.into_inner());
+        let guard = self.lock.lock_recover();
         // `Release` pairs with the `Acquire` in `is_audio_thread`.
         self.audio.store(
             thread_id_hash(std::thread::current().id()),

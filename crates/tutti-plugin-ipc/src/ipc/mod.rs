@@ -46,8 +46,9 @@ pub use processor::IpcProcessor;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, OnceLock, PoisonError};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
+use tutti_rt::LockExt;
 
 use tutti_plugin_types::{
     BridgeError, BridgeResult, ChunkCounters, Controller, Load, LoadStage, Loaded, LoadedPlugin,
@@ -197,14 +198,14 @@ struct DeclaredState {
 impl DeclaredCache {
     /// The kept list, or the generation a refill must pass to [`store`](Self::store).
     fn get(&self) -> Result<Arc<[(ParamId, ParamAccess)]>, u64> {
-        let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let state = self.state.lock_recover();
         state.list.clone().ok_or(state.generation)
     }
 
     /// Keeps `list`, read when the generation was `started`, unless a forgetting
     /// has made it older than the plugin's word.
     fn store(&self, started: u64, list: &Arc<[(ParamId, ParamAccess)]>) {
-        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut state = self.state.lock_recover();
         if state.generation == started {
             state.list = Some(Arc::clone(list));
         }
@@ -212,7 +213,7 @@ impl DeclaredCache {
 
     /// Forgets the list, and makes a refill that is under way not store.
     fn forget(&self) {
-        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut state = self.state.lock_recover();
         state.list = None;
         state.generation += 1;
     }
@@ -226,11 +227,11 @@ impl Events {
                 self.ask(Request::LatencyChanged);
             }
             BridgeEvent::TailChanged { tail } => {
-                *self.tail.lock().unwrap_or_else(PoisonError::into_inner) = *tail;
+                *self.tail.lock_recover() = *tail;
                 self.ask(Request::TailChanged);
             }
             BridgeEvent::IoLayout(layout) => {
-                *self.layout.lock().unwrap_or_else(PoisonError::into_inner) = Some(layout.clone());
+                *self.layout.lock_recover() = Some(layout.clone());
             }
             // The restart the core plans for it ([`RESTARTS`](Loaded::RESTARTS))
             // lays out the slab, the pipeline and the node for the buses the
@@ -257,21 +258,14 @@ impl Events {
             // listener, in order; nothing is queued for it here.
             _ => {}
         }
-        let forward = self
-            .forward
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone();
+        let forward = self.forward.lock_recover().clone();
         if let Some(forward) = forward {
             forward(event);
         }
     }
 
     fn ask(&self, request: Request) {
-        self.requests
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(request);
+        self.requests.lock_recover().push(request);
     }
 }
 
@@ -313,11 +307,7 @@ impl Link {
 
     /// The buses the plugin last announced, if it announced any.
     pub(crate) fn layout(&self) -> Option<tutti_plugin_types::Layout> {
-        self.events
-            .layout
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
+        self.events.layout.lock_recover().clone()
     }
 
     /// The latency the plugin reports now.
@@ -380,11 +370,7 @@ impl Link {
     }
 
     pub(crate) fn tail(&self) -> PluginTail {
-        *self
-            .events
-            .tail
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+        *self.events.tail.lock_recover()
     }
 
     pub(crate) fn rate(&self) -> SampleRate {
@@ -396,10 +382,7 @@ impl Link {
     }
 
     pub(crate) fn watch(&self) -> Option<Watch> {
-        self.wait
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
+        self.wait.lock_recover().clone()
     }
 
     /// The queues and points of the bridge's parameter buffers for chunks of
@@ -486,12 +469,7 @@ impl Ipc {
         let answering = Arc::new(Mutex::new(Arc::clone(slab.slab())));
         {
             let answering = Arc::clone(&answering);
-            counters.attach(move |seq| {
-                answering
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .has_output(seq)
-            });
+            counters.attach(move |seq| answering.lock_recover().has_output(seq));
             counters.attach_skipped(bridge.skipped_cell());
         }
         let events = Arc::new(Events {
@@ -639,11 +617,7 @@ impl Ipc {
             self.link.timeout,
             Arc::clone(self.link.bridge.watch()),
         ));
-        *self
-            .link
-            .wait
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner) = Some(Watch {
+        *self.link.wait.lock_recover() = Some(Watch {
             wait: Arc::clone(&wait),
             offline,
         });
@@ -655,12 +629,7 @@ impl Ipc {
     /// `listener` as well. Invoked on the bridge thread: cheap, and never
     /// blocking. `None` stops forwarding.
     pub fn forward_events(&self, listener: Option<BridgeListener>) {
-        *self
-            .link
-            .events
-            .forward
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner) = listener;
+        *self.link.events.forward.lock_recover() = listener;
     }
 
     /// The bridge: the control socket and audio slab, for a caller that has
@@ -835,10 +804,7 @@ impl Ipc {
         ) {
             Ok(None) => slab,
             Ok(Some(new)) => {
-                *link
-                    .answering
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner) = Arc::clone(new.slab());
+                *link.answering.lock_recover() = Arc::clone(new.slab());
                 // The slab the server renders through now; the old one goes
                 // with the writer, after the server's ack.
                 drop(slab);

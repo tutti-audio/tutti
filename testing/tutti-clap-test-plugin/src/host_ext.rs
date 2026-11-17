@@ -13,6 +13,7 @@
 use std::ffi::{CStr, c_void};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicI64, AtomicU32, Ordering};
+use tutti_rt::LockExt;
 
 use clap_sys::ext::draft::transport_control::{
     CLAP_EXT_TRANSPORT_CONTROL, clap_host_transport_control,
@@ -128,7 +129,7 @@ const fn empty_capture() -> HostExtCapture {
 }
 
 fn with_capture<R>(f: impl FnOnce(&mut HostExtCapture) -> R) -> R {
-    f(&mut CAPTURE.lock().unwrap_or_else(|p| p.into_inner()))
+    f(&mut CAPTURE.lock_recover())
 }
 
 // ---------------------------------------------------------------------------

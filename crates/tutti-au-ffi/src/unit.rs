@@ -5,6 +5,7 @@ use std::marker::PhantomData;
 use std::mem::{MaybeUninit, size_of};
 use std::os::raw::c_void;
 use std::sync::Arc;
+use tutti_rt::LockExt;
 
 use coreaudio_sys as sys;
 
@@ -194,10 +195,7 @@ impl Unit {
     // ---- lifecycle ----
 
     fn lifecycle(&self) -> std::sync::MutexGuard<'_, bool> {
-        self.inner
-            .initialized
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        self.inner.initialized.lock_recover()
     }
 
     /// `AudioUnitInitialize`. Serialized with every other lifecycle call and with

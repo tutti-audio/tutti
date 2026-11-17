@@ -15,6 +15,7 @@
 use crate::support;
 use support::active::{Activate, Active, ActiveExt};
 use support::main_thread;
+use tutti_rt::LockExt;
 
 use std::sync::{Mutex, MutexGuard};
 
@@ -48,7 +49,7 @@ struct Probe {
 
 impl Probe {
     fn acquire() -> Self {
-        let lock = PROBE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let lock = PROBE_LOCK.lock_recover();
         reset_activation();
         reset_state_context_refusal();
         param_reset();

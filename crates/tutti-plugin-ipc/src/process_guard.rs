@@ -8,10 +8,11 @@
 //! user-held handle has dropped).
 
 use crate::{BridgeConfig, BridgeThread, Reaped, ServerWatch};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tutti_plugin_ipc_ffi::ExitWait;
 use tutti_plugin_types::PluginFailure;
+use tutti_rt::LockExt;
 use tutti_rt::{StopToken, ThreadHandle};
 
 /// How long the exit thread waits on the OS between looks at its stop flag.
@@ -76,8 +77,7 @@ impl ProcessGuard {
     /// test guard that owns no subprocess.
     pub fn pid(&self) -> Option<u32> {
         self.process
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .lock_recover()
             .as_ref()
             .map(|process| process.id())
     }
@@ -92,7 +92,7 @@ impl ProcessGuard {
     /// EOF and the socket closes. [`Drop`] reaps it. Not for the audio thread
     /// (a lock and a syscall).
     pub fn terminate(&self) {
-        let mut process = self.process.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut process = self.process.lock_recover();
         if let Some(process) = process.as_mut() {
             let _ = process.kill();
         }
@@ -127,11 +127,7 @@ impl Drop for ProcessGuard {
             exit.token().stop();
         }
         // Killed and reaped as it drops ([`Reaped`]), before the socket goes.
-        let process = self
-            .process
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take();
+        let process = self.process.lock_recover().take();
         drop(process);
         // Stops (again) and joins.
         drop(self.exit_thread.take());
@@ -151,7 +147,7 @@ fn declare_exit(
         if !wait.wait(EXIT_SLICE) {
             continue;
         }
-        let mut process = process.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut process = process.lock_recover();
         let Some(process) = process.as_mut() else {
             return;
         };

@@ -36,6 +36,7 @@
 
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
+use tutti_rt::LockExt;
 
 use crate::support;
 use support::active::{Activate, Active, ActiveExt};
@@ -90,7 +91,7 @@ impl Probe {
     /// these symbols drive the very globals the host reads), and start from a
     /// clean slate.
     fn acquire() -> Self {
-        let lock = PROBE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let lock = PROBE_LOCK.lock_recover();
         unsafe {
             let lib = libloading::Library::new(tutti_fixtures::clap_probe())
                 .expect("re-open reference plugin");

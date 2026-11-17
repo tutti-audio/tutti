@@ -42,6 +42,7 @@ use crate::probe::probe_path;
 
 use std::sync::Mutex;
 use tutti_fixtures::main_thread;
+use tutti_rt::LockExt;
 
 use crate::active;
 #[allow(unused_imports)]
@@ -112,9 +113,7 @@ impl Misbehaviour {
     }
 
     fn enter(code: Option<&str>) -> Self {
-        let guard = PROBE_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let guard = PROBE_ENV_LOCK.lock_recover();
         let previous = std::env::var("TUTTI_PROBE_MISBEHAVIOUR").ok();
         match code {
             // SAFETY: `PROBE_ENV_LOCK` is held for the life of this guard, so no other

@@ -30,6 +30,7 @@
 
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
+use tutti_rt::LockExt;
 
 #[path = "support/active.rs"]
 mod active;
@@ -44,7 +45,7 @@ const BLOCK: usize = 128;
 static PROBE_LOCK: Mutex<()> = Mutex::new(());
 
 fn lock_probe() -> MutexGuard<'static, ()> {
-    PROBE_LOCK.lock().unwrap_or_else(|p| p.into_inner())
+    PROBE_LOCK.lock_recover()
 }
 
 /// Re-open the image the host loaded and call one of the probe's exported
