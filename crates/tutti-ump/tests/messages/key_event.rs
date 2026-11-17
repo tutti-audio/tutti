@@ -7,10 +7,9 @@
 use crate::common;
 
 use proptest::prelude::*;
-use tutti_ump::ControlValue;
 use tutti_ump::{
-    Address, Key, KeyEvent, Message, MidiChannel, MidiGroup, NoteNumber, Protocol, Stream, Ump,
-    Voice1, Voice2,
+    Address, CCNumber, ControlValue, Key, KeyEvent, Message, MidiChannel, MidiGroup, NoteNumber,
+    NoteVelocity, Protocol, Stream, U7, Ump, Voice1, Voice2,
 };
 
 const SUSTAIN: u8 = 64;
@@ -113,6 +112,31 @@ proptest! {
         let up = Ump::sustain_up(protocol, address).unwrap();
         prop_assert_eq!(up.key_event(), Some(KeyEvent::Sustain { protocol, address, down: false }));
         prop_assert!(up.decode().is_ok());
+    }
+
+    /// The writers `note_off` and `sustain_up` build the packet `encode` builds
+    /// for the same message: a velocity-0 Note Off of the key, a CC 64 of 0.
+    #[test]
+    fn the_closing_writers_equal_the_encoded_messages(index in any::<u16>(), m2 in any::<bool>(), lane_ in any::<u8>()) {
+        let key = Key::from_index(index);
+        let (address, note) = (key.address(), key.note());
+        let want = match key.protocol() {
+            Protocol::Midi2 => Message::Midi2(address, Voice2::note_off(note, NoteVelocity::MIN)),
+            _ => Message::Midi1(address, Voice1::note_off(note, U7::of(0))),
+        };
+        prop_assert_eq!(Ump::note_off(key), Ump::from(want));
+        prop_assert_eq!(Ump::note_off(key).decode(), Ok(want));
+
+        let protocol = if m2 { Protocol::Midi2 } else { Protocol::Midi1 };
+        let address = Address::from_index(usize::from(lane_)).unwrap();
+        let want = if m2 {
+            Message::Midi2(address, Voice2::control_change(CCNumber::SUSTAIN, ControlValue::new(0)))
+        } else {
+            Message::Midi1(address, Voice1::control_change(CCNumber::SUSTAIN, U7::of(0)))
+        };
+        let up = Ump::sustain_up(protocol, address).unwrap();
+        prop_assert_eq!(up, Ump::from(want));
+        prop_assert_eq!(up.decode(), Ok(want));
     }
 }
 

@@ -229,7 +229,12 @@ fn render(
         midi,
         ..Default::default()
     };
-    inst.process(&mut buffer, &events, params, &TransportInfo::default());
+    inst.process(
+        &mut buffer,
+        &events,
+        params,
+        &TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K),
+    );
 
     // Regroup the flat outputs by bus.
     let mut grouped = Vec::new();
@@ -394,7 +399,7 @@ fn a_block_past_the_activated_length_is_refused() {
                 &mut buffer,
                 &InputEvents::default(),
                 None,
-                &TransportInfo::default(),
+                &TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K),
             )
             .err()
             .map(|e| e.error);
@@ -769,7 +774,7 @@ fn f64_path_carries_the_same_audio() {
         &mut buffer,
         &InputEvents::default(),
         None,
-        &TransportInfo::default(),
+        &TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K),
     );
 
     let mut flat = outs.into_iter();
@@ -1083,7 +1088,12 @@ fn note_expression_reaches_the_plugin_with_its_value() {
         note_expressions: &expressions,
         ..Default::default()
     };
-    inst.process(&mut buffer, &events, None, &TransportInfo::default());
+    inst.process(
+        &mut buffer,
+        &events,
+        None,
+        &TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K),
+    );
     let ch0 = &outs[0];
 
     // VST3 typeIds: Volume = 0, Pan = 1.
@@ -1167,7 +1177,12 @@ fn a_per_note_pitch_bend_reaches_the_plugin_as_tuning() {
         midi: &midi,
         ..Default::default()
     };
-    inst.process(&mut buffer, &events, None, &TransportInfo::default());
+    inst.process(
+        &mut buffer,
+        &events,
+        None,
+        &TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K),
+    );
     let ch0 = &outs[0];
 
     // An f32 near 5000 resolves to about 5e-4; the two readings and the old
@@ -1218,7 +1233,7 @@ fn midi_emitted_by_the_plugin_reaches_the_host() {
             &mut buffer,
             &InputEvents::default(),
             Some(&params),
-            &TransportInfo::default(),
+            &TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K),
         );
         out.midi_events.len()
     };

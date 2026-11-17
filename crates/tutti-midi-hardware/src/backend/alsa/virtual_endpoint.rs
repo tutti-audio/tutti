@@ -9,8 +9,8 @@
 
 use tutti_alsa_ffi::{
     BLOCK_IS_LOWSPEED, BLOCK_IS_MIDI1, Blocking, CAP_READ, CAP_SUBS_READ, CAP_SUBS_WRITE,
-    CAP_WRITE, Client, DIR_BIDIRECTION, DIR_INPUT, DIR_OUTPUT, PROTO_MIDI1, PROTO_MIDI2,
-    TYPE_APPLICATION, TYPE_MIDI_GENERIC, UmpBlock, UmpEndpoint, UmpVersion,
+    CAP_WRITE, Client, DIR_BIDIRECTION, DIR_INPUT, DIR_OUTPUT, Operation, PROTO_MIDI1, PROTO_MIDI2,
+    Packet, TYPE_APPLICATION, TYPE_MIDI_GENERIC, UmpBlock, UmpEndpoint, UmpVersion,
 };
 use tutti_midi_device::FunctionBlock;
 use tutti_rt::LockExt;
@@ -21,9 +21,6 @@ use crate::InputProducerHandle;
 use crate::block::RawBlock;
 use crate::error::{Error, Result};
 use crate::virtual_endpoint::{SourceBackend, VirtualProtocol, VirtualSpec};
-
-/// The call that fails when the kernel has no MIDI 2.0 client mode.
-const SET_VERSION: &str = "snd_seq_set_client_midi_version";
 
 /// The sequencer's version for a protocol.
 fn version_of(protocol: VirtualProtocol) -> UmpVersion {
@@ -40,10 +37,11 @@ fn open_client(spec: &VirtualSpec, blocking: Blocking) -> Result<(Client, Virtua
     match super::client::open(name, blocking, version_of(spec.protocol())) {
         Ok(client) => Ok((client, spec.protocol())),
         Err(Error::Os(tutti_alsa_ffi::Error::Call {
-            operation: SET_VERSION,
-            code,
+            operation: Operation::SetClientMidiVersion,
+            source,
         })) if spec.protocol() == VirtualProtocol::Midi2 => {
-            tracing::debug!("virtual MIDI endpoint falls back to MIDI 1.0 ({code})");
+            // The call that fails when the kernel has no MIDI 2.0 client mode.
+            tracing::debug!("virtual MIDI endpoint falls back to MIDI 1.0 ({source})");
             Ok((
                 super::client::open(name, blocking, UmpVersion::Midi1)?,
                 VirtualProtocol::Midi1,
@@ -109,7 +107,7 @@ impl SourceBackend for AlsaVirtualSource {
         // A poisoned lock guards a client handle and a port number, which a
         // panic cannot leave half-written.
         let inner = self.inner.lock_recover();
-        inner.0.send_to_subscribers(inner.1, words)?;
+        inner.0.send_to_subscribers(inner.1, Packet::new(words)?)?;
         Ok(())
     }
 }

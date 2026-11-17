@@ -15,7 +15,10 @@ use tutti_types::{ChannelLayout, ChannelTopology, Placement, SampleRate, Samples
 const RATE: SampleRate = SampleRate::SR_48K;
 
 /// The channels `values` hold, one per global output from channel 0.
-fn feed<C: tutti_session::Clock>(session: &mut Session<C>, values: &[f32]) {
+fn feed<K: tutti_session::AppKey, C: tutti_session::Clock>(
+    session: &mut Session<K, C>,
+    values: &[f32],
+) {
     let (node, _) = session.graph().add(ForkByClone(Const::frame(values)));
     for c in 0..values.len() {
         session

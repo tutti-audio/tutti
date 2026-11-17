@@ -217,7 +217,7 @@ pub(super) fn placed_uses(src: &str) -> Vec<Use> {
 }
 
 /// The inline `mod NAME { .. }` blocks of lexed `code`, as `(name, open, close)`.
-fn inline_mods(code: &str) -> Vec<(String, usize, usize)> {
+pub(super) fn inline_mods(code: &str) -> Vec<(String, usize, usize)> {
     let b = code.as_bytes();
     let mut out = Vec::new();
     let mut from = 0;

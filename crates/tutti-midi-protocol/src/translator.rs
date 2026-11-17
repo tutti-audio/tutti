@@ -51,10 +51,11 @@ struct Channel {
     pending: bool,
     /// A Data Entry LSB that arrived before any MSB of this parameter.
     early_lsb: Option<U7>,
-    /// The Bank Select halves as last sent, kept across Program Changes.
+    /// The Bank Select halves as last sent.
     bank_msb: U7,
     bank_lsb: U7,
-    /// Whether a Bank Select arrived since the last Program Change.
+    /// Whether a Bank Select has arrived since [`new`](Translator::new) or
+    /// the last reset: the bank is valid from then on (D.3.4).
     bank_set: bool,
     /// The low 7 bits a High Resolution Velocity Prefix (CC 88) gave the next
     /// Note On or Note Off on this channel.
@@ -78,9 +79,9 @@ struct Channel {
 ///   CC 6 waits for one of them, with an LSB of 0 if none follows; a CC 38
 ///   before any CC 6 waits for the CC 6 and is sent with it. The data is the
 ///   14-bit `MSB << 7 | LSB`, zero-extended to 32 bits for registered
-///   controllers 0 to 31 of bank 0 (M2-115 section 4.1: their halves are two
-///   fields, pitch bend sensitivity's semitones and cents for one) and
-///   scaled Min-Center-Max for every other. A select of one half keeps the
+///   controllers of any bank whose index is 0 to 31 (M2-115 section 4.1: their
+///   halves are two fields, pitch bend sensitivity's semitones and cents for
+///   one) and scaled Min-Center-Max for every other. A select of one half keeps the
 ///   other half as last selected, separately for RPN and NRPN. The Null
 ///   Function (`7F 7F`) ends the run and is not translated: Data Entry after
 ///   it is dropped. So does Reset All Controllers (CC 121, RP-015), which
@@ -98,8 +99,11 @@ struct Channel {
 ///   a receiver.
 /// - **Bank Select** (CC 0 and 32) is absorbed and rides on the channel's next
 ///   Program Change as its bank. The halves are kept across Program Changes,
-///   so a lone CC 32 pairs with the CC 0 last sent (0 if never); a Program
-///   Change with no Bank Select since the one before carries no bank.
+///   so a lone CC 32 pairs with the CC 0 last sent (0 if never). The bank is
+///   valid from the first Bank Select on (D.3.4: the Program Change includes
+///   "the current valid Bank Select values"): every later Program Change
+///   carries it until a Bank Select changes it, and one before any carries no
+///   bank.
 /// - **A MIDI 2.0 Control Change of CC 0, 6, 32, 38 or 98 to 101** is
 ///   dropped, and returns `None`: the MIDI 2.0 Protocol has the Program Change,
 ///   Registered Controller and Assignable Controller messages for what they
@@ -256,7 +260,6 @@ impl Translator {
                     msb: channel.bank_msb,
                     lsb: channel.bank_lsb,
                 });
-                channel.bank_set = false;
                 send(Voice2::ProgramChange { program, bank });
             }
             Voice1::NoteOn { note, velocity } if velocity.get() != 0 => send(Voice2::NoteOn {
@@ -407,7 +410,7 @@ fn emit(channel: &mut Channel, lsb: Option<U7>, send: &mut impl FnMut(Voice2)) {
         Kind::None => return,
         Kind::Registered => {
             let Number { bank, index } = channel.rpn;
-            let value = ControlValue::new(if scale::zero_extended(bank, index) {
+            let value = ControlValue::new(if scale::zero_extended(index) {
                 data << 18
             } else {
                 scale::upscale(data, 14, 32)

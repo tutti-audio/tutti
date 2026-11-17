@@ -12,7 +12,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use interprocess::local_socket::Stream;
 use interprocess::local_socket::traits::Stream as _;
@@ -31,18 +31,23 @@ impl Drop for Server {
 }
 
 fn connect(socket: &Path, server: &mut Server) -> Stream {
-    let deadline = Instant::now() + Duration::from_secs(60);
-    loop {
-        if let Ok(stream) = Stream::connect(socket_name(socket).expect("a socket name")) {
-            return stream;
-        }
-        assert!(
-            server.0.try_wait().expect("poll the server").is_none(),
-            "the server exited before it bound its socket"
-        );
-        assert!(Instant::now() < deadline, "the server never bound");
-        std::thread::sleep(Duration::from_millis(5));
-    }
+    let mut connected = None;
+    tutti_fixtures::wait_until(
+        "the server to bind its socket",
+        Duration::from_secs(60),
+        || {
+            if let Ok(stream) = Stream::connect(socket_name(socket).expect("a socket name")) {
+                connected = Some(stream);
+                return true;
+            }
+            assert!(
+                server.0.try_wait().expect("poll the server").is_none(),
+                "the server exited before it bound its socket"
+            );
+            false
+        },
+    );
+    connected.expect("the wait ended on a connection")
 }
 
 fn load(stream: &mut Stream, path: &Path, format: PluginFormat) -> BridgeMessage {

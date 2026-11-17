@@ -1,7 +1,7 @@
 //! **A live plugin keeps in step with the device.** The reference CLAP
 //! plugin in a real `plugin-server`, rendered by tutti-engine's `Engine` exactly
-//! as a device drives it — one call per callback, the callbacks paced to real
-//! time — at 480-, 1024- and 441-frame device quanta.
+//! as a device drives it — one call per callback, each once the chunk before it
+//! is settled — at 480-, 1024- and 441-frame device quanta.
 //!
 //! A live plugin's pipeline chunk is the device's callback
 //! (`Prepare::quantum`), not a fixed 64 frames. With 64, a chunk completed
@@ -19,8 +19,6 @@
 //! counted within a few blocks of the miss; a silent block whose chunk was none
 //! of these, or that no collect missed, fails; so does a run with an
 //! unanswered chunk: a server that drops a chunk silently.
-//! A run in which more than a quarter of the judged blocks were late is rerun
-//! (twice at most) or reported as too loaded to judge.
 //!
 //! Needs `cargo build -p tutti-plugin-server` first (see `CLAUDE.md`).
 
@@ -32,10 +30,6 @@ use tutti_fixtures::machine_lock;
 use tutti_types::MaxBlock;
 
 use std::ops::Range;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::thread::JoinHandle;
-use std::time::{Duration, Instant};
 
 use tutti_buffers::InterleavedMut;
 use tutti_engine::Engine;
@@ -76,9 +70,7 @@ impl Node for RampSource {
 /// What a live run saw.
 struct Run {
     declared: Samples,
-    /// Blocks after warm-up.
-    blocks: usize,
-    /// Of those, entirely silent (block indices).
+    /// The blocks after warm-up that were entirely silent (indices).
     silent: Vec<usize>,
     /// Of those, neither silent nor the input delayed by `declared`.
     wrong: Vec<usize>,
@@ -96,72 +88,6 @@ struct Run {
     /// Missed chunks no counter explains at the end of the run
     /// (`unanswered_chunks`).
     unanswered: u64,
-}
-
-/// Keeps idle CPUs awake for the length of a paced run (Linux only).
-///
-/// Measured on an idle 4-vCPU VM: a thread woken from an idle CPU is
-/// sometimes 10 to 28 ms late (a bare `sleep(1 ms)` loop with no tutti code
-/// oversleeps by more than 10 ms about once in 4000 calls), at any thread
-/// priority, and the late thread is the host's bridge thread or the server's
-/// about once in 1000 blocks. The plugin gets one period to answer, so such a
-/// wake-up costs the block and its successors up to the next fresh one: the
-/// source of the late answers `judge_silence` excuses. With spinners on the other
-/// CPUs at the lowest priority (they yield to any waking thread) the late
-/// wake-ups fell from 8 in 5249 blocks to 1 in 8399. A device's callback is
-/// woken by an interrupt, not from an idle CPU, so this keeps the run closer
-/// to one.
-///
-/// Safe where the CPU count is a quota: fewer than 4 CPUs spawn none, and
-/// `cpus / 2` bounds the rest. Every caller holds [`exclusive`], so one
-/// process spins at a time. A spinner whose `setpriority` fails exits rather
-/// than spin at normal priority; other platforms spawn none.
-struct KeepAwake {
-    stop: Arc<AtomicBool>,
-    spinners: Vec<JoinHandle<()>>,
-}
-
-/// Spinners for `cpus` CPUs.
-fn spinner_count(cpus: usize) -> usize {
-    if cfg!(target_os = "linux") && cpus >= 4 {
-        cpus / 2
-    } else {
-        0
-    }
-}
-
-impl KeepAwake {
-    fn new() -> Self {
-        let stop = Arc::new(AtomicBool::new(false));
-        let cpus = std::thread::available_parallelism().map_or(1, |n| n.get());
-        let spinners = (0..spinner_count(cpus))
-            .map(|_| {
-                let stop = stop.clone();
-                std::thread::spawn(move || {
-                    // Nice 19 on the calling thread; a spinner that cannot
-                    // get it would compete with the run.
-                    #[cfg(target_os = "linux")]
-                    // SAFETY: `setpriority` takes no pointers.
-                    if unsafe { libc::setpriority(libc::PRIO_PROCESS, 0, 19) } != 0 {
-                        return;
-                    }
-                    while !stop.load(Ordering::Relaxed) {
-                        std::hint::spin_loop();
-                    }
-                })
-            })
-            .collect();
-        Self { stop, spinners }
-    }
-}
-
-impl Drop for KeepAwake {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::Relaxed);
-        for t in self.spinners.drain(..) {
-            let _ = t.join();
-        }
-    }
 }
 
 /// Callbacks a [`run_live`] burst makes back to back.
@@ -232,13 +158,22 @@ fn judge_silence(run: &Run, from: usize, neutral: &Range<usize>) -> Result<(), S
     }
 }
 
-/// Render `blocks` callbacks of `quantum` frames at `rate`, paced to real
-/// time, through an engine whose graph is the ramp into the probe. With
+/// Waits until the chunk the node submitted last is settled: answered, or
+/// counted refused or skipped since `refused` and `skipped` were read.
+fn settled(controls: &tutti_plugin_host::PluginControls, refused: u64, skipped: u64) {
+    clap_probe::await_answer_or(
+        controls,
+        "the chunk in flight to be answered, refused or skipped",
+        || controls.refused_chunks() > refused || controls.skipped_chunks() > skipped,
+    );
+}
+
+/// Render `blocks` callbacks of `quantum` frames at `rate`, each once the
+/// chunk before it is settled, through an engine whose graph is the ramp into the probe. With
 /// `burst_at`, the callbacks from that block (counted after warm-up) on run
 /// [`BURST`] in a row with no pause, as a device does when it catches up.
 fn run_live(rate: f64, quantum: usize, blocks: usize, burst_at: Option<usize>) -> Run {
     let probe = load_probe(rate);
-    let _awake = KeepAwake::new();
     let inputs = probe.client.inputs();
     let prepare = Prepare::new(SampleRate::of(rate), MaxBlock::of(Samples(quantum)))
         .with_quantum(MaxBlock::of(Samples(quantum)));
@@ -273,14 +208,12 @@ fn run_live(rate: f64, quantum: usize, blocks: usize, burst_at: Option<usize>) -
     let transport = Transport::new(SampleRate::of(rate));
     let engine = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
         .expect("the engine builds");
-    let period = Duration::from_secs_f64(quantum as f64 / rate);
     let warm_up = 8 + declared.get().div_ceil(quantum);
     let mut buf = vec![0.0f32; quantum];
     let (mut silent, mut wrong) = (Vec::new(), Vec::new());
     let (mut misses, mut lates) = (Vec::new(), Vec::new());
     let (mut refuses, mut skips) = (Vec::new(), Vec::new());
     let mut skipped = 0;
-    let mut next = Instant::now();
     // More callbacks, unjudged, so a chunk missed at the end is resolved before
     // the counts are read: the batcher gives up on a fate it has not learned
     // `TRAILING` chunks on.
@@ -327,24 +260,17 @@ fn run_live(rate: f64, quantum: usize, blocks: usize, burst_at: Option<usize>) -
         if burst_at.is_some_and(|at| (warm_up + at..warm_up + at + BURST - 1).contains(&b)) {
             continue;
         }
-        // A device's callbacks stay a period apart: one that oversleeps (a
-        // loaded machine) is not followed by a burst of catch-up calls, which
-        // would hand the server no period to answer and so read as silence.
-        let now = Instant::now();
-        next += period;
-        if next <= now {
-            next = now + period;
-        }
-        std::thread::sleep(next - now);
+        // The next callback comes once the chunk this one submitted is settled
+        // (answered, or counted refused or skipped): the server has the whole
+        // period to answer, and a callback is never a catch-up that would hand
+        // it none and read as silence.
+        settled(&controls, refused, now_skipped);
     }
-    // A skip of the last chunks may still be on its way.
-    std::thread::sleep(period * 3);
     skips.extend((skipped..controls.skipped_chunks()).map(|_| blocks + TRAILING - 1));
     let unanswered = controls.unanswered_chunks();
     drop(probe.handle);
     Run {
         declared,
-        blocks,
         silent,
         wrong,
         misses,
@@ -423,7 +349,6 @@ fn a_silent_block_is_judged_by_what_the_collect_and_the_server_did() {
                refuses: &[usize],
                skips: &[usize]| Run {
         declared: Samples(0),
-        blocks: 200,
         silent: silent.to_vec(),
         wrong: Vec::new(),
         misses: misses.to_vec(),
@@ -456,66 +381,38 @@ fn a_silent_block_is_judged_by_what_the_collect_and_the_server_did() {
     );
 }
 
-/// Runs of `run` before a machine is called too loaded to judge.
-const JUDGEABLE_RUNS: usize = 3;
-
-/// The first run of `run` that can be judged: no block wrong, no silent block
-/// outside a late answer, a refusal or a skip, and no missed chunk the server never accounted for (any fails at once, in any run, whatever
-/// the load), and no more than a quarter of the blocks judged (`from` on,
-/// outside `neutral`) answered late, refused or skipped. More than that and the run asserts
-/// little about the pipeline, so it is run again on a fresh server, up to
-/// [`JUDGEABLE_RUNS`] times, and then reported.
-fn judgeable_run(
-    what: &str,
-    mut run: impl FnMut() -> Run,
-    from: usize,
-    neutral: Range<usize>,
-) -> Run {
-    let mut seen = Vec::new();
-    for attempt in 1..=JUDGEABLE_RUNS {
-        let run = run();
-        assert!(
-            run.wrong.is_empty(),
-            "{what}: blocks {:?} are neither silent nor the input delayed by {:?}",
-            run.wrong,
-            run.declared
-        );
-        let judged = (from..run.blocks).filter(|b| !neutral.contains(b)).count();
-        let late = run
-            .lates
-            .iter()
-            .chain(&run.refuses)
-            .chain(&run.skips)
-            .filter(|&&b| b >= from && !neutral.contains(&b))
-            .count();
-        eprintln!(
-            "{what}: run {attempt}: {} chunks missed, {late} late, refused or skipped ({} refused, {} skipped), of \
-             {judged} judged blocks, {} silent",
-            run.misses.len(),
-            run.refuses.len(),
-            run.skips.len(),
-            run.silent.len()
-        );
-        assert_eq!(
-            run.unanswered, 0,
-            "{what}: a missed chunk the server neither answered, refused nor skipped"
-        );
-        if let Err(why) = judge_silence(&run, from, &neutral) {
-            panic!("{what}: {why}");
-        }
-        if late * 4 <= judged {
-            return run;
-        }
-        seen.push(format!("{late} of {judged}"));
-    }
-    panic!(
-        "{what}: machine too loaded to judge: late, refused or skipped chunks per run: {seen:?}"
+/// Runs `run` and judges it: no block wrong, no silent block outside a late
+/// answer, a refusal or a skip (from `from` on, outside `neutral`), and no
+/// missed chunk the server never accounted for.
+fn judged_run(what: &str, run: impl FnOnce() -> Run, from: usize, neutral: Range<usize>) -> Run {
+    let run = run();
+    assert!(
+        run.wrong.is_empty(),
+        "{what}: blocks {:?} are neither silent nor the input delayed by {:?}",
+        run.wrong,
+        run.declared
     );
+    eprintln!(
+        "{what}: {} chunks missed ({} late, {} refused, {} skipped), {} silent",
+        run.misses.len(),
+        run.lates.len(),
+        run.refuses.len(),
+        run.skips.len(),
+        run.silent.len()
+    );
+    assert_eq!(
+        run.unanswered, 0,
+        "{what}: a missed chunk the server neither answered, refused nor skipped"
+    );
+    if let Err(why) = judge_silence(&run, from, &neutral) {
+        panic!("{what}: {why}");
+    }
+    run
 }
 
 fn assert_live(rate: f64, quantum: usize) {
     let what = format!("{quantum}-frame callbacks");
-    let run = judgeable_run(&what, || run_live(rate, quantum, 200, None), 0, 0..0);
+    let run = judged_run(&what, || run_live(rate, quantum, 200, None), 0, 0..0);
     assert_eq!(
         run.declared,
         Samples(PROBE_LATENCY + quantum),
@@ -567,7 +464,7 @@ fn a_burst_of_callbacks_loses_blocks_but_never_corrupts_them() {
     let _env = ProbeEnv::new().render_mode(render::LATENCY);
 
     let window = BURST_AT..BURST_AT + BURST + RING_SLOTS;
-    let run = judgeable_run(
+    let run = judged_run(
         "a burst of callbacks",
         || run_live(48_000.0, QUANTUM, BLOCKS, Some(BURST_AT)),
         SETTLE,

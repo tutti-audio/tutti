@@ -210,11 +210,13 @@ jobs:
     name: clippy (macos)
     needs: changes
     if: needs.changes.outputs.macos == 'true' && needs.changes.outputs.full == 'true'
-    runs-on: macos-latest
+    # The same switch as the macOS test job: the self-hosted Mac when MACOS_TEST_RUNNER is set.
+    runs-on: ${{ fromJSON(vars.MACOS_TEST_RUNNER || '"macos-latest"') }}
     steps:
       - uses: actions/checkout@v7
       - run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
+        if: runner.environment == 'github-hosted'
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo clippy --locked -p tutti-au-ffi -p tutti-au-host --all-targets -- -D warnings
@@ -471,7 +473,7 @@ jobs:
       fail-fast: false
       matrix:
         os: ${{ fromJSON(needs.changes.outputs.test_more_os) }}
-    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || (matrix.os == 'macos-latest' && fromJSON(vars.MACOS_TEST_RUNNER || '"macos-latest"')) || matrix.os }}
     env:
       CARGO_PROFILE_DEV_OPT_LEVEL: '1'
     steps:
@@ -483,6 +485,7 @@ jobs:
         uses: ./.github/actions/linux-audio-deps
       - run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
+        if: runner.environment == 'github-hosted'
         with:
           shared-key: test
           save-if: false
@@ -584,7 +587,7 @@ jobs:
   #
   # `code`: false when every change is prose nothing compiles (top-level `docs/`, or a root `*.md`). A crate's
   # README is pulled in by `include_str!`, so it counts as code. `canonical paths` still runs for prose.
-  # `loom`: the change can affect a loom model: `tutti-rt`, `tutti-shm-model`, the lock, the toolchain or this file.
+  # `loom`: the change can affect a loom model: `tutti-rt`, `tutti-plugin-ipc-ffi`, the lock, the toolchain or this file.
   # `macos`: the change touches code that differs on macOS. It gates `clippy (macos)` (which also runs rustdoc over
   # the macOS-only crates) and the macOS `test`; the macOS editor, release and doctest runs are for pushes only.
   # `deps`: a manifest, the lock, `deny.toml`, the toolchain or this file changed, which is what `cargo deny` reads.
@@ -635,7 +638,7 @@ jobs:
           else
             echo "code=false" >> "$GITHUB_OUTPUT"
           fi
-          if echo "$changed" | grep -qE '^(crates/tutti-rt/|testing/tutti-shm-model/|Cargo\.lock$|rust-toolchain\.toml$|\.github/workflows/ci\.yml$)'; then
+          if echo "$changed" | grep -qE '^(crates/tutti-rt/|crates/tutti-plugin-ipc-ffi/|Cargo\.lock$|rust-toolchain\.toml$|\.github/workflows/ci\.yml$)'; then
             echo "loom=true" >> "$GITHUB_OUTPUT"
           else
             echo "loom=false" >> "$GITHUB_OUTPUT"
@@ -688,7 +691,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' && matrix.group == 'rest' }}
       # `--cfg loom` changes constants the lints see, and no other job compiles that configuration.
       - if: matrix.group == 'rest'
-        run: cargo clippy --locked -p tutti-rt -p tutti-shm-model --all-targets -- -D warnings
+        run: cargo clippy --locked -p tutti-rt -p tutti-plugin-ipc-ffi --all-targets -- -D warnings
       # Nine models, about five minutes at this bound.
       - if: matrix.group == 'pos_ring'
         run: cargo test --locked -p tutti-rt --release --test pos_ring_loom
@@ -708,7 +711,7 @@ jobs:
       - if: matrix.group == 'doorbell'
         run: cargo test --locked -p tutti-rt --release --test doorbell_loom
       - if: matrix.group == 'rest'
-        run: cargo test --locked -p tutti-shm-model --release
+        run: cargo test --locked -p tutti-plugin-ipc-ffi --release --lib loom_model
 
   # The parallel executor's primitives (`SplitMut`/`SplitRw`, `JobGate`, `TaskGraph`) against the shipped code.
   # Its own job so neither loom job nears its timeout.

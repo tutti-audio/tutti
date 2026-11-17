@@ -6,7 +6,7 @@
 
 use super::ClapLoaded;
 use crate::events::ParamBounds;
-use crate::events::{ClapEvent, InputEventList, OutputEventList};
+use crate::events::{ClapEvent, FlushEvents, OutputEventList};
 use crate::types::{ClapParamFlags, ClapParamInfo};
 use crate::types::{Color, ParamAutomationState};
 use tutti_plugin_types::MainThreadMarker;
@@ -225,7 +225,7 @@ impl ClapLoaded {
         main: MainThreadMarker,
         input_events: Vec<ClapEvent>,
     ) -> Vec<ClapEvent> {
-        let mut input_list = InputEventList::from_events(input_events);
+        let mut input_list = FlushEvents::new(input_events);
         input_list.sort_by_time();
         let mut output_list = OutputEventList::new();
 

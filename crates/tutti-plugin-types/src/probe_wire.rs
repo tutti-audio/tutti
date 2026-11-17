@@ -10,7 +10,7 @@
 //! probe did not finish (a crash or a hang), which the reader tells from the
 //! process, not from the file.
 
-use crate::PluginDescriptor;
+use crate::{PluginDescriptor, ResultError};
 use std::ffi::OsString;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -37,24 +37,6 @@ pub enum ProbeOutcome {
     /// The probe ran to its end and the plugin could not be read. The message is
     /// the loader's own reason.
     Failed(String),
-}
-
-/// Why a result file could not be read.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[non_exhaustive]
-pub enum ResultError {
-    /// The file is shorter than its own header or its declared payload.
-    #[error("the probe result is truncated")]
-    Truncated,
-    /// The file does not begin with a result's magic and version.
-    #[error("not a probe result (bad magic or version)")]
-    BadMagic,
-    /// The payload does not decode as a [`ProbeOutcome`].
-    #[error("malformed probe result: {0}")]
-    Malformed(String),
-    /// The file exists and could not be read.
-    #[error("probe result unreadable: {0}")]
-    Io(String),
 }
 
 /// The bytes of a result file for `outcome`.

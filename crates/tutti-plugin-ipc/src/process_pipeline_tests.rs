@@ -51,7 +51,7 @@ fn no_editor(
     _: &tutti_plugin_types::Load,
 ) -> tutti_plugin_types::BridgeResult<Box<dyn tutti_plugin_types::Editor>> {
     Err(tutti_plugin_types::BridgeError::LoadFailed {
-        path: path.to_path_buf(),
+        path: Some(path.to_path_buf()),
         stage: tutti_plugin_types::LoadStage::Opening,
         reason: "no editor in these tests".into(),
     })
@@ -67,7 +67,7 @@ impl crate::Chunks for MidiEventVec {
     fn take(&mut self, _from: usize, _n: usize, _at: usize) {}
 
     fn payload(&mut self, _frames: usize) -> BlockPayload {
-        BlockPayload::default()
+        BlockPayload::new(tutti_types::SampleRate::SR_48K)
     }
 
     fn midi_out(&mut self, events: &MidiEventVec) {
@@ -1530,7 +1530,7 @@ impl crate::Chunks for StatusProbe {
     fn take(&mut self, _from: usize, _n: usize, _at: usize) {}
 
     fn payload(&mut self, _frames: usize) -> BlockPayload {
-        BlockPayload::default()
+        BlockPayload::new(tutti_types::SampleRate::SR_48K)
     }
 
     fn midi_out(&mut self, _events: &MidiEventVec) {}
@@ -1625,7 +1625,7 @@ impl crate::Chunks for LossProbe {
         };
         BlockPayload {
             midi: std::iter::repeat_n(note, self.midi).collect(),
-            ..BlockPayload::default()
+            ..BlockPayload::new(tutti_types::SampleRate::SR_48K)
         }
     }
 
@@ -1872,7 +1872,7 @@ fn two_stale_blocks(
             &mut tutti_plugin_types::ParameterChanges::new(),
             Default::default(),
             Default::default(),
-            Default::default(),
+            tutti_plugin_types::TransportInfo::new(tutti_types::SampleRate::SR_48K),
             Default::default(),
         );
         assert!(submitted.block);

@@ -10,7 +10,7 @@
 //! A call a clock cannot serve does not exist on its session.
 
 /// A session on the offline clock, which the app steps with `render`.
-pub type OfflineSession = crate::Session<Offline>;
+pub type OfflineSession<K = &'static str> = crate::Session<K, Offline>;
 
 /// A session on the system clock, which an OS timer thread steps: no audio in
 /// or out. It is `Send`, so an app may build it on one thread and run it on
@@ -30,7 +30,7 @@ pub type OfflineSession = crate::Session<Offline>;
 ///     build();
 /// }
 /// ```
-pub type SystemSession = crate::Session<SystemClock>;
+pub type SystemSession<K = &'static str> = crate::Session<K, SystemClock>;
 
 use tutti_engine::{Engine, OutputStream};
 
@@ -86,7 +86,7 @@ pub trait Clock: sealed::Sealed + Sized + 'static {
 /// A clock that runs blocks on its own: `DeviceClock` and [`SystemClock`].
 /// Sealed.
 ///
-/// What both share is on `Session<C: RealTime>`: the stream's
+/// What both share is on `Session<K, C: RealTime>`: the stream's
 /// [`faults`](crate::Session::faults), which `Session::update` reports as
 /// [`SessionEvent::Fault`](crate::SessionEvent::Fault), and the listing of
 /// the host's output devices.
@@ -133,7 +133,7 @@ pub struct Detached;
 
 /// A session on the detached clock: a test's, whose graph the caller renders.
 #[cfg(feature = "testing")]
-pub type DetachedSession = crate::Session<Detached>;
+pub type DetachedSession<K = &'static str> = crate::Session<K, Detached>;
 
 /// What a detached session holds: nothing, its audio side stays with the
 /// graph.

@@ -50,12 +50,14 @@
 //! [`harmonic_decay`]: ChromaConfig::harmonic_decay
 
 use crate::level::SILENCE_FLOOR;
+use core::marker::PhantomData;
+
 use tutti_buffers::{Mono, Sample};
 use tutti_types::{Cents, Db, Hz, Note, SampleRate, Samples, Semitones};
 
 use crate::convert::{all_finite, for_blocks, to_f32};
 use crate::framing::{FrameCutter, Framing, check_nyquist};
-use crate::{Error, Result};
+use crate::{Error, Measure, Meter, Result};
 use tutti_dsp::Complex32;
 use tutti_dsp::FftScratch;
 use tutti_dsp::StftGeometry;
@@ -258,16 +260,6 @@ impl ChromaConfig {
         self.tuning = tuning;
         self
     }
-
-    /// A meter that folds audio at `rate`, chunk by chunk.
-    ///
-    /// # Errors
-    ///
-    /// As [`chroma`], for what depends on the framing and the band at `rate`.
-    pub fn measure(&self, rate: impl Into<SampleRate>) -> Result<ChromaMeter> {
-        Ok(ChromaMeter::new(self.plan(rate.into())?))
-    }
-
     /// The config at `rate`.
     ///
     /// # Errors
@@ -311,6 +303,20 @@ impl ChromaConfig {
         };
         plan.band_bins()?;
         Ok(plan)
+    }
+}
+
+impl<S: Sample> Measure<S> for ChromaConfig {
+    type Context = SampleRate;
+    type Meter = ChromaMeter<S>;
+
+    /// A meter that folds audio at `rate`, chunk by chunk.
+    ///
+    /// # Errors
+    ///
+    /// As [`chroma`], for what depends on the framing and the band at `rate`.
+    fn measure(&self, rate: SampleRate) -> Result<ChromaMeter<S>> {
+        Ok(ChromaMeter::new(self.plan(rate)?))
     }
 }
 
@@ -620,12 +626,36 @@ impl ChromaFold {
     }
 }
 
+/// One analysed frame of a [`ChromaMeter`]: its chroma and where it starts.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ChromaFrame {
+    /// The frame's first sample, in [`Samples`] of the stream.
+    pub frame: Samples,
+    /// The frame's chroma, `0..=1` per pitch class from C; all zero for a frame
+    /// with no pitch.
+    pub bins: [f32; CLASSES],
+}
+
+/// The reading of a [`ChromaMeter`]: the mean of the frames folded and the
+/// tuning in use.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ChromaSummary {
+    /// The mean of the frames, per pitch class from C; all zero before the
+    /// first frame.
+    pub mean: [f32; CLASSES],
+    /// The tuning in use: the config's fixed value, or the estimate from the
+    /// peaks seen.
+    pub tuning: Cents,
+}
+
 /// A running chroma at one rate: fed chunks of the buffer in order, of any
-/// length, it cuts the frames at the hop, folds each into a running mean and
-/// reports the mean and the tuning so far.
+/// length, it cuts the frames at the hop, yields each frame's chroma as an
+/// item, folds each into a running mean and reports the mean and the tuning so
+/// far.
 ///
-/// There is no `finish`: the reading, [`mean`](Self::mean) and
-/// [`tuning`](Self::tuning), is available after any push. With
+/// The reading, [`mean`](Self::mean) and [`tuning`](Self::tuning), is
+/// available after any push, and [`finish`](Meter::finish) returns both as a
+/// [`ChromaSummary`]. With
 /// [`Tuning::Estimate`] the tuning is the estimate from the peaks seen so far;
 /// with a fixed tuning the frames equal [`chroma`]'s bit for bit.
 ///
@@ -633,13 +663,14 @@ impl ChromaFold {
 /// there), and its cost is a transform per frame: fit for a consumer thread
 /// that drains a tap, not for an audio callback.
 #[derive(Debug)]
-pub struct ChromaMeter {
+pub struct ChromaMeter<S: Sample = f32> {
     fold: ChromaFold,
     cutter: FrameCutter,
     fft: FftScratch,
+    sample: PhantomData<fn(S)>,
 }
 
-impl ChromaMeter {
+impl<S: Sample> ChromaMeter<S> {
     fn new(plan: ChromaPlan) -> Self {
         let mut fft = FftScratch::new();
         let fold = ChromaFold::new(plan);
@@ -652,32 +683,23 @@ impl ChromaMeter {
             cutter: FrameCutter::new(Framing::new(plan.geometry.window(), plan.geometry.hop())),
             fold,
             fft,
+            sample: PhantomData,
         }
     }
 
-    /// Feeds the next chunk of the buffer, in order, and folds each frame it
-    /// completes. Returns the number of frames folded.
-    ///
-    /// # Errors
-    ///
-    /// [`Error::NonFiniteInput`] when the chunk holds a NaN or infinity. The
-    /// meter is untouched on error.
-    pub fn push<S: Sample>(&mut self, chunk: Mono<'_, S>) -> Result<usize> {
-        if !all_finite(chunk.samples()) {
-            return Err(Error::NonFiniteInput);
-        }
-        let mut folded = 0;
-        for_blocks(chunk.samples(), 1, |block| {
-            self.feed(block, |_| folded += 1);
+    /// Takes finite samples and folds each frame they complete, calling `each`
+    /// with the frame's chroma.
+    fn feed(&mut self, block: &[f32], mut each: impl FnMut(ChromaFrame)) {
+        let Self {
+            fold, cutter, fft, ..
+        } = self;
+        let hop = fold.plan.geometry.hop().get();
+        cutter.feed(block, |index, samples| {
+            each(ChromaFrame {
+                frame: Samples(index * hop),
+                bins: fold.fold_frame(samples, fft),
+            });
         });
-        Ok(folded)
-    }
-
-    /// Takes converted, finite samples and folds each frame they complete,
-    /// calling `each` with the frame's chroma.
-    fn feed(&mut self, block: &[f32], mut each: impl FnMut(&[f32; CLASSES])) {
-        let Self { fold, cutter, fft } = self;
-        cutter.feed(block, |_, samples| each(&fold.fold_frame(samples, fft)));
     }
 
     /// The mean of the frames folded so far, per class; all zero before the
@@ -699,6 +721,37 @@ impl ChromaMeter {
     pub fn reset(&mut self) {
         self.fold.reset();
         self.cutter.reset();
+    }
+}
+
+impl<S: Sample> Meter for ChromaMeter<S> {
+    type Input<'a> = Mono<'a, S>;
+    type Item = ChromaFrame;
+    type Output = ChromaSummary;
+
+    /// Feeds the next chunk of the buffer, in order, folds each frame it
+    /// completes and extends `out` with that frame's chroma.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NonFiniteInput`] when the chunk holds a NaN or infinity. The
+    /// meter is untouched on error.
+    fn push(&mut self, chunk: Mono<'_, S>, out: &mut impl Extend<ChromaFrame>) -> Result<()> {
+        if !all_finite(chunk.samples()) {
+            return Err(Error::NonFiniteInput);
+        }
+        for_blocks(chunk.samples(), 1, |block| {
+            self.feed(block, |frame| out.extend([frame]));
+        });
+        Ok(())
+    }
+
+    /// The mean of the frames folded and the tuning in use.
+    fn finish(self) -> ChromaSummary {
+        ChromaSummary {
+            mean: self.mean(),
+            tuning: self.tuning(),
+        }
     }
 }
 
@@ -768,10 +821,10 @@ pub fn chroma<S: Sample>(
         tuning: Tuning::Fixed(tuning),
         ..plan
     };
-    let mut meter = ChromaMeter::new(fixed);
+    let mut meter: ChromaMeter = ChromaMeter::new(fixed);
     core::mem::swap(&mut meter.fft, fft);
     let mut data = Vec::with_capacity(frames.get() * CLASSES);
-    meter.feed(&samples, |frame| data.extend_from_slice(frame));
+    meter.feed(&samples, |frame| data.extend_from_slice(&frame.bins));
     core::mem::swap(&mut meter.fft, fft);
     Ok(Chroma {
         grid: Grid::new(data, frames, BinCount(CLASSES))?,
@@ -783,6 +836,7 @@ pub fn chroma<S: Sample>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fold_uneven;
 
     const RATE: SampleRate = SampleRate::SR_22K05;
 
@@ -973,16 +1027,22 @@ mod tests {
         assert_eq!(run(&x, &fixed).grid(), batch.grid());
         for chunk in [1usize, 777, 4096, 5000, x.len()] {
             let mut meter = fixed.measure(RATE).unwrap();
-            let mut folded = 0;
+            let mut items = Vec::new();
             for part in x.chunks(chunk) {
-                folded += meter.push(Mono::new(part)).unwrap();
+                meter.push(Mono::new(part), &mut items).unwrap();
             }
-            assert_eq!(folded, batch.grid().frames().get(), "chunk {chunk}");
+            assert_eq!(items.len(), batch.grid().frames().get(), "chunk {chunk}");
+            assert!(
+                items
+                    .iter()
+                    .zip(batch.grid().rows())
+                    .all(|(a, b)| a.bins == b)
+            );
             assert_eq!(meter.mean(), batch.mean(), "chunk {chunk}");
             assert_eq!(meter.tuning(), batch.tuning(), "chunk {chunk}");
         }
         let mut meter = fixed.measure(RATE).unwrap();
-        meter.push(Mono::new(&x)).unwrap();
+        meter.push(Mono::new(&x), &mut Vec::new()).unwrap();
         meter.reset();
         assert_eq!(meter.mean(), [0.0; CLASSES]);
         assert_eq!(meter.tuning(), batch.tuning());
@@ -1001,7 +1061,7 @@ mod tests {
         let read = |chunk: usize| {
             let mut meter = cfg().measure(RATE).unwrap();
             for part in x.chunks(chunk) {
-                meter.push(Mono::new(part)).unwrap();
+                meter.push(Mono::new(part), &mut Vec::new()).unwrap();
             }
             (meter.mean(), meter.tuning())
         };
@@ -1018,7 +1078,9 @@ mod tests {
         let x = sine(440.0 * (25.0f64 / 1200.0).exp2(), 4096, 0.5);
         let mut meter = cfg().measure(RATE).unwrap();
         assert_eq!(meter.tuning(), Cents(0.0));
-        assert_eq!(meter.push(Mono::new(&x)).unwrap(), 1);
+        let mut frames = Vec::new();
+        meter.push(Mono::new(&x), &mut frames).unwrap();
+        assert_eq!(frames.len(), 1);
         assert!((meter.tuning().get() - 25.0).abs() < 1.0);
     }
 
@@ -1028,11 +1090,14 @@ mod tests {
     fn a_refused_chunk_keeps_the_carry_and_reset_reads_fresh() {
         let x = sine(440.0 * (25.0f64 / 1200.0).exp2(), 4096, 0.5);
         let mut meter = cfg().measure(RATE).unwrap();
-        meter.push(Mono::new(&x)).unwrap();
+        meter.push(Mono::new(&x), &mut Vec::new()).unwrap();
         let (mean, tuning) = (meter.mean(), meter.tuning());
         let mut nan = x.clone();
         nan[7] = f32::NAN;
-        assert_eq!(meter.push(Mono::new(&nan)), Err(Error::NonFiniteInput));
+        assert_eq!(
+            meter.push(Mono::new(&nan), &mut Vec::new()),
+            Err(Error::NonFiniteInput)
+        );
         assert_eq!((meter.mean(), meter.tuning()), (mean, tuning));
 
         meter.reset();
@@ -1044,7 +1109,7 @@ mod tests {
     /// against the bins it holds, where the rate binds.
     #[test]
     fn the_framing_and_band_are_validated() {
-        let at = |window, hop| cfg().framing(framing(window, hop)).measure(RATE);
+        let at = |window, hop| Measure::<f32>::measure(&cfg().framing(framing(window, hop)), RATE);
         assert!(matches!(at(32, 8), Err(Error::WindowOutOfRange { .. })));
         assert!(matches!(
             at(1 << 19, 1 << 17),
@@ -1087,7 +1152,7 @@ mod tests {
             Err(Error::AboveNyquist { .. })
         ));
         assert!(matches!(
-            wide.measure(RATE),
+            Measure::<f32>::measure(&wide, RATE),
             Err(Error::AboveNyquist { .. })
         ));
         // A low rate clamps the default band to Nyquist instead of failing.
@@ -1150,5 +1215,37 @@ mod tests {
             .collect();
         let c = chroma(&cfg(), Mono::new(&x), RATE, &mut FftScratch::new()).unwrap();
         assert_eq!(c.mean()[9], 1.0);
+    }
+
+    /// The trait fold over uneven chunks (1, 7, 64 samples and the rest) yields
+    /// the chroma rows of `chroma` as its items, and their mean and the
+    /// tuning as its output, at a fixed tuning.
+    #[test]
+    fn the_trait_fold_over_uneven_chunks_equals_the_chroma_rows() {
+        let x = sine(440.0, 30_000, 0.5);
+        let fixed = cfg().tuning(Tuning::Fixed(TuningOffset::new(Cents(0.0)).unwrap()));
+        let batch = run(&x, &fixed);
+        let (items, summary) = fold_uneven(&fixed, RATE, x.len(), |meter, at, out| {
+            meter.push(Mono::new(&x[at]), out)
+        })
+        .unwrap();
+        assert_eq!(items.len(), batch.grid().frames().get());
+        assert!(items.len() > 3);
+        assert!(
+            items
+                .iter()
+                .zip(batch.grid().rows())
+                .all(|(a, b)| a.bins == b)
+        );
+        let hop = batch.framing().hop().get();
+        assert!(
+            items
+                .iter()
+                .enumerate()
+                .all(|(i, f)| f.frame == Samples(i * hop)),
+            "each frame names the sample it starts at"
+        );
+        assert_eq!(summary.mean, batch.mean());
+        assert_eq!(summary.tuning, batch.tuning());
     }
 }

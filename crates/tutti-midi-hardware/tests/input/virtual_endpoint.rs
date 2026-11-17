@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use super::listener::Listener;
 
 use tutti_alsa_ffi::{
-    Blocking, CAP_READ, CAP_WRITE, Client, PROTO_MIDI1, PROTO_MIDI2, PortEntry, Read,
+    Blocking, CAP_READ, CAP_WRITE, Client, PROTO_MIDI1, PROTO_MIDI2, Packet, PortEntry, Read,
     TYPE_APPLICATION, TYPE_MIDI_GENERIC, UmpVersion,
 };
 use tutti_fixtures::midi::{
@@ -69,7 +69,7 @@ fn read(peer: &Client, count: usize) -> Vec<[u32; 4]> {
         assert!(Instant::now() < deadline, "only {got:?} arrived");
         match peer.read_event().expect("a read") {
             Read::Event(event) => got.push(event.ump),
-            Read::Empty | Read::Skipped => std::thread::sleep(Duration::from_millis(1)),
+            Read::Empty => std::thread::sleep(Duration::from_millis(1)),
         }
     }
     got
@@ -114,7 +114,8 @@ fn a_virtual_destination_delivers_what_a_client_sends_to_the_graph_in_order() {
 
     let sent = notes(5);
     for ump in &sent {
-        peer.send_to_subscribers(port, ump.words()).expect("sends");
+        peer.send_to_subscribers(port, Packet::new(ump.words()).unwrap())
+            .expect("sends");
     }
     let heard = listener.hear(sent.len(), PATIENCE);
     assert_eq!(heard, sent);
@@ -142,7 +143,8 @@ fn jr_messages_a_client_sends_are_not_heard_by_an_arrival_port() {
     let stamp = Ump::from(Message::Utility(Utility::JrTimestamp(0x1300)));
     let note = note_on(MidiChannel::of(2), 60, 0x8000);
     for ump in [clock, stamp, note] {
-        peer.send_to_subscribers(port, ump.words()).expect("sends");
+        peer.send_to_subscribers(port, Packet::new(ump.words()).unwrap())
+            .expect("sends");
     }
     assert_eq!(listener.hear(1, PATIENCE), [note]);
 }
@@ -220,7 +222,8 @@ fn a_midi1_destination_reports_midi1_and_its_messages_arrive_widened() {
     peer.connect_to(port, found.client, found.port)
         .expect("subscribes");
     let note = m1_note_on(MidiChannel::of(2), 60, U7::of(0x40));
-    peer.send_to_subscribers(port, note.words()).expect("sends");
+    peer.send_to_subscribers(port, Packet::new(note.words()).unwrap())
+        .expect("sends");
     let heard = listener.hear(1, PATIENCE);
     assert_eq!(heard, [note_on(MidiChannel::of(2), 60, 0x8000)]);
 }
@@ -312,8 +315,7 @@ fn a_program_change_with_a_bank_reaches_a_midi1_subscriber_as_bank_select_and_pr
 
 /// A Registered Controller sent into a MIDI 1.0 source reaches a subscriber as
 /// the four Control Changes of M2-104 Appendix D.2.3 (CC 101, 100, 6, 38), and
-/// a second value for the same parameter, from the source's one narrower, is
-/// only CC 6 and CC 38: the select is already there.
+/// a second value for the same parameter is the four again.
 #[test]
 fn a_registered_controller_reaches_a_midi1_subscriber_as_the_rpn_sequence() {
     let spec = spec("rpn").with_protocol(VirtualProtocol::Midi1);
@@ -331,12 +333,14 @@ fn a_registered_controller_reaches_a_midi1_subscriber_as_the_rpn_sequence() {
     source
         .send(registered(channel, Rpn::PITCH_BEND_SENSITIVITY, 7 << 25))
         .expect("sends");
-    let got = read(&peer, 6);
+    let got = read(&peer, 8);
     let want = [
         cc(101, 0),
         cc(100, 0),
         cc(6, 12),
         cc(38, 0),
+        cc(101, 0),
+        cc(100, 0),
         cc(6, 7),
         cc(38, 0),
     ];

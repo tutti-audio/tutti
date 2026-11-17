@@ -481,13 +481,11 @@ impl MidiSendBuffer {
             // bank is CC 0, CC 32, PC; an RPN or NRPN is CC 101 and 100 or 99
             // and 98, then CC 6 and 38): each takes a slot at the same frame,
             // and all of them fit or none is staged (a bank is not sent
-            // without its program). The narrower keeps what the plugin has had
-            // selected, so a refusal makes it forget: the next one is in full.
+            // without its program).
             let mut messages = [[0u8; 3]; MAX_MESSAGES];
             let n = narrowed(&mut self.narrower, *ev, &mut messages);
             if self.order.len() + n > self.room {
                 self.events_dropped.add(n as u64);
-                self.narrower.reset();
                 continue;
             }
             for message in &messages[..n] {
@@ -603,9 +601,8 @@ impl MidiSendBuffer {
     }
 
     /// The plugin was reset: drops a SysEx message open across the reset
-    /// (counted in [`sysex_dropped`](Self::sysex_dropped)) and forgets which RPN,
-    /// NRPN and bank each channel has had selected, so the next controller selects
-    /// in full. Never allocates.
+    /// (counted in [`sysex_dropped`](Self::sysex_dropped)) and resets the narrower.
+    /// Never allocates.
     pub fn reset_midi(&mut self) {
         self.sysex.reset();
         self.count_sysex_drops();
@@ -1406,12 +1403,12 @@ mod tests {
         assert_eq!(buf.groups_dropped().get(), 2);
     }
 
-    /// **An RPN is four Control Changes through the stateful narrower** (M2-104
-    /// Appendix D.2.3): CC 101 and 100 select, CC 6 and 38 carry the top 14 bits
-    /// (12 << 25 is MSB 12, LSB 0); the select is not repeated for the same
-    /// parameter, across blocks, and is sent in full again after a reset.
+    /// **An RPN is four Control Changes every time** (M2-104 Appendix D.2.3): CC
+    /// 101 and 100 select, CC 6 and 38 carry the top 14 bits (12 << 25 is MSB
+    /// 12, LSB 0); the same parameter in the next block is the four again, and
+    /// so is one after a reset.
     #[test]
-    fn an_rpn_is_four_control_changes_and_the_select_is_not_repeated() {
+    fn an_rpn_is_four_control_changes_every_time() {
         use tutti_ump::MidiChannel;
         let rpn = |value| {
             at(
@@ -1431,17 +1428,70 @@ mod tests {
         );
         assert_eq!(
             staged_bytes(&mut buf, &[rpn(24 << 25)]),
-            [vec![0xB1, 6, 24], vec![0xB1, 38, 0]]
+            [
+                vec![0xB1, 101, 0],
+                vec![0xB1, 100, 0],
+                vec![0xB1, 6, 24],
+                vec![0xB1, 38, 0],
+            ]
         );
         buf.reset_midi();
         assert_eq!(staged_bytes(&mut buf, &[rpn(12 << 25)]).len(), 4);
     }
 
-    /// **A bank is resent only when it changes** (M2-104 Appendix D.2.4), and a
-    /// refused message (past the room) makes the narrower forget, so the next
-    /// one is sent in full.
+    /// **A refused message leaves an MPE note's member channel as it was**: the
+    /// narrower's note allocation survives a message past the room, so the
+    /// note's per-note bend still goes to its channel (M2-104 D.2.8).
     #[test]
-    fn a_bank_is_resent_only_when_it_changes() {
+    fn a_refused_message_keeps_an_mpe_notes_channel() {
+        use tutti_midi_protocol::{
+            ExtremeValues, MpeZoneConfig, PerNoteTranslation, PitchBendSensitivity, TranslationMode,
+        };
+        use tutti_ump::{Address, Attribute, BendValue, ControlValue, Message, NoteNumber};
+        use tutti_ump::{NoteVelocity, Voice2};
+        let zone = MpeZoneConfig::lower(
+            2,
+            PitchBendSensitivity::MPE_MASTER_DEFAULT,
+            PitchBendSensitivity::MPE_MEMBER_DEFAULT,
+        )
+        .unwrap();
+        // Room for the note, the bend and one more: the RPN's four do not fit.
+        let mut buf = MidiSendBuffer::with_capacity(3);
+        buf.narrower = Narrower::with_mode(TranslationMode {
+            extremes: ExtremeValues::Scaled,
+            per_note: PerNoteTranslation::Mpe(zone),
+        });
+        let address = Address::new(MidiGroup::FIRST, MidiChannel::FIRST);
+        let note = NoteNumber::of(60);
+        let ump = |voice| at(0, Message::midi2(address, voice).into());
+        let midi = [
+            ump(Voice2::NoteOn {
+                note,
+                velocity: NoteVelocity::new(0x8000),
+                attribute: Attribute::None,
+            }),
+            ump(Voice2::registered(
+                tutti_ump::Rpn::PITCH_BEND_SENSITIVITY,
+                ControlValue::new(12 << 25),
+            )),
+            ump(Voice2::PerNotePitchBend {
+                note,
+                value: BendValue::new(0x8000_0000),
+            }),
+        ];
+        // Note On on member channel 2 (0x91), then its Pitch Bend, centre 0x2000.
+        assert_eq!(
+            staged_bytes(&mut buf, &midi),
+            [vec![0x91, 60, 0x40], vec![0xE1, 0x00, 0x40]]
+        );
+        assert_eq!(buf.events_dropped().get(), 4);
+    }
+
+    /// **A banked Program Change is three messages every time** (M2-104
+    /// Appendix D.2.4), and a refused message (past the room) is dropped whole,
+    /// so the next one is sent in full.
+    #[test]
+    fn a_banked_program_change_is_three_messages_every_time() {
         use tutti_ump::MidiChannel;
         let pc = |program, bank| at(0, midi::program_change(MidiChannel::FIRST, program, bank));
         let bank = Some(Bank {
@@ -1453,7 +1503,10 @@ mod tests {
             staged_bytes(&mut buf, &[pc(3, bank)]),
             [vec![0xB0, 0, 5], vec![0xB0, 32, 9], vec![0xC0, 3, 0]]
         );
-        assert_eq!(staged_bytes(&mut buf, &[pc(4, bank)]), [vec![0xC0, 4, 0]]);
+        assert_eq!(
+            staged_bytes(&mut buf, &[pc(4, bank)]),
+            [vec![0xB0, 0, 5], vec![0xB0, 32, 9], vec![0xC0, 4, 0]]
+        );
         assert_eq!(
             staged_bytes(
                 &mut buf,
@@ -1470,8 +1523,8 @@ mod tests {
         );
 
         // A buffer with room for three: a note then the three-message bank for
-        // bank B does not fit, so the bank is refused whole, and the narrower
-        // forgets it sent bank B: the next Program Change of B is in full.
+        // bank B does not fit, so the bank is refused whole and the next Program
+        // Change of B is in full.
         let note = at(0, midi::note_on(MidiChannel::FIRST, 60, 0x8000));
         let mut tight = MidiSendBuffer::with_capacity(3);
         let bank_b = Some(Bank {

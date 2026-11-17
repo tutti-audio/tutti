@@ -203,8 +203,7 @@ pub(crate) fn property_exchange(message: &Message) -> bool {
 /// the rest of the header, Start of Clip, each event behind its Delta
 /// Clockstamp, and End of Clip behind the DCS that makes the clip `end` ticks
 /// long. `header` and `events` are absolute ticks in order (the header's on
-/// its own clock), `events` none past `end`, no two more than `u32::MAX` apart
-/// (the caller checks; [`MidiFile`] does), and the header ends at `header_end`,
+/// its own clock), `events` none past `end`, and the header ends at `header_end`,
 /// not before its last message: the Delta Clockstamp before Start of Clip is
 /// the gap that makes it so.
 ///
@@ -375,6 +374,13 @@ fn push_delta(out: &mut Vec<u8>, mut ticks: u64) {
         ticks -= DCS_MAX;
     }
     push_words(out, delta_clockstamp(ticks).words());
+}
+
+/// The bytes of the Delta Clockstamp and Null pairs that restart the count
+/// over `ticks` of gap (8 bytes a restart): what a gap of that length costs to
+/// write beyond its own Delta Clockstamp.
+pub(crate) fn restart_bytes(ticks: u64) -> u64 {
+    ticks / DCS_MAX * 8
 }
 
 fn dctpq(ticks_per_quarter: TicksPerQuarterNote) -> Ump {
