@@ -72,8 +72,7 @@ fn a_fan_in_sum_and_a_gain_keep_the_figure_f32_rounds_away() {
     );
 }
 
-/// A caller's `f64` planes are read as they are, and a caller's `f64` planes
-/// are written as they are, through the same blocks.
+/// A caller's `f64` planes are read as they are.
 #[test]
 fn caller_planes_cross_the_renderer_at_f64() {
     let mut g = GraphBuilder::<f64>::with_format(ChannelLayout::MONO, ChannelLayout::MONO);
@@ -83,8 +82,17 @@ fn caller_planes_cross_the_renderer_at_f64() {
     let input = vec![FINE; 40];
     let out = r.render_input(Planes::new(&[&input[..]]).expect("one plane"));
     assert!(out[0].iter().all(|&x| x == 0.5 * FINE));
+}
 
-    let mut into = vec![0.0f64; 40];
+/// `render_into` writes the caller's `f64` planes whole: a buffer pre-filled
+/// with a sentinel reads `FINE` in every sample afterwards.
+#[test]
+fn render_into_overwrites_the_callers_f64_planes() {
+    let mut g = GraphBuilder::<f64>::with_format(ChannelLayout::EMPTY, ChannelLayout::MONO);
+    let dc = g.add(ForkByClone(Dc(FINE)));
+    g.connect_output(dc, 0, 0);
+    let mut r = g.renderer(prepare()).expect("builds at f64");
+    let mut into = vec![-7.0f64; 40];
     r.render_into(PlanesMut::new(&mut [&mut into[..]]).expect("one plane"));
-    assert!(into.iter().all(|&x| x == 0.0), "silent inputs, halved");
+    assert!(into.iter().all(|&x| x == FINE), "{:?}", &into[..3]);
 }

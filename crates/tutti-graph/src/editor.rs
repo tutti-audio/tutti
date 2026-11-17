@@ -335,28 +335,27 @@ impl Editor {
     /// another sample format.
     #[must_use]
     pub fn new(prepare: Prepare) -> (Self, Executor) {
-        Self::with_event_capacity(prepare, DEFAULT_EVENT_CAPACITY)
-    }
-
-    /// As [`new`](Self::new), with `cap` events per block as the default
-    /// capacity of an event output port whose node declares none
-    /// ([`Shape::event_capacity`](crate::Shape::event_capacity)) — its
-    /// writer's limit, and the rate the delay FIFOs fed by it are sized
-    /// from. A declared capacity overrides it for that node's ports.
-    #[must_use]
-    pub fn with_event_capacity(prepare: Prepare, cap: usize) -> (Self, Executor) {
-        Self::with_format(prepare, cap)
+        Self::with_format(prepare)
     }
 }
 
 impl<F: Float> Editor<F> {
     /// An empty graph in sample format `F`, and the executor that will run
-    /// it, both for `prepare`, with `cap` events per block as the default
-    /// capacity of an event output port
-    /// ([`with_event_capacity`](Editor::with_event_capacity)). The only way
-    /// to build an [`Executor`].
+    /// it, both for `prepare`, with the default event capacity
+    /// ([`with_event_capacity`](Self::with_event_capacity)).
     #[must_use]
-    pub fn with_format(prepare: Prepare, cap: usize) -> (Self, Executor<F>) {
+    pub fn with_format(prepare: Prepare) -> (Self, Executor<F>) {
+        Self::with_event_capacity(prepare, DEFAULT_EVENT_CAPACITY)
+    }
+
+    /// As [`with_format`](Self::with_format), with `cap` events per block as
+    /// the default capacity of an event output port whose node declares none
+    /// ([`Shape::event_capacity`](crate::Shape::event_capacity)) — its
+    /// writer's limit, and the rate the delay FIFOs fed by it are sized
+    /// from. A declared capacity overrides it for that node's ports. The only
+    /// way to build an [`Executor`].
+    #[must_use]
+    pub fn with_event_capacity(prepare: Prepare, cap: usize) -> (Self, Executor<F>) {
         let (channels, ends) = channels();
         let (commands, command_rx) = command_channel();
         let stager = Stager::new(

@@ -61,8 +61,8 @@ pub use walk::TempoAhead;
 /// A renderer driving the graph (`tutti_graph::Executor`) must also *hand*
 /// each block a transport, since
 /// the graph's clock is the executor's `Env`, not a node — that is
-/// [`graph_block`](Self::graph_block), and [`render_graph`]
-/// is the one order the two are called in. It is still not a supertrait of
+/// [`graph_block`](Self::graph_block), which [`render_graph`] reads through
+/// [`graph_piece`](Self::graph_piece) and so is the one order they are called in. It is still not a supertrait of
 /// `Timeline`: a clock that does not move (`FrozenClock`) has a transport to
 /// report — stopped, at beat zero — without being a timeline anything reads.
 ///
@@ -82,8 +82,9 @@ pub trait RenderClock: Send + Sync {
 
     /// The block about to be rendered as the graph takes it: the
     /// transport at the block's first frame, and the changes inside it. Read
-    /// **before** the block is processed, as [`render_graph`]
-    /// does.
+    /// **before** the block is processed, as [`render_graph`] does through
+    /// [`graph_piece`](Self::graph_piece), whose default is this over the
+    /// whole block.
     ///
     /// Required, not defaulted. The obvious default — stopped, at beat zero —
     /// is right for a clock that does not move and wrong for every clock that
@@ -122,7 +123,9 @@ pub trait RenderClock: Send + Sync {
 /// `Executor::process_with_changes`, then [`advance`](RenderClock::advance),
 /// again for each piece — the one order that keeps every reader of the clock
 /// on the frame the graph renders (emit-then-advance, as above). The block is
-/// the frames of `outputs`; `inputs` holds at least as many per channel, or
+/// the frames of `outputs`, so it needs at least one output plane (a view
+/// has none to give otherwise); a block of zero frames renders nothing and
+/// leaves the clock where it was. `inputs` holds at least as many per channel, or
 /// is [`Planes::default`] for a graph that reads none. A clock whose block
 /// has more changes than the executor takes splits it into pieces, each
 /// narrowed from the views as the executor's slice tables, held in fixed

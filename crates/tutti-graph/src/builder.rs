@@ -50,7 +50,7 @@ use crate::{Edge, FeedbackFrom, InPort, NodeSpec, OutPort, Source};
 use tutti_types::{ChannelLayout, Frame, Samples};
 
 use crate::editor::{CommitError, Editor};
-use crate::exec::{DEFAULT_EVENT_CAPACITY, Executor};
+use crate::exec::Executor;
 use crate::node::{IntoNode, NodeParts, Prepare, Shape, TransportPosition};
 use crate::spec::{EventEdge, EventIn, EventOut, GraphSpec};
 use tutti_buffers::{Float, Planes, PlanesMut};
@@ -650,7 +650,7 @@ impl<F: Float> GraphBuilder<F> {
     /// delay shorter than `prepare`'s maximum block, a width mismatch, and
     /// so on.
     pub fn build(self, prepare: Prepare) -> Result<(Editor<F>, Executor<F>), CommitError> {
-        let (mut editor, mut executor) = Editor::<F>::with_format(prepare, DEFAULT_EVENT_CAPACITY);
+        let (mut editor, mut executor) = Editor::<F>::with_format(prepare);
         for Pending { key, kind, unit } in self.units {
             // No wiring is recorded yet (it moves across below), so nothing is unwired.
             editor.insert(key, &kind, unit);

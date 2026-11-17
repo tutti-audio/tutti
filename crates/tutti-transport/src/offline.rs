@@ -733,6 +733,31 @@ mod tests {
         assert_eq!(timeline.beat(), Beat(100.0 / 24_000.0));
     }
 
+    /// A block of zero frames renders nothing and leaves the clock where it
+    /// was: the output keeps what it held and the playhead does not move.
+    #[test]
+    fn a_zero_frame_block_renders_nothing_and_leaves_the_clock() {
+        use tutti_buffers::{Planes, PlanesMut};
+        use tutti_graph::{GraphBuilder, Prepare};
+        use tutti_types::{ChannelLayout, MaxBlock};
+
+        let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
+        g.set_output(0, tutti_graph::Source::Zero);
+        let (_editor, mut exec) = g
+            .build(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(128))))
+            .expect("builds");
+        let timeline = OfflineTimeline::new(&config(0.0));
+        let mut none: [f32; 0] = [];
+        crate::render_graph(
+            &timeline,
+            &mut exec,
+            Planes::default(),
+            PlanesMut::new(&mut [&mut none[..]]).expect("one empty plane"),
+        );
+        assert_eq!(timeline.beat(), Beat(0.0));
+        assert_eq!(exec.frame().get(), 0);
+    }
+
     /// A ramp is followed: from beat 0 of 97 to 120 BPM over 4 beats (tempo
     /// linear in time, so `T = 2 x 4 / (97 + 120) x 60` s) the first cell's
     /// tempo is the chord of the curve over its 128 frames, written out here

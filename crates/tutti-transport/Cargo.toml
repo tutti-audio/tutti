@@ -15,7 +15,7 @@ workspace = true
 
 [dependencies]
 tutti-types = { version = "0.0.1", path = "../tutti-types" }
-# `RenderClock::render_graph` takes the buffer views.
+# `render_graph` takes the buffer views.
 tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 # `RenderClock` hands a block's transport to the graph's executor.
 tutti-graph = { version = "0.0.1", path = "../tutti-graph" }

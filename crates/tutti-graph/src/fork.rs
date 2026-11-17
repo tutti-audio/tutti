@@ -315,7 +315,7 @@ impl<F: Float> PendingFork<F> {
             return Err((error, ForkRemains { units, graph: None }));
         }
 
-        let (mut editor, mut executor) = Editor::<F>::with_format(prepare, event_capacity);
+        let (mut editor, mut executor) = Editor::<F>::with_event_capacity(prepare, event_capacity);
         for (key, (forked, wake)) in built {
             let kind = &spec.topology.nodes[&key].kind;
             // Not forkable itself (module docs: a fork is not a fork source).
