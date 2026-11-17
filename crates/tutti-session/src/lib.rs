@@ -178,8 +178,8 @@ pub use midi::{
 };
 #[cfg(feature = "midi-hardware")]
 pub use midi_ci::{
-    ChannelProfile, ListedProfile, ProfilePeer, ReportPeer, RequestReport, SwitchProfile,
-    WholeProfile,
+    ChannelProfile, GetProperty, ListedProfile, ListedResource, PeFailure, ProfilePeer, ReportPeer,
+    RequestReport, ResourcePeer, SetProperty, SwitchProfile, WholeProfile,
 };
 #[cfg(feature = "midi")]
 pub use midi_follow::{FollowClock, FollowMachineControl, FollowTempo, SendMachineControl};
