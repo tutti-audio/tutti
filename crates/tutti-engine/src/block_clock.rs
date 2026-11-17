@@ -50,7 +50,8 @@ pub enum BlockDates {
     Os,
     /// Each call is dated by the frames rendered before it: call `n` begins at
     /// the origin plus the sum, over the blocks before it, of each block's
-    /// frames over the rate in force for that block. The origin is the
+    /// frames over the rate in force for that block, in integer arithmetic
+    /// (the rate to the millihertz). The origin is the
     /// [`tutti_rt::monotonic_ns`] reading when the engine is built, so the
     /// dates stay on the OS scale and a re-rate between blocks moves nothing
     /// already dated. No clock is read while rendering: the same renders
@@ -72,12 +73,26 @@ pub enum BlockDates {
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum DateKeeper {
     Os,
+    /// Integers only: the time up to the last rate change, and the frames
+    /// rendered since at that rate, so a date has no drift however long the
+    /// render.
     Frames {
         origin: i64,
-        /// The nanoseconds of the frames rendered so far, each block's added
-        /// at its own rate.
-        elapsed_ns: f64,
+        /// The nanoseconds of the frames rendered before the last rate change.
+        base_ns: u128,
+        /// The frames rendered since, at `rate_mhz`.
+        frames: u128,
+        /// The rate in millihertz; 0 before the first block.
+        rate_mhz: u128,
     },
+}
+
+/// Nanoseconds of `frames` at `rate_mhz` millihertz, rounded half up.
+fn ns_of(frames: u128, rate_mhz: u128) -> u128 {
+    if rate_mhz == 0 {
+        return 0;
+    }
+    (frames * 1_000_000_000_000 + rate_mhz / 2) / rate_mhz
 }
 
 impl DateKeeper {
@@ -87,7 +102,9 @@ impl DateKeeper {
             BlockDates::Os => Self::Os,
             BlockDates::Frames => Self::Frames {
                 origin: tutti_rt::monotonic_ns(),
-                elapsed_ns: 0.0,
+                base_ns: 0,
+                frames: 0,
+                rate_mhz: 0,
             },
         }
     }
@@ -97,14 +114,35 @@ impl DateKeeper {
     pub(crate) fn date(&self, due: Option<i64>) -> i64 {
         match *self {
             Self::Os => due.unwrap_or_else(tutti_rt::monotonic_ns),
-            Self::Frames { origin, elapsed_ns } => origin.saturating_add(elapsed_ns.round() as i64),
+            Self::Frames {
+                origin,
+                base_ns,
+                frames,
+                rate_mhz,
+            } => {
+                let ns = i64::try_from(base_ns + ns_of(frames, rate_mhz)).unwrap_or(i64::MAX);
+                origin.saturating_add(ns)
+            }
         }
     }
 
-    /// Counts `frames` rendered at `rate`.
-    pub(crate) fn advance(&mut self, frames: usize, rate: SampleRate) {
-        if let Self::Frames { elapsed_ns, .. } = self {
-            *elapsed_ns += Samples(frames).to_seconds(rate).get() * 1e9;
+    /// Counts `frames` rendered at `rate`; a change of rate folds the frames
+    /// so far into the time.
+    pub(crate) fn advance(&mut self, count: usize, rate: SampleRate) {
+        if let Self::Frames {
+            base_ns,
+            frames,
+            rate_mhz,
+            ..
+        } = self
+        {
+            let now = (rate.get() * 1000.0).round() as u128;
+            if now != *rate_mhz {
+                *base_ns += ns_of(*frames, *rate_mhz);
+                *frames = 0;
+                *rate_mhz = now;
+            }
+            *frames += count as u128;
         }
     }
 }
