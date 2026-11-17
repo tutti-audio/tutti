@@ -76,10 +76,10 @@ use super::link::Link;
 use tutti_ump::{MidiChannel, U7};
 
 use super::{
-    Ack, CiDeviceId, CiHeader, CiMessage, Decoded, Destination, DetailsData, InquiryTarget, Muid,
-    Nak, PEER_REPLY_TIMEOUT, ProfileChannels, ProfileId, ProfileLists, ProfileState,
-    SUB_ID2_PROFILE_DETAILS_INQUIRY, SUB_ID2_PROFILE_INQUIRY, SUB_ID2_SET_PROFILE_OFF,
-    SUB_ID2_SET_PROFILE_ON, SpecificData,
+    Ack, CiDeviceId, CiHeader, CiMessage, CiVersion, Decoded, Destination, DetailsData,
+    InquiryTarget, Muid, Nak, PEER_REPLY_TIMEOUT, ProfileChannels, ProfileId, ProfileLists,
+    ProfileState, SUB_ID2_PROFILE_DETAILS_INQUIRY, SUB_ID2_PROFILE_INQUIRY,
+    SUB_ID2_SET_PROFILE_OFF, SUB_ID2_SET_PROFILE_ON, SpecificData,
 };
 
 /// Whether the five detail bytes of an ACK or a NAK name `profile` (§5.10.3, §5.11.3), or
@@ -88,12 +88,13 @@ fn details_name(details: [u8; 5], profile: ProfileId) -> bool {
     details == profile.to_bytes() || details == [0; 5]
 }
 
-/// Where a Set Profile On is aimed, and how many Channels it asks for (§7.8).
+/// Where a Set Profile On, Profile Enabled or Profile Disabled is aimed, and how
+/// many Channels it names (§7.8, §7.10, §7.11).
 ///
 /// For a Profile Destination of address 0x7E or 0x7F the number of Channels is
-/// the width of the Group or Function Block, and Number Channels Requested is
-/// 0x0000: so only a Channel has a
-/// count to give, and a Group or Function Block has none to get wrong.
+/// the width of the Group or Function Block, and the Number of Channels field
+/// is 0x0000: so only a Channel has a count to give, and a Group or Function
+/// Block has none to get wrong.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProfileTarget {
     /// A Channel, the Manager Channel of a multi-Channel Profile, and the total
@@ -122,7 +123,27 @@ impl ProfileTarget {
         }
     }
 
-    /// The Number Channels Requested field.
+    /// The target at `address` with `channels` as the message carries them, or
+    /// the count when a Group or Function Block address carries one other than 0.
+    ///
+    /// # Errors
+    ///
+    /// The count, for a Group or Function Block address.
+    pub(super) const fn from_wire(
+        address: CiDeviceId,
+        channels: ProfileChannels,
+    ) -> Result<Self, u16> {
+        match address {
+            CiDeviceId::Channel(channel) => Ok(Self::Channel { channel, channels }),
+            CiDeviceId::Group | CiDeviceId::FunctionBlock if !channels.is_by_address() => {
+                Err(channels.get())
+            }
+            CiDeviceId::Group => Ok(Self::Group),
+            CiDeviceId::FunctionBlock => Ok(Self::FunctionBlock),
+        }
+    }
+
+    /// The Number of Channels field.
     #[must_use]
     pub const fn channels(self) -> ProfileChannels {
         match self {
@@ -460,14 +481,14 @@ impl ProfileInitiator {
         now: Instant,
     ) -> Result<Vec<ProfileAction>, RequestError> {
         let address = target.address();
-        let channels = target.channels();
         self.begin(Request::SetOn { address, profile }, now)?;
         Ok(vec![self.send(address, |header, to| {
             CiMessage::SetProfileOn {
-                header,
+                source: header.source,
+                ci_version: header.ci_version,
                 to,
+                target,
                 profile,
-                channels,
             }
         })])
     }
@@ -566,27 +587,27 @@ impl ProfileInitiator {
                 self.on_reply(address, profiles, &mut actions);
             }
             CiMessage::ProfileEnabled {
-                header,
+                ci_version,
+                target,
                 profile,
-                channels,
+                ..
             } if from_peer => self.on_state(
-                address,
                 *profile,
                 ProfileState::Enabled,
-                *channels,
-                header,
+                *target,
+                *ci_version,
                 &mut actions,
             ),
             CiMessage::ProfileDisabled {
-                header,
+                ci_version,
+                target,
                 profile,
-                channels,
+                ..
             } if from_peer => self.on_state(
-                address,
                 *profile,
                 ProfileState::Disabled,
-                *channels,
-                header,
+                *target,
+                *ci_version,
                 &mut actions,
             ),
             CiMessage::ProfileAdded { profile, .. } if from_peer => {
@@ -681,17 +702,18 @@ impl ProfileInitiator {
 
     fn on_state(
         &mut self,
-        address: CiDeviceId,
         profile: ProfileId,
         state: ProfileState,
-        channels: ProfileChannels,
-        header: &CiHeader,
+        target: ProfileTarget,
+        ci_version: CiVersion,
         actions: &mut Vec<ProfileAction>,
     ) {
+        let address = target.address();
+        let channels = target.channels();
         let entry = ProfileEntry {
             state,
             // A Version 1 sender has no count to report.
-            channels: (header.ci_version.get() >= 2).then_some(channels),
+            channels: (ci_version.get() >= 2).then_some(channels),
         };
         if self.table.set(address, profile, entry) {
             actions.push(ProfileAction::Changed {

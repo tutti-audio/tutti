@@ -921,7 +921,7 @@ fn a_ci_peers_product_instance_id_fills_what_the_device_left() {
 use crate::{ChannelCount, ProfileError, ProfilesChange, Switcher, Whole};
 use tutti_midi_device::{
     Outcome, PEER_REPLY_TIMEOUT, ProfileChange, ProfileChannels, ProfileId, ProfileLists,
-    ProfileState, Request, StandardProfile,
+    ProfileState, ProfileTarget, Request, StandardProfile,
 };
 use tutti_ump::MidiChannel;
 
@@ -936,6 +936,13 @@ fn profile(number: u8) -> ProfileId {
 
 fn channel(n: u8) -> CiDeviceId {
     CiDeviceId::Channel(MidiChannel::of(n))
+}
+
+fn on_channel(n: u8, channels: ProfileChannels) -> ProfileTarget {
+    ProfileTarget::Channel {
+        channel: MidiChannel::of(n),
+        channels,
+    }
 }
 
 /// The peer's Reply to Profile Inquiry at `address`.
@@ -1148,12 +1155,10 @@ fn a_set_profile_on_names_the_channel_and_its_enabled_report_updates_the_table()
         &wire,
         GROUP_0,
         &CiMessage::ProfileEnabled {
-            header: CiHeader {
-                device_id: channel(0),
-                ..CiHeader::new(peer())
-            },
+            source: peer(),
+            ci_version: CI_VERSION,
+            target: on_channel(0, ProfileChannels::of(3)),
             profile: profile(2),
-            channels: ProfileChannels::of(3),
         },
         120,
     );
@@ -1218,12 +1223,10 @@ fn an_enabled_mpe_profile_is_a_zone_of_the_channels_its_report_gave() {
             &wire,
             GROUP_0,
             &CiMessage::ProfileEnabled {
-                header: CiHeader {
-                    device_id: channel(0),
-                    ..CiHeader::new(peer())
-                },
+                source: peer(),
+                ci_version: CI_VERSION,
+                target: on_channel(0, ProfileChannels::of(channels)),
                 profile: ProfileId::MPE,
-                channels: ProfileChannels::of(channels),
             },
             120,
         );
@@ -1238,12 +1241,10 @@ fn an_enabled_mpe_profile_is_a_zone_of_the_channels_its_report_gave() {
         &wire,
         GROUP_0,
         &CiMessage::ProfileDisabled {
-            header: CiHeader {
-                device_id: channel(0),
-                ..CiHeader::new(peer())
-            },
+            source: peer(),
+            ci_version: CI_VERSION,
+            target: on_channel(0, ProfileChannels::of(16)),
             profile: ProfileId::MPE,
-            channels: ProfileChannels::of(16),
         },
         140,
     );
@@ -1263,12 +1264,10 @@ fn an_mpe_zone_sharing_channels_with_a_lower_one_is_reported_refused() {
             wire,
             GROUP_0,
             &CiMessage::ProfileEnabled {
-                header: CiHeader {
-                    device_id: channel(manager),
-                    ..CiHeader::new(peer())
-                },
+                source: peer(),
+                ci_version: CI_VERSION,
+                target: on_channel(manager, ProfileChannels::of(channels.into())),
                 profile: ProfileId::MPE,
-                channels: ProfileChannels::of(channels.into()),
             },
             ms,
         );
@@ -1372,12 +1371,10 @@ fn a_set_profile_on_a_group_asks_for_no_channels_and_off_is_resolved_by_the_disa
         &wire,
         GROUP_0,
         &CiMessage::ProfileEnabled {
-            header: CiHeader {
-                device_id: CiDeviceId::Group,
-                ..CiHeader::new(peer())
-            },
+            source: peer(),
+            ci_version: CI_VERSION,
+            target: ProfileTarget::Group,
             profile: profile(3),
-            channels: ProfileChannels::of(0),
         },
         120,
     );
@@ -1397,12 +1394,10 @@ fn a_set_profile_on_a_group_asks_for_no_channels_and_off_is_resolved_by_the_disa
         &wire,
         GROUP_0,
         &CiMessage::ProfileDisabled {
-            header: CiHeader {
-                device_id: CiDeviceId::Group,
-                ..CiHeader::new(peer())
-            },
+            source: peer(),
+            ci_version: CI_VERSION,
+            target: ProfileTarget::Group,
             profile: profile(3),
-            channels: ProfileChannels::of(0),
         },
         150,
     );

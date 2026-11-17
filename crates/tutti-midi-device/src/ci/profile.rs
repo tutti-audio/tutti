@@ -27,7 +27,8 @@ use std::vec::Vec;
 use tutti_ump::{ManufacturerId, MidiChannel, MidiGroup, U7, U14, U28, Ump, first_non_seven_bit};
 
 use super::{
-    CI_VERSION, CiDeviceId, CiVersion, Destination, encode_preamble, read, sysex7_packets,
+    CI_VERSION, CiDeviceId, CiVersion, Destination, ProfileTarget, encode_preamble, read,
+    sysex7_packets,
 };
 
 /// Profile Inquiry, Sub-ID#2 `0x20` (§7.2).
@@ -570,18 +571,19 @@ impl TryFrom<&[u8]> for ProfileOnRequest {
             .ok_or(NotSetProfileOn::DeviceId(preamble.device_id))?;
         let (profile, channels) =
             read::profile_with_count_body(body).ok_or(NotSetProfileOn::Body)?;
-        match device_id {
-            CiDeviceId::Channel(channel) => Ok(Self::Channel {
-                channel,
-                profile,
-                channels,
-            }),
-            CiDeviceId::Group | CiDeviceId::FunctionBlock if !channels.is_by_address() => {
-                Err(NotSetProfileOn::ChannelsForBlock(channels.get()))
-            }
-            CiDeviceId::Group => Ok(Self::Group(profile)),
-            CiDeviceId::FunctionBlock => Ok(Self::FunctionBlock(profile)),
-        }
+        Ok(
+            match ProfileTarget::from_wire(device_id, channels)
+                .map_err(NotSetProfileOn::ChannelsForBlock)?
+            {
+                ProfileTarget::Channel { channel, channels } => Self::Channel {
+                    channel,
+                    profile,
+                    channels,
+                },
+                ProfileTarget::Group => Self::Group(profile),
+                ProfileTarget::FunctionBlock => Self::FunctionBlock(profile),
+            },
+        )
     }
 }
 

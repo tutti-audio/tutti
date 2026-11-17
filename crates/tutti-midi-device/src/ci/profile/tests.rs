@@ -1,7 +1,7 @@
 use proptest::prelude::*;
 use tutti_ump::{ManufacturerId, MidiChannel, U7};
 
-use super::super::testing::{DST, channel, decoded, header_on, preamble, to_dst, unread};
+use super::super::testing::{DST, SRC, channel, decoded, header_on, preamble, to_dst, unread};
 use super::super::*;
 
 const BROADCAST: [u8; 4] = [0x7F; 4];
@@ -174,10 +174,14 @@ fn a_list_of_more_than_14_bits_is_refused_and_the_most_is_written() {
 #[test]
 fn set_on_is_table_24_with_the_channels_requested_lsb_first() {
     let message = CiMessage::SetProfileOn {
-        header: header_on(channel(0)),
+        source: Muid::of(SRC),
+        ci_version: CI_VERSION,
         to: Muid::of(DST),
+        target: ProfileTarget::Channel {
+            channel: MidiChannel::of(0),
+            channels: ProfileChannels::of(130),
+        },
         profile: piano(),
-        channels: ProfileChannels::of(130),
     };
     let mut want = preamble(0x00, 0x22, to_dst());
     want.extend([0x7E, 1, 2, 3, 4]);
@@ -186,16 +190,64 @@ fn set_on_is_table_24_with_the_channels_requested_lsb_first() {
     assert_eq!(decoded(&want), message);
 }
 
+/// Spec: m2-101/7.8#1
+#[test]
+fn a_set_on_to_the_group_or_function_block_is_table_24_with_zero_channels() {
+    for (device, target) in [
+        (0x7Eu8, ProfileTarget::Group),
+        (0x7F, ProfileTarget::FunctionBlock),
+    ] {
+        let message = CiMessage::SetProfileOn {
+            source: Muid::of(SRC),
+            ci_version: CI_VERSION,
+            to: Muid::of(DST),
+            target,
+            profile: piano(),
+        };
+        let mut want = preamble(device, 0x22, to_dst());
+        want.extend([0x7E, 1, 2, 3, 4, 0, 0]);
+        assert_eq!(message.encode(), want, "{device:#x}");
+        assert_eq!(decoded(&want), message);
+    }
+}
+
+/// §7.8, §7.10 and §7.11 notes: a Group or Function Block address names no count.
+#[test]
+fn a_group_or_function_block_address_with_channels_is_not_read() {
+    // §7.8, §7.10 and §7.11 notes: the count is 0x0000 at address 0x7E or 0x7F.
+    for sub in [0x22u8, 0x24, 0x25] {
+        for device in [0x7Eu8, 0x7F] {
+            let destination = if sub == 0x22 { to_dst() } else { BROADCAST };
+            let mut bytes = preamble(device, sub, destination);
+            bytes.extend([0x7E, 1, 2, 3, 4, 3, 0]);
+            assert_eq!(
+                unread(&bytes).reason,
+                UnreadReason::Malformed,
+                "{sub:#x} at {device:#x}"
+            );
+            // The same count at a Channel is read.
+            bytes[1] = 0x05;
+            assert!(matches!(
+                decoded(&bytes),
+                CiMessage::SetProfileOn { .. }
+                    | CiMessage::ProfileEnabled { .. }
+                    | CiMessage::ProfileDisabled { .. }
+            ));
+        }
+    }
+}
+
 #[test]
 fn a_version_1_set_on_has_no_channels_field_and_reads_as_zero() {
     // §5.3: `Number Channels Requested` was added in Version 2.
     let mut bytes = preamble(0x7F, 0x22, to_dst());
     bytes[4] = 0x01;
     bytes.extend([0x7E, 1, 2, 3, 4]);
-    let CiMessage::SetProfileOn { channels, .. } = decoded(&bytes) else {
+    let CiMessage::SetProfileOn { target, .. } = decoded(&bytes) else {
         panic!("a Set On")
     };
-    assert_eq!(channels, ProfileChannels::BY_ADDRESS);
+    assert_eq!(target, ProfileTarget::FunctionBlock);
+    assert_eq!(target.channels(), ProfileChannels::BY_ADDRESS);
     // One byte of the two is malformed, not absent.
     bytes.push(0x05);
     assert_eq!(unread(&bytes).reason, UnreadReason::Malformed);
@@ -222,18 +274,24 @@ fn set_off_is_table_25_with_two_reserved_bytes_that_are_ignored() {
 #[test]
 fn enabled_and_disabled_reports_are_tables_26_and_27_to_the_broadcast_muid() {
     for (sub, enabled) in [(0x24u8, true), (0x25, false)] {
-        let (header, profile, channels) = (header_on(channel(9)), piano(), ProfileChannels::of(3));
+        let (source, profile) = (Muid::of(SRC), piano());
+        let target = ProfileTarget::Channel {
+            channel: MidiChannel::of(9),
+            channels: ProfileChannels::of(3),
+        };
         let message = if enabled {
             CiMessage::ProfileEnabled {
-                header,
+                source,
+                ci_version: CI_VERSION,
+                target,
                 profile,
-                channels,
             }
         } else {
             CiMessage::ProfileDisabled {
-                header,
+                source,
+                ci_version: CI_VERSION,
+                target,
                 profile,
-                channels,
             }
         };
         let mut want = preamble(0x09, sub, BROADCAST);
@@ -254,13 +312,13 @@ fn a_version_1_report_has_no_channel_count_and_reads_as_zero() {
     bytes[4] = 0x01;
     bytes.extend([0x7E, 1, 2, 3, 4]);
     let CiMessage::ProfileEnabled {
-        header, channels, ..
+        ci_version, target, ..
     } = decoded(&bytes)
     else {
         panic!("a report")
     };
-    assert_eq!(header.ci_version.get(), 1);
-    assert_eq!(channels, ProfileChannels::BY_ADDRESS);
+    assert_eq!(ci_version.get(), 1);
+    assert_eq!(target.channels(), ProfileChannels::BY_ADDRESS);
 }
 
 /// Spec: m2-101/7.4#2, m2-101/7.5#2, m2-102/2.4#15, m2-102/2.4#18
@@ -502,8 +560,15 @@ fn any_address() -> impl Strategy<Value = CiDeviceId> {
     ]
 }
 
-fn any_channels() -> impl Strategy<Value = ProfileChannels> {
-    (0u16..0x4000).prop_map(ProfileChannels::of)
+fn any_target() -> impl Strategy<Value = ProfileTarget> {
+    prop_oneof![
+        ((0u8..16), (0u16..0x4000)).prop_map(|(c, n)| ProfileTarget::Channel {
+            channel: MidiChannel::of(c),
+            channels: ProfileChannels::of(n),
+        }),
+        Just(ProfileTarget::Group),
+        Just(ProfileTarget::FunctionBlock),
+    ]
 }
 
 fn any_data() -> impl Strategy<Value = Vec<u8>> {
@@ -533,14 +598,15 @@ fn any_message() -> impl Strategy<Value = CiMessage> {
                 profiles,
             }
         }),
-        (head(), to(), any_profile(), any_channels()).prop_map(
-            |(header, to, profile, channels)| CiMessage::SetProfileOn {
-                header,
+        (any_target(), to(), any_profile()).prop_map(|(target, to, profile)| {
+            CiMessage::SetProfileOn {
+                source: Muid::of(SRC),
+                ci_version: CI_VERSION,
                 to,
+                target,
                 profile,
-                channels
             }
-        ),
+        }),
         (head(), to(), any_profile()).prop_map(|(header, to, profile)| {
             CiMessage::SetProfileOff {
                 header,
@@ -548,19 +614,17 @@ fn any_message() -> impl Strategy<Value = CiMessage> {
                 profile,
             }
         }),
-        (head(), any_profile(), any_channels()).prop_map(|(header, profile, channels)| {
-            CiMessage::ProfileEnabled {
-                header,
-                profile,
-                channels,
-            }
+        (any_target(), any_profile()).prop_map(|(target, profile)| CiMessage::ProfileEnabled {
+            source: Muid::of(SRC),
+            ci_version: CI_VERSION,
+            target,
+            profile,
         }),
-        (head(), any_profile(), any_channels()).prop_map(|(header, profile, channels)| {
-            CiMessage::ProfileDisabled {
-                header,
-                profile,
-                channels,
-            }
+        (any_target(), any_profile()).prop_map(|(target, profile)| CiMessage::ProfileDisabled {
+            source: Muid::of(SRC),
+            ci_version: CI_VERSION,
+            target,
+            profile,
         }),
         (head(), any_profile())
             .prop_map(|(header, profile)| CiMessage::ProfileAdded { header, profile }),
@@ -662,14 +726,14 @@ fn a_profile_on_request_has_the_body_of_the_message_on_a_link() {
         channels: ProfileChannels::of(3),
     };
     let message = CiMessage::SetProfileOn {
-        header: CiHeader {
-            device_id: on.device_id(),
-            ci_version: CI_VERSION,
-            source: Muid::of(0x0102_0304),
-        },
+        source: Muid::of(0x0102_0304),
+        ci_version: CI_VERSION,
         to: Muid::of(0x0506_0708),
+        target: ProfileTarget::Channel {
+            channel: MidiChannel::of(2),
+            channels: on.channels(),
+        },
         profile: on.profile(),
-        channels: on.channels(),
     };
     assert_eq!(on.encode()[13..], message.encode()[13..]);
     assert_eq!(on.encode()[..5], message.encode()[..5]);
