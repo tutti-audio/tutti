@@ -62,7 +62,7 @@ mod ump;
 #[cfg(feature = "testing")]
 pub use client::LegacyEvent;
 pub use client::{Blocking, Client, QueueClock, Read, UmpVersion};
-pub use error::{Error, Result};
+pub use error::{Error, Operation, Result};
 pub use event::{Announced, Received};
 pub use poll::{Poller, Wait};
 pub use ports::{PortEntry, Ports};

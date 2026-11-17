@@ -88,6 +88,16 @@ pub enum Error {
     #[error(transparent)]
     Os(#[from] crate::backend::OsError),
 
+    /// An output's pool has fewer free cells than a message of several packets
+    /// needs, so none of it was sent.
+    #[error("MIDI output pool has {free} free cells, and the message needs {needed}")]
+    OutputPoolFull {
+        /// Free cells now.
+        free: usize,
+        /// Cells the message needs.
+        needed: usize,
+    },
+
     /// A backend seeded its device list twice, or after reporting a change.
     #[error(transparent)]
     Seed(#[from] crate::SeedError),

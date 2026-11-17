@@ -534,7 +534,7 @@ impl Announce {
                     // An overrun drops announcements and is not a quiet read: it
                     // makes the settle look again. A descriptor that keeps
                     // failing ends the drain.
-                    tracing::debug!("ALSA announce: {}", e.message());
+                    tracing::debug!("ALSA announce: {e}");
                     found.failed();
                     if errors.failed() {
                         return found;

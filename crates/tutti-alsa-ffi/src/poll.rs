@@ -10,7 +10,7 @@ use std::os::raw::{c_short, c_uint};
 use std::time::Duration;
 
 use crate::client::Client;
-use crate::error::{Result, check};
+use crate::error::{Operation, Result, check};
 use crate::sys;
 
 /// Why [`Poller::wait`] returned.
@@ -47,7 +47,7 @@ impl Poller {
         let events = libc::POLLIN;
         // SAFETY: `client` is open.
         let rc = unsafe { sys::snd_seq_poll_descriptors_count(client.raw(), events) };
-        let count = check(rc, "snd_seq_poll_descriptors_count")?;
+        let count = check(rc, Operation::PollDescriptorsCount)?;
         let space = count as usize;
         let mut polls = vec![
             libc::pollfd {
@@ -67,7 +67,7 @@ impl Poller {
                 events,
             )
         };
-        check(rc, "snd_seq_poll_descriptors")?;
+        check(rc, Operation::PollDescriptors)?;
         Ok(Self::over(polls, stop))
     }
 

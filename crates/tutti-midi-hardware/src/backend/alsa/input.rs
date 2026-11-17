@@ -35,9 +35,9 @@ pub(super) static PUMP_WAKES: std::sync::atomic::AtomicUsize =
 #[cfg(test)]
 pub(super) static INJECT_READ_ERROR: AtomicBool = AtomicBool::new(false);
 
-/// `-EIO`, what the injected failure reads as.
+/// `EIO`, what the injected failure reads as.
 #[cfg(test)]
-const EIO: i32 = -5;
+const EIO: i32 = 5;
 
 /// How long dropping an input waits for its pump to end before it lets the
 /// thread go. A pump ends within a poll wake of the stop; only a read that never
@@ -222,8 +222,8 @@ fn pump(
         #[cfg(test)]
         let read = if INJECT_READ_ERROR.load(Ordering::SeqCst) {
             Err(tutti_alsa_ffi::Error::Call {
-                operation: "snd_seq_ump_event_input",
-                code: EIO,
+                operation: tutti_alsa_ffi::Operation::UmpEventInput,
+                source: std::io::Error::from_raw_os_error(EIO),
             })
         } else {
             read
@@ -260,9 +260,9 @@ fn pump(
             Err(e) => {
                 // An overrun or a failing read: try again at once, a few times
                 // in a row at most (a level-triggered descriptor would spin).
-                tracing::debug!("ALSA MIDI input: {}", e.message());
+                tracing::debug!("ALSA MIDI input: {e}");
                 if errors.failed() {
-                    return die(&e.message());
+                    return die(&e.to_string());
                 }
                 continue;
             }

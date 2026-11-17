@@ -3,7 +3,7 @@
 use std::ffi::CString;
 use std::time::Duration;
 
-use crate::error::{Error, Result, address_byte, check};
+use crate::error::{Error, Operation, Result, address_byte, check};
 use crate::event::Received;
 use crate::records::{PoolRecord, PortRecord, StatusRecord};
 use crate::sys;
@@ -104,7 +104,7 @@ impl Client {
         client.set_ump_version(version)?;
         // SAFETY: `client.seq` is open.
         let rc = unsafe { sys::snd_seq_set_client_ump_conversion(client.seq, 1) };
-        check(rc, "snd_seq_set_client_ump_conversion")?;
+        check(rc, Operation::SetClientUmpConversion)?;
         Ok(client)
     }
 
@@ -118,7 +118,7 @@ impl Client {
     pub fn set_ump_version(&self, version: UmpVersion) -> Result<()> {
         // SAFETY: `self.seq` is open.
         let rc = unsafe { sys::snd_seq_set_client_midi_version(self.seq, version.raw()) };
-        check(rc, "snd_seq_set_client_midi_version").map(drop)
+        check(rc, Operation::SetClientMidiVersion).map(drop)
     }
 
     /// `snd_seq_open` and the name: a client that is not yet a UMP client.
@@ -142,7 +142,7 @@ impl Client {
         // literal that outlives the call.
         let rc =
             unsafe { sys::snd_seq_open(&mut seq, device.as_ptr(), sys::SND_SEQ_OPEN_DUPLEX, mode) };
-        check(rc, "snd_seq_open")?;
+        check(rc, Operation::Open)?;
         // Owned from here: any failure below closes it by `Drop`.
         let mut client = Self { seq, id: 0 };
 
@@ -152,7 +152,7 @@ impl Client {
 
         // SAFETY: `client.seq` is open.
         let rc = unsafe { sys::snd_seq_client_id(client.seq) };
-        client.id = address_byte("client", check(rc, "snd_seq_client_id")?)?;
+        client.id = address_byte("client", check(rc, Operation::ClientId)?)?;
         Ok(client)
     }
 
@@ -173,7 +173,7 @@ impl Client {
         let cname = c_name(name);
         // SAFETY: `self.seq` is open; `cname` outlives the call.
         let rc = unsafe { sys::snd_seq_create_simple_port(self.seq, cname.as_ptr(), caps, kind) };
-        address_byte("port", check(rc, "snd_seq_create_simple_port")?)
+        address_byte("port", check(rc, Operation::CreateSimplePort)?)
     }
 
     /// Subscribes `port` to what `src_client:src_port` sends.
@@ -186,7 +186,7 @@ impl Client {
         // sequencer validates.
         let rc =
             unsafe { sys::snd_seq_connect_from(self.seq, i32::from(port), src_client, src_port) };
-        check(rc, "snd_seq_connect_from").map(drop)
+        check(rc, Operation::ConnectFrom).map(drop)
     }
 
     /// Subscribes `dest_client:dest_port` to what `port` sends.
@@ -199,7 +199,7 @@ impl Client {
         // sequencer validates.
         let rc =
             unsafe { sys::snd_seq_connect_to(self.seq, i32::from(port), dest_client, dest_port) };
-        check(rc, "snd_seq_connect_to").map(drop)
+        check(rc, Operation::ConnectTo).map(drop)
     }
 
     /// Subscribes `port` to the system announce port, which sends an event
@@ -232,7 +232,7 @@ impl Client {
         if rc == EAGAIN {
             return Ok(Read::Empty);
         }
-        check(rc, "snd_seq_ump_event_input")?;
+        check(rc, Operation::UmpEventInput)?;
         // SAFETY: `rc >= 0` means alsa-lib wrote a complete event at `ev`, which
         // `as_ref` checks for NULL; it is copied out by value before any other
         // call.
@@ -281,7 +281,7 @@ impl Client {
         if words.is_empty() {
             return Ok(());
         }
-        let operation = "snd_seq_ump_event_output_direct";
+        let operation = Operation::UmpEventOutputDirect;
         let mut ev = sys::snd_seq_ump_event_t {
             // `SND_SEQ_EVENT_NONE`. For a UMP event the type field is unused:
             // the message type lives in the first word's top nibble.
@@ -339,7 +339,7 @@ impl Client {
         let pool = PoolRecord::new()?;
         // SAFETY: `self.seq` is open and `pool` is a live record.
         let rc = unsafe { sys::snd_seq_get_client_pool(self.seq, pool.as_ptr()) };
-        check(rc, "snd_seq_get_client_pool")?;
+        check(rc, Operation::GetClientPool)?;
         // SAFETY: `pool` was just filled and is live.
         Ok(unsafe { sys::snd_seq_client_pool_get_output_free(pool.as_ptr()) })
     }
@@ -355,7 +355,7 @@ impl Client {
     pub fn start_queue(&self) -> Result<QueueClock> {
         // SAFETY: `self.seq` is open.
         let rc = unsafe { sys::snd_seq_alloc_queue(self.seq) };
-        let queue = address_byte("queue", check(rc, "snd_seq_alloc_queue")?)?;
+        let queue = address_byte("queue", check(rc, Operation::AllocQueue)?)?;
         // SAFETY: `self.seq` is open; a NULL event is the call's documented
         // "send directly".
         let rc = unsafe {
@@ -367,11 +367,11 @@ impl Client {
                 std::ptr::null_mut(),
             )
         };
-        check(rc, "snd_seq_control_queue")?;
+        check(rc, Operation::ControlQueue)?;
         // The control event is buffered, not sent, until the buffer is drained.
         // SAFETY: `self.seq` is open.
         let rc = unsafe { sys::snd_seq_drain_output(self.seq) };
-        check(rc, "snd_seq_drain_output")?;
+        check(rc, Operation::DrainOutput)?;
         Ok(QueueClock {
             queue,
             status: StatusRecord::new()?,
@@ -406,11 +406,11 @@ impl Client {
         let info = PortRecord::new()?;
         // SAFETY: `self.seq` is open and `info` is a live record.
         let rc = unsafe { sys::snd_seq_get_port_info(self.seq, i32::from(port), info.as_ptr()) };
-        check(rc, "snd_seq_get_port_info")?;
+        check(rc, Operation::GetPortInfo)?;
         edit(info.as_ptr());
         // SAFETY: `self.seq` is open and `info` is a live record.
         let rc = unsafe { sys::snd_seq_set_port_info(self.seq, i32::from(port), info.as_ptr()) };
-        check(rc, "snd_seq_set_port_info").map(drop)
+        check(rc, Operation::SetPortInfo).map(drop)
     }
 
     /// The sequencer handle, for the crate's other modules.
@@ -439,7 +439,7 @@ impl Client {
     /// `snd_seq_event_output_direct`'s code.
     #[cfg(feature = "testing")]
     pub fn send_legacy_to_subscribers(&self, port: u8, event: LegacyEvent) -> Result<()> {
-        let operation = "snd_seq_event_output_direct";
+        let operation = Operation::EventOutputDirect;
         let mut ev = sys::snd_seq_event_t {
             type_: 0,
             flags: 0,
@@ -566,7 +566,7 @@ impl QueueClock {
         let rc = unsafe {
             sys::snd_seq_get_queue_status(client.seq, i32::from(self.queue), self.status.as_ptr())
         };
-        check(rc, "snd_seq_get_queue_status")?;
+        check(rc, Operation::GetQueueStatus)?;
         // SAFETY: `status` was just filled; the pointer is into it and read at
         // once, before the record is used again.
         let time =

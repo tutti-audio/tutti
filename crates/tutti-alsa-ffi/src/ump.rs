@@ -167,7 +167,7 @@ impl Client {
     ///
     /// The code of the call that failed.
     pub fn publish_ump_endpoint(&self, endpoint: &UmpEndpoint) -> crate::Result<()> {
-        use crate::error::check;
+        use crate::error::{Operation, check};
         use std::ffi::CString;
         let info = EndpointRecord::new()?;
         let p = info.as_ptr();
@@ -193,7 +193,7 @@ impl Client {
         }
         // SAFETY: `self.raw()` is open and `info` is a live record.
         let rc = unsafe { sys::snd_seq_set_ump_endpoint_info(self.raw(), p.cast()) };
-        check(rc, "snd_seq_set_ump_endpoint_info")?;
+        check(rc, Operation::SetUmpEndpointInfo)?;
         for block in &endpoint.blocks {
             let info = BlockRecord::new()?;
             let p = info.as_ptr();
@@ -218,7 +218,7 @@ impl Client {
             let id = i32::try_from(block.id).unwrap_or(0);
             // SAFETY: `self.raw()` is open and `info` is a live record.
             let rc = unsafe { sys::snd_seq_set_ump_block_info(self.raw(), id, p.cast()) };
-            check(rc, "snd_seq_set_ump_block_info")?;
+            check(rc, Operation::SetUmpBlockInfo)?;
         }
         Ok(())
     }

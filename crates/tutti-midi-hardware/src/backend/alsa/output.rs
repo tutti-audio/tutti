@@ -13,7 +13,7 @@ use tutti_rt::LockExt;
 use super::enumerate::unpack_id;
 use crate::backend::by_message::{Refused, by_message};
 use crate::endpoints::DeviceOut;
-use crate::error::{NotFound, Result};
+use crate::error::{Error, NotFound, Result};
 use crate::stamp::Paired;
 use tutti_alsa_ffi::{
     Blocking, CAP_READ, Client, QueueClock, TYPE_APPLICATION, TYPE_MIDI_GENERIC, UmpVersion,
@@ -128,9 +128,8 @@ impl MidiOut for AlsaOutput {
                     sent: 0,
                 })?;
                 if free < needed {
-                    let error = tutti_alsa_ffi::Error::PoolFull { free, needed };
                     return Err(Refused {
-                        error: error.into(),
+                        error: Error::OutputPoolFull { free, needed },
                         sent: 0,
                     });
                 }
