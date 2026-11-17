@@ -169,12 +169,38 @@ bits!(
 );
 
 impl U14 {
+    /// `0x2000`, a pitch bend at rest (M1).
+    pub const CENTER: Self = Self::of(0x2000);
+
+    /// The value whose upper seven bits are `msb` and lower seven `lsb`: the
+    /// inverse of [`msb`](Self::msb) and [`lsb`](Self::lsb).
+    #[inline]
+    #[must_use]
+    pub const fn from_halves(msb: U7, lsb: U7) -> Self {
+        Self((msb.get() as u16) << 7 | lsb.get() as u16)
+    }
+
+    /// The upper seven bits: the second data byte of a pitch bend or a song
+    /// position.
+    #[inline]
+    #[must_use]
+    pub const fn msb(self) -> U7 {
+        U7::masked((self.0 >> 7) as u8)
+    }
+
+    /// The lower seven bits: the first data byte.
+    #[inline]
+    #[must_use]
+    pub const fn lsb(self) -> U7 {
+        U7::masked((self.0 & 0x7F) as u8)
+    }
+
     /// The two 7-bit wire bytes, least significant first (the MIDI-CI and
     /// MIDI Tuning order).
     #[inline]
     #[must_use]
     pub const fn to_le7(self) -> [u8; 2] {
-        [(self.0 & 0x7F) as u8, (self.0 >> 7) as u8]
+        [self.lsb().get(), self.msb().get()]
     }
 
     /// The value of a length, or `None` above 14 bits.
@@ -193,10 +219,10 @@ impl U14 {
     #[inline]
     #[must_use]
     pub const fn from_le7(bytes: [u8; 2]) -> Option<Self> {
-        if (bytes[0] | bytes[1]) & 0x80 != 0 {
-            return None;
+        match (U7::new(bytes[0]), U7::new(bytes[1])) {
+            (Some(lsb), Some(msb)) => Some(Self::from_halves(msb, lsb)),
+            _ => None,
         }
-        Some(Self((bytes[0] as u16) | (bytes[1] as u16) << 7))
     }
 }
 

@@ -528,7 +528,7 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> SysexAssembler<B> {
         if let Some(group) = ump.group() {
             // System Real Time (type 1, status 0xF8..=0xFF) may be inserted
             // between the UMPs of a message; anything else on the Group ends it.
-            let real_time = ump.message_type() == 0x1 && (ump.0[0] >> 16) & 0xFF >= 0xF8;
+            let real_time = ump.is_system_real_time();
             if !real_time {
                 self.end_run(group.index());
             }

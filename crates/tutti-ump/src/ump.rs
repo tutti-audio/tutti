@@ -82,6 +82,15 @@ impl Ump {
         self.message_type() == 0 && matches!((self.0[0] >> 20) & 0xF, 1 | 2)
     }
 
+    /// Whether this is a System Real Time message (type `0x1`, status
+    /// `0xF8..=0xFF`, M2-104 §7.6): a message that may sit between the packets
+    /// of another message.
+    #[inline]
+    #[must_use]
+    pub const fn is_system_real_time(&self) -> bool {
+        self.message_type() == 0x1 && (self.0[0] >> 16) & 0xFF >= 0xF8
+    }
+
     /// The Group of a message type that has one: System (`0x1`), MIDI 1.0
     /// and 2.0 channel voice (`0x2`, `0x4`), Data 64 and 128 (`0x3`, `0x5`)
     /// and Flex Data (`0xD`). `None` for Utility (`0x0`) and UMP Stream
@@ -419,6 +428,19 @@ mod tests {
             );
             assert!(!Ump([(1 << 28) | (status << 20), 0, 0, 0]).is_jr());
         }
+    }
+
+    /// System Real Time is type 1 with a status byte of `0xF8` to `0xFF`
+    /// (M2-104 §7.6): `0xF7` (End of Exclusive) is a System Common status, and
+    /// the same byte under another type is not Real Time.
+    #[test]
+    fn system_real_time_is_type_1_status_f8_and_above() {
+        let system = |status: u32| Ump([0x1000_0000 | (status << 16), 0, 0, 0]);
+        assert!(!system(0xF7).is_system_real_time());
+        assert!(system(0xF8).is_system_real_time());
+        assert!(system(0xFF).is_system_real_time());
+        assert!(!system(0xF1).is_system_real_time());
+        assert!(!Ump([0x2000_0000 | (0xF8 << 16), 0, 0, 0]).is_system_real_time());
     }
 
     /// The header readers against packets written out from M2-104's
