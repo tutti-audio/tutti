@@ -571,7 +571,7 @@ impl StateDevice for Device {
     }
 }
 
-fn big_link() -> Link {
+fn big_link(device: Option<Box<dyn StateDevice>>) -> Link {
     let mut store = store_with(&[("buffer", stored(3000))]);
     store.declare(
         ResourceEntry::device_state()
@@ -580,7 +580,7 @@ fn big_link() -> Link {
             .with_fc_on_set(true)
             .unwrap(),
     );
-    Link::new(store, 256)
+    Link::judged(store, 256, device)
 }
 
 fn restore(link: &mut Link, state: PeState) -> CallId {
@@ -626,9 +626,8 @@ fn listed(link: &Link, id: &str) -> PeStateEntry {
 // `timestamp`; the device gives them, and the Initiator reads them typed.
 #[test]
 fn the_set_reply_carries_the_state_rev_and_timestamp_the_device_gave() {
-    let mut link = big_link();
     let (device, ..) = Device::new();
-    link.resp.set_state_device(Box::new(device));
+    let mut link = big_link(Some(Box::new(device)));
     let call = restore(&mut link, PeState::octets(bytes(500)));
     assert_eq!(link.set_result(call), Ok(PeStatus::Ok));
     let stamp = link
@@ -655,9 +654,8 @@ fn the_set_reply_carries_the_state_rev_and_timestamp_the_device_gave() {
 // changed is listed with its new size, revision and time, and its title stays.
 #[test]
 fn an_accepted_set_refreshes_the_state_list_entry() {
-    let mut link = big_link();
     let (device, ..) = Device::new();
-    link.resp.set_state_device(Box::new(device));
+    let mut link = big_link(Some(Box::new(device)));
     assert_eq!(listed(&link, "buffer").size.unwrap().get(), 3000);
     restore(&mut link, PeState::octets(bytes(500)));
     let entry = listed(&link, "buffer");
@@ -671,7 +669,7 @@ fn an_accepted_set_refreshes_the_state_list_entry() {
 // content, so the entry drops it; a state the list lacked is listed.
 #[test]
 fn a_set_without_a_device_clears_the_stale_revision_and_lists_a_new_state() {
-    let mut link = big_link();
+    let mut link = big_link(None);
     restore(&mut link, PeState::octets(bytes(70)));
     let entry = listed(&link, "buffer");
     assert_eq!((entry.size.unwrap().get(), entry.rev), (70, None));
@@ -690,10 +688,9 @@ fn a_set_without_a_device_clears_the_stale_revision_and_lists_a_new_state() {
 /// Spec: m2-111/3.3#4
 #[test]
 fn a_refused_body_is_ended_midway_with_terminate_inquiry() {
-    let mut link = big_link();
     let (mut device, asked, _) = Device::new();
     device.refuse_prefix_from = Some(40);
-    link.resp.set_state_device(Box::new(device));
+    let mut link = big_link(Some(Box::new(device)));
     let before = stored_state(&link, "buffer");
     let sent = chunks(&link, true, PeMessageKind::SET_INQUIRY);
     let call = restore(&mut link, PeState::octets(bytes(3000)));
@@ -720,9 +717,8 @@ fn a_refused_body_is_ended_midway_with_terminate_inquiry() {
 /// Spec: m2-111/3.3#2, m2-111/3.3#3
 #[test]
 fn the_device_is_asked_after_each_chunk_with_the_decoded_start_of_the_body() {
-    let mut link = big_link();
     let (device, asked, seen) = Device::new();
-    link.resp.set_state_device(Box::new(device));
+    let mut link = big_link(Some(Box::new(device)));
     let body = bytes(3000);
     let call = restore(&mut link, PeState::octets(body.clone()));
     assert_eq!(link.set_result(call), Ok(PeStatus::Ok));
@@ -740,10 +736,9 @@ fn the_device_is_asked_after_each_chunk_with_the_decoded_start_of_the_body() {
 // the state the device held stays.
 #[test]
 fn a_body_refused_at_the_end_is_answered_400() {
-    let mut link = big_link();
     let (mut device, ..) = Device::new();
     device.refuse_whole = true;
-    link.resp.set_state_device(Box::new(device));
+    let mut link = big_link(Some(Box::new(device)));
     let before = stored_state(&link, "buffer");
     let call = restore(&mut link, PeState::octets(bytes(400)));
     let Err(ResourceFailure::Peer(outcome)) = link.set_result(call) else {
@@ -768,9 +763,9 @@ fn a_body_refused_at_the_end_is_answered_400() {
 /// Spec: m2-111/3.2#2
 #[test]
 fn a_state_that_outgrows_the_limit_is_ended_with_terminate_inquiry() {
-    let mut link = big_link();
+    let mut link = big_link(None);
     let whole = {
-        let mut other = big_link();
+        let mut other = big_link(None);
         let call = fetch(&mut other, "buffer", 1 << 20);
         assert!(other.got(call).is_ok());
         chunks(&other, false, PeMessageKind::GET_REPLY)
@@ -788,7 +783,7 @@ fn a_state_that_outgrows_the_limit_is_ended_with_terminate_inquiry() {
 // M2-111 §3.2: a body that fits the limit is not cut.
 #[test]
 fn a_state_within_the_limit_is_fetched_whole() {
-    let mut link = big_link();
+    let mut link = big_link(None);
     let call = fetch(&mut link, "buffer", 3000);
     assert!(matches!(link.got(call), Ok(PeData::State(_))));
     assert!(!terminates(&link, true));
@@ -798,7 +793,7 @@ fn a_state_within_the_limit_is_fetched_whole() {
 // anything is sent.
 #[test]
 fn a_listed_size_past_the_limit_refuses_the_get_before_it_is_sent() {
-    let mut link = big_link();
+    let mut link = big_link(None);
     let mut entry = PeStateEntry::new(state_id("buffer"), text("Buffer"));
     entry.size = StateSize::new(5000);
     let sent = link.wire.len();

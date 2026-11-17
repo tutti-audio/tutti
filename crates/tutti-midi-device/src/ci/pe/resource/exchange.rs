@@ -19,6 +19,7 @@ use super::super::limits::{MediaType, ResourceId, ResourceName, SubscribeId};
 use super::super::partial::{JsonPointer, PartialUpdate};
 use super::super::reassemble::{BufferLimit, PeFlowControl, PeReassemblyLimits, StreamLimit};
 use super::super::tree::PeJson;
+use super::state::StateDevice;
 use super::*;
 use crate::ci::testing::{OURS, PEER};
 use crate::{BodyLimit, CiHeader, CiMessage, Decoded, MaxSysexSize, Muid};
@@ -233,6 +234,24 @@ impl Link {
 
     /// A link whose Initiator takes `requests` Subscription messages at once.
     pub(super) fn taking(store: ResourceStore, max: u32, requests: u8) -> Self {
+        Self::assembled(store, max, requests, None)
+    }
+
+    /// A link whose Responder has `device` judge each State it is set.
+    pub(super) fn judged(
+        store: ResourceStore,
+        max: u32,
+        device: Option<Box<dyn StateDevice>>,
+    ) -> Self {
+        Self::assembled(store, max, 4, device)
+    }
+
+    fn assembled(
+        store: ResourceStore,
+        max: u32,
+        requests: u8,
+        device: Option<Box<dyn StateDevice>>,
+    ) -> Self {
         let now = Instant::now();
         let (init, actions) = ResourceInitiator::new(
             Muid::of(OURS),
@@ -241,6 +260,9 @@ impl Link {
             now,
         );
         let mut resp = ResourceResponder::new(Muid::of(PEER), responder_settings(), store);
+        if let Some(device) = device {
+            resp = resp.state_device(device);
+        }
         resp.accept(Muid::of(OURS), MaxSysexSize::of(max));
         let mut link = Self {
             init,

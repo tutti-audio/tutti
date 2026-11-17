@@ -182,9 +182,6 @@ tutti-midi-device  chain-result  crates/tutti-midi-device/src/ci/pe/resource/ent
 tutti-midi-device  chain-result  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_require_res_id
 tutti-midi-device  chain-result  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_schema
 tutti-midi-device  chain-result  crates/tutti-midi-device/src/ci/pe/resource/request.rs::ResourceGet::paged
-tutti-midi-device  setter  crates/tutti-midi-device/src/ci/initiator.rs::ProfileInitiator::set_off
-tutti-midi-device  setter  crates/tutti-midi-device/src/ci/initiator.rs::ProfileInitiator::set_on
-tutti-midi-device  setter  crates/tutti-midi-device/src/ci/pe/resource/server.rs::ResourceResponder::set_state_device
 tutti-midi-device  ctor-result  crates/tutti-midi-device/src/ci/articulation.rs::ArticulationDetails::from_data
 tutti-midi-device  ctor-result  crates/tutti-midi-device/src/ci/articulation.rs::CustomSounds::from_data
 tutti-midi-device  ctor-result  crates/tutti-midi-device/src/ci/pe/chunk.rs::PeChunk::new

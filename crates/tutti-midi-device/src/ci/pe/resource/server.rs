@@ -352,8 +352,10 @@ impl ResourceResponder {
     /// Gives the device a say over the states Initiators set: it judges each body
     /// as it comes and gives an accepted state its revision and time (M2-111
     /// §3.3). Without one every state is accepted with no stamp.
-    pub fn set_state_device(&mut self, device: Box<dyn StateDevice>) {
+    #[must_use]
+    pub fn state_device(mut self, device: Box<dyn StateDevice>) -> Self {
         self.device = Some(device);
+        self
     }
 
     /// The Resources served, locked while the guard lives: drop it before the
