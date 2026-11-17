@@ -386,11 +386,11 @@ fn stage_state(
     config: &BridgeConfig,
     state: &[u8],
 ) -> BridgeResult<std::result::Result<(), String>> {
-    if state.len() > crate::protocol::MAX_STATE_BYTES {
+    if state.len() > tutti_plugin_types::MAX_STATE_BYTES {
         return Ok(Err(format!(
             "state is {} bytes, over the {}-byte limit",
             state.len(),
-            crate::protocol::MAX_STATE_BYTES
+            tutti_plugin_types::MAX_STATE_BYTES
         )));
     }
     for (seq, last, bytes) in crate::transport::state_chunk::split(state) {

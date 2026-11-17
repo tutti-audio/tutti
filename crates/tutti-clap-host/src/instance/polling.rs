@@ -154,21 +154,7 @@ impl ClapLoaded {
         if !self.flags.gui_created {
             return EditorCapabilities::default();
         }
-        let Some(hints) = self.plugin.gui_hints(main) else {
-            return EditorCapabilities::default();
-        };
-        let mut caps = EditorCapabilities {
-            resize: tutti_plugin_types::ResizeHints {
-                resizable: hints.resizable,
-                can_resize_horizontally: hints.can_resize_horizontally,
-                can_resize_vertically: hints.can_resize_vertically,
-            },
-            aspect: tutti_plugin_types::AspectRatio::default(),
-            appkit_autoresize_friendly: false,
-        };
-        caps.aspect.preserve = hints.preserve_aspect_ratio;
-        caps.aspect.ratio = hints.aspect_ratio;
-        caps
+        self.plugin.gui_hints(main).unwrap_or_default()
     }
 
     /// Tells the open editor its window's scale changed (`gui.set_scale`).

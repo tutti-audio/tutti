@@ -25,6 +25,7 @@ use tutti_plugin_types::{
 };
 use tutti_plugin_types::{MainThreadMarker, SampleRate};
 use tutti_rt::Publisher;
+use tutti_types::MaxBlock;
 
 /// Heap reservation for pooled per-call event scratch on a `ClapProcessor`,
 /// beyond the parameter points each list also has room for.
@@ -126,8 +127,7 @@ impl ClapLoaded {
             reason: plugin_error(error),
         };
 
-        // CLAP's `max_frames_count` is a `u32`, the bound `MaxBlock` holds.
-        let max_frames = prepare.max_block().get_u32();
+        let max_block = prepare.max_block();
         // CLAP's render mode is `[main-thread]` and carries no activation
         // constraint; a plugin without the extension has declined, which is
         // not a failure.
@@ -147,13 +147,13 @@ impl ClapLoaded {
             return Err(refuse(self, err));
         }
 
-        if let Err(e) = self.activate_plugin(main, prepare.rate(), max_frames) {
+        if let Err(e) = self.activate_plugin(main, prepare.rate(), max_block) {
             return Err(refuse(self, e));
         }
         self.audio.f64_active = wide;
 
         let table = self.read_param_ranges(main);
-        let max_frames = max_frames as usize;
+        let max_frames = max_block.get();
         let mut scratch = AudioScratch::new(prepare.format());
         let port_channels = |ports: &tutti_plugin_types::BusChannels| -> Vec<u32> {
             ports.iter().map(|c| u32::from(c.count())).collect()
@@ -220,7 +220,7 @@ impl ClapLoaded {
             pool: pools.reader(),
             input_ports,
             output_ports,
-            max_frames: max_frames as u32,
+            max_frames: max_block.get_u32(),
             scratch,
             ranges: ranges.reader(),
             drain,
@@ -272,10 +272,9 @@ impl ClapLoaded {
         &mut self,
         main: MainThreadMarker,
         rate: SampleRate,
-        max_frames: u32,
+        max_block: MaxBlock,
     ) -> Result<()> {
-        // `clap_plugin.activate` takes a bare `f64`: the unit stops at the C ABI.
-        if let Err(e) = self.plugin.activate(main, rate.get(), 1, max_frames) {
+        if let Err(e) = self.plugin.activate(main, rate, max_block) {
             return Err(ClapError::LoadFailed {
                 path: PathBuf::new(),
                 stage: LoadStage::Activation,
@@ -284,9 +283,6 @@ impl ClapLoaded {
                         "the audio half of the previous activation is still alive".to_string()
                     }
                     ActivateError::AlreadyActive => "the plugin is already active".to_string(),
-                    ActivateError::BadConfig => {
-                        "the sample rate or block range is one CLAP forbids".to_string()
-                    }
                     ActivateError::Refused => "Activate failed".to_string(),
                 },
             });

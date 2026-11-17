@@ -203,7 +203,7 @@
 //! on the *inner* `ClapLoaded`: [`flush_params`][`ClapLoaded::flush_params`] is
 //! tagged `[active ? audio-thread : main-thread]` and branches on that live flag, so
 //! the same code reached through a `ClapController`'s `loaded_mut` takes the
-//! audio-thread claim (`tutti_clap_ffi::AudioClaim`) where a bare `ClapLoaded` is a
+//! audio-thread claim where a bare `ClapLoaded` is a
 //! main-thread call (it takes the `MainThreadMarker` either way).
 //!
 //! The distinction that gates it is *active* versus *processing*, and they are not
