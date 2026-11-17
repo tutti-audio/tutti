@@ -6,7 +6,7 @@ use tutti_alsa_ffi::{
     BLOCK_IS_LOWSPEED, BLOCK_IS_MIDI1, Client, PROTO_MIDI2, PortCaps, PortEntry, UmpBlock,
     UmpEndpoint,
 };
-use tutti_midi_device::{EndpointId, FunctionBlock, Identity};
+use tutti_midi_device::{FunctionBlock, Identity};
 use tutti_ump::Protocol;
 
 /// Which direction an endpoint is being listed for.
@@ -113,7 +113,7 @@ fn endpoint_of(port: PortEntry) -> OsEndpoint {
         ..
     } = port;
     OsEndpoint {
-        id: EndpointId::from_raw(address.into()),
+        id: super::handle_of(address),
         identity: Identity::alsa(client_name.as_str(), port_name.as_str()),
         // "Client: Port" is how `aconnect -l` presents them, and a
         // bare port name ("MIDI 1") is ambiguous across devices.

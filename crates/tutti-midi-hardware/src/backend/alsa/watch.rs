@@ -50,12 +50,13 @@ use std::os::unix::net::UnixStream;
 use super::poll::ErrorRun;
 #[cfg(test)]
 use super::poll::MAX_DRAIN_ERRORS;
+use super::{address_of, handle_of};
 use crate::devices::ChangeSink;
 use crate::devices::reporter::Reporter;
 use crate::endpoints::Watch;
 use crate::error::{Error, Result};
 use tutti_alsa_ffi::{
-    Address, Announced, Blocking, Client, Event, Poller, PortCaps, PortKind, Read, UmpVersion, Wait,
+    Announced, Blocking, Client, Event, Poller, PortCaps, PortKind, Read, UmpVersion, Wait,
 };
 use tutti_midi_device::{EndpointId, OsDevice};
 use tutti_rt::{ThreadHandle, spawn_named};
@@ -544,16 +545,6 @@ impl Announce {
             }
         }
     }
-}
-
-/// The handle a port is listed under.
-fn handle_of(at: Address) -> EndpointId {
-    EndpointId::from_raw(at.into())
-}
-
-/// The port a handle names; `None` for a handle no port here made.
-fn address_of(handle: EndpointId) -> Option<Address> {
-    Address::try_from(handle.raw()).ok()
 }
 
 /// The running watch. Dropping it closes the stop pair, which wakes the thread

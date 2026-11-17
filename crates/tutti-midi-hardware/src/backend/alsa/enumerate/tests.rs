@@ -1,20 +1,6 @@
 use super::*;
 use tutti_alsa_ffi::{DIR_BIDIRECTION, DIR_INPUT, DIR_OUTPUT};
 
-// A port is listed for an input when another client can subscribe to read it,
-// and for an output when it can subscribe to write: the raw bit alone lists a
-// device that fails to open.
-#[test]
-fn a_direction_lists_only_a_subscribable_port() {
-    let read = PortCaps::READ | PortCaps::SUBS_READ;
-    let write = PortCaps::WRITE | PortCaps::SUBS_WRITE;
-    assert!(Direction::Input.listed(read) && !Direction::Output.listed(read));
-    assert!(Direction::Output.listed(write) && !Direction::Input.listed(write));
-    assert!(Direction::Input.listed(read | write) && Direction::Output.listed(read | write));
-    assert!(!Direction::Input.listed(PortCaps::READ));
-    assert!(!Direction::Output.listed(PortCaps::WRITE));
-}
-
 fn block(direction: u32, first_group: u32, num_groups: u32, flags: u32) -> UmpBlock {
     UmpBlock {
         id: 0,

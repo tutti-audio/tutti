@@ -148,6 +148,14 @@ pub enum Error {
         #[source]
         source: std::num::TryFromIntError,
     },
+    /// A client or port number from alsa-lib past the sequencer's tables.
+    #[error("ALSA {what} {id} is outside the sequencer's numbers")]
+    Number {
+        /// What the number names (`"client"`, `"port"`).
+        what: &'static str,
+        /// The number alsa-lib gave.
+        id: i32,
+    },
     /// A client and port the sequencer lists that no address names: a number
     /// past its tables.
     #[error("ALSA lists client {client} port {port}, which is no sequencer address")]

@@ -3,7 +3,7 @@
 use std::ffi::CString;
 use std::time::Duration;
 
-use crate::address::{Address, PortCaps, PortKind};
+use crate::address::{Address, ClientId, PortCaps, PortId, PortKind};
 use crate::error::{Error, Operation, Result, address_byte, check};
 use crate::event::Event;
 use crate::records::{PoolRecord, PortRecord, StatusRecord};
@@ -108,8 +108,8 @@ impl UmpVersion {
 #[derive(Debug)]
 pub struct Client {
     seq: *mut sys::snd_seq_t,
-    /// The id as an address byte: what a sent event names as its source.
-    pub(crate) id: u8,
+    /// The client's number: what a sent event names as its source.
+    pub(crate) id: ClientId,
 }
 
 // SAFETY: a `Client` owns its `snd_seq_t` outright (no other copy of the
@@ -183,7 +183,10 @@ impl Client {
             unsafe { sys::snd_seq_open(&mut seq, device.as_ptr(), sys::SND_SEQ_OPEN_DUPLEX, mode) };
         check(rc, Operation::Open)?;
         // Owned from here: any failure below closes it by `Drop`.
-        let mut client = Self { seq, id: 0 };
+        let mut client = Self {
+            seq,
+            id: ClientId::of(0),
+        };
 
         let cname = c_name(name)?;
         // SAFETY: `client.seq` is open; `cname` outlives the call.
@@ -191,7 +194,8 @@ impl Client {
 
         // SAFETY: `client.seq` is open.
         let rc = unsafe { sys::snd_seq_client_id(client.seq) };
-        client.id = address_byte("client", check(rc, Operation::ClientId)?)?;
+        let id = check(rc, Operation::ClientId)?;
+        client.id = ClientId::from_int(id).ok_or(Error::Number { what: "client", id })?;
         Ok(client)
     }
 
@@ -199,23 +203,24 @@ impl Client {
     #[cfg(feature = "testing")]
     #[doc(hidden)]
     #[must_use]
-    pub fn id(&self) -> u8 {
+    pub fn id(&self) -> ClientId {
         self.id
     }
 
-    /// Creates a port on this client with `caps` and `kind`, and returns its number as an address byte.
+    /// Creates a port on this client with `caps` and `kind`, and returns its number.
     ///
     /// # Errors
     ///
-    /// `snd_seq_create_simple_port`'s code, or [`Error::Address`] for a number
-    /// that is no address byte.
-    pub fn open_port(&self, name: &str, caps: PortCaps, kind: PortKind) -> Result<u8> {
+    /// `snd_seq_create_simple_port`'s code, or [`Error::Number`] for a number
+    /// that is no port.
+    pub fn open_port(&self, name: &str, caps: PortCaps, kind: PortKind) -> Result<PortId> {
         let cname = c_name(name)?;
         // SAFETY: `self.seq` is open; `cname` outlives the call.
         let rc = unsafe {
             sys::snd_seq_create_simple_port(self.seq, cname.as_ptr(), caps.bits(), kind.bits())
         };
-        address_byte("port", check(rc, Operation::CreateSimplePort)?)
+        let id = check(rc, Operation::CreateSimplePort)?;
+        PortId::from_int(id).ok_or(Error::Number { what: "port", id })
     }
 
     /// Subscribes `port` to what the port at `source` sends.
@@ -223,15 +228,15 @@ impl Client {
     /// # Errors
     ///
     /// `snd_seq_connect_from`'s code: the address is not one that exists.
-    pub fn connect_from(&self, port: u8, source: Address) -> Result<()> {
+    pub fn connect_from(&self, port: PortId, source: Address) -> Result<()> {
         // SAFETY: `self.seq` is open; the arguments are plain integers the
         // sequencer validates.
         let rc = unsafe {
             sys::snd_seq_connect_from(
                 self.seq,
-                i32::from(port),
-                i32::from(source.client()),
-                i32::from(source.port()),
+                i32::from(port.get()),
+                i32::from(source.client().get()),
+                i32::from(source.port().get()),
             )
         };
         check(rc, Operation::ConnectFrom).map(drop)
@@ -242,15 +247,15 @@ impl Client {
     /// # Errors
     ///
     /// `snd_seq_connect_to`'s code: the address is not one that exists.
-    pub fn connect_to(&self, port: u8, dest: Address) -> Result<()> {
+    pub fn connect_to(&self, port: PortId, dest: Address) -> Result<()> {
         // SAFETY: `self.seq` is open; the arguments are plain integers the
         // sequencer validates.
         let rc = unsafe {
             sys::snd_seq_connect_to(
                 self.seq,
-                i32::from(port),
-                i32::from(dest.client()),
-                i32::from(dest.port()),
+                i32::from(port.get()),
+                i32::from(dest.client().get()),
+                i32::from(dest.port().get()),
             )
         };
         check(rc, Operation::ConnectTo).map(drop)
@@ -262,7 +267,7 @@ impl Client {
     /// # Errors
     ///
     /// `snd_seq_connect_from`'s code.
-    pub fn connect_from_announce(&self, port: u8) -> Result<()> {
+    pub fn connect_from_announce(&self, port: PortId) -> Result<()> {
         self.connect_from(port, Address::ANNOUNCE)
     }
 
@@ -304,7 +309,7 @@ impl Client {
     ///
     /// `snd_seq_ump_event_output_direct`'s code; `-EAGAIN` on a
     /// [`Blocking::NonBlock`] client whose destination has no room.
-    pub fn send_to_subscribers(&self, port: u8, packet: Packet) -> Result<()> {
+    pub fn send_to_subscribers(&self, port: PortId, packet: Packet) -> Result<()> {
         self.send_ump_event(port, packet, None)
     }
 
@@ -320,7 +325,7 @@ impl Client {
     /// [`Blocking::NonBlock`] client whose destination has no room.
     pub fn send_to_subscribers_at(
         &self,
-        port: u8,
+        port: PortId,
         packet: Packet,
         queue: &QueueClock,
         at: Duration,
@@ -329,15 +334,20 @@ impl Client {
     }
 
     /// The one send: direct, or scheduled on a queue of this client's.
-    fn send_ump_event(&self, port: u8, packet: Packet, on: Option<(u8, Duration)>) -> Result<()> {
+    fn send_ump_event(
+        &self,
+        port: PortId,
+        packet: Packet,
+        on: Option<(u8, Duration)>,
+    ) -> Result<()> {
         let operation = Operation::UmpEventOutputDirect;
         let mut ev = sys::snd_seq_ump_event_t {
             // `SND_SEQ_EVENT_NONE`. For a UMP event the type field is unused:
             // the message type lives in the first word's top nibble.
             type_: 0,
             source: sys::snd_seq_addr_t {
-                client: self.id,
-                port,
+                client: self.id.get(),
+                port: port.get(),
             },
             // **Not** the destination's own address, even though it is known.
             //
@@ -435,7 +445,7 @@ impl Client {
     /// # Errors
     ///
     /// The code of the call that failed.
-    pub fn stamp_port(&self, port: u8) -> Result<QueueClock> {
+    pub fn stamp_port(&self, port: PortId) -> Result<QueueClock> {
         let clock = self.start_queue()?;
         let queue = clock.queue;
         self.edit_port(port, |info| {
@@ -451,14 +461,20 @@ impl Client {
 
     /// Reads one of this client's ports into a record, lets `edit` change it,
     /// and writes it back; the sequencer announces the change.
-    fn edit_port(&self, port: u8, edit: impl FnOnce(*mut sys::snd_seq_port_info_t)) -> Result<()> {
+    fn edit_port(
+        &self,
+        port: PortId,
+        edit: impl FnOnce(*mut sys::snd_seq_port_info_t),
+    ) -> Result<()> {
         let info = PortRecord::new()?;
         // SAFETY: `self.seq` is open and `info` is a live record.
-        let rc = unsafe { sys::snd_seq_get_port_info(self.seq, i32::from(port), info.as_ptr()) };
+        let rc =
+            unsafe { sys::snd_seq_get_port_info(self.seq, i32::from(port.get()), info.as_ptr()) };
         check(rc, Operation::GetPortInfo)?;
         edit(info.as_ptr());
         // SAFETY: `self.seq` is open and `info` is a live record.
-        let rc = unsafe { sys::snd_seq_set_port_info(self.seq, i32::from(port), info.as_ptr()) };
+        let rc =
+            unsafe { sys::snd_seq_set_port_info(self.seq, i32::from(port.get()), info.as_ptr()) };
         check(rc, Operation::SetPortInfo).map(drop)
     }
 
@@ -489,7 +505,7 @@ impl Client {
     /// `snd_seq_event_output_direct`'s code.
     #[cfg(feature = "testing")]
     #[doc(hidden)]
-    pub fn send_legacy_to_subscribers(&self, port: u8, event: LegacyEvent) -> Result<()> {
+    pub fn send_legacy_to_subscribers(&self, port: PortId, event: LegacyEvent) -> Result<()> {
         let operation = Operation::EventOutputDirect;
         let mut ev = sys::snd_seq_event_t {
             type_: 0,
@@ -498,8 +514,8 @@ impl Client {
             queue: sys::SND_SEQ_QUEUE_DIRECT,
             time: [0; 8],
             source: sys::snd_seq_addr_t {
-                client: self.id,
-                port,
+                client: self.id.get(),
+                port: port.get(),
             },
             dest: sys::snd_seq_addr_t {
                 client: sys::SND_SEQ_ADDRESS_SUBSCRIBERS,
@@ -556,7 +572,7 @@ impl Client {
     /// The code of the call that failed.
     #[cfg(feature = "testing")]
     #[doc(hidden)]
-    pub fn set_port_caps(&self, port: u8, caps: PortCaps) -> Result<()> {
+    pub fn set_port_caps(&self, port: PortId, caps: PortCaps) -> Result<()> {
         self.edit_port(port, |info| {
             // SAFETY: `info` is a live record, filled from this client's port.
             unsafe { sys::snd_seq_port_info_set_capability(info, caps.bits()) };

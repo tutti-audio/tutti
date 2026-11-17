@@ -9,8 +9,8 @@ use std::time::{Duration, Instant};
 use super::listener::Listener;
 
 use tutti_alsa_ffi::{
-    Blocking, Client, Event, PROTO_MIDI1, PROTO_MIDI2, Packet, PortCaps, PortEntry, PortKind, Read,
-    UmpVersion,
+    Blocking, Client, Event, PROTO_MIDI1, PROTO_MIDI2, Packet, PortCaps, PortEntry, PortId,
+    PortKind, Read, UmpVersion,
 };
 use tutti_fixtures::midi::{
     m1_cc, m1_note_on, note_on, per_note_pitch_bend, program_change, registered,
@@ -42,12 +42,12 @@ fn find(peer: &Client, spec: &VirtualSpec) -> Option<PortEntry> {
         .find(|p| p.client_name == spec.name().as_str())
 }
 
-fn peer(caps: PortCaps) -> (Client, u8) {
+fn peer(caps: PortCaps) -> (Client, PortId) {
     peer_in(caps, UmpVersion::Midi2)
 }
 
 /// A peer client delivered `version`.
-fn peer_in(caps: PortCaps, version: UmpVersion) -> (Client, u8) {
+fn peer_in(caps: PortCaps, version: UmpVersion) -> (Client, PortId) {
     let client = Client::open("tutti-virt-peer", Blocking::NonBlock, version).expect("a sequencer");
     let port = client
         .open_port("peer", caps, PortKind::MIDI_GENERIC | PortKind::APPLICATION)

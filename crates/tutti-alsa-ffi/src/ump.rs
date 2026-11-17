@@ -10,6 +10,7 @@
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 
+use crate::address::ClientId;
 use crate::client::{Client, c_name};
 use crate::error::{Error, Operation, Result, check};
 use crate::records::{BlockRecord, EndpointRecord};
@@ -123,12 +124,17 @@ impl Client {
     ///
     /// The code of a query that failed for any other reason than the Endpoint
     /// being absent.
-    pub fn ump_endpoint(&self, client: i32) -> Result<Option<UmpEndpoint>> {
+    pub fn ump_endpoint(&self, client: ClientId) -> Result<Option<UmpEndpoint>> {
         let info = EndpointRecord::new()?;
         // SAFETY: `self.raw()` is open and `info` is a live record; the call's
         // `info` is typed `void *` in alsa-lib's header.
-        let rc =
-            unsafe { sys::snd_seq_get_ump_endpoint_info(self.raw(), client, info.as_ptr().cast()) };
+        let rc = unsafe {
+            sys::snd_seq_get_ump_endpoint_info(
+                self.raw(),
+                i32::from(client.get()),
+                info.as_ptr().cast(),
+            )
+        };
         if is_absent(rc) {
             return Ok(None);
         }
@@ -159,14 +165,14 @@ impl Client {
 
     /// Block `id` of `client`'s Endpoint; `None` when the sequencer has no such
     /// block.
-    fn ump_block(&self, client: i32, id: u32) -> Result<Option<UmpBlock>> {
+    fn ump_block(&self, client: ClientId, id: u32) -> Result<Option<UmpBlock>> {
         let info = BlockRecord::new()?;
         // SAFETY: `self.raw()` is open and `info` is a live record; the call's
         // `info` is typed `void *` in alsa-lib's header.
         let rc = unsafe {
             sys::snd_seq_get_ump_block_info(
                 self.raw(),
-                client,
+                i32::from(client.get()),
                 block_number(id)?,
                 info.as_ptr().cast(),
             )

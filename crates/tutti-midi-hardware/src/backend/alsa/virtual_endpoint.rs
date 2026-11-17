@@ -9,7 +9,7 @@
 
 use tutti_alsa_ffi::{
     BLOCK_IS_LOWSPEED, BLOCK_IS_MIDI1, Blocking, Client, DIR_BIDIRECTION, DIR_INPUT, DIR_OUTPUT,
-    Operation, PROTO_MIDI1, PROTO_MIDI2, Packet, PortCaps, PortKind, UmpBlock, UmpEndpoint,
+    Operation, PROTO_MIDI1, PROTO_MIDI2, Packet, PortCaps, PortId, PortKind, UmpBlock, UmpEndpoint,
     UmpVersion,
 };
 use tutti_midi_device::FunctionBlock;
@@ -99,7 +99,7 @@ fn publish(client: &Client, spec: &VirtualSpec, protocol: VirtualProtocol) -> Re
 /// A virtual source: the client's readable, subscribable port.
 pub(crate) struct AlsaVirtualSource {
     // `Client` is `Send` and not `Sync`; sends are rare and short.
-    inner: std::sync::Mutex<(Client, u8)>,
+    inner: std::sync::Mutex<(Client, PortId)>,
 }
 
 impl SourceBackend for AlsaVirtualSource {

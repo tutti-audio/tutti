@@ -17,7 +17,7 @@
 //! | `QueueClock` | the queue a stamped port reads its timestamps from, and the clock that says what time it is now |
 //! | `Poller` | a client and a stop descriptor it owns, waited on with `poll(2)`: `Client::into_poller`, then `wait` and `wait_for` |
 //! | `Event`, `Announced` | an event copied out of alsa-lib's buffer (a UMP message, an announcement or a notice), and what an announce-port event says |
-//! | `Address`, `PortCaps`, `PortKind` | a port's client and number, what it allows, and what it is |
+//! | `Address`, `ClientId`, `PortId`, `PortCaps`, `PortKind` | a port's client and number, what it allows, and what it is |
 //! | `Error`, `Operation` | the alsa-lib call that failed and the OS error it returned |
 //!
 //! The raw declarations are a private module (`sys`), with alsa-lib's C names so a
@@ -64,7 +64,7 @@ mod records;
 mod sys;
 mod ump;
 
-pub use address::{Address, PortCaps, PortKind};
+pub use address::{Address, ClientId, PortCaps, PortId, PortKind};
 #[cfg(feature = "testing")]
 pub use client::LegacyEvent;
 pub use client::{Blocking, Client, Packet, QueueClock, Read, UmpVersion};

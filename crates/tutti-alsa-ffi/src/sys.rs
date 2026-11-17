@@ -181,7 +181,6 @@ pub struct snd_seq_event_t {
 }
 
 /// `SND_SEQ_EVENT_NOTEON`.
-#[cfg(feature = "testing")]
 pub const SND_SEQ_EVENT_NOTEON: u8 = 6;
 /// `SND_SEQ_EVENT_CONTROLLER`.
 #[cfg(feature = "testing")]

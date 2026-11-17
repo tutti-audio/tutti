@@ -15,7 +15,7 @@ use crate::endpoints::DeviceOut;
 use crate::error::{Error, NotFound, Result};
 use crate::stamp::Paired;
 use tutti_alsa_ffi::{
-    Address, Blocking, Client, Packet, PortCaps, PortKind, QueueClock, UmpVersion,
+    Blocking, Client, Packet, PortCaps, PortId, PortKind, QueueClock, UmpVersion,
 };
 use tutti_midi_device::EndpointId;
 use tutti_midi_runtime::{MidiOut, Outgoing, SendAt, Taken};
@@ -33,7 +33,7 @@ pub struct AlsaOutput {
 
 struct Sender {
     seq: Client,
-    port: u8,
+    port: PortId,
     /// The client's own queue, started when the output opened, which holds an
     /// event until its time.
     queue: QueueClock,
@@ -164,7 +164,7 @@ pub fn open(id: EndpointId) -> Result<Box<dyn DeviceOut>> {
 
 /// [`open`], as the concrete type.
 pub(super) fn connect(id: EndpointId) -> Result<AlsaOutput> {
-    let dest = Address::try_from(id.raw()).map_err(|_| NotFound::Endpoint(id))?;
+    let dest = super::address_of(id).ok_or(NotFound::Endpoint(id))?;
 
     // Non-blocking: a destination with no room refuses the send, which is
     // counted, rather than holding the caller until it has some.

@@ -7,9 +7,9 @@ use std::time::{Duration, Instant};
 use crate::DeviceOut;
 use crate::{Devices, HardwareMidiInputs};
 use tutti_alsa_ffi::Client;
-use tutti_alsa_ffi::{Address, Event, PortCaps, PortKind};
+use tutti_alsa_ffi::{Address, Event, PortCaps, PortId, PortKind};
 use tutti_graph::Losses;
-use tutti_midi_device::{DeviceEvent, DeviceId, DeviceInfo, EndpointId, Identity};
+use tutti_midi_device::{DeviceEvent, DeviceId, DeviceInfo, Identity};
 use tutti_midi_runtime::DeviceWriters;
 
 /// Long enough to be a failure, not a race: the announce arrives at once.
@@ -260,7 +260,9 @@ fn a_port_gaining_its_capabilities_is_added_as_a_duplex() {
     )
     .expect("a sequencer to open (modprobe snd-seq)");
     let kind = PortKind::MIDI_GENERIC | PortKind::APPLICATION;
-    let port = seq.open_port("port", PortCaps::NONE, kind).expect("a port");
+    let port = seq
+        .open_port("port", PortCaps::SUBS_READ, kind)
+        .expect("a port");
     let want = format!("{name}: port");
     assert!(devices.list().iter().all(|d| d.name != want));
 
@@ -616,7 +618,10 @@ fn a_device_that_takes_a_departed_clients_number_is_added_once() {
 fn send_note(device: &Virtual) {
     device
         .0
-        .send_to_subscribers(0, tutti_alsa_ffi::Packet::new(&[0x2090_3C64]).unwrap())
+        .send_to_subscribers(
+            PortId::of(0),
+            tutti_alsa_ffi::Packet::new(&[0x2090_3C64]).unwrap(),
+        )
         .expect("send failed");
 }
 
@@ -649,7 +654,7 @@ impl Pumped {
     fn over(device: Virtual, lead: Duration) -> Self {
         let inlets = tutti_midi_runtime::InputInlets::new(tutti_graph::EventCapacity::of(64), lead);
         let ports = std::sync::Arc::new(HardwareMidiInputs::new(std::sync::Arc::clone(&inlets)));
-        let id = EndpointId::from_raw(Address::of(device.0.id(), 0).into());
+        let id = super::handle_of(Address::new(device.0.id(), PortId::of(0)));
         let (producer, inlet) = ports.open_input_port("pump");
         let mut rig = crate::testing::Rig::over(&inlets, Instant::now());
         rig.attach(inlet);
@@ -704,7 +709,7 @@ fn a_legacy_source_arrives_as_midi1_ump_not_converted_by_the_kernel() {
         pumped
             .device
             .0
-            .send_legacy_to_subscribers(0, event)
+            .send_legacy_to_subscribers(PortId::of(0), event)
             .unwrap()
     };
     send(LegacyEvent::NoteOn {
@@ -736,7 +741,10 @@ fn a_midi2_endpoint_arrives_as_midi2_ump() {
     pumped
         .device
         .0
-        .send_to_subscribers(0, tutti_alsa_ffi::Packet::new(&note_on).unwrap())
+        .send_to_subscribers(
+            PortId::of(0),
+            tutti_alsa_ffi::Packet::new(&note_on).unwrap(),
+        )
         .unwrap();
     let got = arrive(&mut pumped, 1);
     assert_eq!(got[0].words(), note_on, "{got:?}");
@@ -917,7 +925,7 @@ fn dropping_an_input_does_not_wait_on_a_stuck_pump() {
 #[test]
 fn an_output_with_a_poisoned_lock_still_sends() {
     let target = plug(&unique("poisoned"));
-    let id = EndpointId::from_raw(Address::of(target.0.id(), 0).into());
+    let id = super::handle_of(Address::new(target.0.id(), PortId::of(0)));
     let output = super::output::connect(id).expect("the output to open");
     output.poison();
     send(&output, 0x2090_3C64, tutti_midi_runtime::SendAt::Now);
@@ -951,7 +959,7 @@ fn next_note(device: &Virtual, patience: Duration) -> Option<(u32, Instant)> {
 #[test]
 fn a_scheduled_event_arrives_at_its_time_and_now_at_once() {
     let target = plug(&unique("scheduled"));
-    let id = EndpointId::from_raw(Address::of(target.0.id(), 0).into());
+    let id = super::handle_of(Address::new(target.0.id(), PortId::of(0)));
     let output = super::output::connect(id).expect("the output to open");
     let slack = Duration::from_millis(10);
 
@@ -977,7 +985,7 @@ fn a_scheduled_event_arrives_at_its_time_and_now_at_once() {
 #[test]
 fn events_are_delivered_by_their_times_and_a_past_time_at_once() {
     let target = plug(&unique("ordered"));
-    let id = EndpointId::from_raw(Address::of(target.0.id(), 0).into());
+    let id = super::handle_of(Address::new(target.0.id(), PortId::of(0)));
     let output = super::output::connect(id).expect("the output to open");
     let now = Instant::now();
     let late = now + Duration::from_secs(2);
@@ -1051,7 +1059,7 @@ fn fill(output: &super::output::AlsaOutput) -> usize {
 fn an_output_with_a_full_pool_takes_what_fits_and_does_not_wait() {
     use tutti_midi_runtime::MidiOut;
     let target = plug(&unique("pool"));
-    let id = EndpointId::from_raw(Address::of(target.0.id(), 0).into());
+    let id = super::handle_of(Address::new(target.0.id(), PortId::of(0)));
     let output = super::output::connect(id).expect("the output to open");
     let held = held(tutti_ump::Ump([0x2090_3C64, 0, 0, 0]));
     let batch = vec![held; 10_000];
@@ -1086,14 +1094,14 @@ fn a_scheduled_message_the_pool_cannot_hold_whole_is_refused_whole() {
     let note = held(tutti_ump::Ump([0x2090_3C64, 0, 0, 0]));
     let pool = {
         let target = plug(&unique("pool-size"));
-        let id = EndpointId::from_raw(Address::of(target.0.id(), 0).into());
+        let id = super::handle_of(Address::new(target.0.id(), PortId::of(0)));
         let output = super::output::connect(id).expect("the output to open");
         (0..10_000)
             .take_while(|_| !output.queue_timed(&[note]).is_none())
             .count()
     };
     let target = plug(&unique("pool-room"));
-    let id = EndpointId::from_raw(Address::of(target.0.id(), 0).into());
+    let id = super::handle_of(Address::new(target.0.id(), PortId::of(0)));
     let output = super::output::connect(id).expect("the output to open");
     let notes = vec![note; pool - 2];
     assert!(output.queue_timed(&notes).is_all(&notes));
@@ -1109,7 +1117,7 @@ fn a_scheduled_message_the_pool_cannot_hold_whole_is_refused_whole() {
 fn a_full_destination_refuses_a_send_at_once() {
     use tutti_midi_runtime::MidiOut;
     let target = plug(&unique("full"));
-    let id = EndpointId::from_raw(Address::of(target.0.id(), 0).into());
+    let id = super::handle_of(Address::new(target.0.id(), PortId::of(0)));
     let output = super::output::connect(id).expect("the output to open");
     assert!(fill(&output) > 0, "an empty destination takes some");
     assert!(
@@ -1127,7 +1135,7 @@ fn a_full_destination_refuses_a_send_at_once() {
 fn a_message_a_full_destination_cannot_start_is_refused_whole() {
     use tutti_midi_runtime::MidiOut;
     let target = plug(&unique("refused"));
-    let id = EndpointId::from_raw(Address::of(target.0.id(), 0).into());
+    let id = super::handle_of(Address::new(target.0.id(), PortId::of(0)));
     let output = super::output::connect(id).expect("the output to open");
     fill(&output);
     assert!(output.queue_timed(&sysex()).is_none());
@@ -1144,12 +1152,12 @@ fn a_destination_that_fills_inside_a_message_has_the_lost_tail_counted() {
     use tutti_midi_runtime::MidiOut;
     let room = {
         let target = plug(&unique("measured"));
-        let id = EndpointId::from_raw(Address::of(target.0.id(), 0).into());
+        let id = super::handle_of(Address::new(target.0.id(), PortId::of(0)));
         fill(&super::output::connect(id).expect("the output to open"))
     };
     assert!(room > 2, "a destination holds more than two");
     let target = plug(&unique("cut"));
-    let id = EndpointId::from_raw(Address::of(target.0.id(), 0).into());
+    let id = super::handle_of(Address::new(target.0.id(), PortId::of(0)));
     let output = super::output::connect(id).expect("the output to open");
     let note = now(tutti_ump::Ump([0x2090_3C64, 0, 0, 0]));
     let notes = vec![note; room - 2];
@@ -1282,7 +1290,7 @@ fn a_device_on_the_sequencer_is_negotiated_through_the_pump_and_the_output() {
                         let _ = endpoint.reply(message, &mut answers);
                         for answer in answers {
                             let packet = tutti_alsa_ffi::Packet::new(answer.words()).unwrap();
-                            device.0.send_to_subscribers(0, packet).unwrap();
+                            device.0.send_to_subscribers(PortId::of(0), packet).unwrap();
                         }
                     }
                     _ => std::thread::sleep(Duration::from_millis(1)),

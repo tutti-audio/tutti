@@ -19,6 +19,7 @@ use crate::test_support::endpoint;
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
+use tutti_alsa_ffi::{Address, ClientId};
 use tutti_midi_device::DeviceEvent;
 
 fn heard(events: &[Announced]) -> Drained {
@@ -37,14 +38,14 @@ const NOTHING: Drained = Drained {
 /// and client exit, then the new owner's start and port.
 const REPLUG: [Announced; 4] = [
     Announced::PortExit(Address::of(5, 0)),
-    Announced::ClientExit(5),
-    Announced::ClientStart(5),
+    Announced::ClientExit(ClientId::of(5)),
+    Announced::ClientStart(ClientId::of(5)),
     Announced::PortStart(Address::of(5, 0)),
 ];
 
 /// A client 5 starting with one port.
 const START: [Announced; 2] = [
-    Announced::ClientStart(5),
+    Announced::ClientStart(ClientId::of(5)),
     Announced::PortStart(Address::of(5, 0)),
 ];
 
@@ -75,14 +76,14 @@ fn events_read_after_a_look_are_kept() {
         NOTHING,
     ]));
     let settled = settle(
-        heard(&[Announced::ClientStart(6)]),
+        heard(&[Announced::ClientStart(ClientId::of(6))]),
         || reads.borrow_mut().pop_front().unwrap_or(NOTHING),
         || Some(()),
     );
     assert_eq!(
         settled.events,
         [
-            Announced::ClientStart(6),
+            Announced::ClientStart(ClientId::of(6)),
             Announced::PortStart(Address::of(7, 0))
         ]
     );
@@ -333,8 +334,8 @@ fn late_exits_and_changes_of_an_old_owner_are_nothing() {
         *m.present.borrow_mut() = World::device("Two");
     });
     for late in [
-        Announced::ClientExit(5),
-        Announced::ClientChange(5),
+        Announced::ClientExit(ClientId::of(5)),
+        Announced::ClientChange(ClientId::of(5)),
         Announced::PortExit(Address::of(5, 0)),
         Announced::PortChange(Address::of(5, 0)),
     ] {
@@ -375,7 +376,7 @@ fn a_rename_lost_in_an_overrun_does_not_hide_a_later_replug() {
 fn renamed_twice_then_replugged() {
     let mut world = World::with("One", &[]);
     for name in ["Two", "Three"] {
-        world.wake(heard(&[Announced::ClientChange(5)]), |m| {
+        world.wake(heard(&[Announced::ClientChange(ClientId::of(5))]), |m| {
             *m.present.borrow_mut() = World::device(name)
         });
     }
@@ -424,7 +425,7 @@ fn a_look_that_sees_a_new_client_before_its_start_is_read_reports_it() {
     world.wake(
         heard(&[
             Announced::PortExit(Address::of(5, 0)),
-            Announced::ClientExit(5),
+            Announced::ClientExit(ClientId::of(5)),
         ]),
         |m| {
             m.stream.borrow_mut().extend(START);
@@ -458,7 +459,7 @@ fn a_start_read_late_for_an_unconfirmed_handle_is_its_own() {
     assert_eq!(world.shape(), vec![("added", "Two".to_string())]);
     world.wake(
         heard(&[
-            Announced::ClientStart(6),
+            Announced::ClientStart(ClientId::of(6)),
             Announced::PortStart(Address::of(6, 0)),
         ]),
         |_| {},
@@ -467,8 +468,8 @@ fn a_start_read_late_for_an_unconfirmed_handle_is_its_own() {
     world.wake(
         heard(&[
             Announced::PortExit(Address::of(6, 0)),
-            Announced::ClientExit(6),
-            Announced::ClientStart(6),
+            Announced::ClientExit(ClientId::of(6)),
+            Announced::ClientStart(ClientId::of(6)),
             Announced::PortStart(Address::of(6, 0)),
         ]),
         |_| {},
@@ -529,7 +530,7 @@ fn a_look_that_fails_once_costs_nothing() {
 #[test]
 fn a_new_port_listed_before_its_start_is_posted_is_not_made_again() {
     let mut world = World::with("One", &[]);
-    world.wake(heard(&[Announced::ClientStart(6)]), |m| {
+    world.wake(heard(&[Announced::ClientStart(ClientId::of(6))]), |m| {
         m.present.borrow_mut().extend(World::device_on(6, "Two"));
     });
     assert_eq!(world.shape(), vec![("added", "Two".to_string())]);
@@ -550,13 +551,13 @@ fn a_new_port_listed_before_its_start_is_posted_is_not_made_again() {
 #[test]
 fn a_port_start_still_to_come_survives_other_wakes() {
     let mut world = World::with("One", &[]);
-    world.wake(heard(&[Announced::ClientStart(6)]), |m| {
+    world.wake(heard(&[Announced::ClientStart(ClientId::of(6))]), |m| {
         m.present.borrow_mut().extend(World::device_on(6, "Two"));
     });
     world.shape();
     for other in [
         Announced::PortChange(Address::of(6, 0)),
-        Announced::ClientChange(6),
+        Announced::ClientChange(ClientId::of(6)),
     ] {
         world.wake(heard(&[other]), |_| {});
     }
@@ -573,8 +574,8 @@ fn a_replug_listed_before_its_port_start_is_not_made_again() {
     world.wake(
         heard(&[
             Announced::PortExit(Address::of(5, 0)),
-            Announced::ClientExit(5),
-            Announced::ClientStart(5),
+            Announced::ClientExit(ClientId::of(5)),
+            Announced::ClientStart(ClientId::of(5)),
         ]),
         |_| {},
     );
@@ -593,7 +594,7 @@ fn a_removal_read_while_every_look_fails_is_reported_by_the_retry() {
     world.wake(
         heard(&[
             Announced::PortExit(Address::of(5, 0)),
-            Announced::ClientExit(5),
+            Announced::ClientExit(ClientId::of(5)),
         ]),
         |m| {
             m.present.borrow_mut().clear();
@@ -700,10 +701,10 @@ fn a_rename_listed_by_a_look_that_did_not_quiet_does_not_hide_a_replug() {
         world.model.storm.set(false);
         assert_eq!(world.shape(), pair("One", "Renamed"));
         if changes_first {
-            world.wake(heard(&[Announced::ClientChange(5)]), |_| {});
+            world.wake(heard(&[Announced::ClientChange(ClientId::of(5))]), |_| {});
             world.wake(heard(&REPLUG), |_| {});
         } else {
-            let mut announced = vec![Announced::ClientChange(5)];
+            let mut announced = vec![Announced::ClientChange(ClientId::of(5))];
             announced.extend(REPLUG);
             world.wake(heard(&announced), |_| {});
         }
@@ -730,7 +731,7 @@ fn a_change_read_with_the_look_that_lists_the_rename_is_a_rename() {
     non_quiet_rename(
         &mut world,
         "Renamed",
-        &[Announced::ClientChange(5)],
+        &[Announced::ClientChange(ClientId::of(5))],
         &REPLUG,
     );
     assert_eq!(
@@ -768,7 +769,7 @@ fn a_port_exit_read_for_an_undecided_handle_is_a_new_occupant() {
     world.wake(
         heard(&[
             Announced::PortExit(Address::of(5, 0)),
-            Announced::ClientChange(5),
+            Announced::ClientChange(ClientId::of(5)),
         ]),
         |_| {},
     );
@@ -804,7 +805,12 @@ fn a_quiet_look_decides_an_undecided_handle() {
 #[test]
 fn a_replug_listed_after_a_read_change_is_reported_again_by_its_start() {
     let mut world = World::with("One", &[]);
-    non_quiet_rename(&mut world, "Three", &[Announced::ClientChange(5)], &REPLUG);
+    non_quiet_rename(
+        &mut world,
+        "Three",
+        &[Announced::ClientChange(ClientId::of(5))],
+        &REPLUG,
+    );
     assert_eq!(
         world.shape(),
         twice(pair("One", "Three"), pair("Three", "Three"))
@@ -840,7 +846,7 @@ fn a_port_exit_read_before_a_change_with_the_look_is_a_replacement() {
         "Two",
         &[
             Announced::PortExit(Address::of(5, 0)),
-            Announced::ClientChange(5),
+            Announced::ClientChange(ClientId::of(5)),
         ],
         &START,
     );
@@ -857,7 +863,7 @@ fn a_replacement_listed_after_a_rename_is_not_taken_for_one() {
     world.wake(heard(&[Announced::PortExit(Address::of(5, 0))]), |m| {
         *m.present.borrow_mut() = World::device("Two")
     });
-    world.wake(heard(&[Announced::ClientChange(5)]), |_| {});
+    world.wake(heard(&[Announced::ClientChange(ClientId::of(5))]), |_| {});
     world.model.storm.set(false);
     world.wake(heard(&START), |_| {});
     assert_eq!(

@@ -4,69 +4,163 @@ use std::ops::BitOr;
 
 use crate::sys;
 
-/// A client's or a port's number, as one byte.
-type Byte = u8;
-
-/// The sequencer's client table holds 192 clients (the kernel's SNDRV_SEQ_MAX_CLIENTS): the
-/// numbers `0..=191`. Above them are the broadcast addresses.
-const CLIENTS: Byte = 192;
+/// The sequencer's client table holds 192 clients (the kernel's SNDRV_SEQ_MAX_CLIENTS):
+/// the numbers `0..=191`. Above them are the broadcast addresses.
+const CLIENTS: u8 = 192;
 /// A client holds 254 ports (the kernel's SNDRV_SEQ_MAX_PORTS): the numbers `0..=253`.
 /// 254 and 255 name "the subscribers" and "everyone".
-const PORTS: Byte = 254;
+const PORTS: u8 = 254;
+
+// `ClientId`, `PortId` and `Address` are written by hand, not with `tutti_types::ranged!`:
+// this crate is layer 0 and cannot name `tutti-types`, and `Address` is a pair.
+
+/// A client's number in the sequencer: `0..=191`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ClientId(u8);
+
+impl ClientId {
+    /// The client `raw`; `None` past the sequencer's client table.
+    #[must_use]
+    pub const fn new(raw: u8) -> Option<Self> {
+        if raw < CLIENTS { Some(Self(raw)) } else { None }
+    }
+
+    /// [`new`](Self::new) for a literal.
+    ///
+    /// # Panics
+    ///
+    /// When `new` refuses `raw`.
+    #[must_use]
+    pub const fn of(raw: u8) -> Self {
+        match Self::new(raw) {
+            Some(id) => id,
+            None => panic!("not a sequencer client"),
+        }
+    }
+
+    /// From alsa-lib's integer; `None` when it is no client.
+    pub(crate) fn from_int(raw: i32) -> Option<Self> {
+        Self::new(u8::try_from(raw).ok()?)
+    }
+
+    /// The number.
+    #[must_use]
+    pub const fn get(self) -> u8 {
+        self.0
+    }
+}
+
+impl From<ClientId> for u8 {
+    fn from(id: ClientId) -> Self {
+        id.0
+    }
+}
+
+impl TryFrom<u8> for ClientId {
+    type Error = u8;
+
+    fn try_from(raw: u8) -> Result<Self, u8> {
+        Self::new(raw).ok_or(raw)
+    }
+}
+
+/// A port's number within its client: `0..=253`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct PortId(u8);
+
+impl PortId {
+    /// The port `raw`; `None` for the broadcast numbers 254 and 255.
+    #[must_use]
+    pub const fn new(raw: u8) -> Option<Self> {
+        if raw < PORTS { Some(Self(raw)) } else { None }
+    }
+
+    /// [`new`](Self::new) for a literal.
+    ///
+    /// # Panics
+    ///
+    /// When `new` refuses `raw`.
+    #[must_use]
+    pub const fn of(raw: u8) -> Self {
+        match Self::new(raw) {
+            Some(id) => id,
+            None => panic!("not a sequencer port"),
+        }
+    }
+
+    /// From alsa-lib's integer; `None` when it is no port.
+    pub(crate) fn from_int(raw: i32) -> Option<Self> {
+        Self::new(u8::try_from(raw).ok()?)
+    }
+
+    /// The number.
+    #[must_use]
+    pub const fn get(self) -> u8 {
+        self.0
+    }
+}
+
+impl From<PortId> for u8 {
+    fn from(id: PortId) -> Self {
+        id.0
+    }
+}
+
+impl TryFrom<u8> for PortId {
+    type Error = u8;
+
+    fn try_from(raw: u8) -> Result<Self, u8> {
+        Self::new(raw).ok_or(raw)
+    }
+}
 
 /// A port of a client: the pair the sequencer addresses events and
 /// subscriptions by. It names a place that can exist, not one that does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Address {
-    client: Byte,
-    port: Byte,
+    client: ClientId,
+    port: PortId,
 }
 
 impl Address {
     /// The system client's announce port (`SND_SEQ_CLIENT_SYSTEM`,
     /// `SND_SEQ_PORT_SYSTEM_ANNOUNCE`), which sends an event whenever a client or
     /// port starts, exits or changes.
-    pub const ANNOUNCE: Self = Self { client: 0, port: 1 };
+    pub const ANNOUNCE: Self = Self::of(0, 1);
 
-    /// The port `port` of client `client`; `None` when either is past the
-    /// sequencer's tables (clients `0..=191`, ports `0..=253`), which is the
-    /// broadcast range and no one's port.
+    /// The port `port` of client `client`.
     #[must_use]
-    pub const fn new(client: u8, port: u8) -> Option<Self> {
-        if client < CLIENTS && port < PORTS {
-            Some(Self { client, port })
-        } else {
-            None
-        }
+    pub const fn new(client: ClientId, port: PortId) -> Self {
+        Self { client, port }
     }
 
-    /// [`new`](Self::new) for a literal; panics on a refused pair.
+    /// [`new`](Self::new) for literal numbers.
     ///
     /// # Panics
     ///
-    /// When `new` refuses the pair.
+    /// When either number is past the sequencer's tables.
     #[must_use]
     pub const fn of(client: u8, port: u8) -> Self {
-        match Self::new(client, port) {
-            Some(address) => address,
-            None => panic!("not a sequencer address"),
-        }
+        Self::new(ClientId::of(client), PortId::of(port))
     }
 
     /// From alsa-lib's integers; `None` when either is no address.
     pub(crate) fn from_ints(client: i32, port: i32) -> Option<Self> {
-        Self::new(u8::try_from(client).ok()?, u8::try_from(port).ok()?)
+        Some(Self::new(
+            ClientId::from_int(client)?,
+            PortId::from_int(port)?,
+        ))
     }
 
-    /// The client's number.
+    /// The client.
     #[must_use]
-    pub const fn client(self) -> u8 {
+    pub const fn client(self) -> ClientId {
         self.client
     }
 
-    /// The port's number within its client.
+    /// The port within its client.
     #[must_use]
-    pub const fn port(self) -> u8 {
+    pub const fn port(self) -> PortId {
         self.port
     }
 }
@@ -75,7 +169,7 @@ impl Address {
 /// the port in the lower.
 impl From<Address> for u64 {
     fn from(address: Address) -> Self {
-        (u64::from(address.client) << 32) | u64::from(address.port)
+        (u64::from(address.client.get()) << 32) | u64::from(address.port.get())
     }
 }
 
@@ -87,8 +181,11 @@ impl TryFrom<u64> for Address {
 
     fn try_from(raw: u64) -> Result<Self, u64> {
         let (client, port) = (raw >> 32, raw & 0xFFFF_FFFF);
-        match (u8::try_from(client), u8::try_from(port)) {
-            (Ok(client), Ok(port)) => Self::new(client, port).ok_or(raw),
+        let (Ok(client), Ok(port)) = (u8::try_from(client), u8::try_from(port)) else {
+            return Err(raw);
+        };
+        match (ClientId::new(client), PortId::new(port)) {
+            (Some(client), Some(port)) => Ok(Self::new(client, port)),
             _ => Err(raw),
         }
     }
@@ -108,12 +205,8 @@ impl PortCaps {
     /// Other clients may subscribe to write to the port (`SND_SEQ_PORT_CAP_SUBS_WRITE`).
     pub const SUBS_WRITE: Self = Self(sys::SND_SEQ_PORT_CAP_SUBS_WRITE);
 
-    /// No capability.
-    pub const NONE: Self = Self(0);
-
     /// The set a port reports, bits this crate has no name for kept.
-    #[must_use]
-    pub const fn from_bits(bits: u32) -> Self {
+    pub(crate) const fn from_bits(bits: u32) -> Self {
         Self(bits)
     }
 
@@ -124,8 +217,7 @@ impl PortCaps {
     }
 
     /// Whether every capability of `other` is in this set.
-    #[must_use]
-    pub const fn contains(self, other: Self) -> bool {
+    const fn contains(self, other: Self) -> bool {
         self.0 & other.0 == other.0
     }
 
@@ -182,15 +274,30 @@ impl BitOr for PortKind {
 mod tests {
     use super::*;
 
-    /// A client below 192 and a port below 254 make an address; the first past
-    /// either is the broadcast range and is refused.
+    /// A client below 192 is a client; 192 and up is the broadcast range and is
+    /// refused, as `TryFrom` and `From` agree.
     #[test]
-    fn an_address_past_the_tables_is_refused() {
-        assert_eq!(Address::new(191, 253).map(Address::client), Some(191));
-        assert_eq!(Address::new(0, 0).map(Address::port), Some(0));
-        assert_eq!(Address::new(192, 0), None);
-        assert_eq!(Address::new(0, 254), None);
-        assert_eq!(Address::new(255, 255), None);
+    fn a_client_past_the_table_is_refused() {
+        assert_eq!(ClientId::new(191).map(ClientId::get), Some(191));
+        assert_eq!(ClientId::new(0).map(ClientId::get), Some(0));
+        assert_eq!(ClientId::new(192), None);
+        assert_eq!(ClientId::new(255), None);
+        assert_eq!(ClientId::try_from(192), Err(192));
+        assert_eq!(u8::from(ClientId::of(130)), 130);
+        assert_eq!(ClientId::from_int(-1), None);
+        assert_eq!(ClientId::from_int(256), None);
+    }
+
+    /// A port below 254 is a port; 254 ("the subscribers") and 255 ("everyone")
+    /// are refused.
+    #[test]
+    fn a_port_past_the_table_is_refused() {
+        assert_eq!(PortId::new(253).map(PortId::get), Some(253));
+        assert_eq!(PortId::new(254), None);
+        assert_eq!(PortId::new(255), None);
+        assert_eq!(PortId::try_from(254), Err(254));
+        assert_eq!(u8::from(PortId::of(9)), 9);
+        assert_eq!(PortId::from_int(-1), None);
     }
 
     /// The integers alsa-lib gives are an address when both are in range, and
@@ -200,6 +307,7 @@ mod tests {
         assert_eq!(Address::from_ints(130, 9), Some(Address::of(130, 9)));
         assert_eq!(Address::from_ints(-1, 0), None);
         assert_eq!(Address::from_ints(0, 256), None);
+        assert_eq!(Address::from_ints(192, 0), None);
         assert_eq!(Address::from_ints(0, 254), None);
     }
 
@@ -217,7 +325,8 @@ mod tests {
     }
 
     /// A number no address packs to is refused whole, not truncated to a port:
-    /// a bit above a byte in either half, or a pair past the tables.
+    /// a bit above a byte in either half, a pair past the tables, or the low
+    /// half of a CoreMIDI-style 32-bit unique id.
     #[test]
     fn a_number_no_address_made_is_refused() {
         for raw in [
@@ -226,14 +335,15 @@ mod tests {
             0x100 << 32,
             192 << 32,
             254,
+            0xDEAD_BEEF,
             u64::MAX,
         ] {
             assert_eq!(Address::try_from(raw), Err(raw), "{raw:#x}");
         }
     }
 
-    /// The predicates are the flag values the kernel defines: READ 1, WRITE 2,
-    /// SUBS_READ 32, SUBS_WRITE 64.
+    /// The flags are the kernel's values: READ 1, WRITE 2, SUBS_READ 32,
+    /// SUBS_WRITE 64; MIDI_GENERIC 2 and APPLICATION 1<<20.
     #[test]
     fn caps_are_the_kernels_flag_values() {
         assert_eq!(PortCaps::READ.bits(), 0x01);
@@ -258,7 +368,7 @@ mod tests {
         assert!(!PortCaps::WRITE.can_write_to());
         assert!(!PortCaps::SUBS_WRITE.can_write_to());
         assert!((read | write).can_read_from() && (read | write).can_write_to());
-        assert!(!PortCaps::NONE.can_read_from());
+        assert!(!PortCaps::from_bits(0).can_read_from());
         // A bit with no name stays and does not change the answer.
         assert!(PortCaps::from_bits(read.bits() | 0x8000).can_read_from());
     }

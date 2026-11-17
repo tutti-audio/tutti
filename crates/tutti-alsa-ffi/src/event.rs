@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use crate::address::Address;
+use crate::address::{Address, ClientId, PortId};
 use crate::client::Packet;
 use crate::sys;
 
@@ -45,11 +45,11 @@ impl Event {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Announced {
     /// A client opened: its number.
-    ClientStart(u8),
+    ClientStart(ClientId),
     /// A client closed: its number.
-    ClientExit(u8),
+    ClientExit(ClientId),
     /// A client set its info (its name among it): its number.
-    ClientChange(u8),
+    ClientChange(ClientId),
     /// A port was created.
     PortStart(Address),
     /// A port was deleted.
@@ -64,12 +64,12 @@ impl Announced {
     /// port) it is about; one that is no address is no announcement.
     fn of(ev: &sys::snd_seq_ump_event_t) -> Option<Self> {
         let data = ev.ump[0].to_ne_bytes();
-        let (client, port) = (data[0], data[1]);
-        let address = || Address::new(client, port);
+        let client = ClientId::new(data[0]);
+        let address = || Some(Address::new(client?, PortId::new(data[1])?));
         match ev.type_ {
-            sys::SND_SEQ_EVENT_CLIENT_START => Some(Self::ClientStart(client)),
-            sys::SND_SEQ_EVENT_CLIENT_EXIT => Some(Self::ClientExit(client)),
-            sys::SND_SEQ_EVENT_CLIENT_CHANGE => Some(Self::ClientChange(client)),
+            sys::SND_SEQ_EVENT_CLIENT_START => client.map(Self::ClientStart),
+            sys::SND_SEQ_EVENT_CLIENT_EXIT => client.map(Self::ClientExit),
+            sys::SND_SEQ_EVENT_CLIENT_CHANGE => client.map(Self::ClientChange),
             sys::SND_SEQ_EVENT_PORT_START => address().map(Self::PortStart),
             sys::SND_SEQ_EVENT_PORT_EXIT => address().map(Self::PortExit),
             sys::SND_SEQ_EVENT_PORT_CHANGE => address().map(Self::PortChange),
@@ -95,7 +95,7 @@ mod tests {
     fn an_announcement_names_its_client_and_port() {
         assert_eq!(
             event(sys::SND_SEQ_EVENT_CLIENT_START, 130, 9),
-            Event::Announce(Announced::ClientStart(130))
+            Event::Announce(Announced::ClientStart(ClientId::of(130)))
         );
         assert_eq!(
             event(sys::SND_SEQ_EVENT_PORT_START, 130, 9),
@@ -107,11 +107,11 @@ mod tests {
         );
         assert_eq!(
             event(sys::SND_SEQ_EVENT_CLIENT_CHANGE, 4, 0),
-            Event::Announce(Announced::ClientChange(4))
+            Event::Announce(Announced::ClientChange(ClientId::of(4)))
         );
         assert_eq!(
             event(sys::SND_SEQ_EVENT_CLIENT_EXIT, 4, 0),
-            Event::Announce(Announced::ClientExit(4))
+            Event::Announce(Announced::ClientExit(ClientId::of(4)))
         );
         assert_eq!(
             event(sys::SND_SEQ_EVENT_PORT_CHANGE, 4, 2),
@@ -123,13 +123,21 @@ mod tests {
     /// holds, and a notice carries no words to read as music.
     #[test]
     fn another_event_is_a_notice_never_a_message() {
-        assert_eq!(event(6, 130, 9), Event::Notice);
+        assert_eq!(event(sys::SND_SEQ_EVENT_NOTEON, 130, 9), Event::Notice);
         assert_eq!(event(66, 130, 9), Event::Notice);
-        // A port announcement whose bytes are no address says nothing.
+        // An announcement whose bytes are no client or port says nothing.
         assert_eq!(
             event(sys::SND_SEQ_EVENT_PORT_START, 255, 255),
             Event::Notice
         );
+        assert_eq!(event(sys::SND_SEQ_EVENT_PORT_START, 5, 254), Event::Notice);
+        for kind in [
+            sys::SND_SEQ_EVENT_CLIENT_START,
+            sys::SND_SEQ_EVENT_CLIENT_EXIT,
+            sys::SND_SEQ_EVENT_CLIENT_CHANGE,
+        ] {
+            assert_eq!(event(kind, 192, 0), Event::Notice, "{kind}");
+        }
     }
 
     /// A UMP packet event carries its words, and the stamp is its real time as
