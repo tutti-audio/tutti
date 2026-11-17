@@ -615,3 +615,26 @@ fn a_caller_can_still_fold_to_stereo_itself() {
     );
     let _ = std::fs::remove_file(&path);
 }
+
+/// **A view of another width is refused, untouched.** A stereo file read into a
+/// mono or a three-channel view is [`DecodeError::Width`] naming both widths,
+/// and the view keeps what it held.
+#[test]
+fn a_view_of_another_width_is_refused_and_untouched() {
+    let path = write_test_wav(64, "width_refused");
+    for view in [ChannelLayout::MONO, ChannelLayout::from_count(3)] {
+        let mut file = FileIn::<i16>::open(&path).expect("open");
+        let mut buf = [7i16; 12];
+        let out = InterleavedMut::new(&mut buf, view).expect("whole frames");
+        match file.fill_sequential_interleaved(out) {
+            Err(DecodeError::Width { file, view: got }) => {
+                assert_eq!(file, ChannelLayout::STEREO);
+                assert_eq!(got, view);
+            }
+            other => panic!("expected Width, got {other:?}"),
+        }
+        assert_eq!(buf, [7i16; 12], "{view:?}: the view is untouched");
+        assert_eq!(file.cursor(), Samples(0), "nothing was consumed");
+    }
+    let _ = std::fs::remove_file(&path);
+}

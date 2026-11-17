@@ -355,9 +355,10 @@ impl RegionOut {
                 return false;
             }
             // Frames read before a fault are kept; the rest is silence.
-            let got = InterleavedMut::new(&mut *out, decoder.topology().width())
-                .ok()
-                .and_then(|view| decoder.fill_sequential_interleaved(view).ok())
+            let view = InterleavedMut::new(&mut *out, decoder.topology().width())
+                .expect("the ring is the file's width and `out` holds whole frames");
+            let got = decoder
+                .fill_sequential_interleaved(view)
                 .map_or(0, Samples::get);
             out[got * ch..].fill(0.0);
             let Some(fault) = decoder.error() else {

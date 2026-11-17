@@ -14,7 +14,8 @@ use symphonia::core::audio::sample::{SampleFormat as FileFormat, i24};
 use symphonia::core::audio::{AudioSpec, GenericAudioBufferRef};
 use symphonia::core::codecs::CodecParameters;
 use symphonia::core::codecs::audio::well_known::{
-    CODEC_ID_PCM_F32BE, CODEC_ID_PCM_F32LE, CODEC_ID_PCM_F64BE, CODEC_ID_PCM_F64LE, CODEC_ID_VORBIS,
+    CODEC_ID_PCM_ALAW, CODEC_ID_PCM_F32BE, CODEC_ID_PCM_F32LE, CODEC_ID_PCM_F64BE,
+    CODEC_ID_PCM_F64LE, CODEC_ID_PCM_MULAW, CODEC_ID_VORBIS,
 };
 use symphonia::core::codecs::audio::{
     AudioCodecParameters, AudioDecoder, AudioDecoderOptions, CODEC_ID_NULL_AUDIO,
@@ -65,7 +66,8 @@ pub struct WaveMetadata {
 }
 
 /// The format a track's decoded samples are held in: a float PCM codec's own
-/// width, an integer codec's smallest format holding its bits, and a lossy
+/// width, an integer codec's smallest format holding its bits, a G.711
+/// companding codec's, which expands its 8 bits to 16-bit integers, and a lossy
 /// codec's, which has no integer to keep, `f32`.
 fn native_format(params: &AudioCodecParameters) -> SampleFormat {
     let float = |wide: bool| {
@@ -78,6 +80,7 @@ fn native_format(params: &AudioCodecParameters) -> SampleFormat {
     match (params.codec, params.sample_format, params.bits_per_sample) {
         (CODEC_ID_PCM_F32LE | CODEC_ID_PCM_F32BE, ..) => float(false),
         (CODEC_ID_PCM_F64LE | CODEC_ID_PCM_F64BE, ..) => float(true),
+        (CODEC_ID_PCM_ALAW | CODEC_ID_PCM_MULAW, ..) => SampleFormat::I16,
         (_, Some(FileFormat::F32), _) => float(false),
         (_, Some(FileFormat::F64), _) => float(true),
         (_, _, Some(..=8)) => SampleFormat::I8,
@@ -191,7 +194,10 @@ fn lift(decoded: &GenericAudioBufferRef<'_>, planes: &mut dyn Any, wide: &mut Ve
     out.resize_with(wide.len(), Vec::new);
     for (dst, src) in out.iter_mut().zip(wide.iter()) {
         dst.clear();
-        dst.extend(src.iter().map(|v| I24::new(v.0).unwrap_or(I24::ZERO)));
+        dst.extend(
+            src.iter()
+                .map(|v| I24::new(v.0).expect("a decoder's 24-bit integer is within I24's range")),
+        );
     }
 }
 

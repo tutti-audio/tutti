@@ -152,8 +152,9 @@ impl<S: Sample> FileIn<S> {
         self.total_frames.map(frames)
     }
 
-    /// Returns the file's sample rate (44 100 Hz if the container does not
-    /// say). Nothing is resampled.
+    /// Returns the file's sample rate, as the container states it; a file
+    /// that states none is not opened ([`DecodeError::NoSampleRate`]).
+    /// Nothing is resampled.
     pub fn sample_rate(&self) -> SampleRate {
         self.sample_rate
     }

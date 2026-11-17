@@ -522,9 +522,9 @@ impl Pages {
             }
             // Frames read before a fault stay in the page.
             let layout = self.decoder.topology().width();
-            if let Ok(view) = tutti_buffers::InterleavedMut::new(&mut page.data, layout) {
-                let _ = self.decoder.fill_sequential_interleaved(view);
-            }
+            let view = tutti_buffers::InterleavedMut::new(&mut page.data, layout)
+                .expect("a page is whole frames of the file's width");
+            let _ = self.decoder.fill_sequential_interleaved(view);
             if let Some(e) = self.decoder.error() {
                 self.fault.latch(fail(ReadFault::Decode {
                     frame: start,

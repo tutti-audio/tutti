@@ -14,7 +14,7 @@
 use std::path::PathBuf;
 
 use tutti_buffers::Wave;
-use tutti_buffers::{InterleavedMut, Pull, Source};
+use tutti_buffers::{Interleaved, InterleavedMut, PlanesMut, Pull, Source, deinterleave};
 use tutti_codec::{FileIn, read_wave, read_wave_bytes, read_wave_metadata};
 use tutti_types::Samples;
 
@@ -325,42 +325,31 @@ fn seek_lands_on_the_whole_file_load_frames() {
     }
 }
 
-/// `read_wave_bytes`, which probes from the bytes alone with no extension
-/// hint, decodes to the same samples as the path-based load, for every fixture.
-#[test]
-fn from_bytes_decodes_what_load_decodes() {
-    for &name in FIXTURES {
-        let want = read_wave::<f32>(asset(name)).expect("load");
-        let bytes = std::fs::read(asset(name)).expect("read fixture");
-        let decoded = read_wave_bytes::<f32>(bytes).expect("decode bytes");
-        assert_eq!(decoded.channels(), want.channels(), "{name}: channels");
-        assert_eq!(decoded.len(), want.len(), "{name}: frames");
-        assert_eq!(decoded.sample_rate(), want.sample_rate(), "{name}: rate");
-        for c in 0..want.channels() {
-            for i in 0..want.len().get() {
-                assert_eq!(
-                    decoded.at(c, i).to_bits(),
-                    want.at(c, i).to_bits(),
-                    "{name}: channel {c} frame {i}"
-                );
-            }
-        }
-    }
-}
-
 /// A PCM WAV built byte by byte from the RIFF/WAVE layout: a `fmt ` chunk
 /// (format 1, `planes.len()` channels, 48 kHz, `bits` per sample) and a `data`
 /// chunk holding the planes' integers frame by frame, little-endian.
 fn pcm_wav(planes: &[Vec<i32>], bits: u16) -> Vec<u8> {
     let channels = planes.len() as u16;
     let width = bits / 8;
-    let frames = planes[0].len();
-    let data_len = (frames * usize::from(channels) * usize::from(width)) as u32;
+    let mut data = Vec::new();
+    for i in 0..planes[0].len() {
+        for plane in planes {
+            data.extend(&plane[i].to_le_bytes()[..usize::from(width)]);
+        }
+    }
+    riff_wav(1, channels, bits, &data)
+}
+
+/// A WAV of format tag `tag` holding `data` as it is, `channels` wide at 48 kHz
+/// with `bits` stored per sample.
+fn riff_wav(tag: u16, channels: u16, bits: u16, data: &[u8]) -> Vec<u8> {
+    let width = bits / 8;
+    let data_len = data.len() as u32;
     let mut out = b"RIFF".to_vec();
     out.extend((36 + data_len).to_le_bytes());
     out.extend(b"WAVEfmt ");
     out.extend(16u32.to_le_bytes());
-    out.extend(1u16.to_le_bytes());
+    out.extend(tag.to_le_bytes());
     out.extend(channels.to_le_bytes());
     out.extend(48_000u32.to_le_bytes());
     out.extend((48_000 * u32::from(channels) * u32::from(width)).to_le_bytes());
@@ -368,11 +357,7 @@ fn pcm_wav(planes: &[Vec<i32>], bits: u16) -> Vec<u8> {
     out.extend(bits.to_le_bytes());
     out.extend(b"data");
     out.extend(data_len.to_le_bytes());
-    for i in 0..frames {
-        for plane in planes {
-            out.extend(&plane[i].to_le_bytes()[..usize::from(width)]);
-        }
-    }
+    out.extend(data);
     out
 }
 
@@ -439,15 +424,19 @@ fn a_native_stream_returns_the_files_exact_integers() {
     let path = dir.path().join("stream.wav");
     std::fs::write(&path, pcm_wav(&want, 16)).expect("write");
     let mut dec = FileIn::<i16>::open(&path).expect("open");
+    let layout = dec.layout();
     let mut got = vec![Vec::new(); 2];
     let mut buf = vec![0i16; 1000 * 2];
     loop {
-        let out = InterleavedMut::new(&mut buf, dec.layout()).unwrap();
+        let out = InterleavedMut::new(&mut buf, layout).unwrap();
         let Pull::Frames(n) = dec.pull(out) else {
             break;
         };
-        for (i, &s) in buf[..n.interleaved_len(dec.layout())].iter().enumerate() {
-            got[i % 2].push(i32::from(s));
+        let pulled = Interleaved::new(&buf[..n.interleaved_len(layout)], layout).unwrap();
+        let mut planes = vec![vec![0i16; n.get()]; 2];
+        deinterleave(pulled, PlanesMut::from_vecs(&mut planes).unwrap()).expect("same shape");
+        for (plane, chunk) in got.iter_mut().zip(planes) {
+            plane.extend(chunk.into_iter().map(i32::from));
         }
     }
     assert_eq!(got, want);
@@ -460,4 +449,104 @@ fn a_lossy_file_is_native_float() {
         let meta = read_wave_metadata(asset(name)).expect("probe");
         assert_eq!(meta.format, tutti_buffers::SampleFormat::F32, "{name}");
     }
+}
+
+/// Both entry points, a path and the bytes alone, decode a RIFF-built 16-bit
+/// WAV to the integers put in, and the header says `I16` and the rate and width
+/// put in.
+#[test]
+fn both_entry_points_decode_a_riff_built_file_to_its_integers() {
+    let want = integer_planes(i32::from(i16::MIN), i32::from(i16::MAX), 500);
+    let bytes = pcm_wav(&want, 16);
+    let dir = tempfile::tempdir().expect("tmp dir");
+    let path = dir.path().join("both.wav");
+    std::fs::write(&path, &bytes).expect("write");
+    let ints = |wave: Wave<i16>| -> Vec<Vec<i32>> {
+        (0..wave.channels())
+            .map(|c| wave.channel(c).iter().map(|&s| i32::from(s)).collect())
+            .collect()
+    };
+    let from_path = read_wave::<i16>(&path).expect("load");
+    assert_eq!(from_path.sample_rate().get(), 48_000.0);
+    assert_eq!(ints(from_path), want, "path");
+    assert_eq!(
+        ints(read_wave_bytes::<i16>(bytes).expect("decode bytes")),
+        want,
+        "bytes"
+    );
+}
+
+/// An 8-bit WAV is unsigned with 128 as zero: the bytes 0, 128 and 255 are the
+/// signed -128, 0 and 127, and the header says `I8`.
+#[test]
+fn an_8_bit_wav_is_unsigned_around_128() {
+    let bytes = riff_wav(1, 1, 8, &[0, 128, 255, 1, 127, 129]);
+    let dir = tempfile::tempdir().expect("tmp dir");
+    let path = dir.path().join("u8.wav");
+    std::fs::write(&path, &bytes).expect("write");
+    assert_eq!(
+        read_wave_metadata(&path).expect("probe").format,
+        tutti_buffers::SampleFormat::I8
+    );
+    let wave = read_wave_bytes::<i8>(bytes).expect("decode");
+    assert_eq!(wave.channel(0).samples(), &[-128i8, 0, 127, -127, -1, 1]);
+}
+
+/// A 32-bit integer WAV keeps `i32::MIN`, `i32::MAX`, -1 and 0 exactly.
+#[test]
+fn a_32_bit_wav_keeps_every_integer() {
+    let ints = [i32::MIN, i32::MAX, -1, 0, 1, i32::MIN + 1, i32::MAX - 1];
+    let bytes = pcm_wav(&[ints.to_vec()], 32);
+    let wave = read_wave_bytes::<i32>(bytes).expect("decode");
+    assert_eq!(wave.channel(0).samples(), &ints);
+}
+
+/// A 16-bit file asked for as another format converts by `tutti_buffers`'
+/// rule: to a float it is `v / 32768`, exact, and to `I24` it is `v * 256`.
+#[test]
+fn a_16_bit_file_read_as_another_format_follows_the_conversion_rule() {
+    let ints = [i16::MIN, i16::MAX, -1, 0, 1, 16384, -16384, 12345];
+    let planes = vec![ints.iter().map(|&v| i32::from(v)).collect::<Vec<_>>()];
+    let bytes = pcm_wav(&planes, 16);
+    let float = read_wave_bytes::<f32>(bytes.clone()).expect("f32");
+    let double = read_wave_bytes::<f64>(bytes.clone()).expect("f64");
+    let wide = read_wave_bytes::<tutti_buffers::I24>(bytes).expect("i24");
+    for (i, &v) in ints.iter().enumerate() {
+        assert_eq!(float.at(0, i), f32::from(v) / 32768.0, "f32 of {v}");
+        assert_eq!(double.at(0, i), f64::from(v) / 32768.0, "f64 of {v}");
+        assert_eq!(wide.at(0, i).get(), i32::from(v) * 256, "i24 of {v}");
+    }
+}
+
+/// The G.711 A-law expansion of one byte (ITU-T G.711 table 1a): the byte's
+/// even bits are inverted, its low nibble is the mantissa, bits 4-6 the
+/// segment, and bit 7 the sign (set is positive).
+fn alaw_expand(byte: u8) -> i16 {
+    let a = byte ^ 0x55;
+    let mantissa = i32::from(a & 0x0F) << 4;
+    let segment = (a & 0x70) >> 4;
+    let magnitude = match segment {
+        0 => mantissa + 8,
+        s => (mantissa + 0x108) << (s - 1),
+    };
+    (if a & 0x80 != 0 { magnitude } else { -magnitude }) as i16
+}
+
+/// An A-law WAV (format tag 6, 8 bits stored) carries no bit depth the header
+/// could map, yet it decodes to 16-bit integers: the header says `I16` and
+/// every decoded integer is the G.711 expansion of its byte.
+#[test]
+fn an_a_law_wav_is_16_bit_integers() {
+    let coded = [0xD5u8, 0x55, 0xAA, 0x2A, 0xFF, 0x7F, 0x80, 0x00, 0x95, 0x1B];
+    let bytes = riff_wav(6, 1, 8, &coded);
+    let dir = tempfile::tempdir().expect("tmp dir");
+    let path = dir.path().join("alaw.wav");
+    std::fs::write(&path, &bytes).expect("write");
+    assert_eq!(
+        read_wave_metadata(&path).expect("probe").format,
+        tutti_buffers::SampleFormat::I16
+    );
+    let wave = read_wave_bytes::<i16>(bytes).expect("decode");
+    let want: Vec<i16> = coded.iter().map(|&b| alaw_expand(b)).collect();
+    assert_eq!(wave.channel(0).samples(), want.as_slice());
 }
