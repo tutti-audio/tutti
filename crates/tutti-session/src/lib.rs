@@ -264,7 +264,7 @@ pub use session::MidiNodes;
 pub use session::ModInput;
 pub use session::{AppKey, PHASES, Phase, PhaseCx, RootTopologyStatus, Session, SessionEvent};
 #[cfg(feature = "device")]
-pub use switch::ClockOffset;
+pub use switch::ClockError;
 #[cfg(all(feature = "device", feature = "audio-io"))]
 pub use take::{
     Armed, InFlight, Placement, Punch, PunchError, Recorded, Rolling, Start, Take, TakeEnd,

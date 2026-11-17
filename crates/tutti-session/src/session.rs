@@ -1684,8 +1684,8 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     }
 
     /// Sends what a followed MIDI clock asked of the transport, each command at
-    /// the frame it was placed on (`At::NextBlock` for Machine Control), and says whether the transport took it. A command the transport's
-    /// list has no room for is dropped and logged, and the caller counts it
+    /// the frame it was placed on (`At::NextBlock` for Machine Control), and says
+    /// whether the transport took it. A command the transport's list has no room for is dropped and logged, and the caller counts it
     /// ([`MidiReport::ClockCommandsRefused`](crate::MidiReport::ClockCommandsRefused)):
     /// the source says its position again with the next message.
     #[cfg(feature = "midi")]

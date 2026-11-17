@@ -1,5 +1,5 @@
 //! A session changes clock: [`Session::into_device`] and
-//! [`Session::into_system_clock`], and the [`ClockOffset`] that hands the
+//! [`Session::into_system_clock`], and the [`ClockError`] that hands the
 //! session back when they fail.
 //!
 //! A session moves between the system clock and the sound card's clock by a
@@ -62,12 +62,12 @@ use crate::{
 /// where starting that clock again failed too and the session is stopped.
 #[derive(Debug, thiserror::Error)]
 #[error("{error}")]
-pub struct ClockOffset<S> {
+pub struct ClockError<S> {
     session: Box<S>,
     error: RestartError,
 }
 
-impl<S> ClockOffset<S> {
+impl<S> ClockError<S> {
     pub(crate) fn new(session: S, error: Error) -> Self {
         Self {
             session: Box::new(session),
@@ -187,11 +187,11 @@ impl<K: crate::AppKey> Session<K, SystemClock> {
     /// comes back stopped only with [`Error::SwitchNotUndone`].
     ///
     /// A panic during the switch (a node's `prepare`, the OS) unwinds out of
-    /// this call and drops the session: it is not returned as a [`ClockOffset`].
+    /// this call and drops the session: it is not returned as a [`ClockError`].
     ///
     /// # Errors
     ///
-    /// A [`ClockOffset`] whose error is [`Error::Device`] when the device cannot
+    /// A [`ClockError`] whose error is [`Error::Device`] when the device cannot
     /// be found or opened, [`Error::Unplaceable`], [`Error::MapUnplaceable`],
     /// [`Error::Reprepare`] or [`Error::RunsPending`] when the graph cannot
     /// take the device **before the timer stops**, the re-prepare's or the
@@ -200,7 +200,7 @@ impl<K: crate::AppKey> Session<K, SystemClock> {
     pub fn into_device(
         self,
         device: DeviceSelector,
-    ) -> std::result::Result<LiveSession<K>, ClockOffset<Self>> {
+    ) -> std::result::Result<LiveSession<K>, ClockError<Self>> {
         let opened = DeviceHost::open(self.running.audio_host).and_then(|host| {
             let engine = AudioEngine::open(host, device.clone())?;
             let resolved = engine.resolve_device()?;
@@ -208,7 +208,7 @@ impl<K: crate::AppKey> Session<K, SystemClock> {
         });
         let (engine, resolved) = match opened {
             Ok(found) => found,
-            Err(e) => return Err(ClockOffset::new(self, e.into())),
+            Err(e) => return Err(ClockError::new(self, e.into())),
         };
         let channels = resolved.spec().channels;
         self.switch_to_device(channels, device, move |host, session| {
@@ -232,7 +232,7 @@ impl<K: crate::AppKey> Session<K, SystemClock> {
         self,
         spec: OutputSpec,
         driver: D,
-    ) -> std::result::Result<LiveSession<K>, ClockOffset<Self>>
+    ) -> std::result::Result<LiveSession<K>, ClockError<Self>>
     where
         D::Error: Into<tutti_cpal::Error>,
     {
@@ -257,12 +257,12 @@ impl<K: crate::AppKey> Session<K, SystemClock> {
             &mut Self,
         )
             -> std::result::Result<TuttiDriver, Box<(tutti_engine::StreamHost, Error)>>,
-    ) -> std::result::Result<LiveSession<K>, ClockOffset<Self>> {
+    ) -> std::result::Result<LiveSession<K>, ClockError<Self>> {
         if let Err(e) = self
             .settle_runs()
             .and_then(|()| self.check_switch(channels))
         {
-            return Err(ClockOffset::new(self, e));
+            return Err(ClockError::new(self, e));
         }
         let previous = self.graph.prepared().sample_rate();
         // What the timer's stream reported since the last update is reported
@@ -278,7 +278,7 @@ impl<K: crate::AppKey> Session<K, SystemClock> {
                 self.running.host = Some(host);
                 let undone = self.back_to_the_timer(old);
                 self.carried_events.append(&mut unpolled);
-                Err(ClockOffset::new(self, after_stop(switch, undone)))
+                Err(ClockError::new(self, after_stop(switch, undone)))
             }
         }
     }
@@ -345,15 +345,15 @@ impl<K: crate::AppKey> Session<K, DeviceClock> {
     /// session comes back stopped only with [`Error::SwitchNotUndone`].
     ///
     /// A panic during the switch (a node's `prepare`, the OS) unwinds out of
-    /// this call and drops the session: it is not returned as a [`ClockOffset`].
+    /// this call and drops the session: it is not returned as a [`ClockError`].
     ///
     /// # Errors
     ///
-    /// A [`ClockOffset`] whose error is [`Error::Reprepare`] or
+    /// A [`ClockError`] whose error is [`Error::Reprepare`] or
     /// [`Error::RunsPending`] before the stream stops, the re-prepare's or the
     /// timer's own failure ([`Error::Clock`]) after it, and
     /// [`Error::SwitchNotUndone`] when the card could not be started again.
-    pub fn into_system_clock(self) -> std::result::Result<SystemSession<K>, ClockOffset<Self>> {
+    pub fn into_system_clock(self) -> std::result::Result<SystemSession<K>, ClockError<Self>> {
         self.into_timer(TimerDriver::new(), |session, device, _| {
             let chosen = device.chosen.clone();
             device.driver.restart_with(chosen, |spec, stopped| {
@@ -375,7 +375,7 @@ impl<K: crate::AppKey> Session<K, DeviceClock> {
         self,
         timer: impl StreamDriver<Error = tutti_engine::TimerError>,
         back: B,
-    ) -> std::result::Result<SystemSession<K>, ClockOffset<Self>>
+    ) -> std::result::Result<SystemSession<K>, ClockError<Self>>
     where
         B::Error: Into<tutti_cpal::Error>,
     {
@@ -392,21 +392,21 @@ impl<K: crate::AppKey> Session<K, DeviceClock> {
         mut self,
         timer: D,
         undo: impl FnOnce(&mut Self, &mut Device, OutputSpec) -> Result<()>,
-    ) -> std::result::Result<SystemSession<K>, ClockOffset<Self>>
+    ) -> std::result::Result<SystemSession<K>, ClockError<Self>>
     where
         D: StreamDriver<Error = tutti_engine::TimerError>,
     {
         // The runs first: they may have changed the graph or restarted the
         // card, and the switch is of the session as they left it.
         if let Err(e) = self.settle_runs() {
-            return Err(ClockOffset::new(self, e));
+            return Err(ClockError::new(self, e));
         }
         let rate = self.device().graph_rate();
         let old = self.device().spec().clone();
         let mut spec = old.clone().with_quantum(self.graph.prepared().max_block());
         spec.sample_rate = rate;
         if let Err(e) = self.check_switch(spec.channels) {
-            return Err(ClockOffset::new(self, e));
+            return Err(ClockError::new(self, e));
         }
         // What the card's stream reported since the last update is reported
         // before the timer's start clears the record.
@@ -426,7 +426,7 @@ impl<K: crate::AppKey> Session<K, DeviceClock> {
             }
             self.faults_seen = self.device().faults().count();
             self.carried_events.append(&mut events);
-            return Err(ClockOffset::new(self, after_stop(switch, undone)));
+            return Err(ClockError::new(self, after_stop(switch, undone)));
         }
         #[cfg(feature = "audio-io")]
         events.extend(

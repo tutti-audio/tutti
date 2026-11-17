@@ -108,8 +108,8 @@
 //!   the worst and located every 4 s, and one 10% off is 100 ms off and located
 //!   every second.
 //! - **Reverse.** Quarter Frames in descending piece order (`7` to `0`) mean the
-//!   source runs backward. It is read from two consecutive pieces
-//!   ([`MtcDecoder::direction`]) and said once as [`ClockEvent::Reversed`]. The
+//!   source runs backward. It is read from [`MtcDecoder::DIRECTION_STEPS`] steps in a row
+//!   ([`MtcDecoder::direction`]), so one glitch is not a reverse and said once as [`ClockEvent::Reversed`]. The
 //!   transport has no negative rate, so the follower stops it, unlocks, and takes
 //!   no position until the pieces ascend again, when it locks afresh.
 

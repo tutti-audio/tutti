@@ -1845,8 +1845,8 @@ impl Midi<'_> {
     /// `tutti_midi_runtime::ClockFollower`. A source silent for its dropout
     /// unlocks and stops the transport it was rolling.
     ///
-    /// A command is placed on the frame its message arrived on, 20 ms on (`At::Frame`;
-    /// the next block when the audio thread is past it), with the source's
+    /// A command is placed on the frame its message arrived on, 20 ms on, and
+    /// never sooner than a declick past the next block (`At::Frame`), with the source's
     /// position advanced by the time since the message arrived, so a source that
     /// kept rolling is not trailed. **A Beat
     /// Clock follower owns the tempo map** as `follow_tempo` does: the map found

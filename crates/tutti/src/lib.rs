@@ -385,7 +385,7 @@ pub mod session {
     pub use tutti_metering::LoadRecorder;
     pub use tutti_modulation::PeriodPoint;
     #[cfg(feature = "device")]
-    pub use tutti_session::ClockOffset;
+    pub use tutti_session::ClockError;
     #[cfg(feature = "plugin")]
     pub use tutti_session::Param as PluginParam;
     pub use tutti_session::{

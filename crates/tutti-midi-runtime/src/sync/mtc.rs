@@ -51,8 +51,8 @@ pub struct MtcDecoder {
     partial: Option<MtcDirection>,
     /// The piece accepted last; `None` before the first, so a decoder may join mid-cycle.
     last_piece: Option<u8>,
-    /// The way the last two pieces ran; `None` after a gap or before the second.
-    direction: Option<MtcDirection>,
+    /// The way the last step ran, and how many steps in a row ran that way.
+    run: Option<(MtcDirection, u8)>,
     cycle: Option<MtcCycle>,
     /// Whether `cycle` completed since [`take_cycle`](Self::take_cycle).
     fresh: bool,
@@ -70,7 +70,7 @@ impl MtcDecoder {
             count: 0,
             partial: None,
             last_piece: None,
-            direction: None,
+            run: None,
             cycle: None,
             fresh: false,
         }
@@ -117,7 +117,11 @@ impl MtcDecoder {
             }
         });
         self.last_piece = Some(piece);
-        self.direction = step;
+        self.run = match (step, self.run) {
+            (Some(d), Some((was, n))) if d == was => Some((d, n.saturating_add(1))),
+            (Some(d), _) => Some((d, 1)),
+            (None, _) => None,
+        };
 
         // A forward cycle starts at piece 0 and a reverse one at piece 7. With
         // no step to say which (a decoder joining, or after a gap) either may
@@ -163,15 +167,25 @@ impl MtcDecoder {
         }
     }
 
-    /// The way the last two pieces ran, or `None` before a second piece and
+    /// Steps of one direction in a row that make a [`direction`](Self::direction):
+    /// 3 (tutti's choice). A piece that is one up or one down from the one
+    /// before is one step; the spec has the pieces of a running source arrive in
+    /// strict order (M1, MIDI Time Code, Quarter Frame Message Implementation),
+    /// and a single step the other way is what one corrupt or lost byte makes
+    /// (`2, 1, 3`, or a burst loss that jumps `0` to `7`). Three in a row is
+    /// four pieces in order, half a cycle, which a glitch does not make and a
+    /// source that turned round does within a frame.
+    pub const DIRECTION_STEPS: u8 = 3;
+
+    /// The way the pieces run: [`DIRECTION_STEPS`](Self::DIRECTION_STEPS) steps
+    /// in a row up are [`Forward`](MtcDirection::Forward), that many down
+    /// [`Reverse`](MtcDirection::Reverse). `None` before that many steps, and
     /// after a gap (a piece that is neither one up nor one down from the one
-    /// before).
-    ///
-    /// Known from two pieces, a quarter frame in, not at the end of a cycle:
-    /// a source that turns round is seen at once.
+    /// before) until a run is made again.
     #[must_use]
     pub fn direction(&self) -> Option<MtcDirection> {
-        self.direction
+        self.run
+            .and_then(|(d, n)| (n >= Self::DIRECTION_STEPS).then_some(d))
     }
 
     /// The piece (0 to 7) fed last, or `None` before the first.
@@ -221,7 +235,7 @@ impl MtcDecoder {
         self.count = 0;
         self.partial = None;
         self.last_piece = None;
-        self.direction = None;
+        self.run = None;
         self.cycle = None;
         self.fresh = false;
     }

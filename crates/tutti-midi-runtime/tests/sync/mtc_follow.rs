@@ -236,21 +236,80 @@ fn a_slip_locates_once_and_holds_off_for_settle() {
     }
 }
 
-/// **The decoder reads direction from two consecutive pieces**: ascending is
-/// forward, descending is reverse, and a gap says neither (M1 MTC, Quarter Frame
-/// Message Implementation).
+/// **The decoder reads direction from `DIRECTION_STEPS` steps in a row**:
+/// ascending is forward, descending is reverse (M1 MTC, Quarter Frame Message
+/// Implementation), and one step the other way, or a gap, is neither. Three
+/// steps are four pieces: `5, 4, 3` is two steps and says nothing, `5, 4, 3, 2`
+/// is three.
 #[test]
 fn pieces_in_descending_order_are_reverse() {
     let mut decoder = MtcDecoder::new();
+    assert_eq!(MtcDecoder::DIRECTION_STEPS, 3);
     assert_eq!(decoder.direction(), None);
-    decoder.feed(&quarter(5, 0));
-    assert_eq!(decoder.direction(), None, "one piece is no direction");
-    decoder.feed(&quarter(4, 0));
-    assert_eq!(decoder.direction(), Some(MtcDirection::Reverse));
-    decoder.feed(&quarter(5, 0));
-    assert_eq!(decoder.direction(), Some(MtcDirection::Forward));
-    decoder.feed(&quarter(7, 0));
-    assert_eq!(decoder.direction(), None, "a gap");
+    for (piece, expected) in [
+        (5, None),
+        (4, None),
+        (3, None),
+        (2, Some(MtcDirection::Reverse)),
+        (1, Some(MtcDirection::Reverse)),
+        // A gap, then a run up from where it lands.
+        (6, None),
+        (7, None),
+        (0, None),
+        (1, Some(MtcDirection::Forward)),
+    ] {
+        decoder.feed(&quarter(piece, 0));
+        assert_eq!(decoder.direction(), expected, "after piece {piece}");
+    }
+}
+
+/// Feeds `pieces` to a locked forward follower; what it said.
+fn glitch(pieces: &[u8]) -> (Rig, Vec<ClockEvent>) {
+    let mut rig = Rig::new();
+    for c in 0..5 {
+        for (ump, t) in forward(c, 1.0) {
+            rig.feed(ump, t);
+        }
+    }
+    assert!(rig.follower.locked());
+    rig.heard.clear();
+    let mut t = 0.4;
+    for piece in pieces {
+        rig.feed(quarter(*piece, 0), t);
+        t += 1.0 / (4.0 * FPS);
+    }
+    let events = rig.heard.iter().map(|(_, e)| *e).collect();
+    (rig, events)
+}
+
+/// **One glitch is not a reverse.** Pieces `2, 1, 3` have one step down, and a
+/// burst loss that jumps `0` to `7` has one: neither makes `DIRECTION_STEPS`
+/// steps down, so neither says `Reversed`, stops the transport or unlocks it.
+#[test]
+fn a_lone_out_of_order_piece_or_a_jump_does_not_reverse() {
+    for pieces in [
+        [0u8, 1, 2, 1, 3, 4].as_slice(),
+        [6, 7, 0, 7, 0, 1].as_slice(),
+    ] {
+        let (rig, events) = glitch(pieces);
+        assert!(rig.follower.locked(), "{pieces:?}");
+        assert!(
+            !events.iter().any(|e| matches!(
+                e,
+                ClockEvent::Reversed | ClockEvent::Stop { .. } | ClockEvent::Unlocked
+            )),
+            "{pieces:?}: {events:?}"
+        );
+    }
+}
+
+/// **A descending run does reverse**: `7, 6, 5, 4` is three steps down, said at
+/// the fourth piece.
+#[test]
+fn a_descending_run_reverses_at_its_third_step() {
+    let (rig, events) = glitch(&[7, 6, 5, 4]);
+    assert!(!rig.follower.locked());
+    assert_eq!(events[0], ClockEvent::Reversed);
 }
 
 /// **A reverse cycle names the frame at its last piece, with no offset.** Pieces
@@ -282,9 +341,9 @@ fn a_reverse_cycle_is_frame_n_and_a_forward_one_is_two_on() {
 }
 
 /// **A source that runs backward stops the transport, once, and a source that
-/// runs forward again locks afresh.** Five forward cycles lock and play; piece 7
-/// then 6 of the next cycle is descending: `Reversed`, `Stop` and `Unlocked`, in
-/// that order and at the piece that showed it (6, a quarter frame after 7).
+/// runs forward again locks afresh.** Five forward cycles lock and play; pieces
+/// 7, 6, 5, 4 of the next cycle are three steps down: `Reversed`, `Stop` and `Unlocked`, in
+/// that order and at the piece that showed it (4, the third step down from 7).
 /// The descending cycles that follow say nothing and locate nothing. Forward
 /// cycles then lock after `MTC_LOCK_CYCLES`, with a locate and a play.
 #[test]
@@ -305,7 +364,7 @@ fn a_reversed_source_stops_the_transport_and_forward_locks_again() {
         let n = nibbles(frame);
         for k in (0..8).rev() {
             rig.feed(quarter(k as u8, n[k]), t);
-            if frame == 40 && k == 6 {
+            if frame == 40 && k == 4 {
                 stopped_at = Some(t);
             }
             t += quarter_frame;
