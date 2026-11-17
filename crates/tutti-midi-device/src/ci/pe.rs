@@ -47,7 +47,7 @@
 //! let request = PeRequest::new(ResourceName::new("ChannelList").unwrap());
 //! let bytes = PeHeader::Request(request.clone()).encode(MaxSysexSize::of(512)).unwrap();
 //! assert_eq!(bytes, br#"{"resource":"ChannelList"}"#);
-//! assert_eq!(PeHeader::try_from(&bytes), Ok(PeHeader::Request(request)));
+//! assert_eq!(PeHeader::try_from(bytes.as_slice()), Ok(PeHeader::Request(request)));
 //! ```
 //!
 //! A message sent in chunks, and received:
