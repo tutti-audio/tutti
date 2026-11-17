@@ -11,7 +11,7 @@ use tutti_plugin_types::{
     Control, Controller, EditDrain, EditQueue, EditSink, Loaded, Normalized, PluginError,
     PluginTail, Prepare, Refused, RestartRules, Samples, Stuck,
 };
-use tutti_rt::ArcLend;
+use tutti_rt::Publisher;
 use tutti_types::ParamId;
 
 use super::ClapLoaded;
@@ -45,9 +45,9 @@ pub struct ClapController {
     queue: EditQueue,
     /// The ranges the Processor denormalizes against, republished after a
     /// rescan that changed the parameters.
-    pub(crate) ranges: Arc<ArcLend<RangeTable>>,
+    pub(crate) ranges: Publisher<RangeTable>,
     /// The pool the Processor serves `clap.thread-pool` requests on.
-    pools: Arc<ArcLend<PoolCell>>,
+    pools: Publisher<PoolCell>,
     /// The plugin's own parameter edits, which the Processor queued from its
     /// output events ([`take_reported_edits`](Control::take_reported_edits)).
     pub(crate) reported: EditDrain,
@@ -68,8 +68,8 @@ impl ClapController {
     pub(crate) fn new(
         loaded: ClapLoaded,
         edits: EditSink,
-        ranges: Arc<ArcLend<RangeTable>>,
-        pools: Arc<ArcLend<PoolCell>>,
+        ranges: Publisher<RangeTable>,
+        pools: Publisher<PoolCell>,
         (reported, reports_dropped): (EditDrain, Arc<AtomicU64>),
     ) -> Self {
         Self {

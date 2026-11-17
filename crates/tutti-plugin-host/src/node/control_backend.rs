@@ -32,7 +32,7 @@ use std::sync::Arc;
 use std::sync::mpsc::RecvTimeoutError;
 use std::sync::mpsc::sync_channel;
 use std::time::{Duration, Instant};
-use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
+use tutti_plugin_types::{MainThreadMarker, MainWorkHandle, StateUse};
 use tutti_types::ParkedSampleRate;
 
 use parking_lot::Mutex;
@@ -259,11 +259,11 @@ where
     /// runs this on the session's spawner: off the main thread it
     /// is run by the main thread's next tick (`on_main`), and
     /// [`StateError::Unavailable`] if that does not come within the deadline.
-    fn save_state(&self) -> Result<Vec<u8>, StateError> {
-        match self.on_main(|main, instance| {
+    fn save_state(&self, state_use: StateUse) -> Result<Vec<u8>, StateError> {
+        match self.on_main(move |main, instance| {
             instance.control().map(|control| {
                 control
-                    .save_state(main, tutti_plugin_types::StateUse::Project)
+                    .save_state(main, state_use)
                     .map_err(|e| e.to_string())
             })
         }) {
@@ -392,7 +392,7 @@ mod off_main_tests {
     use tutti_fixtures::main_thread;
     use tutti_plugin_types::{
         AutomationMode, AutomationModeError, Load, MainWork, MainWorkHandle, Normalized,
-        RenderMode, StateError,
+        RenderMode, StateError, StateUse,
     };
     use tutti_types::ParamId;
     use tutti_types::SampleRate;
@@ -440,14 +440,14 @@ mod off_main_tests {
         let (_client, handle, _pump) = loaded();
         let expected = handle
             .any_thread()
-            .save_state()
+            .save_state(StateUse::Project)
             .expect("saved on the main thread");
         let id = ParamId::new(1);
         let job = {
             let handle = handle.clone();
             std::thread::spawn(move || {
                 (
-                    handle.any_thread().save_state(),
+                    handle.any_thread().save_state(StateUse::Project),
                     handle.any_thread().parameter_value(id),
                 )
             })
@@ -466,7 +466,7 @@ mod off_main_tests {
         let id = ParamId::new(1);
         let (state, value) = std::thread::spawn(move || {
             (
-                handle.any_thread().save_state(),
+                handle.any_thread().save_state(StateUse::Project),
                 handle.any_thread().parameter_value(id),
             )
         })
@@ -487,7 +487,7 @@ mod off_main_tests {
         let id = ParamId::new(1);
         let (state, value) = std::thread::spawn(move || {
             (
-                handle.any_thread().save_state(),
+                handle.any_thread().save_state(StateUse::Project),
                 handle.any_thread().parameter_value(id),
             )
         })
@@ -545,7 +545,10 @@ mod off_main_tests {
     #[test]
     fn the_state_saves_on_the_main_thread() {
         let (_client, handle, _pump) = loaded();
-        let state = handle.any_thread().save_state().expect("the probe saves");
+        let state = handle
+            .any_thread()
+            .save_state(StateUse::Project)
+            .expect("the probe saves");
         assert!(!state.is_empty());
     }
 

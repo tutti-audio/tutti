@@ -8,7 +8,7 @@
 
 use crate::{
     AutomationMode, AutomationModeError, BlockCounts, BypassWrite, Normalized, OwnBypass,
-    ParameterInfo, PluginFailure, RenderMode, SampleRate, StateError, TerminationReason,
+    ParameterInfo, PluginFailure, RenderMode, SampleRate, StateError, StateUse, TerminationReason,
     bypass_value, is_bypassed,
 };
 use tutti_types::ParamId;
@@ -82,8 +82,9 @@ pub trait AnyThread: Send + Sync {
     /// a setter with no parse-only counterpart, so asking applies the value.
     fn parameter_value_from_text(&self, id: ParamId, text: &str) -> Option<Normalized>;
 
-    /// Serializes the plugin's state: its own bytes, the same a project save
-    /// stores. A plugin with nothing to save answers `Ok(vec![])`.
+    /// Serializes the plugin's state for `state_use`: its own bytes, the same a
+    /// project save stores for [`StateUse::Project`]. A plugin with nothing to
+    /// save answers `Ok(vec![])`.
     ///
     /// Blocks on a round trip (served) or a main-thread tick (in-process).
     ///
@@ -93,7 +94,7 @@ pub trait AnyThread: Send + Sync {
     /// refused, the state exceeds the transport's limit, the transfer stalled,
     /// or ([`StateError::Unavailable`]) the plugin was not asked because the
     /// main thread did not answer in time.
-    fn save_state(&self) -> Result<Vec<u8>, StateError>;
+    fn save_state(&self, state_use: StateUse) -> Result<Vec<u8>, StateError>;
 
     /// Tells the plugin whether it is rendering offline, and returns whether it
     /// *accepted* the mode (`false` is a refusal or an unavailable plugin, not
@@ -214,7 +215,7 @@ mod tests {
         fn parameter_value_from_text(&self, _: ParamId, _: &str) -> Option<Normalized> {
             None
         }
-        fn save_state(&self) -> Result<Vec<u8>, StateError> {
+        fn save_state(&self, _: StateUse) -> Result<Vec<u8>, StateError> {
             Ok(Vec::new())
         }
         fn set_render_mode(&self, _: RenderMode) -> bool {

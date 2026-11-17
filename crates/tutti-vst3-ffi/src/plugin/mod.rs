@@ -237,7 +237,6 @@ pub struct Parts {
     home: Home,
     /// This plugin's claim on the module's run loop: what it registers there is
     /// taken back when its editor closes and when it drops.
-    #[cfg(target_os = "linux")]
     owner: crate::com::Owner,
     /// Whether `initialize` succeeded on the component, and on a separate
     /// controller: `terminate` follows a successful `initialize` only.
@@ -248,15 +247,6 @@ pub struct Parts {
     _not_sync: PhantomData<Cell<()>>,
     module: Arc<Module>,
 }
-
-/// The guard `Parts::scoped` returns.
-#[cfg(target_os = "linux")]
-pub(super) struct CallScope(
-    #[allow(dead_code, reason = "held for its drop")] crate::com::OwnedScope,
-);
-/// The guard [`Parts::scoped`] returns: nothing to scope off Linux.
-#[cfg(not(target_os = "linux"))]
-pub(super) struct CallScope;
 
 /// One plugin instance: its component, its processor and its controller, with
 /// the host objects they call back into.
@@ -398,7 +388,6 @@ impl Parts {
             audio_presentation_latency: processor.cast(),
         };
         let shared = Arc::new(Shared::new(&processor));
-        #[cfg(target_os = "linux")]
         let owner = crate::com::Owner::next();
         Ok(Self {
             component,
@@ -406,13 +395,9 @@ impl Parts {
             controller,
             ext,
             handler: ComponentHandler::new(),
-            application: module.new_host_application(
-                #[cfg(target_os = "linux")]
-                owner,
-            ),
+            application: module.new_host_application(owner),
             editor: None,
             home: Home::new(main),
-            #[cfg(target_os = "linux")]
             owner,
             component_initialized: false,
             controller_initialized: false,
@@ -430,16 +415,8 @@ impl Parts {
     /// the plugin that takes a `MainThreadMarker` runs under one: a toolkit
     /// registers lazily (in `onSize`, on an event, from a controller call), not
     /// only inside `attached`.
-    pub(super) fn scoped(&self, main: MainThreadMarker) -> CallScope {
-        #[cfg(target_os = "linux")]
-        {
-            CallScope(self.module.run_loop().scope_owned(self.owner, main))
-        }
-        #[cfg(not(target_os = "linux"))]
-        {
-            let _ = main;
-            CallScope
-        }
+    pub(super) fn scoped(&self, main: MainThreadMarker) -> crate::com::OwnedScope {
+        self.module.run_loop().scope_owned(self.owner, main)
     }
 
     /// The module this plugin came from.

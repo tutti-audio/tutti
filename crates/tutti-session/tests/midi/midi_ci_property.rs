@@ -8,9 +8,9 @@ use std::time::{Duration, Instant};
 use tutti_midi_device::{BodyLimit, BufferLimit, PeCiMessage, PeMessageKind};
 use tutti_midi_device::{
     CallError, CiCategories, CiHeader, CiMessage, Decoded, DiscoveryData, EndpointId, JsonPointer,
-    MaxSysexSize, PE_TIMEOUT, PartialUpdate, PeCapabilities, PeData, PeExternalSync, PeHeader,
-    PeJson, PeLocalOn, PeReassemblyLimits, PeResource, PeStatus, PeSubscription, PortDirection,
-    RequestRefused, ResourceEntry, ResourceResponder, ResourceStore, ResourceTarget,
+    MaxSysexSize, PE_TIMEOUT, PartialUpdate, PartialValue, PeCapabilities, PeData, PeExternalSync,
+    PeHeader, PeJson, PeLocalOn, PeReassemblyLimits, PeResource, PeStatus, PeSubscription,
+    PortDirection, RequestRefused, ResourceEntry, ResourceResponder, ResourceStore, ResourceTarget,
     ResponderAction, ResponderSettings, SimultaneousRequests, StreamLimit,
 };
 use tutti_midi_hardware::test_support::FakeCounters;
@@ -78,7 +78,7 @@ impl PePeer {
                 midi2: true,
                 ..Capabilities::default()
             }))
-            .with_function_block(block),
+            .block(block),
             assembler: SysexAssembler::new(vec![0; room].into_boxed_slice(), 1024, 16),
             muid,
             responder: ResourceResponder::new(
@@ -196,8 +196,12 @@ impl PePeer {
 
 fn store() -> ResourceStore {
     let mut store = ResourceStore::new();
-    store.declare(ResourceEntry::new(PeResource::LocalOn).unwrap());
-    store.declare(ResourceEntry::new(PeResource::DeviceInfo).unwrap());
+    store.declare(ResourceEntry::builder(PeResource::LocalOn).build().unwrap());
+    store.declare(
+        ResourceEntry::builder(PeResource::DeviceInfo)
+            .build()
+            .unwrap(),
+    );
     store
         .put(None, PeData::LocalOn(PeLocalOn(false)))
         .expect("declared");
@@ -501,7 +505,7 @@ fn a_session_dropped_with_a_call_pending_ends_the_job() {
 #[test]
 fn a_fetch_of_a_resource_that_needs_a_res_id_is_not_sent() {
     let mut states = ResourceStore::new();
-    states.declare(ResourceEntry::new(PeResource::State).unwrap());
+    states.declare(ResourceEntry::builder(PeResource::State).build().unwrap());
     let mut wire = Wire::new(states);
     let job = wire.listed(&PeResource::State).fetch();
     assert_eq!(job.status(), JobStatus::Done);
@@ -521,7 +525,11 @@ fn a_fetch_of_a_resource_that_needs_a_res_id_is_not_sent() {
 /// A second store Resource with data, for the tests of two Resources.
 fn synced() -> ResourceStore {
     let mut store = store();
-    store.declare(ResourceEntry::new(PeResource::ExternalSync).unwrap());
+    store.declare(
+        ResourceEntry::builder(PeResource::ExternalSync)
+            .build()
+            .unwrap(),
+    );
     store
         .put(None, PeData::ExternalSync(PeExternalSync(true)))
         .expect("declared");
@@ -654,14 +662,16 @@ fn device_info(model: &str) -> PeData {
 fn subscribable() -> ResourceStore {
     let mut store = ResourceStore::new();
     store.declare(
-        ResourceEntry::new(PeResource::LocalOn)
-            .unwrap()
-            .with_can_subscribe(true),
+        ResourceEntry::builder(PeResource::LocalOn)
+            .can_subscribe(true)
+            .build()
+            .unwrap(),
     );
     store.declare(
-        ResourceEntry::new(PeResource::DeviceInfo)
-            .unwrap()
-            .with_can_subscribe(true),
+        ResourceEntry::builder(PeResource::DeviceInfo)
+            .can_subscribe(true)
+            .build()
+            .unwrap(),
     );
     store.put(None, on(true)).expect("declared");
     store.put(None, device_info("Workbench")).expect("declared");
@@ -756,12 +766,10 @@ fn a_partial_update_is_merged_into_the_data_the_record_holds() {
     let mut wire = Wire::new(subscribable());
     let _lease = wire.subscribed(&PeResource::DeviceInfo);
     let now = wire.now();
-    let update = PartialUpdate::new()
-        .with(
-            JsonPointer::new("/model").expect("a pointer"),
-            PeJson::from("Renamed"),
-        )
-        .expect("an update");
+    let update = PartialUpdate::new().with(
+        JsonPointer::new("/model").expect("a pointer"),
+        PartialValue::String("Renamed".to_owned()),
+    );
     let actions = wire
         .peer
         .responder

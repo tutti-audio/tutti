@@ -84,7 +84,8 @@ fn the_served_control_and_any_thread_answer_alike() {
         "the parse"
     );
 
-    let state = AnyThread::save_state(&any).expect("the probe saves");
+    let state = AnyThread::save_state(&any, tutti_plugin_types::StateUse::Project)
+        .expect("the probe saves");
     assert_eq!(
         Control::save_state(&mut control, main, tutti_plugin_types::StateUse::Project)
             .expect("the probe saves"),

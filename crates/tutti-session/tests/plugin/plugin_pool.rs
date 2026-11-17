@@ -9,15 +9,15 @@ use std::time::{Duration, Instant};
 
 use tutti_buffers::InterleavedMut;
 use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status, Unforkable};
-use tutti_plugin::catalog::{Catalog, Hosting, PluginId, PluginRef, PluginState};
+use tutti_plugin::catalog::{Catalog, Hosting, PluginId, PluginRef};
 use tutti_plugin::error::StateError;
 use tutti_plugin_db::PluginFormat;
-use tutti_plugin_types::Normalized;
+use tutti_plugin_types::{Normalized, StateUse};
 use tutti_plugin_types::{PluginFailure, TerminationReason};
 use tutti_session::{
-    AddPluginError, CrossfadeRefused, DetachedSession, HandleError, JobStatus, LoadError, Peer,
-    PluginCause, PluginHealth, PoolEvent, PoolState, Presence, RecoveryPolicy, Resource,
-    RetryError, Session, SessionEvent, StateJobError, StateJobFailed,
+    AddPluginError, CrossfadeRefused, DetachedSession, HandleError, JobStatus, LoadError,
+    OtherPeer, Peer, PeerState, PluginCause, PluginHealth, PoolEvent, PoolState, Presence,
+    RecoveryPolicy, Resource, RetryError, Session, SessionEvent, StateJobError, StateJobFailed,
 };
 use tutti_types::ParamId;
 use tutti_types::{ChannelLayout, MaxBlock, SampleRate, Samples, Tail};
@@ -252,12 +252,12 @@ fn an_initial_state_of_another_plugin_is_refused() {
             .entries()
             .find(|entry| entry.descriptor.id == id.id)
             .expect("the plugin is listed");
-        PluginState::new(PluginRef::from(&entry), Vec::new())
+        PeerState::of_plugin(PluginRef::from(&entry), Vec::new())
     };
     let declared = s.plugin_entry("a", &second_id(), &catalog);
     assert!(matches!(
         declared.clone().initial_state(state_of(&first_id())),
-        Err(StateError::OtherPlugin { .. })
+        Err(OtherPeer { .. })
     ));
     assert!(declared.initial_state(state_of(&second_id())).is_ok());
 }
@@ -443,7 +443,12 @@ fn an_initial_state_is_restored_and_two_keys_load_two_plugins() {
         .unwrap()
         .set(set)
         .unwrap();
-    let state = s.plugin_view(a).unwrap().state().save().expect("a state");
+    let state = s
+        .plugin_view(a)
+        .unwrap()
+        .state()
+        .save(tutti_plugin_types::StateUse::Project)
+        .expect("a state");
 
     s.pool((
         s.plugin_entry("a", &first_id(), &catalog),
@@ -492,11 +497,11 @@ fn a_state_job_saves_what_the_plugin_holds_and_refuses_by_name() {
     let a = s.add_pooled_plugin(&"a").unwrap();
 
     assert!(matches!(
-        s.save_state(&"missing"),
+        s.save_state(&"missing", StateUse::Project),
         Err(StateJobError::Entry(HandleError::NotPooled("missing")))
     ));
     assert!(matches!(
-        s.save_state(&"idle"),
+        s.save_state(&"idle", StateUse::Project),
         Err(StateJobError::NoNode("idle"))
     ));
     let foreign = {
@@ -504,7 +509,7 @@ fn a_state_job_saves_what_the_plugin_holds_and_refuses_by_name() {
             .entries()
             .find(|entry| entry.descriptor.id == second_id().id)
             .expect("the second plugin is listed");
-        PluginState::new(PluginRef::from(&entry), Vec::new())
+        PeerState::of_plugin(PluginRef::from(&entry), Vec::new())
     };
     assert!(matches!(
         s.restore_state(&"idle", foreign.clone()),
@@ -512,7 +517,7 @@ fn a_state_job_saves_what_the_plugin_holds_and_refuses_by_name() {
     ));
     assert!(matches!(
         s.restore_state(&"a", foreign),
-        Err(StateJobError::OtherPlugin(StateError::OtherPlugin { .. }))
+        Err(StateJobError::OtherPeer(OtherPeer { .. }))
     ));
 
     let set = Normalized::of(0.9);
@@ -523,9 +528,35 @@ fn a_state_job_saves_what_the_plugin_holds_and_refuses_by_name() {
         .unwrap()
         .set(set)
         .unwrap();
-    let saving = s.save_state(&"a").expect("a node holds the plugin");
+    let saving = s
+        .save_state(&"a", StateUse::Project)
+        .expect("a node holds the plugin");
     assert_ne!(saving.status(), JobStatus::Done, "it lands in an update");
     let state = saving.wait(&mut s).expect("a state");
+    assert_eq!(
+        state.media_type().as_str(),
+        "application/x-clap-state",
+        "a saved CLAP state is typed as CLAP's"
+    );
+
+    // The probe stamps the state context after its 4-byte magic: 3 for a
+    // project save, 2 for a duplicate.
+    const CONTEXT_BYTE: usize = 4;
+    assert_eq!(
+        state.bytes()[CONTEXT_BYTE],
+        3,
+        "a project save is FOR_PROJECT"
+    );
+    let duplicate = s
+        .save_state(&"a", StateUse::Duplicate)
+        .expect("a node holds the plugin")
+        .wait(&mut s)
+        .expect("a duplicate state");
+    assert_eq!(
+        duplicate.bytes()[CONTEXT_BYTE],
+        2,
+        "the use reaches the plugin: a duplicate save is FOR_DUPLICATE"
+    );
 
     s.pool((
         s.plugin_entry("a", &first_id(), &catalog),
@@ -567,7 +598,9 @@ fn a_state_job_of_a_dead_plugin_lands_the_plugins_refusal() {
             blocks: 16,
             held: Duration::from_secs(5),
         });
-    let saving = s.save_state(&"a").expect("the node is still there");
+    let saving = s
+        .save_state(&"a", StateUse::Project)
+        .expect("the node is still there");
     let landed = saving.wait(&mut s);
     assert!(
         matches!(

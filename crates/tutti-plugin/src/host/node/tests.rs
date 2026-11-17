@@ -467,7 +467,7 @@ fn handle_save_state_roundtrip() {
         _ => None,
     });
 
-    let state = handle.save_state();
+    let state = handle.save_state(tutti_plugin_types::StateUse::Project);
     assert_eq!(state.expect("mock answered"), vec![0xDE, 0xAD, 0xBE, 0xEF]);
 }
 

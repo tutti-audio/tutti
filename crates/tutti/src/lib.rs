@@ -171,9 +171,9 @@ pub use tutti_graph::NodeKey;
 #[cfg(feature = "plugin")]
 pub use tutti_plugin::Normalized;
 #[cfg(feature = "plugin")]
-pub use tutti_plugin::catalog::{Catalog, Hosting, PluginRef, PluginState};
+pub use tutti_plugin::catalog::{Catalog, Hosting, PluginRef};
 #[cfg(feature = "plugin")]
-pub use tutti_plugin_types::{PluginFailure, PresetError, PresetId};
+pub use tutti_plugin_types::{PluginFailure, PresetError, PresetId, StateUse};
 #[cfg(all(feature = "session", feature = "plugin"))]
 pub use tutti_session::Params as PluginParams;
 #[cfg(all(feature = "session", feature = "plugin"))]
@@ -181,7 +181,7 @@ pub use tutti_session::{
     AddPluginError, Diagnostics, ListedPreset, LoadPreset, Opened, Plugin, PluginBuses,
     PluginChange, PluginDeclaration, PluginEvent, PluginHealth, PluginInfo, PluginNode,
     PluginParamError, PluginPresets, PooledPlugin, PortCounts, PresetJobError, PresetJobFailed,
-    RestoreState, SaveState, TypedParam,
+    RestoreError, RestoreState, SaveState, TypedParam,
 };
 #[cfg(feature = "session")]
 pub use tutti_session::{
@@ -204,6 +204,8 @@ pub use tutti_session::{
 pub use tutti_session::{InstrumentHandle, Midi, MidiReport};
 #[cfg(all(feature = "session", feature = "midi-hardware"))]
 pub use tutti_session::{MidiInput, MidiOutput};
+#[cfg(all(feature = "session", feature = "plugin"))]
+pub use tutti_session::{OtherPeer, PeerState, SavedPeer};
 #[cfg(feature = "session")]
 pub use tutti_session::{ParamRef, RouteSpec};
 #[cfg(all(feature = "session", feature = "sampler"))]
@@ -707,39 +709,44 @@ pub mod midi {
     };
     /// MIDI-CI Property Exchange (M2-103 and its resource specifications): a
     /// peer's resources, read, written and subscribed to through the session.
-    #[cfg(feature = "midi-hardware")]
+    /// Under `plugin` alone it holds only the `MediaType` a `PeerState` carries.
+    #[cfg(any(feature = "midi-hardware", feature = "plugin"))]
     pub mod property {
+        pub use tutti_midi_device::MediaType;
+        #[cfg(feature = "midi-hardware")]
         pub use tutti_midi_device::mcoded7::Mcoded7Error;
+        #[cfg(feature = "midi-hardware")]
         pub use tutti_midi_device::{
             Ack, ActionError, BodyLimit, BufferLimit, CallError, CallId, CanSet, CcIndex,
             ChangeKind, ChunkNo, ClusterKind, ColumnSource, ConfirmIcon, ConfirmType, Confirmation,
             CtrlControl, CtrlKind, CtrlRange, CtrlValueKind, CustomResource, DefaultMapNotCc,
-            EntryError, JsonPointer, LinkRole, ListedTwice, MediaType, ModeId, NotABodyLimit,
-            NotABufferLimit, NotAChunkNo, NotAPeChannel, NotAPriority, NotARequestId,
-            NotASimultaneousRequests, NotAStateSize, NotAStepCount, NotAStreamLimit,
-            NotATimeoutWait, NotSignificantBits, NotUnixSeconds, NotValid, NotVendorName,
-            OpaqueBody, PaginationFault, ParamPath, PartialError, PartialUpdate, PeAllCtrlEntry,
-            PeAllCtrlList, PeAnswer, PeBankProgram, PeBasicChannelRx, PeBasicChannelTx,
-            PeBodyError, PeCapabilities, PeCapabilitiesFailure, PeChCtrlEntry, PeChCtrlList,
-            PeChannel, PeChannelEntry, PeChannelList, PeChannelMode, PeChunkError, PeCluster,
-            PeColumn, PeController, PeCtrl, PeCtrlMapEntry, PeCtrlMapList, PeCurrentMode, PeData,
-            PeDataError, PeDataFault, PeDecimal, PeDeviceInfo, PeEncoding, PeEndedBy, PeError,
-            PeExtensions, PeExternalSync, PeExtra, PeExtraError, PeFlowControl, PeHeaderError,
-            PeHeaderTooLong, PeJson, PeJsonError, PeJsonSchema, PeLink, PeLocalOn, PeMessage,
-            PeMidiMode, PeModeEntry, PeModeList, PeObject, PeOpaque, PeOutcome, PePage,
-            PeProgramEntry, PeProgramList, PeReassemblyError, PeReply, PeRequestId, PeResource,
-            PeResourceList, PeResponse, PeSignal, PeState, PeStateEntry, PeStateList, PeStatus,
-            PeStatusClass, PeTerminator, PeText, PeTransaction, PeUnreadable, PeVersion, Priority,
-            PropertyName, RefusedAt, RequestRefused, ResIdUse, ResourceDefaults, ResourceEntry,
+            EntryError, JsonPointer, LinkRole, ListedTwice, ModeId, NotABodyLimit, NotABufferLimit,
+            NotAChunkNo, NotAPeChannel, NotAPriority, NotARequestId, NotASimultaneousRequests,
+            NotAStateSize, NotAStepCount, NotAStreamLimit, NotATimeoutWait, NotSignificantBits,
+            NotUnixSeconds, NotValid, NotVendorName, OpaqueBody, PaginationFault, ParamPath,
+            PartialError, PartialUpdate, PartialValue, PeAllCtrlEntry, PeAllCtrlList, PeAnswer,
+            PeBankProgram, PeBasicChannelRx, PeBasicChannelTx, PeBodyError, PeCapabilities,
+            PeCapabilitiesFailure, PeChCtrlEntry, PeChCtrlList, PeChannel, PeChannelEntry,
+            PeChannelList, PeChannelMode, PeChunkError, PeCluster, PeColumn, PeController, PeCtrl,
+            PeCtrlMapEntry, PeCtrlMapList, PeCurrentMode, PeData, PeDataError, PeDataFault,
+            PeDecimal, PeDeviceInfo, PeEncoding, PeEndedBy, PeError, PeExtensions, PeExternalSync,
+            PeExtra, PeExtraError, PeFlowControl, PeHeaderError, PeHeaderTooLong, PeJson,
+            PeJsonError, PeJsonSchema, PeLink, PeLocalOn, PeMessage, PeMidiMode, PeModeEntry,
+            PeModeList, PeObject, PeOpaque, PeOutcome, PePage, PeProgramEntry, PeProgramList,
+            PeReassemblyError, PeReply, PeRequestId, PeResource, PeResourceList, PeResponse,
+            PeSignal, PeState, PeStateEntry, PeStateList, PeStatus, PeStatusClass, PeTerminator,
+            PeText, PeTransaction, PeUnreadable, PeVersion, Priority, PropertyName, RefusedAt,
+            RequestRefused, ResIdUse, ResourceDefaults, ResourceEntry, ResourceEntryBuilder,
             ResourceEvent, ResourceFailure, ResourceGet, ResourceId, ResourceName, ResourceSet,
             ResourceTarget, ResponderEvent, RoleName, SelectorAction, SetBody, SignificantBits,
             SimpleAction, SimultaneousRequests, StateId, StateRev, StateSize, StateStamp,
             StepCount, StreamLimit, SubscribeId, TimeoutWait, TypeHint, UnixSeconds, UpdateKind,
         };
+        #[cfg(feature = "midi-hardware")]
         pub use tutti_midi_hardware::{
             PropertyAsk, PropertyCall, PropertyChange, PropertyError, PropertyPeer,
         };
-        #[cfg(feature = "session")]
+        #[cfg(all(feature = "session", feature = "midi-hardware"))]
         pub use tutti_session::{
             GetProperty, ListedResource, PeFailure, ResourcePeer, SetProperty, Subscribe,
             Subscription, SubscriptionCause,

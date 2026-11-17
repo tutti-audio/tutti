@@ -18,7 +18,7 @@ use tutti_plugin_types::{
     Normalized, ParamAccess, ParamFlags, ParamRange, ParamSteps, ParameterInfo, PluginDescriptor,
     SampleFormat,
 };
-use tutti_rt::ArcLend;
+use tutti_rt::Publisher;
 use tutti_types::ChannelTopology;
 use tutti_types::ParamId;
 use tutti_vst3_ffi::{
@@ -84,7 +84,7 @@ pub struct Vst3Loaded {
     pub(super) declared: Option<Arc<[(ParamId, ParamAccess)]>>,
     /// The `IMidiMapping` table the Processor routes against: published by
     /// whichever half rebuilds it, lent to the Processor once per block.
-    pub(super) midi_cc: Arc<ArcLend<MidiCcCell>>,
+    pub(super) midi_cc: Publisher<MidiCcCell>,
     /// What the `IMidiMapping` table declares, read when the table is rebuilt
     /// (at load, at every activation and when the plugin says it changed).
     pub(super) assignments: Vec<tutti_plugin_types::MidiAssignment>,

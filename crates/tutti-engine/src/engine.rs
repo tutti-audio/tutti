@@ -550,7 +550,7 @@ impl Engine {
     /// A new engine renders into buffers of up to 16 channels without being
     /// asked: the folds from each root width (1 to `MAX_CHANNELS`) to each
     /// device width are built on the control side, in
-    /// [`Engine::new`](Self::new), and published through an `ArcLend` that each
+    /// [`Engine::new`](Self::new), and published through a `Publisher` that each
     /// call lends once, so a plan change needs no rebuild and the audio thread
     /// never builds a fold. Call this when a stream is built for a device
     /// wider than that (or at all, to say so); it is a no-op for a width

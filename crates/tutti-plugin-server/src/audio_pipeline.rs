@@ -11,6 +11,7 @@
 //! resulting `AudioOutput`.
 
 use crate::served::Render;
+use tutti_buffers::Float;
 use tutti_graph::Offset;
 use tutti_graph::UmpAt;
 use tutti_plugin_ipc::SlabWriter;
@@ -18,7 +19,7 @@ use tutti_plugin_types::{
     AudioBuffer, AudioBufferMut, BlockStatus, BridgeResult, ChannelTable, ChordChanges,
     ExpressiveContext, Features, MAX_BLOCK_CHANNELS, MIDI_STACK_CAPACITY, MidiEventVec,
     NoteExpressionChanges, NoteExpressionIntChanges, NoteExpressionTextChanges, ParameterChanges,
-    ProcessContext, ProcessOutput, Sample, SampleFormat, SampleRate, Samples, ScaleChanges,
+    ProcessContext, ProcessOutput, SampleFormat, SampleRate, Samples, ScaleChanges,
     TransportChange, TransportInfo, WireMidi, sanitize, silence,
 };
 use tutti_ump::Ump;
@@ -633,7 +634,7 @@ fn note_failed_block(count: &mut u64, error: &tutti_plugin_types::PluginError) {
 /// checker sees the output table's borrow end at the `f(...)` call, so it does
 /// not collide with the per-channel data borrows. A single coincident lifetime
 /// forces a `split_first_mut` recursion instead.
-fn with_audio_buffer<T: Sample, R>(
+fn with_audio_buffer<T: Float, R>(
     inputs: &[Vec<T>],
     outputs: &mut [Vec<T>],
     size: usize,

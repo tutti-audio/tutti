@@ -435,7 +435,9 @@ fn restore_round_trip(hosting: Hosting) {
 
     set(&s, 0.9);
     blocks(&mut s);
-    let saving = s.save_state(&"verb").expect("a node holds the plugin");
+    let saving = s
+        .save_state(&"verb", tutti_plugin_types::StateUse::Project)
+        .expect("a node holds the plugin");
     let state = saving.wait(&mut s).expect("a state");
 
     set(&s, 0.1);

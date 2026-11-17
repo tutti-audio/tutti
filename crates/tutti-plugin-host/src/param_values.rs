@@ -366,7 +366,7 @@ mod tests {
         fn parameter_value_from_text(&self, _id: ParamId, _text: &str) -> Option<Normalized> {
             None
         }
-        fn save_state(&self) -> Result<Vec<u8>, StateError> {
+        fn save_state(&self, _: tutti_plugin_types::StateUse) -> Result<Vec<u8>, StateError> {
             Err(StateError::NoStateRoute)
         }
         fn set_render_mode(&self, _mode: RenderMode) -> bool {

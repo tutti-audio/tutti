@@ -26,12 +26,13 @@ use std::num::NonZeroUsize;
 use std::time::Instant;
 
 use dpi::Size;
+use tutti_buffers::Float;
 
 use crate::{
     AudioBuffer, AudioBufferMut, AutomationMode, BypassWrite, ChannelTable, ContentScale,
     EditorCapabilities, EditorWindow, KeyEvent, KeyUse, LoadedPlugin, Normalized, ParamWriteError,
     ParameterInfo, PluginDescriptor, PluginError, PluginResult, PluginTail, Preset, PresetId,
-    ProcessContext, ProcessOutput, ProcessWake, Sample, SampleRate, Samples, WindowHandle,
+    ProcessContext, ProcessOutput, ProcessWake, SampleRate, Samples, WindowHandle,
 };
 use crate::{Delivered, ParamEdit, bypass_parameter, bypass_value, is_bypassed};
 use crate::{
@@ -866,7 +867,7 @@ pub struct Stuck<P, C> {
 ///
 /// [`PluginError::Process`] when the plugin failed the block.
 #[allow(clippy::too_many_arguments)]
-pub fn process_block<P: Processor, T: Sample>(
+pub fn process_block<P: Processor, T: Float>(
     processor: &mut P,
     inputs: &[&[T]],
     outputs: &mut [&mut [T]],

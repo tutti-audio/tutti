@@ -187,7 +187,9 @@ fn a_fork_and_the_live_instance_do_not_reach_each_other() {
             tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo"),
         )
         .expect("the probe forks");
-    let state_at_fork = handle.save_state().expect("the probe saves");
+    let state_at_fork = handle
+        .save_state(tutti_plugin_types::StateUse::Project)
+        .expect("the probe saves");
 
     // After the fork: the live instance moves to -15 dB.
     probe.client.set_parameter(GAIN, gain_at(-15.0));
@@ -248,7 +250,9 @@ fn a_fork_and_the_live_instance_do_not_reach_each_other() {
     // handle, the path a host has once the node is in a graph.
     handle.send_parameter(GAIN, gain_at(-6.0));
     assert_eq!(
-        handle.save_state().expect("the probe saves"),
+        handle
+            .save_state(tutti_plugin_types::StateUse::Project)
+            .expect("the probe saves"),
         state_at_fork,
         "rendering the fork changed the live instance's state"
     );
@@ -322,7 +326,10 @@ fn a_fork_is_saved_and_restored_as_a_duplicate_and_a_project_save_is_not() {
 
     // The probe stamps the context after its 4-byte magic.
     const CONTEXT_BYTE: usize = 4;
-    let project = probe.handle.save_state().expect("the project save");
+    let project = probe
+        .handle
+        .save_state(tutti_plugin_types::StateUse::Project)
+        .expect("the project save");
     assert_eq!(project[CONTEXT_BYTE], 3, "a project save is FOR_PROJECT");
 
     probe

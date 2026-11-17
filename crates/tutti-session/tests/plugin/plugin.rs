@@ -32,9 +32,10 @@ use tutti_buffers::InterleavedMut;
 use tutti_graph::ForkByClone;
 use tutti_graph::NodeKey;
 use tutti_plugin::RenderMode;
-use tutti_plugin::catalog::{PluginRef, PluginState};
+use tutti_plugin::catalog::PluginRef;
 use tutti_plugin_types::PluginFailure;
 use tutti_session::BufferMaster;
+use tutti_session::PeerState;
 use tutti_session::{
     Bounce, BounceError, BounceLatency, BounceTail, ExportClock, Phase, PhaseCx, PluginHealth,
     Range, Session, SessionEvent,
@@ -111,7 +112,11 @@ fn latency(s: &Session, node: NodeKey) -> Samples {
 /// reply; live, any later control call (a snapshot, a parameter read) carries
 /// it, and here this one does.
 fn round_trip(s: &Session, node: NodeKey) {
-    let _ = s.plugin_view(node).expect("hosted").state().save();
+    let _ = s
+        .plugin_view(node)
+        .expect("hosted")
+        .state()
+        .save(tutti_plugin_types::StateUse::Project);
 }
 
 /// Waits (up to 10 s) for the probe's latency to read `want`: the
@@ -1217,7 +1222,7 @@ fn a_replacement_with_other_ports_is_refused_and_the_graph_stays_editable() {
         "{why}"
     );
     assert_eq!(
-        state.as_ref().map(PluginState::bytes),
+        state.as_ref().map(PeerState::bytes),
         Some(kept.as_slice()),
         "the user's last state goes out with the event"
     );
@@ -1344,7 +1349,7 @@ fn a_snapshot_that_kills_the_load_is_withheld_from_the_next_attempt() {
             .unwrap()
             .state()
             .withheld()
-            .map(PluginState::bytes),
+            .map(PeerState::bytes),
         Some(users.as_slice())
     );
     // ...and the snapshots taken since, of a plugin at its defaults, do not
@@ -1363,7 +1368,7 @@ fn a_snapshot_that_kills_the_load_is_withheld_from_the_next_attempt() {
             .unwrap()
             .state()
             .withheld()
-            .map(PluginState::bytes),
+            .map(PeerState::bytes),
         Some(users.as_slice()),
         "a default-state snapshot replaced the withheld one"
     );

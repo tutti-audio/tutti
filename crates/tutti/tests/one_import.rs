@@ -132,3 +132,18 @@ fn a_tempo_map_is_built_and_published_through_the_facade() {
     let transport = Transport::new(rate);
     transport.settings().set_tempo_map(map);
 }
+
+/// A peer state's media type is named from the facade: `PeerState::media_type`
+/// returns `tutti::midi::property::MediaType`, whatever MIDI features are on.
+#[cfg(all(feature = "session", feature = "plugin"))]
+#[test]
+fn a_peer_states_media_type_is_named_through_the_facade() {
+    use tutti::midi::property::MediaType;
+    use tutti::{PeerState, PluginRef, SavedPeer};
+
+    let plugin = PluginRef::file("/p/synth.clap").expect("a plugin file");
+    let media_type = MediaType::new("application/x-clap-state").expect("a media type");
+    let state = PeerState::new(SavedPeer::Plugin(plugin), media_type.clone(), vec![1, 2]);
+    let read: &MediaType = state.media_type();
+    assert_eq!(read, &media_type);
+}

@@ -108,7 +108,10 @@ impl AnyThread for Fake {
             .ok()
             .and_then(Normalized::new)
     }
-    fn save_state(&self) -> Result<Vec<u8>, tutti_plugin::error::StateError> {
+    fn save_state(
+        &self,
+        _: tutti_plugin_types::StateUse,
+    ) -> Result<Vec<u8>, tutti_plugin::error::StateError> {
         Err(tutti_plugin::error::StateError::NoStateRoute)
     }
     fn set_render_mode(&self, _mode: RenderMode) -> bool {

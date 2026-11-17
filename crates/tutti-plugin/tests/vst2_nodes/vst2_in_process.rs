@@ -145,7 +145,7 @@ fn handle_state_roundtrip() {
     let handle = load_handle(&[("TUTTI_VST2_PROBE_PARAMS", "4")]);
 
     let original = handle
-        .save_state()
+        .save_state(tutti_plugin_types::StateUse::Project)
         .expect("the probe declares chunk-based state");
     assert!(!original.is_empty(), "a declared chunk must not be empty");
 
@@ -159,7 +159,7 @@ fn handle_state_roundtrip() {
         .load_state(main_thread(), &modified)
         .expect("the probe accepts a chunk it just produced");
     let after = handle
-        .save_state()
+        .save_state(tutti_plugin_types::StateUse::Project)
         .expect("state must still be readable after a load");
 
     assert_eq!(
@@ -181,7 +181,9 @@ fn an_accepted_chunk_reports_success() {
     let _lock = lock_probe();
     let handle = load_handle(&[]);
 
-    let blob = handle.save_state().expect("probe declares state");
+    let blob = handle
+        .save_state(tutti_plugin_types::StateUse::Project)
+        .expect("probe declares state");
     handle
         .load_state(main_thread(), &blob)
         .expect("a chunk the plugin just produced must be accepted");

@@ -618,9 +618,8 @@ fn add_parameter_data_past_the_lists_queues_is_null_counted() {
 /// plugin's output answer `Busy` / `false` / `None` and add to
 /// [`busy`](ParameterChangesImpl::busy).
 ///
-/// Checked against the old code (the panicking borrows): the first refill
-/// while the queue is held panics with "already borrowed" instead of
-/// returning `Busy`.
+/// A refill while the queue is held answers `Busy`; it does not panic with
+/// "already borrowed".
 #[test]
 fn staging_while_a_plugin_holds_a_queue_or_the_list_is_refused_and_counted() {
     let list = unpooled(2, 4);
