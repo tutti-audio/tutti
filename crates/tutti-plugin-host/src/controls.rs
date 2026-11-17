@@ -337,8 +337,9 @@ impl PluginControls {
         self.pipeline.store(frames.get(), Ordering::Release);
     }
 
-    /// Overwrite the reported latency. See
-    /// `PluginClient::set_latency`.
+    /// Overwrite the reported latency: what a test uses to move the figure the
+    /// graph's compensation reads (feature `testing`).
+    #[cfg(feature = "testing")]
     pub fn set_latency(&self, samples: impl Into<Samples>) {
         self.latency.store(samples.into().get(), Ordering::Release);
     }
@@ -349,8 +350,9 @@ impl PluginControls {
         *lock_tail(&self.tail)
     }
 
-    /// Overwrite the reported tail. See
-    /// `PluginClient::set_tail`.
+    /// Overwrite the reported tail: what a test uses to move the figure the
+    /// graph reads (feature `testing`).
+    #[cfg(feature = "testing")]
     pub fn set_tail(&self, tail: PluginTail) {
         *lock_tail(&self.tail) = tail;
     }

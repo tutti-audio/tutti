@@ -46,12 +46,11 @@ pub use node::{
     load_client_restoring,
 };
 pub use param_delivery::{DeliveryCounters, ParamDelivery, ParamDeliveryStats};
-pub use param_input::take as take_param_input;
 pub use param_values::{ParamRead, ParamReporter, ParamSnapshot, PluginParamValues};
 pub use render_mode::needs_announcement;
-pub use segment_points::SegmentPoints;
+pub(crate) use segment_points::SegmentPoints;
 pub(crate) use transport_source::TransportSource;
-pub use transport_source::{BlockTransport, ProjectTime, Snapshot, SteadyTime, transport_info};
-pub use transport_walk::Call;
+pub(crate) use transport_source::{BlockTransport, Snapshot, transport_info};
+pub(crate) use transport_walk::Call;
 pub(crate) use transport_walk::TransportWalk;
 pub use wakeups::service_now;

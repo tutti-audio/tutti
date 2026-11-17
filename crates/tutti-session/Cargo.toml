@@ -115,6 +115,10 @@ testing = ["tutti-cpal?/testing"]
 [dev-dependencies]
 # Turns `testing` on for this crate's own tests, benches and doctests.
 tutti-session = { path = ".", features = ["testing"] }
+# The raw plugin-handle door and the client's figure setters, which tests drive
+# beside the session's own calls.
+tutti-plugin-host = { path = "../tutti-plugin-host", features = ["testing"] }
+tutti-plugin = { path = "../tutti-plugin", features = ["testing"] }
 # The `FakeBackend` the hot-plug tests drive (`plug`, `unplug`). Dev-only:
 # `midi-hardware` must not link a fake backend.
 tutti-midi-hardware = { path = "../tutti-midi-hardware", features = ["testing"] }

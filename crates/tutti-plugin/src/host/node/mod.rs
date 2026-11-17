@@ -603,16 +603,17 @@ impl<S> PluginClient<S> {
         self.controls.latency()
     }
 
-    /// Overrides the plugin's reported latency. RT-safe.
+    /// Overrides the plugin's reported latency (feature `testing`). RT-safe.
     ///
-    /// Normally driven by the bridge thread when the plugin-server emits
-    /// `BridgeMessage::LatencyChanged` (forwarded by `PluginClient::new`);
-    /// exposed publicly so callers can also force a value. It changes what
+    /// The bridge thread writes it when the plugin-server emits
+    /// `BridgeMessage::LatencyChanged` (forwarded by `PluginClient::new`); a
+    /// test forces a value here. It changes what
     /// [`PluginControls::declared_latency`] reports, and a graph re-plans PDC
     /// around it when the host hands that to `Editor::set_latency` — the
     /// node's `Shape` changes at the next commit. Register a callback via
     /// `PluginHandle::subscribe` (latency arrives as
     /// `PluginInvalidation::Latency`) to get notified.
+    #[cfg(feature = "testing")]
     pub fn set_latency(&self, samples: impl Into<Samples>) {
         self.controls.set_latency(samples);
     }
@@ -625,14 +626,14 @@ impl<S> PluginClient<S> {
         self.controls.tail()
     }
 
-    /// Overrides the plugin's reported tail. Control side: takes a short lock
-    /// (nothing on the audio thread reads the tail).
+    /// Overrides the plugin's reported tail (feature `testing`). Control side:
+    /// takes a short lock (nothing on the audio thread reads the tail).
     ///
-    /// Normally driven by the bridge thread when the plugin-server emits
-    /// `BridgeMessage::TailChanged`; exposed publicly so callers can also force
-    /// a value. Like `set_latency`, this changes what the node reports without
+    /// The bridge thread writes it when the plugin-server emits
+    /// `BridgeMessage::TailChanged`; a test forces a value here. Like `set_latency`, this changes what the node reports without
     /// re-running anything — an offline render reads the tail when it sizes
     /// itself, so a bounce already in flight keeps the length it started with.
+    #[cfg(feature = "testing")]
     pub fn set_tail(&self, tail: PluginTail) {
         self.controls.set_tail(tail);
     }

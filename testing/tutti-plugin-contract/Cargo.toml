@@ -35,7 +35,7 @@ tutti-plugin-ipc = { path = "../../crates/tutti-plugin-ipc", optional = true }
 [features]
 # `tests/server.rs`: the same configuration and transcript through a real
 # `plugin-server` process.
-server = ["dep:tutti-plugin", "dep:tutti-plugin-db", "dep:tutti-plugin-ipc"]
+server = ["dep:tutti-plugin", "tutti-plugin/testing", "dep:tutti-plugin-db", "dep:tutti-plugin-ipc"]
 
 [[test]]
 name = "server"
