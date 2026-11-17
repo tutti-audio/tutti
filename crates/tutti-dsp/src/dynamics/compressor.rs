@@ -24,9 +24,8 @@ use tutti_types::{Amplitude, ChannelLayout, CompressionRatio, Db, Hz, Q, SampleR
 
 use super::curves::{amplitude_to_db, compute_compressor_gain_reduction};
 use super::key_filter::{KeyFilter, KeyStage};
-use super::shared::{CHUNK, GAIN_GLIDE, key_levels};
+use super::shared::{Ballistics, CHUNK, GAIN_GLIDE, MAX_KNEE_DB, key_levels};
 use crate::delay::finite_or;
-use crate::smoother::Smoother;
 use crate::{Glide, Steps};
 
 /// The controls of a [`CompressorBank`].
@@ -81,10 +80,6 @@ impl Default for CompressorControls {
 /// makeup and a reduction stays finite whatever either is.
 const MAX_MAKEUP_DB: f32 = 400.0;
 
-/// The widest knee, in dB, a compressor runs: the knee term `(1 - 1/ratio) x^2 / (2 knee)`
-/// with `x` inside the knee is at most `knee / 2`, and `x^2` stays finite.
-const MAX_KNEE_DB: f32 = 400.0;
-
 /// A compressor at one set of controls and one rate: the controls made runnable.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct CompressorMember {
@@ -129,10 +124,8 @@ struct Detector {
     threshold: Db,
     knee: Db,
     ratio: CompressionRatio,
-    /// The one-pole coefficient while the reduction rises.
-    attack: f32,
-    /// The one-pole coefficient while the reduction falls.
-    release: f32,
+    /// The follower on the reduction: the attack while it rises, the release while it falls.
+    ballistics: Ballistics,
 }
 
 impl Detector {
@@ -143,8 +136,7 @@ impl Detector {
             threshold: m.threshold,
             knee: m.knee,
             ratio: m.ratio,
-            attack: m.attack.one_pole_coeff(m.rate),
-            release: m.release.one_pole_coeff(m.rate),
+            ballistics: Ballistics::new(m.attack, m.release, m.rate),
         }
     }
 
@@ -153,8 +145,7 @@ impl Detector {
         threshold: Db(0.0),
         knee: Db(0.0),
         ratio: CompressionRatio::UNITY,
-        attack: 0.0,
-        release: 0.0,
+        ballistics: Ballistics::NEUTRAL,
     };
 
     /// One frame of the compressor: the key's `level` (an amplitude) in dB, the static
@@ -165,12 +156,7 @@ impl Detector {
     fn frame(&self, reduction: &mut f32, level: f32, threshold: Db, makeup_db: f32) -> f32 {
         let input_db = amplitude_to_db(Amplitude::new(level));
         let target = compute_compressor_gain_reduction(input_db, threshold, self.ratio, self.knee);
-        let coeff = if target.get() > *reduction {
-            self.attack
-        } else {
-            self.release
-        };
-        *reduction = Smoother::toward(*reduction, target.get(), coeff);
+        *reduction = self.ballistics.follow(*reduction, target.get());
         Db::new(-*reduction + makeup_db).to_amplitude().get()
     }
 }

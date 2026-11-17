@@ -55,6 +55,10 @@ units! {
             Threshold => Db, Ratio => CompressionRatio, Attack => Seconds, Release => Seconds,
             GainDb => Db
         }
+        tutti_nodes::DynamicEqNode {
+            Threshold => Db, Knee => Db, Ratio => CompressionRatio, Attack => Seconds,
+            Release => Seconds, Range => Db, Cutoff => Hz, Q => Q
+        }
         tutti_nodes::GateNode {
             Threshold => Db, Attack => Seconds, Hold => Seconds, Release => Seconds, Range => Db
         }
