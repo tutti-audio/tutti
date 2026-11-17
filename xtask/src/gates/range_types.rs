@@ -136,9 +136,9 @@ pub(super) const EXCEPTIONS: &[(&str, &str, &str)] = &[
         "permanent: any path, format and id names a plugin; a missing one is the load's error",
     ),
     (
-        "crates/tutti-plugin/src/host/plugin_ref.rs",
-        "PluginState",
-        "permanent: any plugin with any saved bytes is a state; the plugin refuses what it cannot read",
+        "crates/tutti-session/src/peer_state.rs",
+        "PeerState",
+        "permanent: any peer with any saved bytes is a state; the peer refuses what it cannot read",
     ),
     (
         "crates/tutti-types/src/ambisonic.rs",

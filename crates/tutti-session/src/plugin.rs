@@ -125,13 +125,11 @@
 use std::sync::{Arc, Mutex};
 
 use std::time::{Duration, Instant};
-use tutti_plugin_types::MainThreadMarker;
+use tutti_plugin_types::{MainThreadMarker, StateUse};
 use tutti_rt::LockExt;
 
 use tutti_graph::NodeKey;
-use tutti_plugin::catalog::{
-    AudioConfig, Hosting, Loadable, Plugin as HostPlugin, PluginRef, PluginState,
-};
+use tutti_plugin::catalog::{AudioConfig, Hosting, Loadable, Plugin as HostPlugin, PluginRef};
 use tutti_plugin::error::StateError;
 use tutti_plugin_host::{Liveness, Verdict};
 use tutti_plugin_host::{
@@ -163,9 +161,9 @@ pub use state_job::{RestoreState, SaveState, StateJobError, StateJobFailed};
 
 use crate::plugin_diagnostics::Figures;
 use crate::{
-    Diagnostics, GiveUp, HangDetector, Key, Params, PluginBuses, PortCounts, Recovery,
-    RecoveryAction, RecoveryEvent, RecoveryFailure, ReloadCause, Session, SessionEvent,
-    WorkerError,
+    Diagnostics, GiveUp, HangDetector, Key, OtherPeer, Params, PeerState, PluginBuses, PortCounts,
+    Recovery, RecoveryAction, RecoveryEvent, RecoveryFailure, ReloadCause, SavedPeer, Session,
+    SessionEvent, WorkerError,
 };
 
 /// How often a healthy plugin's state is captured, by default: 8 s.
@@ -183,7 +181,7 @@ pub(crate) struct PluginLoad {
     loadable: Loadable,
     rate: SampleRate,
     config: AudioConfig,
-    state: Option<Arc<PluginState>>,
+    state: Option<Arc<PeerState>>,
     /// The session's collector of main-thread work, which the plugin's handles hold.
     work: tutti_plugin_types::MainWorkHandle,
 }
@@ -246,7 +244,7 @@ impl PluginLoad {
             &self.config,
             &self.loadable,
             self.rate,
-            self.state.as_deref().map(PluginState::bytes),
+            self.state.as_deref().map(PeerState::bytes),
         ) {
             Ok((plugin, restore)) => (Ok(plugin), restore),
             // The server died, or stopped answering, inside the step that
@@ -576,7 +574,7 @@ pub enum PluginChange {
         why: GiveUp,
         /// The last state worth keeping, for a host that offers the user a
         /// manual reload: the state a reload withheld, else the last good one.
-        state: Option<PluginState>,
+        state: Option<PeerState>,
     },
 }
 
@@ -769,13 +767,13 @@ pub(crate) struct HostedPlugin {
     pub(crate) told: bool,
     /// The plugin's own bypass against the node's mode.
     pub(crate) bypass: crate::bypass::BypassSync,
-    snapshot: Option<PluginState>,
+    snapshot: Option<PeerState>,
     /// When the snapshot's capture was asked for.
     snapshot_from: Option<Instant>,
     /// A snapshot left out of a reload ([`StateRestore::Withheld`]), kept for
     /// the host ([`StateView::withheld`]); later
     /// snapshots go to `snapshot` and never replace it.
-    withheld: Option<PluginState>,
+    withheld: Option<PeerState>,
     /// Until when a plugin that has just restored a state is suspected of
     /// dying of it.
     probation_until: Option<Instant>,
@@ -1400,7 +1398,7 @@ impl<'a> StateView<'a> {
     /// The last state captured while the plugin was healthy: the
     /// crash-recovery copy a reload restores, up to a snapshot interval
     /// stale. A project is saved from [`save`](Self::save), not from this.
-    pub fn last_good(&self) -> Option<&'a PluginState> {
+    pub fn last_good(&self) -> Option<&'a PeerState> {
         self.hosted.snapshot.as_ref()
     }
 
@@ -1409,11 +1407,11 @@ impl<'a> StateView<'a> {
     /// host may still offer to load by hand. Kept until the plugin is
     /// withheld from again or replaced by the host; the states captured since
     /// (of a plugin at its defaults) do not replace it.
-    pub fn withheld(&self) -> Option<&'a PluginState> {
+    pub fn withheld(&self) -> Option<&'a PeerState> {
         self.hosted.withheld.as_ref()
     }
 
-    /// Saves the plugin's state now, as a blocking round trip to it (ten
+    /// Saves the plugin's state for `state_use` now, as a blocking round trip to it (ten
     /// seconds at worst; an in-process plugin's is run by the main thread's
     /// next tick, see the module docs). A pooled plugin's state goes through
     /// [`Session::save_state`], a job that lands in an update.
@@ -1422,9 +1420,9 @@ impl<'a> StateView<'a> {
     ///
     /// The plugin's [`StateError`]: it is gone, busy, refused, or has no state
     /// route.
-    pub fn save(&self) -> Result<PluginState, StateError> {
-        let bytes = self.hosted.handle.save_state()?;
-        Ok(PluginState::new(self.hosted.plugin.clone(), bytes))
+    pub fn save(&self, state_use: StateUse) -> Result<PeerState, StateError> {
+        let bytes = self.hosted.handle.save_state(state_use)?;
+        Ok(PeerState::of_plugin(self.hosted.plugin.clone(), bytes))
     }
 
     /// Restores `state` into the plugin. The parameter mirror is read again by
@@ -1433,15 +1431,29 @@ impl<'a> StateView<'a> {
     ///
     /// # Errors
     ///
-    /// [`StateError::OtherPlugin`] when `state` was saved from another plugin
+    /// [`RestoreError::OtherPeer`] when `state` was saved from another peer
     /// (nothing is sent to the plugin); otherwise the plugin's own
-    /// [`StateError`].
-    pub fn restore(&self, main: MainThreadMarker, state: &PluginState) -> Result<(), StateError> {
-        state.check_for(&self.hosted.plugin)?;
+    /// [`RestoreError::State`].
+    pub fn restore(&self, main: MainThreadMarker, state: &PeerState) -> Result<(), RestoreError> {
+        state
+            .check_for(&SavedPeer::Plugin(self.hosted.plugin.clone()))
+            .map_err(RestoreError::OtherPeer)?;
         self.hosted.handle.load_state(main, state.bytes())?;
         self.hosted.refresh_values();
         Ok(())
     }
+}
+
+/// Why [`StateView::restore`] restored nothing.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum RestoreError {
+    /// The state was saved from another peer: nothing was sent to the plugin.
+    #[error(transparent)]
+    OtherPeer(OtherPeer),
+    /// The plugin was asked and could not restore it.
+    #[error(transparent)]
+    State(#[from] StateError),
 }
 
 /// `Phase::RenderMode`'s record: the mode last announced.
@@ -1562,7 +1574,7 @@ impl<C: crate::Clock> Session<C> {
         }
         match state {
             Ok(bytes) => {
-                hosted.snapshot = Some(PluginState::new(hosted.plugin.clone(), bytes));
+                hosted.snapshot = Some(PeerState::of_plugin(hosted.plugin.clone(), bytes));
                 hosted.snapshot_from = Some(asked);
                 true
             }
@@ -2271,7 +2283,7 @@ impl<C: crate::Clock> Session<C> {
             if let Some((handle, token)) = snapshot {
                 let asked = now;
                 self.jobs.submit(
-                    move || handle.save_state(),
+                    move || handle.save_state(StateUse::Project),
                     move |session, ended, _| match ended {
                         Ok(state) => {
                             session.land_plugin_snapshot(node, &token, asked, state);
@@ -2384,7 +2396,10 @@ mod tests {
         fn parameter_value_from_text(&self, _id: ParamId, _text: &str) -> Option<Normalized> {
             None
         }
-        fn save_state(&self) -> Result<Vec<u8>, tutti_plugin::error::StateError> {
+        fn save_state(
+            &self,
+            _: tutti_plugin_types::StateUse,
+        ) -> Result<Vec<u8>, tutti_plugin::error::StateError> {
             self.saves.fetch_add(1, Ordering::SeqCst);
             self.state
                 .clone()
@@ -2597,7 +2612,7 @@ mod tests {
                 .unwrap()
                 .state()
                 .last_good()
-                .map(PluginState::bytes),
+                .map(PeerState::bytes),
             Some(&[1u8, 2, 3][..])
         );
         assert_eq!(rig.saves.load(Ordering::SeqCst), 1, "one job is one save");
@@ -2620,7 +2635,7 @@ mod tests {
     fn a_declined_save_keeps_the_previous_snapshot() {
         let mut rig = rig(None);
         let hosted = rig.session.graph.plugins.get_mut(&rig.node).unwrap();
-        hosted.snapshot = Some(PluginState::new(hosted.plugin.clone(), vec![4, 2]));
+        hosted.snapshot = Some(PeerState::of_plugin(hosted.plugin.clone(), vec![4, 2]));
         rig.plugins_at(0);
         let job = rig.plugins_at(1_000).pop().expect("a job at the interval");
         rig.run_and_land(job);
@@ -2630,7 +2645,7 @@ mod tests {
                 .unwrap()
                 .state()
                 .last_good()
-                .map(PluginState::bytes),
+                .map(PeerState::bytes),
             Some(&[4u8, 2][..]),
             "a declined save must keep the last good snapshot"
         );
@@ -2868,7 +2883,7 @@ mod tests {
                 .unwrap()
                 .state()
                 .last_good()
-                .map(PluginState::bytes),
+                .map(PeerState::bytes),
             None,
             "the outgoing plugin's snapshot is not the incoming one's"
         );
@@ -2879,7 +2894,7 @@ mod tests {
                 .unwrap()
                 .state()
                 .last_good()
-                .map(PluginState::bytes),
+                .map(PeerState::bytes),
             None,
             "the outgoing plugin's job must not land on the incoming plugin"
         );
@@ -2893,7 +2908,7 @@ mod tests {
                 .unwrap()
                 .state()
                 .last_good()
-                .map(PluginState::bytes),
+                .map(PeerState::bytes),
             Some(&[9u8][..])
         );
     }
