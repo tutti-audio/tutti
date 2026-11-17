@@ -11,8 +11,7 @@ use tutti_graph::{
 use tutti_graph::{ForkByClone, NodeKey, Stamp};
 use tutti_midi_runtime::{
     DeviceEpochs, HarmonyNode, LIVE_INLET_CAPACITY, MidiClipNode, MidiIngestNode, MidiKeys,
-    MidiOutNode, MpeTransformNode, SyncMessages, SyncOut, SyncOutConfig, TimedHarmony,
-    TimedMidiEvent,
+    MidiOutNode, MpeTransformNode, SyncMessages, SyncOut, TimedHarmony, TimedMidiEvent,
 };
 use tutti_types::MaxBlock;
 use tutti_types::{Beat, Bpm, Frame, FrameClock, Moment, SampleRate, Samples};
@@ -73,12 +72,12 @@ fn the_border_nodes_process_without_allocating() {
     ed.insert(
         NodeKey(3),
         "sync",
-        SyncOut::new(SyncOutConfig::new(MidiGroup::FIRST).messages(SyncMessages {
+        SyncOut::new(MidiGroup::FIRST).messages(SyncMessages {
             clock: true,
             mtc: true,
             mmc: Some(Recipient::AllCall),
             rate: MtcRate::Fps30,
-        })),
+        }),
     );
     let mut out = common::sink(&mut ed, 1, &[(1, 0), (1, 3), (2, 0), (3, 0)]);
     ed.commit().unwrap();
@@ -749,11 +748,11 @@ fn machine_control_out_of_a_sync_node_processes_without_allocating() {
         .insert(
             NodeKey(1),
             "mmc",
-            SyncOut::new(SyncOutConfig::new(MidiGroup::FIRST).messages(SyncMessages {
+            SyncOut::new(MidiGroup::FIRST).messages(SyncMessages {
                 mmc: Some(Recipient::AllCall),
                 rate: MtcRate::Fps30,
                 ..SyncMessages::OFF
-            })),
+            }),
         )
         .controls;
     let mut out = common::sink(&mut ed, 1, &[(1, 0)]);

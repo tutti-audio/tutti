@@ -12,7 +12,7 @@ use tutti_graph::{
     Editor, Executor, IntoNode as _, NodeKey, Offset, TransportChanges, TransportPosition,
 };
 use tutti_midi_protocol::{MtcRate, Recipient};
-use tutti_midi_runtime::{SyncMessages, SyncOut, SyncOutConfig, SyncOutControls};
+use tutti_midi_runtime::{SyncMessages, SyncOut, SyncOutControls};
 use tutti_types::{Beat, Bpm, Samples};
 use tutti_ump::{Message, MidiGroup, SysexStatus, System, U14, Ump};
 
@@ -50,11 +50,7 @@ impl Rig {
         let mut rig = EventRig::events_only(RATE, BLOCK, 1);
         let controls = rig
             .editor
-            .insert(
-                NodeKey(1),
-                "sync",
-                SyncOut::new(SyncOutConfig::new(group).messages(messages)),
-            )
+            .insert(NodeKey(1), "sync", SyncOut::new(group).messages(messages))
             .controls;
         rig.feed(NodeKey(1), 0, 0);
         rig.commit();
@@ -397,7 +393,7 @@ fn a_fork_sends_what_the_live_node_sent_at_the_fork() {
         .insert(
             NodeKey(1),
             "sync",
-            SyncOut::new(SyncOutConfig::new(G).messages(SyncMessages::OFF)),
+            SyncOut::new(G).messages(SyncMessages::OFF),
         )
         .controls;
     rig.feed(NodeKey(1), 0, 0);
@@ -413,5 +409,5 @@ fn a_fork_sends_what_the_live_node_sent_at_the_fork() {
     let got: Vec<_> = heard(&rig.seen).into_iter().map(|e| e.1).collect();
     assert_eq!(got[0], system(G, System::Start));
     assert_eq!(got[1], system(G, System::TimingClock));
-    let _ = SyncOut::new(SyncOutConfig::new(G)).into_node();
+    let _ = SyncOut::new(MidiGroup::FIRST).into_node();
 }

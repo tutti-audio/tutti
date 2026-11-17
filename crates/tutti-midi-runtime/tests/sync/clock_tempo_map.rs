@@ -29,7 +29,7 @@ use crate::common;
 use tutti_buffers::InterleavedMut;
 use tutti_engine::Engine;
 use tutti_graph::{Editor, Executor, NodeKey, Prepare};
-use tutti_midi_runtime::{SyncMessages, SyncOut, SyncOutConfig};
+use tutti_midi_runtime::{SyncMessages, SyncOut};
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_transport::{FadeOut, MotionEvent, Then, Transport};
 use tutti_types::{Beat, Bpm, ChannelLayout, SampleRate, Samples};
@@ -150,13 +150,11 @@ fn rig(map: &Arc<TempoMap>, mtc: bool) -> Rig {
     ed.insert(
         NodeKey(1),
         "clock",
-        SyncOut::new(
-            SyncOutConfig::new(tutti_ump::MidiGroup::FIRST).messages(SyncMessages {
-                clock: true,
-                mtc,
-                ..SyncMessages::OFF
-            }),
-        ),
+        SyncOut::new(tutti_ump::MidiGroup::FIRST).messages(SyncMessages {
+            clock: true,
+            mtc,
+            ..SyncMessages::OFF
+        }),
     );
     let out = std::cell::RefCell::new(common::sink(&mut ed, 1, &[(1, 0)]));
     ed.commit().expect("commits");

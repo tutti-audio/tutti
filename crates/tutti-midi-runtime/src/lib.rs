@@ -228,8 +228,7 @@ pub use mpe_zones::mpe_zones;
 pub use outbound::{
     ACTIVE_SENSING_INTERVAL, ActiveSensingSender, JR_CLOCK_INTERVAL, JR_CLOCK_MAX_INTERVAL,
     JrClock, JrClockEmitter, JrStamper, JrStream, MIDI_OUT_EVENT_CAPACITY, MachineControlSender,
-    MidiOutNode, NoTimeCode, SYNC_OUT_EVENT_CAPACITY, SyncMessages, SyncOut, SyncOutConfig,
-    SyncOutControls,
+    MidiOutNode, NoTimeCode, SYNC_OUT_EVENT_CAPACITY, SyncMessages, SyncOut, SyncOutControls,
 };
 pub use output_plan::{
     MAX_OUTPUT_AHEAD, MAX_OUTPUT_LATENCY, OffsetOutOfRange, Outgoing, OutputLatency, OutputOffset,

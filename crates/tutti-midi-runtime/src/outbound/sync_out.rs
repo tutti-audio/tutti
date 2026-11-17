@@ -94,49 +94,6 @@ impl SyncOutControls {
     }
 }
 
-/// What a [`SyncOut`] is made of: the Group it sends on, and what it sends
-/// at first.
-///
-/// ```
-/// use tutti_graph::IntoNode as _;
-/// use tutti_midi_protocol::{MtcRate, Recipient};
-/// use tutti_midi_runtime::{SyncMessages, SyncOut, SyncOutConfig};
-/// use tutti_ump::MidiGroup;
-///
-/// let config = SyncOutConfig::new(MidiGroup::FIRST).messages(SyncMessages {
-///     clock: true,
-///     mmc: Some(Recipient::AllCall),
-///     rate: MtcRate::Fps30,
-///     ..SyncMessages::OFF
-/// });
-/// let (_node, controls) = SyncOut::new(config).into_node();
-/// assert!(controls.messages().get().clock);
-/// ```
-#[derive(Clone, Copy, Debug)]
-pub struct SyncOutConfig {
-    group: MidiGroup,
-    settings: SyncSettings,
-}
-
-impl SyncOutConfig {
-    /// A node that sends on `group`, sending nothing until
-    /// [`messages`](SyncOutControls::messages) is set.
-    #[must_use]
-    pub fn new(group: MidiGroup) -> Self {
-        Self {
-            group,
-            settings: SyncSettings::new(),
-        }
-    }
-
-    /// What the node sends from its first block.
-    #[must_use]
-    pub fn messages(mut self, messages: SyncMessages) -> Self {
-        self.settings = self.settings.messages(messages);
-        self
-    }
-}
-
 /// The transport sent to other gear, as a graph node with one event output.
 /// See the module docs.
 #[derive(Debug)]
@@ -154,22 +111,47 @@ pub struct SyncOut {
 }
 
 impl SyncOut {
-    /// A node over `config`, placing events at the graph's rate once
-    /// prepared. Control thread.
+    /// A node that sends on `group`, sending nothing until
+    /// [`messages`](SyncOutControls::messages) is set, placing events at the
+    /// graph's rate once prepared. Control thread.
+    ///
+    /// ```
+    /// use tutti_graph::IntoNode as _;
+    /// use tutti_midi_protocol::{MtcRate, Recipient};
+    /// use tutti_midi_runtime::{SyncMessages, SyncOut};
+    /// use tutti_ump::MidiGroup;
+    ///
+    /// let (_node, controls) = SyncOut::new(MidiGroup::masked(2))
+    ///     .messages(SyncMessages {
+    ///         clock: true,
+    ///         mmc: Some(Recipient::AllCall),
+    ///         rate: MtcRate::Fps30,
+    ///         ..SyncMessages::OFF
+    ///     })
+    ///     .into_node();
+    /// assert!(controls.messages().get().clock);
+    /// ```
     #[must_use]
-    pub fn new(config: SyncOutConfig) -> Self {
+    pub fn new(group: MidiGroup) -> Self {
         let (losses, reader) = counter();
         Self {
-            clock: ClockMaster::new(config.group, UNPREPARED_RATE),
+            clock: ClockMaster::new(group, UNPREPARED_RATE),
             sender: MachineControlSender::new(Recipient::AllCall, MtcRate::Fps25),
-            group: config.group,
+            group,
             controls: Arc::new(SyncOutControls {
-                messages: Setting::new(config.settings.messages),
+                messages: Setting::new(SyncSettings::new().messages),
                 losses: reader,
             }),
             losses,
             pending: RtVec::new(),
         }
+    }
+
+    /// What the node sends from its first block.
+    #[must_use]
+    pub fn messages(self, messages: SyncMessages) -> Self {
+        self.controls.messages.set(messages);
+        self
     }
 
     /// Adds one Machine Control message's packets, at `at`, whole or not at all.
@@ -273,8 +255,8 @@ struct SyncFork {
 
 impl ForkSource for SyncFork {
     fn fork(&self, _mode: ForkMode) -> Result<Forked, ForkCause> {
-        let config = SyncOutConfig::new(self.group).messages(self.controls.messages.get());
-        Ok(Forked::new(Box::new(SyncOut::new(config))))
+        let node = SyncOut::new(self.group).messages(self.controls.messages.get());
+        Ok(Forked::new(Box::new(node)))
     }
 }
 

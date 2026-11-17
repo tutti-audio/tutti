@@ -23,7 +23,7 @@ use tutti_midi_protocol::{
 use tutti_midi_runtime::{
     CHANNELLESS_PORT, DeviceEpochs, MIDI_INPUT_EVENT_CAPACITY, MIDI_INPUT_PORTS,
     MachineControlEvent, MachineControlFollower, MidiIngestNode, MidiInputPorts, MidiOutNode,
-    MpeTransformNode, SyncMessages, SyncOut, SyncOutConfig,
+    MpeTransformNode, SyncMessages, SyncOut,
 };
 use tutti_types::{Beat, Bpm, Frame, SampleRate, Samples};
 use tutti_ump::{
@@ -44,7 +44,7 @@ use tutti_fixtures::{EventRig, Seen};
 
 /// A sync node on the first Group, sending `messages`.
 fn sync(messages: SyncMessages) -> SyncOut {
-    SyncOut::new(SyncOutConfig::new(G).messages(messages))
+    SyncOut::new(G).messages(messages)
 }
 
 /// A source at key 1 whose `ports` event outputs each feed the sink's input

@@ -27,4 +27,4 @@ pub use jr_timestamp::{
 pub use machine_control_out::{MachineControlSender, NoTimeCode};
 pub use out_node::{MIDI_OUT_EVENT_CAPACITY, MidiOutNode};
 pub use sync_messages::SyncMessages;
-pub use sync_out::{SYNC_OUT_EVENT_CAPACITY, SyncOut, SyncOutConfig, SyncOutControls};
+pub use sync_out::{SYNC_OUT_EVENT_CAPACITY, SyncOut, SyncOutControls};

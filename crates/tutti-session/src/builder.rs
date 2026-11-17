@@ -907,7 +907,7 @@ impl<C: Clock> SessionBuilder<C> {
         #[cfg(feature = "midi")]
         let midi = {
             let (sync, sync_controls) = graph.add(tutti_midi_runtime::SyncOut::new(
-                tutti_midi_runtime::SyncOutConfig::new(tutti_ump::MidiGroup::FIRST),
+                tutti_ump::MidiGroup::FIRST,
             ));
             Some(crate::MidiNodes {
                 input_ports: self.opts.midi_ports,
