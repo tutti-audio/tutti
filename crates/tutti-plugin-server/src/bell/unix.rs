@@ -42,7 +42,7 @@ impl Bell {
 
     /// The descriptor the main loop's wait watches for readability.
     pub(crate) fn fd(&self) -> FdId {
-        FdId(self.rx.as_raw_fd())
+        FdId::new(self.rx.as_raw_fd())
     }
 
     /// Reads the bytes [`ring`](Self::ring) wrote, so the descriptor is quiet

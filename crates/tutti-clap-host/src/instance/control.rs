@@ -242,7 +242,7 @@ impl ClapLoaded {
             self.woken
                 .announce
                 .drain(..)
-                .map(|fd| Request::Fd(FdId(fd))),
+                .map(|fd| Request::Fd(FdId::new(fd))),
         );
     }
 }

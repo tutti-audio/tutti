@@ -137,7 +137,7 @@ impl Call {
             13 => Self::RescanParameters(SCOPES[a as usize]),
             14 => Self::RunMainThread,
             15 => Self::RunTimer(TimerId(a as u32)),
-            16 => Self::ServiceFd(FdId(a as u32 as i32)),
+            16 => Self::ServiceFd(FdId::new(a as u32 as i32)),
             17 => Self::RebuildMidiMapping,
             18 => Self::Reset,
             19 => Self::OpenEditor,

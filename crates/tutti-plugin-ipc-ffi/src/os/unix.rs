@@ -11,13 +11,15 @@ use std::time::Duration;
 
 use crate::{Interest, Ready, Watch};
 
-/// `poll`'s timeout for `timeout`, rounded up to a whole millisecond (a wait of
-/// 0.3 ms must not become a busy `poll(0)` loop); `None` waits for ever.
+/// The `Timespec` `poll` waits for `timeout`, rounded up to a whole millisecond
+/// (a wait of 0.3 ms must not become a busy `poll(0)` loop) and capped at
+/// `i32::MAX` ms, the most a platform that takes `poll`'s timeout as a `c_int`
+/// of milliseconds accepts; `None` waits for ever.
 fn timespec(timeout: Option<Duration>) -> Option<Timespec> {
     timeout.map(|timeout| {
         let ms = u64::try_from(timeout.as_nanos().div_ceil(1_000_000))
             .unwrap_or(u64::MAX)
-            .min(u64::from(u32::MAX));
+            .min(u64::from(i32::MAX.cast_unsigned()));
         Timespec {
             tv_sec: (ms / 1000) as _,
             tv_nsec: ((ms % 1000) * 1_000_000) as _,
@@ -41,12 +43,12 @@ pub fn wait_readable(fd: BorrowedFd<'_>, timeout: Option<Duration>) -> std::io::
 /// plugin asked to have watched, in one `poll(2)`.
 ///
 /// Waits up to `timeout` (`None`: for ever) for `own` to be readable (a hang-up
-/// counts: the read reports it) or for any of `watched`  to be ready, and writes the ready ones, with only the bits they asked
-/// for, into `ready` (replacing its contents). Returns whether `own` is
-/// readable; `false` on a timeout.
+/// counts: the read reports it) or for any of `watched` to be ready, and writes
+/// the ready ones, with only the events they asked for, into `ready` (replacing
+/// its contents). Returns whether `own` is readable; `false` on a timeout.
 ///
-/// A descriptor that is not open answers [`Interest::ERROR`], never a fault. A zero timeout
-/// never blocks.
+/// A descriptor that is not open answers [`Interest::ERROR`], never a fault. A
+/// zero timeout never blocks.
 ///
 /// A plugin's descriptor arrives as a plain number, and borrowing it is the one
 /// `unsafe` of this function.
@@ -77,7 +79,7 @@ pub fn poll_wait(
         // the host, borrowed only for this one `poll` call, which its
         // registration keeps open; if it is not open `poll` answers `NVAL` and
         // nothing is read from or written to it.
-        let fd = unsafe { BorrowedFd::borrow_raw(fd.0) };
+        let fd = unsafe { BorrowedFd::borrow_raw(fd.get()) };
         PollFd::from_borrowed_fd(fd, events)
     }));
     if rustix::event::poll(&mut polls, timespec(timeout).as_ref())? == 0 {
@@ -104,17 +106,20 @@ pub fn poll_wait(
     Ok(own_ready)
 }
 
-/// Looks, without waiting, at which of `watched` are ready, into `ready` (replacing its contents), through [`poll_wait`]. A
-/// failed look is none ready: the descriptors are looked at again on the next
-/// call.
+/// Looks, without waiting, at which of `watched` are ready, into `ready`
+/// (replacing its contents), through [`poll_wait`]. A failed look is none
+/// ready: the descriptors are looked at again on the next call.
 pub fn poll_now(watched: &[Watch], ready: &mut Vec<Ready>) {
     ready.clear();
-    if !watched.is_empty() && poll_wait(None, watched, Some(Duration::ZERO), ready).is_err() {
+    if poll_wait(None, watched, Some(Duration::ZERO), ready).is_err() {
         ready.clear();
     }
 }
 
 /// Whether `pid` names a live process, without signalling it.
+///
+/// A number that cannot be a process id (zero, or past `pid_t`) names no
+/// process.
 ///
 /// `kill(pid, 0)` runs the permission and existence checks and delivers
 /// nothing. `EPERM` means it exists but is not ours to signal, which is still
@@ -124,12 +129,11 @@ pub fn poll_now(watched: &[Watch], ready: &mut Vec<Ready>) {
 #[must_use]
 pub fn process_exists(pid: u32) -> bool {
     use rustix::io::Errno;
-    // A number that is no process id (zero, past `pid_t`) is a failure to ask.
     let Some(pid) = i32::try_from(pid)
         .ok()
         .and_then(rustix::process::Pid::from_raw)
     else {
-        return true;
+        return false;
     };
     !matches!(rustix::process::test_kill_process(pid), Err(Errno::SRCH))
 }
@@ -140,12 +144,13 @@ mod tests {
     use crate::FdId;
 
     /// This process exists; a PID far past `pid_max` does not; a number that is
-    /// no `pid_t` is a failure to ask, which reads as alive.
+    /// no `pid_t` (zero, past `i32::MAX`) names no process.
     #[test]
     fn process_exists_tells_a_live_pid_from_a_dead_one() {
         assert!(process_exists(std::process::id()));
         assert!(!process_exists(i32::MAX as u32));
-        assert!(process_exists(u32::MAX), "a failure to ask is alive");
+        assert!(!process_exists(u32::MAX));
+        assert!(!process_exists(0));
     }
 
     /// A pipe's read end is not readable until something is written to it.
@@ -161,14 +166,21 @@ mod tests {
     }
 
     /// A timeout is rounded up to whole milliseconds, so a sub-millisecond wait
-    /// is never a zero one, and `None` has no timeout at all.
+    /// is never a zero one; one past `i32::MAX` ms is capped there; `None` has
+    /// no timeout at all.
     #[test]
-    fn a_timeout_rounds_up_to_a_millisecond() {
-        let one_ms = |t| timespec(Some(t)).map(|t| (t.tv_sec, t.tv_nsec));
-        assert_eq!(one_ms(Duration::ZERO), Some((0, 0)));
-        assert_eq!(one_ms(Duration::from_micros(300)), Some((0, 1_000_000)));
-        assert_eq!(one_ms(Duration::from_micros(1001)), Some((0, 2_000_000)));
-        assert_eq!(one_ms(Duration::from_millis(2500)), Some((2, 500_000_000)));
+    fn a_timeout_rounds_up_to_a_millisecond_and_is_capped() {
+        let spec = |t| timespec(Some(t)).map(|t| (t.tv_sec, t.tv_nsec));
+        assert_eq!(spec(Duration::ZERO), Some((0, 0)));
+        assert_eq!(spec(Duration::from_nanos(1)), Some((0, 1_000_000)));
+        assert_eq!(spec(Duration::from_micros(300)), Some((0, 1_000_000)));
+        assert_eq!(spec(Duration::from_micros(1001)), Some((0, 2_000_000)));
+        assert_eq!(spec(Duration::from_millis(2500)), Some((2, 500_000_000)));
+        let max_ms = i64::from(i32::MAX);
+        assert_eq!(
+            spec(Duration::MAX),
+            Some((max_ms / 1000, (max_ms % 1000) * 1_000_000))
+        );
         assert!(timespec(None).is_none());
     }
 
@@ -182,7 +194,7 @@ mod tests {
         let (watched, mut writer) = std::io::pipe().unwrap();
         let (own, _own_writer) = std::io::pipe().unwrap();
         let mut ready = Vec::new();
-        let fd = FdId(watched.as_raw_fd());
+        let fd = FdId::new(watched.as_raw_fd());
         let read = [Watch {
             fd,
             interest: Interest::READ,

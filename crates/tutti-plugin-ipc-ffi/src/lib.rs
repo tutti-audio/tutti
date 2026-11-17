@@ -47,7 +47,7 @@ pub use wakeups::{FdId, Interest, Ready, Watch};
 #[derive(Debug, thiserror::Error)]
 pub enum SlabError {
     /// The backing file could not be created, opened, sized or mapped.
-    #[error("failed to {op} the shared memory file: {source}")]
+    #[error("failed to {op} the slab file: {source}")]
     File {
         /// What was being done to the file, as a verb phrase.
         op: &'static str,

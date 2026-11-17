@@ -428,7 +428,7 @@ fn request() -> impl Strategy<Value = Request> {
         Just(Request::NoteExpressionChanged),
         Just(Request::Transport(TransportRequest::TogglePlay)),
         (0u32..6).prop_map(|i| Request::Timer(TimerId(i))),
-        (0i32..6).prop_map(|i| Request::Fd(FdId(i))),
+        (0i32..6).prop_map(|i| Request::Fd(FdId::new(i))),
     ]
 }
 
@@ -738,7 +738,7 @@ proptest! {
             s = req(s, Request::Timer(TimerId(t)));
         }
         for f in fds {
-            s = req(s, Request::Fd(FdId(f)));
+            s = req(s, Request::Fd(FdId::new(f)));
         }
         for e in std::iter::once(Event::Tick).chain(events) {
             let (next, out) = step(s, e);
@@ -1061,7 +1061,7 @@ fn rule_7_a_request_on_a_plugin_that_is_not_running_changes_nothing() {
     // A loaded plugin still runs its callback, timers and descriptors.
     let mut s = State::new(RESTARTS);
     s = req(s, Request::Timer(TimerId(4)));
-    s = req(s, Request::Fd(FdId(5)));
+    s = req(s, Request::Fd(FdId::new(5)));
     s = req(s, Request::Callback);
     let (s, fx) = go(s, Event::Tick);
     assert_eq!(fx, [Fx::Main]);
@@ -1310,7 +1310,7 @@ fn timers_and_descriptors_over_the_cap_wait_for_the_next_tick() {
         s = req(s, Request::Timer(TimerId(i)));
     }
     for i in 0..4 {
-        s = req(s, Request::Fd(FdId(i)));
+        s = req(s, Request::Fd(FdId::new(i)));
     }
     // A repeated id is one entry.
     s = req(s, Request::Timer(TimerId(4)));
@@ -1339,7 +1339,7 @@ fn the_busiest_tick_emits_exactly_the_documented_maximum() {
         s = req(s, Request::Timer(TimerId(i)));
     }
     for i in 0..FDS_PER_TICK as i32 {
-        s = req(s, Request::Fd(FdId(i)));
+        s = req(s, Request::Fd(FdId::new(i)));
     }
     for r in [
         Request::LatencyChanged,
@@ -1362,7 +1362,7 @@ fn a_refusal_forgets_what_was_pending() {
     let p = prep(1);
     let (s, _) = go(State::new(RESTARTS), Event::Op(HostOp::Activate(p)));
     let s = req(s, Request::Timer(TimerId(1)));
-    let s = req(s, Request::Fd(FdId(2)));
+    let s = req(s, Request::Fd(FdId::new(2)));
     let s = req(s, Request::Callback);
     let (s, _) = reply(s, Reply::Refused(err()));
     let (s, _) = go(s, Event::Op(HostOp::Activate(p)));

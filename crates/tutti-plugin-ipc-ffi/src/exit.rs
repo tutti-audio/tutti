@@ -16,9 +16,10 @@ mod platform;
 mod platform;
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 mod platform {
-    /// A platform with no wake for a child's end.
+    /// A platform with no wake for a child's end: no value exists, and
+    /// [`of`](Self::of) is always `None`.
     #[derive(Debug)]
-    pub(super) struct Imp;
+    pub(super) enum Imp {}
 
     impl Imp {
         pub(super) fn of(_child: &std::process::Child) -> Option<Self> {
@@ -26,7 +27,7 @@ mod platform {
         }
 
         pub(super) fn wait(&self, _timeout: std::time::Duration) -> bool {
-            true
+            match *self {}
         }
     }
 }

@@ -113,7 +113,7 @@ mod tests {
         w.due_at(t0 + Duration::from_millis(30));
         w.due_at(t0 + Duration::from_millis(10));
         w.due_at(t0 + Duration::from_millis(20));
-        w.watch(FdId(3), Interest::NONE);
+        w.watch(FdId::new(3), Interest::NONE);
         assert_eq!(w.deadline(), Some(t0 + Duration::from_millis(10)));
         assert!(w.watches().is_empty());
         assert_eq!(

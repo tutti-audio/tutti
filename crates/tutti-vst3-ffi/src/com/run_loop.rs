@@ -197,7 +197,7 @@ impl RunLoop {
     pub(crate) fn describe(&self, out: &mut Wakeups) {
         let state = self.state();
         for &fd in state.event_handlers.keys() {
-            out.watch(FdId(fd), Interest::READ);
+            out.watch(FdId::new(fd), Interest::READ);
         }
         for entry in state.timers.values() {
             out.due_at(entry.last_fired + entry.period);
@@ -244,10 +244,10 @@ impl RunLoop {
                 }
             }
             for r in ready.iter().filter(|r| r.events.contains(Interest::READ)) {
-                if let Some(entry) = state.event_handlers.get(&r.fd.0)
+                if let Some(entry) = state.event_handlers.get(&r.fd.get())
                     && !entry.handler.is_null()
                 {
-                    due.push(Due::Fd(r.fd.0, entry.handler, entry.owner));
+                    due.push(Due::Fd(r.fd.get(), entry.handler, entry.owner));
                 }
             }
         }

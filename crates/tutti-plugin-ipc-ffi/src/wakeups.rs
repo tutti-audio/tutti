@@ -7,7 +7,21 @@
 
 /// A plugin file descriptor registration, as the format names it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct FdId(pub i32);
+pub struct FdId(i32);
+
+impl FdId {
+    /// The registration of the descriptor numbered `raw`.
+    #[must_use]
+    pub const fn new(raw: i32) -> Self {
+        Self(raw)
+    }
+
+    /// The descriptor's number.
+    #[must_use]
+    pub const fn get(self) -> i32 {
+        self.0
+    }
+}
 
 /// Which events on a descriptor a plugin asked to hear about, or which of
 /// them are ready.

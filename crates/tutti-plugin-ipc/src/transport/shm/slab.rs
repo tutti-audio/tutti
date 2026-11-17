@@ -1031,7 +1031,8 @@ mod tests {
         }
 
         // The data region at its absolute offsets; the header's bytes (and the
-        // magic at offset 0) are `tutti-plugin-ipc-ffi`'s to check.
+        // magic at offset 0) are `tutti-plugin-ipc-ffi`'s to check. The read ends
+        // at the layout's last byte, so a mapping shorter than the layout panics.
         let mapping = &host.slab().mapping;
         let mut bytes = vec![0u8; check_layout(&l).unwrap()];
         mapping.read(SLAB_HEADER_BYTES, &mut bytes[SLAB_HEADER_BYTES..]);
