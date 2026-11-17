@@ -106,7 +106,8 @@
 //! The crate also holds the values the translation and the instruments share:
 //! [`flex_tempo`] and [`flex_time_signature`] read a Flex Set Tempo and Set Time
 //! Signature as a `Bpm` and a project meter (`None` for a field the type cannot
-//! hold, never clamped), and [`flex_tempo_field`] writes the tempo back;
+//! hold, never clamped), and [`flex_tempo_field`] and [`flex_time_signature_wire`]
+//! write them back;
 //! [`song_position`](fn@song_position) converts a beat to a Song Position
 //! Pointer; [`SmpteTimecode::from_seconds`] and
 //! [`MtcTimeCode::nibbles`] are the timecode of a time and its Quarter Frame
@@ -156,7 +157,7 @@ mod unit;
 mod universal;
 mod voice;
 
-pub use flex::{flex_tempo, flex_tempo_field, flex_time_signature};
+pub use flex::{flex_tempo, flex_tempo_field, flex_time_signature, flex_time_signature_wire};
 pub use midi1::{NoMidi1Form, midi1, narrow, narrow_message};
 pub use mode::{ExtremeValues, PerNoteTranslation, TranslationMode};
 pub use mpe::{
