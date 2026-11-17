@@ -85,7 +85,7 @@ pub type TransportStateProc2 = unsafe extern "C" fn(
 ///
 /// Written by the control thread via [`set_transport`](Self::set_transport) and
 /// read by the AU through the C procs. See the module docs for why this is a
-/// set of atomics rather than an `ArcLend` cell.
+/// set of atomics rather than a `Publisher` cell.
 ///
 /// Lives behind a `Box` owned by the owning registration so its address is stable for
 /// the `hostUserData` pointer the AU retains — the same pinning discipline

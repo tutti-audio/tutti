@@ -24,7 +24,7 @@ use tutti_plugin_types::{
     Control, PluginError, Prepare, Refused, Request, SampleFormat, negotiate, taken,
 };
 use tutti_plugin_types::{MainThreadMarker, SampleRate};
-use tutti_rt::ArcLend;
+use tutti_rt::Publisher;
 
 /// Heap reservation for pooled per-call event scratch on a `ClapProcessor`,
 /// beyond the parameter points each list also has room for.
@@ -205,8 +205,8 @@ impl ClapLoaded {
             .in_note_expressions
             .reserve_exact(INPUT_NOTE_EXPRESSIONS);
 
-        let ranges = Arc::new(ArcLend::new(table));
-        let pools = Arc::new(ArcLend::new(PoolCell(self.pool_snapshot())));
+        let ranges = Publisher::new(table);
+        let pools = Publisher::new(PoolCell(self.pool_snapshot()));
         let channels = |ports: &tutti_plugin_types::BusChannels| -> Vec<u32> {
             ports.iter().map(|c| u32::from(c.count())).collect()
         };

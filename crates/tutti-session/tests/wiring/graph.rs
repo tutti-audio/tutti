@@ -836,7 +836,7 @@ fn an_update_frees_what_a_block_held_across_a_replacement() {
     assert!(gone.upgrade().is_none(), "the meter is freed");
 }
 
-/// A source of zeros whose controls publish to it through an `ArcLend`
+/// A source of zeros whose controls publish to it through a `Publisher`
 /// cell, as a clip or a voice placement does: the node lends once per
 /// block, and its `SessionNode` impl hands the graph a reclaimer over its
 /// controls.
@@ -855,7 +855,7 @@ struct PublishedNode {
 /// and the graph's reclaimer's).
 #[derive(Clone)]
 struct PublishedControls {
-    cell: Arc<tutti_rt::ArcLend<u32>>,
+    cell: tutti_rt::Publisher<u32>,
     token: Arc<()>,
 }
 
@@ -868,7 +868,7 @@ impl tutti_rt::Reclaim for PublishedControls {
 
 impl Published {
     fn new() -> Self {
-        let cell = Arc::new(tutti_rt::ArcLend::new(0));
+        let cell = tutti_rt::Publisher::new(0);
         Self {
             node: PublishedNode {
                 reader: cell.reader(),

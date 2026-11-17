@@ -82,9 +82,8 @@ struct Parts {
     _host_context: ComWrapper<HostApplication>,
     /// The run loop lent to the plugin via `IRunLoop`. Owned here, at module
     /// scope, because the host context registers handlers with it before any
-    /// editor exists and it must outlive every `HostPlugFrame`. Linux only —
-    /// other platforms have an ambient OS run loop.
-    #[cfg(target_os = "linux")]
+    /// editor exists and it must outlive every `HostPlugFrame`. Off Linux it
+    /// holds nothing: the OS has the loop.
     run_loop: Arc<crate::com::RunLoop>,
     /// Runs the paired module exit point (`bundleExit` / `ModuleExit` /
     /// `ExitDll`) on drop. Held only for that side effect.
@@ -139,7 +138,6 @@ impl Drop for Module {
         // Whatever is still registered with the run loop (a registration
         // through the module's own context belongs to no instance) points into
         // code about to be unloaded.
-        #[cfg(target_os = "linux")]
         self.parts.run_loop.clear_all();
         // SAFETY: `parts` is dropped here and nowhere else, and never used
         // again. Dropping it by hand is what lets the guard outlive the fields.
@@ -150,8 +148,7 @@ impl Drop for Module {
 impl Module {
     /// The run loop this module lends the plugin. Shared with every
     /// `HostPlugFrame` so handlers registered through either object are pumped
-    /// by one loop. Linux only.
-    #[cfg(target_os = "linux")]
+    /// by one loop.
     pub(crate) fn run_loop(&self) -> Arc<crate::com::RunLoop> {
         self.parts.run_loop.clone()
     }
@@ -160,15 +157,9 @@ impl Module {
     /// the module's run loop. One per instance.
     pub(crate) fn new_host_application(
         &self,
-        #[cfg(target_os = "linux")] owner: crate::com::Owner,
+        owner: crate::com::Owner,
     ) -> ComWrapper<HostApplication> {
-        HostApplication::new(
-            HOST_NAME,
-            #[cfg(target_os = "linux")]
-            self.parts.run_loop.clone(),
-            #[cfg(target_os = "linux")]
-            Some(owner),
-        )
+        HostApplication::new(HOST_NAME, self.parts.run_loop.clone(), Some(owner))
     }
 
     /// Opens a VST3 module from a pre-resolved path to the actual binary (the
@@ -225,14 +216,11 @@ impl Module {
         // Optional by spec: a factory that only implements IPluginFactory or
         // IPluginFactory2 has nothing to set, which is not an error.
         let factory3 = factory.cast::<IPluginFactory3>();
-        #[cfg(target_os = "linux")]
         let run_loop = crate::com::RunLoop::new();
         let host_context = HostApplication::new(
             HOST_NAME,
-            #[cfg(target_os = "linux")]
             run_loop.clone(),
             // The module's own context serves every plugin: it has no owner.
-            #[cfg(target_os = "linux")]
             None,
         );
         if let Some(f3) = factory3.as_ref()
@@ -254,7 +242,6 @@ impl Module {
                 factory,
                 factory3,
                 _host_context: host_context,
-                #[cfg(target_os = "linux")]
                 run_loop,
                 _entry: entry,
                 _library: library,
