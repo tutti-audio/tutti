@@ -2,7 +2,7 @@
 //! control side.
 
 use std::sync::Arc;
-use tutti_rt::{ArcLend, Loan, Reader};
+use tutti_rt::{Loan, Publisher, Reader};
 use tutti_tempo::TempoMap;
 
 /// A reader of the project's [`TempoMap`], for a thread with a deadline: the
@@ -46,23 +46,39 @@ use tutti_tempo::TempoMap;
 /// assert_eq!(fixed.lend().constant_tempo(), Some(Bpm::of(100.0)));
 /// # Ok::<(), tutti_tempo::TempoError>(())
 /// ```
-#[derive(Clone, Debug)]
-pub struct TempoReader(Reader<TempoMap>);
+#[derive(Debug)]
+pub struct TempoReader {
+    reader: Reader<TempoMap>,
+    /// The cell `reader` was registered on: a clone registers its reader
+    /// through it, on the control side.
+    cell: Publisher<TempoMap>,
+}
+
+impl Clone for TempoReader {
+    /// Registers a new reader on the same cell: it locks and may allocate, so
+    /// clone on the control side only.
+    fn clone(&self) -> Self {
+        Self::new(&self.cell)
+    }
+}
 
 impl TempoReader {
     /// A reader over `cell`, registered here. Control thread: registering
     /// takes the publisher's lock and may allocate.
-    pub(crate) fn new(cell: &Arc<ArcLend<TempoMap>>) -> Self {
-        Self(cell.reader())
+    pub(crate) fn new(cell: &Publisher<TempoMap>) -> Self {
+        Self {
+            reader: cell.reader(),
+            cell: cell.clone(),
+        }
     }
 
     /// A reader of `map` alone, with no session: it builds a cell of its own
-    /// (which the reader keeps alive) and nothing ever republishes it. For a
+    /// (which the reader keeps) and nothing ever republishes it. For a
     /// host or a test that has no [`TransportSettings`](super::TransportSettings).
     /// Clones of the reader read the same map. Control thread: allocates.
     #[must_use]
     pub fn fixed(map: Arc<TempoMap>) -> Self {
-        Self::new(&Arc::new(ArcLend::from_arc(map)))
+        Self::new(&Publisher::from_arc(map))
     }
 
     /// [`fixed`](Self::fixed) over one constant tempo: the reader a test or a
@@ -80,7 +96,7 @@ impl TempoReader {
     /// block, never parked across blocks (see the type's docs).
     #[must_use = "a loan dropped at once reads nothing"]
     pub fn lend(&mut self) -> Loan<'_, TempoMap> {
-        self.0.lend()
+        self.reader.lend()
     }
 }
 
