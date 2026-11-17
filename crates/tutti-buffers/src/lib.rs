@@ -13,7 +13,8 @@
 //! - [`Interleaved`] / [`InterleavedMut`]: whole frames in one slice, carrying
 //!   their [`ChannelLayout`](tutti_types::ChannelLayout);
 //! - [`Planes`] / [`PlanesMut`]: one equal-length slice per channel, and
-//!   [`StereoPlanes`], exactly two.
+//!   [`StereoPlanes`], exactly two;
+//! - [`InputOutput`]: one block's frame count with its input and output planes.
 //!
 //! Construction checks once and returns a [`BufferError`] for a zero width, a
 //! length that is not whole frames or a ragged plane; nothing truncates. Every
@@ -60,6 +61,7 @@ mod edge;
 mod error;
 mod fold;
 mod i24;
+mod input_output;
 mod interleaved;
 mod mono;
 mod planes;
@@ -71,6 +73,7 @@ pub use edge::{FiniteSource, Pull, Sink, SinkFailed, Source, Stop};
 pub use error::BufferError;
 pub use fold::{Fold, FoldEnd, FoldError, FoldLevel, FoldLevels, FoldSpec};
 pub use i24::{I24, I24OutOfRange};
+pub use input_output::{BlockSide, InputOutput};
 pub use interleaved::{Frames, FramesMut, Interleaved, InterleavedMut};
 pub use mono::{Mono, MonoMut};
 pub use planes::{PlaneIter, PlaneIterMut, Planes, PlanesMut};

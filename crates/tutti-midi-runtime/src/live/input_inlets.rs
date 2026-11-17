@@ -56,8 +56,8 @@ use std::time::{Duration, Instant};
 
 use tutti_graph::{EventCapacity, EventInletNode, EventInletWriter, InletCounts, Losses, Stamp};
 use tutti_rt::{
-    ArcLend, Counter, CounterWriter, Gauge, GaugeWriter, PushError, Reader, Tally, counter, gauge,
-    tally,
+    Counter, CounterWriter, Gauge, GaugeWriter, Publisher, PushError, Reader, Tally, counter,
+    gauge, tally,
 };
 use tutti_types::{Moment, Resyncs, Seconds};
 use tutti_ump::Ump;
@@ -101,7 +101,7 @@ pub struct InputInlets {
     lead: Arc<AtomicU64>,
     /// The engine's block clock, lent to each device's thread. `None` until
     /// the owner has an engine ([`set_clock`](Self::set_clock)).
-    clock: Arc<ArcLend<Option<ArrivalClock>>>,
+    clock: Publisher<Option<ArrivalClock>>,
 }
 
 impl std::fmt::Debug for InputInlets {
@@ -121,7 +121,7 @@ impl InputInlets {
             last: AtomicU64::new(0),
             capacity,
             lead: Arc::new(AtomicU64::new(nanos(lead))),
-            clock: Arc::new(ArcLend::new(None)),
+            clock: Publisher::new(None),
         })
     }
 

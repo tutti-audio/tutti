@@ -3,7 +3,7 @@
 //! inside `assert_no_alloc`; a primitive that runs on several threads runs
 //! every participant inside it, helpers included.
 
-use tutti_rt::{AudioThreadCell, RtVec};
+use tutti_rt::{AudioThreadCell, CappedVec, Claim, LastOut, Party, RenderGate, RtVec};
 
 /// `RtVec` reached through `&self`, as `tutti-midi-hardware`'s drain holds it:
 /// behind an `AudioThreadCell`.
@@ -27,6 +27,27 @@ fn rt_vec_steady_state_is_allocation_free() {
     });
     assert_eq!(buf.borrow().len(), 64);
     assert!(buf.borrow().is_overflowed());
+}
+
+/// `CappedVec` filled past its cap, sorted, read and cleared, block after
+/// block, neither allocates nor frees once built: its storage is the one
+/// allocation `with_capacity` made.
+#[test]
+fn capped_vec_steady_state_is_allocation_free() {
+    let mut v: CappedVec<(u32, u32)> = CappedVec::with_capacity(64);
+    assert_no_alloc::assert_no_alloc(|| {
+        for _ in 0..10_000 {
+            v.clear();
+            for i in 0..96u32 {
+                let _ = v.push((96 - i, i));
+            }
+            v.as_mut_slice().sort_by_key(|&(k, _)| k);
+            let sum: u32 = v.iter().map(|&(_, x)| x).sum();
+            core::hint::black_box(sum);
+        }
+    });
+    assert_eq!(v.len(), 64);
+    assert!(v.is_overflowed());
 }
 
 /// Every `AudioThreadCell` borrow path — `borrow_mut`, `borrow`, granted
@@ -410,4 +431,30 @@ fn ring_is_allocation_free() {
         drop(reader);
         assert_no_alloc::assert_no_alloc(|| assert!(writer.push([0; 3]).is_err()));
     }
+}
+
+/// `RenderGate::enter` (admitted and refused), `Claim::try_claim` (granted and
+/// refused) and `LastOut::leave` neither allocate nor free, with their guards' drops.
+#[test]
+fn gate_claim_and_last_out_audio_paths_neither_allocate_nor_free() {
+    let gate = RenderGate::new();
+    gate.begin_open().expect("closed").finish();
+    let claim = Claim::new();
+    assert_no_alloc::assert_no_alloc(|| {
+        for _ in 0..10_000 {
+            let render = gate.enter().expect("open");
+            drop(render);
+            let held = claim.try_claim().expect("free");
+            assert!(claim.try_claim().is_none());
+            drop(held);
+        }
+    });
+    gate.close().expect("open").finish();
+    assert_no_alloc::assert_no_alloc(|| assert!(gate.enter().is_none()));
+
+    let out = LastOut::new(7u32);
+    assert_no_alloc::assert_no_alloc(|| {
+        assert_eq!(out.leave(Party::A), None);
+        assert_eq!(out.leave(Party::B), Some(7));
+    });
 }

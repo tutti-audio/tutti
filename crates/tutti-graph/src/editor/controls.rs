@@ -1,6 +1,7 @@
 //! The controls a running graph takes without a commit: param ranges, edge
 //! gains and fades, pass states, modes and mixes.
 
+use tutti_buffers::Float;
 use tutti_types::{Amplitude, Mix, ParamCell};
 
 use super::{CommitError, Editor};
@@ -13,7 +14,7 @@ use crate::pass::Pass;
 use crate::spec::GraphInvalid;
 use crate::{Edge, EdgeId, Sink};
 
-impl Editor {
+impl<F: Float> Editor<F> {
     /// Sets param port `at`'s range — what its driven value is clamped
     /// to — **without a commit**: the spec records it, and the running unit
     /// clamps to it from its next block on, as it reads a base moved through

@@ -21,16 +21,19 @@ use tutti_types::{Azimuth, Bed, UnitParam};
 /// having walked no DSP.
 fn gate<N: IntoNode>(node: N, warm: usize) {
     let (mut rig, _controls) = BlockRig::new(node, SampleRate::SR_48K, 64);
-    for c in rig.inputs_mut() {
+    for c in rig.inputs_mut().iter_mut() {
+        let c = c.into_samples_mut();
         c.fill(0.5);
     }
     for _ in 0..warm {
         rig.block();
     }
     assert!(
-        rig.output(0)
+        rig.output()
+            .plane(0)
+            .samples()
             .iter()
-            .chain(rig.output(1))
+            .chain(rig.output().plane(1).samples())
             .any(|s| s.abs() > 1e-6),
         "the node rendered silence; the gate would walk no DSP"
     );
@@ -163,7 +166,7 @@ fn check_block(
     for frame in 0..len {
         let mut power = 0.0f32;
         for c in 0..channels {
-            let s = rig.output(c)[frame];
+            let s = rig.output().plane(c).samples()[frame];
             health.0 &= s.is_finite();
             power += s * s;
             health.1 |= Some(c) == lfe && s != 0.0;
@@ -207,7 +210,8 @@ fn vbap_every_bed_under_hostile_cells_and_lanes_is_allocation_free_finite_and_bo
         let mut rig = Direct::new(Gated(node), SampleRate::SR_48K, FRAMES);
         let mut forked = Direct::new(Gated(fork), SampleRate::SR_48K, FRAMES);
         for d in [&mut rig, &mut forked] {
-            for c in d.inputs_mut() {
+            for c in d.inputs_mut().iter_mut() {
+                let c = c.into_samples_mut();
                 c.fill(0.5);
             }
         }
@@ -359,7 +363,8 @@ fn hrtf_binaural_moving_source_is_allocation_free() {
     let bytes = synthetic_hrir_sphere(48_000, 64);
     let node = HrtfBinauralNode::new(&bytes, SampleRate::SR_48K).expect("synthetic sphere parses");
     let (mut rig, controls) = BlockRig::new(node, SampleRate::SR_48K, 64);
-    for c in rig.inputs_mut() {
+    for c in rig.inputs_mut().iter_mut() {
+        let c = c.into_samples_mut();
         c.fill(0.5);
     }
     let mut bearing = 0.0f32;
@@ -375,7 +380,11 @@ fn hrtf_binaural_moving_source_is_allocation_free() {
         }
     });
     assert!(
-        rig.output(0).iter().any(|s| s.abs() > 1e-6),
+        rig.output()
+            .plane(0)
+            .samples()
+            .iter()
+            .any(|s| s.abs() > 1e-6),
         "the node rendered silence; the gate walked no DSP"
     );
 }
@@ -439,7 +448,8 @@ fn hrtf_binaural_resampled_set_in_split_blocks_is_allocation_free() {
     assert_eq!(node.shape().tail, Tail::Finite(Samples(59 - 1)));
 
     let (mut rig, _controls) = BlockRig::new(node, SampleRate::SR_44K1, 100);
-    for c in rig.inputs_mut() {
+    for c in rig.inputs_mut().iter_mut() {
+        let c = c.into_samples_mut();
         c.fill(0.5);
     }
     assert_no_alloc::assert_no_alloc(|| {
@@ -448,7 +458,11 @@ fn hrtf_binaural_resampled_set_in_split_blocks_is_allocation_free() {
         }
     });
     assert!(
-        rig.output(0).iter().any(|s| s.abs() > 1e-6),
+        rig.output()
+            .plane(0)
+            .samples()
+            .iter()
+            .any(|s| s.abs() > 1e-6),
         "the node rendered silence; the gate walked no DSP"
     );
 }

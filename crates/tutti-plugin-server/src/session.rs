@@ -13,9 +13,10 @@ use crate::served::AnyServed;
 use dpi::Size;
 use tutti_plugin_ipc::state_chunk::{self, Reassembler};
 use tutti_plugin_ipc::{AudioSlab, BridgeMessage, HostMessage, MAX_STATE_BYTES, StagedState};
+use tutti_plugin_ipc_ffi::Ready;
 use tutti_plugin_types::{
     BridgeError, BridgeResult, EditorError, Load, MainThreadMarker, MainWork, MainWorkHandle,
-    ParameterQueue, PluginError, PluginFormat, Ready, SampleFormat, SampleRate, StateUse, Wakeups,
+    ParameterQueue, PluginError, PluginFormat, SampleFormat, SampleRate, StateUse, Wakeups,
     WindowHandle,
 };
 
@@ -1716,7 +1717,7 @@ mod tests {
     #[cfg(feature = "clap")]
     fn clap_round_trip<T>(name: &str, mask: u32, format: SampleFormat, input: T) -> RoundTrip<T>
     where
-        T: tutti_plugin_types::Sample + bytemuck::Pod,
+        T: tutti_buffers::Float,
     {
         const SEQ: u64 = 1;
         let _ports = crate::test_utils::clap_probe_ports_64bit(mask);

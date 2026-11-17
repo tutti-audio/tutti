@@ -1,4 +1,5 @@
 use super::*;
+use tutti_buffers::Planes;
 use tutti_graph::contract::{drive, prepared};
 use tutti_types::MaxBlock;
 use tutti_types::UnitParam;
@@ -20,7 +21,12 @@ fn tick(node: &mut VbapPannerNode, input: &[f32; 2], out: &mut [f32]) {
 }
 
 fn tick_at(node: &mut VbapPannerNode, rate: SampleRate, input: &[f32; 2], out: &mut [f32]) {
-    let rendered = drive(node, rate, &[&input[..1], &input[1..]], &[]);
+    let rendered = drive(
+        node,
+        rate,
+        Planes::new(&[&input[..1], &input[1..]]).unwrap(),
+        &[],
+    );
     for (o, c) in out.iter_mut().zip(rendered) {
         *o = c[0];
     }
@@ -362,7 +368,7 @@ fn the_inserted_params_move_the_running_node() {
     aim(solo.controls(), Azimuth(90.0), Elevation::LEVEL);
     // 100 ms: past the 50 ms glide.
     let ones = vec![1.0f32; 4_800];
-    let out = solo.render_input(&[&ones, &ones]);
+    let out = solo.render_input(Planes::new(&[&ones, &ones]).unwrap());
     let (l, r) = (out[0][4_799], out[1][4_799]);
     assert!(
         l > 0.9 && r < 0.1,
@@ -447,7 +453,7 @@ fn a_lane_drives_each_param_as_its_cell_would() {
         // Ten glide lengths of blocks.
         let mut last = Vec::new();
         for _ in 0..(RATE.get() as usize / 2).div_ceil(64) {
-            last = drive(node, RATE, &[&left, &right], &params);
+            last = drive(node, RATE, Planes::new(&[&left, &right]).unwrap(), &params);
         }
         last.iter().map(|c| c[63]).collect::<Vec<f32>>()
     };
@@ -499,10 +505,15 @@ fn a_lane_driven_bearing_crosses_the_seam_the_short_way() {
         let mut node = prep(VbapPannerNode::quad());
         node.azimuth.store(Azimuth(bearing));
         Node::reset(&mut node);
-        drive(&mut node, RATE, &[&ones[..1], &ones[..1]], &[])
-            .iter()
-            .map(|c| c[0])
-            .collect::<Vec<f32>>()
+        drive(
+            &mut node,
+            RATE,
+            Planes::new(&[&ones[..1], &ones[..1]]).unwrap(),
+            &[],
+        )
+        .iter()
+        .map(|c| c[0])
+        .collect::<Vec<f32>>()
     };
     let (start, end) = (at(170.0), at(-170.0));
     let front: Vec<usize> = (0..4)
@@ -522,7 +533,12 @@ fn a_lane_driven_bearing_crosses_the_seam_the_short_way() {
     let mut last = Vec::new();
     // Ten glide lengths: the glide is over.
     for _ in 0..(RATE.get() as usize / 2).div_ceil(64) {
-        last = drive(&mut node, RATE, &[&ones, &ones], &[Some(&lane)]);
+        last = drive(
+            &mut node,
+            RATE,
+            Planes::new(&[&ones, &ones]).unwrap(),
+            &[Some(&lane)],
+        );
         for &c in &front {
             loudest_front = last[c].iter().fold(loudest_front, |m, s| m.max(s.abs()));
         }
@@ -579,7 +595,7 @@ fn a_bearing_step_across_the_seam_glides_along_the_short_arc() {
         params.set(UnitParam::Azimuth, 170.0);
         let ones = [1.0f32; GRID];
         // Seated on 170 by the first segment, then the step.
-        drive(&mut node, rate, &[&ones, &ones], &[]);
+        drive(&mut node, rate, Planes::new(&[&ones, &ones]).unwrap(), &[]);
         params.set(UnitParam::Azimuth, -170.0);
 
         let n = glide_steps(rate);
@@ -589,7 +605,7 @@ fn a_bearing_step_across_the_seam_glides_along_the_short_arc() {
         );
         let mut worst_chord_gap = 0.0f32;
         for j in 1..=n + 2 {
-            let out = drive(&mut node, rate, &[&ones, &ones], &[]);
+            let out = drive(&mut node, rate, Planes::new(&[&ones, &ones]).unwrap(), &[]);
             for front in [0, 1] {
                 assert!(out[front].iter().all(|&s| s == 0.0), "{rate:?} point {j}");
             }
@@ -619,9 +635,14 @@ fn a_move_between_grid_points_starts_at_the_next_one() {
     let mut node = prep(VbapPannerNode::surround_5_1());
     node.param_set().set(UnitParam::StereoWidth, 0.0);
     // Frames 0..8 of the first segment, then the write, then the rest.
-    let head = drive(&mut node, RATE, &[&ones[..8], &ones[..8]], &[]);
+    let head = drive(
+        &mut node,
+        RATE,
+        Planes::new(&[&ones[..8], &ones[..8]]).unwrap(),
+        &[],
+    );
     aim(&node.param_set(), Azimuth(90.0), Elevation::LEVEL);
-    let tail = drive(&mut node, RATE, &[&ones, &ones], &[]);
+    let tail = drive(&mut node, RATE, Planes::new(&[&ones, &ones]).unwrap(), &[]);
     let old = solve(Bed::Surround51, Azimuth(0.0));
     let one_step = solve(Bed::Surround51, Azimuth(90.0 / glide_steps(RATE) as f32));
     let speakers = speaker_of_channel(Bed::Surround51);
@@ -662,7 +683,7 @@ fn a_lane_driven_bearing_is_followed_to_the_grid_period() {
         let out = drive(
             &mut node,
             RATE,
-            &[&ones, &ones],
+            Planes::new(&[&ones, &ones]).unwrap(),
             &[Some(&lane), None, None, None],
         );
         let want = solve(Bed::Quad, Azimuth(lane[0]));

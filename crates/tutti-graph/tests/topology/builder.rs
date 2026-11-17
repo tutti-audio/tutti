@@ -3,6 +3,7 @@
 //! rules are written out independently below ([`net_rule`]) and each render
 //! is pinned to the figure they give in closed form.
 
+use tutti_buffers::{Planes, PlanesMut};
 use tutti_fixtures::signal::bits;
 use tutti_graph::testing as common;
 
@@ -352,10 +353,10 @@ fn builder_builds_what_a_hand_written_spec_builds() {
     // The hand-built side has rendered one silent frame to install its
     // plan; render the same frame on the built side, so both clocks (and so
     // the emitter's phase) line up before the comparison.
-    built.render_input(&[&[0.0]]);
+    built.render_input(Planes::new(&[&[0.0]]).unwrap());
     let input = signal(2_000);
-    let a = built.render_input(&[&input]);
-    let b = by_hand.render_input(&[&input]);
+    let a = built.render_input(Planes::new(&[&input]).unwrap());
+    let b = by_hand.render_input(Planes::new(&[&input]).unwrap());
     assert_eq!(a.len(), 2);
     for c in 0..2 {
         assert_eq!(bits(&a[c]), bits(&b[c]), "channel {c}");
@@ -527,7 +528,7 @@ fn chain_and_add_take_nodes() {
     let out = g
         .renderer(prepare(64))
         .expect("builds")
-        .render_input(&[&[1.0; 10]]);
+        .render_input(Planes::new(&[&[1.0; 10]]).unwrap());
     assert_eq!(out, vec![vec![6.0; 10]]);
 }
 
@@ -587,7 +588,7 @@ fn renderer_drives_blocks_and_interleaves() {
 
     // `render_into` writes where it is told, and advances the same clock.
     let (mut l, mut rr) = (vec![0.0; 30], vec![0.0; 30]);
-    r.render_into(&mut [&mut l, &mut rr]);
+    r.render_into(PlanesMut::new(&mut [&mut l, &mut rr]).unwrap());
     assert_eq!((l, rr), (vec![1.0; 30], vec![2.0; 30]));
     assert_eq!(r.executor().frame(), Frame::new(280));
 }

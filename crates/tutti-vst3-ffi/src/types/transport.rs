@@ -52,8 +52,7 @@ bitflags::bitflags! {
 /// [`all`](ProcessContextRequirements::all) when the plugin doesn't implement
 /// that interface). Only the fields whose requirement bit is set are
 /// populated and marked valid; the rest are left zeroed. Passing `all()`
-/// fills everything, reproducing the unconditional behaviour this host had
-/// before the interface was wired.
+/// fills everything.
 ///
 /// Field mapping:
 /// - `position.samples` → `projectTimeSamples` (always). VST3 has no validity
@@ -107,11 +106,9 @@ pub fn to_process_context(
         // barPositionMusic contain valid information" — not about whether a
         // cycle is running.
         //
-        // Setting it from `cycle_active` under the transport gate broke both
-        // directions at once: a plugin asking only for transport state was
-        // told the cycle bounds were valid while they were still the
-        // `mem::zeroed` 0.0, and a plugin asking only for cycle music got the
-        // bounds written below with no bit to say so, and ignored them.
+        // So `kCycleValid` is set only when the plugin asked for
+        // `kNeedCycleMusic` and the bounds are usable: it is advertised exactly
+        // when the bounds are filled.
         if wants(need::NEED_CYCLE_MUSIC)
             && is_usable(t.loop_region.start_quarters)
             && is_usable(t.loop_region.end_quarters)
@@ -144,9 +141,8 @@ pub fn to_process_context(
             state |= crate::sdk_enum_u32(StatesAndFlags_::kTimeSigValid);
         }
         // `continousTimeSamples` is filled below whenever the plugin asked for
-        // it, so `kContTimeValid` must be set on the same condition. Without the
-        // bit a spec-correct plugin ignores the field entirely — the value was
-        // being computed and shipped into a dead slot.
+        // it, so `kContTimeValid` is set on the same condition: without the bit
+        // a spec-correct plugin ignores the field.
         if wants(need::NEED_CONTINOUS_TIME_SAMPLES) {
             state |= crate::sdk_enum_u32(StatesAndFlags_::kContTimeValid);
         }
@@ -260,17 +256,13 @@ mod tests {
             .with_system_time_ns(9_000_000_000)
     }
 
-    /// `u32::MAX` (the "plugin didn't implement IProcessContextRequirements"
-    /// sentinel) fills every field this host knows how to source — i.e. the
-    /// behaviour before the interface was wired.
-    /// An unusable value must not be advertised as valid, however loudly the
+    /// An unusable value is not advertised as valid, however loudly the
     /// plugin asked for it.
     ///
     /// The requirement mask says what the plugin *wants*, not what the host
-    /// *has*. Gating the `*Valid` bits on the mask alone let a NaN tempo reach
-    /// the plugin flagged valid — and a plugin that trusts the flag divides by
-    /// it, propagating NaN or an infinity straight into the audio buffer. The
-    /// VST2 path has always gated on the value; this one had drifted.
+    /// *has*: a `*Valid` bit is set only over a value a plugin can compute
+    /// with, so a NaN tempo never reaches the plugin flagged valid. The VST2
+    /// path gates on the value the same way.
     #[test]
     fn a_nan_or_zero_field_is_not_advertised_as_valid() {
         // Everything requested, so only the value can clear a bit.

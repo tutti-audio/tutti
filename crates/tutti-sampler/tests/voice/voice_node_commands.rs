@@ -5,7 +5,7 @@
 //! optional duration, and truncating a beat position to `f32` re-introduces
 //! the ~2²⁴ cliff that `Sample.loop_start` was moved to `SamplePosition` (f64)
 //! to escape — so it takes the tier the engine reserves for multi-field
-//! state: an `ArcLend` cell the handle publishes to and the node reads once
+//! state: a `Publisher` cell the handle publishes to and the node reads once
 //! per block, latest wins. The cell sits in the `VoiceNodeHandle` its
 //! `IntoNode` hands back.
 //!

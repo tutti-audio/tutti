@@ -1,10 +1,11 @@
 //! One activation, both halves held together: [`Active`] is the shared
 //! `tutti_fixtures::Active`, and [`Render`] is what a case drives it with.
 
+use tutti_buffers::Float;
 use tutti_fixtures::Whole;
 use tutti_plugin_types::{
     AudioBuffer, AudioBufferMut, Loaded, MaxBlock, PluginIo, Prepare, ProcessContext,
-    ProcessOutput, Processor, Sample, SampleFormat, SampleRate, Samples,
+    ProcessOutput, Processor, SampleFormat, SampleRate, Samples,
 };
 
 /// The default rate.
@@ -27,7 +28,7 @@ pub fn prepare(rate: f64, block: usize, format: SampleFormat) -> Prepare {
 }
 
 /// A sample width a case can render at.
-pub trait Width: Sample + Into<f64> + From<f32> {
+pub trait Width: Float + Into<f64> + From<f32> {
     /// The width's buffer variant.
     fn wrap<'t, 'd: 't>(buffer: AudioBuffer<'t, 'd, Self>) -> AudioBufferMut<'t, 'd>;
 }

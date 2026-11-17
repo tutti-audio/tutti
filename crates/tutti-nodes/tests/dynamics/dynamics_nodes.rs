@@ -3,6 +3,7 @@
 //! parks and clones, the key bus, the latency and the tail. Every figure is from the
 //! definition (the grid, the lookahead, the ceiling), never from another render.
 
+use tutti_buffers::Planes;
 use tutti_dsp::{CompressorControls, GateControls, LimiterControls};
 use tutti_graph::contract::{Driven, assert_honest_tail, drive, drive_input, prepared};
 use tutti_graph::{Env, Node, ParamNode, PlayClock, Status, TransportChanges, TransportPosition};
@@ -49,7 +50,7 @@ fn render<N: Node + ParamNode>(
         let end = (start + block).min(n);
         let ins: Vec<&[f32]> = inputs.iter().map(|c| &c[start..end]).collect();
         let ps: Vec<Option<&[f32]>> = lanes.iter().map(|l| l.map(|l| &l[start..end])).collect();
-        let o = drive(&mut node, SR, &ins, &ps);
+        let o = drive(&mut node, SR, Planes::new(&ins).unwrap(), &ps);
         out.resize(o.len(), Vec::new());
         for (all, more) in out.iter_mut().zip(o) {
             all.extend(more);
@@ -368,7 +369,7 @@ fn a_reset_node_renders_as_a_fresh_one() {
         let mut out: Vec<Vec<f32>> = Vec::new();
         for start in (0..N).step_by(100) {
             let chunk: Vec<&[f32]> = ins.iter().map(|c| &c[start..start + 100]).collect();
-            let o = drive(node, SR, &chunk, &[]);
+            let o = drive(node, SR, Planes::new(&chunk).unwrap(), &[]);
             out.resize(o.len(), Vec::new());
             for (all, more) in out.iter_mut().zip(o) {
                 all.extend(more);
@@ -415,7 +416,10 @@ fn a_clone_starts_silent_and_shares_the_cells() {
     let run = |node: &mut dyn Node| -> Vec<Vec<f32>> {
         let mut out = vec![Vec::new(), Vec::new()];
         for chunk in x.chunks(100) {
-            for (o, y) in out.iter_mut().zip(drive(node, SR, &[chunk, chunk], &[])) {
+            for (o, y) in
+                out.iter_mut()
+                    .zip(drive(node, SR, Planes::new(&[chunk, chunk]).unwrap(), &[]))
+            {
                 o.extend(y);
             }
         }
@@ -465,7 +469,13 @@ fn the_limiter_reports_its_lookahead_as_latency_and_never_parks() {
             play: PlayClock::ZERO,
         };
         let input = if block == 0 { &x } else { &silence };
-        let d: Driven = drive_input(&mut node, &env, &[input, input], &[], &[]);
+        let d: Driven = drive_input(
+            &mut node,
+            &env,
+            Planes::new(&[input, input]).unwrap(),
+            &[],
+            &[],
+        );
         assert_eq!(d.reported_tail, None, "block {block}: nothing narrowed");
         assert_eq!(
             d.status,
@@ -610,7 +620,7 @@ fn no_node_here_parks() {
                 changes: TransportChanges::NONE,
                 play: PlayClock::ZERO,
             };
-            let d = drive_input(&mut *node, &env, &ins, &[], &[]);
+            let d = drive_input(&mut *node, &env, Planes::new(&ins).unwrap(), &[], &[]);
             assert_eq!(d.status, Some(Status::Modified), "block {block}");
         }
     }

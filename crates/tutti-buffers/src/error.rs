@@ -1,5 +1,6 @@
 //! [`BufferError`], the one refusal a view's construction or a conversion gives.
 
+use crate::BlockSide;
 use tutti_types::{ChannelLayout, LayoutError, Samples};
 
 /// Why a view was not built, or a conversion was not run.
@@ -40,6 +41,16 @@ pub enum BufferError {
         src: Samples,
         /// The destination's frame count.
         dst: Samples,
+    },
+    /// A view of a block holds a different frame count from the block.
+    #[error("the block is {block} frames and its {side} holds {found}")]
+    BlockLengthMismatch {
+        /// Which of the block's views.
+        side: BlockSide,
+        /// The block's frame count.
+        block: Samples,
+        /// The view's frame count.
+        found: Samples,
     },
     /// Source and destination have different widths.
     #[error("the source is {src:?} and the destination {dst:?}")]

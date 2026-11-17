@@ -17,8 +17,12 @@
 //! - [`RtVec`] — a capped collection through `&mut self` that refuses the
 //!   write at the cap rather than growing, latching an overflow flag. An owner
 //!   that shares one behind an `Arc` puts it in an [`AudioThreadCell`].
+//!   [`CappedVec`] is the same with a cap chosen at construction, for a count
+//!   known only at run time.
 //! - [`PackedAtomic`] — a value of up to eight bytes in one atomic word, so a
 //!   reader never pairs one write's field with another's.
+//! - [`Setting`] / [`SettingWord`] — a mode or switch set (a fieldless enum,
+//!   [`setting_word!`]) in one atomic word, stored by its encoding.
 //! - [`SeqWriter`] / [`SeqReader`] — a sequence lock for a `Pod` value one
 //!   writer overwrites in place and any thread copies whole.
 //! - [`level_cell()`] — a peak and an energy the audio thread folds each block
@@ -55,7 +59,7 @@
 //! - [`RenderCount`] — the renders of one thing in flight, and a `quiescent`
 //!   check so a thread that cleared what they read frees only when none can
 //!   still read it.
-//! - [`ArcLend`] / [`Loan`] / [`Reader`] — the publish cell, re-exported from
+//! - [`Publisher`] / [`Loan`] / [`Reader`] — the publish cell, re-exported from
 //!   `arc-lend`: a control thread publishes non-scalar state, the audio thread
 //!   only borrows it.
 //!
@@ -133,12 +137,12 @@
 //!   one module per OS (on Windows, a `.CRT$XCU` initializer entry), and `MainThreadMarker::new_unchecked`, whose `# Safety` names the
 //!   caller's duty (a test harness's constructor).
 //!
-//! `arc-lend`'s `ArcLend` (an external crate) holds the rest: an `AtomicPtr` to an `Arc::into_raw`
+//! `arc-lend`'s `Publisher` (an external crate) holds the rest: an `AtomicPtr` to an `Arc::into_raw`
 //! pointer that a `Loan` dereferences under a hazard-slot protocol, so the audio
 //! thread can never free a value (the reason it exists instead of `ArcSwap`).
 //!
 //! What checks it: a loom model per lock-free structure, run against the shipped
-//! code (`tests/*_loom.rs` here, and arc-lend's own loom model for `ArcLend`), and miri
+//! code (`tests/*_loom.rs` here, and arc-lend's own loom model for `Publisher`), and miri
 //! over this crate's unit tests (arc-lend's CI runs its own), in CI's `loom` and
 //! `miri` jobs (`cargo xtask loom`, `cargo xtask miri`). Miri executes no FFI and no x86 intrinsics,
 //! so the denormal register tests are skipped under it, and it perturbs libm
@@ -148,7 +152,11 @@
 #![deny(missing_docs)]
 #![deny(clippy::undocumented_unsafe_blocks, clippy::missing_safety_doc)]
 
+mod backoff;
+mod capped_vec;
 mod cell;
+mod claim;
+mod claim_lock;
 mod clock;
 mod denormals;
 mod dirty_set;
@@ -158,6 +166,7 @@ mod fault_latch;
 mod gauge;
 mod handoff;
 mod job_gate;
+mod last_out;
 mod level_cell;
 mod lock;
 mod main_thread;
@@ -166,10 +175,12 @@ mod pos_ring;
 mod priority;
 mod reclaim;
 mod render_count;
+mod render_gate;
 mod request_word;
 mod ring;
 mod scope;
 mod seq_cell;
+mod setting;
 mod sleep;
 mod spin;
 mod split;
@@ -177,7 +188,9 @@ mod task_graph;
 mod thread;
 mod vec;
 
+pub use capped_vec::CappedVec;
 pub use cell::{AudioThreadCell, BorrowGuard, BorrowRef};
+pub use claim_lock::{Claim, ClaimGuard};
 pub use clock::monotonic_ns;
 pub use denormals::with_no_denormals;
 pub use dirty_set::{DirtyIndex, DirtySet, Taken};
@@ -190,6 +203,7 @@ pub use gauge::{
 };
 pub use handoff::{Hand, Rt, handoff};
 pub use job_gate::JobGate;
+pub use last_out::{LastOut, Party};
 pub use level_cell::{LevelReader, LevelSpan, LevelWriter, level_cell};
 pub use lock::LockExt;
 pub use main_thread::MainThreadMarker;
@@ -201,10 +215,12 @@ pub use pos_ring::{
 pub use priority::{PriorityOutcome, PriorityRequest, Scheduling, request_priority};
 pub use reclaim::Reclaim;
 pub use render_count::{RenderCount, RenderGuard};
+pub use render_gate::{Closing, GateGuard, GateState, HeldClosed, Opening, RenderGate};
 pub use request_word::{RequestBit, RequestBitOutOfRange, RequestBits, RequestWord};
 pub use ring::{Drain, Iter, Overflow, PushError, Returned, RingReader, RingWriter, ring};
 pub use scope::{ControlDrop, RtScope, RtScopeGuard};
 pub use seq_cell::{Contended, SeqReader, SeqWriter};
+pub use setting::{Setting, SettingWord};
 pub use sleep::sleep_until_ns;
 pub use spin::BlockWaits;
 pub use split::{ClaimConflict, ClaimTable, Claimed, ClaimedRun, Held, RwView, SplitMut, SplitRw};
@@ -215,8 +231,8 @@ pub use vec::RtVec;
 // The cell non-scalar state reaches the audio thread through: a control
 // thread publishes, the audio thread only borrows (`Loan`), so it never frees.
 // The external `arc-lend` crate, which names nothing of tutti's; re-exported here
-// so the engine spells it `tutti_rt::ArcLend`.
-pub use arc_lend::{ArcLend, Loan, Reader};
+// so the engine spells it `tutti_rt::Publisher`.
+pub use arc_lend::{Loan, Publisher, Reader};
 
 #[cfg(test)]
 mod error_bounds {

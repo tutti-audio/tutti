@@ -94,8 +94,8 @@ macro_rules! served_control {
                 self.link.bridge.parameter_value_from_text(id, text)
             }
 
-            fn save_state(&self) -> Result<Vec<u8>, StateError> {
-                self.link.bridge.save_state(StateUse::Project)
+            fn save_state(&self, state_use: StateUse) -> Result<Vec<u8>, StateError> {
+                self.link.bridge.save_state(state_use)
             }
 
             /// Queued on the command bus as the blocks around it are, so the
@@ -159,7 +159,7 @@ macro_rules! served_control {
             fn wake(
                 &mut self,
                 main: MainThreadMarker,
-                ready: &[tutti_plugin_types::Ready],
+                ready: &[tutti_plugin_ipc_ffi::Ready],
                 now: std::time::Instant,
             ) {
                 self.link.bridge.wake(main, ready, now);

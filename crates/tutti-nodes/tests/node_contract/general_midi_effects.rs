@@ -3,6 +3,7 @@
 //! figure is from the definition of the effect (a wet-only line is a delayed
 //! copy, a reverb's tail covers its ring-out), not from another render.
 
+use tutti_buffers::Planes;
 use tutti_graph::contract::assert_honest_tail;
 use tutti_graph::contract::{drive, prepared};
 use tutti_graph::{Node, ParamNode};
@@ -25,7 +26,7 @@ fn impulse_response<N: Node>(node: N, frames: usize) -> Vec<Vec<f32>> {
             .map(|i| if i == 0 { 1.0 } else { 0.0 })
             .collect();
         let inputs: Vec<&[f32]> = (0..ins).map(|_| &chunk[..]).collect();
-        let block = drive(&mut node, SR, &inputs, &[]);
+        let block = drive(&mut node, SR, Planes::new(&inputs).unwrap(), &[]);
         out.resize(block.len(), Vec::with_capacity(frames));
         for (ch, b) in out.iter_mut().zip(block) {
             ch.extend(b);
@@ -178,10 +179,10 @@ fn reset_empties_the_room() {
     let mut node = prepared(FreeverbNode::general_midi(), SR, BLOCK);
     let burst = vec![1.0f32; BLOCK];
     for _ in 0..40 {
-        drive(&mut node, SR, &[&burst], &[]);
+        drive(&mut node, SR, Planes::new(&[&burst]).unwrap(), &[]);
     }
     node.reset();
     let silence = vec![0.0f32; BLOCK];
-    let out = drive(&mut node, SR, &[&silence], &[]);
+    let out = drive(&mut node, SR, Planes::new(&[&silence]).unwrap(), &[]);
     assert!(out.iter().flatten().all(|&s| s == 0.0));
 }

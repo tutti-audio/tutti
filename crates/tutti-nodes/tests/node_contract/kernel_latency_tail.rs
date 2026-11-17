@@ -140,7 +140,13 @@ impl Rig {
             play: PlayClock::ZERO,
         };
         self.frame += input.len() as u64;
-        drive_input(&mut self.node, &env, &[input], &[], &[])
+        drive_input(
+            &mut self.node,
+            &env,
+            Planes::new(&[input]).unwrap(),
+            &[],
+            &[],
+        )
     }
 }
 
@@ -281,7 +287,7 @@ fn the_graphs_mix_is_aligned_to_the_kernels_latency() {
         .expect("a mix");
     let mut x = vec![0.0; BLOCK];
     x.extend(impulse_block());
-    let out = solo.render_input(&[&x]).remove(0);
+    let out = solo.render_input(Planes::new(&[&x]).unwrap()).remove(0);
     let spikes: Vec<(usize, f32)> = out
         .iter()
         .enumerate()

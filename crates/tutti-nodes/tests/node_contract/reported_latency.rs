@@ -10,6 +10,7 @@
 //! whose DSP drifted away from it.
 
 use tutti_buffers::Mono;
+use tutti_buffers::Planes;
 use tutti_graph::contract::{drive, prepared};
 use tutti_graph::{GraphBuilder, IntoNode, Node, Prepare};
 use tutti_nodes::testing::Through;
@@ -40,7 +41,7 @@ fn impulse_response<N: Node>(node: N, frames: usize) -> Vec<Vec<f32>> {
             .map(|i| if i == 0 { 1.0 } else { 0.0 })
             .collect();
         let inputs: Vec<&[f32]> = (0..ins).map(|_| &chunk[..]).collect();
-        let block = drive(&mut node, SR, &inputs, &[]);
+        let block = drive(&mut node, SR, Planes::new(&inputs).unwrap(), &[]);
         out.resize(block.len(), Vec::with_capacity(frames));
         for (ch, b) in out.iter_mut().zip(block) {
             ch.extend(b);
@@ -74,7 +75,7 @@ fn mixed_impulse_response<N: IntoNode>(node: N, frames: usize, mix: Mix) -> Vec<
     let ins: Vec<&[f32]> = (0..usize::from(shape.audio_in().count()))
         .map(|_| &chunk[..])
         .collect();
-    r.render_input(&ins)
+    r.render_input(Planes::new(&ins).unwrap())
 }
 
 /// The latency a node declares: one figure for its whole output (a graph
@@ -288,7 +289,7 @@ fn a_limiter_summed_with_a_dry_path_reports_the_limiter_latency() {
     );
     let mut impulse = vec![0.0f32; 512];
     impulse[0] = 0.25;
-    let out = r.render_input(&[&impulse]).remove(0);
+    let out = r.render_input(Planes::new(&[&impulse]).unwrap()).remove(0);
     assert_eq!(
         onsets(&out),
         vec![lookahead.get()],
@@ -396,10 +397,10 @@ mod convolver {
         let mut node = prepared(ConvolverNode::new(&[1.0], 64), SR, 256);
 
         // Load the convolver with a take, then reset mid-block.
-        drive(&mut node, SR, &[&[1.0; 32]], &[]);
+        drive(&mut node, SR, Planes::new(&[&[1.0; 32]]).unwrap(), &[]);
         Node::reset(&mut node);
 
-        let out = drive(&mut node, SR, &[&[0.0; 256]], &[]);
+        let out = drive(&mut node, SR, Planes::new(&[&[0.0; 256]]).unwrap(), &[]);
         let peak = tutti_fixtures::signal::peak(&out[0]);
         assert!(
             peak < 1e-6,

@@ -93,7 +93,7 @@ impl Plugin {
         let plugin = tutti_plugin::catalog::PluginRef::file(path).expect("a plugin file");
         let request = match state {
             Some(bytes) => Spec::new(plugin.clone())
-                .restoring(tutti_plugin::catalog::PluginState::new(plugin, bytes)),
+                .restoring(tutti_session::PeerState::of_plugin(plugin, bytes)),
             None => Spec::new(plugin),
         };
         let node = session
@@ -147,7 +147,7 @@ impl Subject for Plugin {
             .plugin_view(rig.node)
             .ok()?
             .state()
-            .save()
+            .save(tutti_plugin_types::StateUse::Project)
             .expect("the plugin saves its state")
             .bytes()
             .to_vec();

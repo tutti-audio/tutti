@@ -17,11 +17,12 @@
 //! - [`AudioBuffer`] — the safe, borrowed view of one process block: a slice of
 //!   input channel slices and a slice of output channel slices, plus the block
 //!   length and sample rate. This is what host code reads and writes.
-//! - [`Sample`] — a compile-time switch (`f32` / `f64`) that routes a generic
-//!   `process::<T>` call to the matching width. Per-format
-//!   extensions (e.g. `tutti-vst3-host`'s `Vst3Sample`) layer format-specific
-//!   constants on top.
+//! - the width is `tutti_buffers::Float` (`f32` / `f64`), the compile-time
+//!   switch that routes a generic `process::<T>` call to the matching width.
+//!   Per-format extensions (e.g. `tutti-vst3-host`'s `Vst3Sample`) layer
+//!   format-specific constants on top.
 
+use tutti_buffers::Float;
 use tutti_types::SampleRate;
 
 /// The most channels, per direction, that a block's stack-built channel tables
@@ -47,30 +48,6 @@ pub struct PluginTooWide {
     pub direction: &'static str,
     /// The channels the plugin has in that direction, over all its buses.
     pub channels: usize,
-}
-
-/// Plugin-compatible sample width (`f32` or `f64`), used as a compile-time
-/// switch by generic process code.
-///
-/// Generic process code such as `Vst3Instance::process` / `ClapProcessor::process`
-/// is written `<T: Sample>`, so the compiler monomorphizes one specialization
-/// per concrete width: the two a plugin bus can negotiate, `f32` and `f64` (a
-/// 64-bit plugin bus).
-pub trait Sample: Copy + Default + Send + 'static {
-    /// Whether the value is neither NaN nor infinite.
-    fn is_finite(self) -> bool;
-}
-
-impl Sample for f32 {
-    fn is_finite(self) -> bool {
-        f32::is_finite(self)
-    }
-}
-
-impl Sample for f64 {
-    fn is_finite(self) -> bool {
-        f64::is_finite(self)
-    }
 }
 
 /// The channel slices of one direction of a block, in a fixed table of
@@ -131,11 +108,11 @@ impl<S> std::ops::DerefMut for ChannelTable<S> {
 
 /// Zeroes the first `frames` samples of every channel (all of a shorter one).
 /// Allocation-free and RT-safe.
-pub fn silence<T: Sample, C: AsMut<[T]>>(channels: &mut [C], frames: usize) {
+pub fn silence<T: Float, C: AsMut<[T]>>(channels: &mut [C], frames: usize) {
     for channel in channels {
         let channel = channel.as_mut();
         let n = channel.len().min(frames);
-        channel[..n].fill(T::default());
+        channel[..n].fill(T::ZERO);
     }
 }
 
@@ -146,11 +123,11 @@ pub fn silence<T: Sample, C: AsMut<[T]>>(channels: &mut [C], frames: usize) {
 /// downstream of it, so both the in-process node and the plugin server run each
 /// block of plugin output through this before it leaves the plugin's stage.
 /// Allocation-free and RT-safe.
-pub fn sanitize<T: Sample>(samples: &mut [T]) -> bool {
+pub fn sanitize<T: Float>(samples: &mut [T]) -> bool {
     let mut replaced = false;
     for s in samples {
         if !s.is_finite() {
-            *s = T::default();
+            *s = T::ZERO;
             replaced = true;
         }
     }
@@ -170,7 +147,7 @@ pub fn sanitize<T: Sample>(samples: &mut [T]) -> bool {
 /// does not collide with the `'d` data borrows. Made coincident, the two force a
 /// caller into a hand-unrolled `split_first_mut` recursion to sidestep a
 /// conflict that was never real.
-pub struct AudioBuffer<'t, 'd: 't, T: Sample = f32> {
+pub struct AudioBuffer<'t, 'd: 't, T: Float = f32> {
     /// One deinterleaved slice per input channel, each `num_samples` long.
     pub inputs: &'t [&'d [T]],
     /// One deinterleaved slice per output channel, each `num_samples` long.
@@ -185,7 +162,7 @@ pub struct AudioBuffer<'t, 'd: 't, T: Sample = f32> {
     pub sample_rate: SampleRate,
 }
 
-impl<T: Sample> std::fmt::Debug for AudioBuffer<'_, '_, T> {
+impl<T: Float> std::fmt::Debug for AudioBuffer<'_, '_, T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AudioBuffer")
             .field("inputs", &self.inputs.len())
@@ -196,7 +173,7 @@ impl<T: Sample> std::fmt::Debug for AudioBuffer<'_, '_, T> {
     }
 }
 
-impl<'t, 'd: 't, T: Sample> AudioBuffer<'t, 'd, T> {
+impl<'t, 'd: 't, T: Float> AudioBuffer<'t, 'd, T> {
     /// Creates a block over the given channel tables.
     ///
     /// `num_samples` is taken from the first output channel's length, or the

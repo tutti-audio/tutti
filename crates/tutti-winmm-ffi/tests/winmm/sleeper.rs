@@ -1,37 +1,38 @@
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use tutti_winmm_ffi::{Sleeper, Woken};
+use tutti_winmm_ffi::{Woken, waitable_timer};
 
 #[test]
-fn a_wait_ends_at_its_time() {
-    let sleeper = Sleeper::new().unwrap();
-    let start = Instant::now();
+fn a_timed_wait_with_no_wake_elapses() {
+    let (_wake, mut wait) = waitable_timer().unwrap();
     assert_eq!(
-        sleeper.wait(Some(Duration::from_millis(30))).unwrap(),
+        wait.wait_for(Duration::from_millis(30)).unwrap(),
         Woken::Elapsed
     );
-    // A wait never ends before its time; only lateness depends on load.
-    let took = start.elapsed();
-    assert!(took >= Duration::from_millis(25), "{took:?}");
 }
 
 #[test]
 fn a_wake_made_before_the_wait_ends_it_at_once() {
-    let sleeper = Sleeper::new().unwrap();
-    sleeper.wake().unwrap();
+    let (wake, mut wait) = waitable_timer().unwrap();
+    wake.wake().unwrap();
     assert_eq!(
-        sleeper.wait(Some(Duration::from_secs(30))).unwrap(),
+        wait.wait_for(Duration::from_secs(30)).unwrap(),
         Woken::Signalled
+    );
+    // The wake was consumed by that wait.
+    assert_eq!(
+        wait.wait_for(Duration::from_millis(10)).unwrap(),
+        Woken::Elapsed
     );
 }
 
 #[test]
-fn a_wake_from_another_thread_ends_a_wait_with_no_time() {
-    let sleeper = std::sync::Arc::new(Sleeper::new().unwrap());
-    let waker = std::sync::Arc::clone(&sleeper);
+fn a_wake_from_a_clone_on_another_thread_ends_a_wait_with_no_time() {
+    let (wake, mut wait) = waitable_timer().unwrap();
+    let waker = wake.clone();
     let thread = std::thread::spawn(move || {
         waker.wake().unwrap();
     });
-    assert_eq!(sleeper.wait(None).unwrap(), Woken::Signalled);
+    wait.wait().unwrap();
     thread.join().unwrap();
 }

@@ -124,13 +124,13 @@ mod learned {
 
     fn said() -> Learned {
         Learned::new()
-            .with_identity(DeviceIdentity {
+            .identified(DeviceIdentity {
                 manufacturer: ManufacturerId::of(0x0042),
                 family: [1, 0].map(U7::of),
                 model: [7, 0].map(U7::of),
                 revision: SoftwareRevision::from([1, 2, 3, 4].map(U7::of)),
             })
-            .with_instance_id(ProductInstanceId::new("SN-1").unwrap())
+            .instanced(ProductInstanceId::new("SN-1").unwrap())
     }
 
     #[test]
@@ -216,8 +216,8 @@ mod saved_state {
     #[test]
     fn a_binary_state_reads_back_with_its_device_revision_and_time() {
         let state = PeState::octets(vec![0, 127, 128, 255])
-            .with_rev(StateRev::new("buui890adj").unwrap())
-            .with_timestamp(UnixSeconds::of(1_586_786_400));
+            .revised(StateRev::new("buui890adj").unwrap())
+            .stamped(UnixSeconds::of(1_586_786_400));
         let saved = saved(state);
         assert_eq!(round_trip(&saved), saved);
     }
@@ -235,7 +235,7 @@ mod saved_state {
     fn the_document_names_each_part() {
         let state = PeState::binary(MediaType::new("audio/wav").unwrap(), vec![9])
             .unwrap()
-            .with_timestamp(UnixSeconds::of(5));
+            .stamped(UnixSeconds::of(5));
         assert_eq!(
             serde_json::to_string(&saved(state)).unwrap(),
             r#"{"device":{"manufacturer":66,"family":[1,0],"model":[7,0],"revision":[1,2,3,4]},"state_id":"fullState","rev":null,"timestamp":5,"media_type":"audio/wav","bytes":[9]}"#
@@ -256,6 +256,29 @@ mod saved_state {
             assert!(good.contains(from), "{good}");
             let bad = good.replace(from, to);
             assert!(serde_json::from_str::<SavedState>(&bad).is_err(), "{bad}");
+        }
+    }
+}
+
+mod media_type {
+    use tutti_midi_device::MediaType;
+
+    #[test]
+    fn a_media_type_is_its_text_in_a_document() {
+        let media_type = MediaType::new("application/x-thing; v=1").unwrap();
+        let json = serde_json::to_string(&media_type).unwrap();
+        assert_eq!(json, r#""application/x-thing; v=1""#);
+        assert_eq!(
+            serde_json::from_str::<MediaType>(&json).unwrap(),
+            media_type
+        );
+    }
+
+    #[test]
+    fn a_document_text_that_breaks_the_limit_is_refused() {
+        for bad in [String::new(), "caf\u{e9}".into(), "a".repeat(76)] {
+            let json = serde_json::to_string(&bad).unwrap();
+            assert!(serde_json::from_str::<MediaType>(&json).is_err(), "{json}");
         }
     }
 }

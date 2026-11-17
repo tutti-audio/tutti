@@ -125,12 +125,12 @@ impl Setup {
 ///
 /// The executor renders in blocks of its prepared `MaxBlock`, each handed the
 /// transport the render's clock reports ([`RenderClock::graph_block`]), and
-/// the clock is advanced after each block ([`RenderClock::render_graph`]).
+/// the clock is advanced after each block ([`render_graph`]).
 /// A clip reader reads the transport at any frame of its block from its
 /// `Env`.
 ///
 /// [`RenderClock::graph_block`]: tutti_transport::RenderClock::graph_block
-/// [`RenderClock::render_graph`]: tutti_transport::RenderClock::render_graph
+/// [`render_graph`]: tutti_transport::render_graph
 ///
 /// # Latency and tail
 ///

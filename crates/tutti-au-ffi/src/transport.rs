@@ -83,9 +83,10 @@ pub type TransportStateProc2 = unsafe extern "C" fn(
 
 /// The host's transport, readable from the render thread without a lock.
 ///
-/// Written by the control thread via [`set_transport`](Self::set_transport) and
+/// Written once per block by the thread that renders (or from the control side
+/// between blocks) via [`set_transport`](Self::set_transport) and
 /// read by the AU through the C procs. See the module docs for why this is a
-/// set of atomics rather than an `ArcLend` cell.
+/// set of atomics rather than a `Publisher` cell.
 ///
 /// Lives behind a `Box` owned by the owning registration so its address is stable for
 /// the `hostUserData` pointer the AU retains — the same pinning discipline
@@ -173,7 +174,9 @@ impl TransportState {
         Self::default()
     }
 
-    /// Publishes a new transport snapshot. **Control thread only.**
+    /// Publishes a new transport snapshot. Called once per block by the thread
+    /// that renders the unit, or between blocks from the control side: atomic
+    /// stores only, so it never allocates, locks or waits. One writer at a time.
     ///
     /// Ordering is deliberate: every value field is stored *before*
     /// `state_changed`, so an AU that observes the changed flag is guaranteed to
@@ -237,7 +240,9 @@ impl TransportState {
     /// `kAudioUnitErr_CannotDoInCurrentContext` again until the next
     /// [`set_transport`](Self::set_transport). For a block the host has no
     /// transport for, so the AU is told so instead of being handed the last
-    /// block's beat as if it were current. **Control thread only.**
+    /// block's beat as if it were current. Called as
+    /// [`set_transport`](Self::set_transport) is: one atomic store, safe on the
+    /// audio thread.
     pub fn withdraw(&self) {
         self.published.store(false, Ordering::Release);
     }
@@ -256,7 +261,8 @@ impl TransportState {
     /// one musical-time field that is a property of the *upcoming block* rather
     /// than of the transport: it is what lets an arpeggiator place its first
     /// note on the beat instead of on the block boundary, and it has to be
-    /// recomputed per block even when nothing about the transport moved.
+    /// recomputed per block even when nothing about the transport moved. One
+    /// relaxed atomic store, safe on the audio thread.
     pub fn set_samples_to_next_beat(&self, samples: u32) {
         self.samples_to_next_beat.store(samples, Ordering::Relaxed);
     }

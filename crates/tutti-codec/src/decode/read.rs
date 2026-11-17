@@ -23,6 +23,7 @@ use symphonia::core::packet::Packet;
 
 use super::error::convert;
 use super::placement::topology_of;
+use super::riff_guard;
 use crate::DecodeError;
 use crate::Wave;
 use tutti_types::{ChannelTopology, Placement};
@@ -153,7 +154,11 @@ pub(super) fn probe_path(path: &Path) -> Result<Box<dyn FormatReader>, Error> {
     probe_source(source, &hint)
 }
 
-fn probe_source(source: Box<dyn MediaSource>, hint: &Hint) -> Result<Box<dyn FormatReader>, Error> {
+fn probe_source(
+    mut source: Box<dyn MediaSource>,
+    hint: &Hint,
+) -> Result<Box<dyn FormatReader>, Error> {
+    riff_guard::check(&mut *source)?;
     let stream = MediaSourceStream::new(source, Default::default());
     symphonia::default::get_probe().probe(
         hint,
@@ -273,8 +278,10 @@ fn decode(mut reader: Box<dyn FormatReader>) -> Result<Wave, DecodeError> {
     // Pre-allocate using the metadata frame count when available (WAV, FLAC).
     let mut wave: Option<Wave> = total_frames.map(|total| {
         let mut wave = Wave::with_placement(topology, placement, sample_rate);
-        for ch in 0..wave.channels() {
-            wave.channel_vec_mut(ch).reserve_exact(total as usize);
+        let channels = wave.channels();
+        for ch in 0..channels {
+            wave.channel_vec_mut(ch)
+                .reserve_exact(reserved_frames(total, channels));
         }
         wave
     });
@@ -312,6 +319,17 @@ fn decode(mut reader: Box<dyn FormatReader>) -> Result<Wave, DecodeError> {
         }
         wave_output.set_len(old_len + Samples(buffer_len));
     }
+}
+
+/// The most samples, across all channels, reserved before the first packet.
+const RESERVE_SAMPLES: u64 = 1 << 24;
+
+/// The frames per channel to reserve for a header stating `total`: the header's
+/// count is untrusted, so a larger one is reserved only up to
+/// [`RESERVE_SAMPLES`] and the vectors grow with the packets actually decoded.
+fn reserved_frames(total: u64, channels: usize) -> usize {
+    let cap = RESERVE_SAMPLES / channels.max(1) as u64;
+    total.min(cap) as usize
 }
 
 /// What a stream with no packet at all is refused with.

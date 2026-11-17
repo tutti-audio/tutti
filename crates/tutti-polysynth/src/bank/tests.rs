@@ -1,4 +1,5 @@
 use super::*;
+use tutti_buffers::Planes;
 use tutti_nodes::{LadderFilterNode, LadderType, SvfFilterNode};
 use tutti_types::{Amplitude, Seconds};
 
@@ -231,7 +232,7 @@ fn the_lane_svf_matches_svf_filter_node() {
             SvfFilterNode::<f32>::new(ty, cutoff, q),
             tutti_graph::Prepare::new(sr(), tutti_types::MaxBlock::of(tutti_types::Samples(64))),
         );
-        let expected = node.render_input(&[&dry]).remove(0);
+        let expected = node.render_input(Planes::new(&[&dry]).unwrap()).remove(0);
         for (i, (w, e)) in wet.iter().zip(&expected).enumerate() {
             assert!(
                 (w - e).abs() < 1e-4,
@@ -256,7 +257,7 @@ fn the_lane_ladder_matches_ladder_filter_node() {
         LadderFilterNode::<f32>::new(LadderType::LP24, cutoff, res),
         tutti_graph::Prepare::new(sr(), tutti_types::MaxBlock::of(tutti_types::Samples(64))),
     );
-    let expected = node.render_input(&[&dry]).remove(0);
+    let expected = node.render_input(Planes::new(&[&dry]).unwrap()).remove(0);
     for (i, (w, e)) in wet.iter().zip(&expected).enumerate() {
         assert!((w - e).abs() < 2e-3, "frame {i}: lane {w}, node {e}");
     }
