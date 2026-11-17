@@ -173,8 +173,8 @@ mod oscillator;
 mod oversample;
 mod pan;
 mod polarity;
-mod stereo;
 mod ring_mod;
+mod stereo;
 mod tremolo;
 mod waveshape;
 
