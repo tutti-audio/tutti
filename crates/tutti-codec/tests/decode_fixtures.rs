@@ -345,16 +345,21 @@ fn pcm_wav(planes: &[Vec<i32>], bits: u16) -> Vec<u8> {
 fn riff_wav(tag: u16, channels: u16, bits: u16, data: &[u8]) -> Vec<u8> {
     let width = bits / 8;
     let data_len = data.len() as u32;
+    // A format other than PCM states a zero-length extension (`cbSize`) after
+    // the 16 bytes every `fmt ` chunk starts with.
+    let extension: &[u8] = if tag == 1 { &[] } else { &[0, 0] };
+    let fmt_len = 16 + extension.len() as u32;
     let mut out = b"RIFF".to_vec();
-    out.extend((36 + data_len).to_le_bytes());
+    out.extend((20 + fmt_len + data_len).to_le_bytes());
     out.extend(b"WAVEfmt ");
-    out.extend(16u32.to_le_bytes());
+    out.extend(fmt_len.to_le_bytes());
     out.extend(tag.to_le_bytes());
     out.extend(channels.to_le_bytes());
     out.extend(48_000u32.to_le_bytes());
     out.extend((48_000 * u32::from(channels) * u32::from(width)).to_le_bytes());
     out.extend((channels * width).to_le_bytes());
     out.extend(bits.to_le_bytes());
+    out.extend(extension);
     out.extend(b"data");
     out.extend(data_len.to_le_bytes());
     out.extend(data);
