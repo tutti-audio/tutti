@@ -13,7 +13,7 @@
 
 use crate::nonempty;
 use crate::voice::interp::Place;
-use tutti_codec::Wave;
+use tutti_buffers::Wave;
 use tutti_types::ChannelLayout;
 
 /// The canonical planar→interleaved unpack: writes frame `idx` of `wave` into
@@ -58,12 +58,14 @@ pub(crate) fn read_wave(wave: &Wave, at: usize, out: &mut [f32], channels: Chann
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tutti_buffers::Interleaved;
     use tutti_types::{SampleRate, Seconds};
 
     fn test_wave(samples: &[(f32, f32)]) -> Wave {
         let mut wave = Wave::new(2, SampleRate::SR_48K);
         for &(l, r) in samples {
-            wave.push_frame(&[l, r]);
+            wave.append(Interleaved::new(&[l, r], wave.layout()).unwrap())
+                .unwrap();
         }
         wave
     }
@@ -113,7 +115,8 @@ mod tests {
     #[test]
     fn wave_frame_duplicates_left_for_mono() {
         let mut wave = Wave::new(1, SampleRate::SR_48K);
-        wave.push_frame(&[0.7]);
+        wave.append(Interleaved::new(&[0.7], wave.layout()).unwrap())
+            .unwrap();
         let mut f = [0.0f32; 2];
         frame_into(&wave, 0, &mut f);
         assert_eq!(f, [0.7, 0.7]);
@@ -127,7 +130,8 @@ mod tests {
         // Mono goes to the centre of a 5.1 frame and nowhere else (the lone
         // centre rule of `Fold`; the memory tier's pinned in `interp`).
         let mut mono = Wave::new(1, SampleRate::SR_48K);
-        mono.push_frame(&[0.4]);
+        mono.append(Interleaved::new(&[0.4], mono.layout()).unwrap())
+            .unwrap();
         let mut f = [9.0f32; 6];
         frame_into(&mono, 0, &mut f);
         assert_eq!(f, [0.0, 0.0, 0.4, 0.0, 0.0, 0.0], "mono is the centre");

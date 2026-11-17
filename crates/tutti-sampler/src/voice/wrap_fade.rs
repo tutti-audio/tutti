@@ -8,13 +8,14 @@
 //! a cut shows as a step of the tone's amplitude.
 
 use crate::VoiceWindow;
+use tutti_buffers::Interleaved;
 use tutti_buffers::Planes;
 
 use std::sync::Arc;
 use tutti_graph::declick_frames;
 use tutti_types::MaxBlock;
 
-use tutti_codec::Wave;
+use tutti_buffers::Wave;
 use tutti_graph::{Env, Node, Offset, Prepare, TransportChanges, TransportPosition, contract};
 use tutti_types::{
     Beat, BeatDuration, Bpm, ChannelLayout, Frame, FrameClock, LoopRange, SampleRate, Samples,
@@ -49,7 +50,8 @@ fn wave(channels: usize, len: usize, tone_at: impl Fn(f64, usize) -> f32) -> Arc
             .iter()
             .map(|&f| tone_at(f, i))
             .collect();
-        w.push_frame(&frame);
+        w.append(Interleaved::new(&frame, w.layout()).unwrap())
+            .unwrap();
     }
     Arc::new(w)
 }
@@ -529,7 +531,8 @@ fn steps_at(channels: usize, before: f32, after: f32, split: usize) -> Arc<Wave>
     for i in 0..4 * FPB {
         let v = if i < split { before } else { after };
         let frame: Vec<f32> = (0..channels).map(|c| v + 0.1 * c as f32).collect();
-        w.push_frame(&frame);
+        w.append(Interleaved::new(&frame, w.layout()).unwrap())
+            .unwrap();
     }
     Arc::new(w)
 }

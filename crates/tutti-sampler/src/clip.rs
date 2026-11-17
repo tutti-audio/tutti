@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use tutti_codec::Wave;
+use tutti_buffers::Wave;
 use tutti_graph::{HasParam, IntoNode, NodeParts};
 use tutti_transport::TempoReader;
 use tutti_types::{Amplitude, Beat, ChannelLayout, PlaybackRate};

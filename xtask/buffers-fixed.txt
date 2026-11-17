@@ -13,13 +13,8 @@
 #         measured: <why>   kept after judging.
 crates/tutti-au-host/src/macos/processor.rs::AuProcessor::render_f32  pending
 crates/tutti-au-host/src/macos/processor.rs::AuProcessor::render_f64  pending
-crates/tutti-codec/src/decode/file_in.rs::FileIn::fill_sequential_interleaved  pending
-crates/tutti-codec/src/encoder.rs::Encoder::write  pending
-crates/tutti-codec/src/wave.rs::Wave::channel  pending
-crates/tutti-codec/src/wave.rs::Wave::channel_mut  pending
-crates/tutti-codec/src/wave.rs::Wave::from_samples  pending
-crates/tutti-codec/src/wave.rs::Wave::push_frame  pending
-crates/tutti-codec/src/writer.rs::FormatWriter::write  pending
+crates/tutti-codec/src/encoder.rs::Encoder::write  measured: every format quantizes from an f32 block at its own width, and the encoder is typed per format in step 3c
+crates/tutti-codec/src/writer.rs::FormatWriter::write  measured: every format quantizes from an f32 block at its own width, and the encoder is typed per format in step 3c
 crates/tutti-dsp/src/convolver.rs::Convolver::new  pending
 crates/tutti-dsp/src/convolver.rs::Convolver::process_block  pending
 crates/tutti-dsp/src/convolver.rs::Convolver::with_ir  pending

@@ -28,13 +28,14 @@
 //! that of the map's, plus the ramp wave's `f32` rounding (0.02 frames at the
 //! largest source frame read here).
 
+use tutti_buffers::Interleaved;
 use tutti_sampler::VoiceWindow;
 
 use std::sync::Arc;
 use tutti_types::MaxBlock;
 
 use tutti_buffers::InterleavedMut;
-use tutti_codec::Wave;
+use tutti_buffers::Wave;
 use tutti_engine::Engine;
 use tutti_graph::{Editor, NodeKey, OutPort, Prepare, Source};
 use tutti_sampler::{MemorySource, Playback, SlotId, VoicePool};
@@ -116,7 +117,8 @@ fn render(
     let transport = Transport::new(SampleRate::of(SR));
     let mut wave = Wave::new(1, SampleRate::of(SR));
     for i in 0..4 * SR as usize {
-        wave.push_frame(&[i as f32 / SCALE]);
+        wave.append(Interleaved::new(&[i as f32 / SCALE], wave.layout()).unwrap())
+            .unwrap();
     }
     let wave = Arc::new(wave);
     let (mut ed, exec) = Editor::new(Prepare::new(

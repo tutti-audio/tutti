@@ -12,6 +12,7 @@
 //! start steps across the wrap by less than a cut's step, which the wave
 //! gives analytically.
 
+use tutti_buffers::Interleaved;
 use tutti_sampler::VoiceWindow;
 
 use std::sync::Arc;
@@ -33,7 +34,14 @@ fn tone() -> Arc<Wave> {
     let mut w = Wave::new(2, SampleRate::of(SR));
     for i in 0..SR as usize {
         let t = i as f32 / SR as f32;
-        w.push_frame(&[(t * 2_765.0).sin() * 0.4, (t * 4_148.0).sin() * 0.3]);
+        w.append(
+            Interleaved::new(
+                &[(t * 2_765.0).sin() * 0.4, (t * 4_148.0).sin() * 0.3],
+                w.layout(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
     }
     Arc::new(w)
 }

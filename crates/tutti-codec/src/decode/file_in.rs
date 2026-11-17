@@ -2,7 +2,7 @@
 //!
 //! [`FileIn`] decodes an audio file sequentially, frame by frame, without
 //! loading the whole file into RAM. It is a [`Source`]: [`pull`] fills a
-//! caller's interleaved `f32` view **at the file's own channel width**
+//! caller's interleaved view of `S` **at the file's own channel width**
 //! from the current cursor and reports how many **frames** it produced (a short
 //! count, then [`Pull::Ended`] at end-of-stream, or [`Pull::Failed`] at a decode
 //! fault). [`layout`](Source::layout) reports that
@@ -24,7 +24,7 @@
 //! [`pull`]: Source::pull
 //! [`seek`]: FileIn::seek
 //!
-//! It shares [`Wave::read`](crate::Wave::read)'s probe head and its one-packet
+//! It shares [`read_wave`](crate::read_wave)'s probe head and its one-packet
 //! helper. All decode/seek/file I/O runs on the streamer thread; the audio
 //! thread never touches this type.
 
@@ -34,7 +34,9 @@ use symphonia::core::codecs::audio::well_known::CODEC_ID_FLAC;
 use symphonia::core::errors::{Error, SeekErrorKind};
 use symphonia::core::formats::{FormatReader, SeekMode, SeekTo};
 use symphonia::core::units::Timestamp;
-use tutti_buffers::{FiniteSource, InterleavedMut, Pull, Source};
+use tutti_buffers::{
+    FiniteSource, Interleaved, InterleavedMut, Planes, Pull, Sample, Source, interleave,
+};
 use tutti_types::{ChannelLayout, ChannelTopology, Placement, SampleRate, Samples};
 
 use super::error::convert;
@@ -55,8 +57,8 @@ const TRUNCATED: &str = "stream ended before the container's frame count";
 /// [`Source`].
 ///
 /// Decodes sequentially without loading the whole file into memory (compare
-/// [`Wave::read`](crate::Wave::read)). [`pull`](Source::pull) fills a
-/// interleaved `f32` view **at the file's own channel width** and
+/// [`read_wave`](crate::read_wave)). [`pull`](Source::pull) fills an
+/// interleaved view of `S` **at the file's own channel width** and
 /// returns the frames produced; a short count and then [`Pull::Ended`] mark the
 /// end of the file. It does not downmix: [`topology`](Self::topology) says which speaker each
 /// channel feeds, and a caller wanting another width builds a
@@ -74,7 +76,7 @@ const TRUNCATED: &str = "stream ended before the container's frame count";
 /// use tutti_buffers::{InterleavedMut, Pull, Source};
 /// use tutti_types::Samples;
 ///
-/// let mut file = FileIn::open("take.flac")?;
+/// let mut file = FileIn::<f32>::open("take.flac")?;
 /// let width = usize::from(file.layout().count());
 /// let mut buf = vec![0.0f32; 1024 * width];
 /// let out = InterleavedMut::new(&mut buf, file.layout())?;
@@ -84,9 +86,9 @@ const TRUNCATED: &str = "stream ended before the container's frame count";
 /// }
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
-pub struct FileIn {
+pub struct FileIn<S: Sample = f32> {
     reader: Box<dyn FormatReader>,
-    decoder: PacketDecoder,
+    decoder: PacketDecoder<S>,
     track_id: u32,
     /// Which speaker each channel feeds; its length is the interleave stride.
     topology: ChannelTopology,
@@ -95,8 +97,8 @@ pub struct FileIn {
     sample_rate: SampleRate,
     total_frames: Option<u64>,
     /// Decoded-but-unconsumed frames from the last packet, interleaved at the
-    /// file's own width. Frame `f` channel `c` is at `leftover[f * width + c]`.
-    leftover: Vec<f32>,
+    /// file's own width.
+    leftover: Vec<S>,
     /// Read offset into `leftover` in frames; `[leftover_pos..]` is unconsumed.
     leftover_pos: usize,
     /// Next file sample-frame a sequential read produces.
@@ -126,14 +128,14 @@ pub struct FileIn {
     exact_length: bool,
 }
 
-impl std::fmt::Debug for FileIn {
+impl<S: Sample> std::fmt::Debug for FileIn<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FileIn")
             .field("track_id", &self.track_id)
             .field("topology", &self.topology)
             .field("sample_rate", &self.sample_rate)
             .field("total_frames", &self.total_frames)
-            .field("leftover_frames", &(self.leftover.len() / self.width()))
+            .field("leftover_frames", &self.leftover_frames())
             .field("leftover_pos", &self.leftover_pos)
             .field("cursor", &self.cursor)
             .field("seekable", &self.seekable)
@@ -144,7 +146,7 @@ impl std::fmt::Debug for FileIn {
     }
 }
 
-impl FileIn {
+impl<S: Sample> FileIn<S> {
     /// Returns the file's length in frames, if the container reports it.
     pub fn total_frames(&self) -> Option<Samples> {
         self.total_frames.map(frames)
@@ -158,7 +160,7 @@ impl FileIn {
 
     /// Which speaker each channel of the interleaved frames feeds, in channel
     /// order: what the container names, or [`ChannelTopology::assumed`] for
-    /// the count it states (see [`Wave::read`](crate::Wave::read)). Its width is
+    /// the count it states (see [`read_wave`](crate::read_wave)). Its width is
     /// [`layout`](Source::layout)'s.
     pub fn topology(&self) -> &ChannelTopology {
         &self.topology
@@ -170,14 +172,14 @@ impl FileIn {
         self.placement
     }
 
-    /// The interleave stride: the file's channel count.
-    fn width(&self) -> usize {
-        usize::from(self.topology.width().count())
+    /// Frames held in `leftover`, consumed or not.
+    fn leftover_frames(&self) -> usize {
+        Samples::from_interleaved_len(self.leftover.len(), self.topology.width()).get()
     }
 
     /// Returns whether [`seek`](Self::seek) can serve arbitrary positions:
     /// `true` when the container reports a frame count. When `false`, load the
-    /// whole file with [`Wave::read`](crate::Wave::read) instead.
+    /// whole file with [`read_wave`](crate::read_wave) instead.
     pub fn seekable(&self) -> bool {
         self.seekable
     }
@@ -185,7 +187,7 @@ impl FileIn {
     /// Opens `path` at its first audio track, positioned at frame 0.
     ///
     /// Probes the container and creates a decoder; no audio is decoded yet.
-    /// It reads the same track [`Wave::read`](crate::Wave::read) decodes.
+    /// It reads the same track [`read_wave`](crate::read_wave) decodes.
     ///
     /// # Errors
     ///
@@ -205,7 +207,7 @@ impl FileIn {
         // the demuxer).
         let (topology, placement) = topology_of(params.channels.as_ref());
 
-        let decoder = PacketDecoder::new(params).map_err(convert)?;
+        let decoder = PacketDecoder::<S>::new(params).map_err(convert)?;
 
         // Seekable only when the container reports a frame count. Formats
         // without n_frames (some VBR/streamed) fall back to whole-file load.
@@ -240,7 +242,7 @@ impl FileIn {
     /// Unconsumed retained frames.
     #[inline]
     fn leftover_len(&self) -> usize {
-        (self.leftover.len() / self.width()).saturating_sub(self.leftover_pos)
+        self.leftover_frames().saturating_sub(self.leftover_pos)
     }
 
     /// Refill `leftover` from the next packet of the selected track that
@@ -283,22 +285,20 @@ impl FileIn {
                 continue;
             }
             self.origin_ts.get_or_insert(ts);
-            let planes = self.decoder.planes();
-            let num_ch = planes.len();
-
-            self.leftover.clear();
-            self.leftover_pos = 0;
             // A packet whose channel count disagrees with `open`'s is
             // zero-filled up to the file's width, so the stride stays constant.
-            let width = usize::from(self.topology.width().count());
-            let ch = num_ch.min(width);
-            self.leftover.resize(frames * width, 0.0);
-            for (c, plane) in planes.iter().take(ch).enumerate() {
-                let dst = self.leftover[c..].iter_mut().step_by(width);
-                for (d, &s) in dst.zip(plane) {
-                    *d = s;
-                }
-            }
+            let layout = self.topology.width();
+            let planes = self
+                .decoder
+                .planes_of_width(usize::from(layout.count()), frames);
+            self.leftover.clear();
+            self.leftover_pos = 0;
+            self.leftover
+                .resize(Samples(frames).interleaved_len(layout), S::SILENCE);
+            let planes = Planes::from_vecs(planes).expect("every plane holds the packet's frames");
+            let out = InterleavedMut::new(&mut self.leftover, layout)
+                .expect("the buffer holds whole frames");
+            interleave(planes, out).expect("both are the file's width and the packet's frames");
             return Ok((frames, ts));
         }
     }
@@ -325,17 +325,25 @@ impl FileIn {
     /// channel width, interleaved, and returns how many frames were produced
     /// (fewer than fit only at the end of the file).
     ///
-    /// `out.len()` should be a multiple of the file's channel count; a
-    /// partial trailing frame is not filled. This is the fallible form of
-    /// [`pull`](Source::pull).
+    /// This is the fallible form of [`pull`](Source::pull).
     ///
     /// # Errors
     ///
-    /// A [`DecodeError`] if reading or decoding a packet fails. Frames filled
+    /// [`DecodeError::Width`] if `out` is not the file's width. Otherwise a
+    /// [`DecodeError`] if reading or decoding a packet fails. Frames filled
     /// before the failure are returned as `Ok` first, and the failure comes
     /// with the next call (and stays, see [`error`](Self::error)). The same
     /// goes for a FLAC stream that ends before its frame count.
-    pub fn fill_sequential_interleaved(&mut self, out: &mut [f32]) -> Result<Samples, DecodeError> {
+    pub fn fill_sequential_interleaved(
+        &mut self,
+        out: InterleavedMut<'_, S>,
+    ) -> Result<Samples, DecodeError> {
+        if out.layout() != self.topology.width() {
+            return Err(DecodeError::Width {
+                file: self.topology.width(),
+                view: out.layout(),
+            });
+        }
         if let Some(fault) = &self.fault {
             return Err(fault.clone());
         }
@@ -359,9 +367,9 @@ impl FileIn {
 
     /// [`fill_sequential_interleaved`](Self::fill_sequential_interleaved),
     /// keeping the frames filled before a decode error.
-    fn fill(&mut self, out: &mut [f32]) -> (usize, Option<DecodeError>) {
-        let ch = self.width();
-        let capacity_frames = out.len() / ch;
+    fn fill(&mut self, mut out: InterleavedMut<'_, S>) -> (usize, Option<DecodeError>) {
+        let layout = self.topology.width();
+        let capacity_frames = out.frames().get();
         let mut filled = 0usize;
 
         while filled < capacity_frames {
@@ -369,9 +377,11 @@ impl FileIn {
             if self.leftover_len() > 0 {
                 let avail = self.leftover_len();
                 let want = (capacity_frames - filled).min(avail);
-                let src_start = self.leftover_pos * ch;
-                let src = &self.leftover[src_start..src_start + want * ch];
-                out[filled * ch..(filled + want) * ch].copy_from_slice(src);
+                let held = Interleaved::new(&self.leftover, layout)
+                    .expect("the buffer holds whole frames");
+                let src = held.slice(Samples(self.leftover_pos)..Samples(self.leftover_pos + want));
+                let mut dst = out.slice_mut(Samples(filled)..Samples(filled + want));
+                dst.samples_mut().copy_from_slice(src.samples());
                 self.leftover_pos += want;
                 filled += want;
                 self.cursor += want as u64;
@@ -525,10 +535,10 @@ impl FileIn {
 /// [`topology`](FileIn::topology).
 ///
 /// A file is synchronous, so it never answers [`Pull::Starved`].
-impl FiniteSource for FileIn {}
+impl<S: Sample> FiniteSource for FileIn<S> {}
 
-impl Source for FileIn {
-    type Sample = f32;
+impl<S: Sample> Source for FileIn<S> {
+    type Sample = S;
 
     /// The file's own width, which is what [`pull`](Self::pull) produces.
     fn layout(&self) -> ChannelLayout {
@@ -543,7 +553,7 @@ impl Source for FileIn {
     /// decode fault come first, and the fault is the next pull's
     /// [`Failed`](Pull::Failed). A pull that finds nothing left and no fault is
     /// [`Ended`](Pull::Ended).
-    fn pull(&mut self, mut out: InterleavedMut<'_, f32>) -> Pull {
+    fn pull(&mut self, out: InterleavedMut<'_, S>) -> Pull {
         if out.layout() != self.layout() {
             return Pull::Failed;
         }
@@ -552,7 +562,7 @@ impl Source for FileIn {
         if self.fault.is_some() {
             return Pull::Failed;
         }
-        let (filled, fault) = self.fill(out.samples_mut());
+        let (filled, fault) = self.fill(out);
         self.fault = fault;
         if filled > 0 {
             Pull::Frames(Samples(filled))

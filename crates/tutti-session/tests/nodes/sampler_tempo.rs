@@ -3,6 +3,7 @@
 //! feature (`SessionNode` for the sampler's nodes).
 
 use std::sync::Arc;
+use tutti_buffers::Interleaved;
 
 use tutti_buffers::InterleavedMut;
 use tutti_session::{OutPort, Root, Session};
@@ -47,9 +48,10 @@ fn a_sampler_node_added_to_the_graph_follows_the_sessions_tempo_map() {
     use tutti_tempo::{TempoMap, TempoPoint, Transition};
     use tutti_types::{Beat, Bpm};
 
-    let mut wave = tutti_codec::Wave::new(1, SampleRate::of(RATE));
+    let mut wave = tutti_buffers::Wave::new(1, SampleRate::of(RATE));
     for i in 0..RATE as usize * 2 {
-        wave.push_frame(&[i as f32 / 131_072.0]);
+        wave.append(Interleaved::new(&[i as f32 / 131_072.0], wave.layout()).unwrap())
+            .unwrap();
     }
     let source = MemorySource::placed(Arc::new(wave), VoiceWindow::from(Beat(0.0)))
         .expect("a placeable wave");

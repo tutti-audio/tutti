@@ -1016,7 +1016,7 @@ fn the_update_sweeps_each_nodes_reclaimer_while_it_is_in_the_graph() {
 fn park_a_retired_slot(s: &mut DetachedSession, handle: &tutti_sampler::VoicePoolHandle) {
     use tutti_sampler::{MemorySource, Playback, SlotId, VoiceWindow};
     let source = MemorySource::placed(
-        Arc::new(tutti_codec::Wave::new(1, SampleRate::SR_48K)),
+        Arc::new(tutti_buffers::Wave::new(1, SampleRate::SR_48K)),
         VoiceWindow::from(tutti_types::Beat(0.0)),
     )
     .expect("a placeable wave");

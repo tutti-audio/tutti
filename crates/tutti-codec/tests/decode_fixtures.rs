@@ -13,8 +13,9 @@
 
 use std::path::PathBuf;
 
+use tutti_buffers::Wave;
 use tutti_buffers::{InterleavedMut, Pull, Source};
-use tutti_codec::{FileIn, Wave};
+use tutti_codec::{FileIn, read_wave, read_wave_bytes, read_wave_metadata};
 use tutti_types::Samples;
 
 /// The frames one pull produced, `0` for any verdict (these loops read until
@@ -113,7 +114,7 @@ const GENERATED: &[(&str, f64, usize, &[&[Partial]], f64)] = &[
 #[test]
 fn lossless_fixtures_decode_to_their_generator() {
     for &(name, rate, frames, channels, step) in GENERATED {
-        let w = Wave::read(asset(name)).expect("load");
+        let w = read_wave::<f32>(asset(name)).expect("load");
         assert_eq!(w.channels(), channels.len(), "{name}: channels");
         assert_eq!(w.sample_rate().get(), rate, "{name}: rate");
         assert_eq!(w.len().get(), frames, "{name}: frames");
@@ -156,7 +157,7 @@ fn lossy_fixtures_decode_to_the_generator_level() {
     ];
     let db = |got: f64, want: f64| 20.0 * (got / want).log10();
     for &name in LOSSY {
-        let w = Wave::read(asset(name)).expect("load");
+        let w = read_wave::<f32>(asset(name)).expect("load");
         assert_eq!(w.channels(), 2, "{name}: channels");
         assert!(
             (11_025..=11_025 + 2_304).contains(&w.len().get()),
@@ -170,7 +171,7 @@ fn lossy_fixtures_decode_to_the_generator_level() {
                 .sum::<f64>()
                 .sqrt();
             let peak: f64 = partials.iter().map(|&(_, a)| a.abs()).sum();
-            let ch = w.channel(c);
+            let ch = w.channel(c).samples();
             let got_rms = (ch.iter().map(|&s| f64::from(s) * f64::from(s)).sum::<f64>()
                 / ch.len() as f64)
                 .sqrt();
@@ -198,9 +199,9 @@ fn lossy_fixtures_decode_to_the_generator_level() {
 #[test]
 fn the_stream_reads_every_frame_the_load_does() {
     for &name in FIXTURES {
-        let w = Wave::read(asset(name)).expect("load");
+        let w = read_wave::<f32>(asset(name)).expect("load");
         let ch = w.channels();
-        let mut dec = FileIn::open(asset(name)).expect("open");
+        let mut dec = FileIn::<f32>::open(asset(name)).expect("open");
         let mut buf = vec![0.0f32; 333 * ch];
         let mut at = 0usize;
         loop {
@@ -229,16 +230,16 @@ fn the_stream_reads_every_frame_the_load_does() {
     }
 }
 
-/// The header agrees with the decode: `Wave::read_metadata`'s width, topology, rate **and
-/// frame count** are what `Wave::read` actually produces, for every fixture.
+/// The header agrees with the decode: `read_wave_metadata`'s width, topology, rate **and
+/// frame count** are what `read_wave` actually produces, for every fixture.
 ///
 /// Restores the fork's `probe_metadata_matches_full_load`, which the move
 /// deleted along with the fork's WAV writer it depended on.
 #[test]
 fn the_probe_agrees_with_the_full_load() {
     for &name in FIXTURES {
-        let w = Wave::read(asset(name)).expect("load");
-        let meta = Wave::read_metadata(asset(name)).expect("probe");
+        let w = read_wave::<f32>(asset(name)).expect("load");
+        let meta = read_wave_metadata(asset(name)).expect("probe");
         assert_eq!(meta.channels(), w.channels(), "{name}: probed width");
         assert_eq!(meta.topology, *w.topology(), "{name}: probed topology");
         assert_eq!(meta.sample_rate, w.sample_rate(), "{name}: probed rate");
@@ -286,7 +287,7 @@ fn lag_of(w: &Wave, start: usize, out: &[f32]) -> Option<i64> {
 #[test]
 fn seek_lands_on_the_whole_file_load_frames() {
     for &name in FIXTURES {
-        let w = Wave::read(asset(name)).expect("load");
+        let w = read_wave::<f32>(asset(name)).expect("load");
         let ch = w.channels();
         let len = w.len().get();
         let starts = [1, 700, len / 3, len - 100];
@@ -313,25 +314,25 @@ fn seek_lands_on_the_whole_file_load_frames() {
         };
 
         for &start in &starts {
-            let mut dec = FileIn::open(asset(name)).expect("open");
+            let mut dec = FileIn::<f32>::open(asset(name)).expect("open");
             assert!(dec.seekable(), "{name}: every fixture must be seekable");
             check(&mut dec, start, "fresh");
         }
-        let mut dec = FileIn::open(asset(name)).expect("open");
+        let mut dec = FileIn::<f32>::open(asset(name)).expect("open");
         for &start in starts.iter().rev() {
             check(&mut dec, start, "repeated");
         }
     }
 }
 
-/// `Wave::from_bytes`, which probes from the bytes alone with no extension
+/// `read_wave_bytes`, which probes from the bytes alone with no extension
 /// hint, decodes to the same samples as the path-based load, for every fixture.
 #[test]
 fn from_bytes_decodes_what_load_decodes() {
     for &name in FIXTURES {
-        let want = Wave::read(asset(name)).expect("load");
+        let want = read_wave::<f32>(asset(name)).expect("load");
         let bytes = std::fs::read(asset(name)).expect("read fixture");
-        let decoded = Wave::from_bytes(bytes).expect("decode bytes");
+        let decoded = read_wave_bytes::<f32>(bytes).expect("decode bytes");
         assert_eq!(decoded.channels(), want.channels(), "{name}: channels");
         assert_eq!(decoded.len(), want.len(), "{name}: frames");
         assert_eq!(decoded.sample_rate(), want.sample_rate(), "{name}: rate");
@@ -344,5 +345,72 @@ fn from_bytes_decodes_what_load_decodes() {
                 );
             }
         }
+    }
+}
+
+/// The integers `hound`, an independent reader, finds in a PCM WAV, one `Vec`
+/// per channel.
+fn hound_planes(name: &str) -> (Vec<Vec<i32>>, u16) {
+    let mut reader = hound::WavReader::open(asset(name)).expect("hound opens the fixture");
+    let spec = reader.spec();
+    let mut planes = vec![Vec::new(); usize::from(spec.channels)];
+    for (i, s) in reader.samples::<i32>().enumerate() {
+        planes[i % usize::from(spec.channels)].push(s.expect("a sample"));
+    }
+    (planes, spec.bits_per_sample)
+}
+
+/// A decode as the file's own format keeps every integer the file holds: a
+/// 16-bit WAV read as `i16` and a 24-bit one as `I24` are the samples `hound`
+/// finds in the file, and the header names those formats.
+#[test]
+fn a_native_decode_returns_the_files_exact_integers() {
+    use tutti_buffers::{I24, SampleFormat};
+    let meta = read_wave_metadata(asset("stereo_s16.wav")).expect("probe");
+    assert_eq!(meta.format, SampleFormat::I16);
+    let (want, bits) = hound_planes("stereo_s16.wav");
+    assert_eq!(bits, 16);
+    let wave = read_wave::<i16>(asset("stereo_s16.wav")).expect("decode");
+    for (c, plane) in want.iter().enumerate() {
+        let got: Vec<i32> = wave.channel(c).iter().map(|&s| i32::from(s)).collect();
+        assert_eq!(&got, plane, "16-bit channel {c}");
+    }
+
+    let meta = read_wave_metadata(asset("stereo_s24.wav")).expect("probe");
+    assert_eq!(meta.format, SampleFormat::I24);
+    let (want, bits) = hound_planes("stereo_s24.wav");
+    assert_eq!(bits, 24);
+    let wave = read_wave::<I24>(asset("stereo_s24.wav")).expect("decode");
+    for (c, plane) in want.iter().enumerate() {
+        let got: Vec<i32> = wave.channel(c).iter().map(|s| s.get()).collect();
+        assert_eq!(&got, plane, "24-bit channel {c}");
+    }
+}
+
+/// `FileIn` as `i16` streams the same integers, across packets.
+#[test]
+fn a_native_stream_returns_the_files_exact_integers() {
+    let (want, _) = hound_planes("stereo_s16.wav");
+    let mut dec = FileIn::<i16>::open(asset("stereo_s16.wav")).expect("open");
+    let mut got = vec![Vec::new(); want.len()];
+    let mut buf = vec![0i16; 1000 * want.len()];
+    loop {
+        let out = InterleavedMut::new(&mut buf, dec.layout()).unwrap();
+        let Pull::Frames(n) = dec.pull(out) else {
+            break;
+        };
+        for (i, &s) in buf[..n.interleaved_len(dec.layout())].iter().enumerate() {
+            got[i % want.len()].push(i32::from(s));
+        }
+    }
+    assert_eq!(got, want);
+}
+
+/// A lossy codec's samples are floats, and the header says so.
+#[test]
+fn a_lossy_file_is_native_float() {
+    for name in ["stereo.mp3", "stereo.ogg"] {
+        let meta = read_wave_metadata(asset(name)).expect("probe");
+        assert_eq!(meta.format, tutti_buffers::SampleFormat::F32, "{name}");
     }
 }

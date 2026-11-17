@@ -11,6 +11,7 @@
 //! Each render hands its node blocks of `BLOCK` frames on a render clock that
 //! counts frames (as an export's does), moved after each.
 
+use tutti_buffers::Interleaved;
 use tutti_buffers::Planes;
 use tutti_sampler::VoiceWindow;
 
@@ -749,9 +750,10 @@ fn a_fork_matches_the_memory_tier_bit_for_bit() {
         if case.reverse {
             reverse(&mut rig);
         }
-        let mut wave = tutti_codec::Wave::new(2, SampleRate::of(case.file_rate as f64));
+        let mut wave = tutti_buffers::Wave::new(2, SampleRate::of(case.file_rate as f64));
         for i in 0..LEN {
-            wave.push_frame(&[value(i), -value(i)]);
+            wave.append(Interleaved::new(&[value(i), -value(i)], wave.layout()).unwrap())
+                .unwrap();
         }
         let clock = clock_at(SR);
         let mut source =

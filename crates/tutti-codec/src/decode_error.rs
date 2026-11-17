@@ -6,6 +6,7 @@ use std::borrow::Cow;
 use std::io;
 
 use thiserror::Error;
+use tutti_types::ChannelLayout;
 
 /// Why a file could not be probed, decoded or sought.
 ///
@@ -46,6 +47,15 @@ pub enum DecodeError {
     /// the rate supplies it where it chooses to read.
     #[error("the audio track states no sample rate")]
     NoSampleRate,
+
+    /// A view to fill is not as wide as the file.
+    #[error("the file is {file:?} wide and the view {view:?}")]
+    Width {
+        /// The file's width.
+        file: ChannelLayout,
+        /// The view's width.
+        view: ChannelLayout,
+    },
 }
 
 impl Clone for DecodeError {
@@ -59,6 +69,10 @@ impl Clone for DecodeError {
             Self::Limit(m) => Self::Limit(m.clone()),
             Self::NoAudioTrack => Self::NoAudioTrack,
             Self::NoSampleRate => Self::NoSampleRate,
+            Self::Width { file, view } => Self::Width {
+                file: *file,
+                view: *view,
+            },
         }
     }
 }

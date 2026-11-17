@@ -44,7 +44,7 @@ pub enum Tier {
 #[non_exhaustive]
 pub enum AudioEntry {
     /// The file, decoded whole; every handle shares the `Arc`.
-    Resident(Arc<tutti_codec::Wave>),
+    Resident(Arc<tutti_buffers::Wave>),
     /// The file's header, read; its samples stay on disk until a stream opens
     /// ([`Session::open_stream`](crate::Session::open_stream) over
     /// [`StreamInfo::path`]).
@@ -193,7 +193,7 @@ fn streamed(path: PathBuf, facts: tutti_sampler::SampleFacts) -> AudioEntry {
 
 #[cfg(all(feature = "sampler", codec))]
 fn resident(path: PathBuf) -> Result<AudioEntry, LoadError> {
-    tutti_codec::Wave::read(path)
+    tutti_codec::read_wave::<f32>(path)
         .map(|wave| AudioEntry::Resident(Arc::new(wave)))
         .map_err(|error| LoadError::Decode(Arc::new(error)))
 }

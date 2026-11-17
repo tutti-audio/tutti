@@ -32,7 +32,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crossbeam_channel::Sender;
-use tutti_codec::Wave;
+use tutti_buffers::Wave;
 use tutti_rt::{PriorityRequest, StopToken, ThreadHandle, spawn_named};
 
 use super::StreamerSender;
@@ -213,12 +213,12 @@ fn load_wave(
         return Some(cached);
     }
 
-    // `Wave::read` is `tutti-codec`'s decode path, which is compiled only when a
+    // `read_wave` is `tutti-codec`'s decode path, which is compiled only when a
     // codec feature is on — calling it unconditionally breaks the
     // `--no-default-features` build.
     #[cfg(codec)]
     {
-        if let Ok(w) = Wave::read(file_path) {
+        if let Ok(w) = tutti_codec::read_wave::<f32>(file_path) {
             let arc_wave = Arc::new(w);
             let bytes = arc_wave.len().get() as u64 * arc_wave.channels() as u64 * 4;
             meter.record_read(bytes, metrics);

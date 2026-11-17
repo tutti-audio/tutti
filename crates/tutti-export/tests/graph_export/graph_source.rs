@@ -23,6 +23,7 @@
 
 use crate::support;
 use crate::support::{EncodeConfig, ExportConfig, RenderConfig, write_buffers};
+use tutti_buffers::Interleaved;
 use tutti_types::MaxBlock;
 
 use std::sync::Arc;
@@ -660,10 +661,11 @@ impl Node for BeatPorts {
 
 /// A 440 Hz sine at the render's rate, one second long: a plain wave table,
 /// so a voice reading it at unit rate reproduces it sample for sample.
-fn tone() -> Arc<tutti_codec::Wave> {
-    let mut w = tutti_codec::Wave::new(1, SampleRate::of(RATE.get()));
+fn tone() -> Arc<tutti_buffers::Wave> {
+    let mut w = tutti_buffers::Wave::new(1, SampleRate::of(RATE.get()));
     for i in 0..RATE.get() as usize {
-        w.push_frame(&[tone_at(i)]);
+        w.append(Interleaved::new(&[tone_at(i)], w.layout()).unwrap())
+            .unwrap();
     }
     Arc::new(w)
 }

@@ -13,12 +13,13 @@
 //! was swapped" would pass vacuously the day the position derives from
 //! somewhere else.
 
+use tutti_buffers::Mono;
 use tutti_sampler::VoiceWindow;
 
 use std::sync::Arc;
 use tutti_types::MaxBlock;
 
-use tutti_codec::Wave;
+use tutti_buffers::Wave;
 use tutti_graph::NodeKey;
 use tutti_graph::{
     Cx, Editor, Executor, ForkByClone, ForkMode, ForkTarget, IntoNode, Io, Node, Prepare, Shape,
@@ -31,11 +32,13 @@ use tutti_types::{Beat, Bpm, ChannelLayout, SampleRate, Samples};
 const RATE: SampleRate = SampleRate::SR_44K1;
 
 fn ramp_wave() -> Arc<Wave> {
-    Arc::new(Wave::from_samples(
+    Arc::new(Wave::from_mono(
         SampleRate::SR_44K1,
-        &(0..4_096)
-            .map(|i| (i as f32 + 1.0) / 4_096.0)
-            .collect::<Vec<_>>(),
+        Mono::new(
+            &(0..4_096)
+                .map(|i| (i as f32 + 1.0) / 4_096.0)
+                .collect::<Vec<_>>(),
+        ),
     ))
 }
 

@@ -4,8 +4,9 @@
 //! forks only while its voices are the ones it was built with.
 
 use std::sync::Arc;
+use tutti_buffers::Interleaved;
 
-use tutti_codec::Wave;
+use tutti_buffers::Wave;
 use tutti_graph::ForkError;
 use tutti_sampler::{Clip, Loop, MemorySource, Playback, SlotId, VoicePool};
 use tutti_session::{Bounce, BounceError, BounceTail, DetachedSession, Range, Root, Session};
@@ -27,7 +28,8 @@ fn session() -> DetachedSession {
 fn constant(frames: usize, level: f32) -> Arc<Wave> {
     let mut wave = Wave::new(1, SampleRate::of(RATE));
     for _ in 0..frames {
-        wave.push_frame(&[level]);
+        wave.append(Interleaved::new(&[level], wave.layout()).unwrap())
+            .unwrap();
     }
     Arc::new(wave)
 }

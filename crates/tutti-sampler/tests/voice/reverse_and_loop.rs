@@ -19,13 +19,14 @@
 //! The one exception is the crossfade seam test, which needs a signal whose
 //! discontinuity is audible; it uses two constants so the seam is a step.
 
+use tutti_buffers::Interleaved;
 use tutti_buffers::Planes;
 use tutti_sampler::testing::loop_frames;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use tutti_codec::Wave;
+use tutti_buffers::Wave;
 use tutti_graph::{Env, Node, TransportChanges, contract};
 use tutti_sampler::{Direction, MemorySource, MemorySourceConfig, Playback, SlotId, VoicePool};
 use tutti_types::{
@@ -44,7 +45,8 @@ fn ramp(len: usize) -> Arc<Wave> {
     let mut w = Wave::new(2, SampleRate::of(SR));
     for i in 0..len {
         let v = i as f32 / len as f32;
-        w.push_frame(&[v, v]);
+        w.append(Interleaved::new(&[v, v], w.layout()).unwrap())
+            .unwrap();
     }
     Arc::new(w)
 }
@@ -276,7 +278,8 @@ fn reverse_past_the_first_frame_is_silent() {
     let mut w = Wave::new(2, SampleRate::of(SR));
     for i in 0..LEN {
         let v = (i + 1) as f32 / LEN as f32;
-        w.push_frame(&[v, v]);
+        w.append(Interleaved::new(&[v, v], w.layout()).unwrap())
+            .unwrap();
     }
     let (mut pool, clock) = reversed_pool(Arc::new(w), Direction::Reverse);
     let out = render_placed(&mut pool, &clock, 16);
@@ -303,7 +306,8 @@ fn sine(len: usize) -> Arc<Wave> {
     let mut w = Wave::new(2, SampleRate::of(SR));
     for i in 0..len {
         let v = (std::f64::consts::TAU * i as f64 / PERIOD as f64).sin() as f32;
-        w.push_frame(&[v, v]);
+        w.append(Interleaved::new(&[v, v], w.layout()).unwrap())
+            .unwrap();
     }
     Arc::new(w)
 }
@@ -514,7 +518,8 @@ fn a_crossfaded_loop_holds_its_level_across_the_seam() {
     // same value, so a correct linear crossfade between them is flat at 0.5.
     let mut w = Wave::new(2, SampleRate::of(SR));
     for _ in 0..LEN {
-        w.push_frame(&[0.5f32, 0.5f32]);
+        w.append(Interleaved::new(&[0.5f32, 0.5f32], w.layout()).unwrap())
+            .unwrap();
     }
     let mut source = looping_source(Arc::new(w), start, end, XFADE);
 
@@ -662,7 +667,8 @@ fn reverse_and_loop_work_at_mono_width() {
     const LEN: usize = 2048;
     let mut w = Wave::new(1, SampleRate::of(SR));
     for i in 0..LEN {
-        w.push_frame(&[i as f32 / LEN as f32]);
+        w.append(Interleaved::new(&[i as f32 / LEN as f32], w.layout()).unwrap())
+            .unwrap();
     }
     let mut source = MemorySource::with_config(
         Arc::new(w),

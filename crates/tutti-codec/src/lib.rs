@@ -1,7 +1,7 @@
 #![doc = include_str!("../README.md")]
 //! **The audio file codecs**: WAV, AIFF, FLAC and Ogg Vorbis out behind one
-//! `Encoder`, over any `Write + Seek` sink; WAV, FLAC, MP3 and Ogg in as a `Wave`
-//! or a streaming `FileIn`.
+//! `Encoder`, over any `Write + Seek` sink; WAV, FLAC, MP3 and Ogg in as a
+//! [`Wave`](tutti_buffers::Wave) or a streaming `FileIn`.
 //!
 //! ## What is here
 //!
@@ -23,13 +23,15 @@
 //!   writes are skipped and return `SinkFailed`) and `finalize` returns that
 //!   error, else the result of `finish`. It writes in place rather than staged,
 //!   because a recording cut short is worth keeping.
-//! - `Wave::write(path, format)` saves a `Wave` at its own rate and topology.
-//! - Decoding is plain functions and types of our own, no trait: `Wave::read`
+//! - `write_wave(&wave, path, format)` saves a `Wave` at its own rate and topology.
+//! - Decoding is plain functions and types of our own, no trait: `read_wave`
 //!   decodes a file into a `Wave` (a resident, planar sample buffer),
 //!   `Wave::topology` and `FileIn::topology` say which speaker each channel feeds,
-//!   `Wave::read_metadata` reads a header, `Wave::from_bytes` decodes a file held
-//!   in memory, and `FileIn` streams a file as a `Source` with a
-//!   sample-accurate `seek`. A failure is a `DecodeError`. `symphonia` does the
+//!   `read_wave_metadata` reads a header (and the sample format the file holds
+//!   its samples in), `read_wave_bytes` decodes a file held in memory, and
+//!   `FileIn` streams a file as a `Source` with a sample-accurate `seek`. Both
+//!   are generic over the sample format `S` they hand back: the file's own
+//!   (`WaveMetadata::format`) is exact, so an app matches on it once at open. A failure is a `DecodeError`. `symphonia` does the
 //!   work behind them, in `src/decode/` alone, and none of its types is in a
 //!   signature or an error. `can_decode` and `decodable_extensions` say what this
 //!   build reads. Each `decode-*` feature (`decode-wav`, `decode-flac`,
@@ -75,15 +77,16 @@ mod test_sink;
 mod vorbis;
 #[cfg(feature = "encode-wav")]
 mod wav;
-mod wave;
 #[cfg(any(feature = "encode-wav", decode))]
 mod wave_mask;
+#[cfg(encode)]
+mod wave_write;
 mod writer;
 
 #[cfg(feature = "encode-aiff")]
 pub use aiff::AiffWriter;
 #[cfg(decode)]
-pub use decode::{FileIn, WaveMetadata};
+pub use decode::{FileIn, WaveMetadata, read_wave, read_wave_bytes, read_wave_metadata};
 pub use decode::{can_decode, decodable_extensions};
 pub use decode_error::DecodeError;
 pub use encoder::{Encoder, Finalized};
@@ -98,5 +101,6 @@ pub use spec::Spec;
 pub use vorbis::VorbisWriter;
 #[cfg(feature = "encode-wav")]
 pub use wav::WavWriter;
-pub use wave::Wave;
+#[cfg(encode)]
+pub use wave_write::write_wave;
 pub use writer::FormatWriter;
