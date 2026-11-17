@@ -6,7 +6,7 @@
 //! keeps it off is the graph: the executor moves a retired unit into the commit box it sends
 //! back (`tutti-graph`'s `exec.rs`, the `retired` pushes in `apply_pending`), the editor's
 //! `collect` drops it on the control side, and a unit dropped inside the audio scope panics in
-//! a debug build (`NodeBox::drop` -> `RtScope::check_outside`).
+//! a debug build (`NodeBox`'s `ControlDrop` field).
 //!
 //! The test removes the node while the engine renders, applies the removal and renders the next
 //! blocks inside `assert_no_alloc`, reads the plugin's close count (the plugin's own view: 0,

@@ -74,7 +74,7 @@
 //! **Thread and OS**
 //!
 //! - [`RtScope`] — a per-thread "inside a block" marker that a `Drop` impl
-//!   checks ([`RtScope::check_outside`]).
+//!   checks ([`RtScope::check_outside`]), or a [`ControlDrop`] field does.
 //! - [`with_no_denormals`] — runs a closure with subnormals flushed to zero and
 //!   restores the mode after, unwinding included.
 //! - [`MainThreadMarker`] — proof that the holder is on the process's main
@@ -203,7 +203,7 @@ pub use reclaim::Reclaim;
 pub use render_count::{RenderCount, RenderGuard};
 pub use request_word::{RequestBit, RequestBitOutOfRange, RequestBits, RequestWord};
 pub use ring::{Drain, Iter, Overflow, PushError, Returned, RingReader, RingWriter, ring};
-pub use scope::{RtScope, RtScopeGuard};
+pub use scope::{ControlDrop, RtScope, RtScopeGuard};
 pub use seq_cell::{Contended, SeqReader, SeqWriter};
 pub use sleep::sleep_until_ns;
 pub use spin::BlockWaits;
