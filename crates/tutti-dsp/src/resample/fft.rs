@@ -1,4 +1,5 @@
-//! A fixed-input FFT resampler over [`RealFft`].
+//! A fixed-input FFT resampler over [`RealFft`], generic over the float `F`
+//! (`f32` or `f64`) it runs in, `f32` by default.
 //!
 //! Overlap-add: each `fft_size_in`-frame block is zero-padded to twice its
 //! length, transformed, multiplied by a windowed-sinc low-pass, truncated or

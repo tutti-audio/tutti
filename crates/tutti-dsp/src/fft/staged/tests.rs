@@ -155,3 +155,23 @@ fn the_steps_keep_their_state_in_the_scratch() {
     };
     assert!(same(&bx, &alone_x) && same(&by, &alone_y));
 }
+
+/// At `f64` a split transform of a bin-centred cosine puts `size / 2` in its
+/// bin and zero elsewhere, to far below `f32` precision.
+#[test]
+fn an_f64_split_transform_finds_the_tone_at_f64_precision() {
+    let (size, k) = (128usize, 7usize);
+    let x: Vec<f64> = (0..size)
+        .map(|t| (2.0 * PI * (k * t) as f64 / size as f64).cos())
+        .collect();
+    let f = StagedRealFft::<f64>::new(size, 4);
+    let mut scratch = f.new_scratch();
+    let mut bins = vec![Complex::new(0.0, 0.0); f.bins()];
+    for step in 0..f.forward_steps() {
+        f.forward_step(step, Mono::new(&x), &mut bins, &mut scratch);
+    }
+    for (b, v) in bins.iter().enumerate() {
+        let want = if b == k { size as f64 / 2.0 } else { 0.0 };
+        assert!((v.re - want).abs() < 1e-11 && v.im.abs() < 1e-11, "bin {b}");
+    }
+}

@@ -363,11 +363,11 @@ impl StreamingResampler {
                 scratch.clear();
                 scratch.extend_from_slice(&self.carry[c][chunk.clone()]);
             }
-            // The scratch planes are sized alike at construction, so each is a whole view.
+            // Each scratch plane is `need` frames in, `output_frames_max()` out; a
+            // channel count a `ChannelLayout` cannot hold is the only refusal.
             let produced_len = self.inner.process_into_buffer(
-                Planes::from_vecs(&self.in_scratch).expect("BUG: the input scratch is whole"),
-                PlanesMut::from_vecs(&mut self.out_scratch)
-                    .expect("BUG: the output scratch is whole"),
+                Planes::from_vecs(&self.in_scratch)?,
+                PlanesMut::from_vecs(&mut self.out_scratch)?,
             )?;
             let produced = &self.out_scratch;
             self.head += need;

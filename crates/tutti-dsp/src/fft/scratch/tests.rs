@@ -220,3 +220,28 @@ fn the_centroid_of_two_equal_tones_is_their_midpoint() {
         });
     assert!((num / den - 80.0).abs() < 0.05, "centroid {}", num / den);
 }
+
+/// At `f64` a bin-centred cosine of amplitude 1 puts `size / 2` in its bin,
+/// and a forward then an inverse is the identity, both to far below `f32`
+/// precision.
+#[test]
+fn an_f64_scratch_finds_the_tone_and_round_trips_at_f64_precision() {
+    let size = 128;
+    let bin = 9usize;
+    let input: Vec<f64> = (0..size)
+        .map(|i| (2.0 * core::f64::consts::PI * (bin * i) as f64 / size as f64).cos())
+        .collect();
+    let window = vec![1.0f64; size];
+    let mut fft = FftScratch::<f64>::new();
+    let mut bins = vec![Complex::new(0.0, 0.0); size / 2 + 1];
+    fft.forward(Mono::new(&input), &window, &mut bins);
+    for (b, v) in bins.iter().enumerate() {
+        let want = if b == bin { size as f64 / 2.0 } else { 0.0 };
+        assert!((v.re - want).abs() < 1e-11 && v.im.abs() < 1e-11, "bin {b}");
+    }
+    let mut back = vec![0.0f64; size];
+    fft.inverse(&bins, MonoMut::new(&mut back));
+    for (a, b) in input.iter().zip(&back) {
+        assert!((a - b).abs() < 1e-12);
+    }
+}

@@ -10,7 +10,7 @@
 //! planner (what `realfft` always uses) picks AVX, SSE or NEON at run time, and
 //! those round differently from scalar in most bins. `realfft` cannot be given
 //! a planner, so the real-FFT passes are written out here over
-//! [`FftPlannerScalar`]. Everything else is plain `f32` Rust, which the compiler
+//! [`FftPlannerScalar`]. Everything else is plain Rust over the float `F`, which the compiler
 //! does not contract into FMAs. The transform's arithmetic is therefore
 //! CPU-independent by construction. Its twiddles come from the C library's `sin`
 //! and `cos`, so the output is the same bits across CPUs on the same OS, libm
@@ -33,10 +33,11 @@ use tutti_buffers::{Float, Mono, MonoMut, Sample};
 
 /// num-complex 0.4's complex number, re-exported from rustfft beside
 /// [`Complex32`]: a spectrum bin over the float the transform runs in.
+/// [`Complex`] and [`Complex32`] follow rustfft's semver: a rustfft bump that
+/// changes num-complex changes both.
 pub use rustfft::num_complex::Complex;
 
-/// num-complex 0.4's `Complex<f32>`, re-exported from rustfft, so it follows
-/// rustfft's semver: a rustfft bump that changes num-complex changes this type.
+/// num-complex 0.4's `Complex<f32>`, re-exported from rustfft beside [`Complex`].
 pub use rustfft::num_complex::Complex32;
 
 /// num-complex 0.4's complex number over `f64`, re-exported from rustfft beside
@@ -105,8 +106,11 @@ enum Plans<F: Float + FftNum> {
 
 /// Forward and inverse plans for one real frame length.
 ///
-/// Generic over the [`Float`] it runs in, `f32` by default. The module docs
-/// (above) state the determinism guarantee.
+/// Generic over the float `F` it runs in, `f32` by default: `F` is `f32` or
+/// `f64`, the implementors of tutti-buffers' sealed [`Float`]. `FftNum` is in
+/// the bound because the plan is rustfft's, and rustfft implements it for
+/// exactly those two. The module docs (above) state the determinism
+/// guarantee.
 pub struct RealFft<F: Float + FftNum = f32> {
     size: usize,
     plans: Arc<Plans<F>>,
@@ -267,6 +271,8 @@ impl<F: Float + FftNum> RealFft<F> {
     ) {
         let half = self.size / 2;
         let (work, inner) = scratch.split_at_mut(half);
+        // Packs the even and odd samples into one complex value each for the
+        // half-size FFT; not a channel interleave.
         for (point, pair) in work.iter_mut().zip(real.as_chunks::<2>().0) {
             *point = Complex::new(pair[0], pair[1]);
         }
@@ -295,6 +301,8 @@ impl<F: Float + FftNum> RealFft<F> {
             work,
             &mut inner[..pass.scratch_len()],
         );
+        // Unpacks each complex value into its even and odd samples; not a
+        // channel interleave.
         for (pair, point) in real.as_chunks_mut::<2>().0.iter_mut().zip(work.iter()) {
             pair[0] = point.re;
             pair[1] = point.im;

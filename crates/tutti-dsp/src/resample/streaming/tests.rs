@@ -595,3 +595,23 @@ fn rates_of_one_whole_hz_are_no_conversion() {
         Samples(1_000_000)
     );
 }
+
+/// A channel count a `ChannelLayout` cannot hold is refused with the buffer
+/// error, not a panic.
+#[test]
+fn a_width_over_the_layout_limit_is_refused_when_a_chunk_runs() {
+    let channels = usize::from(u16::MAX) + 1;
+    let mut r = StreamingResampler::new(
+        channels,
+        SampleRate::from_hz(44_100).unwrap(),
+        SampleRate::from_hz(48_000).unwrap(),
+        ChunkSize::MIN,
+    )
+    .unwrap();
+    let planes = vec![vec![0.0f32; 64]; channels];
+    let mut out = vec![Vec::new(); channels];
+    assert!(matches!(
+        r.push(&planes, &mut out),
+        Err(ResampleError::Buffer(tutti_buffers::BufferError::Layout(_)))
+    ));
+}

@@ -202,3 +202,32 @@ fn the_transform_preserves_energy() {
         );
     }
 }
+
+/// At `f64` a bin-centred cosine of amplitude 1 puts `size / 2` in bin `k`
+/// and zero elsewhere, to far below `f32` precision, for an even and an odd
+/// size.
+#[test]
+fn an_f64_cosine_lands_in_its_bin_at_f64_precision() {
+    for n in [64usize, 63] {
+        let k = 5;
+        let frame: Vec<f64> = (0..n)
+            .map(|t| (2.0 * PI * (k * t) as f64 / n as f64).cos())
+            .collect();
+        let fft = RealFft::<f64>::new(n);
+        let mut scratch = fft.new_scratch();
+        let mut bins = vec![Complex::new(0.0, 0.0); fft.bins()];
+        fft.forward(Mono::new(&frame), &mut bins, &mut scratch);
+        for (b, bin) in bins.iter().enumerate() {
+            let want = if b == k { n as f64 / 2.0 } else { 0.0 };
+            assert!(
+                (bin.re - want).abs() < 1e-11 && bin.im.abs() < 1e-11,
+                "size {n} bin {b}: {bin} != {want}"
+            );
+        }
+        let mut back = vec![0.0f64; n];
+        fft.inverse(&mut bins, MonoMut::new(&mut back), &mut scratch);
+        for (i, (&got, &want)) in back.iter().zip(&frame).enumerate() {
+            assert!((got / n as f64 - want).abs() < 1e-12, "size {n} sample {i}");
+        }
+    }
+}

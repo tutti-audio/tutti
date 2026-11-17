@@ -12,7 +12,7 @@
 //! for bit.
 //!
 //! **The split changes the rounding, not the result.** The sub-FFTs are
-//! rustfft's scalar ones and the combine is plain `f32` Rust, so the output
+//! rustfft's scalar ones and the combine is plain Rust over the float `F`, so the output
 //! is as CPU-independent as [`RealFft`]'s, but it is not the unsplit
 //! transform's bits: the butterflies add in another order. Both are the same
 //! transform to a few ulp of the signal's norm.
@@ -272,6 +272,8 @@ impl<F: Float + FftNum> StagedRealFft<F> {
                 if p.is_multiple_of(2) { (b, a) } else { (a, b) };
             combine(s, p, self.ways, src, dst);
             if p + 1 == s.combine.len() {
+                // Unpacks each complex value into its even and odd samples; not a
+                // channel interleave.
                 for (pair, point) in real.as_chunks_mut::<2>().0.iter_mut().zip(dst.iter()) {
                     pair[0] = point.re;
                     pair[1] = point.im;

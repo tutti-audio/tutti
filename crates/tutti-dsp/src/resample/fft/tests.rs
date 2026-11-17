@@ -217,3 +217,26 @@ fn the_filter_passes_to_its_cutoff_and_stops_at_the_taps_precision_floor() {
         }
     }
 }
+
+/// At `f64` a constant input is a constant output of the same level once the
+/// filter has filled: the low-pass has unity gain at DC, read in the
+/// passband to far below `f32` precision.
+#[test]
+fn an_f64_resampler_passes_dc_at_unity_to_f64_precision() {
+    let mut r = FftResampler::<f64>::new(44_100, 48_000, 1024, 2, 1).unwrap();
+    let input = vec![vec![1.0f64; r.input_frames_next()]];
+    let mut out = vec![vec![0.0f64; r.output_frames_max()]];
+    let mut produced = 0;
+    for _ in 0..6 {
+        produced = r
+            .process_into_buffer(
+                Planes::from_vecs(&input).unwrap(),
+                PlanesMut::from_vecs(&mut out).unwrap(),
+            )
+            .unwrap();
+    }
+    assert!(produced > 0);
+    for (i, &v) in out[0][..produced].iter().enumerate() {
+        assert!((v - 1.0).abs() < 1e-10, "frame {i}: {v}");
+    }
+}
