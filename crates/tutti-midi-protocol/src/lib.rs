@@ -15,9 +15,9 @@
 //! calls `widen` for every message that needs no state.
 //!
 //! [`Narrower`] is its inverse (M2-104 Appendix D.2), per group and channel:
-//! a Registered or Assignable Controller as its four Control Changes with the
-//! select skipped while it stays selected, and a Program Change's bank sent
-//! only when it changes. An output edge that speaks MIDI 1.0 holds one.
+//! a Registered or Assignable Controller as its four Control Changes, and a
+//! Program Change with a bank as Bank Select MSB and LSB then the Program
+//! Change, every time. An output edge that speaks MIDI 1.0 holds one.
 //!
 //! [`channel_voice`] is what an instrument reads a packet with: the channel
 //! voice message it carries as a [`Voice2`](tutti_ump::Voice2), a MIDI 1.0 one

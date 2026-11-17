@@ -1080,8 +1080,7 @@ impl InputEventList {
 
     /// The plugin is being reset: it has forgotten its notes and its MIDI 1.0
     /// state. Drops what was held per note (every value, every note that still
-    /// responds, every bend sensitivity), forgets which RPN, NRPN and bank each
-    /// channel has had selected so the next controller selects in full, and
+    /// responds, every bend sensitivity), resets the narrower, and
     /// drops the open SysEx ([`reset_sysex`](Self::reset_sysex)). Never
     /// allocates.
     pub fn reset_midi(&mut self) {
@@ -1128,7 +1127,8 @@ impl InputEventList {
     /// controller, channel pitch bend and pressure, a program change, an RPN
     /// or NRPN) is `clap_event_midi` bytes through the list's
     /// [`Narrower`]: an RPN or NRPN is the Control Changes of M2-104
-    /// Appendix D.2.3 and a bank is sent only when it changes. UMP variants
+    /// Appendix D.2.3 and a Program Change with a bank is Bank Select MSB and LSB
+    /// then the Program Change (D.2.4). UMP variants
     /// without a CLAP or MIDI 1.0 form are silently skipped. Add a block's MIDI
     /// in frame order, so a sensitivity applies to the bends after it.
     ///
@@ -1286,8 +1286,7 @@ impl InputEventList {
 
     /// `message` as `clap_event_midi` on its Group's note port, through the
     /// narrower: all of its messages fit the list's room or none is staged (a
-    /// bank is not sent without its program), and a refusal forgets what the
-    /// narrower thinks it has selected, so the next one is sent in full.
+    /// bank is not sent without its program).
     fn add_bytes(&mut self, time: u32, address: Address, message: Message) {
         let Some(port) = self.port_of(address) else {
             return;
@@ -2630,7 +2629,7 @@ mod tests {
         let packets: Vec<UmpAt> = table.iter().map(|(_, words)| packet(2, words)).collect();
         for midi_notes in [false, true] {
             let mut list = InputEventList::new();
-            list.reserve(64);
+            list.reserve(128);
             list.reserve_sysex();
             list.set_note_ports(&[midi_notes]);
             list.add_midi_events(&packets);

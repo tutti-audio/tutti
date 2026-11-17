@@ -362,9 +362,8 @@ mod tests {
             .collect()
     }
 
-    // M2-104 Appendix D.2.3: a parameter select is skipped only where the
-    // receiver has seen it. A send that fails mid-sequence leaves the receiver
-    // with an unknown part of the select, so the next controller sends it whole.
+    // M2-104 Appendix D.2.3: every controller is the whole sequence of four, so a
+    // send that fails mid-sequence leaves the next controller whole.
     #[test]
     fn a_refused_send_makes_the_next_registered_controller_send_its_select_again() {
         // The first controller's second packet (CC 100) is refused.
@@ -378,12 +377,12 @@ mod tests {
         assert_eq!(controllers(&sent), [101, 101, 100, 6, 38]);
     }
 
-    // The same controller twice sends the select once.
+    // M2-104 Appendix D.2.3: the same controller twice is the four messages twice.
     #[test]
-    fn a_second_value_of_the_selected_parameter_sends_no_select() {
+    fn a_second_value_of_the_same_parameter_sends_the_select_again() {
         let (source, sent) = midi1_source(usize::MAX);
         source.send(bend_range(12)).unwrap();
         source.send(bend_range(7)).unwrap();
-        assert_eq!(controllers(&sent), [101, 100, 6, 38, 6, 38]);
+        assert_eq!(controllers(&sent), [101, 100, 6, 38, 101, 100, 6, 38]);
     }
 }

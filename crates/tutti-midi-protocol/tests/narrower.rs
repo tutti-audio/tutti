@@ -85,20 +85,32 @@ fn an_assignable_controller_selects_with_nrpn_controllers() {
     );
 }
 
-/// **MIDI 1.0 rule 6: a selected parameter stays selected until another is
-/// chosen**, so the same parameter again is CC 6 and CC 38 only; another
-/// parameter, or the other kind, selects again; a channel keeps its own.
+/// **D.2.3: each message generates a sequence of four MIDI 1.0 Protocol
+/// messages**, however often the same parameter is sent: the select (CC 101 and
+/// 100, or 99 and 98) is in every sequence, for the same parameter again, for
+/// another one, for the other kind and on any channel or group.
+/// Spec: m2-104/6.2#4
 #[test]
-fn the_select_is_skipped_for_the_parameter_already_selected() {
+fn every_controller_is_the_full_sequence_of_four() {
     let mut n = Narrower::new();
-    assert_eq!(feed(&mut n, rpn(A, 0, 0, 0)).len(), 4);
-    assert_eq!(feed(&mut n, rpn(A, 0, 0, 1 << 25)).len(), 2);
+    let again = [
+        vec![0xB0, 101, 0],
+        vec![0xB0, 100, 0],
+        vec![0xB0, 6, 1],
+        vec![0xB0, 38, 0],
+    ];
+    assert_eq!(feed(&mut n, rpn(A, 0, 0, 0))[..2], again[..2]);
+    assert_eq!(feed(&mut n, rpn(A, 0, 0, 1 << 25)), again, "same RPN again");
+    assert_eq!(feed(&mut n, rpn(A, 0, 0, 1 << 25)), again, "and again");
     assert_eq!(feed(&mut n, rpn(A, 0, 1, 0)).len(), 4, "another index");
-    assert_eq!(
-        feed(&mut n, nrpn(A, 0, 1, 0)).len(),
-        4,
-        "same number, other kind"
-    );
+    let nrpn_seq = [
+        vec![0xB0, 99, 0],
+        vec![0xB0, 98, 1],
+        vec![0xB0, 6, 0],
+        vec![0xB0, 38, 0],
+    ];
+    assert_eq!(feed(&mut n, nrpn(A, 0, 1, 0)), nrpn_seq, "other kind");
+    assert_eq!(feed(&mut n, nrpn(A, 0, 1, 0)), nrpn_seq, "NRPN again");
     assert_eq!(feed(&mut n, rpn(A, 0, 1, 0)).len(), 4, "back to the RPN");
     assert_eq!(
         feed(
@@ -120,36 +132,38 @@ fn the_select_is_skipped_for_the_parameter_already_selected() {
     );
 }
 
-/// **A passing CC 101/100/99/98 or Reset All Controllers (RP-015) moves the
-/// receiver's selection**, so the next controller selects in full; `reset`
-/// forgets it too.
+/// **A Control Change that passes through, or `reset`, changes nothing**: the
+/// next controller is the same four messages (D.2.3).
+/// Spec: m2-104/6.2#4
 #[test]
-fn a_select_moved_behind_its_back_is_sent_again() {
-    for moved in [
-        Message::Midi1(
-            A,
-            Voice1::ControlChange {
-                controller: CCNumber::RPN_LSB,
-                value: U7::of(9),
-            },
-        ),
-        Message::Midi1(
-            A,
-            Voice1::ControlChange {
-                controller: CCNumber::RESET_ALL,
-                value: U7::of(0),
-            },
-        ),
-    ] {
+fn a_passing_select_or_reset_leaves_the_sequence_whole() {
+    let full = || {
+        [
+            vec![0xB0, 101, 0],
+            vec![0xB0, 100, 0],
+            vec![0xB0, 6, 0],
+            vec![0xB0, 38, 0],
+        ]
+    };
+    for moved in [CCNumber::RPN_LSB, CCNumber::RESET_ALL] {
         let mut n = Narrower::new();
         feed(&mut n, rpn(A, 0, 0, 0));
-        feed(&mut n, moved);
-        assert_eq!(feed(&mut n, rpn(A, 0, 0, 0)).len(), 4);
+        feed(
+            &mut n,
+            Message::Midi1(
+                A,
+                Voice1::ControlChange {
+                    controller: moved,
+                    value: U7::of(9),
+                },
+            ),
+        );
+        assert_eq!(feed(&mut n, rpn(A, 0, 0, 0)), full());
     }
     let mut n = Narrower::new();
     feed(&mut n, rpn(A, 0, 0, 0));
     n.reset();
-    assert_eq!(feed(&mut n, rpn(A, 0, 0, 0)).len(), 4);
+    assert_eq!(feed(&mut n, rpn(A, 0, 0, 0)), full());
 }
 
 /// **M2-115 section 4.4.1 (`scaleDownRounding(v, 32, 14)`): RPN index 0 to 31
@@ -196,12 +210,13 @@ fn other_controllers_narrow_by_shift() {
     assert_eq!(data(rpn(A, 1, 32, 0xFFFF_FFFF)), 0x3FFF);
 }
 
-/// **A Program Change with a bank is CC 0, CC 32, Program Change (D.2.4); the
-/// bank is kept**: the same bank again is the Program Change alone, a changed
-/// bank sends both Bank Selects, a bank-less Program Change is itself, and a
-/// passing CC 0 makes the bank unknown again.
+/// **D.2.4: with the Bank Valid bit 1, a Program Change "translate[s] to three
+/// MIDI 1.0 Protocol messages in the following order": Bank Select MSB, Bank
+/// Select LSB, Program Change**, every time, the same bank again included; with
+/// the bit 0, "only translate the Program Change value".
+/// Spec: m2-104/d.3.3#8
 #[test]
-fn the_bank_is_resent_only_when_it_changes() {
+fn a_program_change_with_a_bank_is_always_three_messages() {
     let pc = |program: u8, bank: Option<(u8, u8)>| {
         Message::Midi2(
             A,
@@ -219,20 +234,16 @@ fn the_bank_is_resent_only_when_it_changes() {
         feed(&mut n, pc(5, Some((1, 2)))),
         [vec![0xB0, 0, 1], vec![0xB0, 32, 2], vec![0xC0, 5]]
     );
-    assert_eq!(feed(&mut n, pc(6, Some((1, 2)))), [vec![0xC0, 6]]);
-    assert_eq!(feed(&mut n, pc(7, None)), [vec![0xC0, 7]]);
-    assert_eq!(feed(&mut n, pc(8, Some((1, 3)))).len(), 3);
-    feed(
-        &mut n,
-        Message::Midi1(
-            A,
-            Voice1::ControlChange {
-                controller: CCNumber::BANK_SELECT,
-                value: U7::of(9),
-            },
-        ),
+    assert_eq!(
+        feed(&mut n, pc(6, Some((1, 2)))),
+        [vec![0xB0, 0, 1], vec![0xB0, 32, 2], vec![0xC0, 6]],
+        "the same bank again"
     );
-    assert_eq!(feed(&mut n, pc(8, Some((1, 3)))).len(), 3);
+    assert_eq!(feed(&mut n, pc(7, None)), [vec![0xC0, 7]]);
+    assert_eq!(
+        feed(&mut n, pc(8, Some((1, 3)))),
+        [vec![0xB0, 0, 1], vec![0xB0, 32, 3], vec![0xC0, 8]]
+    );
 }
 
 /// **D.2.1: a Note On whose velocity narrows to 0 is sent as 1**, and the
