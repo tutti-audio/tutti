@@ -149,7 +149,7 @@ pub use tutti_transport::{FadeOut, LoopRegion, MotionEvent, MotionState, Then, T
 pub use tutti_buffers::{Interleaved, InterleavedMut};
 pub use tutti_types::{
     Amplitude, At, BarNumber, Beat, Bipolar, Bpm, Cents, ChannelLayout, ChannelTopology, Db, Depth,
-    Frame, Hz, MaxBlock, Meter, MeterMap, Q, SampleRate, Samples, Seconds, Semitones,
+    Frame, Hz, MaxBlock, Meter, MeterMap, ParamId, Q, SampleRate, Samples, Seconds, Semitones,
     TimeSignature,
 };
 
@@ -175,7 +175,7 @@ pub use tutti_plugin::Normalized;
 #[cfg(feature = "plugin")]
 pub use tutti_plugin::catalog::{Catalog, Hosting, PluginRef};
 #[cfg(feature = "plugin")]
-pub use tutti_plugin_types::{ParamId, PluginFailure, PresetError, PresetId, StateUse};
+pub use tutti_plugin_types::{PluginFailure, PresetError, PresetId, StateUse};
 #[cfg(all(feature = "session", feature = "plugin"))]
 pub use tutti_session::Params as PluginParams;
 #[cfg(all(feature = "session", feature = "plugin"))]

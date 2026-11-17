@@ -5,10 +5,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use tutti_plugin_types::{
-    Edit, EditDrain, EditSink, Normalized, NoteExpressionChanges, ParamId, PluginAudio,
-    PluginError, PluginIo, PluginResult, Processor, SampleFormat,
+    Edit, EditDrain, EditSink, Normalized, NoteExpressionChanges, PluginAudio, PluginError,
+    PluginIo, PluginResult, Processor, SampleFormat,
 };
 use tutti_rt::Reader;
+use tutti_types::ParamId;
 
 use tutti_clap_ffi::AudioSide;
 

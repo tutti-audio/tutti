@@ -39,10 +39,10 @@ use crate::{BlockTransport, TransportSource, TransportWalk};
 use crate::{ParamDelivery, PluginControls, PluginMeter, SegmentPoints};
 use tutti_plugin_types::MidiIntake;
 use tutti_plugin_types::{
-    ChordChanges, ExpressiveContext, Features, MIDI_STACK_CAPACITY, MidiEventVec, ParamId,
-    ParameterChanges, PluginTooWide, ScaleChanges, TransportChange, TransportChanges,
-    TransportInfo,
+    ChordChanges, ExpressiveContext, Features, MIDI_STACK_CAPACITY, MidiEventVec, ParameterChanges,
+    PluginTooWide, ScaleChanges, TransportChange, TransportChanges, TransportInfo,
 };
+use tutti_types::ParamId;
 
 /// A plugin running inside the host process, as a graph node, whatever its
 /// format `F`.

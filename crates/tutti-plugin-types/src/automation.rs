@@ -1,6 +1,7 @@
 //! Parameter automation primitives passed into a plugin's process call.
 
-use crate::{Normalized, ParamId, PointBuf, PointPool};
+use crate::{Normalized, PointBuf, PointPool};
+use tutti_types::ParamId;
 
 /// One automation breakpoint: the value at a specific sample offset within
 /// the current process block.
@@ -642,7 +643,7 @@ impl ParameterChanges {
 #[cfg(all(test, feature = "serde"))]
 mod serde_tests {
     use super::*;
-    use crate::ParamId;
+    use tutti_types::ParamId;
 
     fn round_trip(q: &ParameterQueue) -> ParameterQueue {
         let bytes = postcard::to_allocvec(q).expect("serialize");

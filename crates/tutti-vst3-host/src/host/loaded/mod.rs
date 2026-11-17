@@ -15,11 +15,12 @@ use std::path::Path;
 use std::sync::{Arc, OnceLock};
 
 use tutti_plugin_types::{
-    Normalized, ParamAccess, ParamFlags, ParamId, ParamRange, ParamSteps, ParameterInfo,
-    PluginDescriptor, SampleFormat,
+    Normalized, ParamAccess, ParamFlags, ParamRange, ParamSteps, ParameterInfo, PluginDescriptor,
+    SampleFormat,
 };
 use tutti_rt::Publisher;
 use tutti_types::ChannelTopology;
+use tutti_types::ParamId;
 use tutti_vst3_ffi::{
     BusDirection, CreateError, EditorError, MediaType, Plugin, PluginNotification, RestartFlags,
 };

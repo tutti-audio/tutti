@@ -4,9 +4,9 @@
 //! plugin's own copy is the spec in `tutti-shared-plugin`'s `core` module.
 
 use tutti_plugin_types::{
-    Axis, ChannelLayout, ControlRole, MidiAssignment, MidiSource, Normalized, ParamId, ParamSteps,
-    Samples,
+    Axis, ChannelLayout, ControlRole, MidiAssignment, MidiSource, Normalized, ParamSteps, Samples,
 };
+use tutti_types::ParamId;
 use tutti_ump::{MidiChannel, U7};
 
 /// A parameter.

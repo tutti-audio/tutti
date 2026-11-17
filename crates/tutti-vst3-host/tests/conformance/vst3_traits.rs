@@ -12,10 +12,11 @@ use tutti_rt::LockExt;
 
 use assert_no_alloc::assert_no_alloc;
 use tutti_plugin_types::{
-    Control, Controller, Loaded, MaxBlock, Normalized, ParamId, PluginAudio, PluginError, PluginIo,
+    Control, Controller, Loaded, MaxBlock, Normalized, PluginAudio, PluginError, PluginIo,
     PluginTail, Prepare, ProcessContext, ProcessOutput, Processor, RenderMode, Request,
     RescanScope, SampleFormat, SampleRate, Samples,
 };
+use tutti_types::ParamId;
 use tutti_vst3_host::host::conformance::plugin_restart_component;
 use tutti_vst3_host::{LoadOptions, ProcessorAny, Vst3Loaded};
 

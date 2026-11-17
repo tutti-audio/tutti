@@ -8,7 +8,7 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
-use tutti_types::MaxBlock;
+use tutti_types::{MaxBlock, ParamId};
 use tutti_ump::{MidiChannel, NoteNumber, U7};
 
 use tutti_graph::NodeKey;
@@ -946,7 +946,7 @@ fn a_foreign_target_takes_a_lane_on_its_event_input() {
     ed.insert(key(50), "plugin", ForkByClone(Capture(Arc::clone(&log))));
     ed.commit().expect("commits");
     host.foreign.insert(50, key(50));
-    let param = TargetKey::param(50, ParamAddr::Id(7));
+    let param = TargetKey::param(50, ParamAddr::Id(ParamId::new(7)));
     let mut decl = Decl::default();
     decl.target(param, 0.0, 1.0);
     let one = decl.source(1, ModSource::Macro { value: 1.0 });
@@ -962,8 +962,8 @@ fn a_foreign_target_takes_a_lane_on_its_event_input() {
     let last = |log: &Mutex<Vec<(u64, ParamSegment)>>| {
         let log = log.lock().expect("unpoisoned");
         let (_, seg) = log.last().copied().expect("a segment");
-        assert_eq!(seg.addr(), ParamAddr::Id(7));
-        seg.foreign_target(7).expect("its id")
+        assert_eq!(seg.addr(), ParamAddr::Id(ParamId::new(7)));
+        seg.foreign_target(ParamId::new(7)).expect("its id")
     };
     assert!((last(&log) - 0.75).abs() < 1e-6, "{}", last(&log));
 
@@ -1264,7 +1264,7 @@ fn a_taken_lanes_unwiring_keeps_the_hosts_edges() {
     ed.insert(key(50), "plugin", ForkByClone(Capture(Arc::clone(&log))));
     ed.commit().expect("commits");
     host.foreign.insert(50, key(50));
-    let param = TargetKey::param(50, ParamAddr::Id(7));
+    let param = TargetKey::param(50, ParamAddr::Id(ParamId::new(7)));
     let mut decl = Decl::default();
     decl.target(param, 0.0, 1.0);
     let one = decl.source(1, ModSource::Macro { value: 1.0 });
@@ -1724,7 +1724,7 @@ fn foreign_rig() -> (Editor, Host, Decl, Modulation, TargetKey) {
     ed.insert(key(51), "plugin", ForkByClone(Capture2));
     ed.commit().expect("commits");
     host.foreign.insert(50, key(50));
-    let param = TargetKey::param(50, ParamAddr::Id(7));
+    let param = TargetKey::param(50, ParamAddr::Id(ParamId::new(7)));
     let mut decl = Decl::default();
     decl.target(param, 0.0, 1.0);
     let one = decl.source(1, ModSource::Macro { value: 1.0 });
