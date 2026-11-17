@@ -36,17 +36,7 @@ parking_lot = "0.13"
 thiserror = { workspace = true, features = ["std"] }
 tracing.workspace = true
 
-[features]
-# Nothing on by default.
-default = []
-# What a test needs of the plugin's own cells and the raw `AnyThread` door:
-# `PluginHandle::any_thread`, `PluginControls::set_latency` and `set_tail`. Off
-# by default; this crate's own tests turn it on through the dev-dependency on
-# itself below.
-testing = []
-
 [dev-dependencies]
-tutti-plugin-host = { path = ".", features = ["testing"] }
 tutti-midi-protocol = { path = "../tutti-midi-protocol" }
 # `fake`: the plugin that implements `Loaded` with no format behind it, which
 # the block-status tests drive through `client_over`.

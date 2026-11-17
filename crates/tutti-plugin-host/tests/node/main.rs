@@ -9,5 +9,7 @@
 static A: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
 
 mod chunked_node;
+#[path = "../support/param_reads.rs"]
+mod param_reads;
 mod vst2_in_process_no_alloc;
 mod vst2_in_process_retire;

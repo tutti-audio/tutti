@@ -476,7 +476,10 @@ mod tests {
         controls.set_pipeline(Samples(64));
         watch.wait.plan(controls.declared_latency().samples());
         assert!(watch.fault().is_none(), "the plan holds");
-        controls.set_latency(Samples(161));
+        // The figure the bridge listener writes when the plugin reports a new latency.
+        controls
+            .latency_cell()
+            .store(161, std::sync::atomic::Ordering::Release);
         let (kind, cause) = watch.fault().expect("the latency moved");
         assert_eq!(kind, ForkFaultKind::Failed);
         match cause.downcast_ref::<PluginRenderFault>() {

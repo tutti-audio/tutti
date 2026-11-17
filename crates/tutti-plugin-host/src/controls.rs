@@ -337,24 +337,10 @@ impl PluginControls {
         self.pipeline.store(frames.get(), Ordering::Release);
     }
 
-    /// Overwrite the reported latency: what a test uses to move the figure the
-    /// graph's compensation reads (feature `testing`).
-    #[cfg(feature = "testing")]
-    pub fn set_latency(&self, samples: impl Into<Samples>) {
-        self.latency.store(samples.into().get(), Ordering::Release);
-    }
-
     /// What the plugin currently reports for its tail. Control side: takes a
     /// short lock.
     pub fn tail(&self) -> PluginTail {
         *lock_tail(&self.tail)
-    }
-
-    /// Overwrite the reported tail: what a test uses to move the figure the
-    /// graph reads (feature `testing`).
-    #[cfg(feature = "testing")]
-    pub fn set_tail(&self, tail: PluginTail) {
-        *lock_tail(&self.tail) = tail;
     }
 
     /// The sample rate a source installed now would be stamped with.
@@ -470,8 +456,8 @@ mod tests {
     fn latency_and_tail_are_shared_between_handles() {
         let node = controls();
         let held = node.clone();
-        node.set_latency(Samples(512));
-        node.set_tail(PluginTail::Unbounded);
+        node.latency.store(512, Ordering::Release);
+        *lock_tail(&node.tail) = PluginTail::Unbounded;
         assert_eq!(held.latency(), Samples(512));
         assert_eq!(held.tail(), PluginTail::Unbounded);
     }
@@ -486,7 +472,7 @@ mod tests {
         let held = node.clone();
         assert_eq!(held.declared_latency(), Latency::new(Samples(MAX_CHUNK)));
         node.set_pipeline(Samples(64));
-        node.set_latency(Samples(512));
+        node.latency.store(512, Ordering::Release);
         assert_eq!(held.declared_latency(), Latency::new(Samples(576)));
         node.set_pipeline(Samples(32));
         assert_eq!(held.declared_latency(), Latency::new(Samples(544)));

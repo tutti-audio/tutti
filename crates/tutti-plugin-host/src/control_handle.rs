@@ -291,18 +291,8 @@ impl PluginHandle {
 
     // ---- Accessors ---------------------------------------------------------
 
-    /// What the plugin answers from any thread: the parameter catalog, reads
-    /// and writes, `save_state`. See [`AnyThread`].
-    ///
-    /// Feature `testing`: a session's gate, mirror and notices sit above these
-    /// calls, so a host goes through the session and the named methods below.
-    #[cfg(feature = "testing")]
-    pub fn any_thread(&self) -> &dyn AnyThread {
-        self.any_thread.as_ref()
-    }
-
-    /// What the plugin answers from any thread, for this crate.
-    #[cfg(not(feature = "testing"))]
+    /// What the plugin answers from any thread: the parameter catalog, reads and
+    /// writes, `save_state`. A host reaches it through the named methods below.
     pub(crate) fn any_thread(&self) -> &dyn AnyThread {
         self.any_thread.as_ref()
     }

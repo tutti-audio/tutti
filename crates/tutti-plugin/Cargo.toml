@@ -34,12 +34,6 @@ au = ["dep:tutti-au-host"]
 # instance for the host to load.
 vst2 = ["dep:tutti-vst2-host"]
 
-# What a test moves of a client's reported figures (`PluginClient::set_latency`,
-# `set_tail`) and of the plugin handle (`tutti-plugin-host`'s `testing`). Off by
-# default; this crate's own tests turn it on through the dev-dependency on itself
-# below.
-testing = ["tutti-plugin-host/testing"]
-
 [dependencies]
 # The format-generic half of hosting: the handle, the node's controls, the
 # transport and parameter delivery, and the in-process node.
@@ -91,7 +85,6 @@ tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 tempfile = "3"
 
 [dev-dependencies]
-tutti-plugin = { path = ".", features = ["testing"] }
 tutti-buffers = { path = "../tutti-buffers" }
 tutti-midi-protocol = { path = "../tutti-midi-protocol" }
 # A size for `set_editor_size`.

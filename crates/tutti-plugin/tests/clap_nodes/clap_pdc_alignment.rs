@@ -413,8 +413,8 @@ fn with_compensation_both_paths_land_on_the_same_sample() {
 /// `Shape` changes — and the next commit re-plans the graph around it.
 ///
 /// A plugin may raise its latency mid-session — a CLAP host is told so through
-/// `clap.latency`'s host extension, and `PluginClient::set_latency` is the seam
-/// that lands it. What that does *not* do on its own is re-run PDC: the node's
+/// `clap.latency`'s host extension, and the controls' latency cell is where
+/// that lands. What that does *not* do on its own is re-run PDC: the node's
 /// figure is the editor's until told, so the graph is misaligned by exactly
 /// the difference until something re-plans. This is the case a static rig
 /// cannot reach, and the one where a stale compensation is most damaging — the
@@ -436,7 +436,10 @@ fn a_latency_change_reaches_pdc_at_the_next_commit() {
     // is unchanged — the probe still delays by 137 — which is deliberate: the
     // question here is whether the planner re-reads the declaration and
     // re-plans, not whether the audio moved.
-    rig.controls.set_latency(Samples(PROBE_LATENCY + EXTRA));
+    // The figure the bridge listener writes when the plugin reports a new latency.
+    rig.controls
+        .latency_cell()
+        .store(PROBE_LATENCY + EXTRA, std::sync::atomic::Ordering::Release);
     let declared = rig.controls.declared_latency();
     rig.graph
         .editor_mut()

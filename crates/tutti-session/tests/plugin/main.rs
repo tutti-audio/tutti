@@ -6,6 +6,10 @@ mod support;
 
 // Loading a plugin file through the pool, as a test does where an app declares the entry.
 #[cfg(feature = "plugin")]
+#[path = "../support/param_reads.rs"]
+mod param_reads;
+
+#[cfg(feature = "plugin")]
 #[path = "../support/pooled.rs"]
 mod pooled;
 

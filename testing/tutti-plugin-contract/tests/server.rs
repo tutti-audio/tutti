@@ -42,18 +42,21 @@ fn through_server<F: Format>(path: PathBuf) {
     let pid = handle.server_pid().expect("the plugin lives in a server");
     assert_ne!(pid, std::process::id(), "a process other than this one");
 
-    let state = handle.any_thread().save_state().expect("saves");
+    let state = handle.save_state().expect("saves");
     let blob = patch_mode(F::extract_blob(&state), Mode::Level);
     handle
         .load_state(main_thread(), &F::embed_blob(&state, &blob))
         .expect("loads");
 
-    let saved = handle.any_thread().save_state().expect("saves again");
+    let saved = handle.save_state().expect("saves again");
     let after = Transcript::parse(&F::extract_blob(&saved));
     assert_eq!(after.mode, Mode::Level.index(), "the mode crossed");
-    let level = handle
-        .any_thread()
-        .parameter_value(ParamId::new(Param::Level.id().get()))
+    // The mirror a session reads: its load-time read of the served plugin's values.
+    let (mut mirror, read) = tutti_plugin_host::PluginParamValues::start(&handle);
+    mirror.land(read.run().expect("the served plugin lists its parameters"));
+    let level = mirror
+        .get(ParamId::new(Param::Level.id().get()))
+        .flatten()
         .map(|v| v.get());
     assert_eq!(level, Some(0.5), "a parameter read across the boundary");
 
@@ -61,7 +64,7 @@ fn through_server<F: Format>(path: PathBuf) {
     // the spec's for the format (`spec::Tone`), never a line the client draws.
     let tone = F::SURFACE.tone;
     for (i, &n) in spec::TONE_AT.iter().enumerate() {
-        let any = handle.any_thread();
+        let any = &handle;
         let plain = any.parameter_plain(Param::Tone.id(), Normalized::of(n));
         let want = tone.plain.map(|p| p[i]);
         match (plain, want) {
