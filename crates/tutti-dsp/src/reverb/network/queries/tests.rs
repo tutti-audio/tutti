@@ -189,11 +189,11 @@ fn a_nested_all_pass_lengthens_the_loop_by_its_low_frequency_delay() {
 fn a_one_pole_adds_its_group_delay_at_dc_to_the_loop() {
     let g = Amplitude(0.9);
     let pole = |damp| Absorption::OnePole { gain: g, damp };
-    assert_eq!(pole(0.5).low_frequency_delay(), SampleSpan::of(1.0));
-    assert_eq!(pole(-0.5).low_frequency_delay(), SampleSpan::of(1.0));
-    assert!((pole(0.9).low_frequency_delay().get() - 9.0).abs() < 1e-5);
+    assert_eq!(pole(0.5).peak_delay(), SampleSpan::of(1.0));
+    assert_eq!(pole(-0.5).peak_delay(), SampleSpan::of(1.0));
+    assert!((pole(0.9).peak_delay().get() - 9.0).abs() < 1e-5);
     for none in [pole(1.5), pole(f32::NAN), Absorption::Gain(g)] {
-        assert_eq!(none.low_frequency_delay(), SampleSpan::ZERO);
+        assert_eq!(none.peak_delay(), SampleSpan::ZERO);
     }
     assert_eq!(
         line(1000.0, pole(0.5)).effective_length(),
