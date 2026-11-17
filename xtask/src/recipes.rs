@@ -325,7 +325,7 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
     (
         "doc",
         "",
-        "rustdoc as CI does, per feature, and the docs.rs build on a dated nightly",
+        "rustdoc as CI does, per feature, the docs.rs build on a dated nightly, and umbrella-api (needs cargo-public-api)",
     ),
     ("check-loom", "", "clippy under --cfg loom"),
     (
@@ -349,7 +349,7 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
     (
         "umbrella-api",
         "[<dir>]",
-        "the types in the signatures of what tutti exports that tutti does not name (needs cargo-public-api; not in gates or ci)",
+        "the types in the signatures of what tutti exports that tutti does not name (needs cargo-public-api; `doc` and `ci` run it, `gates` does not)",
     ),
     (
         "book",
@@ -662,6 +662,7 @@ impl Planner<'_> {
                 self.lines(&[format!(
                     r#"RUSTDOCFLAGS="-D warnings --cfg docsrs" cargo +{DOCS_NIGHTLY} doc --locked --workspace --no-deps"#
                 )]);
+                self.out.push(Step::UmbrellaApi(None));
             }
             "check-no-std" => self.check_no_std(),
             "check-loom" => self.lines(&[
@@ -806,6 +807,7 @@ const NO_STD_CRATES: &[(&str, &[&str])] = &[
     ("tutti-ump", &["serde"]),
     ("tutti-midi-protocol", &["serde"]),
     ("tutti-curve", &[]),
+    ("tutti-buffers", &["serde"]),
     ("tutti-metering", &[]),
     ("tutti-tempo", &["serde"]),
     ("tutti-modulation", &[]),

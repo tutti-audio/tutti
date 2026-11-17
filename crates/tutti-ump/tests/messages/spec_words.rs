@@ -13,8 +13,8 @@ use tutti_ump::{
     GroupSpan, KeySignature, Letter, MdsChunk, MdsChunkSize, MdsChunks, MdsIdentity, Message,
     Metronome, Midi1Port, MidiChannel, MidiGroup, MixedDataHeader, NoteNumber, NoteVelocity,
     PerNoteManagement, Protocol, RegisteredPerNoteController, SharpsFlats, SoftwareRevision,
-    Stream, StreamConfig, Sysex7Packet, Sysex8Packet, SysexStatus, System, U4, U7, U14, UiHint,
-    Ump, UmpVersion, Utility, Voice1, Voice2,
+    Stream, StreamConfig, Sysex7Packet, SysexStatus, System, U4, U7, U14, UiHint, Ump, UmpVersion,
+    Utility, Voice1, Voice2,
 };
 use tutti_ump::{BendValue, ControlValue, FunctionBlockCount, TicksPerQuarterNote};
 use tutti_ump::{ManufacturerId, Unknown};
@@ -183,35 +183,46 @@ fn sysex7() {
 /// Spec: m2-104/msg/5/0, m2-104/msg/5/1, m2-104/msg/5/2, m2-104/msg/5/3
 #[test]
 fn sysex8() {
-    let p = |status, stream, data: &[u8]| {
-        Message::Data128(
-            g(4),
-            Data128::Sysex8(Sysex8Packet::new(status, stream, data).unwrap()),
-        )
+    // Decode reads the status, stream id and data, and encode gives the words
+    // back: packets are written only through `Sysex8Stream`.
+    let p = |words: [u32; 4], status, stream, data: &[u8]| {
+        let Ok(Message::Data128(group, Data128::Sysex8(packet))) = Ump(words).decode() else {
+            panic!("{words:08x?} is not a SysEx8 packet");
+        };
+        assert_eq!(group, g(4), "{words:08x?}");
+        assert_eq!(
+            (packet.status(), packet.stream_id(), packet.bytes()),
+            (status, stream, data),
+            "{words:08x?}"
+        );
+        assert_eq!(
+            Ump::from(Message::Data128(group, Data128::Sysex8(packet))),
+            Ump(words)
+        );
     };
     // Stream 7, data AA BB: `# of bytes` = 3.
-    pin(
+    p(
         [0x5403_07AA, 0xBB00_0000, 0, 0],
-        p(SysexStatus::Complete, 7, &[0xAA, 0xBB]),
+        SysexStatus::Complete,
+        7,
+        &[0xAA, 0xBB],
     );
     // The stream id alone: `# of bytes` = 1, which §7.8.1 names for an End.
-    pin([0x5431_0700, 0, 0, 0], p(SysexStatus::End, 7, &[]));
+    p([0x5431_0700, 0, 0, 0], SysexStatus::End, 7, &[]);
     // Thirteen data bytes fill the packet: `# of bytes` = 14.
-    pin(
+    let full = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13];
+    p(
         [0x541E_0701, 0x0203_0405, 0x0607_0809, 0x0A0B_0C0D],
-        p(
-            SysexStatus::Start,
-            7,
-            &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
-        ),
+        SysexStatus::Start,
+        7,
+        &full,
     );
-    pin([0x542E_0701, 0x0203_0405, 0x0607_0809, 0x0A0B_0C0D], {
-        p(
-            SysexStatus::Continue,
-            7,
-            &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
-        )
-    });
+    p(
+        [0x542E_0701, 0x0203_0405, 0x0607_0809, 0x0A0B_0C0D],
+        SysexStatus::Continue,
+        7,
+        &full,
+    );
     // §7.8.1: an End with `# of bytes` 0xF aborts the stream.
     pin(
         [0x543F_0700, 0, 0, 0],
