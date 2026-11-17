@@ -29,19 +29,19 @@
 use tutti_graph::{Continuity, Cx, Offset, TransportPosition};
 use tutti_tempo::TempoView;
 use tutti_types::Samples;
-use tutti_types::{Beat, Bpm, SampleRate, SegmentOrigin, first_frame_at_or_after};
+use tutti_types::{Beat, Bpm, LoopRange, SampleRate, SegmentOrigin, first_frame_at_or_after};
 use tutti_types::{Meter, MeterMap};
 
 use std::sync::Arc;
 
-use tutti_plugin_types::{Features, TransportInfo};
+use tutti_plugin_types::{Features, LoopRegion, TransportInfo};
 use tutti_rt::Loan;
 use tutti_transport::MeterSlotReader;
 
 /// The transport facts a plugin snapshot is made of, at one frame.
 ///
-/// Engine types throughout: [`transport_info`] is where they meet the ABI's
-/// `f64`s.
+/// Engine types throughout, the same units [`TransportInfo`] carries:
+/// [`transport_info`] only adds the meter's signature and bar.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Snapshot {
     pub(crate) playing: bool,
@@ -49,13 +49,12 @@ pub struct Snapshot {
     pub(crate) tempo: Bpm,
     /// How the tempo moves across the chunk this snapshot opens, in BPM per
     /// sample ([`follow`](Snapshot::follow)): `0.0` until a map says
-    /// otherwise. A raw `f64`: it is CLAP's `tempo_inc`, and the unit types
-    /// stop at the C ABI.
+    /// otherwise. A raw `f64`: no unit covers a tempo's slope.
     pub(crate) tempo_inc: f64,
     /// The playhead, in quarter notes.
     pub(crate) beat: Beat,
     /// The loop region, when looping.
-    pub(crate) looping: Option<(Beat, Beat)>,
+    pub(crate) looping: Option<LoopRange>,
     /// The loop's bounds in seconds from song start, read from the tempo map
     /// ([`settle`](Snapshot::settle)); `None` until a map has been read or
     /// when not looping.
@@ -67,8 +66,8 @@ pub struct Snapshot {
     /// The host's monotonic clock at the frame, in nanoseconds
     /// ([`HostClock`]); `None` for an offline render.
     pub(crate) system_time_ns: Option<i64>,
-    /// Project time at the frame, in frames ([`ProjectTime`]); `None`
-    /// without a usable tempo and rate.
+    /// Project time at the frame, in frames ([`ProjectTime`]); `None` when
+    /// the playhead is not finite.
     pub(crate) project_frames: Option<f64>,
     pub(crate) sample_rate: SampleRate,
 }
@@ -304,7 +303,7 @@ fn continued_without_origin(
         && let Some(l) = from.looping
     {
         let (start, end) = (from.beat().get(), to.beat().get());
-        if start < l.end.get() && end >= l.end.get() {
+        if start < l.end().get() && end >= l.end().get() {
             return None;
         }
     }
@@ -404,7 +403,7 @@ impl Snapshot {
         self.tempo_inc = 0.0;
         self.loop_seconds = self
             .looping
-            .map(|(a, b)| (view.seconds_at(a), view.seconds_at(b)));
+            .map(|l| (view.seconds_at(l.start()), view.seconds_at(l.end())));
         let mut beat = self.beat;
         if !beat.get().is_finite() {
             return beat;
@@ -433,7 +432,7 @@ impl Snapshot {
             view,
             beat,
             self.playing,
-            self.looping.map(|(_, end)| end),
+            self.looping.map(|l| l.end()),
             chunk,
         );
     }
@@ -459,7 +458,7 @@ impl Snapshot {
             tempo: t.tempo,
             tempo_inc: 0.0,
             beat: t.beat(),
-            looping: t.looping.map(|l| (l.start, l.end)),
+            looping: t.looping,
             loop_seconds: None,
             continuous,
             system_time_ns: block_ns
@@ -499,49 +498,39 @@ pub(crate) fn from_cx(
 /// Map `s` onto the snapshot the plugin ABIs read, with `meter`'s signature
 /// and bar at the playhead.
 pub fn transport_info(s: &Snapshot, meter: &MeterMap) -> TransportInfo {
-    // `.get()` from here on: `TransportInfo` is handed to C ABIs, where the
-    // unit types stop.
-    let tempo = s.tempo.get();
     let position = meter.bar_at(s.beat);
 
-    let mut info = TransportInfo::new()
-        .with_tempo(tempo)
-        .with_tempo_inc(s.tempo_inc)
-        .with_playing(s.playing)
-        .with_recording(s.recording)
-        .with_time_signature(position.signature)
-        .with_bar(position.bar_start.get(), position.bar)
-        .with_sample_rate(s.sample_rate.get());
-
-    // CLAP's beats position, and its seconds: project time
-    // (`ProjectTime`), or zero without one.
-    let beats = s.beat.get();
+    // CLAP's seconds position is project time (`ProjectTime`), or zero
+    // without one. The beat is already quarter notes, which is exactly what
+    // VST2's `ppqPos` and VST3's `projectTimeMusic` want. `continuous` is the
+    // free-running counter; project time in samples is `ProjectTime`'s,
+    // rounded (an `as` cast saturates, and an `i64` of frames is three
+    // million years).
     let seconds = tutti_types::Seconds(
         s.project_frames
             .map_or(0.0, |frames| frames / s.sample_rate.get()),
     );
-    info = info.with_position_beats(beats, seconds);
-
-    // The beat is already quarter notes, which is exactly what VST2's
-    // `ppqPos` and VST3's `projectTimeMusic` want. `continuous` is the
-    // free-running counter; project time in samples is `ProjectTime`'s,
-    // rounded (an `as` cast saturates, and an `i64` of frames is three
-    // million years).
-    info = info
-        .with_position_quarters(beats)
+    let mut info = TransportInfo::new(s.sample_rate)
+        .with_tempo(s.tempo)
+        .with_tempo_inc(s.tempo_inc)
+        .with_playing(s.playing)
+        .with_recording(s.recording)
+        .with_time_signature(position.signature)
+        .with_bar(position.bar_start, position.bar)
+        .with_beat(s.beat)
+        .with_seconds(seconds)
         .with_continuous_samples(s.continuous);
+    if let Some(range) = s.looping {
+        info = info.with_loop(LoopRegion {
+            range,
+            seconds: s.loop_seconds,
+        });
+    }
     if let Some(frames) = s.project_frames {
         info = info.with_position_samples(frames.round() as i64);
     }
     if let Some(ns) = s.system_time_ns {
         info = info.with_system_time_ns(ns);
-    }
-
-    if let Some((start, end)) = s.looping {
-        info = info.with_loop(true, start.get(), end.get());
-        if let Some((a, b)) = s.loop_seconds {
-            info = info.with_loop_seconds(a, b);
-        }
     }
     info
 }
@@ -665,7 +654,7 @@ impl BlockTransport<'_> {
 mod tests {
     use super::*;
     use std::time::Instant;
-    use tutti_graph::{Env, LoopRange, TransportChanges, TransportHistory, TransportPosition};
+    use tutti_graph::{Env, TransportChanges, TransportHistory, TransportPosition};
     use tutti_tempo::TempoMap;
     use tutti_types::Latency;
     use tutti_types::{BarNumber, BeatsPerBar, MeterChange, NoteValue, TimeSignature};
@@ -768,9 +757,9 @@ mod tests {
         );
         assert!(first.state.playing);
         assert!(first.state.recording);
-        assert_eq!(first.timing.tempo, 120.0);
-        assert_eq!(first.position.beats, 2.0);
-        assert_eq!(first.sample_rate, 48_000.0);
+        assert_eq!(first.timing.tempo.get(), 120.0);
+        assert_eq!(first.position.beat.get(), 2.0);
+        assert_eq!(first.sample_rate.get(), 48_000.0);
 
         // 24 frames at 120 BPM / 48 kHz: 24 / 24 000 of a beat.
         // The node has rendered 7 000 frames of its own, whatever `Env`'s
@@ -786,10 +775,10 @@ mod tests {
             &meter,
         );
         assert_eq!(
-            later.position.beats,
+            later.position.beat.get(),
             e.transport_at(at(24, 64)).beat().get()
         );
-        assert!((later.position.beats - (2.0 + 24.0 / 24_000.0)).abs() < 1e-12);
+        assert!((later.position.beat.get() - (2.0 + 24.0 / 24_000.0)).abs() < 1e-12);
         assert_eq!(later.position.continuous_samples, 7_024);
     }
 
@@ -798,10 +787,7 @@ mod tests {
     /// reports it.
     #[test]
     fn a_seek_a_tempo_change_and_a_loop_wrap_inside_the_block_are_followed() {
-        let looping = Some(LoopRange {
-            start: Beat(4.0),
-            end: Beat(4.0 + 32.0 / 24_000.0),
-        });
+        let looping = Some(LoopRange::new(Beat(4.0), Beat(4.0 + 32.0 / 24_000.0)).expect("a loop"));
         let t = TransportPosition::counted(
             true,
             Bpm::of(120.0),
@@ -848,9 +834,13 @@ mod tests {
                 &meter,
             );
             let want = e.transport_at(at(i, 64));
-            assert_eq!(got.position.beats, want.beat().get(), "frame {i}");
-            assert_eq!(got.timing.tempo, want.tempo.get(), "frame {i}");
-            assert_eq!(got.state.cycle_active, want.looping.is_some(), "frame {i}");
+            assert_eq!(got.position.beat.get(), want.beat().get(), "frame {i}");
+            assert_eq!(got.timing.tempo.get(), want.tempo.get(), "frame {i}");
+            assert_eq!(
+                got.loop_region.is_some(),
+                want.looping.is_some(),
+                "frame {i}"
+            );
         }
         // The wrap: 32 frames into a 32-frame loop is back at its start.
         assert_eq!(
@@ -864,7 +854,8 @@ mod tests {
                 &meter
             )
             .position
-            .beats,
+            .beat
+            .get(),
             4.0
         );
         // The seek, and its tempo.
@@ -877,9 +868,9 @@ mod tests {
             None,
             &meter,
         );
-        assert_eq!(seeked.position.beats, 16.0);
-        assert_eq!(seeked.timing.tempo, 90.0);
-        assert!(!seeked.state.cycle_active);
+        assert_eq!(seeked.position.beat.get(), 16.0);
+        assert_eq!(seeked.timing.tempo.get(), 90.0);
+        assert!(seeked.loop_region.is_none());
     }
 
     /// Behind a latent path the snapshot is the transport the node's input
@@ -919,10 +910,10 @@ mod tests {
             &meter,
         );
         assert_eq!(
-            got.position.beats,
+            got.position.beat.get(),
             first.transport_at(at(14, 64)).beat().get()
         );
-        assert!((got.position.beats - (2.0 + 14.0 / 24_000.0)).abs() < 1e-12);
+        assert!((got.position.beat.get() - (2.0 + 14.0 / 24_000.0)).abs() < 1e-12);
     }
 
     /// The signature and bar fields come from the meter map. Left at their
@@ -949,11 +940,10 @@ mod tests {
 
         assert_eq!(out.timing.signature, seven_eight);
         assert_eq!(out.bar.number, BarNumber(2));
-        assert!((out.bar.start_beats - 3.5).abs() < 1e-9);
-        // VST2's `bar_start_pos` / VST3's `barPositionMusic` read this one.
-        assert!((out.bar.position_quarters - 3.5).abs() < 1e-9);
-        // And the VST playhead.
-        assert!((out.position.quarters - 3.5).abs() < 1e-9);
+        // VST2's `bar_start_pos` / VST3's `barPositionMusic` / CLAP's `bar_start`.
+        assert!((out.bar.start.get() - 3.5).abs() < 1e-9);
+        // And the playhead.
+        assert!((out.position.beat.get() - 3.5).abs() < 1e-9);
     }
 
     fn point(beat: f64, bpm: f64, transition: tutti_tempo::Transition) -> tutti_tempo::TempoPoint {
@@ -1018,10 +1008,10 @@ mod tests {
     fn a_chunk_on_a_step_is_told_the_steps_own_tempo() {
         let map = step_map();
         let on = told(&map, rolling(4.0), 64);
-        assert_eq!(on.timing.tempo, 90.0);
+        assert_eq!(on.timing.tempo.get(), 90.0);
         assert_eq!(on.timing.tempo_inc, 0.0);
         let before = told(&map, rolling(3.5), 64);
-        assert_eq!(before.timing.tempo, 120.0);
+        assert_eq!(before.timing.tempo.get(), 120.0);
         assert_eq!(before.timing.tempo_inc, 0.0);
     }
 
@@ -1034,9 +1024,9 @@ mod tests {
         for chunk in [64, 1_000] {
             let got = told(&map, rolling(1.8), chunk);
             assert!(
-                (got.timing.tempo - 150.0).abs() < 1e-6,
+                (got.timing.tempo.get() - 150.0).abs() < 1e-6,
                 "tempo {}",
-                got.timing.tempo
+                got.timing.tempo.get()
             );
             assert!(
                 (got.timing.tempo_inc - RAMP_SLOPE).abs() < 1e-9,
@@ -1065,7 +1055,7 @@ mod tests {
         // first segment is the 120 -> 180 ramp (RAMP_SLOPE a frame), held to
         // its end at beat 4; the chunk's tempo is that ramp's, just under 180.
         let across = told(&map, rolling(3.99), 1_000);
-        assert!((across.timing.tempo - 180.0).abs() < 0.5);
+        assert!((across.timing.tempo.get() - 180.0).abs() < 0.5);
         assert!(
             (across.timing.tempo_inc - RAMP_SLOPE).abs() < 1e-9,
             "slope {}",
@@ -1074,7 +1064,7 @@ mod tests {
         // On the point: 180 to 60 over four beats, 2 s (mean 120 BPM), so
         // -120 BPM over 96 000 frames.
         let on = told(&map, rolling(4.0), 64);
-        assert!((on.timing.tempo - 180.0).abs() < 1e-9);
+        assert!((on.timing.tempo.get() - 180.0).abs() < 1e-9);
         assert!(
             (on.timing.tempo_inc - (-120.0 / 96_000.0)).abs() < 1e-9,
             "slope {}",
@@ -1088,7 +1078,7 @@ mod tests {
     fn a_stopped_transport_is_told_no_slope() {
         let stopped = TransportPosition::new(false, Bpm::of(120.0), Beat(1.8), None);
         let got = told(&ramp_map(), stopped, 64);
-        assert!((got.timing.tempo - 150.0).abs() < 1e-6);
+        assert!((got.timing.tempo.get() - 150.0).abs() < 1e-6);
         assert_eq!(got.timing.tempo_inc, 0.0);
     }
 
@@ -1102,10 +1092,7 @@ mod tests {
                 true,
                 Bpm::of(120.0),
                 Beat(1.8),
-                Some(LoopRange {
-                    start: Beat(1.0),
-                    end: Beat(end),
-                }),
+                Some(LoopRange::new(Beat(1.0), Beat(end)).expect("a loop")),
             )
         };
         // 64 frames at 150 BPM is 0.0033 beat.
@@ -1126,30 +1113,27 @@ mod tests {
             true,
             Bpm::of(120.0),
             Beat(3.0),
-            Some(LoopRange {
-                start: Beat(2.0),
-                end: Beat(8.0),
-            }),
+            Some(LoopRange::new(Beat(2.0), Beat(8.0)).expect("a loop")),
         );
         let got = told(&step_map(), looped, 64);
-        let (start, end) = got.loop_region.seconds.expect("a looping transport");
+        let (start, end) = got
+            .loop_region
+            .and_then(|l| l.seconds)
+            .expect("a looping transport");
         assert!((start.get() - 1.0).abs() < 1e-9, "start {}", start.get());
         assert!(
             (end.get() - (2.0 + 8.0 / 3.0)).abs() < 1e-9,
             "end {}",
             end.get()
         );
-        assert_eq!(
-            told(&step_map(), rolling(3.0), 64).loop_region.seconds,
-            None
-        );
+        assert_eq!(told(&step_map(), rolling(3.0), 64).loop_region, None);
     }
 
     /// A constant map is its tempo and no slope.
     #[test]
     fn a_constant_map_is_its_tempo_and_no_slope() {
         let got = told(&constant(97.0), rolling(2.0), 64);
-        assert_eq!(got.timing.tempo, 97.0);
+        assert_eq!(got.timing.tempo.get(), 97.0);
         assert_eq!(got.timing.tempo_inc, 0.0);
     }
 
@@ -1213,9 +1197,8 @@ mod tests {
                 Cmd::Seek(beat) => self.clock.seat(Beat(beat)),
                 Cmd::Tempo(bpm) => self.clock.set_tempo(Bpm::of(bpm)),
                 Cmd::Loop(l) => {
-                    self.looping = l.map(|(start, end)| LoopRange {
-                        start: Beat(start),
-                        end: Beat(end),
+                    self.looping = l.map(|(start, end)| {
+                        LoopRange::new(Beat(start), Beat(end)).expect("a loop")
                     });
                 }
                 Cmd::Rate(hz) => self.clock.set_sample_rate(SampleRate::of(hz)),
@@ -1224,10 +1207,7 @@ mod tests {
 
         fn roll(&mut self, frames: usize) {
             if self.playing {
-                let region = self
-                    .looping
-                    .and_then(|l| tutti_types::LoopRange::new(l.start, l.end));
-                self.clock.advance(Samples(frames), region);
+                self.clock.advance(Samples(frames), self.looping);
             }
         }
 
@@ -1332,8 +1312,7 @@ mod tests {
     /// **A seek, a loop wrap and a start elsewhere re-seat project time** at
     /// the beat's time at the tempo; between them it rolls, and a start where
     /// the transport stood continues it. At 120 BPM and 48 kHz a beat is
-    /// 24 000 frames; at 90 BPM, 32 000. Without a usable tempo there is
-    /// none.
+    /// 24 000 frames; at 90 BPM, 32 000.
     #[test]
     fn a_seek_a_loop_wrap_and_a_start_elsewhere_re_seat_project_time() {
         let mut h = Host::new(true, 120.0, 4.0);
@@ -1678,12 +1657,8 @@ mod tests {
     fn a_transport_built_by_hand_is_read_by_the_playheads_rule() {
         let per = |n: f64, bpm: f64| n * bpm / 60.0 / 48_000.0;
         let b1 = 10.0 + per(64.0, 120.0);
-        let lp = |start: f64, end: f64| {
-            Some(LoopRange {
-                start: Beat(start),
-                end: Beat(end),
-            })
-        };
+        let lp =
+            |start: f64, end: f64| Some(LoopRange::new(Beat(start), Beat(end)).expect("a loop"));
         let crossing = lp(9.0, b1 + per(16.0, 121.0));
         let behind = lp(5.0, 9.0);
         let read_after = |looping, playing, to: TransportPosition, rate| {

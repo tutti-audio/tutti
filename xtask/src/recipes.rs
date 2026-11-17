@@ -740,7 +740,7 @@ impl Planner<'_> {
             }
             "check-no-std" => self.check_no_std(),
             "check-loom" => self.lines(&[
-                r#"RUSTFLAGS="--cfg loom" cargo clippy --locked -p tutti-rt -p tutti-shm-model --all-targets -- -D warnings"#,
+                r#"RUSTFLAGS="--cfg loom" cargo clippy --locked -p tutti-rt -p tutti-plugin-ipc-ffi --all-targets -- -D warnings"#,
             ]),
             "book" => {
                 let [out] = Self::params(name, args, [""])?;
@@ -892,9 +892,10 @@ const NO_STD_CRATES: &[(&str, &[&str])] = &[
 const CHECK_FEATURES: &[&str] = &[
     r#"cargo clippy --locked -p tutti-cpal --features capture --all-targets -- -D warnings"#,
     r#"cargo clippy --locked -p tutti-session --features audio-io --all-targets -- -D warnings"#,
-    r#"cargo clippy --locked -p tutti-session --features clap,export,midi-hardware,synth,soundfont,sampler,vst2,device,audio-io,serde --all-targets -- -D warnings"#,
+    r#"cargo clippy --locked -p tutti-session --features clap,export,midi-hardware,synth,soundfont,sampler,vst2,device,audio-io,serde,analyze --all-targets -- -D warnings"#,
     r#"cargo clippy --locked -p tutti --features clap,export,sampler,midi-hardware,synth --all-targets -- -D warnings"#,
     r#"cargo clippy --locked -p tutti --features audio-io --all-targets -- -D warnings"#,
+    r#"cargo clippy --locked -p tutti --features analyze,decode-wav,sampler --all-targets -- -D warnings"#,
     r#"cargo clippy --locked -p tutti --no-default-features --features io --all-targets -- -D warnings"#,
     r#"cargo clippy --locked -p tutti-export --lib -- -D warnings"#,
     r#"cargo clippy --locked -p tutti-session --lib --features export,encode-flac,encode-aiff,encode-vorbis -- -D warnings"#,
@@ -939,9 +940,10 @@ const TEST_FEATURES: &[&str] = &[
     r#"cargo build --locked -p tutti-plugin-probe"#,
     r#"cargo nextest run --locked -p tutti-cpal --features capture"#,
     r#"cargo nextest run --locked -p tutti-session --features audio-io"#,
-    r#"cargo nextest run --locked -p tutti-session --features clap,export,midi-hardware,synth,soundfont,sampler,vst2,device,audio-io,serde"#,
+    r#"cargo nextest run --locked -p tutti-session --features clap,export,midi-hardware,synth,soundfont,sampler,vst2,device,audio-io,serde,analyze"#,
     r#"cargo nextest run --locked -p tutti --features clap,export,sampler,midi-hardware,synth"#,
     r#"cargo nextest run --locked -p tutti --features audio-io"#,
+    r#"cargo nextest run --locked -p tutti --features analyze,decode-wav,sampler"#,
     r#"cargo nextest run --locked -p tutti --no-default-features --features io"#,
     r#"cargo nextest run --locked -p tutti-session --features export,encode-flac,encode-aiff,encode-vorbis"#,
     r#"cargo nextest run --locked -p tutti-codec"#,
@@ -976,7 +978,7 @@ const LOOM: &[&str] = &[
     r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test seq_cell_loom"#,
     r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test cell_loom"#,
     r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test handoff_loom -- --nocapture"#,
-    r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-shm-model --release"#,
+    r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-plugin-ipc-ffi --release --lib loom_model"#,
     r#"LOOM_MAX_PREEMPTIONS=3 RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test split_loom"#,
     r#"LOOM_MAX_PREEMPTIONS=3 RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test job_gate_loom"#,
     r#"LOOM_MAX_PREEMPTIONS=3 RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test task_graph_loom"#,

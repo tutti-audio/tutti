@@ -18,7 +18,7 @@ use tutti_session::{
     Session, SessionEvent, midi_input, midi_output,
 };
 use tutti_types::{Beat, BeatDuration, SampleRate};
-use tutti_ump::{Address, CCNumber, KeyEvent, Message, MidiChannel, MidiGroup, U7, Voice2};
+use tutti_ump::{Address, CCNumber, Message, MidiChannel, MidiGroup, NoteKeyEvent, U7, Voice2};
 
 const RATE: f64 = 48_000.0;
 
@@ -87,24 +87,24 @@ fn key(channel: u8, n: u8) -> tutti_ump::Ump {
     midi::note_on(MidiChannel::of(channel), n, MF)
 }
 
-fn heard(seen: &Seen, wanted: fn(KeyEvent) -> Option<u8>) -> Vec<u8> {
+fn heard(seen: &Seen, wanted: fn(NoteKeyEvent) -> Option<u8>) -> Vec<u8> {
     seen.lock()
         .unwrap()
         .iter()
-        .filter_map(|&(_, e)| e.key_event().and_then(wanted))
+        .filter_map(|&(_, e)| e.note_key_event().and_then(wanted))
         .collect()
 }
 
 fn note_ons(seen: &Seen) -> Vec<u8> {
     heard(seen, |e| match e {
-        KeyEvent::On(k) => Some(k.note().get()),
+        NoteKeyEvent::On(k) => Some(k.note().get()),
         _ => None,
     })
 }
 
 fn note_offs(seen: &Seen) -> Vec<u8> {
     heard(seen, |e| match e {
-        KeyEvent::Off(k) => Some(k.note().get()),
+        NoteKeyEvent::Off(k) => Some(k.note().get()),
         _ => None,
     })
 }
@@ -441,7 +441,7 @@ fn a_session_without_the_hardware_layer_fails_the_load_by_name() {
     let Some(PoolState::Failed(LoadError::Midi(error))) = s.pool_state(&"keys") else {
         panic!("the load failed: {:?}", s.pool_state(&"keys"));
     };
-    assert!(matches!(&*error, MidiPortError::NoHardware), "{error:?}");
+    assert!(matches!(&*error, MidiPortError::NoHardware(_)), "{error:?}");
 }
 
 /// **A released port reads `Closed`**: once the pool no longer names the entry,
@@ -755,8 +755,9 @@ fn an_output_port_sends_what_its_node_is_fed_to_the_device() {
     let _ = s.update();
     let sent = fake.take_sent(EndpointId::from_raw(10));
     assert!(
-        sent.iter()
-            .any(|u| matches!(u.key_event(), Some(KeyEvent::On(k)) if k.note().get() == 60)),
+        sent.iter().any(
+            |u| matches!(u.note_key_event(), Some(NoteKeyEvent::On(k)) if k.note().get() == 60)
+        ),
         "the device received the note on: {sent:?}"
     );
 }
@@ -775,10 +776,11 @@ fn an_output_port_follows_its_device_through_an_unplug() {
     let out = s.midi_output(&"synth").expect("loaded");
     s.midi_nodes()
         .unwrap()
-        .clock_master
-        .set_sends(tutti_midi_runtime::ClockSends {
-            timing: true,
-            ..Default::default()
+        .sync_controls
+        .messages()
+        .set(tutti_midi_runtime::SyncMessages {
+            clock: true,
+            ..tutti_midi_runtime::SyncMessages::OFF
         });
     let _ = s.update();
     roll(&s, 4_096);
@@ -1001,10 +1003,11 @@ fn an_output_port_counts_what_its_device_refused() {
     let out = s.midi_output(&"synth").expect("loaded");
     s.midi_nodes()
         .unwrap()
-        .clock_master
-        .set_sends(tutti_midi_runtime::ClockSends {
-            timing: true,
-            ..Default::default()
+        .sync_controls
+        .messages()
+        .set(tutti_midi_runtime::SyncMessages {
+            clock: true,
+            ..tutti_midi_runtime::SyncMessages::OFF
         });
     roll(&s, 4_096);
     let _ = s.update();
@@ -1026,10 +1029,11 @@ fn an_output_port_counts_the_events_its_tap_had_no_room_for() {
     let out = s.midi_output(&"synth").expect("loaded");
     s.midi_nodes()
         .unwrap()
-        .clock_master
-        .set_sends(tutti_midi_runtime::ClockSends {
-            timing: true,
-            ..Default::default()
+        .sync_controls
+        .messages()
+        .set(tutti_midi_runtime::SyncMessages {
+            clock: true,
+            ..tutti_midi_runtime::SyncMessages::OFF
         });
     roll(&s, 1_100_000);
     let _ = s.update();

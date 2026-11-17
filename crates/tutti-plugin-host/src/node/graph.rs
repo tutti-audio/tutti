@@ -282,7 +282,7 @@ where
                     }
                     this.params.count_transport_dropped(over);
                 } else if phase == 0 {
-                    this.chunk_info = TransportInfo::default();
+                    this.chunk_info = TransportInfo::new(cx.env.sample_rate);
                 }
 
                 let piece_midi = this.midi.len();
@@ -310,7 +310,6 @@ where
                     &ins,
                     &mut outs,
                     n,
-                    this.sample_rate,
                 );
                 if rendered != Rendered::Ran {
                     silence(&mut outs, n);
@@ -447,7 +446,6 @@ where
                 &ins,
                 &mut outs,
                 size,
-                this.sample_rate,
             );
             if rendered != Rendered::Ran {
                 silence(&mut outs, size);
@@ -859,7 +857,7 @@ mod owed_tests {
         // The host keeps one SysEx reassembler across activations, so the
         // cut dump is still open on it, and its second `START` drops it.
         let fresh = unit.node.rt.held().expect("the new Processor");
-        assert_eq!(fresh.dropped_sysex(), 1, "the cut dump, whole");
+        assert_eq!(fresh.dropped_sysex().get(), 1, "the cut dump, whole");
         assert_eq!(
             controls.dropped_midi_in(),
             (3 + cut.len() - 6) as u64,
@@ -900,7 +898,7 @@ mod owed_tests {
         unit.block();
 
         let processor = unit.node.rt.held().expect("lent");
-        assert_eq!(processor.dropped_sysex(), 1, "the cut dump, whole");
+        assert_eq!(processor.dropped_sysex().get(), 1, "the cut dump, whole");
         assert_eq!(controls.dropped_midi_in(), (cut.len() - 3) as u64);
     }
 }

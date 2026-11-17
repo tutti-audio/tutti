@@ -75,7 +75,7 @@ use crate::convert::to_f32;
 use crate::onset::{DetectionFunction, OnsetConfig, OnsetPlan, onset_lag, run};
 use crate::silence::FiniteLevel;
 use crate::yin::{PitchEstimate, YinConfig, YinPlan, yin_track_at};
-use crate::{Error, Result};
+use crate::{Error, Meter, Result};
 use tutti_dsp::FftScratch;
 use tutti_types::ranged;
 

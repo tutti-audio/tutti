@@ -58,6 +58,8 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+#[cfg(feature = "analyze")]
+mod analyze;
 #[cfg(feature = "export")]
 mod bounce;
 mod builder;
@@ -94,6 +96,9 @@ mod midi_follow;
 mod midi_hardware;
 #[cfg(feature = "midi-hardware")]
 mod midi_port;
+#[cfg(all(feature = "midi", not(feature = "midi-hardware")))]
+#[path = "midi_port_none.rs"]
+mod midi_port;
 #[cfg(feature = "midi")]
 mod midi_report;
 #[cfg(feature = "midi")]
@@ -129,9 +134,12 @@ mod switch;
 #[cfg(all(feature = "device", feature = "audio-io"))]
 mod take;
 mod transport_handle;
+mod value;
 #[cfg(feature = "device")]
 mod watch;
 
+#[cfg(feature = "analyze")]
+pub use analyze::{Analyze, AnalyzeError, Audio, AudioContext, AudioInput};
 #[cfg(feature = "export")]
 pub use bounce::{
     AnyStem, Bounce, BounceConfigError, BounceError, BounceHandle, BounceJob, BounceLatency,
@@ -178,9 +186,7 @@ pub use key::{
     RootDeclaration, Weighted, Wire,
 };
 #[cfg(feature = "midi")]
-pub use midi::{
-    Midi, MidiLoad, MidiRouteId, MidiRouteRule, NoSuchMidiRoute, Stamping, TakePlacement,
-};
+pub use midi::{Midi, MidiLoad, MidiRouteId, MidiRouteRule, Stamping, TakePlacement};
 #[cfg(feature = "midi-hardware")]
 pub use midi_ci::{
     ChannelProfile, GetProperty, ListedProfile, ListedResource, PeFailure, ProfilePeer, ReportPeer,
@@ -188,11 +194,12 @@ pub use midi_ci::{
     SwitchProfile, WholeProfile,
 };
 #[cfg(feature = "midi")]
-pub use midi_follow::{FollowClock, FollowMachineControl, FollowTempo, SendMachineControl};
+pub use midi_follow::{FollowClock, FollowMachineControl, FollowTempo};
 #[cfg(feature = "midi-hardware")]
 pub use midi_port::{
     InputLoaded, MidiInput, MidiInputEntry, MidiInputInfo, MidiOutput, MidiOutputEntry,
-    MidiOutputInfo, MidiPortError, OutputLoaded, OutputOptions, PortCause, midi_input, midi_output,
+    MidiOutputInfo, MidiPortError, NoHardware, OutputLoaded, OutputOptions, PortCause, midi_input,
+    midi_output,
 };
 #[cfg(feature = "midi")]
 pub use midi_report::MidiReport;
@@ -204,7 +211,7 @@ pub use modulation::{
     RouteInfo, RouteMut, RouteSpec, SourceInfo, SourceName, TargetName, declare_targets,
 };
 pub use node::{Reclaimer, Reclaims, SessionNode};
-pub use params::{ParamError, RangeError, TypedParamRef};
+pub use params::RangeError;
 pub use peer::{Peer, PeerError, Presence, Resource, ResourceFact, ResourceId};
 #[cfg(any(feature = "plugin", feature = "midi-hardware"))]
 pub use peer_state::{OtherPeer, PeerState, SavedPeer};
@@ -255,7 +262,7 @@ pub use sampler::{SamplerError, SamplerEvent, SamplerLoad};
 #[cfg(feature = "midi")]
 pub use session::MidiNodes;
 pub use session::ModInput;
-pub use session::{PHASES, Phase, PhaseCx, RootTopologyStatus, Session, SessionEvent};
+pub use session::{AppKey, PHASES, Phase, PhaseCx, RootTopologyStatus, Session, SessionEvent};
 #[cfg(feature = "device")]
 pub use switch::ClockError;
 #[cfg(all(feature = "device", feature = "audio-io"))]
@@ -277,9 +284,14 @@ pub use tutti_graph::{
     BusError, BusRef, BusSource, Buses, HasParam, HasParams, MissingSource, ParamUnit, Scalar,
 };
 pub use tutti_graph::{
-    CloseError, CommitError, EventCapacity, Losses, MixError, ModeError, NodeMode, PassError, Stamp,
+    CloseError, CommitError, EventCapacity, Losses, MixError, ModeError, NodeMode, PassError,
+    Stamp, Wired, WiredMask,
 };
 #[cfg(feature = "midi")]
 pub use tutti_ump::{MidiChannel, MidiGroup};
+pub use value::{
+    AnyAssign, AnyTarget, Assign, Effective, Info, IntoAssign, IntoRead, Knobs, Modify, Moved,
+    ParamTarget, ScalarTarget, SetRefusal, Target, TargetInfo, ValueError, ValueErrorKind,
+};
 #[cfg(feature = "device")]
 pub use watch::{Backoff, DevicePolicy, DeviceWatch, Follow, FollowEvent};

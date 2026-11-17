@@ -398,7 +398,7 @@ fn an_identity_is_refused_on_a_session_with_no_os_midi_layer() {
         .expect("builds");
     assert_eq!(
         s.policy::<MidiPolicy>().set(policy(2, "My App")),
-        Err(MidiPolicyError::NoHardware)
+        Err(MidiPolicyError::NoHardware(tutti_session::NoHardware))
     );
     assert_eq!(s.policy::<MidiPolicy>().get().identity, None);
     assert_eq!(s.policy::<MidiPolicy>().set(MidiPolicy::default()), Ok(()));
@@ -451,7 +451,7 @@ fn a_granted_request_moves_the_sessions_output_to_the_protocol_asked() {
     let sent = fake.take_sent(EndpointId::from_raw(RAW));
     let notes: Vec<_> = sent
         .iter()
-        .filter(|u| u.key_event().is_some())
+        .filter(|u| u.note_key_event().is_some())
         .map(|u| u.message_type())
         .collect();
     assert_eq!(notes, [2], "the note on, as MIDI 1.0");

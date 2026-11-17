@@ -2,10 +2,11 @@
 //! examples, the refusals, and sequence numbers.
 
 use tutti_midi_network::{
-    AuthChallenge, AuthMethods, AuthState, Bye, ByeReason, Command, DatagramBuilder, Digest,
-    Header, Invitation, Nak, NakReason, Nonce, ParseError, PingId, RetransmitErrorReason,
-    RetransmitRefusal, RetransmitRequest, SIGNATURE, SequenceNumber, SignatureError, Text, UmpData,
-    UmpDataError, UserAuthChallenge, UserAuthState, UserAuthentication, Username, parse,
+    AuthChallenge, AuthMethods, AuthState, Bye, ByeReason, ByeText, Command, DatagramBuilder,
+    Digest, Header, Invitation, Nak, NakReason, NakText, Nonce, ParseError, PingId,
+    RetransmitErrorReason, RetransmitRefusal, RetransmitRequest, SIGNATURE, SequenceNumber,
+    SignatureError, UmpData, UmpDataError, UserAuthChallenge, UserAuthState, UserAuthentication,
+    Username, parse,
 };
 use tutti_ump::Ump;
 
@@ -43,7 +44,7 @@ fn signature_is_midi_in_ascii() {
     assert_eq!(&datagram(&[])[..], b"MIDI");
 }
 
-/// Spec: m2-124/6.4#14, m2-124/6.4#16
+/// Spec: m2-124/6.4#14, m2-124/6.4#17
 #[test]
 fn invitation_matches_the_specification_example_byte_for_byte() {
     // M2-124 A.1.1: capabilities 0, name "MyDev" (padded with zero), id "8shYe3h5".
@@ -112,7 +113,7 @@ fn zero_length_ump_data_is_a_header_alone() {
     let Command::UmpData(d) = one(&cmd_bytes(&idle)).unwrap() else {
         panic!()
     };
-    assert!(d.is_idle());
+    assert!(d.words().is_empty());
 }
 
 #[test]
@@ -160,7 +161,7 @@ fn nak_carries_the_refused_header_then_padded_text() {
     let nak = Command::Nak(Nak {
         reason: NakReason::NotSupported,
         refused: Header::from_word(0xAB00_0000),
-        text: Text::new("hello").unwrap(),
+        text: NakText::new("hello").unwrap(),
     });
     assert_eq!(
         cmd_bytes(&nak),
@@ -171,8 +172,8 @@ fn nak_carries_the_refused_header_then_padded_text() {
     assert_eq!(one(&cmd_bytes(&nak)).unwrap(), nak);
     let bare = Command::Nak(Nak {
         reason: NakReason::Malformed,
-        refused: Header::new(0x20, 1, 0),
-        text: Text::default(),
+        refused: Header::from_word(0x2001_0000),
+        text: NakText::default(),
     });
     assert_eq!(
         cmd_bytes(&bare)[1],
@@ -188,7 +189,7 @@ fn bye_carries_the_reason_in_the_header_and_optional_text() {
     assert_eq!(cmd_bytes(&plain), [0xF0, 0x00, 0x04, 0x00]);
     let worded = Command::Bye(Bye {
         reason: ByeReason::UserTerminated,
-        text: Text::new("bye").unwrap(),
+        text: ByeText::new("bye").unwrap(),
     });
     assert_eq!(
         cmd_bytes(&worded),
@@ -351,11 +352,11 @@ fn every_command_round_trips() {
         Command::Nak(Nak {
             reason: NakReason::Reserved(0x55),
             refused: Header::from_word(0x0102_0304),
-            text: Text::new("why").unwrap(),
+            text: NakText::new("why").unwrap(),
         }),
         Command::Bye(Bye {
             reason: ByeReason::Reserved(0x99),
-            text: Text::new("é").unwrap(),
+            text: ByeText::new("é").unwrap(),
         }),
         Command::ByeReply,
         Command::UmpData(UmpData::new(SequenceNumber::new(5), &packets).unwrap()),
@@ -417,7 +418,7 @@ fn an_unknown_command_code_is_refused_and_the_next_command_still_reads() {
     let results: Vec<_> = parse(&all).unwrap().collect();
     let refused = results[0].as_ref().unwrap_err();
     assert_eq!(refused.error, ParseError::UnknownCode(0x55));
-    assert_eq!(refused.header, Header::new(0x55, 1, 0));
+    assert_eq!(refused.header, Header::from_word(0x5501_0000));
     assert_eq!(results[1], Ok(Command::ByeReply));
 }
 
@@ -456,6 +457,8 @@ fn an_invitation_with_no_product_instance_id_is_refused() {
     );
 }
 
+/// An Invitation's UMP Endpoint Name is never empty.
+/// Spec: m2-124/6.4#16
 #[test]
 fn an_invitation_with_an_all_zero_name_is_refused_as_empty() {
     let e = one(&[0x01, 0x02, 0x01, 0x00, 0, 0, 0, 0, b'i', 0, 0, 0]).unwrap_err();
@@ -500,6 +503,8 @@ fn a_reserved_authentication_state_is_refused() {
     assert_eq!(one(&bytes).unwrap_err().error, ParseError::Reserved);
 }
 
+/// A nonce is 16 bytes of ASCII 32-126, so a non-ASCII byte is refused.
+/// Spec: m2-124/6.7#14
 #[test]
 fn a_non_ascii_nonce_is_refused() {
     let c = Command::AuthRequired(AuthChallenge {
@@ -510,6 +515,42 @@ fn a_non_ascii_nonce_is_refused() {
     let mut bytes = cmd_bytes(&c);
     bytes[4] = 0xC3;
     assert_eq!(one(&bytes).unwrap_err().error, ParseError::Nonce);
+}
+
+/// The sender's nonce is ASCII 32-126; a received one is only hashed, so any ASCII is read.
+/// Spec: m2-124/6.7#14
+#[test]
+fn a_received_nonce_outside_the_senders_range_is_read_but_never_issued() {
+    let mut bytes = cmd_bytes(&Command::AuthRequired(AuthChallenge {
+        state: AuthState::First,
+        nonce: Nonce::new(*b"0123456789abcdef").unwrap(),
+        identity: identity("A", "B"),
+    }));
+    bytes[4] = 0x01;
+    let Ok(Command::AuthRequired(challenge)) = one(&bytes) else {
+        panic!("a nonce holding 0x01 is read")
+    };
+    assert_eq!(challenge.nonce.get()[0], 0x01);
+    let mut raw = *b"0123456789abcdef";
+    raw[0] = 0x01;
+    assert!(Nonce::new(raw).is_none(), "this crate issues only 32..=126");
+}
+
+#[test]
+fn a_payload_of_the_wrong_length_is_a_length_error_from_command_parse() {
+    // A Ping's header counts one payload word.
+    let header = Header::from_word(0x2001_0000);
+    let length = ParseError::Length {
+        code: 0x20,
+        words: 1,
+    };
+    assert_eq!(
+        Command::parse(header, &[0, 0, 0, 7]),
+        Ok(Command::Ping(PingId::new(7)))
+    );
+    assert_eq!(Command::parse(header, &[0, 0, 7]), Err(length));
+    assert_eq!(Command::parse(header, &[0, 0, 0, 0, 7]), Err(length));
+    assert_eq!(Command::parse(header, &[]), Err(length));
 }
 
 /// Spec: m2-124/7.1#3
@@ -556,14 +597,45 @@ fn chunks_split_at_sixty_four_words_without_splitting_a_packet_and_number_on() {
     assert_eq!(chunks[1].sequence(), SequenceNumber::ZERO);
 }
 
+/// A username is never empty.
+/// Spec: m2-124/6.10#11
 #[test]
 fn texts_refuse_a_nul_and_overlong_input() {
-    assert!(Text::new("a\0b").is_err());
-    assert!(Text::new(&"x".repeat(1017)).is_err());
-    assert!(Text::new(&"x".repeat(1016)).is_ok());
+    assert!(ByeText::new("a\0b").is_err());
+    assert!(ByeText::new(&"x".repeat(1021)).is_err());
+    assert!(ByeText::new(&"x".repeat(1020)).is_ok());
+    assert!(NakText::new(&"x".repeat(1017)).is_err());
+    assert!(NakText::new(&"x".repeat(1016)).is_ok());
     assert!(Username::new("").is_err());
     assert!(Username::new(&"u".repeat(989)).is_err());
     assert!(Username::new(&"u".repeat(988)).is_ok());
+}
+
+/// Advisory text: what is UTF-8 is kept.
+/// Spec: m2-124/6.15#2, m2-124/6.16#5
+#[test]
+fn advisory_text_that_is_not_utf8_is_cut_before_the_bad_byte() {
+    let bye = one(&[
+        0xF0, 0x02, 0x01, 0x00, b'o', b'k', 0xFF, 0xFE, b't', b'a', b'i', b'l',
+    ])
+    .unwrap();
+    assert_eq!(
+        bye,
+        Command::Bye(Bye {
+            reason: ByeReason::UserTerminated,
+            text: ByeText::new("ok").unwrap(),
+        })
+    );
+    // A multi-byte character cut in half is dropped whole.
+    let nak = one(&[0x8F, 0x02, 0x03, 0x00, 0x20, 1, 0, 0, b'a', 0xC3, 0, 0]).unwrap();
+    assert_eq!(
+        nak,
+        Command::Nak(Nak {
+            reason: NakReason::Malformed,
+            refused: Header::from_word(0x2001_0000),
+            text: NakText::new("a").unwrap(),
+        })
+    );
 }
 
 // ---- Sequence numbers ----
@@ -571,10 +643,6 @@ fn texts_refuse_a_nul_and_overlong_input() {
 #[test]
 fn sequence_numbers_wrap_to_zero_after_ffff() {
     assert_eq!(SequenceNumber::new(0xFFFF).next(), SequenceNumber::ZERO);
-    assert_eq!(
-        SequenceNumber::new(0xFFFE).advanced(3),
-        SequenceNumber::new(1)
-    );
 }
 
 #[test]
@@ -592,9 +660,10 @@ mod props {
 
     proptest! {
         #[test]
-        fn advancing_then_measuring_returns_the_step(start in any::<u16>(), step in 0u16..0x7FFF) {
+        fn a_number_step_on_wrapping_measures_the_step(start in any::<u16>(), step in 0u16..0x7FFF) {
             let a = SequenceNumber::new(start);
-            prop_assert_eq!(a.advanced(step).distance_from(a), i16::try_from(step).unwrap());
+            let later = SequenceNumber::new(start.wrapping_add(step));
+            prop_assert_eq!(later.distance_from(a), i16::try_from(step).unwrap());
         }
     }
 }

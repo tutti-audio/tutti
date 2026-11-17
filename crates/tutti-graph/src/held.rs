@@ -7,7 +7,7 @@
 //! the injection path that flushes a vanished delay. Nodes know nothing of
 //! this.
 //!
-//! The set is a bitset over the 16-bit [`Key`](tutti_ump::Key), fixed at 8 KiB,
+//! The set is a bitset over the 16-bit [`NoteKey`](tutti_ump::NoteKey), fixed at 8 KiB,
 //! allocated on the control side with the commit that places the unit and never
 //! grown. A node's op writes only its own unit's
 //! sets, so a parallel block needs no new claim.
@@ -17,7 +17,7 @@
 //! replacement: past about 72 held keys (what a block's slot takes) it can end a
 //! note the new unit started on the same key.
 
-use tutti_ump::{Address, KeyBitset, KeyEvent, Lane, LaneSet, Protocol, Ump};
+use tutti_ump::{Address, KeyBitset, Lane, LaneSet, NoteKeyEvent, Protocol, Ump};
 
 use crate::event::{Event, EventKind};
 use crate::time::Offset;
@@ -57,14 +57,14 @@ impl Held {
     pub(crate) fn observe(&mut self, events: &[Event]) {
         for e in events {
             let EventKind::Midi(u) = e.kind else { continue };
-            match u.key_event() {
-                Some(KeyEvent::On(k)) => {
+            match u.note_key_event() {
+                Some(NoteKeyEvent::On(k)) => {
                     self.keys.insert(k);
                 }
-                Some(KeyEvent::Off(k)) => {
+                Some(NoteKeyEvent::Off(k)) => {
                     self.keys.remove(k);
                 }
-                Some(KeyEvent::Sustain {
+                Some(NoteKeyEvent::Sustain {
                     protocol,
                     address,
                     down,
@@ -78,7 +78,7 @@ impl Held {
     pub(crate) fn any_key(events: &[Event]) -> bool {
         events
             .iter()
-            .any(|e| matches!(e.kind, EventKind::Midi(u) if u.key_event().is_some()))
+            .any(|e| matches!(e.kind, EventKind::Midi(u) if u.note_key_event().is_some()))
     }
 
     /// Forget everything held.

@@ -66,15 +66,16 @@
 //! else: the `f64` stays inside the node.
 
 use crate::OfflineWait;
-use crate::{AudioSlab, FATES, Fate, HarmonyInputs, PluginBridge, SlabAccessError, SlabWriter};
+use crate::{AudioSlab, FATES, Fate, HarmonyInputs, PluginBridge, SlabWriter};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use std::time::{Duration, Instant};
+use std::time::Instant;
+use tutti_plugin_types::SlabAccessError;
 use tutti_plugin_types::{
     BlockStatus, ChunkCounters, MidiEventVec, NoteExpressionChanges, ParameterChanges,
     SampleFormat, TransportChanges, TransportInfo, WireMidi,
 };
-use tutti_types::Samples;
+use tutti_types::{SampleRate, Samples};
 
 /// Single-chunk wire scratch in the plugin-negotiated format. Allocated at
 /// [`Batcher::new`] for the chunk ceiling, because the wire format is known
@@ -167,7 +168,7 @@ impl WireStorage {
 /// The chunk's parameter changes are not here: they stay in the node's
 /// `ParamDelivery`, whose buffer the bridge swaps rather than moves
 /// ([`Chunks::params`]), so nothing is allocated or freed per chunk.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct BlockPayload {
     /// The chunk's MIDI events.
     pub midi: MidiEventVec,
@@ -180,6 +181,21 @@ pub struct BlockPayload {
     /// The transport changes after it, each at its chunk frame (doc 020
     /// stage 5b; `transport_walk`). Inline: nothing allocates.
     pub changes: TransportChanges,
+}
+
+impl BlockPayload {
+    /// A chunk with nothing in it: no MIDI, no harmony, a stopped transport at
+    /// `sample_rate` and no changes after it.
+    #[must_use]
+    pub fn new(sample_rate: SampleRate) -> Self {
+        Self {
+            midi: MidiEventVec::new(),
+            note_expression: NoteExpressionChanges::default(),
+            harmony: HarmonyInputs::default(),
+            transport: TransportInfo::new(sample_rate),
+            changes: TransportChanges::new(),
+        }
+    }
 }
 
 /// What the plugin node gives the batcher per chunk: the chunk's payload, and
@@ -400,6 +416,14 @@ impl Batcher {
     /// bridge's crash latch is the server's [`ServerWatch`](crate::ServerWatch),
     /// which the process's end sets as well as the stream's, so a wait that
     /// sends no command (and so never reads the socket) still sees it.
+    ///
+    /// **The wait ends at the reply, not at the publish.** The publisher is the
+    /// server, another process, so nothing in this one can ring at the moment it
+    /// writes the chunk into the slab; what wakes the wait is the bridge thread
+    /// reading the server's reply, or the server's end. A server that publishes
+    /// and then stalls before replying is therefore seen at its reply or at the
+    /// budget, where a poll of the slab saw it at the publish. An export that
+    /// waits for a block's MIDI waits for the reply anyway.
     fn await_output(&mut self, bridge: &PluginBridge) {
         let (Some(watch), Some(seq)) = (&self.offline_wait, self.expect_seq) else {
             return;
@@ -418,24 +442,26 @@ impl Batcher {
             return;
         }
         let deadline = Instant::now() + watch.budget();
-        while !bridge.is_crashed() && !self.slab.has_output(seq) {
-            if Instant::now() >= deadline {
-                watch.give_up();
-                // No reply is awaited past the live bound from here on: a
-                // hung server must not hold the bridge thread one budget per
-                // chunk the render still submits.
-                bridge.set_reply_wait(watch.reply_wait());
-                tracing::warn!(
-                    seq,
-                    budget = ?watch.budget(),
-                    "offline plugin fork: block not published in time; \
-                     rendering silence from here on"
-                );
-                return;
-            }
-            // Short, not a spin: this is a worker thread, and the server needs
-            // the core more than this loop does.
-            std::thread::sleep(Duration::from_micros(50));
+        // The server publishes a chunk's audio and then replies, and the
+        // reply (or the end of the server) wakes this wait: the bridge
+        // thread notifies as it queues each response, and the server's watch
+        // as it is declared gone. Nothing wakes on the publish alone.
+        let progress = bridge.progress();
+        if !progress.wait_until(deadline, || {
+            bridge.is_crashed() || self.slab.has_output(seq)
+        }) {
+            watch.give_up();
+            // No reply is awaited past the live bound from here on: a
+            // hung server must not hold the bridge thread one budget per
+            // chunk the render still submits.
+            bridge.set_reply_wait(watch.reply_wait());
+            tracing::warn!(
+                seq,
+                budget = ?watch.budget(),
+                "offline plugin fork: block not published in time; \
+                 rendering silence from here on"
+            );
+            return;
         }
         // The latch outlives the bridge: the health probe reads the watch, and
         // a render that ends before the next poll drops the bridge (with the
@@ -447,12 +473,9 @@ impl Batcher {
         // for the reply too, or an export's MIDI-out would depend on how the
         // two raced. Within the same budget; a reply that never comes costs
         // its MIDI, never the audio (no `give_up`).
-        while !bridge.take_replies(seq, &mut self.reply, &mut self.said) {
-            if bridge.is_crashed() || Instant::now() >= deadline {
-                return;
-            }
-            std::thread::sleep(Duration::from_micros(50));
-        }
+        progress.wait_until(deadline, || {
+            bridge.is_crashed() || bridge.take_replies(seq, &mut self.reply, &mut self.said)
+        });
     }
 
     /// Drop the chunk in flight, the frames taken towards the next one and

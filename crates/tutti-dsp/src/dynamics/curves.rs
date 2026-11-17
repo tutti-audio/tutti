@@ -64,6 +64,23 @@ pub fn compute_compressor_gain_reduction(
     }
 }
 
+/// The upward counterpart of [`compute_compressor_gain_reduction`]: the lift, in dB and `>= 0`,
+/// a level under the threshold is given.
+///
+/// It is the reduction curve mirrored about the threshold: a level `x` dB under it, through
+/// the same knee and ratio, is lifted by what a level `x` dB over it is reduced by, so a
+/// ratio of 1 lifts nothing and the lift is continuous at the knee's edges.
+#[inline]
+pub(super) fn compute_upward_gain_lift(
+    input_db: Db,
+    threshold: Db,
+    ratio: CompressionRatio,
+    knee: Db,
+) -> Db {
+    let mirrored = Db(2.0 * threshold.get() - input_db.get());
+    compute_compressor_gain_reduction(mirrored, threshold, ratio, knee)
+}
+
 /// The gate's gain: `range_linear` closed (`gate_level` 0) to 1 open (`gate_level` 1),
 /// from the open fraction (unitless, 0..1) and the range already as an amplitude.
 #[inline]

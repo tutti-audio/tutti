@@ -249,10 +249,7 @@ impl OfflineTimeline {
             true,
             clock.tempo(),
             clock.origin(),
-            self.loop_range.map(|r| tutti_graph::LoopRange {
-                start: r.start(),
-                end: r.end(),
-            }),
+            self.loop_range,
         )
     }
 

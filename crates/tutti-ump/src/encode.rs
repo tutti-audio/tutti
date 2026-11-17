@@ -3,10 +3,10 @@
 
 use crate::field::{ChordType, FirstGroup, FunctionBlockId, GroupSpan, U7};
 use crate::message::{
-    Accidental, Address, Alteration, AlterationKind, Attribute, BlockSelect, ChordName, ChordPitch,
-    Data128, Direction, Flex, FlexAddress, FlexTextKind, Form, FunctionBlocks, KeySignature,
-    Letter, Message, Midi1Port, Protocol, Stream, StreamConfig, Sysex7Packet, SysexStatus, System,
-    UiHint, Utility, Voice1, Voice2,
+    Accidental, Address, Alteration, AlterationKind, Attribute, BlockDirection, BlockSelect,
+    ChordName, ChordPitch, Data128, Flex, FlexAddress, FlexTextKind, Form, FunctionBlocks,
+    KeySignature, Letter, Message, Midi1Port, Protocol, Stream, StreamConfig, Sysex7Packet,
+    SysexStatus, System, UiHint, Utility, Voice1, Voice2,
 };
 use crate::{MidiGroup, Ump};
 
@@ -71,9 +71,7 @@ fn system(g: MidiGroup, s: System) -> u32 {
     let h = head(0x1, g);
     match s {
         System::TimeCode(d) => h | (0xF1 << 16) | (u7(d) << 8),
-        System::SongPosition(p) => {
-            h | (0xF2 << 16) | ((u32::from(p.get()) & 0x7f) << 8) | (u32::from(p.get()) >> 7)
-        }
+        System::SongPosition(p) => h | (0xF2 << 16) | (u7(p.lsb()) << 8) | u7(p.msb()),
         System::SongSelect(d) => h | (0xF3 << 16) | (u7(d) << 8),
         System::TuneRequest => h | (0xF6 << 16),
         System::TimingClock => h | (0xF8 << 16),
@@ -97,7 +95,7 @@ fn voice1(a: Address, v: Voice1) -> u32 {
         }
         Voice1::ProgramChange(p) => (0xC, u7(p), 0),
         Voice1::ChannelPressure(p) => (0xD, u7(p), 0),
-        Voice1::PitchBend(b) => (0xE, u32::from(b.get()) & 0x7f, u32::from(b.get()) >> 7),
+        Voice1::PitchBend(b) => (0xE, u7(b.lsb()), u7(b.msb())),
     };
     address(0x2, a, opcode) | (d1 << 8) | d2
 }
@@ -504,10 +502,10 @@ fn stream(s: Stream) -> [u32; 4] {
         }
         Stream::FunctionBlockInfo(i) => {
             let direction = match i.direction {
-                Direction::Input => 0b01,
-                Direction::Output => 0b10,
-                Direction::Bidirectional => 0b11,
-                Direction::Reserved(r) => u32::from(r.get()) & 0x3,
+                BlockDirection::Input => 0b01,
+                BlockDirection::Output => 0b10,
+                BlockDirection::Bidirectional => 0b11,
+                BlockDirection::Reserved(r) => u32::from(r.get()) & 0x3,
             };
             let ui_hint = match i.ui_hint {
                 UiHint::Unknown => 0,

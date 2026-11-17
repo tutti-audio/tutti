@@ -37,7 +37,7 @@ use tutti_rt::{StopToken, ThreadHandle};
 
 use tutti_plugin_ipc::{BridgeMessage, HostMessage, SlabWriter};
 use tutti_plugin_types::{
-    AudioBufferMut, BlockStatus, BridgeError, BridgeResult, Features, MidiEventVec, PluginResult,
+    BlockStatus, BridgeError, BridgeResult, Features, MidiEventVec, PluginAudio, PluginResult,
     ProcessContext, ProcessOutput, Processor, SampleFormat,
 };
 use tutti_rt::{Overflow, PushError, Returned, RingReader, RingWriter, Rt, ring};
@@ -131,11 +131,11 @@ impl<P: Processor + 'static> Render for End<P> {
         self.features
     }
 
-    fn render(
+    fn render<'a>(
         &mut self,
-        buffer: AudioBufferMut<'_, '_>,
-        ctx: &ProcessContext<'_>,
-        out: &mut ProcessOutput,
+        buffer: PluginAudio<'a>,
+        ctx: &'a ProcessContext<'a>,
+        out: &'a mut ProcessOutput,
     ) -> PluginResult<()> {
         // A Processor that is not here (recalled for a rate change, or
         // refused): the block is silence and the plugin is not touched.
@@ -494,9 +494,10 @@ impl RenderSide {
                 }
                 Ok(None)
             }
-            other => Err(BridgeError::ProtocolError(format!(
-                "{other:?} is not carried on the audio connection"
-            ))),
+            other => Err(BridgeError::UnexpectedMessage {
+                expected: "a message the audio connection carries",
+                got: format!("{other:?}"),
+            }),
         }
     }
 
@@ -568,7 +569,6 @@ impl RenderSide {
         let Self {
             slab,
             pipeline,
-            config,
             seat,
             barrier,
             back,
@@ -582,7 +582,7 @@ impl RenderSide {
         };
 
         let reaches = seat.has_processor();
-        let output = pipeline.process(seat.as_mut(), slab, &config.clock, block)?;
+        let output = pipeline.process(seat.as_mut(), slab, block)?;
         if reaches && let Some(id) = barrier.take() {
             // This block ran the Processor after the barrier was taken.
             if let Err(refused) = back.push(Back::Ack(id)) {
@@ -647,7 +647,7 @@ pub(crate) struct RenderThread {
     handle: Option<ThreadHandle<RenderSide>>,
     /// Why the audio connection ended, if it did: the thread then only trades
     /// the Processor, until it is stopped.
-    ended: Arc<OnceLock<BridgeError>>,
+    ended: Arc<OnceLock<Arc<BridgeError>>>,
 }
 
 impl RenderThread {
@@ -671,7 +671,7 @@ impl RenderThread {
     }
 
     /// Why the audio connection ended, once it has.
-    pub(crate) fn ended(&self) -> Option<&BridgeError> {
+    pub(crate) fn ended(&self) -> Option<&Arc<BridgeError>> {
         self.ended.get()
     }
 
@@ -701,7 +701,7 @@ fn run(
     mut side: RenderSide,
     audio: Box<dyn Transport>,
     stop: &StopToken,
-    ended: &OnceLock<BridgeError>,
+    ended: &OnceLock<Arc<BridgeError>>,
 ) -> RenderSide {
     let mut audio = Some(audio);
     while !stop.is_stopped() {
@@ -709,7 +709,7 @@ fn run(
             // The connection is gone; the Processor may still be recalled, so
             // the thread keeps trading it until the main thread has it back.
             audio = None;
-            let _ = ended.set(error);
+            let _ = ended.set(Arc::new(error));
         }
     }
     side

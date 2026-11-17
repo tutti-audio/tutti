@@ -4,9 +4,8 @@
 /// sections 7.4.11 and 7.4.7), centred on [`CENTER`](Self::CENTER).
 ///
 /// Every `u32` is a bend, so there is no refusing constructor. The word is the
-/// wire's integer: a MIDI 1.0 14-bit bend reaches it through
-/// `tutti_midi_protocol::widen_bend`, which scales by M2-115, and the raw
-/// `0x2000` of a 14-bit centre is far below the centre here.
+/// wire's integer, not a MIDI 1.0 14-bit bend: the raw `0x2000` of a 14-bit
+/// centre is far below the centre here.
 ///
 /// # Examples
 ///
@@ -18,7 +17,24 @@
 /// assert_eq!(BendValue::CENTER.get(), 0x8000_0000);
 /// ```
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(try_from = "u32", into = "u32"))]
 pub struct BendValue(u32);
+
+// Every `u32` is a BendValue, so the serde form (the bare number) reads back
+// through a conversion that cannot fail.
+#[cfg(feature = "serde")]
+#[allow(
+    clippy::infallible_try_from,
+    reason = "no `From<raw>`: a value enters through `new` or `wire`; this is the serde form"
+)]
+impl TryFrom<u32> for BendValue {
+    type Error = core::convert::Infallible;
+
+    fn try_from(raw: u32) -> Result<Self, Self::Error> {
+        Ok(Self(raw))
+    }
+}
 
 impl BendValue {
     /// The lowest bend, `0`.

@@ -1,31 +1,10 @@
-//! [`MidiChannel`] — which of a MIDI group's 16 channels a message addresses.
+//! [`MidiChannel`]: which of a group's 16 channels a message addresses.
 //!
-//! An *address*, not a measure — so like `Samples` it is an
-//! integer newtype rather than one of the float-backed units in
-//! `tutti_types`, and it deliberately does not implement
-//! `Unit`: a channel is not an automatable DSP parameter and must
-//! not be reachable through `Param`.
-//!
-//! # Why a newtype and not `u8`
-//!
-//! Every UMP constructor takes `(group, channel, note, …)` — three adjacent
-//! `u8`s. Nothing stops two of them being swapped, and the result is not a
-//! crash: the note plays on the wrong channel, which under MPE means the wrong
-//! *voice*, and per-note expression lands on a note nobody is holding.
-//!
-//! A `pub type MidiChannel = u8` alias prevents none of that — an alias is the
-//! same type. This is a real newtype, serializable (feature `serde`) so a document can persist a channel.
-//!
-//! See [`MidiGroup`](crate::MidiGroup) for the other half: typing a channel
-//! alone still leaves `(group, channel)` transposable, since both are 4-bit.
-//!
-//! # Channel is voice identity
-//!
-//! Under MPE a channel is not a timbre selector but a *voice slot*: the synth
-//! addresses a sounding note by `NoteId::from_channel_note(channel, note)`, so
-//! two same-pitch notes on different channels are independent. Dropping the
-//! channel from an authored note therefore does not merely lose routing — it
-//! makes overlapping same-pitch notes collide, unrecoverably.
+//! An address, not a quantity. A channel names a voice slot (under MPE a note
+//! is addressed by `NoteId::from_channel_note(channel, note)`), so the channel
+//! of a note is part of its identity. It is a distinct type from
+//! [`MidiGroup`](crate::MidiGroup): both are 4 bits, and a transposed
+//! `(group, channel)` pair does not compile.
 
 use crate::OutOfRange;
 

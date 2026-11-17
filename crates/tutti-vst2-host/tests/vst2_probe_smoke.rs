@@ -212,8 +212,8 @@ fn the_transport_changed_edge_spans_blocks() {
     let in_refs: Vec<&[f32]> = inputs.iter().map(|v| v.as_slice()).collect();
     let mut out_refs: Vec<&mut [f32]> = outputs.iter_mut().map(|v| v.as_mut_slice()).collect();
 
-    let stopped = TransportInfo::new();
-    let playing = TransportInfo::new().with_playing(true);
+    let stopped = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
+    let playing = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K).with_playing(true);
     let mut changed = Vec::new();
     for transport in [&stopped, &playing, &playing, &stopped] {
         let ctx = Vst2ProcessContext::new(tutti_plugin_types::SampleRate::of(SAMPLE_RATE))

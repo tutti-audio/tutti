@@ -178,10 +178,10 @@ impl PeCiMessage {
             SUB_ID2_PE_CAPABILITIES_REPLY => {
                 PeCapabilities::decode_body(body).map(Self::CapabilitiesReply)
             }
-            SUB_ID2_PE_NOTIFY => PeChunk::parse_fields(body).ok().map(Self::Notify),
+            SUB_ID2_PE_NOTIFY => PeChunk::try_from(body).ok().map(Self::Notify),
             _ => Some(Self::Chunk {
                 kind: PeMessageKind::from_sub_id2(sub_id2)?,
-                chunk: PeChunk::parse_fields(body).ok()?,
+                chunk: PeChunk::try_from(body).ok()?,
             }),
         }
     }

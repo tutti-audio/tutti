@@ -3,20 +3,18 @@
 
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
-    Butterworth, ButterworthOrder, CutResponse, Glide, LinkwitzRiley, MAX_SECTIONS, Ring, Sos,
-    SosBank, SosCoefficients, System, TAIL_FLOOR,
+    Butterworth, ButterworthOrder, CutResponse, LinkwitzRiley, Ring, SosCoefficients, System,
+    TAIL_FLOOR,
 };
-use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
+use tutti_graph::Shape;
 use tutti_types::{BusTopology, ChannelLayout, Hz, MaxBlock, SampleRate, Samples, Tail};
 
 use super::filter_bus;
+use super::glided::{GLIDE_STEPS, GlidedSos, filter_shape};
 use crate::kernel::{ControlLanes, Kernel, KernelNode};
 
 /// The lowest cutoff a filter takes: 10 Hz.
 pub const MIN_CUT_CUTOFF: Hz = Hz(10.0);
-
-/// The steps the coefficients take to a new design: one grid period.
-const GLIDE_STEPS: u32 = 16;
 
 /// The octaves from [`MIN_CUT_CUTOFF`] a cutoff below 192 kHz's Nyquist can sit in.
 const LADDER: usize = 14;
@@ -84,14 +82,14 @@ impl CutFilterConfig {
 }
 
 /// A high-pass or low-pass of any width, a [`Butterworth`] or [`LinkwitzRiley`] design run
-/// as a cascade of state-variable sections ([`SosBank`]) in `f64`.
+/// as a cascade of state-variable sections ([`SosBank`](tutti_dsp::SosBank)) in `f64`.
 ///
 /// The cutoff is a live [`Hz`] cell (`UnitParam::Cutoff`), designed on a 16-frame grid
 /// and reached along a line in the sections' coefficients over the next 16 frames with the
 /// state kept, so an automated cutoff glides and the cascade stays stable. The response and
 /// the order are the node's build: another is another node.
 ///
-/// The tail is the ring-out of the whole cascade at the lowest cutoff ([`Sos`]'s tail,
+/// The tail is the ring-out of the whole cascade at the lowest cutoff ([`Sos`](tutti_dsp::Sos)'s tail,
 /// every pole together), the ceiling over every control. No latency. A [`KernelNode`]. Made
 /// from a [`CutFilterConfig`] (`CutFilterNode::from`).
 ///
@@ -124,19 +122,15 @@ control_set! {
     }
 }
 
-/// The filter as a [`Kernel`]: a [`SosBank`] and the glide of the coefficients every channel
-/// shares.
+/// The filter as a [`Kernel`]: a [`SosBank`](tutti_dsp::SosBank) run with the glide of the
+/// coefficients every channel shares.
 #[derive(Clone, Debug)]
 pub struct CutFilterKernel {
     input: BusTopology,
     response: CutResponse,
     alignment: CutAlignment,
-    bank: SosBank<f64>,
-    coefficients: Glide<SosCoefficients<f64>>,
-    /// The design in progress, its room for [`MAX_SECTIONS`] sections held.
-    scratch: Sos,
+    sos: GlidedSos,
     rate: SampleRate,
-    landed: bool,
     /// The tail at each octave from [`MIN_CUT_CUTOFF`] up (`LADDER` rungs at most), found
     /// in `prepare`; the rungs past the Nyquist's are unused.
     ladder: [Tail; LADDER],
@@ -146,19 +140,16 @@ impl CutFilterKernel {
     /// A filter on the bus `input`, its output where it is; at a placeholder 48 kHz until
     /// `prepare`, which an unprepared node renders nothing before.
     fn new(input: BusTopology, config: &CutFilterConfig) -> Self {
-        let rate = SampleRate::SR_48K;
         let mut kernel = Self {
             input,
             response: config.response,
             alignment: config.alignment,
-            bank: SosBank::new(input.layout()),
-            coefficients: Glide::landed(SosCoefficients::THROUGH),
-            scratch: Sos::new(Vec::with_capacity(MAX_SECTIONS), rate),
-            rate,
-            landed: false,
+            sos: GlidedSos::new(input),
+            rate: SampleRate::SR_48K,
             ladder: [Tail::Unknown; LADDER],
         };
-        kernel.coefficients = Glide::landed(kernel.design(CutFilterControls::DEFAULT.cutoff));
+        let first = kernel.design(CutFilterControls::DEFAULT.cutoff);
+        kernel.sos.start(first);
         kernel
     }
 
@@ -167,16 +158,15 @@ impl CutFilterKernel {
     fn design(&mut self, cutoff: Hz) -> SosCoefficients<f64> {
         let top = self.rate.nyquist_scaled(0.99).get();
         let cutoff = Hz(cutoff.get().clamp(MIN_CUT_CUTOFF.get(), top));
-        let done =
-            match self.alignment {
-                CutAlignment::Butterworth(order) => Butterworth::new(self.response, order)
-                    .design_into(cutoff, self.rate, &mut self.scratch),
-                CutAlignment::LinkwitzRiley(half) => LinkwitzRiley::new(self.response, half)
-                    .design_into(cutoff, self.rate, &mut self.scratch),
-            };
-        done.ok()
-            .and_then(|()| SosCoefficients::new(&self.scratch))
-            .unwrap_or_else(|| self.coefficients.target())
+        let (response, alignment, rate) = (self.response, self.alignment, self.rate);
+        self.sos.design(|into| match alignment {
+            CutAlignment::Butterworth(order) => {
+                Butterworth::new(response, order).design_into(cutoff, rate, into)
+            }
+            CutAlignment::LinkwitzRiley(half) => {
+                LinkwitzRiley::new(response, half).design_into(cutoff, rate, into)
+            }
+        })
     }
 }
 
@@ -186,25 +176,19 @@ impl Kernel for CutFilterKernel {
     const GRID: usize = GLIDE_STEPS as usize;
 
     fn shape(&self) -> Shape {
-        let output = Bus::banded(self.input, BusRole::Main, 1).expect("one band is a bus");
-        Shape::buses(
-            Buses::main(self.input),
-            Buses::NONE.with(output).expect("one bus"),
-        )
-        .with_cost(Cost::Moderate)
+        filter_shape(self.input)
     }
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
         self.rate = rate;
-        self.scratch = Sos::new(Vec::with_capacity(MAX_SECTIONS), rate);
-        self.coefficients =
-            Glide::landed(self.design(CutFilterControls::DEFAULT.cutoff)).by(GLIDE_STEPS);
-        self.landed = false;
+        self.sos.at_rate(rate);
+        let first = self.design(CutFilterControls::DEFAULT.cutoff);
+        self.sos.restart(first);
         let top = self.rate.nyquist_scaled(0.99).get();
         for rung in 0..LADDER {
             let cutoff = MIN_CUT_CUTOFF.get() * (1u32 << rung) as f32;
             let _ = self.design(Hz(cutoff.min(top)));
-            self.ladder[rung] = match self.scratch.tail(TAIL_FLOOR) {
+            self.ladder[rung] = match self.sos.scratch().tail(TAIL_FLOOR) {
                 Ring::Finite(s) => Tail::Finite(Samples((s.get() * rate.get()).ceil() as usize)),
                 Ring::Unbounded => Tail::Unbounded,
             };
@@ -212,17 +196,12 @@ impl Kernel for CutFilterKernel {
     }
 
     fn reset(&mut self) {
-        self.coefficients.settle();
-        self.bank.reset();
+        self.sos.reset();
     }
 
     fn retarget(&mut self, controls: &CutFilterControls) {
         let design = self.design(controls.cutoff);
-        self.coefficients.aim(design);
-        if !self.landed {
-            self.coefficients.settle();
-            self.landed = true;
-        }
+        self.sos.aim(design);
     }
 
     fn render<S: Float>(
@@ -231,7 +210,7 @@ impl Kernel for CutFilterKernel {
         _: ControlLanes<'_, S>,
         output: PlanesMut<'_, '_, S>,
     ) {
-        self.bank.process(&mut self.coefficients, input, output);
+        self.sos.render(input, output);
     }
 
     /// The ring-out at the lowest cutoff: the longest over every control.
@@ -260,7 +239,7 @@ mod tests {
     use crate::test_support::{RATE, assert_cell_glides, drive_block, prepared};
     use tutti_dsp::TAIL_FLOOR;
     use tutti_graph::contract::assert_param_fork;
-    use tutti_graph::{Node, ParamNode};
+    use tutti_graph::{Cost, Node, ParamNode};
     use tutti_types::UnitParam;
 
     const LP: CutResponse = CutResponse::LowPass;

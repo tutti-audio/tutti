@@ -12,11 +12,12 @@
 
 use std::sync::Arc;
 use tutti_graph::UmpAt;
+use tutti_rt::{Counter, Tally};
 
 use vst::host::RenderHandle;
 
 use tutti_plugin_types::{
-    AudioBufferMut, Normalized, ParameterChanges, PluginError, PluginIo, PluginResult,
+    ChannelTable, Normalized, ParameterChanges, PluginAudio, PluginError, PluginIo, PluginResult,
     ProcessContext, ProcessOutput, Processor, SampleRate,
 };
 
@@ -55,6 +56,8 @@ pub struct Vst2Processor {
     /// The maximum block the plugin was told (`effSetBlockSize`). A block longer
     /// than this is split before it reaches the plugin.
     block_size: usize,
+    /// The rate the plugin was told (`effSetSampleRate`).
+    sample_rate: SampleRate,
     /// Whether the plugin was told `effSetProcessPrecision(64)`: the width
     /// [`process_f64`](Self::process_f64) enters it at.
     double_precision: bool,
@@ -79,6 +82,7 @@ pub(crate) struct ProcessorParts {
     pub scratch: RenderScratch,
     pub audio: AudioSide,
     pub block_size: usize,
+    pub sample_rate: SampleRate,
     pub double_precision: bool,
     pub host: Arc<HostState>,
 }
@@ -91,6 +95,7 @@ impl Vst2Processor {
             scratch,
             audio,
             block_size,
+            sample_rate,
             double_precision,
             host,
         } = parts;
@@ -101,6 +106,7 @@ impl Vst2Processor {
             time_info: audio.time_info,
             midi: audio.midi,
             block_size,
+            sample_rate,
             double_precision,
             host,
         }
@@ -152,8 +158,8 @@ impl Vst2Processor {
     /// Counted apart from the parameter drops because the consequence differs: a
     /// dropped note-off whose note-on landed is a stuck note.
     #[must_use]
-    pub fn dropped_midi_out(&self) -> u64 {
-        self.host.dropped_midi_out() + self.midi.out_overflow()
+    pub fn dropped_midi_out(&self) -> &Tally<u64> {
+        self.host.dropped_midi_out()
     }
 
     /// Returns how many SysEx messages were **dropped** whole since load rather
@@ -167,7 +173,7 @@ impl Vst2Processor {
     /// blocks) and hands the plugin one complete `0xF0 … 0xF7` message, as a
     /// `kVstSysExType` event, at its `END` packet's frame.
     #[must_use]
-    pub fn dropped_sysex(&self) -> u64 {
+    pub fn dropped_sysex(&self) -> &Counter<u64> {
         self.midi.send.sysex_dropped()
     }
 
@@ -176,7 +182,7 @@ impl Vst2Processor {
     /// which takes Group 0's channels only, and a message of another Group is
     /// never heard on them. Monotonic.
     #[must_use]
-    pub fn groups_dropped(&self) -> u64 {
+    pub fn groups_dropped(&self) -> &Counter<u64> {
         self.midi.send.groups_dropped()
     }
 
@@ -185,7 +191,7 @@ impl Vst2Processor {
     /// [`MIDI_STACK_CAPACITY`](tutti_plugin_types::MIDI_STACK_CAPACITY) (the
     /// plugin node never hands it more). Monotonic.
     #[must_use]
-    pub fn dropped_midi_in(&self) -> u64 {
+    pub fn dropped_midi_in(&self) -> &Counter<u64> {
         self.midi.send.events_dropped()
     }
 
@@ -434,50 +440,48 @@ impl Vst2Processor {
     ///
     /// # Errors
     ///
-    /// [`PluginError::Block`] when a channel slice is shorter than the block, or
-    /// the buffer is 32-bit for a plugin activated at 64-bit. Neither allocates,
-    /// and neither enters the plugin.
+    /// [`PluginError::Block`] when the buffer is 32-bit for a plugin activated at
+    /// 64-bit. It does not allocate and does not enter the plugin.
     pub fn render(
         &mut self,
-        buffer: &mut AudioBufferMut<'_, '_>,
+        buffer: &mut PluginAudio<'_>,
         ctx: &ProcessContext<'_>,
         out: &mut ProcessOutput,
     ) -> PluginResult<()> {
         let transport = ctx.transport;
         let refused;
+        let sample_rate = self.sample_rate;
         let emitted = match buffer {
-            AudioBufferMut::F32(buf) => {
+            PluginAudio::F32(io) => {
                 if self.double_precision {
                     return Err(PluginError::Block(
                         "the block's sample format is not the one the plugin was activated with",
                     ));
                 }
-                if short_slice(buf.inputs, buf.num_samples)
-                    || short_slice_mut(buf.outputs, buf.num_samples)
-                {
-                    return Err(PluginError::Block("a channel is shorter than the block"));
-                }
                 refused = self.apply_automation(ctx.param_changes);
                 let host_ctx = Vst2ProcessContext {
                     midi: ctx.midi_events,
                     transport,
-                    sample_rate: buf.sample_rate,
+                    sample_rate,
                 };
-                self.process_f32(buf.inputs, buf.outputs, buf.num_samples, &host_ctx)
+                let frames = io.frames().0;
+                let (input, mut output) = io.split();
+                let inputs = ChannelTable::of_planes(input)?;
+                let mut outputs = ChannelTable::of_planes_mut(&mut output)?;
+                self.process_f32(&inputs, &mut outputs, frames, &host_ctx)
             }
-            AudioBufferMut::F64(buf) => {
-                if short_slice(buf.inputs, buf.num_samples)
-                    || short_slice_mut(buf.outputs, buf.num_samples)
-                {
-                    return Err(PluginError::Block("a channel is shorter than the block"));
-                }
+            PluginAudio::F64(io) => {
                 refused = self.apply_automation(ctx.param_changes);
                 let host_ctx = Vst2ProcessContext {
                     midi: ctx.midi_events,
                     transport,
-                    sample_rate: buf.sample_rate,
+                    sample_rate,
                 };
-                self.process_f64(buf.inputs, buf.outputs, buf.num_samples, &host_ctx)
+                let frames = io.frames().0;
+                let (input, mut output) = io.split();
+                let inputs = ChannelTable::of_planes(input)?;
+                let mut outputs = ChannelTable::of_planes_mut(&mut output)?;
+                self.process_f64(&inputs, &mut outputs, frames, &host_ctx)
             }
         };
         // `out` arrives cleared, with its capacity intact: past its cap the MIDI
@@ -488,16 +492,6 @@ impl Vst2Processor {
         out.count_params_refused(refused as usize);
         Ok(())
     }
-}
-
-/// Whether any of `channels` holds fewer than `frames` frames.
-fn short_slice<T>(channels: &[&[T]], frames: usize) -> bool {
-    channels.iter().any(|c| c.len() < frames)
-}
-
-/// [`short_slice`] for the output channels.
-fn short_slice_mut<T>(channels: &[&mut [T]], frames: usize) -> bool {
-    channels.iter().any(|c| c.len() < frames)
 }
 
 impl Processor for Vst2Processor {

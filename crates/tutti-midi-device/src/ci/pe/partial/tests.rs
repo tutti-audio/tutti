@@ -4,7 +4,7 @@
 use super::*;
 
 fn json(text: &str) -> PeJson {
-    PeJson::parse(text.as_bytes()).unwrap()
+    PeJson::try_from(text.as_bytes()).unwrap()
 }
 
 fn pointer(text: &str) -> JsonPointer {
@@ -23,7 +23,7 @@ fn program() -> PeJson {
 /// Spec: m2-103/10#6
 #[test]
 fn a_partial_set_changes_the_property_a_pointer_names() {
-    let update = PartialUpdate::from_json(&json(r#"{"/lfoSpeed":10}"#)).unwrap();
+    let update = PartialUpdate::try_from(&json(r#"{"/lfoSpeed":10}"#)).unwrap();
     let got = update.apply(&program()).unwrap();
     let expected = json(
         r#"{"name":"PIANO 4","lfoSpeed":10,"lfoWaveform":"triangle",
@@ -37,7 +37,7 @@ fn a_partial_set_changes_the_property_a_pointer_names() {
 /// Spec: m2-103/10.2#1
 #[test]
 fn a_partial_set_changes_elements_of_arrays() {
-    let update = PartialUpdate::from_json(&json(
+    let update = PartialUpdate::try_from(&json(
         r#"{"/pitchEnvelope/rates/0":80,"/pitchEnvelope/levels/0":60}"#,
     ))
     .unwrap();
@@ -62,12 +62,12 @@ fn a_change_to_an_object_or_an_array_is_not_a_partial_set() {
         r#"{"noSlash":1}"#,
     ] {
         assert_eq!(
-            PartialUpdate::from_json(&json(bad)),
+            PartialUpdate::try_from(&json(bad)),
             Err(PartialError::NotAChange),
             "{bad}"
         );
     }
-    assert!(PartialUpdate::from_json(&json(r#"{"/a":"s","/b":1.5,"/c":false}"#)).is_ok());
+    assert!(PartialUpdate::try_from(&json(r#"{"/a":"s","/b":1.5,"/c":false}"#)).is_ok());
 }
 
 // §10: each key is a JSON Pointer (RFC 6901 §3, §5): empty, or `/`-led tokens in
@@ -159,5 +159,5 @@ fn a_change_is_written_as_an_object_of_pointers() {
         update.to_json().encode(),
         br#"{"/pitchEnvelope/rates/0":80,"/pitchEnvelope/levels/0":60}"#
     );
-    assert_eq!(PartialUpdate::from_json(&update.to_json()), Ok(update));
+    assert_eq!(PartialUpdate::try_from(&update.to_json()), Ok(update));
 }

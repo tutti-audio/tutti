@@ -169,8 +169,11 @@ impl Cancel {
 
     /// The job was dropped: its result will not be read.
     #[cfg_attr(
-        not(any(test, feature = "plugin")),
-        expect(dead_code, reason = "the plugin state jobs (feature `plugin`) read it")
+        not(any(test, feature = "plugin", feature = "analyze")),
+        expect(
+            dead_code,
+            reason = "the plugin state jobs (feature `plugin`) and analyze read it"
+        )
     )]
     pub(crate) fn is_cancelled(&self) -> bool {
         self.0.cancelled.load(Ordering::Acquire)
@@ -219,7 +222,10 @@ impl<J: JobKind> Job<J> {
     ///
     /// The kind's own error, or a [`WorkerError`] or [`WaitError`] converted
     /// into it.
-    pub fn wait<C: Clock>(&self, session: &mut Session<C>) -> Result<J::Output, J::Error> {
+    pub fn wait<K: crate::AppKey, C: Clock>(
+        &self,
+        session: &mut Session<K, C>,
+    ) -> Result<J::Output, J::Error> {
         loop {
             // Read before the update: an ended ticket has already queued its
             // landing, which that update then finds.

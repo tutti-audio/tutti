@@ -141,7 +141,8 @@ pub enum UnitParam {
     /// Gate hold: how long the gate stays fully open after the key falls under the
     /// threshold (`Seconds`, `>= 0`, whole frames).
     Hold = 32,
-    /// Gate range: the gain of a closed gate (`Db`, `<= 0`): a floor, not a mute.
+    /// Range: the gain of a closed gate (`Db`, `<= 0`): a floor, not a mute; or the most a
+    /// dynamic EQ band moves from flat (`Db`, `>= 0`).
     Range = 33,
     /// Delay cross-feedback: how much of each channel's delayed signal feeds the other
     /// channels' lines (`Feedback`), beside its own `Feedback`.

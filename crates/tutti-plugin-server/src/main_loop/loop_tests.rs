@@ -60,9 +60,6 @@ impl Until {
 /// hang, a hundred times what a loaded runner needs.
 const HANG_GUARD: Duration = Duration::from_secs(60);
 
-/// How often a script silent until an event looks for it.
-const UNTIL_POLL: Duration = Duration::from_millis(5);
-
 /// A host that follows a script and records what it is sent.
 struct Script {
     steps: VecDeque<Step>,
@@ -107,7 +104,7 @@ impl Transport for Script {
 }
 
 impl Script {
-    fn wait_inner(&mut self, timeout: Duration) -> BridgeResult<bool> {
+    fn wait_inner(&mut self, _timeout: Duration) -> BridgeResult<bool> {
         match self.steps.front() {
             Some(Step::Call(_)) => {
                 let Some(Step::Call(call)) = self.steps.pop_front() else {
@@ -127,7 +124,9 @@ impl Script {
                 if (until.holds)(&self.heard) {
                     self.steps.pop_front();
                 } else {
-                    std::thread::sleep(timeout.min(UNTIL_POLL));
+                    // The predicates read other threads' state, which has no
+                    // doorbell to wait on, so the script polls them.
+                    std::thread::yield_now();
                 }
                 Ok(false)
             }
@@ -151,7 +150,10 @@ impl Script {
         self.message_due_by = None;
         match self.steps.pop_front() {
             Some(Step::Send(message)) => Ok(message),
-            _ => Err(BridgeError::ConnectionFailed("the script is over".into())),
+            _ => Err(BridgeError::Io(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "the script is over",
+            ))),
         }
     }
 }
@@ -182,14 +184,14 @@ impl Transport for AudioEnd {
             None => self
                 .requests
                 .recv()
-                .map_err(|_| BridgeError::ConnectionFailed("the host went".into())),
+                .map_err(|_| BridgeError::Io(std::io::ErrorKind::BrokenPipe.into())),
         }
     }
 
     fn send(&mut self, msg: &BridgeMessage) -> BridgeResult<()> {
         self.replies
             .send(msg.clone())
-            .map_err(|_| BridgeError::ConnectionFailed("the host went".into()))
+            .map_err(|_| BridgeError::Io(std::io::ErrorKind::BrokenPipe.into()))
     }
 }
 
@@ -207,7 +209,7 @@ impl HostEnd {
             .send(HostMessage::ProcessAudio(ProcessAudioData {
                 seq,
                 num_samples: frames,
-                ..Default::default()
+                ..tutti_plugin_ipc::ProcessAudioData::empty(tutti_plugin_types::SampleRate::SR_48K)
             }))
             .ok()?;
         self.replies.recv_timeout(within).ok()
@@ -305,7 +307,7 @@ fn run_ticking(fixture: &mut Fixture, script: &mut Script, tick: Duration) {
     drop(render.stop());
     // A script that ends ends in `recv`'s refusal; any other end is a failure.
     assert!(
-        matches!(result, Err(BridgeError::ConnectionFailed(ref m)) if m == "the script is over")
+        matches!(result, Err(BridgeError::Io(ref e)) if e.to_string() == "the script is over")
             || result.is_ok(),
         "{result:?}"
     );
@@ -545,8 +547,9 @@ fn a_slow_paint_on_the_main_loop_delays_no_block() {
                         if waits.load(Ordering::SeqCst) == sent_at {
                             within.lock().unwrap().push(sent_at);
                         }
-                        // Paces the host's blocks.
-                        std::thread::sleep(Duration::from_millis(5));
+                        // Each block is a round trip to the render thread, whose
+                        // ring has no doorbell, so the thread polls it.
+                        std::thread::yield_now();
                     }
                     done.store(true, Ordering::SeqCst);
                 }));

@@ -13,10 +13,10 @@ use assert_no_alloc::assert_no_alloc;
 use tutti_fixtures::midi;
 use tutti_graph::Offset;
 use tutti_plugin_types::{
-    AudioBuffer, AudioBufferMut, AutomationMode, Control, Controller, EditorWindow, Event, Hand,
-    HostOp, Lifecycle, Loaded, MaxBlock, Normalized, Notice, ParamId, ParameterChanges,
-    PluginError, PluginIo, Prepare, ProcessContext, ProcessOutput, Processor, RenderMode,
-    SampleFormat, SampleRate, Samples, Stage,
+    AutomationMode, Control, Controller, EditorWindow, Event, Hand, HostOp, Lifecycle, Loaded,
+    MaxBlock, Normalized, Notice, ParamId, ParameterChanges, PluginAudio, PluginError, PluginIo,
+    Prepare, ProcessContext, ProcessOutput, Processor, RenderMode, SampleFormat, SampleRate,
+    Samples, Stage,
 };
 use tutti_ump::MidiChannel;
 use tutti_vst2_host::{Vst2Controller, Vst2Loaded, Vst2Processor};
@@ -189,7 +189,12 @@ fn render_f32(processor: &mut Vst2Processor, ctx: &ProcessContext<'_>) -> Vec<Ve
     let mut outputs = [left.as_mut_slice(), right.as_mut_slice()];
     let mut out = ProcessOutput::default();
     let mut io = PluginIo {
-        buffer: AudioBufferMut::F32(AudioBuffer::new(&inputs, &mut outputs, SAMPLE_RATE)),
+        buffer: PluginAudio::new(
+            tutti_plugin_types::Samples(inputs[0].len()),
+            &inputs,
+            &mut outputs,
+        )
+        .expect("equal channels"),
         ctx,
         out: &mut out,
     };
@@ -241,7 +246,12 @@ fn a_64_bit_activation_is_entered_at_64_and_refuses_a_32_bit_block() {
     let mut out = ProcessOutput::default();
     processor
         .process(&mut PluginIo {
-            buffer: AudioBufferMut::F64(AudioBuffer::new(&inputs, &mut outputs, SAMPLE_RATE)),
+            buffer: PluginAudio::new(
+                tutti_plugin_types::Samples(inputs[0].len()),
+                &inputs,
+                &mut outputs,
+            )
+            .expect("equal channels"),
             ctx: &ctx,
             out: &mut out,
         })
@@ -256,7 +266,12 @@ fn a_64_bit_activation_is_entered_at_64_and_refuses_a_32_bit_block() {
     let inputs32 = [input32.as_slice(), input32.as_slice()];
     let mut outputs32 = [left32.as_mut_slice(), right32.as_mut_slice()];
     let refused = processor.process(&mut PluginIo {
-        buffer: AudioBufferMut::F32(AudioBuffer::new(&inputs32, &mut outputs32, SAMPLE_RATE)),
+        buffer: PluginAudio::new(
+            tutti_plugin_types::Samples(inputs32[0].len()),
+            &inputs32,
+            &mut outputs32,
+        )
+        .expect("equal channels"),
         ctx: &ctx,
         out: &mut out,
     });
@@ -341,7 +356,7 @@ fn automation_is_a_host_write_and_its_echo_is_not_reported() {
     let mut edits = Vec::new();
     controller.take_reported_edits(main_thread(), &mut edits);
     assert_eq!(edits, Vec::new());
-    assert_eq!(controller.loaded().dropped_param_changes(), 0);
+    assert_eq!(controller.loaded().dropped_param_changes().get(), 0);
     drop(rejoin(processor, controller));
 }
 
@@ -362,7 +377,12 @@ fn a_write_to_a_parameter_the_plugin_lacks_is_reported_in_the_output() {
         let inputs = [input.as_slice(), input.as_slice()];
         let mut outputs = [left.as_mut_slice(), right.as_mut_slice()];
         let mut io = PluginIo {
-            buffer: AudioBufferMut::F32(AudioBuffer::new(&inputs, &mut outputs, SAMPLE_RATE)),
+            buffer: PluginAudio::new(
+                tutti_plugin_types::Samples(inputs[0].len()),
+                &inputs,
+                &mut outputs,
+            )
+            .expect("equal channels"),
             ctx: &ctx,
             out,
         };
@@ -382,12 +402,9 @@ fn a_write_to_a_parameter_the_plugin_lacks_is_reported_in_the_output() {
     assert_eq!(out.params_refused(), 0);
 }
 
-/// **A block with automation, MIDI and a transport allocates nothing**, and a
-/// block the plugin cannot take (a channel shorter than the block) is an error,
-/// not a panic, builds its error without allocating, and does not enter the
-/// plugin.
+/// **A block with automation, MIDI and a transport allocates nothing.**
 #[test]
-fn a_block_does_not_allocate_and_a_short_channel_is_an_error() {
+fn a_block_with_automation_midi_and_transport_does_not_allocate() {
     let probe = Probe::acquire();
     let (mut processor, controller) = probe.activate();
 
@@ -398,7 +415,6 @@ fn a_block_does_not_allocate_and_a_short_channel_is_an_error() {
     let ctx = ProcessContext::new().params(&changes).midi(&midi);
 
     let input = [0.0f32; BLOCK];
-    let short = [0.0f32; BLOCK / 2];
     let mut left = [0.0f32; BLOCK];
     let mut right = [0.0f32; BLOCK];
     let mut out = ProcessOutput::default();
@@ -406,7 +422,12 @@ fn a_block_does_not_allocate_and_a_short_channel_is_an_error() {
         let inputs = [input.as_slice(), input.as_slice()];
         let mut outputs = [left.as_mut_slice(), right.as_mut_slice()];
         let mut io = PluginIo {
-            buffer: AudioBufferMut::F32(AudioBuffer::new(&inputs, &mut outputs, SAMPLE_RATE)),
+            buffer: PluginAudio::new(
+                tutti_plugin_types::Samples(inputs[0].len()),
+                &inputs,
+                &mut outputs,
+            )
+            .expect("equal channels"),
             ctx: &ctx,
             out: &mut out,
         };
@@ -416,32 +437,6 @@ fn a_block_does_not_allocate_and_a_short_channel_is_an_error() {
             processor.process(&mut io).expect("renders");
         });
     }
-    let calls = capture().process_calls;
-    {
-        let inputs = [input.as_slice(), short.as_slice()];
-        let mut outputs = [left.as_mut_slice(), right.as_mut_slice()];
-        let mut io = PluginIo {
-            buffer: AudioBufferMut::F32(AudioBuffer::new(&inputs, &mut outputs, SAMPLE_RATE)),
-            ctx: &ctx,
-            out: &mut out,
-        };
-        let refused = assert_no_alloc(|| processor.process(&mut io));
-        assert!(matches!(refused, Err(PluginError::Block(_))), "{refused:?}");
-    }
-    {
-        // The same for an output channel shorter than the block.
-        let mut short_out = [0.0f32; BLOCK / 2];
-        let inputs = [input.as_slice(), input.as_slice()];
-        let mut outputs = [left.as_mut_slice(), short_out.as_mut_slice()];
-        let mut io = PluginIo {
-            buffer: AudioBufferMut::F32(AudioBuffer::new(&inputs, &mut outputs, SAMPLE_RATE)),
-            ctx: &ctx,
-            out: &mut out,
-        };
-        let refused = assert_no_alloc(|| processor.process(&mut io));
-        assert!(matches!(refused, Err(PluginError::Block(_))), "{refused:?}");
-    }
-    assert_eq!(capture().process_calls, calls, "the plugin was not entered");
     drop(rejoin(processor, controller));
 }
 
@@ -601,7 +596,7 @@ fn the_automation_mode_reaches_the_plugin_as_state_and_time_info_flags() {
     const AUTOMATION_READING: i32 = 1 << 7;
     let probe = Probe::acquire();
     let (mut processor, mut controller) = probe.activate();
-    let transport = tutti_vst2_host::TransportInfo::new();
+    let transport = tutti_vst2_host::TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
     let ctx = ProcessContext {
         transport: Some(&transport),
         ..ProcessContext::new()
@@ -646,7 +641,8 @@ fn smpte_is_not_claimed_when_a_plugin_asks_for_it() {
     const PLAYING: i32 = 1 << 1;
     let probe = Probe::acquire();
     let (mut processor, controller) = probe.activate();
-    let transport = tutti_vst2_host::TransportInfo::new().with_playing(true);
+    let transport = tutti_vst2_host::TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K)
+        .with_playing(true);
     let ctx = ProcessContext {
         transport: Some(&transport),
         ..ProcessContext::new()
@@ -670,8 +666,9 @@ fn a_rejoin_keeps_the_transport_the_plugin_reads() {
     const TRANSPORT_CHANGED: i32 = 1;
     let probe = Probe::acquire();
     let (mut processor, controller) = probe.activate();
-    let stopped = tutti_vst2_host::TransportInfo::new();
-    let playing = tutti_vst2_host::TransportInfo::new().with_playing(true);
+    let stopped = tutti_vst2_host::TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
+    let playing = tutti_vst2_host::TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K)
+        .with_playing(true);
     let ctx = |transport| ProcessContext {
         transport: Some(transport),
         ..ProcessContext::new()

@@ -8,9 +8,12 @@
 //!
 //! This is the data only: drawing, persistence and fading are the display's.
 
+use core::marker::PhantomData;
 use core::num::NonZeroUsize;
 
 use tutti_buffers::{Sample, StereoPlanes};
+
+use crate::{Measure, Meter, Result};
 
 /// One frame on the scope.
 ///
@@ -50,44 +53,53 @@ impl VectorscopeConfig {
         Self { decimate }
     }
 
-    /// A meter at the start of a stream: the first frame is kept.
-    #[must_use]
-    pub fn measure(&self) -> VectorscopeMeter {
+    /// The meter at the start of a stream: the infallible core of
+    /// [`Measure::measure`], which `vectorscope_points` calls so its own result
+    /// needs no `Result`.
+    fn bind<S: Sample>(&self) -> VectorscopeMeter<S> {
         VectorscopeMeter {
             decimate: self.decimate,
             skip: 0,
+            sample: PhantomData,
         }
+    }
+}
+
+impl<S: Sample> Measure<S> for VectorscopeConfig {
+    type Context = ();
+    type Meter = VectorscopeMeter<S>;
+
+    /// A meter at the start of a stream: the first frame is kept. Never fails.
+    fn measure(&self, (): ()) -> Result<VectorscopeMeter<S>> {
+        Ok(self.bind())
     }
 }
 
 /// A running vectorscope: where the stride stands between blocks.
 ///
-/// There is no `finish`: the points go into the caller's `Vec` on every push.
+/// Every push yields its points as items, and there is no output: the points
+/// are the answer.
 ///
 /// Carries how many frames to skip before the next point, so a stream fed in
 /// blocks keeps one stride phase instead of restarting it per block.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct VectorscopeMeter {
+pub struct VectorscopeMeter<S: Sample = f32> {
     decimate: NonZeroUsize,
     skip: usize,
+    sample: PhantomData<fn(S)>,
 }
 
-impl VectorscopeMeter {
-    /// Appends every `decimate`-th frame of the next block to `out` as a
-    /// [`ScopePoint`].
-    ///
-    /// Writes into the caller's buffer, so a UI feeding blocks reuses one `Vec`
-    /// (clear it between draws). It grows `out` and so allocates when it is
-    /// full: not for the audio thread.
-    pub fn push<S: Sample>(&mut self, planes: StereoPlanes<'_, S>, out: &mut Vec<ScopePoint>) {
+impl<S: Sample> VectorscopeMeter<S> {
+    /// Extends `out` with every `decimate`-th frame of the next block.
+    fn scan(&mut self, planes: StereoPlanes<'_, S>, out: &mut impl Extend<ScopePoint>) {
         let frames = planes.frames().get();
         let (left, right) = (planes.left(), planes.right());
         let mut at = self.skip;
         while at < frames {
-            out.push(ScopePoint::from_lr(
+            out.extend([ScopePoint::from_lr(
                 left[at].convert_to::<f32>(),
                 right[at].convert_to::<f32>(),
-            ));
+            )]);
             at += self.decimate.get();
         }
         self.skip = at - frames;
@@ -99,6 +111,29 @@ impl VectorscopeMeter {
     }
 }
 
+impl<S: Sample> Meter for VectorscopeMeter<S> {
+    type Input<'a> = StereoPlanes<'a, S>;
+    type Item = ScopePoint;
+    type Output = ();
+
+    /// Extends `out` with every `decimate`-th frame of the next block as a
+    /// [`ScopePoint`].
+    ///
+    /// Writes into the caller's collection, so a UI feeding blocks reuses one
+    /// `Vec` (clear it between draws). It grows `out` and so allocates when it
+    /// is full: not for the audio thread.
+    fn push(
+        &mut self,
+        planes: StereoPlanes<'_, S>,
+        out: &mut impl Extend<ScopePoint>,
+    ) -> Result<()> {
+        self.scan(planes, out);
+        Ok(())
+    }
+
+    fn finish(self) {}
+}
+
 /// Every `decimate`-th frame of one whole pair as a [`ScopePoint`], starting
 /// at the first: a [`VectorscopeMeter`] fed the pair. Allocates the result.
 pub fn vectorscope_points<S: Sample>(
@@ -106,13 +141,14 @@ pub fn vectorscope_points<S: Sample>(
     planes: StereoPlanes<'_, S>,
 ) -> Vec<ScopePoint> {
     let mut out = Vec::with_capacity(planes.frames().get().div_ceil(cfg.decimate.get()));
-    cfg.measure().push(planes, &mut out);
+    cfg.bind().scan(planes, &mut out);
     out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fold_uneven;
 
     const ONE: NonZeroUsize = NonZeroUsize::MIN;
 
@@ -208,13 +244,31 @@ mod tests {
             let d = NonZeroUsize::new(decimate).unwrap();
             let batch = scope(&l, &r, d);
             for block in [1usize, 2, 5, 10, 64, 103] {
-                let mut meter = VectorscopeConfig::new(d).measure();
+                let mut meter = VectorscopeConfig::new(d).measure(()).unwrap();
                 let mut out = Vec::new();
                 for (lb, rb) in l.chunks(block).zip(r.chunks(block)) {
-                    meter.push(StereoPlanes::new(lb, rb).unwrap(), &mut out);
+                    meter
+                        .push(StereoPlanes::new(lb, rb).unwrap(), &mut out)
+                        .unwrap();
                 }
                 assert_eq!(out, batch, "decimate {decimate}, block {block}");
             }
         }
+    }
+
+    /// The trait fold over uneven blocks (1, 7, 64 and the rest) yields
+    /// exactly the points of the batch function, as items.
+    #[test]
+    fn the_trait_fold_over_uneven_chunks_equals_vectorscope_points() {
+        let l: Vec<f32> = (0..300).map(|i| i as f32).collect();
+        let r: Vec<f32> = (0..300).map(|i| -(i as f32) * 0.25).collect();
+        let cfg = VectorscopeConfig::new(NonZeroUsize::new(5).unwrap());
+        let (items, ()) = fold_uneven(&cfg, (), l.len(), |meter, at, out| {
+            meter.push(StereoPlanes::new(&l[at.clone()], &r[at]).unwrap(), out)
+        })
+        .unwrap();
+        let batch = vectorscope_points(&cfg, StereoPlanes::new(&l, &r).unwrap());
+        assert_eq!(batch.len(), 60);
+        assert_eq!(items, batch);
     }
 }

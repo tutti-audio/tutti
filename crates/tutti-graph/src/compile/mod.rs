@@ -64,7 +64,7 @@ use crate::NodeMix;
 use crate::{Edge, EdgeId, FeedbackFrom, InPort, OutPort, Sink, Source};
 use tutti_types::{ChannelLayout, Latency, Samples, Tail};
 
-use crate::node::{InPlaceMask, MAX_PORTS, Prepare, Resolution, Shape};
+use crate::node::{InPlaceMask, MAX_PORTS, Prepare, Resolution, Shape, Wired};
 use crate::param::ParamIn;
 use crate::plan::{
     Csr, DelayKey, DelaySpec, Delta, EMPTY_SLOT, EventSlotCapacity, FeedbackKey, FeedbackSpec,
@@ -1701,6 +1701,7 @@ pub fn compile(
     let store_len = taken.iter().next_back().map_or(0, |&m| m + 1);
     delta.store_len = store_len;
 
+    let consumed = consumed_outputs(topology);
     let units: Vec<PlanUnit> = keys
         .iter()
         .enumerate()
@@ -1710,6 +1711,7 @@ pub fn compile(
             idx: idx_of[&key],
             shape: node_shapes[n],
             arrival: arrival[n],
+            wired: wired_ports(topology, key, &node_shapes[n], &consumed),
         })
         .collect();
 
@@ -1785,6 +1787,58 @@ pub fn compile(
     }
 
     Ok((plan, delta))
+}
+
+/// The output ports something reads: an edge (direct or feedback), a global
+/// output, a tap lane or a meter lane.
+fn consumed_outputs(topology: &crate::Topology) -> BTreeSet<OutPort> {
+    let edges = topology.edges.values().flatten().filter_map(|e| match *e {
+        Edge::Direct(Source::Node(p)) => Some(p),
+        Edge::Feedback(f) => Some(f.from),
+        Edge::Direct(_) => None,
+    });
+    let lanes = topology
+        .taps
+        .values()
+        .filter_map(|t| match t {
+            crate::TapSpec::Ports { sources, .. } => Some(sources),
+            crate::TapSpec::Outputs { .. } => None,
+        })
+        .chain(topology.meters.values().filter_map(|m| match m {
+            crate::MeterSpec::Ports { sources, .. } => Some(sources),
+            crate::MeterSpec::Outputs => None,
+        }))
+        .chain(&topology.outputs)
+        .flatten()
+        .filter_map(|s| match *s {
+            Source::Node(p) => Some(p),
+            _ => None,
+        });
+    edges.chain(lanes).collect()
+}
+
+/// The audio ports of `key` with a source (an edge, direct or feedback) or a
+/// consumer among `consumed`. A validated graph stores no silence edge.
+fn wired_ports(
+    topology: &crate::Topology,
+    key: NodeKey,
+    shape: &Shape,
+    consumed: &BTreeSet<OutPort>,
+) -> Wired {
+    let mut wired = Wired::default();
+    for port in 0..shape.audio_in().count() {
+        let at = InPort { node: key, port };
+        let fed = topology.edges.get(&at).is_some_and(|e| !e.is_empty());
+        if fed {
+            wired.inputs = wired.inputs.with(usize::from(port));
+        }
+    }
+    for port in 0..shape.audio_out().count() {
+        if consumed.contains(&OutPort { node: key, port }) {
+            wired.outputs = wired.outputs.with(usize::from(port));
+        }
+    }
+    wired
 }
 
 /// `v` through its PDC delay of `by` frames, keyed `key`: the value itself

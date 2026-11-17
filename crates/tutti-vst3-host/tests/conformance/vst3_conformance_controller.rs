@@ -6,12 +6,13 @@
 #![cfg(feature = "conformance")]
 
 use crate::conformance_support;
+use tutti_buffers::{InputOutput, Planes, PlanesMut};
 
 use tutti_fixtures::main_thread;
 use tutti_graph::Offset;
 use tutti_types::Samples;
 use tutti_ump::{CCNumber, MidiChannel};
-use tutti_vst3_host::{AudioBuffer, InputEvents, PrefetchSupport, TransportInfo};
+use tutti_vst3_host::{InputEvents, PrefetchSupport, TransportInfo};
 
 /// A block longer than any offset these tests place an event at.
 const TEST_BLOCK: usize = 1 << 16;
@@ -90,12 +91,12 @@ fn midi_learn_forwards_from_the_main_thread() {
     let mut outs: Vec<Vec<f32>> = (0..2).map(|_| vec![0.0; 512]).collect();
     let in_refs: Vec<&[f32]> = ins.iter().map(|v| v.as_slice()).collect();
     let mut out_refs: Vec<&mut [f32]> = outs.iter_mut().map(|v| v.as_mut_slice()).collect();
-    let mut buffer = AudioBuffer {
-        inputs: &in_refs,
-        outputs: &mut out_refs,
-        num_samples: 512,
-        sample_rate: tutti_plugin_types::SampleRate::SR_48K,
-    };
+    let mut buffer = InputOutput::new(
+        tutti_plugin_types::Samples(in_refs[0].len()),
+        Planes::new(&in_refs).expect("equal channels"),
+        PlanesMut::new(&mut out_refs).expect("equal channels"),
+    )
+    .expect("equal lengths");
     inst.process(
         &mut buffer,
         &InputEvents {
@@ -103,7 +104,7 @@ fn midi_learn_forwards_from_the_main_thread() {
             ..Default::default()
         },
         None,
-        &TransportInfo::default(),
+        &TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K),
     );
     assert_eq!(
         inst.get_parameter(AUX),

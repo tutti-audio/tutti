@@ -5,7 +5,10 @@
 //! `serde`) refuses what `new` refuses. `tutti-ump` depends on no workspace
 //! crate, so this is its own `check_range_contract`.
 
-use tutti_ump::{DeltaTicks, NoteNumber, OutOfRange, U4, U7, U14};
+use tutti_ump::{
+    DeltaTicks, MonoChannels, MpeChannels, NotSharpsFlats, NoteNumber, OutOfRange, SharpsFlats, U4,
+    U7, U14,
+};
 
 macro_rules! contract {
     ($ty:ident, $repr:ty, $width:expr) => {{
@@ -67,4 +70,41 @@ fn serde_refuses_what_new_refuses() {
     assert!(serde_json::from_str::<NoteNumber>("200").is_err());
     assert!(serde_json::from_str::<DeltaTicks>("1048576").is_err());
     assert!(serde_json::from_str::<U4>("16").is_err());
+}
+
+/// The bounded fields' conversions over the whole raw range: `TryFrom` agrees
+/// with `new`, `From` gives `get` back, and the error carries the refused raw.
+#[test]
+fn the_bounded_conversions_agree_with_new_over_every_raw() {
+    macro_rules! unsigned {
+        ($ty:ident) => {
+            for raw in 0..=u8::MAX {
+                match $ty::new(raw) {
+                    Some(v) => {
+                        assert_eq!($ty::try_from(raw), Ok(v));
+                        assert_eq!(u8::from(v), v.get());
+                        assert_eq!(v.get(), raw);
+                    }
+                    None => {
+                        let Err(e) = $ty::try_from(raw) else {
+                            panic!("{} {raw}", stringify!($ty))
+                        };
+                        assert_eq!((e.what, e.value), (stringify!($ty), u32::from(raw)));
+                    }
+                }
+            }
+        };
+    }
+    unsigned!(MpeChannels);
+    unsigned!(MonoChannels);
+    for raw in i8::MIN..=i8::MAX {
+        match SharpsFlats::new(raw) {
+            Some(v) => {
+                assert_eq!(SharpsFlats::try_from(raw), Ok(v));
+                assert_eq!(i8::from(v), v.get());
+                assert_eq!(v.get(), raw);
+            }
+            None => assert_eq!(SharpsFlats::try_from(raw), Err(NotSharpsFlats(raw))),
+        }
+    }
 }

@@ -87,6 +87,7 @@ mod placements;
 mod taps;
 mod unwired;
 use cells::LiveCells;
+pub use commit::Rewired;
 pub use errors::{CloseError, CommitError, MissingSource};
 use lifecycle::Lifecycle;
 use link::Link;

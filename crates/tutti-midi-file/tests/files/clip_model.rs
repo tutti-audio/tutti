@@ -9,8 +9,8 @@ use tutti_midi_device::{
     NotSetProfileOn, ProfileChannels, ProfileId, ProfileOnRequest, ProfileTarget,
 };
 use tutti_midi_file::{
-    ClipFileError, Error, FileEvent, Meta, MidiFile, MidiFileKind, SmfDivision, SmfFormat, Tick,
-    Track, Truncated,
+    ClipFileError, ConfigError, Error, FileEvent, Meta, MidiFile, MidiFileKind, SmfDivision,
+    SmfFormat, Tick, Track, Truncated,
 };
 use tutti_types::{Beat, Bpm, Seconds};
 use tutti_ump::ControlValue;
@@ -94,8 +94,10 @@ fn packet(m: Message) -> FileEvent {
 #[test]
 fn a_clip_reads_at_absolute_ticks() {
     let file = MidiFile::from_bytes(&clip(&valid())).unwrap();
-    assert_eq!(file.kind(), MidiFileKind::ClipFile);
-    assert_eq!(file.smf_format(), None);
+    assert_eq!(
+        MidiFileKind::detect(&file.to_bytes().unwrap()),
+        Some(MidiFileKind::ClipFile)
+    );
     assert_eq!(file.ticks_per_quarter(), DIVISION);
     let events = &file.tracks()[0].events;
     assert_eq!(events.len(), 2, "structure is not an event");
@@ -383,15 +385,45 @@ fn what_a_clip_cannot_hold_is_refused() {
     ] {
         assert!(matches!(one(packet(structure)), Err(Error::Config(_))));
     }
-    // A gap past a u32.
-    let far = MidiFile::clip(
+}
+
+/// M2-116 section 3.2.2: a Delta Clockstamp holds 20 bits and a Null message
+/// restarts the count, so a gap of any length is written and read back. Past
+/// a `u32` it is 4096 restarts.
+#[test]
+fn a_gap_past_a_u32_round_trips() {
+    let at = u64::from(u32::MAX) + 1;
+    let file = MidiFile::clip(
         DIVISION,
-        track(vec![(
-            u64::from(u32::MAX) + 1,
-            packet(on(60, 1).decode().unwrap()),
-        )]),
-    );
-    assert!(matches!(far, Err(Error::Config(_))));
+        Track {
+            events: vec![(Tick(at), packet(on(60, 1).decode().unwrap()))],
+            end: Tick(at + 7),
+            ..Track::new()
+        },
+    )
+    .unwrap();
+    let bytes = file.to_bytes().unwrap();
+    // 4096 restarts of two words each, and the Delta Clockstamps around them.
+    assert!(bytes.len() > 4096 * 8);
+    assert_eq!(MidiFile::from_bytes(&bytes).unwrap(), file);
+}
+
+/// A gap whose Null restarts would not fit 4 GB is refused when written, not
+/// built into memory.
+#[test]
+fn a_gap_too_long_to_write_is_too_large() {
+    let file = MidiFile::clip(
+        DIVISION,
+        Track {
+            end: Tick(u64::MAX),
+            ..Track::new()
+        },
+    )
+    .unwrap();
+    assert!(matches!(
+        file.to_bytes(),
+        Err(Error::Config(ConfigError::TooLarge))
+    ));
 }
 
 // ---- notes ----------------------------------------------------------------
@@ -1128,8 +1160,8 @@ fn a_written_clip_stamps_every_message_and_ends_the_header_at_start_of_clip() {
     }
     let header = &packets[..s - 1];
     assert!(header.contains(&program_change()) && header.contains(&sysex));
-    assert!(header.iter().all(|p| p.key_event().is_none()));
-    assert!(packets[s..].iter().any(|p| p.key_event().is_some()));
+    assert!(header.iter().all(|p| p.note_key_event().is_none()));
+    assert!(packets[s..].iter().any(|p| p.note_key_event().is_some()));
 }
 
 /// Events that follow one Delta Clockstamp are at one tick and keep the order

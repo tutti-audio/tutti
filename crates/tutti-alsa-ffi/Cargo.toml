@@ -15,7 +15,8 @@ links = "asound"
 workspace = true
 
 [features]
-# Hooks that rename a client and change a port's capabilities.
+# Hidden hooks for a test's fake peer: a legacy client and its events, a rename,
+# a change of a port's capabilities, and the client's id.
 testing = []
 
 [target.'cfg(target_os = "linux")'.dependencies]

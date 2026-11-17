@@ -20,8 +20,8 @@ fn the_node_adopts_the_mode_last_asked_for() {
         mpe_request_cell: controls.request.clone(),
         ..MidiIngestNode::new()
     };
-    node.adopt_mpe_request();
-    assert_eq!(node.mpe_mode, upper, "the node adopts it");
+    node.device.adopt(node.mpe_request.lend().mode);
+    assert_eq!(node.device.mode, upper, "the node adopts it");
 }
 
 /// **A request the node held across the next `set_mpe_mode` is freed by
@@ -31,6 +31,7 @@ fn reclaim_frees_a_request_a_block_held_across_the_next() {
     let mut node = MidiIngestNode::new();
     let controls = MidiIngestControls {
         request: node.mpe_request_cell.clone(),
+        serial: Arc::clone(&node.request_serial),
         dropped: node.dropped_reader.clone(),
     };
     {
@@ -115,4 +116,33 @@ fn a_group_has_ports_of_its_own() {
     );
     // One that names a Group not heard takes nothing.
     assert_eq!(two.listening(Some(MidiGroup::of(2)), None).count(), 0);
+}
+
+/// How many events a following node sends at the block in which a device
+/// arrives, after it was sent a note-on and was `reset` or not.
+fn sent_at_arrival(reset: bool) -> usize {
+    use tutti_graph::Event;
+    use tutti_graph::contract::Direct;
+    let (mut writer, epochs) = DeviceEpochs::new();
+    let node = MidiIngestNode::new().following(&epochs);
+    let mut d = Direct::new(node, SampleRate::SR_48K, 64);
+    let on = midi::note_on(MidiChannel::of(0), 60, widen_velocity(U7::of(100)).get());
+    d.events(0, &[Event::midi(Offset::ZERO, on)]);
+    d.block();
+    if reset {
+        d.node.reset();
+    }
+    d.events(0, &[]);
+    writer.arrive();
+    d.block();
+    (0..MIDI_INPUT_PORTS).map(|p| d.events_out(p).len()).sum()
+}
+
+/// **`reset` returns the node to a freshly prepared one's state**: a device
+/// that arrives releases the notes the one before held, and a reset node
+/// holds none (the executor closed what a parked node held downstream).
+#[test]
+fn reset_forgets_the_notes_the_device_held() {
+    assert_eq!(sent_at_arrival(false), 1, "the held note is released");
+    assert_eq!(sent_at_arrival(true), 0, "a reset node holds nothing");
 }

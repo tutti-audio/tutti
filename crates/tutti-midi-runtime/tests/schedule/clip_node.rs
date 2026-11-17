@@ -13,14 +13,13 @@ use tutti_fixtures::midi::key_of;
 use tutti_fixtures::{EventRig, Seen, heard};
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Cx, Editor, Executor, IntoNode, Io, LoopRange, Node, Offset, Prepare, Shape, Status,
-    TransportChanges, TransportPosition, Unforkable,
+    Editor, Executor, IntoNode, Offset, TransportChanges, TransportPosition, Unforkable,
 };
-use tutti_midi_runtime::{MidiClipControls, MidiClipNode, NoteLedger, TimedMidiEvent};
-use tutti_types::{Beat, BeatDuration, Bpm, SampleRate, Samples};
+use tutti_midi_runtime::{MidiClipControls, MidiClipNode, TimedMidiEvent};
+use tutti_types::{Beat, BeatDuration, Bpm, LoopRange, SampleRate, Samples};
 use tutti_ump::Ump;
 use tutti_ump::{Address, ControlValue, NoteNumber, RegisteredPerNoteController, parse_exact};
-use tutti_ump::{CCNumber, Message, MidiChannel, MidiGroup, Rpn, U7, U14, Voice1, Voice2};
+use tutti_ump::{CCNumber, Message, MidiChannel, MidiGroup, Rpn, U7, Voice2};
 
 const RATE: f64 = 48_000.0;
 
@@ -96,10 +95,7 @@ fn a_seek_inside_a_block_plays_from_the_seek() {
 fn a_loop_that_wraps_inside_a_block_plays_its_start() {
     let clip = MidiClipNode::new([at(48, on(62)), at(23_850, on(60)), at(23_950, on(64))]);
     let (_ed, mut exec, _c, seen) = rig(clip, 512);
-    let lp = Some(LoopRange {
-        start: Beat(0.0),
-        end: Beat(1.0),
-    });
+    let lp = Some(LoopRange::new(Beat(0.0), Beat(1.0)).expect("a loop"));
     let looping = |f: u64| TransportPosition::new(true, Bpm::of(120.0), beat_of(f), lp);
     exec.process(100, &looping(23_800), &[], &mut []);
     exec.process(512, &looping(23_900), &[], &mut []);
@@ -147,6 +143,44 @@ fn a_new_clip_ends_the_old_clips_notes() {
     );
 }
 
+/// **Without a publish the node keeps its notes across blocks; each publish
+/// ends them once.** Note 60 sounds from frame 10 through three blocks with
+/// no `set` (no note-off), one `set` between the third and fourth ends it on
+/// the fourth block's first frame, and two more blocks send nothing more.
+#[test]
+fn a_block_ends_the_held_notes_once_per_publish_and_never_without_one() {
+    let clip = MidiClipNode::new([at(10, on(60)), at(100_000, off(60))]);
+    let (_ed, mut exec, controls, seen) = rig(clip, 64);
+    for f in [0, 64, 128] {
+        exec.process(64, &rolling(f), &[], &mut []);
+    }
+    assert_eq!(heard(&seen), vec![(10, on(60))], "no publish, no release");
+    controls.set([at(5_000, on(72))]);
+    for f in [192, 256, 320] {
+        exec.process(64, &rolling(f), &[], &mut []);
+    }
+    assert_eq!(heard(&seen), vec![(10, on(60)), (192, off(60))]);
+}
+
+/// **Two publishes between blocks end each held note once**, on the next
+/// block: notes 60 and 62 sounding, two `set`s, one block, exactly one
+/// note-off each.
+#[test]
+fn two_publishes_between_blocks_release_each_held_note_once() {
+    let clip = MidiClipNode::new([at(10, on(60)), at(20, on(62)), at(100_000, off(60))]);
+    let (_ed, mut exec, controls, seen) = rig(clip, 64);
+    exec.process(64, &rolling(0), &[], &mut []);
+    controls.set([at(5_000, on(72))]);
+    controls.set([at(5_000, on(73))]);
+    exec.process(64, &rolling(64), &[], &mut []);
+    exec.process(64, &rolling(128), &[], &mut []);
+    let offs: Vec<_> = heard(&seen)
+        .into_iter()
+        .filter(|&(_, e)| e == off(60) || e == off(62))
+        .collect();
+    assert_eq!(offs, vec![(64, off(60)), (64, off(62))]);
+}
+
 /// **A fork plays the clip as it was when forked.** The live clip is
 /// replaced after the fork; the forked node still plays the original's note,
 /// at its frame, on the `Env` it is rendered with.
@@ -172,10 +206,7 @@ fn a_fork_plays_the_clip_as_it_was_at_the_fork() {
 fn a_loop_that_wraps_at_a_block_edge_ends_its_held_notes() {
     let clip = MidiClipNode::new([at(23_850, on(60))]);
     let (_ed, mut exec, _c, seen) = rig(clip, 512);
-    let lp = Some(LoopRange {
-        start: Beat(0.0),
-        end: Beat(1.0),
-    });
+    let lp = Some(LoopRange::new(Beat(0.0), Beat(1.0)).expect("a loop"));
     let looping = |f: u64| TransportPosition::new(true, Bpm::of(120.0), beat_of(f), lp);
     exec.process(100, &looping(23_800), &[], &mut []);
     exec.process(100, &looping(23_900), &[], &mut []);
@@ -279,10 +310,7 @@ fn a_note_lands_on_its_frame_at_ninety_bpm() {
 fn a_loop_shorter_than_a_block_plays_every_pass() {
     let clip = MidiClipNode::new([at(10, on(60)), at(60, off(60))]);
     let (_ed, mut exec, _c, seen) = rig(clip, 512);
-    let lp = Some(LoopRange {
-        start: Beat(0.0),
-        end: beat_of(100),
-    });
+    let lp = Some(LoopRange::new(Beat(0.0), beat_of(100)).expect("a loop"));
     let looping = |f: u64| TransportPosition::new(true, Bpm::of(120.0), beat_of(f), lp);
     exec.process(512, &looping(0), &[], &mut []);
     exec.process(512, &looping(12), &[], &mut []);
@@ -431,7 +459,12 @@ fn a_keys_owner_starts_over_at_a_loop_wrap() {
 
 /// A loop of `[start, end)` beats under `tempo`, rolling from `beat`.
 fn looping_at(tempo: f64, beat: Beat, start: Beat, end: Beat) -> TransportPosition {
-    TransportPosition::new(true, Bpm::of(tempo), beat, Some(LoopRange { start, end }))
+    TransportPosition::new(
+        true,
+        Bpm::of(tempo),
+        beat,
+        Some(LoopRange::new(start, end).expect("a loop")),
+    )
 }
 
 /// **A pass that ends exactly on a block's edge ends what it held at the
@@ -754,10 +787,7 @@ fn a_loop_wrap_lifts_the_pedal_after_the_note_off() {
         at(23_851, pedal(0, CCNumber::SUSTAIN, DOWN)),
     ]);
     let (_ed, mut exec, _c, seen) = rig(clip, 512);
-    let lp = Some(LoopRange {
-        start: Beat(0.0),
-        end: Beat(1.0),
-    });
+    let lp = Some(LoopRange::new(Beat(0.0), Beat(1.0)).expect("a loop"));
     let looping = |f: u64| TransportPosition::new(true, Bpm::of(120.0), beat_of(f), lp);
     exec.process(100, &looping(23_800), &[], &mut []);
     exec.process(512, &looping(23_900), &[], &mut []);
@@ -837,66 +867,6 @@ fn a_refused_pedal_up_is_owed_and_follows_the_last_note_off() {
         .collect();
     assert_eq!(ups.len(), 1, "the pedal is lifted exactly once");
     assert!(ups[0] > last_off, "after every note-off");
-}
-
-/// Block 0 sends `script` through a ledger; block 1 releases it all.
-struct SendThenRelease {
-    ledger: NoteLedger<()>,
-    script: Vec<Ump>,
-    block: u32,
-}
-
-impl Node for SendThenRelease {
-    fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(0, 1).with_event_capacity(64)
-    }
-    fn prepare(&mut self, _: &Prepare) {}
-    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
-        let first = cx.env.offset(0).unwrap();
-        let mut sending = self.ledger.block(io.event_out(0), first);
-        if self.block == 0 {
-            for &u in &self.script {
-                sending.send(first, u, None);
-            }
-        } else {
-            sending.release_all(first);
-        }
-        self.block += 1;
-        Status::Modified
-    }
-    fn reset(&mut self) {}
-}
-
-/// **A MIDI 1.0 pedal and bend are returned in MIDI 1.0.** The ledger sends
-/// the return in the protocol the message it was told about used: a MIDI 1.0
-/// Control Change 64 with value 0 and a MIDI 1.0 Pitch Bend at 0x2000, never
-/// a MIDI 2.0 packet (M1 p. 31, Stop; the 14-bit centre is 0x2000, M1 table
-/// of Pitch Bend). A pedal value below 64 is up (M1 CC 64: 0 to 63 is off), so a
-/// pedal sent at 63 is not lifted again.
-#[test]
-fn a_midi_1_pedal_and_bend_are_returned_in_midi_1() {
-    let ch = MidiChannel::of(2);
-    let m1_bend = |v: u16| Ump::from(Message::midi1(ch, Voice1::PitchBend(U14::of(v))));
-    let m1_pedal = |controller, v: u8| midi::m1_cc(ch, controller, U7::of(v));
-    let script = vec![
-        m1_pedal(CCNumber::SUSTAIN, 127),
-        m1_pedal(CCNumber::SOSTENUTO, 63),
-        m1_bend(0x3000),
-    ];
-    let node = SendThenRelease {
-        ledger: NoteLedger::new(16),
-        script: script.clone(),
-        block: 0,
-    };
-    let (_ed, mut exec, _c, seen) = rig_with(Unforkable(node), 64);
-    exec.process(64, &rolling(0), &[], &mut []);
-    exec.process(64, &rolling(64), &[], &mut []);
-    let late: Vec<Ump> = heard(&seen)
-        .iter()
-        .filter(|&&(f, _)| f >= 64)
-        .map(|&(_, u)| u)
-        .collect();
-    assert_eq!(late, vec![m1_pedal(CCNumber::SUSTAIN, 0), m1_bend(0x2000)]);
 }
 
 // ---------------------------------------------------------------------------

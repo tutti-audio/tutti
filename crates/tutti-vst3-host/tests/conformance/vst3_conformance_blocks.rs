@@ -6,13 +6,14 @@
 #![cfg(feature = "conformance")]
 
 use crate::conformance_support;
+use tutti_buffers::{InputOutput, Planes, PlanesMut};
 
 use std::ffi::CStr;
 
 use tutti_graph::Offset;
 use tutti_types::Samples;
 use tutti_ump::MidiChannel;
-use tutti_vst3_host::{AudioBuffer, InputEvents, Library, ParameterChanges, TransportInfo};
+use tutti_vst3_host::{InputEvents, Library, ParameterChanges, TransportInfo};
 
 /// A block longer than any offset these tests place an event at.
 const TEST_BLOCK: usize = 1 << 16;
@@ -164,17 +165,17 @@ fn every_audio_class_survives_a_block() {
                     let in_refs: Vec<&[f32]> = ins.iter().map(|v| v.as_slice()).collect();
                     let mut out_refs: Vec<&mut [f32]> =
                         outs.iter_mut().map(|v| v.as_mut_slice()).collect();
-                    let mut buffer = AudioBuffer {
-                        inputs: &in_refs,
-                        outputs: &mut out_refs,
-                        num_samples: 512,
-                        sample_rate: tutti_plugin_types::SampleRate::SR_48K,
-                    };
+                    let mut buffer = InputOutput::new(
+                        tutti_plugin_types::Samples(in_refs[0].len()),
+                        Planes::new(&in_refs).expect("equal channels"),
+                        PlanesMut::new(&mut out_refs).expect("equal channels"),
+                    )
+                    .expect("equal lengths");
                     inst.process(
                         &mut buffer,
                         &InputEvents::default(),
                         None,
-                        &TransportInfo::default(),
+                        &TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K),
                     );
 
                     // Silence in must not become non-finite out: a NaN here
@@ -423,7 +424,7 @@ fn transport_across_blocks_is_spec_clean() {
     let mut unloadable: Vec<String> = Vec::new();
 
     for (name, path) in sample_plugins() {
-        let transport = TransportInfo::default();
+        let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
         let blocks: Vec<Block<'_>> = (0..8)
             .map(|_| Block::of(512).transport(&transport))
             .collect();

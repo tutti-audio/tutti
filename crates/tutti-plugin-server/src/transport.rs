@@ -183,10 +183,8 @@ mod recv_tests {
         let len = u32::try_from(MAX_FRAME_BYTES + 1).expect("the cap fits a u32 prefix");
         host.write_all(&len.to_be_bytes()).expect("write prefix");
         match transport.recv() {
-            Err(BridgeError::ConnectionFailed(msg)) => {
-                assert!(msg.contains(&(MAX_FRAME_BYTES + 1).to_string()), "{msg}");
-            }
-            other => panic!("expected ConnectionFailed, got {other:?}"),
+            Err(BridgeError::FrameTooLarge(e)) => assert_eq!(e.len, MAX_FRAME_BYTES + 1),
+            other => panic!("expected FrameTooLarge, got {other:?}"),
         }
     }
 }

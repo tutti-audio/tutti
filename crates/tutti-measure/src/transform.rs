@@ -15,7 +15,7 @@
 //! panicked, and how a decimated display transform reached it and produced a
 //! comb of islands separated by silence.
 
-use tutti_buffers::{Mono, Sample};
+use tutti_buffers::{Mono, MonoMut, Sample};
 use tutti_types::{Amplitude, SampleRate, Samples};
 
 use crate::convert::to_f32;
@@ -519,7 +519,7 @@ pub fn istft<S: Sample>(transform: &Stft, fft: &mut FftScratch) -> Vec<S> {
     let mut frame_buf = vec![0.0f32; window_len];
 
     for frame in frames.indices() {
-        fft.inverse(transform.bins.row(frame), &mut frame_buf);
+        fft.inverse(transform.bins.row(frame), MonoMut::new(&mut frame_buf));
         let offset = frame.get() * geometry.hop().get();
         for i in 0..window_len {
             out[offset + i] += frame_buf[i] * window[i];
@@ -548,7 +548,7 @@ fn compute(samples: &[f32], geometry: StftGeometry, fft: &mut FftScratch) -> Stf
         let offset = frame.get() * geometry.hop().get();
         let start = frame.get() * bins_per_frame.get();
         fft.forward(
-            &samples[offset..offset + window_len],
+            Mono::new(&samples[offset..offset + window_len]),
             &window,
             &mut bins[start..start + bins_per_frame.get()],
         );

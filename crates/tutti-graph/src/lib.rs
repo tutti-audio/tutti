@@ -616,7 +616,7 @@ pub use controls::{ParamFork, ParamNode, ParamSet, ParamSetBuilder, Params, para
 pub use cost::{Cost, Schedule, Work};
 pub use declare::{HasParam, HasParams, ParamUnit, Scalar};
 pub use editor::{
-    CloseError, CommitError, Editor, Limits, MissingSource, Placed, RootGate, Unwired,
+    CloseError, CommitError, Editor, Limits, MissingSource, Placed, Rewired, RootGate, Unwired,
 };
 pub use event::{
     Event, EventDensity, EventKind, EventOrderError, EventRejected, EventWriter, Harmony,
@@ -655,9 +655,9 @@ pub use latency::{
 pub use loss::EventLoss;
 pub use mode::{MixError, ModeError, NodeMix, NodeMode};
 pub use node::{
-    Chase, ConstantMask, Cx, Env, InPlaceMask, IntoNode, LoopRange, MAX_PORTS,
-    MAX_TRANSPORT_CHANGES, Node, NodeParts, Prepare, Resolution, Scratch, Shape, SilenceMask,
-    Status, TransportChange, TransportChangeRejected, TransportChanges, TransportPosition,
+    Chase, ConstantMask, Cx, Env, InPlaceMask, IntoNode, MAX_PORTS, MAX_TRANSPORT_CHANGES, Node,
+    NodeParts, Prepare, Resolution, Scratch, Shape, SilenceMask, Status, TransportChange,
+    TransportChangeRejected, TransportChanges, TransportPosition, Wired, WiredMask,
 };
 pub use par::Pool;
 pub use param::{

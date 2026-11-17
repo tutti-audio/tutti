@@ -461,13 +461,11 @@ fn voice_nodes_at_max_block_512_in_ragged_blocks_are_allocation_free() {
 /// every offset: nothing allocates, and the crossfade ran: no step across a
 /// wrap is a cut's (a 440 Hz tone steps 0.49 there).
 fn wraps_without_allocating<N: Node>(node: N) {
-    use tutti_graph::{LoopRange, TransportPosition};
+    use tutti_graph::TransportPosition;
+    use tutti_types::LoopRange;
     const WRAPS: usize = 4;
     let region = tutti_types::LoopRange::new(Beat::new(0.125), Beat::new(0.376)).expect("a loop");
-    let looping = LoopRange {
-        start: Beat::new(0.125),
-        end: Beat::new(0.376),
-    };
+    let looping = LoopRange::new(Beat::new(0.125), Beat::new(0.376)).expect("a loop");
     let node = tutti_graph::contract::prepared(node, RATE, 64);
     let mut direct = Direct::new(node, RATE, 512);
     let mut clock = tutti_types::FrameClock::new(Beat::new(0.0), Bpm::of(120.0), RATE);

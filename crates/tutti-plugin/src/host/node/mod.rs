@@ -81,10 +81,8 @@ mod mock_server;
 mod param_delivery_tests;
 // The block-budget suite driven by a REAL plugin subprocess, as opposed to
 // `tutti-plugin-ipc`'s `process_pipeline_tests` mock servers. A unit test rather than an
-// integration one because it asserts on `PluginBridge::settled_replies`, which
-// is `#[cfg(test)]` — deliberately, since nothing in the shipping host reads it
-// and an always-compiled accessor with no caller reads as API someone may
-// depend on. `clap` because it needs a `plugin-server` built with that loader.
+// integration one: it reads `PluginBridge`'s block counts and drives a graph built
+// in the test. `clap` because it needs a `plugin-server` built with that loader.
 #[cfg(all(test, feature = "clap"))]
 mod fork_late_rate_tests;
 #[cfg(all(test, feature = "clap"))]
@@ -101,7 +99,6 @@ pub(crate) use capability_view::is_declined;
 
 use crate::host::loadable::Loadable;
 use crate::host::plugin_ref::PluginRef;
-use std::path::PathBuf;
 use std::sync::Arc;
 use tutti_graph::{IntoNode, Node, NodeParts, Shape};
 use tutti_plugin_host::{
@@ -314,8 +311,10 @@ impl PluginClient<Unbound> {
         let descriptor = ipc.descriptor().clone();
         let loaded = ipc.loaded().clone();
         let rate = ipc.rate();
+        // The plugin's file, when the ipc knows it: the path of a failure here.
+        let origin_path = ipc.origin().map(|o| o.path.clone());
         let failed = |reason: String| BridgeError::LoadFailed {
-            path: PathBuf::new(),
+            path: origin_path.clone(),
             stage: LoadStage::Activation,
             reason,
         };

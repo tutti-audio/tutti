@@ -5,7 +5,7 @@
 //! inverted and cancelling.
 //!
 //! Split into a pure kernel ([`correlate`]) and an explicit smoother
-//! ([`BallisticsMeter`]). Folding the two together invites a `width` stored
+//! ([`StereoSmoother`]). Folding the two together invites a `width` stored
 //! beside the correlation it is defined from and smoothed independently of it,
 //! so the smoothed pair contradicts the invariant the kernel guarantees.
 
@@ -158,7 +158,7 @@ pub fn correlate<S: Sample>(planes: StereoPlanes<'_, S>) -> StereoReading {
 /// Meter ballistics: how fast a reading rises and falls.
 ///
 /// A one-pole attack/release smoother that shapes how a reading moves: a
-/// meter's face ([`BallisticsMeter`]) and the spectrum meter's
+/// meter's face ([`StereoSmoother`]) and the spectrum meter's
 /// [`Smoothing`](crate::Smoothing). The loudness, peak and correlation readings
 /// are taken from the raw signal, never through it.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -187,7 +187,7 @@ impl Ballistics {
     /// Public because ballistics are not stereo-specific: a level meter smooths
     /// the peak and RMS of `tutti_graph::Level`
     /// with the same attack and release (the meter holds the peak since the
-    /// last read; the decay is the reader's). [`BallisticsMeter::push`] stays the
+    /// last read; the decay is the reader's). [`StereoSmoother::push`] stays the
     /// convenience for the stereo case.
     ///
     /// The one-pole coefficient of the attack or release over a step of
@@ -213,10 +213,11 @@ impl Ballistics {
     }
 }
 
-/// A running smoother of stereo readings: the smoothed reading carried between
-/// blocks, moved by [`push`](Self::push) with the config's attack and release.
+/// A display filter over stereo level readings, not a stream meter: it takes a
+/// reading and the time since the last, and carries the smoothed reading
+/// between pushes with the config's attack and release.
 #[derive(Debug, Clone, Copy)]
-pub struct BallisticsMeter {
+pub struct StereoSmoother {
     cfg: Ballistics,
     current: StereoReading,
 }
@@ -224,15 +225,15 @@ pub struct BallisticsMeter {
 impl Ballistics {
     /// A smoother seeded with a default (silent, uncorrelated) reading.
     #[must_use]
-    pub fn measure(&self) -> BallisticsMeter {
-        BallisticsMeter {
+    pub fn smoother(&self) -> StereoSmoother {
+        StereoSmoother {
             cfg: *self,
             current: StereoReading::default(),
         }
     }
 }
 
-impl BallisticsMeter {
+impl StereoSmoother {
     /// The latest smoothed reading.
     #[inline]
     #[must_use]
@@ -362,7 +363,7 @@ mod tests {
     /// drift from the correlation it is defined from — even after smoothing.
     #[test]
     fn width_cannot_contradict_correlation_even_when_smoothed() {
-        let mut state = Ballistics::standard().measure();
+        let mut state = Ballistics::standard().smoother();
         let mono = tone(512, 1.0);
         let inverted: Vec<f32> = mono.iter().map(|s| -s).collect();
 
@@ -378,7 +379,7 @@ mod tests {
     /// The smoothed value is what comes back, not the instantaneous one.
     #[test]
     fn the_return_value_is_the_smoothed_reading() {
-        let mut state = Ballistics::new(Seconds(1.0), Seconds(1.0)).measure();
+        let mut state = Ballistics::new(Seconds(1.0), Seconds(1.0)).smoother();
         let mono = tone(512, 1.0);
 
         let instant = correlate(pair(&mono, &mono));
@@ -397,8 +398,8 @@ mod tests {
         let mono = tone(512, 1.0);
         let inverted: Vec<f32> = mono.iter().map(|s| -s).collect();
 
-        let mut fast = Ballistics::new(Seconds(0.001), Seconds(0.001)).measure();
-        let mut slow = Ballistics::new(Seconds(1.0), Seconds(1.0)).measure();
+        let mut fast = Ballistics::new(Seconds(0.001), Seconds(0.001)).smoother();
+        let mut slow = Ballistics::new(Seconds(1.0), Seconds(1.0)).smoother();
 
         let target = correlate(pair(&mono, &mono));
         let fast_out = fast.push(target, Seconds(0.01));
@@ -411,7 +412,7 @@ mod tests {
 
         // And the release path differs from the attack path.
         let falling = correlate(pair(&mono, &inverted));
-        let mut state = Ballistics::new(Seconds(0.001), Seconds(1.0)).measure();
+        let mut state = Ballistics::new(Seconds(0.001), Seconds(1.0)).smoother();
         state.push(target, Seconds(0.01));
         let before = state.current().correlation;
         state.push(falling, Seconds(0.01));

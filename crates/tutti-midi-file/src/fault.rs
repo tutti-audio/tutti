@@ -59,7 +59,7 @@ pub enum SmfParseError {
     #[error("system common or real-time status in a file")]
     SystemStatus,
     /// An End of Track that is not the last event of its track.
-    #[error("End of Track that is not the last event in its track")]
+    #[error("an End of Track that is not the last event in its track")]
     EndOfTrackNotLast,
     /// More track chunks than the header declares.
     #[error("more tracks than the header declares")]
