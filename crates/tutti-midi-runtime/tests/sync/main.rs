@@ -13,4 +13,5 @@ mod clock_follower;
 mod clock_tempo_map;
 mod decoder_no_alloc;
 mod machine_control;
+mod mtc_follow;
 mod sync_out;

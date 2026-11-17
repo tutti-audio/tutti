@@ -174,18 +174,15 @@ impl Tuning {
         tuning
     }
 
-    /// An arbitrary scale from a list of degrees in cents above the root, e.g.
-    /// `[0.0, 50.0, 100.0, …]` for quarter tones.
+    /// An arbitrary scale from a list of degrees in [`Cents`] above the root,
+    /// e.g. `0, 50, 100, …` cents for quarter tones.
     ///
     /// The scale repeats every octave (1200 cents), and its *length* — not 12 —
     /// is the number of note numbers one repeat spans. Pinned at
     /// A4 = 440 [`Hz`]. An empty slice falls back to 12-tone equal temperament.
     #[must_use]
-    pub fn from_cents(cents: &[f32]) -> Self {
-        let degrees: Vec<ScaleDegree> = cents
-            .iter()
-            .map(|c| ScaleDegree::from_cents(Cents::new(*c)))
-            .collect();
+    pub fn from_cents(cents: &[Cents]) -> Self {
+        let degrees: Vec<ScaleDegree> = cents.iter().map(|c| ScaleDegree::from_cents(*c)).collect();
 
         let mut tuning = Self {
             degrees,
