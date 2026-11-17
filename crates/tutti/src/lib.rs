@@ -238,9 +238,10 @@ pub mod nodes {
     };
     pub use tutti_nodes::{
         BAND_PARAMS, BitCrusherConfig, BitCrusherControls, BitCrusherNode, BrickwallLimiterNode,
-        BusStripNode, ChannelTimes, ChannelTimesError, ClickSettings, ClickState,
+        BusStripNode, ButterworthOrder, ChannelTimes, ChannelTimesError, ClickSettings, ClickState,
         CompressorControls, CompressorNode, ConvolverError, ConvolverNode, CrossoverControls,
-        CrossoverError, CrossoverNode, DcBlockerConfig, DcBlockerControls, DcBlockerNode,
+        CrossoverError, CrossoverNode, CutAlignment, CutFilterConfig, CutFilterControls,
+        CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerControls, DcBlockerNode,
         DelayControls, DelayLayout, DelayNode, DistortionNode, EnvelopeFollowerNode, EqBandNode,
         FdnControls, FdnLayout, FdnNode, FreeverbControls, FreeverbNode, GateControls, GateNode,
         HrtfBinauralNode, InterpolationMode, IrLayout, KeyFilter, KeySource, LadderControls,
@@ -254,13 +255,13 @@ pub mod nodes {
     };
     pub use tutti_nodes::{
         BitCrusherKernel, BrickwallKernel, CompressorKernel, Control, ControlLanes, ControlRead,
-        ControlSet, ControlValid, CrossoverKernel, DcBlockerKernel, DelayKernel, DistortionKernel,
-        FdnKernel, Feed, FreeverbKernel, GateKernel, Kernel, KernelNode, LadderKernel,
-        LimiterKernel, ModDelayKernel, PhaserKernel, ReconcileError, SvfKernel,
+        ControlSet, ControlValid, CrossoverKernel, CutFilterKernel, DcBlockerKernel, DelayKernel,
+        DistortionKernel, FdnKernel, Feed, FreeverbKernel, GateKernel, Kernel, KernelNode,
+        LadderKernel, LimiterKernel, ModDelayKernel, PhaserKernel, ReconcileError, SvfKernel,
     };
     pub use tutti_nodes::{
-        BitCrusherSet, BrickwallSet, CompressorSet, CrossoverSet, DcBlockerSet, DelaySet,
-        DistortionSet, FdnSet, FreeverbSet, GateSet, HasControl, LadderSet, LimiterSet,
+        BitCrusherSet, BrickwallSet, CompressorSet, CrossoverSet, CutFilterSet, DcBlockerSet,
+        DelaySet, DistortionSet, FdnSet, FreeverbSet, GateSet, HasControl, LadderSet, LimiterSet,
         ModDelaySet, PhaserSet, SvfSet,
     };
 }

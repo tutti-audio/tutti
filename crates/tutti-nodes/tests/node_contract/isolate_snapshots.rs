@@ -23,7 +23,10 @@ use tutti_nodes::{
     PhaserNode, RingModConfig, RingModNode, ShapeKind, Stages, SvfControls, SvfFilterNode, SvfType,
     TremoloConfig, TremoloNode,
 };
-use tutti_nodes::{BitCrusherConfig, BitCrusherNode, DcBlockerConfig, DcBlockerNode};
+use tutti_nodes::{
+    BitCrusherConfig, BitCrusherNode, ButterworthOrder, CutAlignment, CutFilterConfig,
+    CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerNode,
+};
 use tutti_nodes::{StereoWidthConfig, StereoWidthNode};
 use tutti_types::{
     Amplitude, BusTopology, ChannelLayout, CompressionRatio, Db, Depth, Drive, Feedback, Hz, Q,
@@ -222,6 +225,21 @@ fn dc_blocker() {
     })
     .control("corner", |d| {
         assert!(d.param_set().set(UnitParam::Cutoff, 80.0))
+    })
+    .check();
+}
+
+#[test]
+fn cut_filter() {
+    IsolateRow::new("CutFilterNode (stereo)", || {
+        CutFilterNode::from(CutFilterConfig::new(
+            ChannelLayout::STEREO,
+            CutResponse::HighPass,
+            CutAlignment::Butterworth(ButterworthOrder::of(6)),
+        ))
+    })
+    .control("cutoff", |d| {
+        assert!(d.param_set().set(UnitParam::Cutoff, 400.0))
     })
     .check();
 }

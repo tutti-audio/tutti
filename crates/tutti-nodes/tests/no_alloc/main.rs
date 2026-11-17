@@ -11,6 +11,7 @@ mod rt_no_alloc;
 mod rt_no_alloc_bit_crusher;
 mod rt_no_alloc_convolver;
 mod rt_no_alloc_crossover;
+mod rt_no_alloc_cut_filter;
 mod rt_no_alloc_dc_blocker;
 mod rt_no_alloc_dynamics;
 mod rt_no_alloc_engine;

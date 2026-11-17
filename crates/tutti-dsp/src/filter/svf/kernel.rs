@@ -7,7 +7,7 @@
 use tutti_buffers::Float;
 
 use crate::level::db_to_ratio_f64;
-use crate::{Lanes, Lerp};
+use crate::{Complex64, Lanes, Lerp};
 use tutti_types::{Db, Hz, Q, SampleRate};
 
 /// Which response the state-variable filter presents.
@@ -155,6 +155,16 @@ impl SvfCoeffs {
             m1,
             m2,
         }
+    }
+
+    /// `H(e^jw)` of the set, read from the trapezoidal form: the warped frequency in
+    /// units of the prototype's cutoff is `t = tan(w / 2) / g`, and
+    /// `H = m0 + (m2 + j m1 t) / (1 - t^2 + j k t)`. Well conditioned at a pole near
+    /// `z = 1`, where the direct coefficients are not.
+    pub(crate) fn response(&self, w: f64) -> Complex64 {
+        let t = libm::tan(w / 2.0) / self.g;
+        let d = Complex64::new(1.0 - t * t, self.k * t);
+        self.m0 + Complex64::new(self.m2, self.m1 * t) / d
     }
 }
 

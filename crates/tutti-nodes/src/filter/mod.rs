@@ -1,13 +1,19 @@
-//! Filter nodes: state-variable, Moog ladder, parametric EQ band, and the
-//! Linkwitz-Riley crossover, each a kernel on the one driver. The algorithms are `tutti-dsp`'s.
+//! Filter nodes: state-variable, Moog ladder, parametric EQ band, the Butterworth and
+//! Linkwitz-Riley high-pass and low-pass, and the Linkwitz-Riley crossover, each a kernel on
+//! the one driver. The algorithms are `tutti-dsp`'s.
 
 mod crossover;
+mod cut;
 pub mod eq_band;
 pub mod ladder;
 pub mod svf;
 
 pub(crate) use crossover::Splits;
 pub use crossover::{CrossoverKernel, CrossoverNode, CrossoverSet};
+pub use cut::{
+    CutAlignment, CutFilterConfig, CutFilterControls, CutFilterKernel, CutFilterNode, CutFilterSet,
+    MIN_CUT_CUTOFF,
+};
 pub use eq_band::EqBandNode;
 pub use ladder::{LadderFilterNode, LadderKernel, LadderSet};
 pub use svf::{SvfFilterNode, SvfKernel, SvfSet};
