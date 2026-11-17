@@ -277,7 +277,7 @@ mod distortion;
 pub use distortion::{DistortionKernel, DistortionNode, DistortionSet};
 // `ShapeKind` and `OversamplingFactor` are in `DistortionNode`'s signatures; what is behind
 // them is `tutti-dsp`'s.
-pub use tutti_dsp::{OversamplingFactor, ShapeKind};
+pub use tutti_dsp::{Antialiasing, OversamplingFactor, ShapeKind};
 
 // A sample-and-hold and a quantizer.
 mod bit_crusher;

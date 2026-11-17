@@ -1,9 +1,9 @@
-//! The waveshaper [`DistortionNode`]: six memoryless curves ([`ShapeKind`]) at a drive.
+//! The waveshaper [`DistortionNode`]: six curves ([`ShapeKind`]) at a drive.
 
 use tutti_buffers::{Float, Mono, Planes, PlanesMut};
 use tutti_dsp::{
-    COEFF_INTERVAL, Oversampler, Oversampling, OversamplingFactor, OversamplingPlan, ShapeKind,
-    WaveshaperBank, WaveshaperControls,
+    Antialiasing, COEFF_INTERVAL, Oversampler, Oversampling, OversamplingFactor, OversamplingPlan,
+    ShapeKind, WaveshaperBank, WaveshaperControls,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_types::{
@@ -42,8 +42,18 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// removes never fold. The cascade's round trip is a whole number of frames, which the node
 /// declares as its latency, and its ring-out, as many frames again, as its tail. The drive's
 /// glide runs at the oversampled rate, and a drive fed per frame holds across the frames of
-/// each input frame. Without oversampling the node is memoryless: it declares no latency and no
-/// tail, a silent input is a silent output.
+/// each input frame. Without oversampling or antialiasing the node is memoryless: it declares no
+/// latency and no tail, a silent input is a silent output.
+///
+/// # Antialiasing
+///
+/// [`antialiasing`](Self::antialiasing) shapes with antiderivative antialiasing instead
+/// ([`Antialiasing`] has the forms): each frame is the curve's mean over the segment from the
+/// input before it, which needs no extra rate and composes with oversampling, where it runs at
+/// the oversampled rate. The history is the input before the drive, so a drive change makes no
+/// step. The node then keeps state: it delays the audio by half a frame at first order and a
+/// whole frame at second, which it declares rounded to a whole frame (half a frame as one), and
+/// its tail is the frames the history rings.
 ///
 /// # In a graph
 ///
@@ -97,6 +107,17 @@ impl DistortionNode {
     pub fn oversampling(self, factor: OversamplingFactor) -> Self {
         self.map_kernel(|kernel| kernel.factor = Some(factor))
     }
+
+    /// Shapes with `order` of antiderivative antialiasing (see "Antialiasing" above); the
+    /// default is [`Antialiasing::Off`], the memoryless curve.
+    ///
+    /// A kind with no antiderivative of that order shapes with the highest it has
+    /// ([`ShapeKind::max_antialiasing`]): `SecondOrder` is first order for `Tanh`, `Atan`,
+    /// `Crush` and `SoftCrush`.
+    #[must_use]
+    pub fn antialiasing(self, order: Antialiasing) -> Self {
+        self.map_kernel(|kernel| kernel.antialiasing = order)
+    }
 }
 
 /// The waveshaper's control: the drive.
@@ -131,6 +152,8 @@ pub struct DistortionKernel {
     factor: Option<OversamplingFactor>,
     /// The oversampling, once prepared at a rate its filters can be designed for.
     oversampled: Option<Oversampled>,
+    /// What the node was asked to shape with.
+    antialiasing: Antialiasing,
 }
 
 impl DistortionKernel {
@@ -144,7 +167,18 @@ impl DistortionKernel {
             landed: false,
             factor: None,
             oversampled: None,
+            antialiasing: Antialiasing::Off,
         }
+    }
+
+    /// The order the node shapes with: the one asked for, within what the kind has.
+    fn order(&self) -> Antialiasing {
+        self.antialiasing.min(self.kind.max_antialiasing())
+    }
+
+    /// The oversampling factor the bank runs at: `None` without it.
+    fn factor(&self) -> Option<OversamplingFactor> {
+        self.oversampled.as_ref().map(|o| o.plan.factor())
     }
 }
 
@@ -241,11 +275,17 @@ impl Kernel for DistortionKernel {
     /// `HardClip` are arithmetic, `Light`; `Crush` and `SoftCrush` (a rounding call) and
     /// `Atan` and `Tanh` (a libm call) are `Moderate`. With oversampling it is `Heavy`: every
     /// channel runs two half-band cascades and the curve at up to eight times the rate.
+    /// Antialiasing makes every curve at least `Moderate`: the curve and its antiderivatives
+    /// run in `f64`.
     fn shape(&self) -> Shape {
         let output = Bus::banded(self.input, BusRole::Main, 1).expect("one band is a bus");
         let cost = match (self.factor, self.kind) {
             (Some(_), _) => Cost::Heavy,
-            (None, ShapeKind::Softsign | ShapeKind::HardClip) => Cost::Light,
+            (None, ShapeKind::Softsign | ShapeKind::HardClip)
+                if self.order() == Antialiasing::Off =>
+            {
+                Cost::Light
+            }
             (None, _) => Cost::Moderate,
         };
         Shape::buses(
@@ -264,13 +304,13 @@ impl Kernel for DistortionKernel {
             .oversampled
             .as_ref()
             .map_or(rate, |o| o.plan.high_rate());
-        self.bank = WaveshaperBank::new(self.kind, shaping);
+        self.bank = WaveshaperBank::new(self.kind, shaping).antialiasing(self.antialiasing);
         self.landed = false;
     }
 
     /// Silence, and the next design lands at once, as a fresh node's first does.
     fn reset(&mut self) {
-        self.bank.settle();
+        self.bank.reset();
         self.landed = false;
         for state in self.oversampled.iter_mut().flat_map(|o| &mut o.channels) {
             state.reset();
@@ -300,19 +340,28 @@ impl Kernel for DistortionKernel {
         self.landed = true;
     }
 
-    /// The cascade's round trip, in base frames: zero without oversampling.
+    /// The cascade's round trip, in base frames, and the antialiasing's delay rounded to a
+    /// whole frame: zero with neither.
     fn latency(&self) -> Samples {
-        self.oversampled
+        let cascade = self
+            .oversampled
             .as_ref()
-            .map_or(Samples::ZERO, |o| o.plan.latency())
+            .map_or(Samples::ZERO, |o| o.plan.latency());
+        cascade + self.order().delay(self.factor())
     }
 
     /// The half-bands' response is symmetric about its delay, so what rings after the input
-    /// stops lasts as long as the latency; a frame more covers the rounding.
+    /// stops lasts as long as the latency; a frame more covers the rounding. The history rings
+    /// on after that.
     fn tail(&self) -> Tail {
-        self.oversampled.as_ref().map_or(Tail::None, |o| {
-            Tail::Finite(Samples(o.plan.latency().get() + 1))
-        })
+        let cascade = self
+            .oversampled
+            .as_ref()
+            .map_or(Samples::ZERO, |o| Samples(o.plan.latency().get() + 1));
+        match cascade + self.order().ring_out(self.factor()) {
+            Samples::ZERO => Tail::None,
+            frames => Tail::Finite(frames),
+        }
     }
 }
 
@@ -596,6 +645,120 @@ mod tests {
         ] {
             let level = shaped(Some(factor));
             assert!(level < bound, "{factor:?}: {level} dB, not under {bound}");
+        }
+    }
+
+    /// Antialiasing declares its delay, rounded to a whole frame, and the frames the history
+    /// rings as the node's tail: first order half a frame (declared 1), second a frame, and
+    /// a kind with no second order declares the first's; at 2x oversampling the delay is a
+    /// fraction of a base frame that rounds into the cascade's.
+    #[test]
+    fn antialiasing_declares_its_delay_and_tail() {
+        let node = |kind, order| {
+            prepared(DistortionNode::with_channels(1u16, kind, Drive::new(1.0)).antialiasing(order))
+        };
+        for (kind, order, latency, tail) in [
+            (ShapeKind::HardClip, Antialiasing::Off, 0, Tail::None),
+            (
+                ShapeKind::HardClip,
+                Antialiasing::FirstOrder,
+                1,
+                Tail::Finite(Samples(1)),
+            ),
+            (
+                ShapeKind::HardClip,
+                Antialiasing::SecondOrder,
+                1,
+                Tail::Finite(Samples(2)),
+            ),
+            (
+                ShapeKind::Tanh,
+                Antialiasing::SecondOrder,
+                1,
+                Tail::Finite(Samples(1)),
+            ),
+        ] {
+            let shape = node(kind, order).shape();
+            assert_eq!(shape.latency.samples().get(), latency, "{kind:?} {order:?}");
+            assert_eq!(shape.tail, tail, "{kind:?} {order:?}");
+        }
+        let plain = prepared(
+            DistortionNode::with_channels(1u16, ShapeKind::HardClip, Drive::new(1.0))
+                .oversampling(OversamplingFactor::X2),
+        );
+        let both = prepared(
+            DistortionNode::with_channels(1u16, ShapeKind::HardClip, Drive::new(1.0))
+                .oversampling(OversamplingFactor::X2)
+                .antialiasing(Antialiasing::SecondOrder),
+        );
+        assert_eq!(
+            both.shape().latency.samples().get(),
+            plain.shape().latency.samples().get() + 1,
+        );
+        assert_eq!(
+            both.shape().tail,
+            Tail::Finite(Samples(
+                match plain.shape().tail {
+                    Tail::Finite(t) => t.get(),
+                    other => panic!("{other:?}"),
+                } + 1
+            ))
+        );
+    }
+
+    /// A small impulse inside the clip comes out as the filter's closed form: `[x/2, x/2]` at
+    /// first order and `[x/3; 3]` at second, and silence past the declared latency and tail.
+    #[test]
+    fn antialiasing_rings_for_its_declared_tail() {
+        for (order, taps) in [
+            (Antialiasing::FirstOrder, 2usize),
+            (Antialiasing::SecondOrder, 3),
+        ] {
+            let mut n = prepared(
+                DistortionNode::with_channels(1u16, ShapeKind::HardClip, Drive::new(1.0))
+                    .antialiasing(order),
+            );
+            let Tail::Finite(tail) = n.shape().tail else {
+                panic!("{order:?}: no finite tail");
+            };
+            let mut x = vec![0.0f32; 32];
+            x[0] = 0.5;
+            let y = render_chunked(&mut n, &[x], 8).remove(0);
+            for (i, &v) in y.iter().enumerate() {
+                let want = if i < taps { 0.5 / taps as f32 } else { 0.0 };
+                assert!((v - want).abs() < 1e-7, "{order:?} frame {i}: {v}");
+            }
+            assert_eq!(tail.get(), taps - 1, "{order:?}");
+        }
+    }
+
+    /// First-order antialiasing lowers the aliases of the 9 kHz drive-3 tanh `alias_db`
+    /// measures, alone and under 2x oversampling, where it runs at the oversampled rate. The
+    /// margins are set under what is measured: alone -18.8 dB against the plain -12.6 (6.2 dB
+    /// under; bound 4), at 2x -57.7 against -39.5 (18.2 dB under; bound 12).
+    #[test]
+    fn antialiasing_lowers_the_aliases_alone_and_oversampled() {
+        let tanh = || DistortionNode::with_channels(1u16, ShapeKind::Tanh, Drive::new(3.0));
+        let (plain, first) = (
+            alias_db(tanh()),
+            alias_db(tanh().antialiasing(Antialiasing::FirstOrder)),
+        );
+        assert!(first < plain - 4.0, "{first} dB against {plain}");
+        let x2 = || tanh().oversampling(OversamplingFactor::X2);
+        let (plain, first) = (
+            alias_db(x2()),
+            alias_db(x2().antialiasing(Antialiasing::FirstOrder)),
+        );
+        assert!(first < plain - 12.0, "at 2x: {first} dB against {plain}");
+    }
+
+    /// Antialiasing makes every curve at least `Moderate`.
+    #[test]
+    fn antialiasing_is_at_least_moderate() {
+        for kind in KINDS {
+            let n =
+                DistortionNode::new(kind, Drive::new(1.0)).antialiasing(Antialiasing::FirstOrder);
+            assert_eq!(n.shape().cost, Cost::Moderate, "{kind:?}");
         }
     }
 
