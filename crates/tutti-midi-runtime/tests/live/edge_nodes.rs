@@ -315,14 +315,14 @@ fn a_devices_select_and_entry_make_a_run() {
 /// Note Off.
 #[test]
 fn a_departed_devices_epoch_settles_only_after_a_block_has_run() {
-    let epochs = DeviceEpochs::new();
-    epochs.arrive();
+    let (mut writer, epochs) = DeviceEpochs::new();
+    writer.arrive();
     let wire = Script::new(vec![vec![note(0, 60, 10)], vec![]]);
     let (_ed, mut exec, _c, seen) = ingest(following(wire, &epochs), MIDI_INPUT_PORTS as u16, 512);
     block(&mut exec, 512);
     assert!(epochs.is_settled(), "the block handled the arrival");
     assert_eq!(heard(&seen).len(), 1, "the key is down");
-    epochs.depart();
+    writer.depart();
     assert!(!epochs.is_settled(), "the departure is owed a block");
     block(&mut exec, 512);
     assert!(epochs.is_settled(), "the block released and said so");
@@ -341,8 +341,8 @@ fn a_release_that_does_not_fit_is_owed_and_settles_when_it_has_gone() {
             .map(|i| note(first + (i / 100) as u8, (i % 100) as u8, i))
             .collect()
     };
-    let epochs = DeviceEpochs::new();
-    epochs.arrive();
+    let (mut writer, epochs) = DeviceEpochs::new();
+    writer.arrive();
     let wire = Script::new(vec![keys(0), keys(4), vec![], vec![]]);
     let (_ed, mut exec, _c, seen) = ingest(following(wire, &epochs), MIDI_INPUT_PORTS as u16, 512);
     let offs = |from: u64, to: u64| {
@@ -355,7 +355,7 @@ fn a_release_that_does_not_fit_is_owed_and_settles_when_it_has_gone() {
     block(&mut exec, 512);
     assert_eq!(heard(&seen).len(), 800, "every key is down");
 
-    epochs.depart();
+    writer.depart();
     block(&mut exec, 512);
     assert_eq!(offs(1024, 1536), 584, "what the port has room for");
     assert!(!epochs.is_settled(), "216 are still owed");
@@ -435,14 +435,14 @@ fn a_slot_a_new_device_takes_forgets_the_previous_devices_half_sent_run() {
         ])
     };
     for reopened in [false, true] {
-        let epochs = DeviceEpochs::new();
+        let (mut writer, epochs) = DeviceEpochs::new();
         let Ingest { node, inlet } = Ingest::new(script());
         let node = node.following(&epochs);
         let (_ed, mut exec, _controls, seen) =
             ingest(Ingest { node, inlet }, MIDI_INPUT_PORTS as u16, 512);
         block(&mut exec, 512);
         if reopened {
-            epochs.arrive();
+            writer.arrive();
         }
         block(&mut exec, 512);
         let made = seen
@@ -502,8 +502,8 @@ fn heard(seen: &Seen) -> Vec<(u64, String)> {
 #[test]
 fn a_device_that_lets_go_has_what_it_held_released() {
     for replaced in [false, true] {
-        let epochs = DeviceEpochs::new();
-        epochs.arrive();
+        let (mut writer, epochs) = DeviceEpochs::new();
+        writer.arrive();
         let bend = at(
             30,
             midi::pitch_bend(Address::new(G, MidiChannel::of(0)), 0xC000_0000),
@@ -517,9 +517,9 @@ fn a_device_that_lets_go_has_what_it_held_released() {
         block(&mut exec, 512);
         assert_eq!(heard(&seen).len(), 3, "the key, the pedal, the bend");
         seen.lock().unwrap().clear();
-        epochs.depart();
+        writer.depart();
         if replaced {
-            epochs.arrive();
+            writer.arrive();
         }
         block(&mut exec, 512);
         let mut expected = vec![
@@ -742,8 +742,8 @@ fn a_requested_mpe_mode_is_adopted_once() {
 #[test]
 fn a_devices_profile_zones_switch_its_rules() {
     let reset = |frame: usize| cc_at(frame, 2, CCNumber::RESET_ALL, 0);
-    let epochs = DeviceEpochs::new();
-    epochs.arrive();
+    let (mut writer, epochs) = DeviceEpochs::new();
+    writer.arrive();
     let node = following(
         Script::new(vec![vec![reset(0)], vec![reset(1)], vec![reset(2)]]),
         &epochs,
@@ -796,8 +796,8 @@ fn a_devices_profile_zones_switch_its_rules() {
 /// heard again.
 #[test]
 fn clearing_a_devices_profiles_returns_it_to_the_rules_it_had() {
-    let epochs = DeviceEpochs::new();
-    epochs.arrive();
+    let (mut writer, epochs) = DeviceEpochs::new();
+    writer.arrive();
     let reset = cc_at(1, 2, CCNumber::RESET_ALL, 0);
     let (_ed, mut exec, controls, seen) = ingest(
         following(Script::new(vec![vec![], vec![reset], vec![reset]]), &epochs),

@@ -11,8 +11,10 @@ use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 use tutti_types::MaxBlock;
 
-use crate::common::{FRAMES_PER_BEAT, at, beat_of, connect, off, on, rolling};
+use self::common::{FRAMES_PER_BEAT, at, beat_of, connect, off, on, rolling};
 
+use crate::ledger::NoteLedger;
+use crate::{MidiClipControls, MidiClipNode, TimedMidiEvent};
 use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
 use tutti_graph::contract::Direct;
@@ -22,9 +24,59 @@ use tutti_graph::{
     TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, InPort, OutPort, Source};
-use tutti_midi_runtime::{MidiClipControls, MidiClipNode, NoteLedger, TimedMidiEvent};
 use tutti_types::{Beat, Bpm, ChannelLayout, Latency, SampleRate, Samples};
 use tutti_ump::{CCNumber, MidiChannel, MidiGroup, NoteId, NoteNumber, Ump};
+
+/// The clip clock at 120 BPM and 48 kHz and the helpers that build on it.
+mod common {
+    use tutti_fixtures::midi;
+    use tutti_graph::{Editor, EventEdge, EventIn, EventOut, NodeKey, TransportPosition};
+    use tutti_types::{Beat, Bpm};
+    use tutti_ump::{MidiChannel, Ump};
+
+    use crate::TimedMidiEvent;
+
+    /// Frames in a beat at 120 BPM and 48 kHz, so a frame is exact in beats.
+    pub(super) const FRAMES_PER_BEAT: f64 = 24_000.0;
+
+    pub(super) fn beat_of(frame: u64) -> Beat {
+        Beat(frame as f64 / FRAMES_PER_BEAT)
+    }
+
+    /// Rolling at 120 BPM from `frame`.
+    pub(super) fn rolling(frame: u64) -> TransportPosition {
+        TransportPosition::new(true, Bpm::of(120.0), beat_of(frame), None)
+    }
+
+    /// `event` on `frame`.
+    pub(super) fn at(frame: u64, event: Ump) -> TimedMidiEvent {
+        TimedMidiEvent::new(beat_of(frame), event).unwrap()
+    }
+
+    /// A full-velocity Note On of key `n` on the first Group and Channel.
+    pub(super) fn on(n: u8) -> Ump {
+        midi::note_on(MidiChannel::FIRST, n, 0xFFFF)
+    }
+
+    /// A Note Off of key `n` on the first Group and Channel.
+    pub(super) fn off(n: u8) -> Ump {
+        midi::note_off(MidiChannel::FIRST, n, 0)
+    }
+
+    /// Wires event output 0 of node `from` to event input 0 of node `to`.
+    pub(super) fn connect(ed: &mut Editor, from: u64, to: u64) {
+        ed.spec_mut().connect_events(
+            EventIn {
+                node: NodeKey(to),
+                port: 0,
+            },
+            EventEdge::Direct(EventOut {
+                node: NodeKey(from),
+                port: 0,
+            }),
+        );
+    }
+}
 
 fn stopped(frame: u64) -> TransportPosition {
     TransportPosition::new(false, Bpm::of(120.0), beat_of(frame), None)
@@ -545,13 +597,7 @@ fn a_full_table_withholds_what_it_cannot_keep() {
 // ---------------------------------------------------------------------------
 
 /// A clip holds note 60 from frame 0 to frame 100,000 and feeds sink A.
-fn holding_clip() -> (
-    Editor,
-    Executor,
-    tutti_midi_runtime::MidiClipControls,
-    Shared,
-    Shared,
-) {
+fn holding_clip() -> (Editor, Executor, crate::MidiClipControls, Shared, Shared) {
     let (mut ed, exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(256))));
     let controls = ed
         .insert(
@@ -642,7 +688,7 @@ fn the_close_reaches_a_sink_behind_a_delayed_edge() {
 fn forkable_rig() -> (
     Editor,
     Executor,
-    tutti_midi_runtime::MidiClipControls,
+    crate::MidiClipControls,
     Shared,
     Arc<Mutex<Vec<Shared>>>,
 ) {
@@ -1045,4 +1091,71 @@ fn the_loss_count_is_exact_through_loops_and_replacements() {
     }
     assert!(refused > 0, "no event was ever refused");
     assert!(recovered > 0, "no refused off was ever given back");
+}
+
+/// Block 0 sends `script` through a ledger; block 1 releases it all.
+struct SendThenRelease {
+    ledger: NoteLedger<()>,
+    script: Vec<Ump>,
+    block: u32,
+}
+
+impl Node for SendThenRelease {
+    fn shape(&self) -> Shape {
+        Shape::EMPTY.with_events(0, 1).with_event_capacity(64)
+    }
+    fn prepare(&mut self, _: &Prepare) {}
+    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
+        let first = cx.env.offset(0).unwrap();
+        let mut sending = self.ledger.block(io.event_out(0), first);
+        if self.block == 0 {
+            for &u in &self.script {
+                sending.send(first, u, None);
+            }
+        } else {
+            sending.release_all(first);
+        }
+        self.block += 1;
+        Status::Modified
+    }
+    fn reset(&mut self) {}
+}
+
+/// **A MIDI 1.0 pedal and bend are returned in MIDI 1.0.** The ledger sends
+/// the return in the protocol the message it was told about used: a MIDI 1.0
+/// Control Change 64 with value 0 and a MIDI 1.0 Pitch Bend at 0x2000, never
+/// a MIDI 2.0 packet (M1 p. 31, Stop; the 14-bit centre is 0x2000, M1 table
+/// of Pitch Bend). A pedal value below 64 is up (M1 CC 64: 0 to 63 is off), so a
+/// pedal sent at 63 is not lifted again.
+#[test]
+fn a_midi_1_pedal_and_bend_are_returned_in_midi_1() {
+    use tutti_ump::{Message, U7, U14, Voice1};
+    let ch = MidiChannel::of(2);
+    let m1_bend = |v: u16| Ump::from(Message::midi1(ch, Voice1::PitchBend(U14::of(v))));
+    let m1_pedal = |controller, v: u8| midi::m1_cc(ch, controller, U7::of(v));
+    let script = vec![
+        m1_pedal(CCNumber::SUSTAIN, 127),
+        m1_pedal(CCNumber::SOSTENUTO, 63),
+        m1_bend(0x3000),
+    ];
+    let node = SendThenRelease {
+        ledger: NoteLedger::new(16),
+        script,
+        block: 0,
+    };
+    let mut d = Direct::new(node, SampleRate::SR_48K, 64);
+    d.block();
+    d.block();
+    let released: Vec<Ump> = d
+        .events_out(0)
+        .iter()
+        .map(|e| match e.kind {
+            EventKind::Midi(u) => u,
+            _ => unreachable!("the node sends MIDI"),
+        })
+        .collect();
+    assert_eq!(
+        released,
+        vec![m1_pedal(CCNumber::SUSTAIN, 0), m1_bend(0x2000)]
+    );
 }

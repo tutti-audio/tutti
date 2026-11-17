@@ -21,9 +21,7 @@ pub mod sync_messages;
 pub mod sync_out;
 
 pub use active_sensing::{ACTIVE_SENSING_INTERVAL, ActiveSensingSender};
-pub use jr_timestamp::{
-    JR_CLOCK_INTERVAL, JR_CLOCK_MAX_INTERVAL, JrClock, JrClockEmitter, JrStamper, JrStream,
-};
+pub use jr_timestamp::{JrClock, JrStream};
 pub use machine_control_out::{MachineControlSender, NoTimeCode};
 pub use out_node::{MIDI_OUT_EVENT_CAPACITY, MidiOutNode};
 pub use sync_messages::SyncMessages;

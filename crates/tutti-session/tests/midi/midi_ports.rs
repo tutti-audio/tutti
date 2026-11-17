@@ -441,7 +441,7 @@ fn a_session_without_the_hardware_layer_fails_the_load_by_name() {
     let Some(PoolState::Failed(LoadError::Midi(error))) = s.pool_state(&"keys") else {
         panic!("the load failed: {:?}", s.pool_state(&"keys"));
     };
-    assert!(matches!(&*error, MidiPortError::NoHardware), "{error:?}");
+    assert!(matches!(&*error, MidiPortError::NoHardware(_)), "{error:?}");
 }
 
 /// **A released port reads `Closed`**: once the pool no longer names the entry,

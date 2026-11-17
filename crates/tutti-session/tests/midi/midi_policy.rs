@@ -398,7 +398,7 @@ fn an_identity_is_refused_on_a_session_with_no_os_midi_layer() {
         .expect("builds");
     assert_eq!(
         s.policy::<MidiPolicy>().set(policy(2, "My App")),
-        Err(MidiPolicyError::NoHardware)
+        Err(MidiPolicyError::NoHardware(tutti_session::NoHardware))
     );
     assert_eq!(s.policy::<MidiPolicy>().get().identity, None);
     assert_eq!(s.policy::<MidiPolicy>().set(MidiPolicy::default()), Ok(()));

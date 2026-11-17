@@ -253,7 +253,7 @@ impl Node for SyncOut {
             );
             let at = Offset::clamped(base, block_len);
             match messages.mmc {
-                None => self.sender.forget(),
+                None => self.sender.reset(),
                 Some(to) => {
                     self.sender.retarget(to, messages.rate);
                     // The transport's time is its beat at its tempo from beat
@@ -284,7 +284,15 @@ impl Node for SyncOut {
         Status::Modified
     }
 
-    fn reset(&mut self) {}
+    /// Forgets what it saw: the previous tick, the MTC grid, the Flex
+    /// statements and the last Machine Control look, so the next block states
+    /// where the transport stands afresh. The messages, the rate and the Group
+    /// are kept. Allocates nothing.
+    fn reset(&mut self) {
+        self.clock.reset();
+        self.sender.reset();
+        self.pending.clear();
+    }
 }
 
 /// A [`SyncOut`]'s fork: a node of its own over the group and the messages

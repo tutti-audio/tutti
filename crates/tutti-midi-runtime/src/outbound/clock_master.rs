@@ -13,7 +13,7 @@
 //! **The tempo is the published map's**: the engine hands
 //! the node a segment for every cell where the chord tempo changes, seated on
 //! the map's exact beat, and `tick` reads `transport.tempo` of each. A
-//! segment that starts where the previous ended (within `SEEK_EPSILON_BEATS`)
+//! segment that starts where the previous ended (within `SEEK_EPSILON`)
 //! is a continuation, so a ramp's cell edge or a step is no locate; the
 //! ticks are the first frames at or after beat `k / 24` on the playhead, which
 //! is on the map's frame at every cell start and within a frame of it inside
@@ -67,11 +67,11 @@ use super::sync_messages::SyncMessages;
 
 /// Below this beat, a play edge is treated as "from the top" → Start (0xFA)
 /// rather than Continue (0xFB). Wide enough to absorb float jitter at beat 0.
-const START_EPSILON_BEATS: f64 = 1e-6;
+const START_EPSILON: BeatDuration = BeatDuration(1e-6);
 /// A start beat further than this from where the previous block ended (while
 /// playing) is a seek, not the normal run-on of the next block: it triggers a
 /// fresh Song Position.
-const SEEK_EPSILON_BEATS: f64 = 1e-3;
+const SEEK_EPSILON: BeatDuration = BeatDuration(1e-3);
 
 /// Generates outbound MIDI clock / timecode from the transport: the Beat
 /// Clock and MTC half of a [`SyncOut`](crate::SyncOut), which owns it.
@@ -143,6 +143,15 @@ struct PrevTick {
     cued: Option<Beat>,
 }
 
+impl PrevTick {
+    const FRESH: Self = Self {
+        playing: false,
+        end: Beat(0.0),
+        wrapped: false,
+        cued: None,
+    };
+}
+
 /// The MTC quarter-frame grid.
 #[derive(Debug)]
 struct MtcGrid {
@@ -194,15 +203,20 @@ impl ClockMaster {
             group,
             sample_rate,
             fps: SyncMessages::OFF.rate,
-            prev: PrevTick {
-                playing: false,
-                end: Beat(0.0),
-                wrapped: false,
-                cued: None,
-            },
+            prev: PrevTick::FRESH,
             mtc: MtcGrid::RESTARTED,
             flex: FlexOut::SILENT,
         }
+    }
+
+    /// Returns the clock to what it was before its first tick: the transport
+    /// it last saw, the MTC grid and what the Flex messages stated are
+    /// forgotten, so the next tick states its position afresh. The Group, the
+    /// rate and the frame rate are kept.
+    pub(crate) fn reset(&mut self) {
+        self.prev = PrevTick::FRESH;
+        self.mtc = MtcGrid::RESTARTED;
+        self.flex = FlexOut::SILENT;
     }
 
     /// Moves the clock to a device running at `sample_rate`: what a device
@@ -330,7 +344,7 @@ impl ClockMaster {
 
         // --- transport edges -------------------------------------------------
         if playing && !was_playing {
-            if beat.get().abs() <= START_EPSILON_BEATS {
+            if (beat - Beat(0.0)).abs() <= START_EPSILON {
                 emit((Offset::ZERO, self.system(System::Start)));
             } else {
                 emit((
@@ -379,7 +393,7 @@ impl ClockMaster {
         // locate on the same frame.
         let prev_end = self.prev.end;
         let is_edge = playing && !was_playing;
-        let located = (beat - prev_end).abs() > BeatDuration(SEEK_EPSILON_BEATS);
+        let located = (beat - prev_end).abs() > SEEK_EPSILON;
         let wrapped = self.prev.wrapped;
         if !is_edge && (located || wrapped) {
             emit((
@@ -439,7 +453,7 @@ impl ClockMaster {
     fn is_cued_at(&self, beat: Beat) -> bool {
         self.prev
             .cued
-            .is_some_and(|cued| (beat - cued).abs() <= BeatDuration(SEEK_EPSILON_BEATS))
+            .is_some_and(|cued| (beat - cued).abs() <= SEEK_EPSILON)
     }
 
     /// Emit the MTC Full Message (Real Time `01 01`) for the frame nearest

@@ -139,8 +139,8 @@ fn the_border_nodes_process_without_allocating() {
 fn an_epoch_change_processes_without_allocating() {
     let (mut ed, mut exec) =
         Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
-    let epochs = DeviceEpochs::new();
-    epochs.arrive();
+    let (mut writer, epochs) = DeviceEpochs::new();
+    writer.arrive();
     ed.insert(NodeKey(1), "in", MidiIngestNode::new().following(&epochs));
     let mut dev = device(&mut ed, 4);
     let mut out = common::sink(&mut ed, 1, &[(1, 0), (1, 3), (1, 6), (1, 9)]);
@@ -159,8 +159,8 @@ fn an_epoch_change_processes_without_allocating() {
             // A device goes every eighth block and another takes the input two
             // blocks on.
             match b % 8 {
-                0 => epochs.depart(),
-                2 => epochs.arrive(),
+                0 => writer.depart(),
+                2 => writer.arrive(),
                 _ => {}
             }
             exec.process(512, &t, &[], &mut []);
@@ -172,7 +172,7 @@ fn an_epoch_change_processes_without_allocating() {
         }
     });
     assert!(offs > 0, "the departures released the keys they held");
-    epochs.depart();
+    writer.depart();
     exec.process(512, &t, &[], &mut []);
     assert!(epochs.is_settled(), "the last departure was handled");
 }
@@ -807,4 +807,20 @@ fn machine_control_out_of_a_sync_node_processes_without_allocating() {
     );
     assert_eq!(controls.losses().lost, 0);
     assert_eq!(out.dropped(), 0);
+}
+
+/// **`reset` allocates nothing**: the executor calls it on the audio thread as
+/// a node leaves bypass, on the ingest and sync nodes alike.
+#[test]
+fn resetting_the_border_nodes_allocates_nothing() {
+    use tutti_graph::Node;
+    use tutti_graph::contract::Direct;
+
+    let rate = SampleRate::SR_48K;
+    let mut ingest = Direct::new(MidiIngestNode::new(), rate, 64);
+    let mut sync = Direct::new(SyncOut::new(MidiGroup::FIRST), rate, 64);
+    assert_no_alloc::assert_no_alloc(|| {
+        ingest.node.reset();
+        sync.node.reset();
+    });
 }

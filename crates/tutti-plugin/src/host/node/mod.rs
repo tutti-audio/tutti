@@ -81,10 +81,8 @@ mod mock_server;
 mod param_delivery_tests;
 // The block-budget suite driven by a REAL plugin subprocess, as opposed to
 // `tutti-plugin-ipc`'s `process_pipeline_tests` mock servers. A unit test rather than an
-// integration one because it asserts on `PluginBridge::settled_replies`, which
-// is `#[cfg(test)]` — deliberately, since nothing in the shipping host reads it
-// and an always-compiled accessor with no caller reads as API someone may
-// depend on. `clap` because it needs a `plugin-server` built with that loader.
+// integration one: it reads `PluginBridge`'s block counts and drives a graph built
+// in the test. `clap` because it needs a `plugin-server` built with that loader.
 #[cfg(all(test, feature = "clap"))]
 mod fork_late_rate_tests;
 #[cfg(all(test, feature = "clap"))]

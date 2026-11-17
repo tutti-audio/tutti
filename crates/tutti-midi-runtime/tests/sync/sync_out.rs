@@ -8,12 +8,15 @@
 //! (PLAY `02`, STOP `01`, LOCATE target `44 06 01 hr mn sc fr sf`).
 //! At 120 BPM and 48 kHz a beat is 24 000 frames and a second is two beats.
 
+use tutti_graph::Node as _;
+use tutti_graph::contract::Direct;
 use tutti_graph::{
-    Editor, Executor, IntoNode as _, NodeKey, Offset, TransportChanges, TransportPosition,
+    Editor, EventKind, Executor, IntoNode as _, NodeKey, Offset, TransportChanges,
+    TransportPosition,
 };
 use tutti_midi_protocol::{MtcRate, Recipient};
 use tutti_midi_runtime::{SyncMessages, SyncOut, SyncOutControls};
-use tutti_types::{Beat, Bpm, Samples};
+use tutti_types::{Beat, Bpm, SampleRate, Samples};
 use tutti_ump::{Message, MidiGroup, SysexStatus, System, U14, Ump};
 
 use tutti_fixtures::{EventRig, Seen, heard};
@@ -466,4 +469,68 @@ fn flex_states_the_tempo_and_the_nodes_meter_once() {
         "no clock bytes"
     );
     assert!(flexes(&rig.block(BLOCK, rolling(beat(0.0, BLOCK)), &[])).is_empty());
+}
+
+/// One block of 64 frames under `transport` through `node`; what it sent.
+fn drive(d: &mut Direct<SyncOut>, transport: TransportPosition) -> Vec<Ump> {
+    d.set_transport(transport);
+    d.block();
+    d.events_out(0)
+        .iter()
+        .filter_map(|e| match e.kind {
+            EventKind::Midi(ump) => Some(ump),
+            _ => None,
+        })
+        .collect()
+}
+
+/// **`reset` returns the node to a freshly prepared one's state and keeps
+/// what it sends**, allocating nothing. At 120 BPM and 48 kHz a 64-frame block
+/// is 64/24 000 of a beat. Clock: a run-on sends no Continue, the same
+/// transport after a reset is a play edge mid-song and sends one. Machine
+/// Control: a stopped look and then a started one sends PLAY, but the look
+/// after a reset is a first and sends nothing. The messages set stay set.
+#[test]
+fn reset_forgets_what_was_seen_and_keeps_what_is_sent() {
+    let both = SyncMessages {
+        clock: true,
+        mmc: Some(Recipient::AllCall),
+        ..SyncMessages::OFF
+    };
+    let step = 64.0 / BEAT;
+    let continues = |sent: &[Ump]| sent.contains(&system(G, System::Continue));
+    let plays = |sent: &[Ump]| {
+        sysex(&sent.iter().map(|&u| (0, u)).collect::<Vec<_>>()) == [(0, PLAY.to_vec())]
+    };
+
+    let mut d = Direct::new(SyncOut::new(G).messages(both), SampleRate::SR_48K, 64);
+    assert!(!drive(&mut d, rolling(Beat(1.0))).is_empty());
+    let run_on = drive(&mut d, rolling(beat(1.0, 64)));
+    assert!(!continues(&run_on), "a run-on is no play edge");
+    assert_no_alloc::assert_no_alloc(|| d.node.reset());
+    let after = drive(&mut d, rolling(Beat(1.0 + 2.0 * step)));
+    assert!(continues(&after), "a reset clock sees a play edge mid-song");
+    assert!(!after.is_empty(), "the messages set are still set");
+
+    let mut kept = Direct::new(
+        SyncOut::new(G).messages(mmc(MtcRate::Fps30)),
+        SampleRate::SR_48K,
+        64,
+    );
+    assert!(
+        drive(&mut kept, stopped(Beat(0.0))).is_empty(),
+        "the first look sends nothing"
+    );
+    assert!(plays(&drive(&mut kept, rolling(Beat(0.0)))));
+    let mut reset = Direct::new(
+        SyncOut::new(G).messages(mmc(MtcRate::Fps30)),
+        SampleRate::SR_48K,
+        64,
+    );
+    assert!(drive(&mut reset, stopped(Beat(0.0))).is_empty());
+    assert_no_alloc::assert_no_alloc(|| reset.node.reset());
+    assert!(
+        drive(&mut reset, rolling(Beat(0.0))).is_empty(),
+        "the look after a reset is a first"
+    );
 }
