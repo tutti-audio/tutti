@@ -7,7 +7,7 @@
 use clap_sys::events::{
     CLAP_NOTE_EXPRESSION_BRIGHTNESS, CLAP_NOTE_EXPRESSION_PRESSURE, CLAP_NOTE_EXPRESSION_TUNING,
 };
-use tutti_clap_host::{ClapEvent, InputEventList};
+use tutti_clap_host::{ClapEvent, EventList, InputEventList};
 use tutti_fixtures::midi;
 use tutti_graph::Offset;
 use tutti_midi_protocol::{PitchBendSensitivity, widen_value};

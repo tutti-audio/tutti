@@ -341,7 +341,7 @@ impl ClapProcessor {
             let input_events = &mut self.scratch.input_events;
             let drain = &mut self.drain;
             input_events.add_param_edits(&table.ranges, table.claims, |each| {
-                drain.drain(|edit| each(edit));
+                drain.drain(each);
             });
             if !param_changes.is_empty() {
                 input_events.add_param_changes(param_changes, &table.ranges, table.claims);
