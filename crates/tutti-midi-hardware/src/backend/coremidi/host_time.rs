@@ -26,8 +26,9 @@ impl Pairing {
     /// Reads both clocks now. Allocation-free, so it runs in CoreMIDI's callback.
     pub(super) fn now() -> Self {
         let base = Timebase::get();
-        let Ok(paired) =
-            Paired::read(|| Ok::<_, std::convert::Infallible>(base.duration(host_ticks())));
+        let before = Instant::now();
+        let reading = base.duration(host_ticks());
+        let paired = Paired::midpoint(before, Instant::now(), reading);
         Self { base, paired }
     }
 

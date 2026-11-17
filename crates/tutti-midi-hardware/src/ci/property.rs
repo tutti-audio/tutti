@@ -123,23 +123,6 @@ impl Member {
         self.server = responder(new, self.server.shared_store());
     }
 
-    /// The Responder serves `store`, as the peers it already serves are.
-    pub(super) fn serve(&mut self, store: Arc<Mutex<ResourceStore>>) {
-        self.server = responder(self.device.muid(), store);
-        let serves: Vec<_> = self
-            .properties
-            .keys()
-            .filter_map(|&muid| {
-                self.device
-                    .peer(muid)
-                    .map(|peer| (muid, peer.discovery().max_sysex_size))
-            })
-            .collect();
-        for (muid, max_sysex) in serves {
-            self.server.accept(muid, max_sysex);
-        }
-    }
-
     /// Hands the Responder and every Initiator the message, which is theirs to
     /// keep or ignore.
     pub(super) fn route_property(
@@ -356,14 +339,6 @@ impl Member {
 }
 
 impl Running {
-    /// Gives each member's Responder `store`, the one every member serves.
-    pub(super) fn serve(&mut self, store: &Arc<Mutex<ResourceStore>>) {
-        self.store = Arc::clone(store);
-        for member in &mut self.members {
-            member.serve(Arc::clone(store));
-        }
-    }
-
     /// Starts the calls the app asked for (see [`Ci::ask_property`](super::Ci)): each
     /// goes to the Initiator of its peer.
     pub(super) fn start_properties(

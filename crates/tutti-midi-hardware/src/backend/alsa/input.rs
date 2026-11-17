@@ -3,7 +3,6 @@
 use std::os::fd::OwnedFd;
 use std::os::unix::net::UnixStream;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use super::poll::ErrorRun;
@@ -16,26 +15,8 @@ use tutti_alsa_ffi::{
     Blocking, Client, Event, Poller, PortCaps, PortKind, QueueClock, Read, UmpVersion, Wait,
 };
 use tutti_midi_device::EndpointId;
-use tutti_rt::PushError;
-use tutti_rt::{ThreadHandle, spawn_named};
+use tutti_rt::{FaultLatch, ThreadHandle, spawn_named};
 use tutti_ump::split_stream;
-
-/// Times the pump came back from `poll`, for the test that an idle pump sleeps.
-/// The count is per process, so the test relies on nextest running each test in
-/// its own process.
-#[cfg(test)]
-pub(super) static PUMP_WAKES: std::sync::atomic::AtomicUsize =
-    std::sync::atomic::AtomicUsize::new(0);
-
-/// While set, the pump's reads fail with `-EIO` instead of reaching the
-/// sequencer: the error path has no other way to be reached on a healthy
-/// sequencer. Per process, like [`PUMP_WAKES`].
-#[cfg(test)]
-pub(super) static INJECT_READ_ERROR: AtomicBool = AtomicBool::new(false);
-
-/// `EIO`, what the injected failure reads as.
-#[cfg(test)]
-const EIO: i32 = 5;
 
 /// How long dropping an input waits for its pump to end before it lets the
 /// thread go. A pump ends within a poll wake of the stop; only a read that never
@@ -48,26 +29,19 @@ const JOIN_BOUND: Duration = Duration::from_secs(1);
 /// microseconds at most.
 const PAIRING_AGE: Duration = Duration::from_secs(1);
 
-/// While non-zero, the pump sleeps this many milliseconds after each wake, before
-/// it reads: a pump that is late, which is what a timestamp from the sequencer
-/// exists to correct. Per process, like [`PUMP_WAKES`].
-#[cfg(test)]
-pub(super) static PUMP_STALL_MS: std::sync::atomic::AtomicU64 =
-    std::sync::atomic::AtomicU64::new(0);
-
 /// An open ALSA input. Dropping it stops the pump and closes the port.
 pub struct AlsaInput {
     /// One end of a socket pair whose other end is in the pump's `poll` set:
     /// closing this one is the shutdown signal, and wakes the pump at once.
     stop: Option<UnixStream>,
-    /// Set by the pump when it ends on an error, never on a stop.
-    died: Arc<AtomicBool>,
+    /// Raised by the pump when it ends on an error, never on a stop.
+    died: Arc<FaultLatch>,
     thread: Option<ThreadHandle<()>>,
 }
 
 impl InputConnection for AlsaInput {
     fn is_alive(&self) -> bool {
-        !self.died.load(Ordering::Acquire)
+        !self.died.is_raised()
     }
 }
 
@@ -125,6 +99,16 @@ pub(super) fn version_for(endpoint: Option<&tutti_alsa_ffi::UmpEndpoint>) -> Ump
 /// spawned. A source client that exits while the open reads its Endpoint record
 /// fails the open (`ENOENT`) rather than opening as a legacy port.
 pub fn open(id: EndpointId, producer: InputProducerHandle) -> Result<Box<dyn InputConnection>> {
+    let (seq, clock) = prepare(id)?;
+    Ok(Box::new(start(seq, clock, producer)?))
+}
+
+/// A client subscribed to `id`, and its port's clock: what [`start`] pumps.
+///
+/// # Errors
+///
+/// As [`open`], but for the pump thread.
+pub(super) fn prepare(id: EndpointId) -> Result<(Client, QueueClock)> {
     let source = super::address_of(id).ok_or(crate::error::NotFound::Endpoint(id))?;
 
     // Non-blocking, so the pump reads until the queue is empty and then waits in
@@ -152,7 +136,7 @@ pub fn open(id: EndpointId, producer: InputProducerHandle) -> Result<Box<dyn Inp
     let clock = seq.stamp_port(port)?;
 
     seq.connect_from(port, source)?;
-    Ok(Box::new(start(seq, clock, producer)?))
+    Ok((seq, clock))
 }
 
 /// Starts pumping what the client's ports receive into `producer`: the pump
@@ -171,12 +155,12 @@ pub(super) fn start(
     let (stop_tx, stop_rx) = UnixStream::pair()
         .map_err(|e| crate::error::Error::device_from("MIDI pump stop pair", e))?;
     let seq = seq.into_poller(OwnedFd::from(stop_rx))?;
-    let died = Arc::new(AtomicBool::new(false));
+    let died = Arc::new(FaultLatch::new());
     let flag = Arc::clone(&died);
     let thread = spawn_named("tutti-midi-in", None, move |_| {
         // A panic in the pump ends it with the input held, so it is caught
-        // and marks the input dead, as an error does.
-        Guard::new(Arc::clone(&flag)).run(|| pump(seq, clock, flag, producer));
+        // and raises the latch, as an error does.
+        Guard::new(Arc::clone(&flag)).run(|| pump(seq, clock, &flag, producer));
     })
     .map_err(|e| crate::error::Error::device_from("spawn MIDI pump", e))?;
 
@@ -191,69 +175,36 @@ pub(super) fn start(
 /// then blocks in `poll`: the descriptors are level-triggered, so an event that
 /// arrives between the last read and the `poll` wakes it at once.
 ///
-/// An error ends the pump with `died` set (and a warning): the port goes silent
+/// An error ends the pump with `died` raised: the port goes silent
 /// while the connection is still held, and [`InputConnection::is_alive`] is how
 /// the holder finds out.
 ///
 /// Takes `seq` **by value** so the client is dropped here, on this thread, when
 /// the loop ends — the port unsubscribes exactly when the pump stops.
-fn pump(
+pub(super) fn pump(
     mut seq: Poller,
     clock: QueueClock,
-    died: Arc<AtomicBool>,
+    died: &FaultLatch,
     mut producer: InputProducerHandle,
 ) {
-    let die = |why: &str| {
-        tracing::warn!("ALSA MIDI input stopped: {why}");
-        died.store(true, Ordering::Release);
-    };
     let mut errors = ErrorRun::default();
-    let mut arrivals = Arrivals {
-        clock,
-        pairing: None,
-        latest: None,
-    };
+    let mut clock = clock;
+    let mut arrivals = Arrivals::default();
     loop {
-        let read = seq.client().read_event();
-        #[cfg(test)]
-        let read = if INJECT_READ_ERROR.load(Ordering::SeqCst) {
-            Err(tutti_alsa_ffi::Error::Call {
-                operation: tutti_alsa_ffi::Operation::UmpEventInput,
-                source: std::io::Error::from_raw_os_error(EIO),
-            })
-        } else {
-            read
-        };
-
-        let received = match read {
+        let received = match seq.client().read_event() {
             Ok(Read::Event(event)) => event,
-            Ok(Read::Empty) => {
-                // Empty queue is the common case, not a failure.
-                let waited = seq.wait();
-                #[cfg(test)]
-                PUMP_WAKES.fetch_add(1, Ordering::SeqCst);
-                #[cfg(test)]
-                if let Ok(Wait::Ready) = waited {
-                    // Held for the stall, or until a test clears it.
-                    let ms = PUMP_STALL_MS.load(Ordering::SeqCst);
-                    let end = Instant::now() + Duration::from_millis(ms);
-                    while Instant::now() < end && PUMP_STALL_MS.load(Ordering::SeqCst) != 0 {
-                        std::thread::sleep(Duration::from_millis(1));
-                    }
-                }
-                match waited {
-                    Ok(Wait::Ready) => continue,
-                    Ok(Wait::Stopped) => return,
-                    Ok(Wait::Broken) => return die("the sequencer descriptor failed"),
-                    Err(e) => return die(&e.to_string()),
-                }
-            }
-            Err(e) => {
+            // Empty queue is the common case, not a failure.
+            Ok(Read::Empty) => match seq.wait() {
+                Ok(Wait::Ready) => continue,
+                Ok(Wait::Stopped) => return,
+                // The descriptor failed: the port is silent from here.
+                Ok(Wait::Broken) | Err(_) => return died.raise(),
+            },
+            Err(_) => {
                 // An overrun or a failing read: try again at once, a few times
                 // in a row at most (a level-triggered descriptor would spin).
-                tracing::debug!("ALSA MIDI input: {}", crate::error::chain(&e));
                 if errors.failed() {
-                    return die(&crate::error::chain(&e));
+                    return died.raise();
                 }
                 continue;
             }
@@ -265,10 +216,13 @@ fn pump(
             continue;
         };
         let words = packet.words();
+        let now = Instant::now();
         let now = match stamp {
-            Some(t) => arrivals.at(seq.client(), t),
+            Some(t) => arrivals.at(t, now, || {
+                super::client::pair(&mut clock, seq.client()).ok()
+            }),
             // A port that is not stamping: the read is the best there is.
-            None => Instant::now(),
+            None => now,
         };
 
         // A `snd_seq_ump_event_t` carries one UMP message in a fixed 4-word
@@ -277,11 +231,9 @@ fn pump(
         // yields exactly that one message — using it rather than passing all
         // four words into one packet is what keeps a 1-word message from
         // swallowing three words of zeros.
-        let decoded = split_stream(&words).next();
-        if let Some(event) = decoded
-            && producer.push(event, now) == Err(PushError::Full)
-        {
-            tracing::debug!("MIDI input ring full, dropping event");
+        // A full inlet counts the drop itself.
+        if let Some(event) = split_stream(&words).next() {
+            let _ = producer.push(event, now);
         }
     }
 }
@@ -289,8 +241,8 @@ fn pump(
 /// A queue time as an OS instant: the queue's clock and the OS's read together
 /// (`pairing`), then each event's age is the queue's time then, subtracted from
 /// the pairing's ([`Paired::arrival`]).
+#[derive(Default)]
 struct Arrivals {
-    clock: QueueClock,
     /// The pairing, and when it was read.
     pairing: Option<(Paired, Instant)>,
     /// The instant given to the event before: the port delivers its events in
@@ -308,19 +260,22 @@ fn pairing_is_stale(pairing: Option<(Paired, Instant)>, stamped: Duration, now: 
 }
 
 impl Arrivals {
-    /// The OS instant an event stamped `stamped` on the queue arrived at. Reads
-    /// a fresh pairing when the held one is older than the event (the event
-    /// came after it) or than [`PAIRING_AGE`]; one syscall, not one per event.
-    fn at(&mut self, seq: &Client, stamped: Duration) -> Instant {
-        if pairing_is_stale(self.pairing, stamped, Instant::now()) {
-            self.pairing = Paired::read(|| self.clock.now(seq))
-                .ok()
-                .map(|paired| (paired, Instant::now()));
+    /// The OS instant, at `now`, of an event stamped `stamped` on the queue.
+    /// Takes a fresh pairing from `pair` when the held one is older than the
+    /// event (the event came after it) or than [`PAIRING_AGE`]; one syscall, not
+    /// one per event. With no pairing to be had the event is at `now`.
+    fn at(
+        &mut self,
+        stamped: Duration,
+        now: Instant,
+        pair: impl FnOnce() -> Option<Paired>,
+    ) -> Instant {
+        if pairing_is_stale(self.pairing, stamped, now) {
+            self.pairing = pair().map(|paired| (paired, now));
         }
-        let placed = match self.pairing {
-            Some((paired, _)) => paired.arrival(stamped),
-            None => Instant::now(),
-        };
+        let placed = self
+            .pairing
+            .map_or(now, |(paired, _)| paired.arrival(stamped));
         // Two pairings place events by readings of two clocks that were not
         // taken at one instant, so an event read after a refresh can land
         // before one placed by the pairing before it. The port's order is the

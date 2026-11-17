@@ -94,13 +94,6 @@ struct Watcher {
     live: bool,
 }
 
-/// Notifications CoreMIDI has delivered to the hub's client: what tests count to
-/// tell a delivered notification from the idle look.
-#[cfg(test)]
-pub(super) static CALLBACKS: AtomicU64 = AtomicU64::new(0);
-#[cfg(not(test))]
-static CALLBACKS: AtomicU64 = AtomicU64::new(0);
-
 type Shared = Arc<Mutex<Watcher>>;
 
 /// Looks again at CoreMIDI and reports what changed. A panic does not unwind
@@ -130,6 +123,9 @@ fn look(watcher: &Shared) {
 pub(super) struct Hub {
     watches: Mutex<Vec<(u64, Shared)>>,
     next: AtomicU64,
+    /// Notifications CoreMIDI has delivered to the hub's client: what tells a
+    /// delivered notification from the idle look.
+    callbacks: AtomicU64,
 }
 
 impl Hub {
@@ -164,13 +160,14 @@ fn start_hub() -> std::result::Result<&'static Hub, String> {
         let hub: &'static Hub = Box::leak(Box::new(Hub {
             watches: Mutex::new(Vec::new()),
             next: AtomicU64::new(0),
+            callbacks: AtomicU64::new(0),
         }));
         let (ready, started) = mpsc::channel();
         // The hub thread lives as long as the process: no owner stops it.
         spawn_named("tutti-devwatch", None, move |_| {
             let client = tutti_coremidi_ffi::create_client(|| {
                 Client::new_with_notifications("tutti-midi-watch", move |n: &Notification| {
-                    CALLBACKS.fetch_add(1, Ordering::Relaxed);
+                    hub.callbacks.fetch_add(1, Ordering::Relaxed);
                     if matches!(
                         n,
                         Notification::SetupChanged

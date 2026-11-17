@@ -430,7 +430,14 @@ impl MidiSession {
         let os = self.devices.capability(&id).unwrap_or_default();
         // A MIDI 1.0 port with an output is asked for its identity instead.
         let out = self.devices.open_output(&id).ok();
-        let stream = Negotiation::new(id.clone(), os, out, timing, ci_refused);
+        let stream = Negotiation::new(
+            id.clone(),
+            os,
+            out,
+            timing,
+            ci_refused,
+            Arc::clone(&self.properties),
+        );
         let held = Held {
             stream,
             timing,
@@ -589,7 +596,7 @@ impl MidiSession {
                 lost_during: after > before,
             };
             held.lost_seen = after;
-            let stepped = held.stream.poll(now, &heard, presented, &self.properties);
+            let stepped = held.stream.poll(now, &heard, presented);
             // Off the moment nothing listens, so no packet is kept for no one.
             sync_hearing(ports, held, ci);
             if let Some(stream) = stepped.stream {

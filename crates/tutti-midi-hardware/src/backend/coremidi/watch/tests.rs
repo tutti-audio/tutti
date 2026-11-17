@@ -88,17 +88,25 @@ fn a_virtual_destination_comes_and_goes_and_the_watch_unregisters() {
 
 /// The notification path itself: with the engine's shared client created first,
 /// as `Devices::open` does, CoreMIDI still delivers the hub's notifications, and
-/// they arrive on the hub's client (`CALLBACKS`), not through the idle look.
+/// they arrive on the hub's client (`Hub::callbacks`), not through the idle look.
 #[test]
 fn notifications_reach_the_hub_when_the_shared_client_is_created() {
     let _ = crate::backend::coremidi::shared_client().expect("shared client");
     hub().expect("hub");
-    let before = CALLBACKS.load(std::sync::atomic::Ordering::Relaxed);
+    let before = hub()
+        .expect("hub")
+        .callbacks
+        .load(std::sync::atomic::Ordering::Relaxed);
     let name = format!("tutti-callbacks-{}", std::process::id());
     let destination =
         UmpVirtualDestination::new(&name, VirtualProtocol::Midi2, |_| {}).expect("creates");
     let deadline = Instant::now() + PATIENCE;
-    while CALLBACKS.load(std::sync::atomic::Ordering::Relaxed) == before {
+    while hub()
+        .expect("hub")
+        .callbacks
+        .load(std::sync::atomic::Ordering::Relaxed)
+        == before
+    {
         assert!(
             Instant::now() < deadline,
             "no notification reached the hub's client"
@@ -115,10 +123,18 @@ fn notifications_reach_the_hub_when_the_shared_client_is_created() {
 fn notifications_reach_the_hub_when_a_virtual_source_comes_first() {
     use crate::backend::coremidi::UmpVirtualSource;
     let name = format!("tutti-source-{}", std::process::id());
-    let before = CALLBACKS.load(std::sync::atomic::Ordering::Relaxed);
+    let before = hub()
+        .expect("hub")
+        .callbacks
+        .load(std::sync::atomic::Ordering::Relaxed);
     let source = UmpVirtualSource::new(&name, VirtualProtocol::Midi2).expect("creates");
     let deadline = Instant::now() + PATIENCE;
-    while CALLBACKS.load(std::sync::atomic::Ordering::Relaxed) == before {
+    while hub()
+        .expect("hub")
+        .callbacks
+        .load(std::sync::atomic::Ordering::Relaxed)
+        == before
+    {
         assert!(
             Instant::now() < deadline,
             "no notification reached the hub's client"

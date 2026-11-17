@@ -372,8 +372,6 @@ struct Running {
     identity: DeviceIdentity,
     members: Vec<Member>,
     assembler: SysexAssembler<Box<[u8]>>,
-    /// What the devices' Responders serve.
-    store: Arc<Mutex<ResourceStore>>,
     /// The Groups whose device could not start and was reported: reported once
     /// until it starts, tried again at every poll. A Group that leaves the
     /// Groups and returns is reported again.
@@ -403,7 +401,7 @@ pub(crate) struct Ci {
     property_peers: properties::Snapshot,
     /// Property Exchange calls asked for, started by the next poll.
     calls: Vec<PropertyAsk>,
-    /// What the devices' Responders serve.
+    /// What the devices' Responders serve: the session's, given at construction.
     store: Arc<Mutex<ResourceStore>>,
     /// Counts the CI messages the output has refused: a cell of the port that
     /// owns the conversation, which outlives the connection.
@@ -438,7 +436,11 @@ pub(crate) fn groups_of_a_midi1_port() -> Vec<MidiGroup> {
 
 impl Ci {
     /// MIDI-CI for the input `device`, with nothing decided.
-    pub(crate) fn new(device: DeviceId, refused: CounterWriter<Losses>) -> Self {
+    pub(crate) fn new(
+        device: DeviceId,
+        refused: CounterWriter<Losses>,
+        store: Arc<Mutex<ResourceStore>>,
+    ) -> Self {
         Self {
             device,
             groups: Vec::new(),
@@ -450,7 +452,7 @@ impl Ci {
             reports: Vec::new(),
             property_peers: Arc::default(),
             calls: Vec::new(),
-            store: Arc::default(),
+            store,
             refused,
         }
     }
@@ -476,16 +478,9 @@ impl Ci {
         now: Instant,
         heard: &Heard<'_>,
         identity: Option<DeviceIdentity>,
-        store: &Arc<Mutex<ResourceStore>>,
         out: &mut OpenOutput,
     ) -> CiChanges {
         let mut changes = CiChanges::default();
-        if !Arc::ptr_eq(&self.store, store) {
-            self.store = Arc::clone(store);
-            if let Some(running) = &mut self.running {
-                running.serve(&self.store);
-            }
-        }
         // Who the session is changed, or it presents no one: the devices that
         // ran under the old identity end (Invalidate MUID, peers lost) and the
         // new identity, if any, starts them again below.
@@ -499,16 +494,22 @@ impl Ci {
         }
         match (&mut self.running, identity) {
             (Some(running), _) => {
-                running.reconcile(&self.groups, &mut entropy, now, out, &mut changes);
+                running.reconcile(
+                    &self.groups,
+                    &self.store,
+                    &mut entropy,
+                    now,
+                    out,
+                    &mut changes,
+                );
                 running.step(now, heard, out, &mut changes);
                 running.start_switches(&mut self.queue, now, out, &mut changes);
                 running.start_reports(&mut self.reports, now, out, &mut changes);
                 running.start_properties(&mut self.calls, now, out, &mut changes);
             }
             (None, Some(identity)) if !self.groups.is_empty() => {
-                let (mut running, started) =
-                    Running::start(&self.groups, identity, &mut entropy, now, out);
-                running.serve(&self.store);
+                let (running, started) =
+                    Running::start(&self.groups, &self.store, identity, &mut entropy, now, out);
                 self.running = Some(Box::new(running));
                 changes.peers.extend(started.peers);
                 changes.profiles.extend(started.profiles);
@@ -690,6 +691,7 @@ impl Running {
     /// [`unstarted`](Self::unstarted).
     fn start(
         groups: &[MidiGroup],
+        store: &Arc<Mutex<ResourceStore>>,
         identity: DeviceIdentity,
         entropy: &mut impl FnMut() -> Result<Entropy, EntropyError>,
         now: Instant,
@@ -704,7 +706,7 @@ impl Running {
             .filter_map(|&group| match start_device(identity, entropy, now) {
                 Ok((device, first)) => {
                     firsts.push(first);
-                    Some(Member::new(group, device, Arc::default()))
+                    Some(Member::new(group, device, Arc::clone(store)))
                 }
                 Err(error) => {
                     unstarted.push(group);
@@ -721,7 +723,6 @@ impl Running {
             identity,
             members,
             assembler,
-            store: Arc::default(),
             unstarted,
         };
         let mut changes = CiChanges {
@@ -752,6 +753,7 @@ impl Running {
     fn reconcile(
         &mut self,
         groups: &[MidiGroup],
+        store: &Arc<Mutex<ResourceStore>>,
         entropy: &mut impl FnMut() -> Result<Entropy, EntropyError>,
         now: Instant,
         out: &mut OpenOutput,
@@ -775,7 +777,7 @@ impl Running {
                     started.push((group, first));
                     self.unstarted.retain(|g| *g != group);
                     self.members
-                        .push(Member::new(group, device, Arc::clone(&self.store)));
+                        .push(Member::new(group, device, Arc::clone(store)));
                     changed = true;
                 }
                 Err(error) => {
@@ -1432,8 +1434,14 @@ mod tests {
         let t0 = Instant::now();
         let at = |ms| t0 + Duration::from_millis(ms);
 
-        let (mut running, first) =
-            Running::start(&[G0, G1], identity(), &mut source, at(0), &mut out);
+        let (mut running, first) = Running::start(
+            &[G0, G1],
+            &Arc::default(),
+            identity(),
+            &mut source,
+            at(0),
+            &mut out,
+        );
         assert_eq!(first.unstarted, [(G1, EntropyError::unavailable())]);
         let _ = counters.take_sent(raw);
 
@@ -1448,7 +1456,14 @@ mod tests {
         let (head, tail) = packets.split_at(packets.len() / 2);
         for (ms, part) in [(1, head), (2, tail)] {
             let mut changes = CiChanges::default();
-            running.reconcile(&[G0, G1], &mut source, at(ms), &mut out, &mut changes);
+            running.reconcile(
+                &[G0, G1],
+                &Arc::default(),
+                &mut source,
+                at(ms),
+                &mut out,
+                &mut changes,
+            );
             running.step(at(ms), &heard(part), &mut out, &mut changes);
             assert!(changes.unstarted.is_empty(), "reported once");
             if ms == 1 {
@@ -1465,7 +1480,14 @@ mod tests {
 
         // The next draw succeeds: Group 1 starts and sends its Discovery.
         let mut changes = CiChanges::default();
-        running.reconcile(&[G0, G1], &mut source, at(3), &mut out, &mut changes);
+        running.reconcile(
+            &[G0, G1],
+            &Arc::default(),
+            &mut source,
+            at(3),
+            &mut out,
+            &mut changes,
+        );
         assert!(changes.unstarted.is_empty());
         assert!(running.unstarted.is_empty());
         let sent = counters.take_sent(raw);
@@ -1481,8 +1503,14 @@ mod tests {
         // Two draws at the start and two on each of three polls are refused.
         let mut source = refusing(1, 9);
         let now = Instant::now();
-        let (mut running, first) =
-            Running::start(&[G0, G1], identity(), &mut source, now, &mut out);
+        let (mut running, first) = Running::start(
+            &[G0, G1],
+            &Arc::default(),
+            identity(),
+            &mut source,
+            now,
+            &mut out,
+        );
         assert_eq!(
             first.unstarted,
             [
@@ -1493,19 +1521,40 @@ mod tests {
         assert!(!running.is_idle(), "the Groups still wait to start");
         for _ in 0..3 {
             let mut changes = CiChanges::default();
-            running.reconcile(&[G0, G1], &mut source, now, &mut out, &mut changes);
+            running.reconcile(
+                &[G0, G1],
+                &Arc::default(),
+                &mut source,
+                now,
+                &mut out,
+                &mut changes,
+            );
             assert!(changes.unstarted.is_empty(), "reported once");
             assert!(!running.is_idle());
             assert!(running.members.is_empty());
         }
         // The next draws succeed: both Groups start, and nothing is reported.
         let mut changes = CiChanges::default();
-        running.reconcile(&[G0, G1], &mut source, now, &mut out, &mut changes);
+        running.reconcile(
+            &[G0, G1],
+            &Arc::default(),
+            &mut source,
+            now,
+            &mut out,
+            &mut changes,
+        );
         assert!(changes.unstarted.is_empty());
         assert_eq!(running.members.len(), 2);
         assert!(running.unstarted.is_empty());
         // No Group is called for: nothing waits and nothing runs.
-        running.reconcile(&[], &mut source, now, &mut out, &mut changes);
+        running.reconcile(
+            &[],
+            &Arc::default(),
+            &mut source,
+            now,
+            &mut out,
+            &mut changes,
+        );
         assert!(running.is_idle());
     }
 
@@ -1516,13 +1565,34 @@ mod tests {
         let (mut out, _counters) = output();
         let mut source = refusing(1, 100);
         let now = Instant::now();
-        let (mut running, first) = Running::start(&[G0], identity(), &mut source, now, &mut out);
+        let (mut running, first) = Running::start(
+            &[G0],
+            &Arc::default(),
+            identity(),
+            &mut source,
+            now,
+            &mut out,
+        );
         assert_eq!(first.unstarted.len(), 1);
         let mut changes = CiChanges::default();
-        running.reconcile(&[G1], &mut source, now, &mut out, &mut changes);
+        running.reconcile(
+            &[G1],
+            &Arc::default(),
+            &mut source,
+            now,
+            &mut out,
+            &mut changes,
+        );
         assert_eq!(changes.unstarted, [(G1, EntropyError::unavailable())]);
         let mut changes = CiChanges::default();
-        running.reconcile(&[G0, G1], &mut source, now, &mut out, &mut changes);
+        running.reconcile(
+            &[G0, G1],
+            &Arc::default(),
+            &mut source,
+            now,
+            &mut out,
+            &mut changes,
+        );
         assert_eq!(changes.unstarted, [(G0, EntropyError::unavailable())]);
     }
 
@@ -1534,11 +1604,25 @@ mod tests {
     fn a_ci_message_the_output_refuses_is_counted_and_one_it_takes_is_not() {
         let now = Instant::now();
         let (mut full, _counters) = output_taking(0);
-        let (_, changes) = Running::start(&[G0, G1], identity(), &mut entropy, now, &mut full);
+        let (_, changes) = Running::start(
+            &[G0, G1],
+            &Arc::default(),
+            identity(),
+            &mut entropy,
+            now,
+            &mut full,
+        );
         assert_eq!(changes.refused, Losses::refused(2));
 
         let (mut roomy, counters) = output();
-        let (_, changes) = Running::start(&[G0, G1], identity(), &mut entropy, now, &mut roomy);
+        let (_, changes) = Running::start(
+            &[G0, G1],
+            &Arc::default(),
+            identity(),
+            &mut entropy,
+            now,
+            &mut roomy,
+        );
         assert_eq!(changes.refused, Losses::NONE);
         assert!(counters.sent() > 0, "the messages were sent");
     }
@@ -1549,17 +1633,23 @@ mod tests {
     fn a_ci_message_the_output_has_room_for_only_in_part_is_counted() {
         let now = Instant::now();
         let (mut short, _counters) = output_taking(1);
-        let (_, changes) = Running::start(&[G0], identity(), &mut entropy, now, &mut short);
+        let (_, changes) = Running::start(
+            &[G0],
+            &Arc::default(),
+            identity(),
+            &mut entropy,
+            now,
+            &mut short,
+        );
         assert_eq!(changes.refused, Losses::refused(1));
     }
 
-    // A Group that starts after the app gave its store serves that store: one
-    // store is held for every device of the input, not one per start.
+    // A Group that starts later serves the store the first one does: one store
+    // is held for every device of the input, not one per start.
     #[test]
-    fn a_group_reconciled_after_the_store_was_given_serves_it() {
+    fn a_group_reconciled_later_serves_the_store_the_first_does() {
         let (mut out, _counters) = output();
         let now = Instant::now();
-        let (mut running, _) = Running::start(&[G0], identity(), &mut entropy, now, &mut out);
         let mut store = ResourceStore::new();
         store.declare(
             tutti_midi_device::ResourceEntry::builder(tutti_midi_device::PeResource::LocalOn)
@@ -1567,9 +1657,17 @@ mod tests {
                 .unwrap(),
         );
         let shared = Arc::new(Mutex::new(store));
-        running.serve(&shared);
+        let (mut running, _) =
+            Running::start(&[G0], &shared, identity(), &mut entropy, now, &mut out);
         let mut changes = CiChanges::default();
-        running.reconcile(&[G0, G1], &mut entropy, now, &mut out, &mut changes);
+        running.reconcile(
+            &[G0, G1],
+            &shared,
+            &mut entropy,
+            now,
+            &mut out,
+            &mut changes,
+        );
         assert_eq!(running.members.len(), 2);
         let given = shared.lock().unwrap().resource_list();
         for member in &running.members {
@@ -1628,7 +1726,6 @@ mod tests {
         };
         let (mut out, _counters) = output();
         let now = Instant::now();
-        let (mut running, _) = Running::start(&[G0, G1], identity(), &mut entropy, now, &mut out);
         let mut store = ResourceStore::new();
         store.declare(
             ResourceEntry::builder(PeResource::LocalOn)
@@ -1640,7 +1737,8 @@ mod tests {
             .put(None, PeData::LocalOn(PeLocalOn(true)))
             .expect("declared");
         let shared = Arc::new(Mutex::new(store));
-        running.serve(&shared);
+        let (mut running, _) =
+            Running::start(&[G0, G1], &shared, identity(), &mut entropy, now, &mut out);
 
         let peer = Muid::of(0x0012_3456);
         let settings = |max| PeSettings {
@@ -1713,7 +1811,14 @@ mod tests {
         let device = device_id();
         let (mut out, _counters) = output();
         let now = Instant::now();
-        let (mut running, _) = Running::start(&[G0], identity(), &mut entropy, now, &mut out);
+        let (mut running, _) = Running::start(
+            &[G0],
+            &Arc::default(),
+            identity(),
+            &mut entropy,
+            now,
+            &mut out,
+        );
         let muid = Muid::of(0x0012_3456);
         let profile = ProfileId::from_bytes([0x7E, 1, 0, 1, 1]).unwrap();
         for group in [G1, G0] {
