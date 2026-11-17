@@ -51,7 +51,8 @@
 //! and for how long (the channel's Portamento Time). What a channel holds
 //! besides notes is its [`ChannelState`].
 
-use std::num::{NonZeroU16, NonZeroUsize};
+use alloc::vec::Vec;
+use core::num::{NonZeroU16, NonZeroUsize};
 
 use tutti_midi_protocol::{
     GeneralMidi, Heard, KeyTable, Timing, TuningMessage, Universal, bend_to_signed_f32,
@@ -1291,7 +1292,7 @@ impl Voicing {
                 n.tune = tune;
                 n.strike = strike;
                 let id = n.id;
-                let old = std::mem::replace(&mut n.note, self.strike_note);
+                let old = core::mem::replace(&mut n.note, self.strike_note);
                 self.retire(old);
                 self.push(Command::Retarget {
                     id,
@@ -1439,7 +1440,7 @@ impl Voicing {
                     self.notes[i].key = key;
                     self.notes[i].tune = tune;
                     self.notes[i].strike = strike;
-                    let moved = std::mem::replace(&mut self.notes[i].note, self.strike_note);
+                    let moved = core::mem::replace(&mut self.notes[i].note, self.strike_note);
                     self.retire(moved);
                     self.push(Command::Retarget {
                         id,

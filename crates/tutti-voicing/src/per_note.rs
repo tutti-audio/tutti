@@ -54,6 +54,8 @@
 //! The state is sized in [`PerNoteState::new`], about 270 KiB for each Group
 //! (128 notes on 16 channels), and `step` allocates nothing.
 
+use alloc::vec;
+use alloc::vec::Vec;
 use tutti_midi_protocol::{PitchBendSensitivity, bend_to_signed_f32};
 use tutti_types::Semitones;
 use tutti_ump::BendValue;
@@ -406,7 +408,7 @@ impl PerNoteState {
             f64::from(bend_to_signed_f32(BendValue::new(v)) * range.get())
         });
         let q = f64::from(told.q7_25()) + bend * f64::from(1u32 << 25);
-        Pitch::from_q7_25(q.round().clamp(0.0, f64::from(u32::MAX)) as u32)
+        Pitch::from_q7_25(libm::round(q).clamp(0.0, f64::from(u32::MAX)) as u32)
     }
 
     /// The controller a held code and word, other than the pitch and its bend,
