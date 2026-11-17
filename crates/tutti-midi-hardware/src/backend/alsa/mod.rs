@@ -81,28 +81,13 @@ impl AlsaEndpoints {
         let mut held = self.enumerator.lock_recover();
         if held.is_none() {
             *held = client::open("tutti-enum", Blocking::NonBlock, UmpVersion::Midi2)
-                .inspect_err(|e| tracing::debug!("ALSA enumeration: {e}"))
+                .inspect_err(|e| tracing::debug!("ALSA enumeration: {}", crate::error::chain(e)))
                 .ok();
         }
         held.as_ref()
             .map(|seq| enumerate::endpoints(seq, direction))
             .unwrap_or_default()
     }
-}
-
-/// An error and the errors under it, as one line: `outer: inner: innermost`.
-///
-/// alsa-ffi's `Call` names the failed call and keeps the OS error as its
-/// source, so a log line prints the chain to show both.
-fn chain(error: &dyn std::error::Error) -> String {
-    let mut text = error.to_string();
-    let mut source = error.source();
-    while let Some(under) = source {
-        text.push_str(": ");
-        text.push_str(&under.to_string());
-        source = under.source();
-    }
-    text
 }
 
 /// Every device now, enumerated on `seq`; `None` when the enumeration was cut

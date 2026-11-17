@@ -253,9 +253,9 @@ fn pump(
             Err(e) => {
                 // An overrun or a failing read: try again at once, a few times
                 // in a row at most (a level-triggered descriptor would spin).
-                tracing::debug!("ALSA MIDI input: {}", super::chain(&e));
+                tracing::debug!("ALSA MIDI input: {}", crate::error::chain(&e));
                 if errors.failed() {
-                    return die(&super::chain(&e));
+                    return die(&crate::error::chain(&e));
                 }
                 continue;
             }

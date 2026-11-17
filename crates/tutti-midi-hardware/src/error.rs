@@ -129,6 +129,21 @@ pub enum Error {
     // depend on).
 }
 
+/// An error and the errors under it, as one line: `outer: inner: innermost`.
+///
+/// A failed call's error names the call and keeps the OS error as its source
+/// (alsa-ffi's `Call` does), so a log line prints the chain to show both.
+pub(crate) fn chain(error: &dyn std::error::Error) -> String {
+    let mut text = error.to_string();
+    let mut source = error.source();
+    while let Some(under) = source {
+        text.push_str(": ");
+        text.push_str(&under.to_string());
+        source = under.source();
+    }
+    text
+}
+
 impl Error {
     /// A [`MidiPort`](Self::MidiPort) error with no error under it.
     #[must_use]

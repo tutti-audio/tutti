@@ -41,6 +41,10 @@ pub enum Operation {
     PollDescriptorsCount,
     /// `snd_seq_poll_descriptors`.
     PollDescriptors,
+    /// `snd_seq_query_next_client`.
+    QueryNextClient,
+    /// `snd_seq_query_next_port`.
+    QueryNextPort,
     /// `snd_seq_get_ump_endpoint_info`.
     GetUmpEndpointInfo,
     /// `snd_seq_get_ump_block_info`.
@@ -87,6 +91,8 @@ impl Operation {
             Self::GetQueueStatus => "snd_seq_get_queue_status",
             Self::PollDescriptorsCount => "snd_seq_poll_descriptors_count",
             Self::PollDescriptors => "snd_seq_poll_descriptors",
+            Self::QueryNextClient => "snd_seq_query_next_client",
+            Self::QueryNextPort => "snd_seq_query_next_port",
             Self::GetUmpEndpointInfo => "snd_seq_get_ump_endpoint_info",
             Self::GetUmpBlockInfo => "snd_seq_get_ump_block_info",
             Self::SetUmpEndpointInfo => "snd_seq_set_ump_endpoint_info",

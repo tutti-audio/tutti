@@ -96,67 +96,64 @@ impl Poller {
     ///
     /// The OS error of `poll`, but an interrupted wait, which is retried.
     pub fn wait(&mut self) -> io::Result<Wait> {
-        loop {
-            if let Some(wait) = wait_on(&mut self.seq, self.stop.as_raw_fd(), None)? {
-                return Ok(wait);
-            }
-        }
+        let stop = self.stop.as_raw_fd();
+        poll_with_stop(&mut self.seq, stop, |polls| poll_until(polls, None)).map(|(_, wait)| wait)
     }
 
     /// As [`wait`](Self::wait), and `None` when `timeout` passes with nothing
     /// ready. An interrupted wait is retried with the time left of `timeout`.
+    /// A `timeout` too long for an `Instant` waits for ever.
     ///
     /// # Errors
     ///
     /// The OS error of `poll`, but an interrupted wait, which is retried.
     pub fn wait_for(&mut self, timeout: Duration) -> io::Result<Option<Wait>> {
-        let deadline = Instant::now() + timeout;
-        wait_on(&mut self.seq, self.stop.as_raw_fd(), Some(deadline))
+        let stop = self.stop.as_raw_fd();
+        let deadline = Instant::now().checked_add(timeout);
+        poll_with_stop(&mut self.seq, stop, |polls| poll_until(polls, deadline))
+            .map(|(ready, wait)| ready.then_some(wait))
     }
 }
 
-/// Polls `seq` and `stop` until something is ready or `deadline` passes (`None`
-/// waits for ever); `None` when the deadline passes with nothing ready. `seq`
-/// has room for one more, which holds `stop` during the call and is taken off
-/// again, so no wait allocates.
-fn wait_on(
+/// Polls `seq` and `stop` through `poll`, which says whether something became
+/// ready, and classifies the result: the stop descriptor first, then a failed
+/// sequencer descriptor, else input (the class means nothing when `poll` said
+/// nothing was ready). `seq` has room for one more, which holds `stop` during
+/// the call and is taken off again, so no wait allocates.
+fn poll_with_stop(
     seq: &mut Vec<libc::pollfd>,
     stop: RawFd,
-    deadline: Option<Instant>,
-) -> io::Result<Option<Wait>> {
+    poll: impl FnOnce(&mut [libc::pollfd]) -> io::Result<bool>,
+) -> io::Result<(bool, Wait)> {
     let count = seq.len();
     seq.push(libc::pollfd {
         fd: stop,
         events: libc::POLLIN,
         revents: 0,
     });
-    let ready = poll_until(seq, deadline);
+    let ready = poll(seq);
     let stopped = seq[count].revents != 0;
     seq.truncate(count);
-    if !ready? {
-        return Ok(None);
-    }
     let broken = libc::POLLERR | libc::POLLHUP | libc::POLLNVAL;
-    Ok(Some(if stopped {
+    let wait = if stopped {
         Wait::Stopped
     } else if seq.iter().any(|p| p.revents & broken != 0) {
         Wait::Broken
     } else {
         Wait::Ready
-    }))
+    };
+    Ok((ready?, wait))
 }
 
-/// `poll` over `polls` until one is ready (true) or `deadline` passes (false).
-/// An interrupted `poll` goes again with the time left.
+/// `poll` over `polls` until one is ready (true) or `deadline` passes (false);
+/// no deadline waits for ever. An interrupted `poll` goes again with the time
+/// left.
 fn poll_until(polls: &mut [libc::pollfd], deadline: Option<Instant>) -> io::Result<bool> {
     loop {
-        let timeout_ms = match deadline {
-            None => -1,
-            Some(deadline) => {
-                let left = deadline.saturating_duration_since(Instant::now());
-                if left.is_zero() { 0 } else { timeout_ms(left) }
-            }
-        };
+        let timeout_ms = deadline.map_or(-1, |deadline| {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() { 0 } else { timeout_ms(left) }
+        });
         for p in polls.iter_mut() {
             p.revents = 0;
         }
@@ -180,8 +177,8 @@ fn poll_until(polls: &mut [libc::pollfd], deadline: Option<Instant>) -> io::Resu
     }
 }
 
-/// `poll`'s timeout: a time is rounded up to a millisecond (0 would not wait
-/// at all) and saturates at `i32::MAX`.
+/// `poll`'s timeout: a time is counted in whole milliseconds, floored, with a
+/// minimum of one (0 would not wait at all), and saturates at `i32::MAX`.
 fn timeout_ms(timeout: Duration) -> i32 {
     i32::try_from(timeout.as_millis().max(1)).unwrap_or(i32::MAX)
 }
@@ -196,10 +193,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_timeout_is_whole_milliseconds_and_never_zero() {
+    fn a_timeout_is_floored_to_whole_milliseconds_with_a_minimum_of_one() {
         assert_eq!(timeout_ms(Duration::ZERO), 1);
         assert_eq!(timeout_ms(Duration::from_micros(10)), 1);
         assert_eq!(timeout_ms(Duration::from_millis(250)), 250);
+        assert_eq!(timeout_ms(Duration::from_micros(2900)), 2);
         assert_eq!(timeout_ms(Duration::from_secs(u64::MAX / 2000)), i32::MAX);
     }
 
@@ -212,6 +210,11 @@ mod tests {
     fn the_wait_reports_input_timeout_hang_up_and_stop_with_stop_first() {
         use std::io::Write;
         use std::os::unix::net::UnixStream;
+        let wait = |seq: &mut Vec<libc::pollfd>, stop: RawFd, deadline: Option<Instant>| {
+            poll_with_stop(seq, stop, |polls| poll_until(polls, deadline))
+                .map(|(ready, wait)| ready.then_some(wait))
+                .unwrap()
+        };
         let past = Some(Instant::now());
         let soon = || Some(Instant::now() + Duration::from_millis(20));
         let (mut seq_tx, seq_rx) = UnixStream::pair().unwrap();
@@ -223,14 +226,14 @@ mod tests {
         }];
         seq.reserve_exact(1);
         let stop = stop_rx.as_raw_fd();
-        assert_eq!(wait_on(&mut seq, stop, past).unwrap(), None);
-        assert_eq!(wait_on(&mut seq, stop, soon()).unwrap(), None);
+        assert_eq!(wait(&mut seq, stop, past), None);
+        assert_eq!(wait(&mut seq, stop, soon()), None);
         seq_tx.write_all(b"x").unwrap();
-        assert_eq!(wait_on(&mut seq, stop, soon()).unwrap(), Some(Wait::Ready));
+        assert_eq!(wait(&mut seq, stop, soon()), Some(Wait::Ready));
         drop(seq_tx);
-        assert_eq!(wait_on(&mut seq, stop, soon()).unwrap(), Some(Wait::Broken));
+        assert_eq!(wait(&mut seq, stop, soon()), Some(Wait::Broken));
         stop_tx.write_all(b"x").unwrap();
-        assert_eq!(wait_on(&mut seq, stop, None).unwrap(), Some(Wait::Stopped));
+        assert_eq!(wait(&mut seq, stop, None), Some(Wait::Stopped));
         assert_eq!(seq.len(), 1, "the stop slot is taken off again");
     }
 }

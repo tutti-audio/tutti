@@ -2,9 +2,10 @@
 
 use std::ffi::CStr;
 use std::os::raw::c_char;
+use std::sync::Arc;
 
 use crate::client::Client;
-use crate::error::Error;
+use crate::error::{Error, Operation, check};
 use crate::records::{ClientRecord, PortRecord};
 use crate::sys;
 use crate::ump::UmpEndpoint;
@@ -27,8 +28,8 @@ pub struct PortEntry {
     pub caps: u32,
     /// The client's UMP Endpoint, when the sequencer has one: a genuine UMP
     /// endpoint rather than a legacy client reached through the kernel's
-    /// converter. The same for every port of a client.
-    pub ump: Option<UmpEndpoint>,
+    /// converter. The same record, shared, for every port of a client.
+    pub ump: Option<Arc<UmpEndpoint>>,
 }
 
 /// What [`Client::list_ports`] found.
@@ -36,14 +37,11 @@ pub struct PortEntry {
 pub struct Ports {
     /// The ports found, in the sequencer's order.
     pub ports: Vec<PortEntry>,
-    /// Whether every query ended with `-ENOENT`, the end of the list. A walk
-    /// that stopped on another error (a client that exits mid-walk answers
-    /// `-ENXIO`) is short, and is not a look.
-    pub complete: bool,
-    /// The first Endpoint query that failed, which is why `complete` is false.
-    /// A walk can also be short with no error here (a query that answered
-    /// `-ENXIO`).
-    pub failed: Option<Error>,
+    /// Why the walk is short, when it is: the first query that failed with
+    /// anything but `-ENOENT`, the end of a list (a client that exits mid-walk
+    /// answers `-ENXIO`), or an Endpoint query or a record that failed. A short
+    /// walk is not a look.
+    pub incomplete: Option<Error>,
 }
 
 /// A C string alsa-lib owns, copied. `None` for NULL: "the library reported no
@@ -73,12 +71,14 @@ impl Client {
     pub fn list_ports(&self) -> Ports {
         let mut out = Ports {
             ports: Vec::new(),
-            complete: true,
-            failed: None,
+            incomplete: None,
         };
-        let (Ok(cinfo), Ok(pinfo)) = (ClientRecord::new(), PortRecord::new()) else {
-            out.complete = false;
-            return out;
+        let (cinfo, pinfo) = match (ClientRecord::new(), PortRecord::new()) {
+            (Ok(cinfo), Ok(pinfo)) => (cinfo, pinfo),
+            (Err(error), _) | (_, Err(error)) => {
+                out.incomplete = Some(error);
+                return out;
+            }
         };
         let seq = self.raw();
 
@@ -89,7 +89,7 @@ impl Client {
             // SAFETY: `seq` is open and `cinfo` is a live record.
             let rc = unsafe { sys::snd_seq_query_next_client(seq, cinfo.as_ptr()) };
             if rc < 0 {
-                out.complete &= rc == ENOENT;
+                out.end_of(rc, Operation::QueryNextClient);
                 break;
             }
             // SAFETY: `cinfo` is a live record the query just filled.
@@ -106,12 +106,12 @@ impl Client {
                 sys::snd_seq_port_info_set_client(pinfo.as_ptr(), client);
                 sys::snd_seq_port_info_set_port(pinfo.as_ptr(), -1);
             }
-            let mut ump: Option<Option<UmpEndpoint>> = None;
+            let mut ump: Option<Option<Arc<UmpEndpoint>>> = None;
             loop {
                 // SAFETY: `seq` is open and `pinfo` is a live record.
                 let rc = unsafe { sys::snd_seq_query_next_port(seq, pinfo.as_ptr()) };
                 if rc < 0 {
-                    out.complete &= rc == ENOENT;
+                    out.end_of(rc, Operation::QueryNextPort);
                     break;
                 }
                 // SAFETY: `pinfo` is a live record the query just filled.
@@ -126,12 +126,11 @@ impl Client {
                     .unwrap_or_else(|| format!("Port {port}"));
                 if ump.is_none() {
                     match self.ump_endpoint(client) {
-                        Ok(endpoint) => ump = Some(endpoint),
+                        Ok(endpoint) => ump = Some(endpoint.map(Arc::new)),
                         // Not knowing a port's Endpoint is not a legacy port: the
                         // client's ports are left out and the look is short.
                         Err(error) => {
-                            out.complete = false;
-                            out.failed.get_or_insert(error);
+                            out.incomplete.get_or_insert(error);
                             break;
                         }
                     }
@@ -147,5 +146,17 @@ impl Client {
             }
         }
         out
+    }
+}
+
+impl Ports {
+    /// Records why a query ended: `-ENOENT` is the end of the list and nothing
+    /// is wrong; any other code leaves the walk short.
+    fn end_of(&mut self, rc: i32, operation: Operation) {
+        if rc != ENOENT
+            && let Err(error) = check(rc, operation)
+        {
+            self.incomplete.get_or_insert(error);
+        }
     }
 }

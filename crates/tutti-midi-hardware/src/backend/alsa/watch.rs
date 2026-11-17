@@ -529,7 +529,7 @@ impl Announce {
                     // An overrun drops announcements and is not a quiet read: it
                     // makes the settle look again. A descriptor that keeps
                     // failing ends the drain.
-                    tracing::debug!("ALSA announce: {}", super::chain(&e));
+                    tracing::debug!("ALSA announce: {}", crate::error::chain(&e));
                     found.failed();
                     if errors.failed() {
                         return found;
@@ -589,7 +589,7 @@ pub(super) fn start(
     let mut announce = match Announce::open(stop_rx) {
         Ok(announce) => announce,
         Err(e) => {
-            tracing::debug!("ALSA device watch: {e}");
+            tracing::debug!("ALSA device watch: {}", crate::error::chain(&e));
             return Ok(Box::new(crate::endpoints::NoWatch));
         }
     };
