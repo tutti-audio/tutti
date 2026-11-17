@@ -36,9 +36,16 @@ fn a_pool_thread_is_answered_while_the_main_thread_updates_the_session() {
     let handle = session.plugin_view(node).expect("hosted").handle().clone();
     let id = ParamId::new(1);
     handle.send_parameter(id, Normalized::of(0.75));
-    let expected = handle.save_state().expect("saved on the main thread");
+    let expected = handle
+        .save_state(tutti_plugin_types::StateUse::Project)
+        .expect("saved on the main thread");
 
-    let pool = std::thread::spawn(move || (handle.save_state(), handle.parameter_value(id)));
+    let pool = std::thread::spawn(move || {
+        (
+            handle.save_state(tutti_plugin_types::StateUse::Project),
+            handle.parameter_value(id),
+        )
+    });
     // The load gave the session a main thread, so the calls wait for an update
     // rather than answering "unavailable" at once.
     std::thread::sleep(Duration::from_millis(50));
