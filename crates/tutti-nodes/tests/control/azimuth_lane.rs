@@ -212,8 +212,8 @@ fn a_modulated_height_is_clamped_as_ever() {
 /// no depth (so the lane samples the curve rather than sending its pieces).
 fn seam_program() -> ControlProgram {
     let mut curve = Trajectory::new();
-    curve.add_breakpoint(Breakpoint::new(Beat(0.0), 170.0));
-    curve.add_breakpoint(Breakpoint::new(Beat(4.0), -170.0));
+    curve.add_breakpoint(Breakpoint::new(Beat(0.0), Azimuth(170.0)));
+    curve.add_breakpoint(Breakpoint::new(Beat(4.0), Azimuth(-170.0)));
     ControlProgram::new(Some(Arc::new(curve)), vec![constant(0.0)], vec![]).expect("valid")
 }
 

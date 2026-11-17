@@ -8,5 +8,14 @@ mod chroma;
 mod spectrum;
 mod windowed_loudness;
 
+/// An `out` that drops every item: pushing into it allocates nothing.
+struct Discard;
+
+impl<T> Extend<T> for Discard {
+    fn extend<I: IntoIterator<Item = T>>(&mut self, items: I) {
+        items.into_iter().for_each(drop);
+    }
+}
+
 #[global_allocator]
 static ALLOC: tutti_fixtures::ThreadCounting = tutti_fixtures::ThreadCounting;

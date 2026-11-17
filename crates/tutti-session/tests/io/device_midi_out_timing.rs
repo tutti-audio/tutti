@@ -71,10 +71,11 @@ fn rig(wire: &Wire) -> (LiveSession, ManualStream) {
     let _ = s.update();
     s.midi_nodes()
         .unwrap()
-        .clock_master
-        .set_sends(tutti_midi_runtime::ClockSends {
-            timing: true,
-            ..Default::default()
+        .sync_controls
+        .messages()
+        .set(tutti_midi_runtime::SyncMessages {
+            clock: true,
+            ..tutti_midi_runtime::SyncMessages::OFF
         });
     s.play().expect("room");
     (s, stream)
@@ -217,8 +218,9 @@ fn a_clips_notes_are_sent_when_their_frames_are_heard() {
     let (mut s, stream) = rig(&wire);
     s.midi_nodes()
         .unwrap()
-        .clock_master
-        .set_sends(tutti_midi_runtime::ClockSends::default());
+        .sync_controls
+        .messages()
+        .set(tutti_midi_runtime::SyncMessages::OFF);
     s.midi().set_output_latency(
         OutputLatency::new(
             Duration::from_millis(5),

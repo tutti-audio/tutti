@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use tutti_plugin_types::MidiEventVec;
+use tutti_plugin_types::{MidiEventVec, SampleRate};
 
 use super::{
     ChordChanges, NoteExpressionChanges, NoteExpressionIntChanges, NoteExpressionTextChanges,
@@ -15,7 +15,7 @@ use super::{
 /// side-band (MIDI, automation, note expression, VST3 sequencer context,
 /// transport). Audio travels in the shared `AudioSlab`; everything here rides
 /// the control socket alongside it.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessAudioData {
     /// Which block this is. Monotonic per plugin instance from 1, and the index
     /// into the slab's ring: the server reads `seq`'s input slot and publishes
@@ -51,11 +51,37 @@ pub struct ProcessAudioData {
     pub transport_changes: TransportChanges,
 }
 
+impl ProcessAudioData {
+    /// A block of no frames and no events, with a stopped transport at
+    /// `sample_rate`: what a block's fields are overwritten from.
+    #[must_use]
+    pub fn empty(sample_rate: SampleRate) -> Self {
+        Self {
+            seq: 0,
+            num_samples: 0,
+            midi_events: MidiEventVec::new(),
+            param_changes: ParameterChanges::new(),
+            note_expression: NoteExpressionChanges::new(),
+            chords: ChordChanges::new(),
+            scales: ScaleChanges::new(),
+            expr_texts: NoteExpressionTextChanges::new(),
+            expr_ints: NoteExpressionIntChanges::new(),
+            transport: TransportInfo::new(sample_rate),
+            transport_changes: TransportChanges::new(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use tutti_plugin_types::{TransportChange, WireMidi};
+    use tutti_types::Bpm;
     use tutti_ump::Ump;
+
+    fn info() -> TransportInfo {
+        TransportInfo::new(SampleRate::SR_48K)
+    }
 
     /// A block with every list populated: MIDI,
     /// automation on two parameters, note expression (a named and a custom
@@ -137,19 +163,12 @@ mod tests {
             scales,
             expr_texts,
             expr_ints,
-            transport: TransportInfo {
-                sample_rate: 48_000.0,
-                system_time_ns: Some(0x0102_0304_0506_0708),
-                ..Default::default()
-            },
+            transport: info().with_system_time_ns(0x0102_0304_0506_0708),
             transport_changes: [TransportChange {
                 offset: 17,
-                transport: TransportInfo {
-                    sample_rate: 48_000.0,
-                    system_time_ns: Some(0x0102_0304_0506_0708),
-                    ..Default::default()
-                }
-                .with_tempo(90.0),
+                transport: info()
+                    .with_system_time_ns(0x0102_0304_0506_0708)
+                    .with_tempo(Bpm::of(90.0)),
             }]
             .into_iter()
             .collect(),
@@ -181,7 +200,10 @@ mod tests {
         assert_eq!(back.transport.system_time_ns, Some(0x0102_0304_0506_0708));
         assert_eq!(back.transport_changes.len(), 1);
         assert_eq!(back.transport_changes[0].offset, 17);
-        assert_eq!(back.transport_changes[0].transport.timing.tempo, 90.0);
+        assert_eq!(
+            back.transport_changes[0].transport.timing.tempo,
+            Bpm::of(90.0)
+        );
     }
 
     /// **The transport's project-time position and host clock cross the
@@ -190,10 +212,10 @@ mod tests {
     #[test]
     fn the_transport_clocks_cross_the_wire() {
         let block = ProcessAudioData {
-            transport: TransportInfo::new()
+            transport: info()
                 .with_position_samples(96_007)
                 .with_system_time_ns(5_001_000_000),
-            ..Default::default()
+            ..ProcessAudioData::empty(SampleRate::SR_48K)
         };
         let back: ProcessAudioData =
             postcard::from_bytes(&postcard::to_allocvec(&block).unwrap()).unwrap();
@@ -201,19 +223,45 @@ mod tests {
         assert_eq!(back.transport.system_time_ns, Some(5_001_000_000));
     }
 
+    /// **A cycle crosses the wire whole**: its beat range and its seconds.
+    #[test]
+    fn a_cycle_with_its_seconds_crosses_the_wire() {
+        let region = tutti_plugin_types::LoopRegion {
+            seconds: Some((
+                tutti_plugin_types::Seconds(1.0),
+                tutti_plugin_types::Seconds(4.5),
+            )),
+            ..tutti_plugin_types::LoopRegion::new(
+                tutti_types::LoopRange::new(tutti_types::Beat(2.0), tutti_types::Beat(8.0))
+                    .expect("a loop"),
+            )
+        };
+        let block = ProcessAudioData {
+            transport: info().with_loop(region),
+            ..ProcessAudioData::empty(SampleRate::SR_48K)
+        };
+        let back: ProcessAudioData =
+            postcard::from_bytes(&postcard::to_allocvec(&block).unwrap()).unwrap();
+        assert_eq!(back.transport.loop_region, Some(region));
+        assert_eq!(
+            ProcessAudioData::empty(SampleRate::SR_48K)
+                .transport
+                .loop_region,
+            None
+        );
+    }
+
     /// **The tempo and its slope cross the wire**: the plugin server hands
     /// CLAP's `tempo_inc` the host's figure.
     #[test]
     fn the_tempo_slope_crosses_the_wire() {
         let block = ProcessAudioData {
-            transport: TransportInfo::new()
-                .with_tempo(93.5)
-                .with_tempo_inc(-0.000_125),
-            ..Default::default()
+            transport: info().with_tempo(Bpm::of(93.5)).with_tempo_inc(-0.000_125),
+            ..ProcessAudioData::empty(SampleRate::SR_48K)
         };
         let back: ProcessAudioData =
             postcard::from_bytes(&postcard::to_allocvec(&block).unwrap()).unwrap();
-        assert_eq!(back.transport.timing.tempo, 93.5);
+        assert_eq!(back.transport.timing.tempo, Bpm::of(93.5));
         assert_eq!(back.transport.timing.tempo_inc, -0.000_125);
     }
 }
@@ -222,17 +270,22 @@ mod tests {
 mod change_tests {
     use super::*;
     use tutti_plugin_types::TransportChange;
+    use tutti_types::Bpm;
+
+    fn info() -> TransportInfo {
+        TransportInfo::new(SampleRate::SR_48K)
+    }
 
     /// **The transport changes cross the wire, in order, each at its frame
     /// with its own tempo and slope**, up to the graph's bound; a list one
     /// longer is refused at decode (the server never grows one).
     #[test]
     fn the_transport_changes_cross_the_wire_in_order() {
-        let mut block = ProcessAudioData::default();
-        for (offset, tempo, inc) in [(10, 100.0, 0.001), (50, 90.0, -0.002)] {
+        let mut block = ProcessAudioData::empty(SampleRate::SR_48K);
+        for (offset, tempo, inc) in [(10, Bpm::of(100.0), 0.001), (50, Bpm::of(90.0), -0.002)] {
             block.transport_changes.push(TransportChange {
                 offset,
-                transport: TransportInfo::new()
+                transport: info()
                     .with_tempo(tempo)
                     .with_tempo_inc(inc)
                     .with_playing(true),
@@ -251,17 +304,20 @@ mod change_tests {
                 )
             })
             .collect();
-        assert_eq!(got, [(10, 100.0, 0.001), (50, 90.0, -0.002)]);
+        assert_eq!(
+            got,
+            [(10, Bpm::of(100.0), 0.001), (50, Bpm::of(90.0), -0.002)]
+        );
         assert!(back.transport_changes[1].transport.state.playing);
 
         // One more than the bound: the encoding of nine is a decode error.
-        let mut nine = postcard::to_allocvec(&ProcessAudioData::default()).unwrap();
+        let mut nine = postcard::to_allocvec(&ProcessAudioData::empty(SampleRate::SR_48K)).unwrap();
         let tail = nine.len() - 1;
         // The empty list is the last byte (a varint length of 0); say 9 and
         // append nine changes' worth of bytes taken from a real one.
         let one = postcard::to_allocvec(&TransportChange {
             offset: 1,
-            transport: TransportInfo::new(),
+            transport: info(),
         })
         .unwrap();
         nine.truncate(tail);

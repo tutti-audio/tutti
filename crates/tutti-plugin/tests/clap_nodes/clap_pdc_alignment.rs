@@ -93,31 +93,6 @@ const WARMUP_BLOCKS: usize = 8;
 /// on a block boundary and read as correct.
 const IMPULSE_AT: usize = 5;
 
-/// One block's worth of wall time — what a real audio callback spends per block.
-///
-/// See the pacing note in [`render_impulse`] for why sleeping is load-bearing
-/// here rather than cosmetic.
-const PERIOD: std::time::Duration =
-    std::time::Duration::from_nanos((BLOCK as f64 / SAMPLE_RATE * 1e9) as u64);
-
-/// How many block periods to actually wait per block.
-///
-/// A real callback gets exactly one period, and one period is enough *when the
-/// subprocess is scheduled promptly*. These tests are not a real callback: they
-/// run under a test runner that may have every core busy, the subprocess is not
-/// at realtime priority (the server logs when it cannot raise itself), and a
-/// `sleep` guarantees only a lower bound on elapsed time — not that the other
-/// process was given any CPU inside it.
-///
-/// So the wait is deliberately generous. This is not a timing assertion —
-/// nothing here measures throughput or deadlines, unlike `real_plugin_pressure`
-/// — so a longer wait costs a few milliseconds per test and buys a result that
-/// does not depend on machine load. With one period, this suite failed roughly
-/// one run in three under a parallel runner; the failure always presented as
-/// "the plugin contributed nothing", which is also what a genuine routing bug
-/// looks like, so a flake here is worse than slow.
-const PACE: std::time::Duration = PERIOD.saturating_mul(20);
-
 /// Impulse height. A power of two so every product and sum below is exact in
 /// f32 and the assertions can use exact equality — the arithmetic under test is
 /// routing and delay, not rounding, so an epsilon would only hide a defect.
@@ -128,7 +103,7 @@ const IMPULSE: f32 = 1.0;
 ///
 /// One impulse at [`IMPULSE_AT`] and silence everywhere else, so every nonzero
 /// sample in the result is an arrival and its index is an arrival time.
-fn render_impulse(graph: &mut Renderer) -> Vec<f32> {
+fn render_impulse(rig: &mut Rig) -> Vec<f32> {
     let silence = [0.0f32; BLOCK];
     let mut captured = Vec::with_capacity(TOTAL_FRAMES);
 
@@ -148,8 +123,8 @@ fn render_impulse(graph: &mut Renderer) -> Vec<f32> {
     // would have to be a genuine mid-run starvation rather than the cold start
     // every run has.
     for _ in 0..WARMUP_BLOCKS {
-        graph.render_input(Planes::new(&[&silence]).unwrap());
-        std::thread::sleep(PACE);
+        rig.graph.render_input(Planes::new(&[&silence]).unwrap());
+        clap_probe::await_answer(&rig.controls);
     }
 
     for block in 0..BLOCKS {
@@ -158,18 +133,18 @@ fn render_impulse(graph: &mut Renderer) -> Vec<f32> {
         if (base..base + BLOCK).contains(&IMPULSE_AT) {
             input[IMPULSE_AT - base] = IMPULSE;
         }
-        let out = graph.render_input(Planes::new(&[&input]).unwrap());
+        let out = rig.graph.render_input(Planes::new(&[&input]).unwrap());
         captured.extend_from_slice(&out[0]);
-        // Pace to the real block period.
+        // Wait for the server's answer to the block.
         //
         // Not politeness — correctness. The pipeline never waits for a reply, so
-        // the subprocess needs wall-clock time between blocks to have rendered
-        // anything. A tight loop runs thousands of blocks inside one block
-        // period, the server never publishes, and every block reads back
-        // silence — so the plugin path presents as "contributed nothing" when
-        // what actually happened is that it was never given a chance to run.
-        // `real_plugin_pressure.rs` documents the same constraint.
-        std::thread::sleep(PACE);
+        // the next block plays the answer only if the server has published it.
+        // A tight loop runs thousands of blocks before the server publishes,
+        // and every block reads back silence — so the plugin path presents as
+        // "contributed nothing" when what actually happened is that it was never
+        // given a chance to run. `real_plugin_pressure.rs` documents the same
+        // constraint.
+        clap_probe::await_answer(&rig.controls);
     }
     captured
 }
@@ -328,7 +303,7 @@ fn the_plugin_path_alone_arrives_a_full_latency_late() {
     let mut rig = plugin_alone(probe.client.bind(
         tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo"),
     ));
-    let out = render_impulse(&mut rig.graph);
+    let out = render_impulse(&mut rig);
     assert!(
         !handle.status().is_dead(),
         "the plugin must survive the run"
@@ -380,7 +355,7 @@ fn with_compensation_both_paths_land_on_the_same_sample() {
         "the plan's total is the worst path's latency"
     );
 
-    let out = render_impulse(&mut rig.graph);
+    let out = render_impulse(&mut rig);
     assert!(
         !handle.status().is_dead(),
         "the plugin must survive the run"
@@ -475,7 +450,7 @@ fn a_latency_change_reaches_pdc_at_the_next_commit() {
         "the re-plan must carry the plugin's NEW figure plus the pipeline chunk"
     );
 
-    let out = render_impulse(&mut rig.graph);
+    let out = render_impulse(&mut rig);
     assert!(
         !handle.status().is_dead(),
         "the plugin must survive the run"

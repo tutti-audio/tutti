@@ -11,7 +11,7 @@
 //!
 //! - **MIDI as graph nodes**, sending on `tutti-graph` event ports:
 //!   [`MidiIngestNode`] (a device's inlet in, one port per Group and channel), [`MidiClipNode`] and
-//!   [`HarmonyNode`] (a timeline), [`ClockNode`] (Beat Clock and MTC). MIDI leaves the graph
+//!   [`HarmonyNode`] (a timeline), [`SyncOut`] (Beat Clock, MTC and Machine Control). MIDI leaves the graph
 //!   through an event tap (`tutti-graph`'s `EventTapReader`).
 //! - [`ClockMap`]: the pure OS-time to graph-frame map (and back), built from
 //!   readings of the OS `Instant` and the graph's `Frame`; it holds no clock.
@@ -25,8 +25,8 @@
 //!   session places the change.
 //! - [`MidiKeys`]: the key helpers (`note_on`, `note_off`) over `tutti-graph`'s
 //!   event inlet, which is how a control thread sends MIDI into the graph.
-//! - [`ClockNode`] and [`JrStream`]: engine-produced MIDI *out* (Beat Clock, MTC,
-//!   JR timestamps).
+//! - [`SyncOut`] and [`JrStream`]: engine-produced MIDI *out* (the transport's Beat
+//!   Clock, MTC, Machine Control and Flex Data, JR timestamps).
 //! - [`MidiClockDecoder`] and [`MtcDecoder`]: the inbound half of
 //!   sync (Beat Clock and MTC decoders), beside the master that sends them.
 //! - [`ClockFollower`]: what a transport that follows an outside Beat Clock or MTC does
@@ -123,7 +123,7 @@
 //! [`HARMONY_EVENT_DENSITY`] and [`MIDI_INPUT_DENSITY`] are the events per frame a
 //! node is sized for, and the graph multiplies by the block length. A port at
 //! capacity refuses a new event, and the graph counts every refusal
-//! (`Editor::take_event_losses`); a clock counts its own ([`ClockControls::losses`]).
+//! (`Editor::take_event_losses`); a sync sender counts its own ([`SyncOutControls::losses`]).
 //! A note-off has room past the capacity, and one the port still refuses is owed:
 //! a clip's note ledger writes it at the first frame of a later block, before
 //! anything else, so a note is never left sounding by a full port.
@@ -210,9 +210,9 @@ pub use live::{
 pub use mpe_features::{MpeFeaturesError, ask_mpe_features, mpe_features};
 pub use mpe_zones::mpe_zones;
 pub use outbound::{
-    ACTIVE_SENSING_INTERVAL, ActiveSensingSender, CLOCK_EVENT_CAPACITY, ClockControls, ClockNode,
-    ClockSends, JrClock, JrStream, MACHINE_CONTROL_EVENT_CAPACITY, MIDI_OUT_EVENT_CAPACITY,
-    MachineControlControls, MachineControlNode, MachineControlSender, MidiOutNode, NoTimeCode,
+    ACTIVE_SENSING_INTERVAL, ActiveSensingSender, JrClock, JrStream, MIDI_OUT_EVENT_CAPACITY,
+    MachineControlSender, MidiOutNode, NoTimeCode, SYNC_OUT_EVENT_CAPACITY, SyncMessages, SyncOut,
+    SyncOutControls,
 };
 pub use output_plan::{
     MAX_OUTPUT_AHEAD, MAX_OUTPUT_LATENCY, OffsetOutOfRange, Outgoing, OutputLatency, OutputOffset,

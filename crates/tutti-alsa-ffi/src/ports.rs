@@ -4,6 +4,7 @@ use std::ffi::CStr;
 use std::os::raw::c_char;
 use std::sync::Arc;
 
+use crate::address::{Address, PortCaps};
 use crate::client::Client;
 use crate::error::{Error, Operation, check};
 use crate::records::{ClientRecord, PortRecord};
@@ -16,16 +17,14 @@ const ENOENT: i32 = -2;
 /// One port of another client.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PortEntry {
-    /// The owning client's id.
-    pub client: i32,
+    /// The port's address.
+    pub address: Address,
     /// The owning client's name, or `Client <id>` when it reports none.
     pub client_name: String,
-    /// The port's number within its client.
-    pub port: i32,
     /// The port's name, or `Port <n>` when it reports none.
     pub name: String,
-    /// The port's `CAP_*` bits.
-    pub caps: u32,
+    /// What the port allows.
+    pub caps: PortCaps,
     /// The client's UMP Endpoint, when the sequencer has one: a genuine UMP
     /// endpoint rather than a legacy client reached through the kernel's
     /// converter. The same record, shared, for every port of a client.
@@ -94,7 +93,7 @@ impl Client {
             }
             // SAFETY: `cinfo` is a live record the query just filled.
             let client = unsafe { sys::snd_seq_client_info_get_client(cinfo.as_ptr()) };
-            if client == i32::from(self.id) || client == sys::SND_SEQ_CLIENT_SYSTEM {
+            if client == i32::from(self.id.get()) || client == sys::SND_SEQ_CLIENT_SYSTEM {
                 continue;
             }
             // SAFETY: as above; the name is copied before the record changes.
@@ -121,11 +120,18 @@ impl Client {
                         sys::snd_seq_port_info_get_capability(pinfo.as_ptr()),
                     )
                 };
+                let Some(address) = Address::from_ints(client, port) else {
+                    // A port the sequencer lists with a number past its tables
+                    // is not offered, and the walk is marked incomplete.
+                    out.incomplete
+                        .get_or_insert(Error::NotAddress { client, port });
+                    continue;
+                };
                 // SAFETY: as above; the name is copied before the record changes.
                 let name = owned(unsafe { sys::snd_seq_port_info_get_name(pinfo.as_ptr()) })
                     .unwrap_or_else(|| format!("Port {port}"));
                 if ump.is_none() {
-                    match self.ump_endpoint(client) {
+                    match self.ump_endpoint(address.client()) {
                         Ok(endpoint) => ump = Some(endpoint.map(Arc::new)),
                         // Not knowing a port's Endpoint is not a legacy port: the
                         // client's ports are left out and the look is short.
@@ -136,11 +142,10 @@ impl Client {
                     }
                 }
                 out.ports.push(PortEntry {
-                    client,
+                    address,
                     client_name: client_name.clone(),
-                    port,
                     name,
-                    caps,
+                    caps: PortCaps::from_bits(caps),
                     ump: ump.clone().flatten(),
                 });
             }

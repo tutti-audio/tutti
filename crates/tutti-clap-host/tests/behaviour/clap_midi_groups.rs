@@ -7,7 +7,7 @@
 use clap_sys::events::{
     CLAP_NOTE_EXPRESSION_BRIGHTNESS, CLAP_NOTE_EXPRESSION_PRESSURE, CLAP_NOTE_EXPRESSION_TUNING,
 };
-use tutti_clap_host::{ClapEvent, InputEventList};
+use tutti_clap_host::{ClapEvent, EventList, InputEventList};
 use tutti_fixtures::midi;
 use tutti_graph::Offset;
 use tutti_midi_protocol::{PitchBendSensitivity, widen_value};
@@ -38,7 +38,28 @@ fn add(list: &mut InputEventList, ump: Ump) {
 
 /// The events the list holds, then empty.
 fn drain(list: &mut InputEventList) -> Vec<ClapEvent> {
-    list.take_events()
+    let events = list.events().iter().map(copy).collect();
+    list.clear();
+    events
+}
+
+/// A copy of `event`. These tests send no SysEx, the one event that owns or
+/// points at bytes.
+fn copy(event: &ClapEvent) -> ClapEvent {
+    match event {
+        ClapEvent::NoteOn(e) => ClapEvent::NoteOn(*e),
+        ClapEvent::NoteOff(e) => ClapEvent::NoteOff(*e),
+        ClapEvent::NoteChoke(e) => ClapEvent::NoteChoke(*e),
+        ClapEvent::NoteEnd(e) => ClapEvent::NoteEnd(*e),
+        ClapEvent::Midi(e) => ClapEvent::Midi(*e),
+        ClapEvent::NoteExpression(e) => ClapEvent::NoteExpression(*e),
+        ClapEvent::ParamValue(e) => ClapEvent::ParamValue(*e),
+        ClapEvent::ParamMod(e) => ClapEvent::ParamMod(*e),
+        ClapEvent::ParamGestureBegin(e) => ClapEvent::ParamGestureBegin(*e),
+        ClapEvent::ParamGestureEnd(e) => ClapEvent::ParamGestureEnd(*e),
+        ClapEvent::Transport(e) => ClapEvent::Transport(*e),
+        ClapEvent::MidiSysex { .. } => panic!("a SysEx event is not copied"),
+    }
 }
 
 /// `(port, channel, key, note_id)` of a NOTE_ON.
@@ -535,13 +556,13 @@ fn rpn(group: MidiGroup, channel: MidiChannel, index: u8, value: u32) -> Ump {
     )
 }
 
-/// **An RPN is four Control Changes through the stateful narrower** (M2-104
-/// Appendix D.2.3): CC 101 and 100 select, CC 6 and 38 carry the top 14 bits;
-/// the select is not repeated for the same parameter, and is sent in full for
-/// another channel, another Group (its port), and after a reset. The value
-/// 12 << 25 is 12 in the MSB and 0 in the LSB (a zero-extended 7.25 number).
+/// **An RPN is four Control Changes every time** (M2-104 Appendix D.2.3): CC
+/// 101 and 100 select, CC 6 and 38 carry the top 14 bits; the same parameter
+/// again, another Group (its port) and a value after a reset are the four
+/// again. The value 12 << 25 is 12 in the MSB and 0 in the LSB (a
+/// zero-extended 7.25 number).
 #[test]
-fn an_rpn_is_four_control_changes_and_the_select_is_not_repeated() {
+fn an_rpn_is_four_control_changes_every_time() {
     let mut list = InputEventList::new();
     list.set_note_ports(&[false, false]);
 
@@ -559,7 +580,15 @@ fn an_rpn_is_four_control_changes_and_the_select_is_not_repeated() {
 
     add(&mut list, rpn(group(0), ch(1), 0, 24 << 25));
     let bytes: Vec<_> = drain(&mut list).iter().map(midi_bytes).collect();
-    assert_eq!(bytes, [(0, [0xB1, 6, 24]), (0, [0xB1, 38, 0])]);
+    assert_eq!(
+        bytes,
+        [
+            (0, [0xB1, 101, 0]),
+            (0, [0xB1, 100, 0]),
+            (0, [0xB1, 6, 24]),
+            (0, [0xB1, 38, 0]),
+        ]
+    );
 
     // The same channel number of Group 1 is another channel, on port 1.
     add(&mut list, rpn(group(1), ch(1), 0, 12 << 25));
@@ -567,7 +596,6 @@ fn an_rpn_is_four_control_changes_and_the_select_is_not_repeated() {
     assert_eq!(bytes.len(), 4, "{bytes:?}");
     assert!(bytes.iter().all(|b| b.0 == 1));
 
-    // A reset: the plugin forgot its selection.
     list.reset_midi();
     add(&mut list, rpn(group(0), ch(1), 0, 12 << 25));
     assert_eq!(drain(&mut list).len(), 4);
@@ -596,11 +624,10 @@ fn an_nrpn_selects_with_cc_99_and_98() {
     );
 }
 
-/// **A bank is resent only when it changes** (M2-104 Appendix D.2.4): the
-/// first banked Program Change is CC 0, CC 32 and the program; the same bank
-/// again is the program alone; another bank is all three.
+/// **A banked Program Change is three messages every time** (M2-104 Appendix
+/// D.2.4): CC 0, CC 32 and the program, the same bank again included.
 #[test]
-fn a_bank_is_resent_only_when_it_changes() {
+fn a_banked_program_change_is_three_messages_every_time() {
     let mut list = InputEventList::new();
     let bank = Bank {
         msb: U7::of(5),
@@ -620,7 +647,10 @@ fn a_bank_is_resent_only_when_it_changes() {
         midi::program_change(Address::new(group(0), ch(0)), 4, Some(bank)),
     );
     let bytes: Vec<_> = drain(&mut list).iter().map(midi_bytes).collect();
-    assert_eq!(bytes, [(0, [0xC0, 4, 0])]);
+    assert_eq!(
+        bytes,
+        [(0, [0xB0, 0, 5]), (0, [0xB0, 32, 9]), (0, [0xC0, 4, 0])]
+    );
     add(
         &mut list,
         midi::program_change(

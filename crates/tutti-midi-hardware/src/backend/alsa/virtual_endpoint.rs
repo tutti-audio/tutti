@@ -8,9 +8,9 @@
 //! reads the protocol it carries instead of taking it for a legacy port.
 
 use tutti_alsa_ffi::{
-    BLOCK_IS_LOWSPEED, BLOCK_IS_MIDI1, Blocking, CAP_READ, CAP_SUBS_READ, CAP_SUBS_WRITE,
-    CAP_WRITE, Client, DIR_BIDIRECTION, DIR_INPUT, DIR_OUTPUT, Operation, PROTO_MIDI1, PROTO_MIDI2,
-    Packet, TYPE_APPLICATION, TYPE_MIDI_GENERIC, UmpBlock, UmpEndpoint, UmpVersion,
+    BLOCK_IS_LOWSPEED, BLOCK_IS_MIDI1, Blocking, Client, DIR_BIDIRECTION, DIR_INPUT, DIR_OUTPUT,
+    Operation, PROTO_MIDI1, PROTO_MIDI2, Packet, PortCaps, PortId, PortKind, UmpBlock, UmpEndpoint,
+    UmpVersion,
 };
 use tutti_midi_device::FunctionBlock;
 use tutti_rt::LockExt;
@@ -99,7 +99,7 @@ fn publish(client: &Client, spec: &VirtualSpec, protocol: VirtualProtocol) -> Re
 /// A virtual source: the client's readable, subscribable port.
 pub(crate) struct AlsaVirtualSource {
     // `Client` is `Send` and not `Sync`; sends are rare and short.
-    inner: std::sync::Mutex<(Client, u8)>,
+    inner: std::sync::Mutex<(Client, PortId)>,
 }
 
 impl SourceBackend for AlsaVirtualSource {
@@ -117,8 +117,8 @@ pub(crate) fn source(spec: &VirtualSpec) -> Result<(AlsaVirtualSource, VirtualPr
     let (client, protocol) = open_client(spec, Blocking::Block)?;
     let port = client.open_port(
         spec.name().as_str(),
-        CAP_READ | CAP_SUBS_READ,
-        TYPE_MIDI_GENERIC | TYPE_APPLICATION,
+        PortCaps::READ | PortCaps::SUBS_READ,
+        PortKind::MIDI_GENERIC | PortKind::APPLICATION,
     )?;
     publish(&client, spec, protocol)?;
     Ok((
@@ -139,8 +139,8 @@ pub(crate) fn destination(
     let (client, protocol) = open_client(spec, Blocking::NonBlock)?;
     let port = client.open_port(
         spec.name().as_str(),
-        CAP_WRITE | CAP_SUBS_WRITE,
-        TYPE_MIDI_GENERIC | TYPE_APPLICATION,
+        PortCaps::WRITE | PortCaps::SUBS_WRITE,
+        PortKind::MIDI_GENERIC | PortKind::APPLICATION,
     )?;
     publish(&client, spec, protocol)?;
     let clock = client.stamp_port(port)?;

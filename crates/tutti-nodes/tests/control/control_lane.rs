@@ -323,10 +323,10 @@ fn program(automation: Option<Arc<dyn Curve>>, layers: Vec<Layer>) -> ControlPro
 }
 
 /// A linear trajectory through `points` (beat, value).
-fn trajectory(points: &[(f64, f32)]) -> Trajectory {
+fn trajectory(points: &[(f64, f32)]) -> Trajectory<Hz> {
     let mut e = Trajectory::new();
     for &(b, v) in points {
-        e.add_breakpoint(Breakpoint::new(Beat(b), v));
+        e.add_breakpoint(Breakpoint::new(Beat(b), Hz(v)));
     }
     e
 }
@@ -441,19 +441,19 @@ fn an_export_is_the_live_render_bit_for_bit() {
         let shaped: Arc<dyn Curve> = {
             // A range cutting into the 1500 breakpoint bends its two pieces, which
             // go as grid pieces beside the exact ones.
-            let mut e = Trajectory::new().with_range(0.0, 1200.0);
+            let mut e = Trajectory::new().with_range(Hz(0.0), Hz(1200.0));
             e.add_breakpoint(Breakpoint::with_law(
                 Beat(0.0),
-                300.0,
+                Hz(300.0),
                 Law::PowerIn(Exponent::of(2.0)),
             ));
             e.add_breakpoint(Breakpoint::with_law(
                 Beat(0.37),
-                1500.0,
+                Hz(1500.0),
                 Law::PowerInOut(Exponent::of(2.0)),
             ));
-            e.add_breakpoint(Breakpoint::with_law(Beat(1.1), 900.0, Law::Hold));
-            e.add_breakpoint(Breakpoint::new(Beat(1.9), 600.0));
+            e.add_breakpoint(Breakpoint::with_law(Beat(1.1), Hz(900.0), Law::Hold));
+            e.add_breakpoint(Breakpoint::new(Beat(1.9), Hz(600.0)));
             Arc::new(e)
         };
         let drawn = Waveform::Drawn(Arc::from(vec![
@@ -776,15 +776,15 @@ fn a_plugin_lane_sends_linear_grid_pieces() {
     let mut e = Trajectory::new();
     e.add_breakpoint(Breakpoint::with_law(
         Beat(0.0),
-        0.1,
+        Hz(0.1),
         Law::PowerIn(Exponent::of(2.0)),
     ));
     e.add_breakpoint(Breakpoint::with_law(
         Beat(0.3),
-        0.9,
+        Hz(0.9),
         Law::PowerInOut(Exponent::of(2.0)),
     ));
-    e.add_breakpoint(Breakpoint::new(Beat(0.6), 0.4));
+    e.add_breakpoint(Breakpoint::new(Beat(0.6), Hz(0.4)));
     let curve: Arc<dyn Curve> = Arc::new(e);
     let (mut ed, mut exec) = Editor::new(Prepare::new(
         SampleRate::of(RATE),

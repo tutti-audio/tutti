@@ -52,10 +52,11 @@ fn rig(wire: &Wire) -> Session {
     let _ = s.update();
     s.midi_nodes()
         .unwrap()
-        .clock_master
-        .set_sends(tutti_midi_runtime::ClockSends {
-            timing: true,
-            ..Default::default()
+        .sync_controls
+        .messages()
+        .set(tutti_midi_runtime::SyncMessages {
+            clock: true,
+            ..tutti_midi_runtime::SyncMessages::OFF
         });
     s.pool(midi_sink("out", Arc::new(wire.clone())))
         .expect("declares");
@@ -116,7 +117,7 @@ fn the_clock_reaches_the_output_in_order_on_its_frames() {
 fn a_full_tap_counts_what_it_drops() {
     let wire = Wire::default();
     let mut s = rig(&wire);
-    let clock = s.midi_nodes().unwrap().clock;
+    let clock = s.midi_nodes().unwrap().sync;
     let mut all = s
         .graph()
         .taps()
@@ -178,7 +179,7 @@ fn a_full_tap_counts_what_it_drops() {
 fn reopening_one_tap_leaves_the_others_fed() {
     let wire = Wire::default();
     let mut s = rig(&wire);
-    let clock = s.midi_nodes().unwrap().clock;
+    let clock = s.midi_nodes().unwrap().sync;
     let mut first = s
         .graph()
         .taps()
@@ -231,8 +232,9 @@ fn a_clip_fed_to_a_sinks_node_arrives_on_its_frames() {
     let mut s = rig(&wire);
     s.midi_nodes()
         .unwrap()
-        .clock_master
-        .set_sends(tutti_midi_runtime::ClockSends::default());
+        .sync_controls
+        .messages()
+        .set(tutti_midi_runtime::SyncMessages::OFF);
     let out = s.midi_sink(&"out").expect("loaded");
     let (clip, _) = s.graph().add(MidiClipNode::new(note(
         60,

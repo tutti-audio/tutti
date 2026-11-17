@@ -776,10 +776,11 @@ fn an_output_port_follows_its_device_through_an_unplug() {
     let out = s.midi_output(&"synth").expect("loaded");
     s.midi_nodes()
         .unwrap()
-        .clock_master
-        .set_sends(tutti_midi_runtime::ClockSends {
-            timing: true,
-            ..Default::default()
+        .sync_controls
+        .messages()
+        .set(tutti_midi_runtime::SyncMessages {
+            clock: true,
+            ..tutti_midi_runtime::SyncMessages::OFF
         });
     let _ = s.update();
     roll(&s, 4_096);
@@ -1002,10 +1003,11 @@ fn an_output_port_counts_what_its_device_refused() {
     let out = s.midi_output(&"synth").expect("loaded");
     s.midi_nodes()
         .unwrap()
-        .clock_master
-        .set_sends(tutti_midi_runtime::ClockSends {
-            timing: true,
-            ..Default::default()
+        .sync_controls
+        .messages()
+        .set(tutti_midi_runtime::SyncMessages {
+            clock: true,
+            ..tutti_midi_runtime::SyncMessages::OFF
         });
     roll(&s, 4_096);
     let _ = s.update();
@@ -1027,10 +1029,11 @@ fn an_output_port_counts_the_events_its_tap_had_no_room_for() {
     let out = s.midi_output(&"synth").expect("loaded");
     s.midi_nodes()
         .unwrap()
-        .clock_master
-        .set_sends(tutti_midi_runtime::ClockSends {
-            timing: true,
-            ..Default::default()
+        .sync_controls
+        .messages()
+        .set(tutti_midi_runtime::SyncMessages {
+            clock: true,
+            ..tutti_midi_runtime::SyncMessages::OFF
         });
     roll(&s, 1_100_000);
     let _ = s.update();

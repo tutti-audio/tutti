@@ -57,8 +57,9 @@ use support::corpus::{
 use support::probe_au::{Misbehaviour, NOT_CALLED, last_host_pull};
 
 use tutti_au_host::{AuError, TransportInfo, TransportState};
+use tutti_plugin_types::LoopRegion;
 use tutti_types::{BarNumber, TimeSignature};
-use tutti_types::{Bpm, Samples, Seconds};
+use tutti_types::{Beat, Bpm, LoopRange, Samples, Seconds};
 
 /// Serializes component discovery / instantiate / dispose, exactly as
 /// `au_conformance.rs`'s lock of the same name does. AudioToolbox tolerates
@@ -74,6 +75,16 @@ fn lock() -> std::sync::MutexGuard<'static, ()> {
 }
 
 const RATE: tutti_types::SampleRate = tutti_types::SampleRate::SR_48K;
+
+/// A stopped transport at the tests' rate.
+fn transport() -> TransportInfo {
+    TransportInfo::new(RATE)
+}
+
+/// A cycle over `start..end` beats.
+fn cycle(start: f64, end: f64) -> LoopRegion {
+    LoopRegion::new(LoopRange::new(Beat(start), Beat(end)).expect("a loop"))
+}
 const BLOCK: u32 = 512;
 
 // ------------------------------------------------------------------ tail time
@@ -298,14 +309,14 @@ fn reinstalling_host_callbacks_preserves_the_published_state() {
     let mut au = DELAY.open(RATE, BLOCK);
 
     au.install_host_callbacks().expect("first install");
-    let info = TransportInfo::new().with_tempo(137.5).with_playing(true);
+    let info = transport().with_tempo(Bpm::of(137.5)).with_playing(true);
     assert!(au.set_transport(&info, true), "publish after install");
 
     au.install_host_callbacks().expect("second install");
     let state = au.transport().expect("state survives a re-install");
     assert_eq!(
         state.tempo(),
-        Some(Bpm::of(137.5)),
+        Bpm::of(137.5),
         "a re-install must reuse the existing state, not replace it"
     );
     assert!(state.is_playing());
@@ -328,7 +339,7 @@ fn publishing_without_installing_is_reported() {
     let mut au = DELAY.open(RATE, BLOCK);
     assert!(au.transport().is_none());
     assert!(
-        !au.set_transport(&TransportInfo::new().with_tempo(120.0), false),
+        !au.set_transport(&transport().with_tempo(Bpm::of(120.0)), false),
         "set_transport must report that no callbacks are installed"
     );
 }
@@ -348,14 +359,14 @@ fn transport_survives_initialize_and_uninitialize() {
 
     au.install_host_callbacks()
         .expect("install in the Loaded state");
-    let info = TransportInfo::new().with_tempo(90.0).with_playing(true);
+    let info = transport().with_tempo(Bpm::of(90.0)).with_playing(true);
     au.set_transport(&info, true);
 
     au.initialize()
         .expect("initialize with transport installed");
     assert_eq!(
         au.transport().expect("state survives initialize").tempo(),
-        Some(Bpm::of(90.0))
+        Bpm::of(90.0)
     );
 
     let input = silence(2, BLOCK as usize);
@@ -365,12 +376,12 @@ fn transport_survives_initialize_and_uninitialize() {
     au.uninitialize().expect("uninitialize");
     assert_eq!(
         au.transport().expect("state survives uninitialize").tempo(),
-        Some(Bpm::of(90.0))
+        Bpm::of(90.0)
     );
 
     au.initialize().expect("re-initialize");
     render(&mut au, &input, &mut output, BLOCK).expect("render after the cycle");
-    assert_eq!(au.transport().unwrap().tempo(), Some(Bpm::of(90.0)));
+    assert_eq!(au.transport().unwrap().tempo(), Bpm::of(90.0));
 }
 
 // ------------------------------------------- the state plumbing, driven direct
@@ -385,14 +396,15 @@ fn transport_survives_initialize_and_uninitialize() {
 #[test]
 fn every_transport_field_reaches_the_callbacks() {
     let state = TransportState::new();
-    let info = TransportInfo::new()
-        .with_tempo(137.5)
+    let info = transport()
+        .with_tempo(Bpm::of(137.5))
         .with_playing(true)
         .with_recording(true)
-        .with_position_beats(12.25, Seconds(5.0))
+        .with_beat(Beat(12.25))
+        .with_seconds(Seconds(5.0))
         .with_position_samples(240_000)
-        .with_loop(true, 4.0, 20.0)
-        .with_bar(8.0, BarNumber::new(3))
+        .with_loop(cycle(4.0, 20.0))
+        .with_bar(Beat(8.0), BarNumber::new(3))
         .with_time_signature(TimeSignature::of(7, 8));
     state.set_transport(&info, true);
     state.set_samples_to_next_beat(123);
@@ -432,12 +444,12 @@ fn every_transport_field_reaches_the_callbacks() {
 #[test]
 fn the_two_transport_procs_agree() {
     let state = TransportState::new();
-    let info = TransportInfo::new()
-        .with_tempo(100.0)
+    let info = transport()
+        .with_tempo(Bpm::of(100.0))
         .with_playing(true)
         .with_recording(true)
         .with_position_samples(48_000)
-        .with_loop(true, 2.0, 6.0);
+        .with_loop(cycle(2.0, 6.0));
     state.set_transport(&info, false);
 
     let procs = TestProcs::install(&state);
@@ -467,10 +479,10 @@ fn the_locate_flag_is_consumed_exactly_once() {
     let procs = TestProcs::install(&state);
 
     // A transport is published, but no locate.
-    state.set_transport(&TransportInfo::new(), false);
+    state.set_transport(&transport(), false);
     assert!(!procs.transport_v1().changed, "no locate published yet");
 
-    state.set_transport(&TransportInfo::new().with_playing(true), true);
+    state.set_transport(&transport().with_playing(true), true);
     assert!(state.state_changed_pending(), "peek must not consume");
 
     assert!(
@@ -484,14 +496,14 @@ fn the_locate_flag_is_consumed_exactly_once() {
     assert!(!state.state_changed_pending());
 
     // A publish with `changed: false` must not resurrect it.
-    state.set_transport(&TransportInfo::new().with_playing(true), false);
+    state.set_transport(&transport().with_playing(true), false);
     assert!(
         !procs.transport_v1().changed,
         "a routine publish must not look like a locate"
     );
 
     // And v2 consumes the same flag, so a locate is not delivered twice.
-    state.set_transport(&TransportInfo::new(), true);
+    state.set_transport(&transport(), true);
     assert!(procs.transport_v2().changed, "v2 reports the locate");
     assert!(
         !procs.transport_v1().changed,
@@ -507,7 +519,7 @@ fn the_locate_flag_is_consumed_exactly_once() {
 #[test]
 fn callbacks_tolerate_null_out_params() {
     let state = TransportState::new();
-    state.set_transport(&TransportInfo::new().with_tempo(120.0), true);
+    state.set_transport(&transport().with_tempo(Bpm::of(120.0)), true);
     let procs = TestProcs::install(&state);
 
     // Every proc, with every out-param null. Reaching the asserts at all is the
@@ -659,7 +671,7 @@ fn every_proc_answers_cannot_do_until_the_host_publishes() {
     );
     assert!(!state.is_published(), "a beat distance is not a transport");
 
-    state.set_transport(&TransportInfo::new().with_tempo(133.0), true);
+    state.set_transport(&transport().with_tempo(Bpm::of(133.0)), true);
     assert!(state.is_published());
     let (statuses, _) = probe(&procs);
     assert_eq!(statuses, [0; 4], "published");
@@ -703,13 +715,14 @@ fn an_au_pulls_the_published_transport_through_audiotoolbox() {
     assert!(pull.tempo.is_nan(), "a refused pull must not carry a tempo");
 
     // Published: the next render's pull sees all of it.
-    let info = TransportInfo::new()
-        .with_tempo(137.5)
+    let info = transport()
+        .with_tempo(Bpm::of(137.5))
         .with_playing(true)
-        .with_position_beats(12.25, Seconds(5.0))
+        .with_beat(Beat(12.25))
+        .with_seconds(Seconds(5.0))
         .with_position_samples(240_000)
-        .with_loop(true, 4.0, 20.0)
-        .with_bar(8.0, BarNumber::new(3))
+        .with_loop(cycle(4.0, 20.0))
+        .with_bar(Beat(8.0), BarNumber::new(3))
         .with_time_signature(TimeSignature::of(7, 8));
     au.transport()
         .expect("installed")
@@ -733,7 +746,10 @@ fn an_au_pulls_the_published_transport_through_audiotoolbox() {
     assert_eq!(pull.changed, 1, "the locate reaches the AU");
 
     // The next block publishes no locate, and the AU is told so.
-    assert!(au.set_transport(&info.with_position_beats(12.5, Seconds(5.0)), false));
+    assert!(au.set_transport(
+        &info.with_beat(Beat(12.5)).with_seconds(Seconds(5.0)),
+        false
+    ));
     render(&mut au, &input, &mut output, BLOCK).expect("render");
     let pull = last_host_pull(&au);
     assert_eq!(pull.changed, 0, "the locate flag must not latch");
@@ -827,10 +843,11 @@ fn a_real_au_pulls_and_consumes_the_transport() {
     let mut au = Au::shared(RATE, BLOCK);
     au.initialize().expect("initialize");
 
-    let transport = TransportInfo::new()
-        .with_tempo(137.5)
+    let transport = transport()
+        .with_tempo(Bpm::of(137.5))
         .with_playing(true)
-        .with_position_beats(12.25, Seconds(5.0));
+        .with_beat(Beat(12.25))
+        .with_seconds(Seconds(5.0));
     au.set_transport(&transport, true);
     assert!(
         au.transport().unwrap().state_changed_pending(),

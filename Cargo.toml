@@ -49,7 +49,6 @@ members = [
     "crates/tutti-plugin-probe",
     "crates/tutti-plugin-types",
     "crates/tutti-plugin-db",
-    "testing/tutti-shm-model",
     "crates/tutti-vst3-host",
     "crates/tutti-clap-ffi",
     "crates/tutti-au-ffi",

@@ -1390,7 +1390,6 @@ fn test_clap_take_initially_clear() {
     let loaded = instance.clap_loaded();
     assert!(!loaded.take_params_flush_requested());
     assert!(!loaded.take_state_dirty());
-    assert!(!loaded.take_note_ports_changed());
 }
 
 /// A request raised from a callback is handed over once.
@@ -1426,15 +1425,12 @@ fn test_clap_take_flags() {
             .expect("Failed to load");
 
     let state = instance.clap_loaded().host_state();
-    state.notes.ports_changed.store(true, Ordering::Release);
-    state.processing.state_dirty.store(true, Ordering::Release);
+    state.state_dirty.store(true, Ordering::Release);
 
     let loaded = instance.clap_loaded();
-    assert!(loaded.take_note_ports_changed());
     assert!(loaded.take_state_dirty());
 
     // Second take should be false (cleared)
-    assert!(!loaded.take_note_ports_changed());
     assert!(!loaded.take_state_dirty());
 }
 
@@ -1807,9 +1803,9 @@ fn test_clap_process_with_transport() {
         ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44100.0, 512, false)
             .expect("Failed to load");
 
-    let transport = TransportInfo::new()
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K)
         .with_playing(true)
-        .with_tempo(120.0)
+        .with_tempo(tutti_types::Bpm::of(120.0))
         .with_time_signature(tutti_plugin_types::TimeSignature::default());
 
     let num_samples = 512;
