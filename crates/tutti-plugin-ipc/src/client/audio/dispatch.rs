@@ -251,7 +251,7 @@ impl Owed {
     /// moot (the slab slot it names has been recycled, and the sequence check
     /// rejects it) but its MIDI-out is the plugin's real output and the socket
     /// is its only path. Dropping it silently loses notes from any block whose
-    /// reply ran late. Only a block's counts as settled
+    /// reply ran late. Only a block's counts as a reply
     /// ([`Channels::note_settled`]): the counters are about blocks.
     fn take(&mut self, msg: BridgeMessage, channels: &Channels) -> Option<BridgeMessage> {
         while let Some(&late) = self.late.front() {
@@ -1096,7 +1096,7 @@ mod tests {
 
     /// **What is owed is taken first, in order, and the next request's answer
     /// is its own**. An abandoned block's reply is forwarded and
-    /// counted as settled; a query's late reply and the rest of a stalled
+    /// counted as a reply; a query's late reply and the rest of a stalled
     /// state are taken without answering anything; the frame after them is
     /// the answer.
     #[test]
@@ -1112,7 +1112,7 @@ mod tests {
             channels.pop_audio_response(),
             Some(AudioResponse::AudioProcessed { seq: 3, .. })
         ));
-        assert_eq!(channels.settled(), 1);
+        assert_eq!(channels.block_counts().1, 1);
         let value = BridgeMessage::ParameterValue {
             value: Some(crate::protocol::Normalized::of(0.25)),
         };
@@ -1128,7 +1128,11 @@ mod tests {
             owed.take(list, &channels),
             Some(BridgeMessage::ParameterList { .. })
         ));
-        assert_eq!(channels.settled(), 1, "only a block counts as settled");
+        assert_eq!(
+            channels.block_counts().1,
+            1,
+            "only a block counts as a reply"
+        );
     }
 
     /// **An owed answer that is not coming does not swallow the replies after

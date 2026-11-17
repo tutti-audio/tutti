@@ -137,7 +137,7 @@ impl AudioBridge {
         // own reply timeout from the same block period, and two copies of the
         // rate would let the two timeouts drift apart.
         let (channels, sleeper) = Channels::new(sample_rate);
-        let payloads = PayloadPool::new();
+        let payloads = PayloadPool::new(channels.refusal_writer());
         let lifecycle = Lifecycle::new(watch, timeouts);
         let listener: ListenerSlot = Arc::new(Mutex::new(None));
         let thread = BridgeThread::spawn(
@@ -259,36 +259,6 @@ impl AudioBridge {
         self.lifecycle.mark_crashed(cause);
     }
 
-    /// How many replies the bridge thread has taken back off the socket after
-    /// abandoning the blocks that asked for them.
-    ///
-    /// Instrumentation for the drain, which is otherwise unobservable: the audio
-    /// it recovers is stale and rejected by the slab's sequence check, and the
-    /// MIDI it forwards looks exactly like MIDI that arrived on time. A test
-    /// that wants to pin the drain has to read this — the alternative is
-    /// inferring it from how far replies lag, which is a function of machine
-    /// load rather than of correctness.
-    ///
-    /// Monotonic over the life of the bridge, and `Relaxed`: nothing branches on
-    /// it.
-    ///
-    /// `cfg(test)`: nothing in the shipping host reads this, and an
-    /// always-compiled accessor with no caller reads as an API someone may
-    /// depend on. The counter itself is unconditional — it is two atomic ops
-    /// on a path that already blocks on a socket — so what the tests observe
-    /// is the production code path, not a test-only variant of it.
-    #[cfg(any(test, feature = "testing"))]
-    pub fn settled_replies(&self) -> u64 {
-        self.channels.settled()
-    }
-
-    /// How many blocks' replies the bridge thread abandoned on a missed budget.
-    /// `cfg(test)` for the reason [`settled_replies`](Self::settled_replies) is.
-    #[cfg(any(test, feature = "testing"))]
-    pub fn abandoned_replies(&self) -> u64 {
-        self.channels.abandoned()
-    }
-
     /// How many plugin-originated parameter-change events the bridge
     /// dropped, over its life, because more arrived during one command (a
     /// preset or state load) than it holds between two listener calls.
@@ -298,6 +268,19 @@ impl AudioBridge {
     /// Latency, tail and resync events are never dropped.
     pub fn dropped_parameter_events(&self) -> u64 {
         self.channels.dropped_param_events()
+    }
+
+    /// The count of commands the audio side could not hand to the bridge
+    /// thread (a full command queue, an empty payload pool, a parameter buffer
+    /// with no room to return to), shared: the plugin node's controls read it.
+    pub(crate) fn commands_refused_cell(&self) -> tutti_rt::Tally<u64> {
+        self.channels.commands_refused_cell()
+    }
+
+    /// Audio responses the bridge thread could not queue for the audio
+    /// thread, over the life of the bridge.
+    pub fn responses_lost(&self) -> u64 {
+        self.channels.responses_lost()
     }
 
     /// The count of MIDI events the bridge thread did not send (a block it
@@ -485,7 +468,11 @@ impl AudioBridge {
             return Submitted::REFUSED;
         }
 
-        let mut payload = self.payloads.acquire();
+        // An empty pool refuses the block (counted by the pool): nothing has
+        // moved out of the caller's hands.
+        let Some(mut payload) = self.payloads.acquire() else {
+            return Submitted::REFUSED;
+        };
         payload.seq = seq;
         payload.num_samples = num_samples;
         payload.midi_events = midi_events;
@@ -930,9 +917,10 @@ mod tests {
     /// Once the bridge is crashed, the same refusal is `PluginCrashed`.
     #[test]
     fn a_full_queue_is_busy_not_a_crash() {
+        let channels = Channels::new(SampleRate::SR_48K).0;
         let bridge = AudioBridge {
-            channels: Channels::new(SampleRate::SR_48K).0,
-            payloads: PayloadPool::new(),
+            payloads: PayloadPool::new(channels.refusal_writer()),
+            channels,
             lifecycle: Lifecycle::new(Arc::new(ServerWatch::new()), Timeouts::default()),
             listener: Arc::new(Mutex::new(None)),
         };

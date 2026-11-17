@@ -18,8 +18,8 @@ use std::sync::Arc;
 
 use tutti_plugin_types::BlockStatus;
 use tutti_plugin_types::{
-    AudioBufferMut, ParameterChanges, PluginError, PluginIo, PluginResult, ProcessContext,
-    ProcessOutput, Processor, SampleRate, Samples, WireMidi,
+    AudioBufferMut, ChordValue, ParameterChanges, PluginError, PluginIo, PluginResult,
+    ProcessContext, ProcessOutput, Processor, SampleRate, Samples, ScaleValue, WireMidi,
 };
 
 use super::Link;
@@ -114,6 +114,7 @@ impl Processor for IpcProcessor {
         self.batcher.reset();
         self.pending = BlockPayload::default();
         self.params.clear();
+        // A refused reset is counted (`PluginControls::refused_commands`).
         let _ = self.link.bridge.reset_rt();
     }
 
@@ -136,6 +137,7 @@ impl Processor for IpcProcessor {
         let (queues, points) = self.link.param_room(chunk);
         self.params = ParameterChanges::reserved_bridged(queues, points);
         self.pending = BlockPayload::default();
+        // A refused rate command is counted (`PluginControls::refused_commands`).
         let _ = self.link.bridge.set_sample_rate_rt(rate);
         self.link.set_rate(rate);
         // A fork's graph is compiled from the shape read right after this, and
@@ -206,20 +208,30 @@ impl Chunks for Piece<'_, '_> {
                 self.over += 1;
             }
         }
+        // The chunk's harmony carries the degrees a plugin acts on, shifted to
+        // the chunk's frames; the display text stays with the node's list. A
+        // `String` cloned here would allocate, and a refused event would free.
         let shift = i32::try_from(at).unwrap_or(i32::MAX);
         if let Some(expressive) = &self.ctx.expressive {
             if let Some(chords) = expressive.chords {
                 for chord in &chords.changes {
-                    let mut chord = chord.clone();
-                    chord.sample_offset = chord.sample_offset.saturating_add(shift);
-                    let _ = self.pending.harmony.chords.add_change(chord);
+                    let _ = self.pending.harmony.chords.add_change(ChordValue {
+                        sample_offset: chord.sample_offset.saturating_add(shift),
+                        root: chord.root,
+                        bass_note: chord.bass_note,
+                        mask: chord.mask,
+                        text: String::new(),
+                    });
                 }
             }
             if let Some(scales) = expressive.scales {
                 for scale in &scales.changes {
-                    let mut scale = scale.clone();
-                    scale.sample_offset = scale.sample_offset.saturating_add(shift);
-                    let _ = self.pending.harmony.scales.add_change(scale);
+                    let _ = self.pending.harmony.scales.add_change(ScaleValue {
+                        sample_offset: scale.sample_offset.saturating_add(shift),
+                        root: scale.root,
+                        mask: scale.mask,
+                        text: String::new(),
+                    });
                 }
             }
         }
@@ -317,5 +329,60 @@ mod tests {
         assert!(changes.add_change(ParamId::new(1), 3, 0.5));
         let with_params = ProcessContext::new().params(&changes);
         assert!(carries_input(&with_params, &[&silence], 8), "a parameter");
+    }
+
+    /// **A piece's chords and scales join the chunk shifted to the chunk's
+    /// frames, without allocating, display text and all.** The node's list
+    /// holds a named chord and a named scale; the chunk gets their degrees at
+    /// `at` frames later (a refused event past the cap frees nothing either).
+    #[test]
+    fn a_pieces_harmony_joins_the_chunk_shifted_and_allocation_free() {
+        use tutti_plugin_types::{ChordChanges, ExpressiveContext, ScaleChanges};
+        let mut chords = ChordChanges::new();
+        let mut scales = ScaleChanges::new();
+        for i in 0..=tutti_plugin_types::HARMONY_CAPACITY as i32 {
+            let _ = chords.add_change(ChordValue {
+                sample_offset: i,
+                root: 60,
+                bass_note: 48,
+                mask: 0b1001_0001,
+                text: "Cmaj7 over a long enough name to need the heap".into(),
+            });
+            let _ = scales.add_change(ScaleValue {
+                sample_offset: 8 + i,
+                root: 2,
+                mask: 0x0AB5,
+                text: "D Dorian, spelled out at length for the heap".into(),
+            });
+        }
+        let ctx = ProcessContext::new().expressive(ExpressiveContext {
+            chords: Some(&chords),
+            scales: Some(&scales),
+            ..ExpressiveContext::default()
+        });
+        let mut out = ProcessOutput::default();
+        let mut pending = BlockPayload::default();
+        let mut params = ParameterChanges::reserved(1, 4);
+        let mut piece = Piece {
+            ctx: &ctx,
+            out: &mut out,
+            pending: &mut pending,
+            params: &mut params,
+            over: 0,
+            said: BlockStatus::Continue,
+        };
+        assert_no_alloc::assert_no_alloc(|| piece.take(0, 64, 64));
+        let at: Vec<i32> = pending
+            .harmony
+            .chords
+            .changes
+            .iter()
+            .map(|c| c.sample_offset)
+            .collect();
+        assert_eq!(at, [64, 65, 66, 67], "the first four, 64 frames in");
+        assert_eq!(pending.harmony.chords.changes[0].mask, 0b1001_0001);
+        assert_eq!(pending.harmony.chords.changes[0].bass_note, 48);
+        assert_eq!(pending.harmony.scales.changes[3].sample_offset, 8 + 3 + 64);
+        assert_eq!(pending.harmony.scales.changes[0].mask, 0x0AB5);
     }
 }

@@ -106,6 +106,16 @@ impl<'a> Diagnostics<'a> {
             .map_or(0, tutti_plugin_host::PluginControls::skipped_chunks)
     }
 
+    /// Commands the audio side could not hand to the plugin's bridge (a full
+    /// command queue, or no payload for a block): lost, and a refused block
+    /// plays as silence. Zero for a plugin that runs in this process.
+    pub fn refused_commands(&self) -> u64 {
+        self.hosted
+            .controls
+            .as_ref()
+            .map_or(0, tutti_plugin_host::PluginControls::refused_commands)
+    }
+
     /// The latency the graph compensates for this plugin's node, as of the last
     /// update: the plugin's own, and out of process one chunk of the pipeline
     /// that carries its audio.

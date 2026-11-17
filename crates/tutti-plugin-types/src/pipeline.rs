@@ -64,6 +64,11 @@ pub struct ChunkCounters {
     /// Chunks the bridge dropped because the plugin fell more than one chunk
     /// behind, counted by the bridge thread (set by [`attach_skipped`](Self::attach_skipped)).
     skipped: OnceLock<Tally<u64>>,
+    /// Commands the audio side could not hand to the bridge thread (a full
+    /// command queue, an empty payload pool, a parameter buffer with no room
+    /// to return to), counted by the bridge (set by
+    /// [`attach_commands_refused`](Self::attach_commands_refused)).
+    commands_refused: OnceLock<Tally<u64>>,
     /// Whether the chunk of a sequence has been answered, set when the node is
     /// bound (the shared-memory slab's reply flag, which this file does not
     /// name).
@@ -79,6 +84,7 @@ impl std::fmt::Debug for ChunkCounters {
             .field("refused", &self.refused)
             .field("unanswered", &self.unanswered)
             .field("skipped", &self.skipped())
+            .field("commands_refused", &self.commands_refused())
             .finish_non_exhaustive()
     }
 }
@@ -97,6 +103,16 @@ impl ChunkCounters {
     /// Reads the bridge thread's count of skipped chunks (the node's bind).
     pub fn attach_skipped(&self, skipped: Tally<u64>) {
         let _ = self.skipped.set(skipped);
+    }
+
+    /// Reads the bridge's count of refused commands (the node's bind).
+    pub fn attach_commands_refused(&self, refused: Tally<u64>) {
+        let _ = self.commands_refused.set(refused);
+    }
+
+    /// See `PluginControls::refused_commands`.
+    pub fn commands_refused(&self) -> u64 {
+        self.commands_refused.get().map_or(0, Tally::get)
     }
 
     /// See `PluginControls::skipped_chunks`.
