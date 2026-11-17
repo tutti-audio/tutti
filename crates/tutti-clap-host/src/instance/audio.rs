@@ -2,7 +2,6 @@
 
 use super::ClapProcessor;
 use super::config::AudioScratch;
-use super::lifecycle::EDIT_CAPACITY;
 use crate::error::{ClapError, Result};
 use crate::events::{ClapEvent, EventList};
 use crate::types::{ClapNoteExpression, ParameterChanges, TransportInfo};
@@ -21,7 +20,6 @@ use tutti_plugin_types::AudioBufferMut;
 use tutti_plugin_types::TransportChange;
 use tutti_plugin_types::WireMidi;
 use tutti_plugin_types::is_usable;
-use tutti_rt::RtVec;
 
 /// Owned snapshot of the plugin's per-block output. Returned for
 /// non-RT consumers (tests, offline render) via
@@ -326,6 +324,10 @@ impl ClapProcessor {
             });
         }
 
+        debug_assert!(
+            self.scratch.input_events.is_reserved(),
+            "activation reserves the input events before the first block"
+        );
         self.scratch.input_events.clear();
         if !midi_events.is_empty() {
             self.scratch.input_events.add_midi_events(midi_events);
@@ -337,22 +339,10 @@ impl ClapProcessor {
         {
             let table = self.ranges.lend();
             let input_events = &mut self.scratch.input_events;
-            // The block's edits, held until the drain ends: a reset in it voids
-            // those before it.
-            let mut edits: RtVec<(u32, f64), EDIT_CAPACITY> = RtVec::new();
-            self.drain.drain(|edit| match edit {
-                tutti_plugin_types::Edit::Param { id, value } => {
-                    edits.push((id.get(), value.get()));
-                }
-                // The Controller reset the stream (a state or preset load): the
-                // edits queued before it, which this block already took, are not
-                // to be sent.
-                tutti_plugin_types::Edit::Reset => edits.clear(),
-                _ => {}
+            let drain = &mut self.drain;
+            input_events.add_param_edits(&table.ranges, table.claims, |each| {
+                drain.drain(|edit| each(edit));
             });
-            for &(id, value) in &edits {
-                input_events.add_param_edit(id, value, &table.ranges, table.claims);
-            }
             if !param_changes.is_empty() {
                 input_events.add_param_changes(param_changes, &table.ranges, table.claims);
             }

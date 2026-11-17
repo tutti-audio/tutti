@@ -76,6 +76,17 @@ pub struct GuiState {
 pub(crate) const NO_RESIZE: [u32; 2] = [0, 0];
 
 impl GuiState {
+    /// The pending resize request, once: `None` after it, until the plugin
+    /// asks again. A request raised between the read and the clear is lost.
+    pub(crate) fn take_resize(&self) -> Option<[u32; 2]> {
+        let asked = self.resize_request.load();
+        if asked == NO_RESIZE {
+            return None;
+        }
+        self.resize_request.store(NO_RESIZE);
+        Some(asked)
+    }
+
     fn new() -> Self {
         Self {
             closed: AtomicBool::new(false),

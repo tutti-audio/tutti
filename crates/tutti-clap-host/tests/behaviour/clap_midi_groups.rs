@@ -38,7 +38,9 @@ fn add(list: &mut InputEventList, ump: Ump) {
 
 /// The events the list holds, then empty.
 fn drain(list: &mut InputEventList) -> Vec<ClapEvent> {
-    list.take_events()
+    let events = list.events().to_vec();
+    list.clear();
+    events
 }
 
 /// `(port, channel, key, note_id)` of a NOTE_ON.

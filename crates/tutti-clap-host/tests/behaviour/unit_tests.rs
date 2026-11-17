@@ -30,7 +30,7 @@ fn at(k: usize) -> Offset {
 fn first(event: &(Offset, tutti_ump::Ump)) -> Option<ClapEvent> {
     let mut list = InputEventList::new();
     list.add_midi(event);
-    list.take_events().into_iter().next()
+    list.events().first().cloned()
 }
 
 use crate::support;

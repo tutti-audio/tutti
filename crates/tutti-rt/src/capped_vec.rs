@@ -92,15 +92,6 @@ impl<T> CappedVec<T> {
         written
     }
 
-    /// Removes every item and yields it, keeping the storage, and resets the
-    /// overflow flag. The items are dropped where the iterator is, so a caller
-    /// that drains on the audio thread holds only items that are free to drop
-    /// there.
-    pub fn drain(&mut self) -> std::vec::Drain<'_, T> {
-        self.overflowed = false;
-        self.buf.drain(..)
-    }
-
     /// The filled run.
     #[inline]
     #[must_use]

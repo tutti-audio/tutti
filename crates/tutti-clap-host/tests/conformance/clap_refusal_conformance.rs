@@ -261,15 +261,15 @@ fn refused_sample_rate_change_is_reported() {
     );
 }
 
-/// A refused activation hands the plugin back reporting the configuration it
-/// already accepted, and the very same instance activates there again.
+/// A refused activation leaves the plugin on the configuration it already
+/// accepted, and the very same instance activates there again.
 /// (Putting the previous configuration back automatically is the server
 /// bridge's rollback, tested in `tutti-plugin-server`.)
 ///
 /// The oracle is plugin-side: one accepted activation before, one after, the
 /// second on the base rate.
 #[test]
-fn a_refused_activation_leaves_the_accepted_configuration_reported() {
+fn a_refused_activation_leaves_the_plugin_on_its_accepted_configuration() {
     let probe = Probe::acquire();
     let active = probe.activate();
     assert_eq!(
@@ -298,16 +298,11 @@ fn a_refused_activation_leaves_the_accepted_configuration_reported() {
     assert_eq!(last_accepted_activation(), Some((BASE_RATE, BASE_FRAMES)),);
 }
 
-/// A refused block-size growth leaves the block size the plugin accepted, so
-/// `process` does not admit blocks the plugin never agreed to.
-///
-/// The scratch size is what `process` bounds-checks incoming blocks against
-/// (`process_impl` rejects `num_samples > max_frames`). If the host kept
-/// `max_frames` at the refused value, `process` would accept a block larger than
-/// the plugin's declared ceiling — the plugin reads `frames_count` samples out of
-/// buffers it sized for less.
+/// A refused block-size growth leaves the plugin on the ceiling it accepted:
+/// the oracle is plugin-side, the last activation it accepted. The host holds
+/// no block size of its own to disagree with it.
 #[test]
-fn a_refused_block_size_growth_leaves_the_accepted_ceiling() {
+fn a_refused_block_size_growth_leaves_the_plugin_on_its_accepted_ceiling() {
     let probe = Probe::acquire();
     let active = probe.activate();
 

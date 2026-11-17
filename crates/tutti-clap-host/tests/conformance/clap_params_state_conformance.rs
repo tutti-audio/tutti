@@ -902,6 +902,31 @@ fn taking_a_rescan_consumes_it() {
     );
 }
 
+/// **An active plugin's `request_flush` is not served by a main-thread flush**:
+/// the flush would take the audio claim from the block, so the request is left
+/// for `process`, and stays latched. Spec: clap.ext.params.host.request_flush
+#[test]
+fn an_active_plugins_request_flush_is_left_for_process() {
+    let probe = Probe::acquire();
+    let mut inst = probe.activate();
+
+    probe.command(PARAM_CMD_REQUEST_FLUSH);
+    inst.loaded_mut().on_main_thread(main_thread());
+
+    let before = probe.capture().flush_calls;
+    let mut out = Vec::new();
+    Control::take_requests(inst.loaded_mut(), main_thread(), &mut out);
+    assert_eq!(
+        probe.capture().flush_calls,
+        before,
+        "an active plugin is not flushed from the main thread"
+    );
+    assert!(
+        inst.loaded().take_params_flush_requested(),
+        "the request survives for the block"
+    );
+}
+
 /// `request_flush` must reach the host as a pending flush, and that flush must
 /// then actually deliver parameters **outside `process`**. Asserting only the
 /// flag would leave the second half — the part a plugin depends on — untested.

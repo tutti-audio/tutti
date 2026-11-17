@@ -230,8 +230,19 @@ impl ClapLoaded {
             self.destroy_editor(main);
         }
         // `params.request_flush`: the plugin has values to hand the host
-        // outside a block.
-        if self.host_state.take(&self.host_state.flush_requested) {
+        // outside a block. An active plugin hands them over in its next
+        // `process`, so its request stays latched and no flush takes the audio
+        // claim from the block; an inactive one is flushed here.
+        if self.flags.active {
+            if self
+                .host_state
+                .flush_requested
+                .load(std::sync::atomic::Ordering::Acquire)
+                && let Some(wake) = self.host_state.process_wake.get()
+            {
+                wake.raise();
+            }
+        } else if self.host_state.take(&self.host_state.flush_requested) {
             let _ = self.flush_params(main, Vec::new());
         }
         out.extend(tutti_plugin_types::taken(&self.host_state.requests));

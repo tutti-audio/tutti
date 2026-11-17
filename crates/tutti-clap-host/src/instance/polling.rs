@@ -4,7 +4,7 @@
 use super::ClapLoaded;
 use crate::error::{ClapError, Result};
 use crate::host::HostState;
-use crate::host::state::{NO_RESIZE, TimerEntry};
+use crate::host::state::TimerEntry;
 use crate::types::{ContentScale, EditorCapabilities, WindowHandle};
 use dpi::Size;
 use std::sync::Arc;
@@ -203,12 +203,7 @@ impl ClapLoaded {
     /// is free to ignore or clamp the size — CLAP treats it as a request, not
     /// an instruction.
     pub fn take_editor_resize_request(&self) -> Option<Size> {
-        let gui = &self.host_state.gui;
-        let [width, height] = gui.resize_request.load();
-        if [width, height] == NO_RESIZE {
-            return None;
-        }
-        gui.resize_request.store(NO_RESIZE);
+        let [width, height] = self.host_state.gui.take_resize()?;
         Some(tutti_clap_ffi::gui_size(width, height))
     }
 

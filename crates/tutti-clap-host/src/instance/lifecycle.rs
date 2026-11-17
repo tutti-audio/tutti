@@ -351,8 +351,7 @@ fn reserve_input_events(scratch: &mut AudioScratch, table: &RangeTable, max_fram
         + EDIT_CAPACITY
         + INPUT_NOTE_EXPRESSIONS
         + tutti_graph::MAX_TRANSPORT_CHANGES;
-    // Grows only: a smaller block keeps the room.
-    events.reserve(wanted.max(events.events.capacity()));
+    events.reserve(wanted);
     events.set_param_point_room(param_points);
     events.set_source_rooms(
         EDIT_CAPACITY,

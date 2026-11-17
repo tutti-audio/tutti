@@ -31,12 +31,16 @@ use std::ptr;
 use tutti_clap_ffi::{EventRef, EventSink, PluginEvent};
 use tutti_graph::UmpAt;
 use tutti_plugin_types::{
-    LinearRange, Normalized, ParamEdit, ParamId, ParamMapping, RtMidiEvents,
+    Edit, LinearRange, Normalized, ParamEdit, ParamId, ParamMapping, RtMidiEvents,
     SYSEX_MESSAGE_CAPACITY, StableOrder, WireMidi, expression_of_per_note_controller,
     group_of_port, note_id_to_channel_note, per_note_message, per_note_tuning, plugin_note_id,
     push_sysex, sysex_assembler,
 };
-use tutti_rt::{CappedVec, Tally, TallyWriter, tally};
+use tutti_rt::{CappedVec, RtVec, Tally, TallyWriter, tally};
+
+/// The edits one block holds before they are added: the Controller's queue
+/// is no longer than this.
+const EDIT_BLOCK: usize = 256;
 
 use crate::types::RtNoteExpressions;
 use tutti_midi_protocol::{
@@ -185,6 +189,35 @@ pub enum ClapEvent {
         /// dangle that pointer.
         _data: Vec<u8>,
     },
+}
+
+impl Clone for ClapEvent {
+    /// A copy that owns what it points at: a SysEx event with its own payload
+    /// points at the copy's, one backed by an input list's reassembly buffer
+    /// keeps pointing there.
+    fn clone(&self) -> Self {
+        match self {
+            Self::NoteOn(e) => Self::NoteOn(*e),
+            Self::NoteOff(e) => Self::NoteOff(*e),
+            Self::NoteChoke(e) => Self::NoteChoke(*e),
+            Self::NoteEnd(e) => Self::NoteEnd(*e),
+            Self::Midi(e) => Self::Midi(*e),
+            Self::NoteExpression(e) => Self::NoteExpression(*e),
+            Self::ParamValue(e) => Self::ParamValue(*e),
+            Self::ParamMod(e) => Self::ParamMod(*e),
+            Self::ParamGestureBegin(e) => Self::ParamGestureBegin(*e),
+            Self::ParamGestureEnd(e) => Self::ParamGestureEnd(*e),
+            Self::Transport(e) => Self::Transport(*e),
+            Self::MidiSysex { inner, _data } => {
+                let data = _data.clone();
+                let mut inner = *inner;
+                if !data.is_empty() {
+                    inner.buffer = data.as_ptr();
+                }
+                Self::MidiSysex { inner, _data: data }
+            }
+        }
+    }
 }
 
 /// CLAP's upper bound for `CLAP_NOTE_EXPRESSION_VOLUME`.
@@ -833,9 +866,10 @@ pub trait EventList {
     fn clear(&mut self);
 }
 
-/// The room an input list has before [`InputEventList::reserve`] fixes it: the
-/// events a list built for a test or a one-off conversion can hold.
-const UNRESERVED_ROOM: usize = 1024;
+/// The room [`InputEventList::new`] holds until [`InputEventList::reserve`]
+/// fixes it: what a test or a one-off conversion needs. A list that reaches
+/// `process` has been reserved.
+const TEST_ROOM: usize = 1024;
 
 /// Owned list of input events passed into `clap_plugin.process()`.
 ///
@@ -868,6 +902,8 @@ pub struct InputEventList {
     /// Edits, note expressions and transport changes refused for want of
     /// their source's room: see [`refused`](Self::refused).
     refused: u64,
+    /// Whether [`reserve`](Self::reserve) has fixed the room.
+    reserved: bool,
     /// Parameter points not handed on whole since the list was built: see
     /// [`param_points_dropped`](Self::param_points_dropped). A tally, so an
     /// app reads it from any thread.
@@ -908,7 +944,7 @@ impl InputEventList {
     pub fn new() -> Self {
         let param_points_tally = tally::<u64>();
         Self {
-            events: CappedVec::with_capacity(UNRESERVED_ROOM),
+            events: CappedVec::with_capacity(TEST_ROOM),
             order: StableOrder::default(),
             param_room: usize::MAX,
             edit_room: usize::MAX,
@@ -921,6 +957,7 @@ impl InputEventList {
             param_points_tally,
             midi_dropped: 0,
             refused: 0,
+            reserved: false,
             notes: Self::per_note_state(1),
             narrower: Narrower::new(),
             ports: 1,
@@ -1009,6 +1046,13 @@ impl InputEventList {
     pub fn reserve(&mut self, n: usize) {
         self.events = CappedVec::with_capacity(n);
         self.order.reserve(n);
+        self.reserved = true;
+    }
+
+    /// Whether [`reserve`](Self::reserve) has fixed the room: a list built
+    /// with [`new`](Self::new) holds a room for tests until it has.
+    pub(crate) fn is_reserved(&self) -> bool {
+        self.reserved
     }
 
     /// Bound the parameter events one
@@ -1197,6 +1241,10 @@ impl InputEventList {
                     return self;
                 }
                 if self.midi_capable >> port & 1 == 0 {
+                    return self;
+                }
+                if self.midi_room() == 0 {
+                    self.midi_dropped += 1;
                     return self;
                 }
                 let bytes = self.sysex.message(message).bytes();
@@ -1566,6 +1614,40 @@ impl InputEventList {
         self
     }
 
+    /// Adds the block's queued edits. `drain` hands each queued edit to the
+    /// callback it is given, oldest first. A [`Edit::Reset`] voids the edits
+    /// before it; the edits kept are added in order, and any past the room
+    /// [`set_source_rooms`](Self::set_source_rooms) gave them, or past the
+    /// [`EDIT_BLOCK`] the block can hold, are refused and counted
+    /// ([`refused`](Self::refused)).
+    pub(crate) fn add_param_edits(
+        &mut self,
+        ranges: &[ParamBounds],
+        plugin_claims_params: bool,
+        drain: impl FnOnce(&mut dyn FnMut(Edit)),
+    ) {
+        let mut edits: RtVec<(u32, f64), EDIT_BLOCK> = RtVec::new();
+        let mut surplus = 0u64;
+        drain(&mut |edit| match edit {
+            Edit::Param { id, value } => {
+                if !edits.push((id.get(), value.get())) {
+                    surplus += 1;
+                }
+            }
+            // The Controller reset the stream (a state or preset load): the
+            // edits queued before it are not to be sent.
+            Edit::Reset => {
+                edits.clear();
+                surplus = 0;
+            }
+            _ => {}
+        });
+        self.refused += surplus;
+        for &(id, value) in &edits {
+            self.add_param_edit(id, value, ranges, plugin_claims_params);
+        }
+    }
+
     /// Appends one `PARAM_VALUE` event at the head of the block (time 0) for a
     /// parameter edit the Controller queued: `value` is normalized `0..=1` and
     /// is denormalized against `ranges` exactly as
@@ -1706,12 +1788,6 @@ impl InputEventList {
     /// Borrows the events currently in the list.
     pub fn events(&self) -> &[ClapEvent] {
         self.events.as_slice()
-    }
-
-    /// Moves the events out of the list, leaving it empty. Allocates: off the
-    /// audio thread.
-    pub fn take_events(&mut self) -> Vec<ClapEvent> {
-        self.events.drain().collect()
     }
 }
 
@@ -2422,7 +2498,7 @@ mod tests {
     fn from_midi(event: &UmpAt) -> Option<ClapEvent> {
         let mut list = InputEventList::new();
         list.add_midi(event);
-        list.take_events().into_iter().next()
+        list.events().first().cloned()
     }
 
     /// A Note On at the address and key of the per-note `event`, at velocity
@@ -2450,10 +2526,10 @@ mod tests {
         let mut list = InputEventList::new();
         if let Some(on) = note_on_for(event) {
             list.add_midi(&on);
-            list.take_events();
+            list.clear();
         }
         list.add_midi(event);
-        list.take_events().into_iter().next()
+        list.events().first().cloned()
     }
 
     /// The message `midi` carries.
@@ -3173,6 +3249,82 @@ mod tests {
         assert_eq!(list.param_points_dropped(), 2);
     }
 
+    /// **An edit past the room a block holds for edits is refused and
+    /// counted.** One more than the room is queued; the room's worth is kept.
+    #[test]
+    fn an_edit_past_the_edit_room_is_refused_and_counted() {
+        let mut list = InputEventList::new();
+        list.reserve(EDIT_BLOCK + 8);
+        list.set_source_rooms(EDIT_BLOCK, 0, 0);
+        let capacity = list.events.capacity();
+        assert_no_alloc::assert_no_alloc(|| {
+            list.add_param_edits(&[], false, |each| {
+                for id in 0..=EDIT_BLOCK as u32 {
+                    each(Edit::Param {
+                        id: ParamId::new(id),
+                        value: Normalized::clamped(0.5),
+                    });
+                }
+            });
+        });
+        assert_eq!(list.events.len(), EDIT_BLOCK);
+        assert_eq!(list.events.capacity(), capacity);
+        assert_eq!(list.refused(), 1);
+    }
+
+    /// A reset in the block's edits voids the ones before it.
+    #[test]
+    fn a_reset_voids_the_edits_before_it() {
+        let mut list = InputEventList::new();
+        list.reserve(8);
+        let param = |id| Edit::Param {
+            id: ParamId::new(id),
+            value: Normalized::clamped(0.5),
+        };
+        list.add_param_edits(&[], false, |each| {
+            each(param(1));
+            each(Edit::Reset);
+            each(param(2));
+        });
+        let ids: Vec<u32> = list
+            .events()
+            .iter()
+            .filter_map(|e| match e {
+                ClapEvent::ParamValue(v) => Some(v.param_id),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(ids, [2]);
+        assert_eq!(list.refused(), 0);
+    }
+
+    /// **SysEx takes only the MIDI room.** A list whose MIDI room holds three
+    /// events is sent five SysEx messages: three are kept and two counted in
+    /// `midi_dropped`, and the edits added after them all fit.
+    #[test]
+    fn sysex_cannot_take_the_edit_room() {
+        let mut list = InputEventList::new();
+        list.set_note_ports(&[true]);
+        list.reserve(3 + 3);
+        list.reserve_sysex();
+        list.set_source_rooms(3, 0, 0);
+        for k in 0..5 {
+            list.add_midi_events(&sysex_packets(&[1, 2, 3], k));
+        }
+        assert_eq!(list.events().len(), 3);
+        assert_eq!(list.midi_dropped(), 2);
+        list.add_param_edits(&[], false, |each| {
+            for id in 0..3 {
+                each(Edit::Param {
+                    id: ParamId::new(id),
+                    value: Normalized::clamped(0.5),
+                });
+            }
+        });
+        assert_eq!(list.events().len(), 6);
+        assert_eq!(list.refused(), 0);
+    }
+
     /// **A SysEx message past the pool or past a buffer is refused and
     /// counted, and nothing allocates.** A reserved output list holds
     /// `SYSEX_POOL_BUFFERS` buffers of `SYSEX_BUFFER_BYTES`: a message longer
@@ -3787,7 +3939,7 @@ mod tests {
         for channel in [3, 4] {
             list.add_midi(&(at(0), midi::note_on(MidiChannel::of(channel), 60, 0x8000)));
         }
-        list.take_events();
+        list.clear();
         list.add_midi(&(
             at(0),
             midi::registered(
@@ -4429,7 +4581,7 @@ mod tests {
         let mut list = InputEventList::new();
         // The note sounds first: a pressure with no note is held.
         list.add_midi(&midi1_event(&[0x93, 60, 100]));
-        list.take_events();
+        list.clear();
         list.add_midi(&event);
         assert!(matches!(list.events()[0], ClapEvent::NoteExpression(_)));
     }

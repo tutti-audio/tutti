@@ -245,19 +245,15 @@ mod tests {
         assert_eq!(got, [Request::IoChanged]);
     }
 
-    /// A resize request is its width and height as one value: the last
-    /// request is the one a take reads, never the width of one and the height
-    /// of another.
+    /// A take returns the last resize request once, then none.
     #[test]
-    fn a_resize_request_keeps_its_width_and_height_together() {
+    fn a_resize_request_is_taken_once() {
         let state = HostState::new(tutti_fixtures::main_thread());
-        assert_eq!(
-            state.gui.resize_request.load(),
-            super::super::state::NO_RESIZE
-        );
+        assert_eq!(state.gui.take_resize(), None);
         assert!(state.gui_request_resize(640, 480));
         assert!(state.gui_request_resize(800, 600));
-        assert_eq!(state.gui.resize_request.load(), [800, 600]);
+        assert_eq!(state.gui.take_resize(), Some([800, 600]));
+        assert_eq!(state.gui.take_resize(), None);
     }
 
     /// Two rescans between takes keep both requests, each once.

@@ -37,6 +37,9 @@ use std::sync::{Mutex, MutexGuard};
 use tutti_rt::LockExt;
 
 use crate::support;
+
+/// The rate `Probe::activate` activates at.
+const PROBE_RATE: f64 = 48_000.0;
 use support::active::{Activate, Active, ActiveExt, drive_block};
 use support::logs::plugin_events;
 use support::main_thread;
@@ -89,7 +92,7 @@ impl Probe {
     /// Load + activate the reference plugin through the real host.
     fn activate(&self) -> Active<f32> {
         self.load()
-            .activate_at::<f32>(48_000.0, 512)
+            .activate_at::<f32>(PROBE_RATE, 512)
             .map_err(|(_, e)| e)
             .expect("reference plugin should activate")
     }
@@ -531,8 +534,11 @@ fn a_sample_rate_change_deactivates_and_reactivates_the_plugin() {
     let mut inst = probe.activate();
     drive_block(&mut inst, 64, &ClapProcessContext::default());
 
-    // `Probe::activate` runs at 48 kHz.
-    let target = 44_100.0;
+    let target = if PROBE_RATE == 44_100.0 {
+        48_000.0
+    } else {
+        44_100.0
+    };
 
     // Clear the first activation so the counts below can only come from the
     // rate change. Same discipline as the restart test.
