@@ -78,6 +78,17 @@ impl ClockNode {
     }
 }
 
+impl ClockNode {
+    /// This node stating the meter `meter` reads as Set Time Signature when
+    /// [`ClockControls::set_send_flex`] is on: a reader of the project meter,
+    /// registered on the control side. A node without one sends no meter.
+    #[must_use]
+    pub fn with_meter(mut self, meter: tutti_rt::Reader<tutti_types::MeterMap>) -> Self {
+        self.master = self.master.with_meter(meter);
+        self
+    }
+}
+
 impl Node for ClockNode {
     /// No audio; one event output of [`CLOCK_EVENT_CAPACITY`].
     fn shape(&self) -> Shape {

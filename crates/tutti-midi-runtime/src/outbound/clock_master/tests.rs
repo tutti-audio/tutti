@@ -6,7 +6,7 @@ use std::sync::atomic::AtomicBool as StdAtomicBool;
 use tutti_graph::UmpAt;
 use tutti_midi_protocol::SmpteFrameRate;
 use tutti_types::{Bpm, Seconds};
-use tutti_ump::{Message, MidiGroup, System};
+use tutti_ump::{Flex, Message, MidiGroup, System};
 
 /// The System message a packet carries.
 fn system(ump: Ump) -> Option<System> {
@@ -961,19 +961,22 @@ fn every_event_goes_out_on_the_masters_group() {
 }
 
 /// **Every combination of the settings word reads back as written**: enabled,
-/// MTC and each frame rate, so the control side's three fields are one word
-/// the audio side decodes whole.
+/// MTC, Flex and each frame rate, so the control side's four fields are one
+/// word the audio side decodes whole.
 #[test]
 fn the_settings_word_round_trips_every_combination() {
     for enabled in [false, true] {
         for send_mtc in [false, true] {
-            for fps in MtcRate::ALL {
-                let settings = Settings {
-                    enabled,
-                    send_mtc,
-                    fps,
-                };
-                assert_eq!(Settings::from_bits(settings.bits()), settings);
+            for send_flex in [false, true] {
+                for fps in MtcRate::ALL {
+                    let settings = Settings {
+                        enabled,
+                        send_mtc,
+                        send_flex,
+                        fps,
+                    };
+                    assert_eq!(Settings::from_bits(settings.bits()), settings);
+                }
             }
         }
     }
@@ -1144,4 +1147,199 @@ fn no_full_message_is_sent_with_mtc_off() {
     transport.set_beat(80.0);
     rig.tick(512);
     assert!(full_messages(&drain_all(&cons)).is_empty());
+}
+
+// --- Flex Set Tempo and Set Time Signature ----------------------------------
+
+use tutti_transport::ProjectMeter;
+use tutti_types::{MeterChange, MeterMap, TimeSignature};
+
+/// A master on the first Group at 48 kHz, its clock bytes on or off, Flex on,
+/// reading the meter of the returned project meter (4/4 until set).
+fn flex_master(clock: bool) -> (ClockMaster, ProjectMeter, Collected) {
+    let meter = ProjectMeter::default();
+    let (cm, controls) = ClockMaster::new(MidiGroup::FIRST, SampleRate::SR_48K);
+    controls.set_enabled(clock);
+    controls.set_send_flex(true);
+    (cm.with_meter(meter.reader()), meter, Collected::default())
+}
+
+/// One block of `frames` frames at `beat` and `tempo`, playing.
+fn play(cm: &mut ClockMaster, out: &Collected, tempo: f64, beat: f64, frames: usize) {
+    let transport = TransportPosition::new(true, Bpm::of(tempo), Beat(beat), None);
+    cm.tick(&transport, Samples(frames), &mut |e| {
+        out.0.lock().unwrap().push(e);
+    });
+}
+
+/// The Flex messages of `events` as `(frame, message)`, in order.
+fn flexes(events: &[UmpAt]) -> Vec<(u32, Flex)> {
+    events
+        .iter()
+        .filter_map(|(at, ump)| match ump.decode() {
+            Ok(Message::Flex(group, flex)) => {
+                assert_eq!(group, MidiGroup::FIRST, "addressed to the group");
+                Some((at.get(), flex))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn time_signature(numerator: u8, denominator: u8) -> Flex {
+    Flex::SetTimeSignature(tutti_ump::FlexTimeSignature {
+        numerator,
+        denominator,
+        thirty_seconds: 8,
+    })
+}
+
+/// Tempo 120 for 2 500 frames (ticks every 1 000 frames: 24 000 frames a beat
+/// over 24), then 150 from beat 2 500 / 24 000 (800 frames a tick; the next
+/// tick, 3 / 24 beat, is (3 / 24 - 2 500 / 24 000) x 19 200 = 400 frames in).
+/// Set Tempo goes out for 120 on the start beat's tick and for 150 on frame
+/// 400, with the Timing Clock of that tick, and on no frame between ticks.
+/// Spec: m2-104/7.5.3#2
+#[test]
+fn set_tempo_with_clock_goes_out_on_a_tick() {
+    let (mut cm, _meter, out) = flex_master(true);
+    play(&mut cm, &out, 120.0, 0.0, 2_500);
+    let first = drain_all(&out);
+    assert_eq!(flexes(&first)[0], (0, Flex::SetTempo(50_000_000)));
+    play(&mut cm, &out, 150.0, 2_500.0 / 24_000.0, 2_000);
+    let second = drain_all(&out);
+    let tempo: Vec<_> = flexes(&second)
+        .into_iter()
+        .filter(|(_, f)| matches!(f, Flex::SetTempo(_)))
+        .collect();
+    assert_eq!(tempo, [(400, Flex::SetTempo(40_000_000))]);
+    let ticks: Vec<u32> = second
+        .iter()
+        .filter(|e| is_status(e, 0xF8))
+        .map(|e| e.0.get())
+        .collect();
+    assert_eq!(ticks, [400, 1_200]);
+}
+
+/// The same with the clock bytes off: no Timing Clock is sent, and Set Tempo
+/// still waits for the 24-PPQN grid (frame 400), not the segment's first frame.
+/// Spec: m2-104/7.5.3#3
+#[test]
+fn set_tempo_without_clock_goes_out_on_the_tick_grid() {
+    let (mut cm, _meter, out) = flex_master(false);
+    play(&mut cm, &out, 120.0, 0.0, 2_500);
+    let first = drain_all(&out);
+    assert_eq!(flexes(&first)[0], (0, Flex::SetTempo(50_000_000)));
+    play(&mut cm, &out, 150.0, 2_500.0 / 24_000.0, 2_000);
+    let second = drain_all(&out);
+    assert!(
+        second.iter().all(|e| !is_status(e, 0xF8)),
+        "no clock bytes with the clock off"
+    );
+    let tempo: Vec<_> = flexes(&second)
+        .into_iter()
+        .filter(|(_, f)| matches!(f, Flex::SetTempo(_)))
+        .collect();
+    assert_eq!(tempo, [(400, Flex::SetTempo(40_000_000))]);
+}
+
+/// A tempo that stays is stated once, not on every tick or block.
+/// Spec: m2-104/7.5.3#3
+#[test]
+fn an_unchanged_tempo_is_not_restated() {
+    let (mut cm, _meter, out) = flex_master(false);
+    play(&mut cm, &out, 120.0, 0.0, 2_400);
+    play(&mut cm, &out, 120.0, 0.1, 2_400);
+    let tempo = flexes(&drain_all(&out))
+        .into_iter()
+        .filter(|(_, f)| matches!(f, Flex::SetTempo(_)))
+        .count();
+    assert_eq!(tempo, 1);
+}
+
+/// 4/4 from the top is stated on frame 0 (a bar boundary); a 3/4 meter
+/// published at beat 1.5 (36 000 frames at 120 bpm, 48 kHz) is stated on the
+/// next bar boundary of the new meter, beat 3, frame (3 - 1.5) x 24 000 =
+/// 36 000 of the block that starts at 1.5, and on no frame before it.
+/// Spec: m2-104/7.5.4#1
+#[test]
+fn set_time_signature_with_clock_goes_out_on_a_bar_boundary() {
+    let (mut cm, meter, out) = flex_master(true);
+    play(&mut cm, &out, 120.0, 0.0, 36_000);
+    let first = flexes(&drain_all(&out));
+    assert_eq!(
+        first
+            .iter()
+            .filter(|(_, f)| *f == time_signature(4, 2))
+            .count(),
+        1
+    );
+    meter.set_meter(MeterMap::new([MeterChange::new(
+        Beat(0.0),
+        TimeSignature::of(3, 4),
+    )]));
+    play(&mut cm, &out, 120.0, 1.5, 48_000);
+    let second: Vec<_> = flexes(&drain_all(&out))
+        .into_iter()
+        .filter(|(_, f)| matches!(f, Flex::SetTimeSignature(_)))
+        .collect();
+    assert_eq!(second, [(36_000, time_signature(3, 2))]);
+}
+
+/// The same with the clock bytes off.
+/// Spec: m2-104/7.5.4#2
+#[test]
+fn set_time_signature_without_clock_goes_out_on_a_bar_boundary() {
+    let (mut cm, meter, out) = flex_master(false);
+    play(&mut cm, &out, 120.0, 0.0, 36_000);
+    let first = flexes(&drain_all(&out));
+    assert!(first.contains(&(0, time_signature(4, 2))));
+    meter.set_meter(MeterMap::new([MeterChange::new(
+        Beat(0.0),
+        TimeSignature::of(7, 8),
+    )]));
+    // 7/8 is 3.5 beats a bar: the boundary after beat 1.5 is beat 3.5, frame
+    // (3.5 - 1.5) x 24 000 = 48 000 of the block; 7/8 wire is 7 over 2^3.
+    play(&mut cm, &out, 120.0, 1.5, 60_000);
+    let second: Vec<_> = flexes(&drain_all(&out))
+        .into_iter()
+        .filter(|(_, f)| matches!(f, Flex::SetTimeSignature(_)))
+        .collect();
+    assert_eq!(second, [(48_000, time_signature(7, 3))]);
+}
+
+/// A Continue mid-bar states the tempo on its first tick (beat 1 is tick 24,
+/// frame 0) and the meter on the next bar boundary, beat 4, frame
+/// (4 - 1) x 24 000 = 72 000, never off a bar boundary.
+/// Spec: m2-104/7.5.4#1
+#[test]
+fn a_start_mid_bar_states_the_meter_at_the_next_bar() {
+    let (mut cm, _meter, out) = flex_master(true);
+    play(&mut cm, &out, 120.0, 1.0, 80_000);
+    let sent = flexes(&drain_all(&out));
+    assert_eq!(
+        sent,
+        [
+            (0, Flex::SetTempo(50_000_000)),
+            (72_000, time_signature(4, 2)),
+        ]
+    );
+}
+
+/// Flex is off until set: a clock with the tempo changing and a meter set
+/// sends no Flex Data.
+/// Spec: m2-104/7.5.3#2
+#[test]
+fn no_flex_is_sent_unless_enabled() {
+    let meter = ProjectMeter::default();
+    let (cm, controls) = ClockMaster::new(MidiGroup::FIRST, SampleRate::SR_48K);
+    controls.set_enabled(true);
+    assert!(!controls.sends_flex());
+    let mut cm = cm.with_meter(meter.reader());
+    let out = Collected::default();
+    play(&mut cm, &out, 120.0, 0.0, 48_000);
+    play(&mut cm, &out, 150.0, 2.0, 48_000);
+    let events = drain_all(&out);
+    assert!(flexes(&events).is_empty());
+    assert!(events.iter().any(|e| is_status(e, 0xF8)), "the clock ran");
 }

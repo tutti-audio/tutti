@@ -71,11 +71,13 @@ fn the_border_nodes_process_without_allocating() {
         .insert(
             NodeKey(3),
             "clock",
-            ClockNode::new(tutti_ump::MidiGroup::FIRST, tutti_types::SampleRate::SR_48K),
+            ClockNode::new(tutti_ump::MidiGroup::FIRST, tutti_types::SampleRate::SR_48K)
+                .with_meter(tutti_transport::ProjectMeter::default().reader()),
         )
         .controls;
     let mut out = common::sink(&mut ed, 1, &[(1, 0), (1, 3), (2, 0), (3, 0)]);
     clock.set_enabled(true);
+    clock.set_send_flex(true);
     ed.commit().unwrap();
     let t = TransportPosition::new(true, Bpm::of(120.0), Beat(0.0), None);
     let mut drain = [(0, Ump([0; 4])); 256];

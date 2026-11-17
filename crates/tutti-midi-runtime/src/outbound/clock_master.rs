@@ -36,6 +36,15 @@
 //! as after any locate. The restarted grid puts its first piece 0 on the next
 //! even frame of the timeline from the wrapped beat, so a loop start that is
 //! not on an even frame leaves up to two frames with no quarter-frames.
+//! - **Set Tempo** and **Set Time Signature** (Flex Data, M2-104 §7.5.3 and
+//!   §7.5.4; off until [`ClockControls::set_send_flex`]), on the clock's Group,
+//!   with or without the clock bytes enabled. Set Tempo goes out on the first
+//!   24-PPQN tick position at or after the tempo in force changes, Set Time
+//!   Signature on the first bar boundary at or after the meter in force
+//!   changes. Where playback starts the tempo goes out on the first tick
+//!   position (the start beat's own, when it is on one) and the meter on the
+//!   first bar boundary: a start from the top is both, a Continue mid-bar
+//!   states the meter at the next bar boundary, never off a boundary.
 //! - **MTC quarter-frames** (0xF1) at frame-rate×4, cycling the 8 SMPTE nibbles
 //!   (when `send_mtc` is set).
 //! - **MTC Full Messages** (Real Time `01 01`, when `send_mtc` is set) on every
@@ -47,14 +56,17 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use tutti_graph::{Losses, Offset, TransportPosition, UmpAt};
-use tutti_rt::{Counter, CounterWriter, counter};
+use tutti_rt::{Counter, CounterWriter, Reader, counter};
 use tutti_types::{
-    AtomicSampleRate, Beat, BeatDuration, LoopRange, Pass, PassEnd, SampleRate, Samples, Seconds,
-    first_frame_at_or_after,
+    AtomicSampleRate, BarCount, Beat, BeatDuration, Bpm, LoopRange, Meter, MeterMap, Pass, PassEnd,
+    SampleRate, Samples, Seconds, TimeSignature, first_frame_at_or_after,
 };
-use tutti_ump::{Message, MidiGroup, System, U7, Ump};
+use tutti_ump::{Flex, Message, MidiGroup, System, U7, Ump};
 
-use tutti_midi_protocol::{MtcFullMessage, MtcRate, MtcTimeCode, SmpteTimecode, song_position};
+use tutti_midi_protocol::{
+    MtcFullMessage, MtcRate, MtcTimeCode, SmpteTimecode, flex_tempo_field,
+    flex_time_signature_wire, song_position,
+};
 
 /// Below this beat, a play edge is treated as "from the top" → Start (0xFA)
 /// rather than Continue (0xFB). Wide enough to absorb float jitter at beat 0.
@@ -64,27 +76,31 @@ const START_EPSILON_BEATS: f64 = 1e-6;
 /// fresh Song Position.
 const SEEK_EPSILON_BEATS: f64 = 1e-3;
 
-/// What a control thread sets on a clock: enabled, MTC on or off, and the
-/// SMPTE frame rate. One value in one word (an `AtomicU32`), so the audio
-/// thread reads the three of one store, never a mix of two.
+/// What a control thread sets on a clock: enabled, MTC on or off, Flex tempo
+/// and meter on or off, and the SMPTE frame rate. One value in one word (an
+/// `AtomicU32`), so the audio thread reads them of one store, never a mix of
+/// two.
 ///
-/// Layout of the word: bit 0 is enabled, bit 1 is MTC, bits 8 to 15 are the
-/// MTC rate's two-bit code ([`MtcRate::code`]).
+/// Layout of the word: bit 0 is enabled, bit 1 is MTC, bit 2 is Flex, bits 8
+/// to 15 are the MTC rate's two-bit code ([`MtcRate::code`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Settings {
     enabled: bool,
     send_mtc: bool,
+    send_flex: bool,
     fps: MtcRate,
 }
 
 impl Settings {
     const ENABLED: u32 = 1;
     const SEND_MTC: u32 = 1 << 1;
+    const SEND_FLEX: u32 = 1 << 2;
     const FPS_SHIFT: u32 = 8;
 
     const OFF: Self = Self {
         enabled: false,
         send_mtc: false,
+        send_flex: false,
         fps: MtcRate::Fps25,
     };
 
@@ -96,6 +112,9 @@ impl Settings {
         if self.send_mtc {
             word |= Self::SEND_MTC;
         }
+        if self.send_flex {
+            word |= Self::SEND_FLEX;
+        }
         word
     }
 
@@ -106,6 +125,7 @@ impl Settings {
         Self {
             enabled: word & Self::ENABLED != 0,
             send_mtc: word & Self::SEND_MTC != 0,
+            send_flex: word & Self::SEND_FLEX != 0,
             fps: MtcRate::masked((word >> Self::FPS_SHIFT) as u8),
         }
     }
@@ -159,6 +179,22 @@ impl ClockControls {
     /// other here rather than filtering downstream.
     pub fn set_send_mtc(&self, send: bool) {
         self.update(|s| s.send_mtc = send);
+    }
+
+    /// Turn the Flex Data tempo and meter on or off, independently of
+    /// [`set_enabled`](Self::set_enabled): a Set Tempo (M2-104 §7.5.3) when the
+    /// tempo in force changes, a Set Time Signature (§7.5.4) when the meter
+    /// does, each on the Group, at the times the module docs give. Off by
+    /// default. The meter is sent only by a clock built with
+    /// [`ClockMaster::with_meter`].
+    pub fn set_send_flex(&self, send: bool) {
+        self.update(|s| s.send_flex = send);
+    }
+
+    /// Whether the Flex tempo and meter are on.
+    #[must_use]
+    pub fn sends_flex(&self) -> bool {
+        self.settings().send_flex
     }
 
     /// Sets the SMPTE frame rate the MTC quarter-frames are denominated in.
@@ -241,6 +277,33 @@ pub struct ClockMaster {
     prev: PrevTick,
     /// The MTC quarter-frame grid.
     mtc: MtcGrid,
+    /// The project meter, read once per pass when Flex is on; `None` sends no
+    /// Set Time Signature.
+    meter: Option<Reader<MeterMap>>,
+    /// What the Flex messages last stated.
+    flex: FlexOut,
+}
+
+/// What the Flex output has stated to the receiver, and what it has seen of
+/// the transport.
+#[derive(Debug)]
+struct FlexOut {
+    /// `playing` at the previous tick, whatever the settings: a start states
+    /// tempo and meter afresh.
+    was_playing: bool,
+    /// The Set Tempo field last sent; `None` before the first, after a start
+    /// and while Flex is off.
+    tempo: Option<u32>,
+    /// The meter last sent, under the same reset.
+    meter: Option<TimeSignature>,
+}
+
+impl FlexOut {
+    const SILENT: Self = Self {
+        was_playing: false,
+        tempo: None,
+        meter: None,
+    };
 }
 
 /// The transport as the previous tick saw it, for edge and locate detection.
@@ -341,8 +404,19 @@ impl ClockMaster {
                 cued: None,
             },
             mtc: MtcGrid::RESTARTED,
+            meter: None,
+            flex: FlexOut::SILENT,
         };
         (master, controls)
+    }
+
+    /// This master stating the meter `meter` reads (a reader of the project
+    /// meter's cell) as Set Time Signature when Flex is on. A master without
+    /// one sends no meter.
+    #[must_use]
+    pub fn with_meter(mut self, meter: Reader<MeterMap>) -> Self {
+        self.meter = Some(meter);
+        self
     }
 
     /// Adds `n` to [`ClockControls::losses`].
@@ -442,6 +516,31 @@ impl ClockMaster {
         if settings.fps != self.fps {
             self.rebase_mtc(self.sample_rate, self.fps, self.sample_rate);
             self.fps = settings.fps;
+        }
+        // A start states tempo and meter afresh; Flex off forgets them, so a
+        // later enable states them too.
+        let flex_started = transport.playing && !self.flex.was_playing;
+        self.flex.was_playing = transport.playing;
+        if flex_started || !settings.send_flex {
+            self.flex.tempo = None;
+            self.flex.meter = None;
+        }
+        if !settings.enabled && settings.send_flex && block_size != 0 {
+            // Flex alone: no clock bytes, and the clock's own edge and locate
+            // state is left as it was.
+            if transport.playing {
+                let beats_per_sample = tutti_types::beats_per_sample(transport.tempo, sample_rate);
+                let region = transport
+                    .looping
+                    .and_then(|l| LoopRange::new(l.start, l.end));
+                let mut clock = transport.clock(sample_rate);
+                for pass in clock.passes(Samples(block_size), region) {
+                    self.send_flex(&pass, block_size, beats_per_sample, transport.tempo, emit);
+                }
+            }
+            self.prev.playing = transport.playing;
+            self.prev.wrapped = false;
+            return;
         }
         if !settings.enabled || block_size == 0 {
             // Keep prev.playing honest so re-enabling mid-playback emits a fresh
@@ -550,6 +649,9 @@ impl ClockMaster {
                 self.restart_mtc();
             }
             self.tick_clock(&pass, block_size, beats_per_sample, emit);
+            if settings.send_flex {
+                self.send_flex(&pass, block_size, beats_per_sample, tempo, emit);
+            }
             if settings.send_mtc {
                 self.tick_mtc(&pass, block_size, sample_rate, beats_per_sample, emit);
             }
@@ -611,25 +713,69 @@ impl ClockMaster {
         beats_per_sample: BeatDuration,
         emit: &mut impl FnMut(UmpAt),
     ) {
-        let tick_beats = BeatDuration(1.0 / f64::from(System::TIMING_CLOCKS_PER_QUARTER));
-        // The tick at or before the pass's first beat: its frame is 0 (on the
-        // beat, within the rule's tolerance) or before the pass (already
-        // sent, or behind an off-tick start).
-        let mut tick_idx = (pass.beat.get() / tick_beats.get()).floor() as i64;
+        for k in tick_frames(pass, beats_per_sample) {
+            emit((
+                frame_offset(pass.start.get() + k, block_size),
+                self.system(System::TimingClock),
+            ));
+        }
+    }
+
+    /// Emit the Flex tempo and meter due in `pass`: a Set Tempo on the first
+    /// 24-PPQN tick frame (the grid [`tick_clock`](Self::tick_clock) places) if
+    /// `tempo` is not what was last stated, and a Set Time Signature on each
+    /// bar boundary whose meter is not. The tempo is the segment's, constant
+    /// over the pass, so a change waits for the first tick at or after the
+    /// segment's start, in this pass or a later one. The meter is lent once
+    /// for the pass.
+    fn send_flex(
+        &mut self,
+        pass: &Pass,
+        block_size: usize,
+        beats_per_sample: BeatDuration,
+        tempo: Bpm,
+        emit: &mut impl FnMut(UmpAt),
+    ) {
+        let field = flex_tempo_field(tempo);
+        if self.flex.tempo != Some(field)
+            && let Some(k) = tick_frames(pass, beats_per_sample).next()
+        {
+            emit((
+                frame_offset(pass.start.get() + k, block_size),
+                Message::Flex(self.group, Flex::SetTempo(field)).into(),
+            ));
+            self.flex.tempo = Some(field);
+        }
+        let Some(reader) = self.meter.as_mut() else {
+            return;
+        };
+        let meter = reader.lend();
+        let mut boundary = {
+            let at = meter.bar_at(pass.beat);
+            if at.is_downbeat() {
+                at.bar_start
+            } else {
+                meter.bar_start(at.bar + BarCount(1))
+            }
+        };
         loop {
-            let tick_beat = Beat(tick_idx as f64 * tick_beats.get());
-            let k = first_frame_at_or_after((tick_beat - pass.beat) / beats_per_sample);
-            tick_idx += 1;
-            if k < 0 {
-                continue;
-            }
-            match usize::try_from(k) {
-                Ok(k) if k < pass.len.get() => emit((
+            let k = first_frame_at_or_after((boundary - pass.beat) / beats_per_sample).max(0);
+            let Some(k) = usize::try_from(k).ok().filter(|&k| k < pass.len.get()) else {
+                break;
+            };
+            let signature = meter.at(boundary);
+            if self.flex.meter != Some(signature) {
+                emit((
                     frame_offset(pass.start.get() + k, block_size),
-                    self.system(System::TimingClock),
-                )),
-                _ => break,
+                    Message::Flex(
+                        self.group,
+                        Flex::SetTimeSignature(flex_time_signature_wire(signature)),
+                    )
+                    .into(),
+                ));
+                self.flex.meter = Some(signature);
             }
+            boundary = meter.bar_start(meter.bar_at(boundary).bar + BarCount(1));
         }
     }
 
@@ -713,6 +859,29 @@ impl ClockMaster {
         self.mtc.next = next;
         self.mtc.frames = at + len as u64;
     }
+}
+
+/// The frames of `pass`, in order, that a 24-PPQN tick falls on: the first
+/// frame at or after beat `k / 24` (`first_frame_at_or_after`) for each tick
+/// `k` the pass reaches, compared as integer frames so a tick on a block
+/// boundary is reached on the next block's first frame, not both.
+fn tick_frames(pass: &Pass, beats_per_sample: BeatDuration) -> impl Iterator<Item = usize> {
+    let tick_beats = BeatDuration(1.0 / f64::from(System::TIMING_CLOCKS_PER_QUARTER));
+    let (beat, len) = (pass.beat, pass.len.get());
+    // The tick at or before the pass's first beat: its frame is 0 (on the
+    // beat, within the rule's tolerance) or before the pass (already sent, or
+    // behind an off-tick start).
+    let mut tick_idx = (beat.get() / tick_beats.get()).floor() as i64;
+    std::iter::from_fn(move || {
+        loop {
+            let tick_beat = Beat(tick_idx as f64 * tick_beats.get());
+            let k = first_frame_at_or_after((tick_beat - beat) / beats_per_sample);
+            tick_idx += 1;
+            if k >= 0 {
+                return usize::try_from(k).ok().filter(|&k| k < len);
+            }
+        }
+    })
 }
 
 /// A frame index as an event's offset in a block of `block_size` frames. Every
