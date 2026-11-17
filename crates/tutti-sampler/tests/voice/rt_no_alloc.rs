@@ -483,7 +483,7 @@ fn wraps_without_allocating<N: Node>(node: N) {
         ));
         direct.set_block_len(len);
         direct.block();
-        heard.extend_from_slice(direct.output(0));
+        heard.extend_from_slice(direct.output().plane(0).samples());
         clock.advance(tutti_types::Samples(len), Some(region));
         clock.beat() < before
     };
@@ -738,7 +738,14 @@ fn six_channel_clip_reaches_six_reader_outputs_without_allocating() {
 
     // Every channel carries the material, not just the front pair.
     for c in 0..6 {
-        let energy: f32 = rig.direct.output(c).iter().map(|s| s.abs()).sum();
+        let energy: f32 = rig
+            .direct
+            .output()
+            .plane(c)
+            .samples()
+            .iter()
+            .map(|s| s.abs())
+            .sum();
         assert!(
             energy > 0.0,
             "channel {c} produced silence — a width was dropped at a seam"
@@ -1150,7 +1157,7 @@ fn update_loop_drain_is_allocation_free_at_six_channels() {
 /// `AddVoice` doc spells out — a command that carries a `Voice` or a stretch
 /// filter has to be *built* on the control thread, or the callback pays for it.
 ///
-/// A node's placement is a `Copy` window in an `ArcLend` cell, read once
+/// A node's placement is a `Copy` window in a `Publisher` cell, read once
 /// per block and applied as a field write when it changed, so this should be
 /// free. "Should be" is exactly the kind of claim this file exists to convert
 /// into a measurement.

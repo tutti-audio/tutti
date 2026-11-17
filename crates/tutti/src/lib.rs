@@ -241,20 +241,21 @@ pub mod nodes {
     };
     pub use tutti_nodes::{
         BAND_PARAMS, BitCrusherConfig, BitCrusherControls, BitCrusherNode, BrickwallLimiterNode,
-        BusStripNode, ButterworthOrder, ChannelTimes, ChannelTimesError, ClickSettings, ClickState,
-        CompressorControls, CompressorNode, ConvolverError, ConvolverNode, CrossoverControls,
-        CrossoverError, CrossoverNode, CutAlignment, CutFilterConfig, CutFilterControls,
-        CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerControls, DcBlockerNode,
-        DelayControls, DelayLayout, DelayNode, DistortionNode, EnvelopeFollowerNode, EqBandNode,
-        FdnControls, FdnLayout, FdnNode, FreeverbControls, FreeverbNode, GateControls, GateNode,
-        HrtfBinauralNode, InterpolationMode, IrLayout, KeyFilter, KeySource, LadderControls,
-        LadderFilterNode, LadderType, LfoClock, LfoNode, LimiterControls, LimiterNode,
-        MetronomeMode, ModDelayControls, ModDelayNode, MultibandCompressorNode, MultibandControls,
-        NoteEnvelopeNode, OscillatorNode, OversamplingFactor, PhaserControls, PhaserNode, PortSide,
-        Routing as FeedbackRouting, RoutingError as FeedbackRoutingError, SOURCE_EVENT_CAPACITY,
-        ShapeKind, SourceNode, SourcePorts, Stages, StagesError, Stagger, StaggerError,
-        SvfControls, SvfFilterNode, SvfType, Sweep, SweepError, SweepRange, SweepRangeError,
-        VbapError, VbapPannerNode, VolumeOutOfRange,
+        BusStripNode, ButterworthOrder, ChannelTimes, ChannelTimesError, ClickConfig,
+        ClickSettings, ClickState, CompressorControls, CompressorNode, ConvolverError,
+        ConvolverNode, CrossoverControls, CrossoverError, CrossoverNode, CutAlignment,
+        CutFilterConfig, CutFilterControls, CutFilterNode, CutResponse, DcBlockerConfig,
+        DcBlockerControls, DcBlockerNode, DelayControls, DelayLayout, DelayNode, DistortionNode,
+        EnvelopeFollowerNode, EqBandNode, FdnControls, FdnLayout, FdnNode, FreeverbControls,
+        FreeverbNode, GateControls, GateNode, HrtfBinauralNode, InterpolationMode, IrLayout,
+        KeyFilter, KeySource, LadderControls, LadderFilterNode, LadderType, LfoClock, LfoNode,
+        LimiterControls, LimiterNode, MetronomeMode, ModDelayControls, ModDelayNode,
+        MultibandCompressorNode, MultibandControls, NoteEnvelopeNode, OscillatorNode,
+        OversamplingFactor, PhaserControls, PhaserNode, PortSide, Routing as FeedbackRouting,
+        RoutingError as FeedbackRoutingError, SOURCE_EVENT_CAPACITY, ShapeKind, SourceNode,
+        SourcePorts, Stages, StagesError, Stagger, StaggerError, SvfControls, SvfFilterNode,
+        SvfType, Sweep, SweepError, SweepRange, SweepRangeError, VbapError, VbapPannerNode,
+        VolumeOutOfRange,
     };
     pub use tutti_nodes::{
         BitCrusherKernel, BrickwallKernel, CompressorKernel, Control, ControlLanes, ControlRead,
@@ -284,7 +285,7 @@ pub mod types {
     pub use tutti_curve::{Curvature, CurvatureError, Exponent, ExponentError, Law, Piece};
     pub use tutti_rt::{
         Count, Counter, CounterWriter, Drained, Gauge, GaugeWriter, LevelSpan, Panicked, PosFrame,
-        Reading, Reclaim, Tally, TallyWriter, Words,
+        Reading, Reclaim, Setting, SettingWord, Tally, TallyWriter, Words,
     };
     pub use tutti_types::{
         Adsr, AmbisonicFormat, AmbisonicNormalization, AmbisonicOrder, AmbisonicOrderOutOfRange,
@@ -559,8 +560,8 @@ pub mod plugin {
     };
     pub use tutti_plugin_db::ScanBusy;
     pub use tutti_plugin_db::{
-        BlacklistedFile, Delta, FileFacts, FileFailure, FileRow, FileState, FilesError,
-        PluginEntry, ProbeFailure, ProbeFailureKind, ScanPhase, ScanProgress,
+        BlacklistedFile, FileFacts, FileFailure, FileRow, FileState, FilesError, PluginEntry,
+        ProbeFailure, ProbeFailureKind, RowChange, ScanError, ScanProgress,
     };
     pub use tutti_plugin_host::RebindError;
     pub use tutti_plugin_ipc::RandomSourceError;
@@ -723,18 +724,19 @@ pub mod midi {
             NotAChunkNo, NotAPeChannel, NotAPriority, NotARequestId, NotASimultaneousRequests,
             NotAStateSize, NotAStepCount, NotAStreamLimit, NotATimeoutWait, NotSignificantBits,
             NotUnixSeconds, NotValid, NotVendorName, OpaqueBody, PaginationFault, ParamPath,
-            PartialError, PartialUpdate, PeAllCtrlEntry, PeAllCtrlList, PeAnswer, PeBankProgram,
-            PeBasicChannelRx, PeBasicChannelTx, PeBodyError, PeCapabilities, PeCapabilitiesFailure,
-            PeChCtrlEntry, PeChCtrlList, PeChannel, PeChannelEntry, PeChannelList, PeChannelMode,
-            PeChunkError, PeCluster, PeColumn, PeController, PeCtrl, PeCtrlMapEntry, PeCtrlMapList,
-            PeCurrentMode, PeData, PeDataError, PeDataFault, PeDecimal, PeDeviceInfo, PeEncoding,
-            PeEndedBy, PeError, PeExtensions, PeExternalSync, PeExtra, PeExtraError, PeFlowControl,
-            PeHeaderError, PeHeaderTooLong, PeJson, PeJsonError, PeJsonSchema, PeLink, PeLocalOn,
-            PeMessage, PeMidiMode, PeModeEntry, PeModeList, PeObject, PeOpaque, PeOutcome, PePage,
-            PeProgramEntry, PeProgramList, PeReassemblyError, PeReply, PeRequestId, PeResource,
-            PeResourceList, PeResponse, PeSignal, PeState, PeStateEntry, PeStateList, PeStatus,
-            PeStatusClass, PeTerminator, PeText, PeTransaction, PeUnreadable, PeVersion, Priority,
-            PropertyName, RefusedAt, RequestRefused, ResIdUse, ResourceDefaults, ResourceEntry,
+            PartialError, PartialUpdate, PartialValue, PeAllCtrlEntry, PeAllCtrlList, PeAnswer,
+            PeBankProgram, PeBasicChannelRx, PeBasicChannelTx, PeBodyError, PeCapabilities,
+            PeCapabilitiesFailure, PeChCtrlEntry, PeChCtrlList, PeChannel, PeChannelEntry,
+            PeChannelList, PeChannelMode, PeChunkError, PeCluster, PeColumn, PeController, PeCtrl,
+            PeCtrlMapEntry, PeCtrlMapList, PeCurrentMode, PeData, PeDataError, PeDataFault,
+            PeDecimal, PeDeviceInfo, PeEncoding, PeEndedBy, PeError, PeExtensions, PeExternalSync,
+            PeExtra, PeExtraError, PeFlowControl, PeHeaderError, PeHeaderTooLong, PeJson,
+            PeJsonError, PeJsonSchema, PeLink, PeLocalOn, PeMessage, PeMidiMode, PeModeEntry,
+            PeModeList, PeObject, PeOpaque, PeOutcome, PePage, PeProgramEntry, PeProgramList,
+            PeReassemblyError, PeReply, PeRequestId, PeResource, PeResourceList, PeResponse,
+            PeSignal, PeState, PeStateEntry, PeStateList, PeStatus, PeStatusClass, PeTerminator,
+            PeText, PeTransaction, PeUnreadable, PeVersion, Priority, PropertyName, RefusedAt,
+            RequestRefused, ResIdUse, ResourceDefaults, ResourceEntry, ResourceEntryBuilder,
             ResourceEvent, ResourceFailure, ResourceGet, ResourceId, ResourceName, ResourceSet,
             ResourceTarget, ResponderEvent, RoleName, SelectorAction, SetBody, SignificantBits,
             SimpleAction, SimultaneousRequests, StateId, StateRev, StateSize, StateStamp,

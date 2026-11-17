@@ -73,10 +73,7 @@ fn endpoint_of(blocks: &[FunctionBlock]) -> Endpoint {
         midi2: true,
         ..Capabilities::default()
     }));
-    blocks
-        .iter()
-        .cloned()
-        .fold(device, Endpoint::with_function_block)
+    blocks.iter().cloned().fold(device, Endpoint::block)
 }
 
 /// A negotiated UMP Endpoint with `blocks`, and the poll after the settle,
@@ -2011,7 +2008,7 @@ fn pe_limits() -> PeReassemblyLimits {
 
 fn local_on(on: bool) -> ResourceStore {
     let mut store = ResourceStore::new();
-    store.declare(ResourceEntry::new(PeResource::LocalOn).unwrap());
+    store.declare(ResourceEntry::builder(PeResource::LocalOn).build().unwrap());
     store
         .put(None, PeData::LocalOn(PeLocalOn(on)))
         .expect("declared");
@@ -2334,9 +2331,10 @@ fn a_lost_peer_drops_its_property_exchange() {
 fn subscribable() -> ResourceStore {
     let mut store = ResourceStore::new();
     store.declare(
-        ResourceEntry::new(PeResource::LocalOn)
-            .unwrap()
-            .with_can_subscribe(true),
+        ResourceEntry::builder(PeResource::LocalOn)
+            .can_subscribe(true)
+            .build()
+            .unwrap(),
     );
     store
         .put(None, PeData::LocalOn(PeLocalOn(true)))

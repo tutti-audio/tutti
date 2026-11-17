@@ -70,7 +70,7 @@ impl VirtualSpec {
     }
 
     /// The endpoint declaring `block`, replacing a block of the same number.
-    pub fn with_function_block(mut self, block: FunctionBlock) -> Self {
+    pub fn block(mut self, block: FunctionBlock) -> Self {
         self.blocks.retain(|held| held.id() != block.id());
         self.blocks.push(block);
         self

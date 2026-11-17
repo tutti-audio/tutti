@@ -140,7 +140,13 @@ impl Rig {
             play: PlayClock::ZERO,
         };
         self.frame += input.len() as u64;
-        drive_input(&mut self.node, &env, &[input], &[], &[])
+        drive_input(
+            &mut self.node,
+            &env,
+            Planes::new(&[input]).unwrap(),
+            &[],
+            &[],
+        )
     }
 }
 

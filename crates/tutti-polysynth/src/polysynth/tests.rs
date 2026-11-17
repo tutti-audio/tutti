@@ -6,6 +6,7 @@ use crate::{
     VoiceMode,
 };
 use std::num::NonZeroUsize;
+use tutti_buffers::Planes;
 use tutti_curve::Law;
 use tutti_fixtures::midi;
 use tutti_midi_protocol::{bend_to_signed_f32, velocity_to_unit_f32};
@@ -97,8 +98,14 @@ impl Hand {
             changes: tutti_graph::TransportChanges::NONE,
             play: tutti_graph::PlayClock::ZERO,
         };
-        let out =
-            tutti_graph::contract::drive_input(&mut self.synth, &env, &[], &[], &[&events]).audio;
+        let out = tutti_graph::contract::drive_input(
+            &mut self.synth,
+            &env,
+            Planes::default(),
+            &[],
+            &[&events],
+        )
+        .audio;
         for &(_, ump) in &past {
             self.synth.apply_midi(ump);
         }

@@ -2,6 +2,7 @@ use super::*;
 use crate::VoiceWindow;
 use crate::testing::MockTransport;
 use crate::testing::loop_frames;
+use tutti_buffers::Planes;
 use tutti_types::Bpm;
 use tutti_types::MaxBlock;
 use tutti_types::UnitParam;
@@ -488,7 +489,7 @@ fn a_stop_inside_a_block_silences_the_read_on_its_frame() {
         )
         .unwrap();
     env.changes = changes;
-    let out = tutti_graph::contract::drive_input(&mut u, &env, &[], &[], &[]).audio;
+    let out = tutti_graph::contract::drive_input(&mut u, &env, Planes::default(), &[], &[]).audio;
     assert!(
         out[0][..40].iter().all(|&s| s > 0.0),
         "plays up to the stop"

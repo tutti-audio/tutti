@@ -429,9 +429,9 @@ mod tests {
     }
 
     /// **A pointer `getBinary` returned stays readable after the key is set
-    /// again.** The lock is released on return, and the pointer used to name the
-    /// stored `Vec`, which `setBinary` dropped: a plugin that read it after the
-    /// sender reused the message read freed memory.
+    /// again.** The lock is released on return, so the pointer names storage
+    /// that `setBinary` does not drop: a plugin that reads it after the sender
+    /// reuses the message reads live memory.
     ///
     /// The lifetime is observed through a `Weak` of the stored buffer, not by
     /// reading freed memory: the buffer must still be alive after the key is

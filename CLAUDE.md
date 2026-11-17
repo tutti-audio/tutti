@@ -134,7 +134,7 @@ std only. A rule the compiler already enforces is not a gate.
 - The audio thread never calls `tracing`, `log` or a print macro: a subscriber may
   allocate, lock or write a file. What it reports is a count an app can act on, and what
   it logs goes only through `Io::log`.
-- Non-scalar state reaches the audio thread through `tutti_rt::{ArcLend, Reader, Loan}`;
+- Non-scalar state reaches the audio thread through `tutti_rt::{Publisher, Reader, Loan}`;
   scalars use `Param<U>`. Nothing the audio thread reads is an `ArcSwap`.
 - The audio thread never holds an owning handle to published state and never frees it.
   `publish` and `reclaim` are control-thread only.

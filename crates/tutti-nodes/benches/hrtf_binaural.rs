@@ -150,7 +150,8 @@ fn bench(c: &mut Criterion) {
             // one filter from its first block.
             Node::reset(&mut *d.node);
             let mut rng = Lcg(0x2545_f491);
-            for ch in d.inputs_mut() {
+            for ch in d.inputs_mut().iter_mut() {
+                let ch = ch.into_samples_mut();
                 for x in ch.iter_mut() {
                     *x = rng.next();
                 }
@@ -170,7 +171,7 @@ fn bench(c: &mut Criterion) {
                         aim(&params, Azimuth(bearing), Elevation(10.0));
                     }
                     d.block();
-                    black_box(d.output(0)[BLOCK - 1]);
+                    black_box(d.output().plane(0).samples()[BLOCK - 1]);
                 })
             });
         }
