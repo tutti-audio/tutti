@@ -2770,6 +2770,11 @@ version = "0.0.0"
 dependencies = [
  "tutti-codec",
  "tutti-fixtures",
+ "tutti-midi-device",
+ "tutti-midi-file",
+ "tutti-midi-protocol",
+ "tutti-types",
+ "tutti-ump",
 ]
 
 [[package]]

@@ -148,8 +148,9 @@ pub use tutti_transport::{FadeOut, LoopRegion, MotionEvent, MotionState, Then, T
 // Units, channels, buffers and the musical meter.
 pub use tutti_buffers::{Interleaved, InterleavedMut};
 pub use tutti_types::{
-    Amplitude, At, BarNumber, Beat, Bpm, Cents, ChannelLayout, ChannelTopology, Db, Depth, Frame,
-    Hz, MaxBlock, Meter, MeterMap, Q, SampleRate, Samples, Seconds, Semitones, TimeSignature,
+    Amplitude, At, BarNumber, Beat, Bipolar, Bpm, Cents, ChannelLayout, ChannelTopology, Db, Depth,
+    Frame, Hz, MaxBlock, Meter, MeterMap, Q, SampleRate, Samples, Seconds, Semitones,
+    TimeSignature,
 };
 
 // The device handle and a device's identity.
@@ -292,18 +293,18 @@ pub mod types {
     pub use tutti_types::{
         Adsr, AmbisonicFormat, AmbisonicNormalization, AmbisonicOrder, AmbisonicOrderOutOfRange,
         AmbisonicOrdering, ArcDegrees, AtomicSampleRate, Azimuth, Balance, BarCount, BarPosition,
-        BeatDuration, BeatsPerBar, BeatsPerCycle, BeatsPerCycleOutOfRange, Bed, BitDepth,
-        BpmOutOfRange, BusTooWide, BusTopology, CentsSpan, CentsSpanOutOfRange, CompressionRatio,
-        Confidence, Correlation, DepthOutOfRange, Direction, Drive, Elevation, FRAME_TOLERANCE,
-        Feedback, FrameClock, Gain, HoldFactor, InvalidBeatsPerBar, InvalidMaxBlock,
-        InvalidNoteValue, Latency, LayoutError, LoopRange, LoopRangeError, MAX_CHANNELS,
-        MeterChange, Mix, Moment, NotOnMidiScale, Note, NoteNumberOutOfRange, NoteValue, Pan,
-        Param, Param64, ParamAddr, ParamCell, ParamKey, ParamRaw, Pass, PassEnd, PhaseIncrement,
-        PitchClass, PlayReading, PlaybackRate, Radians, ReadRate, Resonance, SamplePosition,
-        SampleRateOutOfRange, SampleSpan, SampleSpanOutOfRange, SegmentOrigin, Speaker, Speakers,
-        Spread, SrcRatio, StereoBalance, StereoWidth, StretchFactor, Tail, TimelineSegment,
-        TopologyError, Unit, UnitAddr, UnitParam, UnitParamOutOfRange, Velocity, beats_per_sample,
-        first_frame_at_or_after, frames_per_beat, snap_to_whole_frame,
+        BeatDuration, BeatsPerBar, BeatsPerCycle, BeatsPerCycleOutOfRange, Bed, BipolarOutOfRange,
+        BitDepth, BpmOutOfRange, BusTooWide, BusTopology, CentsSpan, CentsSpanOutOfRange,
+        CompressionRatio, Confidence, Correlation, DepthOutOfRange, Direction, Drive, Elevation,
+        FRAME_TOLERANCE, Feedback, FrameClock, Gain, HoldFactor, InvalidBeatsPerBar,
+        InvalidMaxBlock, InvalidNoteValue, Latency, LayoutError, LoopRange, LoopRangeError,
+        MAX_CHANNELS, MeterChange, Mix, Moment, NotOnMidiScale, Note, NoteNumberOutOfRange,
+        NoteValue, Pan, Param, Param64, ParamAddr, ParamCell, ParamKey, ParamRaw, Pass, PassEnd,
+        PhaseIncrement, PitchClass, PlayReading, PlaybackRate, Radians, ReadRate, Resonance,
+        SamplePosition, SampleRateOutOfRange, SampleSpan, SampleSpanOutOfRange, SegmentOrigin,
+        Speaker, Speakers, Spread, SrcRatio, StereoBalance, StereoWidth, StretchFactor, Tail,
+        TimelineSegment, TopologyError, Unit, UnitAddr, UnitParam, UnitParamOutOfRange, Velocity,
+        beats_per_sample, first_frame_at_or_after, frames_per_beat, snap_to_whole_frame,
     };
     pub use tutti_types::{Mint, Phase, Placement, Resyncs};
 }

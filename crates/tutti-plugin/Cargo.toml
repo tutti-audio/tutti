@@ -162,6 +162,12 @@ path = "tests/vst2_fork/main.rs"
 harness = false
 required-features = ["vst2"]
 
+# The percentile harness for what a working plugin step costs; it owns `main()`.
+[[bench]]
+name = "pressure"
+harness = false
+required-features = ["clap"]
+
 # docs.rs renders with every feature on; otherwise it would publish a page with
 # the feature-gated half of the public API missing.
 [package.metadata.docs.rs]
