@@ -14,7 +14,7 @@ use tutti_alsa_ffi::{
 };
 use tutti_midi_device::FunctionBlock;
 use tutti_rt::LockExt;
-use tutti_ump::Direction;
+use tutti_ump::BlockDirection;
 
 use super::input::{self, AlsaInput};
 use crate::InputProducerHandle;
@@ -63,8 +63,8 @@ fn ump_block(block: &FunctionBlock) -> UmpBlock {
             _ => BLOCK_IS_MIDI1 | BLOCK_IS_LOWSPEED,
         },
         direction: match block.direction() {
-            Direction::Input => DIR_INPUT,
-            Direction::Output => DIR_OUTPUT,
+            BlockDirection::Input => DIR_INPUT,
+            BlockDirection::Output => DIR_OUTPUT,
             _ => DIR_BIDIRECTION,
         },
         first_group: raw.first_group,

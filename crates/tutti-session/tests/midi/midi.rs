@@ -28,7 +28,7 @@ use tutti_types::{Beat, BeatDuration, Frame};
 use tutti_ump::MidiGroup;
 #[cfg(feature = "midi-hardware")]
 use tutti_ump::Ump;
-use tutti_ump::{KeyEvent, MidiChannel, NoteNumber, NoteVelocity};
+use tutti_ump::{MidiChannel, NoteKeyEvent, NoteNumber, NoteVelocity};
 #[cfg(feature = "midi-hardware")]
 use tutti_ump::{MpeChannels, MpeZoneSpan};
 
@@ -68,8 +68,8 @@ fn note_ons(seen: &Seen) -> Vec<(u64, u8)> {
     seen.lock()
         .unwrap()
         .iter()
-        .filter_map(|&(f, e)| match e.key_event() {
-            Some(KeyEvent::On(key)) => Some((f, key.note().get())),
+        .filter_map(|&(f, e)| match e.note_key_event() {
+            Some(NoteKeyEvent::On(key)) => Some((f, key.note().get())),
             _ => None,
         })
         .collect()
@@ -810,8 +810,8 @@ fn a_removed_port_ends_its_held_key_once() {
         .lock()
         .unwrap()
         .iter()
-        .filter_map(|&(_, e)| match e.key_event() {
-            Some(KeyEvent::Off(key)) => Some(key.note().get()),
+        .filter_map(|&(_, e)| match e.note_key_event() {
+            Some(NoteKeyEvent::Off(key)) => Some(key.note().get()),
             _ => None,
         })
         .collect();
@@ -1009,7 +1009,9 @@ fn a_midi_ci_peer_that_answers_discovery_is_in_the_ports_info() {
         BlockName, CiCategories, CiHeader, CiMessage, Decoded, DiscoveryData, MaxSysexSize, Muid,
     };
     use tutti_midi_device::{Capabilities, Endpoint, FunctionBlock, Supports};
-    use tutti_ump::{Direction, FirstGroup, FunctionBlockId, GroupSpan, SysexAssembler, SysexStep};
+    use tutti_ump::{
+        BlockDirection, FirstGroup, FunctionBlockId, GroupSpan, SysexAssembler, SysexStep,
+    };
 
     // Off unless the app says who it is, with an id it registered.
     let (mut s, fake) = hot_plug_session_ci(tutti_ump::DeviceIdentity {
@@ -1025,7 +1027,7 @@ fn a_midi_ci_peer_that_answers_discovery_is_in_the_ports_info() {
 
     let block = FunctionBlock::builder(
         FunctionBlockId::new(0).unwrap(),
-        Direction::Bidirectional,
+        BlockDirection::Bidirectional,
         FirstGroup::new(0).unwrap(),
         GroupSpan::new(1).unwrap(),
     )
@@ -1127,7 +1129,7 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
     use tutti_midi_hardware::{ChannelCount, ProfilesChange};
     use tutti_session::ListedProfile;
     use tutti_ump::{
-        DeviceIdentity, Direction, FirstGroup, FunctionBlockId, GroupSpan, ManufacturerId,
+        BlockDirection, DeviceIdentity, FirstGroup, FunctionBlockId, GroupSpan, ManufacturerId,
         SysexAssembler, SysexStep, U7,
     };
 
@@ -1144,7 +1146,7 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
     let port = s.midi_input(&"wire").expect("loaded");
     let block = FunctionBlock::builder(
         FunctionBlockId::new(0).unwrap(),
-        Direction::Bidirectional,
+        BlockDirection::Bidirectional,
         FirstGroup::new(0).unwrap(),
         GroupSpan::new(1).unwrap(),
     )
@@ -1411,10 +1413,10 @@ impl MpePeer {
 
     pub(crate) fn new() -> Self {
         use tutti_midi_device::{Capabilities, Endpoint, FunctionBlock, Supports};
-        use tutti_ump::{Direction, FirstGroup, FunctionBlockId, GroupSpan, SysexAssembler};
+        use tutti_ump::{BlockDirection, FirstGroup, FunctionBlockId, GroupSpan, SysexAssembler};
         let block = FunctionBlock::builder(
             FunctionBlockId::new(0).unwrap(),
-            Direction::Bidirectional,
+            BlockDirection::Bidirectional,
             FirstGroup::new(0).unwrap(),
             GroupSpan::new(1).unwrap(),
         )
@@ -1806,7 +1808,7 @@ fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
     use tutti_midi_device::{Capabilities, Endpoint, FunctionBlock, Supports};
     use tutti_midi_hardware::ProcessChange;
     use tutti_ump::{
-        DeviceIdentity, Direction, FirstGroup, FunctionBlockId, GroupSpan, ManufacturerId,
+        BlockDirection, DeviceIdentity, FirstGroup, FunctionBlockId, GroupSpan, ManufacturerId,
         SysexAssembler, SysexStep, U7,
     };
 
@@ -1823,7 +1825,7 @@ fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
     let port = s.midi_input(&"wire").expect("loaded");
     let block = FunctionBlock::builder(
         FunctionBlockId::new(0).unwrap(),
-        Direction::Bidirectional,
+        BlockDirection::Bidirectional,
         FirstGroup::new(0).unwrap(),
         GroupSpan::new(1).unwrap(),
     )

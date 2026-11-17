@@ -1220,7 +1220,7 @@ fn a_clients_protocol_and_blocks_are_read_from_its_ump_endpoint() {
     };
     assert_eq!(block.first_group().get(), 2);
     assert_eq!(block.groups().get(), 2);
-    assert_eq!(block.direction(), tutti_ump::Direction::Bidirectional);
+    assert_eq!(block.direction(), tutti_ump::BlockDirection::Bidirectional);
     assert_eq!(block.name().map(|n| n.as_str()), Some("Keys"));
 
     let cap = capability_of(&devices, &one);

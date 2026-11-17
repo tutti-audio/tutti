@@ -16,7 +16,7 @@
 //!
 //! [`MIDI_STACK_CAPACITY`]: crate::MIDI_STACK_CAPACITY
 
-use tutti_ump::{Key, KeyEvent, Message, SysexStatus, Ump};
+use tutti_ump::{Message, NoteKey, NoteKeyEvent, SysexStatus, Ump};
 
 use crate::{MidiEventVec, WireMidi};
 
@@ -115,7 +115,7 @@ impl MidiIntake {
         if self.push(list, event) {
             return 0;
         }
-        let Some(KeyEvent::Off(off)) = event.ump.key_event() else {
+        let Some(NoteKeyEvent::Off(off)) = event.ump.note_key_event() else {
             return 1;
         };
         if self.exhausted || !list.is_full() {
@@ -129,15 +129,15 @@ impl MidiIntake {
         let mut latest_other = None;
         let mut victim = None;
         for (i, e) in list.iter().enumerate().rev() {
-            match e.ump.key_event() {
-                Some(KeyEvent::On(on)) => {
+            match e.ump.note_key_event() {
+                Some(NoteKeyEvent::On(on)) => {
                     if same_note(on, off) {
                         victim = Some(i);
                         break;
                     }
                     latest_on.get_or_insert(i);
                 }
-                Some(KeyEvent::Off(_)) => {}
+                Some(NoteKeyEvent::Off(_)) => {}
                 _ if e.ump.address().is_some() => {
                     latest_other.get_or_insert(i);
                 }
@@ -184,7 +184,7 @@ impl MidiIntake {
 
 /// Whether `a` and `b` are the same note: group, channel and number, whichever
 /// protocol spelled each (a MIDI 1.0 off ends a MIDI 2.0 on).
-fn same_note(a: Key, b: Key) -> bool {
+fn same_note(a: NoteKey, b: NoteKey) -> bool {
     (a.address(), a.note()) == (b.address(), b.note())
 }
 
@@ -447,7 +447,7 @@ mod tests {
         );
         assert!(
             list.iter()
-                .all(|e| matches!(e.ump.key_event(), Some(KeyEvent::On(_))))
+                .all(|e| matches!(e.ump.note_key_event(), Some(NoteKeyEvent::On(_))))
         );
         assert_eq!(intake.push_displacing(&mut list, off(5)), 1);
         assert_eq!(list.len(), MIDI_STACK_CAPACITY);
@@ -455,7 +455,7 @@ mod tests {
         // The later note-on of key 5 (index 133) is the one that went.
         let ons_of_5 = list
             .iter()
-            .filter(|e| matches!(e.ump.key_event(), Some(KeyEvent::On(k)) if k.note().get() == 5))
+            .filter(|e| matches!(e.ump.note_key_event(), Some(NoteKeyEvent::On(k)) if k.note().get() == 5))
             .count();
         assert_eq!(ons_of_5, 1);
         assert_eq!(list[5], on(5));
@@ -501,7 +501,7 @@ mod tests {
         assert_eq!(lost, 8_192);
         assert_eq!(
             list.iter()
-                .filter(|e| matches!(e.ump.key_event(), Some(KeyEvent::On(_))))
+                .filter(|e| matches!(e.ump.note_key_event(), Some(NoteKeyEvent::On(_))))
                 .count(),
             0
         );

@@ -18,7 +18,7 @@ use tutti_session::{
     Session, SessionEvent, midi_input, midi_output,
 };
 use tutti_types::{Beat, BeatDuration, SampleRate};
-use tutti_ump::{Address, CCNumber, KeyEvent, Message, MidiChannel, MidiGroup, U7, Voice2};
+use tutti_ump::{Address, CCNumber, Message, MidiChannel, MidiGroup, NoteKeyEvent, U7, Voice2};
 
 const RATE: f64 = 48_000.0;
 
@@ -87,24 +87,24 @@ fn key(channel: u8, n: u8) -> tutti_ump::Ump {
     midi::note_on(MidiChannel::of(channel), n, MF)
 }
 
-fn heard(seen: &Seen, wanted: fn(KeyEvent) -> Option<u8>) -> Vec<u8> {
+fn heard(seen: &Seen, wanted: fn(NoteKeyEvent) -> Option<u8>) -> Vec<u8> {
     seen.lock()
         .unwrap()
         .iter()
-        .filter_map(|&(_, e)| e.key_event().and_then(wanted))
+        .filter_map(|&(_, e)| e.note_key_event().and_then(wanted))
         .collect()
 }
 
 fn note_ons(seen: &Seen) -> Vec<u8> {
     heard(seen, |e| match e {
-        KeyEvent::On(k) => Some(k.note().get()),
+        NoteKeyEvent::On(k) => Some(k.note().get()),
         _ => None,
     })
 }
 
 fn note_offs(seen: &Seen) -> Vec<u8> {
     heard(seen, |e| match e {
-        KeyEvent::Off(k) => Some(k.note().get()),
+        NoteKeyEvent::Off(k) => Some(k.note().get()),
         _ => None,
     })
 }
@@ -755,8 +755,9 @@ fn an_output_port_sends_what_its_node_is_fed_to_the_device() {
     let _ = s.update();
     let sent = fake.take_sent(EndpointId::from_raw(10));
     assert!(
-        sent.iter()
-            .any(|u| matches!(u.key_event(), Some(KeyEvent::On(k)) if k.note().get() == 60)),
+        sent.iter().any(
+            |u| matches!(u.note_key_event(), Some(NoteKeyEvent::On(k)) if k.note().get() == 60)
+        ),
         "the device received the note on: {sent:?}"
     );
 }

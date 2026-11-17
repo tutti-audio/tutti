@@ -24,7 +24,7 @@ use tutti_midi_protocol::{channel_voice, flex_tempo};
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_types::{Beat, Bpm, Seconds};
 use tutti_ump::{
-    Address, Flex, FlexAddress, FlexTextKind, Form, KeyEvent, Message, MidiChannel, MidiGroup,
+    Address, Flex, FlexAddress, FlexTextKind, Form, Message, MidiChannel, MidiGroup, NoteKeyEvent,
     NoteNumber, NoteVelocity, Sysex7Packets, SysexPart, System, TicksPerQuarterNote, U7, Ump,
     Unknown, Voice2,
 };
@@ -569,16 +569,18 @@ impl Track {
                 continue;
             };
             let ump = Ump::from(*message);
-            // `key_event` reads the status, group, channel and note bits of a
+            // `note_key_event` reads the status, group, channel and note bits of a
             // MIDI 1.0 or 2.0 channel-voice packet and counts a MIDI 1.0 Note
             // On at velocity 0 as an off, as `Ump::is_note_off` does.
-            let Some(key_event @ (KeyEvent::On(key) | KeyEvent::Off(key))) = ump.key_event() else {
+            let Some(note_key_event @ (NoteKeyEvent::On(key) | NoteKeyEvent::Off(key))) =
+                ump.note_key_event()
+            else {
                 continue;
             };
             let Address { group, channel } = key.address();
             let note = key.note();
             let map_key = (group, channel, note);
-            if matches!(key_event, KeyEvent::Off(_)) {
+            if matches!(note_key_event, NoteKeyEvent::Off(_)) {
                 if let Some((start, velocity)) = held.get_mut(&map_key).and_then(Vec::pop) {
                     out.push(PairedNote {
                         group,

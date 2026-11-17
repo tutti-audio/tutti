@@ -1619,7 +1619,7 @@ pub struct BlockFilter {
 /// A Function Block's connection direction (§7.1.8); `0b00` is reserved.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum Direction {
+pub enum BlockDirection {
     /// Receives only.
     Input,
     /// Transmits only.
@@ -1667,7 +1667,7 @@ pub struct FunctionBlockInfo {
     /// Which block.
     pub id: Field<FunctionBlockId>,
     /// Its direction.
-    pub direction: Direction,
+    pub direction: BlockDirection,
     /// Its UI hint.
     pub ui_hint: UiHint,
     /// MIDI 1.0 port status.

@@ -8,9 +8,7 @@
 //! [`RawBlock`] (ALSA's flag bits, CoreMIDI's separate MIDI 1.0 field).
 
 use tutti_midi_device::{BlockName, FunctionBlock};
-use tutti_ump::{
-    Direction as BlockDirection, FirstGroup, FunctionBlockId, GroupSpan, Midi1Port, UiHint,
-};
+use tutti_ump::{BlockDirection, FirstGroup, FunctionBlockId, GroupSpan, Midi1Port, UiHint};
 
 /// One block as an OS records it, before the spec's bounds are applied.
 #[derive(Clone, Copy, Debug)]
