@@ -6,7 +6,6 @@
 
 use tutti_buffers::Float;
 
-use crate::level::db_to_ratio_f64;
 use crate::{Complex64, Lanes, Lerp};
 use tutti_types::{Db, Hz, Q, SampleRate};
 
@@ -116,7 +115,7 @@ impl SvfCoeffs {
         };
         // `Db` is `f32` and the design is `f64` to 1e-9 (the closed-form tests), so the
         // half-gain amplitude `10^(dB / 40)` is half the decibels, widened once.
-        let a = db_to_ratio_f64(0.5 * f64::from(gain_db));
+        let a = Db::to_amplitude_f64(0.5 * f64::from(gain_db));
 
         // RBJ cookbook shapes: a bell's damping is `1/(Q*A)`, and a shelf's
         // midpoint (half the dB gain) sits at `fc`, so its prototype is tuned

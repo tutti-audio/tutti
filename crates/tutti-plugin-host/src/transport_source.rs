@@ -993,7 +993,7 @@ mod tests {
     /// ((120 t + 18.75 t^2) / 60 at t = 0.8).
     fn ramp_map() -> TempoMap {
         TempoMap::new([
-            point(0.0, 120.0, tutti_tempo::Transition::RampTime),
+            point(0.0, 120.0, tutti_tempo::Transition::RampTime { end: None }),
             point(4.0, 180.0, tutti_tempo::Transition::Step),
         ])
         .expect("a map")
@@ -1046,8 +1046,8 @@ mod tests {
     #[test]
     fn a_stretch_with_a_point_inside_is_told_its_segments_slope() {
         let map = TempoMap::new([
-            point(0.0, 120.0, tutti_tempo::Transition::RampTime),
-            point(4.0, 180.0, tutti_tempo::Transition::RampTime),
+            point(0.0, 120.0, tutti_tempo::Transition::RampTime { end: None }),
+            point(4.0, 180.0, tutti_tempo::Transition::RampTime { end: None }),
             point(8.0, 60.0, tutti_tempo::Transition::Step),
         ])
         .expect("a map");

@@ -299,19 +299,20 @@ pub mod types {
     };
     pub use tutti_types::{
         Adsr, AmbisonicFormat, AmbisonicNormalization, AmbisonicOrder, AmbisonicOrderOutOfRange,
-        AmbisonicOrdering, ArcDegrees, AtomicSampleRate, Azimuth, Balance, BarCount, BarPosition,
-        BeatDuration, BeatsPerBar, BeatsPerCycle, BeatsPerCycleOutOfRange, Bed, BipolarOutOfRange,
-        BitDepth, BpmOutOfRange, BusTooWide, BusTopology, CentsSpan, CentsSpanOutOfRange,
-        CompressionRatio, Confidence, Correlation, DepthOutOfRange, Direction, Drive, Elevation,
-        FRAME_TOLERANCE, Feedback, FrameClock, Gain, HoldFactor, InvalidBeatsPerBar,
-        InvalidMaxBlock, InvalidNoteValue, Latency, LayoutError, LoopRange, LoopRangeError,
-        MAX_CHANNELS, MeterChange, Mix, Moment, NotOnMidiScale, Note, NoteNumberOutOfRange,
-        NoteValue, Pan, Param, Param64, ParamAddr, ParamCell, ParamKey, ParamRaw, Pass, PassEnd,
-        PhaseIncrement, PitchClass, PlayReading, PlaybackRate, Radians, ReadRate, Resonance,
-        SamplePosition, SampleRateOutOfRange, SampleSpan, SampleSpanOutOfRange, SegmentOrigin,
-        Speaker, Speakers, Spread, SrcRatio, StereoBalance, StereoWidth, StretchFactor, Tail,
-        TimelineSegment, TopologyError, Unit, UnitAddr, UnitParam, UnitParamOutOfRange, Velocity,
-        beats_per_sample, first_frame_at_or_after, frames_per_beat, snap_to_whole_frame,
+        AmbisonicOrdering, ArcDegrees, AtomicSampleRate, Azimuth, Balance, Ballistics, BarCount,
+        BarPosition, BeatDuration, BeatsPerBar, BeatsPerCycle, BeatsPerCycleOutOfRange, Bed,
+        BipolarOutOfRange, BitDepth, BpmOutOfRange, BusTooWide, BusTopology, CentsSpan,
+        CentsSpanOutOfRange, ChannelIndex, ChannelIndexOutOfRange, CompressionRatio, Confidence,
+        Correlation, DepthOutOfRange, Direction, Drive, Elevation, FRAME_TOLERANCE, Feedback,
+        FrameClock, Gain, HoldFactor, InvalidBeatsPerBar, InvalidMaxBlock, InvalidNoteValue,
+        Latency, LayoutError, LoopRange, LoopRangeError, MAX_CHANNELS, MeterChange, Mix, Moment,
+        NotOnMidiScale, Note, NoteNumberOutOfRange, NoteValue, Pan, Param, Param64, ParamAddr,
+        ParamCell, ParamKey, ParamRaw, Pass, PassEnd, PhaseIncrement, PitchClass, PlayReading,
+        PlaybackRate, Radians, ReadRate, Resonance, SamplePosition, SampleRateOutOfRange,
+        SampleSpan, SampleSpanOutOfRange, SegmentOrigin, Speaker, Speakers, Spread, SrcRatio,
+        StereoBalance, StereoWidth, StretchFactor, Tail, TimelineSegment, TopologyError, Unit,
+        UnitAddr, UnitParam, UnitParamOutOfRange, Velocity, beats_per_sample,
+        first_frame_at_or_after, frames_per_beat, snap_to_whole_frame,
     };
     pub use tutti_types::{Mint, Phase, Placement, Resyncs};
 }
@@ -699,25 +700,25 @@ pub mod midi {
     pub use tutti_midi_runtime::{MidiKeys, MidiOut, Outgoing, SendAt, Taken, TimedMidiEvent};
     pub use tutti_ump::{
         Accidental, Alteration, AlterationKind, ArticulationAttribute, Attribute, Bank, BarAccents,
-        BendValue, BlockFilter, BlockSelect, ChordBass, ChordName, ChordPitch, ChordType,
-        ControlValue, Data128, DeltaTicks, Direction as BlockDirection, DiscoveryFilter,
-        EndpointInfoNotification, Field, FirstGroup, Flex, FlexAddress, FlexTextKind,
-        FlexTimeSignature, Form, Framed, FunctionBlockCount, FunctionBlockId, FunctionBlockInfo,
-        FunctionBlocks, GroupSpan, Key, KeyEvent, KeySignature, Lane, Letter, MdsChunk,
-        MdsChunkSize, MdsChunks, MdsIdentity, Metronome, Midi1Bytes, Midi1Port, MixedDataHeader,
-        MpeChannels, MpeOverlap, MpeZoneSet, MpeZoneSpan, NotChunkSize, NotManufacturerId,
-        NotSharpsFlats, OutOfRange, PerNoteManagement, Pitch, RegisteredData,
-        RegisteredPerNoteController, Reserved, ReservedAccents, ReservedAttribute, Rpn,
-        SharpsFlats, Stream, Sysex7Packet, Sysex7Packets, Sysex8Packet, Sysex8Packets,
-        Sysex8Stream, Sysex8StreamIds, SysexError, SysexMessage, SysexRef, SysexStatus, SysexStep,
-        System, U4, UiHint, UmpVersion, Unknown, Utility, Voice2,
+        BendValue, BlockDirection, BlockFilter, BlockSelect, ChordBass, ChordName, ChordPitch,
+        ChordType, ControlValue, Data128, DeltaTicks, DiscoveryFilter, EndpointInfoNotification,
+        Field, FirstGroup, Flex, FlexAddress, FlexTextKind, FlexTimeSignature, Form, Framed,
+        FunctionBlockCount, FunctionBlockId, FunctionBlockInfo, FunctionBlocks, GroupSpan,
+        KeySignature, Lane, Letter, MdsChunk, MdsChunkSize, MdsChunks, MdsIdentity, Metronome,
+        Midi1Bytes, Midi1Port, MixedDataHeader, MpeChannels, MpeOverlap, MpeZoneSet, MpeZoneSpan,
+        NotChunkSize, NotManufacturerId, NotSharpsFlats, NoteKey, NoteKeyEvent, OutOfRange,
+        PerNoteManagement, Pitch, RegisteredData, RegisteredPerNoteController, Reserved,
+        ReservedAccents, ReservedAttribute, Rpn, SharpsFlats, Stream, Sysex7Packet, Sysex7Packets,
+        Sysex8Packet, Sysex8Packets, Sysex8Stream, Sysex8StreamIds, SysexError, SysexMessage,
+        SysexPart, SysexRef, SysexStatus, SysexStep, System, U4, UiHint, UmpVersion, Unknown,
+        Utility, Voice2,
     };
     pub use tutti_ump::{
         Address, CCNumber, DeviceIdentity, ManufacturerId, Message, Midi1Parser, MidiChannel,
         MidiGroup, NoteNumber, NoteVelocity, Protocol, StreamConfig, SysexAssembler,
         TicksPerQuarterNote, U7, U14, Ump, Voice1,
     };
-    pub use tutti_ump::{Join, Span, Spans};
+    pub use tutti_ump::{Join, PacketSpan, Spans};
     pub use tutti_ump::{
         LyricKind, NotASoftwareRevision, PlainTextKind, SoftwareRevision, TextError,
     };

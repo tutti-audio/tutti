@@ -1,4 +1,5 @@
-//! A fixed-input FFT resampler over [`RealFft`].
+//! A fixed-input FFT resampler over [`RealFft`], generic over the float `F`
+//! (`f32` or `f64`) it runs in, `f32` by default.
 //!
 //! Overlap-add: each `fft_size_in`-frame block is zero-padded to twice its
 //! length, transformed, multiplied by a windowed-sinc low-pass, truncated or
@@ -21,40 +22,42 @@
 
 use super::{ResampleError, WindowedSinc};
 use crate::CosineWindow;
-use crate::fft::{Complex32, RealFft};
+use crate::fft::{Complex, RealFft};
+use rustfft::FftNum;
+use tutti_buffers::{Float, Mono, MonoMut, Planes, PlanesMut};
 
 /// One block's worth of resampling: the filter, the plans and the scratch.
 #[derive(Debug)]
-struct Unit {
+struct Unit<F: Float + FftNum> {
     fft_size_in: usize,
     fft_size_out: usize,
     /// The low-pass, already transformed and scaled by `1 / (2 * fft_size_in)`,
     /// which is the inverse transform's normalisation.
-    filter_f: Vec<Complex32>,
-    forward: RealFft,
-    inverse: RealFft,
-    scratch_fw: Vec<Complex32>,
-    scratch_inv: Vec<Complex32>,
-    input_buf: Vec<f32>,
-    input_f: Vec<Complex32>,
-    output_f: Vec<Complex32>,
-    output_buf: Vec<f32>,
+    filter_f: Vec<Complex<F>>,
+    forward: RealFft<F>,
+    inverse: RealFft<F>,
+    scratch_fw: Vec<Complex<F>>,
+    scratch_inv: Vec<Complex<F>>,
+    input_buf: Vec<F>,
+    input_f: Vec<Complex<F>>,
+    output_f: Vec<Complex<F>>,
+    output_buf: Vec<F>,
 }
 
 /// The relative cutoff (1.0 is Nyquist) at which a squared Blackman-Harris
 /// windowed sinc of `npoints` taps rolls off to -6 dB at the band edge: a cubic
 /// fit in `1 / npoints`, good for 32 to 2048 taps.
-fn cutoff(npoints: usize) -> f32 {
-    let (k1, k2, k3) = (13.745_203f32, 121.735_33f32, 5_964.163f32);
-    let n = npoints as f32;
-    1.0 / (k1 / n + k2 / (n * n) + k3 / (n * n * n) + 1.0)
+fn cutoff<F: Float>(npoints: usize) -> F {
+    let [k1, k2, k3] = [13.745_203f32, 121.735_33, 5_964.163].map(F::from_f32);
+    let n = F::from_f32(npoints as f32);
+    F::ONE / (k1 / n + k2 / (n * n) + k3 / (n * n * n) + F::ONE)
 }
 
 /// A windowed sinc of `npoints` taps at relative cutoff `f_cutoff`, summing to 1
 /// (unity gain at DC): [`WindowedSinc`] over the squared Blackman-Harris window,
 /// whose support is the `npoints` taps and whose peak is tap `npoints / 2`.
-fn sinc_filter(npoints: usize, f_cutoff: f32) -> Vec<f32> {
-    let cutoff = f64::from(f_cutoff);
+fn sinc_filter<F: Float>(npoints: usize, f_cutoff: F) -> Vec<F> {
+    let cutoff = f_cutoff.to_f64();
     let kernel = WindowedSinc::new(
         cutoff,
         npoints as f64 * cutoff / 2.0,
@@ -62,36 +65,37 @@ fn sinc_filter(npoints: usize, f_cutoff: f32) -> Vec<f32> {
     )
     .expect("the cutoff and the tap count are positive and finite");
     let mid = (npoints / 2) as f64;
-    let mut taps: Vec<f32> = (0..npoints)
-        .map(|x| kernel.weight(x as f64 - mid) as f32)
+    let mut taps: Vec<F> = (0..npoints)
+        .map(|x| F::from_f64(kernel.weight(x as f64 - mid)))
         .collect();
-    let sum: f32 = taps.iter().sum();
+    let sum: F = taps.iter().copied().sum();
     taps.iter_mut().for_each(|t| *t /= sum);
     taps
 }
 
-impl Unit {
+impl<F: Float + FftNum> Unit<F> {
     fn new(fft_size_in: usize, fft_size_out: usize) -> Self {
         // The filter is cut at the lower of the two Nyquists: the output's
         // when downsampling (anti-alias), the input's when upsampling
         // (anti-image).
         let f_cutoff = if fft_size_in > fft_size_out {
-            cutoff(fft_size_out) * fft_size_out as f32 / fft_size_in as f32
+            cutoff::<F>(fft_size_out) * <F as Float>::from_f32(fft_size_out as f32)
+                / <F as Float>::from_f32(fft_size_in as f32)
         } else {
-            cutoff(fft_size_in)
+            cutoff::<F>(fft_size_in)
         };
         let taps = sinc_filter(fft_size_in, f_cutoff);
-        let scale = (2 * fft_size_in) as f32;
-        let mut filter_t = vec![0.0f32; 2 * fft_size_in];
+        let scale = <F as Float>::from_f32((2 * fft_size_in) as f32);
+        let mut filter_t = vec![F::ZERO; 2 * fft_size_in];
         for (f, t) in filter_t.iter_mut().zip(&taps) {
-            *f = t / scale;
+            *f = *t / scale;
         }
         let forward = RealFft::new(2 * fft_size_in);
         let inverse = RealFft::new(2 * fft_size_out);
         let mut scratch_fw = forward.new_scratch();
         let scratch_inv = inverse.new_scratch();
-        let mut filter_f = vec![Complex32::new(0.0, 0.0); fft_size_in + 1];
-        forward.forward(&filter_t, &mut filter_f, &mut scratch_fw);
+        let mut filter_f = vec![Complex::new(F::ZERO, F::ZERO); fft_size_in + 1];
+        forward.forward(Mono::new(&filter_t), &mut filter_f, &mut scratch_fw);
         Self {
             fft_size_in,
             fft_size_out,
@@ -100,20 +104,23 @@ impl Unit {
             inverse,
             scratch_fw,
             scratch_inv,
-            input_buf: vec![0.0; 2 * fft_size_in],
-            input_f: vec![Complex32::new(0.0, 0.0); fft_size_in + 1],
-            output_f: vec![Complex32::new(0.0, 0.0); fft_size_out + 1],
-            output_buf: vec![0.0; 2 * fft_size_out],
+            input_buf: vec![F::ZERO; 2 * fft_size_in],
+            input_f: vec![Complex::new(F::ZERO, F::ZERO); fft_size_in + 1],
+            output_f: vec![Complex::new(F::ZERO, F::ZERO); fft_size_out + 1],
+            output_buf: vec![F::ZERO; 2 * fft_size_out],
         }
     }
 
     /// Resample one block: `wave_in` is `fft_size_in` frames, `wave_out` gets
     /// `fft_size_out`, and `overlap` carries the tail between blocks.
-    fn resample_unit(&mut self, wave_in: &[f32], wave_out: &mut [f32], overlap: &mut [f32]) {
+    fn resample_unit(&mut self, wave_in: &[F], wave_out: &mut [F], overlap: &mut [F]) {
         self.input_buf[..self.fft_size_in].copy_from_slice(wave_in);
-        self.input_buf[self.fft_size_in..].fill(0.0);
-        self.forward
-            .forward(&self.input_buf, &mut self.input_f, &mut self.scratch_fw);
+        self.input_buf[self.fft_size_in..].fill(F::ZERO);
+        self.forward.forward(
+            Mono::new(&self.input_buf),
+            &mut self.input_f,
+            &mut self.scratch_fw,
+        );
 
         // The bins both rates share; the rest of the output spectrum is zero.
         let shared = if self.fft_size_in < self.fft_size_out {
@@ -130,11 +137,11 @@ impl Unit {
         {
             *out = *spec * *filt;
         }
-        self.output_f[shared..].fill(Complex32::new(0.0, 0.0));
+        self.output_f[shared..].fill(Complex::new(F::ZERO, F::ZERO));
 
         self.inverse.inverse(
             &mut self.output_f,
-            &mut self.output_buf,
+            MonoMut::new(&mut self.output_buf),
             &mut self.scratch_inv,
         );
         for ((out, &fresh), &carried) in wave_out
@@ -163,18 +170,18 @@ pub(super) const MAX_BLOCK: usize = 1 << 20;
 /// A resampler that takes a fixed number of input frames per call and returns
 /// a variable number of output frames (whole blocks of `fft_size_out`).
 #[derive(Debug)]
-pub struct FftResampler {
+pub struct FftResampler<F: Float + FftNum = f32> {
     channels: usize,
     chunk_size_in: usize,
     fft_size_in: usize,
     fft_size_out: usize,
-    overlaps: Vec<Vec<f32>>,
-    input_buffers: Vec<Vec<f32>>,
+    overlaps: Vec<Vec<F>>,
+    input_buffers: Vec<Vec<F>>,
     saved_frames: usize,
-    unit: Unit,
+    unit: Unit<F>,
 }
 
-impl FftResampler {
+impl<F: Float + FftNum> FftResampler<F> {
     /// `chunk_size_in` input frames per call, split into about `sub_chunks`
     /// blocks (the real count is whatever makes a block a whole number of the
     /// rate pair's repeating unit).
@@ -217,8 +224,8 @@ impl FftResampler {
             chunk_size_in,
             fft_size_in,
             fft_size_out,
-            overlaps: vec![vec![0.0; fft_size_out]; channels],
-            input_buffers: vec![vec![0.0; chunk_size_in + fft_size_in]; channels],
+            overlaps: vec![vec![F::ZERO; fft_size_out]; channels],
+            input_buffers: vec![vec![F::ZERO; chunk_size_in + fft_size_in]; channels],
             saved_frames: 0,
             unit: Unit::new(fft_size_in, fft_size_out),
         })
@@ -247,16 +254,16 @@ impl FftResampler {
     /// [`ResampleError::BufferMismatch`] when the planes are too few or too short.
     pub fn process_into_buffer(
         &mut self,
-        wave_in: &[Vec<f32>],
-        wave_out: &mut [Vec<f32>],
+        wave_in: Planes<'_, F>,
+        mut wave_out: PlanesMut<'_, '_, F>,
     ) -> Result<usize, ResampleError> {
         let next_saved = self.saved_frames + self.chunk_size_in;
         let ready = next_saved / self.fft_size_in;
         let needed = ready * self.fft_size_out;
-        if wave_in.len() != self.channels
-            || wave_out.len() != self.channels
-            || wave_in.iter().any(|p| p.len() < self.chunk_size_in)
-            || wave_out.iter().any(|p| p.len() < needed)
+        if wave_in.channels() != self.channels
+            || wave_out.channels() != self.channels
+            || wave_in.frames().0 < self.chunk_size_in
+            || wave_out.frames().0 < needed
         {
             return Err(ResampleError::BufferMismatch {
                 channels: self.channels,
@@ -266,11 +273,12 @@ impl FftResampler {
         }
 
         for (buffer, input) in self.input_buffers.iter_mut().zip(wave_in) {
-            buffer[self.saved_frames..next_saved].copy_from_slice(&input[..self.chunk_size_in]);
+            buffer[self.saved_frames..next_saved]
+                .copy_from_slice(&input.samples()[..self.chunk_size_in]);
         }
         self.saved_frames = next_saved;
 
-        for ((buffer, out), overlap) in self
+        for ((buffer, mut out), overlap) in self
             .input_buffers
             .iter()
             .zip(wave_out.iter_mut())
@@ -279,7 +287,7 @@ impl FftResampler {
             for (in_block, out_block) in buffer
                 .chunks(self.fft_size_in)
                 .take(ready)
-                .zip(out.chunks_mut(self.fft_size_out))
+                .zip(out.samples_mut().chunks_mut(self.fft_size_out))
             {
                 self.unit.resample_unit(in_block, out_block, overlap);
             }

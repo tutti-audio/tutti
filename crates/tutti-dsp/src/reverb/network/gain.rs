@@ -6,9 +6,7 @@
 //! ways, in `f64` and through `libm` so a design does not depend on the
 //! platform's C math library.
 
-use tutti_types::{Amplitude, SampleRate, SampleSpan, Seconds};
-
-use crate::level::{db_to_ratio_f64, ratio_to_db_f64};
+use tutti_types::{Amplitude, Db, SampleRate, SampleSpan, Seconds};
 
 /// The loop gain that makes a loop of `delay` frames decay by 60 dB in `rt60`:
 /// `g = 10^(-3 d / (RT60 fs))`.
@@ -30,7 +28,7 @@ pub fn loop_gain(delay: SampleSpan, rt60: Seconds, rate: SampleRate) -> Amplitud
     if trips == SampleSpan::ZERO {
         return Amplitude::SILENT;
     }
-    Amplitude(db_to_ratio_f64(-60.0 * delay.get() / trips.get()) as f32)
+    Amplitude(Db::to_amplitude_f64(-60.0 * delay.get() / trips.get()) as f32)
 }
 
 /// The inverse of [`loop_gain`]: the RT60 of a loop of `delay` frames at
@@ -42,7 +40,7 @@ pub fn loop_gain(delay: SampleSpan, rt60: Seconds, rate: SampleRate) -> Amplitud
 pub fn rt60_from_gain(gain: Amplitude, delay: SampleSpan, rate: SampleRate) -> Seconds {
     Seconds(decay_seconds(
         delay.get(),
-        ratio_to_db_f64(f64::from(gain.get())),
+        Db::from_amplitude_f64(f64::from(gain.get())),
         rate.get(),
     ))
 }

@@ -1,0 +1,43 @@
+# Public writes of tutti-session that are not `set` on a target (`cargo xtask check-values`).
+#
+# One `<rule>  <file>::<Owner>::<fn>  <reason>` row per violation that is not yet gone; the
+# gate fails on a violation with no row and on a row with no violation, so the list only
+# shrinks. A slice that moves a value onto a target deletes its rows with the code they name.
+#
+# rule  setter  a `pub fn set_*`
+#       set     a `pub fn set` that is not `Session::set` or `Knobs::set`
+#       unit    a `pub` method returning `()` that takes a unit
+
+setter  crates/tutti-session/src/general_midi.rs::GeneralMidi::set_gain  goes at the editor-table targets (7a S3): a target's `set`
+unit  crates/tutti-session/src/general_midi.rs::GeneralMidi::set_gain  goes at the editor-table targets (7a S3): a target's `set`
+setter  crates/tutti-session/src/graph.rs::Graph::set_feed  wiring of an event feed, a declaration: goes with the wiring declarations (11b)
+setter  crates/tutti-session/src/graph.rs::Graph::set_mix  goes at the editor-table targets (7a S3): a target's `set`
+setter  crates/tutti-session/src/graph.rs::Graph::set_mode  goes at the editor-table targets (7a S3): a target's `set`
+setter  crates/tutti-session/src/graph.rs::Graph::set_param_mod  a modulation declaration (range, source): goes with the declarations (11b)
+setter  crates/tutti-session/src/graph.rs::Graph::set_sample_rate  the graph's prepare rate, a configuration of the detached graph: goes with the builder's rate (11a)
+unit  crates/tutti-session/src/graph.rs::Graph::set_sample_rate  the graph's prepare rate, a configuration of the detached graph: goes with the builder's rate (11a)
+setter  crates/tutti-session/src/graph.rs::Graph::set_sources  wiring, a declaration: goes with the wiring declarations (11b)
+setter  crates/tutti-session/src/graph.rs::Graph::set_sources_hard  wiring, a declaration: goes with the wiring declarations (11b)
+setter  crates/tutti-session/src/graph/testing.rs::AudioSide::set_transport  a hand-driven transport for the detached graph, behind feature `testing`: goes with the transport target (7d)
+setter  crates/tutti-session/src/instrument.rs::InstrumentHandle::set_gain  goes at the editor-table targets (7a S3): a target's `set`
+unit  crates/tutti-session/src/instrument.rs::InstrumentHandle::set_gain  goes at the editor-table targets (7a S3): a target's `set`
+setter  crates/tutti-session/src/key.rs::Edge::set_gain  goes at the editor-table targets (7a S3): a target's `set`
+setter  crates/tutti-session/src/midi.rs::Midi::set_mpe  MPE zones are a published value (7c)
+setter  crates/tutti-session/src/midi.rs::Midi::set_output_latency  a MIDI setting word (7a S5)
+setter  crates/tutti-session/src/midi.rs::Midi::set_route_fallback  a MIDI routing declaration (7c)
+setter  crates/tutti-session/src/midi.rs::Midi::set_routes  a MIDI routing declaration (7c)
+setter  crates/tutti-session/src/modulation.rs::Mods::set_source  which source a route reads, a declaration: goes at 11e
+setter  crates/tutti-session/src/modulation.rs::RouteMut::set_curve  a route target (7a S4)
+setter  crates/tutti-session/src/modulation.rs::RouteMut::set_depth  a route target (7a S4)
+setter  crates/tutti-session/src/modulation.rs::RouteMut::set_polarity  a route target (7a S4)
+setter  crates/tutti-session/src/plugin_params.rs::Param::set_plain  a plugin param's peer path (7a S6)
+setter  crates/tutti-session/src/plugin_params.rs::Param::set_text  a plugin param's peer path (7a S6)
+setter  crates/tutti-session/src/plugin_params.rs::Params::set_automation_mode  a plugin's automation mode (7a S6)
+setter  crates/tutti-session/src/session.rs::Session::set_loop  a timed loop edit, a published value (7c)
+setter  crates/tutti-session/src/session.rs::Session::set_tempo  the tempo while the sync follower runs (7a S5)
+setter  crates/tutti-session/src/session.rs::Session::set_tempo_map  the tempo map, a published value (7a S5)
+set  crates/tutti-session/src/midi_hardware.rs::MidiPolicyHandle::set  a policy handle's write (7a S5)
+set  crates/tutti-session/src/plugin_params.rs::Param::set  a plugin param's peer path (7a S6)
+set  crates/tutti-session/src/plugin_params.rs::ParamGesture::set  a plugin param's gesture, until `Gesture` lands (7d)
+set  crates/tutti-session/src/plugin_params.rs::TypedParam::set  a plugin param's peer path (7a S6)
+set  crates/tutti-session/src/policy.rs::OutputPolicyHandle::set  a policy handle's write (7a S5)

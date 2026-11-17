@@ -42,9 +42,9 @@ fn close(got: f64, want: f64) -> bool {
 fn ramps_match_decimal_figures() {
     for case in figures::CASES {
         let shape = if case.ramp_beats {
-            Transition::RampBeats
+            Transition::RampBeats { end: None }
         } else {
-            Transition::RampTime
+            Transition::RampTime { end: None }
         };
         let map = TempoMap::new([
             pt(0.0, case.from, shape),

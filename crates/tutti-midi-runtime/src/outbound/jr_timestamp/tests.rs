@@ -3,7 +3,7 @@ use crate::test_support::at;
 
 use tutti_fixtures::midi;
 use tutti_types::{Frame, Samples};
-use tutti_ump::{KeyEvent, Message, MidiChannel, Utility};
+use tutti_ump::{Message, MidiChannel, NoteKeyEvent, Utility};
 
 /// The sender-clock value if `ump` is a JR Clock (M2-104 section 7.2.2.1).
 fn jr_clock_value(ump: &Ump) -> Option<u16> {
@@ -259,7 +259,10 @@ fn stamp_block_prefixes_each_event() {
     stamper.stamp_block(&events, Frame::new(0), &mut out);
     assert_eq!(out.len(), 4, "one timestamp + one event, twice");
     assert_eq!(jr_timestamp_value(&out[0].1), Some(0));
-    assert!(matches!(out[1].1.key_event(), Some(KeyEvent::On(_))));
+    assert!(matches!(
+        out[1].1.note_key_event(),
+        Some(NoteKeyEvent::On(_))
+    ));
     assert_eq!(jr_timestamp_value(&out[2].1), Some(15_625));
     assert!(out[3].1.is_note_off());
 }

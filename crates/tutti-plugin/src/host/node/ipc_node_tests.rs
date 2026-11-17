@@ -591,7 +591,7 @@ fn a_tempo_ramp_across_a_block_boundary_reaches_the_server_as_its_slope() {
     };
     let map = tutti_transport::TempoReader::fixed(std::sync::Arc::new(
         TempoMap::new(vec![
-            point(0.0, 120.0, Transition::RampTime),
+            point(0.0, 120.0, Transition::RampTime { end: None }),
             point(100.0, 90.0, Transition::Step),
         ])
         .expect("a map"),
