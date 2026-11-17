@@ -32,9 +32,7 @@ use std::sync::{Arc, Mutex};
 
 use tutti_plugin::catalog::{
     AudioConfig, BindError, Catalog, Hosting, Loadable, PluginDescriptor, PluginId, PluginRef,
-    PluginState,
 };
-use tutti_plugin::error::StateError;
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::{BridgeError, Features, MainThreadMarker, MainWorkHandle, PluginFailure};
 use tutti_rt::LockExt;
@@ -47,6 +45,7 @@ use crate::{
     Declared, GiveUp, HandleError, Hold, HoldKind, IntoPool, Key, Life, Load, LoadError, Peer,
     PoolEntry, PoolKey, PoolSet, Presence, ReplaceRefused, Resource, ResourceId, Session,
 };
+use crate::{OtherPeer, PeerState, SavedPeer};
 
 /// What a pooled plugin's load needs of the session that declared it.
 #[derive(Clone, Debug)]
@@ -445,7 +444,7 @@ pub struct PluginEntry {
     id: PluginId,
     resolved: Result<Loadable, BindError>,
     hosting: Hosting,
-    state: Option<Arc<PluginState>>,
+    state: Option<Arc<PeerState>>,
     cx: Context,
 }
 
@@ -534,12 +533,12 @@ impl<K> PluginDeclaration<K> {
     ///
     /// # Errors
     ///
-    /// [`StateError::OtherPlugin`] when `state` was saved from another plugin
+    /// [`OtherPeer`] when `state` was saved from another peer
     /// than the one the entry resolved to. An entry that resolved to none is
     /// not checked: its load fails.
-    pub fn initial_state(mut self, state: PluginState) -> Result<Self, StateError> {
+    pub fn initial_state(mut self, state: PeerState) -> Result<Self, OtherPeer> {
         if let Ok(loadable) = &self.entry.resolved {
-            state.check_for(loadable.plugin())?;
+            state.check_for(&SavedPeer::Plugin(loadable.plugin().clone()))?;
         }
         self.entry.state = Some(Arc::new(state));
         Ok(self)

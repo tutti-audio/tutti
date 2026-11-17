@@ -416,7 +416,7 @@ fn a_clock_switch_re_declares_a_plugins_latency_and_keeps_its_handle() {
         live.plugin_view(node)
             .expect("hosted")
             .state()
-            .save()
+            .save(tutti_plugin_types::StateUse::Project)
             .is_ok(),
         "the handle still answers"
     );
@@ -430,7 +430,7 @@ fn a_clock_switch_re_declares_a_plugins_latency_and_keeps_its_handle() {
             .plugin_view(node)
             .expect("hosted")
             .state()
-            .save()
+            .save(tutti_plugin_types::StateUse::Project)
             .is_ok(),
         "and on the timer"
     );
@@ -449,5 +449,9 @@ fn diagnostics_of(s: &Session, node: tutti_graph::NodeKey) -> tutti_session::Dia
 /// `latency.changed` of a render mode after that call's reply, and the bridge
 /// thread reads it off the socket only while it waits for the next reply.
 fn round_trip(s: &Session, node: tutti_graph::NodeKey) {
-    let _ = s.plugin_view(node).expect("hosted").state().save();
+    let _ = s
+        .plugin_view(node)
+        .expect("hosted")
+        .state()
+        .save(tutti_plugin_types::StateUse::Project);
 }
