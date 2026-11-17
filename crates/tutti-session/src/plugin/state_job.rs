@@ -101,7 +101,7 @@ impl<C: crate::Clock> Session<C> {
                 if cancel.is_cancelled() {
                     return Err(StateError::Unavailable);
                 }
-                handle.any_thread().save_state()
+                handle.save_state()
             },
             move |_, done, ticket| {
                 ticket.land(match done {

@@ -3021,6 +3021,7 @@ dependencies = [
  "tutti-midi-protocol",
  "tutti-plugin",
  "tutti-plugin-db",
+ "tutti-plugin-host",
  "tutti-plugin-ipc",
  "tutti-plugin-types",
  "tutti-shared-plugin",

@@ -57,8 +57,6 @@ use tutti_types::MeterMap;
 
 /// What the walk reads of one call, and of the project, to place changes in
 /// the call's frames.
-///
-/// Public for `tutti-plugin`'s node of a served plugin, which drives the same piece.
 #[derive(Debug)]
 pub struct Call<'a, 'c> {
     /// The call's context: its `Env`, arrival and the transport history.
@@ -195,8 +193,6 @@ impl Stretch {
 
 /// The walk over the chunk being filled. One per node, reset by every
 /// [`begin`](Self::begin); nothing here allocates.
-///
-/// Public for `tutti-plugin`'s node of a served plugin, which drives the same piece.
 #[derive(Debug, Default)]
 pub(crate) struct TransportWalk {
     stretch: Option<Stretch>,

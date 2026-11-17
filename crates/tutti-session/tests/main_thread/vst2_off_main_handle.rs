@@ -7,6 +7,7 @@
 //! `MainSession::update` runs them (the session's `MainWork`). The target runs on the
 //! process's main thread, where the handle's own calls run at once.
 
+use crate::param_reads::ParamReads as _;
 use crate::pooled::{LoadPlugin, Spec};
 use std::time::Duration;
 use tutti_types::ChannelLayout;
@@ -34,20 +35,10 @@ fn a_pool_thread_is_answered_while_the_main_thread_updates_the_session() {
         .expect("the in-process VST2 loads");
     let handle = session.plugin_view(node).expect("hosted").handle().clone();
     let id = ParamId::new(1);
-    handle
-        .any_thread()
-        .set_parameter_value(id, Normalized::of(0.75));
-    let expected = handle
-        .any_thread()
-        .save_state()
-        .expect("saved on the main thread");
+    handle.send_parameter(id, Normalized::of(0.75));
+    let expected = handle.save_state().expect("saved on the main thread");
 
-    let pool = std::thread::spawn(move || {
-        (
-            handle.any_thread().save_state(),
-            handle.any_thread().parameter_value(id),
-        )
-    });
+    let pool = std::thread::spawn(move || (handle.save_state(), handle.parameter_value(id)));
     // The load gave the session a main thread, so the calls wait for an update
     // rather than answering "unavailable" at once.
     std::thread::sleep(Duration::from_millis(50));

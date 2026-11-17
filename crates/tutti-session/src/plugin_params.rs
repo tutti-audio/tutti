@@ -391,10 +391,7 @@ impl<'a> Param<'a> {
     fn send(&self, value: Normalized) {
         let hosted = self.params.hosted;
         if !hosted.driven.write(self.id(), value) {
-            hosted
-                .handle
-                .any_thread()
-                .set_parameter_value(self.id(), value);
+            hosted.handle.send_parameter(self.id(), value);
         }
         hosted.mirror.report(self.id(), value);
     }
@@ -418,7 +415,6 @@ impl<'a> Param<'a> {
         self.params
             .hosted
             .handle
-            .any_thread()
             .parameter_text(self.id(), self.normalized())
     }
 
@@ -435,7 +431,6 @@ impl<'a> Param<'a> {
             .params
             .hosted
             .handle
-            .any_thread()
             .parameter_value_from_text(self.id(), text)
             .ok_or_else(|| PluginParamError::UnreadableText {
                 id: self.id(),
@@ -455,7 +450,6 @@ impl<'a> Param<'a> {
         self.params
             .hosted
             .handle
-            .any_thread()
             .parameter_plain(self.id(), self.normalized())
     }
 
@@ -474,7 +468,6 @@ impl<'a> Param<'a> {
             .params
             .hosted
             .handle
-            .any_thread()
             .parameter_normalized(self.id(), plain)
             .ok_or(PluginParamError::NoPlainValue(self.id()))?;
         self.send(value);
@@ -562,7 +555,7 @@ impl ParamGesture {
             return Err(PluginParamError::Gone(self.id));
         }
         if !self.driven.write(self.id, value) {
-            self.handle.any_thread().set_parameter_value(self.id, value);
+            self.handle.send_parameter(self.id, value);
         }
         self.reporter.report(self.id, value);
         queue(
