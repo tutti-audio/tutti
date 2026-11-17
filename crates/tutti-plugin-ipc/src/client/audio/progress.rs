@@ -50,7 +50,7 @@
 //! promises a healthy session and a reasonable retry, while the crash it rode in
 //! on had already destroyed the session it would retry against.
 //!
-//! [`MAX_STATE_BYTES`]: crate::protocol::MAX_STATE_BYTES
+//! [`MAX_STATE_BYTES`]: tutti_plugin_types::MAX_STATE_BYTES
 
 use super::ask::Ask;
 use std::sync::Arc;

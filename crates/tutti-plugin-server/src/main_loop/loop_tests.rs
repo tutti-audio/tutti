@@ -151,7 +151,10 @@ impl Script {
         self.message_due_by = None;
         match self.steps.pop_front() {
             Some(Step::Send(message)) => Ok(message),
-            _ => Err(BridgeError::ConnectionFailed("the script is over".into())),
+            _ => Err(BridgeError::Io(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "the script is over",
+            ))),
         }
     }
 }
@@ -182,14 +185,14 @@ impl Transport for AudioEnd {
             None => self
                 .requests
                 .recv()
-                .map_err(|_| BridgeError::ConnectionFailed("the host went".into())),
+                .map_err(|_| BridgeError::Io(std::io::ErrorKind::BrokenPipe.into())),
         }
     }
 
     fn send(&mut self, msg: &BridgeMessage) -> BridgeResult<()> {
         self.replies
             .send(msg.clone())
-            .map_err(|_| BridgeError::ConnectionFailed("the host went".into()))
+            .map_err(|_| BridgeError::Io(std::io::ErrorKind::BrokenPipe.into()))
     }
 }
 
@@ -305,7 +308,7 @@ fn run_ticking(fixture: &mut Fixture, script: &mut Script, tick: Duration) {
     drop(render.stop());
     // A script that ends ends in `recv`'s refusal; any other end is a failure.
     assert!(
-        matches!(result, Err(BridgeError::ConnectionFailed(ref m)) if m == "the script is over")
+        matches!(result, Err(BridgeError::Io(ref e)) if e.to_string() == "the script is over")
             || result.is_ok(),
         "{result:?}"
     );

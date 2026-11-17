@@ -15,8 +15,9 @@ categories = ["multimedia::audio", "hardware-support"]
 serde = ["dep:serde", "tutti-ump/serde"]
 # Exports `test_support::FakeBackend`, a device list with no OS behind it.
 testing = []
-# The suites that need a real ALSA sequencer (`/dev/snd/seq`); Linux only.
-sequencer-tests = []
+# The suites that need a real ALSA sequencer (`/dev/snd/seq`); Linux only. They
+# stand in for devices through `tutti-alsa-ffi`'s `testing` hooks.
+sequencer-tests = ["tutti-alsa-ffi/testing"]
 # The suites that open Windows' GS Wavetable Synth, which needs an audio
 # endpoint; Windows only.
 synth-tests = []
@@ -49,9 +50,6 @@ core-foundation = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 tutti-winmm-ffi = { version = "0.0.1", path = "../tutti-winmm-ffi" }
-
-[target.'cfg(target_os = "linux")'.dev-dependencies]
-tutti-alsa-ffi = { path = "../tutti-alsa-ffi", features = ["testing"] }
 
 [dev-dependencies]
 tutti-midi-hardware = { path = ".", features = ["testing"] }

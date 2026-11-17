@@ -143,8 +143,9 @@ fn utility(w0: u32) -> Option<Utility> {
 fn system(w0: u32) -> Option<System> {
     match byte(w0, 2) {
         0xF1 => Some(System::TimeCode(data7(w0, 1)?)),
-        0xF2 => Some(System::SongPosition(U14::masked(
-            u16::from(data7(w0, 1)?.get()) | (u16::from(data7(w0, 0)?.get()) << 7),
+        0xF2 => Some(System::SongPosition(U14::from_halves(
+            data7(w0, 0)?,
+            data7(w0, 1)?,
         ))),
         0xF3 => Some(System::SongSelect(data7(w0, 1)?)),
         0xF6 => Some(System::TuneRequest),
@@ -182,9 +183,7 @@ fn voice1(w0: u32) -> Option<Voice1> {
         }),
         0xC => Some(Voice1::ProgramChange(d1)),
         0xD => Some(Voice1::ChannelPressure(d1)),
-        0xE => Some(Voice1::PitchBend(U14::masked(
-            u16::from(d1.get()) | (u16::from(d2.get()) << 7),
-        ))),
+        0xE => Some(Voice1::PitchBend(U14::from_halves(d2, d1))),
         _ => None,
     }
 }

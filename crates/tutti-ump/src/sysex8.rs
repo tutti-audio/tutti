@@ -271,16 +271,9 @@ impl Iterator for Sysex8Packets<'_> {
         if self.started && self.rest.is_empty() {
             return None;
         }
-        let status = match (self.started, self.rest.len() > BYTES_PER_PACKET) {
-            (false, false) => SysexStatus::Complete,
-            (false, true) => SysexStatus::Start,
-            (true, true) => SysexStatus::Continue,
-            (true, false) => SysexStatus::End,
-        };
-        let (chunk, rest) = self.rest.split_at(self.rest.len().min(BYTES_PER_PACKET));
+        let (packet, rest) = Sysex8Packet::take(self.started, self.stream.id, self.rest);
         self.rest = rest;
         self.started = true;
-        let packet = Sysex8Packet::new(status, self.stream.id, chunk).expect("at most 13 bytes");
         Some(Ump::from(Message::Data128(
             self.group,
             Data128::Sysex8(packet),

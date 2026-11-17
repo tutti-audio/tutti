@@ -8,7 +8,7 @@
 //! # Everything here is 7-bit
 //!
 //! An SMF cannot express MIDI 2.0 resolution: a channel message is a
-//! [`Voice1`](tutti_ump::Voice1) on group 0, and the MIDI 2.0 side of the
+//! [`Voice1`](tutti_ump::Voice1) on the first Group, and the MIDI 2.0 side of the
 //! crate (the Clip File) is a *different format*, not a wider encoding of
 //! this one.
 //!

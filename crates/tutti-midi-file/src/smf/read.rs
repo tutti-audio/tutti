@@ -55,7 +55,10 @@ use winnow::token::{literal, take};
 use tutti_ump::{MidiGroup, Voice1, parse_exact};
 
 use super::{SmfDivision, SmfParts};
-use crate::file::{FileEvent, Meta, SmfFormat, TextKind, Tick, Track};
+use crate::file::{
+    FileEvent, MalformedMeta, Meta, MicrosPerQuarter, OtherMetaKind, SmfFormat, TextKind, Tick,
+    Track,
+};
 use crate::{Error, Result, SmfParseError, Truncated};
 
 /// Why a parser refused, carried as winnow context and mapped to [`enum@Error`]
@@ -202,7 +205,7 @@ fn smf<'a>(input: &mut &'a [u8]) -> Res<(Header, Vec<&'a [u8]>)> {
 // ---- events ----------------------------------------------------------------
 
 /// The data bytes of a channel status (how many is `Voice1::data_len`'s) as a
-/// message on group 0. `parse_exact` owns the status bit layout.
+/// message on the first Group. `parse_exact` owns the status bit layout.
 fn channel<'a>(status: u8) -> impl Parser<&'a [u8], FileEvent, ContextError<Fault>> {
     let count = Voice1::data_len(status).map_or(0, usize::from);
     take(count)
@@ -217,17 +220,28 @@ fn channel<'a>(status: u8) -> impl Parser<&'a [u8], FileEvent, ContextError<Faul
         .context(malformed(SmfParseError::ChannelData))
 }
 
-/// A meta event's type byte and data as the model's [`Meta`]. A fixed-size
-/// event with more data than it defines is read for the bytes it defines and
-/// keeps the rest as `extra` (SMF 1.0 section 3.3: a program ignores what is past
-/// what it knows). Anything shorter than the typed shape stays
-/// `Other`, so no byte is lost.
-fn meta_of(kind: u8, data: &[u8]) -> Meta {
+/// What an event of a track is: an event of the model, or the End of Track
+/// that ends the track.
+#[derive(Clone)]
+enum Item {
+    Event(FileEvent),
+    EndOfTrack,
+}
+
+/// A meta event's type byte and data as the model's [`Meta`], or the track's
+/// end. A fixed-size event with more data than it defines is read for the
+/// bytes it defines and keeps the rest as `extra` (SMF 1.0 section 3.3: a
+/// program ignores what is past what it knows). An event of a typed kind (End
+/// of Track, tempo, time and key signature) whose data is shorter than the
+/// kind defines or has an undefined value, or whose type byte has its top bit
+/// set, is kept as [`Meta::Malformed`]: [`Meta::Other`] holds no typed kind.
+fn meta_of(kind: u8, data: &[u8]) -> Item {
     let text = |kind| Meta::Text {
         kind,
         bytes: data.into(),
     };
-    match (kind, data) {
+    let meta = match (kind, data) {
+        (0x2F, []) => return Item::EndOfTrack,
         (0x01, _) => text(TextKind::Text),
         (0x02, _) => text(TextKind::Copyright),
         (0x03, _) => text(TextKind::TrackName),
@@ -238,7 +252,7 @@ fn meta_of(kind: u8, data: &[u8]) -> Meta {
         (0x08, _) => text(TextKind::ProgramName),
         (0x09, _) => text(TextKind::DeviceName),
         (0x51, &[a, b, c, ref extra @ ..]) => Meta::Tempo {
-            micros_per_quarter: u32::from_be_bytes([0, a, b, c]),
+            micros_per_quarter: MicrosPerQuarter::from_wire([a, b, c]),
             extra: extra.into(),
         },
         (
@@ -262,26 +276,28 @@ fn meta_of(kind: u8, data: &[u8]) -> Meta {
             minor: minor == 1,
             extra: extra.into(),
         },
-        _ => Meta::Other {
-            kind,
-            data: data.into(),
+        _ => match OtherMetaKind::new(kind) {
+            Some(kind) => Meta::Other {
+                kind,
+                data: data.into(),
+            },
+            None => Meta::Malformed(MalformedMeta::new(kind, data)),
         },
-    }
+    };
+    Item::Event(FileEvent::Meta(meta))
 }
 
 /// A meta event after its `FF`: type, length, data.
-fn meta(input: &mut &[u8]) -> Res<FileEvent> {
+fn meta(input: &mut &[u8]) -> Res<Item> {
     (byte, counted(vlq))
-        .map(|(kind, data)| FileEvent::Meta(meta_of(kind, data)))
+        .map(|(kind, data)| meta_of(kind, data))
         .parse_next(input)
 }
 
 /// One event after its delta, given the running status: the event and the
 /// status after it. A status byte is read when the next byte has its top bit
 /// set; otherwise the running one stands in and the byte is data.
-fn event<'a>(
-    running: Status,
-) -> impl Parser<&'a [u8], (u32, FileEvent, Status), ContextError<Fault>> {
+fn event<'a>(running: Status) -> impl Parser<&'a [u8], (u32, Item, Status), ContextError<Fault>> {
     let status = alt((
         byte.verify(|b| b & 0x80 != 0),
         peek(byte.verify(|b| b & 0x80 == 0)).verify_map(move |_| running),
@@ -290,9 +306,9 @@ fn event<'a>(
     (vlq, status).flat_map(|(delta, status)| {
         dispatch! { move |_: &mut &'a [u8]| Ok::<u8, ContextError<Fault>>(status);
             0xFF => meta.map(|e| (e, None)),
-            0xF0 => counted(vlq).map(|d| (FileEvent::SysEx(d.into()), None)),
-            0xF7 => counted(vlq).map(|d| (FileEvent::Escape(d.into()), None)),
-            0x80..=0xEF => channel(status).map(move |e| (e, Some(status))),
+            0xF0 => counted(vlq).map(|d| (Item::Event(FileEvent::SysEx(d.into())), None)),
+            0xF7 => counted(vlq).map(|d| (Item::Event(FileEvent::Escape(d.into())), None)),
+            0x80..=0xEF => channel(status).map(move |e| (Item::Event(e), Some(status))),
             _ => refuse(SmfParseError::SystemStatus),
         }
         .map(move |(event, status)| (delta, event, status))
@@ -303,7 +319,7 @@ fn event<'a>(
 /// status after it. `None` at the end of the bytes.
 struct Step<'a> {
     delta: u32,
-    event: FileEvent,
+    event: Item,
     rest: &'a [u8],
     status: Status,
 }
@@ -333,7 +349,7 @@ fn steps(body: &[u8]) -> impl Iterator<Item = Res<Step<'_>>> {
 /// A track body: its events at absolute ticks, and its end. The last event,
 /// if it is an End of Track (`FF 2F 00`), is the track's end and not an event.
 fn track(body: &[u8]) -> Res<Track> {
-    let mut events = steps(body)
+    let items = steps(body)
         .scan(0u64, |tick, step| {
             Some(step.map(|s| {
                 *tick += u64::from(s.delta);
@@ -341,24 +357,27 @@ fn track(body: &[u8]) -> Res<Track> {
             }))
         })
         .collect::<Res<Vec<_>>>()?;
-    let is_end = |e: &FileEvent| matches!(e, FileEvent::Meta(Meta::Other { kind: 0x2F, data }) if data.is_empty());
     // SMF 1.0 section 3.3: an end-of-track event is the last
     // event in the track. One before the last is refused, not read as the
     // track's end: what follows it would be dropped, and the model is lossless.
-    let last = events.len().saturating_sub(1);
-    if events.iter().take(last).any(|(_, e)| is_end(e)) {
-        return Err(refuse::<Track>(SmfParseError::EndOfTrackNotLast)
-            .parse_peek(body)
-            .unwrap_err());
-    }
-    let end = match events.last() {
-        Some(&(tick, ref e)) if is_end(e) => {
-            events.pop();
-            tick
+    let count = items.len();
+    let mut events = Vec::with_capacity(count);
+    let mut end = None;
+    for (index, (tick, item)) in items.into_iter().enumerate() {
+        match item {
+            Item::Event(event) => events.push((tick, event)),
+            Item::EndOfTrack if index + 1 == count => end = Some(tick),
+            Item::EndOfTrack => {
+                return Err(refuse::<Track>(SmfParseError::EndOfTrackNotLast)
+                    .parse_peek(body)
+                    .unwrap_err());
+            }
         }
-        Some(&(tick, _)) => tick,
-        None => Tick(0),
-    };
+    }
+    // A track with no End of Track ends at its last event.
+    let end = end
+        .or_else(|| events.last().map(|&(tick, _)| tick))
+        .unwrap_or(Tick(0));
     Ok(Track {
         header: Vec::new(),
         header_end: Tick(0),

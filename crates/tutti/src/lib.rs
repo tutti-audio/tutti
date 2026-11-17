@@ -184,10 +184,10 @@ pub use tutti_session::{
 };
 #[cfg(feature = "session")]
 pub use tutti_session::{
-    BlockDates, Clock, ConnectError, Edge, EventInPort, EventOutPort, InPort, Job, JobId, JobKind,
-    JobStatus, Key, Landed, NoSuchNode, Offline, OfflineSession, OutPort, Playhead, RealTime, Root,
-    Session, SessionBuilder, SessionEvent, SystemClock, SystemSession, TransportHandle,
-    TypedParamRef, WaitError, Workers,
+    AppKey, BlockDates, Clock, ConnectError, Edge, EventInPort, EventOutPort, InPort, Job, JobId,
+    JobKind, JobStatus, Key, Landed, NoSuchNode, Offline, OfflineSession, OutPort, Playhead,
+    RealTime, Root, Session, SessionBuilder, SessionEvent, SystemClock, SystemSession,
+    TransportHandle, TypedParamRef, WaitError, Workers,
 };
 #[cfg(all(feature = "session", feature = "export"))]
 pub use tutti_session::{
@@ -199,10 +199,6 @@ pub use tutti_session::{Device, DeviceClock, DeviceEvent, LiveSession};
 pub use tutti_session::{
     Input, InputConfig, Punch, Recorded, Take, TakeError, TakeEvent, TakeTarget, Trim,
 };
-#[cfg(all(feature = "session", feature = "midi"))]
-pub use tutti_session::{InstrumentHandle, Midi, MidiReport};
-#[cfg(all(feature = "session", feature = "midi-hardware"))]
-pub use tutti_session::{MidiInput, MidiOutput};
 #[cfg(all(feature = "session", feature = "plugin"))]
 pub use tutti_session::{OtherPeer, PeerState, SavedPeer};
 #[cfg(feature = "session")]
@@ -339,7 +335,7 @@ pub mod graph {
         ParamRangeReader, ParamSegment, Pass as DryPath, PlayClock, RenderMode, Resolution,
         SilenceMask, Sink as GraphSink, SortedEvents, Source as GraphSource, SubBlocks,
         TransportChange, TransportChangeRejected, TransportChanges, TransportHistory,
-        TransportPosition, UmpAt, VerifyError, Wake,
+        TransportPosition, UmpAt, VerifyError, Wake, WiredMask,
     };
     pub use tutti_graph::{EdgeGain, FeedbackFrom, Invalid, NodeMix, RangeView};
 }
@@ -370,7 +366,7 @@ pub mod session {
     };
     pub use tutti_graph::{
         BusError, BusRef, BusSource, CloseError, CommitError, MissingSource, MixError, ModeError,
-        PassError, Placed, Unwired,
+        PassError, Placed, Rewired, Unwired, Wired,
     };
     pub use tutti_graph::{
         BusFeed, BusFold, BusSide, EdgeFade, EdgeId, EventCapacityError, EventIn, EventOut,
@@ -423,6 +419,8 @@ pub mod session {
         Rolling, Start, TakeEnd, TakeId, Terms, Window,
     };
     // The `audio_file` entry decodes a file, so it needs a decoder.
+    #[cfg(feature = "midi")]
+    pub use tutti_session::MidiNodes;
     #[cfg(all(
         feature = "sampler",
         any(
@@ -455,15 +453,8 @@ pub mod session {
         RecoveryEvent, RecoveryFailure, RecoveryPolicy, ReloadCause, StateJobError, StateJobFailed,
         StateRestore, StateView,
     };
-    #[cfg(feature = "midi")]
-    pub use tutti_session::{
-        FollowClock, FollowMachineControl, MidiNodes, MidiRouteId, NoSuchMidiRoute, NotInstrument,
-        SendMachineControl, SinkLoaded,
-    };
     #[cfg(feature = "soundfont")]
     pub use tutti_session::{GeneralMidi, SoundFontFile, soundfont};
-    #[cfg(feature = "midi-hardware")]
-    pub use tutti_session::{InputLoaded, MidiInputEntry, MidiOutputEntry, OutputLoaded};
 }
 
 /// Audio file settings (`tutti-codec`): the `Spec` a file is written with, the
@@ -563,12 +554,11 @@ pub mod plugin {
     };
     pub use tutti_plugin_db::ScanBusy;
     pub use tutti_plugin_db::{
-        BlacklistedFile, FileFacts, FileFailure, FileRow, FileState, FilesError, PluginEntry,
-        ProbeFailure, ProbeFailureKind, RowChange, ScanError, ScanProgress,
+        BeforeEpoch, BlacklistedFile, FileFacts, FileFailure, FileRow, FileState, FilesError,
+        Mtime, PluginEntry, ProbeFailure, ProbeFailureKind, RowChange, ScanError, ScanProgress,
     };
     pub use tutti_plugin_host::RebindError;
     pub use tutti_plugin_ipc::RandomSourceError;
-    pub use tutti_plugin_ipc::{SlabAccessError, SlabLayoutError};
     pub use tutti_plugin_types::PresetSupport;
     pub use tutti_plugin_types::bundle::ModuleKind;
     pub use tutti_plugin_types::features::{FeatureReport, Features};
@@ -582,6 +572,9 @@ pub mod plugin {
         VersionText, Vst2Category, Vst3PlugType, Vst3SubCategories,
     };
     pub use tutti_plugin_types::{EditorError, LoadStage, TerminationReason};
+    pub use tutti_plugin_types::{
+        FrameTooLarge, ResultError, SlabAccessError, SlabError, SlabLayoutError,
+    };
     pub use tutti_plugin_types::{Timeouts, ZeroTimeout};
 
     /// The plugin catalog: scanning, the database and the descriptors it
@@ -599,10 +592,13 @@ pub mod plugin {
 /// a file (`MidiFile`, `Track`, `Tick`), a message (`Message`, `Ump`,
 /// `MidiChannel`, `MidiGroup`, `NoteNumber`, `NoteVelocity`, `Voice1`, `SysexAssembler`, `Midi1Parser`), a timed event, the keys
 /// that play an instrument or a live input (`MidiKeys`),
-/// the session's route rule, events and errors (`MidiRouteRule`, `MidiReport`,
-/// `midi::Error`), a host's own output (`midi_sink`, `MidiSink`), and under `midi-hardware` a device (`DeviceId`,
+/// the session's MIDI (`Midi`, `InstrumentHandle`), its route rule, events and
+/// errors (`MidiRouteRule`, `MidiRouteId`, `MidiReport`, `midi::Error`), its
+/// followers (`FollowTempo`, `FollowClock`, `FollowMachineControl`,
+/// `SendMachineControl`), a host's own output (`midi_sink`, `MidiSink`,
+/// `SinkLoaded`), and under `midi-hardware` a device (`MidiDeviceId`,
 /// `DeviceInfo`), the ports the pool opens for them (`midi_input`, `midi_output`,
-/// `MidiInput`, `MidiOutput`) and what an open one said of itself (`Learned`, `SavedDevice`, `Match`), and the Profiles
+/// `MidiInput`, `MidiOutput`, their entries and loaded reports) and what an open one said of itself (`Learned`, `SavedDevice`, `Match`), and the Profiles
 /// its MIDI-CI peers support and how to switch one (`PeerProfiles`,
 /// `ListedProfile`, `SwitchProfile`, `ProfilesChange`). The translation layer
 /// (`Translator`, `Narrower`), the runtime's clock sync and the MIDI-CI codec
@@ -627,12 +623,14 @@ pub mod midi {
     };
     pub use tutti_midi_file::Error as FileError;
     pub use tutti_midi_file::{
-        ClipFileError, ConfigError as FileConfigError, Refusal, SmfParseError, ToClipError,
-        Truncated,
+        Altered, Converted, DropReason, Dropped, LyricChange, MalformedMeta, MicrosPerQuarter,
+        MicrosPerQuarterOutOfRange, MidiFileKind, Moved, NoCommonTimeline, OtherMetaKind,
+        OtherMetaKindOutOfRange, OutOfOrder, PairedNote, SmfDivision, SmfDivisionOutOfRange,
+        TextKind, Timeline, TimelineDrop, WriteOptions,
     };
     pub use tutti_midi_file::{
-        Converted, DropReason, Dropped, MidiFileKind, Moved, NoCommonTimeline, OutOfOrder,
-        PairedNote, SmfDivision, SmfDivisionOutOfRange, TextKind, WriteOptions,
+        ClipFileError, ConfigError as FileConfigError, IoStep, Refusal, SmfParseError, ToClipError,
+        Truncated,
     };
     pub use tutti_midi_file::{FileEvent, Meta, MidiFile, SmfFormat, Tick, Track};
     #[cfg(feature = "midi-hardware")]
@@ -665,11 +663,11 @@ pub mod midi {
         FunctionBlocks, GroupSpan, Key, KeyEvent, KeySignature, Lane, Letter, MdsChunk,
         MdsChunkSize, MdsChunks, MdsIdentity, Metronome, Midi1Bytes, Midi1Port, MixedDataHeader,
         MpeChannels, MpeOverlap, MpeZoneSet, MpeZoneSpan, NotChunkSize, NotManufacturerId,
-        OutOfRange, PerNoteManagement, Pitch, RegisteredData, RegisteredPerNoteController,
-        Reserved, ReservedAccents, ReservedAttribute, Rpn, SharpsFlats, Stream, Sysex7Packet,
-        Sysex7Packets, Sysex8Packet, Sysex8Packets, Sysex8Stream, Sysex8StreamIds, SysexError,
-        SysexMessage, SysexRef, SysexStatus, SysexStep, System, U4, UiHint, UmpVersion, Unknown,
-        Utility, Voice2,
+        NotSharpsFlats, OutOfRange, PerNoteManagement, Pitch, RegisteredData,
+        RegisteredPerNoteController, Reserved, ReservedAccents, ReservedAttribute, Rpn,
+        SharpsFlats, Stream, Sysex7Packet, Sysex7Packets, Sysex8Packet, Sysex8Packets,
+        Sysex8Stream, Sysex8StreamIds, SysexError, SysexMessage, SysexRef, SysexStatus, SysexStep,
+        System, U4, UiHint, UmpVersion, Unknown, Utility, Voice2,
     };
     pub use tutti_ump::{
         Address, CCNumber, DeviceIdentity, ManufacturerId, Message, Midi1Parser, MidiChannel,
@@ -689,8 +687,14 @@ pub mod midi {
     pub use tutti_session::RouteDeclarer;
     #[cfg(feature = "session")]
     pub use tutti_session::{
-        AddedInstrument, AnyNode, FollowTempo, MidiLoad, MidiRouteRule, MidiSink, MidiSinkEntry,
-        MidiSinkInfo, SinkOptions, Stamping, TakePlacement, midi_sink,
+        AddedInstrument, AnyNode, FollowClock, FollowMachineControl, FollowTempo, InstrumentHandle,
+        Midi, MidiLoad, MidiReport, MidiRouteId, MidiRouteRule, MidiSink, MidiSinkEntry,
+        MidiSinkInfo, NotInstrument, SendMachineControl, SinkLoaded, SinkOptions, Stamping,
+        TakePlacement, midi_sink,
+    };
+    #[cfg(all(feature = "session", feature = "midi-hardware"))]
+    pub use tutti_session::{
+        InputLoaded, MidiInput, MidiInputEntry, MidiOutput, MidiOutputEntry, OutputLoaded,
     };
 
     #[cfg(feature = "midi-hardware")]
@@ -707,8 +711,8 @@ pub mod midi {
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
     pub use tutti_session::{
         ChannelProfile, ListedProfile, MidiInputInfo, MidiOutputInfo, MidiPolicy, MidiPolicyError,
-        MidiPolicyHandle, MidiPortError, OutputOptions, PortCause, ProfilePeer, ReportPeer,
-        RequestReport, SwitchProfile, WholeProfile, midi_input, midi_output,
+        MidiPolicyHandle, MidiPortError, NoHardware, OutputOptions, PortCause, ProfilePeer,
+        ReportPeer, RequestReport, SwitchProfile, WholeProfile, midi_input, midi_output,
     };
     /// MIDI-CI Property Exchange (M2-103 and its resource specifications): a
     /// peer's resources, read, written and subscribed to through the session.
@@ -722,8 +726,8 @@ pub mod midi {
         pub use tutti_midi_device::{
             Ack, ActionError, BodyLimit, BufferLimit, CallError, CallId, CanSet, CcIndex,
             ChangeKind, ChunkNo, ClusterKind, ColumnSource, ConfirmIcon, ConfirmType, Confirmation,
-            CtrlControl, CtrlKind, CtrlRange, CtrlValueKind, CustomResource, DefaultMapNotCc,
-            EntryError, JsonPointer, LinkRole, ListedTwice, ModeId, NotABodyLimit, NotABufferLimit,
+            CtrlControl, CtrlKind, CtrlRange, CtrlValueKind, CustomResource, EntryError,
+            JsonPointer, LinkRole, ListedTwice, ModeId, NotABodyLimit, NotABufferLimit,
             NotAChunkNo, NotAPeChannel, NotAPriority, NotARequestId, NotASimultaneousRequests,
             NotAStateSize, NotAStepCount, NotAStreamLimit, NotATimeoutWait, NotSignificantBits,
             NotUnixSeconds, NotValid, NotVendorName, OpaqueBody, PaginationFault, ParamPath,

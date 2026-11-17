@@ -68,10 +68,10 @@ use crate::protocol::{BusChannels, ChannelLayout, SampleFormat, SlabLayout};
 use std::sync::Arc;
 use tutti_buffers::Float;
 use tutti_plugin_types::MAX_BLOCK_CHANNELS;
-use tutti_plugin_types::{BridgeError, BridgeResult};
+use tutti_plugin_types::{BridgeError, BridgeResult, SlabAccessError, SlabLayoutError};
 
 use tutti_plugin_ipc_ffi::{
-    Direction, MappingWriter, RING_SLOTS, SLAB_HEADER_BYTES, SharedMapping, SlabError, slot_for,
+    Direction, MappingWriter, RING_SLOTS, SLAB_HEADER_BYTES, SharedMapping, slot_for,
 };
 
 /// Named mmap region: a `SlabHeader`, then a ring per direction.
@@ -107,7 +107,7 @@ impl AudioSlab {
         let name = name.into();
         // Stamped before it returns: the peer is told the slab's name only
         // after this, and the header's magic is released last.
-        let writer = MappingWriter::create(&name, bytes).map_err(slab_err)?;
+        let writer = MappingWriter::create(&name, bytes).map_err(BridgeError::from)?;
         let slab = Self {
             mapping: Arc::clone(writer.mapping()),
             name,
@@ -135,7 +135,7 @@ impl AudioSlab {
         let name = name.into();
         // Checks the length before the header, and the header before this
         // side trusts a byte.
-        let writer = MappingWriter::open(&name, bytes).map_err(slab_err)?;
+        let writer = MappingWriter::open(&name, bytes).map_err(BridgeError::from)?;
         let slab = Self {
             mapping: Arc::clone(writer.mapping()),
             name,
@@ -463,52 +463,6 @@ impl SlabLayout {
     }
 }
 
-/// Why a [`SlabLayout`] is refused: it is a shape the peer chose, and a slab
-/// is mapped and addressed from it.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum SlabLayoutError {
-    /// A direction names no bus: an empty list would read as "share one region
-    /// in place", which is the aliasing bypass.
-    #[error(
-        "slab layout must name at least one bus per direction; \
-         an empty list would read as 'share one region in place', which is the bypass"
-    )]
-    NoBus,
-    /// The ring depth is not this build's.
-    #[error("slab layout asks for {asked} ring slots, this build addresses {RING_SLOTS}")]
-    Slots {
-        /// The depth the layout names.
-        asked: u32,
-    },
-    /// A direction names more buses than a block carries channels.
-    #[error("slab layout names {buses} {direction} buses, at most {MAX_BLOCK_CHANNELS} are served")]
-    TooManyBuses {
-        /// `"input"` or `"output"`.
-        direction: &'static str,
-        /// The bus count the layout names.
-        buses: usize,
-    },
-    /// A direction is wider than a block's channel tables.
-    #[error(
-        "slab layout names {channels} {direction} channels, at most {MAX_BLOCK_CHANNELS} are served"
-    )]
-    TooManyChannels {
-        /// `"input"` or `"output"`.
-        direction: &'static str,
-        /// The channel count the layout names.
-        channels: u64,
-    },
-    /// The mapping's size does not fit in `usize`.
-    #[error("slab layout's size overflows usize")]
-    SizeOverflow,
-}
-
-impl From<SlabLayoutError> for BridgeError {
-    fn from(e: SlabLayoutError) -> Self {
-        BridgeError::SharedMemoryError(e.to_string())
-    }
-}
-
 /// Reject a layout this build cannot address or serve, before it becomes a
 /// mapping, and return the mapping's size, header included.
 ///
@@ -525,6 +479,7 @@ fn check_layout(layout: &SlabLayout) -> Result<usize, SlabLayoutError> {
     if layout.slots as usize != RING_SLOTS {
         return Err(SlabLayoutError::Slots {
             asked: layout.slots,
+            served: RING_SLOTS as u32,
         });
     }
     for (direction, buses) in [("input", &layout.inputs), ("output", &layout.outputs)] {
@@ -546,32 +501,6 @@ fn check_layout(layout: &SlabLayout) -> Result<usize, SlabLayoutError> {
     layout
         .checked_byte_size_with_header(SLAB_HEADER_BYTES)
         .ok_or(SlabLayoutError::SizeOverflow)
-}
-
-/// Why a read or a write of a slab's channel was refused. `Copy` and free of
-/// text, so the audio thread can meet it without allocating; the control paths
-/// turn it into a [`BridgeError`] (`From`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
-pub enum SlabAccessError {
-    /// The sample type is not the width the slab was laid out at.
-    #[error("sample type does not match the slab's sample format")]
-    SampleWidth,
-    /// The slab has no such channel in that direction.
-    #[error("channel index out of bounds")]
-    Channel,
-    /// The data is longer than a channel holds.
-    #[error("data length exceeds buffer capacity")]
-    Length,
-}
-
-impl From<SlabAccessError> for BridgeError {
-    fn from(error: SlabAccessError) -> Self {
-        Self::SharedMemoryError(error.to_string())
-    }
-}
-
-fn slab_err(e: SlabError) -> BridgeError {
-    BridgeError::SharedMemoryError(e.to_string())
 }
 
 #[cfg(test)]

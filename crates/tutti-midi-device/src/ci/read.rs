@@ -48,7 +48,8 @@ use tutti_ump::{DeviceIdentity, FunctionBlockId, ManufacturerId, SoftwareRevisio
 use super::{
     CI_SUB_ID_1, CI_UNIVERSAL_SYSEX, CiCategories, CiDeviceId, DataControl, Destination,
     DetailsData, DiscoveryData, InquiryTarget, MaxSysexSize, MessageText, Muid, ProcessFeatures,
-    ProfileChannels, ProfileId, ProfileLists, ProfileTarget, ReportScope, SpecificData,
+    ProfileChannels, ProfileId, ProfileList, ProfileLists, ProfileTarget, ReportScope,
+    SpecificData,
 };
 
 type Res<T> = winnow::ModalResult<T, ContextError>;
@@ -282,7 +283,12 @@ fn profile_list(input: &mut &[u8]) -> Res<Vec<ProfileId>> {
 /// The two lists of a Reply to Profile Inquiry, or `None` when malformed.
 pub(super) fn profile_reply_body(mut body: &[u8]) -> Option<ProfileLists> {
     (profile_list, profile_list)
-        .verify_map(|(enabled, disabled)| ProfileLists::new(enabled, disabled).ok())
+        .verify_map(|(enabled, disabled)| {
+            Some(ProfileLists::new(
+                ProfileList::new(enabled)?,
+                ProfileList::new(disabled)?,
+            ))
+        })
         .parse_next(&mut body)
         .ok()
 }

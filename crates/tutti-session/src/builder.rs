@@ -392,7 +392,10 @@ impl SessionBuilder<Offline> {
     /// [`Error::Output`](crate::Error::Output) when the declared root topology is empty or wider
     /// than the engine renders; there is no device to place it on.
     #[cfg(feature = "testing")]
-    pub fn build_detached(mut self, rate: SampleRate) -> Result<Session<crate::Detached>> {
+    pub fn build_detached(
+        mut self,
+        rate: SampleRate,
+    ) -> Result<Session<&'static str, crate::Detached>> {
         let outputs = self.opts.root.as_ref().map_or_else(
             || usize::from(self.opts.outputs_floor.count()),
             |r| usize::from(r.width().count()),
@@ -869,9 +872,11 @@ impl<C: Clock> SessionBuilder<C> {
             );
             let io = match backend {
                 Some(MidiBackend(backend)) => {
-                    tutti_midi_hardware::MidiSession::open_over(backend, inlets, options)?
+                    tutti_midi_hardware::MidiSession::open_over(backend, inlets, options)
+                        .map_err(crate::Error::MidiHardware)?
                 }
-                None => tutti_midi_hardware::MidiSession::open(inlets, options)?,
+                None => tutti_midi_hardware::MidiSession::open(inlets, options)
+                    .map_err(crate::Error::MidiHardware)?,
             };
             // Subscribed before anything can plug in unseen: `Phase::Poll`
             // is this subscription's only reader.
@@ -934,12 +939,12 @@ impl<C: Clock> SessionBuilder<C> {
 
     /// The session over `parts`, `engine` its offline engine if any, with
     /// (`sampler`) a disk streamer when `streamer`.
-    fn session<K: Clock>(
+    fn session<N: Clock>(
         &mut self,
         parts: Parts,
-        running: K::Running,
+        running: N::Running,
         streamer: bool,
-    ) -> Result<Session<K>> {
+    ) -> Result<Session<&'static str, N>> {
         #[cfg(feature = "sampler")]
         let disk_streamer = if streamer {
             Some(tutti_sampler::DiskStreamer::new(
@@ -956,6 +961,7 @@ impl<C: Clock> SessionBuilder<C> {
         #[cfg(feature = "plugin")]
         let main_work = crate::session::SharedWork::new(main_work);
         Ok(Session {
+            _key: std::marker::PhantomData,
             #[cfg(feature = "plugin")]
             _early_work: crate::session::EarlyWork(main_work.clone()),
             running,

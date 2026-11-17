@@ -106,7 +106,10 @@ fn the_reply_is_table_18_enabled_list_then_disabled_list() {
     let message = CiMessage::ProfileReply {
         header: header_on(CiDeviceId::Group),
         to: Muid::of(DST),
-        profiles: ProfileLists::new(vec![piano(), vendor()], vec![one_byte_vendor()]).unwrap(),
+        profiles: ProfileLists::new(
+            ProfileList::try_from(vec![piano(), vendor()]).unwrap(),
+            ProfileList::try_from(vec![one_byte_vendor()]).unwrap(),
+        ),
     };
     let mut want = preamble(0x7E, 0x21, to_dst());
     want.extend([2, 0]); // cep, LSB first
@@ -150,14 +153,14 @@ fn a_reply_whose_count_runs_past_the_message_is_malformed() {
 fn a_list_of_more_than_14_bits_is_refused_and_the_most_is_written() {
     let id = piano();
     assert_eq!(
-        ProfileLists::new(vec![id; 0x4000], Vec::new()),
+        ProfileList::try_from(vec![id; 0x4000]),
         Err(ListTooLong { len: 0x4000 })
     );
-    assert_eq!(
-        ProfileLists::new(Vec::new(), vec![id; 0x4000]),
-        Err(ListTooLong { len: 0x4000 })
+    assert_eq!(ProfileList::new(vec![id; 0x4000]), None);
+    let full = ProfileLists::new(
+        ProfileList::try_from(vec![id; 0x3FFF]).unwrap(),
+        ProfileList::default(),
     );
-    let full = ProfileLists::new(vec![id; 0x3FFF], Vec::new()).unwrap();
     let message = CiMessage::ProfileReply {
         header: header_on(CiDeviceId::FunctionBlock),
         to: Muid::of(DST),
@@ -642,7 +645,12 @@ fn any_message() -> impl Strategy<Value = CiMessage> {
         proptest::collection::vec(any_profile(), 0..4),
         proptest::collection::vec(any_profile(), 0..4),
     )
-        .prop_map(|(e, d)| ProfileLists::new(e, d).unwrap());
+        .prop_map(|(e, d)| {
+            ProfileLists::new(
+                ProfileList::try_from(e).unwrap(),
+                ProfileList::try_from(d).unwrap(),
+            )
+        });
     prop_oneof![
         (head(), to()).prop_map(|(header, to)| CiMessage::ProfileInquiry { header, to }),
         (head(), to(), lists).prop_map(|(header, to, profiles)| {

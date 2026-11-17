@@ -143,7 +143,9 @@ fn entry(key: &'static str, probe: Probe) -> Declared<&'static str, Probe> {
 }
 
 /// The pool events of one update, as `(key, what)`.
-fn events<C: crate::Clock>(session: &mut Session<C>) -> Vec<(&'static str, String)> {
+fn events<K: crate::AppKey, C: crate::Clock>(
+    session: &mut Session<K, C>,
+) -> Vec<(&'static str, String)> {
     session
         .update()
         .into_iter()
@@ -162,7 +164,10 @@ fn events<C: crate::Clock>(session: &mut Session<C>) -> Vec<(&'static str, Strin
         .collect()
 }
 
-fn state<C: crate::Clock>(session: &Session<C>, key: &'static str) -> Option<String> {
+fn state<K: crate::AppKey, C: crate::Clock>(
+    session: &Session<K, C>,
+    key: &'static str,
+) -> Option<String> {
     session.pool_state(&key).map(|state| match state {
         PoolState::Loading => "loading".to_owned(),
         PoolState::Loaded => "loaded".to_owned(),
@@ -174,8 +179,8 @@ fn state<C: crate::Clock>(session: &Session<C>, key: &'static str) -> Option<Str
     })
 }
 
-fn handle<C: crate::Clock>(
-    session: &Session<C>,
+fn handle<K: crate::AppKey, C: crate::Clock>(
+    session: &Session<K, C>,
     key: &'static str,
 ) -> Result<ProbeHandle, HandleError<&'static str>> {
     session.pool.handle::<_, Probe>(&key)

@@ -4,7 +4,7 @@
 //! A transmitter that sends Active Sensing (`0xFE`) sends one at least every
 //! 300 ms in which it sent nothing else, and a receiver that has seen one
 //! turns its voices off when 330 ms pass with no message
-//! ([`ActiveSensing`](crate::ActiveSensing)). The spec recommends the
+//! (`ActiveSensing`). The spec recommends the
 //! transmitter send within 270 ms, a margin for a scheduler that wakes late,
 //! and that is the [`ACTIVE_SENSING_INTERVAL`] here.
 //!

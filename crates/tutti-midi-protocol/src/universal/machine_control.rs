@@ -329,6 +329,41 @@ impl<T: MmcItem> Iterator for MmcItems<'_, T> {
 }
 
 impl MmcCommands {
+    /// STOP alone.
+    #[must_use]
+    pub fn stop() -> Self {
+        Self::of(&[MmcCommand::Stop])
+    }
+
+    /// PLAY alone.
+    #[must_use]
+    pub fn play() -> Self {
+        Self::of(&[MmcCommand::Play])
+    }
+
+    /// LOCATE (target) to `target`, then DEFERRED PLAY when `then_play`: the
+    /// device plays once it has got there. At most 9 bytes, far inside
+    /// [`MMC_MAX_DATA`], so it cannot fail.
+    #[must_use]
+    pub fn locate(target: MmcPosition, then_play: bool) -> Self {
+        let locate = MmcCommand::Locate(MmcLocate::Target(target));
+        if then_play {
+            Self::of(&[locate, MmcCommand::DeferredPlay])
+        } else {
+            Self::of(&[locate])
+        }
+    }
+
+    /// The list of `commands`, which the callers bound to a few bytes each.
+    fn of(commands: &[MmcCommand]) -> Self {
+        let mut list = Self::new();
+        for command in commands {
+            let pushed = list.push(command);
+            debug_assert!(pushed.is_ok(), "the callers' commands fit 48 bytes");
+        }
+        list
+    }
+
     /// The payload of the Command message to `to`: a device, a group or all
     /// (`7F device 06 commands`), the bytes between `F0` and `F7`. It goes out
     /// as SysEx7 through [`Sysex7Packets::from_payload`](tutti_ump::Sysex7Packets::from_payload).
@@ -394,3 +429,6 @@ impl<const N: usize> PartialEq<[u8; N]> for MmcPayload {
         self.as_bytes() == other
     }
 }
+
+#[cfg(test)]
+mod tests;

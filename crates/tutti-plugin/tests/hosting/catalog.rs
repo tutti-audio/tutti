@@ -525,7 +525,7 @@ mod links {
         let rows: Vec<_> = catalog.db().rows().map(|(p, _)| p.to_path_buf()).collect();
         assert_eq!(rows, std::slice::from_ref(&canonical));
         let row = catalog.db().row(&canonical).expect("the row");
-        assert_eq!(row.format, tutti_plugin_types::PluginFormat::Clap);
+        assert_eq!(row.format(), Some(tutti_plugin_types::PluginFormat::Clap));
         let args = std::fs::read_to_string(log).expect("the probe ran");
         assert!(args.contains("--as clap"), "{args:?}");
     }

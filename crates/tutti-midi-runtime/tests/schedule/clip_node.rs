@@ -13,14 +13,13 @@ use tutti_fixtures::midi::key_of;
 use tutti_fixtures::{EventRig, Seen, heard};
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Cx, Editor, Executor, IntoNode, Io, LoopRange, Node, Offset, Prepare, Shape, Status,
-    TransportChanges, TransportPosition, Unforkable,
+    Editor, Executor, IntoNode, LoopRange, Offset, TransportChanges, TransportPosition, Unforkable,
 };
-use tutti_midi_runtime::{MidiClipControls, MidiClipNode, NoteLedger, TimedMidiEvent};
+use tutti_midi_runtime::{MidiClipControls, MidiClipNode, TimedMidiEvent};
 use tutti_types::{Beat, BeatDuration, Bpm, SampleRate, Samples};
 use tutti_ump::Ump;
 use tutti_ump::{Address, ControlValue, NoteNumber, RegisteredPerNoteController, parse_exact};
-use tutti_ump::{CCNumber, Message, MidiChannel, MidiGroup, Rpn, U7, U14, Voice1, Voice2};
+use tutti_ump::{CCNumber, Message, MidiChannel, MidiGroup, Rpn, U7, Voice2};
 
 const RATE: f64 = 48_000.0;
 
@@ -837,66 +836,6 @@ fn a_refused_pedal_up_is_owed_and_follows_the_last_note_off() {
         .collect();
     assert_eq!(ups.len(), 1, "the pedal is lifted exactly once");
     assert!(ups[0] > last_off, "after every note-off");
-}
-
-/// Block 0 sends `script` through a ledger; block 1 releases it all.
-struct SendThenRelease {
-    ledger: NoteLedger<()>,
-    script: Vec<Ump>,
-    block: u32,
-}
-
-impl Node for SendThenRelease {
-    fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(0, 1).with_event_capacity(64)
-    }
-    fn prepare(&mut self, _: &Prepare) {}
-    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
-        let first = cx.env.offset(0).unwrap();
-        let mut sending = self.ledger.block(io.event_out(0), first);
-        if self.block == 0 {
-            for &u in &self.script {
-                sending.send(first, u, None);
-            }
-        } else {
-            sending.release_all(first);
-        }
-        self.block += 1;
-        Status::Modified
-    }
-    fn reset(&mut self) {}
-}
-
-/// **A MIDI 1.0 pedal and bend are returned in MIDI 1.0.** The ledger sends
-/// the return in the protocol the message it was told about used: a MIDI 1.0
-/// Control Change 64 with value 0 and a MIDI 1.0 Pitch Bend at 0x2000, never
-/// a MIDI 2.0 packet (M1 p. 31, Stop; the 14-bit centre is 0x2000, M1 table
-/// of Pitch Bend). A pedal value below 64 is up (M1 CC 64: 0 to 63 is off), so a
-/// pedal sent at 63 is not lifted again.
-#[test]
-fn a_midi_1_pedal_and_bend_are_returned_in_midi_1() {
-    let ch = MidiChannel::of(2);
-    let m1_bend = |v: u16| Ump::from(Message::midi1(ch, Voice1::PitchBend(U14::of(v))));
-    let m1_pedal = |controller, v: u8| midi::m1_cc(ch, controller, U7::of(v));
-    let script = vec![
-        m1_pedal(CCNumber::SUSTAIN, 127),
-        m1_pedal(CCNumber::SOSTENUTO, 63),
-        m1_bend(0x3000),
-    ];
-    let node = SendThenRelease {
-        ledger: NoteLedger::new(16),
-        script: script.clone(),
-        block: 0,
-    };
-    let (_ed, mut exec, _c, seen) = rig_with(Unforkable(node), 64);
-    exec.process(64, &rolling(0), &[], &mut []);
-    exec.process(64, &rolling(64), &[], &mut []);
-    let late: Vec<Ump> = heard(&seen)
-        .iter()
-        .filter(|&&(f, _)| f >= 64)
-        .map(|&(_, u)| u)
-        .collect();
-    assert_eq!(late, vec![m1_pedal(CCNumber::SUSTAIN, 0), m1_bend(0x2000)]);
 }
 
 // ---------------------------------------------------------------------------

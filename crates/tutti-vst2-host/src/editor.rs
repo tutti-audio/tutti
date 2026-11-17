@@ -30,7 +30,7 @@ impl Vst2Loaded {
     ///
     /// # Errors
     ///
-    /// Returns [`Vst2Error::EditorError`] if the plugin has no editor or
+    /// Returns [`Vst2Error::NoEditor`] or [`Vst2Error::EditorOpenFailed`] if the plugin has no editor or
     /// refuses to open it.
     ///
     /// # Panics
@@ -44,7 +44,7 @@ impl Vst2Loaded {
         parent: WindowHandle,
     ) -> Result<Size> {
         if !self.instance.has_editor() {
-            return Err(Vst2Error::EditorError("Plugin has no editor".into()));
+            return Err(Vst2Error::NoEditor);
         }
 
         // The rect's *origin* is deliberately not read. `effEditGetRect`
@@ -63,9 +63,7 @@ impl Vst2Loaded {
 
         let opened = self.instance.open_editor(main, parent);
         if !opened {
-            return Err(Vst2Error::EditorError(
-                "VST2 editor.open() returned false".into(),
-            ));
+            return Err(Vst2Error::EditorOpenFailed);
         }
 
         let (w, h) = if pre.0 > 0 && pre.1 > 0 {
