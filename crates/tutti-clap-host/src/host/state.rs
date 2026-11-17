@@ -17,10 +17,8 @@ use tutti_rt::PackedAtomic;
 pub(crate) struct TimerEntry {
     pub id: u32,
     pub period_ms: u32,
-    /// When the timer last fired, or was armed by the first pass after its
-    /// registration (`None` until then: a registration reads no clock, a pass
-    /// is given one).
-    pub last_fire: Option<Instant>,
+    /// When the timer last fired, or was registered.
+    pub last_fire: Instant,
 }
 
 /// The least a timer's deadline is put after its last fire, whatever period it
@@ -32,11 +30,10 @@ pub(crate) const TIMER_FLOOR: std::time::Duration = std::time::Duration::from_mi
 
 impl TimerEntry {
     /// When the loop should wake for this timer: its period after the last
-    /// fire, at least [`TIMER_FLOOR`]. `None` for a timer no pass has armed.
-    pub(crate) fn wake_at(&self) -> Option<Instant> {
-        self.last_fire.map(|last| {
-            last + std::time::Duration::from_millis(u64::from(self.period_ms)).max(TIMER_FLOOR)
-        })
+    /// fire, at least [`TIMER_FLOOR`].
+    pub(crate) fn wake_at(&self) -> Instant {
+        self.last_fire
+            + std::time::Duration::from_millis(u64::from(self.period_ms)).max(TIMER_FLOOR)
     }
 }
 
@@ -133,6 +130,13 @@ impl TimerState {
             epoch: Instant::now(),
             next_due: AtomicU64::new(Self::NONE),
         }
+    }
+
+    /// The instant a registration is stamped with: the one place a timer
+    /// reads a clock. Every rule that compares instants takes them as
+    /// parameters.
+    pub(crate) fn now(&self) -> Instant {
+        Instant::now()
     }
 
     pub(crate) fn epoch(&self) -> Instant {

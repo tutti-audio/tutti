@@ -444,12 +444,7 @@ fn collect_due_timers(state: &crate::host::state::TimerState, now: std::time::In
 /// Stored under the lock, so a registration's `note_due` is not overwritten.
 fn cache_next_deadline(state: &crate::host::state::TimerState) {
     if let Ok(timers) = state.timers.lock() {
-        // A timer no pass has seen asks for one at once.
-        let next = if timers.iter().any(|t| t.last_fire.is_none()) {
-            Some(state.epoch())
-        } else {
-            timers.iter().filter_map(TimerEntry::wake_at).min()
-        };
+        let next = timers.iter().map(TimerEntry::wake_at).min();
         state.set_next_due(next);
     }
 }
@@ -505,22 +500,14 @@ fn fire_due_timers(
 fn take_due_timers(timers: &mut [TimerEntry], now: std::time::Instant) -> Vec<u32> {
     let mut due = Vec::new();
     for timer in timers.iter_mut() {
-        // A timer no pass has seen was registered since the last one (a
-        // registration reads no clock), so it is taken as due: its period
-        // starts at this pass.
-        let Some(last_fire) = timer.last_fire else {
-            due.push(timer.id);
-            timer.last_fire = Some(now);
-            continue;
-        };
         // `checked_duration_since` rather than `duration_since`: the latter
         // panics (debug) or saturates (release) when `now` precedes
         // `last_fire`, which a caller passing its own instants can do. A timer
         // whose last fire is in the future is simply not due yet.
-        let elapsed = now.checked_duration_since(last_fire);
+        let elapsed = now.checked_duration_since(timer.last_fire);
         if elapsed.is_some_and(|e| e.as_millis() >= timer.period_ms as u128) {
             due.push(timer.id);
-            timer.last_fire = Some(now);
+            timer.last_fire = now;
         }
     }
     due
@@ -535,7 +522,7 @@ mod timer_due_tests {
         TimerEntry {
             id,
             period_ms,
-            last_fire: Some(last_fire),
+            last_fire,
         }
     }
 
@@ -700,13 +687,13 @@ mod main_thread_work_tests {
             TimerEntry {
                 id: 1,
                 period_ms,
-                last_fire: Some(at),
+                last_fire: at,
             }
             .wake_at()
         };
-        assert_eq!(wake(250), Some(at + Duration::from_millis(250)));
-        assert_eq!(wake(0), Some(at + TIMER_FLOOR), "a zero period is floored");
-        assert_eq!(wake(1), Some(at + TIMER_FLOOR));
+        assert_eq!(wake(250), at + Duration::from_millis(250));
+        assert_eq!(wake(0), at + TIMER_FLOOR, "a zero period is floored");
+        assert_eq!(wake(1), at + TIMER_FLOOR);
     }
 
     /// **The CLAP flag word and the shared interest convert both ways**, and a
@@ -735,7 +722,7 @@ mod main_thread_work_tests {
             list.push(TimerEntry {
                 id,
                 period_ms,
-                last_fire: Some(at),
+                last_fire: at,
             });
         }
         drop(list);
@@ -758,35 +745,33 @@ mod main_thread_work_tests {
         assert_eq!(n, 1);
     }
 
-    /// **A timer registered with no clock is due at the first pass, which
-    /// starts its period at that pass's `now`, and asks for that pass at
-    /// once.**
+    /// **A registered timer is not due before its registration plus its
+    /// period, and is due at it**: constructed instants, no clock.
     #[test]
-    fn a_registered_timer_is_due_at_the_first_pass() {
-        let state = TimerState::new();
-        let t0 = state.epoch();
-        state.timers.lock().unwrap().push(TimerEntry {
+    fn a_registered_timer_is_due_once_its_period_has_elapsed() {
+        let registered = Instant::now();
+        let mut timers = [TimerEntry {
             id: 1,
-            period_ms: 10,
-            last_fire: None,
-        });
-        state.note_due(t0);
-        assert_eq!(state.next_due_nanos(), 0, "asks for a pass at once");
-        let later = t0 + Duration::from_millis(500);
-        assert_eq!(fire_due_timers(&state, later, |_| {}), 1);
-        assert_eq!(
-            state.next_due_nanos(),
-            u64::try_from(Duration::from_millis(510).as_nanos()).unwrap(),
-            "its period runs from the pass that fired it"
-        );
-        assert_eq!(
-            fire_due_timers(&state, later + Duration::from_millis(5), |_| {}),
-            0
-        );
-        assert_eq!(
-            fire_due_timers(&state, later + Duration::from_millis(10), |_| {}),
-            1
-        );
+            period_ms: 1000,
+            last_fire: registered,
+        }];
+        let before = registered + Duration::from_millis(999);
+        assert!(take_due_timers(&mut timers, before).is_empty());
+        let due = registered + Duration::from_millis(1000);
+        assert_eq!(take_due_timers(&mut timers, due), [1]);
+    }
+
+    /// The cached deadline of a registration is its period after it.
+    #[test]
+    fn a_registration_lowers_the_cached_deadline_to_its_period() {
+        let state = TimerState::new();
+        let entry = TimerEntry {
+            id: 1,
+            period_ms: 250,
+            last_fire: state.epoch(),
+        };
+        state.note_due(entry.wake_at());
+        assert_eq!(state.next_due_nanos(), 250_000_000);
     }
 
     /// **The pass leaves the cached deadline at the earliest timer's**, and at

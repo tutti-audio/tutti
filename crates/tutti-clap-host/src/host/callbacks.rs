@@ -148,14 +148,15 @@ impl HostCallbacks for HostState {
     fn timer_register(&self, period_ms: u32) -> Option<u32> {
         let id = self.timer.next_id.fetch_add(1, Ordering::Relaxed);
         let mut timers = self.timer.timers.lock().ok()?;
-        // No clock is read here: the first pass arms the timer at its own
-        // `now`, and the cached deadline asks for that pass at once.
-        self.timer.note_due(self.timer.epoch());
-        timers.push(TimerEntry {
+        // `register_timer` is `[main-thread]`, where reading the clock is
+        // allowed; the entry's period runs from this instant.
+        let entry = TimerEntry {
             id,
             period_ms,
-            last_fire: None,
-        });
+            last_fire: self.timer.now(),
+        };
+        self.timer.note_due(entry.wake_at());
+        timers.push(entry);
         Some(id)
     }
 

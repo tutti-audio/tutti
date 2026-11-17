@@ -40,7 +40,9 @@ fn a_timer_the_editor_registers_ticks_on_idle() {
         cap
     };
 
-    let at = std::time::Instant::now();
+    // `on_main_thread` is where the plugin registers it, so every deadline is
+    // after this instant.
+    let before_registering = std::time::Instant::now();
     // SAFETY: a plain integer command latched by the plugin.
     unsafe { command(CMD_REGISTER_TIMER) };
     editor.loaded_mut().on_main_thread(main);
@@ -48,11 +50,17 @@ fn a_timer_the_editor_registers_ticks_on_idle() {
     let tick = Site::OnTimer as usize;
     assert_eq!(read().sites[tick].visits, 0);
 
+    // Before the floor has passed the loop is not woken for it, and the timer
+    // is not latched.
+    EditorWindow::wake(&mut editor, main, &[], before_registering);
+    editor.editor_idle(main);
+    assert_eq!(read().sites[tick].visits, 0, "not before its wake-up");
+
     EditorWindow::wake(
         &mut editor,
         main,
         &[],
-        at + std::time::Duration::from_secs(1),
+        before_registering + std::time::Duration::from_secs(1),
     );
     editor.editor_idle(main);
     assert_eq!(read().sites[tick].visits, 1, "a period-0 timer is due");
