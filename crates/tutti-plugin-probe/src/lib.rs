@@ -7,7 +7,6 @@
 #![forbid(unsafe_code)]
 
 use std::path::Path;
-use tutti_plugin_db::format_from_path;
 use tutti_plugin_types::{MainThreadMarker, PluginDescriptor, PluginFormat};
 
 mod measure;
@@ -20,7 +19,7 @@ pub use measure::{
 /// The format a file is read as: `format` when the caller names one, and the
 /// one its extension names otherwise.
 fn routing(path: &Path, format: Option<PluginFormat>) -> Option<PluginFormat> {
-    format.or_else(|| format_from_path(path))
+    format.or_else(|| PluginFormat::from_path(path))
 }
 
 /// The descriptor of every plugin the file at `path` holds, read as `format` or,
