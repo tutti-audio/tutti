@@ -96,7 +96,7 @@ pub(crate) use table::{Hold, HoldKind};
 #[cfg(test)]
 mod tests;
 
-impl<C: crate::Clock> Session<C> {
+impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// Declares what the session keeps loaded: the whole set, each time.
     ///
     /// The set is diffed against the one declared before, by key and by
@@ -127,9 +127,9 @@ impl<C: crate::Clock> Session<C> {
     /// on the main thread and this call is not on it. A key of the same kind
     /// whose load is [`Load::on_worker`] is not refused. The call refuses the
     /// set whole: nothing of it is applied.
-    pub fn pool<K>(&mut self, parts: impl IntoPool<K>) -> Result<(), PoolError<K>>
+    pub fn pool<P>(&mut self, parts: impl IntoPool<P>) -> Result<(), PoolError<P>>
     where
-        K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
+        P: Ord + Clone + fmt::Debug + Send + Sync + 'static,
     {
         let mut set = PoolSet::new();
         parts.into_pool(&mut set);
@@ -154,9 +154,9 @@ impl<C: crate::Clock> Session<C> {
     /// [`RetryError::NotPooled`] for a key the pool does not declare;
     /// [`RetryError::NeedsMainThread`] for an entry whose load has a stage on
     /// the main thread when no update has run on it and this call is not on it.
-    pub fn retry<K>(&mut self, key: &K) -> Result<(), RetryError<K>>
+    pub fn retry<P>(&mut self, key: &P) -> Result<(), RetryError<P>>
     where
-        K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
+        P: Ord + Clone + fmt::Debug + Send + Sync + 'static,
     {
         let start = self.pool.retry(key)?;
         self.pool_start(start.into_iter().collect());
@@ -171,9 +171,9 @@ impl<C: crate::Clock> Session<C> {
     ///
     /// `K` is the type of the keys the pool was declared with; keys of another
     /// type are not in the report.
-    pub fn pool_loaded<K>(&mut self) -> crate::Job<PoolLoaded<K>>
+    pub fn pool_loaded<P>(&mut self) -> crate::Job<PoolLoaded<P>>
     where
-        K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
+        P: Ord + Clone + fmt::Debug + Send + Sync + 'static,
     {
         let (job, ticket) = self.jobs.new_job();
         self.pool.wait_loaded(ticket);
@@ -202,13 +202,13 @@ impl<C: crate::Clock> Session<C> {
     ///
     /// [`WhenLoadedError::NotPooled`] when the key is not declared: never
     /// declared, or released.
-    pub fn when_loaded<K>(
+    pub fn when_loaded<P>(
         &mut self,
-        key: &K,
+        key: &P,
         then: impl FnOnce(&mut Self) + Send + 'static,
-    ) -> Result<(), WhenLoadedError<K>>
+    ) -> Result<(), WhenLoadedError<P>>
     where
-        K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
+        P: Ord + Clone + fmt::Debug + Send + Sync + 'static,
     {
         self.pool.when_loaded(key, Box::new(then))
     }
@@ -247,16 +247,16 @@ impl<C: crate::Clock> Session<C> {
     /// Where the entry under `key` stands, `None` when the pool has none: never
     /// declared, or released.
     #[must_use]
-    pub fn pool_state<K>(&self, key: &K) -> Option<PoolState>
+    pub fn pool_state<P>(&self, key: &P) -> Option<PoolState>
     where
-        K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
+        P: Ord + Clone + fmt::Debug + Send + Sync + 'static,
     {
         self.pool.state(&PoolKey::new(key))
     }
 }
 
 #[cfg(all(feature = "sampler", codec))]
-impl<C: crate::Clock> Session<C> {
+impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// What the `audio_file` entry under `key` read: its wave, or its stream's
     /// header ([`AudioEntry`]).
     ///
@@ -268,16 +268,16 @@ impl<C: crate::Clock> Session<C> {
     /// [`HandleError::NotPooled`] when the key is not declared (never, or
     /// released); [`HandleError::WrongKind`] when it is another kind of entry;
     /// [`HandleError::NotLoaded`] before the load lands, or after it failed.
-    pub fn audio<K>(&self, key: &K) -> Result<AudioEntry, HandleError<K>>
+    pub fn audio<P>(&self, key: &P) -> Result<AudioEntry, HandleError<P>>
     where
-        K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
+        P: Ord + Clone + fmt::Debug + Send + Sync + 'static,
     {
-        self.pool.handle::<K, AudioFile>(key)
+        self.pool.handle::<P, AudioFile>(key)
     }
 }
 
 #[cfg(feature = "soundfont")]
-impl<C: crate::Clock> Session<C> {
+impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// The SoundFont of the `soundfont` entry under `key`, shared by its `Arc`.
     /// The handle owns nothing: dropping it leaves the entry loaded.
     ///
@@ -286,10 +286,10 @@ impl<C: crate::Clock> Session<C> {
     /// [`HandleError::NotPooled`] when the key is not declared (never, or
     /// released); [`HandleError::WrongKind`] when it is another kind of entry;
     /// [`HandleError::NotLoaded`] before the load lands, or after it failed.
-    pub fn soundfont<K>(&self, key: &K) -> Result<Arc<tutti_sf2::SoundFont>, HandleError<K>>
+    pub fn soundfont<P>(&self, key: &P) -> Result<Arc<tutti_sf2::SoundFont>, HandleError<P>>
     where
-        K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
+        P: Ord + Clone + fmt::Debug + Send + Sync + 'static,
     {
-        self.pool.handle::<K, SoundFontFile>(key)
+        self.pool.handle::<P, SoundFontFile>(key)
     }
 }

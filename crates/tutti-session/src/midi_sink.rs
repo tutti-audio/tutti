@@ -218,7 +218,7 @@ impl Peer for MidiSink {
     }
 }
 
-impl<C: crate::Clock> Session<C> {
+impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// The sink of the `midi_sink` entry under `key`.
     ///
     /// # Errors
@@ -226,11 +226,11 @@ impl<C: crate::Clock> Session<C> {
     /// [`HandleError::NotPooled`] when the key is not declared (never, or
     /// released); [`HandleError::WrongKind`] when it is another kind of entry;
     /// [`HandleError::NotLoaded`] before the load lands.
-    pub fn midi_sink<K>(&self, key: &K) -> Result<MidiSink, HandleError<K>>
+    pub fn midi_sink<P>(&self, key: &P) -> Result<MidiSink, HandleError<P>>
     where
-        K: Ord + Clone + std::fmt::Debug + Send + Sync + 'static,
+        P: Ord + Clone + std::fmt::Debug + Send + Sync + 'static,
     {
-        self.pool.handle::<K, MidiSinkEntry>(key)
+        self.pool.handle::<P, MidiSinkEntry>(key)
     }
 }
 

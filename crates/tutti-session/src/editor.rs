@@ -175,7 +175,7 @@ impl Editors {
     }
 }
 
-impl<C: Clock> Session<C> {
+impl<K: crate::AppKey, C: Clock> Session<K, C> {
     /// The editor of the plugin hosted at `node`, for the caller that holds
     /// the proof ([`MainThreadMarker::new`]). It is closed until
     /// [`Editor::open`]; see the module docs.

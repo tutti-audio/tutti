@@ -329,10 +329,10 @@ pub(crate) struct MainItem {
 }
 
 /// What the app asked to run once an entry is loaded.
-struct WhenLoaded<C: Clock> {
+struct WhenLoaded<A: crate::AppKey, C: Clock> {
     seq: u64,
     key: PoolKey,
-    then: Box<dyn FnOnce(&mut crate::Session<C>) + Send>,
+    then: Box<dyn FnOnce(&mut crate::Session<A, C>) + Send>,
 }
 
 struct Pending {
@@ -346,7 +346,7 @@ type Slots = BTreeMap<PoolKey, Slot>;
 
 /// The pool: every key's entry, the loads in flight, and the events not yet
 /// reported.
-pub(crate) struct Pool<C: Clock> {
+pub(crate) struct Pool<A: crate::AppKey, C: Clock> {
     config: PoolConfig,
     slots: BTreeMap<PoolKey, Slot>,
     last_generation: u64,
@@ -367,11 +367,11 @@ pub(crate) struct Pool<C: Clock> {
     last_rank: u64,
     waiters: Vec<Box<dyn FnMut(&Slots) -> bool + Send>>,
     /// Runs waiting for an entry to load, in the order they were asked.
-    when_loaded: Vec<WhenLoaded<C>>,
+    when_loaded: Vec<WhenLoaded<A, C>>,
     last_when: u64,
 }
 
-impl<C: Clock> fmt::Debug for Pool<C> {
+impl<A: crate::AppKey, C: Clock> fmt::Debug for Pool<A, C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Pool")
             .field("entries", &self.slots.len())
@@ -379,7 +379,7 @@ impl<C: Clock> fmt::Debug for Pool<C> {
     }
 }
 
-impl<C: Clock> Pool<C> {
+impl<A: crate::AppKey, C: Clock> Pool<A, C> {
     pub(crate) fn new(config: PoolConfig) -> Self {
         Self {
             config,
@@ -407,7 +407,7 @@ impl<C: Clock> Pool<C> {
     /// asked of and do not: the caller has run or refused them first
     /// ([`waiting_runs`](Self::waiting_runs)).
     #[cfg(feature = "device")]
-    pub(crate) fn rebind<K: Clock>(self) -> Pool<K> {
+    pub(crate) fn rebind<N: Clock>(self) -> Pool<A, N> {
         debug_assert!(
             self.when_loaded.is_empty(),
             "no run waits when the session changes clock"
@@ -1090,7 +1090,7 @@ impl<C: Clock> Pool<C> {
     pub(crate) fn when_loaded<K>(
         &mut self,
         key: &K,
-        then: Box<dyn FnOnce(&mut crate::Session<C>) + Send>,
+        then: Box<dyn FnOnce(&mut crate::Session<A, C>) + Send>,
     ) -> Result<(), WhenLoadedError<K>>
     where
         K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
@@ -1115,7 +1115,7 @@ impl<C: Clock> Pool<C> {
     pub(crate) fn next_loaded(
         &mut self,
         through: u64,
-    ) -> Option<Box<dyn FnOnce(&mut crate::Session<C>) + Send>> {
+    ) -> Option<Box<dyn FnOnce(&mut crate::Session<A, C>) + Send>> {
         let slots = &self.slots;
         self.when_loaded.retain(|run| slots.contains_key(&run.key));
         let at = self.when_loaded.iter().position(|run| {

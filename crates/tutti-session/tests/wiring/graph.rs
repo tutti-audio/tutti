@@ -41,6 +41,20 @@ fn a_session_is_send() {
     send::<Session>();
 }
 
+/// An app's own key type names a session, and the session is `Send` and `Sync`
+/// by its clock alone, whatever the key.
+#[test]
+fn a_session_takes_an_app_key_type() {
+    #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+    struct MyKey(u32);
+    fn names<K: tutti_session::AppKey>() -> usize {
+        std::mem::size_of::<Session<K, tutti_session::Offline>>()
+    }
+    fn send<T: Send>() {}
+    send::<Session<MyKey, tutti_session::Offline>>();
+    assert_eq!(names::<&'static str>(), names::<MyKey>());
+}
+
 // ---- stimulus nodes ---------------------------------------------------------
 
 /// A source whose one output is its `Drive` param: its drive a `Param` cell

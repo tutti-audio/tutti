@@ -80,7 +80,7 @@ pub enum MidiPolicyError {
 impl Policy for MidiPolicy {
     type Handle<'a> = MidiPolicyHandle<'a>;
 
-    fn handle<C: Clock>(session: &mut Session<C>) -> MidiPolicyHandle<'_> {
+    fn handle<K: crate::AppKey, C: Clock>(session: &mut Session<K, C>) -> MidiPolicyHandle<'_> {
         MidiPolicyHandle {
             attached: session.midi_io.is_some(),
             policy: &mut session.midi_policy,
@@ -118,7 +118,7 @@ impl MidiPolicyHandle<'_> {
     }
 }
 
-impl<C: Clock> Session<C> {
+impl<K: crate::AppKey, C: Clock> Session<K, C> {
     /// Makes the OS MIDI layer present what the policy says, in
     /// [`Phase::Poll`](crate::Phase::Poll), before the devices are stepped.
     pub(crate) fn apply_midi_policy(&mut self) {

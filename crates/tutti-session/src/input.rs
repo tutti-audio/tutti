@@ -315,7 +315,7 @@ impl Inputs {
     }
 }
 
-impl Session<crate::DeviceClock> {
+impl<K: crate::AppKey> Session<K, crate::DeviceClock> {
     /// Opens a capture input on the session's host and puts it in the graph:
     /// the capture stream ([`tutti_cpal::MicIn`]) and the inlet node that copies
     /// it in ([`Graph::add_inlet`](crate::Graph::add_inlet)), in one call. Wire

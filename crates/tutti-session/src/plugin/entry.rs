@@ -630,7 +630,7 @@ enum Swap {
     Refused(u64, LoadError),
 }
 
-impl<C: crate::Clock> Session<C> {
+impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// A plugin to keep loaded under `key`: declare it with
     /// [`pool`](Self::pool), and the session loads it.
     ///
@@ -648,12 +648,12 @@ impl<C: crate::Clock> Session<C> {
     ///
     /// The loaded plugin has no node: [`add_pooled_plugin`](Self::add_pooled_plugin)
     /// puts it in the graph.
-    pub fn plugin_entry<K>(
+    pub fn plugin_entry<P>(
         &self,
-        key: K,
+        key: P,
         id: &PluginId,
         catalog: &Catalog,
-    ) -> PluginDeclaration<K> {
+    ) -> PluginDeclaration<P> {
         PluginDeclaration {
             key,
             entry: PluginEntry {
@@ -679,11 +679,11 @@ impl<C: crate::Clock> Session<C> {
     /// released); [`HandleError::WrongKind`] when it is another kind of
     /// entry; [`HandleError::NotLoaded`] before the load lands, or after it
     /// failed.
-    pub fn plugin<K>(&self, key: &K) -> Result<PooledPlugin, HandleError<K>>
+    pub fn plugin<P>(&self, key: &P) -> Result<PooledPlugin, HandleError<P>>
     where
-        K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
+        P: Ord + Clone + fmt::Debug + Send + Sync + 'static,
     {
-        self.pool.handle::<K, PluginEntry>(key)
+        self.pool.handle::<P, PluginEntry>(key)
     }
 
     /// Puts the plugin of the entry under `key` in the graph, unwired: its
@@ -704,12 +704,12 @@ impl<C: crate::Clock> Session<C> {
     /// call leaves alone);
     /// [`AddPluginError::Lost`] when the plugin is lost (it stays so until
     /// [`retry`](Self::retry)).
-    pub fn add_pooled_plugin<K>(&mut self, key: &K) -> Result<Key<PluginNode>, AddPluginError<K>>
+    pub fn add_pooled_plugin<P>(&mut self, key: &P) -> Result<Key<PluginNode>, AddPluginError<P>>
     where
-        K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
+        P: Ord + Clone + fmt::Debug + Send + Sync + 'static,
     {
         let pool_key = PoolKey::new(key);
-        if self.pool.loaded::<K, PluginEntry>(key)?.standing.lost() {
+        if self.pool.loaded::<P, PluginEntry>(key)?.standing.lost() {
             return Err(AddPluginError::Lost(key.clone()));
         }
         let hold = self
@@ -726,7 +726,7 @@ impl<C: crate::Clock> Session<C> {
         if linked {
             return Err(AddPluginError::Installed(key.clone()));
         }
-        let loaded = self.pool.loaded::<K, PluginEntry>(key)?;
+        let loaded = self.pool.loaded::<P, PluginEntry>(key)?;
         let Some(install) = loaded.take_install() else {
             return Err(AddPluginError::Installed(key.clone()));
         };
