@@ -46,7 +46,7 @@ use tutti_ump::{Message, Voice2};
 
 /// Every phase at `now`: one update, at a time the test picks.
 #[cfg(feature = "midi-hardware")]
-fn update_at(s: &mut Session, now: Instant) -> Vec<SessionEvent> {
+pub(crate) fn update_at(s: &mut Session, now: Instant) -> Vec<SessionEvent> {
     let mut out = Vec::new();
     for &phase in PHASES {
         s.run_phase(phase, PhaseCx::at(now), &mut out);

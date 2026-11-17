@@ -41,7 +41,7 @@ impl Wire {
             manufacturer: ManufacturerId::NON_COMMERCIAL,
             family: [U7::of(1); 2],
             model: [U7::of(2); 2],
-            revision: [U7::of(3); 4],
+            revision: tutti_ump::SoftwareRevision::from([U7::of(3); 4]),
         });
         let (synth, seen) = tap(&mut s);
         s.midi()
