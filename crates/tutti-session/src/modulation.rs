@@ -177,8 +177,8 @@ impl From<ParamRef> for ModTarget {
     }
 }
 
-impl<U> From<crate::TypedParamRef<U>> for ModTarget {
-    fn from(p: crate::TypedParamRef<U>) -> Self {
+impl<U> From<crate::ParamTarget<U>> for ModTarget {
+    fn from(p: crate::ParamTarget<U>) -> Self {
         Self::Param(p.into())
     }
 }
@@ -208,7 +208,7 @@ impl std::fmt::Display for ModTarget {
 }
 
 /// A modulation target whose value is in a unit tutti knows: what
-/// [`Mods::range`] takes a range of. A [`TypedParamRef`](crate::TypedParamRef) (the unit its node
+/// [`Mods::range`] takes a range of. A [`ParamTarget`](crate::ParamTarget) (the unit its node
 /// declares), an [`Edge`] ([`Amplitude`](tutti_types::Amplitude)) and a
 /// [`MixRef`] ([`Mix`](tutti_types::Mix)). Sealed.
 pub trait Ranged: Into<ModTarget> + ranged::Sealed {
@@ -220,8 +220,8 @@ mod ranged {
     pub trait Sealed {}
 }
 
-impl<U: crate::Scalar> ranged::Sealed for crate::TypedParamRef<U> {}
-impl<U: crate::Scalar> Ranged for crate::TypedParamRef<U> {
+impl<U: crate::Scalar> ranged::Sealed for crate::ParamTarget<U> {}
+impl<U: crate::Scalar> Ranged for crate::ParamTarget<U> {
     type Unit = U;
 }
 impl ranged::Sealed for Edge {}
@@ -712,8 +712,17 @@ impl ModState {
 
     /// `target`'s lane: its node and its controls (the knob, the range, the
     /// counters). `None` while it has none.
-    pub fn lane(&self, target: TargetKey) -> Option<(NodeKey, &LaneControls)> {
+    #[cfg_attr(not(any(feature = "testing", feature = "plugin")), allow(dead_code))]
+    pub(crate) fn lane(&self, target: TargetKey) -> Option<(NodeKey, &LaneControls)> {
         self.modulation.lane(target)
+    }
+
+    /// `lane` for a test that reads a lane's program, counters
+    /// and knob: the lane's controls write the knob too, so the feature
+    /// `testing` is what exposes them.
+    #[cfg(feature = "testing")]
+    pub fn lane_controls(&self, target: TargetKey) -> Option<(NodeKey, &LaneControls)> {
+        self.lane(target)
     }
 
     /// The lanes with a knob that drive `node`'s plugin parameters, by id.
@@ -1625,7 +1634,7 @@ impl Mods<'_> {
     }
 
     /// The key the reconciler holds `target` under: what
-    /// [`ModState::lane`] and [`ModRefusal::target`] speak. A param's is
+    /// `ModState::lane` and [`ModRefusal::target`] speak. A param's is
     /// [`ParamRef::key`], a mix's [`MixRef::key`]; an edge's is minted on first
     /// use and kept.
     pub fn key(&mut self, target: impl Into<ModTarget>) -> TargetKey {

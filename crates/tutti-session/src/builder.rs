@@ -961,7 +961,7 @@ impl<C: Clock> SessionBuilder<C> {
         #[cfg(feature = "plugin")]
         let main_work = crate::session::SharedWork::new(main_work);
         Ok(Session {
-            _key: std::marker::PhantomData,
+            values: crate::value::ValueState::new(parts.graph.value_table()),
             #[cfg(feature = "plugin")]
             _early_work: crate::session::EarlyWork(main_work.clone()),
             running,

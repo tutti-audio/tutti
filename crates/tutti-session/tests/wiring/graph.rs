@@ -512,7 +512,7 @@ fn a_crossfade_refused_busy_during_a_re_prepare_lands_on_a_later_update() {
     assert!(controls.set(UnitParam::Drive, 8.0));
     side.tick(&[], &mut out);
     assert_eq!(out[0], 8.0, "its controls steer it");
-    s.graph().set_param(knob.drive(), Drive(9.0)).unwrap();
+    s.set(knob.drive().to(Drive(9.0))).unwrap();
     side.tick(&[], &mut out);
     assert_eq!(out[0], 9.0, "and its params are addressed");
 }
@@ -587,7 +587,7 @@ fn a_crossfade_on_a_poisoned_graph_is_refused() {
 // ---- params and forks -----------------------------------------------------------
 
 /// **Every param write path the session has reaches a fork of a node**
-/// (the constraint export by `Editor::fork` rests on): `Graph::set_param`
+/// (the constraint export by `Editor::fork` rests on): `Session::set`
 /// through the node's addressed `ParamSet`, and a write to the controls
 /// `Graph::add` handed back. A fork starts from the values its cells hold.
 /// (The modulated paths are `mod_lanes.rs`'.)
@@ -604,7 +604,7 @@ fn every_param_write_path_reaches_a_fork() {
         .unwrap();
     let _ = s.update();
 
-    s.graph().set_param(k0.drive(), Drive(5.0)).unwrap();
+    s.set(k0.drive().to(Drive(5.0))).unwrap();
     assert!(c1.set(UnitParam::Drive, 4.0));
     let mut live = [0.0f32; 2];
     s.render_frame(&mut live);

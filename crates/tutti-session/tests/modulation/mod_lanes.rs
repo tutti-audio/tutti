@@ -197,7 +197,7 @@ fn an_export_is_the_live_render_on_a_native_param() {
     settle(&mut s);
     // Past the connect's declick, stopped; then the knobs move.
     render_n(&mut side, 2, 1_024, 128);
-    s.graph().set_param(a.cutoff(), Hz(450.0)).unwrap();
+    s.set(a.cutoff().to(Hz(450.0))).unwrap();
     let _ = s.update();
     // The same write lands on the live side before it plays.
     render_n(&mut side, 2, 128, 128);
@@ -300,7 +300,7 @@ fn a_removed_source_leaves_no_node_and_no_layer() {
         .source_node(follower)
         .expect("the follower has a node");
     assert!(s.graph_ref().contains(node));
-    let (_, lane) = s.mod_state().lane(cutoff.key()).expect("a lane");
+    let (_, lane) = s.mod_state().lane_controls(cutoff.key()).expect("a lane");
     assert_eq!(
         lane.program().inputs().len(),
         1,
@@ -324,7 +324,7 @@ fn a_removed_source_leaves_no_node_and_no_layer() {
     assert!(!s.graph_ref().contains(node), "its node is gone");
     let (_, lane) = s
         .mod_state()
-        .lane(cutoff.key())
+        .lane_controls(cutoff.key())
         .expect("the LFO keeps the lane");
     let program = lane.program();
     assert!(program.inputs().is_empty(), "no input layer");
@@ -332,7 +332,7 @@ fn a_removed_source_leaves_no_node_and_no_layer() {
 }
 
 /// **A knob written after a route edit is the knob.** The cutoff's knob is
-/// the node's own cell, written through `Graph::set_param`; a depth edit
+/// the node's own cell, written through `Session::set`; a depth edit
 /// republishes the lane and writes no knob, so the knob written before it and
 /// the one written after it are each the base the LFO rides on.
 #[test]
@@ -350,7 +350,7 @@ fn a_knob_written_after_a_route_edit_is_the_knob() {
     settle(&mut s);
     render(&mut side, 1_024, 128);
 
-    s.graph().set_param(probe.cutoff(), Hz(300.0)).unwrap();
+    s.set(probe.cutoff().to(Hz(300.0))).unwrap();
     let _ = s.update();
     s.mods_mut()
         .route_of(route)
@@ -358,12 +358,16 @@ fn a_knob_written_after_a_route_edit_is_the_knob() {
         .set_depth(Depth::of(0.2));
     let _ = s.update();
     let a = render(&mut side, 2_048, 128);
-    s.graph().set_param(probe.cutoff(), Hz(700.0)).unwrap();
+    s.set(probe.cutoff().to(Hz(700.0))).unwrap();
     let _ = s.update();
     let b = render(&mut side, 2_048, 128);
 
     assert_eq!(
-        s.mod_state().lane(cutoff.key()).expect("a lane").1.knob(),
+        s.mod_state()
+            .lane_controls(cutoff.key())
+            .expect("a lane")
+            .1
+            .knob(),
         Some(700.0)
     );
     let tol = lfo_tolerance(0.2, 2.0);
@@ -558,7 +562,7 @@ fn a_follower_downstream_of_its_target_is_refused_by_route() {
     assert_eq!(s.mod_state().source_node(follower), None, "nothing built");
     let (_, lane) = s
         .mod_state()
-        .lane(cutoff.key())
+        .lane_controls(cutoff.key())
         .expect("the lane before the refusal");
     assert!(lane.program().inputs().is_empty(), "unchanged");
     // The macro's `+100` still plays.
@@ -775,7 +779,7 @@ fn a_host_edit_committed_for_a_target_publishes_its_latency() {
     );
     render(&mut side, 128, 128);
     settle(&mut s);
-    assert!(s.mod_state().lane(cutoff.key()).is_some());
+    assert!(s.mod_state().lane_controls(cutoff.key()).is_some());
 }
 
 // ------------------------------- properties of the declarations --
@@ -831,14 +835,17 @@ fn removing_the_last_route_returns_the_param_to_its_knob() {
     settle(&mut s);
     assert_holds(&render(&mut side, 1_024, 128)[0], 600.0, "the route");
     assert!(
-        s.mod_state().lane(cutoff.key()).is_some(),
+        s.mod_state().lane_controls(cutoff.key()).is_some(),
         "the route has its lane"
     );
 
     s.mods_mut().remove_route(route).unwrap();
     settle(&mut s);
     assert_holds(&render(&mut side, 1_024, 128)[0], 500.0, "no route left");
-    assert!(s.mod_state().lane(cutoff.key()).is_none(), "and no lane");
+    assert!(
+        s.mod_state().lane_controls(cutoff.key()).is_none(),
+        "and no lane"
+    );
 }
 
 /// **A route's polarity and curve are its own, declared with it and edited in
@@ -910,7 +917,7 @@ fn a_bus_strips_volume_and_pan_take_lanes() {
     for param in [UnitParam::Volume, UnitParam::Balance] {
         assert!(
             s.mod_state()
-                .lane(ParamRef::unit(strip, param).key())
+                .lane_controls(ParamRef::unit(strip, param).key())
                 .is_some(),
             "{param:?} has its lane"
         );
@@ -948,7 +955,10 @@ fn a_chorus_rate_and_a_phaser_mix_take_lanes() {
     }
     settle(&mut s);
     for (at, key) in targets.into_iter().zip(keys) {
-        assert!(s.mod_state().lane(key).is_some(), "{at:?} has its lane");
+        assert!(
+            s.mod_state().lane_controls(key).is_some(),
+            "{at:?} has its lane"
+        );
     }
 }
 
@@ -974,7 +984,7 @@ fn an_added_synth_is_a_modulation_target() {
     settle(&mut s);
     let (_, lane) = s
         .mod_state()
-        .lane(volume.key())
+        .lane_controls(volume.key())
         .expect("the volume has a lane");
     // The knob is read from its cell: a write through the synth's own params
     // is what the lane reads, value for value.
@@ -1028,7 +1038,7 @@ fn lfo_scene(
     }
     assert_eq!(s.mod_state().problems().next(), None);
     assert!(
-        s.mod_state().lane(cutoff.key()).is_some(),
+        s.mod_state().lane_controls(cutoff.key()).is_some(),
         "precondition: a lane"
     );
     (cutoff, route)
@@ -1188,7 +1198,7 @@ fn a_fork_renders_a_modulated_param_as_live_does() {
             .unwrap();
     }
     settle(&mut s);
-    s.graph().set_param(written.drive(), Drive(6.0)).unwrap();
+    s.set(written.drive().to(Drive(6.0))).unwrap();
     let _ = s.update();
 
     // Past the lanes' connect declick (256 frames).

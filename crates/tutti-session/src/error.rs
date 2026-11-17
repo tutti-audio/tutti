@@ -460,10 +460,6 @@ pub enum Error {
     #[error(transparent)]
     Connect(#[from] ConnectError),
 
-    /// A param write was refused ([`Graph::set_param`](crate::Graph::set_param)).
-    #[error(transparent)]
-    Param(#[from] crate::ParamError),
-
     /// A modulation range was refused (`Mods::range`).
     #[error(transparent)]
     Range(#[from] crate::RangeError),
