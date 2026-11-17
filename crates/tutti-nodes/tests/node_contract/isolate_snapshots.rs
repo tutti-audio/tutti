@@ -24,10 +24,10 @@ use tutti_nodes::{
     TremoloConfig, TremoloNode,
 };
 use tutti_nodes::{
-    BitCrusherConfig, BitCrusherNode, ButterworthOrder, CutAlignment, CutFilterConfig,
-    CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerNode,
+    BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode, ButterworthOrder,
+    CutAlignment, CutFilterConfig, CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerNode,
 };
-use tutti_nodes::{StereoWidthConfig, StereoWidthNode};
+use tutti_nodes::{StereoWidthConfig, StereoWidthNode, TiltFilterConfig, TiltFilterNode};
 use tutti_types::{
     Amplitude, BusTopology, ChannelLayout, CompressionRatio, Db, Depth, Drive, Feedback, Hz, Q,
     Resonance, Seconds, StereoWidth, UnitParam,
@@ -225,6 +225,37 @@ fn dc_blocker() {
     })
     .control("corner", |d| {
         assert!(d.param_set().set(UnitParam::Cutoff, 80.0))
+    })
+    .check();
+}
+
+#[test]
+fn bell_filter() {
+    IsolateRow::new("BellFilterNode (stereo)", || {
+        BellFilterNode::from(BellFilterConfig::new(
+            ChannelLayout::STEREO,
+            Hz(2_000.0),
+            Q(2.0),
+            Db(6.0),
+        ))
+    })
+    .control("gain", |d| {
+        assert!(d.param_set().set(UnitParam::GainDb, -9.0))
+    })
+    .check();
+}
+
+#[test]
+fn tilt_filter() {
+    IsolateRow::new("TiltFilterNode (stereo)", || {
+        TiltFilterNode::from(TiltFilterConfig::new(
+            ChannelLayout::STEREO,
+            Hz(1_000.0),
+            Db(6.0),
+        ))
+    })
+    .control("gain", |d| {
+        assert!(d.param_set().set(UnitParam::GainDb, -9.0))
     })
     .check();
 }
