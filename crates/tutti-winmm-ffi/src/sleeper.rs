@@ -165,7 +165,8 @@ impl TimerWaiter {
     }
 
     /// Waits on the first `count` of the event and the timer; the index of the
-    /// one that ended the wait.
+    /// one that ended the wait. `block(1)` waits on the event alone, so an
+    /// armed or fired timer never ends it.
     fn block(&mut self, count: u32) -> Result<u32, Error> {
         let handles = [self.handles.event, self.handles.timer];
         // SAFETY: `handles` holds open handles, `count` of them are read, and

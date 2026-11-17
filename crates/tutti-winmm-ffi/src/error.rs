@@ -104,7 +104,7 @@ pub enum MmResult {
     /// `MMSYSERR_INVALHANDLE`: the handle names no open port.
     #[error("{}", text(MMSYSERR_INVALHANDLE))]
     InvalHandle,
-    /// Any other nonzero `MMRESULT`.
+    /// A code with no named variant.
     #[error("{}", text(*.0))]
     Other(u32),
 }
