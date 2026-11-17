@@ -28,6 +28,22 @@ fn filling_and_clearing_never_reallocate() {
     }
 }
 
+/// The refused push drops its item there and then: a value refused at the cap
+/// is not kept anywhere.
+#[test]
+fn a_refused_push_drops_its_item() {
+    use std::rc::Rc;
+    let item = Rc::new(());
+    let mut v = CappedVec::with_capacity(1);
+    assert!(v.push(Rc::clone(&item)));
+    assert!(!v.push(Rc::clone(&item)));
+    assert_eq!(
+        Rc::strong_count(&item),
+        2,
+        "the original and the one stored"
+    );
+}
+
 /// A cap of zero refuses the first push.
 #[test]
 fn a_zero_cap_refuses_every_push() {
