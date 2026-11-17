@@ -4,8 +4,9 @@
 //!
 //! The structures the engine's audio callback touches, allocation-free on the
 //! audio path (`tests/no_alloc/rt_no_alloc.rs` gates it), and the home of the
-//! engine's lock-free and `unsafe` runtime structures. It names one tutti
-//! crate, `tutti-types` (the units a [`Gauge`] reads, and [`RequestBit`]'s range);
+//! engine's lock-free and `unsafe` runtime structures. It names two tutti
+//! crates, `tutti-types` (the units a [`Gauge`] reads, and [`RequestBit`]'s range)
+//! and `tutti-buffers` (the `Sample` formats);
 //! its other dependencies are `arc-lend`, `arrayvec` and `bytemuck` (and `loom`
 //! under `--cfg loom`).
 //!

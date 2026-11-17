@@ -58,12 +58,12 @@ pub(super) const LAYERS: &[&[&str]] = &[
         "tutti-plugin-ipc-ffi",
     ],
     &[
-        "tutti-rt",
         "tutti-midi-protocol",
         "tutti-midi-device",
         "tutti-curve",
         "tutti-buffers",
     ],
+    &["tutti-rt"],
     &[
         "tutti-midi-network",
         "tutti-graph",
@@ -110,8 +110,9 @@ pub(super) const LAYERS: &[&[&str]] = &[
 const ONLY: &[(&str, &[&str])] = &[
     ("tutti-midi-protocol", &["tutti-ump", "tutti-types"]),
     ("tutti-midi-device", &["tutti-ump", "tutti-types"]),
-    // The unit vocabulary a `Gauge<U>` reads through (`Reading` for a `Unit`).
-    ("tutti-rt", &["tutti-types"]),
+    // The unit vocabulary a `Gauge<U>` reads through (`Reading` for a `Unit`) and the
+    // `Sample` formats the audio-shaped structures are generic over.
+    ("tutti-rt", &["tutti-types", "tutti-buffers"]),
     ("tutti-midi-network", &["tutti-ump", "tutti-midi-device"]),
     ("tutti-metering", &["tutti-types"]),
     // The encoders' worker threads (`spawn_named`), behind the `encode-flac` and
@@ -698,7 +699,7 @@ mod tests {
             "[dependencies]\ntutti-graph = { path = \"../tutti-graph\" }\n",
         ));
         assert!(r.findings.iter().any(|l| {
-            l.contains("tutti-types -> tutti-graph (normal) points up or sideways (layer 0 -> 2)")
+            l.contains("tutti-types -> tutti-graph (normal) points up or sideways (layer 0 -> 3)")
         }));
         // A dev-dependency may point anywhere, except where a crate is held to none.
         let r = with((
@@ -851,11 +852,11 @@ mod tests {
     }
 
     #[test]
-    fn the_runtime_primitives_name_the_units_and_nothing_else() {
+    fn the_runtime_primitives_name_the_units_and_the_sample_formats_only() {
         let r = with((
             "crates/tutti-rt",
             "tutti-rt",
-            "[dependencies]\ntutti-types = { path = \"x\" }\n",
+            "[dependencies]\ntutti-types = { path = \"x\" }\ntutti-buffers = { path = \"x\" }\n",
         ));
         assert!(r.passed(), "{:?}", r.findings);
         let r = with((
@@ -864,7 +865,7 @@ mod tests {
             "[dependencies]\ntutti-types = { path = \"x\" }\ntutti-ump = { path = \"x\" }\n",
         ));
         assert!(r.findings.iter().any(|l| l.contains(
-            "tutti-rt may depend on [\"tutti-types\"] only; it depends on {\"tutti-ump\"}"
+            "tutti-rt may depend on [\"tutti-buffers\", \"tutti-types\"] only; it depends on {\"tutti-ump\"}"
         )));
     }
 
