@@ -1,5 +1,5 @@
 //! [`Client`] and [`Host`]: the two roles over any number of datagrams, and
-//! [`Endpoint`], the boundary a socket driver feeds.
+//! [`NetworkEndpoint`], the boundary a socket driver feeds.
 
 use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
@@ -22,7 +22,7 @@ use crate::{
 /// [`Client`] and [`Host`] are the two; a driver ([`UdpDriver`](crate::UdpDriver))
 /// feeds one of them from a socket. Nothing here blocks, reads a clock or
 /// touches the network.
-pub trait Endpoint {
+pub trait NetworkEndpoint {
     /// Takes a datagram received from `from` at `now`.
     fn on_message(&mut self, from: SocketAddr, datagram: &[u8], now: Instant);
 
@@ -142,7 +142,7 @@ impl Client {
     }
 }
 
-impl Endpoint for Client {
+impl NetworkEndpoint for Client {
     fn on_message(&mut self, from: SocketAddr, datagram: &[u8], now: Instant) {
         // A Client talks to its Host's address alone.
         if from != self.host {
@@ -314,7 +314,7 @@ impl Host {
     }
 }
 
-impl Endpoint for Host {
+impl NetworkEndpoint for Host {
     fn on_message(&mut self, from: SocketAddr, datagram: &[u8], now: Instant) {
         if let Some(session) = self.sessions.get_mut(&from) {
             feed(session, now, datagram);

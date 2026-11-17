@@ -8,9 +8,9 @@ use tutti_midi_device::EntropyError;
 
 use tutti_midi_network::{
     Admission, AuthFailure, AuthMethods, AuthState, Bye, ByeReason, Command, Credentials,
-    DatagramBuilder, Digest, EndedBy, Endpoint, Event, Fec, HostConfig, Invitation, NakReason,
-    Nonce, PingId, Requests, Retransmit, RetransmitRequest, SendError, SequenceNumber,
-    SessionConfig, SessionState, UmpData, UserAuthState, Username,
+    DatagramBuilder, Digest, EndedBy, Event, Fec, HostConfig, Invitation, NakReason,
+    NetworkEndpoint, Nonce, PingId, Requests, Retransmit, RetransmitRequest, SendError,
+    SequenceNumber, SessionConfig, SessionState, UmpData, UserAuthState, Username,
 };
 
 use crate::sim::{Direction, Fate, Sim, client_addr, fixed_nonce, host_addr, identity, note_on};
