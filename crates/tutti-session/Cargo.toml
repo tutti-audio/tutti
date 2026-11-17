@@ -43,6 +43,8 @@ serde = { version = "1", optional = true, features = ["derive"] }
 # The sound card. Off: offline only, and no ALSA headers needed.
 tutti-cpal = { version = "0.0.1", path = "../tutti-cpal", default-features = false, optional = true }
 tutti-modulation = { version = "0.0.1", path = "../tutti-modulation", default-features = false }
+# The analyses `Session::analyze` runs (`Measure`, `Meter`).
+tutti-measure = { version = "0.0.1", path = "../tutti-measure", optional = true }
 # `MpeMode`, the session builder's one MPE setting.
 tutti-midi-protocol = { version = "0.0.1", path = "../tutti-midi-protocol", optional = true }
 tutti-midi-runtime = { version = "0.0.1", path = "../tutti-midi-runtime", default-features = false, optional = true }
@@ -98,6 +100,8 @@ serde = [
     "tutti-midi-device?/serde",
 ]
 sampler = ["dep:tutti-sampler"]
+# `Session::analyze`: an offline analysis job over a wave or a file.
+analyze = ["dep:tutti-measure"]
 soundfont = ["midi", "dep:tutti-soundfont", "dep:tutti-sf2"]
 synth = ["midi", "dep:tutti-polysynth"]
 # Export. `export` is the offline renderer and WAV, which is pure Rust; FLAC and

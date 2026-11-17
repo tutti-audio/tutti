@@ -18,8 +18,9 @@ use tutti_au_ffi::{
 };
 use tutti_graph::UmpAt;
 use tutti_plugin_types::{
-    AudioBufferMut, MIDI_STACK_CAPACITY, ParamMapping, ParamWriteError, PlayheadWatch, PluginError,
-    PluginIo, PluginResult, ProcessContext, ProcessOutput, Processor, TransportInfo, WireMidi,
+    ChannelTable, MIDI_STACK_CAPACITY, ParamMapping, ParamWriteError, PlayheadWatch, PluginAudio,
+    PluginError, PluginIo, PluginResult, ProcessContext, ProcessOutput, Processor, TransportInfo,
+    WireMidi,
 };
 use tutti_rt::Reader;
 use tutti_types::ParamId;
@@ -695,13 +696,13 @@ impl AuProcessor {
 
     /// One block, with the buffers, the context and the output taken apart.
     /// [`Processor::process`] is this with a [`PluginIo`]; a caller whose channel
-    /// tables have distinct lifetimes, as `AudioBufferMut` allows, calls this one.
+    /// tables have distinct lifetimes, as `PluginAudio` allows, calls this one.
     ///
     /// # Errors
     /// [`PluginError::Block`] when the AU failed the block.
     pub fn render(
         &mut self,
-        buffer: &mut AudioBufferMut<'_, '_>,
+        buffer: &mut PluginAudio<'_>,
         ctx: &ProcessContext<'_>,
         out: &mut ProcessOutput,
     ) -> PluginResult<()> {
@@ -755,7 +756,7 @@ impl AuProcessor {
         // goes in first. A block with no transport withdraws the last one.
         match ctx.transport {
             Some(transport) => {
-                self.publish_transport(transport, buffer.num_samples());
+                self.publish_transport(transport, buffer.frames().0);
             }
             None => self.withdraw_transport(),
         }
@@ -768,11 +769,19 @@ impl AuProcessor {
         }
 
         let rendered = match buffer {
-            AudioBufferMut::F32(buf) => {
-                self.render_f32(buf.inputs, buf.outputs, buf.num_samples as u32)
+            PluginAudio::F32(io) => {
+                let frames = io.frames().0 as u32;
+                let (input, mut output) = io.split();
+                let inputs = ChannelTable::of_planes(input)?;
+                let mut outputs = ChannelTable::of_planes_mut(&mut output)?;
+                self.render_f32(&inputs, &mut outputs, frames)
             }
-            AudioBufferMut::F64(buf) => {
-                self.render_f64(buf.inputs, buf.outputs, buf.num_samples as u32)
+            PluginAudio::F64(io) => {
+                let frames = io.frames().0 as u32;
+                let (input, mut output) = io.split();
+                let inputs = ChannelTable::of_planes(input)?;
+                let mut outputs = ChannelTable::of_planes_mut(&mut output)?;
+                self.render_f64(&inputs, &mut outputs, frames)
             }
         };
         // The scheduled events do not reach the unit's listeners (the plugin's
@@ -852,9 +861,8 @@ mod tests {
     use crate::component::find_component;
     use crate::instance::AuLoaded;
     use crate::types::{AudioComponentDescription, K_AUDIO_UNIT_TYPE_EFFECT};
-    use tutti_plugin_types::{
-        AudioBuffer, Loaded, MaxBlock, ParameterChanges, Prepare, SampleRate,
-    };
+    use tutti_buffers::{InputOutput, Planes, PlanesMut};
+    use tutti_plugin_types::{Loaded, MaxBlock, ParameterChanges, Prepare, SampleRate};
     use tutti_types::ParamId;
 
     fn delay() -> (AuProcessor, crate::controller::AuController) {
@@ -896,12 +904,14 @@ mod tests {
         let inputs: Vec<&[f32]> = input.iter().map(|v| v.as_slice()).collect();
         let mut outputs: Vec<&mut [f32]> = output.iter_mut().map(|v| v.as_mut_slice()).collect();
         let mut out = ProcessOutput::default();
-        let mut buffer = AudioBufferMut::F32(AudioBuffer {
-            inputs: &inputs,
-            outputs: &mut outputs,
-            num_samples: 64,
-            sample_rate: tutti_plugin_types::SampleRate::SR_48K,
-        });
+        let mut buffer = PluginAudio::F32(
+            InputOutput::new(
+                tutti_plugin_types::Samples(inputs[0].len()),
+                Planes::new(&inputs).expect("two planes"),
+                PlanesMut::new(&mut outputs).expect("two planes"),
+            )
+            .expect("equal lengths"),
+        );
         processor.render(&mut buffer, &ctx, &mut out).unwrap();
 
         assert_eq!(processor.param_points_dropped(), 2);
@@ -931,12 +941,14 @@ mod tests {
         let inputs: Vec<&[f32]> = input.iter().map(|v| v.as_slice()).collect();
         let mut outputs: Vec<&mut [f32]> = output.iter_mut().map(|v| v.as_mut_slice()).collect();
         let mut out = ProcessOutput::default();
-        let mut buffer = AudioBufferMut::F32(AudioBuffer {
-            inputs: &inputs,
-            outputs: &mut outputs,
-            num_samples: 64,
-            sample_rate: tutti_plugin_types::SampleRate::SR_48K,
-        });
+        let mut buffer = PluginAudio::F32(
+            InputOutput::new(
+                tutti_plugin_types::Samples(inputs[0].len()),
+                Planes::new(&inputs).expect("two planes"),
+                PlanesMut::new(&mut outputs).expect("two planes"),
+            )
+            .expect("equal lengths"),
+        );
         processor.render(&mut buffer, &ctx, &mut out).unwrap();
 
         let stage = processor.stage.borrow();

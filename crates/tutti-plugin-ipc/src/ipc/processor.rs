@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use tutti_plugin_types::BlockStatus;
 use tutti_plugin_types::{
-    AudioBufferMut, ChordValue, ParameterChanges, PluginError, PluginIo, PluginResult,
+    ChannelTable, ChordValue, ParameterChanges, PluginAudio, PluginError, PluginIo, PluginResult,
     ProcessContext, ProcessOutput, Processor, SampleRate, Samples, ScaleValue, TransportInfo,
     WireMidi,
 };
@@ -66,9 +66,13 @@ impl IpcProcessor {
 
 impl Processor for IpcProcessor {
     fn process(&mut self, io: &mut PluginIo<'_>) -> PluginResult<()> {
-        let AudioBufferMut::F32(buffer) = &mut io.buffer else {
+        let PluginAudio::F32(buffer) = &mut io.buffer else {
             return Err(PluginError::Block("the served pipeline takes f32 blocks"));
         };
+        let frames = buffer.frames().0;
+        let (input, mut output) = buffer.split();
+        let inputs = ChannelTable::of_planes(input)?;
+        let mut outputs = ChannelTable::of_planes_mut(&mut output)?;
         let mut piece = Piece {
             ctx: io.ctx,
             out: &mut *io.out,
@@ -78,13 +82,8 @@ impl Processor for IpcProcessor {
             over: 0,
             said: BlockStatus::Continue,
         };
-        self.batcher.process(
-            &self.link.bridge,
-            buffer.num_samples,
-            buffer.inputs,
-            buffer.outputs,
-            &mut piece,
-        );
+        self.batcher
+            .process(&self.link.bridge, frames, &inputs, &mut outputs, &mut piece);
         let over = piece.over;
         let said = piece.said;
         // **A sleep is applied only to a piece that gave the plugin nothing.**
@@ -94,7 +93,7 @@ impl Processor for IpcProcessor {
         // would park the node and that chunk with it, so a piece that carries
         // anything (an event, a parameter, a note expression, a non-silent
         // input frame) does not get the sleep, and the node stays called.
-        if said == BlockStatus::Sleep && !carries_input(io.ctx, buffer.inputs, buffer.num_samples) {
+        if said == BlockStatus::Sleep && !carries_input(io.ctx, &inputs, frames) {
             io.out.set_status(BlockStatus::Sleep);
         }
         if over > 0 {

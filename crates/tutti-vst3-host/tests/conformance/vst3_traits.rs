@@ -12,8 +12,8 @@ use tutti_rt::LockExt;
 
 use assert_no_alloc::assert_no_alloc;
 use tutti_plugin_types::{
-    AudioBuffer, AudioBufferMut, Control, Controller, Loaded, MaxBlock, Normalized, PluginError,
-    PluginIo, PluginTail, Prepare, ProcessContext, ProcessOutput, Processor, RenderMode, Request,
+    Control, Controller, Loaded, MaxBlock, Normalized, PluginAudio, PluginError, PluginIo,
+    PluginTail, Prepare, ProcessContext, ProcessOutput, Processor, RenderMode, Request,
     RescanScope, SampleFormat, SampleRate, Samples,
 };
 use tutti_types::ParamId;
@@ -117,11 +117,12 @@ fn render(
             let [a, b, c] = &mut o;
             let mut outputs = [a.as_mut_slice(), b.as_mut_slice(), c.as_mut_slice()];
             let mut io = PluginIo {
-                buffer: AudioBufferMut::F32(AudioBuffer::new(
+                buffer: PluginAudio::new(
+                    tutti_plugin_types::Samples(inputs[0].len()),
                     &inputs,
                     &mut outputs,
-                    tutti_plugin_types::SampleRate::SR_48K,
-                )),
+                )
+                .expect("equal channels"),
                 ctx,
                 out: &mut out,
             };
@@ -135,11 +136,12 @@ fn render(
             let [a, b, c] = &mut o;
             let mut outputs = [a.as_mut_slice(), b.as_mut_slice(), c.as_mut_slice()];
             let mut io = PluginIo {
-                buffer: AudioBufferMut::F64(AudioBuffer::new(
+                buffer: PluginAudio::new(
+                    tutti_plugin_types::Samples(inputs[0].len()),
                     &inputs,
                     &mut outputs,
-                    tutti_plugin_types::SampleRate::SR_48K,
-                )),
+                )
+                .expect("equal channels"),
                 ctx,
                 out: &mut out,
             };
@@ -415,11 +417,12 @@ impl Block {
         let mut channels = [a.as_mut_slice(), b.as_mut_slice(), c.as_mut_slice()];
         let ctx = ProcessContext::new();
         let mut io = PluginIo {
-            buffer: AudioBufferMut::F32(AudioBuffer::new(
+            buffer: PluginAudio::new(
+                tutti_plugin_types::Samples(inputs[0].len()),
                 &inputs,
                 &mut channels,
-                tutti_plugin_types::SampleRate::SR_48K,
-            )),
+            )
+            .expect("equal channels"),
             ctx: &ctx,
             out,
         };

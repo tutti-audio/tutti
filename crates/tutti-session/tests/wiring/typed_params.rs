@@ -1,5 +1,5 @@
 //! Typed params on keys (doc 030, T2, T3, N2, N3): `lp.cutoff()` is a
-//! reference whose value is in the unit the node declares, `Graph::set_param`
+//! reference whose value is in the unit the node declares, `Session::set`
 //! takes it with a value of that unit and says why it refused, and a host's
 //! own `ParamNode` is inserted as `Params(node)` with no hand-written
 //! `SessionNode`.
@@ -8,7 +8,7 @@ use tutti_graph::{
     Cx, FadeLaw, Io, Node, ParamNode, ParamSet, Params, Prepare, Shape, Status, Unforkable,
 };
 use tutti_nodes::{CompressorControls, CompressorNode, KeySource, SvfFilterNode, SvfType};
-use tutti_session::{DetachedSession, ParamError, Session};
+use tutti_session::{DetachedSession, Session, ValueErrorKind};
 use tutti_types::{
     BusTopology, ChannelLayout, Db, Hz, Param, Q, SampleRate, Seconds, UnitAddr, UnitParam,
 };
@@ -40,17 +40,17 @@ fn a_keys_param_methods_name_their_kind_and_index() {
 }
 
 /// **A write through a key's param reaches the node's cell, in its unit**:
-/// the filter's own control reads what `set_param` wrote.
+/// the filter's own control reads what `set` wrote.
 #[test]
-fn set_param_writes_the_cell_the_key_names() {
+fn a_write_reaches_the_cell_the_key_names() {
     let mut s = detached();
     let (lp, controls) = s.graph().add(SvfFilterNode::<f32>::new(
         SvfType::LowPass,
         Hz(1_000.0),
         Q(0.7),
     ));
-    s.graph().set_param(lp.cutoff(), Hz(2_500.0)).unwrap();
-    s.graph().set_param(lp.q(), Q(1.5)).unwrap();
+    s.set(lp.cutoff().to(Hz(2_500.0))).unwrap();
+    s.set(lp.q().to(Q(1.5))).unwrap();
     assert_eq!(controls.get(UnitParam::Cutoff), Some(2_500.0));
     assert_eq!(controls.get(UnitParam::Q), Some(1.5));
     assert_eq!(controls.get(UnitParam::GainDb), Some(0.0), "the rest stays");
@@ -68,7 +68,7 @@ fn set_param_writes_the_cell_the_key_names() {
             ..CompressorControls::DEFAULT
         },
     ));
-    s.graph().set_param(comp.attack(), Seconds(0.25)).unwrap();
+    s.set(comp.attack().to(Seconds(0.25))).unwrap();
     assert_eq!(controls.get(UnitParam::Attack), Some(0.25));
 }
 
@@ -77,7 +77,7 @@ fn set_param_writes_the_cell_the_key_names() {
 /// key after `replace` swapped in an `Unforkable` one, which addresses no
 /// params). Nothing is written.
 #[test]
-fn set_param_refuses_a_missing_node_and_a_missing_param() {
+fn a_write_to_a_missing_node_or_param_is_no_such_target() {
     let mut s = detached();
     let (lp, _) = s.graph().add(SvfFilterNode::<f32>::new(
         SvfType::LowPass,
@@ -103,20 +103,21 @@ fn set_param_refuses_a_missing_node_and_a_missing_param() {
             FadeLaw::EqualPower,
         )
         .unwrap_or_else(|_| panic!("a detached graph swaps at once"));
-    assert_eq!(
-        s.graph().set_param(bare.cutoff(), Hz(5.0)),
-        Err(ParamError::NoSuchParam {
-            node: bare.erase(),
-            addr: UnitAddr::first(UnitParam::Cutoff)
-        })
+    let refused = s.set(bare.cutoff().to(Hz(5.0))).unwrap_err();
+    assert_eq!(refused.kind, ValueErrorKind::NoSuchTarget);
+    assert!(
+        refused
+            .target
+            .expect("it names the target")
+            .is(bare.cutoff())
     );
 
     let cutoff = lp.cutoff();
     s.graph().remove(lp).unwrap();
-    assert_eq!(
-        s.graph().set_param(cutoff, Hz(5.0)),
-        Err(ParamError::NoSuchNode(lp.erase()))
-    );
+    let refused = s.set(cutoff.to(Hz(5.0))).unwrap_err();
+    assert_eq!(refused.kind, ValueErrorKind::NoSuchTarget);
+    assert_eq!(refused.at, 0);
+    assert_eq!(refused.target.expect("it names the key").node(), lp.erase());
 }
 
 /// A host's node with one param, a `Hz` cutoff.
@@ -165,7 +166,7 @@ fn a_params_wrapped_node_is_addressed_and_forks_from_its_values() {
         .unwrap();
     let _ = s.update();
 
-    s.graph().set_param(mine.cutoff(), Hz(440.0)).unwrap();
+    s.set(mine.cutoff().to(Hz(440.0))).unwrap();
     assert_eq!(controls.get(UnitParam::Cutoff), Some(440.0));
     let mut live = [0.0f32];
     s.render_frame(&mut live);
@@ -176,7 +177,7 @@ fn a_params_wrapped_node_is_addressed_and_forks_from_its_values() {
         .testing()
         .fork_live()
         .expect("a Params node forks");
-    s.graph().set_param(mine.cutoff(), Hz(880.0)).unwrap();
+    s.set(mine.cutoff().to(Hz(880.0))).unwrap();
     let mut forked = [0.0f32];
     fork.tick(&[], &mut forked);
     assert_eq!(forked, [440.0], "the fork has the value set at the fork");

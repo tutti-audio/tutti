@@ -36,7 +36,7 @@ impl Served<Vst3Loaded> {
 use std::path::Path;
 use tutti_fixtures::midi;
 use tutti_midi_protocol::widen_velocity;
-use tutti_plugin_types::{AudioBuffer, AudioBuffer64, AudioBufferMut, Features};
+use tutti_plugin_types::{Features, PluginAudio};
 use tutti_ump::{MidiChannel, U7};
 
 /// Sets `TUTTI_PROBE_MISBEHAVIOUR` until the guard drops (a panic
@@ -92,30 +92,22 @@ fn activations_seen_by_the_plugin(instance: &mut Vst3Instance) -> u32 {
     let frames = 128;
     let input = vec![vec![0.0f32; frames]; 3];
     let mut output = vec![vec![0.0f32; frames]; 3];
-    let input_slices: Vec<&[f32]> = input.iter().map(|v| v.as_slice()).collect();
-    let mut output_slices: Vec<&mut [f32]> = output.iter_mut().map(|v| v.as_mut_slice()).collect();
-    let buffer = AudioBuffer {
-        inputs: &input_slices,
-        outputs: &mut output_slices,
-        num_samples: frames,
-        sample_rate: tutti_plugin_types::SampleRate::SR_48K,
-    };
     let ctx = ProcessContext::new();
     let mut out = ProcessOutput::default();
     // The first block carries the write into the plugin; the mode applies
     // from the next.
-    instance
-        .render(AudioBufferMut::F32(buffer), &ctx, &mut out)
-        .expect("renders");
-    let buffer = AudioBuffer {
-        inputs: &input_slices,
-        outputs: &mut output_slices,
-        num_samples: frames,
-        sample_rate: tutti_plugin_types::SampleRate::SR_48K,
-    };
-    instance
-        .render(AudioBufferMut::F32(buffer), &ctx, &mut out)
-        .expect("renders");
+    for _ in 0..2 {
+        let input_slices: Vec<&[f32]> = input.iter().map(|v| v.as_slice()).collect();
+        let mut output_slices: Vec<&mut [f32]> =
+            output.iter_mut().map(|v| v.as_mut_slice()).collect();
+        let buffer = PluginAudio::new(
+            tutti_plugin_types::Samples(input_slices[0].len()),
+            &input_slices,
+            &mut output_slices,
+        )
+        .expect("equal channels");
+        instance.render(buffer, &ctx, &mut out).expect("renders");
+    }
     (output[0][0] - ACTIVATION_COUNT_BASE) as u32
 }
 
@@ -681,17 +673,17 @@ fn test_vst3_process_f32_silence() {
     let mut output_slices: Vec<&mut [f32]> =
         output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
 
-    let buffer = AudioBuffer {
-        inputs: &input_slices,
-        outputs: &mut output_slices,
-        num_samples,
-        sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
-    };
+    let buffer = PluginAudio::new(
+        tutti_plugin_types::Samples(input_slices[0].len()),
+        &input_slices,
+        &mut output_slices,
+    )
+    .expect("equal channels");
 
     let ctx = tutti_plugin_types::ProcessContext::new();
     // Should not panic
     let mut out = tutti_plugin_types::ProcessOutput::default();
-    let _output = instance.render(AudioBufferMut::F32(buffer), &ctx, &mut out);
+    let _output = instance.render(buffer, &ctx, &mut out);
 }
 
 #[test]
@@ -718,16 +710,16 @@ fn test_vst3_process_f32_with_note() {
         let mut output_slices: Vec<&mut [f32]> =
             output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
 
-        let buffer = AudioBuffer {
-            inputs: &input_slices,
-            outputs: &mut output_slices,
-            num_samples,
-            sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
-        };
+        let buffer = PluginAudio::new(
+            tutti_plugin_types::Samples(input_slices[0].len()),
+            &input_slices,
+            &mut output_slices,
+        )
+        .expect("equal channels");
 
         let ctx = tutti_plugin_types::ProcessContext::new().midi(&note_on);
         let mut out = tutti_plugin_types::ProcessOutput::default();
-        let _output = instance.render(AudioBufferMut::F32(buffer), &ctx, &mut out);
+        let _output = instance.render(buffer, &ctx, &mut out);
 
         for ch in output_data.iter() {
             for &sample in ch.iter() {
@@ -748,16 +740,16 @@ fn test_vst3_process_f32_with_note() {
         let mut output_slices: Vec<&mut [f32]> =
             output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
 
-        let buffer = AudioBuffer {
-            inputs: &input_slices,
-            outputs: &mut output_slices,
-            num_samples,
-            sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
-        };
+        let buffer = PluginAudio::new(
+            tutti_plugin_types::Samples(input_slices[0].len()),
+            &input_slices,
+            &mut output_slices,
+        )
+        .expect("equal channels");
 
         let mut out = tutti_plugin_types::ProcessOutput::default();
 
-        let _output = instance.render(AudioBufferMut::F32(buffer), &empty_ctx, &mut out);
+        let _output = instance.render(buffer, &empty_ctx, &mut out);
 
         for ch in output_data.iter() {
             for &sample in ch.iter() {
@@ -866,16 +858,16 @@ fn test_voxengo_span_process_f64() {
     let mut output_slices: Vec<&mut [f64]> =
         output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
 
-    let buffer = AudioBuffer64 {
-        inputs: &input_slices,
-        outputs: &mut output_slices,
-        num_samples,
-        sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
-    };
+    let buffer = PluginAudio::new(
+        tutti_plugin_types::Samples(input_slices[0].len()),
+        &input_slices,
+        &mut output_slices,
+    )
+    .expect("equal channels");
 
     let ctx = tutti_plugin_types::ProcessContext::new();
     let mut out = tutti_plugin_types::ProcessOutput::default();
-    let _output = instance.render(AudioBufferMut::F64(buffer), &ctx, &mut out);
+    let _output = instance.render(buffer, &ctx, &mut out);
 
     // SPAN is an analyzer — it should pass audio through unchanged
     let mut all_zero = true;
@@ -925,16 +917,16 @@ fn test_voxengo_boogex_process_f64() {
     let mut output_slices: Vec<&mut [f64]> =
         output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
 
-    let buffer = AudioBuffer64 {
-        inputs: &input_slices,
-        outputs: &mut output_slices,
-        num_samples,
-        sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
-    };
+    let buffer = PluginAudio::new(
+        tutti_plugin_types::Samples(input_slices[0].len()),
+        &input_slices,
+        &mut output_slices,
+    )
+    .expect("equal channels");
 
     let ctx = tutti_plugin_types::ProcessContext::new();
     let mut out = tutti_plugin_types::ProcessOutput::default();
-    let _output = instance.render(AudioBufferMut::F64(buffer), &ctx, &mut out);
+    let _output = instance.render(buffer, &ctx, &mut out);
 
     let mut has_nonzero = false;
     for ch in &output_data {

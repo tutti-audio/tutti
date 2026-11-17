@@ -27,9 +27,9 @@
 //!
 //! The other types you will meet first:
 //!
-//! - `AudioBufferMut` (`tutti-plugin-types`): the per-block audio, `F32` or `F64`,
-//!   a [`process`][`ClapProcessor::process`] call reads and writes; its width is
-//!   the processor's. [`AudioBuffer32`] / [`AudioBuffer64`] build the two.
+//! - `PluginAudio` (`tutti-plugin-types`): the per-block audio, `F32` or `F64`, a
+//!   [`process`][`ClapProcessor::process`] call reads and writes; its width is the
+//!   processor's. Each width holds an `InputOutput` (`tutti-buffers`).
 //! - [`ClapProcessContext`]: per-block MIDI, parameter changes and transport.
 //! - [`PluginInfo`]: the descriptor (id, name, vendor, features) read at load.
 //! - [`ClapError`]: the error type, with [`LoadStage`] for load failures.
@@ -67,10 +67,9 @@
 //! use tutti_graph::Offset;
 //! use tutti_fixtures::midi;
 //! use tutti_ump::{MidiChannel, NoteVelocity};
-//! use tutti_clap_host::{
-//!     AudioBuffer32, ClapLoaded, ClapProcessContext, LoadOptions, TransportInfo,
-//! };
-//! use tutti_plugin_types::{AudioBufferMut, Loaded, MaxBlock, Prepare, SampleRate, Samples};
+//! use tutti_buffers::{InputOutput, Planes, PlanesMut};
+//! use tutti_clap_host::{ClapLoaded, ClapProcessContext, LoadOptions, TransportInfo};
+//! use tutti_plugin_types::{Loaded, MaxBlock, PluginAudio, Prepare, SampleRate, Samples};
 //!
 //! // `ClapLoaded` is the GUI / parameter / state stage. The rate and the block
 //! // length are not load parameters: they are the activation's.
@@ -89,11 +88,16 @@
 //! let inputs: [&[f32]; 2] = [&silence, &silence];
 //! let (mut left, mut right) = (vec![0.0f32; 512], vec![0.0f32; 512]);
 //! let mut outputs: [&mut [f32]; 2] = [&mut left, &mut right];
-//! let mut buffer = AudioBuffer32::new(&inputs, &mut outputs, tutti_plugin_types::SampleRate::SR_48K);
+//! let buffer = InputOutput::new(
+//!     Samples(512),
+//!     Planes::new(&inputs).expect("two equal planes"),
+//!     PlanesMut::new(&mut outputs).expect("two equal planes"),
+//! )
+//! .expect("equal lengths");
 //!
 //! let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K).with_tempo(tutti_types::Bpm::of(120.0)).with_playing(true);
 //! let midi = [(Offset::ZERO, midi::note_on(MidiChannel::FIRST, 60, 16384))];
-//! processor.process(&mut AudioBufferMut::F32(buffer), &ClapProcessContext {
+//! processor.process(&mut PluginAudio::F32(buffer), &ClapProcessContext {
 //!     midi: &midi,
 //!     transport: Some(&transport),
 //!     ..Default::default()
@@ -258,8 +262,6 @@
 //! [`ClapProcessor::process`]: crate::ClapProcessor::process
 //! [`ClapError`]: crate::ClapError
 //! [`LoadStage`]: crate::LoadStage
-//! [`AudioBuffer32`]: crate::AudioBuffer32
-//! [`AudioBuffer64`]: crate::AudioBuffer64
 //! [`ClapProcessContext`]: crate::ClapProcessContext
 //! [`PluginInfo`]: crate::PluginInfo
 //! [`ClapNoteExpression`]: crate::ClapNoteExpression
@@ -291,11 +293,11 @@ pub use instance::{
 // (`ClapParamInfo` / `ClapParamFlags`) stay crate-private: the boundary speaks
 // the shared `ParameterInfo` via `ClapLoaded::parameter_list`.
 pub use types::{
-    AmbisonicConfig, AmbisonicNormalization, AmbisonicOrdering, AudioBuffer, AudioBuffer32,
-    AudioBuffer64, AudioPortFlags, AudioPortInfo, ChannelLayout, Color, ContentScale,
-    EditorCapabilities, NoteDialect, NoteDialects, NoteExpressionType, NoteName, NotePortInfo,
-    ParamAutomationState, ParameterChanges, ParameterPoint, ParameterQueue, PluginInfo,
-    StateContext, SurroundChannel, TransportInfo, VoiceInfo, WindowHandle, WireMidi,
+    AmbisonicConfig, AmbisonicNormalization, AmbisonicOrdering, AudioPortFlags, AudioPortInfo,
+    ChannelLayout, Color, ContentScale, EditorCapabilities, NoteDialect, NoteDialects,
+    NoteExpressionType, NoteName, NotePortInfo, ParamAutomationState, ParameterChanges,
+    ParameterPoint, ParameterQueue, PluginInfo, StateContext, SurroundChannel, TransportInfo,
+    VoiceInfo, WindowHandle, WireMidi,
 };
 pub use types::{ClapNoteExpression, RtNoteExpressions};
 

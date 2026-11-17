@@ -11,8 +11,8 @@
 //! [`InProcClient::unlent_blocks`]; a block the Processor failed renders
 //! silence too, counted by [`InProcClient::failed_blocks`].
 //!
-//! A block is one [`Processor::process`]: the graph's channel slices as an
-//! [`AudioBufferMut`](tutti_plugin_types::AudioBufferMut), the block's MIDI, parameter chunk and transport as a
+//! A block is one [`Processor::process`]: the graph's channel slices as
+//! [`PluginAudio`](tutti_plugin_types::PluginAudio), the block's MIDI, parameter chunk and transport as a
 //! [`ProcessContext`], and a [`ProcessOutput`] the client owns and clears each
 //! block. A block is allocation-free in steady state (verified by the
 //! `assert_no_alloc` test in `tests/`).
@@ -841,7 +841,6 @@ pub(super) fn render_with<P: Processor>(
     inputs: &[&[f32]],
     outputs: &mut [&mut [f32]],
     size: usize,
-    sample_rate: SampleRate,
 ) -> Rendered {
     let (unlent, failed) = counters;
     // Taken whether or not the plugin runs: a block with no Processor drops
@@ -867,7 +866,7 @@ pub(super) fn render_with<P: Processor>(
     if let Some(expressive) = with.expressive {
         ctx = ctx.expressive(expressive);
     }
-    let processed = process_block(processor, inputs, outputs, size, sample_rate, &ctx, out);
+    let processed = process_block(processor, inputs, outputs, block, &ctx, out);
     match processed {
         Ok(()) => {
             // A plugin's NaN or infinity would poison every node downstream of it.
@@ -1187,7 +1186,6 @@ mod render_tests {
             &[],
             &mut [&mut channel[..]],
             8,
-            SampleRate::SR_48K,
         )
     }
 
@@ -1253,15 +1251,20 @@ mod render_tests {
 mod sanitize_tests {
     use super::*;
     use tutti_plugin_types::PluginResult;
-    use tutti_plugin_types::{AudioBufferMut, PluginIo};
+    use tutti_plugin_types::{PluginAudio, PluginIo};
 
     /// Writes NaN, +inf and -inf among finite samples to its first output channel.
     struct Poisoned;
 
     impl Processor for Poisoned {
         fn process(&mut self, io: &mut PluginIo<'_>) -> PluginResult<()> {
-            if let AudioBufferMut::F32(buf) = &mut io.buffer {
-                buf.outputs[0].copy_from_slice(&[0.5, f32::NAN, f32::INFINITY, f32::NEG_INFINITY]);
+            if let PluginAudio::F32(buf) = &mut io.buffer {
+                buf.output().plane_mut(0).samples_mut().copy_from_slice(&[
+                    0.5,
+                    f32::NAN,
+                    f32::INFINITY,
+                    f32::NEG_INFINITY,
+                ]);
             }
             Ok(())
         }
@@ -1298,7 +1301,6 @@ mod sanitize_tests {
             &[],
             &mut [&mut channel[..]],
             4,
-            SampleRate::SR_48K,
         );
         assert_eq!(rendered, Rendered::Ran);
         assert_eq!(channel, [0.5, 0.0, 0.0, 0.0]);

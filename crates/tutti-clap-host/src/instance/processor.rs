@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use tutti_plugin_types::{
-    AudioBufferMut, Edit, EditDrain, EditSink, Normalized, NoteExpressionChanges, PluginError,
+    Edit, EditDrain, EditSink, Normalized, NoteExpressionChanges, PluginAudio, PluginError,
     PluginIo, PluginResult, Processor, SampleFormat,
 };
 use tutti_rt::Reader;
@@ -186,7 +186,7 @@ impl ClapProcessor {
 
     /// Renders one block, with the buffers, the context and the output taken
     /// apart. [`Processor::process`] is this with a [`PluginIo`]; a caller whose
-    /// channel tables have distinct lifetimes, as `AudioBufferMut` allows, calls
+    /// channel tables have distinct lifetimes, as `PluginAudio` allows, calls
     /// this one.
     ///
     /// # Errors
@@ -196,7 +196,7 @@ impl ClapProcessor {
     /// failed the block.
     pub fn render(
         &mut self,
-        buffer: &mut AudioBufferMut<'_, '_>,
+        buffer: &mut PluginAudio<'_>,
         ctx: &tutti_plugin_types::ProcessContext<'_>,
         out: &mut tutti_plugin_types::ProcessOutput,
     ) -> PluginResult<()> {
@@ -208,7 +208,7 @@ impl ClapProcessor {
     /// copies what the plugin emitted into `out`.
     fn process_shared(
         &mut self,
-        buffer: &mut AudioBufferMut<'_, '_>,
+        buffer: &mut PluginAudio<'_>,
         ctx: &tutti_plugin_types::ProcessContext<'_>,
         out: &mut tutti_plugin_types::ProcessOutput,
     ) -> PluginResult<()> {

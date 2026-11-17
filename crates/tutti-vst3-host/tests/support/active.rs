@@ -9,6 +9,7 @@
 
 use std::marker::PhantomData;
 use std::path::Path;
+use tutti_buffers::InputOutput;
 use tutti_fixtures::{Activation, main_thread};
 
 use tutti_plugin_types::{
@@ -17,7 +18,7 @@ use tutti_plugin_types::{
 };
 use tutti_types::ParamId;
 use tutti_vst3_host::{
-    AudioBuffer, InputEvents, Library, LoadOptions, ParameterChanges, ProcessFailed, ProcessMode,
+    InputEvents, Library, LoadOptions, ParameterChanges, ProcessFailed, ProcessMode,
     ProcessOutputRef, TransportInfo, Vst3Controller, Vst3Error, Vst3Loaded, Vst3Processor,
     Vst3Sample, class_id,
 };
@@ -143,7 +144,7 @@ pub trait ActiveExt<T: Vst3Sample>: Sized {
     /// One block through the Processor.
     fn process(
         &mut self,
-        buffer: &mut AudioBuffer<T>,
+        buffer: &mut InputOutput<'_, '_, '_, T>,
         events: &InputEvents,
         param_changes: Option<&ParameterChanges>,
         transport: &TransportInfo,
@@ -151,7 +152,7 @@ pub trait ActiveExt<T: Vst3Sample>: Sized {
     /// One block, with the failure the plugin reported.
     fn try_process(
         &mut self,
-        buffer: &mut AudioBuffer<T>,
+        buffer: &mut InputOutput<'_, '_, '_, T>,
         events: &InputEvents,
         param_changes: Option<&ParameterChanges>,
         transport: &TransportInfo,
@@ -229,7 +230,7 @@ impl<T: Vst3Sample> ActiveExt<T> for Active<T> {
 
     fn process(
         &mut self,
-        buffer: &mut AudioBuffer<T>,
+        buffer: &mut InputOutput<'_, '_, '_, T>,
         events: &InputEvents,
         param_changes: Option<&ParameterChanges>,
         transport: &TransportInfo,
@@ -240,7 +241,7 @@ impl<T: Vst3Sample> ActiveExt<T> for Active<T> {
 
     fn try_process(
         &mut self,
-        buffer: &mut AudioBuffer<T>,
+        buffer: &mut InputOutput<'_, '_, '_, T>,
         events: &InputEvents,
         param_changes: Option<&ParameterChanges>,
         transport: &TransportInfo,

@@ -290,10 +290,7 @@ pub(crate) fn roll(t: TransportPosition, rate: SampleRate, frames: Samples) -> T
         return t;
     }
     let mut clock = t.clock(rate);
-    let region = t
-        .looping
-        .and_then(|l| tutti_types::LoopRange::new(l.start, l.end));
-    clock.advance(frames, region);
+    clock.advance(frames, t.looping);
     t.walked_to(clock.origin())
 }
 
@@ -364,8 +361,8 @@ impl Env {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::node::{LoopRange, TransportChanges};
-    use tutti_types::{Beat, Bpm, SegmentOrigin};
+    use crate::node::TransportChanges;
+    use tutti_types::{Beat, Bpm, LoopRange, SegmentOrigin};
 
     const SR: SampleRate = SampleRate::SR_48K;
     /// Frames per beat at 120 BPM and 48 kHz.
@@ -504,10 +501,7 @@ mod tests {
             true,
             Bpm::of(120.0),
             Beat(8.0),
-            Some(LoopRange {
-                start: Beat(8.0),
-                end: Beat(8.0 + 50.0 / FPB),
-            }),
+            Some(LoopRange::new(Beat(8.0), Beat(8.0 + 50.0 / FPB)).expect("a loop")),
         );
         let mut mid_seek = TransportChanges::NONE;
         mid_seek.push(off(20), rolling(32.0)).expect("inside");
@@ -561,10 +555,7 @@ mod tests {
     /// (inside the loop) cannot tell a wrap from a start, the history can.
     #[test]
     fn a_loop_wrap_before_the_block_is_unwound() {
-        let looping = Some(LoopRange {
-            start: Beat(4.0),
-            end: Beat(4.0 + 32.0 / FPB),
-        });
+        let looping = Some(LoopRange::new(Beat(4.0), Beat(4.0 + 32.0 / FPB)).expect("a loop"));
         let mut p = Played::default();
         let first = env(
             0,
@@ -605,10 +596,7 @@ mod tests {
     fn a_counting_host_keeps_only_the_jumps_whatever_the_reach() {
         const REACH: usize = 480_000;
         const BLOCK: usize = 256;
-        let looping = LoopRange {
-            start: Beat(0.0),
-            end: Beat(1.0),
-        };
+        let looping = LoopRange::new(Beat(0.0), Beat(1.0)).expect("a loop");
         let mut p = Played::default();
         let mut next = counted(0.0, Some(looping));
         let mut checked = 0;
@@ -743,10 +731,9 @@ mod tests {
                         t.playing,
                         t.tempo,
                         origin,
-                        Some(LoopRange {
-                            start: Beat(b - 0.001),
-                            end: Beat(b + 40.0 / FPB),
-                        }),
+                        Some(
+                            LoopRange::new(Beat(b - 0.001), Beat(b + 40.0 / FPB)).expect("a loop"),
+                        ),
                     )
                 }
                 _ => TransportPosition::counted(t.playing, Bpm::of(97.0), origin, t.looping),

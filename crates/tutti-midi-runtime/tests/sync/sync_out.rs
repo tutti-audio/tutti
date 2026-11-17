@@ -222,7 +222,7 @@ fn full_message(rate_bits: u8, seconds: u8, frame: u8) -> Vec<u8> {
 /// the node's rate (25 fps here: hours byte `0x20`).
 #[test]
 fn a_cue_a_jump_and_a_wrap_are_full_messages_on_their_frames() {
-    use tutti_graph::LoopRange;
+    use tutti_types::LoopRange;
     let mut rig = Rig::new(
         G,
         SyncMessages {
@@ -250,10 +250,7 @@ fn a_cue_a_jump_and_a_wrap_are_full_messages_on_their_frames() {
     // A loop of beats 2.0 to 2.1 (2 400 frames) wraps on frame 2 400 of a block
     // that starts at its start, a jump back from beat 40: a message of the
     // loop's start, 1 s, at the block's start and on the wrap.
-    let looping = Some(LoopRange {
-        start: Beat(2.0),
-        end: Beat(2.1),
-    });
+    let looping = Some(LoopRange::new(Beat(2.0), Beat(2.1)).expect("a loop"));
     let start = TransportPosition::new(true, Bpm::of(120.0), Beat(2.0), looping);
     let wrap = sysex(&rig.block(BLOCK, start, &[]));
     let from = 4 * BLOCK as u64;
@@ -548,11 +545,8 @@ fn reset_forgets_what_was_seen_and_keeps_what_is_sent() {
 /// on frame 4 096; the wrap's own frame sends nothing.
 #[test]
 fn an_mmc_locate_on_a_loop_wrap_is_on_the_next_blocks_first_frame() {
-    use tutti_graph::LoopRange;
-    let looping = Some(LoopRange {
-        start: Beat(2.0),
-        end: Beat(2.1),
-    });
+    use tutti_types::LoopRange;
+    let looping = Some(LoopRange::new(Beat(2.0), Beat(2.1)).expect("a loop"));
     let mut rig = Rig::new(G, mmc(MtcRate::Fps30));
     let first = TransportPosition::new(true, Bpm::of(120.0), Beat(2.0), looping);
     assert!(

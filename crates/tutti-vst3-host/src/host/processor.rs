@@ -7,18 +7,19 @@ use tutti_graph::UmpAt;
 
 use vst3::Steinberg::Vst::ProcessSetup;
 
+use tutti_buffers::InputOutput;
 use tutti_plugin_types::{
-    AudioBufferMut, Edit, EditDrain, EditSink, Normalized, ParamAccess, ParamWriteError,
+    ChannelTable, Edit, EditDrain, EditSink, Normalized, ParamAccess, ParamWriteError, PluginAudio,
     PluginError, PluginIo, PluginResult, Processor, RtMidiEvents,
 };
 use tutti_rt::DrainBeat;
 use tutti_types::ParamId;
-use tutti_types::{ChannelLayout, SampleRate};
+use tutti_types::{ChannelLayout, SampleRate, Samples};
 
 use crate::events::{InputEvents, OutputStream, Stager, drain_midi};
 use crate::types::{
-    AudioBuffer, ParameterChanges, ProcessContextRequirements, ProcessMode, ProcessOutputRef,
-    TransportInfo, Vst3Sample, to_process_context,
+    ParameterChanges, ProcessContextRequirements, ProcessMode, ProcessOutputRef, TransportInfo,
+    Vst3Sample, to_process_context,
 };
 use tutti_vst3_ffi::{
     AudioSide, BusBuffers, Busy, EventList, FlushIo, ParameterChangesImpl, ProcessIo,
@@ -388,7 +389,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
     /// carries any MIDI / parameter-change events the plugin emitted
     /// (plugin-emitted legacy-MIDI-CC-out is decoded to MIDI).
     ///
-    /// An empty output if `buffer.num_samples == 0`.
+    /// An empty output if `buffer.frames() == Samples(0)`.
     ///
     /// # Errors
     ///
@@ -399,7 +400,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
     /// activation, so the steady-state path does not allocate.
     pub fn process(
         &mut self,
-        buffer: &mut AudioBuffer<T>,
+        buffer: &mut InputOutput<'_, '_, '_, T>,
         events: &InputEvents,
         param_changes: Option<&ParameterChanges>,
         transport: &TransportInfo,
@@ -409,7 +410,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
         // plugin's fresh events into them.
         self.audio.output.clear_emitted();
 
-        if buffer.num_samples == 0 {
+        if buffer.frames() == Samples(0) {
             return Ok(self.audio.output.emitted_ref());
         }
         // Processing resumes lazily after a `stop`. (Activation starts it.)
@@ -420,7 +421,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
             match self.audio_side.set_processing(true) {
                 Ok(()) | Err(tutti_vst3_ffi::Vst3Error::NotImplemented) => self.processing = true,
                 Err(error) => {
-                    buffer.clear_outputs();
+                    buffer.output().silence();
                     return Err(ProcessFailed { error });
                 }
             }
@@ -451,13 +452,13 @@ impl<T: Vst3Sample> Vst3Processor<T> {
             // holds the last block's events: processing now would replay them.
             // The block is silence, nothing is emitted, and the skip is counted
             // (`lists_busy`). The controller's writes wait in `pending`.
-            buffer.clear_outputs();
+            buffer.output().silence();
             return Ok(self.audio.output.emitted_ref());
         };
         if !self.audio.output.events.clear() {
             // The output list is busy the same way: the plugin would append to
             // the last block's output, and the host would read it twice.
-            buffer.clear_outputs();
+            buffer.output().silence();
             return Ok(self.audio.output.emitted_ref());
         }
 
@@ -486,7 +487,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
             Ok::<(), Busy>(())
         })();
         if staged.is_err() {
-            buffer.clear_outputs();
+            buffer.output().silence();
             return Ok(self.audio.output.emitted_ref());
         }
         self.pending.clear();
@@ -497,7 +498,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
                 .unwrap_or(ProcessContextRequirements::all()),
         );
         // `ProcessContext` is the SDK's C struct: the unit stops at its `f64`.
-        process_context.sampleRate = buffer.sample_rate.get();
+        process_context.sampleRate = self.audio.config.sample_rate.get();
 
         // The setup comes from `process_setup()`, the same accessor
         // `apply_process_setup` hands the plugin, so a conformance observer
@@ -507,20 +508,31 @@ impl<T: Vst3Sample> Vst3Processor<T> {
         // Bind each direction to this block's channel slices: bus 0 maps onto
         // the live channels, extra input buses get silence, extra output buses
         // a sink. Channels beyond the scratch's flat width are dropped.
-        let bound = T::bind_inputs(&mut self.audio.input.buses, buffer.inputs).and_then(|inputs| {
-            T::bind_outputs(&mut self.audio.output.buses, buffer.outputs)
+        let frames = buffer.frames();
+        let (input, mut output) = buffer.split();
+        let (Ok(input_table), Ok(mut output_table)) = (
+            ChannelTable::of_planes(input),
+            ChannelTable::of_planes_mut(&mut output),
+        ) else {
+            buffer.output().silence();
+            return Err(ProcessFailed {
+                error: tutti_vst3_ffi::Vst3Error::InvalidArgument,
+            });
+        };
+        let bound = T::bind_inputs(&mut self.audio.input.buses, &input_table).and_then(|inputs| {
+            T::bind_outputs(&mut self.audio.output.buses, &mut output_table)
                 .map(|outputs| (inputs, outputs))
         });
         let (inputs, outputs) = match bound {
             Ok(buses) => buses,
             Err(error) => {
-                buffer.clear_outputs();
+                buffer.output().silence();
                 return Err(ProcessFailed { error });
             }
         };
         let result = self.audio_side.process(ProcessIo {
             mode: self.audio.config.block_mode,
-            num_samples: buffer.num_samples,
+            num_samples: frames.0,
             inputs,
             outputs,
             input_events: &self.audio.input.events,
@@ -532,7 +544,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
         });
 
         if let Err(error) = result {
-            buffer.clear_outputs();
+            buffer.output().silence();
             return Err(ProcessFailed { error });
         }
 
@@ -859,14 +871,14 @@ impl ProcessorAny {
     /// allocates.
     pub fn render(
         &mut self,
-        buffer: &mut AudioBufferMut<'_, '_>,
+        buffer: &mut PluginAudio<'_>,
         ctx: &tutti_plugin_types::ProcessContext<'_>,
         out: &mut tutti_plugin_types::ProcessOutput,
     ) -> PluginResult<()> {
         match (buffer, self) {
-            (AudioBufferMut::F32(buf), Self::F32(p)) => p.process_shared(buf, ctx, out),
-            (AudioBufferMut::F64(buf), Self::F64(p)) => p.process_shared(buf, ctx, out),
-            (AudioBufferMut::F32(_), Self::F64(_)) | (AudioBufferMut::F64(_), Self::F32(_)) => {
+            (PluginAudio::F32(buf), Self::F32(p)) => p.process_shared(buf, ctx, out),
+            (PluginAudio::F64(buf), Self::F64(p)) => p.process_shared(buf, ctx, out),
+            (PluginAudio::F32(_), Self::F64(_)) | (PluginAudio::F64(_), Self::F32(_)) => {
                 Err(PluginError::Block(
                     "the block's sample format is not the one the plugin was activated with",
                 ))
@@ -903,14 +915,13 @@ impl<T: Vst3Sample> Vst3Processor<T> {
     /// and copies what the plugin emitted into `out`.
     fn process_shared(
         &mut self,
-        buffer: &mut AudioBuffer<'_, '_, T>,
+        buffer: &mut InputOutput<'_, '_, '_, T>,
         ctx: &tutti_plugin_types::ProcessContext<'_>,
         out: &mut tutti_plugin_types::ProcessOutput,
     ) -> PluginResult<()> {
-        let transport = ctx
-            .transport
-            .cloned()
-            .unwrap_or_else(|| tutti_plugin_types::TransportInfo::new(buffer.sample_rate));
+        let transport = ctx.transport.cloned().unwrap_or_else(|| {
+            tutti_plugin_types::TransportInfo::new(self.audio.config.sample_rate)
+        });
         // The shared and VST3 note-expression values are one type, so this is a
         // borrow, not a conversion.
         let note_expressions = ctx
