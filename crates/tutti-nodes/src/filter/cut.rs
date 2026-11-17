@@ -19,6 +19,9 @@ pub const MIN_CUT_CUTOFF: Hz = Hz(10.0);
 /// The steps the coefficients take to a new design: one grid period.
 const GLIDE_STEPS: u32 = 16;
 
+/// The octaves from [`MIN_CUT_CUTOFF`] a cutoff below 192 kHz's Nyquist can sit in.
+const LADDER: usize = 14;
+
 /// The control of a [`CutFilterNode`].
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CutFilterControls {
@@ -133,7 +136,9 @@ pub struct CutFilterKernel {
     scratch: Sos,
     rate: SampleRate,
     landed: bool,
-    tail: Tail,
+    /// The tail at each octave from [`MIN_CUT_CUTOFF`] up (`LADDER` rungs at most), found
+    /// in `prepare`; the rungs past the Nyquist's are unused.
+    ladder: [Tail; LADDER],
 }
 
 impl CutFilterKernel {
@@ -156,7 +161,7 @@ impl CutFilterKernel {
             scratch: Sos::new(Vec::with_capacity(MAX_SECTIONS), rate),
             rate,
             landed: false,
-            tail: Tail::Unknown,
+            ladder: [Tail::Unknown; LADDER],
         };
         kernel.coefficients = Glide::landed(kernel.design(CutFilterControls::DEFAULT.cutoff));
         kernel
@@ -205,11 +210,15 @@ impl Kernel for CutFilterKernel {
         self.coefficients =
             Glide::landed(self.design(CutFilterControls::DEFAULT.cutoff)).by(GLIDE_STEPS);
         self.landed = false;
-        let _ = self.design(MIN_CUT_CUTOFF);
-        self.tail = match self.scratch.tail(TAIL_FLOOR) {
-            Ring::Finite(s) => Tail::Finite(Samples((s.get() * rate.get()).ceil() as usize)),
-            Ring::Unbounded => Tail::Unbounded,
-        };
+        let top = self.rate.nyquist_scaled(0.99).get();
+        for rung in 0..LADDER {
+            let cutoff = MIN_CUT_CUTOFF.get() * (1u32 << rung) as f32;
+            let _ = self.design(Hz(cutoff.min(top)));
+            self.ladder[rung] = match self.scratch.tail(TAIL_FLOOR) {
+                Ring::Finite(s) => Tail::Finite(Samples((s.get() * rate.get()).ceil() as usize)),
+                Ring::Unbounded => Tail::Unbounded,
+            };
+        }
     }
 
     fn reset(&mut self) {
@@ -237,7 +246,18 @@ impl Kernel for CutFilterKernel {
 
     /// The ring-out at the lowest cutoff: the longest over every control.
     fn tail(&self) -> Tail {
-        self.tail
+        self.ladder[0]
+    }
+
+    /// The tail found for the highest octave from [`MIN_CUT_CUTOFF`] at or below the
+    /// cutoff in force: a lower cutoff rings longer, so it errs long. No simulation.
+    fn tail_of(&mut self, controls: &CutFilterControls) -> Tail {
+        let top = self.rate.nyquist_scaled(0.99).get();
+        let cutoff = controls.cutoff.get().clamp(MIN_CUT_CUTOFF.get(), top);
+        let octave = (1..LADDER)
+            .take_while(|&rung| MIN_CUT_CUTOFF.get() * (1u32 << rung) as f32 <= cutoff)
+            .count();
+        self.ladder[octave]
     }
 }
 
@@ -248,6 +268,7 @@ mod tests {
     use super::*;
     use crate::filter::test_utils::{generate_sine, rms};
     use crate::test_support::{RATE, assert_cell_glides, drive_block, prepared};
+    use tutti_dsp::TAIL_FLOOR;
     use tutti_graph::contract::assert_param_fork;
     use tutti_graph::{Node, ParamNode};
     use tutti_types::UnitParam;
@@ -409,6 +430,67 @@ mod tests {
                 out.iter().all(|v| v.is_finite() && v.abs() < 2.0),
                 "{config:?}"
             );
+        }
+    }
+
+    /// The frames an `f64` impulse response (transposed direct form II, never the kernel's
+    /// realization) of LR16 at `cutoff` last carries the tail floor of its peak.
+    fn ring_at(response: SosResponse, cutoff: f32) -> usize {
+        let sos = LinkwitzRiley::new(response, 16)
+            .design(Hz(cutoff), RATE)
+            .unwrap();
+        let mut z = vec![[0.0f64; 2]; sos.sections().len()];
+        let h: Vec<f64> = (0..1 << 20)
+            .map(|n| {
+                let mut x = if n == 0 { 1.0 } else { 0.0 };
+                for (b, z) in sos.sections().iter().zip(&mut z) {
+                    let y = b.b0 * x + z[0];
+                    z[0] = b.b1 * x - b.a1 * y + z[1];
+                    z[1] = b.b2 * x - b.a2 * y;
+                    x = y;
+                }
+                x
+            })
+            .collect();
+        let peak = h.iter().fold(0.0f64, |m, v| m.max(v.abs()));
+        let eps = f64::from(TAIL_FLOOR.to_amplitude().get());
+        h.iter().rposition(|v| v.abs() >= eps * peak).unwrap() + 1
+    }
+
+    /// Between two octave rungs the tail `tail_of` reports covers the impulse response's
+    /// at that exact cutoff and is under the next rung down's twice over, and the ceiling
+    /// is the lowest rung's. Reporting the rung above fails the cover.
+    #[test]
+    fn the_tail_narrows_to_the_octave_below_the_cutoff() {
+        let config = CutFilterConfig::new(1u16, LP, 16).linkwitz_riley();
+        let frames = |t: Tail| match t {
+            Tail::Finite(s) => s.get(),
+            other => panic!("{other:?}"),
+        };
+        for response in [LP, HP] {
+            let mut kernel = CutFilterKernel::new(filter_bus(1u16.into()), &config);
+            kernel.response = response;
+            kernel.prepare(RATE, MaxBlock::of(Samples(64)));
+            assert_eq!(
+                kernel.tail(),
+                kernel.tail_of(&CutFilterControls { cutoff: Hz(10.0) })
+            );
+            let mut last = usize::MAX;
+            for cutoff in [14.0f32, 27.0, 55.0, 110.0, 230.0, 470.0, 1500.0, 3000.0] {
+                let reported = frames(kernel.tail_of(&CutFilterControls { cutoff: Hz(cutoff) }));
+                let ring = ring_at(response, cutoff);
+                assert!(
+                    ring <= reported,
+                    "{response:?} {cutoff}: {reported} < {ring}"
+                );
+                assert!(
+                    reported <= 3 * ring + 64,
+                    "{response:?} {cutoff}: {reported} vs {ring}"
+                );
+                assert!(reported <= last, "{response:?} {cutoff} does not narrow");
+                last = reported;
+            }
+            assert!(frames(kernel.tail()) > 10 * last);
         }
     }
 }
