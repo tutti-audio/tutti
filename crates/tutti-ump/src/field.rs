@@ -159,8 +159,7 @@ bits!(
     U28, u32, "u32", 28
 );
 bits!(
-    /// A MIDI note number on the wire (`0..=127`). The musical pitch is
-    /// `tutti_types::Note`, which converts with `u8::try_from`.
+    /// A MIDI note number on the wire (`0..=127`), not a musical pitch.
     NoteNumber, u8, "u8", 7
 );
 bits!(
@@ -169,12 +168,38 @@ bits!(
 );
 
 impl U14 {
+    /// `0x2000`, a pitch bend at rest (M1).
+    pub const CENTER: Self = Self::of(0x2000);
+
+    /// The value whose upper seven bits are `msb` and lower seven `lsb`: the
+    /// inverse of [`msb`](Self::msb) and [`lsb`](Self::lsb).
+    #[inline]
+    #[must_use]
+    pub const fn from_halves(msb: U7, lsb: U7) -> Self {
+        Self((msb.get() as u16) << 7 | lsb.get() as u16)
+    }
+
+    /// The upper seven bits: the second data byte of a pitch bend or a song
+    /// position.
+    #[inline]
+    #[must_use]
+    pub const fn msb(self) -> U7 {
+        U7::masked((self.0 >> 7) as u8)
+    }
+
+    /// The lower seven bits: the first data byte.
+    #[inline]
+    #[must_use]
+    pub const fn lsb(self) -> U7 {
+        U7::masked((self.0 & 0x7F) as u8)
+    }
+
     /// The two 7-bit wire bytes, least significant first (the MIDI-CI and
     /// MIDI Tuning order).
     #[inline]
     #[must_use]
     pub const fn to_le7(self) -> [u8; 2] {
-        [(self.0 & 0x7F) as u8, (self.0 >> 7) as u8]
+        [self.lsb().get(), self.msb().get()]
     }
 
     /// The value of a length, or `None` above 14 bits.
@@ -193,10 +218,10 @@ impl U14 {
     #[inline]
     #[must_use]
     pub const fn from_le7(bytes: [u8; 2]) -> Option<Self> {
-        if (bytes[0] | bytes[1]) & 0x80 != 0 {
-            return None;
+        match (U7::new(bytes[0]), U7::new(bytes[1])) {
+            (Some(lsb), Some(msb)) => Some(Self::from_halves(msb, lsb)),
+            _ => None,
         }
-        Some(Self((bytes[0] as u16) | (bytes[1] as u16) << 7))
     }
 }
 
@@ -248,8 +273,29 @@ pub fn first_non_seven_bit(bytes: &[u8]) -> Option<usize> {
     bytes.iter().position(|&b| b & 0x80 != 0)
 }
 
-// `From` into the raw and `TryFrom` from it, for a bounded type with an
-// unsigned raw.
+// Under `serde`, the bare number, read back through the type's `TryFrom` so a
+// document cannot carry a value the type refuses.
+macro_rules! bounded_serde {
+    ($name:ident, $repr:ty) => {
+        #[cfg(feature = "serde")]
+        impl serde::Serialize for $name {
+            fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                self.get().serialize(serializer)
+            }
+        }
+
+        #[cfg(feature = "serde")]
+        impl<'de> serde::Deserialize<'de> for $name {
+            fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+                let raw = <$repr as serde::Deserialize>::deserialize(deserializer)?;
+                Self::try_from(raw).map_err(serde::de::Error::custom)
+            }
+        }
+    };
+}
+
+// `From` into the raw, `TryFrom` from it, and the serde form, for a bounded
+// type with an unsigned raw.
 macro_rules! bounded_conversions {
     ($name:ident, $repr:ty, $max:expr) => {
         impl From<$name> for $repr {
@@ -269,6 +315,8 @@ macro_rules! bounded_conversions {
                 })
             }
         }
+
+        bounded_serde!($name, $repr);
     };
 }
 
@@ -297,6 +345,7 @@ bounded!(
     /// to fifteen Member Channels: `2..=16` (M2-120 §2.1).
     MpeChannels, u8, 2, 16
 );
+bounded_conversions!(MpeChannels, u8, 16);
 bounded!(
     /// A chord type, `0x00..=0x1B` (Table 14). A reserved type read from the
     /// wire is a [`Field::Reserved`](crate::Field::Reserved), not a value of
@@ -342,6 +391,7 @@ bounded!(
     /// (M2-104 §7.4.6.1).
     MonoChannels, u8, 0, 16
 );
+bounded_conversions!(MonoChannels, u8, 16);
 
 impl MonoChannels {
     /// `0`: one channel for each voice of the receiver.
@@ -381,13 +431,58 @@ bounded!(
     SharpsFlats, i8, -7, 7
 );
 
+/// A number that is not a count of sharps or flats: outside `-7..=7`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("{0} is not a key signature's sharps or flats: -7 to 7")]
+pub struct NotSharpsFlats(pub i8);
+
+impl From<SharpsFlats> for i8 {
+    fn from(value: SharpsFlats) -> i8 {
+        value.get()
+    }
+}
+
+impl TryFrom<i8> for SharpsFlats {
+    type Error = NotSharpsFlats;
+
+    fn try_from(raw: i8) -> Result<Self, NotSharpsFlats> {
+        Self::new(raw).ok_or(NotSharpsFlats(raw))
+    }
+}
+
+bounded_serde!(SharpsFlats, i8);
+
 /// An unsigned fixed-point pitch: a MIDI note number with a fraction of a
 /// semitone, stored as Q7.25 (7 integer bits, 25 fractional bits). Note On
 /// Attribute #3 carries it as Q7.9 (§7.4.15.3) and Registered Per-Note
 /// Controller #3 as Q7.25 (§7.4.15.2). Q7.9 widens by zero extension, which is
 /// exact (M2-115 §4), so one type holds both.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(try_from = "u32", into = "u32"))]
 pub struct Pitch(u32);
+
+// Every `u32` is a Pitch, so the serde form (the bare number) reads back
+// through a conversion that cannot fail.
+#[cfg(feature = "serde")]
+#[allow(
+    clippy::infallible_try_from,
+    reason = "no `From<raw>`: a value enters through `new` or `wire`; this is the serde form"
+)]
+impl TryFrom<u32> for Pitch {
+    type Error = core::convert::Infallible;
+
+    fn try_from(raw: u32) -> Result<Self, Self::Error> {
+        Ok(Self(raw))
+    }
+}
+
+#[cfg(feature = "serde")]
+impl From<Pitch> for u32 {
+    fn from(pitch: Pitch) -> u32 {
+        pitch.0
+    }
+}
 
 impl Pitch {
     /// The pitch of a Q7.9 word.

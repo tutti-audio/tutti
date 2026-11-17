@@ -12,6 +12,12 @@ const UMP_BYTES: u16 = 16;
 /// The data bytes one payload UMP carries: the UMP less its two prefix bytes
 /// (message type, Group, status and MDS id).
 const PAYLOAD_BYTES: usize = 14;
+
+/// The size in bytes of a chunk that carries `len` data bytes: its header, and
+/// each payload UMP's two prefix bytes with its data.
+const fn chunk_bytes(len: usize) -> usize {
+    UMP_BYTES as usize + len + 2 * len.div_ceil(PAYLOAD_BYTES)
+}
 /// The most payload UMPs one chunk holds: its size, header included, is a
 /// 16-bit field.
 const MAX_UMPS: u16 = (u16::MAX - UMP_BYTES) / UMP_BYTES;
@@ -80,8 +86,7 @@ impl MdsChunkSize {
     /// does not fit 16 bits.
     #[must_use]
     pub const fn from_data_len(len: usize) -> Option<Self> {
-        let umps = len.div_ceil(PAYLOAD_BYTES);
-        let bytes = UMP_BYTES as usize + len + 2 * umps;
+        let bytes = chunk_bytes(len);
         if bytes > u16::MAX as usize {
             None
         } else {
@@ -128,6 +133,7 @@ impl From<MdsChunkSize> for u16 {
 /// Set"): a count, or unknown for streaming data, which the last chunk
 /// resolves by declaring its own number.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum MdsChunks {
     /// Zero on the wire: not known yet.
     Unknown,
@@ -159,6 +165,7 @@ impl MdsChunks {
 /// zero in a final chunk of a set whose data the sender cannot vouch for
 /// (section 7.9.1).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum MdsChunk {
     /// Zero on the wire: the set ends here and its data is not verified.
     Unverified,
@@ -191,6 +198,7 @@ impl MdsChunk {
 /// manufacturer id the device id and sub ids are the MMA/AMEI specification's;
 /// with a manufacturer's own they are the manufacturer's.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct MdsIdentity {
     /// The 16-bit manufacturer id (section 7.10).
     pub manufacturer: ManufacturerId,
@@ -242,6 +250,15 @@ impl MdsChunkUmps {
     const fn data_len(self) -> usize {
         self.0 as usize * PAYLOAD_BYTES
     }
+
+    /// The first chunk of `data`: its bytes (at most [`data_len`](Self::data_len)),
+    /// its size and the bytes after it. A chunk of at most 4094 payload UMPs
+    /// is at most `16 + 16 * 4094` bytes, which fits 16 bits.
+    fn take(self, data: &[u8]) -> (&[u8], MdsChunkSize, &[u8]) {
+        let (chunk, rest) = data.split_at(data.len().min(self.data_len()));
+        let size = MdsChunkSize(chunk_bytes(chunk.len()) as u16);
+        (chunk, size, rest)
+    }
 }
 
 impl From<MdsChunkUmps> for u16 {
@@ -272,11 +289,10 @@ impl<'a> MixedDataSet<'a> {
     /// chunks, the most a 16-bit chunk count names.
     #[must_use]
     pub fn packets(self, chunk: MdsChunkUmps) -> Option<MixedDataPackets<'a>> {
-        let per_chunk = chunk.data_len();
-        let total = u16::try_from(self.data.len().div_ceil(per_chunk).max(1)).ok()?;
+        let total = u16::try_from(self.data.len().div_ceil(chunk.data_len()).max(1)).ok()?;
         Some(MixedDataPackets {
             set: self,
-            per_chunk,
+            chunk_umps: chunk,
             total,
             chunk: 0,
             pending: &[],
@@ -319,8 +335,8 @@ impl<'a> MixedDataSet<'a> {
 #[derive(Clone, Debug)]
 pub struct MixedDataPackets<'a> {
     set: MixedDataSet<'a>,
-    /// The data bytes of a full chunk.
-    per_chunk: usize,
+    /// The most payload UMPs of a chunk.
+    chunk_umps: MdsChunkUmps,
     total: u16,
     /// The number of the chunk whose header was last written; 0 before any.
     chunk: u16,
@@ -340,12 +356,10 @@ impl Iterator for MixedDataPackets<'_> {
                 return None;
             }
             self.chunk += 1;
-            let (this, rest) = self.rest.split_at(self.rest.len().min(self.per_chunk));
+            let (this, chunk_size, rest) = self.chunk_umps.take(self.rest);
             self.pending = this;
             self.rest = rest;
             self.header_due = this.is_empty();
-            let chunk_size = MdsChunkSize::from_data_len(this.len())
-                .expect("a chunk holds at most 4094 payload UMPs");
             return Some(Ump::from(Message::Data128(
                 self.set.group,
                 Data128::MixedDataHeader(MixedDataHeader {
