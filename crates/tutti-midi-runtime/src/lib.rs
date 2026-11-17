@@ -23,8 +23,6 @@
 //! - [`TempoFollower`]: what a transport that follows an outside tempo applies, as a pure
 //!   value (a Group's Flex Set Tempo and Set Time Signature, M2-104 §7.5.3, §7.5.4); the
 //!   session places the change.
-//! - [`NoteLedger`]: the notes a node has started and not ended, and the only way
-//!   it writes to its port; [`MidiClipNode`] uses it.
 //! - [`MidiKeys`]: the key helpers (`note_on`, `note_off`) over `tutti-graph`'s
 //!   event inlet, which is how a control thread sends MIDI into the graph.
 //! - [`ClockNode`] and [`JrStream`]: engine-produced MIDI *out* (Beat Clock, MTC,
@@ -127,7 +125,7 @@
 //! capacity refuses a new event, and the graph counts every refusal
 //! (`Editor::take_event_losses`); a clock counts its own ([`ClockControls::losses`]).
 //! A note-off has room past the capacity, and one the port still refuses is owed:
-//! the [`NoteLedger`] writes it at the first frame of a later block, before
+//! a clip's note ledger writes it at the first frame of a later block, before
 //! anything else, so a note is never left sounding by a full port.
 //!
 //! ## MPE folded to native per-note messages
@@ -202,7 +200,6 @@ mod test_support;
 mod traits;
 
 pub use clock_map::{ClockMap, ClockReading, GAIN, Observed, RESYNC};
-pub use ledger::{NoteLedger, Sending};
 pub use live::{
     ArrivalClock, CHANNELLESS_PORT, DeviceEpochs, DeviceInput, DeviceWriters, EpochWriter, InputId,
     InputInlets, InputReaders, InputWriters, LIVE_INLET_CAPACITY, MIDI_INPUT_DENSITY,
