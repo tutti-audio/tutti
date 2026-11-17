@@ -40,6 +40,7 @@ use tutti_plugin_types::{BridgeError, Features, MainThreadMarker, MainWorkHandle
 use tutti_types::{ChannelLayout, SampleRate};
 
 use super::{HostPlugin, Mirror, Open, Origin, PluginLoad, PluginLoaded, PluginNode};
+use crate::PluginPresets;
 use crate::peer::{ResourceIds, sealed};
 use crate::{
     Declared, GiveUp, HandleError, Hold, HoldKind, IntoPool, Key, Life, Load, LoadError, Peer,
@@ -204,6 +205,7 @@ pub struct PluginInfo {
     descriptor: PluginDescriptor,
     hosting: Hosting,
     server_pid: Option<u32>,
+    presets: PluginPresets,
 }
 
 impl PluginInfo {
@@ -231,6 +233,13 @@ impl PluginInfo {
     #[must_use]
     pub const fn hosting(&self) -> Hosting {
         self.hosting
+    }
+
+    /// What the plugin does with presets, and its list: read when the plugin
+    /// loaded, never per call ([`PluginPresets::is_read`]).
+    #[must_use]
+    pub const fn presets(&self) -> &PluginPresets {
+        &self.presets
     }
 }
 
@@ -278,6 +287,7 @@ impl LoadedPlugin {
         open: Open,
         loadable: Loadable,
         config: AudioConfig,
+        main: Option<MainThreadMarker>,
     ) -> Result<Self, LoadError> {
         let Open {
             plugin,
@@ -289,15 +299,31 @@ impl LoadedPlugin {
         let served = hosting == Hosting::OutOfProcess;
         let handle = plugin.handle().clone();
         let ports = ports_of(&handle);
+        let id = cx.ids.mint();
+        let presets = PluginPresets::new(handle.preset_support(), id);
+        if presets.support().can_list() {
+            match main {
+                Some(main) => presets.fill(handle.presets(main).unwrap_or_default()),
+                // A served plugin's list is a round trip that takes the main
+                // thread's proof: the first update there reads it.
+                None => {
+                    let (cell, handle) = (presets.cell(), handle.clone());
+                    cx.work.defer(move |main| {
+                        let _ = cell.set(handle.presets(main).unwrap_or_default());
+                    });
+                }
+            }
+        }
         let info = PluginInfo {
             plugin: plugin.plugin().clone(),
             descriptor: handle.descriptor().clone(),
             hosting,
             server_pid: handle.server_pid(),
+            presets,
         };
         let main_only = !served;
         Ok(Self {
-            id: cx.ids.mint(),
+            id,
             info: Arc::new(info),
             standing: Arc::new(Standing {
                 handle: Mutex::new(Some(Affine::new(handle, &cx.work, main_only))),
@@ -452,7 +478,7 @@ fn land(
     main: Option<MainThreadMarker>,
 ) -> Result<LoadedPlugin, LoadError> {
     let (loadable, config, open) = loaded.finish(main);
-    LoadedPlugin::new(cx, open, loadable, config)
+    LoadedPlugin::new(cx, open, loadable, config, main)
 }
 
 /// A plugin to keep loaded, under `key`: what [`Session::plugin_entry`]

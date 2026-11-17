@@ -147,6 +147,7 @@ mod fake_hosting;
 mod lost;
 mod rebind;
 pub use rebind::PortsRefusal;
+mod preset_job;
 mod state_job;
 pub(crate) use lost::Lost;
 
@@ -155,6 +156,7 @@ pub use entry::{
     AddPluginError, LoadedPlugin, PluginCause, PluginDeclaration, PluginEntry, PluginInfo,
     PluginPorts, PooledPlugin,
 };
+pub use preset_job::{LoadPreset, PresetJobError, PresetJobFailed};
 pub use state_job::{RestoreState, SaveState, StateJobError, StateJobFailed};
 
 use crate::plugin_diagnostics::Figures;
@@ -1269,22 +1271,6 @@ pub struct Plugin<'a> {
 }
 
 impl<'a> Plugin<'a> {
-    /// The plugin's presets: a list to load from, or a file to load. They are
-    /// the main thread's (VST3, VST2 and AU answer them there), so this takes
-    /// the proof.
-    ///
-    /// # Errors
-    ///
-    /// [`PresetError::Unsupported`](tutti_plugin_types::PresetError::Unsupported)
-    /// when the plugin has no preset surface;
-    /// [`PresetError::Lost`](tutti_plugin_types::PresetError::Lost) when it is gone.
-    pub fn presets(
-        &self,
-        main: &tutti_plugin_types::MainThreadMarker,
-    ) -> Result<crate::Presets<'a>, tutti_plugin_types::PresetError> {
-        crate::Presets::of(self.hosted, *main)
-    }
-
     pub(crate) fn new(node: NodeKey, hosted: &'a HostedPlugin, figures: Figures) -> Self {
         Self {
             node,
@@ -1523,7 +1509,7 @@ impl<C: crate::Clock> Session<C> {
     }
 
     /// The view of the plugin hosted at `node`, a borrow of its record: its
-    /// params, state, diagnostics, buses, health and presets. It reads the
+    /// params, state, diagnostics, buses and health. It reads the
     /// node's plugin; the entry's handle ([`plugin`](Self::plugin)) is the
     /// plugin's, whether or not a node has it.
     ///

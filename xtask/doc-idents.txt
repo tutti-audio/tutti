@@ -144,7 +144,7 @@
 1 crates/tutti-vst3-host/tests/host/integration_tests.rs
 3 crates/tutti-vst3-host/tests/support/audio-probe/README.md
 9 crates/tutti-vst3-host/tests/support/conformance.rs
-42 docs/engineering-notes.md
+41 docs/engineering-notes.md
 5 docs/style-guide.md
 1 testing/tutti-clap-test-plugin/src/lib.rs
 3 testing/tutti-clap-test-plugin/src/params_state.rs

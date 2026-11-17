@@ -1,162 +1,132 @@
-//! A hosted plugin's presets: what the format can do
-//! with them, the list where there is one, and a load that says what happened.
+//! A hosted plugin's presets as part of its [`PluginInfo`](crate::PluginInfo):
+//! what the format does with them ([`PluginPresets::support`]) and the list
+//! where there is one ([`ListedPreset`]).
 //!
-//! Presets are the main thread's (VST3, VST2 and AU answer them there), so the
-//! view is [`Plugin::presets`](crate::Plugin::presets), which takes the proof.
-//! The three answers of the old `Option<bool>` are [`PresetError`]: no such operation for this plugin
-//! ([`Unsupported`](PresetError::Unsupported)), the plugin declined
-//! ([`Refused`](PresetError::Refused)), the plugin is gone
-//! ([`Lost`](PresetError::Lost)).
+//! The list is read once, when the plugin loads, and held: an in-process plugin
+//! answers it where the load lands, and a served plugin's list is a round trip,
+//! so it is read by the first [`update`](crate::Session::update) on the main
+//! thread after the load ([`PluginPresets::is_read`]). No host reports a change
+//! of a plugin's list, so nothing refreshes it later. Loading is a job
+//! ([`Session::load_preset`](crate::Session::load_preset),
+//! [`Session::load_preset_file`](crate::Session::load_preset_file)).
 
-use std::path::Path;
+use std::sync::{Arc, OnceLock};
 
-use crate::plugin::HostedPlugin;
-use tutti_plugin_types::{MainThreadMarker, Preset, PresetError, PresetId, PresetSupport};
+use tutti_plugin_types::{Preset, PresetId, PresetSupport};
 
-/// What a plugin's format does with presets ([`Presets::kind`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[non_exhaustive]
-pub enum PresetKind {
-    /// The plugin lists its presets and loads one by its id (VST2, VST3, AU):
-    /// [`Presets::iter`], [`PresetEntry::load`].
-    Browse,
-    /// The plugin loads a preset from a file and lists none (CLAP, whose
-    /// discovery is not bound): [`Presets::load_file`].
-    File,
-}
+use crate::ResourceId;
 
-/// A hosted plugin's presets, lent by [`Plugin::presets`](crate::Plugin::presets).
+/// What a plugin does with presets and the list it has, in its
+/// [`PluginInfo`](crate::PluginInfo).
 ///
-/// The list is read when the view is made, so a call may be a round trip to a
-/// served plugin; the view is a snapshot of it, and the plugin's own list is
-/// asked again by making another.
-#[derive(Debug)]
-pub struct Presets<'a> {
-    hosted: &'a HostedPlugin,
-    main: MainThreadMarker,
-    kind: PresetKind,
-    list: Vec<Preset>,
+/// Cloning shares the list: a clone sees the read land.
+#[derive(Debug, Clone)]
+pub struct PluginPresets {
+    support: PresetSupport,
+    plugin: ResourceId,
+    list: Arc<OnceLock<Vec<Preset>>>,
 }
 
-impl<'a> Presets<'a> {
-    /// The presets of the plugin of `hosted`.
-    ///
-    /// # Errors
-    ///
-    /// [`PresetError::Unsupported`]: the plugin has no preset surface;
-    /// [`PresetError::Lost`]: it is gone.
-    pub(crate) fn of(
-        hosted: &'a HostedPlugin,
-        main: MainThreadMarker,
-    ) -> Result<Self, PresetError> {
-        let handle = &hosted.handle;
-        let kind = match handle.preset_support() {
-            // A format that lists but cannot load answers its loads `Refused`.
-            PresetSupport::Full | PresetSupport::ListOnly => PresetKind::Browse,
-            PresetSupport::LoadByPath => PresetKind::File,
-            PresetSupport::None => return Err(PresetError::Unsupported),
+impl PluginPresets {
+    /// The presets of the plugin `plugin` as `support` says; `list` is the
+    /// read, set once ([`fill`](Self::fill)).
+    pub(crate) fn new(support: PresetSupport, plugin: ResourceId) -> Self {
+        let this = Self {
+            support,
+            plugin,
+            list: Arc::default(),
         };
-        let list = match kind {
-            PresetKind::Browse => handle.presets(main)?,
-            PresetKind::File => Vec::new(),
-        };
-        Ok(Self {
-            hosted,
-            main,
-            kind,
-            list,
-        })
+        // A plugin that lists nothing has nothing to read.
+        if !support.can_list() {
+            this.fill(Vec::new());
+        }
+        this
     }
 
-    /// Whether the plugin lists its presets or loads them from files.
-    pub fn kind(&self) -> PresetKind {
-        self.kind
+    /// The list's cell, to be filled from the main thread.
+    pub(crate) fn cell(&self) -> Arc<OnceLock<Vec<Preset>>> {
+        Arc::clone(&self.list)
     }
 
-    /// How many presets the plugin listed (always 0 for [`PresetKind::File`]).
+    /// Sets the list, if it was not set.
+    pub(crate) fn fill(&self, presets: Vec<Preset>) {
+        let _ = self.list.set(presets);
+    }
+
+    /// What the plugin's format does with presets: a list to load from
+    /// ([`Full`](PresetSupport::Full), [`ListOnly`](PresetSupport::ListOnly)),
+    /// a file to load ([`LoadByPath`](PresetSupport::LoadByPath), CLAP), or
+    /// nothing.
+    #[must_use]
+    pub fn support(&self) -> PresetSupport {
+        self.support
+    }
+
+    /// Whether the plugin's list has been read. A served plugin's is read by the
+    /// first update on the main thread after the load; until then
+    /// [`iter`](Self::iter) is empty although the plugin lists some.
+    #[must_use]
+    pub fn is_read(&self) -> bool {
+        self.list.get().is_some()
+    }
+
+    /// How many presets the plugin listed (0 for a plugin that lists none, and
+    /// before the read).
+    #[must_use]
     pub fn len(&self) -> usize {
-        self.list.len()
+        self.list.get().map_or(0, Vec::len)
     }
 
     /// Whether it listed none.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.list.is_empty()
+        self.len() == 0
     }
 
     /// The listed presets, in the plugin's own order.
-    pub fn iter(&self) -> impl Iterator<Item = PresetEntry<'_>> {
-        self.list.iter().map(|preset| PresetEntry {
-            presets: self,
-            preset,
-        })
+    pub fn iter(&self) -> impl Iterator<Item = ListedPreset> + '_ {
+        self.list
+            .get()
+            .into_iter()
+            .flatten()
+            .map(|preset| ListedPreset {
+                plugin: self.plugin,
+                preset: preset.clone(),
+            })
     }
 
     /// The listed preset with `id`, if the plugin listed one.
-    pub fn get(&self, id: &PresetId) -> Option<PresetEntry<'_>> {
-        self.iter().find(|entry| entry.id() == id)
-    }
-
-    /// The preset the plugin says is loaded, when it will say: not every format
-    /// has the query, and the plugin may decline. Never "the first one".
-    pub fn current(&self) -> Option<PresetId> {
-        self.hosted.handle.current_preset(self.main)
-    }
-
-    /// Loads the preset file at `path` ([`PresetKind::File`]).
-    ///
-    /// # Errors
-    ///
-    /// [`PresetError::Unsupported`] for a plugin that lists its presets and loads
-    /// no file; [`PresetError::Refused`] when the plugin cannot read the file;
-    /// [`PresetError::Lost`] when it is gone.
-    pub fn load_file(&self, path: impl AsRef<Path>) -> Result<(), PresetError> {
-        if self.kind != PresetKind::File {
-            return Err(PresetError::Unsupported);
-        }
-        self.hosted
-            .handle
-            .load_preset(self.main, &PresetId::Location(path.as_ref().to_path_buf()))?;
-        self.hosted.refresh_values();
-        Ok(())
+    #[must_use]
+    pub fn get(&self, id: &PresetId) -> Option<ListedPreset> {
+        self.iter().find(|listed| listed.id() == id)
     }
 }
 
-/// One listed preset ([`Presets::iter`]).
-#[derive(Debug, Clone, Copy)]
-pub struct PresetEntry<'a> {
-    presets: &'a Presets<'a>,
-    preset: &'a Preset,
+/// One preset a plugin listed ([`PluginPresets::iter`]): an owned handle that
+/// belongs to that plugin's entry, loaded by
+/// [`Session::load_preset`](crate::Session::load_preset).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ListedPreset {
+    pub(crate) plugin: ResourceId,
+    preset: Preset,
 }
 
-impl PresetEntry<'_> {
+impl ListedPreset {
     /// The plugin's id for it: opaque, never a position in the list.
+    #[must_use]
     pub fn id(&self) -> &PresetId {
         &self.preset.id
     }
 
     /// Its name.
+    #[must_use]
     pub fn name(&self) -> &str {
         &self.preset.name
     }
 
     /// The bank it is in, for a format that groups.
+    #[must_use]
     pub fn bank(&self) -> Option<&str> {
         self.preset.bank.as_deref()
-    }
-
-    /// Loads it into the plugin.
-    ///
-    /// # Errors
-    ///
-    /// [`PresetError::Refused`] when the plugin declines (leave the selection
-    /// where it was); [`PresetError::Lost`] when it is gone.
-    pub fn load(&self) -> Result<(), PresetError> {
-        let presets = self.presets;
-        presets
-            .hosted
-            .handle
-            .load_preset(presets.main, &self.preset.id)?;
-        presets.hosted.refresh_values();
-        Ok(())
     }
 }

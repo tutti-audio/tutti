@@ -177,9 +177,10 @@ pub use tutti_plugin_types::{ParamId, PluginFailure, PresetError, PresetId};
 pub use tutti_session::Params as PluginParams;
 #[cfg(all(feature = "session", feature = "plugin"))]
 pub use tutti_session::{
-    AddPluginError, Diagnostics, Opened, Plugin, PluginBuses, PluginChange, PluginDeclaration,
-    PluginEvent, PluginHealth, PluginInfo, PluginNode, PluginParamError, PooledPlugin, PortCounts,
-    PresetEntry, PresetKind, Presets, RestoreState, SaveState, TypedParam,
+    AddPluginError, Diagnostics, ListedPreset, LoadPreset, Opened, Plugin, PluginBuses,
+    PluginChange, PluginDeclaration, PluginEvent, PluginHealth, PluginInfo, PluginNode,
+    PluginParamError, PluginPresets, PooledPlugin, PortCounts, PresetJobError, PresetJobFailed,
+    RestoreState, SaveState, TypedParam,
 };
 #[cfg(all(feature = "session", feature = "export"))]
 pub use tutti_session::{

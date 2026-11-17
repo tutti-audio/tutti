@@ -50,6 +50,26 @@ pub enum StateJobError<K: fmt::Debug> {
     OtherPlugin(StateError),
 }
 
+/// Why a key names no plugin node: shared by the plugin jobs that need one.
+#[derive(Clone, Debug, thiserror::Error)]
+pub(super) enum NodeLookup<K: fmt::Debug> {
+    /// The key has no loaded plugin entry.
+    #[error(transparent)]
+    Entry(#[from] HandleError<K>),
+    /// The entry's plugin is in no node.
+    #[error("the plugin of {0:?} has no node")]
+    NoNode(K),
+}
+
+impl<K: fmt::Debug> From<NodeLookup<K>> for StateJobError<K> {
+    fn from(lookup: NodeLookup<K>) -> Self {
+        match lookup {
+            NodeLookup::Entry(error) => Self::Entry(error),
+            NodeLookup::NoNode(key) => Self::NoNode(key),
+        }
+    }
+}
+
 job_kind! {
     /// A plugin's saved state ([`Session::save_state`]).
     pub SaveState => PluginState, StateJobFailed
@@ -160,10 +180,10 @@ impl<C: crate::Clock> Session<C> {
     }
 
     /// The handle, the plugin and the notice queue of the node over `key`.
-    fn state_parts<K>(
+    pub(super) fn state_parts<K>(
         &self,
         key: &K,
-    ) -> Result<(PluginHandle, PluginRef, super::Notices), StateJobError<K>>
+    ) -> Result<(PluginHandle, PluginRef, super::Notices), NodeLookup<K>>
     where
         K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
     {
@@ -182,7 +202,7 @@ impl<C: crate::Clock> Session<C> {
                     .as_ref()
                     .is_some_and(|link| link.key == pool_key)
             })
-            .ok_or_else(|| StateJobError::NoNode(key.clone()))?;
+            .ok_or_else(|| NodeLookup::NoNode(key.clone()))?;
         Ok((
             hosted.handle.clone(),
             hosted.plugin.clone(),
