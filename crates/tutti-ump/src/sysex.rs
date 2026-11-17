@@ -129,10 +129,8 @@ pub struct Sysex7Packets<'a> {
     group: MidiGroup,
     /// The payload not yet packed.
     rest: Rest<'a>,
-    /// Whether the run's first packet is the message's first.
-    opens: bool,
-    /// Whether the run's last packet is the message's last.
-    closes: bool,
+    /// Where the run lies in its message.
+    part: SysexPart,
     /// Whether a packet has been yielded, so an empty payload is one packet.
     emitted: bool,
 }
@@ -142,10 +140,15 @@ pub struct Sysex7Packets<'a> {
 enum Rest<'a> {
     /// Plain bytes checked by [`first_non_seven_bit`] or [`SysexMessage`].
     Bytes(&'a [u8]),
+    /// A part's values, 7-bit by their type.
     Seven(&'a [U7]),
 }
 
 impl Rest<'_> {
+    const fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     const fn len(&self) -> usize {
         match self {
             Self::Bytes(b) => b.len(),
@@ -187,6 +190,18 @@ pub enum SysexPart {
     Last,
 }
 
+impl SysexPart {
+    /// Whether the part's first packet is the message's first.
+    const fn opens(self) -> bool {
+        matches!(self, Self::Only | Self::First)
+    }
+
+    /// Whether the part's last packet is the message's last.
+    const fn closes(self) -> bool {
+        matches!(self, Self::Only | Self::Last)
+    }
+}
+
 impl<'a> Sysex7Packets<'a> {
     /// The packets of `payload` (the bytes between `0xF0` and `0xF7`, without
     /// them) from plain bytes: the entry for a payload that arrives unchecked,
@@ -209,15 +224,14 @@ impl<'a> Sysex7Packets<'a> {
     /// (a `Complete` when the part is [`Only`](SysexPart::Only)), the last
     /// packet of a [`Last`](SysexPart::Last) part an `End`, and every other
     /// packet a `Continue`; each carries six bytes except a part's last, which
-    /// carries the rest. A part with no bytes is one packet with none, so a
-    /// divided message keeps the pause between its parts.
+    /// carries the rest. A part with no bytes is one packet with none. The
+    /// caller sends a divided message's parts in order, `First` through `Last`.
     #[must_use]
     pub fn part(group: MidiGroup, data: &'a [U7], part: SysexPart) -> Self {
         Self {
             group,
             rest: Rest::Seven(data),
-            opens: matches!(part, SysexPart::Only | SysexPart::First),
-            closes: matches!(part, SysexPart::Only | SysexPart::Last),
+            part,
             emitted: false,
         }
     }
@@ -226,8 +240,7 @@ impl<'a> Sysex7Packets<'a> {
         Self {
             group,
             rest: Rest::Bytes(payload),
-            opens: true,
-            closes: true,
+            part: SysexPart::Only,
             emitted: false,
         }
     }
@@ -237,12 +250,14 @@ impl Iterator for Sysex7Packets<'_> {
     type Item = Ump;
 
     fn next(&mut self) -> Option<Ump> {
-        if self.emitted && self.rest.len() == 0 {
+        if self.emitted && self.rest.is_empty() {
             return None;
         }
         let (chunk, n, rest) = self.rest.split();
-        let status =
-            SysexStatus::of_run(!self.opens || self.emitted, rest.len() != 0 || !self.closes);
+        let status = SysexStatus::of_run(
+            !self.part.opens() || self.emitted,
+            !rest.is_empty() || !self.part.closes(),
+        );
         self.rest = rest;
         self.emitted = true;
         let packet = Sysex7Packet::of_chunk(status, &chunk[..n]);
