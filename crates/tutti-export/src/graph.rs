@@ -64,7 +64,7 @@ impl Setup {
         Self::default()
     }
 
-    /// Render on `pool` (the parallel executor, doc 013). Left uncalled, the
+    /// Render on `pool` (the parallel executor). Left uncalled, the
     /// render runs on its own thread. The render is bit for bit the same
     /// either way; a pool only spreads each block's independent nodes across
     /// its threads. Give an export its own pool (a `tutti_graph::WorkerPool`),
