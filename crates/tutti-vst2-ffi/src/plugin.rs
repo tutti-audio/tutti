@@ -7,7 +7,7 @@ use std::ptr;
 use std::sync::Arc;
 
 use crate::{
-    api::{self, AEffect, ChunkError, HostCallbackProc, Supported, TimeInfo, consts::VST_MAGIC},
+    api::{self, AEffect, GetChunkError, HostCallbackProc, Supported, TimeInfo, consts::VST_MAGIC},
     buffer::AudioBuffer,
     channels::ChannelInfo,
     editor::Editor,
@@ -896,8 +896,8 @@ pub trait PluginParameters: Send + Sync {
     ///
     /// # Errors
     ///
-    /// [`ChunkError`] when the chunk read failed. The default never errs.
-    fn try_get_preset_data(&self) -> Result<Vec<u8>, ChunkError> {
+    /// [`GetChunkError`] when the chunk read failed. The default never errs.
+    fn try_get_preset_data(&self) -> Result<Vec<u8>, GetChunkError> {
         Ok(self.get_preset_data())
     }
 

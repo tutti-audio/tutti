@@ -1,7 +1,7 @@
 //! Host specific structures.
 
 use num_traits::Float;
-use tutti_rt::LockExt;
+use tutti_rt::{LockExt, Tally, TallyWriter, tally};
 
 use libloading::Library;
 use std::cell::{Cell, UnsafeCell};
@@ -11,8 +11,8 @@ use std::ffi::CString;
 use std::marker::PhantomData;
 use std::mem::{ManuallyDrop, MaybeUninit};
 use std::os::raw::c_void;
-use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, TryLockError};
 use std::thread::ThreadId;
 use std::{fmt, ptr, slice};
@@ -22,7 +22,7 @@ use tutti_plugin_types::{
 };
 
 use crate::{
-    api::{self, AEffect, ChunkError, PluginFlags, PluginMain, Supported, TimeInfo, consts::*},
+    api::{self, AEffect, GetChunkError, PluginFlags, PluginMain, Supported, TimeInfo, consts::*},
     buffer::AudioBuffer,
     editor::{KeyCode, Rect},
     interfaces,
@@ -295,6 +295,12 @@ pub trait Host {
         Supported::Maybe
     }
 
+    /// A callback the host did not answer: an opcode it does not implement, or one whose
+    /// pointer was null or misaligned. Runs on whichever thread the plugin called from, the
+    /// audio thread included, so an implementation counts it and neither logs nor allocates.
+    /// The default ignores it.
+    fn refused_callback(&self, opcode: i32) {}
+
     /// Refresh UI after the plugin's parameters changed.
     ///
     /// Note: some hosts will call some `PluginParameters` methods from within the `update_display`
@@ -303,32 +309,54 @@ pub trait Host {
     fn update_display(&self) {}
 }
 
-/// All possible errors that can occur when loading a VST plugin.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+/// Why a VST2 plugin did not load, by the stage that failed.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum PluginLoadError {
-    /// Could not load given path.
-    #[error("could not open the requested path")]
-    InvalidPath,
+    /// The operating system could not open the library: it is missing, unreadable, the
+    /// wrong architecture, or one of its own dependencies is absent.
+    #[error("could not open the library at {}", path.display())]
+    OpenLibrary {
+        /// The path that was opened.
+        path: PathBuf,
+        /// The loader's error.
+        #[source]
+        source: libloading::Error,
+    },
 
-    /// Given path is not a VST plugin.
-    #[error("the given path does not contain a VST2.4 compatible library")]
-    NotAPlugin,
+    /// The library opened but has no `VSTPluginMain` entry point: it is no VST2.4 plugin.
+    #[error("the library at {} has no VSTPluginMain entry point", path.display())]
+    MissingEntryPoint {
+        /// The library's path.
+        path: PathBuf,
+        /// The loader's error.
+        #[source]
+        source: libloading::Error,
+    },
 
-    /// Failed to create an instance of this plugin.
+    /// The entry point returned no plugin.
     ///
     /// This can happen for many reasons, such as if the plugin requires a different version of
     /// the VST API to be used, or due to improper licensing.
-    #[error("failed to create a plugin instance")]
+    #[error("the plugin entry point returned no instance")]
     InstanceFailed,
 
     /// The API version which the plugin used is not supported by this library.
-    #[error("the plugin API version is not compatible with this library")]
-    InvalidApiVersion,
+    #[error("the plugin API version {version} is below 2400")]
+    InvalidApiVersion {
+        /// What `effGetVstVersion` answered.
+        version: isize,
+    },
 
     /// The entry point returned an `AEffect` that is not one: its `magic` is not
     /// `VstP`, or it has no dispatcher. Nothing was called on it.
     #[error("the plugin entry point returned an invalid AEffect")]
     InvalidEffect,
+
+    /// The plugin installed neither `processReplacing` nor the deprecated `process`, so it
+    /// has nothing to render with. Refused at load, not per block.
+    #[error("the plugin installed neither processReplacing nor process")]
+    NoProcessEntry,
 }
 
 /// Wrapper for an externally loaded VST plugin.
@@ -530,9 +558,19 @@ struct Core {
     /// the close, the last call that can reach the host.
     _host_ref: Option<HostRef>,
     /// Blocks a render entry refused because the plugin's pin counts grew past the
-    /// buffer. Counted on the audio thread, read and reported by the control side
-    /// (`PluginInstance::pin_refusals`); `Relaxed`, nothing is published through it.
-    pin_refusals: AtomicU64,
+    /// buffer. Counted on the audio thread through the writer each [`RenderHandle`]
+    /// holds, read and reported by the control side (`PluginInstance::pin_refusals`).
+    pin_refusals: Tally<u64>,
+    /// Audio-thread entries the gate refused: shut by a close or a panic, or held by a close
+    /// or an exclusive call. A lost block, event list or parameter write. Counted through
+    /// each handle's writer.
+    gate_refusals: Tally<u64>,
+    /// Calls the plugin has no entry for: a null `processReplacingF64` for an `f64` block,
+    /// a render or `process` slot it cleared, a null `setParameter`.
+    entry_refusals: Tally<u64>,
+    /// Calls that found the plugin's dispatcher cleared: an event list or a process
+    /// start or stop that did not reach it.
+    dispatcher_cleared: Tally<u64>,
     /// Whether the control side has logged `pin_refusals` going nonzero.
     pin_refusals_logged: AtomicBool,
     /// Whether `effStartProcess` is the plugin's last word. Written under the gate, by the
@@ -577,7 +615,10 @@ impl Core {
         let core = Arc::new(Core {
             effect: UnsafeCell::new(effect),
             _host_ref: host_ref,
-            pin_refusals: AtomicU64::new(0),
+            pin_refusals: tally(),
+            gate_refusals: tally(),
+            entry_refusals: tally(),
+            dispatcher_cleared: tally(),
             pin_refusals_logged: AtomicBool::new(false),
             processing: AtomicBool::new(false),
             gate: Mutex::new(false),
@@ -704,8 +745,8 @@ impl<T: Host + Send + Sync + 'static> PluginLoader<T> {
     ///
     /// # Errors
     ///
-    /// [`PluginLoadError::InvalidPath`] if the library at `path` cannot be
-    /// opened, and [`PluginLoadError::NotAPlugin`] if it has no `VSTPluginMain`
+    /// [`PluginLoadError::OpenLibrary`] if the library at `path` cannot be
+    /// opened, and [`PluginLoadError::MissingEntryPoint`] if it has no `VSTPluginMain`
     /// entry point.
     ///
     /// # Example
@@ -751,19 +792,20 @@ impl<T: Host + Send + Sync + 'static> PluginLoader<T> {
         // point ABI and cannot be checked. The copied fn pointer stays valid because `lib` is
         // stored beside it in the loader (and `PluginInstance` never unloads it).
         unsafe {
-            let lib = match Library::new(path) {
-                Ok(l) => l,
-                Err(_) => return Err(PluginLoadError::InvalidPath),
-            };
+            let lib = Library::new(path).map_err(|source| PluginLoadError::OpenLibrary {
+                path: path.to_path_buf(),
+                source,
+            })?;
+            // Search the library for the VSTAPI entry point
+            let main = *lib.get::<PluginMain>(b"VSTPluginMain").map_err(|source| {
+                PluginLoadError::MissingEntryPoint {
+                    path: path.to_path_buf(),
+                    source,
+                }
+            })?;
 
             Ok(PluginLoader {
-                main:
-                    // Search the library for the VSTAPI entry point
-                    match lib.get(b"VSTPluginMain") {
-                        Ok(s) => *s,
-                        _ => return Err(PluginLoadError::NotAPlugin),
-                    }
-                ,
+                main,
                 lib: Arc::new(lib),
                 host,
             })
@@ -797,8 +839,9 @@ impl<T: Host + Send + Sync + 'static> PluginLoader<T> {
     /// # Errors
     ///
     /// [`PluginLoadError::InstanceFailed`] if the plugin's entry point returns
-    /// no instance, and [`PluginLoadError::InvalidApiVersion`] if the instance
-    /// speaks a VST API version this library does not support.
+    /// no instance, [`PluginLoadError::InvalidApiVersion`] if the instance
+    /// speaks a VST API version this library does not support, and
+    /// [`PluginLoadError::NoProcessEntry`] if it installed no render entry.
     pub fn instance(
         &mut self,
         main: MainThreadMarker,
@@ -846,16 +889,36 @@ impl<T: Host + Send + Sync + 'static> PluginLoader<T> {
         );
 
         let api_ver = instance.dispatch(plugin::OpCode::GetApiVersion, 0, 0, ptr::null_mut(), 0.0);
-        if api_ver >= 2400 {
-            Ok(instance)
-        } else {
-            trace!("Could not load plugin with api version {}", api_ver);
-            Err(PluginLoadError::InvalidApiVersion)
+        if api_ver < 2400 {
+            return Err(PluginLoadError::InvalidApiVersion { version: api_ver });
         }
+        if !instance.has_process_entry() {
+            return Err(PluginLoadError::NoProcessEntry);
+        }
+        if !instance.can_replacing {
+            warn!(
+                "plugin '{}' does not support processReplacing; \
+                 it renders through the deprecated accumulating process",
+                instance.info.name
+            );
+        }
+        Ok(instance)
     }
 }
 
 impl PluginInstance {
+    /// Whether the plugin installed an entry to render with: the `processReplacing` it
+    /// advertises, or the deprecated `process`.
+    fn has_process_entry(&self) -> bool {
+        // SAFETY: the core's effect is live while the instance is; the slots are read as
+        // `Option` fn pointers and not called.
+        let (replacing, accumulating) = unsafe {
+            let effect = &*self.core.get_effect();
+            (effect.processReplacing.is_some(), effect._process.is_some())
+        };
+        (self.can_replacing && replacing) || accumulating
+    }
+
     /// Re-read the counts and delay [`Info`] snapshots from the
     /// live `AEffect`: `numInputs`, `numOutputs`, `numParams`, `numPrograms`
     /// and `initialDelay`. The snapshot is taken before `effOpen`, so
@@ -1064,6 +1127,12 @@ impl PluginInstance {
                 ..self.entry()
             },
             name: Arc::from(self.info.name.as_str()),
+            refusals: Refusals {
+                pins: self.core.pin_refusals.writer(),
+                gate: self.core.gate_refusals.writer(),
+                entries: self.core.entry_refusals.writer(),
+                dispatcher: self.core.dispatcher_cleared.writer(),
+            },
             core: Arc::clone(&self.core),
         }
     }
@@ -1084,14 +1153,31 @@ impl PluginInstance {
     /// `audioMasterIOChanged` (`RestartRules::VST2`); a plugin that grows its pins without
     /// raising it stays silent, and this counter says so. The counter is for the control
     /// side to report once; the audio thread never logs.
-    pub fn pin_refusals(&self) -> u64 {
-        self.core.pin_refusals.load(Ordering::Relaxed)
+    pub fn pin_refusals(&self) -> &Tally<u64> {
+        &self.core.pin_refusals
     }
 
-    /// [`pin_refusals`](Self::pin_refusals), and the first time it is nonzero, one
-    /// warning. For the control side's tick; never call it from the audio thread.
-    pub fn report_pin_refusals(&self) -> u64 {
-        let refused = self.pin_refusals();
+    /// How many audio-thread entries the gate refused: the plugin was closed or dead, or a
+    /// close or an exclusive call held the gate.
+    pub fn gate_refusals(&self) -> &Tally<u64> {
+        &self.core.gate_refusals
+    }
+
+    /// How many audio-thread calls found no entry in the plugin: no `processReplacingF64`
+    /// for an `f64` block, a render slot it cleared, a null `setParameter`.
+    pub fn entry_refusals(&self) -> &Tally<u64> {
+        &self.core.entry_refusals
+    }
+
+    /// How many audio-thread calls found the plugin's dispatcher cleared.
+    pub fn dispatcher_cleared(&self) -> &Tally<u64> {
+        &self.core.dispatcher_cleared
+    }
+
+    /// The first time [`pin_refusals`](Self::pin_refusals) is nonzero, one warning. For the
+    /// control side's tick; never call it from the audio thread.
+    pub fn report_pin_refusals(&self) {
+        let refused = self.core.pin_refusals.get();
         if refused > 0 && !self.core.pin_refusals_logged.swap(true, Ordering::Relaxed) {
             warn!(
                 "plugin '{}' now declares more pins than it was activated with; it renders \
@@ -1099,7 +1185,6 @@ impl PluginInstance {
                 self.info.name
             );
         }
-        refused
     }
 
     /// Read `AEffect::numParams` as it stands *now*.
@@ -1549,7 +1634,7 @@ impl Core {
     ///
     /// `Ok(vec)` — possibly empty, meaning the plugin genuinely has nothing
     /// saved. `Err` — the plugin *attempted* the save and failed; see
-    /// [`ChunkError`] for why the two must not be conflated.
+    /// [`GetChunkError`] for why the two must not be conflated.
     ///
     /// Three plugin behaviours must not become UB on the project-save path:
     ///
@@ -1561,7 +1646,7 @@ impl Core {
     ///   and then a `Vec` allocation of 16 exbibytes (or a wild read).
     /// * a positive length with a null pointer, from a plugin that computed a
     ///   size but failed to hand back the buffer.
-    fn get_chunk(&self, index: i32) -> Result<Vec<u8>, ChunkError> {
+    fn get_chunk(&self, index: i32) -> Result<Vec<u8>, GetChunkError> {
         // Create a pointer that can be updated from the plugin.
         let mut ptr: *mut u8 = ptr::null_mut();
         let len = self.dispatch(
@@ -1593,10 +1678,10 @@ impl Core {
 /// # Safety
 /// If `len > 0` and `ptr` is non-null, `ptr` must be valid for reads of `len`
 /// bytes.
-unsafe fn copy_chunk(ptr: *mut u8, len: isize) -> Result<Vec<u8>, ChunkError> {
+unsafe fn copy_chunk(ptr: *mut u8, len: isize) -> Result<Vec<u8>, GetChunkError> {
     if len < 0 {
         warn!("plugin returned a negative effGetChunk length ({len})");
-        return Err(ChunkError::Failed(len));
+        return Err(GetChunkError::Failed(len));
     }
     if len == 0 {
         // Genuinely nothing saved — not an error.
@@ -1604,12 +1689,32 @@ unsafe fn copy_chunk(ptr: *mut u8, len: isize) -> Result<Vec<u8>, ChunkError> {
     }
     if ptr.is_null() {
         warn!("plugin reported {len} bytes of chunk data but left the pointer null");
-        return Err(ChunkError::NullBuffer(len));
+        return Err(GetChunkError::NullBuffer(len));
     }
     // SAFETY: `len > 0` and `ptr` is non-null here (both checked above), and the caller's
     // contract (this fn's `# Safety`) is that `ptr` is readable for `len` bytes; `u8` has no
     // alignment or validity requirement.
     Ok(unsafe { slice::from_raw_parts(ptr, len as usize) }.to_vec())
+}
+
+/// How a render entry ended, for the handle to count.
+enum Block {
+    /// The plugin rendered the block.
+    Rendered,
+    /// The plugin's pin counts grew past the buffer: not called, outputs silent.
+    PinsGrew,
+    /// The plugin has no entry for the block: not called, outputs silent.
+    NoEntry,
+}
+
+/// The writers a [`RenderHandle`] counts its refusals through, minted from the core's tallies
+/// on the control side. The audio thread adds through them and never drops the last handle
+/// on a cell, which the core's tallies keep.
+struct Refusals {
+    pins: TallyWriter<u64>,
+    gate: TallyWriter<u64>,
+    entries: TallyWriter<u64>,
+    dispatcher: TallyWriter<u64>,
 }
 
 /// What a block needs of a plugin: its `AEffect` and the flags and pin counts
@@ -1632,17 +1737,14 @@ impl RenderEntry {
         value: isize,
         ptr: *mut c_void,
         opt: f32,
-    ) -> isize {
+    ) -> Option<isize> {
         let _rendering = Rendering::enter(self.effect);
         // SAFETY: `effect` is the plugin's `AEffect`, live for as long as the
         // holder keeps the core (see the type's docs).
-        let Some(dispatcher) = (unsafe { (*self.effect).dispatcher }) else {
-            error!("plugin cleared its dispatcher; opcode {opcode:?} unanswered");
-            return 0;
-        };
+        let dispatcher = unsafe { (*self.effect).dispatcher }?;
         // SAFETY: as for `Dispatch::dispatch`: the effect is the dispatcher's
         // own, and `ptr` and `value` are the caller's to get right.
-        unsafe { dispatcher(self.effect, opcode.into(), index, value, ptr, opt) }
+        Some(unsafe { dispatcher(self.effect, opcode.into(), index, value, ptr, opt) })
     }
 
     /// Whether the plugin's pin counts, read from its `AEffect` now, still fit the
@@ -1665,8 +1767,9 @@ impl RenderEntry {
     /// Render one block.
     ///
     /// A plugin whose pin counts have grown past the buffer is not called and the
-    /// outputs are silent (see [`pins_fit`](Self::pins_fit)); that is the `false`
-    /// answer, and every other path answers `true`.
+    /// outputs are silent (see [`pins_fit`](Self::pins_fit)): [`Block::PinsGrew`]. A plugin
+    /// with no entry left to call renders silence: [`Block::NoEntry`]. Every other path is
+    /// [`Block::Rendered`].
     ///
     /// Prefers `processReplacing`, but only when the plugin both advertises
     /// `effFlagsCanReplacing` *and* actually installed the pointer. VST2.4
@@ -1676,15 +1779,18 @@ impl RenderEntry {
     /// api version >= 2400 while leaving the slot null. When replacing is
     /// unavailable we fall back to the deprecated *accumulating* `process` the
     /// same way JUCE does — that entry point adds into the output buffers, so
-    /// they must be zeroed first. If neither pointer exists there is nothing to
-    /// call; the outputs are left silent rather than filled with whatever the
-    /// caller's scratch held.
+    /// they must be zeroed first. [`PluginLoader::instance`] refuses a plugin
+    /// with neither pointer, so only one that clears them later reaches the
+    /// silent branch: the outputs are left silent rather than filled with
+    /// whatever the caller's scratch held.
     ///
     /// The presence check is `Option`, not `(p as *const u8).is_null()`. That
     /// idiom silently did nothing: a bare `extern "C" fn` is non-nullable, so the
     /// compiler folded the comparison to `false` under `-O` and the guard shipped
     /// only in debug builds.
-    fn process(&self, name: &str, buffer: &mut AudioBuffer<f32>) -> bool {
+    ///
+    /// Nothing here logs: this runs every block on the audio thread.
+    fn process(&self, buffer: &mut AudioBuffer<f32>) -> Block {
         let _rendering = Rendering::enter(self.effect);
         if buffer.input_count() < self.inputs {
             panic!("Too few inputs in AudioBuffer");
@@ -1693,10 +1799,8 @@ impl RenderEntry {
             panic!("Too few outputs in AudioBuffer");
         }
         if !self.pins_fit(buffer.input_count(), buffer.output_count()) {
-            // No log here: this runs every block on the audio thread. The caller counts
-            // it (`Core::pin_refusals`) and the control side reports.
             zero_outputs(buffer);
-            return false;
+            return Block::PinsGrew;
         }
         let effect = self.effect;
         let samples = buffer.samples() as i32;
@@ -1712,22 +1816,14 @@ impl RenderEntry {
                     buffer.raw_outputs().as_mut_ptr(),
                     samples,
                 );
-                return true;
+                return Block::Rendered;
             }
 
             let Some(accumulating) = (*effect)._process else {
-                error!(
-                    "plugin '{name}' installed neither processReplacing nor process; \
-                     rendering silence"
-                );
                 zero_outputs(buffer);
-                return true;
+                return Block::NoEntry;
             };
 
-            warn!(
-                "plugin '{name}' does not support processReplacing; \
-                 falling back to the deprecated accumulating process"
-            );
             // Accumulating mode *adds* to the outputs, so they must start at 0.
             zero_outputs(buffer);
             accumulating(
@@ -1737,7 +1833,7 @@ impl RenderEntry {
                 samples,
             );
         }
-        true
+        Block::Rendered
     }
 
     /// Render one block in `f64`.
@@ -1745,10 +1841,10 @@ impl RenderEntry {
     /// There is no accumulating counterpart for double precision in VST2.4 —
     /// `processDoubleReplacing` is the only `f64` entry point — so an absent
     /// `effFlagsCanDoubleReplacing` or a null pointer leaves the caller to
-    /// re-render through the `f32` path. Silence is returned rather than
-    /// jumping to a null pointer; callers should consult
+    /// re-render through the `f32` path. Silence is returned ([`Block::NoEntry`])
+    /// rather than jumping to a null pointer; callers should consult
     /// `get_info().f64_precision` before choosing this path.
-    fn process_f64(&self, name: &str, buffer: &mut AudioBuffer<f64>) -> bool {
+    fn process_f64(&self, buffer: &mut AudioBuffer<f64>) -> Block {
         let _rendering = Rendering::enter(self.effect);
         if buffer.input_count() < self.inputs {
             panic!("Too few inputs in AudioBuffer");
@@ -1757,10 +1853,8 @@ impl RenderEntry {
             panic!("Too few outputs in AudioBuffer");
         }
         if !self.pins_fit(buffer.input_count(), buffer.output_count()) {
-            // No log here: this runs every block on the audio thread. The caller counts
-            // it (`Core::pin_refusals`) and the control side reports.
             zero_outputs(buffer);
-            return false;
+            return Block::PinsGrew;
         }
         let effect = self.effect;
         // SAFETY: as for `process`: live `effect`, the `Option` slot is called only when `Some`,
@@ -1770,9 +1864,8 @@ impl RenderEntry {
                 .processReplacingF64
                 .filter(|_| self.can_double_replacing);
             let Some(replacing) = replacing else {
-                error!("plugin '{name}' does not support f64 processing; rendering silence");
                 zero_outputs(buffer);
-                return true;
+                return Block::NoEntry;
             };
             replacing(
                 effect,
@@ -1781,17 +1874,17 @@ impl RenderEntry {
                 buffer.samples() as i32,
             );
         }
-        true
+        Block::Rendered
     }
 
-    fn process_events(&self, events: &api::Events) {
+    fn process_events(&self, events: &api::Events) -> Option<isize> {
         self.dispatch(
             plugin::OpCode::ProcessEvents,
             0,
             0,
             events as *const _ as *mut _,
             0.0,
-        );
+        )
     }
 }
 
@@ -1820,6 +1913,7 @@ impl RenderEntry {
 pub struct RenderHandle {
     entry: RenderEntry,
     name: Arc<str>,
+    refusals: Refusals,
     /// What `entry.effect` points into: the gate says whether it is still the plugin's.
     core: Arc<Core>,
 }
@@ -1860,8 +1954,9 @@ impl Drop for RenderHandle {
     }
 }
 
-/// Runs `f` on the entry with the gate held and open, or answers `refused` when the plugin is
-/// closed or dead, or the instance's close (or an exclusive call) holds the gate.
+/// Runs `f` on the entry with the gate held and open, or answers `refused` (and counts it in
+/// `refusals`) when the plugin is closed or dead, or the instance's close (or an exclusive
+/// call) holds the gate.
 ///
 /// **A panic under the gate kills the core.** The mutex is then poisoned: the plugin may be in
 /// any state (the panic came out of an entry mid-call), so the next entry marks the gate
@@ -1871,6 +1966,7 @@ impl Drop for RenderHandle {
 fn gated<R>(
     core: &Core,
     entry: &RenderEntry,
+    refusals: &Refusals,
     refused: R,
     f: impl FnOnce(&RenderEntry, &Core) -> R,
 ) -> R {
@@ -1878,11 +1974,16 @@ fn gated<R>(
         Ok(gate) => gate,
         Err(TryLockError::Poisoned(poisoned)) => {
             *poisoned.into_inner() = true;
+            refusals.gate.add(1);
             return refused;
         }
-        Err(TryLockError::WouldBlock) => return refused,
+        Err(TryLockError::WouldBlock) => {
+            refusals.gate.add(1);
+            return refused;
+        }
     };
     if *gate {
+        refusals.gate.add(1);
         return refused;
     }
     // The guard is held to the end of this function, so for the whole call; a panic out of `f`
@@ -1906,17 +2007,10 @@ impl RenderHandle {
     /// was made. A plugin that raised its pin counts since is not called: the
     /// outputs are silent.
     pub fn process(&mut self, buffer: &mut AudioBuffer<f32>) {
-        let name: &str = &self.name;
-        let rendered = gated(&self.core, &self.entry, None, |entry, _| {
-            Some(entry.process(name, buffer))
+        let rendered = gated(&self.core, &self.entry, &self.refusals, None, |entry, _| {
+            Some(entry.process(buffer))
         });
-        match rendered {
-            Some(true) => {}
-            Some(false) => {
-                self.core.pin_refusals.fetch_add(1, Ordering::Relaxed);
-            }
-            None => zero_outputs(buffer),
-        }
+        self.count_block(rendered, buffer);
     }
 
     /// Render one block in `f64`: `processReplacingF64`, or silence when the plugin lacks it
@@ -1926,42 +2020,68 @@ impl RenderHandle {
     ///
     /// As [`process`](Self::process).
     pub fn process_f64(&mut self, buffer: &mut AudioBuffer<f64>) {
-        let name: &str = &self.name;
-        let rendered = gated(&self.core, &self.entry, None, |entry, _| {
-            Some(entry.process_f64(name, buffer))
+        let rendered = gated(&self.core, &self.entry, &self.refusals, None, |entry, _| {
+            Some(entry.process_f64(buffer))
         });
+        self.count_block(rendered, buffer);
+    }
+
+    /// Counts a block that did not reach the plugin and silences its outputs when the gate
+    /// refused it (`None`, counted by [`gated`]).
+    fn count_block<S: Float>(&self, rendered: Option<Block>, buffer: &mut AudioBuffer<S>) {
         match rendered {
-            Some(true) => {}
-            Some(false) => {
-                self.core.pin_refusals.fetch_add(1, Ordering::Relaxed);
-            }
+            Some(Block::Rendered) => {}
+            Some(Block::PinsGrew) => self.refusals.pins.add(1),
+            Some(Block::NoEntry) => self.refusals.entries.add(1),
             None => zero_outputs(buffer),
         }
     }
 
     /// Delivers MIDI events, `effProcessEvents`.
     pub fn process_events(&mut self, events: &api::Events) {
-        gated(&self.core, &self.entry, (), |entry, _| {
-            entry.process_events(events)
+        gated(&self.core, &self.entry, &self.refusals, (), |entry, _| {
+            if entry.process_events(events).is_none() {
+                self.refusals.dispatcher.add(1);
+            }
         });
     }
 
     /// `effStartProcess`, if processing is not on. Only legal while the plugin is resumed.
     pub fn start_process(&mut self) {
-        gated(&self.core, &self.entry, (), |entry, core| {
-            if !core.processing.swap(true, Ordering::AcqRel) {
-                entry.dispatch(plugin::OpCode::StartProcess, 0, 0, ptr::null_mut(), 0.0);
-            }
-        });
+        gated(
+            &self.core,
+            &self.entry,
+            &self.refusals,
+            (),
+            |entry, core| {
+                if !core.processing.swap(true, Ordering::AcqRel)
+                    && entry
+                        .dispatch(plugin::OpCode::StartProcess, 0, 0, ptr::null_mut(), 0.0)
+                        .is_none()
+                {
+                    self.refusals.dispatcher.add(1);
+                }
+            },
+        );
     }
 
     /// `effStopProcess`, if processing is on. Only legal while the plugin is resumed.
     pub fn stop_process(&mut self) {
-        gated(&self.core, &self.entry, (), |entry, core| {
-            if core.processing.swap(false, Ordering::AcqRel) {
-                entry.dispatch(plugin::OpCode::StopProcess, 0, 0, ptr::null_mut(), 0.0);
-            }
-        });
+        gated(
+            &self.core,
+            &self.entry,
+            &self.refusals,
+            (),
+            |entry, core| {
+                if core.processing.swap(false, Ordering::AcqRel)
+                    && entry
+                        .dispatch(plugin::OpCode::StopProcess, 0, 0, ptr::null_mut(), 0.0)
+                        .is_none()
+                {
+                    self.refusals.dispatcher.add(1);
+                }
+            },
+        );
     }
 
     /// Whether `effStartProcess` is the plugin's last word.
@@ -1972,19 +2092,26 @@ impl RenderHandle {
     /// `setParameter`, which VST 2.4 allows from either thread. `false` when the plugin left
     /// the slot null, or is closed.
     pub fn set_parameter(&mut self, index: i32, value: f32) -> bool {
-        gated(&self.core, &self.entry, false, |entry, _| {
-            let effect = entry.effect;
-            // SAFETY: the gate is held open, so the plugin is not closed and `effect` is its
-            // live `AEffect`. The slot is read as an `Option` fn pointer and only called when
-            // `Some`; `index` is the caller's to bound, as for the instance's
-            // `set_parameter`.
-            let Some(set) = (unsafe { (*effect).setParameter }) else {
-                return false;
-            };
-            // SAFETY: the setter belongs to this effect, which is live (above).
-            unsafe { set(effect, index, value) };
-            true
-        })
+        gated(
+            &self.core,
+            &self.entry,
+            &self.refusals,
+            false,
+            |entry, _| {
+                let effect = entry.effect;
+                // SAFETY: the gate is held open, so the plugin is not closed and `effect` is its
+                // live `AEffect`. The slot is read as an `Option` fn pointer and only called when
+                // `Some`; `index` is the caller's to bound, as for the instance's
+                // `set_parameter`.
+                let Some(set) = (unsafe { (*effect).setParameter }) else {
+                    self.refusals.entries.add(1);
+                    return false;
+                };
+                // SAFETY: the setter belongs to this effect, which is live (above).
+                unsafe { set(effect, index, value) };
+                true
+            },
+        )
     }
 }
 
@@ -2165,8 +2292,8 @@ impl PluginInstance {
         match self.editor_rect() {
             None => (0, 0),
             Some(rect) => (
-                (rect.right - rect.left) as i32,
-                (rect.bottom - rect.top) as i32,
+                i32::from(rect.right) - i32::from(rect.left),
+                i32::from(rect.bottom) - i32::from(rect.top),
             ),
         }
     }
@@ -2274,12 +2401,12 @@ impl PluginInstance {
     }
 
     /// The real `effGetChunk` answer for the current preset, with a failed save
-    /// distinguishable from an empty one — what the [`ChunkError`] split exists for.
+    /// distinguishable from an empty one — what the [`GetChunkError`] split exists for.
     ///
     /// # Errors
     ///
-    /// [`ChunkError`] when the plugin attempted the save and failed.
-    pub fn try_get_preset_data(&self, _main: MainThreadMarker) -> Result<Vec<u8>, ChunkError> {
+    /// [`GetChunkError`] when the plugin attempted the save and failed.
+    pub fn try_get_preset_data(&self, _main: MainThreadMarker) -> Result<Vec<u8>, GetChunkError> {
         self.core.get_chunk(1 /*preset*/)
     }
 
@@ -2673,6 +2800,8 @@ extern "C" fn callback_wrapper<T: Host>(
         } else {
             return 0;
         };
+        // SAFETY: `ptr` is what the plugin passed `audioMasterCallback` for `opcode`, which is
+        // `host_dispatch`'s contract.
         interfaces::host_dispatch(host, effect, opcode, index, value, ptr, opt)
     })
 }
@@ -2762,14 +2891,14 @@ mod tests {
         assert_eq!(
             // SAFETY: `copy_chunk` reads through `ptr` only when `len > 0` and `ptr` is non-null; here `len <= 0` so it returns before any read.
             unsafe { copy_chunk(ptr::null_mut(), -1) },
-            Err(ChunkError::Failed(-1))
+            Err(GetChunkError::Failed(-1))
         );
 
         // A plugin that sized the chunk but failed to hand back the buffer.
         assert_eq!(
             // SAFETY: `copy_chunk` returns `NullBuffer` on a null `ptr` with `len > 0` before any read.
             unsafe { copy_chunk(ptr::null_mut(), 4096) },
-            Err(ChunkError::NullBuffer(4096))
+            Err(GetChunkError::NullBuffer(4096))
         );
 
         // A non-null pointer with a negative length is still rejected — the
@@ -2778,7 +2907,7 @@ mod tests {
         assert_eq!(
             // SAFETY: `len` is negative, so `copy_chunk` returns before any read; `data` is a live 4-byte array regardless.
             unsafe { copy_chunk(data.as_mut_ptr(), -1) },
-            Err(ChunkError::Failed(-1))
+            Err(GetChunkError::Failed(-1))
         );
 
         // The good case still copies.
@@ -2960,15 +3089,18 @@ mod tests {
 
         let ask = |name: &str| {
             let name = CString::new(name).unwrap();
-            interfaces::host_dispatch(
-                &Answers,
-                ptr::null_mut(),
-                OpCode::CanDo as i32,
-                0,
-                0,
-                name.as_ptr() as *mut c_void,
-                0.0,
-            )
+            // SAFETY: `name` is a NUL-terminated string that outlives the call.
+            unsafe {
+                interfaces::host_dispatch(
+                    &Answers,
+                    ptr::null_mut(),
+                    OpCode::CanDo as i32,
+                    0,
+                    0,
+                    name.as_ptr() as *mut c_void,
+                    0.0,
+                )
+            }
         };
         assert_eq!(ask("sendVstEvents"), 1);
         assert_eq!(ask("openFileSelector"), -1);
@@ -2986,15 +3118,18 @@ mod tests {
         impl Host for Plain {}
         let ask = |opcode: OpCode| {
             // A non-null garbage pointer: a declining arm must not dereference it.
-            interfaces::host_dispatch(
-                &Plain,
-                ptr::null_mut(),
-                opcode as i32,
-                0,
-                0,
-                0x10 as *mut c_void,
-                0.0,
-            )
+            // SAFETY: the declining arms do not read `ptr`, which is what the test checks.
+            unsafe {
+                interfaces::host_dispatch(
+                    &Plain,
+                    ptr::null_mut(),
+                    opcode as i32,
+                    0,
+                    0,
+                    0x10 as *mut c_void,
+                    0.0,
+                )
+            }
         };
         assert_eq!(ask(OpCode::OpenFileSelector), 0);
         assert_eq!(ask(OpCode::CloseFileSelector), 0);
@@ -3045,8 +3180,8 @@ mod tests {
 
         struct RefusingParams;
         impl PluginParameters for RefusingParams {
-            fn try_get_preset_data(&self) -> Result<Vec<u8>, ChunkError> {
-                Err(ChunkError::Failed(-1))
+            fn try_get_preset_data(&self) -> Result<Vec<u8>, GetChunkError> {
+                Err(GetChunkError::Failed(-1))
             }
         }
 
@@ -3386,6 +3521,9 @@ mod tests {
         let mut effect: Box<AEffect> = Box::new(unsafe { std::mem::zeroed() });
         effect.magic = VST_MAGIC;
         effect.dispatcher = Some(dispatcher);
+        // A render entry, which the loader requires; a test that renders installs its own.
+        extern "C" fn no_process(_: *mut AEffect, _: *const *const f32, _: *mut *mut f32, _: i32) {}
+        effect._process = Some(no_process);
         Box::into_raw(effect)
     }
 
@@ -4117,11 +4255,11 @@ mod tests {
         });
         assert_eq!(RENDERS.load(Ordering::SeqCst), 2, "called past its buffer");
         assert_eq!(
-            instance.pin_refusals(),
+            instance.pin_refusals().get(),
             2,
             "both refused blocks are counted"
         );
-        assert_eq!(instance.report_pin_refusals(), 2);
+        instance.report_pin_refusals();
         assert!(outputs.iter().flatten().all(|s| *s == 0.0), "f32 is silent");
         assert!(
             outputs64.iter().flatten().all(|s| *s == 0.0),
@@ -4133,7 +4271,11 @@ mod tests {
         unsafe { (*effect).numOutputs = 1 };
         render.process(&mut host32.bind(&inputs, &mut outputs));
         assert_eq!(RENDERS.load(Ordering::SeqCst), 3);
-        assert_eq!(instance.pin_refusals(), 2, "a fitting block is not counted");
+        assert_eq!(
+            instance.pin_refusals().get(),
+            2,
+            "a fitting block is not counted"
+        );
     }
 
     /// A loader over `main`, for the entry-point tests.
@@ -4145,6 +4287,40 @@ mod tests {
             lib: Arc::new(lib),
             host: Arc::new(IdHost(id)),
         }
+    }
+
+    /// **A plugin with no render entry is refused at load**, not rendered silent per block:
+    /// neither `processReplacing` nor `process` is `NoProcessEntry`.
+    #[cfg(unix)]
+    #[test]
+    fn a_plugin_with_no_render_entry_is_refused_at_load() {
+        use std::sync::atomic::AtomicPtr;
+        static EFFECT: AtomicPtr<AEffect> = AtomicPtr::new(ptr::null_mut());
+
+        extern "C" fn dispatch(
+            _: *mut AEffect,
+            opcode: i32,
+            _: i32,
+            _: isize,
+            _: *mut c_void,
+            _: f32,
+        ) -> isize {
+            if opcode == plugin::OpCode::GetApiVersion as i32 {
+                return 2400;
+            }
+            0
+        }
+        extern "C" fn main_returning_effect(_: crate::api::HostCallbackProc) -> *mut AEffect {
+            EFFECT.load(Ordering::SeqCst)
+        }
+
+        let effect = fake_effect(dispatch);
+        // SAFETY: the test's leaked `AEffect`.
+        unsafe { (*effect)._process = None };
+        EFFECT.store(effect, Ordering::SeqCst);
+        let result = loader_over(main_returning_effect, 1)
+            .instance(tutti_fixtures::main_thread(), &detached());
+        assert!(matches!(result, Err(PluginLoadError::NoProcessEntry)));
     }
 
     /// **An `AEffect` that is not one is refused untouched.** A wrong `magic` or a

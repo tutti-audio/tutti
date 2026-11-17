@@ -8,10 +8,24 @@ use tutti_vst2_ffi::{
     api::{self, AEffect, consts::*},
     buffer::AudioBuffer,
     editor::{Key, KeyCode, Rect},
-    interfaces::{copy_string, read_string},
+    interfaces,
 };
 
 use crate::aeffect::AEffectExt as _;
+
+/// [`interfaces::copy_string`] into the host's buffer for the opcode being dispatched.
+fn copy_string(ptr: *mut c_void, src: &str, max: usize) -> isize {
+    // SAFETY: the VST2 ABI has the host pass, for a string opcode, a buffer of the SDK's
+    // size for it (`max`), writable for the call.
+    unsafe { interfaces::copy_string(ptr, src, max) }
+}
+
+/// [`interfaces::read_string`] of the host's string for the opcode being dispatched.
+fn read_string(ptr: *mut c_void) -> String {
+    // SAFETY: the VST2 ABI has the host pass, for a string-taking opcode, a NUL-terminated
+    // string valid for the call.
+    unsafe { interfaces::read_string(ptr) }
+}
 
 /// Deprecated process function.
 pub extern "C" fn process_deprecated(

@@ -7,6 +7,7 @@
 
 use std::cell::Cell;
 use std::os::raw::c_void;
+use std::ptr::NonNull;
 
 use tutti_plugin_types::{c_str_prefix, read_c_str, write_c_str};
 
@@ -26,7 +27,12 @@ const LANGUAGE_ENGLISH: isize = 1;
 /// [`c_str_prefix`]`(src, max)` and a NUL: always terminated, cut at a char boundary, and
 /// nothing is written past that NUL, so a destination that is shorter than `max` but holds
 /// the string is not overrun by a clearing pass.
-pub fn copy_string(dst: *mut c_void, src: &str, max: usize) -> isize {
+///
+/// # Safety
+///
+/// A non-null `dst` is writable for `max` bytes, and nothing else accesses them during the
+/// call.
+pub unsafe fn copy_string(dst: *mut c_void, src: &str, max: usize) -> isize {
     if dst.is_null() || max == 0 {
         return 0;
     }
@@ -47,9 +53,14 @@ pub fn copy_string(dst: *mut c_void, src: &str, max: usize) -> isize {
 /// Takes `&dyn Host`, not `&mut`: every `Host` method takes `&self`, and this
 /// runs on the plugin's audio thread as often as the UI thread — see
 /// [`crate::host::PluginLoader::load`] for why no lock guards it.
-pub fn host_dispatch(
+///
+/// # Safety
+///
+/// `ptr` is what the plugin passed `audioMasterCallback` for `opcode`: the opcode's
+/// structure or string, valid for the call, or null.
+pub(crate) unsafe fn host_dispatch(
     host: &dyn Host,
-    effect: *mut AEffect,
+    _effect: *mut AEffect,
     opcode: i32,
     index: i32,
     value: isize,
@@ -58,6 +69,7 @@ pub fn host_dispatch(
 ) -> isize {
     use crate::host::OpCode;
 
+    let opcode_number = opcode;
     let opcode = OpCode::try_from(opcode);
     match opcode {
         Ok(OpCode::Version) => return 2400,
@@ -72,10 +84,12 @@ pub fn host_dispatch(
         // is a malformed query and answers "don't know".
         Ok(OpCode::CanDo) => {
             if ptr.is_null() {
+                host.refused_callback(opcode_number);
                 return 0;
             }
-            let query = read_string(ptr);
-            info!("Plugin is asking if host can: {}.", query);
+            // SAFETY: `ptr` is non-null and the plugin's NUL-terminated query string, valid
+            // for the call (this fn's contract).
+            let query = unsafe { read_string(ptr) };
             return match host.can_do(&query) {
                 Supported::Yes => 1,
                 Supported::Maybe => 0,
@@ -86,22 +100,26 @@ pub fn host_dispatch(
 
         Ok(OpCode::GetVendorVersion) => return host.get_info().0,
         Ok(OpCode::GetVendorString) => {
-            return copy_string(ptr, &host.get_info().1, MAX_VENDOR_STR_LEN);
+            // SAFETY: the plugin's buffer for the string, of the SDK's size for the opcode.
+            return unsafe { copy_string(ptr, &host.get_info().1, MAX_VENDOR_STR_LEN) };
         }
         Ok(OpCode::GetProductString) => {
-            return copy_string(ptr, &host.get_info().2, MAX_PRODUCT_STR_LEN);
+            // SAFETY: as above.
+            return unsafe { copy_string(ptr, &host.get_info().2, MAX_PRODUCT_STR_LEN) };
         }
         Ok(OpCode::ProcessEvents) => {
             // A null or misaligned `VstEvents` is a malformed call: not handled.
-            if ptr.is_null() || !(ptr as *const api::Events).is_aligned() {
+            let events = NonNull::new(ptr.cast::<api::Events>()).filter(|e| e.is_aligned());
+            let Some(events) = events else {
+                host.refused_callback(opcode_number);
                 return 0;
-            }
+            };
             // SAFETY: VST2 ABI: for `audioMasterProcessEvents`, `ptr` is the plugin's
-            // `VstEvents`, valid for the call; non-null and aligned (checked above). What
-            // it holds beyond the header (the count's worth of event pointers) is the
-            // plugin's word, which the view reads and `PluginEvents::iter` bounds as it can.
-            let events = unsafe { &*(ptr as *const api::Events) };
-            host.process_plugin_events(api::PluginEvents::new(events));
+            // `VstEvents`, valid for the call; non-null and aligned (checked above). The
+            // pointer keeps the provenance of the plugin's whole list, and what it holds
+            // beyond the header (the count's worth of event pointers) is the plugin's word,
+            // which `PluginEvents::iter` bounds as it can.
+            host.process_plugin_events(unsafe { api::PluginEvents::new(events) });
         }
 
         Ok(OpCode::GetTime) => {
@@ -167,13 +185,9 @@ pub fn host_dispatch(
         // host has no file dialog; `0` declines, and `canDo` answers No.
         Ok(OpCode::OpenFileSelector | OpCode::CloseFileSelector) => return 0,
 
-        _ => {
-            trace!("VST: Got unimplemented host opcode ({:?})", opcode);
-            trace!(
-                "Arguments; effect: {:?}, index: {}, value: {}, ptr: {:?}, opt: {}",
-                effect, index, value, ptr, opt
-            );
-        }
+        // An opcode the host does not answer: counted by the host, never logged (this runs
+        // on the plugin's audio thread).
+        _ => host.refused_callback(opcode_number),
     }
     0
 }
@@ -184,7 +198,11 @@ const MAX_QUERY_LEN: usize = 256;
 
 /// Read a string from the `ptr` buffer, up to its first NUL or `MAX_QUERY_LEN` (256) bytes. A
 /// null `ptr` reads as the empty string.
-pub fn read_string(ptr: *mut c_void) -> String {
+///
+/// # Safety
+///
+/// A non-null `ptr` is a NUL-terminated C string, readable up to its NUL for the call.
+pub unsafe fn read_string(ptr: *mut c_void) -> String {
     if ptr.is_null() {
         return String::new();
     }
@@ -210,6 +228,29 @@ pub fn read_string(ptr: *mut c_void) -> String {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// [`super::copy_string`] over the test's own buffers, each at least `max` bytes (or
+    /// untouched, for a `max` of 0 and a null `dst`).
+    fn copy_string(dst: *mut c_void, src: &str, max: usize) -> isize {
+        // SAFETY: the callers pass a null `dst`, a `max` of 0, or a buffer of `max` bytes.
+        unsafe { super::copy_string(dst, src, max) }
+    }
+
+    /// [`super::host_dispatch`] with the test's own pointers: null, misaligned (never
+    /// followed) or absent.
+    fn host_dispatch(
+        host: &dyn Host,
+        effect: *mut AEffect,
+        opcode: i32,
+        index: i32,
+        value: isize,
+        ptr: *mut c_void,
+        opt: f32,
+    ) -> isize {
+        // SAFETY: the callers pass null or a misaligned pointer, which the dispatch refuses
+        // before reading.
+        unsafe { super::host_dispatch(host, effect, opcode, index, value, ptr, opt) }
+    }
 
     /// **`copy_string` writes the string, a NUL, and nothing past it.**
     #[test]
