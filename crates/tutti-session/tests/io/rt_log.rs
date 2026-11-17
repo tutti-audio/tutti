@@ -50,10 +50,14 @@ fn a_node_that_logs_on_the_audio_thread_emits_a_tracing_event_on_the_next_update
     assert_eq!(event.message, SITE);
     assert_eq!((event.frame, event.repeats), (7, 2));
     assert_eq!(event.fields, "channel=1");
-    assert!(
-        event.node.contains('#'),
-        "the node is named by its kind and id: {}",
-        event.node
+    assert_eq!(
+        event.node,
+        format!(
+            "{}#{}",
+            std::any::type_name::<Noisy>(),
+            tutti_graph::NodeKey::from(noisy).0
+        ),
+        "the node is named by its kind and id"
     );
     assert!(
         events.iter().any(|e| e.level == Some(Level::DEBUG)),

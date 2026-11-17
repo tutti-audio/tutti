@@ -628,12 +628,15 @@ impl Graph {
     ) -> crate::Result<tutti_engine::Engine> {
         let mut exec = self.take_executor();
         exec.set_pool(self.render_pool("tutti-worker", self.render_worker_start.as_ref()));
+        // Built here, on the control side, after the pool sized the
+        // executor: the engine moves to the audio thread and holds none.
+        let rt_log = tutti_graph::RtLogReaders::new(&mut exec);
         let engine = tutti_engine::Engine::new(transport, &mut self.editor, exec)?;
         let control = engine.output_control();
         control.support(device)?;
         control.state_device(device, topology)?;
         self.output = Some(Placed { control, device });
-        self.rt_log = Some(engine.rt_log());
+        self.rt_log = Some(rt_log);
         Ok(engine)
     }
 
@@ -1167,8 +1170,9 @@ impl Graph {
     }
 
     /// Emits what the nodes logged on the audio thread as `tracing` events
-    /// (`rt_log.rs`). Control thread: the session's
-    /// [`Reclaim`](crate::Phase::Reclaim) phase.
+    /// (`rt_log.rs`), naming each node by its kind in the current graph; a
+    /// node removed since it logged is named by its id alone. Control
+    /// thread: the session's [`Reclaim`](crate::Phase::Reclaim) phase.
     pub(crate) fn drain_rt_log(&self) {
         if let Some(readers) = &self.rt_log {
             let nodes = &self.editor.spec().topology.nodes;

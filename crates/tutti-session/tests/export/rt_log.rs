@@ -42,12 +42,26 @@ fn a_node_that_logs_in_a_bounce_emits_a_tracing_event_through_the_export_path() 
         .iter()
         .filter(|e| e.level == Some(Level::WARN) && e.message == SITE)
         .collect();
-    assert!(
-        warn.len() >= 2,
-        "one record a block of a 2,400-frame render, in frame order: {events:?}"
+    // A 2,400-frame render in blocks of the export's maximum: one record a
+    // block at its frame 7, none lost, none twice, in frame order.
+    let block = tutti_export::GRAPH_MAX_BLOCK.get() as u64;
+    let frames: Vec<u64> = warn.iter().map(|e| e.frame).collect();
+    let expected: Vec<u64> = (0..2_400)
+        .step_by(block as usize)
+        .map(|start| start + 7)
+        .collect();
+    assert_eq!(frames, expected, "{events:?}");
+    let node = format!(
+        "{}#{}",
+        std::any::type_name::<Noisy>(),
+        tutti_graph::NodeKey::from(noisy).0
     );
-    assert!(warn.windows(2).all(|w| w[0].frame <= w[1].frame));
-    assert_eq!(warn[0].target, "tutti::graph");
-    assert_eq!((warn[0].frame, warn[0].repeats), (7, 2));
-    assert!(warn[0].node.contains('#'), "{}", warn[0].node);
+    for event in &warn {
+        assert_eq!(event.target, "tutti::graph");
+        assert_eq!(event.repeats, 2);
+        assert_eq!(
+            event.node, node,
+            "the bounce names the node as the live graph does"
+        );
+    }
 }

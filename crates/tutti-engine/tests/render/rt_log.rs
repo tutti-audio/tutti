@@ -4,8 +4,8 @@
 use tutti_buffers::InterleavedMut;
 use tutti_engine::Engine;
 use tutti_graph::{
-    Cx, Editor, Io, LogFilter, Node, NodeKey, OutPort, Prepare, RtLevel, RtRecord, RtValue, Shape,
-    Source, Status, Unforkable,
+    Cx, Editor, Io, LogFilter, Node, NodeKey, OutPort, Prepare, RtLevel, RtLogReaders, RtRecord,
+    RtValue, Shape, Source, Status, Unforkable,
 };
 use tutti_transport::Transport;
 use tutti_types::{ChannelLayout, Frame, MaxBlock, SampleRate, Samples, Tail};
@@ -48,8 +48,9 @@ fn an_engine_renders_a_nodes_records_to_its_readers_from_the_block_after_the_fil
             port: 0,
         })]);
     ed.commit().expect("commits");
+    let mut exec = exec;
+    let readers = RtLogReaders::new(&mut exec);
     let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
-    let readers = engine.rt_log();
     let block = |engine: &Engine| {
         let mut buf = vec![0.0f32; 64];
         engine.process(&mut InterleavedMut::new(&mut buf, ChannelLayout::MONO).unwrap());

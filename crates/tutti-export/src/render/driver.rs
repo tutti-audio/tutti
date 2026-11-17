@@ -121,6 +121,17 @@ pub(crate) struct GraphSource<'a> {
     rt_log: Option<(RtLogReaders, Arc<dyn RtLogSink>)>,
 }
 
+/// Hands what the executor's log rings hold to the sink, stores the sink's
+/// filter for the next block, and reports what was lost since the last drain.
+fn drain_rt_log(rt_log: Option<&(RtLogReaders, Arc<dyn RtLogSink>)>) {
+    if let Some((readers, sink)) = rt_log {
+        let lost = readers.drain(sink.filter(), |r| sink.record(r));
+        if lost > 0 {
+            sink.lost(lost);
+        }
+    }
+}
+
 impl<'a> GraphSource<'a> {
     /// Refuses a pair it cannot render as configured rather than rendering
     /// something else: an executor prepared at a rate other than the
@@ -175,9 +186,7 @@ impl<'a> GraphSource<'a> {
         );
         let planes = vec![vec![0.0f32; max_block]; rendered];
         // The gate is open from the first block.
-        if let Some((readers, sink)) = &rt_log {
-            readers.drain(sink.filter(), |r| sink.record(r));
-        }
+        drain_rt_log(rt_log.as_ref());
         Ok(Self {
             editor,
             executor,
@@ -270,12 +279,7 @@ impl GraphSource<'_> {
         // Retired units and returned commits are freed here, on this thread,
         // as a host's control loop would free them.
         self.editor.collect();
-        if let Some((readers, sink)) = &self.rt_log {
-            let lost = readers.drain(sink.filter(), |r| sink.record(r));
-            if lost > 0 {
-                sink.lost(lost);
-            }
-        }
+        drain_rt_log(self.rt_log.as_ref());
         self.produced = Samples(self.produced.get() + block_size);
         block_size
     }
