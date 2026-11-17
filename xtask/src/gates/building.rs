@@ -516,6 +516,18 @@ pub(super) const ALLOW: &[Allow] = &[
         SETTER,
         "the one writer of a position ring: a writer handle, not a node, source, spec or config",
     ),
+    ty(
+        "crates/tutti-midi-device/src/ci/initiator.rs",
+        "ProfileInitiator::set_on",
+        SETTER,
+        "the spec's Set Profile On message (M2-102): a request to the peer, not a setter of the initiator",
+    ),
+    ty(
+        "crates/tutti-midi-device/src/ci/initiator.rs",
+        "ProfileInitiator::set_off",
+        SETTER,
+        "the spec's Set Profile Off message (M2-102): a request to the peer, not a setter of the initiator",
+    ),
 ];
 
 /// A violation: its key and rule.
