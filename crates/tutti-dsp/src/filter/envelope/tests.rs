@@ -261,7 +261,7 @@ fn the_attack_and_the_release_are_told_apart() {
             .step_by(16)
             .map(|k| {
                 let n = 4_560 + k - 7;
-                let env = low + (high - low) * pole(release).powi(n as i32);
+                let env = low + (high - low) * pole(release).powi(n);
                 magnitude(ty, cutoff(env), q, TONE)
             })
             .sum::<f64>()
