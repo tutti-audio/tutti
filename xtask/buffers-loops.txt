@@ -14,7 +14,6 @@
 crates/tutti-codec/src/decode/file_in.rs::FileIn::decode_next_packet  pending
 crates/tutti-codec/src/wave.rs::Wave::write  pending
 crates/tutti-cpal/src/mic.rs::Capture::block  pending
-crates/tutti-dsp/src/dynamics/multiband.rs::MultibandBank::chunk  pending
 crates/tutti-dsp/src/fft/real.rs::RealFft::forward_even  pending
 crates/tutti-dsp/src/fft/real.rs::RealFft::inverse_even  pending
 crates/tutti-dsp/src/fft/staged.rs::StagedRealFft::inverse_step  pending

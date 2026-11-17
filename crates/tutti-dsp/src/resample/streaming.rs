@@ -16,7 +16,8 @@
 //! silence at the end to push the real tail out.
 
 use super::{FftResampler, ResampleError};
-use tutti_buffers::{Planes, PlanesMut};
+use rustfft::FftNum;
+use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_types::{SampleRate, Samples};
 
 /// Input frames per FFT chunk, and how finely each chunk is subdivided.
@@ -141,12 +142,12 @@ const MAX_FLUSH_BLOCK: usize = 1 << 20;
 /// Owns its own input carry, so callers hand it whatever block size they
 /// have and it emits output whenever the converter has a chunk ready.
 #[derive(Debug)]
-pub struct StreamingResampler {
-    inner: FftResampler,
+pub struct StreamingResampler<F: Float + FftNum = f32> {
+    inner: FftResampler<F>,
     channels: usize,
     ratio: f64,
     /// Input frames per channel, consumed up to `head`.
-    carry: Vec<Vec<f32>>,
+    carry: Vec<Vec<F>>,
     /// Frames at the front of every `carry` plane already handed to the
     /// converter. A chunk advances it instead of shifting the plane down,
     /// so a push of the whole signal (the two-pass path) costs O(N) rather
@@ -161,13 +162,13 @@ pub struct StreamingResampler {
     /// Output frames emitted so far, so the budget is a running total.
     emitted: usize,
     /// Reusable scratch so the per-block path does not allocate.
-    in_scratch: Vec<Vec<f32>>,
+    in_scratch: Vec<Vec<F>>,
     /// The converter's output, `output_frames_max()` per channel, written
     /// by `process_into_buffer`.
-    out_scratch: Vec<Vec<f32>>,
+    out_scratch: Vec<Vec<F>>,
 }
 
-impl StreamingResampler {
+impl<F: Float + FftNum> StreamingResampler<F> {
     /// Both rates are [`SampleRate`], which every caller already holds;
     /// the narrowing to the converter's integer rates happens once, here,
     /// at its boundary.
@@ -197,7 +198,7 @@ impl StreamingResampler {
             channels,
         )?;
         let skip = inner.output_delay();
-        let out_scratch = vec![vec![0.0; inner.output_frames_max()]; channels];
+        let out_scratch = vec![vec![F::ZERO; inner.output_frames_max()]; channels];
         Ok(Self {
             inner,
             channels,
@@ -246,10 +247,10 @@ impl StreamingResampler {
     /// # Errors
     /// [`ResampleError`] if the converter refuses a chunk or the carry stops
     /// shrinking.
-    pub fn push(&mut self, planes: &[Vec<f32>], out: &mut [Vec<f32>]) -> Result<(), ResampleError> {
-        let n = planes.first().map_or(0, |p| p.len());
+    pub fn push(&mut self, planes: Planes<'_, F>, out: &mut [Vec<F>]) -> Result<(), ResampleError> {
+        let n = planes.frames().get();
         for (c, p) in planes.iter().enumerate().take(self.channels) {
-            self.carry[c].extend_from_slice(p);
+            self.carry[c].extend_from_slice(p.samples());
         }
         self.fed += n;
         self.drain(out, false)
@@ -277,7 +278,7 @@ impl StreamingResampler {
     /// # Errors
     /// [`ResampleError::Stalled`] if the silence cannot push the tail out, or
     /// the converter's own error.
-    pub fn finish(&mut self, out: &mut [Vec<f32>]) -> Result<(), ResampleError> {
+    pub fn finish(&mut self, out: &mut [Vec<F>]) -> Result<(), ResampleError> {
         // The real input's last partial chunk, padded by `drain`.
         self.drain(out, true)?;
         let need = self.inner.input_frames_next();
@@ -290,7 +291,7 @@ impl StreamingResampler {
                 return Err(ResampleError::Stalled { chunks: bound });
             }
             for c in self.carry.iter_mut() {
-                c.resize(c.len() + need, 0.0);
+                c.resize(c.len() + need, F::ZERO);
             }
             self.drain(out, true)?;
         }
@@ -315,7 +316,7 @@ impl StreamingResampler {
         (len - self.head, self.head, self.inner.input_frames_next())
     }
 
-    fn drain(&mut self, out: &mut [Vec<f32>], flushing: bool) -> Result<(), ResampleError> {
+    fn drain(&mut self, out: &mut [Vec<F>], flushing: bool) -> Result<(), ResampleError> {
         let result = self.drain_chunks(out, flushing);
         // Drop the consumed prefix once per call, not once per chunk.
         for c in self.carry.iter_mut() {
@@ -325,7 +326,7 @@ impl StreamingResampler {
         result
     }
 
-    fn drain_chunks(&mut self, out: &mut [Vec<f32>], flushing: bool) -> Result<(), ResampleError> {
+    fn drain_chunks(&mut self, out: &mut [Vec<F>], flushing: bool) -> Result<(), ResampleError> {
         // Every pass consumes one chunk, so the carry this call starts
         // with runs out within `ceil(have / need)` passes (the last one
         // padded when flushing). The `+ 1` is slack; past it the carry is
@@ -348,7 +349,7 @@ impl StreamingResampler {
                     return Ok(());
                 }
                 for c in self.carry.iter_mut() {
-                    c.resize(self.head + need, 0.0);
+                    c.resize(self.head + need, F::ZERO);
                 }
             }
 

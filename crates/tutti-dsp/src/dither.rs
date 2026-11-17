@@ -8,6 +8,7 @@ pub(crate) mod sink;
 
 use crate::Xorshift32;
 use std::num::NonZeroU32;
+use tutti_buffers::{Float, InterleavedMut};
 use tutti_types::Amplitude;
 
 /// The probability density of the noise a [`DitherNoise`] adds.
@@ -43,15 +44,24 @@ impl DitherNoise {
     }
 
     /// Add noise of `shape`, scaled to `lsb` (one least significant bit of the
-    /// target depth in the `[-1, 1]` float domain), to every sample in place.
-    pub fn apply(&mut self, shape: DitherShape, lsb: Amplitude, samples: &mut [f32]) {
+    /// target depth in the `[-1, 1]` float domain), to every sample of `audio` in place.
+    ///
+    /// One draw per sample, in frame order and channel order within a frame. A draw is an
+    /// `f32` (the 32-bit word's nearest `f32` over `2^32 - 1`) widened exactly into `F`, so a
+    /// block of `f32` and one of `f64` get the same noise.
+    pub fn apply<F: Float>(
+        &mut self,
+        shape: DitherShape,
+        lsb: Amplitude,
+        mut audio: InterleavedMut<'_, F>,
+    ) {
         let lsb = lsb.0;
-        for s in samples.iter_mut() {
+        for s in audio.samples_mut() {
             let noise = match shape {
                 DitherShape::Rectangular => self.rectangular(),
                 DitherShape::Triangular => self.triangular(),
             };
-            *s += noise * lsb;
+            *s += F::from_f32(noise * lsb);
         }
     }
 
@@ -77,6 +87,16 @@ impl Default for DitherNoise {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tutti_types::ChannelLayout;
+
+    /// `apply` over a mono run of samples.
+    fn apply<F: Float>(n: &mut DitherNoise, shape: DitherShape, lsb: Amplitude, s: &mut [F]) {
+        n.apply(
+            shape,
+            lsb,
+            InterleavedMut::new(s, ChannelLayout::MONO).unwrap(),
+        );
+    }
 
     const LSB: Amplitude = Amplitude(1.0);
 
@@ -85,7 +105,12 @@ mod tests {
     #[test]
     fn the_first_draw_is_the_seeded_word_scaled() {
         let mut s = [0.0f32; 1];
-        DitherNoise::new().apply(DitherShape::Rectangular, LSB, &mut s);
+        apply(
+            &mut DitherNoise::new(),
+            DitherShape::Rectangular,
+            LSB,
+            &mut s,
+        );
         let want = 2_274_908_837.0_f64 / 4_294_967_295.0 - 0.5;
         assert!((f64::from(s[0]) - want).abs() < 1e-7, "{} vs {want}", s[0]);
     }
@@ -95,7 +120,12 @@ mod tests {
     #[test]
     fn the_first_triangular_draw_is_the_difference_of_two_seeded_words() {
         let mut s = [0.0f32; 1];
-        DitherNoise::new().apply(DitherShape::Triangular, Amplitude(0.25), &mut s);
+        apply(
+            &mut DitherNoise::new(),
+            DitherShape::Triangular,
+            Amplitude(0.25),
+            &mut s,
+        );
         let want = (2_274_908_837.0_f64 - 358_294_691.0) / 4_294_967_295.0 * 0.25;
         assert!((f64::from(s[0]) - want).abs() < 1e-7, "{} vs {want}", s[0]);
     }
@@ -104,7 +134,7 @@ mod tests {
     fn rectangular_stays_within_half_an_lsb() {
         let mut n = DitherNoise::new();
         let mut s = [0.0f32; 4096];
-        n.apply(DitherShape::Rectangular, LSB, &mut s);
+        apply(&mut n, DitherShape::Rectangular, LSB, &mut s);
         assert!(s.iter().all(|x| x.abs() <= 0.5));
         assert!(s.iter().any(|x| x.abs() > 0.4), "the range is used");
     }
@@ -113,7 +143,7 @@ mod tests {
     fn triangular_stays_within_one_lsb() {
         let mut n = DitherNoise::new();
         let mut s = [0.0f32; 4096];
-        n.apply(DitherShape::Triangular, LSB, &mut s);
+        apply(&mut n, DitherShape::Triangular, LSB, &mut s);
         assert!(s.iter().all(|x| x.abs() <= 1.0));
         assert!(s.iter().any(|x| x.abs() > 0.8), "the range is used");
     }
@@ -122,12 +152,32 @@ mod tests {
     #[test]
     fn the_sequence_continues_across_calls() {
         let mut whole = [0.0f32; 16];
-        DitherNoise::new().apply(DitherShape::Triangular, LSB, &mut whole);
+        apply(
+            &mut DitherNoise::new(),
+            DitherShape::Triangular,
+            LSB,
+            &mut whole,
+        );
         let mut split = [0.0f32; 16];
         let mut n = DitherNoise::new();
         let (a, b) = split.split_at_mut(6);
-        n.apply(DitherShape::Triangular, LSB, a);
-        n.apply(DitherShape::Triangular, LSB, b);
+        apply(&mut n, DitherShape::Triangular, LSB, a);
+        apply(&mut n, DitherShape::Triangular, LSB, b);
         assert_eq!(whole, split);
+    }
+
+    /// In `f64` the first rectangular draw is the seeded word over `2^32 - 1`, scaled to
+    /// `[-0.5, 0.5]` (the `f32` draw widened), and the noise is added to the signal.
+    #[test]
+    fn an_f64_block_gets_the_seeded_draw_added_to_the_signal() {
+        let mut s = [0.25f64; 1];
+        apply(
+            &mut DitherNoise::new(),
+            DitherShape::Rectangular,
+            LSB,
+            &mut s,
+        );
+        let want = 0.25 + (2_274_908_837.0_f64 / 4_294_967_295.0 - 0.5);
+        assert!((s[0] - want).abs() < 1e-7, "{} vs {want}", s[0]);
     }
 }

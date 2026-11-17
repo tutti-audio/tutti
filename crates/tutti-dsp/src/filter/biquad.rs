@@ -1,6 +1,7 @@
 //! The second-order section both the crossover and the SVF's equivalent forms
 //! share: its coefficients, its response and its poles.
 
+use tutti_buffers::{Float, Mono, MonoMut};
 use tutti_types::{Db, SampleRate, Seconds};
 
 use crate::{Complex64, Ring};
@@ -65,24 +66,27 @@ pub struct DirectForm1 {
 
 impl DirectForm1 {
     /// Filter `block` in place through `c`.
-    pub fn process(&mut self, c: &Biquad, block: &mut [f32]) {
-        for sample in block {
-            let x = f64::from(*sample);
+    ///
+    /// The arithmetic runs in `f64` whatever the block's format `F`, so a block of `f32` is
+    /// widened exactly and rounded back once per sample.
+    pub fn process<F: Float>(&mut self, c: &Biquad, mut block: MonoMut<'_, F>) {
+        for sample in block.samples_mut() {
+            let x = sample.to_f64();
             let y = c.b0 * x + c.b1 * self.x[0] + c.b2 * self.x[1]
                 - c.a1 * self.y[0]
                 - c.a2 * self.y[1];
             self.x = [x, self.x[0]];
             self.y = [y, self.y[0]];
-            *sample = y as f32;
+            *sample = F::from_f64(y);
         }
     }
 
     /// Pass `block` through untouched, leaving the history as the filter's would
     /// be had its output been its input, so the section can take over without a
     /// step. A block shorter than two frames keeps what the history held.
-    pub fn hold(&mut self, block: &[f32]) {
-        for &sample in block.iter().rev().take(2).rev() {
-            let x = f64::from(sample);
+    pub fn hold<F: Float>(&mut self, block: Mono<'_, F>) {
+        for &sample in block.samples().iter().rev().take(2).rev() {
+            let x = sample.to_f64();
             self.x = [x, self.x[0]];
             self.y = [x, self.y[0]];
         }
@@ -177,7 +181,7 @@ mod tests {
         };
         let mut f = DirectForm1::default();
         let mut out = [1.0f32, 0.0, 0.0, 0.0];
-        f.process(&c, &mut out);
+        f.process(&c, MonoMut::new(&mut out));
         // y0 = b0; y1 = b1 - a1 y0; y2 = b2 - a1 y1 - a2 y0; y3 = -a1 y2 - a2 y1.
         let y1 = 0.25 + 0.5 * 0.5;
         let y2 = -0.125 + 0.5 * y1 - 0.25 * 0.5;
@@ -188,12 +192,42 @@ mod tests {
         // Held over [9, 1, 2], then a section fed 0 answers as if 1 then 2 had
         // passed through it unchanged.
         let mut held = DirectForm1::default();
-        held.hold(&[9.0, 1.0, 2.0]);
+        held.hold(Mono::new(&[9.0f32, 1.0, 2.0]));
         let mut after = [0.0f32];
-        held.process(&c, &mut after);
+        held.process(&c, MonoMut::new(&mut after));
         let want = c.b1 * 2.0 + c.b2 * 1.0 - c.a1 * 2.0 - c.a2 * 1.0;
         assert!((f64::from(after[0]) - want).abs() < 1e-7);
         held.reset();
         assert_eq!(held, DirectForm1::default());
+    }
+
+    /// In `f64` the section is the difference equation to the last bit: a block run through
+    /// `process` equals the recurrence computed in the test, and `hold` keeps the last two
+    /// inputs as both histories.
+    #[test]
+    fn direct_form_i_in_f64_is_the_recurrence_exactly() {
+        let c = Biquad {
+            b0: 0.5,
+            b1: 0.25,
+            b2: -0.125,
+            a1: -0.5,
+            a2: 0.25,
+        };
+        let input = [1.0f64, -0.5, 0.25, 0.75, -1.0];
+        let mut got = input;
+        DirectForm1::default().process(&c, MonoMut::new(&mut got));
+        let (mut x, mut y) = ([0.0f64; 2], [0.0f64; 2]);
+        for (n, &xn) in input.iter().enumerate() {
+            let yn = c.b0 * xn + c.b1 * x[0] + c.b2 * x[1] - c.a1 * y[0] - c.a2 * y[1];
+            x = [xn, x[0]];
+            y = [yn, y[0]];
+            assert_eq!(got[n], yn, "frame {n}");
+        }
+        let mut held = DirectForm1::default();
+        held.hold(Mono::new(&[9.0f64, 1.0, 2.0]));
+        let mut after = [0.0f64];
+        held.process(&c, MonoMut::new(&mut after));
+        let want = c.b1 * 2.0 + c.b2 * 1.0 - c.a1 * 2.0 - c.a2 * 1.0;
+        assert_eq!(after[0], want);
     }
 }

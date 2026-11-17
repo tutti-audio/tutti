@@ -397,10 +397,11 @@ impl MultibandBank {
         let mut by = [0.0f32; CHUNK];
         let mut au = [0.0f32; CHUNK];
         let mut lane = [0.0f32; CHUNK];
-        for b in 0..self.bands {
+        // The bands are `width` planes each, band-major.
+        for (b, band_planes) in scratch.bands.chunks(width).take(self.bands).enumerate() {
             {
                 let (Ok(band), Ok(mut squeezed)) = (
-                    Planes::from_vecs(&scratch.bands[b * width..(b + 1) * width]),
+                    Planes::from_vecs(band_planes),
                     PlanesMut::from_vecs(&mut scratch.squeezed),
                 ) else {
                     return;
@@ -430,10 +431,13 @@ impl MultibandBank {
             }
             weights(bypass, &mut by[..n]);
             weights(&self.audible[b], &mut au[..n]);
-            for c in 0..width {
-                let x = &scratch.bands[b * width + c][..n];
-                let y = &scratch.squeezed[c][..n];
-                for (i, s) in scratch.sum[c][..n].iter_mut().enumerate() {
+            let planes = band_planes
+                .iter()
+                .zip(&scratch.squeezed)
+                .zip(&mut scratch.sum);
+            for ((x, y), sum) in planes {
+                let (x, y) = (&x[..n], &y[..n]);
+                for (i, s) in sum[..n].iter_mut().enumerate() {
                     let (w, a) = (by[i], au[i]);
                     if a == 0.0 {
                         continue;
