@@ -313,8 +313,10 @@ impl PluginClient<Unbound> {
         let descriptor = ipc.descriptor().clone();
         let loaded = ipc.loaded().clone();
         let rate = ipc.rate();
+        // The plugin's file, when the ipc knows it: the path of a failure here.
+        let origin_path = ipc.origin().map(|o| o.path.clone());
         let failed = |reason: String| BridgeError::LoadFailed {
-            path: None,
+            path: origin_path.clone(),
             stage: LoadStage::Activation,
             reason,
         };

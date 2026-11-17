@@ -178,9 +178,9 @@ where
         let (preset, state, live_mode) = {
             let mut instance = live.lock();
             let live_mode = instance.render_mode();
-            let control = instance.control().ok_or_else(|| {
-                PluginForkError::SaveState(StateError::Rejected("the plugin is lost".into()))
-            })?;
+            let control = instance
+                .control()
+                .ok_or(PluginForkError::SaveState(StateError::PluginCrashed))?;
             // A plugin with no presets has none to carry (and would refuse
             // the current one's id).
             let preset = if self.features.contains(Features::PRESET_LOAD) {

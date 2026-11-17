@@ -124,14 +124,14 @@ fn run(
     let status = wait(&mut child, timeout, cancel);
     // The file is read even after a timeout or a bad exit: it is the only proof
     // of finishing, and a probe that finished at the deadline did.
-    let file = read_result(&result).map_err(|e| BridgeError::IpcError(e.to_string()));
+    let file = read_result(&result);
     let outcome = match (file, status) {
         (Ok(Some(outcome)), _) => outcome,
-        (Err(e), _) => return Err(e.into()),
+        (Err(e), _) => return Err(BridgeError::from(e).into()),
         (Ok(None), Waited::Exited) => return Err(BridgeError::ProcessCrashed.into()),
         (Ok(None), Waited::TimedOut) => {
             return Err(BridgeError::Timeout {
-                operation: "probe".into(),
+                operation: "probe",
                 after: timeout,
                 partial: false,
             }
@@ -150,7 +150,11 @@ fn run(
             Err(BridgeError::load_from_server(plugin_path, message).into())
         }
         // `ProbeOutcome` is `#[non_exhaustive]`: an outcome from a newer probe.
-        other => Err(BridgeError::IpcError(format!("unknown probe outcome: {other:?}")).into()),
+        other => Err(BridgeError::UnexpectedMessage {
+            expected: "a described or failed probe outcome",
+            got: format!("{other:?}"),
+        }
+        .into()),
     }
 }
 
@@ -352,7 +356,7 @@ mod tests {
         let cut = stand_in(&dir, "printf 'TPRB\\001' > \"$2\"");
         let result = probe(&cut, Duration::from_secs(10));
         assert!(
-            matches!(result, Err(BridgeError::IpcError(_))),
+            matches!(result, Err(BridgeError::ProbeResult(_))),
             "{result:?}"
         );
     }

@@ -1064,7 +1064,7 @@ mod state_back_tests {
         fn save_state(&mut self, _: MainThreadMarker) -> PluginResult<Vec<u8>> {
             self.state
                 .clone()
-                .ok_or_else(|| PluginError::State("unreadable".into()))
+                .ok_or(PluginError::StateFailed(StateError::Unavailable))
         }
     }
 

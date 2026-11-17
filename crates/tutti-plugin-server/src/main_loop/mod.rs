@@ -38,6 +38,7 @@
 //!
 //! The loop owns no state: what a message or a tick does is [`Session`]'s.
 
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use tutti_plugin_types::{BridgeError, BridgeResult, MainThreadMarker, Ready, Wakeups};
@@ -173,10 +174,15 @@ pub(crate) fn serve_every(
     loop {
         // An audio connection that ends is the host leaving, which the control
         // connection says too; one that was misused is a peer to stop serving.
-        if let Some(error @ BridgeError::ProtocolError(_)) = render.ended() {
-            return Err(BridgeError::ProtocolError(format!(
-                "the audio connection: {error}"
-            )));
+        if let Some(error) = render.ended()
+            && matches!(
+                **error,
+                BridgeError::ProtocolError(_) | BridgeError::UnexpectedMessage { .. }
+            )
+        {
+            return Err(BridgeError::AudioConnection {
+                cause: Arc::clone(error),
+            });
         }
         if ticker.take_due(Instant::now()) {
             for event in session.tick(main) {

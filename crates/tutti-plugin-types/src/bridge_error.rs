@@ -5,12 +5,17 @@
 //! which a format loader knows about; the lean [`PluginError`] the loaders'
 //! capability traits return converts to and from it with `From`.
 
+use std::borrow::Cow;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use thiserror::Error;
 
-use crate::{EditorError, LoadStage, PluginError, StateError};
+use crate::{
+    EditorError, FrameTooLarge, LoadStage, PluginError, PluginFailure, ResultError,
+    SlabAccessError, SlabLayoutError, StateError,
+};
 
 /// Anything that can go wrong hosting a plugin out of process.
 ///
@@ -21,17 +26,29 @@ use crate::{EditorError, LoadStage, PluginError, StateError};
 #[non_exhaustive]
 pub enum BridgeError {
     /// A [`Timeouts`](crate::Timeouts) with a zero deadline was configured.
-    #[error("the bridge configuration is refused: {0}")]
+    #[error(transparent)]
     Timeouts(#[from] crate::ZeroTimeout),
 
     /// The thread that watches the subprocess's end could not start, so the
     /// subprocess is not run.
-    #[error("the plugin-server's exit cannot be watched: {0}")]
+    #[error("the plugin-server's exit cannot be watched")]
     ExitUnwatched(#[source] std::io::Error),
 
-    /// The host could not reach the subprocess over its control socket.
-    #[error("the bridge connection failed: {0}")]
-    ConnectionFailed(String),
+    /// The subprocess ended before it bound its control socket.
+    #[error("the plugin-server exited before binding its socket")]
+    ServerExited {
+        /// How the server ended.
+        #[source]
+        cause: PluginFailure,
+    },
+
+    /// The subprocess did not take the audio slab the host offered.
+    #[error("the plugin-server did not take the new audio slab")]
+    SlabRefused,
+
+    /// A frame's length is over the protocol's limit.
+    #[error(transparent)]
+    FrameTooLarge(#[from] FrameTooLarge),
 
     /// The plugin failed to load, with the stage it reached before failing.
     #[error("the plugin{} failed to load at the {stage} stage: {reason}", of_path(.path))]
@@ -131,19 +148,28 @@ pub enum BridgeError {
         got: u32,
     },
 
-    /// The control channel to the subprocess failed.
-    #[error("the control channel failed: {0}")]
-    IpcError(String),
-
-    /// The shared-memory audio slab could not be created, mapped or validated.
+    /// The shared-memory audio slab could not be created or mapped: the
+    /// operating system's refusal, as text.
     #[error("the shared memory failed: {0}")]
     SharedMemoryError(String),
 
+    /// The audio slab's layout is a shape this build does not serve.
+    #[error(transparent)]
+    SlabLayout(#[from] SlabLayoutError),
+
+    /// A probe's result file could not be read.
+    #[error(transparent)]
+    ProbeResult(#[from] ResultError),
+
+    /// A slab channel was read or written wrongly.
+    #[error(transparent)]
+    SlabAccess(#[from] SlabAccessError),
+
     /// The subprocess did not answer within the operation's deadline.
-    #[error("{operation} timed out after {}ms", after.as_millis())]
+    #[error("{operation} timed out after {after:?}")]
     Timeout {
         /// What the host was waiting on.
-        operation: String,
+        operation: &'static str,
         /// How long it waited.
         after: Duration,
         /// Whether the deadline expired **part-way through a frame**, leaving
@@ -165,13 +191,13 @@ pub enum BridgeError {
 
     /// The plugin's state could not be saved or restored, for the reason the
     /// [`StateError`] names.
-    #[error("plugin state failed: {0}")]
+    #[error(transparent)]
     State(#[from] StateError),
 
     /// A launch's staged state did not finish restoring: the server began the
     /// restore and the bridge failed while waiting on it. `cause` is the
     /// failure itself. A failure before the restore began is a load failure.
-    #[error("the plugin did not finish restoring its state: {cause}")]
+    #[error("the plugin did not finish restoring its state")]
     StateRestore {
         /// The bridge failure the restore ended in.
         #[source]
@@ -180,29 +206,57 @@ pub enum BridgeError {
 
     /// The plugin failed while processing audio.
     #[error("the plugin failed processing: {0}")]
-    ProcessError(String),
+    ProcessError(Cow<'static, str>),
 
     /// The plugin's editor could not be opened, embedded or closed.
-    #[error("the plugin editor failed: {0}")]
+    #[error(transparent)]
     Editor(#[from] EditorError),
 
-    /// A failure a format loader reported that fits no other variant
-    /// ([`PluginError::Other`]).
+    /// A failure a format loader reported in its own words that fits no other
+    /// variant ([`PluginError::Other`]).
     #[error("the plugin failed: {0}")]
     Other(String),
 
-    /// A message could not be framed, encoded or decoded.
-    #[error("the wire protocol failed: {0}")]
-    ProtocolError(String),
+    /// The peer broke the protocol: a message on a connection that does not
+    /// carry it, or a call out of its phase.
+    #[error("the peer broke the wire protocol: {0}")]
+    ProtocolError(&'static str),
+
+    /// The audio connection was misused; the failure it ended with.
+    #[error("the audio connection failed")]
+    AudioConnection {
+        /// What the connection ended with.
+        #[source]
+        cause: Arc<BridgeError>,
+    },
 
     /// An underlying I/O operation failed.
-    #[error("an I/O operation failed: {0}")]
+    #[error(transparent)]
     Io(#[from] std::io::Error),
 
-    /// A wire message could not be postcard-encoded or -decoded; carries the
-    /// codec's message.
-    #[error("a wire message failed to encode or decode: {0}")]
-    Serialization(String),
+    /// A wire message could not be postcard-encoded or -decoded.
+    #[error("a wire message failed to encode or decode")]
+    Serialization(#[source] postcard::Error),
+
+    /// A frame's body holds bytes after its one message.
+    #[error("{left} bytes are left after the message in a {frame}-byte frame")]
+    TrailingBytes {
+        /// Bytes after the message.
+        left: usize,
+        /// The frame body's length.
+        frame: usize,
+    },
+
+    /// The handshake's first message does not decode: a server from another build.
+    #[error(
+        "the plugin-server's handshake does not decode: a server from another build \
+         (protocol 26 or older?), rebuild the plugin-server"
+    )]
+    StaleServer {
+        /// The decode failure.
+        #[source]
+        cause: Box<BridgeError>,
+    },
 }
 
 /// A host operation's result, erroring as [`BridgeError`].
@@ -291,8 +345,8 @@ impl From<PluginError> for BridgeError {
             },
             PluginError::State(msg) => BridgeError::State(StateError::Rejected(msg)),
             PluginError::StateFailed(err) => BridgeError::State(err),
-            PluginError::Process(msg) => BridgeError::ProcessError(msg),
-            PluginError::Block(why) => BridgeError::ProcessError(why.to_owned()),
+            PluginError::Process(msg) => BridgeError::ProcessError(Cow::Owned(msg)),
+            PluginError::Block(why) => BridgeError::ProcessError(Cow::Borrowed(why)),
             PluginError::Editor(err) => BridgeError::Editor(err),
             PluginError::Bridge(err) => *err,
             PluginError::Other(msg) => BridgeError::Other(msg),
@@ -303,15 +357,17 @@ impl From<PluginError> for BridgeError {
 /// Narrows a `BridgeError` into the lean [`PluginError`] a format loader
 /// returns.
 ///
-/// A variant the lean type has a counterpart for keeps its payload; every other
-/// (`ServerNotFound`, `ProtocolMismatch`, `IpcError`, ...) travels whole as
-/// [`PluginError::Bridge`], so widening it again returns the same value.
+/// A variant the lean type has a counterpart for keeps its payload, except that
+/// a [`BridgeError::LoadFailed`] drops its `path` (a [`PluginError::Load`] names
+/// none). Every other variant (`ServerNotFound`, `ProtocolMismatch`, ...)
+/// travels whole as [`PluginError::Bridge`], so widening it again returns the
+/// same value.
 impl From<BridgeError> for PluginError {
     fn from(e: BridgeError) -> Self {
         match e {
             BridgeError::LoadFailed { stage, reason, .. } => PluginError::Load { stage, reason },
             BridgeError::State(err) => PluginError::StateFailed(err),
-            BridgeError::ProcessError(msg) => PluginError::Process(msg),
+            BridgeError::ProcessError(msg) => PluginError::Process(msg.into_owned()),
             BridgeError::Editor(err) => PluginError::Editor(err),
             BridgeError::Other(msg) => PluginError::Other(msg),
             other => PluginError::Bridge(Box::new(other)),
@@ -420,12 +476,15 @@ mod tests {
         ));
     }
 
-    /// A load failure round-trips its stage and reason, and its message names
-    /// the path only when there is one.
+    /// A load failure names its path only when it has one, and keeps its stage
+    /// and reason through the narrowing.
     #[test]
     fn a_load_failure_names_its_path_only_when_it_has_one() {
         let with = BridgeError::load_from_server(std::path::Path::new("/x.vst3"), "refused".into());
-        assert!(with.to_string().contains("/x.vst3"), "{with}");
+        assert_eq!(
+            with.to_string(),
+            "the plugin at /x.vst3 failed to load at the opening library stage: refused"
+        );
         let without = BridgeError::from(PluginError::Load {
             stage: LoadStage::Activation,
             reason: "refused".into(),
@@ -440,6 +499,60 @@ mod tests {
                 assert_eq!(reason, "refused");
             }
             other => panic!("expected Load, got {other:?}"),
+        }
+    }
+
+    /// A timeout and a restore failure read as one sentence each.
+    #[test]
+    fn a_timeout_and_a_restore_failure_read_as_one_sentence() {
+        let timeout = BridgeError::Timeout {
+            operation: "recv",
+            after: Duration::from_millis(250),
+            partial: false,
+        };
+        assert_eq!(timeout.to_string(), "recv timed out after 250ms");
+        let restore = BridgeError::StateRestore {
+            cause: Box::new(BridgeError::ProcessCrashed),
+        };
+        assert_eq!(
+            restore.to_string(),
+            "the plugin did not finish restoring its state"
+        );
+    }
+
+    /// Each cause's text appears once across a error's `source` chain and its
+    /// own text: an error that prints its source and also returns it makes a
+    /// reporter that walks the chain print the cause twice.
+    #[test]
+    fn a_cause_is_printed_once_along_the_source_chain() {
+        use std::error::Error as _;
+        let errors: [BridgeError; 3] = [
+            BridgeError::StateRestore {
+                cause: Box::new(BridgeError::Timeout {
+                    operation: "a reply",
+                    after: Duration::from_secs(5),
+                    partial: false,
+                }),
+            },
+            BridgeError::State(StateError::Stalled {
+                bytes: 3,
+                after: Duration::from_secs(2),
+            }),
+            BridgeError::Editor(EditorError::PluginCrashed),
+        ];
+        let causes = ["timed out after 5s", "stalled after 3 bytes", "has crashed"];
+        for (error, cause) in errors.iter().zip(causes) {
+            let mut chain = vec![error.to_string()];
+            let mut next = error.source();
+            while let Some(e) = next {
+                chain.push(e.to_string());
+                next = e.source();
+            }
+            assert_eq!(
+                chain.iter().filter(|t| t.contains(cause)).count(),
+                1,
+                "{cause:?} in {chain:?}"
+            );
         }
     }
 }

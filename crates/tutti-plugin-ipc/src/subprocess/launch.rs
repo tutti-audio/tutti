@@ -256,9 +256,7 @@ fn connect_when_listening(
             Ok(stream) => return Ok(stream),
             Err(e) => {
                 if let Some(cause) = server.watch().cause() {
-                    return Err(BridgeError::ConnectionFailed(format!(
-                        "plugin-server exited before binding its socket ({cause})"
-                    )));
+                    return Err(BridgeError::ServerExited { cause });
                 }
                 if Instant::now() >= deadline {
                     return Err(e);
@@ -276,10 +274,11 @@ fn handshake(config: &BridgeConfig, server: &ProcessGuard) -> BridgeResult<Contr
     // not decode as one message of ours: say which binary is stale rather than
     // report a bare codec error.
     let ready = ipc::recv_within(&mut stream, timeout).map_err(|e| match e {
-        BridgeError::Serialization(why) => BridgeError::Serialization(format!(
-            "the plugin-server's handshake does not decode ({why}): a server from \
-             another build (protocol 26 or older?), rebuild the plugin-server"
-        )),
+        undecodable @ (BridgeError::Serialization(_) | BridgeError::TrailingBytes { .. }) => {
+            BridgeError::StaleServer {
+                cause: Box::new(undecodable),
+            }
+        }
         other => other,
     })?;
     match ready {
@@ -495,9 +494,7 @@ pub(crate) fn swap_slab(
     if bridge.setup_shared_memory(shm_name, layout) {
         Ok(Some(slab))
     } else {
-        Err(BridgeError::ConnectionFailed(
-            "the plugin-server did not take the new audio slab".into(),
-        ))
+        Err(BridgeError::SlabRefused)
     }
 }
 
@@ -751,7 +748,7 @@ mod tests {
         assert_eq!(LoadPhase::Restoring.window(&t), Duration::from_secs(20));
 
         let timed_out = || BridgeError::Timeout {
-            operation: "a reply".into(),
+            operation: "a reply",
             after: Duration::from_millis(1),
             partial: false,
         };
@@ -1131,10 +1128,10 @@ mod tests {
         bincode_ready.extend_from_slice(&26u32.to_le_bytes());
 
         match handshake_against(bincode_ready) {
-            BridgeError::Serialization(m) => {
-                assert!(m.contains("rebuild the plugin-server"), "{m}");
+            stale @ BridgeError::StaleServer { .. } => {
+                assert!(stale.to_string().contains("rebuild the plugin-server"));
             }
-            other => panic!("expected a Serialization error naming a rebuild, got: {other}"),
+            other => panic!("expected StaleServer, got: {other}"),
         }
     }
 
@@ -1208,7 +1205,7 @@ mod tests {
             .expect_err("a server that never binds cannot connect");
 
         assert!(
-            format!("{err}").contains("exited before binding"),
+            matches!(err, BridgeError::ServerExited { .. }),
             "the error must say the server died rather than blaming the socket, got: {err}"
         );
 
@@ -1244,7 +1241,7 @@ mod tests {
     /// - `Lingers` runs [`stand_in_lingers`] alone, with [`STAND_IN_ENV`] set so
     ///   it sleeps. If that name ever stops matching, the child exits at once
     ///   instead and `the_connect_waits_for_a_socket_that_is_not_bound_yet`
-    ///   fails with "exited before binding" — the drift cannot pass silently.
+    ///   fails with `ServerExited` — the drift cannot pass silently.
     fn spawn_stand_in(kind: StandIn) -> Child {
         let exe = std::env::current_exe().expect("the test binary's own path");
         let mut cmd = Command::new(exe);

@@ -64,7 +64,7 @@ pub enum PluginFailure {
     },
     /// The server broke the protocol: a message the host was not waiting for,
     /// or one that would not frame, encode or decode
-    /// ([`BridgeError::UnexpectedMessage`], `ProtocolError`, `Serialization`).
+    /// ([`BridgeError::UnexpectedMessage`], `ProtocolError`, `Serialization`, `FrameTooLarge`).
     Protocol {
         /// The violation.
         source: Arc<BridgeError>,
@@ -143,6 +143,10 @@ impl PluginFailure {
             },
             BridgeError::UnexpectedMessage { .. }
             | BridgeError::ProtocolError(_)
+            | BridgeError::AudioConnection { .. }
+            | BridgeError::FrameTooLarge(_)
+            | BridgeError::TrailingBytes { .. }
+            | BridgeError::StaleServer { .. }
             | BridgeError::Serialization(_) => Self::Protocol {
                 source: Arc::new(error),
             },
@@ -190,12 +194,12 @@ mod tests {
             Some(BridgeError::Io(e)) if e.to_string() == "boom"
         ));
         let late = PluginFailure::from_stream(BridgeError::Timeout {
-            operation: "x".into(),
+            operation: "x",
             after: std::time::Duration::from_millis(5),
             partial: false,
         });
         assert!(matches!(late, PluginFailure::TimedOut { .. }));
-        let proto = PluginFailure::from_stream(BridgeError::ProtocolError("bad".into()));
+        let proto = PluginFailure::from_stream(BridgeError::ProtocolError("bad"));
         assert!(matches!(proto, PluginFailure::Protocol { .. }));
         assert!(matches!(
             PluginFailure::from_stream(BridgeError::ServerNotFound),

@@ -152,7 +152,7 @@ mod tests {
         assert!(crashed.reason.contains("crashed"));
 
         let timed_out = probe_failure(BridgeError::Timeout {
-            operation: "probe".into(),
+            operation: "probe",
             after: std::time::Duration::from_secs(5),
             // Irrelevant to the blacklist verdict, which is what this asserts:
             // a probe that timed out is unusable either way.
@@ -180,7 +180,12 @@ mod tests {
         );
 
         // Environmental failures say nothing about the plugin — never hide it.
-        assert!(!probe_failure(BridgeError::IpcError("socket".into())).blacklistable());
+        assert!(
+            !probe_failure(BridgeError::ProbeResult(
+                tutti_plugin_types::ResultError::BadMagic
+            ))
+            .blacklistable()
+        );
         assert!(
             !probe_failure(BridgeError::ProtocolMismatch {
                 expected: 2,

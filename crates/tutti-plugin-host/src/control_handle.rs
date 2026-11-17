@@ -557,7 +557,7 @@ impl PluginHandle {
             Some(Ok(())) => Ok(()),
             Some(Err(PluginError::StateFailed(error))) => Err(error),
             Some(Err(other)) => Err(StateError::Rejected(other.to_string())),
-            None => Err(StateError::Rejected("the plugin is lost".into())),
+            None => Err(StateError::PluginCrashed),
         }
     }
 
