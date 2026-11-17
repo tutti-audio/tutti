@@ -923,8 +923,8 @@ struct Room {
 /// The writers a plan names, taps first: each is the one opened since the
 /// last commit (which wins over a carried one of the same id) or `None`,
 /// with the old index a carried one comes from.
-struct Outlets {
-    taps: Vec<Option<TapWriter>>,
+struct Outlets<F: Float> {
+    taps: Vec<Option<TapWriter<F>>>,
     taps_from: Vec<Option<u32>>,
     event_taps: Vec<Option<EventTapWriter>>,
     event_taps_from: Vec<Option<u32>>,
@@ -934,7 +934,7 @@ struct Outlets {
 
 /// Taps, event taps and meters, by id. A writer the plan does not name stays
 /// in the old state (or the commit) and is freed on the control side.
-fn outlets<F: Float>(c: &mut Commit<F>, cx: &Cx<'_>) -> Outlets {
+fn outlets<F: Float>(c: &mut Commit<F>, cx: &Cx<'_>) -> Outlets<F> {
     let plan = cx.plan;
     fn open<I: PartialEq, W>(opened: &mut Vec<(I, W)>, id: &I) -> Option<W> {
         let at = opened.iter().position(|(o, _)| o == id)?;

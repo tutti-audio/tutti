@@ -14,7 +14,7 @@ use tutti_graph::testing as common;
 use std::collections::{BTreeMap, BTreeSet};
 use tutti_types::MaxBlock;
 
-use common::{Kind, Pair, bits, input_signal};
+use common::{Kind, Pair, Word, bits, input_signal};
 use proptest::prelude::*;
 use tutti_graph::Topology;
 use tutti_graph::{Bus, BusRef, BusRole, BusSource, Buses, NodeKey, TapAlign, TapId, TapSpec};
@@ -511,9 +511,9 @@ fn modes(seed: u64) -> [usize; 2] {
     [1, common::workers_for(seed)]
 }
 
-fn run(pair: &mut Pair, blocks: &[usize], frame: &mut u64) {
+fn run<F: Word>(pair: &mut Pair<F>, blocks: &[usize], frame: &mut u64) {
     for &n in blocks {
-        let input = input_signal(*frame, n);
+        let input = input_signal::<F>(*frame, n);
         let (a, b) = pair.block(n, &input);
         assert_eq!(
             bits(&a),
@@ -535,6 +535,24 @@ proptest! {
             let desc = random_graph(seed);
             let valid = desc.spec.validate().expect("generated graphs are valid");
             let mut pair = Pair::with_workers(MAX_BLOCK, workers);
+            pair.switch(&valid, &desc.kinds);
+            let mut frame = 0;
+            run(&mut pair, &schedule(which, seed, 700), &mut frame);
+        }
+    }
+
+    /// The same at `f64`: `Executor<f64>` renders every random graph exactly
+    /// as `Reference<f64>` does, serial and parallel, at every block
+    /// schedule.
+    #[test]
+    fn the_f64_executor_is_bit_identical_to_the_f64_reference(seed in any::<u64>(), which in 0usize..5) {
+        for workers in modes(seed) {
+            let desc = random_graph(seed);
+            let valid = desc.spec.validate().expect("generated graphs are valid");
+            let mut pair = Pair::<f64>::with_format(MAX_BLOCK);
+            if workers > 1 {
+                pair.exec.set_pool(Some(common::test_pool(workers)));
+            }
             pair.switch(&valid, &desc.kinds);
             let mut frame = 0;
             run(&mut pair, &schedule(which, seed, 700), &mut frame);
