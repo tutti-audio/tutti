@@ -20,7 +20,7 @@ pub struct SosCoefficients<F: Lanes> {
 }
 
 impl<F: Float + Lanes> SosCoefficients<F> {
-    /// The section forms of `sos` ([`svf_form`](super::svf_form)) narrowed once to `F`, or
+    /// The section forms of `sos` ([`svf_form`]) narrowed once to `F`, or
     /// `None` for a cascade of more than [`MAX_SECTIONS`] sections.
     #[must_use]
     pub fn new(sos: &Sos) -> Option<Self> {
