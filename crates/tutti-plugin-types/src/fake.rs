@@ -18,11 +18,12 @@ use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, AtomicUsize,
 use tutti_rt::LockExt;
 
 use dpi::{PhysicalSize, Size};
+use tutti_plugin_ipc_ffi::FdId;
 use tutti_rt::RequestWord;
 
 use crate::{
     AudioBufferMut, ChannelLayout, ContentScale, Control, Controller, EditDrain, EditSink,
-    EditorError, EditorWindow, FdId, Layout, Loaded, LoadedPlugin, MainThreadMarker, Normalized,
+    EditorError, EditorWindow, Layout, Loaded, LoadedPlugin, MainThreadMarker, Normalized,
     ParamEdit, ParamFlags, ParamId, ParameterInfo, PluginBus, PluginDescriptor, PluginError,
     PluginIo, PluginResult, PluginTail, Prepare, Processor, Refused, RenderMode, RenderModeSupport,
     Request, RescanScope, RestartRules, SampleRate, Samples, Stuck, TimerId, WindowHandle, edits,

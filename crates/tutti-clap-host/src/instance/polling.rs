@@ -9,7 +9,8 @@ use crate::types::{ContentScale, EditorCapabilities, WindowHandle};
 use dpi::Size;
 use std::sync::Arc;
 use tutti_clap_ffi::GuiError;
-use tutti_plugin_types::{FdId, Interest, MainThreadMarker, Ready, Wakeups};
+use tutti_plugin_ipc_ffi::{FdId, Interest, Ready};
+use tutti_plugin_types::{MainThreadMarker, Wakeups};
 
 fn gui_error(error: GuiError) -> ClapError {
     ClapError::EditorError(error.to_string())

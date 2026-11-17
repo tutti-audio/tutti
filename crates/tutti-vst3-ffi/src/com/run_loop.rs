@@ -38,7 +38,8 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tutti_plugin_types::{FdId, Interest, MainThreadMarker, Ready, Wakeups};
+use tutti_plugin_ipc_ffi::{FdId, Interest, Ready};
+use tutti_plugin_types::{MainThreadMarker, Wakeups};
 use tutti_rt::LockExt;
 
 use vst3::ComRef;
@@ -209,20 +210,8 @@ impl RunLoop {
     pub(crate) fn run_iteration(&self, main: MainThreadMarker) {
         let mut wakeups = Wakeups::new();
         self.describe(&mut wakeups);
-        let asked: Vec<(i32, u8)> = wakeups
-            .watches()
-            .iter()
-            .map(|w| (w.fd.0, w.interest.bits()))
-            .collect();
-        let mut got = Vec::new();
-        tutti_plugin_ipc_ffi::poll_now(&asked, &mut got);
-        let ready: Vec<Ready> = got
-            .into_iter()
-            .map(|(fd, bits)| Ready {
-                fd: FdId(fd),
-                events: Interest::from_bits(bits),
-            })
-            .collect();
+        let mut ready = Vec::new();
+        tutti_plugin_ipc_ffi::poll_now(wakeups.watches(), &mut ready);
         self.dispatch(main, &ready, Instant::now());
     }
 

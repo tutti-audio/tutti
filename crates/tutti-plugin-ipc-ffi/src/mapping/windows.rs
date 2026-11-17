@@ -53,15 +53,19 @@ pub(super) fn open_file(name: &str, size: usize, mode: Open) -> Result<(File, Ba
     }
     let file = opts
         .open(path(name))
-        .map_err(|e| SlabError::File(format!("failed to open shared memory file: {e}")))?;
+        .map_err(|source| SlabError::File { op: "open", source })?;
     let backing = Backing {
-        _file: file
-            .try_clone()
-            .map_err(|e| SlabError::File(format!("failed to duplicate the file handle: {e}")))?,
+        _file: file.try_clone().map_err(|source| SlabError::File {
+            op: "duplicate the handle of",
+            source,
+        })?,
     };
     if matches!(mode, Open::Create) {
         file.set_len(size as u64)
-            .map_err(|e| SlabError::File(format!("failed to set file size: {e}")))?;
+            .map_err(|source| SlabError::File {
+                op: "set the size of",
+                source,
+            })?;
     }
     Ok((file, backing))
 }

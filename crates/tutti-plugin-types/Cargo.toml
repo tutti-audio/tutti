@@ -48,6 +48,8 @@ tutti-types = { version = "0.0.1", path = "../tutti-types" }
 tutti-graph = { version = "0.0.1", path = "../tutti-graph" }
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
+# `FdId`, `Interest`, `Watch` and `Ready`: the typed values of a wait on a plugin's descriptors.
+tutti-plugin-ipc-ffi = { version = "0.0.1", path = "../tutti-plugin-ipc-ffi" }
 serde = { version = "1", features = ["derive"], optional = true }
 raw-window-handle = "0.6"
 # The result file's payload encoding, with `probe-wire`.

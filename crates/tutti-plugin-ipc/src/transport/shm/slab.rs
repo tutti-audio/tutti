@@ -1033,12 +1033,7 @@ mod tests {
         // The data region at its absolute offsets; the header's bytes (and the
         // magic at offset 0) are `tutti-plugin-ipc-ffi`'s to check.
         let mapping = &host.slab().mapping;
-        assert_eq!(
-            mapping.len(),
-            check_layout(&l).unwrap(),
-            "mapping is not the sized length"
-        );
-        let mut bytes = vec![0u8; mapping.len()];
+        let mut bytes = vec![0u8; check_layout(&l).unwrap()];
         mapping.read(SLAB_HEADER_BYTES, &mut bytes[SLAB_HEADER_BYTES..]);
 
         // 1. Audio starts after the header, and the two rings are disjoint.

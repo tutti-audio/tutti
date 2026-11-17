@@ -11,6 +11,7 @@ use proptest::prelude::*;
 
 use super::*;
 use crate::{ChannelLayout, PluginBus};
+use tutti_plugin_ipc_ffi::FdId;
 
 // ---------------------------------------------------------------- vocabulary
 

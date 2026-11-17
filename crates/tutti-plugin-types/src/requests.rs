@@ -341,7 +341,7 @@ mod tests {
             assert!(request.raise(&word), "raising twice is one request");
         }
         assert!(!Request::Timer(crate::TimerId(1)).raise(&word));
-        assert!(!Request::Fd(crate::FdId(3)).raise(&word));
+        assert!(!Request::Fd(tutti_plugin_ipc_ffi::FdId(3)).raise(&word));
         let got: Vec<_> = taken(&word).collect();
         let want: Vec<_> = WORD_REQUESTS.iter().map(|&(_, r)| r).collect();
         assert_eq!(got, want);

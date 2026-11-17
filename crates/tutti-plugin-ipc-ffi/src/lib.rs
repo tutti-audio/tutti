@@ -13,35 +13,48 @@
 //! - **The wait for a child's end** ([`ExitWait`]): the host's wait for a server
 //!   process to end, which the OS wakes (a pidfd on Linux, a kqueue on macOS, the
 //!   process handle on Windows).
-//! - **The OS calls** (`wait_readable` and `Poller` (the server's wait on its
+//! - **The OS calls** (`wait_readable` and `poll_wait` (the server's wait on its
 //!   socket and the descriptors a plugin asked to have watched, and an
 //!   in-process host's zero-timeout look at the same) on unix, `process_exists`,
 //!   and `parent_process_id`, `terminate_process` and `pipe_bytes_available` on
 //!   Windows): the server's wait for its host, its check that the host still
 //!   runs and its end without detach, and the host's peek at a named pipe.
 //!
+//! - **The vocabulary of a wait on descriptors** ([`FdId`], [`Interest`],
+//!   [`Watch`], [`Ready`]): the typed values `poll_wait` and `poll_now` take and
+//!   return, on every platform.
+//!
 //! It names no tutti crate.
 
 mod exit;
 mod header;
 mod mapping;
+#[cfg(unix)]
+#[path = "os/unix.rs"]
 mod os;
+#[cfg(windows)]
+#[path = "os/windows.rs"]
+mod os;
+mod wakeups;
 
 pub use exit::ExitWait;
 pub use header::{Direction, RING_SLOTS, SLAB_HEADER_BYTES, SlabHeader, slot_for};
 pub use mapping::{MappingWriter, SharedMapping};
-pub use os::process_exists;
-#[cfg(unix)]
-pub use os::{ERROR, Poller, READ, WRITE, poll_now, wait_readable};
-#[cfg(windows)]
-pub use os::{parent_process_id, pipe_bytes_available, terminate_process};
+pub use os::*;
+pub use wakeups::{FdId, Interest, Ready, Watch};
 
 /// Why a slab could not be made, opened or trusted.
 #[derive(Debug, thiserror::Error)]
 pub enum SlabError {
     /// The backing file could not be created, opened, sized or mapped.
-    #[error("{0}")]
-    File(String),
+    #[error("failed to {op} the shared memory file: {source}")]
+    File {
+        /// What was being done to the file, as a verb phrase.
+        op: &'static str,
+        /// The OS error.
+        #[source]
+        source: std::io::Error,
+    },
     /// The peer's slab is shorter than the layout this side expects.
     #[error("slab is {actual} bytes, layout needs {expected}")]
     Short {
@@ -50,8 +63,28 @@ pub enum SlabError {
         /// The length the layout needs.
         expected: usize,
     },
-    /// The mapping is not a tutti slab of this build's header version and ring
-    /// depth.
-    #[error("{0}")]
-    Header(String),
+    /// The mapping does not begin with the tutti slab magic: it is not a slab.
+    #[error("not a tutti audio slab: magic {found:#x}, expected {expected:#x}")]
+    BadMagic {
+        /// The magic the mapping holds.
+        found: u64,
+        /// The magic of a tutti slab.
+        expected: u64,
+    },
+    /// The slab's header is of another version than this build speaks.
+    #[error("slab header version {found}, this build speaks {expected}")]
+    BadVersion {
+        /// The version the mapping holds.
+        found: u32,
+        /// The version this build speaks.
+        expected: u32,
+    },
+    /// The slab's ring has another depth than this build's.
+    #[error("slab has {found} ring slots, this build expects {expected}")]
+    BadSlots {
+        /// The slot count the mapping holds.
+        found: u32,
+        /// The slot count of this build.
+        expected: usize,
+    },
 }

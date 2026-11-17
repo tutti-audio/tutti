@@ -9,7 +9,8 @@
 
 use std::time::Instant;
 
-use tutti_plugin_types::{EditorWindow, MainThreadMarker, Ready, Wakeups};
+use tutti_plugin_ipc_ffi::Ready;
+use tutti_plugin_types::{EditorWindow, MainThreadMarker, Wakeups};
 
 #[cfg(unix)]
 #[path = "wakeups/unix.rs"]
@@ -55,7 +56,7 @@ mod tests {
     mod unix {
         use super::*;
         use std::time::Duration;
-        use tutti_plugin_types::{FdId, Interest};
+        use tutti_plugin_ipc_ffi::{FdId, Interest};
 
         /// A plugin that asks for one descriptor and a timer, and records what it
         /// is woken with.
@@ -138,15 +139,6 @@ mod tests {
             service_now(&mut plugin, main);
             assert_eq!(plugin.woken.len(), 2, "a due timer wakes it too");
             assert!(plugin.woken[1].0.is_empty());
-        }
-
-        /// **The shared interest bits are the OS layer's**, so a host hands
-        /// them across as they are.
-        #[test]
-        fn the_interest_bits_are_the_os_layers() {
-            assert_eq!(Interest::READ.bits(), tutti_plugin_ipc_ffi::READ);
-            assert_eq!(Interest::WRITE.bits(), tutti_plugin_ipc_ffi::WRITE);
-            assert_eq!(Interest::ERROR.bits(), tutti_plugin_ipc_ffi::ERROR);
         }
     }
 }
