@@ -249,3 +249,208 @@ fn the_parallel_losses_are_the_serial_ones() {
         assert_eq!(sorted(parallel), sorted(serial.clone()), "{workers}");
     }
 }
+
+/// Records the frame of every event its event inputs are sent, block by
+/// block, declaring an input bound of `bound` events per block (all ports
+/// together).
+struct Recorder {
+    bound: Option<u32>,
+    blocks: Arc<Mutex<Vec<Vec<u32>>>>,
+}
+
+impl Node for Recorder {
+    fn shape(&self) -> Shape {
+        let shape = Shape::EMPTY.with_events(1, 0);
+        match self.bound {
+            Some(n) => shape.with_event_input_capacity(n),
+            None => shape,
+        }
+    }
+    fn prepare(&mut self, _: &Prepare) {}
+    fn process(&mut self, _: &Cx<'_>, io: Io<'_>) -> Status {
+        let frames = io.events(0).iter().map(|e| e.offset.index() as u32);
+        self.blocks.lock().unwrap().push(frames.collect());
+        Status::Silent
+    }
+    fn reset(&mut self) {}
+}
+
+/// A bounded-input rig: a [`Recorder`] (key 100) bounded to `bound`, and a
+/// writer (key `1 + i`) of `ons[i]` note-ons per block on frames
+/// `0..ons[i]` for each `i`, all into its port 0.
+struct Bounded {
+    ed: Editor,
+    exec: Executor,
+    blocks: Arc<Mutex<Vec<Vec<u32>>>>,
+    writers: u64,
+}
+
+impl Bounded {
+    fn new(workers: usize, bound: Option<u32>, ons: &[u32]) -> Self {
+        let prep = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(BLOCK)));
+        let (mut ed, mut exec) = Editor::new(prep);
+        if workers > 1 {
+            exec.set_pool(Some(test_pool(workers)));
+        }
+        let blocks = Arc::default();
+        ed.insert(
+            NodeKey(100),
+            "recorder",
+            tutti_graph::Unforkable(Recorder {
+                bound,
+                blocks: Arc::clone(&blocks),
+            }),
+        );
+        let mut rig = Self {
+            ed,
+            exec,
+            blocks,
+            writers: 0,
+        };
+        for &n in ons {
+            rig.wire(n);
+        }
+        rig.commit();
+        rig
+    }
+
+    /// A new writer of `ons` note-ons into the recorder, not yet committed.
+    fn wire(&mut self, ons: u32) {
+        self.writers += 1;
+        let key = NodeKey(self.writers);
+        self.ed.insert(
+            key,
+            "writer",
+            tutti_graph::Unforkable(Writer {
+                cap: 64,
+                scripts: vec![Script { ons, offs: 0 }],
+            }),
+        );
+        let input = self.input();
+        self.ed
+            .spec_mut()
+            .connect_events(input, EventEdge::Direct(EventOut { node: key, port: 0 }));
+    }
+
+    fn input(&self) -> EventIn {
+        EventIn {
+            node: NodeKey(100),
+            port: 0,
+        }
+    }
+
+    fn commit(&mut self) {
+        self.ed.commit().expect("commits");
+        self.exec.apply_pending();
+        self.ed.collect();
+    }
+
+    /// The frames the recorder was sent in each of `n` more blocks.
+    fn run(&mut self, n: usize) -> Vec<Vec<u32>> {
+        self.blocks.lock().unwrap().clear();
+        for _ in 0..n {
+            self.exec
+                .process(BLOCK, &TransportPosition::default(), &[], &mut []);
+        }
+        self.blocks.lock().unwrap().clone()
+    }
+}
+
+/// Two writers send 6 and 5 note-ons a block on frames `0..6` and `0..5`,
+/// 11 events past a bound of 8. The merge orders by frame, ties to the lower
+/// source: frames 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5. The node is sent the first
+/// 8 of them, and the 3 past them are counted once each block, the same on the
+/// serial executor and on every worker count.
+#[test]
+fn a_declared_input_bound_keeps_the_earliest_and_counts_the_rest() {
+    for workers in std::iter::once(1).chain(common::WORKERS) {
+        let mut rig = Bounded::new(workers, Some(8), &[6, 5]);
+        let got = rig.run(2);
+        assert_eq!(got, vec![vec![0, 0, 1, 1, 2, 2, 3, 3]; 2], "{workers}");
+        assert_eq!(rig.exec.dropped_event_count(), 6, "{workers}");
+        assert_eq!(rig.exec.lost_event_count(), 6, "{workers}");
+    }
+}
+
+/// Events within the bound are all delivered and nothing is counted: the same
+/// 11 events under a bound of 11.
+#[test]
+fn events_within_the_input_bound_are_all_delivered() {
+    let mut rig = Bounded::new(1, Some(11), &[6, 5]);
+    let got = rig.run(2);
+    assert_eq!(got, vec![vec![0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5]; 2]);
+    assert_eq!(rig.exec.dropped_event_count(), 0);
+}
+
+/// A bound holds a node whose input has a single writer: 9 events past a
+/// bound of 4 deliver frames 0..4 and count 5.
+#[test]
+fn a_declared_input_bound_holds_a_single_writer() {
+    let mut rig = Bounded::new(1, Some(4), &[9]);
+    assert_eq!(rig.run(1), vec![vec![0, 1, 2, 3]]);
+    assert_eq!(rig.exec.dropped_event_count(), 5);
+}
+
+/// The bound is the node's, not the edges': a writer wired in by a commit,
+/// with no re-prepare of the node, is held to it. One writer of 5 is within 8;
+/// a second (5 more) is cut to 8 and counts 2; a third (5 more) counts 7.
+#[test]
+fn an_input_bound_holds_when_a_writer_is_wired_in_without_a_reprepare() {
+    for workers in std::iter::once(1).chain(common::WORKERS) {
+        let mut rig = Bounded::new(workers, Some(8), &[5]);
+        assert_eq!(rig.run(1), vec![vec![0, 1, 2, 3, 4]], "{workers}");
+        assert_eq!(rig.exec.dropped_event_count(), 0);
+        rig.wire(5);
+        rig.commit();
+        assert_eq!(rig.run(1), vec![vec![0, 0, 1, 1, 2, 2, 3, 3]], "{workers}");
+        assert_eq!(rig.exec.dropped_event_count(), 2, "{workers}");
+        rig.wire(5);
+        rig.commit();
+        assert_eq!(rig.run(1), vec![vec![0, 0, 0, 1, 1, 1, 2, 2]], "{workers}");
+        assert_eq!(rig.exec.dropped_event_count(), 2 + 7, "{workers}");
+    }
+}
+
+/// A node declaring no input bound is sent everything its edges send, and its
+/// merge slot is sized from the writers (the existing sizing, pinned by
+/// `declared_capacities_size_merges_and_delays_so_nothing_is_lost`): 11
+/// events with no bound all arrive.
+#[test]
+fn an_undeclared_input_is_not_bounded() {
+    let mut rig = Bounded::new(1, None, &[6, 5]);
+    assert_eq!(rig.run(1), vec![vec![0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5]]);
+    assert_eq!(rig.exec.dropped_event_count(), 0);
+}
+
+/// The compiled merge slot holds `min(bound, what the writers can send)`,
+/// sized on the control side: two writers of declared capacity 64 hold
+/// `2 × note_off_room(64)` events, and a bound of 8 holds 8 and a bound
+/// above that, the sum.
+#[test]
+fn the_merge_slot_is_sized_to_the_smaller_of_the_bound_and_the_writers() {
+    let sized = |bound: u32| {
+        let rig = Bounded::new(1, Some(bound), &[1, 1]);
+        let plan = rig.exec.plan().expect("applied");
+        plan.ops()
+            .iter()
+            .filter_map(|op| match *op {
+                tutti_graph::Op::EventMerge { dst, bound, .. } => {
+                    Some((plan.event_slot_capacity()[dst as usize], bound))
+                }
+                _ => None,
+            })
+            .next()
+            .expect("a merge")
+    };
+    let sum = 2 * note_off_room(64) as u32;
+    let (cap, bound) = sized(8);
+    assert_eq!(
+        (cap.declared, cap.defaults, bound.map(|n| n.get())),
+        (8, 0, Some(8))
+    );
+    let (cap, bound) = sized(10_000);
+    assert_eq!(
+        (cap.declared, cap.defaults, bound.map(|n| n.get())),
+        (sum, 0, Some(10_000))
+    );
+}

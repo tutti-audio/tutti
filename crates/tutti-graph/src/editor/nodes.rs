@@ -163,6 +163,7 @@ impl<F: Float> Editor<F> {
             // a replace waiting behind a running fade runs the old unit under
             // the new plan: both must fit the same buffers.
             && shape.event_capacity == running.event_capacity
+            && shape.event_input_capacity == running.event_input_capacity
             // The key's param state (per declared param) runs on across a
             // fade, so both units must declare the same params.
             && shape.params == running.params;

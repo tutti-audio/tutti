@@ -104,6 +104,30 @@ pub struct Shape {
     /// told `Full` at the push, can still choose what matters (a note-off
     /// before a controller move) for the room it has left.
     pub event_capacity: Option<NonZeroU32>,
+    /// The most events per block this node accepts on its event inputs,
+    /// **all of them together**: the size a host may allocate for what it is
+    /// sent. `None` is unbounded: each input is sized from the edges into it.
+    /// Set it with [`with_event_input_capacity`](Self::with_event_input_capacity).
+    ///
+    /// # Overflow: drop the latest, and count it
+    ///
+    /// An input's events are the merge of its edges, ordered by frame and then
+    /// by source. When a block's merge holds more than the bound, the merged
+    /// input keeps the earliest by frame (a note-off is kept ahead of any other
+    /// event while the bound has room, so an end is never what is cut), and the
+    /// executor counts the rest as it counts a full output port
+    /// ([`Executor::dropped_event_count`](crate::Executor::dropped_event_count)).
+    /// The cut falls on the same events on the serial and the parallel
+    /// executor. The merge slot is sized `min(bound, what its edges can send)`
+    /// on the control side, so nothing allocates on the audio thread however
+    /// the edges change at a commit.
+    ///
+    /// The bound covers events from edges. Flushed events and scheduled
+    /// commands landing on the node are further sources with their own room
+    /// and counts. A node that computes its bound from the block reads it in
+    /// [`Node::prepare`] ([`EventDensity`](crate::EventDensity)), as an
+    /// output's capacity is.
+    pub event_input_capacity: Option<NonZeroU32>,
     /// **Processing latency only** — frames the node buffers as a side effect
     /// (lookahead, FFT block, plugin pipeline). Never a musical delay: a
     /// 500 ms echo has latency zero, or PDC drags every parallel path 500 ms
@@ -300,6 +324,7 @@ impl Shape {
             event_in: 0,
             event_out: 0,
             event_capacity: None,
+            event_input_capacity: None,
             latency: Latency::ZERO,
             tail: Tail::None,
             in_place: false,
@@ -534,6 +559,31 @@ impl Shape {
         match NonZeroU32::new(per_block) {
             Some(n) => self.event_capacity = Some(n),
             None => panic!("an event capacity of zero: the port could hold no event"),
+        }
+        self
+    }
+
+    /// This shape, accepting at most `per_block` events per block on its event
+    /// inputs together (see [`event_input_capacity`](Self::event_input_capacity)
+    /// for what that bounds, and what happens past it).
+    ///
+    /// ```
+    /// use tutti_graph::Shape;
+    /// let sink = Shape::EMPTY
+    ///     .with_events(2, 0)
+    ///     .with_event_input_capacity(64);
+    /// assert_eq!(sink.event_input_capacity.map(|n| n.get()), Some(64));
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// If `per_block` is zero: an input that can take no event is not an
+    /// event input. (In a `const` context, at compile time.)
+    #[must_use]
+    pub const fn with_event_input_capacity(mut self, per_block: u32) -> Self {
+        match NonZeroU32::new(per_block) {
+            Some(n) => self.event_input_capacity = Some(n),
+            None => panic!("an event input capacity of zero: the input could take no event"),
         }
         self
     }

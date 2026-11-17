@@ -1386,6 +1386,9 @@ impl<F: Float> Reference<F> {
             for e in &mut all {
                 e.offset = e.offset.clamp_to(frames);
             }
+            // What the edges send, in merge order: bounded by the node's
+            // declared input capacity before the other sources join it.
+            let mut edges: Vec<Event> = Vec::new();
             // Source order is `(NodeKey, port)` of the source, whatever order
             // the spec lists them in: re-keyed by source here, where the
             // compiler sorts its list.
@@ -1399,8 +1402,8 @@ impl<F: Float> Reference<F> {
                     EventEdge::Direct(from) => {
                         let src = events[&from].clone();
                         match self.event_lines.get_mut(&DelayKey::Event { at, from }) {
-                            Some(f) => all.extend(fifo_run(f, &src, frames)),
-                            None => all.extend(src),
+                            Some(f) => edges.extend(fifo_run(f, &src, frames)),
+                            None => edges.extend(src),
                         }
                     }
                     EventEdge::Feedback { from, delay } => {
@@ -1408,10 +1411,15 @@ impl<F: Float> Reference<F> {
                             .fb_event
                             .get_mut(&(at, from, graph.generation(from.node), delay))
                             .expect("built by set_graph");
-                        all.extend(fifo_due(f, frames));
+                        edges.extend(fifo_due(f, frames));
                     }
                 }
             }
+            edges.sort_by_key(|e| e.offset);
+            if let Some(n) = shape.event_input_capacity {
+                self.dropped += bound_events(&mut edges, n.get() as usize);
+            }
+            all.extend(edges);
             // Stable: equal offsets keep source order.
             // Scheduled commands: one more source, after the edges.
             // Ties at one offset: by timeline position, then scheduling
@@ -2706,6 +2714,32 @@ fn fifo_due(f: &mut RefFifo, frames: usize) -> Vec<Event> {
             ..e
         })
         .collect()
+}
+
+/// Cuts `events` (in merge order) to `cap`, dropping the latest: every
+/// note-off is kept ahead of any other event while there is room, as the
+/// executor's merge does. Returns how many it dropped.
+fn bound_events(events: &mut Vec<Event>, cap: usize) -> u64 {
+    if events.len() <= cap {
+        return 0;
+    }
+    let before = events.len();
+    let offs = events.iter().filter(|e| e.is_note_off()).count();
+    let mut others = cap.saturating_sub(offs);
+    let mut kept = 0usize;
+    events.retain(|e| {
+        let keep = if e.is_note_off() {
+            kept < cap
+        } else if kept < cap && others > 0 {
+            others -= 1;
+            true
+        } else {
+            false
+        };
+        kept += usize::from(keep);
+        keep
+    });
+    (before - events.len()) as u64
 }
 
 fn fifo_run(f: &mut RefFifo, input: &[Event], frames: usize) -> Vec<Event> {

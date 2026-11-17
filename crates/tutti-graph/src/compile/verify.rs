@@ -104,7 +104,7 @@ fn accesses(plan: &Plan, op: &Op) -> Vec<Access> {
             )
             .collect(),
         Op::EventDelay { src, dst, .. } => vec![e(src, false), e(dst, true)],
-        Op::EventMerge { srcs, dst } => plan.event_list[srcs.range()]
+        Op::EventMerge { srcs, dst, .. } => plan.event_list[srcs.range()]
             .iter()
             .map(|&s| e(s, false))
             .chain([e(dst, true)])
@@ -904,12 +904,12 @@ fn verify_tables(plan: &Plan) -> Result<(), VerifyError> {
                 };
                 plan.event_tap_fifo(from, d.len, block)
             }
-            Op::EventMerge { srcs, .. } => {
+            Op::EventMerge { srcs, bound, .. } => {
                 let mut need = EventSlotCapacity::NONE;
                 for &s in &plan.event_list[srcs.range()] {
                     need = need.plus(read_need(s, &op_need)?);
                 }
-                need
+                need.bounded(bound)
             }
             _ => EventSlotCapacity::NONE,
         };
@@ -991,6 +991,7 @@ pub fn verify_fades(prev: Option<&Plan>, plan: &Plan, delta: &Delta) -> Result<(
             && was.in_place == now.in_place
             && was.event_resolution == now.event_resolution
             && was.event_capacity == now.event_capacity
+            && was.event_input_capacity == now.event_input_capacity
             && was.params == now.params;
         if !same {
             return Err(VerifyError(format!(

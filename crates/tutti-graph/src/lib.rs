@@ -477,9 +477,17 @@
 //!   except a note-off, which has room past the capacity
 //!   ([`note_off_room`]); the executor counts each refusal
 //!   ([`Executor::dropped_event_count`]), and per port
-//!   ([`Editor::take_event_losses`]). Nothing downstream of a writer ever
-//!   drops one. A source whose rate is per second sizes its declaration from
-//!   the block it is prepared for ([`EventDensity`]).
+//!   ([`Editor::take_event_losses`]). Nothing downstream of a writer drops
+//!   one, unless the receiving node bounds its inputs. A source whose rate is
+//!   per second sizes its declaration from the block it is prepared for
+//!   ([`EventDensity`]).
+//! - A node that sizes a buffer for what it is sent declares the most events
+//!   per block its event inputs accept together
+//!   ([`Shape::event_input_capacity`]; `None` is unbounded, each input sized
+//!   from its edges). Past it the merged input keeps the earliest events by
+//!   frame (note-offs first) and the executor counts the rest as it counts a
+//!   refused write ([`Executor::dropped_event_count`]). The bound holds
+//!   however the edges change at a commit.
 //! - [`Editor::schedule`] delivers an event on an exact frame or beat
 //!   ([`At`](tutti_types::At)). A late command lands at the start of the next
 //!   block and is counted ([`Executor::late_command_count`]), never dropped.

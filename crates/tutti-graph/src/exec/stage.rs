@@ -1092,7 +1092,7 @@ fn widen(cx: &Cx<'_>, ring_extra: &[usize], efb_extra: &[usize]) -> Vec<usize> {
                 let e = &mut extra[dst as usize];
                 *e = (*e).max(ring_extra[delay as usize]);
             }
-            Op::EventMerge { srcs, dst } => {
+            Op::EventMerge { srcs, dst, .. } => {
                 let sum = plan.event_list[srcs.range()]
                     .iter()
                     .map(|&s| extra[s as usize])

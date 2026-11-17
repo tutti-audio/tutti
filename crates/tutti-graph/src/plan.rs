@@ -323,6 +323,21 @@ impl EventSlotCapacity {
         })
     }
 
+    /// This slot's room under an input bound: a slot that cannot hold more
+    /// than `bound` stays as it is; any other holds `bound`. (A slot that
+    /// may hold ports that declared nothing is priced at the executor's
+    /// default, which the compiler does not know, so it holds `bound`.)
+    #[must_use]
+    pub(crate) fn bounded(self, bound: Option<NonZeroU32>) -> Self {
+        match bound {
+            Some(n) if self.defaults != 0 || self.declared > n.get() => Self {
+                declared: n.get(),
+                defaults: 0,
+            },
+            _ => self,
+        }
+    }
+
     /// Room for both: a merge of the two.
     #[must_use]
     pub const fn plus(self, other: Self) -> Self {
@@ -456,6 +471,9 @@ pub enum Op {
         srcs: Span,
         /// Event slot written.
         dst: u32,
+        /// The node's [`Shape::event_input_capacity`] when `dst` is its
+        /// input: the merge keeps at most this many events.
+        bound: Option<NonZeroU32>,
     },
     /// Run a unit.
     Node {
@@ -1205,6 +1223,15 @@ impl Plan {
         self.unit(port.node)
             .filter(|u| port.port < u.shape.event_out)
             .and_then(|u| u.shape.event_capacity)
+    }
+
+    /// What the node of event input `port` declared it accepts per block
+    /// ([`Shape::event_input_capacity`]): `None` for unbounded, or for an input
+    /// this plan does not have.
+    pub fn event_input_capacity(&self, port: EventIn) -> Option<NonZeroU32> {
+        self.unit(port.node)
+            .filter(|u| port.port < u.shape.event_in)
+            .and_then(|u| u.shape.event_input_capacity)
     }
 
     /// The declared capacity of each output port that writes what an event

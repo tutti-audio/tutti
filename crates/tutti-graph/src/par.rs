@@ -551,11 +551,11 @@ impl<F: Float> Shared<'_, '_, F> {
                 let lost = event_delay_op(event_ring(&mut ring), &mut e, src, dst, frames);
                 dropped.charge_delay(self.plan, delay, lost);
             }
-            Op::EventMerge { srcs, dst } => {
+            Op::EventMerge { srcs, dst, bound } => {
                 let mut e = EventsView {
                     view: self.events.view(held_events),
                 };
-                let lost = event_merge_op(&self.plan.event_list[srcs.range()], dst, &mut e);
+                let lost = event_merge_op(&self.plan.event_list[srcs.range()], dst, bound, &mut e);
                 dropped.count(lost);
             }
             Op::Node { unit, .. } => {
