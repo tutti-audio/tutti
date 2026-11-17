@@ -58,6 +58,7 @@ use tutti_engine::BlockDates;
 pub struct SessionBuilder<C: Clock = Offline> {
     opts: Options,
     config: C::Config,
+    dates: C::Dates,
 }
 
 impl<C: Clock> std::fmt::Debug for SessionBuilder<C> {
@@ -65,6 +66,7 @@ impl<C: Clock> std::fmt::Debug for SessionBuilder<C> {
         f.debug_struct("SessionBuilder")
             .field("opts", &self.opts)
             .field("config", &self.config)
+            .field("dates", &self.dates)
             .finish()
     }
 }
@@ -99,10 +101,6 @@ struct Options {
     /// ([`device_topology`](SessionBuilder::device_topology)).
     device_topology: Option<ChannelTopology>,
     render_workers: Workers,
-    /// What dates an offline session's blocks
-    /// ([`block_dates`](SessionBuilder::block_dates)); every other clock
-    /// dates by the OS.
-    block_dates: BlockDates,
     /// The platform host the output and every input the session opens use.
     #[cfg(feature = "device")]
     host: tutti_cpal::AudioHost,
@@ -152,7 +150,6 @@ impl Default for Options {
             root: None,
             device_topology: None,
             render_workers: Workers::SERIAL,
-            block_dates: BlockDates::Os,
             #[cfg(feature = "device")]
             host: tutti_cpal::AudioHost::Default,
             #[cfg(all(feature = "device", feature = "audio-io"))]
@@ -258,6 +255,7 @@ impl Default for SessionBuilder<Offline> {
         Self {
             opts: Options::default(),
             config: BlockConfig::default(),
+            dates: BlockDates::Os,
         }
     }
 }
@@ -294,11 +292,12 @@ impl SessionBuilder<Offline> {
     /// Dates each block the host renders by `dates` ([`BlockDates`]), where the
     /// default, [`BlockDates::Os`], reads the OS clock. An offline render dated
     /// by [`BlockDates::Frames`] is the same on every run, whatever the host's
-    /// wall clock does. A [`system_clock`](Self::system_clock) or
-    /// `device` session always dates by the OS.
+    /// wall clock does. The dates belong to the offline builder:
+    /// [`system_clock`](Self::system_clock) and `device` sessions are timed by
+    /// the OS and take none.
     #[must_use]
     pub fn block_dates(mut self, dates: BlockDates) -> Self {
-        self.opts.block_dates = dates;
+        self.dates = dates;
         self
     }
 
@@ -306,11 +305,11 @@ impl SessionBuilder<Offline> {
     /// app that plays MIDI. The rate, the width and the block carry over, and
     /// every other option with them.
     #[must_use]
-    pub fn system_clock(mut self) -> SessionBuilder<SystemClock> {
-        self.opts.block_dates = BlockDates::Os;
+    pub fn system_clock(self) -> SessionBuilder<SystemClock> {
         SessionBuilder {
             opts: self.opts,
             config: self.config,
+            dates: (),
         }
     }
 
@@ -334,6 +333,7 @@ impl SessionBuilder<Offline> {
         SessionBuilder {
             opts: self.opts,
             config: device,
+            dates: (),
         }
     }
 
@@ -363,7 +363,7 @@ impl SessionBuilder<Offline> {
             &parts.transport,
             layout,
             self.opts.device_topology.clone(),
-            self.opts.block_dates,
+            self.dates,
         )?;
         Self::clock_midi(&parts, &engine);
         self.declare(&mut parts.graph)?;

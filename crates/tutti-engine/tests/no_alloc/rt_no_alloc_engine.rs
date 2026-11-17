@@ -95,7 +95,8 @@ fn graph_engine_with_timed_transport_is_allocation_free() {
         })
     }));
     ed.commit().expect("commits");
-    let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
+    let engine = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
+        .expect("within the limits");
 
     let mut output = vec![0.0f32; 1024 * 2];
     // Applying the commit allocates; that is the control side's price and
@@ -182,7 +183,8 @@ fn a_published_tempo_map_is_taken_without_allocating() {
         })
     }));
     ed.commit().expect("commits");
-    let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
+    let engine = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
+        .expect("within the limits");
     let mut output = vec![0.0f32; 1024 * 2];
     engine.process(&mut InterleavedMut::new(&mut output, ChannelLayout::STEREO).unwrap());
     for round in 0..20u32 {
@@ -250,7 +252,8 @@ fn a_step_map_is_followed_without_allocating() {
         })
     }));
     ed.commit().expect("commits");
-    let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
+    let engine = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
+        .expect("within the limits");
     transport.settings().set_tempo_map(dense(90.0));
     transport
         .motion()
@@ -315,7 +318,8 @@ fn a_step_map_is_followed_without_allocating() {
         })
     }));
     ed.commit().expect("commits");
-    let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
+    let engine = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
+        .expect("within the limits");
     transport
         .settings()
         .set_tempo_map(ramp(60.0, Transition::RampTime));
@@ -386,7 +390,8 @@ fn the_heard_tap_is_allocation_free() {
         })
     }));
     ed.commit().expect("commits");
-    let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
+    let engine = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
+        .expect("within the limits");
     let _ = transport.motion().try_send(MotionEvent::Play);
     let taps = engine.heard_taps();
     let mut output = vec![0.0f32; 1024 * 2];
@@ -494,7 +499,8 @@ fn graph_engine_with_env_clock_and_metronome_is_allocation_free() {
             .map(|(node, port)| Source::Node(OutPort { node, port })),
     );
     ed.commit().expect("commits");
-    let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
+    let engine = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
+        .expect("within the limits");
 
     let four = ChannelLayout::from_count(4);
     let mut output = vec![0.0f32; 1024 * 4];
@@ -617,7 +623,8 @@ fn graph_engine_on_a_worker_pool_is_allocation_free() {
     exec.apply_pending();
     ed.collect();
     assert!(exec.is_parallel(), "the plan spreads over the pool");
-    let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
+    let engine = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
+        .expect("within the limits");
     let mut output = vec![0.0f32; 512 * 2];
     engine.process(&mut InterleavedMut::new(&mut output, ChannelLayout::STEREO).unwrap());
     ed.collect();
@@ -679,7 +686,8 @@ fn a_714_root_block_is_allocation_free() {
         })
     }));
     ed.commit().expect("commits");
-    let engine = Engine::new(&transport, &mut ed, exec).expect("twelve is within the cap");
+    let engine = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
+        .expect("twelve is within the cap");
     engine
         .support_output(ChannelLayout::from(12u16))
         .expect("a width");
@@ -746,7 +754,8 @@ fn a_declared_root_into_a_stated_device_is_allocation_free() {
         })
     }));
     ed.commit().expect("commits");
-    let engine = Engine::new(&transport, &mut ed, exec).expect("twelve is within the cap");
+    let engine = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
+        .expect("twelve is within the cap");
     let control = engine.output_control();
     let twelve = ChannelLayout::from(12u16);
     let mut speakers = Bed::Surround714.topology().positions().unwrap().to_vec();
@@ -804,7 +813,8 @@ fn a_live_routing_and_ramping_output_gains_are_allocation_free() {
         })
     }));
     ed.commit().expect("commits");
-    let engine = Engine::new(&transport, &mut ed, exec).expect("twelve is within the cap");
+    let engine = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
+        .expect("twelve is within the cap");
     let twelve = ChannelLayout::from(12u16);
     engine.support_output(twelve).expect("a width");
     let control = engine.output_control();
@@ -884,7 +894,8 @@ fn a_routing_crossfade_is_allocation_free() {
         })
     }));
     ed.commit().expect("commits");
-    let engine = Engine::new(&transport, &mut ed, exec).expect("twelve is within the cap");
+    let engine = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
+        .expect("twelve is within the cap");
     let twelve = ChannelLayout::from(12u16);
     engine.support_output(twelve).expect("a width");
     let control = engine.output_control();
@@ -981,7 +992,8 @@ fn a_root_change_crossfaded_across_several_blocks_is_allocation_free() {
     };
     wire(&mut ed, 12);
     ed.commit().expect("commits");
-    let engine = Engine::new(&transport, &mut ed, exec).expect("twelve is within the cap");
+    let engine = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
+        .expect("twelve is within the cap");
     ed.set_root_fade(Some(Fade::seconds(
         Seconds(0.005),
         SampleRate::of(48_000.0),

@@ -632,8 +632,7 @@ impl Graph {
         // Built here, on the control side, after the pool sized the
         // executor: the engine moves to the audio thread and holds none.
         let rt_log = tutti_graph::RtLogReaders::new(&mut exec);
-        let engine =
-            tutti_engine::Engine::new(transport, &mut self.editor, exec)?.block_dates(dates);
+        let engine = tutti_engine::Engine::new(transport, &mut self.editor, exec, dates)?;
         let control = engine.output_control();
         control.support(device)?;
         control.state_device(device, topology)?;

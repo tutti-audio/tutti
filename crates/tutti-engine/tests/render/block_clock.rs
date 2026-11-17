@@ -21,7 +21,8 @@ fn engine() -> Engine {
         MaxBlock::of(Samples(512)),
     ));
     ed.commit().expect("commits");
-    let engine = Engine::new(&transport, &mut ed, exec).expect("within limits");
+    let engine = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
+        .expect("within limits");
     Box::leak(Box::new(ed));
     TRANSPORTS.with(|t| t.borrow_mut().push(transport));
     engine
@@ -187,9 +188,7 @@ fn dated(dates: BlockDates, rate: f64) -> (Engine, Editor, Transport) {
         MaxBlock::of(Samples(512)),
     ));
     ed.commit().expect("commits");
-    let engine = Engine::new(&transport, &mut ed, exec)
-        .expect("within limits")
-        .block_dates(dates);
+    let engine = Engine::new(&transport, &mut ed, exec, dates).expect("within limits");
     (engine, ed, transport)
 }
 
@@ -234,13 +233,17 @@ fn frames_date_block_n_at_the_origin_plus_n_blocks() {
     }
 }
 
-/// **A re-rate between blocks keeps every earlier date**: blocks before and
-/// after a re-prepare from 48 kHz to 24 kHz are dated by the sum of each
-/// block's frames over the rate it rendered at (the reading's rate), so a block
-/// at the new rate is as long as 1 / 24 000 s a frame.
-#[test]
-fn frames_add_each_block_at_its_own_rate() {
-    let (engine, mut ed, _transport) = dated(BlockDates::Frames, 48_000.0);
+/// The nanoseconds of `blocks`, each `(frames, rate in Hz)`: each run of
+/// blocks at one rate rounded once, and the runs added.
+fn segmented_ns(blocks: &[(usize, u64)]) -> i64 {
+    blocks.chunk_by(|a, b| a.1 == b.1).map(exact_ns).sum()
+}
+
+/// A re-prepare from `from` Hz to `to` Hz after three blocks, dated by
+/// `Frames`: every block is `segmented_ns` of the blocks before it, using the
+/// rate each reading carries.
+fn rerated(from: f64, to: f64) {
+    let (engine, mut ed, _transport) = dated(BlockDates::Frames, from);
     let reader = engine.block_clock();
     let mut seen: Vec<(usize, u64)> = Vec::new();
     let mut origin = None;
@@ -250,7 +253,7 @@ fn frames_add_each_block_at_its_own_rate() {
         let origin = *origin.get_or_insert(reading.os_ns);
         assert_eq!(
             reading.os_ns - origin,
-            exact_ns(&seen),
+            segmented_ns(&seen),
             "the block after {} blocks",
             seen.len()
         );
@@ -259,11 +262,8 @@ fn frames_add_each_block_at_its_own_rate() {
     for _ in 0..3 {
         step(&engine, 480);
     }
-    ed.reprepare(Prepare::new(
-        SampleRate::of(24_000.0),
-        MaxBlock::of(Samples(512)),
-    ))
-    .expect("re-prepares");
+    ed.reprepare(Prepare::new(SampleRate::of(to), MaxBlock::of(Samples(512))))
+        .expect("re-prepares");
     // The suspended block, then the resumed ones at the new rate.
     step(&engine, 480);
     ed.collect();
@@ -271,8 +271,19 @@ fn frames_add_each_block_at_its_own_rate() {
         step(&engine, 480);
     }
     let rates: Vec<u64> = seen.iter().map(|&(_, r)| r).collect();
-    assert_eq!(rates[..3], [48_000; 3]);
-    assert_eq!(rates[rates.len() - 3..], [24_000; 3], "the rate moved");
+    assert_eq!(rates[..3], [from as u64; 3]);
+    assert_eq!(rates[rates.len() - 3..], [to as u64; 3], "the rate moved");
+}
+
+/// **A re-rate between blocks keeps every earlier date**: blocks before and
+/// after a re-prepare are dated by the sum of each stretch at one rate, rounded
+/// once per stretch. 480 frames over 24 kHz are exact in nanoseconds; over
+/// 44.1 kHz they are not (10 884 353.74 ns each), so the second pair pins the
+/// rounding per stretch.
+#[test]
+fn frames_add_each_block_at_its_own_rate() {
+    rerated(48_000.0, 24_000.0);
+    rerated(44_100.0, 48_000.0);
 }
 
 /// **`Os` dates from the OS clock**: through both entry points the dates never

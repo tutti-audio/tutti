@@ -59,13 +59,18 @@ pub enum BlockDates {
     ///
     /// Everything that reads OS time from a block's date sees frame times from
     /// the origin, not wall time: the clock map of a MIDI input places an
-    /// arrival (an `Instant` the device stamped) by it, MIDI output is
-    /// scheduled by it, and the playhead's extrapolated beat
-    /// ([`Playhead::beat_now`], `Session::beat_now`) is measured from it. A
-    /// reader that holds a real [`tutti_rt::monotonic_ns`] reading (a device's
-    /// arrival stamp, the `now` of `beat_now`) compares it with a date that
-    /// runs ahead of or behind the OS clock as fast as the render does, so
-    /// such a reading must itself be built from a date.
+    /// arrival (an `Instant` the device stamped) by it, and the playhead's
+    /// extrapolated beat ([`Playhead::beat_now`], `Session::beat_now`) is
+    /// measured from it. A reader that holds a real
+    /// [`tutti_rt::monotonic_ns`] reading (a device's arrival stamp, the `now`
+    /// of `beat_now`) compares it with a date that runs ahead of or behind the
+    /// OS clock as fast as the render does, so such a reading must itself be
+    /// built from a date. MIDI output scheduling reads block dates too, but an
+    /// offline session never wires it, so `Frames` does not reach it.
+    ///
+    /// The date is exact: each stretch of blocks at one rate is rounded once,
+    /// to the nanosecond, and a re-rate adds the stretches up, so a long
+    /// render does not drift.
     Frames,
 }
 
@@ -151,7 +156,9 @@ impl DateKeeper {
 /// and the rate that frame is counted at.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BlockReading {
-    /// [`tutti_rt::monotonic_ns`] at the call's start.
+    /// [`tutti_rt::monotonic_ns`] at the call's start; under
+    /// [`BlockDates::Frames`], the frame time from the engine's origin on that
+    /// scale, not a reading of the clock.
     pub os_ns: i64,
     /// The graph's frame at the call's start.
     pub frame: Frame,
@@ -275,6 +282,7 @@ impl Playhead {
     }
 
     /// [`tutti_rt::monotonic_ns`] at the call's start: the OS clock reading
+    /// (under [`BlockDates::Frames`], the frame time from the engine's origin)
     /// [`beat_now`](Self::beat_now) measures from, on the epoch the block
     /// clock and a plugin server share. `None` before any render call.
     #[must_use]
