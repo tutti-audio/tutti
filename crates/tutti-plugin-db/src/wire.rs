@@ -11,14 +11,12 @@
 //! that is not possible, serializing fails rather than dropping the row.
 
 use super::os_path;
-use super::table::{Delta, FileRow, PluginDb};
+use super::table::{FileRow, PluginDb, RowChange};
 use serde::ser::Error as _;
 use serde::{Deserialize, Serialize, Serializer};
 use std::path::{Path, PathBuf};
 
 /// The version of the record layout [`PluginDb`] serializes and deserializes.
-/// 4: a plugin's version is a `PluginVersion`, not a string; 3: a file's row lists every
-/// plugin it holds; 2: a bus's speakers name a channel with no speaker `Unassigned`.
 pub const DB_VERSION: u64 = 4;
 
 /// Why a record is not a database this version can read.
@@ -97,7 +95,7 @@ impl TryFrom<Raw> for PluginDb {
             if db.row(&path).is_some() {
                 return Err(InvalidDb::DuplicatePath(path));
             }
-            db.apply(Delta::put(path, row));
+            db.apply(RowChange::put(path, row));
         }
         Ok(db)
     }
@@ -126,11 +124,10 @@ impl Serialize for PluginDb {
 mod tests {
     use super::*;
     use crate::facts::FileFacts;
-    use crate::format::{PluginClass, PluginDescriptor, PluginFormat};
     use crate::table::FileState;
     use tutti_plugin_types::{
-        LatencyVerdict, MaxBlock, Measured, NotChecked, PROBE_FLOOR, ProbeConfig, StateHash,
-        TailVerdict, Verdict,
+        LatencyVerdict, MaxBlock, Measured, NotChecked, PROBE_FLOOR, PluginClass, PluginDescriptor,
+        PluginFormat, ProbeConfig, StateHash, TailVerdict, Verdict,
     };
     use tutti_types::{Db, SampleRate, Samples};
 
@@ -151,7 +148,7 @@ mod tests {
         let mut db = PluginDb::new();
         for name in names {
             let name = name.as_ref();
-            db.apply(Delta::put(format!("/plugins/{name}.vst3"), row(name)));
+            db.apply(RowChange::put(format!("/plugins/{name}.vst3"), row(name)));
         }
         db
     }
@@ -231,7 +228,7 @@ mod tests {
         ];
         for (k, (tail, latency)) in verdicts.into_iter().enumerate() {
             let name = format!("plugin{k}");
-            db.apply(Delta::put(
+            db.apply(RowChange::put(
                 format!("/plugins/{name}.vst3"),
                 measured_row(&name, measurement(tail, latency)),
             ));

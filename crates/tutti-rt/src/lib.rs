@@ -21,6 +21,8 @@
 //!   known only at run time.
 //! - [`PackedAtomic`] — a value of up to eight bytes in one atomic word, so a
 //!   reader never pairs one write's field with another's.
+//! - [`Setting`] / [`SettingWord`] — a mode or switch set (a fieldless enum,
+//!   [`setting_word!`]) in one atomic word, stored by its encoding.
 //! - [`SeqWriter`] / [`SeqReader`] — a sequence lock for a `Pod` value one
 //!   writer overwrites in place and any thread copies whole.
 //! - [`level_cell()`] — a peak and an energy the audio thread folds each block
@@ -174,6 +176,7 @@ mod request_word;
 mod ring;
 mod scope;
 mod seq_cell;
+mod setting;
 mod sleep;
 mod spin;
 mod split;
@@ -210,6 +213,7 @@ pub use request_word::{RequestBit, RequestBitOutOfRange, RequestBits, RequestWor
 pub use ring::{Drain, Iter, Overflow, PushError, Returned, RingReader, RingWriter, ring};
 pub use scope::{ControlDrop, RtScope, RtScopeGuard};
 pub use seq_cell::{Contended, SeqReader, SeqWriter};
+pub use setting::{Setting, SettingWord};
 pub use sleep::sleep_until_ns;
 pub use spin::BlockWaits;
 pub use split::{ClaimConflict, ClaimTable, Claimed, ClaimedRun, Held, RwView, SplitMut, SplitRw};
