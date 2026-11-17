@@ -7,10 +7,12 @@
 //! transposed `(group, channel)` pair does not compile. [`Message`] is one
 //! defined message as a `Copy` value with no lifetime. [`Ump::decode`]
 //! (and `TryFrom<Ump> for Message`) and `From<Message> for Ump` hold the bit
-//! positions of every message; the one other reader is `Ump::is_note_off` (and
-//! `Ump::words`, which reads the type nibble), which a test ties to
-//! `Ump::decode`. MIDI 1.0 on the wire is the other place that knows bit
-//! positions: [`Voice1::bytes`] and [`System::bytes`] write a message's bytes,
+//! positions of every message. The packet-level readers and writers on [`Ump`]
+//! (`words`, `message_type`, `group`, `channel`, `is_note_off`,
+//! `is_system_real_time`, `key_event`, `note_off`, `sustain_up`) are the only
+//! other code that shifts a packet's bits, and each agrees with `decode` and
+//! `encode` on every packet (a test holds it). MIDI 1.0 on the wire is the other place that knows
+//! bit positions: [`Voice1::bytes`] and [`System::bytes`] write a message's bytes,
 //! [`frame`] adds a SysEx's delimiters, and [`Midi1Parser`] reads a byte stream
 //! into [`Message`]s. [`NoteId`] is a note's identity (`channel * 128 + note`,
 //! the plugin formats' wire value), and [`SysexMessage`] and [`SysexAssembler`]

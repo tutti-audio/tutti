@@ -8,9 +8,13 @@ use crate::{Address, CCNumber, Lane, MidiChannel, MidiGroup, NoteNumber, Protoco
 /// the top nibble of the first word says how many are meaningful
 /// ([`words`](Self::words)). Unused words are zero.
 ///
-/// The type is storage. It names no message and checks no field. The one
-/// message it reads is the note-off, because the graph's event queues must tell
-/// one apart ([`is_note_off`](Self::is_note_off)).
+/// The type is storage. It names no message and checks no field. Its readers
+/// and writers (the header fields, [`is_note_off`](Self::is_note_off),
+/// [`is_panic_controller`](Self::is_panic_controller),
+/// [`key_event`](Self::key_event), [`note_off`](Self::note_off),
+/// [`sustain_up`](Self::sustain_up)) are the packet-level bit reads that
+/// consumers without a decoded [`Message`] need; each agrees with
+/// [`decode`](Self::decode) and `From<Message> for Ump` on every packet.
 ///
 /// `Pod`, so a block of packets crosses a process boundary as one copy.
 #[repr(transparent)]
