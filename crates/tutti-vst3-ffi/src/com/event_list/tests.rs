@@ -593,8 +593,9 @@ fn a_plugin_text_is_copied_into_the_arena() {
 }
 
 /// **A plugin thread inside a list call makes the host skip, not panic.** The
-/// audio thread's `try_begin` and `try_with_events` used to `borrow`, which
-/// panics when a plugin thread is inside `getEventCount` or `getEvent`.
+/// audio thread's `try_begin` and `try_with_events` try the borrow, where a
+/// blocking `borrow` would panic while a plugin thread is inside
+/// `getEventCount` or `getEvent`.
 #[test]
 fn a_list_in_use_by_the_plugin_is_skipped_and_counted() {
     let list = EventList::input();
