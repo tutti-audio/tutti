@@ -32,16 +32,18 @@ const PATIENCE: Duration = Duration::from_secs(60);
 
 /// `node` as the only node of a graph with no global input, its outputs the
 /// graph's: its inputs are silent, which is what lets the executor park it.
-fn one_plugin_graph(node: impl tutti_graph::IntoNode, outputs: usize) -> Renderer {
+fn one_plugin_graph<N: tutti_graph::IntoNode>(node: N, outputs: usize) -> (Renderer, N::Controls) {
     let layout = |n: usize| ChannelLayout::from_count(u16::try_from(n).expect("a few ports"));
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, layout(outputs));
-    let (key, _controls) = g.add_with_controls(node);
+    let (key, controls) = g.add_with_controls(node);
     g.pipe_output(key);
-    g.renderer(Prepare::new(
-        SampleRate::of(SAMPLE_RATE),
-        MaxBlock::of(Samples(BLOCK)),
-    ))
-    .expect("a one-plugin graph compiles")
+    let renderer = g
+        .renderer(Prepare::new(
+            SampleRate::of(SAMPLE_RATE),
+            MaxBlock::of(Samples(BLOCK)),
+        ))
+        .expect("a one-plugin graph compiles");
+    (renderer, controls)
 }
 
 fn is_woken(out: &[Vec<f32>]) -> bool {
@@ -77,7 +79,7 @@ fn in_process_the_next_block_after_a_request_from_another_thread_runs_the_plugin
     let node = client.bind(
         tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo"),
     );
-    let mut renderer = one_plugin_graph(node, 2);
+    let (mut renderer, _controls) = one_plugin_graph(node, 2);
 
     for _ in 0..8 {
         assert!(!is_woken(&renderer.render(BLOCK)), "silent until it asks");
@@ -122,7 +124,7 @@ fn served_a_request_while_parked_wakes_the_node() {
         .request_process_file(&request);
     let probe = load_probe(SAMPLE_RATE);
     let outputs = probe.client.outputs();
-    let mut renderer = one_plugin_graph(
+    let (mut renderer, controls) = one_plugin_graph(
         probe.client.bind(
             tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo"),
         ),
@@ -130,7 +132,9 @@ fn served_a_request_while_parked_wakes_the_node() {
     );
     let step = |renderer: &mut Renderer| {
         let out = renderer.render(BLOCK);
-        std::thread::yield_now();
+        // The next block plays the answer to this one's chunk: a reply the
+        // server has not sent yet would be abandoned, and with it the sound.
+        clap_probe::await_answer(&controls);
         out
     };
 

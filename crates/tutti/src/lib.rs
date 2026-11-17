@@ -185,10 +185,15 @@ pub use tutti_session::{
 };
 #[cfg(feature = "session")]
 pub use tutti_session::{
+    AnyAssign, AnyTarget, Assign, Effective, Info, IntoAssign, IntoRead, Knobs, Modify, Moved,
+    ParamTarget, ScalarTarget, SetRefusal, Target, TargetInfo, ValueError, ValueErrorKind,
+};
+#[cfg(feature = "session")]
+pub use tutti_session::{
     AppKey, BlockDates, Clock, ConnectError, Edge, EventInPort, EventOutPort, InPort, Job, JobId,
     JobKind, JobStatus, Key, Landed, NoSuchNode, Offline, OfflineSession, OutPort, Playhead,
     RealTime, Root, Session, SessionBuilder, SessionEvent, SystemClock, SystemSession,
-    TransportHandle, TypedParamRef, WaitError, Workers,
+    TransportHandle, WaitError, Workers,
 };
 #[cfg(all(feature = "session", feature = "export"))]
 pub use tutti_session::{
@@ -237,34 +242,36 @@ pub mod nodes {
         TremoloConfig, TremoloControls, TremoloKernel, TremoloNode, TremoloSet, WidthControls,
     };
     pub use tutti_nodes::{
-        BAND_PARAMS, BitCrusherConfig, BitCrusherControls, BitCrusherNode, BrickwallLimiterNode,
-        BusStripNode, ButterworthOrder, ChannelTimes, ChannelTimesError, ClickConfig,
-        ClickSettings, ClickState, CompressorControls, CompressorNode, ConvolverError,
-        ConvolverNode, CrossoverControls, CrossoverError, CrossoverNode, CutAlignment,
-        CutFilterConfig, CutFilterControls, CutFilterNode, CutResponse, DcBlockerConfig,
-        DcBlockerControls, DcBlockerNode, DelayControls, DelayLayout, DelayNode, DistortionNode,
-        DynamicEqConfig, DynamicEqControls, DynamicEqNode, DynamicMode, EnvelopeFollowerNode,
-        EqBandNode, FdnControls, FdnLayout, FdnNode, FreeverbControls, FreeverbNode, GateControls,
-        GateNode, HrtfBinauralNode, InterpolationMode, IrLayout, KeyFilter, KeySource,
-        LadderControls, LadderFilterNode, LadderType, LfoClock, LfoNode, LimiterControls,
-        LimiterNode, MetronomeMode, ModDelayControls, ModDelayNode, MultibandCompressorNode,
-        MultibandControls, NoteEnvelopeNode, OscillatorNode, OversamplingFactor, PhaserControls,
-        PhaserNode, PortSide, Routing as FeedbackRouting, RoutingError as FeedbackRoutingError,
-        SOURCE_EVENT_CAPACITY, ShapeKind, SourceNode, SourcePorts, Stages, StagesError, Stagger,
-        StaggerError, SvfControls, SvfFilterNode, SvfType, Sweep, SweepError, SweepRange,
-        SweepRangeError, VbapError, VbapPannerNode, VolumeOutOfRange,
+        BAND_PARAMS, BellFilterConfig, BellFilterControls, BellFilterNode, BitCrusherConfig,
+        BitCrusherControls, BitCrusherNode, BrickwallLimiterNode, BusStripNode, ButterworthOrder,
+        ChannelTimes, ChannelTimesError, ClickConfig, ClickSettings, ClickState,
+        CompressorControls, CompressorNode, ConvolverError, ConvolverNode, CrossoverControls,
+        CrossoverError, CrossoverNode, CutAlignment, CutFilterConfig, CutFilterControls,
+        CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerControls, DcBlockerNode,
+        DelayControls, DelayLayout, DelayNode, DistortionNode, DynamicEqConfig, DynamicEqControls,
+        DynamicEqNode, DynamicMode, EnvelopeFollowerNode, EqBandNode, FdnControls, FdnLayout,
+        FdnNode, FreeverbControls, FreeverbNode, GateControls, GateNode, HrtfBinauralNode,
+        InterpolationMode, IrLayout, KeyFilter, KeySource, LadderControls, LadderFilterNode,
+        LadderType, LfoClock, LfoNode, LimiterControls, LimiterNode, MetronomeMode,
+        ModDelayControls, ModDelayNode, MultibandCompressorNode, MultibandControls,
+        NoteEnvelopeNode, OscillatorNode, OversamplingFactor, PhaserControls, PhaserNode, PortSide,
+        Routing as FeedbackRouting, RoutingError as FeedbackRoutingError, SOURCE_EVENT_CAPACITY,
+        ShapeKind, SourceNode, SourcePorts, Stages, StagesError, Stagger, StaggerError,
+        SvfControls, SvfFilterNode, SvfType, Sweep, SweepError, SweepRange, SweepRangeError,
+        TiltFilterConfig, TiltFilterControls, TiltFilterNode, VbapError, VbapPannerNode,
+        VolumeOutOfRange,
     };
     pub use tutti_nodes::{
-        BitCrusherKernel, BrickwallKernel, CompressorKernel, Control, ControlLanes, ControlRead,
-        ControlSet, ControlValid, CrossoverKernel, CutFilterKernel, DcBlockerKernel, DelayKernel,
-        DistortionKernel, DynamicEqKernel, FdnKernel, Feed, FreeverbKernel, GateKernel, Kernel,
-        KernelNode, LadderKernel, LimiterKernel, ModDelayKernel, PhaserKernel, ReconcileError,
-        SvfKernel,
+        BellFilterKernel, BitCrusherKernel, BrickwallKernel, CompressorKernel, Control,
+        ControlLanes, ControlRead, ControlSet, ControlValid, CrossoverKernel, CutFilterKernel,
+        DcBlockerKernel, DelayKernel, DistortionKernel, DynamicEqKernel, EqControls, EqKernel,
+        FdnKernel, Feed, FreeverbKernel, GateKernel, Kernel, KernelNode, LadderKernel,
+        LimiterKernel, ModDelayKernel, PhaserKernel, ReconcileError, SvfKernel, TiltFilterKernel,
     };
     pub use tutti_nodes::{
-        BitCrusherSet, BrickwallSet, CompressorSet, CrossoverSet, CutFilterSet, DcBlockerSet,
-        DelaySet, DistortionSet, DynamicEqSet, FdnSet, FreeverbSet, GateSet, HasControl, LadderSet,
-        LimiterSet, ModDelaySet, PhaserSet, SvfSet,
+        BellFilterSet, BitCrusherSet, BrickwallSet, CompressorSet, CrossoverSet, CutFilterSet,
+        DcBlockerSet, DelaySet, DistortionSet, DynamicEqSet, FdnSet, FreeverbSet, GateSet,
+        HasControl, LadderSet, LimiterSet, ModDelaySet, PhaserSet, SvfSet, TiltFilterSet,
     };
 }
 
@@ -383,11 +390,11 @@ pub mod session {
         Connection, Crossfade, CrossfadeId, CrossfadeRefused, EdgeGainError,
         Event as EventEdgeKind, EventEdge, EventTapPort, Fanin, Feeder, Graph, HeardOpen,
         HeardTapError, Inlet, InletError, LIVE_MAX_BLOCK, MainBus, MainSink, Meters, NotReopened,
-        Outlet, OutputPlacement, OutputPolicy, OutputPolicyError, OutputPolicyHandle, PHASES,
-        ParamError, Peer, PeerError, Phase as UpdatePhase, PhaseCx, Policy, Presence, RangeError,
-        Reclaimer, Reclaims, RemoveError, Reopened, ReplaceRefused, Resource, ResourceFact,
-        ResourceId, RootDeclaration, RootReader, RootTopologyStatus, SessionNode, Taps, TempoError,
-        Weighted, Wire, root_width,
+        Outlet, OutputPlacement, OutputPolicy, OutputPolicyError, OutputPolicyHandle, PHASES, Peer,
+        PeerError, Phase as UpdatePhase, PhaseCx, Policy, Presence, RangeError, Reclaimer,
+        Reclaims, RemoveError, Reopened, ReplaceRefused, Resource, ResourceFact, ResourceId,
+        RootDeclaration, RootReader, RootTopologyStatus, SessionNode, Taps, TempoError, Weighted,
+        Wire, root_width,
     };
     pub use tutti_transport::{
         AudioTaken, LoopEdit, OfflineTimeline, OfflineTimelineConfig, OfflineTransport, TimedError,
@@ -601,8 +608,8 @@ pub mod plugin {
 /// that play an instrument or a live input (`MidiKeys`),
 /// the session's MIDI (`Midi`, `InstrumentHandle`), its route rule, events and
 /// errors (`MidiRouteRule`, `MidiRouteId`, `MidiReport`, `midi::Error`), its
-/// followers (`FollowTempo`, `FollowClock`, `FollowMachineControl`,
-/// `SendMachineControl`), a host's own output (`midi_sink`, `MidiSink`,
+/// followers (`FollowTempo`, `FollowClock`, `FollowMachineControl`), the
+/// sync node that sends the transport (`SyncOut`, `SyncMessages`), a host's own output (`midi_sink`, `MidiSink`,
 /// `SinkLoaded`), and under `midi-hardware` a device (`MidiDeviceId`,
 /// `DeviceInfo`), the ports the pool opens for them (`midi_input`, `midi_output`,
 /// `MidiInput`, `MidiOutput`, their entries and loaded reports) and what an open one said of itself (`Learned`, `SavedDevice`, `Match`), and the Profiles
@@ -657,8 +664,8 @@ pub mod midi {
         SmpteFrameRate, SysexDeviceId, TuningFrequency, UnknownFrameRate,
     };
     pub use tutti_midi_runtime::{
-        ClockControls, ClockKind, ClockSends, MidiClipControls, MidiClipNode, MidiInputPorts,
-        OffsetOutOfRange, OutputLatency, OutputOffset, OutputTerms, SegmentFault,
+        ClockKind, MidiClipControls, MidiClipNode, MidiInputPorts, OffsetOutOfRange, OutputLatency,
+        OutputOffset, OutputTerms, SegmentFault, SyncMessages, SyncOut, SyncOutControls,
     };
     pub use tutti_midi_runtime::{MidiKeys, MidiOut, Outgoing, SendAt, Taken, TimedMidiEvent};
     pub use tutti_ump::{
@@ -696,8 +703,7 @@ pub mod midi {
     pub use tutti_session::{
         AddedInstrument, AnyNode, FollowClock, FollowMachineControl, FollowTempo, InstrumentHandle,
         Midi, MidiLoad, MidiReport, MidiRouteId, MidiRouteRule, MidiSink, MidiSinkEntry,
-        MidiSinkInfo, NotInstrument, SendMachineControl, SinkLoaded, SinkOptions, Stamping,
-        TakePlacement, midi_sink,
+        MidiSinkInfo, NotInstrument, SinkLoaded, SinkOptions, Stamping, TakePlacement, midi_sink,
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
     pub use tutti_session::{

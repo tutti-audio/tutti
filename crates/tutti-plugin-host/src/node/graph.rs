@@ -310,7 +310,6 @@ where
                     &ins,
                     &mut outs,
                     n,
-                    this.sample_rate,
                 );
                 if rendered != Rendered::Ran {
                     silence(&mut outs, n);
@@ -447,7 +446,6 @@ where
                 &ins,
                 &mut outs,
                 size,
-                this.sample_rate,
             );
             if rendered != Rendered::Ran {
                 silence(&mut outs, size);

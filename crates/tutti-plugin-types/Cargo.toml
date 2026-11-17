@@ -44,7 +44,7 @@ bitflags = "2"
 tutti-midi-protocol = { version = "0.0.1", path = "../tutti-midi-protocol" }
 # The engine's unit vocabulary (`Samples`, `Tail`).
 tutti-types = { version = "0.0.1", path = "../tutti-types" }
-# The sample width of a plugin port (`Float`).
+# The block views (`InputOutput`, `Planes`, `PlanesMut`) and the sample width (`Float`).
 tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 # `Offset`: where a block's MIDI sits (`ProcessContext::midi_events`, `WireMidi::at`).
 tutti-graph = { version = "0.0.1", path = "../tutti-graph" }

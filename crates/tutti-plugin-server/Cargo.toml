@@ -39,7 +39,7 @@ tutti-plugin-ipc = { version = "0.0.1", path = "../tutti-plugin-ipc" }
 # The editor's sizes, which name their unit (`dpi::Size`).
 dpi.workspace = true
 tutti-plugin-types = { version = "0.0.1", path = "../tutti-plugin-types" }
-# The sample width of the served pipeline's channels (`Float`).
+# The sample width of the served pipeline's channels (`Float`) and the block views.
 tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
@@ -67,8 +67,6 @@ tutti-plugin-ipc-ffi = { version = "0.0.1", path = "../tutti-plugin-ipc-ffi" }
 
 [dev-dependencies]
 tutti-midi-protocol = { path = "../tutti-midi-protocol" }
-# The slab's sample bound (`Pod`) on the generic round-trip helper.
-bytemuck = "1"
 # Finds the reference plugins and the plugin-server beside the test binary.
 tutti-fixtures = { path = "../../testing/tutti-fixtures", features = ["plugin"] }
 # An unchecked `SampleRate` (`Unit::from_raw`), to build the rate a hostile peer sends.

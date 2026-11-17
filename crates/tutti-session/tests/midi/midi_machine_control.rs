@@ -13,10 +13,10 @@ use std::time::Instant;
 use tutti_midi_device::EndpointId;
 use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint};
 use tutti_midi_protocol::{MtcRate, Recipient, SysexDeviceId};
-use tutti_midi_runtime::{ClockKind, MidiOut};
+use tutti_midi_runtime::{ClockKind, MidiOut, SyncMessages};
 use tutti_session::{
-    FollowClock, FollowMachineControl, MidiError, MidiReport, SendMachineControl, Session,
-    SessionEvent, TempoError, midi_sink,
+    FollowClock, FollowMachineControl, MidiError, MidiReport, Session, SessionEvent, TempoError,
+    midi_sink,
 };
 use tutti_transport::FadeOut;
 use tutti_types::{Beat, SampleRate};
@@ -391,11 +391,15 @@ fn sender(wire: &Wire, to: Recipient) -> Session {
     s.pool(midi_sink("out", Arc::new(wire.clone())))
         .expect("declares");
     let _ = s.update();
-    s.midi().send_machine_control(SendMachineControl {
-        group: G,
-        to,
-        rate: MtcRate::Fps30,
-    });
+    s.midi_nodes()
+        .unwrap()
+        .sync_controls
+        .messages()
+        .set(SyncMessages {
+            mmc: Some(to),
+            rate: MtcRate::Fps30,
+            ..SyncMessages::OFF
+        });
     blocks(&s, 1);
     let _ = s.update();
     s
@@ -404,7 +408,7 @@ fn sender(wire: &Wire, to: Recipient) -> Session {
 /// **The transport's play, locate and stop go out as MMC** (RP-013 pp.20 and
 /// 28): PLAY is `7F <id> 06 02`; a locate while rolling is LOCATE [TARGET]
 /// `44 06 01 60 00 02 00 00` (2 s at 30 frames) with DEFERRED PLAY `03`;
-/// STOP is `01`. The first update after the call sends nothing.
+/// STOP is `01`. The first block after the setting sends nothing.
 #[test]
 fn the_transport_is_sent_as_play_locate_and_stop() {
     let wire = Wire::default();
@@ -455,13 +459,13 @@ fn a_locate_while_stopped_sends_a_locate_and_no_play() {
 
 /// **A locate to a time no time code names sends nothing and is counted**
 /// (RP-013 p.8: hours are 0 to 23): a day of beats out is refused by the
-/// sender, and the output's refused count rises by exactly the one look;
-/// standing there afterwards adds nothing.
+/// sync node, and its refused count rises by exactly the one look; standing
+/// there afterwards adds nothing.
 #[test]
 fn a_locate_no_time_code_names_is_counted_and_sends_nothing() {
     let wire = Wire::default();
     let mut s = sender(&wire, Recipient::AllCall);
-    let refused = |s: &Session| s.midi_sink(&"out").unwrap().losses().refused;
+    let refused = |s: &Session| s.midi_nodes().unwrap().sync_controls.losses().refused;
     let before = refused(&s);
     s.locate(Beat(4_000_000.0)).unwrap();
     blocks(&s, 1);
@@ -473,20 +477,17 @@ fn a_locate_no_time_code_names_is_counted_and_sends_nothing() {
     assert_eq!(refused(&s), before + 1);
 }
 
-/// **Off by default and stoppable**: with no call nothing is sent; after
-/// `stop_sending_machine_control` the transport's motion is not sent, and
-/// stopping twice is refused by name.
+/// **Off by default and stoppable**: with nothing set nothing is sent; set back
+/// to nothing the transport's motion is not sent.
 #[test]
 fn nothing_is_sent_unless_asked_and_it_can_be_stopped() {
     let wire = Wire::default();
     let mut s = sender(&wire, Recipient::AllCall);
-    s.midi()
-        .stop_sending_machine_control()
-        .expect("was sending");
-    assert!(matches!(
-        s.midi().stop_sending_machine_control(),
-        Err(MidiError::NotSendingMachineControl)
-    ));
+    s.midi_nodes()
+        .unwrap()
+        .sync_controls
+        .messages()
+        .set(SyncMessages::OFF);
     s.play().unwrap();
     blocks(&s, 2);
     let _ = s.update();

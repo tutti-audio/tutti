@@ -177,8 +177,8 @@ impl From<ParamRef> for ModTarget {
     }
 }
 
-impl<U> From<crate::TypedParamRef<U>> for ModTarget {
-    fn from(p: crate::TypedParamRef<U>) -> Self {
+impl<U> From<crate::ParamTarget<U>> for ModTarget {
+    fn from(p: crate::ParamTarget<U>) -> Self {
         Self::Param(p.into())
     }
 }
@@ -208,7 +208,7 @@ impl std::fmt::Display for ModTarget {
 }
 
 /// A modulation target whose value is in a unit tutti knows: what
-/// [`Mods::range`] takes a range of. A [`TypedParamRef`](crate::TypedParamRef) (the unit its node
+/// [`Mods::range`] takes a range of. A [`ParamTarget`](crate::ParamTarget) (the unit its node
 /// declares), an [`Edge`] ([`Amplitude`](tutti_types::Amplitude)) and a
 /// [`MixRef`] ([`Mix`](tutti_types::Mix)). Sealed.
 pub trait Ranged: Into<ModTarget> + ranged::Sealed {
@@ -220,8 +220,8 @@ mod ranged {
     pub trait Sealed {}
 }
 
-impl<U: crate::Scalar> ranged::Sealed for crate::TypedParamRef<U> {}
-impl<U: crate::Scalar> Ranged for crate::TypedParamRef<U> {
+impl<U: crate::Scalar> ranged::Sealed for crate::ParamTarget<U> {}
+impl<U: crate::Scalar> Ranged for crate::ParamTarget<U> {
     type Unit = U;
 }
 impl ranged::Sealed for Edge {}

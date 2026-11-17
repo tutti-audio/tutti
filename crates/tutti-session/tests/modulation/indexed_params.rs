@@ -1,5 +1,5 @@
 //! Indexed param addresses through the session (doc 013, "Param addresses"):
-//! `Graph::set_param` and a modulation route reach a node's second param of
+//! `Session::set` and a modulation route reach a node's second param of
 //! a kind (`Threshold` at index 1) without touching its first.
 //!
 //! The render stands on `tests/modulation/modulation.rs`'s analytic sine figure.
@@ -9,7 +9,7 @@ use crate::common;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::Params;
 use tutti_modulation::Lfo;
-use tutti_session::{OutPort, ParamError, ParamRef, Root, RouteSpec, Session};
+use tutti_session::{OutPort, ParamRef, Root, RouteSpec, Session, ValueErrorKind};
 use tutti_types::{BeatsPerCycle, Db, Depth, ParamAddr, UnitAddr, UnitParam};
 use tutti_types::{ChannelLayout, SampleRate};
 
@@ -44,10 +44,10 @@ fn render(s: &mut Session, frames: usize) -> [Vec<f32>; 2] {
     all
 }
 
-/// `Graph::set_param` writes the cell of the index it names and no other,
+/// `Session::set` writes the cell of the index it names and no other,
 /// and the node reads it: the render shows each band's own value.
 #[test]
-fn set_param_writes_the_index_it_names() {
+fn a_write_reaches_the_index_it_names() {
     let mut s = offline();
     let (node, _) = s.graph().add(Params(Bands::new(100.0, 500.0)));
     s.graph()
@@ -61,22 +61,22 @@ fn set_param_writes_the_index_it_names() {
     let [a, b] = render(&mut s, 256);
     assert!(a.iter().all(|&x| x == 100.0) && b.iter().all(|&x| x == 500.0));
 
-    s.graph().set_param(node.threshold_at(1), Db(-6.0)).unwrap();
+    s.set(node.threshold_at(1).to(Db(-6.0))).unwrap();
     let [a, b] = render(&mut s, 256);
     assert!(a.iter().all(|&x| x == 100.0), "band 0 did not move");
     assert!(b.iter().all(|&x| x == -6.0), "band 1 took the write");
 
     // A bare `UnitParam` is index 0.
-    s.graph().set_param(node.threshold(), Db(-12.0)).unwrap();
+    s.set(node.threshold().to(Db(-12.0))).unwrap();
     let [a, b] = render(&mut s, 256);
     assert!(a.iter().all(|&x| x == -12.0));
     assert!(b.iter().all(|&x| x == -6.0));
 
     // An index the node lacks takes nothing.
-    assert!(matches!(
-        s.graph().set_param(node.threshold_at(2), Db(99.0)),
-        Err(ParamError::NoSuchParam { .. })
-    ));
+    assert_eq!(
+        s.set(node.threshold_at(2).to(Db(99.0))).unwrap_err().kind,
+        ValueErrorKind::NoSuchTarget
+    );
     let [a, b] = render(&mut s, 256);
     assert!(a.iter().all(|&x| x == -12.0) && b.iter().all(|&x| x == -6.0));
 }

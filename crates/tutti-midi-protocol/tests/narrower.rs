@@ -577,6 +577,97 @@ fn mpe_steals_the_oldest_member_and_resets_its_bend() {
     );
 }
 
+/// **The longest sequence one message makes is `MAX_MESSAGES` and
+/// `MAX_BYTES`**: a key struck again on a member whose note was bent, pressed
+/// and slid ends that note, centres the three, then sounds.
+#[test]
+fn a_restruck_mpe_note_is_the_longest_sequence() {
+    let mut n = mpe(zone());
+    let _ = feed(&mut n, note_on(60));
+    let _ = feed(&mut n, per_note_bend(60, 0xFFFF_FFFF));
+    let pressure = Message::Midi2(
+        A,
+        Voice2::PolyPressure {
+            note: NoteNumber::of(60),
+            value: ControlValue::new(0x8000_0000),
+        },
+    );
+    let _ = feed(&mut n, pressure);
+    let slide = Message::Midi2(
+        A,
+        Voice2::AssignablePerNote {
+            note: NoteNumber::of(60),
+            controller: 74,
+            value: ControlValue::new(0xFFFF_FFFF),
+        },
+    );
+    let _ = feed(&mut n, slide);
+    let sent = feed(&mut n, note_on(60));
+    assert_eq!(
+        sent,
+        [
+            vec![0x81, 60, 0],
+            vec![0xE1, 0x00, 0x40],
+            vec![0xD1, 0],
+            vec![0xB1, 74, 0x40],
+            vec![0x91, 60, 0x40],
+        ]
+    );
+    assert_eq!(sent.len(), Narrower::MAX_MESSAGES);
+    assert_eq!(
+        sent.iter().map(Vec::len).sum::<usize>(),
+        Narrower::MAX_BYTES
+    );
+}
+
+/// The Default Translation's longest sequence, a controller's four Control
+/// Changes, stays under the bounds.
+#[test]
+fn the_default_translation_stays_under_the_bounds() {
+    let sent = feed(&mut Narrower::new(), rpn(A, 0, 0, 12 << 25));
+    assert_eq!(sent.len(), 4);
+    assert_eq!(sent.iter().map(Vec::len).sum::<usize>(), 12);
+}
+
+/// **A steal is as long as a re-strike**: the oldest member's note, bent,
+/// pressed and slid, ends, the three centre, and the new note sounds there.
+#[test]
+fn a_stealing_mpe_note_is_the_longest_sequence() {
+    let one = one_member_zone();
+    let mut n = mpe(one);
+    let _ = feed(&mut n, note_on(60));
+    let _ = feed(&mut n, per_note_bend(60, 0xFFFF_FFFF));
+    let _ = feed(
+        &mut n,
+        Message::Midi2(
+            A,
+            Voice2::PolyPressure {
+                note: NoteNumber::of(60),
+                value: ControlValue::new(0x8000_0000),
+            },
+        ),
+    );
+    let _ = feed(
+        &mut n,
+        Message::Midi2(
+            A,
+            Voice2::AssignablePerNote {
+                note: NoteNumber::of(60),
+                controller: 74,
+                value: ControlValue::new(0xFFFF_FFFF),
+            },
+        ),
+    );
+    let sent = feed(&mut n, note_on(64));
+    assert_eq!(sent.len(), Narrower::MAX_MESSAGES);
+    assert_eq!(
+        sent.iter().map(Vec::len).sum::<usize>(),
+        Narrower::MAX_BYTES
+    );
+    assert_eq!(sent[0], [sent[4][0] & 0xEF, 60, 0]);
+    assert_eq!(sent[4][1], 64);
+}
+
 /// A mode is alternate unless it is the Default Translation, so a product can
 /// tell its user (D.4).
 #[test]
