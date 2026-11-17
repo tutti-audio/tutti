@@ -7,7 +7,10 @@
 # text when `TUTTI_MIDI_SPECS` is set. Nothing of the spec is quoted here: ids,
 # section numbers, keyword kinds and functional facts only.
 #
-# Columns: id | side | maturity | kind | section | paraphrase | facts | na-kind | cite
+# Columns: id | side | maturity | kind | section | paraphrase | facts | na-kind | cite | digest
+# digest is the FNV-1a 64 of the row's sentence, whitespace normalised: the hand
+# columns follow it when a revision shifts the numbers. side `changed` is a row
+# whose sentence changed under hand columns: reread it and rewrite them.
 #
 # Ids:
 #   m2-107/<section>#<n>          the nth sentence under the numbered section
@@ -21,11 +24,11 @@
 # sentence with only those has no row. Sentence rows only: no table of the
 # document has a row per item.
 # side: initiator, responder or both (todo marks a row not yet read).
-m2-107/1.1#1 | responder |  | recommended | M2-107 §1.1 | a device whose Programs are chosen by Bank Select and Program Change supports ProgramList |  |  |
-m2-107/1.3#1 | both |  | permitted | M2-107 §1.3 | glossary: Property Exchange lets one device read another's properties, definition only |  |  |
-m2-107/2.1.3#1 | responder |  | required | M2-107 §2.1.3 | a paginated ProgramList carries the pagination Header properties of M2-103 |  |  |
-m2-107/2.2#1 | initiator |  | permitted | M2-107 §2.2 | an Initiator can read ProgramList with a Get |  |  |
-m2-107/2.2#2 | responder |  | required | M2-107 §2.2 | a Responder with ProgramList answers a Get with an array of objects |  |  |
-m2-107/2.2#3 | responder |  | permitted | M2-107 §2.2 | a device can define its own Program categories |  |  |
-m2-107/2.2#4 | responder |  | permitted | M2-107 §2.2 | a device can let the user define meta tags |  |  |
-m2-107/2.3#1 | initiator |  | permitted | M2-107 §2.3 | a Program is recalled with the Bank Select and Program Change its entry declares |  |  |
+m2-107/1.1#1 | responder |  | recommended | M2-107 §1.1 | a device whose Programs are chosen by Bank Select and Program Change supports ProgramList |  |  |  | 2ada9f46a197d5c7
+m2-107/1.3#1 | both |  | permitted | M2-107 §1.3 | glossary: Property Exchange lets one device read another's properties, definition only |  |  |  | 03d34747a84b3a64
+m2-107/2.1.3#1 | responder |  | required | M2-107 §2.1.3 | a paginated ProgramList carries the pagination Header properties of M2-103 |  |  |  | 05ab8c43e08e6730
+m2-107/2.2#1 | initiator |  | permitted | M2-107 §2.2 | an Initiator can read ProgramList with a Get |  |  |  | aa32fdde1839f11d
+m2-107/2.2#2 | responder |  | required | M2-107 §2.2 | a Responder with ProgramList answers a Get with an array of objects |  |  |  | 422e4fb83b0ac5d2
+m2-107/2.2#3 | responder |  | permitted | M2-107 §2.2 | a device can define its own Program categories |  |  |  | 2ef8fc9c71e9e781
+m2-107/2.2#4 | responder |  | permitted | M2-107 §2.2 | a device can let the user define meta tags |  |  |  | d62e66c0468a6662
+m2-107/2.3#1 | initiator |  | permitted | M2-107 §2.3 | a Program is recalled with the Bank Select and Program Change its entry declares |  |  |  | 34ab34f1e969008f
