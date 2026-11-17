@@ -2,11 +2,10 @@
 //!
 //! # Why methods and not public fields
 //!
-//! The buffers are planar `f32`. Exposing them as
-//! `&[&[f32]]` fields would make that layout part of every node's source; as
-//! methods (`input`, `output`, `split`, `channel`) a later `input_f64` — or a
-//! port format the compiler converts at a mismatched edge — is an addition,
-//! not a breaking change. See [`PortKind`].
+//! The buffers are planar slices of the sample format `F`. Exposing them as
+//! `&[&[F]]` fields would make that layout part of every node's source; as
+//! methods (`input`, `output`, `split`, `channel`) the layout can change
+//! without a breaking change. See [`PortKind`].
 //!
 //! # The length guarantee
 //!
@@ -15,6 +14,7 @@
 //! [`frames`](Io::frames) long and that `frames` is at most the
 //! [`MaxBlock`] the node was prepared with. A node therefore never clamps.
 
+use tutti_buffers::Float;
 use tutti_types::{Samples, Tail};
 
 use crate::bus::{InBus, OutBus, PortSpan};
@@ -27,15 +27,11 @@ use tutti_types::MaxBlock;
 
 /// What a port carries.
 ///
-/// `Audio` is planar `f32` blocks. A sample *format* is deliberately not a
-/// variant yet: when one is needed (an `f64` path for a plugin that wants it,
-/// say), it would ride on `Audio`, and the compiler would insert a conversion
-/// op on an edge whose two ends disagree — the same way it would coerce a
-/// channel-count mismatch — so nodes on either side never see the other
-/// format.
+/// `Audio` is planar blocks of the graph's sample format: the format is the
+/// `F` of the [`Node`](crate::Node) and its [`Io`], not a variant here.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum PortKind {
-    /// Planar `f32` audio, one channel per port.
+    /// Planar audio, one channel per port.
     Audio,
     /// Sorted [`Event`](crate::Event) streams.
     Event,
@@ -47,9 +43,9 @@ pub enum PortKind {
 /// Only the executor (or the `Reference` interpreter)
 /// builds one, and it guarantees every audio slice is exactly
 /// [`frames`](Self::frames) long, at most the [`MaxBlock`] the node was
-/// prepared with — so a node never needs to clamp. Buffers are planar `f32`
-/// and reached through methods rather than fields: [`split`](Self::split)
-/// borrows inputs and outputs together, [`channel`](Self::channel) gives
+/// prepared with — so a node never needs to clamp. Buffers are planar slices
+/// of the sample format `F` (`f32` for a plain `impl Node`) and reached through
+/// methods rather than fields: [`split`](Self::split) borrows inputs and outputs together, [`channel`](Self::channel) gives
 /// one channel as a [`Channel`] (separate or in place), and
 /// [`sub_blocks`](Self::sub_blocks) splits the block at an event port's
 /// offsets for sample-accurate event handling.
@@ -70,10 +66,10 @@ pub enum PortKind {
 /// [`bus_out`](Self::bus_out), [`Inputs::bus`], [`Outputs::bus`]. So `c + width`
 /// on the main view is out of range in every build, as a slice is, and never
 /// another bus's port.
-pub struct Io<'a> {
+pub struct Io<'a, F: Float = f32> {
     frames: usize,
-    inputs: &'a [&'a [f32]],
-    outputs: &'a mut [&'a mut [f32]],
+    inputs: &'a [&'a [F]],
+    outputs: &'a mut [&'a mut [F]],
     /// The ports the main views cover.
     main: MainPorts,
     silent: SilenceMask,
@@ -95,7 +91,7 @@ pub struct Io<'a> {
     log: Option<&'a LogSlots>,
 }
 
-impl std::fmt::Debug for Io<'_> {
+impl<F: Float> std::fmt::Debug for Io<'_, F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Io")
             .field("frames", &self.frames)
@@ -111,25 +107,25 @@ impl std::fmt::Debug for Io<'_> {
 /// The audio inputs, while the outputs are borrowed too: the main bus by
 /// channel ([`get`](Self::get)), any other bus by its handle
 /// ([`bus`](Self::bus)).
-pub struct Inputs<'s> {
-    slices: &'s [&'s [f32]],
+pub struct Inputs<'s, F: Float = f32> {
+    slices: &'s [&'s [F]],
     main: PortSpan,
     in_place: InPlaceMask,
 }
 
 /// One input bus, read by channel: channel `c` of the bus, bounded to it.
-pub struct BusIn<'s> {
-    slices: &'s [&'s [f32]],
+pub struct BusIn<'s, F: Float = f32> {
+    slices: &'s [&'s [F]],
     first: usize,
     in_place: InPlaceMask,
 }
 
 /// One output bus, written by channel: channel `c` of the bus, bounded to it.
-pub struct BusOut<'s, 'a> {
-    slices: &'s mut [&'a mut [f32]],
+pub struct BusOut<'s, 'a, F: Float = f32> {
+    slices: &'s mut [&'a mut [F]],
 }
 
-impl std::fmt::Debug for Inputs<'_> {
+impl<F: Float> std::fmt::Debug for Inputs<'_, F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Inputs")
             .field("channels", &self.main.width)
@@ -138,7 +134,7 @@ impl std::fmt::Debug for Inputs<'_> {
     }
 }
 
-impl std::fmt::Debug for BusIn<'_> {
+impl<F: Float> std::fmt::Debug for BusIn<'_, F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BusIn")
             .field("channels", &self.slices.len())
@@ -146,7 +142,7 @@ impl std::fmt::Debug for BusIn<'_> {
     }
 }
 
-impl std::fmt::Debug for BusOut<'_, '_> {
+impl<F: Float> std::fmt::Debug for BusOut<'_, '_, F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BusOut")
             .field("channels", &self.slices.len())
@@ -157,12 +153,12 @@ impl std::fmt::Debug for BusOut<'_, '_> {
 /// The audio outputs, while the inputs are borrowed too: the main bus by
 /// channel ([`get`](Self::get)), any other bus by its handle
 /// ([`bus`](Self::bus)).
-pub struct Outputs<'s, 'a> {
-    slices: &'s mut [&'a mut [f32]],
+pub struct Outputs<'s, 'a, F: Float = f32> {
+    slices: &'s mut [&'a mut [F]],
     main: PortSpan,
 }
 
-impl std::fmt::Debug for Outputs<'_, '_> {
+impl<F: Float> std::fmt::Debug for Outputs<'_, '_, F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Outputs")
             .field("channels", &self.main.width)
@@ -171,19 +167,19 @@ impl std::fmt::Debug for Outputs<'_, '_> {
 }
 
 /// One channel's input and output together.
-pub enum Channel<'s> {
+pub enum Channel<'s, F: Float = f32> {
     /// Separate buffers: read `input`, write `output`.
     Split {
         /// The input samples.
-        input: &'s [f32],
+        input: &'s [F],
         /// Where the output goes.
-        output: &'s mut [f32],
+        output: &'s mut [F],
     },
     /// One buffer: it holds the input now and must hold the output after.
-    InPlace(&'s mut [f32]),
+    InPlace(&'s mut [F]),
 }
 
-impl std::fmt::Debug for Channel<'_> {
+impl<F: Float> std::fmt::Debug for Channel<'_, F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Channel::Split { input, .. } => f
@@ -198,7 +194,7 @@ impl std::fmt::Debug for Channel<'_> {
     }
 }
 
-impl Channel<'_> {
+impl<F: Float> Channel<'_, F> {
     /// Apply `f` sample by sample, whichever form this is.
     // `#[inline]` is load-bearing: without it the loop is compiled apart from
     // the node's closure, whose captured state (a filter's two state
@@ -206,7 +202,7 @@ impl Channel<'_> {
     // store and a reload on the recurrence — measured 1.5× slower on a chain
     // of SVFs.
     #[inline]
-    pub fn map(self, mut f: impl FnMut(f32) -> f32) {
+    pub fn map(self, mut f: impl FnMut(F) -> F) {
         match self {
             Channel::Split { input, output } => {
                 for (o, &i) in output.iter_mut().zip(input) {
@@ -222,7 +218,7 @@ impl Channel<'_> {
     }
 }
 
-impl<'a> Io<'a> {
+impl<'a, F: Float> Io<'a, F> {
     /// Build a call's buffers, enforcing the length guarantee.
     ///
     /// # Panics
@@ -237,8 +233,8 @@ impl<'a> Io<'a> {
     pub(crate) fn new(
         max: MaxBlock,
         frames: usize,
-        inputs: &'a [&'a [f32]],
-        outputs: &'a mut [&'a mut [f32]],
+        inputs: &'a [&'a [F]],
+        outputs: &'a mut [&'a mut [F]],
         silent: SilenceMask,
         constant: ConstantMask,
         in_place: InPlaceMask,
@@ -482,7 +478,7 @@ impl<'a> Io<'a> {
     /// # Panics
     ///
     /// If `c` is not below [`input_count`](Self::input_count).
-    pub fn input(&self, c: usize) -> &[f32] {
+    pub fn input(&self, c: usize) -> &[F] {
         let p = self.in_port(c);
         if self.in_place.get(p) {
             &self.outputs[p][..]
@@ -496,7 +492,7 @@ impl<'a> Io<'a> {
     /// # Panics
     ///
     /// If `c` is not below [`output_count`](Self::output_count).
-    pub fn output(&mut self, c: usize) -> &mut [f32] {
+    pub fn output(&mut self, c: usize) -> &mut [F] {
         let p = self.out_port(c);
         &mut self.outputs[p][..]
     }
@@ -506,7 +502,7 @@ impl<'a> Io<'a> {
     /// # Panics
     ///
     /// If `c` is out of range for the main input or output bus.
-    pub fn channel(&mut self, c: usize) -> Channel<'_> {
+    pub fn channel(&mut self, c: usize) -> Channel<'_, F> {
         let (i, o) = (self.in_port(c), self.out_port(c));
         if self.in_place.get(i) {
             debug_assert_eq!(i, o, "a channel in place is one port");
@@ -522,7 +518,7 @@ impl<'a> Io<'a> {
     /// Every input and every output at once, for a node that mixes across
     /// channels: the main buses by channel, any other bus by its handle. An
     /// aliased channel is reachable only through the outputs.
-    pub fn split(&mut self) -> (Inputs<'_>, Outputs<'_, 'a>) {
+    pub fn split(&mut self) -> (Inputs<'_, F>, Outputs<'_, 'a, F>) {
         (
             Inputs {
                 slices: self.inputs,
@@ -542,7 +538,7 @@ impl<'a> Io<'a> {
     ///
     /// If the handle reaches past this node's input ports: one taken from
     /// another shape.
-    pub fn bus_in(&self, bus: InBus) -> BusIn<'_> {
+    pub fn bus_in(&self, bus: InBus) -> BusIn<'_, F> {
         bus_in(self.inputs, bus, self.in_place)
     }
 
@@ -551,7 +547,7 @@ impl<'a> Io<'a> {
     /// # Panics
     ///
     /// If the handle reaches past this node's output ports.
-    pub fn bus_out(&mut self, bus: OutBus) -> BusOut<'_, 'a> {
+    pub fn bus_out(&mut self, bus: OutBus) -> BusOut<'_, 'a, F> {
         BusOut {
             slices: &mut self.outputs[bus.0.range()],
         }
@@ -644,7 +640,7 @@ impl<'a> Io<'a> {
     }
 }
 
-impl<'s> Inputs<'s> {
+impl<'s, F: Float> Inputs<'s, F> {
     /// Channels of the main input bus.
     #[must_use]
     pub fn len(&self) -> usize {
@@ -663,7 +659,7 @@ impl<'s> Inputs<'s> {
     ///
     /// If `c` is aliased in place (read it through the outputs) or past the
     /// main bus.
-    pub fn get(&self, c: usize) -> &[f32] {
+    pub fn get(&self, c: usize) -> &[F] {
         assert!(
             c < self.len(),
             "input {c} is past the main bus ({} channels); another bus is read by its handle",
@@ -682,12 +678,12 @@ impl<'s> Inputs<'s> {
     /// # Panics
     ///
     /// If the handle reaches past this node's input ports.
-    pub fn bus(&self, bus: InBus) -> BusIn<'s> {
+    pub fn bus(&self, bus: InBus) -> BusIn<'s, F> {
         bus_in(self.slices, bus, self.in_place)
     }
 }
 
-impl<'s, 'a> Outputs<'s, 'a> {
+impl<'s, 'a, F: Float> Outputs<'s, 'a, F> {
     /// Channels of the main output bus.
     #[must_use]
     pub fn len(&self) -> usize {
@@ -705,7 +701,7 @@ impl<'s, 'a> Outputs<'s, 'a> {
     /// # Panics
     ///
     /// If `c` is past the main bus.
-    pub fn get(&mut self, c: usize) -> &mut [f32] {
+    pub fn get(&mut self, c: usize) -> &mut [F] {
         assert!(
             c < self.len(),
             "output {c} is past the main bus ({} channels); another bus is written by its handle",
@@ -715,7 +711,7 @@ impl<'s, 'a> Outputs<'s, 'a> {
     }
 
     /// Every main output channel.
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut [f32]> + use<'_, 's, 'a> {
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut [F]> + use<'_, 's, 'a, F> {
         self.slices[self.main.range()].iter_mut().map(|s| &mut **s)
     }
 
@@ -724,14 +720,14 @@ impl<'s, 'a> Outputs<'s, 'a> {
     /// # Panics
     ///
     /// If the handle reaches past this node's output ports.
-    pub fn bus(&mut self, bus: OutBus) -> BusOut<'_, 'a> {
+    pub fn bus(&mut self, bus: OutBus) -> BusOut<'_, 'a, F> {
         BusOut {
             slices: &mut self.slices[bus.0.range()],
         }
     }
 }
 
-impl<'s, 'a> Outputs<'s, 'a> {
+impl<'s, 'a, F: Float> Outputs<'s, 'a, F> {
     /// Several output buses at once, by their handles in port order, so a node
     /// that writes more than one bus in a pass (a split's bands, a plugin's
     /// buses) holds them together.
@@ -743,8 +739,8 @@ impl<'s, 'a> Outputs<'s, 'a> {
     pub fn buses<'h>(
         &mut self,
         buses: &'h [OutBus],
-    ) -> impl Iterator<Item = BusOut<'_, 'a>> + use<'_, 'h, 's, 'a> {
-        let mut rest: &mut [&'a mut [f32]] = &mut self.slices[..];
+    ) -> impl Iterator<Item = BusOut<'_, 'a, F>> + use<'_, 'h, 's, 'a, F> {
+        let mut rest: &mut [&'a mut [F]] = &mut self.slices[..];
         let mut at = 0;
         buses.iter().map(move |bus| {
             let span = bus.0.range();
@@ -761,7 +757,7 @@ impl<'s, 'a> Outputs<'s, 'a> {
     }
 }
 
-impl<'s> BusIn<'s> {
+impl<'s, F: Float> BusIn<'s, F> {
     /// The bus's channels.
     #[must_use]
     pub fn len(&self) -> usize {
@@ -779,7 +775,7 @@ impl<'s> BusIn<'s> {
     /// # Panics
     ///
     /// When it reaches a channel aliased in place.
-    pub fn channels(self) -> impl Iterator<Item = &'s [f32]> {
+    pub fn channels(self) -> impl Iterator<Item = &'s [F]> {
         (0..self.len()).map(move |c| self.get(c))
     }
 
@@ -788,7 +784,7 @@ impl<'s> BusIn<'s> {
     /// # Panics
     ///
     /// If `c` is past the bus, or aliased in place.
-    pub fn get(&self, c: usize) -> &'s [f32] {
+    pub fn get(&self, c: usize) -> &'s [F] {
         assert!(
             !self.in_place.get(self.first + c),
             "input {c} of the bus is in place; it is in the output buffer"
@@ -797,7 +793,7 @@ impl<'s> BusIn<'s> {
     }
 }
 
-impl<'s, 'a> BusOut<'s, 'a> {
+impl<'s, 'a, F: Float> BusOut<'s, 'a, F> {
     /// The bus's channels.
     #[must_use]
     pub fn len(&self) -> usize {
@@ -815,23 +811,23 @@ impl<'s, 'a> BusOut<'s, 'a> {
     /// # Panics
     ///
     /// If `c` is past the bus.
-    pub fn get(&mut self, c: usize) -> &mut [f32] {
+    pub fn get(&mut self, c: usize) -> &mut [F] {
         &mut self.slices[c][..]
     }
 
     /// Every channel of the bus.
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut [f32]> + use<'_, 's, 'a> {
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut [F]> + use<'_, 's, 'a, F> {
         self.slices.iter_mut().map(|s| &mut **s)
     }
 
     /// Every channel of the bus, for as long as the view was lent.
-    pub fn into_channels(self) -> impl Iterator<Item = &'s mut [f32]> + use<'s, 'a> {
+    pub fn into_channels(self) -> impl Iterator<Item = &'s mut [F]> + use<'s, 'a, F> {
         self.slices.iter_mut().map(|s| &mut **s)
     }
 }
 
 /// The view of input bus `bus` over `slices`.
-fn bus_in<'s>(slices: &'s [&'s [f32]], bus: InBus, in_place: InPlaceMask) -> BusIn<'s> {
+fn bus_in<'s, F: Float>(slices: &'s [&'s [F]], bus: InBus, in_place: InPlaceMask) -> BusIn<'s, F> {
     BusIn {
         slices: &slices[bus.0.range()],
         first: usize::from(bus.0.first),

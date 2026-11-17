@@ -25,6 +25,8 @@ tutti-types = { version = "0.0.1", path = "../tutti-types" }
 libm = "0.2.15"
 # The `Error` derive of `BufferError` and `I24OutOfRange`.
 thiserror = { workspace = true, features = ["std"] }
+# `Float` is `Pod`: the engine's arena casts lines of it to slices. No std feature.
+bytemuck = "1.16"
 # `I24`'s `Serialize` and `Deserialize`, behind the `serde` feature.
 serde = { version = "1", optional = true, features = ["derive"] }
 

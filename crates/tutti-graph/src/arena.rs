@@ -3,18 +3,19 @@
 //!
 //! One `Vec` of 64-byte [`Line`]s holds every slot; a slot is `stride` lines,
 //! so every channel a node sees starts on a cache line and its length is
-//! padded to a SIMD multiple (one aligned arena per port kind).
+//! padded to a SIMD multiple (one aligned arena per port kind). The lines are
+//! plain bytes: an `Arena<F>` reads them as samples of the sample format `F`.
 //!
 //! # Why no `unsafe`
 //!
-//! A node needs `&[f32]` inputs and `&mut [f32]` outputs **from the same
+//! A node needs `&[F]` inputs and `&mut [F]` outputs **from the same
 //! arena at once**. The obvious spelling is raw pointers plus a proof that the
 //! colouring kept them disjoint — new non-FFI `unsafe`, which the crate
 //! avoids whenever a safe construct will do. One will: [`borrow_sorted`] walks the requested slots in order
 //! and peels them off with `split_at_mut`, so the borrow checker, not a
 //! comment, proves disjointness. If the colouring were ever wrong and asked
 //! for a written slot twice, the result is a panic naming the slot — never
-//! aliasing. The reinterpretation of `[Line]` as `[f32]` is `bytemuck`'s
+//! aliasing. The reinterpretation of `[Line]` as `[F]` is `bytemuck`'s
 //! checked `Pod` cast.
 //!
 //! **Node calls pay no sort.** A node op's requests are sorted once, when the
@@ -28,8 +29,12 @@
 //! skip the walk entirely (`plan::Form`).
 
 use bytemuck::{Pod, Zeroable};
+use std::marker::PhantomData;
+use std::mem::size_of;
 
-/// Floats per line: 64 bytes.
+use tutti_buffers::Float;
+
+/// `f32` lanes per line: 64 bytes.
 pub(crate) const LANES: usize = 16;
 
 /// One cache line of samples. The alignment is the type's, so every slot the
@@ -112,36 +117,41 @@ pub(crate) fn borrow_sorted<'a, T>(
 }
 
 /// The audio arena: `slots × stride` lines.
-pub(crate) struct Arena {
+pub(crate) struct Arena<F: Float> {
     lines: Vec<Line>,
+    /// Lines per slot.
     stride: usize,
+    format: PhantomData<fn() -> F>,
 }
 
-impl Arena {
+impl<F: Float> Arena<F> {
     /// An arena of `slots` zeroed slots, each holding at least `max_block`
     /// samples. Control thread.
     pub(crate) fn new(slots: usize, max_block: usize) -> Self {
-        let stride = max_block.div_ceil(LANES).max(1);
+        let stride = (max_block * size_of::<F>())
+            .div_ceil(size_of::<Line>())
+            .max(1);
         Self {
             lines: vec![Line::zeroed(); slots * stride],
             stride,
+            format: PhantomData,
         }
     }
 
     /// Slot `s`'s first `frames` samples.
     #[inline]
-    pub(crate) fn slot(&self, s: u32, frames: usize) -> &[f32] {
+    pub(crate) fn slot(&self, s: u32, frames: usize) -> &[F] {
         // `[start..][..stride]` rather than `[start..end]`: two length checks
         // and no `start <= end` one, on the hottest indexing in the executor.
         let lines = &self.lines[s as usize * self.stride..][..self.stride];
-        &bytemuck::cast_slice::<Line, f32>(lines)[..frames]
+        &bytemuck::cast_slice::<Line, F>(lines)[..frames]
     }
 
     /// Slot `s`'s first `frames` samples, mutably.
     #[inline]
-    pub(crate) fn slot_mut(&mut self, s: u32, frames: usize) -> &mut [f32] {
+    pub(crate) fn slot_mut(&mut self, s: u32, frames: usize) -> &mut [F] {
         let lines = &mut self.lines[s as usize * self.stride..][..self.stride];
-        &mut bytemuck::cast_slice_mut::<Line, f32>(lines)[..frames]
+        &mut bytemuck::cast_slice_mut::<Line, F>(lines)[..frames]
     }
 
     /// A [`Direct`](crate::plan::Direct) node's buffers: `I` inputs (an
@@ -159,13 +169,13 @@ impl Arena {
         &mut self,
         frames: usize,
         d: &crate::plan::Direct,
-    ) -> ([&[f32]; I], [&mut [f32]; O]) {
+    ) -> ([&[F]; I], [&mut [F]; O]) {
         use crate::plan::Direct;
         let st = self.stride;
         let mut rest: &mut [Line] = &mut self.lines;
         let mut base = 0usize;
-        let mut reads: [&[f32]; 4] = [&[]; 4];
-        let mut outs: [&mut [f32]; O] = std::array::from_fn(|_| &mut [][..]);
+        let mut reads: [&[F]; 4] = [&[]; 4];
+        let mut outs: [&mut [F]; O] = std::array::from_fn(|_| &mut [][..]);
         let entries = d.slots.iter().zip(&d.role).zip(reads.iter_mut());
         for ((&slot, &role), read) in entries.take(usize::from(d.count)) {
             let slot = slot as usize;
@@ -177,11 +187,9 @@ impl Arena {
             match role {
                 Direct::READ => {
                     let cur: &[Line] = cur;
-                    *read = &bytemuck::cast_slice::<Line, f32>(cur)[..frames];
+                    *read = &bytemuck::cast_slice::<Line, F>(cur)[..frames];
                 }
-                c => {
-                    outs[usize::from(c)] = &mut bytemuck::cast_slice_mut::<Line, f32>(cur)[..frames]
-                }
+                c => outs[usize::from(c)] = &mut bytemuck::cast_slice_mut::<Line, F>(cur)[..frames],
             }
         }
         let ins = std::array::from_fn(|c| match d.input[c] {
@@ -200,7 +208,7 @@ impl Arena {
 
     /// `src` for reading and `dst` for writing, at once. They must differ.
     #[inline]
-    pub(crate) fn pair(&mut self, src: u32, dst: u32, frames: usize) -> (&[f32], &mut [f32]) {
+    pub(crate) fn pair(&mut self, src: u32, dst: u32, frames: usize) -> (&[F], &mut [F]) {
         assert_ne!(src, dst, "pair() of one slot");
         let st = self.stride;
         let (lo, hi) = (src.min(dst) as usize, src.max(dst) as usize);
@@ -209,8 +217,8 @@ impl Arena {
         let high = &mut b[..st];
         let (s, d) = if src < dst { (low, high) } else { (high, low) };
         (
-            &bytemuck::cast_slice::<Line, f32>(s)[..frames],
-            &mut bytemuck::cast_slice_mut::<Line, f32>(d)[..frames],
+            &bytemuck::cast_slice::<Line, F>(s)[..frames],
+            &mut bytemuck::cast_slice_mut::<Line, F>(d)[..frames],
         )
     }
 
@@ -218,12 +226,12 @@ impl Arena {
     /// entry of `outs` — a crossfade's scratch, whose slots are its outgoing
     /// unit's output channels in order.
     #[inline]
-    pub(crate) fn leading_mut<'a>(&'a mut self, frames: usize, outs: &mut [&'a mut [f32]]) {
+    pub(crate) fn leading_mut<'a>(&'a mut self, frames: usize, outs: &mut [&'a mut [F]]) {
         for (o, lines) in outs
             .iter_mut()
             .zip(self.lines.chunks_exact_mut(self.stride))
         {
-            *o = &mut bytemuck::cast_slice_mut::<Line, f32>(lines)[..frames];
+            *o = &mut bytemuck::cast_slice_mut::<Line, F>(lines)[..frames];
         }
     }
 
@@ -245,15 +253,15 @@ impl Arena {
         );
     }
 
-    /// Hand the sorted `reqs` to [`borrow_sorted`], as `f32` slices of
+    /// Hand the sorted `reqs` to [`borrow_sorted`], as slices of
     /// `frames`.
     #[inline]
     pub(crate) fn borrow<'a>(
         &'a mut self,
         frames: usize,
         reqs: &[(u32, Role)],
-        ins: &mut [&'a [f32]],
-        outs: &mut [&'a mut [f32]],
+        ins: &mut [&'a [F]],
+        outs: &mut [&'a mut [F]],
     ) {
         let stride = self.stride;
         borrow_sorted(
@@ -261,10 +269,10 @@ impl Arena {
             stride,
             reqs,
             |port, lines| {
-                ins[port as usize] = &bytemuck::cast_slice::<Line, f32>(lines)[..frames];
+                ins[port as usize] = &bytemuck::cast_slice::<Line, F>(lines)[..frames];
             },
             |port, lines| {
-                outs[port as usize] = &mut bytemuck::cast_slice_mut::<Line, f32>(lines)[..frames];
+                outs[port as usize] = &mut bytemuck::cast_slice_mut::<Line, F>(lines)[..frames];
             },
         );
     }
@@ -272,7 +280,7 @@ impl Arena {
     /// The arena's samples, as one aligned slice — for tests asserting the
     /// alignment claim.
     #[cfg(test)]
-    pub(crate) fn base(&self) -> *const f32 {
+    pub(crate) fn base(&self) -> *const F {
         self.lines.as_ptr().cast()
     }
 }
@@ -286,7 +294,7 @@ mod tests {
     #[test]
     fn slots_are_cache_line_aligned() {
         for max_block in [1, 7, 64, 100, 1000] {
-            let mut a = Arena::new(5, max_block);
+            let mut a = Arena::<f32>::new(5, max_block);
             assert_eq!(a.base() as usize % 64, 0);
             for s in 0..5 {
                 assert_eq!(a.slot_mut(s, 1).as_ptr() as usize % 64, 0, "slot {s}");
@@ -299,7 +307,7 @@ mod tests {
     /// slot.
     #[test]
     fn borrow_hands_each_port_its_slot() {
-        let mut a = Arena::new(6, 16);
+        let mut a = Arena::<f32>::new(6, 16);
         for s in 0..6u32 {
             a.slot_mut(s, 16).fill(s as f32);
         }
@@ -329,7 +337,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "written and also borrowed")]
     fn borrow_refuses_a_write_that_aliases() {
-        let mut a = Arena::new(3, 16);
+        let mut a = Arena::<f32>::new(3, 16);
         let reqs = [(2, Role::Read(0)), (2, Role::Write(0))];
         let mut ins: [&[f32]; MAX_PORTS] = [&[]; MAX_PORTS];
         let mut outs: [&mut [f32]; MAX_PORTS] = std::array::from_fn(|_| &mut [][..]);
@@ -341,7 +349,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "sorted")]
     fn borrow_refuses_unsorted_requests() {
-        let mut a = Arena::new(4, 16);
+        let mut a = Arena::<f32>::new(4, 16);
         let reqs = [(3, Role::Write(0)), (1, Role::Read(0))];
         let mut ins: [&[f32]; MAX_PORTS] = [&[]; MAX_PORTS];
         let mut outs: [&mut [f32]; MAX_PORTS] = std::array::from_fn(|_| &mut [][..]);

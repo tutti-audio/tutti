@@ -278,6 +278,9 @@ impl Sample for f64 {
 /// generic code over `F: Float`, or the qualified `<f32 as Float>::sqrt(x)`,
 /// reaches `libm`.
 ///
+/// A `Float` is plain bytes ([`Pod`](bytemuck::Pod)), so a buffer of lines of
+/// it can be cast to a slice of it.
+///
 /// ```
 /// use tutti_buffers::Float;
 ///
@@ -287,6 +290,7 @@ impl Sample for f64 {
 /// ```
 pub trait Float:
     Sample
+    + bytemuck::Pod
     + Display
     + Sum
     + Add<Output = Self>

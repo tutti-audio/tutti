@@ -41,7 +41,8 @@ use tutti_rt::{FaultLatch, RtScope};
 use tutti_rt::{Overflow, RingReader, RingWriter, ring};
 use tutti_types::{ChannelLayout, Frame, Samples};
 
-use crate::slots::AudioSlots;
+use crate::slots::{AudioSlots, for_f32};
+use tutti_buffers::Float;
 
 /// The executor's end of a tap: every lane's ring producer, written together.
 ///
@@ -186,7 +187,7 @@ impl TapWriter {
 /// is counted lost, once for the tap. With no reader there is nothing to write
 /// or count.
 #[inline]
-pub(crate) fn tap_op<A: AudioSlots>(
+pub(crate) fn tap_op<F: Float, A: AudioSlots<F>>(
     tap: &mut TapWriter,
     arena: &A,
     srcs: &[u32],
@@ -201,7 +202,10 @@ pub(crate) fn tap_op<A: AudioSlots>(
         tap.note(start, take);
     }
     for (lane, &src) in tap.lanes.iter_mut().zip(srcs) {
-        let pushed = lane.push_slice(&arena.slot(src, frames)[..take]);
+        let mut pushed = 0;
+        for_f32(&arena.slot(src, frames)[..take], |chunk| {
+            pushed += lane.push_slice(chunk);
+        });
         // A reader dropped since the check above refuses its pushes.
         debug_assert!(
             pushed == take || lane.is_disconnected(),

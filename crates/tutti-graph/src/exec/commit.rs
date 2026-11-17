@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize};
+use tutti_buffers::Float;
 
 use tutti_curve::FadeLaw;
 use tutti_rt::RtScope;
@@ -39,13 +40,13 @@ use crate::{EdgeFade, EdgeId, EventTapId, MeterId, TapId};
 /// It carries the unit's [`Wake`]: the executor's clone of the flag lives and
 /// dies with the unit, so its drop is the control side's too, and the audio
 /// thread is never the last owner of the flag's storage.
-pub(crate) struct NodeBox {
-    node: Box<dyn Node>,
+pub(crate) struct NodeBox<F: Float = f32> {
+    node: Box<dyn Node<F>>,
     wake: Wake,
 }
 
-impl NodeBox {
-    pub(crate) fn new(node: Box<dyn Node>, wake: Wake) -> Self {
+impl<F: Float> NodeBox<F> {
+    pub(crate) fn new(node: Box<dyn Node<F>>, wake: Wake) -> Self {
         Self { node, wake }
     }
 
@@ -59,7 +60,7 @@ impl NodeBox {
     /// The unit, out of its box — control side, to re-prepare it. Leaves a
     /// zero-sized placeholder behind for the box's own drop, which therefore
     /// frees nothing (a `Box` of a zero-sized type never allocated).
-    pub(crate) fn into_inner(mut self) -> Box<dyn Node> {
+    pub(crate) fn into_inner(mut self) -> Box<dyn Node<F>> {
         std::mem::replace(&mut self.node, Box::new(Vacant))
     }
 }
@@ -67,31 +68,31 @@ impl NodeBox {
 /// What a [`NodeBox`] holds once its unit has been taken out.
 pub(super) struct Vacant;
 
-impl Node for Vacant {
+impl<F: Float> Node<F> for Vacant {
     fn shape(&self) -> crate::node::Shape {
         crate::node::Shape::EMPTY
     }
     fn prepare(&mut self, _: &Prepare) {}
-    fn process(&mut self, _: &Cx<'_>, _: Io<'_>) -> Status {
+    fn process(&mut self, _: &Cx<'_>, _: Io<'_, F>) -> Status {
         Status::Silent
     }
     fn reset(&mut self) {}
 }
 
-impl Deref for NodeBox {
-    type Target = dyn Node;
-    fn deref(&self) -> &(dyn Node + 'static) {
+impl<F: Float> Deref for NodeBox<F> {
+    type Target = dyn Node<F>;
+    fn deref(&self) -> &(dyn Node<F> + 'static) {
         &*self.node
     }
 }
 
-impl DerefMut for NodeBox {
-    fn deref_mut(&mut self) -> &mut (dyn Node + 'static) {
+impl<F: Float> DerefMut for NodeBox<F> {
+    fn deref_mut(&mut self) -> &mut (dyn Node<F> + 'static) {
         &mut *self.node
     }
 }
 
-impl Drop for NodeBox {
+impl<F: Float> Drop for NodeBox<F> {
     fn drop(&mut self) {
         RtScope::check_outside("a unit");
     }
@@ -101,15 +102,15 @@ impl Drop for NodeBox {
 /// the control side with the commit that asks for it, so its scratch is
 /// allocated there; it travels back in a commit box, so it is freed there
 /// too.
-pub(crate) struct Crossfade {
+pub(crate) struct Crossfade<F: Float = f32> {
     key: NodeKey,
     /// The unit fading out, once the fade has started.
-    pub(super) out: Option<NodeBox>,
+    pub(super) out: Option<NodeBox<F>>,
     /// The unit fading in, while this fade waits behind the one running at
     /// its key. It moves into the store when this fade starts.
-    pub(super) waiting: Option<NodeBox>,
+    pub(super) waiting: Option<NodeBox<F>>,
     /// The outgoing unit's outputs, one aligned slot per channel.
-    pub(super) scratch: Arena,
+    pub(super) scratch: Arena<F>,
     /// Frames of the fade rendered so far.
     pub(super) done: usize,
     pub(super) len: usize,
@@ -120,7 +121,7 @@ pub(crate) struct Crossfade {
     pub(super) chase: Vec<Event>,
 }
 
-impl Crossfade {
+impl<F: Float> Crossfade<F> {
     /// The units it carries back: the outgoing one, a waiting one that
     /// never ran, or both after a re-prepare's cut.
     pub(crate) fn units(&self) -> usize {
@@ -133,7 +134,7 @@ impl Crossfade {
     }
 }
 
-impl Drop for Crossfade {
+impl<F: Float> Drop for Crossfade<F> {
     fn drop(&mut self) {
         RtScope::check_outside("a crossfade");
     }
@@ -141,15 +142,15 @@ impl Drop for Crossfade {
 
 /// A unit a commit places, with everything built for it on the control
 /// side.
-pub(super) struct Incoming {
+pub(super) struct Incoming<F: Float = f32> {
     pub(super) key: NodeKey,
     pub(super) idx: UnitIdx,
     pub(super) generation: u32,
-    pub(super) node: NodeBox,
+    pub(super) node: NodeBox<F>,
     /// The crossfade it arrives with, over the unit at its key.
-    pub(super) fade: Option<Box<Crossfade>>,
+    pub(super) fade: Option<Box<Crossfade<F>>>,
     pub(super) params: ParamState,
-    pub(super) mode: ModeState,
+    pub(super) mode: ModeState<F>,
     /// The held-key tables of a unit placed now, sized for its shape.
     pub(super) keys: Keys,
     /// The tables it writes into while it waits behind a running fade
@@ -158,10 +159,10 @@ pub(super) struct Incoming {
 }
 
 /// A kept unit's rebuilt bypass line.
-pub(super) struct Relined {
+pub(super) struct Relined<F: Float = f32> {
     pub(super) idx: UnitIdx,
     pub(super) latency: usize,
-    pub(super) line: Option<BypassLine>,
+    pub(super) line: Option<BypassLine<F>>,
 }
 
 /// A plan and the unit changes that go with it — what travels to the
@@ -170,7 +171,7 @@ pub(super) struct Relined {
 /// Before it is applied it holds the new plan and the incoming units; after,
 /// everything the executor replaced. Dropping it on the audio thread panics
 /// in a debug build.
-pub(crate) struct Commit {
+pub(crate) struct Commit<F: Float = f32> {
     /// The editor's count of commits sent, this one included: a scheduled
     /// command checked against this commit waits until it is applied.
     pub(super) seq: u64,
@@ -179,11 +180,11 @@ pub(crate) struct Commit {
     pub(super) suspend: Option<Prepare>,
     pub(super) plan: Option<Arc<Plan>>,
     pub(super) delta: Delta,
-    pub(super) incoming: Vec<Incoming>,
+    pub(super) incoming: Vec<Incoming<F>>,
     /// Kept units whose declared latency changed, each with its rebuilt
     /// bypass line (`Editor::set_latency`).
-    pub(super) relined: Vec<Relined>,
-    pub(super) retired: Vec<(NodeKey, NodeBox)>,
+    pub(super) relined: Vec<Relined<F>>,
+    pub(super) retired: Vec<(NodeKey, NodeBox<F>)>,
     /// Param state the executor let go of, carried back to be freed on the
     /// control side: a retired unit's, and one built for an incoming unit
     /// that crossfades in over one already at its key, which keeps its own
@@ -191,15 +192,15 @@ pub(crate) struct Commit {
     pub(super) spare_params: Vec<ParamState>,
     /// Mode state the executor let go of (a retired unit's, an unused
     /// incoming one's), freed on the control side.
-    pub(super) spare_modes: Vec<ModeState>,
+    pub(super) spare_modes: Vec<ModeState<F>>,
     /// Bypass lines a rebuilt one replaced.
-    pub(super) spare_lines: Vec<BypassLine>,
+    pub(super) spare_lines: Vec<BypassLine<F>>,
     /// Held-key tables the executor let go of, freed on the control side.
     pub(super) spare_held: Vec<Tables>,
-    pub(super) old_state: Option<State>,
+    pub(super) old_state: Option<State<F>>,
     /// The state the plan needs, built on the control side (`stage.rs`);
     /// after applying, what applying did not use.
-    pub(super) staged: Option<Box<Staged>>,
+    pub(super) staged: Option<Box<Staged<F>>>,
     /// The lists applying fills, with room reserved here.
     pub(super) gone: Gone,
     /// A re-prepare's first half: where the units' held-key tables wait for
@@ -222,25 +223,25 @@ pub(crate) struct Opened {
     pub(crate) meters: Vec<(MeterId, MeterWriter)>,
 }
 
-impl Drop for Commit {
+impl<F: Float> Drop for Commit<F> {
     fn drop(&mut self) {
         RtScope::check_outside("Commit");
     }
 }
 
-impl Commit {
+impl<F: Float> Commit<F> {
     /// `params` builds each incoming unit's param state from its key and
     /// declared port count (the editor's range cells).
     pub(crate) fn build(
         seq: u64,
         plan: Arc<Plan>,
         delta: Delta,
-        mut units: BTreeMap<NodeKey, Box<dyn Node>>,
+        mut units: BTreeMap<NodeKey, Box<dyn Node<F>>>,
         mut params: impl FnMut(NodeKey, usize, usize) -> ParamState,
-        mut modes: impl FnMut(NodeKey) -> ModeState,
+        mut modes: impl FnMut(NodeKey) -> ModeState<F>,
         mut wakes: impl FnMut(NodeKey) -> Wake,
         opened: Opened,
-    ) -> Box<Commit> {
+    ) -> Box<Commit<F>> {
         let wanted = delta
             .insert
             .iter()
@@ -343,7 +344,7 @@ impl Commit {
     /// and comes back in this box, and the executor adopts `prepare`.
     /// `units` is how many the running plan has, reserved here so applying
     /// moves them in without growing.
-    pub(crate) fn suspend(seq: u64, prepare: Prepare, units: usize) -> Box<Commit> {
+    pub(crate) fn suspend(seq: u64, prepare: Prepare, units: usize) -> Box<Commit<F>> {
         Box::new(Self {
             seq,
             suspend: Some(prepare),
@@ -382,7 +383,7 @@ impl Commit {
     }
 
     /// The units applying removed, out of their boxes (control side).
-    pub(crate) fn take_retired(&mut self) -> Vec<(NodeKey, Box<dyn Node>)> {
+    pub(crate) fn take_retired(&mut self) -> Vec<(NodeKey, Box<dyn Node<F>>)> {
         self.retired
             .drain(..)
             .map(|(k, b)| (k, b.into_inner()))
@@ -393,7 +394,7 @@ impl Commit {
 /// Send an applied box back to the editor. The push cannot fail by the
 /// credit count (module docs); were it ever full, or the editor gone (nothing
 /// will collect it), leak rather than free on the audio thread.
-pub(super) fn send_back(back: &mut RingWriter<Box<Commit>>, commit: Box<Commit>) {
+pub(super) fn send_back<F: Float>(back: &mut RingWriter<Box<Commit<F>>>, commit: Box<Commit<F>>) {
     if let Err(refused) = back.push(commit) {
         debug_assert!(
             refused.error == PushError::Disconnected,
@@ -408,7 +409,10 @@ pub(super) fn send_back(back: &mut RingWriter<Box<Commit>>, commit: Box<Commit>)
 /// The push cannot fail: the editor reserved this crossfade's slot before
 /// sending the commit that built it (module docs). Were it ever full, or the
 /// editor gone, leak rather than free on the audio thread.
-pub(super) fn retire_fade(fade_back: &mut RingWriter<Box<Crossfade>>, x: Box<Crossfade>) {
+pub(super) fn retire_fade<F: Float>(
+    fade_back: &mut RingWriter<Box<Crossfade<F>>>,
+    x: Box<Crossfade<F>>,
+) {
     if let Err(refused) = fade_back.push(x) {
         debug_assert!(
             refused.error == PushError::Disconnected,
@@ -424,9 +428,9 @@ pub(super) fn retire_fade(fade_back: &mut RingWriter<Box<Crossfade>>, x: Box<Cro
 ///
 /// Returns the keys of the unit that stopped writing, if the cut displaced
 /// one (`Keys::displace`).
-pub(super) fn cut_fades(
-    u: &mut Unit,
-    fade_back: &mut RingWriter<Box<Crossfade>>,
+pub(super) fn cut_fades<F: Float>(
+    u: &mut Unit<F>,
+    fade_back: &mut RingWriter<Box<Crossfade<F>>>,
 ) -> Option<Tables> {
     let mut stale = None;
     if let Some(mut q) = u.queued.take() {
@@ -447,11 +451,11 @@ pub(super) fn cut_fades(
 }
 
 /// The queue pair between an editor and its executor.
-pub(crate) struct Channels {
-    pub(crate) to_executor: RingWriter<Box<Commit>>,
-    pub(crate) returned: RingReader<Box<Commit>>,
+pub(crate) struct Channels<F: Float = f32> {
+    pub(crate) to_executor: RingWriter<Box<Commit<F>>>,
+    pub(crate) returned: RingReader<Box<Commit<F>>>,
     /// Crossfades coming back (see the module docs, "Crossfades").
-    pub(crate) faded: RingReader<Box<Crossfade>>,
+    pub(crate) faded: RingReader<Box<Crossfade<F>>>,
     /// The executor's play clock, as it last published it.
     pub(crate) play: PlayReader,
     /// Where the executor says which ports lost events.
@@ -470,10 +474,10 @@ pub(crate) struct Channels {
 }
 
 /// The executor's ends of the rings.
-pub(crate) struct ExecutorEnds {
-    pub(super) queue: RingReader<Box<Commit>>,
-    pub(super) back: RingWriter<Box<Commit>>,
-    pub(super) fade_back: RingWriter<Box<Crossfade>>,
+pub(crate) struct ExecutorEnds<F: Float = f32> {
+    pub(super) queue: RingReader<Box<Commit<F>>>,
+    pub(super) back: RingWriter<Box<Commit<F>>>,
+    pub(super) fade_back: RingWriter<Box<Crossfade<F>>>,
     pub(super) play: Arc<AtomicU64>,
     pub(super) losses: RingWriter<EventLoss>,
     pub(super) unreported: Arc<AtomicU64>,
@@ -484,10 +488,10 @@ pub(crate) struct ExecutorEnds {
 }
 
 /// Build the rings: the editor's ends and the executor's.
-pub(crate) fn channels() -> (Channels, ExecutorEnds) {
-    let (tx, rx) = ring::<Box<Commit>>(QUEUE_CAPACITY, Overflow::Refuse);
-    let (back_tx, back_rx) = ring::<Box<Commit>>(QUEUE_CAPACITY + 1, Overflow::Refuse);
-    let (fade_tx, fade_rx) = ring::<Box<Crossfade>>(FADE_CAPACITY, Overflow::Refuse);
+pub(crate) fn channels<F: Float>() -> (Channels<F>, ExecutorEnds<F>) {
+    let (tx, rx) = ring::<Box<Commit<F>>>(QUEUE_CAPACITY, Overflow::Refuse);
+    let (back_tx, back_rx) = ring::<Box<Commit<F>>>(QUEUE_CAPACITY + 1, Overflow::Refuse);
+    let (fade_tx, fade_rx) = ring::<Box<Crossfade<F>>>(FADE_CAPACITY, Overflow::Refuse);
     let play = Arc::new(AtomicU64::new(0));
     let unreported = Arc::new(AtomicU64::new(0));
     let (loss_tx, loss_rx) = ring::<EventLoss>(crate::loss::RING_CAPACITY, Overflow::Refuse);
