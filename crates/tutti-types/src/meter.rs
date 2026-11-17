@@ -608,14 +608,17 @@ fn floor_div_rem(value: BeatDuration, unit: BeatDuration) -> (i64, BeatDuration)
 
 /// Bar/beat for `beat` under a single signature, measured from `origin`.
 ///
-/// Shared by both [`Meter`] impls: the constant case passes beat 0 and bar 1, and
-/// [`MeterMap`] passes the start of whichever segment `beat` lands in.
+/// Shared by both [`Meter`] impls: the constant case passes beat 0, bar 1 and no
+/// last bar, and [`MeterMap`] passes the start of whichever segment `beat` lands
+/// in and, before the last change, the index of that segment's last bar, so a
+/// position just under the next change stays in this segment.
 #[inline]
 fn bar_position_within(
     beat: Beat,
     origin: Beat,
     origin_bar: BarNumber,
     signature: TimeSignature,
+    last_bar: Option<i64>,
 ) -> BarPosition {
     let bar_length = signature.bar_length();
     // Bar `k` starts at `origin + bar_length * k`, rounded as `Meter::bar_start`
@@ -626,10 +629,13 @@ fn bar_position_within(
     // downbeat, at every origin.
     let start_of = |bars: i64| origin + bar_length * bars as f64;
     let (mut bars, _) = floor_div_rem(beat - origin, bar_length);
-    if start_of(bars + 1) <= beat {
-        bars += 1;
+    if start_of(bars.saturating_add(1)) <= beat {
+        bars = bars.saturating_add(1);
     } else if start_of(bars) > beat {
         bars -= 1;
+    }
+    if let Some(last) = last_bar {
+        bars = bars.min(last);
     }
     let bar_start = start_of(bars);
     // In `[0, bar_length)`: `bar_start <= beat < start_of(bars + 1)`, and a
@@ -668,7 +674,7 @@ impl Meter for TimeSignature {
 
     #[inline]
     fn bar_at(&self, beat: Beat) -> BarPosition {
-        bar_position_within(beat, Beat(0.0), BarNumber::FIRST, *self)
+        bar_position_within(beat, Beat(0.0), BarNumber::FIRST, *self, None)
     }
 
     #[inline]
@@ -900,7 +906,17 @@ impl Meter for MeterMap {
     fn bar_at(&self, beat: Beat) -> BarPosition {
         let i = self.segment_at(beat);
         let change = self.changes[i];
-        bar_position_within(beat, change.beat, self.starts[i], change.signature)
+        let last_bar = self
+            .starts
+            .get(i + 1)
+            .map(|next| (*next - self.starts[i]).get() - 1);
+        bar_position_within(
+            beat,
+            change.beat,
+            self.starts[i],
+            change.signature,
+            last_bar,
+        )
     }
 
     fn bar_start(&self, bar: BarNumber) -> Beat {
@@ -1128,6 +1144,38 @@ mod tests {
                     assert_eq!(at.bar, bar, "{second} @ {origin}: bar {bar} at {start:?}");
                     assert!(at.is_downbeat(), "{second} @ {origin}: bar {bar}");
                     assert_eq!(at.bar_start, start, "{second} @ {origin}: bar {bar}");
+                }
+            }
+        }
+    }
+
+    /// A position just under a change belongs to a bar of the segment before it.
+    /// The edge is a change one step above where the segment before it would
+    /// start a bar: that bar start is under the change, so it is in the earlier
+    /// segment, but the change begins the next bar number.
+    #[test]
+    fn a_position_just_under_a_change_stays_in_the_segment_before() {
+        let sixty_fourth = TimeSignature::new(BeatsPerBar::of(1), NoteValue::of(64));
+        for first in [0.1, 1.0 / 3.0, 4.1] {
+            for signature in [sixty_fourth, seven_eight(), TimeSignature::default()] {
+                for bars in [1i64, 3, 7, 40] {
+                    let rounded_start = first + signature.bar_length().get() * bars as f64;
+                    let second = rounded_start.next_up();
+                    let map = MeterMap::new([
+                        MeterChange::new(Beat(0.0), TimeSignature::default()),
+                        MeterChange::new(Beat(first), signature),
+                        MeterChange::new(Beat(second), TimeSignature::default()),
+                    ]);
+                    let at_change = map.bar_at(Beat(second));
+                    let under = map.bar_at(Beat(rounded_start));
+                    assert!(
+                        under.bar < at_change.bar,
+                        "{signature} @ {first}, {bars} bars: {rounded_start} is bar {} and the change bar {}",
+                        under.bar,
+                        at_change.bar
+                    );
+                    assert_eq!(under.signature, signature);
+                    assert!(at_change.is_downbeat());
                 }
             }
         }
