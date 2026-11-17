@@ -10,8 +10,8 @@ use core::num::NonZeroU8;
 
 use tutti_ump::{
     BarAccents, Flex, FlexAddress, FlexTimeSignature, KeySignature, Letter, Message, Metronome,
-    MidiGroup, PlainTextKind, SharpsFlats, SysexMessage, Text, TextError, TicksPerQuarterNote, Ump,
-    flex_text_packets,
+    MidiGroup, PlainTextKind, SharpsFlats, SyllableError, SysexMessage, Text, TicksPerQuarterNote,
+    Ump, flex_text_packets,
 };
 
 use unicode_normalization::UnicodeNormalization;
@@ -67,9 +67,9 @@ pub enum DropReason {
     /// 1.8 and 7.5.9) and the SMF text is in no declared encoding, so it
     /// cannot be carried as it is.
     TextNotUtf8,
-    /// A text Flex Data cannot carry: one with a NUL, which is its padding,
-    /// or one past the 384 bytes of a message.
-    Text(TextError),
+    /// A text or lyric syllable Flex Data cannot carry: one with a NUL, which
+    /// is its padding, or one past the 384 bytes of a message.
+    Text(SyllableError),
     /// A lyric with nothing but breaks and hyphens: it has no syllable, and
     /// no syllable before it for the break to end (see [`MidiFile::to_clip`]).
     LyricWithoutSyllable,
@@ -341,7 +341,7 @@ fn message_text(bytes: &[u8]) -> std::result::Result<String, DropReason> {
 
 /// A text as its Flex packets, or why it has none.
 fn text(kind: PlainTextKind, bytes: &[u8]) -> std::result::Result<Vec<FileEvent>, DropReason> {
-    let text = Text::try_from(&*message_text(bytes)?).map_err(DropReason::Text)?;
+    let text = Text::try_from(&*message_text(bytes)?).map_err(|e| DropReason::Text(e.into()))?;
     let packets = flex_text_packets(MidiGroup::FIRST, FlexAddress::Group, kind, &text);
     Ok(packets.map(event).collect())
 }

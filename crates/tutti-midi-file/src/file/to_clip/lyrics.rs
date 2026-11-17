@@ -23,8 +23,7 @@
 //! - An event of several words is several messages at its tick, one a word.
 
 use tutti_ump::{
-    FlexAddress, LyricKind, MidiGroup, Syllable, SyllableBody, SyllableEnd, SyllableError,
-    flex_lyric_packets,
+    FlexAddress, LyricKind, MidiGroup, Syllable, SyllableBody, SyllableEnd, flex_lyric_packets,
 };
 
 use super::{DropReason, LyricChange, event};
@@ -184,11 +183,7 @@ fn syllable(body: &str, end: SyllableEnd) -> (Result<Option<Piece>, DropReason>,
     } else {
         match SyllableBody::try_from(trimmed) {
             Ok(body) => Ok(Some(Piece { body, end })),
-            Err(SyllableError::Text(e)) => Err(DropReason::Text(e)),
-            // The split leaves no separator in a body; `SyllableError` is
-            // `non_exhaustive`, and a refusal that is not the text's leaves
-            // no syllable.
-            Err(_) => Err(DropReason::LyricWithoutSyllable),
+            Err(e) => Err(DropReason::Text(e)),
         }
     };
     (piece, trimmed.len() != body.len())

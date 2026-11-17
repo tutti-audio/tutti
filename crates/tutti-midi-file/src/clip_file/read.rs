@@ -475,48 +475,44 @@ fn clip(input: &mut Input<'_>) -> Res<Clip> {
 // ---- the edge --------------------------------------------------------------
 
 /// The one place winnow's error becomes ours: the rule broken, and the packets
-/// left of the input where the rule began (`None` when a rule ran out of
-/// packets without naming itself). A rule that ran out of packets where a
-/// cut-off last packet stands (`torn`) names that instead.
-fn error_of(
-    e: &winnow::error::ErrMode<ContextError<Cause>>,
-    torn: bool,
-) -> (ClipFileError, Option<usize>) {
+/// left of the input where the rule began. The grammar ends at End of Clip, so
+/// a refusal that names no rule is a stream that ended before it. A rule that
+/// ran out of packets where a cut-off last packet stands (`torn`) names that
+/// instead.
+fn error_of(e: &winnow::error::ErrMode<ContextError<Cause>>, torn: bool) -> (ClipFileError, usize) {
     let cause = match e {
         winnow::error::ErrMode::Backtrack(e) | winnow::error::ErrMode::Cut(e) => {
             e.context().next().copied()
         }
         winnow::error::ErrMode::Incomplete(_) => None,
     };
-    let remaining = cause.map(|c| c.remaining);
-    (rule_of(cause.map(|c| c.fault), torn), remaining)
+    let Cause { fault, remaining } = cause.unwrap_or(Cause {
+        fault: Fault::MissingEndOfClip,
+        remaining: 0,
+    });
+    (rule_of(fault, torn), remaining)
 }
 
-fn rule_of(fault: Option<Fault>, torn: bool) -> ClipFileError {
+fn rule_of(fault: Fault, torn: bool) -> ClipFileError {
     match fault {
-        Some(Fault::MissingDctpq | Fault::MissingStartOfClip | Fault::MissingEndOfClip) | None
-            if torn =>
-        {
+        Fault::MissingDctpq | Fault::MissingStartOfClip | Fault::MissingEndOfClip if torn => {
             ClipFileError::MessageCutOff
         }
-        Some(Fault::MissingDctpq) => ClipFileError::MissingDctpq,
-        Some(Fault::ZeroDctpq) => ClipFileError::ZeroDctpq,
-        Some(Fault::DctpqNotFirst) => ClipFileError::DctpqNotFirst,
-        Some(Fault::DctpqDelta) => ClipFileError::DctpqDelta,
-        Some(Fault::ProfileOnDelta) => ClipFileError::ProfileOnDelta,
-        Some(Fault::PropertyExchange) => ClipFileError::PropertyExchange,
-        Some(Fault::DuplicateDctpq) => ClipFileError::DuplicateDctpq,
-        Some(Fault::MissingStartOfClip) => ClipFileError::MissingStartOfClip,
-        Some(Fault::DuplicateStartOfClip) => ClipFileError::DuplicateStartOfClip,
-        Some(Fault::DuplicateHeaderTempo) => ClipFileError::DuplicateHeaderTempo,
-        Some(Fault::DuplicateHeaderTimeSignature) => ClipFileError::DuplicateHeaderTimeSignature,
-        Some(Fault::MisplacedHeaderTempo) => ClipFileError::MisplacedHeaderTempo,
-        Some(Fault::MisplacedHeaderTimeSignature) => ClipFileError::MisplacedHeaderTimeSignature,
-        Some(Fault::MissingEndOfClip) => ClipFileError::MissingEndOfClip,
-        Some(Fault::TrailingData) => ClipFileError::TrailingData,
-        // Every rule that can refuse names its fault; a refusal with none ran
-        // out of packets inside a rule.
-        None => ClipFileError::StructureCutOff,
+        Fault::MissingDctpq => ClipFileError::MissingDctpq,
+        Fault::ZeroDctpq => ClipFileError::ZeroDctpq,
+        Fault::DctpqNotFirst => ClipFileError::DctpqNotFirst,
+        Fault::DctpqDelta => ClipFileError::DctpqDelta,
+        Fault::ProfileOnDelta => ClipFileError::ProfileOnDelta,
+        Fault::PropertyExchange => ClipFileError::PropertyExchange,
+        Fault::DuplicateDctpq => ClipFileError::DuplicateDctpq,
+        Fault::MissingStartOfClip => ClipFileError::MissingStartOfClip,
+        Fault::DuplicateStartOfClip => ClipFileError::DuplicateStartOfClip,
+        Fault::DuplicateHeaderTempo => ClipFileError::DuplicateHeaderTempo,
+        Fault::DuplicateHeaderTimeSignature => ClipFileError::DuplicateHeaderTimeSignature,
+        Fault::MisplacedHeaderTempo => ClipFileError::MisplacedHeaderTempo,
+        Fault::MisplacedHeaderTimeSignature => ClipFileError::MisplacedHeaderTimeSignature,
+        Fault::MissingEndOfClip => ClipFileError::MissingEndOfClip,
+        Fault::TrailingData => ClipFileError::TrailingData,
     }
 }
 
@@ -559,12 +555,11 @@ pub(crate) fn parse(body: &[u8]) -> Result<ParsedClip, ReadError> {
     let mut input = &packets[..];
     let clip = clip.parse_next(&mut input).map_err(|e| {
         let (cause, remaining) = error_of(&e, torn);
-        // A cut-off packet stands past the last whole one; a rule that named
-        // no start stopped where the input is.
+        // A cut-off packet stands past the last whole one.
         let at = if cause == ClipFileError::MessageCutOff {
             packets.len()
         } else {
-            packets.len() - remaining.unwrap_or(input.len())
+            packets.len() - remaining
         };
         refusal(&packets, at, cause)
     })?;

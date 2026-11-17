@@ -651,7 +651,10 @@ fn text_that_flex_cannot_carry_is_reported() {
     let reasons: Vec<_> = converted.dropped.iter().map(|d| d.reason).collect();
     assert_eq!(
         reasons,
-        [DropReason::TextNotUtf8, DropReason::Text(TextError::Nul)]
+        [
+            DropReason::TextNotUtf8,
+            DropReason::Text(TextError::Nul.into())
+        ]
     );
     assert_eq!(
         flex_texts(&converted.clip),
@@ -1173,9 +1176,9 @@ fn a_lyric_that_cannot_be_a_message_is_reported() {
         [
             DropReason::LyricWithoutSyllable,
             DropReason::LyricWithoutSyllable,
-            DropReason::Text(TextError::TooLong),
-            DropReason::Text(TextError::Nul),
-            DropReason::Text(TextError::TooLong),
+            DropReason::Text(TextError::TooLong.into()),
+            DropReason::Text(TextError::Nul.into()),
+            DropReason::Text(TextError::TooLong.into()),
         ]
     );
 }

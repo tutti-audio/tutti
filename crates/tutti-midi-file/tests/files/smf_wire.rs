@@ -622,3 +622,36 @@ fn every_format_word_reads_and_writes_back() {
         assert_eq!(read.to_bytes()[8..10], word.to_be_bytes(), "format {word}");
     }
 }
+
+/// SMF 1.0 section 2.3: a track chunk's length is the bytes of its body. For
+/// tracks with running status, a sysex and a long meta event, each length
+/// field equals the body that follows.
+#[test]
+fn each_track_chunk_length_is_the_length_of_its_body() {
+    let busy = track(vec![
+        (0, note(0, 60)),
+        (0, note(0, 62)),
+        (5, FileEvent::SysEx(vec![0x7E; 130].into())),
+        (
+            5,
+            FileEvent::Meta(Meta::text(TextKind::Lyric, &"l".repeat(300))),
+        ),
+        (0x0FFF_FFFF, note(0, 64)),
+    ]);
+    let plain = track(vec![(0, note(1, 60))]);
+    let bytes = MidiFile::smf(SmfFormat::Parallel, SMF_DIVISION, vec![busy, plain])
+        .unwrap()
+        .to_bytes();
+    // The header chunk is 14 bytes; each track chunk is a type, a length, a body.
+    let mut at = 14;
+    let mut chunks = 0;
+    while at < bytes.len() {
+        assert_eq!(&bytes[at..at + 4], b"MTrk");
+        let len = u32::from_be_bytes(bytes[at + 4..at + 8].try_into().unwrap()) as usize;
+        // The body ends in End of Track, and the next chunk follows it.
+        assert_eq!(&bytes[at + 8 + len - 3..at + 8 + len], [0xFF, 0x2F, 0x00]);
+        at += 8 + len;
+        chunks += 1;
+    }
+    assert_eq!((chunks, at), (2, bytes.len()));
+}

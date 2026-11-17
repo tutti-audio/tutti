@@ -110,10 +110,6 @@ pub enum ClipFileError {
     /// A packet claims more words than remain in the stream.
     #[error("a message runs past the end of the clip file")]
     MessageCutOff,
-    /// The stream ends inside the structure: a required message has no
-    /// packets left to be read from.
-    #[error("the clip file ends inside its structure")]
-    StructureCutOff,
     /// No DCTPQ (tick-unit declaration) in the file.
     #[error("clip file has no DCTPQ tick-unit declaration")]
     MissingDctpq,

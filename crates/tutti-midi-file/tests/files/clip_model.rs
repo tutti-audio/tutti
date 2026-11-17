@@ -354,10 +354,11 @@ fn the_magic_alignment_and_a_cut_packet_are_refused() {
     odd.push(0);
     assert!(matches!(
         MidiFile::from_bytes(&odd),
+        // The word the stray byte starts.
         Err(ReadError::Clip {
+            word,
             cause: ClipFileError::Unaligned,
-            ..
-        })
+        }) if word == (good.len() - 8) / 4
     ));
     // End of Clip is a 128-bit message: cut it to one word.
     let cut = &good[..good.len() - 12];
@@ -1143,10 +1144,11 @@ fn half_a_packet_after_end_of_clip_is_trailing_data() {
     bytes.extend_from_slice(&on(60, 1).words()[0].to_be_bytes());
     assert!(matches!(
         MidiFile::from_bytes(&bytes),
+        // The first word of the Note On, after the clip's words.
         Err(ReadError::Clip {
+            word,
             cause: ClipFileError::TrailingData,
-            ..
-        })
+        }) if word == (clip(&valid()).len() - 8) / 4
     ));
 }
 
