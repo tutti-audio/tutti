@@ -23,9 +23,11 @@ use tutti_nodes::{
     LimiterNode, MaxDelay, ModDelayNode, PhaserControls, PhaserNode, ShapeKind, Stages,
     SvfControls, SvfFilterNode, SvfType,
 };
+use tutti_nodes::{DcBlockerConfig, DcBlockerNode};
+use tutti_nodes::{StereoWidthConfig, StereoWidthNode};
 use tutti_types::{
     Amplitude, BusTopology, ChannelLayout, CompressionRatio, Db, Depth, Drive, Feedback, Hz, Q,
-    Resonance, Seconds, UnitParam,
+    Resonance, Seconds, StereoWidth, UnitParam,
 };
 
 #[test]
@@ -184,6 +186,17 @@ fn bit_crusher() {
     })
     .control("hold", |b| {
         assert!(b.param_set().set(UnitParam::HoldFactor, 5.0))
+    })
+    .check();
+}
+
+#[test]
+fn stereo_width() {
+    IsolateRow::new("StereoWidthNode", || {
+        StereoWidthNode::from(StereoWidthConfig::new().width(StereoWidth(1.5)))
+    })
+    .control("width", |w| {
+        assert!(w.param_set().set(UnitParam::StereoWidth, 0.25))
     })
     .check();
 }
