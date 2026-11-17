@@ -138,7 +138,7 @@ pub(super) const EXCEPTIONS: &[(&str, &str, &str)] = &[
     (
         "crates/tutti-session/src/peer_state.rs",
         "PeerState",
-        "permanent: any peer with any saved bytes is a state; the peer refuses what it cannot read",
+        "permanent: any peer with any saved bytes and media type is a state; a plugin's restore does not read the media type (its format decides), and the peer refuses bytes it cannot read",
     ),
     (
         "crates/tutti-types/src/ambisonic.rs",

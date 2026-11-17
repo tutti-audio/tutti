@@ -1411,9 +1411,9 @@ impl<'a> StateView<'a> {
         self.hosted.withheld.as_ref()
     }
 
-    /// Saves the plugin's state for `state_use` now, as a blocking round trip to it (ten
-    /// seconds at worst; an in-process plugin's is run by the main thread's
-    /// next tick, see the module docs). A pooled plugin's state goes through
+    /// Saves the plugin's state for `state_use` now, as a blocking round trip
+    /// to it (ten seconds at worst; an in-process plugin's is run by the main
+    /// thread's next tick, see the module docs). A pooled plugin's state goes through
     /// [`Session::save_state`], a job that lands in an update.
     ///
     /// # Errors

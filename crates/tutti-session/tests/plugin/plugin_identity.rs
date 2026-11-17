@@ -163,5 +163,4 @@ fn a_state_is_refused_by_another_plugin() {
         "application/x-clap-state",
         "a CLAP plugin's state carries CLAP's media type"
     );
-    let _: &PeerState = &from_second;
 }

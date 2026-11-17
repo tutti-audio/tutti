@@ -10,7 +10,7 @@ use std::fmt;
 
 use tutti_midi_device::MediaType;
 #[cfg(feature = "midi-hardware")]
-use tutti_midi_device::SavedDevice;
+use tutti_midi_device::{Match, SavedDevice};
 #[cfg(feature = "plugin")]
 use tutti_plugin::catalog::PluginRef;
 #[cfg(feature = "plugin")]
@@ -30,17 +30,25 @@ pub enum SavedPeer {
 }
 
 impl SavedPeer {
-    /// Whether `other` is the same peer: for a plugin, the same plugin
-    /// (`PluginRef::is_same_plugin`; a version is not part of it, plugins
-    /// read the states of their older versions); for a device, the same
-    /// listing row. A peer of another kind is another peer.
+    /// Whether `other` is the same peer.
+    ///
+    /// A plugin is the same plugin (`PluginRef::is_same_plugin`; a version is
+    /// not part of it, plugins read the states of their older versions). A
+    /// device is the same model by its Device Identity (M2-104 §7.1.3), the
+    /// same unit when both carry a Product Instance Id (§7.1.5): a device's
+    /// fullState is per model, so another unit of the model reads it. A device
+    /// with no identity on either side is another peer, and so is a peer of
+    /// another kind. The OS listing (`DeviceInfo`) is not compared: it names a
+    /// port, not the device.
     #[must_use]
     pub fn is_same_peer(&self, other: &Self) -> bool {
         match (self, other) {
             #[cfg(feature = "plugin")]
             (Self::Plugin(a), Self::Plugin(b)) => a.is_same_plugin(b),
             #[cfg(feature = "midi-hardware")]
-            (Self::Device(a), Self::Device(b)) => a.info() == b.info(),
+            (Self::Device(a), Self::Device(b)) => {
+                matches!(a.confirm(b.learned()), Match::SameUnit | Match::SameModel)
+            }
             #[cfg(all(feature = "plugin", feature = "midi-hardware"))]
             _ => false,
         }
@@ -103,10 +111,13 @@ impl OtherPeer {
 /// A peer's saved state and the peer it was saved from.
 ///
 /// The bytes are the peer's own. They restore only into the peer they were
-/// saved from ([`check_for`](Self::check_for)). The [`MediaType`] (a device's is the `mediaType` its State body declares,
-/// MIDI-CI M2-103 §7.5) says how to
-/// read them; it is not checked on a restore: for a plugin it follows from
-/// the peer's format, which the peer's identity already includes.
+/// saved from ([`check_for`](Self::check_for)).
+///
+/// The [`MediaType`] says how to read the bytes; a device's is the
+/// `mediaType` its State body declares (MIDI-CI M2-103 §7.5). It is not
+/// checked for a plugin: a stored state may pair a plugin with any media
+/// type, and a restore does not read it, because the plugin's format decides
+/// how its bytes are read and the format is part of the plugin's identity.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PeerState {

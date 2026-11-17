@@ -711,7 +711,6 @@ pub mod midi {
     /// Under `plugin` alone it holds only the `MediaType` a `PeerState` carries.
     #[cfg(any(feature = "midi-hardware", feature = "plugin"))]
     pub mod property {
-        #[cfg(any(feature = "midi-hardware", feature = "plugin"))]
         pub use tutti_midi_device::MediaType;
         #[cfg(feature = "midi-hardware")]
         pub use tutti_midi_device::mcoded7::Mcoded7Error;

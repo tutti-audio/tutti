@@ -538,6 +538,25 @@ fn a_state_job_saves_what_the_plugin_holds_and_refuses_by_name() {
         "a saved CLAP state is typed as CLAP's"
     );
 
+    // The probe stamps the state context after its 4-byte magic: 3 for a
+    // project save, 2 for a duplicate.
+    const CONTEXT_BYTE: usize = 4;
+    assert_eq!(
+        state.bytes()[CONTEXT_BYTE],
+        3,
+        "a project save is FOR_PROJECT"
+    );
+    let duplicate = s
+        .save_state(&"a", StateUse::Duplicate)
+        .expect("a node holds the plugin")
+        .wait(&mut s)
+        .expect("a duplicate state");
+    assert_eq!(
+        duplicate.bytes()[CONTEXT_BYTE],
+        2,
+        "the use reaches the plugin: a duplicate save is FOR_DUPLICATE"
+    );
+
     s.pool((
         s.plugin_entry("a", &first_id(), &catalog),
         s.plugin_entry("idle", &first_id(), &catalog),

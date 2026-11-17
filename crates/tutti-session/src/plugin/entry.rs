@@ -533,7 +533,7 @@ impl<K> PluginDeclaration<K> {
     ///
     /// # Errors
     ///
-    /// [`OtherPeer`] when `state` was saved from another plugin
+    /// [`OtherPeer`] when `state` was saved from another peer
     /// than the one the entry resolved to. An entry that resolved to none is
     /// not checked: its load fails.
     pub fn initial_state(mut self, state: PeerState) -> Result<Self, OtherPeer> {
