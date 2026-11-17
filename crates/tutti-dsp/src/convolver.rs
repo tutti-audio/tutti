@@ -70,7 +70,8 @@
 use std::sync::Arc;
 
 use rustfft::FftNum;
-use tutti_buffers::{Float, Mono, MonoMut, Sample};
+use tutti_buffers::{Float, Interleaved, InterleavedMut, Mono, MonoMut, Sample, convert};
+use tutti_types::ChannelLayout;
 
 use crate::Complex;
 use crate::fft::StagedRealFft;
@@ -187,6 +188,19 @@ fn plan_levels(ir_len: usize, head: usize) -> Vec<Plan> {
         }
     }
     best.1.unwrap_or(uniform)
+}
+
+/// `dst = src` in `dst`'s format, through [`tutti_buffers::convert`] as one channel. Allocates
+/// nothing.
+///
+/// # Panics
+///
+/// If the two slices differ in length.
+pub(super) fn convert_mono<A: Sample, B: Sample>(src: &[A], dst: &mut [B]) {
+    let one = ChannelLayout::MONO;
+    let (src, dst) = (Interleaved::new(src, one), InterleavedMut::new(dst, one));
+    let done = src.and_then(|s| dst.and_then(|d| convert(s, d)));
+    assert!(done.is_ok(), "BUG: a mono copy of equal lengths: {done:?}");
 }
 
 /// Zeroed complex spectrum of `bins` bins.
@@ -620,14 +634,17 @@ impl<F: Float + FftNum> std::fmt::Debug for Convolver<F> {
 }
 
 impl<F: Float + FftNum> Convolver<F> {
-    /// Creates a new convolver from an impulse response.
+    /// Creates a new convolver from an impulse response in any sample format,
+    /// converted to `F`.
     ///
     /// `block_size` is rounded up to the next power of two; it is the head
     /// partition and the latency.
     #[must_use]
-    pub fn new(ir: Mono<'_, F>, block_size: usize) -> Self {
+    pub fn new<S: Sample>(ir: Mono<'_, S>, block_size: usize) -> Self {
         let block_size = block_size.next_power_of_two().max(2);
-        Self::over(Arc::new(IrSpectra::new(ir.samples(), block_size)))
+        let mut converted = vec![F::ZERO; ir.samples().len()];
+        convert_mono(ir.samples(), &mut converted);
+        Self::over(Arc::new(IrSpectra::new(&converted, block_size)))
     }
 
     /// A convolver over `ir` at `block_size` (a power of two) cut by `parts`
@@ -673,17 +690,10 @@ impl<F: Float + FftNum> Convolver<F> {
         &self.spectra
     }
 
-    /// [`new`](Self::new) over an impulse response in any sample format, converted to `F`.
-    #[must_use]
-    pub fn from_samples<S: Sample>(ir: Mono<'_, S>, block_size: usize) -> Self {
-        let ir: Vec<F> = ir.iter().map(|s| s.convert_to::<F>()).collect();
-        Self::new(Mono::new(&ir), block_size)
-    }
-
-    /// [`from_samples`](Self::from_samples) at the default block size (`512`).
+    /// [`new`](Self::new) at the default block size (`512`).
     #[must_use]
     pub fn with_ir<S: Sample>(ir: Mono<'_, S>) -> Self {
-        Self::from_samples(ir, DEFAULT_BLOCK_SIZE)
+        Self::new(ir, DEFAULT_BLOCK_SIZE)
     }
 
     /// IR length in samples.

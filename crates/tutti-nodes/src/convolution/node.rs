@@ -218,8 +218,7 @@ impl Engine {
 /// # The sample rate is not this node's to fix
 ///
 /// Unlike the other rate-dependent nodes in this crate, `prepare` fixes no
-/// coefficient here, and the node stores no rate. The IRs are taken as bare
-/// `Mono` views with no rate attached, so the node cannot tell what rate they were
+/// coefficient here, and the node stores no rate. `Mono` views carry no rate, so the node cannot tell what rate they were
 /// measured at and has nothing to resample from or to.
 ///
 /// The consequence is the caller's to avoid: an IR captured at 44.1 kHz and
@@ -312,7 +311,7 @@ impl ConvolverNode {
         let engine = match &layout {
             IrLayout::PerChannel(_) => Engine::PerChannel(
                 irs.iter()
-                    .map(|ir| Convolver::from_samples(*ir, block_size))
+                    .map(|ir| Convolver::new(*ir, block_size))
                     .collect(),
             ),
             IrLayout::TrueStereo | IrLayout::Ambisonic { .. } => Engine::Matrix(Box::new(
@@ -400,7 +399,7 @@ impl ConvolverNode {
     #[must_use]
     pub fn new<S: Sample>(ir: Mono<'_, S>, block_size: usize) -> Self {
         Self::assemble(
-            Engine::PerChannel(vec![Convolver::from_samples(ir, block_size)]),
+            Engine::PerChannel(vec![Convolver::new(ir, block_size)]),
             IrLayout::PerChannel(ChannelTopology::from(tutti_types::Bed::Mono)),
             BusTopology::MONO,
             BusTopology::MONO,
@@ -442,7 +441,7 @@ impl ConvolverNode {
             return Err(ConvolverError::NoChannels);
         }
         let (layout, ports) = Self::unassigned(n)?;
-        let head = Convolver::from_samples(ir, block_size);
+        let head = Convolver::new(ir, block_size);
         Ok(Self::assemble(
             Engine::PerChannel((0..n).map(|_| head.fresh()).collect()),
             layout,

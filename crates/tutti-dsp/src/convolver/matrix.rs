@@ -11,7 +11,7 @@
 use tutti_buffers::{Float, Mono, MonoMut, Planes, PlanesMut, Sample};
 use tutti_types::ChannelLayout;
 
-use super::Convolver;
+use super::{Convolver, convert_mono};
 
 /// Frames a call is cut into: the size of the scratch, fixed at construction.
 const CHUNK: usize = 64;
@@ -93,7 +93,7 @@ impl MatrixConvolver {
             inputs,
             outputs,
             irs.iter()
-                .map(|ir| Convolver::from_samples(*ir, block_size))
+                .map(|ir| Convolver::new(*ir, block_size))
                 .collect(),
         ))
     }
@@ -106,7 +106,7 @@ impl MatrixConvolver {
             ChannelLayout::STEREO,
             ChannelLayout::STEREO,
             irs.iter()
-                .map(|ir| Convolver::from_samples(*ir, block_size))
+                .map(|ir| Convolver::new(*ir, block_size))
                 .collect(),
         )
     }
@@ -175,11 +175,7 @@ impl MatrixConvolver {
             let n = CHUNK.min(frames - at);
             for (i, row) in self.heard.iter_mut().enumerate() {
                 match input.get_plane(i) {
-                    Some(src) => {
-                        for (d, s) in row[..n].iter_mut().zip(&src.samples()[at..at + n]) {
-                            *d = s.convert_to::<f32>();
-                        }
-                    }
+                    Some(src) => convert_mono(&src.samples()[at..at + n], &mut row[..n]),
                     None => row[..n].fill(0.0),
                 }
             }
@@ -195,12 +191,7 @@ impl MatrixConvolver {
                     }
                 }
                 if let Some(mut plane) = output.get_plane_mut(o) {
-                    for (y, &x) in plane.samples_mut()[at..at + n]
-                        .iter_mut()
-                        .zip(&self.sum[..n])
-                    {
-                        *y = x.convert_to::<S>();
-                    }
+                    convert_mono(&self.sum[..n], &mut plane.samples_mut()[at..at + n]);
                 }
             }
             at += n;

@@ -803,7 +803,13 @@ fn layouts_are_contiguous_and_schedule_inside_their_slack() {
 #[test]
 fn a_long_ir_is_cut_into_levels() {
     let ir = vec![0.1f32; 6000];
-    assert!(Convolver::new(Mono::new(&ir), 32).spectra().shape().len() > 1);
+    assert!(
+        Convolver::<f32>::new(Mono::new(&ir), 32)
+            .spectra()
+            .shape()
+            .len()
+            > 1
+    );
 }
 
 /// The cost model keeps the uniform layout where an extra level does not
@@ -814,7 +820,7 @@ fn a_long_ir_is_cut_into_levels() {
 #[test]
 fn the_cost_model_picks_uniform_for_short_irs_and_levels_for_long_ones() {
     let shape = |len: usize, head: usize| {
-        Convolver::new(Mono::new(&vec![0.1; len]), head)
+        Convolver::<f32>::new(Mono::new(&vec![0.1; len]), head)
             .spectra()
             .shape()
     };
@@ -980,7 +986,7 @@ fn a_split_render_is_independent_of_the_call_lengths() {
 /// An empty IR is silence at the declared latency, with no panic.
 #[test]
 fn an_empty_ir_is_silence() {
-    let mut c = Convolver::new(Mono::new(&[]), 64);
+    let mut c = Convolver::<f32>::new(Mono::new(&[] as &[f32]), 64);
     let x = noise(300);
     let got = run_blocks(&mut c, &x, &[7, 100]);
     assert!(got.iter().all(|&s| s == 0.0));
