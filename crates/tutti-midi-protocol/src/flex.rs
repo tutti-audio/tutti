@@ -86,24 +86,29 @@ pub fn flex_time_signature(wire: FlexTimeSignature) -> Option<tutti_types::TimeS
 /// [`flex_time_signature`]: the numerator is the beats per bar, the denominator
 /// the exponent of the note value (a quarter note is 2, an eighth 3), and the
 /// 1/32 notes in 24 MIDI clocks is 8, the 32nds in a quarter note, which the
-/// 24-per-quarter clock fixes (section 7.5.4).
+/// 24-per-quarter clock fixes (section 7.5.4). `None` for a whole-note
+/// denominator: the exponent 0 it would need is non-standard (section 7.5.4),
+/// and [`flex_time_signature`] reads it as no meter.
 ///
 /// ```
 /// use tutti_midi_protocol::{flex_time_signature, flex_time_signature_wire};
 /// use tutti_types::TimeSignature;
 ///
 /// let seven_eight = TimeSignature::of(7, 8);
-/// let wire = flex_time_signature_wire(seven_eight);
+/// let wire = flex_time_signature_wire(seven_eight).unwrap();
 /// assert_eq!((wire.numerator, wire.denominator, wire.thirty_seconds), (7, 3, 8));
 /// assert_eq!(flex_time_signature(wire), Some(seven_eight));
 /// ```
 #[must_use]
-pub fn flex_time_signature_wire(signature: tutti_types::TimeSignature) -> FlexTimeSignature {
-    FlexTimeSignature {
+pub fn flex_time_signature_wire(
+    signature: tutti_types::TimeSignature,
+) -> Option<FlexTimeSignature> {
+    let denominator = signature.note_value().get().trailing_zeros() as u8;
+    (denominator != 0).then(|| FlexTimeSignature {
         // A numerator is at most 64 and a note value a power of two at most 64:
         // both fit the wire's bytes, and the exponent is at most 6.
         numerator: signature.beats_per_bar().get() as u8,
-        denominator: signature.note_value().get().trailing_zeros() as u8,
+        denominator,
         thirty_seconds: 8,
-    }
+    })
 }

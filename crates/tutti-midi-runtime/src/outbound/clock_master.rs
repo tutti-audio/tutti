@@ -765,14 +765,13 @@ impl ClockMaster {
             };
             let signature = meter.at(boundary);
             if self.flex.meter != Some(signature) {
-                emit((
-                    frame_offset(pass.start.get() + k, block_size),
-                    Message::Flex(
-                        self.group,
-                        Flex::SetTimeSignature(flex_time_signature_wire(signature)),
-                    )
-                    .into(),
-                ));
+                // A whole-note meter has no standard message: it is stated by none.
+                if let Some(wire) = flex_time_signature_wire(signature) {
+                    emit((
+                        frame_offset(pass.start.get() + k, block_size),
+                        Message::Flex(self.group, Flex::SetTimeSignature(wire)).into(),
+                    ));
+                }
                 self.flex.meter = Some(signature);
             }
             boundary = meter.bar_start(meter.bar_at(boundary).bar + BarCount(1));
