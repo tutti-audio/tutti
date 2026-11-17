@@ -102,10 +102,13 @@ pub enum ConfigError {
         /// Which rule it broke.
         refusal: Refusal,
     },
-    /// A count or length the file's fields cannot hold: an SMF's event past
-    /// 2^28 bytes, chunk past 4 GB or delta past 28 bits, or a Clip File whose
-    /// gaps need over 4 GB of Null restarts (M2-116 section 3.2.2).
-    #[error("a track, event or delta too long for an SMF's length fields")]
+    /// A count or length the writer cannot hold. An SMF's event past 2^28
+    /// bytes, chunk past 4 GB or delta past 28 bits is past the format's
+    /// fields (SMF 1.0 section 1.1). A Clip File's limit is the writer's own
+    /// bound on what it allocates, not M2-116's: the format holds any gap with
+    /// Null restarts (section 3.2.2), and the writer refuses a gap whose
+    /// restarts alone would be over 4 GB.
+    #[error("the file is larger than the writer holds")]
     TooLarge,
 }
 
@@ -142,14 +145,4 @@ pub struct OutOfOrder {
     pub last: Tick,
     /// The earlier tick pushed.
     pub at: Tick,
-}
-
-/// A note whose Note Off is past the last tick ([`Track::note`](crate::Track::note)).
-#[derive(Error, Debug, Clone, Copy, PartialEq, Eq)]
-#[error("a note at tick {} of {len} ticks ends past the last tick", tick.0)]
-pub struct TickOverflow {
-    /// The tick of the Note On.
-    pub tick: Tick,
-    /// The length in ticks.
-    pub len: u64,
 }

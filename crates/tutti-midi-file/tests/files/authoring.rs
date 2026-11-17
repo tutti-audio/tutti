@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use tutti_midi_file::{
     ConfigError, Error, FileEvent, Meta, MidiFile, OutOfOrder, Refusal, SmfDivision, SmfFormat,
-    TextKind, Tick, TickOverflow, Track,
+    TextKind, Tick, TimelineDrop, Track,
 };
 use tutti_types::{Beat, Bpm};
 use tutti_ump::{
@@ -72,38 +72,14 @@ fn tick_arithmetic_past_the_ends_of_u64_is_none() {
     assert_eq!(Tick::quarters(u64::MAX / 2 + 1, two), None);
 }
 
-/// A note whose Note Off is past the last tick is refused and adds nothing.
-#[test]
-fn a_note_ending_past_the_last_tick_is_refused() {
-    let note = |tick, len| {
-        Track::new().note(
-            Tick(tick),
-            len,
-            MidiChannel::FIRST,
-            NoteNumber::of(60),
-            U7::of(100),
-        )
-    };
-    assert_eq!(
-        note(u64::MAX - 10, 11).unwrap_err(),
-        TickOverflow {
-            tick: Tick(u64::MAX - 10),
-            len: 11
-        }
-    );
-    assert_eq!(note(u64::MAX - 10, 10).unwrap().end, Tick(u64::MAX));
-}
-
 // ---- the builder -----------------------------------------------------------
 
-/// A note is a Note On and a Note Off `len` ticks later on its channel, and
+/// A note is a Note On at its start and a Note Off at its end on its channel, and
 /// the track ends where the last event does.
 #[test]
-fn a_note_is_an_on_and_an_off_len_ticks_later() {
+fn a_note_is_an_on_at_its_start_and_an_off_at_its_end() {
     let ch = MidiChannel::of(4);
-    let track = Track::new()
-        .note(Tick(100), 50, ch, NoteNumber::of(60), U7::of(90))
-        .unwrap();
+    let track = Track::new().note(Tick(100), Tick(150), ch, NoteNumber::of(60), U7::of(90));
     let at = |m| Address::first(ch) == m;
     assert_eq!(track.events.len(), 2);
     let (t0, e0) = &track.events[0];
@@ -121,6 +97,22 @@ fn a_note_is_an_on_and_an_off_len_ticks_later() {
     assert_eq!(track.end, Tick(150));
 }
 
+/// A note whose end is before its start is a note of no length, at the
+/// start: its Note Off is never before its Note On.
+#[test]
+fn a_note_ending_before_it_starts_has_no_length() {
+    let track = Track::new().note(
+        Tick(100),
+        Tick(40),
+        MidiChannel::FIRST,
+        NoteNumber::of(60),
+        U7::of(100),
+    );
+    let ticks: Vec<Tick> = track.events.iter().map(|(t, _)| *t).collect();
+    assert_eq!(ticks, [Tick(100), Tick(100)]);
+    assert_eq!(track.end, Tick(100));
+}
+
 /// Notes added in any order, a chord and overlapping notes all leave the
 /// events in non-decreasing tick order, which the file layer requires.
 #[test]
@@ -128,12 +120,9 @@ fn notes_in_any_order_leave_the_events_in_tick_order() {
     let ch = MidiChannel::FIRST;
     let n = |k| NoteNumber::of(k);
     let track = Track::new()
-        .note(Tick(480), 480, ch, n(64), U7::of(100))
-        .unwrap()
-        .note(Tick(0), 960, ch, n(60), U7::of(100))
-        .unwrap() // overlaps the first
-        .note(Tick(0), 480, ch, n(67), U7::of(100))
-        .unwrap(); // a chord with it
+        .note(Tick(480), Tick(960), ch, n(64), U7::of(100))
+        .note(Tick(0), Tick(960), ch, n(60), U7::of(100)) // overlaps the first
+        .note(Tick(0), Tick(480), ch, n(67), U7::of(100)); // a chord with it
     let ticks: Vec<u64> = track.events.iter().map(|(t, _)| t.0).collect();
     assert_eq!(ticks, [0, 0, 480, 480, 960, 960]);
     assert_eq!(track.end, Tick(960));
@@ -225,20 +214,18 @@ fn the_timeline_is_the_messages_at_their_beats_and_not_the_meta_events() {
     let notes = Track::new()
         .note(
             Tick(480),
-            240,
+            Tick(720),
             MidiChannel::FIRST,
             NoteNumber::of(60),
             U7::of(100),
         )
-        .unwrap()
         .note(
             Tick(0),
-            120,
+            Tick(120),
             MidiChannel::of(1),
             NoteNumber::of(62),
             U7::of(80),
-        )
-        .unwrap();
+        );
     let f = file(vec![tempo_track, notes]);
     let line: Vec<(Beat, Ump)> = f.timeline().unwrap().packets;
     let words = |ump: &Ump| ump.0[0];
@@ -288,8 +275,16 @@ fn a_sysex_event_is_its_sysex7_packets_at_its_beat() {
     assert_eq!(
         timeline.dropped,
         [
-            (Beat(2.0), FileEvent::SysEx(vec![1, 2, 3].into())),
-            (Beat(2.0), FileEvent::SysEx(vec![0x90, 0xF7].into())),
+            (
+                Beat(2.0),
+                FileEvent::SysEx(vec![1, 2, 3].into()),
+                TimelineDrop::Unfinished
+            ),
+            (
+                Beat(2.0),
+                FileEvent::SysEx(vec![0x90, 0xF7].into()),
+                TimelineDrop::NotSevenBit
+            ),
         ]
     );
 }
@@ -401,10 +396,10 @@ fn a_bare_escape_and_an_unfinished_divided_message_are_dropped_and_listed() {
     assert_eq!(
         timeline.dropped,
         [
-            (beat(0.0), escape),
-            (beat(10.0), first.clone()),
-            (beat(30.0), second),
-            (beat(40.0), first),
+            (beat(0.0), escape, TimelineDrop::BareEscape),
+            (beat(10.0), first.clone(), TimelineDrop::Unfinished),
+            (beat(30.0), second, TimelineDrop::BareEscape),
+            (beat(40.0), first, TimelineDrop::Unfinished),
         ]
     );
 }
@@ -413,15 +408,13 @@ fn a_bare_escape_and_an_unfinished_divided_message_are_dropped_and_listed() {
 /// its own division.
 #[test]
 fn a_format_2_file_has_no_timeline_but_each_track_has() {
-    let a = Track::new()
-        .note(
-            Tick(480),
-            480,
-            MidiChannel::FIRST,
-            NoteNumber::of(60),
-            U7::of(100),
-        )
-        .unwrap();
+    let a = Track::new().note(
+        Tick(480),
+        Tick(960),
+        MidiChannel::FIRST,
+        NoteNumber::of(60),
+        U7::of(100),
+    );
     let f = MidiFile::smf(SmfFormat::Sequential, SMF_DIVISION, vec![a, Track::new()]).unwrap();
     assert!(f.timeline().is_err());
     let beats: Vec<Beat> = f.tracks()[0]
@@ -431,6 +424,57 @@ fn a_format_2_file_has_no_timeline_but_each_track_has() {
         .map(|(b, _)| b)
         .collect();
     assert_eq!(beats, [Beat(1.0), Beat(2.0)]);
+}
+
+/// A divided message with a byte of 128 or more is dropped whole, each part
+/// listed as `NotSevenBit`, and a Clip File packet no definition covers is
+/// listed as `UnknownPacket`.
+#[test]
+fn an_eight_bit_divided_message_and_an_unknown_packet_are_listed() {
+    let part = FileEvent::SysEx(vec![1, 0x90].into());
+    let end = FileEvent::Escape(vec![2, 0xF7].into());
+    let track = Track::new()
+        .push(Tick(0), part.clone())
+        .unwrap()
+        .push(Tick(10), end.clone())
+        .unwrap();
+    let timeline = file(vec![track]).timeline().unwrap();
+    assert!(timeline.packets.is_empty());
+    let beat = |ticks: f64| Beat(ticks / f64::from(TPQ));
+    assert_eq!(
+        timeline.dropped,
+        [
+            (beat(0.0), part, TimelineDrop::NotSevenBit),
+            (beat(10.0), end, TimelineDrop::NotSevenBit),
+        ]
+    );
+    // Message type 0x6 is reserved: nothing decodes it.
+    let reserved = Ump([0x6001_2345, 0, 0, 0]);
+    let known = Message::Midi2(
+        MidiChannel::FIRST.into(),
+        Voice2::ChannelPressure(tutti_ump::ControlValue::MIN),
+    );
+    let clip = MidiFile::from_bytes(
+        &MidiFile::clip(
+            DIVISION,
+            Track {
+                events: vec![
+                    (Tick(0), FileEvent::Unknown(tutti_ump::Unknown(reserved))),
+                    (Tick(0), known.into()),
+                ],
+                end: Tick(0),
+                ..Track::new()
+            },
+        )
+        .unwrap()
+        .to_bytes()
+        .unwrap(),
+    )
+    .unwrap();
+    let timeline = clip.timeline().unwrap();
+    assert_eq!(timeline.packets.len(), 1);
+    assert_eq!(timeline.dropped.len(), 1);
+    assert_eq!(timeline.dropped[0].2, TimelineDrop::UnknownPacket);
 }
 
 /// A Clip File's packets are the timeline as they are stored (a MIDI 2.0 note
@@ -537,12 +581,11 @@ fn a_file_round_trips_through_a_slice() {
             .meta(Tick(0), Meta::tempo(Bpm::of(100.0)))
             .note(
                 Tick(0),
-                480,
+                Tick(480),
                 MidiChannel::FIRST,
                 NoteNumber::of(60),
                 U7::of(100),
-            )
-            .unwrap(),
+            ),
     ]);
     let out = f.to_bytes().unwrap();
     assert_eq!(MidiFile::try_from(out.as_slice()).unwrap(), f);

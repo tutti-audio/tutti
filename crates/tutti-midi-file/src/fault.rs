@@ -67,12 +67,6 @@ pub enum SmfParseError {
     /// A format 0 file with other than one track.
     #[error("a format 0 file has one track")]
     FormatZeroTracks,
-    /// A meta event of a kind the model types (text, End of Track, Set Tempo,
-    /// Time Signature, Key Signature) whose data is shorter than the kind
-    /// defines or holds an undefined value, or one whose type byte has its top
-    /// bit set.
-    #[error("meta event data that its type does not define")]
-    MetaData,
     /// Bytes that no rule names.
     #[error("unexpected bytes")]
     Unexpected,

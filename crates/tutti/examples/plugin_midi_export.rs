@@ -169,11 +169,11 @@ fn phrase(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
         let key = NoteNumber::of(60 + n);
         track = track.note(
             beat(n.into()),
-            u64::from(TPQ),
+            beat(u64::from(n) + 1),
             MidiChannel::FIRST,
             key,
             U7::of(100),
-        )?;
+        );
     }
     MidiFile::smf(SmfFormat::SingleTrack, SMF_DIVISION, vec![track])?
         .write_options()

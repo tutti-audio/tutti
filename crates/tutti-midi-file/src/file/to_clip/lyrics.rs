@@ -133,6 +133,14 @@ fn split(text: &str) -> (Option<SyllableEnd>, Vec<Piece>, Vec<LyricChange>) {
         before = before.max(Some(end));
     }
     let mut syllables = Vec::new();
+    // Each syllable, noting once that hyphens left the text.
+    let mut push = |body: &str, end| {
+        let (piece, stripped) = syllable(body, end);
+        syllables.extend(piece);
+        if stripped && !changes.contains(&LyricChange::HyphenStripped) {
+            changes.push(LyricChange::HyphenStripped);
+        }
+    };
     let (mut body, mut end) = (String::new(), SyllableEnd::None);
     while let Some(c) = chars.next() {
         let separator = match c {
@@ -148,33 +156,23 @@ fn split(text: &str) -> (Option<SyllableEnd>, Vec<Piece>, Vec<LyricChange>) {
             end = end.max(separator);
         } else {
             if end != SyllableEnd::None {
-                push_syllable(&mut syllables, std::mem::take(&mut body), end, &mut changes);
+                push(&std::mem::take(&mut body), end);
                 end = SyllableEnd::None;
             }
             body.push(c);
         }
     }
-    push_syllable(&mut syllables, body, end, &mut changes);
+    push(&body, end);
     (before, syllables, changes)
 }
 
-/// Adds `body` as a syllable, without the hyphens that marked its word going
-/// on (noted in `changes`); a body of only hyphens is no syllable.
-fn push_syllable(
-    syllables: &mut Vec<Piece>,
-    body: String,
-    end: SyllableEnd,
-    changes: &mut Vec<LyricChange>,
-) {
+/// `body` as a syllable without the hyphens that marked its word going on, and
+/// whether there were any; a body of only hyphens is no syllable.
+fn syllable(body: &str, end: SyllableEnd) -> (Option<Piece>, bool) {
     let trimmed = body.trim_end_matches('-');
-    if trimmed.len() != body.len() && !changes.contains(&LyricChange::HyphenStripped) {
-        changes.push(LyricChange::HyphenStripped);
-    }
-    let body = trimmed;
-    if !body.is_empty() {
-        syllables.push(Piece {
-            body: body.to_owned(),
-            end,
-        });
-    }
+    let piece = (!trimmed.is_empty()).then(|| Piece {
+        body: trimmed.to_owned(),
+        end,
+    });
+    (piece, trimmed.len() != body.len())
 }

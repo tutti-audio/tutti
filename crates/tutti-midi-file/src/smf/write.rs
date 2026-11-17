@@ -112,6 +112,7 @@ fn meta_parts(meta: &Meta) -> (u8, Vec<u8>) {
             [&[sharps.cast_unsigned(), u8::from(*minor)][..], extra].concat(),
         ),
         Meta::Other { kind, data } => (kind.get(), data.to_vec()),
+        Meta::Malformed(malformed) => (malformed.kind(), malformed.data().to_vec()),
     }
 }
 

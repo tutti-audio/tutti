@@ -25,22 +25,21 @@ use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_types::{Beat, Bpm, Seconds};
 use tutti_ump::{
     Address, Flex, FlexAddress, FlexTextKind, Form, KeyEvent, Message, MidiChannel, MidiGroup,
-    NoteNumber, NoteVelocity, Sysex7Packet, Sysex7Packets, SysexStatus, System,
-    TicksPerQuarterNote, U7, Ump, Unknown, Voice2,
+    NoteNumber, NoteVelocity, Sysex7Packet, SysexStatus, System, TicksPerQuarterNote, U7, Ump,
+    Unknown, Voice2,
 };
 
 use crate::MidiFileKind;
 use crate::smf::SmfDivision;
 use crate::write::{Existing, WriteOptions};
-use crate::{
-    ConfigError, Error, IoStep, OutOfOrder, Refusal, Result, TickOverflow, clip_file, smf,
-};
+use crate::{ConfigError, Error, IoStep, OutOfOrder, Refusal, Result, clip_file, smf};
 
 mod meta_kind;
 mod to_clip;
 
 pub use meta_kind::{
-    MicrosPerQuarter, MicrosPerQuarterOutOfRange, OtherMetaKind, OtherMetaKindOutOfRange,
+    MalformedMeta, MicrosPerQuarter, MicrosPerQuarterOutOfRange, OtherMetaKind,
+    OtherMetaKindOutOfRange,
 };
 pub use to_clip::{Altered, Converted, DropReason, Dropped, LyricChange, Moved, ToClipError};
 use tutti_ump::Voice1;
@@ -254,6 +253,9 @@ pub enum Meta {
         /// The data, without its length.
         data: Box<[u8]>,
     },
+    /// A meta event of a typed kind whose data the kind does not define, kept
+    /// as the file has it ([`MalformedMeta`]).
+    Malformed(MalformedMeta),
 }
 
 /// The slowest tempo the wire holds: 24 bits of microseconds per quarter.
@@ -386,11 +388,10 @@ impl Track {
     ///
     /// let track = Track::new()
     ///     .meta(Tick(0), Meta::tempo(Bpm::of(90.0)))
-    ///     .note(Tick(0), 480, MidiChannel::FIRST, NoteNumber::of(60), U7::of(100))?
-    ///     .note(Tick(480), 480, MidiChannel::FIRST, NoteNumber::of(64), U7::of(100))?;
+    ///     .note(Tick(0), Tick(480), MidiChannel::FIRST, NoteNumber::of(60), U7::of(100))
+    ///     .note(Tick(480), Tick(960), MidiChannel::FIRST, NoteNumber::of(64), U7::of(100));
     /// assert_eq!(track.end, Tick(960));
     /// assert_eq!(track.events.len(), 5);
-    /// # Ok::<(), tutti_midi_file::TickOverflow>(())
     /// ```
     #[must_use]
     pub fn new() -> Self {
@@ -405,39 +406,35 @@ impl Track {
         self.end = self.end.max(tick);
     }
 
-    /// A note: a Note On at `tick` and its Note Off `len` ticks on, on `channel`
-    /// (a bare [`MidiChannel`] is in the first Group, as an SMF holds). The Note Off
-    /// carries the MIDI release velocity of 64, which means none.
-    ///
-    /// # Errors
-    ///
-    /// [`TickOverflow`] if the Note Off is past `u64::MAX`; the track is
-    /// not changed.
+    /// A note: a Note On at `start` and its Note Off at `end`, on `channel`
+    /// (a bare [`MidiChannel`] is in the first Group, as an SMF holds). The
+    /// Note Off carries the MIDI release velocity of 64, which means none. An
+    /// `end` before `start` is `start`: a note of no length.
     ///
     /// Events are placed in tick order, after the events already at their
     /// tick, so notes may be added in any order, overlap, or start together
     /// (a chord). At one tick the events are in the order they were added: a
     /// Note Off lands before the Note On of a note that starts where it ends
     /// only when its note was added first.
+    #[must_use]
     pub fn note(
         mut self,
-        tick: Tick,
-        len: u64,
+        start: Tick,
+        end: Tick,
         channel: impl Into<Address>,
         note: NoteNumber,
         velocity: U7,
-    ) -> std::result::Result<Self, TickOverflow> {
-        let off = tick.checked_add(len).ok_or(TickOverflow { tick, len })?;
+    ) -> Self {
         let address = channel.into();
         self.place(
-            tick,
+            start,
             Message::midi1(address, Voice1::note_on(note, velocity)).into(),
         );
         self.place(
-            off,
+            end.max(start),
             Message::midi1(address, Voice1::note_off(note, U7::of(64))).into(),
         );
-        Ok(self)
+        self
     }
 
     /// A meta event at `tick`, placed in tick order as [`note`](Self::note) is.
@@ -690,7 +687,7 @@ impl Container {
 ///
 /// let track = Track::new()
 ///     .meta(Tick(0), Meta::tempo(Bpm::of(120.0)))
-///     .note(Tick(0), 480, MidiChannel::FIRST, NoteNumber::of(60), U7::of(100))?;
+///     .note(Tick(0), Tick(480), MidiChannel::FIRST, NoteNumber::of(60), U7::of(100));
 /// let file = MidiFile::smf(SmfFormat::SingleTrack, SmfDivision::of(480), vec![track])?;
 ///
 /// let again = MidiFile::from_bytes(&file.to_bytes()?)?;
@@ -1134,13 +1131,13 @@ impl MidiFile {
     ///   `F0` event or the end of the file.
     /// - [`Meta`](FileEvent::Meta) events are not messages: the tempo is the
     ///   file's [`tempo_map`](Self::tempo_map), and the rest (text, time and
-    ///   key signature, ...) are not on the timeline. Nor is an
-    ///   [`Unknown`](FileEvent::Unknown) packet.
+    ///   key signature, ...) are not on the timeline.
     ///
-    /// What a SysEx7 packet cannot carry is in [`Timeline::dropped`], not lost
-    /// silently: a bare `F7` escape (one with no divided message open: it is
-    /// the arbitrary bytes SMF 1.0 section 3.2 allows, which no packet holds),
-    /// a divided message left unfinished, and one with a byte of 128 or more.
+    /// What has no packet is in [`Timeline::dropped`] with its
+    /// [`TimelineDrop`], not lost silently: a bare `F7` escape (the arbitrary
+    /// bytes SMF 1.0 section 3.2 allows, which no packet holds), a divided
+    /// message left unfinished, one with a byte of 128 or more, and an
+    /// [`Unknown`](FileEvent::Unknown) packet.
     ///
     /// The Clip File's [`header`](Track::header) is not on the timeline.
     ///
@@ -1149,7 +1146,7 @@ impl MidiFile {
     /// use tutti_types::Beat;
     /// use tutti_ump::{MidiChannel, NoteNumber, U7};
     ///
-    /// let track = Track::new().note(Tick(480), 480, MidiChannel::FIRST, NoteNumber::of(60), U7::of(100))?;
+    /// let track = Track::new().note(Tick(480), 480, MidiChannel::FIRST, NoteNumber::of(60), U7::of(100));
     /// let file = MidiFile::smf(SmfFormat::SingleTrack, SmfDivision::of(480), vec![track])?;
     /// let clip = file.timeline()?;
     /// assert_eq!(clip.packets.len(), 2);
@@ -1169,25 +1166,45 @@ impl MidiFile {
 #[error("a format 2 file has no common timeline: its sequences are independent")]
 pub struct NoCommonTimeline;
 
-/// Events as the packets a clip plays ([`MidiFile::timeline`]), and the System
-/// Exclusive events that gave none.
+/// Events as the packets a clip plays ([`MidiFile::timeline`]), and the events
+/// that gave none.
 #[derive(Clone, Debug, PartialEq, Default)]
-#[must_use = "`dropped` lists the System Exclusive events with no packets"]
+#[must_use = "`dropped` lists the events with no packet"]
 #[non_exhaustive]
 pub struct Timeline {
     /// The packets at their beats, in order.
     pub packets: Vec<(Beat, Ump)>,
-    /// The [`SysEx`](FileEvent::SysEx) and [`Escape`](FileEvent::Escape) events
-    /// that have no packet, at their beats, in order: a bare escape, a divided
-    /// message that never ended (all its parts), and a message with a byte of
-    /// 128 or more (all its parts).
-    pub dropped: Vec<(Beat, FileEvent)>,
+    /// The [`SysEx`](FileEvent::SysEx), [`Escape`](FileEvent::Escape) and
+    /// [`Unknown`](FileEvent::Unknown) events that have no packet, at their
+    /// beats and with why, in order. A divided message that gave none is all
+    /// of its parts.
+    pub dropped: Vec<(Beat, FileEvent, TimelineDrop)>,
+}
+
+/// Why an event of [`MidiFile::timeline`] has no packet ([`Timeline::dropped`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum TimelineDrop {
+    /// An `F7` event with no divided message open: the escape of arbitrary
+    /// bytes SMF 1.0 section 3.2 allows, which no SysEx7 packet holds.
+    BareEscape,
+    /// A part of a divided message that was never ended: a transmittable
+    /// event, the next `F0` event or the end of the file came before its `F7`.
+    Unfinished,
+    /// A part of a message with a byte of 128 or more, which SysEx7 does not
+    /// carry.
+    NotSevenBit,
+    /// A Clip File packet no definition covers ([`FileEvent::Unknown`]).
+    UnknownPacket,
 }
 
 /// The bytes of a System Exclusive message run, `F7` terminated.
 fn ends_in_f7(data: &[u8]) -> bool {
     data.last() == Some(&0xF7)
 }
+
+/// The most data bytes of a SysEx7 packet (M2-104 section 7.7).
+const SYSEX7_PACKET_BYTES: usize = 6;
 
 impl Timeline {
     /// The packets of `events`, by [`MidiFile::timeline`]'s rule.
@@ -1207,7 +1224,7 @@ impl Timeline {
                     }
                 }
                 FileEvent::Escape(_) if open.is_empty() => {
-                    timeline.dropped.push((beat, event.clone()));
+                    timeline.discard(beat, event, TimelineDrop::BareEscape);
                 }
                 FileEvent::Escape(data) => {
                     open.push((beat, event));
@@ -1220,7 +1237,10 @@ impl Timeline {
                     timeline.abandon(&mut open);
                     timeline.packets.push((beat, Ump::from(*message)));
                 }
-                FileEvent::Unknown(_) => timeline.abandon(&mut open),
+                FileEvent::Unknown(_) => {
+                    timeline.abandon(&mut open);
+                    timeline.discard(beat, event, TimelineDrop::UnknownPacket);
+                }
                 FileEvent::Meta(_) => {}
             }
         }
@@ -1228,10 +1248,16 @@ impl Timeline {
         timeline
     }
 
+    fn discard(&mut self, beat: Beat, event: &FileEvent, why: TimelineDrop) {
+        self.dropped.push((beat, event.clone(), why));
+    }
+
     /// Reports the divided message left unfinished, if one is open.
     fn abandon(&mut self, open: &mut Vec<(Beat, &FileEvent)>) {
-        self.dropped
-            .extend(open.drain(..).map(|(beat, event)| (beat, event.clone())));
+        for (beat, event) in open.drain(..) {
+            self.dropped
+                .push((beat, event.clone(), TimelineDrop::Unfinished));
+        }
     }
 
     /// The packets of one message, whole in one event or divided into the
@@ -1239,55 +1265,59 @@ impl Timeline {
     /// six at the part's beat, the first of the message a Start, the last an
     /// End, any between Continues, and a message of one packet a Complete.
     fn complete(&mut self, parts: &[(Beat, &FileEvent)]) {
-        let payloads: Vec<(Beat, &[u8])> = parts
+        // The data of each part, `F7` of the last cut, as 7-bit bytes: a
+        // message with any other byte has no packets.
+        let payloads: Option<Vec<(Beat, Vec<U7>)>> = parts
             .iter()
             .enumerate()
-            .filter_map(|(i, &(beat, event))| match event {
-                FileEvent::SysEx(data) | FileEvent::Escape(data) => {
-                    let last = i + 1 == parts.len();
-                    Some((beat, if last { &data[..data.len() - 1] } else { data }))
-                }
-                _ => None,
+            .map(|(i, &(beat, event))| {
+                let (FileEvent::SysEx(data) | FileEvent::Escape(data)) = event else {
+                    return Some((beat, Vec::new()));
+                };
+                let data = if i + 1 == parts.len() {
+                    &data[..data.len() - 1]
+                } else {
+                    data
+                };
+                data.iter()
+                    .map(|&b| U7::new(b))
+                    .collect::<Option<Vec<U7>>>()
+                    .map(|bytes| (beat, bytes))
             })
             .collect();
-        if let [(beat, payload)] = payloads[..] {
-            match Sysex7Packets::from_payload(MidiGroup::FIRST, payload) {
-                Ok(packets) => self.packets.extend(packets.map(|ump| (beat, ump))),
-                Err(_) => self.dropped.push((beat, parts[0].1.clone())),
+        let Some(payloads) = payloads else {
+            for &(beat, event) in parts {
+                self.discard(beat, event, TimelineDrop::NotSevenBit);
             }
             return;
-        }
-        if payloads
-            .iter()
-            .any(|(_, payload)| payload.iter().any(|&b| b >= 0x80))
-        {
-            self.dropped
-                .extend(parts.iter().map(|&(beat, event)| (beat, event.clone())));
-            return;
-        }
+        };
         // An empty part still sends a packet: its pause is the message's.
-        let chunks: Vec<(Beat, &[u8])> = payloads
+        let chunks: Vec<(Beat, Vec<u8>)> = payloads
             .iter()
-            .flat_map(|&(beat, payload)| {
-                let mut chunks: Vec<&[u8]> = payload.chunks(6).collect();
+            .flat_map(|(beat, payload)| {
+                let mut chunks: Vec<Vec<u8>> = payload
+                    .chunks(SYSEX7_PACKET_BYTES)
+                    .map(|chunk| chunk.iter().map(|u| u.get()).collect())
+                    .collect();
                 if chunks.is_empty() {
-                    chunks.push(&[]);
+                    chunks.push(Vec::new());
                 }
-                chunks.into_iter().map(move |chunk| (beat, chunk))
+                chunks.into_iter().map(move |chunk| (*beat, chunk))
             })
             .collect();
         let last = chunks.len() - 1;
         for (i, (beat, chunk)) in chunks.into_iter().enumerate() {
             let status = match i {
+                0 if last == 0 => SysexStatus::Complete,
                 0 => SysexStatus::Start,
                 i if i == last => SysexStatus::End,
                 _ => SysexStatus::Continue,
             };
-            // Checked above: at most six bytes, each below 128.
-            if let Some(packet) = Sysex7Packet::new(status, chunk) {
-                self.packets
-                    .push((beat, Ump::from(Message::Sysex7(MidiGroup::FIRST, packet))));
-            }
+            // A chunk is at most `SYSEX7_PACKET_BYTES` bytes, each a `U7`.
+            let packet = Sysex7Packet::new(status, &chunk)
+                .expect("a chunk of at most six bytes below 128 is a packet");
+            self.packets
+                .push((beat, Ump::from(Message::Sysex7(MidiGroup::FIRST, packet))));
         }
     }
 }

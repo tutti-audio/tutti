@@ -5,8 +5,8 @@
 use crate::common::{note, track, unsorted};
 use crate::support::{Division, RawEvent, build_smf, write_vlq};
 use tutti_midi_file::{
-    Error, FileEvent, Meta, MicrosPerQuarter, MidiFile, SmfDivision, SmfFormat, SmfParseError,
-    TextKind, Tick,
+    DropReason, Error, FileEvent, Meta, MicrosPerQuarter, MidiFile, SmfDivision, SmfFormat,
+    SmfParseError, TextKind, Tick,
 };
 use tutti_ump::{Message, TicksPerQuarterNote, Voice1};
 
@@ -403,4 +403,49 @@ fn a_written_file_reads_back_equal() {
     let back = MidiFile::from_bytes(&file.to_bytes().unwrap()).unwrap();
     assert_eq!(back.tracks(), file.tracks());
     assert_eq!(back.ticks_per_quarter(), DIVISION);
+}
+
+/// SMF 1.0 section 3.3: Set Tempo is `FF 51 03`, Time Signature `FF 58 04`, Key
+/// Signature `FF 59 02` (a mode of 0 or 1) and End of Track `FF 2F 00`. A
+/// lenient reader keeps an event of such a type whose data is not that, as
+/// `Meta::Malformed` with its bytes, so the file's other events are read; it
+/// writes back byte for byte, reads back the same, and `to_clip` drops it.
+/// A meta type byte of 0x80 or more is no type (section 3.3: below 128): the
+/// reader keeps it the same way.
+#[test]
+fn a_typed_meta_event_with_data_its_type_does_not_define_is_kept_malformed() {
+    let cases: [(u8, &[u8]); 7] = [
+        (0x51, &[0x07, 0xA1]),       // a tempo of two bytes
+        (0x58, &[0x04, 0x02, 0x18]), // a time signature of three
+        (0x59, &[0x00]),             // a key signature of one byte
+        (0x59, &[0x00, 0x02]),       // a mode of 2
+        (0x2F, &[0x00]),             // an End of Track with data
+        (0x85, &[0x01, 0x02]),       // a type byte with its top bit set
+        (0x58, &[]),                 // a time signature of none
+    ];
+    for (kind, data) in cases {
+        let mut body = vec![0x00, 0xFF, kind, data.len() as u8];
+        body.extend_from_slice(data);
+        body.extend_from_slice(&[0x00, 0x90, 60, 100, 0x00, 0xFF, 0x2F, 0x00]);
+        let read = MidiFile::from_bytes(&raw_track(&body)).expect("reads");
+        let events = &read.tracks()[0].events;
+        // The note after it is read.
+        assert_eq!(events.len(), 2, "{kind:#04x} {data:?}");
+        let FileEvent::Meta(Meta::Malformed(malformed)) = &events[0].1 else {
+            panic!("{kind:#04x} {data:?}: {:?}", events[0].1);
+        };
+        assert_eq!((malformed.kind(), malformed.data()), (kind, data));
+        // Written back as the file had it, and read as the same.
+        let written = read.to_bytes().unwrap();
+        let mut event = vec![0xFF, kind, data.len() as u8];
+        event.extend_from_slice(data);
+        assert!(
+            written.windows(event.len()).any(|w| w == event),
+            "{kind:#04x} {data:?}"
+        );
+        assert_eq!(MidiFile::from_bytes(&written).unwrap(), read);
+        let converted = read.to_clip().unwrap();
+        let reasons: Vec<DropReason> = converted.dropped.iter().map(|d| d.reason).collect();
+        assert_eq!(reasons, [DropReason::MalformedMeta], "{kind:#04x} {data:?}");
+    }
 }

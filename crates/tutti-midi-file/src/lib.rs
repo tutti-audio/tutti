@@ -69,7 +69,7 @@
 //! let four_quarters = Tick(4 * 480);
 //! let track = Track::new()
 //!     .meta(Tick(0), Meta::tempo(Bpm::of(120.0)))
-//!     .note(Tick(0), 1_440, MidiChannel::FIRST, NoteNumber::of(60), U7::of(100))?
+//!     .note(Tick(0), Tick(1_440), MidiChannel::FIRST, NoteNumber::of(60), U7::of(100))
 //!     .meta(four_quarters, Meta::tempo(Bpm::of(60.0)));
 //! let file = MidiFile::smf(SmfFormat::SingleTrack, SmfDivision::of(480), vec![track])?;
 //!
@@ -120,12 +120,13 @@ mod smf;
 mod write;
 
 pub use clip_file::ClipFileError;
-pub use config::{ConfigError, OutOfOrder, Refusal, TickOverflow};
+pub use config::{ConfigError, OutOfOrder, Refusal};
 pub use fault::{SmfParseError, Truncated};
 pub use file::{
-    Altered, Converted, DropReason, Dropped, FileEvent, LyricChange, Meta, MicrosPerQuarter,
-    MicrosPerQuarterOutOfRange, MidiFile, Moved, NoCommonTimeline, OtherMetaKind,
-    OtherMetaKindOutOfRange, PairedNote, SmfFormat, TextKind, Tick, Timeline, ToClipError, Track,
+    Altered, Converted, DropReason, Dropped, FileEvent, LyricChange, MalformedMeta, Meta,
+    MicrosPerQuarter, MicrosPerQuarterOutOfRange, MidiFile, Moved, NoCommonTimeline, OtherMetaKind,
+    OtherMetaKindOutOfRange, PairedNote, SmfFormat, TextKind, Tick, Timeline, TimelineDrop,
+    ToClipError, Track,
 };
 pub use kind::MidiFileKind;
 pub use smf::{SmfDivision, SmfDivisionOutOfRange};

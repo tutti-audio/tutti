@@ -778,40 +778,6 @@ fn an_other_meta_event_of_every_allowed_kind_writes_and_reads_back_equal() {
     assert_eq!(read(&file.to_bytes().unwrap()), file);
 }
 
-/// A meta event of a typed kind whose data is not what the kind defines has no
-/// form in the model, so the read refuses it: Set Tempo, Time Signature and Key
-/// Signature shorter than their fixed part, a Key Signature whose mode byte is
-/// neither 0 nor 1, and an End of Track with data.
-#[test]
-fn a_typed_meta_event_with_data_its_kind_does_not_define_is_refused() {
-    let meta = |kind: u8, data: &[u8]| {
-        let mut event = vec![0x00, 0xFF, kind, data.len() as u8];
-        event.extend_from_slice(data);
-        event
-    };
-    let body = |event: Vec<u8>| {
-        let mut chunk = b"MThd\0\0\0\x06\0\0\0\x01\x01\xE0MTrk".to_vec();
-        chunk.extend((event.len() as u32).to_be_bytes());
-        chunk.extend(event);
-        chunk
-    };
-    for (kind, data) in [
-        (0x51, &[1, 2][..]),
-        (0x58, &[4, 2, 24][..]),
-        (0x59, &[0][..]),
-        (0x59, &[0, 2][..]),
-        (0x2F, &[0][..]),
-    ] {
-        assert!(
-            matches!(
-                MidiFile::from_bytes(&body(meta(kind, data))),
-                Err(Error::MidiFileParse(_))
-            ),
-            "{kind:#04x} {data:?}"
-        );
-    }
-}
-
 #[test]
 fn events_out_of_order_are_refused() {
     let out_of_order = Track {

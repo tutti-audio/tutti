@@ -94,6 +94,9 @@ pub enum DropReason {
     /// a clip holds one of each at a position, and the later event wins
     /// where both land on one (see [`MidiFile::to_clip`]).
     Superseded,
+    /// A meta event of a typed kind whose data the kind does not define
+    /// ([`Meta::Malformed`]): its value cannot be read.
+    MalformedMeta,
     /// A Set Tempo of zero microseconds per quarter note: no valid tempo, and a
     /// Flex Set Tempo field of 0 is none either (M2-104 section 7.5.3). It
     /// is not the file's first tempo, and the clip's default 120 BPM stands
@@ -416,6 +419,7 @@ fn convert(
                 };
                 other(text(kind, bytes)?)
             }
+            Meta::Malformed(_) => Err(DropReason::MalformedMeta),
             Meta::Other { kind, .. } => Err(match kind.get() {
                 0x20 | 0x21 => DropReason::ReplacedByAddressing,
                 0x54 => DropReason::SuccessorUndefined,

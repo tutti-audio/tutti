@@ -1,5 +1,6 @@
-//! The two range-checked numbers of a [`Meta`](crate::Meta): the wire's 24-bit
-//! tempo and the type byte of an untyped meta event.
+//! The parts of a [`Meta`](crate::Meta) that are not a plain field: the wire's
+//! 24-bit tempo, the type byte of an untyped meta event, and a meta event the
+//! reader could not type.
 
 tutti_types::ranged! {
     /// Microseconds per quarter note as a Set Tempo holds it: 24 bits,
@@ -37,4 +38,40 @@ tutti_types::ranged! {
     /// bit (SMF 1.0 section 3.3).
     #[derive(Eq, Hash, PartialOrd, Ord)]
     OtherMetaKind(u8), OtherMetaKindOutOfRange, "a meta type byte below 128 that has no Meta variant", |raw| raw < 0x80 && !is_typed(raw)
+}
+
+/// A meta event whose type the model types but whose data is not what the type
+/// defines: a Set Tempo, Time Signature or Key Signature shorter than its
+/// fixed part, a Key Signature whose mode is neither 0 nor 1, an End of Track
+/// with data (SMF 1.0 section 3.3), or a type byte with its top bit set.
+///
+/// A lenient reader keeps it: the file's other events are read, and a write
+/// gives the event's bytes back exactly. Only a read makes one, so a
+/// `MalformedMeta` is never one that reads back as a typed event.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MalformedMeta {
+    kind: u8,
+    data: Box<[u8]>,
+}
+
+impl MalformedMeta {
+    /// The event the reader found: its type byte and data.
+    pub(crate) fn new(kind: u8, data: &[u8]) -> Self {
+        Self {
+            kind,
+            data: data.into(),
+        }
+    }
+
+    /// The type byte as the file has it.
+    #[must_use]
+    pub const fn kind(&self) -> u8 {
+        self.kind
+    }
+
+    /// The data as the file has it, without its length.
+    #[must_use]
+    pub fn data(&self) -> &[u8] {
+        &self.data
+    }
 }
