@@ -470,7 +470,8 @@ fn group_peaks<S: Float>(state: &mut Oversampler<f32>, samples: &[S], peaks: &mu
     }
     state.upsample(Mono::new(clean));
     let (high, _) = state.high_rate();
-    for (p, group) in peaks.iter_mut().zip(high.samples().chunks_exact(4)) {
+    let (groups, _) = high.samples().as_chunks::<4>();
+    for (p, group) in peaks.iter_mut().zip(groups) {
         *p = group.iter().fold(*p, |peak, &x| peak.max(level(x)));
     }
 }
