@@ -190,7 +190,7 @@ mod tests {
 
     /// A thread that holds no claim is neither role but the one that built
     /// the roles is the main thread.
-    /// Spec: clap.thread-check
+    /// Spec: clap.ext.thread_check.host.is_main_thread, clap.ext.thread_check.host.is_audio_thread
     #[test]
     fn an_unclaimed_thread_is_not_the_audio_thread() {
         let roles = roles();
@@ -207,7 +207,7 @@ mod tests {
     /// `is_main_thread` and `is_audio_thread` are mutually exclusive: the main
     /// thread inside an audio claim is the audio thread alone, so a plugin's
     /// `!is_main_thread()` assertion there can fail.
-    /// Spec: clap.thread-check
+    /// Spec: clap.ext.thread_check.host.is_main_thread, clap.ext.thread_check.host.is_audio_thread
     #[test]
     fn a_claim_makes_its_thread_the_audio_thread_and_not_the_main_thread() {
         let roles = roles();
@@ -222,7 +222,7 @@ mod tests {
 
     /// The audio claim is mutual exclusion: no two threads are inside it at
     /// once, and each sees itself as the audio thread throughout.
-    /// Spec: clap.params (`flush` is never concurrent with `process`)
+    /// Spec: clap.ext.params.flush, clap.plugin.process
     #[test]
     fn audio_claims_serialize_across_threads() {
         let roles = roles();

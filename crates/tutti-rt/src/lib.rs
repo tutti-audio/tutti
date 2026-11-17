@@ -17,8 +17,12 @@
 //! - [`RtVec`] — a capped collection through `&mut self` that refuses the
 //!   write at the cap rather than growing, latching an overflow flag. An owner
 //!   that shares one behind an `Arc` puts it in an [`AudioThreadCell`].
+//!   [`CappedVec`] is the same with a cap chosen at construction, for a count
+//!   known only at run time.
 //! - [`PackedAtomic`] — a value of up to eight bytes in one atomic word, so a
 //!   reader never pairs one write's field with another's.
+//! - [`Setting`] / [`SettingWord`] — a mode or switch set (a fieldless enum,
+//!   [`setting_word!`]) in one atomic word, stored by its encoding.
 //! - [`SeqWriter`] / [`SeqReader`] — a sequence lock for a `Pod` value one
 //!   writer overwrites in place and any thread copies whole.
 //! - [`level_cell()`] — a peak and an energy the audio thread folds each block
@@ -148,6 +152,7 @@
 #![deny(missing_docs)]
 #![deny(clippy::undocumented_unsafe_blocks, clippy::missing_safety_doc)]
 
+mod capped_vec;
 mod cell;
 mod claim;
 mod clock;
@@ -171,6 +176,7 @@ mod request_word;
 mod ring;
 mod scope;
 mod seq_cell;
+mod setting;
 mod sleep;
 mod spin;
 mod split;
@@ -178,6 +184,7 @@ mod task_graph;
 mod thread;
 mod vec;
 
+pub use capped_vec::CappedVec;
 pub use cell::{AudioThreadCell, BorrowGuard, BorrowRef};
 pub use clock::monotonic_ns;
 pub use denormals::with_no_denormals;
@@ -206,6 +213,7 @@ pub use request_word::{RequestBit, RequestBitOutOfRange, RequestBits, RequestWor
 pub use ring::{Drain, Iter, Overflow, PushError, Returned, RingReader, RingWriter, ring};
 pub use scope::{ControlDrop, RtScope, RtScopeGuard};
 pub use seq_cell::{Contended, SeqReader, SeqWriter};
+pub use setting::{Setting, SettingWord};
 pub use sleep::sleep_until_ns;
 pub use spin::BlockWaits;
 pub use split::{ClaimConflict, ClaimTable, Claimed, ClaimedRun, Held, RwView, SplitMut, SplitRw};

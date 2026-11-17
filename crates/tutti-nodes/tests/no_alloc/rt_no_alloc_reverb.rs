@@ -72,7 +72,8 @@ fn controls(freezable: bool) -> Vec<Control> {
 fn gate(layout: FdnLayout, blocks: usize, mut between: impl FnMut(&ParamSet, usize)) {
     let node = FdnNode::live(layout, FdnControls::DEFAULT);
     let (mut rig, set) = BlockRig::new(node, SampleRate::SR_48K, 64);
-    for c in rig.inputs_mut() {
+    for c in rig.inputs_mut().iter_mut() {
+        let c = c.into_samples_mut();
         for (i, x) in c.iter_mut().enumerate() {
             *x = if i % 3 == 0 { 0.5 } else { -0.25 };
         }
@@ -88,7 +89,7 @@ fn gate(layout: FdnLayout, blocks: usize, mut between: impl FnMut(&ParamSet, usi
             between(&set, i);
             rig.block();
             for c in 0..2 {
-                for &s in rig.output(c) {
+                for &s in rig.output().plane(c).samples() {
                     finite &= s.is_finite();
                     peak = peak.max(s.abs());
                 }
@@ -150,7 +151,8 @@ fn direct(layout: FdnLayout, controls: FdnControls, amplitude: f32) -> Direct<Fd
 }
 
 fn set_input(rig: &mut Direct<FdnNode>, amplitude: f32) {
-    for c in rig.inputs_mut() {
+    for c in rig.inputs_mut().iter_mut() {
+        let c = c.into_samples_mut();
         for (i, x) in c.iter_mut().enumerate() {
             *x = if i % 2 == 0 { amplitude } else { -amplitude };
         }
@@ -162,7 +164,7 @@ fn level(rig: &Direct<FdnNode>) -> (f32, bool) {
     let mut peak = 0.0f32;
     let mut finite = true;
     for c in 0..2 {
-        for &s in rig.output(c) {
+        for &s in rig.output().plane(c).samples() {
             finite &= s.is_finite();
             peak = peak.max(s.abs());
         }
@@ -274,7 +276,8 @@ fn the_fdn_renders_non_finite_input_without_allocating() {
         for _ in 0..32 {
             rig.block();
         }
-        for c in rig.inputs_mut() {
+        for c in rig.inputs_mut().iter_mut() {
+            let c = c.into_samples_mut();
             c[0] = f32::NAN;
             c[1] = f32::INFINITY;
             c[2] = f32::NEG_INFINITY;

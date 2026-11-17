@@ -13,6 +13,7 @@
 //! must be finite.
 
 use std::sync::atomic::Ordering;
+use tutti_buffers::Planes;
 use tutti_types::MaxBlock;
 
 use tutti_fixtures::Noise;
@@ -49,7 +50,7 @@ fn render_node_finite(node: &mut dyn Node, rate: SampleRate, blocks: usize, seed
     for b in 0..blocks {
         let chans = noise_block(width, seed + b as u32);
         let refs: Vec<&[f32]> = chans.iter().map(|c| &c[..]).collect();
-        let out = drive(node, rate, &refs, &[]);
+        let out = drive(node, rate, Planes::new(&refs).unwrap(), &[]);
         all &= out.iter().flatten().all(|s| s.is_finite());
     }
     all

@@ -368,7 +368,7 @@ mod tests {
             let out = drive(
                 &mut node,
                 crate::test_support::RATE,
-                &[chunk],
+                Planes::new(&[chunk]).unwrap(),
                 &[Some(&lane[..chunk.len()])],
             );
             low.extend_from_slice(&out[0]);

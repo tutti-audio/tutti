@@ -1033,8 +1033,9 @@ impl<F: Fn()> EventSource for AtFlush<F> {
 /// holds the instance, a block is refused `Busy` and the plugin is not called,
 /// a `reset` is owed and runs first on the next block, and a `stop` returns
 /// without waiting and leaves the plugin processing.
-/// Spec: clap.plugin (`reset` and `stop_processing` are audio-thread entries,
-/// serialised with `process`)
+/// `reset` and `stop_processing` are audio-thread entries, serialised with
+/// `process`.
+/// Spec: clap.plugin.reset, clap.plugin.stop_processing, clap.ext.params.flush
 #[test]
 fn a_flush_holding_the_instance_refuses_a_block_owes_a_reset_and_does_not_wait_for_a_stop() {
     use std::cell::RefCell;

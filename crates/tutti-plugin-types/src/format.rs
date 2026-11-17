@@ -90,6 +90,15 @@ impl PluginFormat {
                 extension: ext.to_owned(),
             })
     }
+
+    /// The format the extension of `path` names
+    /// ([`from_extension`](Self::from_extension)), or `None` for a path with no
+    /// extension or one no format claims.
+    #[must_use]
+    pub fn from_path(path: &std::path::Path) -> Option<Self> {
+        let ext = path.extension().and_then(|e| e.to_str())?;
+        Self::from_extension(ext).ok()
+    }
 }
 
 /// A file extension no plugin format claims.
@@ -130,6 +139,27 @@ impl PluginId {
 #[cfg(test)]
 mod tests {
     use super::PluginFormat;
+    use std::path::Path;
+
+    /// A path names its format by its extension, whatever its case, and a path
+    /// with no plugin extension names none.
+    #[test]
+    fn a_path_names_the_format_of_its_extension() {
+        for (path, format) in [
+            ("a.vst3", Some(PluginFormat::Vst3)),
+            ("Reverb.VST3", Some(PluginFormat::Vst3)),
+            ("a.vst", Some(PluginFormat::Vst2)),
+            ("Legacy.DLL", Some(PluginFormat::Vst2)),
+            ("Synth1.so", Some(PluginFormat::Vst2)),
+            ("a.clap", Some(PluginFormat::Clap)),
+            ("Synth.Component", Some(PluginFormat::AudioUnit)),
+            ("a.txt", None),
+            ("a.wasm", None),
+            ("plain", None),
+        ] {
+            assert_eq!(PluginFormat::from_path(Path::new(path)), format, "{path}");
+        }
+    }
 
     /// **`from_extension_id` inverts `extension_id`** for every format, and `ALL`
     /// lists each format once, so the name a caller sends to `plugin-probe --as`

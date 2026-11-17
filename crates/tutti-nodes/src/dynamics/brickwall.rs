@@ -325,7 +325,7 @@ mod tests {
             BusTopology::unassigned(ChannelLayout::from(3u16)).unwrap(),
             Db::new(0.0),
         ));
-        let out = drive(&mut bw, RATE, &refs, &[Some(&fed)]);
+        let out = drive(&mut bw, RATE, Planes::new(&refs).unwrap(), &[Some(&fed)]);
         for (c, (o, x)) in out.iter().zip(&ins).enumerate() {
             for (i, (&y, &x)) in o.iter().zip(x).enumerate() {
                 let ceiling = Db(fed[i]).to_amplitude().get();
@@ -338,7 +338,7 @@ mod tests {
             }
         }
         // Unfed: one ceiling, 0 dB, for the whole block.
-        let out = drive(&mut bw, RATE, &refs, &[None]);
+        let out = drive(&mut bw, RATE, Planes::new(&refs).unwrap(), &[None]);
         for (c, (o, x)) in out.iter().zip(&ins).enumerate() {
             for (i, (&y, &x)) in o.iter().zip(x).enumerate() {
                 let want = if x.abs() > 1.0 { x.signum() } else { x };

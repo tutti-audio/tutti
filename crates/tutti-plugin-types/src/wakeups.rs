@@ -24,81 +24,7 @@ use std::time::{Duration, Instant};
 
 #[cfg(doc)]
 use crate::EditorWindow;
-use crate::FdId;
-
-/// Which events on a descriptor a plugin asked to hear about, or which of
-/// them are ready.
-///
-/// A set of three: readable, writable, in an error state. Its bits are the
-/// the OS layer's poll's (read 1, write 2, error 4), so a format's own flag
-/// values are converted at the format.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct Interest(u8);
-
-impl Interest {
-    /// No event.
-    pub const NONE: Self = Self(0);
-    /// The descriptor is readable without blocking.
-    pub const READ: Self = Self(1 << 0);
-    /// The descriptor is writable without blocking.
-    pub const WRITE: Self = Self(1 << 1);
-    /// The descriptor is in an error state.
-    pub const ERROR: Self = Self(1 << 2);
-
-    /// The events of both.
-    #[must_use]
-    pub const fn union(self, other: Self) -> Self {
-        Self(self.0 | other.0)
-    }
-
-    /// The events `self` and `other` share.
-    #[must_use]
-    pub const fn intersection(self, other: Self) -> Self {
-        Self(self.0 & other.0)
-    }
-
-    /// Whether every event of `other` is in `self`.
-    #[must_use]
-    pub const fn contains(self, other: Self) -> bool {
-        self.0 & other.0 == other.0
-    }
-
-    /// Whether no event is in the set.
-    #[must_use]
-    pub const fn is_empty(self) -> bool {
-        self.0 == 0
-    }
-
-    /// The set as bits (read 1, write 2, error 4), for a host that waits.
-    #[must_use]
-    pub const fn bits(self) -> u8 {
-        self.0
-    }
-
-    /// The set of `bits` (see [`bits`](Self::bits)); bits with no event are dropped.
-    #[must_use]
-    pub const fn from_bits(bits: u8) -> Self {
-        Self(bits & (Self::READ.0 | Self::WRITE.0 | Self::ERROR.0))
-    }
-}
-
-/// A descriptor a plugin asked the host to wait on, and for what.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Watch {
-    /// The descriptor, as the format names it.
-    pub fd: FdId,
-    /// The events to wait for.
-    pub interest: Interest,
-}
-
-/// A watched descriptor that is ready, and the events that are.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Ready {
-    /// The descriptor.
-    pub fd: FdId,
-    /// The events ready, among those asked for.
-    pub events: Interest,
-}
+use tutti_plugin_ipc_ffi::{FdId, Interest, Watch};
 
 /// What one plugin wants waited on: its descriptors, and when its earliest
 /// timer is due.
@@ -187,7 +113,7 @@ mod tests {
         w.due_at(t0 + Duration::from_millis(30));
         w.due_at(t0 + Duration::from_millis(10));
         w.due_at(t0 + Duration::from_millis(20));
-        w.watch(FdId(3), Interest::NONE);
+        w.watch(FdId::new(3), Interest::NONE);
         assert_eq!(w.deadline(), Some(t0 + Duration::from_millis(10)));
         assert!(w.watches().is_empty());
         assert_eq!(
@@ -202,17 +128,5 @@ mod tests {
         );
         w.clear();
         assert!(w.is_empty() && w.until_due(t0).is_none());
-    }
-
-    /// **Interest is a set of three events**, and bits the OS layer has no
-    /// event for are dropped.
-    #[test]
-    fn interest_is_a_set_of_three_events() {
-        let rw = Interest::READ.union(Interest::WRITE);
-        assert!(rw.contains(Interest::READ) && rw.contains(Interest::WRITE));
-        assert!(!rw.contains(Interest::ERROR));
-        assert_eq!(rw.intersection(Interest::WRITE), Interest::WRITE);
-        assert_eq!(Interest::from_bits(rw.bits() | 0x80), rw);
-        assert!(Interest::NONE.is_empty() && !rw.is_empty());
     }
 }
