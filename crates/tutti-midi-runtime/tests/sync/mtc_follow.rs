@@ -404,3 +404,40 @@ fn a_reversed_source_stops_the_transport_and_forward_locks_again() {
     );
     assert_eq!(events[2], ClockEvent::Play);
 }
+
+/// **A discarded cycle is no jump; a real jump still locates.** A locked, rolling
+/// follower is fed cycles of frames 10, 12, then (the cycle at 14 lost to a gap)
+/// 16: the step is 4 frames, two whole cycles, within `MTC_DROPOUT` (0.25 s is
+/// 6.25 frames at 25 fps), so no `Locate`. A cycle at frame 17 is 1 frame on, not
+/// whole cycles, and one at 200 is past the window: each locates.
+#[test]
+fn a_discarded_cycle_is_not_a_jump_and_a_real_jump_locates() {
+    let locates = |rig: &Rig| {
+        rig.heard
+            .iter()
+            .filter(|(_, e)| matches!(e, ClockEvent::Locate { .. }))
+            .count()
+    };
+    let feed_cycle = |rig: &mut Rig, frame: u64, start: f64| {
+        for (k, n) in nibbles(frame).iter().enumerate() {
+            rig.feed(quarter(k as u8, *n), start + k as f64 / (4.0 * FPS));
+        }
+    };
+    let mut rig = Rig::new();
+    for c in 0..5 {
+        for (ump, t) in forward(c, 1.0) {
+            rig.feed(ump, t);
+        }
+    }
+    assert!(rig.follower.locked());
+    rig.heard.clear();
+    // Frames 8 was the last cycle (c = 4); 12 follows with 10 lost.
+    feed_cycle(&mut rig, 12, 0.5);
+    assert_eq!(locates(&rig), 0, "a discarded cycle is two whole cycles");
+    feed_cycle(&mut rig, 14, 0.58);
+    assert_eq!(locates(&rig), 0);
+    feed_cycle(&mut rig, 17, 0.66);
+    assert_eq!(locates(&rig), 1, "one frame is not whole cycles");
+    feed_cycle(&mut rig, 200, 0.74);
+    assert_eq!(locates(&rig), 2, "past the dropout window");
+}

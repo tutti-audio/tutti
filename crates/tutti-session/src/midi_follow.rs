@@ -396,13 +396,12 @@ impl ClockAction {
     }
 }
 
-/// How long after a message arrived a command takes effect, at the soonest:
-/// four declicks, 20 ms, derived from [`DECLICK`](tutti_graph::DECLICK) (tutti's
-/// choice of four): the interval of a 60 Hz update is 16.7 ms, so a poll that
-/// reads a message is no more than four declicks after it, and a command placed
-/// this far on is ahead of the audio thread at the poll that reads it. A
-/// command placed at the arrival and this lead lands at a constant delay from
-/// its message, not at a block's first frame.
+/// How long after a message arrived a command is placed: four declicks, 20 ms
+/// (tutti's choice of margin), above one 60 Hz app update (16.7 ms), so a poll
+/// that reads a message is usually before the frame. The lead only sets the
+/// latency, a constant delay from the message; correctness is the floor in
+/// [`placed_frame`], a declick past the next block, which a late poll falls
+/// back to.
 pub(crate) const CLOCK_LEAD: Seconds = Seconds::new(4.0 * tutti_graph::DECLICK.get());
 
 /// The frame a command for a message that arrived at `at` takes effect on:

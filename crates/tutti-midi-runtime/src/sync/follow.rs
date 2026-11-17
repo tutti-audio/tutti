@@ -79,9 +79,11 @@
 //!   +2 frame offset; the follower keeps the frame and the arrival of piece 0
 //!   instead, so a [`Locate`](ClockEvent::Locate) says where the source was at
 //!   that arrival and whoever applies it advances by the time since, as for any
-//!   locate. A cycle is **consistent** when it names the frame two after the
-//!   one before at the same rate, which is what a generator running forward
-//!   sends and needs no arrival time to judge.
+//!   locate. A cycle is **consistent** when it names a frame a whole number of
+//!   cycles (two frames each) after the one before at the same rate, within
+//!   [`MTC_DROPOUT`](ClockFollower::MTC_DROPOUT): one cycle is what a generator
+//!   running forward sends, more is a cycle the assembler discarded, and neither
+//!   needs an arrival time to judge. Any other step is a jump.
 //! - The follower is **locked** after [`MTC_LOCK_CYCLES`](ClockFollower::MTC_LOCK_CYCLES)
 //!   consistent cycles, and plays, locating to the position first. A cycle that
 //!   is not consistent while it plays is a jump of the source, and locates.
@@ -767,9 +769,17 @@ impl MtcFollower {
     /// at `origin`, so the transport that applies it later advances by the
     /// difference as for any locate.
     fn cycle(&mut self, frame: SmpteTimecode, origin: Seconds, out: &mut impl FnMut(ClockEvent)) {
+        // Whole cycles on: one after the last, or more when the assembler
+        // discarded a cycle between (a gap costs a cycle, not the lock), up to
+        // as many as `MTC_DROPOUT` holds.
         let consistent = self.last_cycle.is_some_and(|last| {
+            let step = frame.frame_count().checked_sub(last.frame_count());
             last.frame_rate() == frame.frame_rate()
-                && frame.frame_count() == last.frame_count() + CYCLE_FRAMES
+                && step.is_some_and(|step| {
+                    step >= CYCLE_FRAMES
+                        && step % CYCLE_FRAMES == 0
+                        && frame.frame_rate().frames_at(ClockFollower::MTC_DROPOUT) >= step as f64
+                })
         });
         let first = self.last_cycle.is_none();
         self.last_cycle = Some(frame);
