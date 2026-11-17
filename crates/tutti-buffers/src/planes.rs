@@ -1,6 +1,7 @@
 //! [`Planes`] and [`PlanesMut`]: one equal-length run per channel.
 
 use crate::{BufferError, Mono, MonoMut, Sample, bounds};
+use alloc::vec::Vec;
 use core::fmt;
 use core::iter::FusedIterator;
 use core::ops::Range;

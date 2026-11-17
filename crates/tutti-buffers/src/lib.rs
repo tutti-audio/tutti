@@ -49,7 +49,10 @@
 //! assert_eq!((l, r), ([0.5, 0.25], [-0.5, 0.0]));
 //! # Ok::<(), tutti_buffers::BufferError>(())
 //! ```
+#![cfg_attr(not(test), no_std)]
 #![forbid(unsafe_code)]
+
+extern crate alloc;
 
 mod bounds;
 mod convert;
