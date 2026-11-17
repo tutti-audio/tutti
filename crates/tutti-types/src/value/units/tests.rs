@@ -103,6 +103,8 @@ fn every_new_clamped_passes_nan_and_saturates_infinity() {
     check!(StereoWidth, 0.0, f32::INFINITY);
     check!(CompressionRatio, 1.0, f32::INFINITY);
     check!(Q, f32::MIN_POSITIVE, f32::INFINITY);
+    check!(BitDepth, 1.0, 32.0);
+    check!(HoldFactor, 1.0, f32::INFINITY);
     // In-range values pass untouched, and -0.0 keeps its sign bit.
     assert_eq!(StereoWidth::new_clamped(1.5), StereoWidth(1.5));
     assert_eq!(CompressionRatio::new_clamped(4.0), CompressionRatio(4.0));
