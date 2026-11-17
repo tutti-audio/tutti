@@ -5,7 +5,10 @@
 //! a safety catch, see [`BrickwallLimiterNode`](super::BrickwallLimiterNode).
 
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_dsp::{COEFF_INTERVAL, LimiterBank, LimiterControls, LimiterLanes, Lookahead};
+use tutti_dsp::{
+    COEFF_INTERVAL, LimiterBank, LimiterControls, LimiterLanes, Lookahead, PeakDetection,
+    TruePeakError,
+};
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_types::{BusTopology, Db, MaxBlock, SampleRate, Samples, Seconds, Tail};
 
@@ -92,6 +95,21 @@ impl LimiterNode {
         Self::with_kernel(LimiterKernel::new(input, lookahead), LimiterSet, controls)
     }
 
+    /// This limiter reading its peak by `detection` ([`PeakDetection::Sample`] until set).
+    ///
+    /// [`TruePeak`](PeakDetection::TruePeak) limits the signal between the samples too, to
+    /// within [`LimiterBank::TRUE_PEAK_MARGIN`] (0.56 dB) of the ceiling for content in the
+    /// oversampler's passband, and its detection must line up with the lookahead: one under
+    /// the up-sampler's delay (about 20 frames) is lengthened to the shortest that does at
+    /// the rate the node is prepared at, and the latency the node declares is that length;
+    /// [`LimiterBank::detecting`] is the one that refuses. The up-sampler designs at every
+    /// rate a device runs at; a rate whose transition width does not fit `f32` panics at
+    /// prepare.
+    #[must_use]
+    pub fn detection(self, detection: PeakDetection) -> Self {
+        self.map_kernel(|k| k.detection = detection)
+    }
+
     /// A mono limiter at the default lookahead: 1 input, 1 output.
     #[must_use]
     pub fn mono(controls: LimiterControls) -> Self {
@@ -132,6 +150,7 @@ control_set! {
 pub struct LimiterKernel {
     input: BusTopology,
     lookahead: Lookahead,
+    detection: PeakDetection,
     /// `None` until [`prepare`](Kernel::prepare).
     bank: Option<LimiterBank>,
 }
@@ -142,6 +161,7 @@ impl LimiterKernel {
         Self {
             input,
             lookahead,
+            detection: PeakDetection::Sample,
             bank: None,
         }
     }
@@ -164,7 +184,19 @@ impl Kernel for LimiterKernel {
 
     /// Sizes the delay from the lookahead at `rate`: a re-prepare empties it.
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
-        self.bank = Some(LimiterBank::new(self.input.layout(), self.lookahead, rate));
+        let (layout, detection) = (self.input.layout(), self.detection);
+        let bank = LimiterBank::detecting(layout, self.lookahead, rate, detection)
+            .or_else(|e| match e {
+                TruePeakError::Lookahead { shortest, .. } => {
+                    LimiterBank::detecting(layout, shortest, rate, detection)
+                }
+                design @ TruePeakError::Design(_) => Err(design),
+            })
+            // The up-sampler fails to design only at a rate whose transition width does not fit
+            // `f32` (a rate no device has), and the shortest lookahead lines up by
+            // construction.
+            .expect("the true-peak up-sampler designs at every rate a device runs at");
+        self.bank = Some(bank);
     }
 
     fn reset(&mut self) {
@@ -744,5 +776,72 @@ mod tests {
                 assert!(y.is_finite(), "threshold {threshold}: frame {i} is {y}");
             }
         }
+    }
+
+    /// A true-peak node declares the lookahead as its latency, as the sample-peak one does,
+    /// and holds a quarter-rate sine at 45 degrees, whose samples are at 0.707 of its
+    /// amplitude, at its ceiling between them: the sample-peak node leaves it 3 dB over (its
+    /// samples at the ceiling, the sinusoid at the ceiling over 0.707).
+    #[test]
+    fn a_true_peak_node_declares_the_lookahead_and_limits_between_samples() {
+        let ceiling = Db::new(-6.0);
+        let limit = ceiling.to_amplitude().get();
+        let x: Vec<f32> = (0..4_000)
+            .map(|n| {
+                (std::f64::consts::FRAC_PI_2 * n as f64 + std::f64::consts::FRAC_PI_4).sin() as f32
+            })
+            .collect();
+        let peak = |detection| {
+            let mut lim = prepared_at(
+                limiter_releasing(ceiling, ceiling, 0.1).detection(detection),
+                RATE_44K,
+            );
+            assert_eq!(lim.shape().latency, Latency::new(Samples(221)));
+            let out = drive(&mut lim, RATE_44K, &[&x, &x], &[]).remove(0);
+            // The tone is a quarter of the rate, so its crest is a sample or a half between
+            // two: the largest of the samples and of the pairs' quadrature (a quarter-rate
+            // tone through two neighbours `a`, `b` peaks at `hypot(a, b)`).
+            out[2_000..]
+                .windows(2)
+                .map(|w| f32::hypot(w[0], w[1]))
+                .fold(0.0f32, f32::max)
+        };
+        let sample = peak(PeakDetection::Sample);
+        let true_peak = peak(PeakDetection::TruePeak);
+        assert!(
+            (sample / limit - std::f32::consts::SQRT_2).abs() < 1e-3,
+            "{sample}"
+        );
+        assert!((true_peak / limit - 1.0).abs() < 1e-3, "{true_peak}");
+    }
+
+    /// A lookahead under the up-sampler's delay is lengthened by the node to the shortest
+    /// that lines up, and it declares that as its latency.
+    #[test]
+    fn a_true_peak_node_lengthens_a_lookahead_too_short_to_line_up() {
+        let c = LimiterControls::DEFAULT;
+        let short = Lookahead::of(Seconds(0.0002));
+        let sample = prepared_at(
+            LimiterNode::new(BusTopology::MONO, short, c),
+            SampleRate::SR_48K,
+        );
+        assert_eq!(sample.shape().latency, Latency::new(Samples(10)));
+        let tp = prepared_at(
+            LimiterNode::new(BusTopology::MONO, short, c).detection(PeakDetection::TruePeak),
+            SampleRate::SR_48K,
+        );
+        let frames = tp.shape().latency.samples().get();
+        assert!(frames > 10, "{frames}");
+        let bank = LimiterBank::detecting(
+            ChannelLayout::MONO,
+            short,
+            SampleRate::SR_48K,
+            PeakDetection::TruePeak,
+        );
+        let tutti_dsp::TruePeakError::Lookahead { needed, .. } = bank.expect_err("too short")
+        else {
+            panic!("not a lookahead refusal");
+        };
+        assert!(frames >= needed.get());
     }
 }

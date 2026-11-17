@@ -267,6 +267,23 @@ impl OversamplingPlan {
         self.shared.latency
     }
 
+    /// The delay of the up-sampling half alone, in frames of the oversampled rate: the
+    /// oversampled point `h` of an impulse that entered at base frame 0 peaks at `h` equal to
+    /// this. It is the sum of the up stages' delays, each in oversampled frames, plus the
+    /// pad that makes the round trip whole base frames (all of it on the up side), so it is
+    /// not a whole number of base frames in general; the round trip is.
+    pub(crate) fn upsample_delay(&self) -> usize {
+        let stages = self.shared.taps.len();
+        let stage_sum: usize = self
+            .shared
+            .taps
+            .iter()
+            .enumerate()
+            .map(|(j, s)| s.delay << (stages - 1 - j))
+            .sum();
+        stage_sum + 2 * self.shared.lead
+    }
+
     /// One channel's state for blocks of at most `max_block` base frames, its filters and
     /// oversampled signal in `F`. Control side; allocates.
     #[must_use]

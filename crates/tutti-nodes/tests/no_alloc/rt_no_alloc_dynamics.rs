@@ -18,7 +18,7 @@ use tutti_graph::IntoNode;
 use tutti_graph::contract::BlockRig;
 use tutti_nodes::{
     BrickwallLimiterNode, CompressorControls, CompressorNode, GateControls, GateNode, KeyFilter,
-    KeySource, LimiterControls, LimiterNode, Lookahead, MultibandCompressorNode,
+    KeySource, LimiterControls, LimiterNode, Lookahead, MultibandCompressorNode, PeakDetection,
 };
 use tutti_types::{BusTopology, ChannelLayout, CompressionRatio, Db, SampleRate, Seconds};
 
@@ -149,6 +149,22 @@ fn limiter_node_process_is_allocation_free() {
             ceiling: Db::new(-0.3),
             ..LimiterControls::DEFAULT
         }),
+        1.5,
+        32,
+        2_000,
+    );
+}
+
+#[test]
+fn true_peak_limiter_node_process_is_allocation_free() {
+    // The 4x up-samplers and their buffers are built at prepare; a block only fills them.
+    gate(
+        LimiterNode::stereo(LimiterControls {
+            threshold: Db::new(-3.0),
+            ceiling: Db::new(-0.3),
+            ..LimiterControls::DEFAULT
+        })
+        .detection(PeakDetection::TruePeak),
         1.5,
         32,
         2_000,

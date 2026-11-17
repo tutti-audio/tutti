@@ -983,3 +983,5 @@ fn the_aimed_extremes_keep_their_meaning_on_the_lane_path() {
         "a -inf threshold limits everything: peak {peak}"
     );
 }
+
+mod true_peak;
