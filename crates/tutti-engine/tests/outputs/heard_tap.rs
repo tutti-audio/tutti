@@ -53,7 +53,8 @@ fn engine(width: u16) -> Engine {
         })
     }));
     ed.commit().expect("commits");
-    let engine = Engine::new(&transport, &mut ed, exec).expect("within limits");
+    let engine = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
+        .expect("within limits");
     Box::leak(Box::new((ed, transport)));
     engine
 }

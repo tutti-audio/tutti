@@ -82,7 +82,13 @@ fn render(pooled: bool) -> (Vec<f32>, usize) {
     }
     wire(&mut ed, [11, 12]);
     ed.commit().expect("commits");
-    let engine = Engine::new(&Transport::new(rate), &mut ed, exec).expect("within limits");
+    let engine = Engine::new(
+        &Transport::new(rate),
+        &mut ed,
+        exec,
+        tutti_engine::BlockDates::Os,
+    )
+    .expect("within limits");
     ed.set_root_fade(Some(Fade::seconds(
         Seconds(0.005),
         rate,

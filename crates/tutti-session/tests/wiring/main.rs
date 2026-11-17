@@ -1,5 +1,6 @@
 //! The session's graph: wiring, buses, edge gain, latency, the root and the scene render.
 
+mod block_dates;
 mod bus_edges;
 mod compensation;
 mod connect;

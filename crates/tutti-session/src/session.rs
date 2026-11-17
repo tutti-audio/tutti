@@ -666,10 +666,8 @@ impl SharedWork {
 
     /// [`MainWork::run`](tutti_plugin_types::MainWork::run).
     pub(crate) fn run(&self, main: tutti_plugin_types::MainThreadMarker) -> usize {
-        self.0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .run(main)
+        use tutti_rt::LockExt;
+        self.0.lock_recover().run(main)
     }
 }
 
@@ -1569,6 +1567,11 @@ impl<C: Clock> Session<C> {
     /// The playhead's beat now, extrapolated from the last block by
     /// [`Playhead::beat_now`] on [`tutti_rt::monotonic_ns`], the clock the
     /// block was stamped on.
+    ///
+    /// On a session dated by [`BlockDates::Frames`](crate::BlockDates::Frames)
+    /// the blocks are not on that clock: the extrapolation is measured from
+    /// the block's frame time, so it reads the block's beat or at most one
+    /// block past it.
     #[must_use]
     pub fn beat_now(&self) -> Beat {
         self.playhead().beat_now(tutti_rt::monotonic_ns())

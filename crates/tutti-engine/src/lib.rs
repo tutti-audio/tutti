@@ -94,7 +94,7 @@
 //!     .map(|port| Source::Node(OutPort { node: beats, port })));
 //! editor.commit().expect("the graph compiles");
 //!
-//! let engine = Engine::new(&transport, &mut editor, executor).expect("within the limits");
+//! let engine = Engine::new(&transport, &mut editor, executor, tutti_engine::BlockDates::Os).expect("within the limits");
 //!
 //! // Transport is a `motion`/`settings` split rather than a `play()` method:
 //! // settings anyone may store into, motion a state machine that may defer or
@@ -134,7 +134,7 @@ mod routing;
 mod stage;
 mod stream;
 mod timer;
-pub use block_clock::{BlockClockReader, BlockReading, Playhead};
+pub use block_clock::{BlockClockReader, BlockDates, BlockReading, Playhead};
 pub use callback::{AudioCallbackState, MAX_FRAMES, OutputBlock, process_audio};
 pub use engine::{DEFAULT_BLOCK_CAPACITY, Engine, GraphEngineError};
 pub use faults::{

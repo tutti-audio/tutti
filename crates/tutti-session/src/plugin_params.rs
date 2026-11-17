@@ -75,6 +75,7 @@ use tutti_plugin_types::{
     AutomationMode, AutomationModeError, Normalized, ParamEdit, ParamId, ParamUnit, ParameterInfo,
     PlainUnit,
 };
+use tutti_rt::LockExt;
 
 use crate::plugin::{Gate, HostedPlugin, Notices, queue};
 
@@ -95,7 +96,8 @@ impl Driven {
     /// Writes `value` into parameter `id`'s lane knob. `false` when no lane
     /// with a knob drives it.
     pub(crate) fn write(&self, id: ParamId, value: Normalized) -> bool {
-        self.lock()
+        self.knobs
+            .lock_recover()
             .get(&id)
             .is_some_and(|lane| lane.set_knob(value.get() as f32))
     }
@@ -103,7 +105,7 @@ impl Driven {
     /// Replaces the driven parameters with `knobs`; nothing is touched while
     /// there were none and there are none.
     pub(crate) fn replace(&self, knobs: Knobs) {
-        let mut held = self.lock();
+        let mut held = self.knobs.lock_recover();
         if held.is_empty() && knobs.is_empty() {
             return;
         }
@@ -114,17 +116,11 @@ impl Driven {
     /// plugin lands the value it plays (the knob plus the lane's routes), and
     /// the mirror holds the knob.
     pub(crate) fn report_knobs(&self, mirror: &tutti_plugin_host::PluginParamValues) {
-        for (&id, lane) in self.lock().iter() {
+        for (&id, lane) in self.knobs.lock_recover().iter() {
             if let Some(knob) = lane.knob() {
                 mirror.report(id, Normalized::clamped(f64::from(knob)));
             }
         }
-    }
-
-    fn lock(&self) -> std::sync::MutexGuard<'_, Knobs> {
-        self.knobs
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 }
 

@@ -625,13 +625,14 @@ impl Graph {
         transport: &tutti_transport::Transport,
         device: ChannelLayout,
         topology: Option<tutti_types::ChannelTopology>,
+        dates: tutti_engine::BlockDates,
     ) -> crate::Result<tutti_engine::Engine> {
         let mut exec = self.take_executor();
         exec.set_pool(self.render_pool("tutti-worker", self.render_worker_start.as_ref()));
         // Built here, on the control side, after the pool sized the
         // executor: the engine moves to the audio thread and holds none.
         let rt_log = tutti_graph::RtLogReaders::new(&mut exec);
-        let engine = tutti_engine::Engine::new(transport, &mut self.editor, exec)?;
+        let engine = tutti_engine::Engine::new(transport, &mut self.editor, exec, dates)?;
         let control = engine.output_control();
         control.support(device)?;
         control.state_device(device, topology)?;

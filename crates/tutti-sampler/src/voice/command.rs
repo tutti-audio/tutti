@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 
 use crate::streamer::{Stream, StreamId};
 use crate::stretch;
@@ -22,7 +22,7 @@ use super::slot::{stretch_values_want_filter, stretch_wanted};
 use super::types::{Direction, Playback, SlotId, Voice, VoiceSource};
 use tutti_codec::Wave;
 use tutti_graph::ParamSet;
-use tutti_rt::{ArcLend, PushError, RingReader, RingWriter};
+use tutti_rt::{ArcLend, LockExt, PushError, RingReader, RingWriter};
 use tutti_types::{
     Amplitude, AtomicSampleRate, Cents, ChannelLayout, Param, PlaybackRate, SampleRate,
     StretchFactor,
@@ -477,7 +477,7 @@ impl VoiceNodeHandle {
     /// thread: publishing allocates the new value and frees the one it
     /// replaces, here, so the node never does either.
     fn steer(&self, edit: impl FnOnce(&mut Steering)) {
-        let mut latest = self.latest.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut latest = self.latest.lock_recover();
         edit(&mut latest);
         self.steering.publish(*latest);
     }
@@ -510,10 +510,7 @@ impl VoiceNodeHandle {
     #[must_use = "a discarded loop is a loop that never plays"]
     pub fn set_loop(&self, setting: Option<Loop>) -> Result<(), crate::StreamerGone> {
         match &self.stream {
-            Some(stream) => stream
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .set_loop(setting),
+            Some(stream) => stream.lock_recover().set_loop(setting),
             None => {
                 self.steer(|s| s.loop_ = Some(setting));
                 Ok(())
@@ -528,16 +525,8 @@ impl VoiceNodeHandle {
     /// until then).
     pub fn loop_(&self) -> Option<Loop> {
         match &self.stream {
-            Some(stream) => stream
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .loop_(),
-            None => self
-                .latest
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .loop_
-                .flatten(),
+            Some(stream) => stream.lock_recover().loop_(),
+            None => self.latest.lock_recover().loop_.flatten(),
         }
     }
 
@@ -546,9 +535,7 @@ impl VoiceNodeHandle {
     /// a memory voice, which has no stream.
     #[must_use]
     pub fn status(&self) -> Option<crate::StreamStatus> {
-        self.stream
-            .as_ref()
-            .map(|s| s.lock().unwrap_or_else(PoisonError::into_inner).status())
+        self.stream.as_ref().map(|s| s.lock_recover().status())
     }
 
     /// Sets the voice's varispeed (pitch follows the rate), from the node's
@@ -572,11 +559,7 @@ impl VoiceNodeHandle {
 
     /// Whether the voice is playing (not [`stop`](Self::stop)ped).
     pub fn is_playing(&self) -> bool {
-        !self
-            .latest
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .stopped
+        !self.latest.lock_recover().stopped
     }
 
     /// Sets the voice's gain, from the node's next block on; a NaN or infinite gain
@@ -686,11 +669,7 @@ impl VoicePoolHandle {
     ///
     /// Returns how many values were freed, which is what a test can assert on.
     pub fn collect_retired(&self) -> usize {
-        self.retired
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .drain()
-            .count()
+        self.retired.lock_recover().drain().count()
     }
 
     /// What the pool's drain has dropped, refused, or freed in the callback
@@ -1006,7 +985,7 @@ impl VoicePoolHandle {
             // An in-memory (or unknown) slot: nothing to set it on.
             return self.queue(cmd, None);
         };
-        let mut stream = entry.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut stream = entry.lock_recover();
         let previous = stream.loop_();
         self.queue(cmd, Some(stream.id()))?;
         if stream.set_loop(setting).is_err() {
@@ -1033,7 +1012,7 @@ impl VoicePoolHandle {
             // without a stream here is counted by the drain.
             return self.queue(cmd, None);
         };
-        let mut stream = entry.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut stream = entry.lock_recover();
         let previous = stream.direction();
         self.queue(cmd, Some(stream.id()))?;
         if stream.set_direction(direction).is_err() {
@@ -1056,12 +1035,12 @@ impl VoicePoolHandle {
 
     /// The command ring's writer, locked.
     fn writer(&self) -> std::sync::MutexGuard<'_, RingWriter<Queued>> {
-        self.tx.lock().unwrap_or_else(PoisonError::into_inner)
+        self.tx.lock_recover()
     }
 
     /// The stream table, locked.
     fn streams(&self) -> std::sync::MutexGuard<'_, HashMap<SlotId, Arc<Mutex<Stream>>>> {
-        self.streams.lock().unwrap_or_else(PoisonError::into_inner)
+        self.streams.lock_recover()
     }
 
     /// Queues `cmd` for the drain, with the stream its loop was set on.

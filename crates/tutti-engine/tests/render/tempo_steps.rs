@@ -110,7 +110,8 @@ fn live(map: &Arc<TempoMap>, start: f64, blocks: &[usize], total: usize) -> Seen
     let transport = Transport::new(SampleRate::of(SR));
     let log = Log::default();
     let (mut ed, exec) = graph(&log);
-    let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
+    let engine = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
+        .expect("within the limits");
     transport.settings().set_tempo_map(Arc::clone(map));
     transport
         .motion()
@@ -273,7 +274,8 @@ fn a_seek_seats_at_the_exact_beat_in_its_step() {
     let transport = Transport::new(SampleRate::of(SR));
     let log = Log::default();
     let (mut ed, exec) = graph(&log);
-    let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
+    let engine = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
+        .expect("within the limits");
     transport.settings().set_tempo_map(steps(&points));
     let m = &transport.motion();
     m.try_send(MotionEvent::play_from(Beat(0.0))).expect("room");
@@ -318,7 +320,8 @@ fn a_loop_wrap_takes_the_tempo_where_it_lands() {
     let transport = Transport::new(SampleRate::of(SR));
     let log = Log::default();
     let (mut ed, exec) = graph(&log);
-    let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
+    let engine = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
+        .expect("within the limits");
     transport.settings().set_tempo_map(steps(&points));
     transport
         .motion()

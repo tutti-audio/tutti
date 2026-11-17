@@ -14,8 +14,9 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard};
 use tutti_codec::Wave;
+use tutti_rt::LockExt;
 
 /// Bounded LRU cache with entry count and byte limits.
 ///
@@ -108,7 +109,7 @@ impl LruCache {
     /// The map, locked. Poisoning is ignored: nothing runs under the lock that
     /// can leave the map half-changed.
     fn lock(&self) -> MutexGuard<'_, Inner> {
-        self.inner.lock().unwrap_or_else(PoisonError::into_inner)
+        self.inner.lock_recover()
     }
 
     /// The resident wave for `path`, if any, marking it most-recently-used.
