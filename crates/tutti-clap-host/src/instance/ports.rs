@@ -41,6 +41,28 @@ const fn clap_normalization(normalization: AmbisonicNormalization) -> Option<u32
     }
 }
 
+/// The ordering and normalization CLAP's constants `ordering` and
+/// `normalization` name, or `None` when either is not one `ambisonic.h` defines.
+fn ambisonic_of(
+    ordering: u32,
+    normalization: u32,
+) -> Option<(AmbisonicOrdering, AmbisonicNormalization)> {
+    let ordering = match ordering {
+        CLAP_AMBISONIC_ORDERING_FUMA => AmbisonicOrdering::FuMa,
+        CLAP_AMBISONIC_ORDERING_ACN => AmbisonicOrdering::Acn,
+        _ => return None,
+    };
+    let normalization = match normalization {
+        CLAP_AMBISONIC_NORMALIZATION_MAXN => AmbisonicNormalization::MaxN,
+        CLAP_AMBISONIC_NORMALIZATION_SN3D => AmbisonicNormalization::Sn3d,
+        CLAP_AMBISONIC_NORMALIZATION_N3D => AmbisonicNormalization::N3d,
+        CLAP_AMBISONIC_NORMALIZATION_SN2D => AmbisonicNormalization::Sn2d,
+        CLAP_AMBISONIC_NORMALIZATION_N2D => AmbisonicNormalization::N2d,
+        _ => return None,
+    };
+    Some((ordering, normalization))
+}
+
 impl ClapLoaded {
     /// Number of input or output audio ports exposed by the plugin.
     ///
@@ -246,20 +268,7 @@ impl ClapLoaded {
         port_index: u32,
     ) -> Option<(AmbisonicOrdering, AmbisonicNormalization)> {
         let config = self.plugin.ambisonic_config(main, is_input, port_index)?;
-        let ordering = match config.ordering {
-            CLAP_AMBISONIC_ORDERING_FUMA => AmbisonicOrdering::FuMa,
-            CLAP_AMBISONIC_ORDERING_ACN => AmbisonicOrdering::Acn,
-            _ => return None,
-        };
-        let normalization = match config.normalization {
-            CLAP_AMBISONIC_NORMALIZATION_MAXN => AmbisonicNormalization::MaxN,
-            CLAP_AMBISONIC_NORMALIZATION_SN3D => AmbisonicNormalization::Sn3d,
-            CLAP_AMBISONIC_NORMALIZATION_N3D => AmbisonicNormalization::N3d,
-            CLAP_AMBISONIC_NORMALIZATION_SN2D => AmbisonicNormalization::Sn2d,
-            CLAP_AMBISONIC_NORMALIZATION_N2D => AmbisonicNormalization::N2d,
-            _ => return None,
-        };
-        Some((ordering, normalization))
+        ambisonic_of(config.ordering, config.normalization)
     }
 
     /// Asks whether the plugin can process the given
@@ -442,5 +451,46 @@ mod surround_map_tests {
             SurroundChannel::BackRight,
             "channel 5 must still report its own speaker, not channel 4's"
         );
+    }
+}
+
+#[cfg(test)]
+mod ambisonic_tests {
+    use super::*;
+
+    /// A raw ordering or normalization `ambisonic.h` does not define is not
+    /// reported as some other one.
+    #[test]
+    fn an_unknown_raw_ambisonic_value_is_none() {
+        let known = (
+            CLAP_AMBISONIC_ORDERING_ACN,
+            CLAP_AMBISONIC_NORMALIZATION_SN3D,
+        );
+        assert_eq!(
+            ambisonic_of(known.0, known.1),
+            Some((AmbisonicOrdering::Acn, AmbisonicNormalization::Sn3d))
+        );
+        assert_eq!(ambisonic_of(u32::MAX, known.1), None, "ordering");
+        assert_eq!(ambisonic_of(known.0, u32::MAX), None, "normalization");
+    }
+
+    /// CLAP has no Furse-Malham normalization constant, so asking for one is
+    /// unsupported, while every normalization it does define maps.
+    #[test]
+    fn fuma_normalization_has_no_clap_constant() {
+        assert_eq!(clap_normalization(AmbisonicNormalization::FuMa), None);
+        for n in [
+            AmbisonicNormalization::MaxN,
+            AmbisonicNormalization::Sn3d,
+            AmbisonicNormalization::N3d,
+            AmbisonicNormalization::Sn2d,
+            AmbisonicNormalization::N2d,
+        ] {
+            let raw = clap_normalization(n).expect("CLAP defines it");
+            assert_eq!(
+                ambisonic_of(CLAP_AMBISONIC_ORDERING_ACN, raw).map(|(_, n)| n),
+                Some(n)
+            );
+        }
     }
 }

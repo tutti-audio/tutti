@@ -4,7 +4,7 @@
 //! [`AudioScratch`] holds all per-block RT scratch and lives only on the
 //! `ClapProcessor` (it exists solely for `process`).
 
-use crate::events::{InputEventList, InputRooms, OutputEventList, ParamBounds};
+use crate::events::{InputEventList, InputRooms, OutputEventList, OutputRooms, ParamBounds};
 use crate::types::{ClapNoteExpression, ParameterChanges, RtNoteExpressions};
 use clap_sys::process::CLAP_PROCESS_CONTINUE;
 use std::sync::atomic::AtomicI32;
@@ -86,11 +86,11 @@ pub(crate) struct AudioScratch {
 }
 
 impl AudioScratch {
-    pub fn new(format: SampleFormat, input_rooms: InputRooms) -> Self {
+    pub fn new(format: SampleFormat, input_rooms: InputRooms, output_rooms: OutputRooms) -> Self {
         Self {
             process: PortScratch::new(format),
             input_events: InputEventList::new(input_rooms),
-            output_events: OutputEventList::new(),
+            output_events: OutputEventList::new(output_rooms),
             out_midi: RtMidiEvents::new(),
             out_translator: Translator::new(),
             out_midi_lost: 0,

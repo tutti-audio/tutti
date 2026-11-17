@@ -11,7 +11,8 @@ use clap_sys::events::{
 };
 use tutti_clap_host::{
     ClapEvent, ClapHost, EventList, HostState, InputEventList, InputRooms, InputStream,
-    NoteExpressionType, OutputEventList, OutputStream, ParameterChanges, ParameterQueue,
+    NoteExpressionType, OutputEventList, OutputRooms, OutputStream, ParameterChanges,
+    ParameterQueue,
 };
 use tutti_graph::Offset;
 use tutti_midi_protocol::{channel_voice, midi1};
@@ -173,7 +174,7 @@ fn test_input_event_list_add_midi_counts_correctly() {
 /// `to_midi_events()`.
 #[test]
 fn test_output_event_list_push_note_on() {
-    let mut list = OutputEventList::new();
+    let mut list = OutputEventList::new(OutputRooms::new(256).params(64, &[]));
     let raw = list.as_raw_mut();
 
     let note = clap_event_note {
@@ -224,7 +225,7 @@ fn a_wildcard_note_off_resolves_by_note_id_not_by_masking() {
     const CHANNEL: u8 = 2;
     const NOTE: u8 = 60;
 
-    let mut list = OutputEventList::new();
+    let mut list = OutputEventList::new(OutputRooms::new(256).params(64, &[]));
     let raw = list.as_raw_mut();
 
     let note = clap_event_note {
@@ -283,7 +284,7 @@ fn a_wildcard_note_off_resolves_by_note_id_not_by_masking() {
 /// named is not.
 #[test]
 fn a_wildcard_note_off_with_an_opaque_note_id_is_dropped() {
-    let mut list = OutputEventList::new();
+    let mut list = OutputEventList::new(OutputRooms::new(256).params(64, &[]));
     let raw = list.as_raw_mut();
 
     let note = clap_event_note {
@@ -317,7 +318,7 @@ fn a_wildcard_note_off_with_an_opaque_note_id_is_dropped() {
 #[test]
 fn test_output_event_list_push_midi_cc() {
     use clap_sys::events::clap_event_midi;
-    let mut list = OutputEventList::new();
+    let mut list = OutputEventList::new(OutputRooms::new(256).params(64, &[]));
     let raw = list.as_raw_mut();
 
     let midi = clap_event_midi {
@@ -366,7 +367,7 @@ fn test_input_event_list_sort_by_time() {
 
 #[test]
 fn test_output_event_list_push_param_value() {
-    let mut list = OutputEventList::new();
+    let mut list = OutputEventList::new(OutputRooms::new(256).params(64, &[]));
     let raw = list.as_raw_mut();
 
     let param = clap_event_param_value {
@@ -426,7 +427,7 @@ fn test_param_changes_through_input_list() {
 
 #[test]
 fn test_note_expression_roundtrip_through_output_list() {
-    let mut list = OutputEventList::new();
+    let mut list = OutputEventList::new(OutputRooms::new(256).params(64, &[]));
     let raw = list.as_raw_mut();
 
     let expr = clap_event_note_expression {
@@ -523,7 +524,7 @@ fn test_input_stream_partial_reads() {
 
 #[test]
 fn test_output_list_filters_midi_from_mixed_events() {
-    let mut list = OutputEventList::new();
+    let mut list = OutputEventList::new(OutputRooms::new(256).params(64, &[]));
     let raw = list.as_raw_mut();
 
     // Push a note on
@@ -575,7 +576,7 @@ fn test_output_list_filters_midi_from_mixed_events() {
 
 #[test]
 fn test_output_list_push_note_choke() {
-    let mut list = OutputEventList::new();
+    let mut list = OutputEventList::new(OutputRooms::new(256).params(64, &[]));
     let raw = list.as_raw_mut();
 
     let note = clap_event_note {
@@ -613,7 +614,7 @@ fn test_output_list_push_note_choke() {
 
 #[test]
 fn test_output_list_push_note_end() {
-    let mut list = OutputEventList::new();
+    let mut list = OutputEventList::new(OutputRooms::new(256).params(64, &[]));
     let raw = list.as_raw_mut();
 
     let note = clap_event_note {
@@ -650,7 +651,7 @@ fn test_output_list_push_note_end() {
 
 #[test]
 fn test_output_list_push_param_gesture_begin_end() {
-    let mut list = OutputEventList::new();
+    let mut list = OutputEventList::new(OutputRooms::new(256).params(64, &[]));
     let raw = list.as_raw_mut();
 
     let begin = clap_event_param_gesture {
@@ -1047,7 +1048,7 @@ fn test_param_value_event_construction() {
 fn test_output_event_list_take_events() {
     use clap_sys::events::{CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_NOTE_ON};
 
-    let mut list = OutputEventList::new();
+    let mut list = OutputEventList::new(OutputRooms::new(256).params(64, &[]));
     let raw = list.as_raw_mut();
 
     let note = clap_event_note {

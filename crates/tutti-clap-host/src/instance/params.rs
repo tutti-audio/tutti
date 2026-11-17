@@ -6,7 +6,11 @@
 
 use super::ClapLoaded;
 use crate::events::ParamBounds;
-use crate::events::{ClapEvent, FlushEvents, OutputEventList};
+use crate::events::{ClapEvent, FlushEvents, OutputEventList, OutputRooms};
+use crate::types::ParameterChanges;
+
+/// The events other than parameter values one `params.flush` may output.
+const FLUSH_EVENT_CAPACITY: usize = 256;
 use crate::types::{ClapParamFlags, ClapParamInfo};
 use crate::types::{Color, ParamAutomationState};
 use tutti_plugin_types::MainThreadMarker;
@@ -150,7 +154,13 @@ impl ClapLoaded {
     ) -> Vec<ClapEvent> {
         let mut input_list = FlushEvents::new(input_events);
         input_list.sort_by_time();
-        let mut output_list = OutputEventList::new();
+        // One parameter value's worth of points per parameter, as the output
+        // of a block is budgeted at least; a flush has no block to size by.
+        let ranges = &self.params.ranges().ranges;
+        let ids: Vec<u32> = ranges.iter().map(|b| b.id).collect();
+        let points = ParameterChanges::point_budget(ranges.len(), 1);
+        let mut output_list =
+            OutputEventList::new(OutputRooms::new(FLUSH_EVENT_CAPACITY).params(points, &ids));
 
         if !self
             .plugin

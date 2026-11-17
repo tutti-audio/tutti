@@ -40,6 +40,11 @@ pub(crate) struct ProcessorParts {
 /// and takes the `[audio-thread]` claim for every call, so it never touches the
 /// `ClapLoaded` its [`ClapController`](super::ClapController) holds. Dropping it
 /// releases its share of the activation and calls nothing in the plugin.
+///
+/// Both halves hold one plugin instance. Why that is sound (the two halves
+/// call disjoint entries, audio entries never overlap, and the instance is
+/// destroyed once, by the main thread, last) is argued rule by rule in the
+/// `tutti_clap_ffi::Plugin` module docs; this crate holds no `unsafe` of its own.
 pub struct ClapProcessor {
     pub(crate) scratch: AudioScratch,
     pub(crate) ranges: Reader<RangeTable>,

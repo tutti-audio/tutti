@@ -15,7 +15,7 @@ use super::controller::ClapController;
 use super::processor::{ClapProcessor, ProcessorParts};
 use super::thread_pool::PoolCell;
 use crate::error::{ClapError, LoadStage, Result};
-use crate::events::{EDIT_CAPACITY, InputRooms};
+use crate::events::{EDIT_CAPACITY, InputRooms, OutputRooms};
 use crate::types::{ParameterChanges, ParameterQueue, PluginInfo};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -158,7 +158,11 @@ impl ClapLoaded {
 
         let table = self.params.ranges().clone();
         let max_frames = max_block.get();
-        let mut scratch = AudioScratch::new(prepare.format(), input_rooms(&table, max_frames));
+        let mut scratch = AudioScratch::new(
+            prepare.format(),
+            input_rooms(&table, max_frames),
+            output_rooms(&table, max_frames),
+        );
         let port_channels = |ports: &tutti_plugin_types::BusChannels| -> Vec<u32> {
             ports.iter().map(|c| u32::from(c.count())).collect()
         };
@@ -191,7 +195,7 @@ impl ClapLoaded {
         // reserved the same way, one queue per parameter drawing on a shared
         // pool of a chunk's room, and bounded the same way
         // (`ClapProcessor::output_param_points_dropped`).
-        reserve_output_params(&mut scratch, &table, max_frames);
+        reserve_output_queues(&mut scratch, &table, max_frames);
         // A UMP Group is an input note port: each port's own dialect.
         scratch
             .input_events
@@ -327,16 +331,21 @@ fn input_rooms(table: &RangeTable, max_frames: usize) -> InputRooms {
 /// so it never refuses a note-off; past it each of the plugin's parameters
 /// keeps its latest value. A push past either room is refused
 /// (`ClapProcessor::output_events_refused`).
-fn reserve_output_params(scratch: &mut AudioScratch, table: &RangeTable, max_frames: usize) {
+fn output_rooms(table: &RangeTable, max_frames: usize) -> OutputRooms {
+    let queues = table.ranges.len().max(PARAM_QUEUE_CAPACITY);
+    let budget = ParameterChanges::point_budget(queues, ParameterQueue::chunk_room(max_frames));
+    let ids: Vec<u32> = table.ranges.iter().map(|b| b.id).collect();
+    OutputRooms::new(OUTPUT_EVENT_CAPACITY).params(budget, &ids)
+}
+
+/// The queues the plugin's parameter output is grouped into: one per
+/// parameter, each with room for a block's points of one. Grows only: a
+/// smaller block keeps the room.
+fn reserve_output_queues(scratch: &mut AudioScratch, table: &RangeTable, max_frames: usize) {
     let queues = table.ranges.len().max(PARAM_QUEUE_CAPACITY);
     let points = ParameterQueue::chunk_room(max_frames);
     let budget = ParameterChanges::point_budget(queues, points);
-    let ids: Vec<u32> = table.ranges.iter().map(|b| b.id).collect();
-    let events = &mut scratch.output_events;
-    events.reserve(OUTPUT_EVENT_CAPACITY);
-    events.set_param_room(budget, &ids);
     let out = &scratch.out_param_changes;
-    // Grows only: a smaller block keeps the room.
     if out.capacity() < queues || out.point_storage() < budget {
         scratch.out_param_changes = ParameterChanges::reserved(queues, points);
     }
@@ -381,9 +390,12 @@ mod tests {
                         .collect(),
                     claims: true,
                 };
-                let mut scratch =
-                    AudioScratch::new(SampleFormat::Float32, input_rooms(&table, frames));
-                reserve_output_params(&mut scratch, &table, frames);
+                let mut scratch = AudioScratch::new(
+                    SampleFormat::Float32,
+                    input_rooms(&table, frames),
+                    output_rooms(&table, frames),
+                );
+                reserve_output_queues(&mut scratch, &table, frames);
                 let n = params as usize;
                 let room = ParameterQueue::chunk_room(frames);
                 let input = ParameterChanges::point_budget(n, room);
@@ -429,7 +441,11 @@ mod tests {
                 .collect(),
             claims: true,
         };
-        let mut scratch = AudioScratch::new(SampleFormat::Float32, input_rooms(&table, FRAMES));
+        let mut scratch = AudioScratch::new(
+            SampleFormat::Float32,
+            input_rooms(&table, FRAMES),
+            output_rooms(&table, FRAMES),
+        );
         let room = ParameterQueue::chunk_room(FRAMES);
         let mut chunk = ParameterChanges::reserved_bridged(PARAMS as usize, room);
         for id in 0..PARAMS {

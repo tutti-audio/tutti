@@ -186,7 +186,8 @@ pub mod types;
 
 pub use error::{ClapError, LoadStage, Result};
 pub use events::{
-    ClapEvent, EventList, FlushEvents, InputEventList, InputRooms, OutputEventList, ParamBounds,
+    ClapEvent, EventList, FlushEvents, InputEventList, InputRooms, OutputEventList, OutputRooms,
+    ParamBounds,
 };
 pub use host::{ClapHost, HostState, InputStream, OutputStream};
 pub use instance::{
