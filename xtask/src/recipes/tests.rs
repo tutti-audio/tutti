@@ -416,8 +416,15 @@ fn check_no_std_builds_each_listed_crate_for_the_bare_metal_target() {
     assert_eq!(
         steps,
         [
-            "cargo build --locked -p tutti-ump --no-default-features --target thumbv7em-none-eabihf",
-            "cargo build --locked -p tutti-ump --no-default-features --target thumbv7em-none-eabihf --features serde",
+            "cargo build --locked -p tutti-types --no-default-features --target aarch64-unknown-none",
+            "cargo build --locked -p tutti-types --no-default-features --target aarch64-unknown-none --features serde",
+            "cargo build --locked -p tutti-ump --no-default-features --target aarch64-unknown-none",
+            "cargo build --locked -p tutti-ump --no-default-features --target aarch64-unknown-none --features serde",
+            "cargo build --locked -p tutti-curve --no-default-features --target aarch64-unknown-none",
+            "cargo build --locked -p tutti-metering --no-default-features --target aarch64-unknown-none",
+            "cargo build --locked -p tutti-tempo --no-default-features --target aarch64-unknown-none",
+            "cargo build --locked -p tutti-tempo --no-default-features --target aarch64-unknown-none --features serde",
+            "cargo build --locked -p tutti-modulation --no-default-features --target aarch64-unknown-none",
         ]
     );
 }

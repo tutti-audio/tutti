@@ -3,15 +3,18 @@ use std::io::{Cursor, SeekFrom};
 use std::sync::atomic::{AtomicBool, Ordering};
 use tutti_types::{ChannelTopology, SampleRate};
 
-/// A sink that is slow to write and says when it is dropped.
+/// A sink that says when its first write began and when it is dropped.
 struct Watched {
     inner: Cursor<Vec<u8>>,
     dropped: Arc<AtomicBool>,
+    writing: Option<std::sync::mpsc::Sender<()>>,
 }
 
 impl Write for Watched {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        std::thread::sleep(std::time::Duration::from_millis(15));
+        if let Some(writing) = self.writing.take() {
+            let _ = writing.send(());
+        }
         self.inner.write(buf)
     }
     fn flush(&mut self) -> std::io::Result<()> {
@@ -32,8 +35,10 @@ impl Drop for Watched {
 }
 
 /// Dropping the writer stops its thread before `drop` returns, so the sink (a
-/// file, in a staged encoder) is closed by then. The sink is slow, so the
-/// thread is still working through its queue when the drop starts.
+/// file, in a staged encoder) is closed by then. The drop starts once the
+/// thread has begun writing, so the thread is working through its queue. A
+/// drop that did not join is caught with high probability, not
+/// deterministically.
 #[test]
 fn a_dropped_writer_has_stopped_its_thread() {
     let dropped = Arc::new(AtomicBool::new(false));
@@ -44,9 +49,11 @@ fn a_dropped_writer_has_stopped_its_thread() {
         ChannelLayout::STEREO,
         SampleRate::SR_44K1,
     );
+    let (writing, began) = std::sync::mpsc::channel();
     let sink = Watched {
         inner: Cursor::new(Vec::new()),
         dropped: Arc::clone(&dropped),
+        writing: Some(writing),
     };
     let mut w = VorbisWriter::create(&spec, Quality::LOWEST, sink).unwrap();
     let samples: Vec<f32> = (0..8_192 * 2)
@@ -56,6 +63,7 @@ fn a_dropped_writer_has_stopped_its_thread() {
         w.write(Interleaved::new(&samples, ChannelLayout::STEREO).unwrap())
             .unwrap();
     }
+    began.recv().expect("the thread began writing");
     drop(w);
     assert!(
         dropped.load(Ordering::SeqCst),

@@ -42,6 +42,8 @@
 //! grouping is what lets tempo and meter stay orthogonal.
 
 use crate::value::{Beat, BeatDuration};
+use alloc::vec;
+use alloc::vec::Vec;
 
 /// How many notated beats are in a bar — the upper number of a time signature.
 ///
@@ -584,7 +586,7 @@ pub trait Meter: Send + Sync {
 /// zero, which gets both wrong on the negative side.
 #[inline]
 fn floor_div_rem(value: BeatDuration, unit: BeatDuration) -> (i64, BeatDuration) {
-    let quotient = (value / unit).floor();
+    let quotient = libm::floor(value / unit);
     let rem = value - unit * quotient;
     // Rounding can put the remainder of a position a hair off a boundary on
     // the wrong side of it: `unit` itself (a tiny negative `value`), or just
@@ -735,6 +737,7 @@ pub struct MeterMap {
 #[cfg(feature = "serde")]
 mod meter_map_serde {
     use super::{MeterChange, MeterMap};
+    use alloc::vec::Vec;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
     impl Serialize for MeterMap {
@@ -810,7 +813,7 @@ impl MeterMap {
         for pair in changes.windows(2) {
             let span = pair[1].beat - pair[0].beat;
             let exact = span / pair[0].signature.bar_length();
-            let bars = (exact - BAR_COUNT_EPSILON).ceil() as i64;
+            let bars = libm::ceil(exact - BAR_COUNT_EPSILON) as i64;
             bar += BarCount(bars.max(1));
             starts.push(bar);
         }

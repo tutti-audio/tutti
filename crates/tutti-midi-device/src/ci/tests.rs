@@ -2,6 +2,7 @@ use super::testing::{SRC, decoded, header, unread};
 use super::*;
 use tutti_ump::DeviceIdentity;
 use tutti_ump::ManufacturerId;
+use tutti_ump::SoftwareRevision;
 
 /// Spec: m2-101/3.3#1
 #[test]
@@ -40,7 +41,7 @@ fn sample() -> DiscoveryData {
             manufacturer: ManufacturerId::of(0xA109),
             family: [0x34, 0x24].map(U7::of),
             model: [0x55, 0x00].map(U7::of),
-            revision: [1, 2, 3, 4].map(U7::of),
+            revision: SoftwareRevision::from([1, 2, 3, 4].map(U7::of)),
         },
         CiCategories::PROFILE_CONFIGURATION,
         MaxSysexSize::of(512),

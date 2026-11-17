@@ -5,6 +5,7 @@ mod brickwall;
 mod compressor;
 mod curves;
 mod gate;
+mod key_filter;
 mod key_source;
 mod limiter;
 mod lookahead;
@@ -18,6 +19,7 @@ pub use curves::{
     LimiterCurve, amplitude_to_db, compute_compressor_gain_reduction, compute_limiter_gain,
 };
 pub use gate::{GateBank, GateControls, GateLanes};
+pub use key_filter::KeyFilter;
 pub use key_source::KeySource;
 pub use limiter::{LimiterBank, LimiterControls, LimiterLanes, Lookahead, LookaheadError};
 pub use multiband::{

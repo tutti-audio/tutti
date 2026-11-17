@@ -22,6 +22,7 @@ use tutti_nodes::{
     LimiterNode, MaxDelay, ModDelayNode, PhaserControls, PhaserNode, ShapeKind, Stages,
     SvfControls, SvfFilterNode, SvfType,
 };
+use tutti_nodes::{DcBlockerConfig, DcBlockerNode};
 use tutti_nodes::{StereoWidthConfig, StereoWidthNode};
 use tutti_types::{
     Amplitude, BusTopology, ChannelLayout, CompressionRatio, Db, Depth, Drive, Feedback, Hz, Q,
@@ -41,6 +42,7 @@ fn compressor() {
                 attack: Seconds(0.005),
                 release: Seconds(0.05),
                 makeup: Db(2.0),
+                ..CompressorControls::DEFAULT
             },
         )
     })
@@ -77,6 +79,7 @@ fn gate() {
                 hold: Seconds(0.005),
                 release: Seconds(0.02),
                 range: Db(-40.0),
+                ..GateControls::DEFAULT
             },
         )
     })
@@ -179,6 +182,17 @@ fn stereo_width() {
     })
     .control("width", |w| {
         assert!(w.param_set().set(UnitParam::StereoWidth, 0.25))
+    })
+    .check();
+}
+
+#[test]
+fn dc_blocker() {
+    IsolateRow::new("DcBlockerNode (stereo)", || {
+        DcBlockerNode::from(DcBlockerConfig::new(ChannelLayout::STEREO))
+    })
+    .control("corner", |d| {
+        assert!(d.param_set().set(UnitParam::Cutoff, 80.0))
     })
     .check();
 }

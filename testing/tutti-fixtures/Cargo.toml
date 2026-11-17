@@ -66,3 +66,6 @@ vst3-cpp = ["plugin", "dep:tutti-shared-plugin-vst3-cpp"]
 [dev-dependencies]
 # The lock test's private directory.
 tempfile = "3"
+
+[lints]
+workspace = true

@@ -41,7 +41,7 @@ use crate::{Clock, Policy, Session};
 /// use tutti_midi_device::EndpointName;
 /// use tutti_midi_device::MidiIdentity;
 /// use tutti_session::MidiPolicy;
-/// use tutti_ump::{DeviceIdentity, ManufacturerId, U7};
+/// use tutti_ump::{DeviceIdentity, ManufacturerId, SoftwareRevision, U7};
 ///
 /// // A development identity: the manufacturer id MIDI 1.0 sets aside for
 /// // non-commercial use; a released product registers its own.
@@ -49,7 +49,7 @@ use crate::{Clock, Policy, Session};
 ///     manufacturer: ManufacturerId::NON_COMMERCIAL,
 ///     family: [U7::of(1); 2],
 ///     model: [U7::of(2); 2],
-///     revision: [U7::of(3); 4],
+///     revision: env!("CARGO_PKG_VERSION").parse::<SoftwareRevision>().unwrap(),
 /// };
 /// let policy = MidiPolicy {
 ///     identity: Some(MidiIdentity {

@@ -1,6 +1,6 @@
 //! DeviceInfo and JSONSchema (M2-105 §3, §5).
 
-use tutti_ump::{DeviceIdentity, ManufacturerId, U7};
+use tutti_ump::{DeviceIdentity, ManufacturerId, SoftwareRevision, U7};
 
 use super::super::tree::{PeJson, PeObject};
 use super::fields::{
@@ -46,7 +46,7 @@ impl PeDeviceInfo {
         o.insert("family", self.family.as_str().into());
         o.insert("modelId", ints(&id.model.map(U7::get)));
         o.insert("model", self.model.as_str().into());
-        o.insert("versionId", ints(&id.revision.map(U7::get)));
+        o.insert("versionId", ints(&id.revision.get().map(U7::get)));
         o.insert("version", self.version.as_str().into());
         if let Some(serial) = &self.serial_number {
             o.insert("serialNumber", serial.as_str().into());
@@ -84,7 +84,7 @@ impl PeDeviceInfo {
                 manufacturer,
                 family,
                 model,
-                revision,
+                revision: SoftwareRevision::from(revision),
             },
             manufacturer: manufacturer_name,
             family: family_name,

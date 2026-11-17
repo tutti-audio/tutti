@@ -203,6 +203,8 @@ impl Band {
                 attack: Seconds::from_f32(attack),
                 release: Seconds::from_f32(release),
                 makeup: Db(makeup),
+                // The multiband compressor has no key filter: its bands read the split signal.
+                ..CompressorControls::DEFAULT
             },
             bypass: is_on(&self.bypass),
             solo: is_on(&self.solo),

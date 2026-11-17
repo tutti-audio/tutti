@@ -27,6 +27,7 @@ fn controls(
         attack: Seconds(attack),
         release: Seconds(release),
         makeup: Db(makeup),
+        ..CompressorControls::DEFAULT
     }
 }
 

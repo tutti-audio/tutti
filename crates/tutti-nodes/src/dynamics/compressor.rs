@@ -2,9 +2,11 @@
 //! makeup gain.
 
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_dsp::{COEFF_INTERVAL, CompressorBank, CompressorControls, CompressorLanes, KeySource};
+use tutti_dsp::{
+    COEFF_INTERVAL, CompressorBank, CompressorControls, CompressorLanes, KeyFilter, KeySource,
+};
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
-use tutti_types::{BusTopology, CompressionRatio, Db, MaxBlock, SampleRate, Seconds, Tail};
+use tutti_types::{BusTopology, CompressionRatio, Db, Hz, MaxBlock, Q, SampleRate, Seconds, Tail};
 
 use crate::kernel::{ControlLanes, Kernel, KernelNode};
 
@@ -35,6 +37,16 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 ///
 /// The node declares no tail: the release decays after the key goes silent, but it only
 /// scales, so a silent input is a silent output.
+///
+/// # The key filter
+///
+/// [`key_filter`](Self::key_filter) puts a [`KeyFilter`] on the key: the detector hears the
+/// key through a high-pass or a band-pass, and the signal the gain is applied to is never
+/// filtered. It is off by default. A node built with one has two more controls after the
+/// makeup, the cutoff ([`UnitParam::Cutoff`](tutti_types::UnitParam::Cutoff), [`Hz`], 100 Hz) and
+/// the Q ([`UnitParam::Q`](tutti_types::UnitParam::Q), [`Q`], Butterworth); a node with
+/// [`KeyFilter::Off`] declares neither, as a reverb that cannot freeze declares no freeze.
+/// The filter's coefficients glide to a new cutoff over one grid period.
 ///
 /// # Controls
 ///
@@ -81,7 +93,25 @@ impl CompressorNode {
     /// names what it wants: `CompressorControls { threshold, ratio, ..CompressorControls::DEFAULT }`.
     #[must_use]
     pub fn new(input: BusTopology, key: KeySource, controls: CompressorControls) -> Self {
-        Self::with_kernel(CompressorKernel::new(input, key), CompressorSet, controls)
+        Self::with_kernel(
+            CompressorKernel::new(input, key, KeyFilter::Off),
+            CompressorSet::new(KeyFilter::Off, controls.key_cutoff, controls.key_q),
+            controls,
+        )
+    }
+
+    /// This compressor with its detector hearing the key through `filter`, starting at the
+    /// `key_cutoff` and `key_q` of the controls it was built with (100 Hz and Butterworth in
+    /// the default's). The node gains the cutoff and Q controls after its others;
+    /// [`KeyFilter::Off`], the default, has none, and the two fields of the controls are only
+    /// what a later filter starts at. Chain it onto the constructor, before the node is
+    /// inserted: the values its controls hold carry over.
+    #[must_use]
+    pub fn key_filter(self, filter: KeyFilter) -> Self {
+        self.rebuilt(
+            |k| k.with_key_filter(filter),
+            |set| set.with_key_filter(filter),
+        )
     }
 
     /// Returns a mono compressor that listens to its own signal: 1 input, 1 output.
@@ -103,13 +133,36 @@ impl CompressorNode {
     }
 }
 
-/// The compressor's controls: threshold, knee, ratio, attack, release and makeup.
+/// The compressor's controls: threshold, knee, ratio, attack, release and makeup, then the
+/// key filter's cutoff and Q if its [`KeyFilter`] is not [`Off`](KeyFilter::Off).
 #[derive(Clone, Copy, Debug)]
-pub struct CompressorSet;
+pub struct CompressorSet {
+    filter: KeyFilter,
+    /// The cutoff the filter starts at: a part the ports do not carry until the node has a
+    /// filter, so a node given a filter later starts there.
+    cutoff: Hz,
+    /// The Q the filter starts at, held as `cutoff` is.
+    q: Q,
+}
+
+impl CompressorSet {
+    fn new(filter: KeyFilter, cutoff: Hz, q: Q) -> Self {
+        Self { filter, cutoff, q }
+    }
+
+    /// This set with the key filter `filter`.
+    fn with_key_filter(self, filter: KeyFilter) -> Self {
+        Self { filter, ..self }
+    }
+}
 
 control_set! {
-    CompressorSet(_s): CompressorControls = CompressorControls::DEFAULT;
-    live: (all);
+    CompressorSet(s): CompressorControls = CompressorControls {
+        key_cutoff: s.cutoff,
+        key_q: s.q,
+        ..CompressorControls::DEFAULT
+    };
+    live: (if s.filter == KeyFilter::Off { 6 } else { 8 });
     Threshold => Db = threshold { fast },
     Knee => Db = knee { whole },
     Ratio => CompressionRatio = ratio { whole },
@@ -117,7 +170,10 @@ control_set! {
     Release => Seconds = release { whole },
     // The makeup glides in the bank, over `GAIN_GLIDE`: the reader must not ramp it
     // across the block as well. It is addressed as `GainDb`.
-    GainDb => Db = makeup { whole };
+    GainDb => Db = makeup { whole },
+    // The filter's coefficients glide in the bank, over one grid period.
+    Cutoff => Hz = key_cutoff { whole },
+    Q => Q = key_q { whole };
 
     fn defaults(&self) -> CompressorControls {
         CompressorControls::DEFAULT
@@ -134,6 +190,7 @@ control_set! {
 pub struct CompressorKernel {
     input: BusTopology,
     key: KeySource,
+    filter: KeyFilter,
     /// `None` until [`prepare`](Kernel::prepare).
     bank: Option<CompressorBank>,
     /// Whether the first retarget after `prepare` has landed.
@@ -142,13 +199,20 @@ pub struct CompressorKernel {
 
 impl CompressorKernel {
     /// A compressor on `input` whose detector reads `key`.
-    fn new(input: BusTopology, key: KeySource) -> Self {
+    fn new(input: BusTopology, key: KeySource, filter: KeyFilter) -> Self {
         Self {
             input,
             key,
+            filter,
             bank: None,
             landed: false,
         }
+    }
+
+    /// This kernel with its detector's key through `filter`.
+    fn with_key_filter(mut self, filter: KeyFilter) -> Self {
+        self.filter = filter;
+        self
     }
 }
 
@@ -173,7 +237,7 @@ impl Kernel for CompressorKernel {
     }
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
-        self.bank = Some(CompressorBank::new(rate));
+        self.bank = Some(CompressorBank::new(rate).key_filter(self.filter, self.input.layout()));
         self.landed = false;
     }
 
@@ -505,6 +569,7 @@ mod tests {
             attack: Seconds(0.002),
             release: Seconds(0.25),
             makeup: Db(2.5),
+            ..CompressorControls::DEFAULT
         };
         for node in [
             CompressorNode::new(BusTopology::STEREO, KeySource::Sidechain, c),

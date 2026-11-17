@@ -1,0 +1,166 @@
+use super::*;
+use tutti_buffers::{Planes, PlanesMut};
+
+const RATE: SampleRate = SampleRate::SR_48K;
+
+fn run(blocker: &mut DcBlocker, input: &[Vec<f64>]) -> Vec<Vec<f64>> {
+    let mut out = vec![vec![0.0; input[0].len()]; input.len()];
+    blocker.process(
+        Planes::from_vecs(input).unwrap(),
+        PlanesMut::from_vecs(&mut out).unwrap(),
+    );
+    out
+}
+
+fn at(corner: f32, rate: SampleRate) -> DcBlocker {
+    let mut b = DcBlocker::new(ChannelLayout::MONO, rate);
+    b.aim(&DcBlockerControls { corner: Hz(corner) });
+    b.settle();
+    b
+}
+
+/// The pole is `exp(-2 pi fc / fs)` at each rate: at 10 Hz and 48 kHz it is
+/// `exp(-0.0013089969...)`, and a higher rate is nearer 1.
+#[test]
+fn the_pole_is_the_exponential_of_the_corner_over_the_rate() {
+    for rate in [SampleRate::SR_44K1, SampleRate::SR_48K, SampleRate::SR_96K] {
+        for fc in [1.0f64, 10.0, 20.0, 100.0] {
+            let want = (-2.0 * std::f64::consts::PI * fc / rate.get()).exp();
+            assert_eq!(dc_pole(Hz(fc as f32), rate), want, "{fc} Hz at {rate:?}");
+        }
+    }
+    assert!((dc_pole(DC_CORNER, RATE) - 0.998_691_8).abs() < 1e-7);
+    assert!(dc_pole(DC_CORNER, SampleRate::SR_96K) > dc_pole(DC_CORNER, RATE));
+}
+
+/// A corner under the floor reads as the floor, one past Nyquist as Nyquist, and one that
+/// is not finite as the default.
+#[test]
+fn the_corner_is_held_within_its_bounds() {
+    assert_eq!(dc_pole(Hz(0.0), RATE), dc_pole(MIN_DC_CORNER, RATE));
+    assert_eq!(dc_pole(Hz(-5.0), RATE), dc_pole(MIN_DC_CORNER, RATE));
+    assert_eq!(dc_pole(Hz(1e9), RATE), dc_pole(Hz(24_000.0), RATE));
+    assert_eq!(dc_pole(Hz(f32::NAN), RATE), dc_pole(DC_CORNER, RATE));
+}
+
+/// A constant input `c` decays as `y[n] = c R^n` (the step response of the difference
+/// equation from zero state), at each channel alone.
+#[test]
+fn a_constant_decays_as_the_pole_to_the_n() {
+    let mut b = DcBlocker::new(ChannelLayout::STEREO, RATE);
+    b.aim(&DcBlockerControls { corner: Hz(20.0) });
+    b.settle();
+    let r = b.pole();
+    let out = run(&mut b, &[vec![0.5; 2000], vec![-1.0; 2000]]);
+    for n in [0usize, 1, 2, 10, 500, 1999] {
+        let rn = r.powi(n as i32);
+        assert!((out[0][n] - 0.5 * rn).abs() < 1e-12, "left {n}");
+        assert!((out[1][n] + rn).abs() < 1e-12, "right {n}");
+    }
+}
+
+/// The settled gain of a sine at `f` is `|1 - e^{-jw}| / |1 - R e^{-jw}|`, the difference
+/// equation's own response, at frequencies a decade under the corner to well above it.
+#[test]
+fn the_gain_is_the_closed_form_of_the_difference_equation() {
+    let fs = RATE.get();
+    for corner in [10.0f32, 40.0] {
+        for f in [1.0f64, 10.0, 40.0, 200.0, 1000.0, 10_000.0] {
+            let mut b = at(corner, RATE);
+            let r = b.pole();
+            let w = std::f64::consts::TAU * f / fs;
+            // Two seconds to settle, then one second (a whole number of cycles of every
+            // `f` here) is correlated with the sine and cosine: the amplitude does not
+            // depend on where the samples fall on the crest.
+            let n = (fs * 3.0) as usize;
+            let x: Vec<f64> = (0..n).map(|i| (w * i as f64).sin()).collect();
+            let y = &run(&mut b, &[x])[0];
+            let start = 2 * fs as usize;
+            let (mut si, mut co) = (0.0, 0.0);
+            for (i, v) in y[start..].iter().enumerate() {
+                let phase = w * (start + i) as f64;
+                si += v * phase.sin();
+                co += v * phase.cos();
+            }
+            let peak = 2.0 / (n - start) as f64 * si.hypot(co);
+            let (c, s) = (w.cos(), w.sin());
+            let num = ((1.0 - c).powi(2) + s * s).sqrt();
+            let den = ((1.0 - r * c).powi(2) + (r * s).powi(2)).sqrt();
+            let want = num / den;
+            assert!(
+                (peak - want).abs() < 1e-6,
+                "{f} Hz, corner {corner}: {peak} against {want}"
+            );
+        }
+    }
+}
+
+/// The ring-out `tail` covers the worst stopped input: `-A` held until settled, then `+A`
+/// (for one frame, or held), then silence. Past the first tap the response is one sign, so the
+/// output after the stop is `A R^(n-1)`, under `TAIL_FLOOR` of `A` from `tail` frames on and
+/// still over it a few frames before.
+#[test]
+fn the_tail_covers_the_worst_stopped_input_to_the_floor() {
+    let floor = 10f64.powf(-3.0);
+    for corner in [1.0f32, 10.0, 100.0] {
+        let controls = DcBlockerControls { corner: Hz(corner) };
+        let n = DcBlocker::tail(&controls, RATE).get();
+        let settle = 20 * n;
+        for hold in [1usize, 1000] {
+            let mut x = vec![-1.0; settle];
+            x.extend(vec![1.0; hold]);
+            let stop = x.len();
+            x.extend(vec![0.0; n + 64]);
+            let y = &run(&mut at(corner, RATE), &[x])[0];
+            assert!(
+                y[stop + n..].iter().all(|v| v.abs() < floor),
+                "{corner} Hz, hold {hold}"
+            );
+            if hold == 1 {
+                assert!(
+                    y[stop + n - 4].abs() >= floor,
+                    "{corner} Hz: the bound is long by more than a few frames"
+                );
+            }
+        }
+    }
+}
+
+/// A pole move glides over `COEFF_INTERVAL` frames. Jumping the corner from 10 Hz to 1 kHz at
+/// the crest of a 100 Hz unit sine, the first frame after the jump steps by at most
+/// `omega + (1 - r1)`: the input's largest step (`omega = 2 pi f / fs`, amplitude 1) plus the
+/// recursion's `(r1 - 1) y` with `|y| <= 1` (the high-pass gain at 100 Hz is under 1), where
+/// `r1` is the pole one glide step along. Swapping the pole at once steps by the pole's
+/// change times `y`, about 0.12, over this bound of about 0.022.
+#[test]
+fn a_corner_jump_steps_the_output_by_the_glide_share() {
+    let (f, fs) = (100.0f64, RATE.get());
+    let w = std::f64::consts::TAU * f / fs;
+    let crest = 120; // a quarter of the 480-frame period
+    let jump = 480 * 10 + crest;
+    let x: Vec<f64> = (0..jump + 64).map(|i| (w * i as f64).sin()).collect();
+    let mut b = at(10.0, RATE);
+    let first = run(&mut b, &[x[..jump].to_vec()]);
+    b.aim(&DcBlockerControls { corner: Hz(1000.0) });
+    let second = run(&mut b, &[x[jump..].to_vec()]);
+    let (r0, r1) = (dc_pole(Hz(10.0), RATE), dc_pole(Hz(1000.0), RATE));
+    let r1_step = r0 + (r1 - r0) / COEFF_INTERVAL as f64;
+    let bound = w + (1.0 - r1_step);
+    let y_before = *first[0].last().unwrap();
+    assert!(y_before > 0.9, "the jump falls on y's crest: {y_before}");
+    let step = (second[0][0] - y_before).abs();
+    assert!(step <= bound + 1e-9, "{step} against {bound}");
+    let steps = second[0].windows(2).map(|p| (p[1] - p[0]).abs());
+    assert!(steps.fold(0.0, f64::max) <= w + (1.0 - r1) + 1e-9);
+}
+
+/// `reset` drops the state: a blocker that has settled on 1 renders a held 0 as 0 after
+/// it, and as `-R^n` before.
+#[test]
+fn reset_clears_the_state() {
+    let mut b = at(20.0, RATE);
+    run(&mut b, &[vec![1.0; 100]]);
+    assert_ne!(run(&mut b, &[vec![0.0; 4]])[0][0], 0.0);
+    b.reset();
+    assert!(run(&mut b, &[vec![0.0; 4]])[0].iter().all(|&v| v == 0.0));
+}

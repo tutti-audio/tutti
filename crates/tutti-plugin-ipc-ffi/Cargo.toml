@@ -25,9 +25,11 @@ thiserror = "2"
 rustix = { version = "1", default-features = false, features = ["std", "event", "process", "fs"] }
 
 [target.'cfg(windows)'.dependencies]
-# The process table walk and liveness probe, and the named-pipe peek.
+# The process table walk and liveness probe, the named-pipe peek, and the
+# slab file's delete-on-close open.
 windows-sys = { version = "0.61", features = [
   "Win32_Foundation",
+  "Win32_Storage_FileSystem",
   "Win32_System_Diagnostics_ToolHelp",
   "Win32_System_Pipes",
   "Win32_System_Threading",
