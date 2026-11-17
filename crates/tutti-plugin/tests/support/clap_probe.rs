@@ -31,6 +31,7 @@
 
 use std::sync::OnceLock;
 use std::time::Duration;
+use tutti_buffers::Planes;
 use tutti_types::MaxBlock;
 
 use tutti_graph::NodeKey;
@@ -174,7 +175,7 @@ impl Rig {
             .map(|c| (0..frames).map(|i| input(c, i)).collect())
             .collect();
         let refs: Vec<&[f32]> = chans.iter().map(Vec::as_slice).collect();
-        self.renderer.render_input(&refs)
+        self.renderer.render_input(Planes::new(&refs).unwrap())
     }
 
     /// The node's latency as the graph compiles it: its declared `Shape`.

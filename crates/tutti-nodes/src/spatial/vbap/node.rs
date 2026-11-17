@@ -67,6 +67,7 @@ fn glide_steps(rate: SampleRate) -> u32 {
 /// # Examples
 ///
 /// ```
+/// # use tutti_buffers::Planes;
 /// use tutti_types::MaxBlock;
 /// use tutti_types::{SampleRate, Samples, UnitParam};
 /// use tutti_graph::{ParamNode, Prepare, Solo};
@@ -76,7 +77,7 @@ fn glide_steps(rate: SampleRate) -> u32 {
 /// panner.param_set().set(UnitParam::Azimuth, 45.0); // front-left
 ///
 /// let mut solo = Solo::new(panner, Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
-/// let out = solo.render_input(&[&[1.0; 64], &[1.0; 64]]);
+/// let out = solo.render_input(Planes::new(&[&[1.0; 64], &[1.0; 64]]).unwrap());
 /// assert_eq!(out.len(), 4); // one channel per speaker
 /// ```
 ///

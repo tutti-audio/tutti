@@ -12,6 +12,7 @@ use crate::exec::{Channels, Commit, Crossfade, FADE_CAPACITY, QUEUE_CAPACITY};
 use crate::gain::EdgeFade;
 use crate::spec::EventIn;
 use crate::{EdgeId, Executor};
+use tutti_buffers::Float;
 use tutti_rt::PushError;
 
 /// The control end of the rings to the paired executor, and the counts that
@@ -20,8 +21,8 @@ use tutti_rt::PushError;
 /// At most [`QUEUE_CAPACITY`] commits are out (sent and not yet handed back),
 /// and the crossfades they start hold at most [`FADE_CAPACITY`] slots on the
 /// fade-return ring, so a push this link makes after its check never fails.
-pub(super) struct Link {
-    channels: Channels,
+pub(super) struct Link<F: Float> {
+    channels: Channels<F>,
     commands: CommandTx,
     /// Commits sent and not yet handed back.
     out: usize,
@@ -39,8 +40,8 @@ pub(super) struct Link {
     ending_taps: Vec<(Option<u64>, Arc<FaultLatch>)>,
 }
 
-impl Link {
-    pub(super) fn new(channels: Channels, commands: CommandTx) -> Self {
+impl<F: Float> Link<F> {
+    pub(super) fn new(channels: Channels<F>, commands: CommandTx) -> Self {
         Self {
             channels,
             commands,
@@ -86,7 +87,7 @@ impl Link {
     /// [`check_room`](Self::check_room) and
     /// [`check_fade_room`](Self::check_fade_room). A tap ending since the
     /// last commit is left out of this one.
-    pub(super) fn send(&mut self, commit: Box<Commit>, fades: usize) {
+    pub(super) fn send(&mut self, commit: Box<Commit<F>>, fades: usize) {
         self.fades_out += fades;
         debug_assert!(self.fades_out <= FADE_CAPACITY);
         self.push(commit);
@@ -98,11 +99,11 @@ impl Link {
 
     /// Sends a re-prepare's first half: the caller checked
     /// [`check_room`](Self::check_room).
-    pub(super) fn send_suspend(&mut self, suspend: Box<Commit>) {
+    pub(super) fn send_suspend(&mut self, suspend: Box<Commit<F>>) {
         self.push(suspend);
     }
 
-    fn push(&mut self, commit: Box<Commit>) {
+    fn push(&mut self, commit: Box<Commit<F>>) {
         // Full cannot happen: the credit count keeps the queue below capacity.
         // With the executor gone nothing applies the commit, and it counts as
         // sent all the same, so the credits run out as they would behind a
@@ -119,7 +120,7 @@ impl Link {
     }
 
     /// The next commit the executor handed back, applied.
-    pub(super) fn pop_returned(&mut self) -> Option<Box<Commit>> {
+    pub(super) fn pop_returned(&mut self) -> Option<Box<Commit<F>>> {
         let done = self.channels.returned.pop()?;
         self.out -= 1;
         self.acked += 1;
@@ -147,7 +148,7 @@ impl Link {
     }
 
     /// The next crossfade the executor handed back.
-    pub(super) fn pop_faded(&mut self) -> Option<Box<Crossfade>> {
+    pub(super) fn pop_faded(&mut self) -> Option<Box<Crossfade<F>>> {
         let x = self.channels.faded.pop()?;
         self.fades_out -= 1;
         Some(x)
@@ -191,7 +192,7 @@ impl Link {
     }
 
     /// Whether `executor` holds the other end of these rings.
-    pub(super) fn is_paired_with(&self, executor: &Executor) -> bool {
+    pub(super) fn is_paired_with(&self, executor: &Executor<F>) -> bool {
         self.commands.same_pair(executor.commands())
     }
 
@@ -221,7 +222,7 @@ impl Link {
     }
 }
 
-impl std::fmt::Debug for Link {
+impl<F: Float> std::fmt::Debug for Link<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Link")
             .field("out", &self.out)

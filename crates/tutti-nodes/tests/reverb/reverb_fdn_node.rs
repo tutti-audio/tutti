@@ -5,6 +5,7 @@
 //! another reverb's render.
 
 use std::sync::Arc;
+use tutti_buffers::Planes;
 use tutti_types::MaxBlock;
 
 use tutti_dsp::{FdnControls, FdnLayout, FreeverbControls, MaxDecay, Network, System};
@@ -292,7 +293,7 @@ fn a_lane_driving_the_decay_changes_how_long_it_rings() {
         let frames = 96_000;
         let mut x = noise(8, 4_800);
         x.resize(frames, 0.0);
-        let out = r.render_input(&[&x]);
+        let out = r.render_input(Planes::new(&[&x]).unwrap());
         let energy = |from: usize, to: usize| -> f64 {
             out.iter()
                 .flat_map(|c| &c[from..to])

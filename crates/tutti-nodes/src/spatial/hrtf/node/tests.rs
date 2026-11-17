@@ -1,5 +1,6 @@
 use super::*;
 use crate::testing::aim;
+use tutti_buffers::Planes;
 use tutti_dsp::HRTF_STEP;
 use tutti_graph::contract::{drive, prepared};
 use tutti_types::MaxBlock;
@@ -268,7 +269,7 @@ fn pdc_compensates_the_other_path_by_the_binaural_latency() {
         .expect("builds");
     let mut impulse = vec![0.0f32; 2 * LATENCY];
     impulse[0] = 1.0;
-    let out = r.render_input(&[&impulse]);
+    let out = r.render_input(Planes::new(&[&impulse]).unwrap());
     for (o, ch) in out.iter().enumerate() {
         assert_eq!(onsets(ch), vec![LATENCY], "output {o}");
     }
