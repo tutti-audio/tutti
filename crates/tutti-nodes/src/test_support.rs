@@ -21,7 +21,7 @@ pub(crate) fn prepared<N: Node>(node: N) -> N {
 /// One `process` call of a node over `inputs` (one slice per input
 /// port), its params at their bases.
 pub(crate) fn drive_block(node: &mut dyn Node, inputs: &[&[f32]]) -> Vec<Vec<f32>> {
-    drive(node, RATE, inputs, &[])
+    drive(node, RATE, Planes::new(inputs).unwrap(), &[])
 }
 
 /// Returns a [`prepared`] node of `make`, driven over `before` in one block, then
@@ -110,7 +110,10 @@ pub(crate) fn tick_fed(
         .iter()
         .map(|p| p.as_ref().map(std::slice::from_ref))
         .collect();
-    for (o, c) in out.iter_mut().zip(drive(node, RATE, &ins, &ps)) {
+    for (o, c) in out
+        .iter_mut()
+        .zip(drive(node, RATE, Planes::new(&ins).unwrap(), &ps))
+    {
         *o = c[0];
     }
 }

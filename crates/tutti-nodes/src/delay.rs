@@ -292,7 +292,10 @@ mod tests {
         for i in 0..n {
             let ins: Vec<&[f32]> = inputs.iter().map(|c| &c[i..=i]).collect();
             let ps: Vec<Option<&[f32]>> = params.iter().map(|p| p.map(|v| &v[i..=i])).collect();
-            for (o, v) in out.iter_mut().zip(drive(&mut node, RATE, &ins, &ps)) {
+            for (o, v) in
+                out.iter_mut()
+                    .zip(drive(&mut node, RATE, Planes::new(&ins).unwrap(), &ps))
+            {
                 o.push(v[0]);
             }
         }
@@ -517,7 +520,7 @@ mod tests {
         let node = DelayNode::mono(MaxDelay::of(Seconds(0.1)), controls(5.0, 0.0, 0.0));
         let mut node = prepared(node, rate, 4_800);
         let x = impulses(1, 4_800, &[0]);
-        let out = drive(&mut node, rate, &[&x[0]], &[]);
+        let out = drive(&mut node, rate, Planes::new(&[&x[0]]).unwrap(), &[]);
         assert_eq!(out[0].iter().position(|&s| s != 0.0), Some(4_410));
     }
 
@@ -531,10 +534,10 @@ mod tests {
             64,
         );
         let x = impulses(1, 64, &[0]);
-        drive(&mut node, RATE, &[&x[0]], &[]);
+        drive(&mut node, RATE, Planes::new(&[&x[0]]).unwrap(), &[]);
         node = prepared(node, RATE, 64);
         let silence = [0.0f32; 64];
-        let out = drive(&mut node, RATE, &[&silence], &[]);
+        let out = drive(&mut node, RATE, Planes::new(&[&silence]).unwrap(), &[]);
         assert!(out[0].iter().all(|&s| s == 0.0));
     }
 
@@ -560,7 +563,15 @@ mod tests {
                 let at = n * block;
                 let l = &lane[at..at + chunk.len()];
                 let params = [None, None, driven.then_some(l)];
-                out.extend(drive(&mut node, RATE, &[chunk, chunk], &params).remove(0));
+                out.extend(
+                    drive(
+                        &mut node,
+                        RATE,
+                        Planes::new(&[chunk, chunk]).unwrap(),
+                        &params,
+                    )
+                    .remove(0),
+                );
             }
             out
         };
@@ -611,7 +622,12 @@ mod tests {
         let blocks = |node: &mut DelayNode, from: usize| -> Vec<Vec<f32>> {
             let mut out = vec![Vec::new(), Vec::new()];
             for chunk in x[from..].chunks(37) {
-                for (o, y) in out.iter_mut().zip(drive(node, RATE, &[chunk, chunk], &[])) {
+                for (o, y) in out.iter_mut().zip(drive(
+                    node,
+                    RATE,
+                    Planes::new(&[chunk, chunk]).unwrap(),
+                    &[],
+                )) {
                     o.extend(y);
                 }
             }
@@ -636,10 +652,10 @@ mod tests {
         );
         let set = node.param_set();
         let x = vec![1.0f32; 32];
-        drive(&mut node, RATE, &[&x], &[]);
+        drive(&mut node, RATE, Planes::new(&[&x]).unwrap(), &[]);
         node.reset();
         assert!(set.set(UnitParam::Feedback, 0.5));
-        let out = drive(&mut node, RATE, &[&x], &[]).remove(0);
+        let out = drive(&mut node, RATE, Planes::new(&[&x]).unwrap(), &[]).remove(0);
         assert_eq!(out[0], 0.0);
         for (n, &y) in out.iter().enumerate().skip(1) {
             let want = 2.0 - 2.0f64.powi(1 - n as i32);
@@ -665,7 +681,9 @@ mod tests {
                 if from == at {
                     assert!(set.set(UnitParam::CrossFeedback, 0.6));
                 }
-                out.extend(drive(&mut node, RATE, &[chunk, chunk], &[]).remove(0));
+                out.extend(
+                    drive(&mut node, RATE, Planes::new(&[chunk, chunk]).unwrap(), &[]).remove(0),
+                );
             }
             out
         };

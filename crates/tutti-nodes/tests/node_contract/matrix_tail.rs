@@ -141,7 +141,10 @@ fn assert_parks_at_the_tail(node: ConvolverNode, latency: usize, tail: usize) {
     let mut want: Vec<Vec<f32>> = vec![Vec::new(); usize::from(outs.count())];
     for at in (0..FRAMES).step_by(BLOCK) {
         let block: Vec<&[f32]> = inputs.iter().map(|c| &c[at..at + BLOCK]).collect();
-        for (w, b) in want.iter_mut().zip(drive(&mut direct, SR, &block, &[])) {
+        for (w, b) in want
+            .iter_mut()
+            .zip(drive(&mut direct, SR, Planes::new(&block).unwrap(), &[]))
+        {
             w.extend(b);
         }
     }
@@ -259,7 +262,7 @@ fn the_node_says_silent_from_the_first_block_past_its_tail() {
         if k == 0 {
             x[0] = 1.0;
         }
-        drive(&mut node, SR, &[&x, &x], &[]);
+        drive(&mut node, SR, Planes::new(&[&x, &x]).unwrap(), &[]);
     }
     let log = log.lock().expect("the log");
     for (k, status) in log.iter().enumerate() {
@@ -391,7 +394,10 @@ fn direct(
             let ins: Vec<&[f32]> = input.iter().map(|c| &c[at..at + n]).collect();
             let params = [lane.map(|l| &l[at..at + n])];
             let params: &[Option<&[f32]>] = if lane.is_some() { &params } else { &[] };
-            for (o, b) in out.iter_mut().zip(drive(&mut node, SR, &ins, params)) {
+            for (o, b) in
+                out.iter_mut()
+                    .zip(drive(&mut node, SR, Planes::new(&ins).unwrap(), params))
+            {
                 o.extend(b);
             }
             at += n;
@@ -518,7 +524,7 @@ fn a_burst_after_a_parked_gap_is_a_fresh_nodes_at_any_block_size() {
 fn direct_once(node: ConvolverNode, input: &[Vec<f32>]) -> Vec<Vec<f32>> {
     let mut node = prepared(node, SR, 512);
     let ins: Vec<&[f32]> = input.iter().map(|c| &c[..]).collect();
-    drive(&mut node, SR, &ins, &[])
+    drive(&mut node, SR, Planes::new(&ins).unwrap(), &[])
 }
 
 /// The same with a gain driven on the `Volume` port, per frame: at every block size the render
@@ -532,7 +538,12 @@ fn a_burst_after_a_parked_gap_is_a_fresh_nodes_with_a_driven_gain() {
         let second: Vec<Vec<f32>> = input.iter().map(|c| c[3000..STREAM].to_vec()).collect();
         let mut fresh = prepared(fresh, SR, 512);
         let ins: Vec<&[f32]> = second.iter().map(|c| &c[..]).collect();
-        let want = drive(&mut fresh, SR, &ins, &[Some(&lane[3000..STREAM])]);
+        let want = drive(
+            &mut fresh,
+            SR,
+            Planes::new(&ins).unwrap(),
+            &[Some(&lane[3000..STREAM])],
+        );
 
         let mut first_render: Option<Vec<Vec<f32>>> = None;
         for block in [64usize, 37, 100, 128] {
@@ -666,7 +677,10 @@ fn direct_plain(node: ConvolverNode, input: &[Vec<f32>], block: usize) -> Vec<Ve
     while at < input[0].len() {
         let n = block.min(input[0].len() - at);
         let ins: Vec<&[f32]> = input.iter().map(|c| &c[at..at + n]).collect();
-        for (o, b) in out.iter_mut().zip(drive(&mut node, SR, &ins, &[])) {
+        for (o, b) in out
+            .iter_mut()
+            .zip(drive(&mut node, SR, Planes::new(&ins).unwrap(), &[]))
+        {
             o.extend(b);
         }
         at += n;

@@ -3,6 +3,7 @@ use crate::contract::{drive_input, prepared};
 use crate::event::{EventWriter, SortedEvents};
 use crate::node::{ConstantMask, Env, InPlaceMask, SilenceMask};
 use crate::{PlayClock, TransportChanges, TransportPosition};
+use tutti_buffers::Planes;
 use tutti_types::MaxBlock;
 use tutti_types::{Frame, SampleRate};
 
@@ -26,7 +27,7 @@ fn block(node: &mut InletNode, frames: usize) -> Vec<Vec<f32>> {
         changes: TransportChanges::NONE,
         play: PlayClock::ZERO,
     };
-    drive_input(node, &env, &[], &[], &[]).audio
+    drive_input(node, &env, Planes::default(), &[], &[]).audio
 }
 
 fn prepared_node(node: InletNode) -> InletNode {

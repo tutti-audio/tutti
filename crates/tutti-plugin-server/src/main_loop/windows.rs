@@ -6,7 +6,8 @@
 //! together, without touching the loop's logic.
 
 use crate::transport::Transport;
-use tutti_plugin_types::{BridgeResult, MainThreadMarker, Ready, Wakeups};
+use tutti_plugin_ipc_ffi::Ready;
+use tutti_plugin_types::{BridgeResult, MainThreadMarker, Wakeups};
 
 pub(crate) type Listener = interprocess::local_socket::Listener;
 pub(crate) type Stream = interprocess::local_socket::Stream;

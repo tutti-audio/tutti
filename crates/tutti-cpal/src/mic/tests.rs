@@ -1,4 +1,5 @@
 use super::*;
+use tutti_buffers::Planes;
 
 use std::time::Instant;
 
@@ -207,7 +208,8 @@ fn inputs_three_and_four_of_sixteen_are_the_recording() {
         changes: tutti_graph::TransportChanges::NONE,
         play: tutti_graph::PlayClock::ZERO,
     };
-    let heard = tutti_graph::contract::drive_input(&mut node, &env, &[], &[], &[]).audio;
+    let heard =
+        tutti_graph::contract::drive_input(&mut node, &env, Planes::default(), &[], &[]).audio;
     assert_eq!(heard[0], [2.0, 102.0, 202.0]);
     assert_eq!(heard[1], [3.0, 103.0, 203.0]);
 }

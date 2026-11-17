@@ -19,6 +19,7 @@
 //! a jump, the lanes, `hermite_lanes`, `filter_lanes`, the gain and the mix.
 
 use crate::VoiceWindow;
+use tutti_buffers::Planes;
 
 use crate::testing::loop_frames;
 
@@ -295,8 +296,14 @@ fn the_block_read_is_the_same_at_any_block_length() {
             }
         }
         let frame = (big * 256) as u64;
-        let got =
-            contract::drive_input(&mut long, &env(frame, 256, first, changes), &[], &[], &[]).audio;
+        let got = contract::drive_input(
+            &mut long,
+            &env(frame, 256, first, changes),
+            Planes::default(),
+            &[],
+            &[],
+        )
+        .audio;
 
         // The same span in 64-frame blocks, each event at a block's start.
         let mut want = [Vec::with_capacity(256), Vec::with_capacity(256)];
@@ -308,7 +315,7 @@ fn the_block_read_is_the_same_at_any_block_length() {
             let out = contract::drive_input(
                 &mut short,
                 &env(at, 64, host.transport(), TransportChanges::NONE),
-                &[],
+                Planes::default(),
                 &[],
                 &[],
             )

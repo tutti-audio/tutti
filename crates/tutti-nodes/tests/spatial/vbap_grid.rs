@@ -2,6 +2,7 @@
 //! reset: the render does not depend on where the blocks fall, a reset node
 //! renders what a fresh one does.
 
+use tutti_buffers::Planes;
 use tutti_graph::ParamNode;
 use tutti_graph::contract::{drive, prepared};
 use tutti_nodes::VbapPannerNode;
@@ -33,7 +34,12 @@ fn render(node: &mut VbapPannerNode, input: &[Vec<f32>; 2], splits: &[usize]) ->
     while at < input[0].len() {
         let end = (at + splits[i % splits.len()]).min(input[0].len());
         i += 1;
-        let block = drive(node, RATE, &[&input[0][at..end], &input[1][at..end]], &[]);
+        let block = drive(
+            node,
+            RATE,
+            Planes::new(&[&input[0][at..end], &input[1][at..end]]).unwrap(),
+            &[],
+        );
         for (o, b) in out.iter_mut().zip(block) {
             o.extend(b);
         }

@@ -34,7 +34,7 @@
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-/// The server re-checks host liveness once per `POLL_SLICE_MS` (50 ms in
+/// The server re-checks host liveness once per `POLL_SLICE` (50 ms in
 /// `transport.rs`). Everything below is denominated in that slice so the
 /// numbers state "how many poll intervals", not a wall-clock guess.
 const POLL_SLICE: Duration = Duration::from_millis(50);
