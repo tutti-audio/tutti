@@ -753,13 +753,10 @@ impl ClockMaster {
             first + BarCount(1)
         };
         let mut boundary = meter.bar_start(bar);
-        loop {
-            let Some(k) = usize::try_from(frame_of(boundary))
-                .ok()
-                .filter(|&k| k < pass.len.get())
-            else {
-                break;
-            };
+        while let Some(k) = usize::try_from(frame_of(boundary))
+            .ok()
+            .filter(|&k| k < pass.len.get())
+        {
             let signature = meter.at(boundary);
             if self.flex.meter != Some(signature) {
                 // A whole-note meter has no standard message: it is stated by none.
@@ -771,7 +768,7 @@ impl ClockMaster {
                 }
                 self.flex.meter = Some(signature);
             }
-            bar = bar + BarCount(1);
+            bar += BarCount(1);
             let next = meter.bar_start(bar);
             // A line that does not advance would stand here for ever.
             if next <= boundary {
