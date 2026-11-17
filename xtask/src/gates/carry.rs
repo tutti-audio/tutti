@@ -11,7 +11,7 @@
 //! new text's generated columns and loses the hand columns ([`Fate::Changed`]),
 //! which the gate then refuses until a person rereads the sentence. Old rows
 //! with hand columns that no sentence claims are [`Carried::orphans`]: each is
-//! written back as a row with side `orphan`, its old id, hand columns and digest,
+//! written back as a row with side `orphan:<old side>`, its old id, hand columns and digest,
 //! after the last row of its section, and stays through every later run until a
 //! person moves its text to the right row and deletes it. The gate refuses both
 //! `changed` and `orphan` rows.
@@ -27,8 +27,14 @@ use std::collections::BTreeMap;
 /// The side a row has while its sentence is being reread.
 pub(super) const CHANGED_SIDE: &str = "changed";
 
-/// The side of a row that keeps the hand columns of a sentence no row claims.
-pub(super) const ORPHAN_SIDE: &str = "orphan";
+/// The side prefix of a row that keeps the hand columns of a sentence no row
+/// claims: `orphan:<old side>`.
+const ORPHAN_PREFIX: &str = "orphan:";
+
+/// Whether `side` marks an orphan row.
+pub(super) fn is_orphan(side: &str) -> bool {
+    side.starts_with(ORPHAN_PREFIX)
+}
 
 /// A short stable digest of a requirement sentence: FNV-1a 64 of its words
 /// joined by single spaces, as 16 hex digits. Empty for no text.
@@ -88,7 +94,7 @@ pub(super) struct Carried {
 /// regeneration after the column was added).
 pub(super) fn carry(old: Vec<Row>, items: &[(&str, &str)]) -> Carried {
     let (kept_orphans, old): (Vec<Row>, Vec<Row>) =
-        old.into_iter().partition(|r| r.side == ORPHAN_SIDE);
+        old.into_iter().partition(|r| is_orphan(&r.side));
     let by_id: BTreeMap<&str, &str> = items.iter().copied().collect();
     let mut old: Vec<(Row, Option<String>)> = old
         .into_iter()
@@ -164,7 +170,7 @@ pub(super) fn carry(old: Vec<Row>, items: &[(&str, &str)]) -> Carried {
     for (i, (mut r, _)) in old.drain(..).enumerate() {
         if !taken[i] {
             if has_hand(&r) {
-                r.side = ORPHAN_SIDE.to_owned();
+                r.side = format!("{ORPHAN_PREFIX}{}", r.side);
                 orphans.push(r);
             } else {
                 dropped.push(r);

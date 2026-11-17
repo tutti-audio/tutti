@@ -71,7 +71,7 @@
 //! CI, so with it absent the comparison is skipped and said so, and only
 //! `TUTTI_CONFORMANCE=require-all` makes the absence a finding.
 
-use super::carry::{self, CHANGED_SIDE, Fate, ORPHAN_SIDE};
+use super::carry::{self, CHANGED_SIDE, Fate, is_orphan};
 use super::clap_sys::{self, Item};
 use super::lex::blank_keeping_docs;
 use super::midi_spec;
@@ -217,7 +217,7 @@ pub(super) fn parse_row(line: &str) -> Result<Row, String> {
             "id `{id}` is empty or has a character outside a-z A-Z 0-9 . _ / # -"
         ));
     }
-    if !is_token(side, false) {
+    if !is_token(side.strip_prefix("orphan:").unwrap_or(side), false) {
         return Err(format!("side `{side}` is not a non-empty lowercase token"));
     }
     if !maturity.is_empty() && !MATURITIES.contains(&maturity) {
@@ -295,7 +295,7 @@ pub(super) fn load(tree: &dyn Tree) -> (Vec<(String, Row)>, Vec<String>) {
         let (file_rows, file_errs) = parse_file(&path, &text);
         errs.extend(file_errs);
         for r in file_rows {
-            if r.side == ORPHAN_SIDE {
+            if is_orphan(&r.side) {
                 errs.push(format!(
                     "{path}: orphan row `{}`: its sentence is gone; move its hand text to the row it belongs to and delete this row",
                     r.id
@@ -1052,7 +1052,7 @@ pub(super) fn regenerate_sf2(existing: &str, items: &[sf2_spec::Item]) -> Result
     for line in existing.lines() {
         let t = line.trim();
         let id = t.split('|').next().unwrap_or("").trim();
-        let is_orphan = t.split('|').nth(1).is_some_and(|c| c.trim() == ORPHAN_SIDE);
+        let is_orphan = t.split('|').nth(1).is_some_and(|c| is_orphan(c.trim()));
         if is_orphan {
             continue;
         }
@@ -1928,7 +1928,7 @@ mod tests {
             let row = rows_of(&r.text).pop().unwrap();
             assert_eq!(
                 (row.id.as_str(), row.side.as_str(), row.paraphrase.as_str()),
-                ("m2-104/1#2", "orphan", "bee")
+                ("m2-104/1#2", "orphan:client", "bee")
             );
             assert_eq!(row.digest, carry::digest("B shall y."));
         }
@@ -1960,7 +1960,7 @@ mod tests {
             ids,
             [
                 ("m2-104/1#1", "host"),
-                ("m2-104/1#2", "orphan"),
+                ("m2-104/1#2", "orphan:client"),
                 ("m2-104/2#1", "todo")
             ]
         );
