@@ -143,6 +143,9 @@
 //!   `tutti_buffers::Sink` adapter export and recording share.
 //! - **Oscillator** (`oscillator.rs`): [`Oscillator`], a sine, or a saw, square or
 //!   triangle band-limited by PolyBLEP and PolyBLAMP ([`OscillatorWave`]).
+//! - **Stereo and utility** (`polarity.rs`, `stereo.rs`): [`Polarity`], the channels a block
+//!   inverts; [`MidSide`] and [`WidthBank`] (the side scaled by a glided
+//!   [`StereoWidth`](tutti_types::StereoWidth)).
 //! - **Small kernels**: [`cubic_hermite`], [`ShapeKind`], [`Smoother`].
 //!
 //! ## Import paths
@@ -166,6 +169,8 @@ mod modulation;
 mod oscillator;
 mod oversample;
 mod pan;
+mod polarity;
+mod stereo;
 mod waveshape;
 
 mod model;
@@ -220,6 +225,7 @@ pub use oversample::{
     Oversampler, Oversampling, OversamplingFactor, OversamplingPlan, Passband, PassbandError,
 };
 pub use pan::{PanLaw, pan_gains};
+pub use polarity::{ChannelOutOfRange, Polarity};
 pub use resample::{ChunkSize, FftResampler, ResampleError, StreamingResampler, WindowedSinc};
 pub use reverb::fdn::bank::{FdnBank, FdnGlides};
 pub use reverb::fdn::design::{FdnControls, FdnLayout, MAX_PRE_DELAY, MIN_DECAY};
@@ -236,6 +242,7 @@ pub use spatial::{
     MAX_PREPARED_RATE, MAX_SPHERE_RATE, MIN_SPHERE_RATE, SpeakerGeometryError, SpeakerLayout,
     VbapGains, VbapKernel,
 };
+pub use stereo::{MidSide, WidthBank, WidthControls};
 pub use stft::error::StftError;
 pub use stft::geometry::StftGeometry;
 pub use stft::grid::{BinCount, BinIndex, FrameCount, FrameIndex, Grid};
