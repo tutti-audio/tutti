@@ -526,7 +526,6 @@ mod tests {
     use super::*;
     use crate::protocol::ChannelLayout;
     use crate::transport::shm::RING_SLOTS;
-    use std::thread;
     use tutti_plugin_types::Timeouts;
 
     /// A failed launch must not leave the subprocess running.
@@ -696,49 +695,38 @@ mod tests {
         drop(server);
     }
 
-    /// A fifo the restore of the reference plugin holds on: it is entered when
-    /// the plugin opens the fifo for reading, and it returns when the writer's
-    /// end closes.
-    #[cfg(unix)]
-    fn restore_hold() -> (tempfile::TempDir, std::path::PathBuf) {
-        let dir = tempfile::tempdir().expect("a private temp dir");
-        let fifo = dir.path().join("restore-hold");
-        let made = Command::new("mkfifo").arg(&fifo).status().expect("mkfifo");
-        assert!(made.success(), "mkfifo {}", fifo.display());
-        (dir, fifo)
-    }
-
-    /// **A restore that outlasts the response window and succeeds is a load.**
-    /// The plugin blocks in its state restore until the test releases it, which
-    /// is after the call window has passed: the server said it began restoring,
-    /// and a restore has the window of its own. The call window is short and the
-    /// restore's a hang guard, so a launch that kept waiting on the call window
-    /// during the restore fails with the state's timeout; this one completes.
-    ///
-    /// The release waits out twice the call window from the moment the plugin is
-    /// in its restore: the host began its restore wait before that, so a
-    /// slower machine only makes the window more surely past. No event says the
-    /// host's window has passed (it is the host's clock), so that wait is the one
-    /// timed step, and it only lengthens, never shortens, the proof.
+    /// **A restore that returns when the plugin is done is a load**, however long
+    /// that is: the plugin blocks in its state restore until the test releases
+    /// it, after the server has said it began restoring, and the launch waits
+    /// for it and completes. Both windows are hang guards here, so no clock
+    /// decides the outcome: a launch that gave up on the restore would fail with
+    /// the state's timeout. That a restore is waited on for `state_restore`
+    /// and not `call` is
+    /// `a_restore_is_waited_on_for_its_own_window` (the window per phase) and
+    /// `a_restore_that_outlasts_its_window_is_blamed_on_the_state` (the restore
+    /// window ends the wait while the call window is far longer).
     ///
     /// Needs `cargo build -p tutti-plugin-server` first.
     #[test]
     #[cfg(unix)]
-    fn a_restore_that_outlasts_the_call_window_and_succeeds_is_a_load() {
-        const CALL: Duration = Duration::from_secs(1);
-        let (_dir, fifo) = restore_hold();
+    fn a_restore_that_returns_when_released_completes_the_launch_as_a_load() {
+        // The plugin holds its restore on this fifo: it is in the restore when it
+        // opens it for reading, and the restore ends when the writer closes it.
+        let dir = tempfile::tempdir().expect("a private temp dir");
+        let fifo = dir.path().join("restore-hold");
+        let made = Command::new("mkfifo").arg(&fifo).status().expect("mkfifo");
+        assert!(made.success(), "mkfifo {}", fifo.display());
         let releaser = {
             let fifo = fifo.clone();
-            thread::spawn(move || {
+            std::thread::spawn(move || {
                 // Opening for writing returns when the plugin opens for reading:
-                // the plugin is in its restore.
-                let held = std::fs::OpenOptions::new()
-                    .write(true)
-                    .open(&fifo)
-                    .expect("the plugin opens the fifo");
-                // Nothing is sent on this channel: the timeout is the wait.
-                let _ = std::sync::mpsc::channel::<()>().1.recv_timeout(CALL * 2);
-                drop(held);
+                // the plugin is in its restore. Closing it ends the restore.
+                drop(
+                    std::fs::OpenOptions::new()
+                        .write(true)
+                        .open(&fifo)
+                        .expect("the plugin opens the fifo"),
+                );
             })
         };
         let launched = stateful_launch(
@@ -746,10 +734,10 @@ mod tests {
                 "TUTTI_CLAP_PROBE_STATE_LOAD_HOLD_FIFO",
                 fifo.to_str().expect("a utf-8 path"),
             )],
-            CALL,
+            Duration::from_secs(60),
             Duration::from_secs(60),
         );
-        let server = launched.expect("a slow restore is not a failure");
+        let server = launched.expect("a restore that returns is not a failure");
         assert!(server.state_restore.is_some(), "a restore was attempted");
         releaser.join().expect("the releaser ends");
         reap(Ok(server));
@@ -765,7 +753,12 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn a_restore_that_outlasts_its_window_is_blamed_on_the_state() {
-        let (_dir, fifo) = restore_hold();
+        // The plugin holds its restore on this fifo: it is in the restore when it
+        // opens it for reading, and the restore ends when the writer closes it.
+        let dir = tempfile::tempdir().expect("a private temp dir");
+        let fifo = dir.path().join("restore-hold");
+        let made = Command::new("mkfifo").arg(&fifo).status().expect("mkfifo");
+        assert!(made.success(), "mkfifo {}", fifo.display());
         let launched = stateful_launch(
             &[(
                 "TUTTI_CLAP_PROBE_STATE_LOAD_HOLD_FIFO",
