@@ -25,12 +25,13 @@
 //! it catches the same `vec![]`.
 
 use std::path::Path;
+use tutti_buffers::{InputOutput, Planes, PlanesMut};
 use tutti_graph::UmpAt;
 
 use tutti_graph::Offset;
 use tutti_types::Samples;
 use tutti_ump::MidiChannel;
-use tutti_vst3_host::{AudioBuffer, InputEvents, ParameterChanges, TransportInfo};
+use tutti_vst3_host::{InputEvents, ParameterChanges, TransportInfo};
 
 /// A block longer than any offset these tests place an event at.
 const TEST_BLOCK: usize = 1 << 16;
@@ -70,8 +71,12 @@ fn drive_silent(inst: &mut Active, iters: usize, transport: &TransportInfo) {
     let midi: [UmpAt; 0] = [];
     for _ in 0..iters {
         let outs: &mut [&mut [f32]] = &mut [&mut out_l[..], &mut out_r[..]];
-        let ins: &[&[f32]] = &[];
-        let mut buffer = AudioBuffer::new(ins, outs, tutti_plugin_types::SampleRate::SR_48K);
+        let mut buffer = InputOutput::new(
+            Samples(64),
+            Planes::default(),
+            PlanesMut::new(outs).expect("equal channels"),
+        )
+        .expect("equal lengths");
         let events = InputEvents {
             midi: &midi,
             ..Default::default()
@@ -121,8 +126,12 @@ fn process_with_automation_does_not_allocate() {
     let mut drive = |inst: &mut Active, iters: usize| {
         for _ in 0..iters {
             let outs: &mut [&mut [f32]] = &mut [&mut out_l[..], &mut out_r[..]];
-            let ins: &[&[f32]] = &[];
-            let mut buffer = AudioBuffer::new(ins, outs, tutti_plugin_types::SampleRate::SR_48K);
+            let mut buffer = InputOutput::new(
+                Samples(64),
+                Planes::default(),
+                PlanesMut::new(outs).expect("equal channels"),
+            )
+            .expect("equal lengths");
             let events = InputEvents {
                 midi: &midi,
                 ..Default::default()
@@ -171,8 +180,12 @@ fn process_with_midi_does_not_allocate() {
     // allocator.
     {
         let outs: &mut [&mut [f32]] = &mut [&mut out_l[..], &mut out_r[..]];
-        let ins: &[&[f32]] = &[];
-        let mut buffer = AudioBuffer::new(ins, outs, tutti_plugin_types::SampleRate::SR_48K);
+        let mut buffer = InputOutput::new(
+            Samples(64),
+            Planes::default(),
+            PlanesMut::new(outs).expect("equal channels"),
+        )
+        .expect("equal lengths");
         let warm = [
             (Offset::ZERO, midi::note_on(MidiChannel::FIRST, 60, 0x8000)),
             (Offset::ZERO, midi::note_off(MidiChannel::FIRST, 60, 0)),
@@ -196,8 +209,12 @@ fn process_with_midi_does_not_allocate() {
                 _ => &[],
             };
             let outs: &mut [&mut [f32]] = &mut [&mut out_l[..], &mut out_r[..]];
-            let ins: &[&[f32]] = &[];
-            let mut buffer = AudioBuffer::new(ins, outs, tutti_plugin_types::SampleRate::SR_48K);
+            let mut buffer = InputOutput::new(
+                Samples(64),
+                Planes::default(),
+                PlanesMut::new(outs).expect("equal channels"),
+            )
+            .expect("equal lengths");
             let src = InputEvents {
                 midi: events,
                 ..Default::default()
@@ -258,8 +275,12 @@ fn process_with_hundreds_of_events_does_not_allocate() {
     let mut drive = |inst: &mut Active, exprs: &[NoteExpressionValue], iters: usize| {
         for _ in 0..iters {
             let outs: &mut [&mut [f32]] = &mut [&mut out_l[..], &mut out_r[..]];
-            let ins: &[&[f32]] = &[];
-            let mut buffer = AudioBuffer::new(ins, outs, tutti_plugin_types::SampleRate::SR_48K);
+            let mut buffer = InputOutput::new(
+                Samples(64),
+                Planes::default(),
+                PlanesMut::new(outs).expect("equal channels"),
+            )
+            .expect("equal lengths");
             let events = InputEvents {
                 midi: &midi,
                 note_expressions: exprs,

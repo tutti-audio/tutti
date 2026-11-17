@@ -46,7 +46,10 @@ impl TempoMapBuilder {
         }
     }
 
-    fn then(mut self, transition: Transition, beat: Beat, tempo: Bpm) -> Self {
+    /// Reach `tempo` at `beat` by `transition`: [`step_to`](Self::step_to),
+    /// [`ramp_time_to`](Self::ramp_time_to) or
+    /// [`ramp_beats_to`](Self::ramp_beats_to), chosen by a value.
+    pub fn transition_to(mut self, transition: Transition, beat: Beat, tempo: Bpm) -> Self {
         if let Some(last) = self.points.last_mut() {
             last.transition = transition;
         }
@@ -56,19 +59,19 @@ impl TempoMapBuilder {
 
     /// Hold the last tempo until `beat`, then take `tempo` there.
     pub fn step_to(self, beat: Beat, tempo: Bpm) -> Self {
-        self.then(Transition::Step, beat, tempo)
+        self.transition_to(Transition::Step, beat, tempo)
     }
 
     /// Move from the last tempo to `tempo`, reaching it at `beat`, with tempo
     /// linear in time ([`Transition::RampTime`]).
     pub fn ramp_time_to(self, beat: Beat, tempo: Bpm) -> Self {
-        self.then(Transition::RampTime, beat, tempo)
+        self.transition_to(Transition::RampTime, beat, tempo)
     }
 
     /// Move from the last tempo to `tempo`, reaching it at `beat`, with tempo
     /// linear in beats ([`Transition::RampBeats`]).
     pub fn ramp_beats_to(self, beat: Beat, tempo: Bpm) -> Self {
-        self.then(Transition::RampBeats, beat, tempo)
+        self.transition_to(Transition::RampBeats, beat, tempo)
     }
 
     /// The map.

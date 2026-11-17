@@ -182,6 +182,34 @@ fn a_nested_all_pass_lengthens_the_loop_by_its_low_frequency_delay() {
     assert!((r(nested) / r(plain) - 1.3).abs() < 1e-5);
 }
 
+/// A one-pole of pole `p` delays a loop by `|p| / (1 - |p|)` frames at its slowest, which the
+/// effective length, the RT60 and the tail carry: a loop of a one-pole absorption rings longer
+/// than one of the same gain without it, by that many frames a trip.
+#[test]
+fn a_one_pole_adds_its_group_delay_at_dc_to_the_loop() {
+    let g = Amplitude(0.9);
+    let pole = |damp| Absorption::OnePole { gain: g, damp };
+    assert_eq!(pole(0.5).peak_delay(), SampleSpan::of(1.0));
+    assert_eq!(pole(-0.5).peak_delay(), SampleSpan::of(1.0));
+    assert!((pole(0.9).peak_delay().get() - 9.0).abs() < 1e-5);
+    for none in [pole(1.5), pole(f32::NAN), Absorption::Gain(g)] {
+        assert_eq!(none.peak_delay(), SampleSpan::ZERO);
+    }
+    assert_eq!(
+        line(1000.0, pole(0.5)).effective_length(),
+        Some(SampleSpan::of(1001.0))
+    );
+    let net = |a| network(&[Stage::Fdn(fdn(&[line(1000.0, a)], Matrix::Diagonal))]);
+    let rt = |a| net(a).rt60(Band::Low).get();
+    // The same DC gain: the RT60 is that of a loop 1000 + 9 frames long.
+    assert!((rt(pole(0.9)) / rt(Absorption::Gain(g)) - 1.009).abs() < 1e-5);
+    let tail = |a| match net(a).tail(Db(-60.0)) {
+        Ring::Finite(t) => t.get(),
+        Ring::Unbounded => panic!("a finite tail"),
+    };
+    assert!(tail(pole(0.9)) > tail(Absorption::Gain(g)));
+}
+
 /// Stability: a gain below 1 under an orthogonal matrix is stable; a gain
 /// of 1 in one band only is not (it never settles) and its tail is
 /// unbounded; a Hadamard of 3 lines, a dense matrix of the wrong size, a

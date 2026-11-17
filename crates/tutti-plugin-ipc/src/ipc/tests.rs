@@ -884,9 +884,7 @@ fn a_client_with_a_loader_sends_no_editor_message() {
 
 /// Renders one block of `frames` silent frames through `processor`.
 fn render_silence(processor: &mut IpcProcessor, frames: usize) {
-    use tutti_plugin_types::{
-        AudioBuffer, AudioBufferMut, PluginIo, ProcessContext, ProcessOutput,
-    };
+    use tutti_plugin_types::{PluginAudio, PluginIo, ProcessContext, ProcessOutput};
     let input = vec![vec![0.0f32; frames]; 2];
     let mut output = vec![vec![0.0f32; frames]; 2];
     let inputs: Vec<&[f32]> = input.iter().map(Vec::as_slice).collect();
@@ -894,12 +892,12 @@ fn render_silence(processor: &mut IpcProcessor, frames: usize) {
     let ctx = ProcessContext::new();
     let mut out = ProcessOutput::default();
     let mut io = PluginIo {
-        buffer: AudioBufferMut::F32(AudioBuffer {
-            inputs: &inputs,
-            outputs: &mut outputs,
-            num_samples: frames,
-            sample_rate: RATE,
-        }),
+        buffer: PluginAudio::new(
+            tutti_plugin_types::Samples(inputs[0].len()),
+            &inputs,
+            &mut outputs,
+        )
+        .expect("equal channels"),
         ctx: &ctx,
         out: &mut out,
     };

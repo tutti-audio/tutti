@@ -203,8 +203,8 @@ fn an_au_latency_poll_refreshes_the_cached_wiring() {
 }
 
 use tutti_plugin_types::{
-    AudioBuffer as TuttiAudioBuffer, AudioBufferMut, Features, ParamFlags, ParameterChanges,
-    ParameterQueue, TimeSignature, TransportInfo,
+    Features, ParamFlags, ParameterChanges, ParameterQueue, PluginAudio, TimeSignature,
+    TransportInfo,
 };
 
 const SAMPLE_RATE: SampleRate = SampleRate::SR_44K1;
@@ -235,17 +235,17 @@ fn run(
     let mut output = vec![vec![0.0f32; frames]; 2];
     let inputs: Vec<&[f32]> = input.iter().map(|v| v.as_slice()).collect();
     let mut outputs: Vec<&mut [f32]> = output.iter_mut().map(|v| v.as_mut_slice()).collect();
-    let buffer = TuttiAudioBuffer {
-        inputs: &inputs,
-        outputs: &mut outputs,
-        num_samples: frames,
-        sample_rate: SAMPLE_RATE,
-    };
+    let buffer = PluginAudio::new(
+        tutti_plugin_types::Samples(inputs[0].len()),
+        &inputs,
+        &mut outputs,
+    )
+    .expect("equal channels");
     let mut ctx = ProcessContext::new();
     ctx.transport = transport;
     ctx.param_changes = changes;
     let mut out = ProcessOutput::default();
-    au.render(AudioBufferMut::F32(buffer), &ctx, &mut out)
+    au.render(buffer, &ctx, &mut out)
 }
 
 #[test]
