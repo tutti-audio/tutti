@@ -53,7 +53,6 @@
 //! is pending, and a bounce refuses while one is
 //! (`BounceError::PoolPending`, feature `export`).
 
-use std::fmt;
 #[cfg(feature = "soundfont")]
 use std::sync::Arc;
 

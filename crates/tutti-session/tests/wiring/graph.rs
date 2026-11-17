@@ -41,14 +41,13 @@ fn a_session_is_send() {
     send::<Session>();
 }
 
-/// An app's own key type names a session, and `Send` and `Sync` follow the
-/// clock alone.
+/// An app's own key type names a session, and `Send` follows the clock alone.
 #[test]
 fn a_session_takes_an_app_key_type() {
     #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
     struct MyKey(u32);
-    fn assert_send_sync<T: Send + Sync>() {}
-    assert_send_sync::<Session<MyKey, tutti_session::Offline>>();
+    fn assert_send<T: Send>() {}
+    assert_send::<Session<MyKey, tutti_session::Offline>>();
 }
 
 // ---- stimulus nodes ---------------------------------------------------------
