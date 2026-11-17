@@ -969,7 +969,7 @@ mod tests {
         let mut out: Vec<Vec<f32>> = Vec::new();
         for i in 0..n {
             let frame: Vec<&[f32]> = inputs.iter().map(|s| &s[i..=i]).collect();
-            let o = drive(node, RATE, &frame, &[]);
+            let o = drive(node, RATE, Planes::new(&frame).unwrap(), &[]);
             out.resize(o.len(), Vec::with_capacity(n));
             for (c, v) in o.into_iter().enumerate() {
                 out[c].push(v[0]);
@@ -1047,7 +1047,12 @@ mod tests {
         node.set_gain(Amplitude::new(5.0));
         let latency = node.latency_samples().get();
         let lane: Vec<f32> = (0..256).map(|i| [0.5, 1.0, -2.0, 0.25][i % 4]).collect();
-        let out = drive(&mut node, RATE, &[&[1.0; 256]], &[Some(&lane)]);
+        let out = drive(
+            &mut node,
+            RATE,
+            Planes::new(&[&[1.0; 256]]).unwrap(),
+            &[Some(&lane)],
+        );
         for i in latency..256 {
             let want = lane[i].max(0.0);
             assert!(
@@ -1065,10 +1070,20 @@ mod tests {
     fn a_non_finite_driven_frame_holds_the_same_value_on_every_channel() {
         let mut node = prepared(ConvolverNode::per_channel(&[&[1.0], &[1.0]], 64).unwrap());
         let ones = [1.0; 256];
-        drive(&mut node, RATE, &[&ones, &ones], &[Some(&[0.5; 256])]);
+        drive(
+            &mut node,
+            RATE,
+            Planes::new(&[&ones, &ones]).unwrap(),
+            &[Some(&[0.5; 256])],
+        );
         let mut lane = [0.25; 256];
         lane[0] = f32::NAN;
-        let out = drive(&mut node, RATE, &[&ones, &ones], &[Some(&lane)]);
+        let out = drive(
+            &mut node,
+            RATE,
+            Planes::new(&[&ones, &ones]).unwrap(),
+            &[Some(&lane)],
+        );
         assert_eq!(out[0][0], 0.5);
         assert_eq!(out[1][0], 0.5);
     }
@@ -1237,7 +1252,10 @@ mod direct_sum {
         while at < frames {
             let n = BLOCK.min(frames - at);
             let ins: Vec<&[f32]> = x.iter().map(|c| &c[at..at + n]).collect();
-            for (o, b) in out.iter_mut().zip(drive(&mut node, rate, &ins, &[])) {
+            for (o, b) in
+                out.iter_mut()
+                    .zip(drive(&mut node, rate, Planes::new(&ins).unwrap(), &[]))
+            {
                 o.extend(b);
             }
             at += n;
@@ -1472,7 +1490,10 @@ mod layouts {
         while at < frames {
             let n = lens[k % lens.len()].min(frames - at);
             let ins: Vec<&[f32]> = x.iter().map(|c| &c[at..at + n]).collect();
-            for (o, b) in out.iter_mut().zip(drive(node, RATE, &ins, &[])) {
+            for (o, b) in out
+                .iter_mut()
+                .zip(drive(node, RATE, Planes::new(&ins).unwrap(), &[]))
+            {
                 o.extend(b);
             }
             at += n;
@@ -1489,7 +1510,10 @@ mod layouts {
         while at < frames {
             let n = BLOCK.min(frames - at);
             let ins: Vec<&[f32]> = x.iter().map(|c| &c[at..at + n]).collect();
-            for (o, b) in out.iter_mut().zip(drive(node, RATE, &ins, &[])) {
+            for (o, b) in out
+                .iter_mut()
+                .zip(drive(node, RATE, Planes::new(&ins).unwrap(), &[]))
+            {
                 o.extend(b);
             }
             at += n;
@@ -1896,7 +1920,7 @@ mod layouts {
         let out = drive(
             &mut node,
             RATE,
-            &[&impulse_on(1, 0, 100)[0], &impulse_on(1, 0, 100)[0]],
+            Planes::new(&[&impulse_on(1, 0, 100)[0], &impulse_on(1, 0, 100)[0]]).unwrap(),
             &[],
         );
         for ch in &out {

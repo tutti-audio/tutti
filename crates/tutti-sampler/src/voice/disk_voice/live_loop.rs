@@ -20,6 +20,7 @@
 //! read (underruns): a reposition costs none.
 
 use crate::VoiceWindow;
+use tutti_buffers::Planes;
 
 use crate::testing::loop_frames;
 
@@ -237,7 +238,7 @@ fn seeking(node: &mut dyn Node, clock: &MockTransport, at: usize, beat: f64) -> 
         )
         .expect("one change");
     env.changes = changes;
-    let left = tutti_graph::contract::drive_input(node, &env, &[], &[], &[])
+    let left = tutti_graph::contract::drive_input(node, &env, Planes::default(), &[], &[])
         .audio
         .swap_remove(0);
     clock.set_beat(Beat::new(beat));

@@ -57,6 +57,7 @@ fn run_node(c: &mut Criterion, group: &str, width: usize, node: impl Node, fed: 
     let mut d = Direct::new(node, SR, BLOCK);
     let input = noise_block(width);
     for (ch, buf) in d.inputs_mut().iter_mut().enumerate() {
+        let buf = buf.into_samples_mut();
         for (i, x) in buf.iter_mut().enumerate() {
             *x = input[ch][i];
         }
@@ -72,7 +73,7 @@ fn run_node(c: &mut Criterion, group: &str, width: usize, node: impl Node, fed: 
     g.bench_with_input(BenchmarkId::from_parameter(width), &width, |b, _| {
         b.iter(|| {
             d.block();
-            black_box(d.output(0)[BLOCK - 1]);
+            black_box(d.output().plane(0).samples()[BLOCK - 1]);
         })
     });
     g.finish();

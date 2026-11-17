@@ -123,10 +123,12 @@ fn check_io<N: IntoNode>(
     let mut solo_out: Vec<Vec<f32>> = vec![Vec::new(); outputs];
     for at in (0..input[0].len()).step_by(BLOCK) {
         let block: Vec<&[f32]> = input.iter().map(|c| &c[at..at + BLOCK]).collect();
-        for (o, b) in solo_out
-            .iter_mut()
-            .zip(drive(alone.as_mut(), RATE, &block, &[]))
-        {
+        for (o, b) in solo_out.iter_mut().zip(drive(
+            alone.as_mut(),
+            RATE,
+            Planes::new(&block).unwrap(),
+            &[],
+        )) {
             o.extend(b);
         }
     }
