@@ -816,3 +816,29 @@ fn the_machine_control_node_processes_without_allocating() {
     assert_eq!(controls.losses().lost, 0);
     assert_eq!(out.dropped(), 0);
 }
+
+/// **`reset` allocates nothing**: the executor calls it on the audio thread as
+/// a node leaves bypass, on the ingest, clock and machine control nodes alike.
+#[test]
+fn resetting_the_border_nodes_allocates_nothing() {
+    use tutti_graph::Node;
+    use tutti_graph::contract::Direct;
+    use tutti_midi_protocol::{MtcRate, Recipient};
+    use tutti_midi_runtime::MachineControlNode;
+    use tutti_rt::Publisher;
+
+    let rate = SampleRate::SR_48K;
+    let mut ingest = Direct::new(MidiIngestNode::new(), rate, 64);
+    let meter = Publisher::new(MeterMap::default()).reader();
+    let mut clock = Direct::new(ClockNode::new(MidiGroup::FIRST, rate, meter), rate, 64);
+    let mut mmc = Direct::new(
+        MachineControlNode::new(MidiGroup::FIRST, Recipient::AllCall, MtcRate::Fps30),
+        rate,
+        64,
+    );
+    assert_no_alloc::assert_no_alloc(|| {
+        ingest.node.reset();
+        clock.node.reset();
+        mmc.node.reset();
+    });
+}

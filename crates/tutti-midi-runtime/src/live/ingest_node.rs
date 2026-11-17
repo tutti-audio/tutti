@@ -726,9 +726,11 @@ impl Node for MidiIngestNode {
     /// ingest start empty (the MPE mode in force stays), nothing is held or
     /// owed, no Group has sent an Active Sensing, and the Profile zones in
     /// force are read again from the requests. What the node held is not
-    /// released: `reset` has no output to release into, and the executor
-    /// ends what a bypassed node held on its event outputs when it parks it
-    /// (the call is made as a node leaves bypass).
+    /// released: `reset` has no output to release into. The executor, when it
+    /// parks a bypassed node, ends the keys and the sustain pedal the node held
+    /// on its event outputs (the graph's held set covers keys and sustain
+    /// only), so after a bypass the sostenuto, soft and hold-2 pedals and the
+    /// bend the device left are neither lifted nor remembered.
     fn reset(&mut self) {
         self.device.translator.reset();
         self.device.mpe = MpeIngest::new(self.mpe_mode);
@@ -736,6 +738,9 @@ impl Node for MidiIngestNode {
         self.device.sensing.forget_all();
         self.device.owing = 0;
         self.profiles = NO_PROFILES;
+        // A published request's generation is at least 1 (`edit_profiles`
+        // bumps it before publishing), so generation 0 reads the requests again
+        // whenever one was published.
         self.profiles_generation = 0;
     }
 }

@@ -354,14 +354,12 @@ impl MmcCommands {
         }
     }
 
-    /// The list of `commands`, which the callers bound to a few bytes each;
-    /// a command that would not fit is left out.
+    /// The list of `commands`, which the callers bound to a few bytes each.
     fn of(commands: &[MmcCommand]) -> Self {
         let mut list = Self::new();
         for command in commands {
-            if list.push(command).is_err() {
-                break;
-            }
+            let pushed = list.push(command);
+            debug_assert!(pushed.is_ok(), "the callers' commands fit 48 bytes");
         }
         list
     }
@@ -431,3 +429,6 @@ impl<const N: usize> PartialEq<[u8; N]> for MmcPayload {
         self.as_bytes() == other
     }
 }
+
+#[cfg(test)]
+mod tests;
