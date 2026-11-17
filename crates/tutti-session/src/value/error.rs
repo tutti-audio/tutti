@@ -15,14 +15,13 @@ use super::AnyTarget;
 /// `K` is the session's key type: [`Knobs<K>`](crate::Knobs) and
 /// [`Session<K>`](crate::Session) answer a `ValueError<K>`.
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
-#[error("value {at}")]
+#[error("value {at}: {kind}")]
 pub struct ValueError<K> {
     /// The failing item's position in the call's argument.
     pub at: usize,
     /// The failing item's target.
     pub target: Option<AnyTarget<K>>,
     /// What went wrong.
-    #[source]
     pub kind: ValueErrorKind,
 }
 
@@ -53,4 +52,8 @@ pub enum SetRefusal {
     /// A float target was given a NaN or an infinity.
     #[error("the value is not a finite number")]
     NotFinite,
+    /// A finite value the target's cell cannot hold: a `Seconds` figure past
+    /// what an `f32` cell stores.
+    #[error("the value does not fit the param's cell")]
+    OutOfRange,
 }

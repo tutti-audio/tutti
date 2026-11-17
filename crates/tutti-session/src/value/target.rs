@@ -1,7 +1,7 @@
 //! [`Target`], what holds a value, and the builders every target gets:
 //! [`Assign`], [`Modify`], [`Effective`] and [`Info`].
 
-use std::any::Any;
+use std::any::{Any, TypeId};
 use std::fmt;
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -33,8 +33,8 @@ pub(crate) mod sealed {
         /// The cell and the base value now, or `None` when the target is gone.
         fn resolve(self, params: &Params) -> Option<(Self::Cell, Self::Value)>;
 
-        /// Whether `value` may be written.
-        fn check(value: &Self::Value) -> Result<(), SetRefusal>;
+        /// Whether `value` may be written through `cell`.
+        fn check(cell: &Self::Cell, value: &Self::Value) -> Result<(), SetRefusal>;
 
         /// Stores `value` through `cell`. Infallible and panic-free.
         fn land(cell: &Self::Cell, value: &Self::Value);
@@ -70,8 +70,10 @@ pub trait ScalarTarget: Moved {
 /// A target's identity, whatever its type: what an [`AnyTarget`] holds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TargetId {
-    /// A native param of a node, at an address.
-    Param(NodeKey, UnitAddr),
+    /// A native param of a node, at an address, as the node type its key
+    /// names declares it: a key of another node type than the one the node
+    /// is now names no such param.
+    Param(NodeKey, UnitAddr, TypeId),
 }
 
 /// A target with its type erased, in the error of the call that named it.
@@ -101,7 +103,7 @@ impl<K> AnyTarget<K> {
     #[must_use]
     pub fn node(&self) -> NodeKey {
         match self.id {
-            TargetId::Param(node, _) => node,
+            TargetId::Param(node, ..) => node,
         }
     }
 }
@@ -226,6 +228,8 @@ pub trait Staged {
     fn id(&self) -> TargetId;
     /// The value the call has built so far.
     fn value_mut(&mut self) -> &mut dyn Any;
+    /// Whether the slot's cell takes `value`, which is of the slot's type.
+    fn accepts(&self, value: &dyn Any) -> Result<(), SetRefusal>;
     /// Stores it.
     fn land(self: Box<Self>);
 }
@@ -246,7 +250,10 @@ macro_rules! target_builders {
             }
 
             /// An edit: the value `f` builds from the value the call has for
-            /// this target, for [`Session::set`](crate::Session::set).
+            /// this target, for [`Session::set`](crate::Session::set). `f` runs
+            /// under the value lock, so a graph edit (`add`, `remove`,
+            /// `replace`) and a `Knobs` write on another thread wait until it
+            /// returns; it must not wait on another thread.
             pub fn modify<F>(self, f: F) -> $crate::Modify<Self, F>
             where
                 F: FnOnce(&<Self as $crate::Target>::Value) -> <Self as $crate::Target>::Value,

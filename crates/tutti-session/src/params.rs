@@ -16,6 +16,8 @@
 //! the session's, and a write to a param the node lacks is
 //! [`ValueErrorKind::NoSuchTarget`](crate::ValueErrorKind::NoSuchTarget).
 
+use std::any::TypeId;
+
 use thiserror::Error;
 use tutti_graph::{HasParam, HasParams};
 use tutti_types::{UnitAddr, UnitParam};
@@ -57,9 +59,9 @@ macro_rules! param_methods {
             #[must_use]
             pub fn $name(self) -> ParamTarget<<N as HasParam<{ UnitParam::$kind as u16 }>>::Unit>
             where
-                N: HasParam<{ UnitParam::$kind as u16 }>,
+                N: HasParam<{ UnitParam::$kind as u16 }> + 'static,
             {
-                ParamTarget::new(self.erase(), UnitAddr::first(UnitParam::$kind))
+                ParamTarget::new(self.erase(), UnitAddr::first(UnitParam::$kind), TypeId::of::<N>())
             }
 
             #[doc = concat!(
@@ -70,9 +72,9 @@ macro_rules! param_methods {
             #[must_use]
             pub fn $at(self, index: u8) -> ParamTarget<<N as HasParam<{ UnitParam::$kind as u16 }>>::Unit>
             where
-                N: HasParams<{ UnitParam::$kind as u16 }>,
+                N: HasParams<{ UnitParam::$kind as u16 }> + 'static,
             {
-                ParamTarget::new(self.erase(), UnitAddr::new(UnitParam::$kind, index))
+                ParamTarget::new(self.erase(), UnitAddr::new(UnitParam::$kind, index), TypeId::of::<N>())
             }
         )+}
     };

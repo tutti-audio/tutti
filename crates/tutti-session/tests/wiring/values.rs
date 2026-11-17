@@ -4,6 +4,9 @@
 use std::cell::Cell;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
+use tutti_graph::{
+    Cx, FadeLaw, Io, Node, ParamNode, ParamSet, Params, Prepare, Shape, Status, Unforkable,
+};
 use tutti_nodes::{
     CompressorControls, CompressorNode, KeySource, MultibandCompressorNode, SvfFilterNode, SvfType,
 };
@@ -11,7 +14,7 @@ use tutti_session::{
     Assign, DetachedSession, Knobs, ParamTarget, Session, SetRefusal, TargetInfo, ValueErrorKind,
 };
 use tutti_types::{
-    BusTopology, ChannelLayout, Db, Hz, Q, SampleRate, Seconds, UnitAddr, UnitParam,
+    BusTopology, ChannelLayout, Db, Hz, Param, Q, SampleRate, Seconds, UnitAddr, UnitParam,
 };
 
 fn detached() -> DetachedSession {
@@ -75,8 +78,8 @@ fn a_batch_runs_in_argument_order_over_the_value_built_so_far() {
     assert_eq!(s.get(cutoff).unwrap(), Hz(50.0));
 }
 
-/// **A target lands once, with its final value**: the cell is written for each target of
-/// a batch, so a read after the call sees the last item's value for each.
+/// **A batch over several targets leaves each at its final value**: a read after the call
+/// sees, for each target, what its last item built.
 #[test]
 fn a_batch_over_several_targets_lands_each_final_value() {
     let mut s = detached();
@@ -208,8 +211,7 @@ fn a_panic_in_a_modify_lands_nothing_and_leaves_the_lock_usable() {
 }
 
 /// **A node that is gone is `NoSuchTarget`, naming its key**, on a read and on a write,
-/// through the session and through a `Knobs`; a swapped-in node that declares no params
-/// has no such param either.
+/// through the session and through a `Knobs`.
 #[test]
 fn a_removed_node_is_no_such_target_and_names_its_key() {
     let mut s = detached();
@@ -353,4 +355,188 @@ fn knobs_are_clone_and_send_and_write_across_threads() {
         .join()
         .unwrap();
     assert_eq!(s.get(lp.cutoff()).unwrap(), Hz(123.0));
+}
+
+/// A node whose `Cutoff` is a `Seconds`, where a filter's is a `Hz`: the same address in
+/// another unit.
+#[derive(Clone)]
+struct Slow {
+    cutoff: Param<Seconds>,
+}
+
+impl Node for Slow {
+    fn shape(&self) -> Shape {
+        Shape::source_unassigned(ChannelLayout::MONO)
+    }
+    fn prepare(&mut self, _: &Prepare) {}
+    fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
+        io.output(0).fill(self.cutoff.load().0 as f32);
+        Status::Modified
+    }
+    fn reset(&mut self) {}
+}
+
+impl ParamNode for Slow {
+    fn param_set(&self) -> ParamSet {
+        self.declared_set()
+    }
+    fn fork_fresh(&self) -> Self {
+        let mut fork = self.clone();
+        fork.cutoff.detach();
+        fork
+    }
+}
+
+tutti_graph::declare_params!([] Slow, n { Cutoff => Seconds = &n.cutoff });
+
+fn swap<N: tutti_session::SessionNode>(
+    s: &mut DetachedSession,
+    key: tutti_session::Key<SvfFilterNode<f32>>,
+    incoming: N,
+) {
+    s.graph()
+        .replace(key, incoming, Seconds(0.0), FadeLaw::EqualPower)
+        .unwrap_or_else(|_| panic!("a detached graph swaps at once"));
+}
+
+/// **A typed key outlives a swap to another node type as `NoSuchTarget`**: the old key's
+/// `Hz` cutoff names no param of the node now at its address (a `Seconds` one, or none),
+/// on a read, a write and an `info`, and in a batch the error is at the stale item.
+#[test]
+fn a_key_of_a_swapped_out_node_type_is_no_such_target() {
+    let mut s = detached();
+    let stale = filter(&mut s, 1_000.0);
+    let kept = filter(&mut s, 1_000.0);
+    let bare = filter(&mut s, 1_000.0);
+    swap(
+        &mut s,
+        stale,
+        Params(Slow {
+            cutoff: Param::new(Seconds(1.0)),
+        }),
+    );
+    swap(
+        &mut s,
+        bare,
+        Unforkable(SvfFilterNode::<f32>::new(
+            SvfType::LowPass,
+            Hz(1_000.0),
+            Q(0.7),
+        )),
+    );
+    for key in [stale, bare] {
+        let e = s.set(key.cutoff().to(Hz(5.0))).unwrap_err();
+        assert_eq!(e.kind, ValueErrorKind::NoSuchTarget);
+        assert_eq!(e.target.expect("it names the key").node(), key.erase());
+        assert_eq!(
+            s.get(key.cutoff()).unwrap_err().kind,
+            ValueErrorKind::NoSuchTarget
+        );
+        assert_eq!(
+            s.get(key.cutoff().info()).unwrap_err().kind,
+            ValueErrorKind::NoSuchTarget
+        );
+        let e = s
+            .set((kept.cutoff().to(Hz(7.0)), key.cutoff().to(Hz(5.0))))
+            .unwrap_err();
+        assert_eq!((e.at, e.kind), (1, ValueErrorKind::NoSuchTarget));
+        assert_eq!(s.get(kept.cutoff()).unwrap(), Hz(1_000.0), "nothing landed");
+    }
+}
+
+/// **A value call on one session from inside a `modify` of another is not `Reentrant`**:
+/// each session has its own value lock.
+#[test]
+fn a_modify_may_call_another_session() {
+    let mut a = detached();
+    let mut b = detached();
+    let fa = filter(&mut a, 100.0);
+    let fb = filter(&mut b, 200.0);
+    let seen = Cell::new(None);
+    a.set(fa.cutoff().modify(|h| {
+        seen.set(Some(b.get(fb.cutoff()).map_err(|e| e.kind)));
+        *h
+    }))
+    .unwrap();
+    assert_eq!(seen.take().unwrap().unwrap(), Hz(200.0));
+}
+
+/// **An `f32` param reads back the bits it was given**, subnormals and the last mantissa
+/// bit included.
+#[test]
+fn an_f32_param_round_trips_bit_for_bit() {
+    let mut s = detached();
+    let lp = filter(&mut s, 1_000.0);
+    for bits in [0x3f80_0001u32, 0x0000_0001, 0x7f7f_ffff, 0x1234_5678] {
+        let v = f32::from_bits(bits);
+        s.set(lp.cutoff().to(Hz(v))).unwrap();
+        assert_eq!(s.get(lp.cutoff()).unwrap().0.to_bits(), bits);
+    }
+}
+
+/// **A `Seconds` that is not a finite number, or that an `f32` cell cannot hold, is
+/// refused, and an `f64` cell takes what an `f32` cannot**.
+#[test]
+fn a_seconds_value_the_cell_cannot_hold_is_refused() {
+    let mut s = detached();
+    let mb = multiband(&mut s);
+    let comp = compressor(&mut s);
+    for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        for refused in [
+            s.set(mb.attack_at(0).to(Seconds(bad))).unwrap_err(),
+            s.set(comp.attack().to(Seconds(bad))).unwrap_err(),
+        ] {
+            assert_eq!(refused.kind, ValueErrorKind::Refused(SetRefusal::NotFinite));
+        }
+    }
+    let before = s.get(comp.attack()).unwrap();
+    let e = s
+        .set((
+            comp.release().to(Seconds(0.5)),
+            comp.attack().to(Seconds(1e300)),
+        ))
+        .unwrap_err();
+    assert_eq!(
+        (e.at, e.kind),
+        (1, ValueErrorKind::Refused(SetRefusal::OutOfRange))
+    );
+    assert_eq!(s.get(comp.attack()).unwrap(), before, "no infinity stored");
+    s.set(mb.attack_at(0).to(Seconds(1e300))).unwrap();
+    assert_eq!(s.get(mb.attack_at(0)).unwrap(), Seconds(1e300));
+}
+
+/// **An erased assignment is checked like a typed one**: a NaN through `AnyAssign` is
+/// refused at its position, and the item before it does not land.
+#[test]
+fn an_erased_non_finite_assignment_is_refused() {
+    let mut s = detached();
+    let lp = filter(&mut s, 1_000.0);
+    let e = s
+        .set(vec![
+            lp.q().to(Q(2.0)).erase(),
+            lp.cutoff().to(Hz(f32::NAN)).erase(),
+        ])
+        .unwrap_err();
+    assert_eq!(
+        (e.at, e.kind),
+        (1, ValueErrorKind::Refused(SetRefusal::NotFinite))
+    );
+    assert_eq!(s.get(lp.q()).unwrap(), Q(0.7));
+}
+
+/// **A read that fails inside a `Vec` is at its flattened position.**
+#[test]
+fn a_failing_read_inside_a_vec_is_at_its_position() {
+    let mut s = detached();
+    let lp = filter(&mut s, 1_000.0);
+    let gone = filter(&mut s, 1_000.0);
+    s.graph().remove(gone).unwrap();
+    let e = s
+        .get((
+            lp.cutoff(),
+            vec![lp.cutoff(), lp.cutoff()],
+            vec![gone.cutoff()],
+        ))
+        .unwrap_err();
+    assert_eq!((e.at, e.kind), (3, ValueErrorKind::NoSuchTarget));
 }

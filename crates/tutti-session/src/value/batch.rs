@@ -9,7 +9,7 @@
 
 use std::any::Any;
 
-use super::error::ValueErrorKind;
+use super::error::{SetRefusal, ValueErrorKind};
 use super::state::Params;
 use super::target::{AnyAssign, Assign, Info, Modify, Staged, TargetId, sealed::Land};
 
@@ -41,6 +41,13 @@ impl<T: Land> Staged for Slot<T> {
 
     fn value_mut(&mut self) -> &mut dyn Any {
         &mut self.value
+    }
+
+    fn accepts(&self, value: &dyn Any) -> Result<(), SetRefusal> {
+        let value = value
+            .downcast_ref::<T::Value>()
+            .expect("a target id names one value type");
+        T::check(&self.cell, value)
     }
 
     fn land(self: Box<Self>) {
@@ -89,36 +96,34 @@ impl<'a> Batch<'a> {
         make: impl FnOnce(&T::Value) -> T::Value,
     ) -> Result<(), Fail> {
         let id = target.id();
-        let staged = self.slots.iter().position(|s| s.id() == id);
-        let (cell, next) = match staged {
+        // A target id holds the node type its key names, and one node type
+        // declares one unit at an address, so every target of one id has one
+        // value type: a key of another node type resolves to no cell and
+        // never reaches a slot. The downcasts cannot fail.
+        const ONE_TYPE: &str = "one target id names one value type";
+        match self.slots.iter().position(|s| s.id() == id) {
             Some(at) => {
-                let value = self.slots[at]
-                    .value_mut()
-                    .downcast_mut::<T::Value>()
-                    .expect("one target id names one value type");
-                (None, make(value))
+                let slot = &mut self.slots[at];
+                let current = slot.value_mut().downcast_ref::<T::Value>().expect(ONE_TYPE);
+                let next = make(current);
+                let accepted = slot.accepts(&next);
+                if accepted.is_ok() {
+                    *slot.value_mut().downcast_mut::<T::Value>().expect(ONE_TYPE) = next;
+                }
+                accepted.map_err(|r| self.fail(id, ValueErrorKind::Refused(r)))?;
             }
             None => {
                 let (cell, base) = target
                     .resolve(self.params)
                     .ok_or_else(|| self.fail(id, ValueErrorKind::NoSuchTarget))?;
-                (Some(cell), make(&base))
+                let next = make(&base);
+                T::check(&cell, &next).map_err(|r| self.fail(id, ValueErrorKind::Refused(r)))?;
+                self.slots.push(Box::new(Slot::<T> {
+                    id,
+                    cell,
+                    value: next,
+                }));
             }
-        };
-        T::check(&next).map_err(|r| self.fail(id, ValueErrorKind::Refused(r)))?;
-        match (cell, staged) {
-            (Some(cell), _) => self.slots.push(Box::new(Slot::<T> {
-                id,
-                cell,
-                value: next,
-            })),
-            (None, Some(at)) => {
-                *self.slots[at]
-                    .value_mut()
-                    .downcast_mut::<T::Value>()
-                    .expect("one target id names one value type") = next;
-            }
-            (None, None) => unreachable!("a staged slot has a position"),
         }
         self.index += 1;
         Ok(())
