@@ -286,7 +286,9 @@ fn a_hand_built_io_reads_every_port_wired() {
     let rate = tutti_types::SampleRate::SR_48K;
     let mut node = tutti_graph::contract::prepared(node, rate, 16);
     let block: &[f32] = &[0.0; 16];
-    tutti_graph::contract::drive(&mut node, rate, &[block; 3], &[]);
+    let planes = [block; 3];
+    let inputs = tutti_buffers::Planes::new(&planes).unwrap();
+    tutti_graph::contract::drive(&mut node, rate, inputs, &[]);
     assert_eq!(seen.read(), (0b11, 0b11, 0b1, 0b1));
 }
 
