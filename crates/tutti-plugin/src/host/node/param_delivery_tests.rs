@@ -119,6 +119,7 @@ fn a_buffer_of_the_room_before_a_re_prepare_is_dropped_not_reused() {
     let counters = Arc::new(DeliveryCounters::default());
     let mut d = ParamDelivery::new((0..2000).map(ParamId::new), counters);
     let pool = tutti_plugin_ipc::PayloadPool::new(
+        tutti_plugin_types::SampleRate::SR_48K,
         tutti_rt::tally::<u64>().writer(),
         tutti_rt::tally::<u64>().writer(),
     );

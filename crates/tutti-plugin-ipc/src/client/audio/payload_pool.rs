@@ -14,6 +14,7 @@ use crossbeam::queue::ArrayQueue;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tutti_rt::TallyWriter;
+use tutti_types::SampleRate;
 
 /// One payload per command the audio thread can have queued.
 ///
@@ -146,11 +147,15 @@ impl PayloadPool {
     /// one. This runs once, off the RT path, where a few hundred KiB of boxes
     /// costs nothing. `refused` counts each `acquire` an empty pool refuses,
     /// and `leaked` each buffer `return_params_rt` could not keep.
-    pub fn new(refused: TallyWriter<u64>, leaked: TallyWriter<u64>) -> Self {
+    pub fn new(
+        sample_rate: SampleRate,
+        refused: TallyWriter<u64>,
+        leaked: TallyWriter<u64>,
+    ) -> Self {
         let recycle = ArrayQueue::new(POOL_CAPACITY);
         for _ in 0..POOL_CAPACITY {
             // Cannot fail: the queue was just created with this capacity.
-            let _ = recycle.push(Box::new(ProcessPayload::empty()));
+            let _ = recycle.push(Box::new(ProcessPayload::empty(sample_rate)));
         }
         Self {
             recycle: Arc::new(recycle),
@@ -273,6 +278,7 @@ mod tests {
     #[test]
     fn a_full_queue_and_both_threads_take_payloads_without_allocating() {
         let pool = PayloadPool::new(
+            SampleRate::SR_48K,
             tutti_rt::tally::<u64>().writer(),
             tutti_rt::tally::<u64>().writer(),
         );
@@ -302,6 +308,7 @@ mod tests {
         for chunk in [512usize, 4096] {
             let room = ParameterQueue::chunk_room(chunk);
             let pool = PayloadPool::new(
+                SampleRate::SR_48K,
                 tutti_rt::tally::<u64>().writer(),
                 tutti_rt::tally::<u64>().writer(),
             );
@@ -329,6 +336,7 @@ mod tests {
     #[test]
     fn the_bridge_drops_surplus_buffers_and_the_audio_thread_none() {
         let pool = PayloadPool::new(
+            SampleRate::SR_48K,
             tutti_rt::tally::<u64>().writer(),
             tutti_rt::tally::<u64>().writer(),
         );
@@ -361,7 +369,11 @@ mod tests {
     #[test]
     fn an_empty_pool_refuses_and_counts_without_allocating() {
         let refused = tutti_rt::tally::<u64>();
-        let pool = PayloadPool::new(refused.writer(), tutti_rt::tally::<u64>().writer());
+        let pool = PayloadPool::new(
+            SampleRate::SR_48K,
+            refused.writer(),
+            tutti_rt::tally::<u64>().writer(),
+        );
         let mut held = Vec::with_capacity(POOL_CAPACITY);
         for _ in 0..POOL_CAPACITY {
             held.push(pool.acquire().expect("a pooled payload"));
@@ -380,7 +392,7 @@ mod tests {
     #[test]
     fn a_buffer_with_no_room_to_return_is_counted_as_leaked() {
         let (refused, leaked) = (tutti_rt::tally::<u64>(), tutti_rt::tally::<u64>());
-        let pool = PayloadPool::new(refused.writer(), leaked.writer());
+        let pool = PayloadPool::new(SampleRate::SR_48K, refused.writer(), leaked.writer());
         while pool
             .params
             .push(ParameterChanges::reserved_bridged(1, 4))

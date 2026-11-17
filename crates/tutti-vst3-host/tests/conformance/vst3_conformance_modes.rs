@@ -219,7 +219,7 @@ fn live_realtime_prefetch_toggle_is_spec_clean() {
         *counts_cell.lock().unwrap() = counts;
     }));
 
-    let transport = TransportInfo::default();
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
     let mut failures = Vec::new();
 
     for (i, prefetch) in [false, true, true, false, true].into_iter().enumerate() {
@@ -336,7 +336,7 @@ fn plugin_observes_the_offline_mode_we_requested() {
         panic!("audio-probe failed to load offline");
     };
     let info = inst.loaded().plugin_info().clone();
-    let transport = TransportInfo::default();
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
 
     // The probe writes the point on every non-realtime block; the last is read.
     let mut reported: Option<f64> = None;

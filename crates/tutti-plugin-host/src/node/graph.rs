@@ -282,7 +282,7 @@ where
                     }
                     this.params.count_transport_dropped(over);
                 } else if phase == 0 {
-                    this.chunk_info = TransportInfo::default();
+                    this.chunk_info = TransportInfo::new(cx.env.sample_rate);
                 }
 
                 let piece_midi = this.midi.len();

@@ -998,7 +998,7 @@ mod tests {
     use tutti_plugin_types::Features;
     use tutti_plugin_types::LoadStage;
     use tutti_plugin_types::{
-        MidiEventVec, Normalized, NoteExpressionChanges, ParamId, ParameterChanges, TransportInfo,
+        MidiEventVec, Normalized, NoteExpressionChanges, ParamId, ParameterChanges,
     };
 
     fn assert_none(r: Reaction) {
@@ -1020,7 +1020,9 @@ mod tests {
     #[test]
     fn the_control_connection_refuses_a_block() {
         let mut s = Rig::new();
-        let block = HostMessage::ProcessAudio(tutti_plugin_ipc::ProcessAudioData::default());
+        let block = HostMessage::ProcessAudio(tutti_plugin_ipc::ProcessAudioData::empty(
+            tutti_plugin_types::SampleRate::SR_48K,
+        ));
         assert_error_contains(
             s.session.handle(main_thread(), block).unwrap(),
             "audio connection",
@@ -1116,7 +1118,9 @@ mod tests {
                             tutti_plugin_ipc::ProcessAudioData {
                                 seq,
                                 num_samples: FRAMES,
-                                ..Default::default()
+                                ..tutti_plugin_ipc::ProcessAudioData::empty(
+                                    tutti_plugin_types::SampleRate::SR_48K,
+                                )
                             },
                         ))
                         .unwrap();
@@ -1305,8 +1309,9 @@ mod tests {
                     midi_events: MidiEventVec::new(),
                     param_changes: ParameterChanges::new(),
                     note_expression: NoteExpressionChanges::new(),
-                    transport: TransportInfo::default(),
-                    ..Default::default()
+                    ..tutti_plugin_ipc::ProcessAudioData::empty(
+                        tutti_plugin_types::SampleRate::SR_48K,
+                    )
                 }),
                 Refusal("No plugin loaded"),
             ),
@@ -1591,7 +1596,9 @@ mod tests {
                 HostMessage::ProcessAudio(tutti_plugin_ipc::ProcessAudioData {
                     seq,
                     num_samples: F64_FRAMES,
-                    ..Default::default()
+                    ..tutti_plugin_ipc::ProcessAudioData::empty(
+                        tutti_plugin_types::SampleRate::SR_48K,
+                    )
                 }),
             )
             .unwrap()
@@ -1740,7 +1747,9 @@ mod tests {
                 HostMessage::ProcessAudio(tutti_plugin_ipc::ProcessAudioData {
                     seq: SEQ,
                     num_samples: F64_FRAMES,
-                    ..Default::default()
+                    ..tutti_plugin_ipc::ProcessAudioData::empty(
+                        tutti_plugin_types::SampleRate::SR_48K,
+                    )
                 }),
             )
             .unwrap()
@@ -1804,7 +1813,9 @@ mod tests {
                     HostMessage::ProcessAudio(tutti_plugin_ipc::ProcessAudioData {
                         seq,
                         num_samples: F64_FRAMES,
-                        ..Default::default()
+                        ..tutti_plugin_ipc::ProcessAudioData::empty(
+                            tutti_plugin_types::SampleRate::SR_48K,
+                        )
                     }),
                 )
                 .unwrap()
@@ -1867,7 +1878,9 @@ mod tests {
                     HostMessage::ProcessAudio(tutti_plugin_ipc::ProcessAudioData {
                         seq,
                         num_samples: frames,
-                        ..Default::default()
+                        ..tutti_plugin_ipc::ProcessAudioData::empty(
+                            tutti_plugin_types::SampleRate::SR_48K,
+                        )
                     }),
                 )
                 .unwrap()
@@ -1931,7 +1944,9 @@ mod tests {
                     HostMessage::ProcessAudio(tutti_plugin_ipc::ProcessAudioData {
                         seq,
                         num_samples: 256,
-                        ..Default::default()
+                        ..tutti_plugin_ipc::ProcessAudioData::empty(
+                            tutti_plugin_types::SampleRate::SR_48K,
+                        )
                     }),
                 )
                 .unwrap()
@@ -2622,8 +2637,9 @@ mod tests {
                     midi_events: MidiEventVec::new(),
                     param_changes: ParameterChanges::new(),
                     note_expression: NoteExpressionChanges::new(),
-                    transport: TransportInfo::default(),
-                    ..Default::default()
+                    ..tutti_plugin_ipc::ProcessAudioData::empty(
+                        tutti_plugin_types::SampleRate::SR_48K,
+                    )
                 }),
             )
             .unwrap()
@@ -2688,7 +2704,9 @@ mod tests {
                 HostMessage::ProcessAudio(tutti_plugin_ipc::ProcessAudioData {
                     seq,
                     num_samples: frames,
-                    ..Default::default()
+                    ..tutti_plugin_ipc::ProcessAudioData::empty(
+                        tutti_plugin_types::SampleRate::SR_48K,
+                    )
                 }),
             )
             .expect("a failed block does not end the server")
