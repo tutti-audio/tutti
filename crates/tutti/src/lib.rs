@@ -646,8 +646,8 @@ pub mod midi {
         SmpteFrameRate, SysexDeviceId, TuningFrequency, UnknownFrameRate,
     };
     pub use tutti_midi_runtime::{
-        ClockControls, ClockKind, MidiClipControls, MidiClipNode, MidiInputPorts, OffsetOutOfRange,
-        OutputLatency, OutputOffset, OutputTerms, SegmentFault,
+        ClockControls, ClockKind, ClockSends, MidiClipControls, MidiClipNode, MidiInputPorts,
+        OffsetOutOfRange, OutputLatency, OutputOffset, OutputTerms, SegmentFault,
     };
     pub use tutti_midi_runtime::{MidiKeys, MidiOut, Outgoing, SendAt, Taken, TimedMidiEvent};
     pub use tutti_ump::{

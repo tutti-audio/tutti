@@ -80,8 +80,11 @@ fn the_border_nodes_process_without_allocating() {
         )
         .controls;
     let mut out = common::sink(&mut ed, 1, &[(1, 0), (1, 3), (2, 0), (3, 0)]);
-    clock.set_enabled(true);
-    clock.set_send_flex(true);
+    clock.set_sends(tutti_midi_runtime::ClockSends {
+        timing: true,
+        flex: true,
+        ..Default::default()
+    });
     ed.commit().unwrap();
     let t = TransportPosition::new(true, Bpm::of(120.0), Beat(0.0), None);
     let mut drain = [(0, Ump([0; 4])); 256];

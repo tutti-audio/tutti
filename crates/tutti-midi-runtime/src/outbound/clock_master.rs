@@ -37,7 +37,7 @@
 //! even frame of the timeline from the wrapped beat, so a loop start that is
 //! not on an even frame leaves up to two frames with no quarter-frames.
 //! - **Set Tempo** and **Set Time Signature** (Flex Data, M2-104 §7.5.3 and
-//!   §7.5.4; off until [`ClockControls::set_send_flex`]), on the clock's Group,
+//!   §7.5.4; off until [`ClockSends::flex`]), on the clock's Group,
 //!   with or without the clock bytes enabled. Set Tempo goes out on the first
 //!   24-PPQN tick position at or after the tempo in force changes, Set Time
 //!   Signature on the first bar boundary at or after the meter in force
@@ -46,7 +46,7 @@
 //!   first bar boundary: a start from the top is both, a Continue mid-bar
 //!   states the meter at the next bar boundary, never off a boundary.
 //! - **MTC quarter-frames** (0xF1) at frame-rate×4, cycling the 8 SMPTE nibbles
-//!   (when `send_mtc` is set).
+//!   (when [`ClockSends::mtc`] is set).
 //! - **MTC Full Messages** (Real Time `01 01`, when `send_mtc` is set) on every
 //!   locate: a cue while stopped, the start from a position no cue stated, a
 //!   jump while playing and a loop wrap. The quarter-frame cycle restarts at
@@ -76,44 +76,64 @@ const START_EPSILON_BEATS: f64 = 1e-6;
 /// fresh Song Position.
 const SEEK_EPSILON_BEATS: f64 = 1e-3;
 
-/// What a control thread sets on a clock: enabled, MTC on or off, Flex tempo
-/// and meter on or off, and the SMPTE frame rate. One value in one word (an
-/// `AtomicU32`), so the audio thread reads all of them from one store, never a
-/// mix of two.
+/// What a clock sends: each kind of message on or off, set together by
+/// [`ClockControls::set_sends`]. All off by default: a clock sends nothing
+/// until a host turns on what its receiver wants.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct ClockSends {
+    /// The Beat Clock: Timing Clock (24 a quarter note), Song Position and
+    /// Start, Continue and Stop. While it is off the clock does not follow
+    /// the transport's edges and locates, and the Flex tempo and meter below
+    /// are placed on the same 24-ppqn grid and bar lines all the same.
+    pub timing: bool,
+    /// MIDI Time Code: the quarter-frames and the Full Messages of locates,
+    /// at the clock's SMPTE frame rate ([`ClockControls::set_mtc_fps`]).
+    /// Sent with the Beat Clock only: it needs `timing` too.
+    pub mtc: bool,
+    /// The Flex Data tempo and meter: a Set Tempo (M2-104 §7.5.3) when the
+    /// tempo in force changes, a Set Time Signature (§7.5.4) when the meter
+    /// does, each on the Group at the times the module docs give. The meter
+    /// is the one the clock was built over.
+    pub flex: bool,
+}
+
+/// What a control thread sets on a clock: what it sends and the SMPTE frame
+/// rate. One value in one word (an `AtomicU32`), so the audio thread reads all
+/// of them from one store, never a mix of two.
 ///
-/// Layout of the word: bit 0 is enabled, bit 1 is MTC, bit 2 is Flex, bits 8
-/// to 15 are the MTC rate's two-bit code ([`MtcRate::code`]).
+/// Layout of the word: bit 0 is the Beat Clock, bit 1 is MTC, bit 2 is Flex,
+/// bits 8 to 15 are the MTC rate's two-bit code ([`MtcRate::code`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Settings {
-    enabled: bool,
-    send_mtc: bool,
-    send_flex: bool,
+    sends: ClockSends,
     fps: MtcRate,
 }
 
 impl Settings {
-    const ENABLED: u32 = 1;
-    const SEND_MTC: u32 = 1 << 1;
-    const SEND_FLEX: u32 = 1 << 2;
+    const TIMING: u32 = 1;
+    const MTC: u32 = 1 << 1;
+    const FLEX: u32 = 1 << 2;
     const FPS_SHIFT: u32 = 8;
 
     const OFF: Self = Self {
-        enabled: false,
-        send_mtc: false,
-        send_flex: false,
+        sends: ClockSends {
+            timing: false,
+            mtc: false,
+            flex: false,
+        },
         fps: MtcRate::Fps25,
     };
 
     fn bits(self) -> u32 {
         let mut word = u32::from(self.fps.code()) << Self::FPS_SHIFT;
-        if self.enabled {
-            word |= Self::ENABLED;
+        if self.sends.timing {
+            word |= Self::TIMING;
         }
-        if self.send_mtc {
-            word |= Self::SEND_MTC;
+        if self.sends.mtc {
+            word |= Self::MTC;
         }
-        if self.send_flex {
-            word |= Self::SEND_FLEX;
+        if self.sends.flex {
+            word |= Self::FLEX;
         }
         word
     }
@@ -123,9 +143,11 @@ impl Settings {
     /// some rate instead of needing an arm that cannot run for the words that do.
     fn from_bits(word: u32) -> Self {
         Self {
-            enabled: word & Self::ENABLED != 0,
-            send_mtc: word & Self::SEND_MTC != 0,
-            send_flex: word & Self::SEND_FLEX != 0,
+            sends: ClockSends {
+                timing: word & Self::TIMING != 0,
+                mtc: word & Self::MTC != 0,
+                flex: word & Self::FLEX != 0,
+            },
             fps: MtcRate::masked((word >> Self::FPS_SHIFT) as u8),
         }
     }
@@ -158,42 +180,22 @@ pub struct ClockControls {
 }
 
 impl ClockControls {
-    /// Turn clock generation on or off. A disabled clock emits nothing at all:
-    /// [`tick`](ClockMaster::tick) returns without reading the transport.
+    /// Sets what the clock sends, all of it in one store: the audio half reads
+    /// the whole value at its next [`tick`](ClockMaster::tick), never a mix of
+    /// two calls. A clock sending nothing emits nothing at all: `tick` returns
+    /// without reading the transport.
     ///
-    /// Enabling mid-playback does not synthesise a Start: the next tick sees
-    /// a stopped clock against a playing transport and emits the Continue and
-    /// Song Position that resync the receiver.
-    pub fn set_enabled(&self, enabled: bool) {
-        self.update(|s| s.enabled = enabled);
+    /// Turning the Beat Clock on mid-playback does not synthesise a Start: the
+    /// next tick sees a stopped clock against a playing transport and emits the
+    /// Continue and Song Position that resync the receiver.
+    pub fn set_sends(&self, sends: ClockSends) {
+        self.update(|s| s.sends = sends);
     }
 
-    /// Whether clock generation is on.
+    /// What the clock sends.
     #[must_use]
-    pub fn is_enabled(&self) -> bool {
-        self.settings().enabled
-    }
-
-    /// Turn MTC quarter-frame emission on or off, independently of the 24-PPQN
-    /// Beat Clock. A receiver that wants only one is served by disabling the
-    /// other here rather than filtering downstream.
-    pub fn set_send_mtc(&self, send: bool) {
-        self.update(|s| s.send_mtc = send);
-    }
-
-    /// Turn the Flex Data tempo and meter on or off, independently of
-    /// [`set_enabled`](Self::set_enabled): a Set Tempo (M2-104 §7.5.3) when the
-    /// tempo in force changes, a Set Time Signature (§7.5.4) when the meter
-    /// does, each on the Group, at the times the module docs give. Off by
-    /// default. The meter is the one the clock was built over.
-    pub fn set_send_flex(&self, send: bool) {
-        self.update(|s| s.send_flex = send);
-    }
-
-    /// Whether the Flex tempo and meter are on.
-    #[must_use]
-    pub fn sends_flex(&self) -> bool {
-        self.settings().send_flex
+    pub fn sends(&self) -> ClockSends {
+        self.settings().sends
     }
 
     /// Sets the SMPTE frame rate the MTC quarter-frames are denominated in.
@@ -377,7 +379,7 @@ impl ClockMaster {
     /// A clock sending on `group` (every event it emits is addressed to it: a
     /// clock is the Group's, M2-104 section 7.6) and placing events at
     /// `sample_rate`: the audio half, and the controls that configure it.
-    /// Starts **disabled**; call [`ClockControls::set_enabled`] once a hardware
+    /// Starts **disabled**; call [`ClockControls::set_sends`] once a hardware
     /// output is connected.
     #[must_use]
     pub fn new(
@@ -557,11 +559,11 @@ impl ClockState {
         // later enable states them too.
         let flex_started = transport.playing && !self.flex.was_playing;
         self.flex.was_playing = transport.playing;
-        if flex_started || !settings.send_flex {
+        if flex_started || !settings.sends.flex {
             self.flex.tempo = None;
             self.flex.meter = None;
         }
-        if !settings.enabled && settings.send_flex && block_size != 0 {
+        if !settings.sends.timing && settings.sends.flex && block_size != 0 {
             // Flex alone: no clock bytes, and the clock's own edge and locate
             // state is left as it was.
             if transport.playing {
@@ -586,7 +588,7 @@ impl ClockState {
             self.prev.wrapped = false;
             return;
         }
-        if !settings.enabled || block_size == 0 {
+        if !settings.sends.timing || block_size == 0 {
             // Keep prev.playing honest so re-enabling mid-playback emits a fresh
             // Start/Continue rather than silently assuming playback was already
             // under way.
@@ -612,7 +614,7 @@ impl ClockState {
             }
             // The receiver is told where it starts from, unless a cue already
             // did; then the grid realigns to the (possibly non-zero) start beat.
-            if settings.send_mtc && !self.is_cued_at(beat) {
+            if settings.sends.mtc && !self.is_cued_at(beat) {
                 self.send_full_message(beat, transport, sample_rate, Offset::ZERO, emit);
             }
             self.prev.cued = None;
@@ -628,7 +630,7 @@ impl ClockState {
             self.prev.wrapped = false;
             // A locate while stopped is a cue: the receiver is told where the
             // transport stands by a Full Message, as no Quarter Frame runs.
-            if settings.send_mtc && !self.is_cued_at(beat) {
+            if settings.sends.mtc && !self.is_cued_at(beat) {
                 self.send_full_message(beat, transport, sample_rate, Offset::ZERO, emit);
                 self.prev.cued = Some(beat);
             }
@@ -657,7 +659,7 @@ impl ClockState {
                 Offset::ZERO,
                 self.system(System::SongPosition(song_position(beat))),
             ));
-            if settings.send_mtc {
+            if settings.sends.mtc {
                 self.send_full_message(beat, transport, sample_rate, Offset::ZERO, emit);
             }
             self.restart_mtc();
@@ -674,7 +676,7 @@ impl ClockState {
             .and_then(|l| LoopRange::new(l.start, l.end));
         let mut clock = transport.clock(sample_rate);
         // Lent once, held across every pass of the block.
-        let loan = settings.send_flex.then(|| meter.lend());
+        let loan = settings.sends.flex.then(|| meter.lend());
         let mut ends_on_wrap = false;
         for pass in clock.passes(Samples(block_size), region) {
             ends_on_wrap = pass.end == PassEnd::Wrap;
@@ -683,7 +685,7 @@ impl ClockState {
                     frame_offset(pass.start.get(), block_size),
                     self.system(System::SongPosition(song_position(pass.beat))),
                 ));
-                if settings.send_mtc {
+                if settings.sends.mtc {
                     self.send_full_message(
                         pass.beat,
                         transport,
@@ -698,7 +700,7 @@ impl ClockState {
             if let Some(loan) = &loan {
                 self.send_flex(loan, &pass, block_size, beats_per_sample, tempo, emit);
             }
-            if settings.send_mtc {
+            if settings.sends.mtc {
                 self.tick_mtc(&pass, block_size, sample_rate, beats_per_sample, emit);
             }
         }

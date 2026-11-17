@@ -158,8 +158,11 @@ fn rig(map: &Arc<TempoMap>, mtc: bool) -> Rig {
             ),
         )
         .controls;
-    master.set_enabled(true);
-    master.set_send_mtc(mtc);
+    master.set_sends(tutti_midi_runtime::ClockSends {
+        timing: true,
+        mtc,
+        ..Default::default()
+    });
     let out = std::cell::RefCell::new(common::sink(&mut ed, 1, &[(1, 0)]));
     ed.commit().expect("commits");
     let transport = Transport::new(SampleRate::of(SR));

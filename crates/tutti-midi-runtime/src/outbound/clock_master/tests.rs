@@ -77,6 +77,21 @@ impl Rig {
         self.cm.set_sample_rate(rate);
     }
 
+    /// The Beat Clock on or off, the rest of what is sent as it was.
+    fn set_enabled(&self, on: bool) {
+        let sends = self.controls.sends();
+        self.controls.set_sends(ClockSends {
+            timing: on,
+            ..sends
+        });
+    }
+
+    /// MTC on or off, the rest of what is sent as it was.
+    fn set_send_mtc(&self, on: bool) {
+        let sends = self.controls.sends();
+        self.controls.set_sends(ClockSends { mtc: on, ..sends });
+    }
+
     fn tick(&mut self, block_size: usize) {
         self.cm
             .tick(&self.transport.now(), Samples(block_size), &mut |e| {
@@ -94,7 +109,10 @@ fn master(tempo: Bpm, sample_rate: impl Into<SampleRate>) -> (Rig, Arc<TestTrans
         sample_rate.into(),
         ProjectMeter::default().reader(),
     );
-    controls.set_enabled(true);
+    controls.set_sends(ClockSends {
+        timing: true,
+        ..ClockSends::default()
+    });
     let rig = Rig {
         cm,
         controls,
@@ -944,8 +962,11 @@ fn every_event_goes_out_on_the_masters_group() {
     let group = MidiGroup::masked(5);
     let (mut cm, controls) =
         ClockMaster::new(group, SampleRate::SR_48K, ProjectMeter::default().reader());
-    controls.set_enabled(true);
-    controls.set_send_mtc(true);
+    controls.set_sends(ClockSends {
+        timing: true,
+        mtc: true,
+        flex: false,
+    });
     let transport = TestTransport::new(Bpm::of(120.0));
     transport.set_beat(8.0);
     transport.set_playing(true);
@@ -967,24 +988,20 @@ fn every_event_goes_out_on_the_masters_group() {
     }
 }
 
-/// **Every combination of the settings word reads back as written**: enabled,
-/// MTC, Flex and each frame rate, so the control side's four fields are one
-/// word the audio side decodes whole.
+/// **Every combination of the settings word reads back as written**: each
+/// `ClockSends` and each frame rate, so what the control side sets is one word
+/// the audio side decodes whole.
 #[test]
 fn the_settings_word_round_trips_every_combination() {
-    for enabled in [false, true] {
-        for send_mtc in [false, true] {
-            for send_flex in [false, true] {
-                for fps in MtcRate::ALL {
-                    let settings = Settings {
-                        enabled,
-                        send_mtc,
-                        send_flex,
-                        fps,
-                    };
-                    assert_eq!(Settings::from_bits(settings.bits()), settings);
-                }
-            }
+    for bits in 0..8u8 {
+        let sends = ClockSends {
+            timing: bits & 1 != 0,
+            mtc: bits & 2 != 0,
+            flex: bits & 4 != 0,
+        };
+        for fps in MtcRate::ALL {
+            let settings = Settings { sends, fps };
+            assert_eq!(Settings::from_bits(settings.bits()), settings);
         }
     }
 }
@@ -1163,8 +1180,11 @@ fn no_full_message_is_sent_with_mtc_off() {
 fn flex_master(clock: bool) -> (ClockMaster, ProjectMeter, Collected) {
     let meter = ProjectMeter::default();
     let (cm, controls) = ClockMaster::new(MidiGroup::FIRST, SampleRate::SR_48K, meter.reader());
-    controls.set_enabled(clock);
-    controls.set_send_flex(true);
+    controls.set_sends(ClockSends {
+        timing: clock,
+        mtc: false,
+        flex: true,
+    });
     (cm, meter, Collected::default())
 }
 
@@ -1336,8 +1356,11 @@ fn a_start_mid_bar_states_the_meter_at_the_next_bar() {
 fn no_flex_is_sent_unless_enabled() {
     let meter = ProjectMeter::default();
     let (mut cm, controls) = ClockMaster::new(MidiGroup::FIRST, SampleRate::SR_48K, meter.reader());
-    controls.set_enabled(true);
-    assert!(!controls.sends_flex());
+    controls.set_sends(ClockSends {
+        timing: true,
+        ..ClockSends::default()
+    });
+    assert!(!controls.sends().flex);
     let out = Collected::default();
     play(&mut cm, &out, 120.0, 0.0, 48_000);
     play(&mut cm, &out, 150.0, 2.0, 48_000);

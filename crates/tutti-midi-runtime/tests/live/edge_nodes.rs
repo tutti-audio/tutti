@@ -1034,7 +1034,10 @@ fn a_start_inside_a_block_clocks_from_its_frame() {
         1,
         2048,
     );
-    clock.set_enabled(true);
+    clock.set_sends(tutti_midi_runtime::ClockSends {
+        timing: true,
+        ..Default::default()
+    });
     let stopped = TransportPosition::new(false, Bpm::of(120.0), Beat(0.0), None);
     let rolling = TransportPosition::new(true, Bpm::of(120.0), Beat(0.0), None);
     let mut changes = TransportChanges::NONE;
@@ -1192,7 +1195,10 @@ fn a_clocks_fork_sends_nothing() {
         1,
         512,
     );
-    clock.set_enabled(true);
+    clock.set_sends(tutti_midi_runtime::ClockSends {
+        timing: true,
+        ..Default::default()
+    });
     let prepare = *live.prepare();
     let (_fork, mut fork_exec) = live
         .fork(ForkTarget::Master, ForkMode::Live, prepare)
@@ -1232,8 +1238,11 @@ fn a_clock_flood_past_the_port_capacity_is_counted() {
             1,
             LONG,
         );
-        clock.set_enabled(true);
-        clock.set_send_mtc(true);
+        clock.set_sends(tutti_midi_runtime::ClockSends {
+            timing: true,
+            mtc: true,
+            ..Default::default()
+        });
         let mut frame = 0usize;
         for &len in blocks {
             let beat = frame as f64 / RATE * BPM / 60.0;
@@ -1284,7 +1293,10 @@ fn a_segment_boundary_on_a_wrap_sends_the_song_position_once() {
         1,
         4096,
     );
-    clock.set_enabled(true);
+    clock.set_sends(tutti_midi_runtime::ClockSends {
+        timing: true,
+        ..Default::default()
+    });
     let looping = Some(LoopRange {
         start: Beat(1.0),
         end: Beat(1.1),
@@ -1350,7 +1362,10 @@ fn a_short_loop_in_a_long_block_is_counted_past_the_cap() {
             1,
             TOTAL,
         );
-        clock.set_enabled(true);
+        clock.set_sends(tutti_midi_runtime::ClockSends {
+            timing: true,
+            ..Default::default()
+        });
         let looping = Some(LoopRange {
             start: Beat(0.0),
             end: Beat(end),
