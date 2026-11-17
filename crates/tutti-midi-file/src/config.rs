@@ -113,7 +113,7 @@ pub enum ConfigError {
 }
 
 /// Why a container cannot hold an event ([`ConfigError::Refused`]).
-#[derive(Error, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Error, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Refusal {
     /// An SMF holds the first Group only.
