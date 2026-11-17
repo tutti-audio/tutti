@@ -9,8 +9,8 @@ use std::time::{Duration, Instant};
 use super::listener::Listener;
 
 use tutti_alsa_ffi::{
-    Blocking, CAP_READ, CAP_WRITE, Client, PROTO_MIDI1, PROTO_MIDI2, Packet, PortEntry, Read,
-    TYPE_APPLICATION, TYPE_MIDI_GENERIC, UmpVersion,
+    Blocking, Client, Event, PROTO_MIDI1, PROTO_MIDI2, Packet, PortCaps, PortEntry, PortKind, Read,
+    UmpVersion,
 };
 use tutti_fixtures::midi::{
     m1_cc, m1_note_on, note_on, per_note_pitch_bend, program_change, registered,
@@ -42,15 +42,15 @@ fn find(peer: &Client, spec: &VirtualSpec) -> Option<PortEntry> {
         .find(|p| p.client_name == spec.name().as_str())
 }
 
-fn peer(caps: u32) -> (Client, u8) {
+fn peer(caps: PortCaps) -> (Client, u8) {
     peer_in(caps, UmpVersion::Midi2)
 }
 
 /// A peer client delivered `version`.
-fn peer_in(caps: u32, version: UmpVersion) -> (Client, u8) {
+fn peer_in(caps: PortCaps, version: UmpVersion) -> (Client, u8) {
     let client = Client::open("tutti-virt-peer", Blocking::NonBlock, version).expect("a sequencer");
     let port = client
-        .open_port("peer", caps, TYPE_MIDI_GENERIC | TYPE_APPLICATION)
+        .open_port("peer", caps, PortKind::MIDI_GENERIC | PortKind::APPLICATION)
         .expect("a port");
     (client, port)
 }
@@ -68,7 +68,8 @@ fn read(peer: &Client, count: usize) -> Vec<[u32; 4]> {
     while got.len() < count {
         assert!(Instant::now() < deadline, "only {got:?} arrived");
         match peer.read_event().expect("a read") {
-            Read::Event(event) => got.push(event.ump),
+            Read::Event(Event::Ump { packet, .. }) => got.push(packet.words()),
+            Read::Event(_) => {}
             Read::Empty => std::thread::sleep(Duration::from_millis(1)),
         }
     }
@@ -81,10 +82,9 @@ fn read(peer: &Client, count: usize) -> Vec<[u32; 4]> {
 fn a_subscriber_receives_what_a_virtual_source_sends_in_order() {
     let spec = spec("source");
     let source = VirtualSource::open(&spec).expect("a virtual source");
-    let (peer, port) = peer(CAP_WRITE);
+    let (peer, port) = peer(PortCaps::WRITE);
     let found = find(&peer, &spec).expect("the source is listed");
-    peer.connect_from(port, found.client, found.port)
-        .expect("subscribes");
+    peer.connect_from(port, found.address).expect("subscribes");
 
     let sent = notes(5);
     for ump in &sent {
@@ -107,10 +107,9 @@ fn a_virtual_destination_delivers_what_a_client_sends_to_the_graph_in_order() {
     let (producer, inlet) = ports.open_input_port("virtual");
     listener.attach(inlet);
     let destination = VirtualDestination::open(&spec, producer).expect("a virtual destination");
-    let (peer, port) = peer(CAP_READ);
+    let (peer, port) = peer(PortCaps::READ);
     let found = find(&peer, &spec).expect("the destination is listed");
-    peer.connect_to(port, found.client, found.port)
-        .expect("subscribes");
+    peer.connect_to(port, found.address).expect("subscribes");
 
     let sent = notes(5);
     for ump in &sent {
@@ -134,10 +133,9 @@ fn jr_messages_a_client_sends_are_not_heard_by_an_arrival_port() {
     let (producer, inlet) = ports.open_input_port("virtual");
     listener.attach(inlet);
     let _destination = VirtualDestination::open(&spec, producer).expect("a virtual destination");
-    let (peer, port) = peer(CAP_READ);
+    let (peer, port) = peer(PortCaps::READ);
     let found = find(&peer, &spec).expect("the destination is listed");
-    peer.connect_to(port, found.client, found.port)
-        .expect("subscribes");
+    peer.connect_to(port, found.address).expect("subscribes");
 
     let clock = Ump::from(Message::Utility(Utility::JrClock(0x1234)));
     let stamp = Ump::from(Message::Utility(Utility::JrTimestamp(0x1300)));
@@ -179,7 +177,7 @@ fn the_published_endpoint_record_carries_the_protocol_and_the_blocks() {
     assert_eq!(source.protocol(), VirtualProtocol::Midi2);
     assert_eq!(destination.protocol(), VirtualProtocol::Midi2);
 
-    let (peer, _) = peer(CAP_READ);
+    let (peer, _) = peer(PortCaps::READ);
     for spec in [&source_spec, &dest_spec] {
         let record = find(&peer, spec)
             .expect("listed")
@@ -216,11 +214,10 @@ fn a_midi1_destination_reports_midi1_and_its_messages_arrive_widened() {
     let destination = VirtualDestination::open(&spec, producer).expect("a destination");
     assert_eq!(destination.protocol(), VirtualProtocol::Midi1);
 
-    let (peer, port) = peer(CAP_READ);
+    let (peer, port) = peer(PortCaps::READ);
     let found = find(&peer, &spec).expect("listed");
     assert_eq!(found.ump.as_ref().map(|e| e.protocol), Some(PROTO_MIDI1));
-    peer.connect_to(port, found.client, found.port)
-        .expect("subscribes");
+    peer.connect_to(port, found.address).expect("subscribes");
     let note = m1_note_on(MidiChannel::of(2), 60, U7::of(0x40));
     peer.send_to_subscribers(port, Packet::new(note.words()).unwrap())
         .expect("sends");
@@ -237,10 +234,9 @@ fn a_midi2_note_sent_into_a_midi1_source_arrives_as_a_midi1_note() {
     let spec = spec("narrow").with_protocol(VirtualProtocol::Midi1);
     let source = VirtualSource::open(&spec).expect("a virtual source");
     assert_eq!(source.protocol(), VirtualProtocol::Midi1);
-    let (peer, port) = peer_in(CAP_WRITE, UmpVersion::Midi1);
+    let (peer, port) = peer_in(PortCaps::WRITE, UmpVersion::Midi1);
     let found = find(&peer, &spec).expect("listed");
-    peer.connect_from(port, found.client, found.port)
-        .expect("subscribes");
+    peer.connect_from(port, found.address).expect("subscribes");
 
     source
         .send(note_on(MidiChannel::of(2), 60, 0x8100))
@@ -257,10 +253,9 @@ fn a_midi2_note_sent_into_a_midi1_source_arrives_as_a_midi1_note() {
 fn a_message_with_no_midi1_form_is_refused_by_a_midi1_source() {
     let spec = spec("noform").with_protocol(VirtualProtocol::Midi1);
     let source = VirtualSource::open(&spec).expect("a virtual source");
-    let (peer, port) = peer_in(CAP_WRITE, UmpVersion::Midi1);
+    let (peer, port) = peer_in(PortCaps::WRITE, UmpVersion::Midi1);
     let found = find(&peer, &spec).expect("listed");
-    peer.connect_from(port, found.client, found.port)
-        .expect("subscribes");
+    peer.connect_from(port, found.address).expect("subscribes");
 
     let bend = per_note_pitch_bend(MidiChannel::of(2), 60, 0x8000_0000);
     assert!(matches!(
@@ -289,10 +284,9 @@ fn a_message_with_no_midi1_form_is_refused_by_a_midi1_source() {
 fn a_program_change_with_a_bank_reaches_a_midi1_subscriber_as_bank_select_and_program() {
     let spec = spec("bank").with_protocol(VirtualProtocol::Midi1);
     let source = VirtualSource::open(&spec).expect("a virtual source");
-    let (peer, port) = peer_in(CAP_WRITE, UmpVersion::Midi1);
+    let (peer, port) = peer_in(PortCaps::WRITE, UmpVersion::Midi1);
     let found = find(&peer, &spec).expect("listed");
-    peer.connect_from(port, found.client, found.port)
-        .expect("subscribes");
+    peer.connect_from(port, found.address).expect("subscribes");
 
     let channel = MidiChannel::of(2);
     let bank = Bank {
@@ -321,10 +315,9 @@ fn a_program_change_with_a_bank_reaches_a_midi1_subscriber_as_bank_select_and_pr
 fn a_registered_controller_reaches_a_midi1_subscriber_as_the_rpn_sequence() {
     let spec = spec("rpn").with_protocol(VirtualProtocol::Midi1);
     let source = VirtualSource::open(&spec).expect("a virtual source");
-    let (peer, port) = peer_in(CAP_WRITE, UmpVersion::Midi1);
+    let (peer, port) = peer_in(PortCaps::WRITE, UmpVersion::Midi1);
     let found = find(&peer, &spec).expect("listed");
-    peer.connect_from(port, found.client, found.port)
-        .expect("subscribes");
+    peer.connect_from(port, found.address).expect("subscribes");
 
     let channel = MidiChannel::of(2);
     let cc = |n: u8, value: u8| m1_cc(channel, CCNumber::of(n), U7::of(value));
@@ -355,10 +348,9 @@ fn a_registered_controller_reaches_a_midi1_subscriber_as_the_rpn_sequence() {
 fn a_midi1_note_sent_into_a_midi2_source_arrives_widened() {
     let spec = spec("widen");
     let source = VirtualSource::open(&spec).expect("a virtual source");
-    let (peer, port) = peer(CAP_WRITE);
+    let (peer, port) = peer(PortCaps::WRITE);
     let found = find(&peer, &spec).expect("listed");
-    peer.connect_from(port, found.client, found.port)
-        .expect("subscribes");
+    peer.connect_from(port, found.address).expect("subscribes");
 
     source
         .send(m1_note_on(MidiChannel::of(2), 60, U7::of(0x40)))

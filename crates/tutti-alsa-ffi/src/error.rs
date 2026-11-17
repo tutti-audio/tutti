@@ -148,6 +148,15 @@ pub enum Error {
         #[source]
         source: std::num::TryFromIntError,
     },
+    /// A client and port the sequencer lists that no address names: a number
+    /// past its tables.
+    #[error("ALSA lists client {client} port {port}, which is no sequencer address")]
+    NotAddress {
+        /// The client number alsa-lib gave.
+        client: i32,
+        /// The port number alsa-lib gave.
+        port: i32,
+    },
     /// An allocation alsa-lib reported as made returned no record.
     #[error("ALSA {operation} made no record")]
     NoRecord {

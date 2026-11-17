@@ -7,11 +7,9 @@ use std::time::{Duration, Instant};
 use crate::DeviceOut;
 use crate::{Devices, HardwareMidiInputs};
 use tutti_alsa_ffi::Client;
-use tutti_alsa_ffi::{
-    CAP_READ, CAP_SUBS_READ, CAP_SUBS_WRITE, CAP_WRITE, TYPE_APPLICATION, TYPE_MIDI_GENERIC,
-};
+use tutti_alsa_ffi::{Address, Event, PortCaps, PortKind};
 use tutti_graph::Losses;
-use tutti_midi_device::{DeviceEvent, DeviceId, DeviceInfo, Identity};
+use tutti_midi_device::{DeviceEvent, DeviceId, DeviceInfo, EndpointId, Identity};
 use tutti_midi_runtime::DeviceWriters;
 
 /// Long enough to be a failure, not a race: the announce arrives at once.
@@ -75,8 +73,8 @@ fn plug(name: &str) -> Virtual {
         tutti_alsa_ffi::UmpVersion::Midi2,
     )
     .expect("a sequencer to open (modprobe snd-seq)");
-    let caps = CAP_READ | CAP_SUBS_READ | CAP_WRITE | CAP_SUBS_WRITE;
-    seq.open_port("port", caps, TYPE_MIDI_GENERIC | TYPE_APPLICATION)
+    let caps = PortCaps::READ | PortCaps::SUBS_READ | PortCaps::WRITE | PortCaps::SUBS_WRITE;
+    seq.open_port("port", caps, PortKind::MIDI_GENERIC | PortKind::APPLICATION)
         .expect("a port");
     Virtual(seq)
 }
@@ -261,12 +259,12 @@ fn a_port_gaining_its_capabilities_is_added_as_a_duplex() {
         tutti_alsa_ffi::UmpVersion::Midi2,
     )
     .expect("a sequencer to open (modprobe snd-seq)");
-    let kind = TYPE_MIDI_GENERIC | TYPE_APPLICATION;
-    let port = seq.open_port("port", 0, kind).expect("a port");
+    let kind = PortKind::MIDI_GENERIC | PortKind::APPLICATION;
+    let port = seq.open_port("port", PortCaps::NONE, kind).expect("a port");
     let want = format!("{name}: port");
     assert!(devices.list().iter().all(|d| d.name != want));
 
-    let caps = CAP_READ | CAP_SUBS_READ | CAP_WRITE | CAP_SUBS_WRITE;
+    let caps = PortCaps::READ | PortCaps::SUBS_READ | PortCaps::WRITE | PortCaps::SUBS_WRITE;
     seq.set_port_caps(port, caps).expect("capabilities");
     let added = info(until(&devices, added(&name)));
     assert_eq!(added.direction, tutti_midi_device::PortDirection::Duplex);
@@ -651,7 +649,7 @@ impl Pumped {
     fn over(device: Virtual, lead: Duration) -> Self {
         let inlets = tutti_midi_runtime::InputInlets::new(tutti_graph::EventCapacity::of(64), lead);
         let ports = std::sync::Arc::new(HardwareMidiInputs::new(std::sync::Arc::clone(&inlets)));
-        let id = super::enumerate::pack_id(device.0.id(), 0);
+        let id = EndpointId::from_raw(Address::of(device.0.id(), 0).into());
         let (producer, inlet) = ports.open_input_port("pump");
         let mut rig = crate::testing::Rig::over(&inlets, Instant::now());
         rig.attach(inlet);
@@ -676,8 +674,8 @@ impl Pumped {
 fn plug_legacy(name: &str) -> Virtual {
     let seq = tutti_alsa_ffi::Client::open_legacy(name, tutti_alsa_ffi::Blocking::NonBlock)
         .expect("a sequencer to open (modprobe snd-seq)");
-    let caps = CAP_READ | CAP_SUBS_READ;
-    seq.open_port("port", caps, TYPE_MIDI_GENERIC | TYPE_APPLICATION)
+    let caps = PortCaps::READ | PortCaps::SUBS_READ;
+    seq.open_port("port", caps, PortKind::MIDI_GENERIC | PortKind::APPLICATION)
         .expect("a port");
     Virtual(seq)
 }
@@ -919,7 +917,7 @@ fn dropping_an_input_does_not_wait_on_a_stuck_pump() {
 #[test]
 fn an_output_with_a_poisoned_lock_still_sends() {
     let target = plug(&unique("poisoned"));
-    let id = super::enumerate::pack_id(target.0.id(), 0);
+    let id = EndpointId::from_raw(Address::of(target.0.id(), 0).into());
     let output = super::output::connect(id).expect("the output to open");
     output.poison();
     send(&output, 0x2090_3C64, tutti_midi_runtime::SendAt::Now);
@@ -932,8 +930,10 @@ fn next_note(device: &Virtual, patience: Duration) -> Option<(u32, Instant)> {
     let deadline = Instant::now() + patience;
     while Instant::now() < deadline {
         match device.0.read_event() {
-            Ok(tutti_alsa_ffi::Read::Event(e)) if e.ump[0] >> 28 == 2 => {
-                return Some((e.ump[0], Instant::now()));
+            Ok(tutti_alsa_ffi::Read::Event(tutti_alsa_ffi::Event::Ump { packet, .. }))
+                if packet.words()[0] >> 28 == 2 =>
+            {
+                return Some((packet.words()[0], Instant::now()));
             }
             Ok(tutti_alsa_ffi::Read::Event(_)) => {}
             _ => std::thread::sleep(Duration::from_micros(500)),
@@ -951,7 +951,7 @@ fn next_note(device: &Virtual, patience: Duration) -> Option<(u32, Instant)> {
 #[test]
 fn a_scheduled_event_arrives_at_its_time_and_now_at_once() {
     let target = plug(&unique("scheduled"));
-    let id = super::enumerate::pack_id(target.0.id(), 0);
+    let id = EndpointId::from_raw(Address::of(target.0.id(), 0).into());
     let output = super::output::connect(id).expect("the output to open");
     let slack = Duration::from_millis(10);
 
@@ -977,7 +977,7 @@ fn a_scheduled_event_arrives_at_its_time_and_now_at_once() {
 #[test]
 fn events_are_delivered_by_their_times_and_a_past_time_at_once() {
     let target = plug(&unique("ordered"));
-    let id = super::enumerate::pack_id(target.0.id(), 0);
+    let id = EndpointId::from_raw(Address::of(target.0.id(), 0).into());
     let output = super::output::connect(id).expect("the output to open");
     let now = Instant::now();
     let late = now + Duration::from_secs(2);
@@ -1051,7 +1051,7 @@ fn fill(output: &super::output::AlsaOutput) -> usize {
 fn an_output_with_a_full_pool_takes_what_fits_and_does_not_wait() {
     use tutti_midi_runtime::MidiOut;
     let target = plug(&unique("pool"));
-    let id = super::enumerate::pack_id(target.0.id(), 0);
+    let id = EndpointId::from_raw(Address::of(target.0.id(), 0).into());
     let output = super::output::connect(id).expect("the output to open");
     let held = held(tutti_ump::Ump([0x2090_3C64, 0, 0, 0]));
     let batch = vec![held; 10_000];
@@ -1086,14 +1086,14 @@ fn a_scheduled_message_the_pool_cannot_hold_whole_is_refused_whole() {
     let note = held(tutti_ump::Ump([0x2090_3C64, 0, 0, 0]));
     let pool = {
         let target = plug(&unique("pool-size"));
-        let id = super::enumerate::pack_id(target.0.id(), 0);
+        let id = EndpointId::from_raw(Address::of(target.0.id(), 0).into());
         let output = super::output::connect(id).expect("the output to open");
         (0..10_000)
             .take_while(|_| !output.queue_timed(&[note]).is_none())
             .count()
     };
     let target = plug(&unique("pool-room"));
-    let id = super::enumerate::pack_id(target.0.id(), 0);
+    let id = EndpointId::from_raw(Address::of(target.0.id(), 0).into());
     let output = super::output::connect(id).expect("the output to open");
     let notes = vec![note; pool - 2];
     assert!(output.queue_timed(&notes).is_all(&notes));
@@ -1109,7 +1109,7 @@ fn a_scheduled_message_the_pool_cannot_hold_whole_is_refused_whole() {
 fn a_full_destination_refuses_a_send_at_once() {
     use tutti_midi_runtime::MidiOut;
     let target = plug(&unique("full"));
-    let id = super::enumerate::pack_id(target.0.id(), 0);
+    let id = EndpointId::from_raw(Address::of(target.0.id(), 0).into());
     let output = super::output::connect(id).expect("the output to open");
     assert!(fill(&output) > 0, "an empty destination takes some");
     assert!(
@@ -1127,7 +1127,7 @@ fn a_full_destination_refuses_a_send_at_once() {
 fn a_message_a_full_destination_cannot_start_is_refused_whole() {
     use tutti_midi_runtime::MidiOut;
     let target = plug(&unique("refused"));
-    let id = super::enumerate::pack_id(target.0.id(), 0);
+    let id = EndpointId::from_raw(Address::of(target.0.id(), 0).into());
     let output = super::output::connect(id).expect("the output to open");
     fill(&output);
     assert!(output.queue_timed(&sysex()).is_none());
@@ -1144,12 +1144,12 @@ fn a_destination_that_fills_inside_a_message_has_the_lost_tail_counted() {
     use tutti_midi_runtime::MidiOut;
     let room = {
         let target = plug(&unique("measured"));
-        let id = super::enumerate::pack_id(target.0.id(), 0);
+        let id = EndpointId::from_raw(Address::of(target.0.id(), 0).into());
         fill(&super::output::connect(id).expect("the output to open"))
     };
     assert!(room > 2, "a destination holds more than two");
     let target = plug(&unique("cut"));
-    let id = super::enumerate::pack_id(target.0.id(), 0);
+    let id = EndpointId::from_raw(Address::of(target.0.id(), 0).into());
     let output = super::output::connect(id).expect("the output to open");
     let note = now(tutti_ump::Ump([0x2090_3C64, 0, 0, 0]));
     let notes = vec![note; room - 2];
@@ -1271,8 +1271,8 @@ fn a_device_on_the_sequencer_is_negotiated_through_the_pump_and_the_output() {
             }));
             while !stop.load(Ordering::Acquire) {
                 match device.0.read_event() {
-                    Ok(Read::Event(received)) => {
-                        let Some(ump) = tutti_ump::split_stream(&received.ump).next() else {
+                    Ok(Read::Event(Event::Ump { packet, .. })) => {
+                        let Some(ump) = tutti_ump::split_stream(&packet.words()).next() else {
                             continue;
                         };
                         let Ok(message @ Message::Stream(_)) = ump.decode() else {

@@ -202,9 +202,6 @@ pub const SND_SEQ_CLIENT_UMP_MIDI_2_0: c_int = 2;
 /// `SND_SEQ_CLIENT_SYSTEM` — the kernel's own client, which owns the announce
 /// port.
 pub const SND_SEQ_CLIENT_SYSTEM: c_int = 0;
-/// `SND_SEQ_PORT_SYSTEM_ANNOUNCE` — the system client's port that sends an event
-/// whenever a client or port starts, exits or changes.
-pub const SND_SEQ_PORT_SYSTEM_ANNOUNCE: c_int = 1;
 
 /// `SND_SEQ_EVENT_START` — start a queue.
 pub const SND_SEQ_EVENT_START: c_int = 30;

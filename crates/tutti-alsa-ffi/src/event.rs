@@ -2,57 +2,41 @@
 
 use std::time::Duration;
 
+use crate::address::Address;
+use crate::client::Packet;
 use crate::sys;
 
-/// One UMP event read from a port, owned: alsa-lib's buffer is valid only
-/// until the next read, so nothing here borrows it.
+/// One event read from a port, owned: alsa-lib's buffer is valid only until
+/// the next read, so nothing here borrows it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Received {
-    /// The event's four UMP words; a message is 1 to 4 of them and the rest
-    /// are padding.
-    pub ump: [u32; 4],
-    /// When the port stamped the event, as the time since its queue started;
-    /// `None` when the port is not stamping.
-    pub stamp: Option<Duration>,
-    kind: u8,
+pub enum Event {
+    /// A UMP message.
+    Ump {
+        /// The message, its words padded with zeros to the event's fixed field.
+        packet: Packet,
+        /// When the port stamped the event, as the time since its queue
+        /// started; `None` when the port is not stamping.
+        stamp: Option<Duration>,
+    },
+    /// What the system announce port says.
+    Announce(Announced),
+    /// Any other event: the sequencer's own notice (a port subscribed to, an
+    /// Endpoint changed). Its words are not a message and are not given.
+    Notice,
 }
 
-impl Received {
+impl Event {
     /// Copies what the backend needs out of `ev`.
     pub(crate) fn from_event(ev: &sys::snd_seq_ump_event_t) -> Self {
-        Self {
-            ump: ev.ump,
-            stamp: ev
-                .real_time()
-                .map(|t| Duration::new(u64::from(t.tv_sec), t.tv_nsec)),
-            kind: ev.type_,
+        if ev.type_ == sys::SND_SEQ_EVENT_UMP_PACKET {
+            return Self::Ump {
+                packet: Packet::from_field(ev.ump),
+                stamp: ev
+                    .real_time()
+                    .map(|t| Duration::new(u64::from(t.tv_sec), t.tv_nsec)),
+            };
         }
-    }
-
-    /// Whether the event holds a UMP message in [`ump`](Self::ump). A UMP client
-    /// also reads the sequencer's own notices (a port subscribed to, an Endpoint
-    /// changed), whose words are not a message.
-    #[must_use]
-    pub fn is_ump(&self) -> bool {
-        self.kind == sys::SND_SEQ_EVENT_UMP_PACKET
-    }
-
-    /// What this event announces, if it came from the system announce port and
-    /// says a client or port started, exited or changed. The event's data
-    /// begins with the address of the client (and port) it is about.
-    #[must_use]
-    pub fn announced(&self) -> Option<Announced> {
-        let data = self.ump[0].to_ne_bytes();
-        let (client, port) = (i32::from(data[0]), i32::from(data[1]));
-        match self.kind {
-            sys::SND_SEQ_EVENT_CLIENT_START => Some(Announced::ClientStart(client)),
-            sys::SND_SEQ_EVENT_CLIENT_EXIT => Some(Announced::ClientExit(client)),
-            sys::SND_SEQ_EVENT_CLIENT_CHANGE => Some(Announced::ClientChange(client)),
-            sys::SND_SEQ_EVENT_PORT_START => Some(Announced::PortStart(client, port)),
-            sys::SND_SEQ_EVENT_PORT_EXIT => Some(Announced::PortExit(client, port)),
-            sys::SND_SEQ_EVENT_PORT_CHANGE => Some(Announced::PortChange(client, port)),
-            _ => None,
-        }
+        Announced::of(ev).map_or(Self::Notice, Self::Announce)
     }
 }
 
@@ -60,79 +44,115 @@ impl Received {
 /// it names.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Announced {
-    /// A client opened.
-    ClientStart(i32),
-    /// A client closed.
-    ClientExit(i32),
-    /// A client set its info (its name among it).
-    ClientChange(i32),
-    /// A port was created: `(client, port)`.
-    PortStart(i32, i32),
-    /// A port was deleted: `(client, port)`.
-    PortExit(i32, i32),
-    /// A port's info was set, its name or capabilities: `(client, port)`.
-    PortChange(i32, i32),
+    /// A client opened: its number.
+    ClientStart(u8),
+    /// A client closed: its number.
+    ClientExit(u8),
+    /// A client set its info (its name among it): its number.
+    ClientChange(u8),
+    /// A port was created.
+    PortStart(Address),
+    /// A port was deleted.
+    PortExit(Address),
+    /// A port's info was set, its name or capabilities.
+    PortChange(Address),
+}
+
+impl Announced {
+    /// What `ev` announces, if it says a client or port started, exited or
+    /// changed. The event's data begins with the address of the client (and
+    /// port) it is about; one that is no address is no announcement.
+    fn of(ev: &sys::snd_seq_ump_event_t) -> Option<Self> {
+        let data = ev.ump[0].to_ne_bytes();
+        let (client, port) = (data[0], data[1]);
+        let address = || Address::new(client, port);
+        match ev.type_ {
+            sys::SND_SEQ_EVENT_CLIENT_START => Some(Self::ClientStart(client)),
+            sys::SND_SEQ_EVENT_CLIENT_EXIT => Some(Self::ClientExit(client)),
+            sys::SND_SEQ_EVENT_CLIENT_CHANGE => Some(Self::ClientChange(client)),
+            sys::SND_SEQ_EVENT_PORT_START => address().map(Self::PortStart),
+            sys::SND_SEQ_EVENT_PORT_EXIT => address().map(Self::PortExit),
+            sys::SND_SEQ_EVENT_PORT_CHANGE => address().map(Self::PortChange),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn event(kind: u8, client: u8, port: u8) -> Received {
-        Received {
+    fn event(kind: u8, client: u8, port: u8) -> Event {
+        Event::from_event(&sys::snd_seq_ump_event_t {
+            type_: kind,
             ump: [u32::from_ne_bytes([client, port, 0, 0]), 0, 0, 0],
-            stamp: None,
-            kind,
-        }
+            ..Default::default()
+        })
     }
 
     /// Each announcement kind names its client, and a port kind its port too.
     #[test]
     fn an_announcement_names_its_client_and_port() {
         assert_eq!(
-            event(sys::SND_SEQ_EVENT_CLIENT_START, 130, 9).announced(),
-            Some(Announced::ClientStart(130))
+            event(sys::SND_SEQ_EVENT_CLIENT_START, 130, 9),
+            Event::Announce(Announced::ClientStart(130))
         );
         assert_eq!(
-            event(sys::SND_SEQ_EVENT_PORT_START, 130, 9).announced(),
-            Some(Announced::PortStart(130, 9))
+            event(sys::SND_SEQ_EVENT_PORT_START, 130, 9),
+            Event::Announce(Announced::PortStart(Address::of(130, 9)))
         );
         assert_eq!(
-            event(sys::SND_SEQ_EVENT_PORT_EXIT, 4, 1).announced(),
-            Some(Announced::PortExit(4, 1))
+            event(sys::SND_SEQ_EVENT_PORT_EXIT, 4, 1),
+            Event::Announce(Announced::PortExit(Address::of(4, 1)))
         );
         assert_eq!(
-            event(sys::SND_SEQ_EVENT_CLIENT_CHANGE, 4, 0).announced(),
-            Some(Announced::ClientChange(4))
+            event(sys::SND_SEQ_EVENT_CLIENT_CHANGE, 4, 0),
+            Event::Announce(Announced::ClientChange(4))
         );
         assert_eq!(
-            event(sys::SND_SEQ_EVENT_CLIENT_EXIT, 4, 0).announced(),
-            Some(Announced::ClientExit(4))
+            event(sys::SND_SEQ_EVENT_CLIENT_EXIT, 4, 0),
+            Event::Announce(Announced::ClientExit(4))
         );
         assert_eq!(
-            event(sys::SND_SEQ_EVENT_PORT_CHANGE, 4, 2).announced(),
-            Some(Announced::PortChange(4, 2))
+            event(sys::SND_SEQ_EVENT_PORT_CHANGE, 4, 2),
+            Event::Announce(Announced::PortChange(Address::of(4, 2)))
         );
     }
 
-    /// Any other event (a note, say) is no announcement, whatever its first
-    /// word holds.
+    /// Any other event (a note, say) is a notice, whatever its first word
+    /// holds, and a notice carries no words to read as music.
     #[test]
-    fn another_event_announces_nothing() {
-        assert_eq!(event(0, 130, 9).announced(), None);
-        assert_eq!(event(66, 130, 9).announced(), None);
+    fn another_event_is_a_notice_never_a_message() {
+        assert_eq!(event(6, 130, 9), Event::Notice);
+        assert_eq!(event(66, 130, 9), Event::Notice);
+        // A port announcement whose bytes are no address says nothing.
+        assert_eq!(
+            event(sys::SND_SEQ_EVENT_PORT_START, 255, 255),
+            Event::Notice
+        );
     }
 
-    /// The stamp is the event's real time as a duration, and none when the
-    /// flags say the stamp is a tick.
+    /// A UMP packet event carries its words, and the stamp is its real time as
+    /// a duration, none when the flags say the stamp is a tick.
     #[test]
-    fn a_real_time_stamp_becomes_a_duration() {
-        let mut ev = sys::snd_seq_ump_event_t::default();
+    fn a_ump_event_carries_its_words_and_real_time_stamp() {
+        let mut ev = sys::snd_seq_ump_event_t {
+            type_: sys::SND_SEQ_EVENT_UMP_PACKET,
+            ump: [0x2090_4040, 0, 0, 0],
+            ..Default::default()
+        };
         ev.time[..4].copy_from_slice(&3u32.to_ne_bytes());
         ev.time[4..].copy_from_slice(&500u32.to_ne_bytes());
         ev.flags = sys::SND_SEQ_TIME_STAMP_REAL;
-        assert_eq!(Received::from_event(&ev).stamp, Some(Duration::new(3, 500)));
+        let Event::Ump { packet, stamp } = Event::from_event(&ev) else {
+            panic!("a UMP packet event is a message");
+        };
+        assert_eq!(packet.words(), [0x2090_4040, 0, 0, 0]);
+        assert_eq!(stamp, Some(Duration::new(3, 500)));
         ev.flags = 0;
-        assert_eq!(Received::from_event(&ev).stamp, None);
+        assert!(matches!(
+            Event::from_event(&ev),
+            Event::Ump { stamp: None, .. }
+        ));
     }
 }

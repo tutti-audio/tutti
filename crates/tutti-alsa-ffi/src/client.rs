@@ -3,8 +3,9 @@
 use std::ffi::CString;
 use std::time::Duration;
 
+use crate::address::{Address, PortCaps, PortKind};
 use crate::error::{Error, Operation, Result, address_byte, check};
-use crate::event::Received;
+use crate::event::Event;
 use crate::records::{PoolRecord, PortRecord, StatusRecord};
 use crate::sys;
 
@@ -41,13 +42,24 @@ impl Packet {
         field[..words.len()].copy_from_slice(words);
         Ok(Self { words: field })
     }
+
+    /// The fixed field of a received event.
+    pub(crate) fn from_field(words: [u32; 4]) -> Self {
+        Self { words }
+    }
+
+    /// The message's four words, the rest zero.
+    #[must_use]
+    pub fn words(&self) -> [u32; 4] {
+        self.words
+    }
 }
 
 /// What [`Client::read_event`] found.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Read {
     /// One event.
-    Event(Received),
+    Event(Event),
     /// Nothing queued (`-EAGAIN`; only a non-blocking client says so).
     Empty,
 }
@@ -187,47 +199,60 @@ impl Client {
     #[cfg(feature = "testing")]
     #[doc(hidden)]
     #[must_use]
-    pub fn id(&self) -> i32 {
-        i32::from(self.id)
+    pub fn id(&self) -> u8 {
+        self.id
     }
 
-    /// Creates a port on this client with `caps` (`CAP_*`) and `kind`
-    /// (`TYPE_*`), and returns its number as an address byte.
+    /// Creates a port on this client with `caps` and `kind`, and returns its number as an address byte.
     ///
     /// # Errors
     ///
     /// `snd_seq_create_simple_port`'s code, or [`Error::Address`] for a number
     /// that is no address byte.
-    pub fn open_port(&self, name: &str, caps: u32, kind: u32) -> Result<u8> {
+    pub fn open_port(&self, name: &str, caps: PortCaps, kind: PortKind) -> Result<u8> {
         let cname = c_name(name)?;
         // SAFETY: `self.seq` is open; `cname` outlives the call.
-        let rc = unsafe { sys::snd_seq_create_simple_port(self.seq, cname.as_ptr(), caps, kind) };
+        let rc = unsafe {
+            sys::snd_seq_create_simple_port(self.seq, cname.as_ptr(), caps.bits(), kind.bits())
+        };
         address_byte("port", check(rc, Operation::CreateSimplePort)?)
     }
 
-    /// Subscribes `port` to what `src_client:src_port` sends.
+    /// Subscribes `port` to what the port at `source` sends.
     ///
     /// # Errors
     ///
     /// `snd_seq_connect_from`'s code: the address is not one that exists.
-    pub fn connect_from(&self, port: u8, src_client: i32, src_port: i32) -> Result<()> {
+    pub fn connect_from(&self, port: u8, source: Address) -> Result<()> {
         // SAFETY: `self.seq` is open; the arguments are plain integers the
         // sequencer validates.
-        let rc =
-            unsafe { sys::snd_seq_connect_from(self.seq, i32::from(port), src_client, src_port) };
+        let rc = unsafe {
+            sys::snd_seq_connect_from(
+                self.seq,
+                i32::from(port),
+                i32::from(source.client()),
+                i32::from(source.port()),
+            )
+        };
         check(rc, Operation::ConnectFrom).map(drop)
     }
 
-    /// Subscribes `dest_client:dest_port` to what `port` sends.
+    /// Subscribes the port at `dest` to what `port` sends.
     ///
     /// # Errors
     ///
     /// `snd_seq_connect_to`'s code: the address is not one that exists.
-    pub fn connect_to(&self, port: u8, dest_client: i32, dest_port: i32) -> Result<()> {
+    pub fn connect_to(&self, port: u8, dest: Address) -> Result<()> {
         // SAFETY: `self.seq` is open; the arguments are plain integers the
         // sequencer validates.
-        let rc =
-            unsafe { sys::snd_seq_connect_to(self.seq, i32::from(port), dest_client, dest_port) };
+        let rc = unsafe {
+            sys::snd_seq_connect_to(
+                self.seq,
+                i32::from(port),
+                i32::from(dest.client()),
+                i32::from(dest.port()),
+            )
+        };
         check(rc, Operation::ConnectTo).map(drop)
     }
 
@@ -238,11 +263,7 @@ impl Client {
     ///
     /// `snd_seq_connect_from`'s code.
     pub fn connect_from_announce(&self, port: u8) -> Result<()> {
-        self.connect_from(
-            port,
-            sys::SND_SEQ_CLIENT_SYSTEM,
-            sys::SND_SEQ_PORT_SYSTEM_ANNOUNCE,
-        )
+        self.connect_from(port, Address::ANNOUNCE)
     }
 
     /// Reads one event, skipping a read that succeeds with none. A blocking
@@ -271,7 +292,7 @@ impl Client {
             // which `as_ref` checks for NULL; it is copied out by value before
             // any other call.
             if let Some(ev) = unsafe { ev.as_ref() } {
-                return Ok(Read::Event(Received::from_event(ev)));
+                return Ok(Read::Event(Event::from_event(ev)));
             }
         }
     }
@@ -535,10 +556,10 @@ impl Client {
     /// The code of the call that failed.
     #[cfg(feature = "testing")]
     #[doc(hidden)]
-    pub fn set_port_caps(&self, port: u8, caps: u32) -> Result<()> {
+    pub fn set_port_caps(&self, port: u8, caps: PortCaps) -> Result<()> {
         self.edit_port(port, |info| {
             // SAFETY: `info` is a live record, filled from this client's port.
-            unsafe { sys::snd_seq_port_info_set_capability(info, caps) };
+            unsafe { sys::snd_seq_port_info_set_capability(info, caps.bits()) };
         })
     }
 }
