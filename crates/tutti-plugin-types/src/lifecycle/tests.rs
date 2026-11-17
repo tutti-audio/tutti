@@ -58,7 +58,7 @@ fn tag(effect: &Effect) -> Fx {
         Effect::RebuildMidiMapping => Fx::MidiMapping,
         Effect::RunMainThread => Fx::Main,
         Effect::RunTimer(id) => Fx::Timer(id.0),
-        Effect::ServiceFd(id) => Fx::Fd(id.0),
+        Effect::ServiceFd(id) => Fx::Fd(id.get()),
         Effect::Notify(Notice::LatencyChanged(s)) => Fx::LatencyNotice(s.0),
         Effect::Notify(Notice::TailChanged(_)) => Fx::TailNotice,
         Effect::Notify(Notice::IoChanged) => Fx::IoNotice,

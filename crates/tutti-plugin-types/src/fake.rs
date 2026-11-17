@@ -107,7 +107,7 @@ impl Call {
             }
             Self::RunMainThread => [14, 0, 0],
             Self::RunTimer(id) => [15, u64::from(id.0), 0],
-            Self::ServiceFd(id) => [16, u64::from(id.0 as u32), 0],
+            Self::ServiceFd(id) => [16, u64::from(id.get() as u32), 0],
             Self::RebuildMidiMapping => [17, 0, 0],
             Self::Reset => [18, 0, 0],
             Self::OpenEditor => [19, 0, 0],

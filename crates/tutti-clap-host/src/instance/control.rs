@@ -451,7 +451,7 @@ impl Control for ClapLoaded {
     }
 
     fn service_fd(&mut self, main: MainThreadMarker, id: FdId) {
-        self.fire_fd(main, id.0);
+        self.fire_fd(main, id.get());
     }
 
     /// Everything one main-thread pass turns into the core's requests: what
