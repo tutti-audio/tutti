@@ -48,6 +48,11 @@ pub enum PluginError {
     /// Opening / resizing the plugin editor failed.
     #[error("plugin editor error: {0}")]
     Editor(#[from] EditorError),
+    /// A bridge failure with no lean counterpart (the subprocess, the socket,
+    /// the shared memory), kept whole so widening it back to a
+    /// [`BridgeError`](crate::BridgeError) loses nothing.
+    #[error(transparent)]
+    Bridge(Box<crate::BridgeError>),
     /// Any other failure that doesn't fit the categories above.
     #[error("plugin error: {0}")]
     Other(String),

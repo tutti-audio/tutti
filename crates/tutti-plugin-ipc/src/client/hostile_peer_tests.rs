@@ -85,7 +85,7 @@ fn no_editor(
     _: &tutti_plugin_types::Load,
 ) -> tutti_plugin_types::BridgeResult<Box<dyn tutti_plugin_types::Editor>> {
     Err(tutti_plugin_types::BridgeError::LoadFailed {
-        path: path.to_path_buf(),
+        path: Some(path.to_path_buf()),
         stage: tutti_plugin_types::LoadStage::Opening,
         reason: "no editor in these tests".into(),
     })
@@ -1340,7 +1340,7 @@ fn an_under_cap_dribble_is_stopped_by_the_total_deadline() {
 /// A large state survives the round trip, in both directions.
 ///
 /// A state over `MAX_FRAME_BYTES` must travel as chunks, not fail as a *crash*
-/// (`save_state` answering "Bridge process crashed"), which would be
+/// (`save_state` answering "the bridge process crashed"), which would be
 /// indistinguishable from a segfault and lose the user's preset under a wrong
 /// explanation.
 ///

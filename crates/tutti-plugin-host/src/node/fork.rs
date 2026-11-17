@@ -219,7 +219,7 @@ where
             Some(&mut restore),
         )
         .map_err(|source| PluginForkError::Load {
-            path: self.origin.path().to_path_buf(),
+            path: Some(self.origin.path().to_path_buf()),
             source,
         })?;
         // The fork is driven through its node alone: no editor, no parameter
@@ -328,9 +328,9 @@ where
     ) -> Result<PluginNode<F>, PluginForkError> {
         Fork::of(self)
             .ok_or_else(|| PluginForkError::Load {
-                path: std::path::PathBuf::new(),
+                path: None,
                 source: tutti_plugin_types::BridgeError::LoadFailed {
-                    path: std::path::PathBuf::new(),
+                    path: None,
                     stage: tutti_plugin_types::LoadStage::Opening,
                     reason: "this node has no origin to load again".into(),
                 },

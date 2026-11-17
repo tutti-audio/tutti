@@ -153,7 +153,7 @@ mod tests {
 
         let timed_out = probe_failure(BridgeError::Timeout {
             operation: "probe".into(),
-            duration_ms: 5000,
+            after: std::time::Duration::from_secs(5),
             // Irrelevant to the blacklist verdict, which is what this asserts:
             // a probe that timed out is unusable either way.
             partial: false,
@@ -163,7 +163,7 @@ mod tests {
 
         // A load failure was the one path that recorded nothing.
         let load_failed = probe_failure(BridgeError::LoadFailed {
-            path: PathBuf::from("/plugins/Broken.vst3"),
+            path: Some(PathBuf::from("/plugins/Broken.vst3")),
             stage: tutti_plugin_types::LoadStage::Opening,
             reason: "dlopen failed".into(),
         });
@@ -243,7 +243,7 @@ mod tests {
         let path = Path::new("/plugins/Broken.vst3");
         let failure = interpret_probe(
             Err(BridgeError::LoadFailed {
-                path: path.to_path_buf(),
+                path: Some(path.to_path_buf()),
                 stage: tutti_plugin_types::LoadStage::Opening,
                 reason: "dlopen failed".into(),
             }

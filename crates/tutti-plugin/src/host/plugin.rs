@@ -230,7 +230,7 @@ impl Plugin {
             // the caller says it is there by passing the token.
             let Some(main) = main else {
                 return Err(tutti_plugin_types::BridgeError::LoadFailed {
-                    path: plugin.plugin().path().to_path_buf(),
+                    path: Some(plugin.plugin().path().to_path_buf()),
                     stage: tutti_plugin_types::LoadStage::Opening,
                     reason: "a plugin hosted in the host process loads on the main thread \
                              and needs it"

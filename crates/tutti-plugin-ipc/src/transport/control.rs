@@ -81,7 +81,7 @@ pub fn send(stream: &mut ControlStream, msg: &HostMessage) -> BridgeResult<()> {
         {
             BridgeError::Timeout {
                 operation: "send".to_string(),
-                duration_ms: SEND_TIMEOUT.as_millis() as u64,
+                after: SEND_TIMEOUT,
                 partial: true,
             }
         }
@@ -420,7 +420,7 @@ pub fn recv_resumable(
         {
             BridgeError::Timeout {
                 operation: "recv".to_string(),
-                duration_ms: timeout.as_millis() as u64,
+                after: timeout,
                 partial: partial.in_progress(),
             }
         }

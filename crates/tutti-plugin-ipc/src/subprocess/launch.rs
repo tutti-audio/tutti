@@ -311,13 +311,13 @@ impl LoadPhase {
     }
 
     /// `error` as this phase answers for it: a restore's failure is the
-    /// state's ([`BridgeError::StateRestoreError`]); an open's is its own.
+    /// state's ([`BridgeError::StateRestore`]); an open's is its own.
     fn blame(self, error: BridgeError) -> BridgeError {
         match self {
             Self::Opening => error,
-            Self::Restoring => BridgeError::StateRestoreError(format!(
-                "the plugin did not finish restoring its state: {error}"
-            )),
+            Self::Restoring => BridgeError::StateRestore {
+                cause: Box::new(error),
+            },
         }
     }
 }
@@ -356,7 +356,7 @@ fn load_plugin(
     // is one opaque plugin call with no signal inside it to measure progress by,
     // and a large state is legitimately slow to restore, so it gets a window of
     // its own. A failure from then on is the state's to answer for
-    // ([`BridgeError::StateRestoreError`]); one before it is a load failure, and
+    // ([`BridgeError::StateRestore`]); one before it is a load failure, and
     // blames nothing.
     let mut phase = LoadPhase::Opening;
     loop {
@@ -703,7 +703,7 @@ mod tests {
     }
 
     /// **A restore that never returns is the state's to answer for**: past its
-    /// window the launch fails as `StateRestoreError`. The window is 200 ms and
+    /// window the launch fails as `StateRestore`. The window is 200 ms and
     /// the plugin sleeps far past it, so the restore outlasts its window in
     /// every run. `a_restore_is_waited_on_for_its_own_window` pins that the
     /// window is `Timeouts::state_restore` once the server says it is restoring.
@@ -716,7 +716,7 @@ mod tests {
             Duration::from_millis(200),
         );
         assert!(
-            matches!(&launched, Err(BridgeError::StateRestoreError(_))),
+            matches!(&launched, Err(BridgeError::StateRestore { .. })),
             "{:?}",
             launched.as_ref().err()
         );
@@ -733,7 +733,7 @@ mod tests {
             Duration::from_secs(60),
         );
         assert!(
-            matches!(&launched, Err(BridgeError::StateRestoreError(_))),
+            matches!(&launched, Err(BridgeError::StateRestore { .. })),
             "{:?}",
             launched.as_ref().err()
         );
@@ -752,7 +752,7 @@ mod tests {
 
         let timed_out = || BridgeError::Timeout {
             operation: "a reply".into(),
-            duration_ms: 1,
+            after: Duration::from_millis(1),
             partial: false,
         };
         assert!(matches!(
@@ -761,7 +761,7 @@ mod tests {
         ));
         assert!(matches!(
             LoadPhase::Restoring.blame(timed_out()),
-            BridgeError::StateRestoreError(_)
+            BridgeError::StateRestore { cause } if matches!(*cause, BridgeError::Timeout { .. })
         ));
     }
 
@@ -776,7 +776,7 @@ mod tests {
             Duration::from_secs(60),
         );
         assert!(
-            launched.is_err() && !matches!(&launched, Err(BridgeError::StateRestoreError(_))),
+            launched.is_err() && !matches!(&launched, Err(BridgeError::StateRestore { .. })),
             "{:?}",
             launched.as_ref().err()
         );

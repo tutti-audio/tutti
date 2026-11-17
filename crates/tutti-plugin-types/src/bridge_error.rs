@@ -6,6 +6,7 @@
 //! capability traits return converts to and from it with `From`.
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use thiserror::Error;
 
@@ -20,7 +21,7 @@ use crate::{EditorError, LoadStage, PluginError, StateError};
 #[non_exhaustive]
 pub enum BridgeError {
     /// A [`Timeouts`](crate::Timeouts) with a zero deadline was configured.
-    #[error("Bridge configuration refused: {0}")]
+    #[error("the bridge configuration is refused: {0}")]
     Timeouts(#[from] crate::ZeroTimeout),
 
     /// The thread that watches the subprocess's end could not start, so the
@@ -29,14 +30,15 @@ pub enum BridgeError {
     ExitUnwatched(#[source] std::io::Error),
 
     /// The host could not reach the subprocess over its control socket.
-    #[error("Bridge connection failed: {0}")]
+    #[error("the bridge connection failed: {0}")]
     ConnectionFailed(String),
 
     /// The plugin failed to load, with the stage it reached before failing.
-    #[error("Plugin load failed at {stage} stage: {path}\n  Reason: {reason}")]
+    #[error("the plugin{} failed to load at the {stage} stage: {reason}", of_path(.path))]
     LoadFailed {
-        /// The plugin that failed to load.
-        path: PathBuf,
+        /// The plugin that failed to load; `None` when the failure came from a
+        /// loader that is handed no path (a [`PluginError::Load`]).
+        path: Option<PathBuf>,
         /// How far the load got, which narrows the cause.
         stage: LoadStage,
         /// Human-readable reason, from the loader or the plugin itself.
@@ -101,7 +103,7 @@ pub enum BridgeError {
     /// force-quit, a power loss, or an OOM kill as readily as on a real crash.
     /// The record stores the file's mtime, so a reinstall or vendor update
     /// re-admits the plugin without the host doing anything.
-    #[error("Plugin at {path} is blacklisted: {reason}")]
+    #[error("the plugin at {} is blacklisted: {reason}", path.display())]
     Blacklisted {
         /// The plugin the catalog refuses to load.
         path: std::path::PathBuf,
@@ -110,7 +112,7 @@ pub enum BridgeError {
     },
 
     /// The subprocess replied with a message the host was not waiting for.
-    #[error("Unexpected bridge message: expected {expected}, got {got}")]
+    #[error("unexpected bridge message: expected {expected}, got {got}")]
     UnexpectedMessage {
         /// The variant name the host awaited.
         expected: &'static str,
@@ -120,7 +122,7 @@ pub enum BridgeError {
 
     /// Host and subprocess speak different wire versions and refuse to proceed.
     #[error(
-        "Plugin protocol version mismatch: host speaks {expected}, subprocess speaks {got} (rebuild the plugin-server)"
+        "plugin protocol version mismatch: host speaks {expected}, subprocess speaks {got} (rebuild the plugin-server)"
     )]
     ProtocolMismatch {
         /// The host's `PROTOCOL_VERSION` (`tutti-plugin-ipc`).
@@ -130,20 +132,20 @@ pub enum BridgeError {
     },
 
     /// The control channel to the subprocess failed.
-    #[error("IPC error: {0}")]
+    #[error("the control channel failed: {0}")]
     IpcError(String),
 
     /// The shared-memory audio slab could not be created, mapped or validated.
-    #[error("Shared memory error: {0}")]
+    #[error("the shared memory failed: {0}")]
     SharedMemoryError(String),
 
     /// The subprocess did not answer within the operation's deadline.
-    #[error("Timeout after {duration_ms}ms: {operation}")]
+    #[error("{operation} timed out after {}ms", after.as_millis())]
     Timeout {
         /// What the host was waiting on.
         operation: String,
-        /// How long it waited, in milliseconds.
-        duration_ms: u64,
+        /// How long it waited.
+        after: Duration,
         /// Whether the deadline expired **part-way through a frame**, leaving
         /// bytes of it consumed.
         ///
@@ -158,36 +160,48 @@ pub enum BridgeError {
     },
 
     /// The subprocess died. Any plugin state it held is gone.
-    #[error("Bridge process crashed")]
+    #[error("the bridge process crashed")]
     ProcessCrashed,
 
-    /// The plugin could not serialize its state.
-    #[error("Failed to save plugin state: {0}")]
-    StateSaveError(String),
+    /// The plugin's state could not be saved or restored, for the reason the
+    /// [`StateError`] names.
+    #[error("plugin state failed: {0}")]
+    State(#[from] StateError),
 
-    /// The plugin rejected a state chunk it was asked to restore.
-    #[error("Failed to restore plugin state: {0}")]
-    StateRestoreError(String),
+    /// A launch's staged state did not finish restoring: the server began the
+    /// restore and the bridge failed while waiting on it. `cause` is the
+    /// failure itself. A failure before the restore began is a load failure.
+    #[error("the plugin did not finish restoring its state: {cause}")]
+    StateRestore {
+        /// The bridge failure the restore ended in.
+        #[source]
+        cause: Box<BridgeError>,
+    },
 
     /// The plugin failed while processing audio.
-    #[error("Plugin process error: {0}")]
+    #[error("the plugin failed processing: {0}")]
     ProcessError(String),
 
     /// The plugin's editor could not be opened, embedded or closed.
-    #[error("Plugin editor error: {0}")]
-    EditorError(String),
+    #[error("the plugin editor failed: {0}")]
+    Editor(#[from] EditorError),
+
+    /// A failure a format loader reported that fits no other variant
+    /// ([`PluginError::Other`]).
+    #[error("the plugin failed: {0}")]
+    Other(String),
 
     /// A message could not be framed, encoded or decoded.
-    #[error("Protocol error: {0}")]
+    #[error("the wire protocol failed: {0}")]
     ProtocolError(String),
 
     /// An underlying I/O operation failed.
-    #[error("IO error: {0}")]
+    #[error("an I/O operation failed: {0}")]
     Io(#[from] std::io::Error),
 
     /// A wire message could not be postcard-encoded or -decoded; carries the
     /// codec's message.
-    #[error("Serialization error: {0}")]
+    #[error("a wire message failed to encode or decode: {0}")]
     Serialization(String),
 }
 
@@ -219,10 +233,11 @@ pub enum PluginForkError {
     SaveState(#[source] StateError),
 
     /// A fresh instance of the same plugin did not load.
-    #[error("a fresh instance of {} did not load: {source}", path.display())]
+    #[error("a fresh instance{} did not load: {source}", of_path(.path))]
     Load {
-        /// The plugin file the live instance was loaded from.
-        path: PathBuf,
+        /// The plugin file the live instance was loaded from; `None` when the
+        /// instance has no origin to name.
+        path: Option<PathBuf>,
         /// Why the load failed.
         #[source]
         source: BridgeError,
@@ -251,25 +266,36 @@ pub enum PluginForkError {
     OffMainThread,
 }
 
+/// Renders ` at <path>` for a load failure that knows its plugin, nothing for
+/// one that does not.
+fn of_path(path: &Option<PathBuf>) -> String {
+    path.as_ref()
+        .map_or_else(String::new, |p| format!(" at {}", p.display()))
+}
+
 /// Widens the lean [`PluginError`] a format loader returns into a
-/// `BridgeError`, keeping the message and load stage.
+/// `BridgeError`, keeping every payload.
 ///
-/// A [`PluginError::Load`] becomes [`BridgeError::LoadFailed`] with an empty
-/// `path`.
+/// A [`PluginError::Load`] becomes [`BridgeError::LoadFailed`] with no `path`:
+/// the loader names none. A state failure keeps its [`StateError`] (a bare
+/// [`PluginError::State`] message is a plugin's refusal,
+/// [`StateError::Rejected`]); a [`PluginError::Bridge`] unwraps to the
+/// `BridgeError` it carried.
 impl From<PluginError> for BridgeError {
     fn from(e: PluginError) -> Self {
         match e {
             PluginError::Load { stage, reason } => BridgeError::LoadFailed {
-                path: PathBuf::new(),
+                path: None,
                 stage,
                 reason,
             },
-            PluginError::State(msg) => BridgeError::StateSaveError(msg),
-            PluginError::StateFailed(err) => BridgeError::StateSaveError(err.to_string()),
+            PluginError::State(msg) => BridgeError::State(StateError::Rejected(msg)),
+            PluginError::StateFailed(err) => BridgeError::State(err),
             PluginError::Process(msg) => BridgeError::ProcessError(msg),
-            PluginError::Block(why) => BridgeError::ProcessError(why.to_string()),
-            PluginError::Editor(err) => BridgeError::EditorError(err.to_string()),
-            PluginError::Other(msg) => BridgeError::ProcessError(msg),
+            PluginError::Block(why) => BridgeError::ProcessError(why.to_owned()),
+            PluginError::Editor(err) => BridgeError::Editor(err),
+            PluginError::Bridge(err) => *err,
+            PluginError::Other(msg) => BridgeError::Other(msg),
         }
     }
 }
@@ -277,18 +303,18 @@ impl From<PluginError> for BridgeError {
 /// Narrows a `BridgeError` into the lean [`PluginError`] a format loader
 /// returns.
 ///
-/// The IPC-only variants (`ServerNotFound`, `ProtocolMismatch`, `IpcError`, …)
-/// collapse into [`PluginError::Other`], preserving their `Display` text.
+/// A variant the lean type has a counterpart for keeps its payload; every other
+/// (`ServerNotFound`, `ProtocolMismatch`, `IpcError`, ...) travels whole as
+/// [`PluginError::Bridge`], so widening it again returns the same value.
 impl From<BridgeError> for PluginError {
     fn from(e: BridgeError) -> Self {
         match e {
             BridgeError::LoadFailed { stage, reason, .. } => PluginError::Load { stage, reason },
-            BridgeError::StateSaveError(msg) | BridgeError::StateRestoreError(msg) => {
-                PluginError::State(msg)
-            }
+            BridgeError::State(err) => PluginError::StateFailed(err),
             BridgeError::ProcessError(msg) => PluginError::Process(msg),
-            BridgeError::EditorError(msg) => PluginError::Editor(EditorError::PluginError(msg)),
-            other => PluginError::Other(other.to_string()),
+            BridgeError::Editor(err) => PluginError::Editor(err),
+            BridgeError::Other(msg) => PluginError::Other(msg),
+            other => PluginError::Bridge(Box::new(other)),
         }
     }
 }
@@ -300,7 +326,7 @@ impl BridgeError {
     #[must_use]
     pub fn load_from_server(path: &std::path::Path, message: String) -> Self {
         Self::LoadFailed {
-            path: path.to_path_buf(),
+            path: Some(path.to_path_buf()),
             stage: LoadStage::Opening,
             reason: message,
         }
@@ -311,114 +337,109 @@ impl BridgeError {
 mod tests {
     use super::*;
 
-    /// Every `PluginError` a trait method can return must survive the widening
-    /// into `BridgeError` with its payload intact. The load stage matters most:
-    /// it is what the host reports to the user, and the conversion rebuilds the
-    /// variant field by field rather than forwarding it.
+    /// A state failure converted through `From<PluginError>` stays a state
+    /// failure with its typed cause, and converts back to the same
+    /// `StateError`; a flattening to text would leave `Busy` unrecoverable.
     #[test]
-    fn widening_a_plugin_error_keeps_its_payload() {
-        let widened = BridgeError::from(PluginError::Load {
+    fn a_state_failure_keeps_its_typed_cause_both_ways() {
+        let stalled = StateError::Stalled {
+            bytes: 7,
+            after: Duration::from_millis(250),
+        };
+        match BridgeError::from(PluginError::StateFailed(stalled.clone())) {
+            BridgeError::State(err) => assert_eq!(err, stalled),
+            other => panic!("expected State, got {other:?}"),
+        }
+        assert!(matches!(
+            BridgeError::from(PluginError::State("truncated".into())),
+            BridgeError::State(StateError::Rejected(m)) if m == "truncated"
+        ));
+        match PluginError::from(BridgeError::State(StateError::Busy)) {
+            PluginError::StateFailed(StateError::Busy) => {}
+            other => panic!("expected StateFailed(Busy), got {other:?}"),
+        }
+    }
+
+    /// A load error widens with stage and reason intact and no invented path.
+    #[test]
+    fn widening_a_load_error_names_no_path() {
+        match BridgeError::from(PluginError::Load {
             stage: LoadStage::Factory,
             reason: "no factory entry point".into(),
-        });
-        match widened {
-            BridgeError::LoadFailed { stage, reason, .. } => {
+        }) {
+            BridgeError::LoadFailed {
+                path,
+                stage,
+                reason,
+            } => {
+                assert_eq!(path, None);
                 assert_eq!(stage, LoadStage::Factory);
                 assert_eq!(reason, "no factory entry point");
             }
             other => panic!("expected LoadFailed, got {other:?}"),
         }
+    }
 
+    /// Process, editor and other failures keep their own variant, and the
+    /// editor error stays typed.
+    #[test]
+    fn process_editor_and_other_failures_keep_their_variant() {
         assert!(matches!(
             BridgeError::from(PluginError::Process("underrun".into())),
             BridgeError::ProcessError(m) if m == "underrun"
         ));
         assert!(matches!(
-            BridgeError::from(PluginError::State("truncated".into())),
-            BridgeError::StateSaveError(m) if m == "truncated"
+            BridgeError::from(PluginError::Other("odd".into())),
+            BridgeError::Other(m) if m == "odd"
         ));
-
-        // The editor arm is the lossy one going out: `BridgeError` has no
-        // structured editor error, so the typed variant is flattened with
-        // `to_string()` and only its Display text crosses. Assert against the
-        // variant's own Display rather than a copied literal, so rewording the
-        // `#[error(...)]` cannot leave this passing on a stale string.
-        let crashed = EditorError::PluginCrashed;
-        match BridgeError::from(PluginError::Editor(crashed)) {
-            BridgeError::EditorError(msg) => {
-                assert_eq!(msg, EditorError::PluginCrashed.to_string())
-            }
-            other => panic!("expected EditorError, got {other:?}"),
-        }
-        // A variant carrying a field must keep that field's text in the message.
-        match BridgeError::from(PluginError::Editor(EditorError::GuiNotSupported {
+        let widened = BridgeError::from(PluginError::Editor(EditorError::GuiNotSupported {
             format: "vst3".into(),
-        })) {
-            BridgeError::EditorError(msg) => assert!(
-                msg.contains("vst3"),
-                "the flattened message dropped the format: {msg:?}"
-            ),
-            other => panic!("expected EditorError, got {other:?}"),
-        }
+        }));
+        assert!(matches!(
+            &widened,
+            BridgeError::Editor(EditorError::GuiNotSupported { format }) if format == "vst3"
+        ));
+        assert!(matches!(
+            PluginError::from(widened),
+            PluginError::Editor(EditorError::GuiNotSupported { .. })
+        ));
     }
 
-    /// Narrowing back is deliberately lossy in two places, and both are the
-    /// point of the test rather than an accident to be tolerated.
+    /// A bridge-only variant narrows to `PluginError::Bridge` and widens back
+    /// to the same variant, so nothing is flattened to text on the way.
     #[test]
-    fn narrowing_a_bridge_error_collapses_only_where_it_must() {
-        // A load error round-trips: stage and reason are the two fields the
-        // lean type also carries.
-        let narrowed = PluginError::from(BridgeError::LoadFailed {
-            path: PathBuf::from("/x.vst3"),
+    fn a_bridge_only_failure_round_trips_whole() {
+        let narrowed = PluginError::from(BridgeError::ProcessCrashed);
+        assert!(matches!(
+            narrowed,
+            PluginError::Bridge(ref b) if matches!(**b, BridgeError::ProcessCrashed)
+        ));
+        assert!(matches!(
+            BridgeError::from(narrowed),
+            BridgeError::ProcessCrashed
+        ));
+    }
+
+    /// A load failure round-trips its stage and reason, and its message names
+    /// the path only when there is one.
+    #[test]
+    fn a_load_failure_names_its_path_only_when_it_has_one() {
+        let with = BridgeError::load_from_server(std::path::Path::new("/x.vst3"), "refused".into());
+        assert!(with.to_string().contains("/x.vst3"), "{with}");
+        let without = BridgeError::from(PluginError::Load {
             stage: LoadStage::Activation,
             reason: "refused".into(),
         });
-        match narrowed {
+        assert_eq!(
+            without.to_string(),
+            "the plugin failed to load at the activating stage: refused"
+        );
+        match PluginError::from(with) {
             PluginError::Load { stage, reason } => {
-                assert_eq!(stage, LoadStage::Activation);
+                assert_eq!(stage, LoadStage::Opening);
                 assert_eq!(reason, "refused");
             }
             other => panic!("expected Load, got {other:?}"),
-        }
-
-        // Save and restore are two BridgeError variants but one PluginError
-        // variant, so the direction of a state failure is not recoverable from
-        // the narrowed value — only its message is.
-        for e in [
-            BridgeError::StateSaveError("boom".into()),
-            BridgeError::StateRestoreError("boom".into()),
-        ] {
-            assert!(
-                matches!(PluginError::from(e), PluginError::State(m) if m == "boom"),
-                "both state directions must narrow to PluginError::State"
-            );
-        }
-
-        // The IPC-only variants have no lean counterpart at all and collapse
-        // into `Other` — carrying their Display text, which is the only thing
-        // that survives and so the only thing worth asserting.
-        let crashed = PluginError::from(BridgeError::ProcessCrashed);
-        match crashed {
-            PluginError::Other(msg) => assert_eq!(msg, BridgeError::ProcessCrashed.to_string()),
-            other => panic!("expected Other, got {other:?}"),
-        }
-        assert!(matches!(
-            PluginError::from(BridgeError::ServerNotFound),
-            PluginError::Other(_)
-        ));
-
-        // Coming back, every editor failure re-enters as
-        // `EditorError::PluginError` regardless of what it was on the way out —
-        // the round trip is not idempotent, and this is where that is visible.
-        // `PluginCrashed` in, `PluginError(<its text>)` out.
-        let there_and_back = PluginError::from(BridgeError::from(PluginError::Editor(
-            EditorError::PluginCrashed,
-        )));
-        match there_and_back {
-            PluginError::Editor(EditorError::PluginError(msg)) => {
-                assert_eq!(msg, EditorError::PluginCrashed.to_string());
-            }
-            other => panic!("expected Editor(PluginError), got {other:?}"),
         }
     }
 }

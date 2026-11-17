@@ -132,7 +132,7 @@ fn run(
         (Ok(None), Waited::TimedOut) => {
             return Err(BridgeError::Timeout {
                 operation: "probe".into(),
-                duration_ms: timeout.as_millis() as u64,
+                after: timeout,
                 partial: false,
             }
             .into());

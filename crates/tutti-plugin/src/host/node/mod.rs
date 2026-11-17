@@ -101,7 +101,6 @@ pub(crate) use capability_view::is_declined;
 
 use crate::host::loadable::Loadable;
 use crate::host::plugin_ref::PluginRef;
-use std::path::PathBuf;
 use std::sync::Arc;
 use tutti_graph::{IntoNode, Node, NodeParts, Shape};
 use tutti_plugin_host::{
@@ -315,7 +314,7 @@ impl PluginClient<Unbound> {
         let loaded = ipc.loaded().clone();
         let rate = ipc.rate();
         let failed = |reason: String| BridgeError::LoadFailed {
-            path: PathBuf::new(),
+            path: None,
             stage: LoadStage::Activation,
             reason,
         };

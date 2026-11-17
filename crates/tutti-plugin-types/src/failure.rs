@@ -191,7 +191,7 @@ mod tests {
         ));
         let late = PluginFailure::from_stream(BridgeError::Timeout {
             operation: "x".into(),
-            duration_ms: 5,
+            after: std::time::Duration::from_millis(5),
             partial: false,
         });
         assert!(matches!(late, PluginFailure::TimedOut { .. }));
