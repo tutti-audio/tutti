@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use tutti_codec::Wave;
 use tutti_measure::{Measure, Meter};
-use tutti_types::{ChannelLayout, ChannelTopology, SampleRate};
+use tutti_types::{ChannelLayout, ChannelTopology, SampleRate, Samples};
 
 pub use feed::{AudioContext, AudioInput};
 use feed::{Bind, Chunk, View};
@@ -26,7 +26,7 @@ use crate::job::{Cancel, sealed};
 use crate::{AppKey, Clock, Job, JobKind, Session, WaitError, WorkerError};
 
 /// Frames decoded, and pushed to the meter, at a time.
-const CHUNK_FRAMES: usize = 16_384;
+const CHUNK_FRAMES: Samples = Samples(16_384);
 
 /// The audio an analysis reads: a wave in memory or a file on disk.
 ///
@@ -143,6 +143,9 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// not held in memory. Dropping the [`Job`] cancels the analysis between
     /// chunks.
     ///
+    /// The analysis reads `f32` (`A: Measure` is `Measure<f32>`): a [`Wave`] and
+    /// a decoded file both hold `f32`.
+    ///
     /// The analysis is generic, never boxed: [`Meter`] is not object-safe.
     ///
     /// # Errors
@@ -175,21 +178,21 @@ impl<K: AppKey, C: Clock> Session<K, C> {
 }
 
 /// Where the chunks come from.
-enum Reader {
+enum Reader<'w> {
     Wave {
-        wave: Arc<Wave>,
-        at: usize,
+        wave: &'w Wave,
+        at: Samples,
     },
     #[cfg(codec)]
     File(Box<tutti_codec::FileIn>),
 }
 
-impl Reader {
-    fn open(audio: &Audio) -> Result<Self, AnalyzeError> {
+impl<'w> Reader<'w> {
+    fn open(audio: &'w Audio) -> Result<Self, AnalyzeError> {
         Ok(match audio {
             Audio::Wave(wave) => Self::Wave {
-                wave: Arc::clone(wave),
-                at: 0,
+                wave,
+                at: Samples::ZERO,
             },
             #[cfg(codec)]
             Audio::File(path) => Self::File(Box::new(tutti_codec::FileIn::open(path)?)),
@@ -213,24 +216,19 @@ impl Reader {
     }
 
     /// Fills `chunk` with the next frames; it is left empty at the end.
-    fn next(&mut self, chunk: &mut Chunk) -> Result<(), AnalyzeError> {
+    fn next(&mut self, chunk: &mut Chunk<'w>) -> Result<(), AnalyzeError> {
         match self {
             Self::Wave { wave, at } => {
-                let frames = CHUNK_FRAMES.min(wave.len().get() - *at);
-                let width = wave.channels();
-                let out = chunk.fill(frames);
-                for channel in 0..width {
-                    let plane = &wave.channel(channel)[*at..*at + frames];
-                    for (frame, &sample) in plane.iter().enumerate() {
-                        out[frame * width + channel] = sample;
-                    }
-                }
-                *at += frames;
+                let wave: &'w Wave = wave;
+                let frames = CHUNK_FRAMES.min(Samples(wave.len().get() - at.get()));
+                let span = at.get()..at.get() + frames.get();
+                chunk.hold_planes((0..wave.channels()).map(|c| &wave.channel(c)[span.clone()]));
+                *at = Samples(span.end);
             }
             #[cfg(codec)]
             Self::File(file) => {
                 let filled = file.fill_sequential_interleaved(chunk.fill(CHUNK_FRAMES))?;
-                chunk.truncate(filled.get());
+                chunk.truncate(filled);
             }
         }
         Ok(())

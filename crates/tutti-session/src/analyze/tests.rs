@@ -12,7 +12,9 @@ use tutti_measure::{
 };
 use tutti_types::{Amplitude, Db, Hz, SampleRate, Samples, Seconds};
 
-use super::{Analyze, AnalyzeError, CHUNK_FRAMES};
+use super::{Analyze, AnalyzeError};
+
+const CHUNK_FRAMES: usize = super::CHUNK_FRAMES.get();
 use crate::{DetachedSession, Job, Session};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -261,4 +263,70 @@ fn a_job_that_is_not_dropped_pushes_every_chunk() {
     let wave = Wave::from_samples(RATE, &vec![0.0; 2 * CHUNK_FRAMES + 1]);
     let job = s.analyze(wave, Counting(std::sync::Arc::clone(&pushed)));
     assert_eq!(land(&mut s, &job).unwrap(), 3);
+}
+
+/// An analysis that reads a stereo pair as planes and keeps each channel's peak.
+struct ChannelPeaks;
+
+struct ChannelPeaksMeter([f32; 2]);
+
+impl tutti_measure::Measure for ChannelPeaks {
+    type Context = ();
+    type Meter = ChannelPeaksMeter;
+
+    fn measure(&self, (): ()) -> tutti_measure::Result<ChannelPeaksMeter> {
+        Ok(ChannelPeaksMeter([0.0; 2]))
+    }
+}
+
+impl Meter for ChannelPeaksMeter {
+    type Input<'a> = tutti_buffers::StereoPlanes<'a>;
+    type Item = ();
+    type Output = [f32; 2];
+
+    fn push(
+        &mut self,
+        input: Self::Input<'_>,
+        _: &mut impl Extend<()>,
+    ) -> tutti_measure::Result<()> {
+        for (peak, channel) in self.0.iter_mut().zip(0..2) {
+            let plane = input.plane(channel);
+            *peak = plane.iter().fold(*peak, |m, x| m.max(x.abs()));
+        }
+        Ok(())
+    }
+
+    fn finish(self) -> [f32; 2] {
+        self.0
+    }
+}
+
+#[test]
+fn a_stereo_wave_reads_each_channels_peak_through_its_own_planes() {
+    let mut s = session();
+    let mut wave = Wave::new(2, RATE);
+    for frame in 0..(2 * CHUNK_FRAMES + 5) {
+        let (left, right) = match frame {
+            3 => (0.5, 0.0),
+            f if f == CHUNK_FRAMES + 9 => (0.0, -0.25),
+            _ => (0.0, 0.0),
+        };
+        wave.push_frame(&[left, right]);
+    }
+    let job = s.analyze(wave, ChannelPeaks);
+    assert_eq!(land(&mut s, &job).unwrap(), [0.5, 0.25]);
+}
+
+#[cfg(codec)]
+#[test]
+fn a_stereo_file_reads_each_channels_peak_through_deinterleaved_planes() {
+    let mut s = session();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("planes.wav");
+    let mut samples = vec![0.0f32; 2 * (CHUNK_FRAMES + 20)];
+    samples[2 * 7] = 0.5;
+    samples[2 * (CHUNK_FRAMES + 11) + 1] = -0.25;
+    write(&path, RATE, 2, &samples);
+    let job = s.analyze(path, ChannelPeaks);
+    assert_eq!(land(&mut s, &job).unwrap(), [0.5, 0.25]);
 }
