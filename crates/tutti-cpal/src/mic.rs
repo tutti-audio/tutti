@@ -47,7 +47,7 @@ use std::sync::Arc;
 use cpal::traits::{DeviceTrait, StreamTrait};
 
 use tutti_buffers::Fold;
-use tutti_buffers::{InterleavedMut, Pull, Source};
+use tutti_buffers::{Interleaved, InterleavedMut, Pull, Source};
 use tutti_codec::{FileOut, Format, Spec};
 use tutti_graph::{InletRing, TapReader, TapWriter};
 use tutti_rt::Drained;
@@ -471,10 +471,8 @@ impl Source for MicIn {
 struct Capture {
     /// The selection: destination channel `i` is device input `inputs[i]`.
     select: Fold,
-    /// The device's interleave stride.
-    stride: usize,
-    /// One device frame as `f32`.
-    frame: Vec<f32>,
+    /// A chunk of device frames as `f32`, [`CHUNK_FRAMES`] of them.
+    device: Vec<f32>,
     /// A chunk of selected frames, [`CHUNK_FRAMES`] of them.
     chunk: Vec<f32>,
     /// The recording ring's writer.
@@ -485,13 +483,12 @@ struct Capture {
 
 impl Capture {
     fn new(select: Fold, device: ChannelLayout, rec: TapWriter, mon: Option<TapWriter>) -> Self {
-        let stride = usize::from(device.count()).max(1);
-        let width = usize::from(select.dst_layout().count());
+        let frames = Samples(CHUNK_FRAMES);
+        let selected = select.dst_layout();
         Self {
             select,
-            stride,
-            frame: vec![0.0; stride],
-            chunk: vec![0.0; CHUNK_FRAMES * width],
+            device: vec![0.0; frames.interleaved_len(device)],
+            chunk: vec![0.0; frames.interleaved_len(selected)],
             rec,
             mon,
         }
@@ -506,20 +503,24 @@ impl Capture {
         T: cpal::SizedSample,
         f32: cpal::FromSample<T>,
     {
-        let width = usize::from(self.select.dst_layout().count());
-        for run in data.chunks(self.stride * CHUNK_FRAMES) {
-            let mut frames = 0;
-            for (device, selected) in run
-                .chunks_exact(self.stride)
-                .zip(self.chunk.chunks_exact_mut(width))
-            {
-                for (slot, s) in self.frame.iter_mut().zip(device) {
-                    *slot = s.to_sample();
-                }
-                self.select.frame(&self.frame, selected);
-                frames += 1;
+        let device = self.select.src_layout();
+        let selected = self.select.dst_layout();
+        let whole = Samples::from_interleaved_len(data.len(), device).interleaved_len(device);
+        let run_len = Samples(CHUNK_FRAMES).interleaved_len(device).max(1);
+        for run in data[..whole].chunks(run_len) {
+            let frames = Samples::from_interleaved_len(run.len(), device);
+            let held = &mut self.device[..run.len()];
+            for (slot, s) in held.iter_mut().zip(run) {
+                *slot = s.to_sample();
             }
-            let pushed = &self.chunk[..frames * width];
+            let pushed = &mut self.chunk[..frames.interleaved_len(selected)];
+            // The chunks are sized to the run, so the views agree in width and frames.
+            let folded = Interleaved::new(held, device).and_then(|src| {
+                let dst = InterleavedMut::new(&mut *pushed, selected)?;
+                self.select.fold(src, dst)
+            });
+            debug_assert!(folded.is_ok(), "the capture chunks are sized to the run");
+            let pushed = &*pushed;
             self.rec.push_interleaved(pushed);
             // The monitor ring is shallow (~10ms) so it never builds a backlog
             // of latency, and a full one drops this chunk (the graph consumer

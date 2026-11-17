@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use tutti_rt::LockExt;
+use tutti_types::Samples;
 
 use crate::callback::OutputBlock;
 use crate::faults::{BackendErrorKind, StreamFaults};
@@ -119,8 +120,8 @@ impl ManualStream {
     }
 
     fn render_block_inner(&self, frames: usize, delay: Option<Duration>) -> Option<Vec<f32>> {
-        let channels = self.with_block(|b| b.channels())?;
-        let mut out = vec![0.0f32; frames * channels];
+        let layout = self.with_block(|b| b.layout())?;
+        let mut out = vec![0.0f32; Samples(frames).interleaved_len(layout)];
         self.with_block(|b| b.render_delayed_with(&mut out, delay, |x| x))?;
         if let Some(faults) = self.faults.lock_recover().as_ref() {
             faults.delivered();

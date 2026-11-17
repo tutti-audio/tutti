@@ -349,9 +349,14 @@ impl<F: Float> TapReader<F> {
         if width == 0 {
             return Samples(0);
         }
-        let frames = self.available().get().min(out.len() / width);
+        let layout = self.layout();
+        let frames = self
+            .available()
+            .min(Samples::from_interleaved_len(out.len(), layout));
+        let whole = frames.interleaved_len(layout);
+        let frames = frames.get();
         for (channel, lane) in self.lanes.iter_mut().enumerate() {
-            let plane = &mut out[..frames * width];
+            let plane = &mut out[..whole];
             let mut at = channel;
             lane.pop_each(frames, |sample| {
                 plane[at] = sample;
@@ -542,5 +547,18 @@ mod tests {
         assert_eq!(reader.pop_into(&mut out), Samples(FRAMES));
         assert_eq!(out, block);
         assert_ne!(f64::from(block[0] as f32), block[0]);
+    }
+
+    /// A stereo pop writes frame `i` as `[left_i, right_i]` and stops at whole
+    /// frames: a seven-sample buffer takes three frames and leaves its seventh
+    /// sample as it was.
+    #[test]
+    fn a_stereo_pop_interleaves_in_lane_order_and_leaves_a_partial_tail() {
+        let (mut reader, mut writer) = TapReader::<f32>::pair(2, Samples(16));
+        writer.push_interleaved(&[1.0, -1.0, 2.0, -2.0, 3.0, -3.0, 4.0, -4.0]);
+        let mut out = [9.0f32; 7];
+        assert_eq!(reader.pop_into(&mut out), Samples(3));
+        assert_eq!(out, [1.0, -1.0, 2.0, -2.0, 3.0, -3.0, 9.0]);
+        assert_eq!(reader.available(), Samples(1), "the fourth frame stays");
     }
 }

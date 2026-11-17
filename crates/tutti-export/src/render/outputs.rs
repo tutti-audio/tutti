@@ -294,7 +294,7 @@ fn open_lanes(
             tap,
             layout,
             placement,
-            scratch: vec![0.0; max_block * usize::from(layout.count())],
+            scratch: vec![0.0; Samples(max_block).interleaved_len(layout)],
             sink,
         });
     }
@@ -530,7 +530,7 @@ fn measure(
     let mut staging: Vec<f32> = Vec::new();
     let mut replay = waiting.spill.replay()?;
     let chunk = chunk_frames(rate).get();
-    let mut block = vec![0.0f32; chunk * ch];
+    let mut block = vec![0.0f32; Samples(chunk).interleaved_len(layout)];
     let mut block = InterleavedMut::new(&mut block, layout)?;
     loop {
         if control.is_cancelled() {
