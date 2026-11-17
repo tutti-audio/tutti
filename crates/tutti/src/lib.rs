@@ -231,27 +231,28 @@ pub mod nodes {
     pub use tutti_nodes::{
         BAND_PARAMS, BrickwallLimiterNode, BusStripNode, ChannelTimes, ChannelTimesError,
         ClickNode, ClickSettings, ClickState, CompressorControls, CompressorNode, ConvolverError,
-        ConvolverNode, CrossoverControls, CrossoverError, CrossoverNode, DelayControls,
-        DelayLayout, DelayNode, DistortionNode, EnvelopeFollowerNode, EqBandNode, FdnControls,
-        FdnLayout, FdnNode, FreeverbControls, FreeverbNode, GateControls, GateNode,
-        HrtfBinauralNode, InterpolationMode, IrLayout, KeySource, LadderControls, LadderFilterNode,
-        LadderType, LfoClock, LfoNode, LimiterControls, LimiterNode, MetronomeMode,
-        ModDelayControls, ModDelayNode, MultibandCompressorNode, MultibandControls,
-        NoteEnvelopeNode, OscillatorNode, PhaserControls, PhaserNode, PortSide,
-        Routing as FeedbackRouting, RoutingError as FeedbackRoutingError, SOURCE_EVENT_CAPACITY,
-        ShapeKind, SourceNode, SourcePorts, Stages, StagesError, Stagger, StaggerError,
-        SvfControls, SvfFilterNode, SvfType, Sweep, SweepError, SweepRange, SweepRangeError,
-        VbapError, VbapPannerNode, VolumeOutOfRange,
+        ConvolverNode, CrossoverControls, CrossoverError, CrossoverNode, DcBlockerConfig,
+        DcBlockerControls, DcBlockerNode, DelayControls, DelayLayout, DelayNode, DistortionNode,
+        EnvelopeFollowerNode, EqBandNode, FdnControls, FdnLayout, FdnNode, FreeverbControls,
+        FreeverbNode, GateControls, GateNode, HrtfBinauralNode, InterpolationMode, IrLayout,
+        KeyFilter, KeySource, LadderControls, LadderFilterNode, LadderType, LfoClock, LfoNode,
+        LimiterControls, LimiterNode, MetronomeMode, ModDelayControls, ModDelayNode,
+        MultibandCompressorNode, MultibandControls, NoteEnvelopeNode, OscillatorNode,
+        OversamplingFactor, PhaserControls, PhaserNode, PortSide, Routing as FeedbackRouting,
+        RoutingError as FeedbackRoutingError, SOURCE_EVENT_CAPACITY, ShapeKind, SourceNode,
+        SourcePorts, Stages, StagesError, Stagger, StaggerError, SvfControls, SvfFilterNode,
+        SvfType, Sweep, SweepError, SweepRange, SweepRangeError, VbapError, VbapPannerNode,
+        VolumeOutOfRange,
     };
     pub use tutti_nodes::{
         BrickwallKernel, CompressorKernel, Control, ControlLanes, ControlRead, ControlSet,
-        ControlValid, CrossoverKernel, DelayKernel, DistortionKernel, FdnKernel, Feed,
-        FreeverbKernel, GateKernel, Kernel, KernelNode, LadderKernel, LimiterKernel,
+        ControlValid, CrossoverKernel, DcBlockerKernel, DelayKernel, DistortionKernel, FdnKernel,
+        Feed, FreeverbKernel, GateKernel, Kernel, KernelNode, LadderKernel, LimiterKernel,
         ModDelayKernel, PhaserKernel, ReconcileError, SvfKernel,
     };
     pub use tutti_nodes::{
-        BrickwallSet, CompressorSet, CrossoverSet, DelaySet, DistortionSet, FdnSet, FreeverbSet,
-        GateSet, HasControl, LadderSet, LimiterSet, ModDelaySet, PhaserSet, SvfSet,
+        BrickwallSet, CompressorSet, CrossoverSet, DcBlockerSet, DelaySet, DistortionSet, FdnSet,
+        FreeverbSet, GateSet, HasControl, LadderSet, LimiterSet, ModDelaySet, PhaserSet, SvfSet,
     };
 }
 
