@@ -60,4 +60,3 @@ tutti-fixtures = { path = "../../testing/tutti-fixtures", features = ["graph"] }
 
 [package.metadata.docs.rs]
 all-features = true
-rustdoc-args = ["--cfg", "docsrs"]
