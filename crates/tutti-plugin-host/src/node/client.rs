@@ -344,8 +344,8 @@ pub(super) struct TransportFeed {
     /// node's own.
     source: TransportSource,
     /// The last snapshot handed out: what an empty block (no frame to read
-    /// the transport at) repeats.
-    last: TransportInfo,
+    /// the transport at) repeats. `None` before one.
+    last: Option<TransportInfo>,
 }
 
 impl TransportFeed {
@@ -366,7 +366,7 @@ impl TransportFeed {
         Self {
             source: TransportSource::new(meter.reader()),
             meter,
-            last: TransportInfo::default(),
+            last: None,
         }
     }
 
@@ -401,9 +401,9 @@ impl TransportFeed {
     }
 
     /// The snapshot for a block of `frames`, then count them. A plugin that
-    /// did not declare [`Features::TRANSPORT`] is handed the default
-    /// (stopped) snapshot; an empty block, which has no frame to read the
-    /// transport at, repeats the last one. Audio thread: one wait-free
+    /// did not declare [`Features::TRANSPORT`] is handed a stopped snapshot at
+    /// the block's rate; an empty block, which has no frame to read the
+    /// transport at, repeats the last one (a stopped one before any). Audio thread: one wait-free
     /// borrow (the node's meter cell), no allocation and no free.
     pub(super) fn block(
         &mut self,
@@ -414,14 +414,17 @@ impl TransportFeed {
     ) -> TransportInfo {
         if !features.contains(Features::TRANSPORT) {
             self.source.advance(frames);
-            return TransportInfo::default();
+            return TransportInfo::new(cx.env.sample_rate);
         }
         let Some(at) = Offset::new(Samples(0), Samples(frames)) else {
-            return self.last;
+            return self
+                .last
+                .unwrap_or_else(|| TransportInfo::new(cx.env.sample_rate));
         };
-        self.last = self.source.block(features).at(cx, at, frames, tempo);
+        let info = self.source.block(features).at(cx, at, frames, tempo);
         self.source.advance(frames);
-        self.last
+        self.last = Some(info);
+        info
     }
 }
 
@@ -569,7 +572,7 @@ impl<F: Loaded> InProcClient<F> {
             segments,
             phase: Samples(0),
             walk: TransportWalk::default(),
-            chunk_info: TransportInfo::default(),
+            chunk_info: TransportInfo::new(sample_rate),
             changes: TransportChanges::default(),
             chunk_midi: 0,
             owed_lost: 0,
@@ -955,10 +958,10 @@ mod transport_tests {
         let params = ParameterChanges::default();
         let ctx = block_context(&[], &params, &snapshot);
         let delivered = ctx.transport.expect("a transport snapshot");
-        assert_eq!(delivered.timing.tempo, 132.0);
+        assert_eq!(delivered.timing.tempo.get(), 132.0);
         assert!(delivered.state.playing);
-        assert_eq!(delivered.position.quarters, 4.0);
-        assert_eq!(delivered.sample_rate, 48_000.0);
+        assert_eq!(delivered.position.beat.get(), 4.0);
+        assert_eq!(delivered.sample_rate.get(), 48_000.0);
         assert_eq!(
             delivered.timing.signature,
             TimeSignature::new(BeatsPerBar::of(4), NoteValue::QUARTER)
@@ -977,10 +980,10 @@ mod transport_tests {
             Features::empty(),
             &mut map().view(e.sample_rate),
         );
-        let default = TransportInfo::default();
-        assert_eq!(got.timing.tempo, default.timing.tempo);
+        let default = TransportInfo::new(e.sample_rate);
+        assert_eq!(got.timing.tempo.get(), default.timing.tempo.get());
         assert_eq!(got.state.playing, default.state.playing);
-        assert_eq!(got.position.quarters, default.position.quarters);
+        assert_eq!(got.position.beat, default.position.beat);
     }
 
     /// A meter installed through one handle on the feed's cell reaches the
@@ -1065,7 +1068,7 @@ mod transport_tests {
             loader_features(),
             &mut map().view(e.sample_rate),
         );
-        assert_eq!(empty.timing.tempo, 132.0);
+        assert_eq!(empty.timing.tempo.get(), 132.0);
         assert!(empty.state.playing);
         assert_eq!(empty.position.continuous_samples, 0);
     }
@@ -1121,7 +1124,7 @@ mod transport_tests {
         let mut live = feed();
         let map = TempoMap::constant(Bpm::of(100.0)).expect("a tempo");
         let got = live.block(&cx(&e), 64, loader_features(), &mut map.view(e.sample_rate));
-        assert_eq!(got.timing.tempo, 100.0);
+        assert_eq!(got.timing.tempo.get(), 100.0);
     }
 }
 
@@ -1177,7 +1180,7 @@ mod render_tests {
             &mut midi,
             out,
             Inputs {
-                transport: &TransportInfo::default(),
+                transport: &TransportInfo::new(SampleRate::SR_48K),
                 changes: &[],
                 expressive: None,
             },
@@ -1288,7 +1291,7 @@ mod sanitize_tests {
             &mut midi,
             &mut out,
             Inputs {
-                transport: &TransportInfo::default(),
+                transport: &TransportInfo::new(SampleRate::SR_48K),
                 changes: &[],
                 expressive: None,
             },

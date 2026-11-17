@@ -41,7 +41,7 @@ use tutti_modulation::{
 };
 use tutti_nodes::automation::{LaneControls, RecordMode, Recorder};
 use tutti_nodes::{Feed, ReconcileError};
-use tutti_types::{Depth, ParamAddr, ParamId, UnitAddr, UnitParam};
+use tutti_types::{Depth, ParamAddr, ParamId, Unit, UnitAddr, UnitParam};
 
 use crate::Edge;
 use crate::ModKeys;
@@ -457,18 +457,21 @@ fn unclamped(automation: Option<Arc<dyn Curve>>) -> TargetDecl {
 /// release ([`RecordMode::Touch`]), once the recorder is released after a
 /// touch. Feed the recorder through [`recorder_mut`](Self::recorder_mut) as
 /// the gesture moves.
+///
+/// A take is typed over the unit `U` of the value it records, which is the unit
+/// of the target it is opened on.
 #[derive(Debug)]
-pub struct AutomationTake {
-    recorder: Recorder,
+pub struct AutomationTake<U: Unit<Raw = f32>> {
+    recorder: Recorder<U>,
     touched: bool,
     closed: bool,
 }
 
-impl AutomationTake {
+impl<U: Unit<Raw = f32>> AutomationTake<U> {
     /// A take recording into `recorder` (a fresh one, or
     /// `Recorder::overdub` over the lane's trajectory).
     #[must_use]
-    pub fn new(recorder: Recorder) -> Self {
+    pub fn new(recorder: Recorder<U>) -> Self {
         Self {
             recorder,
             touched: false,
@@ -477,17 +480,17 @@ impl AutomationTake {
     }
 
     /// A fresh `mode` take over `min..=max`.
-    pub fn record(mode: RecordMode, min: f32, max: f32) -> Self {
+    pub fn record(mode: RecordMode, min: U, max: U) -> Self {
         Self::new(Recorder::new(mode, min, max))
     }
 
     /// The recorder.
-    pub fn recorder(&self) -> &Recorder {
+    pub fn recorder(&self) -> &Recorder<U> {
         &self.recorder
     }
 
     /// The recorder, to touch, record and release.
-    pub fn recorder_mut(&mut self) -> &mut Recorder {
+    pub fn recorder_mut(&mut self) -> &mut Recorder<U> {
         &mut self.recorder
     }
 
@@ -511,8 +514,32 @@ impl AutomationTake {
 
     /// The finished trajectory, as the automation curve it becomes.
     #[must_use]
-    pub fn finish(self) -> Arc<dyn Curve> {
+    pub fn finish(self) -> Arc<dyn Curve>
+    where
+        U: Send + Sync + 'static,
+    {
         Arc::new(self.recorder.finish())
+    }
+}
+
+/// An open take with its unit erased: what a lane holds, since a lane's target
+/// is named by [`ModTarget`] and not by a unit. [`Mods::take_mut`] names the unit
+/// again.
+trait OpenTake: std::fmt::Debug + Send {
+    fn is_done(&mut self) -> bool;
+    fn finish(self: Box<Self>) -> Arc<dyn Curve>;
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
+}
+
+impl<U: Unit<Raw = f32> + Send + Sync + 'static> OpenTake for AutomationTake<U> {
+    fn is_done(&mut self) -> bool {
+        AutomationTake::is_done(self)
+    }
+    fn finish(self: Box<Self>) -> Arc<dyn Curve> {
+        AutomationTake::finish(*self)
+    }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
     }
 }
 
@@ -834,7 +861,7 @@ struct OwnRoute {
 
 struct OwnAutomation {
     curve: Arc<dyn Curve>,
-    take: Option<AutomationTake>,
+    take: Option<Box<dyn OpenTake>>,
 }
 
 impl std::fmt::Debug for OwnAutomation {
@@ -947,10 +974,7 @@ impl OwnMods {
     /// target's automation.
     fn close_takes(&mut self) {
         for automation in self.automation.values_mut() {
-            if automation
-                .take
-                .as_mut()
-                .is_some_and(AutomationTake::is_done)
+            if automation.take.as_mut().is_some_and(|take| take.is_done())
                 && let Some(take) = automation.take.take()
             {
                 automation.curve = take.finish();
@@ -1596,30 +1620,43 @@ impl Mods<'_> {
     /// # Errors
     ///
     /// [`NoAutomation`] when `target` has no automation; the take is dropped.
+    ///
+    /// The take's unit is the target's: a [`Ranged`] target names it, so a take
+    /// in another unit does not compile. This API is interim until
+    /// the typed automation target and the recording of moves replace it.
     #[must_use = "a refused take is dropped, and the target records nothing"]
-    pub fn record(
+    pub fn record<T: Ranged>(
         &mut self,
-        target: impl Into<ModTarget>,
-        take: AutomationTake,
-    ) -> Result<(), NoAutomation> {
+        target: T,
+        take: AutomationTake<T::Unit>,
+    ) -> Result<(), NoAutomation>
+    where
+        T::Unit: Unit<Raw = f32> + Send + Sync + 'static,
+    {
         let target = target.into();
         let key = self.own.key_of(target);
         match self.own.automation.get_mut(&key) {
             Some(automation) => {
-                automation.take = Some(take);
+                automation.take = Some(Box::new(take));
                 Ok(())
             }
             None => Err(NoAutomation { target }),
         }
     }
 
-    /// The open take on `target`, to feed its recorder.
-    pub fn take_mut(&mut self, target: impl Into<ModTarget>) -> Option<&mut AutomationTake> {
+    /// The open take on `target`, to feed its recorder; `None` when no take is
+    /// open on it. A take is opened only through [`record`](Self::record), whose
+    /// take is in the target's own unit, so the take read back is in that unit.
+    pub fn take_mut<T: Ranged>(&mut self, target: T) -> Option<&mut AutomationTake<T::Unit>>
+    where
+        T::Unit: Unit<Raw = f32> + Send + Sync + 'static,
+    {
         let key = self.own.key_of(target.into());
         self.own
             .automation
             .get_mut(&key)
             .and_then(|a| a.take.as_mut())
+            .and_then(|take| take.as_any_mut().downcast_mut())
     }
 
     /// The key the reconciler holds `target` under: what

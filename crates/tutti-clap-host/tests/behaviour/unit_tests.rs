@@ -27,11 +27,11 @@ fn at(k: usize) -> Offset {
     Offset::of(Samples(k), Samples(BLOCK))
 }
 
-/// The first event `event` adds to a fresh list.
-fn first(event: &(Offset, tutti_ump::Ump)) -> Option<ClapEvent> {
+/// A fresh list `event` was added to: its first event is what it converts to.
+fn first(event: &(Offset, tutti_ump::Ump)) -> InputEventList {
     let mut list = InputEventList::new();
     list.add_midi(event);
-    list.take_events().into_iter().next()
+    list
 }
 
 use crate::support;
@@ -54,7 +54,8 @@ use tutti_ump::{U7, U14};
 fn test_note_on_roundtrip() {
     // Build with MIDI-2 velocity (half of u16 max ≈ 0x8000).
     let event = (at(10), midi::note_on(MidiChannel::of(3), 60, 0x8000));
-    let clap = first(&event).expect("NoteOn should convert");
+    let list = first(&event);
+    let clap = list.events().first().expect("NoteOn should convert");
     assert!(matches!(clap, ClapEvent::NoteOn(_)));
     let back = clap
         .to_midi(&mut tutti_midi_protocol::Translator::new())
@@ -70,7 +71,8 @@ fn test_note_on_roundtrip() {
 #[test]
 fn test_note_off_roundtrip() {
     let event = (at(20), midi::note_off(MidiChannel::of(5), 72, 0x4000));
-    let clap = first(&event).expect("NoteOff should convert");
+    let list = first(&event);
+    let clap = list.events().first().expect("NoteOff should convert");
     assert!(matches!(clap, ClapEvent::NoteOff(_)));
     let back = clap
         .to_midi(&mut tutti_midi_protocol::Translator::new())
@@ -93,7 +95,8 @@ fn test_control_change_roundtrip() {
             widen_value(U7::of(100)).get(),
         ),
     );
-    let clap = first(&event).expect("CC should convert");
+    let list = first(&event);
+    let clap = list.events().first().expect("CC should convert");
     // CC goes through the generic Midi event
     match clap {
         ClapEvent::Midi(e) => {
@@ -114,7 +117,8 @@ fn test_pitch_bend_roundtrip() {
         at(0),
         midi::pitch_bend(MidiChannel::FIRST, widen_bend(U14::of(8192)).get()),
     );
-    let clap = first(&event).expect("PitchBend should convert");
+    let list = first(&event);
+    let clap = list.events().first().expect("PitchBend should convert");
     match clap {
         ClapEvent::Midi(e) => {
             assert_eq!(e.data[0] & 0xF0, 0xE0, "PitchBend status nibble");
@@ -130,7 +134,8 @@ fn test_pitch_bend_roundtrip() {
 #[test]
 fn test_program_change_roundtrip() {
     let event = (at(100), midi::program_change(MidiChannel::of(9), 42, None));
-    let clap = first(&event).expect("ProgramChange should convert");
+    let list = first(&event);
+    let clap = list.events().first().expect("ProgramChange should convert");
     match clap {
         ClapEvent::Midi(e) => {
             assert_eq!(e.data[0], 0xC0 | 9, "ProgramChange status byte");
@@ -747,12 +752,12 @@ fn test_host_state_take_clears_flag() {
     use std::sync::atomic::Ordering;
 
     let state = HostState::new(main_thread());
-    state.processing.state_dirty.store(true, Ordering::Release);
+    state.state_dirty.store(true, Ordering::Release);
 
     // First take returns true and clears
-    assert!(state.take(&state.processing.state_dirty));
+    assert!(state.take(&state.state_dirty));
     // Second take returns false
-    assert!(!state.take(&state.processing.state_dirty));
+    assert!(!state.take(&state.state_dirty));
 }
 
 /// The main thread is the one thread that proved it with a token, and no
@@ -1114,18 +1119,17 @@ fn test_output_event_list_take_events() {
 }
 
 #[test]
-fn test_input_event_list_from_events() {
+fn a_flush_list_is_sent_in_time_order() {
     let events = vec![
         ClapEvent::param_value(10, 1, 0.5),
         ClapEvent::param_value(5, 2, 0.3),
     ];
 
-    let mut list = tutti_clap_host::InputEventList::from_events(events);
-    assert_eq!(list.len(), 2);
-
+    let mut list = tutti_clap_host::FlushEvents::new(events);
     list.sort_by_time();
-    // After sorting, event at time 5 should be first
-    let raw = list.as_raw();
+    let source: *const dyn tutti_clap_ffi::EventSource = &list;
+    // SAFETY: `list` outlives the raw list, which is read here only.
+    let raw = unsafe { tutti_clap_ffi::input_raw_for_test(source) };
     unsafe {
         let size_fn = (*raw).size.unwrap();
         assert_eq!(size_fn(raw), 2);

@@ -20,9 +20,9 @@
 
 use crate::clap_probe;
 use tutti_buffers::{Planes, PlanesMut};
-// The live side is paced to `PACE`; the fork is *not*: it waits for each
+// The live side waits for the server's answer to each block; the fork is *not*: it waits for each
 // block, which is the property under test.
-use clap_probe::{BLOCK, PACE, ProbeEnv, Rig, SAMPLE_RATE, load_probe, load_probe_with, render};
+use clap_probe::{BLOCK, ProbeEnv, Rig, SAMPLE_RATE, load_probe, load_probe_with, render};
 use tutti_fixtures::machine_lock;
 use tutti_types::MaxBlock;
 
@@ -85,13 +85,16 @@ fn drive(unit: &mut Rig, b: usize) -> Vec<f32> {
     out.into_iter().next().expect("the probe has outputs")
 }
 
-/// Drive `blocks` paced blocks through the live unit; return each block's
+/// Drive `blocks` blocks through the live unit, each answered before the next; return each block's
 /// channel 0, silent (`None`) where the pipeline had nothing to collect.
 fn drive_live(unit: &mut Rig, blocks: usize) -> Vec<Option<Vec<f32>>> {
     (0..blocks)
         .map(|b| {
-            let out = drive(unit, b);
-            std::thread::sleep(PACE);
+            let out = unit
+                .run_answered(BLOCK, |_, i| input(b, i))
+                .into_iter()
+                .next()
+                .expect("the probe has outputs");
             out.iter().any(|&s| s != 0.0).then_some(out)
         })
         .collect()

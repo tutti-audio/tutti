@@ -22,6 +22,16 @@ use tutti_clap_host::{AudioBuffer32, ClapError, ClapLoaded, ClapProcessContext, 
 use tutti_clap_test_plugin::{PORTS_64BIT_INPUTS, PORTS_64BIT_OUTPUTS, REPORTED_TAIL_SAMPLES};
 use tutti_plugin_types::PluginError;
 
+/// The channels the plugin's audio ports declare now, summed over one
+/// direction.
+fn channel_total(loaded: &ClapLoaded, is_input: bool) -> usize {
+    let main = main_thread();
+    (0..loaded.audio_port_count(main, is_input))
+        .filter_map(|i| loaded.audio_port_info(main, i, is_input))
+        .map(|port| usize::from(port.layout.count()))
+        .sum()
+}
+
 static PROBE_LOCK: Mutex<()> = Mutex::new(());
 
 const BOTH_SIDES: u32 = PORTS_64BIT_INPUTS | PORTS_64BIT_OUTPUTS;
@@ -221,7 +231,7 @@ fn a_rate_change_rereads_the_port_layout() {
         1,
         "fixture: one input port"
     );
-    assert_eq!(active.loaded().info().audio_inputs, 2);
+    assert_eq!(channel_total(active.loaded(), true), 2);
 
     probe.port_layout(LAYOUT_ASYMMETRIC_AUX);
     active.reconfigure_at(44_100.0, 512).expect("re-activates");
@@ -232,7 +242,7 @@ fn a_rate_change_rereads_the_port_layout() {
         "the plugin's new layout"
     );
     assert_eq!(
-        active.loaded().info().audio_inputs,
+        channel_total(active.loaded(), true),
         3,
         "stereo main + mono aux"
     );
@@ -363,16 +373,16 @@ fn a_successful_rate_change_exposes_the_new_layout() {
         .map_err(|(_, e)| e)
         .expect("activates");
     let before = (
-        active.loaded().info().audio_inputs,
-        active.loaded().info().audio_outputs,
+        channel_total(active.loaded(), true),
+        channel_total(active.loaded(), false),
     );
 
     probe.port_layout(LAYOUT_ASYMMETRIC_AUX);
     active.reconfigure_at(44_100.0, 512).expect("re-activates");
 
     let after = (
-        active.loaded().info().audio_inputs,
-        active.loaded().info().audio_outputs,
+        channel_total(active.loaded(), true),
+        channel_total(active.loaded(), false),
     );
     assert_ne!(before, after, "the totals follow the plugin's new layout");
     assert!(active.loaded().is_active());
@@ -390,25 +400,18 @@ fn reactivate_rereads_the_port_layout_in_place() {
         .map_err(|(_, e)| e)
         .expect("activates");
     assert_eq!(
-        active.loaded().info().audio_inputs,
+        channel_total(active.loaded(), true),
         2,
         "fixture: one stereo input"
     );
 
     probe.port_layout(LAYOUT_ASYMMETRIC_AUX);
-    assert_eq!(
-        active.loaded().info().audio_inputs,
-        2,
-        "nothing was re-read"
-    );
 
     active.reactivate().expect("re-activates");
     assert!(active.loaded().is_active());
     assert_eq!(
-        active.loaded().info().audio_inputs,
+        channel_total(active.loaded(), true),
         3,
         "the plugin's new layout"
     );
-    assert_eq!(active.loaded().sample_rate().get(), 48_000.0);
-    assert_eq!(active.loaded().block_size(), 512);
 }

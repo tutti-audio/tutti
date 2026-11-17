@@ -91,7 +91,7 @@
 //! let mut outputs: [&mut [f32]; 2] = [&mut left, &mut right];
 //! let mut buffer = AudioBuffer32::new(&inputs, &mut outputs, tutti_plugin_types::SampleRate::SR_48K);
 //!
-//! let transport = TransportInfo::default().with_tempo(120.0).with_playing(true);
+//! let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K).with_tempo(tutti_types::Bpm::of(120.0)).with_playing(true);
 //! let midi = [(Offset::ZERO, midi::note_on(MidiChannel::FIRST, 60, 16384))];
 //! processor.process(&mut AudioBufferMut::F32(buffer), &ClapProcessContext {
 //!     midi: &midi,
@@ -279,7 +279,7 @@ pub mod topology;
 pub mod types;
 
 pub use error::{ClapError, LoadStage, Result};
-pub use events::{ClapEvent, EventList, InputEventList, OutputEventList, ParamBounds};
+pub use events::{ClapEvent, EventList, FlushEvents, InputEventList, OutputEventList, ParamBounds};
 pub use host::{ClapHost, HostState, InputStream, OutputStream};
 pub use instance::{
     ClapController, ClapEditor, ClapLoaded, ClapProcessContext, ClapProcessor, LoadOptions,

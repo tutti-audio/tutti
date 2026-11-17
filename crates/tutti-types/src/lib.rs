@@ -86,7 +86,7 @@
 //! A unit is a name on a float, not a validated value: `Pan(5.0)` builds. The
 //! range a type documents is what its `new_clamped` or wrap produces, and
 //! `new_clamped` passes NaN through (see the `units` module docs). The types that
-//! do validate are `SampleRate`, `Bpm`, `Depth`, `LoopRange`, `BeatsPerBar`,
+//! do validate are `SampleRate`, `Bpm`, `Depth`, `Bipolar`, `LoopRange`, `BeatsPerBar`,
 //! `NoteValue` and `MeterMap`.
 //! `SampleRate::new` (finite and above zero), `LoopRange::new`, `BeatsPerBar::new` and `NoteValue::new` return `None` for a
 //! raw they cannot hold (`BeatsPerBar::clamped` is the one named saturation);
@@ -161,15 +161,15 @@ pub use mint::Mint;
 // Value vocabulary.
 pub use value::{
     Adsr, Amplitude, ArcDegrees, At, AtomicSampleRate, Azimuth, Balance, Beat, BeatDuration,
-    BeatsPerCycle, BeatsPerCycleOutOfRange, BitDepth, Bpm, BpmOutOfRange, Cents, CentsSpan,
-    CentsSpanOutOfRange, CompressionRatio, Confidence, Correlation, Db, Depth, DepthOutOfRange,
-    Direction, Drive, Elevation, Feedback, Frame, Gain, HoldFactor, Hz, InvalidMaxBlock, Latency,
-    MaxBlock, Mix, Moment, NotOnMidiScale, Note, NoteNumberOutOfRange, Pan, Param, Param64,
-    ParamAddr, ParamCell, ParamId, ParamKey, ParamRaw, ParkedSampleRate, Phase, PhaseIncrement,
-    PitchClass, PlayReading, PlaybackRate, Q, Radians, ReadRate, Resonance, Resyncs,
-    SamplePosition, SampleRate, SampleRateOutOfRange, SampleSpan, SampleSpanOutOfRange, Samples,
-    Seconds, Semitones, Spread, SrcRatio, StereoBalance, StereoWidth, StretchFactor, Tail, Unit,
-    UnitAddr, UnitParam, UnitParamOutOfRange, Velocity,
+    BeatsPerCycle, BeatsPerCycleOutOfRange, Bipolar, BipolarOutOfRange, BitDepth, Bpm,
+    BpmOutOfRange, Cents, CentsSpan, CentsSpanOutOfRange, CompressionRatio, Confidence,
+    Correlation, Db, Depth, DepthOutOfRange, Direction, Drive, Elevation, Feedback, Frame, Gain,
+    HoldFactor, Hz, InvalidMaxBlock, Latency, MaxBlock, Mix, Moment, NotOnMidiScale, Note,
+    NoteNumberOutOfRange, Pan, Param, Param64, ParamAddr, ParamCell, ParamId, ParamKey, ParamRaw,
+    ParkedSampleRate, Phase, PhaseIncrement, PitchClass, PlayReading, PlaybackRate, Q, Radians,
+    ReadRate, Resonance, Resyncs, SamplePosition, SampleRate, SampleRateOutOfRange, SampleSpan,
+    SampleSpanOutOfRange, Samples, Seconds, Semitones, Spread, SrcRatio, StereoBalance,
+    StereoWidth, StretchFactor, Tail, Unit, UnitAddr, UnitParam, UnitParamOutOfRange, Velocity,
 };
 
 // The frame is the source of truth for time: the one frame↔beat conversion,

@@ -142,10 +142,8 @@ fn a_midi1_endpoint_is_never_sent_type_4() {
 }
 
 /// M2-104 Appendix D.2.3: a Registered Controller is a sequence of four MIDI
-/// 1.0 Protocol messages, CC 101, 100, 6 and 38, and the select is skipped for
-/// the same parameter on the same channel (MIDI 1.0 rule 6), which is state of
-/// the output's one narrower: the second value of one parameter is two
-/// messages, a value of another is four again.
+/// 1.0 Protocol messages, CC 101, 100, 6 and 38, every time: the second value
+/// of one parameter is four messages again, and so is a value of another.
 #[test]
 fn a_registered_controller_is_four_control_changes_through_one_narrower() {
     let mut wire = Wire::new(MIDI1);
@@ -153,9 +151,13 @@ fn a_registered_controller_is_four_control_changes_through_one_narrower() {
     let out = convert(&mut wire, &[rpn(0, 0, 12 << 25)]);
     assert_eq!(controls(&out), [(101, 0), (100, 0), (6, 12), (38, 0)]);
     let out = convert(&mut wire, &[rpn(0, 0, 2 << 25)]);
-    assert_eq!(controls(&out), [(6, 2), (38, 0)], "the select is kept");
+    assert_eq!(
+        controls(&out),
+        [(101, 0), (100, 0), (6, 2), (38, 0)],
+        "the select is sent again"
+    );
     let out = convert(&mut wire, &[rpn(0, 1, 0)]);
-    assert_eq!(controls(&out).len(), 4, "another parameter selects again");
+    assert_eq!(controls(&out).len(), 4, "another parameter");
 }
 
 /// A MIDI 2.0 Protocol endpoint is sent the graph's messages as they are, type
@@ -274,22 +276,60 @@ fn the_accepted_count_is_in_the_callers_events() {
     assert_eq!(counts, [1, 1, 1, 1, 2, 3]);
 }
 
-/// A device that goes from one Protocol to another has not seen what the
-/// narrower believes it was told: the next controller selects in full.
+/// **A change of Protocol drops a held MPE note's allocation**: the stream
+/// restarts, so a per-note message for the note sounding before it has no
+/// member channel and sends nothing, where without the change it is sent on
+/// the note's channel (M2-104 D.2.8, MPE mode).
 #[test]
-fn a_change_of_protocol_makes_the_narrower_forget() {
+fn a_change_of_protocol_drops_an_mpe_notes_channel() {
+    use tutti_midi_protocol::{
+        ExtremeValues, MpeZoneConfig, PerNoteTranslation, PitchBendSensitivity, TranslationMode,
+    };
+    use tutti_ump::{Attribute, BendValue, NoteVelocity};
+    let mpe = || {
+        let zone = MpeZoneConfig::lower(
+            2,
+            PitchBendSensitivity::MPE_MASTER_DEFAULT,
+            PitchBendSensitivity::MPE_MEMBER_DEFAULT,
+        )
+        .unwrap();
+        Narrower::with_mode(TranslationMode {
+            extremes: ExtremeValues::Scaled,
+            per_note: PerNoteTranslation::Mpe(zone),
+        })
+    };
+    let note = NoteNumber::of(60);
+    let note_on = Ump::from(Message::Midi2(
+        address(0, 0),
+        Voice2::NoteOn {
+            note,
+            velocity: NoteVelocity::new(0x8000),
+            attribute: Attribute::None,
+        },
+    ));
+    let bend = Ump::from(Message::Midi2(
+        address(0, 0),
+        Voice2::PerNotePitchBend {
+            note,
+            value: BendValue::new(0x8000_0000),
+        },
+    ));
+    // A change of JR alone keeps the note: its bend is the member channel's.
     let mut wire = Wire::new(MIDI1);
-    convert(&mut wire, &[rpn(0, 0, 0)]);
-    assert_eq!(controls(&convert(&mut wire, &[rpn(0, 0, 0)])).len(), 2);
-    wire.set_config(MIDI2);
-    wire.set_config(MIDI1);
-    assert_eq!(controls(&convert(&mut wire, &[rpn(0, 0, 0)])).len(), 4);
-    // A change of JR alone does not.
+    wire.narrower = mpe();
+    convert(&mut wire, &[note_on]);
     wire.set_config(StreamConfig {
         rx_jr: true,
         ..MIDI1
     });
-    assert_eq!(controls(&convert(&mut wire, &[rpn(0, 0, 0)])).len(), 2);
+    assert_eq!(convert(&mut wire, &[bend]).len(), 1);
+    // A change of Protocol forgets it.
+    let mut wire = Wire::new(MIDI1);
+    wire.narrower = mpe();
+    convert(&mut wire, &[note_on]);
+    wire.set_config(MIDI2);
+    wire.set_config(MIDI1);
+    assert!(convert(&mut wire, &[bend]).is_empty());
 }
 
 /// **A send time stays with its event through the conversion:** an RPN that

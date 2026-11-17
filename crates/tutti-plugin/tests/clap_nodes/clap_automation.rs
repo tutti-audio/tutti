@@ -13,7 +13,7 @@ use clap_probe::{ProbeEnv, load_probe, render};
 use tutti_buffers::{Planes, PlanesMut};
 use tutti_fixtures::machine_lock;
 use tutti_graph::Exponent;
-use tutti_types::{MaxBlock, ParamId};
+use tutti_types::{Hz, MaxBlock, ParamId};
 
 use std::sync::Arc;
 
@@ -366,11 +366,11 @@ fn a_lane_drives_a_plugin_parameter_along_its_curve() {
     let mut env = Trajectory::new();
     env.add_breakpoint(Breakpoint::with_law(
         Beat(0.0),
-        0.5,
+        Hz(0.5),
         Law::PowerIn(Exponent::of(2.0)),
     ));
     // 120 BPM at 48 kHz: 24 000 frames a beat, so frame 1500.
-    env.add_breakpoint(Breakpoint::new(Beat(0.0625), 0.75));
+    env.add_breakpoint(Breakpoint::new(Beat(0.0625), Hz(0.75)));
     let lane = ControlLaneNode::for_foreign(
         GAIN,
         ControlProgram::from_curve(Arc::new(env.clone())),
@@ -385,7 +385,7 @@ fn a_lane_drives_a_plugin_parameter_along_its_curve() {
         0,
         1500,
         32,
-        |f| env.value_at(beat(f)).expect("a value"),
+        |f| env.value_at(beat(f)).expect("a value").get(),
         0.75,
     );
 }

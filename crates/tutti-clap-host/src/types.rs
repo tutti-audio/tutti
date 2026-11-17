@@ -37,15 +37,11 @@ pub struct PluginInfo {
     /// CLAP feature/category tags (`"audio-effect"`, `"instrument"`, …) used
     /// for browser categorisation.
     pub features: Vec<String>,
-    /// Total input channels summed across every audio input port.
-    pub audio_inputs: usize,
-    /// Total output channels summed across every audio output port.
-    pub audio_outputs: usize,
 }
 
 impl PluginInfo {
     /// Creates a new [`PluginInfo`] with the given plugin ID and display name.
-    /// Defaults to stereo in/out and empty metadata fields.
+    /// Empty metadata fields but the id and name.
     pub fn new(id: impl Into<String>, name: impl Into<String>) -> Self {
         Self {
             id: id.into(),
@@ -55,8 +51,6 @@ impl PluginInfo {
             url: String::new(),
             description: String::new(),
             features: Vec::new(),
-            audio_inputs: 2,
-            audio_outputs: 2,
         }
     }
 
@@ -92,14 +86,6 @@ impl PluginInfo {
     #[must_use]
     pub fn features(mut self, features: Vec<String>) -> Self {
         self.features = features;
-        self
-    }
-
-    /// Sets the audio input/output channel counts (builder style).
-    #[must_use]
-    pub fn audio_io(mut self, inputs: usize, outputs: usize) -> Self {
-        self.audio_inputs = inputs;
-        self.audio_outputs = outputs;
         self
     }
 }

@@ -16,13 +16,12 @@
 #![cfg(feature = "clap")]
 
 use tutti_nodes::automation::Exponent;
-use tutti_types::MaxBlock;
+use tutti_types::{Hz, MaxBlock};
 
 use crate::clap_probe::{ProbeEnv, Rig, load_probe, render};
 use tutti_fixtures::machine_lock;
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use tutti_fixtures::midi;
 use tutti_graph::{Offset, TransportChanges, TransportPosition};
@@ -114,7 +113,7 @@ fn a_bound_plugin_does_not_allocate_on_the_audio_thread() {
         let v = if k % 2 == 0 { 0.2 } else { 0.9 };
         env.add_breakpoint(Breakpoint::with_law(
             Beat::new(f64::from(k) * 2.0),
-            v,
+            Hz(v),
             Law::PowerIn(Exponent::of(2.0)),
         ));
     }
@@ -150,7 +149,6 @@ fn a_bound_plugin_does_not_allocate_on_the_audio_thread() {
             TransportPosition::new(true, Bpm::of(90.0), Beat(9.0), None),
         )
         .expect("a change inside the block");
-    let pace = Duration::from_millis(15);
     let mut block = |b: usize, outs: &mut [&mut [f32]]| {
         if b.is_multiple_of(4) {
             let note = 60 + (b % 12) as u8;
@@ -173,7 +171,8 @@ fn a_bound_plugin_does_not_allocate_on_the_audio_thread() {
             &mut o[..],
         );
         if (b + 1).is_multiple_of(PASSES) {
-            std::thread::sleep(pace);
+            // The server answers the pass's chunk before the next pass.
+            crate::clap_probe::await_answer(&rig.controls);
         }
     };
 

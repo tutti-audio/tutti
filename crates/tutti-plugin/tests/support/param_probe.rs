@@ -51,8 +51,8 @@ pub fn knobs(n: usize, value: impl Fn(usize) -> f32) -> (Vec<LaneControls>, Vec<
     (lanes.iter().map(ControlLaneNode::controls).collect(), lanes)
 }
 
-/// Polls `check` while `step` renders, until it holds or `timeout` passes.
-/// Returns whether it held.
+/// Polls `check` after each `step`, which renders and waits for the server's
+/// answer, until it holds or `timeout` passes. Returns whether it held.
 pub fn until(timeout: Duration, mut step: impl FnMut(), mut check: impl FnMut() -> bool) -> bool {
     let deadline = Instant::now() + timeout;
     loop {
@@ -63,6 +63,5 @@ pub fn until(timeout: Duration, mut step: impl FnMut(), mut check: impl FnMut() 
         if Instant::now() >= deadline {
             return false;
         }
-        std::thread::sleep(Duration::from_millis(5));
     }
 }

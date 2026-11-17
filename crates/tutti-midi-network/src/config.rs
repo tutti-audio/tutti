@@ -11,6 +11,14 @@ const IDLE_INTERVAL_MAX: Duration = Duration::from_millis(300);
 const REPEAT_INTERVAL_MIN: Duration = Duration::from_millis(300);
 const REPEAT_INTERVAL_MAX: Duration = Duration::from_secs(2);
 
+/// The shortest a timer is set: no interval or timeout is zero, so no endpoint
+/// asks its driver for the clock in a loop.
+const TIMER_MIN: Duration = Duration::from_millis(1);
+/// The longest a timer is set. An `Instant` plus a duration that overflows
+/// panics; an hour is far past any session timer and far inside every
+/// platform's range.
+pub(crate) const TIMER_MAX: Duration = Duration::from_secs(60 * 60);
+
 const BUFFER_DEFAULT: NonZeroUsize = NonZeroUsize::new(256).unwrap();
 const REQUESTS_DEFAULT: NonZeroU8 = NonZeroU8::new(5).unwrap();
 
@@ -127,16 +135,16 @@ impl SessionConfig {
     /// which the specification requires of the first.
     #[must_use]
     pub fn with_idle_interval(mut self, interval: Duration) -> Self {
-        self.idle_interval = interval.clamp(Duration::from_millis(1), IDLE_INTERVAL_MAX);
+        self.idle_interval = interval.clamp(TIMER_MIN, IDLE_INTERVAL_MAX);
         self
     }
 
     /// How long a missing sequence number is waited for before a Retransmit
     /// Request asks for it (the specification suggests 10 ms), which lets
-    /// an out-of-order command arrive first.
+    /// an out-of-order command arrive first. Saturates to 1 ms..1 h.
     #[must_use]
-    pub const fn with_reorder_wait(mut self, wait: Duration) -> Self {
-        self.reorder_wait = wait;
+    pub fn with_reorder_wait(mut self, wait: Duration) -> Self {
+        self.reorder_wait = wait.clamp(TIMER_MIN, TIMER_MAX);
         self
     }
 
@@ -149,18 +157,18 @@ impl SessionConfig {
         self
     }
 
-    /// How long a peer is silent before a Ping is sent.
+    /// How long a peer is silent before a Ping is sent. Saturates to 1 ms..1 h.
     #[must_use]
-    pub const fn with_ping_interval(mut self, interval: Duration) -> Self {
-        self.ping_interval = interval;
+    pub fn with_ping_interval(mut self, interval: Duration) -> Self {
+        self.ping_interval = interval.clamp(TIMER_MIN, TIMER_MAX);
         self
     }
 
     /// How long a peer is silent before the Session is ended with a Bye for
-    /// timeout.
+    /// timeout. Saturates to 1 ms..1 h.
     #[must_use]
-    pub const fn with_liveness_timeout(mut self, timeout: Duration) -> Self {
-        self.liveness_timeout = timeout;
+    pub fn with_liveness_timeout(mut self, timeout: Duration) -> Self {
+        self.liveness_timeout = timeout.clamp(TIMER_MIN, TIMER_MAX);
         self
     }
 
@@ -173,19 +181,68 @@ impl SessionConfig {
     }
 
     /// How long a repeated command is repeated before the endpoint gives up
-    /// and ends the Session with a Bye.
+    /// and ends the Session with a Bye. Saturates to 1 ms..1 h.
     #[must_use]
-    pub const fn with_command_timeout(mut self, timeout: Duration) -> Self {
-        self.command_timeout = timeout;
+    pub fn with_command_timeout(mut self, timeout: Duration) -> Self {
+        self.command_timeout = timeout.clamp(TIMER_MIN, TIMER_MAX);
         self
     }
 
     /// How long a Client waits for an Invitation Reply: Accepted after the
     /// Host said it was Pending (a user may be deciding), and how long a Host
-    /// holds a challenge or a confirmation open.
+    /// holds a challenge or a confirmation open. Saturates to 1 ms..1 h.
     #[must_use]
-    pub const fn with_pending_timeout(mut self, timeout: Duration) -> Self {
-        self.pending_timeout = timeout;
+    pub fn with_pending_timeout(mut self, timeout: Duration) -> Self {
+        self.pending_timeout = timeout.clamp(TIMER_MIN, TIMER_MAX);
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const HOUR: Duration = Duration::from_secs(60 * 60);
+
+    /// Every duration option, set to `value`, as the fields it lands in.
+    fn all_set(value: Duration) -> [Duration; 5] {
+        let config = SessionConfig::default()
+            .with_reorder_wait(value)
+            .with_ping_interval(value)
+            .with_liveness_timeout(value)
+            .with_command_timeout(value)
+            .with_pending_timeout(value);
+        [
+            config.reorder_wait,
+            config.ping_interval,
+            config.liveness_timeout,
+            config.command_timeout,
+            config.pending_timeout,
+        ]
+    }
+
+    #[test]
+    fn no_timer_is_zero_so_no_endpoint_asks_for_the_clock_in_a_loop() {
+        assert_eq!(all_set(Duration::ZERO), [Duration::from_millis(1); 5]);
+        let config = SessionConfig::default()
+            .with_idle_interval(Duration::ZERO)
+            .with_repeat_interval(Duration::ZERO);
+        assert_eq!(config.idle_interval, Duration::from_millis(1));
+        assert_eq!(config.repeat_interval, REPEAT_INTERVAL_MIN);
+    }
+
+    #[test]
+    fn no_timer_is_past_an_hour_so_no_instant_overflows() {
+        assert_eq!(all_set(Duration::MAX), [HOUR; 5]);
+        let config = SessionConfig::default().with_repeat_interval(Duration::MAX);
+        assert_eq!(config.repeat_interval, REPEAT_INTERVAL_MAX);
+        let now = std::time::Instant::now();
+        assert!(now.checked_add(TIMER_MAX).is_some());
+    }
+
+    #[test]
+    fn a_timer_inside_the_range_is_kept() {
+        let value = Duration::from_millis(250);
+        assert_eq!(all_set(value), [value; 5]);
     }
 }

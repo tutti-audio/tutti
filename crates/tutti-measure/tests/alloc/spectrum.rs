@@ -3,12 +3,13 @@
 //! Counted with this binary's own global allocator, as in `chroma_alloc.rs`. It
 //! counts per thread, so the harness's other threads do not show up.
 
+use super::Discard;
 use tutti_buffers::Mono;
 use tutti_dsp::FrameCount;
 use tutti_fixtures::allocations;
 use tutti_measure::{
-    Banding, BandsPerOctave, Framing, FrequencyBand, PeakDecay, Smoothing, SpectrumConfig,
-    SpectrumTime,
+    Banding, BandsPerOctave, Framing, FrequencyBand, Measure, Meter, PeakDecay, Smoothing,
+    SpectrumConfig, SpectrumTime,
 };
 use tutti_types::{Db, Hz, SampleRate, Samples, Seconds};
 
@@ -40,7 +41,7 @@ fn a_spectrum_step_does_not_allocate() {
         let steps = allocations(|| {
             for size in [1, 100, 256, 777, 4096] {
                 for block in signal.chunks(size) {
-                    state.push(Mono::new(block)).unwrap();
+                    state.push(Mono::new(block), &mut Discard).unwrap();
                 }
             }
         });
@@ -49,10 +50,27 @@ fn a_spectrum_step_does_not_allocate() {
         let after_reset = allocations(|| {
             state.reset();
             for block in signal.chunks(500) {
-                state.push(Mono::new(block)).unwrap();
+                state.push(Mono::new(block), &mut Discard).unwrap();
             }
             let _ = (state.levels(), state.peaks(), state.spectrogram().count());
         });
         assert_eq!(after_reset, 0, "reset and steps");
     }
+}
+
+/// A push of 16-bit audio allocates nothing either, for blocks longer than the
+/// conversion block.
+#[test]
+fn an_integer_spectrum_step_does_not_allocate() {
+    let cfg = SpectrumConfig::new().framing(Framing::new(Samples(1024), Samples(256)));
+    let signal: Vec<i16> = (0..48_000)
+        .map(|i| ((std::f32::consts::TAU * 1234.5 * i as f32 / 48_000.0).sin() * 8_000.0) as i16)
+        .collect();
+    let mut state = cfg.measure(SampleRate::SR_48K).unwrap();
+    let steps = allocations(|| {
+        for block in signal.chunks(10_000) {
+            state.push(Mono::new(block), &mut Discard).unwrap();
+        }
+    });
+    assert_eq!(steps, 0, "i16 steps");
 }

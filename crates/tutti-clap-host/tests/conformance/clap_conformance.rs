@@ -296,8 +296,8 @@ fn host_never_delivers_an_event_time_outside_the_block() {
 #[test]
 fn host_supplies_transport_when_present() {
     let mut inst = load_plugin();
-    let transport = TransportInfo::default()
-        .with_tempo(140.0)
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K)
+        .with_tempo(tutti_types::Bpm::of(140.0))
         .with_playing(true);
     let ctx = ClapProcessContext {
         transport: Some(&transport),
@@ -322,8 +322,8 @@ fn host_supplies_transport_when_present() {
 #[test]
 fn host_supplies_the_tempo_slope() {
     let mut inst = load_plugin();
-    let transport = TransportInfo::default()
-        .with_tempo(140.0)
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K)
+        .with_tempo(tutti_types::Bpm::of(140.0))
         .with_tempo_inc(-0.001)
         .with_playing(true);
     let ctx = ClapProcessContext {
@@ -336,7 +336,8 @@ fn host_supplies_the_tempo_slope() {
     assert_eq!(cap.transport_tempo_inc, -0.001);
 
     // A constant tempo is a zero slope.
-    let flat = TransportInfo::default().with_tempo(140.0);
+    let flat = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K)
+        .with_tempo(tutti_types::Bpm::of(140.0));
     let ctx = ClapProcessContext {
         transport: Some(&flat),
         ..Default::default()

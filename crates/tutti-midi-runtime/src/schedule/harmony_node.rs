@@ -22,7 +22,6 @@
 //! The lanes are published to the node with [`Publisher`]
 //! ([`HarmonyControls::set`]); the node reads them once per block.
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tutti_rt::LockExt;
 
@@ -69,14 +68,12 @@ impl Beated for TimedHarmony {
     }
 }
 
-/// Published lanes: the changes sorted by beat (non-finite beats dropped),
-/// and a generation that tells the node they were replaced.
+/// Published lanes: the changes sorted by beat (non-finite beats dropped).
 struct Lanes {
-    generation: u64,
     changes: Box<[TimedHarmony]>,
 }
 
-fn lanes(generation: u64, changes: impl IntoIterator<Item = TimedHarmony>) -> Lanes {
+fn lanes(changes: impl IntoIterator<Item = TimedHarmony>) -> Lanes {
     let mut v: Vec<TimedHarmony> = changes
         .into_iter()
         .filter(|c| c.beat.get().is_finite())
@@ -84,7 +81,6 @@ fn lanes(generation: u64, changes: impl IntoIterator<Item = TimedHarmony>) -> La
     // Stable: two changes at one beat keep their order, the later winning.
     v.sort_by(|a, b| a.beat.get().total_cmp(&b.beat.get()));
     Lanes {
-        generation,
         changes: v.into_boxed_slice(),
     }
 }
@@ -94,21 +90,16 @@ struct Shared {
     /// What the audio thread reads, once per block, through the node's
     /// reader.
     cell: Publisher<Lanes>,
-    /// Serializes `set`'s compare, generation and publish (`Publisher` has no
-    /// compare-and-publish), so two control threads cannot each publish
-    /// against a stale read. The value is the cell's own: the control side
-    /// reads it with `Publisher::current`. The node never takes it.
+    /// Serializes `set`'s compare and publish (`Publisher` has no compare-and-publish), so two control threads cannot each publish against a stale read. The value is the cell's own: the control side reads it with `Publisher::current`. The node never takes it.
     publish: Mutex<()>,
-    next_generation: AtomicU64,
 }
 
 impl Shared {
     fn new(changes: impl IntoIterator<Item = TimedHarmony>) -> Arc<Self> {
-        let first = Arc::new(lanes(0, changes));
+        let first = Arc::new(lanes(changes));
         Arc::new(Self {
             cell: Publisher::from_arc(Arc::clone(&first)),
             publish: Mutex::new(()),
-            next_generation: AtomicU64::new(1),
         })
     }
 
@@ -138,8 +129,10 @@ pub struct HarmonyNode {
     /// A reader of `shared.cell`, registered in [`over`](Self::over): a
     /// fork's node is built over its own cell and registers there.
     lanes: Reader<Lanes>,
-    /// The generation of the lanes this node last walked.
-    generation: u64,
+    /// The publish number of the lanes this node last walked. A lend may return
+    /// number `N` while the value is already `N + 1`, so a replacement can be
+    /// seen one block late, never missed and never seen twice.
+    last_seq: u64,
     walk: Walk,
     /// The chord and the scale this node last sent: a loop wrap re-states
     /// only what differs.
@@ -152,7 +145,7 @@ impl std::fmt::Debug for HarmonyNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("HarmonyNode")
             .field("lanes", &self.lanes)
-            .field("generation", &self.generation)
+            .field("last_seq", &self.last_seq)
             .field("walk", &self.walk)
             .field("sent", &self.sent)
             .finish_non_exhaustive()
@@ -168,11 +161,10 @@ impl HarmonyNode {
     /// A node over `shared`, reading it through a reader registered here.
     /// Control thread: registering may allocate.
     fn over(shared: Arc<Shared>) -> Self {
-        let generation = shared.current().generation;
         Self {
             lanes: shared.cell.reader(),
+            last_seq: shared.cell.seq(),
             shared,
-            generation,
             walk: Walk::default(),
             sent: Sent::default(),
             capacity: MIN_EVENT_PORT_CAPACITY,
@@ -198,18 +190,13 @@ impl HarmonyControls {
     /// in force on that block's first frame. Changes equal to the lanes' (in
     /// beat order) change nothing. Control thread.
     pub fn set(&self, changes: impl IntoIterator<Item = TimedHarmony>) {
-        let next = lanes(0, changes);
+        let next = lanes(changes);
         let _serial = self.shared.publish.lock_recover();
         let current = self.shared.current();
         if current.changes == next.changes {
             return;
         }
-        let generation = self.shared.next_generation.fetch_add(1, Ordering::Relaxed);
-        let published = Arc::new(Lanes {
-            generation,
-            changes: next.changes,
-        });
-        self.shared.cell.publish(published);
+        self.shared.cell.publish(next);
     }
 
     /// Sends nothing from the next block on. Control thread.
@@ -342,8 +329,8 @@ impl Node for HarmonyNode {
 
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
         let lanes = self.lanes.lend();
-        if lanes.generation != self.generation {
-            self.generation = lanes.generation;
+        let seq = lanes.seq();
+        if std::mem::replace(&mut self.last_seq, seq) != seq {
             self.walk.forget();
             self.sent = Sent::default();
         }

@@ -22,7 +22,9 @@ use clap_sys::events::{
 use tutti_clap_ffi::{
     EventSink, EventSource, header_size, input_raw_for_test, output_raw_for_test,
 };
-use tutti_clap_host::{ClapEvent, EventList, InputEventList, NoteExpressionType, OutputEventList};
+use tutti_clap_host::{
+    ClapEvent, EventList, FlushEvents, InputEventList, NoteExpressionType, OutputEventList,
+};
 use tutti_graph::Offset;
 use tutti_plugin_types::{
     ParameterChanges, ParameterQueue, RtMidiEvents, WireMidi, sysex_assembler,
@@ -46,10 +48,10 @@ fn raw_out(output: &mut OutputEventList) -> *const clap_output_events {
 }
 
 /// The raw input list of `list`, valid while `list` is alive and unmoved.
-fn raw_in(list: &InputEventList) -> *const clap_input_events {
-    let source: *const dyn EventSource = list;
+fn raw_in<S: EventSource + 'static>(list: &S) -> *const clap_input_events {
+    let list: *const dyn EventSource = list;
     // SAFETY: as `raw_out`.
-    unsafe { input_raw_for_test(source) }
+    unsafe { input_raw_for_test(list) }
 }
 
 /// The size of the core event struct of `type_`, as the table the FFI crate
@@ -713,7 +715,7 @@ fn input_event_pointers_have_the_alignment_their_payload_needs() {
         needs.push(need);
     }
     assert!(needs.contains(&8) && needs.contains(&4));
-    let list = InputEventList::from_events(events);
+    let list = FlushEvents::new(events);
     let raw = raw_in(&list);
     let n = unsafe { ((*raw).size.unwrap())(raw) };
     assert_eq!(n, 64);

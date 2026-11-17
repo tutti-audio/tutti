@@ -32,3 +32,11 @@ windows-sys = { workspace = true, features = [
   "Win32_System_Diagnostics_ToolHelp",
   "Win32_System_Pipes",
 ] }
+
+# The header's atomics become loom's under the loom cfg flag, so the
+# `loom_model` unit module in `src/header.rs` models the shipped code. Only that
+# flag pulls this in.
+#
+#     cargo test -p tutti-plugin-ipc-ffi --release --lib loom_model   (with the loom cfg flag set)
+[target.'cfg(loom)'.dependencies]
+loom = "0.7"

@@ -152,9 +152,9 @@ impl ClapLoaded {
             return buses;
         }
         let total = if is_input {
-            self.info.audio_inputs
+            self.ports.input_channel_total()
         } else {
-            self.info.audio_outputs
+            self.ports.output_channel_total()
         };
         match u16::try_from(total) {
             Ok(0) | Err(_) => PluginBuses::new(),
@@ -230,6 +230,19 @@ impl ClapLoaded {
         // is destroyed and the next open starts clean.
         if self.host_state.take(&self.host_state.gui.closed) {
             self.destroy_editor(main);
+        }
+        // `params.request_flush`: the plugin has values to hand the host
+        // outside a block. An active plugin hands them over in its next
+        // `process` (the flush would take the audio claim from the block), so
+        // the request wakes the block; an inactive one is flushed here.
+        if self.host_state.take(&self.host_state.flush_requested) {
+            if self.flags.active {
+                if let Some(wake) = self.host_state.process_wake.get() {
+                    wake.raise();
+                }
+            } else {
+                let _ = self.flush_params(main, Vec::new());
+            }
         }
         out.extend(tutti_plugin_types::taken(&self.host_state.requests));
         self.take_transport(out);
