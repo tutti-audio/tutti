@@ -218,7 +218,7 @@ pub use dynamics::{
     MultibandLanes, MultibandSettings, PeakDetection, TruePeakError, amplitude_to_db,
     compute_compressor_gain_reduction, compute_limiter_gain,
 };
-pub use fft::{Complex32, Complex64, FftScratch, RealFft};
+pub use fft::{Complex, Complex32, Complex64, FftScratch, RealFft};
 pub use filter::{
     Biquad, CrossoverBank, CrossoverCoefficients, CrossoverControls, CrossoverError,
     CrossoverModel, DirectForm1, LadderBank, LadderCoefficients, LadderCoeffs, LadderControls,
