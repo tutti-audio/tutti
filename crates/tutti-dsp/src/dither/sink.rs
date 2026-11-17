@@ -80,7 +80,7 @@ impl<S: Sink<Sample = f32>> DitherSink<S> {
     /// Wraps `inner`, dithering with `spec`, or passing through with `None`.
     pub fn new(inner: S, spec: Option<DitherSpec>) -> Self {
         let scratch = match spec {
-            Some(_) => Vec::with_capacity(CHUNK.interleaved_len(inner.layout())),
+            Some(_) => Vec::with_capacity(inner.layout().interleaved_len(CHUNK)),
             None => Vec::new(),
         };
         Self {

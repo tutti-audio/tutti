@@ -83,7 +83,7 @@ impl<'a, S: Sample> Interleaved<'a, S> {
     #[inline]
     #[must_use]
     pub const fn frames(&self) -> Samples {
-        Samples::from_interleaved_len(self.data.len(), self.layout)
+        self.layout.from_interleaved_len(self.data.len())
     }
 
     /// Returns whether there are no frames.
@@ -126,8 +126,8 @@ impl<'a, S: Sample> Interleaved<'a, S> {
 
     /// The sub-run of an in-bounds frame range.
     fn run(&self, r: &Range<usize>) -> Interleaved<'a, S> {
-        let start = Samples(r.start).interleaved_len(self.layout);
-        let end = Samples(r.end).interleaved_len(self.layout);
+        let start = self.layout.interleaved_len(Samples(r.start));
+        let end = self.layout.interleaved_len(Samples(r.end));
         Interleaved {
             data: &self.data[start..end],
             layout: self.layout,
@@ -144,7 +144,7 @@ impl<'a, S: Sample> Interleaved<'a, S> {
     #[track_caller]
     pub fn split_at(&self, at: Samples) -> (Interleaved<'a, S>, Interleaved<'a, S>) {
         let at = bounds::split(at, self.frames().get());
-        let (a, b) = self.data.split_at(Samples(at).interleaved_len(self.layout));
+        let (a, b) = self.data.split_at(self.layout.interleaved_len(Samples(at)));
         let layout = self.layout;
         (
             Interleaved { data: a, layout },
@@ -162,7 +162,7 @@ impl<'a, S: Sample> Interleaved<'a, S> {
     #[track_caller]
     pub fn frame(&self, i: Samples) -> &'a [S] {
         let i = bounds::index(i, self.frames().get());
-        let start = Samples(i).interleaved_len(self.layout);
+        let start = self.layout.interleaved_len(Samples(i));
         &self.data[start..start + self.channels()]
     }
 
@@ -170,7 +170,7 @@ impl<'a, S: Sample> Interleaved<'a, S> {
     #[inline]
     #[must_use]
     pub fn get_frame(&self, i: Samples) -> Option<&'a [S]> {
-        let start = i.interleaved_len(self.layout);
+        let start = self.layout.interleaved_len(i);
         self.data.get(start..start.checked_add(self.channels())?)
     }
 
@@ -258,7 +258,7 @@ impl<'a, S: Sample> InterleavedMut<'a, S> {
     #[inline]
     #[must_use]
     pub const fn frames(&self) -> Samples {
-        Samples::from_interleaved_len(self.data.len(), self.layout)
+        self.layout.from_interleaved_len(self.data.len())
     }
 
     /// Returns whether there are no frames.
@@ -353,8 +353,8 @@ impl<'a, S: Sample> InterleavedMut<'a, S> {
 
     /// The writable sub-run of an in-bounds frame range.
     fn run_mut(&mut self, r: &Range<usize>) -> InterleavedMut<'_, S> {
-        let start = Samples(r.start).interleaved_len(self.layout);
-        let end = Samples(r.end).interleaved_len(self.layout);
+        let start = self.layout.interleaved_len(Samples(r.start));
+        let end = self.layout.interleaved_len(Samples(r.end));
         InterleavedMut {
             data: &mut self.data[start..end],
             layout: self.layout,
@@ -372,7 +372,7 @@ impl<'a, S: Sample> InterleavedMut<'a, S> {
     pub fn split_at_mut(&mut self, at: Samples) -> (InterleavedMut<'_, S>, InterleavedMut<'_, S>) {
         let at = bounds::split(at, self.frames().get());
         let layout = self.layout;
-        let (a, b) = self.data.split_at_mut(Samples(at).interleaved_len(layout));
+        let (a, b) = self.data.split_at_mut(layout.interleaved_len(Samples(at)));
         (
             InterleavedMut { data: a, layout },
             InterleavedMut { data: b, layout },
@@ -408,7 +408,7 @@ impl<'a, S: Sample> InterleavedMut<'a, S> {
     #[track_caller]
     pub fn frame_mut(&mut self, i: Samples) -> &mut [S] {
         let i = bounds::index(i, self.frames().get());
-        let start = Samples(i).interleaved_len(self.layout);
+        let start = self.layout.interleaved_len(Samples(i));
         let channels = self.channels();
         &mut self.data[start..start + channels]
     }
@@ -417,7 +417,7 @@ impl<'a, S: Sample> InterleavedMut<'a, S> {
     #[inline]
     #[must_use]
     pub fn get_frame_mut(&mut self, i: Samples) -> Option<&mut [S]> {
-        let start = i.interleaved_len(self.layout);
+        let start = self.layout.interleaved_len(i);
         let end = start.checked_add(self.channels())?;
         self.data.get_mut(start..end)
     }

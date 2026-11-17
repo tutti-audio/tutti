@@ -68,14 +68,14 @@ impl<'w> Chunk<'w> {
     pub(crate) fn fill(&mut self, frames: Samples) -> &mut [f32] {
         self.held = Layout::Interleaved;
         self.data.clear();
-        self.data.resize(frames.interleaved_len(self.layout), 0.0);
+        self.data.resize(self.layout.interleaved_len(frames), 0.0);
         &mut self.data
     }
 
     /// Keeps the first `frames` frames of what was decoded.
     #[cfg(codec)]
     pub(crate) fn truncate(&mut self, frames: Samples) {
-        self.data.truncate(frames.interleaved_len(self.layout));
+        self.data.truncate(self.layout.interleaved_len(frames));
     }
 
     /// Whether the chunk holds no frame.
@@ -86,7 +86,7 @@ impl<'w> Chunk<'w> {
     fn frames(&self) -> Samples {
         match &self.held {
             Layout::Planar(planes) => planes.first().map_or(Samples::ZERO, |p| Samples(p.len())),
-            Layout::Interleaved => Samples::from_interleaved_len(self.data.len(), self.layout),
+            Layout::Interleaved => self.layout.from_interleaved_len(self.data.len()),
         }
     }
 }
@@ -178,7 +178,7 @@ impl<'a> sealed::Sealed<'a> for Interleaved<'a> {
                 chunk.interleaved.clear();
                 chunk
                     .interleaved
-                    .resize(frames.interleaved_len(layout), 0.0);
+                    .resize(layout.interleaved_len(frames), 0.0);
                 interleave(
                     Planes::new(planes)?,
                     InterleavedMut::new(&mut chunk.interleaved, layout)?,
@@ -204,7 +204,7 @@ impl<'a> sealed::Sealed<'a> for Mono<'a> {
         chunk.mono.clear();
         chunk
             .mono
-            .resize(chunk.frames().interleaved_len(ChannelLayout::MONO), 0.0);
+            .resize(ChannelLayout::MONO.interleaved_len(chunk.frames()), 0.0);
         let mono = InterleavedMut::new(&mut chunk.mono, ChannelLayout::MONO)?;
         match &chunk.held {
             Layout::Interleaved => fold.fold(Interleaved::new(&chunk.data, layout)?, mono)?,
