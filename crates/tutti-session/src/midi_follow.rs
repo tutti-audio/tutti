@@ -450,10 +450,9 @@ impl ClockFollow {
         let tempo = cx.settings.tempo_in_force();
         // The drift between the source and the transport, read at the frame a
         // command lands on; a transport that is not rolling has none.
-        if rolling && cx.playhead.playing() {
-            let beat = next_block_beat(&cx.playhead, &map);
-            self.core.steer(beat, lands, &mut |e| events.push(e));
-        }
+        let steered =
+            (rolling && cx.playhead.playing()).then(|| next_block_beat(&cx.playhead, &map));
+        self.core.steer(steered, lands, &mut |e| events.push(e));
         let beat_of = |position: ClockPosition, at: Seconds| {
             let lag = if rolling {
                 (lands - at).get().max(0.0)

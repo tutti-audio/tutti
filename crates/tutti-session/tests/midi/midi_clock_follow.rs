@@ -400,3 +400,31 @@ fn the_clock_error_is_none_until_a_locked_rolling_beat_clock_gives_one() {
     }
     assert_eq!(s.midi().clock_error(), None);
 }
+
+/// **A locked, rolling Beat Clock follower reads an error**: a Start and 120
+/// Timing Clocks at 120 bpm, each at `base + k * period` from one captured
+/// instant, roll the transport, and once the follower has locked and the
+/// transport has taken the Start, `clock_error` is a finite reading under
+/// `SLIP`, and the transport's beat is within a beat of the source's.
+#[test]
+fn a_locked_rolling_beat_clock_reads_an_error_under_slip() {
+    let (mut s, fake) = rig();
+    follow(&mut s, ClockKind::BeatClock);
+    for _ in 0..8 {
+        pump(&mut s);
+    }
+    let base = Instant::now();
+    let period = Duration::from_secs_f64(60.0 / (120.0 * 24.0));
+    send(&fake, system(System::Start), base);
+    send_ticks(&fake, base, period, 120);
+    let mut error = None;
+    for _ in 0..1500 {
+        pump(&mut s);
+        error = s.midi().clock_error();
+        if error.is_some() {
+            break;
+        }
+    }
+    let error = error.expect("a locked, rolling follower reads an error");
+    assert!(error.get().abs() < tutti_midi_runtime::ClockFollower::SLIP.get());
+}

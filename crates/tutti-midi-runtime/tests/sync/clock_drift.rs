@@ -1,14 +1,16 @@
 //! A Beat Clock follower steered by the transport's beat (`ClockFollower::steer`).
 //!
 //! The oracle is arithmetic. A source at `T(t)` bpm has counted `B(t) = ∫T/60` beats
-//! at time `t`, and sends tick `k` when `B` reaches `k / 24` (M1 p.30). A model
+//! at time `t`. Start "does not start the sequence until the next Timing Clock"
+//! (M1 p.30), so the first Timing Clock is beat 0 and tick `k` is sent when `B`
+//! reaches `(k - 1) / 24`, 24 to a quarter note (M1 p.30). A model
 //! transport integrates the tempo the follower announces, so its beat error is
 //! `B(t)` less that integral, and every bound below is a formula of the
 //! constants.
 
-use tutti_midi_runtime::{ClockEvent, ClockFollower, ClockKind, ClockPosition};
+use tutti_midi_runtime::{ClockEvent, ClockFollower, ClockKind, ClockPosition, MidiClockDecoder};
 use tutti_types::{Beat, Seconds};
-use tutti_ump::{Message, MidiGroup, System, Ump};
+use tutti_ump::{Message, MidiGroup, System, U14, Ump};
 
 fn at(seconds: f64) -> Seconds {
     Seconds::new(seconds)
@@ -87,7 +89,7 @@ fn run(source: &Source, seconds: f64, from: f64, behind: f64, steer: bool) -> Ru
     model.beat -= behind;
     let (mut k, mut j) = (1u32, 1u32);
     loop {
-        let tick = (source.time_at)(f64::from(k) / 24.0);
+        let tick = (source.time_at)((f64::from(k) - 1.0) / 24.0);
         let block = f64::from(j) * 0.01;
         if tick.min(block) > seconds {
             break;
@@ -102,7 +104,7 @@ fn run(source: &Source, seconds: f64, from: f64, behind: f64, steer: bool) -> Ru
             k += 1;
         } else {
             if steer {
-                let here = Beat::new(model.beat_at(block));
+                let here = Some(Beat::new(model.beat_at(block)));
                 follower.steer(here, at(block), &mut |e| events.push(e));
                 for e in events.drain(..) {
                     model.take(e, block, &mut slips, &mut locates);
@@ -141,11 +143,13 @@ fn wander() -> Source {
     }
 }
 
-/// The least error a tempo step corrects, and the growth in one beat of ticks
-/// at the most, in beats (the module docs of `follow`).
+/// The least error a tempo step corrects, and the growth at that step over
+/// `LOCK_TICKS` ticks (one beat) of the 120 bpm sources here, in beats (the
+/// module docs of `follow`).
 fn bound() -> f64 {
     let step = ClockFollower::TEMPO_STEP.get();
-    step * ClockFollower::CATCH_UP.get() / 60.0 + step / 60.0 * 0.5
+    let beat_seconds = MidiClockDecoder::LOCK_TICKS as f64 / 24.0 * 60.0 / 120.0;
+    step * ClockFollower::CATCH_UP.get() / 60.0 + step / 60.0 * beat_seconds
 }
 
 /// **A tempo that wanders under `TEMPO_STEP` is followed.** The source ends 0.09
@@ -208,7 +212,7 @@ fn steady() -> Source {
 
 /// **An error past `SLIP` locates once to the source's beat and says so.** The
 /// transport starts 0.5 beat behind; once the locate after Start has landed
-/// (the follower holds off a second), the first steer reads 0.5, which is past
+/// (the follower holds off `SETTLE`), the first steer reads 0.5, which is past
 /// a quarter, and relocates to the source's beat at that instant, `2 now`,
 /// then reads no more slips.
 #[test]
@@ -216,12 +220,15 @@ fn an_error_past_slip_locates_once_and_reports() {
     let slipped = run(&steady(), 20.0, 5.0, 0.5, true);
     assert_eq!(slipped.slips.len(), 1, "{:?}", slipped.slips);
     assert!((slipped.slips[0] - 0.5).abs() < 1e-9, "{:?}", slipped.slips);
-    // The Start's locate to beat 0, then the slip's, at the 10 ms block after
-    // the second of hold-off (1.0 + 0.01 at the latest, the follower is locked
-    // by 0.5 s).
+    // The Start's locate to beat 0, then the slip's, at the first 10 ms block
+    // after `SETTLE` (the follower is locked by 0.5 s), at 2 beats a second.
     assert_eq!(slipped.locates.len(), 2, "{:?}", slipped.locates);
+    let settle = ClockFollower::SETTLE.get();
     let at_slip = slipped.locates[1] / 2.0;
-    assert!((1.0..1.02).contains(&at_slip), "{at_slip}");
+    assert!(
+        (settle..settle + 0.01 + 1e-9).contains(&at_slip),
+        "{at_slip}"
+    );
     // On the source's beat, so the error stays in bound afterwards.
     assert!(worst(&slipped.errors) <= bound());
 }
@@ -248,24 +255,87 @@ fn the_gauge_reads_the_error_and_the_trim_follows() {
     assert!(steered.model.tempo > 120.0 + ClockFollower::TEMPO_STEP.get() - 1e-9);
 }
 
-/// The first read, by hand: a follower locked at 120 bpm, steered at a tick.
+/// **The source's beat is the last tick's, not the next's.** Start "does not
+/// start the sequence until the next Timing Clock" (M1 p.30): after Start, the
+/// `k`-th Timing Clock is beat `(k - 1) / 24`. The error at the first read is
+/// the last tick's beat plus the time since it at the fitted tempo, less the
+/// transport's.
 #[test]
 fn the_error_at_the_first_read_is_the_beat_difference() {
     let mut follower = ClockFollower::new(ClockKind::BeatClock);
     let p = 60.0 / (120.0 * 24.0);
     follower.step(system(System::Start), at(0.0), &mut |_| {});
-    for k in 1..=48u32 {
+    for k in 1..=60u32 {
         follower.step(
             system(System::TimingClock),
-            at(f64::from(k) * p),
+            at(f64::from(k - 1) * p),
             &mut |_| {},
         );
     }
-    // 48 ticks are 2 beats, at 1.0 s. Past the hold-off of 1 s from Start, 5 ms
-    // after the last tick the source is at 2.01 beats.
-    let now = 48.0 * p + 0.005;
-    assert!(now > 1.0 + 1e-6);
-    follower.steer(Beat::new(1.95), at(now), &mut |_| {});
+    // The 60th tick is beat 59 / 24 at 59 p; 5 ms later, past `SETTLE`, the
+    // source is 0.01 beat on.
+    let now = 59.0 * p + 0.005;
+    assert!(now > ClockFollower::SETTLE.get());
+    follower.steer(Some(Beat::new(2.4)), at(now), &mut |_| {});
     let error = follower.error().expect("read").get();
-    assert!((error - (2.0 + 0.005 * 2.0 - 1.95)).abs() < 1e-9, "{error}");
+    assert!((error - (59.0 / 24.0 + 0.01 - 2.4)).abs() < 1e-9, "{error}");
+}
+
+/// **The origin of the source's beat**: the first Timing Clock after a Start is
+/// beat 0 and the `k`-th is `(k - 1) / 24` (M1 p.30); after a Song Position
+/// Pointer of `n` sixteenths and a Continue the first is `n / 4` (M1 p.28).
+#[test]
+fn the_decoder_counts_the_first_tick_after_start_and_continue_as_its_own_beat() {
+    let tick = system(System::TimingClock);
+    let mut decoder = MidiClockDecoder::new();
+    assert_eq!(decoder.last_tick_beat(), None);
+    decoder.feed(&system(System::Start), at(0.0));
+    assert_eq!(decoder.last_tick_beat(), None);
+    for k in 1..=30u32 {
+        decoder.feed(&tick, at(f64::from(k) * 0.02));
+        assert_eq!(
+            decoder.last_tick_beat(),
+            Some(Beat::new(f64::from(k - 1) / 24.0)),
+            "tick {k}"
+        );
+    }
+    decoder.feed(&system(System::SongPosition(U14::of(22))), at(1.0));
+    decoder.feed(&system(System::Continue), at(1.0));
+    assert_eq!(decoder.last_tick_beat(), None);
+    decoder.feed(&tick, at(1.02));
+    assert_eq!(decoder.last_tick_beat(), Some(Beat::new(22.0 / 4.0)));
+    decoder.feed(&tick, at(1.04));
+    assert_eq!(
+        decoder.last_tick_beat(),
+        Some(Beat::new(22.0 / 4.0 + 1.0 / 24.0))
+    );
+}
+
+/// **A follower with nothing to steer reads no error**: after a Stop, and while
+/// the transport is not rolling though the source is (`steer` given `None`).
+#[test]
+fn the_error_is_none_after_a_stop_and_while_the_transport_is_stopped() {
+    let mut follower = ClockFollower::new(ClockKind::BeatClock);
+    let p = 60.0 / (120.0 * 24.0);
+    follower.step(system(System::Start), at(0.0), &mut |_| {});
+    for k in 1..=60u32 {
+        follower.step(
+            system(System::TimingClock),
+            at(f64::from(k - 1) * p),
+            &mut |_| {},
+        );
+    }
+    let now = 59.0 * p + 0.005;
+    follower.steer(Some(Beat::new(2.4)), at(now), &mut |_| {});
+    assert!(follower.error().is_some());
+    // The transport stops while the source rolls.
+    follower.steer(None, at(now + 0.01), &mut |_| {});
+    assert_eq!(follower.error(), None);
+    follower.steer(Some(Beat::new(2.4)), at(now + 0.02), &mut |_| {});
+    assert!(follower.error().is_some());
+    // The source stops.
+    follower.step(system(System::Stop), at(now + 0.03), &mut |_| {});
+    assert_eq!(follower.error(), None);
+    follower.steer(Some(Beat::new(2.4)), at(now + 0.04), &mut |_| {});
+    assert_eq!(follower.error(), None);
 }
