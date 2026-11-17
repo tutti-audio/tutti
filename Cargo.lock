@@ -3128,6 +3128,7 @@ name = "tutti-plugin-ipc-ffi"
 version = "0.0.1"
 dependencies = [
  "crossbeam-utils",
+ "loom",
  "memmap2",
  "rustix",
  "thiserror 2.0.21",
@@ -3357,13 +3358,6 @@ name = "tutti-shared-plugin-vst3-cpp"
 version = "0.1.0"
 dependencies = [
  "cc",
-]
-
-[[package]]
-name = "tutti-shm-model"
-version = "0.0.1"
-dependencies = [
- "loom",
 ]
 
 [[package]]
