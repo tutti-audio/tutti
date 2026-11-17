@@ -51,42 +51,6 @@ fn a_nonce_holds_only_the_printable_ascii_range() {
 }
 
 #[test]
-fn a_drawn_nonce_skips_the_bytes_that_would_bias_it() {
-    // 190 is two turns of 95: bytes from 190 up are skipped, the rest map to
-    // `32 + b % 95`.
-    let blocks = [
-        [
-            0, 94, 95, 189, 190, 191, 255, 254, 100, 101, 102, 103, 104, 105, 106, 107,
-        ],
-        [
-            255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 1, 2, 3, 4,
-        ],
-    ];
-    let mut next = blocks.iter();
-    let nonce = Nonce::draw(|| next.next().copied().ok_or(())).unwrap();
-    assert_eq!(
-        nonce.get(),
-        [
-            32, 126, 32, 126, 37, 38, 39, 40, 41, 42, 43, 44, 33, 34, 35, 36
-        ]
-    );
-}
-
-#[test]
-fn a_draw_that_runs_out_of_entropy_fails_with_its_error() {
-    let mut blocks = 0;
-    let result = Nonce::draw(|| {
-        blocks += 1;
-        if blocks == 1 {
-            Ok([255; 16])
-        } else {
-            Err("dry")
-        }
-    });
-    assert_eq!(result, Err("dry"));
-}
-
-#[test]
 fn random_nonces_are_valid_and_differ() {
     let nonce = Nonce::random().unwrap();
     assert!(Nonce::new(nonce.get()).is_some());

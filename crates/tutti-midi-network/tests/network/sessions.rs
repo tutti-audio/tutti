@@ -1084,28 +1084,41 @@ fn a_full_event_queue_keeps_what_it_holds_and_counts_the_rest() {
     assert_eq!(client.state(), SessionState::Established);
     let batches = 300;
     let per_batch = 16;
-    for _ in 0..batches {
-        host.send(now, client_addr(), &[note_on(60); 16]).unwrap();
+    for batch in 0..batches {
+        // The first batch is the oldest data in the queue.
+        let note = if batch == 0 { 100 } else { 60 };
+        host.send(now, client_addr(), &[note_on(note); 16]).unwrap();
         deliver(&mut host, &mut client, now);
     }
-    // One Established event, then one per UMP delivered.
+    // One Established event, then one per UMP delivered; the queue holds the
+    // first MAX_QUEUED_EVENTS.
     let total = 1 + batches * per_batch;
     assert!(total > MAX_QUEUED_EVENTS);
     assert_eq!(client.events_lost(), (total - MAX_QUEUED_EVENTS) as u64);
     let lost = client.events_lost();
-    // A Closed at a full queue is kept and is not a loss.
+    // A Closed at a full queue is delivered and evicts the oldest data event.
     host.close(now, client_addr(), ByeReason::PowerDown);
     deliver(&mut host, &mut client, now);
-    assert_eq!(client.events_lost(), lost);
+    assert_eq!(client.events_lost(), lost + 1);
     let mut held = 0;
     let mut first = None;
     let mut last = None;
+    let mut oldest_notes = 0;
     while let Some(event) = client.poll_event() {
+        if event
+            == (Event::Ump {
+                peer: host_addr(),
+                packet: note_on(100),
+            })
+        {
+            oldest_notes += 1;
+        }
         first.get_or_insert_with(|| event.clone());
         last = Some(event);
         held += 1;
     }
-    assert_eq!(held, MAX_QUEUED_EVENTS + 1);
+    assert_eq!(held, MAX_QUEUED_EVENTS, "the queue never exceeds the cap");
+    assert_eq!(oldest_notes, per_batch - 1, "the oldest data event is gone");
     assert!(matches!(first, Some(Event::Established { .. })));
     assert!(matches!(
         last,
@@ -1113,6 +1126,57 @@ fn a_full_event_queue_keeps_what_it_holds_and_counts_the_rest() {
             reason: ByeReason::PowerDown,
             ..
         })
+    ));
+}
+
+/// A queue full of session-life events loses its oldest to a newer one.
+#[test]
+fn a_queue_of_session_events_evicts_its_oldest_for_the_newest() {
+    let now = Instant::now();
+    let mut host = Host::new(HostConfig::new(identity("Studio", "HOST-1")));
+    let mut client = Client::new(
+        identity("Laptop", "CLIENT-1"),
+        Credentials::none(),
+        SessionConfig::default(),
+        host_addr(),
+        now,
+    );
+    let deliver = |host: &mut Host, client: &mut Client| loop {
+        let mut moved = false;
+        while let Some(t) = client.poll_transmit() {
+            moved = true;
+            host.on_message(client_addr(), &t.payload, now);
+        }
+        while let Some(t) = host.poll_transmit() {
+            moved = true;
+            client.on_message(host_addr(), &t.payload, now);
+        }
+        if !moved {
+            break;
+        }
+    };
+    // Each cycle is an Established and a Closed.
+    for _ in 0..MAX_QUEUED_EVENTS / 2 {
+        client.connect(now);
+        deliver(&mut host, &mut client);
+        host.close(now, client_addr(), ByeReason::UserTerminated);
+        deliver(&mut host, &mut client);
+    }
+    assert_eq!(client.state(), SessionState::Idle);
+    assert_eq!(client.events_lost(), 0);
+    // One more session-life event: the oldest (the first Established) goes.
+    client.connect(now);
+    deliver(&mut host, &mut client);
+    assert_eq!(client.events_lost(), 1);
+    let mut events = Vec::new();
+    while let Some(event) = client.poll_event() {
+        events.push(event);
+    }
+    assert_eq!(events.len(), MAX_QUEUED_EVENTS);
+    assert!(matches!(events[0], Event::Closed { .. }));
+    assert!(matches!(
+        events[MAX_QUEUED_EVENTS - 1],
+        Event::Established { .. }
     ));
 }
 

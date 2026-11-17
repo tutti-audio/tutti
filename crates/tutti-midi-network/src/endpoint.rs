@@ -37,27 +37,28 @@ pub trait NetworkEndpoint {
     /// The next event for the application, if one is queued.
     fn poll_event(&mut self) -> Option<Event>;
 
-    /// How many data events were dropped because [`MAX_QUEUED_EVENTS`] were
+    /// How many events were dropped because [`MAX_QUEUED_EVENTS`] were
     /// already waiting for [`poll_event`](Self::poll_event), since the
-    /// endpoint was made. An application that polls events never sees the
-    /// count rise; one that does not has the first events and this count of
-    /// the ones it missed. Session-state events are never dropped or counted
-    /// (see [`MAX_QUEUED_EVENTS`]).
+    /// endpoint was made: a data event that found the queue full, or an event
+    /// a later session-life event evicted. An application that polls events
+    /// never sees the count rise.
     fn events_lost(&self) -> u64;
 
     /// When [`on_timeout`](Self::on_timeout) next has work, if ever.
     fn deadline(&self) -> Option<Instant>;
 }
 
-/// The most data events an endpoint holds for the application. A queue that
-/// is full drops the data event that would join it and counts it
-/// ([`events_lost`](NetworkEndpoint::events_lost)), so an application that
-/// never polls costs the endpoint a bounded amount of memory.
+/// The most events an endpoint holds for the application; the queue never
+/// exceeds it, so an application that never polls costs the endpoint a bounded
+/// amount of memory. Every event lost is counted
+/// ([`events_lost`](NetworkEndpoint::events_lost)).
 ///
-/// The events of a session's life (`Established`, `Confirm`, `Closed` and
-/// `AuthenticationFailed`) join the queue whatever its length and are not
-/// counted: each is bounded by the number of sessions, and losing one would
-/// leave the application out of step with the session.
+/// A data event (`Ump`, `DataLost`, `Reset`, `Nak`) that finds the queue full
+/// is dropped. The events of a session's life (`Established`, `Confirm`,
+/// `Closed`, `AuthenticationFailed` and `NonceUnavailable`) take priority:
+/// one that finds the queue full evicts the oldest data event, and when no
+/// data event is queued, the oldest session-life event. Session-life events
+/// are lost only when the queue holds nothing else.
 pub const MAX_QUEUED_EVENTS: usize = 4096;
 
 #[derive(Debug, Default)]
@@ -78,8 +79,13 @@ impl Outbox {
                 .map(|payload| Transmit { to: peer, payload }),
         );
         for event in events {
-            if is_lifecycle(&event) || self.events.len() < MAX_QUEUED_EVENTS {
+            if self.events.len() < MAX_QUEUED_EVENTS {
                 self.events.push_back(event);
+            } else if is_lifecycle(&event) {
+                let oldest_data = self.events.iter().position(|e| !is_lifecycle(e));
+                self.events.remove(oldest_data.unwrap_or(0));
+                self.events.push_back(event);
+                self.events_lost += 1;
             } else {
                 self.events_lost += 1;
             }
@@ -87,8 +93,7 @@ impl Outbox {
     }
 }
 
-/// Whether an event reports a session's life, which a peer can cause only as
-/// often as the Host holds sessions.
+/// Whether an event reports a session's life rather than carrying data.
 const fn is_lifecycle(event: &Event) -> bool {
     matches!(
         event,
@@ -96,6 +101,7 @@ const fn is_lifecycle(event: &Event) -> bool {
             | Event::Confirm { .. }
             | Event::Closed { .. }
             | Event::AuthenticationFailed { .. }
+            | Event::NonceUnavailable { .. }
     )
 }
 
