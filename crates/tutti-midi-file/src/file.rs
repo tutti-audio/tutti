@@ -678,12 +678,11 @@ impl Track {
         let packets = packets(&self.header);
         let leading = clip_file::leading_profile_len(&packets);
         clip_file::profiles(packets[..leading].iter().map(|&(_, ump)| ump))
-            .map(|request| {
+            .inspect(|request| {
                 // A header holds only Set Profile On messages that read: a
                 // read file's are checked by `check_header` when it is built,
                 // and `profile_on` writes whole ones.
                 debug_assert!(request.is_ok(), "a built header's profiles read");
-                request
             })
             .flatten()
             .collect()

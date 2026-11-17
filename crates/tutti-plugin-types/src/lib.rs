@@ -56,7 +56,8 @@
 //! differ, and the reading path is the same for both:
 //!
 //! ```rust
-//! use tutti_plugin_types::{ParamFlags, ParamId, ParamSteps, ParameterInfo};
+//! use tutti_plugin_types::{ParamFlags, ParamSteps, ParameterInfo};
+//! use tutti_types::ParamId;
 //!
 //! // VST3/CLAP/AU: a plugin-chosen handle, often a hash of the name. Not an
 //! // index, not dense, not ordered.
@@ -141,7 +142,7 @@
 //! [`PluginDescriptor`]: crate::PluginDescriptor
 //! [`LoadedPlugin`]: crate::LoadedPlugin
 //! [`ParameterInfo`]: crate::ParameterInfo
-//! [`ParamId`]: crate::ParamId
+//! [`ParamId`]: tutti_types::ParamId
 //! [`ParamRange`]: crate::ParamRange
 //! [`ParamFlags`]: crate::ParamFlags
 //! [`ParamSteps`]: crate::ParamSteps
@@ -334,7 +335,7 @@ pub use param_edit::ParamEdit;
 pub use param_mapping::{LinearRange, ParamMapping};
 pub use param_unit::{ParamUnit, PlainUnit};
 pub use parameters::{
-    InvalidNormalized, Normalized, ParamAccess, ParamFlags, ParamId, ParamRange, ParamSteps,
+    InvalidNormalized, Normalized, ParamAccess, ParamFlags, ParamRange, ParamSteps,
     ParamWriteError, ParameterInfo,
 };
 pub use pipeline::{BlockCounts, ChunkCounters, MAX_CHUNK};

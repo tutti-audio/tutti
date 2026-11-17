@@ -19,7 +19,7 @@ use tutti_modulation::ControlProgram;
 use tutti_nodes::automation::{ControlLaneNode, LaneControls};
 use tutti_plugin::PluginClient;
 use tutti_plugin_host::PluginHandle;
-use tutti_plugin_types::ParamId;
+use tutti_types::ParamId;
 
 use crate::clap_probe::{ProbeEnv, load_probe};
 
@@ -32,7 +32,7 @@ pub fn extra(i: usize) -> ParamId {
 /// knob is at `value`, in the plugin's normalisation (doc 014 §5). It sends
 /// its knob on its first block and whenever the knob moves
 /// (`LaneControls::set_knob`), and again on `LaneControls::resync`.
-pub fn knob(id: u32, value: f32) -> ControlLaneNode {
+pub fn knob(id: ParamId, value: f32) -> ControlLaneNode {
     ControlLaneNode::for_foreign(id, ControlProgram::default(), Some(value), (0.0, 1.0))
 }
 
@@ -47,7 +47,7 @@ pub fn load_param_probe(params: usize, sample_rate: f64) -> (PluginClient, Plugi
 /// One [`knob`] lane per extra parameter `0..n`, each at `value(i)`, and their
 /// controls.
 pub fn knobs(n: usize, value: impl Fn(usize) -> f32) -> (Vec<LaneControls>, Vec<ControlLaneNode>) {
-    let lanes: Vec<ControlLaneNode> = (0..n).map(|i| knob(extra(i).get(), value(i))).collect();
+    let lanes: Vec<ControlLaneNode> = (0..n).map(|i| knob(extra(i), value(i))).collect();
     (lanes.iter().map(ControlLaneNode::controls).collect(), lanes)
 }
 
