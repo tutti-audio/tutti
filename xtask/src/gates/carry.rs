@@ -10,13 +10,25 @@
 //! A sentence reworded under hand columns has a new digest. Its row keeps the
 //! new text's generated columns and loses the hand columns ([`Fate::Changed`]),
 //! which the gate then refuses until a person rereads the sentence. Old rows
-//! with hand columns that no sentence claims are [`Carried::orphans`].
+//! with hand columns that no sentence claims are [`Carried::orphans`]: each is
+//! written back as a row with side `orphan`, its old id, hand columns and digest,
+//! after the last row of its section, and stays through every later run until a
+//! person moves its text to the right row and deletes it. The gate refuses both
+//! `changed` and `orphan` rows.
+//!
+//! The first regeneration after an inventory gains the digest column has no old
+//! digests: an old row without one takes the digest of the sentence currently at
+//! its id, so a rewording in that same run is accepted. The existing inventories
+//! have been through it; it applies only to a newly added inventory.
 
 use super::conformance::Row;
 use std::collections::BTreeMap;
 
 /// The side a row has while its sentence is being reread.
 pub(super) const CHANGED_SIDE: &str = "changed";
+
+/// The side of a row that keeps the hand columns of a sentence no row claims.
+pub(super) const ORPHAN_SIDE: &str = "orphan";
 
 /// A short stable digest of a requirement sentence: FNV-1a 64 of its words
 /// joined by single spaces, as 16 hex digits. Empty for no text.
@@ -41,7 +53,7 @@ pub(super) fn digest(text: &str) -> String {
 
 /// The section an id numbers its sentences in: the id up to its last `#`, or
 /// the whole id when it has none.
-fn section_of(id: &str) -> &str {
+pub(super) fn section_of(id: &str) -> &str {
     id.rsplit_once('#').map_or(id, |(s, _)| s)
 }
 
@@ -75,6 +87,8 @@ pub(super) struct Carried {
 /// An old row without a digest takes that of the item at its id (the first
 /// regeneration after the column was added).
 pub(super) fn carry(old: Vec<Row>, items: &[(&str, &str)]) -> Carried {
+    let (kept_orphans, old): (Vec<Row>, Vec<Row>) =
+        old.into_iter().partition(|r| r.side == ORPHAN_SIDE);
     let by_id: BTreeMap<&str, &str> = items.iter().copied().collect();
     let mut old: Vec<(Row, Option<String>)> = old
         .into_iter()
@@ -146,10 +160,11 @@ pub(super) fn carry(old: Vec<Row>, items: &[(&str, &str)]) -> Carried {
             })
         })
         .collect();
-    let (mut orphans, mut dropped) = (Vec::new(), Vec::new());
-    for (i, (r, _)) in old.drain(..).enumerate() {
+    let (mut orphans, mut dropped) = (kept_orphans, Vec::new());
+    for (i, (mut r, _)) in old.drain(..).enumerate() {
         if !taken[i] {
             if has_hand(&r) {
+                r.side = ORPHAN_SIDE.to_owned();
                 orphans.push(r);
             } else {
                 dropped.push(r);
