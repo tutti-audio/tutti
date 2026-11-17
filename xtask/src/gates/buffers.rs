@@ -490,7 +490,7 @@ fn source_files(tree: &dyn Tree) -> Vec<String> {
 /// (`pending`, `engine-f32`, `ffi`) or `not-audio`/`spec-f32` with a `: <why>`.
 pub(super) fn reason_error(reason: &str, allowed: &[&str]) -> Option<String> {
     let (kind, why) = match reason.split_once(':') {
-        Some((k, w)) => (k.trim(), Some(w.trim())),
+        Some((k, w)) => (k, Some(w.trim())),
         None => (reason, None),
     };
     let needs_why = matches!(kind, "not-audio" | "spec-f32");
@@ -675,6 +675,7 @@ mod tests {
             "spec-f32:",
             "pending: soon",
             "ffi: wire",
+            "not-audio :x",
         ] {
             let list = format!("crates/a/src/lib.rs::gain  {reason}\n");
             let r = run(&list, "pub fn gain(x: &[f32]) {}\n");

@@ -30,7 +30,8 @@
 //!   `n * usize::from(layout.count())`).
 //!
 //! **What it misses.** It is a grep, not a proof: a loop over `step_by`, a
-//! `chunks(..)` or `chunks_exact(len)` whose length is not a width word, an
+//! `chunks(..)` or `chunks_exact(len)` whose length is not a width word, a
+//! `chunks_exact(<literal>)` or `chunks_exact(a * b)`, an
 //! index whose stride is `cols`, `n` or a local alias, a product split over
 //! lines or through a temporary (`let s = width; frames * s`), a `.count()`
 //! on a receiver not named for a layout, a loop that zips planes by hand
@@ -402,7 +403,7 @@ fn source_files(tree: &dyn Tree) -> Vec<String> {
         .collect()
 }
 
-const KINDS: [&str; 2] = ["pending", "not-audio"];
+const LOOP_KINDS: [&str; 2] = ["pending", "not-audio"];
 
 /// The list's rows, key to reason; the errors name the line.
 fn parse(text: &str) -> Result<BTreeMap<String, String>, Vec<String>> {
@@ -418,7 +419,7 @@ fn parse(text: &str) -> Result<BTreeMap<String, String>, Vec<String>> {
             Some((k, r)) => (k, r.trim()),
             None => (line, ""),
         };
-        if let Some(why) = reason_error(reason, &KINDS) {
+        if let Some(why) = reason_error(reason, &LOOP_KINDS) {
             errors.push(format!("  {LIST}:{at}: `{key}`: {why}"));
         }
         if rows.insert(key.to_owned(), reason.to_owned()).is_some() {
@@ -631,6 +632,30 @@ mod tests {
             ],
         );
         assert!(r.passed(), "{:?}", r.findings);
+    }
+
+    #[test]
+    fn a_file_a_cfg_test_mod_declaration_reaches_is_skipped() {
+        let hit_src = "fn f() { let n = frames * channels; }\n";
+        let r = run(
+            "",
+            &[
+                (F, "#[cfg(test)]\nmod helpers;\n"),
+                ("crates/a/src/helpers.rs", hit_src),
+            ],
+        );
+        assert!(r.passed(), "{:?}", r.findings);
+        let r = run(
+            "",
+            &[(F, "mod helpers;\n"), ("crates/a/src/helpers.rs", hit_src)],
+        );
+        assert_eq!(r.findings[1..], ["  crates/a/src/helpers.rs::f: length"]);
+    }
+
+    #[test]
+    fn a_cfg_test_fn_is_skipped_and_its_neighbour_is_not() {
+        let src = "#[cfg(test)]\nfn t() { let n = frames * channels; }\nfn p() { let n = frames * channels; }\n";
+        assert_eq!(keys(src), [format!("{F}::p")]);
     }
 
     #[test]
