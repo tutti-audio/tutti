@@ -4,27 +4,27 @@
 use tutti_midi_device::{EndpointName, NameError, ProductInstanceId};
 use tutti_ump::{Ump, split_stream};
 
-use crate::{Digest, Nonce, SequenceNumber, Text, TextError, Username};
+use crate::{BoundedText, ByeText, Digest, NakText, Nonce, SequenceNumber, TextError, Username};
 
 /// Command Codes (M2-124 Table 8).
-mod code {
-    pub(super) const INVITATION: u8 = 0x01;
-    pub(super) const INVITATION_AUTH: u8 = 0x02;
-    pub(super) const INVITATION_USER_AUTH: u8 = 0x03;
-    pub(super) const ACCEPTED: u8 = 0x10;
-    pub(super) const PENDING: u8 = 0x11;
-    pub(super) const AUTH_REQUIRED: u8 = 0x12;
-    pub(super) const USER_AUTH_REQUIRED: u8 = 0x13;
-    pub(super) const PING: u8 = 0x20;
-    pub(super) const PING_REPLY: u8 = 0x21;
-    pub(super) const RETRANSMIT_REQUEST: u8 = 0x80;
-    pub(super) const RETRANSMIT_ERROR: u8 = 0x81;
-    pub(super) const SESSION_RESET: u8 = 0x82;
-    pub(super) const SESSION_RESET_REPLY: u8 = 0x83;
-    pub(super) const NAK: u8 = 0x8F;
-    pub(super) const BYE: u8 = 0xF0;
-    pub(super) const BYE_REPLY: u8 = 0xF1;
-    pub(super) const UMP_DATA: u8 = 0xFF;
+pub(crate) mod code {
+    pub(crate) const INVITATION: u8 = 0x01;
+    pub(crate) const INVITATION_AUTH: u8 = 0x02;
+    pub(crate) const INVITATION_USER_AUTH: u8 = 0x03;
+    pub(crate) const ACCEPTED: u8 = 0x10;
+    pub(crate) const PENDING: u8 = 0x11;
+    pub(crate) const AUTH_REQUIRED: u8 = 0x12;
+    pub(crate) const USER_AUTH_REQUIRED: u8 = 0x13;
+    pub(crate) const PING: u8 = 0x20;
+    pub(crate) const PING_REPLY: u8 = 0x21;
+    pub(crate) const RETRANSMIT_REQUEST: u8 = 0x80;
+    pub(crate) const RETRANSMIT_ERROR: u8 = 0x81;
+    pub(crate) const SESSION_RESET: u8 = 0x82;
+    pub(crate) const SESSION_RESET_REPLY: u8 = 0x83;
+    pub(crate) const NAK: u8 = 0x8F;
+    pub(crate) const BYE: u8 = 0xF0;
+    pub(crate) const BYE_REPLY: u8 = 0xF1;
+    pub(crate) const UMP_DATA: u8 = 0xFF;
 }
 
 /// The most 32-bit words a UMP Data Command carries (M2-124 Table 29).
@@ -44,12 +44,6 @@ const ID_WORDS_MAX: usize = 11;
 pub struct Header(u32);
 
 impl Header {
-    /// The header with this code, payload length (in words) and data.
-    #[must_use]
-    pub const fn new(code: u8, payload_words: u8, data: u16) -> Self {
-        Self((code as u32) << 24 | (payload_words as u32) << 16 | data as u32)
-    }
-
     /// The header read from its word.
     #[must_use]
     pub const fn from_word(word: u32) -> Self {
@@ -316,8 +310,10 @@ pub struct Nak {
     pub reason: NakReason,
     /// The header of the command that is refused.
     pub refused: Header,
-    /// Words for the user; may be empty.
-    pub text: Text,
+    /// Words for the user; may be empty. Text a peer sent that is not UTF-8 is
+    /// read up to the last whole character before the bad byte, and the NAK is
+    /// still read.
+    pub text: NakText,
 }
 
 /// Why a Session ends (M2-124 Table 27).
@@ -413,8 +409,10 @@ impl ByeReason {
 pub struct Bye {
     /// Why.
     pub reason: ByeReason,
-    /// Words for the user; may be empty.
-    pub text: Text,
+    /// Words for the user; may be empty. Text a peer sent that is not UTF-8 is
+    /// read up to the last whole character before the bad byte, and the Bye
+    /// still ends the Session.
+    pub text: ByeText,
 }
 
 impl Bye {
@@ -423,7 +421,7 @@ impl Bye {
     pub fn new(reason: ByeReason) -> Self {
         Self {
             reason,
-            text: Text::default(),
+            text: ByeText::default(),
         }
     }
 }
@@ -534,12 +532,6 @@ impl UmpData {
         &self.words
     }
 
-    /// Whether this declares an idle period: it carries no UMP.
-    #[must_use]
-    pub fn is_idle(&self) -> bool {
-        self.words.is_empty()
-    }
-
     /// The packets, in the order sent.
     pub fn packets(&self) -> impl Iterator<Item = Ump> + '_ {
         split_stream(&self.words)
@@ -608,19 +600,19 @@ pub enum ParseError {
     #[error("a required text is empty")]
     EmptyText,
     /// A text is not UTF-8.
-    #[error("a text is not UTF-8: {0}")]
+    #[error("a text is not UTF-8")]
     Utf8(#[source] std::str::Utf8Error),
     /// The Endpoint Name is not a valid name.
-    #[error("the Endpoint Name is invalid: {0}")]
-    Name(NameError),
+    #[error("the Endpoint Name is invalid")]
+    Name(#[source] NameError),
     /// The Product Instance Id is not a valid Id.
-    #[error("the Product Instance Id is invalid: {0}")]
-    InstanceId(NameError),
+    #[error("the Product Instance Id is invalid")]
+    InstanceId(#[source] NameError),
     /// A text is empty or too long for its field, or holds a NUL.
-    #[error("a text is not valid for its field: {0}")]
+    #[error("a text is not valid for its field")]
     Text(#[source] TextError),
-    /// The nonce is not ASCII.
-    #[error("the nonce is not ASCII")]
+    /// A received nonce is not ASCII.
+    #[error("a received nonce is not ASCII")]
     Nonce,
     /// An enumerated field holds a reserved value that has no meaning to act
     /// on.
@@ -688,9 +680,18 @@ fn read_identity(name: &[u8], id: &[u8]) -> Result<EndpointIdentity, ParseError>
     })
 }
 
-fn read_text(field: &[u8]) -> Result<Text, ParseError> {
-    let text = std::str::from_utf8(trimmed(field)).map_err(ParseError::Utf8)?;
-    Text::new(text).map_err(ParseError::Text)
+/// The advisory text of a Bye or a NAK. The text is for the user and changes
+/// nothing the session does, so a receiver keeps what it can read: a field that
+/// is not UTF-8 is cut at the last whole character before the bad byte, and an
+/// over-long one cannot occur (the field is the payload, which `MAX` covers).
+/// Constructors of the text types stay strict; only this wire reader is lenient.
+fn read_advisory_text<const MAX: usize>(field: &[u8]) -> BoundedText<0, MAX> {
+    let field = trimmed(field);
+    let valid = match std::str::from_utf8(field) {
+        Ok(text) => text,
+        Err(e) => std::str::from_utf8(&field[..e.valid_up_to()]).unwrap_or_default(),
+    };
+    BoundedText::new(valid).unwrap_or_default()
 }
 
 fn be16(bytes: &[u8]) -> u16 {
@@ -812,21 +813,25 @@ impl Command {
         finish(out, at);
     }
 
-    /// The command a header and its payload make. `payload` is exactly the
-    /// header's payload length, in bytes.
+    /// The command a header and its payload make. `payload` is the bytes that
+    /// follow the header, as many as its payload length counts in words.
+    /// The text of a Bye or NAK is read leniently (see [`Bye::text`]).
     ///
     /// # Errors
     ///
-    /// A [`ParseError`] naming what is wrong. Reserved bytes and bits are not
-    /// read, and payload words past the defined fields are ignored (M2-124
-    /// section 5.3).
+    /// A [`ParseError`] naming what is wrong: [`ParseError::Length`] when
+    /// `payload` is not the header's payload length in bytes. Reserved bytes
+    /// and bits are not read, and payload words past the defined fields are
+    /// ignored (M2-124 section 5.3).
     pub fn parse(header: Header, payload: &[u8]) -> Result<Self, ParseError> {
         let words = usize::from(header.payload_words());
-        debug_assert_eq!(payload.len(), words * 4);
         let bad_length = || ParseError::Length {
             code: header.code(),
             words: header.payload_words(),
         };
+        if payload.len() != words * 4 {
+            return Err(bad_length());
+        }
         match header.code() {
             code::INVITATION => {
                 let (name, id) =
@@ -864,7 +869,7 @@ impl Command {
                 let (nonce, rest) = payload.split_first_chunk::<16>().ok_or_else(bad_length)?;
                 let (name, id) =
                     split_identity(usize::from(header.data1()), rest).ok_or_else(bad_length)?;
-                let nonce = Nonce::new(*nonce).ok_or(ParseError::Nonce)?;
+                let nonce = Nonce::from_wire(*nonce).ok_or(ParseError::Nonce)?;
                 let identity = read_identity(name, id)?;
                 if header.code() == code::AUTH_REQUIRED {
                     let state = match header.data2() {
@@ -924,12 +929,12 @@ impl Command {
                     refused: Header::from_word(u32::from_be_bytes([
                         refused[0], refused[1], refused[2], refused[3],
                     ])),
-                    text: read_text(text)?,
+                    text: read_advisory_text(text),
                 }))
             }
             code::BYE => Ok(Self::Bye(Bye {
                 reason: ByeReason::from_code(header.data1()),
-                text: read_text(payload)?,
+                text: read_advisory_text(payload),
             })),
             code::BYE_REPLY => Ok(Self::ByeReply),
             code::UMP_DATA => {

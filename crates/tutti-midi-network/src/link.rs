@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 
 use tutti_ump::Ump;
 
+use crate::config::TIMER_MAX;
 use crate::{
     Command, RetransmitErrorReason, RetransmitRefusal, RetransmitRequest, SequenceNumber,
     SessionConfig, UmpData,
@@ -322,7 +323,10 @@ impl Link {
                 count: missing,
             }));
             let requests = gap.requests + 1;
-            let wait = cfg.reorder_wait * 2u32.saturating_pow(u32::from(requests));
+            let wait = cfg
+                .reorder_wait
+                .saturating_mul(2u32.saturating_pow(u32::from(requests)))
+                .min(TIMER_MAX);
             self.gap = Some(Gap {
                 requests,
                 next_request: now + wait,

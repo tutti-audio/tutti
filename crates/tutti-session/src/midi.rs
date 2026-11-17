@@ -38,7 +38,7 @@ use crate::midi_follow::{
     MACHINE_TAP_CAPACITY, MachineFollow,
 };
 use crate::{EventOutPort, Key, MidiError, MidiNodes, MidiReport};
-use crate::{FollowClock, FollowMachineControl, FollowTempo, SendMachineControl};
+use crate::{FollowClock, FollowMachineControl, FollowTempo};
 
 /// What a [`Midi`] call returns: the area's one error.
 type Result<T> = std::result::Result<T, MidiError>;
@@ -547,23 +547,6 @@ fn route_drain(
     }
 }
 
-/// Routes a batch of events, each on its frame on the graph's clock, to `out`
-/// ([`UmpOut::send_frames`]). An event with no output is dropped (the ring must
-/// not back up), counted first. Returns how many events did not go.
-pub(crate) fn route_batch(
-    out: Option<&mut UmpOut>,
-    losses: &mut LossWriters,
-    timing: Option<&OutputTiming>,
-    events: &[(Frame, Ump)],
-) -> u64 {
-    let refused = match out {
-        Some(out) => out.send_frames(events, timing) as u64,
-        None => events.len() as u64,
-    };
-    losses.refused(refused);
-    refused
-}
-
 /// Where a take's events belong on the timeline: the figure
 /// [`Midi::record`]'s readers are placed by. A note played at graph frame `F`
 /// was answered by output the device played `output` after it was rendered, and
@@ -741,10 +724,6 @@ pub(crate) struct MidiState {
     /// The Machine Control the session follows, if it does
     /// ([`Midi::follow_machine_control`]).
     machine: Option<MachineFollow>,
-    /// The Machine Control the session sends, if it does
-    /// ([`Midi::send_machine_control`]): the Group it goes out on and what
-    /// turns the transport's changes into commands.
-    machine_out: Option<(MidiGroup, tutti_midi_runtime::MachineControlSender)>,
     /// Events [`Midi::unfollow_tempo`] and [`Midi::unfollow_clock`] queued for the next `Poll` phase, which
     /// reports them.
     follow_events: Vec<MidiReport>,
@@ -982,44 +961,6 @@ impl MidiState {
         edited
     }
 
-    /// Sends the Machine Control the transport's change since the last update
-    /// calls for, to the output, at once and on the playhead's frame.
-    fn send_machine_control(&mut self, playhead: &tutti_engine::Playhead, now: Instant) {
-        let Some((group, sender)) = self.machine_out.as_mut() else {
-            return;
-        };
-        let message = match sender.observe(
-            playhead.playing(),
-            playhead.seconds(),
-            playhead.frame(),
-            playhead.rate(),
-        ) {
-            Ok(Some(message)) => message,
-            Ok(None) => return,
-            // A refused look sends nothing and is counted refused on every output.
-            Err(_) => {
-                self.refuse_to_outputs(1);
-                return;
-            }
-        };
-        let frame = playhead.frame();
-        let Ok(packets) = tutti_ump::Sysex7Packets::from_payload(*group, &message) else {
-            self.refuse_to_outputs(1);
-            return;
-        };
-        let batch: Vec<(Frame, Ump)> = packets.map(|ump| (frame, ump)).collect();
-        let timing = self.output_timing(now);
-        // Every output is sent it, and counts what does not go.
-        self.ports.route(&batch, timing.as_ref());
-        self.sinks.route(&batch, timing.as_ref());
-    }
-
-    /// Counts `n` events a look could not become as refused by every output.
-    fn refuse_to_outputs(&mut self, n: u64) {
-        self.ports.refuse(n);
-        self.sinks.refuse(n);
-    }
-
     /// The outputs' taps are on one scale of frames, the rate they were opened
     /// at: when the graph has been re-prepared at another, drains the old
     /// readers and reopens those taps (and no other: a caller's own are the
@@ -1034,19 +975,13 @@ impl MidiState {
 
     /// `Phase::MidiOut`: drains every output's tap to its device or sink.
     /// Whether the graph was edited.
-    pub(crate) fn midi_out_phase(
-        &mut self,
-        graph: &mut Graph,
-        playhead: &tutti_engine::Playhead,
-        now: Instant,
-    ) -> bool {
+    pub(crate) fn midi_out_phase(&mut self, graph: &mut Graph, now: Instant) -> bool {
         // A graph re-rated outside the device hook (`Graph::set_sample_rate`)
         // is followed here, before this update's events are read.
         let mut edited = self.follow_rate(graph, now);
         let timing = self.output_timing(now);
         edited |= self.sinks.drain(graph, timing.as_ref());
         self.ports.drain_outputs(timing.as_ref());
-        self.send_machine_control(playhead, now);
         edited
     }
 }
@@ -2053,45 +1988,10 @@ impl Midi<'_> {
         Ok(())
     }
 
-    /// Sends the transport's play, stop and locate as MIDI Machine Control
-    /// commands (RP-013) to every open output (a `midi_output` or `midi_sink` entry's),
-    /// for a host that drives a tape machine or another DAW. **Off by default.**
-    ///
-    /// Each update looks at the playhead and sends what changed since the last:
-    /// PLAY when the transport started, STOP when it stopped, and a LOCATE to the
-    /// position's time code (with DEFERRED PLAY after it while rolling) when
-    /// the position is not where rolling would have left it, a loop wrap
-    /// included. The first update after the call sends nothing. A change is
-    /// sent at the update that sees it, not on its frame: MMC carries no time
-    /// of its own. A transport that starts and stops again between two updates
-    /// sends neither; a followed source's commands are sent on like any other
-    /// motion, so do not follow and send to the same machine.
-    ///
-    /// A second call replaces the first.
-    pub fn send_machine_control(&mut self, send: SendMachineControl) {
-        self.state.machine_out = Some((
-            send.group,
-            tutti_midi_runtime::MachineControlSender::new(send.to, send.rate),
-        ));
-    }
-
-    /// Stops sending Machine Control ([`send_machine_control`](Self::send_machine_control)).
-    ///
-    /// # Errors
-    ///
-    /// [`MidiError::NotSendingMachineControl`] when none is sent.
-    pub fn stop_sending_machine_control(&mut self) -> Result<()> {
-        self.state
-            .machine_out
-            .take()
-            .map(|_| ())
-            .ok_or(MidiError::NotSendingMachineControl)
-    }
-
     // --- Outputs ---
 
     /// Adds an output node to the graph and opens its tap: the node is fed by
-    /// the session's clock (every output carries it), and the tap is aligned to
+    /// the session's sync node (every output carries it), and the tap is aligned to
     /// the outputs' time so MIDI leaves with the audio. What a host wires to
     /// the node's event input is read from the tap.
     pub(crate) fn add_output_node(&mut self) -> (NodeKey, EventTapReader) {
@@ -2101,7 +2001,7 @@ impl Midi<'_> {
         let node = key.erase();
         if let Some(nodes) = self.nodes {
             self.graph
-                .set_feed(node, Feeder::Clock, vec![EventOutPort::new(nodes.clock, 0)]);
+                .set_feed(node, Feeder::Clock, vec![EventOutPort::new(nodes.sync, 0)]);
         }
         let tap = self
             .graph
@@ -2260,30 +2160,14 @@ mod tests {
         );
     }
 
-    /// A router with no output counts the events rather than losing them
-    /// silently.
+    /// An open output takes the batch whole: both events reach the sink and
+    /// none is refused.
     #[test]
-    fn routing_with_no_output_counts_the_drops() {
-        let (mut writers, readers) = loss_cells();
-        let refused = route_batch(None, &mut writers, None, &[at(0), at(1), at(2)]);
-        assert_eq!(
-            (refused, readers.get()),
-            (3, tutti_graph::Losses::refused(3))
-        );
-    }
-
-    /// And a router *with* an output does not count drops.
-    #[test]
-    fn routing_to_an_open_output_drops_nothing() {
+    fn sending_to_an_open_output_refuses_nothing() {
         let (mut out, count) = out_with_counter(Stamping::Off);
-        let (mut writers, readers) = loss_cells();
-        route_batch(Some(&mut out), &mut writers, None, &[at(0), at(1)]);
+        let refused = out.send_frames(&[at(0), at(1)], None);
         assert_eq!(count.load(Ordering::SeqCst), 2, "both reached the sink");
-        assert_eq!(
-            readers.get(),
-            tutti_graph::Losses::NONE,
-            "nothing was dropped"
-        );
+        assert_eq!(refused, 0, "nothing was dropped");
     }
 
     /// An event on a frame of the graph's clock.
@@ -2309,13 +2193,7 @@ mod tests {
     fn a_batch_of_frames_is_a_block_from_its_first_frame() {
         let log = Arc::new(std::sync::Mutex::new(Vec::new()));
         let mut out = UmpOut::new(Arc::new(Recording(log.clone())), SampleRate::SR_48K);
-        let (mut losses, _) = loss_cells();
-        route_batch(
-            Some(&mut out),
-            &mut losses,
-            None,
-            &[at(1_250), at(1_000), at(1_999)],
-        );
+        out.send_frames(&[at(1_250), at(1_000), at(1_999)], None);
         let sent = log.lock().unwrap().remove(0);
         let span = Samples(1_000);
         let offsets: Vec<_> = sent.iter().map(|e| e.0).collect();
@@ -2326,12 +2204,7 @@ mod tests {
         );
         out.set_stamping(Stamping::Jr);
         let before = out.origin();
-        route_batch(
-            Some(&mut out),
-            &mut losses,
-            None,
-            &[at(1_250), at(1_000), at(1_999)],
-        );
+        out.send_frames(&[at(1_250), at(1_000), at(1_999)], None);
         assert_eq!(out.origin().since(before), Some(Samples(1_000)), "the span");
     }
 
@@ -2471,25 +2344,16 @@ mod tests {
         );
     }
 
-    /// **An event beyond the cap is not sent and is counted**; one within it
-    /// goes.
+    /// **An event beyond the cap is not sent and is reported refused**; one
+    /// within it goes.
     #[test]
     fn an_event_beyond_the_cap_is_refused_and_counted() {
         let t0 = Instant::now() + Duration::from_secs(60);
         let (mut out, log) = timed_out();
-        let (mut writers, readers) = loss_cells();
         let timing = timing_at(t0, OutputTerms::default());
         let beyond = 48_000 * 3;
-        let refused = route_batch(
-            Some(&mut out),
-            &mut writers,
-            Some(&timing),
-            &[at(1_000), at(beyond)],
-        );
-        assert_eq!(
-            (refused, readers.get()),
-            (1, tutti_graph::Losses::refused(1))
-        );
+        let refused = out.send_frames(&[at(1_000), at(beyond)], Some(&timing));
+        assert_eq!(refused, 1);
         assert_eq!(log.lock().unwrap().len(), 1, "only the one within the cap");
     }
 
