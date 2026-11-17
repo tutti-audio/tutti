@@ -78,9 +78,9 @@ struct Channel {
 ///   CC 6 waits for one of them, with an LSB of 0 if none follows; a CC 38
 ///   before any CC 6 waits for the CC 6 and is sent with it. The data is the
 ///   14-bit `MSB << 7 | LSB`, zero-extended to 32 bits for registered
-///   controllers 0 to 31 of bank 0 (M2-115 section 4.1: their halves are two
-///   fields, pitch bend sensitivity's semitones and cents for one) and
-///   scaled Min-Center-Max for every other. A select of one half keeps the
+///   controllers of any bank whose index is 0 to 31 (M2-115 section 4.1: their
+///   halves are two fields, pitch bend sensitivity's semitones and cents for
+///   one) and scaled Min-Center-Max for every other. A select of one half keeps the
 ///   other half as last selected, separately for RPN and NRPN. The Null
 ///   Function (`7F 7F`) ends the run and is not translated: Data Entry after
 ///   it is dropped. So does Reset All Controllers (CC 121, RP-015), which
@@ -407,7 +407,7 @@ fn emit(channel: &mut Channel, lsb: Option<U7>, send: &mut impl FnMut(Voice2)) {
         Kind::None => return,
         Kind::Registered => {
             let Number { bank, index } = channel.rpn;
-            let value = ControlValue::new(if scale::zero_extended(bank, index) {
+            let value = ControlValue::new(if scale::zero_extended(index) {
                 data << 18
             } else {
                 scale::upscale(data, 14, 32)

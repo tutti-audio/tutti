@@ -44,7 +44,7 @@ struct Channel {
 ///   until a new Parameter Number is chosen), so a stream of values for one
 ///   parameter is a CC 6 and a CC 38 each.
 /// - **The data narrows** by the rule the [`Translator`](crate::Translator) widened with. A
-///   Registered Controller of bank 0 and index 0 to 31 is a fixed-point number
+///   Registered Controller of index 0 to 31 (any bank) is a fixed-point number
 ///   or a pair of fields, widened by zero-extension (M2-115 section 4.1:
 ///   Zero-Extension Scaling for every Registered Controller whose index is
 ///   0 to 31), and narrows **with rounding** (section 4.4: fixed-point values
@@ -214,7 +214,7 @@ impl Narrower {
         match voice {
             Voice2::Registered { bank, index, value } => {
                 let selected = Selected::Registered { bank, index };
-                let data = if scale::zero_extended(bank, index) {
+                let data = if scale::zero_extended(index) {
                     narrow_rounded(value.get())
                 } else {
                     narrow_data(extremes, value)

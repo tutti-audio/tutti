@@ -152,27 +152,31 @@ fn a_select_moved_behind_its_back_is_sent_again() {
     assert_eq!(feed(&mut n, rpn(A, 0, 0, 0)).len(), 4);
 }
 
-/// **M2-115 section 4.4.1 (`scaleDownRounding(v, 32, 14)`): RPN bank 0 index
-/// 0 to 31 round** (add half the range `1 << 17`, shift 18, clamp to 0x3FFF).
+/// **M2-115 section 4.4.1 (`scaleDownRounding(v, 32, 14)`): RPN index 0 to 31
+/// round, in any bank** (section 4.1: zero-extension "where the index (RPN LSB)
+/// is 0-31"): add half the range `1 << 17`, shift 18, clamp to 0x3FFF.
 /// 0x0001_FFFF is below the half (rounds down to 0); 0x0002_0000 is the half
 /// (rounds up to 1); 0xFFFF_FFFF would be 0x4000 and clamps to 0x3FFF.
 /// Spec: m2-115/4.1#1, m2-115/4.4#1, m2-115/4.4#2
 #[test]
 fn rpn_0_to_31_narrows_with_rounding() {
-    let data = |value| {
-        let mut n = Narrower::new();
-        let out = feed(&mut n, rpn(A, 0, 7, value));
-        (u16::from(out[2][2]) << 7) | u16::from(out[3][2])
-    };
-    assert_eq!(data(0x0001_FFFF), 0);
-    assert_eq!(data(0x0002_0000), 1);
-    assert_eq!(data(0xFFFF_FFFF), 0x3FFF);
+    for (bank, index) in [(0, 7), (0, 31), (1, 0), (1, 31), (127, 7)] {
+        let data = |value| {
+            let mut n = Narrower::new();
+            let out = feed(&mut n, rpn(A, bank, index, value));
+            (u16::from(out[2][2]) << 7) | u16::from(out[3][2])
+        };
+        assert_eq!(data(0x0001_FFFF), 0, "bank {bank} index {index}");
+        assert_eq!(data(0x0002_0000), 1, "bank {bank} index {index}");
+        assert_eq!(data(0xFFFF_FFFF), 0x3FFF, "bank {bank} index {index}");
+    }
 }
 
 /// **Every other controller narrows by the plain shift** (M2-115 section 3.4):
 /// RPN index 32 and up, another bank, and every NRPN keep the top 14 bits,
-/// truncating where the zero-extended rule would round (0x0002_0000 is 0).
-/// Spec: m2-115/2.2#2
+/// truncating where the zero-extended rule would round (0x0002_0000 is 0);
+/// index 32 is the first scaled one in every bank (M2-115 section 3.1).
+/// Spec: m2-115/2.2#2, m2-115/3.1#1
 #[test]
 fn other_controllers_narrow_by_shift() {
     let data = |message: Message| {
@@ -182,12 +186,14 @@ fn other_controllers_narrow_by_shift() {
     };
     for message in [
         rpn(A, 0, 32, 0x0002_0000),
-        rpn(A, 1, 7, 0x0002_0000),
+        rpn(A, 1, 32, 0x0002_0000),
+        rpn(A, 1, 127, 0x0002_0000),
         nrpn(A, 0, 7, 0x0002_0000),
     ] {
         assert_eq!(data(message), 0, "{message:?}");
     }
     assert_eq!(data(rpn(A, 0, 32, 0xFFFF_FFFF)), 0x3FFF);
+    assert_eq!(data(rpn(A, 1, 32, 0xFFFF_FFFF)), 0x3FFF);
 }
 
 /// **A Program Change with a bank is CC 0, CC 32, Program Change (D.2.4); the

@@ -277,19 +277,23 @@ fn rpn_and_nrpn_keep_their_own_numbers() {
     assert_eq!(out[4], vec![assignable(0, 9, 0)]);
 }
 
-// M2-115 section 4.1: bank 0 registered controllers 0 to 31 carry two 7-bit
-// fields and are zero-extended; every other is a 14-bit number, scaled
+// M2-115 section 4.1: registered controllers whose index is 0 to 31, in any
+// bank, are zero-extended; every other is a 14-bit number, scaled
 // Min-Center-Max (section 3: maximum to maximum, centre to centre).
 
+/// **Zero-extension keys on the index alone**: M2-115 section 4.1, "Translators
+/// shall use Zero-Extension Scaling on all Registered Controller (RPN) Messages
+/// where the index (RPN LSB) is 0-31". MSB 127, LSB 127 is 0x3FFF, which
+/// zero-extended is `0x3FFF << 18` (0xFFFC_0000), not the scaled 0xFFFF_FFFF.
 /// Spec: m2-115/4.1#1, m2-115/4.3#1
 #[test]
-fn bank_0_registered_controllers_0_to_31_are_zero_extended() {
-    for index in [0, 1, 6, 31] {
+fn registered_controllers_0_to_31_are_zero_extended_in_every_bank() {
+    for (bank, index) in [(0, 0), (0, 1), (0, 6), (0, 31), (1, 0), (1, 31), (127, 7)] {
         let mut t = Translator::new();
         let out = run(
             &mut t,
             &[
-                cc(CCNumber::RPN_MSB, 0),
+                cc(CCNumber::RPN_MSB, bank),
                 cc(CCNumber::RPN_LSB, index),
                 cc(CCNumber::DATA_ENTRY, 127),
                 cc(CCNumber::DATA_ENTRY_LSB, 127),
@@ -297,8 +301,8 @@ fn bank_0_registered_controllers_0_to_31_are_zero_extended() {
         );
         assert_eq!(
             out[3],
-            vec![registered(0, index, 0xFFFC_0000)],
-            "index {index}"
+            vec![registered(bank, index, 0xFFFC_0000)],
+            "bank {bank} index {index}"
         );
     }
 }
@@ -306,14 +310,19 @@ fn bank_0_registered_controllers_0_to_31_are_zero_extended() {
 /// Spec: m2-104/d.1.1#1, m2-115/3.1#1
 #[test]
 fn other_controllers_are_scaled_min_center_max() {
-    // Registered bank 0 index 32, registered bank 1, and every NRPN.
+    // Registered index 32 in bank 0 and bank 1 (section 3.1: index 32 to 127
+    // is Min-Center-Max, the boundary above zero-extension), and every NRPN.
     for (selects, make) in [
         (
             [cc(CCNumber::RPN_MSB, 0), cc(CCNumber::RPN_LSB, 32)],
             registered as fn(u8, u8, u32) -> Message,
         ),
         (
-            [cc(CCNumber::RPN_MSB, 1), cc(CCNumber::RPN_LSB, 0)],
+            [cc(CCNumber::RPN_MSB, 1), cc(CCNumber::RPN_LSB, 32)],
+            registered,
+        ),
+        (
+            [cc(CCNumber::RPN_MSB, 1), cc(CCNumber::RPN_LSB, 127)],
             registered,
         ),
         (
