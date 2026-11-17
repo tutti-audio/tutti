@@ -24,18 +24,6 @@ impl Timebase {
         (denom != 0).then_some(Self { numer, denom })
     }
 
-    /// The numerator of the ratio.
-    #[must_use]
-    pub fn numer(self) -> u32 {
-        self.numer
-    }
-
-    /// The denominator of the ratio, never 0.
-    #[must_use]
-    pub fn denom(self) -> u32 {
-        self.denom
-    }
-
     /// The machine's, read once.
     #[must_use]
     pub fn get() -> Self {
@@ -101,6 +89,26 @@ mod tests {
         assert_eq!(base.ticks(Duration::from_nanos(125)), 3);
         assert_eq!(base.ticks(base.duration(123_456_789)), 123_456_789);
         assert_eq!(base.ticks(Duration::MAX), u64::MAX);
+    }
+
+    // `ticks` is `nanos * denom / numer`, pinned at Apple Silicon's 125/3 and an
+    // Intel Mac's 1/1.
+    #[test]
+    fn ticks_of_literal_nanoseconds() {
+        let apple = Timebase::new(125, 3).unwrap();
+        assert_eq!(
+            apple.ticks(Duration::from_nanos(50_000_000_000)),
+            1_200_000_000
+        );
+        assert_eq!(
+            apple.ticks(Duration::from_nanos(49_990_000_000)),
+            1_199_760_000
+        );
+        let intel = Timebase::new(1, 1).unwrap();
+        assert_eq!(
+            intel.ticks(Duration::from_nanos(50_000_000_000)),
+            50_000_000_000
+        );
     }
 
     // A base with no denominator cannot be built, so `duration` never divides by
