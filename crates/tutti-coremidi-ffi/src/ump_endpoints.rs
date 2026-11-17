@@ -8,14 +8,14 @@
 //! Function Blocks and checks them against M2-104 there.
 //!
 //! The classes do not exist before macOS 15. [`ump_endpoints`] asks the
-//! Objective-C runtime for the manager class first and returns `None` where it
-//! is absent, so a caller on an older system behaves as it did before. Every
-//! message send goes through [`catch`], so an Objective-C exception CoreMIDI
-//! raises (as seen when no MIDI server is reachable) comes back as an
-//! [`ObjcException`] instead of unwinding into Rust, which aborts the process.
+//! Objective-C runtime for the manager class first and returns
+//! [`UmpEndpointsError::Unsupported`] where it is absent. Every message send goes
+//! through [`catch`], so an Objective-C exception CoreMIDI raises (as seen when no
+//! MIDI server is reachable) comes back as [`UmpEndpointsError::Exception`]
+//! instead of unwinding into Rust, which aborts the process.
 
 use crate::objc_exception::{ObjcException, catch};
-use coremidi_sys::{MIDIObjectGetIntegerProperty, kMIDIPropertyUniqueID};
+use crate::unique_id::UniqueId;
 use objc2::rc::autoreleasepool;
 use objc2::runtime::AnyClass;
 use objc2_core_midi::{
@@ -55,27 +55,39 @@ pub struct UmpEndpointInfo {
     /// Whether `supportedMIDIProtocols` includes the MIDI 2.0 Protocol: the
     /// endpoint may negotiate it later even while `protocol` is MIDI 1.0.
     pub supports_midi2: bool,
-    /// The `kMIDIPropertyUniqueID` of the endpoint's source (what a device
-    /// sends from), when it has one.
-    pub source_unique_id: Option<i32>,
-    /// The `kMIDIPropertyUniqueID` of its destination, when it has one.
-    pub destination_unique_id: Option<i32>,
+    /// The unique id of the endpoint's source (what a device sends from), when
+    /// it has one.
+    pub source_unique_id: Option<UniqueId>,
+    /// The unique id of its destination, when it has one.
+    pub destination_unique_id: Option<UniqueId>,
     /// Its Function Blocks.
     pub blocks: Vec<UmpBlockInfo>,
 }
 
-/// Every UMP Endpoint now, or `None` where the OS has no
-/// `MIDIUMPEndpointManager` (before macOS 15).
+/// Why [`ump_endpoints`] returned no endpoints.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum UmpEndpointsError {
+    /// The OS has no `MIDIUMPEndpointManager` (before macOS 15).
+    #[error("this macOS has no MIDIUMPEndpointManager (before macOS 15)")]
+    Unsupported,
+    /// CoreMIDI raised an Objective-C exception (as seen when no MIDI server is
+    /// reachable).
+    #[error(transparent)]
+    Exception(#[from] ObjcException),
+}
+
+/// Every UMP Endpoint now.
 ///
 /// # Errors
 ///
-/// [`ObjcException`] when CoreMIDI raises an Objective-C exception (as seen when
-/// no MIDI server is reachable).
-pub fn ump_endpoints() -> Result<Option<Vec<UmpEndpointInfo>>, ObjcException> {
+/// [`UmpEndpointsError::Unsupported`] before macOS 15, and
+/// [`UmpEndpointsError::Exception`] when CoreMIDI raises an Objective-C
+/// exception.
+pub fn ump_endpoints() -> Result<Vec<UmpEndpointInfo>, UmpEndpointsError> {
     // `ClassType::class` panics on a missing class; the lookup by name is the
     // availability check.
     if AnyClass::get(c"MIDIUMPEndpointManager").is_none() {
-        return Ok(None);
+        return Err(UmpEndpointsError::Unsupported);
     }
     autoreleasepool(|_| {
         catch(|| {
@@ -84,9 +96,10 @@ pub fn ump_endpoints() -> Result<Option<Vec<UmpEndpointInfo>>, ObjcException> {
             // (Apple documents the manager as a shared singleton), and the arrays
             // they return are retained for the length of the pool.
             let endpoints = unsafe { MIDIUMPEndpointManager::sharedInstance().UMPEndpoints() };
-            Some(endpoints.iter().map(|e| endpoint_info(&e)).collect())
+            endpoints.iter().map(|e| endpoint_info(&e)).collect()
         })
     })
+    .map_err(UmpEndpointsError::Exception)
 }
 
 fn endpoint_info(endpoint: &MIDIUMPEndpoint) -> UmpEndpointInfo {
@@ -103,8 +116,8 @@ fn endpoint_info(endpoint: &MIDIUMPEndpoint) -> UmpEndpointInfo {
     UmpEndpointInfo {
         protocol,
         supports_midi2: supported.contains(MIDIUMPProtocolOptions::MIDI2),
-        source_unique_id: unique_id(source),
-        destination_unique_id: unique_id(destination),
+        source_unique_id: UniqueId::of(source),
+        destination_unique_id: UniqueId::of(destination),
         blocks: blocks.iter().map(|b| block_info(&b)).collect(),
     }
 }
@@ -124,18 +137,4 @@ fn block_info(block: &MIDIUMPFunctionBlock) -> UmpBlockInfo {
             name: block.name().to_string(),
         }
     }
-}
-
-/// `kMIDIPropertyUniqueID` of an endpoint, `None` for the null reference (an
-/// endpoint with no source or no destination) or one that has none.
-fn unique_id(endpoint: u32) -> Option<i32> {
-    if endpoint == 0 {
-        return None;
-    }
-    let mut id: i32 = 0;
-    // SAFETY: `kMIDIPropertyUniqueID` is a constant CFString CoreMIDI exports,
-    // and `id` is a valid out-pointer for the call. A stale reference makes the
-    // call return an error status, which reads as `None`.
-    let status = unsafe { MIDIObjectGetIntegerProperty(endpoint, kMIDIPropertyUniqueID, &mut id) };
-    (status == 0).then_some(id)
 }

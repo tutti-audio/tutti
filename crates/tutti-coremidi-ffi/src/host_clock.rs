@@ -20,7 +20,7 @@ pub struct Timebase {
 impl Timebase {
     /// A ratio of `numer` to `denom`; `None` when `denom` is 0.
     #[must_use]
-    pub fn new(numer: u32, denom: u32) -> Option<Self> {
+    pub(crate) fn new(numer: u32, denom: u32) -> Option<Self> {
         (denom != 0).then_some(Self { numer, denom })
     }
 
@@ -32,8 +32,7 @@ impl Timebase {
             let mut info = mach_timebase_info_data_t { numer: 0, denom: 0 };
             // SAFETY: `info` is a valid out-pointer.
             let rc = unsafe { mach_timebase_info(&mut info) };
-            // The call cannot fail on a supported macOS; a 1:1 base is what an
-            // Intel Mac reports, and the only sane answer to fall back on.
+            // The call cannot fail on a supported macOS; 1:1 is an Intel Mac's base.
             if rc != KERN_SUCCESS {
                 return Timebase { numer: 1, denom: 1 };
             }

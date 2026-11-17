@@ -23,6 +23,7 @@ use tracing::debug;
 use tutti_coremidi_ffi::UmpDestination;
 use tutti_ump::{Ump, split_stream};
 
+use super::OsError;
 use super::virtual_source::protocol_of;
 use crate::endpoints::InputConnection;
 use crate::error::{Error, Result};
@@ -108,6 +109,8 @@ impl UmpVirtualDestination {
     where
         F: FnMut(Ump, std::time::Instant) + Send + 'static,
     {
+        // The device watch's client starts before this endpoint's (`hub_first`).
+        super::hub_first();
         let destination =
             UmpDestination::new(name, protocol_of(protocol), move |timestamp, words| {
                 let arrived = super::host_time::Pairing::now().instant_of(timestamp);
@@ -115,7 +118,8 @@ impl UmpVirtualDestination {
                 for event in split_stream(words) {
                     on_event(event, arrived);
                 }
-            })?;
+            })
+            .map_err(OsError::Ffi)?;
 
         debug!(name, ?protocol, "Created virtual MIDI destination");
         Ok(Self {

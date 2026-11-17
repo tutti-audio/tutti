@@ -1,15 +1,11 @@
-//! A **native-UMP** virtual MIDI source.
-//!
-//! The safe `coremidi` wrapper only exposes a MIDI-1.0 virtual source
-//! (`MIDISourceCreate`), whose only send path is legacy packet bytes, which
-//! carries MIDI 1.0 messages only, so a MIDI-2-only message (per-note
-//! controllers, **and JR Timestamps**) cannot reach the wire through it. Publishing a genuine UMP
-//! stream, the one transport where a JR Timestamp actually reaches the wire,
-//! needs a MIDI-2.0-protocol endpoint, created via
-//! `MIDISourceCreateWithProtocol` and fed `MIDIReceivedEventList` with raw UMP
-//! words. That is what [`UmpSource`] does.
+//! A **native-UMP** virtual MIDI source: an endpoint created with
+//! `MIDISourceCreateWithProtocol` and fed raw UMP words through
+//! `MIDIReceivedEventList`, so MIDI 2.0 messages (per-note controllers, JR
+//! Timestamps) reach the wire. The safe `coremidi` wrapper has only the MIDI 1.0
+//! source, whose send path is legacy packet bytes.
 
 use crate::client_retry::create_client;
+use crate::error::{Error, Operation, OsStatus};
 use core_foundation::base::TCFType;
 use core_foundation::string::CFString;
 use coremidi_sys::{
@@ -19,16 +15,6 @@ use coremidi_sys::{
 };
 use std::mem::MaybeUninit;
 use std::sync::Mutex;
-
-/// A CoreMIDI call that failed.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("CoreMIDI error: {} ({})", .operation, .status)]
-pub struct Error {
-    /// What was being done, as a static label.
-    pub operation: &'static str,
-    /// The `OSStatus` CoreMIDI returned (`-1` where no call returned one).
-    pub status: i32,
-}
 
 /// The UMP protocol a virtual endpoint carries (`MIDIProtocolID`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -50,15 +36,12 @@ impl Protocol {
     }
 }
 
-/// The process-wide raw client every source's endpoint belongs to.
+/// The process-wide raw client every endpoint here belongs to.
 ///
-/// The safe wrapper hides its `MIDIClientRef`, and `MIDISourceCreateWithProtocol`
-/// needs the raw one, so this module keeps a client of its own. It is never
-/// disposed: Apple warns that disposing the last client may make the MIDI server
-/// exit and fail every later client creation, and coremidi 0.9 stopped disposing
-/// its own for the same reason. A creation the server's exit refused is retried
-/// for a bounded time; a failed one is not cached.
-pub(crate) fn shared_raw_client() -> Result<MIDIClientRef, i32> {
+/// Never disposed: disposing the last client may make the MIDI server exit and
+/// fail every later client creation. A failed creation is retried for a bounded
+/// time and not cached.
+pub(crate) fn shared_raw_client() -> Result<MIDIClientRef, OsStatus> {
     static CLIENT: Mutex<Option<MIDIClientRef>> = Mutex::new(None);
     let mut slot = CLIENT
         .lock()
@@ -79,7 +62,7 @@ pub(crate) fn shared_raw_client() -> Result<MIDIClientRef, i32> {
                 &mut client,
             )
         };
-        if status == 0 { Ok(client) } else { Err(status) }
+        OsStatus::check(status).map(|()| client)
     })?;
     *slot = Some(client);
     Ok(client)
@@ -108,13 +91,11 @@ impl UmpSource {
     ///
     /// # Errors
     ///
-    /// CoreMIDI's status if it refuses the client or the endpoint.
+    /// [`Error::Call`] when CoreMIDI refuses the client or the endpoint.
     pub fn new(name: &str, protocol: Protocol) -> Result<Self, Error> {
         let source_name = CFString::new(name);
-        let client = shared_raw_client().map_err(|status| Error {
-            operation: "create client (ump source)",
-            status,
-        })?;
+        let client =
+            shared_raw_client().map_err(|status| Error::call(Operation::CreateClient, status))?;
 
         let mut source: MIDIEndpointRef = 0;
         // SAFETY: `client` is the live process-wide client; `source_name` outlives
@@ -127,12 +108,7 @@ impl UmpSource {
                 &mut source,
             )
         };
-        if status != 0 {
-            return Err(Error {
-                operation: "create ump virtual source",
-                status,
-            });
-        }
+        OsStatus::check(status).map_err(|status| Error::call(Operation::CreateSource, status))?;
         Ok(Self { source, protocol })
     }
 
@@ -144,16 +120,15 @@ impl UmpSource {
     ///
     /// # Errors
     ///
-    /// When the message will not fit the event list, or when
-    /// `MIDIReceivedEventList` returns a non-zero `OSStatus`.
+    /// [`Error::TooLong`] when the message will not fit the event list, and
+    /// [`Error::Call`] when `MIDIReceivedEventList` returns a non-zero status.
     pub fn send(&self, words: &[u32]) -> Result<(), Error> {
         if words.is_empty() {
             return Ok(());
         }
 
         // A `MIDIEventList` holds one packet of up to 64 words inline, so a single
-        // message of up to 4 words always fits. Build it the framework-sanctioned
-        // way (`Init` + `Add`) rather than hand-packing the C struct.
+        // message of up to 4 words always fits.
         let mut list = MaybeUninit::<MIDIEventList>::uninit();
         let list_ptr = list.as_mut_ptr();
         let list_size = std::mem::size_of::<MIDIEventList>();
@@ -173,24 +148,13 @@ impl UmpSource {
                 words.as_ptr(),
             );
             if packet.is_null() {
-                // The message didn't fit (only possible if `words` is absurdly
-                // long): nothing was queued.
-                return Err(Error {
-                    operation: "add ump packet",
-                    status: -1,
-                });
+                // The message didn't fit: nothing was queued.
+                return Err(Error::TooLong);
             }
             MIDIReceivedEventList(self.source, list.assume_init_ref() as *const MIDIEventList)
         };
 
-        if status == 0 {
-            Ok(())
-        } else {
-            Err(Error {
-                operation: "send ump event list",
-                status,
-            })
-        }
+        OsStatus::check(status).map_err(|status| Error::call(Operation::SendEventList, status))
     }
 }
 
@@ -221,8 +185,7 @@ mod tests {
     fn a_message_that_does_not_fit_is_refused() {
         let source = UmpSource::new("tutti-ffi-test", Protocol::Midi2).expect("CoreMIDI");
         assert_eq!(source.send(&[]), Ok(()));
-        let err = source.send(&[0; 100_000]).unwrap_err();
-        assert_eq!(err.operation, "add ump packet");
+        assert_eq!(source.send(&[0; 100_000]), Err(Error::TooLong));
         assert_eq!(source.send(&[0x2090_3C64]), Ok(()));
     }
 }

@@ -54,7 +54,7 @@ objc2 = { version = "0.6", features = ["relax-void-encoding"] }
 # `AUEventListenerCreateWithDispatchQueue` takes an Objective-C *block*, not a
 # function pointer, and it is the only listener constructor that works without a
 # running CFRunLoop (see `listener.rs`).
-block2 = "0.6"
+block2 = { workspace = true }
 objc2-foundation = { version = "0.3", features = ["NSBundle", "NSString", "NSGeometry", "NSObject"] }
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]

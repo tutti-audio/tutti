@@ -22,7 +22,8 @@ use std::ffi::c_void;
 use std::fmt;
 use std::sync::Mutex;
 
-use crate::source::{Error, Protocol, shared_raw_client};
+use crate::error::{Error, Operation, OsStatus};
+use crate::source::{Protocol, shared_raw_client};
 
 /// The receive block CoreMIDI calls with each event list: the list, and the
 /// connection's reference constant, which this block never reads. The list is
@@ -37,10 +38,21 @@ type ReceiveBlock = RcBlock<dyn Fn(*const c_void, *mut c_void)>;
 /// its timestamp (host time, 0 for "now") and its UMP words (several messages
 /// back to back, each one's length in its type nibble). Owns its endpoint,
 /// which is disposed on drop.
+///
+/// # The callback after a drop
+///
+/// `MIDIServices.h` does not say whether a call already running on CoreMIDI's
+/// delivery thread has returned when `MIDIEndpointDispose` does, or whether one
+/// can still start after it, so neither is assumed: the callback may run
+/// concurrently with the drop and briefly after it. CoreMIDI holds its own copy
+/// of the receive block, so the callback closure is dropped by whichever
+/// reference to the block is released last: on the thread that drops this value
+/// if CoreMIDI let go first, otherwise on a CoreMIDI thread. The closure is
+/// `Send + 'static` for that reason, and what it owns must tolerate being
+/// dropped on either thread.
 pub struct UmpDestination {
     endpoint: MIDIEndpointRef,
-    // Kept alive while the endpoint is: CoreMIDI holds a copy of the block, and
-    // this one owns the closure the copy calls.
+    // Our reference to the block that owns the closure CoreMIDI's copy calls.
     _block: ReceiveBlock,
 }
 
@@ -65,22 +77,23 @@ impl UmpDestination {
     ///
     /// # Errors
     ///
-    /// [`Error`] when the client or the endpoint cannot be created.
+    /// [`Error::Call`] when the client or the endpoint cannot be created.
     pub fn new<F>(name: &str, protocol: Protocol, on_packet: F) -> Result<Self, Error>
     where
         F: FnMut(MIDITimeStamp, &[u32]) + Send + 'static,
     {
-        let client = shared_raw_client().map_err(|status| Error {
-            operation: "MIDIClientCreate",
-            status,
-        })?;
-        // CoreMIDI calls the block on its own thread, one list at a time; the
-        // mutex makes the `FnMut` callable through the block's `Fn`.
+        let client =
+            shared_raw_client().map_err(|status| Error::call(Operation::CreateClient, status))?;
+        // The mutex makes the `FnMut` callable through the block's `Fn`, and
+        // serialises any overlap with a call still running at a drop.
         let on_packet = Mutex::new(on_packet);
         let block: ReceiveBlock = RcBlock::new(move |list: *const c_void, _: *mut c_void| {
-            let mut on_packet = on_packet
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            // Poisoned only by a panic in `on_packet`, which unwinds into
+            // CoreMIDI's thread, where nothing handles it; a destination whose
+            // callback panicked delivers nothing more.
+            let Ok(mut on_packet) = on_packet.lock() else {
+                return;
+            };
             // SAFETY: CoreMIDI passes a valid event list for the length of the
             // call (MIDIServices.h, `MIDIReceiveBlock`), or null, which
             // `packets` reads as empty.
@@ -101,12 +114,8 @@ impl UmpDestination {
                 RcBlock::as_ptr(&block).cast::<c_void>() as MIDIReceiveBlock,
             )
         };
-        if status != 0 {
-            return Err(Error {
-                operation: "MIDIDestinationCreateWithProtocol",
-                status,
-            });
-        }
+        OsStatus::check(status)
+            .map_err(|status| Error::call(Operation::CreateDestination, status))?;
         Ok(Self {
             endpoint,
             _block: block,
