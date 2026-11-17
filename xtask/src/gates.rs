@@ -10,6 +10,7 @@
 
 mod alloc_binaries;
 mod buffers;
+mod buffers_loops;
 mod building;
 mod canonical_paths;
 mod carry;
@@ -225,7 +226,13 @@ impl Gate {
             Gate::PassiveTests => passive_tests::check(&tree),
             Gate::Comments => comments::check(&tree),
             Gate::Umbrella => umbrella::check(&tree),
-            Gate::Buffers => buffers::check(&tree, buffers::MIN_SITES),
+            Gate::Buffers => {
+                let mut r = buffers::check(&tree, buffers::MIN_SITES);
+                let loops = buffers_loops::check(&tree, buffers_loops::MIN_SITES);
+                r.out.extend(loops.out);
+                r.findings.extend(loops.findings);
+                r
+            }
             Gate::Building => building::check(&tree, building::ALLOW, building::MIN_SITES),
             Gate::Values => values::check(&tree, values::MIN_FILES, values::MIN_UNITS),
             Gate::Logging => logging::check(&tree, logging::ALLOW),
