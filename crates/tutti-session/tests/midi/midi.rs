@@ -1038,7 +1038,7 @@ fn a_midi_ci_peer_that_answers_discovery_is_in_the_ports_info() {
         midi2: true,
         ..Capabilities::default()
     }))
-    .with_function_block(block);
+    .block(block);
     let raw = EndpointId::from_raw(7);
     let peer = Muid::of(0x0012_3456);
     let data = DiscoveryData::new(
@@ -1157,7 +1157,7 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
         midi2: true,
         ..Capabilities::default()
     }))
-    .with_function_block(block);
+    .block(block);
     let raw = EndpointId::from_raw(7);
     let peer = Muid::of(0x0012_3456);
     let profile = ProfileId::Standard(StandardProfile::new(
@@ -1426,7 +1426,7 @@ impl MpePeer {
                 midi2: true,
                 ..Capabilities::default()
             }))
-            .with_function_block(block),
+            .block(block),
             assembler: SysexAssembler::new(vec![0; room].into_boxed_slice(), 256, 16),
             muid: tutti_midi_device::Muid::of(0x0012_3456),
             switch: Reply::Answer,
@@ -1830,7 +1830,7 @@ fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
         midi2: true,
         ..Capabilities::default()
     }))
-    .with_function_block(block);
+    .block(block);
     let raw = EndpointId::from_raw(7);
     let peer = Muid::of(0x0012_3456);
     let at = |device_id| CiHeader {

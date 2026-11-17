@@ -7,6 +7,7 @@
 //! voice left ~85 ms of silence. `verify-audio`'s `seek_while_stretched` case heard
 //! it; this pins it in the suite.
 
+use tutti_buffers::Planes;
 use tutti_sampler::VoiceWindow;
 
 use std::f32::consts::TAU;
@@ -52,7 +53,7 @@ fn render(frames: usize, seek_at: usize) -> Vec<f32> {
         let block = contract::drive_input(
             &mut pool,
             &transport.env(BLOCK, SampleRate::of(SR)),
-            &[],
+            Planes::default(),
             &[],
             &[],
         )

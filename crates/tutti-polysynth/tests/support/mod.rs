@@ -80,7 +80,10 @@ impl Hand {
         self.direct.events(0, &self.queued);
         self.queued.clear();
         self.direct.block();
-        (self.direct.output(0), self.direct.output(1))
+        (
+            self.direct.output().plane(0).samples(),
+            self.direct.output().plane(1).samples(),
+        )
     }
 
     /// One frame (a one-frame block): `[left, right]`.

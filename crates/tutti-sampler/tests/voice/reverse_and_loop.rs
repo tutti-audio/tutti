@@ -19,6 +19,7 @@
 //! The one exception is the crossfade seam test, which needs a signal whose
 //! discontinuity is audible; it uses two constants so the seam is a step.
 
+use tutti_buffers::Planes;
 use tutti_sampler::testing::loop_frames;
 
 use std::sync::Arc;
@@ -103,7 +104,7 @@ impl Clock {
             changes: TransportChanges::NONE,
             play: tutti_graph::PlayClock::ZERO,
         };
-        contract::drive_input(node, &env, &[], &[], &[]).audio
+        contract::drive_input(node, &env, Planes::default(), &[], &[]).audio
     }
 }
 

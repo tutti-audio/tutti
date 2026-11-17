@@ -169,8 +169,8 @@ fn block() -> FunctionBlock {
 /// §7.1.2 and §7.1.8), for a source and a destination alike.
 #[test]
 fn the_published_endpoint_record_carries_the_protocol_and_the_blocks() {
-    let source_spec = spec("record-source").with_function_block(block());
-    let dest_spec = spec("record-destination").with_function_block(block());
+    let source_spec = spec("record-source").block(block());
+    let dest_spec = spec("record-destination").block(block());
     let source = VirtualSource::open(&source_spec).expect("a virtual source");
     let inlets = InputInlets::new(EventCapacity::of(8), Duration::ZERO);
     let ports = HardwareMidiInputs::new(inlets);

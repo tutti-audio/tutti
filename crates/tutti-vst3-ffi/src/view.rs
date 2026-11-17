@@ -438,9 +438,9 @@ mod rect_tests {
     }
 
     /// **A rect a plugin fills in is a size only if both extents are
-    /// non-negative and their subtraction fits.** A negative extent used to
-    /// become about four billion, and a wide span overflowed (a panic in debug,
-    /// a wrap in release).
+    /// non-negative and their subtraction fits.** A negative extent is refused
+    /// rather than read as about four billion, and a wide span is refused
+    /// rather than overflowing.
     #[test]
     fn a_rect_that_is_not_a_size_is_refused() {
         assert_eq!(
@@ -534,9 +534,8 @@ mod attach_tests {
     }
 
     /// **A view that refuses `attached` is not left holding the host's frame.**
-    /// The frame is set before `attached`; on the failure path nothing used to
-    /// withdraw it, so a plugin that kept the pointer held a frame nothing
-    /// would ever pump.
+    /// The frame is set before `attached`; on the failure path it is withdrawn,
+    /// so a plugin that kept the pointer does not hold a frame nothing pumps.
     /// Spec: vst3.IPlugView.attached, vst3.IPlugView.setFrame
     #[test]
     fn a_failed_attach_withdraws_the_frame() {
@@ -544,12 +543,7 @@ mod attach_tests {
         let view = ComWrapper::new(Refusing(calls.clone()))
             .to_com_ptr::<IPlugView>()
             .expect("the view implements IPlugView");
-        let frame = HostPlugFrame::new(
-            #[cfg(target_os = "linux")]
-            crate::com::RunLoop::new(),
-            #[cfg(target_os = "linux")]
-            None,
-        );
+        let frame = HostPlugFrame::new(crate::com::RunLoop::new(), None);
         // SAFETY: the handle is never dereferenced by the stub view.
         let parent = unsafe { WindowHandle::from_u64(1) };
         let result = Editor::open(view, parent, ContentScale::default(), frame);

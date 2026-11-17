@@ -33,6 +33,8 @@ libm = "0.2.15"
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
 
 [dev-dependencies]
+# The buffer views the contract rigs take and return.
+tutti-buffers = { path = "../tutti-buffers" }
 # The font-to-synth swap of the chase test (`tests/chase.rs`).
 tutti-polysynth = { path = "../tutti-polysynth" }
 # Finds the repo's `assets/` for the tests.

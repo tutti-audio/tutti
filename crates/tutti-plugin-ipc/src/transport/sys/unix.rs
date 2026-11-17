@@ -31,7 +31,7 @@ pub fn socket_name(socket: &Path) -> std::io::Result<Name<'static>> {
 pub fn has_pending(stream: &ControlStream) -> bool {
     // `local_socket::Stream` has exactly one variant on Unix.
     let Stream::UdSocket(socket) = stream;
-    tutti_plugin_ipc_ffi::wait_readable(socket.as_fd(), 0).unwrap_or(true)
+    tutti_plugin_ipc_ffi::wait_readable(socket.as_fd(), Some(Duration::ZERO)).unwrap_or(true)
 }
 
 /// A second handle on a control stream that only *waits* for it to have
@@ -62,8 +62,7 @@ impl Watch {
     /// `true` when it has, or when asking fails (a read is the authority on a
     /// closed or broken stream); `false` on a timeout.
     pub fn wait_readable(&self, timeout: Duration) -> bool {
-        let ms = i32::try_from(timeout.as_micros().div_ceil(1000)).unwrap_or(i32::MAX);
-        tutti_plugin_ipc_ffi::wait_readable(self.fd.as_fd(), ms).unwrap_or(true)
+        tutti_plugin_ipc_ffi::wait_readable(self.fd.as_fd(), Some(timeout)).unwrap_or(true)
     }
 }
 

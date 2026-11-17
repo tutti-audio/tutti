@@ -33,12 +33,11 @@
 //! too late. This was confirmed by suppressing exactly that capability in
 //! Steinberg's own `editorhost`, which then crashed identically.
 
-#![cfg(target_os = "linux")]
-
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tutti_plugin_types::{FdId, Interest, MainThreadMarker, Ready, Wakeups};
+use tutti_plugin_ipc_ffi::{FdId, Interest, Ready};
+use tutti_plugin_types::{MainThreadMarker, Wakeups};
 use tutti_rt::LockExt;
 
 use vst3::ComRef;
@@ -48,6 +47,24 @@ use vst3::Steinberg::Linux::{
 };
 use vst3::Steinberg::tresult;
 use vst3::Steinberg::{kResultFalse, kResultOk};
+
+/// The interfaces [`HostApplication`](super::HostApplication) answers.
+pub(crate) type HostApplicationInterfaces = (
+    vst3::Steinberg::Vst::IHostApplication,
+    vst3::Steinberg::Vst::IPlugInterfaceSupport,
+    vst3::Steinberg::Linux::IRunLoop,
+);
+
+/// The interfaces [`HostPlugFrame`](super::HostPlugFrame) answers: `IRunLoop`
+/// alongside `IPlugFrame`, because a plugin's toolkit finds it by querying the
+/// frame it was handed via `IPlugView::setFrame`.
+pub(crate) type PlugFrameInterfaces = (
+    vst3::Steinberg::IPlugFrame,
+    vst3::Steinberg::Linux::IRunLoop,
+);
+
+/// The interface ids this platform answers beyond the common ones.
+pub(crate) const RUN_LOOP_IIDS: &[vst3::Steinberg::TUID] = &[vst3::Steinberg::Linux::IRunLoop_iid];
 
 tutti_types::id! {
     /// Which plugin instance a registration belongs to.
@@ -196,7 +213,7 @@ impl RunLoop {
     pub(crate) fn describe(&self, out: &mut Wakeups) {
         let state = self.state();
         for &fd in state.event_handlers.keys() {
-            out.watch(FdId(fd), Interest::READ);
+            out.watch(FdId::new(fd), Interest::READ);
         }
         for entry in state.timers.values() {
             out.due_at(entry.last_fired + entry.period);
@@ -209,20 +226,8 @@ impl RunLoop {
     pub(crate) fn run_iteration(&self, main: MainThreadMarker) {
         let mut wakeups = Wakeups::new();
         self.describe(&mut wakeups);
-        let asked: Vec<(i32, u8)> = wakeups
-            .watches()
-            .iter()
-            .map(|w| (w.fd.0, w.interest.bits()))
-            .collect();
-        let mut got = Vec::new();
-        tutti_plugin_ipc_ffi::poll_now(&asked, &mut got);
-        let ready: Vec<Ready> = got
-            .into_iter()
-            .map(|(fd, bits)| Ready {
-                fd: FdId(fd),
-                events: Interest::from_bits(bits),
-            })
-            .collect();
+        let mut ready = Vec::new();
+        tutti_plugin_ipc_ffi::poll_now(wakeups.watches(), &mut ready);
         self.dispatch(main, &ready, Instant::now());
     }
 
@@ -255,10 +260,10 @@ impl RunLoop {
                 }
             }
             for r in ready.iter().filter(|r| r.events.contains(Interest::READ)) {
-                if let Some(entry) = state.event_handlers.get(&r.fd.0)
+                if let Some(entry) = state.event_handlers.get(&r.fd.get())
                     && !entry.handler.is_null()
                 {
-                    due.push(Due::Fd(r.fd.0, entry.handler, entry.owner));
+                    due.push(Due::Fd(r.fd.get(), entry.handler, entry.owner));
                 }
             }
         }

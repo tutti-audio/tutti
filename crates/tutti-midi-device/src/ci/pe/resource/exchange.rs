@@ -16,9 +16,10 @@ use super::super::header::{
 };
 use super::super::initiator::{PeAction, PeCall, PeGet, PeInitiator, PeOutcome, PeSet, PeSettings};
 use super::super::limits::{MediaType, ResourceId, ResourceName, SubscribeId};
-use super::super::partial::{JsonPointer, PartialUpdate};
+use super::super::partial::{JsonPointer, PartialUpdate, PartialValue};
 use super::super::reassemble::{BufferLimit, PeFlowControl, PeReassemblyLimits, StreamLimit};
 use super::super::tree::PeJson;
+use super::state::StateDevice;
 use super::*;
 use crate::ci::testing::{OURS, PEER};
 use crate::{BodyLimit, CiHeader, CiMessage, Decoded, MaxSysexSize, Muid};
@@ -106,19 +107,22 @@ pub(super) fn program_edit() -> PeData {
 /// A device with the Resources the tests use.
 pub(super) fn store() -> ResourceStore {
     let mut store = ResourceStore::new();
-    store.declare(ResourceEntry::new(PeResource::DeviceInfo).unwrap());
+    store.declare(
+        ResourceEntry::builder(PeResource::DeviceInfo)
+            .build()
+            .unwrap(),
+    );
     store.put(None, PeData::DeviceInfo(device_info())).unwrap();
     store.declare(
-        ResourceEntry::new(PeResource::ChannelList)
-            .unwrap()
-            .with_can_subscribe(true)
-            .with_fc_on_get(true)
-            .unwrap()
-            .with_encodings(vec![
+        ResourceEntry::builder(PeResource::ChannelList)
+            .can_subscribe(true)
+            .fc_on_get(true)
+            .encodings(vec![
                 PeEncoding::Ascii,
                 PeEncoding::Mcoded7,
                 PeEncoding::ZlibMcoded7,
             ])
+            .build()
             .unwrap(),
     );
     store
@@ -130,16 +134,24 @@ pub(super) fn store() -> ResourceStore {
             ])),
         )
         .unwrap();
-    store.declare(ResourceEntry::new(PeResource::ProgramList).unwrap());
+    store.declare(
+        ResourceEntry::builder(PeResource::ProgramList)
+            .build()
+            .unwrap(),
+    );
     store
         .put(
             Some(id("general")),
             PeData::ProgramList(PeProgramList::new((0..7).map(program).collect())),
         )
         .unwrap();
-    store.declare(ResourceEntry::new(PeResource::LocalOn).unwrap());
+    store.declare(ResourceEntry::builder(PeResource::LocalOn).build().unwrap());
     store.put(None, PeData::LocalOn(PeLocalOn(false))).unwrap();
-    store.declare(ResourceEntry::new(PeResource::ChannelMode).unwrap());
+    store.declare(
+        ResourceEntry::builder(PeResource::ChannelMode)
+            .build()
+            .unwrap(),
+    );
     store
         .put(
             None,
@@ -147,26 +159,24 @@ pub(super) fn store() -> ResourceStore {
         )
         .unwrap();
     store.declare(
-        ResourceEntry::custom(custom("X-ProgramEdit"), json(r#"{"title":"Program Edit"}"#))
-            .unwrap()
-            .with_can_set(CanSet::Partial)
-            .unwrap()
-            .with_require_res_id(true)
-            .unwrap()
-            .with_can_subscribe(true),
+        ResourceEntry::builder(custom("X-ProgramEdit"))
+            .schema(json(r#"{"title":"Program Edit"}"#))
+            .can_set(CanSet::Partial)
+            .require_res_id(true)
+            .can_subscribe(true)
+            .build()
+            .unwrap(),
     );
     store.put(Some(id("abcd")), program_edit()).unwrap();
     for (name, flow) in [("X-Blob", false), ("X-BigBlob", true)] {
-        let blob = ResourceEntry::custom(custom(name), json(r#"{"title":"Blob"}"#))
-            .unwrap()
-            .with_can_set(CanSet::Full)
-            .unwrap()
-            .with_fc_on_set(flow)
-            .unwrap()
-            .with_can_subscribe(true)
-            .with_media_types(vec![octets()])
-            .unwrap()
-            .with_encodings(vec![PeEncoding::Mcoded7])
+        let blob = ResourceEntry::builder(custom(name))
+            .schema(json(r#"{"title":"Blob"}"#))
+            .can_set(CanSet::Full)
+            .fc_on_set(flow)
+            .can_subscribe(true)
+            .media_types(vec![octets()])
+            .encodings(vec![PeEncoding::Mcoded7])
+            .build()
             .unwrap();
         store.declare(blob);
         store.put(None, blob_data(name, &blob_bytes(300))).unwrap();
@@ -233,6 +243,24 @@ impl Link {
 
     /// A link whose Initiator takes `requests` Subscription messages at once.
     pub(super) fn taking(store: ResourceStore, max: u32, requests: u8) -> Self {
+        Self::assembled(store, max, requests, None)
+    }
+
+    /// A link whose Responder has `device` judge each State it is set.
+    pub(super) fn judged(
+        store: ResourceStore,
+        max: u32,
+        device: Option<Box<dyn StateDevice>>,
+    ) -> Self {
+        Self::assembled(store, max, 4, device)
+    }
+
+    fn assembled(
+        store: ResourceStore,
+        max: u32,
+        requests: u8,
+        device: Option<Box<dyn StateDevice>>,
+    ) -> Self {
         let now = Instant::now();
         let (init, actions) = ResourceInitiator::new(
             Muid::of(OURS),
@@ -241,6 +269,9 @@ impl Link {
             now,
         );
         let mut resp = ResourceResponder::new(Muid::of(PEER), responder_settings(), store);
+        if let Some(device) = device {
+            resp = resp.state_device(device);
+        }
         resp.accept(Muid::of(OURS), MaxSysexSize::of(max));
         let mut link = Self {
             init,
@@ -863,7 +894,11 @@ impl Script {
 }
 
 pub(super) fn paginating_list() -> PeResourceList {
-    PeResourceList::new().with(ResourceEntry::new(PeResource::ProgramList).unwrap())
+    PeResourceList::new().with(
+        ResourceEntry::builder(PeResource::ProgramList)
+            .build()
+            .unwrap(),
+    )
 }
 
 pub(super) fn program_page(from: u8, to: u8) -> PeJson {
@@ -977,10 +1012,11 @@ fn a_partial_set_changes_what_a_later_get_returns() {
     let mut link = Link::new(store(), 256);
     let program = entry_target(custom("X-ProgramEdit"), "abcd");
     let update = PartialUpdate::new()
-        .with(pointer("/pitchEnvelope/rates/0"), PeJson::Integer(80))
-        .unwrap()
-        .with(pointer("/pitchEnvelope/levels/0"), PeJson::Integer(60))
-        .unwrap();
+        .with(pointer("/pitchEnvelope/rates/0"), PartialValue::Integer(80))
+        .with(
+            pointer("/pitchEnvelope/levels/0"),
+            PartialValue::Integer(60),
+        );
     let made = link
         .init
         .set(&ResourceSet::partial(program.clone(), update), link.now);
@@ -1096,9 +1132,7 @@ fn a_partial_update_changes_the_data_the_initiator_holds() {
         .init
         .subscribe(&ResourceGet::new(program.clone()), link.now);
     link.call(made);
-    let update = PartialUpdate::new()
-        .with(pointer("/lfoSpeed"), PeJson::Integer(10))
-        .unwrap();
+    let update = PartialUpdate::new().with(pointer("/lfoSpeed"), PartialValue::Integer(10));
     let actions = link.resp.change(&program, update, link.now).unwrap();
     link.publish(actions);
     let updates = link.updates();
@@ -1128,9 +1162,10 @@ fn a_set_is_announced_to_the_subscribers() {
         .init
         .subscribe(&ResourceGet::new(program.clone()), link.now);
     link.call(made);
-    let update = PartialUpdate::new()
-        .with(pointer("/pitchEnvelope/levels/3"), PeJson::Integer(99))
-        .unwrap();
+    let update = PartialUpdate::new().with(
+        pointer("/pitchEnvelope/levels/3"),
+        PartialValue::Integer(99),
+    );
     let made = link
         .init
         .set(&ResourceSet::partial(program, update), link.now);
@@ -1277,9 +1312,10 @@ fn a_subscription_the_entry_does_not_allow_is_refused() {
 
 pub(super) fn subscribed_script() -> (Script, SubscribeId) {
     let list = PeResourceList::new().with(
-        ResourceEntry::new(PeResource::LocalOn)
-            .unwrap()
-            .with_can_subscribe(true),
+        ResourceEntry::builder(PeResource::LocalOn)
+            .can_subscribe(true)
+            .build()
+            .unwrap(),
     );
     let mut script = Script::new(&list);
     let (_, actions) = script
