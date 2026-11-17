@@ -25,7 +25,7 @@ use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_types::{Beat, Bpm, Seconds};
 use tutti_ump::{
     Address, Flex, FlexAddress, FlexTextKind, Form, KeyEvent, Message, MidiChannel, MidiGroup,
-    NoteNumber, NoteVelocity, Sysex7Packet, SysexStatus, System, TicksPerQuarterNote, U7, Ump,
+    NoteNumber, NoteVelocity, Sysex7Packets, SysexPart, System, TicksPerQuarterNote, U7, Ump,
     Unknown, Voice2,
 };
 
@@ -1203,9 +1203,6 @@ fn ends_in_f7(data: &[u8]) -> bool {
     data.last() == Some(&0xF7)
 }
 
-/// The most data bytes of a SysEx7 packet (M2-104 section 7.7).
-const SYSEX7_PACKET_BYTES: usize = 6;
-
 impl Timeline {
     /// The packets of `events`, by [`MidiFile::timeline`]'s rule.
     fn of<'a>(events: impl Iterator<Item = (Beat, &'a FileEvent)>) -> Self {
@@ -1292,32 +1289,17 @@ impl Timeline {
             return;
         };
         // An empty part still sends a packet: its pause is the message's.
-        let chunks: Vec<(Beat, Vec<u8>)> = payloads
-            .iter()
-            .flat_map(|(beat, payload)| {
-                let mut chunks: Vec<Vec<u8>> = payload
-                    .chunks(SYSEX7_PACKET_BYTES)
-                    .map(|chunk| chunk.iter().map(|u| u.get()).collect())
-                    .collect();
-                if chunks.is_empty() {
-                    chunks.push(Vec::new());
-                }
-                chunks.into_iter().map(move |chunk| (*beat, chunk))
-            })
-            .collect();
-        let last = chunks.len() - 1;
-        for (i, (beat, chunk)) in chunks.into_iter().enumerate() {
-            let status = match i {
-                0 if last == 0 => SysexStatus::Complete,
-                0 => SysexStatus::Start,
-                i if i == last => SysexStatus::End,
-                _ => SysexStatus::Continue,
+        let last = payloads.len() - 1;
+        for (i, (beat, bytes)) in payloads.iter().enumerate() {
+            let part = match i {
+                0 if last == 0 => SysexPart::Only,
+                0 => SysexPart::First,
+                i if i == last => SysexPart::Last,
+                _ => SysexPart::Middle,
             };
-            // A chunk is at most `SYSEX7_PACKET_BYTES` bytes, each a `U7`.
-            let packet = Sysex7Packet::new(status, &chunk)
-                .expect("a chunk of at most six bytes below 128 is a packet");
-            self.packets
-                .push((beat, Ump::from(Message::Sysex7(MidiGroup::FIRST, packet))));
+            for packet in Sysex7Packets::part(MidiGroup::FIRST, bytes, part) {
+                self.packets.push((*beat, packet));
+            }
         }
     }
 }

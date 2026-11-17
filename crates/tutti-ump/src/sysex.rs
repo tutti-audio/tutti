@@ -4,7 +4,7 @@
 use core::iter::FusedIterator;
 
 use crate::field::first_non_seven_bit;
-use crate::{Message, MidiGroup, Sysex7Packet, SysexStatus, Ump};
+use crate::{Message, MidiGroup, Sysex7Packet, SysexStatus, U7, Ump};
 
 /// The longest SysEx7 payload (the bytes between `0xF0` and `0xF7`) a host
 /// passes a [`SysexAssembler`] as its `max_message` less the two delimiters:
@@ -127,11 +127,64 @@ impl<'a> SysexMessage<'a> {
 #[derive(Clone, Debug)]
 pub struct Sysex7Packets<'a> {
     group: MidiGroup,
-    /// The payload not yet packed: every byte below 128, checked by the caller's
-    /// type (`U7`, `SysexMessage`).
-    rest: &'a [u8],
+    /// The payload not yet packed.
+    rest: Rest<'a>,
+    /// Whether the run's first packet is the message's first.
+    opens: bool,
+    /// Whether the run's last packet is the message's last.
+    closes: bool,
     /// Whether a packet has been yielded, so an empty payload is one packet.
-    started: bool,
+    emitted: bool,
+}
+
+/// The payload of a [`Sysex7Packets`] run, 7-bit by its owner's type.
+#[derive(Clone, Copy, Debug)]
+enum Rest<'a> {
+    /// Plain bytes checked by [`first_non_seven_bit`] or [`SysexMessage`].
+    Bytes(&'a [u8]),
+    Seven(&'a [U7]),
+}
+
+impl Rest<'_> {
+    const fn len(&self) -> usize {
+        match self {
+            Self::Bytes(b) => b.len(),
+            Self::Seven(s) => s.len(),
+        }
+    }
+
+    /// The first (up to) six values and what follows them.
+    fn split(self) -> ([U7; 6], usize, Self) {
+        let mut chunk = [U7::default(); 6];
+        let n = self.len().min(6);
+        match self {
+            Self::Bytes(b) => {
+                // Every byte is below 128 by the owner's check, so `masked` drops no bit.
+                for (slot, &v) in chunk.iter_mut().zip(&b[..n]) {
+                    *slot = U7::masked(v);
+                }
+                (chunk, n, Self::Bytes(&b[n..]))
+            }
+            Self::Seven(s) => {
+                chunk[..n].copy_from_slice(&s[..n]);
+                (chunk, n, Self::Seven(&s[n..]))
+            }
+        }
+    }
+}
+
+/// Where a run of SysEx7 packets lies in its message (M2-104 section 7.7): the
+/// whole of it, or one of the parts a divided message is sent in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum SysexPart {
+    /// The whole message.
+    Only,
+    /// The first part of a divided message.
+    First,
+    /// A part between the first and the last.
+    Middle,
+    /// The last part of a divided message.
+    Last,
 }
 
 impl<'a> Sysex7Packets<'a> {
@@ -150,11 +203,32 @@ impl<'a> Sysex7Packets<'a> {
         }
     }
 
+    /// The packets of one `part` of a message, `data` being the part's bytes.
+    ///
+    /// The first packet of a [`First`](SysexPart::First) part is a `Start`
+    /// (a `Complete` when the part is [`Only`](SysexPart::Only)), the last
+    /// packet of a [`Last`](SysexPart::Last) part an `End`, and every other
+    /// packet a `Continue`; each carries six bytes except a part's last, which
+    /// carries the rest. A part with no bytes is one packet with none, so a
+    /// divided message keeps the pause between its parts.
+    #[must_use]
+    pub fn part(group: MidiGroup, data: &'a [U7], part: SysexPart) -> Self {
+        Self {
+            group,
+            rest: Rest::Seven(data),
+            opens: matches!(part, SysexPart::Only | SysexPart::First),
+            closes: matches!(part, SysexPart::Only | SysexPart::Last),
+            emitted: false,
+        }
+    }
+
     fn over(group: MidiGroup, payload: &'a [u8]) -> Self {
         Self {
             group,
-            rest: payload,
-            started: false,
+            rest: Rest::Bytes(payload),
+            opens: true,
+            closes: true,
+            emitted: false,
         }
     }
 }
@@ -163,17 +237,20 @@ impl Iterator for Sysex7Packets<'_> {
     type Item = Ump;
 
     fn next(&mut self) -> Option<Ump> {
-        if self.started && self.rest.is_empty() {
+        if self.emitted && self.rest.len() == 0 {
             return None;
         }
-        let (packet, rest) = Sysex7Packet::take(self.started, self.rest);
+        let (chunk, n, rest) = self.rest.split();
+        let status =
+            SysexStatus::of_run(!self.opens || self.emitted, rest.len() != 0 || !self.closes);
         self.rest = rest;
-        self.started = true;
+        self.emitted = true;
+        let packet = Sysex7Packet::of_chunk(status, &chunk[..n]);
         Some(Ump::from(Message::Sysex7(self.group, packet)))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let n = match (self.started, self.rest.len()) {
+        let n = match (self.emitted, self.rest.len()) {
             (true, 0) => 0,
             (_, len) => len.div_ceil(6).max(1),
         };
