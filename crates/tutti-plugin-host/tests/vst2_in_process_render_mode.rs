@@ -27,6 +27,7 @@
 
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
+use tutti_buffers::Planes;
 use tutti_fixtures::main_thread;
 use tutti_plugin_types::Load;
 use tutti_rt::LockExt;
@@ -177,7 +178,7 @@ fn drive_blocks_in(
         changes: TransportChanges::NONE,
         play: tutti_graph::PlayClock::ZERO,
     };
-    let _ = tutti_graph::contract::drive_input(unit, &env, &inputs, &[], &[]);
+    let _ = tutti_graph::contract::drive_input(unit, &env, Planes::new(&inputs).unwrap(), &[], &[]);
 }
 
 /// The handle carries a render-mode route at all.

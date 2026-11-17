@@ -111,6 +111,7 @@ impl<F: Float + Lanes> IntoNode for EqBandNode<F> {
 mod tests {
     use super::*;
     use crate::filter::test_utils::{generate_sine, rms};
+    use tutti_buffers::Planes;
     use tutti_graph::contract::{assert_param_fork, drive, prepared};
     use tutti_types::SampleRate;
 
@@ -118,7 +119,7 @@ mod tests {
     fn render<F: Float + Lanes>(eq: EqBandNode<F>, input: &[f32]) -> Vec<f32> {
         let rate = SampleRate::SR_44K1;
         let mut eq = prepared(eq, rate, input.len());
-        drive(&mut eq, rate, &[input], &[]).remove(0)
+        drive(&mut eq, rate, Planes::new(&[input]).unwrap(), &[]).remove(0)
     }
 
     /// **A fork reaches the inner SVF's param cells**: it starts from the

@@ -218,7 +218,7 @@ impl Parts {
     pub fn wake_editor_loop(
         &self,
         main: MainThreadMarker,
-        ready: &[tutti_plugin_types::Ready],
+        ready: &[tutti_plugin_ipc_ffi::Ready],
         now: std::time::Instant,
     ) {
         self.module.run_loop().dispatch(main, ready, now);

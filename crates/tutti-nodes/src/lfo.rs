@@ -377,7 +377,7 @@ mod tests {
     fn render(node: LfoNode, sr: f64, n: usize) -> Vec<f32> {
         let mut d = Direct::new(node, SampleRate::of(sr), n);
         d.block();
-        d.output(0).to_vec()
+        d.output().plane(0).samples().to_vec()
     }
 
     /// `n` frames of `node` through a graph at 48 kHz, each block handed
@@ -544,7 +544,7 @@ mod tests {
         Node::reset(&mut *d.node);
         d.block();
         assert!(
-            d.output(0)[0].abs() < 0.1,
+            d.output().plane(0).samples()[0].abs() < 0.1,
             "After reset, LFO should start near zero"
         );
     }
@@ -604,10 +604,10 @@ mod tests {
             }
         };
         d.block();
-        check(d.output(0), "original");
+        check(d.output().plane(0).samples(), "original");
         let mut f = Direct::new(d.node.fork_fresh(), rate, 4096);
         f.block();
-        check(f.output(0), "fork");
+        check(f.output().plane(0).samples(), "fork");
     }
 
     /// **Step boundaries.** The step changes exactly where the rate puts a

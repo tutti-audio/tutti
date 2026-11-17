@@ -343,7 +343,13 @@ mod tests {
         let mut node = prepared_at(gate(-20.0, 0.0001, 0.01, 0.1), RATE_44K);
         let audio = vec![0.5f32; 1024];
         let sc = vec![0.9f32; 1024];
-        let out = drive(&mut node, RATE_44K, &[&audio, &sc], &[]).remove(0);
+        let out = drive(
+            &mut node,
+            RATE_44K,
+            Planes::new(&[&audio, &sc]).unwrap(),
+            &[],
+        )
+        .remove(0);
         assert!(out[1023] > 0.3, "the loud sidechain opened the gate");
     }
 
@@ -622,11 +628,23 @@ mod tests {
         let mut node = prepared_at(gate(-20.0, 0.0001, 0.01, 0.1), RATE_44K);
         let audio = vec![1.0f32; 64];
         let nan = vec![f32::NAN; 64];
-        let out = drive(&mut node, RATE_44K, &[&audio, &nan], &[]).remove(0);
+        let out = drive(
+            &mut node,
+            RATE_44K,
+            Planes::new(&[&audio, &nan]).unwrap(),
+            &[],
+        )
+        .remove(0);
         assert!(out.iter().all(|y| y.is_finite()));
         assert!(out[63] < 1e-3, "closed");
         let (audio, loud) = (vec![1.0f32; 1024], vec![0.5f32; 1024]);
-        let out = drive(&mut node, RATE_44K, &[&audio, &loud], &[]).remove(0);
+        let out = drive(
+            &mut node,
+            RATE_44K,
+            Planes::new(&[&audio, &loud]).unwrap(),
+            &[],
+        )
+        .remove(0);
         assert!(out[1023] > 0.99, "recovers on a finite key");
     }
 

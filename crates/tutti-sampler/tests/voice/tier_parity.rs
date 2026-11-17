@@ -47,6 +47,7 @@
 
 use std::path::Path;
 use std::sync::Arc;
+use tutti_buffers::Planes;
 use tutti_fixtures::signal::rms_f64;
 
 use tutti_codec::Wave;
@@ -251,7 +252,7 @@ fn render(unit: &mut dyn Node, clock: &Clock, blocks: usize) -> Vec<(f32, f32)> 
 /// One block of `unit` under `clock`, appended to `out` as frames; the clock
 /// then advances.
 fn push_block(unit: &mut dyn Node, clock: &Clock, out: &mut Vec<(f32, f32)>) {
-    let b = contract::drive_input(unit, &clock.env(), &[], &[], &[]).audio;
+    let b = contract::drive_input(unit, &clock.env(), Planes::default(), &[], &[]).audio;
     out.extend(b[0].iter().copied().zip(b[1].iter().copied()));
     clock.advance(BLOCK);
 }

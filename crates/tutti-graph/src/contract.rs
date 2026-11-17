@@ -81,6 +81,7 @@
 
 use crate::NodeKey;
 use crate::OutPort;
+use tutti_buffers::{BufferError, Float, Planes, PlanesMut};
 use tutti_types::MaxBlock;
 use tutti_types::{
     At, Beat, Bpm, ChannelLayout, Frame, Latency, SampleRate, Samples, Tail, UnitAddr,
@@ -1727,10 +1728,11 @@ macro_rules! contract_tests {
 }
 
 /// One block of `node`, called by hand with no graph around it: `inputs`
-/// on its audio inputs (one slice per port, all one length, which is the
-/// block's), `params[k]` on its declared param `k` (`None`, or a port past
-/// the end, reads its base), no events, transport stopped at frame 0. One
-/// `Vec` per audio output.
+/// on its audio inputs (one plane per port; their length is the block's),
+/// `params[k]` on its declared param `k` (`None`, or a port past the end,
+/// reads its base), no events, transport stopped at frame 0. One `Vec` per
+/// audio output. A node with no audio input takes [`Planes::default`], and
+/// then the block is as long as the first fed param.
 ///
 /// For a node's own unit tests, which inspect its state between blocks —
 /// what a [`Solo`](crate::Solo), whose node the executor owns, cannot show.
@@ -1742,15 +1744,14 @@ macro_rules! contract_tests {
 ///
 /// If the block is empty (a node is never called with zero frames), or the
 /// input count is not the node's.
-pub fn drive(
-    node: &mut dyn Node,
+pub fn drive<F: Float>(
+    node: &mut dyn Node<F>,
     rate: SampleRate,
-    inputs: &[&[f32]],
+    inputs: Planes<'_, F>,
     params: &[Option<&[f32]>],
-) -> Vec<Vec<f32>> {
-    let frames = inputs
-        .first()
-        .map(|c| c.len())
+) -> Vec<Vec<F>> {
+    let frames = (inputs.channels() > 0)
+        .then(|| inputs.frames().get())
         .or_else(|| params.iter().flatten().next().map(|p| p.len()))
         .expect("a block needs a length: an input or a param");
     let env = Env {
@@ -1767,9 +1768,9 @@ pub fn drive(
 /// What [`drive_input`] rendered: each audio output, and what the node wrote
 /// to each event output.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct Driven {
+pub struct Driven<F: Float = f32> {
     /// One `Vec` per audio output, the block long.
-    pub audio: Vec<Vec<f32>>,
+    pub audio: Vec<Vec<F>>,
     /// One `Vec` per event output port, in the order the node wrote them.
     pub events: Vec<Vec<Event>>,
     /// What the node passed to [`Io::report_tail`] in the call, if anything.
@@ -1797,28 +1798,29 @@ pub const HAND_EVENT_CAPACITY: usize = 1024;
 /// If the block is empty, an input is not the block long or the input
 /// count is not the node's, or an event list is unsorted or reaches past
 /// the block ([`SortedEvents::new`](crate::SortedEvents::new)).
-pub fn drive_input(
-    node: &mut dyn Node,
+pub fn drive_input<F: Float>(
+    node: &mut dyn Node<F>,
     env: &Env,
-    inputs: &[&[f32]],
+    inputs: Planes<'_, F>,
     params: &[Option<&[f32]>],
     events: &[&[Event]],
-) -> Driven {
+) -> Driven<F> {
     let shape = node.shape();
     let frames = env.block_len.get();
     assert!(frames > 0, "a node is never called with zero frames");
     assert_eq!(
-        inputs.len(),
+        inputs.channels(),
         usize::from(shape.audio_in().count()),
-        "one slice per audio input"
+        "one plane per audio input"
     );
     assert!(
-        inputs.iter().all(|c| c.len() == frames)
+        (inputs.channels() == 0 || inputs.frames().get() == frames)
             && params.iter().flatten().all(|p| p.len() == frames),
-        "every input and param slice is the block long"
+        "every input plane and param slice is the block long"
     );
-    let mut out = vec![vec![0.0f32; frames]; usize::from(shape.audio_out().count())];
-    let mut refs: Vec<&mut [f32]> = out.iter_mut().map(|c| &mut c[..]).collect();
+    let ins: Vec<&[F]> = inputs.iter().map(|c| c.samples()).collect();
+    let mut out = vec![vec![F::ZERO; frames]; usize::from(shape.audio_out().count())];
+    let mut refs: Vec<&mut [F]> = out.iter_mut().map(|c| &mut c[..]).collect();
     let params: Vec<ParamInput<'_>> = params
         .iter()
         .map(|p| {
@@ -1853,7 +1855,7 @@ pub fn drive_input(
     let io = Io::new(
         max,
         frames,
-        inputs,
+        &ins,
         &mut refs,
         crate::node::SilenceMask::NONE,
         crate::node::ConstantMask::NONE,
@@ -1910,7 +1912,13 @@ pub fn assert_honest_tail(node: &mut dyn Node, rate: SampleRate) {
     let mut impulse = vec![0.0f32; BLOCK];
     impulse[0] = 1.0;
     let silence = vec![0.0f32; BLOCK];
-    let first = drive_input(node, &env(0), &vec![&impulse[..]; width], &[], &[]);
+    let first = drive_input(
+        node,
+        &env(0),
+        or_empty(Planes::new(&vec![&impulse[..]; width])),
+        &[],
+        &[],
+    );
     // What the executor would park on: the narrowed figure.
     let tail = first
         .reported_tail
@@ -1927,7 +1935,13 @@ pub fn assert_honest_tail(node: &mut dyn Node, rate: SampleRate) {
     let mut audio = first.audio;
     let mut frame = BLOCK as u64;
     while audio.first().is_some_and(|c| c.len() < silent_from + BLOCK) {
-        let next = drive_input(node, &env(frame), &vec![&silence[..]; width], &[], &[]);
+        let next = drive_input(
+            node,
+            &env(frame),
+            or_empty(Planes::new(&vec![&silence[..]; width])),
+            &[],
+            &[],
+        );
         for (all, more) in audio.iter_mut().zip(next.audio) {
             all.extend(more);
         }
@@ -2006,6 +2020,17 @@ pub fn assert_param_fork<N: ParamNode + Clone>(node: N) {
     }
 }
 
+/// A rig's view of its channels: the empty view for no channel (a node with
+/// no audio on that side), and a panic for any other refusal, which a rig's own
+/// buffers never produce.
+fn or_empty<T: Default>(planes: Result<T, BufferError>) -> T {
+    match planes {
+        Ok(planes) => planes,
+        Err(BufferError::ZeroWidth) => T::default(),
+        Err(e) => panic!("a rig's planes are well formed: {e}"),
+    }
+}
+
 /// The widest node [`BlockRig`] drives: twice a bus ([`MAX_CHANNELS`](tutti_types::MAX_CHANNELS)),
 /// so a test can drive a node wider than a bus. Its per-block slice lists live
 /// on the stack, so the rig allocates nothing per block.
@@ -2018,15 +2043,15 @@ pub const RIG_MAX_CHANNELS: usize = 2 * tutti_types::MAX_CHANNELS;
 ///
 /// Everything is built in [`new`](Self::new); a block after that touches
 /// only the executor and buffers sized there.
-pub struct BlockRig {
-    _editor: Editor,
-    exec: Executor,
+pub struct BlockRig<F: Float = f32> {
+    _editor: Editor<F>,
+    exec: Executor<F>,
     frames: usize,
-    inputs: Vec<Vec<f32>>,
-    outputs: Vec<Vec<f32>>,
+    inputs: Vec<Vec<F>>,
+    outputs: Vec<Vec<F>>,
 }
 
-impl std::fmt::Debug for BlockRig {
+impl<F: Float> std::fmt::Debug for BlockRig<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BlockRig")
             .field("_editor", &self._editor)
@@ -2037,15 +2062,33 @@ impl std::fmt::Debug for BlockRig {
 }
 
 impl BlockRig {
-    /// `node`, alone, prepared at `rate` for blocks of `frames`, with
-    /// silent inputs. Returns its controls.
+    /// `node`, alone, in an `f32` rig prepared at `rate` for blocks of
+    /// `frames`, with silent inputs. Returns its controls.
+    /// [`with_format`](BlockRig::with_format) builds the rig for another
+    /// sample format.
+    ///
+    /// # Panics
+    ///
+    /// As [`with_format`](BlockRig::with_format).
+    pub fn new<N: IntoNode>(node: N, rate: SampleRate, frames: usize) -> (Self, N::Controls) {
+        Self::with_format(node, rate, frames)
+    }
+}
+
+impl<F: Float> BlockRig<F> {
+    /// [`new`](BlockRig::new) in sample format `F`.
     ///
     /// # Panics
     ///
     /// If the node is wider than [`RIG_MAX_CHANNELS`] either way, or the
     /// one-node graph does not commit.
-    pub fn new<N: IntoNode>(node: N, rate: SampleRate, frames: usize) -> (Self, N::Controls) {
-        let (mut editor, mut exec) = Editor::new(Prepare::new(rate, MaxBlock::of(Samples(frames))));
+    pub fn with_format<N: IntoNode<F>>(
+        node: N,
+        rate: SampleRate,
+        frames: usize,
+    ) -> (Self, N::Controls) {
+        let (mut editor, mut exec) =
+            Editor::<F>::with_format(Prepare::new(rate, MaxBlock::of(Samples(frames))));
         let key = NodeKey(1);
         let controls = editor.insert(key, N::kind(), node).controls;
         let shape = editor
@@ -2088,21 +2131,23 @@ impl BlockRig {
                 _editor: editor,
                 exec,
                 frames,
-                inputs: vec![vec![0.0; frames]; ins],
-                outputs: vec![vec![0.0; frames]; outs],
+                inputs: vec![vec![F::ZERO; frames]; ins],
+                outputs: vec![vec![F::ZERO; frames]; outs],
             },
             controls,
         )
     }
 
-    /// The input channels, to fill before a block.
-    pub fn inputs_mut(&mut self) -> &mut [Vec<f32>] {
-        &mut self.inputs
+    /// The input channels, to fill before a block (empty for a node with no
+    /// audio input).
+    pub fn inputs_mut(&mut self) -> PlanesMut<'_, '_, F> {
+        or_empty(PlanesMut::from_vecs(&mut self.inputs))
     }
 
-    /// Output channel `c` of the last block.
-    pub fn output(&self, c: usize) -> &[f32] {
-        &self.outputs[c]
+    /// The output channels of the last block (empty for a node with no
+    /// audio output).
+    pub fn output(&self) -> Planes<'_, F> {
+        or_empty(Planes::from_vecs(&self.outputs))
     }
 
     /// One block, transport stopped. Allocation-free.
@@ -2113,13 +2158,13 @@ impl BlockRig {
     /// One block under `transport` (a rolling one, for a node that reads
     /// the transport from its `Env`). Allocation-free.
     pub fn block_in(&mut self, transport: &TransportPosition) {
-        let mut ins: [&[f32]; RIG_MAX_CHANNELS] = [&[]; RIG_MAX_CHANNELS];
+        let mut ins: [&[F]; RIG_MAX_CHANNELS] = [&[]; RIG_MAX_CHANNELS];
         for (slot, c) in ins.iter_mut().zip(&self.inputs) {
             *slot = c;
         }
         let (n_in, n_out) = (self.inputs.len(), self.outputs.len());
         let mut outs = self.outputs.iter_mut();
-        let mut out_refs: [&mut [f32]; RIG_MAX_CHANNELS] =
+        let mut out_refs: [&mut [F]; RIG_MAX_CHANNELS] =
             core::array::from_fn(|_| outs.next().map_or(&mut [][..], |c| &mut c[..]));
         self.exec
             .process(self.frames, transport, &ins[..n_in], &mut out_refs[..n_out]);
@@ -2133,7 +2178,7 @@ impl BlockRig {
 /// params and outputs are buffers of the prepared frames; fill them between
 /// blocks. Each block starts where the last ended (its [`Env::frame`]), under
 /// the transport last [set](Self::set_transport) (stopped, by default).
-pub struct Direct<N: ?Sized> {
+pub struct Direct<N: ?Sized, F: Float = f32> {
     /// The node, prepared.
     pub node: Box<N>,
     rate: SampleRate,
@@ -2141,16 +2186,16 @@ pub struct Direct<N: ?Sized> {
     len: usize,
     frame: Frame,
     transport: TransportPosition,
-    inputs: Vec<Vec<f32>>,
+    inputs: Vec<Vec<F>>,
     params: Vec<Option<Vec<f32>>>,
-    outputs: Vec<Vec<f32>>,
+    outputs: Vec<Vec<F>>,
     events_in: Vec<Vec<Event>>,
     events_out: Vec<Vec<Event>>,
     /// What the node reported with `Io::count_lost`, over every block.
     lost: u64,
 }
 
-impl<N: ?Sized> std::fmt::Debug for Direct<N> {
+impl<N: ?Sized, F: Float> std::fmt::Debug for Direct<N, F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Direct")
             .field("rate", &self.rate)
@@ -2163,8 +2208,10 @@ impl<N: ?Sized> std::fmt::Debug for Direct<N> {
 }
 
 impl<N: Node + ?Sized> Direct<N> {
-    /// `node`, prepared at `rate` for blocks of `frames`, silent inputs, no
-    /// param fed, no events.
+    /// `node`, in an `f32` driver prepared at `rate` for blocks of `frames`,
+    /// silent inputs, no param fed, no events.
+    /// [`with_format`](Direct::with_format) builds the driver for another
+    /// sample format.
     ///
     /// # Panics
     ///
@@ -2174,7 +2221,7 @@ impl<N: Node + ?Sized> Direct<N> {
     where
         N: Sized,
     {
-        Self::boxed(Box::new(node), rate, frames)
+        Self::with_format(node, rate, frames)
     }
 
     /// [`new`](Self::new) for a node an `IntoNode` already boxed, e.g.
@@ -2183,7 +2230,30 @@ impl<N: Node + ?Sized> Direct<N> {
     /// # Panics
     ///
     /// As [`new`](Self::new).
-    pub fn boxed(mut node: Box<N>, rate: SampleRate, frames: usize) -> Self {
+    pub fn boxed(node: Box<N>, rate: SampleRate, frames: usize) -> Self {
+        Self::boxed_with_format(node, rate, frames)
+    }
+}
+
+impl<N: Node<F> + ?Sized, F: Float> Direct<N, F> {
+    /// [`new`](Direct::new) in sample format `F`.
+    ///
+    /// # Panics
+    ///
+    /// As [`new`](Direct::new).
+    pub fn with_format(node: N, rate: SampleRate, frames: usize) -> Self
+    where
+        N: Sized,
+    {
+        Self::boxed_with_format(Box::new(node), rate, frames)
+    }
+
+    /// [`boxed`](Direct::boxed) in sample format `F`.
+    ///
+    /// # Panics
+    ///
+    /// As [`new`](Direct::new).
+    pub fn boxed_with_format(mut node: Box<N>, rate: SampleRate, frames: usize) -> Self {
         node.prepare(&Prepare::new(rate, MaxBlock::of(Samples(frames))));
         let shape = node.shape();
         let (ins, outs) = (
@@ -2215,8 +2285,8 @@ impl<N: Node + ?Sized> Direct<N> {
             len: frames,
             frame: Frame::new(0),
             transport: TransportPosition::default(),
-            inputs: vec![vec![0.0; frames]; ins],
-            outputs: vec![vec![0.0; frames]; outs],
+            inputs: vec![vec![F::ZERO; frames]; ins],
+            outputs: vec![vec![F::ZERO; frames]; outs],
             lost: 0,
         }
     }
@@ -2228,9 +2298,10 @@ impl<N: Node + ?Sized> Direct<N> {
         self.lost
     }
 
-    /// The input channels, to fill before a block.
-    pub fn inputs_mut(&mut self) -> &mut [Vec<f32>] {
-        &mut self.inputs
+    /// The input channels, to fill before a block (empty for a node with no
+    /// audio input).
+    pub fn inputs_mut(&mut self) -> PlanesMut<'_, '_, F> {
+        or_empty(PlanesMut::from_vecs(&mut self.inputs))
     }
 
     /// Feeds declared param `k` with `values` (one per frame) from the next
@@ -2284,15 +2355,20 @@ impl<N: Node + ?Sized> Direct<N> {
         self.len = len;
     }
 
-    /// Output channel `c` of the last block (the block's length).
-    pub fn output(&self, c: usize) -> &[f32] {
-        &self.outputs[c][..self.len]
+    /// The output channels of the last block (the block's length; empty for
+    /// a node with no audio output).
+    pub fn output(&self) -> Planes<'_, F> {
+        if self.outputs.is_empty() {
+            return Planes::default();
+        }
+        or_empty(Planes::from_vecs(&self.outputs)).slice(Samples(0)..Samples(self.len))
     }
 
     /// The output channels, to fill before a block: a node must write every
-    /// frame of every output it declares, and what it leaves shows.
-    pub fn outputs_mut(&mut self) -> &mut [Vec<f32>] {
-        &mut self.outputs
+    /// frame of every output it declares, and what it leaves shows (empty for
+    /// a node with no audio output).
+    pub fn outputs_mut(&mut self) -> PlanesMut<'_, '_, F> {
+        or_empty(PlanesMut::from_vecs(&mut self.outputs))
     }
 
     /// One block: at the driver's frame (advanced block to block), under
@@ -2334,13 +2410,13 @@ impl<N: Node + ?Sized> Direct<N> {
     pub fn block_in(&mut self, env: &Env) -> Status {
         self.set_block_len(env.block_len.get());
         let len = self.len;
-        let mut ins: [&[f32]; RIG_MAX_CHANNELS] = [&[]; RIG_MAX_CHANNELS];
+        let mut ins: [&[F]; RIG_MAX_CHANNELS] = [&[]; RIG_MAX_CHANNELS];
         for (slot, c) in ins.iter_mut().zip(&self.inputs) {
             *slot = &c[..len];
         }
         let (n_in, n_out, n_par) = (self.inputs.len(), self.outputs.len(), self.params.len());
         let mut outs = self.outputs.iter_mut();
-        let mut out_refs: [&mut [f32]; RIG_MAX_CHANNELS] =
+        let mut out_refs: [&mut [F]; RIG_MAX_CHANNELS] =
             core::array::from_fn(|_| outs.next().map_or(&mut [][..], |c| &mut c[..len]));
         let mut params = [ParamInput::Base; crate::param::MAX_PARAM_PORTS];
         for (slot, p) in params.iter_mut().zip(&self.params) {
