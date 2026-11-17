@@ -457,10 +457,10 @@ impl PluginBridge {
         self.audio.news_settled(within)
     }
 
-    /// How many editor-mirror parameter writes a full queue refused. The
+    /// The count of editor-mirror parameter writes a full queue refused. The
     /// audio command is unaffected: the mirror only keeps the display current.
-    pub fn mirror_writes_refused(&self) -> u64 {
-        self.mirror.refused.get()
+    pub fn mirror_refused_cell(&self) -> tutti_rt::Tally<u64> {
+        self.mirror.refused.clone()
     }
 
     /// How many plugin parameter-change events the bridge dropped. See
@@ -475,10 +475,16 @@ impl PluginBridge {
         self.audio.commands_refused_cell()
     }
 
-    /// Audio responses lost to a full response queue. See
-    /// `AudioBridge::responses_lost`.
-    pub fn responses_lost(&self) -> u64 {
-        self.audio.responses_lost()
+    /// The count of audio responses lost to a full response queue. See
+    /// `AudioBridge::responses_lost_cell`.
+    pub fn responses_lost_cell(&self) -> tutti_rt::Tally<u64> {
+        self.audio.responses_lost_cell()
+    }
+
+    /// The count of parameter buffers the audio thread leaked. See
+    /// `AudioBridge::leaked_buffers_cell`.
+    pub fn leaked_buffers_cell(&self) -> tutti_rt::Tally<u64> {
+        self.audio.leaked_buffers_cell()
     }
 
     /// See `AudioBridge::block_counts`.
@@ -1076,6 +1082,55 @@ mod gui_mirror_tests {
             applied(&mirror).is_empty(),
             "opening again drops what waited"
         );
+    }
+
+    /// **`take_automation` applies a mode once**: the mode written is
+    /// returned, then nothing until another is written; closing the editor
+    /// drops one not yet applied.
+    #[test]
+    fn an_automation_mode_is_applied_once() {
+        use crate::protocol::AutomationMode;
+        let mirror = GuiMirror::new();
+        mirror.opened();
+        assert_eq!(mirror.take_automation(), None, "nothing written yet");
+        mirror.push_automation(AutomationMode::Reading);
+        assert_eq!(mirror.take_automation(), Some(AutomationMode::Reading));
+        assert_eq!(mirror.take_automation(), None, "applied once");
+        mirror.push_automation(AutomationMode::Off);
+        assert_eq!(mirror.take_automation(), Some(AutomationMode::Off));
+        mirror.push_automation(AutomationMode::Writing);
+        mirror.closed();
+        assert_eq!(mirror.take_automation(), None, "closing drops it");
+    }
+
+    /// **A full mirror queue counts each refused write and keeps what it
+    /// holds**: the first `MIRROR_CAPACITY` writes are applied in order.
+    #[test]
+    fn a_full_mirror_queue_counts_its_refusals() {
+        let mirror = GuiMirror::new();
+        mirror.opened();
+        for i in 0..MIRROR_CAPACITY + 3 {
+            mirror.push_param(ParamId::new(i as u32), Normalized::of(0.5));
+        }
+        assert_eq!(mirror.refused.get(), 3);
+        let kept = applied(&mirror);
+        assert_eq!(kept.len(), MIRROR_CAPACITY);
+        assert_eq!(kept[0], ParamId::new(0));
+    }
+
+    /// **Pushing a write or a mode allocates nothing**, with the editor open
+    /// and with the queue full.
+    #[test]
+    fn pushing_to_the_mirror_allocates_nothing() {
+        let mirror = GuiMirror::new();
+        mirror.opened();
+        assert_no_alloc::assert_no_alloc(|| {
+            for i in 0..MIRROR_CAPACITY + 2 {
+                mirror.push_param(ParamId::new(i as u32), Normalized::of(0.25));
+            }
+            mirror.push_automation(crate::protocol::AutomationMode::ReadWriting);
+        });
+        assert_eq!(mirror.refused.get(), 2);
     }
 }
 

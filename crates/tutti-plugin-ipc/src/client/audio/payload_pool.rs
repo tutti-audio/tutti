@@ -123,9 +123,10 @@ pub struct PayloadPool {
     /// (one reserved before a re-reserve) is dropped rather than recycled,
     /// on the bridge thread. 0 before a reservation.
     params_shape: Arc<AtomicU64>,
-    /// Counts what the audio thread could not take or give back: an empty
-    /// pool at `acquire`, a full list at `return_params_rt`.
+    /// Counts an empty pool at `acquire`.
     refused: TallyWriter<u64>,
+    /// Counts a full list at `return_params_rt`: a buffer leaked.
+    leaked: TallyWriter<u64>,
 }
 
 impl std::fmt::Debug for PayloadPool {
@@ -143,8 +144,9 @@ impl PayloadPool {
     /// point: an empty pool pushes its allocations onto the audio thread, and
     /// the first blocks after a plugin loads are the least forgiving moment for
     /// one. This runs once, off the RT path, where a few hundred KiB of boxes
-    /// costs nothing. `refused` counts each refusal on the audio side.
-    pub fn new(refused: TallyWriter<u64>) -> Self {
+    /// costs nothing. `refused` counts each `acquire` an empty pool refuses,
+    /// and `leaked` each buffer `return_params_rt` could not keep.
+    pub fn new(refused: TallyWriter<u64>, leaked: TallyWriter<u64>) -> Self {
         let recycle = ArrayQueue::new(POOL_CAPACITY);
         for _ in 0..POOL_CAPACITY {
             // Cannot fail: the queue was just created with this capacity.
@@ -155,6 +157,7 @@ impl PayloadPool {
             params: Arc::new(ArrayQueue::new(PARAM_SLOTS)),
             params_shape: Arc::new(AtomicU64::new(0)),
             refused,
+            leaked,
         }
     }
 
@@ -233,7 +236,7 @@ impl PayloadPool {
             // the same `submit`, so it never adds to that total. A full list
             // here would mean that bound is broken: the buffer is leaked
             // rather than freed on the audio thread, and counted.
-            self.refused.add(1);
+            self.leaked.add(1);
             core::mem::forget(changes);
         }
     }
@@ -269,7 +272,10 @@ mod tests {
     /// holds before its refused push, all without allocating.
     #[test]
     fn a_full_queue_and_both_threads_take_payloads_without_allocating() {
-        let pool = PayloadPool::new(tutti_rt::tally::<u64>().writer());
+        let pool = PayloadPool::new(
+            tutti_rt::tally::<u64>().writer(),
+            tutti_rt::tally::<u64>().writer(),
+        );
         let out = super::super::channels::COMMAND_QUEUE_SIZE + 2;
         // Reserved outside the gate; the payloads are dropped outside it too.
         let mut held = Vec::with_capacity(out);
@@ -295,7 +301,10 @@ mod tests {
         let queues = 2_000 + 64;
         for chunk in [512usize, 4096] {
             let room = ParameterQueue::chunk_room(chunk);
-            let pool = PayloadPool::new(tutti_rt::tally::<u64>().writer());
+            let pool = PayloadPool::new(
+                tutti_rt::tally::<u64>().writer(),
+                tutti_rt::tally::<u64>().writer(),
+            );
             pool.reserve_params(queues, room);
             let mut storage = 0;
             while let Some(buffer) = pool.take_params() {
@@ -319,7 +328,10 @@ mod tests {
     /// allocator, which this unit-test binary does not install.)
     #[test]
     fn the_bridge_drops_surplus_buffers_and_the_audio_thread_none() {
-        let pool = PayloadPool::new(tutti_rt::tally::<u64>().writer());
+        let pool = PayloadPool::new(
+            tutti_rt::tally::<u64>().writer(),
+            tutti_rt::tally::<u64>().writer(),
+        );
         pool.reserve_params(4, 10);
         assert_eq!(pool.params.len(), PARAM_BUFFERS);
 
@@ -349,7 +361,7 @@ mod tests {
     #[test]
     fn an_empty_pool_refuses_and_counts_without_allocating() {
         let refused = tutti_rt::tally::<u64>();
-        let pool = PayloadPool::new(refused.writer());
+        let pool = PayloadPool::new(refused.writer(), tutti_rt::tally::<u64>().writer());
         let mut held = Vec::with_capacity(POOL_CAPACITY);
         for _ in 0..POOL_CAPACITY {
             held.push(pool.acquire().expect("a pooled payload"));
@@ -362,19 +374,20 @@ mod tests {
         assert_eq!(refused.get(), 2);
     }
 
-    /// **A parameter buffer that has no room to come back is counted, never
-    /// freed on the audio thread.** (Unreachable by the list's sizing; the
-    /// list is filled past it here.)
+    /// **A parameter buffer that has no room to come back is counted as
+    /// leaked, apart from a refusal, and never freed on the audio thread.**
+    /// (Unreachable by the list's sizing; the list is filled past it here.)
     #[test]
-    fn a_buffer_with_no_room_to_return_is_counted() {
-        let refused = tutti_rt::tally::<u64>();
-        let pool = PayloadPool::new(refused.writer());
+    fn a_buffer_with_no_room_to_return_is_counted_as_leaked() {
+        let (refused, leaked) = (tutti_rt::tally::<u64>(), tutti_rt::tally::<u64>());
+        let pool = PayloadPool::new(refused.writer(), leaked.writer());
         while pool
             .params
             .push(ParameterChanges::reserved_bridged(1, 4))
             .is_ok()
         {}
         pool.return_params_rt(ParameterChanges::reserved_bridged(1, 4));
-        assert_eq!(refused.get(), 1);
+        assert_eq!(leaked.get(), 1);
+        assert_eq!(refused.get(), 0, "a leak is not a refusal");
     }
 }

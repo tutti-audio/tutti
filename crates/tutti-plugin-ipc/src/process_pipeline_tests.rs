@@ -1320,22 +1320,28 @@ fn a_timed_out_reply_is_drained_rather_than_paired_with_a_later_block() {
          statement about pairing"
     );
 
-    // **The deterministic gate.** Everything the drain does is invisible by
-    // construction (the audio it recovers is stale and rejected by the slab's
-    // sequence check, and the MIDI it forwards looks like MIDI that arrived on
-    // time), so the gate is that a block was abandoned at all and that its
-    // reply, owed on the socket, reached the host (the stamp check below).
+    // **The deterministic gate.** Everything else the drain does is invisible
+    // by construction (the audio it recovers is stale and rejected by the
+    // slab's sequence check, and the MIDI it forwards looks like MIDI that
+    // arrived on time), so this reads what the drain collected: an owed reply,
+    // counted `late`. Without the drain it stays 0 whatever the stamps say.
     //
-    // It is not pinned to 1 abandoned. Block 1's 120 ms stall is past
-    // `MAX_PROCESS_TIMEOUT`, so at least that one reply is abandoned on any
-    // machine; but a loaded machine can make a later block miss its few-ms
-    // budget too.
-    let abandoned = bridge.block_counts().abandoned;
+    // Block 1's 120 ms stall is past `MAX_PROCESS_TIMEOUT`, so at least that
+    // one reply is abandoned on any machine; a loaded machine can make a later
+    // block miss its few-ms budget too, so neither count is pinned.
+    let counts = bridge.block_counts();
     assert!(
-        abandoned >= 1,
+        counts.abandoned >= 1,
         "block 1 stalled 120 ms against a budget of at most {:?}, yet no reply \
          was abandoned — the rig did not stage the timeout this test is about",
         std::time::Duration::from_millis(50),
+    );
+    assert!(
+        counts.late >= 1,
+        "the drain collected no owed reply although {} blocks were abandoned. \
+         `Owed::take` never ran or never collected anything, and the abandoned \
+         frame is still queued — which the stamps below cannot reliably detect.",
+        counts.abandoned
     );
 
     // The server stamps block `seq`'s reply with `data[0] == seq` (not its

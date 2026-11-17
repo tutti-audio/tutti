@@ -118,7 +118,10 @@ fn a_pool_spent_chunk_reaches_a_clap_plugin_whole() {
 fn a_buffer_of_the_room_before_a_re_prepare_is_dropped_not_reused() {
     let counters = Arc::new(DeliveryCounters::default());
     let mut d = ParamDelivery::new((0..2000).map(ParamId::new), counters);
-    let pool = tutti_plugin_ipc::PayloadPool::new(tutti_rt::tally::<u64>().writer());
+    let pool = tutti_plugin_ipc::PayloadPool::new(
+        tutti_rt::tally::<u64>().writer(),
+        tutti_rt::tally::<u64>().writer(),
+    );
     let lanes = 20u32;
     let load = |d: &mut ParamDelivery, phase: usize| {
         d.begin();

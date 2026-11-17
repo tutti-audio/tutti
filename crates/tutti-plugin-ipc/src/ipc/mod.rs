@@ -472,6 +472,9 @@ impl Ipc {
             counters.attach(move |seq| answering.lock_recover().has_output(seq));
             counters.attach_skipped(bridge.skipped_cell());
             counters.attach_commands_refused(bridge.commands_refused_cell());
+            counters.attach_responses_lost(bridge.responses_lost_cell());
+            counters.attach_leaked_buffers(bridge.leaked_buffers_cell());
+            counters.attach_mirror_refused(bridge.mirror_refused_cell());
         }
         let events = Arc::new(Events {
             latency: AtomicUsize::new(loaded.latency_samples.get()),

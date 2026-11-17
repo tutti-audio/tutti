@@ -116,6 +116,30 @@ impl<'a> Diagnostics<'a> {
             .map_or(0, tutti_plugin_host::PluginControls::refused_commands)
     }
 
+    /// Audio responses the plugin's bridge could not queue for the audio thread: lost. Zero for a plugin that runs in this process.
+    pub fn lost_responses(&self) -> u64 {
+        self.hosted
+            .controls
+            .as_ref()
+            .map_or(0, tutti_plugin_host::PluginControls::lost_responses)
+    }
+
+    /// Parameter-change buffers the audio thread leaked rather than free (a broken sizing bound). Zero for a plugin that runs in this process.
+    pub fn leaked_buffers(&self) -> u64 {
+        self.hosted
+            .controls
+            .as_ref()
+            .map_or(0, tutti_plugin_host::PluginControls::leaked_buffers)
+    }
+
+    /// Parameter writes the editor mirror refused (the plugin still got them; the open editor's display missed them). Zero for a plugin that runs in this process.
+    pub fn mirror_writes_refused(&self) -> u64 {
+        self.hosted
+            .controls
+            .as_ref()
+            .map_or(0, tutti_plugin_host::PluginControls::mirror_writes_refused)
+    }
+
     /// The latency the graph compensates for this plugin's node, as of the last
     /// update: the plugin's own, and out of process one chunk of the pipeline
     /// that carries its audio.

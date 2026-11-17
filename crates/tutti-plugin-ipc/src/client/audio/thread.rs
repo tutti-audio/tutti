@@ -431,7 +431,7 @@ mod tests {
         run_thread(
             channels.clone(),
             sleeper,
-            PayloadPool::new(channels.refusal_writer()),
+            PayloadPool::new(channels.refusal_writer(), channels.leak_writer()),
             lifecycle.clone(),
             Arc::new(parking_lot::Mutex::new(None)),
             socket,

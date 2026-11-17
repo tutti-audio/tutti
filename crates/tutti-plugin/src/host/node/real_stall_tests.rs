@@ -234,23 +234,23 @@ fn a_real_plugin_that_stops_answering_is_abandoned_and_later_drained() {
 
     // --- Release, and let the drain happen.
     release_the_block();
-    let replies_before = bridge.block_counts().replies;
-    let mut settled = 0;
+    let late_before = bridge.block_counts().late;
+    let mut collected = 0;
     let deadline = Instant::now() + Duration::from_secs(60);
     while Instant::now() < deadline {
         let _ = drive_block(&mut client, &mut midi_out);
         std::thread::sleep(PACE);
-        settled = bridge.block_counts().replies - replies_before;
-        if settled > 0 {
+        collected = bridge.block_counts().late - late_before;
+        if collected > 0 {
             break;
         }
     }
 
     // --- The deterministic gate.
     assert!(
-        settled > 0,
-        "no reply was taken after the release. Either the budget never elapsed (so nothing \
-         was owed, and this test exercised the ordinary path rather than the \
+        collected > 0,
+        "no owed reply was collected after the release. Either the budget never elapsed (so \
+         nothing was owed, and this test exercised the ordinary path rather than the \
          abandonment one), or the owed replies were never taken back off the \
          socket — which leaves the stream one frame out of step for the rest of \
          the session."
@@ -283,7 +283,7 @@ fn a_real_plugin_that_stops_answering_is_abandoned_and_later_drained() {
 /// The counter really moves only because a block was abandoned, and an
 /// ordinary run rarely abandons one.
 ///
-/// The control for the test above, and the reason its `settled > 0` assertion is
+/// The control for the test above, and the reason its `collected > 0` assertion is
 /// worth anything. An identical run with **no** park must show:
 ///
 /// - **`abandoned <= ORDINARY_MISSES`**: an ordinary block misses its budget
@@ -291,10 +291,10 @@ fn a_real_plugin_that_stops_answering_is_abandoned_and_later_drained() {
 ///   make the stall
 ///   test's abandonment a property of the budget rather than of the park.
 ///
-/// Neither is pinned to 0: the budget is wall clock, and a loaded machine can
+/// The count is not pinned to 0: the budget is wall clock, and a loaded machine can
 /// make an ordinary block miss it. See the bound's derivation below.
 #[test]
-fn a_plugin_that_never_parks_settles_nothing() {
+fn an_unstressed_plugin_abandons_few_blocks_and_collects_no_more_than_it_owed() {
     let _lock = machine_lock();
     let _ = std::fs::remove_file(release_path());
     let mut env = ScopedEnv::new();
@@ -317,7 +317,6 @@ fn a_plugin_that_never_parks_settles_nothing() {
     );
 
     let abandoned = bridge.block_counts().abandoned;
-
     // A quarter of the blocks. The budget is 4 periods (5.3 ms at 64/48k), the
     // probe's work is a passthrough, and each block follows a whole `PACE` (20
     // periods) of idle time. So an ordinary block is abandoned only if its

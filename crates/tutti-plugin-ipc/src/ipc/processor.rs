@@ -209,8 +209,8 @@ impl Chunks for Piece<'_, '_> {
             }
         }
         // The chunk's harmony carries the degrees a plugin acts on, shifted to
-        // the chunk's frames; the display text stays with the node's list. A
-        // `String` cloned here would allocate, and a refused event would free.
+        // the chunk's frames. Chord and scale text is not carried yet: cloning
+        // a `String` here would allocate, and a refused event would free it.
         let shift = i32::try_from(at).unwrap_or(i32::MAX);
         if let Some(expressive) = &self.ctx.expressive {
             if let Some(chords) = expressive.chords {
@@ -332,9 +332,10 @@ mod tests {
     }
 
     /// **A piece's chords and scales join the chunk shifted to the chunk's
-    /// frames, without allocating, display text and all.** The node's list
+    /// frames, without allocating, whatever text they carry.** The context
     /// holds a named chord and a named scale; the chunk gets their degrees at
-    /// `at` frames later (a refused event past the cap frees nothing either).
+    /// `at` frames later and no text (a refused event past the cap frees
+    /// nothing either).
     #[test]
     fn a_pieces_harmony_joins_the_chunk_shifted_and_allocation_free() {
         use tutti_plugin_types::{ChordChanges, ExpressiveContext, ScaleChanges};
