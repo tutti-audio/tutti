@@ -274,6 +274,7 @@ fn answer(slab: &mut SlabWriter, scratch: &mut [f32], data: ProcessAudioData) ->
 /// A map at 120 BPM that steps to 90 at `beat`.
 pub(super) fn tempo(beat: f64) -> TempoReader {
     let point = |beat: f64, bpm: f64| TempoPoint {
+        arrive: None,
         beat: Beat(beat),
         tempo: Bpm::of(bpm),
         transition: Transition::Step,

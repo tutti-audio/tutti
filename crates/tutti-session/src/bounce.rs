@@ -2149,11 +2149,13 @@ mod tests {
     fn stepped() -> TempoMap {
         TempoMap::new([
             TempoPoint {
+                arrive: None,
                 beat: Beat(0.0),
                 tempo: Bpm::of(120.0),
                 transition: Transition::Step,
             },
             TempoPoint {
+                arrive: None,
                 beat: Beat(4.0),
                 tempo: Bpm::of(60.0),
                 transition: Transition::Step,

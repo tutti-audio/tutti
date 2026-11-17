@@ -296,11 +296,13 @@ mod tests {
         let two = |shape| {
             TempoMap::new([
                 TempoPoint {
+                    arrive: None,
                     beat: Beat(0.0),
                     tempo: Bpm::of(100.0),
                     transition: shape,
                 },
                 TempoPoint {
+                    arrive: None,
                     beat: Beat(4.0),
                     tempo: Bpm::of(200.0),
                     transition: Transition::Step,

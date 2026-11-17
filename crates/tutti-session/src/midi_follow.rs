@@ -72,7 +72,7 @@ use tutti_midi_runtime::{
     ClockEvent, ClockFollower, ClockKind, ClockPosition, Followed, MachineControlEvent,
     MachineControlFollower, TempoFollower,
 };
-use tutti_tempo::{TempoError, TempoMap, Transition};
+use tutti_tempo::{TempoError, TempoMap, TempoMapBuilder, TempoPoint, Transition};
 use tutti_transport::{ProjectMeter, TransportSettings};
 use tutti_types::{
     BarCount, Beat, Bpm, Frame, Meter, MeterChange, MeterMap, Seconds, TimeSignature,
@@ -596,10 +596,10 @@ pub(crate) fn next_block_beat(playhead: &Playhead, map: &TempoMap) -> Beat {
 /// it), so a source that repeats its tempo grows no map.
 ///
 /// A ramp `beat` lands in is cut there: the ramp is kept up to `beat` (it reaches
-/// the tempo `map` has at `beat`, so every beat before `beat` keeps its time),
-/// and the step follows one ulp of a beat later, because a map holds one tempo
-/// at a beat and a tempo that jumps needs two points. A `beat` before 0 is
-/// beat 0.
+/// the tempo `map` has there, so every beat before `beat` keeps its time) and
+/// the tempo steps at that same beat, in the one point that ends the ramp
+/// ([`TempoMapBuilder::then_step`](tutti_tempo::TempoMapBuilder::then_step)). A
+/// `beat` before 0 is beat 0.
 ///
 /// # Errors
 ///
@@ -624,30 +624,36 @@ pub(crate) fn step_at(
     };
     let mut builder = TempoMap::builder(first.tempo);
     for pair in points[..kept].windows(2) {
-        builder = extend(builder, pair[0].transition, pair[1].beat, pair[1].tempo);
+        builder = extend(builder, pair[0].transition, &pair[1]);
     }
     let last = &points[kept - 1];
     builder = if last.transition == Transition::Step {
         builder.step_to(beat, tempo)
     } else {
-        // The ramp is cut at `beat`: it reaches what the map has there.
-        extend(builder, last.transition, beat, map.tempo_at(beat))
-            .step_to(Beat(beat.get().next_up()), tempo)
+        // The ramp is cut at `beat`: it reaches what the map has there, which
+        // is a ramp's arrival where a point of the map sits on `beat`.
+        let reached = points
+            .get(kept)
+            .filter(|p| p.beat == beat)
+            .map_or_else(|| map.tempo_at(beat), TempoPoint::arrival);
+        extend(builder, last.transition, &TempoPoint::step(beat, reached)).then_step(tempo)
     };
     builder.build().map(Some)
 }
 
-/// The next point of a builder, reached from the last by `transition`.
-fn extend(
-    builder: tutti_tempo::TempoMapBuilder,
-    transition: Transition,
-    beat: Beat,
-    tempo: Bpm,
-) -> tutti_tempo::TempoMapBuilder {
-    match transition {
-        Transition::Step => builder.step_to(beat, tempo),
-        Transition::RampTime => builder.ramp_time_to(beat, tempo),
-        Transition::RampBeats => builder.ramp_beats_to(beat, tempo),
+/// `point` as the next point of a builder, reached from the last by
+/// `transition`, keeping the step it makes where it ends a ramp.
+fn extend(builder: TempoMapBuilder, transition: Transition, point: &TempoPoint) -> TempoMapBuilder {
+    let (beat, reached) = (point.beat, point.arrival());
+    let builder = match transition {
+        Transition::Step => builder.step_to(beat, reached),
+        Transition::RampTime => builder.ramp_time_to(beat, reached),
+        Transition::RampBeats => builder.ramp_beats_to(beat, reached),
+    };
+    if point.arrive.is_some() {
+        builder.then_step(point.tempo)
+    } else {
+        builder
     }
 }
 
@@ -675,7 +681,6 @@ pub(crate) fn meter_at(meter: &MeterMap, at: Beat, signature: TimeSignature) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tutti_tempo::TempoPoint;
 
     fn bpm(x: f64) -> Bpm {
         Bpm::of(x)
@@ -721,9 +726,10 @@ mod tests {
     }
 
     /// **A ramp a step lands in is cut there**: the overlay reaches the tempo the
-    /// ramp had at the beat, so every earlier beat keeps its time; the step
-    /// follows, the map ends on it, and the ramp's own end (beat 8) and the
-    /// point after it are gone.
+    /// ramp had at the beat, so every earlier beat keeps its time; the step is
+    /// at that same beat with no plateau between (the tempo just below the beat
+    /// is the ramp's, at it the step's), the map ends on it, and the ramp's own
+    /// end (beat 8) and the point after it are gone.
     #[test]
     fn a_ramp_a_step_lands_in_is_cut_at_its_beat() {
         let old = ramp_60_to_180();
@@ -733,17 +739,16 @@ mod tests {
         let new = step_at(&old, at, bpm(100.0)).unwrap().unwrap();
 
         let points = new.points();
-        assert_eq!(points.len(), 3, "{points:?}");
+        assert_eq!(points.len(), 2, "{points:?}");
         assert_eq!(points[0], TempoPoint::ramp_time(Beat(0.0), bpm(60.0)));
         assert_eq!(
-            points[1],
-            TempoPoint::step(at, cut),
-            "the ramp ends at the cut"
+            points[1].beat, at,
+            "the ramp ends and the step is at one beat"
         );
-        assert_eq!(points[2].beat, Beat(at.get().next_up()));
-        assert_eq!(points[2].tempo, bpm(100.0));
+        assert_eq!(points[1].arrive, Some(cut), "the ramp ends at the cut");
+        assert_eq!(points[1].tempo, bpm(100.0));
         assert_eq!(
-            points[2].transition,
+            points[1].transition,
             Transition::Step,
             "the map ends on a step"
         );
@@ -752,7 +757,10 @@ mod tests {
             let (a, n) = (old.seconds_at(Beat(b)).get(), new.seconds_at(Beat(b)).get());
             assert!((a - n).abs() < 1e-9, "beat {b}: {a} vs {n}");
         }
+        assert_eq!(new.tempo_at(at), bpm(100.0));
         assert_eq!(new.tempo_at(Beat(10.0)), bpm(100.0));
+        let below = new.tempo_at(Beat(at.get().next_down())).get();
+        assert!((below - cut.get()).abs() < 1e-9, "{below} vs {cut:?}");
     }
 
     /// The same cut of a ramp that is linear in beats.

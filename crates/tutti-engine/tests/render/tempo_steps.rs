@@ -74,6 +74,7 @@ fn graph(log: &Log) -> (Editor, Executor) {
 fn steps(points: &[(f64, f64)]) -> Arc<TempoMap> {
     Arc::new(
         TempoMap::new(points.iter().map(|&(beat, bpm)| TempoPoint {
+            arrive: None,
             beat: Beat(beat),
             tempo: Bpm::of(bpm),
             transition: Transition::Step,

@@ -46,6 +46,7 @@ const SAMPLE_RATE: f64 = 48_000.0;
 fn points_inside_blocks() -> tutti_tempo::TempoMap {
     use tutti_tempo::{TempoMap, TempoPoint, Transition};
     let point = |beat: f64, bpm: f64| TempoPoint {
+        arrive: None,
         beat: Beat(beat),
         tempo: Bpm::of(bpm),
         transition: Transition::Step,

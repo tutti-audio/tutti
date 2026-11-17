@@ -24,6 +24,7 @@ const RATE: f64 = 48_000.0;
 
 fn point(beat: f64, bpm: f64, shape: Transition) -> TempoPoint {
     TempoPoint {
+        arrive: None,
         beat: Beat(beat),
         tempo: Bpm::of(bpm),
         transition: shape,

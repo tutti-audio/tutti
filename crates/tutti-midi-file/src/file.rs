@@ -1419,6 +1419,7 @@ fn tempo_map(container: Container, tracks: &[Track]) -> Result<Arc<TempoMap>> {
     }
     Ok(Arc::new(TempoMap::new(points.into_iter().map(
         |(tick, tempo)| TempoPoint {
+            arrive: None,
             beat: tick.beats(ticks_per_quarter),
             tempo,
             transition: Transition::Step,

@@ -488,6 +488,7 @@ mod tests {
         use tutti_tempo::{TempoPoint, Transition};
         std::sync::Arc::new(
             TempoMap::new(points.iter().map(|&(beat, bpm)| TempoPoint {
+                arrive: None,
                 beat: Beat(beat),
                 tempo: Bpm::of(bpm),
                 transition: Transition::Step,
@@ -531,11 +532,13 @@ mod tests {
         let map = std::sync::Arc::new(
             TempoMap::new([
                 TempoPoint {
+                    arrive: None,
                     beat: Beat(0.0),
                     tempo: Bpm::of(120.0),
                     transition: Transition::RampTime,
                 },
                 TempoPoint {
+                    arrive: None,
                     beat: Beat(4.0),
                     tempo: Bpm::of(60.0),
                     transition: Transition::Step,

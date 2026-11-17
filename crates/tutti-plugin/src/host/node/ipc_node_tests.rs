@@ -564,6 +564,7 @@ fn a_tempo_ramp_across_a_block_boundary_reaches_the_server_as_its_slope() {
     use tutti_tempo::{TempoMap, TempoPoint, Transition};
     let _machine = machine_lock();
     let point = |beat: f64, bpm: f64, shape| TempoPoint {
+        arrive: None,
         beat: Beat(beat),
         tempo: Bpm::of(bpm),
         transition: shape,

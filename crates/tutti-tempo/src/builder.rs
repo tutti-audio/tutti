@@ -71,13 +71,43 @@ impl TempoMapBuilder {
         self.then(Transition::RampBeats, beat, tempo)
     }
 
+    /// The ramp just added ends at its beat at the tempo it was given, and the
+    /// tempo steps to `tempo` at that same beat: one point holds the ramp's end
+    /// and the step ([`TempoPoint::arrive`]), with no plateau between them.
+    /// Every beat before it keeps its time.
+    ///
+    /// ```
+    /// use tutti_tempo::TempoMap;
+    /// use tutti_types::{Beat, Bpm, Seconds};
+    ///
+    /// // 120 to 180 BPM over four beats lasts 1.6 s; the tempo is 90 from there.
+    /// let map = TempoMap::builder(Bpm::of(120.0))
+    ///     .ramp_time_to(Beat(4.0), Bpm::of(180.0))
+    ///     .then_step(Bpm::of(90.0))
+    ///     .build()?;
+    /// assert_eq!(map.tempo_at(Beat(4.0)), Bpm::of(90.0));
+    /// assert!((map.seconds_at(Beat(4.0)) - Seconds(1.6)).get().abs() < 1e-12);
+    /// # Ok::<(), tutti_tempo::TempoError>(())
+    /// ```
+    ///
+    /// After anything but a ramp, [`build`](Self::build) refuses it
+    /// ([`TempoError::ArriveWithoutRamp`]).
+    pub fn then_step(mut self, tempo: Bpm) -> Self {
+        if let Some(last) = self.points.last_mut() {
+            last.arrive.get_or_insert(last.tempo);
+            last.tempo = tempo;
+        }
+        self
+    }
+
     /// The map.
     ///
     /// # Errors
     ///
     /// As [`TempoMap::new`], for what a builder can still get wrong: a beat
     /// that is not finite or not after the last point's
-    /// ([`TempoError::BadOrder`]), or a segment an `f64` cannot hold.
+    /// ([`TempoError::BadOrder`]), a [`then_step`](Self::then_step) after a
+    /// step, or a segment an `f64` cannot hold.
     pub fn build(self) -> Result<TempoMap, TempoError> {
         TempoMap::new(self.points)
     }

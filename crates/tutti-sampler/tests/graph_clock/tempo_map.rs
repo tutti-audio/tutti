@@ -54,6 +54,7 @@ const BLOCKS: [usize; 6] = [1, 64, 100, 512, 1_000, 4_096];
 fn map(points: &[(f64, f64, Transition)]) -> Arc<TempoMap> {
     Arc::new(
         TempoMap::new(points.iter().map(|&(beat, bpm, shape)| TempoPoint {
+            arrive: None,
             beat: Beat(beat),
             tempo: Bpm::of(bpm),
             transition: shape,

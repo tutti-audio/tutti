@@ -825,11 +825,13 @@ mod tests {
         // transport's own tempo change (the seek lands on beat 16) agrees with.
         let map = TempoMap::new([
             tutti_tempo::TempoPoint {
+                arrive: None,
                 beat: Beat(0.0),
                 tempo: Bpm::of(120.0),
                 transition: tutti_tempo::Transition::Step,
             },
             tutti_tempo::TempoPoint {
+                arrive: None,
                 beat: Beat(16.0),
                 tempo: Bpm::of(90.0),
                 transition: tutti_tempo::Transition::Step,
@@ -958,6 +960,7 @@ mod tests {
 
     fn point(beat: f64, bpm: f64, transition: tutti_tempo::Transition) -> tutti_tempo::TempoPoint {
         tutti_tempo::TempoPoint {
+            arrive: None,
             beat: Beat(beat),
             tempo: Bpm::of(bpm),
             transition,

@@ -502,11 +502,13 @@ fn constant_tempo_is_the_single_points_tempo_to_the_bit() {
     ] {
         let two = TempoMap::new([
             TempoPoint {
+                arrive: None,
                 beat: Beat(0.0),
                 tempo: odd,
                 transition: shape,
             },
             TempoPoint {
+                arrive: None,
                 beat: Beat(4.0),
                 tempo: odd,
                 transition: Transition::Step,
@@ -638,4 +640,105 @@ fn the_builder_writes_the_points_and_never_ends_on_a_ramp() {
         TempoMap::new([TempoPoint::ramp_time(Beat(0.0), Bpm::of(120.0))]),
         Err(TempoError::RampWithoutEnd)
     ));
+}
+
+/// 120 -> 180 BPM linear in time over beats 0..4 lasts `2 * 4 / (2 + 3)` = 1.6 s
+/// and ends in a step to 90 at beat 4, in one point. The ramp's tempo against
+/// beats is `60 sqrt(r0^2 + 2 k b)` with `r0` = 2 beats/s and
+/// `k` = (3 - 2) / 1.6 = 0.625 beats/s^2.
+fn ramp_ending_in_a_step() -> TempoMap {
+    TempoMap::builder(Bpm::of(120.0))
+        .ramp_time_to(Beat(4.0), Bpm::of(180.0))
+        .then_step(Bpm::of(90.0))
+        .build()
+        .unwrap()
+}
+
+/// **A ramp that ends in a step has no plateau**: the tempo one ulp below the
+/// point is the ramp's analytic value (180 there, `60 sqrt(7.75)` at beat 3),
+/// at the point it is the step's 90, and the map holds exactly two points.
+#[test]
+fn a_ramp_ending_in_a_step_leaves_no_plateau() {
+    let map = ramp_ending_in_a_step();
+    assert_eq!(map.points().len(), 2);
+    let below = map.tempo_at(Beat(4.0f64.next_down())).get();
+    assert!((below - 180.0).abs() < 1e-9, "{below}");
+    assert_eq!(map.tempo_at(Beat(4.0)), Bpm::of(90.0));
+    let mid = map.tempo_at(Beat(3.0)).get();
+    assert!((mid - 60.0 * 7.75f64.sqrt()).abs() < 1e-9, "{mid}");
+    let in_time = map.tempo_at_seconds(Seconds(1.6f64.next_down())).get();
+    assert!((in_time - 180.0).abs() < 1e-6, "{in_time}");
+    assert_eq!(map.tempo_at_seconds(Seconds(1.6)), Bpm::of(90.0));
+    assert_eq!(map.tempo_at(Beat(100.0)), Bpm::of(90.0));
+}
+
+/// **A step changes the tempo, not the time**: beat 4 is at the ramp's integral,
+/// 1.6 s; after it the tempo is 90 (1.5 beats/s), so beat 5.5 is at 2.6 s. A
+/// ramp linear in beats from 120 to 180 over 4 beats (`g` = 0.25) lasts
+/// `4 ln 1.5` the same way.
+#[test]
+fn a_step_after_a_ramp_keeps_the_ramps_time() {
+    let map = ramp_ending_in_a_step();
+    assert!((map.seconds_at(Beat(4.0)).get() - 1.6).abs() < 1e-12);
+    assert!((map.seconds_at(Beat(5.5)).get() - 2.6).abs() < 1e-12);
+    let near = map.seconds_at(Beat(4.0f64.next_down())).get();
+    assert!((near - 1.6).abs() < 1e-12, "continuous below: {near}");
+
+    let beats = TempoMap::builder(Bpm::of(120.0))
+        .ramp_beats_to(Beat(4.0), Bpm::of(180.0))
+        .then_step(Bpm::of(60.0))
+        .build()
+        .unwrap();
+    let want = 4.0 * libm::log(1.5);
+    assert!((beats.seconds_at(Beat(4.0)).get() - want).abs() < 1e-12);
+    assert_eq!(beats.tempo_at(Beat(4.0)), Bpm::of(60.0));
+    assert!((beats.seconds_at(Beat(5.0)).get() - want - 1.0).abs() < 1e-12);
+}
+
+/// **Time to beat round-trips across the point**, below it, on it and after it.
+#[test]
+fn time_and_beat_round_trip_across_a_ramps_step() {
+    let map = ramp_ending_in_a_step();
+    for b in [0.0, 1.0, 3.999, 4.0, 4.001, 5.5, 20.0] {
+        let back = map.beat_at_seconds(map.seconds_at(Beat(b))).get();
+        assert!((back - b).abs() < 1e-12, "beat {b}: {back}");
+    }
+    assert!((map.beat_at_seconds(Seconds(1.6)).get() - 4.0).abs() < 1e-12);
+    assert!((map.beat_at_seconds(Seconds(2.6)).get() - 5.5).abs() < 1e-12);
+}
+
+/// **An `arrive` needs a ramp before it**: after a step, or at the first point,
+/// the map is refused and names the point.
+#[test]
+fn an_arrive_after_no_ramp_is_refused() {
+    let with = |beat: f64, shape| TempoPoint {
+        arrive: Some(Bpm::of(100.0)),
+        ..pt(beat, 90.0, shape)
+    };
+    assert_eq!(
+        TempoMap::new([with(0.0, Transition::Step)]).unwrap_err(),
+        TempoError::ArriveWithoutRamp(0)
+    );
+    assert_eq!(
+        TempoMap::new([
+            pt(0.0, 120.0, Transition::Step),
+            with(4.0, Transition::Step)
+        ])
+        .unwrap_err(),
+        TempoError::ArriveWithoutRamp(1)
+    );
+    assert_eq!(
+        TempoMap::builder(Bpm::of(120.0))
+            .then_step(Bpm::of(90.0))
+            .build()
+            .unwrap_err(),
+        TempoError::ArriveWithoutRamp(0)
+    );
+    assert!(
+        TempoMap::new([
+            pt(0.0, 120.0, Transition::RampTime),
+            with(4.0, Transition::Step)
+        ])
+        .is_ok()
+    );
 }

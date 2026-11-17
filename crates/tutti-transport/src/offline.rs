@@ -671,6 +671,7 @@ mod tests {
                     .iter()
                     .enumerate()
                     .map(|(i, &(beat, bpm))| TempoPoint {
+                        arrive: None,
                         beat: Beat(beat),
                         tempo: Bpm::of(bpm),
                         transition: if i == last { Transition::Step } else { shape },

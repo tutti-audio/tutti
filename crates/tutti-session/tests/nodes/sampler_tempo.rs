@@ -61,6 +61,7 @@ fn a_sampler_node_added_to_the_graph_follows_the_sessions_tempo_map() {
             [(0.0, 120.0), (1.0, 60.0)]
                 .into_iter()
                 .map(|(beat, bpm)| TempoPoint {
+                    arrive: None,
                     beat: Beat(beat),
                     tempo: Bpm::of(bpm),
                     transition: Transition::Step,

@@ -89,6 +89,7 @@ fn graph(log: &Log) -> (Editor, Executor) {
 fn tempo_map(points: &[(f64, f64, Transition)]) -> Arc<TempoMap> {
     Arc::new(
         TempoMap::new(points.iter().map(|&(beat, bpm, shape)| TempoPoint {
+            arrive: None,
             beat: Beat(beat),
             tempo: Bpm::of(bpm),
             transition: shape,

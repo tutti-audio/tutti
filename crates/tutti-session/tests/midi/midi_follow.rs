@@ -272,13 +272,19 @@ fn a_step_in_a_project_ramp_cuts_the_ramp() {
 
     let map = s.tempo_map();
     let points = map.points();
-    assert_eq!(points.len(), 3, "{points:?}");
+    assert_eq!(points.len(), 2, "{points:?}");
     assert_eq!(points[0], TempoPoint::ramp_time(Beat(0.0), Bpm::of(60.0)));
-    assert_eq!(points[1].beat, beat);
-    assert_eq!(points[1].tempo, ramp.tempo_at(beat), "the ramp as it stood");
-    assert_eq!(points[2].tempo, Bpm::of(150.0));
-    assert_eq!(points[2].transition, Transition::Step, "ends on a step");
-    assert!(points[2].beat > beat && points[2].beat.get() < beat.get() + 1e-9);
+    assert_eq!(
+        points[1].beat, beat,
+        "the ramp ends and the step is at one beat"
+    );
+    assert_eq!(
+        points[1].arrive,
+        Some(ramp.tempo_at(beat)),
+        "the ramp as it stood"
+    );
+    assert_eq!(points[1].tempo, Bpm::of(150.0));
+    assert_eq!(points[1].transition, Transition::Step, "ends on a step");
     for b in [0.0, beat.get() / 2.0, beat.get()] {
         let (a, n) = (
             ramp.seconds_at(Beat(b)).get(),
