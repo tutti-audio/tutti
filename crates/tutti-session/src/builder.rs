@@ -13,6 +13,7 @@ use tutti_types::{ChannelLayout, ChannelTopology, MaxBlock, SampleRate, Samples}
 
 use crate::graph::{Graph, LIVE_MAX_BLOCK};
 use crate::{Clock, Offline, OfflineSession, Result, Session, SystemClock};
+use tutti_engine::BlockDates;
 
 /// Builds a [`Session`], declaratively: chain the options, then
 /// [`build`](SessionBuilder::build).
@@ -57,6 +58,7 @@ use crate::{Clock, Offline, OfflineSession, Result, Session, SystemClock};
 pub struct SessionBuilder<C: Clock = Offline> {
     opts: Options,
     config: C::Config,
+    dates: C::Dates,
 }
 
 impl<C: Clock> std::fmt::Debug for SessionBuilder<C> {
@@ -64,6 +66,7 @@ impl<C: Clock> std::fmt::Debug for SessionBuilder<C> {
         f.debug_struct("SessionBuilder")
             .field("opts", &self.opts)
             .field("config", &self.config)
+            .field("dates", &self.dates)
             .finish()
     }
 }
@@ -252,6 +255,7 @@ impl Default for SessionBuilder<Offline> {
         Self {
             opts: Options::default(),
             config: BlockConfig::default(),
+            dates: BlockDates::Os,
         }
     }
 }
@@ -285,6 +289,18 @@ impl<C: Clock<Config = BlockConfig>> SessionBuilder<C> {
 }
 
 impl SessionBuilder<Offline> {
+    /// Dates each block the host renders by `dates` ([`BlockDates`]), where the
+    /// default, [`BlockDates::Os`], reads the OS clock. An offline render dated
+    /// by [`BlockDates::Frames`] is the same on every run, whatever the host's
+    /// wall clock does. The dates belong to the offline builder:
+    /// [`system_clock`](Self::system_clock) and `device` sessions are timed by
+    /// the OS and take none.
+    #[must_use]
+    pub fn block_dates(mut self, dates: BlockDates) -> Self {
+        self.dates = dates;
+        self
+    }
+
     /// Steps the blocks with an OS timer thread instead: no sound card, for an
     /// app that plays MIDI. The rate, the width and the block carry over, and
     /// every other option with them.
@@ -293,6 +309,7 @@ impl SessionBuilder<Offline> {
         SessionBuilder {
             opts: self.opts,
             config: self.config,
+            dates: (),
         }
     }
 
@@ -316,6 +333,7 @@ impl SessionBuilder<Offline> {
         SessionBuilder {
             opts: self.opts,
             config: device,
+            dates: (),
         }
     }
 
@@ -341,10 +359,12 @@ impl SessionBuilder<Offline> {
         self.check_placement(root, layout)?;
         let mut parts = self.parts(rate, max_block, None, root)?;
         // The width of every block the host pulls.
-        let engine =
-            parts
-                .graph
-                .engine(&parts.transport, layout, self.opts.device_topology.clone())?;
+        let engine = parts.graph.engine(
+            &parts.transport,
+            layout,
+            self.opts.device_topology.clone(),
+            self.dates,
+        )?;
         Self::clock_midi(&parts, &engine);
         self.declare(&mut parts.graph)?;
         let heard = engine.heard_taps();
@@ -434,10 +454,12 @@ impl SessionBuilder<SystemClock> {
         let root = self.root_width(layout);
         self.check_placement(root, layout)?;
         let mut parts = self.parts(rate, max_block, Some(max_block), root)?;
-        let mut engine =
-            parts
-                .graph
-                .engine(&parts.transport, layout, self.opts.device_topology.clone())?;
+        let mut engine = parts.graph.engine(
+            &parts.transport,
+            layout,
+            self.opts.device_topology.clone(),
+            BlockDates::Os,
+        )?;
         Self::clock_midi(&parts, &engine);
         self.declare(&mut parts.graph)?;
         let load = engine.take_load_meter();
@@ -544,6 +566,7 @@ impl SessionBuilder<crate::DeviceClock> {
             &parts.transport,
             spec.channels,
             self.opts.device_topology.clone(),
+            BlockDates::Os,
         )?;
         Self::clock_midi(&parts, &engine);
         self.declare(&mut parts.graph)?;

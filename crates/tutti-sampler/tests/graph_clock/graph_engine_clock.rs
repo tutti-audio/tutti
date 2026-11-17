@@ -91,7 +91,8 @@ fn graph_engine(transport: &Transport, units: Vec<VoicePool>) -> (Engine, Editor
             })
         }));
     ed.commit().expect("commits");
-    let engine = Engine::new(transport, &mut ed, exec).expect("within the limits");
+    let engine = Engine::new(transport, &mut ed, exec, tutti_engine::BlockDates::Os)
+        .expect("within the limits");
     (engine, ed)
 }
 

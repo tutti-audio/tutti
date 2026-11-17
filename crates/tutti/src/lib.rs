@@ -181,16 +181,16 @@ pub use tutti_session::{
     PluginEvent, PluginHealth, PluginInfo, PluginNode, PluginParamError, PooledPlugin, PortCounts,
     PresetEntry, PresetKind, Presets, RestoreState, SaveState, TypedParam,
 };
+#[cfg(feature = "session")]
+pub use tutti_session::{
+    BlockDates, Clock, ConnectError, Edge, EventInPort, EventOutPort, InPort, Job, JobId, JobKind,
+    JobStatus, Key, Landed, NoSuchNode, Offline, OfflineSession, OutPort, Playhead, RealTime, Root,
+    Session, SessionBuilder, SessionEvent, SystemClock, SystemSession, TransportHandle,
+    TypedParamRef, WaitError, Workers,
+};
 #[cfg(all(feature = "session", feature = "export"))]
 pub use tutti_session::{
     Bounce, BounceError, BounceLatency, BounceTail, Bounced, Range, Stem, StemGain, Written,
-};
-#[cfg(feature = "session")]
-pub use tutti_session::{
-    Clock, ConnectError, Edge, EventInPort, EventOutPort, InPort, Job, JobId, JobKind, JobStatus,
-    Key, Landed, NoSuchNode, Offline, OfflineSession, OutPort, Playhead, RealTime, Root, Session,
-    SessionBuilder, SessionEvent, SystemClock, SystemSession, TransportHandle, TypedParamRef,
-    WaitError, Workers,
 };
 #[cfg(all(feature = "session", feature = "device"))]
 pub use tutti_session::{Device, DeviceClock, DeviceEvent, LiveSession};

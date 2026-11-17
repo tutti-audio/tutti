@@ -74,6 +74,10 @@ pub trait Clock: sealed::Sealed + Sized + 'static {
     /// the block sizes for a clock the session sets, the device selector for
     /// the sound card, which sets them itself.
     type Config: std::fmt::Debug;
+    /// What dates the session's blocks, held by the builder: a
+    /// [`BlockDates`](tutti_engine::BlockDates) where the host pulls the
+    /// blocks ([`Offline`]), `()` where the OS clock times them.
+    type Dates: std::fmt::Debug;
     /// What the built session holds to run its blocks.
     #[doc(hidden)]
     type Running: sealed::Running;
@@ -159,6 +163,7 @@ impl SystemEngine {
 
 impl Clock for Offline {
     type Config = BlockConfig;
+    type Dates = tutti_engine::BlockDates;
     type Running = OfflineEngine;
 }
 
@@ -166,6 +171,7 @@ impl sealed::Running for OfflineEngine {}
 
 impl Clock for SystemClock {
     type Config = BlockConfig;
+    type Dates = ();
     type Running = SystemEngine;
 }
 
@@ -186,6 +192,7 @@ impl sealed::Streaming for SystemEngine {
 #[cfg(feature = "device")]
 impl Clock for DeviceClock {
     type Config = tutti_cpal::DeviceSelector;
+    type Dates = ();
     type Running = crate::device::DeviceHandle;
 }
 
@@ -213,6 +220,7 @@ impl sealed::Streaming for crate::device::DeviceHandle {
 #[cfg(feature = "testing")]
 impl Clock for Detached {
     type Config = ();
+    type Dates = ();
     type Running = DetachedGraph;
 }
 

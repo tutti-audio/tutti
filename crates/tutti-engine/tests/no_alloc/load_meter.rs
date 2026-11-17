@@ -60,7 +60,8 @@ fn engine(spin: Duration, max_block: usize) -> (Engine, Transport, Editor) {
             port: 0,
         })]);
     ed.commit().expect("commits");
-    let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
+    let engine = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
+        .expect("within the limits");
     (engine, transport, ed)
 }
 
@@ -182,7 +183,8 @@ fn events_past_a_ports_capacity_reach_the_meter() {
             port: 0,
         })]);
     ed.commit().expect("commits");
-    let mut engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
+    let mut engine = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
+        .expect("within the limits");
     let mut meter = engine.take_load_meter().expect("not taken");
     let mut out = vec![0.0f32; 64];
     engine.process(&mut InterleavedMut::new(&mut out, ChannelLayout::MONO).unwrap());

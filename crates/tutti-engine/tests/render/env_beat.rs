@@ -144,7 +144,8 @@ fn graph_engine(
 ) -> (Engine, Editor) {
     let (mut ed, exec) = Editor::new(Prepare::new(SampleRate::of(SR), MaxBlock::of(Samples(512))));
     wire_clock(&mut ed, sink, width);
-    let engine = Engine::new(transport, &mut ed, exec).expect("within the limits");
+    let engine = Engine::new(transport, &mut ed, exec, tutti_engine::BlockDates::Os)
+        .expect("within the limits");
     (engine, ed)
 }
 
@@ -333,7 +334,8 @@ fn click_clicks_on_the_model_beats() {
         .topology
         .set_outputs((0..2).map(|port| Source::Node(OutPort { node: CLICK, port })));
     ed.commit().expect("commits");
-    let graph = Engine::new(&transport, &mut ed, exec).expect("within the limits");
+    let graph = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
+        .expect("within the limits");
     let m = &transport.motion();
     m.try_send(MotionEvent::Play).expect("room");
     // 151 BPM from the beat frame 20 111 reaches at 120: a step inside a block.
@@ -442,7 +444,8 @@ fn an_offline_render_sees_the_live_engine_transport() {
     let live_t = Transport::new(SampleRate::of(SR));
     let live_log = Arc::new(Mutex::new(Vec::new()));
     let (mut ed, exec) = env_graph(512, &live_log);
-    let live = Engine::new(&live_t, &mut ed, exec).expect("within the limits");
+    let live = Engine::new(&live_t, &mut ed, exec, tutti_engine::BlockDates::Os)
+        .expect("within the limits");
     live_t.settings().set_tempo(Bpm::of(100.0));
     live_t
         .motion()

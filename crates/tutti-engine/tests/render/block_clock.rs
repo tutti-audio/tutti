@@ -4,7 +4,7 @@
 //! analytic: the frame of call `k` is the frames rendered before it.
 
 use tutti_buffers::InterleavedMut;
-use tutti_engine::Engine;
+use tutti_engine::{BlockDates, Engine};
 use tutti_graph::{Editor, Prepare};
 use tutti_transport::MotionEvent;
 use tutti_transport::Transport;
@@ -21,7 +21,8 @@ fn engine() -> Engine {
         MaxBlock::of(Samples(512)),
     ));
     ed.commit().expect("commits");
-    let engine = Engine::new(&transport, &mut ed, exec).expect("within limits");
+    let engine = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
+        .expect("within limits");
     Box::leak(Box::new(ed));
     TRANSPORTS.with(|t| t.borrow_mut().push(transport));
     engine
@@ -176,4 +177,128 @@ fn a_reader_on_another_thread_never_sees_two_calls_mixed() {
         watcher.join().expect("the watcher")
     });
     assert!(reads > 0, "the watcher read");
+}
+
+/// An engine dated by `dates`, with its editor and transport kept for a
+/// re-prepare.
+fn dated(dates: BlockDates, rate: f64) -> (Engine, Editor, Transport) {
+    let transport = Transport::new(SampleRate::of(rate));
+    let (mut ed, exec) = Editor::new(Prepare::new(
+        SampleRate::of(rate),
+        MaxBlock::of(Samples(512)),
+    ));
+    ed.commit().expect("commits");
+    let engine = Engine::new(&transport, &mut ed, exec, dates).expect("within limits");
+    (engine, ed, transport)
+}
+
+fn gcd(a: u128, b: u128) -> u128 {
+    if b == 0 { a } else { gcd(b, a % b) }
+}
+
+/// The nanoseconds of `blocks`, each `(frames, rate in Hz)`, rounded to the
+/// nearest: the sum of each block's `frames / rate` in exact integers.
+fn exact_ns(blocks: &[(usize, u64)]) -> i64 {
+    let lcm = blocks
+        .iter()
+        .map(|&(_, r)| u128::from(r))
+        .fold(1, |a, r| a / gcd(a, r) * r);
+    let scaled: u128 = blocks
+        .iter()
+        .map(|&(f, r)| f as u128 * 1_000_000_000 * (lcm / u128::from(r)))
+        .sum();
+    ((scaled + lcm / 2) / lcm) as i64
+}
+
+/// **`Frames` dates block `n` at the origin plus the frames before it over the
+/// rate**: block 0 is the origin, and block `n` is `n * 512 / rate` after it,
+/// to the nanosecond, at 48 kHz (a block is 10 666 666.67 ns) and at 44.1 kHz
+/// (11 609 977.32 ns), where a total divided by a rounded block would drift.
+#[test]
+fn frames_date_block_n_at_the_origin_plus_n_blocks() {
+    for rate in [48_000u64, 44_100] {
+        let (engine, _ed, _transport) = dated(BlockDates::Frames, rate as f64);
+        let reader = engine.block_clock();
+        let mut origin = None;
+        for n in 0..200usize {
+            render(&engine, 512, n % 2 == 1);
+            let at = reader.read().expect("published").os_ns;
+            let origin = *origin.get_or_insert(at);
+            assert_eq!(
+                at - origin,
+                exact_ns(&vec![(512, rate); n]),
+                "block {n} at {rate} Hz"
+            );
+        }
+    }
+}
+
+/// The nanoseconds of `blocks`, each `(frames, rate in Hz)`: each run of
+/// blocks at one rate rounded once, and the runs added.
+fn segmented_ns(blocks: &[(usize, u64)]) -> i64 {
+    blocks.chunk_by(|a, b| a.1 == b.1).map(exact_ns).sum()
+}
+
+/// A re-prepare from `from` Hz to `to` Hz after three blocks, dated by
+/// `Frames`: every block is `segmented_ns` of the blocks before it, using the
+/// rate each reading carries.
+fn rerated(from: f64, to: f64) {
+    let (engine, mut ed, _transport) = dated(BlockDates::Frames, from);
+    let reader = engine.block_clock();
+    let mut seen: Vec<(usize, u64)> = Vec::new();
+    let mut origin = None;
+    let mut step = |engine: &Engine, frames: usize| {
+        render(engine, frames, false);
+        let reading = reader.read().expect("published");
+        let origin = *origin.get_or_insert(reading.os_ns);
+        assert_eq!(
+            reading.os_ns - origin,
+            segmented_ns(&seen),
+            "the block after {} blocks",
+            seen.len()
+        );
+        seen.push((frames, reading.rate.get() as u64));
+    };
+    for _ in 0..3 {
+        step(&engine, 480);
+    }
+    ed.reprepare(Prepare::new(SampleRate::of(to), MaxBlock::of(Samples(512))))
+        .expect("re-prepares");
+    // The suspended block, then the resumed ones at the new rate.
+    step(&engine, 480);
+    ed.collect();
+    for _ in 0..3 {
+        step(&engine, 480);
+    }
+    let rates: Vec<u64> = seen.iter().map(|&(_, r)| r).collect();
+    assert_eq!(rates[..3], [from as u64; 3]);
+    assert_eq!(rates[rates.len() - 3..], [to as u64; 3], "the rate moved");
+}
+
+/// **A re-rate between blocks keeps every earlier date**: blocks before and
+/// after a re-prepare are dated by the sum of each stretch at one rate, rounded
+/// once per stretch. 480 frames over 24 kHz are exact in nanoseconds; over
+/// 44.1 kHz they are not (10 884 353.74 ns each), so the second pair pins the
+/// rounding per stretch.
+#[test]
+fn frames_add_each_block_at_its_own_rate() {
+    rerated(48_000.0, 24_000.0);
+    rerated(44_100.0, 48_000.0);
+}
+
+/// **`Os` dates from the OS clock**: through both entry points the dates never
+/// go back.
+#[test]
+fn os_dates_never_go_back() {
+    for segment in [false, true] {
+        let (engine, _ed, _transport) = dated(BlockDates::Os, RATE);
+        let reader = engine.block_clock();
+        let mut last = i64::MIN;
+        for _ in 0..50 {
+            render(&engine, 128, segment);
+            let at = reader.read().expect("published").os_ns;
+            assert!(at >= last, "{at} after {last}");
+            last = at;
+        }
+    }
 }
