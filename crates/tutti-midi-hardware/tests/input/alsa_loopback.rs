@@ -21,11 +21,11 @@ use tutti_graph::{EventCapacity, Offset};
 use tutti_midi_device::DeviceInfo;
 use tutti_midi_hardware::{MidiHardwareOptions, MidiSession, OpenOutput};
 use tutti_midi_runtime::InputInlets;
-use tutti_ump::{KeyEvent, MidiChannel, Ump};
+use tutti_ump::{MidiChannel, NoteKeyEvent, Ump};
 
 /// Whether `ev` starts a note, in either protocol.
 fn is_note_on(ev: Ump) -> bool {
-    matches!(ev.key_event(), Some(KeyEvent::On(_)))
+    matches!(ev.note_key_event(), Some(NoteKeyEvent::On(_)))
 }
 
 /// The loopback endpoint.

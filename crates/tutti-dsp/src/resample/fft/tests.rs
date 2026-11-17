@@ -8,8 +8,16 @@ use crate::Window;
 /// three coefficients moves it off the documented figure.
 #[test]
 fn the_cutoff_fit_matches_its_documented_values() {
-    assert!((cutoff(128) - 0.894).abs() < 0.001, "{}", cutoff(128));
-    assert!((cutoff(256) - 0.947).abs() < 0.001, "{}", cutoff(256));
+    assert!(
+        (cutoff::<f32>(128) - 0.894).abs() < 0.001,
+        "{}",
+        cutoff::<f32>(128)
+    );
+    assert!(
+        (cutoff::<f32>(256) - 0.947).abs() < 0.001,
+        "{}",
+        cutoff::<f32>(256)
+    );
 }
 
 /// The window sets the filter's response: a 256-tap, 0.9-cutoff filter is
@@ -20,7 +28,7 @@ fn the_cutoff_fit_matches_its_documented_values() {
 #[test]
 fn the_filter_has_the_squared_windows_transition_and_stopband() {
     let n = 256;
-    let taps = sinc_filter(n, 0.9);
+    let taps = sinc_filter::<f32>(n, 0.9);
     let gain_db = |rel: f64| {
         let (mut re, mut im) = (0.0f64, 0.0f64);
         for (i, &t) in taps.iter().enumerate() {
@@ -42,7 +50,7 @@ fn the_filter_has_the_squared_windows_transition_and_stopband() {
 /// peaks there.
 #[test]
 fn the_sinc_has_unity_dc_gain_and_peaks_at_its_centre() {
-    let taps = sinc_filter(441, 0.9);
+    let taps = sinc_filter::<f32>(441, 0.9);
     let sum: f32 = taps.iter().sum();
     assert!((sum - 1.0).abs() < 1e-5, "sum {sum}");
     let peak = taps
@@ -59,10 +67,10 @@ fn the_sinc_has_unity_dc_gain_and_peaks_at_its_centre() {
 /// sub-chunks asks for 512 -> 4 units = 588 -> 640.
 #[test]
 fn block_sizes_are_whole_units_of_the_rate_pair() {
-    let r = FftResampler::new(44_100, 48_000, 1024, 2, 1).unwrap();
+    let r = FftResampler::<f32>::new(44_100, 48_000, 1024, 2, 1).unwrap();
     assert_eq!((r.fft_size_in, r.fft_size_out), (588, 640));
     assert_eq!(r.output_delay(), 320);
-    let r = FftResampler::new(48_000, 44_100, 1024, 2, 1).unwrap();
+    let r = FftResampler::<f32>::new(48_000, 44_100, 1024, 2, 1).unwrap();
     assert_eq!((r.fft_size_in, r.fft_size_out), (640, 588));
 }
 
@@ -78,7 +86,7 @@ fn the_block_cap_admits_real_pairs_and_refuses_a_runaway_one() {
         8_000, 11_025, 22_050, 44_100, 48_000, 88_200, 96_000, 176_400, 192_000, 44_101, 48_001,
     ];
     let ok = |a: usize, b: usize, chunk: usize, sub: usize| {
-        let r = FftResampler::new(a, b, chunk, sub, 1);
+        let r = FftResampler::<f32>::new(a, b, chunk, sub, 1);
         assert!(r.is_ok(), "{a} -> {b} at {chunk}/{sub}: {:?}", r.err());
     };
     for &a in &rates {
@@ -91,7 +99,9 @@ fn the_block_cap_admits_real_pairs_and_refuses_a_runaway_one() {
             ok(a, b, chunk, sub);
         }
     }
-    let err = FftResampler::new(1, 192_000, 1024, 2, 1).err().unwrap();
+    let err = FftResampler::<f32>::new(1, 192_000, 1024, 2, 1)
+        .err()
+        .unwrap();
     assert!(err.to_string().contains("block"), "{err}");
 }
 
@@ -101,14 +111,14 @@ fn the_block_cap_admits_real_pairs_and_refuses_a_runaway_one() {
 #[test]
 fn an_overflowing_block_size_is_an_error() {
     let half = usize::MAX / 2 + 1;
-    assert!(FftResampler::new(1, half, 2, 1, 1).is_err());
+    assert!(FftResampler::<f32>::new(1, half, 2, 1, 1).is_err());
 }
 
 /// A zero rate is refused, not divided by.
 #[test]
 fn a_zero_rate_is_an_error() {
-    assert!(FftResampler::new(0, 48_000, 1024, 2, 1).is_err());
-    assert!(FftResampler::new(44_100, 0, 1024, 2, 1).is_err());
+    assert!(FftResampler::<f32>::new(0, 48_000, 1024, 2, 1).is_err());
+    assert!(FftResampler::<f32>::new(44_100, 0, 1024, 2, 1).is_err());
 }
 
 /// The magnitude of `taps`' DFT in dB at `rel` times Nyquist, tap `n / 2`
@@ -205,5 +215,28 @@ fn the_filter_passes_to_its_cutoff_and_stops_at_the_taps_precision_floor() {
                 "{offset} bins from the cutoff ({at:.4}): amplitude {got:.4}, lobe integral {want:.4}"
             );
         }
+    }
+}
+
+/// At `f64` a constant input is a constant output of the same level once the
+/// filter has filled: the low-pass has unity gain at DC, read in the
+/// passband to far below `f32` precision.
+#[test]
+fn an_f64_resampler_passes_dc_at_unity_to_f64_precision() {
+    let mut r = FftResampler::<f64>::new(44_100, 48_000, 1024, 2, 1).unwrap();
+    let input = vec![vec![1.0f64; r.input_frames_next()]];
+    let mut out = vec![vec![0.0f64; r.output_frames_max()]];
+    let mut produced = 0;
+    for _ in 0..6 {
+        produced = r
+            .process_into_buffer(
+                Planes::from_vecs(&input).unwrap(),
+                PlanesMut::from_vecs(&mut out).unwrap(),
+            )
+            .unwrap();
+    }
+    assert!(produced > 0);
+    for (i, &v) in out[0][..produced].iter().enumerate() {
+        assert!((v - 1.0).abs() < 1e-10, "frame {i}: {v}");
     }
 }

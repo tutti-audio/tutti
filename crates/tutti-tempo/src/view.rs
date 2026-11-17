@@ -198,7 +198,7 @@ impl<'a> TempoView<'a> {
             // The map's beat at both ends, not this segment's closed form: a
             // segment shorter than a frame ends inside its last cell, and its
             // form past that point is not the map's.
-            Transition::RampTime | Transition::RampBeats => {
+            Transition::RampTime { .. } | Transition::RampBeats { .. } => {
                 let chord = (self.beat_at_frame(Frame::new(end)).get() - b0) * 60.0 * rate.get()
                     / (end - start).max(1) as f64;
                 Bpm::new(chord).unwrap_or(bpm0)

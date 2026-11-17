@@ -28,7 +28,7 @@
 
 use std::sync::Arc;
 
-use tutti_buffers::{Fold, MonoMut, Planes};
+use tutti_buffers::{Fold, Mono, MonoMut, Planes};
 use tutti_types::{ChannelLayout, ChannelTopology, Direction, Mix, Radians, SampleRate};
 
 mod hull;
@@ -384,8 +384,11 @@ impl HrtfBinaural {
         let start = set.fft_len - HRTF_STEP;
         self.dry.copy_from_slice(&self.history[start..]);
 
-        set.fft
-            .forward(&self.history, &mut self.spectrum, &mut self.scratch);
+        set.fft.forward(
+            Mono::new(&self.history),
+            &mut self.spectrum,
+            &mut self.scratch,
+        );
 
         let crossfade = next != self.current;
         let step = 1.0 / HRTF_STEP as f32;
@@ -448,7 +451,7 @@ fn blend_into(
     for ((p, &x), ((&a, &b), &c)) in product.iter_mut().zip(input).zip(filters) {
         *p = x * (a * wa + b * wb + c * wc);
     }
-    set.fft.inverse(product, frame, scratch);
+    set.fft.inverse(product, MonoMut::new(frame), scratch);
 }
 
 /// Map azimuth/elevation in degrees to a unit direction, in the sphere's

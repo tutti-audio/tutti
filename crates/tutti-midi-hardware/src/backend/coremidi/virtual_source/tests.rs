@@ -7,10 +7,10 @@ use tutti_ump::{Message, MidiChannel, Ump, Utility};
 /// is refused by name, not opened without it.
 #[test]
 fn a_spec_with_function_blocks_is_refused_by_name() {
-    use tutti_ump::{Direction, FirstGroup, FunctionBlockId, GroupSpan};
+    use tutti_ump::{BlockDirection, FirstGroup, FunctionBlockId, GroupSpan};
     let block = tutti_midi_device::FunctionBlock::builder(
         FunctionBlockId::new(0).unwrap(),
-        Direction::Output,
+        BlockDirection::Output,
         FirstGroup::new(0).unwrap(),
         GroupSpan::new(1).unwrap(),
     )

@@ -14,8 +14,10 @@
 //! The first signal wins and keeps its cause: a stream's death cascades into
 //! follow-on errors, and the first is the diagnosis.
 
-use std::sync::Mutex;
+use crate::Wake;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tutti_plugin_types::PluginFailure;
 use tutti_rt::LockExt;
 
@@ -28,6 +30,9 @@ use tutti_rt::LockExt;
 pub struct ServerWatch {
     dead: AtomicBool,
     cause: Mutex<Option<PluginFailure>>,
+    /// Notified when [`declare`](Self::declare) sets the latch, and shared with
+    /// whoever else waits on the server ([`wake`](Self::wake)).
+    wake: Arc<Wake>,
 }
 
 impl ServerWatch {
@@ -48,7 +53,24 @@ impl ServerWatch {
         *slot = Some(cause);
         // After the cause: a reader that sees the flag finds the reason.
         self.dead.store(true, Ordering::Release);
+        drop(slot);
+        self.wake.notify();
         true
+    }
+
+    /// The gate that waits on this server notify: [`declare`](Self::declare)
+    /// notifies it, and a thread waiting on the server's end or on its replies
+    /// shares it.
+    #[must_use]
+    pub(crate) fn wake(&self) -> &Arc<Wake> {
+        &self.wake
+    }
+
+    /// Waits up to `timeout` for the server to be gone, and wakes at the
+    /// declaration. `true` when it is gone.
+    pub fn wait_dead(&self, timeout: Duration) -> bool {
+        let deadline = Wake::deadline_in(timeout);
+        self.wake.wait_until(deadline, || self.is_dead())
     }
 
     /// Whether the server is gone. Wait-free: no lock, no allocation.
@@ -69,6 +91,26 @@ impl ServerWatch {
 mod tests {
     use super::*;
     use tutti_plugin_types::TerminationReason;
+
+    /// A wait on a live server ends when the server is declared gone, long
+    /// before its timeout, and a wait on a gone one returns at once.
+    #[test]
+    fn a_wait_ends_at_the_declaration() {
+        let watch = Arc::new(ServerWatch::new());
+        let waiter = {
+            let watch = Arc::clone(&watch);
+            std::thread::spawn(move || watch.wait_dead(Duration::from_secs(60)))
+        };
+        assert!(watch.declare(PluginFailure::StreamClosed));
+        assert!(waiter.join().expect("no panic"), "woken by the declaration");
+        assert!(watch.wait_dead(Duration::ZERO), "a gone server is gone");
+    }
+
+    /// A wait that no one ends reports a live server at its timeout.
+    #[test]
+    fn a_wait_on_a_live_server_times_out_alive() {
+        assert!(!ServerWatch::new().wait_dead(Duration::ZERO));
+    }
 
     /// A server believed alive has no cause, and the first signal sets the
     /// latch with its cause; the second is refused and changes nothing.

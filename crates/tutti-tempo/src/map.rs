@@ -16,6 +16,15 @@ pub struct TempoMap {
     segs: Vec<Seg>,
 }
 
+/// The tempo a segment out of a point with `transition` reaches at the beat of
+/// `next`: the ramp's own end, else `next`'s tempo.
+fn reached(transition: Transition, next: &TempoPoint) -> Bpm {
+    match transition {
+        Transition::RampTime { end } | Transition::RampBeats { end } => end.unwrap_or(next.tempo),
+        Transition::Step => next.tempo,
+    }
+}
+
 /// A lookup hint, owned by a [`TempoView`]. Audio asks for
 /// nearly monotone positions, so the segment found last time is nearly always
 /// right; a wrong hint costs one binary search and never changes a result.
@@ -47,7 +56,7 @@ impl TempoMap {
     /// beat 0, beats that are not finite and strictly increasing, a last point that ramps, or a segment
     /// whose duration an `f64` cannot hold.
     pub fn new(points: impl IntoIterator<Item = TempoPoint>) -> Result<Self, TempoError> {
-        let pts: Vec<TempoPoint> = points.into_iter().collect();
+        let mut pts: Vec<TempoPoint> = points.into_iter().collect();
         let first = pts.first().ok_or(TempoError::Empty)?;
         if first.beat.get() != 0.0 {
             return Err(TempoError::FirstNotAtZero);
@@ -60,13 +69,24 @@ impl TempoMap {
         if pts.last().is_some_and(|p| p.transition != Transition::Step) {
             return Err(TempoError::RampWithoutEnd);
         }
+        // One representation per map: a ramp's end equal to the next tempo is
+        // no end. The last point is a step, so no ramp is left without a next.
+        for i in 1..pts.len() {
+            let next = pts[i].tempo;
+            if let Transition::RampTime { end } | Transition::RampBeats { end } =
+                &mut pts[i - 1].transition
+                && *end == Some(next)
+            {
+                *end = None;
+            }
+        }
         // Anchors: a Neumaier-compensated running sum of segment durations, so
         // a map of 10^5 points keeps the error of one addition, not of 10^5.
         let mut segs = Vec::with_capacity(pts.len());
         let (mut sum, mut comp) = (0.0f64, 0.0f64);
         for (i, p) in pts.iter().enumerate() {
             let (r1, db) = match pts.get(i + 1) {
-                Some(n) => (n.tempo.get() / 60.0, n.beat - p.beat),
+                Some(n) => (reached(p.transition, n).get() / 60.0, n.beat - p.beat),
                 None => (p.tempo.get() / 60.0, BeatDuration(f64::INFINITY)),
             };
             let s = Seg::new(p.beat, Seconds(sum + comp), p.tempo, r1, p.transition, db);
@@ -122,8 +142,9 @@ impl TempoMap {
     ///
     /// A ramp `beat` lands in is cut there: the ramp is kept up to `beat` (it
     /// reaches the tempo this map has at `beat`, so every beat before `beat`
-    /// keeps its time), and the step follows one ulp of a beat later, because a
-    /// map holds one tempo at a beat and a tempo that jumps needs two points. A
+    /// keeps its time), and the tempo steps at that same beat
+    /// ([`TempoMapBuilder::then_step`]): the tempo just below `beat` is the
+    /// ramp's, at `beat` it is `tempo`. A
     /// `beat` before 0 is treated as the origin, which is what a pre-roll beat
     /// wants. The old map is untouched.
     ///
@@ -149,15 +170,36 @@ impl TempoMap {
             builder = builder.transition_to(pair[0].transition, pair[1].beat, pair[1].tempo);
         }
         let last = &points[kept - 1];
-        builder = if last.transition == Transition::Step {
-            builder.step_to(beat, tempo)
-        } else {
-            // The ramp is cut at `beat`: it reaches what the map has there.
-            builder
-                .transition_to(last.transition, beat, self.tempo_at(beat))
-                .step_to(Beat(beat.get().next_up()), tempo)
+        // A ramp is cut at `beat`: it reaches what the map has there (its own
+        // `end` when a point sits on `beat`), and the tempo steps there.
+        let at_point = points.get(kept).filter(|p| p.beat == beat);
+        builder = match last.transition {
+            Transition::Step => builder.step_to(beat, tempo),
+            Transition::RampTime { end } => builder
+                .transition_to(
+                    Transition::RampTime { end: None },
+                    beat,
+                    self.cut_tempo(end, at_point, beat),
+                )
+                .then_step(tempo),
+            Transition::RampBeats { end } => builder
+                .transition_to(
+                    Transition::RampBeats { end: None },
+                    beat,
+                    self.cut_tempo(end, at_point, beat),
+                )
+                .then_step(tempo),
         };
         builder.build().map(Some)
+    }
+
+    /// The tempo a ramp cut at `beat` reaches: its own `end` where a point sits
+    /// on `beat`, else the map's tempo there.
+    fn cut_tempo(&self, end: Option<Bpm>, at_point: Option<&TempoPoint>, beat: Beat) -> Bpm {
+        match (end, at_point) {
+            (Some(end), Some(_)) => end,
+            _ => self.tempo_at(beat),
+        }
     }
 
     /// A [`TempoView`] over this map at `rate`: the frame queries, with a
@@ -264,8 +306,10 @@ impl TempoMap {
         s.beat0 + s.beat_in(seconds - s.sec0)
     }
 
-    /// The tempo at `beat`. A point's own beat belongs to that point, so a step
-    /// reads its new tempo there, and a ramp reads the tempo it was given.
+    /// The tempo at `beat`. A point's own beat belongs to that point (the map is
+    /// right-continuous): a step reads its new tempo there, a ramp the tempo it
+    /// was given, and a point that ends a ramp at an `end` reads the tempo it
+    /// steps to.
     #[must_use]
     pub fn tempo_at(&self, beat: Beat) -> Bpm {
         self.tempo_at_from(beat, &mut Cursor::default())

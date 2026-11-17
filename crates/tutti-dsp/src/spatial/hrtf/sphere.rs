@@ -626,7 +626,7 @@ impl HrtfSet {
             frame[..response.len()].copy_from_slice(response);
             frame[response.len()..].fill(0.0);
             let out = &mut spectra[r * bins..(r + 1) * bins];
-            fft.forward(&frame, out, &mut scratch);
+            fft.forward(Mono::new(&frame), out, &mut scratch);
             out.iter_mut().for_each(|s| *s *= norm);
         };
         if rate == sphere.rate {

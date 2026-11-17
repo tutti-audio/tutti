@@ -16,7 +16,7 @@ use tutti_clap_host::{
 use tutti_graph::Offset;
 use tutti_midi_protocol::{channel_voice, midi1};
 use tutti_types::Samples;
-use tutti_ump::{CCNumber, KeyEvent, Message, MidiChannel, NoteNumber, Voice2};
+use tutti_ump::{CCNumber, Message, MidiChannel, NoteKeyEvent, NoteNumber, Voice2};
 
 /// A block long enough for every offset these tests use.
 const BLOCK: usize = 1_000;
@@ -258,9 +258,9 @@ fn a_wildcard_note_off_resolves_by_note_id_not_by_masking() {
     let event = &midi_out[0];
     assert!(event.ump.is_note_off());
     assert_eq!(
-        event.ump.key_event().map(|key| match key {
-            KeyEvent::On(key) | KeyEvent::Off(key) => key.note().get(),
-            KeyEvent::Sustain { .. } => unreachable!("a note-off"),
+        event.ump.note_key_event().map(|key| match key {
+            NoteKeyEvent::On(key) | NoteKeyEvent::Off(key) => key.note().get(),
+            NoteKeyEvent::Sustain { .. } => unreachable!("a note-off"),
         }),
         Some(NOTE),
         "a wildcard key must resolve through note_id, not mask to 127 — \

@@ -20,8 +20,8 @@ use tutti_nodes::{
 };
 use tutti_types::MaxBlock;
 use tutti_types::{
-    BeatsPerCycle, BusTopology, ChannelLayout, Feedback, Hz, PhaseIncrement, SampleRate, Seconds,
-    UnitParam,
+    Ballistics, BeatsPerCycle, BusTopology, ChannelLayout, Feedback, Hz, PhaseIncrement,
+    SampleRate, Seconds, UnitParam,
 };
 use tutti_ump::{MidiChannel, U7};
 
@@ -1060,8 +1060,8 @@ fn signal_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
             );
             let follower = EnvelopeFollowerNode::new(
                 id,
-                Seconds::from_f32(0.001 + 0.0005 * k as f32),
-                Seconds(0.03),
+                Ballistics::new(Seconds::from_f32(0.001 + 0.0005 * k as f32), Seconds(0.03))
+                    .unwrap(),
                 ChannelLayout::STEREO,
             );
             ed.insert(node, "follower", ForkByClone(follower));

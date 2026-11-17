@@ -2,7 +2,6 @@
 
 use tutti_types::{Amplitude, Db, Hz, SampleRate, SampleSpan, Samples, Seconds};
 
-use crate::level::ratio_to_db_f64;
 use crate::{Ring, System};
 
 use super::gain::decay_seconds;
@@ -150,7 +149,7 @@ impl Fdn {
         let lines = self.lines.iter().map(|l| {
             (
                 l.effective_frames(),
-                ratio_to_db_f64(f64::from(l.absorption.gain(band).get())),
+                Db::from_amplitude_f64(f64::from(l.absorption.gain(band).get())),
             )
         });
         let seconds = if self.mixing() {
@@ -185,14 +184,18 @@ impl Fdn {
                 d.delay.get() * (1.0 + g) / (1.0 - g)
             });
             let m = l.length.get() + peak + l.absorption.peak_delay().get();
-            let db_g = ratio_to_db_f64(f64::from(l.absorption.gain(band).get()));
+            let db_g = Db::from_amplitude_f64(f64::from(l.absorption.gain(band).get()));
             if m.is_nan() || m <= 0.0 || db_g.is_nan() {
                 return None;
             }
             db_rho = db_rho.max(db_g / m);
             longest = longest.max(m);
         }
-        Some((db_rho, ratio_to_db_f64(self.norm_bound().max(1.0)), longest))
+        Some((
+            db_rho,
+            Db::from_amplitude_f64(self.norm_bound().max(1.0)),
+            longest,
+        ))
     }
 
     /// An RT60 in `band` that never undercuts the true decay: the slowest

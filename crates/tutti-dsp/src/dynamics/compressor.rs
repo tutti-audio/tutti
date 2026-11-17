@@ -24,7 +24,7 @@ use tutti_types::{Amplitude, ChannelLayout, CompressionRatio, Db, Hz, Q, SampleR
 
 use super::curves::{amplitude_to_db, compute_compressor_gain_reduction};
 use super::key_filter::{KeyFilter, KeyStage};
-use super::shared::{Ballistics, CHUNK, GAIN_GLIDE, MAX_KNEE_DB, key_levels};
+use super::shared::{CHUNK, Follower, GAIN_GLIDE, MAX_KNEE_DB, floored, key_levels};
 use crate::delay::finite_or;
 use crate::{Glide, Steps};
 
@@ -96,8 +96,7 @@ struct CompressorMember {
 
 impl CompressorMember {
     /// The member for `c` at `rate`: a non-finite control is the default's, a knee is
-    /// floored at 0 and a ratio at 1; the times pass through to [`Ballistics::of`], which
-    /// floors them at 0.
+    /// floored at 0 and a ratio at 1; the times are floored at 0 (an infinite one holds).
     fn designed(c: &CompressorControls, rate: SampleRate) -> Self {
         let d = CompressorControls::DEFAULT;
         Self {
@@ -124,7 +123,7 @@ struct Detector {
     knee: Db,
     ratio: CompressionRatio,
     /// The follower on the reduction: the attack while it rises, the release while it falls.
-    ballistics: Ballistics,
+    ballistics: Follower,
 }
 
 impl Detector {
@@ -135,7 +134,7 @@ impl Detector {
             threshold: m.threshold,
             knee: m.knee,
             ratio: m.ratio,
-            ballistics: Ballistics::of(m.attack, m.release, m.rate),
+            ballistics: Follower::of(floored(m.attack, m.release), m.rate),
         }
     }
 
@@ -144,7 +143,7 @@ impl Detector {
         threshold: Db(0.0),
         knee: Db(0.0),
         ratio: CompressionRatio::UNITY,
-        ballistics: Ballistics::NEUTRAL,
+        ballistics: Follower::NEUTRAL,
     };
 
     /// One frame of the compressor: the key's `level` (an amplitude) in dB, the static
@@ -242,7 +241,7 @@ impl CompressorBank {
 
     /// Aims at `controls`: the detector's figures land whole (the follower smooths them) and
     /// the makeup glides over [`GAIN_GLIDE`]. A non-finite control is the default's, a knee
-    /// and the times at 0 (through `Ballistics::of`) and a ratio at 1. The key filter, if any, glides to the
+    /// and the times at 0 (through `floored`) and a ratio at 1. The key filter, if any, glides to the
     /// cutoff and Q over one grid period ([`COEFF_INTERVAL`](crate::COEFF_INTERVAL)). No
     /// allocation.
     pub fn aim(&mut self, controls: &CompressorControls) {

@@ -1,11 +1,11 @@
-//! The tables an edge keeps of what a source has started: a bit per [`Key`] and
+//! The tables an edge keeps of what a source has started: a bit per [`NoteKey`] and
 //! a position per [`Lane`].
 
-use crate::{Address, Key, MidiChannel, MidiGroup, Protocol};
+use crate::{Address, MidiChannel, MidiGroup, NoteKey, Protocol};
 
 /// A channel of one protocol: the position of a (protocol, Group, Channel) in a
 /// table of 512 entries, MIDI 1.0 lanes first. The index is the one a
-/// [`Key`] packs above its note.
+/// [`NoteKey`] packs above its note.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Lane(u16);
 
@@ -24,7 +24,7 @@ impl Lane {
         }
     }
 
-    /// The lane of the 9 bits a [`Key`] packs above its note.
+    /// The lane of the 9 bits a [`NoteKey`] packs above its note.
     pub(crate) const fn from_packed(bits: u16) -> Self {
         Self(bits & 0x1ff)
     }
@@ -147,15 +147,15 @@ impl LaneSet {
     }
 }
 
-/// A set of [`Key`]s: one bit for each of the 65536 packed keys, 8 KiB, kept in
+/// A set of [`NoteKey`]s: one bit for each of the 65536 packed keys, 8 KiB, kept in
 /// key order. It holds no allocation: a caller that wants it off the stack boxes
 /// it.
 ///
 /// ```
-/// use tutti_ump::{Address, Key, KeyBitset, MidiChannel, NoteNumber, Protocol};
+/// use tutti_ump::{Address, NoteKey, KeyBitset, MidiChannel, NoteNumber, Protocol};
 ///
 /// let mut held = KeyBitset::new();
-/// let key = Key::new(Protocol::Midi2, Address::first(MidiChannel::of(0)), NoteNumber::of(60)).unwrap();
+/// let key = NoteKey::new(Protocol::Midi2, Address::first(MidiChannel::of(0)), NoteNumber::of(60)).unwrap();
 /// assert!(held.insert(key));
 /// assert!(!held.insert(key));
 /// assert_eq!(held.iter().collect::<Vec<_>>(), [key]);
@@ -185,7 +185,7 @@ impl KeyBitset {
     }
 
     /// Adds `key`; whether it was not there.
-    pub fn insert(&mut self, key: Key) -> bool {
+    pub fn insert(&mut self, key: NoteKey) -> bool {
         let (word, bit) = Self::place(key);
         let added = self.words[word] & bit == 0;
         self.words[word] |= bit;
@@ -194,7 +194,7 @@ impl KeyBitset {
     }
 
     /// Removes `key`; whether it was there.
-    pub fn remove(&mut self, key: Key) -> bool {
+    pub fn remove(&mut self, key: NoteKey) -> bool {
         let (word, bit) = Self::place(key);
         let removed = self.words[word] & bit != 0;
         self.words[word] &= !bit;
@@ -229,7 +229,7 @@ impl KeyBitset {
     }
 
     /// The keys, in key order.
-    pub fn iter(&self) -> impl Iterator<Item = Key> + '_ {
+    pub fn iter(&self) -> impl Iterator<Item = NoteKey> + '_ {
         self.words.iter().enumerate().flat_map(|(w, &word)| {
             let mut bits = word;
             core::iter::from_fn(move || {
@@ -238,15 +238,15 @@ impl KeyBitset {
                 }
                 let b = bits.trailing_zeros() as usize;
                 bits &= bits - 1;
-                Some(Key::from_index((w * 64 + b) as u16))
+                Some(NoteKey::from_index((w * 64 + b) as u16))
             })
         })
     }
 
-    /// The first key at packed position `from` or above ([`Key::index`]), or
+    /// The first key at packed position `from` or above ([`NoteKey::index`]), or
     /// `None`: a walk that may remove what it has passed.
     #[must_use]
-    pub fn next_from(&self, from: u32) -> Option<Key> {
+    pub fn next_from(&self, from: u32) -> Option<NoteKey> {
         let mut w = (from >> 6) as usize;
         if w >= WORDS {
             return None;
@@ -254,7 +254,7 @@ impl KeyBitset {
         let mut bits = self.words[w] & (!0u64 << (from & 63));
         loop {
             if bits != 0 {
-                return Some(Key::from_index(
+                return Some(NoteKey::from_index(
                     (w * 64 + bits.trailing_zeros() as usize) as u16,
                 ));
             }
@@ -263,7 +263,7 @@ impl KeyBitset {
         }
     }
 
-    const fn place(key: Key) -> (usize, u64) {
+    const fn place(key: NoteKey) -> (usize, u64) {
         let i = key.index();
         ((i >> 6) as usize, 1u64 << (i & 63))
     }
@@ -274,9 +274,9 @@ mod tests {
     use super::*;
     use crate::NoteNumber;
 
-    fn key(protocol: Protocol, index: usize, note: u8) -> Key {
+    fn key(protocol: Protocol, index: usize, note: u8) -> NoteKey {
         let address = Address::from_index(index).unwrap();
-        Key::new(protocol, address, NoteNumber::of(note)).unwrap()
+        NoteKey::new(protocol, address, NoteNumber::of(note)).unwrap()
     }
 
     #[test]

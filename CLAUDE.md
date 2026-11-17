@@ -125,6 +125,9 @@ std only. A rule the compiler already enforces is not a gate.
   renders a session wire for another reason wires `.hard()`.
 - An inlet whose rate is not the graph's is refused, never resampled.
 - An app reads the playhead through `Session::playhead()`.
+- An app writes a value one way: `Session::set` (or `Knobs::set`) over an assignment built
+  from a target, and reads it with `get`; a new `pub fn set_*` on the session is refused
+  (`cargo xtask check-values`, whose baseline only shrinks).
 - A main-thread method takes `MainThreadMarker`. No public type in `tutti-session` holds one, and no `pub fn` is named `run` or `*_blocking`, bar the rows of `xtask/session-api-allow.txt` (`cargo xtask check-session-api`).
 
 ### The audio thread
