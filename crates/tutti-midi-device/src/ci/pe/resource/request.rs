@@ -213,7 +213,7 @@ impl ResourceGet {
 
     /// Asks for the reply under Flow Control, when the Resource declares it.
     #[must_use]
-    pub fn with_flow_control(mut self) -> Self {
+    pub fn flow_controlled(mut self) -> Self {
         self.flow = PeFlowControl::On;
         self
     }

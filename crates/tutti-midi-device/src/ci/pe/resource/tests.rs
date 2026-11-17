@@ -956,7 +956,7 @@ fn a_get_is_checked_against_its_entry() {
         Err(RequestRefused::EncodingNotDeclared { .. })
     ));
     assert!(matches!(
-        channels.clone().with_flow_control().check_get(&entry),
+        channels.clone().flow_controlled().check_get(&entry),
         Err(RequestRefused::FlowControlNotDeclared(_))
     ));
     let rich = entry
@@ -971,7 +971,7 @@ fn a_get_is_checked_against_its_entry() {
             .check_get(&rich),
         Ok(())
     );
-    assert_eq!(channels.with_flow_control().check_get(&rich), Ok(()));
+    assert_eq!(channels.flow_controlled().check_get(&rich), Ok(()));
     // ProgramList paginates by default, and wants its resId.
     let programs =
         ResourceGet::new(ResourceTarget::entry(PeResource::ProgramList, id("g")).unwrap())

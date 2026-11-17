@@ -73,10 +73,7 @@ fn endpoint_of(blocks: &[FunctionBlock]) -> Endpoint {
         midi2: true,
         ..Capabilities::default()
     }));
-    blocks
-        .iter()
-        .cloned()
-        .fold(device, Endpoint::with_function_block)
+    blocks.iter().cloned().fold(device, Endpoint::block)
 }
 
 /// A negotiated UMP Endpoint with `blocks`, and the poll after the settle,

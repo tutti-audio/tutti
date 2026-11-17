@@ -170,17 +170,6 @@ tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/entr
 tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_media_types
 tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_require_res_id
 tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_schema
-tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/request.rs::ResourceGet::with_flow_control
-tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/state.rs::PeState::with_rev
-tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/state.rs::PeState::with_timestamp
-tutti-midi-device  with-prefix  crates/tutti-midi-device/src/endpoint.rs::Endpoint::with_active
-tutti-midi-device  with-prefix  crates/tutti-midi-device/src/endpoint.rs::Endpoint::with_function_block
-tutti-midi-device  with-prefix  crates/tutti-midi-device/src/endpoint.rs::Endpoint::with_identity
-tutti-midi-device  with-prefix  crates/tutti-midi-device/src/endpoint.rs::Endpoint::with_instance_id
-tutti-midi-device  with-prefix  crates/tutti-midi-device/src/endpoint.rs::Endpoint::with_name
-tutti-midi-device  with-prefix  crates/tutti-midi-device/src/endpoint.rs::Endpoint::with_static_function_blocks
-tutti-midi-device  with-prefix  crates/tutti-midi-device/src/learned.rs::Learned::with_identity
-tutti-midi-device  with-prefix  crates/tutti-midi-device/src/learned.rs::Learned::with_instance_id
 tutti-midi-device  chain-result  crates/tutti-midi-device/src/ci/pe/partial.rs::PartialUpdate::with
 tutti-midi-device  chain-result  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_can_get
 tutti-midi-device  chain-result  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_can_paginate

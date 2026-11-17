@@ -291,14 +291,14 @@ impl PeState {
 
     /// The state with its revision.
     #[must_use]
-    pub fn with_rev(mut self, rev: StateRev) -> Self {
+    pub fn revised(mut self, rev: StateRev) -> Self {
         self.rev = Some(rev);
         self
     }
 
     /// The state with the time it was last changed.
     #[must_use]
-    pub fn with_timestamp(mut self, timestamp: UnixSeconds) -> Self {
+    pub fn stamped(mut self, timestamp: UnixSeconds) -> Self {
         self.timestamp = Some(timestamp);
         self
     }
@@ -761,7 +761,7 @@ impl ResourceInitiator {
             .resource_list()
             .and_then(|l| l.entry(get.target().resource()))
             .is_some_and(ResourceEntry::fc_on_get);
-        if flows { get.with_flow_control() } else { get }
+        if flows { get.flow_controlled() } else { get }
     }
 
     /// Gets the list of the device's states. The result is a

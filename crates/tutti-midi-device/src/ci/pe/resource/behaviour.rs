@@ -418,7 +418,7 @@ fn a_flow_controlled_reply_goes_a_chunk_for_each_ack() {
     let mark = link.wire.len();
     let made = link
         .init
-        .get(&get(PeResource::ChannelList).with_flow_control(), link.now);
+        .get(&get(PeResource::ChannelList).flow_controlled(), link.now);
     let call = link.call(made);
     let Ok(PeData::ChannelList(list)) = link.got(call) else {
         panic!("{:?}", link.events);

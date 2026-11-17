@@ -57,8 +57,8 @@ fn bytes(len: usize) -> Vec<u8> {
 
 fn stored(len: usize) -> PeState {
     PeState::octets(bytes(len))
-        .with_rev(StateRev::new("buui890adj").unwrap())
-        .with_timestamp(UnixSeconds::of(1_586_786_400))
+        .revised(StateRev::new("buui890adj").unwrap())
+        .stamped(UnixSeconds::of(1_586_786_400))
 }
 
 fn store_with(states: &[(&str, PeState)]) -> ResourceStore {

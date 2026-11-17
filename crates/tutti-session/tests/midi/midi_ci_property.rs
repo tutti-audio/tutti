@@ -78,7 +78,7 @@ impl PePeer {
                 midi2: true,
                 ..Capabilities::default()
             }))
-            .with_function_block(block),
+            .block(block),
             assembler: SysexAssembler::new(vec![0; room].into_boxed_slice(), 1024, 16),
             muid,
             responder: ResourceResponder::new(
