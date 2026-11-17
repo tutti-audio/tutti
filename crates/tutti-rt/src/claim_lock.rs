@@ -169,6 +169,24 @@ impl ClaimGuard<'_> {
         self.published = true;
     }
 
+    /// Runs `f` with the current thread published as the holder, and clears
+    /// the identity when `f` returns or unwinds, while the claim stays held: a
+    /// holder that acts as another role for one span (a lifecycle claim that
+    /// runs a stop as the audio thread). The identity is cleared afterwards
+    /// even if it was published before.
+    pub fn as_identity<R>(&mut self, f: impl FnOnce() -> R) -> R {
+        struct Clear<'g, 'a>(&'g mut ClaimGuard<'a>);
+        impl Drop for Clear<'_, '_> {
+            fn drop(&mut self) {
+                self.0.claim.owner.store(0, Ordering::Release);
+                self.0.published = false;
+            }
+        }
+        self.publish_identity();
+        let _clear = Clear(self);
+        f()
+    }
+
     /// Marks the claim dead for good and releases it: every later take, and
     /// every waiter, gets `None`.
     pub fn kill(mut self) {
@@ -231,6 +249,28 @@ mod tests {
         });
         drop(guard);
         assert!(!claim.is_held_by_current_thread());
+    }
+
+    /// **A scoped identity is the holder's inside the span only**, the claim
+    /// staying held after it, and an unwind out of the span clears it too.
+    #[test]
+    fn a_scoped_identity_ends_with_its_span_and_the_claim_stays_held() {
+        let claim = Claim::new();
+        let mut guard = claim.claim().expect("free");
+        let inside = guard.as_identity(|| claim.is_held_by_current_thread());
+        assert!(inside, "published for the span");
+        assert!(!claim.is_held_by_current_thread(), "cleared after it");
+        assert!(claim.try_claim().is_none(), "the claim is still held");
+        let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            guard.as_identity(|| panic!("inside the span"));
+        }));
+        assert!(unwound.is_err());
+        assert!(!claim.is_held_by_current_thread(), "cleared by the unwind");
+        drop(guard);
+        assert!(
+            !claim.is_dead(),
+            "the panic began and ended inside the span, not at the release"
+        );
     }
 
     /// **A taker that does not publish is no thread's holder.**
