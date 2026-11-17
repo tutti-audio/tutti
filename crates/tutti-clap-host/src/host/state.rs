@@ -12,10 +12,12 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 use tutti_clap_ffi::ThreadRoles;
 use tutti_plugin_types::{MainThreadMarker, ProcessWake, RequestWord, TrackInfo, TransportRequest};
+use tutti_rt::PackedAtomic;
 
 pub(crate) struct TimerEntry {
     pub id: u32,
     pub period_ms: u32,
+    /// When the timer last fired, or was registered.
     pub last_fire: Instant,
 }
 
@@ -46,24 +48,6 @@ pub struct PosixFdEntry {
     pub flags: u32,
 }
 
-/// Notifications about values the host caches but the plugin owns. Each is
-/// latched until the matching `take_*` drains it; the host then re-reads the
-/// value from the plugin.
-#[derive(Debug)]
-pub struct ProcessingState {
-    /// The plugin's saveable state changed, so a state blob written earlier no
-    /// longer matches the instance.
-    pub state_dirty: AtomicBool,
-}
-
-impl ProcessingState {
-    fn new() -> Self {
-        Self {
-            state_dirty: AtomicBool::new(false),
-        }
-    }
-}
-
 /// Editor-window requests the plugin raised through `CLAP_EXT_GUI`.
 #[derive(Debug)]
 pub struct GuiState {
@@ -78,83 +62,34 @@ pub struct GuiState {
     /// `destroy` releases what `create` allocated rather than the window.
     /// Latched until the next editor is opened.
     pub window_destroyed: AtomicBool,
-    /// The plugin's resize constraints (aspect ratio, step size) changed, so
-    /// cached hints must be re-read before the next user resize.
-    pub resize_hints_changed: AtomicBool,
-    /// Width in pixels the plugin asked to be resized to. Only meaningful
-    /// while [`request_resize_pending`](Self::request_resize_pending) is set.
-    pub request_resize_width: AtomicU32,
-    /// Height in pixels the plugin asked to be resized to. Only meaningful
-    /// while [`request_resize_pending`](Self::request_resize_pending) is set.
-    pub request_resize_height: AtomicU32,
-    /// Distinguishes a fresh request from stale width/height values.
-    pub request_resize_pending: AtomicBool,
+    /// What the plugin asked the editor window to be resized to, in pixels:
+    /// width and height in one word, so a take never pairs one request's width
+    /// with another's height. `[0, 0]` when none waits.
+    pub resize_request: PackedAtomic<[u32; 2]>,
 }
 
+/// [`GuiState::resize_request`] with no request: a request with no area names
+/// no size.
+pub(crate) const NO_RESIZE: [u32; 2] = [0, 0];
+
 impl GuiState {
+    /// The pending resize request, once: `None` after it, until the plugin
+    /// asks again. A request raised between the read and the clear is lost.
+    pub(crate) fn take_resize(&self) -> Option<[u32; 2]> {
+        let asked = self.resize_request.load();
+        if asked == NO_RESIZE {
+            return None;
+        }
+        self.resize_request.store(NO_RESIZE);
+        Some(asked)
+    }
+
     fn new() -> Self {
         Self {
             closed: AtomicBool::new(false),
             window_destroyed: AtomicBool::new(false),
-            resize_hints_changed: AtomicBool::new(false),
-            request_resize_width: AtomicU32::new(0),
-            request_resize_height: AtomicU32::new(0),
-            request_resize_pending: AtomicBool::new(false),
+            resize_request: PackedAtomic::new(NO_RESIZE),
         }
-    }
-}
-
-/// Parameter-side requests from `CLAP_EXT_PARAMS`. (A rescan is a bit of
-/// [`HostState::requests`].)
-#[derive(Debug)]
-pub struct ParamState {
-    /// The plugin asked the host to flush pending parameter changes.
-    pub flush_requested: AtomicBool,
-}
-
-impl ParamState {
-    fn new() -> Self {
-        Self {
-            flush_requested: AtomicBool::new(false),
-        }
-    }
-}
-
-/// Note-side change notifications, from the note-ports extension.
-#[derive(Debug)]
-pub struct NoteState {
-    /// The note-port layout changed and must be re-enumerated.
-    pub ports_changed: AtomicBool,
-}
-
-impl NoteState {
-    fn new() -> Self {
-        Self {
-            ports_changed: AtomicBool::new(false),
-        }
-    }
-}
-
-/// The `clap.log` lines the host did not emit.
-///
-/// A line from the audio thread is counted, not emitted: emitting allocates.
-#[derive(Debug)]
-pub struct LogState {
-    pub(crate) dropped: AtomicU32,
-}
-
-impl LogState {
-    fn new() -> Self {
-        Self {
-            dropped: AtomicU32::new(0),
-        }
-    }
-
-    /// Counts a line refused because it arrived on the audio thread.
-    ///
-    /// Audio-thread safe: one relaxed increment, no lock, no allocation.
-    pub(crate) fn note_audio_thread_drop(&self) {
-        self.dropped.fetch_add(1, Ordering::Relaxed);
     }
 }
 
@@ -195,6 +130,13 @@ impl TimerState {
             epoch: Instant::now(),
             next_due: AtomicU64::new(Self::NONE),
         }
+    }
+
+    /// The instant a registration is stamped with: the one place a timer
+    /// reads a clock. Every rule that compares instants takes them as
+    /// parameters.
+    pub(crate) fn now(&self) -> Instant {
+        Instant::now()
     }
 
     pub(crate) fn epoch(&self) -> Instant {
@@ -318,16 +260,18 @@ pub struct HostState {
     /// Set once, by [`Control::bind_wake`](tutti_plugin_types::Control::bind_wake);
     /// a request before then has nobody to wake.
     pub process_wake: OnceLock<ProcessWake>,
-    /// State-dirty notification.
-    pub processing: ProcessingState,
+    /// The plugin's saveable state changed (`state.mark_dirty`), so a state
+    /// blob written earlier no longer matches the instance. Latched until
+    /// [`Editor::take_dirty`](tutti_plugin_types::Editor::take_dirty).
+    pub state_dirty: AtomicBool,
+    /// The plugin asked for a parameter flush (`params.request_flush`).
+    /// Latched until the main thread's pass flushes.
+    pub flush_requested: AtomicBool,
     /// Editor close and resize requests.
     pub gui: GuiState,
-    /// Parameter rescan and flush requests.
-    pub params: ParamState,
-    /// Note-port change notifications.
-    pub notes: NoteState,
-    /// The `clap.log` lines refused on the audio thread.
-    pub log: LogState,
+    /// The `clap.log` lines refused on the audio thread: counted, not
+    /// emitted, since emitting allocates.
+    pub log_dropped: AtomicU32,
     /// The id `clap.log` lines are tagged with. Set once, at load, from the
     /// descriptor; a line before then carries an empty id.
     pub plugin_id: OnceLock<String>,
@@ -351,11 +295,10 @@ impl HostState {
             roles: Arc::new(ThreadRoles::new(main)),
             requests: RequestWord::new(),
             process_wake: OnceLock::new(),
-            processing: ProcessingState::new(),
+            state_dirty: AtomicBool::new(false),
+            flush_requested: AtomicBool::new(false),
             gui: GuiState::new(),
-            params: ParamState::new(),
-            notes: NoteState::new(),
-            log: LogState::new(),
+            log_dropped: AtomicU32::new(0),
             plugin_id: OnceLock::new(),
             timer: TimerState::new(),
             posix_fds: PosixFdState::new(),

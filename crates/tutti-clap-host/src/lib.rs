@@ -278,7 +278,7 @@ pub mod topology;
 pub mod types;
 
 pub use error::{ClapError, LoadStage, Result};
-pub use events::{ClapEvent, EventList, InputEventList, OutputEventList, ParamBounds};
+pub use events::{ClapEvent, EventList, FlushEvents, InputEventList, OutputEventList, ParamBounds};
 pub use host::{ClapHost, HostState, InputStream, OutputStream};
 pub use instance::{
     ClapController, ClapEditor, ClapLoaded, ClapProcessContext, ClapProcessor, LoadOptions,
