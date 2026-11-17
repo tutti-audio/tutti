@@ -17,7 +17,7 @@ pub use tutti_vst3_ffi::{
 
 pub use tutti_plugin_types::{
     AudioBuffer, ContentScale, EditorCapabilities, NoteExpressionIntValue, NoteExpressionType,
-    NoteExpressionValue, ParameterChanges, ParameterPoint, ParameterQueue, PluginVersion, Sample,
+    NoteExpressionValue, ParameterChanges, ParameterPoint, ParameterQueue, PluginVersion,
     SampleFormat, TransportInfo, WindowHandle, WireMidi,
 };
 
@@ -242,18 +242,11 @@ impl PluginInfo {
 /// crate binds for each, so an outside impl could only get one wrong.
 ///
 /// ```compile_fail,E0277
-/// use tutti_plugin_types::Sample;
 /// use tutti_plugin_types::SampleFormat;
 /// use tutti_vst3_ffi::{BoundBuses, BusBuffers, SampleWidth, Vst3Error};
 /// use tutti_vst3_host::Vst3Sample;
 ///
-/// #[derive(Clone, Copy, Default)]
 /// struct Half(u16);
-/// impl Sample for Half {
-///     fn is_finite(self) -> bool {
-///         true
-///     }
-/// }
 ///
 /// // The trait is sealed: `Half` cannot implement it, whatever it defines.
 /// impl Vst3Sample for Half {
@@ -274,7 +267,7 @@ impl PluginInfo {
 ///     }
 /// }
 /// ```
-pub trait Vst3Sample: tutti_plugin_types::Sample + sealed::Sealed {
+pub trait Vst3Sample: tutti_buffers::Float + sealed::Sealed {
     /// The format of this sample type.
     const FORMAT: SampleFormat;
     /// The width of this sample type.

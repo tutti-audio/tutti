@@ -92,7 +92,7 @@ unsafe impl<T: Width> Send for Typed<T> {}
 /// A sample width CLAP carries: `f32` through `data32`, `f64` through
 /// `data64`. A fixed fact of each type; the width a scratch holds is the
 /// runtime [`SampleFormat`] in its [`Pool`].
-trait Width: tutti_plugin_types::Sample {
+trait Width: tutti_buffers::Float {
     /// A port buffer over `channel_count` channel pointers at `ptrs`.
     fn port_buffer(ptrs: *mut *mut Self, channel_count: u32) -> clap_audio_buffer;
 }
