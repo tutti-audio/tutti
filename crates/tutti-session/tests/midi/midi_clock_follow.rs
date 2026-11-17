@@ -381,3 +381,22 @@ fn a_clock_command_the_transport_refuses_is_counted() {
     }
     assert_eq!(refused, 1, "the Start, placed as one locate-and-play");
 }
+
+/// **The beat error reads only where one can be read**: none before a clock is
+/// followed, none for a Beat Clock follower that is not locked and rolling, and
+/// none for MTC, which has no tempo to trim.
+#[test]
+fn the_clock_error_is_none_until_a_locked_rolling_beat_clock_gives_one() {
+    let (mut s, _fake) = rig();
+    assert_eq!(s.midi().clock_error(), None);
+    follow(&mut s, ClockKind::BeatClock);
+    for _ in 0..8 {
+        pump(&mut s);
+    }
+    assert_eq!(s.midi().clock_error(), None);
+    follow(&mut s, ClockKind::Mtc);
+    for _ in 0..8 {
+        pump(&mut s);
+    }
+    assert_eq!(s.midi().clock_error(), None);
+}

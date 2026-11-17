@@ -52,6 +52,14 @@
 //! lag is at most a block and one update's interval; the placement of a
 //! command at a frame inside a block is not done, so it is not removed.
 //!
+//! **Drift.** Once per poll, while the transport rolls, a Beat Clock follower
+//! is given the beat the transport is at on the first frame of the next block
+//! (`ClockFollower::steer`): the error against the source's beat is closed by a
+//! trim of the tempo published through the overlay, and an error past
+//! `ClockFollower::SLIP` locates to the source and is reported
+//! ([`MidiReport::ClockSlipped`]). The latest error is
+//! [`Midi::clock_error`](crate::Midi::clock_error).
+//!
 //! MTC `00:00:00:00` is beat 0 of the project's tempo map: a position in time
 //! is a beat through the map in force.
 
@@ -383,6 +391,12 @@ impl ClockFollow {
         self.overlay.as_ref().map_or((None, None), Overlay::restore)
     }
 
+    /// The beat error the follower read at the last poll
+    /// ([`ClockFollower::error`]).
+    pub(crate) fn error(&self) -> Option<Beat> {
+        self.core.error()
+    }
+
     /// The tap's rate, to compare with the graph's.
     pub(crate) fn tap_rate(&self) -> tutti_types::SampleRate {
         self.tap.rate()
@@ -434,6 +448,12 @@ impl ClockFollow {
         self.rolling = rolling;
         let map = cx.settings.tempo_map();
         let tempo = cx.settings.tempo_in_force();
+        // The drift between the source and the transport, read at the frame a
+        // command lands on; a transport that is not rolling has none.
+        if rolling && cx.playhead.playing() {
+            let beat = next_block_beat(&cx.playhead, &map);
+            self.core.steer(beat, lands, &mut |e| events.push(e));
+        }
         let beat_of = |position: ClockPosition, at: Seconds| {
             let lag = if rolling {
                 (lands - at).get().max(0.0)
@@ -465,6 +485,9 @@ impl ClockFollow {
                 ClockEvent::Tempo(tempo) => tempos.push(Followed::Tempo(tempo)),
                 ClockEvent::Locked => out.push(MidiReport::ClockLocked { kind }.into()),
                 ClockEvent::Unlocked => out.push(MidiReport::ClockUnlocked { kind }.into()),
+                ClockEvent::Slipped { error } => {
+                    out.push(MidiReport::ClockSlipped { kind, error }.into());
+                }
             }
         }
         if let Some(overlay) = &mut self.overlay {
