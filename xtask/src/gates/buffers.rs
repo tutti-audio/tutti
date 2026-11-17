@@ -488,12 +488,16 @@ fn source_files(tree: &dyn Tree) -> Vec<String> {
 
 /// Why `reason` is refused, or `None` when it is one of `allowed`: a bare kind
 /// (`pending`, `engine-f32`, `ffi`) or `not-audio`/`spec-f32` with a `: <why>`.
+/// The reason kinds that carry a judgement, written `<kind>: <why>` with a
+/// non-empty why.
+const JUDGED: [&str; 3] = ["not-audio", "spec-f32", "not-interleave"];
+
 pub(super) fn reason_error(reason: &str, allowed: &[&str]) -> Option<String> {
     let (kind, why) = match reason.split_once(':') {
         Some((k, w)) => (k, Some(w.trim())),
         None => (reason, None),
     };
-    let needs_why = matches!(kind, "not-audio" | "spec-f32");
+    let needs_why = JUDGED.contains(&kind);
     let ok = allowed.contains(&kind)
         && if needs_why {
             why.is_some_and(|w| !w.is_empty())
@@ -506,7 +510,7 @@ pub(super) fn reason_error(reason: &str, allowed: &[&str]) -> Option<String> {
     let allowed = allowed
         .iter()
         .map(|k| {
-            if matches!(*k, "not-audio" | "spec-f32") {
+            if JUDGED.contains(k) {
                 format!("`{k}: <why>`")
             } else {
                 (*k).to_owned()
