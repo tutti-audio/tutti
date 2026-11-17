@@ -13,7 +13,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use tutti_rt::{PriorityRequest, StopToken, ThreadHandle};
+use tutti_rt::{PriorityRequest, Sleeper, StopToken, ThreadHandle};
 use tutti_types::SampleRate;
 
 use super::bell::{Bell, StreamerSender};
@@ -42,6 +42,8 @@ pub(super) struct Built {
     /// Its receiving end, until a driver takes it.
     rx: Receiver<StreamerCommand>,
     shared: Handles,
+    /// The wait end of the bell's doorbell, for the thread that runs the loop.
+    sleeper: Sleeper,
     config: BufferConfig,
     /// How long the thread sleeps at most when nothing rings it.
     backstop: Duration,
@@ -61,7 +63,7 @@ impl Built {
         seams: Seams,
     ) -> Self {
         let (tx, rx) = crossbeam_channel::bounded(channel_capacity.max(1));
-        let bell = Bell::new();
+        let (bell, sleeper) = Bell::new();
         let tx = StreamerSender::new(tx, Arc::clone(&bell));
 
         let shared = Handles {
@@ -79,6 +81,7 @@ impl Built {
             tx,
             rx,
             shared,
+            sleeper,
             config,
             backstop: BACKSTOP,
         }
@@ -120,7 +123,7 @@ impl Built {
         let bell = Arc::clone(&self.shared.bell);
         let shared = self.shared;
         let cycle = StreamerCycle::new(self.config, self.tx.clone());
-        let (queue, backstop) = (self.rx, self.backstop);
+        let (queue, backstop, sleeper) = (self.rx, self.backstop, self.sleeper);
 
         let body = move |_: &StopToken| {
             // The thread owns the queue's one receiver, so however the
@@ -128,7 +131,7 @@ impl Built {
             // the streamer is gone instead of letting them queue into
             // nothing; and its table's drop tells every live stream
             // (`Faulted(StreamerGone)`).
-            streamer_loop(&queue, shared, cycle, backstop);
+            streamer_loop(&queue, shared, cycle, sleeper, backstop);
         };
         // Disk streaming should stay ahead of background work, not compete
         // with the audio threads (Ardour's streamer sets no CPU priority,
