@@ -12,7 +12,8 @@
 use tutti_graph::{Cx, Event, EventKind, Offset, ParamSegment};
 use tutti_types::{ParamAddr, Samples};
 
-use tutti_plugin_types::{ParamId, ParameterQueue};
+use tutti_plugin_types::ParameterQueue;
+use tutti_types::ParamId;
 
 use super::param_delivery::ParamDelivery;
 use super::segment_points::SegmentPoints;
@@ -95,7 +96,7 @@ pub fn take(
                 let ParamAddr::Id(id) = ramp.addr() else {
                     continue;
                 };
-                let (Some(address), Some(value)) = (address(id), ramp.foreign_target(id)) else {
+                let Some(value) = ramp.foreign_target(id) else {
                     continue;
                 };
                 // Where the parameter stood at the end of the frame before
@@ -103,19 +104,19 @@ pub fn take(
                 // param port's ramp starts from there too once its source
                 // has started (its first starts from the base at its own
                 // frame).
-                let stands = stood(segments, params, address, o, abs(o));
+                let stands = stood(segments, params, id, o, abs(o));
                 match stands {
                     Some(stands) if ramp.duration() > Samples(0) => {
                         let seg =
                             ParamSegment::foreign(id, stands, value, ramp.duration(), ramp.shape());
-                        segments.start(params, address, seg, abs(o), frame, false);
+                        segments.start(params, id, seg, abs(o), frame, false);
                     }
                     _ => {
                         // A step: it stops a segment in flight on its
                         // parameter.
-                        segments.interrupt(address);
+                        segments.interrupt(id);
                         let offset = i32::try_from(frame).unwrap_or(i32::MAX);
-                        params.point(address, offset, value);
+                        params.point(id, offset, value);
                     }
                 }
             }
@@ -125,13 +126,10 @@ pub fn take(
                 let ParamAddr::Id(id) = seg.addr() else {
                     continue;
                 };
-                let Some(address) = address(id) else {
-                    continue;
-                };
                 // Noted before the segment moves it, for a ramp later on
                 // this frame.
-                stood(segments, params, address, o, abs(o));
-                segments.start(params, address, seg, abs(o), frame, grid(abs(o)));
+                stood(segments, params, id, o, abs(o));
+                segments.start(params, id, seg, abs(o), frame, grid(abs(o)));
             }
             EventKind::Midi(_) | EventKind::Harmony(_) => other(e, frame),
             // A plugin is no source a lane reads: nothing to re-send.
@@ -160,13 +158,6 @@ fn stood(
     })
 }
 
-/// The parameter a ramp's or segment's number names: the plugin reads a foreign
-/// lane's `u32` (`ParamAddr::Id`) back as its own id (a VST2 plugin's is its
-/// parameter's index).
-fn address(id: u32) -> Option<ParamId> {
-    Some(ParamId::new(id))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -176,7 +167,7 @@ mod tests {
         Env, Exponent, Law, ParamRamp, PlayClock, PlayReading, TransportChanges, TransportHistory,
         TransportPosition,
     };
-    use tutti_plugin_types::ParamId;
+    use tutti_types::ParamId;
     use tutti_types::{Beat, Bpm, Frame, Latency, SampleRate, Samples};
 
     /// The block's `Env` at absolute frame 0, its play clock starting at
@@ -228,12 +219,13 @@ mod tests {
         let at =
             |i: usize, ramp: ParamRamp| Event::ramp(Offset::of(Samples(i), Samples(len)), ramp);
         let events = [
-            at(0, ParamRamp::foreign(7, 0.0, Samples(8))),
+            at(0, ParamRamp::foreign(ParamId::new(7), 0.0, Samples(8))),
             at(
                 11,
-                ParamRamp::foreign(7, 1.0, Samples(40)).with_shape(Law::PowerIn(Exponent::of(2.0))),
+                ParamRamp::foreign(ParamId::new(7), 1.0, Samples(40))
+                    .with_shape(Law::PowerIn(Exponent::of(2.0))),
             ),
-            at(40, ParamRamp::foreign(7, 0.0, Samples(4))),
+            at(40, ParamRamp::foreign(ParamId::new(7), 0.0, Samples(4))),
         ];
         take(
             &events,
@@ -292,14 +284,23 @@ mod tests {
         };
         let off = |i: usize| Offset::of(Samples(i), Samples(len));
         let events = [
-            Event::ramp(off(0), ParamRamp::foreign(7, 0.2, Samples(0))),
-            Event::ramp(off(10), ParamRamp::foreign(7, 0.4, Samples(0))),
-            Event::ramp(off(10), ParamRamp::foreign(7, 1.0, Samples(4))),
+            Event::ramp(off(0), ParamRamp::foreign(ParamId::new(7), 0.2, Samples(0))),
+            Event::ramp(
+                off(10),
+                ParamRamp::foreign(ParamId::new(7), 0.4, Samples(0)),
+            ),
+            Event::ramp(
+                off(10),
+                ParamRamp::foreign(ParamId::new(7), 1.0, Samples(4)),
+            ),
             Event::segment(
                 off(20),
-                ParamSegment::foreign(7, 0.9, 0.9, Samples(2), Law::Linear),
+                ParamSegment::foreign(ParamId::new(7), 0.9, 0.9, Samples(2), Law::Linear),
             ),
-            Event::ramp(off(20), ParamRamp::foreign(7, 0.0, Samples(2))),
+            Event::ramp(
+                off(20),
+                ParamRamp::foreign(ParamId::new(7), 0.0, Samples(2)),
+            ),
         ];
         take(
             &events,
@@ -381,8 +382,14 @@ mod tests {
         segments.begin(64);
         let off = |i: usize| Offset::of(Samples(i), Samples(64));
         let events = [
-            Event::ramp(off(10), ParamRamp::foreign(9, 0.4, Samples(0))),
-            Event::ramp(off(10), ParamRamp::foreign(9, 1.0, Samples(4))),
+            Event::ramp(
+                off(10),
+                ParamRamp::foreign(ParamId::new(9), 0.4, Samples(0)),
+            ),
+            Event::ramp(
+                off(10),
+                ParamRamp::foreign(ParamId::new(9), 1.0, Samples(4)),
+            ),
         ];
         walk(&events, 64, &mut segments, &mut params);
         assert_eq!(
@@ -405,12 +412,18 @@ mod tests {
         params.begin();
         segments.begin(64);
         let off = |i: usize| Offset::of(Samples(i), Samples(64));
-        let step = [Event::ramp(off(10), ParamRamp::foreign(7, 0.2, Samples(0)))];
+        let step = [Event::ramp(
+            off(10),
+            ParamRamp::foreign(ParamId::new(7), 0.2, Samples(0)),
+        )];
         walk(&step, 64, &mut segments, &mut params);
         params.handed_off(false);
         params.begin();
         segments.begin(64);
-        let ramp = [Event::ramp(off(10), ParamRamp::foreign(7, 1.0, Samples(4)))];
+        let ramp = [Event::ramp(
+            off(10),
+            ParamRamp::foreign(ParamId::new(7), 1.0, Samples(4)),
+        )];
         walk(&ramp, 64, &mut segments, &mut params);
         let got = queue(&mut params, address);
         let want = [(0, 0.2), (10, 0.4), (13, 1.0)];
@@ -453,7 +466,7 @@ mod tests {
         let events: Vec<Event> = (0..300)
             .map(|i| {
                 let v = if i % 2 == 0 { 0.25 } else { 0.75 };
-                let seg = ParamSegment::foreign(7, v, v, Samples(2), Law::Linear);
+                let seg = ParamSegment::foreign(ParamId::new(7), v, v, Samples(2), Law::Linear);
                 Event::segment(Offset::of(Samples(i), Samples(len)), seg)
             })
             .collect();

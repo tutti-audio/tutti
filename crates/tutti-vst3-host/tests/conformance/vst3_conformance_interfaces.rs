@@ -8,7 +8,7 @@
 use crate::conformance_support;
 
 use tutti_fixtures::main_thread;
-use tutti_plugin_types::ParamId;
+use tutti_types::ParamId;
 use tutti_vst3_host::{
     Library, LoadOptions, PhysicalUiType, ProcessContextRequirements, UnitId, Vst3Loaded,
 };

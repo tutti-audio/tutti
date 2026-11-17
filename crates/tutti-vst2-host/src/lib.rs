@@ -217,7 +217,7 @@
 //! [`WindowHandle`]: crate::WindowHandle
 //! [`Samples`]: crate::Samples
 //! [`WireMidi`]: crate::WireMidi
-//! [`ParamId`]: tutti_plugin_types::ParamId
+//! [`ParamId`]: tutti_types::ParamId
 #![forbid(unsafe_code)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 

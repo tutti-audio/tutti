@@ -19,11 +19,11 @@ use tutti_au_ffi::{
 use tutti_buffers::{Float, InputOutput};
 use tutti_graph::UmpAt;
 use tutti_plugin_types::{
-    MIDI_STACK_CAPACITY, ParamId, ParamMapping, ParamWriteError, PlayheadWatch, PluginAudio,
-    PluginError, PluginIo, PluginResult, ProcessContext, ProcessOutput, Processor, TransportInfo,
-    WireMidi,
+    MIDI_STACK_CAPACITY, ParamMapping, ParamWriteError, PlayheadWatch, PluginAudio, PluginError,
+    PluginIo, PluginResult, ProcessContext, ProcessOutput, Processor, TransportInfo, WireMidi,
 };
 use tutti_rt::Reader;
+use tutti_types::ParamId;
 use tutti_ump::SysexAssembler;
 
 use crate::automation::SharedStage;
@@ -827,7 +827,8 @@ mod tests {
     use crate::instance::AuLoaded;
     use crate::types::{AudioComponentDescription, K_AUDIO_UNIT_TYPE_EFFECT};
     use tutti_buffers::{InputOutput, Planes, PlanesMut};
-    use tutti_plugin_types::{Loaded, MaxBlock, ParamId, ParameterChanges, Prepare, SampleRate};
+    use tutti_plugin_types::{Loaded, MaxBlock, ParameterChanges, Prepare, SampleRate};
+    use tutti_types::ParamId;
 
     fn delay() -> (AuProcessor, crate::controller::AuController) {
         let desc = AudioComponentDescription {
@@ -858,9 +859,9 @@ mod tests {
     fn automation_for_an_undeclared_parameter_is_counted_not_written() {
         let (mut processor, _controller) = delay();
         let mut changes = ParameterChanges::reserved(2, 4);
-        assert!(changes.add_change(ParamId::from(9_999), 3, 0.25));
-        assert!(changes.add_change(ParamId::from(9_999), 25, 0.75));
-        assert!(changes.add_change(ParamId::from(0), 3, 0.5));
+        assert!(changes.add_change(ParamId::new(9_999), 3, 0.25));
+        assert!(changes.add_change(ParamId::new(9_999), 25, 0.75));
+        assert!(changes.add_change(ParamId::new(0), 3, 0.5));
         let ctx = ProcessContext::new().params(&changes);
 
         let input = vec![vec![0.0f32; 64]; 2];
@@ -896,8 +897,8 @@ mod tests {
     fn the_block_points_are_scheduled_by_the_pre_render_notify() {
         let (mut processor, _controller) = delay();
         let mut changes = ParameterChanges::reserved(1, 4);
-        assert!(changes.add_change(ParamId::from(0), 3, 0.25));
-        assert!(changes.add_change(ParamId::from(0), 25, 0.75));
+        assert!(changes.add_change(ParamId::new(0), 3, 0.25));
+        assert!(changes.add_change(ParamId::new(0), 25, 0.75));
         let ctx = ProcessContext::new().params(&changes);
 
         let input = vec![vec![0.0f32; 64]; 2];

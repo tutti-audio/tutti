@@ -10,9 +10,10 @@ use std::path::Path;
 use dpi::Size;
 use tutti_plugin_types::{
     AutomationMode, ContentScale, Control, Editor, EditorCapabilities, EditorError, EditorWindow,
-    InProcess, Load, MainThreadMarker, MainWorkHandle, Normalized, ParamEdit, ParamId,
-    ParamMapping, PluginError, PluginResult, Request, RescanScope, WindowHandle,
+    InProcess, Load, MainThreadMarker, MainWorkHandle, Normalized, ParamEdit, ParamMapping,
+    PluginError, PluginResult, Request, RescanScope, WindowHandle,
 };
+use tutti_types::ParamId;
 
 use super::ClapLoaded;
 use crate::ParamBounds;
@@ -319,7 +320,7 @@ mod tests {
     const CUTOFF: ParamBounds = ParamBounds::continuous(7, 20.0, 20_000.0);
 
     fn change(id: u32, value: f64) -> Option<ParamEdit> {
-        Some(ParamEdit::change(id.into(), Normalized::of(value)))
+        Some(ParamEdit::change(ParamId::new(id), Normalized::of(value)))
     }
 
     /// The editor's plain value is normalized before it leaves for the audio
@@ -423,11 +424,11 @@ mod tests {
         let ranges = [CUTOFF];
         assert_eq!(
             ClapEvent::ParamGestureBegin(gesture(CLAP_EVENT_PARAM_GESTURE_BEGIN, 7)).heard(&ranges),
-            Some(ParamEdit::Begin(7.into()))
+            Some(ParamEdit::Begin(ParamId::new(7)))
         );
         assert_eq!(
             ClapEvent::ParamGestureEnd(gesture(CLAP_EVENT_PARAM_GESTURE_END, 7)).heard(&ranges),
-            Some(ParamEdit::End(7.into()))
+            Some(ParamEdit::End(ParamId::new(7)))
         );
     }
 

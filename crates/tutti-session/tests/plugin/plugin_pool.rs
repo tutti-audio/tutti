@@ -12,13 +12,14 @@ use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status, Unforkable};
 use tutti_plugin::catalog::{Catalog, Hosting, PluginId, PluginRef};
 use tutti_plugin::error::StateError;
 use tutti_plugin_types::PluginFormat;
-use tutti_plugin_types::{Normalized, ParamId, StateUse};
+use tutti_plugin_types::{Normalized, StateUse};
 use tutti_plugin_types::{PluginFailure, TerminationReason};
 use tutti_session::{
     AddPluginError, CrossfadeRefused, DetachedSession, HandleError, JobStatus, LoadError,
     OtherPeer, Peer, PeerState, PluginCause, PluginHealth, PoolEvent, PoolState, Presence,
     RecoveryPolicy, Resource, RetryError, Session, SessionEvent, StateJobError, StateJobFailed,
 };
+use tutti_types::ParamId;
 use tutti_types::{ChannelLayout, MaxBlock, SampleRate, Samples, Tail};
 
 const BLOCK: usize = 512;

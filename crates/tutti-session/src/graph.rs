@@ -3771,7 +3771,8 @@ struct ModHostOver<'a> {
 }
 
 /// A plugin parameter's modulation target, by its node and parameter id.
-pub(crate) type PluginTargets = BTreeMap<(NodeKey, u32), tutti_modulation::TargetKey>;
+pub(crate) type PluginTargets =
+    BTreeMap<(NodeKey, tutti_types::ParamId), tutti_modulation::TargetKey>;
 
 impl tutti_nodes::ModHost for ModHostOver<'_> {
     fn target(&self, target: tutti_modulation::TargetKey) -> Option<tutti_nodes::Target> {

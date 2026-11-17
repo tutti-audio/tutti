@@ -17,11 +17,12 @@ use tutti_plugin_types::features::probed;
 use tutti_plugin_types::{
     AuComponentType, AutomationMode, BypassWrite, ContentScale, Control, EditorCapabilities,
     EditorError, EditorPresence, EditorWindow, Features, LoadedPlugin, MainThreadMarker,
-    Normalized, OwnBypass, ParamEdit, ParamFlags, ParamId, ParamMapping, ParamRange, ParamSteps,
+    Normalized, OwnBypass, ParamEdit, ParamFlags, ParamMapping, ParamRange, ParamSteps,
     ParamWriteError, ParameterInfo, PluginBus, PluginBuses, PluginClass, PluginDescriptor,
     PluginError, PluginResult, PluginTail, PluginVersion, Preset, PresetId, RenderModeSupport,
     Request, RescanScope, StateUse, WindowHandle, Wraps, taken,
 };
+use tutti_types::ParamId;
 use tutti_types::Samples;
 
 use crate::bus::BusDirection;
@@ -262,10 +263,10 @@ impl AuLoaded {
         let mut queued = Vec::new();
         self.edits.drain(&mut queued);
         out.extend(queued.into_iter().map(|edit| match edit {
-            Edit::Begin(id) => ParamEdit::Begin(ParamId::from(id)),
-            Edit::End(id) => ParamEdit::End(ParamId::from(id)),
+            Edit::Begin(id) => ParamEdit::Begin(ParamId::new(id)),
+            Edit::End(id) => ParamEdit::End(ParamId::new(id)),
             Edit::Change(id, plain) => {
-                ParamEdit::change(ParamId::from(id), self.normalize(id, plain))
+                ParamEdit::change(ParamId::new(id), self.normalize(id, plain))
             }
         }));
     }
@@ -367,7 +368,7 @@ impl Control for AuLoaded {
                     .unwrap_or_default();
                 let flags = read_only_flags(p.writable, p.meter_read_only);
                 // `AudioUnitParameterID` is AU's opaque plugin-chosen handle.
-                ParameterInfo::new(p.id.into(), p.name)
+                ParameterInfo::new(ParamId::new(p.id), p.name)
                     .with_unit(p.unit.to_string())
                     .with_range(ParamRange::Plain {
                         min: p.range.min as f64,

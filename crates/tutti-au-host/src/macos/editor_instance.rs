@@ -10,9 +10,10 @@ use std::path::Path;
 use dpi::Size;
 use tutti_plugin_types::{
     ContentScale, Control, Editor, EditorCapabilities, EditorError, EditorWindow, InProcess, Load,
-    MainThreadMarker, MainWorkHandle, Normalized, ParamEdit, ParamId, PluginError, PluginResult,
+    MainThreadMarker, MainWorkHandle, Normalized, ParamEdit, PluginError, PluginResult,
     WindowHandle,
 };
+use tutti_types::ParamId;
 
 use crate::instance::AuLoaded;
 
