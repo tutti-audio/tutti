@@ -17,6 +17,7 @@ fn the_node_adopts_the_mode_last_asked_for() {
     // own, as the inserted one is.
     let mut node = MidiIngestNode {
         mpe_request: controls.request.reader(),
+        mpe_request_cell: controls.request.clone(),
         ..MidiIngestNode::new()
     };
     node.adopt_mpe_request();
@@ -29,7 +30,7 @@ fn the_node_adopts_the_mode_last_asked_for() {
 fn reclaim_frees_a_request_a_block_held_across_the_next() {
     let mut node = MidiIngestNode::new();
     let controls = MidiIngestControls {
-        request: Arc::clone(node.mpe_request.cell()),
+        request: node.mpe_request_cell.clone(),
         dropped: node.dropped_reader.clone(),
     };
     {

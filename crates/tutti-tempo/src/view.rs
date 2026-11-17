@@ -14,7 +14,7 @@ use tutti_types::{Beat, Bpm, Frame, SampleRate, Seconds};
 /// what the same query on a fresh view would.
 ///
 /// **A view does not outlive the map it borrows**, and the map a block reads is
-/// lent for that block (an `ArcLend` loan, which must not be parked), so a view
+/// lent for that block (a `Publisher` loan, which must not be parked), so a view
 /// lives for one block at most. The hint it loses between blocks is one binary
 /// search on the first query.
 ///
