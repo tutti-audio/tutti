@@ -25,7 +25,8 @@ use tutti_midi_hardware::{
     Answer, CiPeerInfo, DeviceStream, MidiSession, ProfileSwitch, PropertyAsk, ReportAsk,
 };
 use tutti_midi_runtime::{
-    DeviceEpochs, InputReaders, InputWriters, JrStream, MidiIngestControls, MidiInputPorts,
+    DeviceEpochs, EpochWriter, InputReaders, InputWriters, JrStream, MidiIngestControls,
+    MidiInputPorts,
 };
 use tutti_rt::{Counter, Gauge, LockExt};
 use tutti_types::{Resyncs, Seconds};
@@ -767,6 +768,9 @@ struct InputPort {
     shared: Arc<InputShared>,
     node: NodeKey,
     controls: MidiIngestControls,
+    /// The one writer of the node's epochs.
+    writer: EpochWriter,
+    /// The node's half of them.
     epochs: DeviceEpochs,
     /// The inlet node of the open connection, in the graph.
     inlet: Option<NodeKey>,
@@ -1017,7 +1021,7 @@ impl Ports {
                 let _ =
                     graph.set_sources(EventInPort::new(port.node, 0), [EventOutPort::new(key, 0)]);
                 port.inlet = Some(key);
-                port.epochs.arrive();
+                port.writer.arrive();
                 port.open = Some(info.id.clone());
                 port.shared.open();
                 Ok(())
@@ -1044,7 +1048,7 @@ impl Ports {
             // A host that removed the inlet itself leaves nothing to take.
             let _ = graph.remove(key);
         }
-        port.epochs.depart();
+        port.writer.depart();
         port.controls.clear_mpe_profiles();
         // The device's peers went with its connection.
         port.end_requests(Gate::Away, Ended::Disconnected);
@@ -1482,7 +1486,7 @@ impl crate::Midi<'_> {
             Resolved::Missing => None,
         };
         let found = found.filter(|info| info.direction.is_input());
-        let epochs = DeviceEpochs::new();
+        let (writer, epochs) = DeviceEpochs::new();
         let layout = self
             .nodes
             .map_or(MidiInputPorts::FIRST_GROUP, |n| n.input_ports);
@@ -1519,6 +1523,7 @@ impl crate::Midi<'_> {
             shared: Arc::clone(&shared),
             node,
             controls,
+            writer,
             epochs,
             inlet: None,
             saved,
