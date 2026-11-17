@@ -21,6 +21,7 @@ use dpi::{PhysicalSize, Size};
 use tutti_plugin_ipc_ffi::FdId;
 use tutti_rt::RequestWord;
 
+use crate::StateError;
 use crate::{
     AudioBufferMut, ChannelLayout, ContentScale, Control, Controller, EditDrain, EditSink,
     EditorError, EditorWindow, Layout, Loaded, LoadedPlugin, MainThreadMarker, Normalized,
@@ -753,7 +754,7 @@ macro_rules! fake_control {
 }
 
 fn poisoned() -> PluginError {
-    PluginError::State("the fake's state lock was poisoned".into())
+    PluginError::StateFailed(StateError::PluginCrashed)
 }
 
 fake_control!(FakeLoaded, |_, _, _| {}, |_, _| {});

@@ -306,7 +306,7 @@ pub(crate) trait JobSession {
     );
 }
 
-impl<C: Clock> JobSession for Session<C> {
+impl<K: crate::AppKey, C: Clock> JobSession for Session<K, C> {
     fn land_pool_load(
         &mut self,
         flight: u64,
@@ -565,7 +565,7 @@ impl Jobs {
     }
 }
 
-impl<C: Clock> Session<C> {
+impl<K: crate::AppKey, C: Clock> Session<K, C> {
     /// Lands what the jobs sent since the last update, in arrival order.
     /// What arrives during a lander (a job it submits that ends at once)
     /// waits for the next update.
