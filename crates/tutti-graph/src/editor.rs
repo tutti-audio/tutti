@@ -73,6 +73,7 @@ use crate::plan::{Delta, Plan};
 use crate::spec::{EventIn, GraphSpec, ValidGraph};
 use crate::tap::TapWriter;
 use crate::{EventTapId, MeterId, NodeKey, TapId};
+use tutti_buffers::Float;
 
 mod cells;
 mod commit;
@@ -213,16 +214,16 @@ impl Limits {
 /// executor.process(64, &transport, &[&input], &mut [&mut output]);
 /// assert_eq!(output[0], 0.5);
 /// ```
-pub struct Editor {
+pub struct Editor<F: Float = f32> {
     /// The rings to the paired executor.
-    link: Link,
+    link: Link<F>,
     prepare: Prepare,
     spec: GraphSpec,
     shapes: Shapes,
     /// Each key's record: the unit waiting for the next commit, its wake
     /// and fork source, the crossfade or latency cut the commit carries,
     /// whether it is leaving, and its generation count.
-    placements: Placements,
+    placements: Placements<F>,
     /// The open taps: each reader's width and end latch.
     taps: Outlets<TapId, TapWriter, TapOpened>,
     /// The open event taps.
@@ -233,7 +234,7 @@ pub struct Editor {
     /// executor will be running once the queue drains, and what the next
     /// commit is compiled against), a re-prepare between its two commits,
     /// or the cause a re-prepare left the editor poisoned by.
-    life: Lifecycle,
+    life: Lifecycle<F>,
     /// What the executor's host can take.
     limits: Limits,
     /// The host that folds the root into a device, once one is attached: a
@@ -295,7 +296,7 @@ struct SentBank {
     ended: bool,
 }
 
-impl std::fmt::Debug for Editor {
+impl<F: Float> std::fmt::Debug for Editor<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Editor")
             .field("link", &self.link)
@@ -329,8 +330,9 @@ fn panic_text(p: Box<dyn std::any::Any + Send>) -> String {
 }
 
 impl Editor {
-    /// An empty graph, and the executor that will run it, both for
-    /// `prepare`. The only way to build an [`Executor`].
+    /// An empty `f32` graph, and the executor that will run it, both for
+    /// `prepare`. [`with_format`](Editor::with_format) builds the pair for
+    /// another sample format.
     #[must_use]
     pub fn new(prepare: Prepare) -> (Self, Executor) {
         Self::with_event_capacity(prepare, DEFAULT_EVENT_CAPACITY)
@@ -343,6 +345,18 @@ impl Editor {
     /// from. A declared capacity overrides it for that node's ports.
     #[must_use]
     pub fn with_event_capacity(prepare: Prepare, cap: usize) -> (Self, Executor) {
+        Self::with_format(prepare, cap)
+    }
+}
+
+impl<F: Float> Editor<F> {
+    /// An empty graph in sample format `F`, and the executor that will run
+    /// it, both for `prepare`, with `cap` events per block as the default
+    /// capacity of an event output port
+    /// ([`with_event_capacity`](Editor::with_event_capacity)). The only way
+    /// to build an [`Executor`].
+    #[must_use]
+    pub fn with_format(prepare: Prepare, cap: usize) -> (Self, Executor<F>) {
         let (channels, ends) = channels();
         let (commands, command_rx) = command_channel();
         let stager = Stager::new(
@@ -436,7 +450,7 @@ impl Editor {
 
     /// Whether `executor` is the one this editor sends to: the two were
     /// built together by [`Editor::new`].
-    pub fn is_paired_with(&self, executor: &Executor) -> bool {
+    pub fn is_paired_with(&self, executor: &Executor<F>) -> bool {
         self.link.is_paired_with(executor)
     }
 
@@ -631,7 +645,7 @@ impl Editor {
 
     /// Where `key`'s forks come from, and the generation of the unit that
     /// handed it over, if it is forkable.
-    pub(crate) fn fork_source(&self, key: NodeKey) -> Option<(u32, &dyn ForkSource)> {
+    pub(crate) fn fork_source(&self, key: NodeKey) -> Option<(u32, &dyn ForkSource<F>)> {
         self.placements.fork_source(key)
     }
 

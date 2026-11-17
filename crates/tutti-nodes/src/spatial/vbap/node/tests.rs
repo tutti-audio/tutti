@@ -1,4 +1,5 @@
 use super::*;
+use tutti_buffers::Planes;
 use tutti_graph::contract::{drive, prepared};
 use tutti_types::MaxBlock;
 use tutti_types::UnitParam;
@@ -362,7 +363,7 @@ fn the_inserted_params_move_the_running_node() {
     aim(solo.controls(), Azimuth(90.0), Elevation::LEVEL);
     // 100 ms: past the 50 ms glide.
     let ones = vec![1.0f32; 4_800];
-    let out = solo.render_input(&[&ones, &ones]);
+    let out = solo.render_input(Planes::new(&[&ones, &ones]).unwrap());
     let (l, r) = (out[0][4_799], out[1][4_799]);
     assert!(
         l > 0.9 && r < 0.1,

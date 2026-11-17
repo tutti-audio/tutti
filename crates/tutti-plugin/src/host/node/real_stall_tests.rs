@@ -32,6 +32,7 @@
 //! which is the whole `Owed` mechanism in one number.
 
 use std::time::{Duration, Instant};
+use tutti_buffers::Planes;
 use tutti_types::MaxBlock;
 
 use tutti_graph::{GraphBuilder, Prepare, Renderer};
@@ -165,7 +166,7 @@ fn drive_block(unit: &mut Renderer, midi_out: &mut tutti_plugin_types::MidiEvent
     let out = if inputs == 0 {
         unit.render(BLOCK)
     } else {
-        unit.render_input(&chans)
+        unit.render_input(Planes::new(&chans).unwrap())
     };
     out.into_iter().next().expect("the probe has outputs")
 }

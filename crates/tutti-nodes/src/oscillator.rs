@@ -30,6 +30,7 @@ use tutti_types::{Amplitude, ChannelLayout, Hz, Param, SampleRate, Tail, UnitPar
 /// # Examples
 ///
 /// ```
+/// # use tutti_buffers::Planes;
 /// use tutti_graph::{GraphBuilder, Params, Prepare};
 /// use tutti_nodes::OscillatorNode;
 /// use tutti_types::{Amplitude, ChannelLayout, Hz, MaxBlock, SampleRate, Samples};
@@ -40,7 +41,7 @@ use tutti_types::{Amplitude, ChannelLayout, Hz, Param, SampleRate, Tail, UnitPar
 /// let mut r = g
 ///     .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))))
 ///     .expect("builds");
-/// let out = r.render_input(&[&[0.0; 64]]);
+/// let out = r.render_input(Planes::new(&[&[0.0; 64]]).unwrap());
 /// assert_eq!(out[0][0], 0.0);
 /// assert!(out[0][1] > 0.0);
 /// ```

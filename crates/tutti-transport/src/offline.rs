@@ -133,7 +133,7 @@ impl OfflineTimeline {
     /// Creates a timeline seated at `config.start_beat`, on `config.tempo_map`.
     ///
     /// A render that must see the map's tempo changes drives it through
-    /// [`RenderClock::render_graph`](super::RenderClock::render_graph), which
+    /// [`render_graph`](super::render_graph), which
     /// knows the block it hands the graph. A map of one point is the constant
     /// tempo, bit for bit.
     #[must_use]
@@ -339,7 +339,7 @@ impl super::RenderClock for OfflineTimeline {
     /// is not a change: the graph derives it from the snapshot, as it does
     /// live, through [`Env::transport_at`](tutti_graph::Env::transport_at) and
     /// [`Env::for_each_beat`](tutti_graph::Env::for_each_beat). A tempo change
-    /// of the map is cut by [`render_graph`](super::RenderClock::render_graph),
+    /// of the map is cut by [`render_graph`](super::render_graph),
     /// which takes the block's changes from the map.
     fn graph_block(
         &self,
@@ -354,41 +354,19 @@ impl super::RenderClock for OfflineTimeline {
         )
     }
 
-    /// The trait's sequence, with the block's tempo steps in its changes, and
-    /// the block cut where more changes fall than it holds. Without a map with
-    /// steps it is one block and the default's calls, unchanged.
-    fn render_graph(
+    /// The block's first piece, with its tempo steps in its changes, cut where
+    /// more changes fall than a block holds
+    /// ([`render_graph`](super::render_graph) asks again for the
+    /// rest). Without a map with steps it is the whole block, as the default.
+    fn graph_piece(
         &self,
-        exec: &mut tutti_graph::Executor,
         frames: usize,
-        inputs: &[&[f32]],
-        outputs: &mut [&mut [f32]],
+    ) -> (
+        tutti_graph::TransportPosition,
+        tutti_graph::TransportChanges,
+        usize,
     ) {
-        use tutti_graph::MAX_PORTS;
-        let mut done = 0;
-        while done < frames {
-            let (transport, changes, n) = self.block(frames - done);
-            if done == 0 && n == frames {
-                exec.process_with_changes(frames, &transport, &changes, inputs, outputs);
-            } else {
-                // A piece of the block: each channel's own frames, held in
-                // fixed arrays (the executor ignores slices past the plan's
-                // channels).
-                let mut ins: [&[f32]; MAX_PORTS] = [&[]; MAX_PORTS];
-                for (to, from) in ins.iter_mut().zip(inputs) {
-                    *to = &from[done..done + n];
-                }
-                let (ni, no) = (inputs.len().min(MAX_PORTS), outputs.len().min(MAX_PORTS));
-                let mut from = outputs.iter_mut();
-                let mut outs: [&mut [f32]; MAX_PORTS] = std::array::from_fn(|_| {
-                    from.next()
-                        .map_or(Default::default(), |o| &mut o[done..done + n])
-                });
-                exec.process_with_changes(n, &transport, &changes, &ins[..ni], &mut outs[..no]);
-            }
-            OfflineTimeline::advance(self, Samples(n));
-            done += n;
-        }
+        self.block(frames)
     }
 }
 
@@ -396,6 +374,7 @@ impl super::RenderClock for OfflineTimeline {
 mod tests {
     use super::*;
     use crate::RenderClock;
+    use tutti_buffers::Float;
     use tutti_tempo::Transition;
 
     fn constant(bpm: f64) -> Arc<TempoMap> {
@@ -708,6 +687,50 @@ mod tests {
             sample_rate: SampleRate::SR_48K,
             loop_range: None,
         }
+    }
+
+    /// A graph rendered at `f64` through the timeline keeps a figure `f32`
+    /// rounds away in every frame, and the clock advances by the frames
+    /// rendered: 100 frames at 120 BPM and 48 kHz are 100 / 24 000 beats.
+    #[test]
+    fn a_block_rendered_at_f64_keeps_its_figure_and_advances_the_clock_by_its_frames() {
+        use tutti_buffers::{Planes, PlanesMut};
+        use tutti_graph::{Cx, ForkByClone, GraphBuilder, Io, Node, Prepare, Shape, Status};
+        use tutti_types::{ChannelLayout, MaxBlock};
+
+        // One part in 2^40 above one: inside `f64`'s significand, past `f32`'s.
+        const FINE: f64 = 1.0 + 1.0 / 1_099_511_627_776.0;
+        #[derive(Clone)]
+        struct Dc;
+        impl<F: Float> Node<F> for Dc {
+            fn shape(&self) -> Shape {
+                Shape::source_unassigned(ChannelLayout::MONO)
+            }
+            fn prepare(&mut self, _: &Prepare) {}
+            fn process(&mut self, _: &Cx<'_>, mut io: Io<'_, F>) -> Status {
+                io.output(0).fill(F::from_f64(FINE));
+                Status::Modified
+            }
+            fn reset(&mut self) {}
+        }
+
+        let mut g = GraphBuilder::<f64>::with_format(ChannelLayout::EMPTY, ChannelLayout::MONO);
+        let dc = g.add(ForkByClone(Dc));
+        g.connect_output(dc, 0, 0);
+        let (mut editor, mut exec) = g
+            .build(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(128))))
+            .expect("builds at f64");
+        let timeline = OfflineTimeline::new(&config(0.0));
+        let mut out = vec![0.0f64; 100];
+        crate::render_graph(
+            &timeline,
+            &mut exec,
+            Planes::default(),
+            PlanesMut::new(&mut [&mut out[..]]).expect("one plane"),
+        );
+        editor.collect();
+        assert!(out.iter().all(|&x| x == FINE));
+        assert_eq!(timeline.beat(), Beat(100.0 / 24_000.0));
     }
 
     /// A ramp is followed: from beat 0 of 97 to 120 BPM over 4 beats (tempo

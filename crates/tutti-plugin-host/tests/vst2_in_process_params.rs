@@ -20,6 +20,7 @@
 //! cleared after.
 
 use std::sync::{Arc, Mutex, MutexGuard};
+use tutti_buffers::{Planes, PlanesMut};
 use tutti_fixtures::main_thread;
 use tutti_plugin_types::Load;
 use tutti_rt::LockExt;
@@ -38,7 +39,7 @@ mod param_reads;
 use param_reads::ParamReads as _;
 use tutti_plugin_host::{PluginNode, load_client};
 use tutti_plugin_types::{Normalized, ParamId};
-use tutti_transport::{OfflineTimeline, OfflineTimelineConfig, RenderClock};
+use tutti_transport::{OfflineTimeline, OfflineTimelineConfig, render_graph};
 use tutti_types::{Beat, Bpm, ChannelLayout, SampleRate, Samples};
 
 const SAMPLE_RATE: f64 = 48_000.0;
@@ -263,7 +264,12 @@ fn an_export_renders_an_edit_made_in_the_plugin_as_live_does() {
     let mut out = vec![vec![0.0f32; BLOCK]; 2];
     for _ in 0..8 {
         let mut outs: Vec<&mut [f32]> = out.iter_mut().map(|c| &mut c[..]).collect();
-        timeline.render_graph(&mut fork_exec, BLOCK, &[], &mut outs);
+        render_graph(
+            &*timeline,
+            &mut fork_exec,
+            Planes::default(),
+            PlanesMut::new(&mut outs).unwrap(),
+        );
     }
     assert_eq!(
         channel_0(&out),

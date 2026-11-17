@@ -12,6 +12,7 @@
 //! drives a control lane whose knob is the filter's cell.
 
 use std::sync::atomic::Ordering;
+use tutti_buffers::Planes;
 use tutti_fixtures::signal::peak;
 use tutti_types::MaxBlock;
 
@@ -250,7 +251,10 @@ fn render_chorus(
         );
         ed.commit().expect("the lane commits");
     }
-    (r.render_input(&[input, input]), params)
+    (
+        r.render_input(Planes::new(&[input, input]).unwrap()),
+        params,
+    )
 }
 
 /// The ramp `x[n] = n`: through a linearly interpolated delay of `d` frames it comes out
@@ -509,7 +513,8 @@ where
         },
     );
     ed.commit().expect("the lane commits");
-    r.render_input(&[input]).swap_remove(0)
+    r.render_input(Planes::new(&[input]).unwrap())
+        .swap_remove(0)
 }
 
 /// **A limiter driven to a release below its floor still releases.** A lane
@@ -766,11 +771,11 @@ fn shelf_handed_back(block: usize) -> Vec<f32> {
     ed.spec_mut().connect_param(at, lane_out);
     ed.commit().expect("the lane commits");
     let dc = vec![1.0; 512];
-    let mut out = r.render_input(&[&dc]).swap_remove(0);
+    let mut out = r.render_input(Planes::new(&[&dc]).unwrap()).swap_remove(0);
     let ed = r.editor_mut();
     assert!(ed.spec_mut().disconnect_param(at, lane_out));
     ed.commit().expect("the removal commits");
-    out.extend(r.render_input(&[&dc]).swap_remove(0));
+    out.extend(r.render_input(Planes::new(&[&dc]).unwrap()).swap_remove(0));
     out
 }
 

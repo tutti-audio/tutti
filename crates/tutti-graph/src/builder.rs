@@ -50,16 +50,17 @@ use crate::{Edge, FeedbackFrom, InPort, NodeSpec, OutPort, Source};
 use tutti_types::{ChannelLayout, Frame, Samples};
 
 use crate::editor::{CommitError, Editor};
-use crate::exec::Executor;
+use crate::exec::{DEFAULT_EVENT_CAPACITY, Executor};
 use crate::node::{IntoNode, NodeParts, Prepare, Shape, TransportPosition};
 use crate::spec::{EventEdge, EventIn, EventOut, GraphSpec};
+use tutti_buffers::{Float, Planes, PlanesMut};
 
 /// One unit waiting for [`GraphBuilder::build`], with its fork source, so a
 /// built graph forks like one inserted by hand ([`Editor::fork`]).
-struct Pending {
+struct Pending<F: Float> {
     key: NodeKey,
     kind: String,
-    unit: NodeParts<()>,
+    unit: NodeParts<(), F>,
 }
 
 /// Builds a [`GraphSpec`] and its units one call per node or edge, then hands
@@ -127,6 +128,7 @@ struct Pending {
 /// which the graph sums):
 ///
 /// ```
+/// # use tutti_buffers::Planes;
 /// use tutti_types::MaxBlock;
 /// use tutti_graph::{ForkByClone, GraphBuilder, Prepare};
 /// use tutti_types::{ChannelLayout, SampleRate, Samples};
@@ -153,18 +155,18 @@ struct Pending {
 /// let mut r = g
 ///     .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))))
 ///     .expect("builds");
-/// let out = r.render_input(&[&[1.0; 10]]);
+/// let out = r.render_input(Planes::new(&[&[1.0; 10]]).unwrap());
 /// assert_eq!(out, vec![vec![0.5; 10], vec![2.0; 10]]);
 /// ```
-pub struct GraphBuilder {
+pub struct GraphBuilder<F: Float = f32> {
     spec: GraphSpec,
     /// Every added node's shape, read at `add` — the widths the fan-out
     /// calls use.
     shapes: Vec<Shape>,
-    units: Vec<Pending>,
+    units: Vec<Pending<F>>,
 }
 
-impl std::fmt::Debug for GraphBuilder {
+impl<F: Float> std::fmt::Debug for GraphBuilder<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GraphBuilder")
             .field("spec", &self.spec)
@@ -174,10 +176,22 @@ impl std::fmt::Debug for GraphBuilder {
 }
 
 impl GraphBuilder {
-    /// An empty graph with `inputs` global input channels and `outputs`
+    /// An empty `f32` graph with `inputs` global input channels and `outputs`
     /// global output channels, every output silent until wired.
+    /// [`with_format`](GraphBuilder::with_format) builds one for another
+    /// sample format.
     #[must_use]
     pub fn new(inputs: ChannelLayout, outputs: ChannelLayout) -> Self {
+        Self::with_format(inputs, outputs)
+    }
+}
+
+impl<F: Float> GraphBuilder<F> {
+    /// An empty graph in sample format `F` with `inputs` global input
+    /// channels and `outputs` global output channels, every output silent
+    /// until wired.
+    #[must_use]
+    pub fn with_format(inputs: ChannelLayout, outputs: ChannelLayout) -> Self {
         let mut spec = GraphSpec::default();
         spec.topology.inputs = inputs;
         spec.topology.outputs = vec![Vec::new(); outputs.count() as usize];
@@ -195,12 +209,12 @@ impl GraphBuilder {
     /// For a node with controls use
     /// [`add_with_controls`](Self::add_with_controls), so the handles are
     /// not dropped unseen.
-    pub fn add<N: IntoNode<Controls = ()>>(&mut self, node: N) -> NodeKey {
+    pub fn add<N: IntoNode<F, Controls = ()>>(&mut self, node: N) -> NodeKey {
         self.add_with_controls(node).0
     }
 
     /// Adds a node, unwired, and returns its controls with its key.
-    pub fn add_with_controls<N: IntoNode>(&mut self, node: N) -> (NodeKey, N::Controls) {
+    pub fn add_with_controls<N: IntoNode<F>>(&mut self, node: N) -> (NodeKey, N::Controls) {
         let NodeParts {
             node,
             controls,
@@ -214,7 +228,7 @@ impl GraphBuilder {
         (self.insert(N::kind(), unit), controls)
     }
 
-    fn insert(&mut self, kind: &str, unit: NodeParts<()>) -> NodeKey {
+    fn insert(&mut self, kind: &str, unit: NodeParts<(), F>) -> NodeKey {
         let key = NodeKey(self.units.len() as u64);
         let shape = unit.node.shape();
         self.spec.topology.nodes.insert(
@@ -554,7 +568,7 @@ impl GraphBuilder {
     /// any); a later one reads whatever fed the global outputs, input `c`
     /// taking output source `c % outputs`. Either way the node then feeds
     /// every global output ([`pipe_output`](Self::pipe_output)).
-    pub fn chain<N: IntoNode<Controls = ()>>(&mut self, node: N) -> NodeKey {
+    pub fn chain<N: IntoNode<F, Controls = ()>>(&mut self, node: N) -> NodeKey {
         let key = self.insert(N::kind(), node.into_parts());
         self.link(key);
         key
@@ -635,8 +649,8 @@ impl GraphBuilder {
     /// The [`CommitError`] [`Editor::commit`] returns: a cycle, a feedback
     /// delay shorter than `prepare`'s maximum block, a width mismatch, and
     /// so on.
-    pub fn build(self, prepare: Prepare) -> Result<(Editor, Executor), CommitError> {
-        let (mut editor, mut executor) = Editor::new(prepare);
+    pub fn build(self, prepare: Prepare) -> Result<(Editor<F>, Executor<F>), CommitError> {
+        let (mut editor, mut executor) = Editor::<F>::with_format(prepare, DEFAULT_EVENT_CAPACITY);
         for Pending { key, kind, unit } in self.units {
             // No wiring is recorded yet (it moves across below), so nothing is unwired.
             editor.insert(key, &kind, unit);
@@ -683,7 +697,7 @@ impl GraphBuilder {
     /// # Errors
     ///
     /// As [`build`](Self::build).
-    pub fn renderer(self, prepare: Prepare) -> Result<Renderer, CommitError> {
+    pub fn renderer(self, prepare: Prepare) -> Result<Renderer<F>, CommitError> {
         let (editor, executor) = self.build(prepare)?;
         Ok(Renderer::new(editor, executor))
     }
@@ -709,6 +723,7 @@ type TransportFn = Box<dyn FnMut(Frame) -> TransportPosition + Send>;
 /// Render a planar input in 200-frame blocks, then silence, interleaved:
 ///
 /// ```
+/// # use tutti_buffers::Planes;
 /// use tutti_types::MaxBlock;
 /// use tutti_graph::{ForkByClone, GraphBuilder, Prepare, TransportPosition};
 /// use tutti_types::{Beat, Bpm, ChannelLayout, SampleRate, Samples};
@@ -734,7 +749,7 @@ type TransportFn = Box<dyn FnMut(Frame) -> TransportPosition + Send>;
 ///     .expect("builds");
 /// r.set_block(Samples(200));
 /// let input: Vec<f32> = (0..500).map(|i| i as f32).collect();
-/// let out = r.render_input(&[&input]);
+/// let out = r.render_input(Planes::new(&[&input]).unwrap());
 /// assert_eq!(out, vec![input.clone(), input]);
 ///
 /// // A rolling transport is a function of the block's first frame.
@@ -744,14 +759,14 @@ type TransportFn = Box<dyn FnMut(Frame) -> TransportPosition + Send>;
 /// });
 /// assert_eq!(r.render_interleaved(2), vec![0.0; 4]); // L R L R
 /// ```
-pub struct Renderer {
-    editor: Editor,
-    executor: Executor,
+pub struct Renderer<F: Float = f32> {
+    editor: Editor<F>,
+    executor: Executor<F>,
     block: usize,
     transport: TransportFn,
 }
 
-impl std::fmt::Debug for Renderer {
+impl<F: Float> std::fmt::Debug for Renderer<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Renderer")
             .field("editor", &self.editor)
@@ -761,14 +776,14 @@ impl std::fmt::Debug for Renderer {
     }
 }
 
-impl Renderer {
+impl<F: Float> Renderer<F> {
     /// Drives `executor`, draining back into `editor`. The transport is stopped at
     /// beat zero ([`TransportPosition::default`]); blocks at the prepared maximum.
     ///
     /// # Panics
     ///
     /// If the two were not built together by [`Editor::new`].
-    pub fn new(editor: Editor, executor: Executor) -> Self {
+    pub fn new(editor: Editor<F>, executor: Executor<F>) -> Self {
         assert!(
             editor.is_paired_with(&executor),
             "a renderer drains back into the editor that feeds its executor"
@@ -818,9 +833,9 @@ impl Renderer {
 
     /// Renders `frames` with silent global inputs; one `Vec` per global
     /// output channel.
-    pub fn render(&mut self, frames: usize) -> Vec<Vec<f32>> {
-        let mut out = vec![vec![0.0f32; frames]; self.global_outputs()];
-        let mut refs: Vec<&mut [f32]> = out.iter_mut().map(|c| &mut c[..]).collect();
+    pub fn render(&mut self, frames: usize) -> Vec<Vec<F>> {
+        let mut out = vec![vec![F::ZERO; frames]; self.global_outputs()];
+        let mut refs: Vec<&mut [F]> = out.iter_mut().map(|c| &mut c[..]).collect();
         self.run(frames, None, &mut refs);
         out
     }
@@ -834,20 +849,18 @@ impl Renderer {
     /// If `input` has the wrong channel count or ragged lengths, or the
     /// graph has no global inputs (there is nothing to count frames by: use
     /// [`render`](Self::render)).
-    pub fn render_input(&mut self, input: &[&[f32]]) -> Vec<Vec<f32>> {
-        let frames = input
-            .first()
-            .expect("a graph with no global inputs renders with `render`")
-            .len();
-        let mut out = vec![vec![0.0f32; frames]; self.global_outputs()];
-        let mut refs: Vec<&mut [f32]> = out.iter_mut().map(|c| &mut c[..]).collect();
-        self.run(frames, Some(input), &mut refs);
+    pub fn render_input(&mut self, input: Planes<'_, F>) -> Vec<Vec<F>> {
+        let frames = input.frames().get();
+        let mut out = vec![vec![F::ZERO; frames]; self.global_outputs()];
+        let mut refs: Vec<&mut [F]> = out.iter_mut().map(|c| &mut c[..]).collect();
+        let table: Vec<&[F]> = input.iter().map(|c| c.samples()).collect();
+        self.run(frames, Some(&table), &mut refs);
         out
     }
 
     /// [`render`](Self::render), interleaved: frame by frame, channel by
     /// channel.
-    pub fn render_interleaved(&mut self, frames: usize) -> Vec<f32> {
+    pub fn render_interleaved(&mut self, frames: usize) -> Vec<F> {
         let planar = self.render(frames);
         let mut out = Vec::with_capacity(frames * planar.len());
         for f in 0..frames {
@@ -863,18 +876,16 @@ impl Renderer {
     ///
     /// If `output` has the wrong channel count or ragged lengths, or no
     /// channels at all.
-    pub fn render_into(&mut self, output: &mut [&mut [f32]]) {
-        let frames = output
-            .first()
-            .expect("a graph with no global outputs has nothing to render into")
-            .len();
-        self.run(frames, None, output);
+    pub fn render_into(&mut self, mut output: PlanesMut<'_, '_, F>) {
+        let frames = output.frames().get();
+        let mut table: Vec<&mut [F]> = output.iter_mut().map(|c| c.into_samples_mut()).collect();
+        self.run(frames, None, &mut table);
     }
 
     /// Render `frames` in blocks, reading `input` (silence when `None`).
-    fn run(&mut self, frames: usize, input: Option<&[&[f32]]>, output: &mut [&mut [f32]]) {
+    fn run(&mut self, frames: usize, input: Option<&[&[F]]>, output: &mut [&mut [F]]) {
         let (ins, outs) = (self.global_inputs(), self.global_outputs());
-        let silence = vec![0.0f32; if input.is_none() { frames } else { 0 }];
+        let silence = vec![F::ZERO; if input.is_none() { frames } else { 0 }];
         let silent = vec![&silence[..]; if input.is_none() { ins } else { 0 }];
         let input = input.unwrap_or(&silent);
         assert_eq!(input.len(), ins, "one input slice per global input");
@@ -887,13 +898,13 @@ impl Renderer {
         while done < frames {
             let n = (frames - done).min(self.block);
             let transport = (self.transport)(self.executor.frame());
-            let block_in: Vec<&[f32]> = input.iter().map(|c| &c[done..done + n]).collect();
+            let block_in: Vec<&[F]> = input.iter().map(|c| &c[done..done + n]).collect();
             // The plan renders an old root's channels beside the root's while a
             // root change crossfades: scratch for them, not returned.
             self.executor.apply_pending();
             let rendered = self.rendered_outputs();
-            let mut spare = vec![vec![0.0f32; n]; rendered.saturating_sub(outs)];
-            let mut block_out: Vec<&mut [f32]> = output
+            let mut spare = vec![vec![F::ZERO; n]; rendered.saturating_sub(outs)];
+            let mut block_out: Vec<&mut [F]> = output
                 .iter_mut()
                 .map(|c| &mut c[done..done + n])
                 .chain(spare.iter_mut().map(|c| &mut c[..]))
@@ -922,28 +933,28 @@ impl Renderer {
     }
 
     /// The editor, to inspect the graph.
-    pub fn editor(&self) -> &Editor {
+    pub fn editor(&self) -> &Editor<F> {
         &self.editor
     }
 
     /// The editor, to change the graph between renders. A commit reaches
     /// the executor at the start of the next block rendered.
-    pub fn editor_mut(&mut self) -> &mut Editor {
+    pub fn editor_mut(&mut self) -> &mut Editor<F> {
         &mut self.editor
     }
 
     /// The executor, to inspect what it runs.
-    pub fn executor(&self) -> &Executor {
+    pub fn executor(&self) -> &Executor<F> {
         &self.executor
     }
 
     /// The executor, to drive a block by hand.
-    pub fn executor_mut(&mut self) -> &mut Executor {
+    pub fn executor_mut(&mut self) -> &mut Executor<F> {
         &mut self.executor
     }
 
     /// The pair back.
-    pub fn into_parts(self) -> (Editor, Executor) {
+    pub fn into_parts(self) -> (Editor<F>, Executor<F>) {
         (self.editor, self.executor)
     }
 }
@@ -957,6 +968,7 @@ impl Renderer {
 /// Allocates, as [`Renderer`] does. Not for an audio callback.
 ///
 /// ```
+/// # use tutti_buffers::Planes;
 /// use tutti_types::MaxBlock;
 /// use tutti_graph::{ForkByClone, Prepare, Solo};
 /// # use tutti_graph::{Cx, Io, Node, Shape, Status};
@@ -974,30 +986,30 @@ impl Renderer {
 /// #     fn reset(&mut self) {}
 /// # }
 /// let mut solo = Solo::new(ForkByClone(Half), Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
-/// assert_eq!(solo.render_input(&[&[1.0; 3]]), vec![vec![0.5; 3]]);
+/// assert_eq!(solo.render_input(Planes::new(&[&[1.0; 3]]).unwrap()), vec![vec![0.5; 3]]);
 /// ```
 #[derive(Debug)]
-pub struct Solo<C> {
-    renderer: Renderer,
+pub struct Solo<C, F: Float = f32> {
+    renderer: Renderer<F>,
     key: NodeKey,
     controls: C,
 }
 
-impl<C> Solo<C> {
+impl<C, F: Float> Solo<C, F> {
     /// `node`, alone, prepared for `prepare`.
     ///
     /// # Panics
     ///
     /// If the one-node graph does not build (a node whose shape the
     /// compiler refuses).
-    pub fn new<N: IntoNode<Controls = C>>(node: N, prepare: Prepare) -> Self {
+    pub fn new<N: IntoNode<F, Controls = C>>(node: N, prepare: Prepare) -> Self {
         let NodeParts {
             node,
             controls,
             fork,
         } = node.into_parts();
         let shape = node.shape();
-        let mut g = GraphBuilder::new(shape.audio_in(), shape.audio_out());
+        let mut g = GraphBuilder::<F>::with_format(shape.audio_in(), shape.audio_out());
         let key = g.insert(
             N::kind(),
             NodeParts {
@@ -1031,18 +1043,18 @@ impl<C> Solo<C> {
     }
 
     /// Renders one frame per input sample (see [`Renderer::render_input`]).
-    pub fn render_input(&mut self, input: &[&[f32]]) -> Vec<Vec<f32>> {
+    pub fn render_input(&mut self, input: Planes<'_, F>) -> Vec<Vec<F>> {
         self.renderer.render_input(input)
     }
 
     /// Renders `frames` with silent inputs (see [`Renderer::render`]).
-    pub fn render(&mut self, frames: usize) -> Vec<Vec<f32>> {
+    pub fn render(&mut self, frames: usize) -> Vec<Vec<F>> {
         self.renderer.render(frames)
     }
 
     /// The renderer, to set the block or the transport, or reach the
     /// editor.
-    pub fn renderer_mut(&mut self) -> &mut Renderer {
+    pub fn renderer_mut(&mut self) -> &mut Renderer<F> {
         &mut self.renderer
     }
 }
