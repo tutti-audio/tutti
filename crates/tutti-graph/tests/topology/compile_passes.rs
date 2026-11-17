@@ -1083,7 +1083,7 @@ fn removing_a_node_removes_its_resolution_marks() {
         .require_resolution(at, from, tutti_graph::Resolution::Sample);
     ed.commit().expect("the consumer honours samples");
     ed.remove(A);
-    assert_eq!(ed.commit(), Ok(()));
+    ed.commit().expect("commits");
     assert!(ed.spec().required_resolution.is_empty());
 }
 
@@ -1113,7 +1113,7 @@ fn disconnecting_an_edge_drops_its_resolution_mark() {
     ed.commit().expect("commits");
     assert!(ed.spec_mut().disconnect_events(at, from));
     assert!(!ed.spec_mut().disconnect_events(at, from), "already gone");
-    assert_eq!(ed.commit(), Ok(()));
+    ed.commit().expect("commits");
     assert!(ed.spec().required_resolution.is_empty());
 
     // `clear_resolution`: the edge stays, the requirement goes.

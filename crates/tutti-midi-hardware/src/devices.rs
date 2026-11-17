@@ -171,7 +171,7 @@ impl ChangeSink {
     /// what was queued, and so does the session's `Phase::Poll`.
     pub fn fail(&self, reason: impl Into<WatchFailure>) {
         let reason = reason.into();
-        tracing::warn!("MIDI device watch ended: {reason}");
+        tracing::warn!("MIDI device watch ended: {}", crate::error::chain(&reason));
         let mut state = self.shared.state();
         let reason = state.failure.get_or_insert(reason).clone();
         state

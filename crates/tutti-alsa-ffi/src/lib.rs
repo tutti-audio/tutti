@@ -15,9 +15,9 @@
 //! | `Client` | an open sequencer client in UMP MIDI-2.0 mode: it closes on drop, and ports, subscriptions, `read_event`, `send_to_subscribers`, `stamp_port` and `list_ports` are methods |
 //! | `UmpEndpoint`, `UmpBlock` | what the sequencer records of a client's UMP Endpoint (the protocol in use, the protocols offered) and its Function Blocks, from `Client::ump_endpoint`; `Client::publish_ump_endpoint` records them for the client itself |
 //! | `QueueClock` | the queue a stamped port reads its timestamps from, and the clock that says what time it is now |
-//! | `Poller` | a client's descriptors and a stop descriptor, waited on with `poll(2)` |
+//! | `Poller` | a client and a stop descriptor it owns, waited on with `poll(2)`: `Client::into_poller`, then `wait` and `wait_for` |
 //! | `Received`, `Announced` | an event copied out of alsa-lib's buffer, and what an announce-port event says |
-//! | `Error` | the alsa-lib call that failed and its negative code |
+//! | `Error`, `Operation` | the alsa-lib call that failed and the OS error it returned |
 //!
 //! The raw declarations are a private module (`sys`), with alsa-lib's C names so a
 //! reader can grep its headers. `snd_seq_ump_event_t` mirrors a C struct whose last
@@ -38,9 +38,12 @@
 //!
 //! ## Features
 //!
-//! `testing` adds `Client::rename` and `Client::set_port_caps`, which let a
-//! test stand in for a device that appears, changes and goes. Off in a production
-//! build.
+//! `testing` adds hidden hooks that let a test stand in for a peer on the
+//! sequencer: a legacy (non-UMP) client with its byte events (`Client::open_legacy`,
+//! `Client::send_legacy_to_subscribers`, `LegacyEvent`), a rename
+//! (`Client::rename`), a change of a port's capabilities (`Client::set_port_caps`)
+//! and the client's own id (`Client::id`). Off in a production build;
+//! `tutti-midi-hardware` turns it on only through its `sequencer-tests` feature.
 // The whole crate is the ALSA UMP backend's FFI: `build.rs` sets `alsa_ump` on
 // Linux when alsa-lib is 1.2.10 or newer, and otherwise there is nothing to link.
 #![cfg(all(target_os = "linux", alsa_ump))]
@@ -61,8 +64,8 @@ mod ump;
 
 #[cfg(feature = "testing")]
 pub use client::LegacyEvent;
-pub use client::{Blocking, Client, QueueClock, Read, UmpVersion};
-pub use error::{Error, Result};
+pub use client::{Blocking, Client, Packet, QueueClock, Read, UmpVersion};
+pub use error::{Error, Operation, Result};
 pub use event::{Announced, Received};
 pub use poll::{Poller, Wait};
 pub use ports::{PortEntry, Ports};

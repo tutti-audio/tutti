@@ -15,13 +15,12 @@ workspace = true
 
 [target.'cfg(windows)'.dependencies]
 thiserror = { workspace = true, features = ["std"] }
-windows-sys = { version = "0.61", features = [
-  "Win32_Foundation",
+tracing.workspace = true
+windows-sys = { workspace = true, features = [
   "Win32_Media",
   "Win32_Media_Audio",
   "Win32_Media_Multimedia",
   "Win32_Security",
-  "Win32_System_Threading",
 ] }
 
 [features]

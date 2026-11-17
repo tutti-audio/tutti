@@ -6,25 +6,11 @@ use core::iter::FusedIterator;
 use crate::field::first_non_seven_bit;
 use crate::{Message, MidiGroup, Sysex7Packet, SysexStatus, Ump};
 
-/// The longest SysEx7 payload (the bytes between `0xF0` and `0xF7`) tutti
-/// carries: 64 KiB. It is tutti's cap on one message, used to size a
-/// [`SysexAssembler`] buffer, and **not a limit the spec sets**: M2-104 section
-/// 7.7 lets a message span a Start, any number of Continue UMPs and an End,
-/// and states no maximum.
-///
-/// A cap exists because the hazard is not a large dump but a **lost
-/// terminator**: a device unplugged mid-dump, or a dropped buffer, leaves a
-/// reassembler mid-message with no end ever arriving, and an uncapped buffer
-/// then grows for the lifetime of the connection.
-///
-/// 64 KiB sits above real traffic and below anything alarming: the largest
-/// thing MIDI-CI negotiates is a Property Exchange chunk, and CI's own
-/// `max_sysex_size` is a 28-bit field that devices populate with values in the
-/// hundreds-to-low-thousands of bytes. Synth bulk dumps (a 32-voice DX7 bank
-/// is 4104 bytes) and sample-dump packets are far below it. A message past
-/// this is a fault, not a big message. A path's event caps can be lower: a
-/// plugin node takes at most 256 MIDI events a chunk, so a dump whose packets
-/// arrive in one block reaches a plugin only up to 1536 payload bytes.
+/// The longest SysEx7 payload (the bytes between `0xF0` and `0xF7`) a host
+/// passes a [`SysexAssembler`] as its `max_message` less the two delimiters:
+/// 64 KiB. It is this crate's cap on one message, not a limit the spec sets
+/// (M2-104 §7.7 states no maximum); an assembler drops and counts a message
+/// past its `max_message`.
 pub const SYSEX7_MAX_PAYLOAD: usize = 64 * 1024;
 
 /// The most bytes one SysEx7 packet adds to a buffer: six payload bytes and
@@ -180,19 +166,9 @@ impl Iterator for Sysex7Packets<'_> {
         if self.started && self.rest.is_empty() {
             return None;
         }
-        let status = match (self.started, self.rest.len() > 6) {
-            (false, false) => SysexStatus::Complete,
-            (false, true) => SysexStatus::Start,
-            (true, true) => SysexStatus::Continue,
-            (true, false) => SysexStatus::End,
-        };
-        let (chunk, rest) = self.rest.split_at(self.rest.len().min(6));
+        let (packet, rest) = Sysex7Packet::take(self.started, self.rest);
         self.rest = rest;
         self.started = true;
-        let mut data = [0u8; 6];
-        data[..chunk.len()].copy_from_slice(chunk);
-        let packet = Sysex7Packet::new(status, &data[..chunk.len()])
-            .expect("at most six bytes, each below 128");
         Some(Ump::from(Message::Sysex7(self.group, packet)))
     }
 
@@ -323,16 +299,10 @@ enum Run {
 /// Mixed Data Set UMP. A Utility or UMP Stream message has no Group and ends
 /// nothing; neither does a reserved type, which names no Group here.
 ///
-/// # Why there is no block guard
+/// # Block contract
 ///
-/// A design where the assembler lends one block (`block() -> Block<'_>`, a
-/// `push` that lends the finished message, the block ending on drop) was
-/// weighed and not built: its six callers (the CLAP, VST2, VST3 and AU hosts,
-/// the plugin intake and MIDI-CI) hand a plugin a pointer to every message of
-/// a block at once, so they keep each [`SysexRef`] until the whole block is
-/// pushed. A lending `push` would make each copy its message first. The
-/// contract stays in prose: read a [`SysexRef`] only before the next
-/// [`begin_block`](Self::begin_block).
+/// A [`SysexRef`] is valid until the next [`begin_block`](Self::begin_block);
+/// read it before then.
 ///
 /// # Policy
 ///
@@ -528,7 +498,7 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> SysexAssembler<B> {
         if let Some(group) = ump.group() {
             // System Real Time (type 1, status 0xF8..=0xFF) may be inserted
             // between the UMPs of a message; anything else on the Group ends it.
-            let real_time = ump.message_type() == 0x1 && (ump.0[0] >> 16) & 0xFF >= 0xF8;
+            let real_time = ump.is_system_real_time();
             if !real_time {
                 self.end_run(group.index());
             }

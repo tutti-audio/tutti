@@ -30,7 +30,26 @@ use std::sync::Arc;
 
 use crate::host::RenderHandle;
 use tutti_plugin_types::{MIDI_STACK_CAPACITY, sysex_assembler};
+use tutti_rt::{Counter, CounterWriter, Tally, TallyWriter, counter};
 use tutti_ump::{SysexAssembler, SysexRef, SysexStep};
+
+/// A count of lost items: the audio-side writer, stored, and the reader the control side
+/// takes. Minted together on the control side.
+struct Drops {
+    writer: CounterWriter<u64>,
+    reader: Counter<u64>,
+}
+
+impl Drops {
+    fn new() -> Self {
+        let (writer, reader) = counter();
+        Self { writer, reader }
+    }
+
+    fn add(&mut self, by: u64) {
+        self.writer.add(by);
+    }
+}
 
 /// Per-block MIDI plumbing for one `Vst2Processor` (in `tutti-vst2-host`): the host→plugin
 /// staging buffer, the plugin→host inbox, and the pooled out-drain returned
@@ -49,8 +68,9 @@ pub struct MidiIo {
     /// What `out` was reserved for: the inbox's capacity. A block's pieces all
     /// drain into it, so a split block could ask for more; it never grows.
     room: usize,
-    /// Events dropped because `out` was full, since load.
-    out_overflow: u64,
+    /// Events dropped because `out` was full, since load. A tally the host's own drops also
+    /// add to.
+    out_overflow: TallyWriter<u64>,
     /// Translates the plugin's MIDI 1.0 output into UMP, keeping its
     /// parameter-number and bank runs across blocks: VST2 has one output
     /// stream, so one translator.
@@ -69,7 +89,9 @@ impl std::fmt::Debug for MidiIo {
 impl MidiIo {
     /// Constructs with the inbox queue; pre-sizes both reusable buffers so
     /// the audio thread never allocates.
-    pub fn new(out_rx: Arc<ArrayQueue<WireMidi>>) -> Self {
+    ///
+    /// `out_overflow` is the tally the events refused for want of room are added to.
+    pub fn new(out_rx: Arc<ArrayQueue<WireMidi>>, out_overflow: &Tally<u64>) -> Self {
         // Reserved from the queue's own capacity, not a constant that happens
         // to match it: `drain_midi_out` empties the queue into this buffer in
         // one pass, so anything smaller reallocates on the audio thread the
@@ -80,15 +102,9 @@ impl MidiIo {
             room: out.capacity(),
             out_rx,
             out,
-            out_overflow: 0,
+            out_overflow: out_overflow.writer(),
             translator: Translator::new(),
         }
-    }
-
-    /// Plugin MIDI-out events dropped because a split block's pieces filled
-    /// the block's list (reserved for one inbox's worth).
-    pub fn out_overflow(&self) -> u64 {
-        self.out_overflow
     }
 }
 
@@ -120,7 +136,7 @@ impl MidiIo {
             // Never past the reservation: a split block drains once a piece,
             // and growing here would allocate on the audio thread.
             if self.out.len() >= self.room {
-                self.out_overflow += 1;
+                self.out_overflow.add(1);
                 continue;
             }
             self.out.push(WireMidi {
@@ -150,7 +166,7 @@ pub fn to_midi(event: &crate::api::MidiEvent) -> Option<WireMidi> {
 /// (`tutti_midi_protocol::midi1`), so no precision is lost beyond MIDI-1's
 /// inherent width. Translated: NoteOn/Off, CC, channel pitch bend,
 /// channel/poly pressure, program change (everything with a 3-byte MIDI-1
-/// form). SysEx is not a `api::MidiEvent` in VST2: [`MidiSendBuffer::stage_piece`]
+/// form). SysEx is not a `api::MidiEvent` in VST2: `MidiSendBuffer::stage_piece`
 /// reassembles it into a `SysExEvent`.
 /// Returns `None` when the packet is not exactly one MIDI 1.0 message, on a
 /// stream that has sent nothing before it: per-note pitch bend, per-note
@@ -228,7 +244,7 @@ fn midi_event(frame_offset: u32, midi_data: [u8; 3], live: bool) -> crate::api::
 /// Pre-allocated, reusable storage for a VST2 `api::Events` flexible-
 /// array struct.
 ///
-/// One instance lives on each [`MidiIo`]; [`Self::stage_piece`]
+/// One instance lives on each [`MidiIo`]; `Self::stage_piece`
 /// rebuilds the contents in place for the next process call. Every list is
 /// reserved at construction for a block's whole MIDI cap
 /// ([`MIDI_STACK_CAPACITY`]: no caller hands it more) and never grows: an
@@ -241,7 +257,7 @@ pub struct MidiSendBuffer {
     /// The most events one block stages; every list below holds this many.
     room: usize,
     /// Events refused past `room` since the buffer was made.
-    events_dropped: u64,
+    events_dropped: Drops,
     /// Plugin-side `api::MidiEvent` storage (the structs the pointer
     /// table points at).
     api_events: Vec<crate::api::MidiEvent>,
@@ -262,7 +278,12 @@ pub struct MidiSendBuffer {
     narrower: Narrower,
     /// Channel voice messages of a Group other than 0, which VST2's one MIDI
     /// input cannot tell from Group 0's.
-    groups_dropped: u64,
+    groups_dropped: Drops,
+    /// SysEx messages the assembler dropped whole, as its own count last stood at the
+    /// block's staging or a reset.
+    sysex_dropped: Drops,
+    /// The assembler's count already added to `sysex_dropped`.
+    sysex_seen: u64,
     /// The SysEx messages the block completed, each with the index of its
     /// `END` packet and the frame (clamped to the block) it lands on, filled once at the block's first piece and
     /// selected from by every piece. A message is assembled once per block: a
@@ -281,7 +302,7 @@ impl std::fmt::Debug for MidiSendBuffer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MidiSendBuffer")
             .field("room", &self.room)
-            .field("events_dropped", &self.events_dropped)
+            .field("events_dropped", &self.events_dropped.reader.get())
             .finish_non_exhaustive()
     }
 }
@@ -318,13 +339,15 @@ impl MidiSendBuffer {
         let mut buf = Self {
             live: true,
             room: events,
-            events_dropped: 0,
+            events_dropped: Drops::new(),
             api_events: Vec::with_capacity(events),
             sysex_events: Vec::with_capacity(events),
             order: Vec::with_capacity(events),
             sysex: sysex_assembler(),
             narrower: Narrower::new(),
-            groups_dropped: 0,
+            groups_dropped: Drops::new(),
+            sysex_dropped: Drops::new(),
+            sysex_seen: 0,
             completed: Vec::with_capacity(events),
             event_ptrs: Vec::with_capacity(events),
             header: Vec::with_capacity(header_words(events)),
@@ -360,10 +383,10 @@ impl MidiSendBuffer {
     ///
     /// # Safety
     /// The returned pointer is valid until the next
-    /// [`Self::stage_piece`] call. Caller must hand it to
+    /// `Self::stage_piece` call. Caller must hand it to
     /// `vst::plugin::Plugin::process_events` and not retain it past
     /// that call.
-    pub fn stage_piece(
+    fn stage_piece(
         &mut self,
         midi_events: &[UmpAt],
         start: usize,
@@ -406,13 +429,14 @@ impl MidiSendBuffer {
             for (index, (offset, ump)) in midi_events.iter().enumerate() {
                 if let SysexStep::Complete(message) = self.sysex.push(*ump) {
                     if self.completed.len() == self.completed.capacity() {
-                        self.events_dropped += 1;
+                        self.events_dropped.add(1);
                     } else {
                         let at = offset.index().min(last);
                         self.completed.push((index, at, message));
                     }
                 }
             }
+            self.count_sysex_drops();
         }
         // Staged in input order (a completed SysEx at its `END` packet), so the
         // stable sort below keeps input order at equal frames.
@@ -431,7 +455,7 @@ impl MidiSendBuffer {
                     continue;
                 }
                 if self.order.len() == self.room {
-                    self.events_dropped += 1;
+                    self.events_dropped.add(1);
                     continue;
                 }
                 let event = self.sysex_event((at - start) as i32, message);
@@ -450,7 +474,7 @@ impl MidiSendBuffer {
             if ev.group().is_some_and(|group| group != MidiGroup::FIRST)
                 && matches!((*ev).decode(), Ok(Message::Midi1(..) | Message::Midi2(..)))
             {
-                self.groups_dropped += 1;
+                self.groups_dropped.add(1);
                 continue;
             }
             // One UMP can be several MIDI-1 messages (a Program Change with a
@@ -462,7 +486,7 @@ impl MidiSendBuffer {
             let mut messages = [[0u8; 3]; MAX_MESSAGES];
             let n = narrowed(&mut self.narrower, *ev, &mut messages);
             if self.order.len() + n > self.room {
-                self.events_dropped += n as u64;
+                self.events_dropped.add(n as u64);
                 self.narrower.reset();
                 continue;
             }
@@ -544,7 +568,7 @@ impl MidiSendBuffer {
         self.live = live;
     }
 
-    /// Stages the piece (see [`stage_piece`](Self::stage_piece)) and hands it to the plugin
+    /// Stages the piece (see `stage_piece`) and hands it to the plugin
     /// through `render`, if any event is in it.
     pub fn send_piece(
         &mut self,
@@ -566,8 +590,16 @@ impl MidiSendBuffer {
     /// SysEx messages dropped whole since this buffer was made: longer than
     /// [`SYSEX_MESSAGE_CAPACITY`](tutti_plugin_types::SYSEX_MESSAGE_CAPACITY),
     /// or left without their `END` by a later `START`.
-    pub fn sysex_dropped(&self) -> u64 {
-        self.sysex.dropped()
+    pub fn sysex_dropped(&self) -> &Counter<u64> {
+        &self.sysex_dropped.reader
+    }
+
+    /// Adds what the assembler has dropped since the last call to the `sysex_dropped` count.
+    fn count_sysex_drops(&mut self) {
+        let dropped = self.sysex.dropped();
+        self.sysex_dropped
+            .add(dropped.saturating_sub(self.sysex_seen));
+        self.sysex_seen = dropped;
     }
 
     /// The plugin was reset: drops a SysEx message open across the reset
@@ -576,6 +608,7 @@ impl MidiSendBuffer {
     /// in full. Never allocates.
     pub fn reset_midi(&mut self) {
         self.sysex.reset();
+        self.count_sysex_drops();
         self.narrower.reset();
     }
 
@@ -583,15 +616,15 @@ impl MidiSendBuffer {
     /// were of a Group other than 0: VST2 has one MIDI input, which takes Group
     /// 0's channels only. Each is dropped whole and counted, never heard on
     /// Group 0's channels (M2-104 section 2.1.2).
-    pub fn groups_dropped(&self) -> u64 {
-        self.groups_dropped
+    pub fn groups_dropped(&self) -> &Counter<u64> {
+        &self.groups_dropped.reader
     }
 
     /// Events refused since this buffer was made because a block staged more
     /// than its room ([`MIDI_STACK_CAPACITY`]); a refused SysEx is a whole
     /// message.
-    pub fn events_dropped(&self) -> u64 {
-        self.events_dropped
+    pub fn events_dropped(&self) -> &Counter<u64> {
+        &self.events_dropped.reader
     }
 
     /// The `SysExEvent` for a reassembled message, at `end`'s frame.
@@ -645,7 +678,7 @@ mod tests {
     #[test]
     fn draining_a_full_inbox_does_not_allocate() {
         let inbox = Arc::new(ArrayQueue::new(256));
-        let mut io = MidiIo::new(Arc::clone(&inbox));
+        let mut io = MidiIo::new(Arc::clone(&inbox), &tutti_rt::tally());
         for _ in 0..3 {
             io.out.clear();
             for i in 0..inbox.capacity() as u32 {
@@ -667,7 +700,8 @@ mod tests {
         let cc =
             |controller: u32, value: u32| Ump([0x20B0_0000 | controller << 8 | value, 0, 0, 0]);
         let inbox = Arc::new(ArrayQueue::new(4));
-        let mut io = MidiIo::new(Arc::clone(&inbox));
+        let overflow = tutti_rt::tally();
+        let mut io = MidiIo::new(Arc::clone(&inbox), &overflow);
         // The list is full of notes, then the run (select, MSB, LSB) arrives.
         for i in 0..4 {
             inbox
@@ -681,7 +715,7 @@ mod tests {
         }
         io.drain_from(0);
         assert_eq!(io.out.len(), 4, "no room for the controller");
-        assert_eq!(io.out_overflow(), 1, "which is counted");
+        assert_eq!(overflow.get(), 1, "which is counted");
         // The next block: RPN 0/0 is still selected, so a new value is one
         // Registered Controller (7 semitones, zero-extended, M2-115 4.1).
         io.out.clear();
@@ -708,7 +742,8 @@ mod tests {
     #[test]
     fn a_split_block_with_full_inboxes_does_not_grow_the_out_list() {
         let inbox = Arc::new(ArrayQueue::new(256));
-        let mut io = MidiIo::new(Arc::clone(&inbox));
+        let overflow = tutti_rt::tally();
+        let mut io = MidiIo::new(Arc::clone(&inbox), &overflow);
         for _ in 0..2 {
             io.out.clear();
             for piece in 0..2usize {
@@ -721,7 +756,7 @@ mod tests {
             }
             assert_eq!(io.out.len(), 256, "capped at the reservation");
         }
-        assert_eq!(io.out_overflow(), 2 * 256, "the second piece's, counted");
+        assert_eq!(overflow.get(), 2 * 256, "the second piece's, counted");
     }
 
     use tutti_fixtures::midi;
@@ -1049,7 +1084,7 @@ mod tests {
         );
         let staged = read_staged(buf.stage_piece(&end, 64, 64, 128).expect("END's piece"));
         assert_eq!(staged, vec![(36, framed(&body))], "once, rebased: 100 - 64");
-        assert_eq!(buf.sysex_dropped(), 0);
+        assert_eq!(buf.sysex_dropped().get(), 0);
 
         // A block that leaves a run open, split in three, counts it at most
         // once (at the next START), not once per piece.
@@ -1058,7 +1093,7 @@ mod tests {
             let _ = buf.stage_piece(start, piece_start, 64, 192);
         }
         let _ = buf.stage_piece(&packets[..1], 0, 64, 64);
-        assert_eq!(buf.sysex_dropped(), 1, "the one abandoned run");
+        assert_eq!(buf.sysex_dropped().get(), 1, "the one abandoned run");
     }
 
     /// **A SysEx keeps its input position among events at the same frame**:
@@ -1148,7 +1183,7 @@ mod tests {
         // Room for two: none of the three is staged, and all three are counted.
         let mut small = MidiSendBuffer::with_capacity(2);
         assert!(small.stage_piece(&[pc], 0, 64, 64).is_none());
-        assert_eq!(small.events_dropped(), 3);
+        assert_eq!(small.events_dropped().get(), 3);
         // Room for the note and one more: the note stays, the bank does not.
         let note = at(
             0,
@@ -1157,7 +1192,7 @@ mod tests {
         let mut tight = MidiSendBuffer::with_capacity(3);
         let staged = read_staged(tight.stage_piece(&[note, pc], 0, 64, 64).expect("the note"));
         assert_eq!(staged, vec![(0, vec![0x91, 60, 100])]);
-        assert_eq!(tight.events_dropped(), 3);
+        assert_eq!(tight.events_dropped().get(), 3);
         // In a later piece every message of the bank takes that piece's
         // rebased frame (offset 70 of a 128-frame block, piece 64..128: 6).
         let late = at(70, pc.1);
@@ -1210,7 +1245,7 @@ mod tests {
                 .expect("events staged"),
         );
         assert_eq!(staged, vec![(0, framed(&long))]);
-        assert_eq!(buf.sysex_dropped(), 0);
+        assert_eq!(buf.sysex_dropped().get(), 0);
     }
 
     /// **Staging a block's whole MIDI cap does not allocate, and an event
@@ -1240,8 +1275,8 @@ mod tests {
             staged = unsafe { (*events).num_events } as usize;
         });
         assert_eq!(staged, MIDI_STACK_CAPACITY);
-        assert_eq!(buf.events_dropped(), 2);
-        assert_eq!(buf.sysex_dropped(), 0);
+        assert_eq!(buf.events_dropped().get(), 2);
+        assert_eq!(buf.sysex_dropped().get(), 0);
     }
 
     /// **Staging a packet of any message type allocates nothing.** Every
@@ -1275,7 +1310,7 @@ mod tests {
         assert_no_alloc::assert_no_alloc(|| {
             let _ = buf.stage_piece(&midi, 0, 4096, 4096);
         });
-        assert_eq!(buf.events_dropped(), 0);
+        assert_eq!(buf.events_dropped().get(), 0);
     }
 
     /// **The staged `api::Events` pointer is 8-aligned for every list size**,
@@ -1316,7 +1351,7 @@ mod tests {
                 .expect("events staged"),
         );
         assert_eq!(staged, vec![(2, framed(&[1, 2, 3, 4, 5, 6, 7]))]);
-        assert_eq!(buf.sysex_dropped(), 1);
+        assert_eq!(buf.sysex_dropped().get(), 1);
     }
     /// The bytes of what one block of `midi` hands the plugin, through `buf`.
     fn staged_bytes(buf: &mut MidiSendBuffer, midi: &[UmpAt]) -> Vec<Vec<u8>> {
@@ -1368,7 +1403,7 @@ mod tests {
             staged_bytes(&mut buf, &midi),
             [vec![0x90, 60, 64], vec![0xF8, 0, 0]]
         );
-        assert_eq!(buf.groups_dropped(), 2);
+        assert_eq!(buf.groups_dropped().get(), 2);
     }
 
     /// **An RPN is four Control Changes through the stateful narrower** (M2-104
@@ -1445,7 +1480,7 @@ mod tests {
         });
         assert_eq!(staged_bytes(&mut tight, &[pc(3, bank)]).len(), 3);
         assert_eq!(staged_bytes(&mut tight, &[note, pc(4, bank_b)]).len(), 1);
-        assert_eq!(tight.events_dropped(), 3);
+        assert_eq!(tight.events_dropped().get(), 3);
         assert_eq!(staged_bytes(&mut tight, &[pc(5, bank_b)]).len(), 3);
     }
 }

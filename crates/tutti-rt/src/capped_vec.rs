@@ -69,6 +69,14 @@ impl<T> CappedVec<T> {
         true
     }
 
+    /// Removes and returns the last item, or `None` when empty. Leaves the
+    /// overflow flag as it is: a pop does not undo a refused push. Never
+    /// frees storage.
+    #[inline]
+    pub fn pop(&mut self) -> Option<T> {
+        self.buf.pop()
+    }
+
     /// Latches [`is_overflowed`](Self::is_overflowed) without pushing: the
     /// caller refused a group of items as a whole and dropped it.
     #[inline]

@@ -2520,7 +2520,6 @@ dependencies = [
  "objc2",
  "objc2-foundation",
  "thiserror 2.0.21",
- "tracing",
  "tutti-midi-protocol",
  "tutti-plugin-types",
  "tutti-rt",
@@ -3050,6 +3049,7 @@ name = "tutti-plugin-db"
 version = "0.0.1"
 dependencies = [
  "crossbeam-channel",
+ "postcard",
  "serde",
  "serde_json",
  "tempfile",
@@ -3587,6 +3587,7 @@ name = "tutti-winmm-ffi"
 version = "0.0.1"
 dependencies = [
  "thiserror 2.0.21",
+ "tracing",
  "tutti-fixtures",
  "windows-sys",
 ]

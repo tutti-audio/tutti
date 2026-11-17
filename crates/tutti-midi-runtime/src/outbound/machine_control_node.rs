@@ -148,7 +148,9 @@ impl Node for MachineControlNode {
         Status::Modified
     }
 
-    fn reset(&mut self) {}
+    fn reset(&mut self) {
+        self.sender.reset();
+    }
 }
 
 /// A [`MachineControlNode`]'s fork: a node of its own that sends nothing.
@@ -186,22 +188,4 @@ impl IntoNode for MachineControlNode {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use tutti_midi_protocol::MtcRate;
-
-    /// The node's one cell keeps a refused look and a lost message apart: its
-    /// controls read both, each in its own count.
-    #[test]
-    fn a_refused_look_and_a_lost_message_are_each_their_own_count() {
-        let mut node =
-            MachineControlNode::new(MidiGroup::FIRST, Recipient::AllCall, MtcRate::Fps30);
-        let controls = node.controls.clone();
-        node.losses.add(Losses::refused(1));
-        node.losses.add(Losses::lost(1));
-        let read = controls.losses();
-        assert_eq!(read, Losses::refused(1) + Losses::lost(1));
-        assert_eq!((read.refused, read.lost), (1, 1));
-        assert_eq!((read.evicted, read.late), (0, 0));
-    }
-}
+mod tests;

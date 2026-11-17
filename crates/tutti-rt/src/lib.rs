@@ -152,9 +152,11 @@
 #![deny(missing_docs)]
 #![deny(clippy::undocumented_unsafe_blocks, clippy::missing_safety_doc)]
 
+mod backoff;
 mod capped_vec;
 mod cell;
 mod claim;
+mod claim_lock;
 mod clock;
 mod denormals;
 mod dirty_set;
@@ -164,6 +166,7 @@ mod fault_latch;
 mod gauge;
 mod handoff;
 mod job_gate;
+mod last_out;
 mod level_cell;
 mod lock;
 mod main_thread;
@@ -172,6 +175,7 @@ mod pos_ring;
 mod priority;
 mod reclaim;
 mod render_count;
+mod render_gate;
 mod request_word;
 mod ring;
 mod scope;
@@ -186,6 +190,7 @@ mod vec;
 
 pub use capped_vec::CappedVec;
 pub use cell::{AudioThreadCell, BorrowGuard, BorrowRef};
+pub use claim_lock::{Claim, ClaimGuard};
 pub use clock::monotonic_ns;
 pub use denormals::with_no_denormals;
 pub use dirty_set::{DirtyIndex, DirtySet, Taken};
@@ -198,6 +203,7 @@ pub use gauge::{
 };
 pub use handoff::{Hand, Rt, handoff};
 pub use job_gate::JobGate;
+pub use last_out::{LastOut, Party};
 pub use level_cell::{LevelReader, LevelSpan, LevelWriter, level_cell};
 pub use lock::LockExt;
 pub use main_thread::MainThreadMarker;
@@ -209,6 +215,7 @@ pub use pos_ring::{
 pub use priority::{PriorityOutcome, PriorityRequest, Scheduling, request_priority};
 pub use reclaim::Reclaim;
 pub use render_count::{RenderCount, RenderGuard};
+pub use render_gate::{Closing, GateGuard, GateState, HeldClosed, Opening, RenderGate};
 pub use request_word::{RequestBit, RequestBitOutOfRange, RequestBits, RequestWord};
 pub use ring::{Drain, Iter, Overflow, PushError, Returned, RingReader, RingWriter, ring};
 pub use scope::{ControlDrop, RtScope, RtScopeGuard};

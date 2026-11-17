@@ -112,10 +112,10 @@ fn an_unusable_reply_or_body_lands_as_unreadable_with_its_failure() {
 /// unreadable with the failure that names which.
 #[test]
 fn a_body_that_is_not_json_or_not_the_resources_lands_as_unreadable() {
-    let Err(json) = PeJson::parse(b"{") else {
+    let Err(json) = PeJson::try_from(b"{".as_slice()) else {
         panic!("not JSON");
     };
-    let number = PeJson::parse(b"5").expect("JSON");
+    let number = PeJson::try_from(b"5".as_slice()).expect("JSON");
     let Err(data) = PeData::decode(&PeResource::LocalOn, &number) else {
         panic!("not LocalOn's data");
     };
@@ -158,7 +158,7 @@ fn a_pending_that_ends_as_disconnected_lands_its_property_calls_disconnected() {
         PeResourceList::new(),
     );
     let ask = peer.ask(PropertyCall::Get(ResourceGet::new(
-        ResourceTarget::new(PeResource::LocalOn).unwrap(),
+        ResourceTarget::try_from(PeResource::LocalOn).unwrap(),
     )));
     let id = PeerId {
         group: MidiGroup::FIRST,
@@ -198,7 +198,7 @@ fn dropping_a_job_whose_landed_lease_is_live_does_not_deadlock() {
         PeResourceList::new(),
     );
     let ask = peer.ask(PropertyCall::Subscribe(ResourceGet::new(
-        ResourceTarget::new(PeResource::LocalOn).unwrap(),
+        ResourceTarget::try_from(PeResource::LocalOn).unwrap(),
     )));
     let (job, ticket) = Ticket::<Subscribe>::new(&queue);
     let (lease, _held) = Subscription::new(

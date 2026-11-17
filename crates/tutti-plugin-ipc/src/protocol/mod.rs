@@ -149,35 +149,12 @@ pub const PROTOCOL_VERSION: u32 = 44;
 /// routinely exceeds 64 MiB, and a plugin storing an impulse response or a
 /// recorded buffer trivially does — so capping state at this number would
 /// silently lose a user's preset. State travels chunked instead
-/// (`StateChunk`), bounded on reassembly by [`MAX_STATE_BYTES`]. Each wire
+/// (`StateChunk`), bounded on reassembly by [`MAX_STATE_BYTES`](tutti_plugin_types::MAX_STATE_BYTES). Each wire
 /// frame stays under this cap, so the allocation and deadline guarantees hold
 /// unchanged for state as well. Raising *this* constant to cover the state tail
 /// would re-widen the allocation surface for all traffic and still leave a wall
 /// somewhere; a larger number just moves the cliff.
 pub const MAX_FRAME_BYTES: usize = 64 * 1024 * 1024;
-
-/// Largest **reassembled** plugin-state blob either end will accept, in bytes.
-///
-/// Bounds the total across a `StateChunk` sequence, which is a different
-/// question from [`MAX_FRAME_BYTES`]: that one bounds a single allocation off a
-/// single unvalidated length, this one bounds an accumulation across many
-/// individually-valid frames. Without it, chunking would reintroduce the
-/// unbounded allocation the frame cap exists to prevent — a peer would simply
-/// send 64 MiB chunks forever.
-///
-/// 1 GiB, chosen to sit above the real tail and below anything that threatens
-/// the host. The largest plugin states in practice are sample-embedding
-/// instruments (Kontakt libraries, Serum wavetables) and convolution reverbs
-/// carrying impulse responses; these reach high hundreds of MiB but not
-/// gigabytes, because the formats themselves stream rather than inline beyond
-/// that. A blob past 1 GiB is a plugin misbehaving or a corrupt project file,
-/// and failing it with `StateError::TooLarge` is both honest and survivable —
-/// unlike an allocation the host cannot satisfy.
-///
-/// Deliberately *not* enforced by aborting the connection: an over-limit state
-/// is a per-command refusal, and the socket stays synchronised because the
-/// receiver stops accumulating and drains the rest of the sequence.
-pub const MAX_STATE_BYTES: usize = 1024 * 1024 * 1024;
 
 /// Payload size of one `StateChunk` on the wire.
 ///

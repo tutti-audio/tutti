@@ -5,7 +5,7 @@
 use tutti_midi_device::{NotSetProfileOn, ProfileOnRequest};
 use tutti_ump::{Message, MidiGroup, SysexStatus, Ump};
 
-/// `request` as the packets a header holds it in, on Group 1.
+/// `request` as the packets a header holds it in, on the first Group.
 pub(crate) fn profile_packets(request: ProfileOnRequest) -> impl Iterator<Item = Ump> {
     request.packets(MidiGroup::FIRST)
 }
