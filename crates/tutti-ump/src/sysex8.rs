@@ -23,7 +23,8 @@ const LANES: usize = 16;
 /// Any byte value is data: that is the point of SysEx8. The Stream ID is the
 /// plain byte the sender wrote. A sender has no way to write one itself: it
 /// takes a [`Sysex8Stream`] from the [`Sysex8StreamIds`] of its receiver, and
-/// [`Sysex8Stream::packets`] is the only public writer of SysEx 8 packets.
+/// [`Sysex8Stream::packets`] is the only public writer of SysEx 8 message packets (`Data128::Sysex8Abort`, which a decoder returns, is the one
+/// variant that still takes a raw Stream ID).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Sysex8Message<'a> {
     /// The Group it travelled on.
@@ -48,8 +49,16 @@ pub struct Sysex8Message<'a> {
 /// share an ID. A merger opens one stream per source it is writing, all from
 /// the one `Sysex8StreamIds` of its receiver.
 ///
-/// An ID is in use from [`open`](Self::open) until the [`Sysex8Packets`] of
-/// its message is dropped finished, or is [aborted](Sysex8Packets::abort).
+/// An ID is in use from [`open`](Self::open) until its [`Sysex8Stream`] is
+/// dropped unused, or the [`Sysex8Packets`] of its message is dropped
+/// finished, [aborted](Sysex8Packets::abort) or
+/// [ended early](Sysex8Packets::end_early). A message dropped part-way owes
+/// an abort: its ID stays in use until [`take_abort`](Self::take_abort).
+///
+/// The count is the Function Block's, shared by all its Groups: with the
+/// receiver keying messages by Group and ID, that only uses fewer IDs than
+/// allowed. The allocator is single-threaded (`Cell`, so not `Sync`); a
+/// merger over several threads needs its own lock.
 ///
 /// ```
 /// use tutti_ump::{Data128, Message, Sysex8StreamIds};
@@ -83,6 +92,9 @@ pub struct Sysex8StreamIds {
     count: u8,
     /// Bit `i` is set while Stream ID `i` is in use.
     used: Cell<[u64; 4]>,
+    /// The Group of the unfinished message of each Stream ID that is owed an
+    /// abort; the ID stays in use until [`take_abort`](Self::take_abort).
+    owed: Cell<[Option<MidiGroup>; 255]>,
 }
 
 impl Sysex8StreamIds {
@@ -101,6 +113,7 @@ impl Sysex8StreamIds {
         Self {
             count: max_streams,
             used: Cell::new([0; 4]),
+            owed: Cell::new([None; 255]),
         }
     }
 
@@ -117,7 +130,30 @@ impl Sysex8StreamIds {
         let used = self.used.get();
         let id = (0..self.count).find(|&i| used[usize::from(i / 64)] & (1 << (i % 64)) == 0)?;
         self.set(id, true);
-        Some(Sysex8Stream { ids: self, id })
+        Some(Sysex8Stream {
+            ids: self,
+            id,
+            keep: false,
+        })
+    }
+
+    /// The abort (section 7.8.1: an End with `# of bytes` `0xF`) of the lowest
+    /// Stream ID whose message was dropped part-way, on that message's Group,
+    /// or `None` when none is owed. Taking it frees the ID: the caller writes
+    /// what it returns. A sender drains this before [`open`](Self::open), or
+    /// in a loop, because [`open`](Self::open) never hands out an ID that is
+    /// owed an abort.
+    #[must_use = "the abort is written to the receiver; the Stream ID is free once it is taken"]
+    pub fn take_abort(&self) -> Option<Ump> {
+        let mut owed = self.owed.get();
+        let id = (0..self.count).find(|&i| owed[usize::from(i)].is_some())?;
+        let group = owed[usize::from(id)].take()?;
+        self.owed.set(owed);
+        self.set(id, false);
+        Some(Ump::from(Message::Data128(
+            group,
+            Data128::Sysex8Abort { stream_id: id },
+        )))
     }
 
     fn set(&self, id: u8, on: bool) {
@@ -166,6 +202,17 @@ impl Sysex8StreamIds {
 pub struct Sysex8Stream<'a> {
     ids: &'a Sysex8StreamIds,
     id: u8,
+    /// Set by an unfinished message: the ID is owed an abort, not free.
+    keep: bool,
+}
+
+impl Drop for Sysex8Stream<'_> {
+    /// An ID dropped unused, or whose message was written, is free again.
+    fn drop(&mut self) {
+        if !self.keep {
+            self.ids.set(self.id, false);
+        }
+    }
 }
 
 impl<'a> Sysex8Stream<'a> {
@@ -191,9 +238,10 @@ impl<'a> Sysex8Stream<'a> {
 /// nothing is allocated. [`Sysex8Assembler`] is the inverse.
 ///
 /// The Stream ID is in use until the iterator is dropped having written every
-/// packet, or [`abort`](Self::abort) ends the message. Dropped part-way, the
-/// message is open on the receiver, and its ID stays in use: section 7.8.1
-/// ends an unfinished message with an abort.
+/// packet, or [`abort`](Self::abort) or [`end_early`](Self::end_early) ends
+/// the message. Dropped part-way, the message is open on the receiver: its ID
+/// stays in use and is owed an abort, which
+/// [`Sysex8StreamIds::take_abort`] gives (section 7.8.1).
 ///
 /// ```
 /// use tutti_ump::{Data128, Message, MidiGroup, Sysex8StreamIds, SysexStatus};
@@ -254,11 +302,11 @@ impl Sysex8Packets<'_> {
         self.started && self.rest.is_empty()
     }
 
-    /// End the message with the abort of section 7.8.1: an End with `# of
-    /// bytes` `0xF`, which tells the receiver to drop what it has of this
-    /// stream. The Stream ID is free again. Written after the packets yielded
-    /// so far; with none yielded it is an abort of nothing, which a receiver
-    /// ignores.
+    /// End the message with the abort of section 7.8.1: an End with all data
+    /// bytes zero and `# of bytes` `0xF`, for "the previous data is an
+    /// incomplete message, or the resulting quality of previous data is
+    /// unknown". The Stream ID is free again. Written after the packets
+    /// yielded so far.
     pub fn abort(mut self) -> Ump {
         self.rest = &[];
         self.started = true;
@@ -269,12 +317,32 @@ impl Sysex8Packets<'_> {
             },
         ))
     }
+
+    /// End the message early (section 7.8.1): an End with all data bytes zero
+    /// and `# of bytes` `0x1`, for "the Sender knows that the previous data in
+    /// the SysEx8 message is valid"; the Stream ID alone is valid and no
+    /// further data is included. The Stream ID is free again. Written after
+    /// the packets yielded so far.
+    pub fn end_early(mut self) -> Ump {
+        self.rest = &[];
+        self.started = true;
+        // Message type 5, status End (3), `# of bytes` 1: the Stream ID alone.
+        Ump([
+            0x5031_0000 | (u32::from(self.group.get()) << 24) | (u32::from(self.stream.id) << 8),
+            0,
+            0,
+            0,
+        ])
+    }
 }
 
 impl Drop for Sysex8Packets<'_> {
     fn drop(&mut self) {
-        if self.finished() {
-            self.stream.ids.set(self.stream.id, false);
+        if self.started && !self.finished() {
+            let mut owed = self.stream.ids.owed.get();
+            owed[usize::from(self.stream.id)] = Some(self.group);
+            self.stream.ids.owed.set(owed);
+            self.stream.keep = true;
         }
     }
 }

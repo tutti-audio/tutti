@@ -503,11 +503,43 @@ fn an_abort_ends_the_message_and_frees_its_id() {
 }
 
 /// Section 7.8.1: a message dropped part-way is open on the receiver, so its
-/// Stream ID is not reused until an abort ends it.
+/// Stream ID is not reopened; the abort it owes (an End with `# of bytes` 0xF
+/// on the message's Group) is taken, and the ID is free again.
+/// Spec: m2-104/7.8.1#1
 #[test]
-fn an_unfinished_message_keeps_its_id() {
+fn an_unfinished_message_keeps_its_id_until_its_abort_is_taken() {
+    let ids = Sysex8StreamIds::discovered(2);
+    let g5 = MidiGroup::of(5);
+    let mut packets = ids.open().unwrap().packets(g5, &[0x80; 40]);
+    packets.next().unwrap();
+    drop(packets);
+    // ID 0 is owed an abort: the next open is ID 1.
+    assert_eq!(wire_id(start(&ids, &[1]).unwrap().0), 1);
+    assert_eq!(ids.take_abort(), Some(Ump([0x553F_0000, 0, 0, 0])));
+    assert_eq!(ids.take_abort(), None);
+    assert_eq!(wire_id(start(&ids, &[1]).unwrap().0), 0);
+}
+
+/// An opened stream dropped without writing frees its ID: nothing was sent.
+#[test]
+fn an_unused_stream_frees_its_id() {
+    let ids = Sysex8StreamIds::undiscovered();
+    drop(ids.open().unwrap());
+    assert_eq!(wire_id(start(&ids, &[1]).unwrap().0), 0);
+    drop(ids.open().unwrap().packets(G0, &[1]));
+    assert!(ids.open().is_some());
+}
+
+/// Section 7.8.1: a sender out of data ends the message with an End of zero
+/// data and `# of bytes` 0x1 (the data so far is valid) or 0xF (incomplete or
+/// unknown); either frees the ID.
+/// Spec: m2-104/7.8.1#1
+#[test]
+fn an_early_end_is_an_end_of_one_or_f_bytes_and_frees_the_id() {
     let ids = Sysex8StreamIds::undiscovered();
     let (_, packets) = start(&ids, &[0x80; 40]).unwrap();
-    drop(packets);
-    assert!(ids.open().is_none());
+    assert_eq!(packets.end_early(), Ump([0x5031_0000, 0, 0, 0]));
+    let (_, packets) = start(&ids, &[0x80; 40]).unwrap();
+    assert_eq!(packets.abort(), Ump([0x503F_0000, 0, 0, 0]));
+    assert!(ids.open().is_some());
 }
