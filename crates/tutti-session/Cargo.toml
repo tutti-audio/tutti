@@ -122,7 +122,7 @@ tutti-midi-hardware = { path = "../tutti-midi-hardware", features = ["testing"] 
 tutti-nodes = { path = "../tutti-nodes", default-features = false, features = ["testing"] }
 # The in-memory tone a sampler voice test plays (`Wave`).
 tutti-codec = { path = "../tutti-codec", features = ["encode-wav", "decode-wav", "decode-flac"] }
-# The collector that reads the `tutti::rt` events a session emits
+# The collector that reads the `tutti::graph` events a session emits
 # (`tests/io/rt_log.rs`).
 tracing-subscriber.workspace = true
 # An independent reader for the WAV files the recorder tests write.

@@ -2,7 +2,7 @@
 //!
 //! Nodes log through `Io::log`; the engine's [`RtLogReaders`] holds what they
 //! logged. On the session's reclaim sweep this module drains it and emits one
-//! event per record on target `tutti::rt` (a node of tutti's) or
+//! event per record on target `tutti::graph` (a node of tutti's) or
 //! `tutti::plugin` (a hosted plugin's line), at the record's level, with the
 //! fields `node` (the node's kind and id), `frame`, `repeats` and `fields`
 //! (the record's own named values), and the call site's text or the plugin's
@@ -43,7 +43,7 @@ fn current_filter() -> LogFilter {
     if LevelFilter::current() == LevelFilter::OFF {
         return LogFilter::OFF;
     }
-    LogFilter::new(most_verbose!("tutti::rt"), most_verbose!("tutti::plugin"))
+    LogFilter::new(most_verbose!("tutti::graph"), most_verbose!("tutti::plugin"))
 }
 
 /// One event on `$target` at the record's level: the call sites tracing's
@@ -99,7 +99,7 @@ fn emit(record: &RtRecord, kind: Option<&str>) {
     let fields = render_fields(record);
     let message = record.text().unwrap_or(record.message());
     match record.target() {
-        RtTarget::Rt => emit_event!("tutti::rt", record, node, fields, message),
+        RtTarget::Rt => emit_event!("tutti::graph", record, node, fields, message),
         RtTarget::Plugin => emit_event!("tutti::plugin", record, node, fields, message),
     }
 }
@@ -118,7 +118,7 @@ pub(crate) fn drain<'a>(readers: &RtLogReaders, kind_of: impl Fn(NodeKey) -> Opt
 fn warn_lost(lost: u64) {
     if lost > 0 {
         tracing::warn!(
-            target: "tutti::rt",
+            target: "tutti::graph",
             lost,
             "the audio thread's log lost records (a full ring, or more than four in one node call)"
         );

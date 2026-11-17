@@ -1,5 +1,5 @@
 //! A node's `Io::log` on the audio thread reaches the session's `tracing`
-//! subscriber as an event on `tutti::rt`, with the node and the frame the
+//! subscriber as an event on `tutti::graph`, with the node and the frame the
 //! executor filled in, on the session's next update.
 
 use tracing::Level;
@@ -46,7 +46,7 @@ fn a_node_that_logs_on_the_audio_thread_emits_a_tracing_event_on_the_next_update
         .collect();
     assert_eq!(warn.len(), 1, "{events:?}");
     let event = warn[0];
-    assert_eq!(event.target, "tutti::rt");
+    assert_eq!(event.target, "tutti::graph");
     assert_eq!(event.message, SITE);
     assert_eq!((event.frame, event.repeats), (7, 2));
     assert_eq!(event.fields, "channel=1");

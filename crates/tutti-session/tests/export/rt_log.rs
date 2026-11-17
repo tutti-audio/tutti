@@ -47,7 +47,7 @@ fn a_node_that_logs_in_a_bounce_emits_a_tracing_event_through_the_export_path() 
         "one record a block of a 2,400-frame render, in frame order: {events:?}"
     );
     assert!(warn.windows(2).all(|w| w[0].frame <= w[1].frame));
-    assert_eq!(warn[0].target, "tutti::rt");
+    assert_eq!(warn[0].target, "tutti::graph");
     assert_eq!((warn[0].frame, warn[0].repeats), (7, 2));
     assert!(warn[0].node.contains('#'), "{}", warn[0].node);
 }
