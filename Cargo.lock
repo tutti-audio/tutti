@@ -2539,6 +2539,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tutti-au-ffi",
  "tutti-au-host",
+ "tutti-buffers",
  "tutti-fixtures",
  "tutti-graph",
  "tutti-midi-protocol",
@@ -2773,7 +2774,6 @@ dependencies = [
  "tutti-midi-device",
  "tutti-midi-file",
  "tutti-midi-protocol",
- "tutti-types",
  "tutti-ump",
 ]
 
@@ -3000,7 +3000,6 @@ dependencies = [
  "tutti-buffers",
  "tutti-clap-host",
  "tutti-clap-test-plugin",
- "tutti-codec",
  "tutti-engine",
  "tutti-export",
  "tutti-fixtures",
@@ -3159,7 +3158,6 @@ name = "tutti-plugin-server"
 version = "0.0.1"
 dependencies = [
  "assert_no_alloc",
- "bytemuck",
  "dpi",
  "interprocess",
  "libc",
@@ -3507,6 +3505,7 @@ dependencies = [
  "raw-window-handle",
  "tempfile",
  "thiserror 2.0.21",
+ "tutti-buffers",
  "tutti-fixtures",
  "tutti-graph",
  "tutti-plugin-types",
@@ -3546,7 +3545,6 @@ dependencies = [
  "dpi",
  "libloading 0.9.1",
  "parking_lot",
- "tempfile",
  "thiserror 2.0.21",
  "tracing",
  "tutti-fixtures",

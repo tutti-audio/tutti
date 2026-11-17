@@ -16,7 +16,7 @@ pub use tutti_vst3_ffi::{
 };
 
 pub use tutti_plugin_types::{
-    AudioBuffer, ContentScale, EditorCapabilities, NoteExpressionIntValue, NoteExpressionType,
+    ContentScale, EditorCapabilities, NoteExpressionIntValue, NoteExpressionType,
     NoteExpressionValue, ParameterChanges, ParameterPoint, ParameterQueue, PluginVersion,
     SampleFormat, TransportInfo, WindowHandle, WireMidi,
 };
@@ -237,12 +237,12 @@ impl PluginInfo {
 /// process buffers.
 ///
 /// This is the host's own seam: the FFI crate's process path is not generic
-/// over the sample type. Only `f32` and `f64` implement it, the two widths the
-/// SDK defines: its `Float` supertrait is sealed to them, and the constants
-/// below agree with the buffers the FFI crate binds for each.
+/// over the sample type. `f32` and `f64` are the two widths the SDK defines,
+/// and the constants below must agree with the buffers the FFI crate binds for
+/// each; `Float` is sealed to those two.
 pub trait Vst3Sample: tutti_buffers::Float {
-    /// The format of this sample type.
-    const FORMAT: SampleFormat;
+    /// The format of this sample type: not named `FORMAT`, which `Float` already uses.
+    const PLUGIN_FORMAT: SampleFormat;
     /// The width of this sample type.
     const WIDTH: SampleWidth;
     /// The `symbolicSampleSize` the plugin is told: `kSample32` or `kSample64`.
@@ -264,7 +264,7 @@ pub trait Vst3Sample: tutti_buffers::Float {
 }
 
 impl Vst3Sample for f32 {
-    const FORMAT: SampleFormat = SampleFormat::Float32;
+    const PLUGIN_FORMAT: SampleFormat = SampleFormat::Float32;
     const WIDTH: SampleWidth = SampleWidth::F32;
     const VST3_SYMBOLIC_SIZE: i32 = K_SAMPLE_32_INT;
 
@@ -284,7 +284,7 @@ impl Vst3Sample for f32 {
 }
 
 impl Vst3Sample for f64 {
-    const FORMAT: SampleFormat = SampleFormat::Float64;
+    const PLUGIN_FORMAT: SampleFormat = SampleFormat::Float64;
     const WIDTH: SampleWidth = SampleWidth::F64;
     const VST3_SYMBOLIC_SIZE: i32 = K_SAMPLE_64_INT;
 
