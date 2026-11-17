@@ -25,7 +25,9 @@ use tutti_types::Amplitude;
 /// From the plans, not the spec: the old and the new plan's
 /// [`PlanUnit::wired`](crate::PlanUnit::wired) for the key differ. A node
 /// the commit placed with no wiring, a node it removed and a rewire that
-/// leaves each port's answer as it was are not listed.
+/// leaves each port's answer as it was are not listed. A re-insert at the
+/// same key with a different shape but the same masks reports nothing: bus
+/// layout changes reach a plugin through its own re-activation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Rewired {
     /// The node.
@@ -191,6 +193,7 @@ impl Editor {
     /// unit to place), [`CommitError::Backpressure`],
     /// [`CommitError::Repreparing`], [`CommitError::Poisoned`] or a
     /// [`Limits`](crate::Limits) refusal ([`CommitError::TooManyOutputs`]).
+    #[must_use = "the nodes this commit rewired"]
     #[allow(
         clippy::missing_panics_doc,
         reason = "every pending unit the delta needs was checked present just before it is taken"

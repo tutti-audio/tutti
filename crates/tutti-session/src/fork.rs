@@ -125,7 +125,7 @@ impl ForkedPair {
     /// The editor's [`CommitError`] if the edit does not compile (a cycle, a
     /// port out of range) or the editor is poisoned; nothing is installed.
     pub(crate) fn commit(&mut self) -> Result<(), CommitError> {
-        self.editor.commit()?;
+        let _rewired = self.editor.commit()?;
         self.executor.apply_pending();
         self.editor.collect();
         Ok(())

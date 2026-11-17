@@ -224,7 +224,8 @@ pub enum SessionEvent {
     /// report; a node whose wiring is as it was reports nothing. It is the
     /// control-side notice a plugin needs to activate or deactivate an aux
     /// bus; the block that applies the commit reads the same answer through
-    /// [`Io::wired_inputs`](tutti_graph::Io::wired_inputs).
+    /// [`Io::wired_inputs`](tutti_graph::Io::wired_inputs). A node with only
+    /// a main bus is never reported; it reads its per-block masks.
     Rewired {
         /// The node.
         node: NodeKey,

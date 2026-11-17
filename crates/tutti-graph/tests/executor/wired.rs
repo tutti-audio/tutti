@@ -11,9 +11,9 @@ use tutti_graph::testing as common;
 
 use common::{Kind, TestNode, WORKERS, prepare, test_pool};
 use tutti_graph::{
-    Bus, BusRole, Buses, Cx, Edge, Editor, Executor, InPort, Io, Node, NodeKey, OutPort, Prepare,
-    Rewired, Shape, Source, Status, TapAlign, TapId, TransportPosition, Unforkable, Wired,
-    WiredMask,
+    Bus, BusRef, BusRole, BusSource, Buses, Cx, Edge, EdgeFade, EdgeId, Editor, Executor,
+    FeedbackFrom, InPort, Io, Node, NodeKey, OutPort, Prepare, Rewired, Shape, Sink, Source,
+    Status, TapAlign, TapId, TransportPosition, Unforkable, Wired, WiredMask,
 };
 use tutti_types::{BusTopology, ChannelLayout, Samples, Tail};
 
@@ -288,4 +288,215 @@ fn a_hand_built_io_reads_every_port_wired() {
     let block: &[f32] = &[0.0; 16];
     tutti_graph::contract::drive(&mut node, rate, &[block; 3], &[]);
     assert_eq!(seen.read(), (0b11, 0b11, 0b1, 0b1));
+}
+
+const OTHER: NodeKey = NodeKey(4);
+
+/// A probe, a second probe, and an executor: the probe pair's two `Seen`s.
+fn pair() -> (Editor, Executor, Arc<Seen>, Arc<Seen>) {
+    let (mut ed, exec) = Editor::new(prepare(16));
+    let (a, b) = (Arc::new(Seen::default()), Arc::new(Seen::default()));
+    ed.insert(
+        PROBE,
+        "a",
+        Unforkable(Probe {
+            seen: Arc::clone(&a),
+        }),
+    );
+    ed.insert(
+        OTHER,
+        "b",
+        Unforkable(Probe {
+            seen: Arc::clone(&b),
+        }),
+    );
+    (ed, exec, a, b)
+}
+
+/// A bus edge lowers to one edge per channel: every port of both buses
+/// reads wired, the aux bus's by its own handle.
+#[test]
+fn a_bus_edge_marks_every_channel_port_of_its_bus() {
+    let (mut ed, mut exec, a, b) = pair();
+    ed.connect_bus(
+        BusSource::Node(BusRef::new(PROBE, 0)),
+        BusRef::new(OTHER, 0),
+    )
+    .expect("stereo to stereo");
+    ed.connect_bus(
+        BusSource::Node(BusRef::new(PROBE, 1)),
+        BusRef::new(OTHER, 1),
+    )
+    .expect("mono to mono");
+    let report = ed.commit().expect("commits");
+    render(&mut exec, 0);
+    assert_eq!(b.read(), (0b11, 0, 0b1, 0), "OTHER's inputs, both buses");
+    assert_eq!(a.read(), (0, 0b11, 0, 0b1), "PROBE's outputs, both buses");
+    assert_eq!(
+        report,
+        [
+            rewired(PROBE, wired(0, 0), wired(0, 0b111)),
+            rewired(OTHER, wired(0, 0), wired(0b111, 0)),
+        ]
+    );
+}
+
+/// A feedback edge is a source of its input and a consumer of its output.
+#[test]
+fn a_feedback_edge_marks_the_input_and_the_source_output() {
+    let (mut ed, mut exec, a, _b) = pair();
+    ed.spec_mut().connect(
+        InPort {
+            node: PROBE,
+            port: 1,
+        },
+        Edge::Feedback(FeedbackFrom::new(out(PROBE, 0), Samples(16))),
+    );
+    let report = ed.commit().expect("commits");
+    render(&mut exec, 0);
+    assert_eq!(a.read(), (0b10, 0b01, 0, 0));
+    assert_eq!(report, [rewired(PROBE, wired(0, 0), wired(0b10, 0b01))]);
+}
+
+/// Ports past 31 and up to 63: a 64-port node reads bit 63 on both sides.
+#[test]
+fn a_shape_with_64_ports_reads_bit_63() {
+    struct Wide(Arc<Seen>);
+    impl Node for Wide {
+        fn shape(&self) -> Shape {
+            let all = ChannelLayout::from_count(64);
+            Shape::unassigned(all, all).with_tail(Tail::Unbounded)
+        }
+        fn prepare(&mut self, _: &Prepare) {}
+        fn process(&mut self, _: &Cx<'_>, io: Io<'_>) -> Status {
+            self.0.main_in.store(io.wired_inputs().0, Ordering::Relaxed);
+            self.0
+                .main_out
+                .store(io.wired_outputs().0, Ordering::Relaxed);
+            Status::Silent
+        }
+        fn reset(&mut self) {}
+    }
+    let (mut ed, mut exec) = Editor::new(prepare(16));
+    let seen = Arc::new(Seen::default());
+    ed.insert(
+        SRC,
+        "src",
+        Unforkable(TestNode::new(Kind::Const {
+            value: 1.0,
+            width: 64,
+        })),
+    );
+    ed.insert(PROBE, "wide", Unforkable(Wide(Arc::clone(&seen))));
+    ed.spec_mut().connect(
+        InPort {
+            node: PROBE,
+            port: 63,
+        },
+        Edge::Direct(Source::Node(out(SRC, 63))),
+    );
+    let _tap = ed
+        .open_tap(
+            TapId::of(1),
+            vec![Source::Node(out(PROBE, 63))],
+            TapAlign::Raw,
+            Samples(64),
+        )
+        .expect("the port exists");
+    let _ = ed.commit().expect("commits");
+    render(&mut exec, 0);
+    assert_eq!(seen.main_in.load(Ordering::Relaxed), 1 << 63);
+    assert_eq!(seen.main_out.load(Ordering::Relaxed), 1 << 63);
+}
+
+fn heard_edge() -> (Editor, Executor, Arc<Seen>, EdgeId) {
+    let (mut ed, mut exec) = Editor::new(prepare(16));
+    let seen = Arc::new(Seen::default());
+    ed.insert(
+        SRC,
+        "src",
+        Unforkable(TestNode::new(Kind::Const {
+            value: 1.0,
+            width: 2,
+        })),
+    );
+    ed.insert(
+        PROBE,
+        "probe",
+        Unforkable(Probe {
+            seen: Arc::clone(&seen),
+        }),
+    );
+    let from = Edge::Direct(Source::Node(out(SRC, 0)));
+    let sink = InPort {
+        node: PROBE,
+        port: 0,
+    };
+    ed.spec_mut().connect(sink, from);
+    let _ = ed.commit().expect("commits");
+    render(&mut exec, 0);
+    ed.collect();
+    let id = EdgeId {
+        sink: Sink::Port(sink),
+        from,
+    };
+    (ed, exec, seen, id)
+}
+
+/// A fade-out keeps its edge in the spec until the fade ends, so the input
+/// reads wired through it; the commit that removes the edge reports the loss.
+#[test]
+fn a_fade_out_keeps_the_input_wired_until_the_commit_that_removes_the_edge() {
+    let (mut ed, mut exec, seen, id) = heard_edge();
+    assert_eq!(seen.read().0, 0b1);
+    ed.set_edge_fade(id, EdgeFade::Out).expect("an edge");
+    assert!(
+        ed.commit().expect("commits").is_empty(),
+        "the fade's lane moves no port's wiring"
+    );
+    for _ in 0..(common::declick() / 16 + 2) {
+        render(&mut exec, 0);
+    }
+    ed.collect();
+    assert_eq!(seen.read().0, 0b1, "fading, still wired");
+    assert!(ed.spec().has_edge(id), "held until the fade is reported");
+    assert!(
+        ed.settle_fades(),
+        "the fade ended and the edge left the spec"
+    );
+    let report = ed.commit().expect("commits");
+    render(&mut exec, 0);
+    assert_eq!(seen.read().0, 0, "wired no more");
+    assert_eq!(
+        report,
+        [
+            rewired(SRC, wired(0, 0b1), wired(0, 0)),
+            rewired(PROBE, wired(0b1, 0), wired(0, 0)),
+        ]
+    );
+}
+
+/// A fade-in edge is in the spec from its commit: wired at once.
+#[test]
+fn a_fade_in_counts_as_wired_at_once() {
+    let (mut ed, mut exec, seen, _) = heard_edge();
+    let sink = InPort {
+        node: PROBE,
+        port: 1,
+    };
+    let from = Edge::Direct(Source::Node(out(SRC, 1)));
+    ed.spec_mut().connect(sink, from);
+    let id = EdgeId {
+        sink: Sink::Port(sink),
+        from,
+    };
+    ed.set_edge_fade(id, EdgeFade::In).expect("an edge");
+    let report = ed.commit().expect("commits");
+    render(&mut exec, 0);
+    assert_eq!(
+        seen.read().0,
+        0b11,
+        "the faded-in port is wired in its first block"
+    );
+    assert_eq!(report.len(), 2);
 }

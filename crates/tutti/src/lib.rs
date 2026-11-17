@@ -333,7 +333,7 @@ pub mod graph {
         ParamRangeReader, ParamSegment, Pass as DryPath, PlayClock, RenderMode, Resolution,
         SilenceMask, Sink as GraphSink, SortedEvents, Source as GraphSource, SubBlocks,
         TransportChange, TransportChangeRejected, TransportChanges, TransportHistory,
-        TransportPosition, UmpAt, VerifyError, Wake, Wired, WiredMask,
+        TransportPosition, UmpAt, VerifyError, Wake, WiredMask,
     };
     pub use tutti_graph::{EdgeGain, FeedbackFrom, Invalid, NodeMix, RangeView};
 }
@@ -364,7 +364,7 @@ pub mod session {
     };
     pub use tutti_graph::{
         BusError, BusRef, BusSource, CloseError, CommitError, MissingSource, MixError, ModeError,
-        PassError, Placed, Rewired, Unwired,
+        PassError, Placed, Rewired, Unwired, Wired,
     };
     pub use tutti_graph::{
         BusFeed, BusFold, BusSide, EdgeFade, EdgeId, EventCapacityError, EventIn, EventOut,

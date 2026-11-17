@@ -1789,8 +1789,6 @@ pub fn compile(
     Ok((plan, delta))
 }
 
-/// `v` through its PDC delay of `by` frames, keyed `key`: the value itself
-/// when `by` is zero (no op), else the output of a `Pre::Delay` ring.
 /// The output ports something reads: an edge (direct or feedback), a global
 /// output, a tap lane or a meter lane.
 fn consumed_outputs(topology: &crate::Topology) -> BTreeSet<OutPort> {
@@ -1819,8 +1817,8 @@ fn consumed_outputs(topology: &crate::Topology) -> BTreeSet<OutPort> {
     edges.chain(lanes).collect()
 }
 
-/// The audio ports of `key` with a source (an edge that is not silence) or a
-/// consumer among `consumed`.
+/// The audio ports of `key` with a source (an edge, direct or feedback) or a
+/// consumer among `consumed`. A validated graph stores no silence edge.
 fn wired_ports(
     topology: &crate::Topology,
     key: NodeKey,
@@ -1830,10 +1828,7 @@ fn wired_ports(
     let mut wired = Wired::default();
     for port in 0..shape.audio_in().count() {
         let at = InPort { node: key, port };
-        let fed = topology
-            .edges
-            .get(&at)
-            .is_some_and(|e| e.iter().any(|e| *e != Edge::Direct(Source::Zero)));
+        let fed = topology.edges.get(&at).is_some_and(|e| !e.is_empty());
         if fed {
             wired.inputs = wired.inputs.with(usize::from(port));
         }
@@ -1846,6 +1841,8 @@ fn wired_ports(
     wired
 }
 
+/// `v` through its PDC delay of `by` frames, keyed `key`: the value itself
+/// when `by` is zero (no op), else the output of a `Pre::Delay` ring.
 fn align_audio(em: &mut Emitted, v: u32, by: Samples, key: DelayKey) -> ARef {
     if by.is_zero() {
         return ARef::Val(v);
