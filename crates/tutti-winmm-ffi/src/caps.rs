@@ -8,7 +8,7 @@ use windows_sys::Win32::Media::Multimedia::{
     DRV_QUERYDEVICEINTERFACE, DRV_QUERYDEVICEINTERFACESIZE,
 };
 
-use crate::error::{Error, Operation, check};
+use crate::error::{Error, MmOperation, check};
 
 /// What a driver reports of one port.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -51,7 +51,7 @@ pub fn input_caps(index: u32) -> Result<Caps, Error> {
             size_of::<MIDIINCAPSW>() as u32,
         )
     };
-    check(Operation::MidiInGetDevCaps, code)?;
+    check(MmOperation::MidiInGetDevCaps, code)?;
     // The struct is packed: read each field by value, never by reference.
     let (manufacturer, product, name) = (caps.wMid, caps.wPid, caps.szPname);
     Ok(Caps {
@@ -77,7 +77,7 @@ pub fn output_caps(index: u32) -> Result<Caps, Error> {
             size_of::<MIDIOUTCAPSW>() as u32,
         )
     };
-    check(Operation::MidiOutGetDevCaps, code)?;
+    check(MmOperation::MidiOutGetDevCaps, code)?;
     let (manufacturer, product, name) = (caps.wMid, caps.wPid, caps.szPname);
     Ok(Caps {
         manufacturer,

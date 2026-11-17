@@ -14,7 +14,7 @@
 //! | `MidiIn` | an open input: short messages and SysEx buffers delivered to a closure on the driver's thread, each with winmm's millisecond stamp; closing it returns every buffer first |
 //! | `input_interface`, `output_interface` | the device interface path a driver gives a port, which names the device across a replug |
 //! | `MidiOut` | an open output: a short message, or a SysEx sent whole |
-//! | `waitable_timer`, `TimerWake`, `TimerWait` | a high-resolution waitable timer and a wake signal: the one waiter's wait ends at a time or when any clone of the waker wakes it |
+//! | `waitable_timer`, `TimerWaker`, `TimerWaiter` | a high-resolution waitable timer and a wake signal: the one waiter's wait ends at a time or when any clone of the waker wakes it |
 //!
 //! Each `unsafe` block carries one `// SAFETY:` argument where it is introduced;
 //! `undocumented_unsafe_blocks` and `missing_safety_doc` are denied.
@@ -39,7 +39,7 @@ mod sleeper;
 pub use caps::{
     Caps, input_caps, input_count, input_interface, output_caps, output_count, output_interface,
 };
-pub use error::{Error, MmResult, Operation};
+pub use error::{Error, MmOperation, MmResult, OsOperation};
 pub use input::{Event, MidiIn};
 pub use output::MidiOut;
-pub use sleeper::{TimerWait, TimerWake, Woken, waitable_timer};
+pub use sleeper::{TimerWaiter, TimerWaker, Woken, waitable_timer};

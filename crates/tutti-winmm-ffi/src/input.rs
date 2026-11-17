@@ -38,8 +38,8 @@ use windows_sys::Win32::Media::{
     MM_MIM_CLOSE, MM_MIM_DATA, MM_MIM_LONGDATA, MM_MIM_LONGERROR, MMSYSERR_INVALHANDLE,
 };
 
-use crate::error::{Error, Operation, check};
-use crate::sleeper::{TimerWait, TimerWake, waitable_timer};
+use crate::error::{Error, MmOperation, OsOperation, check};
+use crate::sleeper::{TimerWaiter, TimerWaker, waitable_timer};
 
 /// How many SysEx buffers an input keeps with winmm, and how long each is:
 /// a message longer than one buffer arrives as consecutive [`Event::Long`]s.
@@ -130,7 +130,7 @@ struct Shared {
     /// Callbacks inside their body; incremented under the registry lock.
     in_flight: AtomicUsize,
     /// Wakes the worker: a buffer is done, or the input is closing.
-    worker: TimerWake,
+    worker: TimerWaker,
 }
 
 /// The inputs that are open, by the id their callback is given.
@@ -180,6 +180,11 @@ impl MidiIn {
     /// must return quickly and call no winmm function. Buffers are handed back
     /// to winmm by a thread of this input's own, never by the callback.
     ///
+    /// `handler` is dropped when the last reference to the input's state goes,
+    /// which can be on winmm's thread after the `MidiIn` has been dropped (a
+    /// callback that was inside when the drop finished leaves last), so its
+    /// destructor must be fit to run there.
+    ///
     /// # Errors
     ///
     /// The failing call: `midiInOpen`
@@ -224,7 +229,7 @@ impl MidiIn {
                 CALLBACK_FUNCTION,
             )
         };
-        if let Err(e) = check(Operation::MidiInOpen, code) {
+        if let Err(e) = check(MmOperation::MidiInOpen, code) {
             unregister(id);
             return Err(e);
         }
@@ -244,7 +249,7 @@ impl MidiIn {
                 .spawn(move || requeue(&shared, wait))
         };
         input.worker = Some(worker.map_err(|source| Error::Os {
-            operation: Operation::SpawnInputWorker,
+            operation: OsOperation::SpawnInputWorker,
             source,
         })?);
         for buffer in &input.shared.buffers {
@@ -252,14 +257,14 @@ impl MidiIn {
             // bytes; both live in `Shared`, which this input and the registry
             // keep allocated, unmoved, until the port is closed.
             let code = unsafe { midiInPrepareHeader(input.handle, buffer.header(), header_size()) };
-            check(Operation::MidiInPrepareHeader, code)?;
+            check(MmOperation::MidiInPrepareHeader, code)?;
             // SAFETY: the header was prepared just above.
             let code = unsafe { midiInAddBuffer(input.handle, buffer.header(), header_size()) };
-            check(Operation::MidiInAddBuffer, code)?;
+            check(MmOperation::MidiInAddBuffer, code)?;
         }
         // SAFETY: `handle` is the open input.
         let code = unsafe { midiInStart(input.handle) };
-        check(Operation::MidiInStart, code)?;
+        check(MmOperation::MidiInStart, code)?;
         Ok(input)
     }
 
@@ -279,10 +284,22 @@ impl Drop for MidiIn {
         // No callback that looks the id up from here on finds the input.
         unregister(self.id);
         self.shared.closing.store(true, Ordering::Release);
-        // The worker queues no buffer after it has been joined.
-        let _ = self.shared.worker.wake();
-        if let Some(worker) = self.worker.take() {
-            let _ = worker.join();
+        // The worker queues no buffer after it has been joined. A wake that
+        // failed would leave the join waiting for ever, so the worker is left
+        // running and, with the port still open, nothing is freed.
+        if let Err(e) = self.shared.worker.wake() {
+            tracing::warn!(
+                "winmm MIDI input: the worker could not be woken, so the port is left open: {e}"
+            );
+            std::mem::forget(Arc::clone(&self.shared));
+            std::mem::forget(self.worker.take());
+            return;
+        }
+        if let Some(worker) = self.worker.take()
+            && worker.join().is_err()
+        {
+            // The worker panicked; it queues nothing more.
+            tracing::warn!("winmm MIDI input: the worker panicked");
         }
         // Callbacks that found the input before it was removed finish.
         let deadline = Instant::now() + LEAVE_BOUND;
@@ -320,7 +337,7 @@ fn unregister(id: usize) {
 }
 
 /// Gives each done buffer back to winmm until the input closes.
-fn requeue(shared: &Shared, mut wait: TimerWait) {
+fn requeue(shared: &Shared, mut wait: TimerWaiter) {
     loop {
         if wait.wait().is_err() {
             shared.dead.store(true, Ordering::Release);

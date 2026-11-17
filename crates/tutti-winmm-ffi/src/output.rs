@@ -7,7 +7,7 @@ use windows_sys::Win32::Media::Audio::{
     midiOutOpen, midiOutPrepareHeader, midiOutReset, midiOutShortMsg, midiOutUnprepareHeader,
 };
 
-use crate::error::{Error, Operation, check};
+use crate::error::{Error, MmOperation, check};
 
 /// How long a SysEx send may take beyond what its bytes take on a MIDI 1.0
 /// wire (320 microseconds each, rounded up to a millisecond per three).
@@ -46,7 +46,7 @@ impl MidiOut {
         let mut handle: HMIDIOUT = std::ptr::null_mut();
         // SAFETY: `handle` is a live out-pointer; no callback is registered.
         let code = unsafe { midiOutOpen(&raw mut handle, index, 0, 0, CALLBACK_NULL) };
-        check(Operation::MidiOutOpen, code)?;
+        check(MmOperation::MidiOutOpen, code)?;
         Ok(Self {
             handle,
             leaked: false,
@@ -62,7 +62,7 @@ impl MidiOut {
     pub fn short(&mut self, message: u32) -> Result<(), Error> {
         // SAFETY: `handle` is the open output.
         let code = unsafe { midiOutShortMsg(self.handle, message) };
-        check(Operation::MidiOutShortMsg, code)
+        check(MmOperation::MidiOutShortMsg, code)
     }
 
     /// Sends `message`, a whole System Exclusive message from `0xF0` to
@@ -92,13 +92,13 @@ impl MidiOut {
         // SAFETY: `header` is a live header whose `lpData` is a live buffer of
         // `dwBufferLength` bytes, both allocated above and not freed before the
         // driver is done with them.
-        let prepared = check(Operation::MidiOutPrepareHeader, unsafe {
+        let prepared = check(MmOperation::MidiOutPrepareHeader, unsafe {
             midiOutPrepareHeader(self.handle, header, size)
         });
         let sent = prepared.and_then(|()| {
             // SAFETY: the header is prepared and stays allocated until it is
             // unprepared below.
-            check(Operation::MidiOutLongMsg, unsafe {
+            check(MmOperation::MidiOutLongMsg, unsafe {
                 midiOutLongMsg(self.handle, header, size)
             })
         });
@@ -119,7 +119,7 @@ impl MidiOut {
                 // are never freed.
                 self.leaked = true;
                 return Err(Error::NotReturned {
-                    operation: Operation::MidiOutLongMsg,
+                    operation: MmOperation::MidiOutLongMsg,
                 });
             }
             std::thread::sleep(Duration::from_millis(1));
@@ -130,7 +130,7 @@ impl MidiOut {
             // bytes, so neither is freed.
             self.leaked = true;
             sent?;
-            return check(Operation::MidiOutUnprepareHeader, released);
+            return check(MmOperation::MidiOutUnprepareHeader, released);
         }
         // SAFETY: the unprepare returned 0, so the driver holds neither the
         // header nor the bytes; nothing else points at either allocation, and

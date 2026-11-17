@@ -6,9 +6,9 @@ use windows_sys::Win32::Media::{
     MMSYSERR_NOERROR, MMSYSERR_NOMEM,
 };
 
-/// The call that failed or did not return.
+/// The winmm call that failed or did not return.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Operation {
+pub enum MmOperation {
     /// `midiInOpen`.
     MidiInOpen,
     /// `midiInPrepareHeader`.
@@ -31,6 +31,29 @@ pub enum Operation {
     MidiOutUnprepareHeader,
     /// `midiOutGetDevCaps`.
     MidiOutGetDevCaps,
+}
+
+impl std::fmt::Display for MmOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::MidiInOpen => "midiInOpen",
+            Self::MidiInPrepareHeader => "midiInPrepareHeader",
+            Self::MidiInAddBuffer => "midiInAddBuffer",
+            Self::MidiInStart => "midiInStart",
+            Self::MidiInGetDevCaps => "midiInGetDevCaps",
+            Self::MidiOutOpen => "midiOutOpen",
+            Self::MidiOutShortMsg => "midiOutShortMsg",
+            Self::MidiOutLongMsg => "midiOutLongMsg",
+            Self::MidiOutPrepareHeader => "midiOutPrepareHeader",
+            Self::MidiOutUnprepareHeader => "midiOutUnprepareHeader",
+            Self::MidiOutGetDevCaps => "midiOutGetDevCaps",
+        })
+    }
+}
+
+/// The Win32 or standard-library call that failed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum OsOperation {
     /// `CreateEventW`.
     CreateEvent,
     /// `CreateWaitableTimerExW`.
@@ -45,35 +68,16 @@ pub enum Operation {
     SpawnInputWorker,
 }
 
-impl Operation {
-    /// The call's name, as the Windows documentation spells it.
-    #[must_use]
-    pub const fn name(self) -> &'static str {
-        match self {
-            Self::MidiInOpen => "midiInOpen",
-            Self::MidiInPrepareHeader => "midiInPrepareHeader",
-            Self::MidiInAddBuffer => "midiInAddBuffer",
-            Self::MidiInStart => "midiInStart",
-            Self::MidiInGetDevCaps => "midiInGetDevCaps",
-            Self::MidiOutOpen => "midiOutOpen",
-            Self::MidiOutShortMsg => "midiOutShortMsg",
-            Self::MidiOutLongMsg => "midiOutLongMsg",
-            Self::MidiOutPrepareHeader => "midiOutPrepareHeader",
-            Self::MidiOutUnprepareHeader => "midiOutUnprepareHeader",
-            Self::MidiOutGetDevCaps => "midiOutGetDevCaps",
+impl std::fmt::Display for OsOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
             Self::CreateEvent => "CreateEventW",
             Self::CreateWaitableTimer => "CreateWaitableTimerExW",
             Self::SetWaitableTimer => "SetWaitableTimer",
             Self::SetEvent => "SetEvent",
             Self::WaitForMultipleObjects => "WaitForMultipleObjects",
             Self::SpawnInputWorker => "spawn the input worker",
-        }
-    }
-}
-
-impl std::fmt::Display for Operation {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.name())
+        })
     }
 }
 
@@ -106,9 +110,23 @@ pub enum MmResult {
 }
 
 impl MmResult {
-    /// The variant for a nonzero `MMRESULT`.
+    /// The `MMRESULT` this stands for; never `MMSYSERR_NOERROR`.
     #[must_use]
-    pub const fn from_code(code: u32) -> Self {
+    pub const fn code(self) -> u32 {
+        match self {
+            Self::Allocated => MMSYSERR_ALLOCATED,
+            Self::BadDeviceId => MMSYSERR_BADDEVICEID,
+            Self::StillPlaying => MIDIERR_STILLPLAYING,
+            Self::NoDriver => MMSYSERR_NODRIVER,
+            Self::NoMem => MMSYSERR_NOMEM,
+            Self::InvalHandle => MMSYSERR_INVALHANDLE,
+            Self::Other(code) => code,
+        }
+    }
+
+    /// The variant for `code`, which is nonzero: a success is not an
+    /// `MmResult`, and `check` alone calls this, after it has ruled success out.
+    const fn from_code(code: u32) -> Self {
         match code {
             MMSYSERR_ALLOCATED => Self::Allocated,
             MMSYSERR_BADDEVICEID => Self::BadDeviceId,
@@ -142,19 +160,19 @@ fn text(code: u32) -> String {
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// A winmm call returned a failure.
-    #[error("winmm error: {operation}: {source}")]
+    #[error("winmm error: {operation} failed")]
     Call {
         /// The call that failed.
-        operation: Operation,
+        operation: MmOperation,
         /// The `MMRESULT` it returned.
         source: MmResult,
     },
     /// A Win32 or standard-library call failed; `source` is its
     /// `GetLastError` or the operating system's error.
-    #[error("winmm error: {operation}: {source}")]
+    #[error("winmm error: {operation} failed")]
     Os {
         /// The call that failed.
-        operation: Operation,
+        operation: OsOperation,
         /// What the operating system said.
         source: std::io::Error,
     },
@@ -163,7 +181,7 @@ pub enum Error {
     #[error("winmm error: {operation} did not return")]
     NotReturned {
         /// The call that did not return.
-        operation: Operation,
+        operation: MmOperation,
     },
     /// A System Exclusive message longer than a buffer winmm takes.
     #[error("winmm error: a message of {len} bytes is too long to send")]
@@ -177,7 +195,7 @@ pub enum Error {
 }
 
 /// `Ok` for `MMSYSERR_NOERROR`, the failure of `operation` otherwise.
-pub(crate) fn check(operation: Operation, code: u32) -> Result<(), Error> {
+pub(crate) fn check(operation: MmOperation, code: u32) -> Result<(), Error> {
     if code == MMSYSERR_NOERROR {
         Ok(())
     } else {
@@ -189,7 +207,7 @@ pub(crate) fn check(operation: Operation, code: u32) -> Result<(), Error> {
 }
 
 /// The calling thread's `GetLastError` as the failure of `operation`.
-pub(crate) fn last_os(operation: Operation) -> Error {
+pub(crate) fn last_os(operation: OsOperation) -> Error {
     Error::Os {
         operation,
         source: std::io::Error::last_os_error(),

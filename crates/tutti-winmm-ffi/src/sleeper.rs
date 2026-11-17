@@ -9,15 +9,14 @@ use windows_sys::Win32::System::Threading::{
     SetEvent, SetWaitableTimer, TIMER_ALL_ACCESS, WaitForMultipleObjects,
 };
 
-use crate::error::{Error, Operation, last_os};
+use crate::error::{Error, OsOperation, last_os};
 
-/// Why [`TimerWait::wait_for`] returned.
+/// Why [`TimerWaiter::wait_for`] returned.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Woken {
-    /// The time passed (or a timer left over from an earlier wait fired: a
-    /// caller looks at the clock again either way).
+    /// The time passed.
     Elapsed,
-    /// A [`TimerWake`] was woken.
+    /// A [`TimerWaker`] was woken.
     Signalled,
 }
 
@@ -33,7 +32,7 @@ struct Handles {
 unsafe impl Send for Handles {}
 // SAFETY: `event` is only passed to `SetEvent`, which any thread may call at any
 // time, and to a wait. `timer` is armed and waited on only through
-// `TimerWait`'s `&mut self` methods, and there is one `TimerWait`, so no two
+// `TimerWaiter`'s `&mut self` methods, and there is one `TimerWaiter`, so no two
 // threads touch it at once.
 unsafe impl Sync for Handles {}
 
@@ -49,9 +48,9 @@ impl Drop for Handles {
 }
 
 /// The waking half of a wake signal and a waitable timer: any thread, through
-/// any clone, ends the [`TimerWait`]'s current or next wait.
+/// any clone, ends the [`TimerWaiter`]'s current or next wait.
 #[derive(Clone, Debug)]
-pub struct TimerWake {
+pub struct TimerWaker {
     handles: Arc<Handles>,
 }
 
@@ -59,21 +58,21 @@ pub struct TimerWake {
 /// and the wake signal. There is one, and its waits take `&mut self`, so two
 /// threads cannot wait on the timer at once.
 #[derive(Debug)]
-pub struct TimerWait {
+pub struct TimerWaiter {
     handles: Arc<Handles>,
 }
 
-/// A [`TimerWake`] and the one [`TimerWait`] it ends, with nothing signalled.
+/// A [`TimerWaker`] and the one [`TimerWaiter`] it ends, with nothing signalled.
 ///
 /// # Errors
 ///
 /// The failing call, with `GetLastError`'s error.
-pub fn waitable_timer() -> Result<(TimerWake, TimerWait), Error> {
+pub fn waitable_timer() -> Result<(TimerWaker, TimerWaiter), Error> {
     // SAFETY: null security attributes and name; an auto-reset event that
     // starts unsignalled.
     let event = unsafe { CreateEventW(std::ptr::null(), 0, 0, std::ptr::null()) };
     if event.is_null() {
-        return Err(last_os(Operation::CreateEvent));
+        return Err(last_os(OsOperation::CreateEvent));
     }
     // High resolution needs Windows 10 1803; the call refuses the flag
     // before that, and the plain timer is the fallback.
@@ -93,22 +92,22 @@ pub fn waitable_timer() -> Result<(TimerWake, TimerWait), Error> {
         };
     }
     if timer.is_null() {
-        let error = last_os(Operation::CreateWaitableTimer);
+        let error = last_os(OsOperation::CreateWaitableTimer);
         // SAFETY: `event` is the open event made above, closed once.
         unsafe { CloseHandle(event) };
         return Err(error);
     }
     let handles = Arc::new(Handles { timer, event });
     Ok((
-        TimerWake {
+        TimerWaker {
             handles: Arc::clone(&handles),
         },
-        TimerWait { handles },
+        TimerWaiter { handles },
     ))
 }
 
-impl TimerWake {
-    /// Ends the [`TimerWait`]'s current or next wait. A wake made while
+impl TimerWaker {
+    /// Ends the [`TimerWaiter`]'s current or next wait. A wake made while
     /// nobody waits ends the next wait at once.
     ///
     /// # Errors
@@ -117,14 +116,14 @@ impl TimerWake {
     pub fn wake(&self) -> Result<(), Error> {
         // SAFETY: `event` is the open event.
         if unsafe { SetEvent(self.handles.event) } == 0 {
-            return Err(last_os(Operation::SetEvent));
+            return Err(last_os(OsOperation::SetEvent));
         }
         Ok(())
     }
 }
 
-impl TimerWait {
-    /// Returns when a [`TimerWake`] has woken it. A wake made while nobody
+impl TimerWaiter {
+    /// Returns when a [`TimerWaker`] has woken it. A wake made while nobody
     /// waits ends this wait at once.
     ///
     /// # Errors
@@ -134,7 +133,7 @@ impl TimerWait {
         self.block(1).map(|_| ())
     }
 
-    /// Returns when `timeout` has passed or a [`TimerWake`] has woken it.
+    /// Returns when `timeout` has passed or a [`TimerWaker`] has woken it.
     ///
     /// # Errors
     ///
@@ -157,7 +156,7 @@ impl TimerWait {
             )
         };
         if armed == 0 {
-            return Err(last_os(Operation::SetWaitableTimer));
+            return Err(last_os(OsOperation::SetWaitableTimer));
         }
         Ok(match self.block(2)? {
             0 => Woken::Signalled,
@@ -174,7 +173,7 @@ impl TimerWait {
         let result = unsafe { WaitForMultipleObjects(count, handles.as_ptr(), 0, INFINITE) };
         match result.wrapping_sub(WAIT_OBJECT_0) {
             index if index < count => Ok(index),
-            _ => Err(last_os(Operation::WaitForMultipleObjects)),
+            _ => Err(last_os(OsOperation::WaitForMultipleObjects)),
         }
     }
 }
