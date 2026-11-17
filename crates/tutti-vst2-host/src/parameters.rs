@@ -16,6 +16,7 @@ use tutti_plugin_types::{
     Normalized, ParamFlags, ParamMapping, ParamRange, ParamSteps, ParamUnit,
     ParameterInfo as SharedParameterInfo,
 };
+use tutti_rt::Tally;
 use tutti_types::ParamId;
 
 use crate::loaded::Vst2Loaded;
@@ -313,8 +314,14 @@ impl Vst2Loaded {
     /// [`Control::take_reported_edits`](tutti_plugin_types::Control::take_reported_edits). In practice it
     /// indicates a host that has stopped draining, not a busy plugin — the
     /// capacity is sized for a whole-preset burst.
-    pub fn dropped_param_changes(&self) -> u64 {
+    pub fn dropped_param_changes(&self) -> &Tally<u64> {
         self.host.dropped_param_changes()
+    }
+
+    /// How many plugin callbacks the host did not answer since load: an `audioMaster`
+    /// opcode it does not implement, or one with a null or misaligned pointer. Monotonic.
+    pub fn refused_callbacks(&self) -> &Tally<u64> {
+        self.host.refused_callbacks()
     }
 }
 

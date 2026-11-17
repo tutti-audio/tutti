@@ -167,7 +167,7 @@ impl Controller for ClapController {
     type Processor = ClapProcessor;
 
     fn latency(&self, main: MainThreadMarker) -> Samples {
-        Samples(self.loaded().latency_samples(main) as usize)
+        self.loaded().latency_samples(main)
     }
 
     fn tail(&self, main: MainThreadMarker) -> PluginTail {

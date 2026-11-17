@@ -405,8 +405,14 @@ fn an_oversized_block_is_still_refused_after_a_change() {
     let err = render(&mut au, &input, &mut output, 2048)
         .expect_err("a 2048-frame render must be refused at a 256-frame block size");
     assert!(
-        matches!(err, AuError::InvalidBuffer(_)),
-        "expected InvalidBuffer for an oversized block, got {err:?}"
+        matches!(
+            err,
+            AuError::BlockTooLarge {
+                frames: 2048,
+                max: 256
+            }
+        ),
+        "expected BlockTooLarge for an oversized block, got {err:?}"
     );
 
     // The instance must still be usable at a legal size afterwards.

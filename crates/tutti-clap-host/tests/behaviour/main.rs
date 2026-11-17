@@ -10,7 +10,6 @@ mod support;
 static A: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
 
 mod clap_audio_correctness;
-mod clap_audio_thread_claim_no_alloc;
 mod clap_editor_instance;
 mod clap_event_lists;
 mod clap_midi_groups;

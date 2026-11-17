@@ -122,11 +122,11 @@ fn cases() -> Vec<(&'static str, fn())> {
     cases!(
         has_editor_agrees_with_opening_one,
         open_size_close_is_idempotent_and_reports_zero_after,
-        view_ptr_is_non_null_only_while_open,
+        is_open_only_until_closed,
         repeated_open_close_cycles_stay_balanced,
         an_au_without_a_cocoa_view_is_refused_cleanly,
         dropping_without_closing_is_safe,
-        dropping_off_the_main_thread_leaks_and_counts_the_view,
+        dropping_off_the_main_thread_defers_and_counts_the_close,
         two_editors_on_one_unit_are_independent,
     )
 }

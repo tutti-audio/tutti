@@ -15,7 +15,6 @@
 
 use std::fmt;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use thiserror::Error;
 
@@ -42,20 +41,20 @@ impl fmt::Display for ResourceId {
 /// (off the session's own call) takes ids no other token has.
 #[derive(Clone, Debug)]
 pub(crate) struct ResourceIds {
-    last: Arc<AtomicU64>,
+    last: Arc<tutti_types::Mint>,
 }
 
 impl ResourceIds {
     pub(crate) fn new() -> Self {
         Self {
-            last: Arc::new(AtomicU64::new(0)),
+            last: Arc::new(tutti_types::Mint::new()),
         }
     }
 
     /// The next id: distinct from every one this source (and its clones)
     /// returned before.
     pub(crate) fn mint(&self) -> ResourceId {
-        ResourceId(self.last.fetch_add(1, Ordering::Relaxed) + 1)
+        ResourceId(self.last.mint().get())
     }
 }
 

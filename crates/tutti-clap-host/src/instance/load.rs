@@ -12,13 +12,13 @@ use std::sync::Arc;
 use tutti_clap_ffi::{AudioPortInfo, Bundle, DescriptorInfo, LoadError, PortKind, Stage};
 use tutti_plugin_types::{BusChannels, ChannelLayout, EditorPresence, PluginVersion};
 use tutti_plugin_types::{Load, MainThreadMarker, MainWorkHandle, Origin, SampleRate};
-use tutti_types::LayoutError;
+use tutti_types::{LayoutError, MaxBlock, Samples};
 
 /// A placeholder rate for the plugin until its first activation, whose
 /// `Prepare` carries the real one.
 const PLACEHOLDER_SAMPLE_RATE: SampleRate = SampleRate::SR_44K1;
 /// A placeholder block size, for the same reason.
-const PLACEHOLDER_MAX_FRAMES: u32 = 512;
+const PLACEHOLDER_MAX_BLOCK: MaxBlock = MaxBlock::of(Samples(512));
 
 /// What to load: which library of a bundle and which plugin of the library.
 #[derive(Debug, Clone, Default)]
@@ -59,10 +59,14 @@ fn stage_of(stage: Stage) -> LoadStage {
 }
 
 fn load_failed(bundle_path: &Path, error: LoadError) -> ClapError {
+    let mut reason = error.to_string();
+    if let Some(cause) = std::error::Error::source(&error) {
+        reason = format!("{reason}: {cause}");
+    }
     ClapError::LoadFailed {
         path: bundle_path.to_path_buf(),
         stage: stage_of(error.stage()),
-        reason: error.reason(),
+        reason,
     }
 }
 
@@ -167,7 +171,7 @@ impl ClapLoaded {
         let (ports, supports_f64) = read_audio_ports(main, &mut plugin_info, &plugin)?;
         let audio = AudioConfig {
             sample_rate: PLACEHOLDER_SAMPLE_RATE,
-            max_frames: PLACEHOLDER_MAX_FRAMES,
+            max_block: PLACEHOLDER_MAX_BLOCK,
             supports_f64,
             f64_active: false,
         };

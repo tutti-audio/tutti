@@ -270,7 +270,7 @@ impl Control for ClapLoaded {
         self.measured(main);
         let layout = self.layout(main);
         let latency_samples = if self.flags.active {
-            Samples(self.latency_samples(main) as usize)
+            self.latency_samples(main)
         } else {
             Samples(0)
         };

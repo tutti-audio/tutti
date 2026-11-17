@@ -1095,7 +1095,7 @@ fn a_plugins_echo_of_a_host_write_is_not_reported() {
     );
     assert_eq!(echoed, Vec::new(), "the echo is not an edit");
     assert_eq!(
-        instance.loaded().dropped_param_changes(),
+        instance.loaded().dropped_param_changes().get(),
         0,
         "nor a dropped one"
     );

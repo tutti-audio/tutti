@@ -316,6 +316,37 @@ impl PluginControls {
         self.chunks.skipped()
     }
 
+    /// Commands the audio side could not hand to the plugin's bridge: a full
+    /// command queue refused a parameter, reset or rate command, or a block
+    /// found no payload or no room for its parameter buffer, so the block was
+    /// refused. The command is lost (a block plays as silence). Telemetry
+    /// beside [`skipped_chunks`](Self::skipped_chunks): an overloaded plugin or
+    /// machine. RT-safe: one relaxed load.
+    pub fn refused_commands(&self) -> u64 {
+        self.chunks.commands_refused()
+    }
+
+    /// Audio responses (a block's MIDI-out and status) the bridge could not
+    /// queue for the audio thread because its queue was full. Lost.
+    /// RT-safe: one relaxed load.
+    pub fn lost_responses(&self) -> u64 {
+        self.chunks.responses_lost()
+    }
+
+    /// Parameter-change buffers the audio thread leaked rather than free on
+    /// its own thread: a broken sizing bound, apart from a full command queue
+    /// ([`refused_commands`](Self::refused_commands)). RT-safe: one relaxed load.
+    pub fn leaked_buffers(&self) -> u64 {
+        self.chunks.leaked_buffers()
+    }
+
+    /// Parameter writes the editor's mirror refused because its queue was
+    /// full. The plugin still got the write; only the open editor's display
+    /// missed it. RT-safe: one relaxed load.
+    pub fn mirror_writes_refused(&self) -> u64 {
+        self.chunks.mirror_refused()
+    }
+
     /// Whether the chunk the node submitted last, and has not played yet,
     /// has been answered: `true` with none in flight.
     ///

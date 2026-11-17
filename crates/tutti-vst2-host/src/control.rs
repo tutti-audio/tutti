@@ -18,15 +18,34 @@ use crate::loaded::Vst2Loaded;
 use crate::types::PluginInfo;
 use keyboard_types::KeyState;
 
+/// An error and its sources, as one line: the shared vocabulary carries text.
+fn error_chain(error: &dyn std::error::Error) -> String {
+    let mut text = error.to_string();
+    let mut source = error.source();
+    while let Some(cause) = source {
+        text.push_str(": ");
+        text.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    text
+}
+
 /// A `Vst2Error` as the shared vocabulary's error.
 pub(crate) fn plugin_error(error: Vst2Error) -> PluginError {
     match error {
         Vst2Error::LoadFailed { stage, reason, .. } => PluginError::Load { stage, reason },
-        Vst2Error::StateError(reason) => PluginError::State(reason),
+        Vst2Error::Loader { stage, source, .. } => PluginError::Load {
+            stage,
+            reason: error_chain(&source),
+        },
         Vst2Error::StateFrame(frame) => PluginError::State(frame.to_string()),
-        Vst2Error::EditorError(reason) => {
-            PluginError::Editor(tutti_plugin_types::EditorError::PluginError(reason))
-        }
+        Vst2Error::NoEditor | Vst2Error::EditorOpenFailed => PluginError::Editor(
+            tutti_plugin_types::EditorError::PluginError(error.to_string()),
+        ),
+        state @ (Vst2Error::ChunkSave(_)
+        | Vst2Error::NoGetParameter { .. }
+        | Vst2Error::TooManyParameters { .. }
+        | Vst2Error::NoSetParameter { .. }) => PluginError::State(error_chain(&state)),
     }
 }
 
@@ -252,7 +271,7 @@ impl Control for Vst2Loaded {
         // Control side, so the one warning about a plugin that grew its pins past the
         // activation (it renders silence until the restart its `audioMasterIOChanged` asks for)
         // is logged here.
-        let _ = self.instance.report_pin_refusals();
+        self.instance.report_pin_refusals();
         out.extend(tutti_plugin_types::taken(self.host.requests()));
     }
 
@@ -306,7 +325,7 @@ impl Control for Vst2Loaded {
 
     /// The reports the bounded queue refused ([`take_reported_edits`](Control::take_reported_edits)).
     fn dropped_reported_edits(&self) -> u64 {
-        self.dropped_param_changes()
+        self.dropped_param_changes().get()
     }
 }
 

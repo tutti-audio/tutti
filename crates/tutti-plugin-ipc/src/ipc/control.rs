@@ -50,6 +50,8 @@ macro_rules! served_control {
             /// included): the wire is a foreign boundary and the peer is
             /// another process.
             fn set_parameter_value(&self, id: ParamId, value: Normalized) {
+                // A full command queue refuses the write, counted
+                // (`PluginControls::refused_commands`).
                 let _ = self.link.bridge.set_parameter_rt(id, value);
             }
 

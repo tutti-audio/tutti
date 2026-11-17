@@ -570,7 +570,7 @@ fn a_command_waits_for_the_commit_it_was_checked_against() {
         ed.remove(NodeKey(u64::from(round - 1)));
         loop {
             match ed.commit() {
-                Ok(()) => break,
+                Ok(_) => break,
                 Err(tutti_graph::CommitError::Backpressure) => std::thread::yield_now(),
                 Err(e) => panic!("{e}"),
             }
