@@ -20,9 +20,6 @@ env:
   CARGO_TERM_COLOR: always
   # CI builds from clean, so an incremental cache only costs time.
   CARGO_INCREMENTAL: 0
-  # Line tables only: backtraces keep file:line, and full debug info filled the runner's disk.
-  CARGO_PROFILE_DEV_DEBUG: line-tables-only
-  CARGO_PROFILE_TEST_DEBUG: line-tables-only
   RUST_BACKTRACE: 1
 
 # Every stable job installs the toolchain `rust-toolchain.toml` pins, and every cargo command that resolves
@@ -290,8 +287,8 @@ jobs:
         run: |
           cargo clippy --locked -p tutti-cpal --features capture --all-targets -- -D warnings
           cargo clippy --locked -p tutti-session --features audio-io --all-targets -- -D warnings
-          cargo clippy --locked -p tutti-session --features clap,export,modulation,midi-hardware,synth,soundfont,sampler,vst2,device,audio-io,serde --all-targets -- -D warnings
-          cargo clippy --locked -p tutti --features clap,export,modulation,sampler,midi-hardware,synth --all-targets -- -D warnings
+          cargo clippy --locked -p tutti-session --features clap,export,midi-hardware,synth,soundfont,sampler,vst2,device,audio-io,serde --all-targets -- -D warnings
+          cargo clippy --locked -p tutti --features clap,export,sampler,midi-hardware,synth --all-targets -- -D warnings
           cargo clippy --locked -p tutti --features audio-io --all-targets -- -D warnings
           cargo clippy --locked -p tutti --no-default-features --features io --all-targets -- -D warnings
           cargo clippy --locked -p tutti-export --lib -- -D warnings
@@ -299,7 +296,7 @@ jobs:
           cargo clippy --locked -p tutti-session --lib --features vst3,au -- -D warnings
           cargo clippy --locked -p tutti --features device,soundfont,decode-wav,decode-flac,decode-mp3,decode-ogg,export,encode-flac,encode-aiff,encode-vorbis --all-targets -- -D warnings
           cargo clippy --locked -p tutti-sampler --lib -- -D warnings
-          cargo clippy --locked -p tutti-sampler --lib --features decode-wav,decode-flac,decode-mp3,decode-ogg -- -D warnings
+          cargo clippy --locked -p tutti-sampler --all-targets -- -D warnings
           cargo clippy --locked -p tutti-plugin --features vst3,au,serde --all-targets -- -D warnings
           cargo clippy --locked -p tutti-codec --all-targets -- -D warnings
           cargo clippy --locked -p tutti-codec --features encode-wav --all-targets -- -D warnings
@@ -316,6 +313,7 @@ jobs:
           cargo clippy --locked -p tutti-midi-protocol --features serde --all-targets -- -D warnings
           cargo clippy --locked -p tutti-midi-device --features serde --all-targets -- -D warnings
           cargo clippy --locked -p tutti-tempo --features serde --all-targets -- -D warnings
+          cargo clippy --locked -p tutti-measure --features serde --all-targets -- -D warnings
           cargo clippy --locked -p tutti-dsp --lib -- -D warnings
           cargo clippy --locked -p tutti-plugin-types --lib --features contract -- -D warnings
           cargo clippy --locked -p tutti-midi-hardware --features sequencer-tests --all-targets -- -D warnings
@@ -340,8 +338,8 @@ jobs:
         run: |
           cargo nextest run --locked -p tutti-cpal --features capture
           cargo nextest run --locked -p tutti-session --features audio-io
-          cargo nextest run --locked -p tutti-session --features clap,export,modulation,midi-hardware,synth,soundfont,sampler,vst2,device,audio-io,serde
-          cargo nextest run --locked -p tutti --features clap,export,modulation,sampler,midi-hardware,synth
+          cargo nextest run --locked -p tutti-session --features clap,export,midi-hardware,synth,soundfont,sampler,vst2,device,audio-io,serde
+          cargo nextest run --locked -p tutti --features clap,export,sampler,midi-hardware,synth
           cargo nextest run --locked -p tutti --features audio-io
           cargo nextest run --locked -p tutti --no-default-features --features io
           cargo nextest run --locked -p tutti-session --features export,encode-flac,encode-aiff,encode-vorbis
@@ -356,6 +354,7 @@ jobs:
           cargo nextest run --locked -p tutti-midi-protocol --features serde
           cargo nextest run --locked -p tutti-midi-device --features serde
           cargo nextest run --locked -p tutti-tempo --features serde
+          cargo nextest run --locked -p tutti-measure --features serde
           cargo nextest run --locked -p tutti-buffers --features serde
           cargo nextest run --locked -p tutti-plugin-types --features testing
           cargo nextest run --locked -p tutti-plugin-db --features serde
@@ -459,7 +458,7 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           cargo nextest run --locked -p tutti-session \
-            --features clap,export,modulation,device,midi,sampler,vst2 \
+            --features clap,export,device,midi,sampler,vst2 \
             -E 'binary(plugin)'
 
   # Split from `test` so the two run on separate runners and overlap; same env and profile.

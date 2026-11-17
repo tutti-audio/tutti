@@ -85,34 +85,23 @@ use crate::plugin::{Gate, HostedPlugin, Notices, queue};
 /// is absent and a set of it goes to the plugin.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Driven {
-    #[cfg(feature = "modulation")]
     knobs: std::sync::Arc<std::sync::Mutex<Knobs>>,
 }
 
 /// The lanes with a knob, by the parameter they drive.
-#[cfg(feature = "modulation")]
 pub(crate) type Knobs = std::collections::BTreeMap<ParamId, tutti_nodes::automation::LaneControls>;
 
 impl Driven {
     /// Writes `value` into parameter `id`'s lane knob. `false` when no lane
     /// with a knob drives it.
-    #[cfg(feature = "modulation")]
     pub(crate) fn write(&self, id: ParamId, value: Normalized) -> bool {
         self.lock()
             .get(&id)
             .is_some_and(|lane| lane.set_knob(value.get() as f32))
     }
 
-    /// Without modulation no lane drives a parameter.
-    #[cfg(not(feature = "modulation"))]
-    #[allow(clippy::unused_self, reason = "the same call as with modulation")]
-    pub(crate) fn write(&self, _id: ParamId, _value: Normalized) -> bool {
-        false
-    }
-
     /// Replaces the driven parameters with `knobs`; nothing is touched while
     /// there were none and there are none.
-    #[cfg(feature = "modulation")]
     pub(crate) fn replace(&self, knobs: Knobs) {
         let mut held = self.lock();
         if held.is_empty() && knobs.is_empty() {
@@ -124,7 +113,6 @@ impl Driven {
     /// Reports each driven parameter's knob into `mirror`: a read of the
     /// plugin lands the value it plays (the knob plus the lane's routes), and
     /// the mirror holds the knob.
-    #[cfg(feature = "modulation")]
     pub(crate) fn report_knobs(&self, mirror: &tutti_plugin_host::PluginParamValues) {
         for (&id, lane) in self.lock().iter() {
             if let Some(knob) = lane.knob() {
@@ -133,7 +121,6 @@ impl Driven {
         }
     }
 
-    #[cfg(feature = "modulation")]
     fn lock(&self) -> std::sync::MutexGuard<'_, Knobs> {
         self.knobs
             .lock()
@@ -373,10 +360,9 @@ impl<'a> Param<'a> {
         self.params.hosted.mirror.value_at(self.position)
     }
 
-    /// The reference that targets this parameter in a modulation route
-    /// (feature `modulation`): the one a native node's param method gives, so a
-    /// route targets a plugin's parameter and a native one through one type.
-    #[cfg(feature = "modulation")]
+    /// The reference that targets this parameter in a modulation route: the
+    /// one a native node's param method gives, so a route targets a plugin's
+    /// parameter and a native one through one type.
     #[must_use]
     pub fn target(&self) -> crate::ParamRef {
         crate::Key::<crate::PluginNode>::new(self.params.node).param(self.id())

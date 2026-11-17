@@ -198,6 +198,9 @@ pub(crate) struct AudioOutput {
     /// the server. A *diagnostic*, not the plugin's reported PDC latency —
     /// that arrives as a `BridgeMessage::LatencyChanged` in `Samples`.
     pub latency_us: u64,
+    /// The block's audio was not published: its input slot was recycled, or an
+    /// output channel was not written. The host reads it as silence.
+    pub refused: bool,
 }
 
 /// Driver for one audio block. Holds scratch across calls so the audio
@@ -561,7 +564,8 @@ impl AudioPipeline {
             //
             // Either way the host reads a stale sequence and substitutes silence,
             // which is the designed failure mode.
-            if inputs_ready && all_channels_written {
+            let published = inputs_ready && all_channels_written;
+            if published {
                 shm.publish(seq);
             }
 
@@ -578,6 +582,7 @@ impl AudioPipeline {
             // into the slab above.
             Ok(AudioOutput {
                 latency_us: start.elapsed().as_micros() as u64,
+                refused: !published,
             })
         })
     }

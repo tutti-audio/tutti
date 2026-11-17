@@ -71,6 +71,7 @@ impl Submitted {
 
 use ask::ask;
 use channels::Channels;
+pub(crate) use channels::{FATES, Fate};
 use lifecycle::Lifecycle;
 use messages::{AudioResponse, Command};
 use parking_lot::Mutex;
@@ -309,6 +310,11 @@ impl AudioBridge {
     /// pipeline's counters read it beside the batcher's own.
     pub(crate) fn skipped_cell(&self) -> Arc<std::sync::atomic::AtomicU64> {
         self.channels.skipped_cell()
+    }
+
+    /// What the bridge thread learned of chunk `seq`, among the last few.
+    pub(crate) fn chunk_fate(&self, seq: u64) -> Option<Fate> {
+        self.channels.fate(seq)
     }
 
     // --- RT fire-and-forget ---

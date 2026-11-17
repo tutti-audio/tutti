@@ -144,6 +144,14 @@ inherits = "release"
 debug = "line-tables-only"
 strip = "none"
 
+# Line tables only: a backtrace keeps file and line, and codegen, linking and
+# disk use shrink. Dependencies carry no debuginfo. `test` inherits all of it.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
 # `aeffect_params` compares function addresses across crates, which holds only
 # when nothing is optimized, so this crate stays at opt-level 0.
 [profile.dev.package.tutti-vst2-author]

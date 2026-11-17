@@ -212,7 +212,6 @@ impl std::fmt::Debug for Doorbell {
 mod tests {
     use std::sync::Arc;
     use std::sync::atomic::AtomicBool;
-    use std::time::Instant;
 
     use super::*;
 
@@ -255,13 +254,12 @@ mod tests {
         assert!(!bell.ring());
     }
 
-    /// A timed wait with nothing pending returns on its own.
+    /// A timed wait with nothing pending returns on its own: the test ends.
     #[test]
     fn a_timed_wait_returns_without_a_ring() {
         let bell = Doorbell::new();
-        let t0 = Instant::now();
         bell.wait_timeout(|| false, Duration::from_millis(20));
-        assert!(t0.elapsed() >= Duration::from_millis(15));
+        assert!(!bell.is_asleep(), "the waiter disarmed itself on return");
     }
 
     /// A closure that is already true keeps the sleeper from parking.

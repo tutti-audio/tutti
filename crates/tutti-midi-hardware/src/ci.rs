@@ -1309,7 +1309,7 @@ mod tests {
     use std::time::Duration;
 
     use tutti_midi_device::{CiCategories, DiscoveryData, EndpointId, PortDirection};
-    use tutti_ump::{ManufacturerId, U7};
+    use tutti_ump::{ManufacturerId, SoftwareRevision, U7};
 
     use super::*;
     use crate::MidiSession;
@@ -1320,7 +1320,7 @@ mod tests {
             manufacturer: ManufacturerId::new(0x41).unwrap(),
             family: [U7::of(1), U7::of(2)],
             model: [U7::of(3), U7::of(4)],
-            revision: [U7::of(5), U7::of(6), U7::of(7), U7::of(8)],
+            revision: SoftwareRevision::from([U7::of(5), U7::of(6), U7::of(7), U7::of(8)]),
         }
     }
 

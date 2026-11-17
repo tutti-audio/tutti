@@ -2792,6 +2792,7 @@ dependencies = [
  "pitch-detection",
  "rand",
  "serde",
+ "serde_json",
  "thiserror 2.0.21",
  "tutti-buffers",
  "tutti-dsp",

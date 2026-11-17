@@ -43,7 +43,7 @@ mod plugin_health;
 mod plugin_latency;
 // Modulation lanes on a hosted plugin's parameters: across a recovery and a
 // crossfade, and an export equal to the live render.
-#[cfg(all(feature = "clap", feature = "modulation", feature = "export"))]
+#[cfg(all(feature = "clap", feature = "export"))]
 mod plugin_modulation;
 // The main-thread view: editors serviced by its update, the sizes they ask
 // for, and the graveyard it empties; a fake plugin with an editor.

@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 use tutti_ump::DeviceIdentity;
-use tutti_ump::{MidiChannel, U7};
+use tutti_ump::{MidiChannel, SoftwareRevision, U7};
 
 use super::super::testing::{OTHER, OURS, PEER, channel, header_from, nak_with, wait, wait_with};
 use super::super::*;
@@ -952,7 +952,7 @@ fn an_inquiry_of_tuttis_own_responder_completes_with_an_empty_table() {
         manufacturer: ManufacturerId::of(0x41),
         family: [U7::of(1), U7::of(2)],
         model: [U7::of(3), U7::of(4)],
-        revision: [U7::of(5), U7::of(6), U7::of(7), U7::of(8)],
+        revision: SoftwareRevision::from([U7::of(5), U7::of(6), U7::of(7), U7::of(8)]),
     };
     let (mut device, _) = CiDevice::new(
         identity,
