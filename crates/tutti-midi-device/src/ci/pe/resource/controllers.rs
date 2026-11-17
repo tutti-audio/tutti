@@ -398,12 +398,6 @@ pub struct PeChCtrlEntry {
     default_cc_map: bool,
 }
 
-/// An entry that claims the Default Control Change Mapping Profile for a message
-/// that is no Control Change.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("defaultCCMap is for a Control Change, not for {0:?}")]
-pub struct DefaultMapNotCc(pub CtrlKind);
-
 impl PeChCtrlEntry {
     /// An entry with `defaultCCMap` false.
     #[must_use]
@@ -415,18 +409,14 @@ impl PeChCtrlEntry {
     }
 
     /// An entry whose Control Change follows the Default Control Change Mapping
-    /// Profile, Level 1 (`defaultCCMap`).
-    ///
-    /// # Errors
-    ///
-    /// [`DefaultMapNotCc`] when the controller is no Control Change.
-    pub fn with_default_cc_map(ctrl: PeCtrl) -> Result<Self, DefaultMapNotCc> {
-        match ctrl.controller {
-            PeController::ControlChange(_) => Ok(Self {
-                ctrl,
-                default_cc_map: true,
-            }),
-            other => Err(DefaultMapNotCc(other.kind())),
+    /// Profile, Level 1 (`defaultCCMap`): `ctrl` with its controller set to the
+    /// Control Change `index`.
+    #[must_use]
+    pub fn with_default_cc_map(mut ctrl: PeCtrl, index: CcIndex) -> Self {
+        ctrl.controller = PeController::ControlChange(index);
+        Self {
+            ctrl,
+            default_cc_map: true,
         }
     }
 
@@ -477,14 +467,16 @@ list_type! {
     PeAllCtrlList of PeAllCtrlEntry
 }
 
-impl PeAllCtrlList {
+impl TryFrom<Vec<PeAllCtrlEntry>> for PeAllCtrlList {
+    type Error = ListedTwice;
+
     /// The list of `entries`.
     ///
     /// # Errors
     ///
     /// [`ListedTwice`] for a controller listed twice, other than once for what it
     /// sends and once for what it recognizes.
-    pub fn checked(entries: Vec<PeAllCtrlEntry>) -> Result<Self, ListedTwice> {
+    fn try_from(entries: Vec<PeAllCtrlEntry>) -> Result<Self, ListedTwice> {
         check_unique(
             entries
                 .iter()
@@ -492,7 +484,9 @@ impl PeAllCtrlList {
         )?;
         Ok(Self(entries))
     }
+}
 
+impl PeAllCtrlList {
     pub(super) fn to_json(&self) -> PeJson {
         PeJson::Array(
             self.0
@@ -519,7 +513,7 @@ impl PeAllCtrlList {
                 Ok(PeAllCtrlEntry { channel: ch, ctrl })
             })
             .collect::<Result<Vec<_>, PeDataError>>()?;
-        Self::checked(entries)
+        Self::try_from(entries)
             .map_err(|e| PeDataError::new("AllCtrlList", PeDataFault::NotValid(listed_twice(&e))))
     }
 }
@@ -533,17 +527,21 @@ list_type! {
     PeChCtrlList of PeChCtrlEntry
 }
 
-impl PeChCtrlList {
+impl TryFrom<Vec<PeChCtrlEntry>> for PeChCtrlList {
+    type Error = ListedTwice;
+
     /// The list of `entries`.
     ///
     /// # Errors
     ///
-    /// [`ListedTwice`] as for [`PeAllCtrlList::checked`].
-    pub fn checked(entries: Vec<PeChCtrlEntry>) -> Result<Self, ListedTwice> {
+    /// [`ListedTwice`] as for [`PeAllCtrlList`]'s `TryFrom`.
+    fn try_from(entries: Vec<PeChCtrlEntry>) -> Result<Self, ListedTwice> {
         check_unique(entries.iter().map(|e| (e.ctrl.controller, &e.ctrl)))?;
         Ok(Self(entries))
     }
+}
 
+impl PeChCtrlList {
     pub(super) fn to_json(&self) -> PeJson {
         PeJson::Array(
             self.0
@@ -571,18 +569,21 @@ impl PeChCtrlList {
                     .unwrap_or(false);
                 ctrl.extensions = f.finish()?;
                 if map {
-                    PeChCtrlEntry::with_default_cc_map(ctrl).map_err(|_| {
-                        PeDataError::new(
+                    match ctrl.controller {
+                        PeController::ControlChange(index) => {
+                            Ok(PeChCtrlEntry::with_default_cc_map(ctrl, index))
+                        }
+                        _ => Err(PeDataError::new(
                             "ChCtrlList entry.defaultCCMap",
                             PeDataFault::NotValid("Control Change flag"),
-                        )
-                    })
+                        )),
+                    }
                 } else {
                     Ok(PeChCtrlEntry::new(ctrl))
                 }
             })
             .collect::<Result<Vec<_>, PeDataError>>()?;
-        Self::checked(entries)
+        Self::try_from(entries)
             .map_err(|e| PeDataError::new("ChCtrlList", PeDataFault::NotValid(listed_twice(&e))))
     }
 }

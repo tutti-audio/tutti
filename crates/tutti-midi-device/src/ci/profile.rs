@@ -18,7 +18,7 @@
 //! [`ProfileId::from_bytes`] refuses what [`ProfileId::to_bytes`] could not give
 //! back, a one-byte id followed by a non-zero byte (§7.3.1 fills the rest
 //! with zeroes), and a manufacturer Profile cannot carry the id `7E`, which would
-//! read back as a Standard Profile. [`ProfileLists`] holds at most 16383 Profiles
+//! read back as a Standard Profile. [`ProfileList`] holds at most 16383 Profiles
 //! per list, the most two 7-bit bytes can count, so a Reply it builds is always
 //! writable.
 
@@ -273,37 +273,58 @@ pub enum ProfileState {
 
 /// A list the wire cannot hold: a count is 14 bits (§7.3).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("{} Profile Ids do not fit a 14-bit count (at most {})", .len, ProfileLists::MAX_LEN)]
+#[error("{} Profile Ids do not fit a 14-bit count (at most {})", .len, ProfileList::MAX_LEN)]
 pub struct ListTooLong {
     /// The length refused.
     pub len: usize,
 }
 
+/// A list of Profile Ids of at most `MAX_LEN` Ids, the largest count a Reply to
+/// Profile Inquiry carries.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ProfileList(Vec<ProfileId>);
+
+impl ProfileList {
+    /// The longest list: the count is two 7-bit bytes.
+    pub const MAX_LEN: usize = 0x3FFF;
+
+    /// The list of `ids`, or `None` when it is longer than `MAX_LEN`.
+    #[must_use]
+    pub fn new(ids: Vec<ProfileId>) -> Option<Self> {
+        Self::try_from(ids).ok()
+    }
+
+    /// The Ids.
+    #[must_use]
+    pub fn as_slice(&self) -> &[ProfileId] {
+        &self.0
+    }
+}
+
+impl TryFrom<Vec<ProfileId>> for ProfileList {
+    type Error = ListTooLong;
+
+    fn try_from(ids: Vec<ProfileId>) -> Result<Self, ListTooLong> {
+        if ids.len() > Self::MAX_LEN {
+            return Err(ListTooLong { len: ids.len() });
+        }
+        Ok(Self(ids))
+    }
+}
+
 /// The two lists of a Reply to Profile Inquiry (§7.3): the Profiles supported and
-/// currently enabled, and those supported but currently disabled. Each holds at
-/// most `MAX_LEN` Ids, the largest count the message carries.
+/// currently enabled, and those supported but currently disabled.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ProfileLists {
-    enabled: Vec<ProfileId>,
-    disabled: Vec<ProfileId>,
+    enabled: ProfileList,
+    disabled: ProfileList,
 }
 
 impl ProfileLists {
-    /// The longest list: the count is two 7-bit bytes.
-    pub(crate) const MAX_LEN: usize = 0x3FFF;
-
-    /// Two lists, or the length of the one that does not fit.
-    ///
-    /// # Errors
-    ///
-    /// [`ListTooLong`] when either list is longer than `MAX_LEN`.
-    pub fn new(enabled: Vec<ProfileId>, disabled: Vec<ProfileId>) -> Result<Self, ListTooLong> {
-        for list in [&enabled, &disabled] {
-            if list.len() > Self::MAX_LEN {
-                return Err(ListTooLong { len: list.len() });
-            }
-        }
-        Ok(Self { enabled, disabled })
+    /// The lists of the Profiles enabled and of those disabled.
+    #[must_use]
+    pub fn new(enabled: ProfileList, disabled: ProfileList) -> Self {
+        Self { enabled, disabled }
     }
 
     /// Both lists empty: no Profiles reported (§7.13).
@@ -315,24 +336,24 @@ impl ProfileLists {
     /// The Profiles currently enabled.
     #[must_use]
     pub fn enabled(&self) -> &[ProfileId] {
-        &self.enabled
+        self.enabled.as_slice()
     }
 
     /// The Profiles supported and currently disabled.
     #[must_use]
     pub fn disabled(&self) -> &[ProfileId] {
-        &self.disabled
+        self.disabled.as_slice()
     }
 
     pub(crate) fn encode_body(&self, out: &mut impl Extend<u8>) {
         for list in [&self.enabled, &self.disabled] {
-            // `new` holds each length to 14 bits.
+            // A `ProfileList` holds its length to 14 bits.
             out.extend(
-                U14::from_len(list.len())
-                    .expect("`new` holds each list to 14 bits of length")
+                U14::from_len(list.as_slice().len())
+                    .expect("a `ProfileList` holds its length to 14 bits")
                     .to_le7(),
             );
-            for id in list {
+            for id in list.as_slice() {
                 out.extend(id.to_bytes());
             }
         }
