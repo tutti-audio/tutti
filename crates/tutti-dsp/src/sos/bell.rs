@@ -82,7 +82,8 @@ impl MatchedBell {
     /// K (m + 1) r^(m-2)` for `m >= 2` with `K = |b0| + |b1| + |b2|`, from the all-pole
     /// response `sum p1^k p2^(m-k)`, whose tail sum is `K r^(n-2) ((n + 1) / (1 - r) + r /
     /// (1 - r)^2)`, solved for `n` by doubling and bisection. [`Ring::Unbounded`] for a pole
-    /// that is not inside the unit circle or a ring-out past `2^24` frames. A cut rings as
+    /// that is not inside the unit circle, a ring-out past `2^24` frames or a floor that is not a
+    /// number or is infinite. A cut rings as
     /// the boost's zeros do.
     ///
     /// # Errors
@@ -92,7 +93,7 @@ impl MatchedBell {
         let b = self.section(center, rate)?;
         let eps = f64::from(floor.to_amplitude().get());
         Ok(match ring_frames(&b, eps) {
-            Some(frames) if frames <= MAX_TAIL_FRAMES as f64 => {
+            Some(frames) if eps.is_finite() && eps > 0.0 && frames <= MAX_TAIL_FRAMES as f64 => {
                 Ring::Finite(Seconds::new(frames / rate.get()))
             }
             _ => Ring::Unbounded,

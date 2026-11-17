@@ -3,6 +3,7 @@
 
 use tutti_types::{Db, Hz, SampleRate, Seconds};
 
+use super::MAX_TAIL_FRAMES;
 use super::butterworth::{check_cutoff, check_gain};
 use super::{Sos, SosError};
 use crate::{Biquad, Ring};
@@ -82,6 +83,9 @@ impl Tilt {
     /// `m >= 1` with `c = b1 - b0 a1 = 2 g (1 - A^2) / (1 + A g)^2`, so the tail sum is
     /// `c r^(n-1) / (1 - r)` and `n` is the first frame that brings it to `floor`.
     ///
+    /// [`Ring::Unbounded`] for a ring-out past `2^24` frames or a floor that is not a number or
+    /// is infinite.
+    ///
     /// # Errors
     ///
     /// As [`design`](Self::design).
@@ -89,8 +93,8 @@ impl Tilt {
         let fc = check_cutoff(center, rate)?;
         let a = libm::pow(10.0, check_gain(self.gain)? / 40.0);
         let g = libm::tan(core::f64::consts::PI * fc / rate.get());
-        let frames = tail_frames(a, g, f64::from(floor.to_amplitude().get()));
-        Ok(Ring::Finite(Seconds::new(frames / rate.get())))
+        let eps = f64::from(floor.to_amplitude().get());
+        Ok(finite(tail_frames(a, g, eps), eps, rate))
     }
 
     /// The time after which the output of every tilt with a center in `[lowest, highest]`
@@ -103,7 +107,8 @@ impl Tilt {
     /// under `A_max = 10^(largest / 40)`, so `n <= 1 + ln(A_max / floor) / L` for `L = -ln r
     /// = ln((x + 1) / |x - 1|)`. `L` rises on `(0, 1)` and falls on `(1, inf)`, so over
     /// `x` in `[g_lowest / A_max, A_max g_highest]` it is least at an end of that range, and
-    /// the bound is taken there.
+    /// the bound is taken there. The ends of the centers may be given in either order.
+    /// [`Ring::Unbounded`] as for [`ring_out`](Self::ring_out).
     ///
     /// # Errors
     ///
@@ -116,15 +121,15 @@ impl Tilt {
         rate: SampleRate,
         floor: Db,
     ) -> Result<Ring, SosError> {
-        let lo = check_cutoff(lowest, rate)?;
-        let hi = check_cutoff(highest, rate)?;
+        let (lo, hi) = (check_cutoff(lowest, rate)?, check_cutoff(highest, rate)?);
+        let (lo, hi) = (lo.min(hi), lo.max(hi));
         let a_max = libm::pow(10.0, check_gain(Db(largest.get().abs()))? / 40.0);
         let g = |fc: f64| libm::tan(core::f64::consts::PI * fc / rate.get());
         let eps = f64::from(floor.to_amplitude().get());
         let nepers = |x: f64| libm::log((x + 1.0) / (x - 1.0).abs());
         let least = nepers(g(lo) / a_max).min(nepers(a_max * g(hi)));
         let frames = 1.0 + libm::ceil(libm::log(a_max / eps).max(0.0) / least);
-        Ok(Ring::Finite(Seconds::new(frames / rate.get())))
+        Ok(finite(frames, eps, rate))
     }
 }
 
@@ -142,5 +147,15 @@ fn tail_frames(a: f64, g: f64, eps: f64) -> f64 {
         1.0
     } else {
         1.0 + libm::ceil(libm::log(sum / eps) / -libm::log(r))
+    }
+}
+
+/// `frames` as a ring-out, [`Ring::Unbounded`] past `2^24` frames or for a floor `eps` that is
+/// not a positive finite amplitude.
+fn finite(frames: f64, eps: f64, rate: SampleRate) -> Ring {
+    if eps.is_finite() && eps > 0.0 && frames <= MAX_TAIL_FRAMES as f64 {
+        Ring::Finite(Seconds::new(frames / rate.get()))
+    } else {
+        Ring::Unbounded
     }
 }

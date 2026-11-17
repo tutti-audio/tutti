@@ -46,7 +46,7 @@ pub enum SosError {
         q: Q,
     },
     /// A gain that is not within [`MAX_GAIN_MAGNITUDE`] of 0 dB, or not a number.
-    #[error("gain {gain:?} is not within 120 dB of unity")]
+    #[error("gain {gain:?} is not within {} dB of unity", MAX_GAIN_MAGNITUDE.get())]
     GainOutOfRange {
         /// The rejected gain.
         gain: Db,

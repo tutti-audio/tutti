@@ -67,8 +67,8 @@ fn tilt(fc: f32, db: f32) -> Biquad {
 }
 
 /// The matched bell is the analog one at DC, at the center and at Nyquist, in dB: to 1e-9
-/// at DC and Nyquist and to 1e-5 at the center (where `Biquad::response` of a pole this
-/// near 1 at 60 Hz sets the floor), for centers up to 22 kHz, Q 0.3 to 25 and gains of 3 to 24 dB.
+/// at DC and Nyquist and to 1e-5 at the center (where the rounding of the `f64`
+/// coefficients of a pole this near `z = 1` at 60 Hz sets the floor), for centers up to 22 kHz, Q 0.3 to 25 and gains of 3 to 24 dB.
 #[test]
 fn the_matched_bell_equals_the_analog_magnitude_at_dc_the_center_and_nyquist() {
     for fc in CENTERS {
@@ -100,20 +100,24 @@ fn worst_deviation(b: &Biquad, fc: f64, q: f64, db: f64) -> f64 {
         .fold(0.0, f64::max)
 }
 
+/// The stated bound in dB of each center's grid, in Hz.
+const BOUNDS: [(f32, f64); 5] = [
+    (250.0, 0.05),
+    (1000.0, 0.4),
+    (5000.0, 1.0),
+    (12000.0, 1.1),
+    (19200.0, 2.8),
+];
+
 /// Between the three matched points the bell follows the analog one to within a bound that
 /// grows with the center (the analog bell reaches past Nyquist and a second-order section
-/// cannot follow it): measured over Q 0.3 to 25 and gains of 3 to 24 dB, in dB up to 0.9 Nyquist.
+/// cannot follow it): in dB up to 0.9 Nyquist, over Q 0.3 to 25 and gains of 3 to 24 dB. The
+/// bounds are stated limits, measured with about 10% slack; the exact property is the match
+/// at the three points above. A bound that the cookbook's bilinear bell also meets does not
+/// discriminate, so every row is one the cookbook bell exceeds.
 #[test]
 fn the_matched_bell_stays_within_a_stated_bound_of_the_analog_one_to_0_9_nyquist() {
-    let bounds = [
-        (60.0f32, 0.01),
-        (250.0, 0.05),
-        (1000.0, 0.4),
-        (5000.0, 1.0),
-        (12000.0, 1.1),
-        (19200.0, 2.8),
-    ];
-    for (fc, bound) in bounds {
+    for (fc, bound) in BOUNDS {
         for q in QS {
             for db in GAINS {
                 let worst = worst_deviation(&bell(fc, q, db), fc.into(), q.into(), db.into());
@@ -126,15 +130,24 @@ fn the_matched_bell_stays_within_a_stated_bound_of_the_analog_one_to_0_9_nyquist
     }
 }
 
-/// The cookbook's bilinear bell, cramped near Nyquist, leaves the bound the matched bell
-/// holds: at 12 kHz, Q 0.707 and 24 dB it is 10 dB off against the matched bell's 1.1, so
-/// the bound above can fail.
+/// The cookbook's bilinear bell, cramped near Nyquist, leaves every row's bound of the test
+/// above somewhere in its grid, while the matched bell holds it: the bound can fail.
 #[test]
-fn the_bilinear_bell_leaves_the_bound_the_matched_bell_holds() {
-    let (fc, q, db) = (12000.0, 0.707, 24.0);
-    let rbj = worst_deviation(&cookbook_bell(fc, q, db), fc, q, db);
-    let matched = worst_deviation(&bell(fc as f32, q as f32, db as f32), fc, q, db);
-    assert!(matched <= 1.1 && rbj > 5.0 * 1.1, "{matched} vs {rbj}");
+fn the_bilinear_bell_leaves_every_bound_the_matched_bell_holds() {
+    for (fc, bound) in BOUNDS {
+        let cookbook = QS
+            .iter()
+            .flat_map(|q| GAINS.iter().map(move |db| (*q, *db)))
+            .map(|(q, db)| {
+                let (fc, q, db) = (f64::from(fc), f64::from(q), f64::from(db));
+                worst_deviation(&cookbook_bell(fc, q, db), fc, q, db)
+            })
+            .fold(0.0, f64::max);
+        assert!(
+            cookbook > bound,
+            "fc {fc}: the cookbook bell's {cookbook} dB is within {bound}"
+        );
+    }
 }
 
 /// A bell of 0 dB is a wire: its numerator is its denominator to 1e-12 (the closed form
@@ -420,11 +433,9 @@ fn the_tilt_ceiling_covers_every_tilt_in_its_ranges() {
 }
 
 /// A sustained sine at the center of a narrow boost (Q 30, +24 dB, 20 Hz), stopped, rings
-/// under the floor within the reported tail. The section answers a unit sine at the center
-/// with an amplitude of 15.8, and after the stop the output peaks at 14.7 over the first
-/// period, against a floor of 1e-3: it takes the reported 939662 frames (19.6 s) to fall
-/// under it. The old criterion (the impulse response under the floor of its peak, whose
-/// residues sum to 3e-4 against a floor of 1e-3) reported 1 frame and would have cut it.
+/// under the floor from the reported tail on: the output is above the floor within the first
+/// period after the stop (a ring a short tail would cut) and under it for every frame from
+/// `reported`.
 #[test]
 fn a_stopped_sustained_sine_at_a_narrow_boost_rings_under_the_floor_within_the_tail() {
     let (fc, q, db) = (20.0f32, 30.0f32, 24.0f32);
@@ -447,6 +458,22 @@ fn a_stopped_sustained_sine_at_a_narrow_boost_rings_under_the_floor_within_the_t
     );
     assert!(
         first > 100.0 * eps(),
-        "the old criterion's frame would cut it"
+        "the ring is not above the floor before the tail"
     );
+}
+
+/// A floor that is not a number or is infinite reads as an unbounded ring-out, for the bell and
+/// the tilt, and `ring_out_over` takes the ends of the centers in either order.
+#[test]
+fn a_floor_that_is_not_a_number_is_unbounded_and_the_ends_of_the_centers_may_swap() {
+    for floor in [Db(f32::NAN), Db(f32::INFINITY), Db(f32::NEG_INFINITY)] {
+        let bell = MatchedBell::new(Q(1.0), Db(6.0)).ring_out(Hz(1000.0), RATE, floor);
+        let tilt = Tilt::new(Db(6.0)).ring_out(Hz(1000.0), RATE, floor);
+        assert!(
+            matches!((bell, tilt), (Ok(Ring::Unbounded), Ok(Ring::Unbounded))),
+            "{floor:?}"
+        );
+    }
+    let over = |lo, hi| Tilt::ring_out_over(Hz(lo), Hz(hi), Db(24.0), RATE, crate::TAIL_FLOOR);
+    assert_eq!(over(20.0, 20_000.0), over(20_000.0, 20.0));
 }
