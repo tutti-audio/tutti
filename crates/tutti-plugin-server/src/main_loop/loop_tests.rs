@@ -31,27 +31,24 @@ use crate::transport::Transport;
 #[allow(clippy::large_enum_variant)] // a test script, built once
 enum Step {
     Send(HostMessage),
-    /// Says nothing for this long, from the first wait on it.
-    Quiet(Duration),
-    /// A silence that has begun: it ends at this instant.
-    QuietUntil(Instant),
     /// Does something (on the loop's thread, when the script reaches it).
     Call(Box<dyn FnOnce() + Send>),
-    /// Says nothing until the condition holds, tried on each wait: the event a
-    /// test is waiting for, not a length of time. [`HANG_GUARD`] fails a script
+    /// Says nothing until the condition holds over what the host has heard so
+    /// far, tried on each wait: the event a test is waiting for, not a length of
+    /// time. [`HANG_GUARD`] fails a script
     /// whose event never comes.
     Until(Until),
 }
 
 /// A condition the script's silence ends on, run on the loop's thread.
 struct Until {
-    holds: Box<dyn FnMut() -> bool + Send>,
+    holds: Box<dyn FnMut(&[BridgeMessage]) -> bool + Send>,
     /// When the wait gives up: [`HANG_GUARD`] after the first wait on it.
     give_up_at: Option<Instant>,
 }
 
 impl Until {
-    fn step(holds: impl FnMut() -> bool + Send + 'static) -> Step {
+    fn step(holds: impl FnMut(&[BridgeMessage]) -> bool + Send + 'static) -> Step {
         Step::Until(Self {
             holds: Box::new(holds),
             give_up_at: None,
@@ -111,10 +108,6 @@ impl Transport for Script {
 
 impl Script {
     fn wait_inner(&mut self, timeout: Duration) -> BridgeResult<bool> {
-        if let Some(Step::Quiet(length)) = self.steps.front() {
-            let until = Instant::now() + *length;
-            self.steps[0] = Step::QuietUntil(until);
-        }
         match self.steps.front() {
             Some(Step::Call(_)) => {
                 let Some(Step::Call(call)) = self.steps.pop_front() else {
@@ -131,18 +124,10 @@ impl Script {
                     .give_up_at
                     .get_or_insert_with(|| Instant::now() + HANG_GUARD);
                 assert!(Instant::now() < give_up_at, "the script's event never came");
-                if (until.holds)() {
+                if (until.holds)(&self.heard) {
                     self.steps.pop_front();
                 } else {
                     std::thread::sleep(timeout.min(UNTIL_POLL));
-                }
-                Ok(false)
-            }
-            Some(&Step::QuietUntil(until)) => {
-                let left = until.saturating_duration_since(Instant::now());
-                std::thread::sleep(timeout.min(left));
-                if Instant::now() >= until {
-                    self.steps.pop_front();
                 }
                 Ok(false)
             }
@@ -352,7 +337,7 @@ fn a_quiet_host_does_not_stop_the_plugins_timers() {
                 "the render thread answers the block"
             );
         })),
-        Until::step(move || probe_visits(probe) >= 3),
+        Until::step(move |_| probe_visits(probe) >= 3),
     ]);
 
     run(&mut session, &mut script);
@@ -403,7 +388,7 @@ fn a_timer_is_served_at_its_deadline_not_the_tick() {
         // A message is served as it comes, and with it the callback the block
         // asked for, which registers the timer.
         Step::Send(HostMessage::GetParameterList),
-        Until::step(move || probe_visits(probe) >= 3),
+        Until::step(move |_| probe_visits(probe) >= 3),
     ]);
 
     run_ticking(&mut session, &mut script, Duration::from_secs(300));
@@ -428,7 +413,7 @@ fn a_message_after_silence_is_answered() {
         // The loop has gone back to waiting a few times before the host speaks.
         Until::step({
             let waits = waits.clone();
-            move || waits.load(std::sync::atomic::Ordering::SeqCst) >= 3
+            move |_| waits.load(std::sync::atomic::Ordering::SeqCst) >= 3
         }),
         Step::Send(HostMessage::GetParameterList),
     ]);
@@ -570,7 +555,7 @@ fn a_slow_paint_on_the_main_loop_delays_no_block() {
         Until::step({
             let (within, painted, stop, done) =
                 (within.clone(), painted.clone(), stop.clone(), done.clone());
-            move || {
+            move |_| {
                 if done.load(Ordering::SeqCst) {
                     return true;
                 }

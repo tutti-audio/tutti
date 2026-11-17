@@ -2,8 +2,6 @@
 //! process: an X11 window id. One `cfg` on this module's declaration holds them
 //! and their helpers.
 
-use std::time::Duration;
-
 use dpi::{PhysicalSize, Size};
 use tutti_clap_test_plugin::{
     GUI_CMD_REQUEST_RESIZE, GUI_HEIGHT, GUI_REQUESTED_RESIZE_H, GUI_REQUESTED_RESIZE_W, GUI_WIDTH,
@@ -53,10 +51,14 @@ fn the_editor_opens_resizes_and_closes_on_the_served_instance() {
             scale: ContentScale::IDENTITY,
         }),
         // The plugin asked for a size from `show`; only an idle tick can say so.
-        Step::Quiet(Duration::from_millis(60)),
+        Until::step(|heard| {
+            heard
+                .iter()
+                .any(|m| matches!(m, BridgeMessage::EditorWantsSize { .. }))
+        }),
         Step::Send(HostMessage::SetEditorSize { size: wanted }),
         Step::Send(HostMessage::CloseEditor),
-        Step::Quiet(Duration::from_millis(30)),
+        Until::step(move |_| probe.gui_capture().destroyed),
     ]);
 
     run(&mut session, &mut script);
@@ -125,7 +127,11 @@ fn unloading_a_plugin_closes_its_editor_and_says_so() {
             scale: ContentScale::IDENTITY,
         }),
         Step::Send(HostMessage::UnloadPlugin),
-        Step::Quiet(Duration::from_millis(40)),
+        Until::step(|heard| {
+            heard
+                .iter()
+                .any(|m| matches!(m, BridgeMessage::EditorClosed))
+        }),
     ]);
 
     run(&mut session, &mut script);
