@@ -38,9 +38,10 @@ use tutti_plugin_types::{
 };
 use tutti_rt::{CappedVec, RtVec, Tally, TallyWriter, tally};
 
-/// The edits one block holds before they are added: the Controller's queue
-/// is no longer than this.
-const EDIT_BLOCK: usize = 256;
+/// The parameter edits the Controller can have queued to the Processor before
+/// the ring refuses one: one block holds as many, and the Processor reserves
+/// event room for them.
+pub(crate) const EDIT_CAPACITY: usize = 256;
 
 use crate::types::RtNoteExpressions;
 use tutti_midi_protocol::{
@@ -189,35 +190,6 @@ pub enum ClapEvent {
         /// dangle that pointer.
         _data: Vec<u8>,
     },
-}
-
-impl Clone for ClapEvent {
-    /// A copy that owns what it points at: a SysEx event with its own payload
-    /// points at the copy's, one backed by an input list's reassembly buffer
-    /// keeps pointing there.
-    fn clone(&self) -> Self {
-        match self {
-            Self::NoteOn(e) => Self::NoteOn(*e),
-            Self::NoteOff(e) => Self::NoteOff(*e),
-            Self::NoteChoke(e) => Self::NoteChoke(*e),
-            Self::NoteEnd(e) => Self::NoteEnd(*e),
-            Self::Midi(e) => Self::Midi(*e),
-            Self::NoteExpression(e) => Self::NoteExpression(*e),
-            Self::ParamValue(e) => Self::ParamValue(*e),
-            Self::ParamMod(e) => Self::ParamMod(*e),
-            Self::ParamGestureBegin(e) => Self::ParamGestureBegin(*e),
-            Self::ParamGestureEnd(e) => Self::ParamGestureEnd(*e),
-            Self::Transport(e) => Self::Transport(*e),
-            Self::MidiSysex { inner, _data } => {
-                let data = _data.clone();
-                let mut inner = *inner;
-                if !data.is_empty() {
-                    inner.buffer = data.as_ptr();
-                }
-                Self::MidiSysex { inner, _data: data }
-            }
-        }
-    }
 }
 
 /// CLAP's upper bound for `CLAP_NOTE_EXPRESSION_VOLUME`.
@@ -1618,7 +1590,7 @@ impl InputEventList {
     /// callback it is given, oldest first. A [`Edit::Reset`] voids the edits
     /// before it; the edits kept are added in order, and any past the room
     /// [`set_source_rooms`](Self::set_source_rooms) gave them, or past the
-    /// [`EDIT_BLOCK`] the block can hold, are refused and counted
+    /// [`EDIT_CAPACITY`] the block can hold, are refused and counted
     /// ([`refused`](Self::refused)).
     pub(crate) fn add_param_edits(
         &mut self,
@@ -1626,7 +1598,7 @@ impl InputEventList {
         plugin_claims_params: bool,
         drain: impl FnOnce(&mut dyn FnMut(Edit)),
     ) {
-        let mut edits: RtVec<(u32, f64), EDIT_BLOCK> = RtVec::new();
+        let mut edits: RtVec<(u32, f64), EDIT_CAPACITY> = RtVec::new();
         let mut surplus = 0u64;
         drain(&mut |edit| match edit {
             Edit::Param { id, value } => {
@@ -2493,12 +2465,12 @@ mod tests {
         )
     }
 
-    /// The first event `event` adds to a fresh list: the one CLAP event a
-    /// packet is, at the default per-note state.
-    fn from_midi(event: &UmpAt) -> Option<ClapEvent> {
+    /// A fresh list `event` was added to: its first event is the one CLAP
+    /// event a packet is, at the default per-note state.
+    fn from_midi(event: &UmpAt) -> InputEventList {
         let mut list = InputEventList::new();
         list.add_midi(event);
-        list.events().first().cloned()
+        list
     }
 
     /// A Note On at the address and key of the per-note `event`, at velocity
@@ -2519,17 +2491,17 @@ mod tests {
     }
 
     /// [`from_midi`] for a per-note message, with its note already sounding:
-    /// the first event the message adds once a Note On on its key has
+    /// the list holds what the message adds once a Note On on its key has
     /// started (a per-note controller of a number with no note is held, and
     /// makes none: M2-104 Appendix C.3).
-    fn from_midi_live(event: &UmpAt) -> Option<ClapEvent> {
+    fn from_midi_live(event: &UmpAt) -> InputEventList {
         let mut list = InputEventList::new();
         if let Some(on) = note_on_for(event) {
             list.add_midi(&on);
             list.clear();
         }
         list.add_midi(event);
-        list.events().first().cloned()
+        list
     }
 
     /// The message `midi` carries.
@@ -2701,7 +2673,8 @@ mod tests {
     #[test]
     fn a_midi1_note_on_at_velocity_zero_releases_at_half() {
         let midi1 = packet(0, &[0x2091_3C00]);
-        let Some(ClapEvent::NoteOff(e)) = from_midi(&midi1) else {
+        let list = from_midi(&midi1);
+        let Some(ClapEvent::NoteOff(e)) = list.events().first() else {
             panic!("a MIDI 1.0 Note On at velocity 0 is a Note Off");
         };
         assert_eq!((e.channel, e.key), (1, 60));
@@ -2712,7 +2685,8 @@ mod tests {
         );
 
         let midi2 = packet(0, &[0x4091_3C00, 0]);
-        let Some(ClapEvent::NoteOn(e)) = from_midi(&midi2) else {
+        let list = from_midi(&midi2);
+        let Some(ClapEvent::NoteOn(e)) = list.events().first() else {
             panic!("a MIDI 2.0 Note On at velocity 0 is a note-on");
         };
         assert_eq!((e.channel, e.key, e.velocity), (1, 60, 0.0));
@@ -2732,7 +2706,7 @@ mod tests {
                         0xFFFF_1234,
                     ],
                 );
-                match from_midi(&midi) {
+                match from_midi(&midi).events().first() {
                     Some(ClapEvent::NoteOn(e)) if on => assert_eq!(e.velocity, 1.0),
                     Some(ClapEvent::NoteOff(e)) if !on => assert_eq!(e.velocity, 1.0),
                     other => panic!("attribute {attribute_type:#x}: got {other:?}"),
@@ -3254,12 +3228,12 @@ mod tests {
     #[test]
     fn an_edit_past_the_edit_room_is_refused_and_counted() {
         let mut list = InputEventList::new();
-        list.reserve(EDIT_BLOCK + 8);
-        list.set_source_rooms(EDIT_BLOCK, 0, 0);
+        list.reserve(EDIT_CAPACITY + 8);
+        list.set_source_rooms(EDIT_CAPACITY, 0, 0);
         let capacity = list.events.capacity();
         assert_no_alloc::assert_no_alloc(|| {
             list.add_param_edits(&[], false, |each| {
-                for id in 0..=EDIT_BLOCK as u32 {
+                for id in 0..=EDIT_CAPACITY as u32 {
                     each(Edit::Param {
                         id: ParamId::new(id),
                         value: Normalized::clamped(0.5),
@@ -3267,7 +3241,7 @@ mod tests {
                 }
             });
         });
-        assert_eq!(list.events.len(), EDIT_BLOCK);
+        assert_eq!(list.events.len(), EDIT_CAPACITY);
         assert_eq!(list.events.capacity(), capacity);
         assert_eq!(list.refused(), 1);
     }
@@ -3734,7 +3708,8 @@ mod tests {
                 },
             )),
         );
-        let ClapEvent::NoteExpression(e) = from_midi_live(&full).expect("converts") else {
+        let list = from_midi_live(&full);
+        let ClapEvent::NoteExpression(e) = list.events().first().expect("converts") else {
             panic!("expected NoteExpression");
         };
         assert_eq!(e.expression_id, CLAP_NOTE_EXPRESSION_VOLUME);
@@ -3756,7 +3731,8 @@ mod tests {
                 },
             )),
         );
-        let ClapEvent::NoteExpression(e) = from_midi_live(&zero).expect("converts") else {
+        let list = from_midi_live(&zero);
+        let ClapEvent::NoteExpression(e) = list.events().first().expect("converts") else {
             panic!("expected NoteExpression");
         };
         assert!(
@@ -3883,7 +3859,11 @@ mod tests {
             at(11),
             midi::per_note_pitch_bend(MidiChannel::of(3), 60, bend.get()),
         );
-        match from_midi_live(&midi).expect("per-note bend converts") {
+        match from_midi_live(&midi)
+            .events()
+            .first()
+            .expect("per-note bend converts")
+        {
             ClapEvent::NoteExpression(e) => {
                 assert_eq!(e.header.time, 11);
                 assert_eq!(e.expression_id, CLAP_NOTE_EXPRESSION_TUNING);
@@ -3994,7 +3974,11 @@ mod tests {
             at(0),
             midi::poly_pressure(MidiChannel::of(2), 48, unit_f32_to_value(0.75).get()),
         );
-        match from_midi_live(&midi).expect("poly pressure converts") {
+        match from_midi_live(&midi)
+            .events()
+            .first()
+            .expect("poly pressure converts")
+        {
             ClapEvent::NoteExpression(e) => {
                 assert_eq!(e.expression_id, CLAP_NOTE_EXPRESSION_PRESSURE);
                 assert_minted(e.note_id);
@@ -4018,7 +4002,11 @@ mod tests {
                 },
             )),
         );
-        match from_midi_live(&midi).expect("per-note cc converts") {
+        match from_midi_live(&midi)
+            .events()
+            .first()
+            .expect("per-note cc converts")
+        {
             ClapEvent::NoteExpression(e) => {
                 assert_eq!(e.expression_id, CLAP_NOTE_EXPRESSION_BRIGHTNESS);
                 assert_minted(e.note_id);
@@ -4043,13 +4031,13 @@ mod tests {
                 },
             )),
         );
-        assert!(from_midi(&midi).is_none());
+        assert!(from_midi(&midi).events().is_empty());
     }
 
     #[test]
     fn from_midi_event_note_on_decodes_to_typed_note_on() {
         let midi = (at(7), midi::note_on(MidiChannel::of(1), 60, 0x8000));
-        match from_midi(&midi).expect("note on converts") {
+        match from_midi(&midi).events().first().expect("note on converts") {
             ClapEvent::NoteOn(e) => {
                 assert_eq!(e.header.time, 7);
                 assert_eq!(e.channel, 1);
@@ -4138,7 +4126,11 @@ mod tests {
         use tutti_midi_protocol::velocity_to_unit_f32;
         let rel = 0x6000u16; // ~0.375 of full scale
         let midi = (at(9), midi::note_off(MidiChannel::of(4), 55, rel));
-        match from_midi(&midi).expect("note off converts") {
+        match from_midi(&midi)
+            .events()
+            .first()
+            .expect("note off converts")
+        {
             ClapEvent::NoteOff(e) => {
                 assert_eq!(e.key, 55);
                 let expected = f64::from(velocity_to_unit_f32(NoteVelocity::new(rel)));
@@ -4176,7 +4168,7 @@ mod tests {
         // The MIDI velocity-0 NoteOn quirk: widening reads it as a NoteOff, so
         // a raw MIDI-1 velocity-0 NoteOn converts to a CLAP NoteOff.
         let midi = midi1_event(&[0x90, 60, 0]);
-        match from_midi(&midi).expect("converts") {
+        match from_midi(&midi).events().first().expect("converts") {
             ClapEvent::NoteOff(e) => {
                 assert_eq!(e.key, 60);
             }
@@ -4190,7 +4182,7 @@ mod tests {
             at(0),
             midi::cc(MidiChannel::FIRST, CCNumber::VOLUME, 0x8000_0000),
         ); // volume, ~half
-        match from_midi(&midi).expect("cc converts") {
+        match from_midi(&midi).events().first().expect("cc converts") {
             ClapEvent::Midi(e) => {
                 assert_eq!(e.data[0] & 0xF0, 0xB0, "status should be CC");
                 assert_eq!(e.data[1], 7, "controller number");

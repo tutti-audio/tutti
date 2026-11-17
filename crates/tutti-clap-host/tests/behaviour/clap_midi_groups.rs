@@ -38,9 +38,28 @@ fn add(list: &mut InputEventList, ump: Ump) {
 
 /// The events the list holds, then empty.
 fn drain(list: &mut InputEventList) -> Vec<ClapEvent> {
-    let events = list.events().to_vec();
+    let events = list.events().iter().map(copy).collect();
     list.clear();
     events
+}
+
+/// A copy of `event`. These tests send no SysEx, the one event that owns or
+/// points at bytes.
+fn copy(event: &ClapEvent) -> ClapEvent {
+    match event {
+        ClapEvent::NoteOn(e) => ClapEvent::NoteOn(*e),
+        ClapEvent::NoteOff(e) => ClapEvent::NoteOff(*e),
+        ClapEvent::NoteChoke(e) => ClapEvent::NoteChoke(*e),
+        ClapEvent::NoteEnd(e) => ClapEvent::NoteEnd(*e),
+        ClapEvent::Midi(e) => ClapEvent::Midi(*e),
+        ClapEvent::NoteExpression(e) => ClapEvent::NoteExpression(*e),
+        ClapEvent::ParamValue(e) => ClapEvent::ParamValue(*e),
+        ClapEvent::ParamMod(e) => ClapEvent::ParamMod(*e),
+        ClapEvent::ParamGestureBegin(e) => ClapEvent::ParamGestureBegin(*e),
+        ClapEvent::ParamGestureEnd(e) => ClapEvent::ParamGestureEnd(*e),
+        ClapEvent::Transport(e) => ClapEvent::Transport(*e),
+        ClapEvent::MidiSysex { .. } => panic!("a SysEx event is not copied"),
+    }
 }
 
 /// `(port, channel, key, note_id)` of a NOTE_ON.

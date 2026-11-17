@@ -15,7 +15,7 @@ use super::controller::ClapController;
 use super::processor::{ClapProcessor, ProcessorParts};
 use super::thread_pool::PoolCell;
 use crate::error::{ClapError, LoadStage, Result};
-use crate::events::ParamBounds;
+use crate::events::{EDIT_CAPACITY, ParamBounds};
 use crate::types::{ClapParamFlags, ParameterChanges, ParameterQueue, PluginInfo};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -35,10 +35,6 @@ const EVENT_SCRATCH_CAPACITY: usize = 256;
 /// output fills (one per distinct param_id it emits in a block). The
 /// reservation is the plugin's parameter count when that is larger.
 const PARAM_QUEUE_CAPACITY: usize = 16;
-/// Parameter edits the Controller can have queued to the Processor before the
-/// ring refuses one; the Processor reserves event room for as many.
-pub(crate) const EDIT_CAPACITY: usize = 256;
-
 /// How many of the plugin's own parameter edits (its output events) the ring
 /// to the Controller holds between two drains: a preset that touches every
 /// parameter, with a gesture's two ends around each, in one burst.

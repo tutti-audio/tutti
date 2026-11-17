@@ -22,7 +22,8 @@
 //! and resets the probe at the top.
 
 use std::path::Path;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard};
 use tutti_rt::LockExt;
 
 use crate::support;
@@ -902,13 +903,23 @@ fn taking_a_rescan_consumes_it() {
     );
 }
 
-/// **An active plugin's `request_flush` is not served by a main-thread flush**:
-/// the flush would take the audio claim from the block, so the request is left
-/// for `process`, and stays latched. Spec: clap.ext.params.host.request_flush
+/// **An active plugin's `request_flush` wakes the block instead of flushing
+/// from the main thread**: a flush there would take the audio claim from the
+/// block, and the block's `process` is the flush CLAP asks for. The request is
+/// taken, so the wake is raised once across two passes, and the plugin's
+/// `flush` is not called. Spec: clap.ext.params.host.request_flush
 #[test]
-fn an_active_plugins_request_flush_is_left_for_process() {
+fn an_active_plugins_request_flush_wakes_the_block_once() {
     let probe = Probe::acquire();
     let mut inst = probe.activate();
+    let woken = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::clone(&woken);
+    Control::bind_wake(
+        inst.loaded_mut(),
+        tutti_plugin_types::ProcessWake::new(move || {
+            counter.fetch_add(1, Ordering::Relaxed);
+        }),
+    );
 
     probe.command(PARAM_CMD_REQUEST_FLUSH);
     inst.loaded_mut().on_main_thread(main_thread());
@@ -916,14 +927,16 @@ fn an_active_plugins_request_flush_is_left_for_process() {
     let before = probe.capture().flush_calls;
     let mut out = Vec::new();
     Control::take_requests(inst.loaded_mut(), main_thread(), &mut out);
+    Control::take_requests(inst.loaded_mut(), main_thread(), &mut out);
+    assert_eq!(woken.load(Ordering::Relaxed), 1, "one wake for one request");
     assert_eq!(
         probe.capture().flush_calls,
         before,
         "an active plugin is not flushed from the main thread"
     );
     assert!(
-        inst.loaded().take_params_flush_requested(),
-        "the request survives for the block"
+        !inst.loaded().take_params_flush_requested(),
+        "the request is taken"
     );
 }
 

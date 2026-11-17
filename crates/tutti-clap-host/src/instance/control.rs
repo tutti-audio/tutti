@@ -231,6 +231,43 @@ impl ClapLoaded {
         }
         // `params.request_flush`: the plugin has values to hand the host
         // outside a block. An active plugin hands them over in its next
+        // `process` (the flush would take the audio claim from the block), so
+        // the request wakes the block; an inactive one is flushed here.
+        if self.host_state.take(&self.host_state.flush_requested) {
+            if self.flags.active {
+                if let Some(wake) = self.host_state.process_wake.get() {
+                    wake.raise();
+                }
+            } else {
+                let _ = self.flush_params(main, Vec::new());
+            }
+        }
+        out.extend(tutti_plugin_types::taken(&self.host_state.requests));
+        self.take_transport(out);
+    }
+
+    /// The transport requests the plugin made since the last take, oldest
+    /// first.
+    fn take_transport(&self, out: &mut Vec<Request>) {
+        let mut asked = Vec::new();
+        self.host_state.transport.drain_into(&mut asked);
+        out.extend(asked.into_iter().map(Request::Transport));
+    }
+
+    /// [`Control::take_requests`]: what the plugin raised from any thread, and
+    /// the timers and descriptors a [`wake`](EditorWindow::wake) latched since
+    /// the last take, as requests for the lifecycle to serve.
+    pub(crate) fn take_requests_now(&mut self, main: MainThreadMarker, out: &mut Vec<Request>) {
+        // `gui.closed` is `[thread-safe]` and the plugin may raise it from its
+        // own window thread, while `gui.destroy` is the main thread's: this
+        // pass is where it is acknowledged (`ext/gui.h`: "the host must call
+        // clap_plugin_gui->destroy()"), so a floating editor the user closed
+        // is destroyed and the next open starts clean.
+        if self.host_state.take(&self.host_state.gui.closed) {
+            self.destroy_editor(main);
+        }
+        // `params.request_flush`: the plugin has values to hand the host
+        // outside a block. An active plugin hands them over in its next
         // `process`, so its request stays latched and no flush takes the audio
         // claim from the block; an inactive one is flushed here.
         if self.flags.active {
