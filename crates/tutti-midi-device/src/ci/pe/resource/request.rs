@@ -95,13 +95,15 @@ pub struct ResourceTarget {
     res_id: Option<ResourceId>,
 }
 
-impl ResourceTarget {
+impl TryFrom<PeResource> for ResourceTarget {
+    type Error = RequestRefused;
+
     /// The Resource without an entry.
     ///
     /// # Errors
     ///
     /// [`RequestRefused::ResIdRequired`] for a Resource that has entries.
-    pub fn new(resource: PeResource) -> Result<Self, RequestRefused> {
+    fn try_from(resource: PeResource) -> Result<Self, RequestRefused> {
         if resource.res_id_use() == ResIdUse::Required {
             return Err(RequestRefused::ResIdRequired(resource.as_str().to_owned()));
         }
@@ -110,7 +112,9 @@ impl ResourceTarget {
             res_id: None,
         })
     }
+}
 
+impl ResourceTarget {
     /// The entry `res_id` of the Resource.
     ///
     /// # Errors
@@ -311,6 +315,28 @@ pub struct ResourceSet {
     encoding: PeEncoding,
 }
 
+impl TryFrom<&PeLink> for ResourceSet {
+    type Error = ActionError;
+
+    /// The Set a `simpleAction` Link asks for: its Resource and entry, and its
+    /// `propData` as the Property Data (M2-103 §13.1.1).
+    ///
+    /// # Errors
+    ///
+    /// [`ActionError`] for a Link that is no `simpleAction` and for `propData`
+    /// that is not the Resource's.
+    fn try_from(link: &PeLink) -> Result<Self, ActionError> {
+        let Some(LinkRole::Simple(action)) = &link.role else {
+            return Err(ActionError::NotThatAction("simpleAction"));
+        };
+        let data = PeData::decode(&link.resource, &action.prop_data)?;
+        Ok(Self::full(
+            link_target(&link.resource, link.res_id.as_ref())?,
+            data,
+        )?)
+    }
+}
+
 impl ResourceSet {
     /// A Full Set of `data`, in ASCII, to the Resource the data is of.
     ///
@@ -412,24 +438,6 @@ impl ResourceSet {
         Ok(())
     }
 
-    /// The Set a `simpleAction` Link asks for: its Resource and entry, and its
-    /// `propData` as the Property Data (M2-103 §13.1.1).
-    ///
-    /// # Errors
-    ///
-    /// [`ActionError`] for a Link that is no `simpleAction` and for `propData`
-    /// that is not the Resource's.
-    pub fn from_simple_action(link: &PeLink) -> Result<Self, ActionError> {
-        let Some(LinkRole::Simple(action)) = &link.role else {
-            return Err(ActionError::NotThatAction("simpleAction"));
-        };
-        let data = PeData::decode(&link.resource, &action.prop_data)?;
-        Ok(Self::full(
-            link_target(&link.resource, link.res_id.as_ref())?,
-            data,
-        )?)
-    }
-
     /// The Set a `selectorAction` Link asks for once the user chose `chosen`, an
     /// entry of the List Resource of the Link: the action Resource, with the
     /// `selectedProperty` of the entry as the Property Data (M2-103 §13.1.2).
@@ -457,7 +465,7 @@ fn link_target(
 ) -> Result<ResourceTarget, RequestRefused> {
     match res_id {
         Some(id) => ResourceTarget::entry(resource.clone(), id.clone()),
-        None => ResourceTarget::new(resource.clone()),
+        None => ResourceTarget::try_from(resource.clone()),
     }
 }
 

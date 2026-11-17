@@ -130,6 +130,7 @@ const NODE_AUTHOR: &str = "tutti-graph's node-author API: what a node declares a
     node is prepared with, not what an app configures";
 
 const CTOR: &[Rule] = &[Rule::CtorResult];
+const RANGE: &[Rule] = &[Rule::RangeMacro];
 const SETTER: &[Rule] = &[Rule::Setter];
 const WIDTH: &[Rule] = &[Rule::ConfigWidth];
 
@@ -400,6 +401,78 @@ pub(super) const ALLOW: &[Allow] = &[
         "EntropyWords::from_os",
         CTOR,
         "reading OS entropy: the failure is the OS's, not a value's",
+    ),
+    ty(
+        "crates/tutti-midi-device/src/ci/pe/limits.rs",
+        "",
+        RANGE,
+        "text_type! is replaced by the one generic text type of lane TEXT",
+    ),
+    ty(
+        "crates/tutti-midi-device/src/ci/pe/resource/fields.rs",
+        "",
+        RANGE,
+        "text_enum! writes a closed enum keyed by its spec text, not a number range; `new(text)` returns the variant or `None`",
+    ),
+    ty(
+        "crates/tutti-midi-device/",
+        "PeData::decode",
+        CTOR,
+        "a parse that needs the Resource it is read as, a second input a `TryFrom` has no place for",
+    ),
+    ty(
+        "crates/tutti-midi-device/",
+        "PeData::decode_bytes",
+        CTOR,
+        "a parse that needs the Resource it is read as, a second input a `TryFrom` has no place for (the media type too)",
+    ),
+    ty(
+        "crates/tutti-midi-device/",
+        "PeState::from_wire",
+        CTOR,
+        "a parse that needs the media type the bytes came with, a second input a `TryFrom` has no place for",
+    ),
+    ty(
+        "crates/tutti-midi-device/",
+        "ResourceSet::from_selection",
+        CTOR,
+        "a parse of a Link and the entry the user chose, two inputs a `TryFrom` has no place for",
+    ),
+    ty(
+        "crates/tutti-midi-device/",
+        "ResourceSet::full",
+        CTOR,
+        "the Resource of the data must be the target's: validity of two arguments together",
+    ),
+    ty(
+        "crates/tutti-midi-device/",
+        "ResourceTarget::entry",
+        CTOR,
+        "validity of two arguments together: the Resource and its entry, so no single type can hold it",
+    ),
+    ty(
+        "crates/tutti-midi-device/",
+        "PeChunk::new",
+        CTOR,
+        "a header is only in chunk 1 and each field has a 14-bit length: validity of the fields together, which no one field's type can carry",
+    ),
+    ty(
+        "crates/tutti-midi-device/",
+        "PeChCtrlEntry::with_default_cc_map",
+        CTOR,
+        "`defaultCCMap` is valid only for a Control Change controller: validity of the flag and the controller together",
+    ),
+    ty(
+        "crates/tutti-midi-device/",
+        "ProfileLists::new",
+        CTOR,
+        "each list is at most the 14-bit count of its message: validity of the pair's lengths, a list the wire counts in two 7-bit bytes",
+    ),
+    ty(
+        "crates/tutti-midi-device/",
+        "Dialect::of",
+        CTOR,
+        "the dialect is valid only for a block the Endpoint has active and receiving, with the Profiles the table reports: validity of three arguments together",
     ),
     ty(
         "crates/tutti-sampler/",

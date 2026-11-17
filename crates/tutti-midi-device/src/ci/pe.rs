@@ -11,7 +11,7 @@
 //! property the spec does not name, a manufacturer-specific `x-` property
 //! among them (§6.1.4), is kept in the header's [`PeExtra`] and written back.
 //!
-//! [`PeHeader::parse`] reads the bytes of a Header Data field and
+//! [`PeHeader`]'s `TryFrom<&[u8]>` reads the bytes of a Header Data field and
 //! [`PeHeader::encode`] writes them, holding the header to the Receivable Maximum
 //! SysEx Message Size from Discovery.
 //!
@@ -47,7 +47,7 @@
 //! let request = PeRequest::new(ResourceName::new("ChannelList").unwrap());
 //! let bytes = PeHeader::Request(request.clone()).encode(MaxSysexSize::of(512)).unwrap();
 //! assert_eq!(bytes, br#"{"resource":"ChannelList"}"#);
-//! assert_eq!(PeHeader::parse(&bytes), Ok(PeHeader::Request(request)));
+//! assert_eq!(PeHeader::try_from(&bytes), Ok(PeHeader::Request(request)));
 //! ```
 //!
 //! A message sent in chunks, and received:

@@ -477,14 +477,16 @@ list_type! {
     PeAllCtrlList of PeAllCtrlEntry
 }
 
-impl PeAllCtrlList {
+impl TryFrom<Vec<PeAllCtrlEntry>> for PeAllCtrlList {
+    type Error = ListedTwice;
+
     /// The list of `entries`.
     ///
     /// # Errors
     ///
     /// [`ListedTwice`] for a controller listed twice, other than once for what it
     /// sends and once for what it recognizes.
-    pub fn checked(entries: Vec<PeAllCtrlEntry>) -> Result<Self, ListedTwice> {
+    fn try_from(entries: Vec<PeAllCtrlEntry>) -> Result<Self, ListedTwice> {
         check_unique(
             entries
                 .iter()
@@ -492,7 +494,9 @@ impl PeAllCtrlList {
         )?;
         Ok(Self(entries))
     }
+}
 
+impl PeAllCtrlList {
     pub(super) fn to_json(&self) -> PeJson {
         PeJson::Array(
             self.0
@@ -519,7 +523,7 @@ impl PeAllCtrlList {
                 Ok(PeAllCtrlEntry { channel: ch, ctrl })
             })
             .collect::<Result<Vec<_>, PeDataError>>()?;
-        Self::checked(entries)
+        Self::try_from(entries)
             .map_err(|e| PeDataError::new("AllCtrlList", PeDataFault::NotValid(listed_twice(&e))))
     }
 }
@@ -533,17 +537,21 @@ list_type! {
     PeChCtrlList of PeChCtrlEntry
 }
 
-impl PeChCtrlList {
+impl TryFrom<Vec<PeChCtrlEntry>> for PeChCtrlList {
+    type Error = ListedTwice;
+
     /// The list of `entries`.
     ///
     /// # Errors
     ///
-    /// [`ListedTwice`] as for [`PeAllCtrlList::checked`].
-    pub fn checked(entries: Vec<PeChCtrlEntry>) -> Result<Self, ListedTwice> {
+    /// [`ListedTwice`] as for [`PeAllCtrlList`]'s `TryFrom`.
+    fn try_from(entries: Vec<PeChCtrlEntry>) -> Result<Self, ListedTwice> {
         check_unique(entries.iter().map(|e| (e.ctrl.controller, &e.ctrl)))?;
         Ok(Self(entries))
     }
+}
 
+impl PeChCtrlList {
     pub(super) fn to_json(&self) -> PeJson {
         PeJson::Array(
             self.0
@@ -582,7 +590,7 @@ impl PeChCtrlList {
                 }
             })
             .collect::<Result<Vec<_>, PeDataError>>()?;
-        Self::checked(entries)
+        Self::try_from(entries)
             .map_err(|e| PeDataError::new("ChCtrlList", PeDataFault::NotValid(listed_twice(&e))))
     }
 }

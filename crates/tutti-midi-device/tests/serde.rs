@@ -224,7 +224,7 @@ mod saved_state {
 
     #[test]
     fn a_json_state_reads_back_as_json() {
-        let json = PeJson::parse(br#"{"a":[1,2]}"#).unwrap();
+        let json = PeJson::try_from(br#"{"a":[1,2]}"#).unwrap();
         let saved = saved(PeState::json(json));
         let back = round_trip(&saved);
         assert_eq!(back, saved);

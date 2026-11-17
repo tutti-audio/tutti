@@ -1096,7 +1096,7 @@ fn reply_status(actions: &[PeAction]) -> (PeRequestId, PeReply) {
     let [(_, chunk)] = &chunks[..] else {
         panic!("one reply to the subscription message, got {actions:?}");
     };
-    match PeHeader::parse(chunk.header()).unwrap() {
+    match PeHeader::try_from(chunk.header()).unwrap() {
         PeHeader::Reply(reply) => (chunk.request_id(), reply),
         other => panic!("not a reply: {other:?}"),
     }
