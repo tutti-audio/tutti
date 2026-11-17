@@ -62,6 +62,7 @@ units! {
         tutti_nodes::BrickwallLimiterNode { Ceiling => Db }
         tutti_nodes::DistortionNode { Drive => Drive }
         tutti_nodes::BitCrusherNode { BitDepth => BitDepth, HoldFactor => HoldFactor }
+        tutti_nodes::TransientShaperNode { GainDb => Db }
         tutti_nodes::BusStripNode { Volume => Amplitude, Balance => Balance }
         tutti_nodes::CrossoverNode { Cutoff => Hz }
         tutti_nodes::MultibandCompressorNode {

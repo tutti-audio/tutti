@@ -16,8 +16,11 @@
 //!                 \ 0                       f = s   (a steady level)
 //! ```
 //!
-//! Each branch is in `[0, 1)` times its amount, and both are 0 where the envelopes meet, so a
-//! steady level is left alone whatever the amounts are, and a positive `attack` lifts the
+//! Each branch is in `[0, 1)` times its amount, and both are 0 where the envelopes meet. A
+//! steady level is left alone to the slow follower's `f32` stall: the follower stops moving
+//! when `c * (L - s)` is under half an ulp of `s`, which leaves `|L - s| / L` near `6e-8 / c`
+//! for the one-pole coefficient `c` (about 2e-3 dB at 24 dB and a 30 ms slow time, rate 48 kHz).
+//! A positive `attack` lifts the
 //! frames the fast envelope has run ahead of the slow one by the fraction of the fast envelope
 //! that the slow one has not reached. The amount of a branch is the most that branch adds: a
 //! decay that falls to nothing under a slow envelope still holding level tends to `sustain`.

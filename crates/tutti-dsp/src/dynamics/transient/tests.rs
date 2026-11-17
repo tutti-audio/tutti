@@ -66,8 +66,10 @@ fn a_steady_level_is_left_alone_at_any_amounts() {
         let mut bank = shaper(attack, sustain);
         let x = steady(48_000);
         let y = run(&mut bank, &[&x], 480).remove(0);
-        // A settled steady level: both envelopes are at the level to `f32`'s rounding, so
-        // the gain is 0 dB to within the ratio's last bits.
+        // A settled steady level: the fast envelope is at the level to `f32`'s rounding, and
+        // the slow one stalls within `6e-8 / c` of it (`c` = 1 - exp(-1 / (20 ms * 48 kHz)),
+        // about 1e-3, so 6e-5 relative): the gain is 24 dB * 6e-5 = 1.4e-3 dB at most, an
+        // output error of 0.5 * 0.115 * 1.4e-3 = 8e-5, under the 1e-4 allowed here.
         for (i, (a, b)) in x.iter().zip(&y).enumerate().skip(40_000) {
             assert!(
                 (f64::from(*b) - f64::from(*a)).abs() < 1e-4,
@@ -79,6 +81,11 @@ fn a_steady_level_is_left_alone_at_any_amounts() {
 
 /// From silence into a constant level `L`, the envelopes are `L (1 - a^n)` after `n` frames,
 /// so the gain in dB at frame `n - 1` is `attack * (1 - (1 - as^n) / (1 - af^n))`.
+///
+/// The 2e-5 absolute tolerance on an output of level 0.5: the two `f32` followers carry a
+/// relative rounding of at most about 1e-6 after 2000 recurrences, which moves the gain by
+/// under `12 dB * 1e-6` and the output by about 1e-6; the closed form moves the output by
+/// 0.1 to 0.5, so a wrong branch or time constant is far outside the band.
 #[test]
 fn the_gain_on_a_step_onset_follows_the_two_followers_step_responses() {
     let attack: f64 = 12.0;
@@ -197,5 +204,65 @@ fn the_amounts_are_held_within_the_range_and_a_non_finite_one_is_zero() {
     }
     for asked in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         assert_eq!(run(&mut shaper(asked, asked), &[&x], 600).remove(0), x);
+    }
+}
+
+/// A mid-stream `aim` after `settle` ramps the amount along `lerp(a0, a1, k / steps)` over the
+/// `GAIN_GLIDE` steps (`ceil(5 ms * rate)`), frame `j` after the aim reading step `j + 1`, and
+/// the rendered gain is that amount in the onset's closed form. Tolerance as the onset test's.
+#[test]
+fn an_aimed_amount_glides_along_the_linear_ramp() {
+    let (a0, a1): (f64, f64) = (6.0, 18.0);
+    let steps = (GAIN_GLIDE.get() * RATE.get()).ceil() as usize;
+    let cut = 500;
+    let mut bank = shaper(a0, 0.0);
+    let x = vec![LEVEL as f32; 1_200];
+    let mut y = run(&mut bank, &[&x[..cut]], 64).remove(0);
+    bank.aim(&TransientControls {
+        attack: Db(a1 as f32),
+        sustain: Db(0.0),
+    });
+    y.extend(run(&mut bank, &[&x[cut..]], 64).remove(0));
+    let (af, asl) = (pole(FAST), pole(SLOW));
+    for (i, got) in y.iter().enumerate() {
+        let n = (i + 1) as i32;
+        let amount = if i < cut {
+            a0
+        } else {
+            let k = (i - cut + 1).min(steps);
+            a0 + (a1 - a0) * k as f64 / steps as f64
+        };
+        let g = amount * (1.0 - (1.0 - asl.powi(n)) / (1.0 - af.powi(n)));
+        let want = LEVEL * amplitude(g);
+        assert!(
+            (f64::from(*got) - want).abs() < 2e-5,
+            "frame {i}: {got} vs {want} (amount {amount} dB)"
+        );
+    }
+}
+
+/// The render does not depend on where blocks fall, with an `aim` between two calls: the
+/// frames before and after it come out bit for bit as one block of 1 200 gives them.
+#[test]
+fn the_render_does_not_depend_on_where_blocks_fall() {
+    let x = noise(5, 1_200, 0.8);
+    let cut = 500;
+    let render = |block: usize| {
+        let mut bank = shaper(6.0, -3.0);
+        let mut y = run(&mut bank, &[&x[..cut]], block).remove(0);
+        bank.aim(&TransientControls {
+            attack: Db(18.0),
+            sustain: Db(9.0),
+        });
+        y.extend(run(&mut bank, &[&x[cut..]], block).remove(0));
+        y
+    };
+    let reference = render(1_200);
+    assert!(
+        x.iter().zip(&reference).any(|(a, b)| a != b),
+        "the shaper moved the signal"
+    );
+    for block in [1, 7, 64, 480] {
+        assert_eq!(reference, render(block), "blocks of {block}");
     }
 }
