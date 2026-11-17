@@ -1903,7 +1903,7 @@ impl Midi<'_> {
     /// not read one: not locked, not rolling, or a locate that has not landed
     /// yet.
     #[must_use]
-    pub fn clock_error(&self) -> Option<tutti_midi_runtime::ClockError> {
+    pub fn clock_error(&self) -> Option<tutti_midi_runtime::ClockOffset> {
         self.state.clock.as_ref().and_then(ClockFollow::error)
     }
 

@@ -223,7 +223,7 @@ pub use schedule::{
     MidiClipNode, TimedHarmony, TimedMidiEvent,
 };
 pub use sync::{
-    ClockError, ClockEvent, ClockFollower, ClockKind, ClockPosition, ClockTransportState,
+    ClockEvent, ClockFollower, ClockKind, ClockOffset, ClockPosition, ClockTransportState,
     MachineControlEvent, MachineControlFollower, MidiClockDecoder, MtcCycle, MtcDecoder,
     MtcDirection, SegmentFault,
 };

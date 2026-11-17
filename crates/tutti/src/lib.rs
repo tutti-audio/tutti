@@ -377,7 +377,7 @@ pub mod session {
     pub use tutti_metering::LoadRecorder;
     pub use tutti_modulation::PeriodPoint;
     #[cfg(feature = "device")]
-    pub use tutti_session::ClockError;
+    pub use tutti_session::ClockOffset;
     #[cfg(feature = "plugin")]
     pub use tutti_session::Param as PluginParam;
     pub use tutti_session::{
@@ -652,8 +652,9 @@ pub mod midi {
         SmpteFrameRate, SysexDeviceId, TuningFrequency, UnknownFrameRate,
     };
     pub use tutti_midi_runtime::{
-        ClockKind, MidiClipControls, MidiClipNode, MidiInputPorts, OffsetOutOfRange, OutputLatency,
-        OutputOffset, OutputTerms, SegmentFault, SyncMessages, SyncOut, SyncOutControls,
+        ClockKind, ClockOffset, MidiClipControls, MidiClipNode, MidiInputPorts, OffsetOutOfRange,
+        OutputLatency, OutputOffset, OutputTerms, SegmentFault, SyncMessages, SyncOut,
+        SyncOutControls,
     };
     pub use tutti_midi_runtime::{MidiKeys, MidiOut, Outgoing, SendAt, Taken, TimedMidiEvent};
     pub use tutti_ump::{

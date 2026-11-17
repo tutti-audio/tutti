@@ -181,7 +181,7 @@ pub enum ClockEvent {
     /// position follows at once.
     Slipped {
         /// The source's position less the transport's, when it was found.
-        error: ClockError,
+        error: ClockOffset,
     },
     /// The source's time code runs backward: its Quarter Frames arrive in
     /// descending piece order (MTC, Quarter Frame Message Implementation). The
@@ -194,7 +194,7 @@ pub enum ClockEvent {
 
 /// How far the transport is from the source, in the unit the source counts in.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum ClockError {
+pub enum ClockOffset {
     /// Beat Clock: the source's beat less the transport's.
     Beat(Beat),
     /// MTC: the source's time less the transport's.
@@ -217,7 +217,7 @@ pub enum ClockError {
 ///     follower.step(tick, at, &mut |e| heard.push(e));
 /// }
 /// assert!(heard.contains(&ClockEvent::Locked));
-/// assert!(heard.iter().any(|e| matches!(e, ClockEvent::Tempo(t) if (t.get() - 120.0).abs() < 1e-6)));
+/// assert!(heard.iter().any(|e| matches!(e, ClockEvent::Tempo { tempo, .. } if (tempo.get() - 120.0).abs() < 1e-6)));
 /// ```
 #[derive(Debug)]
 pub struct ClockFollower(Follower);
@@ -410,10 +410,10 @@ impl ClockFollower {
     /// transport is behind. `None` until it
     /// has read one, and while the follower cannot (see `steer`).
     #[must_use]
-    pub fn error(&self) -> Option<ClockError> {
+    pub fn error(&self) -> Option<ClockOffset> {
         match &self.0 {
-            Follower::BeatClock(f) => f.error.map(ClockError::Beat),
-            Follower::Mtc(f) => f.error.map(ClockError::Time),
+            Follower::BeatClock(f) => f.error.map(ClockOffset::Beat),
+            Follower::Mtc(f) => f.error.map(ClockOffset::Time),
         }
     }
 
@@ -486,7 +486,7 @@ impl BeatClockFollower {
         self.error = Some(Beat::new(error));
         if error.abs() > ClockFollower::SLIP.get() {
             out(ClockEvent::Slipped {
-                error: ClockError::Beat(Beat::new(error)),
+                error: ClockOffset::Beat(Beat::new(error)),
             });
             self.locate(Beat::new(source), now, out);
             return;
@@ -691,7 +691,7 @@ impl MtcFollower {
         let frames = origin.rate.frames_at(Seconds::new(error)).abs();
         if frames > ClockFollower::MTC_SLIP_FRAMES as f64 {
             out(ClockEvent::Slipped {
-                error: ClockError::Time(Seconds::new(error)),
+                error: ClockOffset::Time(Seconds::new(error)),
             });
             self.locate(Seconds::new(source), now, out);
         }

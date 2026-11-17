@@ -123,7 +123,7 @@ pub enum MidiReport {
         kind: tutti_midi_runtime::ClockKind,
         /// The source's position less the transport's, when found: beats for
         /// Beat Clock, seconds for MTC.
-        error: tutti_midi_runtime::ClockError,
+        error: tutti_midi_runtime::ClockOffset,
     },
     /// The MTC the session follows runs backward: its Quarter Frames arrive in
     /// descending piece order. The transport has no negative rate, so the

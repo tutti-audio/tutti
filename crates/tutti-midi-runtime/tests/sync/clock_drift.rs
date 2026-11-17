@@ -9,7 +9,7 @@
 //! constants.
 
 use tutti_midi_runtime::{
-    ClockError, ClockEvent, ClockFollower, ClockKind, ClockPosition, MidiClockDecoder,
+    ClockEvent, ClockFollower, ClockKind, ClockOffset, ClockPosition, MidiClockDecoder,
 };
 use tutti_types::{Beat, Seconds};
 use tutti_ump::{Message, MidiGroup, System, U14, Ump};
@@ -56,7 +56,7 @@ impl Model {
                 locates.push(beat.get());
             }
             ClockEvent::Slipped {
-                error: ClockError::Beat(error),
+                error: ClockOffset::Beat(error),
             } => slips.push(error.get()),
             _ => {}
         }
@@ -248,7 +248,7 @@ fn the_gauge_reads_the_error_and_the_trim_follows() {
     // 0.5 s is inside the hold-off the Start's locate began.
     assert_eq!(held.follower.error(), None);
     let steered = run(&source, 3.0, 0.0, 0.01, true);
-    let Some(ClockError::Beat(error)) = steered.follower.error() else {
+    let Some(ClockOffset::Beat(error)) = steered.follower.error() else {
         panic!("a steered, locked follower reads a beat error");
     };
     let error = error.get();
@@ -284,7 +284,7 @@ fn the_error_at_the_first_read_is_the_beat_difference() {
         at(now),
         &mut |_| {},
     );
-    let Some(ClockError::Beat(error)) = follower.error() else {
+    let Some(ClockOffset::Beat(error)) = follower.error() else {
         panic!("a beat error");
     };
     let error = error.get();

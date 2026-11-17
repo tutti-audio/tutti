@@ -425,7 +425,7 @@ fn a_locked_rolling_beat_clock_reads_an_error_under_slip() {
         }
     }
     let error = error.expect("a locked, rolling follower reads an error");
-    let tutti_midi_runtime::ClockError::Beat(error) = error else {
+    let tutti_midi_runtime::ClockOffset::Beat(error) = error else {
         panic!("a Beat Clock follower reads beats: {error:?}");
     };
     assert!(error.get().abs() < tutti_midi_runtime::ClockFollower::SLIP.get());

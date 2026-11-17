@@ -81,8 +81,8 @@ use tutti_engine::Playhead;
 use tutti_graph::EventTapReader;
 use tutti_midi_protocol::SysexDeviceId;
 use tutti_midi_runtime::{
-    ClockError, ClockEvent, ClockFollower, ClockKind, ClockPosition, Followed, MachineControlEvent,
-    MachineControlFollower, TempoFollower,
+    ClockEvent, ClockFollower, ClockKind, ClockOffset, ClockPosition, Followed,
+    MachineControlEvent, MachineControlFollower, TempoFollower,
 };
 use tutti_tempo::TempoMap;
 use tutti_transport::{ProjectMeter, TransportSettings};
@@ -436,7 +436,7 @@ impl ClockFollow {
 
     /// The error the follower read at the last poll
     /// ([`ClockFollower::error`]).
-    pub(crate) fn error(&self) -> Option<ClockError> {
+    pub(crate) fn error(&self) -> Option<ClockOffset> {
         self.core.error()
     }
 

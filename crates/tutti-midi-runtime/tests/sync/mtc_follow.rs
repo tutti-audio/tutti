@@ -8,7 +8,7 @@
 //! `SETTLE` and the frame rate (25 fps, rate code 1).
 
 use tutti_midi_runtime::{
-    ClockError, ClockEvent, ClockFollower, ClockKind, ClockPosition, MtcDecoder, MtcDirection,
+    ClockEvent, ClockFollower, ClockKind, ClockOffset, ClockPosition, MtcDecoder, MtcDirection,
 };
 use tutti_types::Seconds;
 use tutti_ump::{Message, MidiGroup, System, U7, Ump};
@@ -102,7 +102,7 @@ impl Rig {
             .iter()
             .filter_map(|(now, e)| match e {
                 ClockEvent::Slipped {
-                    error: ClockError::Time(error),
+                    error: ClockOffset::Time(error),
                 } => Some((*now, error.get())),
                 _ => None,
             })
@@ -125,7 +125,7 @@ fn run_at_speed(rig: &mut Rig, speed: f64, seconds: f64) -> f64 {
             rig.feed(ump, t);
         }
         rig.tick(now);
-        if let Some(ClockError::Time(e)) = rig.follower.error() {
+        if let Some(ClockOffset::Time(e)) = rig.follower.error() {
             worst = worst.max(e.get().abs());
         }
     }
