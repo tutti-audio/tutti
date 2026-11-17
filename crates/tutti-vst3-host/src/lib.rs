@@ -323,7 +323,7 @@ pub use types::{
     NoteExpressionFlags, NoteExpressionIntValue, NoteExpressionType, NoteExpressionValue,
     ParameterChanges, ParameterFlags, ParameterPoint, ParameterQueue, PhysicalUiType, PlainRange,
     PluginInfo, PrefetchSupport, ProcessContextRequirements, ProcessMode, ProcessOutput,
-    ProcessOutputRef, Sample, TransportInfo, UnitId, Vst3KeyswitchInfo, Vst3NoteExpressionInfo,
+    ProcessOutputRef, TransportInfo, UnitId, Vst3KeyswitchInfo, Vst3NoteExpressionInfo,
     Vst3ParameterInfo, Vst3ProgramListInfo, Vst3Sample, Vst3UnitInfo, WindowHandle, WireMidi,
     to_process_context,
 };
