@@ -2,7 +2,7 @@
 //! initialisation, the factory and its descriptors.
 
 use std::collections::HashMap;
-use std::ffi::{CString, c_char};
+use std::ffi::{CString, NulError, c_char};
 use std::mem::ManuallyDrop;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
@@ -21,32 +21,41 @@ use crate::plugin::Plugin;
 use crate::roles::ThreadRoles;
 
 /// Which step of loading failed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum Stage {
     /// Opening the library or reading `clap_entry`.
+    #[error("opening")]
     Opening,
     /// Getting the plugin factory and its descriptors.
+    #[error("factory")]
     Factory,
     /// Creating the instance.
+    #[error("instantiation")]
     Instantiation,
     /// The plugin's own `init`.
+    #[error("initialization")]
     Initialization,
 }
 
-/// A load that failed: which step, and what went wrong at it.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("{:?}: {}", self.stage(), self.reason())]
+/// A load that failed: which step ([`stage`](Self::stage)), and what went
+/// wrong at it.
+#[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum LoadError {
-    /// The library could not be opened; the loader's message.
-    Library(String),
-    /// The library has no `clap_entry` symbol; the loader's message.
-    NoEntrySymbol(String),
-    /// The path is not a C string; the reason.
-    InvalidPath(String),
+    /// The library could not be opened.
+    #[error("failed to load the library")]
+    Library(#[source] libloading::Error),
+    /// The library has no `clap_entry` symbol.
+    #[error("no clap_entry symbol")]
+    NoEntrySymbol(#[source] libloading::Error),
+    /// The path is not a C string.
+    #[error("invalid path")]
+    InvalidPath(#[source] NulError),
     /// The entry's `init` answered `false`.
+    #[error("entry init failed")]
     EntryInit,
     /// An entry the CLAP structs define is absent (a null function pointer).
+    #[error("no {name} function ({stage})")]
     MissingFunction {
         /// The step that needed it.
         stage: Stage,
@@ -54,6 +63,11 @@ pub enum LoadError {
         name: &'static str,
     },
     /// The entry or a descriptor declares a CLAP version this host cannot read.
+    #[error(
+        "{what} declares CLAP {major}.{minor}.{revision}, which this host cannot read its \
+         structs against: it is built for major {CLAP_VERSION_MAJOR} (version.h sets the \
+         floor at major >= 1; 0.x is the development stage, with no stable ABI)"
+    )]
     Version {
         /// What declared it.
         what: &'static str,
@@ -67,26 +81,33 @@ pub enum LoadError {
         revision: u32,
     },
     /// The entry returned no plugin factory.
+    #[error("no plugin factory")]
     NoFactory,
     /// The factory advertises no plugins.
+    #[error("no plugins in the factory")]
     EmptyFactory,
     /// The factory advertises plugins but returned no descriptor for any.
+    #[error("the factory advertises {count} plugins but returned no descriptor")]
     NoDescriptors {
         /// How many it advertised.
         count: u32,
     },
     /// No descriptor has the id asked for.
+    #[error("no plugin with id '{wanted}' in this bundle; it contains: {}", available.join(", "))]
     UnknownId {
         /// The id asked for.
         wanted: String,
         /// The ids the bundle holds (`<null id>` for a descriptor without one).
         available: Vec<String>,
     },
-    /// The plugin id is not a C string; the reason.
-    InvalidPluginId(String),
+    /// The plugin id is not a C string.
+    #[error("invalid plugin id")]
+    InvalidPluginId(#[source] NulError),
     /// The factory returned no instance.
+    #[error("failed to create the plugin instance")]
     CreateFailed,
     /// The plugin's own `init` answered `false`.
+    #[error("plugin init failed")]
     PluginInitFailed,
 }
 
@@ -105,42 +126,6 @@ impl LoadError {
             | Self::UnknownId { .. } => Stage::Factory,
             Self::InvalidPluginId(_) | Self::CreateFailed => Stage::Instantiation,
             Self::PluginInitFailed => Stage::Initialization,
-        }
-    }
-
-    /// Why, without the step.
-    #[must_use]
-    pub fn reason(&self) -> String {
-        match self {
-            Self::Library(e) => format!("Failed to load library: {e}"),
-            Self::NoEntrySymbol(e) => format!("No clap_entry symbol: {e}"),
-            Self::InvalidPath(e) => format!("Invalid path: {e}"),
-            Self::EntryInit => "Entry init failed".to_string(),
-            Self::MissingFunction { name, .. } => format!("No {name} function"),
-            Self::Version {
-                what,
-                major,
-                minor,
-                revision,
-                ..
-            } => format!(
-                "{what} declares CLAP {major}.{minor}.{revision}, which this host cannot read \
-                 its structs against: it is built for major {CLAP_VERSION_MAJOR} \
-                 (version.h sets the floor at major >= 1 — 0.x is the development \
-                 stage, with no stable ABI)"
-            ),
-            Self::NoFactory => "No plugin factory".to_string(),
-            Self::EmptyFactory => "No plugins in factory".to_string(),
-            Self::NoDescriptors { count } => {
-                format!("Factory advertises {count} plugins but returned no descriptor")
-            }
-            Self::UnknownId { wanted, available } => format!(
-                "No plugin with id '{wanted}' in this bundle; it contains: {}",
-                available.join(", ")
-            ),
-            Self::InvalidPluginId(e) => format!("Invalid plugin ID: {e}"),
-            Self::CreateFailed => "Failed to create plugin instance".to_string(),
-            Self::PluginInitFailed => "Plugin init failed".to_string(),
         }
     }
 }
@@ -330,15 +315,14 @@ impl Bundle {
         let mut registry = registry();
         // SAFETY: loading a plugin library runs its initialisers, which the
         // host accepts by loading plugins at all; the caller named the path.
-        let library = unsafe { libloading::Library::new(load_path) }
-            .map_err(|e| LoadError::Library(e.to_string()))?;
+        let library = unsafe { libloading::Library::new(load_path) }.map_err(LoadError::Library)?;
 
         // SAFETY: `clap_entry` is the symbol CLAP defines, a `clap_plugin_entry`
         // static of the image, valid while `library` is mapped.
         let entry: &clap_plugin_entry = unsafe {
             let sym = library
                 .get::<*const clap_plugin_entry>(b"clap_entry\0")
-                .map_err(|e| LoadError::NoEntrySymbol(e.to_string()))?;
+                .map_err(LoadError::NoEntrySymbol)?;
             &**sym
         };
         check_version(entry.clap_version, "clap_entry", Stage::Opening)?;
@@ -347,8 +331,7 @@ impl Bundle {
             stage: Stage::Opening,
             name: "init",
         })?;
-        let path_cstr = CString::new(bundle_path.to_string_lossy().as_ref())
-            .map_err(|e| LoadError::InvalidPath(e.to_string()))?;
+        let path_cstr = crate::c_path::c_path(bundle_path).map_err(LoadError::InvalidPath)?;
         let entry_guard = acquire_in(
             &mut registry,
             bundle_path,
@@ -454,8 +437,7 @@ impl Bundle {
         work: &MainWorkHandle,
     ) -> Result<Plugin, LoadError> {
         let id = &self.descriptors[index].id;
-        let id_cstr =
-            CString::new(id.as_str()).map_err(|e| LoadError::InvalidPluginId(e.to_string()))?;
+        let id_cstr = CString::new(id.as_str()).map_err(LoadError::InvalidPluginId)?;
         // SAFETY: `factory` is the live factory read in `open`.
         let factory = unsafe { &*self.factory };
         let create = factory.create_plugin.ok_or(LoadError::MissingFunction {
@@ -575,8 +557,8 @@ mod tests {
     /// uninitialized.
     #[test]
     fn init_runs_again_after_every_guard_for_a_path_is_dropped() {
-        let path = Path::new("/test/h6-reinit-after-unload.clap");
-        let cstr = std::ffi::CString::new("/test/h6-reinit-after-unload.clap").unwrap();
+        let path = Path::new("/test/reinit-after-unload.clap");
+        let cstr = std::ffi::CString::new("/test/reinit-after-unload.clap").unwrap();
 
         // Stands in for `probe()`: acquire, then drop (library unloaded).
         let guard = entry_registry_acquire(path, reinit_counting_init, None, &cstr).unwrap();
@@ -597,8 +579,8 @@ mod tests {
     /// on still holds: overlapping acquires share one `init`.
     #[test]
     fn init_runs_once_while_a_guard_is_still_alive() {
-        let path = Path::new("/test/h6-shared-while-live.clap");
-        let cstr = std::ffi::CString::new("/test/h6-shared-while-live.clap").unwrap();
+        let path = Path::new("/test/shared-while-live.clap");
+        let cstr = std::ffi::CString::new("/test/shared-while-live.clap").unwrap();
 
         let first = entry_registry_acquire(path, shared_counting_init, None, &cstr).unwrap();
         let second = entry_registry_acquire(path, shared_counting_init, None, &cstr).unwrap();
@@ -630,8 +612,8 @@ mod tests {
     /// Spec: clap.entry.init, clap.entry.deinit
     #[test]
     fn deinit_runs_once_when_the_last_claim_is_released_and_before_a_second_init() {
-        let path = Path::new("/test/c1-deinit-pairs-init.clap");
-        let cstr = std::ffi::CString::new("/test/c1-deinit-pairs-init.clap").unwrap();
+        let path = Path::new("/test/deinit-pairs-init.clap");
+        let cstr = std::ffi::CString::new("/test/deinit-pairs-init.clap").unwrap();
 
         let first =
             entry_registry_acquire(path, ordered_init, Some(ordered_deinit), &cstr).unwrap();
@@ -653,8 +635,8 @@ mod tests {
     /// skip init and hand back a guard for an uninitialized entry.
     #[test]
     fn failed_init_is_not_registered() {
-        let path = Path::new("/test/h6-failed-init.clap");
-        let cstr = std::ffi::CString::new("/test/h6-failed-init.clap").unwrap();
+        let path = Path::new("/test/failed-init.clap");
+        let cstr = std::ffi::CString::new("/test/failed-init.clap").unwrap();
 
         assert!(entry_registry_acquire(path, failing_init, None, &cstr).is_err());
 

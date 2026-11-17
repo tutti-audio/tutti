@@ -57,7 +57,7 @@ fn unit() -> Direct<PluginNode<Vst2Loaded>> {
 
 fn drive(unit: &mut Direct<PluginNode<Vst2Loaded>>) {
     unit.block();
-    black_box(unit.output(0).first().copied());
+    black_box(unit.output().plane(0).samples().first().copied());
 }
 
 /// One in-process VST2 instance, per block.

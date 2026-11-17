@@ -101,6 +101,7 @@ fn a_click_comes_out_one_declared_latency_later() {
     let (mut frame, mut heard) = (0u64, Vec::new());
     for len in [100usize, 37, 128, 90, 128, 128, 128] {
         for (c, ch) in unit.inputs_mut().iter_mut().enumerate() {
+            let ch = ch.into_samples_mut();
             for (i, s) in ch.iter_mut().enumerate().take(len) {
                 *s = if c == 0 && frame + i as u64 == 50 {
                     1.0
@@ -110,7 +111,7 @@ fn a_click_comes_out_one_declared_latency_later() {
             }
         }
         unit.block_in(&block_env(frame, len));
-        heard.extend_from_slice(&unit.output(0)[..len]);
+        heard.extend_from_slice(&unit.output().plane(0).samples()[..len]);
         frame += len as u64;
     }
     let click = 50 + declared.get();

@@ -8,7 +8,7 @@ use windows_sys::Win32::Media::Multimedia::{
     DRV_QUERYDEVICEINTERFACE, DRV_QUERYDEVICEINTERFACESIZE,
 };
 
-use crate::error::{Error, check};
+use crate::error::{Error, MmOperation, check};
 
 /// What a driver reports of one port.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -39,7 +39,7 @@ pub fn output_count() -> u32 {
 ///
 /// # Errors
 ///
-/// `MMSYSERR_BADDEVICEID` when the port is gone, or the driver's own refusal.
+/// [`MmResult::BadDeviceId`](crate::MmResult::BadDeviceId) when the port is gone, or the driver's own refusal.
 pub fn input_caps(index: u32) -> Result<Caps, Error> {
     let mut caps = MIDIINCAPSW::default();
     // SAFETY: `caps` is a live, writable `MIDIINCAPSW` and the size passed is
@@ -51,7 +51,7 @@ pub fn input_caps(index: u32) -> Result<Caps, Error> {
             size_of::<MIDIINCAPSW>() as u32,
         )
     };
-    check("midiInGetDevCaps", code)?;
+    check(MmOperation::MidiInGetDevCaps, code)?;
     // The struct is packed: read each field by value, never by reference.
     let (manufacturer, product, name) = (caps.wMid, caps.wPid, caps.szPname);
     Ok(Caps {
@@ -65,7 +65,7 @@ pub fn input_caps(index: u32) -> Result<Caps, Error> {
 ///
 /// # Errors
 ///
-/// `MMSYSERR_BADDEVICEID` when the port is gone, or the driver's own refusal.
+/// [`MmResult::BadDeviceId`](crate::MmResult::BadDeviceId) when the port is gone, or the driver's own refusal.
 pub fn output_caps(index: u32) -> Result<Caps, Error> {
     let mut caps = MIDIOUTCAPSW::default();
     // SAFETY: `caps` is a live, writable `MIDIOUTCAPSW` and the size passed is
@@ -77,7 +77,7 @@ pub fn output_caps(index: u32) -> Result<Caps, Error> {
             size_of::<MIDIOUTCAPSW>() as u32,
         )
     };
-    check("midiOutGetDevCaps", code)?;
+    check(MmOperation::MidiOutGetDevCaps, code)?;
     let (manufacturer, product, name) = (caps.wMid, caps.wPid, caps.szPname);
     Ok(Caps {
         manufacturer,

@@ -2520,7 +2520,6 @@ dependencies = [
  "objc2",
  "objc2-foundation",
  "thiserror 2.0.21",
- "tracing",
  "tutti-midi-protocol",
  "tutti-plugin-types",
  "tutti-rt",
@@ -2604,6 +2603,7 @@ dependencies = [
  "tutti-fixtures",
  "tutti-graph",
  "tutti-midi-protocol",
+ "tutti-plugin-ipc-ffi",
  "tutti-plugin-types",
  "tutti-rt",
  "tutti-types",
@@ -3194,6 +3194,7 @@ dependencies = [
  "tutti-fixtures",
  "tutti-graph",
  "tutti-midi-protocol",
+ "tutti-plugin-ipc-ffi",
  "tutti-plugin-types",
  "tutti-rt",
  "tutti-types",
@@ -3366,6 +3367,7 @@ dependencies = [
  "libm",
  "serde",
  "thiserror 2.0.21",
+ "tutti-buffers",
  "tutti-dsp",
  "tutti-fixtures",
  "tutti-graph",
@@ -3573,6 +3575,7 @@ dependencies = [
  "tutti-fixtures",
  "tutti-graph",
  "tutti-midi-protocol",
+ "tutti-plugin-ipc-ffi",
  "tutti-plugin-types",
  "tutti-rt",
  "tutti-shared-plugin",
@@ -3589,6 +3592,7 @@ name = "tutti-winmm-ffi"
 version = "0.0.1"
 dependencies = [
  "thiserror 2.0.21",
+ "tracing",
  "tutti-fixtures",
  "windows-sys",
 ]

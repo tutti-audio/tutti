@@ -13,6 +13,7 @@ use tutti_midi_protocol::Translator;
 use tutti_plugin_types::BusChannels;
 use tutti_plugin_types::RtMidiEvents;
 use tutti_plugin_types::{SampleFormat, SampleRate};
+use tutti_types::MaxBlock;
 
 /// How many converted note expressions one block can carry; reserved at
 /// activation so converting never grows the buffer.
@@ -22,7 +23,7 @@ pub(crate) const INPUT_NOTE_EXPRESSIONS: usize = 256;
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct AudioConfig {
     pub sample_rate: SampleRate,
-    pub max_frames: u32,
+    pub max_block: MaxBlock,
     pub supports_f64: bool,
     /// Whether the current activation hands the plugin 64-bit buffers.
     pub f64_active: bool,
