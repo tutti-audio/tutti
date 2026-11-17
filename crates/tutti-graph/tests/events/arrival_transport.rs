@@ -23,11 +23,11 @@ use tutti_types::MaxBlock;
 use common::prepare;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Cx, Editor, Env, Executor, Io, LoopRange, Node, Offset, Prepare, Reference, Shape, Status,
+    Cx, Editor, Env, Executor, Io, Node, Offset, Prepare, Reference, Shape, Status,
     TransportChanges, TransportHistory, TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, InPort, OutPort, Source};
-use tutti_types::{Beat, Bpm, ChannelLayout, Frame, Latency, SampleRate, Samples};
+use tutti_types::{Beat, Bpm, ChannelLayout, Frame, Latency, LoopRange, SampleRate, Samples};
 
 const MAX: usize = 64;
 const LATENT: NodeKey = NodeKey(1);
@@ -324,10 +324,7 @@ fn scene(b: usize, n: usize, prev: Option<&Env>) -> (TransportPosition, Transpor
             true,
             Bpm::of(120.0),
             Beat(4.0),
-            Some(LoopRange {
-                start: Beat(4.0),
-                end: Beat(4.0 + 40.0 / FPB),
-            }),
+            Some(LoopRange::new(Beat(4.0), Beat(4.0 + 40.0 / FPB)).expect("a loop")),
         ),
         // The loop, picked up at the previous block's last frame.
         4 => prev.map_or(rolling(2.0), |p| {

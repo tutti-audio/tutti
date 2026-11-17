@@ -23,13 +23,14 @@ use tutti_vst2_host::Vst2Loaded;
 
 use tutti_graph::contract::Latent;
 use tutti_graph::{
-    Env, GraphBuilder, IntoNode, LoopRange, Offset, Prepare, Renderer, TransportChanges,
-    TransportPosition, Unforkable,
+    Env, GraphBuilder, IntoNode, Offset, Prepare, Renderer, TransportChanges, TransportPosition,
+    Unforkable,
 };
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_host::{PluginNode, load_client};
 use tutti_transport::ProjectMeter;
 use tutti_types::Latency;
+use tutti_types::LoopRange;
 use tutti_types::{
     Beat, BeatsPerBar, Bpm, ChannelLayout, Frame, MeterChange, MeterMap, NoteValue, SampleRate,
     Samples, TimeSignature,
@@ -190,10 +191,7 @@ fn scene(b: usize) -> (TransportPosition, TransportChanges) {
             true,
             Bpm::of(120.0),
             Beat(base),
-            Some(LoopRange {
-                start: Beat(base),
-                end: Beat(base + 16.0 / 24_000.0),
-            }),
+            Some(LoopRange::new(Beat(base), Beat(base + 16.0 / 24_000.0)).expect("a loop")),
         ),
         4 => rolling.with_recording(true),
         _ => TransportPosition::new(false, Bpm::of(100.0), Beat(base), None),
