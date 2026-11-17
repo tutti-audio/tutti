@@ -74,7 +74,7 @@ impl ClockNode {
     /// events at `sample_rate` until `prepare` gives it the graph's, and
     /// stating the meter `meter` reads (a reader of the project meter,
     /// registered on the control side) when
-    /// [`ClockSends::flex`] is on.
+    /// [`ClockSends::flex`](super::ClockSends::flex) is on.
     #[must_use]
     pub fn new(group: MidiGroup, sample_rate: SampleRate, meter: Reader<MeterMap>) -> Self {
         let (master, controls) = ClockMaster::new(group, sample_rate, meter);
