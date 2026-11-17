@@ -25,7 +25,7 @@ use tutti_types::{AtomicF32, CompressionRatio, Db, Hz, Param, SampleRate};
 use tutti_types::{BusTopology, ChannelLayout, Seconds, Tail, UnitParam};
 
 use crate::filter::Splits;
-use crate::kernel::{Grid, slice_in, slice_out, walk_grid};
+use crate::kernel::{Grid, first_non_finite, log_non_finite, slice_in, slice_out, walk_grid};
 use crate::ramp::LastGood;
 
 /// The crossover frequencies a band count starts with.
@@ -575,7 +575,8 @@ impl Node for MultibandCompressorNode {
         }
         // A block that wrote a NaN or an infinity is passed on as rendered, and the bank
         // starts the next one from silence: nothing non-finite is latched.
-        if output.iter().any(|ch| !ch.iter().all(|s| s.is_finite())) {
+        if let Some((frame, channel)) = first_non_finite(output.iter()) {
+            log_non_finite(&io, frame, channel);
             t.clear(rig);
         }
         Status::Modified
