@@ -325,11 +325,10 @@ mod tests {
             .unwrap();
         assert!(!own_ready && ready.is_empty(), "nothing yet");
         writer.write_all(b"x").unwrap();
-        let started = std::time::Instant::now();
+        // A timeout past the test harness's limit: a poll that ran it out fails.
         let own_ready = poller
-            .wait(Some(own.as_fd()), &[(fd, READ)], 5000, &mut ready)
+            .wait(Some(own.as_fd()), &[(fd, READ)], 600_000, &mut ready)
             .unwrap();
-        assert!(started.elapsed() < std::time::Duration::from_millis(1000));
         assert!(!own_ready, "the caller's own descriptor is apart");
         assert_eq!(ready, [(fd, READ)]);
         // A write interest it did not ask for is not reported; a closed

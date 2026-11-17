@@ -1310,10 +1310,10 @@ mod tests {
         assert!(!guard.watch().is_dead(), "a launched server is alive");
         guard.terminate();
 
-        let started = Instant::now();
+        let deadline = Instant::now() + Duration::from_secs(60);
         while !guard.watch().is_dead() {
             assert!(
-                started.elapsed() < Duration::from_secs(60),
+                Instant::now() < deadline,
                 "the end of the process was never declared"
             );
             thread::sleep(Duration::from_millis(1));
