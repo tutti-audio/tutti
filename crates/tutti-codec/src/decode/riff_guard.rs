@@ -8,16 +8,19 @@
 //! chunk first: a wrong value is refused before it reaches the arithmetic.
 //!
 //! The probe anchors on the first `RIFF....WAVE` header, which may follow a
-//! prefix or an ID3v2 tag, so [`check`] walks the chunks of that header, up to
-//! the `data` chunk the demuxer stops at, looking no further than
-//! [`SCAN_DEPTH`] bytes past the tag. A source that opens as another container
-//! is not scanned. It reads through a fixed buffer and allocates nothing.
+//! prefix or ID3v2 tags, so [`check`] walks the chunks of that header, up to
+//! the `data` chunk the demuxer stops at. The probe counts its depth from the
+//! start or the end of the last tag it read, as [`SCAN_DEPTH`] does here, so a
+//! WAVE header more than that far past either is beyond the probe too. A
+//! source that opens as another container is not scanned. It reads through a
+//! fixed buffer and allocates nothing.
 
 use std::io::{self, Read, Seek, SeekFrom};
 
 use symphonia::core::errors::Error;
 
-/// How far past the start (or the ID3v2 tag) a marker is looked for: the probe's own default depth.
+/// How far past the start, or the last ID3v2 tag, a marker is looked for: the
+/// probe's own default depth.
 const SCAN_DEPTH: u64 = 1 << 20;
 /// The bytes read per step of the marker scan.
 const WINDOW: usize = 4096;
@@ -54,28 +57,35 @@ pub(super) fn check<R: Read + Seek + ?Sized>(source: &mut R) -> Result<(), Error
     result
 }
 
-/// Checks the WAVE chunks behind the first `RIFF....WAVE` in the first [`SCAN_DEPTH`]
-/// bytes after any ID3v2 tag, unless the source starts as another container.
+/// Checks the WAVE chunks behind the first `RIFF....WAVE` the probe would
+/// find, scanning from `start` and, as the probe does, past each ID3v2 tag it
+/// reads; each tag restarts the [`SCAN_DEPTH`] count. A source that opens as
+/// another container is not scanned.
 fn scan<R: Read + Seek + ?Sized>(source: &mut R, start: u64) -> Result<(), Error> {
     let mut window = [0u8; WINDOW];
-    let mut base = start;
-    source.seek(SeekFrom::Start(base)).map_err(Error::IoError)?;
-    let mut n = read_up_to(source, &mut window[..12]).map_err(Error::IoError)?;
-    if let Some(tag_len) = id3v2_len(&window[..n]) {
-        base += tag_len;
-        source.seek(SeekFrom::Start(base)).map_err(Error::IoError)?;
-        n = read_up_to(source, &mut window[..12]).map_err(Error::IoError)?;
-    }
+    source
+        .seek(SeekFrom::Start(start))
+        .map_err(Error::IoError)?;
+    let n = read_up_to(source, &mut window[..12]).map_err(Error::IoError)?;
     if is_other_container(&window[..n]) {
         return Ok(());
     }
-    let limit = base + SCAN_DEPTH;
-    loop {
+    let mut base = start;
+    let mut limit = start + SCAN_DEPTH;
+    'scan: loop {
         source.seek(SeekFrom::Start(base)).map_err(Error::IoError)?;
         let n = read_up_to(source, &mut window).map_err(Error::IoError)?;
         for at in 0..n.saturating_sub(3) {
-            if &window[at..at + 4] == b"RIFF" && check_riff(source, base + at as u64)? {
+            let pos = base + at as u64;
+            if &window[at..at + 4] == b"RIFF" && check_riff(source, pos)? {
                 return Ok(());
+            }
+            if &window[at..at + 3] == b"ID3"
+                && let Some(len) = id3v2_len(source, pos)?
+            {
+                base = pos + len;
+                limit = base + SCAN_DEPTH;
+                continue 'scan;
             }
         }
         if n < WINDOW || base + n as u64 >= limit {
@@ -86,16 +96,31 @@ fn scan<R: Read + Seek + ?Sized>(source: &mut R, start: u64) -> Result<(), Error
     }
 }
 
-/// The length of the ID3v2 tag `head` opens, header and footer included.
-fn id3v2_len(head: &[u8]) -> Option<u64> {
-    if head.len() < 10 || &head[..3] != b"ID3" || head[6..10].iter().any(|b| b & 0x80 != 0) {
-        return None;
+/// The length of the ID3v2 tag at `at`, header included, or `None` where the
+/// probe's tag reader refuses the header and scans on: a version outside 2
+/// to 4 or with a 0xFF byte, a version 2 compression flag, or a size byte
+/// with its high bit set. The reader consumes the header and `size` bytes and
+/// leaves a version 4 footer to the scan, so the footer is not counted.
+fn id3v2_len<R: Read + Seek + ?Sized>(source: &mut R, at: u64) -> Result<Option<u64>, Error> {
+    let mut head = [0u8; 10];
+    source.seek(SeekFrom::Start(at)).map_err(Error::IoError)?;
+    match source.read_exact(&mut head) {
+        Ok(()) => {}
+        Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => return Ok(None),
+        Err(e) => return Err(Error::IoError(e)),
+    }
+    let (major, minor, flags) = (head[3], head[4], head[5]);
+    if !(2..=4).contains(&major)
+        || minor == 0xFF
+        || (major == 2 && flags & 0x40 != 0)
+        || head[6..10].iter().any(|b| b & 0x80 != 0)
+    {
+        return Ok(None);
     }
     let size = head[6..10]
         .iter()
         .fold(0u64, |size, b| size << 7 | u64::from(*b));
-    let footer = if head[5] & 0x10 != 0 { 10 } else { 0 };
-    Some(10 + size + footer)
+    Ok(Some(10 + size))
 }
 
 /// Whether `head` opens a container this build reads that is not RIFF, which

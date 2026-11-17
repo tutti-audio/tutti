@@ -62,10 +62,10 @@ fn guard(bytes: &[u8]) -> Result<(), Error> {
     check(&mut Cursor::new(bytes))
 }
 
-/// The 72-byte file the fuzzer found: junk before `RIFF`, then a PCM `fmt `
+/// Junk before `RIFF`, then a PCM `fmt `
 /// of 65,535 channels at 16 bits, whose `channels * (bits / 8)` overflows `u16`.
 #[test]
-fn the_fuzzer_found_pcm_of_65535_channels_after_a_prefix_is_refused_not_a_panic() {
+fn pcm_of_65535_channels_after_a_prefix_is_refused_not_a_panic() {
     let junk = [
         0x52, 0x52, 0xd3, 0xd3, 0xd3, 0xd3, 0xd3, 0xd3, 0xd3, 0xd3, 0x96,
     ];
@@ -263,15 +263,7 @@ fn a_source_opening_as_another_container_is_not_scanned() {
 fn an_id3v2_tag_holding_riff_is_skipped_past() {
     let bad = wav(&[], &basic_fmt(PCM, 65_535, 16));
     let good = wav(&[], &basic_fmt(PCM, 2, 16));
-    let mut tag = b"ID3\x04\0\0".to_vec();
-    let size = bad.len() as u32;
-    tag.extend([
-        (size >> 21) as u8 & 0x7f,
-        (size >> 14) as u8 & 0x7f,
-        (size >> 7) as u8 & 0x7f,
-        size as u8 & 0x7f,
-    ]);
-    tag.extend(&bad);
+    let tag = id3(4, 0, &bad);
     let mut skipped = tag.clone();
     skipped.extend(&good);
     assert!(guard(&skipped).is_ok());
@@ -289,7 +281,7 @@ fn only_the_first_riff_after_the_start_is_checked() {
     assert!(guard(&bytes).is_ok());
 }
 
-/// The fuzzer's second input: a `RIFF` of another form, then a WAVE header with
+/// A `RIFF` of another form, then a WAVE header with
 /// a 65,535-channel `fmt `, is refused.
 #[test]
 fn a_riff_of_another_form_does_not_hide_a_later_wave_header() {
@@ -307,11 +299,100 @@ fn a_bad_mp3_sync_before_a_wave_header_does_not_hide_it() {
     assert!(guard(&bytes).is_err());
 }
 
-/// The fuzzer's `FORM` prefix: AIFF is not read here, so the probe scans on to
+/// A `FORM` prefix: AIFF is not read here, so the probe scans on to
 /// the WAVE header.
 #[test]
 fn a_form_marker_does_not_hide_a_later_wave_header() {
     let mut bytes = b"FORM".to_vec();
     bytes.extend(wav(&[], &basic_fmt(PCM, 65_535, 16)));
     assert!(guard(&bytes).is_err());
+}
+
+/// An ID3v2 tag of the given version and flags around `body`, as the probe's
+/// tag reader frames it: a 10-byte header and a syncsafe size.
+fn id3(major: u8, flags: u8, body: &[u8]) -> Vec<u8> {
+    let size = body.len() as u32;
+    let mut tag = vec![b'I', b'D', b'3', major, 0, flags];
+    tag.extend([
+        (size >> 21) as u8 & 0x7f,
+        (size >> 14) as u8 & 0x7f,
+        (size >> 7) as u8 & 0x7f,
+        size as u8 & 0x7f,
+    ]);
+    tag.extend(body);
+    tag
+}
+
+/// A header the probe's tag reader refuses (version 5) is no tag: the probe
+/// scans into it, so the overflowing WAVE inside it is refused.
+#[test]
+fn a_version_5_id3_header_is_not_skipped() {
+    let bad = wav(&[], &basic_fmt(PCM, 65_535, 16));
+    let mut bytes = id3(5, 0, &bad);
+    bytes.extend(wav(&[], &basic_fmt(PCM, 2, 16)));
+    assert!(guard(&bytes).is_err());
+    let mut ff = id3(3, 0, &bad);
+    ff[4] = 0xFF;
+    assert!(guard(&ff).is_err());
+    let mut compressed = id3(2, 0x40, &bad);
+    compressed.extend(wav(&[], &basic_fmt(PCM, 2, 16)));
+    assert!(guard(&compressed).is_err());
+}
+
+/// The probe's tag reader consumes the header and `size` bytes only, so a
+/// footer flag leaves the bytes after the tag to the scan, in any version.
+#[test]
+fn the_footer_flag_does_not_extend_the_skipped_tag() {
+    for major in [3, 4] {
+        let mut bytes = id3(major, 0x10, b"tag");
+        bytes.extend(wav(&[], &basic_fmt(PCM, 65_535, 16)));
+        assert!(guard(&bytes).is_err(), "version {major}");
+    }
+}
+
+/// Consecutive tags are each skipped, and a WAVE header after them is checked.
+#[test]
+fn two_consecutive_id3_tags_before_a_bad_wave_header_are_skipped_to_it() {
+    let bad = wav(&[], &basic_fmt(PCM, 65_535, 16));
+    let mut bytes = id3(4, 0, &bad);
+    bytes.extend(id3(3, 0, &bad));
+    bytes.extend(&bad);
+    assert!(guard(&bytes).is_err());
+    let mut good = id3(4, 0, &bad);
+    good.extend(id3(3, 0, &bad));
+    good.extend(wav(&[], &basic_fmt(PCM, 2, 16)));
+    assert!(guard(&good).is_ok());
+}
+
+/// A tag after a prefix is skipped as well: the probe reads it wherever it
+/// finds it.
+#[test]
+fn an_id3_tag_after_a_prefix_is_skipped() {
+    let bad = wav(&[], &basic_fmt(PCM, 65_535, 16));
+    let mut bytes = vec![0x11; 7];
+    bytes.extend(id3(4, 0, &bad));
+    bytes.extend(wav(&[], &basic_fmt(PCM, 2, 16)));
+    assert!(guard(&bytes).is_ok());
+}
+
+/// Every `fmt ` before the `data` chunk is checked, not only the first.
+#[test]
+fn a_second_bad_fmt_chunk_after_a_good_one_is_refused() {
+    let mut body = b"WAVE".to_vec();
+    body.extend(chunk(b"fmt ", &basic_fmt(PCM, 2, 16)));
+    body.extend(chunk(b"fmt ", &basic_fmt(PCM, 65_535, 16)));
+    body.extend(chunk(b"data", &[0u8; 8]));
+    let mut bytes = b"RIFF".to_vec();
+    bytes.extend((body.len() as u32).to_le_bytes());
+    bytes.extend(body);
+    assert!(guard(&bytes).is_err());
+}
+
+/// A `fmt ` shorter than the 16-byte basic layout is left to the decoder,
+/// which refuses it: the guard passes it.
+#[test]
+fn a_fmt_chunk_shorter_than_16_bytes_passes_the_guard_and_the_decoder_refuses_it() {
+    let bytes = wav(&[], &basic_fmt(PCM, 65_535, 16)[..12]);
+    assert!(guard(&bytes).is_ok());
+    assert!(Wave::from_bytes(bytes).is_err());
 }

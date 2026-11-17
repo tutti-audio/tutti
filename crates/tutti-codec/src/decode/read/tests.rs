@@ -57,8 +57,8 @@ fn the_reserve_for_a_stated_frame_count_is_bounded() {
     assert_eq!(reserved_frames(u64::MAX, 8), RESERVE_SAMPLES as usize / 8);
 }
 
-/// A mono 16-bit header stating about 1.16 GB of data over 32 bytes decodes to
-/// the 16 frames present.
+/// A mono 16-bit header whose data length (`0x4500_0040` bytes) far exceeds the
+/// 32 bytes present decodes to the 16 frames present.
 #[test]
 fn a_data_length_far_past_the_source_decodes_the_frames_present() {
     let mut bytes = b"RIFF".to_vec();
