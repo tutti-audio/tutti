@@ -13,7 +13,6 @@ use crate::transport::control::{self as ipc, ControlStream};
 use crate::transport::shm::{AudioSlab, SlabLayout, SlabWriter};
 use std::path::Path;
 use std::process::{Child, Command};
-use std::thread;
 use std::time::{Duration, Instant};
 use tutti_plugin_types::MAX_CHUNK;
 use tutti_plugin_types::StateUse;
@@ -241,18 +240,32 @@ fn spawn_process(locator: &Locator, config: &BridgeConfig) -> BridgeResult<Child
 /// (`unique_socket_path`), so a successful connect can only be *this* server —
 /// there is no stale socket from a previous run to attach to by mistake.
 ///
-/// The server's watch is asked between attempts. A server that died on startup — a
-/// missing dynamic library, an immediate panic — never binds, and without this
-/// the host would retry for the full timeout before reporting a failure whose
-/// cause was known within milliseconds.
+/// The server's watch is asked between attempts, and the pause between them
+/// is a wait on it ([`ServerWatch::wait_dead`](crate::ServerWatch::wait_dead)):
+/// a server that died on startup — a missing dynamic library, an immediate
+/// panic — never binds, and the wait ends at its death and not at the end of
+/// a retry period, so the host reports a failure whose cause is known at once
+/// and not after the full timeout. No event says "the socket is bound" (the
+/// server would have to announce it over a channel that exists before the
+/// socket does), so the attempts themselves are the poll, one per
+/// [`CONNECT_RETRY_INTERVAL`].
 fn connect_when_listening(
     socket: &Path,
     server: &ProcessGuard,
     patience: Duration,
 ) -> BridgeResult<ControlStream> {
+    connect_with(|| ipc::connect(socket), server, patience)
+}
+
+/// [`connect_when_listening`] over the attempt it makes.
+fn connect_with(
+    mut attempt: impl FnMut() -> BridgeResult<ControlStream>,
+    server: &ProcessGuard,
+    patience: Duration,
+) -> BridgeResult<ControlStream> {
     let deadline = Instant::now() + patience;
     loop {
-        match ipc::connect(socket) {
+        match attempt() {
             Ok(stream) => return Ok(stream),
             Err(e) => {
                 if let Some(cause) = server.watch().cause() {
@@ -263,7 +276,7 @@ fn connect_when_listening(
                 if Instant::now() >= deadline {
                     return Err(e);
                 }
-                thread::sleep(CONNECT_RETRY_INTERVAL);
+                server.watch().wait_dead(CONNECT_RETRY_INTERVAL);
             }
         }
     }
@@ -513,6 +526,7 @@ mod tests {
     use super::*;
     use crate::protocol::ChannelLayout;
     use crate::transport::shm::RING_SLOTS;
+    use std::thread;
     use tutti_plugin_types::Timeouts;
 
     /// A failed launch must not leave the subprocess running.
@@ -682,36 +696,81 @@ mod tests {
         drop(server);
     }
 
-    /// **A slow restore that succeeds is a load.** The plugin sleeps in its
-    /// state restore for longer than the bridge's call window, and the launch
-    /// waits for it: the server said it began restoring, and a restore has the
-    /// window of its own. The call window is a few seconds, the restore's a
-    /// hang guard; the test asserts the launch completes, not how long it took.
+    /// A fifo the restore of the reference plugin holds on: it is entered when
+    /// the plugin opens the fifo for reading, and it returns when the writer's
+    /// end closes.
+    #[cfg(unix)]
+    fn restore_hold() -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().expect("a private temp dir");
+        let fifo = dir.path().join("restore-hold");
+        let made = Command::new("mkfifo").arg(&fifo).status().expect("mkfifo");
+        assert!(made.success(), "mkfifo {}", fifo.display());
+        (dir, fifo)
+    }
+
+    /// **A restore that outlasts the response window and succeeds is a load.**
+    /// The plugin blocks in its state restore until the test releases it, which
+    /// is after the call window has passed: the server said it began restoring,
+    /// and a restore has the window of its own. The call window is short and the
+    /// restore's a hang guard, so a launch that kept waiting on the call window
+    /// during the restore fails with the state's timeout; this one completes.
+    ///
+    /// The release waits out twice the call window from the moment the plugin is
+    /// in its restore: the host began its restore wait before that, so a
+    /// slower machine only makes the window more surely past. No event says the
+    /// host's window has passed (it is the host's clock), so that wait is the one
+    /// timed step, and it only lengthens, never shortens, the proof.
     ///
     /// Needs `cargo build -p tutti-plugin-server` first.
     #[test]
     #[cfg(unix)]
-    fn a_slow_restore_that_succeeds_is_a_load() {
+    fn a_restore_that_outlasts_the_call_window_and_succeeds_is_a_load() {
+        const CALL: Duration = Duration::from_secs(1);
+        let (_dir, fifo) = restore_hold();
+        let releaser = {
+            let fifo = fifo.clone();
+            thread::spawn(move || {
+                // Opening for writing returns when the plugin opens for reading:
+                // the plugin is in its restore.
+                let held = std::fs::OpenOptions::new()
+                    .write(true)
+                    .open(&fifo)
+                    .expect("the plugin opens the fifo");
+                // Nothing is sent on this channel: the timeout is the wait.
+                let _ = std::sync::mpsc::channel::<()>().1.recv_timeout(CALL * 2);
+                drop(held);
+            })
+        };
         let launched = stateful_launch(
-            &[("TUTTI_CLAP_PROBE_STATE_LOAD_SLEEP_MS", "4000")],
-            Duration::from_secs(3),
+            &[(
+                "TUTTI_CLAP_PROBE_STATE_LOAD_HOLD_FIFO",
+                fifo.to_str().expect("a utf-8 path"),
+            )],
+            CALL,
             Duration::from_secs(60),
         );
         let server = launched.expect("a slow restore is not a failure");
         assert!(server.state_restore.is_some(), "a restore was attempted");
+        releaser.join().expect("the releaser ends");
         reap(Ok(server));
     }
 
     /// **A restore that never returns is the state's to answer for**: past its
-    /// window the launch fails as `StateRestoreError`. The window is 200 ms and
-    /// the plugin sleeps far past it, so the restore outlasts its window in
-    /// every run. `a_restore_is_waited_on_for_its_own_window` pins that the
-    /// window is `Timeouts::state_restore` once the server says it is restoring.
+    /// window the launch fails as `StateRestoreError`, and the call window,
+    /// which is a hang guard here, is not what ended the wait. The plugin holds
+    /// the restore on a fifo no one writes to, so the restore outlasts its
+    /// 200 ms window in every run. `a_restore_is_waited_on_for_its_own_window`
+    /// pins that the window is `Timeouts::state_restore` once the server says it
+    /// is restoring.
     #[test]
     #[cfg(unix)]
     fn a_restore_that_outlasts_its_window_is_blamed_on_the_state() {
+        let (_dir, fifo) = restore_hold();
         let launched = stateful_launch(
-            &[("TUTTI_CLAP_PROBE_STATE_LOAD_SLEEP_MS", "60000")],
+            &[(
+                "TUTTI_CLAP_PROBE_STATE_LOAD_HOLD_FIFO",
+                fifo.to_str().expect("a utf-8 path"),
+            )],
             Duration::from_secs(60),
             Duration::from_millis(200),
         );
@@ -1140,38 +1199,42 @@ mod tests {
 
     /// The connect waits for a socket that is not bound yet, instead of failing.
     ///
-    /// This is the property that replaced the flat 500 ms sleep. The listener is
-    /// deliberately created *after* `connect_when_listening` is already
-    /// retrying, so a single attempt — which is what the code did before the
-    /// sleep was introduced — cannot pass: the first `connect` is guaranteed to
-    /// find nothing bound.
+    /// The first attempt is made while nothing is bound and fails; the socket is
+    /// bound before the next one, so a connect that gave up at its first
+    /// failure cannot pass.
     #[test]
     fn the_connect_waits_for_a_socket_that_is_not_bound_yet() {
-        use interprocess::local_socket::{ListenerOptions, prelude::*};
+        use interprocess::local_socket::ListenerOptions;
 
         let path = std::env::temp_dir().join(format!("tutti_late_bind_{}", std::process::id()));
         let _ = std::fs::remove_file(&path);
-
-        let listen_path = path.clone();
-        let server = std::thread::spawn(move || {
-            // Long enough that the first few connect attempts must fail.
-            std::thread::sleep(Duration::from_millis(60));
-            let name = crate::transport::control::socket_name(&listen_path).expect("socket name");
-            let listener = ListenerOptions::new()
-                .name(name)
-                .create_sync()
-                .expect("bind the late listener");
-            // Hold the connection open briefly so the host's connect succeeds.
-            let _ = listener.accept();
-            std::thread::sleep(Duration::from_millis(50));
-        });
 
         let stand_in = ProcessGuard::launched(
             Reaped::new(spawn_stand_in(StandIn::Lingers)),
             BridgeConfig::at(path.clone()),
         )
         .expect("the exit thread starts");
-        let result = connect_when_listening(&path, &stand_in, Timeouts::default().connect);
+        let mut listener = None;
+        let mut attempts = 0;
+        let result = connect_with(
+            || {
+                attempts += 1;
+                let outcome = ipc::connect(&path);
+                if listener.is_none() {
+                    assert!(outcome.is_err(), "nothing is bound at the first attempt");
+                    let name = crate::transport::control::socket_name(&path).expect("socket name");
+                    listener = Some(
+                        ListenerOptions::new()
+                            .name(name)
+                            .create_sync()
+                            .expect("bind the late listener"),
+                    );
+                }
+                outcome
+            },
+            &stand_in,
+            Timeouts::default().connect,
+        );
         drop(stand_in);
 
         assert!(
@@ -1179,8 +1242,7 @@ mod tests {
             "the connect must retry until the server binds, got: {:?}",
             result.err()
         );
-
-        let _ = server.join();
+        assert_eq!(attempts, 2, "one failed attempt, then the one that bound");
         let _ = std::fs::remove_file(&path);
     }
 
@@ -1224,7 +1286,7 @@ mod tests {
     }
 
     /// Set only in a [`StandIn::Lingers`] child, so that [`stand_in_lingers`]
-    /// sleeps there and is an instant no-op in an ordinary test run.
+    /// waits there and is an instant no-op in an ordinary test run.
     const STAND_IN_ENV: &str = "TUTTI_LAUNCH_TEST_STAND_IN";
 
     /// Spawns a stand-in by re-running **this test binary**, never a program
@@ -1242,7 +1304,7 @@ mod tests {
     /// - `Exits` asks the harness for an `--exact` name no test has: libtest
     ///   filters everything out and exits 0 without running anything.
     /// - `Lingers` runs [`stand_in_lingers`] alone, with [`STAND_IN_ENV`] set so
-    ///   it sleeps. If that name ever stops matching, the child exits at once
+    ///   it waits. If that name ever stops matching, the child exits at once
     ///   instead and `the_connect_waits_for_a_socket_that_is_not_bound_yet`
     ///   fails with "exited before binding" — the drift cannot pass silently.
     fn spawn_stand_in(kind: StandIn) -> Child {
@@ -1262,7 +1324,8 @@ mod tests {
                     .env(STAND_IN_ENV, "1");
             }
         }
-        cmd.stdout(std::process::Stdio::null())
+        cmd.stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .spawn()
             .expect("failed to re-run the test binary as a stand-in child")
@@ -1270,12 +1333,12 @@ mod tests {
 
     /// The body of a [`StandIn::Lingers`] child; a no-op anywhere else.
     ///
-    /// 30 s is only a ceiling — every caller kills its stand-in as soon as it is
-    /// done — so a leaked one still goes away by itself.
+    /// It waits for its stdin to close, which its parent's end of the pipe does
+    /// when the test kills it or ends, so a leaked one goes away by itself.
     #[test]
     fn stand_in_lingers() {
         if std::env::var_os(STAND_IN_ENV).is_some() {
-            thread::sleep(Duration::from_secs(30));
+            let _ = std::io::copy(&mut std::io::stdin(), &mut std::io::sink());
         }
     }
 
@@ -1310,14 +1373,10 @@ mod tests {
         assert!(!guard.watch().is_dead(), "a launched server is alive");
         guard.terminate();
 
-        let deadline = Instant::now() + Duration::from_secs(60);
-        while !guard.watch().is_dead() {
-            assert!(
-                Instant::now() < deadline,
-                "the end of the process was never declared"
-            );
-            thread::sleep(Duration::from_millis(1));
-        }
+        assert!(
+            guard.watch().wait_dead(Duration::from_secs(60)),
+            "the end of the process was never declared"
+        );
         match guard.watch().cause() {
             Some(PluginFailure::ServerExited { status }) => {
                 assert!(!status.success(), "{status:?}");

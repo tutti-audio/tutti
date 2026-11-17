@@ -108,6 +108,11 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
 /// grows to [`POLL_INTERVAL`] — the same cadence the `SO_RCVTIMEO` arm uses, for
 /// the same reason.
 ///
+/// Only a named pipe reaches this nap, and no event exists to replace it: a
+/// named pipe read through `interprocess` has no `poll`, no receive timeout and
+/// no wake that a blocked read honours (an overlapped read would be one), so
+/// the peek is the only way to ask.
+///
 /// Capping each nap at `remaining` is what makes the deadline *exact* on this
 /// path rather than exact-plus-one-sleep: the loop cannot oversleep past the
 /// instant it is meant to give up.
@@ -585,18 +590,69 @@ mod tests {
         assert_no_alloc::assert_no_alloc(&mut round);
     }
 
-    /// Send one framed `BridgeMessage`, but pause between the length prefix and
-    /// the body so a reader's deadline lands in the middle of the frame.
+    /// The two halves of a frame split in time: the writer's side.
+    struct Split {
+        /// Sent once the length prefix is on the wire.
+        prefix_sent: std::sync::mpsc::Sender<()>,
+        /// The writer holds the body until this fires.
+        release_body: std::sync::mpsc::Receiver<()>,
+    }
+
+    /// The test's side of a [`Split`].
+    struct SplitGate {
+        prefix_sent: std::sync::mpsc::Receiver<()>,
+        release_body: std::sync::mpsc::Sender<()>,
+    }
+
+    impl SplitGate {
+        /// Waits until the writer's prefix is on the wire, so a read that
+        /// follows it consumes the prefix and then waits for a body that is
+        /// withheld.
+        fn wait_for_prefix(&self) {
+            self.prefix_sent
+                .recv_timeout(Duration::from_secs(60))
+                .expect("the writer sent the prefix");
+        }
+
+        /// Lets the writer send the body.
+        fn release_body(&self) {
+            self.release_body.send(()).expect("the writer waits");
+        }
+    }
+
+    fn split_gate() -> (Split, SplitGate) {
+        let (prefix_sent, prefix_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_body) = std::sync::mpsc::channel();
+        (
+            Split {
+                prefix_sent,
+                release_body,
+            },
+            SplitGate {
+                prefix_sent: prefix_rx,
+                release_body: release_tx,
+            },
+        )
+    }
+
+    /// Send one framed `BridgeMessage`, holding the body back between the
+    /// length prefix and the body so a reader's deadline lands in the middle of
+    /// the frame.
     ///
-    /// The pause is the whole point: it is what puts the reader in the state a
-    /// restart cannot recover from.
-    fn send_split(peer: &ControlStream, msg: &BridgeMessage, pause: Duration) {
+    /// The body is withheld until the test releases it, which is what puts the
+    /// reader in the state a restart cannot recover from, however the
+    /// scheduler runs the two threads.
+    fn send_split(peer: &ControlStream, msg: &BridgeMessage, split: &Split) {
         use std::io::Write;
         let mut peer = peer;
         let data = postcard::to_allocvec(msg).unwrap();
         peer.write_all(&(data.len() as u32).to_be_bytes()).unwrap();
         peer.flush().unwrap();
-        std::thread::sleep(pause);
+        split.prefix_sent.send(()).unwrap();
+        split
+            .release_body
+            .recv_timeout(Duration::from_secs(60))
+            .expect("the test releases the body");
         peer.write_all(&data).unwrap();
         peer.flush().unwrap();
     }
@@ -622,9 +678,9 @@ mod tests {
     /// That is why this asserts on the *delivered message* rather than on an
     /// error code — a restart cannot produce the right one by luck.
     ///
-    /// The pause is far longer than the first budget, so the first read is
-    /// guaranteed to land mid-frame on any machine. That makes this a
-    /// deterministic test of a race.
+    /// The body is sent only after the first read has timed out, and the first
+    /// read starts only after the prefix is on the wire, so the first read
+    /// lands mid-frame however the threads are scheduled.
     #[test]
     fn a_frame_interrupted_by_a_deadline_is_resumed_from_where_it_stopped() {
         let mut p = pair();
@@ -632,14 +688,14 @@ mod tests {
 
         let sent = msg.clone();
         let peer = p.take_peer();
-        let writer = std::thread::spawn(move || {
-            send_split(&peer, &sent, Duration::from_millis(120));
-        });
+        let (split, gate) = split_gate();
+        let writer = std::thread::spawn(move || send_split(&peer, &sent, &split));
         let host = &mut p.host;
 
         let mut partial = PartialFrame::default();
 
         // First attempt: the prefix has landed, the body has not.
+        gate.wait_for_prefix();
         let err = recv_resumable(host, Duration::from_millis(20), &mut partial).unwrap_err();
         match err {
             BridgeError::Timeout { partial: p, .. } => assert!(
@@ -657,6 +713,7 @@ mod tests {
         );
 
         // Second attempt with the SAME cursor: continues from the body.
+        gate.release_body();
         let got = recv_resumable(host, Duration::from_secs(5), &mut partial)
             .expect("the resumed read must deliver the frame the peer sent");
         assert_eq!(
@@ -690,15 +747,18 @@ mod tests {
 
         let (a, b) = (first.clone(), second.clone());
         let peer = p.take_peer();
+        let (split, gate) = split_gate();
         let writer = std::thread::spawn(move || {
             // Interrupt the first frame, then send the second normally.
-            send_split(&peer, &a, Duration::from_millis(120));
-            send_split(&peer, &b, Duration::ZERO);
+            send_split(&peer, &a, &split);
+            write_frame(&mut &peer, &b).unwrap();
         });
 
         let host = &mut p.host;
         let mut partial = PartialFrame::default();
+        gate.wait_for_prefix();
         let _ = recv_resumable(host, Duration::from_millis(20), &mut partial).unwrap_err();
+        gate.release_body();
 
         let got_first = recv_resumable(host, Duration::from_secs(5), &mut partial).unwrap();
         assert_eq!(format!("{got_first:?}"), format!("{first:?}"));

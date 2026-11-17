@@ -183,22 +183,40 @@ type Rig = (
 /// result back in place before replying `AudioProcessed` — exactly what a real
 /// gain plugin's subprocess does.
 fn bridge_with_doubling_server() -> Rig {
-    bridge_with_server_stall(std::time::Duration::ZERO)
+    bridge_with_server_stall(None)
 }
 
-/// As above, but the server sleeps `stall` before every reply — a plugin under
-/// load, or a subprocess the scheduler has not run yet.
-fn bridge_with_server_stall(stall: std::time::Duration) -> Rig {
+/// What holds a mock server's replies: the server takes one permit before
+/// each reply it holds, so a test decides which replies the server answers
+/// and when. A test drops its [`Permits`] sender to let the server run on.
+type Stall = Option<std::sync::mpsc::Receiver<()>>;
+
+/// The sending end of a [`Stall`], and the stall.
+type Permits = (std::sync::mpsc::Sender<()>, Stall);
+
+/// A stall and the permits that release it.
+fn stalled() -> Permits {
+    let (permits, stall) = std::sync::mpsc::channel();
+    (permits, Some(stall))
+}
+
+/// Holds the server for a permit, when it is stalled: a plugin under load, or
+/// a subprocess the scheduler has not run yet. [`WAIT_BUDGET`] only guards a
+/// hang; a dropped sender releases the server for good.
+fn hold_for_permit(stall: &Stall) {
+    if let Some(stall) = stall {
+        let _ = stall.recv_timeout(WAIT_BUDGET);
+    }
+}
+
+/// As above, but the server holds each reply for a permit of `stall`.
+fn bridge_with_server_stall(stall: Stall) -> Rig {
     bridge_with_server(stereo_layout(), stall, |out| out)
 }
 
 /// The mock server over `layout`: output channel `ch` is input channel
-/// `route(ch)` times [`GAIN`], after sleeping `stall`.
-fn bridge_with_server(
-    layout: SlabLayout,
-    stall: std::time::Duration,
-    route: fn(usize) -> usize,
-) -> Rig {
+/// `route(ch)` times [`GAIN`], after the `stall` lets it.
+fn bridge_with_server(layout: SlabLayout, stall: Stall, route: fn(usize) -> usize) -> Rig {
     bridge_with_server_mode(layout, stall, route, false, None)
 }
 
@@ -214,7 +232,7 @@ struct ServerGate {
 /// server that drops chunks silently), and a `gate` holds chunk 1.
 fn bridge_with_server_mode(
     layout: SlabLayout,
-    stall: std::time::Duration,
+    stall: Stall,
     route: fn(usize) -> usize,
     mute: bool,
     gate: Option<ServerGate>,
@@ -278,9 +296,7 @@ fn bridge_with_server_mode(
                 };
                 let reply = match msg {
                     HostMessage::ProcessAudio(data) => {
-                        if !stall.is_zero() {
-                            std::thread::sleep(stall);
-                        }
+                        hold_for_permit(&stall);
                         if let Some(gate) = gate.as_ref().filter(|_| data.seq == 1) {
                             let _ = gate.got.send(());
                             let _ = gate.release.recv_timeout(WAIT_BUDGET);
@@ -345,8 +361,7 @@ fn a_sidechain_port_reaches_the_plugin() {
         inputs: vec![ChannelLayout::STEREO, ChannelLayout::MONO],
         ..stereo_layout()
     };
-    let (bridge, _thread, _server, slab) =
-        bridge_with_server(layout, std::time::Duration::ZERO, |out| [2, 0][out]);
+    let (bridge, _thread, _server, slab) = bridge_with_server(layout, None, |out| [2, 0][out]);
     let host_slab = Arc::clone(slab.slab());
     let mut batcher = Batcher::new(3, CHANNELS, SampleFormat::Float32, BATCH_SIZE, slab);
     let main = vec![1.0f32; BATCH_SIZE];
@@ -362,7 +377,7 @@ fn a_sidechain_port_reaches_the_plugin() {
             &mut out.outs(),
             &mut midi_out,
         );
-        wait_for_reply(&host_slab, block + 1, WAIT_BUDGET);
+        wait_for_reply(&bridge, &host_slab, block + 1, WAIT_BUDGET);
     }
     assert_eq!(
         out.at_scalar(0, 0),
@@ -435,7 +450,7 @@ fn drive_blocks_with_gap(blocks: usize, gap: std::time::Duration) -> Vec<Vec<Vec
         );
 
         if !gap.is_zero() {
-            wait_for_reply(&host_slab, block as u64 + 1, gap);
+            wait_for_reply(&bridge, &host_slab, block as u64 + 1, gap);
         }
     }
 
@@ -465,14 +480,13 @@ fn drive_blocks_with_gap(blocks: usize, gap: std::time::Duration) -> Vec<Vec<Vec
 /// It now panics, naming the budget and the block. That is not a stricter
 /// test — the caller was going to fail either way — it is the same failure with
 /// the right cause on it.
-fn wait_for_reply(slab: &AudioSlab, seq: u64, budget: std::time::Duration) {
-    const SLICE: std::time::Duration = std::time::Duration::from_micros(200);
-    let deadline = std::time::Instant::now() + budget;
-    while std::time::Instant::now() < deadline {
-        if slab.has_output(seq) {
-            return;
-        }
-        std::thread::sleep(SLICE);
+fn wait_for_reply(bridge: &PluginBridge, slab: &AudioSlab, seq: u64, budget: std::time::Duration) {
+    // The server publishes, then replies, and the reply wakes the wait.
+    if bridge
+        .progress()
+        .wait_until(std::time::Instant::now() + budget, || slab.has_output(seq))
+    {
+        return;
     }
     panic!(
         "the mock server did not publish block {seq}'s output within {budget:?}. \
@@ -820,8 +834,9 @@ fn drive_one_block(
 /// bridge is merely behind.
 #[test]
 fn a_stalled_but_live_server_does_not_allocate_on_the_audio_thread() {
-    let (bridge, mut bridge_thread, _server, slab) =
-        bridge_with_server_stall(std::time::Duration::from_millis(10));
+    // Never released: the server holds every reply while the blocks are driven.
+    let (_permits, stall) = stalled();
+    let (bridge, mut bridge_thread, _server, slab) = bridge_with_server_stall(stall);
     let mut batcher = Batcher::new(CHANNELS, CHANNELS, SampleFormat::Float32, BATCH_SIZE, slab);
 
     let mut input = Planar::new();
@@ -853,8 +868,8 @@ fn a_stalled_but_live_server_does_not_allocate_on_the_audio_thread() {
 /// answer is no miss, and a block that outruns a stalled server is counted.
 #[test]
 fn the_chunk_counters_report_misses_and_answers() {
-    let (bridge, mut bridge_thread, _server, slab) =
-        bridge_with_server_stall(std::time::Duration::from_millis(50));
+    let (permits, stall) = stalled();
+    let (bridge, mut bridge_thread, _server, slab) = bridge_with_server_stall(stall);
     let counters = Arc::new(ChunkCounters::default());
     let answered_in = Arc::clone(slab.slab());
     counters.attach(move |seq| answered_in.has_output(seq));
@@ -877,18 +892,14 @@ fn the_chunk_counters_report_misses_and_answers() {
         "a chunk the stalled server has not answered read as answered"
     );
 
-    let deadline = std::time::Instant::now() + WAIT_BUDGET;
-    while !counters.in_flight_answered() {
-        assert!(
-            std::time::Instant::now() < deadline,
-            "the server never answered"
-        );
-        std::thread::sleep(std::time::Duration::from_millis(1));
-    }
+    permits.send(()).expect("the server waits for a permit");
+    wait_for(&bridge, "the server never answered", || {
+        counters.in_flight_answered()
+    });
     drive_one_block(&mut batcher, &bridge, &input, &mut output, &mut midi_out);
     assert_eq!(counters.missed(), 0, "an answered chunk was counted missed");
 
-    // Back to back: each block collects a chunk the server is still sleeping on.
+    // Back to back: each block collects a chunk the server is still holding.
     for _ in 0..4 {
         drive_one_block(&mut batcher, &bridge, &input, &mut output, &mut midi_out);
     }
@@ -901,14 +912,14 @@ fn the_chunk_counters_report_misses_and_answers() {
 }
 
 /// **A chunk the server publishes after the node played its silence is counted
-/// late; one it never publishes is only missed.** A server that sleeps 50 ms
-/// per chunk, driven back to back: the second block collects the first chunk
+/// late; one it never publishes is only missed.** A server that holds
+/// each chunk, driven back to back: the second block collects the first chunk
 /// unanswered (a miss). Once the server has published it, the next block
 /// notices, counting it late, before its ring slot is reused.
 #[test]
 fn a_chunk_published_after_its_miss_is_counted_late() {
-    let (bridge, mut bridge_thread, _server, slab) =
-        bridge_with_server_stall(std::time::Duration::from_millis(50));
+    let (permits, stall) = stalled();
+    let (bridge, mut bridge_thread, _server, slab) = bridge_with_server_stall(stall);
     let counters = Arc::new(ChunkCounters::default());
     let host_slab = Arc::clone(slab.slab());
     let mut batcher = Batcher::new(CHANNELS, CHANNELS, SampleFormat::Float32, BATCH_SIZE, slab)
@@ -922,11 +933,8 @@ fn a_chunk_published_after_its_miss_is_counted_late() {
     assert_eq!(counters.missed(), 1, "chunk 1 was collected unanswered");
     assert_eq!(counters.late(), 0, "and had not been published yet");
 
-    let deadline = std::time::Instant::now() + WAIT_BUDGET;
-    while !host_slab.has_output(1) {
-        assert!(std::time::Instant::now() < deadline, "chunk 1 never came");
-        std::thread::sleep(std::time::Duration::from_millis(1));
-    }
+    permits.send(()).expect("the server waits for a permit");
+    wait_for(&bridge, "chunk 1 never came", || host_slab.has_output(1));
     drive_one_block(&mut batcher, &bridge, &input, &mut output, &mut midi_out);
     assert_eq!(
         counters.late(),
@@ -941,8 +949,9 @@ fn a_chunk_published_after_its_miss_is_counted_late() {
 /// A chunk the server never publishes is a miss and never late.
 #[test]
 fn a_chunk_never_published_is_missed_and_never_late() {
-    let (bridge, mut bridge_thread, _server, slab) =
-        bridge_with_server_stall(std::time::Duration::from_secs(60));
+    // Never released: the chunks are never published.
+    let (_permits, stall) = stalled();
+    let (bridge, mut bridge_thread, _server, slab) = bridge_with_server_stall(stall);
     let counters = Arc::new(ChunkCounters::default());
     let mut batcher = Batcher::new(CHANNELS, CHANNELS, SampleFormat::Float32, BATCH_SIZE, slab)
         .with_counters(Arc::clone(&counters));
@@ -967,13 +976,12 @@ fn counters_on(bridge: &PluginBridge) -> Arc<ChunkCounters> {
     counters
 }
 
-/// Waits until `done`, failing after [`WAIT_BUDGET`].
-fn wait_for(what: &str, mut done: impl FnMut() -> bool) {
+/// Waits until `done`, which the bridge's progress (a response queued, a turn
+/// of the bridge thread, the server's end) wakes the check of, failing after
+/// [`WAIT_BUDGET`].
+fn wait_for(bridge: &PluginBridge, what: &str, done: impl FnMut() -> bool) {
     let deadline = std::time::Instant::now() + WAIT_BUDGET;
-    while !done() {
-        assert!(std::time::Instant::now() < deadline, "{what}");
-        std::thread::sleep(std::time::Duration::from_millis(1));
-    }
+    assert!(bridge.progress().wait_until(deadline, done), "{what}");
 }
 
 /// **A chunk the server refuses is counted refused, and each resolved miss is
@@ -988,7 +996,7 @@ fn a_chunk_the_server_refuses_is_counted_refused() {
     let (release, release_rx) = std::sync::mpsc::channel();
     let (bridge, mut bridge_thread, _server, slab) = bridge_with_server_mode(
         stereo_layout(),
-        std::time::Duration::ZERO,
+        None,
         |out| out,
         false,
         Some(ServerGate {
@@ -1013,15 +1021,15 @@ fn a_chunk_the_server_refuses_is_counted_refused() {
     block();
     block();
     release.send(()).unwrap();
-    wait_for("chunk 3 published", || host_slab.has_output(3));
+    wait_for(&bridge, "chunk 3 published", || host_slab.has_output(3));
     // Block 4 sees chunk 2 in the ring; chunk 1's fate is not read yet.
     block();
-    wait_for("chunk 1's fate", || {
+    wait_for(&bridge, "chunk 1's fate", || {
         bridge.chunk_fate(1) == Some(crate::Fate::Refused)
     });
     // Chunk 4 is answered before block 5, so block 5's collect finds it and
     // neither of its two looks can count it late.
-    wait_for("chunk 4 published", || host_slab.has_output(4));
+    wait_for(&bridge, "chunk 4 published", || host_slab.has_output(4));
     // Block 5 resolves chunk 1.
     block();
 
@@ -1045,13 +1053,8 @@ fn a_chunk_the_server_refuses_is_counted_refused() {
 /// batcher runs on past the window in which a fate can still be learned.
 #[test]
 fn a_chunk_the_server_never_accounts_for_is_counted_unanswered() {
-    let (bridge, mut bridge_thread, _server, slab) = bridge_with_server_mode(
-        stereo_layout(),
-        std::time::Duration::ZERO,
-        |out| out,
-        true,
-        None,
-    );
+    let (bridge, mut bridge_thread, _server, slab) =
+        bridge_with_server_mode(stereo_layout(), None, |out| out, true, None);
     let counters = counters_on(&bridge);
     let mut batcher = Batcher::new(CHANNELS, CHANNELS, SampleFormat::Float32, BATCH_SIZE, slab)
         .with_counters(Arc::clone(&counters));
@@ -1061,7 +1064,7 @@ fn a_chunk_the_server_never_accounts_for_is_counted_unanswered() {
 
     for sent in 1..=2 * FATES as u64 {
         drive_one_block(&mut batcher, &bridge, &input, &mut output, &mut midi_out);
-        wait_for("the bridge to deal with the chunk", || {
+        wait_for(&bridge, "the bridge to deal with the chunk", || {
             bridge.block_counts().abandoned + bridge.skipped_cell().get() >= sent
         });
     }
@@ -1146,17 +1149,10 @@ fn silence_on_a_crashed_bridge_does_not_allocate() {
     // guarded region below exercises the crash branch rather than the mismatch
     // one. Bounded rather than unbounded: if the flag never sets, the test
     // should say so instead of hanging.
-    let mut crashed = false;
-    for _ in 0..200 {
-        drive_one_block(&mut batcher, &bridge, &input, &mut output, &mut midi_out);
-        if bridge.is_crashed() {
-            crashed = true;
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(1));
-    }
+    wait_for(&bridge, "the bridge never crashed", || bridge.is_crashed());
+    drive_one_block(&mut batcher, &bridge, &input, &mut output, &mut midi_out);
     assert!(
-        crashed,
+        bridge.is_crashed(),
         "the bridge never marked itself crashed, so this test would have \
          measured the sequence-mismatch branch instead"
     );
@@ -1210,10 +1206,10 @@ fn silence_on_a_crashed_bridge_does_not_allocate() {
 #[test]
 fn a_late_reply_does_not_permanently_crash_the_bridge() {
     let _lock = machine_lock();
-    // Well past `MAX_PROCESS_TIMEOUT`, so the first block's reply is guaranteed
-    // to miss its budget however fast the machine is.
-    let (bridge, _bridge_thread, _server, slab) =
-        bridge_with_server_stall(std::time::Duration::from_millis(120));
+    // Held until the bridge has abandoned the block, so the first block's reply
+    // misses its budget however fast the machine is.
+    let (permits, stall) = stalled();
+    let (bridge, _bridge_thread, _server, slab) = bridge_with_server_stall(stall);
     let host_slab = Arc::clone(slab.slab());
     let mut batcher = Batcher::new(CHANNELS, CHANNELS, SampleFormat::Float32, BATCH_SIZE, slab);
 
@@ -1235,13 +1231,16 @@ fn a_late_reply_does_not_permanently_crash_the_bridge() {
         &mut midi_out,
     );
 
-    // Give the stalled reply time to land, so the only thing under test is what
-    // the host did with the missed deadline — not whether the server ever
-    // answered.
-    let deadline = std::time::Instant::now() + WAIT_BUDGET;
-    while std::time::Instant::now() < deadline && !host_slab.has_output(1) {
-        std::thread::sleep(std::time::Duration::from_millis(1));
-    }
+    // The bridge abandons the block at its budget, and only then does the
+    // server answer: what is under test is what the host did with the missed
+    // deadline, not whether the server ever answered.
+    wait_for(&bridge, "the bridge never abandoned the block", || {
+        bridge.block_counts().abandoned >= 1
+    });
+    permits.send(()).expect("the server waits for a permit");
+    wait_for(&bridge, "the server never answered", || {
+        host_slab.has_output(1)
+    });
 
     assert!(
         host_slab.has_output(1),
@@ -1283,9 +1282,9 @@ fn a_late_reply_does_not_permanently_crash_the_bridge() {
 #[test]
 fn a_timed_out_reply_is_drained_rather_than_paired_with_a_later_block() {
     let _lock = machine_lock();
-    // One stall, far past `MAX_PROCESS_TIMEOUT`, then full speed.
-    let (bridge, _bridge_thread, _server, slab) =
-        bridge_with_first_block_stalled(std::time::Duration::from_millis(120));
+    // One stall, held until the bridge has abandoned the block, then full speed.
+    let (permits, stall) = stalled();
+    let (bridge, _bridge_thread, _server, slab) = bridge_with_first_block_stalled(stall);
     let host_slab = Arc::clone(slab.slab());
     let mut batcher = Batcher::new(CHANNELS, CHANNELS, SampleFormat::Float32, BATCH_SIZE, slab);
 
@@ -1311,7 +1310,13 @@ fn a_timed_out_reply_is_drained_rather_than_paired_with_a_later_block() {
             &mut midi_out,
         );
         stamps.push(midi_out.iter().map(|e| e.ump.0[0]).collect());
-        wait_for_reply(&host_slab, block as u64 + 1, WAIT_BUDGET);
+        if block == 0 {
+            wait_for(&bridge, "the bridge never abandoned block 1", || {
+                bridge.block_counts().abandoned >= 1
+            });
+            permits.send(()).expect("the server waits for a permit");
+        }
+        wait_for_reply(&bridge, &host_slab, block as u64 + 1, WAIT_BUDGET);
     }
 
     assert!(
@@ -1326,15 +1331,14 @@ fn a_timed_out_reply_is_drained_rather_than_paired_with_a_later_block() {
     // arrived on time), so this reads what the drain collected: an owed reply,
     // counted `late`. Without the drain it stays 0 whatever the stamps say.
     //
-    // Block 1's 120 ms stall is past `MAX_PROCESS_TIMEOUT`, so at least that
+    // Block 1's reply is held past its budget, so at least that
     // one reply is abandoned on any machine; a loaded machine can make a later
     // block miss its few-ms budget too, so neither count is pinned.
     let counts = bridge.block_counts();
     assert!(
         counts.abandoned >= 1,
-        "block 1 stalled 120 ms against a budget of at most {:?}, yet no reply \
-         was abandoned — the rig did not stage the timeout this test is about",
-        std::time::Duration::from_millis(50),
+        "block 1 was held past its budget, yet no reply was abandoned — the rig \
+         did not stage the timeout this test is about",
     );
     assert!(
         counts.late >= 1,
@@ -1386,7 +1390,7 @@ fn a_timed_out_reply_is_drained_rather_than_paired_with_a_later_block() {
 /// A duration is the right shape here, unlike in the backlog test: this only
 /// needs the first reply to miss its budget, and 120 ms against a ~2 ms budget
 /// is not a race on any machine.
-fn bridge_with_first_block_stalled(stall: std::time::Duration) -> Rig {
+fn bridge_with_first_block_stalled(stall: Stall) -> Rig {
     stamped_server(stall, true, SampleRate::SR_48K)
 }
 
@@ -1403,7 +1407,7 @@ fn bridge_with_first_block_stalled(stall: std::time::Duration) -> Rig {
 /// own sequence — so this stamp is the only way a test can observe *which block*
 /// an arriving frame belongs to. `offset` is a label here and nothing
 /// interprets it as a position.
-fn stamped_server(stall: std::time::Duration, first_only: bool, rate: SampleRate) -> Rig {
+fn stamped_server(stall: Stall, first_only: bool, rate: SampleRate) -> Rig {
     use interprocess::local_socket::{ListenerOptions, traits::Listener as _};
 
     let path = unique_socket_path().expect("the OS has a random source");
@@ -1461,9 +1465,9 @@ fn stamped_server(stall: std::time::Duration, first_only: bool, rate: SampleRate
                 };
                 let reply = match msg {
                     HostMessage::ProcessAudio(data) => {
-                        if !stall.is_zero() && !(first_only && stalled_once) {
+                        if !(first_only && stalled_once) {
                             stalled_once = true;
-                            std::thread::sleep(stall);
+                            hold_for_permit(&stall);
                         }
                         let n = data.num_samples;
                         let seq = data.seq;
@@ -1555,11 +1559,8 @@ fn a_blocks_status_reaches_the_host_with_its_chunk() {
     // 50 ms. At 4 kHz a 64-frame block is 16 ms long, so the budget is the
     // cap: a loaded machine does not abandon a block, which is not what this
     // test is about.
-    let (bridge, _thread, _server, slab) = stamped_server(
-        std::time::Duration::ZERO,
-        true,
-        SampleRate::new(4_000.0).unwrap(),
-    );
+    let (bridge, _thread, _server, slab) =
+        stamped_server(None, true, SampleRate::new(4_000.0).unwrap());
     let mut batcher = Batcher::new(CHANNELS, CHANNELS, SampleFormat::Float32, BATCH_SIZE, slab);
     let silence = vec![0.0f32; BATCH_SIZE];
     let mut out = Planar::new();
@@ -1576,18 +1577,16 @@ fn a_blocks_status_reaches_the_host_with_its_chunk() {
         // The bridge thread counts a reply once it is available to the next
         // collect: wait for it.
         let deadline = std::time::Instant::now() + WAIT_BUDGET;
-        while bridge.block_counts().replies < block {
-            let counts = bridge.block_counts();
-            assert!(
-                std::time::Instant::now() < deadline,
-                "block {block}'s reply never arrived within {WAIT_BUDGET:?} \
-                 ({} blocks abandoned, {} replies); a block the bridge abandoned \
-                 on its reply budget carries no status",
-                counts.abandoned,
-                counts.replies,
-            );
-            std::thread::sleep(std::time::Duration::from_micros(200));
-        }
+        assert!(
+            bridge
+                .progress()
+                .wait_until(deadline, || bridge.block_counts().replies >= block),
+            "block {block}'s reply never arrived within {WAIT_BUDGET:?} \
+             ({} blocks abandoned, {} replies); a block the bridge abandoned \
+             on its reply budget carries no status",
+            bridge.block_counts().abandoned,
+            bridge.block_counts().replies,
+        );
     }
     assert_eq!(
         host.said,
@@ -1694,11 +1693,7 @@ fn a_refused_chunk_reports_its_midi_lost() {
         tutti_plugin_types::Timeouts::default(),
     )
     .unwrap();
-    let deadline = std::time::Instant::now() + WAIT_BUDGET;
-    while !bridge.is_crashed() {
-        assert!(std::time::Instant::now() < deadline, "never crashed");
-        std::thread::sleep(std::time::Duration::from_millis(1));
-    }
+    wait_for(&bridge, "never crashed", || bridge.is_crashed());
     let mut batcher = Batcher::new(CHANNELS, CHANNELS, SampleFormat::Float32, BATCH_SIZE, slab);
     let input = Planar::new();
     let mut out = Planar::new();

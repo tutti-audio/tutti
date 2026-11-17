@@ -32,6 +32,7 @@ mod protocol;
 mod server_watch;
 mod subprocess;
 mod transport;
+mod wake;
 
 #[cfg(test)]
 mod process_pipeline_tests;
@@ -62,6 +63,7 @@ pub use server_watch::ServerWatch;
 pub use subprocess::{LaunchedServer, Reaped, launch};
 pub use transport::control::socket_name;
 pub use transport::shm::{AudioSlab, RING_SLOTS, SlabAccessError, SlabLayoutError, SlabWriter};
+pub use wake::Wake;
 // Splitting and reassembling plugin state across frames: both ends must chunk
 // identically, so the server uses this one.
 pub use transport::state_chunk;
