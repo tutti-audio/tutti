@@ -40,7 +40,7 @@ use tutti_plugin::{BridgeConfig, PluginRenderFault, Timeouts};
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::PluginForkError;
 use tutti_plugin_types::{Normalized, ParamId};
-use tutti_transport::{OfflineTimeline, OfflineTimelineConfig};
+use tutti_transport::{OfflineTimeline, OfflineTimelineConfig, RenderClock};
 use tutti_types::{SampleRate, Samples};
 use tutti_ump::{Address, Message, NoteNumber, NoteVelocity, Voice2};
 
