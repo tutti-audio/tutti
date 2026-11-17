@@ -55,7 +55,7 @@ use crate::compile::VerifyError;
 use crate::cost::{Schedule, Work};
 use crate::fade::Fade;
 use crate::io::PortKind;
-use crate::node::{InPlaceMask, Prepare, Shape};
+use crate::node::{InPlaceMask, Prepare, Shape, Wired};
 use crate::param::ParamIn;
 use crate::spec::{EventIn, EventOut};
 
@@ -370,6 +370,9 @@ pub struct PlanUnit {
     pub shape: Shape,
     /// Compiled arrival latency at its inputs (handed to it as `Cx::arrival`).
     pub arrival: Latency,
+    /// Its audio ports with a source or a consumer in this plan
+    /// ([`Io::wired_inputs`](crate::Io::wired_inputs)).
+    pub wired: Wired,
 }
 
 /// One step of the plan.
@@ -723,6 +726,8 @@ pub(crate) struct NodeRec {
     pub(crate) event_capacity: Option<NonZeroU32>,
     /// Channels aliased in place.
     pub(crate) in_place: InPlaceMask,
+    /// Its audio ports with a source or a consumer.
+    pub(crate) wired: Wired,
     /// The ports its [`Io`](crate::Io)'s main views cover
     /// ([`Shape::main_ports`](crate::Shape)).
     pub(crate) main: crate::node::MainPorts,
@@ -872,6 +877,7 @@ impl NodeTables {
                 event_capacity: pu.shape.event_capacity,
                 main: pu.shape.main_ports(),
                 in_place,
+                wired: pu.wired,
                 ports,
                 ain: ain.len() as u16,
                 aout: aout.len() as u16,
@@ -902,6 +908,7 @@ impl NodeTables {
                     event_capacity: units[u].shape.event_capacity,
                     main: units[u].shape.main_ports(),
                     in_place: InPlaceMask::NONE,
+                    wired: units[u].wired,
                     ports: 0,
                     ain: 0,
                     aout: 0,

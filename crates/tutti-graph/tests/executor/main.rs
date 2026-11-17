@@ -25,3 +25,4 @@ mod rt_no_alloc;
 mod tap;
 mod tap_audio_in;
 mod wake;
+mod wired;

@@ -897,6 +897,39 @@ mask!(
     /// `c`. Only ever set for a node whose [`Shape::in_place`] is `true`.
     InPlaceMask
 );
+mask!(
+    /// Audio ports with something on the other end: an input port with at
+    /// least one source, an output port with at least one consumer (an edge,
+    /// a feedback edge, a global output, a tap or a meter). Exact, never a
+    /// hint: an unset input reads silence because nothing feeds it.
+    WiredMask
+);
+
+/// Which of a node's audio ports are wired, from the compiled plan: the
+/// plan's answer for the node, fixed between commits.
+///
+/// Port `p` is bit `p` of the side's mask, over every audio port of the
+/// shape; [`Io::wired_inputs`](crate::Io::wired_inputs) and its kin read the
+/// main bus and each bus by handle.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Wired {
+    /// Input ports with a source.
+    pub inputs: WiredMask,
+    /// Output ports with a consumer.
+    pub outputs: WiredMask,
+}
+
+impl Wired {
+    /// Every one of `inputs` input ports and `outputs` output ports wired:
+    /// what a hand-built [`Io`] reads.
+    #[must_use]
+    pub const fn all(inputs: usize, outputs: usize) -> Self {
+        Self {
+            inputs: WiredMask::all(inputs),
+            outputs: WiredMask::all(outputs),
+        }
+    }
+}
 
 /// What a node's [`process`](Node::process) did to its outputs.
 ///

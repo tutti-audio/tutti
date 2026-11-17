@@ -11,13 +11,50 @@ use crate::compile::{CompileError, Shapes, compile};
 use crate::exec::Commit;
 use crate::exec::{Opened, StageIn};
 use crate::gain::{EdgeFade, EdgeGain};
-use crate::node::Node;
+use crate::node::{Node, Wired};
 use crate::param::ParamState;
 use crate::plan::{Delta, Placement, Plan};
 use crate::spec::{GraphSpec, ValidGraph};
 use crate::{Edge, EdgeId, Sink, Source};
 use crate::{Fade, NodeKey, RootBank};
 use tutti_types::Amplitude;
+
+/// A node whose audio wiring changed in a commit: a port gained its first
+/// source or consumer, or lost its last.
+///
+/// From the plans, not the spec: the old and the new plan's
+/// [`PlanUnit::wired`](crate::PlanUnit::wired) for the key differ. A node
+/// the commit placed with no wiring, a node it removed and a rewire that
+/// leaves each port's answer as it was are not listed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Rewired {
+    /// The node.
+    pub node: NodeKey,
+    /// Its wired ports in the plan sent before (none for a node new to it).
+    pub was: Wired,
+    /// Its wired ports in the plan this commit sent.
+    pub now: Wired,
+}
+
+impl Rewired {
+    /// The nodes of `new` whose wired ports differ from `old`'s, in key
+    /// order.
+    fn between(old: Option<&Plan>, new: &Plan) -> Vec<Self> {
+        new.units()
+            .iter()
+            .filter_map(|u| {
+                let was = old
+                    .and_then(|p| p.unit(u.key))
+                    .map_or_else(Wired::default, |o| o.wired);
+                (was != u.wired).then_some(Self {
+                    node: u.key,
+                    was,
+                    now: u.wired,
+                })
+            })
+            .collect()
+    }
+}
 
 impl Editor {
     /// `Err(Poisoned)` once a re-prepare has failed with its units out.
@@ -148,11 +185,24 @@ impl Editor {
     /// unit to place), [`CommitError::Backpressure`],
     /// [`CommitError::Repreparing`], [`CommitError::Poisoned`] or a
     /// [`Limits`](crate::Limits) refusal ([`CommitError::TooManyOutputs`]).
+    pub fn commit(&mut self) -> Result<(), CommitError> {
+        self.commit_wired().map(drop)
+    }
+
+    /// [`commit`](Self::commit), and the nodes whose audio wiring it changed
+    /// (see [`Rewired`]): empty when nothing was sent. The plan the executor
+    /// has answers [`Io::wired_inputs`](crate::Io::wired_inputs) from the
+    /// block that applies this commit; a node that reacts on the control side
+    /// (a plugin's bus activation) acts on this list.
+    ///
+    /// # Errors
+    ///
+    /// As [`commit`](Self::commit).
     #[allow(
         clippy::missing_panics_doc,
         reason = "every pending unit the delta needs was checked present just before it is taken"
     )]
-    pub fn commit(&mut self) -> Result<(), CommitError> {
+    pub fn commit_wired(&mut self) -> Result<Vec<Rewired>, CommitError> {
         self.collect();
         self.check_poisoned()?;
         if self.is_repreparing() {
@@ -180,7 +230,7 @@ impl Editor {
                 self.life
                     .set_committed(self.spec.clone(), self.shapes.clone());
             }
-            return Ok(());
+            return Ok(Vec::new());
         }
         let (valid, weights, fading) = self.lower_with_bank()?;
         let (mut plan, mut delta) = compile(
@@ -236,12 +286,13 @@ impl Editor {
             .map(|k| (k, self.placements.take_unit(k).expect("checked above")))
             .collect();
         self.placements.clear_fades_and_cuts();
+        let rewired = Rewired::between(self.base().map(|p| &**p), &plan);
         self.send(plan, delta, units, &weights, None);
         self.fading = fading;
         self.sync_ranges();
         self.life
             .set_committed(self.spec.clone(), self.shapes.clone());
-        Ok(())
+        Ok(rewired)
     }
 
     /// How a commit that changes the root's generation trades the old root

@@ -215,6 +215,24 @@ pub enum SessionEvent {
         /// root.
         bus_edges: Vec<(tutti_graph::BusSource, crate::BusSink)>,
     },
+    /// A node with a bus besides its main one (an aux or sidechain bus, a
+    /// plugin's) had its audio wiring changed: a port gained its first source or
+    /// consumer, or lost its last (an edge, a global output, a tap or a
+    /// meter). Reported once per node by the update that sends the commit
+    /// (or the next update, for a commit the host made itself), carrying the
+    /// node's first `was` and last `now` of the commits since the last
+    /// report; a node whose wiring is as it was reports nothing. It is the
+    /// control-side notice a plugin needs to activate or deactivate an aux
+    /// bus; the block that applies the commit reads the same answer through
+    /// [`Io::wired_inputs`](tutti_graph::Io::wired_inputs).
+    Rewired {
+        /// The node.
+        node: NodeKey,
+        /// Its wired ports before.
+        was: tutti_graph::Wired,
+        /// Its wired ports now.
+        now: tutti_graph::Wired,
+    },
     /// A node's event output port lost events since the last update: they
     /// were past its capacity (a note-off only past the room set aside for
     /// note-offs), a PDC or feedback delay it feeds was full, or the node
@@ -386,6 +404,12 @@ impl std::fmt::Debug for SessionEvent {
                 .field("edges", edges)
                 .field("event_edges", event_edges)
                 .field("bus_edges", bus_edges)
+                .finish(),
+            Self::Rewired { node, was, now } => f
+                .debug_struct("Rewired")
+                .field("node", node)
+                .field("was", was)
+                .field("now", now)
                 .finish(),
             Self::Fault(fault) => f.debug_tuple("Fault").field(fault).finish(),
             #[cfg(feature = "device")]
@@ -1178,6 +1202,7 @@ impl<C: Clock> Session<C> {
                         bus_edges: u.bus_edges,
                     });
                 }
+                self.report_rewired(out);
                 if !sent && self.resumed {
                     self.publish_sent();
                 }
@@ -1194,6 +1219,7 @@ impl<C: Clock> Session<C> {
                         self.commit_reporting(out);
                     }
                     self.mods.resync(&mut self.graph);
+                    self.report_rewired(out);
                 }
             }
             Phase::MidiOut => {
@@ -1370,6 +1396,20 @@ impl<C: Clock> Session<C> {
             self.publish_sent();
         }
         committed
+    }
+
+    /// Pushes the nodes the commits since the last report rewired.
+    fn report_rewired(&mut self, out: &mut Vec<SessionEvent>) {
+        out.extend(
+            self.graph
+                .take_rewired()
+                .into_iter()
+                .map(|r| SessionEvent::Rewired {
+                    node: r.node,
+                    was: r.was,
+                    now: r.now,
+                }),
+        );
     }
 
     /// [`commit`](Self::commit), a refusal pushed onto `out`: whether it sent.
