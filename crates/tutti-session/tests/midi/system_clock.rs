@@ -40,7 +40,13 @@ fn the_midi_clock_reaches_the_output_on_the_timers_blocks() {
         .expect("builds");
     let s = &mut system;
     let _ = s.update();
-    s.midi_nodes().unwrap().clock_master.set_enabled(true);
+    s.midi_nodes()
+        .unwrap()
+        .clock_master
+        .set_sends(tutti_midi_runtime::ClockSends {
+            timing: true,
+            ..Default::default()
+        });
     s.pool(midi_sink("out", Arc::new(wire.clone())))
         .expect("declares");
     let _ = s.update();

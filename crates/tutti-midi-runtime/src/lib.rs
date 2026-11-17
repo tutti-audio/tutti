@@ -227,9 +227,9 @@ pub use mpe_features::{MpeFeaturesError, ask_mpe_features, mpe_features};
 pub use mpe_zones::mpe_zones;
 pub use outbound::{
     ACTIVE_SENSING_INTERVAL, ActiveSensingSender, CLOCK_EVENT_CAPACITY, ClockControls, ClockMaster,
-    ClockNode, JR_CLOCK_INTERVAL, JR_CLOCK_MAX_INTERVAL, JrClock, JrClockEmitter, JrStamper,
-    JrStream, MACHINE_CONTROL_EVENT_CAPACITY, MIDI_OUT_EVENT_CAPACITY, MachineControlControls,
-    MachineControlNode, MachineControlSender, MidiOutNode, NoTimeCode,
+    ClockNode, ClockSends, JR_CLOCK_INTERVAL, JR_CLOCK_MAX_INTERVAL, JrClock, JrClockEmitter,
+    JrStamper, JrStream, MACHINE_CONTROL_EVENT_CAPACITY, MIDI_OUT_EVENT_CAPACITY,
+    MachineControlControls, MachineControlNode, MachineControlSender, MidiOutNode, NoTimeCode,
 };
 pub use output_plan::{
     MAX_OUTPUT_AHEAD, MAX_OUTPUT_LATENCY, OffsetOutOfRange, Outgoing, OutputLatency, OutputOffset,

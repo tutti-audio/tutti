@@ -515,7 +515,13 @@ fn clocked(sink: Arc<dyn tutti_midi_runtime::MidiOut>) -> Session {
     let mut s = offline();
     s.pool(midi_sink("out", sink)).expect("declares");
     let _ = s.update(); // the sink's node, loaded and committed
-    s.midi_nodes().unwrap().clock_master.set_enabled(true);
+    s.midi_nodes()
+        .unwrap()
+        .clock_master
+        .set_sends(tutti_midi_runtime::ClockSends {
+            timing: true,
+            ..Default::default()
+        });
     roll(&s, 24_000);
     s
 }
@@ -2043,7 +2049,13 @@ fn an_output_port_stamps_as_the_devices_configuration_says() {
     let raw = EndpointId::from_raw(7);
     declare_dev(&mut s);
     let out = s.midi_output(&"dev out").expect("loaded");
-    s.midi_nodes().unwrap().clock_master.set_enabled(true);
+    s.midi_nodes()
+        .unwrap()
+        .clock_master
+        .set_sends(tutti_midi_runtime::ClockSends {
+            timing: true,
+            ..Default::default()
+        });
 
     let start = settle(&mut s, &fake, raw);
     assert!(!out.info().config().rx_jr, "asked for JR off");
@@ -2092,7 +2104,13 @@ fn a_device_that_receives_jr_has_every_message_prefixed_by_a_timestamp() {
     let _ = s.update();
     let raw = EndpointId::from_raw(7);
     declare_dev(&mut s);
-    s.midi_nodes().unwrap().clock_master.set_enabled(true);
+    s.midi_nodes()
+        .unwrap()
+        .clock_master
+        .set_sends(tutti_midi_runtime::ClockSends {
+            timing: true,
+            ..Default::default()
+        });
     let start = settle(&mut s, &fake, raw);
     let on = Ump::from(Message::Stream(Stream::StreamConfigurationNotification(
         StreamConfig {
