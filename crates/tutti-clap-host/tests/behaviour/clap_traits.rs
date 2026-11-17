@@ -17,9 +17,9 @@ use tutti_clap_test_plugin::{
     PORTS_64BIT_INPUTS, PORTS_64BIT_OUTPUTS, ProcessCapture, Site, ThreadCapture,
 };
 use tutti_plugin_types::{
-    AudioBuffer, AudioBufferMut, Control, Controller, Loaded, MaxBlock, Normalized, ParamId,
-    PluginError, PluginIo, PluginTail, Prepare, ProcessContext, ProcessOutput, Processor,
-    SampleFormat, SampleRate, Samples,
+    Control, Controller, Loaded, MaxBlock, Normalized, ParamId, PluginAudio, PluginError, PluginIo,
+    PluginTail, Prepare, ProcessContext, ProcessOutput, Processor, SampleFormat, SampleRate,
+    Samples,
 };
 
 static PROBE_LOCK: Mutex<()> = Mutex::new(());
@@ -136,11 +136,12 @@ fn render(processor: &mut ClapProcessor, format: SampleFormat) -> Result<(), Plu
             let inputs = [input.as_slice(), input.as_slice()];
             let mut outputs = [left.as_mut_slice(), right.as_mut_slice()];
             let mut io = PluginIo {
-                buffer: AudioBufferMut::F32(AudioBuffer::new(
+                buffer: PluginAudio::new(
+                    tutti_plugin_types::Samples(inputs[0].len()),
                     &inputs,
                     &mut outputs,
-                    tutti_plugin_types::SampleRate::SR_48K,
-                )),
+                )
+                .expect("equal channels"),
                 ctx: &ctx,
                 out: &mut out,
             };
@@ -153,11 +154,12 @@ fn render(processor: &mut ClapProcessor, format: SampleFormat) -> Result<(), Plu
             let inputs = [input.as_slice(), input.as_slice()];
             let mut outputs = [left.as_mut_slice(), right.as_mut_slice()];
             let mut io = PluginIo {
-                buffer: AudioBufferMut::F64(AudioBuffer::new(
+                buffer: PluginAudio::new(
+                    tutti_plugin_types::Samples(inputs[0].len()),
                     &inputs,
                     &mut outputs,
-                    tutti_plugin_types::SampleRate::SR_48K,
-                )),
+                )
+                .expect("equal channels"),
                 ctx: &ctx,
                 out: &mut out,
             };
@@ -634,11 +636,12 @@ fn an_errored_block_does_not_allocate() {
     let inputs = [input.as_slice(), input.as_slice()];
     let mut outputs = [left.as_mut_slice(), right.as_mut_slice()];
     let mut io = PluginIo {
-        buffer: AudioBufferMut::F32(AudioBuffer::new(
+        buffer: PluginAudio::new(
+            tutti_plugin_types::Samples(inputs[0].len()),
             &inputs,
             &mut outputs,
-            tutti_plugin_types::SampleRate::SR_48K,
-        )),
+        )
+        .expect("equal channels"),
         ctx: &ctx,
         out: &mut out,
     };

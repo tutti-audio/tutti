@@ -15,7 +15,9 @@ pub(crate) mod fdn;
 pub(crate) mod freeverb;
 pub(crate) mod network;
 
-use crate::Steps;
+use tutti_types::{SampleRate, Tail};
+
+use crate::{Ring, Steps};
 
 /// The frames between glide steps in the reverbs that run in chunks ([`FdnBank::CHUNK`](crate::FdnBank::CHUNK),
 /// [`FreeverbBank::CHUNK`](crate::FreeverbBank::CHUNK)).
@@ -27,4 +29,28 @@ const RAMP: f64 = 0.020;
 /// A 20 ms ramp at `rate`, in whole chunks (at least one).
 pub(crate) fn ramp(rate: f64) -> Steps {
     Steps::Fixed(((RAMP * rate / CHUNK as f64).ceil() as u32).max(1))
+}
+
+/// `buf[(w - delay) mod cap]` interpolated linearly to a fractional `delay` of at least 0:
+/// `w` is the slot of the current frame, so delay 0 is the frame just written.
+#[inline]
+pub(crate) fn read(buf: &[f32], w: usize, delay: f32) -> f32 {
+    let cap = buf.len();
+    let whole = delay as usize;
+    let frac = delay - whole as f32;
+    let a = buf[(w + cap - whole) % cap];
+    if frac == 0.0 {
+        return a;
+    }
+    let b = buf[(w + cap - whole - 1) % cap];
+    crate::lerp(a, b, frac)
+}
+
+/// The tail a ring is, in whole frames at `rate`: unbounded when it never ends or is not a
+/// finite time.
+pub(crate) fn tail_of(ring: Ring, rate: SampleRate) -> Tail {
+    match ring {
+        Ring::Finite(s) if s.get().is_finite() => Tail::Finite(s.to_samples_ceil(rate)),
+        _ => Tail::Unbounded,
+    }
 }
