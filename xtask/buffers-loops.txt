@@ -1,0 +1,32 @@
+# Hand interleave loops and frame-times-width lengths in `src` (`cargo xtask check-buffers`).
+#
+# Interleave, deinterleave, convert and fold go through `tutti_buffers`, and a frame count
+# crosses to a slice length only through `Samples::interleaved_len`. One `<key>  <reason>`
+# row per function the scan finds (its doc says which shapes and which it misses); the
+# gate fails on a hit with no row and on a row with no hit, so the list only shrinks.
+#
+# key     `<file>::<fn>` for a free function, `<file>::<Owner>::<fn>` for a method,
+#         `<file>::-` outside any function.
+# reason  pending      not judged yet.
+#         measured: <why>   kept after judging.
+crates/tutti-codec/src/decode/file_in.rs::FileIn::decode_next_packet  pending
+crates/tutti-codec/src/wave.rs::Wave::write  pending
+crates/tutti-cpal/src/mic.rs::Capture::block  pending
+crates/tutti-dsp/src/dynamics/multiband.rs::MultibandBank::chunk  pending
+crates/tutti-dsp/src/fft/real.rs::RealFft::forward_even  pending
+crates/tutti-dsp/src/fft/real.rs::RealFft::inverse_even  pending
+crates/tutti-dsp/src/fft/staged.rs::StagedRealFft::inverse_step  pending
+crates/tutti-engine/src/callback.rs::OutputBlock::render_unguarded  pending
+crates/tutti-engine/src/manual.rs::ManualStream::render_block_inner  pending
+crates/tutti-engine/src/timer.rs::TimerDriver::open  pending
+crates/tutti-export/src/encode/mod.rs::replay_through  pending
+crates/tutti-export/src/render/outputs.rs::open_lanes  pending
+crates/tutti-export/src/spill.rs::SpillReplay::fill  pending
+crates/tutti-graph/src/arena.rs::Arena::leading_mut  pending
+crates/tutti-graph/src/tap.rs::TapReader::pop_into  pending
+crates/tutti-rt/src/pos_ring.rs::PosRing::new  pending
+crates/tutti-rt/src/pos_ring.rs::PosWriter::push  pending
+crates/tutti-sampler/src/streamer/io/wave_io.rs::read_wave  pending
+crates/tutti-sampler/src/streamer/loops.rs::RingLoop::blend_run  pending
+crates/tutti-sampler/src/streamer/loops.rs::apply_mapping  pending
+crates/tutti-sampler/src/voice/offline_read.rs::Pages::load  pending
