@@ -1293,11 +1293,8 @@ fn process_with_transport() {
         .with_tempo(tutti_types::Bpm::of(120.0))
         .with_time_signature(TimeSignature::default())
         .with_loop(tutti_plugin_types::LoopRegion::new(
-            tutti_types::LoopRange::new(
-                tutti_types::Beat(0.0),
-                tutti_types::Beat(4.0),
-            )
-            .expect("a loop"),
+            tutti_types::LoopRange::new(tutti_types::Beat(0.0), tutti_types::Beat(4.0))
+                .expect("a loop"),
         ));
 
     let input_data = vec![vec![0.0f32; BLOCK]; instance.loaded().pins().0.count() as usize];
