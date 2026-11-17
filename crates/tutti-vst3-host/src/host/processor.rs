@@ -12,7 +12,7 @@ use tutti_plugin_types::{
     ChannelTable, Edit, EditDrain, EditSink, Normalized, ParamAccess, ParamWriteError, PluginAudio,
     PluginError, PluginIo, PluginResult, Processor, RtMidiEvents,
 };
-use tutti_rt::DrainBeat;
+use tutti_rt::{DrainBeat, RtVec, Tally, TallyWriter, tally};
 use tutti_types::ParamId;
 use tutti_types::{ChannelLayout, SampleRate, Samples};
 
@@ -27,9 +27,7 @@ use tutti_vst3_ffi::{
 
 use super::midi_learn::MidiLearnProducer;
 use super::midi_mapping::{CcRoute, midi_to_mapped_controller, stage_input_events};
-use super::sequencer::{
-    SeqScratch, convert_chords_into, convert_expr_texts_into, convert_scales_into, expr_ints_of,
-};
+use super::sequencer::{SeqScratch, expr_ints_of, fill_chords, fill_expr_texts, fill_scales};
 use super::shell::{Hold, Shell};
 
 /// How many of the Controller's writes the ring holds between two blocks.
@@ -202,6 +200,10 @@ pub struct Vst3Processor<T: Vst3Sample> {
     // The scratch is listed first so it drops before the rest.
     pub(super) audio: AudioIO,
     seq: SeqScratch,
+    /// Sequencer-context texts cut at the room of one event's text, and events
+    /// past a stream's room, since activation.
+    seq_refused: Tally<u64>,
+    seq_refused_writer: TallyWriter<u64>,
     audio_side: AudioSide,
     /// What `getProcessContextRequirements` answered at activation; `None` when
     /// the plugin does not implement the interface.
@@ -214,10 +216,11 @@ pub struct Vst3Processor<T: Vst3Sample> {
     beat: DrainBeat,
     /// The writes taken for the block in hand, latest per parameter, and what
     /// a rejoin carried over from the last activation before the first block.
-    /// Reserved for the ring's room, so no block grows it.
-    pending: Vec<(ParamId, Normalized)>,
-    /// Edits the block could not hold, and writes to a read-only parameter, since
-    /// activation.
+    /// Holds the ring's room ([`EDIT_CAPACITY`]) and no more; a write past it is
+    /// refused and counted in `edits_dropped`.
+    pending: RtVec<(ParamId, Normalized), EDIT_CAPACITY>,
+    /// Edits the block could not hold, writes carried into the activation past
+    /// the ring's room, and writes to a read-only parameter, since activation.
     edits_dropped: u64,
     /// The parameters the plugin declared at activation and what each declares
     /// of its writability, sorted by id: the write policy
@@ -266,21 +269,28 @@ impl<T: Vst3Sample> Vst3Processor<T> {
             drain,
             reports,
             beat,
-            mut carried,
+            carried,
             declared,
         } = parts;
-        carried.reserve(EDIT_CAPACITY);
+        let seq_refused = tally();
+        let mut pending = RtVec::new();
+        let refused = carried
+            .into_iter()
+            .filter(|&write| !pending.push(write))
+            .count();
         Self {
             _format: std::marker::PhantomData,
             audio,
             seq: SeqScratch::default(),
+            seq_refused_writer: seq_refused.writer(),
+            seq_refused,
             audio_side,
             context_requirements,
             drain,
             reports,
             beat,
-            pending: carried,
-            edits_dropped: 0,
+            pending,
+            edits_dropped: refused as u64,
             declared,
             processing: true,
             shell: Hold::new(shell),
@@ -325,7 +335,8 @@ impl<T: Vst3Sample> Vst3Processor<T> {
     /// that must not lose them, as a rejoin must not.
     pub fn take_edits(&mut self, out: &mut Vec<(ParamId, Normalized)>) {
         self.drain_ring();
-        out.append(&mut self.pending);
+        out.extend(self.pending.iter().copied());
+        self.pending.clear();
     }
 
     /// What the plugin's output stream has dropped or evicted since activation:
@@ -345,7 +356,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
     }
 
     /// Moves what the ring holds into `pending`, the latest write to each
-    /// parameter winning. Allocation-free: `pending` is reserved for the ring.
+    /// parameter winning. Allocation-free: `pending` is inline.
     fn drain_ring(&mut self) {
         let Self {
             drain,
@@ -368,11 +379,13 @@ impl<T: Vst3Sample> Vst3Processor<T> {
                 }
                 _ => return,
             };
-            if let Some(slot) = pending.iter_mut().find(|(waiting, _)| *waiting == id) {
+            if let Some(slot) = pending
+                .as_mut_slice()
+                .iter_mut()
+                .find(|(waiting, _)| *waiting == id)
+            {
                 slot.1 = value;
-            } else if pending.len() < pending.capacity() {
-                pending.push((id, value));
-            } else {
+            } else if !pending.push((id, value)) {
                 *edits_dropped += 1;
             }
         });
@@ -745,6 +758,14 @@ impl<T: Vst3Sample> Vst3Processor<T> {
         self.audio.output.events.dropped()
     }
 
+    /// Sequencer-context texts (chord, scale and note-expression text) cut at
+    /// the room of one event's text
+    /// ([`MAX_EVENT_TEXT_LEN`](tutti_vst3_ffi::MAX_EVENT_TEXT_LEN) UTF-16 units),
+    /// and chords, scales and texts past a stream's room, since activation.
+    pub fn sequencer_refused(&self) -> u64 {
+        self.seq_refused.get()
+    }
+
     /// Host parameter points not handed to the plugin whole since
     /// activation: the input list holds a chunk's points as the host's chunk
     /// does (a few per parameter and a shared pool of a chunk's room), and a
@@ -928,30 +949,31 @@ impl<T: Vst3Sample> Vst3Processor<T> {
             .note_expression
             .map(|n| n.changes.as_slice())
             .unwrap_or_default();
-        // Refilled into `seq` rather than rebuilt: each entry carries a UTF-16
-        // `text` buffer, so building them fresh allocated once per event. An
-        // absent stream truncates its buffer to empty, which is what the plugin
-        // should see.
+        // Refilled into `seq`, inline storage that never grows. An absent
+        // stream leaves its buffer empty, which is what the plugin should see.
         let expressive = ctx.expressive.as_ref();
         let mut seq = std::mem::take(&mut self.seq);
-        match expressive.and_then(|e| e.chords) {
-            Some(c) => convert_chords_into(c, &mut seq.chords),
-            None => seq.chords.clear(),
-        }
-        match expressive.and_then(|e| e.scales) {
-            Some(s) => convert_scales_into(s, &mut seq.scales),
-            None => seq.scales.clear(),
-        }
-        match expressive.and_then(|e| e.expr_texts) {
-            Some(t) => convert_expr_texts_into(t, &mut seq.expr_texts),
-            None => seq.expr_texts.clear(),
-        }
+        fill_chords(
+            expressive.and_then(|e| e.chords),
+            &mut seq.chords,
+            &self.seq_refused_writer,
+        );
+        fill_scales(
+            expressive.and_then(|e| e.scales),
+            &mut seq.scales,
+            &self.seq_refused_writer,
+        );
+        fill_expr_texts(
+            expressive.and_then(|e| e.expr_texts),
+            &mut seq.expr_texts,
+            &self.seq_refused_writer,
+        );
         let events = InputEvents {
             midi: ctx.midi_events,
             note_expressions,
-            chords: &seq.chords,
-            scales: &seq.scales,
-            expr_texts: &seq.expr_texts,
+            chords: seq.chords.as_slice(),
+            scales: seq.scales.as_slice(),
+            expr_texts: seq.expr_texts.as_slice(),
             expr_ints: expr_ints_of(expressive),
         };
         let result = match self.process(buffer, &events, ctx.param_changes, &transport) {

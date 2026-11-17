@@ -167,7 +167,6 @@ impl Vst3Loaded {
             declared: None,
             midi_cc: Publisher::new(MidiCcCell(MidiCcMapping::empty())),
             assignments: Vec::new(),
-            stashed: Vec::new(),
         }
     }
 
@@ -226,9 +225,6 @@ impl Vst3Loaded {
         // caller polls on a live active instance, so the re-enumeration would
         // run mid-activation. The activation sequence reconciles.
         let mut restart = self.take_restart();
-        for event in self.stashed.drain(..) {
-            on_event(event);
-        }
         while let Some(event) = self.plugin.handler().pop_notification() {
             on_event(event);
         }
@@ -264,8 +260,7 @@ impl Vst3Loaded {
     ///
     /// Leaves the restart flags and pending MIDI-learn CCs alone.
     pub fn discard_notifications(&mut self) -> usize {
-        // What an earlier edit pass kept aside for the poll goes too.
-        let mut n = self.stashed.drain(..).count();
+        let mut n = 0;
         while self.plugin.handler().pop_notification().is_some() {
             n += 1;
         }
@@ -306,6 +301,15 @@ impl Vst3Loaded {
     #[must_use]
     pub fn is_midi_learn_armed(&self) -> bool {
         self.midi_learn.is_armed()
+    }
+
+    /// The captured controllers the realtime path dropped for a full capture
+    /// channel (the newest is the one dropped), since this plugin was loaded. A
+    /// rising count means [`poll_plugin_notifications`](Self::poll_plugin_notifications)
+    /// runs too rarely while learn is armed.
+    #[must_use]
+    pub fn midi_learn_dropped(&self) -> u64 {
+        self.midi_learn.dropped()
     }
 
     pub(super) fn initialize(&mut self, main: MainThreadMarker) -> Result<()> {

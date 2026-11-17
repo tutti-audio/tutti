@@ -88,11 +88,6 @@ pub struct Vst3Loaded {
     /// What the `IMidiMapping` table declares, read when the table is rebuilt
     /// (at load, at every activation and when the plugin says it changed).
     pub(super) assignments: Vec<tutti_plugin_types::MidiAssignment>,
-    /// Notifications [`Control::take_reported_edits`](tutti_plugin_types::Control::take_reported_edits)
-    /// popped that are not edits, for the next
-    /// [`poll_plugin_notifications`](Self::poll_plugin_notifications) to hand
-    /// out first.
-    pub(super) stashed: Vec<crate::PluginNotification>,
     /// Keeps the DSO loaded for the plugin's lifetime. **Must stay last** — see
     /// the teardown-order note at the top of this struct.
     pub(super) _library: Arc<Library>,

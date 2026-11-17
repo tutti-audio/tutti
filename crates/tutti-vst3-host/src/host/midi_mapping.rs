@@ -20,16 +20,14 @@
 //! `Steinberg::Vst::ControllerNumbers`.
 
 use vst3::Steinberg::Vst::{
-    ControllerNumbers_::{
-        kAfterTouch, kCountCtrlNumber, kCtrlPolyPressure, kCtrlProgramChange, kPitchBend,
-    },
+    ControllerNumbers_::{kAfterTouch, kCtrlPolyPressure, kCtrlProgramChange, kPitchBend},
     ParamID,
 };
 
 use tutti_midi_protocol::channel_voice;
 use tutti_ump::{Address, MidiChannel, MidiGroup, U7, Ump, Voice2};
 
-use crate::events::{InputEvents, Stager};
+use crate::events::{InputEvents, Stager, sample_offset};
 use crate::helpers::sdk_enum_i32;
 use crate::types::ParameterChanges;
 use tutti_graph::UmpAt;
@@ -48,10 +46,11 @@ pub(crate) type FilteredMidi = RtVec<UmpAt, MIDI_STACK_CAPACITY>;
 /// Number of MIDI channels VST3 enumerates mappings for.
 pub(crate) const NUM_CHANNELS: usize = 16;
 
-/// Number of distinct controller slots per channel: CC 0-127 plus the two
-/// synthetic controllers (`kAfterTouch` = 128, `kPitchBend` = 129).
-/// Equal to `Steinberg::Vst::kCountCtrlNumber`.
-pub(crate) const NUM_CONTROLLERS: usize = kCountCtrlNumber as usize;
+/// Number of distinct controller slots per channel: CC 0-127 plus the synthetic
+/// controllers `IMidiMapping` addresses (`kAfterTouch` = 128, `kPitchBend` = 129,
+/// `kCtrlProgramChange` = 130, `kCtrlPolyPressure` = 131). The slots are the ones
+/// [`scan`] asks for.
+pub(crate) const NUM_CONTROLLERS: usize = kCtrlPolyPressure as usize + 1;
 
 /// Sentinel `ParamID` meaning "no parameter mapped". Mirrors
 /// `Steinberg::Vst::kNoParamId` (`0xFFFF_FFFF`).
@@ -61,6 +60,10 @@ pub(crate) const NO_PARAM_ID: ParamID = u32::MAX;
 pub(crate) const CTRL_AFTERTOUCH: usize = kAfterTouch as usize;
 /// Synthetic controller index VST3 uses for pitch bend.
 pub(crate) const CTRL_PITCH_BEND: usize = kPitchBend as usize;
+/// Synthetic controller index VST3 uses for program change.
+pub(crate) const CTRL_PROGRAM_CHANGE: usize = kCtrlProgramChange as usize;
+/// Synthetic controller index VST3 uses for polyphonic key pressure.
+pub(crate) const CTRL_POLY_PRESSURE: usize = kCtrlPolyPressure as usize;
 
 /// One slot of the plugin's `IMidiMapping`: the channel and controller number
 /// it was asked for, and the parameter it names.
@@ -108,8 +111,8 @@ pub(crate) fn declared_assignments(slots: &[Slot]) -> Vec<MidiAssignment> {
             let source = match slot.controller {
                 c if c == CTRL_AFTERTOUCH as i16 => MidiSource::ChannelPressure,
                 c if c == CTRL_PITCH_BEND as i16 => MidiSource::PitchBend,
-                c if c == sdk_enum_i32(kCtrlProgramChange) as i16 => MidiSource::ProgramChange,
-                c if c == sdk_enum_i32(kCtrlPolyPressure) as i16 => MidiSource::PolyPressure,
+                c if c == CTRL_PROGRAM_CHANGE as i16 => MidiSource::ProgramChange,
+                c if c == CTRL_POLY_PRESSURE as i16 => MidiSource::PolyPressure,
                 cc => MidiSource::ControlChange(u8::try_from(cc).ok().and_then(U7::new)?),
             };
             Some(MidiAssignment {
@@ -183,7 +186,8 @@ impl MidiCcMapping {
     ///
     /// `controller` is a VST3 `ControllerNumbers` index: 0-127 for standard
     /// CCs, [`CTRL_AFTERTOUCH`] (128) for channel pressure, [`CTRL_PITCH_BEND`]
-    /// (129) for pitch bend.
+    /// (129) for pitch bend, [`CTRL_PROGRAM_CHANGE`] (130) and
+    /// [`CTRL_POLY_PRESSURE`] (131).
     pub(crate) fn lookup(&self, channel: MidiChannel, controller: usize) -> Option<ParamID> {
         if self.table.is_empty() {
             return None;
@@ -208,7 +212,8 @@ pub(crate) struct MappedController {
 
 /// Decompose a UMP packet into the [`MappedController`] a VST3 `IMidiMapping`
 /// parameter expects, or `None` if the event is not a
-/// mappable controller (CC / channel pressure / pitch bend).
+/// mappable controller (CC / channel pressure / pitch bend / program change /
+/// polyphonic pressure).
 ///
 /// The packet is read through [`channel_voice`]; a MIDI 1.0 message is widened
 /// so MIDI-2 controllers keep their full width here. `IMidiMapping` is
@@ -218,6 +223,9 @@ pub(crate) struct MappedController {
 /// stays a MIDI event for its own bus. Values are
 /// normalized to the VST3 host contract at this edge:
 /// - CC / channel pressure: 32-bit → unit `0.0..=1.0`.
+/// - Program change: the program `0..=127` → `program / 127`.
+/// - Polyphonic pressure: 32-bit → unit `0.0..=1.0`; `IMidiMapping` has no note
+///   address, so the note is not part of the mapped controller.
 /// - Pitch bend: signed `-1.0..=1.0` (center `0.0`) → `0.0..=1.0` (center
 ///   `0.5`), matching what the plugin's parameter funnel expects.
 pub(crate) fn midi_to_mapped_controller(ump: &Ump) -> Option<MappedController> {
@@ -249,6 +257,16 @@ pub(crate) fn midi_to_mapped_controller(ump: &Ump) -> Option<MappedController> {
                 value: Normalized::clamped((f64::from(value) + 1.0) / 2.0),
             })
         }
+        Voice2::ProgramChange { program, .. } => Some(MappedController {
+            channel,
+            controller: CTRL_PROGRAM_CHANGE,
+            value: Normalized::clamped(f64::from(program.get()) / 127.0),
+        }),
+        Voice2::PolyPressure { value, .. } => Some(MappedController {
+            channel,
+            controller: CTRL_POLY_PRESSURE,
+            value: Normalized::clamped(f64::from(value_to_unit_f32(value))),
+        }),
         // No `IMidiMapping` slot: the caller keeps these as MIDI.
         Voice2::RegisteredPerNote { .. }
         | Voice2::AssignablePerNote { .. }
@@ -259,8 +277,6 @@ pub(crate) fn midi_to_mapped_controller(ump: &Ump) -> Option<MappedController> {
         | Voice2::PerNotePitchBend { .. }
         | Voice2::NoteOff { .. }
         | Voice2::NoteOn { .. }
-        | Voice2::PolyPressure { .. }
-        | Voice2::ProgramChange { .. }
         | Voice2::PerNoteManagement { .. } => None,
     }
 }
@@ -299,7 +315,7 @@ pub(crate) fn route_cc_events(
                     // set's `points_overflowed`.
                     let _ = out_params.add_change(
                         ParamId::new(param_id),
-                        event.0.get() as i32,
+                        sample_offset(event.0.get()),
                         value.get(),
                     );
                 }
@@ -508,7 +524,7 @@ impl CcRoute {
     /// the MIDI + params the plugin should actually receive this block.
     ///
     /// When the mapping is non-empty, walks `midi_events` and, for each mapped
-    /// CC / channel-pressure / pitch-bend message, appends a normalized
+    /// CC / channel-pressure / pitch-bend / program-change / poly-pressure message, appends a normalized
     /// parameter point to the scratch `param_changes` (seeded with the host's
     /// `param_changes`) and *omits* that event from the scratch `filtered_midi`.
     /// Unmapped events (notes, unmapped CCs, …) pass through unchanged. Returns
