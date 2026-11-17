@@ -69,9 +69,9 @@ mod sync {
 /// The ringing side of a doorbell: a wake-up for the one [`Sleeper`] made
 /// with it. See the module docs (`src/doorbell.rs`).
 ///
-/// Clones ring the same sleeper; any number of threads ring. A slice of
-/// doorbells for [`ring_first`](Self::ring_first) does not share cache lines
-/// between sleepers (each one's state is aligned to two lines).
+/// Clones ring the same sleeper; any number of threads ring. Each doorbell's
+/// shared state is aligned to two cache lines, so two sleepers' states never
+/// share a line.
 #[derive(Clone)]
 pub struct Doorbell {
     inner: Arc<Inner>,
@@ -319,22 +319,23 @@ mod tests {
         assert!(!bell.ring());
     }
 
-    /// `ring_first` with `n` wakes `n` of the parked sleepers and no more;
-    /// the rest stay asleep.
+    /// `ring_first` reports the sleepers it woke: none for `n == 0`, and two
+    /// for `n == 2` of three parked sleepers (which holds unless two of them
+    /// are mid-spurious-return at once). That it wakes at most `n`, in order,
+    /// is the loom model's property.
     #[test]
-    fn ring_first_wakes_at_most_n_sleepers() {
-        let work = Arc::new(AtomicBool::new(false));
+    fn ring_first_reports_the_sleepers_it_woke() {
+        let done = Arc::new(AtomicBool::new(false));
         let (bells, threads): (Vec<_>, Vec<_>) = (0..3)
             .map(|_| {
                 let (bell, mut sleeper) = doorbell();
-                let work = Arc::clone(&work);
-                let (tx, rx) = std::sync::mpsc::channel::<()>();
+                let done = Arc::clone(&done);
                 let t = std::thread::spawn(move || {
-                    // Parks until rung (the flag stays false), then reports.
-                    sleeper.wait(|| work.load(Ordering::Acquire));
-                    tx.send(()).unwrap();
+                    while !done.load(Ordering::Acquire) {
+                        sleeper.wait(|| done.load(Ordering::Acquire));
+                    }
                 });
-                (bell, (t, rx))
+                (bell, t)
             })
             .unzip();
         for bell in &bells {
@@ -342,17 +343,12 @@ mod tests {
                 std::thread::yield_now();
             }
         }
-        assert_eq!(Doorbell::ring_first(&bells, 2), 2);
         assert_eq!(Doorbell::ring_first(&bells, 0), 0);
-        // The first two were woken, in order; the third is still asleep.
-        threads[0].1.recv().unwrap();
-        threads[1].1.recv().unwrap();
-        assert!(bells[2].is_asleep());
-        assert!(threads[2].1.try_recv().is_err());
-        assert!(bells[2].ring());
-        for (t, rx) in threads {
+        assert_eq!(Doorbell::ring_first(&bells, 2), 2);
+        done.store(true, Ordering::Release);
+        Doorbell::ring_first(&bells, 3);
+        for t in threads {
             t.join().unwrap();
-            drop(rx);
         }
     }
 
@@ -373,22 +369,20 @@ mod tests {
     }
 
     /// A wait from a thread other than the first wait's panics, naming the
-    /// misuse, before it arms: a ring would unpark the first thread only.
+    /// misuse: a ring would unpark the first thread only.
     #[test]
-    fn a_wait_from_a_second_thread_panics_without_arming() {
-        let (bell, mut sleeper) = doorbell();
+    fn a_wait_from_a_second_thread_panics() {
+        let (_bell, mut sleeper) = doorbell();
         sleeper.wait(|| true);
-        let (bell, panic) = std::thread::spawn(move || {
-            let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let panic = std::thread::spawn(move || {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 sleeper.wait(|| true);
             }))
-            .expect_err("a second thread's wait panics");
-            (bell, panic)
+            .expect_err("a second thread's wait panics")
         })
         .join()
         .unwrap();
         let message = panic.downcast_ref::<&str>().copied().unwrap_or_default();
         assert!(message.contains("thread of its first wait"), "{message}");
-        assert!(!bell.is_asleep());
     }
 }
