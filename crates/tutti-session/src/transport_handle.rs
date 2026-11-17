@@ -1,7 +1,7 @@
 //! [`TransportHandle`]: the transport's verbs from any thread.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use tutti_engine::BlockClockReader;
 use tutti_transport::{FadeOut, LoopRegion, MotionEvent, Then, TimedError, Transport};
@@ -28,10 +28,11 @@ pub struct TransportHandle {
     transport: Transport,
     /// The engine's block clock; `None` detached, where nothing renders.
     clock: Option<BlockClockReader>,
-    /// Whether the last motion sent for the next block left the transport
-    /// rolling (a play, a rolling locate) or stopped. The control side's own
-    /// word, which the playhead (one block old) cannot give.
-    rolling_sent: Arc<AtomicBool>,
+    /// The last motion sent for the next block that starts or stops the
+    /// transport, and the frame the next render call was to start at when it
+    /// was sent ([`Sent`]). It speaks for the transport until a call renders
+    /// past that frame; from then on the playhead does.
+    sent: Arc<AtomicU64>,
 }
 
 impl TransportHandle {
@@ -39,7 +40,7 @@ impl TransportHandle {
         Self {
             transport,
             clock: None,
-            rolling_sent: Arc::new(AtomicBool::new(false)),
+            sent: Arc::new(AtomicU64::new(Sent::NONE)),
         }
     }
 
@@ -64,7 +65,7 @@ impl TransportHandle {
     /// event is handed back in it.
     pub fn play(&self) -> Result<(), TimedError<MotionEvent>> {
         self.transport.motion().try_send(MotionEvent::Play)?;
-        self.rolling_sent.store(true, Ordering::Relaxed);
+        self.record(true);
         Ok(())
     }
 
@@ -78,7 +79,7 @@ impl TransportHandle {
         self.transport
             .motion()
             .try_send(MotionEvent::Stop { fade })?;
-        self.rolling_sent.store(false, Ordering::Relaxed);
+        self.record(false);
         Ok(())
     }
 
@@ -105,9 +106,10 @@ impl TransportHandle {
     /// rolls. A command that starts the transport rolling ([`MotionEvent::Play`],
     /// or a locate that then rolls) timed at a beat while the transport is
     /// stopped could only fire after the playback it starts, so it is refused
-    /// where it is made. Stopped is the control side's word: the last motion
-    /// sent through the session or any handle (a `play` just before is
-    /// rolling), not the playhead, which is a block old. A command that does
+    /// where it is made. Stopped is the control side's word: the last start or
+    /// stop sent for the next block through the session or any handle (a
+    /// `play` just before is rolling), until a render call passes it; after
+    /// that, the playhead (which also sees a play timed at a frame fire). A command that does
     /// not start playback (a stop, a plain locate) waits for the playback to
     /// reach its beat, as any beat command does.
     ///
@@ -129,10 +131,7 @@ impl TransportHandle {
                     ..
                 }
         );
-        // Rolling as far as the control side knows: the last motion sent for
-        // the next block, or what the engine last rendered (a transport
-        // started through `Session::transport` directly).
-        let rolling = self.rolling_sent.load(Ordering::Relaxed) || self.playhead().playing();
+        let rolling = self.rolling();
         if let At::Beat(_) = at
             && starts
             && !rolling
@@ -145,12 +144,32 @@ impl TransportHandle {
                 MotionEvent::Play
                 | MotionEvent::Locate {
                     then: Then::Roll, ..
-                } => self.rolling_sent.store(true, Ordering::Relaxed),
-                MotionEvent::Stop { .. } => self.rolling_sent.store(false, Ordering::Relaxed),
+                } => self.record(true),
+                MotionEvent::Stop { .. } => self.record(false),
                 _ => {}
             }
         }
         Ok(())
+    }
+
+    /// Whether the transport rolls as far as the control side knows: the
+    /// last next-block start or stop sent, until a render call passes it;
+    /// then what the engine last rendered, which also covers a play timed at
+    /// a frame.
+    fn rolling(&self) -> bool {
+        let playhead = self.playhead();
+        match Sent::decode(self.sent.load(Ordering::Relaxed)) {
+            Some((next, rolling)) if next == Sent::next_frame(&playhead) => rolling,
+            _ => playhead.playing(),
+        }
+    }
+
+    /// Records a next-block start (`true`) or stop (`false`) against the
+    /// frame the next render call starts at.
+    fn record(&self, rolling: bool) {
+        let next = Sent::next_frame(&self.playhead());
+        self.sent
+            .store(Sent::encode(next, rolling), Ordering::Relaxed);
     }
 
     /// The loop region the engine last published: its bounds and whether it is
@@ -161,7 +180,8 @@ impl TransportHandle {
     }
 
     /// Drops every timed command not yet fired, from the next block. The
-    /// rolling record is unchanged: a cancelled play leaves it as it was sent.
+    /// rolling record is unchanged: only timed commands are cancelled, and
+    /// the record holds only next-block commands.
     pub fn cancel_scheduled(&self) {
         self.transport.motion().cancel_scheduled();
     }
@@ -170,5 +190,28 @@ impl TransportHandle {
     #[must_use]
     pub fn scheduled_outstanding(&self) -> usize {
         self.transport.motion().scheduled_outstanding()
+    }
+}
+
+/// The packing of [`TransportHandle`]'s record into one word: the frame the
+/// next render call was to start at, shifted left by one, with the rolling
+/// bit below it; [`Sent::NONE`] before any start or stop is sent.
+struct Sent;
+
+impl Sent {
+    const NONE: u64 = u64::MAX;
+
+    /// The frame the next render call starts at: past the last call's span.
+    /// Zero before any call renders, and strictly greater after each.
+    fn next_frame(playhead: &Playhead) -> u64 {
+        (playhead.frame() + playhead.span()).get()
+    }
+
+    fn encode(next: u64, rolling: bool) -> u64 {
+        (next << 1) | u64::from(rolling)
+    }
+
+    fn decode(word: u64) -> Option<(u64, bool)> {
+        (word != Self::NONE).then_some((word >> 1, word & 1 == 1))
     }
 }

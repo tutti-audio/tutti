@@ -175,9 +175,10 @@ fn clear_loop_stops_wrapping_and_keeps_the_bounds() {
 
 /// **A play timed at a beat while the transport is stopped is refused where it
 /// is made.** A beat has a frame only while the transport rolls, so such a play
-/// waits for a playback only it can start, and would stay pending. `Session::schedule` names that, for a play and for a locate that
-/// rolls, sends nothing, and still takes a command that does not start playback
-/// (a stop) and a play timed at a frame.
+/// waits for a playback only it can start, and would stay pending.
+/// `Session::schedule` names that, for a play and for a locate that rolls,
+/// sends nothing, and still takes a command that does not start playback (a
+/// stop) and a play timed at a frame.
 #[test]
 fn a_play_at_a_beat_on_a_stopped_transport_is_refused() {
     let s = offline();

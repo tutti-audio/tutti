@@ -109,18 +109,39 @@ fn a_next_block_schedule_updates_the_rolling_record() {
     ));
 }
 
-/// **The rendered playhead stands in for the record**: a stop sent after a
-/// block rendered rolling leaves the record stopped while the playhead still
-/// rolls, and the handle takes a beat play on the playhead's word.
+/// **A stop sent after a rendered play refuses a beat play before the stop
+/// renders:** the record speaks until a render passes it, so the rolling
+/// playhead of the block before does not let a play wait on a stopped
+/// transport.
 #[test]
-fn a_handle_accepts_a_beat_play_while_the_playhead_rolls() {
+fn a_stop_sent_after_a_rendered_play_refuses_a_beat_play() {
     let s = offline();
     s.play().unwrap();
     render(&s, 2);
     assert!(s.playhead().playing());
     let handle = s.transport_handle();
     handle.stop(FadeOut::Immediate).unwrap();
-    // Stopped as sent, rolling as rendered: the rendered state is enough.
+    assert!(matches!(
+        handle.schedule(Beat(8.0), MotionEvent::Play),
+        Err(TimedError::BeatWhileStopped(MotionEvent::Play))
+    ));
+}
+
+/// **A play timed at a frame rolls the transport for the record once it
+/// fires:** after the render that fires it, a beat play is accepted.
+#[test]
+fn a_play_timed_at_a_frame_counts_as_rolling_once_rendered() {
+    let s = offline();
+    let handle = s.transport_handle();
+    handle
+        .schedule(Frame::new(1_000), MotionEvent::Play)
+        .unwrap();
+    assert!(matches!(
+        handle.schedule(Beat(8.0), MotionEvent::Play),
+        Err(TimedError::BeatWhileStopped(MotionEvent::Play))
+    ));
+    render(&s, 3);
+    assert!(s.playhead().playing());
     assert!(handle.schedule(Beat(8.0), MotionEvent::Play).is_ok());
 }
 
