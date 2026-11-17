@@ -158,6 +158,30 @@ std only. A rule the compiler already enforces is not a gate.
 - A platform difference sits behind one seam: the `cfg` chooses a platform module, never
   each item.
 
+### Shared types
+
+Every crate uses these; a hand-rolled copy is replaced by the shared one when its file is
+touched.
+
+- A reading the audio thread writes and any thread reads is a `tutti_rt::Gauge<U>` (latest
+  value) or `Counter<U>` (a cumulative count that saturates); a count with many writers is
+  a `Tally<U>`. A count of lost events is a `Counter<Losses>` (`tutti_graph::Losses`).
+- A refusable push returns `tutti_rt::PushError { Full, Disconnected }`.
+- A wake-up is `tutti_rt::doorbell()`: any number of `Doorbell`s ring one `Sleeper`.
+- A value the audio thread must never drop holds a `tutti_rt::ControlDrop`.
+- A `Mutex` is taken with `tutti_rt::LockExt::lock_recover`; a thread is started with
+  `tutti_rt::spawn_named`.
+- A collection the audio thread fills is a `tutti_rt::RtVec` or `CappedVec`: capped at
+  construction, refusing past it, never growing. A value of more than one field read as
+  one word is a `PackedAtomic`; an atomic float is `tutti_types::AtomicF32`/`AtomicF64`.
+- A setting the audio thread reads is a `tutti_rt::Setting<T>` over a `SettingWord`
+  (`setting_word!`); a node declares it in `declare_params!`'s `settings` block.
+- An id type is written with `tutti_types::id!` and minted from a `Mint`.
+- Time and layout have one type each: `tutti_types::LoopRange` for a loop,
+  `TimeSignature` and `MeterMap` for meter, `tutti_tempo::TempoMap` for tempo,
+  `ChannelLayout`, `ChannelTopology` and `BusTopology` for channels, and
+  `tutti_curve::Trajectory<U>` for an automation curve.
+
 ### Unit types
 
 - Use a `tutti_types` unit, never a bare float, for any quantity one covers: fields,
