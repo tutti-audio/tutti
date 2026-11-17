@@ -42,11 +42,12 @@
 //! outside any function. Several hits in one function share one row.
 //!
 //! **List.** [`LIST`] holds `<key>  <reason>` lines, `#` and blank lines
-//! aside, the reason `pending` or `measured: <why>`. The gate fails on a hit
+//! aside, the reason `pending` or `not-audio: <why>` (a stride that is not
+//! channel interleave). A free-text `measured:` is refused. The gate fails on a hit
 //! with no row, on a row with no hit (delete it), on an unknown reason and on
 //! a key listed twice.
 
-use super::buffers::{blocks, ident_at, item_end};
+use super::buffers::{blocks, ident_at, item_end, reason_error};
 use super::lex::{blank, find_word_from, matching, test_ranges};
 use super::test_time::{cfg_test_files, test_file};
 use super::{Report, Tree};
@@ -401,7 +402,7 @@ fn source_files(tree: &dyn Tree) -> Vec<String> {
         .collect()
 }
 
-const REASONS: &str = "pending, or `measured: <why>`";
+const KINDS: [&str; 2] = ["pending", "not-audio"];
 
 /// The list's rows, key to reason; the errors name the line.
 fn parse(text: &str) -> Result<BTreeMap<String, String>, Vec<String>> {
@@ -417,14 +418,8 @@ fn parse(text: &str) -> Result<BTreeMap<String, String>, Vec<String>> {
             Some((k, r)) => (k, r.trim()),
             None => (line, ""),
         };
-        let known = reason == "pending"
-            || reason
-                .strip_prefix("measured:")
-                .is_some_and(|why| !why.trim().is_empty());
-        if !known {
-            errors.push(format!(
-                "  {LIST}:{at}: `{key}` has reason `{reason}`; a reason is {REASONS}"
-            ));
+        if let Some(why) = reason_error(reason, &KINDS) {
+            errors.push(format!("  {LIST}:{at}: `{key}`: {why}"));
         }
         if rows.insert(key.to_owned(), reason.to_owned()).is_some() {
             errors.push(format!("  {LIST}:{at}: `{key}` is listed twice"));
@@ -679,7 +674,9 @@ mod tests {
     fn an_unknown_reason_a_duplicate_and_a_missing_list_fail() {
         for list in [
             "crates/a/src/lib.rs::f  later\n",
-            "crates/a/src/lib.rs::f  measured:\n",
+            "crates/a/src/lib.rs::f  measured: a fixed 5.1 table\n",
+            "crates/a/src/lib.rs::f  spec-f32: control\n",
+            "crates/a/src/lib.rs::f  not-audio\n",
             "crates/a/src/lib.rs::f  pending\ncrates/a/src/lib.rs::f  pending\n",
         ] {
             let r = run(list, &[(F, "fn f() { let n = frames * channels; }\n")]);
@@ -687,7 +684,7 @@ mod tests {
         }
         assert!(!check(&Mem::with(&[(F, "fn f() {}\n")]), 0).passed());
         let ok = run(
-            "crates/a/src/lib.rs::f  measured: a fixed 5.1 table\n",
+            "crates/a/src/lib.rs::f  not-audio: a 5.1 mixing table\n",
             &[(F, "fn f() { let n = frames * channels; }\n")],
         );
         assert!(ok.passed());

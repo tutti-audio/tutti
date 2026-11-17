@@ -452,9 +452,6 @@ impl PosWriter {
     /// block in flight may read, or where the ring is full ahead of where the
     /// reader plays; push the rest again later. A trailing partial frame is
     /// ignored.
-    ///
-    /// `samples` is a raw `f32` slice because this crate names no
-    /// `tutti_buffers` view and the slots hold `f32` bits.
     #[must_use = "the count is how many frames landed; push the rest again"]
     pub fn push(&mut self, samples: &[f32]) -> usize {
         let ring = &*self.ring;

@@ -8,9 +8,12 @@
 #         impl's type or the trait), `<file>::<Type>.<member>` for a field or enum
 #         variant. No line numbers; same-keyed items share one row.
 # reason  ffi          C ABI, IPC or wire; a comment at the site says why.
-#         engine-f32   the engine is fixed at f32, pending its own migration row.
+#         engine-f32   the engine edge is fixed at f32 until it goes generic.
 #         pending      not judged yet.
-#         measured: <why>   kept after judging.
+#         not-audio: <why>   the item is not audio (a spectrum, a curve, a reading).
+#         spec-f32: <why>    a spec fixes f32 (control values, param lanes).
+#
+# Fixed f32 on audio stays only as one of those kinds; a free-text `measured:` is refused.
 crates/tutti-au-host/src/macos/processor.rs::AuProcessor::render_f32  pending
 crates/tutti-au-host/src/macos/processor.rs::AuProcessor::render_f64  pending
 crates/tutti-codec/src/decode/file_in.rs::FileIn::fill_sequential_interleaved  pending
@@ -53,30 +56,30 @@ crates/tutti-export/src/rendered.rs::Rendered::interleaved_into  pending
 crates/tutti-export/src/rendered.rs::Rendered::into_planes  pending
 crates/tutti-export/src/rendered.rs::Rendered::new  pending
 crates/tutti-export/src/rendered.rs::Rendered::planes  pending
-crates/tutti-graph/src/contract.rs::Detect.Exact  measured: an expected response, not audio
-crates/tutti-graph/src/contract.rs::Direct::feed  measured: the param lanes are f32 by spec; the audio edge is generic
-crates/tutti-graph/src/contract.rs::drive  measured: the param lanes are f32 by spec; the audio edge is generic
-crates/tutti-graph/src/contract.rs::drive_input  measured: the param lanes are f32 by spec; the audio edge is generic
-crates/tutti-graph/src/param.rs::ParamInput.Frames  measured: control values are f32 by spec
-crates/tutti-graph/src/param.rs::ParamInput::frames  measured: control values are f32 by spec
+crates/tutti-graph/src/contract.rs::Detect.Exact  not-audio: an expected response
+crates/tutti-graph/src/contract.rs::Direct::feed  spec-f32: the param lanes are f32 by spec; the audio edge is generic
+crates/tutti-graph/src/contract.rs::drive  spec-f32: the param lanes are f32 by spec; the audio edge is generic
+crates/tutti-graph/src/contract.rs::drive_input  spec-f32: the param lanes are f32 by spec; the audio edge is generic
+crates/tutti-graph/src/param.rs::ParamInput.Frames  spec-f32: control values are f32 by spec
+crates/tutti-graph/src/param.rs::ParamInput::frames  spec-f32: control values are f32 by spec
 crates/tutti-graph/src/reference.rs::Reference::process  pending
 crates/tutti-graph/src/reference.rs::Reference::process_with_changes  pending
-crates/tutti-graph/src/tap.rs::TapReader::pop_into  measured: the op narrows a wider block to its f32 consumers
-crates/tutti-graph/src/tap.rs::TapReader::pop_planes  measured: the op narrows a wider block to its f32 consumers
-crates/tutti-graph/src/tap.rs::TapWriter::push_interleaved  measured: the op narrows a wider block to its f32 consumers
+crates/tutti-graph/src/tap.rs::TapReader::pop_into  pending
+crates/tutti-graph/src/tap.rs::TapReader::pop_planes  pending
+crates/tutti-graph/src/tap.rs::TapWriter::push_interleaved  pending
 crates/tutti-graph/src/testing.rs::Pair::block  pending
 crates/tutti-graph/src/testing.rs::Pair::block_at  pending
 crates/tutti-graph/src/testing.rs::Pair::block_with_changes  pending
 crates/tutti-graph/src/testing.rs::bits  pending
 crates/tutti-graph/src/testing.rs::input_signal  pending
-crates/tutti-measure/src/features.rs::spectral_centroid  measured: a magnitude spectrum, not audio
-crates/tutti-measure/src/features.rs::spectral_flatness  measured: a magnitude spectrum, not audio
-crates/tutti-measure/src/features.rs::spectral_rolloff  measured: a magnitude spectrum, not audio
-crates/tutti-measure/src/onset.rs::complex_domain_deviation  measured: the previous frame's magnitude spectrum, not audio
-crates/tutti-measure/src/onset.rs::spectral_flux  measured: the previous frame's magnitude spectrum, not audio
-crates/tutti-measure/src/tempo.rs::estimate_tempo_from_novelty  measured: a novelty curve of readings, not audio
-crates/tutti-measure/src/tempo.rs::track_beats_from_novelty  measured: a novelty curve of readings, not audio
-crates/tutti-measure/src/xcorr.rs::CrossCorrelation::values  measured: the correlation at each lag, not audio
+crates/tutti-measure/src/features.rs::spectral_centroid  not-audio: a magnitude spectrum
+crates/tutti-measure/src/features.rs::spectral_flatness  not-audio: a magnitude spectrum
+crates/tutti-measure/src/features.rs::spectral_rolloff  not-audio: a magnitude spectrum
+crates/tutti-measure/src/onset.rs::complex_domain_deviation  not-audio: the previous frame's magnitude spectrum
+crates/tutti-measure/src/onset.rs::spectral_flux  not-audio: the previous frame's magnitude spectrum
+crates/tutti-measure/src/tempo.rs::estimate_tempo_from_novelty  not-audio: a novelty curve of readings
+crates/tutti-measure/src/tempo.rs::track_beats_from_novelty  not-audio: a novelty curve of readings
+crates/tutti-measure/src/xcorr.rs::CrossCorrelation::values  not-audio: the correlation at each lag
 crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::folded  pending
 crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::new  pending
 crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::per_channel  pending
@@ -92,7 +95,7 @@ crates/tutti-plugin-types/src/contract.rs::round_trip  pending
 crates/tutti-plugin-types/src/contract.rs::steps  pending
 crates/tutti-polysynth/src/tuning.rs::Tuning::from_cents  pending
 crates/tutti-polysynth/src/tuning.rs::Tuning::from_ratios  pending
-crates/tutti-rt/src/pos_ring.rs::PosWriter::push  measured: tutti-rt may name only tutti-types (check-layout), and the ring stores f32 bits in AtomicU32 slots
+crates/tutti-rt/src/pos_ring.rs::PosWriter::push  pending
 crates/tutti-sampler/src/stretch/unit.rs::Unit::process  pending
 crates/tutti-sampler/src/stretch/unit.rs::Unit::tick  pending
 crates/tutti-sampler/src/testing.rs::block  pending
