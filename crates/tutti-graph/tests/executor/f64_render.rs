@@ -2,6 +2,7 @@
 //! builder, the executor's fan-in sum and the renderer's views unrounded.
 
 use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_graph::contract::{BlockRig, Direct, drive};
 use tutti_graph::{Cx, ForkByClone, GraphBuilder, Io, Node, Prepare, Shape, Status};
 use tutti_types::{ChannelLayout, MaxBlock, SampleRate, Samples};
 
@@ -95,4 +96,40 @@ fn render_into_overwrites_the_callers_f64_planes() {
     let mut into = vec![-7.0f64; 40];
     r.render_into(PlanesMut::new(&mut [&mut into[..]]).expect("one plane"));
     assert!(into.iter().all(|&x| x == FINE), "{:?}", &into[..3]);
+}
+
+/// `drive` hands a node `f64` planes whole and returns its `f64` outputs
+/// unrounded: halving `FINE` reads `0.5 * FINE`, which `f32` cannot hold.
+#[test]
+fn drive_runs_a_generic_node_at_f64() {
+    let mut node = Half;
+    Node::<f64>::prepare(&mut node, &prepare());
+    let input = [FINE; 16];
+    let out = drive(
+        &mut node as &mut dyn Node<f64>,
+        SampleRate::SR_48K,
+        Planes::new(&[&input[..]]).expect("one plane"),
+        &[],
+    );
+    assert!(
+        out[0].iter().all(|&x| x == 0.5 * FINE),
+        "{:?}",
+        &out[0][..3]
+    );
+}
+
+/// `Direct` and `BlockRig` in `f64` fill their input planes, run the node and
+/// read its output planes without rounding through `f32`.
+#[test]
+fn the_rigs_run_a_generic_node_at_f64() {
+    let rate = SampleRate::SR_48K;
+    let mut direct = Direct::<Half, f64>::with_format(Half, rate, 16);
+    direct.inputs_mut().plane_mut(0).samples_mut().fill(FINE);
+    direct.block();
+    assert!(direct.output().plane(0).iter().all(|&x| x == 0.5 * FINE));
+
+    let (mut rig, ()) = BlockRig::<f64>::with_format(ForkByClone(Half), rate, 16);
+    rig.inputs_mut().plane_mut(0).samples_mut().fill(FINE);
+    rig.block();
+    assert!(rig.output().plane(0).iter().all(|&x| x == 0.5 * FINE));
 }

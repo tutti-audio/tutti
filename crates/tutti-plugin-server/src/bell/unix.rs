@@ -6,6 +6,7 @@ use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
 use std::sync::atomic::{AtomicBool, Ordering};
+use tutti_plugin_ipc_ffi::FdId;
 
 /// The process's bell. See the module docs.
 pub(crate) struct Bell {
@@ -40,8 +41,8 @@ impl Bell {
     }
 
     /// The descriptor the main loop's wait watches for readability.
-    pub(crate) fn fd(&self) -> i32 {
-        self.rx.as_raw_fd()
+    pub(crate) fn fd(&self) -> FdId {
+        FdId::new(self.rx.as_raw_fd())
     }
 
     /// Reads the bytes [`ring`](Self::ring) wrote, so the descriptor is quiet
@@ -56,10 +57,10 @@ impl Bell {
 mod tests {
     use super::super::bell;
 
-    /// Whether the bell's descriptor is readable within `ms`.
-    fn readable(ms: i32) -> bool {
+    /// Whether the bell's descriptor is readable within `wait`.
+    fn readable(wait: std::time::Duration) -> bool {
         use std::os::fd::AsFd;
-        tutti_plugin_ipc_ffi::wait_readable(bell().rx.as_fd(), ms).expect("poll")
+        tutti_plugin_ipc_ffi::wait_readable(bell().rx.as_fd(), Some(wait)).expect("poll")
     }
 
     /// **A ring ends a wait on the bell's descriptor at once, and a drain
@@ -70,11 +71,11 @@ mod tests {
         let b = bell();
         b.drain();
         let _ = b.take();
-        assert!(!readable(0));
+        assert!(!readable(std::time::Duration::ZERO));
         std::thread::spawn(|| bell().ring()).join().expect("ringer");
-        assert!(readable(1000));
+        assert!(readable(std::time::Duration::from_secs(1)));
         b.drain();
-        assert!(!readable(0));
+        assert!(!readable(std::time::Duration::ZERO));
         assert!(b.take());
         assert!(!b.take());
     }

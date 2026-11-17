@@ -11,6 +11,7 @@
 //! Each render hands its node blocks of `BLOCK` frames on a render clock that
 //! counts frames (as an export's does), moved after each.
 
+use tutti_buffers::Planes;
 use tutti_sampler::VoiceWindow;
 
 use tutti_sampler::testing::loop_frames;
@@ -175,7 +176,7 @@ fn render(node: &mut dyn Node, clock: &Clock, frames: usize) -> [Vec<f32>; 2] {
     let mut done = 0;
     while done < frames {
         let n = BLOCK.min(frames - done);
-        let out = contract::drive_input(node, &clock.env(n), &[], &[], &[]).audio;
+        let out = contract::drive_input(node, &clock.env(n), Planes::default(), &[], &[]).audio;
         for (plane, c) in planes.iter_mut().zip(out) {
             plane.extend(c);
         }
@@ -782,8 +783,8 @@ fn a_fork_matches_the_memory_tier_bit_for_bit() {
         // Beat 1, then two file lengths: past the end of every case's file.
         for block in 0..(24_000 + 2 * LEN) / BLOCK {
             let env = clock.env(BLOCK);
-            let a = contract::drive_input(&mut *copy.node, &env, &[], &[], &[]).audio;
-            let b = contract::drive_input(&mut *memory, &env, &[], &[], &[]).audio;
+            let a = contract::drive_input(&mut *copy.node, &env, Planes::default(), &[], &[]).audio;
+            let b = contract::drive_input(&mut *memory, &env, Planes::default(), &[], &[]).audio;
             for c in 0..2 {
                 for i in 0..BLOCK {
                     let (x, y) = (a[c][i], b[c][i]);

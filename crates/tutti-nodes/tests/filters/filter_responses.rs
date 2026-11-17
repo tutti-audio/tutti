@@ -4,6 +4,7 @@
 //! independent biquad in `oracle_biquad.rs`; what moves cells and lanes inside a
 //! block is held by `filter_block_independence.rs`.
 
+use tutti_buffers::Planes;
 use tutti_graph::contract::{drive_input, prepared};
 use tutti_graph::{Env, Node, PlayClock, TransportChanges, TransportPosition};
 use tutti_nodes::{
@@ -37,7 +38,14 @@ fn gains_db<N: Node + 'static>(node: N, freq: f64, amp: f32) -> Vec<f64> {
             changes: TransportChanges::NONE,
             play: PlayClock::ZERO,
         };
-        let o = drive_input(&mut node as &mut dyn Node, &env, &ins, &[], &[]).audio;
+        let o = drive_input(
+            &mut node as &mut dyn Node,
+            &env,
+            Planes::new(&ins).unwrap(),
+            &[],
+            &[],
+        )
+        .audio;
         if out.is_empty() {
             out = vec![Vec::new(); o.len()];
         }

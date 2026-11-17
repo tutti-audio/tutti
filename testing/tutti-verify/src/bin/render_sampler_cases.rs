@@ -12,6 +12,7 @@
 //!
 //! Run: `cargo run --release -p tutti-verify --bin render_sampler_cases -- <outdir>`
 
+use tutti_buffers::Planes;
 use tutti_sampler::VoiceWindow;
 
 use std::f32::consts::TAU;
@@ -87,7 +88,7 @@ fn render(stretch: f32, cents: f32, seek_at: Option<usize>) -> Vec<f32> {
         let block = contract::drive_input(
             &mut pool,
             &transport.env(BLOCK, SampleRate::of(SR)),
-            &[],
+            Planes::default(),
             &[],
             &[],
         )

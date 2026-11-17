@@ -701,7 +701,7 @@ impl PluginBridge {
     pub fn wake(
         &self,
         main: MainThreadMarker,
-        ready: &[tutti_plugin_types::Ready],
+        ready: &[tutti_plugin_ipc_ffi::Ready],
         now: std::time::Instant,
     ) {
         if self.load_editor.is_none() {

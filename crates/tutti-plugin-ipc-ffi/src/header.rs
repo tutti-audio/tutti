@@ -200,21 +200,24 @@ impl SlabHeader {
     pub(crate) fn validate(&self) -> Result<(), SlabError> {
         let magic = self.control.magic.load(Ordering::Acquire);
         if magic != SLAB_MAGIC {
-            return Err(SlabError::Header(format!(
-                "not a tutti audio slab: magic {magic:#x}, expected {SLAB_MAGIC:#x}"
-            )));
+            return Err(SlabError::BadMagic {
+                found: magic,
+                expected: SLAB_MAGIC,
+            });
         }
         let version = self.control.header_version.load(Ordering::Relaxed);
         if version != HEADER_VERSION {
-            return Err(SlabError::Header(format!(
-                "slab header version {version}, this build speaks {HEADER_VERSION}"
-            )));
+            return Err(SlabError::BadVersion {
+                found: version,
+                expected: HEADER_VERSION,
+            });
         }
         let slots = self.control.slots.load(Ordering::Relaxed);
         if slots as usize != RING_SLOTS {
-            return Err(SlabError::Header(format!(
-                "slab has {slots} ring slots, this build expects {RING_SLOTS}"
-            )));
+            return Err(SlabError::BadSlots {
+                found: slots,
+                expected: RING_SLOTS,
+            });
         }
         Ok(())
     }
@@ -321,8 +324,17 @@ mod tests {
         let h = header();
         h.initialize();
         h.control.magic.store(0xDEAD_BEEF, Ordering::Release);
-        let err = h.validate().unwrap_err().to_string();
-        assert!(err.contains("not a tutti audio slab"), "{err}");
+        let err = h.validate().unwrap_err();
+        assert!(
+            matches!(
+                err,
+                SlabError::BadMagic {
+                    found: 0xDEAD_BEEF,
+                    expected: SLAB_MAGIC
+                }
+            ),
+            "{err}"
+        );
     }
 
     #[test]
@@ -332,8 +344,11 @@ mod tests {
         h.control
             .header_version
             .store(HEADER_VERSION + 1, Ordering::Relaxed);
-        let err = h.validate().unwrap_err().to_string();
-        assert!(err.contains("header version"), "{err}");
+        let err = h.validate().unwrap_err();
+        assert!(
+            matches!(err, SlabError::BadVersion { found, expected: HEADER_VERSION } if found == HEADER_VERSION + 1),
+            "{err}"
+        );
     }
 
     /// A peer built with a different ring depth must be refused rather than
@@ -345,8 +360,11 @@ mod tests {
         h.control
             .slots
             .store(RING_SLOTS as u32 + 2, Ordering::Relaxed);
-        let err = h.validate().unwrap_err().to_string();
-        assert!(err.contains("ring slots"), "{err}");
+        let err = h.validate().unwrap_err();
+        assert!(
+            matches!(err, SlabError::BadSlots { found, expected: RING_SLOTS } if found as usize == RING_SLOTS + 2),
+            "{err}"
+        );
     }
 
     /// The two directions are independent storage. If they aliased, the host's

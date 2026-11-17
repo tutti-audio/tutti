@@ -697,6 +697,8 @@ jobs:
       - if: matrix.group == 'rest'
         run: cargo test --locked -p tutti-rt --release --test packed_atomic_loom
       - if: matrix.group == 'rest'
+        run: cargo test --locked -p tutti-rt --release --test setting_loom
+      - if: matrix.group == 'rest'
         run: cargo test --locked -p tutti-rt --release --test seq_cell_loom
       - if: matrix.group == 'rest'
         run: cargo test --locked -p tutti-rt --release --test cell_loom

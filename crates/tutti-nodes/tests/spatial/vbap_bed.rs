@@ -5,6 +5,7 @@
 //! panner is the gain vector itself, so each case reads the gains off one
 //! rendered block.
 
+use tutti_buffers::Planes;
 use tutti_graph::ParamNode;
 use tutti_graph::contract::{drive, prepared};
 use tutti_nodes::VbapPannerNode;
@@ -75,7 +76,7 @@ fn gains(bed: Bed, azimuth: f32, elevation: f32, spread: f32) -> Vec<f32> {
     params.set(UnitParam::Spread, spread);
     aim(&params, Azimuth(azimuth), Elevation(elevation));
     let ones = [1.0f32; 16];
-    let out = drive(&mut node, RATE, &[&ones, &ones], &[]);
+    let out = drive(&mut node, RATE, Planes::new(&[&ones, &ones]).unwrap(), &[]);
     out.iter().map(|c| c[15]).collect()
 }
 
