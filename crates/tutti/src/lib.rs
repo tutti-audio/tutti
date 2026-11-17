@@ -697,4 +697,44 @@ pub mod midi {
         MidiPolicyHandle, MidiPortError, OutputOptions, PortCause, ProfilePeer, ReportPeer,
         RequestReport, SwitchProfile, WholeProfile, midi_input, midi_output,
     };
+    /// MIDI-CI Property Exchange (M2-103 and its resource specifications): a
+    /// peer's resources, read, written and subscribed to through the session.
+    #[cfg(feature = "midi-hardware")]
+    pub mod property {
+        pub use tutti_midi_device::mcoded7::Mcoded7Error;
+        pub use tutti_midi_device::{
+            Ack, ActionError, BodyLimit, BufferLimit, CallError, CallId, CanSet, CcIndex,
+            ChangeKind, ChunkNo, ClusterKind, ColumnSource, ConfirmIcon, ConfirmType, Confirmation,
+            CtrlControl, CtrlKind, CtrlRange, CtrlValueKind, CustomResource, DefaultMapNotCc,
+            EntryError, JsonPointer, LinkRole, ListedTwice, MediaType, ModeId, NotABodyLimit,
+            NotABufferLimit, NotAChunkNo, NotAPeChannel, NotAPriority, NotARequestId,
+            NotASimultaneousRequests, NotAStateSize, NotAStepCount, NotAStreamLimit,
+            NotATimeoutWait, NotSignificantBits, NotUnixSeconds, NotValid, NotVendorName,
+            OpaqueBody, PaginationFault, ParamPath, PartialError, PartialUpdate, PeAllCtrlEntry,
+            PeAllCtrlList, PeAnswer, PeBankProgram, PeBasicChannelRx, PeBasicChannelTx,
+            PeBodyError, PeCapabilities, PeCapabilitiesFailure, PeChCtrlEntry, PeChCtrlList,
+            PeChannel, PeChannelEntry, PeChannelList, PeChannelMode, PeChunkError, PeCluster,
+            PeColumn, PeController, PeCtrl, PeCtrlMapEntry, PeCtrlMapList, PeCurrentMode, PeData,
+            PeDataError, PeDataFault, PeDecimal, PeDeviceInfo, PeEncoding, PeEndedBy, PeError,
+            PeExtensions, PeExternalSync, PeExtra, PeExtraError, PeFlowControl, PeHeaderError,
+            PeHeaderTooLong, PeJson, PeJsonError, PeJsonSchema, PeLink, PeLocalOn, PeMessage,
+            PeMidiMode, PeModeEntry, PeModeList, PeObject, PeOpaque, PeOutcome, PePage,
+            PeProgramEntry, PeProgramList, PeReassemblyError, PeReply, PeRequestId, PeResource,
+            PeResourceList, PeResponse, PeSignal, PeState, PeStateEntry, PeStateList, PeStatus,
+            PeStatusClass, PeTerminator, PeText, PeTransaction, PeUnreadable, PeVersion, Priority,
+            PropertyName, RefusedAt, RequestRefused, ResIdUse, ResourceDefaults, ResourceEntry,
+            ResourceEvent, ResourceFailure, ResourceGet, ResourceId, ResourceName, ResourceSet,
+            ResourceTarget, ResponderEvent, RoleName, SelectorAction, SetBody, SignificantBits,
+            SimpleAction, SimultaneousRequests, StateId, StateRev, StateSize, StateStamp,
+            StepCount, StreamLimit, SubscribeId, TimeoutWait, TypeHint, UnixSeconds, UpdateKind,
+        };
+        pub use tutti_midi_hardware::{
+            PropertyAsk, PropertyCall, PropertyChange, PropertyError, PropertyPeer,
+        };
+        #[cfg(feature = "session")]
+        pub use tutti_session::{
+            GetProperty, ListedResource, PeFailure, ResourcePeer, SetProperty, Subscribe,
+            Subscription, SubscriptionCause,
+        };
+    }
 }
