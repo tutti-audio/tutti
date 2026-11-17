@@ -551,8 +551,8 @@ pub mod soundfont {
 pub mod plugin {
     pub use tutti_plugin::catalog::{BindError, BlacklistView, Loadable, PersistError, Resolved};
     pub use tutti_plugin::{
-        AutomationMode, BridgeConfig, FeatureReport, Features, MainThreadMarker, MainWork,
-        MainWorkHandle, PluginRenderFault, Preset, PresetSupport,
+        AutomationMode, BridgeConfig, MainThreadMarker, MainWork, MainWorkHandle,
+        PluginRenderFault, Preset,
     };
     pub use tutti_plugin_db::ScanBusy;
     pub use tutti_plugin_db::{
@@ -562,7 +562,9 @@ pub mod plugin {
     pub use tutti_plugin_host::RebindError;
     pub use tutti_plugin_ipc::RandomSourceError;
     pub use tutti_plugin_ipc::{SlabAccessError, SlabLayoutError};
+    pub use tutti_plugin_types::PresetSupport;
     pub use tutti_plugin_types::bundle::ModuleKind;
+    pub use tutti_plugin_types::features::{FeatureReport, Features};
     pub use tutti_plugin_types::{
         AuComponentType, AutomationModeError, Axis, BlockCounts, BridgeError, BridgeResult,
         ClapFeature, ContentScale, ControlRole, EditorPresence, EmptyVersionText, Helper,
