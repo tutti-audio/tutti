@@ -23,7 +23,6 @@ use tutti_nodes::{
     LimiterNode, MaxDelay, ModDelayNode, PhaserControls, PhaserNode, ShapeKind, Stages,
     SvfControls, SvfFilterNode, SvfType,
 };
-use tutti_nodes::{DcBlockerConfig, DcBlockerNode};
 use tutti_nodes::{StereoWidthConfig, StereoWidthNode};
 use tutti_types::{
     Amplitude, BusTopology, ChannelLayout, CompressionRatio, Db, Depth, Drive, Feedback, Hz, Q,
