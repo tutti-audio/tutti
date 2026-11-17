@@ -914,7 +914,7 @@ fn the_host_sends_to_the_client_too() {
 fn zero_length(sim: &Sim) -> usize {
     data_commands(sim, Direction::ClientToHost)
         .iter()
-        .filter(|d| d.is_idle())
+        .filter(|d| d.words().is_empty())
         .map(|d| d.sequence())
         .collect::<std::collections::HashSet<_>>()
         .len()
@@ -934,7 +934,7 @@ fn an_idle_period_is_declared_with_zero_length_commands_that_use_sequence_number
     assert_eq!(zero_length(&sim), 3);
     let mut idle: Vec<_> = data_commands(&sim, Direction::ClientToHost)
         .iter()
-        .filter(|d| d.is_idle())
+        .filter(|d| d.words().is_empty())
         .map(|d| d.sequence().get())
         .collect();
     idle.sort_unstable();

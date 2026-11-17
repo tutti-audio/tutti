@@ -112,7 +112,7 @@ fn zero_length_ump_data_is_a_header_alone() {
     let Command::UmpData(d) = one(&cmd_bytes(&idle)).unwrap() else {
         panic!()
     };
-    assert!(d.is_idle());
+    assert!(d.words().is_empty());
 }
 
 #[test]
@@ -171,7 +171,7 @@ fn nak_carries_the_refused_header_then_padded_text() {
     assert_eq!(one(&cmd_bytes(&nak)).unwrap(), nak);
     let bare = Command::Nak(Nak {
         reason: NakReason::Malformed,
-        refused: Header::new(0x20, 1, 0),
+        refused: Header::from_word(0x2001_0000),
         text: Text::default(),
     });
     assert_eq!(
@@ -417,7 +417,7 @@ fn an_unknown_command_code_is_refused_and_the_next_command_still_reads() {
     let results: Vec<_> = parse(&all).unwrap().collect();
     let refused = results[0].as_ref().unwrap_err();
     assert_eq!(refused.error, ParseError::UnknownCode(0x55));
-    assert_eq!(refused.header, Header::new(0x55, 1, 0));
+    assert_eq!(refused.header, Header::from_word(0x5501_0000));
     assert_eq!(results[1], Ok(Command::ByeReply));
 }
 
@@ -571,10 +571,6 @@ fn texts_refuse_a_nul_and_overlong_input() {
 #[test]
 fn sequence_numbers_wrap_to_zero_after_ffff() {
     assert_eq!(SequenceNumber::new(0xFFFF).next(), SequenceNumber::ZERO);
-    assert_eq!(
-        SequenceNumber::new(0xFFFE).advanced(3),
-        SequenceNumber::new(1)
-    );
 }
 
 #[test]
@@ -592,9 +588,10 @@ mod props {
 
     proptest! {
         #[test]
-        fn advancing_then_measuring_returns_the_step(start in any::<u16>(), step in 0u16..0x7FFF) {
+        fn a_number_step_on_wrapping_measures_the_step(start in any::<u16>(), step in 0u16..0x7FFF) {
             let a = SequenceNumber::new(start);
-            prop_assert_eq!(a.advanced(step).distance_from(a), i16::try_from(step).unwrap());
+            let later = SequenceNumber::new(start.wrapping_add(step));
+            prop_assert_eq!(later.distance_from(a), i16::try_from(step).unwrap());
         }
     }
 }

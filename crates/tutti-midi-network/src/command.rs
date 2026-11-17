@@ -44,12 +44,6 @@ const ID_WORDS_MAX: usize = 11;
 pub struct Header(u32);
 
 impl Header {
-    /// The header with this code, payload length (in words) and data.
-    #[must_use]
-    pub const fn new(code: u8, payload_words: u8, data: u16) -> Self {
-        Self((code as u32) << 24 | (payload_words as u32) << 16 | data as u32)
-    }
-
     /// The header read from its word.
     #[must_use]
     pub const fn from_word(word: u32) -> Self {
@@ -532,12 +526,6 @@ impl UmpData {
     #[must_use]
     pub fn words(&self) -> &[u32] {
         &self.words
-    }
-
-    /// Whether this declares an idle period: it carries no UMP.
-    #[must_use]
-    pub fn is_idle(&self) -> bool {
-        self.words.is_empty()
     }
 
     /// The packets, in the order sent.
