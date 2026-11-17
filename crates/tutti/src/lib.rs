@@ -594,8 +594,8 @@ pub mod plugin {
 /// that play an instrument or a live input (`MidiKeys`),
 /// the session's MIDI (`Midi`, `InstrumentHandle`), its route rule, events and
 /// errors (`MidiRouteRule`, `MidiRouteId`, `MidiReport`, `midi::Error`), its
-/// followers (`FollowTempo`, `FollowClock`, `FollowMachineControl`,
-/// `SendMachineControl`), a host's own output (`midi_sink`, `MidiSink`,
+/// followers (`FollowTempo`, `FollowClock`, `FollowMachineControl`), the
+/// sync node that sends the transport (`SyncOut`, `SyncMessages`), a host's own output (`midi_sink`, `MidiSink`,
 /// `SinkLoaded`), and under `midi-hardware` a device (`MidiDeviceId`,
 /// `DeviceInfo`), the ports the pool opens for them (`midi_input`, `midi_output`,
 /// `MidiInput`, `MidiOutput`, their entries and loaded reports) and what an open one said of itself (`Learned`, `SavedDevice`, `Match`), and the Profiles
@@ -650,8 +650,8 @@ pub mod midi {
         SmpteFrameRate, SysexDeviceId, TuningFrequency, UnknownFrameRate,
     };
     pub use tutti_midi_runtime::{
-        ClockControls, ClockKind, ClockSends, MidiClipControls, MidiClipNode, MidiInputPorts,
-        OffsetOutOfRange, OutputLatency, OutputOffset, OutputTerms, SegmentFault,
+        ClockKind, MidiClipControls, MidiClipNode, MidiInputPorts, OffsetOutOfRange, OutputLatency,
+        OutputOffset, OutputTerms, SegmentFault, SyncMessages, SyncOut, SyncOutControls,
     };
     pub use tutti_midi_runtime::{MidiKeys, MidiOut, Outgoing, SendAt, Taken, TimedMidiEvent};
     pub use tutti_ump::{
@@ -689,8 +689,7 @@ pub mod midi {
     pub use tutti_session::{
         AddedInstrument, AnyNode, FollowClock, FollowMachineControl, FollowTempo, InstrumentHandle,
         Midi, MidiLoad, MidiReport, MidiRouteId, MidiRouteRule, MidiSink, MidiSinkEntry,
-        MidiSinkInfo, NotInstrument, SendMachineControl, SinkLoaded, SinkOptions, Stamping,
-        TakePlacement, midi_sink,
+        MidiSinkInfo, NotInstrument, SinkLoaded, SinkOptions, Stamping, TakePlacement, midi_sink,
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
     pub use tutti_session::{

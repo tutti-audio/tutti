@@ -13,7 +13,7 @@ use tutti_graph::{
     Prepare, Schedule, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{OutPort, Source};
-use tutti_midi_runtime::{ClockNode, HarmonyNode, MidiClipNode, MidiIngestNode, TimedMidiEvent};
+use tutti_midi_runtime::{HarmonyNode, MidiClipNode, MidiIngestNode, SyncOut, TimedMidiEvent};
 use tutti_types::{Beat, Bpm, ChannelLayout, SampleRate, Samples};
 use tutti_ump::{Message, MidiChannel, NoteNumber, NoteVelocity, Ump, Voice2};
 
@@ -170,13 +170,7 @@ fn every_midi_node_is_light() {
     assert_eq!(clip(0).shape().cost, Cost::Light);
     assert_eq!(HarmonyNode::new([]).shape().cost, Cost::Light);
     assert_eq!(
-        ClockNode::new(
-            tutti_ump::MidiGroup::FIRST,
-            tutti_types::SampleRate::SR_48K,
-            tutti_transport::ProjectMeter::default().reader()
-        )
-        .shape()
-        .cost,
+        SyncOut::new(tutti_ump::MidiGroup::FIRST).shape().cost,
         Cost::Light
     );
     assert_eq!(
