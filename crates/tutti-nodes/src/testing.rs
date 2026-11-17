@@ -46,6 +46,7 @@ mod vbap_mix;
 pub use vbap_mix::{bass_send, vbap_mix};
 
 use std::f64::consts::TAU;
+use tutti_buffers::Sample;
 use tutti_dsp::OscillatorWave;
 
 use tutti_graph::{
@@ -103,10 +104,11 @@ impl Const {
     }
 
     /// Creates a constant with one value per channel, so channels can be told
-    /// apart. The width is `values.len()`.
-    pub fn frame(values: &[f32]) -> Self {
+    /// apart. `values` is one frame, as [`Interleaved::frame`](tutti_buffers::Interleaved::frame) hands it out, in
+    /// any [`Sample`] format; the width is `values.len()`.
+    pub fn frame<S: Sample>(values: &[S]) -> Self {
         Self {
-            values: values.to_vec(),
+            values: values.iter().map(|v| v.convert_to::<f32>()).collect(),
         }
     }
 }
