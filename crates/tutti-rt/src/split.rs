@@ -23,9 +23,9 @@
 //!
 //! # Ordering
 //!
-//! A claim is an `Acquire` compare-exchange and a release is a `Release`
+//! A claim is an `Acquire` read-modify-write and a release is a `Release`
 //! write, so whatever a thread wrote through a claim happens-before whatever
-//! the next claimer of that word reads. A refused claim writes nothing. The
+//! the next claimer of that word reads. A refused claim leaves the word as it found it. The
 //! words are `ClaimWord`s, whose module docs state the protocol; the `loom`
 //! model in `tests/split_loom.rs` checks it against the shipped code.
 //!

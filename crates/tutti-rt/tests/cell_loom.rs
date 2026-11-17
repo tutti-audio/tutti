@@ -24,9 +24,9 @@
 //!
 //! # The claim word
 //!
-//! The cell's state is a `ClaimWord` (`src/claim.rs`). Every claim on it is a
-//! compare-exchange, so a refused borrow writes nothing: after every guard has
-//! dropped, the next borrow is granted, which the models check as shipped.
+//! The cell's state is a `ClaimWord` (`src/claim.rs`). A refused borrow leaves
+//! it as it found it: after every guard has dropped, the next borrow is
+//! granted, which the models check as shipped.
 
 #![cfg(loom)]
 

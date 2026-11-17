@@ -9,22 +9,20 @@
 //!
 //! A `u32`: [`EXCLUSIVE`] (the top bit) while an exclusive claim is held,
 //! otherwise the number of shared claims. A claim is granted by one
-//! compare-exchange with `Acquire`, a release is `Release`, so whatever a
+//! atomic read-modify-write with `Acquire`, a release is `Release`, so whatever a
 //! holder wrote is visible to the next claimer of the word.
 //!
-//! # A refused claim writes nothing
+//! # Claims
 //!
-//! Every claim is a compare-exchange, and a refused one is a load: the word is
-//! changed only by the claims that hold it. Two things follow.
+//! A shared claim is one `fetch_add` of one: it adds before it looks at the
+//! exclusive bit, and a refused one subtracts it again. For that instant a
+//! concurrent exclusive claim on the same word is refused too, and only a
+//! schedule that already conflicts can see it. A shared claim never retries.
 //!
-//! - **An exclusive release is a store of zero.** While the exclusive bit is
-//!   set no other claim writes the word, so the holder's store cannot lose an
-//!   update.
-//! - **No claimer is refused because of a refusal.** A refused claim leaves
-//!   the word as it found it, so a concurrent claim on a word nobody holds is
-//!   granted. The shared loop retries only when another shared claimer changed
-//!   the count in between, so it is lock-free: some claim always makes
-//!   progress, and an exclusive holder never makes one wait.
+//! An exclusive claim and an upgrade are compare-exchanges, so a refused one
+//! writes nothing. An exclusive release subtracts the exclusive bit rather
+//! than storing zero, so it keeps a refused shared claim's add that is not yet
+//! undone.
 
 use sync::{AtomicU32, Ordering};
 
@@ -68,19 +66,13 @@ impl ClaimWord {
     /// reach the exclusive bit; `false` then, with the word unchanged.
     #[inline]
     pub(crate) fn try_shared(&self) -> bool {
-        let mut seen = self.0.load(Ordering::Relaxed);
-        loop {
-            if seen >= EXCLUSIVE - 1 {
-                return false;
-            }
-            match self
-                .0
-                .compare_exchange_weak(seen, seen + 1, Ordering::Acquire, Ordering::Relaxed)
-            {
-                Ok(_) => return true,
-                Err(now) => seen = now,
-            }
+        let prev = self.0.fetch_add(1, Ordering::Acquire);
+        if prev & EXCLUSIVE != 0 || prev + 1 >= EXCLUSIVE {
+            // Leave the word as found.
+            self.0.fetch_sub(1, Ordering::Relaxed);
+            return false;
         }
+        true
     }
 
     /// Takes the word if nothing holds it; `false` if anything does.
@@ -106,9 +98,9 @@ impl ClaimWord {
         self.0.fetch_sub(1, Ordering::Release);
     }
 
-    /// Drops the exclusive claim. A store: see the module docs.
+    /// Drops the exclusive claim: see the module docs.
     #[inline]
     pub(crate) fn release_exclusive(&self) {
-        self.0.store(0, Ordering::Release);
+        self.0.fetch_sub(EXCLUSIVE, Ordering::Release);
     }
 }

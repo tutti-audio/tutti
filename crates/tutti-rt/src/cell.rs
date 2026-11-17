@@ -20,16 +20,17 @@ use crate::claim::ClaimWord;
 /// The cell enforces that contract itself, in release builds as in debug
 /// ones: one atomic claim word is either exclusive or counts the live shared
 /// borrows. A mutable borrow takes the word exclusively with one
-/// compare-exchange from zero; a shared borrow adds one to the count with a
-/// compare-exchange that never succeeds while the word is exclusive. A borrow
+/// compare-exchange from zero; a shared borrow adds one to the count with one
+/// atomic add that is undone when the word is exclusive. A borrow
 /// that the contract refuses — a second mutable borrow, or a shared and a
 /// mutable one together, from another thread or nested on the same one —
 /// panics ([`borrow_mut`], [`borrow`]) or returns `None` ([`try_borrow_mut`],
-/// [`try_borrow`]), and writes nothing. It never hands out a `&mut T` that
-/// aliases. That is what makes the cell sound to share across threads (`Sync`)
-/// through safe code. The cost is one uncontended compare-exchange per borrow
-/// and one store or decrement per release: no lock, no allocation, nothing
-/// that waits on another thread's progress, so it is fine on the audio thread.
+/// [`try_borrow`]), and leaves the word as it found it. It never hands out a
+/// `&mut T` that aliases. That is what makes the cell sound to share across
+/// threads (`Sync`) through safe code. The cost is one uncontended atomic
+/// read-modify-write per borrow and one per release: no lock, no allocation,
+/// nothing that waits on another thread's progress, so it is fine on the audio
+/// thread.
 ///
 /// A panic is the diagnostic, not the plan: a caller still keeps mutable
 /// borrows to one thread at a time, typically by reaching the cell only from
@@ -165,7 +166,7 @@ impl<T> AudioThreadCell<T> {
 }
 
 /// The panic for a borrow that found a conflicting one live. Out of line and
-/// cold, so the borrow's fast path is the compare-exchange and a branch.
+/// cold, so the borrow's fast path is one atomic and a branch.
 #[cold]
 #[inline(never)]
 #[track_caller]
