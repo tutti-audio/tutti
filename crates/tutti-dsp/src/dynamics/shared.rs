@@ -17,7 +17,7 @@ pub const GAIN_GLIDE: Seconds = Seconds(0.005);
 /// `x`'s magnitude as a level: a NaN reads as quiet (0) and an infinity as the largest
 /// finite level, so a detector never sees a value its dB conversion turns into an infinity.
 #[inline]
-pub(crate) fn level(x: f32) -> f32 {
+pub(super) fn level(x: f32) -> f32 {
     let a = x.abs();
     if a.is_nan() { 0.0 } else { a.min(f32::MAX) }
 }

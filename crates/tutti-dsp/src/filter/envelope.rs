@@ -23,8 +23,9 @@
 //! to the period's first frame, and the render does not depend on how the stream is cut into
 //! blocks. Depth 0 never moves the cutoff: the bank is a fixed SVF at `base`.
 //!
-//! The bank has no latency. Its tail is the filter's ([`SvfType`]'s ring-out at the lowest
-//! cutoff the controls reach is not bounded here), so a node over it declares none.
+//! The bank has no latency. It bounds no ring-out (a resonant filter rings for as long as its Q
+//! says, at the lowest cutoff the controls reach), so the node over it declares
+//! [`Tail::Unknown`](tutti_types::Tail::Unknown).
 
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_types::{ChannelLayout, Hz, Q, SampleRate, Samples, Seconds, Semitones};
@@ -149,7 +150,7 @@ impl<F: Float + Lanes> EnvelopeFilterBank<F> {
     /// The cutoff at the envelope `env` (0 to 1): `base * 2^(depth / 12 * env)`, held within 1
     /// Hz and 0.998 of the Nyquist.
     #[must_use]
-    pub fn cutoff_at(&self, env: f32) -> Hz {
+    pub(crate) fn cutoff_at(&self, env: f32) -> Hz {
         let octaves = f64::from(self.controls.depth.get()) / 12.0 * f64::from(env);
         let hz = f64::from(self.controls.base.get()) * libm::exp2(octaves);
         let top = f64::from(self.rate.nyquist_scaled(0.998).get());
