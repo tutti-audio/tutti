@@ -815,6 +815,39 @@ fn a_plugin_lane_sends_linear_grid_pieces() {
     }
 }
 
+/// A program published between two blocks is read by the next block: a flat
+/// 500 republished as a flat 700 has moved by that block's last frame and
+/// settles at 700. Nothing but the republish moves a flat lane (no corner,
+/// no knob or range edit), so a republish the lane failed to see would hold
+/// 500 forever.
+#[test]
+fn a_publish_between_two_blocks_is_read_by_the_next_block() {
+    let flat = |v: f32| -> ControlProgram {
+        let curve: Arc<dyn Curve> = Arc::new(trajectory(&[(0.0, v)]));
+        program(Some(curve), vec![])
+    };
+    let (mut ed, mut exec) = probes(128, &[2], (0.0, 2000.0));
+    let lane = native(&ed, 2, flat(500.0), None);
+    let controls = wire(&mut ed, 1, lane, 2);
+    ed.commit().expect("commits");
+    let (mut host, mut all) = (Host::new(), Vec::new());
+    for _ in 0..10 {
+        host.roll(&mut ed, &mut exec, 128, &mut all);
+    }
+    assert!(
+        all[0].iter().all(|&v| v == 500.0),
+        "flat 500 before the publish"
+    );
+    controls.publish(flat(700.0));
+    host.roll(&mut ed, &mut exec, 128, &mut all);
+    let next = *all[0].last().expect("one block");
+    assert_ne!(next, 500.0, "the next block reads the republished program");
+    for _ in 0..40 {
+        host.roll(&mut ed, &mut exec, 128, &mut all);
+    }
+    assert_eq!(*all[0].last().expect("rolled"), 700.0, "settles at 700");
+}
+
 /// An LFO's phase survives a depth edit: a 2.5 Hz sine on the play clock,
 /// depth 0.25 then 0.4 of a 2000 span, reads `1000 + depth · 2000 ·
 /// sin(2π · 2.5 · play / rate)` on every grid frame before the edit and
