@@ -537,7 +537,7 @@ fn a_reader_dropped_first_is_reaped_and_freed_on_the_control_side() {
 /// panic, as for a unit.
 #[cfg(debug_assertions)]
 #[test]
-#[should_panic(expected = "a tap reader dropped on the audio thread")]
+#[should_panic(expected = "TapReader dropped on the audio thread")]
 fn a_reader_dropped_on_the_audio_thread_panics() {
     let mut r = rig(1, false);
     let tap =
