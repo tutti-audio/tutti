@@ -93,5 +93,5 @@ pub use endpoint::{Client, Host, HostConfig, NetworkEndpoint};
 pub use event::{AuthFailure, EndedBy, Event, SendError, SessionState, Transmit};
 pub use policy::{Admission, Credentials};
 pub use sequence::SequenceNumber;
-pub use text::{BoundedText, Text, TextError, Username};
+pub use text::{BoundedText, ByeText, NakText, TextError, Username};
 pub use udp::UdpDriver;

@@ -189,7 +189,7 @@ impl Session {
         self.out.push(Command::Nak(Nak {
             reason,
             refused,
-            text: crate::Text::default(),
+            text: crate::NakText::default(),
         }));
     }
 

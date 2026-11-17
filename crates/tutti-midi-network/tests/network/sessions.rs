@@ -413,7 +413,7 @@ static NONCE_CALLS: AtomicU8 = AtomicU8::new(0);
 
 fn counting_nonce() -> Result<Nonce, EntropyError> {
     let n = NONCE_CALLS.fetch_add(1, Ordering::SeqCst);
-    Ok(Nonce::from_entropy([n; 16]))
+    Ok(Nonce::new([b'a' + n; 16]).unwrap())
 }
 
 fn no_nonce() -> Result<Nonce, EntropyError> {
@@ -638,11 +638,11 @@ fn no_fec() -> SessionConfig {
 }
 
 fn lossy_sim(client: SessionConfig, lost: Vec<usize>) -> Sim {
-    let mut sim = Sim::new(
-        HostConfig::new(identity("Studio", "HOST-1")),
-        Credentials::none(),
-        client,
-    );
+    lossy_sim_with(HostConfig::new(identity("Studio", "HOST-1")), client, lost)
+}
+
+fn lossy_sim_with(host: HostConfig, client: SessionConfig, lost: Vec<usize>) -> Sim {
+    let mut sim = Sim::new(host, Credentials::none(), client);
     sim.connect();
     sim.client_events.clear();
     sim.host_events.clear();
@@ -771,6 +771,39 @@ fn a_peer_without_retransmit_naks_the_request_and_the_gap_is_given_up() {
         .filter(|c| matches!(c, Command::RetransmitRequest(_)))
         .count();
     assert_eq!(requests, 1);
+}
+
+/// The wait between requests doubles from `reorder_wait`, and an hour is the
+/// most any wait is, so the doubling never overflows an `Instant`.
+#[test]
+fn the_wait_between_retransmit_requests_stops_doubling_at_the_timer_ceiling() {
+    let hour = Duration::from_secs(60 * 60);
+    let mut host = HostConfig::new(identity("Studio", "HOST-1"));
+    host.session = no_fec()
+        .with_reorder_wait(Duration::MAX)
+        .with_requests(Requests::UpTo(std::num::NonZeroU8::MAX))
+        .with_ping_interval(hour)
+        .with_liveness_timeout(Duration::MAX);
+    // Every retransmission is lost as well, so the gap stays open.
+    let mut sim = lossy_sim_with(host, no_fec(), std::iter::once(2).chain(4..60).collect());
+    for n in (60..63).map(note_on) {
+        sim.client.send(sim.now, &[n]).unwrap();
+        sim.flush();
+    }
+    let requests = |sim: &Sim| {
+        sim.commands(Direction::HostToClient)
+            .iter()
+            .filter(|c| matches!(c, Command::RetransmitRequest(_)))
+            .count()
+    };
+    assert_eq!(requests(&sim), 0, "the first wait is an hour");
+    sim.advance(hour);
+    assert_eq!(requests(&sim), 1);
+    // The second wait would be two hours doubled; the ceiling holds it to one.
+    sim.advance(hour);
+    assert_eq!(requests(&sim), 2);
+    sim.advance(hour);
+    assert_eq!(requests(&sim), 3);
 }
 
 #[test]
@@ -1118,6 +1151,57 @@ fn a_bye_is_answered_once_and_both_ends_return_to_idle() {
         Err(SendError::NotEstablished {
             state: SessionState::Idle
         })
+    );
+}
+
+/// A datagram holding one Bye (reason User Terminated) whose message field is
+/// `text`, padded with zero to a word.
+fn raw_bye(text: &[u8]) -> Vec<u8> {
+    let words = text.len().div_ceil(4);
+    let mut bytes = b"MIDI".to_vec();
+    bytes.extend_from_slice(&[0xF0, u8::try_from(words).unwrap(), 0x01, 0x00]);
+    bytes.extend_from_slice(text);
+    bytes.resize(8 + words * 4, 0);
+    bytes
+}
+
+/// Spec: m2-124/6.16#1, m2-124/6.16#5 (Table 26: a Bye's payload length is
+/// 0..255 words, so its message is up to 1020 bytes)
+#[test]
+fn a_bye_with_the_longest_message_the_wire_allows_ends_the_session() {
+    let mut sim = established();
+    sim.client
+        .on_message(host_addr(), &raw_bye(&[b'x'; 1020]), sim.now);
+    sim.flush();
+    assert_eq!(sim.client.state(), SessionState::Idle);
+    assert!(sim.client_events.contains(&Event::Closed {
+        peer: host_addr(),
+        ended_by: EndedBy::Remote,
+        reason: ByeReason::UserTerminated
+    }));
+    assert!(
+        sim.commands(Direction::ClientToHost)
+            .contains(&Command::ByeReply)
+    );
+}
+
+/// Spec: m2-124/6.16#1, m2-124/6.16#5 (the message is advisory: a message that
+/// is not UTF-8 does not keep the Session open)
+#[test]
+fn a_bye_whose_message_is_not_utf8_still_ends_the_session() {
+    let mut sim = established();
+    sim.client
+        .on_message(host_addr(), &raw_bye(b"ok\xFF\xFEtail"), sim.now);
+    sim.flush();
+    assert_eq!(sim.client.state(), SessionState::Idle);
+    assert!(sim.client_events.contains(&Event::Closed {
+        peer: host_addr(),
+        ended_by: EndedBy::Remote,
+        reason: ByeReason::UserTerminated
+    }));
+    assert!(
+        sim.commands(Direction::ClientToHost)
+            .contains(&Command::ByeReply)
     );
 }
 

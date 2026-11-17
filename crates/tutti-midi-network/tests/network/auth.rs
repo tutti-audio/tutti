@@ -36,13 +36,60 @@ fn digests_that_differ_in_one_byte_do_not_match() {
     assert!(!a.matches(&Digest::new(other)));
 }
 
+/// Spec: m2-124/6.7 (the nonce is ASCII ordinals 32-126)
 #[test]
-fn a_nonce_must_be_ascii_and_entropy_makes_printable_ascii() {
-    let mut bad = *b"0123456789abcdef";
-    bad[3] = 0x80;
-    assert!(Nonce::new(bad).is_none());
-    let nonce = Nonce::from_entropy([0xFF; 16]);
-    assert!(nonce.get().iter().all(|b| (32..=126).contains(b)));
+fn a_nonce_holds_only_the_printable_ascii_range() {
+    let good = *b"0123456789abcdef";
+    assert!(Nonce::new(good).is_some());
+    for bad_byte in [0u8, 31, 127, 0x80, 0xFF] {
+        let mut bad = good;
+        bad[3] = bad_byte;
+        assert!(Nonce::new(bad).is_none(), "byte {bad_byte:#04x}");
+    }
+    let (first, last) = (Nonce::new([32; 16]), Nonce::new([126; 16]));
+    assert!(first.is_some() && last.is_some(), "both ends are in range");
+}
+
+#[test]
+fn a_drawn_nonce_skips_the_bytes_that_would_bias_it() {
+    // 190 is two turns of 95: bytes from 190 up are skipped, the rest map to
+    // `32 + b % 95`.
+    let blocks = [
+        [
+            0, 94, 95, 189, 190, 191, 255, 254, 100, 101, 102, 103, 104, 105, 106, 107,
+        ],
+        [
+            255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 1, 2, 3, 4,
+        ],
+    ];
+    let mut next = blocks.iter();
+    let nonce = Nonce::draw(|| next.next().copied().ok_or(())).unwrap();
+    assert_eq!(
+        nonce.get(),
+        [
+            32, 126, 32, 126, 37, 38, 39, 40, 41, 42, 43, 44, 33, 34, 35, 36
+        ]
+    );
+}
+
+#[test]
+fn a_draw_that_runs_out_of_entropy_fails_with_its_error() {
+    let mut blocks = 0;
+    let result = Nonce::draw(|| {
+        blocks += 1;
+        if blocks == 1 {
+            Ok([255; 16])
+        } else {
+            Err("dry")
+        }
+    });
+    assert_eq!(result, Err("dry"));
+}
+
+#[test]
+fn random_nonces_are_valid_and_differ() {
+    let nonce = Nonce::random().unwrap();
+    assert!(Nonce::new(nonce.get()).is_some());
     assert_ne!(
         Nonce::random().unwrap(),
         Nonce::random().unwrap(),

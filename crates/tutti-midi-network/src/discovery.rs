@@ -29,7 +29,7 @@ const LABEL_MAX: usize = 63;
 #[derive(Debug, thiserror::Error)]
 pub enum DiscoveryError {
     /// The mDNS daemon failed.
-    #[error("mDNS: {0}")]
+    #[error("the mDNS daemon failed")]
     Mdns(#[from] mdns_sd::Error),
     /// The mDNS hostname is not ASCII.
     #[error("the mDNS hostname must be ASCII")]
@@ -38,7 +38,7 @@ pub enum DiscoveryError {
     #[error("the TXT record has no {0} key")]
     MissingKey(&'static str),
     /// A TXT value is not UTF-8.
-    #[error("the TXT value of {key} is not UTF-8: {source}")]
+    #[error("the TXT value of {key} is not UTF-8")]
     Utf8 {
         /// The TXT key.
         key: &'static str,
@@ -47,11 +47,11 @@ pub enum DiscoveryError {
         source: std::str::Utf8Error,
     },
     /// The Endpoint Name in the TXT record is not a valid name.
-    #[error("the UMPEndpointName is invalid: {0}")]
-    EndpointName(NameError),
+    #[error("the UMPEndpointName is invalid")]
+    EndpointName(#[source] NameError),
     /// The Product Instance Id in the TXT record is not a valid Id.
-    #[error("the ProductInstanceId is invalid: {0}")]
-    InstanceId(NameError),
+    #[error("the ProductInstanceId is invalid")]
+    InstanceId(#[source] NameError),
     /// The service resolved with no address.
     #[error("the service has no address")]
     NoAddress,

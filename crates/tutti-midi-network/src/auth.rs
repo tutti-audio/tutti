@@ -6,7 +6,16 @@ use tutti_midi_device::{EntropyError, random_bytes};
 
 use crate::Username;
 
-/// The 16 ASCII bytes a Host issues to a Client that must authenticate.
+/// The first printable ASCII character, the space.
+const PRINTABLE_FIRST: u8 = 32;
+/// The printable ASCII characters, `32..=126`.
+const PRINTABLE_COUNT: u8 = 95;
+/// The random bytes below this map onto the printable characters evenly: twice
+/// [`PRINTABLE_COUNT`].
+const UNBIASED_BELOW: u8 = 2 * PRINTABLE_COUNT;
+
+/// The 16 bytes of printable ASCII (`32..=126`) a Host issues to a Client that
+/// must authenticate (M2-124 section 6.7).
 ///
 /// A Client hashes it with its secret, so a digest from an earlier session
 /// does not authenticate a new one.
@@ -14,17 +23,40 @@ use crate::Username;
 pub struct Nonce([u8; 16]);
 
 impl Nonce {
-    /// The nonce with these bytes, or `None` when one is not ASCII.
+    /// The nonce with these bytes, or `None` when one is outside `32..=126`.
+    ///
+    /// The wire reader uses this check too: the specification requires the
+    /// range of the sender (M2-124 section 6.7) and asks a receiver for no
+    /// leniency, so a peer's nonce outside it is a malformed command.
     #[must_use]
     pub fn new(bytes: [u8; 16]) -> Option<Self> {
-        bytes.is_ascii().then_some(Self(bytes))
+        bytes
+            .iter()
+            .all(|b| (PRINTABLE_FIRST..PRINTABLE_FIRST + PRINTABLE_COUNT).contains(b))
+            .then_some(Self(bytes))
     }
 
-    /// A nonce of printable ASCII (`32..=126`) from arbitrary bytes: each byte
-    /// picks a character.
-    #[must_use]
-    pub fn from_entropy(entropy: [u8; 16]) -> Self {
-        Self(entropy.map(|b| 32 + b % 95))
+    /// A nonce drawn from blocks of random bytes: each byte below 190 picks
+    /// the printable character `b % 95` above the space, and every other byte
+    /// is skipped, so the 95 characters are equally likely (190 is two whole
+    /// turns of 95; a modulo over all 256 values would favour the first 66).
+    /// More blocks are asked for until 16 characters are picked.
+    ///
+    /// # Errors
+    ///
+    /// The error of `next_block`, which ends the draw.
+    pub fn draw<E>(mut next_block: impl FnMut() -> Result<[u8; 16], E>) -> Result<Self, E> {
+        let mut nonce = [0u8; 16];
+        let mut filled = 0;
+        while filled < nonce.len() {
+            for byte in next_block()? {
+                if byte < UNBIASED_BELOW && filled < nonce.len() {
+                    nonce[filled] = PRINTABLE_FIRST + byte % PRINTABLE_COUNT;
+                    filled += 1;
+                }
+            }
+        }
+        Ok(Self(nonce))
     }
 
     /// A nonce from the operating system's random bytes.
@@ -33,7 +65,7 @@ impl Nonce {
     ///
     /// [`EntropyError`] when the operating system has no random bytes to give.
     pub fn random() -> Result<Self, EntropyError> {
-        random_bytes().map(Self::from_entropy)
+        Self::draw(random_bytes::<16>)
     }
 
     /// The 16 bytes.

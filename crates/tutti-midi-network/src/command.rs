@@ -4,7 +4,7 @@
 use tutti_midi_device::{EndpointName, NameError, ProductInstanceId};
 use tutti_ump::{Ump, split_stream};
 
-use crate::{Digest, Nonce, SequenceNumber, Text, TextError, Username};
+use crate::{BoundedText, ByeText, Digest, NakText, Nonce, SequenceNumber, TextError, Username};
 
 /// Command Codes (M2-124 Table 8).
 mod code {
@@ -311,7 +311,7 @@ pub struct Nak {
     /// The header of the command that is refused.
     pub refused: Header,
     /// Words for the user; may be empty.
-    pub text: Text,
+    pub text: NakText,
 }
 
 /// Why a Session ends (M2-124 Table 27).
@@ -408,7 +408,7 @@ pub struct Bye {
     /// Why.
     pub reason: ByeReason,
     /// Words for the user; may be empty.
-    pub text: Text,
+    pub text: ByeText,
 }
 
 impl Bye {
@@ -417,7 +417,7 @@ impl Bye {
     pub fn new(reason: ByeReason) -> Self {
         Self {
             reason,
-            text: Text::default(),
+            text: ByeText::default(),
         }
     }
 }
@@ -596,16 +596,16 @@ pub enum ParseError {
     #[error("a required text is empty")]
     EmptyText,
     /// A text is not UTF-8.
-    #[error("a text is not UTF-8: {0}")]
+    #[error("a text is not UTF-8")]
     Utf8(#[source] std::str::Utf8Error),
     /// The Endpoint Name is not a valid name.
-    #[error("the Endpoint Name is invalid: {0}")]
-    Name(NameError),
+    #[error("the Endpoint Name is invalid")]
+    Name(#[source] NameError),
     /// The Product Instance Id is not a valid Id.
-    #[error("the Product Instance Id is invalid: {0}")]
-    InstanceId(NameError),
+    #[error("the Product Instance Id is invalid")]
+    InstanceId(#[source] NameError),
     /// A text is empty or too long for its field, or holds a NUL.
-    #[error("a text is not valid for its field: {0}")]
+    #[error("a text is not valid for its field")]
     Text(#[source] TextError),
     /// The nonce is not ASCII.
     #[error("the nonce is not ASCII")]
@@ -676,9 +676,18 @@ fn read_identity(name: &[u8], id: &[u8]) -> Result<EndpointIdentity, ParseError>
     })
 }
 
-fn read_text(field: &[u8]) -> Result<Text, ParseError> {
-    let text = std::str::from_utf8(trimmed(field)).map_err(ParseError::Utf8)?;
-    Text::new(text).map_err(ParseError::Text)
+/// The advisory text of a Bye or a NAK. The text is for the user and changes
+/// nothing the session does, so a receiver keeps what it can read: a field that
+/// is not UTF-8 is cut at the last whole character before the bad byte, and an
+/// over-long one cannot occur (the field is the payload, which `MAX` covers).
+/// Constructors of the text types stay strict; only this wire reader is lenient.
+fn read_advisory_text<const MAX: usize>(field: &[u8]) -> BoundedText<0, MAX> {
+    let field = trimmed(field);
+    let valid = match std::str::from_utf8(field) {
+        Ok(text) => text,
+        Err(e) => std::str::from_utf8(&field[..e.valid_up_to()]).unwrap_or_default(),
+    };
+    BoundedText::new(valid).unwrap_or_default()
 }
 
 fn be16(bytes: &[u8]) -> u16 {
@@ -912,12 +921,12 @@ impl Command {
                     refused: Header::from_word(u32::from_be_bytes([
                         refused[0], refused[1], refused[2], refused[3],
                     ])),
-                    text: read_text(text)?,
+                    text: read_advisory_text(text),
                 }))
             }
             code::BYE => Ok(Self::Bye(Bye {
                 reason: ByeReason::from_code(header.data1()),
-                text: read_text(payload)?,
+                text: read_advisory_text(payload),
             })),
             code::BYE_REPLY => Ok(Self::ByeReply),
             code::UMP_DATA => {
