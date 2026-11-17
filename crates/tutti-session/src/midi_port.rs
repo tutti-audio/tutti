@@ -20,10 +20,9 @@
 use std::sync::{Arc, Mutex, PoisonError, Weak};
 
 use tutti_graph::{EventTapReader, Losses, NodeKey};
-use tutti_midi_device::{DeviceId, DeviceInfo, Learned, Match, Resolved, SavedDevice};
+use tutti_midi_device::{DeviceId, DeviceInfo, Learned, Match, Nak, Resolved, SavedDevice};
 use tutti_midi_hardware::{
-    CiPeerInfo, DeviceStream, MidiSession, PeerProfiles, ProfileError, ProfileSwitch, ReportAsk,
-    ReportError, ReportPeer,
+    Answer, CiPeerInfo, DeviceStream, MidiSession, ProfileSwitch, ReportAsk,
 };
 use tutti_midi_runtime::{
     DeviceEpochs, InputReaders, InputWriters, JrStream, MidiIngestControls, MidiInputPorts,
@@ -32,7 +31,9 @@ use tutti_rt::{Counter, Gauge};
 use tutti_types::{Resyncs, Seconds};
 use tutti_ump::StreamConfig;
 
+use crate::job::Ticket;
 use crate::midi::{LossReaders, LossWriters, UmpOut, loss_cells};
+use crate::midi_ci::{Pending, PortLink, ProfilePeer, ReportPeer, RequestReport, SwitchProfile};
 use crate::pool::{Declared, HandleError, Life, Load, LoadError, PoolEntry};
 use crate::{
     EventInPort, EventOutPort, MidiReport, Peer, PeerError, Presence, Resource, ResourceFact,
@@ -141,7 +142,7 @@ pub struct MidiInputInfo {
     stream: Option<DeviceStream>,
     learned: Learned,
     peers: Arc<[CiPeerInfo]>,
-    profiles: Arc<[PeerProfiles]>,
+    profiles: Arc<[ProfilePeer]>,
     report_peers: Arc<[ReportPeer]>,
 }
 
@@ -178,15 +179,16 @@ impl MidiInputInfo {
     }
 
     /// The Profiles of the peers that declared Profile Configuration, by Group
-    /// then MUID (M2-101 section 7). A [`ProfileSwitch`] is made from a listed
-    /// Profile of these.
+    /// then MUID (M2-101 section 7). A switch is a request of a listed Profile
+    /// of these ([`ProfilePeer::listed`]).
     #[must_use]
-    pub fn profiles(&self) -> &[PeerProfiles] {
+    pub fn profiles(&self) -> &[ProfilePeer] {
         &self.profiles
     }
 
     /// The peers that declared Process Inquiry and support MIDI Message Report
-    /// (M2-101 section 9): a [`ReportAsk`] is made from one.
+    /// (M2-101 section 9): a report is a request of one
+    /// ([`ReportPeer::request`]).
     #[must_use]
     pub fn report_peers(&self) -> &[ReportPeer] {
         &self.report_peers
@@ -245,7 +247,9 @@ struct Cell<I> {
 pub(crate) struct InputShared {
     id: ResourceId,
     cell: Mutex<Cell<MidiInputInfo>>,
-    requests: Mutex<Vec<InputRequest>>,
+    requests: Mutex<Inbox>,
+    /// What the handles its info lists make requests through.
+    link: PortLink,
     /// The cells a connection's device input writes: the latest correction the
     /// port's clock map made, its re-anchors and the events its inlet had no
     /// room for. Made once with the entry; a connection writes them and closes
@@ -256,13 +260,110 @@ pub(crate) struct InputShared {
     ingest: MidiIngestControls,
 }
 
-/// What a handle asked of the device, for the session to send at its next poll.
-enum InputRequest {
-    Profile(ProfileSwitch),
-    Report(ReportAsk),
+/// What a handle asked of the device, for the session to send at its next poll,
+/// with the ticket of the job that waits for the answer.
+pub(crate) enum InputRequest {
+    Profile(ProfileSwitch, Ticket<SwitchProfile>),
+    Report(ReportAsk, Ticket<RequestReport>),
+}
+
+impl InputRequest {
+    /// The request ends as `why`.
+    fn end(self, why: PeerError<Nak>) {
+        match self {
+            Self::Profile(_, ticket) => ticket.land(Err(why)),
+            Self::Report(_, ticket) => ticket.land(Err(why)),
+        }
+    }
+}
+
+/// Whether the session drains a port's requests.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum Gate {
+    /// The device is open: a request is queued for the next poll.
+    Open,
+    /// The device is away, or the session is gone: a request ends at once.
+    #[default]
+    Away,
+    /// The entry was released or swapped, for good.
+    Released,
+}
+
+/// The requests the handles queued for the session's next poll, with whether
+/// the session will drain them. The gate and the queue share one lock, so a
+/// request is either queued where it will be drained or ended at the call.
+#[derive(Default)]
+struct Inbox {
+    gate: Gate,
+    queue: Vec<InputRequest>,
 }
 
 impl InputShared {
+    /// Queues `request` with its `ticket` when the port can take it now and
+    /// `lists` says the peer and what is asked of it are still listed in the
+    /// port's info; otherwise ends the job at once: [`PeerError::Released`]
+    /// once the entry is released or swapped, [`PeerError::Disconnected`] while
+    /// the device is away or when `lists` is false, since the peer or the
+    /// Profile it lists has gone.
+    pub(crate) fn push<J, R>(
+        &self,
+        request: R,
+        ticket: Ticket<J>,
+        lists: impl FnOnce(&MidiInputInfo, &R) -> bool,
+        make: impl FnOnce(R, Ticket<J>) -> InputRequest,
+    ) where
+        J: crate::JobKind<Error = PeerError<Nak>>,
+    {
+        let mut inbox = self.requests.lock().unwrap_or_else(PoisonError::into_inner);
+        let refused = match inbox.gate {
+            Gate::Released => Some(PeerError::Released),
+            Gate::Away => Some(PeerError::Disconnected),
+            Gate::Open if !lists(&self.read(|cell| Arc::clone(&cell.info)), &request) => {
+                Some(PeerError::Disconnected)
+            }
+            Gate::Open => None,
+        };
+        match refused {
+            Some(error) => ticket.land(Err(error)),
+            None => inbox.queue.push(make(request, ticket)),
+        }
+    }
+
+    /// The session takes what the handles queued.
+    fn drain(&self) -> Vec<InputRequest> {
+        std::mem::take(
+            &mut self
+                .requests
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .queue,
+        )
+    }
+
+    /// The device is open: requests are taken again.
+    fn open(&self) {
+        let mut inbox = self.requests.lock().unwrap_or_else(PoisonError::into_inner);
+        if inbox.gate == Gate::Away {
+            inbox.gate = Gate::Open;
+        }
+    }
+
+    /// Ends what the handles queued as `why`, and refuses what they ask next:
+    /// as [`Gate::Released`] for good, or [`Gate::Away`] until the device is open
+    /// again.
+    fn shut(&self, gate: Gate, why: &PeerError<Nak>) {
+        let queued = {
+            let mut inbox = self.requests.lock().unwrap_or_else(PoisonError::into_inner);
+            if inbox.gate != Gate::Released {
+                inbox.gate = gate;
+            }
+            std::mem::take(&mut inbox.queue)
+        };
+        for request in queued {
+            request.end(why.clone());
+        }
+    }
+
     fn read<R>(&self, read: impl FnOnce(&Cell<MidiInputInfo>) -> R) -> R {
         read(&self.cell.lock().unwrap_or_else(PoisonError::into_inner))
     }
@@ -498,74 +599,6 @@ impl MidiInput {
                 self.shared.cells.inlet.refused() + self.shared.cells.ci_refused.get(),
             )
     }
-
-    /// Asks a peer to enable or disable a Profile it lists
-    /// ([`MidiInputInfo::profiles`]): the request goes out at the next update,
-    /// and its end is a [`MidiReport::CiProfiles`].
-    ///
-    /// # Errors
-    ///
-    /// [`PeerError::Released`] once the entry is released or swapped;
-    /// [`PeerError::Disconnected`] while the port is lost;
-    /// [`PeerError::Refused`] with [`ProfileError::NotOpen`] for a switch made
-    /// from another input, [`ProfileError::NoSuchPeer`] when the peer is gone
-    /// from the port's peers and [`ProfileError::NotListed`] when it no longer
-    /// lists the Profile there, as the port's info reads now. A peer that goes
-    /// between the call and the next update ends the request as a
-    /// [`ProfilesChange::NotQueued`](tutti_midi_hardware::ProfilesChange::NotQueued)
-    /// event.
-    pub fn set_profile(&self, switch: ProfileSwitch) -> Result<(), PeerError<ProfileError>> {
-        let info = self.sendable()?;
-        if switch.device() != &info.device.id {
-            return Err(PeerError::Refused(ProfileError::NotOpen));
-        }
-        switch.check(&info.profiles).map_err(PeerError::Refused)?;
-        self.enqueue(InputRequest::Profile(switch));
-        Ok(())
-    }
-
-    /// Asks a peer for a MIDI Message Report ([`MidiInputInfo::report_peers`]):
-    /// the request goes out at the next update, and its end is a
-    /// [`MidiReport::CiProcess`].
-    ///
-    /// # Errors
-    ///
-    /// As [`set_profile`](Self::set_profile), with [`PeerError::Refused`] of
-    /// [`ReportError::NotOpen`] for a request made from another input, and
-    /// [`ReportError::NoSuchPeer`] when the peer is gone or declared no Process
-    /// Inquiry with MIDI Message Report. A peer that goes between the call and
-    /// the next update ends the request as a
-    /// [`ProcessChange::NotQueued`](tutti_midi_hardware::ProcessChange::NotQueued)
-    /// event.
-    pub fn report(&self, ask: ReportAsk) -> Result<(), PeerError<ReportError>> {
-        let info = self.sendable()?;
-        if ask.device() != &info.device.id {
-            return Err(PeerError::Refused(ReportError::NotOpen));
-        }
-        ask.check(&info.report_peers).map_err(PeerError::Refused)?;
-        self.enqueue(InputRequest::Report(ask));
-        Ok(())
-    }
-
-    /// The info a request is checked against, when the port can take one.
-    fn sendable<E>(&self) -> Result<Arc<MidiInputInfo>, PeerError<E>> {
-        self.life.check()?;
-        let (info, presence) = self
-            .shared
-            .read(|cell| (Arc::clone(&cell.info), cell.presence));
-        if presence != Presence::Live {
-            return Err(PeerError::Disconnected);
-        }
-        Ok(info)
-    }
-
-    fn enqueue(&self, request: InputRequest) {
-        self.shared
-            .requests
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(request);
-    }
 }
 
 impl crate::peer::sealed::Sealed for MidiInput {}
@@ -699,6 +732,8 @@ struct InputPort {
     saved: DeviceInfo,
     /// The device the port holds open.
     open: Option<DeviceId>,
+    /// The requests sent to the device's peers that they have not answered.
+    pending: Pending,
 }
 
 /// One output port as the session keeps it.
@@ -779,18 +814,42 @@ fn set_presence<I>(
 }
 
 /// The snapshot of the open input `device`, as the OS layer reads it now.
-fn input_info(io: &MidiSession, device: &DeviceInfo) -> MidiInputInfo {
+fn input_info(io: &MidiSession, device: &DeviceInfo, link: &PortLink) -> MidiInputInfo {
     MidiInputInfo {
         device: device.clone(),
         stream: io.stream(&device.id),
         learned: io.learned(&device.id),
         peers: io.ci_peers(&device.id),
-        profiles: io.profiles(&device.id),
-        report_peers: io.report_peers(&device.id),
+        profiles: io
+            .profiles(&device.id)
+            .iter()
+            .map(|peer| ProfilePeer::new(link.clone(), peer.clone()))
+            .collect(),
+        report_peers: io
+            .report_peers(&device.id)
+            .iter()
+            .map(|peer| ReportPeer::new(link.clone(), peer.clone()))
+            .collect(),
+    }
+}
+
+impl Drop for InputPort {
+    /// The session ended: the requests its handles queued or waited on end, and
+    /// a handle that outlives it ends what it asks at the call.
+    fn drop(&mut self) {
+        self.end_requests(Gate::Away, &PeerError::Disconnected);
     }
 }
 
 impl InputPort {
+    /// Every request of the port, queued or sent, ends as `why`, and the port
+    /// takes none until its device is open again: for good with
+    /// [`Gate::Released`].
+    fn end_requests(&mut self, gate: Gate, why: &PeerError<Nak>) {
+        self.shared.shut(gate, why);
+        self.pending.end(why);
+    }
+
     /// Whether the entry that made this port still holds it.
     fn is_held(&self) -> bool {
         self.token.strong_count() > 0
@@ -803,7 +862,7 @@ impl InputPort {
         let Some(device) = io.devices().list().into_iter().find(|d| d.id == *id) else {
             return;
         };
-        let info = input_info(io, &device);
+        let info = input_info(io, &device, &self.shared.link);
         let mut cell = self
             .shared
             .cell
@@ -902,6 +961,7 @@ impl Ports {
                 port.inlet = Some(key);
                 port.epochs.arrive();
                 port.open = Some(info.id.clone());
+                port.shared.open();
                 Ok(())
             }
             tutti_midi_hardware::Connected::AlreadyOpen => {
@@ -928,6 +988,8 @@ impl Ports {
         }
         port.epochs.depart();
         port.controls.clear_mpe_profiles();
+        // The device's peers went with its connection.
+        port.end_requests(Gate::Away, &PeerError::Disconnected);
     }
 
     /// The step of the update's `Phase::Poll` for the ports: retires those whose
@@ -956,7 +1018,7 @@ impl Ports {
                 _ => {}
             }
         }
-        self.send_requests(io, out);
+        self.send_requests(io);
         edits |= self.step(io, graph, now, out);
         edits
     }
@@ -971,11 +1033,12 @@ impl Ports {
                 at += 1;
                 continue;
             }
+            self.inputs[at].end_requests(Gate::Released, &PeerError::Released);
             self.disconnect_input(at, io, graph);
             let port = self.inputs.remove(at);
             self.retiring.push(Retiring {
                 node: port.node,
-                epochs: port.epochs,
+                epochs: port.epochs.clone(),
             });
             edits.graph = true;
             edits.routes = true;
@@ -1077,7 +1140,7 @@ impl Ports {
             let shared = &self.inputs[at].shared;
             let presence = match result {
                 Ok(()) => {
-                    let info = input_info(io, arrived);
+                    let info = input_info(io, arrived, &shared.link);
                     shared
                         .cell
                         .lock()
@@ -1112,48 +1175,38 @@ impl Ports {
         edits
     }
 
-    /// Sends what the handles asked of the peers.
-    fn send_requests(&mut self, io: &mut MidiSession, out: &mut Vec<SessionEvent>) {
-        for port in &self.inputs {
-            let requests = std::mem::take(
-                &mut *port
-                    .shared
-                    .requests
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner),
-            );
-            for request in requests {
-                // The call checked the port's info; what went since is the
-                // request's end, as an event.
+    /// Sends what the handles asked of the peers: a request the device took
+    /// waits for its answer, and one it cannot take ends the job.
+    fn send_requests(&mut self, io: &mut MidiSession) {
+        for port in &mut self.inputs {
+            for request in port.shared.drain() {
                 match request {
-                    InputRequest::Profile(switch) => {
-                        let (device, peer) = (switch.device().clone(), switch.peer());
-                        if let Err(error) = io.set_profile(switch) {
-                            out.push(
-                                MidiReport::CiProfiles {
-                                    device,
-                                    peer,
-                                    change: tutti_midi_hardware::ProfilesChange::NotQueued(error),
-                                }
-                                .into(),
-                            );
-                        }
+                    InputRequest::Profile(switch, ticket) => {
+                        port.pending.switch(io, switch, ticket);
                     }
-                    InputRequest::Report(ask) => {
-                        let (device, peer) = (ask.device().clone(), ask.peer());
-                        if let Err(error) = io.report(ask) {
-                            out.push(
-                                MidiReport::CiProcess {
-                                    device,
-                                    peer,
-                                    change: tutti_midi_hardware::ProcessChange::NotQueued(error),
-                                }
-                                .into(),
-                            );
-                        }
-                    }
+                    InputRequest::Report(ask, ticket) => port.pending.report(io, ask, ticket),
                 }
             }
+        }
+    }
+
+    /// The open input port that holds `device`.
+    fn port_of(&mut self, device: &DeviceId) -> Option<&mut InputPort> {
+        self.inputs
+            .iter_mut()
+            .find(|port| port.open.as_ref() == Some(device))
+    }
+
+    /// Lands what a peer of `device` answered on the requests waiting for it.
+    fn answer(
+        &mut self,
+        io: &mut MidiSession,
+        device: &DeviceId,
+        peer: tutti_midi_hardware::PeerId,
+        answer: &Answer,
+    ) {
+        if let Some(port) = self.port_of(device) {
+            port.pending.answer(io, peer, answer);
         }
     }
 
@@ -1180,7 +1233,16 @@ impl Ports {
             let device = match &polled {
                 tutti_midi_hardware::Polled::Stream(device, _)
                 | tutti_midi_hardware::Polled::Ci(device, ..) => device.clone(),
+                tutti_midi_hardware::Polled::Answer(device, peer, answer) => {
+                    self.answer(io, device, *peer, answer);
+                    continue;
+                }
                 tutti_midi_hardware::Polled::Profile(device, peer, change) => {
+                    if matches!(change, tutti_midi_hardware::ProfilesChange::Dropped)
+                        && let Some(port) = self.port_of(device)
+                    {
+                        port.pending.lose_switches(*peer);
+                    }
                     if !profile_devices.contains(device) {
                         profile_devices.push(device.clone());
                     }
@@ -1195,6 +1257,11 @@ impl Ports {
                     device.clone()
                 }
                 tutti_midi_hardware::Polled::Process(device, peer, change) => {
+                    if matches!(change, tutti_midi_hardware::ProcessChange::Dropped)
+                        && let Some(port) = self.port_of(device)
+                    {
+                        port.pending.lose_reports(*peer);
+                    }
                     out.push(
                         MidiReport::CiProcess {
                             device: device.clone(),
@@ -1339,15 +1406,21 @@ impl crate::Midi<'_> {
         // The cells start closed: a connection reopens them.
         let (writers, cells) = InputWriters::new();
         drop(writers);
-        let shared = Arc::new(InputShared {
-            id,
-            cell: Mutex::new(Cell {
-                info: Arc::new(input_info(io, &info)),
-                presence: Presence::Lost(PortCause::Unplugged),
-            }),
-            requests: Mutex::new(Vec::new()),
-            cells,
-            ingest: controls.clone(),
+        let landed = self.jobs.queue();
+        let ingest = controls.clone();
+        let shared = Arc::new_cyclic(|weak| {
+            let link = PortLink::new(weak.clone(), landed);
+            InputShared {
+                id,
+                cell: Mutex::new(Cell {
+                    info: Arc::new(input_info(io, &info, &link)),
+                    presence: Presence::Lost(PortCause::Unplugged),
+                }),
+                requests: Mutex::new(Inbox::default()),
+                link,
+                cells,
+                ingest,
+            }
         });
         self.state.ports.inputs.push(InputPort {
             token: Arc::downgrade(&token),
@@ -1358,6 +1431,7 @@ impl crate::Midi<'_> {
             inlet: None,
             saved,
             open: None,
+            pending: Pending::default(),
         });
         let at = self.state.ports.inputs.len() - 1;
         if let Some(info) = found {
@@ -1370,7 +1444,7 @@ impl crate::Midi<'_> {
             }
             let io = self.io.as_deref().ok_or(MidiPortError::NoHardware)?;
             let mut cell = shared.cell.lock().unwrap_or_else(PoisonError::into_inner);
-            cell.info = Arc::new(input_info(io, &info));
+            cell.info = Arc::new(input_info(io, &info, &shared.link));
             cell.presence = Presence::Live;
         }
         self.compile_session_routes();
