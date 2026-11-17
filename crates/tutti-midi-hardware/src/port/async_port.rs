@@ -16,13 +16,17 @@
 //!
 //! [`HardwareMidiInputs`]: super::HardwareMidiInputs
 
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
 
+use tutti_graph::Losses;
 use tutti_midi_device::{ClockHeard, JrReceiver};
 use tutti_midi_runtime::{DeviceInput, InputId};
-use tutti_rt::{Overflow, PushError, RingReader, RingWriter, ring};
+use tutti_rt::{
+    Counter, CounterWriter, Overflow, PushError, RingReader, RingWriter, counter, ring,
+};
+use tutti_types::Resyncs;
 use tutti_ump::{Message, Ump, Utility};
 
 use crate::InputTiming;
@@ -47,13 +51,34 @@ impl SharedTiming {
     }
 }
 
-/// What a port counts of its device's JR Clock messages, shared with the
-/// port's entry: how many restarted the sender's clock, and how many were
-/// ignored as late.
-#[derive(Debug, Default)]
+/// What a port counts of its device's JR Clock messages: how many restarted
+/// the sender's clock, and how many were ignored as late. The driver's
+/// [`JrInput`] holds the writers; the port's entry holds the readers.
+#[derive(Debug)]
 struct JrCounts {
-    restarted: AtomicU64,
-    late: AtomicU64,
+    restarted: Counter<Resyncs>,
+    late: Counter<Losses>,
+}
+
+/// The writing ends of a port's [`JrCounts`].
+#[derive(Debug)]
+struct JrWriters {
+    restarted: CounterWriter<Resyncs>,
+    late: CounterWriter<Losses>,
+}
+
+impl JrCounts {
+    fn new() -> (Self, JrWriters) {
+        let (restarted_writer, restarted) = counter();
+        let (late_writer, late) = counter();
+        (
+            Self { restarted, late },
+            JrWriters {
+                restarted: restarted_writer,
+                late: late_writer,
+            },
+        )
+    }
 }
 
 /// What the handle holds of a device that sends JR Timestamps: the sender's
@@ -62,7 +87,7 @@ struct JrCounts {
 struct JrInput {
     following: InputTiming,
     clock: JrReceiver,
-    counts: Arc<JrCounts>,
+    counts: JrWriters,
     /// The time the last event was placed at: events are rendered in the order
     /// they arrive (M2-104 §7.2.2.2), so none is placed before it, whichever
     /// timing times them.
@@ -70,7 +95,7 @@ struct JrInput {
 }
 
 impl JrInput {
-    fn new(counts: Arc<JrCounts>) -> Self {
+    fn new(counts: JrWriters) -> Self {
         Self {
             following: InputTiming::Arrival,
             clock: JrReceiver::new(),
@@ -98,10 +123,10 @@ impl JrInput {
         match utility {
             Utility::JrClock(ticks) => match self.clock.clock(ticks, arrival) {
                 ClockHeard::Restarted => {
-                    self.counts.restarted.fetch_add(1, Ordering::Relaxed);
+                    self.counts.restarted.add(Resyncs::new(1));
                 }
                 ClockHeard::Late => {
-                    self.counts.late.fetch_add(1, Ordering::Relaxed);
+                    self.counts.late.add(Losses::late(1));
                 }
                 _ => {}
             },
@@ -195,7 +220,7 @@ impl InputProducerHandle {
     /// port's stream ring, which the control side reads
     /// (`HardwareMidiInputs::drain_stream`),
     /// and one the ring has no room for is counted
-    /// ([`PortInfo::stream_lost`](super::PortInfo::stream_lost)) and is
+    /// ([`PortInfo::losses`](super::PortInfo::losses)) and is
     /// `Diverted` all the same: it was not lost from the inlet.
     ///
     /// A **SysEx7 packet** (type `0x3`) is music's too, and goes to the graph
@@ -315,7 +340,7 @@ pub(crate) struct HardwareMidiInput {
     stream: Mutex<RingReader<Ump>>,
     hear_sysex: Arc<AtomicBool>,
     timing: Arc<SharedTiming>,
-    jr_counts: Arc<JrCounts>,
+    jr_counts: JrCounts,
 }
 
 impl HardwareMidiInput {
@@ -324,7 +349,7 @@ impl HardwareMidiInput {
         let active = Arc::new(AtomicBool::new(true));
         let hear_sysex = Arc::new(AtomicBool::new(false));
         let timing = Arc::new(SharedTiming::new());
-        let jr_counts = Arc::new(JrCounts::default());
+        let (jr_counts, jr_writers) = JrCounts::new();
         let (stream_in, stream_out) = ring(STREAM_CAPACITY, Overflow::DropNewest);
         (
             Self {
@@ -333,7 +358,7 @@ impl HardwareMidiInput {
                 stream: Mutex::new(stream_out),
                 hear_sysex: Arc::clone(&hear_sysex),
                 timing: Arc::clone(&timing),
-                jr_counts: Arc::clone(&jr_counts),
+                jr_counts,
             },
             InputProducerHandle {
                 input,
@@ -341,7 +366,7 @@ impl HardwareMidiInput {
                 stream: stream_in,
                 hear_sysex,
                 timing,
-                jr: JrInput::new(jr_counts),
+                jr: JrInput::new(jr_writers),
             },
         )
     }
@@ -360,13 +385,14 @@ impl HardwareMidiInput {
     }
 
     /// How many JR Clock messages restarted the sender's clock.
-    pub(crate) fn jr_restarted(&self) -> u64 {
-        self.jr_counts.restarted.load(Ordering::Relaxed)
+    pub(crate) fn jr_restarted(&self) -> Resyncs {
+        self.jr_counts.restarted.get()
     }
 
-    /// How many JR Clock messages were ignored as late.
-    pub(crate) fn jr_late(&self) -> u64 {
-        self.jr_counts.late.load(Ordering::Relaxed)
+    /// The port's losses: the Stream messages the ring had no room for, and
+    /// the JR Clock messages ignored as late.
+    pub(crate) fn losses(&self) -> Losses {
+        Losses::lost(self.stream_lost()) + self.jr_counts.late.get()
     }
 
     /// Where the port's event times come from from now on.

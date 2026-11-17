@@ -136,8 +136,8 @@ pub use tutti_session::Error;
 // The graph's vocabulary a session hands out.
 pub use tutti_graph::{
     DECLICK, EventCapacity, EventInletNode, EventInletWriter, EventTapId, EventTapReader, FadeLaw,
-    InletNode, InletRing, InletTotals, Level, Losses, MeterReader, NodeMode, Stamp, TapAlign,
-    TapEvent, TapId, TapReader, TapWriter,
+    InletNode, InletRing, Level, Losses, MeterReader, NodeMode, Stamp, TapAlign, TapEvent, TapId,
+    TapReader, TapWriter,
 };
 pub use tutti_metering::{LoadMeter, LoadReading};
 pub use tutti_rt::PushError;
@@ -278,7 +278,7 @@ pub mod types {
     pub use tutti_curve::{Curvature, CurvatureError, Exponent, ExponentError, Law, Piece};
     pub use tutti_rt::{
         Count, Counter, CounterWriter, Drained, Gauge, GaugeWriter, LevelSpan, Panicked, PosFrame,
-        Reading, Reclaim, Words,
+        Reading, Reclaim, Tally, TallyWriter, Words,
     };
     pub use tutti_types::{
         Adsr, AmbisonicFormat, AmbisonicNormalization, AmbisonicOrder, AmbisonicOrderOutOfRange,
@@ -610,6 +610,7 @@ pub mod midi {
         ProfileId, ProfileState, ProfileTable, ReportRequest, ReportScope, Request, RequestError,
         SpecificData, StandardProfile, SystemMessages, WinMmDevice,
     };
+    pub use tutti_midi_device::{NotSetProfileOn, ProfileOnRequest};
     pub use tutti_midi_file::Error as FileError;
     pub use tutti_midi_file::{
         ClipFileError, ConfigError as FileConfigError, Refusal, SmfParseError, ToClipError,

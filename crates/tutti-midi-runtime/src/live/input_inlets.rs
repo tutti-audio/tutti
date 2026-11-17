@@ -32,7 +32,7 @@
 //! map made (signed, positive when a reading came late), a counter of its
 //! re-anchors, a [`Resyncs`] each, a counter of the pushes its ring had no room
 //! for, and the totals of what its inlet evicted, refused and emitted late
-//! ([`InletTotals`]). The MIDI-CI refusals of the device's output are the
+//! ([`Tally`]). The MIDI-CI refusals of the device's output are the
 //! stream's own cell, the other half of [`InputWriters`].
 //!
 //! The readers ([`InputReaders`]) are made once, by [`InputWriters::new`], and
@@ -54,11 +54,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use tutti_graph::{
-    EventCapacity, EventInletNode, EventInletWriter, InletCounts, InletTotals, Stamp,
-};
+use tutti_graph::{EventCapacity, EventInletNode, EventInletWriter, InletCounts, Losses, Stamp};
 use tutti_rt::{
-    ArcLend, Counter, CounterWriter, Gauge, GaugeWriter, PushError, Reader, counter, gauge,
+    ArcLend, Counter, CounterWriter, Gauge, GaugeWriter, PushError, Reader, Tally, counter, gauge,
+    tally,
 };
 use tutti_types::{Moment, Resyncs, Seconds};
 use tutti_ump::Ump;
@@ -190,7 +189,7 @@ fn nanos(d: Duration) -> u64 {
 #[must_use = "the writers are how an input reports its timing and its losses"]
 pub struct InputWriters {
     device: DeviceWriters,
-    ci_refused: CounterWriter<u64>,
+    ci_refused: CounterWriter<Losses>,
 }
 
 /// The cells a [`DeviceInput`] writes: the latest correction its clock map made,
@@ -202,8 +201,8 @@ pub struct InputWriters {
 pub struct DeviceWriters {
     timing: GaugeWriter<Seconds>,
     resyncs: CounterWriter<Resyncs>,
-    lost: CounterWriter<u64>,
-    inlet: InletTotals,
+    lost: CounterWriter<Losses>,
+    inlet: Tally<Losses>,
 }
 
 /// The reading ends of an input's cells ([`InputWriters`]): made once with the
@@ -215,12 +214,12 @@ pub struct InputReaders {
     /// The clock map's re-anchors.
     pub resyncs: Counter<Resyncs>,
     /// The events the inlet had no room for.
-    pub lost: Counter<u64>,
+    pub lost: Counter<Losses>,
     /// The events the inlets dropped from their waiting lists for room, and
     /// those their ports refused: totals the successive inlets share.
-    pub inlet: InletTotals,
+    pub inlet: Tally<Losses>,
     /// The MIDI-CI messages the device's output refused.
-    pub ci_refused: Counter<u64>,
+    pub ci_refused: Counter<Losses>,
 }
 
 impl InputWriters {
@@ -231,7 +230,7 @@ impl InputWriters {
         let (resyncs, resyncs_reader) = counter();
         let (lost, lost_reader) = counter();
         let (ci_refused, ci_refused_reader) = counter();
-        let inlet = InletTotals::new();
+        let inlet = tally();
         (
             Self {
                 device: DeviceWriters {
@@ -271,7 +270,7 @@ impl InputWriters {
 
     /// The device's writers, and the writer of the MIDI-CI refusals: the
     /// conversation is the device stream's, not the inlet's.
-    pub fn split(self) -> (DeviceWriters, CounterWriter<u64>) {
+    pub fn split(self) -> (DeviceWriters, CounterWriter<Losses>) {
         (self.device, self.ci_refused)
     }
 }
@@ -302,7 +301,7 @@ pub struct DeviceInput {
     /// The map's re-anchors.
     resyncs: CounterWriter<Resyncs>,
     /// The pushes the ring refused.
-    lost: CounterWriter<u64>,
+    lost: CounterWriter<Losses>,
 }
 
 impl std::fmt::Debug for DeviceInput {
@@ -349,7 +348,7 @@ impl DeviceInput {
             None => self.writer.push(Stamp::NextBlock, ump),
         };
         if sent == Err(PushError::Full) {
-            self.lost.add(1);
+            self.lost.add(Losses::lost(1));
         }
         sent
     }

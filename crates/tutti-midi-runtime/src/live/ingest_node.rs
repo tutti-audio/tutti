@@ -270,9 +270,9 @@ pub struct MidiIngestNode {
     profiles_generation: u64,
     /// Translated events a block had no room for in `out`
     /// ([`MidiIngestControls::losses`]).
-    dropped: CounterWriter<u64>,
+    dropped: CounterWriter<Losses>,
     /// The reading end of `dropped`, given to the controls.
-    dropped_reader: Counter<u64>,
+    dropped_reader: Counter<Losses>,
     /// The events a block translates and each port holds, from the block the
     /// node was prepared for.
     capacity: usize,
@@ -506,7 +506,7 @@ pub struct MidiIngestControls {
     /// What the node reads; the controls publish to it and read it back with
     /// `ArcLend::current`.
     request: Arc<ArcLend<Requests>>,
-    dropped: Counter<u64>,
+    dropped: Counter<Losses>,
 }
 
 impl MidiIngestControls {
@@ -567,7 +567,7 @@ impl MidiIngestControls {
     /// hold is counted at the inlet, not here
     /// ([`InputInlets`](crate::InputInlets)).
     pub fn losses(&self) -> Losses {
-        Losses::refused(self.dropped.get())
+        self.dropped.get()
     }
 }
 
@@ -698,7 +698,7 @@ impl Node for MidiIngestNode {
             .map(|_| device.epoch);
         let Staging { kept, dropped, .. } = staging;
         if dropped > 0 {
-            self.dropped.add(dropped);
+            self.dropped.add(Losses::refused(dropped));
             // The executor's too, so an export watching its count sees it.
             io.count_lost(dropped);
         }

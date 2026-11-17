@@ -75,7 +75,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use tutti_graph::Offset;
+use tutti_graph::{Losses, Offset};
 use tutti_midi_device::ResourceStore;
 use tutti_midi_device::{
     Action, Capabilities, Connection, Ending, Endpoint, EntropyError, IdentityInquiry,
@@ -432,7 +432,7 @@ impl Negotiation {
         os: UmpCapability,
         out: Option<OpenOutput>,
         timing: InputTiming,
-        ci_refused: CounterWriter<u64>,
+        ci_refused: CounterWriter<Losses>,
     ) -> Self {
         let asks = os.is_ump_endpoint() && out.is_some();
         let inquire = if !os.is_ump_endpoint() && out.is_some() {
