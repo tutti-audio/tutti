@@ -25,9 +25,8 @@
 0 1 crates/tutti-plugin-host/src/transport_source.rs
 3 1 crates/tutti-plugin-ipc-ffi/src/exit.rs
 1 0 crates/tutti-plugin-ipc-ffi/src/os.rs
-1 1 crates/tutti-plugin-ipc/src/client/audio/mod.rs
-11 14 crates/tutti-plugin-ipc/src/ipc/tests.rs
-0 2 crates/tutti-plugin-ipc/src/process_guard.rs
+10 12 crates/tutti-plugin-ipc/src/ipc/tests.rs
+0 1 crates/tutti-plugin-ipc/src/process_guard.rs
 1 4 crates/tutti-plugin-ipc/src/subprocess/launch.rs
 0 1 crates/tutti-plugin-ipc/src/transport/control.rs
 0 5 crates/tutti-plugin-server/src/session.rs
