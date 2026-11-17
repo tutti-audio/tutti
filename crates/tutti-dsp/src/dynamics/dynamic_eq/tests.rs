@@ -313,6 +313,22 @@ fn the_gain_is_linked_from_the_loudest_key_channel() {
     }
 }
 
+/// A finite threshold past what `f32` holds doubled is held, so an upward band at ratio 1
+/// lifts nothing rather than reading an overflowed curve as its full range.
+#[test]
+fn an_upward_band_at_ratio_one_and_a_huge_threshold_lifts_nothing() {
+    let c = DynamicEqControls {
+        threshold: Db(3.0e38),
+        ratio: CompressionRatio(1.0),
+        ..controls(-20.0, 6.0, 4.0, 12.0, 2.0)
+    };
+    let x = sine(1000.0, 0.5, 4096);
+    let mut b = bank(DynamicMode::Upward, 1, &c);
+    let y = run(&mut b, &[&x], &[&x], 333).remove(0);
+    assert_eq!(b.gain(), Db(0.0));
+    assert_eq!(y, x);
+}
+
 /// Controls that are not finite, or below their floors, are the default's or the floor and
 /// leave the output finite; a non-finite key leaves it finite and the band recovers.
 #[test]

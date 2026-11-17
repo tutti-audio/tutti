@@ -104,9 +104,8 @@ impl Design {
     fn of(c: &GateControls, rate: SampleRate) -> Self {
         let d = GateControls::DEFAULT;
         let threshold = Db(finite_or(c.threshold.get(), d.threshold.get()));
-        // A NaN time reads as 0 (`max` ignores it), instant; an infinite one holds the
-        // follower (a coefficient of 0, as `Seconds::one_pole_coeff` says) or, for a
-        // hold, saturates to the longest count.
+        // A NaN hold reads as 0 (`max` ignores it); an infinite one saturates to the
+        // longest count. `Ballistics::of` floors the attack and release.
         let hold = Seconds(c.hold.get().max(0.0));
         let ballistics = Ballistics::of(c.attack, c.release, rate);
         Self {

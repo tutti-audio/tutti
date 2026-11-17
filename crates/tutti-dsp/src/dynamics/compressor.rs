@@ -95,8 +95,9 @@ struct CompressorMember {
 }
 
 impl CompressorMember {
-    /// The member for `c` at `rate`: a non-finite control is the default's, a knee and
-    /// the times are floored at 0 and a ratio at 1.
+    /// The member for `c` at `rate`: a non-finite control is the default's, a knee is
+    /// floored at 0 and a ratio at 1; the times pass through to [`Ballistics::of`], which
+    /// floors them at 0.
     fn designed(c: &CompressorControls, rate: SampleRate) -> Self {
         let d = CompressorControls::DEFAULT;
         Self {
@@ -241,7 +242,7 @@ impl CompressorBank {
 
     /// Aims at `controls`: the detector's figures land whole (the follower smooths them) and
     /// the makeup glides over [`GAIN_GLIDE`]. A non-finite control is the default's, a knee
-    /// and the times are floored at 0 and a ratio at 1. The key filter, if any, glides to the
+    /// and the times at 0 (through `Ballistics::of`) and a ratio at 1. The key filter, if any, glides to the
     /// cutoff and Q over one grid period ([`COEFF_INTERVAL`](crate::COEFF_INTERVAL)). No
     /// allocation.
     pub fn aim(&mut self, controls: &CompressorControls) {

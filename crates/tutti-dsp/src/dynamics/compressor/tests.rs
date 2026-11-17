@@ -221,7 +221,8 @@ fn the_curve_has_its_three_regions() {
 }
 
 /// The member holds the controls made runnable: a knee under 0 reads as 0, a ratio under
-/// 1 as 1, a time under 0 as 0, and a control that is not finite as the default's.
+/// 1 as 1 and a control that is not finite as the default's, and its detector runs a time
+/// under 0 as 0.
 #[test]
 fn the_member_floors_what_cannot_be_run() {
     let base = controls(-18.0, 6.0, 4.0, 0.003, 0.08, 3.0);
