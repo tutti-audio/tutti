@@ -10,7 +10,7 @@ use crate::protocol::{
 use dpi::Size;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tutti_plugin_types::{
     BridgeResult, Delivered, EditorError, PluginError, PluginFailure, Request, StateError,
@@ -20,6 +20,7 @@ use tutti_plugin_types::{
     Edit, EditDrain, EditSink, MainThreadMarker, MainWorkHandle, ParamEdit, edits,
 };
 use tutti_plugin_types::{Editor, EditorWindow, Load, Origin, PluginFormat, Timeouts};
+use tutti_rt::LockExt;
 use tutti_types::SampleRate;
 
 /// Gives the audio instance the editor instance's state when the user changed
@@ -673,7 +674,7 @@ impl PluginBridge {
             // is still attached.
             self.pull_editor_state(main, gui.as_mut());
             gui.close_editor(main);
-            *self.baseline.lock().unwrap_or_else(PoisonError::into_inner) = None;
+            *self.baseline.lock_recover() = None;
             true
         } else {
             false
@@ -761,12 +762,12 @@ impl PluginBridge {
     /// audio instance. Read back rather than taken from the sync's bytes,
     /// because a plugin may normalise a state it is given.
     fn take_baseline(&self, main: MainThreadMarker, gui: &mut dyn Editor) {
-        *self.baseline.lock().unwrap_or_else(PoisonError::into_inner) = gui.save_state(main).ok();
+        *self.baseline.lock_recover() = gui.save_state(main).ok();
     }
 
     /// [`pull_editor_state`] against this bridge's audio instance.
     fn pull_editor_state(&self, main: MainThreadMarker, gui: &mut dyn Editor) {
-        let mut baseline = self.baseline.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut baseline = self.baseline.lock_recover();
         let pulled = pull_editor_state(main, gui, &mut baseline, |state| {
             self.audio
                 .load_state(state, tutti_plugin_types::StateUse::Project)

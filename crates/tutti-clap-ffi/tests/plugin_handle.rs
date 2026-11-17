@@ -13,6 +13,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use tutti_fixtures::main_thread;
+use tutti_rt::LockExt;
 
 use clap_sys::events::{
     CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_PARAM_VALUE, clap_event_header, clap_event_param_value,
@@ -40,7 +41,7 @@ fn probe_path() -> &'static str {
 static PLUGIN_LOCK: Mutex<()> = Mutex::new(());
 
 fn lock() -> MutexGuard<'static, ()> {
-    PLUGIN_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    PLUGIN_LOCK.lock_recover()
 }
 
 /// `RenderMode::TagOnly`: every output sample is a nonzero per-slot tag.

@@ -2,8 +2,9 @@
 //! the waiting left to the platform.
 
 use std::fmt::Display;
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
+use tutti_rt::LockExt;
 
 use super::schedule::{Next, Outbox};
 use tutti_graph::Losses;
@@ -34,7 +35,7 @@ impl<T> Mailbox<T> {
 
     /// The outbox, locked. The lock is the sender's too, held for one step.
     pub(in crate::backend) fn state(&self) -> MutexGuard<'_, Outbox<T>> {
-        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+        self.state.lock_recover()
     }
 
     /// What the sender could not send: refused sends are lost, and what was

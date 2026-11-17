@@ -4,7 +4,8 @@
 use std::ffi::c_void;
 use std::mem::ManuallyDrop;
 use std::path::Path;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
+use tutti_rt::LockExt;
 
 use libloading::Library;
 use vst3::Steinberg::{
@@ -129,7 +130,7 @@ unsafe impl Sync for Module {}
 static MODULE_LOCK: Mutex<()> = Mutex::new(());
 
 fn lock_modules() -> std::sync::MutexGuard<'static, ()> {
-    MODULE_LOCK.lock().unwrap_or_else(PoisonError::into_inner)
+    MODULE_LOCK.lock_recover()
 }
 
 impl Drop for Module {

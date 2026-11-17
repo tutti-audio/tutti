@@ -14,10 +14,15 @@ use crate::mode::{MixState, NodeMode};
 /// input path alone) or call it and blend its output with the aligned input.
 /// Returns whether a crossfade running at the unit ended this block.
 #[inline(never)]
-pub(super) fn moded_node_op<A: AudioSlots, F: SlotFlags + ?Sized, E: EventSlots + ?Sized>(
-    u: &mut Unit,
+pub(super) fn moded_node_op<
+    F: Float,
+    A: AudioSlots<F>,
+    Fl: SlotFlags + ?Sized,
+    E: EventSlots + ?Sized,
+>(
+    u: &mut Unit<F>,
     head: &Head<'_, '_>,
-    st: &mut OpState<'_, A, F, E>,
+    st: &mut OpState<'_, A, Fl, E>,
 ) -> bool {
     let (rec, plan, frames) = (head.rec, head.plan, head.frames);
     let [ain, aout, ein, eout] = rec.ports(&plan.nodes.slots);
@@ -109,10 +114,10 @@ pub(super) fn moded_node_op<A: AudioSlots, F: SlotFlags + ?Sized, E: EventSlots 
 /// A parked node: not processed, only polled for its handoffs. Its audio outputs are the aligned input (the
 /// bypass line, or the input itself when the node has no latency), its event
 /// outputs only what its held keys still owe, its events discarded.
-fn park<A: AudioSlots, F: SlotFlags + ?Sized, E: EventSlots + ?Sized>(
-    u: &mut Unit,
+fn park<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized, E: EventSlots + ?Sized>(
+    u: &mut Unit<F>,
     head: &Head<'_, '_>,
-    st: &mut OpState<'_, A, F, E>,
+    st: &mut OpState<'_, A, Fl, E>,
     [ain, aout, ein, eout]: [&[u32]; 4],
 ) {
     let rec = head.rec;
@@ -170,10 +175,10 @@ fn park<A: AudioSlots, F: SlotFlags + ?Sized, E: EventSlots + ?Sized>(
 }
 
 /// A parked node's outputs by index: output `c` is input `c`.
-fn park_by_index<A: AudioSlots, F: SlotFlags + ?Sized, E: EventSlots + ?Sized>(
-    u: &mut Unit,
+fn park_by_index<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized, E: EventSlots + ?Sized>(
+    u: &mut Unit<F>,
     head: &Head<'_, '_>,
-    st: &mut OpState<'_, A, F, E>,
+    st: &mut OpState<'_, A, Fl, E>,
     ain: &[u32],
     aout: &[u32],
 ) {
@@ -181,7 +186,7 @@ fn park_by_index<A: AudioSlots, F: SlotFlags + ?Sized, E: EventSlots + ?Sized>(
     let main = u.mode.inputs();
     for (c, &s) in aout.iter().enumerate() {
         if c >= main {
-            st.arena.slot_mut(s, frames).fill(0.0);
+            st.arena.slot_mut(s, frames).fill(F::ZERO);
             st.flags.set(s, SILENT | CONSTANT);
             continue;
         }
@@ -210,10 +215,10 @@ fn park_by_index<A: AudioSlots, F: SlotFlags + ?Sized, E: EventSlots + ?Sized>(
 /// A parked node's outputs as the fold of its main buses: every input through
 /// its ring into the scratch first (an output may share an input's slot), then
 /// each output channel folded from the scratch.
-fn park_folded<A: AudioSlots, F: SlotFlags + ?Sized, E: EventSlots + ?Sized>(
-    u: &mut Unit,
+fn park_folded<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized, E: EventSlots + ?Sized>(
+    u: &mut Unit<F>,
     head: &Head<'_, '_>,
-    st: &mut OpState<'_, A, F, E>,
+    st: &mut OpState<'_, A, Fl, E>,
     ain: &[u32],
     aout: &[u32],
 ) {
@@ -230,7 +235,7 @@ fn park_folded<A: AudioSlots, F: SlotFlags + ?Sized, E: EventSlots + ?Sized>(
     let outputs = u.mode.outputs();
     for (c, &s) in aout.iter().enumerate() {
         if c >= outputs {
-            st.arena.slot_mut(s, frames).fill(0.0);
+            st.arena.slot_mut(s, frames).fill(F::ZERO);
             st.flags.set(s, SILENT | CONSTANT);
             continue;
         }

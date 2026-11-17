@@ -124,7 +124,7 @@ pub(super) fn decay_ring(radius: f64, multiplicity: u32, floor: Db, rate: Sample
 /// `(|b0| + |b1| + |b2|)` times the l1 bound of the all-pole part, which is
 /// `min((1 - r)^-2, K / (1 - r))` for `r` its slowest pole and `K = 2r / |p1 - p2|`
 /// (the all-pole response is at most `min(n + 1, K) r^n`).
-pub(super) fn section_l1(c: &Biquad) -> f64 {
+pub(crate) fn section_l1(c: &Biquad) -> f64 {
     let [p, q] = c.poles();
     let r = p.norm().max(q.norm());
     if r.is_nan() || r >= 1.0 {

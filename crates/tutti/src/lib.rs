@@ -177,9 +177,10 @@ pub use tutti_plugin_types::{ParamId, PluginFailure, PresetError, PresetId};
 pub use tutti_session::Params as PluginParams;
 #[cfg(all(feature = "session", feature = "plugin"))]
 pub use tutti_session::{
-    AddPluginError, Diagnostics, Opened, Plugin, PluginBuses, PluginChange, PluginDeclaration,
-    PluginEvent, PluginHealth, PluginInfo, PluginNode, PluginParamError, PooledPlugin, PortCounts,
-    PresetEntry, PresetKind, Presets, RestoreState, SaveState, TypedParam,
+    AddPluginError, Diagnostics, ListedPreset, LoadPreset, Opened, Plugin, PluginBuses,
+    PluginChange, PluginDeclaration, PluginEvent, PluginHealth, PluginInfo, PluginNode,
+    PluginParamError, PluginPresets, PooledPlugin, PortCounts, PresetJobError, PresetJobFailed,
+    RestoreState, SaveState, TypedParam,
 };
 #[cfg(feature = "session")]
 pub use tutti_session::{
@@ -238,9 +239,10 @@ pub mod nodes {
     };
     pub use tutti_nodes::{
         BAND_PARAMS, BitCrusherConfig, BitCrusherControls, BitCrusherNode, BrickwallLimiterNode,
-        BusStripNode, ChannelTimes, ChannelTimesError, ClickSettings, ClickState,
+        BusStripNode, ButterworthOrder, ChannelTimes, ChannelTimesError, ClickSettings, ClickState,
         CompressorControls, CompressorNode, ConvolverError, ConvolverNode, CrossoverControls,
-        CrossoverError, CrossoverNode, DcBlockerConfig, DcBlockerControls, DcBlockerNode,
+        CrossoverError, CrossoverNode, CutAlignment, CutFilterConfig, CutFilterControls,
+        CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerControls, DcBlockerNode,
         DelayControls, DelayLayout, DelayNode, DistortionNode, EnvelopeFollowerNode, EqBandNode,
         FdnControls, FdnLayout, FdnNode, FreeverbControls, FreeverbNode, GateControls, GateNode,
         HrtfBinauralNode, InterpolationMode, IrLayout, KeyFilter, KeySource, LadderControls,
@@ -254,13 +256,13 @@ pub mod nodes {
     };
     pub use tutti_nodes::{
         BitCrusherKernel, BrickwallKernel, CompressorKernel, Control, ControlLanes, ControlRead,
-        ControlSet, ControlValid, CrossoverKernel, DcBlockerKernel, DelayKernel, DistortionKernel,
-        FdnKernel, Feed, FreeverbKernel, GateKernel, Kernel, KernelNode, LadderKernel,
-        LimiterKernel, ModDelayKernel, PhaserKernel, ReconcileError, SvfKernel,
+        ControlSet, ControlValid, CrossoverKernel, CutFilterKernel, DcBlockerKernel, DelayKernel,
+        DistortionKernel, FdnKernel, Feed, FreeverbKernel, GateKernel, Kernel, KernelNode,
+        LadderKernel, LimiterKernel, ModDelayKernel, PhaserKernel, ReconcileError, SvfKernel,
     };
     pub use tutti_nodes::{
-        BitCrusherSet, BrickwallSet, CompressorSet, CrossoverSet, DcBlockerSet, DelaySet,
-        DistortionSet, FdnSet, FreeverbSet, GateSet, HasControl, LadderSet, LimiterSet,
+        BitCrusherSet, BrickwallSet, CompressorSet, CrossoverSet, CutFilterSet, DcBlockerSet,
+        DelaySet, DistortionSet, FdnSet, FreeverbSet, GateSet, HasControl, LadderSet, LimiterSet,
         ModDelaySet, PhaserSet, SvfSet,
     };
 }
@@ -550,8 +552,8 @@ pub mod soundfont {
 pub mod plugin {
     pub use tutti_plugin::catalog::{BindError, BlacklistView, Loadable, PersistError, Resolved};
     pub use tutti_plugin::{
-        AutomationMode, BridgeConfig, FeatureReport, Features, MainThreadMarker, MainWork,
-        MainWorkHandle, PluginRenderFault, Preset, PresetSupport,
+        AutomationMode, BridgeConfig, MainThreadMarker, MainWork, MainWorkHandle,
+        PluginRenderFault, Preset,
     };
     pub use tutti_plugin_db::ScanBusy;
     pub use tutti_plugin_db::{
@@ -561,7 +563,9 @@ pub mod plugin {
     pub use tutti_plugin_host::RebindError;
     pub use tutti_plugin_ipc::RandomSourceError;
     pub use tutti_plugin_ipc::{SlabAccessError, SlabLayoutError};
+    pub use tutti_plugin_types::PresetSupport;
     pub use tutti_plugin_types::bundle::ModuleKind;
+    pub use tutti_plugin_types::features::{FeatureReport, Features};
     pub use tutti_plugin_types::{
         AuComponentType, AutomationModeError, Axis, BlockCounts, BridgeError, BridgeResult,
         ClapFeature, ContentScale, ControlRole, EditorPresence, EmptyVersionText, Helper,

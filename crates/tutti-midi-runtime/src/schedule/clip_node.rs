@@ -59,7 +59,8 @@
 use std::collections::{BTreeMap, HashMap};
 use std::num::NonZeroU32;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
+use tutti_rt::LockExt;
 
 use tutti_graph::{
     Cx, EventDensity, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io,
@@ -422,11 +423,7 @@ impl MidiClipControls {
     /// note-on) change nothing: no note is cut.
     pub fn set(&self, events: impl IntoIterator<Item = TimedMidiEvent>) {
         let events = sorted(translated(events));
-        let _serial = self
-            .shared
-            .publish
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let _serial = self.shared.publish.lock_recover();
         let current = self.shared.current();
         if current.events == events {
             return;

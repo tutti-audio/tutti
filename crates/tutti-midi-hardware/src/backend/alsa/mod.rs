@@ -44,9 +44,10 @@ use crate::devices::reporter::os_devices;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
 use crate::error::Result;
 use enumerate::Direction;
-use std::sync::{Mutex, PoisonError};
+use std::sync::Mutex;
 use tutti_alsa_ffi::{Blocking, Client, UmpVersion};
 use tutti_midi_device::{EndpointId, OsDevice};
+use tutti_rt::LockExt;
 
 /// The Linux [`MidiEndpoints`] implementation.
 ///
@@ -77,10 +78,7 @@ impl AlsaEndpoints {
     /// CoreMIDI's failed-client path takes. Callers see an empty list and the
     /// reason lands in `debug!`.
     fn list(&self, direction: Direction) -> Vec<OsEndpoint> {
-        let mut held = self
-            .enumerator
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let mut held = self.enumerator.lock_recover();
         if held.is_none() {
             *held = client::open("tutti-enum", Blocking::NonBlock, UmpVersion::Midi2)
                 .inspect_err(|e| tracing::debug!("ALSA enumeration: {e}"))

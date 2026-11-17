@@ -21,6 +21,7 @@
 use std::sync::{Mutex, MutexGuard};
 use tutti_fixtures::main_thread;
 use tutti_graph::UmpAt;
+use tutti_rt::LockExt;
 
 use keyboard_types::{Code, Key, KeyState, Modifiers, NamedKey};
 use tutti_graph::Offset;
@@ -54,7 +55,7 @@ const SET_PROCESS_PRECISION: i32 = 77;
 static PROBE_LOCK: Mutex<()> = Mutex::new(());
 
 fn lock_probe() -> MutexGuard<'static, ()> {
-    PROBE_LOCK.lock().unwrap_or_else(|p| p.into_inner())
+    PROBE_LOCK.lock_recover()
 }
 
 /// Every `TUTTI_VST2_PROBE_*` key this file sets.

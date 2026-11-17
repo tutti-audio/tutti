@@ -22,6 +22,7 @@
 use std::sync::{Arc, Mutex, MutexGuard};
 use tutti_fixtures::main_thread;
 use tutti_plugin_types::Load;
+use tutti_rt::LockExt;
 use tutti_types::MaxBlock;
 use tutti_vst2_host::Vst2Loaded;
 
@@ -47,7 +48,7 @@ const BLOCK: usize = 64;
 static PROBE_LOCK: Mutex<()> = Mutex::new(());
 
 fn lock_probe() -> MutexGuard<'static, ()> {
-    PROBE_LOCK.lock().unwrap_or_else(|p| p.into_inner())
+    PROBE_LOCK.lock_recover()
 }
 
 /// The probe's environment for one test, cleared when it drops. The caller
