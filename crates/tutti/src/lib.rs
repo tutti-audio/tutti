@@ -591,7 +591,6 @@ pub mod plugin {
 pub mod midi {
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_device::EndpointId;
-    #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_device::{
         ChannelControllers, ChannelsDetail, CiCategories, CiDeviceId, CiPeer, DataControl,
         DetailsData, DiscoveryData, Identity, InquiryTarget, ManufacturerProfile, MaxSysexSize,
@@ -601,6 +600,8 @@ pub mod midi {
         ProfileId, ProfileState, ProfileTable, ReportRequest, ReportScope, Request, RequestError,
         SpecificData, StandardProfile, SystemMessages, WinMmDevice,
     };
+    #[cfg(feature = "midi-hardware")]
+    pub use tutti_midi_device::{NotSetProfileOn, ProfileOnRequest};
     pub use tutti_midi_file::Error as FileError;
     pub use tutti_midi_file::{
         ClipFileError, ConfigError as FileConfigError, Refusal, SmfParseError, ToClipError,
