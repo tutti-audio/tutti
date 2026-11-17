@@ -1,7 +1,7 @@
 use super::*;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
-use std::thread::ThreadId;
+use std::thread::{self, ThreadId};
 
 /// A `!Send` value that records the thread it is created and dropped on.
 struct Probe {
