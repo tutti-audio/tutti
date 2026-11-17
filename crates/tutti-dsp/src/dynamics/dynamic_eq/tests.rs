@@ -4,6 +4,7 @@ use tutti_buffers::{Planes, PlanesMut};
 use tutti_types::{ChannelLayout, CompressionRatio, Db, Hz, Q, SampleRate, Seconds};
 
 use super::*;
+use crate::dynamics::curves::compute_upward_gain_lift;
 
 const RATE: SampleRate = SampleRate::SR_48K;
 const FS: f64 = 48_000.0;
@@ -327,6 +328,15 @@ fn hostile_controls_and_keys_leave_the_output_finite() {
             ..base
         },
         DynamicEqControls {
+            threshold: Db(3.0e38),
+            ratio: CompressionRatio(1.0),
+            ..base
+        },
+        DynamicEqControls {
+            threshold: Db(-3.0e38),
+            ..base
+        },
+        DynamicEqControls {
             range: Db(1.0e30),
             knee: Db(1.0e30),
             ..base
@@ -382,4 +392,50 @@ fn a_reset_band_is_flat() {
     let silent = vec![0.0f32; 64];
     let y = run(&mut b, &[&silent], &[&silent], 64).remove(0);
     assert!(y.iter().all(|&v| v == 0.0));
+}
+
+/// The mirror, pinned by hand: 10 dB under a -30 dB threshold at 4:1 and a hard knee lifts
+/// 10 * (1 - 1/4) = 7.5 dB; at the threshold a 10 dB knee lifts `slope (knee / 2)^2 / (2
+/// knee)` = 0.75 * 25 / 20 = 0.9375 dB (the reduction's knee term, the same at the centre).
+#[test]
+fn the_upward_lift_has_its_hand_computed_anchors() {
+    let ratio = CompressionRatio(4.0);
+    let lift = |level: f32, knee: f32| {
+        compute_upward_gain_lift(Db(level), Db(-30.0), ratio, Db(knee)).get()
+    };
+    assert!((lift(-40.0, 0.0) - 7.5).abs() < 1e-5);
+    assert!((lift(-30.0, 10.0) - 0.9375).abs() < 1e-5);
+    assert_eq!(
+        lift(-20.0, 0.0),
+        0.0,
+        "over the threshold nothing is lifted"
+    );
+}
+
+/// The render does not depend on how the stream is cut into calls: blocks of 1, 7, 16 and
+/// 480 frames give the same bits, in both modes, with the times running and the key a
+/// different signal from the input.
+#[test]
+fn the_render_is_the_same_bits_in_any_blocks() {
+    let n = 4_800;
+    let input: Vec<f32> = sine(300.0, 0.4, n)
+        .iter()
+        .zip(sine(5_000.0, 0.2, n))
+        .map(|(a, b)| a + b)
+        .collect();
+    let mut key = sine(1_000.0, 0.5, n);
+    key[n / 2..].iter_mut().for_each(|x| *x *= 0.05);
+    let c = DynamicEqControls {
+        attack: Seconds(0.002),
+        release: Seconds(0.03),
+        ..controls(-24.0, 6.0, 4.0, 12.0, 2.0)
+    };
+    for mode in [DynamicMode::Downward, DynamicMode::Upward] {
+        let whole = run(&mut bank(mode, 1, &c), &[&key], &[&input], n).remove(0);
+        assert!(whole.iter().zip(&input).any(|(a, b)| a != b), "{mode:?}");
+        for block in [1, 7, 16, 480] {
+            let got = run(&mut bank(mode, 1, &c), &[&key], &[&input], block).remove(0);
+            assert_eq!(got, whole, "{mode:?} in blocks of {block}");
+        }
+    }
 }

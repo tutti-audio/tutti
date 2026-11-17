@@ -19,9 +19,7 @@ pub use compressor::{CompressorBank, CompressorControls, CompressorLanes};
 pub use curves::{
     LimiterCurve, amplitude_to_db, compute_compressor_gain_reduction, compute_limiter_gain,
 };
-pub use dynamic_eq::{
-    DETECTOR_MAX, DETECTOR_PERIODS, DynamicEqBank, DynamicEqControls, DynamicMode,
-};
+pub use dynamic_eq::{DynamicEqBank, DynamicEqControls, DynamicMode};
 pub use gate::{GateBank, GateControls, GateLanes};
 pub use key_filter::KeyFilter;
 pub use key_source::KeySource;

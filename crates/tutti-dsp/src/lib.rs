@@ -211,11 +211,11 @@ pub use dither::sink::{DitherSink, DitherSpec};
 pub use dither::{DitherNoise, DitherShape};
 pub use dynamics::{
     BandReductions, BandSettings, BankShape, BrickwallBank, BrickwallControls, BrickwallLanes,
-    CompressorBank, CompressorControls, CompressorLanes, DETECTOR_MAX, DETECTOR_PERIODS,
-    DynamicEqBank, DynamicEqControls, DynamicMode, GAIN_GLIDE, GateBank, GateControls, GateLanes,
-    KeyFilter, KeySource, LimiterBank, LimiterControls, LimiterCurve, LimiterLanes, Lookahead,
-    LookaheadError, MultibandBank, MultibandLanes, MultibandSettings, PeakDetection, TruePeakError,
-    amplitude_to_db, compute_compressor_gain_reduction, compute_limiter_gain,
+    CompressorBank, CompressorControls, CompressorLanes, DynamicEqBank, DynamicEqControls,
+    DynamicMode, GAIN_GLIDE, GateBank, GateControls, GateLanes, KeyFilter, KeySource, LimiterBank,
+    LimiterControls, LimiterCurve, LimiterLanes, Lookahead, LookaheadError, MultibandBank,
+    MultibandLanes, MultibandSettings, PeakDetection, TruePeakError, amplitude_to_db,
+    compute_compressor_gain_reduction, compute_limiter_gain,
 };
 pub use fft::{Complex32, Complex64, FftScratch, RealFft};
 pub use filter::{

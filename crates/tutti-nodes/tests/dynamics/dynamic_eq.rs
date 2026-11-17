@@ -184,3 +184,19 @@ fn an_unwired_side_chain_leaves_a_downward_band_flat() {
     let y = render(DynamicEqNode::from(config), &[&x, &silence]);
     assert!(db(component(&y, 1_000.0) / component(&x, 1_000.0)).abs() < 0.01);
 }
+
+/// With the key nobody wired, silence, an upward band sits at its full boost: the range.
+#[test]
+fn an_unwired_side_chain_gives_an_upward_band_its_full_range() {
+    let config = DynamicEqConfig::new(ChannelLayout::MONO, Hz(1_000.0), Q(2.0))
+        .mode(DynamicMode::Upward)
+        .threshold(Db(-40.0))
+        .ratio(CompressionRatio(4.0))
+        .range(Db(9.0))
+        .key(KeySource::Sidechain);
+    let x = tone(1_000.0, 0.1, RUN);
+    let silence = vec![0.0f32; RUN];
+    let y = render(DynamicEqNode::from(config), &[&x, &silence]);
+    let got = db(component(&y, 1_000.0) / component(&x, 1_000.0));
+    assert!((got - 9.0).abs() < 0.1, "{got} dB against the range's 9");
+}

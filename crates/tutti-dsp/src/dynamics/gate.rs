@@ -27,7 +27,7 @@ use tutti_types::{Amplitude, ChannelLayout, Db, Hz, Q, SampleRate, Seconds};
 
 use super::curves::{amplitude_to_db, gate_gain_at};
 use super::key_filter::{KeyFilter, KeyStage};
-use super::shared::{CHUNK, GAIN_GLIDE, key_levels};
+use super::shared::{Ballistics, CHUNK, GAIN_GLIDE, key_levels};
 use crate::delay::finite_or;
 use crate::smoother::Smoother;
 use crate::{Glide, Steps};
@@ -108,11 +108,12 @@ impl Design {
         // follower (a coefficient of 0, as `Seconds::one_pole_coeff` says) or, for a
         // hold, saturates to the longest count.
         let hold = Seconds(c.hold.get().max(0.0));
+        let ballistics = Ballistics::of(c.attack, c.release, rate);
         Self {
             threshold_linear: threshold.to_amplitude().get(),
             silence_opens: Db::FLOOR >= threshold,
-            attack: Seconds(c.attack.get().max(0.0)).one_pole_coeff(rate),
-            release: Seconds(c.release.get().max(0.0)).one_pole_coeff(rate),
+            attack: ballistics.attack,
+            release: ballistics.release,
             hold_samples: hold.to_samples_floor(rate).get(),
             range: Db(finite_or(c.range.get(), d.range.get()).min(0.0)),
         }

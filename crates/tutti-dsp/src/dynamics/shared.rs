@@ -45,23 +45,26 @@ pub(super) const MAX_KNEE_DB: f32 = 400.0;
 /// release's while it falls.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct Ballistics {
-    attack: f32,
-    release: f32,
+    pub(super) attack: f32,
+    pub(super) release: f32,
 }
 
 impl Ballistics {
-    /// Instant: each step lands on the target. The start of a bank that is not yet aimed.
+    /// Holds: a coefficient of 0 closes none of the gap, so a state stays where it is. What a
+    /// bank that is not yet aimed starts with; [`of`](Self::of) replaces it before any frame
+    /// runs.
     pub(super) const NEUTRAL: Self = Self {
         attack: 0.0,
         release: 0.0,
     };
 
-    /// The follower of time constants `attack` and `release` at `rate`; a time under 0 reads
-    /// as 0 (instant) and an infinite one holds, as [`Seconds::one_pole_coeff`] says.
-    pub(super) fn new(attack: Seconds, release: Seconds, rate: SampleRate) -> Self {
+    /// The follower of time constants `attack` and `release` at `rate`: a time under 0 or NaN
+    /// reads as 0 (coefficient 1, instant) and an infinite one holds (coefficient 0), as
+    /// [`Seconds::one_pole_coeff`] says.
+    pub(super) fn of(attack: Seconds, release: Seconds, rate: SampleRate) -> Self {
         Self {
-            attack: attack.one_pole_coeff(rate),
-            release: release.one_pole_coeff(rate),
+            attack: Seconds(attack.get().max(0.0)).one_pole_coeff(rate),
+            release: Seconds(release.get().max(0.0)).one_pole_coeff(rate),
         }
     }
 

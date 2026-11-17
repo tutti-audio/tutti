@@ -235,9 +235,11 @@ fn the_member_floors_what_cannot_be_run() {
         },
         RATE,
     );
+    assert_eq!((m.knee, m.ratio), (Db(0.0), CompressionRatio(1.0)));
+    // A time under 0 is the follower of time 0: instant.
     assert_eq!(
-        (m.knee, m.ratio, m.attack, m.release),
-        (Db(0.0), CompressionRatio(1.0), Seconds(0.0), Seconds(0.0))
+        Detector::of(&m).ballistics,
+        Ballistics::of(Seconds(0.0), Seconds(0.0), RATE)
     );
     let d = CompressorControls::DEFAULT;
     let bad = CompressorMember::designed(

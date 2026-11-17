@@ -99,14 +99,12 @@ impl CompressorMember {
     /// the times are floored at 0 and a ratio at 1.
     fn designed(c: &CompressorControls, rate: SampleRate) -> Self {
         let d = CompressorControls::DEFAULT;
-        // A NaN time reads as 0 (`max` ignores it), instant; an infinite one holds the
-        // follower (a coefficient of 0), as `Seconds::one_pole_coeff` says.
         Self {
             threshold: Db(finite_or(c.threshold.get(), d.threshold.get())),
             knee: Db(finite_or(c.knee.get(), d.knee.get()).clamp(0.0, MAX_KNEE_DB)),
             ratio: CompressionRatio::new_clamped(finite_or(c.ratio.get(), d.ratio.get())),
-            attack: Seconds(c.attack.get().max(0.0)),
-            release: Seconds(c.release.get().max(0.0)),
+            attack: c.attack,
+            release: c.release,
             makeup: Db(
                 finite_or(c.makeup.get(), d.makeup.get()).clamp(-MAX_MAKEUP_DB, MAX_MAKEUP_DB)
             ),
@@ -136,7 +134,7 @@ impl Detector {
             threshold: m.threshold,
             knee: m.knee,
             ratio: m.ratio,
-            ballistics: Ballistics::new(m.attack, m.release, m.rate),
+            ballistics: Ballistics::of(m.attack, m.release, m.rate),
         }
     }
 

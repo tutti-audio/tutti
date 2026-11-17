@@ -18,7 +18,7 @@
 //! **mean-square level**: a one-pole mean of the key's square, whose square root times
 //! `sqrt(2)` is the amplitude of a sine (a sine at the centre reads its own amplitude
 //! exactly, the band-pass's peak gain of `Q` divided out). The mean's time constant is
-//! [`DETECTOR_PERIODS`] periods of the centre, at most [`DETECTOR_MAX`]: long enough that the
+//! 8 periods of the centre, at most 25 ms: long enough that the
 //! ripple of a sine's square (a fraction `1 / sqrt(1 + (4 pi tau f)^2)` of its mean) is under
 //! 2% of the level at the centre, short enough to follow a band's own ring. The attack and
 //! release then smooth the gain change on top.
@@ -48,11 +48,15 @@ use crate::{
     COEFF_INTERVAL, Glide, SvfBank, SvfCoefficients, SvfCoeffs, SvfControls, SvfModel, SvfType,
 };
 
-/// The periods of the band's centre the detector's mean-square level is taken over.
-pub const DETECTOR_PERIODS: f64 = 8.0;
+/// The periods of the band's centre the detector's mean-square level is taken over: 8.
+const DETECTOR_PERIODS: f64 = 8.0;
 
-/// The longest time constant of the detector's mean: a low band does not wait longer.
-pub const DETECTOR_MAX: Seconds = Seconds(0.025);
+/// The longest time constant of the detector's mean, 25 ms: a low band does not wait longer.
+const DETECTOR_MAX: Seconds = Seconds(0.025);
+
+/// The largest threshold, in dB either way, a band runs: the upward curve mirrors a level about
+/// it (`2 t - x`), which stays finite for `|t|` this size and a level at or over -144 dB.
+const MAX_THRESHOLD_DB: f32 = 1.0e30;
 
 /// The loudest key sample the detector squares: 1e15 (300 dB), whose square is finite.
 const MAX_KEY: f32 = 1.0e15;
@@ -88,9 +92,9 @@ pub struct DynamicEqControls {
     /// (or under it, upward) moves the band 6 dB. Below 1 reads as 1.
     pub ratio: CompressionRatio,
     /// How fast the gain change grows toward a larger one: the time constant of a one-pole
-    /// smoother. Below 0 reads as 0 (instant).
+    /// smoother. Below 0 or NaN reads as 0 (instant); `+inf` holds the gain change.
     pub attack: Seconds,
-    /// How fast the gain change falls back toward flat. Below 0 reads as 0.
+    /// How fast the gain change falls back toward flat. Read as `attack` is.
     pub release: Seconds,
     /// The most the band's gain moves from flat, in dB and not below 0: the cut of a
     /// downward band, the boost of an upward one. Held in `0..=SvfCoeffs::MAX_GAIN_DB`.
@@ -99,7 +103,8 @@ pub struct DynamicEqControls {
 
 impl DynamicEqControls {
     /// A band that does nothing: 1 kHz, Butterworth Q, threshold 0 dB, a hard knee, no ratio,
-    /// no times and a range of 12 dB. What a non-finite control falls back to.
+    /// no times and a range of 12 dB. What a non-finite control other than a time falls back to
+    /// (a NaN time is 0 and an infinite one holds).
     pub const DEFAULT: Self = Self {
         center: Hz(1_000.0),
         q: Q::BUTTERWORTH,
@@ -148,15 +153,12 @@ impl Design {
         let d = DynamicEqControls::DEFAULT;
         let tau = (DETECTOR_PERIODS / f64::from(center.get())).min(DETECTOR_MAX.get());
         Self {
-            threshold: Db(finite_or(c.threshold.get(), d.threshold.get())),
+            threshold: Db(finite_or(c.threshold.get(), d.threshold.get())
+                .clamp(-MAX_THRESHOLD_DB, MAX_THRESHOLD_DB)),
             knee: Db(finite_or(c.knee.get(), d.knee.get()).clamp(0.0, MAX_KNEE_DB)),
             ratio: CompressionRatio::new_clamped(finite_or(c.ratio.get(), d.ratio.get())),
             range: finite_or(c.range.get(), d.range.get()).clamp(0.0, SvfCoeffs::MAX_GAIN_DB),
-            ballistics: Ballistics::new(
-                Seconds(c.attack.get().max(0.0)),
-                Seconds(c.release.get().max(0.0)),
-                rate,
-            ),
+            ballistics: Ballistics::of(c.attack, c.release, rate),
             key_scale: 1.0 / q.get(),
             mean: Seconds(tau).one_pole_coeff(rate),
         }
@@ -260,9 +262,10 @@ impl DynamicEqBank {
     }
 
     /// Aims at `controls`: the curve and the times land whole, and the bell and the detector's
-    /// band-pass glide to the centre and Q over one grid period
-    /// ([`COEFF_INTERVAL`]). A non-finite control is the default's, a
-    /// knee, the times and the range are floored at 0 and a ratio at 1. No allocation.
+    /// band-pass glide to the centre and Q over one grid period ([`COEFF_INTERVAL`]). A
+    /// non-finite control is the default's, except a time (NaN is 0, `+inf` holds); a knee,
+    /// the times and the range are floored at 0, a ratio at 1 and a threshold held within
+    /// 1e30 dB. No allocation.
     pub fn aim(&mut self, controls: &DynamicEqControls) {
         let d = DynamicEqControls::DEFAULT;
         let model = SvfModel::new(
