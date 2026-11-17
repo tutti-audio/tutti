@@ -202,7 +202,8 @@ impl Sent {
     const NONE: u64 = u64::MAX;
 
     /// The frame the next render call starts at: past the last call's span.
-    /// Zero before any call renders, and strictly greater after each.
+    /// Zero before any call renders, and greater after each call that renders
+    /// frames.
     fn next_frame(playhead: &Playhead) -> u64 {
         (playhead.frame() + playhead.span()).get()
     }
