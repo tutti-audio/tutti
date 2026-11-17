@@ -657,11 +657,11 @@ pub mod midi {
         FunctionBlocks, GroupSpan, Key, KeyEvent, KeySignature, Lane, Letter, MdsChunk,
         MdsChunkSize, MdsChunks, MdsIdentity, Metronome, Midi1Bytes, Midi1Port, MixedDataHeader,
         MpeChannels, MpeOverlap, MpeZoneSet, MpeZoneSpan, NotChunkSize, NotManufacturerId,
-        OutOfRange, PerNoteManagement, Pitch, RegisteredData, RegisteredPerNoteController,
-        Reserved, ReservedAccents, ReservedAttribute, Rpn, SharpsFlats, Stream, Sysex7Packet,
-        Sysex7Packets, Sysex8Packet, Sysex8Packets, Sysex8Stream, Sysex8StreamIds, SysexError,
-        SysexMessage, SysexRef, SysexStatus, SysexStep, System, U4, UiHint, UmpVersion, Unknown,
-        Utility, Voice2,
+        NotSharpsFlats, OutOfRange, PerNoteManagement, Pitch, RegisteredData,
+        RegisteredPerNoteController, Reserved, ReservedAccents, ReservedAttribute, Rpn,
+        SharpsFlats, Stream, Sysex7Packet, Sysex7Packets, Sysex8Packet, Sysex8Packets,
+        Sysex8Stream, Sysex8StreamIds, SysexError, SysexMessage, SysexRef, SysexStatus, SysexStep,
+        System, U4, UiHint, UmpVersion, Unknown, Utility, Voice2,
     };
     pub use tutti_ump::{
         Address, CCNumber, DeviceIdentity, ManufacturerId, Message, Midi1Parser, MidiChannel,
@@ -720,8 +720,8 @@ pub mod midi {
         pub use tutti_midi_device::{
             Ack, ActionError, BodyLimit, BufferLimit, CallError, CallId, CanSet, CcIndex,
             ChangeKind, ChunkNo, ClusterKind, ColumnSource, ConfirmIcon, ConfirmType, Confirmation,
-            CtrlControl, CtrlKind, CtrlRange, CtrlValueKind, CustomResource, DefaultMapNotCc,
-            EntryError, JsonPointer, LinkRole, ListedTwice, ModeId, NotABodyLimit, NotABufferLimit,
+            CtrlControl, CtrlKind, CtrlRange, CtrlValueKind, CustomResource, EntryError,
+            JsonPointer, LinkRole, ListedTwice, ModeId, NotABodyLimit, NotABufferLimit,
             NotAChunkNo, NotAPeChannel, NotAPriority, NotARequestId, NotASimultaneousRequests,
             NotAStateSize, NotAStepCount, NotAStreamLimit, NotATimeoutWait, NotSignificantBits,
             NotUnixSeconds, NotValid, NotVendorName, OpaqueBody, PaginationFault, ParamPath,

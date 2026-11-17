@@ -1,48 +1,16 @@
-//! [`MidiGroup`] — which of a UMP Endpoint's 16 virtual cables a packet travels.
+//! [`MidiGroup`]: which of a UMP Endpoint's 16 groups a packet travels on.
 //!
-//! An *address*, not a measure — so like [`MidiChannel`](crate::MidiChannel) it
-//! is an integer newtype rather than one of the float-backed units in
-//! `tutti_types`, and it deliberately does not implement
-//! `Unit`: a group is not an automatable DSP parameter and must
-//! not be reachable through `Param`.
-//!
-//! # Group is transport addressing, Channel is voice addressing
-//!
-//! The two are four bits each and sit eight bits apart in the same UMP word,
-//! which is exactly why they need separate types — nothing about their shape
-//! distinguishes them, only their meaning does.
-//!
-//! Per MIDI 2.0 (M2-104-UM §2.1.2), the **Group** field is present in every
-//! UMP packet except Utility (type `0x0`) and Stream (type `0xF`), which have
-//! none. It identifies one of the 16 virtual cables multiplexed
-//! onto a single UMP Endpoint, and it is carried by messages that have no
-//! channel at all: System Real-Time, SysEx7/SysEx8 and Flex Data.
-//! A group is the transport lane — the moral equivalent of "which of the 16
-//! DIN cables this byte came out of".
-//!
-//! The **Channel** field, by contrast, exists only on Channel Voice messages
-//! (UMP types 0x2 and 0x4) and names one of the 16 voice addresses *within* a
-//! group. So the containment is real and one-directional: a group holds 16
-//! channels, and `MidiChannel::COUNT == MidiGroup::COUNT == 16` is a
-//! coincidence of field width, not a shared concept.
-//!
-//! # Why a newtype and not `u8`
-//!
-//! Every UMP channel-voice constructor takes `(group, channel, note, …)` —
-//! adjacent `u8`s with no positional guard. Transposing the first two compiles,
-//! does not crash, and produces a well-formed packet on the wrong cable
-//! addressing the wrong voice. Both fields are 4 bits, so a transposition of
-//! two in-range values passes every width check. Two distinct types make it a
-//! compile error:
+//! An address, not a quantity. The Group field is present in every UMP packet
+//! except Utility (type `0x0`) and UMP Stream (type `0xF`) (M2-104 §2.1.2); it
+//! is transport addressing, where a [`MidiChannel`](crate::MidiChannel) is
+//! voice addressing within a group. Both are 4 bits, and they are distinct
+//! types so that a transposed pair does not compile:
 //!
 //! ```compile_fail
 //! # use tutti_ump::{MidiChannel, MidiGroup};
 //! fn takes(_group: MidiGroup, _channel: MidiChannel) {}
-//! // Transposed — the compiler rejects it, which is the entire point.
 //! takes(MidiChannel::of(3), MidiGroup::of(1));
 //! ```
-//!
-//! Like [`MidiChannel`](crate::MidiChannel), it is serializable (feature `serde`).
 
 use crate::OutOfRange;
 

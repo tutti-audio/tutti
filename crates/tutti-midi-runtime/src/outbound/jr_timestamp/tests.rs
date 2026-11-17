@@ -61,7 +61,7 @@ fn the_first_clock_is_due_immediately() {
 #[test]
 fn clocks_are_emitted_on_the_configured_cadence() {
     let mut e = JrClockEmitter::with_interval(SampleRate::SR_48K, Duration::from_millis(100));
-    let interval = e.interval();
+    let interval = e.interval;
     assert_eq!(interval, Samples(4_800));
     let at = |frames: Samples| Frame::new(frames.get() as u64);
 
@@ -301,7 +301,7 @@ fn a_re_rated_clock_keeps_its_cadence_at_the_new_rate() {
     let stream = stream.at_rate(SampleRate::SR_44K1);
     assert_eq!(stream.origin(), Frame::new(8_820));
     let mut clock = stream.emitter.expect("the stream clocks");
-    assert_eq!(clock.interval(), Samples(4_410), "100 ms at 44.1 kHz");
+    assert_eq!(clock.interval, Samples(4_410), "100 ms at 44.1 kHz");
     assert!(clock.due(Frame::new(8_819)).is_none(), "one frame short");
     let due = clock.due(Frame::new(8_820)).expect("one interval on");
     assert_eq!(jr_clock_value(&due), Some(6_250));

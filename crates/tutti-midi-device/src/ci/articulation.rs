@@ -211,6 +211,42 @@ fn data(bytes: Vec<u8>) -> DetailsData {
     }
 }
 
+impl TryFrom<&DetailsData> for ArticulationDetails {
+    type Error = ArticulationDetailsError;
+
+    /// The reply to Inquiry Target `0x01` in `data`.
+    ///
+    /// # Errors
+    ///
+    /// [`ArticulationDetailsError`] for data that is not [`LEN`](Self::LEN)
+    /// bytes, sets a reserved feature bit, or has a count above 16.
+    fn try_from(data: &DetailsData) -> Result<Self, ArticulationDetailsError> {
+        let bytes = data.as_bytes();
+        if bytes.len() != Self::LEN {
+            return Err(ArticulationDetailsError::Length {
+                expected: Self::LEN,
+                got: bytes.len(),
+            });
+        }
+        let bits = u16::from(bytes[0]) | u16::from(bytes[1]) << 7;
+        if bits & ArticulationFeatures::RESERVED != 0 {
+            return Err(ArticulationDetailsError::ReservedFeatures(
+                bits & ArticulationFeatures::RESERVED,
+            ));
+        }
+        Ok(Self {
+            features: ArticulationFeatures {
+                mute_type: bits & 0x01 != 0,
+                mute_amount: bits & 0x02 != 0,
+                playing_position: bits & 0x04 != 0,
+                note_off_velocity: bits & 0x08 != 0,
+                custom_sound_discovery: bits & 0x10 != 0,
+            },
+            sounds: read_counts(&bytes[2..], 2)?,
+        })
+    }
+}
+
 impl ArticulationDetails {
     /// Inquiry Target `0x01`, Profile Optional Features Supported (M2-123
     /// §9.1.1).
@@ -256,38 +292,6 @@ impl ArticulationDetails {
         write_counts(&self.sounds, &mut out);
         data(out)
     }
-
-    /// The reply to Inquiry Target `0x01` in `data`.
-    ///
-    /// # Errors
-    ///
-    /// [`ArticulationDetailsError`] for data that is not [`LEN`](Self::LEN)
-    /// bytes, sets a reserved feature bit, or has a count above 16.
-    pub fn from_data(data: &DetailsData) -> Result<Self, ArticulationDetailsError> {
-        let bytes = data.as_bytes();
-        if bytes.len() != Self::LEN {
-            return Err(ArticulationDetailsError::Length {
-                expected: Self::LEN,
-                got: bytes.len(),
-            });
-        }
-        let bits = u16::from(bytes[0]) | u16::from(bytes[1]) << 7;
-        if bits & ArticulationFeatures::RESERVED != 0 {
-            return Err(ArticulationDetailsError::ReservedFeatures(
-                bits & ArticulationFeatures::RESERVED,
-            ));
-        }
-        Ok(Self {
-            features: ArticulationFeatures {
-                mute_type: bits & 0x01 != 0,
-                mute_amount: bits & 0x02 != 0,
-                playing_position: bits & 0x04 != 0,
-                note_off_velocity: bits & 0x08 != 0,
-                custom_sound_discovery: bits & 0x10 != 0,
-            },
-            sounds: read_counts(&bytes[2..], 2)?,
-        })
-    }
 }
 
 /// The reply to Profile Details Inquiry for Inquiry Target `0x40` (M2-123
@@ -295,6 +299,27 @@ impl ArticulationDetails {
 /// `0x1A` to `0x1F`. The Target Data is 96 bytes.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct CustomSounds([SubclassCounts; 6]);
+
+impl TryFrom<&DetailsData> for CustomSounds {
+    type Error = ArticulationDetailsError;
+
+    /// The reply to Inquiry Target `0x40` in `data`.
+    ///
+    /// # Errors
+    ///
+    /// [`ArticulationDetailsError`] for data that is not [`LEN`](Self::LEN)
+    /// bytes or has a count above 16.
+    fn try_from(data: &DetailsData) -> Result<Self, ArticulationDetailsError> {
+        let bytes = data.as_bytes();
+        if bytes.len() != Self::LEN {
+            return Err(ArticulationDetailsError::Length {
+                expected: Self::LEN,
+                got: bytes.len(),
+            });
+        }
+        Ok(Self(read_counts(bytes, 0)?))
+    }
+}
 
 impl CustomSounds {
     /// Inquiry Target `0x40`, Profile Specific, Discover Manufacturer Specific
@@ -322,23 +347,6 @@ impl CustomSounds {
         let mut out = Vec::with_capacity(Self::LEN);
         write_counts(&self.0, &mut out);
         data(out)
-    }
-
-    /// The reply to Inquiry Target `0x40` in `data`.
-    ///
-    /// # Errors
-    ///
-    /// [`ArticulationDetailsError`] for data that is not [`LEN`](Self::LEN)
-    /// bytes or has a count above 16.
-    pub fn from_data(data: &DetailsData) -> Result<Self, ArticulationDetailsError> {
-        let bytes = data.as_bytes();
-        if bytes.len() != Self::LEN {
-            return Err(ArticulationDetailsError::Length {
-                expected: Self::LEN,
-                got: bytes.len(),
-            });
-        }
-        Ok(Self(read_counts(bytes, 0)?))
     }
 }
 

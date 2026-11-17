@@ -28,41 +28,13 @@
 //! that is given back when the off goes out. The count per key saturates at
 //! 255.
 //!
-//! The ledger answers which notes a node has started and not ended on its own
-//! port and what the port owes. It is not `tutti-voicing`'s `Holds` (why one
-//! voice is still sounding) and not the graph executor's per-edge table of
-//! the keys an event output port carries (which lets an edge that ends close
-//! them): the three have different owners, keys and failure modes.
+//! The ledger holds which notes a node has started and not ended on its own
+//! port, and what the port owes.
 //!
 //! The table holds at most its capacity in keys, held or refused. A note-on
 //! that finds it full is withheld and counted ([`EventWriter::withhold`])
 //! like one the port refused: the note does not start, so no off is owed. A
 //! note already started always has its row, so a full table never strands one.
-//!
-//! The node cannot write to the port around the handle:
-//!
-//! ```compile_fail,E0499
-//! use tutti_graph::{Cx, Event, Io, Node, Offset, Prepare, Shape, Status};
-//! use tutti_midi_runtime::NoteLedger;
-//!
-//! struct Bad(NoteLedger<()>);
-//!
-//! impl Node for Bad {
-//!     fn shape(&self) -> Shape {
-//!         Shape::EMPTY
-//!             .with_events(0, 1)
-//!     }
-//!     fn prepare(&mut self, _: &Prepare) {}
-//!     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
-//!         let first = cx.env.offset(0).unwrap();
-//!         let mut sending = self.0.block(io.event_out(0), first);
-//!         let _ = io.event_out(0).push(Event::midi(Offset::ZERO, Ump([0x4090_3c00, 0xffff_0000, 0, 0])));
-//!         sending.release_all(first);
-//!         Status::Modified
-//!     }
-//!     fn reset(&mut self) {}
-//! }
-//! ```
 
 use crate::held::Controllers;
 use tutti_graph::{Event, EventWriter, Offset};
@@ -144,7 +116,7 @@ impl<T> Entry<T> {
 
 /// The notes a node has started and not ended. Fixed capacity: nothing here
 /// allocates after [`new`](Self::new).
-pub struct NoteLedger<T> {
+pub(crate) struct NoteLedger<T> {
     /// Sorted by key; never longer than `capacity`, so it never reallocates.
     entries: Vec<Entry<T>>,
     capacity: usize,
@@ -243,7 +215,7 @@ impl<T: Copy + PartialEq> NoteLedger<T> {
 
 /// One block's sending through a [`NoteLedger`]. It holds the port's writer,
 /// so nothing else can write to the port while it lives.
-pub struct Sending<'l, 'w, T> {
+pub(crate) struct Sending<'l, 'w, T> {
     ledger: &'l mut NoteLedger<T>,
     out: &'l mut EventWriter<'w>,
 }
@@ -461,3 +433,6 @@ impl<T: Copy + PartialEq> Sending<'_, '_, T> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod graphs;

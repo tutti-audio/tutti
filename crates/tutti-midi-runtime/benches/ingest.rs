@@ -50,8 +50,8 @@ fn wire() -> Vec<Ump> {
 fn rig() -> (Executor, DeviceInput) {
     let inlets = InputInlets::new(EventCapacity::of(4_096), Duration::ZERO);
     let (device, inlet) = inlets.open();
-    let epochs = DeviceEpochs::new();
-    epochs.arrive();
+    let (mut writer, epochs) = DeviceEpochs::new();
+    writer.arrive();
     let (mut editor, exec) = Editor::new(Prepare::new(
         SampleRate::SR_48K,
         MaxBlock::of(Samples(BLOCK)),

@@ -345,7 +345,7 @@ impl PeState {
     }
 
     fn parse_json(bytes: &[u8]) -> Result<Self, PeDataError> {
-        PeJson::parse(bytes)
+        PeJson::try_from(bytes)
             .map(Self::json)
             .map_err(|_| PeDataError::new("State", PeDataFault::NotValid("JSON text")))
     }
@@ -479,8 +479,7 @@ impl ResourceStore {
     /// title, description and extensions of an entry already there. A state the
     /// list lacks is listed with its id as the title.
     pub(super) fn note_state(&mut self, id: &StateId, state: &PeState) -> Result<(), StoreError> {
-        let target = ResourceTarget::new(PeResource::StateList)
-            .unwrap_or_else(|_| unreachable!("StateList has no resId"));
+        let target = ResourceTarget::state_list();
         let mut entries = match self.get(&target) {
             Some(PeData::StateList(list)) => list.clone().into_entries(),
             _ => Vec::new(),
@@ -554,8 +553,7 @@ impl ResourceStore {
     /// [`StoreError::NotDeclared`] when [`declare_states`](Self::declare_states)
     /// has not been called.
     pub fn put_state(&mut self, mut entry: PeStateEntry, state: PeState) -> Result<(), StoreError> {
-        let list_target = ResourceTarget::new(PeResource::StateList)
-            .unwrap_or_else(|_| unreachable!("StateList has no resId"));
+        let list_target = ResourceTarget::state_list();
         let mut entries = match self.get(&list_target) {
             Some(PeData::StateList(list)) => list.clone().into_entries(),
             _ => Vec::new(),
@@ -783,7 +781,7 @@ impl ResourceInitiator {
         page_size: NonZeroU32,
         now: Instant,
     ) -> Result<(CallId, Vec<super::ResourceAction>), CallError> {
-        let target = ResourceTarget::new(PeResource::StateList)?;
+        let target = ResourceTarget::state_list();
         let get = self.state_get(target);
         self.get_list(&get, page_size, now)
     }

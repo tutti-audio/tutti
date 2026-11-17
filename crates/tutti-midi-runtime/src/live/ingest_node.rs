@@ -16,8 +16,8 @@
 //! to Channels in another), so a Group has its own sixteen channel ports and
 //! its own channelless port, which carries that Group's System, SysEx and Flex
 //! messages. The node hears the first Group unless built to hear more
-//! ([`MidiIngestNode::hearing`]), so a one-Group device is the seventeen ports
-//! it always was. A message with no Group (Utility, UMP Stream: they address
+//! ([`MidiIngestNode::hearing`]), so a one-Group device has [`MIDI_INPUT_PORTS`]
+//! ports. A message with no Group (Utility, UMP Stream: they address
 //! the Endpoint, not a Group) leaves the first Group's channelless port.
 //! **Routing is wiring**: a synth listening to channel 3 of a Group takes event
 //! edges from that Group's port 3 and its channelless port, one listening to a
@@ -722,7 +722,27 @@ impl Node for MidiIngestNode {
         Status::Modified
     }
 
-    fn reset(&mut self) {}
+    /// The device state of a freshly prepared node: the translator and the MPE
+    /// ingest start empty (the MPE mode in force stays), nothing is held or
+    /// owed, no Group has sent an Active Sensing, and the Profile zones in
+    /// force are read again from the requests. What the node held is not
+    /// released: `reset` has no output to release into. The executor, when it
+    /// parks a bypassed node, ends the keys and the sustain pedal the node held
+    /// on its event outputs (the graph's held set covers keys and sustain
+    /// only), so after a bypass the sostenuto, soft and hold-2 pedals and the
+    /// bend the device left are neither lifted nor remembered.
+    fn reset(&mut self) {
+        self.device.translator.reset();
+        self.device.mpe = MpeIngest::new(self.mpe_mode);
+        self.device.held.forget();
+        self.device.sensing.forget_all();
+        self.device.owing = 0;
+        self.profiles = NO_PROFILES;
+        // A published request's generation is at least 1 (`edit_profiles`
+        // bumps it before publishing), so generation 0 reads the requests again
+        // whenever one was published.
+        self.profiles_generation = 0;
+    }
 }
 
 /// The block's translated events, as they are made.
