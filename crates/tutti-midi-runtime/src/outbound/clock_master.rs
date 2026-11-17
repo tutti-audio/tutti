@@ -171,8 +171,8 @@ struct Shared {
 /// The control side of a clock: turn it on, pick MTC and its frame rate, read
 /// what it lost. Cheap to clone; every clone is the same clock.
 ///
-/// Every call is wait-free and takes effect at the audio half's next
-/// [`tick`](ClockMaster::tick); none of them touches the audio half's state.
+/// Every call is wait-free and takes effect at the audio half's next tick;
+/// none of them touches the audio half's state.
 #[derive(Debug, Clone)]
 pub struct ClockControls {
     shared: Arc<Shared>,
@@ -181,7 +181,7 @@ pub struct ClockControls {
 
 impl ClockControls {
     /// Sets what the clock sends, all of it in one store: the audio half reads
-    /// the whole value at its next [`tick`](ClockMaster::tick), never a mix of
+    /// the whole value at its next tick, never a mix of
     /// two calls. A clock sending nothing emits nothing at all: `tick` returns
     /// without reading the transport.
     ///

@@ -1,6 +1,6 @@
 //! MIDI the engine *produces*, as opposed to plumbing it moves.
 //!
-//! - [`ClockMaster`] (and its [`ClockControls`]) generates outbound Beat Clock and MTC from the
+//! - `ClockMaster` (and its [`ClockControls`]) generates outbound Beat Clock and MTC from the
 //!   transport; [`ClockNode`] ticks it in the graph and sends it out of an
 //!   event port.
 //! - [`MidiOutNode`] is the graph's end of a device output: what is wired to it

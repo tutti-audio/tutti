@@ -32,7 +32,7 @@ use tutti_types::{Frame, SampleRate, Samples, Seconds};
 use tutti_ump::{Message, Ump, Utility};
 
 /// Converts sample positions to 16-bit JR ticks at a fixed sample rate. Cheap,
-/// `Copy`, and stateless — the shared reference both [`JrStamper`] reasons in.
+/// `Copy`, and stateless — the shared reference both `JrStamper` reasons in.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct JrClock {
     sample_rate: SampleRate,
@@ -196,10 +196,10 @@ impl JrClockEmitter {
     }
 }
 
-/// One outbound JR-stamped stream: a [`JrStamper`] plus the running sample origin
+/// One outbound JR-stamped stream: a `JrStamper` plus the running sample origin
 /// its stamps are relative to.
 ///
-/// [`JrStamper`] is deliberately pure, so the origin has to live *somewhere*, and
+/// `JrStamper` is deliberately pure, so the origin has to live *somewhere*, and
 /// "somewhere" is per **wire**, not per caller. A single endpoint fed by two
 /// pumps — the clock master and the track MIDI-out both reach the same hardware
 /// port — must share one origin, or the two interleave stamps that walk
@@ -233,7 +233,7 @@ impl JrStream {
         }
     }
 
-    /// Adds the JR Clock cadence (M2-104 §7.2.2.1) at [`JR_CLOCK_INTERVAL`].
+    /// Adds the JR Clock cadence (M2-104 §7.2.2.1) at `JR_CLOCK_INTERVAL`.
     ///
     /// Once set, [`stamp_span`](Self::stamp_span) prefixes a clock to each block
     /// where one is due — including blocks with no events at all, which is why
