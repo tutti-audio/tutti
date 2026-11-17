@@ -232,8 +232,10 @@ impl<C: crate::Clock> Session<C> {
         let added = self.add_instrument_unwired(instrument)?;
         if let Err(e) = self.graph().connect(added.handle.out(), Root) {
             let node = added.handle.node().erase();
-            let _ = self.remove_instrument(added.handle); // made a moment ago
-            let _ = self.remove(node); // added a moment ago
+            let handle = self.remove_instrument(added.handle);
+            let removed = self.remove(node);
+            // Both were made a moment ago, so they are there.
+            debug_assert!(handle.is_ok() && removed.is_ok());
             return Err(e.into());
         }
         Ok(added)
@@ -259,7 +261,9 @@ impl<C: crate::Clock> Session<C> {
         match self.instrument_at(node, main) {
             Ok(handle) => Ok(AddedInstrument { handle, controls }),
             Err(e) => {
-                let _ = self.remove(node); // added a moment ago, so it is there
+                let removed = self.remove(node);
+                // Added a moment ago, so it is there.
+                debug_assert!(removed.is_ok());
                 Err(e)
             }
         }
