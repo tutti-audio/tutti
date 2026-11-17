@@ -618,11 +618,26 @@ fn bar_position_within(
     signature: TimeSignature,
 ) -> BarPosition {
     let bar_length = signature.bar_length();
-    let (bars, into_bar) = floor_div_rem(beat - origin, bar_length);
-    let bar_start = origin + bar_length * bars as f64;
+    // Bar `k` starts at `origin + bar_length * k`, rounded as `Meter::bar_start`
+    // rounds it. The quotient can land a rounding step either side of that line
+    // when `origin` is not a dyadic beat (`4.1 - 0.1` divides to just under 1),
+    // so the bar is settled against the start itself: the last bar whose start
+    // is at or before `beat`. `bar_at(bar_start(n))` is then bar `n`, on its
+    // downbeat, at every origin.
+    let start_of = |bars: i64| origin + bar_length * bars as f64;
+    let (mut bars, _) = floor_div_rem(beat - origin, bar_length);
+    if start_of(bars + 1) <= beat {
+        bars += 1;
+    } else if start_of(bars) > beat {
+        bars -= 1;
+    }
+    let bar_start = start_of(bars);
+    // In `[0, bar_length)`: `bar_start <= beat < start_of(bars + 1)`, and a
+    // difference that rounds up to the bar length is the bar's last offset.
+    let into_bar = (beat - bar_start).min(BeatDuration(bar_length.get().next_down()));
 
     let (beat_index, fraction) = floor_div_rem(into_bar, signature.beat_length());
-    // No clamp here. `floor_div_rem` returns `into_bar` in `[0, bar_length)`, and
+    // No clamp here. `into_bar` is in `[0, bar_length)` (above), and
     // `bar_length == beats_per_bar * beat_length` exactly (every denominator is a
     // power of two, so the division is exact in binary), so the index is always
     // in `0..beats_per_bar`. A clamp would only mask a regression in
@@ -1085,6 +1100,67 @@ mod tests {
             assert!(round_trip.is_downbeat());
             assert_eq!(round_trip.bar_start, start);
         }
+    }
+
+    /// Every bar start is its own bar's downbeat, also when a meter change sits
+    /// at a beat that is not a dyadic fraction (`0.1`, `1/3`), where the division
+    /// in `bar_at` rounds a hair under the bar line.
+    #[test]
+    fn a_bar_start_is_the_downbeat_of_its_own_bar_at_any_change_beat() {
+        let sixty_fourth = TimeSignature::new(BeatsPerBar::of(1), NoteValue::of(64));
+        let three_four = TimeSignature::new(BeatsPerBar::of(3), NoteValue::QUARTER);
+        let signatures = [
+            TimeSignature::default(),
+            seven_eight(),
+            three_four,
+            sixty_fourth,
+        ];
+        for origin in [0.1, 0.3, 1.0 / 3.0, 4.1, 64.1, 1000.7] {
+            for second in signatures {
+                let map = MeterMap::new([
+                    MeterChange::new(Beat(0.0), TimeSignature::default()),
+                    MeterChange::new(Beat(origin), second),
+                ]);
+                for bar in 1..=400 {
+                    let bar = BarNumber(bar);
+                    let start = map.bar_start(bar);
+                    let at = map.bar_at(start);
+                    assert_eq!(at.bar, bar, "{second} @ {origin}: bar {bar} at {start:?}");
+                    assert!(at.is_downbeat(), "{second} @ {origin}: bar {bar}");
+                    assert_eq!(at.bar_start, start, "{second} @ {origin}: bar {bar}");
+                }
+            }
+        }
+    }
+
+    /// The reported cases: 4/4 changing to 4/4 at beat 0.1, and 1/64 there.
+    #[test]
+    fn bars_after_a_change_at_beat_0_1_start_where_bar_start_says() {
+        let four_four = MeterMap::new([
+            MeterChange::new(Beat(0.0), TimeSignature::default()),
+            MeterChange::new(Beat(0.1), TimeSignature::default()),
+        ]);
+        assert_eq!(
+            four_four.bar_at(four_four.bar_start(BarNumber(3))).bar,
+            BarNumber(3)
+        );
+        assert_eq!(
+            four_four.bar_at(four_four.bar_start(BarNumber(18))).bar,
+            BarNumber(18)
+        );
+        let sixty_fourth = MeterMap::new([
+            MeterChange::new(Beat(0.0), TimeSignature::default()),
+            MeterChange::new(
+                Beat(0.1),
+                TimeSignature::new(BeatsPerBar::of(1), NoteValue::of(64)),
+            ),
+        ]);
+        assert_eq!(
+            sixty_fourth
+                .bar_at(sixty_fourth.bar_start(BarNumber(5)))
+                .bar,
+            BarNumber(5)
+        );
     }
 
     #[test]
