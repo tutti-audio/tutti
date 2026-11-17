@@ -261,6 +261,11 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
         "no `log` dependency, and no print macro outside a main, a test or an example",
     ),
     (
+        "check-test-time",
+        "",
+        "a test asserts no wall-clock time and sleeps for no event; a per-file ratchet",
+    ),
+    (
         "check-conformance",
         "",
         "spec inventories are well formed, test tags name rows, the CLAP inventory matches clap-sys and the VST3 one the SDK",
@@ -326,7 +331,7 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
     (
         "check-no-std",
         "",
-        "build each no_std crate for a bare-metal target (needs `rustup target add thumbv7em-none-eabihf`)",
+        "build each no_std crate for a bare-metal target (needs `rustup target add aarch64-unknown-none`)",
     ),
     (
         "verify-audio",
@@ -598,6 +603,7 @@ impl Planner<'_> {
             "check-buffers" => self.out.push(Step::Gate(Gate::Buffers)),
             "check-building" => self.out.push(Step::Gate(Gate::Building)),
             "check-logging" => self.out.push(Step::Gate(Gate::Logging)),
+            "check-test-time" => self.out.push(Step::Gate(Gate::TestTime)),
             "check-conformance" => self.out.push(Step::Gate(Gate::Conformance)),
             "conformance" => {
                 let o = options(name, args, &["--results", "--out"])?;
@@ -725,7 +731,7 @@ impl Planner<'_> {
                     "check-value-traits", "check-submodule-pins", "check-doc-refs",
                     "check-pointers", "check-comments", "check-platform-seam", "check-doc-idents",
                     "check-passive-tests", "check-alloc-binaries", "check-buffers",
-                    "check-building", "check-umbrella", "check-logging",
+                    "check-building", "check-umbrella", "check-logging", "check-test-time",
                 ] {
                     self.dep(d)?;
                 }
@@ -791,11 +797,18 @@ impl Planner<'_> {
 }
 
 /// A target with no `std`: a crate that builds for it uses only `core` and `alloc`.
-const NO_STD_TARGET: &str = "thumbv7em-none-eabihf";
+const NO_STD_TARGET: &str = "aarch64-unknown-none";
 
-/// The `#![no_std]` crates, each with the features (besides `std`) built on top of
+/// The `#![no_std]` crates in layer order, each with the features built on top of
 /// the bare build. A crate that becomes `no_std` is one line here.
-const NO_STD_CRATES: &[(&str, &[&str])] = &[("tutti-ump", &["serde"])];
+const NO_STD_CRATES: &[(&str, &[&str])] = &[
+    ("tutti-types", &["serde"]),
+    ("tutti-ump", &["serde"]),
+    ("tutti-curve", &[]),
+    ("tutti-metering", &[]),
+    ("tutti-tempo", &["serde"]),
+    ("tutti-modulation", &[]),
+];
 
 const CHECK_FEATURES: &[&str] = &[
     r#"cargo clippy --locked -p tutti-cpal --features capture --all-targets -- -D warnings"#,

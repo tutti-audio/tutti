@@ -31,6 +31,9 @@
 //! assert_eq!(lane.value_at(Beat(2.0)), Some(0.25));
 //! ```
 #![forbid(unsafe_code)]
+#![cfg_attr(not(test), no_std)]
+
+extern crate alloc;
 
 mod fade;
 mod law;

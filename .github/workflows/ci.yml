@@ -112,6 +112,7 @@ jobs:
       - run: cargo xtask check-buffers
       - run: cargo xtask check-building
       - run: cargo xtask check-logging
+      - run: cargo xtask check-test-time
       - run: cargo xtask check-platform-seam
       # The source of the locked `clap-sys` is fetched, not built, for the CLAP rows.
       - run: cargo fetch --locked
@@ -324,7 +325,7 @@ jobs:
 
       - name: no_std build
         run: |
-          rustup target add thumbv7em-none-eabihf
+          rustup target add aarch64-unknown-none
           cargo xtask check-no-std
 
       # `plugin-server` cannot be a dev-dependency (a cycle through `tutti-plugin`), so the tests that spawn it

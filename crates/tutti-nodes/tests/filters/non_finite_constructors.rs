@@ -97,6 +97,7 @@ fn sweep() {
                         hold: s(v(2, 0.05)),
                         release: s(v(3, 0.1)),
                         range: d(-80.0),
+                        ..GateControls::DEFAULT
                     },
                 ))
             }));
@@ -131,6 +132,7 @@ fn sweep() {
                     hold: s(0.05),
                     release: s(0.1),
                     range: d(b),
+                    ..GateControls::DEFAULT
                 },
             ))
         }));

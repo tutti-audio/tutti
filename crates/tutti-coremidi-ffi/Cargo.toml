@@ -15,7 +15,7 @@ workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 coremidi-sys = { workspace = true }
-thiserror = { workspace = true }
+thiserror = { workspace = true, features = ["std"] }
 block2 = "0.6"
 core-foundation = { workspace = true }
 mach2 = "0.7"

@@ -50,6 +50,38 @@ const IDLE_REST: Duration = Duration::from_millis(250);
 /// fallback for a process whose first CoreMIDI client was not the hub's.
 const IDLE_LOOK: Duration = Duration::from_secs(1);
 
+/// When a hub whose run loop has no source looks by itself: every method takes
+/// the time it is given.
+struct IdleLooks {
+    looked: Instant,
+}
+
+impl IdleLooks {
+    fn new(now: Instant) -> Self {
+        Self { looked: now }
+    }
+
+    /// Whether a run of the loop that lasted `ran` had nothing to wait for.
+    fn is_idle(ran: Duration) -> bool {
+        ran < IDLE_RETURN
+    }
+
+    /// Whether a look is due at `now`, after a rest; when it is, it is taken.
+    fn look_due(&mut self, now: Instant) -> bool {
+        let due = now.saturating_duration_since(self.looked) >= IDLE_LOOK;
+        if due {
+            self.looked = now;
+        }
+        due
+    }
+
+    /// The loop waited for a source and returned at `now`: notifications reach
+    /// it, so the timer starts over.
+    fn waited(&mut self, now: Instant) {
+        self.looked = now;
+    }
+}
+
 /// One registered watch: the reporting state of a `Devices`, and the sink to
 /// tell if it fails.
 struct Watcher {
@@ -150,20 +182,19 @@ fn start_hub() -> std::result::Result<&'static Hub, String> {
             let _ = ready.send(client.as_ref().map(|_| ()).map_err(|s| *s));
             // The client lives as long as the process.
             let Ok(_client) = client else { return };
-            let mut looked = Instant::now();
+            let mut looks = IdleLooks::new(Instant::now());
             loop {
                 let started = Instant::now();
                 CFRunLoop::run_current();
-                if started.elapsed() < IDLE_RETURN {
+                if IdleLooks::is_idle(started.elapsed()) {
                     // The loop had nothing to wait for: no notification
                     // can reach it, so look on a timer instead.
                     std::thread::sleep(IDLE_REST);
-                    if looked.elapsed() >= IDLE_LOOK {
+                    if looks.look_due(Instant::now()) {
                         hub.notify();
-                        looked = Instant::now();
                     }
                 } else {
-                    looked = Instant::now();
+                    looks.waited(Instant::now());
                 }
             }
         })

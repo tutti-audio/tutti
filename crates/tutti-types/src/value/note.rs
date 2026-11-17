@@ -14,6 +14,8 @@
 //! into `Note` where you want a frequency, a name, or transposition.
 
 use super::units::{Cents, Hz, Semitones};
+use alloc::format;
+use alloc::string::String;
 
 /// One of the twelve pitch classes.
 ///
@@ -271,7 +273,7 @@ impl Note {
         // converter. The guard above duplicates `from_pitch_ratio`'s on purpose
         // — `None` is a better answer here than a unison.
         let steps = Semitones::from_pitch_ratio(freq.get() / Self::A4_HZ.get());
-        let nearest = steps.get().round();
+        let nearest = libm::roundf(steps.get());
         let note = Self::from_semitones_from_c0(Self::A4.semitones_from_c0() + nearest as i32);
         Some((note, Semitones(steps.get() - nearest).to_cents()))
     }

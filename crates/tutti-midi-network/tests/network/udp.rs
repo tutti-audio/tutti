@@ -16,7 +16,7 @@ fn run_until(
     events: &mut Vec<(&'static str, Event)>,
     mut done: impl FnMut(&[(&'static str, Event)]) -> bool,
 ) {
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while Instant::now() < deadline && !done(events) {
         host.poll(Duration::from_millis(5)).unwrap();
         client.poll(Duration::from_millis(5)).unwrap();

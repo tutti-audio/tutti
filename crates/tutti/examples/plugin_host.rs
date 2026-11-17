@@ -196,10 +196,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //    hosted.buses().input(1).unwrap())`.
     let diagnostics = hosted.diagnostics();
     eprintln!(
-        "server {:?}, latency {:?}, lost MIDI {:?}, input buses: {}",
+        "server {:?}, latency {:?}, losses {:?}, input buses: {}",
         diagnostics.server_pid(),
         diagnostics.latency(),
-        diagnostics.midi_in(),
+        hosted.losses(),
         hosted.buses().input_count()
     );
     {

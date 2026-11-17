@@ -35,8 +35,8 @@
 //!
 //! Anything that renders, decodes, or opens a device. It is the **root leaf** —
 //! Engine-free, depending on no workspace crate (its outside
-//! dependencies are `atomic_float` and `libm`, plus `serde`
-//! behind its feature) and `#![forbid(unsafe_code)]`. The lock-free and `unsafe`
+//! dependencies are `atomic_float`, `libm` and `thiserror`, plus `serde`
+//! behind its feature), `no_std` with `alloc`, and `#![forbid(unsafe_code)]`. The lock-free and `unsafe`
 //! runtime primitives, the graph runtime, the engine, the device and the file
 //! codecs are other crates'. The exception is `Mint`, a bare atomic counter:
 //! it has no protocol to model, like `Param` and `AtomicSampleRate`, so it
@@ -113,8 +113,11 @@
 // below a struct), which leaves the type undocumented in rustdoc while it looks
 // documented in the source. Nothing else catches that.
 #![forbid(unsafe_code)]
+#![cfg_attr(not(test), no_std)]
 #![deny(missing_docs)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
+
+extern crate alloc;
 
 // `value` is declared first and `#[macro_use]`d so `unit!`, the macro that
 // defines every quantity, is in scope for the modules below — `macro_rules!`
@@ -129,6 +132,7 @@ mod value;
 
 // `ranged!` is `#[macro_export]`ed: it is the one way any crate writes a
 // range-checked type, used as `tutti_types::ranged!`.
+mod maths;
 mod ranged;
 
 // `id!` is `#[macro_export]`ed for the same reason: the one way any crate

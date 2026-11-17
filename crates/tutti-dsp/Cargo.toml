@@ -36,7 +36,7 @@ libm = "0.2.15"
 wide = { version = "1.6", default-features = false }
 
 # The `Error` enum's Display/Error impls.
-thiserror.workspace = true
+thiserror = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
 # Reproducible noise for the reverb's tests. Seeded, so an assertion is not

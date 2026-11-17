@@ -99,7 +99,7 @@ impl Seg {
         match self.transition {
             Transition::Step => db / self.r0,
             Transition::RampTime => {
-                2.0 * db / (self.r0 + (self.r0 * self.r0 + 2.0 * self.k * db).sqrt())
+                2.0 * db / (self.r0 + libm::sqrt(self.r0 * self.r0 + 2.0 * self.k * db))
             }
             Transition::RampBeats => ln_ratio(self.k, db, self.r0),
         }
@@ -155,7 +155,7 @@ impl Seg {
         self.in_range(match self.transition {
             Transition::Step => bpm0,
             Transition::RampTime => {
-                let root = (self.r0 * self.r0 + 2.0 * self.k * db).sqrt();
+                let root = libm::sqrt(self.r0 * self.r0 + 2.0 * self.k * db);
                 bpm0 + 60.0 * (2.0 * self.k * db) / (root + self.r0)
             }
             Transition::RampBeats => bpm0 + 60.0 * self.k * db,

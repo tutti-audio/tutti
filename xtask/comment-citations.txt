@@ -227,13 +227,11 @@
 2 crates/tutti-session/tests/nodes/sampler_tempo.rs
 1 crates/tutti-session/tests/nodes/tier_alignment.rs
 3 crates/tutti-session/tests/plugin/main.rs
-1 crates/tutti-session/tests/plugin/main_view.rs
 2 crates/tutti-session/tests/plugin/plugin_bypass.rs
 1 crates/tutti-session/tests/plugin/plugin_diagnostics.rs
 1 crates/tutti-session/tests/plugin/plugin_hosting.rs
 2 crates/tutti-session/tests/plugin/plugin_latency.rs
 1 crates/tutti-session/tests/plugin/plugin_modulation.rs
-1 crates/tutti-session/tests/plugin/plugin_params.rs
 1 crates/tutti-session/tests/plugin/plugin_presets.rs
 1 crates/tutti-session/tests/plugin/plugin.rs
 3 crates/tutti-session/tests/wiring/bus_edges.rs

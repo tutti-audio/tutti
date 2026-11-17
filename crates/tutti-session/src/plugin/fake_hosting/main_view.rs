@@ -5,86 +5,22 @@
 //!
 //! The plugin is `tutti_plugin_types::fake`'s: a control with an editor the
 //! test scripts (`FakePlugin::with_editor`, `request_editor_size`), hosted at a
-//! node with `Graph::host_plugin`, so no `plugin-server` and no display is
+//! node over `host`, so no `plugin-server` and no display is
 //! needed.
 
+use super::{Inert, host};
 use std::sync::Arc;
 
 use dpi::{PhysicalSize, Size};
 
+use crate::{DetachedSession, Opened, PluginChange, PluginEvent, Session, SessionEvent};
 use tutti_fixtures::StandInWindow;
 use tutti_graph::{ForkByClone, NodeKey};
 use tutti_nodes::testing::Const;
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::fake::{Call, FakePlugin};
-use tutti_plugin_types::{
-    ContentScale, EditorError, Normalized, ParamId, ParameterInfo, PluginFailure,
-};
-use tutti_session::{DetachedSession, Opened, PluginChange, PluginEvent, Session, SessionEvent};
+use tutti_plugin_types::{ContentScale, EditorError};
 use tutti_types::{ChannelLayout, SampleRate};
-
-/// A backend that answers nothing: the editor route is the fake control's.
-#[derive(Default)]
-struct Inert {
-    /// The thread the backend dropped on: the last owner of the handle lets go there.
-    dropped_on: Arc<std::sync::Mutex<Option<std::thread::ThreadId>>>,
-}
-
-impl Drop for Inert {
-    fn drop(&mut self) {
-        *self.dropped_on.lock().unwrap() = Some(std::thread::current().id());
-    }
-}
-
-impl tutti_plugin_types::AnyThread for Inert {
-    fn parameter_descriptors(&self) -> Option<Vec<ParameterInfo>> {
-        None
-    }
-    fn parameter_value(&self, _id: ParamId) -> Option<Normalized> {
-        None
-    }
-    fn set_parameter_value(&self, _id: ParamId, _value: Normalized) {}
-    fn parameter_plain(&self, _id: ParamId, _value: Normalized) -> Option<f64> {
-        None
-    }
-    fn parameter_normalized(&self, _id: ParamId, _plain: f64) -> Option<Normalized> {
-        None
-    }
-    fn parameter_text(&self, _id: ParamId, _value: Normalized) -> Option<String> {
-        None
-    }
-    fn parameter_value_from_text(&self, _id: ParamId, _text: &str) -> Option<Normalized> {
-        None
-    }
-    fn save_state(&self) -> Result<Vec<u8>, tutti_plugin::error::StateError> {
-        Err(tutti_plugin::error::StateError::NoStateRoute)
-    }
-    fn set_render_mode(&self, _mode: tutti_plugin_types::RenderMode) -> bool {
-        false
-    }
-    fn set_automation_mode(
-        &self,
-        _mode: tutti_plugin_types::AutomationMode,
-    ) -> Result<(), tutti_plugin_types::AutomationModeError> {
-        Err(tutti_plugin_types::AutomationModeError::PluginDead)
-    }
-}
-
-impl tutti_plugin_types::Health for Inert {
-    fn is_crashed(&self) -> bool {
-        false
-    }
-    fn crash_cause(&self) -> Option<PluginFailure> {
-        None
-    }
-    fn rate_refusal(&self) -> Option<(SampleRate, String)> {
-        None
-    }
-    fn block_counts(&self) -> tutti_plugin_types::BlockCounts {
-        tutti_plugin_types::BlockCounts::default()
-    }
-    fn terminate(&self, _reason: tutti_plugin_types::TerminationReason) {}
-}
 
 /// A detached session with a fake plugin (with an editor) at a node.
 fn session_with_editor() -> (DetachedSession, NodeKey, FakePlugin) {
@@ -108,13 +44,12 @@ fn hosting(backend: Inert) -> (DetachedSession, NodeKey, FakePlugin) {
         .build_detached(SampleRate::DEFAULT)
         .expect("a detached session builds");
     let (node, _) = s.graph().add(ForkByClone(Const::mono(0.0)));
-    s.graph()
-        .host_plugin(
-            node,
-            handle,
-            tutti_plugin::catalog::PluginRef::file("fake.clap").expect("a plugin file"),
-        )
-        .expect("the node is in the graph");
+    host(
+        &mut s,
+        node,
+        handle,
+        tutti_plugin::catalog::PluginRef::file("fake.clap").expect("a plugin file"),
+    );
     s.commit();
     (s, node.erase(), fake)
 }

@@ -183,7 +183,7 @@ impl Beat {
     #[inline]
     #[must_use]
     pub fn floor(self) -> Beat {
-        Beat(self.0.floor())
+        Beat(libm::floor(self.0))
     }
 
     /// How far into the current beat this position is — a *displacement* from
@@ -195,7 +195,7 @@ impl Beat {
     #[inline]
     #[must_use]
     pub fn fract(self) -> BeatDuration {
-        let f = self.0 - self.0.floor();
+        let f = self.0 - libm::floor(self.0);
         BeatDuration(if f >= 1.0 { 1.0_f64.next_down() } else { f })
     }
 
@@ -436,7 +436,7 @@ impl SamplePosition {
     #[inline]
     #[must_use]
     pub fn floor(self) -> SamplePosition {
-        SamplePosition(self.0.floor())
+        SamplePosition(libm::floor(self.0))
     }
 
     /// The interpolation fraction between this index and the next, in `[0, 1)`
@@ -447,7 +447,7 @@ impl SamplePosition {
     #[inline]
     #[must_use]
     pub fn fract(self) -> f64 {
-        let f = self.0 - self.0.floor();
+        let f = self.0 - libm::floor(self.0);
         if f >= 1.0 { 1.0_f64.next_down() } else { f }
     }
 
@@ -482,7 +482,7 @@ impl SamplePosition {
     #[inline]
     #[must_use]
     pub fn to_samples_floor(self) -> Samples {
-        Samples(self.0.floor().max(0.0) as usize)
+        Samples(libm::floor(self.0).max(0.0) as usize)
     }
 
     /// Whole frames needed to *contain* this position — rounds **up**.
@@ -498,7 +498,7 @@ impl SamplePosition {
     #[inline]
     #[must_use]
     pub fn to_samples_ceil(self) -> Samples {
-        Samples(self.0.ceil().max(0.0) as usize)
+        Samples(libm::ceil(self.0).max(0.0) as usize)
     }
 }
 
@@ -555,7 +555,7 @@ impl BeatDuration {
     #[inline]
     #[must_use]
     pub fn rem_euclid(self, rhs: BeatDuration) -> BeatDuration {
-        let r = self.0.rem_euclid(rhs.0);
+        let r = crate::maths::rem_euclid_f64(self.0, rhs.0);
         let span = rhs.0.abs();
         BeatDuration(if r >= span { span.next_down() } else { r })
     }

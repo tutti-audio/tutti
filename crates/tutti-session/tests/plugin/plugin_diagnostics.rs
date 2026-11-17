@@ -213,7 +213,8 @@ mod vst2 {
         let _ = s.update();
 
         let diag = || s.plugin_view(node).unwrap().diagnostics();
-        assert_eq!(diag().midi_in(), Losses::NONE, "nothing sent yet");
+        let losses = || s.plugin_view(node).unwrap().losses();
+        assert_eq!(losses(), Losses::NONE, "nothing sent yet");
         assert_eq!(diag().server_pid(), None, "no server in process");
         assert_eq!(diag().missed_chunks(), 0, "no pipeline in process");
         assert!(diag().follows_project_meter());
@@ -228,13 +229,13 @@ mod vst2 {
         writer.push_all(notes(300).map(|n| (tutti_session::Stamp::NextBlock, n)));
         render_block(&s);
         assert_eq!(
-            diag().midi_in(),
+            losses(),
             Losses::lost(300 - tutti_plugin_types::MIDI_STACK_CAPACITY as u64)
         );
         writer.push_all(notes(10).map(|n| (tutti_session::Stamp::NextBlock, n)));
         render_block(&s);
         assert_eq!(
-            diag().midi_in(),
+            losses(),
             Losses::lost(300 - tutti_plugin_types::MIDI_STACK_CAPACITY as u64),
             "a block within the cap lost nothing more"
         );
