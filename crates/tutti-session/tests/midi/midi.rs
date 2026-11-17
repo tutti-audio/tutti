@@ -192,7 +192,7 @@ fn a_file_plays_at_a_beat_and_a_format_2_file_is_refused() {
     use tutti_ump::U7;
     let track = Track::new().note(
         Tick(480),
-        240,
+        Tick(720),
         MidiChannel::FIRST,
         NoteNumber::of(62),
         U7::of(100),
