@@ -125,8 +125,8 @@ impl EventLog {
     /// Block until the events so far satisfy `holds`, or `SETTLE` elapses.
     /// Returns whether they did.
     fn wait_until(&self, holds: impl Fn(&[AuEvent]) -> bool) -> bool {
-        let start = Instant::now();
-        while start.elapsed() < SETTLE {
+        let until = Instant::now() + SETTLE;
+        while Instant::now() < until {
             if holds(&self.snapshot()) {
                 return true;
             }

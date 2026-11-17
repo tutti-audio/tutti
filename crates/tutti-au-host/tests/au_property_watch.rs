@@ -66,6 +66,12 @@ const RATE: tutti_types::SampleRate = tutti_types::SampleRate::SR_48K;
 /// units, the listener's own 200 ms `NOTIFICATION_INTERVAL` plus delivery.
 const SETTLE: Duration = Duration::from_secs(60);
 
+/// An observation window: how long the log is watched for an event that must
+/// not happen (a late tail of the last interval, a delivery to a disposed
+/// listener). Two of the listener's 200 ms notification intervals and more. It
+/// asserts no speed: a slow machine only delays the end.
+const OBSERVATION_WINDOW: Duration = Duration::from_millis(900);
+
 /// Every `PropertyChanged` id the listener delivered, oldest first.
 #[derive(Default)]
 struct Log {
@@ -312,9 +318,9 @@ fn a_dropped_listener_stops_receiving() {
     );
 
     // A second listener on the same unit, kept, on two properties the writes
-    // below do not touch. Its hearing the tail time marks the pre-drop delivery
-    // as over, and its hearing the parameter list marks the post-drop delivery
-    // as over.
+    // below do not touch. It proves the writes notify, and its events start the
+    // observation windows: its notification interval is its own, so they are not
+    // the end of the other listener's delivery.
     let control = Arc::new(Log::default());
     let control_listener =
         AuParameterListener::new(w.au.unit(), control.sink()).expect("create a control listener");
@@ -328,6 +334,9 @@ fn a_dropped_listener_stops_receiving() {
         control.wait_for(TailTime::ID),
         "the control listener never heard the tail change"
     );
+    // Whatever of the pre-drop interval is still in flight lands here, not in
+    // the baseline's count of post-drop deliveries.
+    std::thread::sleep(OBSERVATION_WINDOW);
 
     w.drop_listener();
     let before = w.log.count.load(Ordering::Acquire);
@@ -340,6 +349,7 @@ fn a_dropped_listener_stops_receiving() {
         control.wait_for(ParameterList::ID),
         "the control listener never heard the parameter list change"
     );
+    std::thread::sleep(OBSERVATION_WINDOW);
 
     assert_eq!(
         w.log.count.load(Ordering::Acquire),

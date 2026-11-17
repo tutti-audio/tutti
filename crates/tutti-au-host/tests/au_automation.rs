@@ -297,12 +297,9 @@ fn many_blocks_between_ticks_tell_each_parameter_once() {
 /// Polls until `holds`, the event a test waits on, or fails after a minute: a
 /// guard against a hang, not a limit on how long delivery takes.
 fn wait_until(holds: impl Fn() -> bool) {
-    let guard = std::time::Instant::now();
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(60);
     while !holds() {
-        assert!(
-            guard.elapsed() < std::time::Duration::from_secs(60),
-            "the event never came"
-        );
+        assert!(std::time::Instant::now() < until, "the event never came");
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
 }
@@ -312,8 +309,8 @@ fn wait_for_edits(controller: &mut AuController, want: usize) -> Vec<ParamEdit> 
     use tutti_plugin_types::Control;
     let main = tutti_fixtures::main_thread();
     let mut heard = Vec::new();
-    let guard = std::time::Instant::now();
-    while heard.len() < want && guard.elapsed() < std::time::Duration::from_secs(60) {
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while heard.len() < want && std::time::Instant::now() < until {
         Control::take_reported_edits(controller, main, &mut heard);
         std::thread::sleep(std::time::Duration::from_millis(20));
     }

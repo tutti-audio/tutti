@@ -149,9 +149,12 @@ const BLOCK: u32 = 512;
 /// is nowhere near it.
 const SETTLE: Duration = Duration::from_secs(60);
 
-/// How long [`EventLog::settle_then_clear`] waits with no arrival before it
-/// takes the log as drained: more than one full 200 ms notification interval.
-const QUIESCE: Duration = Duration::from_millis(900);
+/// An observation window: how long the log is watched for an event that must
+/// not happen (a delivery to a disposed listener, a late tail of the last
+/// interval). Two of the listener's 200 ms notification intervals and more. It
+/// asserts no speed: no event arrives in it or the test fails, and a slow
+/// machine only delays the end.
+const OBSERVATION_WINDOW: Duration = Duration::from_millis(900);
 
 // -------------------------------------------------------------- the event log
 
@@ -183,8 +186,8 @@ impl EventLog {
 
     /// Block until at least `n` events have arrived, or `SETTLE` elapses.
     fn wait_for_at_least(&self, n: usize) -> bool {
-        let start = Instant::now();
-        while start.elapsed() < SETTLE {
+        let until = Instant::now() + SETTLE;
+        while Instant::now() < until {
             if self.len() >= n {
                 return true;
             }
@@ -206,7 +209,7 @@ impl EventLog {
     fn settle_then_clear(&self) {
         let mut settled = self.len();
         loop {
-            std::thread::sleep(QUIESCE);
+            std::thread::sleep(OBSERVATION_WINDOW);
             let now = self.len();
             if now == settled {
                 break;
@@ -295,36 +298,35 @@ fn a_host_property_write_reaches_a_property_listener() {
 #[test]
 fn a_property_listener_does_not_receive_properties_it_did_not_watch() {
     let _g = lock();
-    let mut au = DELAY.open(RATE, BLOCK);
+    let mut au = DISTORTION.open(RATE, BLOCK);
 
     let log = EventLog::default();
     let listener = AuParameterListener::new(au.unit(), log.sink()).expect("create a listener");
     listener
         .watch_property(Latency::ID, EventAddress::GLOBAL)
         .expect("watch_property on kAudioUnitProperty_Latency");
-    // A second listener on the same unit, watching the property the writes
-    // change: its hearing them marks the end of their delivery, and it proves
-    // the writes do notify on this machine.
-    let control = EventLog::default();
-    let control_listener =
-        AuParameterListener::new(au.unit(), control.sink()).expect("create a control listener");
-    control_listener
-        .watch_property(BypassEffect::ID, EventAddress::GLOBAL)
-        .expect("watch BypassEffect on the control");
+    // The control is on the same listener, so it shares the notification
+    // interval: a preset load after the bypass writes is heard in the same
+    // interval or a later one, so by then the writes' events would have been.
+    listener
+        .watch_property(PresentPreset::ID, EventAddress::GLOBAL)
+        .expect("watch PresentPreset as the control");
 
     au.set_bypass(true).expect("bypass on");
     au.set_bypass(false).expect("bypass off");
+    au.load_factory_preset(5).expect("load factory preset 5");
 
     assert!(
-        control.wait_for_at_least(1),
-        "the control half failed: the watched BypassEffect change did not arrive, \
+        log.wait_for_at_least(1),
+        "the control half failed: the watched PresentPreset change did not arrive, \
          so the silence below proves nothing"
     );
-    assert_eq!(
-        log.snapshot(),
-        Vec::new(),
-        "a Latency watcher must not see BypassEffect changes"
+    let ids = property_ids(&log.snapshot());
+    assert!(
+        ids.iter().all(|id| *id == PresentPreset::ID),
+        "a Latency watcher must not see BypassEffect changes; got {ids:?}"
     );
+    log.settle_then_clear();
 
     listener
         .watch_property(BypassEffect::ID, EventAddress::GLOBAL)
@@ -434,23 +436,20 @@ fn registration_never_refuses_a_property_id() {
     }
 
     // And accepting the registrations does not conjure events out of nothing: a
-    // control listener on a real property hears a change, and by then the
-    // others would have.
-    let control = EventLog::default();
-    let control_listener =
-        AuParameterListener::new(au.unit(), control.sink()).expect("create a control listener");
-    control_listener
+    // real property watched on the same listener, so on the same notification
+    // interval, is changed and heard, and nothing but it has been delivered.
+    listener
         .watch_property(BypassEffect::ID, EventAddress::GLOBAL)
-        .expect("watch BypassEffect on the control");
+        .expect("watch BypassEffect as the control");
     au.set_bypass(true).expect("bypass on");
     assert!(
-        control.wait_for_at_least(1),
+        log.wait_for_at_least(1),
         "the control half failed: the watched BypassEffect change did not arrive"
     );
-    assert_eq!(
-        log.snapshot(),
-        Vec::new(),
-        "registering for undeclared properties must not deliver anything"
+    let ids = property_ids(&log.snapshot());
+    assert!(
+        ids.iter().all(|id| *id == BypassEffect::ID),
+        "registering for undeclared properties must not deliver anything; got {ids:?}"
     );
 }
 
@@ -477,7 +476,7 @@ fn registration_never_refuses_a_property_id() {
 /// lands, and anything still in flight arrives after `clear()` and is then
 /// misattributed to the post-teardown writes.
 ///
-/// So the listener is quiesced — a full `QUIESCE` with no new arrivals — *before*
+/// So the listener is quiesced — a full `OBSERVATION_WINDOW` with no new arrivals — *before*
 /// it is dropped. That is what makes the count afterwards attributable to the
 /// writes that follow the dispose, which is the only thing a stale registration
 /// could explain.
@@ -504,8 +503,10 @@ fn a_dropped_property_listener_stops_delivering() {
     // post-teardown writes — see this test's docs.
     log.settle_then_clear();
 
-    // A second listener on the same unit, kept: its hearing the writes below
-    // marks the end of their delivery.
+    // A second listener on the same unit, kept: it proves the writes below
+    // notify, and its last event starts the observation window. Its notification
+    // interval is its own, so its event is not the end of the disposed
+    // listener's delivery; the window is.
     let control = EventLog::default();
     let control_listener =
         AuParameterListener::new(au.unit(), control.sink()).expect("create a control listener");
@@ -524,6 +525,7 @@ fn a_dropped_property_listener_stops_delivering() {
         control.wait_for_at_least(1),
         "the control listener never heard the writes"
     );
+    std::thread::sleep(OBSERVATION_WINDOW);
     assert_eq!(
         log.snapshot(),
         Vec::new(),

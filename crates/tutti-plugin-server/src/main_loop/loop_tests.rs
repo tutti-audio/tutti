@@ -46,14 +46,15 @@ enum Step {
 /// A condition the script's silence ends on, run on the loop's thread.
 struct Until {
     holds: Box<dyn FnMut() -> bool + Send>,
-    since: Option<Instant>,
+    /// When the wait gives up: [`HANG_GUARD`] after the first wait on it.
+    give_up_at: Option<Instant>,
 }
 
 impl Until {
     fn step(holds: impl FnMut() -> bool + Send + 'static) -> Step {
         Step::Until(Self {
             holds: Box::new(holds),
-            since: None,
+            give_up_at: None,
         })
     }
 }
@@ -73,6 +74,8 @@ struct Script {
     waits: std::sync::Arc<std::sync::atomic::AtomicU64>,
     /// Run each time the loop goes to wait, on its thread, before `waits` counts it.
     on_wait: Option<Box<dyn FnMut() + Send>>,
+    /// When the loop must have read the message it was told was readable.
+    message_due_by: Option<Instant>,
 }
 
 impl Script {
@@ -82,6 +85,7 @@ impl Script {
             heard: Vec::new(),
             waits: std::sync::Arc::default(),
             on_wait: None,
+            message_due_by: None,
         }
     }
 }
@@ -123,11 +127,10 @@ impl Script {
                 let Some(Step::Until(until)) = self.steps.front_mut() else {
                     unreachable!("matched an until")
                 };
-                let since = *until.since.get_or_insert_with(Instant::now);
-                assert!(
-                    since.elapsed() < HANG_GUARD,
-                    "the script's event never came"
-                );
+                let give_up_at = *until
+                    .give_up_at
+                    .get_or_insert_with(|| Instant::now() + HANG_GUARD);
+                assert!(Instant::now() < give_up_at, "the script's event never came");
                 if (until.holds)() {
                     self.steps.pop_front();
                 } else {
@@ -144,11 +147,23 @@ impl Script {
                 Ok(false)
             }
             // A message is there to read, or the script is over and `recv` says so.
-            _ => Ok(true),
+            front => {
+                if matches!(front, Some(Step::Send(_))) {
+                    let give_up_at = *self
+                        .message_due_by
+                        .get_or_insert_with(|| Instant::now() + HANG_GUARD);
+                    assert!(
+                        Instant::now() < give_up_at,
+                        "the loop never read the message"
+                    );
+                }
+                Ok(true)
+            }
         }
     }
 
     fn recv_inner(&mut self) -> BridgeResult<HostMessage> {
+        self.message_due_by = None;
         match self.steps.pop_front() {
             Some(Step::Send(message)) => Ok(message),
             _ => Err(BridgeError::ConnectionFailed("the script is over".into())),
@@ -371,7 +386,7 @@ impl Drop for TimerPeriod {
 /// (`wakeups`). The script is silent until the timer has fired three times; a
 /// loop that served it only at the tick would not within the script's guard.
 #[test]
-fn a_timer_fires_at_its_period_through_the_loop() {
+fn a_timer_is_served_at_its_deadline_not_the_tick() {
     let _lock = crate::test_utils::plugin_load_lock();
     let probe = crate::test_utils::clap();
     probe.thread_reset();
@@ -399,8 +414,10 @@ fn a_timer_fires_at_its_period_through_the_loop() {
     );
 }
 
-/// **A request is answered while the loop is ticking**: a message after the
-/// loop has idled through several waits is served and replied to.
+/// **A request is answered as it arrives, not at the next tick.** The loop's
+/// tick is five minutes: only the wait ending readable can serve the message,
+/// and a loop that read messages only at its tick never would within the
+/// script's guard.
 #[test]
 fn a_message_after_silence_is_answered() {
     let _lock = crate::test_utils::plugin_load_lock();
@@ -417,7 +434,7 @@ fn a_message_after_silence_is_answered() {
     ]);
     script.waits = waits;
 
-    run(&mut session, &mut script);
+    run_ticking(&mut session, &mut script, Duration::from_secs(300));
 
     assert!(
         matches!(
@@ -510,6 +527,14 @@ fn a_slow_paint_on_the_main_loop_delays_no_block() {
         Arc::new(AtomicBool::new(false)),
     );
     let waits = Arc::<AtomicU64>::default();
+    /// Stops the sender when the test ends any way, a panic in the loop included.
+    struct StopOnDrop(Arc<AtomicBool>);
+    impl Drop for StopOnDrop {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+    let _stop_on_exit = StopOnDrop(stop.clone());
     let sender = Arc::new(Mutex::new(None));
     let mut script = Script::new([
         Step::Send(load_message()),

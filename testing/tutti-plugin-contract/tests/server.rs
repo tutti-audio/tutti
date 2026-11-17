@@ -154,17 +154,21 @@ fn served<F: Format>(
 
 /// A hang guard for a loop that runs until an event: generous, so a loaded
 /// runner never trips it, and failing a loop whose event never comes.
-struct HangGuard(std::time::Instant);
+struct HangGuard {
+    until: std::time::Instant,
+}
 
 impl HangGuard {
     const LIMIT: std::time::Duration = std::time::Duration::from_secs(60);
 
     fn new() -> Self {
-        Self(std::time::Instant::now())
+        Self {
+            until: std::time::Instant::now() + Self::LIMIT,
+        }
     }
 
     fn check(&self, what: &str) {
-        assert!(self.0.elapsed() < Self::LIMIT, "{what}");
+        assert!(std::time::Instant::now() < self.until, "{what}");
     }
 }
 
