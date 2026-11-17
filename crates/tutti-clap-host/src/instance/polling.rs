@@ -505,9 +505,11 @@ fn fire_due_timers(
 fn take_due_timers(timers: &mut [TimerEntry], now: std::time::Instant) -> Vec<u32> {
     let mut due = Vec::new();
     for timer in timers.iter_mut() {
-        // A timer no pass has seen starts its period at this pass, and is not
-        // due in it.
+        // A timer no pass has seen was registered since the last one (a
+        // registration reads no clock), so it is taken as due: its period
+        // starts at this pass.
         let Some(last_fire) = timer.last_fire else {
+            due.push(timer.id);
             timer.last_fire = Some(now);
             continue;
         };
@@ -756,10 +758,11 @@ mod main_thread_work_tests {
         assert_eq!(n, 1);
     }
 
-    /// **A timer registered with no clock starts its period at the first
-    /// pass's `now`, which does not fire it, and asks for that pass at once.**
+    /// **A timer registered with no clock is due at the first pass, which
+    /// starts its period at that pass's `now`, and asks for that pass at
+    /// once.**
     #[test]
-    fn a_registered_timer_is_armed_by_the_first_pass() {
+    fn a_registered_timer_is_due_at_the_first_pass() {
         let state = TimerState::new();
         let t0 = state.epoch();
         state.timers.lock().unwrap().push(TimerEntry {
@@ -770,11 +773,15 @@ mod main_thread_work_tests {
         state.note_due(t0);
         assert_eq!(state.next_due_nanos(), 0, "asks for a pass at once");
         let later = t0 + Duration::from_millis(500);
-        assert_eq!(fire_due_timers(&state, later, |_| {}), 0);
+        assert_eq!(fire_due_timers(&state, later, |_| {}), 1);
         assert_eq!(
             state.next_due_nanos(),
             u64::try_from(Duration::from_millis(510).as_nanos()).unwrap(),
-            "its period runs from the pass that saw it"
+            "its period runs from the pass that fired it"
+        );
+        assert_eq!(
+            fire_due_timers(&state, later + Duration::from_millis(5), |_| {}),
+            0
         );
         assert_eq!(
             fire_due_timers(&state, later + Duration::from_millis(10), |_| {}),

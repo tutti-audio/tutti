@@ -633,9 +633,7 @@ fn timer_registers_fires_on_the_main_thread_and_stops_after_unregister() {
     );
     let timer_id = cap.timer_id;
 
-    // The first poll starts the timer's period (a registration reads no
-    // clock); the next fires it. One poll, one callback.
-    assert_eq!(inst.loaded_mut().poll_timers(main_thread()), 0);
+    // One poll, one callback.
     assert_eq!(
         inst.loaded_mut().poll_timers(main_thread()),
         1,
