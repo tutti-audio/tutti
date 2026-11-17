@@ -495,9 +495,7 @@ impl Track {
     #[must_use]
     pub fn profile_on(mut self, request: ProfileOnRequest) -> Self {
         let leading = clip_file::leading_profile_len(&header_packets(&self.header));
-        let packets = clip_file::profile_packets(request)
-            .into_iter()
-            .map(|ump| (Tick(0), to_clip::event(ump)));
+        let packets = clip_file::profile_packets(request).map(|ump| (Tick(0), to_clip::event(ump)));
         self.header.splice(leading..leading, packets);
         self
     }

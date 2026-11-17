@@ -1311,6 +1311,22 @@ fn the_headers_profile_is_read_typed() {
     assert_eq!(back.tracks()[0].profiles(), file.tracks()[0].profiles());
 }
 
+/// A header whose Set Profile On is Message Format Version 1, which has no
+/// Number of Channels field, loads and asks for 0 Channels.
+/// Spec: m2-116/6.2#2
+#[test]
+fn a_version_1_set_profile_on_loads_with_no_channels() {
+    let file = read_with_leading(&profile_payload(0x03, 1, MPE, &[])).unwrap();
+    assert_eq!(
+        file.tracks()[0].profiles(),
+        Ok(vec![ProfileOnRequest::Channel {
+            channel: MidiChannel::of(3),
+            profile: ProfileId::MPE,
+            channels: ProfileChannels::of(0),
+        }])
+    );
+}
+
 /// A header with no Set Profile On has no Profile.
 /// Spec: m2-116/6.2#2
 #[test]

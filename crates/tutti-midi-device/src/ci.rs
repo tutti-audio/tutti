@@ -350,6 +350,17 @@ impl CiHeader {
     }
 }
 
+/// `payload` as SysEx7 packets on `group`. Every byte a CI message encodes is
+/// 7-bit: the fields are `U7`, the MUIDs and sizes are cut to 7-bit bytes and a
+/// text is ASCII.
+fn sysex7_packets(group: MidiGroup, payload: &[u8]) -> std::vec::IntoIter<Ump> {
+    Sysex7Packets::from_payload(group, payload)
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .into_iter()
+}
+
 /// Appends the preamble (§5.2.1): `7E device_id 0D sub_id2 version`, the Source
 /// MUID's four bytes and the Destination MUID.
 fn encode_preamble(
@@ -808,14 +819,7 @@ impl CiMessage {
     /// for the payload; a MIDI 1.0 byte stream frames
     /// [`encode`](Self::encode)'s bytes with `tutti_ump::frame` instead.
     pub fn packets(&self, group: MidiGroup) -> std::vec::IntoIter<Ump> {
-        let payload = self.encode();
-        // Every byte a CI message encodes is 7-bit: the fields are `U7`, the
-        // MUIDs and sizes are cut to 7-bit bytes and a text is ASCII.
-        Sysex7Packets::from_payload(group, &payload)
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>()
-            .into_iter()
+        sysex7_packets(group, &self.encode())
     }
 
     /// Decodes a CI byte payload (as [`encode`](Self::encode) produces, or a

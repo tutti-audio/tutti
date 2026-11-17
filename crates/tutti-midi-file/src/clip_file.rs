@@ -14,13 +14,14 @@
 //! messages (no DCS), the DCTPQ, and any UMP messages that configure a
 //! receiver (Bank Select, Program Change, volume, System Exclusive), each
 //! behind its own DCS. It holds at most one Set Tempo and one Set Time
-//! Signature (sections 6.1 to 6.1.2), both at delta 0. A leading Set Profile
-//! On is a `ProfileOnRequest` (section 6.2), and one that does not read is
-//! refused. The DCS before Start of Clip is the header's last gap, and with
-//! the others sets the total time allocated to the Clip Configuration Header
+//! Signature (sections 6.1 to 6.1.2), both at delta 0. A leading Set Profile On
+//! is a [`ProfileOnRequest`](tutti_midi_device::ProfileOnRequest) (section
+//! 6.2), and one that does not read is
+//! refused. The DCS before Start of Clip is the header's last gap, and with the
+//! others sets the total time allocated to the Clip Configuration Header
 //! (section 6.1): it is kept ([`ParsedClip::header_end`]). The rest, from Start
-//! of Clip to End of Clip, is the Sequence Data (section 7). No Property Exchange message is in
-//! either (sections 6.4 and 7.2).
+//! of Clip to End of Clip, is the Sequence Data (section 7). No Property
+//! Exchange message is in either (sections 6.4 and 7.2).
 //!
 //! Start of Clip is tick 0 of the sequence, and music begins there: the first
 //! bar starts at Start of Clip (section 7.1), a pickup bar is that first bar

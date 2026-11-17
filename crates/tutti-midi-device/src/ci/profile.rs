@@ -8,7 +8,7 @@
 //! Each message's destination follows its table in M2-101 §7. The four reports
 //! (Added, Removed, Enabled, Disabled) always go to the Broadcast MUID and carry
 //! no `to`; the Inquiry, the Reply, Set On, Set Off and the two Details messages
-//! go to one MUID; Profile Specific Data carries a [`Destination`](super::Destination),
+//! go to one MUID; Profile Specific Data carries a [`Destination`],
 //! since §7.12 allows the Broadcast MUID only where the Profile defines it. A
 //! message of the wrong kind decodes to an [`Unread`](super::Unread) with
 //! [`WrongDestination`](super::UnreadReason::WrongDestination). A Message Format
@@ -24,11 +24,11 @@
 
 use std::vec::Vec;
 
-use tutti_ump::{
-    ManufacturerId, MidiChannel, MidiGroup, Sysex7Packets, U7, U14, U28, Ump, first_non_seven_bit,
-};
+use tutti_ump::{ManufacturerId, MidiChannel, MidiGroup, U7, U14, U28, Ump, first_non_seven_bit};
 
-use super::{CI_VERSION, CiDeviceId, CiVersion, Destination, encode_preamble, read};
+use super::{
+    CI_VERSION, CiDeviceId, CiVersion, Destination, encode_preamble, read, sysex7_packets,
+};
 
 /// Profile Inquiry, Sub-ID#2 `0x20` (§7.2).
 pub const SUB_ID2_PROFILE_INQUIRY: u8 = 0x20;
@@ -477,9 +477,6 @@ impl DetailsData {
     }
 }
 
-#[cfg(test)]
-mod tests;
-
 /// A Profile Id and its Number of Channels as a Set Profile On, Profile Enabled
 /// or Profile Disabled message carries them (§7.8, §7.10, §7.11).
 pub(super) fn encode_with_count(
@@ -637,11 +634,9 @@ impl ProfileOnRequest {
 
     /// The message as SysEx7 packets on `group` (M2-104 section 7.7).
     pub fn packets(self, group: MidiGroup) -> std::vec::IntoIter<Ump> {
-        // Every byte is 7-bit: the fields are typed to be.
-        Sysex7Packets::from_payload(group, &self.encode())
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>()
-            .into_iter()
+        sysex7_packets(group, &self.encode())
     }
 }
+
+#[cfg(test)]
+mod tests;
