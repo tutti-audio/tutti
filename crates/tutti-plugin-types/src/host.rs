@@ -36,9 +36,10 @@ use crate::{
 };
 use crate::{Delivered, ParamEdit, bypass_parameter, bypass_value, is_bypassed};
 use crate::{
-    FdId, MainThreadMarker, Prepare, Ready, RenderMode, RenderModeSupport, Request, RescanScope,
-    RestartRules, StateUse, TimerId, TrackInfo, Wakeups,
+    MainThreadMarker, Prepare, RenderMode, RenderModeSupport, Request, RescanScope, RestartRules,
+    StateUse, TimerId, TrackInfo, Wakeups,
 };
+use tutti_plugin_ipc_ffi::{FdId, Ready};
 use tutti_types::ParamId;
 
 /// Writes the plugin's bypass parameter, if it lists one: the default of

@@ -93,7 +93,7 @@ impl Hand {
     pub fn plane(&self, c: usize) -> &[f32] {
         match self.status {
             Status::Silent | Status::Idle => &self.silence[..self.len],
-            _ => self.direct.output(c),
+            _ => self.direct.output().plane(c).samples(),
         }
     }
 

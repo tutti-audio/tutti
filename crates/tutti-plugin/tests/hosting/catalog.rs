@@ -117,7 +117,7 @@ fn a_scan_measures_only_when_asked() {
 }
 
 /// **`measure` measures a file a scan already probed**, which a scan never
-/// revisits while the file is unchanged, and delivers its row as a delta that
+/// revisits while the file is unchanged, and delivers its row as a change that
 /// replaces the old one.
 #[test]
 fn measure_measures_a_plugin_a_scan_left_unmeasured() {
@@ -167,14 +167,14 @@ fn register_and_measure_refuse_a_missing_or_unrecognized_file_at_the_call() {
     let text = dir.path().join("notes.txt");
     std::fs::write(&text, b"x").expect("a file");
 
-    assert_eq!(
+    assert!(matches!(
         catalog.register(&gone).unwrap_err(),
-        FilesError::Missing(gone)
-    );
-    assert_eq!(
+        FilesError::Missing(path) if path == gone
+    ));
+    assert!(matches!(
         catalog.register(&text).unwrap_err(),
-        FilesError::UnrecognizedFormat(text)
-    );
+        FilesError::UnrecognizedFormat(path) if path == text
+    ));
 }
 
 #[cfg(unix)]
@@ -525,7 +525,7 @@ mod links {
         let rows: Vec<_> = catalog.db().rows().map(|(p, _)| p.to_path_buf()).collect();
         assert_eq!(rows, std::slice::from_ref(&canonical));
         let row = catalog.db().row(&canonical).expect("the row");
-        assert_eq!(row.format, tutti_plugin_db::PluginFormat::Clap);
+        assert_eq!(row.format, tutti_plugin_types::PluginFormat::Clap);
         let args = std::fs::read_to_string(log).expect("the probe ran");
         assert!(args.contains("--as clap"), "{args:?}");
     }
@@ -537,7 +537,7 @@ mod links {
     #[test]
     fn a_scanned_link_to_a_differently_named_target_loads_by_its_catalog_key() {
         use tutti_plugin::catalog::{Hosting, Plugin, PluginId};
-        use tutti_plugin_db::PluginFormat;
+        use tutti_plugin_types::PluginFormat;
         let dir = tempfile::TempDir::new().expect("a scratch directory");
         let target = dir.path().join("libfoo.so");
         std::fs::copy(tutti_fixtures::clap_probe(), &target).expect("a plugin");

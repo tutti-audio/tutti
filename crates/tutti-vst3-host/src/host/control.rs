@@ -651,7 +651,7 @@ impl EditorWindow for Vst3Loaded {
     fn wake(
         &mut self,
         main: MainThreadMarker,
-        ready: &[tutti_plugin_types::Ready],
+        ready: &[tutti_plugin_ipc_ffi::Ready],
         now: std::time::Instant,
     ) {
         self.plugin.wake_editor_loop(main, ready, now);

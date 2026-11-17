@@ -160,7 +160,7 @@ macro_rules! served_control {
             fn wake(
                 &mut self,
                 main: MainThreadMarker,
-                ready: &[tutti_plugin_types::Ready],
+                ready: &[tutti_plugin_ipc_ffi::Ready],
                 now: std::time::Instant,
             ) {
                 self.link.bridge.wake(main, ready, now);

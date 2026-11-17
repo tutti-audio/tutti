@@ -6,10 +6,11 @@ use std::path::Path;
 use std::time::Instant;
 use tutti_plugin_types::MainThreadMarker;
 
+use tutti_plugin_ipc_ffi::FdId;
 use tutti_plugin_types::features::probed;
 use tutti_plugin_types::{
     AutomationMode, BusRole, ChannelLayout, ClapFeature, ContentScale, Control, Delivered,
-    EditorPresence, EditorWindow, FdId, Features, Layout, LoadedPlugin, Normalized, OwnBypass,
+    EditorPresence, EditorWindow, Features, Layout, LoadedPlugin, Normalized, OwnBypass,
     ParamAccess, ParamEdit, ParamFlags, ParamMapping, ParamWriteError, ParameterInfo, PluginBus,
     PluginBuses, PluginClass, PluginDescriptor, PluginError, PluginResult, PluginTail, PresetId,
     ProcessWake, RenderMode, RenderModeSupport, Request, RescanScope, Samples, StateUse, TimerId,
@@ -242,7 +243,7 @@ impl ClapLoaded {
             self.woken
                 .announce
                 .drain(..)
-                .map(|fd| Request::Fd(FdId(fd))),
+                .map(|fd| Request::Fd(FdId::new(fd))),
         );
     }
 }
@@ -451,7 +452,7 @@ impl Control for ClapLoaded {
     }
 
     fn service_fd(&mut self, main: MainThreadMarker, id: FdId) {
-        self.fire_fd(main, id.0);
+        self.fire_fd(main, id.get());
     }
 
     /// Everything one main-thread pass turns into the core's requests: what
@@ -596,7 +597,12 @@ impl EditorWindow for ClapLoaded {
     /// Latches what fired for [`take_requests`](Control::take_requests): the
     /// lifecycle serves it within its budget, so the plugin's `on_fd` and
     /// `on_timer` run where its other main-thread work does.
-    fn wake(&mut self, _main: MainThreadMarker, ready: &[tutti_plugin_types::Ready], now: Instant) {
+    fn wake(
+        &mut self,
+        _main: MainThreadMarker,
+        ready: &[tutti_plugin_ipc_ffi::Ready],
+        now: Instant,
+    ) {
         self.latch_wakeups(ready, now);
     }
 

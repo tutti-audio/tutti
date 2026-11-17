@@ -176,6 +176,7 @@ fn distortion_process_is_allocation_free_fed_and_unfed() {
                 "{kind:?} {factor:?}: oversampling must be in force where a factor is set"
             );
             for (c, x) in node.inputs_mut().iter_mut().enumerate() {
+                let x = x.into_samples_mut();
                 for (i, s) in x.iter_mut().enumerate() {
                     *s = 0.9 * (((i + 7 * c) % 13) as f32 / 6.0 - 1.0);
                 }
@@ -185,10 +186,17 @@ fn distortion_process_is_allocation_free_fed_and_unfed() {
             }
             node.block();
             assert!(
-                (0..3).all(|c| node.output(c).iter().any(|s| s.abs() > 1e-6)),
+                (0..3).all(|c| node
+                    .output()
+                    .plane(c)
+                    .samples()
+                    .iter()
+                    .any(|s| s.abs() > 1e-6)),
                 "{kind:?} {factor:?} fed={fed} rendered a silent channel; the gate would walk no curve"
             );
-            let first: Vec<Vec<f32>> = (0..3).map(|c| node.output(c).to_vec()).collect();
+            let first: Vec<Vec<f32>> = (0..3)
+                .map(|c| node.output().plane(c).samples().to_vec())
+                .collect();
             if fed {
                 assert_ne!(
                     first, unfed,
@@ -236,6 +244,7 @@ fn distortion_antialiasing_is_allocation_free_fed_and_unfed() {
                     };
                     let mut node = Direct::new(node, SampleRate::SR_48K, 64);
                     for (c, x) in node.inputs_mut().iter_mut().enumerate() {
+                        let x = x.into_samples_mut();
                         for (i, s) in x.iter_mut().enumerate() {
                             *s = 0.9 * (((i + 7 * c) % 13) as f32 / 6.0 - 1.0);
                         }
@@ -245,7 +254,12 @@ fn distortion_antialiasing_is_allocation_free_fed_and_unfed() {
                     }
                     node.block();
                     assert!(
-                        (0..3).all(|c| node.output(c).iter().any(|s| s.abs() > 1e-6)),
+                        (0..3).all(|c| node
+                            .output()
+                            .plane(c)
+                            .samples()
+                            .iter()
+                            .any(|s| s.abs() > 1e-6)),
                         "{kind:?} {order:?} fed={fed} rendered a silent channel"
                     );
                     assert_no_alloc::assert_no_alloc(|| {

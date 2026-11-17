@@ -27,7 +27,8 @@
 //! use tutti_plugin::catalog::{
 //!     Catalog, CatalogConfig, NO_SCAN_DIRS, Plugin, PluginId,
 //! };
-//! use tutti_plugin_db::{PluginDb, PluginFormat};
+//! use tutti_plugin_db::PluginDb;
+//! use tutti_plugin_types::PluginFormat;
 //! use tutti_types::Samples;
 //! use tutti_graph::NodeKey;
 //! use tutti_transport::TempoReader;
@@ -443,7 +444,7 @@ pub mod catalog {
     pub use crate::host::plugin_ref::PluginRef;
     pub use tutti_plugin_db::{
         FileFailure, FilesError, PluginDb, ProbeFailure, ProbeFailureKind, Scan, ScanBusy,
-        ScanPoll, ScanResult,
+        ScanError, ScanPoll, ScanResult,
     };
     pub use tutti_plugin_ipc::{AudioConfig, CatalogConfig, NO_SCAN_DIRS};
     pub use tutti_plugin_types::{PluginDescriptor, PluginId, PluginRole};

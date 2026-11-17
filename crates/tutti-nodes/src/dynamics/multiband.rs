@@ -1573,7 +1573,7 @@ mod tests {
         let mut y = Vec::new();
         for chunk in x.chunks(512) {
             params[port] = Some(&lane[..chunk.len()]);
-            y.extend_from_slice(&drive(&mut n, RATE, &[chunk], &params)[0]);
+            y.extend_from_slice(&drive(&mut n, RATE, Planes::new(&[chunk]).unwrap(), &params)[0]);
         }
         let x4 = warp(10_000.0, 1_000.0).powi(4);
         let want = x4 / (1.0 + x4) * libm::pow(10.0, 6.0 / 20.0);
@@ -1601,7 +1601,12 @@ mod tests {
             let mut params: Vec<Option<&[f32]>> = vec![None; port + 1];
             for _ in 0..SETTLE / 512 {
                 params[port] = Some(&lane);
-                drive(&mut n, RATE, &[&[0.5f32; 512]], &params);
+                drive(
+                    &mut n,
+                    RATE,
+                    Planes::new(&[&[0.5f32; 512]]).unwrap(),
+                    &params,
+                );
             }
             n.gain_reduction_db(0)
         };
@@ -1634,7 +1639,13 @@ mod tests {
         lane[128..].fill(8.0);
         let mut params: Vec<Option<&[f32]>> = vec![None; port + 1];
         params[port] = Some(&lane);
-        let y = drive(&mut n, RATE, &[&[0.5f32; 256]], &params).remove(0);
+        let y = drive(
+            &mut n,
+            RATE,
+            Planes::new(&[&[0.5f32; 256]]).unwrap(),
+            &params,
+        )
+        .remove(0);
         assert!(
             y[..128].iter().all(|s| (s - 0.5).abs() < 1e-6),
             "reduced before the step: {}",
@@ -1659,7 +1670,7 @@ mod tests {
         let mut y = Vec::new();
         for chunk in x.chunks(512) {
             params[port] = Some(&lane[..chunk.len()]);
-            y.extend_from_slice(&drive(&mut n, RATE, &[chunk], &params)[0]);
+            y.extend_from_slice(&drive(&mut n, RATE, Planes::new(&[chunk]).unwrap(), &params)[0]);
         }
         let amp = amplitude_at(&y[SETTLE..], 2_000.0, FS);
         assert!((amp - 0.5).abs() < TOL, "{amp}");
@@ -1672,10 +1683,16 @@ mod tests {
         c.set_crossover(0, Hz(200.0));
         let mut n = prepared(n);
         let x = sine(1_000.0, FS, 1_024);
-        let big = drive(&mut n, RATE, &[&x], &[]).remove(0);
+        let big = drive(&mut n, RATE, Planes::new(&[&x]).unwrap(), &[]).remove(0);
         assert!(big.iter().all(|s| s.is_finite()) && big[1_023].abs() > 0.0);
         for s in &x[..8] {
-            let one = drive(&mut n, RATE, &[std::slice::from_ref(s)], &[]).remove(0);
+            let one = drive(
+                &mut n,
+                RATE,
+                Planes::new(&[std::slice::from_ref(s)]).unwrap(),
+                &[],
+            )
+            .remove(0);
             assert!(one[0].is_finite());
         }
     }
@@ -1759,7 +1776,10 @@ mod tests {
                 params[THRESHOLD] = Some(&threshold[at..end]);
                 params[3 * PER_BAND] = Some(&cutoff[at..end]);
                 let inputs = [&x[0][at..end], &x[1][at..end]];
-                for (o, y) in out.iter_mut().zip(drive(&mut n, RATE, &inputs, &params)) {
+                for (o, y) in
+                    out.iter_mut()
+                        .zip(drive(&mut n, RATE, Planes::new(&inputs).unwrap(), &params))
+                {
                     o.extend(y);
                 }
                 at = end;

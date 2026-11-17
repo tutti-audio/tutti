@@ -12,7 +12,8 @@ use std::time::{Duration, Instant};
 use tutti_clap_test_plugin::{ClapProbe, ClapSwitch, Site, ThreadAnswer};
 
 use tutti_plugin::catalog::{Catalog, CatalogConfig, Hosting, Locator, NO_SCAN_DIRS, PluginId};
-use tutti_plugin_db::{PluginDb, PluginFormat, ScanPoll};
+use tutti_plugin_db::{PluginDb, ScanPoll};
+use tutti_plugin_types::PluginFormat;
 use tutti_session::{
     JobStatus, LoadError, Peer, PoolError, PoolEvent, PoolState, Presence, Session, SessionEvent,
 };

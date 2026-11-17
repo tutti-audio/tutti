@@ -287,6 +287,7 @@ impl<F: Loaded> InProcClient<F> {
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
+    use tutti_buffers::Planes;
 
     use tutti_fixtures::main_thread;
     use tutti_graph::contract::{self, Driven, drive_input};
@@ -383,7 +384,7 @@ mod tests {
     fn block(node: &mut PluginNode<FakeLoaded>, frame: u64) -> Driven {
         let mut x = vec![0.0f32; BLOCK];
         x[0] = 1.0;
-        drive_input(node, &env(frame), &[&x, &x], &[], &[])
+        drive_input(node, &env(frame), Planes::new(&[&x, &x]).unwrap(), &[], &[])
     }
 
     /// The plugin changes its ports to `outputs` channels and the pump reads

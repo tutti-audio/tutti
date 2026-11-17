@@ -8,6 +8,7 @@
 //! a cut shows as a step of the tone's amplitude.
 
 use crate::VoiceWindow;
+use tutti_buffers::Planes;
 
 use std::sync::Arc;
 use tutti_graph::declick_frames;
@@ -186,11 +187,15 @@ impl Rig {
     /// One block under `env`.
     fn drive(&mut self, env: &Env) -> Vec<Vec<f32>> {
         match &mut self.host {
-            Hosted::Pool(pool) => contract::drive_input(pool, env, &[], &[], &[]).audio,
-            Hosted::Node(node) => contract::drive_input(node, env, &[], &[], &[]).audio,
+            Hosted::Pool(pool) => {
+                contract::drive_input(pool, env, Planes::default(), &[], &[]).audio
+            }
+            Hosted::Node(node) => {
+                contract::drive_input(node, env, Planes::default(), &[], &[]).audio
+            }
             Hosted::Voice(node) => {
                 let node = node.as_mut().expect("placed");
-                contract::drive_input(node, env, &[], &[], &[]).audio
+                contract::drive_input(node, env, Planes::default(), &[], &[]).audio
             }
         }
     }

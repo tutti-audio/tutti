@@ -452,7 +452,14 @@ fn run_block_with(
         changes: TransportChanges::NONE,
         play: PlayClock::ZERO,
     };
-    for (i, s) in unit.inputs_mut()[0].iter_mut().enumerate().take(len) {
+    for (i, s) in unit
+        .inputs_mut()
+        .plane_mut(0)
+        .samples_mut()
+        .iter_mut()
+        .enumerate()
+        .take(len)
+    {
         *s = (frame as usize + i) as f32;
     }
     unit.block_in(&env);
@@ -486,7 +493,7 @@ fn a_block_is_cut_at_the_chunk_edges_and_each_piece_reads_its_chunks_transport()
     let mut heard = Vec::new();
     for k in 0..4 {
         run_block(&mut unit, k * 100, 100);
-        heard.extend_from_slice(unit.output(0));
+        heard.extend_from_slice(unit.output().plane(0).samples());
     }
     assert_eq!(
         rig.frames(),
