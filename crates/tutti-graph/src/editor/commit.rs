@@ -177,6 +177,12 @@ impl Editor {
     /// under the new range. A range is a clamp the node may hear at any
     /// block, so that block is a legal state, not a torn one.
     ///
+    /// Returns the nodes whose audio wiring the commit changed (see
+    /// [`Rewired`]): empty when nothing was sent. The plan the executor has
+    /// answers [`Io::wired_inputs`](crate::Io::wired_inputs) from the block
+    /// that applies this commit; a node that reacts on the control side (a
+    /// plugin's bus activation) acts on this list.
+    ///
     /// # Errors
     ///
     /// Nothing is sent, and the plan sent last stays the base, on
@@ -185,24 +191,11 @@ impl Editor {
     /// unit to place), [`CommitError::Backpressure`],
     /// [`CommitError::Repreparing`], [`CommitError::Poisoned`] or a
     /// [`Limits`](crate::Limits) refusal ([`CommitError::TooManyOutputs`]).
-    pub fn commit(&mut self) -> Result<(), CommitError> {
-        self.commit_wired().map(drop)
-    }
-
-    /// [`commit`](Self::commit), and the nodes whose audio wiring it changed
-    /// (see [`Rewired`]): empty when nothing was sent. The plan the executor
-    /// has answers [`Io::wired_inputs`](crate::Io::wired_inputs) from the
-    /// block that applies this commit; a node that reacts on the control side
-    /// (a plugin's bus activation) acts on this list.
-    ///
-    /// # Errors
-    ///
-    /// As [`commit`](Self::commit).
     #[allow(
         clippy::missing_panics_doc,
         reason = "every pending unit the delta needs was checked present just before it is taken"
     )]
-    pub fn commit_wired(&mut self) -> Result<Vec<Rewired>, CommitError> {
+    pub fn commit(&mut self) -> Result<Vec<Rewired>, CommitError> {
         self.collect();
         self.check_poisoned()?;
         if self.is_repreparing() {

@@ -118,7 +118,7 @@ fn render(exec: &mut Executor, outs: usize) {
 /// Commits, applies and renders one block, returning what the commit
 /// reported and what the probe read.
 fn step(ed: &mut Editor, exec: &mut Executor, seen: &Seen, outs: usize) -> (Vec<Rewired>, Read) {
-    let report = ed.commit_wired().expect("commits");
+    let report = ed.commit().expect("commits");
     render(exec, outs);
     ed.collect();
     (report, seen.read())

@@ -3669,7 +3669,7 @@ impl Graph {
         if let Some(refused) = self.unplaceable() {
             return Committed::Refused(refused);
         }
-        match self.editor.commit_wired() {
+        match self.editor.commit() {
             Ok(rewired) => {
                 self.note_rewired(rewired);
                 self.edited = false;
