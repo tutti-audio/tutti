@@ -55,7 +55,62 @@ fn a_block_with_no_audio_keeps_its_frame_count() {
     let block = InputOutput::<f32>::new(Samples(512), Planes::default(), PlanesMut::default())
         .expect("empty views fit any block");
     assert_eq!(block.frames(), Samples(512));
-    assert_eq!(block.input().channels(), 0);
+    let mut block = block;
+    assert_eq!(block.output().channels(), 0);
+}
+
+/// An empty input does not excuse the output: an output of another length
+/// than the block is refused.
+#[test]
+fn an_empty_input_still_checks_the_output() {
+    let mut out = [0.0f32; 6];
+    let mut output = [&mut out[..]];
+    let refused = InputOutput::new(
+        Samples(7),
+        Planes::default(),
+        PlanesMut::new(&mut output).expect("one plane"),
+    )
+    .expect_err("6 output frames in a 7-frame block");
+    assert_eq!(
+        refused,
+        BufferError::BlockLengthMismatch {
+            side: BlockSide::Output,
+            block: Samples(7),
+            found: Samples(6)
+        }
+    );
+}
+
+/// With both views off the block's length, the input is the one named, and
+/// the error text says which side.
+#[test]
+fn the_input_is_checked_first_and_named_in_the_text() {
+    let src = [0.0f32; 2];
+    let input = [&src[..]];
+    let mut out = [0.0f32; 3];
+    let mut output = [&mut out[..]];
+    let refused = InputOutput::new(
+        Samples(4),
+        Planes::new(&input).expect("one plane"),
+        PlanesMut::new(&mut output).expect("one plane"),
+    )
+    .expect_err("neither view holds 4 frames");
+    assert_eq!(
+        refused,
+        BufferError::BlockLengthMismatch {
+            side: BlockSide::Input,
+            block: Samples(4),
+            found: Samples(2)
+        }
+    );
+    assert_eq!(
+        refused.to_string(),
+        format!(
+            "the block is {} frames and its input holds {}",
+            Samples(4),
+            Samples(2)
+        )
+    );
 }
 
 /// An empty input pairs with an output of the block's length.
