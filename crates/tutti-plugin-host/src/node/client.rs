@@ -326,7 +326,7 @@ pub(super) enum RateDelivery {
 /// the cell `audioMasterGetTime` reads), then calls the plugin.
 ///
 /// A clone shares the meter slot and reads it through a reader of its own
-/// (`Reader::clone` registers one on the same cell), and carries the counter
+/// (`Publisher::reader` registers one on the same cell), and carries the counter
 /// and the last snapshot as they stand. Only a test clones a feed.
 #[derive(Clone, Debug)]
 pub(super) struct TransportFeed {

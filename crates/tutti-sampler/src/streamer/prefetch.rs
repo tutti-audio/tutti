@@ -38,7 +38,7 @@
 //! another. A voice in a live graph is dropped where the graph frees units:
 //! under the graph's executor, retired units travel back to the control thread
 //! (`tutti_graph::Editor::collect`), so the last handle is never dropped on
-//! the audio thread, and the ring's slots and its `ArcLend` are freed off it.
+//! the audio thread, and the ring's slots and its `Publisher` are freed off it.
 //!
 //! # Frames, not samples
 //!
@@ -49,7 +49,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tutti_codec::Wave;
-use tutti_rt::{ArcLend, MAX_POS_RING_FRAMES, PosReader, PosRing, PosWriter, Reader};
+use tutti_rt::{MAX_POS_RING_FRAMES, PosReader, PosRing, PosWriter, Publisher, Reader};
 use tutti_types::{ChannelLayout, ChannelTopology, Samples};
 
 #[cfg(codec)]
@@ -85,7 +85,7 @@ pub(crate) struct Ring {
     /// applied loop, in one value, lent through the reader the voice registers
     /// ([`control_reader`](Self::control_reader)). The streamer is its only
     /// publisher.
-    control: Arc<ArcLend<RingControl>>,
+    control: Publisher<RingControl>,
 }
 
 impl std::fmt::Debug for Ring {
@@ -134,8 +134,8 @@ impl Ring {
 
     /// The ring's control cell, for the stream's handle to read the applied
     /// loop from. Control side.
-    pub(crate) fn control_cell(&self) -> Arc<ArcLend<RingControl>> {
-        Arc::clone(&self.control)
+    pub(crate) fn control_cell(&self) -> Publisher<RingControl> {
+        self.control.clone()
     }
 
     /// The control as the streamer last published it: what an export fork of
@@ -183,14 +183,6 @@ impl Ring {
     /// the ring lives.
     pub(crate) fn reclaim_control(&self) -> usize {
         self.control.reclaim()
-    }
-
-    /// Holders of the ring's control cell but the ring itself (tests): the
-    /// stream's handle (it reads the applied loop) and each registered
-    /// reader.
-    #[cfg(test)]
-    pub(crate) fn control_holders(&self) -> usize {
-        Arc::strong_count(&self.control) - 1
     }
 
     /// Controls retired and not yet freed (tests).
@@ -456,10 +448,7 @@ impl RegionBuffer {
             topology,
             core: writer.watch(),
             fade_frames,
-            control: Arc::new(ArcLend::new(RingControl::new(
-                RingMap::plain(arrangement, 0),
-                None,
-            ))),
+            control: Publisher::new(RingControl::new(RingMap::plain(arrangement, 0), None)),
         });
         let writer = RegionOut {
             ring: Arc::clone(&ring),

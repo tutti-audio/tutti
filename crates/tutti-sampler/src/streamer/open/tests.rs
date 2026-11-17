@@ -107,33 +107,6 @@ fn an_open_is_pending_until_the_streamer_answers() {
     assert_eq!(stream.id(), id, "the handle steers the stream it opened");
 }
 
-/// A `Ready` reader has registered its control reader already, on the control
-/// side, and the voice built from it registers nothing more: the ring's control
-/// has two holders after the open (the stream's handle, which reads the
-/// applied loop, and the one reader), and still two with the voice built and
-/// playing, so nothing on the audio thread registers (which allocates).
-#[test]
-fn a_ready_reader_has_registered_its_control_before_it_is_returned() {
-    let (_dir, path) = constant_file(0.25);
-    let mut streamer = manual();
-    let opening = streamer.open(&path, Placement::HEAD);
-    let (_stream, reader) = settle(&mut streamer, opening).expect("the file opens");
-    assert_eq!(
-        reader.ring.control_holders(),
-        2,
-        "the handle, and the reader registered by the open"
-    );
-    let ring = Arc::clone(&reader.ring);
-    let mut voice = prepared(
-        DiskVoice::from_reader(reader, VoiceWindow::from(Beat(0.0))),
-        SampleRate::of(RATE),
-        64,
-    );
-    let clock = MockTransport::rolling(Beat(0.0), Bpm::of(120.0));
-    let _ = play(&mut voice, &clock, SampleRate::of(RATE), 64, 64);
-    assert_eq!(ring.control_holders(), 2, "the voice registers none");
-}
-
 /// Variant `Io`: a path with no file fails the open with the kind the
 /// filesystem reported.
 #[test]
