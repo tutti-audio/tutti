@@ -18,6 +18,7 @@ use tutti_rt::LockExt;
 use clap_sys::events::{
     CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_PARAM_VALUE, clap_event_header, clap_event_param_value,
 };
+use tutti_buffers::{Planes, PlanesMut};
 use tutti_clap_ffi::{
     ActivateError, Bundle, CallError, EventRef, EventSink, EventSource, Host, HostCallbacks,
     InputStream, OutputStream, Planar, Plugin, PluginEvent, PortScratch, ProcessCall, ProcessError,
@@ -184,8 +185,8 @@ fn render(
     side.process(ProcessCall {
         scratch,
         audio: Planar::F32 {
-            inputs: &[],
-            outputs,
+            inputs: Planes::default(),
+            outputs: PlanesMut::new(outputs).expect("equal channels"),
         },
         input_ports: &[2],
         output_ports: &[2],
@@ -314,7 +315,7 @@ fn a_short_channel_is_refused_without_calling_the_plugin() {
     scratch.resize_for(&[2], &[2], 512);
 
     let mut left = vec![0.0f32; FRAMES / 2];
-    let mut right = vec![0.0f32; FRAMES];
+    let mut right = vec![0.0f32; FRAMES / 2];
     let mut outputs: Vec<&mut [f32]> = vec![&mut left, &mut right];
     assert_eq!(
         render(&mut side, &mut scratch, &mut outputs, FRAMES as u32),
@@ -449,8 +450,8 @@ fn a_mismatched_block_is_refused_before_the_retired_check() {
         side.process(ProcessCall {
             scratch: &mut scratch,
             audio: Planar::F64 {
-                inputs: &[],
-                outputs: &mut outputs,
+                inputs: Planes::default(),
+                outputs: PlanesMut::new(&mut outputs).expect("equal channels"),
             },
             input_ports: &[2],
             output_ports: &[2],
@@ -599,8 +600,8 @@ fn render_with_pool(
     side.process(ProcessCall {
         scratch,
         audio: Planar::F32 {
-            inputs: &[],
-            outputs: &mut outputs,
+            inputs: Planes::default(),
+            outputs: PlanesMut::new(&mut outputs).expect("equal channels"),
         },
         input_ports: &[2],
         output_ports: &[2],
@@ -848,8 +849,8 @@ fn one_process_call_runs_either_width_and_refuses_a_mismatch() {
     call(
         &mut wide,
         Planar::F64 {
-            inputs: &[],
-            outputs: &mut outputs,
+            inputs: Planes::default(),
+            outputs: PlanesMut::new(&mut outputs).expect("equal channels"),
         },
     )
     .expect("a 64-bit block runs");
@@ -864,8 +865,8 @@ fn one_process_call_runs_either_width_and_refuses_a_mismatch() {
         call(
             &mut wide,
             Planar::F32 {
-                inputs: &[],
-                outputs: &mut out32
+                inputs: Planes::default(),
+                outputs: PlanesMut::new(&mut out32).expect("equal channels"),
             }
         ),
         Err(ProcessError::FormatMismatch)
@@ -878,8 +879,8 @@ fn one_process_call_runs_either_width_and_refuses_a_mismatch() {
     call(
         &mut narrow,
         Planar::F32 {
-            inputs: &[],
-            outputs: &mut out32,
+            inputs: Planes::default(),
+            outputs: PlanesMut::new(&mut out32).expect("equal channels"),
         },
     )
     .expect("a 32-bit block runs");
@@ -891,8 +892,8 @@ fn one_process_call_runs_either_width_and_refuses_a_mismatch() {
         call(
             &mut narrow,
             Planar::F64 {
-                inputs: &[],
-                outputs: &mut outputs,
+                inputs: Planes::default(),
+                outputs: PlanesMut::new(&mut outputs).expect("equal channels"),
             }
         ),
         Err(ProcessError::FormatMismatch)
@@ -973,8 +974,8 @@ fn a_block_outside_the_activation_is_refused_before_the_plugin_is_called() {
         let result = side.process(ProcessCall {
             scratch: &mut scratch,
             audio: Planar::F32 {
-                inputs: &[],
-                outputs: &mut outputs,
+                inputs: Planes::default(),
+                outputs: PlanesMut::new(&mut outputs).expect("equal channels"),
             },
             input_ports: inputs,
             output_ports: outs,
