@@ -1,28 +1,22 @@
-//! Deinterleaved channel buffers for a plugin's process call.
+//! Channel tables for a plugin's process call.
 //!
 //! # A plugin is a node, not an edge
 //!
 //! In the graph a plugin is a `tutti_graph::Node`: the graph's clock calls it one
-//! block at a time, planar. The engine's edge vocabulary (`tutti_types`'
-//! `Source` and `Sink`, interleaved frames on a clock the graph does not keep)
-//! does not describe it, and [`AudioBuffer`] is not an edge: it is the borrowed,
-//! deinterleaved view of one process block on the RT audio thread, the shape the
-//! plugin ABIs take.
+//! block at a time, planar. The block a plugin renders is a
+//! [`tutti_buffers::InputOutput`]; this module holds what builds one on the
+//! realtime thread.
 //!
 //! Audio crosses the plugin boundary one buffer *per channel* (deinterleaved),
-//! and the C plugin ABIs (VST3, AU) take those channel buffers as a `void**` —
-//! a pointer to an array of per-channel pointers (`*mut *mut c_void` in Rust).
-//! Each format's `-ffi` crate builds that table; this module owns the safe side:
+//! and the C plugin ABIs (VST3, AU) take those channel buffers as a `void**`.
+//! Each format's `-ffi` crate builds that table from the views; this module
+//! owns the safe side:
 //!
-//! - [`AudioBuffer`] — the safe, borrowed view of one process block: a slice of
-//!   input channel slices and a slice of output channel slices, plus the block
-//!   length and sample rate. This is what host code reads and writes.
-//! - [`Sample`] — a compile-time switch (`f32` / `f64`) that routes a generic
-//!   `process::<T>` call to the matching width. Per-format
-//!   extensions (e.g. `tutti-vst3-host`'s `Vst3Sample`) layer format-specific
-//!   constants on top.
+//! - [`ChannelTable`]: a stack table of the channel slices of one direction, the
+//!   backing a `Planes` or `PlanesMut` borrows;
+//! - [`silence`] and [`sanitize`]: the zeroing a block's output gets.
 
-use tutti_types::SampleRate;
+use tutti_buffers::{Float, Planes, PlanesMut, Sample};
 
 /// The most channels, per direction, that a block's stack-built channel tables
 /// hold (the `&[&[T]]` and `&mut [&mut [T]]` slice tables of the plugin server's
@@ -49,30 +43,6 @@ pub struct PluginTooWide {
     pub channels: usize,
 }
 
-/// Plugin-compatible sample width (`f32` or `f64`), used as a compile-time
-/// switch by generic process code.
-///
-/// Generic process code such as `Vst3Instance::process` / `ClapProcessor::process`
-/// is written `<T: Sample>`, so the compiler monomorphizes one specialization
-/// per concrete width: the two a plugin bus can negotiate, `f32` and `f64` (a
-/// 64-bit plugin bus).
-pub trait Sample: Copy + Default + Send + 'static {
-    /// Whether the value is neither NaN nor infinite.
-    fn is_finite(self) -> bool;
-}
-
-impl Sample for f32 {
-    fn is_finite(self) -> bool {
-        f32::is_finite(self)
-    }
-}
-
-impl Sample for f64 {
-    fn is_finite(self) -> bool {
-        f64::is_finite(self)
-    }
-}
-
 /// The channel slices of one direction of a block, in a fixed table of
 /// [`MAX_BLOCK_CHANNELS`] slots on the stack: `ChannelTable<&[T]>` for inputs,
 /// `ChannelTable<&mut [T]>` for outputs. Collecting one allocates nothing,
@@ -84,6 +54,34 @@ impl Sample for f64 {
 pub struct ChannelTable<S> {
     slots: [S; MAX_BLOCK_CHANNELS],
     len: usize,
+}
+
+impl<'a, T: Sample> ChannelTable<&'a [T]> {
+    /// The channels of `planes`, read-only: the table a format's channel
+    /// pointers are built from.
+    ///
+    /// # Panics
+    ///
+    /// When `planes` has more than [`MAX_BLOCK_CHANNELS`] channels.
+    #[must_use]
+    pub fn of_planes(planes: Planes<'a, T>) -> Self {
+        planes.iter().map(|plane| plane.samples()).collect()
+    }
+}
+
+impl<'a, T: Sample> ChannelTable<&'a mut [T]> {
+    /// The channels of `planes`, writable, for as long as `planes` is borrowed.
+    ///
+    /// # Panics
+    ///
+    /// When `planes` has more than [`MAX_BLOCK_CHANNELS`] channels.
+    #[must_use]
+    pub fn of_planes_mut(planes: &'a mut PlanesMut<'_, '_, T>) -> Self {
+        planes
+            .iter_mut()
+            .map(tutti_buffers::MonoMut::into_samples_mut)
+            .collect()
+    }
 }
 
 impl<S> std::fmt::Debug for ChannelTable<S> {
@@ -131,11 +129,11 @@ impl<S> std::ops::DerefMut for ChannelTable<S> {
 
 /// Zeroes the first `frames` samples of every channel (all of a shorter one).
 /// Allocation-free and RT-safe.
-pub fn silence<T: Sample, C: AsMut<[T]>>(channels: &mut [C], frames: usize) {
+pub fn silence<T: Float, C: AsMut<[T]>>(channels: &mut [C], frames: usize) {
     for channel in channels {
         let channel = channel.as_mut();
         let n = channel.len().min(frames);
-        channel[..n].fill(T::default());
+        channel[..n].fill(T::SILENCE);
     }
 }
 
@@ -146,170 +144,20 @@ pub fn silence<T: Sample, C: AsMut<[T]>>(channels: &mut [C], frames: usize) {
 /// downstream of it, so both the in-process node and the plugin server run each
 /// block of plugin output through this before it leaves the plugin's stage.
 /// Allocation-free and RT-safe.
-pub fn sanitize<T: Sample>(samples: &mut [T]) -> bool {
+pub fn sanitize<T: Float>(samples: &mut [T]) -> bool {
     let mut replaced = false;
     for s in samples {
         if !s.is_finite() {
-            *s = T::default();
+            *s = T::SILENCE;
             replaced = true;
         }
     }
     replaced
 }
 
-/// A block of deinterleaved audio passed to a plugin's process call.
-///
-/// `inputs` and `outputs` borrow channel slices owned by the host. `T`
-/// picks 32-bit or 64-bit processing.
-///
-/// Two lifetimes, not one: `'t` is how long the *channel tables* (the outer
-/// `&[…]` / `&mut […]`) are borrowed, `'d` how long the per-channel sample
-/// *data* lives, with `'d: 't` (data outlives the table). Splitting them lets
-/// a caller build the output table with a plain `for … zip` loop — the borrow
-/// checker sees the short-lived outer array's `Drop` as ending at `'t`, so it
-/// does not collide with the `'d` data borrows. Made coincident, the two force a
-/// caller into a hand-unrolled `split_first_mut` recursion to sidestep a
-/// conflict that was never real.
-pub struct AudioBuffer<'t, 'd: 't, T: Sample = f32> {
-    /// One deinterleaved slice per input channel, each `num_samples` long.
-    pub inputs: &'t [&'d [T]],
-    /// One deinterleaved slice per output channel, each `num_samples` long.
-    /// Contents on entry are undefined — a plugin that does not write every
-    /// channel leaves whatever the previous block did; see
-    /// [`clear_outputs`](Self::clear_outputs).
-    pub outputs: &'t mut [&'d mut [T]],
-    /// Block length in **frames**, not samples: each channel slice holds this
-    /// many elements, so the total sample count is `num_samples * channels`.
-    pub num_samples: usize,
-    /// The rate the block renders at.
-    pub sample_rate: SampleRate,
-}
-
-impl<T: Sample> std::fmt::Debug for AudioBuffer<'_, '_, T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AudioBuffer")
-            .field("inputs", &self.inputs.len())
-            .field("outputs", &self.outputs.len())
-            .field("num_samples", &self.num_samples)
-            .field("sample_rate", &self.sample_rate)
-            .finish_non_exhaustive()
-    }
-}
-
-impl<'t, 'd: 't, T: Sample> AudioBuffer<'t, 'd, T> {
-    /// Creates a block over the given channel tables.
-    ///
-    /// `num_samples` is taken from the first output channel's length, or the
-    /// first input channel's length if there are no outputs.
-    ///
-    /// # Panics
-    /// Panics if both `inputs` and `outputs` are empty.
-    pub fn new(
-        inputs: &'t [&'d [T]],
-        outputs: &'t mut [&'d mut [T]],
-        sample_rate: SampleRate,
-    ) -> Self {
-        let num_samples = outputs
-            .first()
-            .map(|s| s.len())
-            .or_else(|| inputs.first().map(|s| s.len()))
-            .expect("AudioBuffer requires at least one input or output channel");
-        Self {
-            inputs,
-            outputs,
-            num_samples,
-            sample_rate,
-        }
-    }
-
-    /// Number of input channels.
-    pub fn num_inputs(&self) -> usize {
-        self.inputs.len()
-    }
-
-    /// Number of output channels, which need not equal
-    /// [`num_inputs`](Self::num_inputs).
-    pub fn num_outputs(&self) -> usize {
-        self.outputs.len()
-    }
-
-    /// Zeroes every output channel.
-    ///
-    /// The way to make a silent block actually silent: an output slice's
-    /// contents are otherwise whatever the last block left, so a plugin that
-    /// declines to render repeats stale audio rather than going quiet.
-    /// Allocation-free and RT-safe.
-    pub fn clear_outputs(&mut self) {
-        silence(self.outputs, usize::MAX);
-    }
-}
-
-/// An [`AudioBuffer`] of 32-bit samples — the width every format negotiates.
-pub type AudioBuffer32<'t, 'd> = AudioBuffer<'t, 'd, f32>;
-/// An [`AudioBuffer`] of 64-bit samples, for a plugin that negotiated a 64-bit
-/// bus.
-pub type AudioBuffer64<'t, 'd> = AudioBuffer<'t, 'd, f64>;
-
-/// An [`AudioBuffer`] tagged with its sample width, as handed to
-/// [`Processor::process`](crate::Processor::process).
-///
-/// The enum keeps the trait dyn-compatible while letting each format's
-/// implementation match once and delegate into a single generic inner body.
-///
-/// Carries [`AudioBuffer`]'s two lifetimes verbatim (`'t` = channel tables,
-/// `'d` = sample data, `'d: 't`) so the split survives the enum boundary — a
-/// caller can still build the output table with a short-lived borrow.
-#[derive(Debug)]
-pub enum AudioBufferMut<'t, 'd: 't> {
-    /// A 32-bit block.
-    F32(AudioBuffer<'t, 'd, f32>),
-    /// A 64-bit block, from a plugin that negotiated a 64-bit bus.
-    F64(AudioBuffer<'t, 'd, f64>),
-}
-
-impl<'t, 'd: 't> From<AudioBuffer<'t, 'd, f32>> for AudioBufferMut<'t, 'd> {
-    fn from(buffer: AudioBuffer<'t, 'd, f32>) -> Self {
-        Self::F32(buffer)
-    }
-}
-
-impl<'t, 'd: 't> From<AudioBuffer<'t, 'd, f64>> for AudioBufferMut<'t, 'd> {
-    fn from(buffer: AudioBuffer<'t, 'd, f64>) -> Self {
-        Self::F64(buffer)
-    }
-}
-
-impl<'t, 'd: 't> AudioBufferMut<'t, 'd> {
-    /// Block length in **frames**, whichever width this carries.
-    pub fn num_samples(&self) -> usize {
-        match self {
-            Self::F32(b) => b.num_samples,
-            Self::F64(b) => b.num_samples,
-        }
-    }
-
-    /// Zeroes every output channel, whichever width this carries
-    /// ([`AudioBuffer::clear_outputs`]).
-    pub fn clear_outputs(&mut self) {
-        match self {
-            Self::F32(b) => b.clear_outputs(),
-            Self::F64(b) => b.clear_outputs(),
-        }
-    }
-
-    /// The render rate, whichever width this carries.
-    pub fn sample_rate(&self) -> SampleRate {
-        match self {
-            Self::F32(b) => b.sample_rate,
-            Self::F64(b) => b.sample_rate,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{AudioBufferMut, ChannelTable, MAX_BLOCK_CHANNELS, sanitize, silence};
-    use tutti_types::SampleRate;
+    use super::{ChannelTable, MAX_BLOCK_CHANNELS, sanitize, silence};
 
     #[test]
     fn a_channel_table_holds_the_channels_collected_in_order_without_allocating() {
@@ -338,19 +186,6 @@ mod tests {
         silence(&mut [&mut a[..], &mut b[..]], 3);
         assert_eq!(a, [0.0, 0.0, 0.0, 1.0]);
         assert_eq!(b, [0.0, 0.0]);
-    }
-
-    #[test]
-    fn a_buffer_converts_to_its_width_and_carries_its_width_and_rate() {
-        let (inputs, mut outputs) = ([[0.0_f64; 2].as_slice()], [[0.0_f64; 2]]);
-        let mut outs = [outputs[0].as_mut_slice()];
-        let tagged = AudioBufferMut::from(super::AudioBuffer::new(
-            &inputs,
-            &mut outs,
-            SampleRate::SR_96K,
-        ));
-        assert!(matches!(tagged, AudioBufferMut::F64(_)));
-        assert_eq!(tagged.sample_rate(), SampleRate::SR_96K);
     }
 
     #[test]

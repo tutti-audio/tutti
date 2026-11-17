@@ -261,7 +261,7 @@ impl<T: Vst3Sample> Staged<T> {
             return Err((instance.loaded, error));
         }
         instance.loaded.active = Activation {
-            format: Some(T::FORMAT),
+            format: Some(<T as Vst3Sample>::PLUGIN_FORMAT),
         };
         // The spec requires reading latency after each `setActive(true)`: the
         // value is only valid once the plugin is active, and it is what a host

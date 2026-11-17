@@ -32,10 +32,9 @@ use std::path::Path;
 
 use tutti_graph::{MAX_NODE_TAIL, Offset, UmpAt};
 use tutti_plugin_types::{
-    AudioBuffer, AudioBufferMut, Controller, InProcess, LatencyVerdict, Load, MainThreadMarker,
-    MaxBlock, Measured, NotChecked, PROBE_FLOOR, PluginDescriptor, PluginError, PluginIo,
-    PluginTail, Prepare, ProbeConfig, ProcessContext, ProcessOutput, Processor, StateHash,
-    TailVerdict, Verdict,
+    Controller, InProcess, LatencyVerdict, Load, MainThreadMarker, MaxBlock, Measured, NotChecked,
+    PROBE_FLOOR, PluginAudio, PluginDescriptor, PluginError, PluginIo, PluginTail, Prepare,
+    ProbeConfig, ProcessContext, ProcessOutput, Processor, StateHash, TailVerdict, Verdict,
 };
 use tutti_types::{Amplitude, Db, SampleRate, Samples, Seconds};
 use tutti_ump::{
@@ -104,7 +103,6 @@ pub struct Subject {
 /// One block's buffers, rendered through a processor.
 struct Render<'p, P> {
     processor: &'p mut P,
-    rate: SampleRate,
     block: usize,
     ins: Vec<Vec<f32>>,
     outs: Vec<Vec<f32>>,
@@ -112,11 +110,10 @@ struct Render<'p, P> {
 }
 
 impl<'p, P: Processor> Render<'p, P> {
-    fn new(processor: &'p mut P, subject: Subject, rate: SampleRate, block: MaxBlock) -> Self {
+    fn new(processor: &'p mut P, subject: Subject, block: MaxBlock) -> Self {
         let block = block.get();
         Self {
             processor,
-            rate,
             block,
             ins: vec![vec![0.0; block]; subject.inputs],
             outs: vec![vec![0.0; block]; subject.outputs],
@@ -134,7 +131,7 @@ impl<'p, P: Processor> Render<'p, P> {
         let mut outs: Vec<&mut [f32]> = self.outs.iter_mut().map(Vec::as_mut_slice).collect();
         let ctx = ProcessContext::new().midi(events);
         let mut io = PluginIo {
-            buffer: AudioBufferMut::F32(AudioBuffer::new(&ins, &mut outs, self.rate)),
+            buffer: PluginAudio::new(&ins, &mut outs).expect("equal channels"),
             ctx: &ctx,
             out: &mut self.out,
         };
@@ -209,7 +206,7 @@ pub fn measure_at<P: Processor>(
 ) -> Result<Measured, PluginError> {
     let floor = config.floor.to_amplitude().get();
     let frames = |t: Seconds| t.to_samples_ceil(config.rate).get();
-    let mut run = Render::new(processor, subject, config.rate, config.block);
+    let mut run = Render::new(processor, subject, config.block);
     let block = run.block;
 
     // 1. Silence in: does the plugin settle at all?

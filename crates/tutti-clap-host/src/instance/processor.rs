@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use tutti_plugin_types::{
-    AudioBufferMut, Edit, EditDrain, EditSink, Normalized, NoteExpressionChanges, ParamId,
+    Edit, EditDrain, EditSink, Normalized, NoteExpressionChanges, ParamId, PluginAudio,
     PluginError, PluginIo, PluginResult, Processor, SampleFormat, SampleRate,
     TransportInfo as SharedTransport,
 };
@@ -26,6 +26,7 @@ pub(crate) struct ProcessorParts {
     pub input_ports: Vec<u32>,
     pub output_ports: Vec<u32>,
     pub max_frames: u32,
+    pub sample_rate: SampleRate,
     pub scratch: AudioScratch,
     pub ranges: Reader<RangeTable>,
     pub drain: EditDrain,
@@ -55,6 +56,8 @@ pub struct ClapProcessor {
     pub(crate) input_ports: Vec<u32>,
     pub(crate) output_ports: Vec<u32>,
     pub(crate) max_frames: u32,
+    /// The rate the plugin was activated at.
+    sample_rate: SampleRate,
 }
 
 impl std::fmt::Debug for ClapProcessor {
@@ -76,6 +79,7 @@ impl ClapProcessor {
             input_ports,
             output_ports,
             max_frames,
+            sample_rate,
             scratch,
             ranges,
             drain,
@@ -93,6 +97,7 @@ impl ClapProcessor {
             input_ports,
             output_ports,
             max_frames,
+            sample_rate,
         }
     }
 
@@ -186,7 +191,7 @@ impl ClapProcessor {
 
     /// Renders one block, with the buffers, the context and the output taken
     /// apart. [`Processor::process`] is this with a [`PluginIo`]; a caller whose
-    /// channel tables have distinct lifetimes, as `AudioBufferMut` allows, calls
+    /// channel tables have distinct lifetimes, as `PluginAudio` allows, calls
     /// this one.
     ///
     /// # Errors
@@ -196,15 +201,11 @@ impl ClapProcessor {
     /// failed the block.
     pub fn render(
         &mut self,
-        buffer: &mut AudioBufferMut<'_, '_>,
+        buffer: &mut PluginAudio<'_>,
         ctx: &tutti_plugin_types::ProcessContext<'_>,
         out: &mut tutti_plugin_types::ProcessOutput,
     ) -> PluginResult<()> {
-        let sample_rate = match buffer {
-            AudioBufferMut::F32(b) => b.sample_rate,
-            AudioBufferMut::F64(b) => b.sample_rate,
-        };
-        self.process_shared(buffer, ctx, sample_rate, out)
+        self.process_shared(buffer, ctx, out)
     }
 
     /// One block from the shared vocabulary: converts the context into CLAP's
@@ -212,9 +213,8 @@ impl ClapProcessor {
     /// copies what the plugin emitted into `out`.
     fn process_shared(
         &mut self,
-        buffer: &mut AudioBufferMut<'_, '_>,
+        buffer: &mut PluginAudio<'_>,
         ctx: &tutti_plugin_types::ProcessContext<'_>,
-        sample_rate: SampleRate,
         out: &mut tutti_plugin_types::ProcessOutput,
     ) -> PluginResult<()> {
         self.scratch.in_note_expressions.clear();
@@ -226,14 +226,16 @@ impl ClapProcessor {
                 &mut scratch.in_note_expressions_dropped,
             );
         }
-        let transport = ctx.transport.map(|t| convert_transport(t, sample_rate));
+        let transport = ctx
+            .transport
+            .map(|t| convert_transport(t, self.sample_rate));
         // Each change as the host's own snapshot, on the stack: at most the
         // graph's bound, inline.
         let mut changes = tutti_plugin_types::TransportChanges::new();
         for c in ctx.transport_changes {
             let _ = changes.try_push(tutti_plugin_types::TransportChange {
                 offset: c.offset,
-                transport: convert_transport(&c.transport, sample_rate),
+                transport: convert_transport(&c.transport, self.sample_rate),
             });
         }
         // `process` borrows `self` for the output it returns, so the expressions

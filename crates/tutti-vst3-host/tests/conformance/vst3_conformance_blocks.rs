@@ -6,13 +6,14 @@
 #![cfg(feature = "conformance")]
 
 use crate::conformance_support;
+use tutti_buffers::{InputOutput, Planes, PlanesMut};
 
 use std::ffi::CStr;
 
 use tutti_graph::Offset;
 use tutti_types::Samples;
 use tutti_ump::MidiChannel;
-use tutti_vst3_host::{AudioBuffer, InputEvents, Library, ParameterChanges, TransportInfo};
+use tutti_vst3_host::{InputEvents, Library, ParameterChanges, TransportInfo};
 
 /// A block longer than any offset these tests place an event at.
 const TEST_BLOCK: usize = 1 << 16;
@@ -164,12 +165,11 @@ fn every_audio_class_survives_a_block() {
                     let in_refs: Vec<&[f32]> = ins.iter().map(|v| v.as_slice()).collect();
                     let mut out_refs: Vec<&mut [f32]> =
                         outs.iter_mut().map(|v| v.as_mut_slice()).collect();
-                    let mut buffer = AudioBuffer {
-                        inputs: &in_refs,
-                        outputs: &mut out_refs,
-                        num_samples: 512,
-                        sample_rate: tutti_plugin_types::SampleRate::SR_48K,
-                    };
+                    let mut buffer = InputOutput::new(
+                        Planes::new(&in_refs).expect("equal channels"),
+                        PlanesMut::new(&mut out_refs).expect("equal channels"),
+                    )
+                    .expect("equal lengths");
                     inst.process(
                         &mut buffer,
                         &InputEvents::default(),

@@ -1,4 +1,4 @@
-//! VST3-specific sample-format extension on top of `tutti_plugin_types::Sample`.
+//! VST3's sample sizes and processing modes.
 
 use vst3::Steinberg::Vst::{AudioBusBuffers, ProcessModes_, SymbolicSampleSizes_};
 

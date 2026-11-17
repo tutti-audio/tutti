@@ -8,39 +8,30 @@
 
 use std::marker::PhantomData;
 
+use tutti_buffers::Float;
 use tutti_clap_host::{
-    AudioBuffer, ClapController, ClapLoaded, ClapProcessContext, ClapProcessor,
-    instance::ProcessOutputRef,
+    ClapController, ClapLoaded, ClapProcessContext, ClapProcessor, instance::ProcessOutputRef,
 };
 use tutti_fixtures::{Activation, Whole};
 use tutti_plugin_types::{
-    AudioBufferMut, MainThreadMarker, MaxBlock, PluginError, Prepare, Sample, SampleFormat,
-    SampleRate, Samples,
+    MainThreadMarker, MaxBlock, PluginAudio, PluginError, Prepare, SampleFormat, SampleRate,
+    Samples,
 };
 
-/// A sample width a suite names with a type (`Active<f32>`, `AudioBuffer32`):
-/// test-side sugar for the processor's runtime `SampleFormat`. The host has no
-/// sample type parameter; this only picks the format value and wraps a typed
-/// buffer for the one `process`.
-pub trait Width: Sample {
+/// A sample width a suite names with a type (`Active<f32>`): test-side sugar
+/// for the processor's runtime `SampleFormat`. The host has no sample type
+/// parameter; this only picks the format value.
+pub trait Width: Float {
     /// The format an activation at this width negotiates.
-    const FORMAT: SampleFormat;
-    /// The buffer as the processor takes it.
-    fn wrap<'t, 'd: 't>(buffer: AudioBuffer<'t, 'd, Self>) -> AudioBufferMut<'t, 'd>;
+    const PLUGIN_FORMAT: SampleFormat;
 }
 
 impl Width for f32 {
-    const FORMAT: SampleFormat = SampleFormat::Float32;
-    fn wrap<'t, 'd: 't>(buffer: AudioBuffer<'t, 'd, f32>) -> AudioBufferMut<'t, 'd> {
-        AudioBufferMut::F32(buffer)
-    }
+    const PLUGIN_FORMAT: SampleFormat = SampleFormat::Float32;
 }
 
 impl Width for f64 {
-    const FORMAT: SampleFormat = SampleFormat::Float64;
-    fn wrap<'t, 'd: 't>(buffer: AudioBuffer<'t, 'd, f64>) -> AudioBufferMut<'t, 'd> {
-        AudioBufferMut::F64(buffer)
-    }
+    const PLUGIN_FORMAT: SampleFormat = SampleFormat::Float64;
 }
 
 /// CLAP's activation at the width `T`.
@@ -74,7 +65,7 @@ pub type Active<T> = tutti_fixtures::Active<Clap<T>>;
 
 fn prepare_for<T: Width>(rate: f64, frames: u32) -> Prepare {
     let block = MaxBlock::new(Samples(frames as usize)).expect("a block of at least one frame");
-    Prepare::new(SampleRate::of(rate), block).with_format(T::FORMAT)
+    Prepare::new(SampleRate::of(rate), block).with_format(T::PLUGIN_FORMAT)
 }
 
 /// Activation at a rate and block size, on a loaded plugin.
@@ -104,7 +95,7 @@ pub trait ActiveExt<T: Width> {
     /// One block through the Processor.
     fn process(
         &mut self,
-        buffer: &mut AudioBuffer<T>,
+        buffer: &mut PluginAudio<'_>,
         ctx: &ClapProcessContext<'_>,
     ) -> tutti_clap_host::Result<ProcessOutputRef<'_>>;
     /// [`ClapProcessor::reset`].
@@ -150,16 +141,10 @@ pub trait ActiveExt<T: Width> {
 impl<T: Width> ActiveExt<T> for Active<T> {
     fn process(
         &mut self,
-        buffer: &mut AudioBuffer<T>,
+        buffer: &mut PluginAudio<'_>,
         ctx: &ClapProcessContext<'_>,
     ) -> tutti_clap_host::Result<ProcessOutputRef<'_>> {
-        let mut wrapped = T::wrap(AudioBuffer {
-            inputs: buffer.inputs,
-            outputs: &mut *buffer.outputs,
-            num_samples: buffer.num_samples,
-            sample_rate: buffer.sample_rate,
-        });
-        self.processor().process(&mut wrapped, ctx)
+        self.processor().process(buffer, ctx)
     }
 
     fn reset(&mut self) {
@@ -239,11 +224,6 @@ pub fn drive_block(inst: &mut Active<f32>, frames: usize, ctx: &ClapProcessConte
     let in_r = vec![0.0f32; frames];
     let outs: &mut [&mut [f32]] = &mut [&mut out_l[..], &mut out_r[..]];
     let ins: &[&[f32]] = &[&in_l[..], &in_r[..]];
-    let mut buffer = AudioBuffer {
-        inputs: ins,
-        outputs: outs,
-        num_samples: frames,
-        sample_rate: tutti_plugin_types::SampleRate::SR_48K,
-    };
+    let mut buffer = PluginAudio::new(ins, outs).expect("equal channels");
     inst.process(&mut buffer, ctx).expect("process succeeds");
 }

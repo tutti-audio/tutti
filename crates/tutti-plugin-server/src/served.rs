@@ -21,9 +21,9 @@ use std::time::{Duration, Instant};
 
 use tutti_plugin_ipc::BridgeMessage;
 use tutti_plugin_types::{
-    AudioBufferMut, AutomationMode, Control, Effect, Event, Features, Hand, HostOp, Layout,
-    Lifecycle, Load, LoadStage, LoadedPlugin, MainThreadMarker, MainWorkHandle, MaxBlock,
-    Normalized, Notice, OutOfProcess, ParamEdit, ParamId, ParamWriteError, ParameterInfo,
+    AutomationMode, Control, Effect, Event, Features, Hand, HostOp, Layout, Lifecycle, Load,
+    LoadStage, LoadedPlugin, MainThreadMarker, MainWorkHandle, MaxBlock, Normalized, Notice,
+    OutOfProcess, ParamEdit, ParamId, ParamWriteError, ParameterInfo, PluginAudio,
     PluginDescriptor, PluginError, PluginResult, Prepare, Preset, PresetId, ProcessContext,
     ProcessOutput, ProcessWake, RenderMode, RenderModeSupport, Request, SampleFormat, SampleRate,
     Samples, Seat, Stage, State, StateUse, TrackInfo,
@@ -56,11 +56,11 @@ pub(crate) trait Render {
     ///
     /// [`PluginError::Process`] (or another variant) when the plugin failed
     /// the block.
-    fn render(
+    fn render<'a>(
         &mut self,
-        buffer: AudioBufferMut<'_, '_>,
-        ctx: &ProcessContext<'_>,
-        out: &mut ProcessOutput,
+        buffer: PluginAudio<'a>,
+        ctx: &'a ProcessContext<'a>,
+        out: &'a mut ProcessOutput,
     ) -> PluginResult<()>;
 }
 
@@ -683,11 +683,11 @@ impl<F: ServerSide> Render for Served<F> {
         self.wiring.features
     }
 
-    fn render(
+    fn render<'a>(
         &mut self,
-        buffer: AudioBufferMut<'_, '_>,
-        ctx: &ProcessContext<'_>,
-        out: &mut ProcessOutput,
+        buffer: PluginAudio<'a>,
+        ctx: &'a ProcessContext<'a>,
+        out: &'a mut ProcessOutput,
     ) -> PluginResult<()> {
         // A rate change the plugin refused left it deactivated (the host was
         // told when it happened): the block is silence and the plugin is not

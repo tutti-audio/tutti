@@ -1,7 +1,7 @@
 //! One audio block: shared-memory in, plugin, shared-memory out.
 //!
 //! Everything the audio path owns lives here: the format-tagged
-//! scratch buffers, the sample-rate/format [`Clock`], and the `process`
+//! scratch buffers and the `process`
 //! driver that takes an explicit `&mut dyn Render` + `&mut SlabWriter`
 //! so the server doesn't have to weave field borrows.
 //!
@@ -11,15 +11,16 @@
 //! resulting `AudioOutput`.
 
 use crate::served::Render;
+use tutti_buffers::{Float, InputOutput};
 use tutti_graph::Offset;
 use tutti_graph::UmpAt;
 use tutti_plugin_ipc::SlabWriter;
 use tutti_plugin_types::{
-    AudioBuffer, AudioBufferMut, BlockStatus, BridgeResult, ChannelTable, ChordChanges,
-    ExpressiveContext, Features, MAX_BLOCK_CHANNELS, MIDI_STACK_CAPACITY, MidiEventVec,
-    NoteExpressionChanges, NoteExpressionIntChanges, NoteExpressionTextChanges, ParameterChanges,
-    ProcessContext, ProcessOutput, Sample, SampleFormat, SampleRate, Samples, ScaleChanges,
-    TransportChange, TransportInfo, WireMidi, sanitize, silence,
+    BlockStatus, BridgeResult, ChannelTable, ChordChanges, ExpressiveContext, Features,
+    MAX_BLOCK_CHANNELS, MIDI_STACK_CAPACITY, MidiEventVec, NoteExpressionChanges,
+    NoteExpressionIntChanges, NoteExpressionTextChanges, ParameterChanges, PluginAudio,
+    PluginError, PluginResult, ProcessContext, ProcessOutput, SampleFormat, SampleRate, Samples,
+    ScaleChanges, TransportChange, TransportInfo, WireMidi, sanitize, silence,
 };
 use tutti_ump::Ump;
 
@@ -356,7 +357,6 @@ impl AudioPipeline {
         &mut self,
         plugin: &mut dyn Render,
         shm: &mut SlabWriter,
-        clock: &Clock,
         block: AudioBlock<'_>,
     ) -> BridgeResult<AudioOutput> {
         let num_samples = block.num_samples;
@@ -423,7 +423,6 @@ impl AudioPipeline {
                 }
             }
 
-            let sample_rate = clock.sample_rate;
             // The widths are the slab's, and a slab is only made from a layout
             // `check_layout` bounded by `MAX_BLOCK_CHANNELS` per direction
             // (`AudioSlab::create`/`open`), so they fit the slice tables.
@@ -467,14 +466,13 @@ impl AudioPipeline {
                     }
                     silence(&mut output[..out_n], num_samples);
                     // Stack-allocated slice tables — no per-block Vec::collect.
-                    // The helper builds the `AudioBuffer` internally so its
-                    // four field lifetimes unify in a single inner scope.
-                    let processed = with_audio_buffer(
+                    let processed = render_block(
+                        plugin,
                         &input[..in_n],
                         &mut output[..out_n],
                         num_samples,
-                        sample_rate,
-                        |buf| plugin.render(buf, &ctx, plugin_output),
+                        &ctx,
+                        plugin_output,
                     );
                     if let Err(error) = processed {
                         note_failed_block(failed_blocks, &error);
@@ -504,12 +502,13 @@ impl AudioPipeline {
                         }
                     }
                     silence(&mut output[..out_n], num_samples);
-                    let processed = with_audio_buffer(
+                    let processed = render_block(
+                        plugin,
                         &input[..in_n],
                         &mut output[..out_n],
                         num_samples,
-                        sample_rate,
-                        |buf| plugin.render(buf, &ctx, plugin_output),
+                        &ctx,
+                        plugin_output,
                     );
                     if let Err(error) = processed {
                         note_failed_block(failed_blocks, &error);
@@ -624,35 +623,27 @@ fn note_failed_block(count: &mut u64, error: &tutti_plugin_types::PluginError) {
     }
 }
 
-/// Build a stack-allocated [`AudioBufferMut`] from owned channel vecs and hand
-/// it to the FnOnce `f`. Allocation-free: the slice tables are
-/// [`ChannelTable`]s, which is what makes this callable on the audio thread.
-///
-/// The tables are built by plain loops, which is possible only because
-/// `AudioBuffer` splits its lifetimes (`'t` table, `'d` data): the borrow
-/// checker sees the output table's borrow end at the `f(...)` call, so it does
-/// not collide with the per-channel data borrows. A single coincident lifetime
-/// forces a `split_first_mut` recursion instead.
-fn with_audio_buffer<T: Sample, R>(
-    inputs: &[Vec<T>],
-    outputs: &mut [Vec<T>],
+/// Renders one block of owned channel vecs through `plugin`. Allocation-free:
+/// the slice tables are [`ChannelTable`]s, which is what makes this callable on
+/// the audio thread.
+fn render_block<S: Float>(
+    plugin: &mut dyn Render,
+    inputs: &[Vec<S>],
+    outputs: &mut [Vec<S>],
     size: usize,
-    sample_rate: SampleRate,
-    f: impl FnOnce(AudioBufferMut<'_, '_>) -> R,
-) -> R
+    ctx: &ProcessContext<'_>,
+    out: &mut ProcessOutput,
+) -> PluginResult<()>
 where
-    for<'a> AudioBufferMut<'a, 'a>: From<AudioBuffer<'a, 'a, T>>,
+    for<'a> PluginAudio<'a>: From<InputOutput<'a, 'a, 'a, S>>,
 {
     // At most `MAX_BLOCK_CHANNELS`: the caller's slices are the slab's widths.
-    let in_refs: ChannelTable<&[T]> = inputs.iter().map(|chan| &chan[..size]).collect();
-    let mut out_refs: ChannelTable<&mut [T]> =
+    let in_refs: ChannelTable<&[S]> = inputs.iter().map(|chan| &chan[..size]).collect();
+    let mut out_refs: ChannelTable<&mut [S]> =
         outputs.iter_mut().map(|chan| &mut chan[..size]).collect();
-    f(AudioBufferMut::from(AudioBuffer {
-        inputs: &in_refs,
-        outputs: &mut out_refs,
-        num_samples: size,
-        sample_rate,
-    }))
+    let buffer = PluginAudio::new(&in_refs, &mut out_refs)
+        .map_err(|_| PluginError::Block("the block's channels differ in length"))?;
+    plugin.render(buffer, ctx, out)
 }
 
 #[cfg(test)]
@@ -725,18 +716,23 @@ mod tests {
             self.meta.features
         }
 
-        fn render(
+        fn render<'a>(
             &mut self,
-            buffer: AudioBufferMut<'_, '_>,
-            _ctx: &ProcessContext,
-            _out: &mut ProcessOutput,
+            buffer: PluginAudio<'a>,
+            _ctx: &'a ProcessContext<'a>,
+            _out: &'a mut ProcessOutput,
         ) -> PluginResult<()> {
             match buffer {
-                AudioBufferMut::F32(b) => b.outputs.iter_mut().for_each(|c| c.fill(self.fill)),
-                AudioBufferMut::F64(b) => b
-                    .outputs
-                    .iter_mut()
-                    .for_each(|c| c.fill(f64::from(self.fill))),
+                PluginAudio::F32(mut b) => {
+                    for mut c in b.output().iter_mut() {
+                        c.samples_mut().fill(self.fill);
+                    }
+                }
+                PluginAudio::F64(mut b) => {
+                    for mut c in b.output().iter_mut() {
+                        c.samples_mut().fill(f64::from(self.fill));
+                    }
+                }
             }
             Ok(())
         }
@@ -754,15 +750,15 @@ mod tests {
             self.meta.features
         }
 
-        fn render(
+        fn render<'a>(
             &mut self,
-            buffer: AudioBufferMut<'_, '_>,
-            _ctx: &ProcessContext,
-            out: &mut ProcessOutput,
+            buffer: PluginAudio<'a>,
+            _ctx: &'a ProcessContext<'a>,
+            out: &'a mut ProcessOutput,
         ) -> PluginResult<()> {
-            if let AudioBufferMut::F32(b) = buffer {
-                for chan in b.outputs.iter_mut() {
-                    chan.fill(self.fill);
+            if let PluginAudio::F32(mut b) = buffer {
+                for mut chan in b.output().iter_mut() {
+                    chan.samples_mut().fill(self.fill);
                 }
             }
             out.set_status(self.status);
@@ -790,19 +786,13 @@ mod tests {
             fill,
             status,
         };
-        let clock = Clock {
-            sample_rate: SampleRate::SR_48K,
-            format: SampleFormat::Float32,
-        };
         let block = AudioBlock {
             seq: 1,
             num_samples: N,
             midi: &[],
             extras: None,
         };
-        pipeline
-            .process(&mut plugin, &mut shm, &clock, block)
-            .unwrap();
+        pipeline.process(&mut plugin, &mut shm, block).unwrap();
         pipeline.status()
     }
 
@@ -834,28 +824,27 @@ mod tests {
             self.meta.features
         }
 
-        fn render(
+        fn render<'a>(
             &mut self,
-            buffer: AudioBufferMut<'_, '_>,
-            _ctx: &ProcessContext,
-            _out: &mut ProcessOutput,
+            buffer: PluginAudio<'a>,
+            _ctx: &'a ProcessContext<'a>,
+            _out: &'a mut ProcessOutput,
         ) -> PluginResult<()> {
-            if let AudioBufferMut::F32(b) = buffer {
+            if let PluginAudio::F32(mut b) = buffer {
                 let mut seen = self.seen_inputs.borrow_mut();
                 seen.clear();
-                for chan in b.inputs.iter() {
-                    seen.push(chan.first().copied().unwrap_or(0.0));
+                let (input, mut output) = b.split();
+                for chan in input.iter() {
+                    seen.push(chan.samples().first().copied().unwrap_or(0.0));
                 }
                 // Echo input[c] -> output[c] for the channels both directions
                 // share, so the test can read outputs back from the slab.
-                for (c, out) in b.outputs.iter_mut().enumerate() {
-                    let v = b
-                        .inputs
-                        .get(c)
-                        .and_then(|i| i.first())
-                        .copied()
+                for (c, mut out) in output.iter_mut().enumerate() {
+                    let v = input
+                        .get_plane(c)
+                        .and_then(|i| i.samples().first().copied())
                         .unwrap_or(0.0);
-                    out.fill(v);
+                    out.samples_mut().fill(v);
                 }
             }
             Ok(())
@@ -950,15 +939,10 @@ mod tests {
             meta: meta(&[2, 1], &[2]),
             seen_inputs: std::cell::RefCell::new(Vec::new()),
         };
-        let clock = Clock {
-            sample_rate: SampleRate::SR_48K,
-            format: SampleFormat::Float32,
-        };
         pipeline
             .process(
                 &mut plugin,
                 &mut shm,
-                &clock,
                 AudioBlock {
                     seq: SEQ,
                     num_samples: N,
@@ -1045,15 +1029,10 @@ mod tests {
             meta: meta(&[CH], &[CH]),
             seen_inputs: std::cell::RefCell::new(Vec::new()),
         };
-        let clock = Clock {
-            sample_rate: SampleRate::SR_48K,
-            format: SampleFormat::Float32,
-        };
         pipeline
             .process(
                 &mut plugin,
                 &mut shm,
-                &clock,
                 AudioBlock {
                     seq: STALE_SEQ,
                     num_samples: N,
@@ -1091,19 +1070,13 @@ mod tests {
             meta: meta(&[CH], &[CH]),
             fill,
         };
-        let clock = Clock {
-            sample_rate: SampleRate::SR_48K,
-            format: SampleFormat::Float32,
-        };
         let block = AudioBlock {
             seq: SEQ,
             num_samples: N,
             midi: &[],
             extras: None,
         };
-        pipeline
-            .process(&mut plugin, &mut shm, &clock, block)
-            .unwrap();
+        pipeline.process(&mut plugin, &mut shm, block).unwrap();
 
         for ch in 0..CH {
             let mut out = vec![1.0f32; N];
@@ -1150,17 +1123,12 @@ mod tests {
             meta: meta(&[2], &[2]),
             fill: 0.25,
         };
-        let clock = Clock {
-            sample_rate: SampleRate::SR_48K,
-            format: SampleFormat::Float32,
-        };
         assert_no_alloc::assert_no_alloc(|| {
             for frames in [N, 64, N, 1, 100] {
                 pipeline
                     .process(
                         &mut plugin,
                         &mut shm,
-                        &clock,
                         AudioBlock {
                             seq: SEQ,
                             num_samples: frames,
@@ -1202,17 +1170,12 @@ mod tests {
             meta: meta(&[CH], &[CH]),
             fill: 0.25,
         };
-        let clock = Clock {
-            sample_rate: SampleRate::SR_48K,
-            format,
-        };
 
         // Warm up: first call allocates the scratch buffers.
         pipeline
             .process(
                 &mut plugin,
                 &mut shm,
-                &clock,
                 AudioBlock {
                     seq: SEQ,
                     num_samples: N,
@@ -1228,7 +1191,6 @@ mod tests {
                     .process(
                         &mut plugin,
                         &mut shm,
-                        &clock,
                         AudioBlock {
                             seq: SEQ,
                             num_samples: N,
@@ -1274,17 +1236,12 @@ mod tests {
             meta: meta(&[2, 1], &[2]),
             fill: 0.25,
         };
-        let clock = Clock {
-            sample_rate: SampleRate::SR_48K,
-            format: SampleFormat::Float32,
-        };
 
         // Warm up: first call sizes the scratch buffers.
         pipeline
             .process(
                 &mut plugin,
                 &mut shm,
-                &clock,
                 AudioBlock {
                     seq: SEQ,
                     num_samples: N,
@@ -1300,7 +1257,6 @@ mod tests {
                     .process(
                         &mut plugin,
                         &mut shm,
-                        &clock,
                         AudioBlock {
                             seq: SEQ,
                             num_samples: N,
@@ -1384,10 +1340,6 @@ mod tests {
         let mut shm = AudioSlab::open(name, layout).unwrap();
 
         let mut pipeline = AudioPipeline::new(SampleFormat::Float32);
-        let clock = Clock {
-            sample_rate: tutti_plugin_types::SampleRate::of(SR),
-            format: SampleFormat::Float32,
-        };
         let block = || AudioBlock {
             seq: SEQ,
             num_samples: N,
@@ -1398,16 +1350,12 @@ mod tests {
         // Warm up outside the gate: the first block sizes the pipeline scratch,
         // and the plugin's own pooled buffers reach their steady capacity.
         for _ in 0..4 {
-            pipeline
-                .process(&mut plugin, &mut shm, &clock, block())
-                .unwrap();
+            pipeline.process(&mut plugin, &mut shm, block()).unwrap();
         }
 
         assert_no_alloc::assert_no_alloc(|| {
             for _ in 0..256 {
-                pipeline
-                    .process(&mut plugin, &mut shm, &clock, block())
-                    .unwrap();
+                pipeline.process(&mut plugin, &mut shm, block()).unwrap();
             }
         });
     }

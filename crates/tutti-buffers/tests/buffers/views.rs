@@ -399,6 +399,10 @@ fn the_default_views_are_empty() {
     assert_eq!((planes.channels(), planes.iter().len()), (0, 0));
     assert!(planes.get_plane(0).is_none());
     assert_eq!(planes, Planes::default());
+    let mut out = PlanesMut::<f32>::default();
+    assert!(out.is_empty());
+    assert_eq!((out.channels(), out.iter().len()), (0, 0));
+    assert!(out.get_plane_mut(0).is_none());
     let pair = StereoPlanes::<f32>::default();
     assert!(pair.is_empty());
     assert_eq!(pair.channels(), 2);
@@ -509,4 +513,15 @@ fn the_views_and_their_iterators_are_send_and_sync() {
     assert_send_sync::<PlaneIter<'_>>();
     assert_send_sync::<PlaneIterMut<'_, '_>>();
     assert_send_sync::<Interleaved<'_, tutti_buffers::I24>>();
+}
+
+/// Silence covers exactly the frames the view covers: a narrowed view leaves the
+/// rest of every plane alone.
+#[test]
+fn silence_zeroes_every_plane_over_the_views_frames_only() {
+    let (mut l, mut r) = ([1.0f32; 4], [2.0f32; 4]);
+    let mut planes = [&mut l[..], &mut r[..]];
+    let mut out = PlanesMut::new(&mut planes).expect("two planes");
+    out.slice_mut(Samples(1)..Samples(3)).silence();
+    assert_eq!((l, r), ([1.0, 0.0, 0.0, 1.0], [2.0, 0.0, 0.0, 2.0]));
 }

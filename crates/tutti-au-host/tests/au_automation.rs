@@ -17,8 +17,8 @@ use tutti_au_host::component::find_component;
 use tutti_au_host::types::{AudioComponentDescription, K_AUDIO_UNIT_TYPE_EFFECT};
 use tutti_au_host::{AuController, AuLoaded, AuProcessor};
 use tutti_plugin_types::{
-    AudioBuffer, AudioBufferMut, Loaded, MaxBlock, ParamEdit, ParamId, ParameterChanges, PluginIo,
-    Prepare, ProcessContext, ProcessOutput, Processor,
+    Loaded, MaxBlock, ParamEdit, ParamId, ParameterChanges, PluginAudio, PluginIo, Prepare,
+    ProcessContext, ProcessOutput, Processor,
 };
 
 const RATE: tutti_types::SampleRate = tutti_types::SampleRate::SR_48K;
@@ -51,12 +51,7 @@ fn render_block(processor: &mut AuProcessor, level: f32, changes: &ParameterChan
     let ctx = ProcessContext::new().params(changes);
     let mut out = ProcessOutput::default();
     let mut io = PluginIo {
-        buffer: AudioBufferMut::F32(AudioBuffer {
-            inputs: &inputs,
-            outputs: &mut outputs,
-            num_samples: BLOCK,
-            sample_rate: RATE,
-        }),
+        buffer: PluginAudio::new(&inputs, &mut outputs).expect("equal channels"),
         ctx: &ctx,
         out: &mut out,
     };

@@ -215,6 +215,12 @@ pub(super) const ALLOW: &[Allow] = &[
         CTOR,
         "two views' frame counts must agree: validity of two arguments together, which neither type can carry",
     ),
+    ty(
+        "crates/tutti-plugin-types/src/audio.rs",
+        "PluginAudio::new",
+        CTOR,
+        "the same validity as `InputOutput::new` over two channel tables: their frame counts must agree",
+    ),
     Allow {
         path: "crates/tutti-midi-hardware/src/virtual_endpoint.rs",
         owner: "VirtualSource::open",

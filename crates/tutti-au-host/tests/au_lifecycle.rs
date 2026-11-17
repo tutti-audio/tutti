@@ -392,9 +392,9 @@ mod halves {
     use super::*;
     use tutti_au_host::{AuController, AuLoaded, AuProcessor};
     use tutti_plugin_types::{
-        AudioBuffer, AudioBufferMut, Control, Controller, Loaded, MaxBlock, Normalized, ParamFlags,
-        ParamId, ParameterChanges, ParameterQueue, PluginIo, ProcessContext, ProcessOutput,
-        Processor, Request, taken,
+        Control, Controller, Loaded, MaxBlock, Normalized, ParamFlags, ParamId, ParameterChanges,
+        ParameterQueue, PluginAudio, PluginIo, ProcessContext, ProcessOutput, Processor, Request,
+        taken,
     };
     use tutti_types::Samples;
 
@@ -483,12 +483,7 @@ mod halves {
                 output.iter_mut().map(|v| v.as_mut_slice()).collect();
             let mut out = ProcessOutput::default();
             let mut io = PluginIo {
-                buffer: AudioBufferMut::F32(AudioBuffer {
-                    inputs: &inputs,
-                    outputs: &mut outputs,
-                    num_samples: 64,
-                    sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
-                }),
+                buffer: PluginAudio::new(&inputs, &mut outputs).expect("equal channels"),
                 ctx: &ctx,
                 out: &mut out,
             };

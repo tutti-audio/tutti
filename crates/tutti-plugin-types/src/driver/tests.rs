@@ -9,10 +9,11 @@
 use super::*;
 use crate::fake::{Call, FakeLoaded, FakePlugin};
 use crate::{
-    AudioBuffer, AudioBufferMut, HostOp, MaxBlock, Normalized, ParamId, PluginError, PluginIo,
-    PluginResult, PluginTail, ProcessContext, ProcessOutput, Processor, RenderMode, Request,
-    RequestWord, SampleFormat, Samples, Stage, taken,
+    HostOp, MaxBlock, Normalized, ParamId, PluginAudio, PluginError, PluginIo, PluginResult,
+    PluginTail, ProcessContext, ProcessOutput, Processor, RenderMode, Request, RequestWord,
+    SampleFormat, Samples, Stage, taken,
 };
+use tutti_buffers::{InputOutput, Planes, PlanesMut};
 
 /// The test process's main thread: nextest runs each test in its own process,
 /// so the claim always succeeds.
@@ -85,7 +86,6 @@ impl Rig {
 
     /// Renders one block of `frames` through the held Processor.
     fn render(&mut self, frames: usize) -> PluginResult<()> {
-        let rate = self.state.prepare().map_or(48_000.0, |p| p.rate().get());
         let input = vec![0.0f32; frames];
         let mut left = vec![1.0f32; frames];
         let mut right = vec![1.0f32; frames];
@@ -94,11 +94,13 @@ impl Rig {
         let ctx = ProcessContext::new();
         let mut out = ProcessOutput::default();
         let mut io = PluginIo {
-            buffer: AudioBufferMut::F32(AudioBuffer::new(
-                &inputs,
-                &mut outputs,
-                SampleRate::of(rate),
-            )),
+            buffer: PluginAudio::F32(
+                InputOutput::new(
+                    Planes::new(&inputs).expect("two planes"),
+                    PlanesMut::new(&mut outputs).expect("two planes"),
+                )
+                .expect("equal lengths"),
+            ),
             ctx: &ctx,
             out: &mut out,
         };
@@ -461,11 +463,13 @@ fn the_processor_renders_without_allocating() {
     let processor = rig.lifecycle.processor().expect("held");
     let mut outputs = [left.as_mut_slice(), right.as_mut_slice()];
     let mut io = PluginIo {
-        buffer: AudioBufferMut::F32(AudioBuffer::new(
-            &inputs,
-            &mut outputs,
-            tutti_plugin_types::SampleRate::SR_48K,
-        )),
+        buffer: PluginAudio::F32(
+            InputOutput::new(
+                Planes::new(&inputs).expect("two planes"),
+                PlanesMut::new(&mut outputs).expect("two planes"),
+            )
+            .expect("equal lengths"),
+        ),
         ctx: &ctx,
         out: &mut out,
     };

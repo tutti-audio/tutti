@@ -582,6 +582,14 @@ impl<'s, 'a, S: Sample> PlanesMut<'s, 'a, S> {
         PlaneIterMut { inner, start, end }
     }
 
+    /// Writes silence ([`Sample::SILENCE`]) over every frame of every plane.
+    #[inline]
+    pub fn silence(&mut self) {
+        for mut plane in self.iter_mut() {
+            plane.samples_mut().fill(S::SILENCE);
+        }
+    }
+
     /// Returns every plane narrowed to a frame range, read-only.
     ///
     /// # Panics
@@ -631,6 +639,19 @@ impl<'s, 'a, S: Sample> PlanesMut<'s, 'a, S> {
             layout: self.layout,
             start: self.start + r.start,
             frames: r.end - r.start,
+        }
+    }
+}
+
+impl<S: Sample> Default for PlanesMut<'_, '_, S> {
+    /// No planes, no frames: the empty view, the write side of
+    /// [`Planes::default`]. [`new`](PlanesMut::new) would refuse it.
+    fn default() -> Self {
+        Self {
+            planes: MutTable::Slices(&mut []),
+            layout: ChannelLayout::EMPTY,
+            start: 0,
+            frames: 0,
         }
     }
 }

@@ -247,6 +247,7 @@ impl ClapLoaded {
             input_ports,
             output_ports,
             max_frames: max_frames as u32,
+            sample_rate: self.audio.sample_rate,
             scratch,
             ranges: ranges.reader(),
             drain,
