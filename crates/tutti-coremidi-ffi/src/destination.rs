@@ -22,7 +22,7 @@ use std::ffi::c_void;
 use std::fmt;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 
 use crate::error::{Error, Operation, OsStatus};
 use crate::source::{Protocol, shared_raw_client};
@@ -56,9 +56,10 @@ struct Callback {
 /// The receive block's invoke function is `extern "C-unwind"`, so a panic
 /// leaving it would unwind through CoreMIDI's frames. The callback runs under
 /// `catch_unwind` instead: a panic drops the callback, so every later packet
-/// delivers nothing, and [`faults`](Self::faults) counts it. Nothing is logged
-/// on CoreMIDI's thread. This guard is local to the crate (layer 0) and moves to
-/// the shared panic guard when one exists at its layer.
+/// delivers nothing, and [`faults`](Self::faults) counts it. The crate logs
+/// nothing, but a caught panic still runs the process's panic hook on CoreMIDI's
+/// thread (the default one prints to stderr, which allocates and locks): an app
+/// that cares installs a quiet hook, which a library never does.
 ///
 /// # Drop
 ///
@@ -159,12 +160,13 @@ impl Drop for UmpDestination {
         unsafe {
             MIDIEndpointDispose(self.endpoint);
         }
+        // The lock is never poisoned: `receive` catches every panic under it.
         let taken = self
             .callback
             .on_packet
             .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take();
+            .ok()
+            .and_then(|mut slot| slot.take());
         drop(taken);
     }
 }
@@ -184,11 +186,20 @@ unsafe fn receive(callback: &Callback, list: *const MIDIEventList) {
     };
     // SAFETY: the caller's contract.
     let ran = catch_unwind(AssertUnwindSafe(|| unsafe { packets(list, on_packet) }));
-    if ran.is_err() {
+    if let Err(payload) = ran {
         callback.faults.fetch_add(1, Ordering::Relaxed);
         let dead = slot.take();
-        // The callback's own drop may panic too; it is not allowed out.
-        let _ = catch_unwind(AssertUnwindSafe(|| drop(dead)));
+        // Neither the payload's drop nor the callback's may panic out.
+        drop_guarded(payload);
+        drop_guarded(dead);
+    }
+}
+
+/// Drops `value`; a panic in its `Drop` is caught, and its payload is leaked
+/// rather than dropped, since that drop could panic again.
+fn drop_guarded<T>(value: T) {
+    if let Err(payload) = catch_unwind(AssertUnwindSafe(|| drop(value))) {
+        std::mem::forget(payload);
     }
 }
 
@@ -230,19 +241,17 @@ mod tests {
     use std::mem::MaybeUninit;
     use std::sync::atomic::AtomicUsize;
 
-    /// A callback that panics on its first packet is never called again, the
-    /// panic is counted once, and it does not leave `receive`.
-    #[test]
-    fn a_panicking_callback_is_dropped_after_one_counted_fault() {
-        let calls = Arc::new(AtomicUsize::new(0));
-        let seen = Arc::clone(&calls);
-        let callback = Callback {
-            on_packet: Mutex::new(Some(Box::new(move |_, _| {
-                seen.fetch_add(1, Ordering::Relaxed);
-                panic!("the callback panics");
-            }))),
-            faults: AtomicU64::new(0),
-        };
+    /// A panic payload whose `Drop` panics.
+    struct PanicsOnDrop;
+
+    impl Drop for PanicsOnDrop {
+        fn drop(&mut self) {
+            panic!("the payload's drop panics");
+        }
+    }
+
+    /// Delivers one packet to `callback` three times.
+    fn deliver_thrice(callback: &Callback) {
         let mut list = MaybeUninit::<MIDIEventList>::uninit();
         let words = [0x2090_3C64_u32];
         // SAFETY: `Init` initialises `list`, which `Add` then fills inside its
@@ -262,10 +271,35 @@ mod tests {
         };
         for _ in 0..3 {
             // SAFETY: `list` is a valid event list.
-            unsafe { receive(&callback, list) };
+            unsafe { receive(callback, list) };
         }
+    }
+
+    /// A callback that panics on its first packet, with `payload`, is never
+    /// called again, the panic is counted once, and nothing leaves `receive`.
+    fn check_panicking_callback(payload: fn() -> ()) {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let seen = Arc::clone(&calls);
+        let callback = Callback {
+            on_packet: Mutex::new(Some(Box::new(move |_, _| {
+                seen.fetch_add(1, Ordering::Relaxed);
+                payload();
+            }))),
+            faults: AtomicU64::new(0),
+        };
+        deliver_thrice(&callback);
         assert_eq!(calls.load(Ordering::Relaxed), 1);
         assert_eq!(callback.faults.load(Ordering::Relaxed), 1);
         assert!(callback.on_packet.lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn a_panicking_callback_is_dropped_after_one_counted_fault() {
+        check_panicking_callback(|| panic!("the callback panics"));
+    }
+
+    #[test]
+    fn a_payload_whose_drop_panics_does_not_leave_receive() {
+        check_panicking_callback(|| std::panic::panic_any(PanicsOnDrop));
     }
 }
