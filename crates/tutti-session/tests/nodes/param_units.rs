@@ -1,5 +1,5 @@
 //! The unit of every engine node's params, as a [`Key`](tutti_session::Key)'s
-//! methods hand it out (doc 030, N1): `key.cutoff()` is a `TypedParamRef<U>`
+//! methods hand it out (doc 030, N1): `key.cutoff()` is a `ParamTarget<U>`
 //! with `U` the node's [`HasParam`] unit, which the node's own declaration
 //! writes from its cell's type. The table is the spec's: each param is in
 //! the unit a reader of the node's docs expects (the ladder's resonance is

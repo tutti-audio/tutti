@@ -28,7 +28,7 @@
 //! semantics of folding first.
 
 use tutti_buffers::{Interleaved, Mono, PlanesMut, Sample, deinterleave};
-use tutti_types::{Amplitude, ChannelLayout, Samples};
+use tutti_types::{Amplitude, ChannelIndex, ChannelLayout, Samples};
 
 use core::marker::PhantomData;
 
@@ -233,13 +233,10 @@ impl PeakBlocks {
 }
 
 /// One whole block of a [`PeakMeter`] stream, with where it stands.
-///
-/// There is no channel-index type in the workspace, so the channel is its
-/// position in the layout.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ChannelBlock {
     /// The channel the block summarizes, from 0.
-    pub channel: usize,
+    pub channel: ChannelIndex,
     /// The frame the block starts at, in [`Samples`] of the stream.
     pub frame: Samples,
     /// The block's summary.
@@ -349,6 +346,7 @@ impl<S: Sample> PeakMeter<S> {
         }
         let split = PlanesMut::from_vecs(&mut self.planes).and_then(|out| deinterleave(chunk, out));
         debug_assert!(split.is_ok(), "the chunk is the meter's width: {split:?}");
+        let layout = self.layout;
         for (channel, ((pending, plane), run)) in self
             .pending
             .iter_mut()
@@ -360,7 +358,9 @@ impl<S: Sample> PeakMeter<S> {
             cut_blocks(pending, self.block, plane, run);
             for (i, &block) in run[done..].iter().enumerate() {
                 emit(ChannelBlock {
-                    channel,
+                    channel: layout
+                        .index(channel)
+                        .expect("a meter has a plane per channel of its layout"),
                     frame: Samples((done + i) * self.block),
                     block,
                 });
@@ -487,6 +487,19 @@ pub fn summarize<S: Sample>(cfg: &PeakConfig, buffer: Interleaved<'_, S>) -> Res
 mod tests {
     use super::*;
     use crate::fold_uneven;
+
+    /// A layout wider than a bus is metered whole: every channel of a 24-channel buffer has
+    /// its blocks, indexed by its position.
+    #[test]
+    fn a_layout_wider_than_a_bus_meters_every_channel() {
+        let wide = ChannelLayout::from(24u16);
+        let samples: Vec<f32> = (0..4 * 24).map(|i| (i % 24) as f32 / 24.0).collect();
+        let blocks = summarize(&mono(4), Interleaved::new(&samples, wide).unwrap());
+        for c in 0..24 {
+            assert_eq!(ch(&blocks, c).len(), 1, "channel {c}");
+            assert_eq!(ch(&blocks, c)[0].max, c as f32 / 24.0, "channel {c}");
+        }
+    }
 
     /// `summarize` of a buffer that is valid for its config.
     fn summarize(cfg: &PeakConfig, buffer: Interleaved<'_>) -> PeakBlocks {
@@ -926,13 +939,13 @@ mod tests {
         for channel in 0..2 {
             let streamed: Vec<PeakBlock> = items
                 .iter()
-                .filter(|item| item.channel == channel)
+                .filter(|item| item.channel.get() == channel)
                 .map(|item| item.block)
                 .collect();
             assert_eq!(streamed, ch(&batch, channel)[..15], "channel {channel}");
             let frames: Vec<Samples> = items
                 .iter()
-                .filter(|item| item.channel == channel)
+                .filter(|item| item.channel.get() == channel)
                 .map(|item| item.frame)
                 .collect();
             let starts: Vec<Samples> = (0..15).map(|i| Samples(i * 16)).collect();

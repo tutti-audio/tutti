@@ -106,6 +106,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use crate::MAX_NODE_LATENCY;
 use crate::NodeKey;
 use crate::{Edge, EdgeId, InPort, OutPort, Sink, Source};
+use tutti_buffers::Float;
 use tutti_curve::{FadeLaw, declick_frames};
 use tutti_rt::with_no_denormals;
 use tutti_types::{Amplitude, At, Frame, Latency, Mix, Samples};
@@ -196,17 +197,17 @@ struct RefFifo {
 /// commit, [`process`](Self::process) to render a block,
 /// [`schedule`](Self::schedule) for timestamped commands, and
 /// [`reprepare`](Self::reprepare) for a rate or block-size change.
-pub struct Reference {
+pub struct Reference<F: Float = f32> {
     prepare: Prepare,
     graph: Option<ValidGraph>,
-    units: BTreeMap<NodeKey, (u32, Box<dyn Node>)>,
+    units: BTreeMap<NodeKey, (u32, Box<dyn Node<F>>)>,
     /// Crossfades by key: `units` holds the incoming unit.
-    fading: BTreeMap<NodeKey, RefFade>,
+    fading: BTreeMap<NodeKey, RefFade<F>>,
     arrival: BTreeMap<NodeKey, Latency>,
     delays: BTreeMap<DelayKey, Samples>,
-    audio_lines: BTreeMap<DelayKey, VecDeque<f32>>,
+    audio_lines: BTreeMap<DelayKey, VecDeque<F>>,
     event_lines: BTreeMap<DelayKey, RefFifo>,
-    fb_audio: BTreeMap<(OutPort, u32, Samples), VecDeque<f32>>,
+    fb_audio: BTreeMap<(OutPort, u32, Samples), VecDeque<F>>,
     fb_event: BTreeMap<(EventIn, EventOut, u32, Samples), RefFifo>,
     inject: BTreeMap<EventIn, Vec<Event>>,
     /// The keys each tracked event output holds (see `Executor`'s
@@ -255,7 +256,7 @@ pub struct Reference {
     /// The mix each node is to have from the next block on (`set_mix`).
     wanted_mix: BTreeMap<NodeKey, Mix>,
     /// What each node's mode has done so far.
-    modes: BTreeMap<NodeKey, RefMode>,
+    modes: BTreeMap<NodeKey, RefMode<F>>,
     /// The transport's jumps, kept as the executor keeps them: the same type.
     /// (Its answers are checked against the blocks themselves in
     /// `history.rs`'s tests, not against this.)
@@ -267,7 +268,7 @@ pub struct Reference {
     play_playing: bool,
 }
 
-impl std::fmt::Debug for Reference {
+impl<F: Float> std::fmt::Debug for Reference<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Reference")
             .field("prepare", &self.prepare)
@@ -296,6 +297,16 @@ impl std::fmt::Debug for Reference {
 }
 
 impl Reference {
+    /// An `f32` interpreter with no graph.
+    /// [`with_format`](Reference::with_format) builds one for another sample
+    /// format.
+    #[must_use]
+    pub fn new(prepare: Prepare) -> Self {
+        Self::with_format(prepare)
+    }
+}
+
+impl<F: Float> Reference<F> {
     /// This block's play clock, and the reading the next block starts from:
     /// a start at the first frame restarts it in a fresh epoch, each start
     /// inside the block takes one reserved epoch from that frame on, and it
@@ -342,9 +353,9 @@ impl Reference {
         clock
     }
 
-    /// An interpreter with no graph.
+    /// An interpreter in sample format `F` with no graph.
     #[must_use]
-    pub fn new(prepare: Prepare) -> Self {
+    pub fn with_format(prepare: Prepare) -> Self {
         Self {
             prepare,
             graph: None,
@@ -581,7 +592,7 @@ impl Reference {
     /// # Panics
     ///
     /// If `fresh` lacks a needed unit.
-    pub fn set_graph(&mut self, graph: &ValidGraph, fresh: BTreeMap<NodeKey, Box<dyn Node>>) {
+    pub fn set_graph(&mut self, graph: &ValidGraph, fresh: BTreeMap<NodeKey, Box<dyn Node<F>>>) {
         self.set_graph_with_fades(graph, fresh, &BTreeMap::new());
     }
 
@@ -598,7 +609,7 @@ impl Reference {
     pub fn set_graph_with_fades(
         &mut self,
         graph: &ValidGraph,
-        mut fresh: BTreeMap<NodeKey, Box<dyn Node>>,
+        mut fresh: BTreeMap<NodeKey, Box<dyn Node<F>>>,
         fades: &BTreeMap<NodeKey, crate::Fade>,
     ) {
         let t = graph.topology();
@@ -1013,12 +1024,12 @@ impl Reference {
                 let line = self
                     .audio_lines
                     .entry(key)
-                    .or_insert_with(|| VecDeque::from(vec![0.0; d.get()]));
+                    .or_insert_with(|| VecDeque::from(vec![F::ZERO; d.get()]));
                 while line.len() > d.get() {
                     line.pop_front();
                 }
                 while line.len() < d.get() {
-                    line.push_front(0.0);
+                    line.push_front(F::ZERO);
                 }
             }
         }
@@ -1036,7 +1047,7 @@ impl Reference {
         for k in audio_fb {
             self.fb_audio
                 .entry(k)
-                .or_insert_with(|| VecDeque::from(vec![0.0; k.2.get()]));
+                .or_insert_with(|| VecDeque::from(vec![F::ZERO; k.2.get()]));
         }
         self.fb_event.retain(|k, _| fb_event_keys.contains(k));
         for k in fb_event_keys {
@@ -1067,8 +1078,8 @@ impl Reference {
         &mut self,
         frames: usize,
         transport: &TransportPosition,
-        inputs: &[&[f32]],
-        outputs: &mut [&mut [f32]],
+        inputs: &[&[F]],
+        outputs: &mut [&mut [F]],
     ) {
         self.process_with_changes(frames, transport, &TransportChanges::NONE, inputs, outputs);
     }
@@ -1084,8 +1095,8 @@ impl Reference {
         frames: usize,
         transport: &TransportPosition,
         changes: &TransportChanges,
-        inputs: &[&[f32]],
-        outputs: &mut [&mut [f32]],
+        inputs: &[&[F]],
+        outputs: &mut [&mut [F]],
     ) {
         // The block's transport pieces, cut here by hand rather than through
         // `Env::segments`, so the executor's cut has an independent check.
@@ -1106,7 +1117,7 @@ impl Reference {
         if let Some(next) = self.suspended {
             // Suspended: silence, the clock counts, the transport moves.
             for o in outputs.iter_mut() {
-                o[..frames].fill(0.0);
+                o[..frames].fill(F::ZERO);
             }
             for &(_, len, t) in &pieces {
                 self.playhead.observe(&t, next.sample_rate().get(), len);
@@ -1135,7 +1146,7 @@ impl Reference {
         self.history.observe(&env);
         let Some(graph) = self.graph.clone() else {
             for o in outputs.iter_mut() {
-                o[..frames].fill(0.0);
+                o[..frames].fill(F::ZERO);
             }
             self.frame += Samples(frames);
             return;
@@ -1188,7 +1199,7 @@ impl Reference {
             }
             self.scheduled = waiting;
 
-            let mut audio: BTreeMap<OutPort, Vec<f32>> = BTreeMap::new();
+            let mut audio: BTreeMap<OutPort, Vec<F>> = BTreeMap::new();
             let mut events: BTreeMap<EventOut, Vec<Event>> = BTreeMap::new();
             let mut done: BTreeSet<NodeKey> = BTreeSet::new();
 
@@ -1277,12 +1288,12 @@ impl Reference {
             }
 
             for (ch, sources) in t.outputs.iter().enumerate() {
-                let mut addends: Vec<RefAddend> = Vec::new();
+                let mut addends: Vec<RefAddend<F>> = Vec::new();
                 for source in sorted(sources) {
                     let mut buf = match source {
                         Source::Node(p) => audio[&p].clone(),
                         Source::Global(g) => inputs[g as usize][..frames].to_vec(),
-                        Source::Zero => vec![0.0; frames],
+                        Source::Zero => vec![F::ZERO; frames],
                     };
                     let key = DelayKey::Output {
                         channel: ch as u16,
@@ -1328,22 +1339,22 @@ impl Reference {
         graph: &ValidGraph,
         frames: usize,
         env: &Env,
-        inputs: &[&[f32]],
-        audio: &mut BTreeMap<OutPort, Vec<f32>>,
+        inputs: &[&[F]],
+        audio: &mut BTreeMap<OutPort, Vec<F>>,
         events: &mut BTreeMap<EventOut, Vec<Event>>,
         targets: &BTreeMap<EdgeId, Amplitude>,
     ) {
         let t = graph.topology();
         let shape = self.units[&key].1.shape();
 
-        let mut ins: Vec<Vec<f32>> = Vec::new();
+        let mut ins: Vec<Vec<F>> = Vec::new();
         for port in 0..shape.audio_in().count() {
             let at = InPort { node: key, port };
             // The addends in source order, each through its own PDC delay.
-            let mut addends: Vec<RefAddend> = Vec::new();
+            let mut addends: Vec<RefAddend<F>> = Vec::new();
             for edge in sorted(t.edges.get(&at).map_or(&[][..], Vec::as_slice)) {
                 let mut buf = match edge {
-                    Edge::Direct(Source::Zero) => vec![0.0; frames],
+                    Edge::Direct(Source::Zero) => vec![F::ZERO; frames],
                     Edge::Direct(Source::Global(g)) => inputs[g as usize][..frames].to_vec(),
                     Edge::Direct(Source::Node(p)) => audio[&p].clone(),
                     Edge::Feedback(f) => {
@@ -1427,7 +1438,7 @@ impl Reference {
         // starts; the aligned input; and whether the node is called at all.
         let mut mode = (shape.audio_out().count() != 0 || shape.event_out != 0)
             .then(|| self.modes.remove(&key).expect("a mode for every node"));
-        let mut xhat: Vec<Vec<f32>> = Vec::new();
+        let mut xhat: Vec<Vec<F>> = Vec::new();
         let mut parked = false;
         if let Some(m) = &mut mode {
             let want = read_mode(&shape, self.wanted.get(&key).copied().unwrap_or_default());
@@ -1451,7 +1462,7 @@ impl Reference {
                 // inputs (`pass.rs`).
                 xhat = (0..m.pass.outputs())
                     .map(|c| {
-                        let mut out = vec![0.0; frames];
+                        let mut out = vec![F::ZERO; frames];
                         m.pass.fold_into(|i| xhat[i].as_slice(), c, &mut out);
                         out
                     })
@@ -1477,14 +1488,13 @@ impl Reference {
         };
         // A crossfade here: the outgoing unit first, on its own copy of the
         // inputs, with no events; what it emits goes nowhere.
-        let outgoing: Option<Vec<Vec<f32>>> =
+        let outgoing: Option<Vec<Vec<F>>> =
             self.fading.get_mut(&key).filter(|_| !parked).map(|f| {
-                let mut o: Vec<Vec<f32>> = vec![vec![0.0; frames]; n_out];
+                let mut o: Vec<Vec<F>> = vec![vec![F::ZERO; frames]; n_out];
                 let copies = ins.clone();
                 let status = {
-                    let in_refs: Vec<&[f32]> = copies.iter().map(Vec::as_slice).collect();
-                    let mut out_refs: Vec<&mut [f32]> =
-                        o.iter_mut().map(Vec::as_mut_slice).collect();
+                    let in_refs: Vec<&[F]> = copies.iter().map(Vec::as_slice).collect();
+                    let mut out_refs: Vec<&mut [F]> = o.iter_mut().map(Vec::as_mut_slice).collect();
                     let none: Vec<SortedEvents<'_>> =
                         vec![SortedEvents::EMPTY; shape.event_in as usize];
                     // Detached writers, as the executor's: every push refused and
@@ -1511,7 +1521,7 @@ impl Reference {
                 settle(status, &copies, &mut o);
                 o
             });
-        let mut outs: Vec<Vec<f32>> = vec![vec![0.0; frames]; n_out];
+        let mut outs: Vec<Vec<F>> = vec![vec![F::ZERO; frames]; n_out];
         let mut ev_bufs: Vec<Vec<Event>> = vec![Vec::new(); shape.event_out as usize];
         if parked {
             // Not called: the aligned input, and the close of what the node
@@ -1541,8 +1551,8 @@ impl Reference {
         let (status, refused) = if parked {
             (Status::Modified, 0)
         } else {
-            let in_refs: Vec<&[f32]> = ins.iter().map(Vec::as_slice).collect();
-            let mut out_refs: Vec<&mut [f32]> = outs.iter_mut().map(Vec::as_mut_slice).collect();
+            let in_refs: Vec<&[F]> = ins.iter().map(Vec::as_slice).collect();
+            let mut out_refs: Vec<&mut [F]> = outs.iter_mut().map(Vec::as_mut_slice).collect();
             let ev_refs: Vec<SortedEvents<'_>> = ev_ins
                 .iter()
                 .map(|v| SortedEvents::new(v, frames).expect("the reference sorted them"))
@@ -1591,7 +1601,7 @@ impl Reference {
                 }
                 let (g_out, g_in) = f.law.gains(k, f.len);
                 for (o, x) in outs.iter_mut().zip(&old) {
-                    o[i] = o[i] * g_in + x[i] * g_out;
+                    o[i] = o[i] * F::from_f32(g_in) + x[i] * F::from_f32(g_out);
                 }
             }
             f.done = (f.done + frames).min(f.len);
@@ -1603,13 +1613,16 @@ impl Reference {
                     for (i, (y, kind)) in o.iter_mut().zip(&kinds).enumerate() {
                         let x = xhat.get(c).map(|x| x[i]);
                         *y = match *kind {
-                            RefFrame::Warm => x.unwrap_or(0.0),
+                            RefFrame::Warm => x.unwrap_or(F::ZERO),
                             RefFrame::Fade { wy, wx, y_on, x_on } => {
                                 match (y_on, x_on && x.is_some()) {
-                                    (true, true) => *y * wy + x.unwrap_or(0.0) * wx,
-                                    (true, false) => *y * wy,
-                                    (false, true) => x.unwrap_or(0.0) * wx,
-                                    (false, false) => 0.0,
+                                    (true, true) => {
+                                        *y * F::from_f32(wy)
+                                            + x.unwrap_or(F::ZERO) * F::from_f32(wx)
+                                    }
+                                    (true, false) => *y * F::from_f32(wy),
+                                    (false, true) => x.unwrap_or(F::ZERO) * F::from_f32(wx),
+                                    (false, false) => F::ZERO,
                                 }
                             }
                             RefFrame::Steady { mix, moving } => match m.heading {
@@ -1618,13 +1631,13 @@ impl Reference {
                                 // the blend (a channel with no input has one
                                 // term).
                                 NodeMode::Active if !moving && mix == 1.0 => *y,
-                                NodeMode::Active if !moving && mix == 0.0 => x.unwrap_or(0.0),
+                                NodeMode::Active if !moving && mix == 0.0 => x.unwrap_or(F::ZERO),
                                 NodeMode::Active => match x {
-                                    Some(x) => *y * mix + x * (1.0 - mix),
-                                    None => *y * mix,
+                                    Some(x) => *y * F::from_f32(mix) + x * F::from_f32(1.0 - mix),
+                                    None => *y * F::from_f32(mix),
                                 },
-                                NodeMode::Muted => 0.0,
-                                NodeMode::Bypassed => x.unwrap_or(0.0),
+                                NodeMode::Muted => F::ZERO,
+                                NodeMode::Bypassed => x.unwrap_or(F::ZERO),
                             },
                         };
                     }
@@ -1654,7 +1667,7 @@ impl Reference {
     }
 }
 
-impl Reference {
+impl<F: Float> Reference<F> {
     /// Edge `id`'s lane for this block: `None` for an edge with no entry.
     /// Its weights are the doc's ramp from the weight the previous block was
     /// given to the base `targets` holds, or, when a source drives it, the
@@ -1710,7 +1723,7 @@ impl Reference {
     }
 }
 
-impl Reference {
+impl<F: Float> Reference<F> {
     /// `key`'s mix lane for this block (`None`: it reads its base), through
     /// the param port's rule (`ref_port`) at [`NodeMix::ADDR`], over the
     /// source's events through its PDC delay. Its state is the node's
@@ -2030,7 +2043,7 @@ fn r_started_arrives(r: &RefRamp) -> Option<u64> {
 /// own output and of the aligned input as the last frame left them, the fade
 /// from where it began, the warm-up left, and whether the node has run since
 /// it was parked. Written from the doc, sharing nothing with `ModeState`.
-struct RefMode {
+struct RefMode<F: Float> {
     heading: NodeMode,
     y: f32,
     x: f32,
@@ -2045,10 +2058,10 @@ struct RefMode {
     stale: bool,
     latency: usize,
     /// Which input channel feeds which output channel (`pass.rs`).
-    pass: crate::pass::Pass,
+    pass: crate::pass::Pass<F>,
     /// The aligned input: one delay line of the declared latency per passed
     /// channel; empty at latency zero.
-    lines: Vec<VecDeque<f32>>,
+    lines: Vec<VecDeque<F>>,
     /// What each event input was sent and has not seen ended.
     held_in: Vec<RefHeld>,
     /// What the node's event outputs held when it was parked.
@@ -2095,7 +2108,7 @@ fn weights_of(mode: NodeMode, mix: f32) -> (f32, f32) {
     }
 }
 
-impl RefMode {
+impl<F: Float> RefMode<F> {
     fn new(
         mode: NodeMode,
         mix: f32,
@@ -2133,7 +2146,7 @@ impl RefMode {
         self.lines = if latency == 0 {
             Vec::new()
         } else {
-            vec![VecDeque::from(vec![0.0; latency]); self.pass.inputs()]
+            vec![VecDeque::from(vec![F::ZERO; latency]); self.pass.inputs()]
         };
     }
 
@@ -2369,10 +2382,10 @@ fn edges_of(g: &ValidGraph) -> BTreeSet<(EventOut, EventIn)> {
 }
 
 /// Apply a node's status to the outputs it was handed.
-fn settle(status: Status, ins: &[Vec<f32>], outs: &mut [Vec<f32>]) {
+fn settle<F: Float>(status: Status, ins: &[Vec<F>], outs: &mut [Vec<F>]) {
     match status {
         Status::Modified | Status::Masked { .. } => {}
-        Status::Silent | Status::Idle => outs.iter_mut().for_each(|o| o.fill(0.0)),
+        Status::Silent | Status::Idle => outs.iter_mut().for_each(|o| o.fill(F::ZERO)),
         Status::Constant => outs.iter_mut().for_each(|o| {
             let v = o[0];
             o.fill(v);
@@ -2381,7 +2394,7 @@ fn settle(status: Status, ins: &[Vec<f32>], outs: &mut [Vec<f32>]) {
             for (c, o) in outs.iter_mut().enumerate() {
                 match ins.get(c) {
                     Some(i) => o.copy_from_slice(i),
-                    None => o.fill(0.0),
+                    None => o.fill(F::ZERO),
                 }
             }
         }
@@ -2390,12 +2403,12 @@ fn settle(status: Status, ins: &[Vec<f32>], outs: &mut [Vec<f32>]) {
 
 /// A crossfade in the reference: the unit fading out, how far the fade has
 /// got, and a replace waiting behind it.
-struct RefFade {
-    old: Box<dyn Node>,
+struct RefFade<F: Float> {
+    old: Box<dyn Node<F>>,
     done: usize,
     len: usize,
     law: crate::FadeLaw,
-    next: Option<(Box<dyn Node>, crate::Fade)>,
+    next: Option<(Box<dyn Node<F>>, crate::Fade)>,
 }
 
 /// A command waiting in the reference.
@@ -2435,17 +2448,17 @@ fn traverse(t: &TransportPosition, tempo: f64, rate: f64, len: usize) -> Travers
     let mut segs = Vec::new();
     loop {
         match t.looping {
-            Some(l) if l.start.get() < l.end.get() && pos < l.end.get() => {
-                let room = l.end.get() - pos;
+            Some(l) if pos < l.end().get() => {
+                let room = l.end().get() - pos;
                 if left < room {
                     segs.push((pos, pos + left, frame0));
                     pos += left;
                     break;
                 }
-                segs.push((pos, l.end.get(), frame0));
+                segs.push((pos, l.end().get(), frame0));
                 frame0 += room * fpb;
                 left -= room;
-                pos = l.start.get();
+                pos = l.start().get();
                 if left <= 0.0 {
                     break;
                 }
@@ -2468,15 +2481,15 @@ fn walk(t: &TransportPosition, dist: f64) -> Vec<(f64, f64)> {
     let mut path = Vec::new();
     while left > 0.0 {
         match t.looping {
-            Some(l) if l.start.get() < l.end.get() && pos < l.end.get() => {
-                let room = l.end.get() - pos;
+            Some(l) if pos < l.end().get() => {
+                let room = l.end().get() - pos;
                 if left < room {
                     path.push((pos, pos + left));
                     break;
                 }
-                path.push((pos, l.end.get()));
+                path.push((pos, l.end().get()));
                 left -= room;
-                pos = l.start.get();
+                pos = l.start().get();
             }
             _ => {
                 path.push((pos, pos + left));
@@ -2535,7 +2548,7 @@ impl RefPlayhead {
             let from = p.beat().get();
             let mut distances = vec![now - from];
             if let Some(l) = p.looping {
-                let (start, end) = (l.start.get(), l.end.get());
+                let (start, end) = (l.start().get(), l.end().get());
                 // Only a playhead inside the loop can have wrapped there.
                 let inside = now >= start - slack && now < end + slack;
                 if start < end && from < end && inside {
@@ -2576,14 +2589,14 @@ impl RefPlayhead {
             .any(|&(from, to)| from <= beat && beat < to);
         let reached_again = self.now.is_some_and(|t| {
             t.looping.is_some_and(|l| {
-                beat >= l.start.get() && beat < l.end.get() && beat >= t.beat().get()
+                beat >= l.start().get() && beat < l.end().get() && beat >= t.beat().get()
             })
         });
         traversed && !reached_again
     }
 }
 
-impl Reference {
+impl<F: Float> Reference<F> {
     /// Where `cmd` lands this block: `Some(Some(offset))`, `Some(None)` for
     /// late (offset 0), or `None` for not yet. Written out from scratch —
     /// no `Env::due`, no `Playhead` — so the executor's time logic has an
@@ -2654,7 +2667,7 @@ impl Reference {
 }
 
 /// Push every sample through the line: in at the back, out at the front.
-fn delay_line(line: &mut VecDeque<f32>, buf: &mut [f32]) {
+fn delay_line<F: Float>(line: &mut VecDeque<F>, buf: &mut [F]) {
     for x in buf.iter_mut() {
         line.push_back(*x);
         *x = line.pop_front().expect("line is non-empty");
@@ -2737,8 +2750,8 @@ fn sorted<T: Copy + Ord>(set: &[T]) -> Vec<T> {
 
 /// One addend of a sink's sum as the reference holds it: its samples, and the
 /// weights of its lane when its edge has a gain entry.
-struct RefAddend {
-    buf: Vec<f32>,
+struct RefAddend<F: Float> {
+    buf: Vec<F>,
     weight: Option<RefWeight>,
 }
 
@@ -2759,12 +2772,12 @@ enum RefWeight {
 /// gain"). Skips nothing, silent addends and a weight of `1.0` or `0.0`
 /// included: the executor skips the silent ones and takes no multiply at
 /// `1.0`, and must agree.
-fn sum_addends(mut addends: Vec<RefAddend>, frames: usize) -> Vec<f32> {
+fn sum_addends<F: Float>(mut addends: Vec<RefAddend<F>>, frames: usize) -> Vec<F> {
     match addends.len() {
-        0 => vec![0.0; frames],
+        0 => vec![F::ZERO; frames],
         1 if addends[0].weight.is_none() => addends.remove(0).buf,
         _ => {
-            let mut acc = vec![0.0f32; frames];
+            let mut acc = vec![F::ZERO; frames];
             for a in &addends {
                 for (i, (x, y)) in acc.iter_mut().zip(&a.buf).enumerate() {
                     *x = match &a.weight {
@@ -2776,9 +2789,9 @@ fn sum_addends(mut addends: Vec<RefAddend>, frames: usize) -> Vec<f32> {
                             } else {
                                 from + (to - from) * ((i + 1) as f32 / frames as f32)
                             };
-                            *x + w * *y
+                            *x + F::from_f32(w) * *y
                         }
-                        Some(RefWeight::Frames(w)) => *x + w[i] * *y,
+                        Some(RefWeight::Frames(w)) => *x + F::from_f32(w[i]) * *y,
                     };
                 }
             }

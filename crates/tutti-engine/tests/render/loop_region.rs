@@ -43,7 +43,7 @@ impl Node for LoopProbe {
         for k in cx.env.offsets() {
             let looping = cx.env.transport_at(k).looping;
             if let Some(log) = log.as_mut() {
-                log.push(looping.map(|l| (l.start.get(), l.end.get())));
+                log.push(looping.map(|l| (l.start().get(), l.end().get())));
             }
         }
         io.output(0).fill(0.0);

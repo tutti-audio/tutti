@@ -12,7 +12,7 @@ mod tests {
 
     /// The beats a block of `len` frames starting on `host`'s frame gets, in
     /// `f64`.
-    fn walked(host: &FrameClock, len: usize, looping: Option<tutti_graph::LoopRange>) -> Vec<Beat> {
+    fn walked(host: &FrameClock, len: usize, looping: Option<tutti_types::LoopRange>) -> Vec<Beat> {
         let env = Env {
             frame: Frame::new(0),
             sample_rate: SR,
@@ -45,11 +45,7 @@ mod tests {
                 host.seat(Beat(1_000.0));
                 host.advance(Samples(3), Some(l));
             }
-            let graph_loop = looping.map(|l| tutti_graph::LoopRange {
-                start: l.start(),
-                end: l.end(),
-            });
-            let got = walked(&host, 512, graph_loop);
+            let got = walked(&host, 512, looping);
             for (i, b) in got.iter().enumerate() {
                 assert_eq!(
                     b.get().to_bits(),

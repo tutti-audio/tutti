@@ -3301,6 +3301,7 @@ dependencies = [
  "tutti-export",
  "tutti-fixtures",
  "tutti-graph",
+ "tutti-measure",
  "tutti-metering",
  "tutti-midi-device",
  "tutti-midi-file",

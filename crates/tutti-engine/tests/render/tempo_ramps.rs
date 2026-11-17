@@ -100,7 +100,7 @@ fn tempo_map(points: &[(f64, f64, Transition)]) -> Arc<TempoMap> {
 /// 120 to 60 BPM over 4 beats, linear in time, then 60 BPM.
 fn down() -> Arc<TempoMap> {
     tempo_map(&[
-        (0.0, 120.0, Transition::RampTime),
+        (0.0, 120.0, Transition::RampTime { end: None }),
         (4.0, 60.0, Transition::Step),
     ])
 }
@@ -275,7 +275,7 @@ fn the_ramp_stays_within_the_grid_bound_of_the_exact_integral() {
 #[test]
 fn a_ramp_linear_in_beats_is_on_the_integral_at_every_cell_start() {
     let map = tempo_map(&[
-        (0.0, 120.0, Transition::RampBeats),
+        (0.0, 120.0, Transition::RampBeats { end: None }),
         (4.0, 60.0, Transition::Step),
     ]);
     let seen = live(&map, 0.0, &[512], 135_000);
@@ -299,8 +299,8 @@ fn a_ramp_linear_in_beats_is_on_the_integral_at_every_cell_start() {
 #[test]
 fn the_beats_do_not_depend_on_the_block_size() {
     let map = tempo_map(&[
-        (0.0, 120.0, Transition::RampTime),
-        (4.0, 60.0, Transition::RampBeats),
+        (0.0, 120.0, Transition::RampTime { end: None }),
+        (4.0, 60.0, Transition::RampBeats { end: None }),
         (6.0, 150.0, Transition::Step),
     ]);
     let total = 175_000;
@@ -385,8 +385,8 @@ fn a_ramp_block_with_more_than_8_cells_is_split_and_exact() {
 #[test]
 fn an_offline_render_is_the_live_render_with_a_ramp() {
     let map = tempo_map(&[
-        (0.0, 120.0, Transition::RampTime),
-        (4.0, 60.0, Transition::RampBeats),
+        (0.0, 120.0, Transition::RampTime { end: None }),
+        (4.0, 60.0, Transition::RampBeats { end: None }),
         (6.0, 150.0, Transition::Step),
     ]);
     let total = 175_000;

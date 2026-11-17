@@ -136,7 +136,7 @@ impl AudioBridge {
         // The rate lives on `Channels`, not here: the bridge thread sizes its
         // own reply timeout from the same block period, and two copies of the
         // rate would let the two timeouts drift apart.
-        let (channels, sleeper) = Channels::new(sample_rate);
+        let (channels, sleeper) = Channels::new(sample_rate, Arc::clone(watch.wake()));
         let payloads = PayloadPool::new(
             sample_rate,
             channels.refusal_writer(),
@@ -204,19 +204,26 @@ impl AudioBridge {
 
     /// Waits, for at most `within`, until the bridge has handed the listener
     /// everything the server has sent so far (news its watcher saw is read and
-    /// delivered, and no byte is left unread on the connection). It sleep-polls:
-    /// call it from the control thread only. `false` when it did not settle in
-    /// time (a bridge held inside its listener never does) or the bridge is dead.
-    /// When nothing is pending this is an atomic load and a `poll` without a wait.
+    /// delivered, and no byte is left unread on the connection). It sleeps on
+    /// the bridge's progress, which each turn of the bridge thread and the
+    /// server's end notify: call it from the control thread only. `false` when
+    /// it did not settle in time (a bridge held inside its listener never does)
+    /// or the bridge is dead. When nothing is pending this is an atomic load
+    /// and a `poll` without a wait.
     pub fn news_settled(&self, within: std::time::Duration) -> bool {
-        let deadline = std::time::Instant::now() + within;
-        while self.channels.news_pending() || self.channels.bytes_waiting() {
-            if self.lifecycle.is_crashed() || std::time::Instant::now() >= deadline {
-                return false;
-            }
-            std::thread::sleep(std::time::Duration::from_micros(100));
-        }
+        let deadline = crate::Wake::deadline_in(within);
+        self.channels.progress().wait_until(deadline, || {
+            self.lifecycle.is_crashed()
+                || !(self.channels.news_pending() || self.channels.bytes_waiting())
+        });
         !self.lifecycle.is_crashed()
+    }
+
+    /// The gate a thread waiting on this bridge sleeps on: it is notified when
+    /// a response is queued, when the bridge thread has finished a turn, and
+    /// when the server is declared gone.
+    pub(crate) fn progress(&self) -> &Arc<crate::Wake> {
+        self.channels.progress()
     }
 
     /// Why this bridge died, or `None` while it is alive.
@@ -925,7 +932,7 @@ mod tests {
     /// when more are out than the queue and both threads can hold.
     #[test]
     fn a_block_submitted_to_an_empty_pool_is_refused_and_counted() {
-        let channels = Channels::new(SampleRate::SR_48K).0;
+        let channels = Channels::new(SampleRate::SR_48K, Arc::default()).0;
         let bridge = AudioBridge {
             payloads: PayloadPool::new(
                 SampleRate::SR_48K,
@@ -966,7 +973,7 @@ mod tests {
     /// Once the bridge is crashed, the same refusal is `PluginCrashed`.
     #[test]
     fn a_full_queue_is_busy_not_a_crash() {
-        let channels = Channels::new(SampleRate::SR_48K).0;
+        let channels = Channels::new(SampleRate::SR_48K, Arc::default()).0;
         let bridge = AudioBridge {
             payloads: PayloadPool::new(
                 SampleRate::SR_48K,
@@ -1042,7 +1049,7 @@ mod tests {
     /// disconnected.
     #[test]
     fn the_sample_rate_is_stored_and_updated_live() {
-        let channels = Channels::new(SampleRate::SR_48K).0;
+        let channels = Channels::new(SampleRate::SR_48K, Arc::default()).0;
         assert_eq!(channels.sample_rate(), SampleRate::SR_48K);
 
         channels.set_sample_rate(SampleRate::SR_192K);

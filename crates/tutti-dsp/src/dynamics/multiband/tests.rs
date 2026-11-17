@@ -249,7 +249,7 @@ fn unity_bands_have_a_flat_impulse_magnitude() {
         let fft = RealFft::new(N);
         let mut scratch = fft.new_scratch();
         let mut bins = vec![Complex32::new(0.0, 0.0); fft.bins()];
-        fft.forward(&out, &mut bins, &mut scratch);
+        fft.forward(Mono::new(&out), &mut bins, &mut scratch);
         for (i, b) in bins.iter().enumerate().skip(1) {
             let magnitude = f64::from(b.re).hypot(f64::from(b.im));
             assert!(

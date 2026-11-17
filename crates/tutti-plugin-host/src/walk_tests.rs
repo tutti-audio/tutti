@@ -8,12 +8,12 @@
 use std::sync::Arc;
 
 use tutti_graph::{
-    Cx, Env, LoopRange, MAX_TRANSPORT_CHANGES, Offset, PlayClock, TransportChanges,
-    TransportHistory, TransportPosition,
+    Cx, Env, MAX_TRANSPORT_CHANGES, Offset, PlayClock, TransportChanges, TransportHistory,
+    TransportPosition,
 };
 use tutti_plugin_types::{Features, TransportChanges as WireChanges, TransportInfo};
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
-use tutti_types::{Beat, Bpm, Frame, Latency, SampleRate, Samples};
+use tutti_types::{Beat, Bpm, Frame, Latency, LoopRange, SampleRate, Samples};
 
 use crate::{
     Call, DeliveryCounters, ParamDelivery, PluginMeter, Snapshot, TransportSource, TransportWalk,
@@ -185,8 +185,8 @@ fn step_map() -> TempoMap {
 /// 96 000 frames, -120 / 96 000 a frame), then a step at 60.
 fn ramps_map() -> TempoMap {
     TempoMap::new([
-        point(0.0, 120.0, Transition::RampTime),
-        point(4.0, 180.0, Transition::RampTime),
+        point(0.0, 120.0, Transition::RampTime { end: None }),
+        point(4.0, 180.0, Transition::RampTime { end: None }),
         point(8.0, 60.0, Transition::Step),
     ])
     .expect("a map")
@@ -274,10 +274,7 @@ fn a_ramp_chunk_has_its_slope_and_its_cell_edges_are_no_entries() {
 /// order.
 #[test]
 fn a_stop_a_start_a_seek_and_a_wrap_are_entries() {
-    let looped = LoopRange {
-        start: Beat(1.0),
-        end: Beat(2.0),
-    };
+    let looped = LoopRange::new(Beat(1.0), Beat(2.0)).expect("a loop");
     let mut rig = Rig::new(TempoMap::constant(Bpm::of(120.0)).expect("a tempo"));
     // 120 BPM: a frame is 1/24 000 beat. Playing from beat 1.5 in the loop
     // [1, 2]; stop at 100 (held at 1.5004), start again at 200, seek to

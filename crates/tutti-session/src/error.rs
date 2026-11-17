@@ -187,9 +187,13 @@ pub enum ConnectError {
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum MidiError {
-    /// A MIDI file could not be read, built or written.
+    /// A MIDI file could not be read.
     #[error("MIDI file: {0}")]
-    File(#[from] tutti_midi_file::Error),
+    Read(#[from] tutti_midi_file::ReadError),
+
+    /// A file has no one timeline to play ([`Midi::play_file`](crate::Midi::play_file)).
+    #[error(transparent)]
+    NoCommonTimeline(#[from] tutti_midi_file::NoCommonTimeline),
 
     /// A session job did not finish ([`Midi::load_file`](crate::Midi::load_file)):
     /// its work panicked, or the spawner dropped it.
@@ -455,10 +459,6 @@ pub enum Error {
     /// A whole-bus connection was refused ([`Graph::connect`](crate::Graph::connect)).
     #[error(transparent)]
     Connect(#[from] ConnectError),
-
-    /// A param write was refused ([`Graph::set_param`](crate::Graph::set_param)).
-    #[error(transparent)]
-    Param(#[from] crate::ParamError),
 
     /// A modulation range was refused (`Mods::range`).
     #[error(transparent)]

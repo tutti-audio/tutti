@@ -71,6 +71,7 @@
 //! | `tutti::midi` | the common MIDI path: files, messages, keys, routes, devices, profiles | `midi` |
 //! | `tutti::codec` | audio file settings: `Spec`, `Quality`, `FlacLevel`, `IntDepth` and the decode errors | `codec` |
 //! | `tutti::sampler` | sample playback voices and loops | `sampler` |
+//! | `tutti::measure` | the analyses `Session::analyze` runs: loudness, peaks, silence, onsets, spectrum, chroma, the vectorscope | `analyze` |
 //! | `tutti::modulation` | modulation sources, curves and their errors | always |
 //! | `tutti::polysynth` | the polyphonic synth node and its configs | `synth` |
 //! | `tutti::soundfont` | the SoundFont playback node and its settings | `soundfont` |
@@ -105,6 +106,7 @@
 //! - `midi-hardware` — OS MIDI I/O in `tutti::midi` (implies `midi`).
 //! - `synth`, `soundfont`, `sampler` — the matching module.
 //!   `synth` and `soundfont` imply `midi`; `sampler` implies no decoder.
+//! - `analyze` — `Session::analyze` and `tutti::measure` (implies `session`).
 //! - `plugin` — `tutti::plugin` (implies `midi`), with one or more formats:
 //!   `vst2`, `vst3`, `clap`, `au`. Each format links its SDK, which is why none
 //!   is in `full`. The out-of-process plugin server is a separate binary,
@@ -183,12 +185,19 @@ pub use tutti_session::{
     PluginParamError, PluginPresets, PooledPlugin, PortCounts, PresetJobError, PresetJobFailed,
     RestoreError, RestoreState, SaveState, TypedParam,
 };
+#[cfg(all(feature = "session", feature = "analyze"))]
+pub use tutti_session::{Analyze, AnalyzeError, Audio, AudioContext, AudioInput};
+#[cfg(feature = "session")]
+pub use tutti_session::{
+    AnyAssign, AnyTarget, Assign, Effective, Info, IntoAssign, IntoRead, Knobs, Modify, Moved,
+    ParamTarget, ScalarTarget, SetRefusal, Target, TargetInfo, ValueError, ValueErrorKind,
+};
 #[cfg(feature = "session")]
 pub use tutti_session::{
     AppKey, BlockDates, Clock, ConnectError, Edge, EventInPort, EventOutPort, InPort, Job, JobId,
     JobKind, JobStatus, Key, Landed, NoSuchNode, Offline, OfflineSession, OutPort, Playhead,
     RealTime, Root, Session, SessionBuilder, SessionEvent, SystemClock, SystemSession,
-    TransportHandle, TypedParamRef, WaitError, Workers,
+    TransportHandle, WaitError, Workers,
 };
 #[cfg(all(feature = "session", feature = "export"))]
 pub use tutti_session::{
@@ -290,19 +299,20 @@ pub mod types {
     };
     pub use tutti_types::{
         Adsr, AmbisonicFormat, AmbisonicNormalization, AmbisonicOrder, AmbisonicOrderOutOfRange,
-        AmbisonicOrdering, ArcDegrees, AtomicSampleRate, Azimuth, Balance, BarCount, BarPosition,
-        BeatDuration, BeatsPerBar, BeatsPerCycle, BeatsPerCycleOutOfRange, Bed, BipolarOutOfRange,
-        BitDepth, BpmOutOfRange, BusTooWide, BusTopology, CentsSpan, CentsSpanOutOfRange,
-        CompressionRatio, Confidence, Correlation, DepthOutOfRange, Direction, Drive, Elevation,
-        FRAME_TOLERANCE, Feedback, FrameClock, Gain, HoldFactor, InvalidBeatsPerBar,
-        InvalidMaxBlock, InvalidNoteValue, Latency, LayoutError, LoopRange, LoopRangeError,
-        MAX_CHANNELS, MeterChange, Mix, Moment, NotOnMidiScale, Note, NoteNumberOutOfRange,
-        NoteValue, Pan, Param, Param64, ParamAddr, ParamCell, ParamKey, ParamRaw, Pass, PassEnd,
-        PhaseIncrement, PitchClass, PlayReading, PlaybackRate, Radians, ReadRate, Resonance,
-        SamplePosition, SampleRateOutOfRange, SampleSpan, SampleSpanOutOfRange, SegmentOrigin,
-        Speaker, Speakers, Spread, SrcRatio, StereoBalance, StereoWidth, StretchFactor, Tail,
-        TimelineSegment, TopologyError, Unit, UnitAddr, UnitParam, UnitParamOutOfRange, Velocity,
-        beats_per_sample, first_frame_at_or_after, frames_per_beat, snap_to_whole_frame,
+        AmbisonicOrdering, ArcDegrees, AtomicSampleRate, Azimuth, Balance, Ballistics, BarCount,
+        BarPosition, BeatDuration, BeatsPerBar, BeatsPerCycle, BeatsPerCycleOutOfRange, Bed,
+        BipolarOutOfRange, BitDepth, BpmOutOfRange, BusTooWide, BusTopology, CentsSpan,
+        CentsSpanOutOfRange, ChannelIndex, ChannelIndexOutOfRange, CompressionRatio, Confidence,
+        Correlation, DepthOutOfRange, Direction, Drive, Elevation, FRAME_TOLERANCE, Feedback,
+        FrameClock, Gain, HoldFactor, InvalidBeatsPerBar, InvalidMaxBlock, InvalidNoteValue,
+        Latency, LayoutError, LoopRange, LoopRangeError, MAX_CHANNELS, MeterChange, Mix, Moment,
+        NotOnMidiScale, Note, NoteNumberOutOfRange, NoteValue, Pan, Param, Param64, ParamAddr,
+        ParamCell, ParamKey, ParamRaw, Pass, PassEnd, PhaseIncrement, PitchClass, PlayReading,
+        PlaybackRate, Radians, ReadRate, Resonance, SamplePosition, SampleRateOutOfRange,
+        SampleSpan, SampleSpanOutOfRange, SegmentOrigin, Speaker, Speakers, Spread, SrcRatio,
+        StereoBalance, StereoWidth, StretchFactor, Tail, TimelineSegment, TopologyError, Unit,
+        UnitAddr, UnitParam, UnitParamOutOfRange, Velocity, beats_per_sample,
+        first_frame_at_or_after, frames_per_beat, snap_to_whole_frame,
     };
     pub use tutti_types::{Mint, Phase, Placement, Resyncs};
 }
@@ -332,12 +342,11 @@ pub mod graph {
         BusIn, BusOut, Channel, Chase, CompileError, ConstantMask, Continuity, CycleEdge, Due,
         Edge as GraphEdge, Event, EventKind, EventOrderError, EventRejected, EventWriter,
         ForkBuild, ForkCause, ForkFaultKind, ForkHealth, ForkMode, ForkSource, Forked,
-        GraphInvalid, Harmony, HarmonyKind, InPlaceMask, LoopRange as TransportLoop, NodeParts,
-        Offset, ParamInput, ParamMod, ParamPorts, ParamPortsError, ParamRamp, ParamRange,
-        ParamRangeReader, ParamSegment, Pass as DryPath, PlayClock, RenderMode, Resolution,
-        SilenceMask, Sink as GraphSink, SortedEvents, Source as GraphSource, SubBlocks,
-        TransportChange, TransportChangeRejected, TransportChanges, TransportHistory,
-        TransportPosition, UmpAt, VerifyError, Wake, WiredMask,
+        GraphInvalid, Harmony, HarmonyKind, InPlaceMask, NodeParts, Offset, ParamInput, ParamMod,
+        ParamPorts, ParamPortsError, ParamRamp, ParamRange, ParamRangeReader, ParamSegment,
+        Pass as DryPath, PlayClock, RenderMode, Resolution, SilenceMask, Sink as GraphSink,
+        SortedEvents, Source as GraphSource, SubBlocks, TransportChange, TransportChangeRejected,
+        TransportChanges, TransportHistory, TransportPosition, UmpAt, VerifyError, Wake, WiredMask,
     };
     pub use tutti_graph::{EdgeGain, FeedbackFrom, Invalid, NodeMix, RangeView};
 }
@@ -385,11 +394,11 @@ pub mod session {
         Connection, Crossfade, CrossfadeId, CrossfadeRefused, EdgeGainError,
         Event as EventEdgeKind, EventEdge, EventTapPort, Fanin, Feeder, Graph, HeardOpen,
         HeardTapError, Inlet, InletError, LIVE_MAX_BLOCK, MainBus, MainSink, Meters, NotReopened,
-        Outlet, OutputPlacement, OutputPolicy, OutputPolicyError, OutputPolicyHandle, PHASES,
-        ParamError, Peer, PeerError, Phase as UpdatePhase, PhaseCx, Policy, Presence, RangeError,
-        Reclaimer, Reclaims, RemoveError, Reopened, ReplaceRefused, Resource, ResourceFact,
-        ResourceId, RootDeclaration, RootReader, RootTopologyStatus, SessionNode, Taps, TempoError,
-        Weighted, Wire, root_width,
+        Outlet, OutputPlacement, OutputPolicy, OutputPolicyError, OutputPolicyHandle, PHASES, Peer,
+        PeerError, Phase as UpdatePhase, PhaseCx, Policy, Presence, RangeError, Reclaimer,
+        Reclaims, RemoveError, Reopened, ReplaceRefused, Resource, ResourceFact, ResourceId,
+        RootDeclaration, RootReader, RootTopologyStatus, SessionNode, Taps, TempoError, Weighted,
+        Wire, root_width,
     };
     pub use tutti_transport::{
         AudioTaken, LoopEdit, OfflineTimeline, OfflineTimelineConfig, OfflineTransport, TimedError,
@@ -501,6 +510,39 @@ pub mod sampler {
         feature = "decode-ogg"
     ))]
     pub use tutti_sampler::{ProbeError, SampleFacts};
+}
+
+/// Audio measurement (`tutti-measure`): the analyses `Session::analyze` runs.
+/// Each is a config (`PeakConfig`, `OnsetConfig`, `LoudnessConfig`, ...) that is
+/// a `Measure`, whose meter folds chunks into a result: loudness, peaks,
+/// silence, onsets, spectrum, chroma and the vectorscope. Feature `analyze`.
+#[cfg(feature = "analyze")]
+pub mod measure {
+    pub use tutti_measure::{Error, Measure, Meter};
+    // Silence and onsets.
+    pub use tutti_measure::{
+        DetectionFunction, FiniteLevel, FiniteLevelError, Framing, Novelty, Onset, OnsetConfig,
+        OnsetGap, OnsetGapError, OnsetMeter, OnsetSensitivity, OnsetSensitivityError,
+        OnsetThreshold, OnsetThresholdError, Region, SilenceConfig, SilenceMeter,
+    };
+    // Spectrum and chroma.
+    pub use tutti_measure::{
+        BandCount, BandCountError, Banding, BandsPerOctave, BandsPerOctaveError, Chroma,
+        ChromaConfig, ChromaFrame, ChromaMeter, ChromaSummary, FrequencyBand, HarmonicDecay,
+        HarmonicDecayError, Harmonics, HarmonicsError, PeakDecay, PeakDecayError, PeakFloor,
+        PeakFloorError, Smoothing, SpectrumConfig, SpectrumFloor, SpectrumFloorError,
+        SpectrumMeter, SpectrumTime, SpectrumTimeError, Tuning, TuningOffset, TuningOffsetError,
+    };
+    // Loudness, waveform blocks and the vectorscope.
+    pub use tutti_measure::{
+        ChannelBlock, Loudness, LoudnessConfig, LoudnessMeter, PeakBlock, PeakBlocks, PeakConfig,
+        PeakMeter, ScopePoint, TruePeakConfig, TruePeakMeter, VectorscopeConfig, VectorscopeMeter,
+        WindowedLoudnessConfig, WindowedMeter, WindowedReading,
+    };
+    // The dsp types `Error`, the spectrum and `Chroma` name.
+    pub use tutti_dsp::{
+        BinCount, BinIndex, CosineWindow, FrameCount, FrameIndex, Grid, StftError,
+    };
 }
 
 /// Modulation (`tutti-modulation`): the sources and curves an application
@@ -623,7 +665,6 @@ pub mod midi {
     pub use tutti_midi_device::{
         NotSetProfileOn, ProfileChannels, ProfileId, ProfileOnRequest, ProfileTarget,
     };
-    pub use tutti_midi_file::Error as FileError;
     pub use tutti_midi_file::{
         Altered, Converted, DropReason, Dropped, LyricChange, MalformedMeta, MicrosPerQuarter,
         MicrosPerQuarterOutOfRange, MidiFileKind, Moved, NoCommonTimeline, OtherMetaKind,
@@ -631,8 +672,8 @@ pub mod midi {
         TextKind, Timeline, TimelineDrop, WriteOptions,
     };
     pub use tutti_midi_file::{
-        ClipFileError, ConfigError as FileConfigError, IoStep, Refusal, SmfParseError, ToClipError,
-        Truncated,
+        ClipFileError, ReadError, Refusal, SmfParseError, ToClipError, TrackPart, TracksError,
+        WriteError,
     };
     pub use tutti_midi_file::{FileEvent, Meta, MidiFile, SmfFormat, Tick, Track};
     #[cfg(feature = "midi-hardware")]
@@ -652,31 +693,32 @@ pub mod midi {
         SmpteFrameRate, SysexDeviceId, TuningFrequency, UnknownFrameRate,
     };
     pub use tutti_midi_runtime::{
-        ClockKind, MidiClipControls, MidiClipNode, MidiInputPorts, OffsetOutOfRange, OutputLatency,
-        OutputOffset, OutputTerms, SegmentFault, SyncMessages, SyncOut, SyncOutControls,
+        ClockKind, ClockOffset, MidiClipControls, MidiClipNode, MidiInputPorts, OffsetOutOfRange,
+        OutputLatency, OutputOffset, OutputTerms, SegmentFault, SyncMessages, SyncOut,
+        SyncOutControls,
     };
     pub use tutti_midi_runtime::{MidiKeys, MidiOut, Outgoing, SendAt, Taken, TimedMidiEvent};
     pub use tutti_ump::{
         Accidental, Alteration, AlterationKind, ArticulationAttribute, Attribute, Bank, BarAccents,
-        BendValue, BlockFilter, BlockSelect, ChordBass, ChordName, ChordPitch, ChordType,
-        ControlValue, Data128, DeltaTicks, Direction as BlockDirection, DiscoveryFilter,
-        EndpointInfoNotification, Field, FirstGroup, Flex, FlexAddress, FlexTextKind,
-        FlexTimeSignature, Form, Framed, FunctionBlockCount, FunctionBlockId, FunctionBlockInfo,
-        FunctionBlocks, GroupSpan, Key, KeyEvent, KeySignature, Lane, Letter, MdsChunk,
-        MdsChunkSize, MdsChunks, MdsIdentity, Metronome, Midi1Bytes, Midi1Port, MixedDataHeader,
-        MpeChannels, MpeOverlap, MpeZoneSet, MpeZoneSpan, NotChunkSize, NotManufacturerId,
-        NotSharpsFlats, OutOfRange, PerNoteManagement, Pitch, RegisteredData,
-        RegisteredPerNoteController, Reserved, ReservedAccents, ReservedAttribute, Rpn,
-        SharpsFlats, Stream, Sysex7Packet, Sysex7Packets, Sysex8Packet, Sysex8Packets,
-        Sysex8Stream, Sysex8StreamIds, SysexError, SysexMessage, SysexRef, SysexStatus, SysexStep,
-        System, U4, UiHint, UmpVersion, Unknown, Utility, Voice2,
+        BendValue, BlockDirection, BlockFilter, BlockSelect, ChordBass, ChordName, ChordPitch,
+        ChordType, ControlValue, Data128, DeltaTicks, DiscoveryFilter, EndpointInfoNotification,
+        Field, FirstGroup, Flex, FlexAddress, FlexTextKind, FlexTimeSignature, Form, Framed,
+        FunctionBlockCount, FunctionBlockId, FunctionBlockInfo, FunctionBlocks, GroupSpan,
+        KeySignature, Lane, Letter, MdsChunk, MdsChunkSize, MdsChunks, MdsIdentity, Metronome,
+        Midi1Bytes, Midi1Port, MixedDataHeader, MpeChannels, MpeOverlap, MpeZoneSet, MpeZoneSpan,
+        NotChunkSize, NotManufacturerId, NotSharpsFlats, NoteKey, NoteKeyEvent, OutOfRange,
+        PerNoteManagement, Pitch, RegisteredData, RegisteredPerNoteController, Reserved,
+        ReservedAccents, ReservedAttribute, Rpn, SharpsFlats, Stream, SyllableError, Sysex7Packet,
+        Sysex7Packets, Sysex8Packet, Sysex8Packets, Sysex8Stream, Sysex8StreamIds, SysexError,
+        SysexMessage, SysexPart, SysexRef, SysexStatus, SysexStep, System, U4, UiHint, UmpVersion,
+        Unknown, Utility, Voice2,
     };
     pub use tutti_ump::{
         Address, CCNumber, DeviceIdentity, ManufacturerId, Message, Midi1Parser, MidiChannel,
         MidiGroup, NoteNumber, NoteVelocity, Protocol, StreamConfig, SysexAssembler,
         TicksPerQuarterNote, U7, U14, Ump, Voice1,
     };
-    pub use tutti_ump::{Join, Span, Spans};
+    pub use tutti_ump::{Join, PacketSpan, Spans};
     pub use tutti_ump::{
         LyricKind, NotASoftwareRevision, PlainTextKind, SoftwareRevision, TextError,
     };

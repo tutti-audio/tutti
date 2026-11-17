@@ -8,8 +8,8 @@
 use std::sync::Arc;
 
 use tutti_midi_file::{
-    ConfigError, Error, FileEvent, Meta, MidiFile, OutOfOrder, Refusal, SmfDivision, SmfFormat,
-    TextKind, Tick, TimelineDrop, Track,
+    FileEvent, Meta, MidiFile, OutOfOrder, ReadError, Refusal, SmfDivision, SmfFormat, TextKind,
+    Tick, TimelineDrop, Track, TrackPart, TracksError,
 };
 use tutti_types::{Beat, Bpm};
 use tutti_ump::{
@@ -179,11 +179,6 @@ fn push_refuses_an_event_before_the_last() {
         }
     );
     assert!(err.to_string().contains("tick 9"), "{err}");
-    // The typed error crosses `?` into the crate's.
-    let authored = || -> tutti_midi_file::Result<Track> {
-        Ok(track.clone().push(Tick(9), Meta::tempo(Bpm::of(100.0)))?)
-    };
-    assert!(matches!(authored(), Err(Error::OutOfOrder(e)) if e == err));
 }
 
 /// Collecting pairs puts them in tick order, stable: events at one tick keep
@@ -467,8 +462,7 @@ fn an_eight_bit_divided_message_and_an_unknown_packet_are_listed() {
             },
         )
         .unwrap()
-        .to_bytes()
-        .unwrap(),
+        .to_bytes(),
     )
     .unwrap();
     let timeline = clip.timeline().unwrap();
@@ -522,13 +516,10 @@ fn the_tempo_map_is_one_shared_value() {
 /// tick that broke it.
 #[test]
 fn a_refused_track_list_names_the_rule_and_where() {
-    let config = |r: Result<MidiFile, Error>| match r {
-        Err(Error::Config(c)) => c,
-        other => panic!("not a config error: {other:?}"),
-    };
+    let config = |r: Result<MidiFile, TracksError>| r.expect_err("the list is refused");
     assert_eq!(
         config(MidiFile::smf(SmfFormat::Parallel, SMF_DIVISION, vec![])),
-        ConfigError::NoTracks
+        TracksError::NoTracks
     );
     assert_eq!(
         config(MidiFile::smf(
@@ -536,7 +527,7 @@ fn a_refused_track_list_names_the_rule_and_where() {
             SMF_DIVISION,
             vec![Track::new(), Track::new()]
         )),
-        ConfigError::SingleTrack { tracks: 2 }
+        TracksError::SingleTrack { tracks: 2 }
     );
     // The second track goes back from tick 20 to tick 5.
     let back = Track {
@@ -550,8 +541,9 @@ fn a_refused_track_list_names_the_rule_and_where() {
             SMF_DIVISION,
             vec![Track::new(), back]
         )),
-        ConfigError::OutOfOrder {
+        TracksError::OutOfOrder {
             track: 1,
+            part: TrackPart::Events,
             at: Tick(5)
         }
     );
@@ -563,9 +555,9 @@ fn a_refused_track_list_names_the_rule_and_where() {
     let t = Track::new().push(Tick(0), g2).unwrap();
     assert_eq!(
         config(MidiFile::smf(SmfFormat::SingleTrack, SMF_DIVISION, vec![t])),
-        ConfigError::Refused {
+        TracksError::Refused {
             track: 0,
-            in_header: false,
+            part: TrackPart::Events,
             refusal: Refusal::SmfGroup
         }
     );
@@ -587,12 +579,12 @@ fn a_file_round_trips_through_a_slice() {
                 U7::of(100),
             ),
     ]);
-    let out = f.to_bytes().unwrap();
+    let out = f.to_bytes();
     assert_eq!(MidiFile::try_from(out.as_slice()).unwrap(), f);
     // Bytes of neither container are refused as the other doors refuse them.
     assert!(matches!(
         MidiFile::try_from(&b"RIFF...."[..]),
-        Err(Error::UnknownFormat)
+        Err(ReadError::UnknownFormat)
     ));
 }
 

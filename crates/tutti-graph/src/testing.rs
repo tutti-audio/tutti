@@ -20,6 +20,7 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use tutti_buffers::Float;
 use tutti_types::MaxBlock;
 
 use crate::NodeKey;
@@ -166,10 +167,10 @@ pub enum SpecBehaviour {
     Fan,
 }
 
-pub struct TestNode {
+pub struct TestNode<F: Float = f32> {
     kind: Kind,
-    ring: VecDeque<f32>,
-    prev: f32,
+    ring: VecDeque<F>,
+    prev: F,
     count: f32,
     state: f32,
     pending: VecDeque<(Frame, Event)>,
@@ -186,12 +187,26 @@ pub struct TestNode {
 }
 
 impl TestNode {
+    /// An `f32` node. [`in_format`](TestNode::in_format) builds one for
+    /// another sample format.
     pub fn new(kind: Kind) -> Self {
-        Self::counted(kind, Arc::new(AtomicUsize::new(0)))
+        Self::in_format(kind)
+    }
+
+    /// An `f32` node that counts its `process` calls into `calls`.
+    pub fn counted(kind: Kind, calls: Arc<AtomicUsize>) -> Self {
+        Self::counted_in(kind, calls)
+    }
+}
+
+impl<F: Float> TestNode<F> {
+    /// A node of `kind` in sample format `F`.
+    pub fn in_format(kind: Kind) -> Self {
+        Self::counted_in(kind, Arc::new(AtomicUsize::new(0)))
     }
 
     /// A node that counts its `process` calls into `calls`.
-    pub fn counted(kind: Kind, calls: Arc<AtomicUsize>) -> Self {
+    pub fn counted_in(kind: Kind, calls: Arc<AtomicUsize>) -> Self {
         let (kind, own_bypass) = match kind {
             Kind::OwnBypass { inner } => (*inner, true),
             kind => (kind, false),
@@ -205,13 +220,13 @@ impl TestNode {
             kind => (kind, None),
         };
         let ring = match kind {
-            Kind::Lag { latency } => VecDeque::from(vec![0.0; latency]),
+            Kind::Lag { latency } => VecDeque::from(vec![F::ZERO; latency]),
             _ => VecDeque::new(),
         };
         Self {
             kind,
             ring,
-            prev: 0.0,
+            prev: F::ZERO,
             count: 0.0,
             state: 0.0,
             pending: VecDeque::with_capacity(1024),
@@ -230,7 +245,7 @@ impl TestNode {
     }
 }
 
-impl TestNode {
+impl<F: Float> TestNode<F> {
     fn kind_shape(&self) -> Shape {
         match self.kind {
             Kind::Bused { .. } | Kind::OwnBypass { .. } => {
@@ -309,7 +324,7 @@ pub fn rebused(shape: Shape, buses_in: crate::Buses, buses_out: crate::Buses) ->
     bused
 }
 
-impl Node for TestNode {
+impl<F: Float> Node<F> for TestNode<F> {
     fn shape(&self) -> Shape {
         let mut shape = self.kind_shape().with_cost(self.cost);
         if self.own_bypass {
@@ -335,7 +350,7 @@ impl Node for TestNode {
         self.rate = Some(rate);
     }
 
-    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
+    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         self.calls.fetch_add(1, Ordering::Relaxed);
         let n = io.frames();
         match self.kind {
@@ -344,12 +359,13 @@ impl Node for TestNode {
             }
             Kind::Const { value, .. } => {
                 for c in 0..io.output_count() {
-                    io.output(c)[0] = value;
+                    io.output(c)[0] = F::from_f32(value);
                 }
                 Status::Constant
             }
             Kind::Gain { gain, width } => {
                 for c in 0..width {
+                    let gain = F::from_f32(gain);
                     io.channel(c).map(|x| x * gain);
                 }
                 Status::Modified
@@ -357,7 +373,7 @@ impl Node for TestNode {
             Kind::Sum { inputs } => {
                 let (ins, mut outs) = io.split();
                 let out = outs.get(0);
-                out.fill(0.0);
+                out.fill(F::ZERO);
                 for c in 0..inputs {
                     for (o, &i) in out.iter_mut().zip(ins.get(c)) {
                         *o += i;
@@ -368,7 +384,7 @@ impl Node for TestNode {
             Kind::Smooth => {
                 let prev = &mut self.prev;
                 io.channel(0).map(|now| {
-                    let y = 0.5 * (now + *prev);
+                    let y = F::from_f32(0.5) * (now + *prev);
                     *prev = now;
                     y
                 });
@@ -399,7 +415,7 @@ impl Node for TestNode {
                         self.count += 1.0;
                     }
                 }
-                io.output(0).fill(self.count);
+                io.output(0).fill(F::from_f32(self.count));
                 Status::Modified
             }
             Kind::GainDriver { period, .. } => {
@@ -447,7 +463,7 @@ impl Node for TestNode {
                         }
                     }
                 }
-                io.output(0).fill(self.count);
+                io.output(0).fill(F::from_f32(self.count));
                 Status::Modified
             }
             Kind::Consumer { inputs } => {
@@ -464,7 +480,7 @@ impl Node for TestNode {
                             *h += 1;
                         }
                     }
-                    io.output(0)[i] = self.state;
+                    io.output(0)[i] = F::from_f32(self.state);
                 }
                 Status::Modified
             }
@@ -516,10 +532,12 @@ impl Node for TestNode {
                 for (k, o) in env.offsets().zip(io.output(0).iter_mut()) {
                     let t = env.transport_at(k);
                     let moving = if t.playing { 0.5 } else { 0.0 };
-                    *o = ((env.frame.get() + k.get() as u64) % 1000) as f32 * 1e-3
-                        + base
-                        + moving
-                        + t.beat().get().fract() as f32;
+                    *o = F::from_f32(
+                        ((env.frame.get() + k.get() as u64) % 1000) as f32 * 1e-3
+                            + base
+                            + moving
+                            + t.beat().get().fract() as f32,
+                    );
                 }
                 Status::Modified
             }
@@ -541,7 +559,7 @@ impl Node for TestNode {
                 }
                 let gain = 1.0 + self.state;
                 for c in 0..width {
-                    let g = gain * (c + 1) as f32;
+                    let g = F::from_f32(gain * (c + 1) as f32);
                     io.channel(c).map(|x| x * g);
                 }
                 if events_in > 0 {
@@ -564,18 +582,18 @@ impl Node for TestNode {
                 for c in 0..outs {
                     for i in 0..n {
                         let v = match behaviour {
-                            SpecBehaviour::Dc(v) => v,
+                            SpecBehaviour::Dc(v) => F::from_f32(v),
                             SpecBehaviour::Gain(g) => {
                                 if c < width {
-                                    ins.get(c)[i] * g
+                                    ins.get(c)[i] * F::from_f32(g)
                                 } else {
-                                    0.0
+                                    F::ZERO
                                 }
                             }
                             SpecBehaviour::Sum => (0..width).map(|k| ins.get(k)[i]).sum(),
                             SpecBehaviour::Fan => {
                                 if width == 0 {
-                                    0.0
+                                    F::ZERO
                                 } else {
                                     ins.get(c % width)[i]
                                 }
@@ -590,7 +608,7 @@ impl Node for TestNode {
     }
 
     fn reset(&mut self) {
-        *self = Self::counted(self.kind.clone(), Arc::clone(&self.calls));
+        *self = Self::counted_in(self.kind.clone(), Arc::clone(&self.calls));
     }
 }
 
@@ -615,12 +633,16 @@ pub fn shapes_costed(
 ) -> Shapes {
     kinds
         .iter()
-        .map(|(&k, kind)| (k, costed(k, kind, costs).shape()))
+        .map(|(&k, kind)| (k, costed::<f32>(k, kind, costs).shape()))
         .collect()
 }
 
-fn costed(k: NodeKey, kind: &Kind, costs: &BTreeMap<NodeKey, crate::Cost>) -> TestNode {
-    let node = TestNode::new(kind.clone());
+fn costed<F: Float>(
+    k: NodeKey,
+    kind: &Kind,
+    costs: &BTreeMap<NodeKey, crate::Cost>,
+) -> TestNode<F> {
+    let node = TestNode::<F>::in_format(kind.clone());
     match costs.get(&k) {
         Some(&c) => node.with_cost(c),
         None => node,
@@ -628,29 +650,34 @@ fn costed(k: NodeKey, kind: &Kind, costs: &BTreeMap<NodeKey, crate::Cost>) -> Te
 }
 
 /// A fresh unit for each key in `keys`.
-pub fn units_for(
+pub fn units_for<F: Float>(
     kinds: &BTreeMap<NodeKey, Kind>,
     keys: impl IntoIterator<Item = NodeKey>,
-) -> BTreeMap<NodeKey, Box<dyn Node>> {
+) -> BTreeMap<NodeKey, Box<dyn Node<F>>> {
     units_costed(kinds, &BTreeMap::new(), keys)
 }
 
 /// `units_for`, those in `costs` declaring that cost.
-pub fn units_costed(
+pub fn units_costed<F: Float>(
     kinds: &BTreeMap<NodeKey, Kind>,
     costs: &BTreeMap<NodeKey, crate::Cost>,
     keys: impl IntoIterator<Item = NodeKey>,
-) -> BTreeMap<NodeKey, Box<dyn Node>> {
+) -> BTreeMap<NodeKey, Box<dyn Node<F>>> {
     keys.into_iter()
-        .map(|k| (k, Box::new(costed(k, &kinds[&k], costs)) as Box<dyn Node>))
+        .map(|k| {
+            (
+                k,
+                Box::new(costed::<F>(k, &kinds[&k], costs)) as Box<dyn Node<F>>,
+            )
+        })
         .collect()
 }
 
 /// The executor and the reference, driven together.
-pub struct Pair {
-    pub editor: Editor,
-    pub exec: Executor,
-    pub reference: Reference,
+pub struct Pair<F: Float = f32> {
+    pub editor: Editor<F>,
+    pub exec: Executor<F>,
+    pub reference: Reference<F>,
     pub plan: Option<Plan>,
     pub outputs: usize,
     pub inputs: usize,
@@ -663,21 +690,10 @@ pub struct Pair {
 }
 
 impl Pair {
+    /// An `f32` pair. [`with_format`](Pair::with_format) builds one for
+    /// another sample format.
     pub fn new(max_block: usize) -> Self {
-        // The harness compiles itself, to hand the same spec to both
-        // interpreters, and ships the plan through `Editor::package`.
-        let (editor, exec) = Editor::with_event_capacity(prepare(max_block), EVENT_CAPACITY);
-        Self {
-            editor,
-            exec,
-            reference: Reference::new(prepare(max_block)),
-            plan: None,
-            outputs: 0,
-            inputs: 0,
-            max_block,
-            costs: BTreeMap::new(),
-            graph: None,
-        }
+        Self::with_format(max_block)
     }
 
     /// As [`new`](Self::new), with the executor running blocks on a shared
@@ -688,6 +704,26 @@ impl Pair {
             pair.exec.set_pool(Some(test_pool(workers)));
         }
         pair
+    }
+}
+
+impl<F: Float> Pair<F> {
+    /// A pair in sample format `F`.
+    pub fn with_format(max_block: usize) -> Self {
+        // The harness compiles itself, to hand the same spec to both
+        // interpreters, and ships the plan through `Editor::package`.
+        let (editor, exec) = Editor::with_event_capacity(prepare(max_block), EVENT_CAPACITY);
+        Self {
+            editor,
+            exec,
+            reference: Reference::with_format(prepare(max_block)),
+            plan: None,
+            outputs: 0,
+            inputs: 0,
+            max_block,
+            costs: BTreeMap::new(),
+            graph: None,
+        }
     }
 
     /// Switch both to `graph`, building fresh units for whatever is new or
@@ -862,7 +898,7 @@ impl Pair {
     }
 
     /// Render one block through both; return (executor, reference) outputs.
-    pub fn block(&mut self, frames: usize, input: &[f32]) -> (Vec<Vec<f32>>, Vec<Vec<f32>>) {
+    pub fn block(&mut self, frames: usize, input: &[F]) -> (Vec<Vec<F>>, Vec<Vec<F>>) {
         let transport = TransportPosition::new(
             true,
             tutti_types::Bpm::of(120.0),
@@ -876,9 +912,9 @@ impl Pair {
     pub fn block_at(
         &mut self,
         frames: usize,
-        input: &[f32],
+        input: &[F],
         transport: &TransportPosition,
-    ) -> (Vec<Vec<f32>>, Vec<Vec<f32>>) {
+    ) -> (Vec<Vec<F>>, Vec<Vec<F>>) {
         self.block_with_changes(frames, input, transport, &TransportChanges::NONE)
     }
 
@@ -886,31 +922,31 @@ impl Pair {
     pub fn block_with_changes(
         &mut self,
         frames: usize,
-        input: &[f32],
+        input: &[F],
         transport: &TransportPosition,
         changes: &TransportChanges,
-    ) -> (Vec<Vec<f32>>, Vec<Vec<f32>>) {
+    ) -> (Vec<Vec<F>>, Vec<Vec<F>>) {
         let transport = *transport;
         // Channel `c` of the graph input is the signal scaled by 2^-c: exact,
         // and distinct per channel.
-        let chans: Vec<Vec<f32>> = (0..self.inputs.max(1))
+        let chans: Vec<Vec<F>> = (0..self.inputs.max(1))
             .map(|c| {
                 input[..frames]
                     .iter()
-                    .map(|x| x * 0.5f32.powi(c as i32))
+                    .map(|&x| x * F::from_f32(0.5f32.powi(c as i32)))
                     .collect()
             })
             .collect();
-        let ins: Vec<&[f32]> = chans.iter().map(Vec::as_slice).collect();
-        let mut a = vec![vec![0.0f32; frames]; self.outputs];
-        let mut b = vec![vec![0.0f32; frames]; self.outputs];
+        let ins: Vec<&[F]> = chans.iter().map(Vec::as_slice).collect();
+        let mut a = vec![vec![F::ZERO; frames]; self.outputs];
+        let mut b = vec![vec![F::ZERO; frames]; self.outputs];
         {
-            let mut outs: Vec<&mut [f32]> = a.iter_mut().map(Vec::as_mut_slice).collect();
+            let mut outs: Vec<&mut [F]> = a.iter_mut().map(Vec::as_mut_slice).collect();
             self.exec
                 .process_with_changes(frames, &transport, changes, &ins, &mut outs);
         }
         {
-            let mut outs: Vec<&mut [f32]> = b.iter_mut().map(Vec::as_mut_slice).collect();
+            let mut outs: Vec<&mut [F]> = b.iter_mut().map(Vec::as_mut_slice).collect();
             self.reference
                 .process_with_changes(frames, &transport, changes, &ins, &mut outs);
         }
@@ -930,25 +966,45 @@ impl Pair {
 }
 
 /// A deterministic global input signal.
-pub fn input_signal(start: u64, frames: usize) -> Vec<f32> {
+pub fn input_signal<F: Float>(start: u64, frames: usize) -> Vec<F> {
     (0..frames)
         .map(|i| {
             let f = start + i as u64;
             // Silent stretches, so the skip path is exercised.
             if (f / 50).is_multiple_of(3) {
-                0.0
+                F::ZERO
             } else {
-                ((f % 17) as f32 - 8.0) * 0.0625
+                F::from_f32(((f % 17) as f32 - 8.0) * 0.0625)
             }
         })
         .collect()
 }
 
 /// Bits, so a comparison is exact (and NaN-safe).
-pub fn bits(v: &[Vec<f32>]) -> Vec<Vec<u32>> {
+pub fn bits<F: Word>(v: &[Vec<F>]) -> Vec<Vec<F::Bits>> {
     v.iter()
-        .map(|c| c.iter().map(|x| x.to_bits()).collect())
+        .map(|c| c.iter().map(|&x| x.to_word()).collect())
         .collect()
+}
+
+/// A float and the integer holding its bits.
+pub trait Word: Float {
+    type Bits: Copy + Eq + std::fmt::Debug;
+    fn to_word(self) -> Self::Bits;
+}
+
+impl Word for f32 {
+    type Bits = u32;
+    fn to_word(self) -> u32 {
+        self.to_bits()
+    }
+}
+
+impl Word for f64 {
+    type Bits = u64;
+    fn to_word(self) -> u64 {
+        self.to_bits()
+    }
 }
 
 /// A pool of `participants - 1` helper threads over `tutti_rt::JobGate`,

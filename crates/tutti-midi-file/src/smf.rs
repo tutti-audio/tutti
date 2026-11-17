@@ -14,17 +14,19 @@
 //!
 //! # Truncation
 //!
-//! A chunk that runs past the end of the file, or fewer track chunks than the
-//! header declares, is [`Error::Truncated`](crate::Error::Truncated); a track
-//! that ends mid-event, or a track count that disagrees with the header the
-//! other way, is [`Error::MidiFileParse`](crate::Error::MidiFileParse). A
-//! write the fields cannot hold is [`ConfigError::TooLarge`](crate::ConfigError::TooLarge).
+//! A chunk that runs past the end of the file, fewer track chunks than the
+//! header declares, or a track that ends mid-event is a
+//! [`ReadError::Smf`](crate::ReadError::Smf) whose cause is one of the
+//! [`SmfParseError`](crate::SmfParseError) cut-off variants, with the track
+//! and byte offset it was found at. A write the fields cannot hold is
+//! [`TracksError::TooLarge`](crate::TracksError::TooLarge), refused when the
+//! file is built.
 
 mod read;
 mod write;
 
 pub(crate) use read::read;
-pub(crate) use write::write;
+pub(crate) use write::{measure, write};
 
 use tutti_ump::TicksPerQuarterNote;
 

@@ -322,7 +322,7 @@ fn a_step_map_is_followed_without_allocating() {
         .expect("within the limits");
     transport
         .settings()
-        .set_tempo_map(ramp(60.0, Transition::RampTime));
+        .set_tempo_map(ramp(60.0, Transition::RampTime { end: None }));
     transport
         .motion()
         .try_send(MotionEvent::play_from(Beat(0.0)))
@@ -336,9 +336,9 @@ fn a_step_map_is_followed_without_allocating() {
     );
     for round in 0..10u32 {
         let shape = if round % 2 == 0 {
-            Transition::RampTime
+            Transition::RampTime { end: None }
         } else {
-            Transition::RampBeats
+            Transition::RampBeats { end: None }
         };
         transport
             .settings()
