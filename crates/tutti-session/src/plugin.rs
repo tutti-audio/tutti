@@ -2778,9 +2778,9 @@ mod tests {
     }
 
     /// **A swap closes the outgoing plugin's open editor** when the main
-    /// thread empties the graveyard: `adopt` gives the record the incoming
-    /// plugin's handle, whose editor is closed, and the outgoing handle's editor is closed first, not
-    /// left to the drop. An editor that was not open is not closed.
+    /// thread empties the graveyard: `adopt` installs the incoming plugin's
+    /// handle, whose editor is closed, and the outgoing handle's editor is closed
+    /// first, not left to the drop. An editor that was not open is not closed.
     #[test]
     fn a_swap_closes_the_outgoing_editor() {
         use tutti_plugin_types::fake::{Call, FakePlugin};

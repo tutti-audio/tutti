@@ -51,7 +51,6 @@ use super::segment_points::SegmentPoints;
     reason = "the two plugin nodes keep the delivery and the segments in \
               different places; a struct over them would exist only for this call"
 )]
-/// Public for `tutti-plugin`'s node of a served plugin, which drives the same piece. Exported as `take_param_input`.
 pub fn take(
     events: &[Event],
     from: usize,

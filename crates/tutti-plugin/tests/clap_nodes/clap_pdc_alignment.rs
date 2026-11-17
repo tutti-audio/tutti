@@ -436,10 +436,11 @@ fn a_latency_change_reaches_pdc_at_the_next_commit() {
     // is unchanged — the probe still delays by 137 — which is deliberate: the
     // question here is whether the planner re-reads the declaration and
     // re-plans, not whether the audio moved.
-    // The figure the bridge listener writes when the plugin reports a new latency.
+    // The plugin reports a new latency, as the bridge listener hands it over.
     rig.controls
-        .latency_cell()
-        .store(PROBE_LATENCY + EXTRA, std::sync::atomic::Ordering::Release);
+        .take_report(&tutti_plugin_types::PluginInvalidation::Latency {
+            samples: Samples(PROBE_LATENCY + EXTRA),
+        });
     let declared = rig.controls.declared_latency();
     rig.graph
         .editor_mut()

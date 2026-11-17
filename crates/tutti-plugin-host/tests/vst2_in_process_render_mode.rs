@@ -1,10 +1,10 @@
 //! Does a render mode set on the *handle* reach the plugin that renders?
 //!
-//! `AnyThread::set_render_mode` through the handle is the route a bounce driver uses, because `into_parts`
+//! `PluginHandle::announce_render_mode` through the handle is the route a bounce driver uses, because `into_parts`
 //! consumes the `Plugin` at load and only the handle survives.
 //!
 //! The in-process VST2 path must populate that route. With the `render_mode`
-//! slot left `None`, `any_thread().set_render_mode` returns `false` and does nothing,
+//! slot left `None`, `announce_render_mode` returns `false` and does nothing,
 //! and an offline bounce renders every in-process VST2 plugin at live quality
 //! while telling the other three formats otherwise.
 //!

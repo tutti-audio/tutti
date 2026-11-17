@@ -178,7 +178,7 @@ impl PluginStatus {
 /// The last group is why this type is `Send + Sync + Clone`: clone the handle
 /// into whatever the host already uses for off-thread work and call it there.
 /// With a task pool that is one line —
-/// `pool.spawn(async move { handle.any_thread().save_state() })` — polled next
+/// `pool.spawn(async move { handle.save_state() })` — polled next
 /// frame.
 ///
 /// These are deliberately **not** `async` and do not return futures. That would
@@ -312,9 +312,8 @@ impl PluginHandle {
         self.any_thread.set_render_mode(mode)
     }
 
-    /// Sends one parameter value to the plugin ([`AnyThread::set_parameter_value`]).
-    /// A session's `Param::set` is the gated call: this one updates no mirror
-    /// and raises no notice.
+    /// Sends one parameter value to the plugin ([`AnyThread::set_parameter_value`]);
+    /// updates no mirror and raises no notice.
     pub fn send_parameter(&self, id: ParamId, value: Normalized) {
         self.any_thread.set_parameter_value(id, value);
     }
@@ -626,7 +625,7 @@ impl PluginHandle {
     ) -> Result<Size, EditorError> {
         let control = self.editor_route()?;
         let size = Self::editor_call(control, |c| c.open_editor(main, parent, scale))?;
-        self.editor_open.store(true, Ordering::Release);
+        self.editor_open.store(true, Ordering::Relaxed);
         Ok(size)
     }
 
@@ -647,7 +646,7 @@ impl PluginHandle {
     pub fn open_floating_editor(&self, main: MainThreadMarker) -> Result<(), EditorError> {
         let control = self.editor_route()?;
         Self::editor_call(control, |c| c.open_floating_editor(main))?;
-        self.editor_open.store(true, Ordering::Release);
+        self.editor_open.store(true, Ordering::Relaxed);
         Ok(())
     }
 
@@ -655,7 +654,7 @@ impl PluginHandle {
     /// what a session's update services.
     #[must_use]
     pub fn is_editor_open(&self) -> bool {
-        self.editor_open.load(Ordering::Acquire)
+        self.editor_open.load(Ordering::Relaxed)
     }
 
     /// Tells the open editor its window's backing-store scale changed.
@@ -698,7 +697,7 @@ impl PluginHandle {
     /// not first ask whether there was one. Returns `&Self` for chaining with
     /// the other editor calls.
     pub fn close_editor(&self, main: MainThreadMarker) -> &Self {
-        self.editor_open.store(false, Ordering::Release);
+        self.editor_open.store(false, Ordering::Relaxed);
         if let Some(control) = self.control.as_deref() {
             let _ = lent(control, |c| c.close_editor(main));
         }

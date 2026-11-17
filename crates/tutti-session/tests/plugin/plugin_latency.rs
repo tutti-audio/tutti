@@ -229,10 +229,10 @@ fn a_crossfaded_plugins_latency_is_the_incoming_ones() {
     )
     .expect("load a second instance of the reference plugin");
     let controls = incoming.controls();
-    // The figure the bridge listener writes when the plugin reports a new latency.
-    controls
-        .latency_cell()
-        .store(INCOMING, std::sync::atomic::Ordering::Release);
+    // The plugin reports a new latency, as the bridge listener hands it over.
+    controls.take_report(&tutti_plugin_types::PluginInvalidation::Latency {
+        samples: Samples(INCOMING),
+    });
     let landed = s
         .graph()
         .crossfade_plugin(
@@ -257,9 +257,9 @@ fn a_crossfaded_plugins_latency_is_the_incoming_ones() {
         Samples(INCOMING + BLOCK),
         "the graph plans against the incoming plugin's declared latency"
     );
-    controls
-        .latency_cell()
-        .store(INCOMING + 7, std::sync::atomic::Ordering::Release);
+    controls.take_report(&tutti_plugin_types::PluginInvalidation::Latency {
+        samples: Samples(INCOMING + 7),
+    });
     let _ = s.update();
     assert_eq!(
         s.graph_ref().node_latency(node).unwrap(),

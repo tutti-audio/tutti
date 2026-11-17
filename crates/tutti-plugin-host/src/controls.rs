@@ -30,7 +30,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
-use tutti_plugin_types::{ChunkCounters, PluginTail};
+use tutti_plugin_types::{ChunkCounters, PluginInvalidation, PluginTail};
 use tutti_transport::ProjectMeter;
 use tutti_types::Latency;
 use tutti_types::{AtomicSampleRate, SampleRate, Samples};
@@ -296,14 +296,22 @@ impl PluginControls {
         self.node.delivery.delivered()
     }
 
-    /// The latency cell, for the bridge-thread listener that writes it.
-    pub fn latency_cell(&self) -> Arc<AtomicUsize> {
-        Arc::clone(&self.latency)
-    }
-
-    /// The tail cell, for the bridge-thread listener that writes it.
-    pub fn tail_cell(&self) -> Arc<Mutex<PluginTail>> {
-        Arc::clone(&self.tail)
+    /// Takes what the plugin reported into the cells the graph reads: a new
+    /// latency reaches [`latency`](Self::latency) and
+    /// [`declared_latency`](Self::declared_latency), a new tail reaches
+    /// [`tail`](Self::tail). Any other invalidation changes no cell. A served
+    /// plugin's bridge thread calls it for each event it hears, before the event
+    /// reaches the node's listeners.
+    pub fn take_report(&self, reported: &PluginInvalidation) {
+        match *reported {
+            // The atomic is the terminus: `AtomicUsize` needs a primitive, so the
+            // unit type stops here.
+            PluginInvalidation::Latency { samples } => {
+                self.latency.store(samples.get(), Ordering::Release);
+            }
+            PluginInvalidation::Tail { tail } => *lock_tail(&self.tail) = tail,
+            _ => {}
+        }
     }
 
     /// The plugin's reported latency, in **frames** — its own figure, without

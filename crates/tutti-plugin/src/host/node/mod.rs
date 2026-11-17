@@ -103,7 +103,6 @@ use crate::host::loadable::Loadable;
 use crate::host::plugin_ref::PluginRef;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 use tutti_graph::{IntoNode, Node, NodeParts, Shape};
 use tutti_plugin_host::{
     InProcClient, InvalidateSink, ParameterChangeSink, PluginControls, PluginHandle, PluginNode,
@@ -348,28 +347,27 @@ impl PluginClient<Unbound> {
 
         // Route the bridge's events into the shared cells and sinks, through
         // `Ipc::forward_events`. The listener runs on the bridge thread and
-        // must be cheap. A latency change writes the latency cell directly, so
+        // must be cheap. A latency change reaches the controls (`take_report`), so
         // `PluginControls::declared_latency` reads the new figure, then fires
         // the *invalidate* sink (latency is a structural invalidation — it
         // re-plans PDC, which a host does with `Editor::set_latency`). Resync
         // signals split by consequence into the refresh (cosmetic) vs
         // invalidate (structural) sinks via `ResyncKind::classify`.
-        let listener_latency = controls.latency_cell();
-        let listener_tail = controls.tail_cell();
+        let listener_controls = controls.clone();
         let listener_param_sink = param_sink.clone();
         let listener_refresh_sink = refresh_sink.clone();
         let listener_invalidate_sink = invalidate_sink.clone();
         let listener_transport_sink = transport_sink.clone();
         ipc.forward_events(Some(Arc::new(move |ev| match ev {
             BridgeEvent::LatencyChanged { samples } => {
-                // The atomic is the terminus: `AtomicUsize` needs a
-                // primitive, so the unit type stops here.
-                listener_latency.store(samples.get(), Ordering::Release);
-                listener_invalidate_sink.fire(PluginInvalidation::Latency { samples });
+                let reported = PluginInvalidation::Latency { samples };
+                listener_controls.take_report(&reported);
+                listener_invalidate_sink.fire(reported);
             }
             BridgeEvent::TailChanged { tail } => {
-                *tutti_plugin_host::lock_tail(&listener_tail) = tail;
-                listener_invalidate_sink.fire(PluginInvalidation::Tail { tail });
+                let reported = PluginInvalidation::Tail { tail };
+                listener_controls.take_report(&reported);
+                listener_invalidate_sink.fire(reported);
             }
             BridgeEvent::ParameterChanged { edit } => {
                 listener_param_sink.fire(edit);
