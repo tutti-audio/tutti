@@ -46,25 +46,14 @@ impl RangeSource {
     }
 }
 
-/// A published program with its generation, so one read gives both: how
-/// the lane tells a republish (a glide) from a block that reads the same
-/// program.
-struct Published {
-    generation: u64,
-    program: Arc<ControlProgram>,
-}
-
 /// What a lane shares with its [`LaneControls`] and its fork source.
 struct Shared {
     /// What the lane reads once per block, through the reader the node
-    /// registered on it when it was built.
-    program: Publisher<Published>,
-    /// The generation of the last publish, handed out by `fetch_add` so two
-    /// racing publishes never share one (the lane compares generations for
-    /// inequality only, so their order in the cell does not matter). The
-    /// program itself is the cell's: the fork and `program()` read
-    /// `Publisher::current` (a `Loan` must not leave the block).
-    generation: AtomicU64,
+    /// registered on it when it was built. A loan's sequence number
+    /// (`Loan::seq`) tells a republish (a glide) from a block that reads the
+    /// same program. The fork and `program()` read `Publisher::current` (a
+    /// `Loan` must not leave the block).
+    program: Publisher<ControlProgram>,
     /// Set by [`LaneControls::resync`]: the next block sends at frame 0.
     resync: AtomicBool,
     knob: Option<ParamCell>,
@@ -81,7 +70,7 @@ struct Shared {
 impl std::fmt::Debug for Shared {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Shared")
-            .field("generation", &self.generation.load(Ordering::Relaxed))
+            .field("seq", &self.program.seq())
             .field("resync", &self.resync.load(Ordering::Relaxed))
             .finish_non_exhaustive()
     }
@@ -91,7 +80,7 @@ impl std::fmt::Debug for Shared {
 /// of an owner's sweep lends through to stand in for a block. Not API.
 #[doc(hidden)]
 #[derive(Debug)]
-pub struct LaneProbe(Reader<Published>);
+pub struct LaneProbe(Reader<ControlProgram>);
 
 impl LaneProbe {
     /// Borrows the program as the node does once per block; the borrow pins
@@ -116,15 +105,7 @@ impl LaneControls {
 
     /// [`publish`](Self::publish) of a program already behind an `Arc`.
     fn publish_arc(&self, program: Arc<ControlProgram>) {
-        let generation = self
-            .0
-            .generation
-            .fetch_add(1, Ordering::Relaxed)
-            .wrapping_add(1);
-        self.0.program.publish(Published {
-            generation,
-            program,
-        });
+        self.0.program.publish(program);
     }
 
     /// Frees the programs the lane has let go of since the last publish (one
@@ -155,7 +136,7 @@ impl LaneControls {
 
     /// The program last published (or built with).
     pub fn program(&self) -> Arc<ControlProgram> {
-        Arc::clone(&self.0.program.current().program)
+        self.0.program.current()
     }
 
     /// Makes the lane send its value at its next block's first frame, even
@@ -259,7 +240,9 @@ struct Walk {
 /// What the lane saw at the end of its last block.
 #[derive(Clone, Copy)]
 struct Seen {
-    generation: u64,
+    /// The sequence number of the program it read (`Loan::seq`); `None`
+    /// before its first block, so that block counts as a change.
+    seq: Option<u64>,
     knob: Option<u32>,
     range: (u32, u32),
     /// The frame after the last block, the transport and play clock at its
@@ -316,7 +299,7 @@ pub struct ControlLaneNode {
     shared: Arc<Shared>,
     /// A reader of `shared.program`, registered when the node is built (a
     /// fork builds a node over a new cell, and registers there).
-    program: Reader<Published>,
+    program: Reader<ControlProgram>,
     make: Arc<MakeSegment>,
     /// A native port (exact mode allowed; the port clamps).
     native: bool,
@@ -344,7 +327,7 @@ fn fresh_walk() -> Walk {
 
 fn fresh_seen() -> Seen {
     Seen {
-        generation: u64::MAX,
+        seq: None,
         knob: None,
         range: (0, 0),
         end: None,
@@ -361,11 +344,7 @@ impl ControlLaneNode {
         native: bool,
     ) -> Self {
         let shared = Shared {
-            program: Publisher::new(Published {
-                generation: 0,
-                program: Arc::clone(&program),
-            }),
-            generation: AtomicU64::new(0),
+            program: Publisher::from_arc(program),
             resync: AtomicBool::new(false),
             knob,
             range,
@@ -452,7 +431,7 @@ impl ControlLaneNode {
     /// never a lend), the knob and the range, so it needs no read state of
     /// its own.
     fn fresh_over(s: &Shared, make: &Arc<MakeSegment>, native: bool) -> Self {
-        let program = Arc::clone(&s.program.current().program);
+        let program = s.program.current();
         let knob = s
             .knob
             .as_ref()
@@ -978,8 +957,8 @@ impl Node for ControlLaneNode {
             return Status::Modified;
         }
         let s = &*self.shared;
-        let published = self.program.lend();
-        let (generation, program) = (published.generation, &*published.program);
+        let loan = self.program.lend();
+        let (seq, program) = (Some(loan.seq()), &*loan);
         let knob = s
             .knob
             .as_ref()
@@ -998,7 +977,7 @@ impl Node for ControlLaneNode {
             s.unranged.fetch_add(1, Ordering::Relaxed);
         }
         let range_bits = (range.0.to_bits(), range.1.to_bits());
-        if generation != self.seen.generation {
+        if seq != self.seen.seq {
             // A new program: forget every input it does not read, so a
             // source id a later program reuses starts from nothing, never from the
             // segment a removed source left.
@@ -1008,7 +987,7 @@ impl Node for ControlLaneNode {
                 }
             }
         }
-        let changed = generation != self.seen.generation
+        let changed = seq != self.seen.seq
             || knob.map(f32::to_bits) != self.seen.knob
             || range_bits != self.seen.range;
         // A resync is a point at frame 0, never a glide (`LaneControls::resync`).
@@ -1070,7 +1049,7 @@ impl Node for ControlLaneNode {
         if thinned {
             s.thinned.fetch_add(1, Ordering::Relaxed);
         }
-        drop(published);
+        drop(loan);
         let out = io.event_out(0);
         for e in &self.scratch {
             // Within the declared capacity: never refused.
@@ -1078,7 +1057,7 @@ impl Node for ControlLaneNode {
         }
         let last = Offset::new(Samples(len - 1), env.block_len).unwrap_or(Offset::ZERO);
         self.seen = Seen {
-            generation,
+            seq,
             knob: knob.map(f32::to_bits),
             range: range_bits,
             end: Some((
