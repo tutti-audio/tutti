@@ -125,7 +125,7 @@ impl LevelWriter {
     /// time** (the executor runs a lane's op once a block). Two at once would
     /// lose a block, never touch memory unsafely.
     #[inline]
-    pub fn fold(&self, peak: f32, sum_sq: f64, frames: u32) {
+    pub fn fold(&mut self, peak: f32, sum_sq: f64, frames: u32) {
         let s = &*self.shared;
         let i = loop {
             let i = s.active.load(Ordering::Acquire);

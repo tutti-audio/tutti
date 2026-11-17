@@ -4,7 +4,7 @@ use super::*;
 /// empty.
 #[test]
 fn a_take_returns_the_fold_and_clears_it() {
-    let (w, mut r) = level_cell();
+    let (mut w, mut r) = level_cell();
     w.fold(0.5, 4.0, 16);
     w.fold(0.25, 2.0, 8);
     assert_eq!(
@@ -26,7 +26,7 @@ fn a_take_returns_the_fold_and_clears_it() {
 /// squares stalls past about 2^24, so the RMS drifts.
 #[test]
 fn a_long_unread_span_stays_exact() {
-    let (w, mut r) = level_cell();
+    let (mut w, mut r) = level_cell();
     // 512-frame blocks each worth 127 (not a power of two, so an `f32` sum
     // rounds once it passes 2^24); 337_500 blocks is an hour at 48 kHz.
     let blocks = 337_500u64;
@@ -41,7 +41,7 @@ fn a_long_unread_span_stays_exact() {
 /// The frame count saturates instead of wrapping.
 #[test]
 fn the_count_saturates() {
-    let (w, mut r) = level_cell();
+    let (mut w, mut r) = level_cell();
     w.shared.slots[0]
         .frames
         .store(u64::MAX - 1, Ordering::Relaxed);
@@ -54,7 +54,7 @@ fn the_count_saturates() {
 #[test]
 fn concurrent_takes_lose_nothing_and_stay_whole() {
     const BLOCKS: u64 = 50_000;
-    let (w, mut r) = level_cell();
+    let (mut w, mut r) = level_cell();
     let writer = std::thread::spawn(move || {
         for _ in 0..BLOCKS {
             w.fold(0.5, 4.0, 16);

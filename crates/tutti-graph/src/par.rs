@@ -183,6 +183,7 @@ pub(crate) struct Par {
     event_fb: ClaimTable,
     taps: ClaimTable,
     event_taps: ClaimTable,
+    meters: ClaimTable,
     lanes: ClaimTable,
     inject: ClaimTable,
     /// Per plan unit, its run of the (unit-sorted) inject list.
@@ -240,6 +241,7 @@ impl Par {
             event_fb: ClaimTable::new(plan.event_feedback.len()),
             taps: ClaimTable::new(plan.taps.len()),
             event_taps: ClaimTable::new(plan.event_taps.len()),
+            meters: ClaimTable::new(plan.meters.len()),
             lanes: ClaimTable::new(plan.sum_lanes.len()),
             inject: ClaimTable::new(n_inject as usize),
             inject_spans,
@@ -287,7 +289,7 @@ pub(crate) struct Block<'b, 'o> {
     pub(crate) event_fb: &'b mut [Option<crate::kernels::EventFifo>],
     pub(crate) taps: &'b mut [Option<crate::tap::TapWriter>],
     pub(crate) event_taps: &'b mut [Option<crate::event_tap::EventTapWriter>],
-    pub(crate) meters: &'b [Option<crate::meter::MeterWriter>],
+    pub(crate) meters: &'b mut [Option<crate::meter::MeterWriter>],
     pub(crate) lanes: &'b mut [SumLane],
     pub(crate) inject: &'b mut [Inject],
     pub(crate) has_inject: &'b mut [bool],
@@ -323,7 +325,7 @@ struct Shared<'s, 'o> {
     taps: SplitMut<'s, Option<crate::tap::TapWriter>>,
     event_taps: SplitMut<'s, Option<crate::event_tap::EventTapWriter>>,
     /// Atomics only, one writer a lane by construction: shared, no claim.
-    meters: &'s [Option<crate::meter::MeterWriter>],
+    meters: SplitMut<'s, Option<crate::meter::MeterWriter>>,
     /// A weighted lane belongs to one op, which claims its run.
     lanes: SplitMut<'s, SumLane>,
     inject: SplitMut<'s, Inject>,
@@ -371,6 +373,7 @@ pub(crate) fn run_block(par: &mut Par, pool: &Arc<dyn Pool>, b: Block<'_, '_>) -
         event_fb,
         taps,
         event_taps,
+        meters,
         lanes,
         inject,
         inject_spans,
@@ -399,7 +402,7 @@ pub(crate) fn run_block(par: &mut Par, pool: &Arc<dyn Pool>, b: Block<'_, '_>) -
             event_fb: SplitMut::new(b.event_fb, event_fb),
             taps: SplitMut::new(b.taps, taps),
             event_taps: SplitMut::new(b.event_taps, event_taps),
-            meters: b.meters,
+            meters: SplitMut::new(b.meters, meters),
             lanes: SplitMut::new(b.lanes, lanes),
             inject: SplitMut::new(b.inject, inject),
             inject_spans,
@@ -634,7 +637,8 @@ impl Shared<'_, '_> {
                 }
             }
             Op::Meter { meter, srcs } => {
-                if let Some(meter) = self.meters[meter as usize].as_ref() {
+                let mut meter = self.meters.claim(meter as usize);
+                if let Some(meter) = meter.as_mut() {
                     let a = ArenaView {
                         view: self.arena.view(held_audio),
                     };
