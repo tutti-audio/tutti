@@ -515,10 +515,22 @@ fn the_views_and_their_iterators_are_send_and_sync() {
     assert_send_sync::<Interleaved<'_, tutti_buffers::I24>>();
 }
 
-/// Silence covers exactly the frames the view covers: a narrowed view leaves the
-/// rest of every plane alone.
+/// After `silence`, every sample of every plane is zero and the view's frame
+/// count is unchanged.
 #[test]
-fn silence_zeroes_every_plane_over_the_views_frames_only() {
+fn silence_leaves_every_sample_of_every_plane_zero_and_the_frame_count_unchanged() {
+    let (mut l, mut r) = ([1.0f32; 4], [-2.0f32; 4]);
+    let mut planes = [&mut l[..], &mut r[..]];
+    let mut out = PlanesMut::new(&mut planes).expect("two planes");
+    out.silence();
+    assert_eq!(out.frames(), Samples(4));
+    assert_eq!(out.channels(), 2);
+    assert_eq!((l, r), ([0.0; 4], [0.0; 4]));
+}
+
+/// A narrowed view silences only the frames it covers.
+#[test]
+fn silence_of_a_narrowed_view_spares_the_frames_outside_it() {
     let (mut l, mut r) = ([1.0f32; 4], [2.0f32; 4]);
     let mut planes = [&mut l[..], &mut r[..]];
     let mut out = PlanesMut::new(&mut planes).expect("two planes");
