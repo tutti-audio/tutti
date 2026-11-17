@@ -78,7 +78,7 @@ impl Node for Sum {
 
 fn click(transport: &Transport) -> ClickNode {
     let settings = Arc::new(ClickSettings::new());
-    settings.set_mode(MetronomeMode::Always);
+    settings.mode().set(MetronomeMode::Always);
     ClickNode::new(transport, settings)
 }
 
