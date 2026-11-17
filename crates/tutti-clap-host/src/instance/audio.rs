@@ -19,7 +19,6 @@ use tutti_graph::UmpAt;
 use tutti_plugin_types::AudioBufferMut;
 use tutti_plugin_types::TransportChange;
 use tutti_plugin_types::WireMidi;
-use tutti_plugin_types::is_usable;
 
 /// Owned snapshot of the plugin's per-block output. Returned for
 /// non-RT consumers (tests, offline render) via
@@ -72,9 +71,10 @@ impl<'a> ProcessOutputRef<'a> {
 /// # use tutti_graph::Offset;
 /// # use tutti_plugin_types::AudioBufferMut;
 /// # use tutti_clap_host::{ClapProcessor, ClapProcessContext, TransportInfo};
+/// # use tutti_types::{Bpm, SampleRate};
 /// # fn ex(plugin: &mut ClapProcessor, buffer: &mut AudioBufferMut<'_, '_>)
 /// # -> tutti_clap_host::Result<()> {
-/// let transport = TransportInfo::default().with_tempo(120.0);
+/// let transport = TransportInfo::new(SampleRate::SR_48K).with_tempo(Bpm::of(120.0));
 /// let midi = [(Offset::ZERO, midi::note_on(MidiChannel::FIRST, 60, 16384))];
 /// plugin.process(buffer, &ClapProcessContext {
 ///     midi: &midi,
@@ -147,9 +147,10 @@ impl ClapProcessor {
     /// # use tutti_graph::Offset;
     /// # use tutti_plugin_types::AudioBufferMut;
     /// # use tutti_clap_host::{ClapProcessor, ClapProcessContext, TransportInfo};
+    /// # use tutti_types::{Bpm, SampleRate};
     /// # fn ex(active: &mut ClapProcessor, buffer: &mut AudioBufferMut<'_, '_>)
     /// # -> tutti_clap_host::Result<()> {
-    /// let transport = TransportInfo::default().with_tempo(120.0);
+    /// let transport = TransportInfo::new(SampleRate::SR_48K).with_tempo(Bpm::of(120.0));
     /// let midi = [(Offset::ZERO, midi::note_on(MidiChannel::FIRST, 60, 16384))];
     /// active.process(buffer, &ClapProcessContext {
     ///     midi: &midi,
@@ -476,28 +477,25 @@ pub(super) fn build_clap_transport(transport: &TransportInfo) -> clap_event_tran
     // active, pre-roll). `bar_start` is a `clap_beattime`, the same type as
     // `song_pos_beats`, so it rides the beats timeline that is already
     // advertised.
-    // `HAS_TIME_SIGNATURE` is unconditional, and it is the only one of the four
-    // that is: `TimeSignature` is a validated newtype with no representable
-    // invalid value, so the claim is always true. The rest assert that a
-    // specific field is usable, and asserting it for a field we did not fill is
-    // how a host ends up sending `tempo = 0` flagged as valid. Tempo
-    // additionally has to be positive, because plugins divide by it.
-    let mut flags: u32 = CLAP_TRANSPORT_HAS_TIME_SIGNATURE;
+    // `HAS_TIME_SIGNATURE` and `HAS_TEMPO` are unconditional: `TimeSignature`
+    // and `Bpm` are validated newtypes with no representable invalid value (a
+    // tempo is finite and above zero, which plugins divide by), so the claims
+    // are always true. The timelines assert that a position is finite, which a
+    // `Beat` and a `Seconds` do not guarantee, and asserting it for a field we
+    // did not fill is how a host ends up sending a NaN flagged as valid.
+    let mut flags: u32 = CLAP_TRANSPORT_HAS_TIME_SIGNATURE | CLAP_TRANSPORT_HAS_TEMPO;
 
-    if is_usable(transport.timing.tempo) && transport.timing.tempo > 0.0 {
-        flags |= CLAP_TRANSPORT_HAS_TEMPO;
-    }
-    if is_usable(transport.position.beats) {
+    if transport.position.beat.get().is_finite() {
         flags |= CLAP_TRANSPORT_HAS_BEATS_TIMELINE;
     }
     // The seconds timeline covers the loop's seconds too: with a loop active
     // and no exact seconds for it, the flag is not claimed.
-    let loop_seconds = match transport.loop_region.seconds {
-        Some((a, b)) if is_usable(a.get()) && is_usable(b.get()) => Some((a, b)),
-        _ => None,
-    };
-    if is_usable(transport.position.seconds.get())
-        && (!transport.state.cycle_active || loop_seconds.is_some())
+    let loop_seconds = transport
+        .loop_region
+        .and_then(|l| l.seconds)
+        .filter(|(a, b)| a.get().is_finite() && b.get().is_finite());
+    if transport.position.seconds.get().is_finite()
+        && (transport.loop_region.is_none() || loop_seconds.is_some())
     {
         flags |= CLAP_TRANSPORT_HAS_SECONDS_TIMELINE;
     }
@@ -508,7 +506,7 @@ pub(super) fn build_clap_transport(transport: &TransportInfo) -> clap_event_tran
     if transport.state.recording {
         flags |= CLAP_TRANSPORT_IS_RECORDING;
     }
-    if transport.state.cycle_active {
+    if transport.loop_region.is_some() {
         flags |= CLAP_TRANSPORT_IS_LOOP_ACTIVE;
     }
 
@@ -521,25 +519,28 @@ pub(super) fn build_clap_transport(transport: &TransportInfo) -> clap_event_tran
             flags: 0,
         },
         flags,
-        song_pos_beats: (transport.position.beats * CLAP_BEATTIME_FACTOR as f64) as i64,
+        song_pos_beats: (transport.position.beat.get() * CLAP_BEATTIME_FACTOR as f64) as i64,
         song_pos_seconds: (transport.position.seconds.get() * CLAP_SECTIME_FACTOR as f64) as i64,
-        tempo: transport.timing.tempo,
+        tempo: transport.timing.tempo.get(),
         // BPM per sample until the next transport event, as the host measured
         // it (`0.0` when it cannot describe the block by one slope). Sent
-        // only beside a tempo the flag vouches for, and only if finite.
-        tempo_inc: if flags & CLAP_TRANSPORT_HAS_TEMPO != 0 && is_usable(transport.timing.tempo_inc)
-        {
+        // only if finite: a bare `f64` has no range check.
+        tempo_inc: if transport.timing.tempo_inc.is_finite() {
             transport.timing.tempo_inc
         } else {
             0.0
         },
-        loop_start_beats: (transport.loop_region.start_beats * CLAP_BEATTIME_FACTOR as f64) as i64,
-        loop_end_beats: (transport.loop_region.end_beats * CLAP_BEATTIME_FACTOR as f64) as i64,
+        loop_start_beats: transport.loop_region.map_or(0, |l| {
+            (l.range.start().get() * CLAP_BEATTIME_FACTOR as f64) as i64
+        }),
+        loop_end_beats: transport.loop_region.map_or(0, |l| {
+            (l.range.end().get() * CLAP_BEATTIME_FACTOR as f64) as i64
+        }),
         loop_start_seconds: loop_seconds
             .map_or(0, |(a, _)| (a.get() * CLAP_SECTIME_FACTOR as f64) as i64),
         loop_end_seconds: loop_seconds
             .map_or(0, |(_, b)| (b.get() * CLAP_SECTIME_FACTOR as f64) as i64),
-        bar_start: (transport.bar.start_beats * CLAP_BEATTIME_FACTOR as f64) as i64,
+        bar_start: (transport.bar.start.get() * CLAP_BEATTIME_FACTOR as f64) as i64,
         // CLAP's bar at song position 0 is number 0 (`events.h`); `BarNumber`
         // is 1-based. Saturating: an `i64` far outside `i32` is no bar a plugin
         // could use.
@@ -561,44 +562,39 @@ pub(super) fn build_clap_transport(transport: &TransportInfo) -> clap_event_tran
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tutti_plugin_types::LoopRegion;
+    use tutti_types::{Beat, Bpm, LoopRange, SampleRate};
 
-    /// A `HAS_*` flag is a claim that the matching field is usable, so it must
-    /// not be set for a field the host did not fill.
-    ///
-    /// VST2 shipped `tempo = 0, kVstTempoValid` for exactly this reason and the
-    /// fix there gates on finiteness plus positivity; CLAP set all four flags
-    /// unconditionally and had the same hole. A plugin that trusts `HAS_TEMPO`
-    /// and divides by the tempo gets an infinity.
+    fn base() -> TransportInfo {
+        TransportInfo::new(SampleRate::SR_48K)
+    }
+
+    fn cycle(start: f64, end: f64) -> LoopRegion {
+        LoopRegion::new(LoopRange::new(Beat(start), Beat(end)).expect("a loop"))
+    }
+
+    /// A timeline flag is a claim that the matching position is finite, so it
+    /// must not be set for a NaN. The tempo and the signature are valid by
+    /// their types, so their flags stand for every snapshot.
     #[test]
-    fn a_transport_flag_is_not_set_for_an_unusable_field() {
-        let mut t = TransportInfo::new();
-
-        t.timing.tempo = 0.0;
-        let ctx = build_clap_transport(&t);
-        assert_eq!(
-            ctx.flags & CLAP_TRANSPORT_HAS_TEMPO,
-            0,
-            "a zero tempo must not be advertised as valid — plugins divide by it"
-        );
-
-        t.timing.tempo = f64::NAN;
-        assert_eq!(build_clap_transport(&t).flags & CLAP_TRANSPORT_HAS_TEMPO, 0);
-        t.timing.tempo = f64::INFINITY;
-        assert_eq!(build_clap_transport(&t).flags & CLAP_TRANSPORT_HAS_TEMPO, 0);
-
-        t.timing.tempo = 120.0;
+    fn a_timeline_flag_is_not_set_for_a_non_finite_position() {
+        let mut t = base();
         assert_ne!(
             build_clap_transport(&t).flags & CLAP_TRANSPORT_HAS_TEMPO,
             0,
-            "a usable tempo must still be advertised"
+            "a tempo is valid by its type and always advertised"
         );
 
-        t.position.beats = f64::NAN;
+        t.position.beat = Beat(f64::NAN);
         assert_eq!(
             build_clap_transport(&t).flags & CLAP_TRANSPORT_HAS_BEATS_TIMELINE,
             0
         );
-        t.position.beats = 0.0;
+        t.position.beat = Beat(0.0);
+        assert_ne!(
+            build_clap_transport(&t).flags & CLAP_TRANSPORT_HAS_BEATS_TIMELINE,
+            0
+        );
         t.position.seconds = tutti_types::Seconds(f64::NAN);
         assert_eq!(
             build_clap_transport(&t).flags & CLAP_TRANSPORT_HAS_SECONDS_TIMELINE,
@@ -606,16 +602,12 @@ mod tests {
         );
     }
 
-    /// The slope rides beside a tempo the flag vouches for and is finite; a
-    /// slope with no usable tempo, or a NaN one, is `0.0`.
+    /// The slope rides beside the tempo when it is finite; a NaN one is `0.0`.
     #[test]
-    fn the_slope_is_sent_only_beside_a_usable_tempo() {
-        let mut t = TransportInfo::new().with_tempo(120.0).with_tempo_inc(0.002);
+    fn the_slope_is_sent_only_when_finite() {
+        let mut t = base().with_tempo(Bpm::of(120.0)).with_tempo_inc(0.002);
         assert_eq!(build_clap_transport(&t).tempo_inc, 0.002);
         t.timing.tempo_inc = f64::NAN;
-        assert_eq!(build_clap_transport(&t).tempo_inc, 0.0);
-        t.timing.tempo_inc = 0.002;
-        t.timing.tempo = 0.0;
         assert_eq!(build_clap_transport(&t).tempo_inc, 0.0);
     }
 
@@ -625,11 +617,11 @@ mod tests {
     #[test]
     fn the_bar_at_song_position_zero_is_number_zero() {
         use tutti_types::BarNumber;
-        assert_eq!(build_clap_transport(&TransportInfo::new()).bar_number, 0);
-        let third = TransportInfo::new().with_bar(8.0, BarNumber::new(3));
+        assert_eq!(build_clap_transport(&base()).bar_number, 0);
+        let third = base().with_bar(Beat(8.0), BarNumber::new(3));
         assert_eq!(build_clap_transport(&third).bar_number, 2);
         // Pre-roll: the bar before the first is -1.
-        let pickup = TransportInfo::new().with_bar(-4.0, BarNumber::new(0));
+        let pickup = base().with_bar(Beat(-4.0), BarNumber::new(0));
         assert_eq!(build_clap_transport(&pickup).bar_number, -1);
     }
 
@@ -640,18 +632,22 @@ mod tests {
     #[test]
     fn an_active_loop_carries_its_seconds() {
         use tutti_types::Seconds;
-        let looped = TransportInfo::new()
-            .with_position_beats(1.0, Seconds(0.5))
-            .with_loop(true, 2.0, 8.0)
-            .with_loop_seconds(Seconds(1.0), Seconds(4.5));
+        let looped = base()
+            .with_beat(Beat(1.0))
+            .with_seconds(Seconds(0.5))
+            .with_loop(LoopRegion {
+                seconds: Some((Seconds(1.0), Seconds(4.5))),
+                ..cycle(2.0, 8.0)
+            });
         let ev = build_clap_transport(&looped);
         assert_ne!(ev.flags & CLAP_TRANSPORT_HAS_SECONDS_TIMELINE, 0);
         assert_eq!(ev.loop_start_seconds, CLAP_SECTIME_FACTOR);
         assert_eq!(ev.loop_end_seconds, CLAP_SECTIME_FACTOR * 9 / 2);
 
-        let unknown = TransportInfo::new()
-            .with_position_beats(1.0, Seconds(0.5))
-            .with_loop(true, 2.0, 8.0);
+        let unknown = base()
+            .with_beat(Beat(1.0))
+            .with_seconds(Seconds(0.5))
+            .with_loop(cycle(2.0, 8.0));
         assert_eq!(
             build_clap_transport(&unknown).flags & CLAP_TRANSPORT_HAS_SECONDS_TIMELINE,
             0,
@@ -659,14 +655,13 @@ mod tests {
         );
     }
 
-    /// The time signature is the one unconditional claim, and legitimately so:
+    /// The time signature's claim is unconditional, and legitimately so:
     /// `TimeSignature` is a validated newtype with no representable invalid
     /// value, so there is no state in which the flag would be a lie.
     #[test]
     fn the_time_signature_flag_is_always_honest() {
-        let mut t = TransportInfo::new();
-        t.timing.tempo = f64::NAN;
-        t.position.beats = f64::NAN;
+        let mut t = base();
+        t.position.beat = Beat(f64::NAN);
         t.position.seconds = tutti_types::Seconds(f64::NAN);
         assert_ne!(
             build_clap_transport(&t).flags & CLAP_TRANSPORT_HAS_TIME_SIGNATURE,

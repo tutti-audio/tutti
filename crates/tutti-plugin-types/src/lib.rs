@@ -343,7 +343,7 @@ pub use sample_format::{SampleFormat, negotiate};
 pub use sysex::{SYSEX_MESSAGE_CAPACITY, push_sysex, sysex_assembler, sysex_packets};
 pub use transport::{
     BarInfo, LoopRegion, MusicalTiming, PlayheadWatch, TransportChange, TransportChanges,
-    TransportFlags, TransportInfo, TransportPosition, is_usable,
+    TransportFlags, TransportInfo, TransportPosition,
 };
 // The session's render mode, which a plugin's `Prepare` carries and `Control::set_render_mode` takes.
 pub use tutti_graph::RenderMode;

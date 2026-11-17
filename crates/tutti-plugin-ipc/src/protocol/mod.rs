@@ -118,7 +118,11 @@ pub(crate) mod wire;
 /// - **Version 44** adds `refused` to `AudioProcessed`: the server did not
 ///   publish the block's audio (its input slot was recycled before it ran), so
 ///   the host counts the chunk refused rather than leaving it unexplained.
-pub const PROTOCOL_VERSION: u32 = 44;
+/// - **Version 45** writes a block's `TransportInfo` on its units (a `SampleRate`,
+///   a `Bpm`, a `Beat` for the playhead and the bar, a `LoopRange`), one position
+///   for each of the quarter and beat pairs, and the cycle as an optional region
+///   in place of the cycle-active flag.
+pub const PROTOCOL_VERSION: u32 = 45;
 
 /// Largest control-socket frame body either end will allocate for, in bytes.
 ///
@@ -805,7 +809,7 @@ mod tests {
             seq: 42,
             num_samples: 512,
             midi_events,
-            ..Default::default()
+            ..ProcessAudioData::empty(tutti_plugin_types::SampleRate::SR_48K)
         });
 
         let encoded = postcard::to_allocvec(&msg).unwrap();
@@ -877,14 +881,16 @@ mod tests {
     }
 
     #[test]
-    fn test_transport_info_default() {
-        let info = TransportInfo::default();
-        assert_eq!(info.timing.tempo, 120.0);
+    fn a_new_transport_info_is_stopped_at_120_in_four_four() {
+        let info = TransportInfo::new(SampleRate::SR_48K);
+        assert_eq!(info.sample_rate, SampleRate::SR_48K);
+        assert_eq!(info.timing.tempo, tutti_types::Bpm::of(120.0));
         // 4/4 — the musical default, now expressed as the type's own default.
         assert_eq!(u32::from(info.timing.signature.beats_per_bar()), 4);
         assert_eq!(u32::from(info.timing.signature.note_value()), 4);
         assert!(!info.state.playing);
         assert!(!info.state.recording);
+        assert!(info.loop_region.is_none());
     }
 
     /// The harmony inputs (chord / scale / text / int) must survive a postcard
@@ -894,7 +900,7 @@ mod tests {
     fn process_audio_round_trips_harmony_fields() {
         let mut data = ProcessAudioData {
             num_samples: 256,
-            ..Default::default()
+            ..ProcessAudioData::empty(tutti_plugin_types::SampleRate::SR_48K)
         };
         assert!(data.chords.add_change(ChordValue {
             sample_offset: 0,

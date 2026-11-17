@@ -40,6 +40,11 @@ use super::units::{Beat, BeatDuration, Bpm, SampleRate};
 /// is the same check as an `Option`), so a consumer holding one of these needs
 /// no `end > start` guard of its own, and `wrap` relies on exactly that.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    feature = "serde",
+    serde(try_from = "(Beat, Beat)", into = "(Beat, Beat)")
+)]
 pub struct LoopRange {
     start: Beat,
     end: Beat,
@@ -86,6 +91,21 @@ impl TryFrom<core::ops::Range<Beat>> for LoopRange {
         } else {
             Ok(Self { start, end })
         }
+    }
+}
+
+impl TryFrom<(Beat, Beat)> for LoopRange {
+    type Error = LoopRangeError;
+
+    /// The same check as [`TryFrom<Range<Beat>>`], over a `(start, end)` pair.
+    fn try_from((start, end): (Beat, Beat)) -> Result<Self, LoopRangeError> {
+        Self::try_from(start..end)
+    }
+}
+
+impl From<LoopRange> for (Beat, Beat) {
+    fn from(range: LoopRange) -> (Beat, Beat) {
+        (range.start, range.end)
     }
 }
 

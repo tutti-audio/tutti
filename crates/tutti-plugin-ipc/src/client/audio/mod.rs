@@ -137,7 +137,7 @@ impl AudioBridge {
         // own reply timeout from the same block period, and two copies of the
         // rate would let the two timeouts drift apart.
         let (channels, sleeper) = Channels::new(sample_rate);
-        let payloads = PayloadPool::new();
+        let payloads = PayloadPool::new(sample_rate);
         let lifecycle = Lifecycle::new(watch, timeouts);
         let listener: ListenerSlot = Arc::new(Mutex::new(None));
         let thread = BridgeThread::spawn(
@@ -932,7 +932,7 @@ mod tests {
     fn a_full_queue_is_busy_not_a_crash() {
         let bridge = AudioBridge {
             channels: Channels::new(SampleRate::SR_48K).0,
-            payloads: PayloadPool::new(),
+            payloads: PayloadPool::new(SampleRate::SR_48K),
             lifecycle: Lifecycle::new(Arc::new(ServerWatch::new()), Timeouts::default()),
             listener: Arc::new(Mutex::new(None)),
         };

@@ -207,7 +207,7 @@ impl HostEnd {
             .send(HostMessage::ProcessAudio(ProcessAudioData {
                 seq,
                 num_samples: frames,
-                ..Default::default()
+                ..tutti_plugin_ipc::ProcessAudioData::empty(tutti_plugin_types::SampleRate::SR_48K)
             }))
             .ok()?;
         self.replies.recv_timeout(within).ok()

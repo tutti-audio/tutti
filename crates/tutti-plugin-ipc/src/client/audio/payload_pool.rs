@@ -15,6 +15,7 @@ use crate::protocol::ParameterChanges;
 use crossbeam::queue::ArrayQueue;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use tutti_types::SampleRate;
 
 /// One payload per command the audio thread can have queued.
 ///
@@ -124,6 +125,9 @@ pub struct PayloadPool {
     /// (one reserved before a re-reserve) is dropped rather than recycled,
     /// on the bridge thread. 0 before a reservation.
     params_shape: Arc<AtomicU64>,
+    /// The rate a placeholder payload's stopped transport is at; every block
+    /// overwrites the transport, so it is only ever a placeholder.
+    sample_rate: SampleRate,
 }
 
 impl std::fmt::Debug for PayloadPool {
@@ -131,12 +135,6 @@ impl std::fmt::Debug for PayloadPool {
         f.debug_struct("PayloadPool")
             .field("free_params", &self.params.len())
             .finish_non_exhaustive()
-    }
-}
-
-impl Default for PayloadPool {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -148,16 +146,17 @@ impl PayloadPool {
     /// the first blocks after a plugin loads are the least forgiving moment for
     /// one. This runs once, off the RT path, where a few hundred KiB of boxes
     /// costs nothing.
-    pub fn new() -> Self {
+    pub fn new(sample_rate: SampleRate) -> Self {
         let recycle = ArrayQueue::new(POOL_CAPACITY);
         for _ in 0..POOL_CAPACITY {
             // Cannot fail: the queue was just created with this capacity.
-            let _ = recycle.push(Box::new(ProcessPayload::empty()));
+            let _ = recycle.push(Box::new(ProcessPayload::empty(sample_rate)));
         }
         Self {
             recycle: Arc::new(recycle),
             params: Arc::new(ArrayQueue::new(PARAM_SLOTS)),
             params_shape: Arc::new(AtomicU64::new(0)),
+            sample_rate,
         }
     }
 
@@ -252,7 +251,7 @@ impl PayloadPool {
     pub(super) fn acquire(&self) -> Box<ProcessPayload> {
         self.recycle
             .pop()
-            .unwrap_or_else(|| Box::new(ProcessPayload::empty()))
+            .unwrap_or_else(|| Box::new(ProcessPayload::empty(self.sample_rate)))
     }
 
     /// Bridge-thread: return a payload after the wire message has been built.
@@ -273,7 +272,7 @@ mod tests {
     /// holds before its refused push, all without allocating.
     #[test]
     fn a_full_queue_and_both_threads_take_payloads_without_allocating() {
-        let pool = PayloadPool::new();
+        let pool = PayloadPool::new(SampleRate::SR_48K);
         let out = super::super::channels::COMMAND_QUEUE_SIZE + 2;
         // Reserved outside the gate; the payloads are dropped outside it too.
         let mut held = Vec::with_capacity(out);
@@ -299,7 +298,7 @@ mod tests {
         let queues = 2_000 + 64;
         for chunk in [512usize, 4096] {
             let room = ParameterQueue::chunk_room(chunk);
-            let pool = PayloadPool::new();
+            let pool = PayloadPool::new(SampleRate::SR_48K);
             pool.reserve_params(queues, room);
             let mut storage = 0;
             while let Some(buffer) = pool.take_params() {
@@ -323,7 +322,7 @@ mod tests {
     /// allocator, which this unit-test binary does not install.)
     #[test]
     fn the_bridge_drops_surplus_buffers_and_the_audio_thread_none() {
-        let pool = PayloadPool::new();
+        let pool = PayloadPool::new(SampleRate::SR_48K);
         pool.reserve_params(4, 10);
         assert_eq!(pool.params.len(), PARAM_BUFFERS);
 

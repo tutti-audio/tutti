@@ -1,7 +1,7 @@
 //! VST3-specific encoding of the shared [`TransportInfo`] into VST3's
 //! `ProcessContext` struct.
 
-use tutti_plugin_types::{TransportInfo, is_usable};
+use tutti_plugin_types::TransportInfo;
 use vst3::Steinberg::Vst::ProcessContext_::StatesAndFlags_;
 
 use vst3::Steinberg::Vst::IProcessContextRequirements_::Flags_;
@@ -63,9 +63,9 @@ bitflags::bitflags! {
 /// - `position.continuous_samples` → `continousTimeSamples` (the monotonic
 ///   clock that does not reset on loop; falls back to `position.samples` when
 ///   unset, i.e. `0`)
-/// - `position.quarters` → `projectTimeMusic`
-/// - `bar.position_quarters` → `barPositionMusic`
-/// - `loop_region.{start,end}_quarters` → `cycleStartMusic`/`cycleEndMusic`
+/// - `position.beat` → `projectTimeMusic`
+/// - `bar.start` → `barPositionMusic`
+/// - `loop_region` (when present) → `cycleStartMusic`/`cycleEndMusic`
 /// - `system_time_ns` → `systemTime`, under `kSystemTimeValid`, when present
 /// - [`TransportInfo::samples_to_nearest_clock`] → `samplesToNextClock`,
 ///   under `kClockValid`, when derivable
@@ -78,8 +78,7 @@ pub fn to_process_context(
     use ProcessContextRequirements as need;
 
     let wants = |flag: ProcessContextRequirements| requirements.intersects(flag);
-    // The MIDI clock grid under the playhead, at the snapshot's own rate: a
-    // guessed rate (the 44.1 kHz fallback below) is not a fact to flag.
+    // The MIDI clock grid under the playhead, at the snapshot's own rate.
     let to_clock = t.samples_to_nearest_clock();
 
     // `sdk_enum_u32` normalises the platform-varying SDK constants to `u32`.
@@ -94,7 +93,7 @@ pub fn to_process_context(
             if t.state.recording {
                 state |= crate::sdk_enum_u32(StatesAndFlags_::kRecording);
             }
-            if t.state.cycle_active {
+            if t.loop_region.is_some() {
                 state |= crate::sdk_enum_u32(StatesAndFlags_::kCycleActive);
             }
         }
@@ -107,15 +106,13 @@ pub fn to_process_context(
         // barPositionMusic contain valid information" — not about whether a
         // cycle is running.
         //
-        // Setting it from `cycle_active` under the transport gate broke both
+        // Setting it from the cycle under the transport gate broke both
         // directions at once: a plugin asking only for transport state was
         // told the cycle bounds were valid while they were still the
         // `mem::zeroed` 0.0, and a plugin asking only for cycle music got the
-        // bounds written below with no bit to say so, and ignored them.
-        if wants(need::NEED_CYCLE_MUSIC)
-            && is_usable(t.loop_region.start_quarters)
-            && is_usable(t.loop_region.end_quarters)
-        {
+        // bounds written below with no bit to say so, and ignored them. A
+        // `LoopRange` is finite and ordered, so a cycle's presence is enough.
+        if wants(need::NEED_CYCLE_MUSIC) && t.loop_region.is_some() {
             state |= crate::sdk_enum_u32(StatesAndFlags_::kCycleValid);
         }
         // Each `*Valid` bit advertises that the matching field below is filled,
@@ -126,18 +123,17 @@ pub fn to_process_context(
         // *asked for*, not what the host *has*. Setting a validity bit over a
         // NaN or an infinity is worse than leaving it clear, because a plugin
         // that trusts the bit propagates the NaN through its timing math into
-        // the audio buffer. The VST2 path gates on the value the same way, via
-        // the shared `is_usable` in `tutti-plugin-types`.
-        if wants(need::NEED_PROJECT_TIME_MUSIC) && is_usable(t.position.quarters) {
+        // the audio buffer. A `Beat` is not range-checked, so the two musical
+        // positions are gated on finiteness; the tempo (`Bpm`: finite and above
+        // zero) and the cycle (`LoopRange`: finite and ordered) are valid by
+        // their types.
+        if wants(need::NEED_PROJECT_TIME_MUSIC) && t.position.beat.get().is_finite() {
             state |= crate::sdk_enum_u32(StatesAndFlags_::kProjectTimeMusicValid);
         }
-        if wants(need::NEED_BAR_POSITION_MUSIC) && is_usable(t.bar.position_quarters) {
+        if wants(need::NEED_BAR_POSITION_MUSIC) && t.bar.start.get().is_finite() {
             state |= crate::sdk_enum_u32(StatesAndFlags_::kBarPositionValid);
         }
-        // Tempo carries a domain rule beyond finiteness: zero or negative BPM
-        // is not a tempo, and a plugin dividing by it produces an infinity.
-        // Matches the VST2 path's `is_usable(..) && > 0.0`.
-        if wants(need::NEED_TEMPO) && is_usable(t.timing.tempo) && t.timing.tempo > 0.0 {
+        if wants(need::NEED_TEMPO) {
             state |= crate::sdk_enum_u32(StatesAndFlags_::kTempoValid);
         }
         if wants(need::NEED_TIME_SIGNATURE) {
@@ -151,8 +147,8 @@ pub fn to_process_context(
             state |= crate::sdk_enum_u32(StatesAndFlags_::kContTimeValid);
         }
         // The host clock and the MIDI clock: flagged only when the snapshot
-        // has them (an offline render has no host clock; an unusable tempo
-        // or rate leaves no clock grid), on the same condition that fills
+        // has them (an offline render has no host clock; a non-finite position
+        // leaves no clock grid), on the same condition that fills
         // the field below. `kSmpteValid` / `kChordValid` stay clear: their
         // fields have no producer.
         if wants(need::NEED_SYSTEM_TIME) && t.system_time_ns.is_some() {
@@ -167,11 +163,7 @@ pub fn to_process_context(
     let mut ctx: vst3::Steinberg::Vst::ProcessContext = crate::sdk::zeroed();
     ctx.state = state;
     // Always-on: not gated by any requirement flag in the spec.
-    ctx.sampleRate = if t.sample_rate > 0.0 {
-        t.sample_rate
-    } else {
-        44100.0
-    };
+    ctx.sampleRate = t.sample_rate.get();
     // VST3 carries no `kProjectTimeSamplesValid` bit — the field is always read
     // as fact — so a snapshot without a project-time position can only send
     // 0 (see `TransportPosition::samples`).
@@ -194,23 +186,21 @@ pub fn to_process_context(
         ctx.systemTime = ns;
     }
     if wants(need::NEED_PROJECT_TIME_MUSIC) {
-        ctx.projectTimeMusic = t.position.quarters;
+        ctx.projectTimeMusic = t.position.beat.get();
     }
     if wants(need::NEED_BAR_POSITION_MUSIC) {
-        ctx.barPositionMusic = t.bar.position_quarters;
+        ctx.barPositionMusic = t.bar.start.get();
     }
-    // Same condition as `kCycleValid` above, including the finiteness check —
-    // the bit and the fields it advertises have to move together, or a NaN
-    // bound ships under a flag saying it is computable.
+    // Same condition as `kCycleValid` above: the bit and the fields it
+    // advertises have to move together.
     if wants(need::NEED_CYCLE_MUSIC)
-        && is_usable(t.loop_region.start_quarters)
-        && is_usable(t.loop_region.end_quarters)
+        && let Some(region) = t.loop_region
     {
-        ctx.cycleStartMusic = t.loop_region.start_quarters;
-        ctx.cycleEndMusic = t.loop_region.end_quarters;
+        ctx.cycleStartMusic = region.range.start().get();
+        ctx.cycleEndMusic = region.range.end().get();
     }
     if wants(need::NEED_TEMPO) {
-        ctx.tempo = t.timing.tempo;
+        ctx.tempo = t.timing.tempo.get();
     }
     if wants(need::NEED_TIME_SIGNATURE) {
         // Conversion at the boundary, gating unchanged: the `kTimeSigValid` bit
@@ -235,25 +225,21 @@ pub fn to_process_context(
 mod tests {
     use super::ProcessContextRequirements as need;
     use super::*;
-    use tutti_plugin_types::{BeatsPerBar, NoteValue, TimeSignature};
+    use tutti_plugin_types::{BeatsPerBar, LoopRegion, NoteValue, TimeSignature};
+    use tutti_types::{Beat, Bpm, LoopRange, SampleRate};
     use vst3::Steinberg::Vst::ProcessContext_::StatesAndFlags_;
 
     /// A TransportInfo with every field set to a recognisable non-zero value,
     /// so a "field was populated" check is unambiguous.
-    ///
-    /// Built through the `with_*` constructors, **not** struct literals. A
-    /// literal hand-filling `LoopRegion { start_quarters, end_quarters }`
-    /// directly would let `with_loop` ship without setting the `_quarters` pair
-    /// and still pass: the test would assert this host reads the fields, never
-    /// that the constructor writes them.
     fn populated_transport() -> TransportInfo {
-        TransportInfo::new()
-            .with_sample_rate(48_000.0)
+        TransportInfo::new(SampleRate::of(48_000.0))
             .with_position_samples(1_234)
-            .with_position_quarters(4.0)
-            .with_bar(8.0, Default::default())
-            .with_loop(true, 2.0, 6.0)
-            .with_tempo(128.0)
+            .with_beat(Beat(4.0))
+            .with_bar(Beat(8.0), Default::default())
+            .with_loop(LoopRegion::new(
+                LoopRange::new(Beat(2.0), Beat(6.0)).expect("a loop"),
+            ))
+            .with_tempo(Bpm::of(128.0))
             .with_time_signature(TimeSignature::new(BeatsPerBar::of(7), NoteValue::EIGHTH))
             .with_playing(true)
             .with_recording(true)
@@ -267,38 +253,16 @@ mod tests {
     /// plugin asked for it.
     ///
     /// The requirement mask says what the plugin *wants*, not what the host
-    /// *has*. Gating the `*Valid` bits on the mask alone let a NaN tempo reach
-    /// the plugin flagged valid — and a plugin that trusts the flag divides by
-    /// it, propagating NaN or an infinity straight into the audio buffer. The
-    /// VST2 path has always gated on the value; this one had drifted.
+    /// *has*. Gating the `*Valid` bits on the mask alone let a non-finite
+    /// position reach the plugin flagged valid, and a plugin that trusts the
+    /// flag propagates it straight into the audio buffer.
     #[test]
-    fn a_nan_or_zero_field_is_not_advertised_as_valid() {
+    fn a_non_finite_position_is_not_advertised_as_valid() {
         // Everything requested, so only the value can clear a bit.
         let all = need::all();
 
         let mut t = populated_transport();
-        t.timing.tempo = f64::NAN;
-        let ctx = to_process_context(&t, all);
-        assert_eq!(
-            ctx.state & crate::sdk_enum_u32(StatesAndFlags_::kTempoValid),
-            0,
-            "a NaN tempo must not be flagged valid — the plugin will compute \
-             with it"
-        );
-
-        // Zero is finite but not a tempo: a plugin dividing by it gets an
-        // infinity. Matches the VST2 path's `> 0.0` rule.
-        let mut t = populated_transport();
-        t.timing.tempo = 0.0;
-        let ctx = to_process_context(&t, all);
-        assert_eq!(
-            ctx.state & crate::sdk_enum_u32(StatesAndFlags_::kTempoValid),
-            0,
-            "a zero tempo must not be flagged valid"
-        );
-
-        let mut t = populated_transport();
-        t.position.quarters = f64::INFINITY;
+        t.position.beat = Beat(f64::INFINITY);
         let ctx = to_process_context(&t, all);
         assert_eq!(
             ctx.state & crate::sdk_enum_u32(StatesAndFlags_::kProjectTimeMusicValid),
@@ -415,10 +379,6 @@ mod tests {
                 crate::sdk_enum_u32(StatesAndFlags_::kContTimeValid),
                 |c| c.continousTimeSamples != 0,
             ),
-            // `cycleStartMusic` was the one filled field missing from this
-            // table, and its absence is why `kCycleValid` could be set from
-            // `cycle_active` under the transport gate for so long: no case
-            // here paired the bit with the field, so nothing contradicted it.
             (
                 "systemTime",
                 need::NEED_SYSTEM_TIME,
@@ -467,7 +427,7 @@ mod tests {
     /// contain valid information" — a claim about fields, not about whether a
     /// cycle is running.
     ///
-    /// Setting `kCycleValid` from `cycle_active` breaks both directions at
+    /// Setting `kCycleValid` from the cycle's presence breaks both directions at
     /// once, and each half needs its own assertion because either alone still
     /// passes when only one direction is right.
     #[test]
@@ -504,27 +464,6 @@ mod tests {
         );
         assert_eq!(cycle_only.cycleStartMusic, 2.0);
         assert_eq!(cycle_only.cycleEndMusic, 6.0);
-    }
-
-    /// A non-finite cycle bound is not flagged valid, matching every other
-    /// field's gate. A plugin trusting the bit would propagate the NaN into
-    /// its own timing math.
-    #[test]
-    fn a_non_finite_cycle_bound_is_not_flagged_valid() {
-        let mut t = populated_transport();
-        t.loop_region.end_quarters = f64::NAN;
-
-        let ctx = to_process_context(&t, need::NEED_CYCLE_MUSIC);
-        assert_eq!(
-            ctx.state & crate::sdk_enum_u32(StatesAndFlags_::kCycleValid),
-            0,
-            "a NaN bound must not be advertised as valid"
-        );
-        assert_eq!(
-            ctx.cycleStartMusic, 0.0,
-            "neither bound is written when the pair is unusable — a good start \
-             beside a NaN end is still an uncomputable region"
-        );
     }
 
     /// Requesting only tempo fills `tempo` + `kTempoValid` and nothing else
@@ -620,13 +559,13 @@ mod tests {
 
     /// **`samplesToNextClock` is the signed distance to the nearest 24-ppq
     /// MIDI clock, under `kClockValid`**, and a snapshot with no host clock
-    /// or no usable tempo claims neither field. 128 BPM at 48 kHz: a quarter
+    /// or no finite position claims neither field. 128 BPM at 48 kHz: a quarter
     /// is 22 500 frames, a clock 937.5; a playhead 0.2 clock past one is
     /// 187.5 frames after it, sent as -188 (rounded half away from zero).
     #[test]
     fn the_midi_clock_and_host_time_are_flagged_only_when_known() {
         let wants = need::NEED_SAMPLES_TO_NEXT_CLOCK | need::NEED_SYSTEM_TIME;
-        let t = populated_transport().with_position_quarters(4.0 + 0.2 / 24.0);
+        let t = populated_transport().with_beat(Beat(4.0 + 0.2 / 24.0));
         let ctx = to_process_context(&t, wants);
         assert_eq!(ctx.samplesToNextClock, -188);
         assert_ne!(
@@ -639,7 +578,7 @@ mod tests {
             0
         );
 
-        let mut bare = populated_transport().with_tempo(0.0);
+        let mut bare = populated_transport().with_beat(Beat(f64::NAN));
         bare.system_time_ns = None;
         let ctx = to_process_context(&bare, wants);
         assert_eq!(

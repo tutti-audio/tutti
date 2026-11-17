@@ -300,20 +300,24 @@ fn the_server_is_sent_the_schedule_on_the_chunks_frames() {
     let starts = [0u64, 128, 355, 483];
     let notes: [&[u32]; 4] = [&[], &[2, 122], &[5], &[]];
     for (i, (chunk, start)) in chunks.iter().zip(starts).enumerate() {
-        let quarters = chunk.transport.position.quarters;
+        let quarters = chunk.transport.position.beat.get();
         assert!(
             (quarters - beat_at(start)).abs() < 1e-9,
             "chunk {i}: the playhead at frame {start} is {}, not {quarters}",
             beat_at(start)
         );
         let tempo = if start >= STEP_FRAME { 90.0 } else { 120.0 };
-        assert_eq!(chunk.transport.timing.tempo, tempo, "chunk {i}: tempo");
+        assert_eq!(
+            chunk.transport.timing.tempo.get(),
+            tempo,
+            "chunk {i}: tempo"
+        );
         let heard: Vec<u32> = chunk.midi_events.iter().map(|m| m.offset).collect();
         assert_eq!(heard, notes[i], "chunk {i}: notes");
         let steps: Vec<(u32, f64)> = chunk
             .transport_changes
             .iter()
-            .map(|c| (c.offset, c.transport.timing.tempo))
+            .map(|c| (c.offset, c.transport.timing.tempo.get()))
             .collect();
         let want: &[(u32, f64)] = if i == 1 { &[(72, 90.0)] } else { &[] };
         assert_eq!(steps, want, "chunk {i}: the tempo step, in its chunk only");
@@ -537,7 +541,7 @@ fn a_stop_and_a_seek_inside_a_chunk_reach_the_server_on_the_chunk_frame() {
                 (
                     c.offset,
                     c.transport.state.playing,
-                    c.transport.position.quarters,
+                    c.transport.position.beat.get(),
                 )
             })
             .collect();
@@ -547,7 +551,7 @@ fn a_stop_and_a_seek_inside_a_chunk_reach_the_server_on_the_chunk_frame() {
         let first = chunk.transport;
         assert!(first.state.playing, "{label}: the chunk began playing");
         assert!(
-            (first.position.quarters - (4.0 + 128.0 * BEATS_PER_FRAME_120)).abs() < 1e-9,
+            (first.position.beat.get() - (4.0 + 128.0 * BEATS_PER_FRAME_120)).abs() < 1e-9,
             "{label}: the chunk's transport is its first frame's"
         );
     }

@@ -461,7 +461,7 @@ pub(super) fn handle(
                 scales: core::mem::take(&mut payload.scales),
                 expr_texts: core::mem::take(&mut payload.expr_texts),
                 expr_ints: core::mem::take(&mut payload.expr_ints),
-                transport: core::mem::take(&mut payload.transport),
+                transport: payload.transport,
                 transport_changes: core::mem::take(&mut payload.transport_changes),
             });
 
