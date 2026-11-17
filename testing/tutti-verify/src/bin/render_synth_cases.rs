@@ -60,8 +60,8 @@ fn render(cfg: SynthConfig, notes: &[u8]) -> (Vec<f32>, Vec<f32>) {
     let (mut l, mut r) = (Vec::new(), Vec::new());
     for _ in 0..BLOCKS {
         synth.block();
-        l.extend_from_slice(synth.output(0));
-        r.extend_from_slice(synth.output(1));
+        l.extend_from_slice(synth.output().plane(0).samples());
+        r.extend_from_slice(synth.output().plane(1).samples());
     }
     (l, r)
 }
