@@ -124,7 +124,7 @@ pub(crate) enum Gate {
     Hosting,
     /// `tutti-session` reaches no Bevy crate and re-exports no crate whole.
     Session,
-    /// Every crate takes the workspace lints, and `missing_debug_implementations` denies.
+    /// Every workspace member takes the workspace lints, and `missing_debug_implementations` denies.
     Lints,
     /// A fieldless public `Eq` enum is `Hash`.
     ValueTraits,

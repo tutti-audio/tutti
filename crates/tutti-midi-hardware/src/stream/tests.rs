@@ -19,8 +19,8 @@ use tutti_midi_device::{
 use tutti_ump::ControlValue;
 use tutti_ump::MidiChannel;
 use tutti_ump::{
-    Direction as BlockDirection, FirstGroup, FunctionBlockId, GroupSpan, Message, Stream,
-    SysexAssembler, SysexStep,
+    Direction as BlockDirection, FirstGroup, FunctionBlockId, GroupSpan, Message, SoftwareRevision,
+    Stream, SysexAssembler, SysexStep,
 };
 
 /// A fake duplex device `raw` and the session that opened its input.
@@ -433,7 +433,7 @@ fn identity() -> tutti_ump::DeviceIdentity {
         manufacturer: ManufacturerId::new(0x41).unwrap(),
         family: [U7::of(1), U7::of(2)],
         model: [U7::of(3), U7::of(4)],
-        revision: [U7::of(5), U7::of(6), U7::of(7), U7::of(8)],
+        revision: SoftwareRevision::from([U7::of(5), U7::of(6), U7::of(7), U7::of(8)]),
     }
 }
 

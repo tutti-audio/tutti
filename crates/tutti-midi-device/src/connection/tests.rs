@@ -3,8 +3,8 @@ use std::time::{Duration, Instant};
 use tutti_ump::ManufacturerId;
 use tutti_ump::{
     DeviceIdentity, Direction as BlockDirection, FirstGroup, Form, FunctionBlockCount,
-    FunctionBlockId, FunctionBlockInfo, GroupSpan, Message, Midi1Port, Protocol, Stream,
-    StreamConfig, U7, UiHint, Ump,
+    FunctionBlockId, FunctionBlockInfo, GroupSpan, Message, Midi1Port, Protocol, SoftwareRevision,
+    Stream, StreamConfig, U7, UiHint, Ump,
 };
 
 use super::*;
@@ -61,7 +61,7 @@ fn device() -> Endpoint {
             manufacturer: ManufacturerId::of(0xA109),
             family: [u(1), u(2)],
             model: [u(3), u(4)],
-            revision: [u(5), u(6), u(7), u(8)],
+            revision: SoftwareRevision::from([u(5), u(6), u(7), u(8)]),
         })
         .with_name(EndpointName::new("A long endpoint name of 40 characters!").unwrap())
         .with_instance_id(ProductInstanceId::new("SERIAL-0123456789-ABCDEFGHIJ").unwrap())

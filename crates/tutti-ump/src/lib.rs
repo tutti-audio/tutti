@@ -86,7 +86,9 @@ mod decode;
 mod encode;
 mod field;
 mod flex_text;
+mod flex_write;
 mod held_keys;
+mod iso8601;
 mod manufacturer;
 mod message;
 mod messages;
@@ -119,8 +121,12 @@ pub use field::{
     MonoChannels, MpeChannels, NoteNumber, OutOfRange, Pitch, SharpsFlats, TicksPerQuarterNote, U4,
     U7, U14, U28, first_non_seven_bit,
 };
-pub use flex_text::{
-    FLEX_TEXT_MAX_LEN, FlexText, FlexTextAssembler, FlexTextPackets, FlexTextStep,
+pub use flex_text::{FlexText, FlexTextAssembler, FlexTextStep};
+pub use flex_write::{
+    Entry, EntryError, FLEX_TEXT_MAX_LEN, FlexTextPackets, Iso8601Date, Iso8601DateError,
+    LyricKind, LyricPackets, MelismaEndPackets, PlainTextKind, Syllable, SyllableBody, SyllableEnd,
+    SyllableError, Text, TextError, WordEnd, flex_clip_name_packets, flex_lyric_packets,
+    flex_melisma_end_packets, flex_project_name_packets, flex_recording_date_packets,
     flex_text_packets,
 };
 pub use held_keys::{KeyBitset, Lane, LaneSet};
@@ -130,9 +136,9 @@ pub use message::{
     BlockSelect, ChordBass, ChordName, ChordPitch, Data128, DeviceIdentity, Direction,
     DiscoveryFilter, EndpointInfoNotification, Flex, FlexAddress, FlexTextKind, FlexTimeSignature,
     Form, FunctionBlockInfo, FunctionBlocks, KeySignature, Letter, Message, Metronome, Midi1Port,
-    MixedDataHeader, PerNoteManagement, Protocol, RegisteredPerNoteController, Stream,
-    StreamConfig, Sysex7Packet, Sysex8Packet, SysexStatus, System, UiHint, UmpVersion, Unknown,
-    Utility, Voice1, Voice2,
+    MixedDataHeader, NotASoftwareRevision, PerNoteManagement, Protocol,
+    RegisteredPerNoteController, SoftwareRevision, Stream, StreamConfig, Sysex7Packet,
+    Sysex8Packet, SysexStatus, System, UiHint, UmpVersion, Unknown, Utility, Voice1, Voice2,
 };
 pub use messages::{Join, Span, Spans, spans, spans_joined};
 pub use midi_channel::MidiChannel;

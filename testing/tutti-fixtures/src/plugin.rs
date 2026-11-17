@@ -11,6 +11,10 @@ use tutti_plugin_types::{Loaded, MainWork, MainWorkHandle, PluginError, Prepare,
 use tutti_rt::MainThreadMarker;
 
 /// The constant 120 BPM a plugin node's tests render under.
+///
+/// # Panics
+///
+/// Panics when the tempo reader cannot be built, which a constant 120 BPM never is.
 pub fn tempo() -> tutti_transport::TempoReader {
     tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo")
 }
@@ -27,6 +31,7 @@ pub fn detached_work() -> MainWorkHandle {
 /// A thread that runs a [`MainWork`] as the main thread's tick does, until it is
 /// dropped: for a test that calls a plugin handle from its own thread, which is
 /// off the main thread, and needs something to answer the hop.
+#[derive(Debug)]
 pub struct Pump {
     stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
@@ -85,6 +90,11 @@ pub struct StandInWindow;
 
 impl StandInWindow {
     /// The stand-in as a plugin's parent [`WindowHandle`].
+    ///
+    /// # Panics
+    ///
+    /// Panics when the platform names no handle for the stand-in, which every
+    /// platform does.
     pub fn handle(self) -> WindowHandle {
         WindowHandle::from_window(&self).expect("an AppKit handle is one every platform names")
     }
