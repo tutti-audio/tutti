@@ -24,7 +24,7 @@ use crate::render::BlockCursor;
 use crate::{ConfigError, RenderGraph, RtLogSink};
 use std::ops::Range;
 use std::sync::Arc;
-use tutti_buffers::{Fold, InterleavedMut, Planes, interleave};
+use tutti_buffers::{Fold, InterleavedMut, Planes, PlanesMut, interleave};
 use tutti_graph::{RtLogReaders, fold_to_width};
 use tutti_transport::RenderClock;
 use tutti_types::{ChannelLayout, ChannelTopology, Samples};
@@ -93,9 +93,9 @@ impl FileChannels<'_> {
 /// One block per [`render_block`](Self::render_block), the clock advanced by
 /// exactly the frames produced. The executor reads the transport from each
 /// block's `Env`, so this hands it one — through
-/// [`RenderClock::render_graph`], which reads the clock's snapshot before the
-/// block and advances it after (`OfflineTimeline` overrides that call
-/// to cut a block at its tempo steps).
+/// [`render_graph`](tutti_transport::render_graph), which reads the clock's
+/// snapshot before the block and advances it after (`OfflineTimeline` cuts a
+/// block at its tempo steps through `graph_piece`).
 pub(crate) struct GraphSource<'a> {
     editor: &'a mut tutti_graph::Editor,
     executor: &'a mut tutti_graph::Executor,
@@ -274,8 +274,16 @@ impl GraphSource<'_> {
         // it (every node reads the snapshot from its `Env`), so an advance
         // before the block would start the render one frame past its own
         // start beat.
-        self.clock
-            .render_graph(self.executor, block_size, &inputs, &mut outputs);
+        tutti_transport::render_graph(
+            self.clock,
+            self.executor,
+            if inputs.is_empty() {
+                Planes::default()
+            } else {
+                Planes::new(&inputs).expect("every plane is one block long")
+            },
+            PlanesMut::new(&mut outputs).expect("every plane is one block long"),
+        );
         // Retired units and returned commits are freed here, on this thread,
         // as a host's control loop would free them.
         self.editor.collect();

@@ -2,6 +2,7 @@
 //! declares (latency, tail).
 
 use std::collections::BTreeSet;
+use tutti_buffers::Float;
 
 use tutti_types::{Latency, Tail};
 
@@ -18,7 +19,7 @@ use crate::{Edge, EdgeId, FeedbackFrom, NodeSpec, Sink, Source};
 use crate::{MAX_NODE_LATENCY, MAX_NODE_TAIL};
 use crate::{MeterSpec, NodeKey, TapSpec};
 
-impl Editor {
+impl<F: Float> Editor<F> {
     /// Adds `node` at `key`, or replaces the unit there (a new generation).
     /// Returns the node's typed controls with what the placement unwired.
     ///
@@ -39,7 +40,7 @@ impl Editor {
     /// A node that hands over a [`ForkSource`] ([`IntoNode::into_parts`]) is
     /// forkable from now on ([`fork`](Self::fork)); one that does not makes
     /// the key unforkable, even if the unit it replaces was.
-    pub fn insert<N: IntoNode>(
+    pub fn insert<N: IntoNode<F>>(
         &mut self,
         key: NodeKey,
         kind: &str,
@@ -66,7 +67,7 @@ impl Editor {
         &mut self,
         key: NodeKey,
         kind: &str,
-        unit: Box<dyn Node>,
+        unit: Box<dyn Node<F>>,
         wake: Wake,
     ) -> Unwired {
         let shape = unit.shape();
@@ -115,7 +116,7 @@ impl Editor {
     /// # Panics
     ///
     /// If `key` is not in the spec.
-    pub fn replace<N: IntoNode>(
+    pub fn replace<N: IntoNode<F>>(
         &mut self,
         key: NodeKey,
         node: N,
@@ -205,7 +206,7 @@ impl Editor {
     /// # Panics
     ///
     /// If `key` is not in the spec: a replace names a node that exists.
-    pub fn replace_or_swap<N: IntoNode>(
+    pub fn replace_or_swap<N: IntoNode<F>>(
         &mut self,
         key: NodeKey,
         node: N,
@@ -260,10 +261,10 @@ impl Editor {
         &mut self,
         key: NodeKey,
         kind: &str,
-        unit: Box<dyn Node>,
+        unit: Box<dyn Node<F>>,
         wake: Wake,
         shape: Shape,
-        fork: Option<Box<dyn ForkSource>>,
+        fork: Option<Box<dyn ForkSource<F>>>,
     ) -> Unwired {
         self.touch();
         // A later placement at a key takes an earlier fade back (the fade

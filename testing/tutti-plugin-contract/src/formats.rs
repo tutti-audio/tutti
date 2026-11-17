@@ -13,7 +13,7 @@ impl Format for Clap {
     const SURFACE: spec::Surface = spec::CLAP;
     type L = tutti_clap_host::ClapLoaded;
     const PARAM_TIMING: ParamTiming = ParamTiming::SampleAccurate;
-    const GAPS: &'static [(&'static str, Gap)] = &[];
+    const GAPS: &'static [(&'static str, Gap)] = &[CLAP_LISTS_NO_PRESET];
 
     fn load() -> Self::L {
         tutti_clap_host::ClapLoaded::load(
@@ -47,6 +47,17 @@ const VST2_NO_BYPASS: (&str, Gap) = (
         why: "VST2 has no opcode that reads the soft bypass back, so the host claims none and \
               the executor's bypass serves the node",
         fails_with: "the loaded plugin has its own bypass",
+    },
+);
+
+/// CLAP lists no preset: the host binds `preset-load`, and discovery is the
+/// factory-level `preset-discovery` it does not read.
+const CLAP_LISTS_NO_PRESET: (&str, Gap) = (
+    "presets_listed_in_order",
+    Gap {
+        why: "the host does not read CLAP's factory-level preset discovery, so it lists no preset \
+              and loads one by file only",
+        fails_with: "the presets listed, in the spec's order",
     },
 );
 

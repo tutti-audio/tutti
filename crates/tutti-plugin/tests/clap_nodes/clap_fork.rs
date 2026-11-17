@@ -19,6 +19,7 @@
 #![cfg(feature = "clap")]
 
 use crate::clap_probe;
+use tutti_buffers::{Planes, PlanesMut};
 // The live side is paced to `PACE`; the fork is *not*: it waits for each
 // block, which is the property under test.
 use clap_probe::{BLOCK, PACE, ProbeEnv, Rig, SAMPLE_RATE, load_probe, load_probe_with, render};
@@ -40,7 +41,7 @@ use tutti_plugin::{BridgeConfig, PluginRenderFault, Timeouts};
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::PluginForkError;
 use tutti_plugin_types::{Normalized, ParamId};
-use tutti_transport::{OfflineTimeline, OfflineTimelineConfig, RenderClock};
+use tutti_transport::{OfflineTimeline, OfflineTimelineConfig, render_graph};
 use tutti_types::{SampleRate, Samples};
 use tutti_ump::{Address, Message, NoteNumber, NoteVelocity, Voice2};
 
@@ -950,7 +951,12 @@ fn a_clip_note_in_a_chunk_that_begins_mid_block_lands_on_its_frame() {
             let mut done = 0;
             while done < BLOCK {
                 let n = pass.min(BLOCK - done);
-                timeline.render_graph(&mut fork_exec, n, &[], &mut [&mut block[done..done + n]]);
+                render_graph(
+                    &*timeline,
+                    &mut fork_exec,
+                    Planes::default(),
+                    PlanesMut::new(&mut [&mut block[done..done + n]]).unwrap(),
+                );
                 done += n;
             }
             out.extend_from_slice(&block);
@@ -1027,7 +1033,12 @@ fn a_clip_nodes_note_reaches_the_plugins_event_input_on_its_frame() {
     let mut out = Vec::new();
     let mut block = vec![0.0f32; BLOCK];
     while out.len() < NOTE_FRAME + 2 * CHUNK {
-        timeline.render_graph(&mut fork_exec, BLOCK, &[], &mut [&mut block[..]]);
+        render_graph(
+            &*timeline,
+            &mut fork_exec,
+            Planes::default(),
+            PlanesMut::new(&mut [&mut block[..]]).unwrap(),
+        );
         out.extend_from_slice(&block);
     }
     assert_eq!(
@@ -1144,11 +1155,11 @@ fn a_plugins_midi_out_keeps_its_place_against_its_audio() {
         let mut out = Vec::new();
         let (mut block, mut silent) = (vec![0.0f32; BLOCK], vec![0.0f32; BLOCK]);
         while out.len() < NOTE_FRAME + 2 * CHUNK {
-            timeline.render_graph(
+            render_graph(
+                &*timeline,
                 &mut fork_exec,
-                BLOCK,
-                &[],
-                &mut [&mut block[..], &mut silent[..]],
+                Planes::default(),
+                PlanesMut::new(&mut [&mut block[..], &mut silent[..]]).unwrap(),
             );
             out.extend_from_slice(&block);
         }

@@ -24,6 +24,7 @@
 //! the one that renders, and a test that reads a control back proves only
 //! that the write happened somewhere.
 
+use tutti_buffers::Planes;
 use tutti_graph::{Fade, FadeLaw, IntoNode, NodeMode, Prepare, Solo};
 use tutti_nodes::{EqBandNode, SvfType};
 use tutti_types::MaxBlock;
@@ -43,7 +44,7 @@ fn energy<C>(solo: &mut Solo<C>) -> f32 {
     let x: Vec<f32> = (0..2048)
         .map(|i| (std::f32::consts::TAU * 1_000.0 * i as f32 / 48_000.0).sin())
         .collect();
-    solo.render_input(&[&x])[0][1024..]
+    solo.render_input(Planes::new(&[&x]).unwrap())[0][1024..]
         .iter()
         .map(|s| s * s)
         .sum()

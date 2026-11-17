@@ -40,6 +40,7 @@ impl Node for Lost {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tutti_buffers::Planes;
     use tutti_graph::{ForkByClone, GraphBuilder};
     use tutti_types::{ChannelLayout, Latency, MaxBlock, SampleRate, Samples, Tail};
 
@@ -63,6 +64,9 @@ mod tests {
         let mut r = g
             .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))))
             .expect("builds");
-        assert_eq!(r.render_input(&[&[1.0; 8]])[0], [0.0; 8]);
+        assert_eq!(
+            r.render_input(Planes::new(&[&[1.0; 8]]).unwrap())[0],
+            [0.0; 8]
+        );
     }
 }

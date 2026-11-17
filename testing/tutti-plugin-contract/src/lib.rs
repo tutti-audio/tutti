@@ -57,6 +57,7 @@ macro_rules! contract {
             the_control_surface_answers_alike_loaded_and_active,
             a_gesture_is_reported_in_order,
             parameters_listed,
+            presets_listed_in_order,
             own_bypass_is_declared_and_written,
             the_bypass_parameter_is_not_a_listed_control,
             a_control_carries_what_the_plugin_declares_of_it,

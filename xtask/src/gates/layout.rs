@@ -124,7 +124,13 @@ const ONLY: &[(&str, &[&str])] = &[
     ),
     (
         "tutti-transport",
-        &["tutti-types", "tutti-rt", "tutti-graph", "tutti-tempo"],
+        &[
+            "tutti-types",
+            "tutti-buffers",
+            "tutti-rt",
+            "tutti-graph",
+            "tutti-tempo",
+        ],
     ),
     (
         "tutti-plugin-db",

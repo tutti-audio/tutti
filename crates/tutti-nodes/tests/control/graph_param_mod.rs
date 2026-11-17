@@ -19,6 +19,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use tutti_buffers::Planes;
 use tutti_fixtures::Noise;
 use tutti_types::MaxBlock;
 
@@ -157,7 +158,7 @@ fn render(
     }
     let input: Vec<Vec<f32>> = (0..ins).map(|c| input(c as u32 + 7)).collect();
     let refs: Vec<&[f32]> = input.iter().map(Vec::as_slice).collect();
-    r.render_input(&refs)
+    r.render_input(Planes::new(&refs).unwrap())
 }
 
 /// How the graph's mix of the node under test is given.
@@ -203,7 +204,7 @@ fn render_mix(node: NodeParts<()>, mix: MixIs) -> Vec<Vec<f32>> {
     }
     let input: Vec<Vec<f32>> = (0..ins).map(|c| noise(c as u32 + 7)).collect();
     let refs: Vec<&[f32]> = input.iter().map(Vec::as_slice).collect();
-    r.render_input(&refs)
+    r.render_input(Planes::new(&refs).unwrap())
 }
 
 /// A phaser of `w` channels, four stages, at its default sweep and controls.
@@ -1024,7 +1025,9 @@ fn an_authored_write_moves_the_base_under_modulation() {
         .expect("builds");
     drive(r.editor_mut(), at, Arc::clone(&cell), vec![konst(0.05)]);
     let x = noise(7);
-    let before = r.render_input(&[&x[..1_000]]).remove(0);
+    let before = r
+        .render_input(Planes::new(&[&x[..1_000]]).unwrap())
+        .remove(0);
     let at_1_5 = plain_distortion(1.5);
     for i in declick_frames(SampleRate::SR_48K).get()..1_000 {
         assert!(
@@ -1035,7 +1038,9 @@ fn an_authored_write_moves_the_base_under_modulation() {
     cell.store(3.0, Ordering::Release);
     // One block for the lane to hear it, then the new knob under the same
     // offset.
-    let after = r.render_input(&[&x[1_000..]]).remove(0);
+    let after = r
+        .render_input(Planes::new(&[&x[1_000..]]).unwrap())
+        .remove(0);
     let at_3_5 = plain_distortion(3.5);
     for i in 200..after.len() {
         assert!(
@@ -1063,7 +1068,7 @@ fn a_crossed_range_is_survivable() {
         .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(100))))
         .expect("builds");
     drive(r.editor_mut(), at, Arc::new(AtomicF32::new(100.0)), vec![]);
-    let out = r.render_input(&[&noise(7)]).remove(0);
+    let out = r.render_input(Planes::new(&[&noise(7)]).unwrap()).remove(0);
     let at_4 = plain_distortion(4.0);
     for i in declick_frames(SampleRate::SR_48K).get()..FRAMES {
         assert!((out[i] - at_4[i]).abs() < 1e-6, "frame {i}: clamped at 4");
@@ -1094,7 +1099,7 @@ fn an_unmodulated_param_adds_nothing_to_the_plan() {
     r.editor_mut().commit().expect("commits");
     // A steady tone, so a jump in drive is a jump in level.
     let tone = vec![0.25f32; 600];
-    let mut out = r.render_input(&[&tone]).remove(0);
+    let mut out = r.render_input(Planes::new(&[&tone]).unwrap()).remove(0);
     let plan = r.executor().plan().expect("a plan");
     assert!(plan.param_ports().is_empty(), "no param step at all");
     let generation = plan.unit(n).expect("the distortion").generation;
@@ -1112,10 +1117,10 @@ fn an_unmodulated_param_adds_nothing_to_the_plan() {
     // The lane has sent its knob already, into nothing: a re-wired lane
     // re-sends on request.
     controls.resync();
-    out.extend(r.render_input(&[&tone]).remove(0));
+    out.extend(r.render_input(Planes::new(&[&tone]).unwrap()).remove(0));
     assert!(r.editor_mut().spec_mut().disconnect_param(at, from));
     r.editor_mut().commit().expect("disconnects");
-    out.extend(r.render_input(&[&tone]).remove(0));
+    out.extend(r.render_input(Planes::new(&[&tone]).unwrap()).remove(0));
 
     let plan = r.executor().plan().expect("a plan");
     assert_eq!(
@@ -1169,7 +1174,9 @@ fn a_fork_modulates_as_the_live_graph_does() {
         .expect("forks");
     let mut fork = Renderer::new(fed, fexec);
     let x = noise(7);
-    let out = fork.render_input(&[&x[..2_000]]).remove(0);
+    let out = fork
+        .render_input(Planes::new(&[&x[..2_000]]).unwrap())
+        .remove(0);
     let at_3 = plain_distortion(3.0);
     for i in 0..2_000 {
         assert!(

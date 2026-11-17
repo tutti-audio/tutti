@@ -138,7 +138,7 @@ pub struct MeterWriter {
 /// executor knows is silent is not scanned: it adds its frames and no energy.
 #[inline]
 pub(crate) fn meter_op<F: Float, A: AudioSlots<F> + ?Sized, Fl: SlotFlags + ?Sized>(
-    meter: &MeterWriter,
+    meter: &mut MeterWriter,
     arena: &A,
     flags: &Fl,
     srcs: &[u32],
@@ -152,7 +152,7 @@ pub(crate) fn meter_op<F: Float, A: AudioSlots<F> + ?Sized, Fl: SlotFlags + ?Siz
     let Ok(n) = u32::try_from(frames) else {
         return;
     };
-    for (lane, &src) in meter.lanes.iter().zip(srcs) {
+    for (lane, &src) in meter.lanes.iter_mut().zip(srcs) {
         let stats = if flags.get(src) & SILENT != 0 {
             BlockStats {
                 peak: 0.0,

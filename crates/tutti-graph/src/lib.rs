@@ -15,6 +15,7 @@
 //! and render:
 //!
 //! ```
+//! # use tutti_buffers::Planes;
 //! use tutti_types::MaxBlock;
 //! use tutti_graph::{Cx, ForkByClone, GraphBuilder, Io, Node, Prepare, Shape, Status};
 //! use tutti_types::{ChannelLayout, SampleRate, Samples};
@@ -50,7 +51,7 @@
 //! let mut r = g
 //!     .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(256))))
 //!     .expect("builds");
-//! let out = r.render_input(&[&[1.0; 1_000]]);
+//! let out = r.render_input(Planes::new(&[&[1.0; 1_000]]).unwrap());
 //! assert!(out[0][999] > 0.9); // a lowpass passes DC
 //! ```
 //!
@@ -110,6 +111,7 @@
 //! buffers or one it works in place.
 //!
 //! ```
+//! # use tutti_buffers::Planes;
 //! use tutti_graph::{Cx, ForkByClone, GraphBuilder, Io, Node, Prepare, Shape, Status};
 //! use tutti_types::{ChannelLayout, MaxBlock, SampleRate, Samples};
 //!
@@ -135,7 +137,7 @@
 //! let mut r = g
 //!     .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))))
 //!     .expect("builds");
-//! assert_eq!(r.render_input(&[&[1.0; 8]])[0], [0.5; 8]);
+//! assert_eq!(r.render_input(Planes::new(&[&[1.0; 8]]).unwrap())[0], [0.5; 8]);
 //! ```
 //!
 //! `ForkByClone` says the clone shares nothing with the original, so an
@@ -225,6 +227,7 @@
 //! gives the key its typed param methods from the declaration.
 //!
 //! ```
+//! # use tutti_buffers::Planes;
 //! use tutti_graph::{
 //!     Cx, GraphBuilder, Io, Node, ParamNode, ParamSet, Params, Prepare, Shape, Status,
 //!     declare_params,
@@ -277,10 +280,10 @@
 //! let mut r = g
 //!     .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))))
 //!     .expect("builds");
-//! assert_eq!(r.render_input(&[&[1.0; 4]])[0], [1.0; 4]);
+//! assert_eq!(r.render_input(Planes::new(&[&[1.0; 4]]).unwrap())[0], [1.0; 4]);
 //! // A host sets it by address; the next block reads the cell.
 //! assert!(controls.set(UnitParam::Volume, 0.25));
-//! assert_eq!(r.render_input(&[&[1.0; 4]])[0], [0.25; 4]);
+//! assert_eq!(r.render_input(Planes::new(&[&[1.0; 4]]).unwrap())[0], [0.25; 4]);
 //! ```
 //!
 //! ## Events in and out
@@ -369,6 +372,7 @@
 //! and export read the ceiling).
 //!
 //! ```
+//! # use tutti_buffers::Planes;
 //! use tutti_graph::{Cx, ForkByClone, GraphBuilder, Io, Node, Prepare, Shape, Status};
 //! use tutti_types::{ChannelLayout, MaxBlock, SampleRate, Samples, Tail};
 //!
@@ -406,7 +410,7 @@
 //! let mut r = g
 //!     .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))))
 //!     .expect("builds");
-//! assert_eq!(r.render_input(&[&[0.5; 4]])[0], [0.5; 4]);
+//! assert_eq!(r.render_input(Planes::new(&[&[0.5; 4]]).unwrap())[0], [0.5; 4]);
 //! ```
 //!
 //! ## What not to do
@@ -508,8 +512,12 @@
 //!
 //! Every buffer between nodes is planar, in the sample format of the
 //! [`Executor<F>`](Executor) that runs them, and an executor sums fan-ins in
-//! that format. The graph an [`Editor`] builds is `f32`. `f64` also belongs inside `f32` nodes (filter state, oscillator
-//! phase — a node converts at its edge), in time ([`Env::frame`] is a `u64`
+//! that format. [`Editor::new`] and [`GraphBuilder::new`] build the `f32`
+//! graph; [`Editor::with_format`] and [`GraphBuilder::with_format`] build one
+//! in another format, whose nodes are `impl<F: Float> Node<F>` (a node that
+//! reads its [`ParamNode`] cells is `f32`). `f64` also belongs inside `f32`
+//! nodes (filter state, oscillator phase — a node converts at its edge), in
+//! time ([`Env::frame`] is a `u64`
 //! [`Frame`](tutti_types::Frame) and the transport position a `f64`
 //! [`Beat`](tutti_types::Beat)), and at the plugin boundary (a plugin that
 //! processes in double converts inside its node). [`Io`] exposes buffers
