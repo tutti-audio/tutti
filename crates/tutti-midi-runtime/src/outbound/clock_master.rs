@@ -78,8 +78,8 @@ const SEEK_EPSILON_BEATS: f64 = 1e-3;
 
 /// What a control thread sets on a clock: enabled, MTC on or off, Flex tempo
 /// and meter on or off, and the SMPTE frame rate. One value in one word (an
-/// `AtomicU32`), so the audio thread reads them of one store, never a mix of
-/// two.
+/// `AtomicU32`), so the audio thread reads all of them from one store, never a
+/// mix of two.
 ///
 /// Layout of the word: bit 0 is enabled, bit 1 is MTC, bit 2 is Flex, bits 8
 /// to 15 are the MTC rate's two-bit code ([`MtcRate::code`]).
@@ -185,8 +185,7 @@ impl ClockControls {
     /// [`set_enabled`](Self::set_enabled): a Set Tempo (M2-104 §7.5.3) when the
     /// tempo in force changes, a Set Time Signature (§7.5.4) when the meter
     /// does, each on the Group, at the times the module docs give. Off by
-    /// default. The meter is sent only by a clock built with
-    /// [`ClockMaster::with_meter`].
+    /// default. The meter is the one the clock was built over.
     pub fn set_send_flex(&self, send: bool) {
         self.update(|s| s.send_flex = send);
     }
@@ -277,9 +276,8 @@ pub struct ClockMaster {
     prev: PrevTick,
     /// The MTC quarter-frame grid.
     mtc: MtcGrid,
-    /// The project meter, read once per pass when Flex is on; `None` sends no
-    /// Set Time Signature.
-    meter: Option<Reader<MeterMap>>,
+    /// The project meter, lent once per pass when Flex is on.
+    meter: Reader<MeterMap>,
     /// What the Flex messages last stated.
     flex: FlexOut,
 }
@@ -380,7 +378,11 @@ impl ClockMaster {
     /// Starts **disabled**; call [`ClockControls::set_enabled`] once a hardware
     /// output is connected.
     #[must_use]
-    pub fn new(group: MidiGroup, sample_rate: SampleRate) -> (Self, ClockControls) {
+    pub fn new(
+        group: MidiGroup,
+        sample_rate: SampleRate,
+        meter: Reader<MeterMap>,
+    ) -> (Self, ClockControls) {
         let (losses_writer, losses) = counter();
         let shared = Arc::new(Shared {
             settings: AtomicU32::new(Settings::OFF.bits()),
@@ -404,19 +406,10 @@ impl ClockMaster {
                 cued: None,
             },
             mtc: MtcGrid::RESTARTED,
-            meter: None,
+            meter,
             flex: FlexOut::SILENT,
         };
         (master, controls)
-    }
-
-    /// This master stating the meter `meter` reads (a reader of the project
-    /// meter's cell) as Set Time Signature when Flex is on. A master without
-    /// one sends no meter.
-    #[must_use]
-    pub fn with_meter(mut self, meter: Reader<MeterMap>) -> Self {
-        self.meter = Some(meter);
-        self
     }
 
     /// Adds `n` to [`ClockControls::losses`].
@@ -727,7 +720,8 @@ impl ClockMaster {
     /// bar boundary whose meter is not. The tempo is the segment's, constant
     /// over the pass, so a change waits for the first tick at or after the
     /// segment's start, in this pass or a later one. The meter is lent once
-    /// for the pass.
+    /// for the pass (a loan borrows the master's reader, which the clock's
+    /// other `&self` helpers cannot share across the whole tick).
     fn send_flex(
         &mut self,
         pass: &Pass,
@@ -746,21 +740,24 @@ impl ClockMaster {
             ));
             self.flex.tempo = Some(field);
         }
-        let Some(reader) = self.meter.as_mut() else {
-            return;
+        let meter = self.meter.lend();
+        // The frame of a bar line in the pass: the first at or after it, so a
+        // line before the pass is negative. Bars are counted by number, never
+        // re-derived from a beat (`bar_at` of a line can name the bar before).
+        let frame_of =
+            |boundary: Beat| first_frame_at_or_after((boundary - pass.beat) / beats_per_sample);
+        let first = meter.bar_at(pass.beat).bar;
+        let mut bar = if frame_of(meter.bar_start(first)) >= 0 {
+            first
+        } else {
+            first + BarCount(1)
         };
-        let meter = reader.lend();
-        let mut boundary = {
-            let at = meter.bar_at(pass.beat);
-            if at.is_downbeat() {
-                at.bar_start
-            } else {
-                meter.bar_start(at.bar + BarCount(1))
-            }
-        };
+        let mut boundary = meter.bar_start(bar);
         loop {
-            let k = first_frame_at_or_after((boundary - pass.beat) / beats_per_sample).max(0);
-            let Some(k) = usize::try_from(k).ok().filter(|&k| k < pass.len.get()) else {
+            let Some(k) = usize::try_from(frame_of(boundary))
+                .ok()
+                .filter(|&k| k < pass.len.get())
+            else {
                 break;
             };
             let signature = meter.at(boundary);
@@ -774,7 +771,13 @@ impl ClockMaster {
                 }
                 self.flex.meter = Some(signature);
             }
-            boundary = meter.bar_start(meter.bar_at(boundary).bar + BarCount(1));
+            bar = bar + BarCount(1);
+            let next = meter.bar_start(bar);
+            // A line that does not advance would stand here for ever.
+            if next <= boundary {
+                break;
+            }
+            boundary = next;
         }
     }
 

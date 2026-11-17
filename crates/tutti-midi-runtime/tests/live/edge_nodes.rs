@@ -1026,7 +1026,11 @@ fn an_event_tap_hands_midi_back_and_counts_drops() {
 #[test]
 fn a_start_inside_a_block_clocks_from_its_frame() {
     let (_ed, mut exec, clock, seen) = rig(
-        ClockNode::new(tutti_ump::MidiGroup::FIRST, tutti_types::SampleRate::SR_48K),
+        ClockNode::new(
+            tutti_ump::MidiGroup::FIRST,
+            tutti_types::SampleRate::SR_48K,
+            tutti_transport::ProjectMeter::default().reader(),
+        ),
         1,
         2048,
     );
@@ -1180,7 +1184,11 @@ fn a_machine_control_fork_sends_nothing() {
 #[test]
 fn a_clocks_fork_sends_nothing() {
     let (live, _exec, clock, seen) = rig(
-        ClockNode::new(tutti_ump::MidiGroup::FIRST, tutti_types::SampleRate::SR_48K),
+        ClockNode::new(
+            tutti_ump::MidiGroup::FIRST,
+            tutti_types::SampleRate::SR_48K,
+            tutti_transport::ProjectMeter::default().reader(),
+        ),
         1,
         512,
     );
@@ -1216,7 +1224,11 @@ fn a_clock_flood_past_the_port_capacity_is_counted() {
 
     let run = |blocks: &[usize]| -> (usize, u64) {
         let (_ed, mut exec, clock, seen) = rig(
-            ClockNode::new(tutti_ump::MidiGroup::FIRST, tutti_types::SampleRate::SR_48K),
+            ClockNode::new(
+                tutti_ump::MidiGroup::FIRST,
+                tutti_types::SampleRate::SR_48K,
+                tutti_transport::ProjectMeter::default().reader(),
+            ),
             1,
             LONG,
         );
@@ -1264,7 +1276,11 @@ fn a_segment_boundary_on_a_wrap_sends_the_song_position_once() {
     // The loop starts at beat 1, a quarter note: 4 MIDI beats (sixteenths).
     const LOOP_START: u16 = 4;
     let (_ed, mut exec, clock, seen) = rig(
-        ClockNode::new(tutti_ump::MidiGroup::FIRST, tutti_types::SampleRate::SR_48K),
+        ClockNode::new(
+            tutti_ump::MidiGroup::FIRST,
+            tutti_types::SampleRate::SR_48K,
+            tutti_transport::ProjectMeter::default().reader(),
+        ),
         1,
         4096,
     );
@@ -1326,7 +1342,11 @@ fn a_short_loop_in_a_long_block_is_counted_past_the_cap() {
 
     let run = |len: usize| -> (usize, u64) {
         let (_ed, mut exec, clock, seen) = rig(
-            ClockNode::new(tutti_ump::MidiGroup::FIRST, tutti_types::SampleRate::SR_48K),
+            ClockNode::new(
+                tutti_ump::MidiGroup::FIRST,
+                tutti_types::SampleRate::SR_48K,
+                tutti_transport::ProjectMeter::default().reader(),
+            ),
             1,
             TOTAL,
         );
@@ -1361,7 +1381,11 @@ fn a_short_loop_in_a_long_block_is_counted_past_the_cap() {
 #[test]
 fn a_clock_node_holds_its_group_and_rate_from_construction() {
     let group = MidiGroup::masked(2);
-    let node = ClockNode::new(group, SampleRate::SR_44K1);
+    let node = ClockNode::new(
+        group,
+        SampleRate::SR_44K1,
+        tutti_transport::ProjectMeter::default().reader(),
+    );
     let master = node.into_parts().controls;
     assert_eq!(master.group(), group);
     assert_eq!(master.sample_rate(), SampleRate::SR_44K1);

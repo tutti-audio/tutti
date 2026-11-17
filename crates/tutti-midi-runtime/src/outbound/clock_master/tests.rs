@@ -5,6 +5,8 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool as StdAtomicBool;
 use tutti_graph::UmpAt;
 use tutti_midi_protocol::SmpteFrameRate;
+use tutti_transport::ProjectMeter;
+use tutti_types::MeterChange;
 use tutti_types::{Bpm, Seconds};
 use tutti_ump::{Flex, Message, MidiGroup, System};
 
@@ -87,7 +89,11 @@ fn master(tempo: Bpm, sample_rate: impl Into<SampleRate>) -> (Rig, Arc<TestTrans
     let transport = Arc::new(TestTransport::new(tempo));
     let receiver = Collected::default();
     let out = receiver.clone();
-    let (cm, controls) = ClockMaster::new(MidiGroup::FIRST, sample_rate.into());
+    let (cm, controls) = ClockMaster::new(
+        MidiGroup::FIRST,
+        sample_rate.into(),
+        ProjectMeter::default().reader(),
+    );
     controls.set_enabled(true);
     let rig = Rig {
         cm,
@@ -936,7 +942,8 @@ fn a_wrap_on_the_block_edge_and_a_locate_are_one_song_position() {
 #[test]
 fn every_event_goes_out_on_the_masters_group() {
     let group = MidiGroup::masked(5);
-    let (mut cm, controls) = ClockMaster::new(group, SampleRate::SR_48K);
+    let (mut cm, controls) =
+        ClockMaster::new(group, SampleRate::SR_48K, ProjectMeter::default().reader());
     controls.set_enabled(true);
     controls.set_send_mtc(true);
     let transport = TestTransport::new(Bpm::of(120.0));
@@ -1151,17 +1158,14 @@ fn no_full_message_is_sent_with_mtc_off() {
 
 // --- Flex Set Tempo and Set Time Signature ----------------------------------
 
-use tutti_transport::ProjectMeter;
-use tutti_types::{MeterChange, MeterMap, TimeSignature};
-
 /// A master on the first Group at 48 kHz, its clock bytes on or off, Flex on,
 /// reading the meter of the returned project meter (4/4 until set).
 fn flex_master(clock: bool) -> (ClockMaster, ProjectMeter, Collected) {
     let meter = ProjectMeter::default();
-    let (cm, controls) = ClockMaster::new(MidiGroup::FIRST, SampleRate::SR_48K);
+    let (cm, controls) = ClockMaster::new(MidiGroup::FIRST, SampleRate::SR_48K, meter.reader());
     controls.set_enabled(clock);
     controls.set_send_flex(true);
-    (cm.with_meter(meter.reader()), meter, Collected::default())
+    (cm, meter, Collected::default())
 }
 
 /// One block of `frames` frames at `beat` and `tempo`, playing.
@@ -1328,18 +1332,178 @@ fn a_start_mid_bar_states_the_meter_at_the_next_bar() {
 
 /// Flex is off until set: a clock with the tempo changing and a meter set
 /// sends no Flex Data.
-/// Spec: m2-104/7.5.3#2
 #[test]
 fn no_flex_is_sent_unless_enabled() {
     let meter = ProjectMeter::default();
-    let (cm, controls) = ClockMaster::new(MidiGroup::FIRST, SampleRate::SR_48K);
+    let (mut cm, controls) = ClockMaster::new(MidiGroup::FIRST, SampleRate::SR_48K, meter.reader());
     controls.set_enabled(true);
     assert!(!controls.sends_flex());
-    let mut cm = cm.with_meter(meter.reader());
     let out = Collected::default();
     play(&mut cm, &out, 120.0, 0.0, 48_000);
     play(&mut cm, &out, 150.0, 2.0, 48_000);
     let events = drain_all(&out);
     assert!(flexes(&events).is_empty());
     assert!(events.iter().any(|e| is_status(e, 0xF8)), "the clock ran");
+}
+
+fn meters(events: &[UmpAt]) -> Vec<(u32, Flex)> {
+    flexes(events)
+        .into_iter()
+        .filter(|(_, f)| matches!(f, Flex::SetTimeSignature(_)))
+        .collect()
+}
+
+fn tempos(events: &[UmpAt]) -> Vec<(u32, Flex)> {
+    flexes(events)
+        .into_iter()
+        .filter(|(_, f)| matches!(f, Flex::SetTempo(_)))
+        .collect()
+}
+
+fn map(changes: &[(f64, u32, u32)]) -> MeterMap {
+    MeterMap::new(
+        changes
+            .iter()
+            .map(|&(beat, n, d)| MeterChange::new(Beat(beat), TimeSignature::of(n, d))),
+    )
+}
+
+/// A meter change off the dyadic beats puts bar lines where `bar_at` of a line
+/// can name the bar before it (4/4 from 0.1 has bar 3 at 4.1, which `bar_at`
+/// puts in bar 2; 1/64 from 0.1 has bar 5 at 0.2875). The master walks bars by
+/// number, so it ends, and states each new meter on the frame of the first bar
+/// line of it: at 120 bpm and 48 kHz a beat is 24 000 frames, the lines here
+/// are whole frames, and the expected frames are those of `MeterMap::bar_start`.
+/// Spec: m2-104/7.5.4#1
+#[test]
+fn bar_lines_off_the_dyadic_beats_are_walked_by_number_and_end() {
+    for changes in [
+        &[(0.0, 4, 4), (0.1, 4, 4)][..],
+        &[(0.0, 4, 4), (0.1, 3, 4)],
+        &[(0.0, 4, 4), (0.1, 1, 64)],
+    ] {
+        let meter_map = map(changes);
+        let (mut cm, meter, out) = flex_master(true);
+        meter.set_meter(meter_map.clone());
+        let frames = 480_000;
+        play(&mut cm, &out, 120.0, 0.0, frames);
+        let mut expected = Vec::new();
+        let mut stated = None;
+        for n in 1.. {
+            let line = meter_map.bar_start(tutti_types::BarNumber(n));
+            let frame = (line.get() * 24_000.0).round() as usize;
+            if frame >= frames {
+                break;
+            }
+            let signature = meter_map.at(line);
+            if stated != Some(signature) {
+                stated = Some(signature);
+                expected.push((
+                    frame as u32,
+                    Flex::SetTimeSignature(flex_time_signature_wire(signature).unwrap()),
+                ));
+            }
+        }
+        assert_eq!(meters(&drain_all(&out)), expected, "{changes:?}");
+    }
+}
+
+/// A tick and a bar line on the first frame of a block are sent there once,
+/// not also at the end of the block before: 1 000 frames a tick at 120 bpm,
+/// and 4/4 then 3/4 from beat 4 (frame 96 000).
+/// Spec: m2-104/7.5.3#2, m2-104/7.5.4#1
+#[test]
+fn a_tick_and_a_bar_line_on_a_block_edge_are_sent_once() {
+    let (mut cm, meter, out) = flex_master(true);
+    meter.set_meter(map(&[(0.0, 4, 4), (4.0, 3, 4)]));
+    play(&mut cm, &out, 120.0, 0.0, 96_000);
+    let first = drain_all(&out);
+    assert_eq!(meters(&first), [(0, time_signature(4, 2))]);
+    play(&mut cm, &out, 120.0, 4.0, 48_000);
+    assert_eq!(meters(&drain_all(&out)), [(0, time_signature(3, 2))]);
+
+    // Tempo 150 from the block that starts on tick 1 (frame 1 000 of 120).
+    let (mut cm, _meter, out) = flex_master(true);
+    play(&mut cm, &out, 120.0, 0.0, 1_000);
+    assert_eq!(tempos(&drain_all(&out)), [(0, Flex::SetTempo(50_000_000))]);
+    play(&mut cm, &out, 150.0, 1_000.0 / 24_000.0, 1_000);
+    assert_eq!(tempos(&drain_all(&out)), [(0, Flex::SetTempo(40_000_000))]);
+    play(
+        &mut cm,
+        &out,
+        150.0,
+        1_000.0 / 24_000.0 + 1_000.0 / 19_200.0,
+        1_000,
+    );
+    assert!(tempos(&drain_all(&out)).is_empty());
+}
+
+/// A locate while playing restates nothing that did not change, and the new
+/// meter waits for a bar line: 4/4 from 0 and 3/4 from 4 have bars at 0, 4, 7
+/// and 10, so a locate to 8.5 states 3/4 on frame (10 - 8.5) x 24 000 = 36 000.
+/// Spec: m2-104/7.5.4#1
+#[test]
+fn a_locate_while_playing_states_the_meter_at_the_next_bar_line() {
+    let (mut cm, meter, out) = flex_master(true);
+    play(&mut cm, &out, 120.0, 0.0, 2_400);
+    drain_all(&out);
+    meter.set_meter(map(&[(0.0, 4, 4), (4.0, 3, 4)]));
+    play(&mut cm, &out, 120.0, 8.5, 60_000);
+    let second = drain_all(&out);
+    assert_eq!(meters(&second), [(36_000, time_signature(3, 2))]);
+    assert!(tempos(&second).is_empty());
+}
+
+/// The passes of a looped block (here three of 24 000 frames, wrapping at
+/// 24 000 and 48 000) restate nothing: the tempo and the meter are each
+/// stated once, on the first frame.
+/// Spec: m2-104/7.5.3#2, m2-104/7.5.4#1
+#[test]
+fn the_passes_of_a_looped_block_restate_nothing() {
+    let (mut cm, _meter, out) = flex_master(true);
+    let looping = tutti_graph::LoopRange {
+        start: Beat(0.0),
+        end: Beat(1.0),
+    };
+    let transport = TransportPosition::new(true, Bpm::of(120.0), Beat(0.0), Some(looping));
+    cm.tick(&transport, Samples(72_000), &mut |e| {
+        out.0.lock().unwrap().push(e);
+    });
+    let events = drain_all(&out);
+    assert_eq!(offsets(&events, 0xF2), [24_000, 48_000], "two wraps");
+    assert_eq!(
+        flexes(&events),
+        [(0, Flex::SetTempo(50_000_000)), (0, time_signature(4, 2)),]
+    );
+}
+
+/// A meter whose change falls inside the block is stated on the first bar line
+/// of the new one: 4/4 then 3/4 from beat 8 over 12 beats (288 000 frames) puts
+/// 3/4 on frame 8 x 24 000 = 192 000.
+/// Spec: m2-104/7.5.4#1
+#[test]
+fn a_meter_change_inside_the_block_is_stated_on_its_bar_line() {
+    let (mut cm, meter, out) = flex_master(true);
+    meter.set_meter(map(&[(0.0, 4, 4), (8.0, 3, 4)]));
+    play(&mut cm, &out, 120.0, 0.0, 288_000);
+    assert_eq!(
+        flexes(&drain_all(&out)),
+        [
+            (0, Flex::SetTempo(50_000_000)),
+            (0, time_signature(4, 2)),
+            (192_000, time_signature(3, 2)),
+        ]
+    );
+}
+
+/// A whole-note meter (4/1, 16 beats a bar) has no standard Set Time
+/// Signature: nothing is sent for it, and nothing is resent at each of its bar
+/// lines (beats 4 and 20 of 24).
+/// Spec: m2-104/7.5.4#1
+#[test]
+fn a_whole_note_meter_is_stated_by_nothing_and_not_resent() {
+    let (mut cm, meter, out) = flex_master(true);
+    meter.set_meter(map(&[(0.0, 4, 4), (4.0, 4, 1)]));
+    play(&mut cm, &out, 120.0, 0.0, 576_000);
+    assert_eq!(meters(&drain_all(&out)), [(0, time_signature(4, 2))]);
 }

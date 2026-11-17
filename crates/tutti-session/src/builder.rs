@@ -905,10 +905,11 @@ impl<C: Clock> SessionBuilder<C> {
         // their pool entries load, and the clock feeds each output.
         #[cfg(feature = "midi")]
         let midi = {
-            let (clock, clock_master) = graph.add(
-                tutti_midi_runtime::ClockNode::new(tutti_ump::MidiGroup::FIRST, rate)
-                    .with_meter(click_settings.project_meter().reader()),
-            );
+            let (clock, clock_master) = graph.add(tutti_midi_runtime::ClockNode::new(
+                tutti_ump::MidiGroup::FIRST,
+                rate,
+                click_settings.project_meter().reader(),
+            ));
             Some(crate::MidiNodes {
                 input_ports: self.opts.midi_ports,
                 clock: clock.erase(),

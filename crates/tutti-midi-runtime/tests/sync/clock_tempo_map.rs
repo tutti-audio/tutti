@@ -151,7 +151,11 @@ fn rig(map: &Arc<TempoMap>, mtc: bool) -> Rig {
         .insert(
             NodeKey(1),
             "clock",
-            ClockNode::new(tutti_ump::MidiGroup::FIRST, tutti_types::SampleRate::SR_48K),
+            ClockNode::new(
+                tutti_ump::MidiGroup::FIRST,
+                tutti_types::SampleRate::SR_48K,
+                tutti_transport::ProjectMeter::default().reader(),
+            ),
         )
         .controls;
     master.set_enabled(true);
