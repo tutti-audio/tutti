@@ -63,7 +63,7 @@ impl ClaimWord {
     }
 
     /// Adds a shared claim unless an exclusive one is held, or the count would
-    /// reach the exclusive bit; `false` then, with the word unchanged.
+    /// reach the exclusive bit; `false` then, with the word restored.
     #[inline]
     pub(crate) fn try_shared(&self) -> bool {
         let prev = self.0.fetch_add(1, Ordering::Acquire);
