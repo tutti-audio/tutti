@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use super::schedule::{Next, Outbox};
 use tutti_graph::Losses;
-use tutti_rt::{Tally, TallyWriter, tally};
+use tutti_rt::{Counter, CounterWriter, counter};
 
 /// What an output and its sender thread share: the [`Outbox`] behind its lock
 /// and the counts of what the sender could not send.
@@ -15,18 +15,21 @@ use tutti_rt::{Tally, TallyWriter, tally};
 pub(in crate::backend) struct Mailbox<T> {
     state: Mutex<Outbox<T>>,
     /// What the sender could not send: sends the device refused are `lost`,
-    /// events dropped when the sender ended are `refused`. The sender thread
-    /// and its end guard each add through their own writer.
-    losses: Tally<Losses>,
+    /// events dropped when the sender ended are `refused`. The sender's end
+    /// guard holds the one writer.
+    losses: Counter<Losses>,
 }
 
 impl<T> Mailbox<T> {
-    /// A mailbox with a live sender and nothing held.
-    pub(in crate::backend) fn new() -> Self {
-        Self {
+    /// A mailbox with a live sender and nothing held, and the writer of its
+    /// losses, which [`run`] takes.
+    pub(in crate::backend) fn new() -> (Self, CounterWriter<Losses>) {
+        let (writer, losses) = counter();
+        let mailbox = Self {
             state: Mutex::new(Outbox::new()),
-            losses: tally(),
-        }
+            losses,
+        };
+        (mailbox, writer)
     }
 
     /// The outbox, locked. The lock is the sender's too, held for one step.
@@ -43,7 +46,7 @@ impl<T> Mailbox<T> {
 
 /// Marks the mailbox's sender dead when its loop ends, however it ends, a panic
 /// included: what it held had nowhere to go.
-struct Ends<'a, T>(&'a Mailbox<T>, TallyWriter<Losses>);
+struct Ends<'a, T>(&'a Mailbox<T>, CounterWriter<Losses>);
 
 impl<T> Drop for Ends<'_, T> {
     fn drop(&mut self) {
@@ -61,6 +64,7 @@ impl<T> Drop for Ends<'_, T> {
 /// exists, so a setup that panics ends the sender the same way.
 pub(in crate::backend) fn run<T, S, W, Send, Wait>(
     mailbox: &Mailbox<T>,
+    losses: CounterWriter<Losses>,
     setup: impl FnOnce() -> (Send, Wait),
 ) where
     S: Display,
@@ -68,8 +72,7 @@ pub(in crate::backend) fn run<T, S, W, Send, Wait>(
     Send: FnMut(T) -> Result<(), S>,
     Wait: FnMut(Option<Duration>) -> Result<(), W>,
 {
-    let _ends = Ends(mailbox, mailbox.losses.writer());
-    let mut losses = mailbox.losses.writer();
+    let mut ends = Ends(mailbox, losses);
     let (mut send, mut wait) = setup();
     loop {
         // The stop is looked at with each event, not once per batch: a long run
@@ -80,7 +83,7 @@ pub(in crate::backend) fn run<T, S, W, Send, Wait>(
             Next::Send(event) => {
                 if let Err(e) = send(event) {
                     tracing::debug!("MIDI send: {e}");
-                    losses.add(Losses::lost(1));
+                    ends.1.add(Losses::lost(1));
                 }
                 mailbox.state().done();
             }

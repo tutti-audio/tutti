@@ -134,6 +134,7 @@ io = ["session", "tutti-session/record", "encode-wav"]
 # --- MIDI, two axes --------------------------------------------------------
 midi = [
     "dep:tutti-midi-protocol",
+    "dep:tutti-midi-device",
     "dep:tutti-midi-file",
     "dep:tutti-midi-runtime",
     "tutti-session?/midi",

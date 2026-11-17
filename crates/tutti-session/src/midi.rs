@@ -2147,6 +2147,20 @@ mod tests {
     /// cable** (MIDI 1.0 Detailed Specification, Hardware: a byte every 320
     /// microseconds, so a two-byte message every 640 at best): the figure of
     /// [`MIDI_INPUT_INLET_CAPACITY`], derived here from the spec's timing.
+    /// An output's one cell keeps tap losses and refusals apart: the reader
+    /// answers both, each in its own count.
+    #[test]
+    fn an_outputs_lost_and_refused_events_read_back_as_their_own_counts() {
+        let (mut writers, readers) = loss_cells();
+        writers.lost(3);
+        writers.refused(2);
+        writers.refused(1);
+        assert_eq!(
+            readers.get(),
+            tutti_graph::Losses::lost(3) + tutti_graph::Losses::refused(3)
+        );
+    }
+
     #[cfg(feature = "midi-hardware")]
     #[test]
     fn the_inlet_holds_a_second_of_a_saturated_midi1_cable() {
