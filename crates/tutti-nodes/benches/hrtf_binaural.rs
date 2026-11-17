@@ -150,8 +150,8 @@ fn bench(c: &mut Criterion) {
             // one filter from its first block.
             Node::reset(&mut *d.node);
             let mut rng = Lcg(0x2545_f491);
-            for mut ch in d.inputs_mut().iter_mut() {
-                let ch = ch.samples_mut();
+            for ch in d.inputs_mut().iter_mut() {
+                let ch = ch.into_samples_mut();
                 for x in ch.iter_mut() {
                     *x = rng.next();
                 }

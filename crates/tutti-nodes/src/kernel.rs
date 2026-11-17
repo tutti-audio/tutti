@@ -838,14 +838,14 @@ mod tests {
             let node =
                 KernelNode::with_kernel(Keyed { main, key }, GainSet, Gain { gain: Db(0.0) });
             let mut d = Direct::new(node, SampleRate::SR_48K, 64);
-            for mut c in d.inputs_mut().iter_mut() {
-                let c = c.samples_mut();
+            for c in d.inputs_mut().iter_mut() {
+                let c = c.into_samples_mut();
                 c.fill(0.5);
             }
             d.outputs_mut().plane_mut(0).samples_mut().fill(7.0);
             d.block();
             assert!(
-                d.output().plane(0).samples().iter().all(|&s| s == 0.0),
+                d.output().plane(0).iter().all(|&s| s == 0.0),
                 "{main:?}, key {key:?}"
             );
         }

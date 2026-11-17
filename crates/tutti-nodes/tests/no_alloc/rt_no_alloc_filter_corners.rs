@@ -68,8 +68,8 @@ fn lane(shape: usize, lo: f32, hi: f32, bad: f32) -> Vec<f32> {
 const SHAPES: usize = 7;
 
 fn fill(rig: &mut Direct<impl Node>) {
-    for (n, mut c) in rig.inputs_mut().iter_mut().enumerate() {
-        let c = c.samples_mut();
+    for (n, c) in rig.inputs_mut().iter_mut().enumerate() {
+        let c = c.into_samples_mut();
         for (i, x) in c.iter_mut().enumerate() {
             *x = match (i + n) % 5 {
                 0 | 1 => 0.5,

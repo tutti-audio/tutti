@@ -81,7 +81,7 @@
 
 use crate::NodeKey;
 use crate::OutPort;
-use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_buffers::{BufferError, Float, Planes, PlanesMut};
 use tutti_types::MaxBlock;
 use tutti_types::{
     At, Beat, Bpm, ChannelLayout, Frame, Latency, SampleRate, Samples, Tail, UnitAddr,
@@ -1915,7 +1915,7 @@ pub fn assert_honest_tail(node: &mut dyn Node, rate: SampleRate) {
     let first = drive_input(
         node,
         &env(0),
-        Planes::new(&vec![&impulse[..]; width]).unwrap_or_default(),
+        or_empty(Planes::new(&vec![&impulse[..]; width])),
         &[],
         &[],
     );
@@ -1938,7 +1938,7 @@ pub fn assert_honest_tail(node: &mut dyn Node, rate: SampleRate) {
         let next = drive_input(
             node,
             &env(frame),
-            Planes::new(&vec![&silence[..]; width]).unwrap_or_default(),
+            or_empty(Planes::new(&vec![&silence[..]; width])),
             &[],
             &[],
         );
@@ -2017,6 +2017,17 @@ pub fn assert_param_fork<N: ParamNode + Clone>(node: N) {
             Some(set(i) + 7.0),
             "{p:?}: a write to the fork reached the live node"
         );
+    }
+}
+
+/// A rig's view of its channels: the empty view for no channel (a node with
+/// no audio on that side), and a panic for any other refusal, which a rig's own
+/// buffers never produce.
+fn or_empty<T: Default>(planes: Result<T, BufferError>) -> T {
+    match planes {
+        Ok(planes) => planes,
+        Err(BufferError::ZeroWidth) => T::default(),
+        Err(e) => panic!("a rig's planes are well formed: {e}"),
     }
 }
 
@@ -2130,13 +2141,13 @@ impl<F: Float> BlockRig<F> {
     /// The input channels, to fill before a block (empty for a node with no
     /// audio input).
     pub fn inputs_mut(&mut self) -> PlanesMut<'_, '_, F> {
-        PlanesMut::from_vecs(&mut self.inputs).unwrap_or_default()
+        or_empty(PlanesMut::from_vecs(&mut self.inputs))
     }
 
     /// The output channels of the last block (empty for a node with no
     /// audio output).
     pub fn output(&self) -> Planes<'_, F> {
-        Planes::from_vecs(&self.outputs).unwrap_or_default()
+        or_empty(Planes::from_vecs(&self.outputs))
     }
 
     /// One block, transport stopped. Allocation-free.
@@ -2290,7 +2301,7 @@ impl<N: Node<F> + ?Sized, F: Float> Direct<N, F> {
     /// The input channels, to fill before a block (empty for a node with no
     /// audio input).
     pub fn inputs_mut(&mut self) -> PlanesMut<'_, '_, F> {
-        PlanesMut::from_vecs(&mut self.inputs).unwrap_or_default()
+        or_empty(PlanesMut::from_vecs(&mut self.inputs))
     }
 
     /// Feeds declared param `k` with `values` (one per frame) from the next
@@ -2347,16 +2358,17 @@ impl<N: Node<F> + ?Sized, F: Float> Direct<N, F> {
     /// The output channels of the last block (the block's length; empty for
     /// a node with no audio output).
     pub fn output(&self) -> Planes<'_, F> {
-        Planes::from_vecs(&self.outputs)
-            .map(|p| p.slice(Samples(0)..Samples(self.len)))
-            .unwrap_or_default()
+        if self.outputs.is_empty() {
+            return Planes::default();
+        }
+        or_empty(Planes::from_vecs(&self.outputs)).slice(Samples(0)..Samples(self.len))
     }
 
     /// The output channels, to fill before a block: a node must write every
     /// frame of every output it declares, and what it leaves shows (empty for
     /// a node with no audio output).
     pub fn outputs_mut(&mut self) -> PlanesMut<'_, '_, F> {
-        PlanesMut::from_vecs(&mut self.outputs).unwrap_or_default()
+        or_empty(PlanesMut::from_vecs(&mut self.outputs))
     }
 
     /// One block: at the driver's frame (advanced block to block), under

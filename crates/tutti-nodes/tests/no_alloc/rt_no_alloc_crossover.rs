@@ -18,8 +18,8 @@ use tutti_types::{UnitAddr, UnitParam};
 /// `between` run before each.
 fn gate<N: IntoNode>(node: N, mut between: impl FnMut(&N::Controls, usize)) {
     let (mut rig, controls) = BlockRig::new(node, SampleRate::SR_48K, 64);
-    for mut c in rig.inputs_mut().iter_mut() {
-        let c = c.samples_mut();
+    for c in rig.inputs_mut().iter_mut() {
+        let c = c.into_samples_mut();
         for (i, x) in c.iter_mut().enumerate() {
             *x = if (i / 16) % 2 == 0 { 0.8 } else { -0.8 };
         }

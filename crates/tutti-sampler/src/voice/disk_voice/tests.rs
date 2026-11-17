@@ -1006,7 +1006,7 @@ fn a_streamed_clip_wider_than_its_pool_mixes_its_first_channels() {
             direct.block_in(&t.env(BLOCK, SampleRate::of(SR)));
             t.advance(BLOCK as i64, SampleRate::of(SR));
             for c in 0..pool_width {
-                for (i, &got) in direct.output().plane(c).samples().iter().enumerate() {
+                for (i, &got) in direct.output().plane(c).iter().enumerate() {
                     let k = 22_050 + b * BLOCK as u64 + i as u64;
                     assert_eq!(
                         got.to_bits(),
@@ -1154,8 +1154,8 @@ fn outside_the_window_silences_every_channel() {
         // one-frame block and an eight-frame one.
         let mut direct = Direct::new(voice, SampleRate::of(SR), 8);
         for frames in [1usize, 8] {
-            for mut ch in direct.outputs_mut().iter_mut() {
-                let ch = ch.samples_mut();
+            for ch in direct.outputs_mut().iter_mut() {
+                let ch = ch.into_samples_mut();
                 ch.fill(9.0);
             }
             let mut env = transport.env(8, SampleRate::of(SR));
@@ -1166,8 +1166,8 @@ fn outside_the_window_silences_every_channel() {
                 // `Direct` runs its own block length; a one-frame block
                 // is a node of its own.
                 let mut one = Direct::new((*direct.node).clone(), SampleRate::of(SR), 1);
-                for mut ch in one.outputs_mut().iter_mut() {
-                    let ch = ch.samples_mut();
+                for ch in one.outputs_mut().iter_mut() {
+                    let ch = ch.into_samples_mut();
                     ch.fill(9.0);
                 }
                 one.block_in(&env);

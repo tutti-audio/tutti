@@ -10,8 +10,8 @@ use tutti_types::{ChannelLayout, SampleRate, UnitParam};
 fn dc_blocker_process_is_allocation_free_with_the_corner_moving() {
     let node = DcBlockerNode::from(DcBlockerConfig::new(ChannelLayout::STEREO));
     let (mut rig, controls) = BlockRig::new(node, SampleRate::SR_48K, 64);
-    for (c, mut ch) in rig.inputs_mut().iter_mut().enumerate() {
-        let ch = ch.samples_mut();
+    for (c, ch) in rig.inputs_mut().iter_mut().enumerate() {
+        let ch = ch.into_samples_mut();
         for (i, x) in ch.iter_mut().enumerate() {
             let side = if (i / 8) % 2 == 0 { 0.5 } else { -0.5 };
             *x = 0.25 + side * (c as f32 + 1.0) * 0.5;

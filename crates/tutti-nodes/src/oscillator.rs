@@ -329,7 +329,7 @@ mod tests {
         let mut d = Direct::new(OscillatorNode::sine(Hz(500.0)), RATE, 16);
         d.feed(0, Some(&lane));
         d.block();
-        for (n, &y) in d.output().plane(0).samples().iter().enumerate() {
+        for (n, &y) in d.output().plane(0).iter().enumerate() {
             let exact = libm::sin(2.0 * core::f64::consts::PI * 1_000.0 * n as f64 / 48_000.0);
             assert!((f64::from(y) - exact).abs() < 1e-6, "sample {n}");
         }

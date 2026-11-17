@@ -2174,8 +2174,8 @@ fn a_voice_node_wider_than_the_sampler_reads_leaves_no_stale_channels() {
         ChannelLayout::try_from(wide).expect("a test width is small"),
     );
     let mut direct = tutti_graph::contract::Direct::new(node, SampleRate::of(SR), 64);
-    for mut ch in direct.outputs_mut().iter_mut() {
-        let ch = ch.samples_mut();
+    for ch in direct.outputs_mut().iter_mut() {
+        let ch = ch.into_samples_mut();
         ch.fill(7.0);
     }
     direct.block_in(&transport.env(64, SampleRate::of(SR)));
@@ -2189,7 +2189,7 @@ fn a_voice_node_wider_than_the_sampler_reads_leaves_no_stale_channels() {
         }
     }
     assert!(
-        direct.output().plane(0).samples().iter().any(|&s| s != 0.0),
+        direct.output().plane(0).iter().any(|&s| s != 0.0),
         "the voice must sound on the channels it reads"
     );
 }

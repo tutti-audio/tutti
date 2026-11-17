@@ -182,7 +182,7 @@ impl<N: ParamNode + Clone> IsolateRow<N> {
                 .map(|ch| (0..size).map(|i| stimulus(ch, done + i)).collect())
                 .collect();
             let refs: Vec<&[f32]> = input.iter().map(|c| &c[..]).collect();
-            let planes = tutti_buffers::Planes::new(&refs).unwrap_or_default();
+            let planes = super::or_empty(tutti_buffers::Planes::new(&refs));
             // `drive_input`, not `drive`: the block's length is the `Env`'s, so
             // a generator with no inputs (an LFO) renders too.
             let env = crate::node::Env {

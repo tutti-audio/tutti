@@ -109,8 +109,8 @@ fn sweep(name: &str, node: ConvolverNode, gains: &[Option<f32>], driven: bool) {
     let width = usize::from(node.outputs().count());
     let cell = node.gain();
     let mut rig = Direct::new(node, SampleRate::SR_48K, MAX_BLOCK);
-    for (c, mut x) in rig.inputs_mut().iter_mut().enumerate() {
-        let x = x.samples_mut();
+    for (c, x) in rig.inputs_mut().iter_mut().enumerate() {
+        let x = x.into_samples_mut();
         for (i, s) in x.iter_mut().enumerate() {
             *s = (((i * 7 + c * 13) % 29) as f32 / 14.0 - 1.0) * 0.9;
         }

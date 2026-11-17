@@ -21,8 +21,8 @@ fn gate<N: IntoNode>(node: N, mut between: impl FnMut(&N::Controls, usize)) {
     // A 32-frame square: low enough that every filter here passes some of
     // it (a Nyquist square through a low-pass is silence, and the silence
     // check below would fail for the wrong reason).
-    for mut c in rig.inputs_mut().iter_mut() {
-        let c = c.samples_mut();
+    for c in rig.inputs_mut().iter_mut() {
+        let c = c.into_samples_mut();
         for (i, x) in c.iter_mut().enumerate() {
             *x = if (i / 16) % 2 == 0 { 0.5 } else { -0.5 };
         }
@@ -159,8 +159,8 @@ fn an_svf_with_its_ports_fed_is_allocation_free() {
             Q::new(1.0),
         );
         let mut rig = Direct::new(node, SampleRate::SR_48K, 64);
-        for mut c in rig.inputs_mut().iter_mut() {
-            let c = c.samples_mut();
+        for c in rig.inputs_mut().iter_mut() {
+            let c = c.into_samples_mut();
             for (i, x) in c.iter_mut().enumerate() {
                 *x = if (i / 16) % 2 == 0 { 0.5 } else { -0.5 };
             }
