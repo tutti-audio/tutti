@@ -27,8 +27,8 @@
 //!   it writes to its port; [`MidiClipNode`] uses it.
 //! - [`MidiKeys`]: the key helpers (`note_on`, `note_off`) over `tutti-graph`'s
 //!   event inlet, which is how a control thread sends MIDI into the graph.
-//! - [`ClockMaster`], [`JrClock`] and [`JrStamper`]: engine-produced MIDI *out*
-//!   (Beat Clock, MTC, JR timestamps).
+//! - [`ClockNode`] and [`JrStream`]: engine-produced MIDI *out* (Beat Clock, MTC,
+//!   JR timestamps).
 //! - [`MidiClockDecoder`] and [`MtcDecoder`]: the inbound half of
 //!   sync (Beat Clock and MTC decoders), beside the master that sends them.
 //! - [`ClockFollower`]: what a transport that follows an outside Beat Clock or MTC does
@@ -165,23 +165,17 @@
 //! assert_eq!(note.get(), 60);
 //! ```
 //!
-//! ## Constraint: [`MpeIngest::set_mode`] drops all held-note state
+//! ## Refusal is a value on the audio path
 //!
-//! The channel→note maps are keyed by a channel range the new mode may not share, so
-//! they cannot carry over. A note held across the call is forgotten: its note-off
-//! arrives on a channel with no mapping and passes through *unfolded*. Silence the
-//! sounding voices separately — reconfiguring is not a panic.
-//!
-//! ## Constraint: refusal is a value here, not an error
-//!
-//! This crate has no `Error` type. Everything here runs on or feeds the audio
-//! thread, where refusal is shaped as a value: a full mailbox drops and reports a
-//! count, and [`MpeIngest::translate`] yields nothing for an event it drops. The file codec's error
-//! is `tutti-midi-file`'s `ClipFileError`; `Midi1Parser` refuses a message with `None`.
+//! What runs on or feeds the audio thread reports a refusal as a value: a full
+//! mailbox drops and reports a count, and [`MpeIngest::translate`] yields nothing for an
+//! event it drops. A fallible control-side call returns its own error
+//! ([`MpeFeaturesError`], [`OffsetOutOfRange`], [`NoTimeCode`]); the file codec's is
+//! `tutti-midi-file`'s `ClipFileError`.
 //!
 //! ## Where it sits
 //!
-//! Builds on `tutti-ump`, `tutti-midi-protocol`, `tutti-transport` and `tutti-graph`. Used by the
+//! Builds on `tutti-ump`, `tutti-midi-protocol` and `tutti-graph`. Used by the
 //! synth, SoundFont and plugin crates and by `tutti-midi-hardware`; re-exported by
 //! `tutti`.
 //!
@@ -190,12 +184,6 @@
 //! None.
 #![forbid(unsafe_code)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
-
-// NOTE: this crate has no fallible operation and therefore no `Error` type.
-// Everything here runs on or feeds the audio thread, where refusal is shaped as
-// a value, not an error: a full mailbox drops and reports a count, and
-// `MpeIngest::translate` sends nothing for an event it drops. The MIDI parse errors live one crate
-// down (`tutti_midi_file::ClipFileError`, `tutti_ump::Midi1Parser`'s refusal, `None`).
 
 mod clock_map;
 mod held;
@@ -214,21 +202,19 @@ mod test_support;
 mod traits;
 
 pub use clock_map::{ClockMap, ClockReading, GAIN, Observed, RESYNC};
-pub use held::HeldState;
 pub use ledger::{NoteLedger, Sending};
 pub use live::{
-    ACTIVE_SENSING_JUDGE, ActiveSensing, ArrivalClock, CHANNELLESS_PORT, DeviceEpochs, DeviceInput,
-    DeviceWriters, InputId, InputInlets, InputReaders, InputWriters, LIVE_INLET_CAPACITY,
-    MIDI_INPUT_DENSITY, MIDI_INPUT_EVENT_CAPACITY, MIDI_INPUT_PORTS, MidiIngestControls,
-    MidiIngestNode, MidiInputPorts, MidiKeys, MpeIngest, MpeTransformControls, MpeTransformNode,
-    RouteRule, compile_routes,
+    ArrivalClock, CHANNELLESS_PORT, DeviceEpochs, DeviceInput, DeviceWriters, EpochWriter, InputId,
+    InputInlets, InputReaders, InputWriters, LIVE_INLET_CAPACITY, MIDI_INPUT_DENSITY,
+    MIDI_INPUT_EVENT_CAPACITY, MIDI_INPUT_PORTS, MidiIngestControls, MidiIngestNode,
+    MidiInputPorts, MidiKeys, MpeIngest, MpeTransformControls, MpeTransformNode, RouteRule,
+    compile_routes,
 };
 pub use mpe_features::{MpeFeaturesError, ask_mpe_features, mpe_features};
 pub use mpe_zones::mpe_zones;
 pub use outbound::{
-    ACTIVE_SENSING_INTERVAL, ActiveSensingSender, CLOCK_EVENT_CAPACITY, ClockControls, ClockMaster,
-    ClockNode, ClockSends, JR_CLOCK_INTERVAL, JR_CLOCK_MAX_INTERVAL, JrClock, JrClockEmitter,
-    JrStamper, JrStream, MACHINE_CONTROL_EVENT_CAPACITY, MIDI_OUT_EVENT_CAPACITY,
+    ACTIVE_SENSING_INTERVAL, ActiveSensingSender, CLOCK_EVENT_CAPACITY, ClockControls, ClockNode,
+    ClockSends, JrClock, JrStream, MACHINE_CONTROL_EVENT_CAPACITY, MIDI_OUT_EVENT_CAPACITY,
     MachineControlControls, MachineControlNode, MachineControlSender, MidiOutNode, NoTimeCode,
 };
 pub use output_plan::{
