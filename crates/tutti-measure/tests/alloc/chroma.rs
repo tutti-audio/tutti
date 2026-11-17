@@ -4,9 +4,10 @@
 //! so this binary counts allocations with its own global allocator. It counts
 //! per thread, so the harness's other threads do not show up in a count.
 
+use super::Discard;
 use tutti_buffers::Mono;
 use tutti_fixtures::allocations;
-use tutti_measure::{ChromaConfig, Framing};
+use tutti_measure::{ChromaConfig, Framing, Measure, Meter};
 use tutti_types::{SampleRate, Samples};
 
 /// Construction builds the buffers and plans the FFT, so every push, the first
@@ -26,18 +27,18 @@ fn no_push_allocates() {
     // Construction planned the transform, so even the first push allocates
     // nothing.
     let first = allocations(|| {
-        meter.push(Mono::new(&frame)).unwrap();
+        meter.push(Mono::new(&frame), &mut Discard).unwrap();
     });
     assert_eq!(first, 0, "the first push");
 
     let again = allocations(|| {
-        meter.push(Mono::new(&frame)).unwrap();
+        meter.push(Mono::new(&frame), &mut Discard).unwrap();
     });
     assert_eq!(again, 0, "a second push");
 
     let reset = allocations(|| {
         meter.reset();
-        meter.push(Mono::new(&frame)).unwrap();
+        meter.push(Mono::new(&frame), &mut Discard).unwrap();
     });
     assert_eq!(reset, 0, "reset and a push");
 }

@@ -3,12 +3,13 @@
 //! Counted with this binary's own global allocator, as in `chroma_alloc.rs`. It
 //! counts per thread, so the harness's other threads do not show up.
 
+use super::Discard;
 use tutti_buffers::Mono;
 use tutti_dsp::FrameCount;
 use tutti_fixtures::allocations;
 use tutti_measure::{
-    Banding, BandsPerOctave, Framing, FrequencyBand, PeakDecay, Smoothing, SpectrumConfig,
-    SpectrumTime,
+    Banding, BandsPerOctave, Framing, FrequencyBand, Measure, Meter, PeakDecay, Smoothing,
+    SpectrumConfig, SpectrumTime,
 };
 use tutti_types::{Db, Hz, SampleRate, Samples, Seconds};
 
@@ -40,7 +41,7 @@ fn a_spectrum_step_does_not_allocate() {
         let steps = allocations(|| {
             for size in [1, 100, 256, 777, 4096] {
                 for block in signal.chunks(size) {
-                    state.push(Mono::new(block)).unwrap();
+                    state.push(Mono::new(block), &mut Discard).unwrap();
                 }
             }
         });
@@ -49,7 +50,7 @@ fn a_spectrum_step_does_not_allocate() {
         let after_reset = allocations(|| {
             state.reset();
             for block in signal.chunks(500) {
-                state.push(Mono::new(block)).unwrap();
+                state.push(Mono::new(block), &mut Discard).unwrap();
             }
             let _ = (state.levels(), state.peaks(), state.spectrogram().count());
         });

@@ -445,12 +445,6 @@ pub(super) const ALLOW: &[Allow] = &[
         TOPOLOGY,
     ),
     ty(
-        "crates/tutti-measure/",
-        "TruePeakMeter::new",
-        CTOR,
-        "ebur128 refuses a rate or width it cannot meter: the refusal is the library's, not a value's",
-    ),
-    ty(
         "crates/tutti-dsp/",
         "LimiterBank::detecting",
         CTOR,

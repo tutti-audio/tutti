@@ -16,7 +16,7 @@ use std::path::PathBuf;
 
 use tutti_buffers::{Fold, Interleaved, InterleavedMut, Planes};
 use tutti_graph::TapReader;
-use tutti_measure::Loudness;
+use tutti_measure::{Loudness, Measure as _};
 use tutti_transport::RenderClock;
 use tutti_types::{ChannelLayout, ChannelTopology, Db, SampleRate, Samples};
 

@@ -8,14 +8,14 @@
 //! holding the whole signal to do both at once.
 //!
 //! `ebur128` is an online meter, so this follows the crate's streaming shape:
-//! a [`LoudnessConfig`] describes the channels, [`LoudnessConfig::measure`]
+//! a [`LoudnessConfig`] describes the channels, [`Measure::measure`]
 //! binds the rate and makes a [`LoudnessMeter`] that takes the frames in
 //! chunks, and [`measure_loudness`] folds the same meter over a whole buffer.
 //!
 //! # A running meter
 //!
-//! [`WindowedMeter::push`] answers a different question from
-//! [`LoudnessMeter::finish`]: not "how loud was the whole signal" but "how loud
+//! [`WindowedMeter`]'s push answers a different question from
+//! [`LoudnessMeter`]'s finish: not "how loud was the whole signal" but "how loud
 //! is it now", as a [`WindowedReading`] after every chunk. Momentary loudness
 //! is the last 400 ms and short-term the last 3 s, both K-weighted and ungated
 //! (EBU Tech 3341). The true peak is the largest seen since the meter was built
@@ -47,7 +47,7 @@ use tutti_buffers::{Interleaved, Sample};
 use tutti_types::{ChannelLayout, ChannelTopology, Db, Direction, SampleRate};
 
 use crate::convert::{all_finite, for_blocks};
-use crate::{Error, Result};
+use crate::{Error, Measure, Meter, Result};
 
 /// What a loudness meter measures: the channel topology of the frames fed to
 /// it. Unlike a width, a topology is part of the analysis: it is the channel
@@ -82,6 +82,11 @@ impl LoudnessConfig {
     pub fn topology(&self) -> &ChannelTopology {
         &self.topology
     }
+}
+
+impl Measure for LoudnessConfig {
+    type Context = SampleRate;
+    type Meter = LoudnessMeter;
 
     /// A meter for frames at `rate`.
     ///
@@ -91,12 +96,12 @@ impl LoudnessConfig {
     /// [`Error::UnplacedLoudnessChannels`] for speakers that are not a
     /// [`Bed`](tutti_types::Bed)'s, whose angles are unknown;
     /// [`Error::MeterUnavailable`] when `ebur128` cannot meter the rate.
-    pub fn measure(&self, rate: impl Into<SampleRate>) -> Result<LoudnessMeter> {
+    fn measure(&self, rate: SampleRate) -> Result<LoudnessMeter> {
         let labels = channel_labels(&self.topology)?;
         let layout = self.topology.width();
         let mut meter = EbuR128::new(
             u32::from(layout.count()),
-            rate.into().get().round() as u32,
+            rate.get().round() as u32,
             Mode::I | Mode::LRA | Mode::TRUE_PEAK,
         )
         .map_err(|_| Error::MeterUnavailable)?;
@@ -206,38 +211,40 @@ impl std::fmt::Debug for LoudnessMeter {
 }
 
 impl LoudnessMeter {
+    /// Forgets everything fed: the readings start over.
+    pub fn reset(&mut self) {
+        self.meter.reset();
+    }
+}
+
+impl Meter for LoudnessMeter {
+    type Input<'a> = Interleaved<'a>;
+    type Item = ();
+    type Output = Loudness;
+
     /// Feeds one chunk of frames.
     ///
     /// The chunk arrives as an [`Interleaved`], so its width travels with it
     /// rather than beside it. An [`Interleaved`] is whole frames, so every
     /// chunk keeps each sample on its own channel, and chunks need not align to
-    /// any block size.
+    /// any block size. A push yields no item: the reading is of the whole run.
     ///
     /// # Errors
     ///
     /// [`Error::ChunkLayoutMismatch`] when `chunk` is not the topology's width:
     /// the meter's channel count is fixed, so a chunk of another width would be
     /// split into the wrong number of frames and read as a different signal.
-    pub fn push<S: Sample>(&mut self, chunk: Interleaved<'_, S>) -> Result<()> {
+    fn push(&mut self, chunk: Interleaved<'_>, _: &mut impl Extend<()>) -> Result<()> {
         if chunk.layout() != self.layout {
             return Err(Error::ChunkLayoutMismatch {
                 chunk: chunk.layout(),
                 config: self.layout,
             });
         }
-        let channels = chunk.channels();
-        let Self { meter, .. } = self;
-        for_blocks(chunk.samples(), channels, |block| {
-            // The width was checked above, and the block is whole frames, so the
-            // meter takes it; a metering miss must not fail a render.
-            let _ = meter.add_frames_f32(block);
-        });
+        // The width was checked above, and the chunk is whole frames, so the
+        // meter takes it; a metering miss must not fail a render.
+        let _ = self.meter.add_frames_f32(chunk.samples());
         Ok(())
-    }
-
-    /// Forgets everything fed: the readings start over.
-    pub fn reset(&mut self) {
-        self.meter.reset();
     }
 
     /// Reads the meter.
@@ -245,8 +252,7 @@ impl LoudnessMeter {
     /// Consumes it: R128's integrated loudness is a whole-signal answer, and
     /// letting a caller read it mid-stream and keep feeding invites treating a
     /// partial reading as final.
-    #[must_use]
-    pub fn finish(self) -> Loudness {
+    fn finish(self) -> Loudness {
         let meter = self.meter;
         // `-70` LUFS is R128's absolute gate. The meter reports `-inf` (not an
         // error) when nothing passed it — silence, or simply an input shorter than
@@ -272,13 +278,43 @@ impl LoudnessMeter {
     }
 }
 
-/// A running true-peak meter: the largest inter-sample peak over every
+/// What a [`TruePeakMeter`] measures: the largest inter-sample peak over every
 /// channel, for channels with no placement to weigh a loudness by.
 ///
 /// It reads nothing but the peak, so it takes no [`ChannelTopology`], pays for
 /// no integrated or range gating, and any channel layout will do: the width is
-/// the audio's, so there is no config to describe, and the meter is made from
-/// the rate and the width it measures.
+/// the audio's, so the config describes nothing and the meter is made from the
+/// rate and the width it measures.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TruePeakConfig;
+
+impl Measure for TruePeakConfig {
+    type Context = (SampleRate, ChannelLayout);
+    type Meter = TruePeakMeter;
+
+    /// A meter for frames `layout` wide at `rate`.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::MeterUnavailable`] when `ebur128` cannot meter the width or the
+    /// rate.
+    fn measure(&self, (rate, layout): (SampleRate, ChannelLayout)) -> Result<TruePeakMeter> {
+        EbuR128::new(
+            u32::from(layout.count()),
+            rate.get().round() as u32,
+            Mode::TRUE_PEAK,
+        )
+        .map_err(|_| Error::MeterUnavailable)
+        .map(|meter| TruePeakMeter {
+            layout,
+            meter,
+            scratch: Vec::new(),
+        })
+    }
+}
+
+/// A running true-peak meter: the largest inter-sample peak over every
+/// channel, made by a [`TruePeakConfig`].
 ///
 /// Not for the audio thread: a push widens the chunk into a scratch that grows
 /// to the longest chunk fed, and the meter's own buffers allocate.
@@ -300,35 +336,24 @@ impl std::fmt::Debug for TruePeakMeter {
 }
 
 impl TruePeakMeter {
-    /// A meter for frames `layout` wide at `rate`.
-    ///
-    /// # Errors
-    ///
-    /// [`Error::MeterUnavailable`] when `ebur128` cannot meter the width or the
-    /// rate.
-    pub fn new(rate: impl Into<SampleRate>, layout: ChannelLayout) -> Result<Self> {
-        EbuR128::new(
-            u32::from(layout.count()),
-            rate.into().get().round() as u32,
-            Mode::TRUE_PEAK,
-        )
-        .map_err(|_| Error::MeterUnavailable)
-        .map(|meter| Self {
-            layout,
-            meter,
-            scratch: Vec::new(),
-        })
+    /// Forgets everything fed: the peak reads the floor again.
+    pub fn reset(&mut self) {
+        self.meter.reset();
     }
+}
 
-    /// Feeds one chunk of frames.
-    ///
-    /// Any sample format is metered at its nominal level (an integer as a
-    /// fraction of full scale).
+impl Meter for TruePeakMeter {
+    type Input<'a> = Interleaved<'a>;
+    type Item = ();
+    type Output = Db;
+
+    /// Feeds one chunk of frames. A push yields no item: the peak is of the
+    /// whole run.
     ///
     /// # Errors
     ///
     /// [`Error::ChunkLayoutMismatch`] when `chunk` is not the meter's width.
-    pub fn push<S: Sample>(&mut self, chunk: Interleaved<'_, S>) -> Result<()> {
+    fn push(&mut self, chunk: Interleaved<'_>, _: &mut impl Extend<()>) -> Result<()> {
         if chunk.layout() != self.layout {
             return Err(Error::ChunkLayoutMismatch {
                 chunk: chunk.layout(),
@@ -344,15 +369,9 @@ impl TruePeakMeter {
         Ok(())
     }
 
-    /// Forgets everything fed: the peak reads the floor again.
-    pub fn reset(&mut self) {
-        self.meter.reset();
-    }
-
     /// The largest true peak of every channel fed, in dBTP; [`Db::FLOOR`] for
-    /// silence. Consumes the meter, as [`LoudnessMeter::finish`] does.
-    #[must_use]
-    pub fn finish(self) -> Db {
+    /// silence. Consumes the meter, as [`LoudnessMeter`]'s finish does.
+    fn finish(self) -> Db {
         let peak = (0..u32::from(self.layout.count()))
             .filter_map(|c| self.meter.true_peak(c).ok())
             .fold(0.0f64, f64::max);
@@ -371,9 +390,26 @@ pub fn measure_true_peak<S: Sample>(
     buffer: Interleaved<'_, S>,
     rate: impl Into<SampleRate>,
 ) -> Result<Db> {
-    let mut meter = TruePeakMeter::new(rate, buffer.layout())?;
-    meter.push(buffer)?;
+    let mut meter = TruePeakConfig.measure((rate.into(), buffer.layout()))?;
+    feed(&mut meter, &buffer)?;
     Ok(meter.finish())
+}
+
+/// Pushes `buffer` through `meter` in blocks of whole frames converted to
+/// `f32`, stopping at the first chunk the meter refuses.
+fn feed<S: Sample, M>(meter: &mut M, buffer: &Interleaved<'_, S>) -> Result<()>
+where
+    M: for<'a> Meter<Input<'a> = Interleaved<'a>, Item = ()>,
+{
+    let mut refused = Ok(());
+    for_blocks(buffer.samples(), buffer.channels(), |block| {
+        if refused.is_ok()
+            && let Ok(whole) = Interleaved::new(block, buffer.layout())
+        {
+            refused = meter.push(whole, &mut ());
+        }
+    });
+    refused
 }
 
 /// An `f64` true-peak amplitude as dBTP, pinning silence at [`Db::FLOOR`].
@@ -423,6 +459,11 @@ impl WindowedLoudnessConfig {
     pub fn topology(&self) -> &ChannelTopology {
         self.config.topology()
     }
+}
+
+impl Measure for WindowedLoudnessConfig {
+    type Context = SampleRate;
+    type Meter = WindowedMeter;
 
     /// A meter for frames at `rate`. Allocates its three-second window here: at
     /// most 3 s of `f64` samples of every channel, 192 kHz x 16 channels x 3 s x
@@ -434,8 +475,7 @@ impl WindowedLoudnessConfig {
     /// [`Error::AmbisonicLoudness`] or [`Error::UnplacedLoudnessChannels`] for
     /// a topology with no placement to weigh; [`Error::MeterUnavailable`] if the
     /// meter cannot be built.
-    pub fn measure(&self, rate: impl Into<SampleRate>) -> Result<WindowedMeter> {
-        let rate = rate.into();
+    fn measure(&self, rate: SampleRate) -> Result<WindowedMeter> {
         if !(WINDOWED_MIN_RATE..=WINDOWED_MAX_RATE).contains(&rate) {
             return Err(Error::SampleRateOutOfRange {
                 rate,
@@ -493,8 +533,9 @@ impl WindowedReading {
 
 /// A running windowed meter at one rate and topology.
 ///
-/// There is no `finish`: the result is the [`WindowedReading`] each push
-/// returns. Not for the audio thread (see [`push`](Self::push)).
+/// Each push yields the [`WindowedReading`] after it, and
+/// [`finish`](Meter::finish) reads the last one. Not for the audio thread (see
+/// [`push`](Meter::push)).
 pub struct WindowedMeter {
     layout: ChannelLayout,
     rate: SampleRate,
@@ -534,7 +575,34 @@ impl WindowedMeter {
         ((self.rate.get().round() as u64 + 5) / 10) * tenths
     }
 
-    /// Feeds one chunk and reads the meter.
+    /// The reading of everything fed.
+    fn reading(&self) -> WindowedReading {
+        let peak = (0..u32::from(self.layout.count()))
+            .filter_map(|c| self.meter.true_peak(c).ok())
+            .fold(0.0f64, f64::max);
+        WindowedReading {
+            momentary: windowed_db(
+                self.frames,
+                self.window_frames(4),
+                self.meter.loudness_momentary().ok(),
+            ),
+            short_term: windowed_db(
+                self.frames,
+                self.window_frames(30),
+                self.meter.loudness_shortterm().ok(),
+            ),
+            true_peak: true_peak_db(peak),
+        }
+    }
+}
+
+impl Meter for WindowedMeter {
+    type Input<'a> = Interleaved<'a>;
+    type Item = WindowedReading;
+    type Output = WindowedReading;
+
+    /// Feeds one chunk and extends `out` with the reading after it: exactly one
+    /// item per accepted push.
     ///
     /// A chunk is whole frames, so the reading does not depend on how the
     /// stream is cut. A chunk may be empty.
@@ -554,7 +622,11 @@ impl WindowedMeter {
     /// [`Error::NonFiniteInput`] for a NaN or infinite sample;
     /// [`Error::MeterRejectedFrames`] if the meter refuses the frames. The
     /// meter is untouched on the first two.
-    pub fn push<S: Sample>(&mut self, chunk: Interleaved<'_, S>) -> Result<WindowedReading> {
+    fn push(
+        &mut self,
+        chunk: Interleaved<'_>,
+        out: &mut impl Extend<WindowedReading>,
+    ) -> Result<()> {
         if chunk.layout() != self.layout {
             return Err(Error::ChunkLayoutMismatch {
                 chunk: chunk.layout(),
@@ -564,36 +636,17 @@ impl WindowedMeter {
         if !all_finite(chunk.samples()) {
             return Err(Error::NonFiniteInput);
         }
-
-        let channels = chunk.channels();
-        let mut rejected = false;
-        for_blocks(chunk.samples(), channels, |block| {
-            if self.meter.add_frames_f32(block).is_err() {
-                rejected = true;
-            } else {
-                self.frames += (block.len() / channels) as u64;
-            }
-        });
-        if rejected {
+        if self.meter.add_frames_f32(chunk.samples()).is_err() {
             return Err(Error::MeterRejectedFrames);
         }
+        self.frames += chunk.frames().get() as u64;
+        out.extend([self.reading()]);
+        Ok(())
+    }
 
-        let peak = (0..u32::from(self.layout.count()))
-            .filter_map(|c| self.meter.true_peak(c).ok())
-            .fold(0.0f64, f64::max);
-        Ok(WindowedReading {
-            momentary: windowed_db(
-                self.frames,
-                self.window_frames(4),
-                self.meter.loudness_momentary().ok(),
-            ),
-            short_term: windowed_db(
-                self.frames,
-                self.window_frames(30),
-                self.meter.loudness_shortterm().ok(),
-            ),
-            true_peak: true_peak_db(peak),
-        })
+    /// The reading of everything fed.
+    fn finish(self) -> WindowedReading {
+        self.reading()
     }
 }
 
@@ -623,18 +676,33 @@ pub fn measure_loudness<S: Sample>(
     buffer: Interleaved<'_, S>,
     rate: impl Into<SampleRate>,
 ) -> Result<Loudness> {
-    let mut meter = cfg.measure(rate)?;
-    meter.push(buffer)?;
+    let mut meter = cfg.measure(rate.into())?;
+    if buffer.layout() != meter.layout {
+        return Err(Error::ChunkLayoutMismatch {
+            chunk: buffer.layout(),
+            config: meter.layout,
+        });
+    }
+    feed(&mut meter, &buffer)?;
     Ok(meter.finish())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fold_uneven;
     use std::f32::consts::TAU;
     use tutti_types::{
         AmbisonicFormat, AmbisonicOrder, Amplitude, Azimuth, Bed, Elevation, Speaker,
     };
+
+    /// Pushes one chunk to a windowed meter and returns the reading it yields.
+    fn read(state: &mut WindowedMeter, chunk: Interleaved<'_>) -> Result<WindowedReading> {
+        let mut readings = Vec::new();
+        state.push(chunk, &mut readings)?;
+        assert_eq!(readings.len(), 1, "one reading per accepted push");
+        Ok(readings[0])
+    }
 
     /// A config with the rate its tests measure at.
     struct Rated<C>(C, SampleRate);
@@ -718,7 +786,10 @@ mod tests {
             let mut meter = c.0.measure(c.1).unwrap();
             for chunk in buf.chunks(frames * 2) {
                 meter
-                    .push(Interleaved::new(chunk, ChannelLayout::STEREO).unwrap())
+                    .push(
+                        Interleaved::new(chunk, ChannelLayout::STEREO).unwrap(),
+                        &mut (),
+                    )
                     .unwrap();
             }
             assert_eq!(meter.finish(), one_shot, "chunks of {frames} frames");
@@ -809,7 +880,10 @@ mod tests {
 
         let mut meter = c.0.measure(c.1).unwrap();
         assert_eq!(
-            meter.push(Interleaved::new(&buf, ChannelLayout::QUAD).unwrap()),
+            meter.push(
+                Interleaved::new(&buf, ChannelLayout::QUAD).unwrap(),
+                &mut ()
+            ),
             Err(Error::ChunkLayoutMismatch {
                 chunk: ChannelLayout::QUAD,
                 config: ChannelLayout::STEREO,
@@ -904,9 +978,11 @@ mod tests {
         let mut state = cfg.0.measure(cfg.1).unwrap();
         buf.chunks(frames * 2)
             .map(|chunk| {
-                state
-                    .push(Interleaved::new(chunk, ChannelLayout::STEREO).unwrap())
-                    .unwrap()
+                read(
+                    &mut state,
+                    Interleaved::new(chunk, ChannelLayout::STEREO).unwrap(),
+                )
+                .unwrap()
             })
             .collect()
     }
@@ -1045,9 +1121,11 @@ mod tests {
         let mut odd = None;
         for chunk in signal.chunks(777 * 2) {
             odd = Some(
-                state
-                    .push(Interleaved::new(chunk, ChannelLayout::STEREO).unwrap())
-                    .unwrap(),
+                read(
+                    &mut state,
+                    Interleaved::new(chunk, ChannelLayout::STEREO).unwrap(),
+                )
+                .unwrap(),
             );
         }
         assert_eq!(odd.as_ref(), fine.last());
@@ -1059,16 +1137,20 @@ mod tests {
         let cfg = windowed_cfg(48_000.0);
         let tone = windowed_sine(48_000.0, 4.0, |_| 0.1);
         let mut state = cfg.0.measure(cfg.1).unwrap();
-        state
-            .push(Interleaved::new(&tone, ChannelLayout::STEREO).unwrap())
-            .unwrap();
+        read(
+            &mut state,
+            Interleaved::new(&tone, ChannelLayout::STEREO).unwrap(),
+        )
+        .unwrap();
         assert!(state.frames_seen() > 0);
         state.reset();
         assert_eq!(state.frames_seen(), 0);
         let quiet = vec![0.0f32; 48_000 * 2];
-        let r = state
-            .push(Interleaved::new(&quiet, ChannelLayout::STEREO).unwrap())
-            .unwrap();
+        let r = read(
+            &mut state,
+            Interleaved::new(&quiet, ChannelLayout::STEREO).unwrap(),
+        )
+        .unwrap();
         assert_eq!(r.momentary, WindowedReading::LOUDNESS_FLOOR);
         assert_eq!(r.short_term, WindowedReading::LOUDNESS_FLOOR);
         assert_eq!(r.true_peak, Db::FLOOR);
@@ -1089,9 +1171,11 @@ mod tests {
                 })
                 .collect();
             let mut state = cfg.0.measure(cfg.1).unwrap();
-            let r = state
-                .push(Interleaved::new(&signal, ChannelLayout::STEREO).unwrap())
-                .unwrap();
+            let r = read(
+                &mut state,
+                Interleaved::new(&signal, ChannelLayout::STEREO).unwrap(),
+            )
+            .unwrap();
             assert!(
                 (r.true_peak.get() - want).abs() < 0.3,
                 "L {left} R {right}: {:?}",
@@ -1107,7 +1191,7 @@ mod tests {
         let mut state = cfg.0.measure(cfg.1).unwrap();
         let tone = windowed_sine(48_000.0, 0.5, |_| 0.1);
         let fed = |state: &mut WindowedMeter, buf: &[f32]| {
-            state.push(Interleaved::new(buf, ChannelLayout::STEREO).unwrap())
+            read(state, Interleaved::new(buf, ChannelLayout::STEREO).unwrap())
         };
         fed(&mut state, &tone).unwrap();
         let frames = state.frames_seen();
@@ -1119,7 +1203,10 @@ mod tests {
             assert_eq!(state.frames_seen(), frames, "a refused chunk feeds nothing");
         }
         assert!(matches!(
-            state.push(Interleaved::new(&tone, ChannelLayout::QUAD).unwrap()),
+            read(
+                &mut state,
+                Interleaved::new(&tone, ChannelLayout::QUAD).unwrap()
+            ),
             Err(Error::ChunkLayoutMismatch { .. })
         ));
         assert_eq!(state.frames_seen(), frames);
@@ -1347,11 +1434,13 @@ mod tests {
                 buf[frame * 6 + channel] = *v;
             }
             let mut state = cfg.0.measure(cfg.1).unwrap();
-            state
-                .push(Interleaved::new(&buf, Bed::Surround51.width()).unwrap())
-                .unwrap()
-                .momentary
-                .get()
+            read(
+                &mut state,
+                Interleaved::new(&buf, Bed::Surround51.width()).unwrap(),
+            )
+            .unwrap()
+            .momentary
+            .get()
         };
         let (front, side, lfe) = (momentary(0), momentary(4), momentary(3));
         assert!((side - front - 10.0 * 1.41f32.log10()).abs() < 0.01);
@@ -1417,9 +1506,12 @@ mod tests {
             .collect();
         let sample_peak = samples.iter().fold(0.0f32, |m, s| m.max(s.abs()));
         assert!((sample_peak - 0.5 / 2f32.sqrt()).abs() < 1e-3);
-        let mut state = TruePeakMeter::new(rate, ChannelLayout::MONO).unwrap();
+        let mut state = TruePeakConfig.measure((rate, ChannelLayout::MONO)).unwrap();
         state
-            .push(Interleaved::new(&samples, ChannelLayout::MONO).unwrap())
+            .push(
+                Interleaved::new(&samples, ChannelLayout::MONO).unwrap(),
+                &mut (),
+            )
             .unwrap();
         let peak = state.finish().get();
         let analytic = 20.0 * 0.5f32.log10();
@@ -1431,14 +1523,22 @@ mod tests {
     /// Silence reads the floor, and a chunk of another width is refused.
     #[test]
     fn the_true_peak_meter_floors_silence_and_refuses_a_wrong_width() {
-        let mut state = TruePeakMeter::new(SampleRate::SR_48K, ChannelLayout::STEREO).unwrap();
+        let mut state = TruePeakConfig
+            .measure((SampleRate::SR_48K, ChannelLayout::STEREO))
+            .unwrap();
         let loud = vec![0.9f32; 4_800 * 4];
         assert!(matches!(
-            state.push(Interleaved::new(&loud, ChannelLayout::QUAD).unwrap()),
+            state.push(
+                Interleaved::new(&loud, ChannelLayout::QUAD).unwrap(),
+                &mut ()
+            ),
             Err(Error::ChunkLayoutMismatch { .. })
         ));
         state
-            .push(Interleaved::new(&[0.0f32; 960], ChannelLayout::STEREO).unwrap())
+            .push(
+                Interleaved::new(&[0.0f32; 960], ChannelLayout::STEREO).unwrap(),
+                &mut (),
+            )
             .unwrap();
         assert_eq!(state.finish(), Db::FLOOR);
     }
@@ -1450,10 +1550,15 @@ mod tests {
         let whole = Interleaved::new(&buf, ChannelLayout::STEREO).unwrap();
         let one_shot = measure_true_peak(whole, SampleRate::SR_48K).unwrap();
         for frames in [1, 777, 4800, 24_000] {
-            let mut meter = TruePeakMeter::new(SampleRate::SR_48K, ChannelLayout::STEREO).unwrap();
+            let mut meter = TruePeakConfig
+                .measure((SampleRate::SR_48K, ChannelLayout::STEREO))
+                .unwrap();
             for chunk in buf.chunks(frames * 2) {
                 meter
-                    .push(Interleaved::new(chunk, ChannelLayout::STEREO).unwrap())
+                    .push(
+                        Interleaved::new(chunk, ChannelLayout::STEREO).unwrap(),
+                        &mut (),
+                    )
                     .unwrap();
             }
             assert_eq!(meter.finish(), one_shot, "chunks of {frames} frames");
@@ -1472,11 +1577,91 @@ mod tests {
                 x.convert_to::<i16>()
             })
             .collect();
-        let mut state = TruePeakMeter::new(SampleRate::SR_48K, ChannelLayout::MONO).unwrap();
-        state
-            .push(Interleaved::new(&samples, ChannelLayout::MONO).unwrap())
-            .unwrap();
-        let peak = state.finish().get();
+        let peak = measure_true_peak(
+            Interleaved::new(&samples, ChannelLayout::MONO).unwrap(),
+            SampleRate::SR_48K,
+        )
+        .unwrap()
+        .get();
         assert!((peak - 20.0 * 0.5f32.log10()).abs() < 0.15, "{peak}");
+    }
+
+    /// The trait fold over uneven chunks (1, 7, 64 frames and the rest) is
+    /// `measure_loudness`, and a push yields no item.
+    #[test]
+    fn the_trait_fold_over_uneven_chunks_equals_measure_loudness() {
+        let c = cfg(48_000.0);
+        let buf = sine(48_000.0, 1.0, 1_000.0, 0.5);
+        let batch =
+            measure_loudness(&c, Interleaved::new(&buf, ChannelLayout::STEREO).unwrap()).unwrap();
+        let (items, loudness) = fold_uneven(&c.0, c.1, buf.len() / 2, |meter, at, out| {
+            let chunk = Interleaved::new(&buf[at.start * 2..at.end * 2], ChannelLayout::STEREO);
+            meter.push(chunk.unwrap(), out)
+        })
+        .unwrap();
+        assert!(items.is_empty());
+        assert_eq!(loudness, batch);
+        assert!(batch.lufs.get() > -20.0, "the tone is audible: {batch:?}");
+    }
+
+    /// The trait fold over uneven chunks is `measure_true_peak`, which reads
+    /// the inter-sample peak of this fs/4 sine.
+    #[test]
+    fn the_true_peak_trait_fold_over_uneven_chunks_equals_measure_true_peak() {
+        let rate = SampleRate::SR_48K;
+        let samples: Vec<f32> = (0..4_800)
+            .map(|n| {
+                0.5 * ((n % 4) as f32 * std::f32::consts::FRAC_PI_2 + std::f32::consts::FRAC_PI_4)
+                    .sin()
+            })
+            .collect();
+        let batch = measure_true_peak(
+            Interleaved::new(&samples, ChannelLayout::MONO).unwrap(),
+            rate,
+        )
+        .unwrap();
+        let (items, peak) = fold_uneven(
+            &TruePeakConfig,
+            (rate, ChannelLayout::MONO),
+            samples.len(),
+            |meter, at, out| {
+                meter.push(
+                    Interleaved::new(&samples[at], ChannelLayout::MONO).unwrap(),
+                    out,
+                )
+            },
+        )
+        .unwrap();
+        assert!(items.is_empty());
+        assert_eq!(peak, batch);
+        // The samples reach 0.5 / sqrt 2 (-9.03 dB); the sine between them 0.5.
+        assert!(
+            (peak.get() - 20.0 * 0.5f32.log10()).abs() < 0.15,
+            "{peak:?}"
+        );
+    }
+
+    /// The windowed fold yields one reading per push, in order, and its last
+    /// item and its output are the reading of one push of the whole stream: the
+    /// reading does not depend on how the stream is cut.
+    #[test]
+    fn the_windowed_trait_fold_yields_one_reading_per_push_and_ends_on_the_whole_stream_reading() {
+        let c = windowed_cfg(48_000.0);
+        let buf = windowed_sine(48_000.0, 1.0, |_| 0.1);
+        let (items, last) = fold_uneven(&c.0, c.1, buf.len() / 2, |meter, at, out| {
+            let chunk = Interleaved::new(&buf[at.start * 2..at.end * 2], ChannelLayout::STEREO);
+            meter.push(chunk.unwrap(), out)
+        })
+        .unwrap();
+        assert_eq!(items.len(), 4, "one reading for each of the four pushes");
+        let mut whole = c.0.measure(c.1).unwrap();
+        let reading = read(
+            &mut whole,
+            Interleaved::new(&buf, ChannelLayout::STEREO).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(items.last(), Some(&reading));
+        assert_eq!(last, reading);
+        assert!(reading.momentary.get() > -30.0, "{reading:?}");
     }
 }

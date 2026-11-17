@@ -8,7 +8,7 @@
 //!
 //! A [`SilenceConfig`] describes the scan in decibels and seconds. The rate
 //! binds where the audio does: [`strip_silence`] takes a buffer and its rate,
-//! and [`SilenceConfig::measure`] makes a [`SilenceMeter`] that takes the
+//! and [`Measure::measure`] makes a [`SilenceMeter`] that takes the
 //! buffer in chunks. `strip_silence` feeds one meter the whole buffer, so batch
 //! and streaming cannot drift.
 
@@ -18,6 +18,7 @@ use tutti_buffers::{Mono, Sample};
 use tutti_types::{Db, SampleRate, Samples, Seconds};
 
 use crate::convert::for_blocks;
+use crate::{Measure, Meter, Result};
 use tutti_types::ranged;
 
 ranged! {
@@ -113,10 +114,8 @@ impl SilenceConfig {
         self
     }
 
-    /// A meter that scans audio at `rate`, chunk by chunk.
-    #[must_use]
-    pub fn measure(&self, rate: impl Into<SampleRate>) -> SilenceMeter {
-        let rate = rate.into();
+    /// The meter at `rate`; no setting here depends on it, so it cannot fail.
+    fn bind(&self, rate: SampleRate) -> SilenceMeter {
         SilenceMeter {
             floor: self.threshold.to_amplitude().get(),
             min_silence: self.min_silence.to_samples(rate).max(Samples(1)).get(),
@@ -129,8 +128,19 @@ impl SilenceConfig {
     }
 }
 
+impl Measure for SilenceConfig {
+    type Context = SampleRate;
+    type Meter = SilenceMeter;
+
+    /// A meter that scans audio at `rate`, chunk by chunk. Never fails.
+    fn measure(&self, rate: SampleRate) -> Result<SilenceMeter> {
+        Ok(self.bind(rate))
+    }
+}
+
 /// A running strip-silence scan at one rate: fed chunks of the buffer in
-/// order, it reads the regions at [`finish`](Self::finish).
+/// order, it reads the regions at [`finish`](Meter::finish). A push yields no
+/// item: the regions are the output.
 ///
 /// Not for the audio thread: it keeps one entry per region found, so it grows
 /// with the audio and allocates. Feed it from the offline or UI side.
@@ -150,11 +160,6 @@ pub struct SilenceMeter {
 }
 
 impl SilenceMeter {
-    /// Feeds the next chunk of the buffer, in order.
-    pub fn push<S: Sample>(&mut self, chunk: Mono<'_, S>) {
-        for_blocks(chunk.samples(), 1, |block| self.scan(block));
-    }
-
     fn scan(&mut self, samples: &[f32]) {
         for (offset, &sample) in samples.iter().enumerate() {
             // Below the floor, or NaN, is silence.
@@ -181,11 +186,21 @@ impl SilenceMeter {
         self.open = None;
         self.closed.clear();
     }
+}
+
+impl Meter for SilenceMeter {
+    type Input<'a> = Mono<'a>;
+    type Item = ();
+    type Output = Vec<Region>;
+
+    fn push(&mut self, chunk: Mono<'_>, _: &mut impl Extend<()>) -> Result<()> {
+        self.scan(chunk.samples());
+        Ok(())
+    }
 
     /// The regions of the audio fed, padded, clamped to the buffer and joined
     /// where they touch. Ascending and disjoint.
-    #[must_use]
-    pub fn finish(self) -> Vec<Region> {
+    fn finish(self) -> Vec<Region> {
         let open = self.open.map(|(first, last)| (first, last + 1));
         let mut regions: Vec<Region> = Vec::new();
         for &(first, end) in self.closed.iter().chain(open.iter()) {
@@ -210,14 +225,15 @@ pub fn strip_silence<S: Sample>(
     samples: Mono<'_, S>,
     rate: impl Into<SampleRate>,
 ) -> Vec<Region> {
-    let mut meter = cfg.measure(rate);
-    meter.push(samples);
+    let mut meter = cfg.bind(rate.into());
+    for_blocks(samples.samples(), 1, |block| meter.scan(block));
     meter.finish()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fold_uneven;
 
     const RATE: f64 = 1000.0; // 1 sample = 1 ms keeps the arithmetic readable
 
@@ -333,12 +349,30 @@ mod tests {
         let batch = strip(&c, &x);
         assert_eq!(batch.len(), 4);
         for chunk in [1usize, 7, 64, 199, 700] {
-            let mut meter = c.measure(SampleRate::of(RATE));
+            let mut meter = c.measure(SampleRate::of(RATE)).unwrap();
             for part in x.chunks(chunk) {
-                meter.push(Mono::new(part));
+                meter.push(Mono::new(part), &mut ()).unwrap();
             }
             assert_eq!(meter.finish(), batch, "chunk {chunk}");
         }
+    }
+
+    /// The trait fold over uneven chunks (1, 7, 64 and the rest) is the batch
+    /// result, and a push yields no item.
+    #[test]
+    fn the_trait_fold_over_uneven_chunks_equals_strip_silence() {
+        let mut x = vec![0.0f32; 700];
+        x[3..40].fill(0.9);
+        x[200..260].fill(-0.9);
+        x[690..].fill(0.9);
+        let c = cfg(Db(-30.0), 40.0).post_padding(Seconds(0.01));
+        let (items, regions) = fold_uneven(&c, SampleRate::of(RATE), x.len(), |meter, at, out| {
+            meter.push(Mono::new(&x[at]), out)
+        })
+        .unwrap();
+        assert!(items.is_empty());
+        assert_eq!(regions, strip(&c, &x));
+        assert_eq!(regions.len(), 3);
     }
 
     /// Any sample format scans at its nominal level: 16-bit audio at half
@@ -358,14 +392,14 @@ mod tests {
         let c = cfg(Db(-20.0), 10.0)
             .pre_padding(Seconds(0.004))
             .post_padding(Seconds(0.006));
-        assert!(c.measure(SampleRate::of(RATE)).finish().is_empty());
-        let mut meter = c.measure(SampleRate::of(RATE));
+        assert!(c.measure(SampleRate::of(RATE)).unwrap().finish().is_empty());
+        let mut meter = c.measure(SampleRate::of(RATE)).unwrap();
         let mut x = vec![0.0f32; 100];
         x[50..60].fill(1.0);
-        meter.push(Mono::new(&x));
+        meter.push(Mono::new(&x), &mut ()).unwrap();
         meter.reset();
         assert!(meter.clone().finish().is_empty());
-        meter.push(Mono::new(&x));
+        meter.push(Mono::new(&x), &mut ()).unwrap();
         assert_eq!(meter.finish(), vec![r(46, 66)]);
     }
 

@@ -60,14 +60,14 @@
 //! push then allocates nothing, including after a
 //! [`reset`](SpectrumMeter::reset) (`tests/alloc/spectrum.rs`).
 
-use tutti_buffers::{Mono, Sample};
+use tutti_buffers::Mono;
 use tutti_types::{Db, Hz, SampleRate, Samples, Seconds};
 
 use crate::chroma::FrequencyBand;
-use crate::convert::{all_finite, for_blocks};
+use crate::convert::all_finite;
 use crate::framing::{Framing, check_nyquist};
 use crate::stereo::Ballistics;
-use crate::{Error, Result};
+use crate::{Error, Measure, Meter, Result};
 use tutti_dsp::Complex32;
 use tutti_dsp::FftScratch;
 use tutti_dsp::FrameCount;
@@ -287,27 +287,6 @@ impl SpectrumConfig {
         self
     }
 
-    /// A meter that analyses audio at `rate`, block by block. Builds every
-    /// buffer and plans the transform, so that pushing allocates nothing.
-    ///
-    /// # Errors
-    ///
-    /// [`Error::ZeroWindow`] or [`Error::ZeroHop`] for a zero window or hop;
-    /// [`Error::WindowOutOfRange`] for a window under 64 or over 65536
-    /// samples; [`Error::HopWiderThanWindow`] for a hop wider than the window;
-    /// [`Error::TooManyOverlaps`] for a hop giving more than 64 frames per
-    /// window; [`Error::SampleRateOutOfRange`] for a rate outside
-    /// 1 Hz..=10 MHz; [`Error::TooManyBands`] for more than 4096 bands;
-    /// [`Error::EmptyBand`] for a band that holds no bin;
-    /// [`Error::EmptyFrequencyRange`] when no whole band fits between the
-    /// edges; [`Error::AboveNyquist`] when the top edge exceeds half the sample
-    /// rate; [`Error::SpectrogramTooLarge`] when the columns times the outputs
-    /// exceed 4194304 cells; [`Error::PeakHoldTooLong`] when the peak hold is
-    /// more than 4294967295 frames at the hop and rate in use.
-    pub fn measure(&self, rate: impl Into<SampleRate>) -> Result<SpectrumMeter> {
-        SpectrumMeter::build(&self.plan(rate.into())?)
-    }
-
     fn plan(&self, rate: SampleRate) -> Result<SpectrumPlan> {
         let geometry = self.framing.geometry(rate)?;
         let window = geometry.window().get();
@@ -348,6 +327,32 @@ impl SpectrumConfig {
             peak_decay: self.peak_decay,
             columns: self.columns,
         })
+    }
+}
+
+impl Measure for SpectrumConfig {
+    type Context = SampleRate;
+    type Meter = SpectrumMeter;
+
+    /// A meter that analyses audio at `rate`, block by block. Builds every
+    /// buffer and plans the transform, so that pushing allocates nothing.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::ZeroWindow`] or [`Error::ZeroHop`] for a zero window or hop;
+    /// [`Error::WindowOutOfRange`] for a window under 64 or over 65536
+    /// samples; [`Error::HopWiderThanWindow`] for a hop wider than the window;
+    /// [`Error::TooManyOverlaps`] for a hop giving more than 64 frames per
+    /// window; [`Error::SampleRateOutOfRange`] for a rate outside
+    /// 1 Hz..=10 MHz; [`Error::TooManyBands`] for more than 4096 bands;
+    /// [`Error::EmptyBand`] for a band that holds no bin;
+    /// [`Error::EmptyFrequencyRange`] when no whole band fits between the
+    /// edges; [`Error::AboveNyquist`] when the top edge exceeds half the sample
+    /// rate; [`Error::SpectrogramTooLarge`] when the columns times the outputs
+    /// exceed 4194304 cells; [`Error::PeakHoldTooLong`] when the peak hold is
+    /// more than 4294967295 frames at the hop and rate in use.
+    fn measure(&self, rate: SampleRate) -> Result<SpectrumMeter> {
+        SpectrumMeter::build(&self.plan(rate)?)
     }
 }
 
@@ -494,9 +499,10 @@ impl SpectrumPlan {
 /// A running spectrum at one rate: fed blocks of any length, it analyses a
 /// frame whenever a hop of new samples has arrived, and holds the readings.
 ///
-/// There is no `finish`: the result is the readings ([`levels`](Self::levels),
-/// [`peaks`](Self::peaks), [`spectrogram`](Self::spectrogram)), which are
-/// available after any push.
+/// A push yields one item per analysed frame, and the readings
+/// ([`levels`](Self::levels), [`peaks`](Self::peaks),
+/// [`spectrogram`](Self::spectrogram)) are available after any push;
+/// [`finish`](Meter::finish) returns the levels.
 ///
 /// Pushing allocates nothing once the meter is built, but each frame is a
 /// transform and every output is smoothed, so it belongs on the consumer side of
@@ -743,33 +749,11 @@ fn to_db(power: f32, floor: Db) -> Db {
 }
 
 impl SpectrumMeter {
-    /// Feeds a block and analyses each frame that completes in it, in order.
-    /// Returns whether at least one did; the readings are those of the last.
-    ///
-    /// A block may be any length, empty included, and may span several frames
-    /// or none. Nothing is read from `block` ahead of the frame it belongs to,
-    /// so the frames and readings are the same however the stream is cut.
-    ///
-    /// # Errors
-    ///
-    /// [`Error::NonFiniteInput`] for a NaN or infinite sample. The meter is
-    /// untouched on error.
-    pub fn push<S: Sample>(&mut self, block: Mono<'_, S>) -> Result<bool> {
-        if !all_finite(block.samples()) {
-            return Err(Error::NonFiniteInput);
-        }
-        let mut ready = false;
-        for_blocks(block.samples(), 1, |converted| {
-            ready |= self.step(converted);
-        });
-        Ok(ready)
-    }
-
-    /// Feeds converted samples and analyses each frame that completes in them.
-    fn step(&mut self, block: &[f32]) -> bool {
+    /// Feeds samples and analyses each frame that completes in them, calling
+    /// `each` after every one.
+    fn step(&mut self, block: &[f32], mut each: impl FnMut()) {
         let size = self.ring.len();
         let mut rest = block;
-        let mut ready = false;
         while !rest.is_empty() {
             // Up to the next due frame, and not past the end of the ring.
             let until_due = (self.next_due - self.fed).min(usize::MAX as u64) as usize;
@@ -781,16 +765,48 @@ impl SpectrumMeter {
             if self.fed == self.next_due {
                 self.analyse();
                 self.next_due += self.cfg.geometry.hop().get() as u64;
-                ready = true;
+                each();
             }
         }
-        ready
+    }
+}
+
+impl Meter for SpectrumMeter {
+    type Input<'a> = Mono<'a>;
+    type Item = ();
+    type Output = Vec<Db>;
+
+    /// Feeds a block, analyses each frame that completes in it, in order, and
+    /// extends `out` with one `()` per frame; the readings are those of the
+    /// last.
+    ///
+    /// A block may be any length, empty included, and may span several frames
+    /// or none. Nothing is read from `block` ahead of the frame it belongs to,
+    /// so the frames and readings are the same however the stream is cut.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NonFiniteInput`] for a NaN or infinite sample. The meter is
+    /// untouched on error.
+    fn push(&mut self, block: Mono<'_>, out: &mut impl Extend<()>) -> Result<()> {
+        if !all_finite(block.samples()) {
+            return Err(Error::NonFiniteInput);
+        }
+        self.step(block.samples(), || out.extend([()]));
+        Ok(())
+    }
+
+    /// The level of each output as of the last frame: [`levels`](Self::levels)
+    /// at the end of the stream.
+    fn finish(self) -> Vec<Db> {
+        self.levels
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fold_uneven;
     use rand::rngs::StdRng;
     use rand::{RngExt, SeedableRng};
     use std::f64::consts::TAU;
@@ -824,6 +840,13 @@ mod tests {
         cfg.measure(SampleRate::of(RATE)).unwrap()
     }
 
+    /// Pushes a finite block and returns whether it completed a frame.
+    fn push_frames(state: &mut SpectrumMeter, block: &[f32]) -> bool {
+        let mut frames = Vec::new();
+        state.push(Mono::new(block), &mut frames).unwrap();
+        !frames.is_empty()
+    }
+
     fn tone(len: usize, freq: f64, amp: f64) -> Vec<f32> {
         (0..len)
             .map(|i| (amp * (TAU * freq * i as f64 / RATE).sin()) as f32)
@@ -836,7 +859,7 @@ mod tests {
         let mut state = meter(cfg);
         let mut frames = Vec::new();
         for block in signal.chunks(plan(cfg).geometry.hop().get()) {
-            if state.push(Mono::new(block)).unwrap() {
+            if push_frames(&mut state, block) {
                 frames.push(state.levels().to_vec());
             }
         }
@@ -959,7 +982,7 @@ mod tests {
             let window = geometry(size, hop).window_coefficients();
             let gain = f64::from(geometry(size, hop).magnitude_gain());
             for (i, s) in signal.iter().enumerate() {
-                let ready = state.push(Mono::new(&[*s])).unwrap();
+                let ready = push_frames(&mut state, &[*s]);
                 let fed = i + 1;
                 let due = fed >= size && (fed - size) % hop == 0;
                 assert_eq!(ready, due, "{size}/{hop} after {fed}");
@@ -1006,7 +1029,7 @@ mod tests {
         let read = |block: usize| {
             let mut state = meter(&cfg);
             for chunk in signal.chunks(block) {
-                state.push(Mono::new(chunk)).unwrap();
+                push_frames(&mut state, chunk);
             }
             let cols: Vec<Vec<Db>> = state.spectrogram().map(<[Db]>::to_vec).collect();
             (state.levels().to_vec(), state.peaks().to_vec(), cols)
@@ -1051,7 +1074,7 @@ mod tests {
         let want = 6.0 * sigma * sigma / size as f64;
         let mut stats = Vec::new();
         for block in signal.chunks(size) {
-            state.push(Mono::new(block)).unwrap();
+            push_frames(&mut state, block);
             let mean = picked
                 .iter()
                 .map(|&k| 10f64.powf(f64::from(state.levels()[k].get()) / 10.0))
@@ -1127,7 +1150,7 @@ mod tests {
         let mut state = meter(&cfg);
         let mut series = Vec::new();
         for block in signal.chunks(hop) {
-            if state.push(Mono::new(block)).unwrap() {
+            if push_frames(&mut state, block) {
                 series.push((state.levels()[32].get(), state.peaks()[32].get()));
             }
         }
@@ -1174,7 +1197,7 @@ mod tests {
         assert_eq!(state.spectrogram().len(), 0);
         let mut seen: Vec<Vec<Db>> = Vec::new();
         for block in ramp.chunks(hop) {
-            if state.push(Mono::new(block)).unwrap() {
+            if push_frames(&mut state, block) {
                 seen.push(state.levels().to_vec());
                 let cols: Vec<Vec<Db>> = state.spectrogram().map(<[Db]>::to_vec).collect();
                 let n = seen.len().min(columns);
@@ -1497,9 +1520,9 @@ mod tests {
     fn no_level_reads_under_the_configured_floor() {
         let cfg = config(256, 64).floor(SpectrumFloor::of(Db(-60.0)));
         let mut state = meter(&cfg);
-        state.push(Mono::new(&vec![0.0f32; 1000])).unwrap();
+        push_frames(&mut state, &vec![0.0f32; 1000]);
         assert!(state.levels().iter().all(|&l| l == Db(-60.0)));
-        state.push(Mono::new(&tone(1000, 1000.0, 1e-6))).unwrap();
+        push_frames(&mut state, &tone(1000, 1000.0, 1e-6));
         assert!(state.levels().iter().all(|&l| l == Db(-60.0)));
     }
 
@@ -1511,7 +1534,7 @@ mod tests {
         let mut state = meter(&cfg);
         assert!(state.levels().iter().all(|&l| l == plan(&cfg).floor.get()));
 
-        state.push(Mono::new(&vec![0.0f32; 1000])).unwrap();
+        push_frames(&mut state, &vec![0.0f32; 1000]);
         assert!(
             state.levels().iter().all(|&l| l == plan(&cfg).floor.get()),
             "silence"
@@ -1522,11 +1545,14 @@ mod tests {
         for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
             let mut block = vec![0.1f32; 500];
             block[499] = bad;
-            assert_eq!(state.push(Mono::new(&block)), Err(Error::NonFiniteInput));
+            assert_eq!(
+                state.push(Mono::new(&block), &mut Vec::new()),
+                Err(Error::NonFiniteInput)
+            );
             assert_eq!(state.levels().to_vec(), before);
         }
 
-        state.push(Mono::new(&vec![3.0e38f32; 600])).unwrap();
+        push_frames(&mut state, &vec![3.0e38f32; 600]);
         assert!(
             state
                 .levels()
@@ -1535,7 +1561,7 @@ mod tests {
                 .all(|l| l.get().is_finite())
         );
         assert!(state.levels().iter().all(|l| l.get() <= 200.0));
-        state.push(Mono::new(&vec![0.0f32; 600])).unwrap();
+        push_frames(&mut state, &vec![0.0f32; 600]);
         assert!(state.levels().iter().all(|l| l.get().is_finite()));
 
         state.reset();
@@ -1547,5 +1573,27 @@ mod tests {
                 .all(|&l| l == plan(&cfg).floor.get())
         );
         assert_eq!(state.spectrogram().len(), 0);
+    }
+
+    /// The trait fold over uneven chunks (1, 7, 64 samples and the rest) yields
+    /// one item per frame the stream completes, `1 + (n - size) / hop`, and ends
+    /// on the levels of one push of the whole stream.
+    #[test]
+    fn the_trait_fold_over_uneven_chunks_yields_every_frame_and_the_whole_stream_levels() {
+        let cfg = config(256, 64);
+        let x = tone(1000, 1500.0, 0.5);
+        let (items, levels) = fold_uneven(&cfg, SampleRate::of(RATE), x.len(), |meter, at, out| {
+            meter.push(Mono::new(&x[at]), out)
+        })
+        .unwrap();
+        assert_eq!(items.len(), 1 + (x.len() - 256) / 64);
+        let mut whole = meter(&cfg);
+        assert!(push_frames(&mut whole, &x));
+        assert_eq!(levels, whole.levels());
+        let floor = plan(&cfg).floor.get();
+        assert!(
+            levels.iter().any(|&l| l > floor),
+            "the tone reads above the floor"
+        );
     }
 }
