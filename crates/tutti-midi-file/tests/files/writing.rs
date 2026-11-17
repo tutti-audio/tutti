@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use tutti_midi_file::{Error, MidiFile, SmfDivision, SmfFormat};
+use tutti_midi_file::{Error, IoStep, MidiFile, SmfDivision, SmfFormat};
 
 use crate::common::track;
 
@@ -75,6 +75,15 @@ fn a_write_into_a_missing_directory_is_an_io_error_and_creates_nothing() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("no").join("a.mid");
     let err = file(96).write(&path).unwrap_err();
-    assert!(matches!(err, Error::Io(_)), "{err:?}");
+    assert!(
+        matches!(
+            err,
+            Error::Io {
+                step: IoStep::Stage,
+                ..
+            }
+        ),
+        "{err:?}"
+    );
     assert!(entries(dir.path()).is_empty());
 }

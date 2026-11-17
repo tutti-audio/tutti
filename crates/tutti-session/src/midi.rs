@@ -1294,7 +1294,7 @@ impl Midi<'_> {
     /// The events are [`TimedMidiEvent`]s, positioned in beats from the
     /// clip's own start, in any order; a clip file's
     /// [`MidiFile::timeline`](tutti_midi_file::MidiFile::timeline) is the
-    /// `(Beat, Ump)` pairs they are built from, and
+    /// `packets` are the `(Beat, Ump)` pairs they are built from, and
     /// [`play_file`](Self::play_file) does that for a file. The clip reads its
     /// block's `Env`, so a note lands on its frame through seeks and loop
     /// wraps, and **a bounce contains it**: an export forks the clip with its
@@ -1378,7 +1378,9 @@ impl Midi<'_> {
     /// file's one timeline
     /// ([`MidiFile::timeline`](tutti_midi_file::MidiFile::timeline)), with
     /// its looping and bounce behaviour. A file arrives from
-    /// [`load_file`](Self::load_file) as [`MidiReport::FileLoaded`].
+    /// [`load_file`](Self::load_file) as [`MidiReport::FileLoaded`]. The
+    /// System Exclusive events the timeline lists as dropped are not played
+    /// and are counted in a `tracing` warning.
     ///
     /// # Errors
     ///
@@ -1391,9 +1393,16 @@ impl Midi<'_> {
         at: Beat,
         file: &tutti_midi_file::MidiFile,
     ) -> Result<()> {
-        let events = file
-            .timeline()
-            .map_err(tutti_midi_file::Error::from)?
+        let timeline = file.timeline().map_err(tutti_midi_file::Error::from)?;
+        if !timeline.dropped.is_empty() {
+            tracing::warn!(
+                dropped = timeline.dropped.len(),
+                "the file's System Exclusive events with no SysEx7 packet are not played"
+            );
+        }
+        let events = timeline
+            .packets
+            .into_iter()
             .map(|(beat, packet)| {
                 TimedMidiEvent::new(beat, packet).ok_or(MidiError::BeatNotFinite(beat))
             })

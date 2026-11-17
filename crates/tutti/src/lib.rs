@@ -619,12 +619,14 @@ pub mod midi {
     };
     pub use tutti_midi_file::Error as FileError;
     pub use tutti_midi_file::{
-        ClipFileError, ConfigError as FileConfigError, Refusal, SmfParseError, ToClipError,
-        Truncated,
+        Altered, Converted, DropReason, Dropped, LyricChange, MalformedMeta, MicrosPerQuarter,
+        MicrosPerQuarterOutOfRange, MidiFileKind, Moved, NoCommonTimeline, OtherMetaKind,
+        OtherMetaKindOutOfRange, OutOfOrder, PairedNote, SmfDivision, SmfDivisionOutOfRange,
+        TextKind, Timeline, TimelineDrop, WriteOptions,
     };
     pub use tutti_midi_file::{
-        Converted, DropReason, Dropped, MidiFileKind, Moved, NoCommonTimeline, OutOfOrder,
-        PairedNote, SmfDivision, SmfDivisionOutOfRange, TextKind, WriteOptions,
+        ClipFileError, ConfigError as FileConfigError, IoStep, Refusal, SmfParseError, ToClipError,
+        Truncated,
     };
     pub use tutti_midi_file::{FileEvent, Meta, MidiFile, SmfFormat, Tick, Track};
     #[cfg(feature = "midi-hardware")]
