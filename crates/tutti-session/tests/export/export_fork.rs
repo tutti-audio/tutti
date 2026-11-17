@@ -917,10 +917,7 @@ fn an_export_does_not_wait_for_a_slow_fork_and_takes_no_later_edit() {
         .graph()
         .add(Params(Level(Param::new(Amplitude::new(0.5)))));
     let volume = level.volume();
-    session
-        .graph()
-        .set_param(volume, Amplitude::new(0.75))
-        .unwrap();
+    session.set(volume.to(Amplitude::new(0.75))).unwrap();
     let (other, _) = session.graph().add(ForkByClone(Const::mono(9.0)));
     session
         .graph()
@@ -941,10 +938,7 @@ fn an_export_does_not_wait_for_a_slow_fork_and_takes_no_later_edit() {
 
     // Edits after the start: none reaches the fork.
     cell.store(0.25f32.to_bits(), Ordering::SeqCst);
-    session
-        .graph()
-        .set_param(volume, Amplitude::new(0.25))
-        .unwrap();
+    session.set(volume.to(Amplitude::new(0.25))).unwrap();
     session.graph().connect(other, Root).unwrap().hard();
     let _ = release.send(());
 

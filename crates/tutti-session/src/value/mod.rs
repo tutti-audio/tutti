@@ -1,0 +1,43 @@
+//! Values: what the session's three verbs read and write.
+//!
+//! A value is named by a [`Target`], a `Copy` reference taken from a key
+//! (`filter.cutoff()`) that carries its value type. [`Session::set`] takes
+//! assignments built from targets (`target.to(v)`, `target.modify(f)`) and
+//! [`Session::get`] takes targets, each as one item, a tuple, an array, a
+//! `Vec` or an `Option`, and answers in the argument's shape.
+//!
+//! Every call takes the session's value lock, a short control-side lock the
+//! audio thread never touches, so a call from any thread sees a whole batch or
+//! none of it:
+//!
+//! - **Order.** The items of a `set` run in argument order, each `modify`
+//!   seeing the value the call has built so far for its target:
+//!   `(n.modify(|x| x + 1), n.modify(|x| x + 1))` adds two, and
+//!   `(a.to(1), a.modify(|x| x + 1))` gives 2.
+//! - **Atomic.** Every item is checked and every `modify` has run before
+//!   anything lands, and the error's `at` is the first failing item. A batch is
+//!   never one cut for the audio thread: two stores can straddle a block.
+//! - **Reentrant.** The closure of a `modify` runs under the lock, on the
+//!   caller's thread; a value call from inside it is
+//!   [`ValueErrorKind::Reentrant`]. A panic in it lands nothing and leaves the
+//!   lock usable.
+//!
+//! [`Session::set`]: crate::Session::set
+//! [`Session::get`]: crate::Session::get
+
+mod batch;
+mod error;
+mod param;
+mod state;
+mod target;
+mod verbs;
+
+pub use batch::{IntoAssign, IntoRead};
+pub use error::{SetRefusal, ValueError, ValueErrorKind};
+pub use param::{ParamTarget, TargetInfo};
+pub use state::Knobs;
+pub(crate) use state::{ValueState, ValueTable};
+pub(crate) use target::target_builders;
+pub use target::{
+    AnyAssign, AnyTarget, Assign, Effective, Info, Modify, Moved, ScalarTarget, Target,
+};

@@ -23,9 +23,9 @@ use tutti_rt::RequestWord;
 
 use crate::StateError;
 use crate::{
-    AudioBufferMut, ChannelLayout, ContentScale, Control, Controller, EditDrain, EditSink,
-    EditorError, EditorWindow, Layout, Loaded, LoadedPlugin, MainThreadMarker, Normalized,
-    ParamEdit, ParamFlags, ParamId, ParameterInfo, PluginBus, PluginDescriptor, PluginError,
+    ChannelLayout, ContentScale, Control, Controller, EditDrain, EditSink, EditorError,
+    EditorWindow, Layout, Loaded, LoadedPlugin, MainThreadMarker, Normalized, ParamEdit,
+    ParamFlags, ParamId, ParameterInfo, PluginAudio, PluginBus, PluginDescriptor, PluginError,
     PluginIo, PluginResult, PluginTail, Prepare, Processor, Refused, RenderMode, RenderModeSupport,
     Request, RescanScope, RestartRules, SampleRate, Samples, Stuck, TimerId, WindowHandle, edits,
 };
@@ -907,47 +907,42 @@ impl Processor for FakeProcessor {
             }
         });
         let ring = self.shared.ring.load(Ordering::Relaxed);
-        let frames = match &mut io.buffer {
-            AudioBufferMut::F32(buffer) => {
-                buffer.clear_outputs();
-                if ring > 0 {
-                    // A voice: every trigger (a non-silent input frame, a MIDI
-                    // event at the frame) starts `ring` frames of 0.5.
-                    let mut triggered = false;
-                    for i in 0..buffer.num_samples {
-                        let hit = io
-                            .ctx
-                            .midi_events
-                            .iter()
-                            .any(|(at, _)| at.get() as usize == i)
-                            || buffer.inputs.iter().any(|c| c[i] != 0.0);
-                        if hit {
-                            self.sounding = ring;
-                            triggered = true;
-                        }
-                        if self.sounding > 0 {
-                            for out in buffer.outputs.iter_mut() {
-                                out[i] = 0.5;
-                            }
-                            self.sounding -= 1;
-                            triggered = true;
-                        }
-                    }
-                    io.out.set_status(
-                        if triggered && !self.shared.sleeps_over_sound.load(Ordering::Relaxed) {
-                            crate::BlockStatus::Continue
-                        } else {
-                            crate::BlockStatus::Sleep
-                        },
-                    );
+        let frames = io.buffer.frames().0;
+        io.buffer.clear_outputs();
+        if let PluginAudio::F32(block) = &mut io.buffer
+            && ring > 0
+        {
+            // A voice: every trigger (a non-silent input frame, a MIDI
+            // event at the frame) starts `ring` frames of 0.5.
+            let mut triggered = false;
+            let (input, mut output) = block.split();
+            for i in 0..frames {
+                let hit = io
+                    .ctx
+                    .midi_events
+                    .iter()
+                    .any(|(at, _)| at.get() as usize == i)
+                    || input.iter().any(|c| c.samples()[i] != 0.0);
+                if hit {
+                    self.sounding = ring;
+                    triggered = true;
                 }
-                buffer.num_samples
+                if self.sounding > 0 {
+                    for mut out in output.iter_mut() {
+                        out.samples_mut()[i] = 0.5;
+                    }
+                    self.sounding -= 1;
+                    triggered = true;
+                }
             }
-            AudioBufferMut::F64(buffer) => {
-                buffer.clear_outputs();
-                buffer.num_samples
-            }
-        };
+            io.out.set_status(
+                if triggered && !self.shared.sleeps_over_sound.load(Ordering::Relaxed) {
+                    crate::BlockStatus::Continue
+                } else {
+                    crate::BlockStatus::Sleep
+                },
+            );
+        }
         log.push(Call::Process(frames));
         Ok(())
     }
