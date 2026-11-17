@@ -483,7 +483,8 @@ mod tests {
 
     /// The worst case is bounded: a full list of 256 note-ons met by 8,192
     /// note-offs displaces 256 of them (every note-on, key by key) and
-    /// refuses the rest, 7,936, in constant time after one empty pass.
+    /// refuses the rest, 7,936, in constant time after one empty pass: the
+    /// intake scans the list 257 times, not 8,192.
     /// Counted: every off beyond the list's 256 is one lost event or one
     /// refused, 8,192 in all.
     #[test]
@@ -493,12 +494,10 @@ mod tests {
         for i in 0..MIDI_STACK_CAPACITY {
             assert_eq!(intake.push_displacing(&mut list, on((i % 128) as u8)), 0);
         }
-        let start = std::time::Instant::now();
         let mut lost = 0;
         for i in 0..8_192usize {
             lost += intake.push_displacing(&mut list, off((i % 128) as u8));
         }
-        let took = start.elapsed();
         assert_eq!(lost, 8_192);
         assert_eq!(
             list.iter()
@@ -509,9 +508,6 @@ mod tests {
         assert_eq!(list.len(), MIDI_STACK_CAPACITY);
         // 256 passes that displace and one that finds nothing: not 8,192.
         assert_eq!(intake.scans, 257);
-        // Release builds take about 0.2 ms for all of it; this is a guard
-        // against a gross regression on a loaded debug build only.
-        assert!(took < std::time::Duration::from_millis(100), "{took:?}");
         // A new chunk may displace again.
         list.clear();
         intake.new_chunk();
