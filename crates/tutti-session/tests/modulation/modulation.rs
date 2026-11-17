@@ -23,7 +23,6 @@ use tutti_session::{
     ModInput, ModKeys, ModRefusal, OutPort, PHASES, ParamRef, PhaseCx, Problem, Root, RouteError,
     RouteSpec, Session, SessionEvent, TargetName,
 };
-use tutti_transport::MotionEvent;
 use tutti_types::{BeatsPerCycle, Depth, Hz, ParamAddr, UnitParam};
 use tutti_types::{ChannelLayout, SampleRate, Samples};
 
@@ -153,10 +152,7 @@ fn the_8_1_example_renders_its_analytic_values() {
     settle(&mut s);
 
     // Rolling from beat 0 at frame 0 (120 BPM, the transport's default).
-    s.transport()
-        .motion()
-        .try_send(MotionEvent::Play)
-        .expect("room");
+    s.play().expect("room");
     let (total, block) = (24_000, 128);
     let mut all = [Vec::new(), Vec::new()];
     let mut buf = vec![0.0f32; block * 2];

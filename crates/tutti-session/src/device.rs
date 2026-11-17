@@ -958,7 +958,10 @@ impl<C: Clock> Session<C> {
         // The outputs' taps read frames of one rate: reopened at the
         // new one, committed with the rest below.
         #[cfg(feature = "midi")]
-        if self.midi_state.follow_rate(&mut self.graph) {
+        if self
+            .midi_state
+            .follow_rate(&mut self.graph, std::time::Instant::now())
+        {
             self.commit();
         }
         // A declaration a device refused is asked again of this one: if it

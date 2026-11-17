@@ -1,5 +1,5 @@
 use super::*;
-use crate::testing::noise;
+use crate::testing::{amplitude_at, noise};
 
 /// The curves, pinned.
 ///
@@ -78,7 +78,11 @@ const TOL: f64 = 1e-4;
 
 /// The curve's closed form in `f64`, at `drive` (the staircases' levels floored at 1).
 fn closed(kind: ShapeKind, x: f32, drive: f32) -> f64 {
-    let (x, d) = (f64::from(x), f64::from(drive));
+    closed_f64(kind, f64::from(x), f64::from(drive))
+}
+
+/// [`closed`] at an `f64` input.
+fn closed_f64(kind: ShapeKind, x: f64, d: f64) -> f64 {
     let half_pi = std::f64::consts::FRAC_PI_2;
     match kind {
         ShapeKind::Tanh => (x * d).tanh(),
@@ -282,4 +286,476 @@ fn the_drive_floors_hold_on_the_lane_and_the_glide() {
         );
     }
     assert_eq!(out[n + 9], 1.0);
+}
+
+// Antiderivative antialiasing.
+
+/// A bank of `kind` landed on `drive`, antialiased to `order`.
+fn antialiased(kind: ShapeKind, drive: f32, order: Antialiasing) -> WaveshaperBank {
+    let mut bank = WaveshaperBank::new(kind, RATE).antialiasing(order);
+    bank.aim(&WaveshaperControls {
+        drive: Drive(drive),
+    });
+    bank.settle();
+    bank
+}
+
+/// The mean of `f` over the segment from `a` to `b`, by the midpoint rule over `n` cells.
+fn mean(f: impl Fn(f64) -> f64, a: f64, b: f64, n: usize) -> f64 {
+    (0..n)
+        .map(|i| f(a + (b - a) * (i as f64 + 0.5) / n as f64))
+        .sum::<f64>()
+        / n as f64
+}
+
+/// First order is the mean of the curve over the segment between two inputs: each output
+/// frame, for every kind, is the midpoint-rule mean of the closed-form curve (at the frame's
+/// drive, in `f64`) from the input before to this one, to 1e-4 (the staircases' jumps are the
+/// quadrature's error: 1/h of a jump over twice the 20 000 cells, 1e-5). This pins `F1` of
+/// every kind, the stable `ln cosh` and the `SoftCrush` polynomial among them.
+#[test]
+fn first_order_is_the_mean_of_the_curve_over_the_segment() {
+    let drive = 2.5;
+    for kind in KINDS {
+        let mut bank = antialiased(kind, drive, Antialiasing::FirstOrder);
+        let x = noise(21, 64, 1.0);
+        let y = run(&mut bank, None, std::slice::from_ref(&x)).remove(0);
+        let mut before = 0.0;
+        for (i, (&y, &x)) in y.iter().zip(&x).enumerate() {
+            let want = mean(
+                |t| closed_f64(kind, t, f64::from(drive)),
+                before,
+                f64::from(x),
+                20_000,
+            );
+            assert!(
+                (f64::from(y) - want).abs() < 1e-4,
+                "{kind:?} frame {i}: {y} vs {want}"
+            );
+            before = f64::from(x);
+        }
+    }
+}
+
+/// `F1` of a curve at `u` by the midpoint rule from 0 over `n` cells.
+fn integral(f: &impl Fn(f64) -> f64, u: f64, n: usize) -> f64 {
+    u * mean(f, 0.0, u, n)
+}
+
+/// Second order is `2 (D(a, b) - D(b, c)) / (a - c)` with `D(p, q)` the mean of `F1` over the
+/// segment from `q` to `p`, and `F1` the integral of the closed-form curve `g` (here in input
+/// units): the `D` of every window of `x` by the midpoint rule over 800 cells, `F1` by
+/// `f1` (given), to `bound`.
+fn assert_second_order_is_quadrature(
+    kind: ShapeKind,
+    drive: f32,
+    x: &[f32],
+    f1: impl Fn(f64) -> f64,
+    bound: f64,
+) {
+    let y = run(
+        &mut antialiased(kind, drive, Antialiasing::SecondOrder),
+        None,
+        &[x.to_vec()],
+    )
+    .remove(0);
+    let d = |p: f64, q: f64| mean(&f1, q, p, 800);
+    for (i, w) in x.windows(3).enumerate() {
+        let [c, b, a] = [w[0], w[1], w[2]].map(f64::from);
+        // Where `a == c` the quotient is its limit, `2 (F1(a) - D(a, b)) / (a - b)`.
+        let want = if a == c {
+            2.0 * (f1(a) - d(a, b)) / (a - b)
+        } else {
+            2.0 * (d(a, b) - d(b, c)) / (a - c)
+        };
+        let y = y[i + 2];
+        assert!(
+            (f64::from(y) - want).abs() < bound,
+            "{kind:?} drive {drive} frame {}: {y} vs {want}",
+            i + 2
+        );
+    }
+}
+
+/// `F1` of the closed-form curve at `drive`, by the midpoint rule from 0 over 800 cells.
+fn quadrature_f1(kind: ShapeKind, drive: f32) -> impl Fn(f64) -> f64 {
+    move |t| integral(&|u| closed_f64(kind, u, f64::from(drive)), t, 800)
+}
+
+/// Second order, for the two kinds that have it, on noise: to 1e-5 (the midpoint rule's error
+/// at a clip's kink is under 2e-6 at that count).
+#[test]
+fn second_order_is_the_divided_difference_of_the_mean_antiderivative() {
+    for kind in [ShapeKind::Softsign, ShapeKind::HardClip] {
+        let x = noise(22, 48, 1.0);
+        assert_second_order_is_quadrature(kind, 2.5, &x, quadrature_f1(kind, 2.5), 1e-5);
+    }
+}
+
+/// The two limits, where the curve is not linear (so a wrong limit is not the identity's
+/// answer): `Softsign` at drive 2 on 0.4 and 1.3 alternating, where every window has
+/// `a == c` and the second-order limit runs, and `Softsign` at drive 1 on `0.1, 0.10005, 0.9`,
+/// where `D(b, c)` has `|b - c|` under the threshold. Both to 1e-5 of the quadrature.
+#[test]
+fn the_second_order_limits_match_quadrature_on_a_nonlinear_curve() {
+    let alternating: Vec<f32> = (0..8).map(|i| if i % 2 == 0 { 0.4 } else { 1.3 }).collect();
+    let close: Vec<f32> = [0.1, 0.10005, 0.9].repeat(3);
+    for (drive, x) in [(2.0, alternating), (1.0, close)] {
+        let kind = ShapeKind::Softsign;
+        assert_second_order_is_quadrature(kind, drive, &x, quadrature_f1(kind, drive), 1e-5);
+    }
+}
+
+/// At drive 1000 on a slow ramp (`u` near 1000, each frame moves it by about 5e-4) the
+/// antiderivatives are large and their quotients cancel: the threshold, relative to the
+/// inputs' size, sends them to the limit, and the output matches the quadrature to 1e-6. The
+/// quadrature takes `F1` as its value at 1 (by 200 000 cells) plus the integral from there,
+/// so the cell error is one constant that cancels in the differences.
+#[test]
+fn second_order_holds_at_large_u_on_a_slow_signal() {
+    let kind = ShapeKind::Softsign;
+    let drive = 1000.0;
+    let g = |t: f64| closed_f64(kind, t, f64::from(drive));
+    let base = integral(&g, 1.0, 200_000);
+    let f1 = |t: f64| base + (t - 1.0) * mean(g, 1.0, t, 16);
+    let x: Vec<f32> = (0..16)
+        .map(|i| (1.0 + 5e-7 * f64::from(i)) as f32)
+        .collect();
+    assert_second_order_is_quadrature(kind, drive, &x, f1, 1e-6);
+}
+
+/// The orders compare as `Off < FirstOrder < SecondOrder`: a bank clamps a request to a kind's
+/// highest with `min`.
+#[test]
+fn the_orders_are_ordered() {
+    assert!(Antialiasing::Off < Antialiasing::FirstOrder);
+    assert!(Antialiasing::FirstOrder < Antialiasing::SecondOrder);
+}
+
+/// The fundamental's period in frames for the harmonic tests: 750 Hz at 48 kHz.
+const PERIOD: usize = 64;
+
+/// A drive-`drive` sine of unit amplitude at 750 Hz through `kind` antialiased to `order`: the
+/// amplitude of each of the harmonics `ks` over 32 whole periods, after the first.
+fn harmonics(kind: ShapeKind, drive: f32, order: Antialiasing, ks: &[usize]) -> Vec<f64> {
+    let w0 = std::f64::consts::TAU / PERIOD as f64;
+    let x: Vec<f32> = (0..33 * PERIOD)
+        .map(|i| (w0 * i as f64).sin() as f32)
+        .collect();
+    let y = run(&mut antialiased(kind, drive, order), None, &[x]).remove(0);
+    ks.iter()
+        .map(|&k| amplitude_at(&y[PERIOD..], 750.0 * k as f64, RATE.get()))
+        .collect()
+}
+
+/// The first-order output's harmonic `k` of a 750 Hz fundamental is the curve's Fourier
+/// coefficient times `sinc(k w0 / 2)`, the droop of the one-frame mean `F1` takes. (Not
+/// `cos(k w0 / 2)`: that is the droop of the two-point average, which a mean over the segment
+/// is not.) The clipped sine has the closed form, with `t = asin(1 / a)` and `a` the drive,
+/// `b_k = 4 / pi (a I_k + cos(k t) / k)` for odd `k`, `I_1 = (t - sin t cos t) / 2` and
+/// `I_k = (sin((k-1) t) / (k-1) - sin((k+1) t) / (k+1)) / 2`; tanh's coefficient is the
+/// 4096-point trapezoid rule over a period (the integrand is periodic and analytic, so its error
+/// is far under 1e-12). The residue left is the naive curve's own aliasing and the
+/// piecewise-linear chord of the sampled sine; harmonics 1 to 7 hold to 0.5% of the
+/// coefficient (the worst measured, hard clip's 7th, is 0.25%).
+#[test]
+fn first_order_harmonics_are_the_fourier_coefficients_under_the_frame_mean_droop() {
+    use std::f64::consts::{PI, TAU};
+    let w0 = TAU / PERIOD as f64;
+    let droop = |k: usize| {
+        let h = k as f64 * w0 / 2.0;
+        h.sin() / h
+    };
+    let ks = [1, 3, 5, 7];
+    let a = 3.0f64;
+    let t = (1.0 / a).asin();
+    let clip = |k: usize| {
+        let kf = k as f64;
+        let i = if k == 1 {
+            0.5 * (t - t.sin() * t.cos())
+        } else {
+            0.5 * (((kf - 1.0) * t).sin() / (kf - 1.0) - ((kf + 1.0) * t).sin() / (kf + 1.0))
+        };
+        4.0 / PI * (a * i + (kf * t).cos() / kf)
+    };
+    let tanh = |k: usize| {
+        let n = 4096;
+        (0..n)
+            .map(|j| {
+                let th = TAU * j as f64 / n as f64;
+                (a * th.sin()).tanh() * (k as f64 * th).sin()
+            })
+            .sum::<f64>()
+            * 2.0
+            / n as f64
+    };
+    let rows: [(ShapeKind, &dyn Fn(usize) -> f64); 2] =
+        [(ShapeKind::HardClip, &clip), (ShapeKind::Tanh, &tanh)];
+    for (kind, coefficient) in rows {
+        let got = harmonics(kind, a as f32, Antialiasing::FirstOrder, &ks);
+        for (&k, got) in ks.iter().zip(got) {
+            let want = coefficient(k) * droop(k);
+            assert!(
+                (got - want).abs() < 5e-3 * coefficient(k),
+                "{kind:?} harmonic {k}: {got} vs {want}"
+            );
+        }
+    }
+}
+
+/// The aliased energy of a 5 kHz sine, 0.9 in amplitude, at 44.1 kHz through `kind` at `drive`
+/// antialiased to `order`: the root-sum-square of the amplitudes at the folds of the 5th, 7th,
+/// 9th, 11th, 13th and 15th harmonics (19.1, 9.1, 0.9, 10.9, 20.9 and 13.2 kHz), none of which
+/// is a harmonic itself. The window is 3 528 frames, 400 periods of the fold spacing of 100 Hz,
+/// so each bin is exact.
+fn alias_energy(kind: ShapeKind, drive: f32, order: Antialiasing) -> f64 {
+    let rate = 44_100.0;
+    let x: Vec<f32> = (0..441 * 9)
+        .map(|i| (0.9 * (std::f64::consts::TAU * 5_000.0 * i as f64 / rate).sin()) as f32)
+        .collect();
+    let y = run(&mut antialiased(kind, drive, order), None, &[x]).remove(0);
+    [19_100.0, 9_100.0, 900.0, 10_900.0, 20_900.0, 13_200.0]
+        .iter()
+        .map(|&hz| amplitude_at(&y[441..], hz, rate).powi(2))
+        .sum::<f64>()
+        .sqrt()
+}
+
+/// Antialiasing takes the aliased energy of a driven 5 kHz sine under the naive curve's. A
+/// figure relative to the naive shaper at the same input is the property: antiderivative
+/// antialiasing claims an attenuation of the aliases against the memoryless curve, not an
+/// absolute level, which follows the curve, the drive and the frequency. The margins are set
+/// under what is measured, at drive 3: first order, at least 5 dB for `Tanh`,
+/// `Atan`, `Softsign` and `HardClip` (measured 6.8 to 7.1 dB) and 3 dB for the two staircases
+/// (9.2 and 13.7 dB); second order, at least 12 dB for `HardClip` (16.1) and `Softsign` (15.1).
+#[test]
+fn antialiasing_lowers_the_aliased_energy() {
+    let db = |kind, drive, order| {
+        20.0 * (alias_energy(kind, drive, order) / alias_energy(kind, drive, Antialiasing::Off))
+            .log10()
+    };
+    for (kind, margin) in [
+        (ShapeKind::Tanh, 5.0),
+        (ShapeKind::Atan, 5.0),
+        (ShapeKind::Softsign, 5.0),
+        (ShapeKind::HardClip, 5.0),
+        (ShapeKind::Crush, 3.0),
+        (ShapeKind::SoftCrush, 3.0),
+    ] {
+        let first = db(kind, 3.0, Antialiasing::FirstOrder);
+        assert!(first < -margin, "{kind:?} first order: {first} dB");
+    }
+    for (kind, margin) in [(ShapeKind::HardClip, 12.0), (ShapeKind::Softsign, 12.0)] {
+        let second = db(kind, 3.0, Antialiasing::SecondOrder);
+        assert!(second < -margin, "{kind:?} second order: {second} dB");
+    }
+}
+
+/// A constant input is the curve itself, to 1e-6 (the `f64` curve rounded to `f32`), for every
+/// kind and order, once the history holds the constant: the segment has no length, and the
+/// fallback is the curve at its midpoint (first order), or at the mean of the three (second).
+#[test]
+fn a_constant_input_is_the_curve() {
+    for kind in KINDS {
+        for order in [Antialiasing::FirstOrder, Antialiasing::SecondOrder] {
+            let mut bank = antialiased(kind, 2.5, order);
+            for x in [0.3f32, -0.7, 0.0] {
+                let y = run(&mut bank, None, &[vec![x; 6]]).remove(0);
+                let want = closed(kind, x, 2.5);
+                for (i, &y) in y.iter().enumerate().skip(2) {
+                    assert!(
+                        (f64::from(y) - want).abs() < 1e-6,
+                        "{kind:?} {order:?} at {x}, frame {i}: {y} vs {want}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// A drive step on a constant input is the curve's own step and no more: the history is the
+/// input before the drive, so the segment from the last input to this one stays a point, and
+/// frame by frame the output is the curve at that frame's drive. (With a history after the
+/// drive the first frame at the new drive would be a mean over the segment from `0.2` to `0.8`.)
+#[test]
+fn a_drive_step_makes_no_step_beyond_the_curve() {
+    let mut lane = vec![1.0f32; 16];
+    lane[8..].fill(4.0);
+    for (kind, order) in [
+        (ShapeKind::HardClip, Antialiasing::FirstOrder),
+        (ShapeKind::HardClip, Antialiasing::SecondOrder),
+        (ShapeKind::Softsign, Antialiasing::SecondOrder),
+        (ShapeKind::Tanh, Antialiasing::FirstOrder),
+    ] {
+        let mut bank = antialiased(kind, 1.0, order);
+        let y = run(&mut bank, Some(&lane), &[vec![0.2; 16]]).remove(0);
+        for (i, (&y, &d)) in y.iter().zip(&lane).enumerate().skip(2) {
+            let want = closed(kind, 0.2, d);
+            assert!(
+                (f64::from(y) - want).abs() < 1e-6,
+                "{kind:?} {order:?} frame {i}: {y} vs {want}"
+            );
+        }
+    }
+}
+
+/// Inside the clip the curve is the identity, so the antialiased filter is linear and its
+/// output is exact: first order is `(x + x') / 2`, second order `(x + x' + x'') / 3`, including
+/// where `x = x''` and the second-order limit `(2 m + x') / 3` takes over.
+#[test]
+fn inside_the_clip_the_orders_are_the_two_and_three_point_means() {
+    let x = noise(23, 48, 0.9);
+    let first = run(
+        &mut antialiased(ShapeKind::HardClip, 1.0, Antialiasing::FirstOrder),
+        None,
+        std::slice::from_ref(&x),
+    )
+    .remove(0);
+    let second = run(
+        &mut antialiased(ShapeKind::HardClip, 1.0, Antialiasing::SecondOrder),
+        None,
+        std::slice::from_ref(&x),
+    )
+    .remove(0);
+    #[allow(clippy::needless_range_loop)]
+    for (i, w) in x.windows(3).enumerate() {
+        let [c, b, a] = [w[0], w[1], w[2]].map(f64::from);
+        let i = i + 2;
+        assert!(
+            (f64::from(first[i]) - (a + b) / 2.0).abs() < 1e-6,
+            "first {i}"
+        );
+        assert!(
+            (f64::from(second[i]) - (a + b + c) / 3.0).abs() < 1e-6,
+            "second {i}"
+        );
+    }
+    // The input alternates 0.1, 0.3: every frame has x == x''.
+    let alternating: Vec<f32> = (0..16)
+        .map(|i| if i % 2 == 0 { 0.1 } else { 0.3 })
+        .collect();
+    let y = run(
+        &mut antialiased(ShapeKind::HardClip, 1.0, Antialiasing::SecondOrder),
+        None,
+        std::slice::from_ref(&alternating),
+    )
+    .remove(0);
+    for i in 2..16 {
+        let (m, b) = (f64::from(alternating[i]), f64::from(alternating[i - 1]));
+        assert!(
+            (f64::from(y[i]) - (2.0 * m + b) / 3.0).abs() < 1e-6,
+            "limit {i}"
+        );
+    }
+}
+
+/// The delay of the orders is the centroid of the impulse response of a small impulse inside
+/// the clip: `[1/2, 1/2]` at first order, half a frame, `[1/3, 1/3, 1/3]` at second, one frame.
+/// `Antialiasing::delay` is that, rounded to the nearest frame, a half up, and divided down by
+/// the rate factor.
+#[test]
+fn the_delay_is_the_centroid_of_the_impulse_response() {
+    let mut x = vec![0.0f32; 8];
+    x[0] = 0.25;
+    for (order, centroid, ring) in [
+        (Antialiasing::FirstOrder, 0.5, 1),
+        (Antialiasing::SecondOrder, 1.0, 2),
+    ] {
+        let y = run(
+            &mut antialiased(ShapeKind::HardClip, 1.0, order),
+            None,
+            std::slice::from_ref(&x),
+        )
+        .remove(0);
+        let total: f64 = y.iter().map(|&v| f64::from(v)).sum();
+        let at: f64 = y
+            .iter()
+            .enumerate()
+            .map(|(i, &v)| i as f64 * f64::from(v))
+            .sum();
+        assert!((total - 0.25).abs() < 1e-7, "{order:?}: unit gain");
+        assert!((at / total - centroid).abs() < 1e-6, "{order:?}: {y:?}");
+        assert!(
+            y[ring + 1..].iter().all(|&v| v == 0.0),
+            "{order:?}: rings on"
+        );
+        assert!(y[ring] != 0.0, "{order:?}: {ring} frames of ring-out");
+        assert_eq!(order.ring_out(None), Samples(ring), "{order:?}");
+        assert_eq!(order.delay(None), Samples(1), "{order:?}");
+    }
+    assert_eq!(Antialiasing::Off.delay(None), Samples::ZERO);
+    assert_eq!(Antialiasing::Off.ring_out(None), Samples::ZERO);
+    // At 2x the rate a first-order half frame is a quarter of a base frame, a second-order
+    // frame half of one; at 4x, an eighth and a quarter.
+    assert_eq!(
+        Antialiasing::FirstOrder.delay(Some(OversamplingFactor::X2)),
+        Samples(0)
+    );
+    assert_eq!(
+        Antialiasing::SecondOrder.delay(Some(OversamplingFactor::X2)),
+        Samples(1)
+    );
+    assert_eq!(
+        Antialiasing::SecondOrder.delay(Some(OversamplingFactor::X4)),
+        Samples(0)
+    );
+    assert_eq!(
+        Antialiasing::SecondOrder.ring_out(Some(OversamplingFactor::X2)),
+        Samples(1)
+    );
+}
+
+/// The kinds with a second antiderivative are `Softsign` and `HardClip`; an order past a kind's
+/// reads as its highest, and `Off` stays off.
+#[test]
+fn an_order_past_the_kinds_reads_as_its_highest() {
+    for kind in KINDS {
+        let highest = match kind {
+            ShapeKind::Softsign | ShapeKind::HardClip => Antialiasing::SecondOrder,
+            _ => Antialiasing::FirstOrder,
+        };
+        assert_eq!(kind.max_antialiasing(), highest, "{kind:?}");
+        let bank = |order| WaveshaperBank::new(kind, RATE).antialiasing(order);
+        assert_eq!(
+            bank(Antialiasing::SecondOrder).antialiasing_order(),
+            highest
+        );
+        assert_eq!(
+            bank(Antialiasing::FirstOrder).antialiasing_order(),
+            Antialiasing::FirstOrder
+        );
+        assert_eq!(
+            bank(Antialiasing::Off).antialiasing_order(),
+            Antialiasing::Off
+        );
+    }
+}
+
+/// The history is per channel and a reset clears it: a first-order bank fed a block on one
+/// channel and silence on the other leaves nothing in the second, and after a reset an input
+/// of `0.5` reads half of it (the history is 0) where it read the full `0.5` before.
+#[test]
+fn the_history_is_per_channel_and_a_reset_clears_it() {
+    let mut bank = antialiased(ShapeKind::HardClip, 1.0, Antialiasing::FirstOrder);
+    let out = run(&mut bank, None, &[vec![0.5; 4], vec![0.0; 4]]);
+    assert!(out[1].iter().all(|&y| y == 0.0));
+    assert_eq!(out[0][3], 0.5);
+    bank.reset();
+    let out = run(&mut bank, None, &[vec![0.5], vec![0.0]]);
+    assert_eq!(out[0][0], 0.25);
+}
+
+/// A non-finite input is heard at its own frame and no later: the history takes 0 for it.
+#[test]
+fn a_non_finite_input_is_heard_at_its_own_frame_only() {
+    for order in [Antialiasing::FirstOrder, Antialiasing::SecondOrder] {
+        for bad in [f32::NAN, f32::INFINITY] {
+            let mut bank = antialiased(ShapeKind::Softsign, 2.0, order);
+            let x = [0.3, 0.3, bad, 0.3, 0.3, 0.3];
+            let y = run(&mut bank, None, &[x.to_vec()]).remove(0);
+            for (i, y) in y.iter().enumerate() {
+                assert_eq!(!y.is_finite(), i == 2, "{order:?} {bad}: frame {i}: {y}");
+            }
+        }
+    }
 }

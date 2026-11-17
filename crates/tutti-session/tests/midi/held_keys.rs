@@ -9,7 +9,6 @@ use crate::common::{Seen, blocks, offline, tap};
 use tutti_graph::{Cx, Event, IntoNode, Io, Node, NodeParts, Offset, Prepare, Shape, Status};
 use tutti_midi_runtime::{MIDI_INPUT_PORTS, MidiInputPorts, TimedMidiEvent};
 use tutti_session::{MidiRouteRule, Session, SessionNode};
-use tutti_transport::MotionEvent;
 use tutti_types::{Beat, BeatDuration};
 use tutti_ump::{Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, Ump, Voice2};
 
@@ -91,7 +90,7 @@ fn retarget_with_a_held_clip_note() {
         .unwrap();
     let clip = s.midi().clip(a).expect("the clip a target has");
     let _ = s.update();
-    s.transport().motion().try_send(MotionEvent::Play).unwrap();
+    s.play().unwrap();
     blocks(&s, 20); // the note starts at about frame 2,400
     assert_eq!(ons(&a_seen), 1, "A heard the note start");
     s.midi().retarget(clip, b).unwrap();

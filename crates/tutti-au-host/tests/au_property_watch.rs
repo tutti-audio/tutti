@@ -61,13 +61,16 @@ use support::probe_au::{
 const BLOCK: u32 = 64;
 const RATE: tutti_types::SampleRate = tutti_types::SampleRate::SR_48K;
 
-/// How long to wait for a notification before calling the path dead.
-///
-/// `au_api_surface.rs` measured first arrival at 202–216 ms against Apple units,
-/// which is the listener's own 200 ms `NOTIFICATION_INTERVAL` plus delivery.
-/// A second is comfortably clear of that without turning a genuine failure into
-/// a minute-long hang.
-const SETTLE: Duration = Duration::from_secs(1);
+/// The guard on waiting for a notification: it only fails one that never
+/// comes. `au_api_surface.rs` measured first arrival at 202–216 ms against Apple
+/// units, the listener's own 200 ms `NOTIFICATION_INTERVAL` plus delivery.
+const SETTLE: Duration = Duration::from_secs(60);
+
+/// An observation window: how long the log is watched for an event that must
+/// not happen (a late tail of the last interval, a delivery to a disposed
+/// listener). Two of the listener's 200 ms notification intervals and more. It
+/// asserts no speed: a slow machine only delays the end.
+const OBSERVATION_WINDOW: Duration = Duration::from_millis(900);
 
 /// Every `PropertyChanged` id the listener delivered, oldest first.
 #[derive(Default)]
@@ -278,20 +281,19 @@ fn a_watcher_is_not_woken_by_an_unrelated_property() {
         .expect("the probe accepts a bypass write");
     w.au.set_bypass(false).expect("bypass off");
 
-    std::thread::sleep(SETTLE);
-    assert_eq!(
-        w.log.snapshot(),
-        Vec::<u32>::new(),
-        "a latency/tail/parameter-list watcher must not see BypassEffect changes"
-    );
-
     // Control: one of the three watched properties does arrive on the same
-    // listener, so the silence above is filtering rather than a dead path.
+    // listener, after the bypass writes, so what the log holds then is
+    // filtering rather than a dead path.
     set_latency_seconds(&w.au, 128.0 / RATE.get());
     assert!(
         w.log.wait_for(Latency::ID),
         "the control half failed: even a watched Latency change did not arrive, \
-         so the silence above proves nothing about filtering"
+         so the silence proves nothing about filtering"
+    );
+    let delivered = w.log.snapshot();
+    assert!(
+        delivered.iter().all(|id| *id == Latency::ID),
+        "a latency/tail/parameter-list watcher must not see BypassEffect changes: {delivered:?}"
     );
 }
 
@@ -315,17 +317,39 @@ fn a_dropped_listener_stops_receiving() {
         "the pre-drop control failed; nothing below would be meaningful"
     );
 
+    // A second listener on the same unit, kept, on two properties the writes
+    // below do not touch. It proves the writes notify, and its events start the
+    // observation windows: its notification interval is its own, so they are not
+    // the end of the other listener's delivery.
+    let control = Arc::new(Log::default());
+    let control_listener =
+        AuParameterListener::new(w.au.unit(), control.sink()).expect("create a control listener");
+    for id in [TailTime::ID, ParameterList::ID] {
+        control_listener
+            .watch_property(id, EventAddress::GLOBAL)
+            .expect("watch the control property");
+    }
+    set_tail_seconds(&w.au, PROBE_INITIAL_TAIL_SECONDS * 4.0);
+    assert!(
+        control.wait_for(TailTime::ID),
+        "the control listener never heard the tail change"
+    );
+    // Whatever of the pre-drop interval is still in flight lands here, not in
+    // the baseline's count of post-drop deliveries.
+    std::thread::sleep(OBSERVATION_WINDOW);
+
     w.drop_listener();
-    // Settle before sampling the baseline: an event already in flight when
-    // `AUListenerDispose` ran may still land, and counting it as a post-drop
-    // delivery would make this flaky rather than strict.
-    std::thread::sleep(SETTLE);
     let before = w.log.count.load(Ordering::Acquire);
 
     for frames in [128.0, 256.0, 512.0] {
         set_latency_seconds(&w.au, frames / RATE.get());
     }
-    std::thread::sleep(SETTLE);
+    set_param_count(&w.au, PROBE_INITIAL_PARAM_COUNT + 1);
+    assert!(
+        control.wait_for(ParameterList::ID),
+        "the control listener never heard the parameter list change"
+    );
+    std::thread::sleep(OBSERVATION_WINDOW);
 
     assert_eq!(
         w.log.count.load(Ordering::Acquire),

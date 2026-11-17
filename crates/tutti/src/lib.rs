@@ -230,15 +230,15 @@ pub mod nodes {
         RecordMode, RecordingConfig, Trajectory,
     };
     pub use tutti_nodes::{
-        AutoPanConfig, AutoPanControls, AutoPanKernel, AutoPanNode, AutoPanSet, ChannelOutOfRange,
-        MidSideConfig, MidSideNode, OscillatorWave, PanLaw, PolarityConfig, PolarityError,
-        PolarityNode, RingModConfig, RingModControls, RingModKernel, RingModNode, RingModSet,
-        StereoWidthConfig, StereoWidthKernel, StereoWidthNode, StereoWidthSet, TremoloConfig,
-        TremoloControls, TremoloKernel, TremoloNode, TremoloSet, WidthControls,
+        Antialiasing, AutoPanConfig, AutoPanControls, AutoPanKernel, AutoPanNode, AutoPanSet,
+        ChannelOutOfRange, MidSideConfig, MidSideNode, OscillatorWave, PanLaw, PolarityConfig,
+        PolarityError, PolarityNode, RingModConfig, RingModControls, RingModKernel, RingModNode,
+        RingModSet, StereoWidthConfig, StereoWidthKernel, StereoWidthNode, StereoWidthSet,
+        TremoloConfig, TremoloControls, TremoloKernel, TremoloNode, TremoloSet, WidthControls,
     };
     pub use tutti_nodes::{
         BAND_PARAMS, BitCrusherConfig, BitCrusherControls, BitCrusherNode, BrickwallLimiterNode,
-        BusStripNode, ChannelTimes, ChannelTimesError, ClickNode, ClickSettings, ClickState,
+        BusStripNode, ChannelTimes, ChannelTimesError, ClickSettings, ClickState,
         CompressorControls, CompressorNode, ConvolverError, ConvolverNode, CrossoverControls,
         CrossoverError, CrossoverNode, DcBlockerConfig, DcBlockerControls, DcBlockerNode,
         DelayControls, DelayLayout, DelayNode, DistortionNode, EnvelopeFollowerNode, EqBandNode,
@@ -608,11 +608,13 @@ pub mod midi {
         DetailsData, DiscoveryData, Identity, InquiryTarget, ManufacturerProfile, MaxSysexSize,
         MessageText, Muid, Nak, NameError, NotADataControl, NotADeviceId, NotAMuid, NotASysexSize,
         NotProfileChannels, NoteData, Outcome, PortDirection, ProcessError, ProcessFeatures,
-        ProductInstanceId, ProfileChange, ProfileChannels, ProfileDataError, ProfileEntry,
-        ProfileId, ProfileState, ProfileTable, ReportRequest, ReportScope, Request, RequestError,
-        SpecificData, StandardProfile, SystemMessages, WinMmDevice,
+        ProductInstanceId, ProfileChange, ProfileDataError, ProfileEntry, ProfileState,
+        ProfileTable, ReportRequest, ReportScope, Request, RequestError, SpecificData,
+        StandardProfile, SystemMessages, WinMmDevice,
     };
-    pub use tutti_midi_device::{NotSetProfileOn, ProfileOnRequest};
+    pub use tutti_midi_device::{
+        NotSetProfileOn, ProfileChannels, ProfileId, ProfileOnRequest, ProfileTarget,
+    };
     pub use tutti_midi_file::Error as FileError;
     pub use tutti_midi_file::{
         ClipFileError, ConfigError as FileConfigError, Refusal, SmfParseError, ToClipError,

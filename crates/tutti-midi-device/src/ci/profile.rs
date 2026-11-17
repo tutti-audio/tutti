@@ -488,40 +488,99 @@ pub(super) fn encode_with_count(
     out.extend(channels.to_le7());
 }
 
+/// Where a Set Profile On, Profile Enabled or Profile Disabled is aimed, and how
+/// many Channels it names (§7.8, §7.10, §7.11).
+///
+/// For a Profile Destination of address 0x7E or 0x7F the number of Channels is
+/// the width of the Group or Function Block, and the Number of Channels field
+/// is 0x0000: so only a Channel has a count to give, and a Group or Function
+/// Block has none to get wrong.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ProfileTarget {
+    /// A Channel, the Manager Channel of a multi-Channel Profile, and the total
+    /// number of Channels: requested by a Set Profile On (M2-102 §2.5.1: no
+    /// more than the peer's declared maximum), enabled or disabled by a report.
+    Channel {
+        /// The Channel.
+        channel: MidiChannel,
+        /// The Manager plus Member Channels.
+        channels: ProfileChannels,
+    },
+    /// The whole Group (`0x7E`).
+    Group,
+    /// The whole Function Block (`0x7F`).
+    FunctionBlock,
+}
+
+impl ProfileTarget {
+    /// The Device ID the message goes to.
+    #[must_use]
+    pub const fn address(self) -> CiDeviceId {
+        match self {
+            Self::Channel { channel, .. } => CiDeviceId::Channel(channel),
+            Self::Group => CiDeviceId::Group,
+            Self::FunctionBlock => CiDeviceId::FunctionBlock,
+        }
+    }
+
+    /// The target at `address` with `channels` as the message carries them, or
+    /// the count when a Group or Function Block address carries one other than 0.
+    ///
+    /// # Errors
+    ///
+    /// The count, for a Group or Function Block address.
+    pub(crate) const fn from_wire(
+        address: CiDeviceId,
+        channels: ProfileChannels,
+    ) -> Result<Self, u16> {
+        match address {
+            CiDeviceId::Channel(channel) => Ok(Self::Channel { channel, channels }),
+            CiDeviceId::Group | CiDeviceId::FunctionBlock if !channels.is_by_address() => {
+                Err(channels.get())
+            }
+            CiDeviceId::Group => Ok(Self::Group),
+            CiDeviceId::FunctionBlock => Ok(Self::FunctionBlock),
+        }
+    }
+
+    /// The Number of Channels field.
+    #[must_use]
+    pub const fn channels(self) -> ProfileChannels {
+        match self {
+            Self::Channel { channels, .. } => channels,
+            Self::Group | Self::FunctionBlock => ProfileChannels::BY_ADDRESS,
+        }
+    }
+}
+
 /// A Set Profile On that names no peer (M2-116 section 6.2): its Source and
 /// Destination MUIDs are both Broadcast, as a Clip File's header carries it.
 ///
 /// [`CiMessage::SetProfileOn`](super::CiMessage::SetProfileOn) is the message on a link, between two MUIDs;
-/// this is the same message at rest. The Device ID and the Number of Channels
-/// Requested go together as §7.8's note asks: a Group or Function Block
-/// address asks for 0 Channels, so only a Channel carries a count.
+/// this is the same message at rest. The [`ProfileTarget`] holds the Device ID
+/// and the Number of Channels Requested together as §7.8's note asks: a Group
+/// or Function Block address asks for 0 Channels, so only a Channel carries a
+/// count.
 ///
 /// ```
-/// use tutti_midi_device::{ProfileChannels, ProfileId, ProfileOnRequest};
+/// use tutti_midi_device::{ProfileChannels, ProfileId, ProfileOnRequest, ProfileTarget};
 /// use tutti_ump::MidiChannel;
 ///
-/// let on = ProfileOnRequest::Channel {
-///     channel: MidiChannel::FIRST,
+/// let on = ProfileOnRequest {
+///     target: ProfileTarget::Channel {
+///         channel: MidiChannel::FIRST,
+///         channels: ProfileChannels::of(15),
+///     },
 ///     profile: ProfileId::MPE,
-///     channels: ProfileChannels::of(15),
 /// };
 /// assert_eq!(ProfileOnRequest::try_from(&on.encode()[..]), Ok(on));
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum ProfileOnRequest {
-    /// For one MIDI Channel of the Group, asking for `channels` Channels.
-    Channel {
-        /// The Channel the Profile is for.
-        channel: MidiChannel,
-        /// The Profile to enable.
-        profile: ProfileId,
-        /// The Number of Channels Requested.
-        channels: ProfileChannels,
-    },
-    /// For the whole Group: 0 Channels requested.
-    Group(ProfileId),
-    /// For the whole Function Block: 0 Channels requested.
-    FunctionBlock(ProfileId),
+pub struct ProfileOnRequest {
+    /// Where the Profile is enabled, and how many Channels are requested.
+    pub target: ProfileTarget,
+    /// The Profile to enable.
+    pub profile: ProfileId,
 }
 
 /// Why bytes are not a [`ProfileOnRequest`].
@@ -570,65 +629,27 @@ impl TryFrom<&[u8]> for ProfileOnRequest {
             .ok_or(NotSetProfileOn::DeviceId(preamble.device_id))?;
         let (profile, channels) =
             read::profile_with_count_body(body).ok_or(NotSetProfileOn::Body)?;
-        match device_id {
-            CiDeviceId::Channel(channel) => Ok(Self::Channel {
-                channel,
-                profile,
-                channels,
-            }),
-            CiDeviceId::Group | CiDeviceId::FunctionBlock if !channels.is_by_address() => {
-                Err(NotSetProfileOn::ChannelsForBlock(channels.get()))
-            }
-            CiDeviceId::Group => Ok(Self::Group(profile)),
-            CiDeviceId::FunctionBlock => Ok(Self::FunctionBlock(profile)),
-        }
+        let target = ProfileTarget::from_wire(device_id, channels)
+            .map_err(NotSetProfileOn::ChannelsForBlock)?;
+        Ok(Self { target, profile })
     }
 }
 
 impl ProfileOnRequest {
-    /// The Profile to enable.
-    #[must_use]
-    pub const fn profile(self) -> ProfileId {
-        match self {
-            Self::Channel { profile, .. } | Self::Group(profile) | Self::FunctionBlock(profile) => {
-                profile
-            }
-        }
-    }
-
-    /// The Device ID the message is addressed to.
-    #[must_use]
-    pub const fn device_id(self) -> CiDeviceId {
-        match self {
-            Self::Channel { channel, .. } => CiDeviceId::Channel(channel),
-            Self::Group(_) => CiDeviceId::Group,
-            Self::FunctionBlock(_) => CiDeviceId::FunctionBlock,
-        }
-    }
-
-    /// The Number of Channels Requested: 0 for a Group or Function Block.
-    #[must_use]
-    pub const fn channels(self) -> ProfileChannels {
-        match self {
-            Self::Channel { channels, .. } => channels,
-            Self::Group(_) | Self::FunctionBlock(_) => ProfileChannels::BY_ADDRESS,
-        }
-    }
-
     /// The CI byte payload, as [`CiMessage::encode`](super::CiMessage::encode)
     /// gives one: Message Format Version [`CI_VERSION`], both MUIDs Broadcast.
     #[must_use]
     pub fn encode(self) -> Vec<u8> {
         let mut out = Vec::new();
         encode_preamble(
-            self.device_id(),
+            self.target.address(),
             SUB_ID2_SET_PROFILE_ON,
             CI_VERSION,
             Destination::Broadcast.to_bytes(),
             Destination::Broadcast,
             &mut out,
         );
-        encode_with_count(self.profile(), self.channels(), &mut out);
+        encode_with_count(self.profile, self.target.channels(), &mut out);
         out
     }
 

@@ -7,7 +7,6 @@ use tutti_engine::{ManualStream, ManualStreamDriver, OutputSpec};
 use tutti_graph::UmpAt;
 use tutti_midi_runtime::MidiOut;
 use tutti_session::{LiveSession, Session, midi_sink};
-use tutti_transport::MotionEvent;
 use tutti_types::{ChannelLayout, SampleRate};
 use tutti_ump::{Message, MidiGroup, System, Ump};
 
@@ -81,10 +80,7 @@ fn a_restart_re_rates_the_midi_clock() {
         .expect("the engine's MIDI nodes")
         .clock_master
         .set_enabled(true);
-    s.transport()
-        .motion()
-        .try_send(MotionEvent::Play)
-        .expect("room");
+    s.play().expect("room");
     let ticks = |events: &[(Ump, u64)]| -> f64 {
         let at: Vec<u64> = events
             .iter()

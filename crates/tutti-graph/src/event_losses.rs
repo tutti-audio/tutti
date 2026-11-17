@@ -137,7 +137,8 @@ impl Sum for Losses {
 
 /// One tally per count, in field order: a `Counter<Losses>` keeps `lost`,
 /// `evicted`, `refused` and `late` as four words, each saturating on its own,
-/// so a port's losses are one counter.
+/// so a port's losses are one counter. A `Tally<Losses>` wraps per word
+/// instead (see `Tally`); only the counter saturates.
 impl Count for Losses {
     type Words = [u64; 4];
 

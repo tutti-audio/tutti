@@ -1,8 +1,7 @@
-0 5 crates/tutti-au-host/tests/au_api_surface.rs
-0 7 crates/tutti-au-host/tests/au_automation.rs
-0 5 crates/tutti-au-host/tests/au_notification.rs
-0 4 crates/tutti-au-host/tests/au_property_watch.rs
-0 1 crates/tutti-clap-host/tests/behaviour/clap_editor_instance.rs
+0 3 crates/tutti-au-host/tests/au_api_surface.rs
+0 2 crates/tutti-au-host/tests/au_automation.rs
+0 1 crates/tutti-au-host/tests/au_notification.rs
+0 3 crates/tutti-au-host/tests/au_property_watch.rs
 0 2 crates/tutti-cpal/src/owner/tests.rs
 0 1 crates/tutti-engine/tests/no_alloc/rt_no_alloc_engine.rs
 0 1 crates/tutti-engine/tests/outputs/heard_tap.rs
@@ -26,8 +25,7 @@
 0 1 crates/tutti-plugin-ipc/src/process_guard.rs
 1 4 crates/tutti-plugin-ipc/src/subprocess/launch.rs
 0 1 crates/tutti-plugin-ipc/src/transport/control.rs
-0 1 crates/tutti-plugin-server/src/served/tests/clap.rs
-0 5 crates/tutti-plugin-server/src/session.rs
+0 2 crates/tutti-plugin-server/src/session.rs
 2 0 crates/tutti-plugin-server/src/transport.rs
 0 1 crates/tutti-plugin-server/tests/load_reply.rs
 0 1 crates/tutti-plugin-server/tests/orphan_watchdog.rs
@@ -47,7 +45,6 @@
 0 1 crates/tutti-plugin/tests/support/param_probe.rs
 0 3 crates/tutti-rt/tests/spin_starvation.rs
 0 3 crates/tutti-sampler/src/streamer/thread.rs
-1 0 crates/tutti-session/src/midi.rs
 0 2 crates/tutti-session/tests/export/export_fork_sampler.rs
 0 1 crates/tutti-session/tests/instrument/instrument_support/cases.rs
 0 1 crates/tutti-session/tests/instrument/instrument_support/rig.rs
@@ -78,8 +75,7 @@
 0 4 crates/tutti-session/tests/wiring/system_clock.rs
 0 1 crates/tutti-vst2-ffi/src/host.rs
 0 3 crates/tutti-vst3-ffi/src/com/run_loop.rs
-0 3 crates/tutti-vst3-host/tests/conformance/vst3_run_loop.rs
 1 1 testing/tutti-fixtures/src/wait.rs
-2 1 testing/tutti-plugin-contract/tests/probe.rs
-0 5 testing/tutti-plugin-contract/tests/server.rs
+0 1 testing/tutti-plugin-contract/tests/probe.rs
+0 3 testing/tutti-plugin-contract/tests/server.rs
 0 1 testing/tutti-vst2-author/src/util/parameter_transfer.rs

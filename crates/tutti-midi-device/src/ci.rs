@@ -73,8 +73,8 @@ pub use drum_map::{
 pub use endpoint::{CiInstanceId, EndpointInfo, EndpointStatus};
 pub use gm2::{Gm2ChannelCount, Gm2FunctionBlock, Gm2Role, Gm2SingleChannel, NotAGm2ChannelCount};
 pub use initiator::{
-    Outcome, ProfileAction, ProfileChange, ProfileEntry, ProfileInitiator, ProfileTable,
-    ProfileTarget, Request, RequestError,
+    Outcome, ProfileAction, ProfileChange, ProfileEntry, ProfileInitiator, ProfileTable, Request,
+    RequestError,
 };
 pub use pe::{
     ActionError, Arrival, BodyLimit, BufferLimit, CallError, CallId, CanSet, CcIndex, ChangeKind,
@@ -118,7 +118,7 @@ pub use process_initiator::{ProcessAction, ProcessError, ProcessInitiator, Repor
 pub use profile::{
     ChannelsDetail, DetailsData, InquiryTarget, ListTooLong, ManufacturerProfile,
     NotProfileChannels, NotSetProfileOn, ProfileChannels, ProfileDataError, ProfileId,
-    ProfileLists, ProfileOnRequest, ProfileState, SUB_ID2_PROFILE_ADDED,
+    ProfileLists, ProfileOnRequest, ProfileState, ProfileTarget, SUB_ID2_PROFILE_ADDED,
     SUB_ID2_PROFILE_DETAILS_INQUIRY, SUB_ID2_PROFILE_DETAILS_REPLY, SUB_ID2_PROFILE_DISABLED,
     SUB_ID2_PROFILE_ENABLED, SUB_ID2_PROFILE_INQUIRY, SUB_ID2_PROFILE_REMOVED,
     SUB_ID2_PROFILE_REPLY, SUB_ID2_PROFILE_SPECIFIC_DATA, SUB_ID2_SET_PROFILE_OFF,
@@ -519,17 +519,21 @@ pub enum CiMessage {
         /// The two lists.
         profiles: ProfileLists,
     },
-    /// Set Profile On (§7.8): enables a Profile at the address in the header.
+    /// Set Profile On (§7.8): enables a Profile at the address of the target. The
+    /// preamble's Device ID and `Number Channels Requested` are the target's,
+    /// so a Group or Function Block address with a count is not writable.
     SetProfileOn {
-        /// Addressing preamble; its Device ID is the address.
-        header: CiHeader,
+        /// MUID of the sender.
+        source: Muid,
+        /// CI message version.
+        ci_version: CiVersion,
         /// The device asked.
         to: Muid,
+        /// The address and the Channels requested there. A Version 1 sender has
+        /// no count field and it reads as 0.
+        target: ProfileTarget,
         /// The Profile to enable.
         profile: ProfileId,
-        /// `Number Channels Requested`: 0 for a Group or Function Block address.
-        /// A Version 1 sender has no such field and it reads as 0.
-        channels: ProfileChannels,
     },
     /// Set Profile Off (§7.9): disables a Profile at the address in the header.
     SetProfileOff {
@@ -543,23 +547,29 @@ pub enum CiMessage {
     /// Profile Enabled Report (§7.10): a Profile is now enabled. Always sent to the
     /// Broadcast MUID.
     ProfileEnabled {
-        /// Addressing preamble; its Device ID is the address.
-        header: CiHeader,
+        /// MUID of the sender.
+        source: Muid,
+        /// CI message version.
+        ci_version: CiVersion,
+        /// The address and `Number Channels enabled` there: 0 for a Group or
+        /// Function Block address, and for a Version 1 sender, which has no
+        /// such field.
+        target: ProfileTarget,
         /// The Profile.
         profile: ProfileId,
-        /// `Number Channels enabled`: 0 for a Group or Function Block address,
-        /// and for a Version 1 sender, which has no such field.
-        channels: ProfileChannels,
     },
     /// Profile Disabled Report (§7.11): a Profile is now disabled. Always sent to the
     /// Broadcast MUID.
     ProfileDisabled {
-        /// Addressing preamble; its Device ID is the address.
-        header: CiHeader,
+        /// MUID of the sender.
+        source: Muid,
+        /// CI message version.
+        ci_version: CiVersion,
+        /// The address and `Number Channels disabled` there: as
+        /// [`ProfileEnabled`](Self::ProfileEnabled).
+        target: ProfileTarget,
         /// The Profile.
         profile: ProfileId,
-        /// `Number Channels disabled`: as [`ProfileEnabled`](Self::ProfileEnabled).
-        channels: ProfileChannels,
     },
     /// Profile Added Report (§7.4): a Profile is newly supported. To the
     /// Broadcast MUID.
@@ -629,8 +639,30 @@ pub enum CiMessage {
 impl CiMessage {
     /// The message's preamble.
     #[must_use]
-    pub fn header(&self) -> &CiHeader {
+    pub fn header(&self) -> CiHeader {
         match self {
+            CiMessage::SetProfileOn {
+                source,
+                ci_version,
+                target,
+                ..
+            }
+            | CiMessage::ProfileEnabled {
+                source,
+                ci_version,
+                target,
+                ..
+            }
+            | CiMessage::ProfileDisabled {
+                source,
+                ci_version,
+                target,
+                ..
+            } => CiHeader {
+                device_id: target.address(),
+                ci_version: *ci_version,
+                source: *source,
+            },
             CiMessage::Discovery { header, .. }
             | CiMessage::DiscoveryReply { header, .. }
             | CiMessage::InvalidateMuid { header, .. }
@@ -645,16 +677,13 @@ impl CiMessage {
             | CiMessage::MessageReportEnd { header, .. }
             | CiMessage::ProfileInquiry { header, .. }
             | CiMessage::ProfileReply { header, .. }
-            | CiMessage::SetProfileOn { header, .. }
             | CiMessage::SetProfileOff { header, .. }
-            | CiMessage::ProfileEnabled { header, .. }
-            | CiMessage::ProfileDisabled { header, .. }
             | CiMessage::ProfileAdded { header, .. }
             | CiMessage::ProfileRemoved { header, .. }
             | CiMessage::ProfileDetailsInquiry { header, .. }
             | CiMessage::ProfileDetailsReply { header, .. }
             | CiMessage::PropertyExchange { header, .. }
-            | CiMessage::ProfileSpecificData { header, .. } => header,
+            | CiMessage::ProfileSpecificData { header, .. } => *header,
         }
     }
 
@@ -737,7 +766,7 @@ impl CiMessage {
     /// Appends the CI byte payload (what [`encode`](Self::encode) returns) to
     /// `out`: a `Vec<u8>`, a `VecDeque`, any collection of bytes.
     pub fn encode_into(&self, out: &mut impl Extend<u8>) {
-        let mut header = *self.header();
+        let mut header = self.header();
         // The Device ID of a Process Inquiry message is the one the message or its
         // scope fixes (Tables 40, 41, 43 and 45), never the header's.
         match self {
@@ -769,19 +798,19 @@ impl CiMessage {
             CiMessage::MessageReportReply { scope, .. } => out.extend(scope.bitmap_bytes()),
             CiMessage::ProfileReply { profiles, .. } => profiles.encode_body(out),
             CiMessage::SetProfileOn {
-                profile, channels, ..
-            } => profile::encode_with_count(*profile, *channels, out),
+                profile, target, ..
+            } => profile::encode_with_count(*profile, target.channels(), out),
             // Two reserved bytes (Table 25).
             CiMessage::SetProfileOff { profile, .. } => {
                 out.extend(profile.to_bytes());
                 out.extend([0, 0]);
             }
             CiMessage::ProfileEnabled {
-                profile, channels, ..
+                profile, target, ..
             }
             | CiMessage::ProfileDisabled {
-                profile, channels, ..
-            } => profile::encode_with_count(*profile, *channels, out),
+                profile, target, ..
+            } => profile::encode_with_count(*profile, target.channels(), out),
             CiMessage::ProfileAdded { profile, .. } | CiMessage::ProfileRemoved { profile, .. } => {
                 out.extend(profile.to_bytes());
             }
@@ -879,189 +908,187 @@ impl CiMessage {
             Destination::Muid(muid) => Some(muid),
             Destination::Broadcast => None,
         };
-        let message =
-            match (sub_id2, unicast) {
-                (SUB_ID2_DISCOVERY, None) => DiscoveryData::decode_body(false, body)
-                    .map(|data| CiMessage::Discovery { header, data }),
-                (SUB_ID2_INVALIDATE_MUID, None) => read::target_body(body)
-                    .map(|target| CiMessage::InvalidateMuid { header, target }),
-                (SUB_ID2_DISCOVERY_REPLY, Some(to)) => DiscoveryData::decode_body(true, body)
-                    .map(|data| CiMessage::DiscoveryReply { header, to, data }),
-                (SUB_ID2_ENDPOINT_INQUIRY, Some(to)) => match read::endpoint_inquiry_body(body) {
-                    None => None,
-                    Some(raw) => match EndpointStatus::new(raw) {
-                        Some(status) => Some(CiMessage::EndpointInquiry { header, to, status }),
-                        None => return unread(UnreadReason::ReservedStatus),
-                    },
+        let message = match (sub_id2, unicast) {
+            (SUB_ID2_DISCOVERY, None) => DiscoveryData::decode_body(false, body)
+                .map(|data| CiMessage::Discovery { header, data }),
+            (SUB_ID2_INVALIDATE_MUID, None) => {
+                read::target_body(body).map(|target| CiMessage::InvalidateMuid { header, target })
+            }
+            (SUB_ID2_DISCOVERY_REPLY, Some(to)) => DiscoveryData::decode_body(true, body)
+                .map(|data| CiMessage::DiscoveryReply { header, to, data }),
+            (SUB_ID2_ENDPOINT_INQUIRY, Some(to)) => match read::endpoint_inquiry_body(body) {
+                None => None,
+                Some(raw) => match EndpointStatus::new(raw) {
+                    Some(status) => Some(CiMessage::EndpointInquiry { header, to, status }),
+                    None => return unread(UnreadReason::ReservedStatus),
                 },
-                (SUB_ID2_ENDPOINT_REPLY, Some(to)) => match read::endpoint_reply_body(body) {
-                    None => None,
-                    Some((raw, data)) => match EndpointStatus::new(raw) {
-                        Some(EndpointStatus::ProductInstanceId) => CiInstanceId::from_bytes(data)
-                            .map(|id| CiMessage::EndpointReply {
-                                header,
-                                to,
-                                info: EndpointInfo::ProductInstanceId(id),
-                            }),
-                        None => return unread(UnreadReason::ReservedStatus),
-                    },
-                },
-                (SUB_ID2_PROCESS_CAPABILITIES_INQUIRY, Some(to)) => {
-                    if header.device_id != CiDeviceId::FunctionBlock {
-                        return unread(UnreadReason::Malformed);
-                    }
-                    Some(CiMessage::ProcessCapabilitiesInquiry { header, to })
-                }
-                (SUB_ID2_PROCESS_CAPABILITIES_REPLY, Some(to)) => {
-                    if header.device_id != CiDeviceId::FunctionBlock {
-                        return unread(UnreadReason::Malformed);
-                    }
-                    read::features_body(body).map(|features| CiMessage::ProcessCapabilitiesReply {
-                        header,
-                        to,
-                        features,
-                    })
-                }
-                (SUB_ID2_MESSAGE_REPORT_INQUIRY, Some(to)) => {
-                    read::report_inquiry_body(header.device_id, body).map(|(control, scope)| {
-                        CiMessage::MessageReportInquiry {
+            },
+            (SUB_ID2_ENDPOINT_REPLY, Some(to)) => match read::endpoint_reply_body(body) {
+                None => None,
+                Some((raw, data)) => match EndpointStatus::new(raw) {
+                    Some(EndpointStatus::ProductInstanceId) => {
+                        CiInstanceId::from_bytes(data).map(|id| CiMessage::EndpointReply {
                             header,
                             to,
-                            control,
-                            scope,
-                        }
-                    })
+                            info: EndpointInfo::ProductInstanceId(id),
+                        })
+                    }
+                    None => return unread(UnreadReason::ReservedStatus),
+                },
+            },
+            (SUB_ID2_PROCESS_CAPABILITIES_INQUIRY, Some(to)) => {
+                if header.device_id != CiDeviceId::FunctionBlock {
+                    return unread(UnreadReason::Malformed);
                 }
-                (SUB_ID2_MESSAGE_REPORT_REPLY, Some(to)) => {
-                    read::report_reply_body(header.device_id, body)
-                        .map(|scope| CiMessage::MessageReportReply { header, to, scope })
+                Some(CiMessage::ProcessCapabilitiesInquiry { header, to })
+            }
+            (SUB_ID2_PROCESS_CAPABILITIES_REPLY, Some(to)) => {
+                if header.device_id != CiDeviceId::FunctionBlock {
+                    return unread(UnreadReason::Malformed);
                 }
-                (SUB_ID2_MESSAGE_REPORT_END, Some(to)) => {
-                    Some(CiMessage::MessageReportEnd { header, to })
-                }
-                (SUB_ID2_PROFILE_INQUIRY, Some(to)) => {
-                    Some(CiMessage::ProfileInquiry { header, to })
-                }
-                (SUB_ID2_PROFILE_REPLY, Some(to)) => {
-                    read::profile_reply_body(body).map(|profiles| CiMessage::ProfileReply {
+                read::features_body(body).map(|features| CiMessage::ProcessCapabilitiesReply {
+                    header,
+                    to,
+                    features,
+                })
+            }
+            (SUB_ID2_MESSAGE_REPORT_INQUIRY, Some(to)) => {
+                read::report_inquiry_body(header.device_id, body).map(|(control, scope)| {
+                    CiMessage::MessageReportInquiry {
                         header,
                         to,
-                        profiles,
-                    })
-                }
-                (SUB_ID2_SET_PROFILE_ON, Some(to)) => {
-                    read::profile_with_count_body(body).map(|(profile, channels)| {
-                        CiMessage::SetProfileOn {
-                            header,
-                            to,
-                            profile,
-                            channels,
-                        }
-                    })
-                }
-                (SUB_ID2_SET_PROFILE_OFF, Some(to)) => {
-                    read::profile_body(body).map(|profile| CiMessage::SetProfileOff {
-                        header,
-                        to,
-                        profile,
-                    })
-                }
-                (SUB_ID2_PROFILE_ENABLED, None) => {
-                    read::profile_with_count_body(body).map(|(profile, channels)| {
-                        CiMessage::ProfileEnabled {
-                            header,
-                            profile,
-                            channels,
-                        }
-                    })
-                }
-                (SUB_ID2_PROFILE_DISABLED, None) => {
-                    read::profile_with_count_body(body).map(|(profile, channels)| {
-                        CiMessage::ProfileDisabled {
-                            header,
-                            profile,
-                            channels,
-                        }
-                    })
-                }
-                (SUB_ID2_PROFILE_ADDED, None) => read::profile_body(body)
-                    .map(|profile| CiMessage::ProfileAdded { header, profile }),
-                (SUB_ID2_PROFILE_REMOVED, None) => read::profile_body(body)
-                    .map(|profile| CiMessage::ProfileRemoved { header, profile }),
-                (SUB_ID2_PROFILE_DETAILS_INQUIRY, Some(to)) => read::details_inquiry_body(body)
-                    .map(|(profile, target)| CiMessage::ProfileDetailsInquiry {
+                        control,
+                        scope,
+                    }
+                })
+            }
+            (SUB_ID2_MESSAGE_REPORT_REPLY, Some(to)) => {
+                read::report_reply_body(header.device_id, body)
+                    .map(|scope| CiMessage::MessageReportReply { header, to, scope })
+            }
+            (SUB_ID2_MESSAGE_REPORT_END, Some(to)) => {
+                Some(CiMessage::MessageReportEnd { header, to })
+            }
+            (SUB_ID2_PROFILE_INQUIRY, Some(to)) => Some(CiMessage::ProfileInquiry { header, to }),
+            (SUB_ID2_PROFILE_REPLY, Some(to)) => {
+                read::profile_reply_body(body).map(|profiles| CiMessage::ProfileReply {
+                    header,
+                    to,
+                    profiles,
+                })
+            }
+            (SUB_ID2_SET_PROFILE_ON, Some(to)) => read::profile_target_body(header.device_id, body)
+                .map(|(target, profile)| CiMessage::SetProfileOn {
+                    source: header.source,
+                    ci_version: header.ci_version,
+                    to,
+                    target,
+                    profile,
+                }),
+            (SUB_ID2_SET_PROFILE_OFF, Some(to)) => {
+                read::profile_body(body).map(|profile| CiMessage::SetProfileOff {
+                    header,
+                    to,
+                    profile,
+                })
+            }
+            (SUB_ID2_PROFILE_ENABLED, None) => read::profile_target_body(header.device_id, body)
+                .map(|(target, profile)| CiMessage::ProfileEnabled {
+                    source: header.source,
+                    ci_version: header.ci_version,
+                    target,
+                    profile,
+                }),
+            (SUB_ID2_PROFILE_DISABLED, None) => read::profile_target_body(header.device_id, body)
+                .map(|(target, profile)| CiMessage::ProfileDisabled {
+                    source: header.source,
+                    ci_version: header.ci_version,
+                    target,
+                    profile,
+                }),
+            (SUB_ID2_PROFILE_ADDED, None) => {
+                read::profile_body(body).map(|profile| CiMessage::ProfileAdded { header, profile })
+            }
+            (SUB_ID2_PROFILE_REMOVED, None) => read::profile_body(body)
+                .map(|profile| CiMessage::ProfileRemoved { header, profile }),
+            (SUB_ID2_PROFILE_DETAILS_INQUIRY, Some(to)) => {
+                read::details_inquiry_body(body).map(|(profile, target)| {
+                    CiMessage::ProfileDetailsInquiry {
                         header,
                         to,
                         profile,
                         target,
-                    }),
-                (SUB_ID2_PROFILE_DETAILS_REPLY, Some(to)) => {
-                    read::details_reply_body(body).map(|(profile, target, data)| {
-                        CiMessage::ProfileDetailsReply {
-                            header,
-                            to,
-                            profile,
-                            target,
-                            data,
-                        }
-                    })
-                }
-                (SUB_ID2_PROFILE_SPECIFIC_DATA, _) => {
-                    read::specific_data_body(body).map(|(profile, data)| {
-                        CiMessage::ProfileSpecificData {
-                            header,
-                            to: destination,
-                            profile,
-                            data,
-                        }
-                    })
-                }
-                (0x30 | 0x31 | 0x34..=0x39 | 0x3F, Some(to)) => PeCiMessage::decode(sub_id2, body)
-                    .map(|message| CiMessage::PropertyExchange {
+                    }
+                })
+            }
+            (SUB_ID2_PROFILE_DETAILS_REPLY, Some(to)) => {
+                read::details_reply_body(body).map(|(profile, target, data)| {
+                    CiMessage::ProfileDetailsReply {
                         header,
                         to,
-                        message,
-                    }),
-                (SUB_ID2_ACK, Some(to)) => {
-                    Ack::decode_body(body).map(|ack| CiMessage::Ack { header, to, ack })
-                }
-                (SUB_ID2_NAK, Some(to)) => {
-                    Nak::decode_body(body).map(|nak| CiMessage::Nak { header, to, nak })
-                }
-                // A message sent to the one kind of destination it is not defined
-                // with: Broadcast where it must not be, a device where it must be
-                // Broadcast.
-                (
-                    SUB_ID2_DISCOVERY
-                    | SUB_ID2_INVALIDATE_MUID
-                    | SUB_ID2_DISCOVERY_REPLY
-                    | SUB_ID2_ENDPOINT_INQUIRY
-                    | SUB_ID2_ENDPOINT_REPLY
-                    | SUB_ID2_ACK
-                    | SUB_ID2_NAK
-                    | SUB_ID2_PROCESS_CAPABILITIES_INQUIRY
-                    | SUB_ID2_PROCESS_CAPABILITIES_REPLY
-                    | SUB_ID2_MESSAGE_REPORT_INQUIRY
-                    | SUB_ID2_MESSAGE_REPORT_REPLY
-                    | SUB_ID2_MESSAGE_REPORT_END
-                    | SUB_ID2_PROFILE_INQUIRY
-                    | SUB_ID2_PROFILE_REPLY
-                    | SUB_ID2_SET_PROFILE_ON
-                    | SUB_ID2_SET_PROFILE_OFF
-                    | SUB_ID2_PROFILE_ENABLED
-                    | SUB_ID2_PROFILE_DISABLED
-                    | SUB_ID2_PROFILE_ADDED
-                    | SUB_ID2_PROFILE_REMOVED
-                    | SUB_ID2_PROFILE_DETAILS_INQUIRY
-                    | SUB_ID2_PROFILE_DETAILS_REPLY
-                    | 0x30
-                    | 0x31
-                    | 0x34..=0x39
-                    | 0x3F,
-                    _,
-                ) => return unread(UnreadReason::WrongDestination),
-                _ => return unread(UnreadReason::UnsupportedMessage),
-            };
+                        profile,
+                        target,
+                        data,
+                    }
+                })
+            }
+            (SUB_ID2_PROFILE_SPECIFIC_DATA, _) => {
+                read::specific_data_body(body).map(|(profile, data)| {
+                    CiMessage::ProfileSpecificData {
+                        header,
+                        to: destination,
+                        profile,
+                        data,
+                    }
+                })
+            }
+            (0x30 | 0x31 | 0x34..=0x39 | 0x3F, Some(to)) => {
+                PeCiMessage::decode(sub_id2, body).map(|message| CiMessage::PropertyExchange {
+                    header,
+                    to,
+                    message,
+                })
+            }
+            (SUB_ID2_ACK, Some(to)) => {
+                Ack::decode_body(body).map(|ack| CiMessage::Ack { header, to, ack })
+            }
+            (SUB_ID2_NAK, Some(to)) => {
+                Nak::decode_body(body).map(|nak| CiMessage::Nak { header, to, nak })
+            }
+            // A message sent to the one kind of destination it is not defined
+            // with: Broadcast where it must not be, a device where it must be
+            // Broadcast.
+            (
+                SUB_ID2_DISCOVERY
+                | SUB_ID2_INVALIDATE_MUID
+                | SUB_ID2_DISCOVERY_REPLY
+                | SUB_ID2_ENDPOINT_INQUIRY
+                | SUB_ID2_ENDPOINT_REPLY
+                | SUB_ID2_ACK
+                | SUB_ID2_NAK
+                | SUB_ID2_PROCESS_CAPABILITIES_INQUIRY
+                | SUB_ID2_PROCESS_CAPABILITIES_REPLY
+                | SUB_ID2_MESSAGE_REPORT_INQUIRY
+                | SUB_ID2_MESSAGE_REPORT_REPLY
+                | SUB_ID2_MESSAGE_REPORT_END
+                | SUB_ID2_PROFILE_INQUIRY
+                | SUB_ID2_PROFILE_REPLY
+                | SUB_ID2_SET_PROFILE_ON
+                | SUB_ID2_SET_PROFILE_OFF
+                | SUB_ID2_PROFILE_ENABLED
+                | SUB_ID2_PROFILE_DISABLED
+                | SUB_ID2_PROFILE_ADDED
+                | SUB_ID2_PROFILE_REMOVED
+                | SUB_ID2_PROFILE_DETAILS_INQUIRY
+                | SUB_ID2_PROFILE_DETAILS_REPLY
+                | 0x30
+                | 0x31
+                | 0x34..=0x39
+                | 0x3F,
+                _,
+            ) => return unread(UnreadReason::WrongDestination),
+            _ => return unread(UnreadReason::UnsupportedMessage),
+        };
         match message {
             Some(message) => Decoded::Message(message),
             None => unread(UnreadReason::Malformed),

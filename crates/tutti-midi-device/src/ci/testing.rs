@@ -4,7 +4,7 @@ use tutti_ump::{MidiChannel, U7};
 
 use super::{
     Ack, CiAction, CiDeviceId, CiHeader, CiMessage, Decoded, Muid, Nak, ProcessAction,
-    ProfileAction, Unread,
+    ProfileAction, ProfileChannels, ProfileTarget, Unread,
 };
 
 /// The source of the messages a test decodes.
@@ -17,6 +17,19 @@ pub(super) const OURS: u32 = 0x0100_0001;
 pub(super) const PEER: u32 = 0x0200_0002;
 /// A third device, neither of the two.
 pub(super) const OTHER: u32 = 0x0300_0003;
+
+/// The target at `address` that names `channels`; a Group or Function Block
+/// names none (§7.8 note).
+pub(super) fn target_at(address: CiDeviceId, channels: u16) -> ProfileTarget {
+    match address {
+        CiDeviceId::Channel(channel) => ProfileTarget::Channel {
+            channel,
+            channels: ProfileChannels::of(channels),
+        },
+        CiDeviceId::Group => ProfileTarget::Group,
+        CiDeviceId::FunctionBlock => ProfileTarget::FunctionBlock,
+    }
+}
 
 /// A header from `source`, on `address`.
 pub(super) fn header_from(source: u32, address: CiDeviceId) -> CiHeader {
@@ -140,22 +153,24 @@ pub(super) fn profile_table(
     profile: super::ProfileId,
     enabled: bool,
 ) -> super::ProfileTable {
-    use super::{CiMessage, Decoded, Muid, ProfileChannels, ProfileInitiator};
+    use super::{CiMessage, Decoded, Muid, ProfileInitiator};
     let (mut peer, _) =
         ProfileInitiator::new(Muid::of(OURS), Muid::of(PEER), std::time::Instant::now());
     let header = header_from(PEER, address);
-    let channels = ProfileChannels::of(1);
+    let target = target_at(address, 1);
     peer.on_message(&Decoded::Message(if enabled {
         CiMessage::ProfileEnabled {
-            header,
+            source: header.source,
+            ci_version: header.ci_version,
+            target,
             profile,
-            channels,
         }
     } else {
         CiMessage::ProfileDisabled {
-            header,
+            source: header.source,
+            ci_version: header.ci_version,
+            target,
             profile,
-            channels,
         }
     }));
     peer.table().clone()

@@ -205,3 +205,56 @@ fn distortion_process_is_allocation_free_fed_and_unfed() {
         }
     }
 }
+
+/// Every curve at each antialiasing order, alone and oversampled by 4, unfed and with its drive
+/// port fed a per-frame ramp, 1 000 blocks each under `assert_no_alloc`.
+#[test]
+fn distortion_antialiasing_is_allocation_free_fed_and_unfed() {
+    use tutti_graph::contract::Direct;
+    use tutti_nodes::{Antialiasing, DistortionNode, OversamplingFactor, ShapeKind};
+    use tutti_types::SampleRate;
+
+    let kinds = [
+        ShapeKind::Tanh,
+        ShapeKind::Atan,
+        ShapeKind::Softsign,
+        ShapeKind::HardClip,
+        ShapeKind::Crush,
+        ShapeKind::SoftCrush,
+    ];
+    let drive: Vec<f32> = (0..64).map(|i| 1.0 + 0.0625 * i as f32).collect();
+    for kind in kinds {
+        for order in [Antialiasing::FirstOrder, Antialiasing::SecondOrder] {
+            for oversampled in [false, true] {
+                for fed in [false, true] {
+                    let node = DistortionNode::with_channels(3u16, kind, Drive::new(2.0))
+                        .antialiasing(order);
+                    let node = if oversampled {
+                        node.oversampling(OversamplingFactor::X4)
+                    } else {
+                        node
+                    };
+                    let mut node = Direct::new(node, SampleRate::SR_48K, 64);
+                    for (c, x) in node.inputs_mut().iter_mut().enumerate() {
+                        for (i, s) in x.iter_mut().enumerate() {
+                            *s = 0.9 * (((i + 7 * c) % 13) as f32 / 6.0 - 1.0);
+                        }
+                    }
+                    if fed {
+                        node.feed(0, Some(&drive));
+                    }
+                    node.block();
+                    assert!(
+                        (0..3).all(|c| node.output(c).iter().any(|s| s.abs() > 1e-6)),
+                        "{kind:?} {order:?} fed={fed} rendered a silent channel"
+                    );
+                    assert_no_alloc::assert_no_alloc(|| {
+                        for _ in 0..1_000 {
+                            node.block();
+                        }
+                    });
+                }
+            }
+        }
+    }
+}

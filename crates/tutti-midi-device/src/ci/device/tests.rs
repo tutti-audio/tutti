@@ -1,10 +1,10 @@
-use super::super::testing::{OTHER, OURS, PEER, header_from, sent};
+use super::super::testing::{OTHER, OURS, PEER, header_from, sent, target_at};
 use super::super::{
     ChunkNo, ChunkPosition, ChunkTotal, DataControl, PeCapabilities, PeChunk, PeRequestId,
     ProcessFeatures, ReportScope, SUB_ID2_MESSAGE_REPORT_INQUIRY,
     SUB_ID2_PROCESS_CAPABILITIES_INQUIRY, SimultaneousRequests,
 };
-use super::super::{DetailsData, InquiryTarget, ProfileChannels, ProfileId, SpecificData};
+use super::super::{DetailsData, InquiryTarget, ProfileId, ProfileTarget, SpecificData};
 use super::super::{Unread, UnreadReason};
 use super::*;
 use crate::PeStatus;
@@ -557,10 +557,11 @@ fn a_set_on_set_off_or_details_inquiry_to_us_is_nakked_0x04_with_the_profile_id(
         (
             0x22u8,
             on(channel, PEER, OURS, |header, to| CiMessage::SetProfileOn {
-                header,
+                source: header.source,
+                ci_version: header.ci_version,
                 to,
+                target: target_at(channel, 1),
                 profile: piano(),
-                channels: ProfileChannels::of(1),
             }),
         ),
         (
@@ -602,10 +603,11 @@ fn a_set_on_for_another_muid_is_not_nakked() {
     let (mut device, _, now) = device([OURS]);
     let set = on(CiDeviceId::Group, PEER, OTHER, |header, to| {
         CiMessage::SetProfileOn {
-            header,
+            source: header.source,
+            ci_version: header.ci_version,
             to,
+            target: ProfileTarget::Group,
             profile: piano(),
-            channels: ProfileChannels::BY_ADDRESS,
         }
     });
     assert!(device.on_message(&set, now).is_empty());
@@ -625,9 +627,10 @@ fn what_an_initiator_reads_is_not_answered_by_the_management_core() {
             }
         }),
         Decoded::Message(CiMessage::ProfileEnabled {
-            header: CiHeader::new(Muid::of(PEER)),
+            source: Muid::of(PEER),
+            ci_version: CI_VERSION,
+            target: ProfileTarget::FunctionBlock,
             profile: piano(),
-            channels: ProfileChannels::BY_ADDRESS,
         }),
         Decoded::Message(CiMessage::ProfileAdded {
             header: CiHeader::new(Muid::of(PEER)),

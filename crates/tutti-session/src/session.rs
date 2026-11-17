@@ -10,7 +10,7 @@ use tutti_graph::PrerollTable;
 use tutti_nodes::ClickSettings;
 use tutti_tempo::TempoMap;
 use tutti_transport::{FadeOut, LoopEdit, MotionEvent, TimedError, Transport};
-use tutti_types::{At, Beat, Bpm, ChannelLayout, ChannelTopology, LoopRange, Samples};
+use tutti_types::{At, Beat, Bpm, ChannelLayout, ChannelTopology, LoopRange, SampleRate, Samples};
 
 use crate::RootDeclaration;
 use crate::graph::{Committed, CrossfadeId, Graph, Retried};
@@ -98,7 +98,10 @@ pub const PHASES: &[Phase] = &[
 /// What one phase reads besides the session.
 #[derive(Clone, Copy, Debug)]
 pub struct PhaseCx<'a> {
-    /// The time thresholds are measured on (a test passes its own).
+    /// The time thresholds are measured on (a test passes its own). On the OS
+    /// clock: it is also the time the MIDI outputs are drained at, which their
+    /// sends are timed against, so it may be stale by the phases that ran
+    /// before the drain.
     pub now: Instant,
     /// The host's modulation declarations and the resolver for its keys;
     /// `None`: the session's own ([`Session::mods_mut`]). Read by the
@@ -1199,7 +1202,10 @@ impl<C: Clock> Session<C> {
                 #[cfg(feature = "midi")]
                 {
                     let playhead = self.playhead();
-                    if self.midi_state.midi_out_phase(&mut self.graph, &playhead) {
+                    if self
+                        .midi_state
+                        .midi_out_phase(&mut self.graph, &playhead, cx.now)
+                    {
                         self.commit();
                     }
                 }
@@ -1530,9 +1536,16 @@ impl<C: Clock> Session<C> {
         lost
     }
 
-    /// The transport: its rate follows the device's.
-    pub fn transport(&self) -> &Transport {
-        &self.transport
+    /// The rate the graph is prepared at; it follows the device's.
+    #[must_use]
+    pub fn sample_rate(&self) -> SampleRate {
+        self.transport.sample_rate()
+    }
+
+    /// The project's tempo map as last published.
+    #[must_use]
+    pub fn tempo_map(&self) -> Arc<TempoMap> {
+        self.transport.settings().tempo_map()
     }
 
     /// The playhead, in one read: its beat, the graph frame, the transport

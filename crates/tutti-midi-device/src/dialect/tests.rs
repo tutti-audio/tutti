@@ -6,7 +6,10 @@ use tutti_ump::{
 };
 
 use super::*;
-use crate::ci::{CiHeader, CiMessage, CiVersion, Decoded, Muid, ProfileInitiator};
+use crate::ci::{
+    CI_VERSION, CiMessage, CiVersion, Decoded, Muid, ProfileChannels, ProfileInitiator,
+    ProfileTarget,
+};
 use crate::endpoint::{Capabilities, FunctionBlock, Supports};
 use tutti_fixtures::midi;
 
@@ -123,11 +126,15 @@ fn speaking(protocol: Protocol) -> Endpoint {
     endpoint(protocol, Direction::Bidirectional, true)
 }
 
-fn header(address: CiDeviceId, version: u8) -> CiHeader {
-    CiHeader {
-        device_id: address,
-        ci_version: CiVersion::of(version),
-        ..CiHeader::new(Muid::of(PEER))
+/// The target at `address`; only a Channel names a count (§7.10 note).
+fn target(address: CiDeviceId, channels: u16) -> ProfileTarget {
+    match address {
+        CiDeviceId::Channel(channel) => ProfileTarget::Channel {
+            channel,
+            channels: ProfileChannels::of(channels),
+        },
+        CiDeviceId::Group => ProfileTarget::Group,
+        CiDeviceId::FunctionBlock => ProfileTarget::FunctionBlock,
     }
 }
 
@@ -137,9 +144,10 @@ fn table(reports: &[(CiDeviceId, Option<u16>)]) -> ProfileTable {
     let (mut peer, _) = ProfileInitiator::new(Muid::of(OURS), Muid::of(PEER), Instant::now());
     for &(address, channels) in reports {
         peer.on_message(&Decoded::Message(CiMessage::ProfileEnabled {
-            header: header(address, if channels.is_some() { 2 } else { 1 }),
+            source: Muid::of(PEER),
+            ci_version: CiVersion::of(if channels.is_some() { 2 } else { 1 }),
+            target: target(address, channels.unwrap_or(0)),
             profile: ProfileId::MPE,
-            channels: ProfileChannels::of(channels.unwrap_or(0)),
         }));
     }
     peer.table().clone()
@@ -290,9 +298,10 @@ fn a_disabled_mpe_profile_is_no_zone() {
     // M2-102 §7.3.3: a supported Profile that is not enabled does not apply.
     let (mut peer, _) = ProfileInitiator::new(Muid::of(OURS), Muid::of(PEER), Instant::now());
     peer.on_message(&Decoded::Message(CiMessage::ProfileDisabled {
-        header: header(channel(0), 2),
+        source: Muid::of(PEER),
+        ci_version: CI_VERSION,
+        target: target(channel(0), 8),
         profile: ProfileId::MPE,
-        channels: ProfileChannels::of(8),
     }));
     assert_eq!(
         *of(&speaking(Protocol::Midi2), peer.table())

@@ -5,11 +5,15 @@
 //! A bank's drive is a [`Glide`] over [`GAIN_GLIDE`], or a lane read per frame where a port drives
 //! it; a frame whose lane value is not finite reads the drive in force, the glide's value at that
 //! frame. Frame `i` reads the glide at step `taken + 1 + i`, then the block's steps are taken.
+//!
+//! [`Antialiasing`] replaces the curve at each frame by its mean over the segment from the
+//! previous input to this one, which removes most of what the curve folds back past the Nyquist
+//! frequency. The bank then keeps each channel's last two inputs.
 
 use tutti_buffers::{Float, Mono, Planes, PlanesMut, Sample};
-use tutti_types::{Drive, SampleRate};
+use tutti_types::{Drive, MAX_CHANNELS, SampleRate, Samples};
 
-use crate::{GAIN_GLIDE, Glide, Steps};
+use crate::{GAIN_GLIDE, Glide, OversamplingFactor, Steps};
 
 /// The frames a pass over a block takes at a time: the hardness of a stretch is held in a
 /// stack array.
@@ -67,6 +71,8 @@ macro_rules! with_kind {
         }
     };
 }
+
+mod adaa;
 
 impl ShapeKind {
     /// Shapes one sample: `x` through this curve at `drive`.
@@ -142,11 +148,82 @@ impl ShapeKind {
 
 /// The ninth-order smoothstep: `0 → 0`, `1 → 1`, with the first four
 /// derivatives zero at both ends, so each [`ShapeKind::SoftCrush`] step is a
-/// smooth S rather than a jump.
+/// smooth S rather than a jump. Generic over `f32` and `f64`, whose arithmetic it keeps
+/// separate: the coefficients are exact in both.
 #[inline]
-fn smooth9(x: f32) -> f32 {
+fn smooth9<T>(x: T) -> T
+where
+    T: Copy
+        + From<f32>
+        + core::ops::Add<Output = T>
+        + core::ops::Sub<Output = T>
+        + core::ops::Mul<Output = T>,
+{
+    let c = T::from;
     let x2 = x * x;
-    ((((70.0 * x - 315.0) * x + 540.0) * x - 420.0) * x + 126.0) * x2 * x2 * x
+    ((((c(70.0) * x - c(315.0)) * x + c(540.0)) * x - c(420.0)) * x + c(126.0)) * x2 * x2 * x
+}
+
+/// The order of antiderivative antialiasing (ADAA) a [`WaveshaperBank`] shapes with.
+///
+/// With `F1` the antiderivative of the curve `g` and `F2` that of `F1`, **first-order** ADAA
+/// outputs, from the input `x` and the one before it `x'`, `(F1(x) - F1(x')) / (x - x')`: the
+/// mean of `g` over the segment between them. Where `|x - x'|` is under 1e-4 (in the units of
+/// the curve's argument) it outputs `g((x + x') / 2)`.
+///
+/// **Second-order** ADAA, from `x`, `x'` and `x''`, with `D(p, q) = (F2(p) - F2(q)) / (p - q)`,
+/// outputs `2 (D(x, x') - D(x', x'')) / (x - x'')`. Where `|p - q|` is under 1e-4, `D(p, q)` is
+/// `F1((p + q) / 2)`. Where `|x - x''|` is under 1e-4, with `m = (x + x'') / 2`, it outputs the
+/// limit `2 (F1(m) - D(m, x')) / (m - x')`, and `g(m)` where `|m - x'|` is under 1e-4 too.
+///
+/// The history is the input before the drive, and the drive of the frame scales all of it, so a
+/// drive change makes no step. The state is `f64`. A non-finite input enters the history as 0,
+/// so the frame after it (the two after, at second order) reads its segment from 0.
+///
+/// Each order delays the signal: half a frame at first order, a whole frame at second
+/// ([`delay`](Self::delay)). A kind whose antiderivatives are not elementary to the order asked
+/// for shapes with the highest order it has ([`ShapeKind::max_antialiasing`]); `Off` is the
+/// memoryless curve.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[non_exhaustive]
+pub enum Antialiasing {
+    /// The curve at each sample.
+    #[default]
+    Off,
+    /// The mean of the curve over the segment between two inputs.
+    FirstOrder,
+    /// The second-order form over three inputs: `HardClip` and `Softsign`; the other kinds
+    /// shape at first order.
+    SecondOrder,
+}
+
+impl Antialiasing {
+    /// The frames of input an output reads back: 0, 1 or 2, which is also its delay in half
+    /// frames.
+    const fn depth(self) -> usize {
+        match self {
+            Self::Off => 0,
+            Self::FirstOrder => 1,
+            Self::SecondOrder => 2,
+        }
+    }
+
+    /// The delay in whole frames of a rate `factor` times lower than the one the bank shapes
+    /// at, rounded to the nearest frame, a half up: a first-order bank at the rate itself
+    /// delays by half a frame, which a whole-frame latency declares as one.
+    #[must_use]
+    pub fn delay(self, factor: Option<OversamplingFactor>) -> Samples {
+        let factor = factor.map_or(1, OversamplingFactor::get);
+        Samples((self.depth() + factor) / (2 * factor))
+    }
+
+    /// The frames the output rings after the input stops, at a rate `factor` times lower than
+    /// the one the bank shapes at, rounded up: the output reads back as many inputs as the order.
+    #[must_use]
+    pub fn ring_out(self, factor: Option<OversamplingFactor>) -> Samples {
+        let factor = factor.map_or(1, OversamplingFactor::get);
+        Samples(self.depth().div_ceil(factor))
+    }
 }
 
 /// The controls of a [`WaveshaperBank`].
@@ -165,7 +242,8 @@ impl WaveshaperControls {
 }
 
 /// A waveshaper of any width: one curve ([`ShapeKind`]) at one drive shared by every
-/// channel. The channels keep no state, so each is shaped alone.
+/// channel, each channel shaped alone. Memoryless unless [`antialiasing`](Self::antialiasing)
+/// is on, when each channel keeps its last two inputs. At most [`MAX_CHANNELS`] channels wide.
 ///
 /// Built on the control side for one rate; nothing it holds grows.
 #[derive(Clone, Copy, Debug)]
@@ -175,6 +253,10 @@ pub struct WaveshaperBank {
     drive: Glide<f32>,
     /// The steps a drive glide takes: [`GAIN_GLIDE`] at the rate.
     steps: u32,
+    /// The order the bank shapes with: the one asked for, within what the kind has.
+    antialiasing: Antialiasing,
+    /// Each channel's last two inputs before the drive, newest first.
+    history: [[f64; 2]; MAX_CHANNELS],
 }
 
 impl WaveshaperBank {
@@ -188,7 +270,30 @@ impl WaveshaperBank {
             kind,
             drive: Glide::landed(WaveshaperControls::DEFAULT.drive.get()),
             steps,
+            antialiasing: Antialiasing::Off,
+            history: [[0.0; 2]; MAX_CHANNELS],
         }
+    }
+
+    /// Shapes with `order` of antialiasing, up to what the kind has
+    /// ([`ShapeKind::max_antialiasing`]); the default is [`Antialiasing::Off`].
+    #[must_use]
+    pub fn antialiasing(mut self, order: Antialiasing) -> Self {
+        self.antialiasing = order.min(self.kind.max_antialiasing());
+        self
+    }
+
+    /// The order the bank shapes with: the one asked for, within what the kind has.
+    #[must_use]
+    pub fn antialiasing_order(&self) -> Antialiasing {
+        self.antialiasing
+    }
+
+    /// Back to rest: [`settle`](Self::settle)s the drive on its target and clears every
+    /// channel's history.
+    pub fn reset(&mut self) {
+        self.settle();
+        self.history = [[0.0; 2]; MAX_CHANNELS];
     }
 
     /// Lands the drive on its target now: back to rest.
@@ -207,7 +312,8 @@ impl WaveshaperBank {
     /// `lane` is the drive per frame where a port drives it: a frame past its end, or one
     /// that is not finite, reads the drive in force: the glide's value at that frame. Channel `c`
     /// of `input` feeds channel `c` of `output`; a channel past the narrower of the two views is
-    /// not touched, and the frames rendered are the fewer of the two views'. No allocation.
+    /// not touched, and the frames rendered are the fewer of the two
+    /// views'. No allocation.
     pub fn process<S: Float>(
         &mut self,
         lane: Option<Mono<'_, S>>,
@@ -216,10 +322,12 @@ impl WaveshaperBank {
     ) {
         let frames = input.frames().get().min(output.frames().get());
         let width = input.channels().min(output.channels());
+        debug_assert!(width <= MAX_CHANNELS, "a bank is at most MAX_CHANNELS wide");
         let kind = self.kind;
         let blended = self.drive.blended(frames);
         let taken = self.drive.taken();
-        if lane.is_none() && blended == 0 {
+        let order = self.antialiasing;
+        if order == Antialiasing::Off && lane.is_none() && blended == 0 {
             let hardness = kind.hardness(self.drive.target());
             for c in 0..width {
                 let mut plane = output.plane_mut(c);
@@ -248,11 +356,14 @@ impl WaveshaperBank {
                 }
                 for c in 0..width {
                     let mut plane = output.plane_mut(c);
-                    kind.shape_each(
-                        &hardness[..end - start],
-                        &input.plane(c).samples()[start..end],
-                        &mut plane.samples_mut()[start..end],
-                    );
+                    let (hardness, input) = (&hardness[..end - start], input.plane(c));
+                    let (input, output) = (&input.samples()[start..end], plane.samples_mut());
+                    let output = &mut output[start..end];
+                    if order == Antialiasing::Off {
+                        kind.shape_each(hardness, input, output);
+                    } else {
+                        kind.adaa_each(order, hardness, input, output, &mut self.history[c]);
+                    }
                 }
                 start = end;
             }

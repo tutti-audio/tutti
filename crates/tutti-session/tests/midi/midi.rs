@@ -1236,15 +1236,14 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
                         );
                     }
                 }
-                Decoded::Message(CiMessage::SetProfileOn {
-                    header, channels, ..
-                }) => {
-                    set_on.push((header.device_id, channels));
+                Decoded::Message(CiMessage::SetProfileOn { target, .. }) => {
+                    set_on.push((target.address(), target.channels()));
                     answers.extend(
                         CiMessage::ProfileEnabled {
-                            header: at(header.device_id),
+                            source: peer,
+                            ci_version: CI_VERSION,
+                            target,
                             profile,
-                            channels,
                         }
                         .packets(MidiGroup::FIRST),
                     );
@@ -1438,8 +1437,8 @@ impl MpePeer {
     ) {
         use tutti_midi_device::{
             CI_VERSION, CiCategories, CiDeviceId, CiHeader, CiMessage, Decoded, DiscoveryData,
-            MaxSysexSize, Nak, ProfileId, ProfileLists, SUB_ID2_MESSAGE_REPORT_INQUIRY,
-            SUB_ID2_SET_PROFILE_OFF, SUB_ID2_SET_PROFILE_ON,
+            MaxSysexSize, Nak, ProfileId, ProfileLists, ProfileTarget,
+            SUB_ID2_MESSAGE_REPORT_INQUIRY, SUB_ID2_SET_PROFILE_OFF, SUB_ID2_SET_PROFILE_ON,
         };
         use tutti_ump::{DeviceIdentity, ManufacturerId, SysexStep, U7};
         let at = |device_id| CiHeader {
@@ -1459,8 +1458,8 @@ impl MpePeer {
             };
             let decoded = CiMessage::decode(self.assembler.message(done).payload());
             match &decoded {
-                Decoded::Message(CiMessage::SetProfileOn { channels, .. }) => {
-                    self.asked.push(Asked::On(*channels));
+                Decoded::Message(CiMessage::SetProfileOn { target, .. }) => {
+                    self.asked.push(Asked::On(target.channels()));
                 }
                 Decoded::Message(CiMessage::SetProfileOff { .. }) => self.asked.push(Asked::Off),
                 Decoded::Message(CiMessage::MessageReportInquiry { scope, .. }) => {
@@ -1507,36 +1506,45 @@ impl MpePeer {
                         );
                     }
                 }
-                Decoded::Message(CiMessage::SetProfileOn {
-                    header, channels, ..
-                }) => match self.switch {
-                    Reply::Answer => answers.extend(
-                        CiMessage::ProfileEnabled {
-                            header: at(header.device_id),
-                            profile: ProfileId::MPE,
-                            channels,
-                        }
-                        .packets(MidiGroup::FIRST),
-                    ),
-                    Reply::Refuse => answers.extend(
-                        CiMessage::Nak {
-                            header: at(header.device_id),
-                            to: header.source,
-                            nak: Nak::new(
-                                U7::of(SUB_ID2_SET_PROFILE_ON),
-                                Nak::STATUS_PROFILE_NOT_SUPPORTED,
-                            ),
-                        }
-                        .packets(MidiGroup::FIRST),
-                    ),
-                    Reply::Silent => {}
-                },
+                Decoded::Message(CiMessage::SetProfileOn { source, target, .. }) => {
+                    match self.switch {
+                        Reply::Answer => answers.extend(
+                            CiMessage::ProfileEnabled {
+                                source: self.muid,
+                                ci_version: CI_VERSION,
+                                target,
+                                profile: ProfileId::MPE,
+                            }
+                            .packets(MidiGroup::FIRST),
+                        ),
+                        Reply::Refuse => answers.extend(
+                            CiMessage::Nak {
+                                header: at(target.address()),
+                                to: source,
+                                nak: Nak::new(
+                                    U7::of(SUB_ID2_SET_PROFILE_ON),
+                                    Nak::STATUS_PROFILE_NOT_SUPPORTED,
+                                ),
+                            }
+                            .packets(MidiGroup::FIRST),
+                        ),
+                        Reply::Silent => {}
+                    }
+                }
                 Decoded::Message(CiMessage::SetProfileOff { header, .. }) => match self.switch {
                     Reply::Answer => answers.extend(
                         CiMessage::ProfileDisabled {
-                            header: at(header.device_id),
+                            source: self.muid,
+                            ci_version: CI_VERSION,
+                            target: match header.device_id {
+                                CiDeviceId::Channel(channel) => ProfileTarget::Channel {
+                                    channel,
+                                    channels: tutti_midi_device::ProfileChannels::of(4),
+                                },
+                                CiDeviceId::Group => ProfileTarget::Group,
+                                CiDeviceId::FunctionBlock => ProfileTarget::FunctionBlock,
+                            },
                             profile: ProfileId::MPE,
-                            channels: tutti_midi_device::ProfileChannels::of(4),
                         }
                         .packets(MidiGroup::FIRST),
                     ),

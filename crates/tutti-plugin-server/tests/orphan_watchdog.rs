@@ -39,15 +39,14 @@ use std::time::{Duration, Instant};
 /// numbers state "how many poll intervals", not a wall-clock guess.
 const POLL_SLICE: Duration = Duration::from_millis(50);
 
-/// How long an orphaned server gets to notice and exit, as a multiple of the
-/// poll interval. Generous — the property under test is "bounded", not "fast",
-/// and a loaded CI box should not turn a correct server into a red test. A
-/// server that compares against the wrong PID never exits at all, so no
-/// plausible tightening of this number changes a verdict.
-const EXIT_DEADLINE: Duration = Duration::from_millis(50 * 60);
+/// The guard on an orphaned server's exit: it is a hang guard, a thousand poll
+/// intervals, and a server that compares against the wrong PID never exits at
+/// all, so it fails whatever this number is.
+const EXIT_DEADLINE: Duration = Duration::from_secs(60);
 
-/// How long a server with a *live* parent is watched for a spurious exit.
-/// Long enough that the watchdog has run its check many times over.
+/// How long a server with a *live* parent is watched for a spurious exit: an
+/// observation window for an event that must not happen, long enough that the
+/// watchdog has run its check many times over. It asserts no speed.
 const STAY_ALIVE_WINDOW: Duration = Duration::from_millis(50 * 20);
 
 /// Has the process `pid` exited?

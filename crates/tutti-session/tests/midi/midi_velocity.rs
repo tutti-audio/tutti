@@ -10,7 +10,6 @@ use crate::common::{MF, Seen, Tap, note, offline};
 use std::sync::Arc;
 use tutti_buffers::InterleavedMut;
 use tutti_midi_protocol::channel_voice;
-use tutti_transport::MotionEvent;
 use tutti_types::{Beat, BeatDuration, ChannelLayout};
 use tutti_ump::Voice2;
 
@@ -25,10 +24,7 @@ fn velocity_keeps_its_full_width() {
         .play_clip(tap, Beat(0.0), events)
         .expect("a tap takes a clip");
     let _ = s.update();
-    s.transport()
-        .motion()
-        .try_send(MotionEvent::Play)
-        .expect("room");
+    s.play().expect("room");
     let mut buf = vec![0.0f32; 64 * 2];
     s.render(&mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap());
 
