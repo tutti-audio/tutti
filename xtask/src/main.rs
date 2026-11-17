@@ -150,6 +150,13 @@ fn execute(step: &Step, ctx: &Ctx) -> Result<(), u8> {
         }
         Step::DocFeatures => doc_features(ctx),
         Step::Package => package(ctx),
+        Step::FuzzList => {
+            for t in fuzz_targets(ctx)? {
+                println!("{t}");
+            }
+            Ok(())
+        }
+        Step::Fuzz { target, secs } => fuzz(target.as_deref(), *secs, ctx),
         Step::UmbrellaApi(dir) => umbrella_api(ctx, dir.as_deref()),
         Step::Release(v) => release::run(&ctx.root, v).map_err(|e| {
             eprintln!("xtask: release: {e}");
@@ -376,6 +383,60 @@ fn package(ctx: &Ctx) -> Result<(), u8> {
         Ok(_) => Err(1),
         Err(e) => Err(spawn_failed(&c, &e)),
     }
+}
+
+/// The fuzz targets: the sorted directory names under the corpus.
+fn fuzz_targets(ctx: &Ctx) -> Result<Vec<String>, u8> {
+    let dir = ctx.root.join(recipes::FUZZ_CORPUS);
+    let entries = std::fs::read_dir(&dir).map_err(|e| {
+        eprintln!("xtask: cannot read {}: {e}", dir.display());
+        1
+    })?;
+    let mut names: Vec<String> = entries
+        .flatten()
+        .filter(|e| e.path().is_dir())
+        .filter_map(|e| e.file_name().into_string().ok())
+        .collect();
+    names.sort();
+    Ok(names)
+}
+
+/// Runs cargo-fuzz over `target`, or over every target in turn for `None`; every
+/// run is attempted and the recipe fails if any did (a crash included).
+fn fuzz(target: Option<&str>, secs: u32, ctx: &Ctx) -> Result<(), u8> {
+    let all = fuzz_targets(ctx)?;
+    let chosen: Vec<String> = match target {
+        None => all,
+        Some(t) if all.iter().any(|a| a == t) => vec![t.to_owned()],
+        Some(t) => {
+            eprintln!(
+                "xtask: no fuzz target `{t}`; the targets are: {}",
+                all.join(", ")
+            );
+            return Err(2);
+        }
+    };
+    let mut failed = Vec::new();
+    for t in &chosen {
+        let work = ctx.root.join("testing/tutti-fuzz/fuzz/corpus").join(t);
+        if let Err(e) = std::fs::create_dir_all(&work) {
+            eprintln!("xtask: cannot create {}: {e}", work.display());
+            return Err(1);
+        }
+        let c = recipes::fuzz_cmd(t, secs);
+        eprintln!("+ {}", c.display());
+        if run(&c, ctx).is_err() {
+            failed.push(t.as_str());
+        }
+    }
+    if failed.is_empty() {
+        return Ok(());
+    }
+    eprintln!(
+        "xtask: fuzz failed for {}; a crash input is under testing/tutti-fuzz/fuzz/artifacts/<target>/",
+        failed.join(", ")
+    );
+    Err(1)
 }
 
 fn command(c: &Cmd, ctx: &Ctx) -> process::Command {
