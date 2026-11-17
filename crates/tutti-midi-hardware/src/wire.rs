@@ -17,8 +17,7 @@
 //! - **A MIDI 1.0 Protocol endpoint**, and a MIDI 1.0 port, gets MIDI 1.0 (§3.2:
 //!   UMP MIDI 1.0 Devices use no message of Message Type 0x4, MIDI 2.0 Channel
 //!   Voice Messages): each type `0x4` packet through one
-//!   [`Narrower`] for the output (M2-104 Appendix D.2, per Group and Channel, so a
-//!   parameter select is skipped only where the receiver has seen it); type
+//!   [`Narrower`] for the output (M2-104 Appendix D.2, per Group and Channel); type
 //!   `0x2`, System and SysEx7 and every other type pass as they are. A
 //!   packet the narrower has no MIDI 1.0 form for (a per-note controller,
 //!   D.2.8) is dropped.
@@ -64,9 +63,7 @@ impl Wire {
         self.config
     }
 
-    /// The device now has `config`. A change of Protocol makes the narrower
-    /// forget what it believes the receiver has selected: a receiver that was
-    /// in another Protocol has not seen it.
+    /// The device now has `config`. A change of Protocol resets the narrower.
     pub(crate) fn set_config(&mut self, config: StreamConfig) {
         if config.protocol != self.config.protocol {
             self.narrower.reset();

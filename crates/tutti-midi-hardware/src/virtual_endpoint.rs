@@ -104,8 +104,7 @@ pub(crate) trait SourceBackend: Send + Sync {
 /// How a source brings a message to its protocol.
 enum Conversion {
     /// A MIDI 1.0 endpoint: MIDI 2.0 voice messages narrow through the one
-    /// [`Narrower`] of the endpoint's life, which keeps the parameter and bank
-    /// the subscribers have been sent (M2-104 Appendix D.2).
+    /// [`Narrower`] of the endpoint's life (M2-104 Appendix D.2).
     Narrow(Box<Mutex<Narrower>>),
     /// A MIDI 2.0 endpoint: MIDI 1.0 voice messages widen, holding the
     /// Registered and Assignable Controller runs a MIDI 1.0 stream spreads over
@@ -161,18 +160,14 @@ impl VirtualSource {
     /// endpoint (M2-115, M2-104 Appendix D.2): a Program Change with a bank is
     /// the Bank Select controllers and the Program Change, and a Registered or
     /// Assignable Controller is its four Control Changes, the parameter select
-    /// skipped when the subscribers have it. A MIDI 1.0 voice message widens on
+    /// sent every time. A MIDI 1.0 voice message widens on
     /// a MIDI 2.0 one; a MIDI 1.0 Registered or Assignable Controller is several
     /// messages, so the widened controller is sent with the message that
     /// completes it and the earlier ones send nothing. Any other message is
     /// sent as it is.
     ///
     /// On a MIDI 1.0 endpoint a MIDI 1.0 packet is sent as it is and bypasses
-    /// the narrowing state: a raw Bank Select or parameter select sent beside
-    /// narrowed messages is not tracked, so mixing the two on one endpoint is
-    /// unsupported. A send the OS refuses leaves the subscribers' state
-    /// unknown, so the next narrowed message sends its Bank Select or parameter
-    /// select again.
+    /// the narrowing state. A send the OS refuses leaves that state as it was.
     ///
     /// Not real-time safe: it holds a lock across the OS send. Call it from a
     /// control thread.
@@ -200,10 +195,6 @@ impl VirtualSource {
                         sent = self.backend.send(packet.words());
                     }
                 });
-                if sent.is_err() {
-                    // Part of a sequence may have reached the subscribers.
-                    narrower.reset();
-                }
                 if count == 0 {
                     // A MIDI 2.0 voice message with a MIDI 1.0 form narrows to at
                     // least one packet, so zero packets is a message with none:
@@ -362,9 +353,8 @@ mod tests {
             .collect()
     }
 
-    // M2-104 Appendix D.2.3: a parameter select is skipped only where the
-    // receiver has seen it. A send that fails mid-sequence leaves the receiver
-    // with an unknown part of the select, so the next controller sends it whole.
+    // M2-104 Appendix D.2.3: every controller is the whole sequence of four, so a
+    // send that fails mid-sequence leaves the next controller whole.
     #[test]
     fn a_refused_send_makes_the_next_registered_controller_send_its_select_again() {
         // The first controller's second packet (CC 100) is refused.
@@ -378,12 +368,70 @@ mod tests {
         assert_eq!(controllers(&sent), [101, 101, 100, 6, 38]);
     }
 
-    // The same controller twice sends the select once.
+    /// **A failed send leaves an MPE note's member channel as it was**: the
+    /// narrower's note allocation is not dropped by a refused packet, so the
+    /// note's per-note bend still goes to its channel (M2-104 D.2.8, MPE mode).
     #[test]
-    fn a_second_value_of_the_selected_parameter_sends_no_select() {
+    fn a_failed_send_keeps_an_mpe_notes_channel() {
+        use tutti_midi_protocol::{
+            ExtremeValues, MpeZoneConfig, PerNoteTranslation, PitchBendSensitivity, TranslationMode,
+        };
+        use tutti_ump::{Address, Attribute, BendValue, NoteNumber, NoteVelocity};
+        let zone = MpeZoneConfig::lower(
+            2,
+            PitchBendSensitivity::MPE_MASTER_DEFAULT,
+            PitchBendSensitivity::MPE_MEMBER_DEFAULT,
+        )
+        .unwrap();
+        let narrower = Narrower::with_mode(TranslationMode {
+            extremes: ExtremeValues::Scaled,
+            per_note: PerNoteTranslation::Mpe(zone),
+        });
+        // Send 0 (the Note On) succeeds and send 1 (the RPN's CC 101) is refused.
+        let (mut source, sent) = midi1_source(1);
+        source.conversion = Conversion::Narrow(Box::new(Mutex::new(narrower)));
+        let address = Address {
+            group: MidiGroup::FIRST,
+            channel: MidiChannel::FIRST,
+        };
+        let note = NoteNumber::of(60);
+        source
+            .send(
+                Message::midi2(
+                    address,
+                    Voice2::NoteOn {
+                        note,
+                        velocity: NoteVelocity::new(0x8000),
+                        attribute: Attribute::None,
+                    },
+                )
+                .into(),
+            )
+            .unwrap();
+        assert!(source.send(bend_range(12)).is_err());
+        source
+            .send(
+                Message::midi2(
+                    address,
+                    Voice2::PerNotePitchBend {
+                        note,
+                        value: BendValue::new(0x8000_0000),
+                    },
+                )
+                .into(),
+            )
+            .unwrap();
+        let words: Vec<u32> = sent.lock().unwrap().iter().map(|u| u.0[0]).collect();
+        // Note On on member channel 2 (0x91), then its Pitch Bend, centre 0x2000.
+        assert_eq!(words, [0x2091_3C40, 0x20E1_0040]);
+    }
+
+    // M2-104 Appendix D.2.3: the same controller twice is the four messages twice.
+    #[test]
+    fn a_second_value_of_the_same_parameter_sends_the_select_again() {
         let (source, sent) = midi1_source(usize::MAX);
         source.send(bend_range(12)).unwrap();
         source.send(bend_range(7)).unwrap();
-        assert_eq!(controllers(&sent), [101, 100, 6, 38, 6, 38]);
+        assert_eq!(controllers(&sent), [101, 100, 6, 38, 101, 100, 6, 38]);
     }
 }

@@ -1,9 +1,10 @@
 //! [`Client`] and [`Host`]: the two roles over any number of datagrams, and
-//! [`Endpoint`], the boundary a socket driver feeds.
+//! [`NetworkEndpoint`], the boundary a socket driver feeds.
 
 use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
 use std::num::NonZeroUsize;
+use std::sync::Arc;
 use std::time::Instant;
 
 use tutti_midi_device::EntropyError;
@@ -22,7 +23,7 @@ use crate::{
 /// [`Client`] and [`Host`] are the two; a driver ([`UdpDriver`](crate::UdpDriver))
 /// feeds one of them from a socket. Nothing here blocks, reads a clock or
 /// touches the network.
-pub trait Endpoint {
+pub trait NetworkEndpoint {
     /// Takes a datagram received from `from` at `now`.
     fn on_message(&mut self, from: SocketAddr, datagram: &[u8], now: Instant);
 
@@ -36,14 +37,35 @@ pub trait Endpoint {
     /// The next event for the application, if one is queued.
     fn poll_event(&mut self) -> Option<Event>;
 
+    /// How many events were dropped because [`MAX_QUEUED_EVENTS`] were
+    /// already waiting for [`poll_event`](Self::poll_event), since the
+    /// endpoint was made: a data event that found the queue full, or an event
+    /// a later session-life event evicted. An application that polls events
+    /// never sees the count rise.
+    fn events_lost(&self) -> u64;
+
     /// When [`on_timeout`](Self::on_timeout) next has work, if ever.
     fn deadline(&self) -> Option<Instant>;
 }
+
+/// The most events an endpoint holds for the application; the queue never
+/// exceeds it, so an application that never polls costs the endpoint a bounded
+/// amount of memory. Every event lost is counted
+/// ([`events_lost`](NetworkEndpoint::events_lost)).
+///
+/// A data event (`Ump`, `DataLost`, `Reset`, `Nak`) that finds the queue full
+/// is dropped. The events of a session's life (`Established`, `Confirm`,
+/// `Closed`, `AuthenticationFailed` and `NonceUnavailable`) take priority:
+/// one that finds the queue full evicts the oldest data event, and when no
+/// data event is queued, the oldest session-life event. Session-life events
+/// are lost only when the queue holds nothing else.
+pub const MAX_QUEUED_EVENTS: usize = 4096;
 
 #[derive(Debug, Default)]
 struct Outbox {
     transmits: VecDeque<Transmit>,
     events: VecDeque<Event>,
+    events_lost: u64,
 }
 
 impl Outbox {
@@ -56,19 +78,42 @@ impl Outbox {
                 .into_iter()
                 .map(|payload| Transmit { to: peer, payload }),
         );
-        self.events.extend(events);
+        for event in events {
+            if self.events.len() < MAX_QUEUED_EVENTS {
+                self.events.push_back(event);
+            } else if is_lifecycle(&event) {
+                let oldest_data = self.events.iter().position(|e| !is_lifecycle(e));
+                self.events.remove(oldest_data.unwrap_or(0));
+                self.events.push_back(event);
+                self.events_lost += 1;
+            } else {
+                self.events_lost += 1;
+            }
+        }
     }
+}
+
+/// Whether an event reports a session's life rather than carrying data.
+const fn is_lifecycle(event: &Event) -> bool {
+    matches!(
+        event,
+        Event::Established { .. }
+            | Event::Confirm { .. }
+            | Event::Closed { .. }
+            | Event::AuthenticationFailed { .. }
+            | Event::NonceUnavailable { .. }
+    )
 }
 
 /// Feeds the commands of a datagram to a session. A datagram that does not
 /// carry the signature is ignored whole.
 fn feed(session: &mut Session, now: Instant, datagram: &[u8]) {
-    let Ok(commands) = datagram::parse(datagram) else {
+    let Ok(mut commands) = datagram::parse(datagram) else {
         return;
     };
-    for command in commands {
-        match command {
-            Ok(command) => session.on_message(command, now),
+    while let Some(received) = commands.next_received() {
+        match received {
+            Ok((header, command)) => session.on_message(header, command, now),
             Err(refused) => session.refuse_command(now, refused.header, refused.error),
         }
     }
@@ -142,7 +187,7 @@ impl Client {
     }
 }
 
-impl Endpoint for Client {
+impl NetworkEndpoint for Client {
     fn on_message(&mut self, from: SocketAddr, datagram: &[u8], now: Instant) {
         // A Client talks to its Host's address alone.
         if from != self.host {
@@ -163,6 +208,10 @@ impl Endpoint for Client {
 
     fn poll_event(&mut self) -> Option<Event> {
         self.outbox.events.pop_front()
+    }
+
+    fn events_lost(&self) -> u64 {
+        self.outbox.events_lost
     }
 
     fn deadline(&self) -> Option<Instant> {
@@ -202,7 +251,12 @@ impl HostConfig {
 /// A Host: serves any number of Clients, each known by its address and port.
 #[derive(Debug)]
 pub struct Host {
-    config: HostConfig,
+    identity: EndpointIdentity,
+    /// Shared with each session that answers an Invitation, so no datagram
+    /// copies it.
+    admission: Arc<Admission>,
+    max_sessions: NonZeroUsize,
+    session_config: SessionConfig,
     nonce_source: fn() -> Result<Nonce, EntropyError>,
     sessions: HashMap<SocketAddr, Session>,
     outbox: Outbox,
@@ -222,8 +276,17 @@ impl Host {
         config: HostConfig,
         nonce_source: fn() -> Result<Nonce, EntropyError>,
     ) -> Self {
+        let HostConfig {
+            identity,
+            admission,
+            max_sessions,
+            session,
+        } = config;
         Self {
-            config,
+            identity,
+            admission: Arc::new(admission),
+            max_sessions,
+            session_config: session,
             nonce_source,
             sessions: HashMap::new(),
             outbox: Outbox::default(),
@@ -314,7 +377,7 @@ impl Host {
     }
 }
 
-impl Endpoint for Host {
+impl NetworkEndpoint for Host {
     fn on_message(&mut self, from: SocketAddr, datagram: &[u8], now: Instant) {
         if let Some(session) = self.sessions.get_mut(&from) {
             feed(session, now, datagram);
@@ -328,15 +391,15 @@ impl Endpoint for Host {
         // refused the same way.
         let mut session = Session::new(
             Role::Host {
-                admission: self.config.admission.clone(),
+                admission: Arc::clone(&self.admission),
                 nonce_source: self.nonce_source,
             },
-            self.config.session,
-            self.config.identity,
+            self.session_config,
+            self.identity,
             from,
             now,
         );
-        session.set_capacity(if self.session_count() >= self.config.max_sessions.get() {
+        session.set_capacity(if self.session_count() >= self.max_sessions.get() {
             Capacity::Full
         } else {
             Capacity::Available
@@ -365,6 +428,10 @@ impl Endpoint for Host {
 
     fn poll_event(&mut self) -> Option<Event> {
         self.outbox.events.pop_front()
+    }
+
+    fn events_lost(&self) -> u64 {
+        self.outbox.events_lost
     }
 
     fn deadline(&self) -> Option<Instant> {

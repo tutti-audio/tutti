@@ -90,9 +90,9 @@ dependencies = [
 
 [[package]]
 name = "arc-lend"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f17e01608ff396d9faa8e721d6964584d0a2374ed1c9770ff3c4ddaa47f4b74c"
+checksum = "b94dbb4c0028396379c0f3cc9bcf0d5bea204746b7ba52f7fa7fbcd261f14646"
 dependencies = [
  "loom",
 ]
@@ -3128,6 +3128,7 @@ name = "tutti-plugin-ipc-ffi"
 version = "0.0.1"
 dependencies = [
  "crossbeam-utils",
+ "loom",
  "memmap2",
  "rustix",
  "thiserror 2.0.21",
@@ -3357,13 +3358,6 @@ name = "tutti-shared-plugin-vst3-cpp"
 version = "0.1.0"
 dependencies = [
  "cc",
-]
-
-[[package]]
-name = "tutti-shm-model"
-version = "0.0.1"
-dependencies = [
- "loom",
 ]
 
 [[package]]

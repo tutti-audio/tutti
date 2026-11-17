@@ -34,11 +34,9 @@ pub enum EndedBy {
     Remote,
 }
 
-/// Why a Client could not answer a challenge.
+/// Why a Host did not admit a Client that answered its challenge.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum AuthFailure {
-    /// The Host asked for a method the Client holds no credentials for.
-    NoCredentials,
     /// The Host did not accept the digest.
     DigestWrong,
     /// The Host does not know the user name.

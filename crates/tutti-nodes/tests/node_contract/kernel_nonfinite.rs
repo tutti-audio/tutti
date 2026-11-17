@@ -15,8 +15,9 @@ use tutti_nodes::{
     TremoloNode,
 };
 use tutti_nodes::{
-    BitCrusherConfig, BitCrusherNode, ButterworthOrder, CutAlignment, CutFilterConfig,
-    CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerNode,
+    BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode, ButterworthOrder,
+    CutAlignment, CutFilterConfig, CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerNode,
+    TiltFilterConfig, TiltFilterNode,
 };
 use tutti_types::{
     BitDepth, BusTopology, ChannelLayout, Db, Drive, Feedback, Frame, HoldFactor, Hz, MaxBlock,
@@ -114,6 +115,23 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
                 ChannelLayout::STEREO,
                 CutResponse::LowPass,
                 CutAlignment::LinkwitzRiley(ButterworthOrder::of(4)),
+            ))),
+        ),
+        (
+            "bell filter",
+            Box::new(BellFilterNode::from(BellFilterConfig::new(
+                ChannelLayout::STEREO,
+                Hz(2_000.0),
+                Q(2.0),
+                Db(6.0),
+            ))),
+        ),
+        (
+            "tilt filter",
+            Box::new(TiltFilterNode::from(TiltFilterConfig::new(
+                ChannelLayout::STEREO,
+                Hz(1_000.0),
+                Db(6.0),
             ))),
         ),
         (

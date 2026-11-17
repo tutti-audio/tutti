@@ -172,8 +172,9 @@ impl Fdn {
     /// frame, `σ = max(‖A‖₂, 1)` and `m` the longest line, or `None` when a
     /// line cannot be analysed (a gain that is NaN or negative, a length that is
     /// not positive). A line with a nested all-pass is read at its peak group
-    /// delay, `D (1 + |g|) / (1 - |g|)`, a conservative reading that is not part
-    /// of the proof in [`rt60_bound`](Fdn::rt60_bound).
+    /// delay, `D (1 + |g|) / (1 - |g|)`, and a one-pole absorption at its peak,
+    /// [`peak_delay`](super::Absorption::peak_delay): conservative
+    /// readings that are not part of the proof in [`rt60_bound`](Fdn::rt60_bound).
     pub(super) fn slowest(&self, band: Band) -> Option<(f64, f64, f64)> {
         let mut db_rho = f64::NEG_INFINITY;
         let mut longest = 0.0f64;
@@ -182,7 +183,7 @@ impl Fdn {
                 let g = f64::from(d.gain.magnitude().get());
                 d.delay.get() * (1.0 + g) / (1.0 - g)
             });
-            let m = l.length.get() + peak;
+            let m = l.length.get() + peak + l.absorption.peak_delay().get();
             let db_g = Db::from_amplitude_f64(f64::from(l.absorption.gain(band).get()));
             if m.is_nan() || m <= 0.0 || db_g.is_nan() {
                 return None;

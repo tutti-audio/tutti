@@ -277,19 +277,23 @@ fn rpn_and_nrpn_keep_their_own_numbers() {
     assert_eq!(out[4], vec![assignable(0, 9, 0)]);
 }
 
-// M2-115 section 4.1: bank 0 registered controllers 0 to 31 carry two 7-bit
-// fields and are zero-extended; every other is a 14-bit number, scaled
+// M2-115 section 4.1: registered controllers whose index is 0 to 31, in any
+// bank, are zero-extended; every other is a 14-bit number, scaled
 // Min-Center-Max (section 3: maximum to maximum, centre to centre).
 
+/// **Zero-extension keys on the index alone**: M2-115 section 4.1, "Translators
+/// shall use Zero-Extension Scaling on all Registered Controller (RPN) Messages
+/// where the index (RPN LSB) is 0-31". MSB 127, LSB 127 is 0x3FFF, which
+/// zero-extended is `0x3FFF << 18` (0xFFFC_0000), not the scaled 0xFFFF_FFFF.
 /// Spec: m2-115/4.1#1, m2-115/4.3#1
 #[test]
-fn bank_0_registered_controllers_0_to_31_are_zero_extended() {
-    for index in [0, 1, 6, 31] {
+fn registered_controllers_0_to_31_are_zero_extended_in_every_bank() {
+    for (bank, index) in [(0, 0), (0, 1), (0, 6), (0, 31), (1, 0), (1, 31), (127, 7)] {
         let mut t = Translator::new();
         let out = run(
             &mut t,
             &[
-                cc(CCNumber::RPN_MSB, 0),
+                cc(CCNumber::RPN_MSB, bank),
                 cc(CCNumber::RPN_LSB, index),
                 cc(CCNumber::DATA_ENTRY, 127),
                 cc(CCNumber::DATA_ENTRY_LSB, 127),
@@ -297,8 +301,8 @@ fn bank_0_registered_controllers_0_to_31_are_zero_extended() {
         );
         assert_eq!(
             out[3],
-            vec![registered(0, index, 0xFFFC_0000)],
-            "index {index}"
+            vec![registered(bank, index, 0xFFFC_0000)],
+            "bank {bank} index {index}"
         );
     }
 }
@@ -306,14 +310,19 @@ fn bank_0_registered_controllers_0_to_31_are_zero_extended() {
 /// Spec: m2-104/d.1.1#1, m2-115/3.1#1
 #[test]
 fn other_controllers_are_scaled_min_center_max() {
-    // Registered bank 0 index 32, registered bank 1, and every NRPN.
+    // Registered index 32 in bank 0 and bank 1 (section 3.1: index 32 to 127
+    // is Min-Center-Max, the boundary above zero-extension), and every NRPN.
     for (selects, make) in [
         (
             [cc(CCNumber::RPN_MSB, 0), cc(CCNumber::RPN_LSB, 32)],
             registered as fn(u8, u8, u32) -> Message,
         ),
         (
-            [cc(CCNumber::RPN_MSB, 1), cc(CCNumber::RPN_LSB, 0)],
+            [cc(CCNumber::RPN_MSB, 1), cc(CCNumber::RPN_LSB, 32)],
+            registered,
+        ),
+        (
+            [cc(CCNumber::RPN_MSB, 1), cc(CCNumber::RPN_LSB, 127)],
             registered,
         ),
         (
@@ -423,9 +432,16 @@ fn groups_keep_their_own_runs() {
     );
 }
 
+/// **The valid Bank Select stays until a Bank Select changes it** (D.3.4:
+/// "include the current valid Bank Select values in the MIDI 2.0 Protocol
+/// Program Change message. If there is no current Bank Select value associated
+/// with the Program Change, then ... set the Bank Valid bit to 0"): a Program
+/// Change before any Bank Select has no bank, bank select then two Program
+/// Changes sends the same bank (B=1) on both, and a lone CC 32 pairs with the
+/// CC 0 last sent.
 /// Spec: m2-104/7.4.6#3, m2-104/7.4.6#4, m2-104/d.3.3#8
 #[test]
-fn bank_select_rides_on_the_next_program_change_only() {
+fn the_valid_bank_select_rides_on_every_program_change_until_changed() {
     let mut t = Translator::new();
     let pc = |p: u8| -> Ump { Message::Midi1(A, Voice1::ProgramChange(U7::of(p))).into() };
     let program = |p: u8, bank: Option<(u8, u8)>| {
@@ -443,26 +459,93 @@ fn bank_select_rides_on_the_next_program_change_only() {
     let out = run(
         &mut t,
         &[
+            pc(4),
             cc(CCNumber::BANK_SELECT, 1),
             cc(CCNumber::BANK_SELECT_LSB, 2),
             pc(5),
             pc(6),
             cc(CCNumber::BANK_SELECT_LSB, 3),
             pc(7),
+            pc(8),
         ],
     );
     assert_eq!(
         out,
         vec![
+            vec![program(4, None)],
             vec![],
             vec![],
             vec![program(5, Some((1, 2)))],
-            vec![program(6, None)],
+            vec![program(6, Some((1, 2)))],
             vec![],
             // A lone CC 32 pairs with the CC 0 last sent.
             vec![program(7, Some((1, 3)))],
+            vec![program(8, Some((1, 3)))],
         ]
     );
+}
+
+fn program_change(address: Address, p: u8, bank: Option<(u8, u8)>) -> Message {
+    Message::Midi2(
+        address,
+        Voice2::ProgramChange {
+            program: U7::of(p),
+            bank: bank.map(|(msb, lsb)| Bank {
+                msb: U7::of(msb),
+                lsb: U7::of(lsb),
+            }),
+        },
+    )
+}
+
+/// **Only a Bank Select changes the valid bank** (D.3.4: "the current valid
+/// Bank Select values"): Reset All Controllers (CC 121) and other Control
+/// Changes between two Program Changes leave it valid.
+/// Spec: m2-104/d.3.3#8
+#[test]
+fn an_unrelated_control_change_leaves_the_bank_valid() {
+    let mut t = Translator::new();
+    let pc = |p: u8| -> Ump { Message::Midi1(A, Voice1::ProgramChange(U7::of(p))).into() };
+    let out = run(
+        &mut t,
+        &[
+            cc(CCNumber::BANK_SELECT, 1),
+            cc(CCNumber::BANK_SELECT_LSB, 2),
+            pc(5),
+            cc(CCNumber::RESET_ALL, 0),
+            cc(CCNumber::of(7), 100),
+            pc(6),
+        ],
+    );
+    assert_eq!(out[2], vec![program_change(A, 5, Some((1, 2)))]);
+    assert_eq!(out[5], vec![program_change(A, 6, Some((1, 2)))]);
+}
+
+/// **A Bank Select is valid for its own channel and Group** (D.3.4: "If there
+/// is no current Bank Select value associated with the Program Change ... set
+/// the Bank Valid bit to 0"): a Program Change on another channel, or on the
+/// same channel of another Group, is B=0 while the first channel's bank holds.
+#[test]
+fn the_valid_bank_is_per_channel_and_group() {
+    let mut t = Translator::new();
+    let other_channel = Address::new(MidiGroup::FIRST, MidiChannel::of(1));
+    let other_group = Address::new(MidiGroup::of(1), MidiChannel::FIRST);
+    let pc = |address: Address, p: u8| -> Ump {
+        Message::Midi1(address, Voice1::ProgramChange(U7::of(p))).into()
+    };
+    let out = run(
+        &mut t,
+        &[
+            cc(CCNumber::BANK_SELECT, 1),
+            cc(CCNumber::BANK_SELECT_LSB, 2),
+            pc(other_channel, 3),
+            pc(other_group, 4),
+            pc(A, 5),
+        ],
+    );
+    assert_eq!(out[2], vec![program_change(other_channel, 3, None)]);
+    assert_eq!(out[3], vec![program_change(other_group, 4, None)]);
+    assert_eq!(out[4], vec![program_change(A, 5, Some((1, 2)))]);
 }
 
 /// Spec: m2-104/d.3.1#1, m2-104/d.3.1#2, m2-115/3.1#1, m2-104/6.2#4
