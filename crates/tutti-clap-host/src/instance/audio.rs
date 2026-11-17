@@ -231,6 +231,14 @@ impl ClapProcessor {
         self.scratch.input_events.midi_dropped()
     }
 
+    /// Parameter edits, note expressions and transport changes not handed to
+    /// the plugin since this instance was activated, each past the room
+    /// reserved for its source. Read on this instance only, like
+    /// [`midi_dropped`](Self::midi_dropped).
+    pub fn input_events_refused(&self) -> u64 {
+        self.scratch.input_events.refused()
+    }
+
     /// Parameter points the plugin emitted past the room this instance was
     /// activated for (one queue per parameter, each with room for a block of
     /// the block size it was activated for's points): each replaced
@@ -335,7 +343,7 @@ impl ClapProcessor {
                 // The Controller reset the stream (a state or preset load): the
                 // edits queued before it, which this block already took, are not
                 // to be sent.
-                tutti_plugin_types::Edit::Reset => input_events.events.truncate(edits_from),
+                tutti_plugin_types::Edit::Reset => input_events.discard_edits(edits_from),
                 _ => {}
             });
             if !param_changes.is_empty() {

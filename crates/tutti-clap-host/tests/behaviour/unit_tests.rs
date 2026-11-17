@@ -746,12 +746,12 @@ fn test_host_state_take_clears_flag() {
     use std::sync::atomic::Ordering;
 
     let state = HostState::new(main_thread());
-    state.processing.state_dirty.store(true, Ordering::Release);
+    state.state_dirty.store(true, Ordering::Release);
 
     // First take returns true and clears
-    assert!(state.take(&state.processing.state_dirty));
+    assert!(state.take(&state.state_dirty));
     // Second take returns false
-    assert!(!state.take(&state.processing.state_dirty));
+    assert!(!state.take(&state.state_dirty));
 }
 
 /// The main thread is the one thread that proved it with a token, and no
@@ -1255,18 +1255,17 @@ fn test_output_event_list_take_events() {
 }
 
 #[test]
-fn test_input_event_list_from_events() {
+fn a_flush_list_is_sent_in_time_order() {
     let events = vec![
         ClapEvent::param_value(10, 1, 0.5),
         ClapEvent::param_value(5, 2, 0.3),
     ];
 
-    let mut list = tutti_clap_host::InputEventList::from_events(events);
-    assert_eq!(list.len(), 2);
-
+    let mut list = tutti_clap_host::FlushEvents::new(events);
     list.sort_by_time();
-    // After sorting, event at time 5 should be first
-    let raw = list.as_raw();
+    let source: *const dyn tutti_clap_ffi::EventSource = &list;
+    // SAFETY: `list` outlives the raw list, which is read here only.
+    let raw = unsafe { tutti_clap_ffi::input_raw_for_test(source) };
     unsafe {
         let size_fn = (*raw).size.unwrap();
         assert_eq!(size_fn(raw), 2);

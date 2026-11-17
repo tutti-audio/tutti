@@ -848,6 +848,19 @@ pub struct InputEventList {
     /// ([`set_param_point_room`](Self::set_param_point_room)). Unbounded
     /// until set.
     pub(crate) param_room: usize,
+    /// The Controller's parameter edits one block may add, the note
+    /// expressions and the transport changes: each source's room, set with
+    /// [`set_source_rooms`](Self::set_source_rooms). Unbounded until set.
+    edit_room: usize,
+    expression_room: usize,
+    transport_room: usize,
+    /// What each of those sources has added this block.
+    edits_pushed: usize,
+    expressions_pushed: usize,
+    transport_pushed: usize,
+    /// Edits, note expressions and transport changes refused for want of
+    /// their source's room: see [`refused`](Self::refused).
+    refused: u64,
     /// Parameter points not handed on whole since the list was built: see
     /// [`param_points_dropped`](Self::param_points_dropped).
     param_points_dropped: u64,
@@ -890,8 +903,15 @@ impl InputEventList {
             events: Vec::new(),
             order: StableOrder::default(),
             param_room: usize::MAX,
+            edit_room: usize::MAX,
+            expression_room: usize::MAX,
+            transport_room: usize::MAX,
+            edits_pushed: 0,
+            expressions_pushed: 0,
+            transport_pushed: 0,
             param_points_dropped: 0,
             midi_dropped: 0,
+            refused: 0,
             bounded: false,
             notes: Self::per_note_state(1),
             narrower: Narrower::new(),
@@ -925,8 +945,9 @@ impl InputEventList {
     /// Forgets the per-note state and every MIDI 1.0 selection, and allocates
     /// it (about 270 KiB for each port): off the audio thread, at activation.
     /// The dialect is read at activation and re-activation only: a plugin that
-    /// changes its note ports (`poll_note_ports_changed`) is not heard
-    /// differently until the embedder re-activates it.
+    /// changes its note ports raises an I/O change
+    /// ([`Request::IoChanged`](tutti_plugin_types::Request::IoChanged)), and
+    /// is not heard differently until the lifecycle re-activates it.
     pub fn set_note_ports(&mut self, midi: &[bool]) {
         let ports = midi
             .len()
@@ -972,27 +993,6 @@ impl InputEventList {
         self.groups_dropped
     }
 
-    /// Creates an input event list pre-populated with the given events.
-    pub fn from_events(events: Vec<ClapEvent>) -> Self {
-        Self {
-            // Reserved for the list's whole capacity, as `reserve` does, so
-            // `sort_by_time` stays `n log n` (`flush_params` sorts one).
-            order: StableOrder::with_capacity(events.capacity()),
-            events,
-            param_room: usize::MAX,
-            param_points_dropped: 0,
-            midi_dropped: 0,
-            bounded: false,
-            notes: Self::per_note_state(1),
-            narrower: Narrower::new(),
-            ports: 1,
-            midi_ports: 0,
-            midi_capable: u16::MAX,
-            groups_dropped: 0,
-            sysex: SysexAssembler::new(Box::default(), 0, 0),
-        }
-    }
-
     /// Reserve heap capacity for at least `n` events. Off-RT only; call
     /// once during plugin activation so steady-state `add_*` calls don't
     /// touch the allocator. `clear()` keeps the reserved capacity.
@@ -1016,21 +1016,44 @@ impl InputEventList {
         self.param_room = points;
     }
 
+    /// Bound the Controller's parameter edits, the note expressions and the
+    /// transport changes one block adds to the room the caller reserved for
+    /// each (with [`reserve`](Self::reserve), on top of the MIDI room and the
+    /// parameter points). A source past its room is refused and counted
+    /// ([`refused`](Self::refused)), so none grows the list on the audio
+    /// thread or takes another source's room. Off-RT; call it at activation.
+    pub(crate) fn set_source_rooms(&mut self, edits: usize, expressions: usize, transport: usize) {
+        self.edit_room = edits;
+        self.expression_room = expressions;
+        self.transport_room = transport;
+    }
+
     /// How many more MIDI events fit without growing a reserved list: its
-    /// room less what is set aside for parameter points.
+    /// room less what is set aside for the other sources.
     fn midi_room(&self) -> usize {
         if !self.bounded {
             return usize::MAX;
         }
-        let aside = if self.param_room == usize::MAX {
-            0
-        } else {
-            self.param_room
-        };
+        let aside = [
+            self.param_room,
+            self.edit_room,
+            self.expression_room,
+            self.transport_room,
+        ]
+        .into_iter()
+        .filter(|&room| room != usize::MAX)
+        .fold(0usize, usize::saturating_add);
         self.events
             .capacity()
             .saturating_sub(aside)
             .saturating_sub(self.events.len())
+    }
+
+    /// Edits, note expressions and transport changes refused since the list
+    /// was built, each past the room [`set_source_rooms`](Self::set_source_rooms)
+    /// gave its source.
+    pub fn refused(&self) -> u64 {
+        self.refused
     }
 
     /// MIDI events refused since the list was built, for lack of reserved
@@ -1522,8 +1545,9 @@ impl InputEventList {
     /// [`add_param_changes`](Self::add_param_changes) does a point, including
     /// its rule for an id the table lacks.
     ///
-    /// An edit does not count against the parameter room: the ring that carried
-    /// it is bounded, and the list reserves room for as many on top of it.
+    /// An edit does not count against the parameter room: it has its own
+    /// ([`set_source_rooms`](Self::set_source_rooms)), and one past it is
+    /// refused and counted ([`refused`](Self::refused)).
     pub(crate) fn add_param_edit(
         &mut self,
         param_id: u32,
@@ -1542,8 +1566,21 @@ impl InputEventList {
             None if plugin_claims_params => return self,
             None => value,
         };
+        if self.edits_pushed >= self.edit_room {
+            self.refused += 1;
+            return self;
+        }
+        self.edits_pushed += 1;
         self.events.push(ClapEvent::param_value(0, param_id, plain));
         self
+    }
+
+    /// Takes back the edits added since the list was cleared: the Controller
+    /// reset the stream, and what it queued before is not to be sent. The
+    /// edits are the first events after the MIDI, which `from` counts.
+    pub(crate) fn discard_edits(&mut self, from: usize) {
+        self.events.truncate(from);
+        self.edits_pushed = 0;
     }
 
     /// Appends each [`ClapNoteExpression`] as a CLAP `NOTE_EXPRESSION` event.
@@ -1561,6 +1598,11 @@ impl InputEventList {
                 expr.note_id,
                 expr.value,
             ) {
+                if self.expressions_pushed >= self.expression_room {
+                    self.refused += 1;
+                    continue;
+                }
+                self.expressions_pushed += 1;
                 self.events.push(event);
             }
         }
@@ -1572,14 +1614,20 @@ impl InputEventList {
     /// on (the block's own transport, `clap_process.transport`, is the one at
     /// frame 0). Added before [`sort_by_time`](Self::sort_by_time), it takes
     /// its place in time order among the block's other events, after those
-    /// already added at the same frame. Room is the caller's
-    /// ([`reserve`](Self::reserve)): at most the graph's
-    /// `MAX_TRANSPORT_CHANGES` a block.
+    /// already added at the same frame. At most the room
+    /// [`set_source_rooms`](Self::set_source_rooms) gave transport changes a
+    /// block; one past it is refused and counted
+    /// ([`refused`](Self::refused)).
     pub(crate) fn add_transport(
         &mut self,
         time: u32,
         mut event: clap_event_transport,
     ) -> &mut Self {
+        if self.transport_pushed >= self.transport_room {
+            self.refused += 1;
+            return self;
+        }
+        self.transport_pushed += 1;
         event.header.time = time;
         self.events.push(ClapEvent::Transport(event));
         self
@@ -1659,6 +1707,9 @@ impl EventList for InputEventList {
     /// (their events go with it), keeping a message still open.
     fn clear(&mut self) {
         self.events.clear();
+        self.edits_pushed = 0;
+        self.expressions_pushed = 0;
+        self.transport_pushed = 0;
         self.sysex.begin_block();
     }
 }
@@ -1673,41 +1724,88 @@ impl tutti_clap_ffi::EventSource for InputEventList {
     /// built, in the event's own `_data`); the FFI crate checks the event's
     /// pointer lies inside whichever it is handed.
     fn get(&self, index: usize) -> Option<EventRef<'_>> {
-        Some(match self.events.get(index)? {
-            ClapEvent::NoteOn(e)
-            | ClapEvent::NoteOff(e)
-            | ClapEvent::NoteChoke(e)
-            | ClapEvent::NoteEnd(e) => EventRef::Note(e),
-            ClapEvent::Midi(e) => EventRef::Midi(e),
-            ClapEvent::NoteExpression(e) => EventRef::NoteExpression(e),
-            ClapEvent::Transport(e) => EventRef::Transport(e),
-            ClapEvent::ParamValue(e) => EventRef::ParamValue(e),
-            ClapEvent::ParamMod(e) => EventRef::ParamMod(e),
-            ClapEvent::ParamGestureBegin(e) | ClapEvent::ParamGestureEnd(e) => {
-                EventRef::ParamGesture(e)
-            }
-            ClapEvent::MidiSysex { inner, _data } => EventRef::Sysex {
-                event: inner,
-                backing: if _data.is_empty() {
-                    self.sysex.bytes()
-                } else {
-                    _data
-                },
-            },
-        })
+        Some(event_ref(self.events.get(index)?, self.sysex.bytes()))
     }
 }
 
-/// How many SysEx payload buffers [`OutputEventList::reserve`] pre-warms.
-/// Far below the event reserve: SysEx is rare, so one buffer per *possible*
-/// event would be 256 allocations against a case that emits one. Past this the
-/// pool grows itself once and then recycles.
-const SYSEX_POOL_PREWARM: usize = 8;
+/// `event` as the FFI crate lends it to the plugin: a SysEx message's bytes
+/// are the event's own (`_data`), or `reassembled`, the assembler's buffer,
+/// when it has none.
+fn event_ref<'a>(event: &'a ClapEvent, reassembled: &'a [u8]) -> EventRef<'a> {
+    match event {
+        ClapEvent::NoteOn(e)
+        | ClapEvent::NoteOff(e)
+        | ClapEvent::NoteChoke(e)
+        | ClapEvent::NoteEnd(e) => EventRef::Note(e),
+        ClapEvent::Midi(e) => EventRef::Midi(e),
+        ClapEvent::NoteExpression(e) => EventRef::NoteExpression(e),
+        ClapEvent::Transport(e) => EventRef::Transport(e),
+        ClapEvent::ParamValue(e) => EventRef::ParamValue(e),
+        ClapEvent::ParamMod(e) => EventRef::ParamMod(e),
+        ClapEvent::ParamGestureBegin(e) | ClapEvent::ParamGestureEnd(e) => {
+            EventRef::ParamGesture(e)
+        }
+        ClapEvent::MidiSysex { inner, _data } => EventRef::Sysex {
+            event: inner,
+            backing: if _data.is_empty() { reassembled } else { _data },
+        },
+    }
+}
 
-/// Capacity each pre-warmed SysEx buffer starts with — enough for the common
-/// short messages (identity replies, GS/XG mode sets, MPE config) without a
-/// grow. A bulk dump grows its buffer once and keeps that capacity in the pool.
-const SYSEX_PREWARM_BYTES: usize = 64;
+/// The events of one `params.flush` call, in time order: what a parameter
+/// flush sends a plugin outside `process`. It has no MIDI stage: no per-note
+/// state, no SysEx assembler and no note ports, which a [`InputEventList`]
+/// carries for a plugin's audio blocks.
+#[derive(Debug)]
+pub struct FlushEvents {
+    events: Vec<ClapEvent>,
+    /// [`sort_by_time`](Self::sort_by_time)'s scratch, reserved with the
+    /// events.
+    order: StableOrder,
+}
+
+impl FlushEvents {
+    /// The flush of `events`, in the order given until sorted.
+    pub fn new(events: Vec<ClapEvent>) -> Self {
+        Self {
+            order: StableOrder::with_capacity(events.capacity()),
+            events,
+        }
+    }
+
+    /// Puts the events in non-decreasing time order, equal times in the order
+    /// given (CLAP's requirement of an input list).
+    pub fn sort_by_time(&mut self) -> &mut Self {
+        self.order
+            .sort_by_key(&mut self.events, |e| e.header().time);
+        self
+    }
+
+    /// The events.
+    pub fn events(&self) -> &[ClapEvent] {
+        &self.events
+    }
+}
+
+impl tutti_clap_ffi::EventSource for FlushEvents {
+    fn len(&self) -> usize {
+        self.events.len()
+    }
+
+    fn get(&self, index: usize) -> Option<EventRef<'_>> {
+        Some(event_ref(self.events.get(index)?, &[]))
+    }
+}
+
+/// How many SysEx payload buffers [`OutputEventList::reserve`] allocates: the
+/// SysEx messages one block can carry out of a plugin. Far below the event
+/// room: SysEx is rare, so one buffer per *possible* event would be 256
+/// allocations against a case that emits one. A ninth is refused and counted.
+const SYSEX_POOL_BUFFERS: usize = 8;
+
+/// Capacity of each SysEx payload buffer: the longest message a reserved
+/// [`OutputEventList`] accepts. A longer one is refused and counted.
+const SYSEX_BUFFER_BYTES: usize = 1024;
 
 /// Owned list that collects events produced by the plugin during
 /// `clap_plugin.process()`.
@@ -1722,8 +1820,11 @@ pub struct OutputEventList {
     /// CLAP's `try_push` buffer is plugin-owned and valid only for that call, so
     /// the host must copy — on the audio thread, per event, per block.
     /// [`Self::clear`] moves each payload `Vec` here instead of dropping it and
-    /// `try_push` refills one, so the allocator is touched only for a payload
-    /// larger than any buffer yet seen.
+    /// `try_push` refills one. A reserved list ([`reserve`](Self::reserve))
+    /// holds [`SYSEX_POOL_BUFFERS`] buffers of [`SYSEX_BUFFER_BYTES`], and a
+    /// message with no buffer free, or longer than one, is refused and counted
+    /// ([`events_refused`](Self::events_refused)): the pool never grows. An
+    /// unreserved list allocates a payload as it needs one.
     ///
     /// Whole `Vec`s rather than one arena: `ClapEvent::MidiSysex`'s `buffer`
     /// pointer aliases its own payload, and an arena reallocating mid-fill would
@@ -1813,7 +1914,8 @@ impl OutputEventList {
     /// or a `PARAM_VALUE` past the room set with
     /// [`set_param_room`](Self::set_param_room) whose id is not one of the
     /// plugin's parameters (a listed one keeps its latest value instead), or
-    /// an event of another space or smaller than its type's struct.
+    /// an event of another space or smaller than its type's struct, or a SysEx
+    /// message longer than a pool buffer or with none free.
     /// Counted since the list was built; zero while the plugin stays within
     /// the room.
     pub fn events_refused(&self) -> u64 {
@@ -1834,18 +1936,16 @@ impl OutputEventList {
     /// events have their own room ([`set_param_room`](Self::set_param_room))
     /// and never take from this one. Off-RT only; call it at activation.
     ///
-    /// Also pre-warms the SysEx payload pool: the pool is fed only by `clear`,
-    /// so without priming, the first block emitting SysEx still allocates on
-    /// the audio thread.
+    /// Also fills the SysEx payload pool ([`SYSEX_POOL_BUFFERS`] buffers of
+    /// [`SYSEX_BUFFER_BYTES`]), the only room a SysEx message has.
     pub fn reserve(&mut self, n: usize) {
         self.room = n;
         self.reserve_events();
 
-        let wanted = n.min(SYSEX_POOL_PREWARM);
-        self.sysex_pool.reserve(wanted);
+        let wanted = n.min(SYSEX_POOL_BUFFERS);
+        self.sysex_pool.reserve_exact(wanted);
         while self.sysex_pool.len() < wanted {
-            self.sysex_pool
-                .push(Vec::with_capacity(SYSEX_PREWARM_BYTES));
+            self.sysex_pool.push(Vec::with_capacity(SYSEX_BUFFER_BYTES));
         }
     }
 
@@ -2187,7 +2287,19 @@ impl EventSink for OutputEventList {
             },
             PluginEvent::Sysex { event, data } => {
                 if !data.is_empty() {
-                    let mut payload = self.sysex_pool.pop().unwrap_or_default();
+                    let mut payload = match self.sysex_pool.pop() {
+                        Some(buf) => buf,
+                        None if self.room == usize::MAX => Vec::new(),
+                        None => {
+                            self.refused += 1;
+                            return false;
+                        }
+                    };
+                    if self.room != usize::MAX && data.len() > payload.capacity() {
+                        self.sysex_pool.push(payload);
+                        self.refused += 1;
+                        return false;
+                    }
                     payload.clear();
                     payload.extend_from_slice(data);
                     // The buffer pointer aliases `payload`; the `ClapEvent`
@@ -2933,6 +3045,124 @@ mod tests {
         );
         assert!(got.iter().all(|&(id, _)| id != 3));
         assert_eq!(list.param_points_dropped(), 3);
+    }
+
+    /// An input list reserved as activation reserves it: a MIDI room of 8,
+    /// parameter points 4, and a room of 3 edits, 3 expressions and 2
+    /// transport changes.
+    fn reserved_list() -> InputEventList {
+        let mut list = InputEventList::new();
+        list.set_note_ports(&[false]);
+        list.reserve(8 + 4 + 3 + 3 + 2);
+        list.set_param_point_room(4);
+        list.set_source_rooms(3, 3, 2);
+        list
+    }
+
+    /// **Every input source stays within its own room, and a source past it
+    /// is refused and counted without taking another's.** MIDI is filled to
+    /// its room (and counted past it), then more edits, expressions and
+    /// transport changes than each has room for are added: the list never
+    /// grows (no allocation), each source ends at its room, and the refusals
+    /// are the surplus.
+    #[test]
+    fn each_input_source_stays_within_its_own_room() {
+        let mut list = reserved_list();
+        let capacity = list.events.capacity();
+        let notes: Vec<UmpAt> = (0..12)
+            .map(|k| (at(0), midi::note_on(MidiChannel::FIRST, 40 + k, 0x8000)))
+            .collect();
+        let expressions: Vec<ClapNoteExpression> = (0..5)
+            .map(|k| ClapNoteExpression::new(NoteExpressionType::Volume, k, 0.5))
+            .collect();
+        let transport = clap_event_transport {
+            header: clap_event_header {
+                size: std::mem::size_of::<clap_event_transport>() as u32,
+                time: 0,
+                space_id: CLAP_CORE_EVENT_SPACE_ID,
+                type_: clap_sys::events::CLAP_EVENT_TRANSPORT,
+                flags: 0,
+            },
+            flags: 0,
+            song_pos_beats: 0,
+            song_pos_seconds: 0,
+            tempo: 120.0,
+            tempo_inc: 0.0,
+            loop_start_beats: 0,
+            loop_end_beats: 0,
+            loop_start_seconds: 0,
+            loop_end_seconds: 0,
+            bar_start: 0,
+            bar_number: 0,
+            tsig_num: 4,
+            tsig_denom: 4,
+        };
+        assert_no_alloc::assert_no_alloc(|| {
+            list.add_midi_events(&notes);
+            for id in 0..5 {
+                list.add_param_edit(id, 0.5, &[], false);
+            }
+            list.add_note_expressions(&expressions);
+            for time in 0..4 {
+                list.add_transport(time, transport);
+            }
+        });
+        assert_eq!(list.events.capacity(), capacity, "the list grew");
+        let count = |pick: fn(&ClapEvent) -> bool| list.events.iter().filter(|e| pick(e)).count();
+        assert_eq!(count(|e| matches!(e, ClapEvent::NoteOn(_))), 8);
+        assert_eq!(count(|e| matches!(e, ClapEvent::ParamValue(_))), 3);
+        assert_eq!(count(|e| matches!(e, ClapEvent::NoteExpression(_))), 3);
+        assert_eq!(count(|e| matches!(e, ClapEvent::Transport(_))), 2);
+        assert_eq!(list.midi_dropped(), 4);
+        assert_eq!(list.refused(), 2 + 2 + 2);
+        // A cleared block has every room back.
+        list.clear();
+        list.add_param_edit(1, 0.5, &[], false);
+        assert_eq!(list.refused(), 6);
+    }
+
+    /// **A SysEx message past the pool or past a buffer is refused and
+    /// counted, and nothing allocates.** A reserved output list holds
+    /// `SYSEX_POOL_BUFFERS` buffers of `SYSEX_BUFFER_BYTES`: a message longer
+    /// than one is refused, so are the ones past the last free buffer, and a
+    /// cleared block has every buffer back.
+    #[test]
+    fn output_sysex_is_bounded_by_the_pool_and_counted() {
+        let mut list = OutputEventList::new();
+        list.reserve(32);
+        let event = clap_event_midi_sysex {
+            header: clap_event_header {
+                size: header_size::<clap_event_midi_sysex>(),
+                time: 0,
+                space_id: CLAP_CORE_EVENT_SPACE_ID,
+                type_: CLAP_EVENT_MIDI_SYSEX,
+                flags: 0,
+            },
+            port_index: 0,
+            buffer: std::ptr::null(),
+            size: 0,
+        };
+        let short = [0xF0, 1, 2, 0xF7];
+        let long = vec![0x55; SYSEX_BUFFER_BYTES + 1];
+        let mut accepted = 0;
+        assert_no_alloc::assert_no_alloc(|| {
+            assert!(!list.push(PluginEvent::Sysex { event, data: &long }));
+            for _ in 0..SYSEX_POOL_BUFFERS + 2 {
+                accepted += usize::from(list.push(PluginEvent::Sysex {
+                    event,
+                    data: &short,
+                }));
+            }
+            list.clear();
+        });
+        assert_eq!(accepted, SYSEX_POOL_BUFFERS);
+        assert_eq!(list.events_refused(), 1 + 2);
+        assert_eq!(list.sysex_pool.len(), SYSEX_POOL_BUFFERS);
+        assert!(
+            list.sysex_pool
+                .iter()
+                .all(|buf| buf.capacity() == SYSEX_BUFFER_BYTES)
+        );
     }
 
     #[test]

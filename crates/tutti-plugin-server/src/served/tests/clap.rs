@@ -1390,7 +1390,6 @@ fn test_clap_take_initially_clear() {
     let loaded = instance.clap_loaded();
     assert!(!loaded.take_params_flush_requested());
     assert!(!loaded.take_state_dirty());
-    assert!(!loaded.take_note_ports_changed());
 }
 
 /// A request raised from a callback is handed over once.
@@ -1434,7 +1433,6 @@ fn test_clap_take_flags() {
     assert!(loaded.take_state_dirty());
 
     // Second take should be false (cleared)
-    assert!(!loaded.take_note_ports_changed());
     assert!(!loaded.take_state_dirty());
 }
 

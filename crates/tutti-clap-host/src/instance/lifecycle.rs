@@ -10,7 +10,7 @@
 use std::sync::atomic::AtomicU64;
 
 use super::ClapLoaded;
-use super::config::{AudioScratch, RangeTable};
+use super::config::{AudioScratch, INPUT_NOTE_EXPRESSIONS, RangeTable};
 use super::controller::ClapController;
 use super::processor::{ClapProcessor, ProcessorParts};
 use super::thread_pool::PoolCell;
@@ -69,20 +69,6 @@ impl ClapLoaded {
     /// Metadata read from the plugin's descriptor at load time.
     pub fn info(&self) -> &PluginInfo {
         &self.info
-    }
-
-    /// The sample rate the plugin was last activated at. A placeholder until
-    /// the first activation.
-    pub fn sample_rate(&self) -> SampleRate {
-        self.audio.sample_rate
-    }
-
-    /// Largest block, in **frames**, the plugin was last activated for. A
-    /// `process` call asking for more is refused with
-    /// [`crate::ClapError::BlockTooLarge`]. A placeholder until the first
-    /// activation.
-    pub fn block_size(&self) -> u32 {
-        self.audio.max_frames
     }
 
     /// The format an activation runs at when `requested` is asked of this
@@ -146,11 +132,6 @@ impl ClapLoaded {
 
         // CLAP's `max_frames_count` is a `u32`, the bound `MaxBlock` holds.
         let max_frames = prepare.max_block().get_u32();
-        // The rate and block size are fixed by `activate`; a refusal below
-        // leaves the previous ones in place.
-        let previous = self.audio;
-        self.audio.sample_rate = prepare.rate();
-        self.audio.max_frames = max_frames;
         // CLAP's render mode is `[main-thread]` and carries no activation
         // constraint; a plugin without the extension has declined, which is
         // not a failure.
@@ -159,7 +140,6 @@ impl ClapLoaded {
         // The plugin may have changed its ports since it was loaded or last
         // deactivated, and the 64-bit flag is part of them.
         if let Err(e) = self.rescan_audio_ports(main) {
-            self.audio = previous;
             return Err(refuse(self, e));
         }
 
@@ -168,18 +148,16 @@ impl ClapLoaded {
                 "Plugin '{}' does not support 64-bit audio processing",
                 self.info.name
             ));
-            self.audio = previous;
             return Err(refuse(self, err));
         }
 
-        if let Err(e) = self.activate_plugin(main) {
-            self.audio = previous;
+        if let Err(e) = self.activate_plugin(main, prepare.rate(), max_frames) {
             return Err(refuse(self, e));
         }
         self.audio.f64_active = wide;
 
         let table = self.read_param_ranges(main);
-        let max_frames = self.audio.max_frames as usize;
+        let max_frames = max_frames as usize;
         let mut scratch = AudioScratch::new(prepare.format());
         let port_channels = |ports: &tutti_plugin_types::BusChannels| -> Vec<u32> {
             ports.iter().map(|c| u32::from(c.count())).collect()
@@ -225,7 +203,7 @@ impl ClapLoaded {
             .set_midi_capable_ports(&self.midi_capable_ports(main));
         scratch
             .in_note_expressions
-            .reserve_exact(super::config::INPUT_NOTE_EXPRESSIONS);
+            .reserve_exact(INPUT_NOTE_EXPRESSIONS);
 
         let ranges = Arc::new(ArcLend::new(table));
         let pools = Arc::new(ArcLend::new(PoolCell(self.pool_snapshot())));
@@ -294,12 +272,14 @@ impl ClapLoaded {
 
     /// Calls the plugin's `activate` FFI. Shared by `activate_now` and the
     /// transitions built on it.
-    pub(crate) fn activate_plugin(&mut self, main: MainThreadMarker) -> Result<()> {
+    pub(crate) fn activate_plugin(
+        &mut self,
+        main: MainThreadMarker,
+        rate: SampleRate,
+        max_frames: u32,
+    ) -> Result<()> {
         // `clap_plugin.activate` takes a bare `f64`: the unit stops at the C ABI.
-        if let Err(e) =
-            self.plugin
-                .activate(main, self.audio.sample_rate.get(), 1, self.audio.max_frames)
-        {
+        if let Err(e) = self.plugin.activate(main, rate.get(), 1, max_frames) {
             return Err(ClapError::LoadFailed {
                 path: PathBuf::new(),
                 stage: LoadStage::Activation,
@@ -353,7 +333,10 @@ impl ClapLoaded {
 /// room of `ParameterQueue::chunk_room`: the chunk's pooled points, and one
 /// more in every queue for the value a skipped block carries, which the bridge
 /// prepends), with the parameter events bounded to that room, and the edits the
-/// Controller can queue ([`EDIT_CAPACITY`]), which the room does not count. So a
+/// Controller can queue ([`EDIT_CAPACITY`]), the note expressions
+/// ([`INPUT_NOTE_EXPRESSIONS`]) and the transport changes
+/// (`MAX_TRANSPORT_CHANGES`), each source with a room of its own that the MIDI
+/// and the parameter points do not count. So a
 /// chunk the host's pool bounded reaches the plugin whole; past it (a set
 /// nothing bounded) the list's own overflow policy applies
 /// (`InputEventList::add_param_changes`). Also reserves the SysEx reassembly
@@ -363,10 +346,18 @@ fn reserve_input_events(scratch: &mut AudioScratch, table: &RangeTable, max_fram
     let param_points =
         ParameterChanges::point_budget(table.ranges.len(), ParameterQueue::chunk_room(max_frames));
     let events = &mut scratch.input_events;
-    let wanted =
-        EVENT_SCRATCH_CAPACITY + param_points + EDIT_CAPACITY + tutti_graph::MAX_TRANSPORT_CHANGES;
+    let wanted = EVENT_SCRATCH_CAPACITY
+        + param_points
+        + EDIT_CAPACITY
+        + INPUT_NOTE_EXPRESSIONS
+        + tutti_graph::MAX_TRANSPORT_CHANGES;
     events.reserve(wanted.saturating_sub(events.events.len()));
     events.set_param_point_room(param_points);
+    events.set_source_rooms(
+        EDIT_CAPACITY,
+        INPUT_NOTE_EXPRESSIONS,
+        tutti_graph::MAX_TRANSPORT_CHANGES,
+    );
     events.reserve_sysex();
 }
 

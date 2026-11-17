@@ -284,19 +284,18 @@ fn a_refused_activation_leaves_the_accepted_configuration_reported() {
     set_activate_refusal(ACTIVATE_REFUSE_NONE, 0);
 
     assert_eq!(
-        loaded.sample_rate().get(),
-        BASE_RATE,
-        "reporting 96k would tell the caller the plugin is configured for a rate it refused"
+        last_accepted_activation(),
+        Some((BASE_RATE, BASE_FRAMES)),
+        "the refused rate is not the plugin's configuration"
     );
     assert_eq!(activate_accepts(), 1, "the refusal activated nothing");
 
-    let active = loaded
+    let _active = loaded
         .activate_at::<f32>(BASE_RATE, BASE_FRAMES)
         .map_err(|(_, e)| e)
         .expect("the same instance activates at the accepted configuration");
     assert_eq!(activate_accepts(), 2);
     assert_eq!(last_accepted_activation(), Some((BASE_RATE, BASE_FRAMES)),);
-    assert_eq!(active.loaded().sample_rate().get(), BASE_RATE);
 }
 
 /// A refused block-size growth leaves the block size the plugin accepted, so
@@ -319,10 +318,11 @@ fn a_refused_block_size_growth_leaves_the_accepted_ceiling() {
 
     assert!(matches!(err, PluginError::Load { .. }), "{err:?}");
     assert_eq!(
-        loaded.block_size(),
-        BASE_FRAMES,
-        "the host must report the ceiling the plugin accepted"
+        last_accepted_activation(),
+        Some((BASE_RATE, BASE_FRAMES)),
+        "the refused ceiling is not the plugin's configuration"
     );
+    drop(loaded);
 }
 
 /// A plugin that refused one configuration still activates and processes at an
@@ -379,7 +379,6 @@ fn accepted_sample_rate_change_reaches_the_plugin() {
         Some((96_000.0, BASE_FRAMES)),
         "the new rate must reach the plugin's `activate`"
     );
-    assert_eq!(active.loaded().sample_rate().get(), 96_000.0);
 }
 
 // ---------------------------------------------------------------------------

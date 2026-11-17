@@ -4,7 +4,7 @@
 use super::ClapLoaded;
 use crate::error::{ClapError, Result};
 use crate::host::HostState;
-use crate::host::state::TimerEntry;
+use crate::host::state::{NO_RESIZE, TimerEntry};
 use crate::types::{ContentScale, EditorCapabilities, WindowHandle};
 use dpi::Size;
 use std::sync::Arc;
@@ -203,21 +203,13 @@ impl ClapLoaded {
     /// is free to ignore or clamp the size — CLAP treats it as a request, not
     /// an instruction.
     pub fn take_editor_resize_request(&self) -> Option<Size> {
-        if !self
-            .host_state
-            .gui
-            .request_resize_pending
-            .swap(false, std::sync::atomic::Ordering::AcqRel)
-        {
+        let gui = &self.host_state.gui;
+        let [width, height] = gui.resize_request.load();
+        if [width, height] == NO_RESIZE {
             return None;
         }
-        let gui = &self.host_state.gui;
-        Some(tutti_clap_ffi::gui_size(
-            gui.request_resize_width
-                .load(std::sync::atomic::Ordering::Acquire),
-            gui.request_resize_height
-                .load(std::sync::atomic::Ordering::Acquire),
-        ))
+        gui.resize_request.store(NO_RESIZE);
+        Some(tutti_clap_ffi::gui_size(width, height))
     }
 
     /// [`EditorWindow::close_editor`](tutti_plugin_types::EditorWindow::close_editor) without a token, for `Drop`, which
@@ -250,22 +242,13 @@ impl ClapLoaded {
     /// Consumes and returns the `params_flush_requested` flag — call
     /// [`Self::flush_params`] or run a process block when this fires.
     pub fn take_params_flush_requested(&self) -> bool {
-        self.host_state
-            .take(&self.host_state.params.flush_requested)
+        self.host_state.take(&self.host_state.flush_requested)
     }
 
     /// Consumes and returns the `state_dirty` flag — the plugin's state has
     /// diverged from the last save.
     pub fn take_state_dirty(&self) -> bool {
-        self.host_state
-            .take(&self.host_state.processing.state_dirty)
-    }
-
-    /// Consumes and returns the `notes.ports_changed` flag. The note dialect
-    /// ([`ClapProcessor::sends_midi_notes`](crate::ClapProcessor::sends_midi_notes)) is
-    /// read only at activation, so on `true` activate again.
-    pub fn take_note_ports_changed(&self) -> bool {
-        self.host_state.take(&self.host_state.notes.ports_changed)
+        self.host_state.take(&self.host_state.state_dirty)
     }
 
     /// Consumes and returns the `gui.closed` flag.
@@ -278,8 +261,7 @@ impl ClapLoaded {
     /// Cumulative, not consumed on read, so callers track their own delta.
     pub fn log_lines_dropped(&self) -> u32 {
         self.host_state
-            .log
-            .dropped
+            .log_dropped
             .load(std::sync::atomic::Ordering::Acquire)
     }
 
@@ -480,7 +462,12 @@ fn collect_due_timers(state: &crate::host::state::TimerState, now: std::time::In
 /// Stored under the lock, so a registration's `note_due` is not overwritten.
 fn cache_next_deadline(state: &crate::host::state::TimerState) {
     if let Ok(timers) = state.timers.lock() {
-        let next = timers.iter().map(TimerEntry::wake_at).min();
+        // A timer no pass has seen asks for one at once.
+        let next = if timers.iter().any(|t| t.last_fire.is_none()) {
+            Some(state.epoch())
+        } else {
+            timers.iter().filter_map(TimerEntry::wake_at).min()
+        };
         state.set_next_due(next);
     }
 }
@@ -536,14 +523,20 @@ fn fire_due_timers(
 fn take_due_timers(timers: &mut [TimerEntry], now: std::time::Instant) -> Vec<u32> {
     let mut due = Vec::new();
     for timer in timers.iter_mut() {
+        // A timer no pass has seen starts its period at this pass, and is not
+        // due in it.
+        let Some(last_fire) = timer.last_fire else {
+            timer.last_fire = Some(now);
+            continue;
+        };
         // `checked_duration_since` rather than `duration_since`: the latter
         // panics (debug) or saturates (release) when `now` precedes
         // `last_fire`, which a caller passing its own instants can do. A timer
         // whose last fire is in the future is simply not due yet.
-        let elapsed = now.checked_duration_since(timer.last_fire);
+        let elapsed = now.checked_duration_since(last_fire);
         if elapsed.is_some_and(|e| e.as_millis() >= timer.period_ms as u128) {
             due.push(timer.id);
-            timer.last_fire = now;
+            timer.last_fire = Some(now);
         }
     }
     due
@@ -558,7 +551,7 @@ mod timer_due_tests {
         TimerEntry {
             id,
             period_ms,
-            last_fire,
+            last_fire: Some(last_fire),
         }
     }
 
@@ -723,13 +716,13 @@ mod main_thread_work_tests {
             TimerEntry {
                 id: 1,
                 period_ms,
-                last_fire: at,
+                last_fire: Some(at),
             }
             .wake_at()
         };
-        assert_eq!(wake(250), at + Duration::from_millis(250));
-        assert_eq!(wake(0), at + TIMER_FLOOR, "a zero period is floored");
-        assert_eq!(wake(1), at + TIMER_FLOOR);
+        assert_eq!(wake(250), Some(at + Duration::from_millis(250)));
+        assert_eq!(wake(0), Some(at + TIMER_FLOOR), "a zero period is floored");
+        assert_eq!(wake(1), Some(at + TIMER_FLOOR));
     }
 
     /// **The CLAP flag word and the shared interest convert both ways**, and a
@@ -758,7 +751,7 @@ mod main_thread_work_tests {
             list.push(TimerEntry {
                 id,
                 period_ms,
-                last_fire: at,
+                last_fire: Some(at),
             });
         }
         drop(list);
@@ -779,6 +772,32 @@ mod main_thread_work_tests {
         });
         assert_eq!(fired, [1]);
         assert_eq!(n, 1);
+    }
+
+    /// **A timer registered with no clock starts its period at the first
+    /// pass's `now`, which does not fire it, and asks for that pass at once.**
+    #[test]
+    fn a_registered_timer_is_armed_by_the_first_pass() {
+        let state = TimerState::new();
+        let t0 = state.epoch();
+        state.timers.lock().unwrap().push(TimerEntry {
+            id: 1,
+            period_ms: 10,
+            last_fire: None,
+        });
+        state.note_due(t0);
+        assert_eq!(state.next_due_nanos(), 0, "asks for a pass at once");
+        let later = t0 + Duration::from_millis(500);
+        assert_eq!(fire_due_timers(&state, later, |_| {}), 0);
+        assert_eq!(
+            state.next_due_nanos(),
+            u64::try_from(Duration::from_millis(510).as_nanos()).unwrap(),
+            "its period runs from the pass that saw it"
+        );
+        assert_eq!(
+            fire_due_timers(&state, later + Duration::from_millis(10), |_| {}),
+            1
+        );
     }
 
     /// **The pass leaves the cached deadline at the earliest timer's**, and at
