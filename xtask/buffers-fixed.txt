@@ -14,8 +14,6 @@
 #         spec-f32: <why>    a spec fixes f32 (control values, param lanes).
 #
 # Fixed f32 on audio stays only as one of those kinds; a free-text `measured:` is refused.
-crates/tutti-au-host/src/macos/processor.rs::AuProcessor::render_f32  pending
-crates/tutti-au-host/src/macos/processor.rs::AuProcessor::render_f64  pending
 crates/tutti-codec/src/decode/file_in.rs::FileIn::fill_sequential_interleaved  pending
 crates/tutti-codec/src/encoder.rs::Encoder::write  pending
 crates/tutti-codec/src/wave.rs::Wave::channel  pending
@@ -70,11 +68,10 @@ crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::shared_ir  pending
 crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::with_ir  pending
 crates/tutti-nodes/src/params.rs::ControlSet::assemble  spec-f32: control cells are f32 by spec, one AtomicF32 per control, not audio
 crates/tutti-nodes/src/params.rs::ControlSet::flatten  spec-f32: control cells are f32 by spec, one AtomicF32 per control, not audio
-crates/tutti-plugin-ipc/src/batcher.rs::Batcher::process  pending
-crates/tutti-plugin-types/src/contract.rs::check  pending
-crates/tutti-plugin-types/src/contract.rs::positions  pending
-crates/tutti-plugin-types/src/contract.rs::round_trip  pending
-crates/tutti-plugin-types/src/contract.rs::steps  pending
+crates/tutti-plugin-types/src/contract.rs::check  not-audio: a normalized parameter position, not audio
+crates/tutti-plugin-types/src/contract.rs::positions  not-audio: a normalized parameter position, not audio
+crates/tutti-plugin-types/src/contract.rs::round_trip  not-audio: a normalized parameter position, not audio
+crates/tutti-plugin-types/src/contract.rs::steps  not-audio: a normalized parameter position, not audio
 crates/tutti-polysynth/src/tuning.rs::Tuning::from_ratios  not-audio: a scale's frequency ratios, a tuning table not audio
 crates/tutti-rt/src/pos_ring.rs::PosWriter::push  pending
 crates/tutti-sampler/src/stretch/unit.rs::Unit::process  pending
@@ -89,5 +86,3 @@ crates/tutti-session/src/graph/testing.rs::AudioSide::tick  engine-f32
 crates/tutti-session/src/session.rs::Session::render  engine-f32
 crates/tutti-session/src/session.rs::Session::render_frame  engine-f32
 crates/tutti-session/src/session.rs::Session::render_frame_at  engine-f32
-crates/tutti-vst2-host/src/processor.rs::Vst2Processor::process_f32  pending
-crates/tutti-vst2-host/src/processor.rs::Vst2Processor::process_f64  pending

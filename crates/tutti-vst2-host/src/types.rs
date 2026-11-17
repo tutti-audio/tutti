@@ -70,11 +70,9 @@ pub use tutti_plugin_types::Vst2Category;
 /// borrowed; a caller copies out what it keeps.
 pub type MidiEventVec = Vec<WireMidi>;
 
-/// Per-block inputs to [`Vst2Processor::process_f32`] and
-/// [`Vst2Processor::process_f64`] beyond the audio buffers.
+/// Per-block inputs to [`Vst2Processor::process_planes`] beyond the audio buffers.
 ///
-/// [`Vst2Processor::process_f32`]: crate::Vst2Processor::process_f32
-/// [`Vst2Processor::process_f64`]: crate::Vst2Processor::process_f64
+/// [`Vst2Processor::process_planes`]: crate::Vst2Processor::process_planes
 #[derive(Debug)]
 pub struct Vst2ProcessContext<'a> {
     /// Events to deliver before the block renders, each carrying its own frame
