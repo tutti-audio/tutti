@@ -406,27 +406,27 @@ fn lane_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
     let mut shaped = Trajectory::new();
     shaped.add_breakpoint(Breakpoint::with_law(
         Beat(0.0),
-        0.0,
+        Hz(0.0),
         Law::PowerIn(Exponent::of(2.0)),
     ));
     shaped.add_breakpoint(Breakpoint::with_law(
         Beat(0.25),
-        1.0,
+        Hz(1.0),
         Law::PowerOut(Exponent::of(3.0)),
     ));
     shaped.add_breakpoint(Breakpoint::with_law(
         Beat(0.4),
-        0.2,
+        Hz(0.2),
         Law::PowerInOut(Exponent::of(2.0)),
     ));
-    shaped.add_breakpoint(Breakpoint::new(Beat(0.55), 0.9));
-    let mut clamped = Trajectory::new().with_range(0.0, 0.5);
+    shaped.add_breakpoint(Breakpoint::new(Beat(0.55), Hz(0.9)));
+    let mut clamped = Trajectory::new().with_range(Hz(0.0), Hz(0.5));
     clamped.add_breakpoint(Breakpoint::with_law(
         Beat(0.1),
-        0.0,
+        Hz(0.0),
         Law::PowerIn(Exponent::of(2.0)),
     ));
-    clamped.add_breakpoint(Breakpoint::new(Beat(0.45), 1.0));
+    clamped.add_breakpoint(Breakpoint::new(Beat(0.45), Hz(1.0)));
     let key = ParamKey::<Hz>::CUTOFF;
     let lane = |curve: Arc<dyn Curve>| {
         ControlLaneNode::for_unit(key.addr(), ControlProgram::from_curve(curve), None, None)
@@ -704,10 +704,10 @@ fn lane_program(k: usize, generation: u32) -> tutti_modulation::ControlProgram {
             let mut e = Trajectory::new();
             e.add_breakpoint(Breakpoint::with_law(
                 Beat(0.0),
-                200.0,
+                Hz(200.0),
                 Law::PowerIn(Exponent::of(2.0)),
             ));
-            e.add_breakpoint(Breakpoint::new(Beat(1.3), 800.0));
+            e.add_breakpoint(Breakpoint::new(Beat(1.3), Hz(800.0)));
             let curve: Arc<dyn tutti_modulation::Curve> = Arc::new(e);
             (Some(curve), vec![layer(seconds, shape(LfoShape::Sawtooth))])
         }

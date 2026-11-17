@@ -137,7 +137,11 @@ impl AudioBridge {
         // own reply timeout from the same block period, and two copies of the
         // rate would let the two timeouts drift apart.
         let (channels, sleeper) = Channels::new(sample_rate);
-        let payloads = PayloadPool::new(channels.refusal_writer(), channels.leak_writer());
+        let payloads = PayloadPool::new(
+            sample_rate,
+            channels.refusal_writer(),
+            channels.leak_writer(),
+        );
         let lifecycle = Lifecycle::new(watch, timeouts);
         let listener: ListenerSlot = Arc::new(Mutex::new(None));
         let thread = BridgeThread::spawn(
@@ -923,7 +927,11 @@ mod tests {
     fn a_block_submitted_to_an_empty_pool_is_refused_and_counted() {
         let channels = Channels::new(SampleRate::SR_48K).0;
         let bridge = AudioBridge {
-            payloads: PayloadPool::new(channels.refusal_writer(), channels.leak_writer()),
+            payloads: PayloadPool::new(
+                SampleRate::SR_48K,
+                channels.refusal_writer(),
+                channels.leak_writer(),
+            ),
             channels,
             lifecycle: Lifecycle::new(Arc::new(ServerWatch::new()), Timeouts::default()),
             listener: Arc::new(Mutex::new(None)),
@@ -943,7 +951,7 @@ mod tests {
                 &mut params,
                 Default::default(),
                 Default::default(),
-                Default::default(),
+                TransportInfo::new(SampleRate::SR_48K),
                 Default::default(),
             )
         });
@@ -960,7 +968,11 @@ mod tests {
     fn a_full_queue_is_busy_not_a_crash() {
         let channels = Channels::new(SampleRate::SR_48K).0;
         let bridge = AudioBridge {
-            payloads: PayloadPool::new(channels.refusal_writer(), channels.leak_writer()),
+            payloads: PayloadPool::new(
+                SampleRate::SR_48K,
+                channels.refusal_writer(),
+                channels.leak_writer(),
+            ),
             channels,
             lifecycle: Lifecycle::new(Arc::new(ServerWatch::new()), Timeouts::default()),
             listener: Arc::new(Mutex::new(None)),

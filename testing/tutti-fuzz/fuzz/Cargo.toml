@@ -21,3 +21,45 @@ path = "fuzz_targets/wav_decode.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "ci_decode"
+path = "fuzz_targets/ci_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "midi1_parse"
+path = "fuzz_targets/midi1_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "midi_file_read"
+path = "fuzz_targets/midi_file_read.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "pe_reassemble"
+path = "fuzz_targets/pe_reassemble.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sysex_assemble"
+path = "fuzz_targets/sysex_assemble.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ump_decode"
+path = "fuzz_targets/ump_decode.rs"
+test = false
+doc = false
+bench = false

@@ -1018,18 +1018,13 @@ pub fn arrival_is_ordered_and_sized<F: Format>() {
     assert_eq!(t.of(Kind::NoteOff).count(), 1);
 }
 
-/// A transport at `tempo` BPM and quarter note `beat`, rolling or not. The
-/// position is stated in both coordinates a host hands a plugin, as the
-/// engine's own source does (`tutti-plugin-host`'s `transport_source`): the
-/// quarter notes of VST2 and VST3, and CLAP's and AU's beats, which in 4/4 are
-/// the same number.
+/// A transport at `tempo` BPM and quarter note `beat`, rolling or not: the
+/// one position every format reads.
 fn transport(playing: bool, tempo: f64, beat: f64) -> TransportInfo {
-    TransportInfo::new()
-        .with_sample_rate(RATE)
+    TransportInfo::new(tutti_plugin_types::SampleRate::of(RATE))
         .with_playing(playing)
-        .with_tempo(tempo)
-        .with_position_beats(beat, tutti_plugin_types::Seconds(0.0))
-        .with_position_quarters(beat)
+        .with_tempo(tutti_types::Bpm::of(tempo))
+        .with_beat(tutti_types::Beat(beat))
 }
 
 /// Each block's transport reaches the plugin at its first frame, as the host

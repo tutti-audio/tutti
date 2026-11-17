@@ -2770,6 +2770,11 @@ version = "0.0.0"
 dependencies = [
  "tutti-codec",
  "tutti-fixtures",
+ "tutti-midi-device",
+ "tutti-midi-file",
+ "tutti-midi-protocol",
+ "tutti-types",
+ "tutti-ump",
 ]
 
 [[package]]
@@ -3038,6 +3043,7 @@ dependencies = [
  "tutti-plugin-ipc",
  "tutti-plugin-types",
  "tutti-shared-plugin",
+ "tutti-types",
  "tutti-ump",
  "tutti-vst2-host",
  "tutti-vst2-shell-plugin",

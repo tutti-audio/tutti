@@ -467,7 +467,7 @@ fn a_stop_drops_an_open_sysex_once() {
         &mut buffer,
         &midi_only(&open),
         None,
-        &TransportInfo::default(),
+        &TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K),
     );
     assert_eq!(plugin.sysex_dropped(), 0, "an open SysEx is not a drop yet");
 
