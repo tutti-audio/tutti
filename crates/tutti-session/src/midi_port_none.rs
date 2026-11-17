@@ -21,17 +21,6 @@ impl Ports {
         false
     }
 
-    /// No output port to send to.
-    pub(crate) fn route(
-        &mut self,
-        _batch: &[(tutti_types::Frame, tutti_ump::Ump)],
-        _: Option<&OutputTiming>,
-    ) {
-    }
-
-    /// No output port to count it against.
-    pub(crate) fn refuse(&mut self, _n: u64) {}
-
     /// No output tap to reopen: the graph is not edited.
     pub(crate) fn reopen(&mut self, _: &mut crate::graph::Graph, _: Option<&OutputTiming>) -> bool {
         false

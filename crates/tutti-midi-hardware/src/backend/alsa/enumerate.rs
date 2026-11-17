@@ -1,14 +1,12 @@
 //! Walking the sequencer's clients and ports.
 
-use std::os::raw::c_int;
-
 use crate::block::RawBlock;
 use crate::capability::{OsEndpoint, UmpCapability};
 use tutti_alsa_ffi::{
-    BLOCK_IS_LOWSPEED, BLOCK_IS_MIDI1, CAP_READ, CAP_SUBS_READ, CAP_SUBS_WRITE, CAP_WRITE, Client,
-    PROTO_MIDI2, PortEntry, UmpBlock, UmpEndpoint,
+    BLOCK_IS_LOWSPEED, BLOCK_IS_MIDI1, Client, PROTO_MIDI2, PortCaps, PortEntry, UmpBlock,
+    UmpEndpoint,
 };
-use tutti_midi_device::{EndpointId, FunctionBlock, Identity};
+use tutti_midi_device::{FunctionBlock, Identity};
 use tutti_ump::Protocol;
 
 /// Which direction an endpoint is being listed for.
@@ -21,41 +19,15 @@ pub(super) enum Direction {
 }
 
 impl Direction {
-    /// The capability bits a port needs to be usable in this direction.
-    ///
-    /// Both the raw and the `SUBS_` bit: a port that is readable but not
-    /// *subscribe*-readable cannot be connected to, so listing it would offer
-    /// the user a device that fails to open.
-    fn required_caps(self) -> u32 {
+    /// Whether a port allows this direction: a port that is readable but not
+    /// *subscribe*-readable cannot be connected to, so listing it would offer the
+    /// user a device that fails to open.
+    fn listed(self, caps: PortCaps) -> bool {
         match self {
-            Direction::Input => CAP_READ | CAP_SUBS_READ,
-            Direction::Output => CAP_WRITE | CAP_SUBS_WRITE,
+            Direction::Input => caps.can_read_from(),
+            Direction::Output => caps.can_write_to(),
         }
     }
-}
-
-/// Pack `(client, port)` into an [`EndpointId`].
-///
-/// ALSA addresses are a pair, and both halves are stable for as long as the
-/// device is present — which is what an id has to be. Packing rather than
-/// indexing means a stale id fails to open instead of silently resolving to
-/// whatever now sits at that position.
-pub(super) fn pack_id(client: c_int, port: c_int) -> EndpointId {
-    EndpointId::from_raw(((client as u64) << 32) | (port as u32 as u64))
-}
-
-/// Unpack an [`EndpointId`] back into `(client, port)`; `None` if `pack_id`
-/// could not have made it.
-///
-/// An `EndpointId` is a bare number any caller can build with `from_raw`, and a
-/// sequencer address is a pair of bytes. A value with bits above either byte was
-/// not minted here (a CoreMIDI id, a corrupted saved one): truncating it would
-/// subscribe to whichever port its low bits name.
-pub(super) fn unpack_id(id: EndpointId) -> Option<(c_int, c_int)> {
-    let raw = id.raw();
-    let (client, port) = (raw >> 32, raw & 0xFFFF_FFFF);
-    let byte = u64::from(u8::MAX);
-    (client <= byte && port <= byte).then_some((client as c_int, port as c_int))
 }
 
 #[cfg(test)]
@@ -114,7 +86,7 @@ fn walk<const N: usize>(seq: &Client, directions: [Direction; N]) -> Walk<N> {
     }
     for port in found.ports {
         let caps = port.caps;
-        let listed = |d: Direction| caps & d.required_caps() == d.required_caps();
+        let listed = |d: Direction| d.listed(caps);
         if !directions.iter().any(|&d| listed(d)) {
             continue;
         }
@@ -134,15 +106,14 @@ fn walk<const N: usize>(seq: &Client, directions: [Direction; N]) -> Walk<N> {
 /// The endpoint a listed port is.
 fn endpoint_of(port: PortEntry) -> OsEndpoint {
     let PortEntry {
-        client,
+        address,
         client_name,
-        port: number,
         name: port_name,
         ump,
         ..
     } = port;
     OsEndpoint {
-        id: pack_id(client, number),
+        id: super::handle_of(address),
         identity: Identity::alsa(client_name.as_str(), port_name.as_str()),
         // "Client: Port" is how `aconnect -l` presents them, and a
         // bare port name ("MIDI 1") is ambiguous across devices.
