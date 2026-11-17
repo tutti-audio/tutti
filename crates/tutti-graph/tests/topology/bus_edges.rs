@@ -211,7 +211,7 @@ impl Rig {
 /// (the harness's rule), exact.
 fn global(c: usize, blocks: usize) -> Vec<f32> {
     (0..blocks)
-        .flat_map(|b| input_signal((b * BLOCK) as u64, BLOCK))
+        .flat_map(|b| input_signal::<f32>((b * BLOCK) as u64, BLOCK))
         .map(|x| x * 0.5f32.powi(c as i32))
         .collect()
 }
