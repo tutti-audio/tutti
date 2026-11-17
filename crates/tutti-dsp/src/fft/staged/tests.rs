@@ -1,4 +1,5 @@
 use super::*;
+use crate::Complex32;
 
 fn signal(n: usize) -> Vec<f32> {
     let mut state = 0x9e37_79b9_u32;
@@ -21,7 +22,7 @@ fn run_forward(f: &StagedRealFft, x: &[f32]) -> Vec<Complex32> {
     let mut scratch = f.new_scratch();
     let mut bins = vec![Complex32::new(0.0, 0.0); f.bins()];
     for step in 0..f.forward_steps() {
-        f.forward_step(step, x, &mut bins, &mut scratch);
+        f.forward_step(step, Mono::new(x), &mut bins, &mut scratch);
     }
     bins
 }
@@ -30,7 +31,7 @@ fn run_inverse(f: &StagedRealFft, mut bins: Vec<Complex32>) -> Vec<f32> {
     let mut scratch = f.new_scratch();
     let mut out = vec![0.0f32; f.size()];
     for step in 0..f.inverse_steps() {
-        f.inverse_step(step, &mut bins, &mut out, &mut scratch);
+        f.inverse_step(step, &mut bins, MonoMut::new(&mut out), &mut scratch);
     }
     out
 }
@@ -53,7 +54,7 @@ fn one_way_is_the_unsplit_transform() {
         let plain = RealFft::new(n);
         let mut scratch = plain.new_scratch();
         let mut want = vec![Complex32::new(0.0, 0.0); plain.bins()];
-        plain.forward(&x, &mut want, &mut scratch);
+        plain.forward(Mono::new(&x), &mut want, &mut scratch);
         let got = run_forward(&f, &x);
         assert!(
             got.iter()
@@ -61,7 +62,7 @@ fn one_way_is_the_unsplit_transform() {
                 .all(|(a, b)| a.re.to_bits() == b.re.to_bits() && a.im.to_bits() == b.im.to_bits())
         );
         let mut back = vec![0.0f32; n];
-        plain.inverse(&mut want, &mut back, &mut scratch);
+        plain.inverse(&mut want, MonoMut::new(&mut back), &mut scratch);
         let again = run_inverse(&f, got);
         assert!(
             again
@@ -129,7 +130,7 @@ fn a_split_transform_is_the_dft() {
 #[test]
 #[should_panic(expected = "a transform has at least one sample")]
 fn a_zero_size_is_refused() {
-    let _ = StagedRealFft::new(0, 4);
+    let _ = StagedRealFft::<f32>::new(0, 4);
 }
 
 /// All the transform's state is in its scratch: two transforms stepped
@@ -144,8 +145,8 @@ fn the_steps_keep_their_state_in_the_scratch() {
     let zero = Complex32::new(0.0, 0.0);
     let (mut bx, mut by) = (vec![zero; f.bins()], vec![zero; f.bins()]);
     for step in 0..f.forward_steps() {
-        f.forward_step(step, &x, &mut bx, &mut sx);
-        f.forward_step(step, &y, &mut by, &mut sy);
+        f.forward_step(step, Mono::new(&x), &mut bx, &mut sx);
+        f.forward_step(step, Mono::new(&y), &mut by, &mut sy);
     }
     let same = |a: &[Complex32], b: &[Complex32]| {
         a.iter()

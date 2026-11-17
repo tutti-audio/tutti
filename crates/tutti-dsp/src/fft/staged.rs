@@ -24,23 +24,24 @@
 //! step reads `bins` and the last writes `real`, so neither is touched in
 //! between. A step allocates nothing.
 
-use super::real::{Complex32, RealFft, forward_post_pass, inverse_pre_pass, pass_twiddles};
-use rustfft::{Fft as InnerFft, FftDirection, FftPlannerScalar};
+use super::real::{Complex, RealFft, forward_post_pass, inverse_pre_pass, pass_twiddles, twiddle};
+use rustfft::{Fft as InnerFft, FftDirection, FftNum, FftPlannerScalar};
 use std::f64::consts::PI;
 use std::sync::Arc;
+use tutti_buffers::{Float, Mono, MonoMut};
 
 /// One direction of the split transform.
-struct Split {
+struct Split<F: Float + FftNum> {
     /// The `size / 2 / ways`-point sub-FFT.
-    inner: Arc<dyn InnerFft<f32>>,
+    inner: Arc<dyn InnerFft<F>>,
     /// The real-input pass's twiddles (`size` points).
-    pass: Vec<Complex32>,
+    pass: Vec<Complex<F>>,
     /// Combine pass `p` merges sequences of `sub << p` points: its twiddles
     /// are `exp(-+2 pi i k / (2 * sub << p))`, `k < sub << p`.
-    combine: Vec<Vec<Complex32>>,
+    combine: Vec<Vec<Complex<F>>>,
 }
 
-impl std::fmt::Debug for Split {
+impl<F: Float + FftNum> std::fmt::Debug for Split<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Split")
             .field("passes", &self.combine.len())
@@ -48,17 +49,17 @@ impl std::fmt::Debug for Split {
     }
 }
 
-impl Split {
+impl<F: Float + FftNum> Split<F> {
     fn new(size: usize, ways: usize, direction: FftDirection) -> Self {
         let sub = size / 2 / ways;
-        let mut planner = FftPlannerScalar::<f32>::new();
+        let mut planner = FftPlannerScalar::<F>::new();
         let combine = (0..ways.trailing_zeros())
             .map(|p| {
                 let l = sub << p;
                 (0..l)
                     .map(|k| {
                         let angle = -2.0 * PI / (2 * l) as f64 * k as f64;
-                        let w = Complex32::new(libm::cos(angle) as f32, libm::sin(angle) as f32);
+                        let w = twiddle::<F>(angle);
                         match direction {
                             FftDirection::Forward => w,
                             FftDirection::Inverse => w.conj(),
@@ -78,14 +79,33 @@ impl Split {
 /// Forward and inverse plans for one real frame length, in steps.
 ///
 /// The module docs state the stepping contract.
-#[derive(Clone, Debug)]
-pub(crate) struct StagedRealFft {
-    fft: RealFft,
+pub(crate) struct StagedRealFft<F: Float + FftNum = f32> {
+    fft: RealFft<F>,
     ways: usize,
-    split: Option<Arc<(Split, Split)>>,
+    split: Option<Arc<(Split<F>, Split<F>)>>,
 }
 
-impl StagedRealFft {
+impl<F: Float + FftNum> Clone for StagedRealFft<F> {
+    fn clone(&self) -> Self {
+        Self {
+            fft: self.fft.clone(),
+            ways: self.ways,
+            split: self.split.clone(),
+        }
+    }
+}
+
+impl<F: Float + FftNum> std::fmt::Debug for StagedRealFft<F> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StagedRealFft")
+            .field("fft", &self.fft)
+            .field("ways", &self.ways)
+            .field("split", &self.split)
+            .finish()
+    }
+}
+
+impl<F: Float + FftNum> StagedRealFft<F> {
     /// Plans for `size` samples run as `ways` sub-FFTs: `ways` is a power of
     /// two, and at one the transform is [`RealFft`]'s single step. Allocates.
     ///
@@ -155,8 +175,8 @@ impl StagedRealFft {
     }
 
     /// A zeroed scratch of [`scratch_len`](Self::scratch_len) elements.
-    pub fn new_scratch(&self) -> Vec<Complex32> {
-        vec![Complex32::new(0.0, 0.0); self.scratch_len()]
+    pub fn new_scratch(&self) -> Vec<Complex<F>> {
+        vec![Complex::new(F::ZERO, F::ZERO); self.scratch_len()]
     }
 
     /// Step `step` of the forward transform of `real` into `bins`, as
@@ -170,9 +190,9 @@ impl StagedRealFft {
     pub fn forward_step(
         &self,
         step: usize,
-        real: &[f32],
-        bins: &mut [Complex32],
-        scratch: &mut [Complex32],
+        real: Mono<'_, F>,
+        bins: &mut [Complex<F>],
+        scratch: &mut [Complex<F>],
     ) {
         assert!(step < self.forward_steps(), "BUG: no such step");
         let Some(split) = &self.split else {
@@ -180,6 +200,7 @@ impl StagedRealFft {
         };
         let s = &split.0;
         let half = self.size() / 2;
+        let real = real.samples();
         assert_eq!(real.len(), self.size(), "BUG: frame is one window");
         assert_eq!(
             bins.len(),
@@ -192,15 +213,13 @@ impl StagedRealFft {
             if step == 0 {
                 // Point `i` of the packed signal is `(real[2i], real[2i+1])`;
                 // sub-FFT `r` takes every `ways`-th one from `r`.
-                gather(a, self.ways, |i| {
-                    Complex32::new(real[2 * i], real[2 * i + 1])
-                });
+                gather(a, self.ways, |i| Complex::new(real[2 * i], real[2 * i + 1]));
             }
             sub_fft(s, step, a, b, inner);
         } else {
             let p = step - self.ways;
             let last = p + 1 == s.combine.len();
-            let (src, dst): (&[Complex32], &mut [Complex32]) = match (p.is_multiple_of(2), last) {
+            let (src, dst): (&[Complex<F>], &mut [Complex<F>]) = match (p.is_multiple_of(2), last) {
                 (_, true) => (if p.is_multiple_of(2) { b } else { a }, &mut bins[..half]),
                 (true, false) => (b, a),
                 (false, false) => (a, b),
@@ -221,9 +240,9 @@ impl StagedRealFft {
     pub fn inverse_step(
         &self,
         step: usize,
-        bins: &mut [Complex32],
-        real: &mut [f32],
-        scratch: &mut [Complex32],
+        bins: &mut [Complex<F>],
+        mut real: MonoMut<'_, F>,
+        scratch: &mut [Complex<F>],
     ) {
         assert!(step < self.inverse_steps(), "BUG: no such step");
         let Some(split) = &self.split else {
@@ -231,6 +250,7 @@ impl StagedRealFft {
         };
         let s = &split.1;
         let half = self.size() / 2;
+        let real = real.samples_mut();
         assert_eq!(real.len(), self.size(), "BUG: frame is one window");
         assert_eq!(
             bins.len(),
@@ -248,7 +268,7 @@ impl StagedRealFft {
             sub_fft(s, step - 1, a, b, inner);
         } else {
             let p = step - 1 - self.ways;
-            let (src, dst): (&[Complex32], &mut [Complex32]) =
+            let (src, dst): (&[Complex<F>], &mut [Complex<F>]) =
                 if p.is_multiple_of(2) { (b, a) } else { (a, b) };
             combine(s, p, self.ways, src, dst);
             if p + 1 == s.combine.len() {
@@ -263,7 +283,11 @@ impl StagedRealFft {
 
 /// `dst[r * sub + j] = point(ways * j + r)`: the sub-FFTs' inputs, one after
 /// the other.
-fn gather(dst: &mut [Complex32], ways: usize, point: impl Fn(usize) -> Complex32) {
+fn gather<F: Float + FftNum>(
+    dst: &mut [Complex<F>],
+    ways: usize,
+    point: impl Fn(usize) -> Complex<F>,
+) {
     let sub = dst.len() / ways;
     for (r, chunk) in dst.chunks_exact_mut(sub).enumerate() {
         for (j, d) in chunk.iter_mut().enumerate() {
@@ -273,7 +297,13 @@ fn gather(dst: &mut [Complex32], ways: usize, point: impl Fn(usize) -> Complex32
 }
 
 /// Sub-FFT `r`: `a`'s sequence `r` into `b`'s.
-fn sub_fft(s: &Split, r: usize, a: &mut [Complex32], b: &mut [Complex32], inner: &mut [Complex32]) {
+fn sub_fft<F: Float + FftNum>(
+    s: &Split<F>,
+    r: usize,
+    a: &mut [Complex<F>],
+    b: &mut [Complex<F>],
+    inner: &mut [Complex<F>],
+) {
     let sub = s.inner.len();
     let range = r * sub..(r + 1) * sub;
     s.inner.process_outofplace_with_scratch(
@@ -288,7 +318,13 @@ fn sub_fft(s: &Split, r: usize, a: &mut [Complex32], b: &mut [Complex32], inner:
 /// the even part and sequence `r + ways >> (p + 1)` the odd part of the
 /// sequence of twice the points congruent to `r` modulo `ways >> (p + 1)`,
 /// which goes to `dst`'s sequence `r`.
-fn combine(s: &Split, p: usize, ways: usize, src: &[Complex32], dst: &mut [Complex32]) {
+fn combine<F: Float + FftNum>(
+    s: &Split<F>,
+    p: usize,
+    ways: usize,
+    src: &[Complex<F>],
+    dst: &mut [Complex<F>],
+) {
     let twiddles = &s.combine[p];
     let l = twiddles.len();
     let seqs = ways >> p;

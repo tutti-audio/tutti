@@ -391,7 +391,7 @@ fn length_and_latency_match_the_documented_values() {
             "n = {n}"
         );
     }
-    let r = FftResampler::new(44_100, 48_000, 1024, 2, 1).unwrap();
+    let r = FftResampler::<f32>::new(44_100, 48_000, 1024, 2, 1).unwrap();
     assert_eq!(r.output_delay(), 320);
     for q in ChunkSize::PRESETS {
         let plane = impulse_at(Samples(8192), Samples(1000));

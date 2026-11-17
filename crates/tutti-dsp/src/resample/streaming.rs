@@ -16,6 +16,7 @@
 //! silence at the end to push the real tail out.
 
 use super::{FftResampler, ResampleError};
+use tutti_buffers::{Planes, PlanesMut};
 use tutti_types::{SampleRate, Samples};
 
 /// Input frames per FFT chunk, and how finely each chunk is subdivided.
@@ -362,9 +363,12 @@ impl StreamingResampler {
                 scratch.clear();
                 scratch.extend_from_slice(&self.carry[c][chunk.clone()]);
             }
-            let produced_len = self
-                .inner
-                .process_into_buffer(&self.in_scratch, &mut self.out_scratch)?;
+            // The scratch planes are sized alike at construction, so each is a whole view.
+            let produced_len = self.inner.process_into_buffer(
+                Planes::from_vecs(&self.in_scratch).expect("BUG: the input scratch is whole"),
+                PlanesMut::from_vecs(&mut self.out_scratch)
+                    .expect("BUG: the output scratch is whole"),
+            )?;
             let produced = &self.out_scratch;
             self.head += need;
 

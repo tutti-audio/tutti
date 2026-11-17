@@ -12,26 +12,29 @@
 
 use super::RealFft;
 
-use crate::Complex32;
+use rustfft::FftNum;
+use rustfft::num_complex::Complex;
+use tutti_buffers::{Float, Mono, MonoMut};
 
 /// The cached real-input plan plus the buffers a transform needs.
 ///
 /// Both directions run on [`RealFft`], the engine's CPU-independent real FFT
 /// (rustfft's scalar planner), so the spectra are the same bits on every CPU.
 /// It does about half the work of a complex transform over a real signal at an
-/// even size; an odd size runs a full-length complex transform.
-pub struct FftScratch {
+/// even size; an odd size runs a full-length complex transform. Generic over
+/// the [`Float`] it runs in, `f32` by default.
+pub struct FftScratch<F: Float + FftNum = f32> {
     /// The plan for the last size transformed; a different size re-plans.
-    plan: Option<(usize, RealFft)>,
+    plan: Option<(usize, RealFft<F>)>,
     /// The windowed real input of a forward transform.
-    real: Vec<f32>,
+    real: Vec<F>,
     /// The `size / 2 + 1` input bins of an inverse transform (the plan
     /// consumes its input).
-    half: Vec<Complex32>,
-    scratch: Vec<Complex32>,
+    half: Vec<Complex<F>>,
+    scratch: Vec<Complex<F>>,
 }
 
-impl FftScratch {
+impl<F: Float + FftNum> FftScratch<F> {
     /// An empty working set. The plan and buffers are built lazily on the
     /// first transform and reused while the size stays the same.
     #[must_use]
@@ -50,7 +53,8 @@ impl FftScratch {
     /// conjugate-symmetric and carries no extra information. The imaginary
     /// parts of the DC bin (and, for an even `size`, the Nyquist bin) are
     /// exactly zero.
-    pub fn forward(&mut self, input: &[f32], window: &[f32], out: &mut [Complex32]) {
+    pub fn forward(&mut self, input: Mono<'_, F>, window: &[F], out: &mut [Complex<F>]) {
+        let input = input.samples();
         let size = input.len();
         debug_assert_eq!(window.len(), size);
         debug_assert_eq!(out.len(), size / 2 + 1);
@@ -62,9 +66,9 @@ impl FftScratch {
 
         let needed = fft.scratch_len();
         if self.scratch.len() < needed {
-            self.scratch.resize(needed, Complex32::default());
+            self.scratch.resize(needed, Complex::new(F::ZERO, F::ZERO));
         }
-        fft.forward(&self.real, out, &mut self.scratch);
+        fft.forward(Mono::new(&self.real), out, &mut self.scratch);
     }
 
     /// Complex bins `DC..=Nyquist` → real samples, conjugate half rebuilt.
@@ -73,7 +77,8 @@ impl FftScratch {
     /// by an inverse is the identity. The imaginary parts of the DC bin (and,
     /// for an even `size`, the Nyquist bin) do not contribute to a real signal
     /// and are ignored.
-    pub fn inverse(&mut self, bins: &[Complex32], out: &mut [f32]) {
+    pub fn inverse(&mut self, bins: &[Complex<F>], mut out: MonoMut<'_, F>) {
+        let out = out.samples_mut();
         let size = out.len();
         debug_assert_eq!(bins.len(), size / 2 + 1);
 
@@ -83,11 +88,11 @@ impl FftScratch {
 
         let needed = fft.scratch_len();
         if self.scratch.len() < needed {
-            self.scratch.resize(needed, Complex32::default());
+            self.scratch.resize(needed, Complex::new(F::ZERO, F::ZERO));
         }
-        fft.inverse(&mut self.half, out, &mut self.scratch);
+        fft.inverse(&mut self.half, MonoMut::new(out), &mut self.scratch);
 
-        let norm = 1.0 / size as f32;
+        let norm = F::ONE / <F as Float>::from_f32(size as f32);
         for slot in out.iter_mut() {
             *slot *= norm;
         }
@@ -96,7 +101,7 @@ impl FftScratch {
 
 /// The plan for `size`, built on a change of size. A free function over the
 /// `plan` field alone, so the caller's other fields stay borrowable.
-fn plan_for(plan: &mut Option<(usize, RealFft)>, size: usize) -> &RealFft {
+fn plan_for<F: Float + FftNum>(plan: &mut Option<(usize, RealFft<F>)>, size: usize) -> &RealFft<F> {
     match plan {
         Some((cached, _)) if *cached == size => {}
         _ => *plan = Some((size, RealFft::new(size))),
@@ -104,13 +109,13 @@ fn plan_for(plan: &mut Option<(usize, RealFft)>, size: usize) -> &RealFft {
     &plan.as_ref().expect("just set").1
 }
 
-impl Default for FftScratch {
+impl<F: Float + FftNum> Default for FftScratch<F> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl core::fmt::Debug for FftScratch {
+impl<F: Float + FftNum> core::fmt::Debug for FftScratch<F> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let size = self.plan.as_ref().map(|(size, _)| *size);
         f.debug_struct("FftScratch").field("size", &size).finish()
