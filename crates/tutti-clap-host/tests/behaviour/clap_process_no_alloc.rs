@@ -414,8 +414,8 @@ fn alternating_continue_tail_does_not_allocate() {
     // even index leaves the last odd, so the final status is TAIL.
     assert!(
         inst.is_tailing(),
-        "the host must still record TAIL — it is now the only route by which a \
-         caller can see it, since the eprintln is gone. last_process_status = {}",
+        "the host must still record TAIL — it is the only route by which a \
+         caller can see it. last_process_status = {}",
         inst.last_process_status()
     );
 }

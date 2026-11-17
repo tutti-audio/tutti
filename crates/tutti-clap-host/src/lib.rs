@@ -14,16 +14,12 @@
 //! when you want a CLAP host without the rest of the engine.
 //!
 //! Three types carry the lifecycle: [`ClapLoaded`] is the mapped, instantiated
-//! plugin, which is not rendering. Activating it takes `self` by value and splits it
-//! into a [`ClapProcessor`], the realtime half, where
-//! [`process`][`ClapProcessor::process`] lives and whose sample format is the
-//! activation's `Prepare::format`, and a [`ClapController`], the
-//! main-thread half, which derefs to [`ClapLoaded`] so the whole control surface
-//! stays reachable while audio runs. Both halves hold one plugin instance; the
-//! reasoning for that is on `tutti_clap_ffi::Plugin`, which owns the instance and
-//! hands the Processor its audio-thread half. They implement the shared
-//! `Loaded`, `Processor` and `Controller` traits of `tutti-plugin-types`, which is
-//! what `Lifecycle` drives.
+//! plugin, which is not rendering. Activating it takes `self` by value and splits
+//! it into a [`ClapProcessor`], the realtime half, where
+//! [`process`][`ClapProcessor::process`] lives, and a [`ClapController`], the
+//! main-thread half. They implement the shared `Loaded`, `Processor` and
+//! `Controller` traits of `tutti-plugin-types`, which is what `Lifecycle`
+//! drives.
 //!
 //! The other types you will meet first:
 //!
@@ -49,12 +45,6 @@
 //!
 //! **Subprocess isolation.** This crate hosts in-process; `tutti-plugin-server` puts
 //! it in a subprocess and [`tutti-plugin`](../tutti-plugin) is the host side.
-//!
-//! **The comparison against the other three formats.** VST3, CLAP, AU and VST2 model
-//! the same two-state shape and reach three different answers. The comparative
-//! account, and the rule for choosing among the strategies, is in `tutti-plugin`'s
-//! crate documentation under *The plugin state machine*. Only CLAP's own half is
-//! below.
 //!
 //! ## Quick start
 //!
@@ -117,7 +107,8 @@
 //!
 //! ```rust,no_run
 //! # use tutti_clap_host::{ClapLoaded, LoadOptions, StateContext};
-//! use tutti_plugin_types::{Control, Normalized, ParamId, StateUse};
+//! use tutti_plugin_types::{Control, Normalized, StateUse};
+//! use tutti_types::ParamId;
 //! # fn ex() -> Result<(), Box<dyn std::error::Error>> {
 //! # let main = tutti_plugin_types::MainThreadMarker::new().expect("on the UI thread");
 //! # let (_collector, work) = tutti_plugin_types::MainWork::new();
@@ -169,94 +160,9 @@
 //! # Ok(()) }
 //! ```
 //!
-//! ## Why a refused `activate` hands the plugin back
-//!
-//! CLAP's own forced constraint, and the one shape here no other format crate
-//! shares: the plugin survives a refusal.
-//!
-//! A refusal is not the end of the plugin, only of that configuration. CLAP plugins
-//! routinely decline 64-bit audio or a rate, and a host that discovers this the
-//! ordinary way — by asking — should not have to pay for a reload to fall back. So
-//! [`Refused`](tutti_plugin_types::Refused) carries the **unconsumed**
-//! [`ClapLoaded`] back beside the reason, and the caller retries at `f32` against
-//! the same mapped library, the same instance, and the same already-read parameter
-//! tree.
-//!
-//! A plain `Result<_, PluginError>` would have destroyed the `ClapLoaded` on the one
-//! path where it is still perfectly good, making "ask, and fall back" strictly more
-//! expensive than guessing from [`supports_f64`][`ClapLoaded::supports_f64`] and
-//! hoping. [`ClapLoaded::negotiate_format`] is the ask: it reads the ports again
-//! and answers the format to activate at.
-//! Both failure paths preserve it: the `f64`-unsupported check returns before any
-//! FFI runs, and a plugin-side `activate` refusal leaves the instance untouched and
-//! not active. Activation never leaves half a pair: the Processor and the
-//! Controller exist only on success.
-//!
-//! ### Why the loaded plugin stays reachable from a `ClapController`
-//!
-//! A `ClapController` lends its `ClapLoaded` by name ([`loaded`][`ClapController::loaded`]
-//! and [`loaded_mut`][`ClapController::loaded_mut`]; it does not `Deref`, so a call
-//! that the Controller also answers cannot quietly skip the Controller). That is
-//! sound because CLAP does not *revoke* the loaded-state operations on activation;
-//! it re-tags some of their **threading** contracts. The two states partition what is legal in one
-//! direction only — `process` requires active — and never in the other, so
-//! activation is additive and the pre-activation surface stays reachable.
-//!
-//! Where a contract does change with activation, the condition is read at the call
-//! rather than assumed from the type, which works precisely because the flag lives
-//! on the *inner* `ClapLoaded`: [`flush_params`][`ClapLoaded::flush_params`] is
-//! tagged `[active ? audio-thread : main-thread]` and branches on that live flag, so
-//! the same code reached through a `ClapController`'s `loaded_mut` takes the
-//! audio-thread claim where a bare `ClapLoaded` is a
-//! main-thread call (it takes the `MainThreadMarker` either way).
-//!
-//! The distinction that gates it is *active* versus *processing*, and they are not
-//! the same fact. They disagree for the whole window between activation and the
-//! first [`process`][`ClapProcessor::process`] — exactly when a host pushes initial
-//! parameter values. Reading `processing` there takes the main-thread branch against
-//! a plugin that considers itself active, and a plugin with a validation layer
-//! reports the host for calling on the wrong thread while the values are dropped in
-//! silence. The flag lives apart from the Processor for the same reason: the
-//! Processor sets it under the `[audio-thread]` claim and the Controller's teardown
-//! reads it under that claim.
-//!
-//! ### Why the halves may share one instance
-//!
-//! The Processor calls only the audio-side entries (`start_processing`, `process`,
-//! `stop_processing`, `reset`), through its own audio-thread handle (`tutti_clap_ffi::AudioSide`), under the
-//! `[audio-thread]` claim; the Controller calls only the main-thread set, through
-//! the `ClapLoaded` it holds. CLAP annotates every entry with its thread, and the
-//! two sets are the ones a host calls concurrently. The plugin is destroyed on the
-//! main thread only, by the Controller's drop, which retires the activation first.
-//! The argument, clause by clause, is on `tutti_clap_ffi::Plugin`; this crate
-//! holds no `unsafe` of its own (`#![forbid(unsafe_code)]`).
-//!
-//! A parameter written to a [`ClapController`] does not call across: it is queued
-//! in an edit ring, and the Processor drains it at the head of its next block into
-//! `PARAM_VALUE` events ahead of the block's own automation.
-//!
-//! ## Threading and real-time safety
-//!
-//! CLAP tags every call `[main-thread]` or `[audio-thread]`, and this crate follows
-//! the tags. Load, activate, deactivate, state, the editor and polling belong on
-//! the thread that loaded the plugin; each takes a `tutti_plugin_types::MainThreadMarker`
-//! as proof.
-//! [`ClapProcessor::process`] belongs on the audio thread and does not allocate: the
-//! scratch it renders through is sized at activation.
-//!
-//! A plugin that spreads its own work over `clap.thread-pool` has its requests
-//! run on the pool given to [`ClapController::set_thread_pool`] (any
-//! `tutti_graph::Pool`, such as `tutti_graph::WorkerPool`), with the calling audio
-//! thread taking part; without one, they are refused and the plugin runs the
-//! tasks itself. Only a request from inside the plugin's `process` is served.
-//!
 //! [`ClapLoaded`]: crate::ClapLoaded
 //! [`ClapLoaded::parameter_list`]: crate::ClapLoaded::parameter_list
-//! [`ClapLoaded::supports_f64`]: crate::ClapLoaded::supports_f64
-//! [`ClapLoaded::negotiate_format`]: crate::ClapLoaded::negotiate_format
-//! [`ClapLoaded::flush_params`]: crate::ClapLoaded::flush_params
 //! [`ClapController`]: crate::ClapController
-//! [`ClapController::set_thread_pool`]: crate::ClapController::set_thread_pool
 //! [`ClapProcessor`]: crate::ClapProcessor
 //! [`ClapProcessor::process`]: crate::ClapProcessor::process
 //! [`ClapError`]: crate::ClapError
@@ -280,11 +186,14 @@ pub mod topology;
 pub mod types;
 
 pub use error::{ClapError, LoadStage, Result};
-pub use events::{ClapEvent, EventList, FlushEvents, InputEventList, OutputEventList, ParamBounds};
+pub use events::{
+    ClapEvent, EventList, FlushEvents, InputEventList, InputRooms, OutputEventList, OutputRooms,
+    ParamBounds,
+};
 pub use host::{ClapHost, HostState, InputStream, OutputStream};
 pub use instance::{
-    ClapController, ClapEditor, ClapLoaded, ClapProcessContext, ClapProcessor, LoadOptions,
-    descriptor_of,
+    ClapController, ClapEditor, ClapLoaded, ClapProcessContext, ClapProcessor, Flushed,
+    LoadOptions, descriptor_of,
 };
 // The CLAP-native, voice-addressed note expression is re-exported under its
 // own distinct name (it does NOT shadow the shared
@@ -292,11 +201,10 @@ pub use instance::{
 // (`ClapParamInfo` / `ClapParamFlags`) stay crate-private: the boundary speaks
 // the shared `ParameterInfo` via `ClapLoaded::parameter_list`.
 pub use types::{
-    AmbisonicConfig, AmbisonicNormalization, AmbisonicOrdering, AudioPortFlags, AudioPortInfo,
-    ChannelLayout, Color, ContentScale, EditorCapabilities, NoteDialect, NoteDialects,
-    NoteExpressionType, NoteName, NotePortInfo, ParamAutomationState, ParameterChanges,
-    ParameterPoint, ParameterQueue, PluginInfo, StateContext, SurroundChannel, TransportInfo,
-    VoiceInfo, WindowHandle, WireMidi,
+    AudioPortFlags, AudioPortInfo, ChannelLayout, Color, ContentScale, EditorCapabilities,
+    NoteDialect, NoteDialects, NoteExpressionType, NoteName, NotePortInfo, ParamAutomationState,
+    ParameterChanges, ParameterPoint, ParameterQueue, PluginInfo, StateContext, SurroundChannel,
+    TransportInfo, VoiceInfo, WindowHandle, WireMidi,
 };
 pub use types::{ClapNoteExpression, RtNoteExpressions};
 

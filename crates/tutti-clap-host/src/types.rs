@@ -249,6 +249,20 @@ pub struct ClapParamInfo {
     pub flags: ClapParamFlags,
 }
 
+impl From<tutti_clap_ffi::ParamInfo> for ClapParamInfo {
+    fn from(info: tutti_clap_ffi::ParamInfo) -> Self {
+        Self {
+            id: info.id,
+            name: info.name,
+            module: info.module,
+            min_value: info.min_value,
+            max_value: info.max_value,
+            default_value: info.default_value,
+            flags: ClapParamFlags::from_bits_truncate(info.flags),
+        }
+    }
+}
+
 impl ClapParamInfo {
     /// Creates a new parameter with the given ID and display name. Defaults
     /// to range `[0.0, 1.0]` with default `0.0` and no flags — use the
@@ -286,115 +300,6 @@ impl ClapParamInfo {
     pub fn flags(mut self, flags: ClapParamFlags) -> Self {
         self.flags = flags;
         self
-    }
-}
-
-/// The scope of a plugin's `params.rescan` request, decoded from
-/// `clap_param_rescan_flags`, so the host can honour CLAP's rule that a full rescan (`all`) may only be
-/// applied while the plugin is deactivated, whereas a value-only rescan can be
-/// picked up live.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) struct ParamRescan {
-    /// Any rescan at all was requested since the last poll.
-    pub requested: bool,
-    /// `CLAP_PARAM_RESCAN_ALL` — everything changed. The plugin MUST be
-    /// deactivated before the host re-reads, per the CLAP spec.
-    pub all: bool,
-    /// `CLAP_PARAM_RESCAN_VALUES` — current values changed; safe to re-read
-    /// live.
-    pub values: bool,
-    /// `CLAP_PARAM_RESCAN_INFO` — info (name/module/flags/range) changed.
-    pub info: bool,
-    /// `CLAP_PARAM_RESCAN_TEXT` — value→text display changed.
-    pub text: bool,
-}
-
-impl ParamRescan {
-    /// Decodes the accumulated `clap_param_rescan_flags` bitset. `requested`
-    /// reflects whether any rescan happened (the caller passes that separately
-    /// since the flags alone can legally be 0).
-    pub(crate) fn from_flags(requested: bool, flags: u32) -> Self {
-        use clap_sys::ext::params::{
-            CLAP_PARAM_RESCAN_ALL, CLAP_PARAM_RESCAN_INFO, CLAP_PARAM_RESCAN_TEXT,
-            CLAP_PARAM_RESCAN_VALUES,
-        };
-        Self {
-            requested,
-            all: flags & CLAP_PARAM_RESCAN_ALL != 0,
-            values: flags & CLAP_PARAM_RESCAN_VALUES != 0,
-            info: flags & CLAP_PARAM_RESCAN_INFO != 0,
-            text: flags & CLAP_PARAM_RESCAN_TEXT != 0,
-        }
-    }
-
-    /// Whether a full re-read requiring plugin deactivation is pending.
-    pub fn needs_deactivate(&self) -> bool {
-        self.all
-    }
-}
-
-/// The scope of a plugin's `audio-ports.rescan` request, decoded from
-/// `clap_audio_ports_rescan_flags`.
-///
-/// The sibling of [`ParamRescan`], and for the same reason: five of the six
-/// flags are annotated `[!active]` in `ext/audio-ports.h`, meaning the host must
-/// deactivate the plugin before re-enumerating. Only `NAMES` is safe to pick up
-/// live. Collapsing all six into one bool left a consumer unable to tell a
-/// cosmetic port rename from a channel-count change, so `PortLayout` could go
-/// stale against the buffer widths the plugin actually expects.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) struct AudioPortsRescan {
-    /// Any rescan at all was requested since the last poll.
-    pub requested: bool,
-    /// `CLAP_AUDIO_PORTS_RESCAN_NAMES` — port names changed. The only flag
-    /// applicable while the plugin is active.
-    pub names: bool,
-    /// `CLAP_AUDIO_PORTS_RESCAN_FLAGS` — per-port flags changed. `[!active]`.
-    pub flags: bool,
-    /// `CLAP_AUDIO_PORTS_RESCAN_CHANNEL_COUNT` — a port's channel count
-    /// changed. `[!active]`, and the one that invalidates buffer sizing.
-    pub channel_count: bool,
-    /// `CLAP_AUDIO_PORTS_RESCAN_PORT_TYPE` — a port's type changed.
-    /// `[!active]`.
-    pub port_type: bool,
-    /// `CLAP_AUDIO_PORTS_RESCAN_IN_PLACE_PAIR` — in-place pairing changed.
-    /// `[!active]`.
-    pub in_place_pair: bool,
-    /// `CLAP_AUDIO_PORTS_RESCAN_LIST` — the set of ports itself changed.
-    /// `[!active]`.
-    pub list: bool,
-}
-
-impl AudioPortsRescan {
-    /// Decodes the accumulated `clap_audio_ports_rescan_flags` bitset.
-    ///
-    /// `requested` is passed separately for the same reason as on
-    /// [`ParamRescan::from_flags`]: a plugin may legally call `rescan` with no
-    /// bits set, and "asked for nothing" must stay distinct from "never asked".
-    pub(crate) fn from_flags(requested: bool, flags: u32) -> Self {
-        use clap_sys::ext::audio_ports::{
-            CLAP_AUDIO_PORTS_RESCAN_CHANNEL_COUNT, CLAP_AUDIO_PORTS_RESCAN_FLAGS,
-            CLAP_AUDIO_PORTS_RESCAN_IN_PLACE_PAIR, CLAP_AUDIO_PORTS_RESCAN_LIST,
-            CLAP_AUDIO_PORTS_RESCAN_NAMES, CLAP_AUDIO_PORTS_RESCAN_PORT_TYPE,
-        };
-        Self {
-            requested,
-            names: flags & CLAP_AUDIO_PORTS_RESCAN_NAMES != 0,
-            flags: flags & CLAP_AUDIO_PORTS_RESCAN_FLAGS != 0,
-            channel_count: flags & CLAP_AUDIO_PORTS_RESCAN_CHANNEL_COUNT != 0,
-            port_type: flags & CLAP_AUDIO_PORTS_RESCAN_PORT_TYPE != 0,
-            in_place_pair: flags & CLAP_AUDIO_PORTS_RESCAN_IN_PLACE_PAIR != 0,
-            list: flags & CLAP_AUDIO_PORTS_RESCAN_LIST != 0,
-        }
-    }
-
-    /// Whether re-enumerating requires deactivating the plugin first.
-    ///
-    /// True for every flag except `NAMES`. Phrased as "anything but names"
-    /// rather than as a list, so a flag added to a later CLAP revision is
-    /// treated as unsafe-while-active until someone has read its annotation.
-    pub fn needs_deactivate(&self) -> bool {
-        self.flags || self.channel_count || self.port_type || self.in_place_pair || self.list
     }
 }
 
@@ -540,42 +445,6 @@ impl Color {}
 
 pub use tutti_clap_ffi::AutomationState as ParamAutomationState;
 
-/// Ambisonic channel ordering (Furse-Malham or Ambisonic Channel Number).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum AmbisonicOrdering {
-    /// Furse-Malham ordering.
-    Fuma,
-    /// Ambisonic Channel Number ordering.
-    Acn,
-}
-
-/// Ambisonic normalization scheme.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum AmbisonicNormalization {
-    /// maxN.
-    MaxN,
-    /// SN3D, the AmbiX convention.
-    Sn3d,
-    /// N3D, full three-dimensional normalization.
-    N3d,
-    /// SN2D, the two-dimensional counterpart of SN3D.
-    Sn2d,
-    /// N2D, the two-dimensional counterpart of N3D.
-    N2d,
-}
-
-/// Combined ambisonic ordering + normalization.
-///
-/// Both halves are needed to read a channel: the ordering says which component
-/// a channel carries, the normalization says how it is scaled.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct AmbisonicConfig {
-    /// Which component each channel carries.
-    pub ordering: AmbisonicOrdering,
-    /// How component amplitudes are scaled.
-    pub normalization: AmbisonicNormalization,
-}
-
 /// Surround speaker positions (matches CLAP's `CLAP_SURROUND_*` constants).
 ///
 /// # Why an `Unknown` arm, and why no `#[repr(u8)]`
@@ -709,122 +578,5 @@ impl SurroundChannel {
             Self::TopSideRight => 19,
             Self::Unknown(raw) => raw,
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use clap_sys::ext::audio_ports::{
-        CLAP_AUDIO_PORTS_RESCAN_CHANNEL_COUNT, CLAP_AUDIO_PORTS_RESCAN_FLAGS,
-        CLAP_AUDIO_PORTS_RESCAN_IN_PLACE_PAIR, CLAP_AUDIO_PORTS_RESCAN_LIST,
-        CLAP_AUDIO_PORTS_RESCAN_NAMES, CLAP_AUDIO_PORTS_RESCAN_PORT_TYPE,
-    };
-    use clap_sys::ext::params::{
-        CLAP_PARAM_RESCAN_ALL, CLAP_PARAM_RESCAN_INFO, CLAP_PARAM_RESCAN_TEXT,
-        CLAP_PARAM_RESCAN_VALUES,
-    };
-
-    #[test]
-    fn param_rescan_decodes_all_flag() {
-        let r = ParamRescan::from_flags(true, CLAP_PARAM_RESCAN_ALL);
-        assert!(r.requested);
-        assert!(r.all);
-        assert!(r.needs_deactivate(), "RESCAN_ALL requires deactivate");
-        assert!(!r.values);
-    }
-
-    #[test]
-    fn param_rescan_decodes_values_only() {
-        // A value-only rescan must NOT require deactivate — it can be picked up
-        // live, which is the whole point of distinguishing it from RESCAN_ALL.
-        let r = ParamRescan::from_flags(true, CLAP_PARAM_RESCAN_VALUES);
-        assert!(r.requested);
-        assert!(r.values);
-        assert!(!r.all);
-        assert!(!r.needs_deactivate());
-    }
-
-    #[test]
-    fn param_rescan_decodes_combined_flags() {
-        let flags = CLAP_PARAM_RESCAN_VALUES | CLAP_PARAM_RESCAN_INFO | CLAP_PARAM_RESCAN_TEXT;
-        let r = ParamRescan::from_flags(true, flags);
-        assert!(r.values && r.info && r.text);
-        assert!(!r.all);
-    }
-
-    #[test]
-    fn param_rescan_empty_when_not_requested() {
-        let r = ParamRescan::from_flags(false, 0);
-        assert_eq!(r, ParamRescan::default());
-        assert!(!r.requested);
-    }
-
-    /// A name change is the one rescan applicable while the plugin is active.
-    ///
-    /// A plain `changed: bool` could not carry this distinction. A host
-    /// that deactivates on every port rename stalls audio for a cosmetic
-    /// update; one that treats every rescan as cosmetic re-reads a channel
-    /// count while active, which the spec forbids.
-    #[test]
-    fn audio_ports_rescan_names_is_safe_while_active() {
-        let r = AudioPortsRescan::from_flags(true, CLAP_AUDIO_PORTS_RESCAN_NAMES);
-        assert!(r.requested);
-        assert!(r.names);
-        assert!(
-            !r.needs_deactivate(),
-            "NAMES is the only flag not annotated [!active]"
-        );
-    }
-
-    /// Each of the five `[!active]` flags requires deactivation on its own.
-    ///
-    /// Individually rather than combined: a decoder that only checked, say,
-    /// `list` would pass a combined-flags test while silently letting a
-    /// channel-count change through live.
-    #[test]
-    fn every_non_name_rescan_flag_requires_deactivation() {
-        for (flag, label) in [
-            (CLAP_AUDIO_PORTS_RESCAN_FLAGS, "FLAGS"),
-            (CLAP_AUDIO_PORTS_RESCAN_CHANNEL_COUNT, "CHANNEL_COUNT"),
-            (CLAP_AUDIO_PORTS_RESCAN_PORT_TYPE, "PORT_TYPE"),
-            (CLAP_AUDIO_PORTS_RESCAN_IN_PLACE_PAIR, "IN_PLACE_PAIR"),
-            (CLAP_AUDIO_PORTS_RESCAN_LIST, "LIST"),
-        ] {
-            let r = AudioPortsRescan::from_flags(true, flag);
-            assert!(
-                r.needs_deactivate(),
-                "{label} is annotated [!active] and must require deactivation"
-            );
-        }
-    }
-
-    /// A channel-count change alongside a name change still needs deactivation.
-    ///
-    /// The mixed case is the one a host gets wrong by checking the wrong bit
-    /// first: the safe flag being present must not license applying the batch
-    /// live.
-    #[test]
-    fn a_name_change_does_not_excuse_a_channel_count_change() {
-        let flags = CLAP_AUDIO_PORTS_RESCAN_NAMES | CLAP_AUDIO_PORTS_RESCAN_CHANNEL_COUNT;
-        let r = AudioPortsRescan::from_flags(true, flags);
-        assert!(r.names && r.channel_count);
-        assert!(r.needs_deactivate());
-    }
-
-    /// A rescan carrying no bits is still a rescan, and no bits is not one.
-    ///
-    /// `requested` is tracked separately because a plugin may legally call
-    /// `rescan(0)`; folding it into the flags would make "asked for nothing"
-    /// indistinguishable from "never asked".
-    #[test]
-    fn audio_ports_rescan_tracks_requested_separately_from_flags() {
-        let asked_nothing = AudioPortsRescan::from_flags(true, 0);
-        assert!(asked_nothing.requested);
-        assert!(!asked_nothing.needs_deactivate());
-
-        let never_asked = AudioPortsRescan::from_flags(false, 0);
-        assert_eq!(never_asked, AudioPortsRescan::default());
-        assert!(!never_asked.requested);
     }
 }

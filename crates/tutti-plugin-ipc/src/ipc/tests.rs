@@ -8,10 +8,11 @@ use std::time::{Duration, Instant};
 
 use tutti_fixtures::{machine_lock, main_thread};
 use tutti_plugin_types::{
-    ChannelLayout, Control, Controller, Loaded, LoadedPlugin, MaxBlock, ParamAccess, ParamId,
-    ParameterInfo, PluginBus, PluginDescriptor, Prepare, Processor, Reopen, Request, SampleFormat,
-    SampleRate, Samples,
+    ChannelLayout, Control, Controller, Loaded, LoadedPlugin, MaxBlock, ParamAccess, ParameterInfo,
+    PluginBus, PluginDescriptor, Prepare, Processor, Reopen, Request, SampleFormat, SampleRate,
+    Samples,
 };
+use tutti_types::ParamId;
 
 use super::DeclaredCache;
 

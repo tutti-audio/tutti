@@ -108,6 +108,8 @@ impl UmpVirtualDestination {
     where
         F: FnMut(Ump, std::time::Instant) + Send + 'static,
     {
+        // The device watch's client starts before this endpoint's (`hub_first`).
+        super::hub_first();
         let destination =
             UmpDestination::new(name, protocol_of(protocol), move |timestamp, words| {
                 let arrived = super::host_time::Pairing::now().instant_of(timestamp);

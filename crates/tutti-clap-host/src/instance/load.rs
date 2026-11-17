@@ -4,6 +4,7 @@
 use super::ClapLoaded;
 use super::config::{AudioConfig, LifecycleFlags, PortLayout};
 use super::control::descriptor_of;
+use super::table::ParamTable;
 use crate::error::{ClapError, LoadStage, Result};
 use crate::host::{ClapHost, HostState};
 use crate::types::PluginInfo;
@@ -168,6 +169,7 @@ impl ClapLoaded {
             f64_active: false,
         };
 
+        let params = ParamTable::read(main, &plugin);
         let loaded = Self {
             plugin,
             host_state,
@@ -177,6 +179,7 @@ impl ClapLoaded {
             audio,
             ports,
             flags: LifecycleFlags::default(),
+            params,
             woken: Default::default(),
             thread_pool: None,
             origin,

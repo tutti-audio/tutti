@@ -117,7 +117,7 @@ fn vst3_and_clap_bend_one_stream_by_the_same_semitones() {
 
     let vst3 = EventList::input();
     let mut stager = Stager::default();
-    let mut clap = InputEventList::new();
+    let mut clap = InputEventList::new(tutti_clap_host::InputRooms::new(1024));
     // A note sounds on each channel: a bend with no note is held, not sent.
     let notes: Vec<UmpAt> = (0..2)
         .map(|channel| {

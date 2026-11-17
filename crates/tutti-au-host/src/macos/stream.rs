@@ -46,7 +46,7 @@ impl StreamConfig {
     /// layout.
     ///
     /// Bus 0 only, deliberately: this layout is what the render scratch is sized
-    /// from, and [`AuProcessor::render_f32`](crate::processor::AuProcessor::render_f32)
+    /// from, and [`AuProcessor::render_planes`](crate::processor::AuProcessor::render_planes)
     /// renders bus 0 alone. Multi-bus units are *described* by
     /// [`crate::bus`] — `bus_count` / `bus_layout` — but not yet rendered
     /// per-bus, so widening the probe would size buffers for buses nothing
@@ -204,7 +204,7 @@ impl StreamConfig {
     /// AU is uninitialized, and an AU that clamps to its own maximum returns
     /// `noErr` while keeping a smaller figure. Recording the larger requested
     /// number then breaks
-    /// [`AuProcessor::render_f32`](crate::processor::AuProcessor::render_f32)'s
+    /// [`AuProcessor::render_planes`](crate::processor::AuProcessor::render_planes)'s
     /// `num_frames > block_size` guard in the dangerous direction — the render is
     /// admitted and the AU writes past buffers it sized for fewer frames.
     ///

@@ -125,7 +125,8 @@
 //!
 //! ```rust,no_run
 //! # use std::path::Path;
-//! # use tutti_plugin_types::{Control, Normalized, ParamId, StateUse};
+//! # use tutti_plugin_types::{Control, Normalized, StateUse};
+//! # use tutti_types::ParamId;
 //! # use tutti_vst3_host::{LoadOptions, Vst3Loaded};
 //! # fn ex() -> Result<(), Box<dyn std::error::Error>> {
 //! # let main = tutti_plugin_types::MainThreadMarker::new().expect("on the UI thread");

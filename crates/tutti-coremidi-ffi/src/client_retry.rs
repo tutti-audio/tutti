@@ -5,15 +5,9 @@
 //! fresh server is up about five seconds later. `ClientRetry` decides when to
 //! try again; [`create_client`] is the loop that reads the clock and sleeps.
 
+use crate::error::OsStatus;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
-
-/// The `OSStatus` `MIDIClientCreate` returns while the MIDI server is exiting.
-///
-/// `MIDIServices.h` names no constant for it. The number is the Carbon code
-/// `smNoDir` (`MacErrors.h`), which CoreMIDI reports when its Mach connection to
-/// the server fails; this crate calls it by what it means here.
-pub(crate) const SERVER_GONE: i32 = -304;
 
 /// How long a client creation keeps retrying, measured from the first attempt.
 /// It covers the server's restart of about five seconds with room to spare.
@@ -70,10 +64,10 @@ impl ClientRetry {
 
     /// The decision for an attempt that failed with `status` at `now`.
     ///
-    /// Only [`SERVER_GONE`] is retried, with waits of 100 ms doubling to 1 s,
+    /// Only [`OsStatus::SERVER_GONE`] is retried, with waits of 100 ms doubling to 1 s,
     /// the last one clipped to the bound; at or past the bound it gives up.
-    pub(crate) fn after(&mut self, status: i32, now: Instant) -> Retry {
-        if status != SERVER_GONE || now >= self.deadline {
+    pub(crate) fn after(&mut self, status: OsStatus, now: Instant) -> Retry {
+        if status != OsStatus::SERVER_GONE || now >= self.deadline {
             return Retry::GiveUp;
         }
         let next = (now + self.wait).min(self.deadline);
@@ -83,7 +77,7 @@ impl ClientRetry {
 }
 
 /// Runs `create` until it succeeds, fails with a status other than
-/// `SERVER_GONE`, or `RETRY_BOUND` passes; returns the last status then.
+/// the server's exit, or `RETRY_BOUND` passes; returns the last status then.
 ///
 /// Every client creation in the process goes through here. A window that ends
 /// in failure is remembered process-wide: creations within `RETRY_BOUND` after
@@ -92,7 +86,7 @@ impl ClientRetry {
 /// # Errors
 ///
 /// The status of the last attempt.
-pub fn create_client<T>(mut create: impl FnMut() -> Result<T, i32>) -> Result<T, i32> {
+pub fn create_client<T>(mut create: impl FnMut() -> Result<T, OsStatus>) -> Result<T, OsStatus> {
     static GAVE_UP: Mutex<Option<Instant>> = Mutex::new(None);
     let gave_up = *GAVE_UP.lock().unwrap_or_else(|p| p.into_inner());
     let mut rule = ClientRetry::new(Instant::now(), gave_up);
@@ -104,7 +98,7 @@ pub fn create_client<T>(mut create: impl FnMut() -> Result<T, i32>) -> Result<T,
         match rule.after(status, Instant::now()) {
             Retry::At(at) => std::thread::sleep(at.saturating_duration_since(Instant::now())),
             Retry::GiveUp => {
-                if status == SERVER_GONE && rule.windowed() {
+                if status == OsStatus::SERVER_GONE && rule.windowed() {
                     *GAVE_UP.lock().unwrap_or_else(|p| p.into_inner()) = Some(Instant::now());
                 }
                 return Err(status);
@@ -116,6 +110,8 @@ pub fn create_client<T>(mut create: impl FnMut() -> Result<T, i32>) -> Result<T,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const SERVER_GONE: OsStatus = OsStatus::SERVER_GONE;
 
     fn ms(n: u64) -> Duration {
         Duration::from_millis(n)
@@ -172,7 +168,8 @@ mod tests {
     #[test]
     fn never_retries_another_status() {
         let start = Instant::now();
-        for status in [-1, 0, -10839, -10833, -303, -305, i32::MIN, i32::MAX] {
+        for raw in [-1, 0, -10839, -10833, -303, -305, i32::MIN, i32::MAX] {
+            let status = OsStatus::new(raw);
             let mut rule = ClientRetry::new(start, None);
             assert_eq!(rule.after(status, start), Retry::GiveUp, "status {status}");
         }
@@ -181,11 +178,11 @@ mod tests {
     #[test]
     fn create_client_returns_a_non_retryable_status_at_once() {
         let mut calls = 0;
-        let result: Result<(), i32> = create_client(|| {
+        let result: Result<(), OsStatus> = create_client(|| {
             calls += 1;
-            Err(-10839)
+            Err(OsStatus::new(-10839))
         });
-        assert_eq!(result, Err(-10839));
+        assert_eq!(result, Err(OsStatus::new(-10839)));
         assert_eq!(calls, 1);
     }
 

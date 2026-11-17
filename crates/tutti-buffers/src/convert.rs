@@ -5,7 +5,7 @@
 //! widths must agree, then the frame counts. A source and a destination of
 //! different formats convert sample by sample by the rule in [`Sample`].
 
-use crate::{BufferError, Interleaved, InterleavedMut, Planes, PlanesMut, Sample};
+use crate::{BufferError, Interleaved, InterleavedMut, Mono, MonoMut, Planes, PlanesMut, Sample};
 use tutti_types::{ChannelLayout, Samples};
 
 /// Converts every sample of `src` into `dst`'s format by the rule in
@@ -35,6 +35,34 @@ pub fn convert<A: Sample, B: Sample>(
     mut dst: InterleavedMut<'_, B>,
 ) -> Result<(), BufferError> {
     same_shape(src.layout(), dst.layout(), src.frames(), dst.frames())?;
+    for (d, &s) in dst.samples_mut().iter_mut().zip(src.samples()) {
+        *d = s.convert_to();
+    }
+    Ok(())
+}
+
+/// Converts one channel of `src` into `dst`'s format by the rule in
+/// [`Sample`].
+///
+/// ```
+/// use tutti_buffers::{convert_mono, Mono, MonoMut};
+///
+/// let src = [0.5f32, -1.0, 2.0, f32::NAN];
+/// let mut dst = [0i16; 4];
+/// convert_mono(Mono::new(&src), MonoMut::new(&mut dst))?;
+/// assert_eq!(dst, [16384, -32768, 32767, 0]);
+/// # Ok::<(), tutti_buffers::BufferError>(())
+/// ```
+///
+/// # Errors
+///
+/// [`BufferError::LengthMismatch`] if the frame counts differ. Nothing is
+/// written then.
+pub fn convert_mono<A: Sample, B: Sample>(
+    src: Mono<'_, A>,
+    mut dst: MonoMut<'_, B>,
+) -> Result<(), BufferError> {
+    same_frames(src.frames(), dst.frames())?;
     for (d, &s) in dst.samples_mut().iter_mut().zip(src.samples()) {
         *d = s.convert_to();
     }

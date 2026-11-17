@@ -21,8 +21,9 @@ use tutti_plugin_contract::{
 use tutti_plugin_ipc::{BridgeConfig as IpcConfig, BridgeEvent, Ipc, Launched};
 use tutti_plugin_types::{
     BridgeError, BridgeResult, Control, Editor, Load, LoadStage, MainThreadMarker, Normalized,
-    ParamEdit, ParamId, SampleFormat, SampleRate,
+    ParamEdit, SampleFormat, SampleRate,
 };
+use tutti_types::ParamId;
 
 fn through_server<F: Format>(path: PathBuf) {
     // SAFETY: set before any thread of this test reads it.

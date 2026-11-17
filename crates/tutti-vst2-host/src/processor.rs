@@ -1,14 +1,14 @@
 //! The realtime half of an activation: [`Vst2Processor`].
 //!
-//! The entry points [`Vst2Processor::process_f32`] and
-//! [`Vst2Processor::process_f64`] update the cached transport snapshot, then
-//! drive the scratch buffers and the `vst` crate's `AudioBuffer`. They return
-//! any MIDI events the plugin emitted. [`Processor::process`] is the same over
-//! the shared vocabulary's [`PluginIo`].
+//! The entry point [`Vst2Processor::process_planes`] updates the cached transport
+//! snapshot, then drives the scratch buffers and the `vst` crate's
+//! `AudioBuffer`. It returns any MIDI events the plugin emitted.
+//! [`Processor::process`] is the same over the shared vocabulary's
+//! [`PluginIo`].
 //!
-//! Each entry point reaches the matching VST 2.4 render slot —
-//! `processReplacing` for f32, `processReplacingF64` for f64 — so the two
-//! widths are independent paths rather than one width wrapping the other.
+//! The render slot is the one the plugin was activated at, VST 2.4's
+//! `processReplacing` for f32 and `processReplacingF64` for f64, whatever the
+//! block's width: the scratch converts at the edge.
 
 use std::sync::Arc;
 use tutti_graph::UmpAt;
@@ -16,9 +16,10 @@ use tutti_rt::{Counter, Tally};
 
 use vst::host::RenderHandle;
 
+use tutti_buffers::{Float, InputOutput};
 use tutti_plugin_types::{
-    ChannelTable, Normalized, ParameterChanges, PluginAudio, PluginError, PluginIo, PluginResult,
-    ProcessContext, ProcessOutput, Processor, SampleRate,
+    Normalized, ParameterChanges, PluginAudio, PluginError, PluginIo, PluginResult, ProcessContext,
+    ProcessOutput, Processor, SampleFormat, SampleRate,
 };
 
 use crate::host::HostState;
@@ -58,9 +59,6 @@ pub struct Vst2Processor {
     block_size: usize,
     /// The rate the plugin was told (`effSetSampleRate`).
     sample_rate: SampleRate,
-    /// Whether the plugin was told `effSetProcessPrecision(64)`: the width
-    /// [`process_f64`](Self::process_f64) enters it at.
-    double_precision: bool,
     /// The host's end of the plugin's callbacks, for its drop counters.
     host: Arc<HostState>,
 }
@@ -69,7 +67,7 @@ impl std::fmt::Debug for Vst2Processor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Vst2Processor")
             .field("block_size", &self.block_size)
-            .field("double_precision", &self.double_precision)
+            .field("format", &self.scratch.format())
             .field("processing", &self.render.is_processing())
             .finish_non_exhaustive()
     }
@@ -83,7 +81,6 @@ pub(crate) struct ProcessorParts {
     pub audio: AudioSide,
     pub block_size: usize,
     pub sample_rate: SampleRate,
-    pub double_precision: bool,
     pub host: Arc<HostState>,
 }
 
@@ -96,7 +93,6 @@ impl Vst2Processor {
             audio,
             block_size,
             sample_rate,
-            double_precision,
             host,
         } = parts;
         Self {
@@ -107,7 +103,6 @@ impl Vst2Processor {
             midi: audio.midi,
             block_size,
             sample_rate,
-            double_precision,
             host,
         }
     }
@@ -146,10 +141,10 @@ impl Vst2Processor {
     }
 
     /// Whether the plugin was told `effSetProcessPrecision(64)`, which is what
-    /// makes [`process_f64`](Self::process_f64) enter `processReplacingF64`.
+    /// makes [`process_planes`](Self::process_planes) enter `processReplacingF64`.
     #[must_use]
     pub fn is_double_precision(&self) -> bool {
-        self.double_precision
+        self.scratch.format() == SampleFormat::Float64
     }
 
     /// Returns how many plugin-emitted MIDI events were **dropped** since the
@@ -195,12 +190,22 @@ impl Vst2Processor {
         self.midi.send.events_dropped()
     }
 
-    /// Renders one block of `num_samples` f32 frames and returns the MIDI the
-    /// plugin emitted during it.
+    /// Renders one block of `io.frames()` frames at its width and returns the
+    /// MIDI the plugin emitted during it.
     ///
-    /// `inputs` and `outputs` hold one slice per channel. `ctx` carries this
-    /// block's MIDI input, transport and sample rate. A zero-length block returns
-    /// immediately without entering the plugin.
+    /// `io` holds one plane per channel. `ctx` carries this block's MIDI input,
+    /// transport and sample rate. A zero-length block returns immediately
+    /// without entering the plugin.
+    ///
+    /// A plugin told 64-bit at activation (`Prepare::format` of `Float64` and
+    /// `effFlagsCanDoubleReplacing`) is entered through `processReplacingF64`, so
+    /// the samples never pass through f32; one told 32 is entered through
+    /// `processReplacing`, and a 64-bit block for it is converted to f32 at the
+    /// scratch and back. That fallback is lossy and deliberate: the alternative
+    /// is silence (what the vendor's `process_f64` returns on a null
+    /// `processReplacingF64`), which would turn an f64 master chain into a mute
+    /// for every plugin that only speaks f32. Callers wanting to avoid the
+    /// narrowing read `metadata().supports_f64` and activate at `Float32`.
     ///
     /// A block longer than the maximum the plugin was told
     /// ([`Prepare::max_block`](tutti_plugin_types::Prepare::max_block)) is
@@ -212,23 +217,16 @@ impl Vst2Processor {
     /// before it.
     ///
     /// The returned events live in a buffer owned by the Processor and are
-    /// replaced on the next `process_*` call; copy out what you need to keep.
+    /// replaced on the next call; copy out what you need to keep.
     ///
     /// Real-time safe: no allocation or locking on this path.
-    ///
-    /// # Panics
-    ///
-    /// Panics if an input slice is shorter than `num_samples`.
-    /// [`Processor::process`] checks both sides and reports a short slice as an
-    /// error instead.
-    pub fn process_f32(
+    pub fn process_planes<S: Float>(
         &mut self,
-        inputs: &[&[f32]],
-        outputs: &mut [&mut [f32]],
-        num_samples: usize,
+        io: &mut InputOutput<'_, '_, '_, S>,
         ctx: &Vst2ProcessContext,
     ) -> &MidiEventVec {
         self.midi.out.clear();
+        let num_samples = io.frames().0;
         if num_samples == 0 {
             return &self.midi.out;
         }
@@ -237,6 +235,7 @@ impl Vst2Processor {
         let host = Arc::clone(&self.host);
         let _in_process = host.enter_process();
 
+        let (input, mut output) = io.split();
         // A block longer than the maximum the plugin was told is rendered in
         // pieces no longer than it: a plugin sizes its internal buffers to the
         // announced maximum, so a longer call overruns them.
@@ -245,63 +244,7 @@ impl Vst2Processor {
             let len = (num_samples - start).min(self.block_size.max(1));
             self.begin_piece(ctx, start, len, num_samples);
             self.scratch
-                .render_f32_piece(&mut self.render, inputs, outputs, start, len);
-            self.midi.drain_from(start);
-            start += len;
-        }
-        &self.midi.out
-    }
-
-    /// Renders one block of `num_samples` f64 frames and returns the MIDI the
-    /// plugin emitted during it.
-    ///
-    /// A plugin told 64-bit at activation (`Prepare::format` of `Float64` and
-    /// `effFlagsCanDoubleReplacing`) is entered through `processReplacingF64`, so
-    /// the samples never pass through f32. One that was told 32 (activated at
-    /// `Float32`, or without the flag) is not entered at 64, and VST 2.4 defines
-    /// no accumulating counterpart, so the block is staged down to f32,
-    /// rendered, and widened back. That fallback is lossy and deliberate: the
-    /// alternative is silence (what the vendor's `process_f64` returns on a null
-    /// `processReplacingF64`), which would turn an f64 master chain into a mute
-    /// for every plugin that only speaks f32. Callers wanting to avoid the
-    /// narrowing read `metadata().supports_f64` and activate at `Float32`.
-    ///
-    /// Arguments, the returned events and real-time behaviour are as for
-    /// [`process_f32`](Self::process_f32).
-    ///
-    /// # Panics
-    ///
-    /// As [`process_f32`](Self::process_f32).
-    pub fn process_f64(
-        &mut self,
-        inputs: &[&[f64]],
-        outputs: &mut [&mut [f64]],
-        num_samples: usize,
-        ctx: &Vst2ProcessContext,
-    ) -> &MidiEventVec {
-        self.midi.out.clear();
-        if num_samples == 0 {
-            return &self.midi.out;
-        }
-        self.ensure_processing();
-        // An `Arc` clone (no allocation): the scope outlives the `&mut self` calls below.
-        let host = Arc::clone(&self.host);
-        let _in_process = host.enter_process();
-
-        // Native only when the plugin was told 64-bit at activation: a plugin
-        // told 32 is not entered at 64.
-        let native_f64 = self.is_double_precision();
-        let mut start = 0;
-        while start < num_samples {
-            let len = (num_samples - start).min(self.block_size.max(1));
-            self.begin_piece(ctx, start, len, num_samples);
-            if native_f64 {
-                self.scratch
-                    .render_f64_piece(&mut self.render, inputs, outputs, start, len);
-            } else {
-                self.scratch
-                    .render_f64_as_f32_piece(&mut self.render, inputs, outputs, start, len);
-            }
+                .render_piece(&mut self.render, input, &mut output, start, len);
             self.midi.drain_from(start);
             start += len;
         }
@@ -451,37 +394,24 @@ impl Vst2Processor {
         let transport = ctx.transport;
         let refused;
         let sample_rate = self.sample_rate;
+        let host_ctx = Vst2ProcessContext {
+            midi: ctx.midi_events,
+            transport,
+            sample_rate,
+        };
         let emitted = match buffer {
             PluginAudio::F32(io) => {
-                if self.double_precision {
+                if self.is_double_precision() {
                     return Err(PluginError::Block(
                         "the block's sample format is not the one the plugin was activated with",
                     ));
                 }
                 refused = self.apply_automation(ctx.param_changes);
-                let host_ctx = Vst2ProcessContext {
-                    midi: ctx.midi_events,
-                    transport,
-                    sample_rate,
-                };
-                let frames = io.frames().0;
-                let (input, mut output) = io.split();
-                let inputs = ChannelTable::of_planes(input)?;
-                let mut outputs = ChannelTable::of_planes_mut(&mut output)?;
-                self.process_f32(&inputs, &mut outputs, frames, &host_ctx)
+                self.process_planes(io, &host_ctx)
             }
             PluginAudio::F64(io) => {
                 refused = self.apply_automation(ctx.param_changes);
-                let host_ctx = Vst2ProcessContext {
-                    midi: ctx.midi_events,
-                    transport,
-                    sample_rate,
-                };
-                let frames = io.frames().0;
-                let (input, mut output) = io.split();
-                let inputs = ChannelTable::of_planes(input)?;
-                let mut outputs = ChannelTable::of_planes_mut(&mut output)?;
-                self.process_f64(&inputs, &mut outputs, frames, &host_ctx)
+                self.process_planes(io, &host_ctx)
             }
         };
         // `out` arrives cleared, with its capacity intact: past its cap the MIDI

@@ -20,7 +20,7 @@ pub struct Timebase {
 impl Timebase {
     /// A ratio of `numer` to `denom`; `None` when `denom` is 0.
     #[must_use]
-    pub fn new(numer: u32, denom: u32) -> Option<Self> {
+    pub(crate) fn new(numer: u32, denom: u32) -> Option<Self> {
         (denom != 0).then_some(Self { numer, denom })
     }
 
@@ -32,8 +32,7 @@ impl Timebase {
             let mut info = mach_timebase_info_data_t { numer: 0, denom: 0 };
             // SAFETY: `info` is a valid out-pointer.
             let rc = unsafe { mach_timebase_info(&mut info) };
-            // The call cannot fail on a supported macOS; a 1:1 base is what an
-            // Intel Mac reports, and the only sane answer to fall back on.
+            // The call cannot fail on a supported macOS; 1:1 is an Intel Mac's base.
             if rc != KERN_SUCCESS {
                 return Timebase { numer: 1, denom: 1 };
             }
@@ -90,6 +89,26 @@ mod tests {
         assert_eq!(base.ticks(Duration::from_nanos(125)), 3);
         assert_eq!(base.ticks(base.duration(123_456_789)), 123_456_789);
         assert_eq!(base.ticks(Duration::MAX), u64::MAX);
+    }
+
+    // `ticks` is `nanos * denom / numer`, pinned at Apple Silicon's 125/3 and an
+    // Intel Mac's 1/1.
+    #[test]
+    fn ticks_of_literal_nanoseconds() {
+        let apple = Timebase::new(125, 3).unwrap();
+        assert_eq!(
+            apple.ticks(Duration::from_nanos(50_000_000_000)),
+            1_200_000_000
+        );
+        assert_eq!(
+            apple.ticks(Duration::from_nanos(49_990_000_000)),
+            1_199_760_000
+        );
+        let intel = Timebase::new(1, 1).unwrap();
+        assert_eq!(
+            intel.ticks(Duration::from_nanos(50_000_000_000)),
+            50_000_000_000
+        );
     }
 
     // A base with no denominator cannot be built, so `duration` never divides by

@@ -212,7 +212,6 @@
 //! not echo** (writing to it feeds the raw-MIDI device, not that port's own
 //! subscribers, so a send/receive pair on one virmidi port receives nothing),
 //! and `Midi Through` is the kernel's actual loopback.
-#![cfg_attr(docsrs, feature(doc_cfg))]
 #![forbid(unsafe_code)]
 
 // --- Framework-free hardware I/O core ---

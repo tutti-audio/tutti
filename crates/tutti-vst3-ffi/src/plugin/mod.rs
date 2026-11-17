@@ -31,10 +31,11 @@ use vst3::Steinberg::{
 use vst3::{ComPtr, ComWrapper};
 
 use tutti_plugin_types::{
-    ContentScale, EditorCapabilities, MainThreadMarker, MainWorkHandle, ParamId, WindowHandle,
+    ContentScale, EditorCapabilities, MainThreadMarker, MainWorkHandle, WindowHandle,
     read_utf16_str, write_c_chars, write_utf16_str,
 };
 use tutti_types::ChannelLayout;
+use tutti_types::ParamId;
 
 use crate::audio::{Arrangement, AudioSide, Setup, Shared};
 use crate::com::{BStream, ComponentHandler, HostApplication, HostPlugFrame};

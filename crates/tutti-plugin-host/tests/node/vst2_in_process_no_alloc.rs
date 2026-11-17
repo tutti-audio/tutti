@@ -22,7 +22,7 @@ use tutti_fixtures::midi;
 use tutti_graph::contract::Direct;
 use tutti_graph::{Event, Offset};
 use tutti_midi_protocol::widen_velocity;
-use tutti_types::{SampleRate, Samples};
+use tutti_types::{ParamId, SampleRate, Samples};
 use tutti_ump::{MidiChannel, U7, Ump};
 
 static PLUGIN_LOAD_LOCK: Mutex<()> = Mutex::new(());
@@ -186,7 +186,7 @@ fn two_hundred_moving_parameters_do_not_allocate() {
         for (k, frame) in [(0u32, 0usize), (1, 32)] {
             let at = Offset::of(Samples(frame), Samples(64));
             for id in 0..PARAMS {
-                let ramp = ParamRamp::foreign(id, value(b, k, id), Samples(0));
+                let ramp = ParamRamp::foreign(ParamId::new(id), value(b, k, id), Samples(0));
                 events.push(Event::ramp(at, ramp));
             }
         }
@@ -204,7 +204,7 @@ fn two_hundred_moving_parameters_do_not_allocate() {
 
     for id in 0..PARAMS {
         assert_eq!(
-            handle.parameter_value(tutti_plugin_types::ParamId::new((id as i32) as u32)),
+            handle.parameter_value(ParamId::new((id as i32) as u32)),
             Some(tutti_plugin_types::Normalized::clamped(f64::from(value(
                 71, 1, id
             )))),
