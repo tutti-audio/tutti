@@ -148,14 +148,14 @@ fn push_refuses_a_scratch_with_no_input_bus() {
         let mut scratch = PushScratch::new(&ins, &outs, BLOCK);
 
         match au.process_push(&mut scratch, BLOCK) {
-            Err(AuError::InvalidBuffer(msg)) => assert!(
-                msg.contains("input bus"),
-                "{}: the refusal should name the missing input bus; got {msg:?}",
+            Err(AuError::MissingBus { needs, .. }) => assert!(
+                needs.contains("input bus"),
+                "{}: the refusal should name the missing input bus; got {needs:?}",
                 unit.label
             ),
             other => panic!(
                 "{}: a scratch with zero input buses must be refused with \
-                 InvalidBuffer — `process_push` indexes `input_slabs[0]` right \
+                 MissingBus — `process_push` indexes `input_slabs[0]` right \
                  after the guard, so admitting it panics on an empty Vec. \
                  Got {other:?}",
                 unit.label
@@ -176,7 +176,7 @@ fn push_refuses_a_scratch_with_no_input_bus() {
     let mut scratch = PushScratch::new(&ins, &outs, BLOCK);
     let r = au.process_push(&mut scratch, BLOCK);
     assert!(
-        !matches!(&r, Err(AuError::InvalidBuffer(m)) if m.contains("input bus")),
+        !matches!(&r, Err(AuError::MissingBus { needs, .. }) if needs.contains("input bus")),
         "AUDelay has an input bus, so the missing-input-bus refusal must not \
          fire for it; got {r:?}"
     );

@@ -15,8 +15,10 @@ use crate::error::{Error, OsError, Result, check};
 use crate::event_list::{EventList, Wire, send_event_list_fn};
 use crate::plain::Plain;
 use crate::property::{
-    AudioUnitMidiProtocol, Element, FactoryPresets, PresentPreset, Property, Scope,
+    AudioUnitMidiProtocol, Element, FactoryPresets, LastRenderStatus, PresentPreset, Property,
+    Scope,
 };
+use crate::status::NO_ERR;
 use tutti_plugin_types::MainWorkHandle;
 
 /// The size and writability of a property, from `AudioUnitGetPropertyInfo`.
@@ -178,6 +180,11 @@ impl Unit {
         self.inner.instance
     }
 
+    /// The handle a drop off the home thread hands its work to.
+    pub(crate) fn work(&self) -> &MainWorkHandle {
+        &self.inner.work
+    }
+
     pub(crate) fn share(&self) -> Arc<Inner> {
         Arc::clone(&self.inner)
     }
@@ -272,6 +279,15 @@ impl Unit {
     /// ([`RenderCount::quiescent`](tutti_rt::RenderCount::quiescent)).
     pub(crate) fn no_render_in_flight(&self) -> bool {
         self.inner.renders.quiescent()
+    }
+
+    /// The unit's `kAudioUnitProperty_LastRenderError`, when it is readable and
+    /// not `noErr`: what the AU last failed a render with. A property read, so
+    /// control side only, after a render reported a failure.
+    pub fn last_render_error(&self) -> Option<i32> {
+        self.get::<LastRenderStatus>(Scope::GLOBAL, Element::ZERO)
+            .ok()
+            .filter(|&e| e != NO_ERR)
     }
 
     /// `AudioUnitReset` on `scope` and `element`.
