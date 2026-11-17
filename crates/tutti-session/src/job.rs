@@ -259,8 +259,19 @@ impl<J: JobKind> Drop for Job<J> {
     fn drop(&mut self) {
         self.cell.cancelled.store(true, Ordering::Release);
         // A landing queued before the drop is discarded with it; one after it
-        // sees `cancelled` under the same lock (`Ticket::land`).
-        lock(&self.queue).retain(|landed| landed.id != self.id);
+        // sees `cancelled` under the same lock (`Ticket::land`). What is
+        // discarded drops after the lock is released: a result may own a handle
+        // (a Subscription) whose drop asks its port for something, which can end
+        // a job and take this lock.
+        let discarded = {
+            let mut queue = lock(&self.queue);
+            let (gone, kept) = std::mem::take(&mut *queue)
+                .into_iter()
+                .partition(|landed| landed.id == self.id);
+            *queue = kept;
+            gone
+        };
+        drop(discarded);
     }
 }
 

@@ -117,7 +117,8 @@
 //! in the same batch. When the device's MUID changes the Responder is made again for
 //! the new one, over the store as the peers left it, and holds no Subscription. A lost
 //! peer's Initiator and Subscriptions go with it ([`PropertyChange::Dropped`]); a repeated
-//! Discovery of a peer keeps its Subscriptions. The store is served as not subscribable
+//! Discovery of a peer keeps its Subscriptions. An update of a Subscription the
+//! session holds, and the end of one, go to its Initiator and not to the Responder. The store is served as not subscribable
 //! (there is no way to publish to a subscriber through the session), and an inquiry of a
 //! peer the Responder does not serve is NAK'd.
 //!
@@ -343,6 +344,9 @@ struct Member {
     process: BTreeMap<Muid, ProcessInitiator>,
     /// The Initiator of Property Exchange with each peer that declared it.
     properties: BTreeMap<Muid, ResourceInitiator>,
+    /// The Subscription messages of a peer still arriving that are the Initiator's
+    /// (an update, or the end of a Subscription it holds), by peer and Request ID.
+    updates: Vec<(Muid, tutti_midi_device::PeRequestId)>,
     /// The Responder that serves the device's store to those peers.
     server: ResourceResponder,
 }
@@ -356,6 +360,7 @@ impl Member {
             initiators: BTreeMap::new(),
             process: BTreeMap::new(),
             properties: BTreeMap::new(),
+            updates: Vec::new(),
             server,
         }
     }
