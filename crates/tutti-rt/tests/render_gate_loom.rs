@@ -185,17 +185,27 @@ fn close_and_begin_open_are_granted_only_from_their_own_states() {
         let gate = Arc::new(RenderGate::new());
         let closer = {
             let gate = gate.clone();
-            thread::spawn(move || gate.close().is_none())
+            thread::spawn(move || match gate.close() {
+                Some(closing) => {
+                    closing.finish();
+                    true
+                }
+                None => false,
+            })
         };
         let opening = gate
             .begin_open()
             .expect("only the opener moves a closed gate");
         opening.finish();
-        let refused = closer.join().unwrap();
-        // The closer ran before the open (refused) or after it (granted, then
-        // dropped, reopening the gate).
-        let _ = refused;
-        assert_eq!(gate.state(), GateState::Open);
+        let closed = closer.join().unwrap();
+        // A close granted only after the open finished, and it finished: the
+        // gate ends Closed exactly when the closer was granted.
+        let expected = if closed {
+            GateState::Closed
+        } else {
+            GateState::Open
+        };
+        assert_eq!(gate.state(), expected);
     });
     // From Open: begin_open is refused, close granted.
     loom::model(|| {
