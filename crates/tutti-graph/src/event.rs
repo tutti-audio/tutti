@@ -57,11 +57,11 @@ use crate::time::Offset;
 ///
 /// ```
 /// use tutti_graph::{Exponent, Law, ParamRamp};
-/// use tutti_types::{Db, Hz, ParamKey, Samples};
+/// use tutti_types::{Db, Hz, ParamId, ParamKey, Samples};
 /// let r = ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz(800.0), Samples(64));
 /// assert_eq!(r.target(ParamKey::<Hz>::CUTOFF), Some(Hz(800.0)));
 /// assert_eq!(r.target(ParamKey::<Db>::THRESHOLD), None); // another param
-/// assert_eq!(r.foreign_target(7), None); // not a foreign param at all
+/// assert_eq!(r.foreign_target(ParamId::new(7)), None); // not a foreign param at all
 /// assert_eq!(r.shape(), Law::Linear);
 /// let eased = r.with_shape(Law::PowerIn(Exponent::of(2.0)));
 /// assert_eq!(eased.shape(), Law::PowerIn(Exponent::of(2.0)));
