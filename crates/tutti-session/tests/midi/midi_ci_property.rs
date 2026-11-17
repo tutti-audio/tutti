@@ -766,12 +766,10 @@ fn a_partial_update_is_merged_into_the_data_the_record_holds() {
     let mut wire = Wire::new(subscribable());
     let _lease = wire.subscribed(&PeResource::DeviceInfo);
     let now = wire.now();
-    let update = PartialUpdate::new()
-        .with(
-            JsonPointer::new("/model").expect("a pointer"),
-            PeJson::from("Renamed"),
-        )
-        .expect("an update");
+    let update = PartialUpdate::new().with(
+        JsonPointer::new("/model").expect("a pointer"),
+        PartialValue::String("Renamed".to_owned()),
+    );
     let actions = wire
         .peer
         .responder
