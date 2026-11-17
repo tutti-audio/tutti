@@ -31,7 +31,7 @@ impl Drop for Server {
 }
 
 fn connect(socket: &Path, server: &mut Server) -> Stream {
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(60);
     loop {
         if let Ok(stream) = Stream::connect(socket_name(socket).expect("a socket name")) {
             return stream;

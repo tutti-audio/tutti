@@ -207,8 +207,8 @@ pub use dynamics::{
     BandReductions, BandSettings, BankShape, BrickwallBank, BrickwallControls, BrickwallLanes,
     CompressorBank, CompressorControls, CompressorLanes, GAIN_GLIDE, GateBank, GateControls,
     GateLanes, KeyFilter, KeySource, LimiterBank, LimiterControls, LimiterCurve, LimiterLanes,
-    Lookahead, LookaheadError, MultibandBank, MultibandLanes, MultibandSettings, amplitude_to_db,
-    compute_compressor_gain_reduction, compute_limiter_gain,
+    Lookahead, LookaheadError, MultibandBank, MultibandLanes, MultibandSettings, PeakDetection,
+    TruePeakError, amplitude_to_db, compute_compressor_gain_reduction, compute_limiter_gain,
 };
 pub use fft::{Complex32, Complex64, FftScratch, RealFft};
 pub use filter::{

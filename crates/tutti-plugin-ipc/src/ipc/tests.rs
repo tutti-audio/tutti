@@ -53,8 +53,8 @@ impl Mock {
 
     /// Waits for `want` messages of the server's record to satisfy `found`.
     fn wait_for(&self, found: impl Fn(&[HostMessage]) -> bool) -> bool {
-        let start = Instant::now();
-        while start.elapsed() < POLL_GUARD {
+        let deadline = Instant::now() + POLL_GUARD;
+        while Instant::now() < deadline {
             if found(&self.received.lock().unwrap()) {
                 return true;
             }
@@ -350,14 +350,14 @@ fn a_processor_follows_the_graphs_rate_block_and_quantum() {
     assert_eq!(processor.latency(), Samples(40), "one chunk of latency");
     assert!(processor.retune(SampleRate::SR_96K, Samples(30), None));
     assert_eq!(processor.chunk(), NonZeroUsize::new(30), "the block");
-    let start = Instant::now();
+    let deadline = Instant::now() + POLL_GUARD;
     while !received
         .lock()
         .unwrap()
         .iter()
         .any(|m| matches!(m, HostMessage::SetSampleRate { rate } if *rate == SampleRate::SR_96K))
     {
-        assert!(start.elapsed() < POLL_GUARD, "the rate is sent");
+        assert!(Instant::now() < deadline, "the rate is sent");
         std::thread::sleep(Duration::from_millis(5));
     }
 }
@@ -407,14 +407,14 @@ fn the_controller_reports_what_the_plugin_re_reports() {
     // The bridge's thread stores the latency, asks for the re-read, then
     // forwards the event, in that order: once the host has heard it, all
     // three are done.
-    let start = Instant::now();
+    let deadline = Instant::now() + POLL_GUARD;
     while !heard
         .lock()
         .unwrap()
         .iter()
         .any(|e| e.contains("LatencyChanged"))
     {
-        assert!(start.elapsed() < POLL_GUARD, "the host hears it");
+        assert!(Instant::now() < deadline, "the host hears it");
         std::thread::sleep(Duration::from_millis(5));
     }
     assert_eq!(controller.latency(main), Samples(77));
@@ -463,9 +463,9 @@ fn the_buses_a_plugin_announces_are_the_buses_the_host_sees() {
     });
     // An idle bridge reads nothing: the next command's reply reads it.
     assert_eq!(controller.parameters(main).len(), 1);
-    let start = Instant::now();
+    let deadline = Instant::now() + POLL_GUARD;
     while !heard.lock().unwrap().iter().any(|e| e.contains("IoLayout")) {
-        assert!(start.elapsed() < POLL_GUARD, "the host hears it");
+        assert!(Instant::now() < deadline, "the host hears it");
         std::thread::sleep(Duration::from_millis(5));
         let _ = controller.parameters(main);
     }
@@ -503,9 +503,9 @@ fn announced_and_deactivated(ipc: Ipc, server: &Mock) -> (Ipc, tutti_plugin_type
     server.say(&BridgeMessage::PluginIoChanged {
         layout: Some(announced.clone()),
     });
-    let start = Instant::now();
+    let deadline = Instant::now() + POLL_GUARD;
     while !heard.lock().unwrap().iter().any(|e| e.contains("IoLayout")) {
-        assert!(start.elapsed() < POLL_GUARD, "the host hears it");
+        assert!(Instant::now() < deadline, "the host hears it");
         std::thread::sleep(Duration::from_millis(5));
         let _ = controller.parameters(main);
     }
@@ -584,9 +584,9 @@ fn a_change_inside_an_activation_waits_for_the_next_restart() {
     let (processor, mut controller) = activate(ipc, 32);
     // The later layout is heard (a command's reply reads it), after the
     // activation read the second.
-    let start = Instant::now();
+    let deadline = Instant::now() + POLL_GUARD;
     while controller.layout() != third {
-        assert!(start.elapsed() < POLL_GUARD, "the later buses are heard");
+        assert!(Instant::now() < deadline, "the later buses are heard");
         std::thread::sleep(Duration::from_millis(5));
         let _ = controller.parameters(main_thread());
     }
@@ -676,9 +676,9 @@ fn a_failed_setup_is_followed_by_one_even_for_the_layout_held() {
     server.say(&BridgeMessage::PluginIoChanged {
         layout: Some(original.clone()),
     });
-    let start = Instant::now();
+    let deadline = Instant::now() + POLL_GUARD;
     while view.layout() != original {
-        assert!(start.elapsed() < POLL_GUARD, "the host hears it");
+        assert!(Instant::now() < deadline, "the host hears it");
         std::thread::sleep(Duration::from_millis(5));
         let _ = view.parameters(main_thread());
     }
@@ -964,10 +964,10 @@ const CHUNKS_AFTER: usize = 90;
 /// Waits for the bridge to have abandoned [`OFF_THE_BUDGET`] blocks past
 /// `before`, panicking with what it had when [`POLL_GUARD`] runs out.
 fn wait_off_the_budget(bridge: &PluginBridge, before: u64) {
-    let start = Instant::now();
+    let deadline = Instant::now() + POLL_GUARD;
     while bridge.abandoned_replies() < before + OFF_THE_BUDGET {
         assert!(
-            start.elapsed() < POLL_GUARD,
+            Instant::now() < deadline,
             "the bridge abandoned {} blocks in {POLL_GUARD:?} after {CHUNKS_AFTER} \
              chunks, wanted {OFF_THE_BUDGET}: it is holding a block for the \
              fork's budget",
@@ -979,10 +979,10 @@ fn wait_off_the_budget(bridge: &PluginBridge, before: u64) {
 
 /// Waits for the bridge to have abandoned one block (the first, at the budget).
 fn wait_first_abandoned(bridge: &PluginBridge) {
-    let start = Instant::now();
+    let deadline = Instant::now() + POLL_GUARD;
     while bridge.abandoned_replies() < 1 {
         assert!(
-            start.elapsed() < POLL_GUARD,
+            Instant::now() < deadline,
             "the bridge never abandoned the first block"
         );
         std::thread::sleep(Duration::from_millis(5));
@@ -1122,9 +1122,9 @@ fn a_resync_with_a_changed_list_flips_the_answer() {
     })));
     *server.parameters.lock().unwrap() = vec![param(3, true)];
     server.say(&BridgeMessage::PluginParamTitlesChanged);
-    let start = Instant::now();
+    let deadline = Instant::now() + POLL_GUARD;
     while !arrived.load(std::sync::atomic::Ordering::Acquire) {
-        assert!(start.elapsed() < POLL_GUARD, "the event never arrived");
+        assert!(Instant::now() < deadline, "the event never arrived");
         std::thread::sleep(Duration::from_millis(1));
     }
     // The cache is forgotten before the event is forwarded: no read of the
@@ -1238,9 +1238,9 @@ fn a_values_resync_keeps_the_declared_list() {
         }
     })));
     server.say(&BridgeMessage::PluginParamValuesChanged);
-    let start = Instant::now();
+    let deadline = Instant::now() + POLL_GUARD;
     while !arrived.load(std::sync::atomic::Ordering::Acquire) {
-        assert!(start.elapsed() < POLL_GUARD, "the event never arrived");
+        assert!(Instant::now() < deadline, "the event never arrived");
         std::thread::sleep(Duration::from_millis(1));
     }
     assert_eq!(ipc.set_parameter(main, ParamId::new(3), half), Ok(()));

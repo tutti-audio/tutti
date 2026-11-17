@@ -21,7 +21,10 @@ pub use curves::{
 pub use gate::{GateBank, GateControls, GateLanes};
 pub use key_filter::KeyFilter;
 pub use key_source::KeySource;
-pub use limiter::{LimiterBank, LimiterControls, LimiterLanes, Lookahead, LookaheadError};
+pub use limiter::{
+    LimiterBank, LimiterControls, LimiterLanes, Lookahead, LookaheadError, PeakDetection,
+    TruePeakError,
+};
 pub use multiband::{
     BandReductions, BandSettings, BankShape, MultibandBank, MultibandLanes, MultibandSettings,
 };

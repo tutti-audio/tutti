@@ -311,6 +311,7 @@ pub use dynamics::{
 // key a compressor or a gate listens to.
 pub use tutti_dsp::{
     CompressorControls, GateControls, KeyFilter, KeySource, LimiterControls, Lookahead,
+    PeakDetection,
 };
 
 // Utilities: polarity, mid/side and stereo width.

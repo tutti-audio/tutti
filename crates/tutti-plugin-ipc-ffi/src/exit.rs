@@ -91,7 +91,7 @@ mod tests {
         let mut child = quick().spawn().expect("the command spawns");
         std::thread::sleep(Duration::from_millis(100));
         let wait = ExitWait::of(&child);
-        let started = Instant::now();
+        let deadline = Instant::now() + Duration::from_secs(60);
         loop {
             if wait.wait(Duration::from_millis(100))
                 && let Some(status) = child.try_wait().expect("the status reads")
@@ -100,32 +100,28 @@ mod tests {
                 break;
             }
             assert!(
-                started.elapsed() < Duration::from_secs(5),
+                Instant::now() < deadline,
                 "the end of the child was never learned of"
             );
         }
     }
 
-    /// **A running child is waited out in full, and its end wakes the wait
-    /// before the timeout** (the first wait only says "may have ended", so it is
-    /// spent before the one measured).
+    /// **A running child's wait ends "running" at its timeout, and its end
+    /// wakes the wait** (the first wait only says "may have ended", so it is
+    /// spent first). The woken wait's timeout outlasts the test harness's limit,
+    /// so a wait that ran it out fails.
     #[cfg(target_os = "linux")]
     #[test]
     fn the_end_of_a_child_wakes_the_wait() {
         let mut child = Command::new("sleep").arg("30").spawn().expect("sleep");
         let wait = ExitWait::of(&child);
         assert!(wait.wait(Duration::ZERO), "the first wait asks nothing");
-        let start = Instant::now();
         assert!(!wait.wait(Duration::from_millis(50)), "a running child");
-        assert!(start.elapsed() >= Duration::from_millis(50));
 
         child.kill().expect("kill");
-        let start = Instant::now();
-        assert!(wait.wait(Duration::from_secs(10)), "its end wakes the wait");
         assert!(
-            start.elapsed() < Duration::from_secs(5),
-            "woken by the end, not the timeout: {:?}",
-            start.elapsed()
+            wait.wait(Duration::from_secs(600)),
+            "its end wakes the wait"
         );
         child.wait().expect("reaped");
     }

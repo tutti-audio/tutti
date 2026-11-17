@@ -715,12 +715,11 @@ fn a_timer_the_plugin_registers_is_ticked() {
         "the pass alone latches nothing: the loop's wake does"
     );
 
-    std::thread::sleep(std::time::Duration::from_millis(30));
     tutti_plugin_types::EditorWindow::wake(
         instance.loaded_mut_unwrapped(),
         main_thread(),
         &[],
-        std::time::Instant::now(),
+        std::time::Instant::now() + std::time::Duration::from_secs(1),
     );
     instance.service_requests();
 

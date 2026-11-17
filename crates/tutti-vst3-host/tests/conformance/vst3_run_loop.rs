@@ -17,6 +17,14 @@ use tutti_fixtures::main_thread;
 use tutti_plugin_types::{ContentScale, Interest, MainThreadMarker, Ready, Wakeups};
 use tutti_vst3_ffi::{Module, Plugin};
 
+/// One pass of the run loop at an instant an hour on, so a timer the loop still
+/// holds is due, then one at the clock for the descriptors.
+fn run_past_every_timer(plugin: &Plugin, main: MainThreadMarker) {
+    let an_hour_on = std::time::Instant::now() + Duration::from_secs(3600);
+    plugin.wake_editor_loop(main, &[], an_hour_on);
+    plugin.run_editor_loop_iteration(main);
+}
+
 /// `core::EDITOR_*`, from the plugin's spec.
 const TIDY: u32 = 1;
 const LEAKY: u32 = 2;
@@ -166,8 +174,7 @@ fn a_leaked_registration_is_purged_when_the_editor_closes() {
     plugin.close_editor(main);
     assert_eq!(registered(&plugin), (0, 0), "the leak was taken back");
 
-    std::thread::sleep(Duration::from_millis(5));
-    plugin.run_editor_loop_iteration(main);
+    run_past_every_timer(&plugin, main);
     let activity = plugin.run_loop_activity();
     assert_eq!(
         activity.timers_fired, 0,
@@ -188,8 +195,7 @@ fn a_dropped_plugin_leaves_nothing_in_the_run_loop() {
     assert_eq!(registered(&bystander), (1, 1), "one loop for the module");
     drop(leaky);
     assert_eq!(registered(&bystander), (0, 0));
-    std::thread::sleep(Duration::from_millis(5));
-    bystander.run_editor_loop_iteration(main);
+    run_past_every_timer(&bystander, main);
     assert_eq!(bystander.run_loop_activity().timers_fired, 0);
 }
 
@@ -203,8 +209,7 @@ fn a_failed_attach_leaves_nothing_in_the_run_loop() {
     let mut plugin = plugin_with_editor(&module, FAILING);
     assert!(try_open(&mut plugin, main).is_err());
     assert_eq!(registered(&plugin), (0, 0));
-    std::thread::sleep(Duration::from_millis(5));
-    plugin.run_editor_loop_iteration(main);
+    run_past_every_timer(&plugin, main);
     assert_eq!(plugin.run_loop_activity().timers_fired, 0);
 }
 

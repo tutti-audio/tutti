@@ -9,8 +9,8 @@ use tutti_nodes::{
     Antialiasing, AutoPanConfig, AutoPanNode, BrickwallLimiterNode, CompressorControls,
     CompressorNode, CrossoverNode, DelayControls, DelayNode, DistortionNode, FdnNode, FreeverbNode,
     GateControls, GateNode, LadderFilterNode, LimiterControls, LimiterNode, MaxDelay, ModDelayNode,
-    MultibandCompressorNode, PhaserControls, PhaserNode, RingModConfig, RingModNode, SvfFilterNode,
-    TremoloConfig, TremoloNode,
+    MultibandCompressorNode, PeakDetection, PhaserControls, PhaserNode, RingModConfig, RingModNode,
+    SvfFilterNode, TremoloConfig, TremoloNode,
 };
 use tutti_nodes::{BitCrusherConfig, BitCrusherNode, DcBlockerConfig, DcBlockerNode};
 use tutti_types::{
@@ -107,6 +107,12 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
         (
             "limiter",
             Box::new(LimiterNode::mono(LimiterControls::DEFAULT)),
+        ),
+        (
+            "true-peak limiter",
+            Box::new(
+                LimiterNode::mono(LimiterControls::DEFAULT).detection(PeakDetection::TruePeak),
+            ),
         ),
         ("brickwall", Box::new(BrickwallLimiterNode::new(Db(-1.0)))),
         ("chorus", Box::new(ModDelayNode::chorus(BusTopology::MONO))),

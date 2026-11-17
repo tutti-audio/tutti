@@ -20,17 +20,22 @@ pub(crate) struct LookaheadRing {
 }
 
 impl LookaheadRing {
-    /// A ring of `channels` channels delaying by `lookahead_samples` frames.
+    /// A ring of `channels` channels delaying by `lookahead_samples` frames, whose gain
+    /// window holds the newest `window` frames of gain: at least one and at most
+    /// `lookahead_samples + 1` (the delayed frame's own and the lookahead after it).
     #[must_use]
-    pub(crate) fn new(channels: usize, lookahead_samples: usize) -> Self {
+    pub(crate) fn new(channels: usize, lookahead_samples: usize, window: usize) -> Self {
         let n = lookahead_samples.max(1);
+        debug_assert!(
+            (1..=n + 1).contains(&window),
+            "a window of {window} over {n}"
+        );
         Self {
             lines: (0..channels.max(1))
                 .map(|_| DelayLine::new(Samples(n)))
                 .collect(),
             lookahead: n,
-            // n + 1 frames: the one delayed out now and the n after it.
-            min_deque: MonotonicMinDeque::new(n + 1),
+            min_deque: MonotonicMinDeque::new(window),
             sample_counter: 0,
         }
     }

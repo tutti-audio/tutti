@@ -85,20 +85,10 @@ fn lock() -> std::sync::MutexGuard<'static, ()> {
 const RATE: tutti_types::SampleRate = tutti_types::SampleRate::SR_48K;
 const BLOCK: u32 = 512;
 
-/// How long to wait for a notification before calling it absent.
-///
-/// The listener's notification interval is 200 ms and the first event was
-/// measured arriving at ~208 ms, so this is ~14x the observed latency. Generous
-/// on purpose: the cost of being too generous is a slow *passing* test, while
-/// the cost of being too tight is a flaky failure on a loaded machine.
-const SETTLE: Duration = Duration::from_secs(3);
-
-/// How long to wait before concluding that *no further* events will arrive.
-///
-/// Used only after a listener is dropped. Must comfortably exceed one full
-/// notification interval so an in-flight event has time to land and be counted;
-/// otherwise "nothing arrived" would just mean "we did not wait long enough".
-const QUIESCE: Duration = Duration::from_millis(900);
+/// The guard on waiting for a notification: it only fails a notification that
+/// never comes. The listener's notification interval is 200 ms, so a loaded
+/// machine is nowhere near it.
+const SETTLE: Duration = Duration::from_secs(60);
 
 /// Collects events off the dispatch queue the listener delivers on.
 ///
@@ -129,14 +119,33 @@ impl EventLog {
     /// Block until at least `n` events have arrived, or `SETTLE` elapses.
     /// Returns whether the count was reached.
     fn wait_for_at_least(&self, n: usize) -> bool {
-        let start = Instant::now();
-        while start.elapsed() < SETTLE {
-            if self.len() >= n {
+        self.wait_until(|events| events.len() >= n)
+    }
+
+    /// Block until the events so far satisfy `holds`, or `SETTLE` elapses.
+    /// Returns whether they did.
+    fn wait_until(&self, holds: impl Fn(&[AuEvent]) -> bool) -> bool {
+        let until = Instant::now() + SETTLE;
+        while Instant::now() < until {
+            if holds(&self.snapshot()) {
                 return true;
             }
             std::thread::sleep(Duration::from_millis(5));
         }
-        self.len() >= n
+        holds(&self.snapshot())
+    }
+
+    /// Block until a change of `id` to about `value` has arrived.
+    fn wait_for_value(&self, id: u32, value: f32) -> bool {
+        self.wait_until(|events| {
+            events.iter().any(|ev| {
+                matches!(
+                    ev,
+                    AuEvent::ParameterChanged { id: got, value: v, .. }
+                        if *got == id && (*v - value).abs() < 0.01
+                )
+            })
+        })
     }
 }
 
@@ -227,10 +236,12 @@ fn gesture_begin_and_end_are_delivered_in_order() {
     {
         emit_gesture(au.unit(), p.id, EventAddress::GLOBAL, true).expect("emit begin");
     }
-    // Separate the two so a coalescing window cannot merge them. The listener's
-    // value-change granularity is 10 ms; gestures are not value changes, but
-    // spacing them removes any doubt about what an ordering failure would mean.
-    std::thread::sleep(Duration::from_millis(50));
+    // Separate the two so a coalescing window cannot merge them: the end is
+    // emitted once the begin has been delivered.
+    assert!(
+        log.wait_for_at_least(1),
+        "the begin was not delivered within {SETTLE:?}"
+    );
     {
         emit_gesture(au.unit(), p.id, EventAddress::GLOBAL, false).expect("emit end");
     }
@@ -290,27 +301,39 @@ fn a_dropped_listener_stops_delivering() {
     } else {
         p.range.min
     };
+    // A second listener on the same parameter, kept: it hears each write the
+    // dropped one would have, so its arrival marks the end of the delivery.
+    let control = EventLog::default();
+    let control_listener =
+        AuParameterListener::new(au.unit(), control.sink()).expect("create control listener");
+    control_listener
+        .watch_parameter(p.id, EventAddress::GLOBAL)
+        .expect("watch_parameter");
     au.set_parameter(p.id, target).expect("set before drop");
     assert!(
-        log.wait_for_at_least(1),
+        log.wait_for_at_least(1) && control.wait_for_value(p.id, target),
         "delivery was never working, so 'it stopped' would prove nothing"
     );
 
     drop(listener);
-    // Let anything already in flight land, so it is counted in the baseline
-    // rather than mistaken for a post-drop delivery.
-    std::thread::sleep(QUIESCE);
     let baseline = log.len();
 
-    // Now hammer the parameter. Spaced past the 10 ms coalescing granularity so
-    // each write is a separately notifiable change: if the registration were
-    // still live, these would land.
+    // Now write the parameter, each write waited for on the control listener so
+    // each is a separately notified change: if the registration were still
+    // live, these would land.
+    let mut last = target;
     for i in 0..20 {
         let v = p.range.min + (p.range.max - p.range.min) * (i as f32 / 20.0);
+        if (v - last).abs() < 0.02 {
+            continue;
+        }
         au.set_parameter(p.id, v).expect("set after drop");
-        std::thread::sleep(Duration::from_millis(15));
+        assert!(
+            control.wait_for_value(p.id, v),
+            "the control listener never heard the write of {v}"
+        );
+        last = v;
     }
-    std::thread::sleep(QUIESCE);
 
     assert_eq!(
         log.len(),

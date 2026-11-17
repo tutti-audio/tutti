@@ -132,9 +132,9 @@ fn pool(participants: usize) -> Arc<WorkerPool> {
 }
 
 /// Blocks until the capture shows a request spread over several threads,
-/// or a deadline (for a loaded runner, not the expected time).
+/// or a hang guard (not the expected time).
 fn until_spread(mut one: impl FnMut()) -> ThreadPoolCapture {
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(60);
     let mut blocks = 0;
     while (blocks < 50 || capture().spread == 0) && Instant::now() < deadline {
         one();

@@ -19,8 +19,10 @@
 //! 4. every channel is that gain times its signal, delayed by the lookahead.
 //!
 //! The ceiling bounds the **sample** peak of the output to within a few ulps of
-//! rounding; it is not a true-peak limit, which would need an oversampled detector. The
-//! lookahead is the bank's own constant, fixed when it is built, and **is its latency**
+//! rounding. That is not a true-peak limit: the signal between two samples can pass the
+//! ceiling (a sine at a quarter of the rate, with samples at 0.707 of its amplitude, is 3 dB
+//! over it). [`PeakDetection::TruePeak`] reads the peak from the signal oversampled 4x
+//! instead; see [there](PeakDetection::TruePeak) for what it bounds. The lookahead is the bank's own constant, fixed when it is built, and **is its latency**
 //! ([`latency`](LimiterBank::latency)): the graph's PDC compensates for it. It has no tail,
 //! which excludes latency: what the delay holds comes out within the latency (the output is
 //! exactly silent that many frames after the input is), and gain on silence is silence.
@@ -45,12 +47,80 @@ const UNSET: f32 = f32::INFINITY;
 const LANE_DB_LIMIT: f32 = 300.0;
 
 use tutti_buffers::{Float, Mono, Planes, PlanesMut};
-use tutti_types::{Amplitude, ChannelLayout, Db, SampleRate, Samples, Seconds};
+use tutti_types::{Amplitude, ChannelLayout, Db, MaxBlock, SampleRate, Samples, Seconds};
 
 use super::curves::{LimiterCurve, amplitude_to_db, compute_limiter_gain};
 use super::lookahead::{LookaheadRing, fold_peak};
-use super::shared::CHUNK;
+use super::shared::{CHUNK, level};
 use crate::smoother::Smoother;
+use crate::{FirError, Oversampler, Oversampling, OversamplingFactor, OversamplingPlan};
+
+/// How a [`LimiterBank`] reads the peak it limits.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum PeakDetection {
+    /// The loudest sample of the frame: the output's samples stay within the ceiling, and
+    /// what lies between them may not.
+    #[default]
+    Sample,
+    /// The loudest point of the frame's group of four, read from the signal oversampled 4x
+    /// by the half-band cascade of [`Oversampling`] (default attenuation and passband).
+    /// The audio is not oversampled: the gain is applied at the base rate, to the delayed
+    /// input.
+    ///
+    /// The gain a frame needs is the minimum of the curve's gain over its four points, which
+    /// is the gain at their largest magnitude (the curve never rises with the peak). The
+    /// frame's own sample is read too, so the sample peak is held as in
+    /// [`Sample`](Self::Sample) for every finite input, however large.
+    ///
+    /// **The bound.** Points a quarter of a frame apart are at most an eighth of a frame
+    /// from any instant, and a signal band-limited to `p` of the Nyquist rate (the
+    /// [`Passband`](crate::Passband), 0.9) moves by at most the factor `cos(pi * p / 8)`
+    /// over that offset, so the largest point reads at least `0.9382` of the true peak: the
+    /// input's true peak is over what the detector read by at most
+    /// [`TRUE_PEAK_MARGIN`](LimiterBank::TRUE_PEAK_MARGIN). The bound is for the input's
+    /// band-limited content; the modulation the gain itself adds to the output is not
+    /// covered. Content above the passband is attenuated by the filter's transition band,
+    /// which the bound does not cover either. The detector reads each sample at most 2^100
+    /// in magnitude and a NaN as 0.
+    ///
+    /// **The alignment.** The up-sampler delays by `U` frames of the 4x rate, so the group
+    /// that leaves with frame `n` is the signal around `n - U/4`, and the gain of audio
+    /// frame `m` takes the groups that cover the instants within a frame of it: groups
+    /// `m + ceil((U - 7) / 4)` through `m + 1 + floor(U / 4)`, the newest of which must
+    /// have been seen by the time the audio leaves, `lookahead` frames after it. (A
+    /// frame's reach of one frame either side is an approximation, valid while the gain
+    /// varies slowly across it.) [`LimiterBank::detecting`] refuses a lookahead under
+    /// `1 + floor(U / 4)` frames, about 20. The latency stays the lookahead; only the
+    /// window narrows.
+    TruePeak,
+}
+
+/// The input of the true-peak detector, held to this magnitude (2^100): the half-band sums
+/// of a sample this large stay finite, and a larger one reads as it.
+const TRUE_PEAK_INPUT_LIMIT: f32 = 1.267_650_6e30;
+
+/// What [`LimiterBank::detecting`] refused.
+#[derive(Clone, Copy, Debug, PartialEq, thiserror::Error)]
+pub enum TruePeakError {
+    /// The lookahead is shorter than the up-sampler's delay lets the detection line up.
+    #[error(
+        "a true-peak limiter at this rate looks at least {needed} frames ({ms:.2} ms) ahead, not {lookahead} frames",
+        needed = needed.get(),
+        lookahead = lookahead.get(),
+        ms = shortest.get().get() * 1e3
+    )]
+    Lookahead {
+        /// The frames the lookahead came to at the rate.
+        lookahead: Samples,
+        /// The fewest frames that line up.
+        needed: Samples,
+        /// The shortest lookahead that lines up at the rate.
+        shortest: Lookahead,
+    },
+    /// The up-sampler cannot be designed at the rate.
+    #[error("the true-peak oversampler cannot be designed: {0}")]
+    Design(#[from] FirError),
+}
 
 /// The controls of a [`LimiterBank`].
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -213,21 +283,116 @@ pub struct LimiterBank {
     /// the bank: the window minimum is pushed the replaced value.
     envelope: f32,
     ring: LookaheadRing,
+    /// The true-peak detector; `None` reads the sample peak.
+    detector: Option<Detector>,
+}
+
+/// The state of a true-peak bank's detection.
+#[derive(Clone, Debug)]
+struct Detector {
+    /// One 4x up-sampler per channel.
+    states: Vec<Oversampler<f32>>,
+    /// The linked sample peaks of the last frames, as many as the groups a frame's window
+    /// starts after it: a frame's own sample joins the groups of its window.
+    lag: Vec<f32>,
+    /// Where `lag` is read and written next.
+    at: usize,
+}
+
+impl Detector {
+    /// `peak` of the newest frame in, the peak of the frame `lag.len()` before it out.
+    #[inline]
+    fn delayed(&mut self, peak: f32) -> f32 {
+        if self.lag.is_empty() {
+            return peak;
+        }
+        let out = std::mem::replace(&mut self.lag[self.at], peak);
+        self.at = (self.at + 1) % self.lag.len();
+        out
+    }
 }
 
 impl LimiterBank {
+    /// How far over the ceiling a [`TruePeak`](PeakDetection::TruePeak) bank's true peak may
+    /// reach for input within the oversampler's passband: `20 log10(1 / cos(pi * 0.9 / 8))`
+    /// is 0.5539 dB, from the 4x grid's largest offset of an eighth of a frame. The two up
+    /// stages' passband ripple, each about `10^(-100 / 20)` (the oversampler's documented
+    /// figure for its default attenuation), adds 0.0002 dB; the sum rounds up to 0.56 dB.
+    pub const TRUE_PEAK_MARGIN: Db = Db(0.56);
+
     /// A silent limiter `width` channels wide at `rate`, looking `lookahead` ahead, aimed
     /// at [`LimiterControls::DEFAULT`]. Allocates: build it on the control side.
     #[must_use]
     pub fn new(width: ChannelLayout, lookahead: Lookahead, rate: SampleRate) -> Self {
         let frames = lookahead_frames(lookahead, rate);
+        Self::build(width, frames, frames + 1, rate, None)
+    }
+
+    /// A bank of `frames` of lookahead whose gain window holds the newest `window` gains,
+    /// with the true-peak `detector` when there is one.
+    fn build(
+        width: ChannelLayout,
+        frames: usize,
+        window: usize,
+        rate: SampleRate,
+        detector: Option<Detector>,
+    ) -> Self {
         Self {
             design: Design::of(&LimiterControls::DEFAULT, rate),
             rate,
             lookahead: frames,
             envelope: UNSET,
-            ring: LookaheadRing::new(usize::from(width.count()), frames),
+            ring: LookaheadRing::new(usize::from(width.count()), frames, window),
+            detector,
         }
+    }
+
+    /// A limiter that reads its peak by `detection`: [`new`](Self::new) for
+    /// [`Sample`](PeakDetection::Sample), a true-peak one for
+    /// [`TruePeak`](PeakDetection::TruePeak). Allocates: build it on the control side.
+    ///
+    /// # Errors
+    ///
+    /// [`TruePeakError::Lookahead`] when a true-peak `lookahead` is under what the
+    /// up-sampler's delay needs at `rate`: the two settings are valid only together.
+    /// [`TruePeakError::Design`] when the up-sampler cannot be designed at `rate`.
+    pub fn detecting(
+        width: ChannelLayout,
+        lookahead: Lookahead,
+        rate: SampleRate,
+        detection: PeakDetection,
+    ) -> Result<Self, TruePeakError> {
+        if detection == PeakDetection::Sample {
+            return Ok(Self::new(width, lookahead, rate));
+        }
+        let plan: OversamplingPlan = Oversampling::new(OversamplingFactor::X4).plan(rate)?;
+        let delay = plan.upsample_delay();
+        let frames = lookahead_frames(lookahead, rate);
+        let needed = 1 + delay / 4;
+        if frames < needed {
+            let shortest = Lookahead::new(Seconds(needed as f64 / rate.get()))
+                .unwrap_or(Lookahead(Lookahead::CAP));
+            return Err(TruePeakError::Lookahead {
+                lookahead: Samples(frames),
+                needed: Samples(needed),
+                shortest,
+            });
+        }
+        let first = delay.saturating_sub(7).div_ceil(4);
+        let channels = usize::from(width.count());
+        let block = MaxBlock::of(Samples(CHUNK));
+        let detector = Detector {
+            states: (0..channels.max(1)).map(|_| plan.state(block)).collect(),
+            lag: vec![0.0; first],
+            at: 0,
+        };
+        Ok(Self::build(
+            width,
+            frames,
+            frames - first + 1,
+            rate,
+            Some(detector),
+        ))
     }
 
     /// The processing latency: the lookahead in frames, at least one.
@@ -240,6 +405,11 @@ impl LimiterBank {
     pub fn reset(&mut self) {
         self.envelope = UNSET;
         self.ring.clear();
+        if let Some(d) = &mut self.detector {
+            d.states.iter_mut().for_each(Oversampler::reset);
+            d.lag.fill(0.0);
+            d.at = 0;
+        }
     }
 
     /// Designs `controls` and lands them whole. No allocation.
@@ -305,6 +475,16 @@ impl LimiterBank {
                     *p = fold_peak(*p, x.convert_to::<f32>());
                 }
             }
+            if let Some(detector) = &mut self.detector {
+                // The loudest point of each frame's group of four, over the channels, and
+                // the sample peak of the frame the window starts after.
+                for p in gains.iter_mut() {
+                    *p = detector.delayed(*p);
+                }
+                for (state, plane) in detector.states.iter_mut().zip(input.iter()) {
+                    group_peaks(state, &plane.samples()[start..end], gains);
+                }
+            }
 
             // The recursive half: the envelope and the sliding minimum, one frame at a
             // time; each frame's peak becomes its window-minimum gain.
@@ -329,6 +509,26 @@ impl LimiterBank {
             }
             start = end;
         }
+    }
+}
+
+/// Folds into `peaks` the loudest of the four 4x points of each frame of `samples`.
+fn group_peaks<S: Float>(state: &mut Oversampler<f32>, samples: &[S], peaks: &mut [f32]) {
+    let mut clean = [0.0f32; CHUNK];
+    let clean = &mut clean[..samples.len()];
+    for (c, x) in clean.iter_mut().zip(samples) {
+        let x = x.convert_to::<f32>();
+        *c = if x.is_nan() {
+            0.0
+        } else {
+            x.clamp(-TRUE_PEAK_INPUT_LIMIT, TRUE_PEAK_INPUT_LIMIT)
+        };
+    }
+    state.upsample(Mono::new(clean));
+    let (high, _) = state.high_rate();
+    let (groups, _) = high.samples().as_chunks::<4>();
+    for (p, group) in peaks.iter_mut().zip(groups) {
+        *p = group.iter().fold(*p, |peak, &x| peak.max(level(x)));
     }
 }
 

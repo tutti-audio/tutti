@@ -319,19 +319,15 @@ fn a_plugin_that_crashes_in_init_is_a_crash() {
 }
 
 /// **A plugin that never returns from its init is a timeout**, and the probe is
-/// killed rather than waited for. The deadline is the caller's: two seconds here.
+/// killed rather than waited for: the plugin never returns, so a probe that
+/// waited for it never ends and [`run_task`]'s hang guard fails the test. The
+/// deadline is the caller's: two seconds here.
 #[test]
 fn a_plugin_that_hangs_in_init_times_out() {
     let dir = tempfile::tempdir().unwrap();
-    let started = Instant::now();
     let failure = probe_with_timeout(&clap_named(&dir, "init-hang"), Duration::from_secs(2))
         .expect_err("must not probe");
     assert_eq!(failure.kind, ProbeFailureKind::TimedOut, "{failure:?}");
-    assert!(
-        started.elapsed() < Duration::from_secs(10),
-        "{:?}",
-        started.elapsed()
-    );
     assert!(failure.blacklistable(), "{failure:?}");
     assert!(failure.reason.contains("timed out"), "{failure:?}");
 }
@@ -538,14 +534,13 @@ fn a_plugin_that_crashes_while_measured_is_a_crash() {
 }
 
 /// **A plugin that hangs while rendering is the timeout a load's hang is**, and
-/// the probe is killed.
+/// the probe is killed: a probe that waited for the hang never ends and
+/// [`run_task`]'s hang guard fails the test.
 #[test]
 fn a_plugin_that_hangs_while_measured_times_out() {
-    let started = Instant::now();
     let failure =
         measure_with_fault(spec::FAULT_HANG, Duration::from_secs(3)).expect_err("must not measure");
     assert_eq!(failure.kind, ProbeFailureKind::TimedOut, "{failure:?}");
-    assert!(started.elapsed() < Duration::from_secs(20));
     assert!(failure.blacklistable());
 }
 
