@@ -38,16 +38,18 @@ use windows_sys::Win32::Media::{
     MM_MIM_CLOSE, MM_MIM_DATA, MM_MIM_LONGDATA, MM_MIM_LONGERROR, MMSYSERR_INVALHANDLE,
 };
 
-use crate::error::{Error, check};
-use crate::sleeper::Sleeper;
+use crate::error::{Error, Operation, check};
+use crate::sleeper::{TimerWait, TimerWake, waitable_timer};
 
 /// How many SysEx buffers an input keeps with winmm, and how long each is:
 /// a message longer than one buffer arrives as consecutive [`Event::Long`]s.
 const BUFFERS: usize = 4;
 const BUFFER_BYTES: usize = 4096;
 
-/// How long dropping an input waits for callbacks already running to return.
+/// How long dropping an input waits for callbacks already running to return,
+/// and how often it looks.
 const LEAVE_BOUND: Duration = Duration::from_secs(1);
+const LEAVE_POLL: Duration = Duration::from_millis(1);
 
 /// What winmm delivered, with its stamp.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -128,7 +130,7 @@ struct Shared {
     /// Callbacks inside their body; incremented under the registry lock.
     in_flight: AtomicUsize,
     /// Wakes the worker: a buffer is done, or the input is closing.
-    worker: Sleeper,
+    worker: TimerWake,
 }
 
 /// The inputs that are open, by the id their callback is given.
@@ -141,6 +143,10 @@ fn registry() -> std::sync::MutexGuard<'static, Vec<(usize, Arc<Shared>)>> {
 
 /// An open input, started. Dropping it returns winmm's buffers and closes the
 /// port.
+///
+/// A `MidiIn` exists only once its port is open, and the port is closed in
+/// `Drop` and nowhere else, so every path out of `open` after the port opened
+/// closes it exactly once.
 ///
 /// Drop must not run on the handler's thread (the callback): it waits for the
 /// callbacks in flight, and the handler's own would be one of them.
@@ -176,14 +182,17 @@ impl MidiIn {
     ///
     /// # Errors
     ///
-    /// The failing call: `midiInOpen` (`MMSYSERR_ALLOCATED` when another
-    /// application holds the port exclusively, `MMSYSERR_BADDEVICEID` when it
-    /// is gone), a buffer's preparation, `midiInStart`, or the worker's or
-    /// its wake event's creation.
+    /// The failing call: `midiInOpen`
+    /// ([`MmResult::Allocated`](crate::MmResult::Allocated) when another
+    /// application holds the port exclusively,
+    /// [`MmResult::BadDeviceId`](crate::MmResult::BadDeviceId) when it is
+    /// gone), a buffer's preparation, `midiInStart`, or the worker's or its
+    /// wake event's creation.
     pub fn open(
         index: u32,
         handler: impl FnMut(Event<'_>) + Send + 'static,
     ) -> Result<Self, Error> {
+        let (wake, wait) = waitable_timer()?;
         let shared = Arc::new(Shared {
             handler: Mutex::new(Box::new(handler)),
             buffers: std::array::from_fn(|_| Buffer::new()),
@@ -191,7 +200,7 @@ impl MidiIn {
             dead: AtomicBool::new(false),
             closing: AtomicBool::new(false),
             in_flight: AtomicUsize::new(0),
-            worker: Sleeper::new()?,
+            worker: wake,
         });
         for buffer in &shared.buffers {
             // SAFETY: the header is not yet shared with winmm or any thread.
@@ -215,53 +224,42 @@ impl MidiIn {
                 CALLBACK_FUNCTION,
             )
         };
-        if let Err(e) = check("midiInOpen", code) {
+        if let Err(e) = check(Operation::MidiInOpen, code) {
             unregister(id);
             return Err(e);
         }
         shared.handle.store(handle, Ordering::Release);
-        let worker = {
-            let shared = Arc::clone(&shared);
-            std::thread::Builder::new()
-                .name("tutti-winmm-in".to_string())
-                .spawn(move || requeue(&shared))
-        };
-        let worker = match worker {
-            Ok(worker) => worker,
-            Err(source) => {
-                let mut input = Self {
-                    id,
-                    handle,
-                    shared,
-                    worker: None,
-                };
-                input.close();
-                return Err(Error::Spawn {
-                    operation: "spawn the input worker",
-                    source,
-                });
-            }
-        };
-        let input = Self {
+        // The port is open: from here `input` owns it, and a failure drops
+        // `input`, which closes the port (once, in `Drop`).
+        let mut input = Self {
             id,
             handle,
             shared,
-            worker: Some(worker),
+            worker: None,
         };
-        // From here a failure drops `input`, which closes the port.
+        let worker = {
+            let shared = Arc::clone(&input.shared);
+            std::thread::Builder::new()
+                .name("tutti-winmm-in".to_string())
+                .spawn(move || requeue(&shared, wait))
+        };
+        input.worker = Some(worker.map_err(|source| Error::Os {
+            operation: Operation::SpawnInputWorker,
+            source,
+        })?);
         for buffer in &input.shared.buffers {
             // SAFETY: `header` is this buffer's header, whose `lpData` is its
             // bytes; both live in `Shared`, which this input and the registry
             // keep allocated, unmoved, until the port is closed.
             let code = unsafe { midiInPrepareHeader(input.handle, buffer.header(), header_size()) };
-            check("midiInPrepareHeader", code)?;
+            check(Operation::MidiInPrepareHeader, code)?;
             // SAFETY: the header was prepared just above.
             let code = unsafe { midiInAddBuffer(input.handle, buffer.header(), header_size()) };
-            check("midiInAddBuffer", code)?;
+            check(Operation::MidiInAddBuffer, code)?;
         }
         // SAFETY: `handle` is the open input.
         let code = unsafe { midiInStart(input.handle) };
-        check("midiInStart", code)?;
+        check(Operation::MidiInStart, code)?;
         Ok(input)
     }
 
@@ -272,10 +270,12 @@ impl MidiIn {
     pub fn is_alive(&self) -> bool {
         !self.shared.dead.load(Ordering::Acquire)
     }
+}
 
+impl Drop for MidiIn {
     /// Stops the worker and callbacks, returns the buffers and closes the
     /// port; leaks the buffers if winmm may still hold them.
-    fn close(&mut self) {
+    fn drop(&mut self) {
         // No callback that looks the id up from here on finds the input.
         unregister(self.id);
         self.shared.closing.store(true, Ordering::Release);
@@ -287,7 +287,7 @@ impl MidiIn {
         // Callbacks that found the input before it was removed finish.
         let deadline = Instant::now() + LEAVE_BOUND;
         while self.shared.in_flight.load(Ordering::Acquire) > 0 && Instant::now() < deadline {
-            std::thread::yield_now();
+            std::thread::sleep(LEAVE_POLL);
         }
         if self.shared.in_flight.load(Ordering::Acquire) > 0 {
             // A callback has not left: it may be in the handler, or winmm may
@@ -315,20 +315,14 @@ impl MidiIn {
     }
 }
 
-impl Drop for MidiIn {
-    fn drop(&mut self) {
-        self.close();
-    }
-}
-
 fn unregister(id: usize) {
     registry().retain(|(registered, _)| *registered != id);
 }
 
 /// Gives each done buffer back to winmm until the input closes.
-fn requeue(shared: &Shared) {
+fn requeue(shared: &Shared, mut wait: TimerWait) {
     loop {
-        if shared.worker.wait(None).is_err() {
+        if wait.wait().is_err() {
             shared.dead.store(true, Ordering::Release);
             return;
         }

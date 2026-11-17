@@ -14,7 +14,7 @@
 //! | `MidiIn` | an open input: short messages and SysEx buffers delivered to a closure on the driver's thread, each with winmm's millisecond stamp; closing it returns every buffer first |
 //! | `input_interface`, `output_interface` | the device interface path a driver gives a port, which names the device across a replug |
 //! | `MidiOut` | an open output: a short message, or a SysEx sent whole |
-//! | `Sleeper` | a high-resolution waitable timer and a wake signal: one wait that ends at a time or when woken |
+//! | `waitable_timer`, `TimerWake`, `TimerWait` | a high-resolution waitable timer and a wake signal: the one waiter's wait ends at a time or when any clone of the waker wakes it |
 //!
 //! Each `unsafe` block carries one `// SAFETY:` argument where it is introduced;
 //! `undocumented_unsafe_blocks` and `missing_safety_doc` are denied.
@@ -25,7 +25,6 @@
 //!   audio endpoint, which a machine with no sound hardware gets from a virtual
 //!   audio driver. Off by default.
 #![cfg(windows)]
-#![cfg_attr(docsrs, feature(doc_cfg))]
 // Every `unsafe` block says why it is sound, and every `unsafe fn` what it
 // asks of its caller.
 #![deny(clippy::undocumented_unsafe_blocks, clippy::missing_safety_doc)]
@@ -40,7 +39,7 @@ mod sleeper;
 pub use caps::{
     Caps, input_caps, input_count, input_interface, output_caps, output_count, output_interface,
 };
-pub use error::Error;
+pub use error::{Error, MmResult, Operation};
 pub use input::{Event, MidiIn};
 pub use output::MidiOut;
-pub use sleeper::{Sleeper, Woken};
+pub use sleeper::{TimerWait, TimerWake, Woken, waitable_timer};

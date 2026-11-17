@@ -7,15 +7,20 @@ use windows_sys::Win32::Media::Audio::{
     midiOutOpen, midiOutPrepareHeader, midiOutReset, midiOutShortMsg, midiOutUnprepareHeader,
 };
 
-use crate::error::{Error, check};
+use crate::error::{Error, Operation, check};
 
 /// How long a SysEx send may take beyond what its bytes take on a MIDI 1.0
 /// wire (320 microseconds each, rounded up to a millisecond per three).
 const SLACK: Duration = Duration::from_secs(1);
 
-/// An open output. Dropping it silences the port and closes it.
+/// An open output. Dropping it silences the port and closes it, except after a
+/// SysEx send the driver did not give back (see [`long`](Self::long)): the port
+/// is then silenced and left open.
 pub struct MidiOut {
     handle: HMIDIOUT,
+    /// Set when a SysEx send left its header and bytes with the driver for
+    /// good: the port is then reset on drop but never closed.
+    leaked: bool,
 }
 
 impl std::fmt::Debug for MidiOut {
@@ -34,14 +39,18 @@ impl MidiOut {
     ///
     /// # Errors
     ///
-    /// `midiOutOpen`'s: `MMSYSERR_ALLOCATED` when another application holds the
-    /// port, `MMSYSERR_BADDEVICEID` when it is gone.
+    /// `midiOutOpen`'s: [`MmResult::Allocated`](crate::MmResult::Allocated) when
+    /// another application holds the port,
+    /// [`MmResult::BadDeviceId`](crate::MmResult::BadDeviceId) when it is gone.
     pub fn open(index: u32) -> Result<Self, Error> {
         let mut handle: HMIDIOUT = std::ptr::null_mut();
         // SAFETY: `handle` is a live out-pointer; no callback is registered.
         let code = unsafe { midiOutOpen(&raw mut handle, index, 0, 0, CALLBACK_NULL) };
-        check("midiOutOpen", code)?;
-        Ok(Self { handle })
+        check(Operation::MidiOutOpen, code)?;
+        Ok(Self {
+            handle,
+            leaked: false,
+        })
     }
 
     /// Sends one short message: the status byte, then its data bytes, low
@@ -53,7 +62,7 @@ impl MidiOut {
     pub fn short(&mut self, message: u32) -> Result<(), Error> {
         // SAFETY: `handle` is the open output.
         let code = unsafe { midiOutShortMsg(self.handle, message) };
-        check("midiOutShortMsg", code)
+        check(Operation::MidiOutShortMsg, code)
     }
 
     /// Sends `message`, a whole System Exclusive message from `0xF0` to
@@ -64,7 +73,8 @@ impl MidiOut {
     /// The failing call. Two failures leave the header and the bytes
     /// allocated for good, because the driver may still read them: the send
     /// outlasting its timeout ([`Error::NotReturned`]), and an unprepare
-    /// that returns any code but `MIDIERR_STILLPLAYING` or success.
+    /// that returns any code but `MIDIERR_STILLPLAYING` or success. The port
+    /// is then never closed: dropping it only resets it.
     pub fn long(&mut self, message: &[u8]) -> Result<(), Error> {
         let length = u32::try_from(message.len()).map_err(|source| Error::TooLong {
             len: message.len(),
@@ -82,13 +92,13 @@ impl MidiOut {
         // SAFETY: `header` is a live header whose `lpData` is a live buffer of
         // `dwBufferLength` bytes, both allocated above and not freed before the
         // driver is done with them.
-        let prepared = check("midiOutPrepareHeader", unsafe {
+        let prepared = check(Operation::MidiOutPrepareHeader, unsafe {
             midiOutPrepareHeader(self.handle, header, size)
         });
         let sent = prepared.and_then(|()| {
             // SAFETY: the header is prepared and stays allocated until it is
             // unprepared below.
-            check("midiOutLongMsg", unsafe {
+            check(Operation::MidiOutLongMsg, unsafe {
                 midiOutLongMsg(self.handle, header, size)
             })
         });
@@ -107,8 +117,9 @@ impl MidiOut {
             if Instant::now() >= deadline {
                 // The driver may still read the header and the bytes: they
                 // are never freed.
+                self.leaked = true;
                 return Err(Error::NotReturned {
-                    operation: "midiOutLongMsg",
+                    operation: Operation::MidiOutLongMsg,
                 });
             }
             std::thread::sleep(Duration::from_millis(1));
@@ -117,8 +128,9 @@ impl MidiOut {
             // The driver did not say it was done with the header (a failure
             // other than `MIDIERR_STILLPLAYING`): it may still read it and the
             // bytes, so neither is freed.
+            self.leaked = true;
             sent?;
-            return check("midiOutUnprepareHeader", released);
+            return check(Operation::MidiOutUnprepareHeader, released);
         }
         // SAFETY: the unprepare returned 0, so the driver holds neither the
         // header nor the bytes; nothing else points at either allocation, and
@@ -133,11 +145,14 @@ impl MidiOut {
 
 impl Drop for MidiOut {
     fn drop(&mut self) {
-        // SAFETY: `handle` is the open output, reset (all notes off) and
-        // closed once.
-        unsafe {
-            midiOutReset(self.handle);
-            midiOutClose(self.handle);
+        // SAFETY: `handle` is the open output, reset (all notes off).
+        unsafe { midiOutReset(self.handle) };
+        if self.leaked {
+            // The driver may still hold a header that a send leaked; the port
+            // stays open so that header is never closed under it.
+            return;
         }
+        // SAFETY: `handle` is the open output, closed once.
+        unsafe { midiOutClose(self.handle) };
     }
 }
