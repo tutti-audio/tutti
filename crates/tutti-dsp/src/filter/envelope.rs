@@ -61,7 +61,7 @@ impl EnvelopeFilterControls {
     /// 10 ms attack and a 100 ms release.
     pub const DEFAULT: Self = Self {
         base: SvfControls::DEFAULT.freq,
-        depth: Semitones(0.0),
+        depth: Semitones::UNISON,
         q: SvfControls::DEFAULT.q,
         attack: Seconds(0.01),
         release: Seconds(0.1),
@@ -142,7 +142,9 @@ impl<F: Float + Lanes> EnvelopeFilterBank<F> {
         let times = floored(controls.attack, controls.release);
         self.controls = EnvelopeFilterControls {
             base: Hz(finite_or(controls.base.get(), d.base.get())),
-            depth: Semitones(finite_or(controls.depth.get(), 0.0).clamp(-max, max)),
+            depth: Semitones(
+                finite_or(controls.depth.get(), Semitones::UNISON.get()).clamp(-max, max),
+            ),
             q: Q(finite_or(controls.q.get(), d.q.get())),
             attack: times.attack(),
             release: times.release(),

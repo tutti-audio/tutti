@@ -149,7 +149,7 @@ impl PolySynth {
 
         let master_volume = Param::new(Amplitude::UNITY);
         let universal = UniversalReader::new(config.group, config.device);
-        let bends = [Semitones(0.0); 16];
+        let bends = [Semitones::UNISON; 16];
 
         Self {
             config,
@@ -368,7 +368,7 @@ impl PolySynth {
         let mpe = match control {
             NoteControl::Pitch(pitch) => {
                 // An absolute pitch: no tuning of the key is on it.
-                let freq = key_freq(pitch.note_number(), Semitones(0.0));
+                let freq = key_freq(pitch.note_number(), Semitones::UNISON);
                 let ratio = self.bend_ratio(self.voices[slot].channel());
                 self.voices[slot].set_tuning_freq(freq);
                 // The note's own pitch, with the glide it may be on and the
@@ -703,7 +703,7 @@ impl PolySynth {
         self.allocator.reset();
         self.universal.reset();
         self.master_applied = MasterGain::UNITY;
-        self.bends = [tutti_types::Semitones(0.0); 16];
+        self.bends = [Semitones::UNISON; 16];
         self.last_freq = A4_FREQ;
     }
 
