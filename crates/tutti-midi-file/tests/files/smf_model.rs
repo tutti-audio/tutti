@@ -203,8 +203,8 @@ fn every_event_kind_survives_a_read_and_a_write() {
         assert_eq!(at(28).0, Tick(20 + u64::from(BEAT)));
 
         let written = file.to_bytes().expect("writes");
-        // SMF 1.0 section 2.1: the header's format word, after `MThd` and the
-        // length 6.
+        // SMF 1.0 section 2.1: the header's format word, after the chunk type
+        // "MThd" and the length 6.
         assert_eq!(&written[8..10], &format.to_be_bytes());
         assert_eq!(read(&written), file, "format {format}");
         // The second opinion: the same events, read by a decoder that shares
