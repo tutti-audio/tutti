@@ -318,9 +318,8 @@ fn an_isolated_peak_is_limited_at_every_alignment() {
 }
 
 /// A loud sample followed by one at the ceiling: the second needs no gain by itself, and its
-/// gain is right only if its window takes the group that covers the signal between the two
-/// (a group starting one later leaves the pair's overshoot between them at about 1.3 of the
-/// ceiling).
+/// gain is right only if its window takes the groups that cover the signal between the two,
+/// so the pair's overshoot between them stays within the margin.
 #[test]
 fn the_gain_of_a_quiet_sample_takes_the_groups_covering_the_instants_before_it() {
     for (lookahead, block) in [(LOOKAHEAD, CHUNK), (shortest(), 1)] {
