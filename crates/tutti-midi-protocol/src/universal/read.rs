@@ -361,7 +361,7 @@ fn machine_control(to: Recipient) -> impl FnMut(&mut &[u8]) -> Res<Universal> {
 }
 
 fn take_rest<'a>(input: &mut &'a [u8]) -> &'a [u8] {
-    std::mem::take(input)
+    core::mem::take(input)
 }
 
 /// The addressed form: the Universal message, who it names, and the checksum

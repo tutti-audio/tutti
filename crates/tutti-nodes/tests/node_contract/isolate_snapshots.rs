@@ -23,9 +23,10 @@ use tutti_nodes::{
     SvfControls, SvfFilterNode, SvfType,
 };
 use tutti_nodes::{DcBlockerConfig, DcBlockerNode};
+use tutti_nodes::{StereoWidthConfig, StereoWidthNode};
 use tutti_types::{
     Amplitude, BusTopology, ChannelLayout, CompressionRatio, Db, Depth, Drive, Feedback, Hz, Q,
-    Resonance, Seconds, UnitParam,
+    Resonance, Seconds, StereoWidth, UnitParam,
 };
 
 #[test]
@@ -170,6 +171,17 @@ fn distortion() {
     })
     .control("drive", |d| {
         assert!(d.param_set().set(UnitParam::Drive, 8.0))
+    })
+    .check();
+}
+
+#[test]
+fn stereo_width() {
+    IsolateRow::new("StereoWidthNode", || {
+        StereoWidthNode::from(StereoWidthConfig::new().width(StereoWidth(1.5)))
+    })
+    .control("width", |w| {
+        assert!(w.param_set().set(UnitParam::StereoWidth, 0.25))
     })
     .check();
 }

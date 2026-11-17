@@ -44,6 +44,8 @@ mod read;
 
 use crate::smpte::{MtcRate, SmpteTimecode};
 use crate::tuning::TuningMessage;
+use alloc::boxed::Box;
+use alloc::vec;
 
 pub use machine_control::*;
 

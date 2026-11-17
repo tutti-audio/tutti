@@ -19,7 +19,8 @@ use tutti_graph::{Cx, Editor, Executor, Io, Node, Prepare, Shape, Status, Unfork
 use tutti_graph::{OutPort, Source};
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_transport::{
-    FadeOut, LoopEdit, MotionEvent, OfflineTimeline, OfflineTimelineConfig, Then, Transport,
+    FadeOut, LoopEdit, MotionEvent, OfflineTimeline, OfflineTimelineConfig, RenderClock, Then,
+    Transport,
 };
 use tutti_types::{
     At, Beat, Bpm, ChannelLayout, LoopRange, SampleRate, Samples, Tail, first_frame_at_or_after,
@@ -222,7 +223,7 @@ fn a_block_crossing_more_than_8_changes_is_split_and_exact() {
 
 /// An offline render over the same map is the live render, frame for frame,
 /// to the bit: both are the one walker. The offline timeline cuts its own
-/// blocks where more than 8 changes fall (`OfflineTimeline::render_graph`).
+/// blocks where more than 8 changes fall (`RenderClock::render_graph`).
 #[test]
 fn an_offline_render_is_the_live_render_with_a_step_map() {
     let mut points: Vec<(f64, f64)> = (0..41)

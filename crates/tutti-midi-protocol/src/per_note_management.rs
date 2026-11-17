@@ -13,6 +13,7 @@
 //! seen per Group, Channel and Note Number, allocates nothing after
 //! construction, and sends nothing.
 
+use alloc::boxed::Box;
 use tutti_ump::{Address, MidiChannel, MidiGroup, NoteNumber, PerNoteManagement, Voice2};
 
 /// Every channel of every Group.

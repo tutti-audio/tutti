@@ -231,27 +231,28 @@ pub mod nodes {
     pub use tutti_nodes::{
         BAND_PARAMS, BrickwallLimiterNode, BusStripNode, ChannelTimes, ChannelTimesError,
         ClickNode, ClickSettings, ClickState, CompressorControls, CompressorNode, ConvolverError,
-        ConvolverNode, CrossoverControls, CrossoverError, CrossoverNode, DelayControls,
-        DelayLayout, DelayNode, DistortionNode, EnvelopeFollowerNode, EqBandNode, FdnControls,
-        FdnLayout, FdnNode, FreeverbControls, FreeverbNode, GateControls, GateNode,
-        HrtfBinauralNode, InterpolationMode, IrLayout, KeySource, LadderControls, LadderFilterNode,
-        LadderType, LfoClock, LfoNode, LimiterControls, LimiterNode, MetronomeMode,
-        ModDelayControls, ModDelayNode, MultibandCompressorNode, MultibandControls,
-        NoteEnvelopeNode, OscillatorNode, PhaserControls, PhaserNode, PortSide,
-        Routing as FeedbackRouting, RoutingError as FeedbackRoutingError, SOURCE_EVENT_CAPACITY,
-        ShapeKind, SourceNode, SourcePorts, Stages, StagesError, Stagger, StaggerError,
-        SvfControls, SvfFilterNode, SvfType, Sweep, SweepError, SweepRange, SweepRangeError,
-        VbapError, VbapPannerNode, VolumeOutOfRange,
+        ConvolverNode, CrossoverControls, CrossoverError, CrossoverNode, DcBlockerConfig,
+        DcBlockerControls, DcBlockerNode, DelayControls, DelayLayout, DelayNode, DistortionNode,
+        EnvelopeFollowerNode, EqBandNode, FdnControls, FdnLayout, FdnNode, FreeverbControls,
+        FreeverbNode, GateControls, GateNode, HrtfBinauralNode, InterpolationMode, IrLayout,
+        KeyFilter, KeySource, LadderControls, LadderFilterNode, LadderType, LfoClock, LfoNode,
+        LimiterControls, LimiterNode, MetronomeMode, ModDelayControls, ModDelayNode,
+        MultibandCompressorNode, MultibandControls, NoteEnvelopeNode, OscillatorNode,
+        OversamplingFactor, PhaserControls, PhaserNode, PortSide, Routing as FeedbackRouting,
+        RoutingError as FeedbackRoutingError, SOURCE_EVENT_CAPACITY, ShapeKind, SourceNode,
+        SourcePorts, Stages, StagesError, Stagger, StaggerError, SvfControls, SvfFilterNode,
+        SvfType, Sweep, SweepError, SweepRange, SweepRangeError, VbapError, VbapPannerNode,
+        VolumeOutOfRange,
     };
     pub use tutti_nodes::{
         BrickwallKernel, CompressorKernel, Control, ControlLanes, ControlRead, ControlSet,
-        ControlValid, CrossoverKernel, DelayKernel, DistortionKernel, FdnKernel, Feed,
-        FreeverbKernel, GateKernel, Kernel, KernelNode, LadderKernel, LimiterKernel,
+        ControlValid, CrossoverKernel, DcBlockerKernel, DelayKernel, DistortionKernel, FdnKernel,
+        Feed, FreeverbKernel, GateKernel, Kernel, KernelNode, LadderKernel, LimiterKernel,
         ModDelayKernel, PhaserKernel, ReconcileError, SvfKernel,
     };
     pub use tutti_nodes::{
-        BrickwallSet, CompressorSet, CrossoverSet, DelaySet, DistortionSet, FdnSet, FreeverbSet,
-        GateSet, HasControl, LadderSet, LimiterSet, ModDelaySet, PhaserSet, SvfSet,
+        BrickwallSet, CompressorSet, CrossoverSet, DcBlockerSet, DelaySet, DistortionSet, FdnSet,
+        FreeverbSet, GateSet, HasControl, LadderSet, LimiterSet, ModDelaySet, PhaserSet, SvfSet,
     };
 }
 
@@ -270,7 +271,7 @@ pub mod types {
     pub use tutti_curve::{Curvature, CurvatureError, Exponent, ExponentError, Law, Piece};
     pub use tutti_rt::{
         Count, Counter, CounterWriter, Drained, Gauge, GaugeWriter, LevelSpan, Panicked, PosFrame,
-        Reading, Reclaim,
+        Reading, Reclaim, Words,
     };
     pub use tutti_types::{
         Adsr, AmbisonicFormat, AmbisonicNormalization, AmbisonicOrder, AmbisonicOrderOutOfRange,
@@ -583,7 +584,7 @@ pub mod plugin {
 /// `DeviceInfo`), the ports the pool opens for them (`midi_input`, `midi_output`,
 /// `MidiInput`, `MidiOutput`) and what an open one said of itself (`Learned`, `SavedDevice`, `Match`), and the Profiles
 /// its MIDI-CI peers support and how to switch one (`PeerProfiles`,
-/// `ListedProfile`, `ProfileSwitch`, `ProfilesChange`). The translation layer
+/// `ListedProfile`, `SwitchProfile`, `ProfilesChange`). The translation layer
 /// (`Translator`, `Narrower`), the runtime's clock sync and the MIDI-CI codec
 /// belong to `tutti-midi-protocol`, `tutti-midi-runtime` and `tutti-midi-device`.
 /// Feature `midi`.
@@ -615,7 +616,7 @@ pub mod midi {
     pub use tutti_midi_hardware::Error as HardwareError;
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_hardware::{
-        InputTiming, NotAChannelCount, ProcessChange, ReportAsk, ReportError, ReportPeer,
+        InputTiming, NotAChannelCount, ProcessChange, ReportAsk, ReportError, Reporter,
         WatchFailure,
     };
     #[cfg(feature = "midi-hardware")]
@@ -652,6 +653,9 @@ pub mod midi {
         TicksPerQuarterNote, U7, U14, Ump, Voice1,
     };
     pub use tutti_ump::{Join, Span, Spans};
+    pub use tutti_ump::{
+        LyricKind, NotASoftwareRevision, PlainTextKind, SoftwareRevision, TextError,
+    };
 
     /// The session's one MIDI error (`tutti_session::MidiError`): each cause
     /// (hardware, file, send, route) is its source.
@@ -672,13 +676,14 @@ pub mod midi {
     };
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_hardware::{
-        ChannelCount, ChannelProfile, CiChange, CiPeerInfo, DeviceQuery, ListedProfile,
-        MidiHardwareOptions, PeerId, PeerProfiles, ProfileError, ProfileSwitch, ProfilesChange,
-        Whole, WholeProfile,
+        ChannelCount, ChannelSwitcher, CiChange, CiPeerInfo, DeviceQuery, MidiHardwareOptions,
+        PeerId, PeerProfiles, ProfileError, ProfileSwitch, ProfilesChange, Switcher, Whole,
+        WholeSwitcher,
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
     pub use tutti_session::{
-        MidiInputInfo, MidiOutputInfo, MidiPolicy, MidiPolicyError, MidiPolicyHandle,
-        MidiPortError, OutputOptions, PortCause, midi_input, midi_output,
+        ChannelProfile, ListedProfile, MidiInputInfo, MidiOutputInfo, MidiPolicy, MidiPolicyError,
+        MidiPolicyHandle, MidiPortError, OutputOptions, PortCause, ProfilePeer, ReportPeer,
+        RequestReport, SwitchProfile, WholeProfile, midi_input, midi_output,
     };
 }
