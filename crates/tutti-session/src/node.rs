@@ -454,7 +454,7 @@ mod tests {
         // A node that publishes nothing keeps none.
         assert!(!keeps_one(
             tutti_nodes::automation::AutomationLaneNode::new(
-                tutti_nodes::automation::Trajectory::new()
+                tutti_nodes::automation::Trajectory::<tutti_types::Hz>::new()
             )
         ));
     }
