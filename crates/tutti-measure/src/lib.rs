@@ -19,15 +19,15 @@
 //! - `correlate` — inter-channel phase correlation and stereo image.
 //! - `measure_loudness` — EBU R128 integrated loudness, loudness range and true
 //!   peak.
-//! - `WindowedLoudnessConfig::measure` — momentary (400 ms) and short-term (3 s)
+//! - `WindowedLoudnessConfig` — momentary (400 ms) and short-term (3 s)
 //!   loudness and true peak of a running stream, after every chunk.
-//! - `SpectrumConfig::measure` — a streaming spectrum: power in dB per bin, or per
+//! - `SpectrumConfig` — a streaming spectrum: power in dB per bin, or per
 //!   third-octave or log band, with smoothing, peak hold and a rolling
 //!   spectrogram.
 //! - `spectral_features` — centroid, flatness and rolloff of every STFT frame.
 //! - `strip_silence` — the sample ranges that hold signal, with a minimum silence
 //!   length and padding.
-//! - `vectorscope_points` (`VectorscopeConfig::measure` for blocks) — a stereo pair
+//! - `vectorscope_points` (`VectorscopeConfig` for blocks) — a stereo pair
 //!   as (side, mid) points for a goniometer.
 //! - `cross_correlate` — FFT cross-correlation of two buffers at every lag.
 //! - `align` — GCC-PHAT delay between two takes: lag, sub-sample offset, confidence.
@@ -37,7 +37,7 @@
 //! - `transcribe` — monophonic audio to notes: a pitch (`Note` plus a cents bend),
 //!   a span in samples and a level, split on onsets and pitch changes;
 //!   `notes_from_track` takes your own pitch track.
-//! - `chroma` / `ChromaConfig::measure` — harmonic pitch class profile (Gomez
+//! - `chroma` / `ChromaConfig` — harmonic pitch class profile (Gomez
 //!   2006) of spectral peaks, with an estimated tuning in cents; `estimate_key`
 //!   — Krumhansl-Schmuckler key with a confidence and a runner-up;
 //!   `detect_chords` — major and minor triads smoothed by Viterbi, as spans in
@@ -66,36 +66,46 @@
 //! Each analysis has the same two terminals:
 //!
 //! - **one-shot**, like scipy: `x(&config, view, rate)` over a whole buffer;
-//! - **streaming**: `config.measure(rate)` makes a meter, `meter.push(view)`
-//!   takes the audio in chunks of any length, `meter.reset()` starts over, and
-//!   `meter.finish()` reads the result where the result is of the whole run.
+//! - **streaming**: the config is a [`Measure`] and `config.measure(context)`
+//!   makes its meter, which is a [`Meter`]: `meter.push(view, &mut out)` takes
+//!   the audio in chunks of any length and extends `out` with the items each
+//!   chunk completes, and `meter.finish()` reads the [`Output`](Meter::Output)
+//!   of the whole run. `meter.reset()` starts over. Import the two traits to
+//!   call them; a consumer that is generic over `A: Measure` takes any analysis
+//!   (a [`Meter`] is not object-safe).
 //!
 //! The one-shot feeds a meter the whole buffer, so the two cannot drift, with
 //! one stated exception: `chroma` under `Tuning::Estimate` finds the tuning in a
 //! first pass over the whole buffer, which a streaming meter cannot do. A meter
-//! changes only through `push` and `reset`. `push` returns a `Result` exactly
-//! where the chunk can be refused (a NaN, a width that is not the meter's).
+//! changes only through `push` and `reset`, counts the frames pushed (a push
+//! takes no position) and owns its transform scratch. `push` returns a `Result`
+//! exactly where the chunk can be refused (a NaN, a width that is not the
+//! meter's). A config is a `Measure<S>` for every sample format `S` (`f32` by
+//! default, so `A: Measure` means `f32`), and its meter reads views of `S`,
+//! converting block by block on the stack; `Measure::<i16>::measure(&config,
+//! context)` names another format when a push does not fix it.
 //!
-//! | Analysis | Config | One-shot | Meter | `push` / result | Audio thread |
-//! |---|---|---|---|---|---|
-//! | silence | [`SilenceConfig`] | [`strip_silence`] | [`SilenceMeter`] | `()` / `finish` regions | no: grows per region |
-//! | onsets | [`OnsetConfig`] | [`detect_onsets`] | [`OnsetMeter`] | `()` / `finish` onsets, `novelty` | no: grows per frame |
-//! | spectrum | [`SpectrumConfig`] | none | [`SpectrumMeter`] | `Result<bool>` / readings, no `finish` | no: a transform per frame, but no allocation |
-//! | chroma | [`ChromaConfig`] | [`chroma()`] | [`ChromaMeter`] | `Result<usize>` / `mean`, `tuning`, no `finish` | no: a transform per frame, no allocation |
-//! | loudness | [`LoudnessConfig`] | [`measure_loudness`] | [`LoudnessMeter`] | `Result<()>` / `finish` [`Loudness`] | no: grows with the run |
-//! | windowed loudness | [`WindowedLoudnessConfig`] | none | [`WindowedMeter`] | `Result<WindowedReading>` / the reading, no `finish` | no: reads 3 s per push, no allocation |
-//! | true peak | none: the audio's width is the meter's | [`measure_true_peak`] | [`TruePeakMeter`] | `Result<()>` / `finish` dBTP | no: grows to the longest chunk |
-//! | waveform blocks | [`PeakConfig`] | [`summarize`] | [`PeakMeter`] | `Result<()>` / `finish` blocks | no: grows per block |
-//! | vectorscope | [`VectorscopeConfig`] | [`vectorscope_points`] | [`VectorscopeMeter`] | `()` into the caller's `Vec` / no `finish` | no: grows the caller's `Vec` |
-//! | meter ballistics | [`Ballistics`](tutti_types::Ballistics) | none | [`BallisticsMeter`] | the smoothed reading / `current`, no `finish` | yes: no allocation, a few flops |
+//! | Analysis | Config | One-shot | Meter | Context | Input | Item | Output | Audio thread |
+//! |---|---|---|---|---|---|---|---|---|
+//! | silence | [`SilenceConfig`] | [`strip_silence`] | [`SilenceMeter`] | `SampleRate` | `Mono` | `()` | `Vec<Region>` | no: grows per region |
+//! | onsets | [`OnsetConfig`] | [`detect_onsets`] | [`OnsetMeter`] | `SampleRate` | `Mono` | [`Novelty`], a frame's novelty | `Vec<Onset>` | no: grows per frame |
+//! | spectrum | [`SpectrumConfig`] | none | [`SpectrumMeter`] | `SampleRate` | `Mono` | `()` per analysed frame | `Vec<Db>`, the levels | no: a transform per frame, but no allocation |
+//! | chroma | [`ChromaConfig`] | [`chroma()`] | [`ChromaMeter`] | `SampleRate` | `Mono` | [`ChromaFrame`], a frame's chroma | [`ChromaSummary`] | no: a transform per frame, no allocation |
+//! | loudness | [`LoudnessConfig`] | [`measure_loudness`] | [`LoudnessMeter`] | `SampleRate` | `Interleaved` | `()` | [`Loudness`] | no: grows with the run |
+//! | windowed loudness | [`WindowedLoudnessConfig`] | none | [`WindowedMeter`] | `SampleRate` | `Interleaved` | [`WindowedReading`] per push | the last [`WindowedReading`] | no: reads 3 s per push, no allocation |
+//! | true peak | [`TruePeakConfig`] | [`measure_true_peak`] | [`TruePeakMeter`] | `(SampleRate, ChannelLayout)` | `Interleaved` | `()` | dBTP as `Db` | no: the meter's own buffers grow, and a push converts on a fixed scratch |
+//! | waveform blocks | [`PeakConfig`] | [`summarize`] | [`PeakMeter`] | `ChannelLayout` | `Interleaved` | [`ChannelBlock`], a whole block of a channel | [`PeakBlocks`] | no: grows per block |
+//! | vectorscope | [`VectorscopeConfig`] | [`vectorscope_points`] | [`VectorscopeMeter`] | `()` | `StereoPlanes` | [`ScopePoint`] | `()` | no: grows the caller's collection |
 //!
-//! A meter has no `finish` where its result is a reading that exists after
-//! every push (spectrum, chroma, windowed loudness, ballistics) or is the
-//! caller's own buffer (vectorscope). A config has no width where the width is
-//! the audio's, which travels with the view (`Mono`, `Interleaved`,
-//! `StereoPlanes`); [`LoudnessConfig`] and [`WindowedLoudnessConfig`] hold a
-//! topology because the weight of each speaker is part of the analysis, and
-//! check the view's width against it ([`Error::ChunkLayoutMismatch`]).
+//! [`StereoSmoother`] (of a [`Ballistics`](tutti_types::Ballistics)) is not a [`Meter`]: it is a display
+//! filter over stereo level readings, with no stream behind it. It allocates
+//! nothing and costs a few flops, so it is fit for the audio thread.
+//!
+//! A config has no width where the width is the audio's, which travels with the
+//! view (`Mono`, `Interleaved`, `StereoPlanes`); [`LoudnessConfig`] and
+//! [`WindowedLoudnessConfig`] hold a topology because the weight of each speaker
+//! is part of the analysis, and check the view's width against it
+//! ([`Error::ChunkLayoutMismatch`]).
 //!
 //! The rest are stateless: `yin`, `correlate`, `cross_correlate`, `align`,
 //! `estimate_tempo`, `transcribe` and `spectral_features` are pure functions of
@@ -230,7 +240,7 @@
 //! ## Allocation
 //!
 //! The one-shot entry points allocate their results, so call them off the audio
-//! thread. A meter's `push` and `FftScratch` let a caller reuse buffers across
+//! thread. A meter's `push` reuses its own buffers across
 //! calls. A `SpectrumMeter` allocates nothing once built, and a
 //! `WindowedMeter` allocates nothing either, but reads three-second windows
 //! on every call, so it belongs on the consumer side of a tap's `TapReader`, not
@@ -270,7 +280,7 @@
 //!   per bin or [`Banding`] band, with [`Smoothing`], held peaks and a rolling
 //!   spectrogram.
 //! - Stereo: [`correlate`] into a [`StereoReading`], smoothed for a meter by a
-//!   [`BallisticsMeter`].
+//!   [`StereoSmoother`].
 //! - Spectral shape: [`spectral_centroid`], [`spectral_flatness`] and
 //!   [`spectral_rolloff`] over one magnitude spectrum, or [`spectral_features`]
 //!   over every frame of a [`StftMagnitude`], into [`SpectralFeatures`].
@@ -306,6 +316,7 @@ mod framing;
 mod key;
 mod level;
 mod loudness;
+mod measure;
 mod notes;
 mod onset;
 mod peaks;
@@ -329,8 +340,9 @@ pub use chord::{
     SharpnessError, detect_chords,
 };
 pub use chroma::{
-    Chroma, ChromaConfig, ChromaMeter, FrequencyBand, HarmonicDecay, HarmonicDecayError, Harmonics,
-    HarmonicsError, PeakFloor, PeakFloorError, Tuning, TuningOffset, TuningOffsetError, chroma,
+    Chroma, ChromaConfig, ChromaFrame, ChromaMeter, ChromaSummary, FrequencyBand, HarmonicDecay,
+    HarmonicDecayError, Harmonics, HarmonicsError, PeakFloor, PeakFloorError, Tuning, TuningOffset,
+    TuningOffsetError, chroma,
 };
 pub use error::{Error, Result};
 pub use features::{
@@ -339,19 +351,25 @@ pub use features::{
 pub use framing::Framing;
 pub use key::{Key, KeyEstimate, KeyProfile, Mode, estimate_key, estimate_key_from_mean};
 pub use loudness::{
-    Loudness, LoudnessConfig, LoudnessMeter, TruePeakMeter, WindowedLoudnessConfig, WindowedMeter,
-    WindowedReading, measure_loudness, measure_true_peak,
+    Loudness, LoudnessConfig, LoudnessMeter, TruePeakConfig, TruePeakMeter, WindowedLoudnessConfig,
+    WindowedMeter, WindowedReading, measure_loudness, measure_true_peak,
 };
+#[cfg(test)]
+pub(crate) use measure::fold_uneven;
+pub use measure::{Measure, Meter};
 pub use notes::{
     NoteConfig, NoteEvent, NoteSpan, NoteSpanError, PitchHop, PitchHopError, PitchSplit,
     PitchSplitError, VelocityRange, frame_levels, notes_from_track, transcribe,
 };
 pub use onset::{
-    DetectionFunction, Onset, OnsetConfig, OnsetGap, OnsetGapError, OnsetMeter, OnsetSensitivity,
-    OnsetSensitivityError, OnsetThreshold, OnsetThresholdError, complex_domain_deviation,
-    detect_onsets, high_frequency_content, spectral_energy, spectral_flux, suppress_close_onsets,
+    DetectionFunction, Novelty, Onset, OnsetConfig, OnsetGap, OnsetGapError, OnsetMeter,
+    OnsetSensitivity, OnsetSensitivityError, OnsetThreshold, OnsetThresholdError,
+    complex_domain_deviation, detect_onsets, high_frequency_content, spectral_energy,
+    spectral_flux, suppress_close_onsets,
 };
-pub use peaks::{PeakBlock, PeakBlocks, PeakConfig, PeakMeter, summarize, summarize_block};
+pub use peaks::{
+    ChannelBlock, PeakBlock, PeakBlocks, PeakConfig, PeakMeter, summarize, summarize_block,
+};
 pub use silence::{
     FiniteLevel, FiniteLevelError, Region, SilenceConfig, SilenceMeter, strip_silence,
 };
@@ -360,7 +378,7 @@ pub use spectrum::{
     PeakDecayError, Smoothing, SpectrumConfig, SpectrumFloor, SpectrumFloorError, SpectrumMeter,
     SpectrumTime, SpectrumTimeError,
 };
-pub use stereo::{BallisticsMeter, StereoLevels, StereoReading, correlate};
+pub use stereo::{StereoLevels, StereoReading, StereoSmoother, correlate};
 pub use tempo::{
     Alternatives, AlternativesError, BeatGrid, PriorSpread, PriorSpreadError, Tempo,
     TempoCandidate, TempoConfig, TempoRange, Tightness, TightnessError, estimate_tempo,
