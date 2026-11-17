@@ -24,6 +24,7 @@
 
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
+use tutti_buffers::Planes;
 use tutti_fixtures::main_thread;
 use tutti_plugin_types::Load;
 use tutti_rt::LockExt;
@@ -170,7 +171,7 @@ fn process_block(unit: &mut PluginNode<Vst2Loaded>, frames: usize) {
         changes: TransportChanges::NONE,
         play: tutti_graph::PlayClock::ZERO,
     };
-    let _ = tutti_graph::contract::drive_input(unit, &env, &inputs, &[], &[]);
+    let _ = tutti_graph::contract::drive_input(unit, &env, Planes::new(&inputs).unwrap(), &[], &[]);
 }
 
 /// `Node::reset` must not dispatch `effMainsChanged`: it asks the plugin to forget with
@@ -439,7 +440,13 @@ fn the_output_is_what_the_plugin_wrote() {
             changes: TransportChanges::NONE,
             play: tutti_graph::PlayClock::ZERO,
         };
-        let out = tutti_graph::contract::drive_input(&mut loaded.unit, &env, &inputs, &[], &[]);
+        let out = tutti_graph::contract::drive_input(
+            &mut loaded.unit,
+            &env,
+            Planes::new(&inputs).unwrap(),
+            &[],
+            &[],
+        );
         assert_eq!(out.audio.len(), channels);
         for (c, ch) in out.audio.iter().enumerate() {
             let want: Vec<f32> = input[c].iter().map(|s| s + channel_tag(c)).collect();
