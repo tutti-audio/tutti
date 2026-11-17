@@ -11,8 +11,8 @@ use crate::common::track;
 use crate::support::{Division, RawEvent, build_smf, decode_smf};
 use tutti_fixtures::{RangeContract, check_range_contract};
 use tutti_midi_file::{
-    Error, FileEvent, Meta, MicrosPerQuarter, MidiFile, MidiFileKind, OtherMetaKind, PairedNote,
-    SmfDivision, SmfFormat, TextKind, Tick, Track, Truncated,
+    Error, FileEvent, IoStep, Meta, MicrosPerQuarter, MidiFile, MidiFileKind, OtherMetaKind,
+    PairedNote, SmfDivision, SmfFormat, TextKind, Tick, Track, Truncated,
 };
 use tutti_types::{Beat, Bpm, Seconds};
 use tutti_ump::{
@@ -117,7 +117,10 @@ fn every_event_kind_survives_a_read_and_a_write() {
         };
         let bytes = smf(format, &tracks);
         let file = read(&bytes);
-        assert_eq!(file.kind(), MidiFileKind::StandardMidiFile);
+        assert_eq!(
+            MidiFileKind::detect(&bytes),
+            Some(MidiFileKind::StandardMidiFile)
+        );
         assert_eq!(file.ticks_per_quarter(), DIVISION);
 
         let events = &file.tracks()[0].events;
@@ -198,16 +201,11 @@ fn every_event_kind_survives_a_read_and_a_write() {
         assert_eq!(long.len(), 301);
         assert_eq!(at(27).1, FileEvent::Escape(vec![1, 2, 3].into()));
         assert_eq!(at(28).0, Tick(20 + u64::from(BEAT)));
-        assert_eq!(
-            file.smf_format(),
-            Some(match format {
-                0 => SmfFormat::SingleTrack,
-                1 => SmfFormat::Parallel,
-                _ => SmfFormat::Sequential,
-            })
-        );
 
         let written = file.to_bytes().expect("writes");
+        // SMF 1.0 section 2.1: the header's format word, after `MThd` and the
+        // length 6.
+        assert_eq!(&written[8..10], &format.to_be_bytes());
         assert_eq!(read(&written), file, "format {format}");
         // The second opinion: the same events, read by a decoder that shares
         // nothing with the crate.
@@ -276,7 +274,7 @@ fn format_2_keeps_its_sequences_apart() {
             ],
         ],
     ));
-    assert_eq!(file.smf_format(), Some(SmfFormat::Sequential));
+    assert_eq!(&file.to_bytes().unwrap()[8..10], &[0, 2]);
     assert!(file.events().is_err(), "no common timeline to merge on");
     assert_eq!(file.tracks().len(), 2);
     let tempo = |i| file.tempo_map_of(i).unwrap().tempo_at(Beat(0.0));
@@ -897,7 +895,10 @@ fn a_file_reads_and_writes_a_path() {
     assert_eq!(MidiFile::read(&path).unwrap(), file);
     assert!(matches!(
         MidiFile::read(dir.path().join("absent.mid")),
-        Err(Error::Io(_))
+        Err(Error::Io {
+            step: IoStep::Read,
+            ..
+        })
     ));
 }
 

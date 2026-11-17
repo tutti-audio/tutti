@@ -9,8 +9,8 @@
 
 use std::path::Path;
 
-use crate::Result;
 use crate::clip_file::CLIP_FILE_MAGIC;
+use crate::{Error, IoStep, Result};
 
 /// The 4-byte Standard MIDI File header chunk id (SMF spec §2.1). A clip file's
 /// magic is `"SMF2CLIP"`, so the two never collide on their first four bytes.
@@ -48,20 +48,21 @@ impl MidiFileKind {
     ///
     /// # Errors
     ///
-    /// [`Error::Io`](crate::Error::Io) if the file cannot be opened or read. A
+    /// [`Error::Io`](crate::Error::Io) (step [`IoStep::Read`](crate::IoStep::Read)) if the file cannot be opened or read. A
     /// file shorter than a header is not an error; it returns `Ok(None)`.
     pub fn detect_path(path: impl AsRef<Path>) -> Result<Option<Self>> {
         use std::io::Read;
 
-        let mut header = [0u8; 8];
-        let mut file = std::fs::File::open(path.as_ref())?;
-        // A short file is not an error — it is simply not one of these formats.
-        let read = match file.read(&mut header) {
-            Ok(n) => n,
-            Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => 0,
-            Err(e) => return Err(e.into()),
-        };
-        Ok(Self::detect(&header[..read]))
+        // `read_to_end` over `take(8)` reads until the eight bytes or the end
+        // of the file, retrying an interrupted read: a short read is not the
+        // end.
+        let mut header = Vec::with_capacity(8);
+        std::fs::File::open(path.as_ref())
+            .map_err(Error::io(IoStep::Read))?
+            .take(8)
+            .read_to_end(&mut header)
+            .map_err(Error::io(IoStep::Read))?;
+        Ok(Self::detect(&header))
     }
 }
 

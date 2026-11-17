@@ -10,7 +10,7 @@ use tutti_ump::{Message, Midi1Bytes};
 
 use super::SmfDivision;
 use crate::file::{FileEvent, Meta, SmfFormat, TextKind, Tick, Track};
-use crate::{ConfigError, Error, Result};
+use crate::{ConfigError, Error, Refusal, Result};
 
 fn too_large() -> Error {
     ConfigError::TooLarge.into()
@@ -115,20 +115,41 @@ fn meta_parts(meta: &Meta) -> (u8, Vec<u8>) {
     }
 }
 
-/// One event as bytes. `Ok(None)` for what an SMF cannot hold (refused at
-/// construction, so not reached).
-fn encode(event: &FileEvent) -> Result<Option<Encoded>> {
+/// One event of track `track` as bytes.
+///
+/// # Errors
+///
+/// [`ConfigError::TooLarge`] for an event too long for its length field, and
+/// [`ConfigError::Refused`] for what an SMF cannot hold (a packet other than
+/// MIDI 1.0 channel voice): the constructor refuses it first.
+fn encode(track: usize, event: &FileEvent) -> Result<Encoded> {
     Ok(match event {
         FileEvent::Message(Message::Midi1(address, voice)) => {
-            Some(Encoded::Channel(voice.bytes(address.channel)))
+            Encoded::Channel(voice.bytes(address.channel))
         }
-        FileEvent::SysEx(data) => Some(Encoded::Other(counted(&[0xF0], data)?)),
-        FileEvent::Escape(data) => Some(Encoded::Other(counted(&[0xF7], data)?)),
+        FileEvent::SysEx(data) => Encoded::Other(counted(&[0xF0], data)?),
+        FileEvent::Escape(data) => Encoded::Other(counted(&[0xF7], data)?),
         FileEvent::Meta(meta) => {
             let (kind, data) = meta_parts(meta);
-            Some(Encoded::Other(counted(&[0xFF, kind], &data)?))
+            Encoded::Other(counted(&[0xFF, kind], &data)?)
         }
-        FileEvent::Message(_) | FileEvent::Unknown(_) => None,
+        FileEvent::Message(
+            Message::Midi2(..)
+            | Message::Utility(_)
+            | Message::System(..)
+            | Message::Sysex7(..)
+            | Message::Data128(..)
+            | Message::Flex(..)
+            | Message::Stream(_),
+        )
+        | FileEvent::Unknown(_) => {
+            return Err(ConfigError::Refused {
+                track,
+                in_header: false,
+                refusal: Refusal::SmfPacket,
+            }
+            .into());
+        }
     })
 }
 
@@ -146,10 +167,12 @@ fn delta(from: Tick, to: Tick) -> Result<impl Iterator<Item = u8>> {
 
 /// Folds one event onto the body: its delta, then its bytes without a status
 /// byte the running status already holds.
-fn append((mut out, running, at): Fold, (tick, event): &(Tick, FileEvent)) -> Result<Fold> {
-    let Some(encoded) = encode(event)? else {
-        return Ok((out, running, at));
-    };
+fn append(
+    track: usize,
+    (mut out, running, at): Fold,
+    (tick, event): &(Tick, FileEvent),
+) -> Result<Fold> {
+    let encoded = encode(track, event)?;
     let (&status, data) = encoded.bytes().split_first().ok_or_else(too_large)?;
     let is_channel = matches!(encoded, Encoded::Channel(_));
     out.extend(delta(at, *tick)?);
@@ -163,11 +186,13 @@ fn append((mut out, running, at): Fold, (tick, event): &(Tick, FileEvent)) -> Re
 }
 
 /// A track's body: its events, then End of Track at its `end`.
-fn body(track: &Track) -> Result<Vec<u8>> {
+fn body(index: usize, track: &Track) -> Result<Vec<u8>> {
     let (out, _, at) = track
         .events
         .iter()
-        .try_fold((Vec::new(), None, Tick(0)), append)?;
+        .try_fold((Vec::new(), None, Tick(0)), |fold, event| {
+            append(index, fold, event)
+        })?;
     Ok(out
         .into_iter()
         .chain(delta(at, track.end)?)
@@ -211,7 +236,8 @@ pub(crate) fn write(format: SmfFormat, division: SmfDivision, tracks: &[Track]) 
         .chain(
             tracks
                 .iter()
-                .map(|t| body(t).and_then(|b| chunk(b"MTrk", &b))),
+                .enumerate()
+                .map(|(i, t)| body(i, t).and_then(|b| chunk(b"MTrk", &b))),
         )
         .collect::<Result<Vec<_>>>()?;
     Ok(chunks.concat())

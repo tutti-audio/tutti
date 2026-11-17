@@ -16,6 +16,7 @@ use tutti_ump::{
 
 use unicode_normalization::UnicodeNormalization;
 
+use super::Container;
 use crate::{
     FileEvent, Meta, MicrosPerQuarter, MidiFile, Result, SmfFormat, TextKind, Tick, Track,
 };
@@ -93,6 +94,11 @@ pub enum DropReason {
     /// a clip holds one of each at a position, and the later event wins
     /// where both land on one (see [`MidiFile::to_clip`]).
     Superseded,
+    /// A Set Tempo of zero microseconds per quarter note: no valid tempo, and a
+    /// Flex Set Tempo field of 0 is none either (M2-104 section 7.5.3). It
+    /// is not the file's first tempo, and the clip's default 120 BPM stands
+    /// where nothing else sets one.
+    ZeroTempo,
     /// A text event with no bytes. SMF gives it no meaning, and the Flex
     /// message it would become does: a Complete Lyric packet filled with
     /// zero bytes specifies a melisma (M2-104 section 7.5.10.1).
@@ -110,6 +116,33 @@ pub struct Dropped {
     pub event: FileEvent,
     /// Why it has no place.
     pub reason: DropReason,
+}
+
+/// What reading a lyric as karaoke text changed of it ([`Altered`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum Alteration {
+    /// A `/` (line break) or `\` (paragraph break) at the start of the text
+    /// became the end of the syllable before it, and left the text.
+    BreakMark,
+    /// Hyphens at the end of a syllable left the text: they mark that the word
+    /// goes on, which the syllable with no word end already says (M2-104
+    /// section 7.5.10). A genuine hyphen there is lost with them.
+    HyphenStripped,
+}
+
+/// A lyric whose clip text is not its SMF text: where it was and what changed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Altered {
+    /// The track the event was in.
+    pub track: usize,
+    /// Where it was.
+    pub tick: Tick,
+    /// The event.
+    pub event: FileEvent,
+    /// What the clip's text changes of it.
+    pub alteration: Alteration,
 }
 
 /// A Set Tempo or Time Signature that conversion moved onto the grid the
@@ -149,6 +182,10 @@ pub struct Converted {
     /// event that took the position of an earlier one of its kind is in
     /// `dropped` as [`DropReason::Superseded`] instead.
     pub moved: Vec<Moved>,
+    /// The lyrics whose text the clip changes, by event and change, in the
+    /// order of `tick`: a lyric is not lost, and what it says is not what the
+    /// file spelled.
+    pub altered: Vec<Altered>,
 }
 
 /// The distance in ticks between the positions of a grid of `numerator /
@@ -175,6 +212,12 @@ fn snap(tick: u64, origin: u64, step: u64, end: u64) -> u64 {
         .and_then(|d| origin.checked_add(d))
         .filter(|&at| at <= end);
     at.unwrap_or_else(|| origin + end.saturating_sub(origin) / step * step)
+}
+
+/// Whether `event` is a Set Tempo with a tempo: not a zero, which has no Flex
+/// form.
+fn has_tempo(event: &FileEvent) -> bool {
+    matches!(event, FileEvent::Meta(meta @ Meta::Tempo { .. }) if meta.bpm().is_some())
 }
 
 /// Whether a Time Signature converts: a whole-note denominator or a numerator
@@ -307,7 +350,7 @@ fn convert(
 ) -> std::result::Result<(Rank, Vec<FileEvent>), DropReason> {
     let other = |events| Ok((Rank::Other, events));
     match ev {
-        // Already a UMP: a MIDI 1.0 channel message on group 0.
+        // Already a UMP: a MIDI 1.0 channel message on the first Group.
         FileEvent::Message(_) | FileEvent::Unknown(_) => other(vec![ev.clone()]),
         FileEvent::SysEx(body) => {
             if let [0x7E, _, 0x0D, 0x30..=0x3F, ..] = **body {
@@ -320,6 +363,9 @@ fn convert(
         }
         FileEvent::Escape(_) => Err(DropReason::NoSuccessor),
         FileEvent::Meta(meta) => match meta {
+            Meta::Tempo {
+                micros_per_quarter, ..
+            } if micros_per_quarter.get() == 0 => Err(DropReason::ZeroTempo),
             Meta::Tempo {
                 micros_per_quarter, ..
             } => Ok((Rank::Tempo, vec![tempo(*micros_per_quarter)])),
@@ -383,7 +429,10 @@ fn convert(
 /// clip events read with the lyrics around it.
 enum Source {
     Event,
-    Lyric(std::result::Result<Vec<FileEvent>, DropReason>),
+    Lyric(
+        std::result::Result<Vec<FileEvent>, DropReason>,
+        Vec<Alteration>,
+    ),
 }
 
 impl MidiFile {
@@ -396,7 +445,7 @@ impl MidiFile {
     ///
     /// | SMF | clip |
     /// |---|---|
-    /// | channel message | the same [`Message::Midi1`] packet, group 0 |
+    /// | channel message | the same [`Message::Midi1`] packet, the first Group |
     /// | Set Tempo `FF 51`, us per quarter | Flex Set Tempo, `us * 100` (10 ns units per quarter) |
     /// | Time Signature `FF 58` | Flex Set Time Signature (numerator, denominator power, 32nds per quarter) then Flex Set Metronome (clocks per click; the bar undivided, its one accent part the numerator; no subdivisions) |
     /// | Key Signature `FF 59` | Flex Set Key Signature: the sharps or flats, and the tonic's letter from the circle of fifths (a minor key's from the major key 3 sharps up) |
@@ -422,7 +471,9 @@ impl MidiFile {
     /// event of several words is one
     /// message each, all at its tick. A lyric of only breaks ends the syllable
     /// before it and is not listed in [`Converted::dropped`]; one of only
-    /// hyphens is, as [`DropReason::LyricWithoutSyllable`]. These karaoke
+    /// hyphens is, as [`DropReason::LyricWithoutSyllable`]. A lyric whose
+    /// break mark or hyphens were taken out of its text is in
+    /// [`Converted::altered`]. These karaoke
     /// conventions are those of the SMF Lyric Meta Event (RP-026), which the
     /// MIDI specifications this crate is held to do not contain.
     ///
@@ -473,10 +524,12 @@ impl MidiFile {
     /// or [`Error::Tempo`](crate::Error::Tempo) cannot happen for a valid SMF.
     #[must_use = "the Converted's `dropped` lists the events the clip lacks"]
     pub fn to_clip(&self) -> Result<Converted> {
-        let format = match self.smf_format() {
-            Some(SmfFormat::Sequential) => return Err(ToClipError::Sequential.into()),
-            Some(format) => format,
-            None => return Err(ToClipError::AlreadyClip.into()),
+        let format = match self.container {
+            Container::Smf(SmfFormat::Sequential, _) => {
+                return Err(ToClipError::Sequential.into());
+            }
+            Container::Smf(format, _) => format,
+            Container::Clip(_) => return Err(ToClipError::AlreadyClip.into()),
         };
 
         // Track order, then the track's own: the stable sort by tick keeps it.
@@ -515,7 +568,9 @@ impl MidiFile {
         let mut grids = vec![four_four];
         let (mut last_tempo, mut last_signature) = (None::<usize>, None::<usize>);
         for (from, track, event) in all {
-            let is_tempo = matches!(event, FileEvent::Meta(Meta::Tempo { .. }));
+            // A zero tempo is no tempo (a Flex field of 0 is none, M2-104
+            // section 7.5.3): it is dropped and replaces no other.
+            let is_tempo = has_tempo(event);
             let bar = match event {
                 FileEvent::Meta(Meta::TimeSignature {
                     numerator,
@@ -565,7 +620,7 @@ impl MidiFile {
             })
         };
         let mut placed: Vec<(Tick, Rank, FileEvent)> = Vec::new();
-        if !live_at_start(|m| matches!(m, Meta::Tempo { .. })) {
+        if !live_at_start(|m| m.bpm().is_some()) {
             placed.push((Tick(0), Rank::Tempo, tempo(MicrosPerQuarter::of(500_000))));
         }
         if !live_at_start(|m| matches!(m, Meta::TimeSignature { .. })) {
@@ -587,11 +642,12 @@ impl MidiFile {
             }
         }
         let mut sources: Vec<Source> = landings.iter().map(|_| Source::Event).collect();
-        for (index, events) in lyrics.into_events() {
-            sources[index] = Source::Lyric(events);
+        for (index, events, alterations) in lyrics.into_events() {
+            sources[index] = Source::Lyric(events, alterations);
         }
         let mut dropped = Vec::new();
         let mut moved = Vec::new();
+        let mut altered = Vec::new();
         for (
             Landing {
                 track,
@@ -603,12 +659,16 @@ impl MidiFile {
             source,
         ) in landings.into_iter().zip(sources)
         {
+            let mut alterations = Vec::new();
             let converted = if superseded {
                 Err(DropReason::Superseded)
             } else {
                 match source {
                     Source::Event => convert(track, format, event),
-                    Source::Lyric(events) => events.map(|events| (Rank::Other, events)),
+                    Source::Lyric(events, changes) => {
+                        alterations = changes;
+                        events.map(|events| (Rank::Other, events))
+                    }
                 }
             };
             match converted {
@@ -621,6 +681,12 @@ impl MidiFile {
                             event: event.clone(),
                         });
                     }
+                    altered.extend(alterations.into_iter().map(|alteration| Altered {
+                        track,
+                        tick: from,
+                        event: event.clone(),
+                        alteration,
+                    }));
                     // Only tick 0 is ordered by rank; a later tempo is where it was.
                     let rank = if to == Tick(0) { rank } else { Rank::Other };
                     placed.extend(events.into_iter().map(|e| (to, rank, e)));
@@ -647,6 +713,7 @@ impl MidiFile {
             clip,
             dropped,
             moved,
+            altered,
         })
     }
 }

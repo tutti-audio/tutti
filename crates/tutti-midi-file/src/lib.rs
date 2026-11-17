@@ -1,8 +1,6 @@
 #![doc = include_str!("../README.md")]
-//! MIDI **file** codec for the Tutti audio engine: Standard MIDI File (SMF,
-//! `.mid`) and MIDI 2.0 Clip File (M2-116, `.midi2`) read into one model and
-//! written back from it, losslessly. `tutti::midi` names its
-//! file types (feature `midi`).
+//! MIDI **file** codec: Standard MIDI File (SMF, `.mid`) and MIDI 2.0 Clip File
+//! (M2-116, `.midi2`) read into one model and written back from it without losing an event.
 //!
 //! ## The model
 //!
@@ -14,11 +12,14 @@
 //! Offs.
 //!
 //! - **A [`FileEvent`]** is a `Message` (an SMF's channel message is MIDI 1.0 on
-//!   group 0; a Clip File's packet is as stored), a `SysEx` or `Escape` of any
+//!   the first Group; a Clip File's packet is as stored), a `SysEx` or `Escape` of any
 //!   length, or a `Meta` (text, tempo, time and key signature, the rest as bytes).
 //!   The file layer does not translate: a MIDI 1.0 Note On at velocity 0 stays one.
-//! - **Lossless.** A read, a write and a read give the same file: SysEx and meta
-//!   included. Running status and a Delta Clockstamp's spelling may differ.
+//! - **Lossless in its events.** A read, a write and a read give the same file:
+//!   SysEx and meta included. Running status and a Delta Clockstamp's spelling
+//!   may differ. A Clip File read leaves out what is no event: its Null messages
+//!   (a write puts them back where a long gap needs them), JR Clock and JR
+//!   Timestamp messages, and the Utility messages M2-104 does not define.
 //! - **Truncation is an error** ([`Error::Truncated`], naming what was being read), not a shorter file.
 //! - **Format 2** keeps its sequences apart: no merged `events()`, a tempo map
 //!   per track ([`MidiFile::tempo_map_of`]).
@@ -53,8 +54,7 @@
 //!   listed in [`Converted::moved`].
 //!
 //! [`MidiFileKind::detect`] tells the two containers apart by magic, not by
-//! extension. Nothing here touches an OS MIDI API; ports are in
-//! `tutti-midi-hardware`.
+//! extension. Nothing here touches an OS MIDI API.
 //!
 //! ## Quick start
 //!
@@ -63,13 +63,14 @@
 //! ```rust
 //! use tutti_midi_file::{Meta, MidiFile, SmfDivision, SmfFormat, Tick, Track};
 //! use tutti_types::{Beat, Bpm, Seconds};
-//! use tutti_ump::{MidiChannel, NoteNumber, TicksPerQuarterNote, U7};
+//! use tutti_ump::{MidiChannel, NoteNumber, U7};
 //!
 //! // 120 BPM, then 60 from beat 4, at 480 ticks per quarter.
+//! let four_quarters = Tick(4 * 480);
 //! let track = Track::new()
 //!     .meta(Tick(0), Meta::tempo(Bpm::of(120.0)))
-//!     .note(Tick(0), 1_440, MidiChannel::FIRST, NoteNumber::of(60), U7::of(100))
-//!     .meta(Tick::quarters(4, TicksPerQuarterNote::of(480)), Meta::tempo(Bpm::of(60.0)));
+//!     .note(Tick(0), 1_440, MidiChannel::FIRST, NoteNumber::of(60), U7::of(100))?
+//!     .meta(four_quarters, Meta::tempo(Bpm::of(60.0)));
 //! let file = MidiFile::smf(SmfFormat::SingleTrack, SmfDivision::of(480), vec![track])?;
 //!
 //! let read = MidiFile::from_bytes(&file.to_bytes()?)?;
@@ -80,12 +81,12 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
-//! A clip plays a file's messages as they are: `file.timeline()` is `(Beat, Ump)`
-//! pairs (channel messages as their packets, SysEx as SysEx7 packets, meta events
-//! dropped: the tempo is [`MidiFile::tempo_map`]), which the session's
-//! `Midi::play_file` plays as a clip (or a caller turns into `tutti-midi-runtime`'s
-//! `TimedMidiEvent`s for `play_clip`). A format 2 file has no one timeline and is
-//! refused with `NoCommonTimeline`.
+//! A clip plays a file's messages as they are: `file.timeline()` is a [`Timeline`]
+//! whose `packets` are `(Beat, Ump)` pairs (channel messages as their packets, SysEx
+//! as SysEx7 packets, a divided SysEx as a Start, Continues and an End each at its
+//! own event's beat, meta events left out: the tempo is [`MidiFile::tempo_map`]) and
+//! whose `dropped` lists the SysEx and escape events no packet holds. A format 2
+//! file has no one timeline and is refused with `NoCommonTimeline`.
 //!
 //! ### Tempo is the wire's
 //!
@@ -119,12 +120,12 @@ mod smf;
 mod write;
 
 pub use clip_file::ClipFileError;
-pub use config::{ConfigError, OutOfOrder, Refusal};
+pub use config::{ConfigError, OutOfOrder, Refusal, TickOverflow};
 pub use fault::{SmfParseError, Truncated};
 pub use file::{
-    Converted, DropReason, Dropped, FileEvent, Meta, MicrosPerQuarter, MicrosPerQuarterOutOfRange,
-    MidiFile, Moved, NoCommonTimeline, OtherMetaKind, OtherMetaKindOutOfRange, PairedNote,
-    SmfFormat, TextKind, Tick, ToClipError, Track,
+    Alteration, Altered, Converted, DropReason, Dropped, FileEvent, Meta, MicrosPerQuarter,
+    MicrosPerQuarterOutOfRange, MidiFile, Moved, NoCommonTimeline, OtherMetaKind,
+    OtherMetaKindOutOfRange, PairedNote, SmfFormat, TextKind, Tick, Timeline, ToClipError, Track,
 };
 pub use kind::MidiFileKind;
 pub use smf::{SmfDivision, SmfDivisionOutOfRange};
@@ -132,14 +133,49 @@ pub use write::WriteOptions;
 
 use thiserror::Error;
 
+/// What a failed [`Error::Io`] was doing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum IoStep {
+    /// Opening or reading the file.
+    Read,
+    /// Creating, writing or syncing the temporary file beside the target.
+    Stage,
+    /// Renaming the temporary file onto the target.
+    Rename,
+}
+
+impl std::fmt::Display for IoStep {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Read => "read",
+            Self::Stage => "stage",
+            Self::Rename => "rename",
+        })
+    }
+}
+
+impl Error {
+    /// The error of a failed `step`, for `map_err`.
+    fn io(step: IoStep) -> impl FnOnce(std::io::Error) -> Self {
+        move |source| Self::Io { step, source }
+    }
+}
+
 /// What can go wrong reading or writing a MIDI file.
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum Error {
-    /// The file could not be read or written at all — missing, unreadable, or
-    /// the write failed.
-    #[error("IO error")]
-    Io(#[from] std::io::Error),
+    /// The file could not be read or written at all: missing, unreadable, or
+    /// the write failed. The step says which part of the work.
+    #[error("could not {step} the file")]
+    Io {
+        /// What was being done.
+        step: IoStep,
+        /// The operating system's error.
+        #[source]
+        source: std::io::Error,
+    },
 
     /// A write found something at its path (a file, a directory or a symlink)
     /// and was not told to replace it ([`WriteOptions::replace`]); it is
@@ -155,7 +191,7 @@ pub enum Error {
     /// variable-length quantity over four bytes, an event cut off inside its
     /// chunk), a track count that disagrees with the header, a zero
     /// ticks-per-beat division. The [`SmfParseError`] says which.
-    #[error("MIDI parse error")]
+    #[error("the bytes are not a well-formed Standard MIDI File")]
     MidiFileParse(#[source] SmfParseError),
 
     /// The file is cut off. What was read is not returned: a shorter file is
@@ -166,13 +202,13 @@ pub enum Error {
     /// SMPTE/timecode division. The codec reads metrical timing only: beats
     /// come from the file's division, and a timecode file has no beat grid to
     /// read them from or put a tempo map on.
-    #[error("Unsupported MIDI timing format")]
+    #[error("an SMPTE division is not supported: the codec reads metrical timing only")]
     MidiUnsupportedTiming,
 
     /// The tracks cannot make a file of the container asked for: an empty
     /// track list, a zero division, events out of order, an event the
     /// container cannot hold. The [`ConfigError`] says which and where.
-    #[error("invalid tracks")]
+    #[error("the tracks cannot make a file of the container asked for")]
     Config(#[from] ConfigError),
 
     /// An event pushed before the last of its track

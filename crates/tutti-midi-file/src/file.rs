@@ -10,14 +10,12 @@
 //! [`Beat`]s.
 //!
 //! The file layer does not translate. An SMF channel message is a MIDI 1.0
-//! [`Message::Midi1`] on group 0, and a MIDI 1.0 Note On at velocity 0 stays
+//! [`Message::Midi1`] on the first Group, and a MIDI 1.0 Note On at velocity 0 stays
 //! one (it is a note-off by the MIDI 1.0 rule, which [`Track::notes`] applies);
 //! a Clip File's packets are as stored. Translation runs where a clip is
 //! loaded for playback. A file allocates and never reaches the audio thread.
 
 use std::collections::HashMap;
-use std::io::{Read, Write};
-use std::ops::{Add, AddAssign, Sub};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -27,13 +25,16 @@ use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_types::{Beat, Bpm, Seconds};
 use tutti_ump::{
     Address, Flex, FlexAddress, FlexTextKind, Form, KeyEvent, Message, MidiChannel, MidiGroup,
-    NoteNumber, NoteVelocity, Sysex7Packets, System, TicksPerQuarterNote, U7, Ump, Unknown, Voice2,
+    NoteNumber, NoteVelocity, Sysex7Packet, Sysex7Packets, SysexStatus, System,
+    TicksPerQuarterNote, U7, Ump, Unknown, Voice2,
 };
 
 use crate::MidiFileKind;
 use crate::smf::SmfDivision;
 use crate::write::{Existing, WriteOptions};
-use crate::{ConfigError, Error, OutOfOrder, Refusal, Result, clip_file, smf};
+use crate::{
+    ConfigError, Error, IoStep, OutOfOrder, Refusal, Result, TickOverflow, clip_file, smf,
+};
 
 mod meta_kind;
 mod to_clip;
@@ -41,30 +42,69 @@ mod to_clip;
 pub use meta_kind::{
     MicrosPerQuarter, MicrosPerQuarterOutOfRange, OtherMetaKind, OtherMetaKindOutOfRange,
 };
-pub use to_clip::{Converted, DropReason, Dropped, Moved, ToClipError};
+pub use to_clip::{Alteration, Altered, Converted, DropReason, Dropped, Moved, ToClipError};
 use tutti_ump::Voice1;
 
 /// A position in a file, in ticks of its division: whole numbers, so a file
 /// written back lands every event on the tick it was read at.
 ///
-/// A tick is a count, and the whole of `u64` is in range. [`MidiFile::beat_at`]
-/// is the conversion to a [`Beat`].
+/// A tick is a count, and the whole of `u64` is in range. Arithmetic is
+/// checked: [`checked_add`](Tick::checked_add), [`ticks_since`](Tick::ticks_since)
+/// and [`quarters`](Tick::quarters) answer `None` where `u64` would wrap.
+/// [`MidiFile::beat_at`] is the conversion to a [`Beat`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Tick(pub u64);
 
 impl Tick {
-    /// `count` quarter notes in a file of division `ticks_per_quarter`.
+    /// `count` quarter notes in a file of division `ticks_per_quarter`, `None`
+    /// when the tick is past `u64::MAX`.
     ///
     /// ```
     /// use tutti_midi_file::Tick;
     /// use tutti_ump::TicksPerQuarterNote;
     ///
-    /// assert_eq!(Tick::quarters(4, TicksPerQuarterNote::of(480)), Tick(1_920));
+    /// assert_eq!(Tick::quarters(4, TicksPerQuarterNote::of(480)), Some(Tick(1_920)));
+    /// assert_eq!(Tick::quarters(u64::MAX, TicksPerQuarterNote::of(2)), None);
     /// ```
     #[inline]
     #[must_use]
-    pub const fn quarters(count: u64, ticks_per_quarter: TicksPerQuarterNote) -> Self {
-        Self(count * ticks_per_quarter.get() as u64)
+    pub const fn quarters(count: u64, ticks_per_quarter: TicksPerQuarterNote) -> Option<Self> {
+        match count.checked_mul(ticks_per_quarter.get() as u64) {
+            Some(ticks) => Some(Self(ticks)),
+            None => None,
+        }
+    }
+
+    /// `ticks` later, `None` when the tick is past `u64::MAX`.
+    ///
+    /// ```
+    /// use tutti_midi_file::Tick;
+    ///
+    /// assert_eq!(Tick(10).checked_add(5), Some(Tick(15)));
+    /// assert_eq!(Tick(u64::MAX).checked_add(1), None);
+    /// ```
+    #[inline]
+    #[must_use]
+    pub const fn checked_add(self, ticks: u64) -> Option<Self> {
+        match self.0.checked_add(ticks) {
+            Some(tick) => Some(Self(tick)),
+            None => None,
+        }
+    }
+
+    /// The ticks from `earlier` to this tick, `None` when `earlier` is after
+    /// it.
+    ///
+    /// ```
+    /// use tutti_midi_file::Tick;
+    ///
+    /// assert_eq!(Tick(15).ticks_since(Tick(10)), Some(5));
+    /// assert_eq!(Tick(10).ticks_since(Tick(15)), None);
+    /// ```
+    #[inline]
+    #[must_use]
+    pub const fn ticks_since(self, earlier: Tick) -> Option<u64> {
+        self.0.checked_sub(earlier.0)
     }
 
     /// This tick in quarter notes: the tick over the division
@@ -109,33 +149,6 @@ impl Tick {
         let ticks = (beat.get() * f64::from(ticks_per_quarter.get())).round();
         // `u64::MAX as f64` is 2^64, the first value out of range.
         (beat.get() >= 0.0 && ticks < u64::MAX as f64).then_some(Self(ticks as u64))
-    }
-}
-
-/// `ticks` later. Overflows like `u64`'s `+`.
-impl Add<u64> for Tick {
-    type Output = Tick;
-
-    #[inline]
-    fn add(self, ticks: u64) -> Tick {
-        Tick(self.0 + ticks)
-    }
-}
-
-/// `ticks` earlier. Underflows like `u64`'s `-`.
-impl Sub<u64> for Tick {
-    type Output = Tick;
-
-    #[inline]
-    fn sub(self, ticks: u64) -> Tick {
-        Tick(self.0 - ticks)
-    }
-}
-
-impl AddAssign<u64> for Tick {
-    #[inline]
-    fn add_assign(&mut self, ticks: u64) {
-        self.0 += ticks;
     }
 }
 
@@ -283,24 +296,13 @@ impl Meta {
             bytes: text.as_bytes().into(),
         }
     }
-
-    /// The text of a text event, `None` for any other event and for text that
-    /// is not UTF-8 (the specification names no encoding, so the bytes are
-    /// the file's: [`Meta::Text`]'s `bytes`).
-    #[must_use]
-    pub fn text_str(&self) -> Option<&str> {
-        match self {
-            Self::Text { bytes, .. } => std::str::from_utf8(bytes).ok(),
-            _ => None,
-        }
-    }
 }
 
 /// One event of a track.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum FileEvent {
-    /// A message. An SMF's channel message is [`Message::Midi1`] on group 0; a
+    /// A message. An SMF's channel message is [`Message::Midi1`] on the first Group; a
     /// Clip File's packets are as stored.
     Message(Message),
     /// A Clip File packet no definition covers (a reserved message type, an
@@ -384,10 +386,11 @@ impl Track {
     ///
     /// let track = Track::new()
     ///     .meta(Tick(0), Meta::tempo(Bpm::of(90.0)))
-    ///     .note(Tick(0), 480, MidiChannel::FIRST, NoteNumber::of(60), U7::of(100))
-    ///     .note(Tick(480), 480, MidiChannel::FIRST, NoteNumber::of(64), U7::of(100));
+    ///     .note(Tick(0), 480, MidiChannel::FIRST, NoteNumber::of(60), U7::of(100))?
+    ///     .note(Tick(480), 480, MidiChannel::FIRST, NoteNumber::of(64), U7::of(100))?;
     /// assert_eq!(track.end, Tick(960));
     /// assert_eq!(track.events.len(), 5);
+    /// # Ok::<(), tutti_midi_file::TickOverflow>(())
     /// ```
     #[must_use]
     pub fn new() -> Self {
@@ -403,15 +406,19 @@ impl Track {
     }
 
     /// A note: a Note On at `tick` and its Note Off `len` ticks on, on `channel`
-    /// (a bare [`MidiChannel`] is in Group 1, as an SMF holds). The Note Off
+    /// (a bare [`MidiChannel`] is in the first Group, as an SMF holds). The Note Off
     /// carries the MIDI release velocity of 64, which means none.
+    ///
+    /// # Errors
+    ///
+    /// [`TickOverflow`] if the Note Off is past `u64::MAX`; the track is
+    /// not changed.
     ///
     /// Events are placed in tick order, after the events already at their
     /// tick, so notes may be added in any order, overlap, or start together
     /// (a chord). At one tick the events are in the order they were added: a
     /// Note Off lands before the Note On of a note that starts where it ends
     /// only when its note was added first.
-    #[must_use]
     pub fn note(
         mut self,
         tick: Tick,
@@ -419,17 +426,18 @@ impl Track {
         channel: impl Into<Address>,
         note: NoteNumber,
         velocity: U7,
-    ) -> Self {
+    ) -> std::result::Result<Self, TickOverflow> {
+        let off = tick.checked_add(len).ok_or(TickOverflow { tick, len })?;
         let address = channel.into();
         self.place(
             tick,
             Message::midi1(address, Voice1::note_on(note, velocity)).into(),
         );
         self.place(
-            tick + len,
+            off,
             Message::midi1(address, Voice1::note_off(note, U7::of(64))).into(),
         );
-        self
+        Ok(self)
     }
 
     /// A meta event at `tick`, placed in tick order as [`note`](Self::note) is.
@@ -520,14 +528,12 @@ impl Track {
     /// The track's events as the packets a clip plays, at their beats for a
     /// file of division `ticks_per_quarter`, in the track's order. The rule is
     /// [`MidiFile::timeline`]'s.
-    pub fn timeline(
-        &self,
-        ticks_per_quarter: TicksPerQuarterNote,
-    ) -> impl Iterator<Item = (Beat, Ump)> + '_ {
-        self.events.iter().flat_map(move |(tick, event)| {
-            let beat = tick.beats(ticks_per_quarter);
-            packets(event).map(move |ump| (beat, ump))
-        })
+    pub fn timeline(&self, ticks_per_quarter: TicksPerQuarterNote) -> Timeline {
+        Timeline::of(
+            self.events
+                .iter()
+                .map(|(tick, event)| (tick.beats(ticks_per_quarter), event)),
+        )
     }
 
     /// The track's name: its first Track Name event, if it is UTF-8 text.
@@ -665,7 +671,7 @@ impl Container {
     }
 }
 
-/// A MIDI file of either container, read losslessly.
+/// A MIDI file of either container, with every event it holds.
 ///
 /// Fields are private and the tempo map is derived from the tracks (their
 /// Set Tempo events), so the two never disagree; [`tracks`](Self::tracks) and
@@ -684,13 +690,13 @@ impl Container {
 ///
 /// let track = Track::new()
 ///     .meta(Tick(0), Meta::tempo(Bpm::of(120.0)))
-///     .note(Tick(0), 480, MidiChannel::FIRST, NoteNumber::of(60), U7::of(100));
+///     .note(Tick(0), 480, MidiChannel::FIRST, NoteNumber::of(60), U7::of(100))?;
 /// let file = MidiFile::smf(SmfFormat::SingleTrack, SmfDivision::of(480), vec![track])?;
 ///
 /// let again = MidiFile::from_bytes(&file.to_bytes()?)?;
 /// assert_eq!(again, file);
 /// assert_eq!(again.seconds_at(Beat(1.0)), Seconds(0.5));
-/// # Ok::<(), tutti_midi_file::Error>(())
+/// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 #[derive(Clone, Debug)]
 pub struct MidiFile {
@@ -713,10 +719,10 @@ impl Eq for MidiFile {}
 impl MidiFile {
     /// The extensions a MIDI file of either container is found under.
     ///
-    /// `.mid` and `.midi` are the Standard MIDI File's; `.mid2` and `.midi2`
-    /// are in use for Clip Files. A reader handles all four the same way,
-    /// detecting rather than trusting any of them.
-    pub const EXTENSIONS: &'static [&'static str] = &["mid", "midi", "mid2", "midi2"];
+    /// `.mid` and `.midi` are the Standard MIDI File's; a Clip File "shall use
+    /// the file extension .midi2" (M2-116 section 4.1). A reader handles all
+    /// three the same way, detecting rather than trusting any of them.
+    pub const EXTENSIONS: &'static [&'static str] = &["mid", "midi", "midi2"];
 
     /// An SMF of `format` and `division` over `tracks`.
     ///
@@ -724,8 +730,8 @@ impl MidiFile {
     ///
     /// [`Error::Config`] if there is no track, a format 0 file does not have
     /// exactly one, a track's events are out of order or past its end, two events are further apart than
-    /// the wire's 28-bit delta, a message is not a group 0 MIDI 1.0 channel
-    /// message (the [`ConfigError`] names which and where); [`Error::Tempo`] if the tempo events do not make a
+    /// the wire's 28-bit delta, a message is not a MIDI 1.0 channel
+    /// message of the first Group (the [`ConfigError`] names which and where); [`Error::Tempo`] if the tempo events do not make a
     /// [`TempoMap`].
     #[must_use = "an Err means no file was built"]
     pub fn smf(format: SmfFormat, division: SmfDivision, tracks: Vec<Track>) -> Result<Self> {
@@ -739,7 +745,7 @@ impl MidiFile {
     ///
     /// [`Error::Config`] if the events or the
     /// header's are out of order or the events past the track's end, the header
-    /// ends before its last message, two are further apart than a `u32`, a
+    /// ends before its last message, a
     /// Flex Data message is interrupted by another message of its Group or
     /// left open (M2-104 section 7.5.2: only its own Continue packets and
     /// System Real Time messages go between its Start and End; a message that
@@ -785,10 +791,12 @@ impl MidiFile {
                 tracks: tracks.len(),
             });
         }
-        // The widest gap the wire holds: 28 bits in an SMF, 32 in a Clip File.
+        // The widest gap the wire holds: 28 bits in an SMF. A Clip File's
+        // Delta Clockstamp restarts its count with a Null message, so any gap
+        // is expressible (M2-116 section 3.2.2).
         let max_gap = match container {
             Container::Smf(..) => 0x0FFF_FFFF,
-            Container::Clip(_) => u64::from(u32::MAX),
+            Container::Clip(_) => u64::MAX,
         };
         for (i, track) in tracks.iter().enumerate() {
             if !track.header.is_empty() || track.header_end != Tick(0) {
@@ -796,16 +804,9 @@ impl MidiFile {
                     return invalid(ConfigError::HeaderInSmf { track: i });
                 }
                 let mut at = Tick(0);
-                let mut packets = Vec::with_capacity(track.header.len());
                 for (tick, event) in &track.header {
                     if *tick < at {
                         return invalid(ConfigError::HeaderOutOfOrder {
-                            track: i,
-                            at: *tick,
-                        });
-                    }
-                    if tick.0 - at.0 > max_gap {
-                        return invalid(ConfigError::HeaderGap {
                             track: i,
                             at: *tick,
                         });
@@ -818,21 +819,10 @@ impl MidiFile {
                             refusal,
                         });
                     }
-                    match event {
-                        FileEvent::Message(m) => packets.push((tick.0, Ump::from(*m))),
-                        FileEvent::Unknown(u) => packets.push((tick.0, u.0)),
-                        _ => {}
-                    }
                 }
-                clip_file::check_header(&packets)?;
+                clip_file::check_header(&clip_packets(&track.header, true)?)?;
                 if track.header_end < at {
                     return invalid(ConfigError::HeaderEndBeforeLast {
-                        track: i,
-                        end: track.header_end,
-                    });
-                }
-                if track.header_end.0 - at.0 > max_gap {
-                    return invalid(ConfigError::HeaderEndTooFar {
                         track: i,
                         end: track.header_end,
                     });
@@ -946,7 +936,7 @@ impl MidiFile {
     /// [`Error::Io`] if the file cannot be read; otherwise as
     /// [`from_bytes`](Self::from_bytes).
     pub fn read(path: impl AsRef<Path>) -> Result<Self> {
-        Self::from_bytes(&std::fs::read(path.as_ref())?)
+        Self::from_bytes(&std::fs::read(path.as_ref()).map_err(Error::io(IoStep::Read))?)
     }
 
     /// The file as bytes, in its own container: every event written back at
@@ -957,56 +947,26 @@ impl MidiFile {
     /// # Errors
     ///
     /// [`ConfigError::TooLarge`] (as [`Error::Config`]) if the encoder
-    /// refuses (an SMF past 65535 tracks or an event of 256 MB).
+    /// refuses (an SMF past 65535 tracks or an event of 256 MB, a Clip File
+    /// whose gaps need over 4 GB of Null restarts).
     pub fn to_bytes(&self) -> Result<Vec<u8>> {
         match self.container {
             Container::Smf(format, division) => smf::write(format, division, &self.tracks),
             Container::Clip(ticks_per_quarter) => {
                 let track = &self.tracks[0];
-                let packets = |events: &[(Tick, FileEvent)]| -> Vec<(u64, Ump)> {
-                    events
-                        .iter()
-                        .filter_map(|(tick, event)| match event {
-                            FileEvent::Message(m) => Some((tick.0, Ump::from(*m))),
-                            FileEvent::Unknown(u) => Some((tick.0, u.0)),
-                            // Refused at construction: not a packet.
-                            _ => None,
-                        })
-                        .collect()
-                };
+                if clip_file::restart_bytes(track.header_end.max(track.end).0) > u64::from(u32::MAX)
+                {
+                    return Err(ConfigError::TooLarge.into());
+                }
                 Ok(clip_file::write(
                     ticks_per_quarter,
-                    &packets(&track.header),
+                    &clip_packets(&track.header, true)?,
                     track.header_end.0,
-                    &packets(&track.events),
+                    &clip_packets(&track.events, false)?,
                     track.end.0,
                 ))
             }
         }
-    }
-
-    /// Reads and decodes a MIDI file from `reader`, to its end. See
-    /// [`from_bytes`](Self::from_bytes).
-    ///
-    /// # Errors
-    ///
-    /// [`Error::Io`] if the reader fails; otherwise as
-    /// [`from_bytes`](Self::from_bytes).
-    pub fn read_from(mut reader: impl Read) -> Result<Self> {
-        let mut bytes = Vec::new();
-        reader.read_to_end(&mut bytes)?;
-        Self::from_bytes(&bytes)
-    }
-
-    /// Writes [`to_bytes`](Self::to_bytes) to `writer`.
-    ///
-    /// # Errors
-    ///
-    /// [`Error::Io`] if the write fails; otherwise as
-    /// [`to_bytes`](Self::to_bytes).
-    pub fn write_to(&self, mut writer: impl Write) -> Result<()> {
-        writer.write_all(&self.to_bytes()?)?;
-        Ok(())
     }
 
     /// Writes [`to_bytes`](Self::to_bytes) to `path`, refusing anything
@@ -1048,22 +1008,6 @@ impl MidiFile {
         }
     }
 
-    /// Which container this file is.
-    pub fn kind(&self) -> MidiFileKind {
-        match self.container {
-            Container::Smf(..) => MidiFileKind::StandardMidiFile,
-            Container::Clip(_) => MidiFileKind::ClipFile,
-        }
-    }
-
-    /// An SMF's format, `None` for a Clip File.
-    pub fn smf_format(&self) -> Option<SmfFormat> {
-        match self.container {
-            Container::Smf(format, _) => Some(format),
-            Container::Clip(_) => None,
-        }
-    }
-
     /// The division: ticks per quarter note.
     #[must_use]
     pub fn ticks_per_quarter(&self) -> TicksPerQuarterNote {
@@ -1089,9 +1033,7 @@ impl MidiFile {
     /// For a format 2 file, which has a timeline per sequence, this is the
     /// first sequence's; [`tempo_map_of`](Self::tempo_map_of) names one.
     ///
-    /// It is shared: `file.tempo_map().clone()` is a reference count, and
-    /// `TransportSettings::set_tempo_map` (`tutti-transport`) takes it as it
-    /// is.
+    /// It is shared: `file.tempo_map().clone()` is a reference count.
     pub fn tempo_map(&self) -> &Arc<TempoMap> {
         &self.tempo_maps[0]
     }
@@ -1167,9 +1109,7 @@ impl MidiFile {
 
 impl MidiFile {
     /// The file's one timeline as the packets a clip plays, `(Beat, Ump)` in
-    /// order ([`events`](Self::events)' order), for
-    /// `Midi::play_clip` (each pair through `TimedMidiEvent::new`), or
-    /// `Midi::play_file`, which does it. Every beat is finite. Refused for a
+    /// order ([`events`](Self::events)' order). Every beat is finite. Refused for a
     /// format 2 file, which has no one timeline: read each [`Track`] with
     /// [`Track::timeline`].
     ///
@@ -1180,38 +1120,46 @@ impl MidiFile {
     /// The rule, one event at a time:
     ///
     /// - A [`Message`](FileEvent::Message) passes as its packet, as it is: an
-    ///   SMF's channel message is MIDI 1.0 on Group 1, and a Clip File's
+    ///   SMF's channel message is MIDI 1.0 on the first Group, and a Clip File's
     ///   packets (Flex Data included) are as stored.
-    /// - A [`SysEx`](FileEvent::SysEx) goes out as its SysEx7 packets, all at
-    ///   the event's beat. A divided message (an `F0` event not ending in `F7`,
-    ///   continued by [`Escape`](FileEvent::Escape) events) is not
-    ///   reassembled and is dropped, as is one with a byte of 128 or more.
+    /// - A [`SysEx`](FileEvent::SysEx) ending in `F7` goes out as its SysEx7
+    ///   packets (M2-104 section 7.7), all at the event's beat.
+    /// - A divided message (SMF 1.0 section 3.2: an `F0` event not ending in
+    ///   `F7` starts it, the [`Escape`](FileEvent::Escape) events after it
+    ///   continue it, and the one ending in `F7` ends it) goes out as a SysEx7
+    ///   Start, Continues and an End, each packet at the beat of the event its
+    ///   bytes are in, six bytes to a packet at most: the pauses between its
+    ///   parts stay. No transmittable event goes between its parts (SMF 1.0
+    ///   section 3.2), so one that does ends it unfinished, as does the next
+    ///   `F0` event or the end of the file.
     /// - [`Meta`](FileEvent::Meta) events are not messages: the tempo is the
     ///   file's [`tempo_map`](Self::tempo_map), and the rest (text, time and
-    ///   key signature, ...) are dropped. So are an
-    ///   [`Escape`](FileEvent::Escape) and an [`Unknown`](FileEvent::Unknown)
-    ///   packet.
+    ///   key signature, ...) are not on the timeline. Nor is an
+    ///   [`Unknown`](FileEvent::Unknown) packet.
+    ///
+    /// What a SysEx7 packet cannot carry is in [`Timeline::dropped`], not lost
+    /// silently: a bare `F7` escape (one with no divided message open: it is
+    /// the arbitrary bytes SMF 1.0 section 3.2 allows, which no packet holds),
+    /// a divided message left unfinished, and one with a byte of 128 or more.
     ///
     /// The Clip File's [`header`](Track::header) is not on the timeline.
     ///
     /// ```
     /// use tutti_midi_file::{MidiFile, SmfDivision, SmfFormat, Tick, Track};
     /// use tutti_types::Beat;
-    /// use tutti_ump::{MidiChannel, NoteNumber, U7, Ump};
+    /// use tutti_ump::{MidiChannel, NoteNumber, U7};
     ///
-    /// let track = Track::new().note(Tick(480), 480, MidiChannel::FIRST, NoteNumber::of(60), U7::of(100));
+    /// let track = Track::new().note(Tick(480), 480, MidiChannel::FIRST, NoteNumber::of(60), U7::of(100))?;
     /// let file = MidiFile::smf(SmfFormat::SingleTrack, SmfDivision::of(480), vec![track])?;
-    /// let clip: Vec<(Beat, Ump)> = file.timeline()?.collect();
-    /// assert_eq!(clip.len(), 2);
-    /// assert_eq!(clip[0].0, Beat(1.0));
-    /// assert_eq!(clip[1].0, Beat(2.0));
-    /// # Ok::<(), tutti_midi_file::Error>(())
+    /// let clip = file.timeline()?;
+    /// assert_eq!(clip.packets.len(), 2);
+    /// assert_eq!(clip.packets[0].0, Beat(1.0));
+    /// assert_eq!(clip.packets[1].0, Beat(2.0));
+    /// assert!(clip.dropped.is_empty());
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    pub fn timeline(
-        &self,
-    ) -> std::result::Result<impl Iterator<Item = (Beat, Ump)> + '_, NoCommonTimeline> {
-        let events = self.events()?;
-        Ok(events.flat_map(|(beat, event)| packets(event).map(move |ump| (beat, ump))))
+    pub fn timeline(&self) -> std::result::Result<Timeline, NoCommonTimeline> {
+        Ok(Timeline::of(self.events()?))
     }
 }
 
@@ -1221,23 +1169,152 @@ impl MidiFile {
 #[error("a format 2 file has no common timeline: its sequences are independent")]
 pub struct NoCommonTimeline;
 
-/// The packets of one event, by [`MidiFile::timeline`]'s rule.
-enum EventPackets<'a> {
-    None,
-    One(Option<Ump>),
-    Sysex(Sysex7Packets<'a>),
+/// Events as the packets a clip plays ([`MidiFile::timeline`]), and the System
+/// Exclusive events that gave none.
+#[derive(Clone, Debug, PartialEq, Default)]
+#[must_use = "`dropped` lists the System Exclusive events with no packets"]
+#[non_exhaustive]
+pub struct Timeline {
+    /// The packets at their beats, in order.
+    pub packets: Vec<(Beat, Ump)>,
+    /// The [`SysEx`](FileEvent::SysEx) and [`Escape`](FileEvent::Escape) events
+    /// that have no packet, at their beats, in order: a bare escape, a divided
+    /// message that never ended (all its parts), and a message with a byte of
+    /// 128 or more (all its parts).
+    pub dropped: Vec<(Beat, FileEvent)>,
 }
 
-impl Iterator for EventPackets<'_> {
-    type Item = Ump;
+/// The bytes of a System Exclusive message run, `F7` terminated.
+fn ends_in_f7(data: &[u8]) -> bool {
+    data.last() == Some(&0xF7)
+}
 
-    fn next(&mut self) -> Option<Ump> {
-        match self {
-            Self::None => None,
-            Self::One(ump) => ump.take(),
-            Self::Sysex(packets) => packets.next(),
+impl Timeline {
+    /// The packets of `events`, by [`MidiFile::timeline`]'s rule.
+    fn of<'a>(events: impl Iterator<Item = (Beat, &'a FileEvent)>) -> Self {
+        let mut timeline = Self::default();
+        // The parts of the divided message being read: its `F0` event, then
+        // the `F7` events after it.
+        let mut open: Vec<(Beat, &FileEvent)> = Vec::new();
+        for (beat, event) in events {
+            match event {
+                FileEvent::SysEx(data) => {
+                    timeline.abandon(&mut open);
+                    if ends_in_f7(data) {
+                        timeline.complete(&[(beat, event)]);
+                    } else {
+                        open.push((beat, event));
+                    }
+                }
+                FileEvent::Escape(_) if open.is_empty() => {
+                    timeline.dropped.push((beat, event.clone()));
+                }
+                FileEvent::Escape(data) => {
+                    open.push((beat, event));
+                    if ends_in_f7(data) {
+                        timeline.complete(&open);
+                        open.clear();
+                    }
+                }
+                FileEvent::Message(message) => {
+                    timeline.abandon(&mut open);
+                    timeline.packets.push((beat, Ump::from(*message)));
+                }
+                FileEvent::Unknown(_) => timeline.abandon(&mut open),
+                FileEvent::Meta(_) => {}
+            }
+        }
+        timeline.abandon(&mut open);
+        timeline
+    }
+
+    /// Reports the divided message left unfinished, if one is open.
+    fn abandon(&mut self, open: &mut Vec<(Beat, &FileEvent)>) {
+        self.dropped
+            .extend(open.drain(..).map(|(beat, event)| (beat, event.clone())));
+    }
+
+    /// The packets of one message, whole in one event or divided into the
+    /// `parts` (the last ending in `F7`): each part's bytes in packets of up to
+    /// six at the part's beat, the first of the message a Start, the last an
+    /// End, any between Continues, and a message of one packet a Complete.
+    fn complete(&mut self, parts: &[(Beat, &FileEvent)]) {
+        let payloads: Vec<(Beat, &[u8])> = parts
+            .iter()
+            .enumerate()
+            .filter_map(|(i, &(beat, event))| match event {
+                FileEvent::SysEx(data) | FileEvent::Escape(data) => {
+                    let last = i + 1 == parts.len();
+                    Some((beat, if last { &data[..data.len() - 1] } else { data }))
+                }
+                _ => None,
+            })
+            .collect();
+        if let [(beat, payload)] = payloads[..] {
+            match Sysex7Packets::from_payload(MidiGroup::FIRST, payload) {
+                Ok(packets) => self.packets.extend(packets.map(|ump| (beat, ump))),
+                Err(_) => self.dropped.push((beat, parts[0].1.clone())),
+            }
+            return;
+        }
+        if payloads
+            .iter()
+            .any(|(_, payload)| payload.iter().any(|&b| b >= 0x80))
+        {
+            self.dropped
+                .extend(parts.iter().map(|&(beat, event)| (beat, event.clone())));
+            return;
+        }
+        // An empty part still sends a packet: its pause is the message's.
+        let chunks: Vec<(Beat, &[u8])> = payloads
+            .iter()
+            .flat_map(|&(beat, payload)| {
+                let mut chunks: Vec<&[u8]> = payload.chunks(6).collect();
+                if chunks.is_empty() {
+                    chunks.push(&[]);
+                }
+                chunks.into_iter().map(move |chunk| (beat, chunk))
+            })
+            .collect();
+        let last = chunks.len() - 1;
+        for (i, (beat, chunk)) in chunks.into_iter().enumerate() {
+            let status = match i {
+                0 => SysexStatus::Start,
+                i if i == last => SysexStatus::End,
+                _ => SysexStatus::Continue,
+            };
+            // Checked above: at most six bytes, each below 128.
+            if let Some(packet) = Sysex7Packet::new(status, chunk) {
+                self.packets
+                    .push((beat, Ump::from(Message::Sysex7(MidiGroup::FIRST, packet))));
+            }
         }
     }
+}
+
+/// The packets of a Clip File's events (`in_header`: its header's) at their
+/// ticks.
+///
+/// # Errors
+///
+/// [`ConfigError::Refused`] for an SMF event: the constructor refuses it
+/// first.
+fn clip_packets(events: &[(Tick, FileEvent)], in_header: bool) -> Result<Vec<(u64, Ump)>> {
+    events
+        .iter()
+        .map(|(tick, event)| match event {
+            FileEvent::Message(m) => Ok((tick.0, Ump::from(*m))),
+            FileEvent::Unknown(u) => Ok((tick.0, u.0)),
+            FileEvent::SysEx(_) | FileEvent::Escape(_) | FileEvent::Meta(_) => {
+                Err(ConfigError::Refused {
+                    track: 0,
+                    in_header,
+                    refusal: Refusal::ClipSmfEvent,
+                }
+                .into())
+            }
+        })
+        .collect()
 }
 
 /// The packets of a header, at their ticks: what the clip layer reads.
@@ -1247,21 +1324,9 @@ fn header_packets(header: &[(Tick, FileEvent)]) -> Vec<(u64, Ump)> {
         .filter_map(|(tick, event)| match event {
             FileEvent::Message(m) => Some((tick.0, Ump::from(*m))),
             FileEvent::Unknown(u) => Some((tick.0, u.0)),
-            _ => None,
+            FileEvent::SysEx(_) | FileEvent::Escape(_) | FileEvent::Meta(_) => None,
         })
         .collect()
-}
-
-fn packets(event: &FileEvent) -> EventPackets<'_> {
-    match event {
-        FileEvent::Message(message) => EventPackets::One(Some(Ump::from(*message))),
-        FileEvent::SysEx(data) => match data.split_last() {
-            Some((0xF7, payload)) => Sysex7Packets::from_payload(MidiGroup::FIRST, payload)
-                .map_or(EventPackets::None, EventPackets::Sysex),
-            _ => EventPackets::None,
-        },
-        FileEvent::Unknown(_) | FileEvent::Escape(_) | FileEvent::Meta(_) => EventPackets::None,
-    }
 }
 
 impl TryFrom<&[u8]> for MidiFile {
@@ -1282,7 +1347,9 @@ fn refuses(container: Container, event: &FileEvent) -> Option<Refusal> {
         (Container::Smf(..), FileEvent::Message(_) | FileEvent::Unknown(_)) => {
             Some(Refusal::SmfPacket)
         }
-        (Container::Smf(..), _) => None,
+        (Container::Smf(..), FileEvent::SysEx(_) | FileEvent::Escape(_) | FileEvent::Meta(_)) => {
+            None
+        }
         (Container::Clip(_), FileEvent::SysEx(_) | FileEvent::Escape(_) | FileEvent::Meta(_)) => {
             Some(Refusal::ClipSmfEvent)
         }
@@ -1298,7 +1365,7 @@ fn refuses(container: Container, event: &FileEvent) -> Option<Refusal> {
         {
             Some(Refusal::ClipPropertyExchange)
         }
-        (Container::Clip(_), _) => None,
+        (Container::Clip(_), FileEvent::Message(_) | FileEvent::Unknown(_)) => None,
     }
 }
 
@@ -1313,7 +1380,7 @@ fn text_interrupted(events: &[(Tick, FileEvent)]) -> Option<Tick> {
         let ump = match event {
             FileEvent::Message(message) => Ump::from(*message),
             FileEvent::Unknown(unknown) => unknown.0,
-            _ => continue,
+            FileEvent::SysEx(_) | FileEvent::Escape(_) | FileEvent::Meta(_) => continue,
         };
         let Some(group) = ump.group() else {
             continue;

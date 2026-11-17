@@ -204,7 +204,7 @@ fn smf<'a>(input: &mut &'a [u8]) -> Res<(Header, Vec<&'a [u8]>)> {
 // ---- events ----------------------------------------------------------------
 
 /// The data bytes of a channel status (how many is `Voice1::data_len`'s) as a
-/// message on group 0. `parse_exact` owns the status bit layout.
+/// message on the first Group. `parse_exact` owns the status bit layout.
 fn channel<'a>(status: u8) -> impl Parser<&'a [u8], FileEvent, ContextError<Fault>> {
     let count = Voice1::data_len(status).map_or(0, usize::from);
     take(count)

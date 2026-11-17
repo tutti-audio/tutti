@@ -190,13 +190,15 @@ fn a_file_plays_at_a_beat_and_a_format_2_file_is_refused() {
     use tutti_midi_file::SmfDivision;
     use tutti_midi_file::{MidiFile, SmfFormat, Tick, Track};
     use tutti_ump::U7;
-    let track = Track::new().note(
-        Tick(480),
-        240,
-        MidiChannel::FIRST,
-        NoteNumber::of(62),
-        U7::of(100),
-    );
+    let track = Track::new()
+        .note(
+            Tick(480),
+            240,
+            MidiChannel::FIRST,
+            NoteNumber::of(62),
+            U7::of(100),
+        )
+        .unwrap();
     let file = MidiFile::smf(
         SmfFormat::SingleTrack,
         SmfDivision::of(480),

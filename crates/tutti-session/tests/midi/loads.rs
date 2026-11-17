@@ -20,13 +20,15 @@ fn session() -> DetachedSession {
 
 /// A one-note SMF written to `dir`; returns the file as built.
 fn write_file(dir: &Path, name: &str, key: u8) -> (std::path::PathBuf, MidiFile) {
-    let track = Track::new().note(
-        Tick(0),
-        480,
-        MidiChannel::FIRST,
-        NoteNumber::of(key),
-        U7::of(100),
-    );
+    let track = Track::new()
+        .note(
+            Tick(0),
+            480,
+            MidiChannel::FIRST,
+            NoteNumber::of(key),
+            U7::of(100),
+        )
+        .unwrap();
     let file =
         MidiFile::smf(SmfFormat::SingleTrack, SmfDivision::of(480), vec![track]).expect("builds");
     let path = dir.join(name);

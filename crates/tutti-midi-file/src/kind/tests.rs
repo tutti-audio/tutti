@@ -56,8 +56,8 @@ fn detect_path_reads_the_magic_not_the_extension() {
         Some(MidiFileKind::ClipFile)
     );
     assert_eq!(
-        MidiFile::read(&misnamed).unwrap().kind(),
-        MidiFileKind::ClipFile
+        MidiFile::read(&misnamed).unwrap().to_bytes().unwrap()[..8],
+        crate::clip_file::CLIP_FILE_MAGIC
     );
 
     // Readable but unrecognised — `Ok(None)`, not an error.
@@ -74,7 +74,5 @@ fn detect_path_reads_the_magic_not_the_extension() {
 /// Spec: m2-116/4.1#1
 #[test]
 fn the_extensions_include_the_ones_the_specifications_name() {
-    for ext in ["mid", "midi", "midi2"] {
-        assert!(MidiFile::EXTENSIONS.contains(&ext), "{ext}");
-    }
+    assert_eq!(MidiFile::EXTENSIONS, ["mid", "midi", "midi2"]);
 }
