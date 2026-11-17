@@ -5,7 +5,8 @@
 use crate::common::{note, track, unsorted};
 use crate::support::{Division, RawEvent, build_smf, write_vlq};
 use tutti_midi_file::{
-    Error, FileEvent, Meta, MidiFile, SmfDivision, SmfFormat, SmfParseError, TextKind, Tick,
+    Error, FileEvent, Meta, MicrosPerQuarter, MidiFile, SmfDivision, SmfFormat, SmfParseError,
+    TextKind, Tick,
 };
 use tutti_ump::{Message, TicksPerQuarterNote, Voice1};
 
@@ -284,7 +285,7 @@ fn a_meta_event_longer_than_defined_is_read_for_what_it_defines() {
         metas,
         [
             &Meta::Tempo {
-                micros_per_quarter: 500_000,
+                micros_per_quarter: MicrosPerQuarter::of(500_000),
                 extra: Box::new([0xAA, 0xBB]),
             },
             &Meta::TimeSignature {
@@ -381,7 +382,7 @@ fn a_written_file_reads_back_equal() {
         (
             0,
             FileEvent::Meta(Meta::Tempo {
-                micros_per_quarter: 500_000,
+                micros_per_quarter: MicrosPerQuarter::of(500_000),
                 extra: Box::default(),
             }),
         ),

@@ -122,7 +122,8 @@ pub use clip_file::ClipFileError;
 pub use config::{ConfigError, OutOfOrder, Refusal};
 pub use fault::{SmfParseError, Truncated};
 pub use file::{
-    Converted, DropReason, Dropped, FileEvent, Meta, MidiFile, Moved, NoCommonTimeline, PairedNote,
+    Converted, DropReason, Dropped, FileEvent, Meta, MicrosPerQuarter, MicrosPerQuarterOutOfRange,
+    MidiFile, Moved, NoCommonTimeline, OtherMetaKind, OtherMetaKindOutOfRange, PairedNote,
     SmfFormat, TextKind, Tick, ToClipError, Track,
 };
 pub use kind::MidiFileKind;

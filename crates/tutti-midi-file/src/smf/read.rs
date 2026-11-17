@@ -55,7 +55,9 @@ use winnow::token::{literal, take};
 use tutti_ump::{MidiGroup, Voice1, parse_exact};
 
 use super::{SmfDivision, SmfParts};
-use crate::file::{FileEvent, Meta, SmfFormat, TextKind, Tick, Track};
+use crate::file::{
+    FileEvent, Meta, MicrosPerQuarter, OtherMetaKind, SmfFormat, TextKind, Tick, Track,
+};
 use crate::{Error, Result, SmfParseError, Truncated};
 
 /// Why a parser refused, carried as winnow context and mapped to [`enum@Error`]
@@ -217,17 +219,28 @@ fn channel<'a>(status: u8) -> impl Parser<&'a [u8], FileEvent, ContextError<Faul
         .context(malformed(SmfParseError::ChannelData))
 }
 
-/// A meta event's type byte and data as the model's [`Meta`]. A fixed-size
-/// event with more data than it defines is read for the bytes it defines and
-/// keeps the rest as `extra` (SMF 1.0 section 3.3: a program ignores what is past
-/// what it knows). Anything shorter than the typed shape stays
-/// `Other`, so no byte is lost.
-fn meta_of(kind: u8, data: &[u8]) -> Meta {
+/// What an event of a track is: an event of the model, or the End of Track
+/// that ends the track.
+#[derive(Clone)]
+enum Item {
+    Event(FileEvent),
+    EndOfTrack,
+}
+
+/// A meta event's type byte and data as the model's [`Meta`], or the track's
+/// end. A fixed-size event with more data than it defines is read for the
+/// bytes it defines and keeps the rest as `extra` (SMF 1.0 section 3.3: a
+/// program ignores what is past what it knows). `None` for an event of a typed
+/// kind (text, End of Track, tempo, time and key signature) whose data is
+/// shorter than the kind defines or has an undefined value: [`Meta::Other`]
+/// holds no typed kind, so the event has no other form.
+fn meta_of(kind: u8, data: &[u8]) -> Option<Item> {
     let text = |kind| Meta::Text {
         kind,
         bytes: data.into(),
     };
-    match (kind, data) {
+    let meta = match (kind, data) {
+        (0x2F, []) => return Some(Item::EndOfTrack),
         (0x01, _) => text(TextKind::Text),
         (0x02, _) => text(TextKind::Copyright),
         (0x03, _) => text(TextKind::TrackName),
@@ -238,7 +251,7 @@ fn meta_of(kind: u8, data: &[u8]) -> Meta {
         (0x08, _) => text(TextKind::ProgramName),
         (0x09, _) => text(TextKind::DeviceName),
         (0x51, &[a, b, c, ref extra @ ..]) => Meta::Tempo {
-            micros_per_quarter: u32::from_be_bytes([0, a, b, c]),
+            micros_per_quarter: MicrosPerQuarter::from_wire([a, b, c]),
             extra: extra.into(),
         },
         (
@@ -263,25 +276,25 @@ fn meta_of(kind: u8, data: &[u8]) -> Meta {
             extra: extra.into(),
         },
         _ => Meta::Other {
-            kind,
+            kind: OtherMetaKind::new(kind)?,
             data: data.into(),
         },
-    }
+    };
+    Some(Item::Event(FileEvent::Meta(meta)))
 }
 
 /// A meta event after its `FF`: type, length, data.
-fn meta(input: &mut &[u8]) -> Res<FileEvent> {
+fn meta(input: &mut &[u8]) -> Res<Item> {
     (byte, counted(vlq))
-        .map(|(kind, data)| FileEvent::Meta(meta_of(kind, data)))
+        .verify_map(|(kind, data)| meta_of(kind, data))
+        .context(malformed(SmfParseError::MetaData))
         .parse_next(input)
 }
 
 /// One event after its delta, given the running status: the event and the
 /// status after it. A status byte is read when the next byte has its top bit
 /// set; otherwise the running one stands in and the byte is data.
-fn event<'a>(
-    running: Status,
-) -> impl Parser<&'a [u8], (u32, FileEvent, Status), ContextError<Fault>> {
+fn event<'a>(running: Status) -> impl Parser<&'a [u8], (u32, Item, Status), ContextError<Fault>> {
     let status = alt((
         byte.verify(|b| b & 0x80 != 0),
         peek(byte.verify(|b| b & 0x80 == 0)).verify_map(move |_| running),
@@ -290,9 +303,9 @@ fn event<'a>(
     (vlq, status).flat_map(|(delta, status)| {
         dispatch! { move |_: &mut &'a [u8]| Ok::<u8, ContextError<Fault>>(status);
             0xFF => meta.map(|e| (e, None)),
-            0xF0 => counted(vlq).map(|d| (FileEvent::SysEx(d.into()), None)),
-            0xF7 => counted(vlq).map(|d| (FileEvent::Escape(d.into()), None)),
-            0x80..=0xEF => channel(status).map(move |e| (e, Some(status))),
+            0xF0 => counted(vlq).map(|d| (Item::Event(FileEvent::SysEx(d.into())), None)),
+            0xF7 => counted(vlq).map(|d| (Item::Event(FileEvent::Escape(d.into())), None)),
+            0x80..=0xEF => channel(status).map(move |e| (Item::Event(e), Some(status))),
             _ => refuse(SmfParseError::SystemStatus),
         }
         .map(move |(event, status)| (delta, event, status))
@@ -303,7 +316,7 @@ fn event<'a>(
 /// status after it. `None` at the end of the bytes.
 struct Step<'a> {
     delta: u32,
-    event: FileEvent,
+    event: Item,
     rest: &'a [u8],
     status: Status,
 }
@@ -333,7 +346,7 @@ fn steps(body: &[u8]) -> impl Iterator<Item = Res<Step<'_>>> {
 /// A track body: its events at absolute ticks, and its end. The last event,
 /// if it is an End of Track (`FF 2F 00`), is the track's end and not an event.
 fn track(body: &[u8]) -> Res<Track> {
-    let mut events = steps(body)
+    let mut items = steps(body)
         .scan(0u64, |tick, step| {
             Some(step.map(|s| {
                 *tick += u64::from(s.delta);
@@ -341,24 +354,35 @@ fn track(body: &[u8]) -> Res<Track> {
             }))
         })
         .collect::<Res<Vec<_>>>()?;
-    let is_end = |e: &FileEvent| matches!(e, FileEvent::Meta(Meta::Other { kind: 0x2F, data }) if data.is_empty());
     // SMF 1.0 section 3.3: an end-of-track event is the last
     // event in the track. One before the last is refused, not read as the
     // track's end: what follows it would be dropped, and the model is lossless.
-    let last = events.len().saturating_sub(1);
-    if events.iter().take(last).any(|(_, e)| is_end(e)) {
+    let last = items.len().saturating_sub(1);
+    if items
+        .iter()
+        .take(last)
+        .any(|(_, item)| matches!(item, Item::EndOfTrack))
+    {
         return Err(refuse::<Track>(SmfParseError::EndOfTrackNotLast)
             .parse_peek(body)
             .unwrap_err());
     }
-    let end = match events.last() {
-        Some(&(tick, ref e)) if is_end(e) => {
-            events.pop();
+    let end = match items.last() {
+        Some(&(tick, Item::EndOfTrack)) => {
+            items.pop();
             tick
         }
-        Some(&(tick, _)) => tick,
+        Some(&(tick, Item::Event(_))) => tick,
         None => Tick(0),
     };
+    let events = items
+        .into_iter()
+        .filter_map(|(tick, item)| match item {
+            Item::Event(event) => Some((tick, event)),
+            // Only the last item can be one, and it was popped.
+            Item::EndOfTrack => None,
+        })
+        .collect();
     Ok(Track {
         header: Vec::new(),
         header_end: Tick(0),

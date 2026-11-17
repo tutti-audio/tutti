@@ -11,8 +11,8 @@ use crate::common::track;
 use crate::support::{Division, RawEvent, build_smf, decode_smf};
 use tutti_fixtures::{RangeContract, check_range_contract};
 use tutti_midi_file::{
-    Error, FileEvent, Meta, MidiFile, MidiFileKind, PairedNote, SmfDivision, SmfFormat, TextKind,
-    Tick, Track, Truncated,
+    Error, FileEvent, Meta, MicrosPerQuarter, MidiFile, MidiFileKind, OtherMetaKind, PairedNote,
+    SmfDivision, SmfFormat, TextKind, Tick, Track, Truncated,
 };
 use tutti_types::{Beat, Bpm, Seconds};
 use tutti_ump::{
@@ -125,7 +125,7 @@ fn every_event_kind_survives_a_read_and_a_write() {
         assert_eq!(
             at(0).1,
             FileEvent::Meta(Meta::Other {
-                kind: 0,
+                kind: OtherMetaKind::of(0),
                 data: vec![0, 5].into()
             })
         );
@@ -139,14 +139,14 @@ fn every_event_kind_survives_a_read_and_a_write() {
         assert_eq!(
             at(12).1,
             FileEvent::Meta(Meta::Tempo {
-                micros_per_quarter: 500_000,
+                micros_per_quarter: MicrosPerQuarter::of(500_000),
                 extra: Box::default(),
             })
         );
         assert_eq!(
             at(13).1,
             FileEvent::Meta(Meta::Other {
-                kind: 0x54,
+                kind: OtherMetaKind::of(0x54),
                 data: vec![0x21, 30, 15, 10, 50].into()
             })
         );
@@ -441,7 +441,7 @@ fn a_zero_tempo_is_not_a_tempo_and_an_absurd_one_is_read_as_written() {
     assert_eq!(
         file.tracks()[0].events[0].1,
         FileEvent::Meta(Meta::Tempo {
-            micros_per_quarter: 0,
+            micros_per_quarter: MicrosPerQuarter::of(0),
             extra: Box::default(),
         })
     );
@@ -461,14 +461,14 @@ fn a_tempo_above_the_wire_range_writes_the_fastest_quarter() {
     assert_eq!(
         Meta::tempo(Bpm::of(1.0e9)),
         Meta::Tempo {
-            micros_per_quarter: 1,
+            micros_per_quarter: MicrosPerQuarter::of(1),
             extra: Box::default(),
         }
     );
     assert_eq!(
         Meta::tempo(Bpm::of(0.001)),
         Meta::Tempo {
-            micros_per_quarter: 0xFF_FFFF,
+            micros_per_quarter: MicrosPerQuarter::of(0xFF_FFFF),
             extra: Box::default(),
         }
     );
@@ -479,7 +479,7 @@ fn a_tempo_above_the_wire_range_writes_the_fastest_quarter() {
     else {
         panic!("a tempo");
     };
-    assert_eq!(micros_per_quarter, 344_828);
+    assert_eq!(micros_per_quarter, MicrosPerQuarter::of(344_828));
     assert!(
         !Meta::tempo(Bpm::of(174.0))
             .bpm()
@@ -729,6 +729,91 @@ fn an_smf_division_is_1_to_32767() {
     });
 }
 
+/// SMF 1.0 section 3.3: Set Tempo is `FF 51 03 tttttt`, 24 bits.
+#[test]
+fn microseconds_per_quarter_is_0_to_16777215() {
+    check_range_contract(&RangeContract {
+        new: MicrosPerQuarter::new,
+        get: MicrosPerQuarter::get,
+        of: Some(MicrosPerQuarter::of),
+        valid: &[0, 1, 500_000, 0xFF_FFFF],
+        invalid: &[0x100_0000, u32::MAX],
+    });
+}
+
+/// Every meta type the reader types (the text events `01` to `09`, End of
+/// Track, Set Tempo, Time and Key Signature) is refused as an `Other`, and so
+/// is a type byte with its top bit set; every other type byte below 128 is
+/// taken.
+#[test]
+fn an_other_meta_kind_is_a_type_byte_with_no_variant() {
+    let typed = [1u8, 2, 3, 4, 5, 6, 7, 8, 9, 0x2F, 0x51, 0x58, 0x59];
+    for kind in 0..=u8::MAX {
+        let expected = kind < 0x80 && !typed.contains(&kind);
+        assert_eq!(OtherMetaKind::new(kind).is_some(), expected, "{kind:#04x}");
+    }
+}
+
+/// A write then a read gives back an `Other` of every kind it can hold, data
+/// of any length included.
+#[test]
+fn an_other_meta_event_of_every_allowed_kind_writes_and_reads_back_equal() {
+    let events: Vec<(Tick, FileEvent)> = (0..0x80u8)
+        .filter_map(OtherMetaKind::new)
+        .map(|kind| {
+            let data = vec![0x7F; usize::from(kind.get() % 5)];
+            (
+                Tick(0),
+                FileEvent::Meta(Meta::Other {
+                    kind,
+                    data: data.into(),
+                }),
+            )
+        })
+        .collect();
+    let file = MidiFile::smf(
+        SmfFormat::SingleTrack,
+        SMF_DIVISION,
+        vec![events.into_iter().collect()],
+    )
+    .unwrap();
+    assert_eq!(read(&file.to_bytes().unwrap()), file);
+}
+
+/// A meta event of a typed kind whose data is not what the kind defines has no
+/// form in the model, so the read refuses it: Set Tempo, Time Signature and Key
+/// Signature shorter than their fixed part, a Key Signature whose mode byte is
+/// neither 0 nor 1, and an End of Track with data.
+#[test]
+fn a_typed_meta_event_with_data_its_kind_does_not_define_is_refused() {
+    let meta = |kind: u8, data: &[u8]| {
+        let mut event = vec![0x00, 0xFF, kind, data.len() as u8];
+        event.extend_from_slice(data);
+        event
+    };
+    let body = |event: Vec<u8>| {
+        let mut chunk = b"MThd\0\0\0\x06\0\0\0\x01\x01\xE0MTrk".to_vec();
+        chunk.extend((event.len() as u32).to_be_bytes());
+        chunk.extend(event);
+        chunk
+    };
+    for (kind, data) in [
+        (0x51, &[1, 2][..]),
+        (0x58, &[4, 2, 24][..]),
+        (0x59, &[0][..]),
+        (0x59, &[0, 2][..]),
+        (0x2F, &[0][..]),
+    ] {
+        assert!(
+            matches!(
+                MidiFile::from_bytes(&body(meta(kind, data))),
+                Err(Error::MidiFileParse(_))
+            ),
+            "{kind:#04x} {data:?}"
+        );
+    }
+}
+
 #[test]
 fn events_out_of_order_are_refused() {
     let out_of_order = Track {
@@ -776,11 +861,6 @@ fn what_an_smf_cannot_hold_is_refused() {
         tutti_ump::Voice2::ChannelPressure(ControlValue::MIN),
     ));
     assert!(matches!(one(midi2), Err(Error::Config(_))));
-    let slow = FileEvent::Meta(Meta::Tempo {
-        micros_per_quarter: 0x100_0000,
-        extra: Box::default(),
-    });
-    assert!(matches!(one(slow), Err(Error::Config(_))));
     let gap = MidiFile::smf(
         SmfFormat::SingleTrack,
         SMF_DIVISION,

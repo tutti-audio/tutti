@@ -16,7 +16,9 @@ use tutti_ump::{
 
 use unicode_normalization::UnicodeNormalization;
 
-use crate::{FileEvent, Meta, MidiFile, Result, SmfFormat, TextKind, Tick, Track};
+use crate::{
+    FileEvent, Meta, MicrosPerQuarter, MidiFile, Result, SmfFormat, TextKind, Tick, Track,
+};
 
 use lyrics::Lyrics;
 
@@ -213,9 +215,9 @@ fn flex(flex: Flex) -> FileEvent {
     FileEvent::Message(Message::Flex(MidiGroup::FIRST, flex))
 }
 
-fn tempo(micros_per_quarter: u32) -> FileEvent {
+fn tempo(micros_per_quarter: MicrosPerQuarter) -> FileEvent {
     // 24 bits of microseconds times 100 is under 2^31.
-    flex(Flex::SetTempo(micros_per_quarter * TEN_NS_PER_MICRO))
+    flex(Flex::SetTempo(micros_per_quarter.get() * TEN_NS_PER_MICRO))
 }
 
 /// The four beats of the 4/4 bar a file with no time signature has.
@@ -368,7 +370,7 @@ fn convert(
                 };
                 other(text(kind, bytes)?)
             }
-            Meta::Other { kind, .. } => Err(match kind {
+            Meta::Other { kind, .. } => Err(match kind.get() {
                 0x20 | 0x21 => DropReason::ReplacedByAddressing,
                 0x54 => DropReason::SuccessorUndefined,
                 _ => DropReason::NoSuccessor,
@@ -564,7 +566,7 @@ impl MidiFile {
         };
         let mut placed: Vec<(Tick, Rank, FileEvent)> = Vec::new();
         if !live_at_start(|m| matches!(m, Meta::Tempo { .. })) {
-            placed.push((Tick(0), Rank::Tempo, tempo(500_000)));
+            placed.push((Tick(0), Rank::Tempo, tempo(MicrosPerQuarter::of(500_000))));
         }
         if !live_at_start(|m| matches!(m, Meta::TimeSignature { .. })) {
             for ev in signature(FOUR_BEATS, 2, 8, 24) {

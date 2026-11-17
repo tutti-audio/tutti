@@ -35,8 +35,12 @@ use crate::smf::SmfDivision;
 use crate::write::{Existing, WriteOptions};
 use crate::{ConfigError, Error, OutOfOrder, Refusal, Result, clip_file, smf};
 
+mod meta_kind;
 mod to_clip;
 
+pub use meta_kind::{
+    MicrosPerQuarter, MicrosPerQuarterOutOfRange, OtherMetaKind, OtherMetaKindOutOfRange,
+};
 pub use to_clip::{Converted, DropReason, Dropped, Moved, ToClipError};
 use tutti_ump::Voice1;
 
@@ -190,12 +194,11 @@ pub enum Meta {
         bytes: Box<[u8]>,
     },
     /// `51`: Set Tempo, microseconds per quarter note. The 24-bit wire value
-    /// (a bare number: it is the file's own figure, and a zero, no valid
-    /// tempo, has to be kept to be written back). [`Meta::tempo`] and
-    /// [`Meta::bpm`] cross to a [`Bpm`].
+    /// (a zero, no valid tempo, is kept to be written back). [`Meta::tempo`]
+    /// and [`Meta::bpm`] cross to a [`Bpm`].
     Tempo {
-        /// Microseconds per quarter note, at most `0xFF_FFFF`.
-        micros_per_quarter: u32,
+        /// Microseconds per quarter note.
+        micros_per_quarter: MicrosPerQuarter,
         /// The data past the three bytes this reads: empty unless the file
         /// has a longer event (SMF 1.0 section 3.3: a program ignores
         /// everything past what it knows). Kept so the file writes
@@ -232,8 +235,9 @@ pub enum Meta {
     /// `21`, SMPTE offset `54`, sequencer specific `7F`, an unregistered
     /// type): its type byte and its data.
     Other {
-        /// The type byte.
-        kind: u8,
+        /// The type byte: never one of the typed variants', so a write and a
+        /// read give the same event.
+        kind: OtherMetaKind,
         /// The data, without its length.
         data: Box<[u8]>,
     },
@@ -254,7 +258,7 @@ impl Meta {
     pub fn tempo(bpm: Bpm) -> Self {
         let micros = (MICROS_PER_MINUTE / bpm.get()).round() as u32;
         Self::Tempo {
-            micros_per_quarter: micros.clamp(1, MAX_MICROS_PER_QUARTER),
+            micros_per_quarter: MicrosPerQuarter::of(micros.clamp(1, MAX_MICROS_PER_QUARTER)),
             extra: Box::default(),
         }
     }
@@ -265,8 +269,8 @@ impl Meta {
         match self {
             Self::Tempo {
                 micros_per_quarter, ..
-            } if *micros_per_quarter != 0 => {
-                Bpm::new(MICROS_PER_MINUTE / f64::from(*micros_per_quarter))
+            } if micros_per_quarter.get() != 0 => {
+                Bpm::new(MICROS_PER_MINUTE / f64::from(micros_per_quarter.get()))
             }
             _ => None,
         }
@@ -721,8 +725,7 @@ impl MidiFile {
     /// [`Error::Config`] if there is no track, a format 0 file does not have
     /// exactly one, a track's events are out of order or past its end, two events are further apart than
     /// the wire's 28-bit delta, a message is not a group 0 MIDI 1.0 channel
-    /// message, a Set Tempo is over 24 bits (the [`ConfigError`] names which
-    /// and where); [`Error::Tempo`] if the tempo events do not make a
+    /// message (the [`ConfigError`] names which and where); [`Error::Tempo`] if the tempo events do not make a
     /// [`TempoMap`].
     #[must_use = "an Err means no file was built"]
     pub fn smf(format: SmfFormat, division: SmfDivision, tracks: Vec<Track>) -> Result<Self> {
@@ -1279,14 +1282,6 @@ fn refuses(container: Container, event: &FileEvent) -> Option<Refusal> {
         (Container::Smf(..), FileEvent::Message(_) | FileEvent::Unknown(_)) => {
             Some(Refusal::SmfPacket)
         }
-        (
-            Container::Smf(..),
-            FileEvent::Meta(Meta::Tempo {
-                micros_per_quarter, ..
-            }),
-        ) if *micros_per_quarter > MAX_MICROS_PER_QUARTER => Some(Refusal::TempoOver24Bits {
-            micros_per_quarter: *micros_per_quarter,
-        }),
         (Container::Smf(..), _) => None,
         (Container::Clip(_), FileEvent::SysEx(_) | FileEvent::Escape(_) | FileEvent::Meta(_)) => {
             Some(Refusal::ClipSmfEvent)

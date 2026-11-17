@@ -80,14 +80,10 @@ fn meta_parts(meta: &Meta) -> (u8, Vec<u8>) {
             },
             bytes.to_vec(),
         ),
-        // Checked to fit 24 bits at construction: the high byte is zero.
         Meta::Tempo {
             micros_per_quarter,
             extra,
-        } => (0x51, {
-            let [_, a, b, c] = micros_per_quarter.to_be_bytes();
-            [&[a, b, c][..], extra].concat()
-        }),
+        } => (0x51, [&micros_per_quarter.to_wire()[..], extra].concat()),
         Meta::TimeSignature {
             numerator,
             denominator_power,
@@ -115,7 +111,7 @@ fn meta_parts(meta: &Meta) -> (u8, Vec<u8>) {
             0x59,
             [&[sharps.cast_unsigned(), u8::from(*minor)][..], extra].concat(),
         ),
-        Meta::Other { kind, data } => (*kind, data.to_vec()),
+        Meta::Other { kind, data } => (kind.get(), data.to_vec()),
     }
 }
 

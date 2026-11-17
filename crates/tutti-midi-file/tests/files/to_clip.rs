@@ -11,8 +11,8 @@
 use crate::common::{note, track};
 use core::num::NonZeroU8;
 use tutti_midi_file::{
-    DropReason, Error, FileEvent, Meta, MidiFile, SmfDivision, SmfFormat, TextKind, Tick,
-    ToClipError, Track,
+    DropReason, Error, FileEvent, Meta, MicrosPerQuarter, MidiFile, OtherMetaKind, SmfDivision,
+    SmfFormat, TextKind, Tick, ToClipError, Track,
 };
 use tutti_types::{Beat, Seconds};
 use tutti_ump::{
@@ -73,7 +73,7 @@ fn a_set_tempo_is_ten_ns_units_per_quarter() {
         (
             0,
             meta(Meta::Tempo {
-                micros_per_quarter: 500_000,
+                micros_per_quarter: MicrosPerQuarter::of(500_000),
                 extra: Box::default(),
             }),
         ),
@@ -88,7 +88,7 @@ fn a_set_tempo_is_ten_ns_units_per_quarter() {
     let slow = format0(vec![(
         0,
         meta(Meta::Tempo {
-            micros_per_quarter: 0xFF_FFFF,
+            micros_per_quarter: MicrosPerQuarter::of(0xFF_FFFF),
             extra: Box::default(),
         }),
     )]);
@@ -108,7 +108,7 @@ fn a_time_signature_is_a_signature_and_a_metronome() {
         (
             0,
             meta(Meta::Tempo {
-                micros_per_quarter: 500_000,
+                micros_per_quarter: MicrosPerQuarter::of(500_000),
                 extra: Box::default(),
             }),
         ),
@@ -253,7 +253,7 @@ fn the_first_set_tempo_has_the_delta_clockstamp_of_start_of_clip() {
         (
             0,
             meta(Meta::Tempo {
-                micros_per_quarter: 500_000,
+                micros_per_quarter: MicrosPerQuarter::of(500_000),
                 extra: Box::default(),
             }),
         ),
@@ -403,7 +403,7 @@ fn the_first_tempo_and_signature_lead_the_clip() {
                 (
                     0,
                     meta(Meta::Tempo {
-                        micros_per_quarter: 1_000_000,
+                        micros_per_quarter: MicrosPerQuarter::of(1_000_000),
                         extra: Box::default(),
                     }),
                 ),
@@ -433,7 +433,7 @@ fn a_file_with_no_tempo_or_signature_gets_the_smf_defaults() {
         (
             960,
             meta(Meta::Tempo {
-                micros_per_quarter: 250_000,
+                micros_per_quarter: MicrosPerQuarter::of(250_000),
                 extra: Box::default(),
             }),
         ),
@@ -464,7 +464,7 @@ fn a_tempo_at_tick_zero_is_not_defaulted() {
     let smf = format0(vec![(
         0,
         meta(Meta::Tempo {
-            micros_per_quarter: 1_000_000,
+            micros_per_quarter: MicrosPerQuarter::of(1_000_000),
             extra: Box::default(),
         }),
     )]);
@@ -511,7 +511,7 @@ fn the_division_and_the_end_carry_over() {
 fn what_has_no_successor_is_reported_with_its_tick() {
     let other = |kind: u8| {
         meta(Meta::Other {
-            kind,
+            kind: OtherMetaKind::of(kind),
             data: vec![1, 2].into(),
         })
     };
@@ -745,7 +745,7 @@ fn the_clip_round_trips_through_its_bytes() {
                 (
                     0,
                     meta(Meta::Tempo {
-                        micros_per_quarter: 500_000,
+                        micros_per_quarter: MicrosPerQuarter::of(500_000),
                         extra: Box::default(),
                     }),
                 ),
@@ -781,7 +781,7 @@ fn the_clip_round_trips_through_its_bytes() {
 
 fn tempo_event(micros: u32) -> FileEvent {
     meta(Meta::Tempo {
-        micros_per_quarter: micros,
+        micros_per_quarter: MicrosPerQuarter::of(micros),
         extra: Box::default(),
     })
 }

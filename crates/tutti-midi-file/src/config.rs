@@ -135,12 +135,6 @@ pub enum Refusal {
     /// An SMF holds MIDI 1.0 channel messages, not packets.
     #[error("an SMF holds MIDI 1.0 channel messages, not packets")]
     SmfPacket,
-    /// A Set Tempo over the wire's 24 bits.
-    #[error("a Set Tempo of {micros_per_quarter} us is over 24 bits")]
-    TempoOver24Bits {
-        /// The microseconds per quarter note refused.
-        micros_per_quarter: u32,
-    },
     /// A Clip File holds packets, not SMF events (`SysEx`, `Escape`, `Meta`).
     #[error("a Clip File holds packets, not SMF events")]
     ClipSmfEvent,

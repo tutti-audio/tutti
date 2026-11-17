@@ -627,8 +627,9 @@ pub mod midi {
         Truncated,
     };
     pub use tutti_midi_file::{
-        Converted, DropReason, Dropped, MidiFileKind, Moved, NoCommonTimeline, OutOfOrder,
-        PairedNote, SmfDivision, SmfDivisionOutOfRange, TextKind, WriteOptions,
+        Converted, DropReason, Dropped, MicrosPerQuarter, MicrosPerQuarterOutOfRange, MidiFileKind,
+        Moved, NoCommonTimeline, OtherMetaKind, OtherMetaKindOutOfRange, OutOfOrder, PairedNote,
+        SmfDivision, SmfDivisionOutOfRange, TextKind, WriteOptions,
     };
     pub use tutti_midi_file::{FileEvent, Meta, MidiFile, SmfFormat, Tick, Track};
     #[cfg(feature = "midi-hardware")]
