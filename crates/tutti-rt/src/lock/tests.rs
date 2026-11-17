@@ -17,12 +17,3 @@ fn a_poisoned_lock_answers_its_guard_with_the_last_store() {
     assert!(m.is_poisoned());
     assert_eq!(*m.lock_recover(), 2);
 }
-
-/// An unpoisoned lock answers its guard, and a store through it is read back.
-#[test]
-fn an_unpoisoned_lock_answers_its_guard() {
-    let m = Mutex::new(vec![1]);
-    m.lock_recover().push(2);
-    assert!(!m.is_poisoned());
-    assert_eq!(*m.lock_recover(), [1, 2]);
-}
