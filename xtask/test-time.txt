@@ -47,7 +47,6 @@
 0 1 crates/tutti-plugin/tests/support/param_probe.rs
 0 3 crates/tutti-rt/tests/spin_starvation.rs
 0 3 crates/tutti-sampler/src/streamer/thread.rs
-1 0 crates/tutti-session/src/midi.rs
 0 2 crates/tutti-session/tests/export/export_fork_sampler.rs
 0 1 crates/tutti-session/tests/instrument/instrument_support/cases.rs
 0 1 crates/tutti-session/tests/instrument/instrument_support/rig.rs

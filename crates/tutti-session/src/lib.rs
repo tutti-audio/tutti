@@ -100,6 +100,8 @@ mod midi_report;
 mod midi_sink;
 mod modulation;
 mod node;
+#[cfg(feature = "midi")]
+mod os_clock;
 mod params;
 mod peer;
 #[cfg(feature = "plugin")]
