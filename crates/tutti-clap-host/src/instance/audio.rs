@@ -231,6 +231,14 @@ impl ClapProcessor {
         self.scratch.input_events.midi_dropped()
     }
 
+    /// Parameter edits, note expressions and transport changes not handed to
+    /// the plugin since this instance was activated, each past the room
+    /// reserved for its source. Read on this instance only, like
+    /// [`midi_dropped`](Self::midi_dropped).
+    pub fn input_events_refused(&self) -> u64 {
+        self.scratch.input_events.refused()
+    }
+
     /// Parameter points the plugin emitted past the room this instance was
     /// activated for (one queue per parameter, each with room for a block of
     /// the block size it was activated for's points): each replaced
@@ -316,6 +324,10 @@ impl ClapProcessor {
             });
         }
 
+        debug_assert!(
+            self.scratch.input_events.is_reserved(),
+            "activation reserves the input events before the first block"
+        );
         self.scratch.input_events.clear();
         if !midi_events.is_empty() {
             self.scratch.input_events.add_midi_events(midi_events);
@@ -327,16 +339,9 @@ impl ClapProcessor {
         {
             let table = self.ranges.lend();
             let input_events = &mut self.scratch.input_events;
-            let edits_from = input_events.events.len();
-            self.drain.drain(|edit| match edit {
-                tutti_plugin_types::Edit::Param { id, value } => {
-                    input_events.add_param_edit(id.get(), value.get(), &table.ranges, table.claims);
-                }
-                // The Controller reset the stream (a state or preset load): the
-                // edits queued before it, which this block already took, are not
-                // to be sent.
-                tutti_plugin_types::Edit::Reset => input_events.events.truncate(edits_from),
-                _ => {}
+            let drain = &mut self.drain;
+            input_events.add_param_edits(&table.ranges, table.claims, |each| {
+                drain.drain(each);
             });
             if !param_changes.is_empty() {
                 input_events.add_param_changes(param_changes, &table.ranges, table.claims);
