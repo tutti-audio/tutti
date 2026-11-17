@@ -1761,7 +1761,8 @@ mod tests {
         }
         let mut got = vec![f32::NAN; 96 * 2];
         assert_eq!(
-            tap.pop_into(InterleavedMut::new(&mut got, tap.layout()).unwrap()),
+            tap.pop_into(InterleavedMut::new(&mut got, tap.layout()).unwrap())
+                .unwrap(),
             Samples(96)
         );
         assert!(got.iter().all(|&x| x == 0.0), "silence, whole frames");

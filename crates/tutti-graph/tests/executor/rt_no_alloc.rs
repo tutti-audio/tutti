@@ -2713,6 +2713,7 @@ fn an_output_tap_opened_again_at_another_width_swaps_without_allocating() {
     let mut frames = vec![0.0f32; 4 * 64 * 3];
     assert_eq!(
         wide.pop_into(InterleavedMut::new(&mut frames, wide.layout()).unwrap())
+            .unwrap()
             .get(),
         4 * 64
     );
@@ -2731,6 +2732,7 @@ fn an_output_tap_opened_again_at_another_width_swaps_without_allocating() {
     assert_eq!(
         narrow
             .pop_into(InterleavedMut::new(&mut one, narrow.layout()).unwrap())
+            .unwrap()
             .get(),
         4 * 64
     );

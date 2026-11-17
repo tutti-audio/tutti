@@ -165,6 +165,7 @@ fn drain(tap: &mut TapReader, into: &mut Vec<f32>) {
     loop {
         let n = tap
             .pop_into(InterleavedMut::new(&mut buf, tap.layout()).unwrap())
+            .unwrap()
             .get();
         if n == 0 {
             break;
@@ -421,6 +422,7 @@ fn next_frame_is_the_graph_frame_of_the_next_frame_read() {
     let mut buf = vec![0.0f32; 2 * 150];
     assert_eq!(
         tap.pop_into(InterleavedMut::new(&mut buf, tap.layout()).unwrap())
+            .unwrap()
             .get(),
         150
     );
@@ -433,6 +435,7 @@ fn next_frame_is_the_graph_frame_of_the_next_frame_read() {
     let mut buf = vec![0.0f32; 2 * 1000];
     assert_eq!(
         tap.pop_into(InterleavedMut::new(&mut buf, tap.layout()).unwrap())
+            .unwrap()
             .get(),
         150
     );
@@ -469,6 +472,7 @@ fn a_lost_block_advances_next_frame_and_a_contiguous_read_stops_at_it() {
         tap.pop_into(
             InterleavedMut::new(&mut buf[..2 * tap.contiguous().get()], tap.layout()).unwrap()
         )
+        .unwrap()
         .get(),
         150
     );
@@ -482,6 +486,7 @@ fn a_lost_block_advances_next_frame_and_a_contiguous_read_stops_at_it() {
     assert_eq!(tap.contiguous().get(), 100);
     assert_eq!(
         tap.pop_into(InterleavedMut::new(&mut buf, tap.layout()).unwrap())
+            .unwrap()
             .get(),
         100
     );
@@ -509,7 +514,11 @@ fn a_read_is_whole_frames() {
     let mut out = [f32::MAX; 8];
     assert!(InterleavedMut::new(&mut out, tap.layout()).is_err());
     let view = InterleavedMut::new(&mut out[..6], tap.layout()).unwrap();
-    assert_eq!(tap.pop_into(view).get(), 2, "two whole frames of three");
+    assert_eq!(
+        tap.pop_into(view).unwrap().get(),
+        2,
+        "two whole frames of three"
+    );
     assert_eq!(out[6..], [f32::MAX; 2], "the rest is untouched");
     assert_eq!(tap.available().get(), 98);
 }
@@ -803,6 +812,7 @@ fn concurrent_drain(workers: usize, width: usize, align: TapAlign) {
             loop {
                 let n = tap
                     .pop_into(InterleavedMut::new(&mut buf, tap.layout()).unwrap())
+                    .unwrap()
                     .get();
                 got.extend_from_slice(&buf[..n * width]);
                 if n == 0 {
@@ -942,6 +952,7 @@ fn a_tap_cannot_change_its_width_under_its_writer() {
     assert_eq!(
         narrow
             .pop_into(InterleavedMut::new(&mut got, narrow.layout()).unwrap())
+            .unwrap()
             .get(),
         100
     );
@@ -959,17 +970,25 @@ fn pop_planes_reads_whole_frames_and_refuses_another_width() {
     writer.push_interleaved(Interleaved::new(&block, writer.layout()).unwrap());
     // Two planes for three lanes: refused, nothing popped.
     let mut two = [vec![9.0f32; 2], vec![9.0f32; 2]];
-    let n = reader.pop_planes(PlanesMut::from_vecs(&mut two).unwrap());
-    assert_eq!((n.get(), reader.available().get()), (0, 3));
+    assert!(
+        reader
+            .pop_planes(PlanesMut::from_vecs(&mut two).unwrap())
+            .is_err()
+    );
+    assert_eq!(reader.available().get(), 3);
     assert_eq!(two, [[9.0; 2], [9.0; 2]], "untouched");
     // Planes of two frames for three there: the first two of each lane.
     let mut planes = [vec![9.0f32; 2], vec![9.0f32; 2], vec![9.0f32; 2]];
-    let n = reader.pop_planes(PlanesMut::from_vecs(&mut planes).unwrap());
+    let n = reader
+        .pop_planes(PlanesMut::from_vecs(&mut planes).unwrap())
+        .unwrap();
     assert_eq!(n.get(), 2);
     assert_eq!(planes, [[1.0, 2.0], [10.0, 20.0], [100.0, 200.0]]);
     // The next frame is the third of every lane.
     let mut last = [vec![0.0f32; 4], vec![0.0f32; 4], vec![0.0f32; 4]];
-    let n = reader.pop_planes(PlanesMut::from_vecs(&mut last).unwrap());
+    let n = reader
+        .pop_planes(PlanesMut::from_vecs(&mut last).unwrap())
+        .unwrap();
     assert_eq!(n.get(), 1);
     assert_eq!((last[0][0], last[1][0], last[2][0]), (3.0, 30.0, 300.0));
 }

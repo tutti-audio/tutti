@@ -205,7 +205,7 @@
 //! // The analysis side: two frames, popped a plane to a lane.
 //! let (mut left, mut right) = ([0.0f32; 2], [0.0f32; 2]);
 //! let mut lanes = [&mut left[..], &mut right[..]];
-//! assert_eq!(tap.pop_planes(PlanesMut::new(&mut lanes).expect("two planes")), Samples(2));
+//! assert_eq!(tap.pop_planes(PlanesMut::new(&mut lanes).expect("two planes")), Ok(Samples(2)));
 //! let planes = StereoPlanes::new(&left, &right).expect("drained in lockstep");
 //!
 //! // `Correlation` is a MEASUREMENT type, deliberately distinct from the control

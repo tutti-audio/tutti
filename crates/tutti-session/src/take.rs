@@ -970,7 +970,11 @@ impl Pump {
                 failed = true;
                 break 'pump;
             };
-            let popped = self.reader.pop_into(window).get();
+            let Ok(popped) = self.reader.pop_into(window) else {
+                failed = true;
+                break 'pump;
+            };
+            let popped = popped.get();
             let past = first + Samples(popped);
             // The window of this pass: [lo, hi).
             let lo = first.max(self.window.start);

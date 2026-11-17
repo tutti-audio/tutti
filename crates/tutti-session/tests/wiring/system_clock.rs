@@ -55,6 +55,7 @@ fn a_system_session_renders_its_graph_with_no_device() {
         let _ = s.update();
         let frames = tap
             .pop_into(InterleavedMut::new(&mut heard, tap.layout()).unwrap())
+            .unwrap()
             .0;
         if frames > 0 && heard[..2 * frames].iter().all(|&x| x == 0.25) {
             break;

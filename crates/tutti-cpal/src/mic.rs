@@ -447,7 +447,8 @@ impl Source for MicIn {
         }
         let tap = &mut self.tap;
         match self.faults.drain(|| {
-            let n = tap.pop_into(out.reborrow());
+            // The width was checked above, so the pop is refused never.
+            let n = tap.pop_into(out.reborrow()).ok()?;
             (!n.is_zero()).then_some(n)
         }) {
             Drained::Item(n) => Pull::Frames(n),

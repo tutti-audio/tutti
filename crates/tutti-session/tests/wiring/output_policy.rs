@@ -71,6 +71,7 @@ fn monitoring_changes_what_is_heard_and_never_the_root() {
     let mut seen = 0;
     while tap
         .pop_into(InterleavedMut::new(&mut frame, tap.layout()).unwrap())
+        .unwrap()
         .get()
         == 1
     {

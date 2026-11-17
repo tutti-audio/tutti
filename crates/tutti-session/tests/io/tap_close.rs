@@ -45,7 +45,9 @@ fn opening_a_tap_yields_a_reader_that_sees_the_rendered_frames() {
 
     let mut got = [f32::NAN; 8];
     assert_eq!(
-        reader.pop_into(InterleavedMut::new(&mut got, reader.layout()).unwrap()),
+        reader
+            .pop_into(InterleavedMut::new(&mut got, reader.layout()).unwrap())
+            .unwrap(),
         Samples(3),
         "three frames rendered since the open"
     );
@@ -76,7 +78,9 @@ fn closing_the_tap_stops_the_copy() {
 
     let mut got = [f32::NAN; 8];
     assert_eq!(
-        reader.pop_into(InterleavedMut::new(&mut got, reader.layout()).unwrap()),
+        reader
+            .pop_into(InterleavedMut::new(&mut got, reader.layout()).unwrap())
+            .unwrap(),
         Samples(1),
         "only the frame rendered while open"
     );

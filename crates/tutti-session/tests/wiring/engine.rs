@@ -556,7 +556,8 @@ fn an_offline_render_feeds_an_output_tap() {
     assert_eq!(tap.available(), Samples(64));
     let mut got = vec![f32::NAN; 64 * 2];
     assert_eq!(
-        tap.pop_into(InterleavedMut::new(&mut got, tap.layout()).unwrap()),
+        tap.pop_into(InterleavedMut::new(&mut got, tap.layout()).unwrap())
+            .unwrap(),
         Samples(64)
     );
     assert!(
@@ -592,7 +593,8 @@ fn an_output_tap_follows_a_rewired_output() {
 
     let mut got = vec![f32::NAN; 128 * 2];
     assert_eq!(
-        tap.pop_into(InterleavedMut::new(&mut got, tap.layout()).unwrap()),
+        tap.pop_into(InterleavedMut::new(&mut got, tap.layout()).unwrap())
+            .unwrap(),
         Samples(128)
     );
     let left: Vec<f32> = got.iter().step_by(2).copied().collect();
@@ -656,7 +658,8 @@ fn a_detached_render_feeds_a_tap() {
     }
     let mut got = [f32::NAN; 3];
     assert_eq!(
-        tap.pop_into(InterleavedMut::new(&mut got, tap.layout()).unwrap()),
+        tap.pop_into(InterleavedMut::new(&mut got, tap.layout()).unwrap())
+            .unwrap(),
         Samples(3)
     );
     assert_eq!(got, [0.5; 3]);
@@ -736,6 +739,7 @@ fn a_tap_steps_at_a_transport_stop_where_the_output_fades() {
     let mut got = vec![0.0f32; 6_400 * 2];
     let n = tap
         .pop_into(InterleavedMut::new(&mut got, tap.layout()).unwrap())
+        .unwrap()
         .get();
     tapped.extend(got[..n * 2].iter().step_by(2));
     assert_eq!(tapped.len(), heard.len());
@@ -804,7 +808,9 @@ fn the_heard_tap_carries_the_fade_at_a_stop() {
     }
     let mut tapped = vec![0.0f32; 6_400 * 2];
     assert_eq!(
-        heard.pop_into(InterleavedMut::new(&mut tapped, heard.layout()).unwrap()),
+        heard
+            .pop_into(InterleavedMut::new(&mut tapped, heard.layout()).unwrap())
+            .unwrap(),
         Samples(6_400)
     );
     let bits = |x: &[f32]| x.iter().map(|s| s.to_bits()).collect::<Vec<_>>();
@@ -814,7 +820,8 @@ fn the_heard_tap_carries_the_fade_at_a_stop() {
         "the tap is what the engine rendered"
     );
     let mut unfaded = vec![0.0f32; 6_400 * 2];
-    plan.pop_into(InterleavedMut::new(&mut unfaded, plan.layout()).unwrap());
+    plan.pop_into(InterleavedMut::new(&mut unfaded, plan.layout()).unwrap())
+        .unwrap();
     let step = |x: &[f32]| {
         x.iter()
             .step_by(2)

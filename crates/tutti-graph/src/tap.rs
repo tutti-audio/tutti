@@ -36,7 +36,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 
 use crate::TapId;
-use tutti_buffers::{Interleaved, InterleavedMut, PlanesMut, Pull, Source};
+use tutti_buffers::{BufferError, Interleaved, InterleavedMut, PlanesMut, Pull, Source};
 use tutti_rt::{ControlDrop, FaultLatch};
 use tutti_rt::{Overflow, RingReader, RingWriter, ring};
 use tutti_types::{ChannelLayout, Frame, Samples};
@@ -101,7 +101,9 @@ impl<F: Float> TapWriter<F> {
     /// Writes a block of interleaved frames to the lanes together: every
     /// lane takes the same count, the fewest frames any ring has room for, and
     /// the rest is counted lost, once. A block of another width than the
-    /// writer's is written to no lane and counted lost whole. With no reader
+    /// writer's is written to no lane and counted lost whole: the audio thread
+    /// never errors, so the misuse shows in the reader's
+    /// [`take_lost`](TapReader::take_lost). With no reader
     /// there is nothing to write or count. Audio thread: allocates nothing,
     /// locks nothing.
     ///
@@ -344,12 +346,15 @@ impl<F: Float> TapReader<F> {
     }
 
     /// Pops frames into `out`, as many as fit; returns the frame count. The
-    /// rest of `out` is as it was. A view of another width than the tap's
-    /// pops nothing.
-    pub fn pop_into(&mut self, mut out: InterleavedMut<'_, F>) -> Samples {
-        if self.lanes.is_empty() || out.layout() != self.layout() {
-            return Samples::ZERO;
-        }
+    /// rest of `out` is as it was.
+    ///
+    /// # Errors
+    ///
+    /// [`BufferError::WidthMismatch`] (`src` the tap's width, `dst` the view's)
+    /// if `out` is not as wide as the tap. Nothing is popped and `out` is left
+    /// untouched.
+    pub fn pop_into(&mut self, mut out: InterleavedMut<'_, F>) -> Result<Samples, BufferError> {
+        self.check_width(out.layout())?;
         let frames = self.available().min(out.frames()).get();
         for (channel, lane) in self.lanes.iter_mut().enumerate() {
             let mut dst = out.iter_mut();
@@ -360,27 +365,43 @@ impl<F: Float> TapReader<F> {
             });
         }
         self.consume(frames);
-        Samples(frames)
+        Ok(Samples(frames))
+    }
+
+    /// Refuses a view of another width than the tap's.
+    fn check_width(&self, view: ChannelLayout) -> Result<(), BufferError> {
+        let tap = self.layout();
+        if view == tap {
+            Ok(())
+        } else {
+            Err(BufferError::WidthMismatch {
+                src: tap,
+                dst: view,
+            })
+        }
     }
 
     /// Pops up to `planes.frames()` frames into `planes`, one plane per lane
     /// in lane order, and returns the frame count: each plane's first frames
-    /// are written and the rest of it is as it was. A view of another width
-    /// than the tap's pops nothing.
+    /// are written and the rest of it is as it was.
+    ///
+    /// # Errors
+    ///
+    /// [`BufferError::WidthMismatch`] (`src` the tap's width, `dst` the view's)
+    /// if `planes` is not as wide as the tap. Nothing is popped and `planes`
+    /// is left untouched.
     ///
     /// The shape of a graph node's outputs: no interleaved scratch to
     /// allocate, and the lanes copy straight out of their rings.
-    pub fn pop_planes(&mut self, mut planes: PlanesMut<'_, '_, F>) -> Samples {
-        if self.lanes.is_empty() || planes.layout() != self.layout() {
-            return Samples::ZERO;
-        }
+    pub fn pop_planes(&mut self, mut planes: PlanesMut<'_, '_, F>) -> Result<Samples, BufferError> {
+        self.check_width(planes.layout())?;
         let frames = self.available().min(planes.frames()).get();
         for (lane, mut plane) in self.lanes.iter_mut().zip(planes.iter_mut()) {
             let popped = lane.pop_slice(&mut plane.samples_mut()[..frames]);
             debug_assert_eq!(popped, frames, "available counted every lane");
         }
         self.consume(frames);
-        Samples(frames)
+        Ok(Samples(frames))
     }
 
     /// The graph frame of the next frame this reader hands out: the clock a
@@ -491,7 +512,9 @@ impl<F: Float> Source for TapReader<F> {
         }
         // The latch first, then the ring: `FaultLatch::drain`'s order.
         let gone = self.source_gone();
-        let frames = self.pop_into(out);
+        let Ok(frames) = self.pop_into(out) else {
+            return Pull::Failed;
+        };
         if !frames.is_zero() {
             Pull::Frames(frames)
         } else if gone {
@@ -526,7 +549,9 @@ mod tests {
         tap_op::<f64, _>(&mut writer, &arena, &[0], Frame::ZERO, FRAMES);
         let mut out = vec![0.0f64; FRAMES];
         assert_eq!(
-            reader.pop_into(InterleavedMut::new(&mut out, reader.layout()).unwrap()),
+            reader
+                .pop_into(InterleavedMut::new(&mut out, reader.layout()).unwrap())
+                .unwrap(),
             Samples(FRAMES)
         );
         assert_eq!(out, block);
@@ -543,9 +568,55 @@ mod tests {
         writer.push_interleaved(Interleaved::new(&block, writer.layout()).unwrap());
         let mut out = [9.0f32; 6];
         let view = InterleavedMut::new(&mut out, reader.layout()).unwrap();
-        assert_eq!(reader.pop_into(view), Samples(3));
+        assert_eq!(reader.pop_into(view).unwrap(), Samples(3));
         assert_eq!(out, [1.0, -1.0, 2.0, -2.0, 3.0, -3.0]);
         assert_eq!(reader.available(), Samples(1), "the fourth frame stays");
+    }
+
+    /// A pop into a view of another width is refused with both widths, leaves
+    /// the view alone and consumes nothing: the next pop of the right width
+    /// still gets every frame.
+    #[test]
+    fn a_pop_into_another_width_is_refused_and_consumes_nothing() {
+        let (mut reader, mut writer) = TapReader::<f32>::pair(2, Samples(16));
+        let block = [1.0, -1.0, 2.0, -2.0, 3.0, -3.0];
+        writer.push_interleaved(Interleaved::new(&block, writer.layout()).unwrap());
+        let three = ChannelLayout::from(3u16);
+        let mut wide = [9.0f32; 9];
+        let view = InterleavedMut::new(&mut wide, three).unwrap();
+        assert_eq!(
+            reader.pop_into(view),
+            Err(BufferError::WidthMismatch {
+                src: ChannelLayout::STEREO,
+                dst: three
+            })
+        );
+        assert_eq!(wide, [9.0; 9], "the view is untouched");
+        let mut out = [0.0f32; 6];
+        let view = InterleavedMut::new(&mut out, ChannelLayout::STEREO).unwrap();
+        assert_eq!(reader.pop_into(view), Ok(Samples(3)));
+        assert_eq!(out, block);
+    }
+
+    /// The same for planes: both widths named, nothing consumed.
+    #[test]
+    fn a_pop_into_planes_of_another_width_is_refused_and_consumes_nothing() {
+        let (mut reader, mut writer) = TapReader::<f32>::pair(2, Samples(16));
+        let block = [1.0, -1.0, 2.0, -2.0, 3.0, -3.0];
+        writer.push_interleaved(Interleaved::new(&block, writer.layout()).unwrap());
+        let mut one = [vec![9.0f32; 3]];
+        assert_eq!(
+            reader.pop_planes(PlanesMut::from_vecs(&mut one).unwrap()),
+            Err(BufferError::WidthMismatch {
+                src: ChannelLayout::STEREO,
+                dst: ChannelLayout::MONO
+            })
+        );
+        assert_eq!(one, [[9.0; 3]], "the view is untouched");
+        let mut planes = [vec![0.0f32; 3], vec![0.0f32; 3]];
+        let got = reader.pop_planes(PlanesMut::from_vecs(&mut planes).unwrap());
+        assert_eq!(got, Ok(Samples(3)));
+        assert_eq!(planes, [[1.0, 2.0, 3.0], [-1.0, -2.0, -3.0]]);
     }
 
     /// A block of another width than the writer's is written to no lane and

@@ -46,7 +46,8 @@ fn pushed_frames_reach_the_outputs_in_order() {
 
     let mut got = vec![f32::NAN; 8 * 2];
     assert_eq!(
-        tap.pop_into(InterleavedMut::new(&mut got, tap.layout()).unwrap()),
+        tap.pop_into(InterleavedMut::new(&mut got, tap.layout()).unwrap())
+            .unwrap(),
         Samples(8)
     );
     assert_eq!(

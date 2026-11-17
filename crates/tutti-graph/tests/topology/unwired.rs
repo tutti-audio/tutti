@@ -497,6 +497,7 @@ fn a_tap_lane_on_a_lost_port_reads_silence() {
     let mut buf = vec![f32::NAN; 2 * 64];
     assert_eq!(
         tap.pop_into(InterleavedMut::new(&mut buf, tap.layout()).unwrap())
+            .unwrap()
             .get(),
         64
     );

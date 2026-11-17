@@ -610,13 +610,13 @@ proptest! {
                 let (exec, reference) = pair.block(n, &input);
                 prop_assert_eq!(bits(&exec), bits(&reference), "a tap changed the render at frame {}", frame);
                 let mut got = vec![0.0f32; n * width];
-                prop_assert_eq!(tap.pop_into(InterleavedMut::new(&mut got, tap.layout()).unwrap()).get(), n);
+                prop_assert_eq!(tap.pop_into(InterleavedMut::new(&mut got, tap.layout()).unwrap()).unwrap().get(), n);
                 for (c, channel) in exec.iter().enumerate().filter(|(c, _)| !summed[*c]) {
                     let lane: Vec<f32> = got.iter().skip(c).step_by(width).copied().collect();
                     prop_assert_eq!(bits(&[lane]), bits(std::slice::from_ref(channel)), "tap lane {} at frame {}", c, frame);
                 }
                 let mut got = vec![0.0f32; n * channels];
-                prop_assert_eq!(heard.pop_into(InterleavedMut::new(&mut got, heard.layout()).unwrap()).get(), n);
+                prop_assert_eq!(heard.pop_into(InterleavedMut::new(&mut got, heard.layout()).unwrap()).unwrap().get(), n);
                 for (c, channel) in exec.iter().enumerate() {
                     let lane: Vec<f32> = got.iter().skip(c).step_by(channels).copied().collect();
                     prop_assert_eq!(bits(&[lane]), bits(std::slice::from_ref(channel)), "outputs tap lane {} at frame {}", c, frame);

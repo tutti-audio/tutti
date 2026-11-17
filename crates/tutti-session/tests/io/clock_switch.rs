@@ -135,6 +135,7 @@ fn a_device_session_switches_to_the_timer_and_its_graph_keeps_rendering() {
         let _ = s.update();
         let frames = tap
             .pop_into(InterleavedMut::new(&mut heard, tap.layout()).unwrap())
+            .unwrap()
             .0;
         frames > 0 && heard[..2 * frames].iter().all(|&x| x == 0.25)
     });

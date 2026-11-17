@@ -341,7 +341,8 @@ fn the_output_tap_hears_the_sum() {
 
     let mut got = vec![f32::NAN; 128 * 2];
     assert_eq!(
-        tap.pop_into(InterleavedMut::new(&mut got, tap.layout()).unwrap()),
+        tap.pop_into(InterleavedMut::new(&mut got, tap.layout()).unwrap())
+            .unwrap(),
         Samples(128)
     );
     let lane: Vec<f32> = got.iter().step_by(2).copied().collect();

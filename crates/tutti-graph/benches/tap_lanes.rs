@@ -41,7 +41,11 @@ fn tap_lanes(c: &mut Criterion) {
                     Interleaved::new(black_box(&block), writer.layout()).unwrap(),
                 );
                 spent += start.elapsed();
-                black_box(reader.pop_into(InterleavedMut::new(&mut out, reader.layout()).unwrap()));
+                black_box(
+                    reader
+                        .pop_into(InterleavedMut::new(&mut out, reader.layout()).unwrap())
+                        .unwrap(),
+                );
             }
             spent
         });
@@ -55,9 +59,11 @@ fn tap_lanes(c: &mut Criterion) {
                 writer.push_interleaved(Interleaved::new(&block, writer.layout()).unwrap());
                 let start = Instant::now();
                 black_box(
-                    reader.pop_into(
-                        InterleavedMut::new(black_box(&mut out), reader.layout()).unwrap(),
-                    ),
+                    reader
+                        .pop_into(
+                            InterleavedMut::new(black_box(&mut out), reader.layout()).unwrap(),
+                        )
+                        .unwrap(),
                 );
                 spent += start.elapsed();
             }
@@ -70,7 +76,9 @@ fn tap_lanes(c: &mut Criterion) {
         b.iter(|| {
             writer.push_interleaved(Interleaved::new(black_box(&block), writer.layout()).unwrap());
             black_box(
-                reader.pop_into(InterleavedMut::new(black_box(&mut out), reader.layout()).unwrap()),
+                reader
+                    .pop_into(InterleavedMut::new(black_box(&mut out), reader.layout()).unwrap())
+                    .unwrap(),
             );
         });
     });

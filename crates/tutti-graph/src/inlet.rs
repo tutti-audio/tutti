@@ -203,10 +203,10 @@ impl Node for InletNode {
             return Status::Modified;
         }
         // The frames the ring holds, then silence for the rest.
-        let popped = match outputs.planes_mut() {
-            Ok(planes) => self.ring.pop_planes(planes).get(),
-            Err(_) => 0,
-        };
+        let popped = outputs
+            .planes_mut()
+            .and_then(|planes| self.ring.pop_planes(planes))
+            .map_or(0, Samples::get);
         for plane in outputs.iter_mut() {
             plane[popped..].fill(0.0);
         }

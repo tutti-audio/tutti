@@ -55,6 +55,7 @@ fn the_session_publishes_the_meter_and_taps_its_callback_feeds() {
     let mut one = [0.0f32; 2];
     while tap
         .pop_into(InterleavedMut::new(&mut one, tap.layout()).unwrap())
+        .unwrap()
         .get()
         == 1
     {

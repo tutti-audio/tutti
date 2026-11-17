@@ -331,7 +331,7 @@ fn drain_tap(output: usize, tap: &mut TapFeed, n: usize) -> Result<()> {
     let mut planes = PlanesMut::from_vecs(&mut tap.planes)?;
     let got = tap
         .reader
-        .pop_planes(planes.slice_mut(Samples::ZERO..Samples(n)));
+        .pop_planes(planes.slice_mut(Samples::ZERO..Samples(n)))?;
     let lost = tap.reader.take_lost();
     if lost.get() > 0 {
         return Err(Error::TapOverrun { output, lost });
