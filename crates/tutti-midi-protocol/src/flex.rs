@@ -47,7 +47,7 @@ pub fn flex_tempo(field: u32) -> Option<Bpm> {
 pub fn flex_tempo_field(bpm: Bpm) -> u32 {
     // `as` saturates the float into the field; `max(1)` keeps a field that
     // `flex_tempo` reads as a tempo.
-    ((TEN_NS_UNITS_PER_MINUTE / bpm.get()).round() as u32).max(1)
+    (libm::round(TEN_NS_UNITS_PER_MINUTE / bpm.get()) as u32).max(1)
 }
 
 /// The meter a Set Time Signature message declares: the numerator field is the

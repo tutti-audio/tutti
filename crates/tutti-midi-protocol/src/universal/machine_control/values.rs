@@ -306,10 +306,10 @@ impl MmcPosition {
         }
         let frame_rate = rate.frame_rate();
         let frames = frame_rate.frames_at(seconds);
-        let whole = frames.floor();
+        let whole = libm::floor(frames);
         // `whole` is a finite whole number from 0 below one day of frames.
         let label = SmpteTimecode::from_frame_count(whole as u64, frame_rate);
-        let hundredths = ((frames - whole) * 100.0).floor().clamp(0.0, 99.0);
+        let hundredths = libm::floor((frames - whole) * 100.0).clamp(0.0, 99.0);
         Some(Self {
             label: MmcTimeLabel::new(MtcTimeCode::new(
                 rate,
