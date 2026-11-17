@@ -7,7 +7,7 @@
 use clap_sys::events::{
     CLAP_NOTE_EXPRESSION_BRIGHTNESS, CLAP_NOTE_EXPRESSION_PRESSURE, CLAP_NOTE_EXPRESSION_TUNING,
 };
-use tutti_clap_host::{ClapEvent, EventList, InputEventList};
+use tutti_clap_host::{ClapEvent, EventList, InputEventList, InputRooms};
 use tutti_fixtures::midi;
 use tutti_graph::Offset;
 use tutti_midi_protocol::{PitchBendSensitivity, widen_value};
@@ -108,7 +108,7 @@ fn note_on_pitched(group: MidiGroup, channel: MidiChannel, key: u8, pitch: f64) 
 /// of Group 1 is MIDI on port 1.
 #[test]
 fn two_groups_land_on_note_ports_zero_and_one() {
-    let mut list = InputEventList::new();
+    let mut list = InputEventList::new(InputRooms::new(1024));
     list.set_note_ports(&[false, false]);
     add(
         &mut list,
@@ -143,7 +143,7 @@ fn two_groups_land_on_note_ports_zero_and_one() {
 /// not counted.
 #[test]
 fn a_group_without_a_note_port_is_dropped_and_counted() {
-    let mut list = InputEventList::new();
+    let mut list = InputEventList::new(InputRooms::new(1024));
     list.set_note_ports(&[false]);
     add(
         &mut list,
@@ -182,7 +182,7 @@ fn a_group_without_a_note_port_is_dropped_and_counted() {
 /// the first.
 #[test]
 fn a_detach_then_a_note_on_is_a_new_note_that_alone_hears_the_controller() {
-    let mut list = InputEventList::new();
+    let mut list = InputEventList::new(InputRooms::new(1024));
     add(
         &mut list,
         midi::note_on(Address::new(group(0), ch(0)), 60, 0x8000),
@@ -232,7 +232,7 @@ fn a_detach_then_a_note_on_is_a_new_note_that_alone_hears_the_controller() {
 /// responds), the plugin's report does.
 #[test]
 fn only_a_note_end_stops_a_released_note_hearing_controllers() {
-    let mut list = InputEventList::new();
+    let mut list = InputEventList::new(InputRooms::new(1024));
     add(
         &mut list,
         midi::note_on(Address::new(group(0), ch(0)), 60, 0x8000),
@@ -265,7 +265,7 @@ fn only_a_note_end_stops_a_released_note_hearing_controllers() {
 /// On is followed by each held value as an expression of the new note.
 #[test]
 fn values_told_before_a_note_on_are_its_initial_expressions() {
-    let mut list = InputEventList::new();
+    let mut list = InputEventList::new(InputRooms::new(1024));
     add(
         &mut list,
         Ump::from(Message::midi2(
@@ -308,7 +308,7 @@ fn values_told_before_a_note_on_are_its_initial_expressions() {
 /// attribute of 60.5 is +0.5.
 #[test]
 fn per_note_pitch_and_the_pitch_attribute_are_tunings() {
-    let mut list = InputEventList::new();
+    let mut list = InputEventList::new(InputRooms::new(1024));
     add(
         &mut list,
         midi::note_on(Address::new(group(0), ch(0)), 60, 0x8000),
@@ -348,7 +348,7 @@ fn per_note_pitch_and_the_pitch_attribute_are_tunings() {
 /// tuning, their sum.
 #[test]
 fn a_per_note_bend_is_scaled_by_the_channels_sensitivity() {
-    let mut list = InputEventList::new();
+    let mut list = InputEventList::new(InputRooms::new(1024));
     add(
         &mut list,
         midi::note_on(Address::new(group(0), ch(3)), 60, 0x8000),
@@ -413,7 +413,7 @@ fn a_per_note_bend_is_scaled_by_the_channels_sensitivity() {
 #[test]
 fn a_pitch_then_a_bend_is_one_tuning_from_the_key() {
     for bend_first in [false, true] {
-        let mut list = InputEventList::new();
+        let mut list = InputEventList::new(InputRooms::new(1024));
         add(
             &mut list,
             midi::note_on(Address::new(group(0), ch(0)), 60, 0x8000),
@@ -446,7 +446,7 @@ fn a_pitch_then_a_bend_is_one_tuning_from_the_key() {
 /// change the range of the same channel in Group 1.
 #[test]
 fn the_sensitivity_is_per_group() {
-    let mut list = InputEventList::new();
+    let mut list = InputEventList::new(InputRooms::new(1024));
     list.set_note_ports(&[false, false]);
     add(
         &mut list,
@@ -482,7 +482,7 @@ fn the_sensitivity_is_per_group() {
 /// pressure return to 0.
 #[test]
 fn a_reset_returns_the_notes_expressions_to_their_defaults() {
-    let mut list = InputEventList::new();
+    let mut list = InputEventList::new(InputRooms::new(1024));
     add(
         &mut list,
         midi::note_on(Address::new(group(0), ch(0)), 60, 0x8000),
@@ -521,7 +521,7 @@ fn a_reset_returns_the_notes_expressions_to_their_defaults() {
 /// A plugin reset forgets the held values and the notes.
 #[test]
 fn a_reset_forgets_the_per_note_state() {
-    let mut list = InputEventList::new();
+    let mut list = InputEventList::new(InputRooms::new(1024));
     add(
         &mut list,
         midi::poly_pressure(Address::new(group(0), ch(0)), 60, 0x8000_0000),
@@ -563,7 +563,7 @@ fn rpn(group: MidiGroup, channel: MidiChannel, index: u8, value: u32) -> Ump {
 /// zero-extended 7.25 number).
 #[test]
 fn an_rpn_is_four_control_changes_every_time() {
-    let mut list = InputEventList::new();
+    let mut list = InputEventList::new(InputRooms::new(1024));
     list.set_note_ports(&[false, false]);
 
     add(&mut list, rpn(group(0), ch(1), 0, 12 << 25));
@@ -604,7 +604,7 @@ fn an_rpn_is_four_control_changes_every_time() {
 /// **An NRPN is CC 99 and 98, then CC 6 and 38** (M2-104 Appendix D.2.3).
 #[test]
 fn an_nrpn_selects_with_cc_99_and_98() {
-    let mut list = InputEventList::new();
+    let mut list = InputEventList::new(InputRooms::new(1024));
     add(
         &mut list,
         Ump::from(Message::midi2(
@@ -628,7 +628,7 @@ fn an_nrpn_selects_with_cc_99_and_98() {
 /// D.2.4): CC 0, CC 32 and the program, the same bank again included.
 #[test]
 fn a_banked_program_change_is_three_messages_every_time() {
-    let mut list = InputEventList::new();
+    let mut list = InputEventList::new(InputRooms::new(1024));
     let bank = Bank {
         msb: U7::of(5),
         lsb: U7::of(9),
@@ -670,7 +670,7 @@ fn a_banked_program_change_is_three_messages_every_time() {
 /// confuses two notes of one key.
 #[test]
 fn a_minted_id_names_no_channel_and_key() {
-    let mut list = InputEventList::new();
+    let mut list = InputEventList::new(InputRooms::new(1024));
     add(
         &mut list,
         midi::note_on(Address::new(group(0), ch(0)), 60, 0x8000),
@@ -685,7 +685,7 @@ fn a_minted_id_names_no_channel_and_key() {
 /// no MIDI 1.0 bytes, is not sent), Group 0's are CLAP note events on port 0.
 #[test]
 fn each_note_port_takes_its_own_dialect() {
-    let mut list = InputEventList::new();
+    let mut list = InputEventList::new(InputRooms::new(1024));
     list.set_note_ports(&[false, true]);
     add(
         &mut list,

@@ -90,12 +90,8 @@ impl ClapLoaded {
     /// The declared bounds of `id` when the host may write it: a read-only
     /// parameter "can't be changed by the host" (`params.h`), and an id the
     /// plugin does not declare has no range to write against.
-    fn writable_bounds(
-        &self,
-        main: MainThreadMarker,
-        id: ParamId,
-    ) -> Result<ParamBounds, ParamWriteError> {
-        let bounds = self.parameter_bounds(main, id.get());
+    fn writable_bounds(&self, id: ParamId) -> Result<ParamBounds, ParamWriteError> {
+        let bounds = self.parameter_bounds(id.get());
         ParamWriteError::check(id, bounds.map(|b| ParamAccess::reported(b.read_only)))?;
         bounds.ok_or(ParamWriteError::Undeclared(id))
     }
@@ -233,7 +229,10 @@ impl ClapLoaded {
         // `params.request_flush`: the plugin has values to hand the host
         // outside a block. An active plugin hands them over in its next
         // `process` (the flush would take the audio claim from the block), so
-        // the request wakes the block; an inactive one is flushed here.
+        // the request wakes the block; an inactive one is flushed here, and
+        // the events its flush outputs are dropped: only a block's output
+        // reaches the reports (`ClapProcessor::report_edits`), and an
+        // inactive plugin has no block.
         if self.host_state.take(&self.host_state.flush_requested) {
             if self.flags.active {
                 if let Some(wake) = self.host_state.process_wake.get() {
@@ -342,7 +341,7 @@ impl Control for ClapLoaded {
     /// answers in its plain range and the declared bounds map it back.
     fn parameter(&self, main: MainThreadMarker, id: ParamId) -> Option<Normalized> {
         let plain = self.plain_value(main, id.get())?;
-        Some(self.parameter_bounds(main, id.get())?.normalized(plain))
+        Some(self.parameter_bounds(id.get())?.normalized(plain))
     }
 
     /// Applied now, as a flushed `PARAM_VALUE` event. CLAP events carry the
@@ -353,7 +352,7 @@ impl Control for ClapLoaded {
         id: ParamId,
         value: Normalized,
     ) -> Result<(), ParamWriteError> {
-        let bounds = self.writable_bounds(main, id)?;
+        let bounds = self.writable_bounds(id)?;
         self.set_plain_value(main, id.get(), bounds.plain(value));
         Ok(())
     }
@@ -361,10 +360,10 @@ impl Control for ClapLoaded {
     /// From the declared bounds, which carry the read-only flag.
     fn parameter_writable(
         &self,
-        main: MainThreadMarker,
+        _main: MainThreadMarker,
         id: ParamId,
     ) -> Result<(), ParamWriteError> {
-        self.writable_bounds(main, id).map(|_| ())
+        self.writable_bounds(id).map(|_| ())
     }
 
     /// Plain from [`ParamBounds`]'s [`ParamMapping`], which CLAP's own range
@@ -372,21 +371,21 @@ impl Control for ClapLoaded {
     /// not declare.
     fn parameter_plain(
         &self,
-        main: MainThreadMarker,
+        _main: MainThreadMarker,
         id: ParamId,
         value: Normalized,
     ) -> Option<f64> {
-        Some(self.parameter_bounds(main, id.get())?.plain(value))
+        Some(self.parameter_bounds(id.get())?.plain(value))
     }
 
     /// The inverse, [`ParamMapping::normalized`].
     fn parameter_normalized(
         &self,
-        main: MainThreadMarker,
+        _main: MainThreadMarker,
         id: ParamId,
         plain: f64,
     ) -> Option<Normalized> {
-        Some(self.parameter_bounds(main, id.get())?.normalized(plain))
+        Some(self.parameter_bounds(id.get())?.normalized(plain))
     }
 
     /// The plugin's own display string. `value_to_text` takes a plain value, so
@@ -397,7 +396,7 @@ impl Control for ClapLoaded {
         id: ParamId,
         value: Normalized,
     ) -> Option<String> {
-        let plain = self.parameter_bounds(main, id.get())?.plain(value);
+        let plain = self.parameter_bounds(id.get())?.plain(value);
         self.value_to_text(main, id.get(), plain)
     }
 
@@ -410,7 +409,7 @@ impl Control for ClapLoaded {
         text: &str,
     ) -> Option<Normalized> {
         let plain = self.text_to_value(main, id.get(), text)?;
-        Some(self.parameter_bounds(main, id.get())?.normalized(plain))
+        Some(self.parameter_bounds(id.get())?.normalized(plain))
     }
 
     /// `state-context` for the context `state_use` names when the plugin has
@@ -449,10 +448,12 @@ impl Control for ClapLoaded {
         }
     }
 
-    /// Nothing is cached here to re-read: the Processor's ranges are the
-    /// Controller's to republish.
-    fn rescan_parameters(&mut self, _main: MainThreadMarker, scope: RescanScope) {
-        let _ = scope;
+    /// A rescan of the parameters' info or of everything reads the table
+    /// again; the Processor's ranges are the Controller's to republish.
+    fn rescan_parameters(&mut self, main: MainThreadMarker, scope: RescanScope) {
+        if matches!(scope, RescanScope::Info | RescanScope::All) {
+            self.params.refresh(main, &self.plugin);
+        }
     }
 
     fn run_main_thread(&mut self, main: MainThreadMarker) {
@@ -718,8 +719,8 @@ impl Wraps for ClapController {
 
     /// An `INFO` or `ALL` rescan changed what the parameters are, so the ranges
     /// the Processor denormalizes against are read again and republished.
-    fn republish_ranges(&mut self, main: MainThreadMarker) {
-        let table = self.loaded_mut().read_param_ranges(main);
+    fn republish_ranges(&mut self, _main: MainThreadMarker) {
+        let table = self.loaded().params.ranges().clone();
         self.ranges.publish(table);
     }
 

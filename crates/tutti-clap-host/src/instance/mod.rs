@@ -33,6 +33,7 @@ mod polling;
 mod ports;
 mod processor;
 mod state;
+mod table;
 mod thread_pool;
 
 pub use audio::{ClapProcessContext, ProcessOutput, ProcessOutputRef};
@@ -73,6 +74,9 @@ pub struct ClapLoaded {
     pub(crate) audio: AudioConfig,
     pub(crate) ports: PortLayout,
     pub(crate) flags: LifecycleFlags,
+    /// The plugin's parameters as declared, refreshed on a rescan of their
+    /// info.
+    pub(crate) params: table::ParamTable,
     /// What a wake latched for the next take.
     pub(crate) woken: polling::Woken,
     /// The pool `clap.thread-pool` requests run on, or `None` to refuse them

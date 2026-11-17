@@ -15,16 +15,9 @@ use tutti_plugin_types::{
 };
 
 use super::ClapLoaded;
-use crate::ParamBounds;
-use crate::types::ClapParamFlags;
 
 fn editor_error(reason: String) -> PluginError {
     PluginError::Editor(EditorError::PluginError(reason))
-}
-
-/// Look up declared bounds for `id` in a table sorted by id.
-fn lookup_range(table: &[ParamBounds], id: u32) -> Option<&ParamBounds> {
-    ParamBounds::find(table, id)
 }
 
 /// A CLAP plugin loaded for its editor alone: never activated, it shows the
@@ -42,14 +35,6 @@ fn lookup_range(table: &[ParamBounds], id: u32) -> Option<&ParamBounds> {
 #[derive(Debug)]
 pub struct ClapEditor {
     inner: ClapLoaded,
-    /// Declared plain-unit bounds per parameter id, sorted, captured at load.
-    ///
-    /// CLAP parameter values are in the plugin's own units where this host
-    /// speaks normalized, so a mirrored write has to be denormalized. Cached
-    /// because `ClapLoaded::parameter_range` is a linear scan that makes one
-    /// FFI call per parameter to find one id — acceptable once at load, not on
-    /// every knob movement.
-    param_ranges: Vec<ParamBounds>,
     /// What the plugin asked of the host that the instance does not serve
     /// itself, since the last [`take_requests`](Editor::take_requests).
     asked: Vec<Request>,
@@ -65,14 +50,8 @@ impl ClapEditor {
         load: &Load,
     ) -> PluginResult<Self> {
         let inner = ClapLoaded::load_in_process(main, work, path, load)?;
-        // One pass over the catalog instead of a scan per write. Params are
-        // readable on an unactivated instance, which is what this GUI-only
-        // load is.
-        let param_ranges = read_param_ranges(main, &inner);
-
         Ok(Self {
             inner,
-            param_ranges,
             asked: Vec::new(),
         })
     }
@@ -89,23 +68,6 @@ impl ClapEditor {
     }
 }
 
-/// The plugin's declared plain-unit bounds per parameter id, sorted by id.
-fn read_param_ranges(main: MainThreadMarker, inner: &ClapLoaded) -> Vec<ParamBounds> {
-    let mut ranges: Vec<ParamBounds> = inner
-        .native_parameters(main)
-        .into_iter()
-        .map(|p| ParamBounds {
-            id: p.id,
-            min: p.min_value,
-            max: p.max_value,
-            stepped: p.flags.contains(ClapParamFlags::STEPPED),
-            read_only: p.flags.contains(ClapParamFlags::READONLY),
-        })
-        .collect();
-    ranges.sort_unstable_by_key(|b| b.id);
-    ranges
-}
-
 impl Editor for ClapEditor {
     fn set_parameter(&mut self, main: MainThreadMarker, id: ParamId, value: Normalized) {
         // CLAP values are in the plugin's native plain range, so the host's
@@ -116,7 +78,7 @@ impl Editor for ClapEditor {
         //
         // The mirror follows the host's write policy: the write the host
         // refused (an undeclared or a read-only parameter) is not mirrored.
-        let Some(bounds) = lookup_range(&self.param_ranges, id.get()) else {
+        let Some(bounds) = self.inner.parameter_bounds(id.get()) else {
             return;
         };
         if bounds.read_only {
@@ -151,7 +113,7 @@ impl Editor for ClapEditor {
         // declared bounds (`ClapEvent::heard`), and a gesture's ends.
         events
             .iter()
-            .filter_map(|e| e.heard(&self.param_ranges))
+            .filter_map(|e| e.heard(&self.inner.params.ranges().ranges))
             .collect()
     }
 
@@ -226,14 +188,15 @@ impl EditorWindow for ClapEditor {
         // loop found ready (`wake`) is latched, and is taken here.
         let mut requests = Vec::new();
         Control::take_requests(&mut self.inner, main, &mut requests);
-        let mut reread = false;
         for request in requests {
             match request {
                 Request::Callback => self.inner.run_main_thread(main),
                 Request::Timer(id) => self.inner.run_timer(main, id),
                 Request::Fd(id) => self.inner.service_fd(main, id),
                 // A rescan that re-described the parameters re-reads their bounds.
-                Request::RescanParams(RescanScope::Info | RescanScope::All) => reread = true,
+                Request::RescanParams(scope @ (RescanScope::Info | RescanScope::All)) => {
+                    Control::rescan_parameters(&mut self.inner, main, scope);
+                }
                 // The plugin's own buttons ask the host of the instance that
                 // shows them; the host of the session answers.
                 Request::Transport(asked) => self.asked.push(Request::Transport(asked)),
@@ -252,9 +215,6 @@ impl EditorWindow for ClapEditor {
                 | Request::NoteExpressionChanged
                 | Request::RescanParams(RescanScope::Values | RescanScope::Text) => {}
             }
-        }
-        if reread {
-            self.param_ranges = read_param_ranges(main, &self.inner);
         }
     }
 
@@ -308,7 +268,7 @@ mod tests {
         clap_event_header, clap_event_param_gesture,
     };
 
-    use crate::ClapEvent;
+    use crate::{ClapEvent, ParamBounds};
 
     use super::*;
 

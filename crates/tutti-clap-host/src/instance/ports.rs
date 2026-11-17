@@ -4,8 +4,7 @@
 use super::ClapLoaded;
 use super::load::layout_of_port;
 use crate::types::{
-    AmbisonicConfig, AmbisonicNormalization, AmbisonicOrdering, AudioPortInfo, NoteDialect,
-    NoteDialects, NoteName, NotePortInfo, SurroundChannel, VoiceInfo,
+    AudioPortInfo, NoteDialect, NoteDialects, NoteName, NotePortInfo, SurroundChannel, VoiceInfo,
 };
 use clap_sys::ext::ambisonic::{
     CLAP_AMBISONIC_NORMALIZATION_MAXN, CLAP_AMBISONIC_NORMALIZATION_N2D,
@@ -19,7 +18,28 @@ use clap_sys::ext::note_ports::{
 };
 use clap_sys::ext::voice_info::CLAP_VOICE_INFO_SUPPORTS_OVERLAPPING_NOTES;
 use tutti_plugin_types::MainThreadMarker;
-use tutti_types::{ChannelTopology, Samples};
+use tutti_types::{AmbisonicNormalization, AmbisonicOrdering, ChannelTopology, Samples};
+
+/// CLAP's constant for `ordering`.
+const fn clap_ordering(ordering: AmbisonicOrdering) -> u32 {
+    match ordering {
+        AmbisonicOrdering::FuMa => CLAP_AMBISONIC_ORDERING_FUMA,
+        AmbisonicOrdering::Acn => CLAP_AMBISONIC_ORDERING_ACN,
+    }
+}
+
+/// CLAP's constant for `normalization`, or `None` for Furse-Malham scaling,
+/// which `ambisonic.h` has no constant for.
+const fn clap_normalization(normalization: AmbisonicNormalization) -> Option<u32> {
+    match normalization {
+        AmbisonicNormalization::MaxN => Some(CLAP_AMBISONIC_NORMALIZATION_MAXN),
+        AmbisonicNormalization::Sn3d => Some(CLAP_AMBISONIC_NORMALIZATION_SN3D),
+        AmbisonicNormalization::N3d => Some(CLAP_AMBISONIC_NORMALIZATION_N3D),
+        AmbisonicNormalization::Sn2d => Some(CLAP_AMBISONIC_NORMALIZATION_SN2D),
+        AmbisonicNormalization::N2d => Some(CLAP_AMBISONIC_NORMALIZATION_N2D),
+        AmbisonicNormalization::FuMa => None,
+    }
+}
 
 impl ClapLoaded {
     /// Number of input or output audio ports exposed by the plugin.
@@ -197,53 +217,49 @@ impl ClapLoaded {
     }
 
     /// Asks whether the plugin can process the given ambisonic ordering +
-    /// normalization. Returns false when `CLAP_EXT_AMBISONIC` is unsupported.
+    /// normalization. Returns false when `CLAP_EXT_AMBISONIC` is unsupported,
+    /// and for Furse-Malham normalization, which CLAP has no constant for.
     #[must_use]
     pub fn is_ambisonic_config_supported(
         &self,
         main: MainThreadMarker,
-        config: &AmbisonicConfig,
+        ordering: AmbisonicOrdering,
+        normalization: AmbisonicNormalization,
     ) -> bool {
-        let clap_config = clap_ambisonic_config {
-            ordering: match config.ordering {
-                AmbisonicOrdering::Fuma => CLAP_AMBISONIC_ORDERING_FUMA,
-                AmbisonicOrdering::Acn => CLAP_AMBISONIC_ORDERING_ACN,
-            },
-            normalization: match config.normalization {
-                AmbisonicNormalization::MaxN => CLAP_AMBISONIC_NORMALIZATION_MAXN,
-                AmbisonicNormalization::Sn3d => CLAP_AMBISONIC_NORMALIZATION_SN3D,
-                AmbisonicNormalization::N3d => CLAP_AMBISONIC_NORMALIZATION_N3D,
-                AmbisonicNormalization::Sn2d => CLAP_AMBISONIC_NORMALIZATION_SN2D,
-                AmbisonicNormalization::N2d => CLAP_AMBISONIC_NORMALIZATION_N2D,
-            },
+        let Some(normalization) = clap_normalization(normalization) else {
+            return false;
         };
-        self.plugin
-            .is_ambisonic_config_supported(main, &clap_config)
+        let config = clap_ambisonic_config {
+            ordering: clap_ordering(ordering),
+            normalization,
+        };
+        self.plugin.is_ambisonic_config_supported(main, &config)
     }
 
-    /// Retrieves the ambisonic config currently used on a given port.
+    /// Retrieves the ambisonic ordering and normalization currently used on a
+    /// given port. `None` when the plugin has no `CLAP_EXT_AMBISONIC`, or
+    /// names an ordering or normalization this crate has no name for.
     pub fn ambisonic_config(
         &self,
         main: MainThreadMarker,
         is_input: bool,
         port_index: u32,
-    ) -> Option<AmbisonicConfig> {
+    ) -> Option<(AmbisonicOrdering, AmbisonicNormalization)> {
         let config = self.plugin.ambisonic_config(main, is_input, port_index)?;
         let ordering = match config.ordering {
-            CLAP_AMBISONIC_ORDERING_FUMA => AmbisonicOrdering::Fuma,
-            _ => AmbisonicOrdering::Acn,
+            CLAP_AMBISONIC_ORDERING_FUMA => AmbisonicOrdering::FuMa,
+            CLAP_AMBISONIC_ORDERING_ACN => AmbisonicOrdering::Acn,
+            _ => return None,
         };
         let normalization = match config.normalization {
             CLAP_AMBISONIC_NORMALIZATION_MAXN => AmbisonicNormalization::MaxN,
             CLAP_AMBISONIC_NORMALIZATION_SN3D => AmbisonicNormalization::Sn3d,
             CLAP_AMBISONIC_NORMALIZATION_N3D => AmbisonicNormalization::N3d,
             CLAP_AMBISONIC_NORMALIZATION_SN2D => AmbisonicNormalization::Sn2d,
-            _ => AmbisonicNormalization::N2d,
+            CLAP_AMBISONIC_NORMALIZATION_N2D => AmbisonicNormalization::N2d,
+            _ => return None,
         };
-        Some(AmbisonicConfig {
-            ordering,
-            normalization,
-        })
+        Some((ordering, normalization))
     }
 
     /// Asks whether the plugin can process the given

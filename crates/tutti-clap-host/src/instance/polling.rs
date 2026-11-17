@@ -233,11 +233,6 @@ impl ClapLoaded {
         self.host_state.take(&self.host_state.state_dirty)
     }
 
-    /// Consumes and returns the `gui.closed` flag.
-    pub fn take_gui_closed(&self) -> bool {
-        self.host_state.take(&self.host_state.gui.closed)
-    }
-
     /// How many `clap.log` lines the plugin sent from the audio thread, where
     /// the host counts a line rather than emit it (emitting allocates).
     /// Cumulative, not consumed on read, so callers track their own delta.

@@ -34,100 +34,23 @@ impl ClapLoaded {
         self.plugin.param_value(main, id)
     }
 
-    /// Full CLAP-native metadata for the parameter at the given `index`
-    /// (0-based, `< parameter_count()`). Private to the crate: the rich native
-    /// [`ClapParamInfo`] (with `module` and the full [`ClapParamFlags`]) stays
-    /// inside; the crate boundary hands out the shared
-    /// [`ParameterInfo`](tutti_plugin_types::ParameterInfo) via
-    /// [`parameter_list`](Self::parameter_list).
-    pub(crate) fn parameter_info(
-        &self,
-        main: MainThreadMarker,
-        index: u32,
-    ) -> Option<ClapParamInfo> {
-        let info = self.plugin.param_info(main, index)?;
-        Some(ClapParamInfo {
-            id: info.id,
-            name: info.name,
-            module: info.module,
-            min_value: info.min_value,
-            max_value: info.max_value,
-            default_value: info.default_value,
-            flags: ClapParamFlags::from_bits_truncate(info.flags),
-        })
-    }
-
-    /// Collects CLAP-native metadata for every parameter. Crate-private (see
-    /// [`parameter_info`](Self::parameter_info)).
-    ///
-    /// A failing `get_info(i)` at `i < count` **truncates**, matching
-    /// [`port_channels`](super::load). Parameters are keyed by id downstream so
-    /// a skipped entry renumbers nothing — it is worse than that: `activate`
-    /// builds the `RangeTable` from this list, and a param missing
-    /// from that table takes the pass-through arm in
-    /// [`add_param_changes`](crate::events::InputEventList::add_param_changes),
-    /// reaching the plugin **un-denormalized** — raw `0..1` into a `100..1100`
-    /// Hz range, silently. Scanning past the hole to keep the later ranges is
-    /// the tempting alternative and is the worse one: it yields a map complete
-    /// for every id but one, so automation looks right everywhere the user
-    /// checks. A short list is a visible symptom; a selectively-wrong map is
-    /// not.
-    pub(crate) fn native_parameters(&self, main: MainThreadMarker) -> Vec<ClapParamInfo> {
-        let count = self.parameter_count(main) as u32;
-        let mut params = Vec::with_capacity(count as usize);
-        for i in 0..count {
-            let Some(info) = self.parameter_info(main, i) else {
-                // Stop, don't skip: a skipped param is absent from
-                // `param_ranges` and its automation arrives un-denormalized.
-                break;
-            };
-            params.push(info);
-        }
-        params
-    }
-
     /// The declared `[min, max]` for one parameter, or `None` if the plugin
     /// does not declare it.
-    ///
-    /// The direct `Control::parameter` path needs a single parameter's range, where
-    /// `process` needs the whole table — so this walks rather than building a
-    /// map. That is the right trade here: it is called once per host-driven
-    /// read or write (a knob turn, a preset apply), never per block.
     ///
     /// `None` means "no range to convert against", which the caller must treat
     /// as pass-through rather than substituting bounds. Inventing a `0..=1`
     /// default here would silently rescale a parameter the plugin never
-    /// described — the same class of quiet wrongness the internal
-    /// `parameters` enumeration truncates to avoid.
-    pub fn parameter_range(&self, main: MainThreadMarker, id: u32) -> Option<(f64, f64)> {
-        let count = self.parameter_count(main) as u32;
-        for i in 0..count {
-            let info = self.parameter_info(main, i)?;
-            if info.id == id {
-                return Some((info.min_value, info.max_value));
-            }
-        }
-        None
+    /// described.
+    pub fn parameter_range(&self, _main: MainThreadMarker, id: u32) -> Option<(f64, f64)> {
+        let bounds = self.params.bounds(id)?;
+        Some((bounds.min, bounds.max))
     }
 
     /// The declared bounds and steppedness for one parameter: what a
     /// normalized value is denormalized against. [`None`] as for
     /// [`parameter_range`](Self::parameter_range).
-    pub(crate) fn parameter_bounds(&self, main: MainThreadMarker, id: u32) -> Option<ParamBounds> {
-        let count = self.parameter_count(main) as u32;
-        for i in 0..count {
-            let info = self.parameter_info(main, i)?;
-            if info.id == id {
-                return Some(ParamBounds {
-                    id,
-                    min: info.min_value,
-                    max: info.max_value,
-                    stepped: info.flags.contains(ClapParamFlags::STEPPED),
-                    read_only: info.flags.contains(ClapParamFlags::READONLY),
-                });
-            }
-        }
-        None
+    pub(crate) fn parameter_bounds(&self, id: u32) -> Option<ParamBounds> {
+        self.params.bounds(id)
     }
 
     /// Every parameter projected onto the shared, format-agnostic
@@ -135,11 +58,12 @@ impl ClapLoaded {
     /// crosses the crate boundary. CLAP has no unit string, so `unit` is empty;
     /// `step_count` comes from the `STEPPED` flag plus the declared span, since
     /// CLAP reports steppedness as a flag and the count only via `min`/`max`.
-    pub fn parameter_list(&self, main: MainThreadMarker) -> Vec<tutti_plugin_types::ParameterInfo> {
-        self.native_parameters(main)
-            .into_iter()
-            .map(project_param_info)
-            .collect()
+    /// Read from the table the plugin's rescans refresh.
+    pub fn parameter_list(
+        &self,
+        _main: MainThreadMarker,
+    ) -> Vec<tutti_plugin_types::ParameterInfo> {
+        self.params.listed().to_vec()
     }
 
     /// Format a parameter `value` to its human-readable display string via the
@@ -176,13 +100,10 @@ impl ClapLoaded {
     /// `flush`, while the plugin is processing. `false` if the id is unknown or
     /// the plugin has no params.
     ///
-    /// Goes through the same enumeration as `parameter_list`, so the two cannot
+    /// Answered from the same table as `parameter_list`, so the two cannot
     /// drift about which parameters exist.
-    pub fn param_requires_process(&self, main: MainThreadMarker, param_id: u32) -> bool {
-        self.native_parameters(main)
-            .into_iter()
-            .find(|info| info.id == param_id)
-            .is_some_and(|info| info.flags.contains(ClapParamFlags::REQUIRES_PROCESS))
+    pub fn param_requires_process(&self, _main: MainThreadMarker, param_id: u32) -> bool {
+        self.params.requires_process(param_id)
     }
 
     /// Delivers parameter changes outside of `process()` via
@@ -190,7 +111,9 @@ impl ClapLoaded {
     /// response.
     ///
     /// Returns an empty `Vec` if the plugin does not implement params or lacks
-    /// a flush function.
+    /// a flush function. The events returned are the caller's to use: the
+    /// flush a plugin's `request_flush` causes while inactive drops them,
+    /// since only a block's output is reported.
     ///
     /// # Threading
     /// CLAP declares `params.flush` as `[active ? audio-thread : main-thread]`
@@ -276,7 +199,7 @@ impl ClapLoaded {
 /// declared span, and leaves `unit` empty (CLAP carries no unit string). CLAP
 /// parameter values are in the plugin's native plain range, so
 /// `min_value`/`max_value` pass through verbatim.
-fn project_param_info(info: ClapParamInfo) -> tutti_plugin_types::ParameterInfo {
+pub(super) fn project_param_info(info: ClapParamInfo) -> tutti_plugin_types::ParameterInfo {
     use tutti_plugin_types::{ParamFlags, ParamRange, ParamSteps};
 
     // CLAP is the one hosted format that reports every capability we model,

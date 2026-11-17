@@ -4,7 +4,7 @@
 //! [`AudioScratch`] holds all per-block RT scratch and lives only on the
 //! `ClapProcessor` (it exists solely for `process`).
 
-use crate::events::{InputEventList, OutputEventList, ParamBounds};
+use crate::events::{InputEventList, InputRooms, OutputEventList, ParamBounds};
 use crate::types::{ClapNoteExpression, ParameterChanges, RtNoteExpressions};
 use clap_sys::process::CLAP_PROCESS_CONTINUE;
 use std::sync::atomic::AtomicI32;
@@ -86,10 +86,10 @@ pub(crate) struct AudioScratch {
 }
 
 impl AudioScratch {
-    pub fn new(format: SampleFormat) -> Self {
+    pub fn new(format: SampleFormat, input_rooms: InputRooms) -> Self {
         Self {
             process: PortScratch::new(format),
-            input_events: InputEventList::new(),
+            input_events: InputEventList::new(input_rooms),
             output_events: OutputEventList::new(),
             out_midi: RtMidiEvents::new(),
             out_translator: Translator::new(),
@@ -114,7 +114,7 @@ impl AudioScratch {
 /// The Controller publishes it through a [`Publisher`](tutti_rt::Publisher) at
 /// activation and again after a rescan that changed the parameters; the
 /// Processor lends it once per block.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub(crate) struct RangeTable {
     /// Each parameter's bounds and steppedness, sorted by id.
     pub ranges: Vec<ParamBounds>,

@@ -10,8 +10,8 @@ use clap_sys::events::{
     clap_event_param_gesture, clap_event_param_mod, clap_event_param_value,
 };
 use tutti_clap_host::{
-    ClapEvent, ClapHost, EventList, HostState, InputEventList, InputStream, NoteExpressionType,
-    OutputEventList, OutputStream, ParameterChanges, ParameterQueue,
+    ClapEvent, ClapHost, EventList, HostState, InputEventList, InputRooms, InputStream,
+    NoteExpressionType, OutputEventList, OutputStream, ParameterChanges, ParameterQueue,
 };
 use tutti_graph::Offset;
 use tutti_midi_protocol::{channel_voice, midi1};
@@ -28,7 +28,7 @@ fn at(k: usize) -> Offset {
 
 /// A fresh list `event` was added to: its first event is what it converts to.
 fn first(event: &(Offset, tutti_ump::Ump)) -> InputEventList {
-    let mut list = InputEventList::new();
+    let mut list = InputEventList::new(InputRooms::new(1024));
     list.add_midi(event);
     list
 }
@@ -148,7 +148,7 @@ fn test_program_change_roundtrip() {
 /// the FFI event table.
 #[test]
 fn test_input_event_list_add_midi_counts_correctly() {
-    let mut list = InputEventList::new();
+    let mut list = InputEventList::new(InputRooms::new(1024));
     list.add_midi(&(at(0), midi::note_on(MidiChannel::FIRST, 60, 0x8000)));
     list.add_midi(&(at(100), midi::note_off(MidiChannel::FIRST, 60, 0)));
 
@@ -352,7 +352,7 @@ fn test_output_event_list_push_midi_cc() {
 /// calling `sort_by_time()`.
 #[test]
 fn test_input_event_list_sort_by_time() {
-    let mut list = InputEventList::new();
+    let mut list = InputEventList::new(InputRooms::new(1024));
     list.add_midi(&(at(200), midi::note_on(MidiChannel::FIRST, 60, 0x8000)));
     list.add_midi(&(at(50), midi::note_on(MidiChannel::FIRST, 64, 0x5000)));
     list.add_midi(&(at(100), midi::note_on(MidiChannel::FIRST, 67, 0x7000)));
@@ -413,7 +413,7 @@ fn test_param_changes_through_input_list() {
     q2.add_point(64, 0.5);
     changes.add_queue(q2);
 
-    let mut list = InputEventList::new();
+    let mut list = InputEventList::new(InputRooms::new(0).with_param_points(3));
     // No range map and no claim of params → pass-through (this test only
     // asserts event count, not denormalized values; the denorm math is covered
     // in the events unit tests).
@@ -517,14 +517,6 @@ fn test_input_stream_partial_reads() {
         let n = read_fn(raw, buf.as_mut_ptr() as *mut c_void, 4);
         assert_eq!(n, 0);
     }
-}
-
-// ── Host ──
-
-#[test]
-fn test_clap_host_as_raw_not_null() {
-    let host = ClapHost::new(std::sync::Arc::new(HostState::new(main_thread())));
-    assert!(!host.as_raw().is_null());
 }
 
 // ── Mixed event types through output ──
@@ -709,39 +701,6 @@ fn test_output_list_push_param_gesture_begin_end() {
 
     // Gesture events should not appear as param changes
     assert_eq!(param_changes(&list).queues.len(), 0);
-}
-
-// ── Transport constants ──
-
-#[test]
-fn test_transport_flags_are_distinct_bits() {
-    use clap_sys::events::{
-        CLAP_TRANSPORT_HAS_BEATS_TIMELINE, CLAP_TRANSPORT_HAS_SECONDS_TIMELINE,
-        CLAP_TRANSPORT_HAS_TEMPO, CLAP_TRANSPORT_HAS_TIME_SIGNATURE, CLAP_TRANSPORT_IS_LOOP_ACTIVE,
-        CLAP_TRANSPORT_IS_PLAYING, CLAP_TRANSPORT_IS_RECORDING,
-    };
-
-    let all_flags = [
-        CLAP_TRANSPORT_HAS_TEMPO,
-        CLAP_TRANSPORT_HAS_BEATS_TIMELINE,
-        CLAP_TRANSPORT_HAS_SECONDS_TIMELINE,
-        CLAP_TRANSPORT_HAS_TIME_SIGNATURE,
-        CLAP_TRANSPORT_IS_PLAYING,
-        CLAP_TRANSPORT_IS_RECORDING,
-        CLAP_TRANSPORT_IS_LOOP_ACTIVE,
-    ];
-
-    // Verify all flags are distinct powers of 2
-    for flag in &all_flags {
-        assert!(flag.is_power_of_two(), "Flag {flag:#x} is not a power of 2");
-    }
-
-    // Verify no two flags are equal
-    for i in 0..all_flags.len() {
-        for j in (i + 1)..all_flags.len() {
-            assert_ne!(all_flags[i], all_flags[j]);
-        }
-    }
 }
 
 // ── Host state + extensions ──

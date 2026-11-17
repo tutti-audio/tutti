@@ -589,6 +589,12 @@ fn close_editor_destroys_exactly_once() {
     );
 }
 
+/// The main-thread pass that serves what the plugin raised, which
+/// acknowledges a `gui.closed` with `gui.destroy`.
+fn serve_requests(loaded: &mut ClapLoaded) {
+    Control::take_requests(loaded, main_thread(), &mut Vec::new());
+}
+
 /// When the plugin's window went away and it told the host so via
 /// `gui.closed(was_destroyed = true)`, the host **must** still call `destroy`.
 ///
@@ -621,10 +627,6 @@ fn close_editor_destroys_after_plugin_window_was_destroyed() {
     probe.command(GUI_CMD_CLOSED_AND_DESTROYED);
     probe.run_command();
 
-    assert!(
-        loaded.take_gui_closed(),
-        "the host must record the plugin's `gui.closed` callback"
-    );
     let after_open = probe.capture();
     assert!(
         after_open.window_destroyed,
@@ -635,6 +637,12 @@ fn close_editor_destroys_after_plugin_window_was_destroyed() {
         after_open.create_balance, 1,
         "the window is gone but the gui object `create` allocated is not; the \
          host still owes it a destroy"
+    );
+    serve_requests(&mut loaded);
+    assert_eq!(
+        probe.capture().create_balance,
+        0,
+        "the host acknowledges the plugin's `gui.closed` with `gui.destroy`"
     );
 
     loaded.close_editor(main_thread());
@@ -679,12 +687,6 @@ fn close_editor_destroys_after_window_was_destroyed_during_show() {
         )
         .expect("opens");
 
-    assert!(
-        loaded.take_gui_closed(),
-        "the host must still hold the `gui.closed` the plugin raised during the \
-         embed — clearing the latch afterwards would have erased it"
-    );
-
     let after_open = probe.capture();
     assert!(
         after_open.window_destroyed,
@@ -693,6 +695,14 @@ fn close_editor_destroys_after_window_was_destroyed_during_show() {
     assert_eq!(
         after_open.create_balance, 1,
         "the gui object is still allocated — only the window went away"
+    );
+    // The `gui.closed` raised inside the embed is still held, so the pass
+    // that serves requests acknowledges it.
+    serve_requests(&mut loaded);
+    assert_eq!(
+        probe.capture().create_balance,
+        0,
+        "the host acknowledges the plugin's `gui.closed` with `gui.destroy`"
     );
 
     loaded.close_editor(main_thread());
@@ -732,7 +742,6 @@ fn close_editor_hides_and_destroys_when_window_was_not_destroyed() {
         )
         .expect("opens");
 
-    assert!(loaded.take_gui_closed(), "the host records the callback");
     let after_open = probe.capture();
     assert!(
         !after_open.window_destroyed,
@@ -741,6 +750,12 @@ fn close_editor_hides_and_destroys_when_window_was_not_destroyed() {
     assert_eq!(
         after_open.create_balance, 1,
         "the editor is still allocated — the plugin only reported its window closed"
+    );
+    serve_requests(&mut loaded);
+    assert_eq!(
+        probe.capture().create_balance,
+        0,
+        "the host acknowledges the plugin's `gui.closed` with `gui.destroy`"
     );
 
     loaded.close_editor(main_thread());

@@ -22,7 +22,8 @@ use tutti_clap_ffi::{
     EventSink, EventSource, header_size, input_raw_for_test, output_raw_for_test,
 };
 use tutti_clap_host::{
-    ClapEvent, EventList, FlushEvents, InputEventList, NoteExpressionType, OutputEventList,
+    ClapEvent, EventList, FlushEvents, InputEventList, InputRooms, NoteExpressionType,
+    OutputEventList,
 };
 use tutti_graph::Offset;
 use tutti_plugin_types::{
@@ -93,9 +94,9 @@ fn test_output_events_push_note_on() {
 }
 
 #[test]
-fn fill_gestures_captures_gesture_and_mod_events() {
+fn gesture_and_mod_events_are_held_beside_the_value() {
     // Gesture begin/end + param-mod on the output side must not be
-    // silently dropped. They land in the CLAP-private gesture list, and
+    // silently dropped. They stay in the event list, and
     // `fill_param_changes` still ignores them (only PARAM_VALUE flows there).
     use clap_sys::events::{
         CLAP_EVENT_PARAM_GESTURE_BEGIN, CLAP_EVENT_PARAM_GESTURE_END, clap_event_param_gesture,
@@ -152,8 +153,18 @@ fn fill_gestures_captures_gesture_and_mod_events() {
         assert!(push(list_ptr, value.header() as *const _));
     }
 
-    let mut gestures: Vec<ClapEvent> = Vec::new();
-    output.fill_gestures(&mut gestures);
+    let gestures: Vec<&ClapEvent> = output
+        .events()
+        .iter()
+        .filter(|e| {
+            matches!(
+                e,
+                ClapEvent::ParamGestureBegin(_)
+                    | ClapEvent::ParamGestureEnd(_)
+                    | ClapEvent::ParamMod(_)
+            )
+        })
+        .collect();
     assert_eq!(gestures.len(), 3, "begin + mod + end captured");
     assert!(
         gestures
@@ -179,12 +190,6 @@ fn fill_gestures_captures_gesture_and_mod_events() {
     );
     assert_eq!(changes.queues.len(), 1, "only the PARAM_VALUE queued");
     assert_eq!(changes.queues[0].param_id, 5u32.into());
-
-    // Draining clears the pool.
-    output.fill_gestures(&mut gestures);
-    assert_eq!(gestures.len(), 3);
-    gestures.clear();
-    assert!(gestures.is_empty());
 }
 
 #[test]
@@ -498,9 +503,8 @@ fn test_output_events_push_sysex_with_data() {
     assert_eq!(packet.data(), &sysex_data[1..sysex_data.len() - 1]);
 }
 
-/// **A long SysEx a plugin emits reaches the host whole.** It used to be
-/// dropped: `ClapEvent::to_midi` is one event, and a SysEx is many
-/// packets.
+/// **A long SysEx a plugin emits reaches the host whole**, though
+/// `ClapEvent::to_midi` is one event and a SysEx is many packets.
 #[test]
 fn a_long_sysex_from_the_plugin_drains_whole() {
     let body: Vec<u8> = (0..40).map(|i| i as u8).collect();
@@ -731,8 +735,7 @@ fn input_event_pointers_have_the_alignment_their_payload_needs() {
 /// MIDI 1.0 velocity 100 is a `NOTE_ON` near 100/127.
 #[test]
 fn a_midi1_note_on_at_velocity_zero_reaches_the_plugin_as_a_release_at_half() {
-    let mut list = InputEventList::new();
-    list.reserve(4);
+    let mut list = InputEventList::new(InputRooms::new(4));
     list.add_midi(&packet(7, &[0x2091_3C00]));
     list.add_midi(&packet(8, &[0x2091_3C64]));
     let raw = raw_in(&list);
