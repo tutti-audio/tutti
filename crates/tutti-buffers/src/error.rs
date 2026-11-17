@@ -41,6 +41,14 @@ pub enum BufferError {
         /// The destination's frame count.
         dst: Samples,
     },
+    /// A block's input and output hold different frame counts.
+    #[error("the block's input holds {input} frames and its output {output}")]
+    BlockLengthMismatch {
+        /// The input's frame count.
+        input: Samples,
+        /// The output's frame count.
+        output: Samples,
+    },
     /// Source and destination have different widths.
     #[error("the source is {src:?} and the destination {dst:?}")]
     WidthMismatch {

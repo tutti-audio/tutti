@@ -149,6 +149,7 @@
 #![deny(clippy::undocumented_unsafe_blocks, clippy::missing_safety_doc)]
 
 mod cell;
+mod claim;
 mod clock;
 mod denormals;
 mod dirty_set;
