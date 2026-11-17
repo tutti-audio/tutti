@@ -16,8 +16,13 @@ use crate::Playhead;
 /// Every clone sends into the session's one motion queue, and every clone
 /// shares the control side's record of whether the last motion sent left the
 /// transport rolling, so [`TimedError::BeatWhileStopped`] is refused on any
-/// thread exactly as on the session. Take one with
+/// thread as on the session. With senders on several threads at once, the
+/// record follows the order their sends updated it, which may differ from the
+/// order the queue holds them. Take one with
 /// [`Session::transport_handle`](crate::Session::transport_handle).
+///
+/// A handle holds no borrow of its session: once the session is dropped, its
+/// sends go into a queue nothing drains, and succeed until that queue is full.
 #[derive(Clone, Debug)]
 pub struct TransportHandle {
     transport: Transport,
