@@ -54,6 +54,7 @@ use tutti_types::{ChannelLayout, ChannelTopology, Samples};
 
 #[cfg(codec)]
 use tutti_buffers::InterleavedMut;
+#[cfg(codec)]
 use tutti_codec::FileIn;
 
 use super::command::StreamId;

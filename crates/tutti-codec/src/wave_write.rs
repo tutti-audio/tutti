@@ -60,5 +60,5 @@ pub fn write_wave<S: Sample>(wave: &Wave<S>, path: impl AsRef<Path>, format: For
     encoder.finish().map(drop)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "encode-wav", decode))]
 mod tests;

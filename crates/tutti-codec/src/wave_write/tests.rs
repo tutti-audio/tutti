@@ -1,11 +1,16 @@
 use super::*;
-use crate::{FlacLevel, IntDepth, Pcm, read_wave};
-use tutti_buffers::Interleaved;
-use tutti_types::{ChannelLayout, ChannelTopology, SampleRate};
+use tutti_types::SampleRate;
+#[cfg(all(feature = "encode-wav", feature = "encode-flac", decode))]
+use {
+    crate::{FlacLevel, IntDepth},
+    tutti_buffers::Interleaved,
+    tutti_types::{ChannelLayout, ChannelTopology},
+};
 
 /// `frames` frames over `topology` whose sample at `(c, i)` is
 /// `((i * 7 + c * 3) % 400 - 200) / 256`: a ramp per channel that wraps, and
 /// exact at 16 bits (a whole multiple of 128 / 32768).
+#[cfg(all(feature = "encode-wav", feature = "encode-flac", decode))]
 fn ramp_wave(topology: ChannelTopology, rate: f64, frames: usize) -> Wave {
     let mut wave = Wave::with_topology(topology, SampleRate::of(rate));
     let width = wave.channels();
@@ -25,6 +30,7 @@ fn ramp_wave(topology: ChannelTopology, rate: f64, frames: usize) -> Wave {
 #[cfg(all(feature = "encode-wav", feature = "encode-flac", decode))]
 #[test]
 fn a_written_wave_reads_back_as_itself() {
+    use crate::{Pcm, read_wave};
     let dir = tempfile::tempdir().unwrap();
     let stereo = || ChannelTopology::assumed(ChannelLayout::STEREO);
     let cases = [
@@ -73,9 +79,9 @@ fn a_written_wave_reads_back_as_itself() {
 /// A wave of 16-bit samples is written at 16 bits and reads back as the same
 /// integers to within the writer's own step (it scales by 32767 and the
 /// reader by 32768), whatever the format it is held in.
-#[cfg(all(feature = "encode-wav", feature = "decode-wav"))]
 #[test]
 fn an_integer_wave_writes_the_integers_it_holds() {
+    use crate::{Pcm, read_wave};
     let samples = [0i16, 16_384, -16_384, 32_767, -32_768, 1];
     let wave = Wave::from_mono(SampleRate::SR_48K, tutti_buffers::Mono::new(&samples));
     let dir = tempfile::tempdir().unwrap();
