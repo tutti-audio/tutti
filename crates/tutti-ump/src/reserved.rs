@@ -40,9 +40,31 @@ impl Reserved {
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(try_from = "(u8, u16)", into = "(u8, u16)"))]
 pub struct ReservedAttribute {
     kind: u8,
     data: u16,
+}
+
+// The serde form is the `(kind, data)` pair, read back only for a kind no
+// table defines.
+#[cfg(feature = "serde")]
+impl TryFrom<(u8, u16)> for ReservedAttribute {
+    type Error = &'static str;
+
+    fn try_from((kind, data): (u8, u16)) -> Result<Self, Self::Error> {
+        match kind {
+            0x04..=0x0F | 0x20..=0xFF => Ok(Self { kind, data }),
+            _ => Err("a reserved attribute type is 0x04 to 0x0F or 0x20 to 0xFF"),
+        }
+    }
+}
+
+#[cfg(feature = "serde")]
+impl From<ReservedAttribute> for (u8, u16) {
+    fn from(attribute: ReservedAttribute) -> Self {
+        (attribute.kind, attribute.data)
+    }
 }
 
 impl ReservedAttribute {
@@ -74,7 +96,29 @@ impl ReservedAttribute {
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(try_from = "[u8; 3]", into = "[u8; 3]"))]
 pub struct ReservedAccents([u8; 3]);
+
+// The serde form is the three parts, read back only for a shape §7.5.5 does
+// not have.
+#[cfg(feature = "serde")]
+impl TryFrom<[u8; 3]> for ReservedAccents {
+    type Error = &'static str;
+
+    fn try_from(parts: [u8; 3]) -> Result<Self, Self::Error> {
+        match crate::BarAccents::from_parts(parts) {
+            None => Ok(Self(parts)),
+            Some(_) => Err("these accents are a shape §7.5.5 has, not a reserved one"),
+        }
+    }
+}
+
+#[cfg(feature = "serde")]
+impl From<ReservedAccents> for [u8; 3] {
+    fn from(accents: ReservedAccents) -> Self {
+        accents.0
+    }
+}
 
 impl ReservedAccents {
     pub(crate) const fn wire(parts: [u8; 3]) -> Self {
@@ -98,6 +142,13 @@ impl ReservedAccents {
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    feature = "serde",
+    serde(
+        try_from = "FieldRepr<T>",
+        bound(deserialize = "T: serde::Deserialize<'de> + TryFrom<u8>")
+    )
+)]
 pub enum Field<T> {
     /// A value in range.
     Value(T),
@@ -135,5 +186,28 @@ impl<T: Copy> Field<T> {
 impl<T> From<T> for Field<T> {
     fn from(value: T) -> Self {
         Self::Value(value)
+    }
+}
+
+/// The serde form of a [`Field`], read back through the table's own check.
+#[cfg(feature = "serde")]
+#[derive(serde::Deserialize)]
+enum FieldRepr<T> {
+    Value(T),
+    Reserved(Reserved),
+}
+
+#[cfg(feature = "serde")]
+impl<T: TryFrom<u8>> TryFrom<FieldRepr<T>> for Field<T> {
+    type Error = &'static str;
+
+    fn try_from(repr: FieldRepr<T>) -> Result<Self, Self::Error> {
+        match repr {
+            FieldRepr::Value(value) => Ok(Self::Value(value)),
+            FieldRepr::Reserved(reserved) if T::try_from(reserved.get()).is_err() => {
+                Ok(Self::Reserved(reserved))
+            }
+            FieldRepr::Reserved(_) => Err("a reserved raw is outside the field's range"),
+        }
     }
 }

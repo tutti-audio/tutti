@@ -12,6 +12,12 @@ const UMP_BYTES: u16 = 16;
 /// The data bytes one payload UMP carries: the UMP less its two prefix bytes
 /// (message type, Group, status and MDS id).
 const PAYLOAD_BYTES: usize = 14;
+
+/// The size in bytes of a chunk that carries `len` data bytes: its header, and
+/// each payload UMP's two prefix bytes with its data.
+const fn chunk_bytes(len: usize) -> usize {
+    UMP_BYTES as usize + len + 2 * len.div_ceil(PAYLOAD_BYTES)
+}
 /// The most payload UMPs one chunk holds: its size, header included, is a
 /// 16-bit field.
 const MAX_UMPS: u16 = (u16::MAX - UMP_BYTES) / UMP_BYTES;
@@ -80,8 +86,7 @@ impl MdsChunkSize {
     /// does not fit 16 bits.
     #[must_use]
     pub const fn from_data_len(len: usize) -> Option<Self> {
-        let umps = len.div_ceil(PAYLOAD_BYTES);
-        let bytes = UMP_BYTES as usize + len + 2 * umps;
+        let bytes = chunk_bytes(len);
         if bytes > u16::MAX as usize {
             None
         } else {
@@ -251,8 +256,7 @@ impl MdsChunkUmps {
     /// is at most `16 + 16 * 4094` bytes, which fits 16 bits.
     fn take(self, data: &[u8]) -> (&[u8], MdsChunkSize, &[u8]) {
         let (chunk, rest) = data.split_at(data.len().min(self.data_len()));
-        let umps = chunk.len().div_ceil(PAYLOAD_BYTES);
-        let size = MdsChunkSize((UMP_BYTES as usize + chunk.len() + 2 * umps) as u16);
+        let size = MdsChunkSize(chunk_bytes(chunk.len()) as u16);
         (chunk, size, rest)
     }
 }

@@ -273,30 +273,10 @@ pub fn first_non_seven_bit(bytes: &[u8]) -> Option<usize> {
     bytes.iter().position(|&b| b & 0x80 != 0)
 }
 
-// `From` into the raw, `TryFrom` from it, and (under `serde`) the bare number
-// read back through `TryFrom`, for a bounded type.
-macro_rules! bounded_conversions {
-    ($name:ident, $repr:ty, $max:expr) => {
-        impl From<$name> for $repr {
-            fn from(value: $name) -> $repr {
-                value.get()
-            }
-        }
-
-        impl TryFrom<$repr> for $name {
-            type Error = OutOfRange;
-
-            fn try_from(raw: $repr) -> Result<Self, OutOfRange> {
-                Self::new(raw).ok_or(OutOfRange {
-                    what: stringify!($name),
-                    value: (raw as i32).unsigned_abs(),
-                    max: $max as u32,
-                })
-            }
-        }
-
-        // Serialized as the bare number, read back through `TryFrom`, so a
-        // document cannot carry a value the type refuses.
+// Under `serde`, the bare number, read back through the type's `TryFrom` so a
+// document cannot carry a value the type refuses.
+macro_rules! bounded_serde {
+    ($name:ident, $repr:ty) => {
         #[cfg(feature = "serde")]
         impl serde::Serialize for $name {
             fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
@@ -311,6 +291,32 @@ macro_rules! bounded_conversions {
                 Self::try_from(raw).map_err(serde::de::Error::custom)
             }
         }
+    };
+}
+
+// `From` into the raw, `TryFrom` from it, and the serde form, for a bounded
+// type with an unsigned raw.
+macro_rules! bounded_conversions {
+    ($name:ident, $repr:ty, $max:expr) => {
+        impl From<$name> for $repr {
+            fn from(value: $name) -> $repr {
+                value.get()
+            }
+        }
+
+        impl TryFrom<$repr> for $name {
+            type Error = OutOfRange;
+
+            fn try_from(raw: $repr) -> Result<Self, OutOfRange> {
+                Self::new(raw).ok_or(OutOfRange {
+                    what: stringify!($name),
+                    value: u32::from(raw),
+                    max: $max as u32,
+                })
+            }
+        }
+
+        bounded_serde!($name, $repr);
     };
 }
 
@@ -424,7 +430,27 @@ bounded!(
     /// Sharps (positive) or flats (negative) in a key signature, `-7..=7`.
     SharpsFlats, i8, -7, 7
 );
-bounded_conversions!(SharpsFlats, i8, 7);
+
+/// A number that is not a count of sharps or flats: outside `-7..=7`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("{0} is not a key signature's sharps or flats: -7 to 7")]
+pub struct NotSharpsFlats(pub i8);
+
+impl From<SharpsFlats> for i8 {
+    fn from(value: SharpsFlats) -> i8 {
+        value.get()
+    }
+}
+
+impl TryFrom<i8> for SharpsFlats {
+    type Error = NotSharpsFlats;
+
+    fn try_from(raw: i8) -> Result<Self, NotSharpsFlats> {
+        Self::new(raw).ok_or(NotSharpsFlats(raw))
+    }
+}
+
+bounded_serde!(SharpsFlats, i8);
 
 /// An unsigned fixed-point pitch: a MIDI note number with a fraction of a
 /// semitone, stored as Q7.25 (7 integer bits, 25 fractional bits). Note On

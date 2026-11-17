@@ -6,10 +6,11 @@ use core::iter::FusedIterator;
 use crate::field::first_non_seven_bit;
 use crate::{Message, MidiGroup, Sysex7Packet, SysexStatus, Ump};
 
-/// The longest SysEx7 payload (the bytes between `0xF0` and `0xF7`) a
-/// [`SysexAssembler`] buffer is sized for: 64 KiB. It is this crate's cap on
-/// one message, not a limit the spec sets (M2-104 §7.7 states no maximum); a
-/// message past it is dropped and counted.
+/// The longest SysEx7 payload (the bytes between `0xF0` and `0xF7`) a host
+/// passes a [`SysexAssembler`] as its `max_message` less the two delimiters:
+/// 64 KiB. It is this crate's cap on one message, not a limit the spec sets
+/// (M2-104 §7.7 states no maximum); an assembler drops and counts a message
+/// past its `max_message`.
 pub const SYSEX7_MAX_PAYLOAD: usize = 64 * 1024;
 
 /// The most bytes one SysEx7 packet adds to a buffer: six payload bytes and
@@ -476,8 +477,8 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> SysexAssembler<B> {
     /// If `message` is not one this assembler returned this block.
     #[must_use]
     pub fn message(&self, message: SysexRef) -> SysexMessage<'_> {
-        // The assembler wrote this range as `0xF0`, 7-bit packet bytes, `0xF7`.
-        SysexMessage(&self.bytes()[message.range()])
+        SysexMessage::from_framed(&self.bytes()[message.range()])
+            .expect("a completed message is F0, 7-bit bytes, F7")
     }
 
     /// Messages dropped whole since this assembler was made (a

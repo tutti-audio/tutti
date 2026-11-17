@@ -333,6 +333,9 @@ impl TryFrom<(SysexStatus, u8, [U7; 6])> for Sysex7Packet {
         if len > 6 {
             return Err("a SysEx7 packet holds at most six bytes");
         }
+        if bytes[usize::from(len)..].iter().any(|b| b.get() != 0) {
+            return Err("a SysEx7 packet's bytes past its length are zero");
+        }
         Ok(Self { status, len, bytes })
     }
 }
@@ -353,6 +356,9 @@ impl TryFrom<(SysexStatus, u8, u8, [u8; 13])> for Sysex8Packet {
     ) -> Result<Self, Self::Error> {
         if len > 13 {
             return Err("a SysEx8 packet holds at most 13 bytes");
+        }
+        if bytes[usize::from(len)..].iter().any(|&b| b != 0) {
+            return Err("a SysEx8 packet's bytes past its length are zero");
         }
         Ok(Self {
             status,

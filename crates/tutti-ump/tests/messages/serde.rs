@@ -6,9 +6,10 @@ use proptest::prelude::*;
 use serde::{Serialize, de::DeserializeOwned};
 use std::fmt::Debug;
 use tutti_ump::{
-    ArticulationAttribute, BendValue, CCNumber, ChordType, ControlValue, FirstGroup,
+    ArticulationAttribute, BendValue, CCNumber, ChordType, ControlValue, Field, FirstGroup,
     FunctionBlockCount, FunctionBlockId, GroupSpan, Message, MidiChannel, MidiGroup, MonoChannels,
-    MpeChannels, Pitch, SharpsFlats, Sysex7Packet, Sysex8Packet, TicksPerQuarterNote, Ump,
+    MpeChannels, Pitch, ReservedAccents, ReservedAttribute, SharpsFlats, Sysex7Packet,
+    Sysex8Packet, TicksPerQuarterNote, Ump,
 };
 
 use crate::common;
@@ -156,4 +157,46 @@ proptest! {
             prop_assert_eq!(back, message);
         }
     }
+}
+
+/// A reserved value is read back only when it is one: the decoder's own reserved
+/// raws round-trip, and a raw in range, an attribute type a table defines, or
+/// accents of a defined shape are refused.
+#[test]
+fn a_reserved_value_that_is_not_reserved_is_refused() {
+    let reserved: Field<FunctionBlockId> = serde_json::from_str(r#"{"Reserved":40}"#).unwrap();
+    assert_eq!(
+        serde_json::to_string(&reserved).unwrap(),
+        r#"{"Reserved":40}"#
+    );
+    let value: Field<FunctionBlockId> = serde_json::from_str(r#"{"Value":5}"#).unwrap();
+    assert_eq!(value.value(), Some(FunctionBlockId::of(5)));
+    assert!(serde_json::from_str::<Field<FunctionBlockId>>(r#"{"Reserved":5}"#).is_err());
+    assert!(serde_json::from_str::<Field<FunctionBlockId>>(r#"{"Value":32}"#).is_err());
+
+    let attribute: ReservedAttribute = serde_json::from_str("[4,9]").unwrap();
+    assert_eq!((attribute.kind(), attribute.data()), (4, 9));
+    for kind in [0u8, 3, 0x10, 0x1F] {
+        assert!(serde_json::from_str::<ReservedAttribute>(&format!("[{kind},0]")).is_err());
+    }
+
+    let accents: ReservedAccents = serde_json::from_str("[0,3,0]").unwrap();
+    assert_eq!(accents.parts(), [0, 3, 0]);
+    for parts in ["[3,0,0]", "[3,2,0]", "[3,2,1]"] {
+        assert!(
+            serde_json::from_str::<ReservedAccents>(parts).is_err(),
+            "{parts}"
+        );
+    }
+}
+
+/// A packet's bytes past its length are zero, as `take` and `new` leave them.
+#[test]
+fn a_packet_with_bytes_past_its_length_is_refused() {
+    assert!(serde_json::from_str::<Sysex7Packet>(r#"["Complete",1,[5,0,0,0,0,0]]"#).is_ok());
+    assert!(serde_json::from_str::<Sysex7Packet>(r#"["Complete",1,[5,9,0,0,0,0]]"#).is_err());
+    let eight =
+        |len: u8, tail: u8| format!(r#"["Complete",0,{len},[5,{tail},0,0,0,0,0,0,0,0,0,0,0]]"#);
+    assert!(serde_json::from_str::<Sysex8Packet>(&eight(1, 0)).is_ok());
+    assert!(serde_json::from_str::<Sysex8Packet>(&eight(1, 9)).is_err());
 }
