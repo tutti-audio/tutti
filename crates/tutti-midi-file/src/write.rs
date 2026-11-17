@@ -5,7 +5,7 @@ use std::fs::OpenOptions;
 use std::io::{ErrorKind, Write};
 use std::path::Path;
 
-use crate::{Error, MidiFile, Result};
+use crate::{Error, IoStep, MidiFile, Result};
 
 /// What a write does when `path` already holds a file.
 #[derive(Clone, Copy, Debug)]
@@ -64,21 +64,28 @@ impl WriteOptions<'_> {
             _ => Path::new("."),
         };
         // `open` with no explicit mode creates `0o666` under the umask.
-        let mut staged = tempfile::Builder::new().make_in(dir, |temp| {
-            OpenOptions::new().write(true).create_new(true).open(temp)
-        })?;
-        staged.write_all(&bytes)?;
-        staged.as_file().sync_all()?;
+        let mut staged = tempfile::Builder::new()
+            .make_in(dir, |temp| {
+                OpenOptions::new().write(true).create_new(true).open(temp)
+            })
+            .map_err(Error::io(IoStep::Stage))?;
+        staged.write_all(&bytes).map_err(Error::io(IoStep::Stage))?;
+        staged
+            .as_file()
+            .sync_all()
+            .map_err(Error::io(IoStep::Stage))?;
         match existing {
             Existing::Replace => {
-                staged.persist(&path).map_err(|e| e.error)?;
+                staged
+                    .persist(&path)
+                    .map_err(|e| Error::io(IoStep::Rename)(e.error))?;
             }
             Existing::Refuse => {
                 staged.persist_noclobber(&path).map_err(|e| {
                     if e.error.kind() == ErrorKind::AlreadyExists {
                         Error::Exists { path: path.clone() }
                     } else {
-                        Error::Io(e.error)
+                        Error::io(IoStep::Rename)(e.error)
                     }
                 })?;
             }

@@ -76,13 +76,16 @@ fn session() -> Result<Session, Error> {
 fn file() -> Result<MidiFile, Box<dyn std::error::Error>> {
     let track: Track = (0..4u8)
         .flat_map(|n| {
-            let at = Tick::quarters(n.into(), DIVISION);
+            let at = Tick::quarters(n.into(), DIVISION).expect("four quarters fit");
             let key = NoteNumber::of(60 + 2 * n);
             let (on, off): (FileEvent, FileEvent) = (
                 Message::midi1(MidiChannel::FIRST, Voice1::note_on(key, U7::of(100))).into(),
                 Message::midi1(MidiChannel::FIRST, Voice1::note_off(key, U7::of(64))).into(),
             );
-            [(at, on), (at + 240, off)]
+            [
+                (at, on),
+                (at.checked_add(240).expect("a quarter fits"), off),
+            ]
         })
         .collect();
     let built = MidiFile::smf(SmfFormat::SingleTrack, SMF_DIVISION, vec![track])?;

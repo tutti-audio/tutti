@@ -1,0 +1,279 @@
+//! The dynamic EQ band [`DynamicEqNode`]: an SVF bell whose gain follows the level of a
+//! band-passed key, and its de-esser configuration.
+
+use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_dsp::{COEFF_INTERVAL, DynamicEqBank, DynamicEqControls, DynamicMode, KeySource};
+use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
+use tutti_types::{
+    BusTopology, ChannelLayout, CompressionRatio, Db, Hz, MaxBlock, Q, SampleRate, Seconds, Tail,
+};
+
+use crate::kernel::{ControlLanes, Kernel, KernelNode};
+
+/// What a [`DynamicEqNode`] is made from: its width, the band's centre and Q, and optionally
+/// the curve, the times, the range, the mode and the key.
+///
+/// The controls are the compressor's where the meaning is the same
+/// ([`threshold`](Self::threshold), [`knee`](Self::knee), [`ratio`](Self::ratio),
+/// [`attack`](Self::attack), [`release`](Self::release), [`key`](Self::key)); the
+/// [`range`](Self::range) and the [`mode`](Self::mode) are the band's.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DynamicEqConfig {
+    width: ChannelLayout,
+    key: KeySource,
+    mode: DynamicMode,
+    controls: DynamicEqControls,
+}
+
+impl DynamicEqConfig {
+    /// A downward band of `width` channels at `center` and `q`, listening to its own signal,
+    /// that does nothing until a threshold and a ratio are given: threshold 0 dB, a hard knee,
+    /// ratio 1, instant times and a range of 12 dB.
+    #[must_use]
+    pub fn new(width: impl Into<ChannelLayout>, center: Hz, q: Q) -> Self {
+        Self {
+            width: width.into(),
+            key: KeySource::Own,
+            mode: DynamicMode::Downward,
+            controls: DynamicEqControls {
+                center,
+                q,
+                ..DynamicEqControls::DEFAULT
+            },
+        }
+    }
+
+    /// A de-esser of `width` channels on the sibilance at `center`: a **downward** band
+    /// whose detector hears the key through the band-pass at the same centre.
+    ///
+    /// It is a bell rather than a high shelf because the reduction acts where the detector
+    /// listens: a shelf would also dull the air and the consonants above the band that the
+    /// detector never judged sibilant, and a bell at the band's Q leaves them untouched.
+    /// It starts at a Q of 2 (a band as wide as half its centre, which holds the spread of
+    /// "s" and "sh"), a threshold of -24 dB, a ratio of 4, a 6 dB knee, a 0.5 ms attack, a 40 ms
+    /// release and a range of 10 dB; each is [`threshold`](Self::threshold),
+    /// [`ratio`](Self::ratio) and so on, as for any band. A voice's sibilance is usually
+    /// between 4 and 9 kHz.
+    #[must_use]
+    pub fn de_esser(width: impl Into<ChannelLayout>, center: Hz) -> Self {
+        Self::new(width, center, Q(2.0))
+            .threshold(Db(-24.0))
+            .ratio(CompressionRatio(4.0))
+            .knee(Db(6.0))
+            .attack(Seconds(0.0005))
+            .release(Seconds(0.04))
+            .range(Db(10.0))
+    }
+
+    /// The level, in dB, at which the band starts to move.
+    #[must_use]
+    pub fn threshold(self, threshold: Db) -> Self {
+        self.with(|c| c.threshold = threshold)
+    }
+
+    /// The width of the soft knee in dB, centred on the threshold; 0 is a hard knee.
+    #[must_use]
+    pub fn knee(self, knee: Db) -> Self {
+        self.with(|c| c.knee = knee)
+    }
+
+    /// dB in per dB out past the threshold, as the compressor's ratio; at least 1.
+    #[must_use]
+    pub fn ratio(self, ratio: CompressionRatio) -> Self {
+        self.with(|c| c.ratio = ratio)
+    }
+
+    /// How fast the gain change grows: the time constant of a one-pole smoother.
+    #[must_use]
+    pub fn attack(self, attack: Seconds) -> Self {
+        self.with(|c| c.attack = attack)
+    }
+
+    /// How fast the gain change falls back toward flat.
+    #[must_use]
+    pub fn release(self, release: Seconds) -> Self {
+        self.with(|c| c.release = release)
+    }
+
+    /// The most the band's gain moves from flat, in dB and not below 0.
+    #[must_use]
+    pub fn range(self, range: Db) -> Self {
+        self.with(|c| c.range = range)
+    }
+
+    /// Whether the band cuts above its threshold or boosts below it.
+    #[must_use]
+    pub fn mode(self, mode: DynamicMode) -> Self {
+        Self { mode, ..self }
+    }
+
+    /// Where the detector listens: the signal itself, or a side-chain bus as wide as the
+    /// signal, which **must be wired** (an unwired key is silence, which leaves a downward
+    /// band flat and an upward one at its full boost).
+    #[must_use]
+    pub fn key(self, key: KeySource) -> Self {
+        Self { key, ..self }
+    }
+
+    fn with(mut self, f: impl FnOnce(&mut DynamicEqControls)) -> Self {
+        f(&mut self.controls);
+        self
+    }
+}
+
+/// One EQ band of any width, an SVF bell whose gain follows the level of the signal in the
+/// band, linked across the channels: `channels = N` means N audio inputs, then (for a
+/// side-chain key) N key inputs, and N outputs.
+///
+/// A [`KernelNode`] over [`DynamicEqKernel`], the detector, the curve and the bell being
+/// [`DynamicEqBank`]'s (see it for the detector and the gain's glide); this file holds the
+/// cells and how the graph reaches them. Made from a [`DynamicEqConfig`]
+/// (`DynamicEqNode::from`).
+///
+/// # The key
+///
+/// The detector listens to a [`KeySource`], chosen when the node is built: the signal itself
+/// by default, or a second bus after the audio inputs (see [`CompressorNode`](crate::CompressorNode)
+/// for the wiring). Either way it hears the key through a band-pass at the band's centre and
+/// Q, and the signal the bell is applied to is filtered only by the bell.
+///
+/// # Controls
+///
+/// Threshold, knee, ratio, attack, release and range ([`UnitParam::Range`](tutti_types::UnitParam::Range),
+/// [`Db`]), then the band's centre ([`UnitParam::Cutoff`](tutti_types::UnitParam::Cutoff),
+/// [`Hz`]) and Q ([`UnitParam::Q`](tutti_types::UnitParam::Q), [`Q`]), are live
+/// [`Params`](crate::Params) shared across clones. They are on the stream grid (16 frames from
+/// the last reset, [`Kernel::GRID`]), so the render does not depend on how the stream is cut
+/// into blocks; the curve and the times land whole and the bell glides to a new centre or Q.
+///
+/// The tail is unknown: a bell rings for as long as its Q says.
+pub type DynamicEqNode = KernelNode<DynamicEqKernel>;
+
+impl From<DynamicEqConfig> for DynamicEqNode {
+    /// # Panics
+    ///
+    /// Past 16 channels: a band is one bus.
+    fn from(config: DynamicEqConfig) -> Self {
+        let input = BusTopology::assumed(config.width).expect("a band is at most 16 channels wide");
+        Self::with_kernel(
+            DynamicEqKernel::new(input, config.key, config.mode),
+            DynamicEqSet,
+            config.controls,
+        )
+    }
+}
+
+/// The band's controls: threshold, knee, ratio, attack, release, range, then the centre and Q.
+#[derive(Clone, Copy, Debug)]
+pub struct DynamicEqSet;
+
+control_set! {
+    DynamicEqSet(_s): DynamicEqControls = DynamicEqControls::DEFAULT;
+    live: (all);
+    Threshold => Db = threshold { whole },
+    Knee => Db = knee { whole },
+    Ratio => CompressionRatio = ratio { whole },
+    Attack => Seconds = attack { whole },
+    Release => Seconds = release { whole },
+    Range => Db = range { whole },
+    // The bell's and the detector's coefficients glide in the bank, over one grid period.
+    Cutoff => Hz = center { whole },
+    Q => Q = q { whole };
+
+    fn defaults(&self) -> DynamicEqControls {
+        DynamicEqControls::DEFAULT
+    }
+}
+
+/// The band as a [`Kernel`]: a [`DynamicEqBank`] sized at the prepared rate, its detector on
+/// the [`KeySource`] it was built with.
+#[derive(Clone, Debug)]
+pub struct DynamicEqKernel {
+    input: BusTopology,
+    key: KeySource,
+    mode: DynamicMode,
+    /// `None` until [`prepare`](Kernel::prepare).
+    bank: Option<DynamicEqBank>,
+    /// Whether the first retarget after `prepare` has landed.
+    landed: bool,
+}
+
+impl DynamicEqKernel {
+    fn new(input: BusTopology, key: KeySource, mode: DynamicMode) -> Self {
+        Self {
+            input,
+            key,
+            mode,
+            bank: None,
+            landed: false,
+        }
+    }
+}
+
+impl Kernel for DynamicEqKernel {
+    type Set = DynamicEqSet;
+
+    /// A cell that moves reaches the render within 16 frames, wherever the blocks fall.
+    const GRID: usize = COEFF_INTERVAL;
+
+    /// The input bus, then, for a [`KeySource::Sidechain`], the key bus as wide; one output
+    /// bus where the input is.
+    fn shape(&self) -> Shape {
+        let output = Bus::banded(self.input, BusRole::Main, 1).expect("one band is a bus");
+        let main = Buses::main(self.input);
+        let inputs = match self.key {
+            KeySource::Own => main,
+            KeySource::Sidechain => main
+                .with(Bus::new(self.input, BusRole::Sidechain))
+                .expect("a main bus and a key are two buses"),
+        };
+        Shape::buses(inputs, Buses::NONE.with(output).expect("one bus")).with_cost(Cost::Moderate)
+    }
+
+    fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
+        self.bank = Some(DynamicEqBank::new(self.mode, self.input.layout(), rate));
+        self.landed = false;
+    }
+
+    fn reset(&mut self) {
+        if let Some(bank) = &mut self.bank {
+            bank.reset();
+        }
+    }
+
+    fn retarget(&mut self, controls: &DynamicEqControls) {
+        let Some(bank) = &mut self.bank else { return };
+        bank.aim(controls);
+        if !self.landed {
+            bank.settle();
+            self.landed = true;
+        }
+    }
+
+    fn render<S: Float>(
+        &mut self,
+        input: Planes<'_, S>,
+        lanes: ControlLanes<'_, S>,
+        output: PlanesMut<'_, '_, S>,
+    ) {
+        self.render_keyed(input, input, lanes, output);
+    }
+
+    fn render_keyed<S: Float>(
+        &mut self,
+        input: Planes<'_, S>,
+        key: Planes<'_, S>,
+        _: ControlLanes<'_, S>,
+        output: PlanesMut<'_, '_, S>,
+    ) {
+        if let Some(bank) = &mut self.bank {
+            bank.process(key, input, output);
+        }
+    }
+
+    /// A bell rings for as long as its Q says, which is too dear to find per block: unknown,
+    /// so the graph's tail fold never reads it as none.
+    fn tail(&self) -> Tail {
+        Tail::Unknown
+    }
+}

@@ -66,10 +66,11 @@
 //! else: the `f64` stays inside the node.
 
 use crate::OfflineWait;
-use crate::{AudioSlab, FATES, Fate, HarmonyInputs, PluginBridge, SlabAccessError, SlabWriter};
+use crate::{AudioSlab, FATES, Fate, HarmonyInputs, PluginBridge, SlabWriter};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
+use tutti_plugin_types::SlabAccessError;
 use tutti_plugin_types::{
     BlockStatus, ChunkCounters, MidiEventVec, NoteExpressionChanges, ParameterChanges,
     SampleFormat, TransportChanges, TransportInfo, WireMidi,

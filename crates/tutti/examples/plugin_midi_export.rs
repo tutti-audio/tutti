@@ -161,7 +161,7 @@ fn phrase(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     const TPQ: u16 = 480;
     const DIVISION: TicksPerQuarterNote = TicksPerQuarterNote::of(TPQ);
     const SMF_DIVISION: SmfDivision = SmfDivision::of(TPQ);
-    let beat = |n| Tick::quarters(n, DIVISION);
+    let beat = |n| Tick::quarters(n, DIVISION).expect("eight quarters fit");
     let mut track = Track::new()
         .meta(Tick(0), Meta::tempo(Bpm::of(120.0)))
         .meta(beat(4), Meta::tempo(Bpm::of(60.0))); // 60 BPM from beat 4
@@ -169,7 +169,7 @@ fn phrase(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
         let key = NoteNumber::of(60 + n);
         track = track.note(
             beat(n.into()),
-            u64::from(TPQ),
+            beat(u64::from(n) + 1),
             MidiChannel::FIRST,
             key,
             U7::of(100),
