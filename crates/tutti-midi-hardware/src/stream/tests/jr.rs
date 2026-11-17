@@ -287,7 +287,7 @@ fn a_jr_input_of_a_device_without_txjr_is_timed_by_arrival() {
         rx_jr: true,
         tx_jr: false,
     }))
-    .with_function_block(block());
+    .block(block());
     let (wire, mut rig, stream) = settled(InputTiming::JitterReduction, device);
     assert!(!stream.config().tx_jr);
     let (frame, heard) = note_delayed_by_10ms(&wire, &mut rig);
