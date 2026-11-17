@@ -85,7 +85,7 @@ impl SampleSpan {
     #[inline]
     #[must_use]
     pub fn to_samples_floor(self) -> Samples {
-        Samples::new(self.0.floor() as usize)
+        Samples::new(libm::floor(self.0) as usize)
     }
 
     /// Whole frames that hold the span, rounded **up**: the size of a buffer
@@ -93,7 +93,7 @@ impl SampleSpan {
     #[inline]
     #[must_use]
     pub fn to_samples_ceil(self) -> Samples {
-        Samples::new(self.0.ceil() as usize)
+        Samples::new(libm::ceil(self.0) as usize)
     }
 
     /// The interpolation fraction between [`to_samples_floor`](Self::to_samples_floor)
@@ -101,7 +101,7 @@ impl SampleSpan {
     #[inline]
     #[must_use]
     pub fn fract(self) -> f64 {
-        self.0 - self.0.floor()
+        self.0 - libm::floor(self.0)
     }
 
     /// `self - rhs`, or `None` when `rhs` is longer.

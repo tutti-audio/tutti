@@ -8,7 +8,10 @@
 //! meters any port of the graph, offline too.
 
 #![forbid(unsafe_code)]
+#![cfg_attr(not(test), no_std)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
+
+extern crate alloc;
 
 mod load;
 

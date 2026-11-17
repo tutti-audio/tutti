@@ -2,9 +2,9 @@
 //! its own signal.
 
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_dsp::{COEFF_INTERVAL, GateBank, GateControls, GateLanes, KeySource};
+use tutti_dsp::{COEFF_INTERVAL, GateBank, GateControls, GateLanes, KeyFilter, KeySource};
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
-use tutti_types::{BusTopology, Db, MaxBlock, SampleRate, Seconds, Tail};
+use tutti_types::{BusTopology, Db, Hz, MaxBlock, Q, SampleRate, Seconds, Tail};
 
 use crate::kernel::{ControlLanes, Kernel, KernelNode};
 
@@ -32,6 +32,16 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 ///
 /// The node declares no tail: the release decays after the key goes silent, but it only
 /// scales, so a silent input is a silent output.
+///
+/// # The key filter
+///
+/// [`key_filter`](Self::key_filter) puts a [`KeyFilter`] on the key: the detector hears the
+/// key through a high-pass or a band-pass, and the signal the gate is applied to is never
+/// filtered. It is off by default. A node built with one has two more controls after the
+/// range, the cutoff ([`UnitParam::Cutoff`](tutti_types::UnitParam::Cutoff), [`Hz`], 100 Hz) and
+/// the Q ([`UnitParam::Q`](tutti_types::UnitParam::Q), [`Q`], Butterworth); a node with
+/// [`KeyFilter::Off`] declares neither, as a reverb that cannot freeze declares no freeze.
+/// The filter's coefficients glide to a new cutoff over one grid period.
 ///
 /// # Controls
 ///
@@ -83,7 +93,25 @@ impl GateNode {
     /// the rate [`Node::prepare`](tutti_graph::Node::prepare) hands it.
     #[must_use]
     pub fn new(input: BusTopology, key: KeySource, controls: GateControls) -> Self {
-        Self::with_kernel(GateKernel::new(input, key), GateSet, controls)
+        Self::with_kernel(
+            GateKernel::new(input, key, KeyFilter::Off),
+            GateSet::new(KeyFilter::Off, controls.key_cutoff, controls.key_q),
+            controls,
+        )
+    }
+
+    /// This gate with its detector hearing the key through `filter`, starting at the
+    /// `key_cutoff` and `key_q` of the controls it was built with (100 Hz and Butterworth in
+    /// the default's). The node gains the cutoff and Q controls after its others;
+    /// [`KeyFilter::Off`], the default, has none, and the two fields of the controls are only
+    /// what a later filter starts at. Chain it onto the constructor, before the node is
+    /// inserted: the values its controls hold carry over.
+    #[must_use]
+    pub fn key_filter(self, filter: KeyFilter) -> Self {
+        self.rebuilt(
+            |k| k.with_key_filter(filter),
+            |set| set.with_key_filter(filter),
+        )
     }
 
     /// Returns a mono gate that listens to its own signal: 1 input, 1 output.
@@ -105,20 +133,46 @@ impl GateNode {
     }
 }
 
-/// The gate's controls: threshold, attack, hold, release and range.
+/// The gate's controls: threshold, attack, hold, release and range, then the key filter's
+/// cutoff and Q if its [`KeyFilter`] is not [`Off`](KeyFilter::Off).
 #[derive(Clone, Copy, Debug)]
-pub struct GateSet;
+pub struct GateSet {
+    filter: KeyFilter,
+    /// The cutoff the filter starts at: a part the ports do not carry until the node has a
+    /// filter, so a node given a filter later starts there.
+    cutoff: Hz,
+    /// The Q the filter starts at, held as `cutoff` is.
+    q: Q,
+}
+
+impl GateSet {
+    fn new(filter: KeyFilter, cutoff: Hz, q: Q) -> Self {
+        Self { filter, cutoff, q }
+    }
+
+    /// This set with the key filter `filter`.
+    fn with_key_filter(self, filter: KeyFilter) -> Self {
+        Self { filter, ..self }
+    }
+}
 
 control_set! {
-    GateSet(_s): GateControls = GateControls::DEFAULT;
-    live: (all);
+    GateSet(s): GateControls = GateControls {
+        key_cutoff: s.cutoff,
+        key_q: s.q,
+        ..GateControls::DEFAULT
+    };
+    live: (if s.filter == KeyFilter::Off { 5 } else { 7 });
     Threshold => Db = threshold { fast },
     Attack => Seconds = attack { whole },
     Hold => Seconds = hold { whole },
     Release => Seconds = release { whole },
     // The range glides in the bank, over `GAIN_GLIDE`: the reader must not ramp it
     // across the block as well.
-    Range => Db = range { whole };
+    Range => Db = range { whole },
+    // The filter's coefficients glide in the bank, over one grid period.
+    Cutoff => Hz = key_cutoff { whole },
+    Q => Q = key_q { whole };
 
     fn defaults(&self) -> GateControls {
         GateControls::DEFAULT
@@ -135,6 +189,7 @@ control_set! {
 pub struct GateKernel {
     input: BusTopology,
     key: KeySource,
+    filter: KeyFilter,
     /// `None` until [`prepare`](Kernel::prepare).
     bank: Option<GateBank>,
     /// Whether the first retarget after `prepare` has landed.
@@ -143,13 +198,20 @@ pub struct GateKernel {
 
 impl GateKernel {
     /// A gate on `input` whose detector reads `key`.
-    fn new(input: BusTopology, key: KeySource) -> Self {
+    fn new(input: BusTopology, key: KeySource, filter: KeyFilter) -> Self {
         Self {
             input,
             key,
+            filter,
             bank: None,
             landed: false,
         }
+    }
+
+    /// This kernel with its detector's key through `filter`.
+    fn with_key_filter(mut self, filter: KeyFilter) -> Self {
+        self.filter = filter;
+        self
     }
 }
 
@@ -174,7 +236,7 @@ impl Kernel for GateKernel {
     }
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
-        self.bank = Some(GateBank::new(rate));
+        self.bank = Some(GateBank::new(rate).key_filter(self.filter, self.input.layout()));
         self.landed = false;
     }
 
@@ -244,6 +306,7 @@ mod tests {
             hold: Seconds::new(hold),
             release: Seconds::new(release),
             range: Db(-80.0),
+            ..GateControls::DEFAULT
         }
     }
 
@@ -448,6 +511,7 @@ mod tests {
             hold: Seconds(0.03),
             release: Seconds(0.25),
             range: Db(-15.0),
+            ..GateControls::DEFAULT
         };
         for node in [
             GateNode::new(BusTopology::STEREO, KeySource::Sidechain, c),

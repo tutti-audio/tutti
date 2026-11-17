@@ -48,7 +48,7 @@ tutti-curve = { version = "0.0.1", path = "../tutti-curve" }
 tutti-transport = { version = "0.0.1", path = "../tutti-transport" }
 
 # `VbapError`.
-thiserror = { workspace = true }
+thiserror = { workspace = true, features = ["std"] }
 serde = { version = "1", optional = true, default-features = false, features = ["derive"] }
 
 [dev-dependencies]

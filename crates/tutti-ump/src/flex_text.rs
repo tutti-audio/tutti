@@ -1,94 +1,9 @@
-//! A text as Flex Data packets (M2-104 section 7.5.9): the writer of the
-//! Flex text format, the way [`SysexMessage::packets`](crate::SysexMessage::packets) is the
-//! writer of SysEx7.
+//! The reader of Flex Data text (M2-104 sections 7.5.2 and 7.5.9): the
+//! [`FlexTextAssembler`] joins the packets of a text message. The writer is
+//! in `flex_write`.
 
-use core::iter::FusedIterator;
-
-use crate::{
-    Flex, FlexAddress, FlexTextKind, Form, Message, MidiGroup, TextPackets, Ump, text_packets,
-};
-
-/// The bytes one Flex text packet carries.
-const BYTES_PER_PACKET: usize = 12;
-
-/// The most packets one Flex Data message has (M2-104 section 7.5.1).
-const MAX_PACKETS: usize = 32;
-
-/// The longest text one Flex Data message carries: a `Start`, 30 `Continue`
-/// and an `End` of 12 bytes each.
-pub const FLEX_TEXT_MAX_LEN: usize = MAX_PACKETS * BYTES_PER_PACKET;
-
-/// The Flex text packets of `text`, `None` if it holds a NUL or is longer than
-/// [`FLEX_TEXT_MAX_LEN`] bytes (a Flex Data message has at most 32 packets).
-///
-/// A text of up to 12 bytes is one `Complete` packet (an empty one is a
-/// `Complete` of zeros). A longer one is a `Start`, any number of `Continue`,
-/// then an `End`, each carrying 12 bytes but the last, which carries one to 12
-/// and is padded with zeros (see [`text_packets`]). A NUL
-/// is refused because zero is the padding: a reader cannot tell it from the end
-/// of the text. Nothing is allocated, and the packets carry no timing.
-///
-/// ```
-/// use tutti_ump::{
-///     Flex, FlexAddress, FlexTextKind, Form, Message, MidiGroup, flex_text_packets,
-/// };
-///
-/// let mut packets =
-///     flex_text_packets(MidiGroup::of(0), FlexAddress::Group, FlexTextKind::Lyrics, "thirteen byte")
-///         .unwrap();
-/// assert_eq!(packets.len(), 2);
-/// let Ok(Message::Flex(_, Flex::Text { form, .. })) = packets.next().unwrap().decode() else {
-///     unreachable!()
-/// };
-/// assert_eq!(form, Form::Start);
-/// ```
-#[must_use]
-pub fn flex_text_packets(
-    group: MidiGroup,
-    address: FlexAddress,
-    kind: FlexTextKind,
-    text: &str,
-) -> Option<FlexTextPackets<'_>> {
-    (text.len() <= FLEX_TEXT_MAX_LEN && !text.as_bytes().contains(&0)).then_some(FlexTextPackets {
-        group,
-        address,
-        kind,
-        packets: text_packets(text.as_bytes()),
-    })
-}
-
-/// The packets of one text; see [`flex_text_packets`].
-#[derive(Clone, Debug)]
-pub struct FlexTextPackets<'a> {
-    group: MidiGroup,
-    address: FlexAddress,
-    kind: FlexTextKind,
-    packets: TextPackets<'a, BYTES_PER_PACKET>,
-}
-
-impl Iterator for FlexTextPackets<'_> {
-    type Item = Ump;
-
-    fn next(&mut self) -> Option<Ump> {
-        let (form, bytes) = self.packets.next()?;
-        Some(Ump::from(Message::Flex(
-            self.group,
-            Flex::Text {
-                address: self.address,
-                kind: self.kind,
-                form,
-                bytes,
-            },
-        )))
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.packets.size_hint()
-    }
-}
-
-impl ExactSizeIterator for FlexTextPackets<'_> {}
-impl FusedIterator for FlexTextPackets<'_> {}
+use crate::flex_write::BYTES_PER_PACKET;
+use crate::{Flex, FlexAddress, FlexTextKind, Form, Message, MidiGroup, Ump};
 
 /// How many Groups there are, so how many messages can be open at once.
 const GROUPS: usize = 16;
@@ -144,7 +59,7 @@ pub enum FlexTextStep<'a> {
 }
 
 /// Reassembles the multi-packet Flex text messages (M2-104 section 7.5.9) that
-/// [`flex_text_packets`] writes: the reader of the Flex text format, as
+/// [`flex_text_packets`](crate::flex_text_packets) writes: the reader of the Flex text format, as
 /// [`SysexAssembler`](crate::SysexAssembler) is of SysEx7. It holds no
 /// allocation after [`new`](Self::new): its room is the buffer the caller gives.
 ///
@@ -176,12 +91,14 @@ pub enum FlexTextStep<'a> {
 ///
 /// ```
 /// use tutti_ump::{
-///     FlexAddress, FlexTextAssembler, FlexTextKind, FlexTextStep, MidiGroup, flex_text_packets,
+///     FlexAddress, FlexTextAssembler, FlexTextStep, MidiGroup, PlainTextKind, Text,
+///     flex_text_packets,
 /// };
 ///
 /// let mut assembler = FlexTextAssembler::new([0u8; 64], 64, 1);
 /// let group = MidiGroup::of(0);
-/// let packets = flex_text_packets(group, FlexAddress::Group, FlexTextKind::Lyrics, "thirty-one bytes of text, in all").unwrap();
+/// let text = Text::try_from("thirty-one bytes of text, in all").unwrap();
+/// let packets = flex_text_packets(group, FlexAddress::Group, PlainTextKind::Copyright, &text);
 /// let mut done = None;
 /// for ump in packets {
 ///     if let FlexTextStep::Done(text) = assembler.push(ump) {

@@ -17,6 +17,10 @@ pub type Seen = Arc<Mutex<Vec<(usize, u64, Ump)>>>;
 
 /// The frame and event of each entry of `seen`, the input dropped: what a sink of
 /// one input logged.
+///
+/// # Panics
+///
+/// Panics when the log's lock is poisoned.
 #[must_use]
 pub fn heard(seen: &Seen) -> Vec<(u64, Ump)> {
     seen.lock()
@@ -38,7 +42,7 @@ pub enum Output {
 /// A node with `ports` event inputs that logs the MIDI on each input, and a
 /// silent mono output unless built [`Output::None`]. A fork of it (`ForkByClone`)
 /// logs into the same list.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Sink {
     ports: u16,
     seen: Seen,
@@ -96,6 +100,7 @@ impl Node for Sink {
 
 /// A graph with a [`Sink`] at [`SINK`](Self::SINK), an editor to build what
 /// feeds it and an executor to render it.
+#[derive(Debug)]
 pub struct EventRig {
     /// The graph's editor: insert the sources, then [`feed`](Self::feed) and commit.
     pub editor: Editor,
@@ -189,6 +194,10 @@ impl EventRig {
     }
 
     /// Everything the sink has received, taken.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the log's lock is poisoned.
     #[must_use]
     pub fn take(&self) -> Vec<(usize, u64, Ump)> {
         std::mem::take(&mut *self.seen.lock().expect("the log is not poisoned"))
@@ -199,6 +208,7 @@ impl EventRig {
 type Reading = Option<(Instant, Moment)>;
 
 /// A block clock a test writes by hand, as the engine does each render call.
+#[derive(Debug)]
 pub struct BlockClock(Arc<Mutex<Reading>>);
 
 impl Default for BlockClock {
@@ -221,6 +231,10 @@ impl BlockClock {
     }
 
     /// A reader of the clock, as a device inlet takes it.
+    ///
+    /// # Panics
+    ///
+    /// The reader panics when the clock's lock is poisoned.
     #[must_use]
     pub fn reader(&self) -> Arc<dyn Fn() -> Option<(Instant, Moment)> + Send + Sync> {
         let cell = Arc::clone(&self.0);
@@ -228,6 +242,10 @@ impl BlockClock {
     }
 
     /// Says that OS time `os` is frame `frame` at `rate`.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the clock's lock is poisoned.
     pub fn write(&mut self, os: Instant, frame: Frame, rate: SampleRate) {
         *self.0.lock().expect("the clock is not poisoned") = Some((os, Moment::new(frame, rate)));
     }

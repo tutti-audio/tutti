@@ -1,6 +1,8 @@
 use crate::error::TempoError;
 use crate::map::TempoMap;
 use crate::point::{TempoPoint, Transition};
+use alloc::vec;
+use alloc::vec::Vec;
 use tutti_types::{Beat, Bpm};
 
 /// A tempo map written left to right, where a trailing ramp cannot be written.

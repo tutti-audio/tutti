@@ -5,16 +5,32 @@
 //! the Flex text format, so each property is checked for both.
 
 use tutti_ump::{
-    Flex, FlexAddress, FlexTextAssembler, FlexTextKind, FlexTextStep, Form, Message, MidiGroup,
-    Ump, flex_text_packets,
+    Flex, FlexAddress, FlexTextAssembler, FlexTextKind, FlexTextStep, Form, LyricKind, Message,
+    MidiGroup, Syllable, SyllableBody, SyllableEnd, SyllableError, TextError, Ump, WordEnd,
+    flex_lyric_packets, flex_melisma_end_packets,
 };
 
 const G0: MidiGroup = MidiGroup::of(0);
-const KINDS: [FlexTextKind; 2] = [FlexTextKind::Lyrics, FlexTextKind::Ruby];
+const KINDS: [LyricKind; 2] = [LyricKind::Lyrics, LyricKind::Ruby];
 
-fn parts(kind: FlexTextKind, text: &str) -> Vec<(Form, [u8; 12])> {
-    flex_text_packets(G0, FlexAddress::Group, kind, text)
-        .unwrap()
+/// The syllable of `text`: its body, and the space, CR or CR LF it ends with.
+fn syllable(text: &str) -> Syllable {
+    let body = text.trim_end_matches([' ', '\r', '\n']);
+    let end = match &text[body.len()..] {
+        "" => SyllableEnd::None,
+        " " => SyllableEnd::Word,
+        "\r" => SyllableEnd::Line,
+        "\r\n" => SyllableEnd::Paragraph,
+        other => panic!("{other:?} is no syllable end"),
+    };
+    Syllable {
+        body: SyllableBody::try_from(body).unwrap(),
+        end,
+    }
+}
+
+fn parts(kind: LyricKind, text: &str) -> Vec<(Form, [u8; 12])> {
+    flex_lyric_packets(G0, FlexAddress::Group, kind, &syllable(text))
         .map(|ump| match ump.decode() {
             Ok(Message::Flex(_, Flex::Text { form, bytes, .. })) => (form, bytes),
             other => panic!("not Flex text: {other:?}"),
@@ -34,16 +50,26 @@ fn packet(kind: FlexTextKind, form: Form, bytes: [u8; 12]) -> Ump {
     ))
 }
 
-fn read(kind: FlexTextKind, text: &str) -> String {
+fn read_all(packets: impl Iterator<Item = Ump>) -> Vec<String> {
     let mut a = FlexTextAssembler::new(vec![0; 512], 512, 1);
-    let mut got = None;
-    for ump in flex_text_packets(G0, FlexAddress::Group, kind, text).unwrap() {
+    let mut got = vec![];
+    for ump in packets {
         if let FlexTextStep::Done(t) = a.push(ump) {
-            assert_eq!(t.kind, kind);
-            got = Some(t.text.to_owned());
+            got.push(t.text.to_owned());
         }
     }
-    got.unwrap()
+    got
+}
+
+fn read(kind: LyricKind, text: &str) -> String {
+    let got = read_all(flex_lyric_packets(
+        G0,
+        FlexAddress::Group,
+        kind,
+        &syllable(text),
+    ));
+    assert_eq!(got.len(), 1);
+    got.into_iter().next().unwrap()
 }
 
 /// A syllable is one Complete packet, or a Start, Continue* and End: the last
@@ -77,7 +103,7 @@ fn a_syllable_is_a_complete_packet_or_a_run_ending_in_end() {
 #[test]
 fn bytes_after_the_end_of_a_syllable_are_zero() {
     for kind in KINDS {
-        for text in ["la", "word ", "line\r", "paragraph\r\n", "thirteen byte"] {
+        for text in ["la", "word ", "line\r", "paragraph\r\n", "thirteen-byte"] {
             let packets = parts(kind, text);
             let (form, last) = packets.last().unwrap();
             assert!(matches!(form, Form::Complete | Form::End));
@@ -109,8 +135,8 @@ fn a_start_packet_never_holds_a_zero() {
         let mut a = FlexTextAssembler::new(vec![0; 64], 64, 1);
         let mut start = [b'a'; 12];
         start[7] = 0;
-        a.push(packet(kind, Form::Start, start));
-        let done = a.push(packet(kind, Form::End, [b'b'; 12]));
+        a.push(packet(kind.into(), Form::Start, start));
+        let done = a.push(packet(kind.into(), Form::End, [b'b'; 12]));
         assert!(!matches!(done, FlexTextStep::Done(_)), "{kind:?}");
         assert_eq!(a.invalid(), 1, "{kind:?}");
     }
@@ -127,8 +153,8 @@ fn a_trailing_space_cr_or_cr_lf_is_kept() {
             "la ",
             "la\r",
             "la\r\n",
-            "a long syllable ",
-            "a long line\r",
+            "extraordinary ",
+            "supercalifragilistic\r",
             " ",
             "\r\n",
         ] {
@@ -148,37 +174,95 @@ fn a_trailing_space_cr_or_cr_lf_is_kept() {
 fn an_all_zero_complete_packet_is_a_melisma() {
     for kind in KINDS {
         let mut a = FlexTextAssembler::new(vec![0; 64], 64, 1);
-        let FlexTextStep::Done(melisma) = a.push(packet(kind, Form::Complete, [0; 12])) else {
+        let FlexTextStep::Done(melisma) = a.push(packet(kind.into(), Form::Complete, [0; 12]))
+        else {
             panic!("{kind:?}");
         };
-        assert_eq!((melisma.kind, melisma.text), (kind, ""));
+        assert_eq!((melisma.kind, melisma.text), (FlexTextKind::from(kind), ""));
         assert_eq!(read(kind, ""), "");
-        assert_eq!(read(kind, " \r\n"), " \r\n");
+        let word_end = read_all(flex_melisma_end_packets(
+            G0,
+            FlexAddress::Group,
+            kind,
+            WordEnd::Paragraph,
+        ));
+        assert_eq!(word_end, ["", " \r\n"]);
     }
 }
 
-/// A Recording/Concert Date is text in the common format (M2-104 section
-/// 7.5.9.2): status bank 1, status 0x0B, Complete for up to 12 bytes, else
-/// Start, Continue and End with the bytes after the end zero.
-/// Spec: m2-104/7.5.9.2#1
+/// Each message is one syllable (or a one-syllable word): a space, a carriage
+/// return or a line feed inside the body would make it more than one word or
+/// line, so a body cannot hold one; the end of a word, line or paragraph is
+/// the syllable's end, at the end of the text only.
+/// Spec: m2-104/7.5.10#1, m2-104/7.5.12#1
 #[test]
-fn a_recording_date_is_common_format_text() {
-    let words = |date: &str| -> Vec<[u32; 4]> {
-        flex_text_packets(G0, FlexAddress::Group, FlexTextKind::RecordingDate, date)
-            .unwrap()
-            .map(|u| u.0)
-            .collect()
+fn a_message_holds_one_syllable() {
+    for good in ["hel", "sixty-four", "hel-", "-", ""] {
+        assert!(SyllableBody::try_from(good).is_ok(), "{good:?}");
+    }
+    for bad in ["hello world", " la", "la ", "a\rb", "a\nb", "\n"] {
+        assert_eq!(
+            SyllableBody::try_from(bad).err(),
+            Some(SyllableError::Separator),
+            "{bad:?}"
+        );
+    }
+    assert_eq!(
+        SyllableBody::try_from("a\0").err(),
+        Some(SyllableError::Text(TextError::Nul))
+    );
+    assert_eq!(
+        SyllableBody::try_from(&*"x".repeat(383)).err(),
+        Some(SyllableError::Text(TextError::TooLong))
+    );
+    // The longest syllable with the longest end still fits 32 packets.
+    let longest = Syllable {
+        body: SyllableBody::try_from(&*"x".repeat(382)).unwrap(),
+        end: SyllableEnd::Paragraph,
     };
-    assert_eq!(
-        words("2026-11-15"),
-        [[0xD010_010B, 0x3230_3236, 0x2D31_312D, 0x3135_0000]]
-    );
-    assert_eq!(
-        words("2026-11-15T10:30:00+09:00"),
-        [
-            [0xD050_010B, 0x3230_3236, 0x2D31_312D, 0x3135_5431],
-            [0xD090_010B, 0x303A_3330, 0x3A30_302B, 0x3039_3A30],
-            [0xD0D0_010B, 0x3000_0000, 0, 0],
-        ]
-    );
+    for kind in KINDS {
+        let packets = flex_lyric_packets(G0, FlexAddress::Group, kind, &longest);
+        assert_eq!(packets.len(), 32);
+    }
+    for (end, text) in [
+        (SyllableEnd::None, "la"),
+        (SyllableEnd::Word, "la "),
+        (SyllableEnd::Line, "la\r"),
+        (SyllableEnd::Paragraph, "la\r\n"),
+    ] {
+        let la = Syllable {
+            body: SyllableBody::try_from("la").unwrap(),
+            end,
+        };
+        for kind in KINDS {
+            assert_eq!(
+                read_all(flex_lyric_packets(G0, FlexAddress::Group, kind, &la)),
+                [text]
+            );
+        }
+    }
+}
+
+/// A melisma that is the end of a word is followed immediately by a message
+/// of a space, with a carriage return and a line feed when the line or the
+/// paragraph ends: the melisma is the all-zero Complete packet and the next
+/// packet is the space message.
+/// Spec: m2-104/7.5.10.1#2, m2-104/7.5.12.1#2
+#[test]
+fn a_melisma_that_ends_a_word_is_followed_by_a_space() {
+    for kind in KINDS {
+        for (end, text) in [
+            (WordEnd::Word, " "),
+            (WordEnd::Line, " \r"),
+            (WordEnd::Paragraph, " \r\n"),
+        ] {
+            let got: Vec<Ump> =
+                flex_melisma_end_packets(G0, FlexAddress::Group, kind, end).collect();
+            assert_eq!(got.len(), 2);
+            assert_eq!(got[0], packet(kind.into(), Form::Complete, [0; 12]));
+            let mut padded = [0; 12];
+            padded[..text.len()].copy_from_slice(text.as_bytes());
+            assert_eq!(got[1], packet(kind.into(), Form::Complete, padded));
+        }
+    }
 }

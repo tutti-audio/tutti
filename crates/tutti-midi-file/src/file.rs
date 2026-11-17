@@ -15,6 +15,7 @@
 //! a Clip File's packets are as stored. Translation runs where a clip is
 //! loaded for playback. A file allocates and never reaches the audio thread.
 
+use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::ops::{Add, AddAssign, Sub};
 use std::path::Path;
@@ -24,8 +25,8 @@ use tutti_midi_protocol::{channel_voice, flex_tempo};
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_types::{Beat, Bpm, Seconds};
 use tutti_ump::{
-    Address, Flex, KeyEvent, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity,
-    Sysex7Packets, TicksPerQuarterNote, U7, Ump, Unknown, Voice2,
+    Address, Flex, FlexAddress, FlexTextKind, Form, KeyEvent, Message, MidiChannel, MidiGroup,
+    NoteNumber, NoteVelocity, Sysex7Packets, System, TicksPerQuarterNote, U7, Ump, Unknown, Voice2,
 };
 
 use crate::MidiFileKind;
@@ -697,7 +698,11 @@ impl MidiFile {
     ///
     /// [`Error::Config`] if the events or the
     /// header's are out of order or the events past the track's end, the header
-    /// ends before its last message, two are further apart than a `u32`, or an
+    /// ends before its last message, two are further apart than a `u32`, a
+    /// Flex Data message is interrupted by another message of its Group or
+    /// left open (M2-104 section 7.5.2: only its own Continue packets and
+    /// System Real Time messages go between its Start and End; a message that
+    /// starts in the header and ends in the events is left open), or an
     /// event is not a packet (`SysEx`, `Escape` and `Meta` are SMF's), is a
     /// MIDI-CI Property Exchange message (sections 6.4 and 7.2) or is the
     /// file's own structure (a Delta Clockstamp, the DCTPQ, a Null, Start or End
@@ -707,7 +712,20 @@ impl MidiFile {
     /// 0);
     /// [`Error::Tempo`] if the Set Tempo messages do not make a
     /// [`TempoMap`].
+    ///
+    /// Only this constructor holds a clip to M2-104 section 7.5.2: a file read
+    /// with [`from_bytes`](Self::from_bytes) keeps the Flex Data messages as
+    /// its sender interleaved them. The rule is checked on the header and on
+    /// the events each by itself, so a message that starts in the header and
+    /// ends in the events is reported open. Its exemption for JR Clock
+    /// messages holds without a check, as a clip refuses every Utility
+    /// message.
     pub fn clip(ticks_per_quarter: TicksPerQuarterNote, track: Track) -> Result<Self> {
+        for events in [&track.header, &track.events] {
+            if let Some(at) = text_interrupted(events) {
+                return Err(Error::Config(ConfigError::TextInterrupted { at }));
+            }
+        }
         Self::build(Container::Clip(ticks_per_quarter), vec![track])
     }
 
@@ -1236,6 +1254,65 @@ fn refuses(container: Container, event: &FileEvent) -> Option<Refusal> {
             Some(Refusal::ClipPropertyExchange)
         }
         (Container::Clip(_), _) => None,
+    }
+}
+
+/// Where a Flex Data message is interrupted (M2-104 section 7.5.2: within a
+/// Group, only Continue packets of the message and System Real Time messages
+/// go between its Start and End): the tick of the first message of a Group
+/// with a message open that is not one of those, or a Continue or End with no
+/// message of its own open, or of the last event if a message is left open.
+fn text_interrupted(events: &[(Tick, FileEvent)]) -> Option<Tick> {
+    let mut open: HashMap<MidiGroup, (FlexAddress, FlexTextKind)> = HashMap::new();
+    for (tick, event) in events {
+        let ump = match event {
+            FileEvent::Message(message) => Ump::from(*message),
+            FileEvent::Unknown(unknown) => unknown.0,
+            _ => continue,
+        };
+        let Some(group) = ump.group() else {
+            continue;
+        };
+        match ump.decode() {
+            Ok(Message::Flex(
+                _,
+                Flex::Text {
+                    address,
+                    kind,
+                    form,
+                    ..
+                },
+            )) => {
+                let key = (address, kind);
+                match (form, open.get(&group).copied()) {
+                    (Form::Complete, None) => {}
+                    (Form::Start, None) => {
+                        open.insert(group, key);
+                    }
+                    (Form::Continue, Some(of)) if of == key => {}
+                    (Form::End, Some(of)) if of == key => {
+                        open.remove(&group);
+                    }
+                    _ => return Some(*tick),
+                }
+            }
+            Ok(Message::System(
+                _,
+                System::TimingClock
+                | System::Start
+                | System::Continue
+                | System::Stop
+                | System::ActiveSensing
+                | System::Reset,
+            )) => {}
+            _ if open.contains_key(&group) => return Some(*tick),
+            _ => {}
+        }
+    }
+    if open.is_empty() {
+        None
+    } else {
+        events.last().map(|(tick, _)| *tick)
     }
 }
 

@@ -11,7 +11,7 @@
 //! | | |
 //! |---|---|
 //! | `UmpSource`, `Protocol` | a native-UMP virtual source in the MIDI 1.0 or MIDI 2.0 protocol: it disposes its endpoint on drop, and sends a UMP message as an event list. The safe `coremidi` wrapper has the destination side and no source |
-//! | `ump_endpoints` | the UMP Endpoints and Function Blocks CoreMIDI reports (macOS 15's `MIDIUMPEndpoint`, Objective-C classes bound through `objc2-core-midi`), as plain values; `None` before macOS 15, where the classes do not exist |
+//! | `ump_endpoints` | the UMP Endpoints and Function Blocks CoreMIDI reports (macOS 15's `MIDIUMPEndpoint`, Objective-C classes bound through `objc2-core-midi`), as plain values; `None` before macOS 15, where the classes do not exist; an Objective-C exception CoreMIDI raises (as seen when no MIDI server is reachable) returns as `ObjcException` |
 //! | `create_client` | client creation that retries the status CoreMIDI returns while its server exits, for a bounded time; every client the process makes goes through it |
 //! | `Timebase`, `host_ticks` | the Mach host clock CoreMIDI timestamps its packets with, and the ratio from its ticks to nanoseconds |
 //!
@@ -29,11 +29,13 @@
 mod client_retry;
 mod destination;
 mod host_clock;
+mod objc_exception;
 mod source;
 mod ump_endpoints;
 
 pub use client_retry::create_client;
 pub use destination::UmpDestination;
 pub use host_clock::{Timebase, host_ticks};
+pub use objc_exception::ObjcException;
 pub use source::{Error, Protocol, UmpSource};
 pub use ump_endpoints::{UmpBlockInfo, UmpEndpointInfo, ump_endpoints};

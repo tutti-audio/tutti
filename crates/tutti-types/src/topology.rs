@@ -35,6 +35,8 @@
 //! invented [`Speaker`]s: it is [`ChannelTopology::Ambisonic`].
 
 use crate::{AmbisonicFormat, Bed, ChannelLayout};
+use alloc::vec;
+use alloc::vec::Vec;
 
 /// Which speaker one channel of a bus feeds.
 ///

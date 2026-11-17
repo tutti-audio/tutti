@@ -136,8 +136,8 @@ pub use tutti_session::Error;
 // The graph's vocabulary a session hands out.
 pub use tutti_graph::{
     DECLICK, EventCapacity, EventInletNode, EventInletWriter, EventTapId, EventTapReader, FadeLaw,
-    InletNode, InletRing, Level, Losses, MeterReader, NodeMode, Stamp, TapAlign, TapEvent, TapId,
-    TapReader, TapWriter,
+    InletNode, InletRing, InletTotals, Level, Losses, MeterReader, NodeMode, Stamp, TapAlign,
+    TapEvent, TapId, TapReader, TapWriter,
 };
 pub use tutti_metering::{LoadMeter, LoadReading};
 pub use tutti_rt::PushError;
@@ -340,7 +340,7 @@ pub mod session {
         Listed, Snapshot, SnapshotSource,
     };
     pub use tutti_engine::{
-        BackendErrorKind, GraphEngineError, OutputLevelError, OutputLevels, OutputMap,
+        BackendErrorKind, GraphEngineError, Lagging, OutputLevelError, OutputLevels, OutputMap,
         OutputMapError, OutputSpec, OutputStrip, Routing, RoutingError, StartError, StreamFault,
         StreamFaultKind, StreamFaults, StreamLatency, TimerError,
     };
@@ -370,11 +370,14 @@ pub mod session {
         HeardTapError, Inlet, InletError, LIVE_MAX_BLOCK, MainBus, MainSink, Meters, NotReopened,
         Outlet, OutputPlacement, OutputPolicy, OutputPolicyError, OutputPolicyHandle, PHASES,
         ParamError, Peer, PeerError, Phase as UpdatePhase, PhaseCx, Policy, Presence, RangeError,
-        Reclaimer, RemoveError, Reopened, ReplaceRefused, Resource, ResourceFact, ResourceId,
-        RootDeclaration, RootReader, RootTopologyStatus, SessionNode, Taps, TempoError, Weighted,
-        Wire, root_width,
+        Reclaimer, Reclaims, RemoveError, Reopened, ReplaceRefused, Resource, ResourceFact,
+        ResourceId, RootDeclaration, RootReader, RootTopologyStatus, SessionNode, Taps, TempoError,
+        Weighted, Wire, root_width,
     };
-    pub use tutti_transport::{AudioTaken, LoopEdit, OfflineTransport, TimedError, Timeline};
+    pub use tutti_transport::{
+        AudioTaken, LoopEdit, OfflineTimeline, OfflineTimelineConfig, OfflineTransport, TimedError,
+        Timeline,
+    };
     // The pool.
     pub use tutti_session::Load as PoolLoad;
     pub use tutti_session::{
@@ -428,10 +431,10 @@ pub mod session {
     };
     #[cfg(feature = "plugin")]
     pub use tutti_session::{
-        EditorView, GiveUp, HangPolicy, HostPluginError, LoadedPlugin, MainPlugin, MainSession,
-        ParamGesture, PluginCause, PluginEntry as PoolPluginEntry, PluginPorts, PortsRefusal,
-        Recovery, RecoveryAction, RecoveryEvent, RecoveryFailure, RecoveryPolicy, ReloadCause,
-        StateJobError, StateJobFailed, StateRestore, StateView,
+        EditorView, GiveUp, HangPolicy, LoadedPlugin, MainPlugin, MainSession, ParamGesture,
+        PluginCause, PluginEntry as PoolPluginEntry, PluginPorts, PortsRefusal, Recovery,
+        RecoveryAction, RecoveryEvent, RecoveryFailure, RecoveryPolicy, ReloadCause, StateJobError,
+        StateJobFailed, StateRestore, StateView,
     };
     #[cfg(feature = "midi")]
     pub use tutti_session::{

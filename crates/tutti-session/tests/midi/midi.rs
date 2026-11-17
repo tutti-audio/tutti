@@ -10,6 +10,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tutti_session::Stamp;
 
+#[cfg(feature = "midi-hardware")]
 use std::time::{Duration, Instant};
 use tutti_graph::Losses;
 #[cfg(feature = "midi-hardware")]
@@ -33,9 +34,10 @@ use tutti_ump::{MpeChannels, MpeZoneSpan};
 
 use tutti_fixtures::midi;
 use tutti_session::{
-    EventInPort, EventOutPort, Feeder, MidiError, MidiReport, PHASES, PhaseCx, Session,
-    SessionEvent, midi_sink,
+    EventInPort, EventOutPort, Feeder, MidiError, Session, SessionEvent, midi_sink,
 };
+#[cfg(feature = "midi-hardware")]
+use tutti_session::{MidiReport, PHASES, PhaseCx};
 #[cfg(feature = "midi-hardware")]
 use tutti_session::{MidiRouteRule, NoSuchMidiRoute, RouteDeclarer};
 #[cfg(feature = "midi-hardware")]
@@ -43,6 +45,7 @@ use tutti_session::{Peer as _, Resource as _};
 use tutti_ump::{Message, Voice2};
 
 /// Every phase at `now`: one update, at a time the test picks.
+#[cfg(feature = "midi-hardware")]
 fn update_at(s: &mut Session, now: Instant) -> Vec<SessionEvent> {
     let mut out = Vec::new();
     for &phase in PHASES {

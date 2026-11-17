@@ -20,9 +20,6 @@ env:
   CARGO_TERM_COLOR: always
   # CI builds from clean, so an incremental cache only costs time.
   CARGO_INCREMENTAL: 0
-  # Line tables only: backtraces keep file:line, and full debug info filled the runner's disk.
-  CARGO_PROFILE_DEV_DEBUG: line-tables-only
-  CARGO_PROFILE_TEST_DEBUG: line-tables-only
   RUST_BACKTRACE: 1
 
 # Every stable job installs the toolchain `rust-toolchain.toml` pins, and every cargo command that resolves
@@ -115,6 +112,7 @@ jobs:
       - run: cargo xtask check-buffers
       - run: cargo xtask check-building
       - run: cargo xtask check-logging
+      - run: cargo xtask check-test-time
       - run: cargo xtask check-platform-seam
       # The source of the locked `clap-sys` is fetched, not built, for the CLAP rows.
       - run: cargo fetch --locked
@@ -327,7 +325,7 @@ jobs:
 
       - name: no_std build
         run: |
-          rustup target add thumbv7em-none-eabihf
+          rustup target add aarch64-unknown-none
           cargo xtask check-no-std
 
       # `plugin-server` cannot be a dev-dependency (a cycle through `tutti-plugin`), so the tests that spawn it

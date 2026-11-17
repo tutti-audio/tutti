@@ -15,7 +15,7 @@ workspace = true
 
 [dependencies]
 tempfile = "3.27"
-thiserror = { workspace = true }
+thiserror = { workspace = true, features = ["std"] }
 
 tutti-midi-protocol = { version = "0.0.1", path = "../tutti-midi-protocol" }
 

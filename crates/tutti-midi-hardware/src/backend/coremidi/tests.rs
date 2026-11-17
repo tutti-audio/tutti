@@ -122,8 +122,8 @@ fn the_os_blocks_are_within_the_spec() {
             let end = u16::from(block.first_group().get()) + u16::from(block.groups().get());
             assert!(end <= 16, "{}: Groups run to {end}", info.name);
         }
-        if ump_endpoints().is_none() {
-            assert!(cap.blocks.is_empty(), "no UMP classes, no blocks");
+        if !matches!(ump_endpoints(), Ok(Some(_))) {
+            assert!(cap.blocks.is_empty(), "no UMP endpoint list, no blocks");
         }
     }
 }

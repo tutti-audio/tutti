@@ -287,6 +287,7 @@ fn cases() -> Vec<Case> {
                 hold: Seconds::new(0.004),
                 release: Seconds::new(0.02),
                 range: Db::new(-80.0),
+                ..GateControls::DEFAULT
             },
         )
     }
@@ -562,6 +563,7 @@ fn block_rate_cases() -> Vec<Case> {
                 hold: Seconds::new(0.0),
                 release: Seconds::new(0.02),
                 range: Db::new(-80.0),
+                ..GateControls::DEFAULT
             },
         )
     }

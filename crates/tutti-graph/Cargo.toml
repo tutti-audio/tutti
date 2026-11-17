@@ -51,7 +51,7 @@ assert_no_alloc = { version = "1", default-features = false, optional = true }
 # `RenderMode`'s wire form, with `serde`.
 serde = { version = "1", features = ["derive"], optional = true }
 # The `Error` derive of the crate's error types.
-thiserror = { workspace = true }
+thiserror = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
 # Turns `contract` and `testing` on for this crate's own tests (the pattern
