@@ -78,10 +78,11 @@ fn a_restart_re_rates_the_midi_clock() {
     let _ = s.update();
     s.midi_nodes()
         .expect("the engine's MIDI nodes")
-        .clock_master
-        .set_sends(tutti_midi_runtime::ClockSends {
-            timing: true,
-            ..Default::default()
+        .sync_controls
+        .messages()
+        .set(tutti_midi_runtime::SyncMessages {
+            clock: true,
+            ..tutti_midi_runtime::SyncMessages::OFF
         });
     s.play().expect("room");
     let ticks = |events: &[(Ump, u64)]| -> f64 {

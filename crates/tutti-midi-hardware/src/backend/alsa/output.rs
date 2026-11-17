@@ -10,13 +10,12 @@ use std::sync::Mutex;
 use tutti_graph::Losses;
 use tutti_rt::LockExt;
 
-use super::enumerate::unpack_id;
 use crate::backend::by_message::{Refused, by_message};
 use crate::endpoints::DeviceOut;
 use crate::error::{Error, NotFound, Result};
 use crate::stamp::Paired;
 use tutti_alsa_ffi::{
-    Blocking, CAP_READ, Client, Packet, QueueClock, TYPE_APPLICATION, TYPE_MIDI_GENERIC, UmpVersion,
+    Blocking, Client, Packet, PortCaps, PortId, PortKind, QueueClock, UmpVersion,
 };
 use tutti_midi_device::EndpointId;
 use tutti_midi_runtime::{MidiOut, Outgoing, SendAt, Taken};
@@ -34,7 +33,7 @@ pub struct AlsaOutput {
 
 struct Sender {
     seq: Client,
-    port: u8,
+    port: PortId,
     /// The client's own queue, started when the output opened, which holds an
     /// event until its time.
     queue: QueueClock,
@@ -165,7 +164,7 @@ pub fn open(id: EndpointId) -> Result<Box<dyn DeviceOut>> {
 
 /// [`open`], as the concrete type.
 pub(super) fn connect(id: EndpointId) -> Result<AlsaOutput> {
-    let (dest_client, dest_port) = unpack_id(id).ok_or(NotFound::Endpoint(id))?;
+    let dest = super::address_of(id).ok_or(NotFound::Endpoint(id))?;
 
     // Non-blocking: a destination with no room refuses the send, which is
     // counted, rather than holding the caller until it has some.
@@ -175,11 +174,11 @@ pub(super) fn connect(id: EndpointId) -> Result<AlsaOutput> {
         // Not subscribable by others, so never listed as a device (see
         // `input::open`); this client subscribes its own port to the
         // destination.
-        CAP_READ,
-        TYPE_MIDI_GENERIC | TYPE_APPLICATION,
+        PortCaps::READ,
+        PortKind::MIDI_GENERIC | PortKind::APPLICATION,
     )?;
 
-    seq.connect_to(port, dest_client, dest_port)?;
+    seq.connect_to(port, dest)?;
 
     // The queue that holds scheduled events. A queue the client never created
     // is refused a scheduled send, so it is the client's own and started.

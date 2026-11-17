@@ -3,11 +3,13 @@
 
 use std::collections::VecDeque;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use tutti_midi_device::EntropyError;
 use tutti_ump::Ump;
 
+use crate::command::code;
 use crate::link::{Link, Loss};
 use crate::{
     Admission, AuthChallenge, AuthFailure, AuthMethods, AuthState, Bye, ByeReason, Command,
@@ -81,7 +83,7 @@ enum Phase {
 pub(crate) enum Role {
     Client(Credentials),
     Host {
-        admission: Admission,
+        admission: Arc<Admission>,
         nonce_source: fn() -> Result<Nonce, EntropyError>,
     },
 }
@@ -189,7 +191,7 @@ impl Session {
         self.out.push(Command::Nak(Nak {
             reason,
             refused,
-            text: crate::Text::default(),
+            text: crate::NakText::default(),
         }));
     }
 
@@ -298,8 +300,9 @@ impl Session {
         }
     }
 
-    /// Takes one command of a received datagram.
-    pub(crate) fn on_message(&mut self, command: Command, now: Instant) {
+    /// Takes one command of a received datagram, with the header it arrived
+    /// under: a NAK of the command quotes that header.
+    pub(crate) fn on_message(&mut self, header: Header, command: Command, now: Instant) {
         self.last_heard = now;
         match command {
             Command::Ping(id) => self.out.push(Command::PingReply(id)),
@@ -307,7 +310,7 @@ impl Session {
                 if let Some(at) = self.outstanding_pings.iter().position(|&p| p == id) {
                     self.outstanding_pings.remove(at);
                 } else {
-                    self.nak(NakReason::BadPingReply, Command::PingReply(id).header());
+                    self.nak(NakReason::BadPingReply, header);
                 }
             }
             Command::Nak(nak) => self.on_nak(now, &nak),
@@ -317,13 +320,15 @@ impl Session {
                     self.finish(EndedBy::Local, reason);
                 }
             }
-            Command::Invitation(inv) => self.on_invitation(now, inv),
-            Command::InvitationWithAuth(digest) => self.on_auth(now, &digest),
-            Command::InvitationWithUserAuth(auth) => self.on_user_auth(now, &auth),
-            Command::Accepted(identity) => self.on_accepted(now, identity),
-            Command::Pending(identity) => self.on_pending(now, identity),
-            Command::AuthRequired(challenge) => self.on_challenge(now, &challenge),
-            Command::UserAuthRequired(challenge) => self.on_user_challenge(now, &challenge),
+            Command::Invitation(inv) => self.on_invitation(now, header, inv),
+            Command::InvitationWithAuth(digest) => self.on_auth(now, header, &digest),
+            Command::InvitationWithUserAuth(auth) => self.on_user_auth(now, header, &auth),
+            Command::Accepted(identity) => self.on_accepted(now, header, identity),
+            Command::Pending(identity) => self.on_pending(now, header, identity),
+            Command::AuthRequired(challenge) => self.on_challenge(now, header, &challenge),
+            Command::UserAuthRequired(challenge) => {
+                self.on_user_challenge(now, header, &challenge);
+            }
             Command::UmpData(data) => match self.phase {
                 Phase::Established => {
                     let mut delivered = Vec::new();
@@ -339,10 +344,7 @@ impl Session {
                 Phase::Established | Phase::Resetting(_)
                     if self.cfg.retransmit == Retransmit::Unsupported =>
                 {
-                    self.nak(
-                        NakReason::NotSupported,
-                        Command::RetransmitRequest(request).header(),
-                    );
+                    self.nak(NakReason::NotSupported, header);
                 }
                 Phase::Established => self.link.retransmit(request, &mut self.out),
                 Phase::Resetting(_) => {}
@@ -392,7 +394,7 @@ impl Session {
         match error {
             crate::ParseError::UnknownCode(_) => self.nak(NakReason::NotSupported, header),
             crate::ParseError::Truncated => {}
-            _ if header.code() == 0x01 => {
+            _ if header.code() == code::INVITATION => {
                 if matches!(self.phase, Phase::Idle) {
                     self.refuse(now, ByeReason::ProtocolError);
                 }
@@ -424,7 +426,7 @@ impl Session {
 
     fn on_nak(&mut self, now: Instant, nak: &Nak) {
         if nak.reason == NakReason::NotSupported
-            && nak.refused.code() == 0x80
+            && nak.refused.code() == code::RETRANSMIT_REQUEST
             && matches!(self.phase, Phase::Established)
         {
             self.link.on_retransmit_refused(now);
@@ -449,11 +451,9 @@ impl Session {
 
     // ---- Client replies ----
 
-    fn on_accepted(&mut self, now: Instant, identity: EndpointIdentity) {
+    fn on_accepted(&mut self, now: Instant, header: Header, identity: EndpointIdentity) {
         match (&self.role, &self.phase) {
-            (Role::Host { .. }, _) => {
-                self.nak(NakReason::NotExpected, Command::Accepted(identity).header())
-            }
+            (Role::Host { .. }, _) => self.nak(NakReason::NotExpected, header),
             (Role::Client(_), Phase::Inviting(_) | Phase::AwaitingAcceptance { .. }) => {
                 self.remote = Some(identity);
                 self.establish(now);
@@ -463,11 +463,9 @@ impl Session {
         }
     }
 
-    fn on_pending(&mut self, now: Instant, identity: EndpointIdentity) {
+    fn on_pending(&mut self, now: Instant, header: Header, identity: EndpointIdentity) {
         match (&self.role, &self.phase) {
-            (Role::Host { .. }, _) => {
-                self.nak(NakReason::NotExpected, Command::Pending(identity).header())
-            }
+            (Role::Host { .. }, _) => self.nak(NakReason::NotExpected, header),
             (Role::Client(_), Phase::Inviting(_) | Phase::AwaitingAcceptance { .. }) => {
                 self.remote = Some(identity);
                 self.phase = Phase::AwaitingAcceptance {
@@ -479,12 +477,17 @@ impl Session {
         }
     }
 
-    fn client_is_inviting(&self) -> bool {
-        matches!(self.role, Role::Client(_))
-            && matches!(
-                self.phase,
-                Phase::Inviting(_) | Phase::AwaitingAcceptance { .. }
-            )
+    /// The credentials of a Client whose Invitation is out and unanswered.
+    /// A challenge is expected only then (M2-124 sections 6.7 and 6.8), and only
+    /// for a method the Invitation advertised, which is the method these
+    /// credentials hold.
+    fn inviting_credentials(&self) -> Option<&Credentials> {
+        match (&self.role, &self.phase) {
+            (Role::Client(credentials), Phase::Inviting(_) | Phase::AwaitingAcceptance { .. }) => {
+                Some(credentials)
+            }
+            _ => None,
+        }
     }
 
     fn authentication_failed(&mut self, now: Instant, cause: AuthFailure) {
@@ -495,39 +498,32 @@ impl Session {
         self.close(now, ByeReason::InvitationCanceled);
     }
 
-    fn on_challenge(&mut self, now: Instant, challenge: &AuthChallenge) {
-        if !self.client_is_inviting() {
-            self.nak(
-                NakReason::NotExpected,
-                Command::AuthRequired(*challenge).header(),
-            );
-            return;
-        }
-        let Role::Client(credentials) = &self.role else {
-            return;
+    fn on_challenge(&mut self, now: Instant, header: Header, challenge: &AuthChallenge) {
+        let digest = self
+            .inviting_credentials()
+            .and_then(|credentials| credentials.secret.as_deref())
+            .map(|secret| Digest::of_secret(&challenge.nonce, secret));
+        let Some(digest) = digest else {
+            return self.nak(NakReason::NotExpected, header);
         };
         if challenge.state == AuthState::DigestWrong {
             return self.authentication_failed(now, AuthFailure::DigestWrong);
         }
-        let Some(secret) = &credentials.secret else {
-            return self.authentication_failed(now, AuthFailure::NoCredentials);
-        };
-        let digest = Digest::of_secret(&challenge.nonce, secret);
         self.remote = Some(challenge.identity);
         let repeat = self.start_repeat(now, Command::InvitationWithAuth(digest));
         self.phase = Phase::Inviting(repeat);
     }
 
-    fn on_user_challenge(&mut self, now: Instant, challenge: &UserAuthChallenge) {
-        if !self.client_is_inviting() {
-            self.nak(
-                NakReason::NotExpected,
-                Command::UserAuthRequired(*challenge).header(),
-            );
-            return;
-        }
-        let Role::Client(credentials) = &self.role else {
-            return;
+    fn on_user_challenge(&mut self, now: Instant, header: Header, challenge: &UserAuthChallenge) {
+        let answer = self
+            .inviting_credentials()
+            .and_then(|credentials| credentials.user.as_ref())
+            .map(|(username, password)| UserAuthentication {
+                digest: Digest::of_user(&challenge.nonce, username, password),
+                username: username.clone(),
+            });
+        let Some(answer) = answer else {
+            return self.nak(NakReason::NotExpected, header);
         };
         match challenge.state {
             UserAuthState::DigestWrong => {
@@ -538,33 +534,23 @@ impl Session {
             }
             UserAuthState::First => {}
         }
-        let Some((username, password)) = &credentials.user else {
-            return self.authentication_failed(now, AuthFailure::NoCredentials);
-        };
-        let command = Command::InvitationWithUserAuth(UserAuthentication {
-            digest: Digest::of_user(&challenge.nonce, username, password),
-            username: username.clone(),
-        });
         self.remote = Some(challenge.identity);
-        let repeat = self.start_repeat(now, command);
+        let repeat = self.start_repeat(now, Command::InvitationWithUserAuth(answer));
         self.phase = Phase::Inviting(repeat);
     }
 
     // ---- Host side of the Invitation ----
 
-    fn on_invitation(&mut self, now: Instant, invitation: Invitation) {
+    fn on_invitation(&mut self, now: Instant, header: Header, invitation: Invitation) {
         let Role::Host {
             admission,
             nonce_source,
         } = &self.role
         else {
             // A Client with no Host behind this port.
-            return self.nak(
-                NakReason::NotExpected,
-                Command::Invitation(invitation).header(),
-            );
+            return self.nak(NakReason::NotExpected, header);
         };
-        let (admission, nonce_source) = (admission.clone(), *nonce_source);
+        let (admission, nonce_source) = (Arc::clone(admission), *nonce_source);
         match &self.phase {
             // A peer the Host already admitted asks again: it missed the reply.
             Phase::Established | Phase::Resetting(_) => {
@@ -587,7 +573,7 @@ impl Session {
         }
         self.remote = Some(invitation.identity);
         let needed = admission.required();
-        match admission {
+        match &*admission {
             Admission::Open => self.establish(now),
             Admission::Confirm => {
                 self.out.push(Command::Pending(self.local));
@@ -629,12 +615,11 @@ impl Session {
         }
     }
 
-    fn on_auth(&mut self, now: Instant, digest: &Digest) {
-        let command = Command::InvitationWithAuth(*digest);
+    fn on_auth(&mut self, now: Instant, header: Header, digest: &Digest) {
         let verdict =
             self.verify(
                 Challenge::SharedSecret,
-                &command,
+                header,
                 |admission, nonce| match admission {
                     Admission::SharedSecret(secret) => {
                         verdict(&Digest::of_secret(nonce, secret), digest)
@@ -645,11 +630,10 @@ impl Session {
         self.conclude(now, verdict);
     }
 
-    fn on_user_auth(&mut self, now: Instant, auth: &UserAuthentication) {
-        let command = Command::InvitationWithUserAuth(auth.clone());
+    fn on_user_auth(&mut self, now: Instant, header: Header, auth: &UserAuthentication) {
         let verdict = self.verify(
             Challenge::User,
-            &command,
+            header,
             |admission, nonce| match admission {
                 Admission::Users(users) => users
                     .iter()
@@ -667,17 +651,17 @@ impl Session {
     fn verify(
         &mut self,
         kind: Challenge,
-        command: &Command,
+        header: Header,
         check: impl FnOnce(&Admission, &Nonce) -> Verdict,
     ) -> Verdict {
         let Role::Host { admission, .. } = &self.role else {
-            self.nak(NakReason::NotExpected, command.header());
+            self.nak(NakReason::NotExpected, header);
             return Verdict::Ignored;
         };
         match &self.phase {
-            Phase::Challenged(c) if c.kind == kind => check(admission, &c.nonce),
+            Phase::Challenged(c) if c.kind == kind => check(admission.as_ref(), &c.nonce),
             Phase::Challenged(_) => {
-                self.nak(NakReason::NotExpected, command.header());
+                self.nak(NakReason::NotExpected, header);
                 Verdict::Ignored
             }
             Phase::Established | Phase::Resetting(_) => {
