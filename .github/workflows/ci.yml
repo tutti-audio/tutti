@@ -210,11 +210,13 @@ jobs:
     name: clippy (macos)
     needs: changes
     if: needs.changes.outputs.macos == 'true' && needs.changes.outputs.full == 'true'
-    runs-on: macos-latest
+    # The same switch as the macOS test job: the self-hosted Mac when MACOS_TEST_RUNNER is set.
+    runs-on: ${{ fromJSON(vars.MACOS_TEST_RUNNER || '"macos-latest"') }}
     steps:
       - uses: actions/checkout@v7
       - run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
+        if: runner.environment == 'github-hosted'
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo clippy --locked -p tutti-au-ffi -p tutti-au-host --all-targets -- -D warnings
