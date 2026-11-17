@@ -17,7 +17,7 @@ use tutti_nodes::{
 use tutti_nodes::{
     BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode, ButterworthOrder,
     CutAlignment, CutFilterConfig, CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerNode,
-    TiltFilterConfig, TiltFilterNode,
+    TiltFilterConfig, TiltFilterNode, TransientShaperConfig, TransientShaperNode,
 };
 use tutti_types::{
     BitDepth, BusTopology, ChannelLayout, Db, Drive, Feedback, Frame, HoldFactor, Hz, MaxBlock,
@@ -138,6 +138,14 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
             "dynamic eq",
             Box::new(DynamicEqNode::from(
                 DynamicEqConfig::de_esser(ChannelLayout::STEREO, Hz(6_000.0)).threshold(Db(-60.0)),
+            )),
+        ),
+        (
+            "transient shaper",
+            Box::new(TransientShaperNode::from(
+                TransientShaperConfig::new(ChannelLayout::STEREO)
+                    .attack(Db(12.0))
+                    .sustain(Db(-6.0)),
             )),
         ),
         ("gate", Box::new(GateNode::mono(GateControls::DEFAULT))),
