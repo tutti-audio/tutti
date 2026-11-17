@@ -100,9 +100,11 @@ impl LimiterNode {
     /// [`TruePeak`](PeakDetection::TruePeak) limits the signal between the samples too, to
     /// within [`LimiterBank::TRUE_PEAK_MARGIN`] (0.56 dB) of the ceiling for content in the
     /// oversampler's passband, and its detection must line up with the lookahead: one under
-    /// the up-sampler's delay (about 20 frames, [`TruePeakError`]) is lengthened to the
-    /// shortest that does at the rate the node is prepared at, and the latency the node
-    /// declares is that length. [`LimiterBank::detecting`] is the one that refuses.
+    /// the up-sampler's delay (about 20 frames) is lengthened to the shortest that does at
+    /// the rate the node is prepared at, and the latency the node declares is that length;
+    /// [`LimiterBank::detecting`] is the one that refuses. The up-sampler designs at every
+    /// rate a device runs at; a rate whose transition width does not fit `f32` panics at
+    /// prepare.
     #[must_use]
     pub fn detection(self, detection: PeakDetection) -> Self {
         self.map_kernel(|k| k.detection = detection)
@@ -183,13 +185,18 @@ impl Kernel for LimiterKernel {
     /// Sizes the delay from the lookahead at `rate`: a re-prepare empties it.
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
         let (layout, detection) = (self.input.layout(), self.detection);
-        let bank = LimiterBank::detecting(layout, self.lookahead, rate, detection).or_else(|e| {
-            let TruePeakError::Lookahead { shortest, .. } = e else {
-                return Ok(LimiterBank::new(layout, self.lookahead, rate));
-            };
-            LimiterBank::detecting(layout, shortest, rate, detection)
-        });
-        self.bank = Some(bank.unwrap_or_else(|_| LimiterBank::new(layout, self.lookahead, rate)));
+        let bank = LimiterBank::detecting(layout, self.lookahead, rate, detection)
+            .or_else(|e| match e {
+                TruePeakError::Lookahead { shortest, .. } => {
+                    LimiterBank::detecting(layout, shortest, rate, detection)
+                }
+                design @ TruePeakError::Design(_) => Err(design),
+            })
+            // The up-sampler fails to design only at a rate whose transition width does not fit
+            // `f32` (a rate no device has), and the shortest lookahead lines up by
+            // construction.
+            .expect("the true-peak up-sampler designs at every rate a device runs at");
+        self.bank = Some(bank);
     }
 
     fn reset(&mut self) {

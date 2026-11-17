@@ -454,7 +454,7 @@ pub(super) const ALLOW: &[Allow] = &[
         "crates/tutti-dsp/",
         "LimiterBank::detecting",
         CTOR,
-        "a true-peak lookahead is valid only against the up-sampler's delay at the rate, which are two arguments of this call together: the one terminal call that binds both",
+        "a true-peak lookahead is valid only together with the rate: the up-sampler's delay is a fixed count of frames, and whether the lookahead in seconds covers it depends on the rate, so no type can hold the validity before the rate is bound at this call",
     ),
     ty("crates/tutti-measure/", "YinConfig", WIDTH, MEASURES),
     ty(

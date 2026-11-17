@@ -28,6 +28,15 @@ fn render(bank: &mut LimiterBank, x: &[f32]) -> Vec<f32> {
     run(bank, &[x]).remove(0)
 }
 
+/// The shortest lookahead a true-peak bank takes at the test rate, as the refusal names it.
+fn shortest() -> Lookahead {
+    let short = Lookahead::of(Seconds(0.0002));
+    match LimiterBank::detecting(ChannelLayout::MONO, short, RATE, PeakDetection::TruePeak) {
+        Err(TruePeakError::Lookahead { shortest, .. }) => shortest,
+        other => panic!("{other:?}"),
+    }
+}
+
 fn bessel_i0(x: f64) -> f64 {
     let (mut sum, mut term) = (1.0, 1.0);
     for k in 1..60 {
@@ -39,6 +48,10 @@ fn bessel_i0(x: f64) -> f64 {
 
 /// The largest magnitude of `x` between its samples, read by a Kaiser-windowed sinc (beta 10,
 /// 64 taps per phase) at 16 phases per frame, away from the 40 frames at each end.
+///
+/// Beta 10 puts the window's stopband near -100 dB; over 64 taps its transition is about 0.1
+/// of the rate wide, centred on 0.5, so a tone at 0.44 of the rate (under the 0.45 edge) is
+/// read to about 1e-5 relative: the 2e-4 slack the cases allow covers it.
 fn true_peak(x: &[f32]) -> f64 {
     const HALF: i64 = 32;
     const PHASES: i64 = 16;
@@ -94,14 +107,21 @@ fn bound() -> f64 {
     CEILING * 10f64.powf(f64::from(LimiterBank::TRUE_PEAK_MARGIN.get()) / 20.0)
 }
 
+/// The bound of a tone of `cycles` of the rate: its own band limit in place of the passband's,
+/// `1 / cos(pi * cycles / 4)` (the factor of an eighth of a frame at that frequency), and 2e-4
+/// of slack for the passband ripple and the reference's.
+fn tone_bound(cycles: f64) -> f64 {
+    CEILING / (std::f64::consts::PI * cycles / 4.0).cos() * 1.0002
+}
+
 /// The adversarial inputs: each is over the ceiling in true peak and within the oversampler's
 /// passband (a tone at most 0.44 of the rate, under the 0.45 of a 0.9 passband).
 fn signals() -> Vec<(&'static str, Vec<f32>)> {
     let frames = 4_800;
     let mut all = vec![];
-    // A sine at a quarter of the rate: the samples of a 45 degree phase sit at 0.707 of the
-    // amplitude, the signal reaches the amplitude between them. The other phases of the
-    // EBU Tech 3341 true-peak family (the same tone offset against the sampling grid).
+    // A sine at a quarter of the rate at four phases against the sampling grid: at 45 degrees
+    // the samples sit at 0.707 of the amplitude and the signal reaches the amplitude
+    // between them.
     for (name, deg) in [
         ("fs/4 at 0 degrees", 0.0),
         ("fs/4 at 22.5 degrees", 22.5),
@@ -220,7 +240,7 @@ fn the_declared_latency_is_the_impulse_peak_delay_of_the_audio_path() {
 }
 
 /// The up-sampler's delay is what the oversampler's cascade sums to: an impulse peaks at that
-/// point of the 4x signal, and it is not a whole number of base frames (the round trip is).
+/// point of the 4x signal.
 #[test]
 fn the_upsample_delay_is_the_impulse_peak_of_the_4x_signal() {
     let plan = Oversampling::new(OversamplingFactor::X4)
@@ -239,7 +259,6 @@ fn the_upsample_delay_is_the_impulse_peak_of_the_4x_signal() {
         .unwrap()
         .0;
     assert_eq!(peak, plan.upsample_delay());
-    assert_ne!(plan.upsample_delay() % 4, 0);
 }
 
 /// A lookahead under the up-sampler's delay is refused with its figures; the shortest one the
@@ -298,14 +317,93 @@ fn an_isolated_peak_is_limited_at_every_alignment() {
     }
 }
 
-/// A true-peak bank renders finite audio from non-finite input, and clones continue alike.
+/// A loud sample followed by one at the ceiling: the second needs no gain by itself, and its
+/// gain is right only if its window takes the group that covers the signal between the two
+/// (a group starting one later leaves the pair's overshoot between them at about 1.3 of the
+/// ceiling).
 #[test]
-fn non_finite_input_renders_finite_output() {
-    let mut x = tone(0.1, 0.0, 0.4, 600);
+fn the_gain_of_a_quiet_sample_takes_the_groups_covering_the_instants_before_it() {
+    for (lookahead, block) in [(LOOKAHEAD, CHUNK), (shortest(), 1)] {
+        for p in 100..108 {
+            let mut x = vec![0.0f32; 1_000];
+            x[p] = 1.0;
+            x[p + 1] = CEILING as f32;
+            let out = run_in(
+                &mut bank_at(PeakDetection::TruePeak, lookahead, RATE),
+                &[&x],
+                [None, None],
+                block,
+            )
+            .remove(0);
+            let after = true_peak(&out);
+            assert!(after <= bound(), "p = {p}: {after} over {}", bound());
+        }
+    }
+}
+
+/// A NaN sample is delayed to its own frame and nowhere else; an infinity is a finite,
+/// limited sample; and a finite sample past the detector's 2^100 clamp is still limited to the
+/// ceiling (the frame's own sample is read as it is).
+#[test]
+fn non_finite_and_huge_input_is_limited_and_does_not_spread() {
+    let latency = bank(PeakDetection::TruePeak).latency().get();
+    let mut x = tone(0.1, 0.0, 0.4, 900);
     x[200] = f32::NAN;
     x[300] = f32::INFINITY;
     x[301] = f32::NEG_INFINITY;
+    x[500] = 1.0e36;
+    x[501] = f32::MAX;
     let out = render(&mut bank(PeakDetection::TruePeak), &x);
-    assert!(out[..300].iter().all(|y| y.is_finite() || y.is_nan()));
-    assert!(out[560..].iter().all(|y| y.is_finite()));
+    for (i, y) in out.iter().enumerate() {
+        if i == 200 + latency {
+            assert!(y.is_nan(), "the NaN is delayed to frame {i}");
+        } else {
+            assert!(y.is_finite(), "frame {i}: {y}");
+        }
+    }
+    for p in [300, 301, 500, 501] {
+        let y = f64::from(out[p + latency]).abs();
+        assert!(y <= CEILING * 1.0001, "frame {p}: {y}");
+    }
+}
+
+/// At the shortest lookahead and in one-frame blocks, as at the default and in whole blocks:
+/// the steady tones stay within the bound of their own frequency (the fs/4 tone at every
+/// phase, and a 0.44 tone), the bursts and the noise within the margin, and a lone sample is
+/// limited at every alignment.
+#[test]
+fn the_shortest_lookahead_and_one_frame_blocks_keep_the_bounds() {
+    for (lookahead, block) in [
+        (LOOKAHEAD, CHUNK),
+        (LOOKAHEAD, 1),
+        (shortest(), CHUNK),
+        (shortest(), 1),
+    ] {
+        let make = || bank_at(PeakDetection::TruePeak, lookahead, RATE);
+        for (name, x) in signals() {
+            let out = run_in(&mut make(), &[&x], [None, None], block).remove(0);
+            let cycles = if name.starts_with("fs/4") {
+                Some(0.25)
+            } else if name == "0.44 fs sine" {
+                Some(0.44)
+            } else {
+                None
+            };
+            let after = true_peak(&out[1_000..]);
+            let limit = cycles.map_or(bound(), tone_bound);
+            assert!(after <= limit, "{name} at {block}: {after} over {limit}");
+            if cycles.is_some() {
+                // The bound is not slack: the tone reaches the ceiling.
+                assert!(after > CEILING * 0.98, "{name}: {after}");
+            }
+        }
+        for p in 100..140 {
+            let mut x = vec![0.0f32; 1_000];
+            x[p] = 1.0;
+            let mut b = make();
+            let latency = b.latency().get();
+            let out = run_in(&mut b, &[&x], [None, None], block).remove(0);
+            assert!(f64::from(out[p + latency]) <= CEILING * 1.0001, "p = {p}");
+        }
+    }
 }
