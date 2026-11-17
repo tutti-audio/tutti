@@ -1,55 +1,70 @@
 use super::*;
 
-/// An input holding fewer frames than the output is refused with both counts.
+/// An input holding fewer frames than the block is refused, naming the input,
+/// the block's count and the input's.
 #[test]
-fn an_input_shorter_than_the_output_is_refused_with_both_counts() {
+fn an_input_shorter_than_the_block_is_refused_with_both_counts() {
     let short = [0.0f32; 3];
     let input = [&short[..]];
-    let mut long = [0.0f32; 4];
+    let mut out = [0.0f32; 4];
+    let mut output = [&mut out[..]];
+    let refused = InputOutput::new(
+        Samples(4),
+        Planes::new(&input).expect("one plane"),
+        PlanesMut::new(&mut output).expect("one plane"),
+    )
+    .expect_err("3 input frames in a 4-frame block");
+    assert_eq!(
+        refused,
+        BufferError::BlockLengthMismatch {
+            side: BlockSide::Input,
+            block: Samples(4),
+            found: Samples(3)
+        }
+    );
+}
+
+/// An output holding more frames than the block is refused too: the block's
+/// frames are never a truncation of a view.
+#[test]
+fn an_output_longer_than_the_block_is_refused() {
+    let src = [0.0f32; 4];
+    let input = [&src[..]];
+    let mut long = [0.0f32; 5];
     let mut output = [&mut long[..]];
     let refused = InputOutput::new(
+        Samples(4),
         Planes::new(&input).expect("one plane"),
         PlanesMut::new(&mut output).expect("one plane"),
     )
-    .expect_err("3 input frames against 4 output frames");
+    .expect_err("5 output frames in a 4-frame block");
     assert_eq!(
         refused,
         BufferError::BlockLengthMismatch {
-            input: Samples(3),
-            output: Samples(4)
+            side: BlockSide::Output,
+            block: Samples(4),
+            found: Samples(5)
         }
     );
 }
 
-/// An input holding more frames than the output is refused too: the block's
-/// frames are never a truncation of the input.
+/// With no channel on either side the block keeps its own frame count: a
+/// processor with no audio still learns the block length.
 #[test]
-fn an_input_longer_than_the_output_is_refused() {
-    let long = [0.0f32; 5];
-    let input = [&long[..]];
-    let mut short = [0.0f32; 4];
-    let mut output = [&mut short[..]];
-    let refused = InputOutput::new(
-        Planes::new(&input).expect("one plane"),
-        PlanesMut::new(&mut output).expect("one plane"),
-    )
-    .expect_err("5 input frames against 4 output frames");
-    assert_eq!(
-        refused,
-        BufferError::BlockLengthMismatch {
-            input: Samples(5),
-            output: Samples(4)
-        }
-    );
+fn a_block_with_no_audio_keeps_its_frame_count() {
+    let block = InputOutput::<f32>::new(Samples(512), Planes::default(), PlanesMut::default())
+        .expect("empty views fit any block");
+    assert_eq!(block.frames(), Samples(512));
+    assert_eq!(block.input().channels(), 0);
 }
 
-/// An empty input pairs with an output of any length; the block has the
-/// output's frames and the input no channel.
+/// An empty input pairs with an output of the block's length.
 #[test]
-fn an_empty_input_takes_the_outputs_frame_count() {
+fn an_empty_input_takes_any_block_length() {
     let mut out = [0.0f32; 7];
     let mut output = [&mut out[..]];
     let block = InputOutput::new(
+        Samples(7),
         Planes::default(),
         PlanesMut::new(&mut output).expect("one plane"),
     )
@@ -67,6 +82,7 @@ fn split_writes_the_output_from_the_input() {
     let mut out = [0.0f32; 3];
     let mut output = [&mut out[..]];
     let mut block = InputOutput::new(
+        Samples(3),
         Planes::new(&input).expect("one plane"),
         PlanesMut::new(&mut output).expect("one plane"),
     )
