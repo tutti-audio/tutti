@@ -180,6 +180,7 @@ pub struct snd_seq_event_t {
     pub data: [u8; 12],
 }
 
+#[cfg(any(test, feature = "testing"))]
 /// `SND_SEQ_EVENT_NOTEON`.
 pub const SND_SEQ_EVENT_NOTEON: u8 = 6;
 /// `SND_SEQ_EVENT_CONTROLLER`.
