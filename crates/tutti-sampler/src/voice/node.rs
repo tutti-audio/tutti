@@ -68,9 +68,8 @@ pub struct VoiceNode {
     /// Declared rather than inferred from the voice, so an edge wired against
     /// it cannot be re-arityed under a live graph.
     pub(crate) channels: ChannelLayout,
-    /// A reader of the steering the handle publishes, lent once per block; the
-    /// reader owns the cell (`Reader::cell`), which the handle and the fork
-    /// source share. Empty until a handle sets a field, so a node driven
+    /// A reader of the steering the handle publishes, lent once per block,
+    /// registered on the `Publisher` the handle and the fork source share. Empty until a handle sets a field, so a node driven
     /// by hand keeps what it was built with.
     steering: Reader<Steering>,
     /// The steering last applied, so a block applies a field once, when it

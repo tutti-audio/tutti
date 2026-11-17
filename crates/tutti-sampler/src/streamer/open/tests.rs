@@ -104,7 +104,6 @@ fn an_open_is_pending_until_the_streamer_answers() {
         panic!("the streamer ran and did not answer");
     };
     assert_eq!(reader.id(), id);
-
     assert_eq!(stream.id(), id, "the handle steers the stream it opened");
 }
 

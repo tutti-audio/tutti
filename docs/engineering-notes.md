@@ -216,9 +216,9 @@ Rules:
   takes the publisher's lock and may allocate a block of slots, so it happens
   where the node (or the streamer's cycle, or the MIDI drain) is built, and
   the reader is stored beside what it reads. A fork builds its node over a
-  new cell and registers there. `Reader::clone` registers a new reader on the
-  same cell, so a derived `Clone` on a node holding one is a node with its
-  own reader, never a shared slot.
+  new cell and registers there. A `Reader` is not `Clone`: a node that clones
+  pairs its reader with the cell's `Publisher` and registers a new reader in a
+  hand `Clone`, so a cloned node has its own reader, never a shared slot.
 - **Lend once per block, never per sample.** A lend is a `Release` store, a
   `SeqCst` fence, an `Acquire` load and a `Relaxed` store, all on the
   reader's own cache line but the load. Measured at 20-30 ns p50 per block
@@ -277,8 +277,7 @@ Rules:
   enumeration in `tutti-midi-hardware`, and the per-channel compensation
   table (`PrerollTable`, a lock), which the session writes and only a host
   reads. The hardware MIDI per-block port set,
-  which the audio thread does read, is a `Publisher` behind a publisher
-  lock.
+  which the audio thread does read, goes through a `Publisher`.
 
 **The guarantee is structural.** The cell (then `RtPublish`) used to wrap `ArcSwap`, which made
 RT deallocation very unlikely and bounded but not *impossible*: a guard whose
