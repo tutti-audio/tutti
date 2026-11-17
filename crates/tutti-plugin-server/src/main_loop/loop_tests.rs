@@ -125,7 +125,7 @@ impl Script {
                     self.steps.pop_front();
                 } else {
                     // The predicates read other threads' state, which has no
-                    // wake to wait on.
+                    // doorbell to wait on yet (lane server-a2's).
                     std::thread::yield_now();
                 }
                 Ok(false)
@@ -544,8 +544,8 @@ fn a_slow_paint_on_the_main_loop_delays_no_block() {
                         if waits.load(Ordering::SeqCst) == sent_at {
                             within.lock().unwrap().push(sent_at);
                         }
-                        // Each block is a round trip to the render thread: it
-                        // paces itself.
+                        // Each block is a round trip to the render thread, whose
+                        // ring has no doorbell yet (lane server-a2's).
                         std::thread::yield_now();
                     }
                     done.store(true, Ordering::SeqCst);

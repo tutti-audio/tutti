@@ -59,7 +59,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError, RwLock};
 use tutti_plugin_db::{
     BlacklistedFile, FileFacts, FilesError, PluginDb, PluginEntry, RowChange, Scan, ScanBusy,
-    ScanError, ScanPoll, ScanResult, Scanner,
+    ScanError, ScanPoll, Scanner,
 };
 use tutti_plugin_ipc::CatalogConfig;
 use tutti_plugin_types::{BridgeError, BridgeResult};
@@ -430,21 +430,6 @@ impl Catalog {
         poll
     }
 
-    /// Blocks until a task ([`scan`](Self::scan), [`register`](Self::register) or
-    /// [`measure`](Self::measure)) ends, applying what it sends as it arrives,
-    /// and returns its result; `None` when the worker died without finishing.
-    ///
-    /// The result is saved as for [`try_apply`](Self::try_apply). For an owner
-    /// with nothing else to do until the task ends; a UI thread polls with
-    /// `try_apply`.
-    pub fn wait(&mut self, task: Scan) -> Option<ScanResult> {
-        let result = self.change(|db, _, _| task.wait(db));
-        if result.is_some() {
-            self.save_in_background();
-        }
-        result
-    }
-
     /// Writes a copy of the table on its own thread. The clone is the only cost
     /// on the owner's thread. A write still in flight is finished first, so two
     /// writes never race and the newer table is the one stored.
@@ -757,7 +742,7 @@ mod tests {
     use super::*;
     use crate::host::loadable::BindError;
     use crate::host::plugin::Plugin;
-    use tutti_plugin_db::{FileRow, ScanPoll};
+    use tutti_plugin_db::{FileRow, ScanPoll, ScanResult};
     use tutti_types::SampleRate;
 
     /// Runs a scan to its end on the calling thread, applying as it goes.

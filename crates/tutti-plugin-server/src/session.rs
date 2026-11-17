@@ -926,7 +926,8 @@ mod tests {
                             side.drain();
                             side.poll_seat();
                         }
-                        // The commands ring has no doorbell: the stepper polls it.
+                        // The commands ring has no doorbell, so the stepper polls it; the
+                        // doorbell is lane server-a2's.
                         std::thread::yield_now();
                     }
                 }
@@ -1128,6 +1129,8 @@ mod tests {
                     };
                     blocks.push((started, peak));
                     rendered.fetch_add(1, Ordering::Release);
+                    // The player polls the render side the same way: no doorbell
+                    // yet (lane server-a2).
                     std::thread::yield_now();
                 }
                 blocks

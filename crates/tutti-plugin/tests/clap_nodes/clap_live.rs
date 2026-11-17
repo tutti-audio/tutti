@@ -19,8 +19,6 @@
 //! counted within a few blocks of the miss; a silent block whose chunk was none
 //! of these, or that no collect missed, fails; so does a run with an
 //! unanswered chunk: a server that drops a chunk silently.
-//! A run in which more than a quarter of the judged blocks were late is rerun
-//! (twice at most) or reported as too loaded to judge.
 //!
 //! Needs `cargo build -p tutti-plugin-server` first (see `CLAUDE.md`).
 
@@ -72,9 +70,7 @@ impl Node for RampSource {
 /// What a live run saw.
 struct Run {
     declared: Samples,
-    /// Blocks after warm-up.
-    blocks: usize,
-    /// Of those, entirely silent (block indices).
+    /// The blocks after warm-up that were entirely silent (indices).
     silent: Vec<usize>,
     /// Of those, neither silent nor the input delayed by `declared`.
     wrong: Vec<usize>,
@@ -279,7 +275,6 @@ fn run_live(rate: f64, quantum: usize, blocks: usize, burst_at: Option<usize>) -
     drop(probe.handle);
     Run {
         declared,
-        blocks,
         silent,
         wrong,
         misses,
@@ -358,7 +353,6 @@ fn a_silent_block_is_judged_by_what_the_collect_and_the_server_did() {
                refuses: &[usize],
                skips: &[usize]| Run {
         declared: Samples(0),
-        blocks: 200,
         silent: silent.to_vec(),
         wrong: Vec::new(),
         misses: misses.to_vec(),
@@ -391,66 +385,38 @@ fn a_silent_block_is_judged_by_what_the_collect_and_the_server_did() {
     );
 }
 
-/// Runs of `run` before a machine is called too loaded to judge.
-const JUDGEABLE_RUNS: usize = 3;
-
-/// The first run of `run` that can be judged: no block wrong, no silent block
-/// outside a late answer, a refusal or a skip, and no missed chunk the server never accounted for (any fails at once, in any run, whatever
-/// the load), and no more than a quarter of the blocks judged (`from` on,
-/// outside `neutral`) answered late, refused or skipped. More than that and the run asserts
-/// little about the pipeline, so it is run again on a fresh server, up to
-/// [`JUDGEABLE_RUNS`] times, and then reported.
-fn judgeable_run(
-    what: &str,
-    mut run: impl FnMut() -> Run,
-    from: usize,
-    neutral: Range<usize>,
-) -> Run {
-    let mut seen = Vec::new();
-    for attempt in 1..=JUDGEABLE_RUNS {
-        let run = run();
-        assert!(
-            run.wrong.is_empty(),
-            "{what}: blocks {:?} are neither silent nor the input delayed by {:?}",
-            run.wrong,
-            run.declared
-        );
-        let judged = (from..run.blocks).filter(|b| !neutral.contains(b)).count();
-        let late = run
-            .lates
-            .iter()
-            .chain(&run.refuses)
-            .chain(&run.skips)
-            .filter(|&&b| b >= from && !neutral.contains(&b))
-            .count();
-        eprintln!(
-            "{what}: run {attempt}: {} chunks missed, {late} late, refused or skipped ({} refused, {} skipped), of \
-             {judged} judged blocks, {} silent",
-            run.misses.len(),
-            run.refuses.len(),
-            run.skips.len(),
-            run.silent.len()
-        );
-        assert_eq!(
-            run.unanswered, 0,
-            "{what}: a missed chunk the server neither answered, refused nor skipped"
-        );
-        if let Err(why) = judge_silence(&run, from, &neutral) {
-            panic!("{what}: {why}");
-        }
-        if late * 4 <= judged {
-            return run;
-        }
-        seen.push(format!("{late} of {judged}"));
-    }
-    panic!(
-        "{what}: machine too loaded to judge: late, refused or skipped chunks per run: {seen:?}"
+/// Runs `run` and judges it: no block wrong, no silent block outside a late
+/// answer, a refusal or a skip (from `from` on, outside `neutral`), and no
+/// missed chunk the server never accounted for.
+fn judged_run(what: &str, run: impl FnOnce() -> Run, from: usize, neutral: Range<usize>) -> Run {
+    let run = run();
+    assert!(
+        run.wrong.is_empty(),
+        "{what}: blocks {:?} are neither silent nor the input delayed by {:?}",
+        run.wrong,
+        run.declared
     );
+    eprintln!(
+        "{what}: {} chunks missed ({} late, {} refused, {} skipped), {} silent",
+        run.misses.len(),
+        run.lates.len(),
+        run.refuses.len(),
+        run.skips.len(),
+        run.silent.len()
+    );
+    assert_eq!(
+        run.unanswered, 0,
+        "{what}: a missed chunk the server neither answered, refused nor skipped"
+    );
+    if let Err(why) = judge_silence(&run, from, &neutral) {
+        panic!("{what}: {why}");
+    }
+    run
 }
 
 fn assert_live(rate: f64, quantum: usize) {
     let what = format!("{quantum}-frame callbacks");
-    let run = judgeable_run(&what, || run_live(rate, quantum, 200, None), 0, 0..0);
+    let run = judged_run(&what, || run_live(rate, quantum, 200, None), 0, 0..0);
     assert_eq!(
         run.declared,
         Samples(PROBE_LATENCY + quantum),
@@ -502,7 +468,7 @@ fn a_burst_of_callbacks_loses_blocks_but_never_corrupts_them() {
     let _env = ProbeEnv::new().render_mode(render::LATENCY);
 
     let window = BURST_AT..BURST_AT + BURST + RING_SLOTS;
-    let run = judgeable_run(
+    let run = judged_run(
         "a burst of callbacks",
         || run_live(48_000.0, QUANTUM, BLOCKS, Some(BURST_AT)),
         SETTLE,

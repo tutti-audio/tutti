@@ -6,11 +6,25 @@
 #![cfg(feature = "clap")]
 
 use tutti_plugin::catalog::{Catalog, CatalogConfig, PluginRef};
-use tutti_plugin_db::{PluginDb, Scan, ScanResult};
+use tutti_plugin_db::{PluginDb, Scan, ScanPoll, ScanResult};
 
-/// Applies `task` as it arrives until it ends, and returns its result.
-fn finish(catalog: &mut Catalog, task: Scan) -> ScanResult {
-    catalog.wait(task).expect("the task's worker died")
+/// Applies `task` as it arrives until it ends, and returns its result; the wait
+/// is bounded by a hang guard.
+fn finish(catalog: &mut Catalog, mut task: Scan) -> ScanResult {
+    let mut result = None;
+    tutti_fixtures::wait_until(
+        "the task to end",
+        std::time::Duration::from_secs(120),
+        || match catalog.try_apply(&mut task) {
+            ScanPoll::Running => false,
+            ScanPoll::Done(done) => {
+                result = Some(done);
+                true
+            }
+            ScanPoll::Died => panic!("the task's worker died"),
+        },
+    );
+    result.expect("the wait ended on a result")
 }
 
 /// Runs a scan of the catalog's directories to its end.
