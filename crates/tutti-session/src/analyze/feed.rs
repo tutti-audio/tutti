@@ -202,7 +202,9 @@ impl<'a> sealed::Sealed<'a> for Mono<'a> {
         }
         let fold = chunk.to_mono.as_ref().map_err(|error| *error)?;
         chunk.mono.clear();
-        chunk.mono.resize(chunk.frames().get(), 0.0);
+        chunk
+            .mono
+            .resize(chunk.frames().interleaved_len(ChannelLayout::MONO), 0.0);
         let mono = InterleavedMut::new(&mut chunk.mono, ChannelLayout::MONO)?;
         match &chunk.held {
             Layout::Interleaved => fold.fold(Interleaved::new(&chunk.data, layout)?, mono)?,
