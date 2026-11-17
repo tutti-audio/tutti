@@ -24,7 +24,8 @@ use tutti_graph::{
 };
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_transport::{
-    FadeOut, LoopEdit, MotionEvent, OfflineTimeline, OfflineTimelineConfig, Then, Transport,
+    FadeOut, LoopEdit, MotionEvent, OfflineTimeline, OfflineTimelineConfig, RenderClock, Then,
+    Transport,
 };
 use tutti_types::{
     At, Beat, Bpm, ChannelLayout, LoopRange, SampleRate, Samples, Tail, first_frame_at_or_after,

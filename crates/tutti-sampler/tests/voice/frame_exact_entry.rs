@@ -21,7 +21,7 @@
 //! A clip at beat 3, a constant wave: its first non-zero frame is exactly
 //! 96 000 on every path a voice is driven by — live, the engine
 //! (`Engine::new`) in 441-frame device blocks; offline, a graph rendered by
-//! `OfflineTimeline::render_graph` in 1023-frame blocks; and a node driven
+//! `RenderClock::render_graph` in 1023-frame blocks; and a node driven
 //! by hand in 77-frame blocks. On none is 96 000 the first frame of a block
 //! (a voice renders each block in one piece, seated at its first frame),
 //! nor of a 64-frame piece of one, which voices rendered before their
@@ -40,7 +40,9 @@ use tutti_graph::{Cx, Editor, Env, Io, Node, Prepare, Shape, Status, TransportCh
 use tutti_graph::{OutPort, Source};
 use tutti_sampler::{MemorySource, SlotId, VoicePool};
 use tutti_tempo::TempoMap;
-use tutti_transport::{MotionEvent, OfflineTimeline, OfflineTimelineConfig, Transport};
+use tutti_transport::{
+    MotionEvent, OfflineTimeline, OfflineTimelineConfig, RenderClock, Transport,
+};
 use tutti_types::{Beat, Bpm, ChannelLayout, Frame, FrameClock, SampleRate, Samples};
 
 const SR: f64 = 48_000.0;

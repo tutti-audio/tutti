@@ -82,11 +82,6 @@ const INTERNAL: &[(&str, &str, &str)] = &[
         "the payload of session's HeardTapError::Tap, matched through its variants; it shares the name",
     ),
     (
-        "tutti_transport",
-        "RenderClock",
-        "the export render's clock; `ExportClock` wraps it",
-    ),
-    (
         "tutti_graph",
         "Executor",
         "the graph's executor; an app renders through `Session` or `Bounce`",
@@ -95,16 +90,6 @@ const INTERNAL: &[(&str, &str, &str)] = &[
         "tutti_transport",
         "OfflineClock",
         "the export render's clock; `ExportClock` wraps it",
-    ),
-    (
-        "tutti_graph",
-        "Topology",
-        "the compiler's view of a graph; the session wraps it",
-    ),
-    (
-        "tutti_graph",
-        "Compensation",
-        "a compiler record of latency compensation",
     ),
     (
         "tutti_graph",

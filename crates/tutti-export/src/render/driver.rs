@@ -94,8 +94,8 @@ impl FileChannels<'_> {
 /// exactly the frames produced. The executor reads the transport from each
 /// block's `Env`, so this hands it one — through
 /// [`RenderClock::render_graph`], which reads the clock's snapshot before the
-/// block and advances it after (`OfflineTimeline::render_graph` is that call
-/// for an offline timeline).
+/// block and advances it after (`OfflineTimeline` overrides that call
+/// to cut a block at its tempo steps).
 pub(crate) struct GraphSource<'a> {
     editor: &'a mut tutti_graph::Editor,
     executor: &'a mut tutti_graph::Executor,

@@ -34,7 +34,7 @@ use tutti_nodes::automation::ControlLaneNode;
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_host::{PluginNode, load_client};
 use tutti_plugin_types::{Normalized, ParamId};
-use tutti_transport::{OfflineTimeline, OfflineTimelineConfig};
+use tutti_transport::{OfflineTimeline, OfflineTimelineConfig, RenderClock};
 use tutti_types::{Beat, Bpm, ChannelLayout, SampleRate, Samples};
 
 const SAMPLE_RATE: f64 = 48_000.0;

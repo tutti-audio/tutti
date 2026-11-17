@@ -270,7 +270,7 @@ pub mod types {
     pub use tutti_curve::{Curvature, CurvatureError, Exponent, ExponentError, Law, Piece};
     pub use tutti_rt::{
         Count, Counter, CounterWriter, Drained, Gauge, GaugeWriter, LevelSpan, Panicked, PosFrame,
-        Reading, Reclaim,
+        Reading, Reclaim, Words,
     };
     pub use tutti_types::{
         Adsr, AmbisonicFormat, AmbisonicNormalization, AmbisonicOrder, AmbisonicOrderOutOfRange,
@@ -652,6 +652,9 @@ pub mod midi {
         TicksPerQuarterNote, U7, U14, Ump, Voice1,
     };
     pub use tutti_ump::{Join, Span, Spans};
+    pub use tutti_ump::{
+        LyricKind, NotASoftwareRevision, PlainTextKind, SoftwareRevision, TextError,
+    };
 
     /// The session's one MIDI error (`tutti_session::MidiError`): each cause
     /// (hardware, file, send, route) is its source.

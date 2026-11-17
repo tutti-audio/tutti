@@ -132,8 +132,9 @@ impl OfflineTimeline {
     /// Creates a timeline seated at `config.start_beat`, on `config.tempo_map`.
     ///
     /// A render that must see the map's tempo changes drives it through
-    /// [`render_graph`](Self::render_graph), which knows the block it hands the
-    /// graph. A map of one point is the constant tempo, bit for bit.
+    /// [`RenderClock::render_graph`](super::RenderClock::render_graph), which
+    /// knows the block it hands the graph. A map of one point is the constant
+    /// tempo, bit for bit.
     #[must_use]
     pub fn new(config: &OfflineTimelineConfig) -> Self {
         let map = &config.tempo_map;
@@ -240,38 +241,6 @@ impl OfflineTimeline {
         self.loop_range
     }
 
-    /// The block about to be rendered, as a graph executor takes it:
-    /// the transport at the block's first frame, and the changes inside it.
-    ///
-    /// The transport is this timeline at its current playhead: rolling (an
-    /// offline render always is), at its tempo, looping over its region, and
-    /// counted from its segment's origin, so a node walking its `Env`
-    /// continues this timeline's arithmetic. There are never changes here: a
-    /// loop wrap inside the block is not a change (the graph
-    /// derives it from the snapshot, as it does live
-    /// ([`Env::transport_at`](tutti_graph::Env::transport_at), and
-    /// [`Env::for_each_beat`](tutti_graph::Env::for_each_beat) frame by
-    /// frame)), and a tempo change of the map is cut by
-    /// [`render_graph`](Self::render_graph), which takes the block's changes
-    /// from the map.
-    ///
-    /// Read **before** the block is processed and advance after, as
-    /// [`render_graph`](Self::render_graph) does: the snapshot's beat is the
-    /// block's first frame, the one clip readers and samplers holding this
-    /// timeline read during the block (see [`RenderClock`](super::RenderClock)).
-    pub fn graph_block(
-        &self,
-    ) -> (
-        tutti_graph::TransportPosition,
-        tutti_graph::TransportChanges,
-    ) {
-        let head = self.lock();
-        (
-            self.transport(&head.clock),
-            tutti_graph::TransportChanges::NONE,
-        )
-    }
-
     /// The transport of `clock`'s frame: rolling, at the tempo and segment the
     /// clock stands on, looping over this timeline's region.
     fn transport(&self, clock: &FrameClock) -> tutti_graph::TransportPosition {
@@ -315,34 +284,6 @@ impl OfflineTimeline {
             |clock| self.transport(clock),
         );
         (first, ahead.changes, ahead.limit.unwrap_or(frames))
-    }
-
-    /// Renders one block of `frames` through `exec` under this timeline, then
-    /// advance the timeline by it: [`graph_block`](Self::graph_block),
-    /// [`Executor::process_with_changes`](tutti_graph::Executor::process_with_changes),
-    /// then [`advance`](Self::advance), in the one order that keeps every
-    /// reader of this timeline on the frame the graph renders (see
-    /// [`RenderClock::render_graph`](super::RenderClock::render_graph)).
-    ///
-    /// The graph's frames and this timeline's beats both start where they
-    /// stand: the executor keeps its own frame clock, and the beat is this
-    /// timeline's playhead (seat it with [`seek_to`](Self::seek_to)).
-    ///
-    /// # Panics
-    ///
-    /// As `Executor::process_with_changes`: if `frames` is zero or past the
-    /// executor's prepared maximum block.
-    pub fn render_graph(
-        &self,
-        exec: &mut tutti_graph::Executor,
-        frames: usize,
-        inputs: &[&[f32]],
-        outputs: &mut [&mut [f32]],
-    ) {
-        // The trait's, so an export driving any `RenderClock` and a caller
-        // holding this timeline run the one sequence (which this timeline
-        // overrides, to cut a block at its tempo steps).
-        super::RenderClock::render_graph(self, exec, frames, inputs, outputs);
     }
 }
 
@@ -390,13 +331,26 @@ impl super::RenderClock for OfflineTimeline {
         OfflineTimeline::advance(self, frames);
     }
 
+    /// This timeline at its current playhead: rolling (an offline render always
+    /// is), at its tempo, looping over its region, and counted from its
+    /// segment's origin, so a node walking its `Env` continues this timeline's
+    /// arithmetic. There are never changes here. A loop wrap inside the block
+    /// is not a change: the graph derives it from the snapshot, as it does
+    /// live, through [`Env::transport_at`](tutti_graph::Env::transport_at) and
+    /// [`Env::for_each_beat`](tutti_graph::Env::for_each_beat). A tempo change
+    /// of the map is cut by [`render_graph`](super::RenderClock::render_graph),
+    /// which takes the block's changes from the map.
     fn graph_block(
         &self,
     ) -> (
         tutti_graph::TransportPosition,
         tutti_graph::TransportChanges,
     ) {
-        OfflineTimeline::graph_block(self)
+        let head = self.lock();
+        (
+            self.transport(&head.clock),
+            tutti_graph::TransportChanges::NONE,
+        )
     }
 
     /// The trait's sequence, with the block's tempo steps in its changes, and
@@ -440,6 +394,7 @@ impl super::RenderClock for OfflineTimeline {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::RenderClock;
     use tutti_tempo::Transition;
 
     fn constant(bpm: f64) -> Arc<TempoMap> {
