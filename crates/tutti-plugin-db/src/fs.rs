@@ -3,6 +3,7 @@
 use super::facts::FileFacts;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 use tracing::debug;
 use tutti_plugin_types::PluginFormat;
 
@@ -26,13 +27,11 @@ impl FileFacts {
     pub(crate) fn read_as(path: impl AsRef<Path>, format: Option<PluginFormat>) -> Self {
         let path = path.as_ref();
         let metadata = std::fs::metadata(path);
-        let mut mtime = metadata.as_ref().ok().and_then(modified_secs);
+        let mut mtime = metadata.as_ref().ok().and_then(modified);
         if metadata.as_ref().is_ok_and(|m| m.is_dir())
             && let Some(module) = module_in_bundle(path, format)
         {
-            let inner = std::fs::metadata(module)
-                .ok()
-                .and_then(|m| modified_secs(&m));
+            let inner = std::fs::metadata(module).ok().and_then(|m| modified(&m));
             mtime = mtime.max(inner);
         }
         Self {
@@ -43,12 +42,13 @@ impl FileFacts {
     }
 }
 
-fn modified_secs(metadata: &std::fs::Metadata) -> Option<u64> {
+/// The file's modification time, or `None` if the platform cannot read it or it
+/// lies before the Unix epoch, which the stored record cannot hold.
+fn modified(metadata: &std::fs::Metadata) -> Option<SystemTime> {
     metadata
         .modified()
         .ok()
-        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_secs())
+        .filter(|time| *time >= SystemTime::UNIX_EPOCH)
 }
 
 /// The module inside a bundle directory, preferring the one this target loads.
@@ -240,7 +240,7 @@ mod tests {
 
         let present = FileFacts::read(&file);
         assert!(present.exists);
-        assert!(present.mtime.is_some_and(|t| t > 0));
+        assert!(present.mtime.is_some());
         assert_eq!(present.format, Some(PluginFormat::Clap));
 
         let absent = FileFacts::read(dir.path().join("gone.vst3"));
@@ -309,8 +309,11 @@ mod tests {
 
         /// A bundle directory holding one bare-stem binary, with the binary's and the
         /// directory's times set; returns the facts read.
+        fn at(secs: u64) -> Option<SystemTime> {
+            Some(SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(secs))
+        }
+
         fn facts_of_bundle(name: &str, module_secs: u64, dir_secs: u64) -> FileFacts {
-            use std::time::{Duration, UNIX_EPOCH};
             let dir = TempDir::new().unwrap();
             let bundle = dir.path().join(name);
             let arch = bundle
@@ -322,7 +325,7 @@ mod tests {
             let set = |p: &Path, secs: u64| {
                 std::fs::File::open(p)
                     .unwrap()
-                    .set_modified(UNIX_EPOCH + Duration::from_secs(secs))
+                    .set_modified(at(secs).unwrap())
                     .unwrap();
             };
             set(&module, module_secs);
@@ -336,10 +339,10 @@ mod tests {
         fn a_bundle_whose_binary_changed_reads_as_changed() {
             for name in ["Reverb.vst3", "Legacy.vst", "Synth.clap", "Verb.component"] {
                 let facts = facts_of_bundle(name, 2_000_000_000, 1_000_000_000);
-                assert_eq!(facts.mtime, Some(2_000_000_000), "{name}");
+                assert_eq!(facts.mtime, at(2_000_000_000), "{name}");
                 // The directory later than the binary still wins.
                 let facts = facts_of_bundle(name, 1_000_000_000, 3_000_000_000);
-                assert_eq!(facts.mtime, Some(3_000_000_000), "{name}");
+                assert_eq!(facts.mtime, at(3_000_000_000), "{name}");
             }
         }
     }

@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize, Serializer};
 use std::path::{Path, PathBuf};
 
 /// The version of the record layout [`PluginDb`] serializes and deserializes.
-pub const DB_VERSION: u64 = 4;
+pub const DB_VERSION: u64 = 5;
 
 /// Why a record is not a database this version can read.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -35,26 +35,24 @@ pub enum InvalidDb {
 }
 
 /// A path as the record holds it: text, or the raw bytes of a name that is not
-/// UTF-8.
+/// UTF-8. Externally tagged, so a format with no self-description reads it.
 #[derive(Serialize)]
-#[serde(untagged)]
 enum StoredPath<'a> {
     Text(&'a str),
-    Bytes { bytes: &'a [u8] },
+    Bytes(&'a [u8]),
 }
 
 #[derive(Deserialize)]
-#[serde(untagged)]
 enum StoredPathOwned {
     Text(String),
-    Bytes { bytes: Vec<u8> },
+    Bytes(Vec<u8>),
 }
 
 impl<'a> StoredPath<'a> {
     fn of(path: &'a Path) -> Option<Self> {
         match path.to_str() {
             Some(text) => Some(Self::Text(text)),
-            None => os_path::raw_bytes(path).map(|bytes| Self::Bytes { bytes }),
+            None => os_path::raw_bytes(path).map(Self::Bytes),
         }
     }
 }
@@ -63,7 +61,7 @@ impl StoredPathOwned {
     fn into_path(self) -> PathBuf {
         match self {
             Self::Text(text) => PathBuf::from(text),
-            Self::Bytes { bytes } => os_path::from_bytes(&bytes),
+            Self::Bytes(bytes) => os_path::from_bytes(&bytes),
         }
     }
 }
@@ -134,7 +132,7 @@ mod tests {
     fn row(name: &str) -> FileRow {
         let facts = FileFacts {
             exists: true,
-            mtime: Some(1_700_000_000),
+            mtime: Some(std::time::UNIX_EPOCH + std::time::Duration::new(1_700_000_000, 123)),
             format: Some(PluginFormat::Vst3),
         };
         FileRow::probed(
@@ -172,7 +170,7 @@ mod tests {
     /// A row of one plugin whose `measured` is `measured`.
     fn measured_row(name: &str, measured: Measured) -> FileRow {
         let mut row = row(name);
-        let FileState::Probed(plugins) = &mut row.state else {
+        let FileState::Probed { plugins, .. } = &mut row.state else {
             unreachable!("a probed row");
         };
         plugins[0].measured = Some(measured);
@@ -251,6 +249,37 @@ mod tests {
         );
     }
 
+    /// **A populated database survives a format with no self-description**:
+    /// postcard reads back exactly what it wrote, a blacklisted row, a measured
+    /// one and a path that is not UTF-8 included.
+    #[test]
+    fn a_populated_database_round_trips_through_postcard() {
+        let mut db = db_of(&["reverb", "delay"]);
+        db.blacklist(
+            Path::new("/plugins/crashy.vst3"),
+            "segfault".into(),
+            &no_file(),
+        );
+        db.apply(RowChange::put(
+            "/plugins/measured.vst3",
+            measured_row(
+                "measured",
+                measurement(TailVerdict::Honest, LatencyVerdict::Honest),
+            ),
+        ));
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStrExt;
+            let odd = PathBuf::from(std::ffi::OsStr::from_bytes(b"/plugins/caf\xe9.vst3"));
+            db.blacklist(&odd, "boom".into(), &no_file());
+        }
+
+        let bytes = postcard::to_stdvec(&db).unwrap();
+        let back: PluginDb = postcard::from_bytes(&bytes).unwrap();
+
+        assert_eq!(back, db);
+    }
+
     /// A serialized database declares the version it deserializes.
     #[test]
     fn a_serialized_database_declares_the_version_it_reads() {
@@ -311,7 +340,7 @@ mod tests {
         let (first, second) = (row("first"), row("second"));
         let value = serde_json::json!({
             "version": DB_VERSION,
-            "files": [["/plugins/a.vst3", first], ["/plugins/a.vst3", second]],
+            "files": [[{"Text": "/plugins/a.vst3"}, first], [{"Text": "/plugins/a.vst3"}, second]],
         });
 
         let raw: Raw = serde_json::from_value(value.clone()).unwrap();

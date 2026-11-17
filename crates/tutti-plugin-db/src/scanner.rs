@@ -724,7 +724,7 @@ mod tests {
     use super::*;
     use crate::table::FileState;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::time::{Duration, UNIX_EPOCH};
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
     use tempfile::TempDir;
 
     fn create_fake_plugin(dir: &Path, name: &str) -> PathBuf {
@@ -733,10 +733,14 @@ mod tests {
         path.canonicalize().unwrap()
     }
 
+    fn at(secs: u64) -> SystemTime {
+        UNIX_EPOCH + Duration::from_secs(secs)
+    }
+
     fn set_mtime(path: &Path, secs: u64) {
         std::fs::File::open(path)
             .unwrap()
-            .set_modified(UNIX_EPOCH + Duration::from_secs(secs))
+            .set_modified(at(secs))
             .unwrap();
     }
 
@@ -898,7 +902,7 @@ mod tests {
         };
         let dir = TempDir::new().unwrap();
         let plugins_dir = plugins_dir(&dir);
-        let measured_row = |plugin: &Path, mtime: Option<u64>| {
+        let measured_row = |plugin: &Path, mtime: Option<SystemTime>| {
             let mut descriptor = PluginDescriptor::new("p", "p", PluginClass::Unknown);
             descriptor.measured = Some(Measured {
                 tail: None,
@@ -922,7 +926,10 @@ mod tests {
         let changed = create_fake_plugin(&plugins_dir, "changed.vst3");
         let mut db = PluginDb::new();
         db.apply(RowChange::put(&same, measured_row(&same, None)));
-        db.apply(RowChange::put(&changed, measured_row(&changed, Some(1))));
+        db.apply(RowChange::put(
+            &changed,
+            measured_row(&changed, Some(at(1))),
+        ));
 
         scan_dirs(&scanner_for(dir.path()), &mut db, &[plugins_dir], no_save).unwrap();
 
@@ -1103,7 +1110,7 @@ mod tests {
 
         // Simulate a reinstall: the file's mtime moves.
         let mut row = db.row(&bad).unwrap().clone();
-        row.mtime = row.mtime.map(|t| t - 1);
+        row.mtime = row.mtime.map(|t| t - Duration::from_secs(1));
         db.apply(RowChange::put(&bad, row));
 
         assert!(db.is_blacklisted(&bad), "flag is still set");
@@ -1200,7 +1207,7 @@ mod tests {
 
         // And it is not permanent: reinstalling the plugin re-admits it.
         let mut row = db.row(&broken).unwrap().clone();
-        row.mtime = row.mtime.map(|t| t - 1);
+        row.mtime = row.mtime.map(|t| t - Duration::from_secs(1));
         db.apply(RowChange::put(&broken, row));
         assert!(
             matches!(
@@ -1265,7 +1272,7 @@ mod tests {
         let (scanner, calls) = counting_scanner(dir.path(), named);
         let mut db = PluginDb::new();
         scan_dirs(&scanner, &mut db, [&plugins_dir], no_save).unwrap();
-        assert_eq!(db.row(&plugin).unwrap().mtime, Some(1_000_000_000));
+        assert_eq!(db.row(&plugin).unwrap().mtime, Some(at(1_000_000_000)));
 
         set_mtime(&plugin, 1_000_000_007);
         let second = scan_dirs(&scanner, &mut db, [&plugins_dir], no_save).unwrap();
@@ -1273,7 +1280,7 @@ mod tests {
         assert_eq!(calls.load(Ordering::SeqCst), 2);
         assert_eq!(second.new, 1);
         assert_eq!(db.len(), 1);
-        assert_eq!(db.row(&plugin).unwrap().mtime, Some(1_000_000_007));
+        assert_eq!(db.row(&plugin).unwrap().mtime, Some(at(1_000_000_007)));
     }
 
     /// A file deleted between scans keeps its row until `prune_missing`: a scan
@@ -1422,7 +1429,7 @@ mod tests {
         let mut db = PluginDb::new();
         for p in [&a, &b] {
             let facts = FileFacts {
-                mtime: Some(old),
+                mtime: Some(at(old)),
                 ..FileFacts::read(p)
             };
             let stale = vec![PluginDescriptor::new("old", "old", PluginClass::Unknown)];
@@ -1464,21 +1471,21 @@ mod tests {
         let whole = |db: &PluginDb, path: &Path| {
             let row = db.row(path).unwrap();
             let name = row.plugins()[0].name.as_str();
-            matches!((row.mtime, name), (Some(t), "old") if t == old)
-                || matches!((row.mtime, name), (Some(t), "new") if t == new)
+            matches!((row.mtime, name), (Some(t), "old") if t == at(old))
+                || matches!((row.mtime, name), (Some(t), "new") if t == at(new))
         };
         // The first file's change was sent before the second probe started, so
         // it is already there to apply.
         assert!(matches!(scan.poll(&mut db), ScanPoll::Running));
         assert!(whole(&db, first) && whole(&db, second));
-        assert_eq!(db.row(first).unwrap().mtime, Some(new));
-        assert_eq!(db.row(second).unwrap().mtime, Some(old), "still parked");
+        assert_eq!(db.row(first).unwrap().mtime, Some(at(new)));
+        assert_eq!(db.row(second).unwrap().mtime, Some(at(old)), "still parked");
 
         release_tx.send(()).unwrap();
         let result = scan.wait(&mut db).expect("the worker finishes");
         assert_eq!(result.new, 2);
         assert!(whole(&db, first) && whole(&db, second));
-        assert_eq!(db.row(second).unwrap().mtime, Some(new));
+        assert_eq!(db.row(second).unwrap().mtime, Some(at(new)));
     }
 
     /// An edit made while a scan runs (a blacklist the user set) is still there
@@ -1731,7 +1738,10 @@ mod tests {
         task.wait(&mut db).expect("the task finishes");
 
         assert_eq!(*seen.lock().unwrap(), [PluginFormat::Clap]);
-        assert_eq!(db.row(&file).expect("a row").format, PluginFormat::Clap);
+        assert_eq!(
+            db.row(&file).expect("a row").format(),
+            Some(PluginFormat::Clap)
+        );
     }
 
     /// A file task refuses a path that is not a file at the call, with a named
@@ -1860,7 +1870,7 @@ mod tests {
         }
 
         /// A link named `.clap` to a file named anything is keyed by the target and
-        /// keeps the link's format, even in a row that records only a failure.
+        /// keeps the link's format.
         #[test]
         fn a_link_to_a_differently_named_file_keeps_its_format() {
             let dir = TempDir::new().unwrap();
@@ -1869,14 +1879,13 @@ mod tests {
             let links = dir.path().join("links");
             std::fs::create_dir(&links).unwrap();
             std::os::unix::fs::symlink(&target, links.join("synth.clap")).unwrap();
-            let (scanner, _) = counting_scanner(dir.path(), crashes);
+            let scanner = scanner_for(dir.path());
             let mut db = PluginDb::new();
 
             scan_dirs(&scanner, &mut db, [&links], no_save).unwrap();
 
             let row = db.row(&target).expect("keyed by the target");
-            assert_eq!(row.format, PluginFormat::Clap);
-            assert!(row.blacklist_reason().is_some());
+            assert_eq!(row.format(), Some(PluginFormat::Clap));
         }
 
         /// A pedal reached by another name is the same pedal: through a link to its
