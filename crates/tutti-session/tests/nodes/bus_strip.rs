@@ -7,7 +7,7 @@
 use tutti_buffers::InterleavedMut;
 use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status, Unforkable};
 use tutti_nodes::BusStripNode;
-use tutti_session::{OutPort, ParamError, Root, Session, SessionBuilder};
+use tutti_session::{OutPort, Root, Session, SessionBuilder, ValueErrorKind};
 use tutti_types::{Balance, BusTopology, ChannelLayout, ChannelTopology, MaxBlock, Samples};
 
 /// Constant `values` on its output channels, declaring `out` as its bus.
@@ -96,13 +96,12 @@ fn a_stereo_strip_feeds_a_declared_surround_root() {
 #[test]
 fn a_strip_without_a_pair_refuses_a_balance_by_name() {
     let mut s = offline(Session::builder(), 2);
-    let g = s.graph();
-    let (stereo, _) = g.add(BusStripNode::stereo());
-    let (mono, _) = g.add(BusStripNode::mono());
-    g.set_param(stereo.balance(), Balance(0.5))
+    let (stereo, _) = s.graph().add(BusStripNode::stereo());
+    let (mono, _) = s.graph().add(BusStripNode::mono());
+    s.set(stereo.balance().to(Balance(0.5)))
         .expect("a stereo strip balances");
-    assert!(matches!(
-        g.set_param(mono.balance(), Balance(0.5)),
-        Err(ParamError::NoSuchParam { .. })
-    ));
+    assert_eq!(
+        s.set(mono.balance().to(Balance(0.5))).unwrap_err().kind,
+        ValueErrorKind::NoSuchTarget
+    );
 }

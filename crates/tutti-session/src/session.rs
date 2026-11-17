@@ -545,8 +545,9 @@ pub enum RootTopologyStatus {
 #[must_use = "dropping a session ends it, and on a real-time clock stops its stream"]
 #[derive(Debug)]
 pub struct Session<K: AppKey = &'static str, C: Clock = Offline> {
-    /// No `K` is held; `fn() -> K` keeps `Send` following the clock.
-    pub(crate) _key: std::marker::PhantomData<fn() -> K>,
+    /// The value lock and the table every node's params are written through,
+    /// shared with the graph and the session's [`Knobs`](crate::Knobs).
+    pub(crate) values: Arc<crate::value::ValueState<K>>,
     /// Runs the work other threads handed to the main thread when the session
     /// drops on it, before anything else drops (the plugins then close, and
     /// the last field collects what they hand over).
@@ -794,7 +795,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     #[cfg(feature = "device")]
     pub(crate) fn with_clock<N: Clock>(self, running: N::Running) -> (Session<K, N>, C::Running) {
         let Session {
-            _key,
+            values,
             #[cfg(feature = "plugin")]
             _early_work,
             running: old_running,
@@ -859,7 +860,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         let pool = pool.rebind();
         (
             Session {
-                _key,
+                values,
                 #[cfg(feature = "plugin")]
                 _early_work,
                 running,

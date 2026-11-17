@@ -7,7 +7,7 @@
 //! logs, once.
 
 use tutti_midi_runtime::{Outgoing, Taken};
-use tutti_ump::Span;
+use tutti_ump::PacketSpan;
 
 /// Why the OS did not take a message, and how much of it went first.
 #[derive(Debug)]
@@ -37,7 +37,7 @@ pub(super) struct Sent {
 pub(super) fn by_message<E: std::error::Error>(
     events: &[Outgoing],
     backend: &str,
-    mut send: impl FnMut(Span<'_, Outgoing>) -> Result<(), Refused<E>>,
+    mut send: impl FnMut(PacketSpan<'_, Outgoing>) -> Result<(), Refused<E>>,
 ) -> Sent {
     let mut taken = Taken::NONE;
     for message in Outgoing::messages(events) {

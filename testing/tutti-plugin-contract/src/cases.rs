@@ -6,9 +6,9 @@ use crate::transcript::select_tail;
 use tutti_graph::Offset;
 use tutti_graph::UmpAt;
 use tutti_plugin_types::{
-    AudioBuffer, AudioBufferMut, BusRole, BypassWrite, Control, Controller, Loaded, Normalized,
-    OwnBypass, ParamFlags, ParamWriteError, ParameterChanges, PluginBus, PluginIo, PluginTail,
-    Preset, PresetId, ProcessContext, ProcessOutput, Processor, Reopen, SampleFormat, Samples,
+    BusRole, BypassWrite, Control, Controller, Loaded, Normalized, OwnBypass, ParamFlags,
+    ParamWriteError, ParameterChanges, PluginAudio, PluginBus, PluginIo, PluginTail, Preset,
+    PresetId, ProcessContext, ProcessOutput, Processor, Reopen, SampleFormat, Samples,
     TransportChange, TransportInfo,
 };
 use tutti_plugin_types::{ParamEdit, Request};
@@ -1428,11 +1428,7 @@ pub fn process_does_not_allocate<F: Format>() {
     let mut outs = [left.as_mut_slice(), right.as_mut_slice()];
     let mut out = ProcessOutput::default();
     let mut io = PluginIo {
-        buffer: AudioBufferMut::F32(AudioBuffer::new(
-            &refs,
-            &mut outs,
-            tutti_plugin_types::SampleRate::of(RATE),
-        )),
+        buffer: PluginAudio::new(Samples(BLOCK), &refs, &mut outs).expect("equal channels"),
         ctx: &ctx,
         out: &mut out,
     };

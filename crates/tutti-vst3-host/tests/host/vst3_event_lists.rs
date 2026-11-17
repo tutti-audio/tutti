@@ -5,6 +5,7 @@
 //! Here, not in the host's `src/`, because the plugin's side of these calls is
 //! `unsafe` COM and the host crate forbids `unsafe`.
 
+use tutti_buffers::{InputOutput, Planes, PlanesMut};
 use tutti_fixtures::midi;
 use tutti_graph::Offset;
 use tutti_graph::UmpAt;
@@ -451,7 +452,7 @@ fn a_start_without_its_end_before_the_next_start_is_dropped() {
 #[test]
 fn a_stop_drops_an_open_sysex_once() {
     use crate::active::{Active, ActiveExt};
-    use tutti_vst3_host::{AudioBuffer, TransportInfo};
+    use tutti_vst3_host::TransportInfo;
 
     let library = tutti_fixtures::cdylib("tutti_shared_plugin", "tutti-shared-plugin");
     let mut plugin = Active::<f32>::load(&library, 48_000.0, 16).expect("the plugin loads");
@@ -462,7 +463,12 @@ fn a_stop_drops_an_open_sysex_once() {
     let [l, r] = &mut out;
     let outs: &mut [&mut [f32]] = &mut [&mut l[..], &mut r[..]];
     let ins: &[&[f32]] = &[&input[0][..], &input[1][..]];
-    let mut buffer = AudioBuffer::new(ins, outs, tutti_plugin_types::SampleRate::SR_48K);
+    let mut buffer = InputOutput::new(
+        tutti_plugin_types::Samples(ins[0].len()),
+        Planes::new(ins).expect("equal channels"),
+        PlanesMut::new(outs).expect("equal channels"),
+    )
+    .expect("equal lengths");
     let _ = plugin.process(
         &mut buffer,
         &midi_only(&open),

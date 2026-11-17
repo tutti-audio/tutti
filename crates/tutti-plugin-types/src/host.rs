@@ -26,14 +26,13 @@ use std::num::NonZeroUsize;
 use std::time::Instant;
 
 use dpi::Size;
-use tutti_buffers::Float;
+use tutti_buffers::{Float, InputOutput};
 
 use crate::{
-    AudioBuffer, AudioBufferMut, AutomationMode, BypassWrite, ChannelTable, ContentScale,
-    EditorCapabilities, EditorWindow, KeyEvent, KeyUse, LoadedPlugin, Normalized, ParamId,
-    ParamWriteError, ParameterInfo, PluginDescriptor, PluginError, PluginResult, PluginTail,
-    Preset, PresetId, ProcessContext, ProcessOutput, ProcessWake, SampleRate, Samples,
-    WindowHandle,
+    AutomationMode, BypassWrite, ChannelTable, ContentScale, EditorCapabilities, EditorWindow,
+    KeyEvent, KeyUse, LoadedPlugin, Normalized, ParamId, ParamWriteError, ParameterInfo,
+    PluginAudio, PluginDescriptor, PluginError, PluginResult, PluginTail, Preset, PresetId,
+    ProcessContext, ProcessOutput, ProcessWake, SampleRate, Samples, WindowHandle,
 };
 use crate::{Delivered, ParamEdit, bypass_parameter, bypass_value, is_bypassed};
 use crate::{
@@ -862,41 +861,32 @@ pub struct Stuck<P, C> {
 /// borrowed again into a table of this call's own, because [`PluginIo`] holds
 /// one lifetime for tables and data and a `&mut [&mut _]` is invariant in the
 /// data's. The tables are stack arrays ([`ChannelTable`]), so this is callable
-/// on the audio thread.
+/// on the audio thread. No inputs is an empty `inputs`; no outputs an empty
+/// `outputs`; the block has its `frames` either way.
 ///
 /// # Errors
 ///
+/// [`PluginError::Block`] when the channels differ in length, and
 /// [`PluginError::Process`] when the plugin failed the block.
-#[allow(clippy::too_many_arguments)]
-pub fn process_block<P: Processor, T: Float>(
+pub fn process_block<P: Processor, S: Float>(
     processor: &mut P,
-    inputs: &[&[T]],
-    outputs: &mut [&mut [T]],
-    num_samples: usize,
-    sample_rate: SampleRate,
+    inputs: &[&[S]],
+    outputs: &mut [&mut [S]],
+    frames: Samples,
     ctx: &ProcessContext<'_>,
     out: &mut ProcessOutput,
 ) -> PluginResult<()>
 where
-    for<'a> AudioBufferMut<'a, 'a>: From<AudioBuffer<'a, 'a, T>>,
+    for<'a> PluginAudio<'a>: From<InputOutput<'a, 'a, 'a, S>>,
 {
-    let mut table: ChannelTable<&mut [T]> = outputs.iter_mut().map(|o| &mut **o).collect();
-    let mut io = PluginIo {
-        buffer: AudioBufferMut::from(AudioBuffer {
-            inputs,
-            outputs: &mut table,
-            num_samples,
-            sample_rate,
-        }),
-        ctx,
-        out,
-    };
-    processor.process(&mut io)
+    let mut table: ChannelTable<&mut [S]> = outputs.iter_mut().map(|o| &mut **o).collect();
+    let audio = PluginAudio::new(frames, inputs, &mut table)
+        .map_err(|_| PluginError::Block("the block's channels differ in length"))?;
+    audio.process(processor, ctx, out)
 }
 
-impl AudioBufferMut<'_, '_> {
-    /// This block through `processor`, whichever width it carries
-    /// ([`process_block`]).
+impl<'a> PluginAudio<'a> {
+    /// This block through `processor`, whichever width it carries.
     ///
     /// # Errors
     ///
@@ -904,29 +894,14 @@ impl AudioBufferMut<'_, '_> {
     pub fn process<P: Processor>(
         self,
         processor: &mut P,
-        ctx: &ProcessContext<'_>,
-        out: &mut ProcessOutput,
+        ctx: &'a ProcessContext<'a>,
+        out: &'a mut ProcessOutput,
     ) -> PluginResult<()> {
-        match self {
-            Self::F32(b) => process_block(
-                processor,
-                b.inputs,
-                b.outputs,
-                b.num_samples,
-                b.sample_rate,
-                ctx,
-                out,
-            ),
-            Self::F64(b) => process_block(
-                processor,
-                b.inputs,
-                b.outputs,
-                b.num_samples,
-                b.sample_rate,
-                ctx,
-                out,
-            ),
-        }
+        processor.process(&mut PluginIo {
+            buffer: self,
+            ctx,
+            out,
+        })
     }
 }
 
@@ -934,7 +909,7 @@ impl AudioBufferMut<'_, '_> {
 #[derive(Debug)]
 pub struct PluginIo<'a> {
     /// The channel tables, in the width the plugin was activated at.
-    pub buffer: AudioBufferMut<'a, 'a>,
+    pub buffer: PluginAudio<'a>,
     /// The block's MIDI, transport and automation.
     pub ctx: &'a ProcessContext<'a>,
     /// What the plugin emitted: MIDI, parameter changes, note expression.

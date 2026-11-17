@@ -1,5 +1,5 @@
 use super::*;
-use tutti_ump::{Direction as BlockDirection, FirstGroup, FunctionBlockId, GroupSpan};
+use tutti_ump::{BlockDirection, FirstGroup, FunctionBlockId, GroupSpan};
 
 fn block() -> FunctionBlock {
     FunctionBlock::builder(

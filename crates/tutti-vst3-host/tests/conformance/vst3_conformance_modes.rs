@@ -6,14 +6,14 @@
 #![cfg(feature = "conformance")]
 
 use crate::conformance_support;
+use tutti_buffers::{InputOutput, Planes, PlanesMut};
 
 use std::os::raw::{c_int, c_uint, c_void};
 use std::sync::Mutex;
 use tutti_fixtures::main_thread;
 
 use tutti_vst3_host::{
-    AudioBuffer, InputEvents, LoadOptions, ProcessMode, TransportInfo, Vst3Loaded,
-    host::conformance,
+    InputEvents, LoadOptions, ProcessMode, TransportInfo, Vst3Loaded, host::conformance,
 };
 
 use conformance_support::*;
@@ -236,12 +236,12 @@ fn live_realtime_prefetch_toggle_is_spec_clean() {
             .collect();
         let in_refs: Vec<&[f32]> = ins.iter().map(|v| v.as_slice()).collect();
         let mut out_refs: Vec<&mut [f32]> = outs.iter_mut().map(|v| v.as_mut_slice()).collect();
-        let mut buffer = AudioBuffer {
-            inputs: &in_refs,
-            outputs: &mut out_refs,
-            num_samples: 512,
-            sample_rate: tutti_plugin_types::SampleRate::SR_48K,
-        };
+        let mut buffer = InputOutput::new(
+            tutti_plugin_types::Samples(in_refs[0].len()),
+            Planes::new(&in_refs).expect("equal channels"),
+            PlanesMut::new(&mut out_refs).expect("equal channels"),
+        )
+        .expect("equal lengths");
         inst.process(&mut buffer, &InputEvents::default(), None, &transport);
 
         let findings = findings_from(&counts_cell.lock().unwrap());
@@ -349,12 +349,12 @@ fn plugin_observes_the_offline_mode_we_requested() {
             .collect();
         let in_refs: Vec<&[f32]> = ins.iter().map(|v| v.as_slice()).collect();
         let mut out_refs: Vec<&mut [f32]> = outs.iter_mut().map(|v| v.as_mut_slice()).collect();
-        let mut buffer = AudioBuffer {
-            inputs: &in_refs,
-            outputs: &mut out_refs,
-            num_samples: 512,
-            sample_rate: tutti_plugin_types::SampleRate::SR_48K,
-        };
+        let mut buffer = InputOutput::new(
+            tutti_plugin_types::Samples(in_refs[0].len()),
+            Planes::new(&in_refs).expect("equal channels"),
+            PlanesMut::new(&mut out_refs).expect("equal channels"),
+        )
+        .expect("equal lengths");
         let out = inst.process(&mut buffer, &InputEvents::default(), None, &transport);
         if let Some(queue) = out
             .parameter_changes
