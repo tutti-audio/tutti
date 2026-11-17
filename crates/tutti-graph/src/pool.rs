@@ -76,7 +76,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use crate::{BlockWaits, Pool};
-use tutti_rt::{Doorbell, JobGate};
+use tutti_rt::{Doorbell, JobGate, Sleeper, doorbell};
 
 type StartHandler = Arc<dyn Fn(usize) + Send + Sync>;
 type ThreadName = Box<dyn FnMut(usize) -> String>;
@@ -84,7 +84,7 @@ type ThreadName = Box<dyn FnMut(usize) -> String>;
 struct Shared {
     gate: JobGate,
     stop: AtomicBool,
-    /// Helper `i`'s doorbell is `bells[i - 1]`.
+    /// The ringing side of each helper's doorbell; a helper owns its `Sleeper`.
     bells: Box<[Doorbell]>,
     spin: Duration,
     idle: Duration,
@@ -97,9 +97,9 @@ impl Shared {
         Doorbell::ring_first(&self.bells, n);
     }
 
-    /// Helper `i`'s loop.
-    fn helper(&self, i: usize) {
-        let me = &self.bells[i - 1];
+    /// A helper's loop, sleeping on `sleeper`, the one of its doorbell
+    /// in `bells`.
+    fn helper(&self, mut sleeper: Sleeper) {
         let mut served = 0u64;
         let mut idle_since = Instant::now();
         while !self.stop.load(Ordering::Acquire) {
@@ -115,7 +115,7 @@ impl Shared {
             } else {
                 // A job opened (or the pool stopped) before the check is
                 // seen; one after rings this bell.
-                me.wait(|| self.gate.pending(served) || self.stop.load(Ordering::Acquire));
+                sleeper.wait(|| self.gate.pending(served) || self.stop.load(Ordering::Acquire));
                 idle_since = Instant::now();
             }
         }
@@ -253,10 +253,11 @@ impl WorkerPoolBuilder {
             n => n,
         };
         let helpers = participants - 1;
+        let (bells, sleepers): (Vec<_>, Vec<_>) = (0..helpers).map(|_| doorbell()).unzip();
         let shared = Arc::new(Shared {
             gate: JobGate::with_waits(participants, self.waits),
             stop: AtomicBool::new(false),
-            bells: (0..helpers).map(|_| Doorbell::new()).collect(),
+            bells: bells.into(),
             spin: self.spin,
             idle: self.idle,
         });
@@ -265,7 +266,7 @@ impl WorkerPoolBuilder {
             shared,
             threads: Vec::with_capacity(helpers),
         };
-        for i in 1..=helpers {
+        for (i, sleeper) in (1..).zip(sleepers) {
             let shared = Arc::clone(&pool.shared);
             let hook = self.start_handler.clone();
             let thread = std::thread::Builder::new()
@@ -274,7 +275,7 @@ impl WorkerPoolBuilder {
                     if let Some(hook) = hook {
                         hook(i);
                     }
-                    shared.helper(i);
+                    shared.helper(sleeper);
                 })?;
             pool.threads.push(thread);
         }

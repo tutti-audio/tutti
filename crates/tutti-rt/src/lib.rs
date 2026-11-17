@@ -49,9 +49,9 @@
 //! - [`handoff()`] — one value that moves between a control thread and the
 //!   audio thread at a block boundary ([`Hand`] lends and recalls, [`Rt`]
 //!   trades).
-//! - [`Doorbell`] — wakes one parked thread from the audio thread (a futex
-//!   wake only if a sleeper is parked), with no wake-up lost between the
-//!   sleeper's check and its park.
+//! - [`doorbell`], [`Doorbell`] and [`Sleeper`] — wake one parked thread from
+//!   the audio thread (a futex wake only if a sleeper is parked), with no
+//!   wake-up lost between the sleeper's check and its park.
 //! - [`RenderCount`] — the renders of one thing in flight, and a `quiescent`
 //!   check so a thread that cleared what they read frees only when none can
 //!   still read it.
@@ -181,7 +181,7 @@ pub use cell::{AudioThreadCell, BorrowGuard, BorrowRef};
 pub use clock::monotonic_ns;
 pub use denormals::with_no_denormals;
 pub use dirty_set::{DirtyIndex, DirtySet, Taken};
-pub use doorbell::Doorbell;
+pub use doorbell::{Doorbell, Sleeper, doorbell};
 pub use drain_clock::{DrainBeat, DrainMark, DrainWatch, drain_clock};
 pub use fault_latch::{Drained, FaultLatch};
 pub use gauge::{

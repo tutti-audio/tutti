@@ -1101,7 +1101,7 @@ mod tests {
     /// the answer.
     #[test]
     fn owed_frames_are_taken_in_order_before_the_answer() {
-        let channels = Channels::new(SampleRate::SR_48K);
+        let channels = Channels::new(SampleRate::SR_48K).0;
         let mut owed = Owed::finishing(Timeouts::default().drain);
         owed.owe(Late::Block);
         owed.owe(Late::Answer(is_value));
@@ -1136,7 +1136,7 @@ mod tests {
     /// against the next; the server's `Error` answers any request.
     #[test]
     fn a_frame_of_another_kind_lets_an_owed_answer_go() {
-        let channels = Channels::new(SampleRate::SR_48K);
+        let channels = Channels::new(SampleRate::SR_48K).0;
         let list = || BridgeMessage::ParameterList {
             parameters: Vec::new(),
         };
