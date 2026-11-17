@@ -917,8 +917,8 @@ fn a_ci_peers_product_instance_id_fills_what_the_device_left() {
 
 use crate::{ChannelCount, ProfileError, ProfilesChange, Switcher, Whole};
 use tutti_midi_device::{
-    Outcome, PEER_REPLY_TIMEOUT, ProfileChange, ProfileChannels, ProfileId, ProfileLists,
-    ProfileState, ProfileTarget, Request, StandardProfile,
+    Outcome, PEER_REPLY_TIMEOUT, ProfileChange, ProfileChannels, ProfileId, ProfileList,
+    ProfileLists, ProfileState, ProfileTarget, Request, StandardProfile,
 };
 use tutti_ump::MidiChannel;
 
@@ -960,7 +960,10 @@ fn reply_at_address(
                 ..CiHeader::new(peer())
             },
             to: ours,
-            profiles: ProfileLists::new(enabled, disabled).unwrap(),
+            profiles: ProfileLists::new(
+                ProfileList::try_from(enabled).unwrap(),
+                ProfileList::try_from(disabled).unwrap(),
+            ),
         },
         ms,
     );

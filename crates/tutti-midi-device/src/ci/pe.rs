@@ -11,7 +11,7 @@
 //! property the spec does not name, a manufacturer-specific `x-` property
 //! among them (§6.1.4), is kept in the header's [`PeExtra`] and written back.
 //!
-//! [`PeHeader`]'s `TryFrom<&[u8]>` reads the bytes of a Header Data field and
+//! [`PeHeader`] reads the bytes of a Header Data field and
 //! [`PeHeader::encode`] writes them, holding the header to the Receivable Maximum
 //! SysEx Message Size from Discovery.
 //!
@@ -135,10 +135,10 @@ pub use reassemble::{
 pub use resource::{
     ActionError, Arrival, CallError, CallId, CanSet, CcIndex, ChangeKind, ClusterKind,
     ColumnSource, CommonState, ConfirmIcon, ConfirmType, Confirmation, CtrlControl, CtrlKind,
-    CtrlRange, CtrlValueKind, CustomResource, DefaultMapNotCc, EntryError, GetStateError, LinkRole,
-    ListedTwice, MAX_LIST_ENTRIES, ModeId, NotAPeChannel, NotAPriority, NotAStateSize,
-    NotAStepCount, NotSignificantBits, NotUnixSeconds, NotVendorName, OpaqueBody, PaginationFault,
-    ParamPath, PeAllCtrlEntry, PeAllCtrlList, PeBankProgram, PeBasicChannelRx, PeBasicChannelTx,
+    CtrlRange, CtrlValueKind, CustomResource, EntryError, GetStateError, LinkRole, ListedTwice,
+    MAX_LIST_ENTRIES, ModeId, NotAPeChannel, NotAPriority, NotAStateSize, NotAStepCount,
+    NotSignificantBits, NotUnixSeconds, NotVendorName, OpaqueBody, PaginationFault, ParamPath,
+    PeAllCtrlEntry, PeAllCtrlList, PeBankProgram, PeBasicChannelRx, PeBasicChannelTx,
     PeChCtrlEntry, PeChCtrlList, PeChannel, PeChannelEntry, PeChannelList, PeChannelMode,
     PeCluster, PeColumn, PeController, PeCtrl, PeCtrlMapEntry, PeCtrlMapList, PeCurrentMode,
     PeData, PeDataError, PeDataFault, PeDeviceInfo, PeExtensions, PeExternalSync, PeJsonSchema,

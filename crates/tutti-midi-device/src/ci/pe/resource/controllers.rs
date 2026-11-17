@@ -398,12 +398,6 @@ pub struct PeChCtrlEntry {
     default_cc_map: bool,
 }
 
-/// An entry that claims the Default Control Change Mapping Profile for a message
-/// that is no Control Change.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("defaultCCMap is for a Control Change, not for {0:?}")]
-pub struct DefaultMapNotCc(pub CtrlKind);
-
 impl PeChCtrlEntry {
     /// An entry with `defaultCCMap` false.
     #[must_use]
@@ -415,18 +409,14 @@ impl PeChCtrlEntry {
     }
 
     /// An entry whose Control Change follows the Default Control Change Mapping
-    /// Profile, Level 1 (`defaultCCMap`).
-    ///
-    /// # Errors
-    ///
-    /// [`DefaultMapNotCc`] when the controller is no Control Change.
-    pub fn with_default_cc_map(ctrl: PeCtrl) -> Result<Self, DefaultMapNotCc> {
-        match ctrl.controller {
-            PeController::ControlChange(_) => Ok(Self {
-                ctrl,
-                default_cc_map: true,
-            }),
-            other => Err(DefaultMapNotCc(other.kind())),
+    /// Profile, Level 1 (`defaultCCMap`): `ctrl` with its controller set to the
+    /// Control Change `index`.
+    #[must_use]
+    pub fn with_default_cc_map(mut ctrl: PeCtrl, index: CcIndex) -> Self {
+        ctrl.controller = PeController::ControlChange(index);
+        Self {
+            ctrl,
+            default_cc_map: true,
         }
     }
 
@@ -579,12 +569,15 @@ impl PeChCtrlList {
                     .unwrap_or(false);
                 ctrl.extensions = f.finish()?;
                 if map {
-                    PeChCtrlEntry::with_default_cc_map(ctrl).map_err(|_| {
-                        PeDataError::new(
+                    match ctrl.controller {
+                        PeController::ControlChange(index) => {
+                            Ok(PeChCtrlEntry::with_default_cc_map(ctrl, index))
+                        }
+                        _ => Err(PeDataError::new(
                             "ChCtrlList entry.defaultCCMap",
                             PeDataFault::NotValid("Control Change flag"),
-                        )
-                    })
+                        )),
+                    }
                 } else {
                     Ok(PeChCtrlEntry::new(ctrl))
                 }

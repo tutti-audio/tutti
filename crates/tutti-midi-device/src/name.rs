@@ -6,7 +6,7 @@ use std::str::FromStr;
 
 use unicode_normalization::{UnicodeNormalization, is_nfc};
 
-/// Why a text is not a name ([`Name`]'s `FromStr`, [`ProductInstanceId`] and
+/// Why a text is not a name ([`Name`] and [`ProductInstanceId`] read through [`FromStr`], and
 /// [`MessageText`](crate::MessageText)'s `TryFrom<&str>`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum NameError {
@@ -64,7 +64,7 @@ pub type BlockName = Name<91>;
 impl<const N: usize> Name<N> {
     /// The name, composed to NFC, or `None` when the composed text is longer
     /// than `N` bytes, holds a NUL or starts with a Byte Order Mark (§1.8).
-    /// `from_str` says which.
+    /// [`FromStr`] says which.
     #[must_use]
     pub fn new(text: &str) -> Option<Self> {
         Self::parse(text).ok()
@@ -105,7 +105,7 @@ impl<const N: usize> Name<N> {
         })
     }
 
-    /// A name read off the wire: UTF-8 bytes, read as `from_str`
+    /// A name read off the wire: UTF-8 bytes, read as [`FromStr`]
     /// reads a text.
     pub(crate) fn from_bytes(bytes: &[u8]) -> Option<Self> {
         Self::parse(std::str::from_utf8(bytes).ok()?).ok()
@@ -169,7 +169,7 @@ impl<const N: usize> FromStr for Name<N> {
 /// Continue and an End packet of 14 bytes (M2-104 §7.1.5).
 ///
 /// With the `serde` feature it is its text, read back through
-/// `from_str`.
+/// [`FromStr`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(try_from = "String", into = "String"))]
@@ -191,7 +191,7 @@ impl TryFrom<String> for ProductInstanceId {
 
 impl ProductInstanceId {
     /// The Id, or `None` when it is longer than 42 bytes or holds a byte
-    /// outside `32..=126`. `from_str` says which.
+    /// outside `32..=126`. [`FromStr`] says which.
     #[must_use]
     pub fn new(text: &str) -> Option<Self> {
         Self::parse(text).ok()

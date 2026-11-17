@@ -115,6 +115,14 @@ impl TryFrom<PeResource> for ResourceTarget {
 }
 
 impl ResourceTarget {
+    /// The State list, a Resource with no entry.
+    pub(super) fn state_list() -> Self {
+        Self {
+            resource: PeResource::StateList,
+            res_id: None,
+        }
+    }
+
     /// The entry `res_id` of the Resource.
     ///
     /// # Errors

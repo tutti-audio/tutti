@@ -403,12 +403,6 @@ pub(super) const ALLOW: &[Allow] = &[
         "reading OS entropy: the failure is the OS's, not a value's",
     ),
     ty(
-        "crates/tutti-midi-device/src/ci/pe/limits.rs",
-        "",
-        RANGE,
-        "text_type! is replaced by the one generic text type of lane TEXT",
-    ),
-    ty(
         "crates/tutti-midi-device/src/ci/pe/resource/fields.rs",
         "",
         RANGE,
@@ -436,19 +430,19 @@ pub(super) const ALLOW: &[Allow] = &[
         "crates/tutti-midi-device/",
         "ResourceSet::from_selection",
         CTOR,
-        "a parse of a Link and the entry the user chose, two inputs a `TryFrom` has no place for",
+        "a Set is read from a Link and the entry the user chose (two inputs)",
     ),
     ty(
         "crates/tutti-midi-device/",
         "ResourceSet::full",
         CTOR,
-        "the Resource of the data must be the target's: validity of two arguments together",
+        "validity depends on the data's Resource and the target's together (two inputs)",
     ),
     ty(
         "crates/tutti-midi-device/",
         "ResourceTarget::entry",
         CTOR,
-        "validity of two arguments together: the Resource and its entry, so no single type can hold it",
+        "validity depends on the Resource and the entry together (two inputs)",
     ),
     ty(
         "crates/tutti-midi-device/",
@@ -458,21 +452,9 @@ pub(super) const ALLOW: &[Allow] = &[
     ),
     ty(
         "crates/tutti-midi-device/",
-        "PeChCtrlEntry::with_default_cc_map",
-        CTOR,
-        "`defaultCCMap` is valid only for a Control Change controller: validity of the flag and the controller together",
-    ),
-    ty(
-        "crates/tutti-midi-device/",
-        "ProfileLists::new",
-        CTOR,
-        "each list is at most the 14-bit count of its message: validity of the pair's lengths, a list the wire counts in two 7-bit bytes",
-    ),
-    ty(
-        "crates/tutti-midi-device/",
         "Dialect::of",
         CTOR,
-        "the dialect is valid only for a block the Endpoint has active and receiving, with the Profiles the table reports: validity of three arguments together",
+        "a lookup: the dialect of one block of an Endpoint, read with the Profile table the peer reported, refused when the block is not one the device sends to",
     ),
     ty(
         "crates/tutti-sampler/",
