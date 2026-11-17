@@ -3138,7 +3138,6 @@ dependencies = [
  "tutti-clap-host",
  "tutti-fixtures",
  "tutti-graph",
- "tutti-plugin-db",
  "tutti-plugin-types",
  "tutti-types",
  "tutti-ump",
