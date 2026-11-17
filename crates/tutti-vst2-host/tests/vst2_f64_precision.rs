@@ -21,6 +21,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
+use tutti_rt::LockExt;
 
 use tutti_vst2_host::Vst2ProcessContext;
 use tutti_vst2_test_plugin::{ProcessCapture, ProcessEntry};
@@ -55,7 +56,7 @@ const NEEDS_F64: f64 = 1.0 / 3.0;
 static PROBE_LOCK: Mutex<()> = Mutex::new(());
 
 fn lock_probe() -> MutexGuard<'static, ()> {
-    PROBE_LOCK.lock().unwrap_or_else(|p| p.into_inner())
+    PROBE_LOCK.lock_recover()
 }
 
 /// Every `TUTTI_VST2_PROBE_*` key this file sets. A leaked variable reshapes

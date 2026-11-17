@@ -33,6 +33,7 @@
 
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
+use tutti_rt::LockExt;
 
 use crate::support;
 use support::active::{Activate, Active, ActiveExt};
@@ -115,7 +116,7 @@ struct GainSession<'a> {
 
 impl GainSession<'_> {
     fn begin() -> Self {
-        let guard = PROBE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let guard = PROBE_LOCK.lock_recover();
         let controls = ProbeControls::open();
         unsafe {
             (controls.reset_params)();

@@ -97,8 +97,11 @@
 //! [`IntoNode`], which also says whether it can be forked: wrap a plain node
 //! in [`ForkByClone`] or [`Unforkable`], or implement `IntoNode` to hand out
 //! typed controls. [`ParamNode`] and [`param_parts`] cover a node whose
-//! controls are `Param<U>` cells addressed by [`ParamSet`]. Every example
-//! below is a doctest: it compiles and runs.
+//! controls are `Param<U>` cells addressed by [`ParamSet`]. `impl Node for X`
+//! is the `f32` node; a node that does not care about the sample format is
+//! `impl<F: Float> Node<F> for X`, with an [`Io<F>`](Io); an
+//! [`Executor<F>`](Executor) runs the nodes of its format. Every example below is a
+//! doctest: it compiles and runs.
 //!
 //! ## The shortest node
 //!
@@ -503,13 +506,14 @@
 //!
 //! # Precision
 //!
-//! Every buffer between nodes is planar `f32`. `f64` belongs inside nodes
-//! (filter state, oscillator phase — a node converts at its edge), in time
-//! ([`Env::frame`] is a `u64` [`Frame`](tutti_types::Frame) and the
-//! transport position a `f64` [`Beat`](tutti_types::Beat)), and at the
-//! plugin boundary (a plugin that processes in double converts inside its
-//! node). [`Io`] exposes buffers through methods rather than fields so a
-//! port format can be added later without breaking nodes.
+//! Every buffer between nodes is planar, in the sample format of the
+//! [`Executor<F>`](Executor) that runs them, and an executor sums fan-ins in
+//! that format. The graph an [`Editor`] builds is `f32`. `f64` also belongs inside `f32` nodes (filter state, oscillator
+//! phase — a node converts at its edge), in time ([`Env::frame`] is a `u64`
+//! [`Frame`](tutti_types::Frame) and the transport position a `f64`
+//! [`Beat`](tutti_types::Beat)), and at the plugin boundary (a plugin that
+//! processes in double converts inside its node). [`Io`] exposes buffers
+//! through methods rather than fields.
 //!
 //! # Testing
 //!

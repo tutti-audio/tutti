@@ -230,6 +230,9 @@ pub const AUX_MODULE: &str = "Voices/Oscillator/Filter";
 /// The unit tree VST3 declares, `(id, parent, name)`, the root being unit `0`:
 /// `Voices` > `Oscillator` > `Filter`. Only `aux` is in a unit, [`AUX_UNIT`].
 pub const UNITS: [(i32, i32, &str); 3] = [(1, 0, "Voices"), (2, 1, "Oscillator"), (3, 2, "Filter")];
+/// The program list VST3 declares: its id, its name and its programs, in
+/// order. The unit `Voices` (id 1) selects it.
+pub const PROGRAM_LIST: (i32, &str, [&str; 3]) = (1, "Factory", ["Init", "Pad", "Lead"]);
 /// The unit `aux` is in.
 pub const AUX_UNIT: i32 = 3;
 /// The parameters VST3's `IParameterFunctionName` answers, `(unit, function

@@ -36,7 +36,7 @@ fn check_whole(span: &LevelSpan) {
 #[test]
 fn a_block_lands_whole_in_one_take() {
     loom::model(|| {
-        let (writer, mut reader) = level_cell();
+        let (mut writer, mut reader) = level_cell();
         let w = thread::spawn(move || {
             for frames in [1u32, 2, 4] {
                 writer.fold(frames as f32, f64::from(frames), frames);

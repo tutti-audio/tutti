@@ -11,6 +11,7 @@
 
 use std::sync::atomic::{AtomicU8, Ordering};
 
+use tutti_buffers::Float;
 use tutti_rt::RwView;
 
 use crate::arena::{Arena, Line, Role, borrow_sorted};
@@ -58,43 +59,43 @@ impl SlotFlags for SharedFlags<'_> {
 }
 
 /// The audio slots an op borrows: [`Arena`]'s own methods, by name.
-pub(crate) trait AudioSlots {
+pub(crate) trait AudioSlots<F: Float> {
     /// Slot `s`'s first `frames` samples.
-    fn slot(&self, s: u32, frames: usize) -> &[f32];
+    fn slot(&self, s: u32, frames: usize) -> &[F];
     /// Slot `s`'s first `frames` samples, mutably.
-    fn slot_mut(&mut self, s: u32, frames: usize) -> &mut [f32];
+    fn slot_mut(&mut self, s: u32, frames: usize) -> &mut [F];
     /// `src` for reading and `dst` for writing, at once. They must differ.
-    fn pair(&mut self, src: u32, dst: u32, frames: usize) -> (&[f32], &mut [f32]);
+    fn pair(&mut self, src: u32, dst: u32, frames: usize) -> (&[F], &mut [F]);
     /// A [`Direct`] node's buffers (see [`Arena::direct`]).
     fn direct<const I: usize, const O: usize>(
         &mut self,
         frames: usize,
         d: &Direct,
-    ) -> ([&[f32]; I], [&mut [f32]; O]);
+    ) -> ([&[F]; I], [&mut [F]; O]);
     /// A node's buffers by its sorted borrow requests (see
     /// [`Arena::borrow`]).
     fn borrow<'a>(
         &'a mut self,
         frames: usize,
         reqs: &[(u32, Role)],
-        ins: &mut [&'a [f32]],
-        outs: &mut [&'a mut [f32]],
+        ins: &mut [&'a [F]],
+        outs: &mut [&'a mut [F]],
     );
     /// Copy slot `src` over slot `dst`.
     fn copy_slot(&mut self, src: u32, dst: u32);
 }
 
-impl AudioSlots for Arena {
+impl<F: Float> AudioSlots<F> for Arena<F> {
     #[inline(always)]
-    fn slot(&self, s: u32, frames: usize) -> &[f32] {
+    fn slot(&self, s: u32, frames: usize) -> &[F] {
         Arena::slot(self, s, frames)
     }
     #[inline(always)]
-    fn slot_mut(&mut self, s: u32, frames: usize) -> &mut [f32] {
+    fn slot_mut(&mut self, s: u32, frames: usize) -> &mut [F] {
         Arena::slot_mut(self, s, frames)
     }
     #[inline(always)]
-    fn pair(&mut self, src: u32, dst: u32, frames: usize) -> (&[f32], &mut [f32]) {
+    fn pair(&mut self, src: u32, dst: u32, frames: usize) -> (&[F], &mut [F]) {
         Arena::pair(self, src, dst, frames)
     }
     #[inline(always)]
@@ -102,7 +103,7 @@ impl AudioSlots for Arena {
         &mut self,
         frames: usize,
         d: &Direct,
-    ) -> ([&[f32]; I], [&mut [f32]; O]) {
+    ) -> ([&[F]; I], [&mut [F]; O]) {
         Arena::direct(self, frames, d)
     }
     #[inline(always)]
@@ -110,14 +111,34 @@ impl AudioSlots for Arena {
         &'a mut self,
         frames: usize,
         reqs: &[(u32, Role)],
-        ins: &mut [&'a [f32]],
-        outs: &mut [&'a mut [f32]],
+        ins: &mut [&'a [F]],
+        outs: &mut [&'a mut [F]],
     ) {
         Arena::borrow(self, frames, reqs, ins, outs)
     }
     #[inline(always)]
     fn copy_slot(&mut self, src: u32, dst: u32) {
         Arena::copy_slot(self, src, dst)
+    }
+}
+
+/// `block` as `f32`, in one piece or in chunks, to `f`: what a tap or a meter
+/// reads, whose readers speak `f32` whatever format the graph renders in. An
+/// `f32` block is lent as it is; any other format is converted a chunk at a
+/// time through a buffer on the stack. Allocates nothing.
+#[inline]
+pub(crate) fn for_f32<F: Float>(block: &[F], mut f: impl FnMut(&[f32])) {
+    if F::BITS == 32
+        && let Ok(same) = bytemuck::try_cast_slice::<F, f32>(block)
+    {
+        return f(same);
+    }
+    let mut buf = [0.0f32; 256];
+    for chunk in block.chunks(buf.len()) {
+        for (b, &x) in buf.iter_mut().zip(chunk) {
+            *b = x.to_f32();
+        }
+        f(&buf[..chunk.len()]);
     }
 }
 
@@ -198,28 +219,28 @@ pub(crate) struct ArenaView<'v> {
 }
 
 #[inline]
-fn samples(lines: &[Line], frames: usize) -> &[f32] {
-    &bytemuck::cast_slice::<Line, f32>(lines)[..frames]
+fn samples<F: Float>(lines: &[Line], frames: usize) -> &[F] {
+    &bytemuck::cast_slice::<Line, F>(lines)[..frames]
 }
 
 #[inline]
-fn samples_mut(lines: &mut [Line], frames: usize) -> &mut [f32] {
-    &mut bytemuck::cast_slice_mut::<Line, f32>(lines)[..frames]
+fn samples_mut<F: Float>(lines: &mut [Line], frames: usize) -> &mut [F] {
+    &mut bytemuck::cast_slice_mut::<Line, F>(lines)[..frames]
 }
 
-impl AudioSlots for ArenaView<'_> {
+impl<F: Float> AudioSlots<F> for ArenaView<'_> {
     #[inline]
-    fn slot(&self, s: u32, frames: usize) -> &[f32] {
+    fn slot(&self, s: u32, frames: usize) -> &[F] {
         samples(self.view.get(s as usize), frames)
     }
     #[inline]
-    fn slot_mut(&mut self, s: u32, frames: usize) -> &mut [f32] {
+    fn slot_mut(&mut self, s: u32, frames: usize) -> &mut [F] {
         samples_mut(self.view.get_mut(s as usize), frames)
     }
-    fn pair(&mut self, src: u32, dst: u32, frames: usize) -> (&[f32], &mut [f32]) {
+    fn pair(&mut self, src: u32, dst: u32, frames: usize) -> (&[F], &mut [F]) {
         assert_ne!(src, dst, "pair() of one slot");
-        let mut s: &[f32] = &[];
-        let mut d: Option<&mut [f32]> = None;
+        let mut s: &[F] = &[];
+        let mut d: Option<&mut [F]> = None;
         let reqs = if src < dst {
             [(src, Role::Read(0)), (dst, Role::Write(0))]
         } else {
@@ -237,14 +258,14 @@ impl AudioSlots for ArenaView<'_> {
         &mut self,
         frames: usize,
         d: &Direct,
-    ) -> ([&[f32]; I], [&mut [f32]; O]) {
+    ) -> ([&[F]; I], [&mut [F]; O]) {
         let n = usize::from(d.count);
         let mut reqs = [(0u32, 0u8); 4];
         for (k, r) in reqs.iter_mut().enumerate().take(n) {
             *r = (d.slots[k], d.role[k]);
         }
-        let mut reads: [&[f32]; 4] = [&[]; 4];
-        let mut outs: [&mut [f32]; O] = std::array::from_fn(|_| &mut [][..]);
+        let mut reads: [&[F]; 4] = [&[]; 4];
+        let mut outs: [&mut [F]; O] = std::array::from_fn(|_| &mut [][..]);
         // Tag each request with its index into `slots`, so the reads land
         // where `d.input` looks for them.
         let mut tagged = [(0u32, (0u8, 0u8)); 4];
@@ -274,8 +295,8 @@ impl AudioSlots for ArenaView<'_> {
         &'a mut self,
         frames: usize,
         reqs: &[(u32, Role)],
-        ins: &mut [&'a [f32]],
-        outs: &mut [&'a mut [f32]],
+        ins: &mut [&'a [F]],
+        outs: &mut [&'a mut [F]],
     ) {
         self.view.split(
             reqs,

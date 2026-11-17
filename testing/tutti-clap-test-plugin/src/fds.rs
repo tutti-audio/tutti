@@ -10,6 +10,7 @@ use std::io::{PipeReader, PipeWriter, Read, Write};
 use std::os::fd::AsRawFd;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use tutti_rt::LockExt;
 
 use clap_sys::ext::posix_fd_support::{
     CLAP_EXT_POSIX_FD_SUPPORT, CLAP_POSIX_FD_READ, clap_host_posix_fd_support,
@@ -43,7 +44,7 @@ unsafe extern "C" fn plugin_on_fd(
     flags: clap_posix_fd_flags,
 ) {
     LAST_EVENTS.store(flags, Ordering::Release);
-    if let Some((reader, _)) = PIPE.lock().unwrap_or_else(|p| p.into_inner()).as_mut() {
+    if let Some((reader, _)) = PIPE.lock_recover().as_mut() {
         let mut sink = [0u8; 64];
         // Readable by contract of the call, so this does not block.
         let _ = reader.read(&mut sink);
@@ -66,7 +67,7 @@ pub(crate) unsafe fn register(host: *const clap_host) {
         return;
     };
     let fd = reader.as_raw_fd();
-    *PIPE.lock().unwrap_or_else(|p| p.into_inner()) = Some((reader, writer));
+    *PIPE.lock_recover() = Some((reader, writer));
     // SAFETY: the host's own entry, with the host pointer it gave us.
     let ok = unsafe { register(host, fd, CLAP_POSIX_FD_READ) };
     REGISTERED.store(ok, Ordering::Release);
@@ -84,8 +85,7 @@ pub(crate) unsafe fn unregister(host: *const clap_host) {
         return;
     };
     let fd = PIPE
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
+        .lock_recover()
         .as_ref()
         .map(|(reader, _)| reader.as_raw_fd());
     if let Some(fd) = fd {
@@ -118,8 +118,7 @@ pub(crate) fn reset() {
 /// Safe to call; `extern "C"` only so the test can reach it across `dlopen`.
 #[unsafe(no_mangle)]
 pub extern "C" fn tutti_test_plugin_fd_poke() -> bool {
-    PIPE.lock()
-        .unwrap_or_else(|p| p.into_inner())
+    PIPE.lock_recover()
         .as_mut()
         .is_some_and(|(_, writer)| writer.write_all(&[1]).is_ok())
 }

@@ -23,6 +23,7 @@
 
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
+use tutti_rt::LockExt;
 
 use crate::support;
 use support::main_thread;
@@ -45,7 +46,7 @@ struct Probe {
 
 impl Probe {
     fn acquire() -> Self {
-        let lock = VERSION_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let lock = VERSION_LOCK.lock_recover();
         reset_clap_version();
         Probe { _lock: lock }
     }

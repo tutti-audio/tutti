@@ -47,6 +47,7 @@
 
 use std::sync::Mutex;
 use tutti_graph::UmpAt;
+use tutti_rt::LockExt;
 
 use crate::support::au::Au;
 use tutti_au_host::BusDirection;
@@ -65,7 +66,7 @@ use tutti_ump::{CCNumber, MidiChannel, MidiGroup};
 static PLUGIN_LOAD_LOCK: Mutex<()> = Mutex::new(());
 
 fn lock() -> std::sync::MutexGuard<'static, ()> {
-    PLUGIN_LOAD_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    PLUGIN_LOAD_LOCK.lock_recover()
 }
 
 /// Block size every test in this file renders at.

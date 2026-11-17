@@ -204,7 +204,7 @@ impl ModeCells {
         plan: &Plan,
         spec: &GraphSpec,
         committed: Option<&GraphSpec>,
-    ) -> ModeState {
+    ) -> ModeState<f32> {
         let cell = self
             .0
             .entry(key)

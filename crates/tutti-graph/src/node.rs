@@ -34,6 +34,7 @@ use crate::play::PlayClock;
 use crate::render_mode::RenderMode;
 use crate::time::Offset;
 use crate::wake::Wake;
+use tutti_buffers::Float;
 use tutti_types::PlayReading;
 
 /// Most audio channels, or event ports, on one side of one node.
@@ -793,7 +794,8 @@ impl Prepare {
     }
 }
 
-/// Planar per-channel scratch a node sizes in [`Node::prepare`].
+/// Planar per-channel scratch a node sizes in [`Node::prepare`], in the sample
+/// format `F` of the [`Node`] it serves.
 ///
 /// Built from the [`MaxBlock`] the node was prepared with
 /// ([`Prepare::max_block`]), so every block the executor can hand the node fits:
@@ -801,17 +803,17 @@ impl Prepare {
 /// clamped. A `MaxBlock` is a plain value anyone can build, so a scratch built
 /// from another one is only as long as that, and a longer block panics.
 #[derive(Clone, Debug, Default)]
-pub struct Scratch {
-    data: Vec<f32>,
+pub struct Scratch<F: Float = f32> {
+    data: Vec<F>,
     max: usize,
 }
 
-impl Scratch {
+impl<F: Float> Scratch<F> {
     /// `channels` zeroed channels of `max` frames. Control thread: allocates.
     #[must_use]
     pub fn new(max: MaxBlock, channels: usize) -> Self {
         Self {
-            data: vec![0.0; max.get() * channels],
+            data: vec![F::ZERO; max.get() * channels],
             max: max.get(),
         }
     }
@@ -822,7 +824,7 @@ impl Scratch {
     ///
     /// If `frames` exceeds the `MaxBlock` this was built from — which an
     /// executor-supplied block length never does.
-    pub fn channel(&mut self, c: usize, frames: usize) -> &mut [f32] {
+    pub fn channel(&mut self, c: usize, frames: usize) -> &mut [F] {
         assert!(
             frames <= self.max,
             "{frames} frames past the prepared maximum {}",
@@ -1348,7 +1350,10 @@ pub(crate) fn narrow_tail(ceiling: Tail, reported: Tail) -> Option<Tail> {
 
 /// A processor in the graph.
 ///
-/// Object-safe: the executor stores `Box<dyn Node>`. `Send + 'static` so a
+/// `F` is the sample format of the audio the node processes ([`Io<F>`](Io)):
+/// `impl Node for X` is the `f32` node, and a node generic over the format is
+/// `impl<F: Float> Node<F> for X`. The executor of a format runs the nodes of that
+/// format. Object-safe: the executor stores `Box<dyn Node<F>>`. `Send + 'static` so a
 /// unit can be built on the control thread and moved to the audio thread in a
 /// commit; not `Sync`, because only the thread that runs a node ever
 /// touches it.
@@ -1408,7 +1413,7 @@ pub(crate) fn narrow_tail(ceiling: Tail, reported: Tail) -> Option<Tail> {
 ///     fn reset(&mut self) {}
 /// }
 /// ```
-pub trait Node: Send + 'static {
+pub trait Node<F: Float = f32>: Send + 'static {
     /// Returns the node's ports, latency and tail, and its event and param
     /// declarations. Must not change after [`prepare`](Self::prepare)
     /// without the node being re-inserted — a shape change is a recompile.
@@ -1423,7 +1428,7 @@ pub trait Node: Send + 'static {
 
     /// Renders one block and reports what it did to the outputs. Audio
     /// thread: must not allocate, lock or block.
-    fn process(&mut self, cx: &Cx<'_>, io: Io<'_>) -> Status;
+    fn process(&mut self, cx: &Cx<'_>, io: Io<'_, F>) -> Status;
 
     /// Returns the node to the state of a freshly prepared one.
     fn reset(&mut self);
@@ -1657,7 +1662,7 @@ mod tests {
     #[test]
     fn scratch_fits_every_prepared_block() {
         let p = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(100)));
-        let mut s = Scratch::new(p.max_block(), 2);
+        let mut s = Scratch::<f32>::new(p.max_block(), 2);
         assert_eq!(s.channel(1, 100).len(), 100);
         assert_eq!(s.channel(0, 7).len(), 7);
         let over = std::panic::catch_unwind(move || {

@@ -8,11 +8,11 @@
 mod pacer;
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::thread::JoinHandle;
 use std::time::Duration;
 
-use tutti_rt::{PriorityRequest, monotonic_ns, request_priority, sleep_until_ns};
+use tutti_rt::{
+    PriorityRequest, StopToken, ThreadHandle, monotonic_ns, sleep_until_ns, spawn_named,
+};
 use tutti_types::{MaxBlock, Samples};
 
 use crate::callback::{MAX_FRAMES, OutputBlock};
@@ -49,7 +49,7 @@ pub const DEFAULT_BLOCK: MaxBlock = MaxBlock::of(Samples(256));
 ///
 /// The block is the stream's [`quantum`](OutputSpec::quantum), or
 /// [`DEFAULT_BLOCK`] when the spec has none. The thread asks the OS for its
-/// highest ordinary priority ([`tutti_rt::request_priority`]); a refusal leaves
+/// highest ordinary priority ([`tutti_rt::spawn_named`]); a refusal leaves
 /// it at the default.
 ///
 /// Pass it to [`OutputStream::start_with`](crate::OutputStream::start_with) or
@@ -79,26 +79,17 @@ pub enum TimerError {
 
 /// The handle of a started [`TimerDriver`] stream. Dropping it stops the
 /// thread and waits for it.
+///
+/// A panic of the loop itself (the render's are caught in the block) is caught
+/// on the thread and ends the stream silently: the drop's join discards it.
 #[derive(Debug)]
 pub struct TimerRunning {
-    stop: Arc<AtomicBool>,
-    thread: Option<JoinHandle<()>>,
+    _thread: ThreadHandle<()>,
 }
 
 impl RunningStream for TimerRunning {
     fn stop(self: Box<Self>) {
         // Drop does it.
-    }
-}
-
-impl Drop for TimerRunning {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::Release);
-        if let Some(thread) = self.thread.take() {
-            // A panic of the loop itself (the render's are caught in the
-            // block) has nothing left to report to.
-            let _ = thread.join();
-        }
     }
 }
 
@@ -116,31 +107,23 @@ impl StreamDriver for TimerDriver {
         let rate = spec.sample_rate;
         // Sized here, on the control thread; the loop only fills it.
         let mut scratch = vec![0.0f32; frames * block.channels()];
-        let stop = Arc::new(AtomicBool::new(false));
-        let thread_stop = Arc::clone(&stop);
-        let thread = std::thread::Builder::new()
-            .name("tutti-timer".into())
-            .spawn(move || {
-                // A refusal leaves the thread at the default priority.
-                let _ = request_priority(PriorityRequest::Highest);
-                let time = OsTime;
-                // The first block is due now and plays one block from now.
-                let mut pacer = Pacer::new(time.now_ns(), frames, rate);
-                run(
-                    &time,
-                    &mut pacer,
-                    &thread_stop,
-                    |os_ns| {
-                        block.render_at(&mut scratch, os_ns, Some(Duration::ZERO));
-                        faults.delivered();
-                    },
-                    || faults.record_overrun("the timer fell behind and began its schedule again"),
-                );
-            })?;
-        Ok(TimerRunning {
-            stop,
-            thread: Some(thread),
-        })
+        // A refusal of the priority leaves the thread at the default.
+        let thread = spawn_named("tutti-timer", Some(PriorityRequest::Highest), move |stop| {
+            let time = OsTime;
+            // The first block is due now and plays one block from now.
+            let mut pacer = Pacer::new(time.now_ns(), frames, rate);
+            run(
+                &time,
+                &mut pacer,
+                stop,
+                |os_ns| {
+                    block.render_at(&mut scratch, os_ns, Some(Duration::ZERO));
+                    faults.delivered();
+                },
+                || faults.record_overrun("the timer fell behind and began its schedule again"),
+            );
+        })?;
+        Ok(TimerRunning { _thread: thread })
     }
 }
 
@@ -165,11 +148,11 @@ impl Timebase for OsTime {
 fn run(
     time: &impl Timebase,
     pacer: &mut Pacer,
-    stop: &AtomicBool,
+    stop: &StopToken,
     mut render: impl FnMut(i64),
     mut overran: impl FnMut(),
 ) {
-    while !stop.load(Ordering::Acquire) {
+    while !stop.is_stopped() {
         match pacer.poll(time.now_ns()) {
             Due::Wait(until_ns) => time.sleep_until_ns(until_ns),
             Due::Render(os_ns) => render(os_ns),

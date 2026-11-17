@@ -1,6 +1,7 @@
 //! Applying a commit: installing its plan, units and state, or checking
 //! every unit out for a re-prepare.
 
+use tutti_buffers::Float;
 use tutti_rt::RtScope;
 
 use super::commit::{Commit, Incoming, Relined, cut_fades, retire_fade, send_back};
@@ -14,7 +15,7 @@ use crate::held::Held;
 use crate::plan::Plan;
 use crate::spec::{EventIn, EventOut};
 
-impl Executor {
+impl<F: Float> Executor<F> {
     /// Applies every queued commit, in the order the editor sent them, and
     /// sends each box back. [`process`](Self::process) calls this first; it is
     /// public so a caller can install a commit without rendering.
@@ -42,7 +43,7 @@ impl Executor {
         }
     }
 
-    pub(super) fn apply(&mut self, c: &mut Commit) {
+    pub(super) fn apply(&mut self, c: &mut Commit<F>) {
         self.inbox.applied = c.seq;
         if let Some(prepare) = c.suspend {
             // Check every unit out, into the box, for the editor to
@@ -379,9 +380,9 @@ impl Executor {
         &mut self,
         plan: &Plan,
         old_plan: Option<&Plan>,
-        st: &mut Staged,
+        st: &mut Staged<F>,
         departed: &mut Gone,
-    ) -> State {
+    ) -> State<F> {
         let max_block = self.prepare.max_block().get();
         let mut new = st.state.take().expect("a staged commit carries its state");
         let old = &mut self.state;
@@ -728,7 +729,11 @@ fn fill(to: &mut Vec<Event>, events: &[Event]) -> u32 {
 /// `carried`, copied into `target`, the ring built for its new length: both
 /// go on, the old one to `spare`. Returns how many events a FIFO that was
 /// built too small could not keep.
-fn move_ring(target: Option<&mut Ring>, carried: Option<Ring>, spare: &mut Vec<Ring>) -> usize {
+fn move_ring<F: Float>(
+    target: Option<&mut Ring<F>>,
+    carried: Option<Ring<F>>,
+    spare: &mut Vec<Ring<F>>,
+) -> usize {
     match (target, carried) {
         (Some(Ring::Audio(n)), Some(Ring::Audio(o))) => {
             n.transfer_from(&o);

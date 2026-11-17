@@ -53,6 +53,7 @@
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
+use tutti_buffers::Float;
 use tutti_curve::{FadeLaw, Piece};
 
 use tutti_types::{Amplitude, AtomicF32, ParamCell, UnitAddr, UnitParam};
@@ -556,46 +557,46 @@ pub(crate) fn fade_at(start: f32, goal: f32, j: usize, len: usize) -> f32 {
     FadeLaw::EqualAmplitude.between(start, goal, j, len)
 }
 
-/// The first live addend: `out = +0.0 + w * a`, or `out = +0.0 + w * out`
+/// The first live addend: `out = +F::ZERO + w * a`, or `out = +F::ZERO + w * out`
 /// when `a` is `None` (the in-place form, `out` already holds the addend).
 ///
 /// The `+0.0 +` is the fold's start and turns a `-0.0` product into `+0.0`.
 #[inline]
-pub(crate) fn first(out: &mut [f32], a: Option<&[f32]>, w: Weight<'_>) {
+pub(crate) fn first<F: Float>(out: &mut [F], a: Option<&[F]>, w: Weight<'_>) {
     let frames = out.len();
     match (a, w) {
         (Some(a), Weight::Unit) => {
             for (o, &x) in out.iter_mut().zip(a) {
-                *o = 0.0 + x;
+                *o = F::ZERO + x;
             }
         }
         (None, Weight::Unit) => {
             for o in out.iter_mut() {
-                *o += 0.0;
+                *o += F::ZERO;
             }
         }
         (Some(a), Weight::Static(w)) => {
-            let w = w.get();
+            let w = F::from_f32(w.get());
             for (o, &x) in out.iter_mut().zip(a) {
-                *o = 0.0 + w * x;
+                *o = F::ZERO + w * x;
             }
         }
         (None, Weight::Static(w)) => {
-            let w = w.get();
+            let w = F::from_f32(w.get());
             for o in out.iter_mut() {
-                *o = 0.0 + w * *o;
+                *o = F::ZERO + w * *o;
             }
         }
         (Some(a), Weight::Ramp { from, to }) => {
             let (from, to) = (from.get(), to.get());
             for (i, (o, &x)) in out.iter_mut().zip(a).enumerate() {
-                *o = 0.0 + Piece::ramp_at(None, from, to, i, frames) * x;
+                *o = F::ZERO + F::from_f32(Piece::ramp_at(None, from, to, i, frames)) * x;
             }
         }
         (None, Weight::Ramp { from, to }) => {
             let (from, to) = (from.get(), to.get());
             for (i, o) in out.iter_mut().enumerate() {
-                *o = 0.0 + Piece::ramp_at(None, from, to, i, frames) * *o;
+                *o = F::ZERO + F::from_f32(Piece::ramp_at(None, from, to, i, frames)) * *o;
             }
         }
         (
@@ -609,7 +610,7 @@ pub(crate) fn first(out: &mut [f32], a: Option<&[f32]>, w: Weight<'_>) {
         ) => {
             let (start, goal) = (start.get(), goal.get());
             for (i, (o, &x)) in out.iter_mut().zip(a).enumerate() {
-                *o = 0.0 + fade_at(start, goal, k + i, len) * x;
+                *o = F::ZERO + F::from_f32(fade_at(start, goal, k + i, len)) * x;
             }
         }
         (
@@ -623,17 +624,17 @@ pub(crate) fn first(out: &mut [f32], a: Option<&[f32]>, w: Weight<'_>) {
         ) => {
             let (start, goal) = (start.get(), goal.get());
             for (i, o) in out.iter_mut().enumerate() {
-                *o = 0.0 + fade_at(start, goal, k + i, len) * *o;
+                *o = F::ZERO + F::from_f32(fade_at(start, goal, k + i, len)) * *o;
             }
         }
         (Some(a), Weight::Frames(w)) => {
             for ((o, &x), &w) in out.iter_mut().zip(a).zip(w) {
-                *o = 0.0 + w * x;
+                *o = F::ZERO + F::from_f32(w) * x;
             }
         }
         (None, Weight::Frames(w)) => {
             for (o, &w) in out.iter_mut().zip(w) {
-                *o = 0.0 + w * *o;
+                *o = F::ZERO + F::from_f32(w) * *o;
             }
         }
     }
@@ -642,7 +643,7 @@ pub(crate) fn first(out: &mut [f32], a: Option<&[f32]>, w: Weight<'_>) {
 /// A later live addend: `out = out + w * a`, a multiply and an add, two
 /// roundings (Rust never contracts them into a fused multiply-add).
 #[inline]
-pub(crate) fn add(out: &mut [f32], a: &[f32], w: Weight<'_>) {
+pub(crate) fn add<F: Float>(out: &mut [F], a: &[F], w: Weight<'_>) {
     let frames = out.len();
     match w {
         Weight::Unit => {
@@ -651,7 +652,7 @@ pub(crate) fn add(out: &mut [f32], a: &[f32], w: Weight<'_>) {
             }
         }
         Weight::Static(w) => {
-            let w = w.get();
+            let w = F::from_f32(w.get());
             for (o, &x) in out.iter_mut().zip(a) {
                 *o += w * x;
             }
@@ -659,7 +660,7 @@ pub(crate) fn add(out: &mut [f32], a: &[f32], w: Weight<'_>) {
         Weight::Ramp { from, to } => {
             let (from, to) = (from.get(), to.get());
             for (i, (o, &x)) in out.iter_mut().zip(a).enumerate() {
-                *o += Piece::ramp_at(None, from, to, i, frames) * x;
+                *o += F::from_f32(Piece::ramp_at(None, from, to, i, frames)) * x;
             }
         }
         Weight::Fade {
@@ -670,12 +671,12 @@ pub(crate) fn add(out: &mut [f32], a: &[f32], w: Weight<'_>) {
         } => {
             let (start, goal) = (start.get(), goal.get());
             for (i, (o, &x)) in out.iter_mut().zip(a).enumerate() {
-                *o += fade_at(start, goal, k + i, len) * x;
+                *o += F::from_f32(fade_at(start, goal, k + i, len)) * x;
             }
         }
         Weight::Frames(w) => {
             for ((o, &x), &w) in out.iter_mut().zip(a).zip(w) {
-                *o += w * x;
+                *o += F::from_f32(w) * x;
             }
         }
     }

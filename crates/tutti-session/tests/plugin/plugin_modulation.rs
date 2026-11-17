@@ -10,7 +10,7 @@
 //! rather than skip.
 
 use crate::param_reads::ParamReads as _;
-use crate::pooled::{LoadPlugin, Spec};
+use crate::pooled::{LandOn as _, LoadPlugin, Spec};
 use crate::support;
 use tutti_session::Root;
 use tutti_session::{PluginChange, PluginEvent};
@@ -58,14 +58,21 @@ fn detached() -> DetachedSession {
 
 /// Loads the probe into `s` and puts it on the outputs.
 fn add_probe(s: &mut DetachedSession) -> tutti_session::Key<tutti_session::PluginNode> {
-    let node = s
-        .load_plugin_blocking(
+    add_probe_keyed(s).1
+}
+
+/// As [`add_probe`], with the pool key of the plugin's entry.
+fn add_probe_keyed(
+    s: &mut DetachedSession,
+) -> (u64, tutti_session::Key<tutti_session::PluginNode>) {
+    let (key, node) = s
+        .load_plugin_keyed(
             tutti_fixtures::main_thread(),
             Spec::new(PluginRef::file(clap_probe()).expect("a plugin file")),
         )
         .expect("the reference CLAP plugin loads");
     s.graph().connect(node, Root).unwrap();
-    node
+    (key, node)
 }
 
 /// A virtual clock for the session's phases, and the plugin changes they
@@ -481,7 +488,7 @@ fn a_read_landing_under_a_lane_keeps_the_knob_in_the_mirror() {
     set_env("TUTTI_CLAP_PROBE_PRESET_LOAD", "1");
     let mut s = detached();
     let mut drive = Drive::new();
-    let node = add_probe(&mut s);
+    let (entry, node) = add_probe_keyed(&mut s);
     drive.update(&mut s);
     wait_for_values(&mut drive, &mut s, node);
     let gain = node.param(ParamId::new(GAIN));
@@ -509,11 +516,9 @@ fn a_read_landing_under_a_lane_keeps_the_knob_in_the_mirror() {
         params.get(first).unwrap().normalized()
     };
     let before = cutoff(&s);
-    s.plugin_view(node)
-        .unwrap()
-        .presets(&tutti_fixtures::main_thread())
-        .unwrap()
-        .load_file("/nowhere/bright.tutti-preset")
+    s.load_preset_file(&entry, "/nowhere/bright.tutti-preset")
+        .expect("the entry has a node")
+        .land_on(&mut s)
         .expect("the plugin takes the preset");
     let deadline = Instant::now() + Duration::from_secs(10);
     while cutoff(&s) == before {

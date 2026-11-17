@@ -29,11 +29,12 @@
 use std::path::PathBuf;
 
 use tutti::midi::{Address, Message, MidiChannel, NoteNumber, TimedMidiEvent, U7, Ump, Voice1};
+use tutti::plugin::PresetSupport;
 use tutti::plugin::catalog::{CatalogConfig, PluginDb, PluginId, ScanPoll};
-use tutti::session::PoolEvent;
+use tutti::session::{Peer as _, PoolEvent};
 use tutti::{
     Beat, Bounce, Catalog, Format, MaxBlock, Normalized, ParamId, Pcm, PluginEvent, PluginRef,
-    PresetError, PresetKind, Range, Root, SampleRate, Samples, Session, SessionEvent,
+    Range, Root, SampleRate, Samples, Session, SessionEvent,
 };
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -183,39 +184,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 8. Health and presets. `health()` is one reading of the plugin's life
     //    (running, stalled, dead and about to be written off, or being
-    //    reloaded). Presets are the main thread's: `ui.plugin(node)?.presets()`
-    //    says whether the plugin lists them (`Browse`: load an entry by its id)
-    //    or loads them from files (`File`, CLAP), and refuses a plugin with
-    //    none (`PresetError::Unsupported`).
-    eprintln!("health: {:?}", hosted.health());
-    //    Diagnostics are the corner of the plugin's panel: its server (none in
-    //    process), its dropouts, what it lost, and the latency the graph
-    //    compensates for it, the same whichever hosting runs it. `buses()` hands
-    //    out the graph's bus handles: a key input is wired by
-    //    index (no format marks a sidechain): `connect(kick.bus_out(0),
-    //    hosted.buses().input(1).unwrap())`.
-    let diagnostics = hosted.diagnostics();
-    eprintln!(
-        "server {:?}, latency {:?}, losses {:?}, input buses: {}",
-        diagnostics.server_pid(),
-        diagnostics.latency(),
-        hosted.losses(),
-        hosted.buses().input_count()
-    );
+    //    reloaded). Presets are part of the plugin's info, read when it loaded:
+    //    `support()` says whether the plugin lists them (load a handle with
+    //    `load_preset`), loads them from files (`LoadByPath`, CLAP:
+    //    `load_preset_file`) or has none. A load is a job, run by an update on
+    //    the main thread.
     {
-        match session.plugin_view(node)?.presets(&main) {
-            Ok(presets) => match presets.kind() {
-                PresetKind::Browse => {
-                    eprintln!("{} preset(s)", presets.len());
-                    if let Some(first) = presets.iter().next() {
-                        first.load()?;
-                        eprintln!("loaded {:?}", first.name());
-                    }
+        let info = session.plugin(&"plugin")?.info();
+        let presets = info.presets();
+        match presets.support() {
+            PresetSupport::None => eprintln!("no presets"),
+            support if support.can_list() => {
+                eprintln!("{} preset(s)", presets.len());
+                if let Some(first) = presets.iter().next() {
+                    session.load_preset(&"plugin", &first)?.wait(&mut session)?;
+                    eprintln!(
+                        "loaded {:?}, current {:?}",
+                        first.name(),
+                        session.current_preset(&"plugin", main)
+                    );
                 }
-                _ => eprintln!("loads preset files, lists none"),
-            },
-            Err(PresetError::Unsupported) => eprintln!("no presets"),
-            Err(other) => return Err(other.into()),
+            }
+            _ => eprintln!("loads preset files, lists none"),
         }
     }
 

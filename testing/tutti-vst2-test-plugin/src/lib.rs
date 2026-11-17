@@ -34,6 +34,7 @@ pub mod config;
 pub mod switches;
 
 use std::sync::Arc;
+use tutti_rt::LockExt;
 
 use num_traits::Float;
 use vst::api::{self, AEffect, HostCallbackProc, Supported};
@@ -127,7 +128,7 @@ impl PluginParameters for ProbeParameters {
             // `can_be_automated` answers false.
             return None;
         }
-        let values = self.values.lock().unwrap_or_else(|p| p.into_inner());
+        let values = self.values.lock_recover();
         values.get(index as usize).copied()
     }
 
@@ -135,7 +136,7 @@ impl PluginParameters for ProbeParameters {
         if !self.in_range(index) {
             return false;
         }
-        let mut values = self.values.lock().unwrap_or_else(|p| p.into_inner());
+        let mut values = self.values.lock_recover();
         let Some(slot) = values.get_mut(index as usize) else {
             return false;
         };
@@ -208,11 +209,11 @@ impl PluginParameters for ProbeParameters {
     }
 
     fn get_bank_data(&self) -> Vec<u8> {
-        self.chunk.lock().unwrap_or_else(|p| p.into_inner()).clone()
+        self.chunk.lock_recover().clone()
     }
 
     fn load_bank_data(&self, data: &[u8]) {
-        *self.chunk.lock().unwrap_or_else(|p| p.into_inner()) = data.to_vec();
+        *self.chunk.lock_recover() = data.to_vec();
     }
 
     fn get_preset_data(&self) -> Vec<u8> {
@@ -364,7 +365,7 @@ impl ProbePlugin {
         if !self.config.state_dc {
             return 0.0;
         }
-        let chunk = self.params.chunk.lock().unwrap_or_else(|p| p.into_inner());
+        let chunk = self.params.chunk.lock_recover();
         let param0 = self.params.get_parameter(0).unwrap_or(0.0);
         config::state_dc(
             self.config.preset_chunks,

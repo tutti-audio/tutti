@@ -47,7 +47,8 @@ use tutti_rt::{ControlDrop, LevelReader, LevelSpan, LevelWriter, level_cell};
 use tutti_types::{Amplitude, Samples};
 
 use crate::exec::SILENT;
-use crate::slots::{AudioSlots, SlotFlags};
+use crate::slots::{AudioSlots, SlotFlags, for_f32};
+use tutti_buffers::Float;
 
 /// What one lane measured since it was last read.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -136,10 +137,10 @@ pub struct MeterWriter {
 /// `srcs` into the meter's lanes, if the reader switched it on. A slot the
 /// executor knows is silent is not scanned: it adds its frames and no energy.
 #[inline]
-pub(crate) fn meter_op<A: AudioSlots + ?Sized, F: SlotFlags + ?Sized>(
+pub(crate) fn meter_op<F: Float, A: AudioSlots<F> + ?Sized, Fl: SlotFlags + ?Sized>(
     meter: &mut MeterWriter,
     arena: &A,
-    flags: &F,
+    flags: &Fl,
     srcs: &[u32],
     frames: usize,
 ) {
@@ -158,7 +159,16 @@ pub(crate) fn meter_op<A: AudioSlots + ?Sized, F: SlotFlags + ?Sized>(
                 sum_sq: 0.0,
             }
         } else {
-            block_stats(arena.slot(src, frames))
+            let mut stats = BlockStats {
+                peak: 0.0,
+                sum_sq: 0.0,
+            };
+            for_f32(arena.slot(src, frames), |chunk| {
+                let part = block_stats(chunk);
+                stats.peak = stats.peak.max(part.peak);
+                stats.sum_sq += part.sum_sq;
+            });
+            stats
         };
         lane.fold(stats.peak, f64::from(stats.sum_sq), n);
     }

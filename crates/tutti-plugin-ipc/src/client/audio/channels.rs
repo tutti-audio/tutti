@@ -16,6 +16,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tutti_rt::Doorbell;
+use tutti_rt::LockExt;
 use tutti_types::{AtomicSampleRate, SampleRate};
 
 /// How many commands the audio thread can queue before `push_command` fails.
@@ -235,26 +236,19 @@ impl Channels {
 
     /// Keeps `watch` as the probe [`bytes_waiting`](Self::bytes_waiting) asks.
     pub(super) fn set_probe(&self, watch: Arc<crate::transport::control::Watch>) {
-        *self
-            .probe
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(watch);
+        *self.probe.lock_recover() = Some(watch);
     }
 
     /// Lets the connection's duplicate go once nothing watches it.
     pub(super) fn clear_probe(&self) {
-        *self
-            .probe
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        *self.probe.lock_recover() = None;
     }
 
     /// Whether the control connection has bytes the bridge thread has not read
     /// (one `poll`, no wait). `false` with no probe.
     pub(super) fn bytes_waiting(&self) -> bool {
         self.probe
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .lock_recover()
             .as_ref()
             .is_some_and(|watch| watch.wait_readable(Duration::ZERO))
     }

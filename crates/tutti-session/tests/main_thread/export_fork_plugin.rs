@@ -17,7 +17,7 @@ use std::sync::Arc;
 use support::{clap_probe, plugin_server};
 use tutti_export::Produced;
 
-use tutti_fixtures::midi;
+use tutti_fixtures::{ScopedEnv, midi};
 use tutti_graph::NodeKey;
 use tutti_graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_midi_runtime::TimedMidiEvent;
@@ -86,33 +86,34 @@ fn stem_planes(
     }
 }
 
-/// Set a switch the probe reads when its server starts. A fork's server
-/// starts from this process too, so a switch set after the live load
-/// reaches the fork only.
-fn probe_env(key: &str, value: impl ToString) {
-    // SAFETY: nextest runs each test in its own process, but the session, its
-    // IPC threads and a live server exist by the time a later switch is set,
-    // so this is not single-threaded. What makes it sound: the threads in this
-    // process are Rust threads, which read the environment only through
-    // `std::env` (behind std's environment lock), and, for a served plugin (the
-    // crash case, which is why this is sound there), no plugin code runs in it.
-    // An in-process plugin sets its variables before any session exists. The
-    // server reads a switch only at spawn, and `Command::spawn` takes that same
-    // lock to read `environ`; the already-running server never re-reads it.
-    unsafe { std::env::set_var(key, value.to_string()) };
-}
-
 /// A detached stereo session at the export's rate, with the reference plugin
-/// loaded from `path` in `mode` and routed to the outputs.
+/// loaded from `path` in `mode` and routed to the outputs. The switches the
+/// probe's server reads are set until the returned guard drops, so a later case
+/// in the process probes with none set; a switch set through the guard after
+/// the live load reaches the fork's server only.
 fn session_with_probe_at(
     mode: u32,
     path: std::path::PathBuf,
     hosting: Hosting,
-) -> (DetachedSession, NodeKey) {
+) -> (DetachedSession, NodeKey, ScopedEnv) {
     // The plugin's file is probed before its variables are set.
     crate::pooled::prime(&PluginRef::file(&path).expect("a plugin file"));
-    probe_env("TUTTI_PLUGIN_SERVER", plugin_server().display());
-    probe_env("TUTTI_CLAP_PROBE_RENDER_MODE", mode);
+    let mut env = ScopedEnv::new();
+    env.set("TUTTI_PLUGIN_SERVER", plugin_server());
+    env.set("TUTTI_CLAP_PROBE_RENDER_MODE", mode.to_string());
+    if hosting == Hosting::InProcess {
+        // The plugin reads its switches when its image is first loaded into this
+        // process, which an earlier case may have done; the mode has a switch of
+        // its own on the image the host holds.
+        // SAFETY: the symbol is the reference plugin's `extern "C" fn(u32)`.
+        unsafe {
+            let lib = libloading::Library::new(&path).expect("the plugin image opens");
+            let set: libloading::Symbol<extern "C" fn(u32)> = lib
+                .get(b"tutti_test_plugin_set_render_mode\0")
+                .expect("the plugin exports its render-mode switch");
+            set(mode);
+        }
+    }
     let mut session = Session::builder()
         .inputs(ChannelLayout::EMPTY)
         .outputs_floor(ChannelLayout::STEREO)
@@ -127,16 +128,16 @@ fn session_with_probe_at(
         .expect("the reference CLAP plugin loads");
     session.graph().connect(probe, Root).unwrap();
     let _ = session.update();
-    (session, probe.erase())
+    (session, probe.erase(), env)
 }
 
 /// [`session_with_probe_at`] over the reference plugin.
-fn session_with_probe(mode: u32) -> (DetachedSession, NodeKey) {
+fn session_with_probe(mode: u32) -> (DetachedSession, NodeKey, ScopedEnv) {
     session_with_probe_hosted(mode, Hosting::OutOfProcess)
 }
 
 /// [`session_with_probe`], the plugin hosted as `hosting` says.
-fn session_with_probe_hosted(mode: u32, hosting: Hosting) -> (DetachedSession, NodeKey) {
+fn session_with_probe_hosted(mode: u32, hosting: Hosting) -> (DetachedSession, NodeKey, ScopedEnv) {
     session_with_probe_at(mode, clap_probe(), hosting)
 }
 
@@ -191,7 +192,7 @@ impl Node for Ramp {
 /// neighbouring frame's value everywhere. (A constant input could not
 /// tell a trim of 64 from one of 201.)
 fn a_plugin_effect_exports_through_its_fork() {
-    let (mut session, probe) = session_with_probe(LATENCY);
+    let (mut session, probe, _env) = session_with_probe(LATENCY);
     feed_with(&mut session, probe, ForkByClone(Ramp { n: 0 }));
     let planes = planes(&mut session, buffers(0.1).latency(BounceLatency::Graph));
     for (c, plane) in planes.iter().enumerate().take(2) {
@@ -215,7 +216,7 @@ fn a_plugin_fork_that_cannot_be_built_is_a_named_failure() {
     let _ = std::fs::remove_file(&own);
     let real = std::fs::canonicalize(&shared).expect("the reference plugin");
     std::fs::copy(&real, &own).expect("copy the plugin");
-    let (mut session, probe) =
+    let (mut session, probe, _env) =
         session_with_probe_at(TAG_PASSTHROUGH, own.clone(), Hosting::OutOfProcess);
     std::fs::remove_file(&own).expect("remove the plugin's file");
     match session.bounce(buffers(0.05)) {
@@ -269,7 +270,7 @@ fn an_exported_in_process_plugin_instrument_plays_its_clip() {
 }
 
 fn instrument_at(rate: f64, hosting: Hosting) {
-    let (mut session, probe) = session_with_probe_hosted(NOTES, hosting);
+    let (mut session, probe, _env) = session_with_probe_hosted(NOTES, hosting);
     let note = |beat: f64, on: bool| {
         let event = if on {
             midi::note_on(MidiChannel::FIRST, 60, 0xFFFF)
@@ -327,9 +328,9 @@ fn instrument_at(rate: f64, hosting: Hosting) {
 /// crash. The crash switch is set after the live instance loaded, so only
 /// the fork's server reads it; it aborts on its 8th block.
 fn a_plugin_fork_that_crashes_mid_export_is_a_named_failure() {
-    let (mut session, probe) = session_with_probe(TAG_PASSTHROUGH);
+    let (mut session, probe, mut env) = session_with_probe(TAG_PASSTHROUGH);
     feed_with(&mut session, probe, ForkByClone(Const::mono(0.25)));
-    probe_env("TUTTI_CLAP_PROBE_CRASH_ON_BLOCK", 8);
+    env.set("TUTTI_CLAP_PROBE_CRASH_ON_BLOCK", "8");
     match session.bounce(buffers(2.0)) {
         Err(BounceError::Export(tutti_export::Error::ForkFailed { key, kind, .. })) => {
             assert_eq!(key, probe);
