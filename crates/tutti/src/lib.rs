@@ -608,11 +608,13 @@ pub mod midi {
         DetailsData, DiscoveryData, Identity, InquiryTarget, ManufacturerProfile, MaxSysexSize,
         MessageText, Muid, Nak, NameError, NotADataControl, NotADeviceId, NotAMuid, NotASysexSize,
         NotProfileChannels, NoteData, Outcome, PortDirection, ProcessError, ProcessFeatures,
-        ProductInstanceId, ProfileChange, ProfileChannels, ProfileDataError, ProfileEntry,
-        ProfileId, ProfileState, ProfileTable, ReportRequest, ReportScope, Request, RequestError,
-        SpecificData, StandardProfile, SystemMessages, WinMmDevice,
+        ProductInstanceId, ProfileChange, ProfileDataError, ProfileEntry, ProfileState,
+        ProfileTable, ReportRequest, ReportScope, Request, RequestError, SpecificData,
+        StandardProfile, SystemMessages, WinMmDevice,
     };
-    pub use tutti_midi_device::{NotSetProfileOn, ProfileOnRequest};
+    pub use tutti_midi_device::{
+        NotSetProfileOn, ProfileChannels, ProfileId, ProfileOnRequest, ProfileTarget,
+    };
     pub use tutti_midi_file::Error as FileError;
     pub use tutti_midi_file::{
         ClipFileError, ConfigError as FileConfigError, Refusal, SmfParseError, ToClipError,
