@@ -1392,7 +1392,7 @@ impl MidiFile {
 }
 
 /// Why a file has no one timeline ([`MidiFile::events`], [`MidiFile::timeline`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 #[non_exhaustive]
 pub enum TimelineError {
     /// A format 2 file (or one of a format above 2): its sequences are
