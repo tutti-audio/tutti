@@ -8,7 +8,8 @@ use tutti_types::{Beat, Bpm};
 pub enum Transition {
     /// Hold this tempo until the next point.
     Step,
-    /// Move to the next point's tempo, tempo linear in time.
+    /// Move to `end`, or the next point's tempo when `end` is `None`, tempo
+    /// linear in time.
     ///
     /// This is CLAP's `tempo_inc` (a constant increment per sample), and the
     /// default for import and export.
@@ -20,7 +21,8 @@ pub enum Transition {
         /// folds an end equal to the next tempo into `None`.
         end: Option<Bpm>,
     },
-    /// Move to the next point's tempo, tempo linear in beats.
+    /// Move to `end`, or the next point's tempo when `end` is `None`, tempo
+    /// linear in beats.
     ///
     /// Time is a logarithm of the beat. This is the ramp Ardour draws.
     RampBeats {

@@ -71,11 +71,13 @@ impl TempoMapBuilder {
         self.then(Transition::RampBeats { end: None }, beat, tempo)
     }
 
-    /// The ramp just added ends at its beat at the tempo it was given, and the
-    /// tempo steps to `tempo` at that same beat: the ramp's `end` is the last
-    /// tempo and the last point departs with `tempo`, with no plateau between
-    /// them. Every beat before it keeps its time. After a step (or on the first
-    /// point) there is no ramp to end, and it replaces the last point's tempo.
+    /// The last point departs with `tempo` at its own beat. When the ramp
+    /// before it has no `end`, that ramp's `end` becomes the last point's
+    /// current tempo (the arrival), so the ramp ends and the tempo steps at one
+    /// beat with no plateau between. When the ramp already has an `end`, only
+    /// the departure is replaced, so a second call keeps the arrival. After a
+    /// step (or on the first point) there is no ramp, and it replaces the last
+    /// point's tempo. Every beat before the last point keeps its time.
     ///
     /// ```
     /// use tutti_tempo::TempoMap;
@@ -95,7 +97,7 @@ impl TempoMapBuilder {
             if let Some(Transition::RampTime { end } | Transition::RampBeats { end }) =
                 self.points.last_mut().map(|p| &mut p.transition)
             {
-                *end = Some(last.tempo);
+                end.get_or_insert(last.tempo);
             }
             self.points.push(TempoPoint { tempo, ..last });
         }

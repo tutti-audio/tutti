@@ -735,3 +735,81 @@ fn a_ramp_end_equal_to_the_next_tempo_folds_away() {
     assert_eq!(kept.points()[0].transition, ending(Some(Bpm::of(150.0))));
     assert_ne!(kept, plain);
 }
+
+/// **A second `then_step` replaces the departure and keeps the arrival**: the
+/// ramp still ends at 180 (beat 4 is at 1.6 s, the tempo just below it 180) and
+/// the tempo from beat 4 is the last value, 60, not 90.
+#[test]
+fn a_second_then_step_keeps_the_arrival() {
+    let map = TempoMap::builder(Bpm::of(120.0))
+        .ramp_time_to(Beat(4.0), Bpm::of(180.0))
+        .then_step(Bpm::of(90.0))
+        .then_step(Bpm::of(60.0))
+        .build()
+        .unwrap();
+    assert_eq!(
+        map.points()[0].transition,
+        Transition::RampTime {
+            end: Some(Bpm::of(180.0))
+        }
+    );
+    assert_eq!(map.tempo_at(Beat(4.0)), Bpm::of(60.0));
+    let below = map.tempo_at(Beat(4.0f64.next_down())).get();
+    assert!((below - 180.0).abs() < 1e-9, "{below}");
+    assert!((map.seconds_at(Beat(4.0)).get() - 1.6).abs() < 1e-12);
+    assert!((map.seconds_at(Beat(5.0)).get() - 2.6).abs() < 1e-12);
+}
+
+/// A beat-linear ramp with an end: 120 to 180 over beats 0..4 (`g` = 0.25
+/// beats/s per beat) reads `120 + 15 b` BPM, 165 at beat 3 and 180 just below
+/// beat 4, though the next point's own tempo is 60.
+#[test]
+fn a_beat_ramp_with_an_end_follows_its_own_line() {
+    let map = TempoMap::new([
+        TempoPoint {
+            transition: Transition::RampBeats {
+                end: Some(Bpm::of(180.0)),
+            },
+            ..pt(0.0, 120.0, Transition::Step)
+        },
+        pt(4.0, 60.0, Transition::Step),
+    ])
+    .unwrap();
+    let mid = map.tempo_at(Beat(3.0)).get();
+    assert!((mid - 165.0).abs() < 1e-9, "{mid}");
+    let below = map.tempo_at(Beat(4.0f64.next_down())).get();
+    assert!((below - 180.0).abs() < 1e-9, "{below}");
+    assert_eq!(map.tempo_at(Beat(4.0)), Bpm::of(60.0));
+}
+
+/// **`then_step` changes only the last segment**: after a step at beat 2 to 90
+/// and a ramp to 180 at beat 6, a `then_step` to 60 leaves every beat at the same
+/// time and every earlier tempo as it was; the ramp still ends at 180 and the
+/// tempo from beat 6 is 60.
+#[test]
+fn then_step_on_a_map_with_earlier_points_changes_only_the_last_segment() {
+    let base = || {
+        TempoMap::builder(Bpm::of(120.0))
+            .step_to(Beat(2.0), Bpm::of(90.0))
+            .ramp_time_to(Beat(6.0), Bpm::of(180.0))
+    };
+    let (plain, stepped) = (
+        base().build().unwrap(),
+        base().then_step(Bpm::of(60.0)).build().unwrap(),
+    );
+    for b in [0.0, 1.0, 2.0, 4.0, 6.0] {
+        assert_eq!(
+            plain.seconds_at(Beat(b)),
+            stepped.seconds_at(Beat(b)),
+            "beat {b}"
+        );
+    }
+    assert_eq!(stepped.points().len(), 3);
+    assert_eq!(stepped.points()[0], plain.points()[0]);
+    assert_eq!(stepped.tempo_at(Beat(1.0)), Bpm::of(120.0));
+    assert_eq!(stepped.tempo_at(Beat(2.0)), Bpm::of(90.0));
+    assert_eq!(stepped.tempo_at(Beat(6.0)), Bpm::of(60.0));
+    assert_eq!(plain.tempo_at(Beat(6.0)), Bpm::of(180.0));
+    let below = stepped.tempo_at(Beat(6.0f64.next_down())).get();
+    assert!((below - 180.0).abs() < 1e-9, "{below}");
+}
