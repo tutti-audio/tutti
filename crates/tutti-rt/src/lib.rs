@@ -49,7 +49,7 @@
 //! - [`handoff()`] — one value that moves between a control thread and the
 //!   audio thread at a block boundary ([`Hand`] lends and recalls, [`Rt`]
 //!   trades).
-//! - [`doorbell`], [`Doorbell`] and [`Sleeper`] — wake one parked thread from
+//! - [`doorbell()`], [`Doorbell`] and [`Sleeper`] — wake one parked thread from
 //!   the audio thread (a futex wake only if a sleeper is parked), with no
 //!   wake-up lost between the sleeper's check and its park.
 //! - [`RenderCount`] — the renders of one thing in flight, and a `quiescent`

@@ -1,4 +1,4 @@
-//! [`doorbell`]: wake one sleeping thread from another, without the waker
+//! [`doorbell()`]: wake one sleeping thread from another, without the waker
 //! ever waiting.
 //!
 //! A helper thread that has nothing to do parks; the audio thread, which
@@ -7,7 +7,7 @@
 //! primitive with a `loom` model (`tests/doorbell_loom.rs`) over the shipped
 //! code.
 //!
-//! [`doorbell`] makes the pair: a [`Doorbell`], the ringing side (`Clone`,
+//! [`doorbell()`] makes the pair: a [`Doorbell`], the ringing side (`Clone`,
 //! `Send + Sync`, held by every ringer), and a [`Sleeper`], the waiting side.
 //! There is one `Sleeper` per doorbell, by type: it is not `Clone`, and
 //! `wait` takes `&mut self`. It binds the thread of its first wait and stays
@@ -77,7 +77,7 @@ pub struct Doorbell {
     inner: Arc<Inner>,
 }
 
-/// The waiting side of a doorbell, made by [`doorbell`].
+/// The waiting side of a doorbell, made by [`doorbell()`].
 ///
 /// One sleeper exists per doorbell: it is not `Clone` and waits through
 /// `&mut self`. It is `Send`, so a control thread makes the pair and moves
