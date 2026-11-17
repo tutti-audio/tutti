@@ -66,7 +66,7 @@ pub enum PortsRefusal {
     Swap(CrossfadeRefused),
 }
 
-impl<C: Clock> Session<C> {
+impl<K: crate::AppKey, C: Clock> Session<K, C> {
     /// Ticks each hosted plugin that keeps a rebinder (pooled, or inserted or
     /// replaced through `Graph`); the tick is what reads a change of ports.
     /// Re-inserts the node of each whose ports changed. Called at the end of
