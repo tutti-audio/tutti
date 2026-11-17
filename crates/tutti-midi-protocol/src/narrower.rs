@@ -82,6 +82,19 @@ impl Default for Narrower {
 }
 
 impl Narrower {
+    /// The most MIDI 1.0 messages one [`feed`](Self::feed) sends. An MPE Note
+    /// On sends one Note Off when it steals a sounding member or strikes its
+    /// key again (never both), then a centred Pitch Bend, Channel Pressure 0
+    /// and Control Change 74 at 0x40 for each its member's last note moved,
+    /// then the Note On. The Default Translation sends at most four, a
+    /// controller's sequence (D.2.3).
+    pub const MAX_MESSAGES: usize = 5;
+
+    /// The most bytes one [`feed`](Self::feed) sends: the Note On sequence of
+    /// [`MAX_MESSAGES`](Self::MAX_MESSAGES), four 3-byte messages and the
+    /// 2-byte Channel Pressure. The Default Translation sends at most 12.
+    pub const MAX_BYTES: usize = 14;
+
     /// A narrower that translates by the Default Translation.
     #[must_use]
     pub const fn new() -> Self {
@@ -118,9 +131,11 @@ impl Narrower {
     }
 
     /// Calls `out` with each MIDI 1.0 message `message` stands for, in the
-    /// order to send them: up to four for a controller, three for a Program
-    /// Change with a bank, one for most others, none for one with no MIDI 1.0
-    /// form (D.2.8) or that is not a channel or system message.
+    /// order to send them: four for a controller, three for a Program Change
+    /// with a bank, up to five for an MPE Note On, one for most others, none
+    /// for one with no MIDI 1.0 form (D.2.8) or that is not a channel or system
+    /// message. [`MAX_MESSAGES`](Self::MAX_MESSAGES) and
+    /// [`MAX_BYTES`](Self::MAX_BYTES) bound one call.
     pub fn feed(&mut self, packet: impl Into<Ump>, mut out: impl FnMut(Midi1Bytes)) {
         // A packet that does not decode has no MIDI 1.0 form.
         let Ok(message) = packet.into().decode() else {
@@ -212,9 +227,6 @@ fn run(
     cc(CCNumber::DATA_ENTRY_LSB, U7::masked((data & 0x7F) as u8));
 }
 
-/// A 32-bit value as 14 bits, rounded (M2-115 section 4.4.1,
-/// `scaleDownRounding(value, 32, 14)`): add half the scaled range, shift,
-/// clamp to the 14-bit maximum.
 /// The top 14 bits of a 32-bit controller word: the data of a Registered or
 /// Assignable Controller that M2-115 scales Min-Center-Max, narrowed by a right
 /// shift (as [`narrow_bend`](crate::narrow_bend) does a bend).
@@ -226,6 +238,9 @@ fn narrow_data(extremes: ExtremeValues, value: ControlValue) -> u16 {
     }
 }
 
+/// A 32-bit value as 14 bits, rounded (M2-115 section 4.4.1,
+/// `scaleDownRounding(value, 32, 14)`): add half the scaled range, shift,
+/// clamp to the 14-bit maximum.
 fn narrow_rounded(value: u32) -> u16 {
     const SCALE_BITS: u32 = 32 - 14;
     let shifted = (u64::from(value) + (1 << (SCALE_BITS - 1))) >> SCALE_BITS;

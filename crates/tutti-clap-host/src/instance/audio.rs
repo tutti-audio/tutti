@@ -16,7 +16,7 @@ use clap_sys::process::{CLAP_PROCESS_SLEEP, CLAP_PROCESS_TAIL, clap_process_stat
 use std::sync::atomic::Ordering;
 use tutti_clap_ffi::{Planar, ProcessCall, ProcessError};
 use tutti_graph::UmpAt;
-use tutti_plugin_types::AudioBufferMut;
+use tutti_plugin_types::PluginAudio;
 use tutti_plugin_types::TransportChange;
 use tutti_plugin_types::WireMidi;
 
@@ -69,10 +69,10 @@ impl<'a> ProcessOutputRef<'a> {
 /// # use tutti_fixtures::midi;
 /// # use tutti_ump::{MidiChannel, NoteVelocity};
 /// # use tutti_graph::Offset;
-/// # use tutti_plugin_types::AudioBufferMut;
+/// # use tutti_plugin_types::PluginAudio;
 /// # use tutti_clap_host::{ClapProcessor, ClapProcessContext, TransportInfo};
 /// # use tutti_types::{Bpm, SampleRate};
-/// # fn ex(plugin: &mut ClapProcessor, buffer: &mut AudioBufferMut<'_, '_>)
+/// # fn ex(plugin: &mut ClapProcessor, buffer: &mut PluginAudio<'_>)
 /// # -> tutti_clap_host::Result<()> {
 /// let transport = TransportInfo::new(SampleRate::SR_48K).with_tempo(Bpm::of(120.0));
 /// let midi = [(Offset::ZERO, midi::note_on(MidiChannel::FIRST, 60, 16384))];
@@ -112,7 +112,7 @@ impl ClapProcessor {
     /// Processes one block of audio through the plugin.
     ///
     /// The sample format is a value fixed at activation
-    /// ([`format`](Self::format)): the block's [`AudioBufferMut`] must be the
+    /// ([`format`](Self::format)): the block's [`PluginAudio`] must be the
     /// same width, matched once per block, and a block of the other width is
     /// refused ([`ClapError::FormatMismatch`]) before the plugin is called. (The
     /// 64-bit support check happened once in `Loaded::activate`.)
@@ -145,10 +145,10 @@ impl ClapProcessor {
     /// # use tutti_fixtures::midi;
     /// # use tutti_ump::{MidiChannel, NoteVelocity};
     /// # use tutti_graph::Offset;
-    /// # use tutti_plugin_types::AudioBufferMut;
+    /// # use tutti_plugin_types::PluginAudio;
     /// # use tutti_clap_host::{ClapProcessor, ClapProcessContext, TransportInfo};
     /// # use tutti_types::{Bpm, SampleRate};
-    /// # fn ex(active: &mut ClapProcessor, buffer: &mut AudioBufferMut<'_, '_>)
+    /// # fn ex(active: &mut ClapProcessor, buffer: &mut PluginAudio<'_>)
     /// # -> tutti_clap_host::Result<()> {
     /// let transport = TransportInfo::new(SampleRate::SR_48K).with_tempo(Bpm::of(120.0));
     /// let midi = [(Offset::ZERO, midi::note_on(MidiChannel::FIRST, 60, 16384))];
@@ -161,36 +161,39 @@ impl ClapProcessor {
     /// ```
     pub fn process(
         &mut self,
-        buffer: &mut AudioBufferMut<'_, '_>,
+        buffer: &mut PluginAudio<'_>,
         ctx: &ClapProcessContext<'_>,
     ) -> Result<ProcessOutputRef<'_>> {
         let empty_params = ParameterChanges::new();
         let params = ctx.params.unwrap_or(&empty_params);
-        let (frames, audio) = match buffer {
-            AudioBufferMut::F32(b) => (
-                b.num_samples,
-                Planar::F32 {
-                    inputs: b.inputs,
-                    outputs: &mut *b.outputs,
-                },
-            ),
-            AudioBufferMut::F64(b) => (
-                b.num_samples,
-                Planar::F64 {
-                    inputs: b.inputs,
-                    outputs: &mut *b.outputs,
-                },
-            ),
-        };
-        self.process_impl(
-            audio,
-            frames,
-            ctx.midi,
-            params,
-            ctx.expressions,
-            ctx.transport,
-            ctx.transport_changes,
-        )
+        match buffer {
+            PluginAudio::F32(io) => {
+                let frames = io.frames();
+                let (inputs, outputs) = io.split();
+                self.process_impl(
+                    Planar::F32 { inputs, outputs },
+                    frames.0,
+                    ctx.midi,
+                    params,
+                    ctx.expressions,
+                    ctx.transport,
+                    ctx.transport_changes,
+                )
+            }
+            PluginAudio::F64(io) => {
+                let frames = io.frames();
+                let (inputs, outputs) = io.split();
+                self.process_impl(
+                    Planar::F64 { inputs, outputs },
+                    frames.0,
+                    ctx.midi,
+                    params,
+                    ctx.expressions,
+                    ctx.transport,
+                    ctx.transport_changes,
+                )
+            }
+        }
     }
 
     /// Parameter points the host sent past the room this instance was

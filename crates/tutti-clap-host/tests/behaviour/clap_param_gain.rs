@@ -39,8 +39,9 @@ use crate::support;
 use support::active::{Activate, Active, ActiveExt};
 use support::main_thread;
 
-use tutti_clap_host::{AudioBuffer32, ClapLoaded, ClapProcessContext, LoadOptions};
+use tutti_clap_host::{ClapLoaded, ClapProcessContext, LoadOptions};
 use tutti_clap_test_plugin::params_state::{GAIN_DB_MAX, GAIN_DB_MIN, GAIN_PARAM_ID};
+use tutti_plugin_types::PluginAudio;
 use tutti_plugin_types::{ParamId, ParameterChanges};
 
 const SAMPLE_RATE: f64 = 48_000.0;
@@ -180,12 +181,12 @@ fn drive(inst: &mut Active<f32>, params: &ParameterChanges) -> Vec<f32> {
     {
         let in_refs: Vec<&[f32]> = ins.iter().map(|v| v.as_slice()).collect();
         let mut out_refs: Vec<&mut [f32]> = outs.iter_mut().map(|v| v.as_mut_slice()).collect();
-        let mut buffer = AudioBuffer32 {
-            inputs: &in_refs,
-            outputs: &mut out_refs,
-            num_samples: FRAMES,
-            sample_rate: tutti_plugin_types::SampleRate::of(SAMPLE_RATE),
-        };
+        let mut buffer = PluginAudio::new(
+            tutti_plugin_types::Samples(in_refs[0].len()),
+            &in_refs,
+            &mut out_refs,
+        )
+        .expect("equal channels");
         let ctx = ClapProcessContext {
             params: Some(params),
             ..ClapProcessContext::default()

@@ -57,7 +57,7 @@ use tutti_types::{MAX_CHANNELS, SampleRate, Seconds, Tail};
 
 use super::design::{CROSSOVER, FdnControls, FdnLayout};
 use crate::reverb::network::{Absorption, Band, Matrix, Network, Stage};
-use crate::reverb::{CHUNK, ramp};
+use crate::reverb::{CHUNK, ramp, read, tail_of};
 use crate::{Glide, Ring, Steps, System, TAIL_FLOOR};
 
 /// How far a line's length moves in a chunk, in frames.
@@ -658,15 +658,6 @@ impl FdnBank {
     }
 }
 
-/// The tail a ring is, in whole frames at `rate`: unbounded when it never ends or is not a
-/// finite time.
-fn tail_of(ring: Ring, rate: SampleRate) -> Tail {
-    match ring {
-        Ring::Finite(s) if s.get().is_finite() => Tail::Finite(s.to_samples_ceil(rate)),
-        _ => Tail::Unbounded,
-    }
-}
-
 /// Sets the one-poles of `t` to the crossovers, in Hz, at `rate`, when they moved.
 fn set_poles(t: &mut Target, crossover: [f32; 2], rate: f64) {
     if crossover == t.crossover {
@@ -730,20 +721,6 @@ pub(crate) fn peak_response(g: [f32; 3], pole: [f32; 2]) -> f64 {
         peak = peak.max(libm::hypot(re, im));
     }
     peak
-}
-
-/// `buf[(w - delay) mod cap]` interpolated to a fractional `delay` of at least 0.
-#[inline]
-fn read(buf: &[f32], w: usize, delay: f32) -> f32 {
-    let cap = buf.len();
-    let whole = delay as usize;
-    let frac = delay - whole as f32;
-    let a = buf[(w + cap - whole) % cap];
-    if frac == 0.0 {
-        return a;
-    }
-    let b = buf[(w + cap - whole - 1) % cap];
-    crate::lerp(a, b, frac)
 }
 
 #[cfg(test)]
