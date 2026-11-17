@@ -134,7 +134,7 @@ mod routing;
 mod stage;
 mod stream;
 mod timer;
-pub use block_clock::{BlockClockReader, BlockReading, Playhead};
+pub use block_clock::{BlockClockReader, BlockDates, BlockReading, Playhead};
 pub use callback::{AudioCallbackState, MAX_FRAMES, OutputBlock, process_audio};
 pub use engine::{DEFAULT_BLOCK_CAPACITY, Engine, GraphEngineError};
 pub use faults::{

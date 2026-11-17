@@ -111,7 +111,7 @@ use tutti_graph::{
     TransportChanges, declick_frames,
 };
 
-use crate::block_clock::{BlockClock, BlockClockReader, Pose};
+use crate::block_clock::{BlockClock, BlockClockReader, BlockDates, DateKeeper, Pose};
 use crate::output::{DEFAULT_DEVICE_WIDTHS, OutputControl, OutputFolds};
 use crate::routing::StageTargets;
 use crate::stage::OutputStage;
@@ -242,6 +242,8 @@ struct GraphRender {
     /// frame clock: what a producer thread's `ClockMap` is fed
     /// ([`Engine::block_clock`]).
     clock: BlockClock,
+    /// What dates each call the clock publishes.
+    dates: DateKeeper,
     /// The root of the plan the last block rendered, for the control side to
     /// retire the older roots' folds by ([`OutputControl::reclaim`]).
     installed: Arc<AtomicU64>,
@@ -515,6 +517,7 @@ impl Engine {
                 playhead: Playhead::new(),
                 dropped_seen,
                 clock,
+                dates: DateKeeper::new(BlockDates::Os),
                 installed: Arc::clone(output.installed()),
                 stage: OutputStage::new(),
                 routing: RoutingRun {
@@ -534,6 +537,15 @@ impl Engine {
             folds,
             stage,
         })
+    }
+
+    /// Dates every render call by `dates` ([`BlockDates`]), where a new engine
+    /// dates them by the OS clock. For `Frames`, the origin is read here, so
+    /// call it as the engine is built, before its first block.
+    #[must_use]
+    pub fn block_dates(self, dates: BlockDates) -> Self {
+        self.graph.borrow_mut().dates = DateKeeper::new(dates);
+        self
     }
 
     /// Builds the fold from every root width into a device of `device`
@@ -709,7 +721,7 @@ impl Engine {
         let mut budget = Seconds(0.0);
         while done < frames {
             let (bound, rate) = g.settle();
-            let began = (done == 0).then(tutti_rt::monotonic_ns);
+            let began = (done == 0).then(|| g.dates.date(None));
             let len = (frames - done).min(bound);
             let t = g.transport.begin_block();
             if let Some(os_ns) = began {
@@ -747,6 +759,7 @@ impl Engine {
             self.hearing
                 .borrow_mut()
                 .write(&output[done * out_ch..(done + len) * out_ch], out_ch);
+            g.dates.advance(len, rate);
             done += len;
         }
         let mut load = self.load.borrow_mut();
@@ -822,7 +835,7 @@ impl Engine {
         let mut budget = Seconds(0.0);
         while done < frames {
             let (bound, rate) = g.settle();
-            let began = (done == 0).then(|| stamp.unwrap_or_else(tutti_rt::monotonic_ns));
+            let began = (done == 0).then(|| g.dates.date(stamp));
             let len = (frames - done).min(bound);
             let frame0 = g.exec.frame();
             let mut pieces = GraphPieces {
@@ -862,6 +875,7 @@ impl Engine {
             self.hearing
                 .borrow_mut()
                 .write(&output[done * out_ch..(done + len) * out_ch], out_ch);
+            g.dates.advance(len, rate);
             done += len;
         }
         let mut load = self.load.borrow_mut();

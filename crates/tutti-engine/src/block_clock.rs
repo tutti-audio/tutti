@@ -38,6 +38,77 @@ struct Wire {
     playing: u64,
 }
 
+/// What dates an [`Engine`](crate::Engine)'s render calls: the time
+/// [`BlockReading::os_ns`] and [`Playhead::at`] carry. Chosen when the engine
+/// is built.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum BlockDates {
+    /// Each call is dated by the OS clock, [`tutti_rt::monotonic_ns`], when it
+    /// begins (or by the instant a timer says it was due). What a device or a
+    /// timer renders by.
+    #[default]
+    Os,
+    /// Each call is dated by the frames rendered before it: call `n` begins at
+    /// the origin plus the sum, over the blocks before it, of each block's
+    /// frames over the rate in force for that block. The origin is the
+    /// [`tutti_rt::monotonic_ns`] reading when the engine is built, so the
+    /// dates stay on the OS scale and a re-rate between blocks moves nothing
+    /// already dated. No clock is read while rendering: the same renders
+    /// give the same dates.
+    ///
+    /// Everything that reads OS time from a block's date sees frame times from
+    /// the origin, not wall time: the clock map of a MIDI input places an
+    /// arrival (an `Instant` the device stamped) by it, MIDI output is
+    /// scheduled by it, and the playhead's extrapolated beat
+    /// ([`Playhead::beat_now`], `Session::beat_now`) is measured from it. A
+    /// reader that holds a real [`tutti_rt::monotonic_ns`] reading (a device's
+    /// arrival stamp, the `now` of `beat_now`) compares it with a date that
+    /// runs ahead of or behind the OS clock as fast as the render does, so
+    /// such a reading must itself be built from a date.
+    Frames,
+}
+
+/// The dating a [`BlockDates`] keeps while the engine renders.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum DateKeeper {
+    Os,
+    Frames {
+        origin: i64,
+        /// The nanoseconds of the frames rendered so far, each block's added
+        /// at its own rate.
+        elapsed_ns: f64,
+    },
+}
+
+impl DateKeeper {
+    /// Control side: reads the OS clock once for a `Frames` origin.
+    pub(crate) fn new(dates: BlockDates) -> Self {
+        match dates {
+            BlockDates::Os => Self::Os,
+            BlockDates::Frames => Self::Frames {
+                origin: tutti_rt::monotonic_ns(),
+                elapsed_ns: 0.0,
+            },
+        }
+    }
+
+    /// The date of a call beginning now; `due` is the instant a timer says it
+    /// was due, which only an OS-dated engine takes.
+    pub(crate) fn date(&self, due: Option<i64>) -> i64 {
+        match *self {
+            Self::Os => due.unwrap_or_else(tutti_rt::monotonic_ns),
+            Self::Frames { origin, elapsed_ns } => origin.saturating_add(elapsed_ns.round() as i64),
+        }
+    }
+
+    /// Counts `frames` rendered at `rate`.
+    pub(crate) fn advance(&mut self, frames: usize, rate: SampleRate) {
+        if let Self::Frames { elapsed_ns, .. } = self {
+            *elapsed_ns += Samples(frames).to_seconds(rate).get() * 1e9;
+        }
+    }
+}
+
 /// One render call's start: the OS monotonic time, the graph frame it began at
 /// and the rate that frame is counted at.
 #[derive(Clone, Copy, Debug, PartialEq)]
