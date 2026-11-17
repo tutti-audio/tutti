@@ -90,26 +90,10 @@ pub(crate) fn arrival_clock(
     std::sync::Arc::new(move || {
         let reading = clock.read()?;
         Some((
-            os_instant(reading.os_ns)?,
+            crate::os_clock::os_instant(reading.os_ns)?,
             tutti_types::Moment::new(reading.frame, reading.rate),
         ))
     })
-}
-
-/// The `Instant` of a reading of [`tutti_rt::monotonic_ns`]: the one pairing of
-/// the two clocks, read once per process, so the conversion is an offset.
-/// `None` where it is beyond what an `Instant` holds.
-fn os_instant(ns: i64) -> Option<Instant> {
-    use std::sync::OnceLock;
-    static PAIRING: OnceLock<(Instant, i64)> = OnceLock::new();
-    let (instant, base) = *PAIRING.get_or_init(|| (Instant::now(), tutti_rt::monotonic_ns()));
-    let delta = ns.saturating_sub(base);
-    let span = Duration::from_nanos(delta.unsigned_abs());
-    if delta >= 0 {
-        instant.checked_add(span)
-    } else {
-        instant.checked_sub(span)
-    }
 }
 
 /// What the session reads of the engine to time the outputs: its block
@@ -138,12 +122,12 @@ impl OutputClockSource {
         self.audio_latency.get()
     }
 
-    /// The timing of a drain now: the latest block's map, `Instant::now()` and
-    /// the terms as the device reports them.
-    fn timing(&self, latency: OutputLatency) -> OutputTiming {
+    /// The timing of a drain at `now`: the latest block's map, `now` and the
+    /// terms as the device reports them.
+    fn timing(&self, latency: OutputLatency, now: Instant) -> OutputTiming {
         OutputTiming {
             map: self.map(),
-            now: Instant::now(),
+            now,
             terms: OutputTerms {
                 audio_output: self.audio_output(),
                 latency,
@@ -157,7 +141,10 @@ impl OutputClockSource {
         let reading = self.clock.read()?;
         Some(ClockMap::new(
             reading.rate,
-            tutti_midi_runtime::ClockReading::new(os_instant(reading.os_ns)?, reading.frame),
+            tutti_midi_runtime::ClockReading::new(
+                crate::os_clock::os_instant(reading.os_ns)?,
+                reading.frame,
+            ),
         ))
     }
 }
@@ -926,11 +913,12 @@ impl MidiState {
         }
     }
 
-    /// The timing of a drain now, from the engine's block clock: `None` offline.
-    pub(crate) fn output_timing(&self) -> Option<OutputTiming> {
+    /// The timing of a drain at `now`, from the engine's block clock: `None`
+    /// offline.
+    pub(crate) fn output_timing(&self, now: Instant) -> Option<OutputTiming> {
         self.output_clock
             .as_ref()
-            .map(|source| source.timing(self.output_latency))
+            .map(|source| source.timing(self.output_latency, now))
     }
 
     /// Whether the session follows a live tempo now.
@@ -1017,7 +1005,7 @@ impl MidiState {
 
     /// Sends the Machine Control the transport's change since the last update
     /// calls for, to the output, at once and on the playhead's frame.
-    fn send_machine_control(&mut self, playhead: &tutti_engine::Playhead) {
+    fn send_machine_control(&mut self, playhead: &tutti_engine::Playhead, now: Instant) {
         let Some((group, sender)) = self.machine_out.as_mut() else {
             return;
         };
@@ -1041,7 +1029,7 @@ impl MidiState {
             return;
         };
         let batch: Vec<(Frame, Ump)> = packets.map(|ump| (frame, ump)).collect();
-        let timing = self.output_timing();
+        let timing = self.output_timing(now);
         // Every output is sent it, and counts what does not go.
         #[cfg(feature = "midi-hardware")]
         self.ports.route(&batch, timing.as_ref());
@@ -1060,8 +1048,8 @@ impl MidiState {
     /// readers and reopens those taps (and no other: a caller's own are the
     /// caller's). Whether any reopened; the graph is then edited and the next
     /// commit compiles the new taps.
-    pub(crate) fn follow_rate(&mut self, graph: &mut Graph) -> bool {
-        let timing = self.output_timing();
+    pub(crate) fn follow_rate(&mut self, graph: &mut Graph, now: Instant) -> bool {
+        let timing = self.output_timing(now);
         let sinks = self.sinks.reopen(graph, timing.as_ref());
         #[cfg(feature = "midi-hardware")]
         let ports = self.ports.reopen(graph, timing.as_ref());
@@ -1076,15 +1064,16 @@ impl MidiState {
         &mut self,
         graph: &mut Graph,
         playhead: &tutti_engine::Playhead,
+        now: Instant,
     ) -> bool {
         // A graph re-rated outside the device hook (`Graph::set_sample_rate`)
         // is followed here, before this update's events are read.
-        let mut edited = self.follow_rate(graph);
-        let timing = self.output_timing();
+        let mut edited = self.follow_rate(graph, now);
+        let timing = self.output_timing(now);
         edited |= self.sinks.drain(graph, timing.as_ref());
         #[cfg(feature = "midi-hardware")]
         self.ports.drain_outputs(timing.as_ref());
-        self.send_machine_control(playhead);
+        self.send_machine_control(playhead, now);
         edited
     }
 }
@@ -2389,12 +2378,14 @@ mod tests {
             panic!("not scheduled: {sends:?}")
         };
         assert_eq!(Some(first), timing.map.unwrap().os_at(Frame::new(1_000)));
+        // 1,000 frames at 48 kHz are 20.833 ms.
+        let spacing = Duration::from_secs_f64(1_000.0 / 48_000.0);
         for pair in sends.windows(2) {
             let (SendAt::At(a), SendAt::At(b)) = (pair[0], pair[1]) else {
                 panic!("not scheduled: {pair:?}")
             };
-            let gap = b.duration_since(a).as_secs_f64();
-            assert!((gap - 1_000.0 / 48_000.0).abs() < 1e-6, "{gap}");
+            let off = (b - a).abs_diff(spacing);
+            assert!(off < Duration::from_micros(1), "{:?} off", off);
         }
     }
 
@@ -2422,7 +2413,7 @@ mod tests {
             let (SendAt::At(a), SendAt::At(b)) = (a.send, b.send) else {
                 panic!("not scheduled")
             };
-            assert_eq!(b.duration_since(a), Duration::from_millis(30 - 5 + 250));
+            assert_eq!(b, a + Duration::from_millis(30 - 5 + 250));
         }
     }
 

@@ -38,14 +38,16 @@ fn keys(s: &mut Session) -> DeviceInfo {
         .expect("Keys is listed")
 }
 
-/// `n` events from the device before any block reads them.
+/// `n` events from the device before any block reads them, all stamped with
+/// the one reading of the clock, so they fall in one block whatever the load.
 fn push(fake: &FakeCounters, n: u64) {
+    let at = Instant::now();
     for i in 0..n {
         let ump = Ump::from(Message::midi2(
             MidiChannel::FIRST,
             Voice2::note_on(NoteNumber::of((i % 128) as u8), NoteVelocity::new(0x8000)),
         ));
-        let _ = fake.send_input(EndpointId::from_raw(u64::from(KEYS)), ump, Instant::now());
+        let _ = fake.send_input(EndpointId::from_raw(u64::from(KEYS)), ump, at);
     }
 }
 
@@ -103,8 +105,8 @@ fn the_lost_count_survives_an_unplug_and_keeps_counting_after_the_replug() {
     assert_eq!(s.midi_input(&"keys").unwrap().losses().lost, 2 * first);
 }
 
-/// `n` events from the device stamped ten seconds ahead, so they wait in the
-/// inlet's list for their frame.
+/// `n` events from the device stamped ten seconds ahead (one reading of the
+/// clock for all), so they wait in the inlet's list for their frame.
 fn push_ahead(fake: &FakeCounters, n: u64) {
     let at = Instant::now() + Duration::from_secs(10);
     for i in 0..n {

@@ -98,7 +98,10 @@ pub const PHASES: &[Phase] = &[
 /// What one phase reads besides the session.
 #[derive(Clone, Copy, Debug)]
 pub struct PhaseCx<'a> {
-    /// The time thresholds are measured on (a test passes its own).
+    /// The time thresholds are measured on (a test passes its own). On the OS
+    /// clock: it is also the time the MIDI outputs are drained at, which their
+    /// sends are timed against, so it may be stale by the phases that ran
+    /// before the drain.
     pub now: Instant,
     /// The host's modulation declarations and the resolver for its keys;
     /// `None`: the session's own ([`Session::mods_mut`]). Read by the
@@ -1172,7 +1175,10 @@ impl<C: Clock> Session<C> {
                 #[cfg(feature = "midi")]
                 {
                     let playhead = self.playhead();
-                    if self.midi_state.midi_out_phase(&mut self.graph, &playhead) {
+                    if self
+                        .midi_state
+                        .midi_out_phase(&mut self.graph, &playhead, cx.now)
+                    {
                         self.commit();
                     }
                 }
