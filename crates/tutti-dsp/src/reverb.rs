@@ -1,6 +1,6 @@
-//! The reverbs: their model, the [`Network`](network::Network), and the two
-//! designs over it, Freeverb and the feedback delay network, each a design and the
-//! bank that runs it.
+//! The reverbs: their model, the [`Network`](network::Network), and the three
+//! designs over it, Freeverb, the feedback delay network and the Dattorro plate, each a
+//! design and the bank that runs it.
 //!
 //! The model is a description, and each algorithm owns its realization: an engine that
 //! interpreted every [`Network`](network::Network) would fix one loop and one float order
@@ -14,6 +14,7 @@
 pub(crate) mod fdn;
 pub(crate) mod freeverb;
 pub(crate) mod network;
+pub(crate) mod plate;
 
 use tutti_types::{SampleRate, Tail};
 

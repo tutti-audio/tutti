@@ -52,7 +52,8 @@
 //!   second order.
 //! - **Reverb** — the reverb model, a `Network` with analytic queries
 //!   (RT60, tail, stability, densities), `FreeverbBank`, Freeverb's combs and
-//!   all-passes over buffers views, and `FdnBank`, the feedback delay network.
+//!   all-passes over buffers views, `FdnBank`, the feedback delay network, and `PlateBank`,
+//!   Dattorro's plate.
 //! - **Spatial** — vector base amplitude panning (`SpeakerLayout`, `VbapKernel`) and the
 //!   HRTF binaural convolver (`HrtfBinaural`).
 //! - **Resampling and dither** — `FftResampler` and `StreamingResampler` for export, and
@@ -254,6 +255,8 @@ pub use reverb::network::{
     LineModulation, MAX_CHANNELS, MAX_DENSE, MAX_LINES, MAX_STAGES, MAX_TAPS, Matrix, Network,
     NetworkCapacity, OutputMap, Stage, Tap, Taps, loop_gain, pre_delay_frames, rt60_from_gain,
 };
+pub use reverb::plate::bank::{PlateBank, PlateGlides};
+pub use reverb::plate::design::{MAX_PLATE_DECAY, PlateControls};
 pub use ring_mod::{RingModControls, RingModulator};
 pub use smoother::Smoother;
 pub use sos::{
