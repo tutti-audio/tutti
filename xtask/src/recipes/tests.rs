@@ -153,7 +153,8 @@ fn ci_runs_each_dependency_once() {
     assert_eq!(count("cargo fmt --all --check"), 1);
     // lint first, doc last, as the justfile's dependency list ran.
     assert_eq!(steps[0], "cargo fmt --all --check");
-    assert!(steps.last().unwrap().contains("--cfg docsrs"));
+    assert!(steps[steps.len() - 2].contains("--cfg docsrs"));
+    assert!(steps.last().unwrap().starts_with("umbrella-api: "));
     let deny = steps
         .iter()
         .position(|l| l.starts_with("cargo deny --version"))
@@ -265,7 +266,7 @@ fn deny_probes_cargo_deny_first() {
 #[test]
 fn doc_sets_rustdocflags_and_the_dated_nightly() {
     let s = dry("doc", &[]);
-    assert_eq!(s.len(), 6);
+    assert_eq!(s.len(), 7);
     assert!(s[0].starts_with("RUSTDOCFLAGS='-D warnings --document-private-items' cargo doc"));
     assert!(
         s[1].starts_with("RUSTDOCFLAGS='-D warnings --document-private-items' cargo doc")
@@ -281,6 +282,7 @@ fn doc_sets_rustdocflags_and_the_dated_nightly() {
     );
     assert!(s[4].starts_with("doc-features: cargo doc"), "{}", s[4]);
     assert!(s[5].contains("cargo +nightly-2026-10-14 doc"));
+    assert!(s[6].starts_with("umbrella-api: "), "{}", s[6]);
 }
 
 #[test]
@@ -450,19 +452,20 @@ fn public_api_lists_on_the_docs_nightly_or_diffs_from_a_base() {
     );
 }
 
-/// `umbrella-api` needs the docs nightly, so neither `gates` nor `ci` plans it.
+/// `umbrella-api` runs in `doc`, as CI's rustdoc job runs it, and so in `ci`;
+/// `gates` builds nothing and leaves it out.
 #[test]
-fn umbrella_api_is_a_local_recipe_outside_gates_and_ci() {
+fn umbrella_api_runs_in_doc_and_ci_not_gates() {
     let umbrella = |recipe: &str| {
         plan(recipe, &[], &ctx())
             .unwrap()
             .iter()
             .any(|s| matches!(s, Step::UmbrellaApi(_)))
     };
-    assert!(umbrella("umbrella-api"));
-    for recipe in ["gates", "ci"] {
-        assert!(!umbrella(recipe), "{recipe}");
+    for recipe in ["umbrella-api", "doc", "ci"] {
+        assert!(umbrella(recipe), "{recipe}");
     }
+    assert!(!umbrella("gates"));
 }
 
 #[test]
