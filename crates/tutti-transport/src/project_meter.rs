@@ -24,16 +24,42 @@
 
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 
-use tutti_rt::{ArcLend, LockExt, Reader};
+use tutti_rt::{Loan, LockExt, Publisher, Reader};
 use tutti_types::MeterMap;
 
 /// What a following node reads: the project's meter, or none (the node then
 /// reads 4/4 from bar 0).
-pub type MeterSlotCell = ArcLend<Option<Arc<MeterMap>>>;
+pub type MeterSlotCell = Publisher<Option<Arc<MeterMap>>>;
 
 /// A reader of a [`MeterSlotCell`]: what a following node lends through,
 /// once per block ([`MeterSlot::reader`]).
-pub type MeterSlotReader = Reader<Option<Arc<MeterMap>>>;
+///
+/// `Clone` registers a new reader on the same cell: it locks and may
+/// allocate, so clone on the control side, never on the audio thread.
+#[derive(Debug)]
+pub struct MeterSlotReader {
+    reader: Reader<Option<Arc<MeterMap>>>,
+    /// The cell `reader` is registered on: a clone registers through it.
+    cell: MeterSlotCell,
+}
+
+impl MeterSlotReader {
+    /// Borrows the slot's meter until the [`Loan`] drops. Wait-free; once per
+    /// block, never parked across blocks.
+    #[must_use = "a loan dropped at once reads nothing"]
+    pub fn lend(&mut self) -> Loan<'_, Option<Arc<MeterMap>>> {
+        self.reader.lend()
+    }
+}
+
+impl Clone for MeterSlotReader {
+    fn clone(&self) -> Self {
+        Self {
+            reader: self.cell.reader(),
+            cell: self.cell.clone(),
+        }
+    }
+}
 
 /// The project meter: the metronome's cell, and the slots that follow it.
 ///
@@ -46,18 +72,18 @@ pub struct ProjectMeter(Arc<ProjectInner>);
 struct ProjectInner {
     /// What the metronome reads once per block. Its identity is fixed for the
     /// meter's life, so a node reading it builds its reader once.
-    cell: Arc<ArcLend<MeterMap>>,
+    cell: Publisher<MeterMap>,
     /// The slots the meter is published to, and the lock that orders every
     /// publish into the cell and the followers. The audio thread never takes
     /// it. The meter last published is the cell's own
-    /// ([`ArcLend::current`]), read under this lock.
+    /// ([`Publisher::current`]), read under this lock.
     state: Mutex<ProjectState>,
 }
 
 struct ProjectState {
     /// Weak, so a slot whose node and handles are gone is dropped from the
     /// list at the next publish rather than kept alive by it.
-    followers: Vec<Weak<MeterSlotCell>>,
+    followers: Vec<Weak<SlotInner>>,
 }
 
 impl ProjectMeter {
@@ -65,7 +91,7 @@ impl ProjectMeter {
     #[must_use]
     pub fn new(meter: MeterMap) -> Self {
         Self(Arc::new(ProjectInner {
-            cell: Arc::new(ArcLend::new(meter)),
+            cell: Publisher::new(meter),
             state: Mutex::new(ProjectState {
                 followers: Vec::new(),
             }),
@@ -86,8 +112,8 @@ impl ProjectMeter {
         let mut state = self.state();
         self.0.cell.publish(Arc::clone(&meter));
         state.followers.retain(|follower| match follower.upgrade() {
-            Some(cell) => {
-                cell.publish(Arc::new(Some(Arc::clone(&meter))));
+            Some(slot) => {
+                slot.cell.publish(Arc::new(Some(Arc::clone(&meter))));
                 true
             }
             None => false,
@@ -104,8 +130,8 @@ impl ProjectMeter {
         let mut state = self.state();
         let mut pinned = self.0.cell.reclaim();
         state.followers.retain(|follower| match follower.upgrade() {
-            Some(cell) => {
-                pinned += cell.reclaim();
+            Some(slot) => {
+                pinned += slot.cell.reclaim();
                 true
             }
             None => false,
@@ -114,7 +140,7 @@ impl ProjectMeter {
     }
 
     /// The meter last published. Control side: the cell's own value as an
-    /// owning handle ([`ArcLend::current`]), never a lend.
+    /// owning handle ([`Publisher::current`]), never a lend.
     pub fn current(&self) -> Arc<MeterMap> {
         self.0.cell.current()
     }
@@ -133,12 +159,12 @@ impl ProjectMeter {
     /// Start publishing to `slot`, with the meter in force now. Idempotent:
     /// a slot already listed is listed once, so a re-follow of the same meter
     /// does not make each later `set_meter` publish into it twice.
-    fn attach(&self, slot: &Arc<MeterSlotCell>) {
+    fn attach(&self, slot: &Arc<SlotInner>) {
         let mut state = self.state();
         // Under the lock every `set_meter` publishes under, so the cell's
         // value is the latest and no `set_meter` can land between this read
         // and the slot being listed.
-        slot.publish(Some(self.0.cell.current()));
+        slot.cell.publish(Some(self.0.cell.current()));
         let me = Arc::downgrade(slot);
         state
             .followers
@@ -148,7 +174,7 @@ impl ProjectMeter {
 
     /// Stop publishing to `slot`, leaving what it holds: for a slot moving to
     /// another meter, whose `attach` replaces the value in one publish.
-    fn forget(&self, slot: &Arc<MeterSlotCell>) {
+    fn forget(&self, slot: &Arc<SlotInner>) {
         let mut state = self.state();
         let gone = Arc::downgrade(slot);
         state
@@ -193,7 +219,7 @@ impl std::fmt::Debug for ProjectMeter {
 pub struct MeterSlot(Arc<SlotInner>);
 
 struct SlotInner {
-    cell: Arc<MeterSlotCell>,
+    cell: MeterSlotCell,
     /// The project meter followed, for the control side
     /// ([`following`](MeterSlot::following)). The audio thread never takes
     /// this lock.
@@ -204,7 +230,7 @@ impl Default for MeterSlot {
     /// Following nothing.
     fn default() -> Self {
         Self(Arc::new(SlotInner {
-            cell: Arc::new(ArcLend::new(None)),
+            cell: Publisher::new(None),
             follows: Mutex::new(None),
         }))
     }
@@ -235,9 +261,9 @@ impl MeterSlot {
         if let Some(old) = follows.take()
             && !old.ptr_eq(&meter)
         {
-            old.forget(&self.0.cell);
+            old.forget(&self.0);
         }
-        meter.attach(&self.0.cell);
+        meter.attach(&self.0);
         *follows = Some(meter);
     }
 
@@ -246,7 +272,7 @@ impl MeterSlot {
     pub fn unfollow(&self) {
         let mut follows = self.follows();
         if let Some(old) = follows.take() {
-            old.forget(&self.0.cell);
+            old.forget(&self.0);
         }
         self.0.cell.publish(Arc::new(None));
     }
@@ -273,15 +299,18 @@ impl MeterSlot {
     }
 
     /// The cell the node reads, once per block.
-    pub fn cell(&self) -> Arc<MeterSlotCell> {
-        Arc::clone(&self.0.cell)
+    pub fn cell(&self) -> MeterSlotCell {
+        self.0.cell.clone()
     }
 
     /// A reader registered on [`cell`](Self::cell): what the node lends
     /// through, registered at its build. Control thread: registering may
     /// allocate.
     pub fn reader(&self) -> MeterSlotReader {
-        self.0.cell.reader()
+        MeterSlotReader {
+            reader: self.0.cell.reader(),
+            cell: self.0.cell.clone(),
+        }
     }
 }
 
@@ -334,7 +363,7 @@ mod tests {
     /// Not covered here: that a moved slot goes from the old meter's map to
     /// the new one's in one publish, never through `None`. The two would be
     /// consecutive publishes inside one `follow` call, which a reader on one
-    /// thread cannot land between, and `ArcLend` exposes no publish count; it
+    /// thread cannot land between, and `Publisher` exposes no publish count; it
     /// is kept by `follow` calling `forget` (which publishes nothing) rather
     /// than `unfollow`'s publish of `None`.
     #[test]
@@ -404,7 +433,7 @@ mod tests {
         let project = ProjectMeter::default();
         let kept = MeterSlot::following_meter(Some(project.clone()));
         let dropped = MeterSlot::following_meter(Some(project.clone()));
-        let weak = Arc::downgrade(&dropped.cell());
+        let weak = Arc::downgrade(&dropped.0);
         drop(dropped);
         assert!(weak.upgrade().is_none(), "the list holds no strong count");
         project.set_meter(meter_of(3));

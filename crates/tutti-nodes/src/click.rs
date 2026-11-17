@@ -33,7 +33,7 @@ use tutti_graph::{
     Cx, Env, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Node, NodeParts, Prepare,
     Shape, Status, declare_params,
 };
-use tutti_rt::{Reader, Setting, setting_word};
+use tutti_rt::{Loan, Reader, Setting, setting_word};
 use tutti_transport::{ProjectMeter, Transport};
 use tutti_types::AtomicF32;
 use tutti_types::{Amplitude, Beat, Hz, Phase, PhaseIncrement, Samples, Seconds};
@@ -104,7 +104,7 @@ pub struct ClickSettings {
     volume: AtomicF32,
     /// The project meter, driving both the click rate and the downbeat accent.
     ///
-    /// Published through an [`ArcLend`](tutti_rt::ArcLend) rather than a packed atomic because a
+    /// Published through a [`Publisher`](tutti_rt::Publisher) rather than a packed atomic because a
     /// [`MeterMap`] is a `Vec`, not a scalar. The node holds that cell itself
     /// (taken when it is built) and reads it once per block, never per
     /// sample; the control side reads the [`ProjectMeter`]'s own mirror.
@@ -228,7 +228,7 @@ pub type ClickState = ClickSettings;
 /// the count-in flag as it stood, sharing nothing with the live node.
 ///
 /// A clone reads the same settings and count-in flag, and its meter through
-/// a reader of its own: `Reader::clone` registers a new reader on the same
+/// a reader of its own: cloning registers a new reader on the same
 /// cell, so the clone and the original never share a reader slot.
 #[derive(Clone)]
 pub struct ClickNode {
@@ -237,7 +237,7 @@ pub struct ClickNode {
     /// when the node is built: the one cell the node reads the meter from,
     /// once per block. Never swapped: a node over other settings is built
     /// with [`over`](Self::over), which registers on that settings' cell.
-    meter: Reader<MeterMap>,
+    meter: MeterReader,
     /// The transport's count-in flag (`TransportSettings::in_preroll`), or a
     /// fork's own copy of it.
     preroll: Arc<AtomicBool>,
@@ -268,6 +268,34 @@ pub struct ClickNode {
     ///
     /// Meaningless while `last_click_onset` is `None`, and never read then.
     latched_until: Beat,
+}
+
+/// A reader of a project meter's cell that clones by registering another
+/// reader on the cell, so a clone of the node never shares a reader slot with
+/// the original. Cloning is a control-side call: it locks and may allocate.
+#[derive(Debug)]
+struct MeterReader {
+    reader: Reader<MeterMap>,
+    meter: ProjectMeter,
+}
+
+impl MeterReader {
+    fn new(meter: ProjectMeter) -> Self {
+        Self {
+            reader: meter.reader(),
+            meter,
+        }
+    }
+
+    fn lend(&mut self) -> Loan<'_, MeterMap> {
+        self.reader.lend()
+    }
+}
+
+impl Clone for MeterReader {
+    fn clone(&self) -> Self {
+        Self::new(self.meter.clone())
+    }
 }
 
 impl std::fmt::Debug for ClickNode {
@@ -301,7 +329,7 @@ impl ClickNode {
     /// there. Control thread: registering may allocate.
     fn over(settings: Arc<ClickSettings>, preroll: Arc<AtomicBool>) -> Self {
         Self {
-            meter: settings.meter.reader(),
+            meter: MeterReader::new(settings.meter.clone()),
             settings,
             preroll,
             sample_rate: None,

@@ -17,7 +17,7 @@ use super::loops::RingControl;
 use super::status::{StatusCell, StreamStatus};
 use crate::Loop;
 use crate::voice::Direction;
-use tutti_rt::ArcLend;
+use tutti_rt::Publisher;
 
 /// The way onto one streamer's command queue, cloned into every [`Stream`].
 ///
@@ -95,7 +95,7 @@ pub struct Stream {
     file: Arc<StreamFile>,
     /// The ring's published control: the loop as applied is read from it
     /// ([`StreamStatus::loop_`]).
-    control: Arc<ArcLend<RingControl>>,
+    control: Publisher<RingControl>,
     /// The loop as last set through this handle, whose send succeeded: the
     /// loop a caller asked for, which a voice's own record of its loop is
     /// kept equal to.
@@ -117,7 +117,7 @@ impl Stream {
         status: Arc<StatusCell>,
         cells: Arc<Cells>,
         file: Arc<StreamFile>,
-        control: Arc<ArcLend<RingControl>>,
+        control: Publisher<RingControl>,
     ) -> Self {
         Self {
             id,
@@ -269,13 +269,13 @@ impl Stream {
                 tutti_types::SampleRate::SR_48K,
                 None,
             )),
-            Arc::new(ArcLend::new(RingControl::new(
+            Publisher::new(RingControl::new(
                 super::loops::RingMap::plain(
                     super::loops::Arrangement::plain(tutti_types::Samples::new(0)),
                     0,
                 ),
                 None,
-            ))),
+            )),
         )
     }
 }

@@ -552,6 +552,16 @@ impl IMidiMappingTrait for Plugin {
     }
 }
 
+/// The default of a parameter VST3 lists: the program-change parameter selects the first
+/// program.
+fn default_of(id: u32) -> Option<f64> {
+    if id == core::PROGRAM {
+        Some(0.0)
+    } else {
+        core::default_of(id)
+    }
+}
+
 impl IUnitInfoTrait for Plugin {
     unsafe fn getUnitCount(&self) -> i32 {
         core::UNITS.len() as i32
@@ -567,7 +577,7 @@ impl IUnitInfoTrait for Plugin {
         info.id = id;
         info.parentUnitId = parent;
         put_wstring(name, &mut info.name);
-        info.programListId = if id == 1 {
+        info.programListId = if id == core::PROGRAM_UNIT {
             core::PROGRAM_LIST.0
         } else {
             kNoProgramListId
@@ -682,16 +692,16 @@ impl IEditControllerTrait for Plugin {
         kResultOk
     }
     unsafe fn getParameterCount(&self) -> i32 {
-        core::LISTED as i32
+        core::VST3_LISTED_IDS.len() as i32
     }
     unsafe fn getParameterInfo(&self, index: i32, info: *mut ParameterInfo) -> tresult {
         let Some(&id) = usize::try_from(index)
             .ok()
-            .and_then(|i| core::LISTED_IDS.get(i))
+            .and_then(|i| core::VST3_LISTED_IDS.get(i))
         else {
             return kInvalidArgument;
         };
-        let Some(default) = core::default_of(id) else {
+        let Some(default) = default_of(id) else {
             return kInvalidArgument;
         };
         // The id is the parameter's, not its position in the list.
@@ -706,25 +716,30 @@ impl IEditControllerTrait for Plugin {
             core::MODE => (core::MODES - 1) as i32,
             // A switch: two positions.
             core::BYPASS => 1,
+            core::PROGRAM => core::PROGRAM_LIST.2.len() as i32 - 1,
             _ => 0,
         };
         info.defaultNormalizedValue = default;
-        info.unitId = if index as u32 == core::AUX {
-            core::AUX_UNIT
-        } else {
-            0
+        info.unitId = match index as u32 {
+            core::AUX => core::AUX_UNIT,
+            core::PROGRAM => core::PROGRAM_UNIT,
+            _ => 0,
         };
         let can_automate: i32 = sdk(ParameterInfo_::ParameterFlags_::kCanAutomate);
         let is_bypass: i32 = sdk(ParameterInfo_::ParameterFlags_::kIsBypass);
+        let is_program_change: i32 = sdk(ParameterInfo_::ParameterFlags_::kIsProgramChange);
+        let is_list: i32 = sdk(ParameterInfo_::ParameterFlags_::kIsList);
+        let is_program = is_program_change | is_list;
         info.flags = match index as u32 {
             core::METER => sdk(ParameterInfo_::ParameterFlags_::kIsReadOnly),
             core::BYPASS => can_automate | is_bypass,
+            core::PROGRAM => can_automate | is_program,
             _ => can_automate,
         };
         kResultOk
     }
     unsafe fn getParamStringByValue(&self, id: u32, v: f64, s: *mut String128) -> tresult {
-        if core::default_of(id).is_none() {
+        if default_of(id).is_none() {
             return kInvalidArgument;
         }
         // SAFETY, for this function's `unsafe` blocks: `s` is a valid `String128` the host owns for the call.
@@ -732,7 +747,7 @@ impl IEditControllerTrait for Plugin {
         kResultOk
     }
     unsafe fn getParamValueByString(&self, id: u32, s: *mut TChar, v: *mut f64) -> tresult {
-        if core::default_of(id).is_none() {
+        if default_of(id).is_none() {
             return kInvalidArgument;
         }
         let mut units = Vec::new();
@@ -768,13 +783,16 @@ impl IEditControllerTrait for Plugin {
         }
     }
     unsafe fn getParamNormalized(&self, id: u32) -> f64 {
+        if id == core::PROGRAM {
+            return self.core.program_normalized();
+        }
         self.core.param(id).unwrap_or(0.0)
     }
     unsafe fn setParamNormalized(&self, id: u32, v: f64) -> tresult {
-        if core::default_of(id).is_none() {
+        if default_of(id).is_none() {
             return kInvalidArgument;
         }
-        self.core.set_param(id, v);
+        self.core.apply(id, v);
         kResultOk
     }
     unsafe fn setComponentHandler(&self, h: *mut IComponentHandler) -> tresult {

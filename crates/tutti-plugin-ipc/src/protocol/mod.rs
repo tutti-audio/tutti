@@ -1,8 +1,8 @@
 //! Wire format for the plugin bridge. Every type here is `Serialize +
 //! Deserialize` and flows between host and server process.
 //!
-//! Non-wire runtime types (`Sample`, `AudioBuffer<T>`, window handles)
-//! live in [`tutti_plugin_types`]. Host-local config lives
+//! Non-wire runtime types (`AudioBuffer<T>`, window handles) live in
+//! [`tutti_plugin_types`]. Host-local config lives
 //! in [`crate::config`].
 
 pub(crate) mod envelope;

@@ -9,7 +9,7 @@
 //!   and ragged device blocks;
 //! - `ClickNode`, reading its block's `Env`, clicks on the frames the beat
 //!   model reaches each beat on;
-//! - an offline render driven by `RenderClock::render_graph` hands the
+//! - an offline render driven by `render_graph` hands the
 //!   graph the transport a live graph engine hands it for the same timeline:
 //!   the `Env` per block.
 //!
@@ -21,6 +21,7 @@
 //! reads it through the same `f32` split.
 
 use std::sync::{Arc, Mutex};
+use tutti_buffers::{Planes, PlanesMut};
 use tutti_types::MaxBlock;
 
 use crate::support;
@@ -35,8 +36,8 @@ use tutti_graph::{
 use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_nodes::{ClickNode, ClickSettings, MetronomeMode};
 use tutti_transport::{
-    FadeOut, LoopEdit, MotionEvent, OfflineTimeline, OfflineTimelineConfig, RenderClock, Then,
-    Timeline, Transport, TransportCommand,
+    FadeOut, LoopEdit, MotionEvent, OfflineTimeline, OfflineTimelineConfig, Then, Timeline,
+    Transport, TransportCommand, render_graph,
 };
 use tutti_types::{
     Amplitude, At, Beat, Bpm, ChannelLayout, Frame, LoopRange, SampleRate, Samples, Tail,
@@ -422,7 +423,7 @@ fn env_graph(max_block: usize, log: &Arc<Mutex<Vec<Env>>>) -> (Editor, Executor)
 }
 
 /// An offline render from bar 2 (beat 4), at 100 BPM, looping beats 6–7,
-/// driven by `RenderClock::render_graph`, hands the graph the time a
+/// driven by `render_graph`, hands the graph the time a
 /// live graph engine hands it for the same timeline:
 ///
 /// **per block, the `Env`**: the same play state, tempo and loop, no
@@ -476,7 +477,12 @@ fn an_offline_render_sees_the_live_engine_transport() {
     let live_log = live_log.lock().expect("log");
     for env in live_log.iter() {
         let n = env.block_len.get();
-        timeline.render_graph(&mut exec, n, &[], &mut [&mut o1[..n]]);
+        render_graph(
+            &*timeline,
+            &mut exec,
+            Planes::default(),
+            PlanesMut::new(&mut [&mut o1[..n]]).unwrap(),
+        );
     }
     let off_log = off_log.lock().expect("log");
 
@@ -529,7 +535,12 @@ fn the_offline_env_walk_starts_each_block_on_the_timeline() {
     let mut at = 0;
     for n in [512usize, 300, 77, 512, 1, 200] {
         let start = timeline.beat();
-        timeline.render_graph(&mut exec, n, &[], &mut [&mut out[..n]]);
+        render_graph(
+            &timeline,
+            &mut exec,
+            Planes::default(),
+            PlanesMut::new(&mut [&mut out[..n]]).unwrap(),
+        );
         let log = log.lock().expect("log");
         let split = (start.floor().get() as f32, start.fract().get() as f32);
         assert_eq!(log[at], split, "block starting at frame {at}");

@@ -15,7 +15,7 @@
 //! *frees* a retired non-scalar value (a `MeterMap`, a routing table). That
 //! property is carried by the type — `Reader::lend` returns a `Loan`, a
 //! `!Send` borrow tied to the reader's lifetime, so there is no owning handle for
-//! the callback to be left holding — and by `ArcLend`'s reclamation protocol,
+//! the callback to be left holding — and by `Publisher`'s reclamation protocol,
 //! whose reader side has no path to a destructor. It cannot be pinned by a
 //! no-alloc gate here: the hazard is a race, and a sampling schedule cannot
 //! exhaust one; a test that tried would pass while asserting a property it
@@ -445,13 +445,13 @@ fn the_heard_tap_is_allocation_free() {
 /// inside blocks, so both walk several segments per block. Neither segment
 /// walk nor the click's meter read allocates.
 ///
-/// The meter read goes through an [`ArcLend`]: a slot CAS, a fence and a
+/// The meter read goes through a [`Publisher`]: a slot CAS, a fence and a
 /// load, not an allocation — but that is a claim about another crate's
 /// internals, so it is pinned here rather than reasoned about. The click
 /// must be *sounding* for it to count: a gated-off metronome returns before
 /// touching the meter, hence the `clicked` check.
 ///
-/// [`ArcLend`]: tutti_rt::ArcLend
+/// [`Publisher`]: tutti_rt::Publisher
 #[test]
 fn graph_engine_with_env_clock_and_metronome_is_allocation_free() {
     use tutti_graph::NodeKey;

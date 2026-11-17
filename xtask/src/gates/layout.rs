@@ -124,7 +124,13 @@ const ONLY: &[(&str, &[&str])] = &[
     ),
     (
         "tutti-transport",
-        &["tutti-types", "tutti-rt", "tutti-graph", "tutti-tempo"],
+        &[
+            "tutti-types",
+            "tutti-buffers",
+            "tutti-rt",
+            "tutti-graph",
+            "tutti-tempo",
+        ],
     ),
     (
         "tutti-plugin-db",
@@ -134,6 +140,7 @@ const ONLY: &[(&str, &[&str])] = &[
         "tutti-plugin-ipc",
         &[
             "tutti-types",
+            "tutti-buffers",
             "tutti-rt",
             "tutti-ump",
             "tutti-plugin-types",
@@ -159,6 +166,7 @@ const ONLY: &[(&str, &[&str])] = &[
     (
         "tutti-plugin-server",
         &[
+            "tutti-buffers",
             "tutti-plugin-ipc",
             "tutti-plugin-ipc-ffi",
             "tutti-plugin-types",

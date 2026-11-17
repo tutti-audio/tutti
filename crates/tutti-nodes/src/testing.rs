@@ -395,6 +395,7 @@ impl Node for Sink {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tutti_buffers::Planes;
     use tutti_graph::Solo;
     use tutti_types::MaxBlock;
     use tutti_types::Samples;
@@ -495,12 +496,12 @@ mod tests {
 
         let through = Through::new(ChannelLayout::STEREO);
         assert_eq!(width(through.shape()), (2, 2));
-        let out = solo(through, sr, 8).render_input(&[&ramp, &neg]);
+        let out = solo(through, sr, 8).render_input(Planes::new(&[&ramp, &neg]).unwrap());
         assert_eq!(out, vec![ramp.clone(), neg]);
 
         let split = Split::new(ChannelLayout::QUAD);
         assert_eq!(width(split.shape()), (1, 4));
-        let out = solo(split, sr, 8).render_input(&[&ramp]);
+        let out = solo(split, sr, 8).render_input(Planes::new(&[&ramp]).unwrap());
         for (c, ch) in out.iter().enumerate() {
             assert_eq!(ch[5], 5.0, "split channel {c}");
         }

@@ -42,6 +42,8 @@ tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false
 tutti-voicing = { version = "0.0.1", path = "../tutti-voicing" }
 
 [dev-dependencies]
+# The buffer views `Renderer::render_input` takes.
+tutti-buffers = { path = "../tutti-buffers" }
 # The filter nodes the bank is compared against (`bank.rs`), and the mixing and
 # lane nodes of the integration tests.
 tutti-nodes = { path = "../tutti-nodes", default-features = false, features = ["testing"] }

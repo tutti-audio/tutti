@@ -10,6 +10,7 @@
 
 use crate::clap_probe;
 use clap_probe::{ProbeEnv, load_probe, render};
+use tutti_buffers::{Planes, PlanesMut};
 use tutti_fixtures::machine_lock;
 use tutti_graph::Exponent;
 use tutti_types::MaxBlock;
@@ -24,7 +25,7 @@ use tutti_graph::{
 use tutti_graph::{OutPort, Source};
 use tutti_modulation::ControlProgram;
 use tutti_nodes::automation::{Breakpoint, ControlLaneNode, Curve, Trajectory};
-use tutti_transport::{OfflineTimeline, OfflineTimelineConfig, RenderClock};
+use tutti_transport::{OfflineTimeline, OfflineTimelineConfig, render_graph};
 use tutti_types::{At, Frame};
 use tutti_types::{Beat, SampleRate, Samples};
 
@@ -101,7 +102,12 @@ fn automation_reaches_the_plugin_through_its_event_input() {
 
     let mut block = vec![0.0f32; BLOCK];
     for _ in 0..8 {
-        timeline.render_graph(&mut fork_exec, BLOCK, &[], &mut [&mut block[..]]);
+        render_graph(
+            &*timeline,
+            &mut fork_exec,
+            Planes::default(),
+            PlanesMut::new(&mut [&mut block[..]]).unwrap(),
+        );
     }
     let last = *block.last().expect("rendered");
     assert!(
@@ -182,7 +188,12 @@ fn render_gain(
     let mut out = Vec::new();
     let mut block = vec![0.0f32; BLOCK];
     for _ in 0..blocks {
-        timeline.render_graph(&mut fork_exec, BLOCK, &[], &mut [&mut block[..]]);
+        render_graph(
+            &*timeline,
+            &mut fork_exec,
+            Planes::default(),
+            PlanesMut::new(&mut [&mut block[..]]).unwrap(),
+        );
         fork_ed.collect();
         out.extend_from_slice(&block);
     }

@@ -13,7 +13,7 @@
 //!   (`Source::Lfo`, `Macro`, `Follower`, `NoteEnvelope`), routes (`RouteDecl`,
 //!   to a param or to another route's depth) and targets (`TargetDecl`: range
 //!   and automation) in, a `Compiled` out. Pure: no clock, no state, no
-//!   `ArcLend`. Equal declarations compile equal, so a host republishes only
+//!   `Publisher`. Equal declarations compile equal, so a host republishes only
 //!   the programs that changed. Refusals are by name (`CompileError`).
 //! - **The program.** `ControlProgram`: automation (which replaces the knob
 //!   where it has a value) plus time-function layers and event-input layers

@@ -9,6 +9,7 @@ use crate::node::Shape;
 use crate::param::ParamIn;
 use crate::spec::{EventEdge, EventIn, EventOut};
 use crate::{Edge, EdgeId, FeedbackFrom, NodeKey, Sink, Source};
+use tutti_buffers::Float;
 
 /// A unit placed at a key, and what the placement left unwired.
 ///
@@ -64,7 +65,7 @@ impl Unwired {
     }
 }
 
-impl Editor {
+impl<F: Float> Editor<F> {
     /// Removes every record of `key`'s wiring that names a port `shape`
     /// lacks, and returns what went.
     pub(super) fn unwire(&mut self, key: NodeKey, shape: &Shape) -> Unwired {
