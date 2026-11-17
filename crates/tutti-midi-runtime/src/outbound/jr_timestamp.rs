@@ -40,10 +40,8 @@ pub struct JrClock {
 
 impl JrClock {
     /// A clock for a stream running at `sample_rate` Hz.
-    pub fn new(sample_rate: impl Into<SampleRate>) -> Self {
-        Self {
-            sample_rate: sample_rate.into(),
-        }
+    pub fn new(sample_rate: SampleRate) -> Self {
+        Self { sample_rate }
     }
 
     /// The 16-bit JR tick a frame maps to (wrapping at 0x1_0000). A whole
@@ -62,7 +60,7 @@ impl JrClock {
 /// to the block it's given); carry a running sample origin in the caller if you
 /// need cross-block continuity.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct JrStamper {
+pub(crate) struct JrStamper {
     clock: JrClock,
 }
 
@@ -72,7 +70,7 @@ impl JrStamper {
     /// There is no group: JR Timestamps are utility messages, which M2-104-UM
     /// §2.1.2 defines as groupless — a stamp applies to the stream, not to one
     /// group within it.
-    pub fn new(sample_rate: impl Into<SampleRate>) -> Self {
+    pub fn new(sample_rate: SampleRate) -> Self {
         Self {
             clock: JrClock::new(sample_rate),
         }
@@ -90,10 +88,10 @@ impl JrStamper {
     /// Clock ahead of the events and then calls this, so clearing here would
     /// drop it — the caller that owns the buffer is the one that clears it.
     ///
-    /// Takes a buffer rather than returning a `Vec` because stamping is a
-    /// per-block operation whose consumers hand the result straight to
-    /// `MidiOut::queue` as a slice. Returning one allocated on every block for a
-    /// value nobody keeps.
+    /// Takes a buffer rather than returning a `Vec`: stamping runs once per
+    /// block and its consumers hand the result straight to `MidiOut::queue` as
+    /// a slice, so a returned `Vec` would allocate every block for a value
+    /// nobody keeps.
     pub(crate) fn stamp_block(&self, events: &[UmpAt], origin: Frame, out: &mut Vec<UmpAt>) {
         out.reserve(events.len() * 2);
         for ev in events {
@@ -120,15 +118,14 @@ impl JrStamper {
 
 /// The spec's hard ceiling on the JR Clock interval: M2-104 §7.2.2.1: a Sender sends a JR Clock
 /// message at least once every 250 milliseconds.
-pub const JR_CLOCK_MAX_INTERVAL: Duration = Duration::from_millis(250);
+pub(crate) const JR_CLOCK_MAX_INTERVAL: Duration = Duration::from_millis(250);
 
 /// The interval [`JrClockEmitter::new`] actually uses.
 ///
-/// Deliberately well inside the 250 ms ceiling. §7.2.2.1 ties the bound to the
-/// 16-bit wrap (2.09712 seconds) and also allows a shorter period, which
-/// helps the Receiver analyze jitter. Emitting at the
-/// ceiling would leave no margin for a late block to push an interval past it.
-pub const JR_CLOCK_INTERVAL: Duration = Duration::from_millis(100);
+/// Well inside the 250 ms ceiling, so a late block cannot push an interval
+/// past it. §7.2.2.1 ties the bound to the 16-bit wrap (2.09712 seconds) and
+/// also allows a shorter period, which helps the Receiver analyze jitter.
+pub(crate) const JR_CLOCK_INTERVAL: Duration = Duration::from_millis(100);
 
 /// Emits JR Clock messages on a cadence (M2-104 §7.2.2.1).
 ///
@@ -141,7 +138,7 @@ pub const JR_CLOCK_INTERVAL: Duration = Duration::from_millis(100);
 /// stream it clocks and is deterministic under test. The emitter is pure: ask it
 /// [`due`](Self::due) for each block and it tells you whether one is owed.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct JrClockEmitter {
+pub(crate) struct JrClockEmitter {
     clock: JrClock,
     sample_rate: SampleRate,
     /// The configured period, which [`interval`](Self::interval) counts in
@@ -156,7 +153,7 @@ pub struct JrClockEmitter {
 
 impl JrClockEmitter {
     /// An emitter at `sample_rate` Hz using [`JR_CLOCK_INTERVAL`].
-    pub fn new(sample_rate: impl Into<SampleRate>) -> Self {
+    pub fn new(sample_rate: SampleRate) -> Self {
         Self::with_interval(sample_rate, JR_CLOCK_INTERVAL)
     }
 
@@ -167,12 +164,11 @@ impl JrClockEmitter {
     /// Panics if `interval` exceeds [`JR_CLOCK_MAX_INTERVAL`]: M2-104 §7.2.2.1 makes
     /// that bound a `shall`, so a longer interval is not a tuning choice, it is
     /// a non-conformant stream. Catching it here beats shipping one.
-    pub(crate) fn with_interval(sample_rate: impl Into<SampleRate>, interval: Duration) -> Self {
+    pub(crate) fn with_interval(sample_rate: SampleRate, interval: Duration) -> Self {
         assert!(
             interval <= JR_CLOCK_MAX_INTERVAL,
             "JR Clock interval {interval:?} exceeds the §7.2.2.1 maximum of {JR_CLOCK_MAX_INTERVAL:?}"
         );
-        let sample_rate = sample_rate.into();
         Self {
             clock: JrClock::new(sample_rate),
             sample_rate,
@@ -197,16 +193,6 @@ impl JrClockEmitter {
         }
         self.last_emit = Some(origin);
         Some(Message::Utility(Utility::JrClock(self.clock.ticks_at(origin))).into())
-    }
-
-    /// The configured interval, in frames.
-    pub fn interval(&self) -> Samples {
-        self.interval
-    }
-
-    /// The sample rate this emitter clocks at.
-    pub fn sample_rate(&self) -> SampleRate {
-        self.sample_rate
     }
 }
 
@@ -233,7 +219,7 @@ impl JrStream {
     ///
     /// Stamps only. Use [`with_clock`](Self::with_clock) for a conformant
     /// sender: §7.2.2.3 makes a receiver ignore timestamps it has no clock for.
-    pub fn new(sample_rate: impl Into<SampleRate>) -> Self {
+    pub fn new(sample_rate: SampleRate) -> Self {
         Self::with_stamper(JrStamper::new(sample_rate))
     }
 
@@ -253,7 +239,7 @@ impl JrStream {
     /// where one is due — including blocks with no events at all, which is why
     /// the cadence cannot ride on [`stamp`](Self::stamp) alone.
     #[must_use]
-    pub fn with_clock(mut self, sample_rate: impl Into<SampleRate>) -> Self {
+    pub fn with_clock(mut self, sample_rate: SampleRate) -> Self {
         self.emitter = Some(JrClockEmitter::new(sample_rate));
         self
     }
@@ -298,8 +284,7 @@ impl JrStream {
     /// interval is its period counted again at `sample_rate`. JR time carries on
     /// from where it stood, within half a frame, when the graph is re-rated.
     #[must_use]
-    pub fn at_rate(self, sample_rate: impl Into<SampleRate>) -> Self {
-        let sample_rate = sample_rate.into();
+    pub fn at_rate(self, sample_rate: SampleRate) -> Self {
         let old = self.stamper.clock.sample_rate;
         let convert = |frame: Frame| {
             Frame::new((frame.get() as f64 * sample_rate.get() / old.get()).round() as u64)

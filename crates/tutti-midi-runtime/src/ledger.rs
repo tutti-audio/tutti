@@ -28,11 +28,8 @@
 //! that is given back when the off goes out. The count per key saturates at
 //! 255.
 //!
-//! The ledger answers which notes a node has started and not ended on its own
-//! port and what the port owes. It is not `tutti-voicing`'s `Holds` (why one
-//! voice is still sounding) and not the graph executor's per-edge table of
-//! the keys an event output port carries (which lets an edge that ends close
-//! them): the three have different owners, keys and failure modes.
+//! The ledger holds which notes a node has started and not ended on its own
+//! port, and what the port owes.
 //!
 //! The table holds at most its capacity in keys, held or refused. A note-on
 //! that finds it full is withheld and counted ([`EventWriter::withhold`])
