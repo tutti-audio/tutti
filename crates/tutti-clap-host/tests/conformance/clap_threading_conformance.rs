@@ -34,6 +34,7 @@
 
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
+use tutti_rt::LockExt;
 
 use crate::support;
 use support::active::{Activate, Active, ActiveExt, drive_block};
@@ -66,7 +67,7 @@ struct Probe {
 impl Probe {
     /// Take the lock and clear the plugin's recorded sites and counters.
     fn acquire() -> Self {
-        let lock = PROBE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let lock = PROBE_LOCK.lock_recover();
         thread_reset();
         Probe { _lock: lock }
     }

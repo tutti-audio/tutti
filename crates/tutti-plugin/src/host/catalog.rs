@@ -64,6 +64,7 @@ use tutti_plugin_db::{
 use tutti_plugin_ipc::CatalogConfig;
 use tutti_plugin_types::{BridgeError, BridgeResult};
 use tutti_plugin_types::{PluginDescriptor, PluginId};
+use tutti_rt::LockExt;
 
 /// Why the persistence a catalog was given could not store the database.
 ///
@@ -135,7 +136,7 @@ fn persist_unattended(
     db: &PluginDb,
 ) -> Result<(), String> {
     let outcome = persist(db);
-    let mut slot = unreported.lock().unwrap_or_else(PoisonError::into_inner);
+    let mut slot = unreported.lock_recover();
     match outcome {
         Ok(()) => {
             *slot = None;
@@ -468,10 +469,7 @@ impl Catalog {
         {
             let panicked = PersistError::new("the persistence panicked");
             tracing::warn!("{panicked}");
-            *self
-                .unreported
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner) = Some(panicked);
+            *self.unreported.lock_recover() = Some(panicked);
         }
     }
 
@@ -483,10 +481,7 @@ impl Catalog {
     /// flight.
     pub fn take_persist_error(&mut self) -> Option<PersistError> {
         self.finish_pending_save();
-        self.unreported
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take()
+        self.unreported.lock_recover().take()
     }
 
     /// Iterates the refs and descriptors of all non-blacklisted plugins.
@@ -703,10 +698,7 @@ impl Catalog {
         self.finish_pending_save();
         let outcome = (self.persist)(&self.db);
         if outcome.is_ok() {
-            *self
-                .unreported
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner) = None;
+            *self.unreported.lock_recover() = None;
         }
         outcome
     }

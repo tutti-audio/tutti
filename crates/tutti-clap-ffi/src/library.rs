@@ -6,6 +6,7 @@ use std::ffi::{CString, c_char};
 use std::mem::ManuallyDrop;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
+use tutti_rt::LockExt;
 
 use clap_sys::entry::clap_plugin_entry;
 use clap_sys::factory::plugin_factory::{CLAP_PLUGIN_FACTORY_ID, clap_plugin_factory};
@@ -187,7 +188,7 @@ type Registry = Option<HashMap<PathBuf, Weak<LiveEntry>>>;
 /// The registry, locked. A poisoned lock is taken as is: the map is only
 /// ever inserted into, so a panicking holder left it consistent.
 fn registry() -> MutexGuard<'static, Registry> {
-    ENTRY_REGISTRY.lock().unwrap_or_else(|e| e.into_inner())
+    ENTRY_REGISTRY.lock_recover()
 }
 
 /// Liveness token of one initialised entry: its existence proves the image

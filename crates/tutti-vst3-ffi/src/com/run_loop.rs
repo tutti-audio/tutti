@@ -39,6 +39,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tutti_plugin_types::{FdId, Interest, MainThreadMarker, Ready, Wakeups};
+use tutti_rt::LockExt;
 
 use vst3::ComRef;
 use vst3::Steinberg::Linux::{
@@ -176,7 +177,7 @@ impl RunLoop {
     }
 
     fn state(&self) -> std::sync::MutexGuard<'_, State> {
-        self.state.lock().unwrap_or_else(|p| p.into_inner())
+        self.state.lock_recover()
     }
 
     /// Whether the handler recorded in `due` is still registered.

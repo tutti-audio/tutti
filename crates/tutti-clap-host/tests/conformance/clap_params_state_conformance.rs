@@ -23,6 +23,7 @@
 
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
+use tutti_rt::LockExt;
 
 use crate::support;
 use support::active::{Activate, Active, ActiveExt, drive_block};
@@ -71,7 +72,7 @@ impl Probe {
     /// Take the lock and clear the probe's capture, restoring every parameter to
     /// its declared default.
     fn acquire() -> Self {
-        let lock = PROBE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let lock = PROBE_LOCK.lock_recover();
         param_reset();
         Probe { _lock: lock }
     }

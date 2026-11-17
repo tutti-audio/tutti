@@ -5,6 +5,7 @@
 use std::ffi::{CStr, c_char, c_void};
 use std::ptr;
 use std::sync::Mutex;
+use tutti_rt::LockExt;
 
 use clap_sys::audio_buffer::clap_audio_buffer;
 use clap_sys::entry::clap_plugin_entry;
@@ -558,11 +559,8 @@ unsafe extern "C" fn destroy(p: *const clap_plugin) {
 unsafe extern "C" fn activate(p: *const clap_plugin, rate: f64, _min: u32, max: u32) -> bool {
     // SAFETY, for this function's `unsafe` blocks: the host passes the plugin this file created (`plugin_data` is its `Inst`), valid until `destroy`.
     let me = unsafe { inst(p) };
-    me.core.prepare(
-        &mut me.dsp.lock().unwrap_or_else(|e| e.into_inner()),
-        rate,
-        max as usize,
-    );
+    me.core
+        .prepare(&mut me.dsp.lock_recover(), rate, max as usize);
     true
 }
 unsafe extern "C" fn deactivate(_p: *const clap_plugin) {}
@@ -573,8 +571,7 @@ unsafe extern "C" fn stop_processing(_p: *const clap_plugin) {}
 unsafe extern "C" fn reset(p: *const clap_plugin) {
     // SAFETY, for this function's `unsafe` blocks: the host passes the plugin this file created (`plugin_data` is its `Inst`), valid until `destroy`.
     let me = unsafe { inst(p) };
-    me.core
-        .reset(&mut me.dsp.lock().unwrap_or_else(|e| e.into_inner()));
+    me.core.reset(&mut me.dsp.lock_recover());
 }
 
 unsafe fn run<S: Sample>(
@@ -627,7 +624,7 @@ unsafe extern "C" fn process(
     if p.audio_inputs_count == 0 || p.audio_outputs_count == 0 {
         return CLAP_PROCESS_ERROR;
     }
-    let mut guard = me.dsp.lock().unwrap_or_else(|e| e.into_inner());
+    let mut guard = me.dsp.lock_recover();
     let dsp = &mut *guard;
     unsafe { report_gesture(me, p.out_events) };
     if let Some(t) = unsafe { p.transport.as_ref() } {

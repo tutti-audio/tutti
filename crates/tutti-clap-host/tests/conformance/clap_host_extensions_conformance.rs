@@ -8,6 +8,7 @@
 
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
+use tutti_rt::LockExt;
 
 use crate::support;
 use support::active::{Activate, Active, ActiveExt, drive_block};
@@ -47,7 +48,7 @@ struct Probe {
 
 impl Probe {
     fn acquire() -> Self {
-        let lock = PROBE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let lock = PROBE_LOCK.lock_recover();
         call::<unsafe extern "C" fn()>(b"tutti_test_plugin_hostext_reset\0", |f| unsafe { f() });
         Probe { _lock: lock }
     }

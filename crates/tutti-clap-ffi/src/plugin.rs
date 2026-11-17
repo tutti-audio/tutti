@@ -53,6 +53,7 @@ use std::ptr::{self, NonNull};
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use tutti_rt::LockExt;
 
 use clap_sys::ext::ambisonic::{
     CLAP_EXT_AMBISONIC, CLAP_EXT_AMBISONIC_COMPAT, clap_plugin_ambisonic,
@@ -498,7 +499,7 @@ impl Plugin {
         if !unsafe { activate(self.core.raw(), sample_rate, min_frames, max_frames) } {
             return Err(ActivateError::Refused);
         }
-        *self.core.layout.lock().unwrap_or_else(|p| p.into_inner()) = Arc::new(layout);
+        *self.core.layout.lock_recover() = Arc::new(layout);
         self.core.min_frames.store(min_frames, Ordering::Release);
         self.core.max_frames.store(max_frames, Ordering::Release);
         self.core.active.store(true, Ordering::Release);
@@ -558,7 +559,7 @@ impl Plugin {
     /// The audio half of the current activation, `None` if inactive.
     #[must_use]
     pub fn audio_side(&self) -> Option<crate::AudioSide> {
-        let layout = Arc::clone(&self.core.layout.lock().unwrap_or_else(|p| p.into_inner()));
+        let layout = Arc::clone(&self.core.layout.lock_recover());
         self.is_active()
             .then(|| crate::AudioSide::new(Arc::clone(&self.core), layout))
     }
