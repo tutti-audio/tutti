@@ -1386,8 +1386,10 @@ impl<F: Float> Reference<F> {
             for e in &mut all {
                 e.offset = e.offset.clamp_to(frames);
             }
-            // What the edges send, in merge order: bounded by the node's
-            // declared input capacity before the other sources join it.
+
+            // What the edges send, in merge order: the merge slot holds at
+            // most the node's declared input capacity, whatever the node
+            // later does with its events.
             let mut edges: Vec<Event> = Vec::new();
             // Source order is `(NodeKey, port)` of the source, whatever order
             // the spec lists them in: re-keyed by source here, where the
@@ -1417,7 +1419,7 @@ impl<F: Float> Reference<F> {
             }
             edges.sort_by_key(|e| e.offset);
             if let Some(n) = shape.event_input_capacity {
-                self.dropped += bound_events(&mut edges, n.get() as usize);
+                self.dropped += bound_inputs(std::slice::from_mut(&mut edges), n.get() as usize);
             }
             all.extend(edges);
             // Stable: equal offsets keep source order.
@@ -1484,10 +1486,13 @@ impl<F: Float> Reference<F> {
                     *held = RefHeld::default();
                 }
             } else {
+                self.dropped += bound_all(&mut ev_ins, shape.event_input_capacity);
                 for (held, events) in m.held_in.iter_mut().zip(&ev_ins) {
                     held.observe(events);
                 }
             }
+        } else {
+            self.dropped += bound_all(&mut ev_ins, shape.event_input_capacity);
         }
         let cx = Cx {
             env,
@@ -2716,18 +2721,31 @@ fn fifo_due(f: &mut RefFifo, frames: usize) -> Vec<Event> {
         .collect()
 }
 
-/// Cuts `events` (in merge order) to `cap`, dropping the latest: every
-/// note-off is kept ahead of any other event while there is room, as the
-/// executor's merge does. Returns how many it dropped.
-fn bound_events(events: &mut Vec<Event>, cap: usize) -> u64 {
-    if events.len() <= cap {
+/// [`bound_inputs`] under a declared bound, if any.
+fn bound_all(ports: &mut [Vec<Event>], cap: Option<std::num::NonZeroU32>) -> u64 {
+    cap.map_or(0, |n| bound_inputs(ports, n.get() as usize))
+}
+
+/// Cuts the event inputs `ports` (each sorted by offset) together to the
+/// earliest `cap` by `(offset, port)`, dropping the
+/// latest: every note-off is kept ahead of any other event while there is
+/// room. Returns how many it dropped.
+fn bound_inputs(ports: &mut [Vec<Event>], cap: usize) -> u64 {
+    let mut ranked: Vec<(usize, Event)> = ports
+        .iter()
+        .enumerate()
+        .flat_map(|(p, evs)| evs.iter().map(move |&e| (p, e)))
+        .collect();
+    if ranked.len() <= cap {
         return 0;
     }
-    let before = events.len();
-    let offs = events.iter().filter(|e| e.is_note_off()).count();
+    ranked.sort_by_key(|&(p, e)| (e.offset, p));
+    let offs = ranked.iter().filter(|(_, e)| e.is_note_off()).count();
     let mut others = cap.saturating_sub(offs);
     let mut kept = 0usize;
-    events.retain(|e| {
+    let mut dropped = 0u64;
+    let mut out: Vec<Vec<Event>> = vec![Vec::new(); ports.len()];
+    for (p, e) in ranked {
         let keep = if e.is_note_off() {
             kept < cap
         } else if kept < cap && others > 0 {
@@ -2736,10 +2754,17 @@ fn bound_events(events: &mut Vec<Event>, cap: usize) -> u64 {
         } else {
             false
         };
-        kept += usize::from(keep);
-        keep
-    });
-    (before - events.len()) as u64
+        if keep {
+            kept += 1;
+            out[p].push(e);
+        } else {
+            dropped += 1;
+        }
+    }
+    for (port, kept) in ports.iter_mut().zip(out) {
+        *port = kept;
+    }
+    dropped
 }
 
 fn fifo_run(f: &mut RefFifo, input: &[Event], frames: usize) -> Vec<Event> {

@@ -484,10 +484,11 @@
 //! - A node that sizes a buffer for what it is sent declares the most events
 //!   per block its event inputs accept together
 //!   ([`Shape::event_input_capacity`]; `None` is unbounded, each input sized
-//!   from its edges). Past it the merged input keeps the earliest events by
-//!   frame (note-offs first) and the executor counts the rest as it counts a
-//!   refused write ([`Executor::dropped_event_count`]). The bound holds
-//!   however the edges change at a commit.
+//!   from its edges). Past it the node is sent the earliest events by frame
+//!   (note-offs first) of what its edges, flushed events and scheduled
+//!   commands bring, and the executor counts the rest as it counts a refused
+//!   write ([`Executor::dropped_event_count`]). The bound holds however the
+//!   edges change at a commit.
 //! - [`Editor::schedule`] delivers an event on an exact frame or beat
 //!   ([`At`](tutti_types::At)). A late command lands at the start of the next
 //!   block and is counted ([`Executor::late_command_count`]), never dropped.

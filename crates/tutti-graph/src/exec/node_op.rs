@@ -504,11 +504,36 @@ pub(super) fn node_op_with<
         }
     }
 
-    // Scheduled commands landing on this node this block: one more source
-    // per port, after everything else, merged into the overlay buffer.
     let mut views = [(0u16, 0u32, 0u32); MAX_PORTS];
     let mut n_views = 0;
-    if scheduled {
+    let mut cut = false;
+    // A node declaring an input bound is sent at most that many events on its
+    // inputs together, whatever the edges, flushed events and scheduled
+    // commands brought: the cut is the earliest by frame, note-offs first.
+    if !discards && let Some(bound) = h.plan.units[unit as usize].shape.event_input_capacity {
+        let (inject, events) = (&*st.inject, &*st.events);
+        let base = |port: u16| -> &[Event] {
+            inject
+                .iter()
+                .find(|i| i.live && i.unit == unit && i.port == port)
+                .map_or(&events.ev(ein[port as usize])[..], |i| &i.merged)
+        };
+        if let Some((n, lost)) = st.due.overlay_bounded(
+            unit,
+            ein.len(),
+            bound.get() as usize,
+            base,
+            st.overlay,
+            &mut views,
+        ) {
+            n_views = n;
+            cut = true;
+            st.dropped.at_node(rec.unit, lost);
+        }
+    }
+    // Scheduled commands landing on this node this block: one more source
+    // per port, after everything else, merged into the overlay buffer.
+    if scheduled && !cut {
         let (inject, events) = (&*st.inject, &*st.events);
         let base = |port: u16| -> &[Event] {
             inject

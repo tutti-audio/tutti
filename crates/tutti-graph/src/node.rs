@@ -111,22 +111,25 @@ pub struct Shape {
     ///
     /// # Overflow: drop the latest, and count it
     ///
-    /// An input's events are the merge of its edges, ordered by frame and then
-    /// by source. When a block's merge holds more than the bound, the merged
-    /// input keeps the earliest by frame (a note-off is kept ahead of any other
-    /// event while the bound has room, so an end is never what is cut), and the
-    /// executor counts the rest as it counts a full output port
+    /// What the node is sent in a block on all its event inputs together is
+    /// the merge of the edges into each input, the events flushed into it
+    /// when a delay vanished, and the commands scheduled onto it
+    /// ([`Editor::schedule`](crate::Editor::schedule)), ordered by frame, then
+    /// by input, then by source. When that holds more than the bound, the node
+    /// is sent the earliest by frame (a note-off is kept ahead of any other
+    /// event while the bound has room, so an end is never what is cut), and
+    /// the executor counts each event cut as it counts a full output port
     /// ([`Executor::dropped_event_count`](crate::Executor::dropped_event_count)).
     /// The cut falls on the same events on the serial and the parallel
-    /// executor. The merge slot is sized `min(bound, what its edges can send)`
-    /// on the control side, so nothing allocates on the audio thread however
-    /// the edges change at a commit.
+    /// executor. Each input's merge slot is sized `min(bound, what its edges
+    /// can send)` on the control side, and the cut over everything is made in
+    /// buffers sized at a commit, so nothing allocates on the audio thread
+    /// however the edges change.
     ///
-    /// The bound covers events from edges. Flushed events and scheduled
-    /// commands landing on the node are further sources with their own room
-    /// and counts. A node that computes its bound from the block reads it in
-    /// [`Node::prepare`] ([`EventDensity`](crate::EventDensity)), as an
-    /// output's capacity is.
+    /// A bypassed node is sent only the closes of what it holds, which the
+    /// bound does not cover. A node that computes its bound from the block
+    /// reads it in [`Node::prepare`] ([`EventDensity`](crate::EventDensity)),
+    /// as an output's capacity is.
     pub event_input_capacity: Option<NonZeroU32>,
     /// **Processing latency only** — frames the node buffers as a side effect
     /// (lookahead, FFT block, plugin pipeline). Never a musical delay: a

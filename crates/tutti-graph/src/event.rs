@@ -1155,8 +1155,20 @@ impl<'a> EventWriter<'a> {
 /// case by construction (a merge's slot holds all its sources), nothing but
 /// the sum of the sources' lengths is looked at.
 pub(crate) fn merge_into(sources: &[&[Event]], out: &mut Vec<Event>, cap: usize) -> u32 {
-    let total: usize = sources.iter().map(|s| s.len()).sum();
     let room = cap.saturating_sub(out.len());
+    merge_walk(sources, room, |_, e| out.push(e))
+}
+
+/// Walks `sources` (each sorted by offset) in `(offset, source index)` order
+/// and calls `keep(source index, event)` for each of the first `room` that
+/// land, with the note-off rule of [`merge_into`]. Returns how many it
+/// dropped. At most [`crate::MAX_PORTS`] `* 2` sources.
+pub(crate) fn merge_walk(
+    sources: &[&[Event]],
+    room: usize,
+    mut keep: impl FnMut(usize, Event),
+) -> u32 {
+    let total: usize = sources.iter().map(|s| s.len()).sum();
     // How many events that are not note-offs may land: all of them while all
     // fit, else what the note-offs leave of the room.
     let mut others = usize::MAX;
@@ -1167,9 +1179,9 @@ pub(crate) fn merge_into(sources: &[&[Event]], out: &mut Vec<Event>, cap: usize)
             .sum();
         others = room.saturating_sub(offs);
     }
-    let mut heads = [0usize; crate::MAX_PORTS];
+    let mut heads = [0usize; 2 * crate::MAX_PORTS];
     let heads = &mut heads[..sources.len()];
-    let mut dropped = 0u32;
+    let (mut kept, mut dropped) = (0usize, 0u32);
     loop {
         let mut best: Option<(Offset, usize)> = None;
         for (i, src) in sources.iter().enumerate() {
@@ -1183,16 +1195,18 @@ pub(crate) fn merge_into(sources: &[&[Event]], out: &mut Vec<Event>, cap: usize)
         let Some((_, i)) = best else { break };
         let e = sources[i][heads[i]];
         heads[i] += 1;
-        let fits = out.len() < cap;
-        if e.is_note_off() {
-            if fits {
-                out.push(e);
-            } else {
-                dropped += 1;
+        let fits = kept < room;
+        let lands = if e.is_note_off() {
+            fits
+        } else {
+            fits && others > 0
+        };
+        if lands {
+            if !e.is_note_off() {
+                others = others.saturating_sub(1);
             }
-        } else if fits && others > 0 {
-            others = others.saturating_sub(1);
-            out.push(e);
+            kept += 1;
+            keep(i, e);
         } else {
             dropped += 1;
         }

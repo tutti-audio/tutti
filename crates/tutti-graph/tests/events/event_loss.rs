@@ -454,3 +454,129 @@ fn the_merge_slot_is_sized_to_the_smaller_of_the_bound_and_the_writers() {
         (sum, 0, Some(10_000))
     );
 }
+
+/// A [`Writer`] declaring `latency` frames of processing latency, so a node
+/// without any, wired to the same input, is the one delayed.
+struct Latent {
+    inner: Writer,
+    latency: usize,
+}
+
+impl Node for Latent {
+    fn shape(&self) -> Shape {
+        self.inner
+            .shape()
+            .with_latency(tutti_types::Latency::new(Samples(self.latency)))
+    }
+    fn prepare(&mut self, _: &Prepare) {}
+    fn process(&mut self, cx: &Cx<'_>, io: Io<'_>) -> Status {
+        self.inner.process(cx, io)
+    }
+    fn reset(&mut self) {}
+}
+
+/// Writes one note-on on the first frame of its first block.
+struct Once {
+    written: bool,
+}
+
+impl Node for Once {
+    fn shape(&self) -> Shape {
+        Shape::EMPTY.with_events(0, 1)
+    }
+    fn prepare(&mut self, _: &Prepare) {}
+    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
+        if !std::mem::replace(&mut self.written, true) {
+            let at = cx.env.offset(0).expect("inside the block");
+            let _ = io.event_out(0).push(Event::midi(at, Ump(note_on(60))));
+        }
+        Status::Silent
+    }
+    fn reset(&mut self) {}
+}
+
+/// The bound covers everything the node is sent on its inputs in a block, not
+/// only the edges. A node bounded to 4 has 4 events from its writer on
+/// frames 0 to 3, which fill it. In block 1 a flush (the event a removed,
+/// delayed writer still held) and a scheduled command, both on frame 0, join
+/// them: 6 events. The node is sent 4, in merge order (flush, writer's frame 0,
+/// command, writer's frame 1: frames 0, 0, 0, 1), and the 2 cut are counted.
+#[test]
+fn a_declared_input_bound_covers_flushed_events_and_scheduled_commands() {
+    use tutti_types::{At, Frame};
+    for workers in std::iter::once(1).chain(common::WORKERS) {
+        let prep = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(BLOCK)));
+        let (mut ed, mut exec) = Editor::new(prep);
+        if workers > 1 {
+            exec.set_pool(Some(test_pool(workers)));
+        }
+        let blocks = Arc::default();
+        let input = EventIn {
+            node: NodeKey(100),
+            port: 0,
+        };
+        ed.insert(
+            NodeKey(100),
+            "recorder",
+            tutti_graph::Unforkable(Recorder {
+                bound: Some(4),
+                blocks: Arc::clone(&blocks),
+            }),
+        );
+        // The writer's latency makes the other writer's edge a delayed one.
+        ed.insert(
+            NodeKey(1),
+            "writer",
+            tutti_graph::Unforkable(Latent {
+                inner: Writer {
+                    cap: 64,
+                    scripts: vec![Script { ons: 4, offs: 0 }],
+                },
+                latency: 256,
+            }),
+        );
+        ed.insert(
+            NodeKey(2),
+            "once",
+            tutti_graph::Unforkable(Once { written: false }),
+        );
+        for node in [1, 2] {
+            ed.spec_mut().connect_events(
+                input,
+                EventEdge::Direct(EventOut {
+                    node: NodeKey(node),
+                    port: 0,
+                }),
+            );
+        }
+        ed.commit().expect("commits");
+        exec.apply_pending();
+        ed.collect();
+        let transport = TransportPosition::default();
+        exec.process(BLOCK, &transport, &[], &mut []);
+        assert_eq!(blocks.lock().unwrap().last().unwrap(), &[0, 1, 2, 3]);
+        assert_eq!(exec.dropped_event_count(), 0, "{workers}");
+
+        ed.schedule(
+            At::Frame(Frame::new(BLOCK as u64)),
+            input,
+            EventKind::Midi(midi::m1_note_on(MidiChannel::FIRST, 61, U7::of(100))),
+        )
+        .expect("room");
+        ed.remove(NodeKey(2));
+        ed.commit().expect("commits");
+        exec.apply_pending();
+        ed.collect();
+        exec.process(BLOCK, &transport, &[], &mut []);
+        assert_eq!(
+            blocks.lock().unwrap().last().unwrap(),
+            &[0, 0, 0, 1],
+            "{workers}"
+        );
+        assert_eq!(exec.dropped_event_count(), 2, "{workers}");
+
+        exec.process(BLOCK, &transport, &[], &mut []);
+        assert_eq!(blocks.lock().unwrap().last().unwrap(), &[0, 1, 2, 3]);
+        assert_eq!(exec.dropped_event_count(), 2, "{workers}");
+    }
+}
