@@ -234,7 +234,7 @@ mod tests {
             &format!("echo $$ > {}\nexec sleep 300", pid_file.display()),
         );
 
-        let started = Instant::now();
+        let deadline = Instant::now() + HANG_GUARD;
         // Long enough for the shell to start and write its pid before it is
         // killed: at 300 ms a cold shell on macOS sometimes had not, and the
         // pid read below failed.
@@ -242,7 +242,7 @@ mod tests {
         // A hang guard: a child waited for rather than killed takes its whole
         // 300 s sleep.
         assert!(
-            started.elapsed() < HANG_GUARD,
+            Instant::now() < deadline,
             "the child was waited for, not killed"
         );
         assert!(
@@ -291,7 +291,7 @@ mod tests {
             .expect("the raiser starts")
         };
 
-        let started = Instant::now();
+        let deadline = Instant::now() + HANG_GUARD;
         let result = probe_metadata_with(
             &locator,
             Path::new("/plugins/Some.clap"),
@@ -304,7 +304,7 @@ mod tests {
         // A hang guard: a cancel that waited for the child or the deadline takes
         // 300 s.
         assert!(
-            started.elapsed() < HANG_GUARD,
+            Instant::now() < deadline,
             "the cancel waited for the child or the deadline"
         );
         assert!(matches!(&result, Err(ProbeError::Cancelled)), "{result:?}");

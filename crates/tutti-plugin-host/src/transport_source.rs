@@ -1790,13 +1790,11 @@ mod tests {
         // slack for the conversions. The second reading is taken once the
         // clock has moved 20 ms; a clock that never moves trips the guard.
         let before = Instant::now();
+        let deadline = before + std::time::Duration::from_secs(60);
         let x = HostClock.now_ns();
         let mut y = HostClock.now_ns();
         while y < x + 20_000_000 {
-            assert!(
-                before.elapsed() < std::time::Duration::from_secs(60),
-                "the clock did not advance"
-            );
+            assert!(Instant::now() < deadline, "the clock did not advance");
             y = HostClock.now_ns();
         }
         let elapsed = i64::try_from(before.elapsed().as_nanos()).expect("fits");
