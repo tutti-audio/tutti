@@ -10,7 +10,7 @@ use crate::common::track;
 fn file(tpq: u16) -> MidiFile {
     MidiFile::smf(
         SmfFormat::SingleTrack,
-        SmfDivision::of(tpq),
+        SmfDivision::per_quarter(tpq),
         vec![track(vec![])],
     )
     .unwrap()
