@@ -113,10 +113,8 @@ impl Clock {
                 true,
                 c.tempo(),
                 c.origin(),
-                self.looping.map(|l| tutti_graph::LoopRange {
-                    start: l.start(),
-                    end: l.end(),
-                }),
+                self.looping
+                    .map(|l| LoopRange::new(l.start(), l.end()).expect("a loop")),
             ),
             changes: TransportChanges::NONE,
             play: tutti_graph::PlayClock::ZERO,

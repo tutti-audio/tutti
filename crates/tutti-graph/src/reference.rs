@@ -2435,17 +2435,17 @@ fn traverse(t: &TransportPosition, tempo: f64, rate: f64, len: usize) -> Travers
     let mut segs = Vec::new();
     loop {
         match t.looping {
-            Some(l) if l.start.get() < l.end.get() && pos < l.end.get() => {
-                let room = l.end.get() - pos;
+            Some(l) if pos < l.end().get() => {
+                let room = l.end().get() - pos;
                 if left < room {
                     segs.push((pos, pos + left, frame0));
                     pos += left;
                     break;
                 }
-                segs.push((pos, l.end.get(), frame0));
+                segs.push((pos, l.end().get(), frame0));
                 frame0 += room * fpb;
                 left -= room;
-                pos = l.start.get();
+                pos = l.start().get();
                 if left <= 0.0 {
                     break;
                 }
@@ -2468,15 +2468,15 @@ fn walk(t: &TransportPosition, dist: f64) -> Vec<(f64, f64)> {
     let mut path = Vec::new();
     while left > 0.0 {
         match t.looping {
-            Some(l) if l.start.get() < l.end.get() && pos < l.end.get() => {
-                let room = l.end.get() - pos;
+            Some(l) if pos < l.end().get() => {
+                let room = l.end().get() - pos;
                 if left < room {
                     path.push((pos, pos + left));
                     break;
                 }
-                path.push((pos, l.end.get()));
+                path.push((pos, l.end().get()));
                 left -= room;
-                pos = l.start.get();
+                pos = l.start().get();
             }
             _ => {
                 path.push((pos, pos + left));
@@ -2535,7 +2535,7 @@ impl RefPlayhead {
             let from = p.beat().get();
             let mut distances = vec![now - from];
             if let Some(l) = p.looping {
-                let (start, end) = (l.start.get(), l.end.get());
+                let (start, end) = (l.start().get(), l.end().get());
                 // Only a playhead inside the loop can have wrapped there.
                 let inside = now >= start - slack && now < end + slack;
                 if start < end && from < end && inside {
@@ -2576,7 +2576,7 @@ impl RefPlayhead {
             .any(|&(from, to)| from <= beat && beat < to);
         let reached_again = self.now.is_some_and(|t| {
             t.looping.is_some_and(|l| {
-                beat >= l.start.get() && beat < l.end.get() && beat >= t.beat().get()
+                beat >= l.start().get() && beat < l.end().get() && beat >= t.beat().get()
             })
         });
         traversed && !reached_again

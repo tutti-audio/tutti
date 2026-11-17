@@ -138,9 +138,11 @@ static PROCESS_REQUESTED: AtomicBool = AtomicBool::new(false);
 /// Abort when a state is loaded: `TUTTI_CLAP_PROBE_CRASH_ON_STATE_LOAD`.
 static CRASH_ON_STATE_LOAD: AtomicBool = AtomicBool::new(false);
 
-/// Milliseconds a state load takes before it answers:
-/// `TUTTI_CLAP_PROBE_STATE_LOAD_SLEEP_MS`. A large state restoring slowly.
-static SLEEP_ON_STATE_LOAD_MS: AtomicU32 = AtomicU32::new(0);
+/// A fifo a state load holds on: `TUTTI_CLAP_PROBE_STATE_LOAD_HOLD_FIFO`. The
+/// load opens it for reading, which waits for a writer, and answers when the
+/// writer closes its end: a large state restoring until the test says it is
+/// done.
+static HOLD_STATE_LOAD_FIFO: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
 
 /// Abort when the plugin is initialized, which is before a state can be
 /// loaded: `TUTTI_CLAP_PROBE_CRASH_ON_INIT`.
@@ -260,8 +262,8 @@ pub(crate) fn configure() {
     if let Some(n) = u32_var("TUTTI_CLAP_PROBE_CRASH_ON_STATE_LOAD") {
         CRASH_ON_STATE_LOAD.store(n != 0, Ordering::SeqCst);
     }
-    if let Some(n) = u32_var("TUTTI_CLAP_PROBE_STATE_LOAD_SLEEP_MS") {
-        SLEEP_ON_STATE_LOAD_MS.store(n, Ordering::SeqCst);
+    if let Some(path) = std::env::var_os("TUTTI_CLAP_PROBE_STATE_LOAD_HOLD_FIFO") {
+        let _ = HOLD_STATE_LOAD_FIFO.set(std::path::PathBuf::from(path));
     }
     if let Some(n) = u32_var("TUTTI_CLAP_PROBE_CRASH_ON_INIT") {
         CRASH_ON_INIT.store(n != 0, Ordering::SeqCst);
@@ -345,9 +347,11 @@ pub(crate) fn refuse_state_load() -> bool {
     // survive. It dies when one is loaded, as a plugin with a bug in its
     // loader does.
     die_if_state_load_crashes();
-    let slow = SLEEP_ON_STATE_LOAD_MS.load(Ordering::SeqCst);
-    if slow > 0 {
-        std::thread::sleep(std::time::Duration::from_millis(u64::from(slow)));
+    if let Some(fifo) = HOLD_STATE_LOAD_FIFO.get() {
+        // Blocks until a writer opens the fifo, then until it closes it.
+        if let Ok(mut held) = std::fs::File::open(fifo) {
+            let _ = std::io::copy(&mut held, &mut std::io::sink());
+        }
     }
     REFUSE_STATE_LOAD.load(Ordering::SeqCst)
 }

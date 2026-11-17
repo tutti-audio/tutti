@@ -7,7 +7,7 @@ use tutti_graph::UmpAt;
 use tutti_midi_protocol::SmpteFrameRate;
 use tutti_transport::ProjectMeter;
 use tutti_types::MeterChange;
-use tutti_types::{Bpm, Seconds};
+use tutti_types::{Bpm, LoopRange, Seconds};
 use tutti_ump::{Flex, Message, MidiGroup, System};
 
 /// The System message a packet carries.
@@ -23,7 +23,7 @@ struct TestTransport {
     beat: AtomicF64,
     tempo: Bpm,
     playing: StdAtomicBool,
-    looping: std::sync::Mutex<Option<tutti_graph::LoopRange>>,
+    looping: std::sync::Mutex<Option<tutti_types::LoopRange>>,
 }
 
 impl TestTransport {
@@ -36,10 +36,8 @@ impl TestTransport {
         }
     }
     fn set_loop(&self, start: f64, end: f64) {
-        *self.looping.lock().unwrap() = Some(tutti_graph::LoopRange {
-            start: Beat(start),
-            end: Beat(end),
-        });
+        *self.looping.lock().unwrap() =
+            Some(LoopRange::new(Beat(start), Beat(end)).expect("a loop"));
     }
     fn set_beat(&self, b: f64) {
         self.beat.store(b, Ordering::Release);
@@ -1499,10 +1497,7 @@ fn a_locate_while_playing_states_the_meter_at_the_next_bar_line() {
 #[test]
 fn the_passes_of_a_looped_block_restate_nothing() {
     let (mut cm, _meter, out) = flex_master(true);
-    let looping = tutti_graph::LoopRange {
-        start: Beat(0.0),
-        end: Beat(1.0),
-    };
+    let looping = LoopRange::new(Beat(0.0), Beat(1.0)).expect("a loop");
     let transport = TransportPosition::new(true, Bpm::of(120.0), Beat(0.0), Some(looping));
     cm.tick(&transport, Samples(72_000), &mut |e| {
         out.0.lock().unwrap().push(e);

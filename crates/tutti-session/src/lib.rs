@@ -58,6 +58,8 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+#[cfg(feature = "analyze")]
+mod analyze;
 #[cfg(feature = "export")]
 mod bounce;
 mod builder;
@@ -132,9 +134,12 @@ mod switch;
 #[cfg(all(feature = "device", feature = "audio-io"))]
 mod take;
 mod transport_handle;
+mod value;
 #[cfg(feature = "device")]
 mod watch;
 
+#[cfg(feature = "analyze")]
+pub use analyze::{Analyze, AnalyzeError, Audio, AudioContext, AudioInput};
 #[cfg(feature = "export")]
 pub use bounce::{
     AnyStem, Bounce, BounceConfigError, BounceError, BounceHandle, BounceJob, BounceLatency,
@@ -206,7 +211,7 @@ pub use modulation::{
     RouteInfo, RouteMut, RouteSpec, SourceInfo, SourceName, TargetName, declare_targets,
 };
 pub use node::{Reclaimer, Reclaims, SessionNode};
-pub use params::{ParamError, RangeError, TypedParamRef};
+pub use params::RangeError;
 pub use peer::{Peer, PeerError, Presence, Resource, ResourceFact, ResourceId};
 #[cfg(any(feature = "plugin", feature = "midi-hardware"))]
 pub use peer_state::{OtherPeer, PeerState, SavedPeer};
@@ -284,5 +289,9 @@ pub use tutti_graph::{
 };
 #[cfg(feature = "midi")]
 pub use tutti_ump::{MidiChannel, MidiGroup};
+pub use value::{
+    AnyAssign, AnyTarget, Assign, Effective, Info, IntoAssign, IntoRead, Knobs, Modify, Moved,
+    ParamTarget, ScalarTarget, SetRefusal, Target, TargetInfo, ValueError, ValueErrorKind,
+};
 #[cfg(feature = "device")]
 pub use watch::{Backoff, DevicePolicy, DeviceWatch, Follow, FollowEvent};

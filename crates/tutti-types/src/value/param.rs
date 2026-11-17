@@ -46,6 +46,10 @@ pub trait ParamRaw: sealed::Sealed + Copy {
     fn to_f32(self) -> f32;
     /// A raw from that `f32` (widened exactly, for `f64`).
     fn from_f32(v: f32) -> Self;
+    /// This raw as an `f64`: exact for both widths.
+    fn to_f64(self) -> f64;
+    /// A raw from an `f64` (narrowed, for `f32`).
+    fn from_f64(v: f64) -> Self;
 }
 
 impl ParamRaw for f32 {
@@ -70,6 +74,14 @@ impl ParamRaw for f32 {
     fn from_f32(v: f32) -> f32 {
         v
     }
+    #[inline]
+    fn to_f64(self) -> f64 {
+        f64::from(self)
+    }
+    #[inline]
+    fn from_f64(v: f64) -> f32 {
+        v as f32
+    }
 }
 
 impl ParamRaw for f64 {
@@ -93,6 +105,14 @@ impl ParamRaw for f64 {
     #[inline]
     fn from_f32(v: f32) -> f64 {
         f64::from(v)
+    }
+    #[inline]
+    fn to_f64(self) -> f64 {
+        self
+    }
+    #[inline]
+    fn from_f64(v: f64) -> f64 {
+        v
     }
 }
 
@@ -129,6 +149,25 @@ impl ParamCell {
         match self {
             Self::F32(c) => c.store(value, order),
             Self::F64(c) => c.store(f64::from(value), order),
+        }
+    }
+
+    /// Loads the value at the cell's own width, as an `f64`: exact for both.
+    #[inline]
+    pub fn load_wide(&self, order: Ordering) -> f64 {
+        match self {
+            Self::F32(c) => f64::from(c.load(order)),
+            Self::F64(c) => c.load(order),
+        }
+    }
+
+    /// Stores an `f64` at the cell's own width: exact for an `f64` cell,
+    /// rounded to the nearest `f32` for an `f32` one.
+    #[inline]
+    pub fn store_wide(&self, value: f64, order: Ordering) {
+        match self {
+            Self::F32(c) => c.store(value as f32, order),
+            Self::F64(c) => c.store(value, order),
         }
     }
 

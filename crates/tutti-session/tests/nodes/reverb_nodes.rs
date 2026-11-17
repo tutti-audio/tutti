@@ -3,7 +3,7 @@
 //! unbounded where it can freeze).
 
 use tutti_nodes::{FdnControls, FdnLayout, FdnNode, MaxDecay};
-use tutti_session::{ParamError, Session};
+use tutti_session::{Session, ValueErrorKind};
 use tutti_types::MaxBlock;
 use tutti_types::{Samples, Seconds, Tail, UnitAddr, UnitParam};
 
@@ -14,18 +14,18 @@ fn session() -> Session {
         .expect("builds")
 }
 
-/// `Graph::set_param` at a decay's index reaches that decay's cell and no other,
+/// `Session::set` at a decay's index reaches that decay's cell and no other,
 /// and the freeze is addressable only where the design can freeze.
 #[test]
-fn set_param_reaches_the_decay_it_names() {
+fn a_write_reaches_the_decay_it_names() {
     let mut s = session();
     let (node, cells) = s.graph().add::<FdnNode>(FdnNode::live(
         FdnLayout::new(8, MaxDecay::DEFAULT, true).unwrap(),
         FdnControls::DEFAULT,
     ));
     let at = |i| UnitAddr::new(UnitParam::Decay, i);
-    s.graph().set_param(node.decay_at(1), Seconds(5.0)).unwrap();
-    s.graph().set_param(node.freeze(), true).unwrap();
+    s.set(node.decay_at(1).to(Seconds(5.0))).unwrap();
+    s.set(node.freeze().to(true)).unwrap();
     assert_eq!(cells.get(at(1)), Some(5.0), "low");
     assert_eq!(cells.get(at(0)), Some(2.0), "mid untouched");
     assert_eq!(cells.get(at(2)), Some(1.2), "high untouched");
@@ -34,10 +34,10 @@ fn set_param_reaches_the_decay_it_names() {
     let (plain, cells) = s
         .graph()
         .add::<FdnNode>(FdnNode::live(FdnLayout::default(), FdnControls::DEFAULT));
-    assert!(matches!(
-        s.graph().set_param(plain.freeze(), true),
-        Err(ParamError::NoSuchParam { .. })
-    ));
+    assert_eq!(
+        s.set(plain.freeze().to(true)).unwrap_err().kind,
+        ValueErrorKind::NoSuchTarget
+    );
     assert_eq!(cells.get(UnitParam::Freeze), None, "no freeze to write");
 }
 
