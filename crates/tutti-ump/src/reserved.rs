@@ -16,7 +16,31 @@
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(try_from = "u8", into = "u8"))]
 pub struct Reserved(u8);
+
+// Any `u8` is a reserved raw of some field (a value outside that field's
+// table), so the serde form reads back through a conversion that cannot fail;
+// `Field` and the decoder-shaped types check it against their own table.
+#[cfg(feature = "serde")]
+#[allow(
+    clippy::infallible_try_from,
+    reason = "no `From<raw>`: a value enters through `new` or `wire`; this is the serde form"
+)]
+impl TryFrom<u8> for Reserved {
+    type Error = core::convert::Infallible;
+
+    fn try_from(raw: u8) -> Result<Self, Self::Error> {
+        Ok(Self(raw))
+    }
+}
+
+#[cfg(feature = "serde")]
+impl From<Reserved> for u8 {
+    fn from(reserved: Reserved) -> u8 {
+        reserved.0
+    }
+}
 
 impl Reserved {
     pub(crate) const fn wire(raw: u8) -> Self {

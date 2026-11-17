@@ -459,8 +459,30 @@ bounded_serde!(SharpsFlats, i8);
 /// exact (M2-115 §4), so one type holds both.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(transparent))]
+#[cfg_attr(feature = "serde", serde(try_from = "u32", into = "u32"))]
 pub struct Pitch(u32);
+
+// Every `u32` is a Pitch, so the serde form (the bare number) reads back
+// through a conversion that cannot fail.
+#[cfg(feature = "serde")]
+#[allow(
+    clippy::infallible_try_from,
+    reason = "no `From<raw>`: a value enters through `new` or `wire`; this is the serde form"
+)]
+impl TryFrom<u32> for Pitch {
+    type Error = core::convert::Infallible;
+
+    fn try_from(raw: u32) -> Result<Self, Self::Error> {
+        Ok(Self(raw))
+    }
+}
+
+#[cfg(feature = "serde")]
+impl From<Pitch> for u32 {
+    fn from(pitch: Pitch) -> u32 {
+        pitch.0
+    }
+}
 
 impl Pitch {
     /// The pitch of a Q7.9 word.

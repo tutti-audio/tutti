@@ -8,7 +8,7 @@ use std::fmt::Debug;
 use tutti_ump::{
     ArticulationAttribute, BendValue, CCNumber, ChordType, ControlValue, Field, FirstGroup,
     FunctionBlockCount, FunctionBlockId, GroupSpan, Message, MidiChannel, MidiGroup, MonoChannels,
-    MpeChannels, Pitch, ReservedAccents, ReservedAttribute, SharpsFlats, Sysex7Packet,
+    MpeChannels, Pitch, Reserved, ReservedAccents, ReservedAttribute, SharpsFlats, Sysex7Packet,
     Sysex8Packet, TicksPerQuarterNote, Ump,
 };
 
@@ -199,4 +199,18 @@ fn a_packet_with_bytes_past_its_length_is_refused() {
         |len: u8, tail: u8| format!(r#"["Complete",0,{len},[5,{tail},0,0,0,0,0,0,0,0,0,0,0]]"#);
     assert!(serde_json::from_str::<Sysex8Packet>(&eight(1, 0)).is_ok());
     assert!(serde_json::from_str::<Sysex8Packet>(&eight(1, 9)).is_err());
+}
+
+/// Every `u8` is a reserved raw of some field, so a `Reserved` is the bare
+/// number for all 256, and a number that is no `u8` is refused.
+#[test]
+fn a_reserved_raw_is_the_bare_byte() {
+    for raw in 0..=u8::MAX {
+        let text = raw.to_string();
+        let back: Reserved = serde_json::from_str(&text).unwrap();
+        assert_eq!(back.get(), raw);
+        assert_eq!(serde_json::to_string(&back).unwrap(), text);
+    }
+    assert!(serde_json::from_str::<Reserved>("256").is_err());
+    assert!(serde_json::from_str::<Reserved>("-1").is_err());
 }

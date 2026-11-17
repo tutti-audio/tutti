@@ -23,8 +23,23 @@
 /// ```
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(transparent))]
+#[cfg_attr(feature = "serde", serde(try_from = "u32", into = "u32"))]
 pub struct ControlValue(u32);
+
+// Every `u32` is a ControlValue, so the serde form (the bare number) reads back
+// through a conversion that cannot fail.
+#[cfg(feature = "serde")]
+#[allow(
+    clippy::infallible_try_from,
+    reason = "no `From<raw>`: a value enters through `new` or `wire`; this is the serde form"
+)]
+impl TryFrom<u32> for ControlValue {
+    type Error = core::convert::Infallible;
+
+    fn try_from(raw: u32) -> Result<Self, Self::Error> {
+        Ok(Self(raw))
+    }
+}
 
 impl ControlValue {
     /// Value 0.
