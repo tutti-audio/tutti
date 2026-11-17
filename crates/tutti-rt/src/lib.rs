@@ -17,6 +17,8 @@
 //! - [`RtVec`] — a capped collection through `&mut self` that refuses the
 //!   write at the cap rather than growing, latching an overflow flag. An owner
 //!   that shares one behind an `Arc` puts it in an [`AudioThreadCell`].
+//!   [`CappedVec`] is the same with a cap chosen at construction, for a count
+//!   known only at run time.
 //! - [`PackedAtomic`] — a value of up to eight bytes in one atomic word, so a
 //!   reader never pairs one write's field with another's.
 //! - [`SeqWriter`] / [`SeqReader`] — a sequence lock for a `Pod` value one
@@ -148,6 +150,7 @@
 #![deny(missing_docs)]
 #![deny(clippy::undocumented_unsafe_blocks, clippy::missing_safety_doc)]
 
+mod capped_vec;
 mod cell;
 mod claim;
 mod clock;
@@ -178,6 +181,7 @@ mod task_graph;
 mod thread;
 mod vec;
 
+pub use capped_vec::CappedVec;
 pub use cell::{AudioThreadCell, BorrowGuard, BorrowRef};
 pub use clock::monotonic_ns;
 pub use denormals::with_no_denormals;
