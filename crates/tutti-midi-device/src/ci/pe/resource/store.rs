@@ -95,7 +95,7 @@ impl ResourceStore {
     pub fn without_subscriptions(&self) -> Self {
         let mut store = self.clone();
         for stored in &mut store.resources {
-            stored.entry = stored.entry.clone().with_can_subscribe(false);
+            stored.entry = stored.entry.clone().not_subscribable();
         }
         store
     }

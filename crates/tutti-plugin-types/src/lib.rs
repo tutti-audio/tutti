@@ -261,7 +261,7 @@ pub use c_string::{
 };
 pub use channels::{
     AudioBuffer, AudioBuffer32, AudioBuffer64, AudioBufferMut, ChannelTable, MAX_BLOCK_CHANNELS,
-    PluginTooWide, Sample, sanitize, silence,
+    PluginTooWide, sanitize, silence,
 };
 pub use classification::{ClapFeature, PluginRole, Vst2Category, Vst3PlugType, Vst3SubCategories};
 pub use descriptor::{AuComponentType, EditorPresence, PluginClass, PluginDescriptor};

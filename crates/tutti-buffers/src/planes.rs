@@ -638,9 +638,8 @@ impl<'s, 'a, S: Sample> PlanesMut<'s, 'a, S> {
 }
 
 impl<S: Sample> Default for PlanesMut<'_, '_, S> {
-    /// No planes, no frames: the empty view, which writes nothing. It has no
-    /// channel, so [`plane_mut(0)`](PlanesMut::plane_mut) panics on it;
-    /// [`iter_mut`](PlanesMut::iter_mut) yields nothing.
+    /// No planes, no frames: the empty view, the write side of
+    /// [`Planes::default`]. [`new`](PlanesMut::new) would refuse it.
     fn default() -> Self {
         Self {
             planes: MutTable::Slices(&mut []),

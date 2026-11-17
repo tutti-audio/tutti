@@ -157,7 +157,7 @@ fn a_restore_that_leaves_the_bypass_on_under_an_active_node_is_reconciled() {
         .plugin_view(node)
         .expect("hosted")
         .state()
-        .save()
+        .save(tutti_plugin_types::StateUse::Project)
         .expect("saves");
     s.plugin_view(node)
         .expect("hosted")

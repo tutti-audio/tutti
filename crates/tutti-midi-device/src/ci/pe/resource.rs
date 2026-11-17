@@ -27,7 +27,7 @@ pub use controllers::{
     PeChCtrlEntry, PeChCtrlList, PeController, PeCtrl, PeCtrlMapEntry, PeCtrlMapList,
 };
 pub use data::{OpaqueBody, PeData, PeOpaque};
-pub use entry::{EntryError, PeResourceList, ResourceEntry};
+pub use entry::{EntryError, PeResourceList, ResourceEntry, ResourceEntryBuilder};
 pub use fields::{
     ClusterKind, CtrlKind, CtrlValueKind, ModeId, NotAPeChannel, NotAPriority, NotAStepCount,
     NotSignificantBits, NotVendorName, ParamPath, PeBankProgram, PeChannel, PeDataError,
