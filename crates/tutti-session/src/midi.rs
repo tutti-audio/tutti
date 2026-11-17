@@ -1825,7 +1825,8 @@ impl Midi<'_> {
     /// # Errors
     ///
     /// [`MidiError::NotAnInput`] when `follow.input` is not an input port's ingest node,
-    /// [`MidiError::GroupNotHeard`] for a Group the input does not hear, and
+    /// [`MidiError::GroupNotHeard`] for a Group the input does not hear,
+    /// [`MidiError::Tap`] when the tap cannot open because the host removed the node, and
     /// [`MidiError::TempoSourceTaken`] while a Beat Clock
     /// [`follow_clock`](Self::follow_clock) publishes the tempo. Nothing changes.
     pub fn follow_tempo(&mut self, follow: FollowTempo) -> Result<()> {
@@ -1911,7 +1912,8 @@ impl Midi<'_> {
     /// # Errors
     ///
     /// [`MidiError::NotAnInput`] when `follow.input` is not an input port's ingest node,
-    /// [`MidiError::GroupNotHeard`] for a Group the input does not hear, and
+    /// [`MidiError::GroupNotHeard`] for a Group the input does not hear,
+    /// [`MidiError::Tap`] when the tap cannot open because the host removed the node, and
     /// [`MidiError::TempoSourceTaken`] for a Beat Clock follow while
     /// [`follow_tempo`](Self::follow_tempo) is active. Nothing changes.
     pub fn follow_clock(&mut self, follow: FollowClock) -> Result<()> {
@@ -1994,7 +1996,8 @@ impl Midi<'_> {
     /// # Errors
     ///
     /// [`MidiError::NotAnInput`] when `follow.input` is not an input port's ingest node and
-    /// [`MidiError::GroupNotHeard`] for a Group the input does not hear.
+    /// [`MidiError::GroupNotHeard`] for a Group the input does not hear, and
+    /// [`MidiError::Tap`] when the tap cannot open because the host removed the node.
     /// Nothing changes.
     pub fn follow_machine_control(&mut self, follow: FollowMachineControl) -> Result<()> {
         let tap = self.follow_tap(follow.input, follow.group, MACHINE_TAP_CAPACITY)?;

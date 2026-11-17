@@ -208,8 +208,8 @@ pub enum MidiError {
     NoEventInput(tutti_graph::NodeKey),
 
     /// A tap on a MIDI port could not be opened: the port is not in the graph.
-    #[error("MIDI tap: {0}")]
-    Tap(tutti_graph::MissingSource),
+    #[error("MIDI tap")]
+    Tap(#[source] tutti_graph::MissingSource),
 
     /// A follower named a node that is not the ingest node of an input port
     /// (`MidiInput::node`).
